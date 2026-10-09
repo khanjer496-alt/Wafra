@@ -40,17 +40,17 @@ test('cash and investment movements stay visible records without inflating incom
   assert.equal(cash.totalFils, 190000, 'withdrawal, investment and purchase still leave the bank');
 });
 
-test('Home names only the real transfer review queue; Accounts does not turn it into navigation', () => {
+test('Home names every transfer waiting for an answer; Accounts does not turn it into navigation', () => {
   const home = fs.readFileSync(path.join(root, 'src/screens/journal-home-screen.tsx'), 'utf8');
   const wallet = fs.readFileSync(path.join(root, 'src/app/(tabs)/wallet.tsx'), 'utf8');
-  // The redesign shows "N transfers to confirm" on Home, counted from the same
-  // queue the Transfers question card answers (one question per movement, from
-  // the reconciliation cached per stored transfer receipt); with no question
-  // left it names the queued entries only the review screen reaches. Shown only
-  // when that queue is non-empty.
+  // Home shows "N transfers need an answer", the count the Transfers card gives
+  // (transferWaitingSummary: every transfer kept out of the totals until the
+  // person answers, a pair once, from the reconciliation cached per stored
+  // transfer receipt); with nothing waiting it names the queued entries only
+  // Transfers' groups reach. Shown only when that count is above zero.
   // Built in slices from the same cached reconciliation (transferReconciliationForStateInSlices).
   assert.match(home, /graph = transferReconciliationForStateInSlices\(state, \(reconciliation\) => \{/);
-  assert.match(home, /const queue = transferQuestionQueue\(activity\);/);
+  assert.match(home, /const waiting = transferWaitingSummary\(activity\)\.transfers;/);
   assert.match(home, /: unaskedPendingIds\(activity, reconciliation\.pendingIds\)/);
   assert.match(home, /pendingTransferSummary\(state\.transactions, ids\)/);
   assert.match(home, /pendingTransfers && pendingTransfers\.count > 0 \? <TransferReviewNotice/);

@@ -57,7 +57,7 @@ export function MoneyPictureProgress({ model, onResume }: {
         {tf('moneyPictureHistoryFound', { count: model.historyFound })}
       </ThemedText>
     </View>}
-    <ThemedText type="micro" themeColor="textTertiary">{t('moneyPictureTruthNote')}</ThemedText>
+    <ThemedText type="meta" themeColor="textTertiary">{t('moneyPictureTruthNote')}</ThemedText>
   </View>;
 }
 

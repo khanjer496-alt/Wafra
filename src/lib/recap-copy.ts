@@ -61,6 +61,9 @@ export const recapCopy = {
     highest: 'Highest month',
     /** Last card. */
     finale: 'Your recap',
+    /** A period with nothing recorded has no story to tell. */
+    emptyTitle: (period: string) => `Nothing recorded in ${period}`,
+    emptyBody: 'A recap appears once Wafra has payments for the period.',
   },
   ar: {
     recap: 'ملخص وفرة',
@@ -101,6 +104,8 @@ export const recapCopy = {
     quietest: 'أهدأ شهر',
     highest: 'أعلى شهر',
     finale: 'ملخصك',
+    emptyTitle: (period: string) => `لا شيء مسجّل في ${period}`,
+    emptyBody: 'يظهر الملخص عندما تتوفر لدى وفرة دفعات لهذه الفترة.',
   },
 } as const;
 

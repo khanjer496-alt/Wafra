@@ -46,6 +46,102 @@ export function cardUsage(
   return { usedFils, limitFils, ratio: Math.min(1, usedFils / limitFils) };
 }
 
+/* ── Debit cards ────────────────────────────────────────────────────── */
+
+/**
+ * A card that is not a credit card: it spends from a bank account and has no
+ * balance of its own, so no balance is ever expected for it.
+ */
+export function isNonCreditCard(account: Pick<Account, 'kind' | 'cardType'>): boolean {
+  return account.cardType === 'debit' || (account.kind === 'card' && account.cardType === undefined);
+}
+
+/** Any card, credit or debit (it opens the card screen, never the account one). */
+export function isPaymentCard(account: Pick<Account, 'kind' | 'cardType'>): boolean {
+  return account.kind === 'card' || account.cardType !== undefined;
+}
+
+/**
+ * The bank account a debit card most likely draws from, or null.
+ *
+ * Alerts never say which account a debit card is linked to, so this names one
+ * only when there is no choice: the bank has exactly one bank account in
+ * Wafra. Two accounts at that bank (a current account and a saver) is a
+ * guess, and the card says only that it is a debit card.
+ */
+export function linkedBankAccount<T extends Pick<Account, 'id' | 'kind' | 'cardType' | 'bankName' | 'archived'>>(
+  card: Pick<Account, 'bankName'>,
+  accounts: readonly T[],
+): T | null {
+  const bank = card.bankName?.trim().toLowerCase();
+  if (!bank) return null;
+  const matches = accounts.filter((account) => !account.archived && account.kind === 'bank'
+    && account.cardType === undefined && account.bankName?.trim().toLowerCase() === bank);
+  return matches.length === 1 ? matches[0]! : null;
+}
+
+/* ── A credit card's one figure and its statement line ──────────────── */
+
+/** What a credit card's figure is: what the bank quoted, or what is left of a statement. */
+export type CreditFigureKind = 'owed' | 'used' | 'statement' | 'unknown';
+
+/** The statement line under a credit card's figure, or null when there is none to state. */
+export type CreditStatementLine =
+  | { kind: 'paid' }
+  | { kind: 'left'; fils: number; dueISO: string; overdue: boolean };
+
+export interface CreditCardStanding {
+  /** The one figure: null when the bank quoted nothing and no statement is open. */
+  figureFils: number | null;
+  figureKind: CreditFigureKind;
+  /** Bank-quoted available credit when there is no figure (no limit entered). */
+  availableFils: number | null;
+  statement: CreditStatementLine | null;
+}
+
+/** How long a settled statement may still be called "paid" after its due date. */
+const PAID_STATEMENT_DAYS = 45;
+
+/**
+ * A credit card's figure and statement status, never two "owed" figures.
+ *
+ * The figure is the latest one the BANK reported for the whole card: an
+ * outstanding balance it quoted ("owed"), or the user's own limit minus the
+ * available credit it quoted ("used"). Only with neither does the figure fall
+ * back to what is left of an open statement, and then it says so. The
+ * statement is a separate line — "left to pay" while open, "paid" once the
+ * latest one is settled — so a paid statement can no longer read as "AED 0.00
+ * owed" beside a card whose bank says AED 15,000 is in use.
+ *
+ * `latestStatement` is the newest statement on the card (open or settled);
+ * `openDue` its allocation when it still has something left. A statement with
+ * nothing on it (total 0), or one settled long ago, says nothing.
+ */
+export function creditCardStanding(
+  account: Pick<Account, 'cardType' | 'creditLimitFils' | 'snapshotFils' | 'snapshotKind'>,
+  openDue: { remainingFils: number; due: Pick<CardDue, 'dueDate'>; daysLeft: number } | undefined,
+  latestStatement: Pick<CardDue, 'dueDate' | 'totalDueFils'> | undefined,
+  todayISO: string,
+): CreditCardStanding {
+  const quotedOwed = account.snapshotKind === 'outstanding' && account.snapshotFils !== undefined
+    ? Math.abs(account.snapshotFils) : null;
+  const usage = quotedOwed === null ? cardUsage(account) : null;
+  const left = openDue && openDue.remainingFils > 0 ? openDue : undefined;
+  let statement: CreditStatementLine | null = null;
+  if (left) {
+    statement = { kind: 'left', fils: left.remainingFils, dueISO: left.due.dueDate, overdue: left.daysLeft < 0 };
+  } else if (latestStatement && latestStatement.totalDueFils > 0) {
+    const age = daysBetweenISO(latestStatement.dueDate, todayISO);
+    if (Number.isFinite(age) && age <= PAID_STATEMENT_DAYS) statement = { kind: 'paid' };
+  }
+  const availableFils = account.snapshotKind === 'limit' && account.snapshotFils !== undefined
+    ? account.snapshotFils : null;
+  if (quotedOwed !== null) return { figureFils: quotedOwed, figureKind: 'owed', availableFils: null, statement };
+  if (usage) return { figureFils: usage.usedFils, figureKind: 'used', availableFils: null, statement };
+  if (left) return { figureFils: left.remainingFils, figureKind: 'statement', availableFils, statement };
+  return { figureFils: null, figureKind: 'unknown', availableFils, statement };
+}
+
 /**
  * Spending Wafra captured on each of the given cards in the current money
  * month, in one pass over the ledger.

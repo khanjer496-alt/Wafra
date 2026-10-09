@@ -578,8 +578,9 @@ status) stays in Customize Home, switched off by default.
   above the tab bar, only when something truly needs the person, highest
   priority first: tracking paused or stopped (trial ended, permission lost,
   iPhone capture not set up, alerts stopped arriving; a deliberate opt-out is
-  never nagged) > an overdue card payment > transfers to answer (the Transfers
-  question queue) > a monthly limit over. A tap goes where it is answered; ×
+  never nagged) > an overdue card payment > transfers that need an answer
+  (every transfer kept out of the totals, `transferWaitingSummary`: the
+  Transfers card's and the Transactions summary's number) > a monthly limit over. A tap goes where it is answered; ×
   hides that need for the session. The pill is one short line (44pt, text
   scaling capped at 1.2x, the full sentence spoken). With large text (the
   large-text layout or a 1.2x text scale) or on a window under 700pt it sits

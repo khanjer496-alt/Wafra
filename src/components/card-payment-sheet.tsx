@@ -335,8 +335,11 @@ export function CardPaymentSheet({ due, onClose, initialChoice = 'full' }: CardP
           {
             key: 'matched',
             label: t('matched'),
+            // A paid amount above came from somewhere (a payment recorded by
+            // hand, or one allocated earlier): "no payment detected" beside
+            // "Paid 1,000" read as a contradiction, so it says which it is.
             value: payments === 0
-              ? t('noCardPaymentYet')
+              ? paid > 0 ? t('noBankPaymentMatched') : t('noCardPaymentYet')
               : tf('matchedPayments', {
                   count: payments,
                   s: payments === 1 ? '' : 's',

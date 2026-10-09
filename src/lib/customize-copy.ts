@@ -1,4 +1,4 @@
-/** Home's layout editor copy. Section names stay separate from their live headings. */
+/** Home's layout editor copy. Each section is named as its heading on Home reads (keep them in step). */
 import type { HomeWidgetId } from '@/lib/home-widgets';
 type Lang = 'en' | 'ar';
 
@@ -15,7 +15,7 @@ const en = {
   moneyOverviewTitle: 'Money overview',
   moneyOverviewDetail: 'Your totals for the selected period.',
   captureTitle: 'Automatic capture',
-  captureDetail: 'Bank-alert capture status and setup.',
+  captureDetail: 'Bank-message capture status and setup.',
   shown: 'Shown',
   hidden: 'Hidden',
   resetLayout: 'Reset layout',
@@ -27,8 +27,8 @@ const en = {
   done: 'Done',
   widgetTitle: {
     greeting: 'Greeting and pattern', hero: 'Spent this month', overview: 'Money overview', today: 'Today', week: 'Last 7 days',
-    due: 'Due soon', upcoming: 'Coming up', activity: 'Latest activity', transfers: 'Transfers to answer', assistant: 'Ask Wafra',
-    insight: 'Spending insight', capture: 'Capture status',
+    due: 'Due payments', upcoming: 'Coming up', activity: 'Transactions', transfers: 'Transfers to answer', assistant: 'Ask Wafra',
+    insight: 'Spending insight', capture: 'Bank messages',
   } satisfies Record<HomeWidgetId, string>,
   widgetDetail: {
     greeting: 'Your name, greeting and personal pattern.',
@@ -42,7 +42,7 @@ const en = {
     transfers: 'Transfers waiting for your answer.',
     assistant: 'Questions about the figures on this phone.',
     insight: 'An observation from your recorded spending.',
-    capture: 'Bank-alert capture status and setup.',
+    capture: 'Bank-message capture status and setup.',
   } satisfies Record<HomeWidgetId, string>,
 };
 
@@ -60,7 +60,7 @@ const ar: CustomizeCopy = {
   moneyOverviewTitle: 'ملخص أموالك',
   moneyOverviewDetail: 'مجاميعك للفترة المختارة.',
   captureTitle: 'الالتقاط التلقائي',
-  captureDetail: 'حالة التقاط تنبيهات البنك وإعداده.',
+  captureDetail: 'حالة التقاط رسائل البنك وإعداده.',
   shown: 'ظاهر',
   hidden: 'مخفي',
   resetLayout: 'إعادة الترتيب الافتراضي',
@@ -72,8 +72,8 @@ const ar: CustomizeCopy = {
   done: 'تم',
   widgetTitle: {
     greeting: 'التحية والنمط', hero: 'إنفاق هذا الشهر', overview: 'ملخص أموالك', today: 'اليوم', week: 'آخر 7 أيام',
-    due: 'مستحق قريبًا', upcoming: 'القادم', activity: 'أحدث العمليات', transfers: 'تحويلات تنتظر ردك', assistant: 'اسأل وفرة',
-    insight: 'معلومة عن الإنفاق', capture: 'حالة الالتقاط',
+    due: 'الدفعات المستحقة', upcoming: 'الدفعات القادمة', activity: 'المعاملات', transfers: 'تحويلات تنتظر ردك', assistant: 'اسأل وفرة',
+    insight: 'معلومة عن الإنفاق', capture: 'رسائل البنك',
   },
   widgetDetail: {
     greeting: 'اسمك وتحيّتك ونمطك الشخصي.',
@@ -87,7 +87,7 @@ const ar: CustomizeCopy = {
     transfers: 'تحويلات تنتظر إجابتك.',
     assistant: 'أسئلة عن الأرقام الموجودة على هذا الهاتف.',
     insight: 'ملاحظة من إنفاقك المسجّل.',
-    capture: 'حالة التقاط تنبيهات البنك وإعداده.',
+    capture: 'حالة التقاط رسائل البنك وإعداده.',
   },
 };
 export const CUSTOMIZE_COPY: Record<Lang, CustomizeCopy> = { en, ar };

@@ -75,8 +75,10 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
   const accountReview = isUnassignedIncome(transaction) || transaction.accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID
     ? t('incomeAccountReview', language) : null;
   const accountLabel = accountReview ?? account?.name;
+  // "••1234" is held left to right: in Arabic the dots would otherwise move
+  // past the digits and read as a second separator ("· ·").
   const accountShort = !accountReview && account?.last4
-    ? [account.bankName, `••${account.last4}`].filter(Boolean).join(' · ') : null;
+    ? [account.bankName, `\u2066••${account.last4}\u2069`].filter(Boolean).join(' · ') : null;
   const detailLine = meaning ?? [clock, source, accountShort].filter(Boolean).join(' · ');
   const autoAdded = transaction.bestEffort ? t('autoAddedCheck', language) : null;
   const label = [presentation.title, autoAdded, where, presentation.note, accountLabel, clock, source,

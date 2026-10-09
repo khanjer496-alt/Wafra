@@ -609,7 +609,7 @@ await tapLabel(page, 'Settings', 1200);
 await tapText(page, 'Wafra Pro', 1200);
 ok('expired trial shows the paused-capture paywall', !!(await visibleText(
   page,
-  'Automatic bank-alert capture is paused. Your ledger and manual entries still work.',
+  'Automatic bank-message capture is paused. Your ledger and manual entries still work.',
 )));
 
 ok('no page errors', errors.length === 0);

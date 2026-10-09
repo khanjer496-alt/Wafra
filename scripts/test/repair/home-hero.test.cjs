@@ -108,6 +108,21 @@ test('the line ends where the shared month summary ends, by the same spending ru
   assert.equal(month.cumulative.at(-1), summary.expenseFils);
 });
 
+test('a row dated later this month ends the line at Spent; the trend stays like for like', () => {
+  const rows = [row('2026-09-02', 1000), row('2026-10-02', 600), row('2026-10-20', 400)];
+  const live = new Set(['bank']);
+  const month = hero.projectHeroMonth(rows, '2026-10', at('2026-10-06'), live, new Set());
+  const summary = insights.summarizeMonth(rows, { mode: 'month', key: '2026-10' }, live, new Set());
+  assert.equal(month.cumulative.length, 6, 'the line still ends today');
+  assert.equal(month.cumulative.at(-1), 1000);
+  assert.equal(month.cumulative.at(-1), summary.expenseFils, 'the big Spent figure');
+  // Rent dated the 20th, entered on the 6th, is not "spending more than last month so far".
+  assert.equal(month.trend.currentFils, 600, 'the chip compares the days so far only');
+  assert.equal(month.trend.previousFils, 1000);
+  assert.equal(month.trend.direction, 'down');
+  assert.equal(hero.paceState(month.trend), 'within');
+});
+
 test('sparkline points start on the baseline and spread over the whole month', () => {
   const points = hero.sparklinePoints([0, 100, 100, 400], 30, 300, 30, 0);
   assert.equal(points.length, 5);
@@ -222,7 +237,10 @@ test('Home copy has the same keys in English and Arabic, and no English in Arabi
   for (const value of strings) assert.doesNotMatch(value, /[A-Za-z]/, value);
   assert.equal(en.spokenTrend('up', 12, 'September', true), 'up 12% versus the same days of September');
   assert.equal(en.spokenTrend('down', -8, 'September', false), 'down 8% versus September');
-  assert.equal(en.transfersToAnswer(1), '1 transfer to answer');
+  // One term for unanswered transfers, as Transfers and Transactions say it.
+  assert.equal(en.transfersToAnswer(1), '1 transfer needs an answer');
+  assert.equal(en.transfersToAnswer(2656), '2656 transfers need an answer');
+  assert.equal(ar.transfersToAnswer(12), '12 تحويلًا بانتظار إجابتك');
   assert.equal(copy.homeCopy('ar'), ar);
   assert.equal(copy.homeCopy('fr'), en);
 });

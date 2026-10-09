@@ -25,6 +25,7 @@ import { ActionIconButton } from '@/components/ui/action-icon-button';
 import { TransactionFilterSheet } from '@/components/transaction-filter-sheet';
 import { BAND_GUTTER, BandScaffold, useBandBottomInset } from '@/components/ui/band-scaffold';
 import { BandChip } from '@/components/ui/band/band-chip';
+import { EButton } from '@/components/ui/band/e-button';
 import { Icon } from '@/components/ui/icon';
 import { TextField } from '@/components/ui/text-field';
 import { Fonts, Radius, Spacing, type BandPalette } from '@/constants/theme';
@@ -135,7 +136,10 @@ type TransferSeparationState = Parameters<typeof transferReconciliationForState>
 
 interface TransferSeparation {
   separateTransferIds: ReadonlySet<string>;
-  /** Separated records the reconciler queued for an ownership decision. */
+  /**
+   * Transfers waiting for an answer (ownership not settled), whether or not the
+   * reconciler queued them: the same rule as Home's Needs you and the Transfers card.
+   */
   reviewTransferIds: ReadonlySet<string>;
   /** Transfer legs still waiting for their other side (the Needs review chip). */
   pendingTransferIds: ReadonlySet<string>;
@@ -176,7 +180,7 @@ function separationFor(
   const records = getTransferActivity(transactions, accounts, reconciliation);
   const value: TransferSeparation = {
     separateTransferIds: new Set(records.map(item => item.transaction.id)),
-    reviewTransferIds: new Set(records.filter(item => item.needsReview).map(item => item.transaction.id)),
+    reviewTransferIds: new Set(records.filter(item => !item.confirmed).map(item => item.transaction.id)),
     pendingTransferIds: reconciliation.pendingIds,
     // Built here, from the same records and reconciliation as the separation set, so the
     // pairs can only name rows that are separated; remembered with it per ledger.
@@ -547,6 +551,9 @@ export default function TransactionsScreen() {
   // with the list as its first cell.
   const onBand = !largeText;
   const filterActive = activeFilterCount > 0;
+  // What the empty list says depends on why it is empty.
+  const narrowing = activeFilterCount > 0 || appliedQuery.trim().length > 0;
+  const ledgerEmpty = state.transactions.length === 0;
   const filterButton = (
     <Pressable
       accessibilityRole="button"
@@ -776,7 +783,7 @@ export default function TransactionsScreen() {
             </View>
               {separatedTransfers.count > 0 && <Pressable testID="transactions-separated-transfers"
                 accessibilityRole="button"
-                accessibilityLabel={[transferWords.strip.kept(separatedTransfers.count), stripDetail, transferWords.viewAll].filter(Boolean).join('. ')}
+                accessibilityLabel={[transferWords.strip.listed(separatedTransfers.count), stripDetail, transferWords.viewAll].filter(Boolean).join('. ')}
                 onPress={() => routerRef.current.push('/transfers')}
                 style={({ pressed }) => [styles.strip, largeText && styles.stripLarge, { backgroundColor: band.card, borderColor: band.rule, opacity: pressed ? 0.8 : 1 }]}>
                 <View style={[styles.stripIcon, { backgroundColor: band.glyphGround }]}>
@@ -784,7 +791,7 @@ export default function TransactionsScreen() {
                 </View>
                 <View style={[styles.stripText, largeText && styles.stripTextLarge]}>
                   <View style={styles.stripTitle}>
-                    <ThemedText type="smallBold">{transferWords.strip.kept(separatedTransfers.count)}</ThemedText>
+                    <ThemedText type="smallBold">{transferWords.strip.listed(separatedTransfers.count)}</ThemedText>
                     {separatedTransfers.reviewCount > 0 && <View style={[styles.stripDot, { backgroundColor: band.statusNear }]} />}
                   </View>
                   {stripDetail ? <ThemedText type="meta" themeColor="textSecondary">{stripDetail}</ThemedText> : null}
@@ -824,20 +831,36 @@ export default function TransactionsScreen() {
           )}
           renderItem={renderRow}
           ListEmptyComponent={
-            <View style={styles.empty}>
+            // "Nothing matches" only while a search or filter narrows the
+            // list; a new ledger and an empty period each say what they are.
+            separatedTransfers.count > 0 || narrowing ? <View style={styles.empty} testID="transactions-empty-filtered">
               <View style={[styles.emptyIcon, { backgroundColor: band.glyphGround }]}>
                 <Icon name={separatedTransfers.count > 0 ? 'repeat' : 'search'} size={24} color={theme.textSecondary} strokeWidth={1.7} />
               </View>
               <ThemedText type="small" themeColor="textSecondary">
-                {separatedTransfers.count > 0 ? transferWords.strip.kept(separatedTransfers.count) : tr('nothingMatches')}
+                {separatedTransfers.count > 0 ? transferWords.strip.listed(separatedTransfers.count) : tr('nothingMatches')}
               </ThemedText>
+            </View> : <View style={styles.empty} testID={ledgerEmpty ? 'transactions-empty-ledger' : 'transactions-empty-period'}>
+              <View style={[styles.emptyIcon, { backgroundColor: band.glyphGround }]}>
+                <Icon name={ledgerEmpty ? 'receipt' : 'calendar'} size={24} color={theme.textSecondary} strokeWidth={1.7} />
+              </View>
+              <ThemedText type="smallBold" style={styles.emptyText}>
+                {ledgerEmpty ? words.emptyTitle : words.emptyPeriod(periodLabel(period))}
+              </ThemedText>
+              <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
+                {ledgerEmpty ? words.emptyBody : words.emptyPeriodBody}
+              </ThemedText>
+              {ledgerEmpty ? <View style={styles.emptyActions}>
+                <EButton palette={band} size="compact" label={words.emptyImport} onPress={() => routerRef.current.push('/statement-import')} />
+                <EButton palette={band} size="compact" variant="secondary" label={words.emptyAdd} onPress={() => routerRef.current.push('/add-transaction')} />
+              </View> : null}
             </View>
           }
         />
         </GestureHandlerRootView>
   ), [sections, listBottom, band, largeText, merchantFilter, smsOnly, autoAddedCount, autoAddedActive, theme, tr, trf, filtered.length,
     filters.datePreset, filters.accountId, period, activeFilterCount, totalShown, showResultTotal, excluded, clearFilters, renderRow,
-    separatedTransfers, stripDetail, transferWords, scrollingSearchControls, words, accountLabelFor]);
+    separatedTransfers, stripDetail, transferWords, scrollingSearchControls, words, accountLabelFor, narrowing, ledgerEmpty]);
 
   // The open entry's transfer assessment, from the reconciliation the screen
   // already shares (cached per stored receipt; null while a history import
@@ -967,7 +990,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.two,
     paddingVertical: Spacing.six,
+    paddingHorizontal: BAND_GUTTER,
   },
+  emptyText: { textAlign: 'center' },
+  emptyActions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: Spacing.two, marginTop: Spacing.two },
   emptyIcon: {
     width: 52,
     height: 52,

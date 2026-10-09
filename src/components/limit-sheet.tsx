@@ -357,7 +357,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
               {/* The dial snaps to the step; an exact figure is typed here. */}
               <TextField
                 numeric
-                label={state.ledgerMoney ? bandWords.exactLimit : t('monthlyLimit')}
+                label={bandWords.monthlyLimit}
                 value={text}
                 onChangeText={setText}
                 placeholder="0"

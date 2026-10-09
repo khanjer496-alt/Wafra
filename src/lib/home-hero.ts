@@ -16,7 +16,7 @@ export type TrendDirection = 'up' | 'down' | 'same';
 
 /** This month's spending so far against the same days of the month before. */
 export interface SpendTrend {
-  /** Spending from the month's first day to today (or its last day, once it has ended). */
+  /** Spending from the month's first day to today (or its last day, once it has ended); later-dated rows are left out. */
   currentFils: number;
   /** Spending over the same number of days from the start of the month before. */
   previousFils: number;
@@ -71,7 +71,12 @@ export function projectHeroMonth(
   const monthDays = daysInPeriod(period, today);
   const elapsed = Math.max(0, Math.min(monthDays, elapsedDays(period, today, [])));
   const startISO = monthStartISO(key);
-  const endISO = elapsed > 0 ? addDays(startISO, elapsed - 1) : '';
+  // Rows dated later this month (entered ahead, or a bank's clock past
+  // midnight) count on today's point of the line, so the line ends at the
+  // Spent figure (the whole month). The trend stays like for like: it
+  // compares only the days so far, as the earlier window does.
+  const monthEnd = elapsed > 0 ? monthEndISO(key) : '';
+  let laterFils = 0;
   const daily = new Array<number>(elapsed).fill(0);
   const dayIndex = new Map<string, number>();
   for (let day = 0; day < elapsed; day += 1) dayIndex.set(addDays(startISO, day), day);
@@ -82,13 +87,14 @@ export function projectHeroMonth(
   let previousRows = 0;
   for (const transaction of transactions) {
     const date = transaction.date;
-    const inside = elapsed > 0 && date >= startISO && date <= endISO;
+    const inside = elapsed > 0 && date >= startISO && date <= monthEnd;
     const earlier = before !== null && date >= before.from && date <= before.to;
     if (!inside && !earlier) continue;
     if (!isSpending(transaction, live, internal)) continue;
     if (inside) {
       const at = dayIndex.get(date);
       if (at !== undefined) daily[at]! += transaction.amountFils;
+      else laterFils += transaction.amountFils;
     } else {
       previousFils += transaction.amountFils;
       previousRows += 1;
@@ -97,6 +103,7 @@ export function projectHeroMonth(
   const cumulative: number[] = [];
   let running = 0;
   for (const fils of daily) { running += fils; cumulative.push(running); }
+  if (laterFils > 0) cumulative[cumulative.length - 1]! += laterFils;
 
   // No spending at all in the earlier window means the ledger did not reach
   // back that far (or nothing was spent): a percentage against nothing is not

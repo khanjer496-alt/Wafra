@@ -46,7 +46,7 @@ ok('review candidates infer safe defaults and still expose genuinely ambiguous a
   /rememberedReview\?\.accountId \?\? matchedAccount\?\.id \?\? ''/.test(add) &&
     /suggestUniversalCategory/.test(add) && /!categorySuggestion\.needsReview/.test(add) && /categorySupportsType\(reviewCategory, reviewType\)/.test(add) && /matchingAccounts\.length === 1/.test(add) &&
     /reviewTemplateRuleFor/.test(add) &&
-    /: 'other' : 'groceries'/.test(add) &&
+    /: 'other' : null,/.test(add) &&
     /!reviewItem \|\| !matchedAccount \|\| event\?\.instrument\.evidence === 'ambiguous'/.test(add) &&
     /reviewAlertChooseAccount/.test(add) &&
     /!reviewItem \? <View[\s\S]{0,200}categoryRef/.test(add));
@@ -72,7 +72,7 @@ ok('dismissal is an accessible 44-point confirmed action',
     /<ConfirmSheet[\s\S]*destructive/.test(route));
 ok('structured-only privacy is visible on the route',
   /t\('reviewAlertsPrivacy'\)/.test(route) &&
-    /The bank-alert text is not stored/.test(copy));
+    /The bank message text is not stored/.test(copy));
 
 const captureAt = home.indexOf('testID="journal-import-controls"');
 ok('Home keeps parser exceptions out of the primary money experience',

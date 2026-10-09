@@ -10,6 +10,7 @@ import { introCues, legTags, newlyAnsweredRoutes, routeLegIds, type CoinCue } fr
 import { TransferAnswerChoices } from '@/components/transfers/transfer-answer-choices';
 import { TransferAnswerSheet } from '@/components/transfers/transfer-answer-sheet';
 import { TransferGroupRow, type TransferGroupView } from '@/components/transfers/transfer-group-row';
+import { TransferPeopleToggle, TransferPersonRow, type TransferPersonView } from '@/components/transfers/transfer-person-row';
 import { TransferQuestionCard } from '@/components/transfers/transfer-question-card';
 import { TransferRouteRow } from '@/components/transfers/transfer-route-row';
 import { ActionIconButton } from '@/components/ui/action-icon-button';
@@ -33,7 +34,7 @@ import { bankBrandForName } from '@/lib/markets';
 import { inPeriod, isCurrentMonth, periodLabel } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { useStore } from '@/lib/store';
-import { duplicateTransactionIds, getTransferActivity, transferQuestionQueue, unaskedPendingIds,
+import { duplicateTransactionIds, getTransferActivity, unaskedPendingIds,
   type TransferActivityRecord } from '@/lib/transfer-activity';
 import { transferActivityCopy, transferMetaLine, unbroken } from '@/lib/transfer-activity-copy';
 import { ownCandidates, type TransferAnswer } from '@/lib/transfer-answer';
@@ -42,6 +43,7 @@ import { freezeTransferRows, transferAnswerGroups, transferBatchChangedIds, tran
 import { absorbedOwnIncoming, filterTransferItems, transferListItems, transferTotals,
   type RouteEnd, type TransferListItem, type TransferTag, type TransferTile } from '@/lib/transfer-list';
 import { matchedTransferPairs, suggestedTransferPairs } from '@/lib/transfer-pairs';
+import { personGroup, transferPeople, transferQuestions, transferUnnamedWaiting, transferWaitingSummary } from '@/lib/transfer-people';
 import { isTransferCandidate, reconcileTransfers } from '@/lib/transfer-reconciliation';
 import type { TransferEvidence } from '@/lib/transfer-reconciliation-types';
 import { projectTransferHistory } from '@/lib/transfer-review-presentation';
@@ -53,8 +55,16 @@ const TILES = [['own', 'repeat'], ['sent', 'arrow-up-right'], ['received', 'arro
 const SUGGESTED = new Set(['likely-own', 'likely-card-repayment']);
 
 type GroupRow = { kind: 'group'; key: string; group: TransferGroupView };
+/** Every waiting transfer with one person: one answer for all of them. */
+type PersonRow = { kind: 'person'; key: string; person: TransferPersonView };
+/** "Show all N people" under the first few. */
+type ToggleRow = { kind: 'people-toggle'; key: string };
 type HeaderRow = { kind: 'header'; key: string; title: string };
-type ListRow = TransferListItem | GroupRow | HeaderRow;
+type ListRow = TransferListItem | GroupRow | PersonRow | ToggleRow | HeaderRow;
+/** Pickable rows: a group, a person or one route. */
+type PickRow = GroupRow | PersonRow | TransferListItem;
+/** People listed before "Show all N people" (select mode lists everyone). */
+const PEOPLE_SHOWN = 5;
 
 /** A masked other account the bank named ("ADCB ••4999"); never a claim that it is the person's. */
 function counterpartName(counterparty: NonNullable<TransferEvidence['counterparty']>): string {
@@ -175,7 +185,21 @@ export default function TransfersScreen() {
     assessments: reconciliation.byId, duplicateIds: duplicateTransactionIds(state.transactions) }),
   [reconciliation, rowsById, suggested, listedIds, state.transactions]);
   const answerGroupById = useMemo(() => new Map(answerGroups.map(group => [group.id, group])), [answerGroups]);
-  const groupedIds = useMemo(() => new Set(answerGroups.flatMap(group => group.transactionIds)), [answerGroups]);
+  // Every other waiting transfer that names who the money went to or came from, one group per person
+  // (built once per activity list, so once per stored transfer receipt).
+  const people = useMemo(() => transferPeople(activity), [activity]);
+  const groupedIds = useMemo(() => new Set([...answerGroups.flatMap(group => group.transactionIds), ...people.flatMap(group => group.ids)]),
+    [answerGroups, people]);
+  // Search narrows a person to the entries it matches; the counts, totals and dates then describe exactly
+  // the entries one answer would change.
+  const personViews = useMemo<TransferPersonView[]>(() => !search ? people : people.flatMap(group => {
+    const rows = group.ids.map(id => rowsById.get(id)).filter((row): row is Transaction => !!row && matchesSearch(row));
+    return rows.length ? [personGroup(group.key, group.name, rows)] : [];
+  }),
+  // matchesSearch closes over search and accounts.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [people, rowsById, search, accounts]);
+  const [allPeople, setAllPeople] = useState(false);
   // Groups are not a period's history but a to-do: every date, bounded (collapsed) however many
   // entries they hold. Search narrows each group to its matching entries, as the bulk review did.
   const groupLabels = useMemo(() => new Map(state.accounts.map(account => [account.id, accountDisplayName(account)])), [state.accounts]);
@@ -241,10 +265,11 @@ export default function TransfersScreen() {
     setSelecting(false);
   } });
   const busy = answering || batch.busy;
-  // Select mode lists everything still waiting, whatever the period: groups first, then each queued
+  // Select mode lists everything still waiting, whatever the period: people, then groups, then each waiting
   // entry, a suggested pair as one route.
   const selectRows = useMemo(() => {
-    const waiting = activity.filter(item => item.needsReview && !item.transaction.transferDecision && !groupedIds.has(item.transaction.id));
+    // Every transfer still waiting for an answer, queued by the reconciler or not, that no group or person holds.
+    const waiting = activity.filter(item => !item.confirmed && !item.transaction.transferDecision && !groupedIds.has(item.transaction.id));
     const ids = new Set(waiting.map(item => item.transaction.id));
     const routes = transferListItems(waiting, suggested.filter(pair => ids.has(pair.out.id) && ids.has(pair.in.id)));
     return !search ? routes : routes.filter(item => (suggestedByKey.get(item.key) ? [suggestedByKey.get(item.key)!.out, suggestedByKey.get(item.key)!.in]
@@ -256,6 +281,14 @@ export default function TransfersScreen() {
   // A tile filters the period's answered transfers; groups wait for an answer, so they step aside.
   const groupRows = useMemo<GroupRow[]>(() => tile ? []
     : groupViews.map(group => ({ kind: 'group', key: `group:${group.key}`, group })), [tile, groupViews]);
+  const personRows = useMemo<PersonRow[]>(() => tile ? []
+    : personViews.map(person => ({ kind: 'person', key: person.key, person })), [tile, personViews]);
+  // The first few people, most transfers first, then "Show all N people"; select mode lists everyone.
+  const peopleFolded = !allPeople && personRows.length > PEOPLE_SHOWN + 1;
+  const shownPeople = useMemo<(PersonRow | ToggleRow)[]>(() => personRows.length > PEOPLE_SHOWN + 1
+    ? [...(allPeople ? personRows : personRows.slice(0, PEOPLE_SHOWN)), { kind: 'people-toggle', key: 'people-toggle' }]
+    : personRows, [personRows, allPeople]);
+  const waitingRows = personRows.length + groupRows.length;
   // A grouped entry is answered with its group, so it is not listed a second time on its own.
   const periodRows = useMemo(() => filterTransferItems(items, tile).filter(item => !routeLegIds(item).some(id => groupedIds.has(id))),
     [items, tile, groupedIds]);
@@ -273,15 +306,15 @@ export default function TransfersScreen() {
   // groupEntryRows reads activity, the ledger rows and the reconciliation.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   [groupRows, expanded, activityById, rowsById, reconciliation]);
-  const data = useMemo<ListRow[]>(() => selecting ? [...selectGroupRows, ...selectRows]
-    : groupRows.length ? [...groupRows, ...(periodRows.length ? [{ kind: 'header' as const, key: 'header:period', title: periodTitle }] : []), ...periodRows]
-      : periodRows, [selecting, selectGroupRows, groupRows, selectRows, periodRows, periodTitle]);
+  const data = useMemo<ListRow[]>(() => selecting ? [...personRows, ...selectGroupRows, ...selectRows]
+    : waitingRows ? [...shownPeople, ...groupRows, ...(periodRows.length ? [{ kind: 'header' as const, key: 'header:period', title: periodTitle }] : []), ...periodRows]
+      : periodRows, [selecting, personRows, selectGroupRows, groupRows, shownPeople, waitingRows, selectRows, periodRows, periodTitle]);
   // An opened catch-all group's entries: each is ticked on its own, by hand, never by Select all.
   const openedEntryKeys = useMemo(() => new Set(selectGroupRows.flatMap(row => 'kind' in row ? [] : [row.key])), [selectGroupRows]);
   // What Select all ticks: a whole group (one answer for all its entries) or one waiting route. A catch-all
   // group is never ticked whole, its opened entries only one by one, and a blocked row never at all.
-  const selectable = useMemo(() => data.filter((row): row is GroupRow | TransferListItem => 'kind' in row
-    ? row.kind === 'group' && row.group.whole && !row.group.blocked : !openedEntryKeys.has(row.key)), [data, openedEntryKeys]);
+  const selectable = useMemo(() => data.filter((row): row is PickRow => 'kind' in row
+    ? row.kind === 'person' || (row.kind === 'group' && row.group.whole && !row.group.blocked) : !openedEntryKeys.has(row.key)), [data, openedEntryKeys]);
   // What is ticked is only ever what the list shows now. A ticked row that search, a closed group or the
   // ledger has taken off the list is unticked, and a ticked group must still be one answer for exactly
   // the entries it showed when it was ticked (a catch-all group that became whole drops its ticked entries,
@@ -290,11 +323,14 @@ export default function TransfersScreen() {
     const shown = new Map(data.map(row => [row.key, row] as const));
     const kept = [...picked].filter(([key, item]) => {
       const row = shown.get(key);
-      if (!row || ('kind' in row && row.kind === 'header')) return false;
+      if (!row || ('kind' in row && (row.kind === 'header' || row.kind === 'people-toggle'))) return false;
       if (item.kind !== 'group') return !('kind' in row);
-      if (!('kind' in row) || row.kind !== 'group' || !row.group.whole || row.group.blocked) return false;
+      if (!('kind' in row)) return false;
+      const ids = row.kind === 'person' ? row.person.ids
+        : row.kind === 'group' && row.group.whole && !row.group.blocked ? row.group.ids : null;
+      if (!ids) return false;
       const frozen = new Set(item.ids);
-      return row.group.ids.length === frozen.size && row.group.ids.every(id => frozen.has(id));
+      return ids.length === frozen.size && ids.every(id => frozen.has(id));
     });
     return kept.length === picked.size ? picked : new Map(kept);
   }, [data, picked]);
@@ -304,8 +340,26 @@ export default function TransfersScreen() {
   }, [livePicked, picked]);
 
   /** Freeze one list row as the person sees it now: its rows' fingerprints, the generation, the route. */
-  const batchItem = (row: GroupRow | TransferListItem): TransferBatchItem | null => {
+  const batchItem = (row: PickRow): TransferBatchItem | null => {
     const generation = getStateGeneration();
+    if ('kind' in row && row.kind === 'person') {
+      // Every waiting transfer with this person, answered as the person: one decision per entry,
+      // never linked (no entry here has another side to link to).
+      const person = row.person;
+      const rows = person.ids.map(id => rowsById.get(id)).filter((entry): entry is Transaction => !!entry && !entry.transferDecision);
+      if (!rows.length || rows.length !== person.ids.length) return null;
+      const count = person.incoming + person.outgoing;
+      return { key: row.key, kind: 'group', ids: person.ids,
+        direction: person.incoming && person.outgoing ? 'between' : person.incoming ? 'income' : 'expense',
+        expectedFingerprints: freezeTransferRows(rows), expectedGeneration: generation,
+        preview: { from: { kind: 'party', name: person.name }, to: { kind: 'party', name: person.name }, fromLabel: person.name,
+          toLabel: person.name, amountFils: person.inFils + person.outFils, sign: 'none', count,
+          dates: person.oldest !== person.newest ? words.dateRange(shortDateWithYear(person.oldest), shortDateWithYear(person.newest))
+            : shortDateWithYear(person.newest),
+          spoken: `${person.name}. ${words.person.transfers(count)}`,
+          person: { name: person.name, initial: person.initial, incoming: person.incoming, outgoing: person.outgoing,
+            inFils: person.inFils, outFils: person.outFils } } };
+    }
     if ('kind' in row) {
       const view = row.group;
       // Entries stored twice under one id are never answered.
@@ -358,9 +412,9 @@ export default function TransfersScreen() {
         ? new Map([...current].filter(([key]) => !keys.has(key))) : current);
     }
   };
-  const togglePicked = (row: GroupRow | TransferListItem) => {
+  const togglePicked = (row: PickRow) => {
     if (busy) return;
-    if ('kind' in row && (row.group.blocked || !row.group.whole)) {
+    if ('kind' in row && row.kind === 'group' && (row.group.blocked || !row.group.whole)) {
       if (!row.group.blocked) toggleExpanded(row);
       return;
     }
@@ -391,11 +445,11 @@ export default function TransfersScreen() {
     setPicked(new Map());
     setExpanded(new Set());
   };
-  const openGroup = (row: GroupRow) => {
-    if (busy || row.group.blocked) return;
+  const openGroup = (row: GroupRow | PersonRow, answer: TransferAnswer | null = null) => {
+    if (busy || (row.kind === 'group' && row.group.blocked)) return;
     Keyboard.dismiss();
     const item = batchItem(row);
-    if (item) batch.open([item], null);
+    if (item) batch.open([item], answer);
   };
   const pickedItems = [...livePicked.values()];
   const pickedIncoming = transferBatchIncoming(pickedItems);
@@ -445,13 +499,20 @@ export default function TransfersScreen() {
   // The questions are the reconciler's queue, newest first, whatever the period or search.
   // Saving an answer takes the row out of the queue, so the card always shows the first one.
   // A pair with both legs queued is one movement: one question, asked about its outgoing leg.
-  // Home counts this same queue (transferQuestionQueue), so the two numbers agree.
-  const queue = useMemo(() => transferQuestionQueue(activity), [activity]);
+  // Home and the Transactions summary count the same transfers (transferWaitingSummary), so the numbers agree.
+  // Before them come the people, most transfers first (one answer settles each person) (transferQuestions).
+  // Waiting transfers that name nobody are not walked one by one: they stay listed as "Needs an answer"
+  // rows and the card's footer opens select mode for them.
+  const questions = useMemo(() => transferQuestions(activity), [activity]);
+  const unnamedCount = useMemo(() => transferUnnamedWaiting(activity).length, [activity]);
+  // How many transfers wait (a pair once): the same count as Home's Needs you and the Transactions summary.
+  const waitingCount = useMemo(() => transferWaitingSummary(activity).transfers, [activity]);
   // Queued entries the card cannot ask about (duplicate observations, archived accounts,
   // likely card repayments) are listed as groups above the period's transfers and reached
   // together through select mode: keep "See all" open.
   const unasked = useMemo(() => unaskedPendingIds(activity, reconciliation.pendingIds).size, [activity, reconciliation]);
-  const current = queue[0];
+  const question = questions[0];
+  const current = question?.kind === 'entry' ? question.record : undefined;
   const hint = useMemo(() => {
     if (!current) return undefined;
     const [candidate] = ownCandidates(current.transaction, current.assessment, rowsById);
@@ -460,6 +521,9 @@ export default function TransfersScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current, rowsById, accounts, words]);
   const answerCurrent = async (choice: TransferAnswer) => {
+    // A person: the confirmation sheet opens on that answer with every entry listed and counted; nothing is
+    // saved until Save. The whole person, whatever the search: the card is not narrowed by it.
+    if (question?.kind === 'person') { openGroup({ kind: 'person', key: question.key, person: question.person }, choice); return; }
     if (!current) return;
     const candidates = ownCandidates(current.transaction, current.assessment, rowsById);
     // Several accounts could be the other side: the detail sheet asks which.
@@ -487,7 +551,7 @@ export default function TransfersScreen() {
         <Icon name={icon} size={15} color={ink} />
         <ThemedText type="meta" style={{ color: quiet }}>{words.tiles[key]}</ThemedText>
         <Money fils={fils} type="smallBold" decimals color={ink} currencyColor={quiet} />
-        {counted ? <ThemedText type="micro" style={{ color: quiet }}>{words.tiles.counted}</ThemedText> : null}
+        {counted ? <ThemedText type="meta" style={{ color: quiet }}>{words.tiles.counted}</ThemedText> : null}
       </Pressable>;
     })}
   </View>;
@@ -499,17 +563,18 @@ export default function TransfersScreen() {
     <Icon name="chevron-down" size={16} color={band.onBand} />
   </Pressable>;
   // Something Select can act on: a group that is not blocked, or a waiting route.
-  const waiting = groupRows.filter(row => !row.group.blocked).length + selectRows.length;
+  const waiting = groupRows.filter(row => !row.group.blocked).length + personRows.length + selectRows.length;
   // The same, whatever tile is on (select mode clears it): what See all would have to offer.
-  const answerable = groupViews.filter(view => !view.blocked).length + selectRows.length;
+  const answerable = groupViews.filter(view => !view.blocked).length + personViews.length + selectRows.length;
   // What a row draws besides its data: its travelling coin, its tick and whether it can be pressed.
-  const listState = useMemo(() => ({ coins, livePicked, selecting, busy, expanded }), [coins, livePicked, selecting, busy, expanded]);
+  const listState = useMemo(() => ({ coins, livePicked, selecting, busy, expanded, peopleFolded }),
+    [coins, livePicked, selecting, busy, expanded, peopleFolded]);
   // The list's first heading, with Select at its end: the waiting groups' section when there are
   // any (the period's heading then sits in the list above its rows), else the period.
   const listHead = <View testID="transfers-list-head" style={styles.listHead}>
     <ThemedText type="smallBold" accessibilityRole="header" style={styles.grow}>
       {/* Select mode lists everything waiting; the count is said once, in the footer above the answers. */}
-      {selecting || groupRows.length ? words.group.section : periodTitle}
+      {selecting || waitingRows ? words.group.section : periodTitle}
     </ThemedText>
     {!selecting && waiting > 0 ? <Pressable testID="transfers-select" accessibilityRole="button"
       accessibilityLabel={words.select.action} accessibilityHint={words.select.actionHint} disabled={busy}
@@ -571,15 +636,17 @@ export default function TransfersScreen() {
             leading={<Icon name="search" size={17} color={band.textSecondary} />}
             trailing={query ? <ActionIconButton icon="close" label={t('clearSearch', language)}
               variant="plain" onPress={() => setQuery('')} /> : undefined} />
-          {selecting ? selectControls : current ? <TransferQuestionCard transaction={current.transaction} index={0} total={queue.length}
-            accountLabel={accountName(current.transaction.accountId)} hint={hint} palette={band} busy={busy}
-            more={unasked} onAnswer={answerCurrent} onSeeAll={startSelecting} />
-            // Only when select mode has something to answer: duplicate-id rows alone are shown read-only in the list.
-            : unasked > 0 && answerable > 0 ? <Pressable testID="transfers-review-link" accessibilityRole="button"
-              accessibilityLabel={`${words.card.title(unasked)}. ${words.card.seeAllPlain}`}
+          {selecting ? selectControls : question ? <TransferQuestionCard transaction={current?.transaction}
+            person={question.kind === 'person' ? question.person : undefined} index={0} total={questions.length} waiting={waitingCount}
+            accountLabel={current ? accountName(current.transaction.accountId) : undefined} hint={hint} palette={band} busy={busy}
+            more={unasked} unnamed={unnamedCount} onAnswer={answerCurrent} onSeeAll={startSelecting} onSelectUnnamed={startSelecting} />
+            // No question left, but entries still wait (unnamed one-offs, queued rows the card cannot ask): select mode
+            // answers them. Only when it has something to answer: duplicate-id rows alone are shown read-only in the list.
+            : unasked + unnamedCount > 0 && answerable > 0 ? <Pressable testID="transfers-review-link" accessibilityRole="button"
+              accessibilityLabel={`${words.card.title(waitingCount + unasked)}. ${words.card.seeAllPlain}`}
               onPress={startSelecting}
               style={({ pressed }) => [styles.reviewLink, { backgroundColor: band.card, borderColor: band.statusNear, opacity: pressed ? 0.7 : 1 }]}>
-              <ThemedText type="smallBold" style={[styles.grow, { color: band.statusNear }]}>{words.card.title(unasked)}</ThemedText>
+              <ThemedText type="smallBold" style={[styles.grow, { color: band.statusNear }]}>{words.card.title(waitingCount + unasked)}</ThemedText>
               <ThemedText type="small" style={{ color: band.tint }}>{words.card.seeAllPlain}</ThemedText>
             </Pressable> : null}
           {listHead}
@@ -594,6 +661,20 @@ export default function TransfersScreen() {
           const last = !next || ('kind' in next && next.kind === 'header');
           const card = [styles.rowCard, { backgroundColor: band.card }, first && styles.rowCardFirst, last && styles.rowCardLast];
           const select = selecting ? { checked: livePicked.has(item.key), disabled: busy } : undefined;
+          if ('kind' in item && item.kind === 'people-toggle') {
+            return <View style={card}>
+              <TransferPeopleToggle palette={band} expanded={!peopleFolded}
+                label={peopleFolded ? words.person.showAll(personRows.length) : words.person.showFewer}
+                onPress={() => setAllPeople(value => !value)} />
+            </View>;
+          }
+          if ('kind' in item && item.kind === 'person') {
+            // A person is one answer for every transfer with them: one tick in select mode.
+            return <View style={card}>
+              <TransferPersonRow person={item.person} palette={band} first={first} select={select}
+                onPress={() => selecting ? togglePicked(item) : openGroup(item)} />
+            </View>;
+          }
           if ('kind' in item) {
             // In select mode a whole group is one tick; a catch-all group opens to show its entries; a blocked one is read-only.
             const tickable = item.group.whole && !item.group.blocked;

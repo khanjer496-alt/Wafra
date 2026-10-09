@@ -73,11 +73,12 @@ import type { AppState as LedgerState, CardDue, Transaction } from '@/lib/types'
 import { t, tf } from '@/lib/i18n';
 import { homeWidgetVisible, loadHomeWidgetPreferences, peekHomeWidgetPreferences, splitHomeWidgetLayout, subscribeHomeWidgetPreferences, type HomeWidgetId, type HomeWidgetPreferences } from '@/lib/home-widgets';
 import { repairGoalOrderedHomeOnce } from '@/lib/home-goal-order-repair';
-import { defaultHomeWidgetPreferences } from '@/lib/home-widget-preferences';
+import { defaultHomeWidgetPreferences, withNeededHomeSections } from '@/lib/home-widget-preferences';
 import { hasRecapActivity, recapCandidates, type RecapDescriptor } from '@/lib/recap';
 import { loadViewedRecaps } from '@/lib/recap-view-state';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
-import { getTransferActivity, transferQuestionQueue, unaskedPendingIds } from '@/lib/transfer-activity';
+import { getTransferActivity, unaskedPendingIds } from '@/lib/transfer-activity';
+import { transferWaitingSummary } from '@/lib/transfer-people';
 import { isTransferCandidate } from '@/lib/transfer-reconciliation';
 import { HomeHero, type HeroMonth } from '@/components/home/home-hero';
 import { HomeRecent } from '@/components/home/home-recent';
@@ -97,21 +98,25 @@ const HOME_RECENT_ROWS = 12;
 const copy = {
   en: { journal: 'Your money, in view', month: 'THIS PERIOD', activity: 'Recent transactions',
     add: 'Add an entry', breakdown: 'View spending', upcoming: 'Coming up',
-    import: 'Bank alerts', paused: 'History import paused', resume: 'Resume',
+    import: 'Bank messages', paused: 'History import paused', resume: 'Resume',
     more: 'View all payments', accounts: 'Your accounts',
     income: 'Money in', spent: 'Spent', netNote: 'Income minus spending · not your bank balance',
     progress: 'Reading history', attention: 'Needs your attention',
     dueTotal: (count: number, total: string) => `${count} ${count === 1 ? 'payment' : 'payments'}, ${total}` },
   ar: { journal: 'أموالك بوضوح', month: 'هذه الفترة', activity: 'حركتك المالية',
     add: 'إضافة حركة', breakdown: 'عرض الإنفاق', upcoming: 'الدفعات القادمة',
-    import: 'تنبيهات البنك', paused: 'استيراد السجل متوقف مؤقتاً', resume: 'متابعة',
+    import: 'رسائل البنك', paused: 'استيراد السجل متوقف مؤقتاً', resume: 'متابعة',
     more: 'عرض كل الدفعات', accounts: 'حساباتك',
     income: 'الدخل', spent: 'الإنفاق', netNote: 'الدخل ناقص الإنفاق · ليس رصيد البنك',
     progress: 'قراءة السجل', attention: 'يحتاج إلى انتباهك',
     dueTotal: (count: number, total: string) => `${count === 1 ? 'دفعة واحدة' : count === 2 ? 'دفعتان' : `${count} دفعات`}، ${total}` },
 } as const;
 
-/** The transfer notice's queue, with how many of its entries the Transfers card can ask about. */
+/**
+ * The transfer notice's count, with how many transfers wait for an answer
+ * (`questions`, transferWaitingSummary: the Transfers card's and the
+ * Transactions summary's number).
+ */
 type HomeTransferQueue = PendingTransferSummary & { questions: number };
 
 const sameHomeWidgets = (a: HomeWidgetPreferences, b: HomeWidgetPreferences): boolean =>
@@ -277,7 +282,8 @@ function keepRecapEntry<T extends { descriptor: RecapDescriptor; unread: boolean
  * and like-for-like trend (home-hero.ts). Named "October", with the year only
  * when it is not this year's.
  */
-function heroMonthFor(transactions: Transaction[], key: string, dayISO: string, live: Set<string>, internal: Set<string>): HeroMonth {
+function heroMonthFor(transactions: Transaction[], key: string, dayISO: string, live: Set<string>, internal: Set<string>,
+  withSeries = true): HeroMonth {
   const today = new Date(`${dayISO}T12:00:00`);
   const year = monthKey(today).slice(0, 4);
   const name = (monthKeyed: string) => monthKeyed.slice(0, 4) === year
@@ -285,7 +291,9 @@ function heroMonthFor(transactions: Transaction[], key: string, dayISO: string, 
   return {
     key, name: name(key), comparedName: name(shiftMonthKey(key, -1)),
     summary: summarizeMonth(transactions, { mode: 'month', key }, live, internal),
-    series: projectHeroMonth(transactions, key, today, live, internal),
+    // Off in Customize Home: no line or trend to draw, so no second pass over the ledger.
+    series: withSeries ? projectHeroMonth(transactions, key, today, live, internal)
+      : { key, monthDays: 0, cumulative: [], trend: null },
   };
 }
 
@@ -601,10 +609,13 @@ export default function JournalHomeScreen() {
   const heroKey = period.mode === 'month' ? period.key : monthKey(now);
   const runningMonth = monthKey(now);
   const heroInternal = dashboard.internalTransactionIds as Set<string>;
-  const heroCurrent = useMemo(() => heroMonthFor(state.transactions, heroKey, projectionDay, liveAccounts as Set<string>, heroInternal),
+  // Switched off, the hero keeps only the month summary (limits over); its line,
+  // trend and pace are not worked out.
+  const heroShown = homeWidgetVisible(homeWidgets, 'hero');
+  const heroCurrent = useMemo(() => heroMonthFor(state.transactions, heroKey, projectionDay, liveAccounts as Set<string>, heroInternal, heroShown),
     // monthLabel follows the app language.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.transactions, heroKey, projectionDay, liveAccounts, heroInternal, language]);
+    [state.transactions, heroKey, projectionDay, liveAccounts, heroInternal, language, heroShown]);
   const [heroPreviousWanted, setHeroPreviousWanted] = useState<string | null>(null);
   const heroPrevious = useMemo(() => heroPreviousWanted === heroKey
     ? heroMonthFor(state.transactions, shiftMonthKey(heroKey, -1), projectionDay, liveAccounts as Set<string>, heroInternal) : null,
@@ -743,9 +754,9 @@ export default function JournalHomeScreen() {
   }, [insightDisabled, state.transactions, state.accounts, state.budgets, state.notSubscriptions,
     state.transferInternalIds, state.transferNormalizationVersion, state.historyImport?.status,
     state.marketId, state.ledgerMoney, state.customCategories, language, period, projectionDay]));
-  // Home names the transfer queue only once it is known: the same questions the
-  // Transfers card asks (transferQuestionQueue), so "N to confirm" and the
-  // card's "N need an answer" agree. The graph is built after interactions,
+  // Home names the transfers waiting only once they are known: the same count
+  // the Transfers card gives (transferWaitingSummary), so Home's "N transfers
+  // need an answer" and the card's agree. The graph is built after interactions,
   // never during hydration or a running history import, and not at all when no
   // row could be a transfer.
   useEffect(() => {
@@ -806,13 +817,16 @@ export default function JournalHomeScreen() {
         activityTask = runAfterFirstFrames(() => {
           if (cancelled) return;
           const activity = getTransferActivity(state.transactions, state.accounts, reconciliation);
-          const queue = transferQuestionQueue(activity);
-          // With no question to ask but entries still queued (duplicate observations,
+          // Every transfer kept out of the totals until the person answers, a pair once: the
+          // number the Transfers card and the Transactions summary give.
+          const waiting = transferWaitingSummary(activity).transfers;
+          // With nothing waiting but entries still queued (duplicate observations,
           // archived accounts, likely card repayments), Home names those; Transfers
           // lists them as groups to answer.
-          const ids = queue.length > 0 ? new Set(queue.map(item => item.transaction.id))
+          const ids = waiting > 0 ? new Set(activity.filter(item => !item.confirmed).map(item => item.transaction.id))
             : unaskedPendingIds(activity, reconciliation.pendingIds);
-          publish({ ...pendingTransferSummary(state.transactions, ids), questions: queue.length });
+          const summary = pendingTransferSummary(state.transactions, ids);
+          publish({ ...summary, count: waiting > 0 ? waiting : summary.count, questions: waiting });
         }, { idle: false, delayMs: 0 });
       });
     });
@@ -1055,6 +1069,28 @@ export default function JournalHomeScreen() {
     hint={homeWords.needHint[need.kind]} icon={need.kind === 'transfers' ? 'repeat' : need.kind === 'card' ? 'calendar' : 'alert'}
     warning={need.kind === 'tracking' || need.kind === 'card'} dismissLabel={homeWords.dismiss} inline={pillInline}
     onPress={() => openNeed(need)} onDismiss={() => dismissNeed(need.key)} band={band} hold={!revealReady} /> : null;
+  // Capture shows by itself while it needs the person and the person can act
+  // on it (tracking off, or stopped arriving), and in the first week's
+  // progress, even when switched off in Customize Home; it goes again once it
+  // does not. Paused (Android without Pro) and "ready, no message yet" can
+  // last for good, so they stay with the dismissable Needs you pill and in
+  // the section; so does the offer to fill in the past.
+  const captureNeeded = state.hydrated && state.onboarded && (trackingNeed === 'off' || trackingNeed === 'stopped'
+    || (!history && moneyPicture !== null));
+  const drawnWidgets = withNeededHomeSections(homeWidgets, captureNeeded ? ['capture'] : []);
+  // Transfers still waiting that the Needs you pill does not name (no question
+  // the card can ask: a likely card repayment, an archived account): one quiet
+  // line under the transactions while the Transfers section is off.
+  const quietTransfers = !homeWidgetVisible(drawnWidgets, 'transfers') && pendingTransfers
+    && pendingTransfers.count > 0 && pendingTransfers.questions === 0
+    ? <Pressable testID="home-transfers-waiting" accessibilityRole="button"
+        accessibilityLabel={homeWords.transfersWaiting(pendingTransfers.count)} accessibilityHint={homeWords.needHint.transfers}
+        onPress={() => router.push('/transfers')}
+        style={({ pressed }) => [styles.quietLine, { opacity: pressed ? 0.6 : 1 }]}>
+        <Icon name="repeat" size={16} color={band.textSecondary} />
+        <ThemedText type="meta" style={[styles.grow, { color: band.textSecondary }]}>{homeWords.transfersWaiting(pendingTransfers.count)}</ThemedText>
+        <Icon name="chevron-right" size={16} color={band.textSecondary} />
+      </Pressable> : null;
   const founderUnlockEnabled = process.env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK === '1';
   const unlockFounder = founderUnlockEnabled && !state.founderPro
     ? () => {
@@ -1152,7 +1188,8 @@ export default function JournalHomeScreen() {
       seeAllHint={homeWords.seeAllHint} onSeeAll={() => router.push('/transactions')}
       note={period.mode === 'month' && period.key === runningMonth ? undefined : periodLabel(period)}
       empty={!hasPeriodRecords ? <EmptyMonth monthName={periodLabel(period)} onReadInbox={() => void onRefresh()} primaryLabel={t('checkBankAlerts')} onAddManually={() => router.push('/add-transaction')} />
-        : hasPeriodTransfers ? transfersLink : null} />;
+        : hasPeriodTransfers ? transfersLink : null}
+      footer={quietTransfers} />;
   };
 
   const summaryProps = {
@@ -1165,7 +1202,7 @@ export default function JournalHomeScreen() {
     onSpending: () => router.push('/flow'),
   };
 
-  const layout = splitHomeWidgetLayout(homeWidgets);
+  const layout = splitHomeWidgetLayout(drawnWidgets);
   // On the band, the month line sits right under the Today tiles and names the
   // period; anywhere else (hidden, or moved down the sheet) the tiles name it.
   const sectionProps = { ...summaryProps, today: homeToday,
@@ -1241,7 +1278,7 @@ export default function JournalHomeScreen() {
       pattern: id === 'greeting' && !greetingInToolbar ? <YourPattern compact testID="home-personal-pattern" tile={24} gap={3} /> : undefined };
     const content = id === 'greeting' ? <ReferenceHomeGreeting {...props} />
       : id === 'hero' ? <HomeHero band={props.band} moneySpec={moneySpec} language={language} largeText={largeText}
-          current={heroCurrent} previous={heroPrevious} onWantPrevious={wantHeroPrevious} budgets={state.budgets}
+          current={heroCurrent} running={heroKey === runningMonth} previous={heroPrevious} onWantPrevious={wantHeroPrevious} budgets={state.budgets}
           warning={livePace === 'over'} hold={!revealReady} />
       : id === 'overview' ? <ReferenceHomeSummary {...props} onBand={onBand} />
       : id === 'today' ? <ReferenceHomeToday {...props} />
@@ -1316,6 +1353,7 @@ export default function JournalHomeScreen() {
 const styles = StyleSheet.create({
   screen: { gap: 24 },
   captureBlock: { gap: 16 },
+  quietLine: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 8 },
   movedMoneyBlock: { padding: 16, borderRadius: 24 },
   utilityStacked: { flexDirection: 'column', alignItems: 'stretch' },
   loading: { gap: 20, paddingTop: 20 },

@@ -17,7 +17,7 @@ function harness(options) {
   // The route row draws its travelling coin from transfer-coins; the screen gives the cues.
   h.local('@/components/transfer-coins/coin-cues', 'src/components/transfer-coins/coin-cues.ts');
   h.local('@/components/transfer-coins/route-coin');
-  for (const name of ['transfer-answer-choices', 'transfer-route-row', 'transfer-question-card']) h.local(`@/components/transfers/${name}`);
+  for (const name of ['transfer-answer-choices', 'transfer-route-row', 'transfer-person-row', 'transfer-question-card']) h.local(`@/components/transfers/${name}`);
   h.answers = [];
   h.deps['@/hooks/use-transfer-answer'] = { useTransferAnswer: () => ({ busy: false,
     answer: async input => { h.answers.push(input); return 'saved'; } }) };
@@ -262,6 +262,9 @@ test('sent and received tiles say counted; your accounts does not', () => {
     assert.ok(text(tile).includes(words.tiles.counted), key);
     assert.ok(tile.props.accessibilityLabel.includes(words.tiles.counted), `${key} label`);
   }
+  // Sentence case, not a caps micro-label (the micro type is uppercase; the harness's ThemedText drops `type`).
+  const screen = require('node:fs').readFileSync(require('node:path').join(__dirname, '../../../src/app/transfers.tsx'), 'utf8');
+  assert.match(screen, /<ThemedText type="meta"[^>]*>\{words\.tiles\.counted\}/);
   assert.ok(!text(byId(tree, 'transfers-tile-own')).includes(words.tiles.counted));
   assert.ok(!byId(tree, 'transfers-tile-own').props.accessibilityLabel.includes(words.tiles.counted));
 });

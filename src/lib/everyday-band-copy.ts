@@ -45,7 +45,6 @@ export const everydayBandCopyTables = {
     merchantLabel: 'Merchant',
     /** Limit sheet. */
     monthlyLimit: 'Monthly limit',
-    exactLimit: 'Exact amount',
   },
   ar: {
     spendingViews: 'طرق عرض الإنفاق',
@@ -76,7 +75,6 @@ export const everydayBandCopyTables = {
     entryType: 'نوع الحركة',
     merchantLabel: 'التاجر',
     monthlyLimit: 'الحد الشهري',
-    exactLimit: 'المبلغ بالضبط',
   },
 };
 

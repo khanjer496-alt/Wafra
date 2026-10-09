@@ -18,7 +18,7 @@ import { useBand } from '@/hooks/use-band';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { scaleTextStyleForE2E } from '@/lib/e2e-font-scale';
-import { assistantCopy as copy } from '@/lib/assistant-copy';
+import { assistantCopyFor, assistantQuestionLabel, assistantShowTransactionsQuery, assistantText } from '@/lib/assistant-copy';
 import { assistantScreenCopy, evidenceTransactionCount } from '@/lib/assistant-screen-copy';
 
 import { toISODate } from '@/lib/format';
@@ -62,7 +62,7 @@ interface AssistantTurn {
 }
 
 /** Honest, state-specific status for the platform model. Null hides the line. */
-function onDeviceStatusCopy(availability: OnDeviceAIAvailability | null): string | null {
+function onDeviceStatusCopy(availability: OnDeviceAIAvailability | null, copy: ReturnType<typeof assistantCopyFor>): string | null {
   if (!availability) return null;
   switch (availability.status) {
     case 'available':
@@ -112,6 +112,7 @@ export default function AssistantScreen() {
   // Redesign additions read plain state: no new hooks, so hook order is unchanged.
   const screenLanguage: 'en' | 'ar' = state.language === 'ar' ? 'ar' : 'en';
   const screenCopy = assistantScreenCopy(screenLanguage);
+  const copy = assistantCopyFor(screenLanguage);
   const ledgerMoney = state.ledgerMoney ?? null;
   const periodKey = JSON.stringify(period);
   const generation = getStateGeneration();
@@ -139,7 +140,7 @@ export default function AssistantScreen() {
     const subscription = NativeAppState.addEventListener('change', (status) => { if (status === 'active') update(); });
     return () => { active = false; subscription.remove(); };
   }, []));
-  const aiStatus = onDeviceStatusCopy(aiAvailability);
+  const aiStatus = onDeviceStatusCopy(aiAvailability, copy);
   const prepareModel = () => {
     if (preparingModel) return;
     setPreparingModel(true);
@@ -167,7 +168,10 @@ export default function AssistantScreen() {
   const latestSuggestions = latest?.answer.suggestions?.length &&
     (latest.request.tool !== 'help' || latest.request.suggestions?.length)
     ? latest.answer.suggestions : undefined;
-  const followUps = latestSuggestions ?? (conversationContext ? assistantFollowUpQuestions(conversationContext) : []);
+  // "Show those transactions" repeats the answer's own "See N transactions"
+  // button whenever it has one, so it is offered only when it does not.
+  const followUps = (latestSuggestions ?? (conversationContext ? assistantFollowUpQuestions(conversationContext) : []))
+    .filter((item) => !(item === assistantShowTransactionsQuery && latest?.answer.evidence?.length));
   const inputs = ledgerInputs(state);
   const isStale = (turn: AssistantTurn) => turn.answer.tool !== 'help' &&
     (toISODate(turn.answeredAt) !== today || turn.inputs.some((value, index) => value !== inputs[index]));
@@ -545,7 +549,7 @@ export default function AssistantScreen() {
     </View>
     {bandQuestion !== null ? <View testID="assistant-band-question"
       style={[styles.bandBubble, !largeText && styles.bandBubbleInset, { backgroundColor: band.tile }]}>
-      <ThemedText selectable style={[styles.bandBubbleText, { color: band.onBand }]}>{bandQuestion}</ThemedText>
+      <ThemedText selectable style={[styles.bandBubbleText, { color: band.onBand }]}>{assistantQuestionLabel(bandQuestion, screenLanguage)}</ThemedText>
     </View> : <ThemedText type="title" style={{ color: band.onBand }}>{copy.heading}</ThemedText>}
   </View>;
 
@@ -606,9 +610,10 @@ export default function AssistantScreen() {
           <EButton palette={band} label={copy.import} onPress={() => router.push('/import-sms')} />
           <EButton palette={band} variant="secondary" label={copy.add} onPress={() => router.push('/add-transaction')} />
         </View> : currentTurns.length === 0 ? <View style={styles.suggestions}>
-          {suggestions.map((item) => <Pressable key={item} accessibilityRole="button" onPress={() => { tapped(); void ask(item); }}
+          {suggestions.map((item) => <Pressable key={item} accessibilityRole="button" accessibilityLabel={assistantQuestionLabel(item, screenLanguage)}
+            onPress={() => { tapped(); void ask(item); }}
             style={({ pressed }) => [styles.suggestion, { borderColor: band.rule, backgroundColor: band.card, opacity: pressed ? 0.8 : 1 }]}>
-            <ThemedText type="small" style={[styles.suggestionText, { color: band.text }]}>{item}</ThemedText>
+            <ThemedText type="small" style={[styles.suggestionText, { color: band.text }]}>{assistantQuestionLabel(item, screenLanguage)}</ThemedText>
             <Icon name="chevron-right" size={16} color={band.textSecondary} />
           </Pressable>)}
         </View> : null}
@@ -624,24 +629,24 @@ export default function AssistantScreen() {
         return <View key={turn.id} testID="assistant-turn"
           style={[styles.turn, index > 0 && [styles.turnDivided, { borderTopColor: band.rule }]]}>
           {questionInBand ? null : <View style={[styles.questionBubble, { backgroundColor: band.card, borderColor: band.rule }]}>
-            <ThemedText type="smallBold" selectable style={{ color: band.text }}>{turn.question}</ThemedText>
+            <ThemedText type="smallBold" selectable style={{ color: band.text }}>{assistantQuestionLabel(turn.question, screenLanguage)}</ThemedText>
           </View>}
           <View accessibilityLiveRegion={index === currentTurns.length - 1 ? 'polite' : 'none'} style={styles.answer}>
-            <ThemedText type="meta" style={{ color: band.textSecondary }}>{turn.answer.title}</ThemedText>
+            <ThemedText type="meta" style={{ color: band.textSecondary }}>{assistantText(turn.answer.title, screenLanguage)}</ThemedText>
             {turn.interpretedOnDevice ? <ThemedText testID="assistant-interpreted-on-device" type="meta" style={{ color: band.textSecondary }}>
               {copy.onDeviceAiInterpreted}
             </ThemedText> : null}
             {turn.answer.headline ? <>
               <ThemedText type="title" selectable style={[styles.answerFigure, { color: band.text }]}>{turn.answer.headline}</ThemedText>
-              {turn.answer.meta ? <ThemedText type="meta" selectable style={{ color: band.textSecondary }}>{turn.answer.meta}</ThemedText> : null}
-            </> : <ThemedText type="heading" selectable style={[styles.answerSentence, { color: band.text }]}>{turn.answer.body}</ThemedText>}
+              {turn.answer.meta ? <ThemedText type="meta" selectable style={{ color: band.textSecondary }}>{assistantText(turn.answer.meta, screenLanguage)}</ThemedText> : null}
+            </> : <ThemedText type="heading" selectable style={[styles.answerSentence, { color: band.text }]}>{assistantText(turn.answer.body, screenLanguage)}</ThemedText>}
             {turn.answer.monthlySeries?.length && ledgerMoney ? <AssistantMonthChart series={turn.answer.monthlySeries}
               highlight={turn.answer.monthlySeriesHighlight} money={ledgerMoney} language={screenLanguage} palette={band} largeText={largeText} /> : null}
             {turn.answer.payments?.length && ledgerMoney ? <AssistantPaymentRows payments={turn.answer.payments}
               money={ledgerMoney} language={screenLanguage} palette={band} />
             : turn.answer.facts?.length ? <View style={styles.facts}>
               {turn.answer.facts.map((fact, factIndex) => <View key={fact.label + '-' + factIndex} style={[styles.factRow, largeText && styles.factRowLarge]}>
-                <ThemedText type="meta" style={[styles.factLabel, { color: band.textSecondary }]}>{fact.label}</ThemedText>
+                <ThemedText type="meta" style={[styles.factLabel, { color: band.textSecondary }]}>{assistantText(fact.label, screenLanguage)}</ThemedText>
                 <ThemedText type="smallBold" tabular selectable style={[styles.factValue, { color: band.text }]}>{fact.value}</ThemedText>
               </View>)}
             </View> : null}
@@ -667,12 +672,12 @@ export default function AssistantScreen() {
       {pendingQuestion ? <View style={[styles.turn, currentTurns.length > 0 && [styles.turnDivided, { borderTopColor: band.rule }]]}
         testID="assistant-pending-turn">
         {currentTurns.length > 0 ? <View style={[styles.questionBubble, { backgroundColor: band.card, borderColor: band.rule }]}>
-          <ThemedText type="smallBold" selectable style={{ color: band.text }}>{pendingQuestion}</ThemedText>
+          <ThemedText type="smallBold" selectable style={{ color: band.text }}>{assistantQuestionLabel(pendingQuestion, screenLanguage)}</ThemedText>
         </View> : null}
         <ThemedText type="meta" style={{ color: band.textSecondary }} accessibilityRole="progressbar">{copy.understanding}</ThemedText>
       </View> : null}
       {currentTurns.length > 0 && followUps.length > 0 ? <View testID="assistant-followups" style={styles.pills}>
-        {followUps.map((item) => <AskPill key={item} palette={band} label={item} onPress={() => { void ask(item); }} />)}
+        {followUps.map((item) => <AskPill key={item} palette={band} label={assistantQuestionLabel(item, screenLanguage)} onPress={() => { void ask(item); }} />)}
       </View> : null}
     </BandScaffold>
     <PeriodSheet visible={periodOpen} selectedPeriod={contextPeriod} onApply={resetConversation} onClose={() => setPeriodOpen(false)} />

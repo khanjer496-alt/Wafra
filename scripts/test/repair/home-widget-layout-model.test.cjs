@@ -197,3 +197,24 @@ test('a layout saved before v3 loads as the new default without being written ba
   assert.deepEqual(plain(api.peekHomeWidgetPreferences()), pref(all, offByDefault), 'the first render after launch already has it');
   assert.equal(writes, 0, 'nothing is written until the person saves a layout');
 });
+
+test('Capture is drawn while it needs the person, at its saved place, without changing what is saved', () => {
+  const saved = model.defaultHomeWidgetPreferences();
+  assert.equal(model.withNeededHomeSections(saved, []), saved, 'no need: the same layout object');
+  const drawn = model.withNeededHomeSections(saved, ['capture']);
+  assert.ok(!drawn.hidden.includes('capture'));
+  assert.deepEqual(plain(drawn.order), plain(saved.order), 'its saved place');
+  assert.ok(saved.hidden.includes('capture'), 'the saved layout still has it off');
+  assert.deepEqual(plain(model.splitHomeWidgetLayout(drawn).sheet), ['activity', 'capture']);
+  // Only Capture is shown by itself; a need never switches on another section.
+  assert.equal(model.withNeededHomeSections(saved, ['assistant', 'transfers']), saved);
+  // Moved up among the band's sections while off: drawn after them, so the band is not cut short.
+  const early = pref(['greeting', 'capture', 'hero', 'today', 'overview', 'week', 'activity'], ['capture', 'today', 'overview', 'week']);
+  const lifted = model.withNeededHomeSections(early, ['capture']);
+  assert.deepEqual(plain(lifted.order).slice(0, 7), ['greeting', 'hero', 'today', 'overview', 'week', 'capture', 'activity']);
+  assert.deepEqual(plain(model.splitHomeWidgetLayout(lifted).band), ['greeting', 'hero']);
+  assert.equal(plain(early.order)[1], 'capture', 'the saved order is untouched');
+  // Already on: unchanged.
+  const on = pref(all, []);
+  assert.equal(model.withNeededHomeSections(on, ['capture']), on);
+});

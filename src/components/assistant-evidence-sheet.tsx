@@ -8,7 +8,8 @@ import { Button } from '@/components/ui/controls';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
-import { assistantCopy as copy } from '@/lib/assistant-copy';
+import { assistantCopyFor } from '@/lib/assistant-copy';
+import { useLanguage } from '@/hooks/use-language';
 import { tapped } from '@/lib/haptics';
 import { formatAED as formatLedgerMoney } from '@/lib/format';
 import type { AppState } from '@/lib/types';
@@ -25,6 +26,7 @@ export function AssistantEvidenceSheet({ evidence, state, stale, onClose, onRefr
   onRefresh: () => void;
 }) {
   const theme = useTheme();
+  const copy = assistantCopyFor(useLanguage());
   const largeText = useLargeTextLayout();
   const [groupIndex, setGroupIndex] = useState(0);
   const [page, setPage] = useState(0);

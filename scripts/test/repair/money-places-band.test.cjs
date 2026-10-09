@@ -63,12 +63,12 @@ test('the band copy is in both languages with correct Arabic counts', () => {
   assert.equal(en.paymentsCount(1), '1 payment');
   assert.equal(en.paymentsCount(7), '7 payments');
   assert.equal(en.estimatesCount(1), '1 is an estimate');
-  assert.equal(en.cardsApart(2), '2 cards, shown on their own');
+  assert.equal(en.cardsApart(2), '2 credit cards, shown on their own');
   assert.equal(ar.paymentsCount(1), 'دفعة واحدة');
   assert.equal(ar.paymentsCount(2), 'دفعتان');
   assert.equal(ar.paymentsCount(3), '3 دفعات');
   assert.equal(ar.paymentsCount(11), '11 دفعة');
-  assert.equal(ar.cardsApart(2), 'بطاقتان تظهران منفصلتين');
+  assert.equal(ar.cardsApart(2), 'بطاقتان ائتمانيتان تظهران منفصلتين');
   assert.equal(ar.cardsCount(12), '12 بطاقة');
   // Recording copy never says Wafra moves money.
   assert.doesNotMatch(en.recordAmount('AED 10'), /pay|send|transfer/i);
