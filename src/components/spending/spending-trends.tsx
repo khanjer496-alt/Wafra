@@ -227,11 +227,13 @@ export function SpendingTrends(p: Props) {
                 color={deltaFils > 0 ? theme.expenseGraphic : theme.primary} />
               <ThemedText type="meta" tabular themeColor={deltaFils > 0 ? 'expense' : 'income'}>
                 {Math.abs(deltaPct)}% {deltaFils > 0 ? w.more : w.fewer}
-                {like && previous ? ` ${w.sameDaysOf(monthLabel(previous.key, true).split(' ')[0] ?? '')}` : ''}
               </ThemedText>
             </View>}
           </View>
         </View>
+        {/* A running month's chip compares the same days; said on its own line so the chip stays short. */}
+        {like && previous && deltaPct !== null ? <ThemedText type="meta" themeColor="textSecondary" testID="cashflow-same-days">
+          {w.sameDaysOf(monthLabel(previous.key, true).split(' ')[0] ?? '')}</ThemedText> : null}
         {monthFigures(selected)}
         <View style={[styles.selectedNetRow, large && styles.stackColumn]}>
           <ThemedText type="meta" themeColor="textTertiary">{w.net}</ThemedText>

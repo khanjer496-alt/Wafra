@@ -100,7 +100,7 @@ export function AccountGroups({ rows, onOpen, onManage, onUpdateBalance, onHide,
               : <Money fils={item.figureFils} type="smallBold" style={styles.figure} />}
           </View>
           <View style={[styles.line, large && styles.lineStacked]}>
-            <ThemedText type="meta" numberOfLines={large ? undefined : 2}
+            <ThemedText type="meta"
               testID={item.quiet ? 'wallet-quiet-line' : `wallet-status-${a.id}`}
               style={[styles.status, { color: item.quiet ? palette.statusNear : toneColor(item.statusTone) }]}>
               {/* The last four is one left-to-right run, so Arabic never reorders it into "· ·". */}

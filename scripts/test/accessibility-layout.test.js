@@ -335,7 +335,7 @@ ok('Money keeps every figure whole: fitted from the width, never split, full amo
   /useHeroFigureMultiplier\(amount, type, fitInset\)/.test(money) &&
     /value: \{ flexShrink: 0, maxWidth: '100%' \}/.test(money) &&
     /adjustsFontSizeToFit=\{Platform\.OS !== 'web'\} minimumFontScale=\{MIN_FIGURE_SCALE\}/.test(money) &&
-    /Platform\.OS === 'web' && WEB_NO_WRAP/.test(money) &&
+    /Platform\.OS === 'web' && !large && WEB_NO_WRAP/.test(money) &&
     /accessibilityLabel=\{label\}/.test(money));
 // Design language E: the selected tab shows its name in its own colour; the
 // others are icons. At the accessibility sizes every tab is an icon. Every

@@ -2,6 +2,7 @@ import { Platform, StyleSheet, TextInput, useWindowDimensions, View, type StyleP
 
 import { ThemedText, type TextType } from '@/components/themed-text';
 import { Fonts, Spacing } from '@/constants/theme';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { useLedgerMoney, useMoneyLocaleKey } from '@/hooks/use-ledger-money';
 import { scaleTextStyleForE2E } from '@/lib/e2e-font-scale';
@@ -144,11 +145,14 @@ export function Money({
   // wraps the currency onto its own line first. A figure still wider than its
   // box shrinks to fit on iOS and Android (never below 60%), and on the web it
   // stays on one line — digits are never split across lines.
+  // At the accessibility sizes the row already stacks the figure on its own
+  // line at full width (the long-standing rule), so the web keeps its wrap there.
+  const large = useLargeTextLayout();
   const figure = (
     <ThemedText type={type} tabular maxFontSizeMultiplier={fitMultiplier}
       numberOfLines={Platform.OS === 'web' ? undefined : 1}
       adjustsFontSizeToFit={Platform.OS !== 'web'} minimumFontScale={MIN_FIGURE_SCALE}
-      style={[styles.value, Platform.OS === 'web' && WEB_NO_WRAP, color ? { color } : undefined]}>
+      style={[styles.value, Platform.OS === 'web' && !large && WEB_NO_WRAP, color ? { color } : undefined]}>
       {amount}
     </ThemedText>
   );
