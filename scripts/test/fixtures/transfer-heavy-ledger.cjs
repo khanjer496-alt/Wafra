@@ -19,7 +19,14 @@ function lcg(seed) {
   };
 }
 
-function transferHeavyLedger(count = 15000, candidates = 3000, seed = 7) {
+/**
+ * `decided` adds the person's own answers to every seventh candidate: own
+ * (half of them naming another candidate as the other side, with no stored
+ * link yet), someone else, and not a transfer. Plain stored data, so the
+ * graph's handling of decisions is pinned without building them through the
+ * code under test.
+ */
+function transferHeavyLedger(count = 15000, candidates = 3000, seed = 7, { decided = false } = {}) {
   const base = hotPathLedger(count - candidates);
   const random = lcg(seed);
   const banks = base.accounts.filter((a) => a.kind === 'bank' && !a.archived);
@@ -37,6 +44,49 @@ function transferHeavyLedger(count = 15000, candidates = 3000, seed = 7) {
       title: income ? 'Incoming transfer' : 'Outgoing transfer', accountId: account.id,
       date: new Date(at).toISOString().slice(0, 10), ts: at, source: 'sms', smsKey: `s${at}-${amountFils}-th${i}`,
       transferEvidence: evidence });
+  }
+  if (decided) {
+    const byId = new Map(base.accounts.map((a) => [a.id, a]));
+    const fab = byId.get('bank-1');
+    const enbd = byId.get('bank-0');
+    const own = (account) => ({ last4: account.last4, kind: 'account', bankIdentity: account.bankName });
+    for (let k = 0; k < 30; k += 1) {
+      const at = NOW - (k + 2) * 3 * DAY - 7_200_000;
+      const card = byId.get(`card-${k % 10}`);
+      const amountFils = 150_000 + k * 1_000;
+      // A debit naming a known own credit card (ownership by observation).
+      rows.push({ id: `th-known-${k}`, type: 'expense', amountFils, category: 'other', title: 'Outgoing transfer',
+        accountId: enbd.id, date: new Date(at).toISOString().slice(0, 10), ts: at, source: 'sms', smsKey: `s${at}-${amountFils}-known${k}`,
+        captureInstrument: own(enbd), transferEvidence: { version: 1, currency: 'AED', attribution: 'source', sourceBank: enbd.bankName,
+          endpointProof: 'explicit-transfer', counterparty: { last4: card.last4, kind: 'credit', bankIdentity: card.bankName } } });
+      // A debit naming a card tail only, and that card's own payment receipt.
+      const paidAt = at + DAY / 2;
+      const paid = 90_000 + k * 1_000;
+      rows.push({ id: `th-repay-${k}`, type: 'expense', amountFils: paid, category: 'other', title: 'Outgoing transfer',
+        accountId: enbd.id, date: new Date(paidAt).toISOString().slice(0, 10), ts: paidAt, source: 'sms', smsKey: `s${paidAt}-${paid}-repay${k}`,
+        captureInstrument: own(enbd), transferEvidence: { version: 1, currency: 'AED', attribution: 'source', sourceBank: enbd.bankName,
+          endpointProof: 'explicit-transfer', counterparty: { last4: card.last4, kind: 'credit' } } });
+      rows.push({ id: `th-receipt-${k}`, type: 'income', amountFils: paid, category: 'other', title: 'Payment received',
+        accountId: card.id, date: new Date(paidAt + 600_000).toISOString().slice(0, 10), ts: paidAt + 600_000, source: 'sms',
+        smsKey: `s${paidAt + 600_000}-${paid}-receipt${k}`, cardPaymentSide: 'receipt', isTransfer: true,
+        captureInstrument: { last4: card.last4, kind: 'credit', bankIdentity: card.bankName } });
+      // One FAB transfer reported twice: transfer detail, then remittance debit.
+      const fabAt = at - DAY;
+      const sent = 40_000 + k * 1_000;
+      for (const [form, offset] of [['transfer-detail', 0], ['remittance-debit', 45_000]]) {
+        rows.push({ id: `th-fab-${form}-${k}`, type: 'expense', amountFils: sent, category: 'other', title: 'Outgoing transfer',
+          accountId: fab.id, date: new Date(fabAt + offset).toISOString().slice(0, 10), ts: fabAt + offset, source: 'sms',
+          smsKey: `s${fabAt + offset}-${sent}-${form}${k}`, captureInstrument: own(fab),
+          transferEvidence: { version: 1, currency: 'AED', attribution: 'source', sourceBank: fab.bankName, postingForm: form } });
+      }
+    }
+    for (let i = 0; i < rows.length; i += 7) {
+      const k = i / 7;
+      const ownership = ['own', 'external', 'none'][k % 3];
+      const partner = ownership === 'own' && k % 2 === 1 ? rows[i + 3] : undefined;
+      rows[i] = { ...rows[i], transferDecision: { version: 1, ownership, decidedAt: NOW - k * 60_000,
+        ...(partner ? { counterpartId: partner.id } : {}) } };
+    }
   }
   const transactions = [...base.transactions, ...rows].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
   const credit = base.accounts.filter((a) => a.kind === 'card' && a.cardType === 'credit');

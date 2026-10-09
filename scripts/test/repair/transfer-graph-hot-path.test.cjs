@@ -16,6 +16,7 @@
  *   uncached code returned.
  */
 const { test } = require('node:test');
+const { performance } = require('node:perf_hooks');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const path = require('node:path');
@@ -30,19 +31,114 @@ markets.setActiveMarket('AE');
 
 const digest = (value) => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 16);
 
-test('a transfer-heavy 15k ledger reconciles exactly as before the pass memo', () => {
-  const ledger = transferHeavyLedger();
+const sortedEntries = (map) => [...map].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+/** Every part of a graph result, digested. */
+function graphDigests(normalized, result) {
+  return {
+    normalized: digest(normalized), byId: digest(sortedEntries(result.byId)), groups: digest(result.groups),
+    internalIds: digest([...result.internalIds].sort()), pendingIds: digest([...result.pendingIds].sort()),
+    corroboratingIds: digest([...result.corroboratingIds].sort()), corroboratingOf: digest(sortedEntries(result.corroboratingOf)),
+    cardRepaymentPairs: digest(sortedEntries(result.cardRepaymentPairs)),
+    knownCardRepayments: digest(sortedEntries(result.knownCardRepayments)),
+  };
+}
+const statusCounts = (result) => {
+  const counts = {};
+  for (const assessment of result.byId.values()) counts[assessment.status] = (counts[assessment.status] ?? 0) + 1;
+  return counts;
+};
+
+// Digests of the pre-speed-up build's output (e3b6e18, before 2721e1b) for
+// these exact fixtures, taken with WAFRA_HOT_PATH_BUILD pointing at that
+// build. Empty sets digest to '4f53cda18c2baa0c' (an empty list).
+const PINS = {
+  plain: {
+    statuses: { 'ownership-unknown': 2996, 'confirmed-own': 212, 'likely-own': 4 },
+    digests: { normalized: 'fb486625099ba5e8', byId: '1d493aef516c3be1', groups: 'f6e2029f7f0c7930',
+      internalIds: '0da67f2d92e29a80', pendingIds: '120ff0398806d257', corroboratingIds: '4f53cda18c2baa0c',
+      corroboratingOf: '4f53cda18c2baa0c', cardRepaymentPairs: '4f53cda18c2baa0c', knownCardRepayments: '4f53cda18c2baa0c' },
+  },
+  // Stored decisions (own, own naming a partner with no link yet, someone
+  // else, not a transfer), debits naming a known own card, card repayments
+  // with their receipts, and FAB's doubled transfer postings.
+  decided: {
+    statuses: { 'ownership-unknown': 2596, 'confirmed-external': 150, 'counterpart-missing': 150, 'confirmed-own': 212,
+      'card-repayment': 48, 'corroborating-alert': 26, 'likely-own': 4 },
+    digests: { normalized: '8b92854ba4884cda', byId: 'b3be8048cfad4d1f', groups: 'f6e2029f7f0c7930',
+      internalIds: '3fdac248c69ad895', pendingIds: '120ff0398806d257', corroboratingIds: 'b896675faa702e3b',
+      corroboratingOf: '445198e8da3e7f38', cardRepaymentPairs: 'b36d1c3253822d77', knownCardRepayments: 'e12d2fe90c45e884' },
+  },
+};
+const fixtures = {
+  plain: () => transferHeavyLedger(),
+  decided: () => transferHeavyLedger(15000, 3000, 7, { decided: true }),
+};
+
+for (const [name, pin] of Object.entries(PINS)) {
+  test(`${name}: a transfer-heavy 15k ledger reconciles exactly as before the speed-ups`, () => {
+    const ledger = fixtures[name]();
+    const normalized = tr.normalizeTransferLinks(ledger.transactions, ledger.accounts);
+    const result = tr.reconcileTransfers(normalized, ledger.accounts);
+    assert.deepEqual(statusCounts(result), pin.statuses);
+    assert.deepEqual(graphDigests(normalized, result), pin.digests);
+  });
+
+  test(`${name}: the graph built in slices is the graph built in one go`, () => {
+    const ledger = fixtures[name]();
+    const normalized = tr.normalizeTransferLinks(ledger.transactions, ledger.accounts);
+    // New array identities: neither build can answer from the memo.
+    const rows = JSON.parse(JSON.stringify(normalized));
+    const build = tr.beginTransferReconciliation(rows, ledger.accounts);
+    let result;
+    let slices = 0;
+    while (!(result = build.step(0))) slices += 1;
+    assert.ok(slices > 50, `a 15k build yields often (${slices} slices at the smallest step)`);
+    assert.deepEqual(graphDigests(normalized, result), pin.digests);
+    assert.equal(tr.reconcileTransfers(rows, ledger.accounts), result, 'a finished build is the memoised answer');
+  });
+}
+
+test('a sliced build keeps every slice short at 15k rows', () => {
+  const ledger = transferHeavyLedger(15000, 3000, 7, { decided: true });
   const normalized = tr.normalizeTransferLinks(ledger.transactions, ledger.accounts);
-  const result = tr.reconcileTransfers(normalized, ledger.accounts);
-  const statuses = {};
-  for (const assessment of result.byId.values()) statuses[assessment.status] = (statuses[assessment.status] ?? 0) + 1;
-  assert.deepEqual(statuses, { 'ownership-unknown': 2996, 'confirmed-own': 212, 'likely-own': 4 });
-  assert.equal(tr.reconciliationInternalIds(result).size, 212);
-  assert.equal(result.pendingIds.size, 4);
-  // Digests of the pre-change build's output for this exact fixture.
-  assert.equal(digest(normalized), 'fb486625099ba5e8');
-  assert.equal(digest([...result.byId].sort(([a], [b]) => (a < b ? -1 : 1))), '1d493aef516c3be1');
-  assert.equal(digest(result.groups), 'f6e2029f7f0c7930');
+  // Best of three builds (as the other host budgets): one stop-the-world GC
+  // inside a slice is the host's, not the build's.
+  const runs = [];
+  for (let run = 0; run < 3; run += 1) {
+    const build = tr.beginTransferReconciliation(JSON.parse(JSON.stringify(normalized)), ledger.accounts);
+    const slices = [];
+    for (;;) {
+      const started = performance.now();
+      const result = build.step(6);
+      slices.push(performance.now() - started);
+      if (result) break;
+    }
+    runs.push({ slices: slices.length, longestMs: Math.max(...slices), totalMs: slices.reduce((a, b) => a + b, 0) });
+  }
+  const best = runs.reduce((a, b) => (b.longestMs < a.longestMs ? b : a));
+  if (process.env.WAFRA_HOT_PATH_REPORT === '1') console.log(JSON.stringify(runs));
+  // Desktop V8; one step is at most 128 rows of one phase past the 6ms mark.
+  // The whole build is 60-140 ms here, so an unsliced phase would blow this.
+  assert.ok(best.longestMs < 40, `longest slice ${best.longestMs.toFixed(1)} ms (budget 40)`);
+});
+
+test('a sliced build never lends its validation memo to callers between slices', () => {
+  const ledger = transferHeavyLedger(3000, 600);
+  const rows = [...ledger.transactions];
+  const index = rows.findIndex((tx) => tx.transferEvidence);
+  rows[index] = { ...rows[index], transferEvidence: { ...rows[index].transferEvidence } };
+  const build = tr.beginTransferReconciliation(rows, ledger.accounts);
+  assert.equal(build.step(0), undefined);
+  // Between slices, the exported predicate reads the row as it is now.
+  const evidence = rows[index].transferEvidence;
+  const currency = evidence.currency;
+  evidence.currency = 'not a currency';
+  const title = rows[index].title;
+  rows[index].title = 'Sample shop';
+  assert.equal(tr.isTransferCandidate(rows[index]), false);
+  evidence.currency = currency;
+  rows[index].title = title;
+  assert.equal(tr.isTransferCandidate(rows[index]), true);
 });
 
 test('answers applied through the reducer path match a fresh rebuild of the graph', () => {

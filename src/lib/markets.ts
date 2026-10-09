@@ -258,7 +258,7 @@ const SA: MarketPack = {
   ],
 };
 
-export const MARKETS: MarketPack[] = [AE, SA];
+export const MARKETS: readonly MarketPack[] = [AE, SA];
 
 /**
  * The parser pack for every country without a launch-tested one.

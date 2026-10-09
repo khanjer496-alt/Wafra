@@ -528,7 +528,8 @@ function homeProbe() {
   } };
   const counts = { walks: 0, widgets: 0 };
   const ledger = h.deps['@/lib/ledger'];
-  h.deps['@/lib/ledger'] = { ...ledger, transferReconciliationForState: (...args) => { counts.walks += 1; return ledger.transferReconciliationForState(...args); } };
+  // Home builds its queue's graph in slices; each call is one graph request.
+  h.deps['@/lib/ledger'] = { ...ledger, transferReconciliationForStateInSlices: (...args) => { counts.walks += 1; return ledger.transferReconciliationForStateInSlices(...args); } };
   h.deps['@/lib/widget-sync'] = { ...h.deps['@/lib/widget-sync'],
     requestWidgetSnapshotSync: () => { counts.widgets += 1; return { cancel() {}, done: Promise.resolve('written') }; } };
   const store = h.deps['@/lib/store'].useStore();

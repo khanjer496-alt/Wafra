@@ -44,6 +44,7 @@ import {
   isUnassignedIncome,
   liveAccountIds,
   transferReconciliationForState,
+  transferReconciliationForStateInSlices,
   UNASSIGNED_INCOME_ACCOUNT_ID,
   UNASSIGNED_TRANSACTION_ACCOUNT_ID,
 } from '@/lib/ledger';
@@ -160,7 +161,12 @@ let separateTransferCache: {
 } | null = null;
 
 function computeSeparateTransferIds(state: TransferSeparationState): TransferSeparation {
-  const reconciliation = transferReconciliationForState(state);
+  return separationFor(state, transferReconciliationForState(state));
+}
+
+function separationFor(
+  state: TransferSeparationState, reconciliation: ReturnType<typeof transferReconciliationForState>,
+): TransferSeparation {
   if (!reconciliation) return NO_SEPARATION;
   const { transactions, accounts } = state;
   if (separateTransferCache?.transactions === transactions && separateTransferCache.accounts === accounts &&
@@ -190,19 +196,21 @@ function useSeparateTransferIds(state: TransferSeparationState): TransferSeparat
     // that ends the run (complete, paused or failed) triggers the recompute.
     if (importing) return;
     let cancelled = false;
+    let graph: ReturnType<typeof transferReconciliationForStateInSlices> | null = null;
     const recompute = () => {
-      if (!cancelled) {
-        setSeparation(computeSeparateTransferIds({
-          transactions, accounts, transferInternalIds, transferNormalizationVersion, historyImport,
-        }));
-      }
+      if (cancelled) return;
+      const input = { transactions, accounts, transferInternalIds, transferNormalizationVersion, historyImport };
+      // A graph not yet cached for this receipt is built in short slices.
+      graph = transferReconciliationForStateInSlices(input, (reconciliation) => {
+        if (!cancelled) setSeparation(separationFor(input, reconciliation));
+      });
     };
     // The first one waits out the push animation's first frames; a later
     // ledger change (an entry edited here) updates sections and day totals
     // on the next turn, as before.
     const task = scheduled.current ? runSoon(recompute) : runAfterFirstFrames(recompute);
     scheduled.current = true;
-    return () => { cancelled = true; task.cancel(); };
+    return () => { cancelled = true; task.cancel(); graph?.cancel(); };
   }, [transactions, accounts, transferInternalIds, transferNormalizationVersion, historyImport, importing]);
   return separation;
 }

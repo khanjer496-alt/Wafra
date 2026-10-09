@@ -2,7 +2,9 @@ import type { Account, AppState, Transaction } from '@/lib/types';
 import type { TransferReconciliationResult } from '@/lib/transfer-reconciliation-types';
 import { bankIdentityForName } from '@/lib/markets';
 import { historyImportIncomplete } from '@/lib/history-import';
+import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
 import {
+  beginTransferReconciliation,
   isTransferEvidence,
   isTransferCandidate,
   isUnassignedTransferAccount,
@@ -317,6 +319,138 @@ export function transferReconciliationForState(
   const result = reconcileTransfers(state.transactions, state.accounts);
   receiptReconciliationCache = { receipt, accounts: state.accounts, result };
   return result;
+}
+
+// Six-millisecond slices and a short yield, as the recurrence scan uses: most
+// of a 120 Hz frame stays free for input and drawing between slices.
+const TRANSFER_GRAPH_SLICE_MS = 6;
+const TRANSFER_GRAPH_YIELD_MS = 8;
+
+interface TransferGraphWaiter {
+  done: (result: TransferReconciliationResult) => void;
+  failed?: (error: unknown) => void;
+}
+
+interface TransferGraphFlight {
+  transactions: Transaction[];
+  accounts: Account[];
+  receipt: unknown;
+  final: boolean;
+  build: ReturnType<typeof beginTransferReconciliation>;
+  waiters: Set<TransferGraphWaiter>;
+  /** No slice is scheduled: nobody was waiting at the last one. */
+  parked: boolean;
+}
+
+let transferGraphFlight: TransferGraphFlight | null = null;
+const NOTHING_TO_CANCEL = { cancel() {} };
+
+/** The same graph question: a final receipt (and accounts) is the revision key, as for the receipt cache. */
+const sameTransferGraph = (flight: TransferGraphFlight, transactions: Transaction[], accounts: Account[],
+  receipt: unknown, final: boolean): boolean =>
+  flight.accounts === accounts && flight.final === final &&
+  (final ? flight.receipt === receipt : flight.transactions === transactions && flight.receipt === receipt);
+
+/**
+ * `transferReconciliationForState`, built in short slices for a screen that
+ * can wait a few frames (Home's transfer queue, Transactions' separation).
+ *
+ * Same answer and same cache: a stored receipt's result is read at once, and a
+ * finished build fills the receipt cache exactly as the synchronous call
+ * would. A small ledger finishes inside its first slice, synchronously. A
+ * larger one continues after each yield, which also waits out the foreground
+ * lease. `done(null)` means a provisional history receipt, as the synchronous
+ * call returns.
+ *
+ * Callers asking the same question share one build. With a final receipt the
+ * question is the receipt (as for the receipt cache), so an edit that leaves
+ * the receipt alone joins the running build instead of restarting it. A build
+ * nobody waits for stops scheduling slices and keeps its progress until a
+ * different question replaces it. A build that throws is dropped, reports to
+ * the console and to each caller's `failed`, and the next request starts over.
+ */
+export function transferReconciliationForStateInSlices(
+  state: Parameters<typeof transferReconciliationForState>[0],
+  done: (result: TransferReconciliationResult | null) => void,
+  failed?: (error: unknown) => void,
+): { cancel(): void } {
+  const receipt = state.transferInternalIds;
+  const final = Array.isArray(receipt) && state.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION;
+  if (!final && Array.isArray(receipt) && historyImportIncomplete(state.historyImport)) {
+    done(null);
+    return NOTHING_TO_CANCEL;
+  }
+  const cachedFor = (key: unknown, accounts: Account[]): TransferReconciliationResult | undefined => {
+    const entry = receiptReconciliationCache;
+    return entry !== null && entry.receipt === key && entry.accounts === accounts ? entry.result : undefined;
+  };
+  const cached = final ? cachedFor(receipt, state.accounts) : undefined;
+  if (cached) {
+    done(cached);
+    return NOTHING_TO_CANCEL;
+  }
+  const waiter: TransferGraphWaiter = { done, failed };
+  const running = transferGraphFlight;
+  let flight: TransferGraphFlight;
+  if (running && sameTransferGraph(running, state.transactions, state.accounts, receipt, final)) {
+    flight = running;
+    flight.waiters.add(waiter);
+    if (!flight.parked) return { cancel() { flight.waiters.delete(waiter); } };
+    flight.parked = false;
+  } else {
+    flight = {
+      transactions: state.transactions, accounts: state.accounts, receipt, final,
+      build: beginTransferReconciliation(state.transactions, state.accounts),
+      waiters: new Set([waiter]), parked: false,
+    };
+    transferGraphFlight = flight;
+  }
+  const settle = (result: TransferReconciliationResult): void => {
+    const current = transferGraphFlight === flight;
+    if (current) transferGraphFlight = null;
+    // Only the build for the current question may fill the cache; one for an
+    // older ledger finishing late answers its own callers and nothing else.
+    if (current && flight.final) {
+      receiptReconciliationCache = { receipt: flight.receipt as readonly string[], accounts: flight.accounts, result };
+    }
+    const waiting = [...flight.waiters];
+    flight.waiters.clear();
+    for (const entry of waiting) entry.done(result);
+  };
+  const slice = (): void => {
+    if (flight.waiters.size === 0) {
+      flight.parked = true;
+      return;
+    }
+    // A synchronous caller may have filled the receipt cache meanwhile.
+    const filled = flight.final ? cachedFor(flight.receipt, flight.accounts) : undefined;
+    if (filled) {
+      settle(filled);
+      return;
+    }
+    let result: TransferReconciliationResult | undefined;
+    try {
+      result = flight.build.step(TRANSFER_GRAPH_SLICE_MS);
+    } catch (error) {
+      if (transferGraphFlight === flight) transferGraphFlight = null;
+      const waiting = [...flight.waiters];
+      flight.waiters.clear();
+      try {
+        console.error('[WafraTransferGraph] sliced build failed', error instanceof Error ? error.name : typeof error);
+      } catch {
+        // Reporting must not turn one failed build into another failure.
+      }
+      for (const entry of waiting) entry.failed?.(error);
+      return;
+    }
+    if (!result) {
+      void waitForForegroundHistoryIdle(TRANSFER_GRAPH_YIELD_MS).then(slice);
+      return;
+    }
+    settle(result);
+  };
+  slice();
+  return { cancel() { flight.waiters.delete(waiter); } };
 }
 
 /**

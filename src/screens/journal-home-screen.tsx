@@ -51,7 +51,7 @@ import { daysPhrase, leavingSoon, type Outgoing } from '@/lib/leaving-soon';
 import { markLaunchPhase } from '@/lib/launch-performance';
 import { ledgerCurrencyCode, marketCurrencyCode } from '@/lib/markets';
 import { formatMinorUnits, formatMoneyText, ledgerMoneySpec } from '@/lib/ledger-money';
-import { internalTransferIdsForState, isSpending, liveAccountIds, transferReconciliationForState } from '@/lib/ledger';
+import { internalTransferIdsForState, isSpending, liveAccountIds, transferReconciliationForStateInSlices } from '@/lib/ledger';
 import { hasRecordsBefore, liveCaptureTimes, pendingTransferSummary, summarizeHomeToday, type PendingTransferSummary } from '@/lib/home-today';
 import { detectCapturePause } from '@/lib/capture-pause';
 import { loadCapturePauseSnooze, saveCapturePauseSnooze } from '@/lib/capture-pause-state';
@@ -713,6 +713,7 @@ export default function JournalHomeScreen() {
         && current.questions === next.questions ? current : next));
     };
     let activityTask: ReturnType<typeof runAfterFirstFrames> | null = null;
+    let graph: ReturnType<typeof transferReconciliationForStateInSlices> | null = null;
     const task = runAfterFirstFrames(() => {
       if (cancelled) return;
       if (!state.transactions.some(isTransferCandidate)) {
@@ -721,30 +722,34 @@ export default function JournalHomeScreen() {
       }
       // The reconciliation cached per stored transfer receipt, shared with
       // Transactions and Transfers, rather than a second full graph build.
-      const reconciliation = transferReconciliationForState(state);
-      if (!reconciliation) {
-        publish({ count: 0, incomingFils: 0, outgoingFils: 0, questions: 0 });
-        return;
-      }
-      // The graph and the activity walk are each a pass over the whole ledger.
-      // On a 15k-row phone the two together were the one long task after a
-      // cold launch; two frames between them let input and drawing through.
-      // Same inputs, same answer: the graph is cached for this receipt.
-      activityTask = runAfterFirstFrames(() => {
+      // Built in short slices: on a 15k-row phone the whole graph in one go
+      // was the one long task after a cold launch. A ledger change cancels
+      // this effect and with it the build.
+      graph = transferReconciliationForStateInSlices(state, (reconciliation) => {
         if (cancelled) return;
-        const activity = getTransferActivity(state.transactions, state.accounts, reconciliation);
-        const queue = transferQuestionQueue(activity);
-        // With no question to ask but entries still queued (duplicate observations,
-        // archived accounts, likely card repayments), Home names those; Transfers
-        // lists them as groups to answer.
-        const ids = queue.length > 0 ? new Set(queue.map(item => item.transaction.id))
-          : unaskedPendingIds(activity, reconciliation.pendingIds);
-        publish({ ...pendingTransferSummary(state.transactions, ids), questions: queue.length });
-      }, { idle: false, delayMs: 0 });
+        if (!reconciliation) {
+          publish({ count: 0, incomingFils: 0, outgoingFils: 0, questions: 0 });
+          return;
+        }
+        // The activity walk is a second pass over the whole ledger; two frames
+        // between it and the graph let input and drawing through.
+        activityTask = runAfterFirstFrames(() => {
+          if (cancelled) return;
+          const activity = getTransferActivity(state.transactions, state.accounts, reconciliation);
+          const queue = transferQuestionQueue(activity);
+          // With no question to ask but entries still queued (duplicate observations,
+          // archived accounts, likely card repayments), Home names those; Transfers
+          // lists them as groups to answer.
+          const ids = queue.length > 0 ? new Set(queue.map(item => item.transaction.id))
+            : unaskedPendingIds(activity, reconciliation.pendingIds);
+          publish({ ...pendingTransferSummary(state.transactions, ids), questions: queue.length });
+        }, { idle: false, delayMs: 0 });
+      });
     });
     return () => {
       cancelled = true;
       task.cancel();
+      graph?.cancel();
       activityTask?.cancel();
     };
     // Transfer receipts change the reconciliation even when the arrays do not.

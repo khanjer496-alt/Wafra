@@ -160,6 +160,9 @@ export async function buildDiagnosticExport(state: AppState, build: DiagnosticBu
       storedParserVersion: state.parserVersion ?? null,
       historyRepairVersion: PARSER_BACKFILL_VERSION,
       storedHistoryRepairVersion: state.parserVersion ?? null,
+      recentRereadVersion: typeof state.recentRereadParserVersion === 'number' &&
+        Number.isSafeInteger(state.recentRereadParserVersion) && state.recentRereadParserVersion >= 0
+        ? state.recentRereadParserVersion : null,
     },
     delivery: { mode: 'manual', uploadedByWafra: false, destinationChosenByUser: true },
     notice: 'Sensitive financial data, not a restore backup. Includes all recorded periods and hidden accounts. No automatic corrections are made by this report.',

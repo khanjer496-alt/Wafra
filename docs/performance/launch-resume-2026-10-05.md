@@ -93,7 +93,8 @@ and every canonical capture (`applyMaterializedImportBatch`).
 |---|---|---|
 | One graph build validated each row's transfer evidence and decision about six to ten times (regex and currency checks), and checked candidacy twice per row | Validation verdicts are memoised for one synchronous pass only (`withPassCache`), keyed by the validated object and dropped in `finally`; exported validators stay uncached outside a pass | `transfer-reconciliation.ts` |
 | `bankIdentityForName` tested every bank pattern and ran a Unicode-property regex on each call, about 5,700 calls per graph build for five distinct names | Bounded memo (512 names) over the fixed `MARKETS` packs | `markets.ts` |
-| Home's transfer queue ran the graph and the activity walk over the whole ledger in one task after a cold launch | Two deferred slices with frames between them (graph, then activity); the graph is the same cached one, so the queue is unchanged | `journal-home-screen.tsx` |
+| Home's transfer queue ran the graph and the activity walk over the whole ledger in one task after a cold launch | The graph is built in ~6ms slices (`transferReconciliationForStateInSlices`, yielding to the foreground lease between slices), then the activity walk runs in its own slice two frames later. Transactions' deferred recompute uses the same sliced build; its first mount still reads the graph synchronously, which is a cache hit once Home's build has filled the receipt cache and a full build otherwise. Same cached reconciliation, so the queue is unchanged | `journal-home-screen.tsx`, `transactions.tsx`, `ledger.ts` |
+| The graph build could only run to completion | Its phases are written once as resumable steps (`contextSteps`, `reconcileSteps`, ...), drained in one call by every synchronous caller (reducer, import, Transfers' render) and stepped by `beginTransferReconciliation`; callers asking the same question share one build (for a final receipt the question is the receipt, so an edit that keeps it joins the running build); a build nobody waits for pauses and keeps its progress until a different question replaces it; only the build for the current question fills the caches; a build that throws is dropped, reported, answers its callers' `failed`, and the next request starts over | `transfer-reconciliation.ts`, `ledger.ts` |
 | Every mounted entry sheet (11 hosts) and Transfers built its own id index of the whole ledger on mount and on every ledger change, open or not | One index per ledger snapshot (`rowsByIdFor`, WeakMap keyed by the array) | `rows-by-id.ts`, `entry-detail-sheet.tsx`, `transfers.tsx` |
 
 Measured on the transfer-heavy 15k ledger (Hermes 0.12 CLI on a desktop core,
@@ -107,6 +108,15 @@ best of three; a phone is slower):
 | Capture apply, incoming transfer (canonical) | 617ms | 418ms |
 | Transfers activity incl. graph | 596ms | 386ms |
 
+Sliced build on the same fixture with stored decisions (Hermes CLI): longest
+slice 7–9ms over 44–47 slices, 262–284ms of work in total against 274–294ms
+for the one-shot build. The one-shot path the reducer and imports use costs
+about 5–7% more than the plain functions did (generator stepping), still well
+under the pre-speed-up times. `transfer-graph-hot-path.test.cjs` pins every
+part of the result (assessments, groups, internal, pending and corroborating
+ids, card repayments) to the pre-speed-up build's digests, for the plain
+fixture and one with stored decisions, card repayments and doubled postings.
+
 The graph output is byte-identical to the pre-change build on that fixture
 (`transfer-graph-hot-path.test.cjs` pins its digests). Not changed: what is
 reconciled, when Home's queue runs, the canonical capture path and the
@@ -119,5 +129,6 @@ awaits and may come from the first launch after an update (the recent
 re-read), so compare a second launch's diagnostic export
 (Settings → Data and help → Send test diagnostics, whose
 `performance.runtimeJs` carries `lagOver100Ms`, `recentStallsMs` and the
-per-operation timings) and record a Perfetto trace of
+per-operation timings, and whose `parser.recentRereadVersion` says whether
+the 14-day re-read after a parser release has completed) and record a Perfetto trace of
 a capture on the 15k ledger.
