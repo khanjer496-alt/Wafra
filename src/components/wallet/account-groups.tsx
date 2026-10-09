@@ -154,7 +154,7 @@ const styles = StyleSheet.create({
   item: {},
   rowWrapper: { flexDirection: 'row', alignItems: 'center' },
   // Manage (a pencil): a 44pt target at the row's end.
-  manage: { minWidth: 40, minHeight: 44, alignItems: 'center', justifyContent: 'center', marginEnd: -8 },
+  manage: { minWidth: 40, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   // One short row: 36pt logo, two lines of text, the figure at the end.
   row: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 60, paddingVertical: 10 },
   body: { flex: 1, minWidth: 0, gap: 2 },
