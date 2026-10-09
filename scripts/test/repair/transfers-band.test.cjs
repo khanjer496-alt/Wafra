@@ -17,7 +17,7 @@ function harness(options) {
   // The route row draws its travelling coin from transfer-coins; the screen gives the cues.
   h.local('@/components/transfer-coins/coin-cues', 'src/components/transfer-coins/coin-cues.ts');
   h.local('@/components/transfer-coins/route-coin');
-  for (const name of ['transfer-answer-choices', 'transfer-route-row', 'transfer-question-card']) h.local(`@/components/transfers/${name}`);
+  for (const name of ['transfer-answer-choices', 'transfer-route-row', 'transfer-person-row', 'transfer-question-card']) h.local(`@/components/transfers/${name}`);
   h.answers = [];
   h.deps['@/hooks/use-transfer-answer'] = { useTransferAnswer: () => ({ busy: false,
     answer: async input => { h.answers.push(input); return 'saved'; } }) };

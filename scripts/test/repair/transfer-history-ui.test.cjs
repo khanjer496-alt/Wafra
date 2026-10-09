@@ -77,6 +77,7 @@ function renderTransfers({ language = 'en', transactions, accounts, adjust = () 
   const src = file => load(path.join(root, file), deps);
   deps['@/lib/transfer-pairs'] = src('src/lib/transfer-pairs.ts');
   deps['@/lib/transfer-activity'] = src('src/lib/transfer-activity.ts');
+  deps['@/lib/transfer-people'] = src('src/lib/transfer-people.ts');
   deps['@/lib/transfer-activity-copy'] = load(path.join(root, 'src/lib/transfer-activity-copy.ts'),
     { '@/lib/i18n': { getLanguage: () => language } });
   deps['@/lib/transfer-answer'] = src('src/lib/transfer-answer.ts');
@@ -85,7 +86,7 @@ function renderTransfers({ language = 'en', transactions, accounts, adjust = () 
   deps['@/lib/transfer-batch'] = src('src/lib/transfer-batch.ts');
   deps['@/lib/transfer-review-presentation'] = src('src/lib/transfer-review-presentation.ts');
   deps['@/hooks/use-transfer-batch'] = src('src/hooks/use-transfer-batch.ts');
-  for (const name of ['transfer-select-mark', 'transfer-answer-choices', 'transfer-route-row', 'transfer-question-card',
+  for (const name of ['transfer-select-mark', 'transfer-answer-choices', 'transfer-route-row', 'transfer-person-row', 'transfer-question-card',
     'transfer-group-row', 'transfer-answer-sheet']) {
     deps[`@/components/transfers/${name}`] = src(`src/components/transfers/${name}.tsx`);
   }
@@ -96,7 +97,9 @@ function renderTransfers({ language = 'en', transactions, accounts, adjust = () 
   return { events, answers, screen, list, records, items, band, words: deps['@/lib/transfer-activity-copy'].transferActivityCopy(language) };
 }
 
-for (const language of ['en', 'ar']) test(`${language}: generic unknowns are neutral; only reconciler review items are queued as questions`, () => {
+// Owner decision (Transfers grouped by person): every transfer kept out of the totals is asked about.
+// A generic unknown with no name is "Needs an answer" like a queued row and is asked after the queue.
+for (const language of ['en', 'ar']) test(`${language}: a generic unknown needs an answer too, asked after the reconciler's queue`, () => {
   const accounts = [{ id: 'bank', name: 'Bank', kind: 'bank', openingFils: 0 },
     { id: 'old', name: 'Old', kind: 'bank', openingFils: 0, archived: true }];
   const transactions = [
@@ -132,20 +135,20 @@ for (const language of ['en', 'ar']) test(`${language}: generic unknowns are neu
   // The tag pill is the View whose only child is its label.
   const tagBox = (tree, label) => walk(tree).find(node => node.type === 'View'
     && node.props.children?.type === 'Text' && node.props.children.props.children === label);
-  const tagLabels = [h.words.tags.unconfirmed, h.words.tags.needsAnswer, h.words.tags.external, h.words.tags.own];
+  const tagLabels = [h.words.tags.needsAnswer, h.words.tags.external, h.words.tags.own];
   const tagOf = tree => tagLabels.find(label => tagBox(tree, label)?.props.style);
-  assert.equal(tagOf(by('generic')), h.words.tags.unconfirmed);
-  const generic = walk(by('generic')).find(node => node.type === 'Text' && node.props.children === h.words.tags.unconfirmed);
-  assert.equal(generic.props.style.color, h.band.textSecondary);
-  assert.equal(tagOf(by('queued')), h.words.tags.needsAnswer);
-  assert.equal(tagBox(by('queued'), h.words.tags.needsAnswer).props.style[1].backgroundColor, h.band.statusNear);
+  assert.equal(h.words.tags.unconfirmed, undefined, 'one term for an unanswered transfer: "Not answered yet" is gone');
+  for (const id of ['generic', 'queued']) {
+    assert.equal(tagOf(by(id)), h.words.tags.needsAnswer, `${id}: Needs an answer`);
+    assert.equal(tagBox(by(id), h.words.tags.needsAnswer).props.style[1].backgroundColor, h.band.statusNear);
+  }
   assert.equal(tagOf(by('sent')), h.words.tags.external);
-  assert.doesNotMatch(text(by('generic')), new RegExp(h.words.tags.needsAnswer));
   assert.equal(walk(by('generic')).filter(node => node.type === 'Pressable').length, 1, 'a row carries no second per-row Review button');
-  // The question card lists exactly the queued rows, not the generic unknown.
   const card = walk(h.list.props.ListHeaderComponent).find(node => node.props?.testID === 'transfer-question-card');
   assert.ok(card, 'a queued transfer shows the question card');
-  // The title counts everything waiting: the one question and the duplicate observation it cannot ask.
-  assert.ok(text(card).includes(h.words.card.title(2)), 'one queued row plus one it cannot ask');
-  assert.ok(!text(card).includes(h.words.card.step(1, 1)), 'no step while the card cannot walk them all');
+  // The reconciler's queue first: the likely own-account match is the first question.
+  assert.ok(text(card).includes(h.words.card.whereOut));
+  // The title counts everything waiting: the queued row, the generic unknown and the duplicate observation it cannot ask.
+  assert.ok(text(card).includes(h.words.card.title(3)), 'two questions plus one it cannot ask');
+  assert.ok(!text(card).includes(h.words.card.step(1, 2)), 'no step while the card cannot walk them all');
 });

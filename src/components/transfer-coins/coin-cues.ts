@@ -39,7 +39,7 @@ export function legTags(items: readonly Pick<TransferListItem, 'key' | 'transact
 /**
  * Routes that have just been answered: tagged own or someone else now, and at
  * least one of their legs was listed before as an open question (needs an
- * answer, or not answered yet). The coin then travels the route the person
+ * answer). The coin then travels the route the person
  * just explained, to the account or person the "?" became. A row first seen
  * already answered (a period change, a first paint) is not an arrival; neither
  * is Undo, which goes back to a question, nor switching one answer for the other.
@@ -50,7 +50,7 @@ export function newlyAnsweredRoutes(
 ): string[] {
   return items.filter(item => (item.tag === 'own' || item.tag === 'external') && routeLegIds(item).some(id => {
     const before = previous.get(id);
-    return before === 'needs-answer' || before === 'unconfirmed';
+    return before === 'needs-answer';
   })).map(item => item.key);
 }
 

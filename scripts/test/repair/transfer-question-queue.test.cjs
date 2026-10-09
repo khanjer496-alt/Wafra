@@ -53,9 +53,12 @@ test('duplicate observations, archived accounts and likely card repayments are q
     ['card', 'dup', 'gone']);
 });
 
-test('Home counts the card\'s queue and always opens the one Transfers page', () => {
-  assert.match(homeToday, /const queue = transferQuestionQueue\(activity\);/);
-  assert.match(homeToday, /queue\.length > 0 \? new Set\(queue\.map\(item => item\.transaction\.id\)\)\s*: unaskedPendingIds\(activity, reconciliation\.pendingIds\)/);
+test('Home counts every transfer waiting, as the card does, and always opens the one Transfers page', () => {
+  // The same count the Transfers card gives (transferWaitingSummary): the reconciler's queue and every other
+  // transfer kept out of the totals until answered, a pair once.
+  assert.match(homeToday, /const waiting = transferWaitingSummary\(activity\)\.transfers;/);
+  assert.match(homeToday, /waiting > 0 \? new Set\(activity\.filter\(item => !item\.confirmed\)\.map\(item => item\.transaction\.id\)\)\s*: unaskedPendingIds\(activity, reconciliation\.pendingIds\)/);
+  assert.match(homeToday, /questions: waiting \}/);
   // What the card cannot ask waits on Transfers as a group row, so there is no second page to open.
   assert.match(homeToday, /onPress=\{\(\) => router\.push\('\/transfers'\)\} \/>/);
   assert.doesNotMatch(homeToday, /review-transfers/);
@@ -69,7 +72,7 @@ function transfersHarness(rows, rec) {
   h.local('@/lib/transfer-pairs', 'src/lib/transfer-pairs.ts');
   h.local('@/components/transfer-coins/coin-cues', 'src/components/transfer-coins/coin-cues.ts');
   h.local('@/components/transfer-coins/route-coin');
-  for (const name of ['transfer-answer-choices', 'transfer-route-row', 'transfer-question-card']) h.local(`@/components/transfers/${name}`);
+  for (const name of ['transfer-answer-choices', 'transfer-route-row', 'transfer-person-row', 'transfer-question-card']) h.local(`@/components/transfers/${name}`);
   h.deps['@/hooks/use-transfer-answer'] = { useTransferAnswer: () => ({ busy: false, answer: async () => 'saved' }) };
   h.deps['@/lib/transfer-reconciliation'] = { ...h.deps['@/lib/transfer-reconciliation'], reconcileTransfers: () => rec };
   h.deps['@/lib/ledger'] = { ...h.deps['@/lib/ledger'], transferReconciliationForState: () => rec };
@@ -135,7 +138,7 @@ function componentHarness(language = 'en') {
   h.local('@/lib/transfer-activity-copy', 'src/lib/transfer-activity-copy.ts');
   h.local('@/components/transfer-coins/coin-cues', 'src/components/transfer-coins/coin-cues.ts');
   h.local('@/components/transfer-coins/route-coin');
-  for (const name of ['transfer-answer-choices', 'transfer-route-row', 'transfer-question-card']) h.local(`@/components/transfers/${name}`);
+  for (const name of ['transfer-answer-choices', 'transfer-route-row', 'transfer-person-row', 'transfer-question-card']) h.local(`@/components/transfers/${name}`);
   return h;
 }
 

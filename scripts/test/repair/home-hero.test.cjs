@@ -222,7 +222,10 @@ test('Home copy has the same keys in English and Arabic, and no English in Arabi
   for (const value of strings) assert.doesNotMatch(value, /[A-Za-z]/, value);
   assert.equal(en.spokenTrend('up', 12, 'September', true), 'up 12% versus the same days of September');
   assert.equal(en.spokenTrend('down', -8, 'September', false), 'down 8% versus September');
-  assert.equal(en.transfersToAnswer(1), '1 transfer to answer');
+  // One term for unanswered transfers, as Transfers and Transactions say it.
+  assert.equal(en.transfersToAnswer(1), '1 transfer needs an answer');
+  assert.equal(en.transfersToAnswer(2656), '2656 transfers need an answer');
+  assert.equal(ar.transfersToAnswer(12), '12 تحويلًا بانتظار إجابتك');
   assert.equal(copy.homeCopy('ar'), ar);
   assert.equal(copy.homeCopy('fr'), en);
 });

@@ -77,7 +77,8 @@ import { defaultHomeWidgetPreferences } from '@/lib/home-widget-preferences';
 import { hasRecapActivity, recapCandidates, type RecapDescriptor } from '@/lib/recap';
 import { loadViewedRecaps } from '@/lib/recap-view-state';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
-import { getTransferActivity, transferQuestionQueue, unaskedPendingIds } from '@/lib/transfer-activity';
+import { getTransferActivity, unaskedPendingIds } from '@/lib/transfer-activity';
+import { transferWaitingSummary } from '@/lib/transfer-people';
 import { isTransferCandidate } from '@/lib/transfer-reconciliation';
 import { HomeHero, type HeroMonth } from '@/components/home/home-hero';
 import { HomeRecent } from '@/components/home/home-recent';
@@ -111,7 +112,11 @@ const copy = {
     dueTotal: (count: number, total: string) => `${count === 1 ? 'دفعة واحدة' : count === 2 ? 'دفعتان' : `${count} دفعات`}، ${total}` },
 } as const;
 
-/** The transfer notice's queue, with how many of its entries the Transfers card can ask about. */
+/**
+ * The transfer notice's count, with how many transfers wait for an answer
+ * (`questions`, transferWaitingSummary: the Transfers card's and the
+ * Transactions summary's number).
+ */
 type HomeTransferQueue = PendingTransferSummary & { questions: number };
 
 const sameHomeWidgets = (a: HomeWidgetPreferences, b: HomeWidgetPreferences): boolean =>
@@ -743,9 +748,9 @@ export default function JournalHomeScreen() {
   }, [insightDisabled, state.transactions, state.accounts, state.budgets, state.notSubscriptions,
     state.transferInternalIds, state.transferNormalizationVersion, state.historyImport?.status,
     state.marketId, state.ledgerMoney, state.customCategories, language, period, projectionDay]));
-  // Home names the transfer queue only once it is known: the same questions the
-  // Transfers card asks (transferQuestionQueue), so "N to confirm" and the
-  // card's "N need an answer" agree. The graph is built after interactions,
+  // Home names the transfers waiting only once they are known: the same count
+  // the Transfers card gives (transferWaitingSummary), so Home's "N transfers
+  // need an answer" and the card's agree. The graph is built after interactions,
   // never during hydration or a running history import, and not at all when no
   // row could be a transfer.
   useEffect(() => {
@@ -806,13 +811,16 @@ export default function JournalHomeScreen() {
         activityTask = runAfterFirstFrames(() => {
           if (cancelled) return;
           const activity = getTransferActivity(state.transactions, state.accounts, reconciliation);
-          const queue = transferQuestionQueue(activity);
-          // With no question to ask but entries still queued (duplicate observations,
+          // Every transfer kept out of the totals until the person answers, a pair once: the
+          // number the Transfers card and the Transactions summary give.
+          const waiting = transferWaitingSummary(activity).transfers;
+          // With nothing waiting but entries still queued (duplicate observations,
           // archived accounts, likely card repayments), Home names those; Transfers
           // lists them as groups to answer.
-          const ids = queue.length > 0 ? new Set(queue.map(item => item.transaction.id))
+          const ids = waiting > 0 ? new Set(activity.filter(item => !item.confirmed).map(item => item.transaction.id))
             : unaskedPendingIds(activity, reconciliation.pendingIds);
-          publish({ ...pendingTransferSummary(state.transactions, ids), questions: queue.length });
+          const summary = pendingTransferSummary(state.transactions, ids);
+          publish({ ...summary, count: waiting > 0 ? waiting : summary.count, questions: waiting });
         }, { idle: false, delayMs: 0 });
       });
     });

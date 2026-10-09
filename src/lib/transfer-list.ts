@@ -2,7 +2,8 @@ import type { TransferActivityRecord } from '@/lib/transfer-activity';
 import type { TransferPair } from '@/lib/transfer-pairs';
 import type { Transaction } from '@/lib/types';
 
-export type TransferTag = 'own' | 'external' | 'needs-answer' | 'unconfirmed';
+/** Every transfer whose ownership is not settled reads "Needs an answer": one term, whether or not the reconciler queued it. */
+export type TransferTag = 'own' | 'external' | 'needs-answer';
 export type RouteEnd = { kind: 'account'; accountId: string } | { kind: 'party'; name: string } | { kind: 'unknown' };
 export interface TransferListItem {
   key: string; transactionId: string; date: string; ts: number;
@@ -18,7 +19,7 @@ const other = (tx: Transaction): RouteEnd => {
 };
 const tagOf = (record: TransferActivityRecord): TransferTag => record.confirmed
   ? record.ownership === 'own' ? 'own' : 'external'
-  : record.needsReview ? 'needs-answer' : 'unconfirmed';
+  : 'needs-answer';
 
 /** One row per transfer: a linked pair collapses to its outgoing leg's route. */
 export function transferListItems(

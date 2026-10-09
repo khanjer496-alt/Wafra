@@ -121,6 +121,8 @@ function createWorkflowHarness(options={}) {
    d['@/lib/markets']={...d['@/lib/markets'],bankBrandForName:d['@/lib/markets']?.bankBrandForName??(()=>undefined)};
    d['@/lib/store']={...d['@/lib/store'],useStoreActions:d['@/lib/store'].useStoreActions??(()=>d['@/lib/store'].useStore())};
    if(!d['@/lib/transfer-batch'])h.local('@/lib/transfer-batch','src/lib/transfer-batch.ts');
+   if(!d['@/lib/transfer-people'])h.local('@/lib/transfer-people','src/lib/transfer-people.ts');
+   if(!d['@/components/transfers/transfer-person-row'])h.local('@/components/transfers/transfer-person-row');
    if(!d['@/lib/transfer-review-presentation'])h.local('@/lib/transfer-review-presentation','src/lib/transfer-review-presentation.ts');
    if(!d['@/hooks/use-transfer-batch'])h.local('@/hooks/use-transfer-batch','src/hooks/use-transfer-batch.ts');
    h.local('@/components/transfers/transfer-group-row');h.local('@/components/transfers/transfer-answer-sheet');

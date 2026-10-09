@@ -135,7 +135,10 @@ type TransferSeparationState = Parameters<typeof transferReconciliationForState>
 
 interface TransferSeparation {
   separateTransferIds: ReadonlySet<string>;
-  /** Separated records the reconciler queued for an ownership decision. */
+  /**
+   * Transfers waiting for an answer (ownership not settled), whether or not the
+   * reconciler queued them: the same rule as Home's Needs you and the Transfers card.
+   */
   reviewTransferIds: ReadonlySet<string>;
   /** Transfer legs still waiting for their other side (the Needs review chip). */
   pendingTransferIds: ReadonlySet<string>;
@@ -176,7 +179,7 @@ function separationFor(
   const records = getTransferActivity(transactions, accounts, reconciliation);
   const value: TransferSeparation = {
     separateTransferIds: new Set(records.map(item => item.transaction.id)),
-    reviewTransferIds: new Set(records.filter(item => item.needsReview).map(item => item.transaction.id)),
+    reviewTransferIds: new Set(records.filter(item => !item.confirmed).map(item => item.transaction.id)),
     pendingTransferIds: reconciliation.pendingIds,
     // Built here, from the same records and reconciliation as the separation set, so the
     // pairs can only name rows that are separated; remembered with it per ledger.
@@ -776,7 +779,7 @@ export default function TransactionsScreen() {
             </View>
               {separatedTransfers.count > 0 && <Pressable testID="transactions-separated-transfers"
                 accessibilityRole="button"
-                accessibilityLabel={[transferWords.strip.kept(separatedTransfers.count), stripDetail, transferWords.viewAll].filter(Boolean).join('. ')}
+                accessibilityLabel={[transferWords.strip.listed(separatedTransfers.count), stripDetail, transferWords.viewAll].filter(Boolean).join('. ')}
                 onPress={() => routerRef.current.push('/transfers')}
                 style={({ pressed }) => [styles.strip, largeText && styles.stripLarge, { backgroundColor: band.card, borderColor: band.rule, opacity: pressed ? 0.8 : 1 }]}>
                 <View style={[styles.stripIcon, { backgroundColor: band.glyphGround }]}>
@@ -784,7 +787,7 @@ export default function TransactionsScreen() {
                 </View>
                 <View style={[styles.stripText, largeText && styles.stripTextLarge]}>
                   <View style={styles.stripTitle}>
-                    <ThemedText type="smallBold">{transferWords.strip.kept(separatedTransfers.count)}</ThemedText>
+                    <ThemedText type="smallBold">{transferWords.strip.listed(separatedTransfers.count)}</ThemedText>
                     {separatedTransfers.reviewCount > 0 && <View style={[styles.stripDot, { backgroundColor: band.statusNear }]} />}
                   </View>
                   {stripDetail ? <ThemedText type="meta" themeColor="textSecondary">{stripDetail}</ThemedText> : null}
@@ -829,7 +832,7 @@ export default function TransactionsScreen() {
                 <Icon name={separatedTransfers.count > 0 ? 'repeat' : 'search'} size={24} color={theme.textSecondary} strokeWidth={1.7} />
               </View>
               <ThemedText type="small" themeColor="textSecondary">
-                {separatedTransfers.count > 0 ? transferWords.strip.kept(separatedTransfers.count) : tr('nothingMatches')}
+                {separatedTransfers.count > 0 ? transferWords.strip.listed(separatedTransfers.count) : tr('nothingMatches')}
               </ThemedText>
             </View>
           }

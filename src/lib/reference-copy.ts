@@ -135,7 +135,7 @@ export const homeSummaryCopy = {
     mayBeHigh: 'May be too high until capture resumes', ask: 'Ask', askHint: 'Opens Ask Wafra',
     // Worded like the Transfers question card it opens, so the queue has one name.
     transfersToConfirm: (n: number) => `${n} ${n === 1 ? 'transfer needs' : 'transfers need'} an answer`,
-    transfersNotCounted: 'Not counted in spending or income until you confirm.' },
+    transfersNotCounted: 'Not counted in spending or income until you answer.' },
   ar: { balance: 'الأرصدة المسجلة', net: 'الصافي بعد الإنفاق', notBalance: 'الدخل ناقص الإنفاق · ليس رصيد البنك',
     moneyIn: 'الدخل', moneyOut: 'المصروفات', netLabel: 'الصافي', totalSpent: 'إجمالي الإنفاق',
     lineSpent: 'المصروف', lineIn: 'الدخل', lineNet: 'الصافي', choosePeriod: 'اختر الفترة',
@@ -168,7 +168,7 @@ export const homeSummaryCopy = {
     mayBeHigh: 'قد يكون أعلى من الحقيقي حتى يُستأنف الالتقاط', ask: 'اسأل', askHint: 'يفتح اسأل وفرة',
     transfersToConfirm: (n: number) => n === 1 ? 'تحويل واحد بانتظار إجابتك' : n === 2 ? 'تحويلان بانتظار إجابتك'
       : n <= 10 ? `${n} تحويلات بانتظار إجابتك` : `${n} تحويلاً بانتظار إجابتك`,
-    transfersNotCounted: 'لا تُحتسب في الإنفاق أو الدخل حتى تؤكدها.' },
+    transfersNotCounted: 'لا تُحتسب في الإنفاق أو الدخل حتى تجيب.' },
 };
 
 /** Entry detail additions: statement kind and the category sheet state. */

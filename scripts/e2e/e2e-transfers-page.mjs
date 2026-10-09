@@ -54,11 +54,13 @@ const transactions = [
   tx('p-in', 'income', 5600, 240),
   tx('q-out', 'expense', 12300, 200),
   tx('q-in', 'income', 12300, 190),
-  // A flagged transfer nobody has answered and the reconciler does not queue.
+  // A flagged transfer nobody has answered and the reconciler does not queue. It names nobody, so it is
+  // asked about on its own, after the reconciler's queue (Transfers grouped by person).
   tx('unk-out', 'expense', NONE_FILS, 100, { isTransfer: true, transferEvidence: undefined }),
 ];
 const OPEN_ROWS = 8; // own pair (one row), ext-out, ext-in, p-out, p-in, q-out, q-in, unk-out
-const QUEUED = 2; // movements needing an answer: one question per pair
+// Questions on the card: one per queued pair (two), then the unnamed transfer the reconciler does not queue.
+const QUEUED = 3;
 const seed = (language, theme) => ({
   ledgerMoney: { schemaVersion: 2, currency: 'AED', exponent: 2 }, accounts, transactions,
   budgets: [], bills: [], cardDues: [], goals: [], merchantOverrides: {}, accountHints: {}, notSubscriptions: [],
@@ -157,7 +159,10 @@ try {
       await expect(toast).toBeVisible();
       const undo = page.getByRole('button', { name: words.answers.undo, exact: true });
       await expect(undo).toBeVisible();
-      await stepOf(page, 1, QUEUED / 2);
+      // The other leg of the answered movement is not counted yet, so it still needs an answer: it joins the
+      // questions after the queue, and the card moves on to the other queued movement.
+      await stepOf(page, 1, QUEUED);
+      await expect(page.getByTestId('transfer-question-card')).toContainText('56.00');
       const answered = (await stored(page)).filter(row => row.transferDecision);
       assert.equal(answered.length, 1, 'one decision saved');
       assert.equal(answered[0].transferDecision.ownership, 'external');

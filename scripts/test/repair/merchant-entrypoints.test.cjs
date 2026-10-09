@@ -106,8 +106,8 @@ test('an unresolved transfer is visibly excluded while it waits for review', () 
   });
   const meaning = byId(tree, 'pending-transfer-meaning');
   assert.ok(meaning);
-  assert.match(String(meaning.props.children), /Transfer needs review · not counted yet/);
-  assert.match(tree.props.accessibilityLabel, /Transfer needs review · not counted yet/);
+  assert.match(String(meaning.props.children), /Needs an answer · not counted yet/);
+  assert.match(tree.props.accessibilityLabel, /Needs an answer · not counted yet/);
 });
 test('merchant previews can disable their own merchant link without losing transaction details', () => {
   const h = rowFixture(); const tree = h.render({}, { merchantLinks: false });

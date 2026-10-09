@@ -14,6 +14,7 @@ function harness(language) {
   h.local('@/components/transfer-coins/coin-cues', 'src/components/transfer-coins/coin-cues.ts');
   h.local('@/components/transfer-coins/route-coin');
   h.local('@/components/transfers/transfer-route-row');
+  h.local('@/components/transfers/transfer-person-row');
   h.local('@/components/transfers/transfer-question-card');
   return h;
 }
@@ -173,6 +174,11 @@ test('question card stacks its question and amount at large text', () => {
   const h = createWorkflowHarness({ language: 'en', largeText: true });
   h.local('@/lib/transfer-activity-copy', 'src/lib/transfer-activity-copy.ts');
   h.local('@/components/transfers/transfer-answer-choices');
+  // The card draws a person with the person row's avatar, which sits on the route row's chips.
+  h.local('@/components/transfer-coins/coin-cues', 'src/components/transfer-coins/coin-cues.ts');
+  h.local('@/components/transfer-coins/route-coin');
+  h.local('@/components/transfers/transfer-route-row');
+  h.local('@/components/transfers/transfer-person-row');
   h.local('@/components/transfers/transfer-question-card');
   const transaction = { id: 'q', type: 'expense', amountFils: 500000, date: '2026-10-02', accountId: 'fab', title: 'Transfer', category: 'other' };
   const tree = h.deps['@/components/transfers/transfer-question-card'].TransferQuestionCard(

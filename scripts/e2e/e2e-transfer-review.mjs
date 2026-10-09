@@ -122,13 +122,14 @@ async function home(page, expected, currentPendingCount, historicalPendingCount 
     amounts.push(minor(await item.getAttribute('aria-label')));
   }
   assert.deepEqual(amounts, expected, 'confirmed Home income, spending and Net');
-  // Home counts the entire review queue, including the intentionally unresolved
-  // historical collision backlog. Completing today's four decisions does not
+  // Home counts every transfer waiting, including the intentionally unresolved
+  // historical collision backlog. Home v3 says it in the Needs you pill (the
+  // Transfers section with its notice is off by default). Completing today's four decisions does not
   // silently classify those 3,106 old records. Wait for the deferred projection,
   // then assert its exact count in either language.
   const pendingCount = historicalPendingCount + currentPendingCount;
   await page.waitForFunction(expectedCount => {
-    const notices = [...document.querySelectorAll('[data-testid="transfer-review-notice"]')];
+    const notices = [...document.querySelectorAll('[data-testid="home-needs-you-open"]')];
     if (expectedCount === 0) return notices.length === 0;
     if (notices.length !== 1) return false;
     const label = (notices[0].getAttribute('aria-label') ?? '')
@@ -136,7 +137,7 @@ async function home(page, expected, currentPendingCount, historicalPendingCount 
       .replace(/[۰-۹]/g, d => String(d.charCodeAt(0) - 0x6f0)).replace(/[,٬]/g, '');
     return Number(label.match(/\d+/)?.[0]) === expectedCount;
   }, pendingCount, { timeout: 10000 });
-  const notice = page.getByTestId('transfer-review-notice');
+  const notice = page.getByTestId('home-needs-you-open');
   assert.equal(await notice.count(), pendingCount === 0 ? 0 : 1);
   if (pendingCount > 0) assert.equal(minor(await notice.getAttribute('aria-label')) / 100, pendingCount,
     'Home names the exact full review queue, including historical entries');
@@ -209,9 +210,9 @@ try {
       await page.goto(`${BASE}/transactions`, { waitUntil: 'networkidle' });
       assert.equal(await page.getByRole('button', { name: /^Outgoing transfer,/ }).count(), 0,
         'transfer records are not regular transaction rows');
-      // Home's notice opens the Transfers page, whose question card takes the queue one at a time.
+      // Home's Needs you pill opens the Transfers page, whose question card takes the queue one at a time.
       await page.goto(BASE + '/', { waitUntil: 'networkidle' });
-      await click(page.getByTestId('transfer-review-notice'));
+      await click(page.getByTestId('home-needs-you-open'));
       await page.waitForURL(/\/transfers(?:[?#]|$)/);
       await page.getByTestId('transfers-screen').waitFor({ state: 'visible' });
       await page.getByTestId('transfer-question-card').waitFor({ state: 'visible' });
