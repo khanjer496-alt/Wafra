@@ -68,6 +68,7 @@ node scripts/e2e/e2e-transfer-review.mjs
 node scripts/e2e/e2e-transfer-batch.mjs
 node scripts/e2e/e2e-transfers-page.mjs
 node scripts/e2e/e2e-transfer-groups.mjs
+node scripts/e2e/e2e-transfer-people.mjs
 node scripts/e2e/e2e-redesign.mjs
 node scripts/e2e/e2e-merchant-logos.mjs
 

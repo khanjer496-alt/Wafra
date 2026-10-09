@@ -116,13 +116,13 @@ function createPage({ language = 'en', transactions = [row('one'), row('two')], 
   src('@/lib/transfer-activity-copy', 'src/lib/transfer-activity-copy.ts');
   src('@/lib/transfer-review-copy', 'src/lib/transfer-review-copy.ts');
   src('@/lib/reference-copy', 'src/lib/reference-copy.ts');
-  for (const name of ['transfer-activity', 'transfer-list', 'transfer-pairs', 'transfer-answer', 'transfer-batch', 'transfer-review-presentation']) {
+  for (const name of ['transfer-activity', 'transfer-people', 'transfer-list', 'transfer-pairs', 'transfer-answer', 'transfer-batch', 'transfer-review-presentation']) {
     src(`@/lib/${name}`, `src/lib/${name}.ts`);
   }
   src('@/components/transfer-coins/coin-cues', 'src/components/transfer-coins/coin-cues.ts');
   src('@/hooks/use-transfer-answer', 'src/hooks/use-transfer-answer.ts');
   src('@/hooks/use-transfer-batch', 'src/hooks/use-transfer-batch.ts');
-  for (const name of ['transfer-select-mark', 'transfer-answer-choices', 'transfer-route-row', 'transfer-question-card',
+  for (const name of ['transfer-select-mark', 'transfer-answer-choices', 'transfer-route-row', 'transfer-person-row', 'transfer-question-card',
     'transfer-group-row', 'transfer-answer-sheet']) src(`@/components/transfers/${name}`, `src/components/transfers/${name}.tsx`);
   const screen = load(path.join(root, 'src/app/transfers.tsx'), deps).default;
   const notice = load(path.join(root, 'src/components/transfer-review-notice.tsx'), deps).TransferReviewNotice;
@@ -132,6 +132,7 @@ function createPage({ language = 'en', transactions = [row('one'), row('two')], 
 }
 
 const list = tree => walk(tree).find(node => node.type === 'FlatList');
+const transfers0 = () => fs.readFileSync(path.join(root, 'src/app/transfers.tsx'), 'utf8');
 const groupRows = tree => walk(tree).filter(node => node.props?.testID?.startsWith('transfer-group-') &&
   node.props.accessibilityRole && !node.props.testID.startsWith('transfer-group-route') && node.props.testID !== 'transfer-group-count' &&
   node.props.testID !== 'transfer-group-entry');
@@ -536,17 +537,23 @@ test('a link to one entry opens its "What is this?" on Transfers; closing shows 
   assert.deepEqual(h.events, [], 'opening a link never classifies');
 });
 
-test('a link to a low-signal transfer opens it without adding generic unknowns to the queue', () => {
+// Owner decision (Transfers grouped by person): a generic unknown is kept out of the totals, so it is asked about.
+test('a link to a low-signal transfer opens it; it needs an answer and select mode reaches it', () => {
   const tx = row('low-signal');
   const h = createPage({ transactions: [tx], params: { transactionId: tx.id }, groupDefinitions: [] });
   const tree = h.render();
   assert.equal(detailSheet(tree).props.transaction.id, tx.id, 'the requested record is reachable despite no pending group');
   assert.deepEqual(h.events, [], 'opening the route cannot classify a record');
-  const general = createPage({ transactions: [tx], groupDefinitions: [] }).render();
-  assert.equal(byId(general, 'transfer-question-card'), undefined, 'the queue is unchanged');
-  assert.equal(groupRows(general).length, 0);
+  const page = createPage({ transactions: [tx], groupDefinitions: [] });
+  const general = page.render();
+  assert.equal(byId(general, 'transfer-question-card'), undefined, 'an unnamed one-off is not walked by the card');
+  const link = byId(general, 'transfers-review-link');
+  assert.ok(link && text(link).includes(copyFor('en').card.title(1)), 'but it is counted, and select mode answers it');
+  link.props.onPress();
+  assert.ok(byId(page.render(), 'transfer-selection-footer'));
+  assert.equal(groupRows(general).length, 0, 'it names nobody: no person, no group');
   const rowNode = byId(general, 'transfer-row-low-signal');
-  assert.ok(!text(rowNode).includes(copyFor('en').tags.needsAnswer), 'a generic unknown is not a chore');
+  assert.ok(text(rowNode).includes(copyFor('en').tags.needsAnswer), 'one term for every unanswered transfer');
 });
 
 test('a link to a missing entry or a non-transfer opens nothing and says so', () => {
@@ -1093,7 +1100,8 @@ test('Home and the question card reach this one page; nothing routes to the old 
   const home = fs.readFileSync(path.join(root, 'src/screens/journal-home-screen.tsx'), 'utf8');
   const notice = home.slice(home.indexOf('<TransferReviewNotice'), home.indexOf('/> : null;', home.indexOf('<TransferReviewNotice')));
   assert.match(notice, /onPress=\{\(\) => router\.push\('\/transfers'\)\}/);
-  assert.match(home, /transferQuestionQueue\(activity\)/, 'Home counts the queue the card answers');
+  assert.match(home, /transferWaitingSummary\(activity\)/, 'Home counts what the card counts: every transfer waiting');
+  assert.match(transfers0(), /transferWaitingSummary\(activity\)\.transfers/, 'and the card says the same number');
   const transfers = fs.readFileSync(path.join(root, 'src/app/transfers.tsx'), 'utf8');
   assert.match(transfers, /onSeeAll=\{startSelecting\}/, 'See all selects several on this page');
   assert.match(transfers, /back: \(\) => \{ if \(router\.canGoBack\(\)\) router\.back\(\);/);
@@ -1317,3 +1325,191 @@ test('select mode names the count once, in the footer: the list head keeps its s
     assert.ok(text(footer(h)).includes(h.words.select.selected(1)), 'the count lives in the footer');
   }
 });
+
+// ---- People: every waiting transfer with one person, one answer for all of them ----
+
+const named = (id, name, extra = {}) => row(id, { title: `Transfer ${extra.type === 'income' ? 'from' : 'to'} ${name}`,
+  transferEvidence: { version: 1, currency: 'AED', attribution: 'source', counterpartyName: name }, ...extra });
+const peoplePage = (extra = {}) => createPage({ groupDefinitions: [], transactions: [
+  named('m1', 'MARIAM S'), named('m2', 'Mariam S.', { type: 'income', amountFils: 5000 }), named('m3', 'MARIAM S'),
+  named('k1', 'KHALID R'), row('u1')], ...extra });
+const personOf = (tree, key) => byId(tree, `transfer-person-${key}`);
+const savingPage = () => peoplePage({ resolveTransferBatch: async (request, state) => {
+  const decidedAt = Date.now();
+  const byIdDecision = new Map(request.decisions.map(decision => [decision.ids[0], decision.ownership]));
+  state.transactions = state.transactions.map(tx => !byIdDecision.has(tx.id) ? tx : byIdDecision.get(tx.id) === null
+    ? (({ transferDecision: _removed, ...rest }) => rest)(tx)
+    : { ...tx, transferDecision: { version: 1, ownership: byIdDecision.get(tx.id), decidedAt } });
+} });
+
+for (const language of ['en', 'ar']) {
+  test(`${language}: a person is one row: initial, name, how many transfers, money each way, dates and the open tag`, () => {
+    const h = peoplePage({ language });
+    const tree = h.render();
+    const mariam = personOf(tree, 'person:mariam s');
+    assert.ok(mariam, 'every spelling of the name is one person');
+    assert.ok(text(mariam).includes('MARIAM S'), 'the spelling the bank used most');
+    assert.ok(text(mariam).includes('M'), 'the avatar initial');
+    assert.ok(text(byId(mariam, 'transfer-person-count')).includes(h.words.person.transfers(3)));
+    assert.ok(text(mariam).includes(h.words.person.sent('AED 246.90', 2)), 'money out, with how many');
+    assert.ok(text(mariam).includes(h.words.person.received('AED 50.00', 1)), 'money in, with how many');
+    assert.ok(text(mariam).includes(h.words.tags.needsAnswer));
+    assert.equal(mariam.props.accessibilityRole, 'button');
+    for (const part of ['MARIAM S', h.words.person.transfers(3), h.words.tags.needsAnswer]) {
+      assert.ok(mariam.props.accessibilityLabel.includes(part), part);
+    }
+    assert.ok(flatStyle(mariam.props.style).minHeight >= 44);
+    assert.ok(personOf(tree, 'person:khalid r'), 'one transfer is still a person');
+    for (const id of ['m1', 'm2', 'm3', 'k1']) assert.equal(byId(tree, `transfer-row-${id}`), undefined, `${id} is answered with its person`);
+    const unnamed = byId(tree, 'transfer-row-u1');
+    assert.ok(unnamed, 'a transfer naming nobody stays its own row');
+    assert.ok(text(unnamed).includes(h.words.tags.needsAnswer), 'with the same one term');
+    assert.ok(text(byId(tree, 'transfers-list-head')).includes(h.words.group.section));
+    assert.deepEqual(h.events, [], 'drawing people never writes');
+  });
+}
+
+test('the card asks about the top person; an answer opens the sheet with every entry and its count, nothing saved yet', () => {
+  const h = peoplePage();
+  const card = byId(h.render(), 'transfer-question-card');
+  assert.ok(text(card).includes(h.words.person.question('MARIAM S')), 'the person with the most transfers first');
+  assert.ok(text(card).includes(h.words.card.title(5)), 'every transfer waiting: three with Mariam, one with Khalid, one unnamed');
+  assert.ok(text(card).includes(h.words.card.step(1, 2)), 'the card walks the two people; the unnamed one-off is not a question');
+  const unnamed = byId(card, 'transfer-question-unnamed');
+  assert.ok(text(unnamed).includes(h.words.card.moreUnnamed(1)));
+  assert.equal(unnamed.props.accessibilityRole, 'button');
+  // Money both ways: the answers are worded for both directions.
+  assert.ok(text(card).includes(h.words.answers.mixed.own));
+  answerIn(card, 'external');
+  assert.deepEqual(h.events, [], 'a person is never answered by one tap: the sheet shows what it covers');
+  const sheet = sheetOf(h);
+  assert.ok(sheet, 'the confirmation sheet opens');
+  assert.equal(byId(sheet, 'transfer-answer-external').props.accessibilityState.checked, true, 'on the answer picked');
+  assert.ok(text(byId(sheet, 'transfer-answer-sheet-person')).includes(h.words.person.oneAnswer('MARIAM S')));
+  assert.ok(byId(sheet, 'transfer-batch-preview-person'));
+  assert.equal(allById(sheet, 'transfer-group-entry').length, 3, 'every entry is listed');
+  assert.equal(byId(sheet, 'transfer-answer-sheet-save').props.accessibilityLabel, h.words.batch.save(3));
+});
+
+test('the card\'s "N more without a name" opens select mode, where each unnamed transfer can be ticked', () => {
+  const h = peoplePage();
+  byId(byId(h.render(), 'transfer-question-card'), 'transfer-question-unnamed').props.onPress();
+  const tree = h.render();
+  assert.ok(byId(tree, 'transfer-selection-footer'), 'select mode');
+  const row = byId(tree, 'transfer-row-u1');
+  assert.equal(row.props.accessibilityRole, 'checkbox');
+  row.props.onPress();
+  assert.equal(byId(h.render(), 'transfer-row-u1').props.accessibilityState.checked, true);
+  assert.deepEqual(h.events, []);
+});
+
+test('a person\'s answer is one single-entry decision per transfer, with Undo clearing exactly those', async () => {
+  const h = savingPage();
+  byId(h.render(), `transfer-person-person:mariam s`).props.onPress();
+  answerIn(sheetOf(h), 'own');
+  const original = Object.fromEntries(h.state.transactions.filter(tx => tx.id.startsWith('m')).map(tx => [tx.id, fingerprint(tx)]));
+  save(h); await flush();
+  const request = h.events.find(event => event[0] === 'batch')[1];
+  assert.deepEqual(request.decisions, [{ ids: ['m1'], ownership: 'own' }, { ids: ['m2'], ownership: 'own' }, { ids: ['m3'], ownership: 'own' }],
+    'own for a person: no pair link, no group decision');
+  assert.deepEqual(request.expectedFingerprints, original, 'frozen when the person was opened');
+  assert.equal(request.expectedGeneration, 1);
+  const [message, options] = h.toasts.at(-1);
+  assert.equal(message, h.words.batch.saved(3));
+  assert.equal(personOf(h.render(), 'person:mariam s'), undefined, 'answered: the person leaves the waiting list');
+  options.actions.find(action => action.label === h.words.answers.undo).onPress(); await flush(); await flush();
+  const undo = h.events.filter(event => event[0] === 'batch').at(-1)[1];
+  assert.deepEqual(undo.decisions, [{ ids: ['m1'], ownership: null }, { ids: ['m2'], ownership: null }, { ids: ['m3'], ownership: null }]);
+  assert.deepEqual(h.events.at(-1), ['toast', h.words.answers.undone]);
+  assert.ok(personOf(h.render(), 'person:mariam s'), 'back to waiting');
+});
+
+test('a person changed after it was opened blocks Save and says so; nothing is written', () => {
+  const h = peoplePage();
+  byId(h.render(), `transfer-person-person:mariam s`).props.onPress();
+  answerIn(sheetOf(h), 'external');
+  h.state.transactions = h.state.transactions.map(tx => tx.id === 'm2' ? { ...tx, amountFils: 5100 } : tx);
+  const sheet = sheetOf(h);
+  assert.equal(byId(sheet, 'transfer-answer-sheet-save').props.disabled, true);
+  assert.ok(text(byId(sheet, 'transfer-answer-sheet-error')).includes(h.words.batch.changed));
+  byId(sheet, 'transfer-answer-sheet-save').props.onPress();
+  assert.deepEqual(h.events, []);
+});
+
+test('select mode: a person is one tick, Select all counts people, and the save covers each of their transfers', async () => {
+  const h = peoplePage();
+  startSelecting(h);
+  let tree = h.render();
+  const mariam = personOf(tree, 'person:mariam s');
+  assert.equal(mariam.props.accessibilityRole, 'checkbox');
+  assert.ok(mariam.props.accessibilityLabel.startsWith(h.words.select.item));
+  assert.equal(byId(tree, 'transfer-select-shown').props.accessibilityLabel, h.words.select.all(3), 'two people and the unnamed transfer');
+  mariam.props.onPress();
+  tree = h.render();
+  assert.equal(personOf(tree, 'person:mariam s').props.accessibilityState.checked, true);
+  answerIn(footer(h), 'external');
+  save(h); await flush();
+  const request = h.events.find(event => event[0] === 'batch')[1];
+  assert.deepEqual(request.decisions, [{ ids: ['m1'], ownership: 'external' }, { ids: ['m2'], ownership: 'external' },
+    { ids: ['m3'], ownership: 'external' }]);
+});
+
+test('search narrows a person to the transfers it matches; the answer covers only those', async () => {
+  const h = peoplePage();
+  walk(h.render()).find(node => node.type === 'TextInput').props.onChangeText('from');
+  const tree = h.render();
+  const mariam = personOf(tree, 'person:mariam s');
+  assert.ok(text(byId(mariam, 'transfer-person-count')).includes(h.words.person.transfers(1)), 'only "Transfer from Mariam S."');
+  assert.equal(personOf(tree, 'person:khalid r'), undefined, 'a person with no match steps aside');
+  mariam.props.onPress();
+  answerIn(sheetOf(h), 'none');
+  save(h); await flush();
+  assert.deepEqual(h.events.find(event => event[0] === 'batch')[1].decisions, [{ ids: ['m2'], ownership: 'none' }]);
+});
+
+test('many people: the first five, then "Show all N people"; select mode lists everyone', () => {
+  const names = ['AMAL A', 'BADR B', 'CYRUS C', 'DIMA D', 'EHAB E', 'FARAH F', 'GHADA G'];
+  const h = createPage({ groupDefinitions: [], transactions: names.flatMap((name, i) =>
+    Array.from({ length: 7 - i }, (_, k) => named(`${i}-${k}`, name))) });
+  let tree = h.render();
+  const shown = walk(tree).filter(node => node.props?.testID?.startsWith('transfer-person-person:'));
+  assert.deepEqual(shown.map(node => node.props.testID.slice('transfer-person-'.length)),
+    ['person:amal a', 'person:badr b', 'person:cyrus c', 'person:dima d', 'person:ehab e'], 'most transfers first');
+  const toggle = byId(tree, 'transfer-people-toggle');
+  assert.equal(toggle.props.accessibilityLabel, h.words.person.showAll(7));
+  assert.equal(toggle.props.accessibilityState.expanded, false);
+  toggle.props.onPress();
+  tree = h.render();
+  assert.equal(walk(tree).filter(node => node.props?.testID?.startsWith('transfer-person-person:')).length, 7);
+  assert.equal(byId(tree, 'transfer-people-toggle').props.accessibilityLabel, h.words.person.showFewer);
+  byId(tree, 'transfer-people-toggle').props.onPress();
+  startSelecting(h);
+  tree = h.render();
+  assert.equal(walk(tree).filter(node => node.props?.testID?.startsWith('transfer-person-person:')).length, 7);
+  assert.equal(byId(tree, 'transfer-people-toggle'), undefined);
+  assert.equal(byId(tree, 'transfer-select-shown').props.accessibilityLabel, h.words.select.all(7));
+});
+
+for (const language of ['en', 'ar']) {
+  test(`${language}: person words have Arabic of their own and count people and transfers`, () => {
+    const words = copyFor(language).person;
+    const en = copyFor('en').person;
+    assert.deepEqual(Object.keys(words).sort(), Object.keys(en).sort());
+    if (language === 'ar') {
+      for (const value of [words.question('مريم'), words.transfers(1), words.transfers(2), words.transfers(5), words.transfers(40),
+        words.oneAnswer('مريم'), words.people(1), words.people(2), words.people(7), words.people(24), words.showAll(24), words.showFewer,
+        copyFor('ar').card.moreUnnamed(1), copyFor('ar').card.moreUnnamed(2), copyFor('ar').card.moreUnnamed(40)]) {
+        assert.doesNotMatch(value, /[A-Za-z]/, value);
+      }
+      assert.equal(words.transfers(1), 'تحويل واحد');
+      assert.equal(words.transfers(2), 'تحويلان');
+      assert.equal(words.transfers(5), '5 تحويلات');
+      assert.equal(words.transfers(40), '40 تحويلاً');
+    } else {
+      assert.equal(words.transfers(1), '1 transfer');
+      assert.equal(words.transfers(40), '40 transfers');
+      assert.equal(copyFor('en').card.moreUnnamed(12), '12 more without a name — select to answer');
+      assert.equal(words.question('Mariam S'), '⁨Mariam S⁩: your own account or someone else?');
+    }
+  });
+}

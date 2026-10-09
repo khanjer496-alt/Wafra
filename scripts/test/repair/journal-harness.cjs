@@ -204,8 +204,9 @@ function harness(options = {}) {
   dependencies['@noble/hashes/sha2.js'] = require('@noble/hashes/sha2.js');
   dependencies['@noble/hashes/utils.js'] = require('@noble/hashes/utils.js');
   dependencies['@/lib/transfer-reconciliation'] = load(path.join(root, 'src/lib/transfer-reconciliation.ts'), dependencies);
-  // Home counts the Transfers question card's queue (transferQuestionQueue), from source.
+  // Home counts every transfer waiting, as the Transfers card does (transferWaitingSummary), from source.
   dependencies['@/lib/transfer-activity'] = load(path.join(root, 'src/lib/transfer-activity.ts'), dependencies);
+  dependencies['@/lib/transfer-people'] = load(path.join(root, 'src/lib/transfer-people.ts'), dependencies);
   dependencies['@/lib/transfer-review-copy'] = load(path.join(root, 'src/lib/transfer-review-copy.ts'), dependencies);
   dependencies['@/lib/transfer-activity-copy'] = load(path.join(root, 'src/lib/transfer-activity-copy.ts'), dependencies);
   dependencies['@/lib/period'].inPeriod = require('../build/period.js').inPeriod;

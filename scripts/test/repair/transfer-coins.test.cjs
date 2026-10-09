@@ -118,7 +118,7 @@ test('the Transfers list hands each row its cue and re-renders rows when cues ch
   h.local('@/lib/transfer-pairs', 'src/lib/transfer-pairs.ts');
   h.local('@/components/transfer-coins/coin-cues', 'src/components/transfer-coins/coin-cues.ts');
   h.local('@/components/transfer-coins/route-coin');
-  for (const name of ['transfer-answer-choices', 'transfer-route-row', 'transfer-question-card']) h.local(`@/components/transfers/${name}`);
+  for (const name of ['transfer-answer-choices', 'transfer-route-row', 'transfer-person-row', 'transfer-question-card']) h.local(`@/components/transfers/${name}`);
   h.deps['@/hooks/use-transfer-answer'] = { useTransferAnswer: () => ({ busy: false, answer: async () => 'saved' }) };
   const reconciliation = { groups: [], pendingIds: new Set(), internalIds: new Set(),
     byId: new Map([['pay', { id: 'pay', status: 'confirmed-external', reason: 'user', candidateIds: [] }]]) };

@@ -96,8 +96,7 @@ export function RouteChip({ end, label, palette, large, answered, slate, directi
 export function RouteTag({ tag, label, palette, slate }: { tag: TransferListItem['tag']; label: string; palette: BandPalette; slate: string }) {
   const look = tag === 'own' ? { backgroundColor: palette.glyphGround, color: slate }
     : tag === 'external' ? { backgroundColor: palette.statusNearSoft, color: palette.statusNear }
-      : tag === 'needs-answer' ? { backgroundColor: palette.statusNear, color: palette.sheet }
-        : { backgroundColor: 'transparent', color: palette.textSecondary };
+      : { backgroundColor: palette.statusNear, color: palette.sheet };
   return <View style={[styles.tag, { backgroundColor: look.backgroundColor }]}>
     <ThemedText type="meta" style={{ color: look.color }}>{label}</ThemedText>
   </View>;
@@ -154,8 +153,7 @@ export function TransferRouteRow({ item, accountLabel, palette, onPress, first, 
     : end.kind === 'party' ? end.name
       : answered === 'own' ? words.route.yourAccount : answered === 'external' ? words.route.someoneElse : words.route.unknown;
   const shown = (end: RouteEnd) => end.kind === 'unknown' && !answered ? '?' : named(end);
-  const tag = item.tag === 'own' ? words.tags.own : item.tag === 'external' ? words.tags.external
-    : item.tag === 'needs-answer' ? words.tags.needsAnswer : words.tags.unconfirmed;
+  const tag = item.tag === 'own' ? words.tags.own : item.tag === 'external' ? words.tags.external : words.tags.needsAnswer;
   // Own transfers move money between the person's accounts and are not signed;
   // everything else reads by direction, the same as the question card.
   const sign = item.tag === 'own' || item.direction === 'between' ? 'none' : item.direction === 'out' ? 'minus' : 'plus';

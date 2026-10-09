@@ -49,7 +49,8 @@ const en = {
   trackingStopped: 'Bank messages stopped arriving',
   trackingOff: 'Tracking is off',
   cardOverdue: (title: string) => `${title} payment overdue`,
-  transfersToAnswer: (count: number) => `${count} ${count === 1 ? 'transfer' : 'transfers'} to answer`,
+  /** The one term for unanswered transfers, as Transfers and Transactions say it: "need an answer". */
+  transfersToAnswer: (count: number) => `${count} ${count === 1 ? 'transfer needs' : 'transfers need'} an answer`,
   limitsOver: (count: number) => `${count} ${count === 1 ? 'limit' : 'limits'} over`,
   needHint: {
     tracking: 'Opens tracking setup',
@@ -99,8 +100,8 @@ const ar: HomeCopy = {
   trackingStopped: 'توقف وصول رسائل البنك',
   trackingOff: 'التتبع غير مفعّل',
   cardOverdue: (title) => `دفعة ${title} متأخرة`,
-  transfersToAnswer: (count) => arCount(count, 'تحويل واحد ينتظر ردك', 'تحويلان ينتظران ردك',
-    (n) => `${n} تحويلات تنتظر ردك`, (n) => `${n} تحويلًا ينتظر ردك`),
+  transfersToAnswer: (count) => arCount(count, 'تحويل واحد بانتظار إجابتك', 'تحويلان بانتظار إجابتك',
+    (n) => `${n} تحويلات بانتظار إجابتك`, (n) => `${n} تحويلًا بانتظار إجابتك`),
   limitsOver: (count) => arCount(count, 'تجاوزت حدًا واحدًا', 'تجاوزت حدّين',
     (n) => `تجاوزت ${n} حدود`, (n) => `تجاوزت ${n} حدًا`),
   needHint: {
