@@ -1069,12 +1069,14 @@ export default function JournalHomeScreen() {
     hint={homeWords.needHint[need.kind]} icon={need.kind === 'transfers' ? 'repeat' : need.kind === 'card' ? 'calendar' : 'alert'}
     warning={need.kind === 'tracking' || need.kind === 'card'} dismissLabel={homeWords.dismiss} inline={pillInline}
     onPress={() => openNeed(need)} onDismiss={() => dismissNeed(need.key)} band={band} hold={!revealReady} /> : null;
-  // Capture shows by itself while it needs the person (tracking off, paused or
-  // stopped, the first week's progress, set up with no message read yet), even
-  // when switched off in Customize Home, and goes again once it does not. The
-  // offer to fill in the past is only an offer: it waits in the section.
-  const captureNeeded = state.hydrated && state.onboarded && (trackingNeed !== null || captureStopped
-    || (!history && moneyPicture !== null) || (captureSetUp && !hasLiveCapture && !history));
+  // Capture shows by itself while it needs the person and the person can act
+  // on it (tracking off, or stopped arriving), and in the first week's
+  // progress, even when switched off in Customize Home; it goes again once it
+  // does not. Paused (Android without Pro) and "ready, no message yet" can
+  // last for good, so they stay with the dismissable Needs you pill and in
+  // the section; so does the offer to fill in the past.
+  const captureNeeded = state.hydrated && state.onboarded && (trackingNeed === 'off' || trackingNeed === 'stopped'
+    || (!history && moneyPicture !== null));
   const drawnWidgets = withNeededHomeSections(homeWidgets, captureNeeded ? ['capture'] : []);
   // Transfers still waiting that the Needs you pill does not name (no question
   // the card can ask: a likely card repayment, an archived account): one quiet
@@ -1082,11 +1084,11 @@ export default function JournalHomeScreen() {
   const quietTransfers = !homeWidgetVisible(drawnWidgets, 'transfers') && pendingTransfers
     && pendingTransfers.count > 0 && pendingTransfers.questions === 0
     ? <Pressable testID="home-transfers-waiting" accessibilityRole="button"
-        accessibilityLabel={homeWords.transfersToAnswer(pendingTransfers.count)} accessibilityHint={homeWords.needHint.transfers}
+        accessibilityLabel={homeWords.transfersWaiting(pendingTransfers.count)} accessibilityHint={homeWords.needHint.transfers}
         onPress={() => router.push('/transfers')}
         style={({ pressed }) => [styles.quietLine, { opacity: pressed ? 0.6 : 1 }]}>
         <Icon name="repeat" size={16} color={band.textSecondary} />
-        <ThemedText type="meta" style={[styles.grow, { color: band.textSecondary }]}>{homeWords.transfersToAnswer(pendingTransfers.count)}</ThemedText>
+        <ThemedText type="meta" style={[styles.grow, { color: band.textSecondary }]}>{homeWords.transfersWaiting(pendingTransfers.count)}</ThemedText>
         <Icon name="chevron-right" size={16} color={band.textSecondary} />
       </Pressable> : null;
   const founderUnlockEnabled = process.env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK === '1';
@@ -1276,7 +1278,7 @@ export default function JournalHomeScreen() {
       pattern: id === 'greeting' && !greetingInToolbar ? <YourPattern compact testID="home-personal-pattern" tile={24} gap={3} /> : undefined };
     const content = id === 'greeting' ? <ReferenceHomeGreeting {...props} />
       : id === 'hero' ? <HomeHero band={props.band} moneySpec={moneySpec} language={language} largeText={largeText}
-          current={heroCurrent} previous={heroPrevious} onWantPrevious={wantHeroPrevious} budgets={state.budgets}
+          current={heroCurrent} running={heroKey === runningMonth} previous={heroPrevious} onWantPrevious={wantHeroPrevious} budgets={state.budgets}
           warning={livePace === 'over'} hold={!revealReady} />
       : id === 'overview' ? <ReferenceHomeSummary {...props} onBand={onBand} />
       : id === 'today' ? <ReferenceHomeToday {...props} />

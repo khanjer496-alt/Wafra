@@ -99,15 +99,17 @@ test('Needs you: nothing, or only the highest-priority need, with a way there an
   assert.equal(byId(harness({ homeWidgets: 'default', optOut: true }).tree, 'home-needs-you'), undefined);
 });
 
-test('Capture shows by itself while tracking needs the person, and not once it is running', () => {
+test('Capture shows by itself while tracking is off, and not once it is running or only paused', () => {
   const ids = (tree) => walk(tree).map((node) => node.props?.testID).filter(Boolean);
   assert.ok(!ids(harness({ homeWidgets: 'default' }).tree).includes('journal-import-controls'), 'running: off as saved');
   const off = harness({ homeWidgets: 'default', needsPermission: true });
   const drawn = ids(off.tree);
   assert.ok(drawn.includes('home-section-capture'), 'tracking off: Capture is drawn');
   assert.ok(drawn.indexOf('home-section-capture') > drawn.indexOf('home-widget-activity'), 'at its saved place, after the transactions');
-  assert.ok(ids(harness({ homeWidgets: 'default', pro: false }).tree).includes('home-section-capture'),
-    'paused (Android without Pro): drawn too');
+  // Paused (Android without Pro) can last for good: the dismissable pill names it, Capture stays as saved.
+  const paused = harness({ homeWidgets: 'default', pro: false });
+  assert.ok(!ids(paused.tree).includes('home-section-capture'));
+  assert.ok(byId(paused.tree, 'home-needs-you'), 'the pill still names it');
   // A deliberate opt-out is not a need.
   assert.ok(!ids(harness({ homeWidgets: 'default', optOut: true }).tree).includes('journal-import-controls'));
 });
@@ -116,12 +118,16 @@ test('Home: a quiet line for transfers the Needs you pill does not name; no head
   const home = fs.readFileSync(path.join(root, 'src/screens/journal-home-screen.tsx'), 'utf8');
   assert.match(home, /const quietTransfers = !homeWidgetVisible\(drawnWidgets, 'transfers'\) && pendingTransfers\s*&& pendingTransfers\.count > 0 && pendingTransfers\.questions === 0/);
   assert.match(home, /footer=\{quietTransfers\}/);
-  assert.match(home, /testID="home-transfers-waiting"[\s\S]{0,200}accessibilityLabel=\{homeWords\.transfersToAnswer\(pendingTransfers\.count\)\}/);
+  assert.match(home, /testID="home-transfers-waiting"[\s\S]{0,200}accessibilityLabel=\{homeWords\.transfersWaiting\(pendingTransfers\.count\)\}/);
   const recent = fs.readFileSync(path.join(root, 'src/components/home/home-recent.tsx'), 'utf8');
   assert.match(recent, /if \(count === 0 && !empty && !footer\) return null;/);
+  // With no rows, the empty state stands in for the footer: never two links to Transfers side by side.
+  assert.match(recent, /count === 0 \? empty \?\? footer \?\? null/);
+  assert.match(recent, /\{count > 0 \? footer \?\? null : null\}/);
   // Last month's side says which month had nothing, not "this month".
   const heroSource = fs.readFileSync(path.join(root, 'src/components/home/home-hero.tsx'), 'utf8');
-  assert.match(heroSource, /empty=\{front \? words\.noSpendingYet : words\.noSpendingIn\(month\.name\)\}/);
+  assert.match(heroSource, /empty=\{front && running \? words\.noSpendingYet : words\.noSpendingIn\(month\.name\)\}/);
+  assert.match(home, /running=\{heroKey === runningMonth\}/, 'a past month chosen in Spending is not "this month"');
   // The early return sits after every hook.
   assert.ok(recent.indexOf('return null;') > recent.lastIndexOf('useMemo('));
 });

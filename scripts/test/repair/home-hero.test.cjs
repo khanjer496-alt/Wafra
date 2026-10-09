@@ -108,7 +108,7 @@ test('the line ends where the shared month summary ends, by the same spending ru
   assert.equal(month.cumulative.at(-1), summary.expenseFils);
 });
 
-test('a row dated later this month counts on today, so Spent, the line and the trend agree', () => {
+test('a row dated later this month ends the line at Spent; the trend stays like for like', () => {
   const rows = [row('2026-09-02', 1000), row('2026-10-02', 600), row('2026-10-20', 400)];
   const live = new Set(['bank']);
   const month = hero.projectHeroMonth(rows, '2026-10', at('2026-10-06'), live, new Set());
@@ -116,9 +116,11 @@ test('a row dated later this month counts on today, so Spent, the line and the t
   assert.equal(month.cumulative.length, 6, 'the line still ends today');
   assert.equal(month.cumulative.at(-1), 1000);
   assert.equal(month.cumulative.at(-1), summary.expenseFils, 'the big Spent figure');
-  assert.equal(month.trend.currentFils, summary.expenseFils, 'the chip compares the same figure');
+  // Rent dated the 20th, entered on the 6th, is not "spending more than last month so far".
+  assert.equal(month.trend.currentFils, 600, 'the chip compares the days so far only');
   assert.equal(month.trend.previousFils, 1000);
-  assert.equal(month.trend.direction, 'same');
+  assert.equal(month.trend.direction, 'down');
+  assert.equal(hero.paceState(month.trend), 'within');
 });
 
 test('sparkline points start on the baseline and spread over the whole month', () => {

@@ -83,13 +83,15 @@ function easeOutCurve(ms: number): CoinCurve {
 }
 const LINE_CURVE = easeOutCurve(LINE_MS);
 
-export function HomeHero({ band, moneySpec, language, largeText, current, previous, onWantPrevious, budgets,
+export function HomeHero({ band, moneySpec, language, largeText, current, running = true, previous, onWantPrevious, budgets,
   warning, hold }: {
   band: BandPalette;
   moneySpec: LedgerMoneySpec;
   language: string;
   largeText: boolean;
   current: HeroMonth;
+  /** The current face is the running month (not a past month chosen in Spending). */
+  running?: boolean;
   /** Last month, computed only once the person asks for it (onWantPrevious). */
   previous: HeroMonth | null;
   onWantPrevious: () => void;
@@ -308,7 +310,7 @@ export function HomeHero({ band, moneySpec, language, largeText, current, previo
     </Pressable>
     {categoriesShown ? <Animated.View testID="home-hero-categories" style={[styles.categories, openPaint]}>
       <HeroCategories summary={month.summary} budgets={budgets} band={band} moneySpec={moneySpec}
-        label={words.byCategory} empty={front ? words.noSpendingYet : words.noSpendingIn(month.name)} />
+        label={words.byCategory} empty={front && running ? words.noSpendingYet : words.noSpendingIn(month.name)} />
     </Animated.View> : null}
   </Animated.View>;
 }

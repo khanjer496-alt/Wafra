@@ -52,6 +52,8 @@ const en = {
   cardOverdue: (title: string) => `${title} payment overdue`,
   /** The one term for unanswered transfers, as Transfers and Transactions say it: "need an answer". */
   transfersToAnswer: (count: number) => `${count} ${count === 1 ? 'transfer needs' : 'transfers need'} an answer`,
+  /** Transfers the card cannot ask about (a likely card repayment, an archived account): Home's quiet line. */
+  transfersWaiting: (count: number) => `${count} ${count === 1 ? 'transfer' : 'transfers'} waiting`,
   limitsOver: (count: number) => `${count} ${count === 1 ? 'limit' : 'limits'} over`,
   needHint: {
     tracking: 'Opens tracking setup',
@@ -104,6 +106,8 @@ const ar: HomeCopy = {
   cardOverdue: (title) => `دفعة ${title} متأخرة`,
   transfersToAnswer: (count) => arCount(count, 'تحويل واحد بانتظار إجابتك', 'تحويلان بانتظار إجابتك',
     (n) => `${n} تحويلات بانتظار إجابتك`, (n) => `${n} تحويلًا بانتظار إجابتك`),
+  transfersWaiting: (count) => arCount(count, 'تحويل واحد قيد الانتظار', 'تحويلان قيد الانتظار',
+    (n) => `${n} تحويلات قيد الانتظار`, (n) => `${n} تحويلًا قيد الانتظار`),
   limitsOver: (count) => arCount(count, 'تجاوزت حدًا واحدًا', 'تجاوزت حدّين',
     (n) => `تجاوزت ${n} حدود`, (n) => `تجاوزت ${n} حدًا`),
   needHint: {

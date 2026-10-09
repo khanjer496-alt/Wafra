@@ -106,7 +106,8 @@ export function HomeRecent({ rows, accountById, internalIds, onPress, arrivedRow
         <Icon name="chevron-right" size={16} color={band.tint} />
       </Pressable>
     </View>
-    {count === 0 ? empty ?? null : days.map((day) => {
+    {/* With no rows, the empty state (or the way to Transfers) stands in for the footer. */}
+    {count === 0 ? empty ?? footer ?? null : days.map((day) => {
       const first = index;
       return <View key={day.date} testID={`home-activity-day-${day.date}`}>
         <Animated.View style={paint(first)}>
@@ -124,7 +125,7 @@ export function HomeRecent({ rows, accountById, internalIds, onPress, arrivedRow
         })}
       </View>;
     })}
-    {footer ?? null}
+    {count > 0 ? footer ?? null : null}
   </View>;
 }
 

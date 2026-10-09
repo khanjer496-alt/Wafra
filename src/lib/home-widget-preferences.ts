@@ -117,14 +117,22 @@ const SHOWN_WHEN_NEEDED: readonly HomeWidgetId[] = ['capture'];
 /**
  * The layout Home draws right now: the saved one, with a switched-off section
  * shown at its saved place while it needs the person (Capture while tracking
- * is off, paused or stopped, or in the first days). Never saved, so the
- * section is off again once the need passes. Unchanged, it returns the same
- * object.
+ * is off or has stopped, or in the first week). A place among the band's
+ * sections would end the band early, so it is drawn just after them instead.
+ * Never saved, so the section is off again once the need passes. Unchanged,
+ * it returns the same object.
  */
 export function withNeededHomeSections(preferences: HomeWidgetPreferences, needed: readonly HomeWidgetId[]): HomeWidgetPreferences {
   const shown = needed.filter((id) => SHOWN_WHEN_NEEDED.includes(id) && preferences.hidden.includes(id));
   if (shown.length === 0) return preferences;
-  return { order: preferences.order, hidden: preferences.hidden.filter((id) => !shown.includes(id)) };
+  const lastBand = preferences.order.reduce((last, id, index) => BAND_SECTIONS.includes(id) ? index : last, -1);
+  const early = shown.filter((id) => preferences.order.indexOf(id) < lastBand);
+  const order = early.length === 0 ? preferences.order : (() => {
+    const rest = preferences.order.filter((id) => !early.includes(id));
+    const after = rest.indexOf(preferences.order[lastBand]!) + 1;
+    return [...rest.slice(0, after), ...early, ...rest.slice(after)];
+  })();
+  return { order, hidden: preferences.hidden.filter((id) => !shown.includes(id)) };
 }
 
 /**
