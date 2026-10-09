@@ -18,7 +18,9 @@ permissions:
 jobs:
   repair:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The repair suite alone takes about 14 minutes on a hosted runner; the
+    # benchmark and evidence upload run after it.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
