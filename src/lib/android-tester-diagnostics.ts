@@ -56,6 +56,10 @@ const safeAgeMs = (timestamp: number | null | undefined, now: number): number | 
     ? Math.max(0, now - Number(timestamp))
     : null;
 
+/** A stored version receipt as a plain integer, or null; never another type. */
+const safeVersion = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+
 const countBy = (values: readonly string[]): Record<string, number> => {
   const result: Record<string, number> = {};
   for (const value of values) result[value] = (result[value] ?? 0) + 1;
@@ -296,6 +300,10 @@ export async function buildAndroidTesterDiagnostic(
     historyRepairVersion: PARSER_BACKFILL_VERSION,
     storedVersion: state.parserVersion ?? null,
     storedHistoryRepairVersion: state.parserVersion ?? null,
+    // The parser release whose bounded recent re-read last completed (an
+    // integer receipt). Behind currentVersion means the next routine scan
+    // re-reads the recent window again.
+    recentRereadVersion: safeVersion(state.recentRereadParserVersion),
     coverage: feedbackCoverage.counts,
     samples: [] as SafeParserSample[],
     inbox: {

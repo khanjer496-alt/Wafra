@@ -48,7 +48,8 @@ test('Home names only the real transfer review queue; Accounts does not turn it 
   // the reconciliation cached per stored transfer receipt); with no question
   // left it names the queued entries only the review screen reaches. Shown only
   // when that queue is non-empty.
-  assert.match(home, /const reconciliation = [^;]*transferReconciliationForState\(state\)/);
+  // Built in slices from the same cached reconciliation (transferReconciliationForStateInSlices).
+  assert.match(home, /graph = transferReconciliationForStateInSlices\(state, \(reconciliation\) => \{/);
   assert.match(home, /const queue = transferQuestionQueue\(activity\);/);
   assert.match(home, /: unaskedPendingIds\(activity, reconciliation\.pendingIds\)/);
   assert.match(home, /pendingTransferSummary\(state\.transactions, ids\)/);

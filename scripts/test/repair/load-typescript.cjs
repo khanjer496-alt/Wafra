@@ -102,6 +102,10 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       if (name === '@/lib/store-selection') {
         return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/store-selection.ts'));
       }
+      // The shared per-snapshot row index (entry sheet, Transfers); pure.
+      if (name === '@/lib/rows-by-id') {
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/rows-by-id.ts'));
+      }
       // The pull-to-refresh scan control is an opaque child boundary for
       // screen harnesses, like the other capture surfaces.
       if (name === '@/components/capture-refresh-control') {

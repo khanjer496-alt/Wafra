@@ -2,11 +2,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   defaultHomeWidgetPreferences,
   normalizeHomeWidgetPreferences,
+  readStoredHomeWidgets,
+  storedHomeWidgets,
   type HomeWidgetPreferences,
 } from '@/lib/home-widget-preferences';
 
 export {
   DEFAULT_HOME_WIDGETS,
+  HOME_WIDGETS_LAYOUT_VERSION,
   defaultHomeWidgetPreferences,
   drawnHomeWidgetOrder,
   homeWidgetVisible,
@@ -52,7 +55,8 @@ export async function loadHomeWidgetPreferences(): Promise<HomeWidgetPreferences
   let result: HomeWidgetPreferences;
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
-    result = raw ? normalizeHomeWidgetPreferences(JSON.parse(raw)) : defaultHomeWidgetPreferences();
+    // A layout saved before Home v3 reads as the new default (readStoredHomeWidgets).
+    result = raw ? readStoredHomeWidgets(JSON.parse(raw)) : defaultHomeWidgetPreferences();
   } catch {
     // Preserve the historical read fallback. Never write it back implicitly.
     if (at !== revision) return loadHomeWidgetPreferences();
@@ -68,7 +72,7 @@ export function saveHomeWidgetPreferences(value: HomeWidgetPreferences): Promise
   const next = normalizeHomeWidgetPreferences(value);
   revision += 1;
   const operation = writes.catch(() => {}).then(async () => {
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedHomeWidgets(next)));
     saved = clone(next);
     for (const listener of listeners) {
       try { listener(clone(next)); } catch { /* one view cannot prevent other subscribers or undo a durable save */ }

@@ -51,11 +51,25 @@ try {
     const page = await context.newPage(); page.setDefaultTimeout(12000); page.on('pageerror', e => errors.push(String(e)));
     try {
       await seed(page, language);
+      // Home rows open the entry sheet as one tap target (Home v3), and the sheet keeps the
+      // way to the merchant: Home row -> sheet -> View merchant spending -> merchant totals.
+      await page.getByTestId('home-widget-activity').getByRole('button', { name: /^Careem,/ }).first().click();
+      await page.locator('[role="dialog"]:visible').last().getByTestId('view-merchant-spending').click();
+      await page.getByTestId('merchant-total-spent').waitFor({ state: 'visible' });
+      assert.equal(minor(await page.getByTestId('merchant-total-spent').innerText()), 3501, 'Home row -> sheet reaches merchant spending');
+      await page.getByRole('button', { name: language === 'ar' ? 'رجوع' : 'Back', exact: true }).click();
+      await page.waitForURL(url => !url.pathname.includes('/merchant'));
+      // The direct name/logo link to the merchant lives on the full Transactions list, reached from "See all".
+      await page.getByTestId('home-see-all').click();
+      await page.waitForURL(url => url.pathname.includes('/transactions'));
       await page.getByRole('button', { name: `${language === 'ar' ? 'عرض تفاصيل التاجر' : 'View merchant details'}: Careem`, exact: true }).first().click();
       await page.getByTestId('merchant-total-spent').waitFor({ state: 'visible' });
       assert.equal(minor(await page.getByTestId('merchant-total-spent').innerText()), 3501, 'Direct name/logo tap shows merchant spending');
       assert.equal(await page.getByTestId('merchant-detail').getByTestId('transaction-merchant-link').count(), 0, 'Merchant page has no self-links');
       await page.getByRole('button', { name: language === 'ar' ? 'رجوع' : 'Back', exact: true }).click();
+      await page.waitForURL(url => !url.pathname.includes('/merchant'));
+      await page.getByRole('button', { name: language === 'ar' ? 'رجوع' : 'Back', exact: true }).click();
+      await page.waitForURL(url => !url.pathname.includes('/transactions'));
       await page.getByRole('tab', { name: language === 'ar' ? 'الإنفاق' : 'Spending', exact: true }).click();
       await page.getByTestId('browse-merchant-spending').click();
       await page.getByTestId('merchant-directory').waitFor({ state: 'visible' });

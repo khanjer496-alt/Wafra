@@ -106,6 +106,10 @@ try {
     const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: scheme,
       locale: language === 'ar' ? 'ar-AE' : 'en-AE', timezoneId: 'Asia/Dubai', reducedMotion: 'reduce' });
     await context.addInitScript(fontScale => { window.__WAFRA_E2E_FONT_SCALE__ = fontScale; }, scale);
+    // Home v3 opens on Spent and the transactions; this suite also reads the last seven days, switched on here.
+    await context.addInitScript(layout => { if (!localStorage.getItem('wafra/ui/home-widgets/v1')) localStorage.setItem('wafra/ui/home-widgets/v1', layout); }, JSON.stringify({ version: 3,
+      order: ['greeting', 'hero', 'today', 'overview', 'week', 'activity', 'due', 'upcoming', 'transfers', 'insight', 'assistant', 'capture'],
+      hidden: ['today', 'overview', 'due', 'upcoming', 'transfers', 'insight', 'assistant', 'capture'] }));
     await context.route('**/*', route => {
       const url = route.request().url();
       return url.startsWith(base + '/') || /^(data|blob):/.test(url) ? route.continue() : route.abort();
@@ -137,7 +141,7 @@ try {
       const homeTotal = page.getByTestId('home-spending-total');
       check(minor(await homeTotal.innerText()), 15444, 'Home selected-month amount is independently correct');
       const homeBox = await homeTotal.boundingBox(); const weekBox = await page.getByTestId('home-week').boundingBox();
-      check(homeBox.y < weekBox.y, true, 'Home month line on the band precedes the week');
+      check(homeBox.y < weekBox.y, true, 'Home Spent hero on the band precedes the week');
       check(await page.getByTestId('home-week').locator('[data-testid^="week-value-"]').count(), 7, 'seven daily values remain visible');
       // Columns are labelled in whole units (12); Larger Text lists the exact
       // 12.34. The exact amount is always in the week's spoken label.

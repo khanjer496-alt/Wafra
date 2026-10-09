@@ -4,6 +4,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createHarness, walk, text } = require('./reference-harness.cjs');
 const find = (tree, id) => walk(tree).find(node => node.props?.testID === id);
+// The money overview (switched on in these cases) carries the same three ids as the Spent hero above it.
+const overview = tree => find(tree, 'home-section-overview');
 
 for (const language of ['en', 'ar']) {
   for (const theme of ['light', 'dark']) {
@@ -20,9 +22,9 @@ for (const language of ['en', 'ar']) {
         });
         const tree = h.render('home');
         const words = h.deps['@/lib/reference-copy'].homeSummaryCopy[language];
-        const incoming = find(tree, 'home-income-summary');
-        const outgoing = find(tree, 'home-spending-total');
-        const net = find(tree, 'home-net-summary');
+        const incoming = find(overview(tree), 'home-income-summary');
+        const outgoing = find(overview(tree), 'home-spending-total');
+        const net = find(overview(tree), 'home-net-summary');
         assert.ok(incoming && outgoing && net);
         assert.ok(incoming.props.accessibilityLabel.startsWith(words.moneyIn + ','));
         assert.ok(outgoing.props.accessibilityLabel.startsWith(words.moneyOut + ','));
@@ -55,12 +57,12 @@ test('changing the shared reporting period changes all three Home figures togeth
     const amount = fils => h.deps['@/lib/ledger-money'].formatMinorUnits(fils, h.state.ledgerMoney);
     const expected = h.deps['@/lib/dashboard-projection'].projectDashboard().hero;
     const tree = h.render('home');
-    assert.ok(find(tree, 'home-income-summary').props.accessibilityLabel.includes(amount(expected.incomeFils)));
-    assert.ok(find(tree, 'home-spending-total').props.accessibilityLabel.includes(amount(expected.expenseFils)));
-    assert.ok(find(tree, 'home-net-summary').props.accessibilityLabel.includes(amount(Math.abs(expected.netFils))));
+    assert.ok(find(overview(tree), 'home-income-summary').props.accessibilityLabel.includes(amount(expected.incomeFils)));
+    assert.ok(find(overview(tree), 'home-spending-total').props.accessibilityLabel.includes(amount(expected.expenseFils)));
+    assert.ok(find(overview(tree), 'home-net-summary').props.accessibilityLabel.includes(amount(Math.abs(expected.netFils))));
   }
-  assert.notEqual(find(current.render('home'), 'home-net-summary').props.accessibilityLabel,
-    find(previous.render('home'), 'home-net-summary').props.accessibilityLabel);
+  assert.notEqual(find(overview(current.render('home')), 'home-net-summary').props.accessibilityLabel,
+    find(overview(previous.render('home')), 'home-net-summary').props.accessibilityLabel);
 });
 
 test('Home keeps transfer uncertainty and raw cash movement out of the primary dashboard', () => {
@@ -74,7 +76,7 @@ test('Home keeps transfer uncertainty and raw cash movement out of the primary d
     },
   });
   const tree = h.render('home');
-  const net = find(tree, 'home-net-summary');
+  const net = find(overview(tree), 'home-net-summary');
   const words = h.deps['@/lib/reference-copy'].homeSummaryCopy.en;
   assert.ok(net);
   assert.ok(net.props.accessibilityLabel.startsWith(words.netLabel + ','));

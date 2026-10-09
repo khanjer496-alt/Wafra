@@ -82,6 +82,7 @@ for f in types routes format categories custom-categories ledger bill-alias capt
          alert-market-packs alert-semantics alert-rollout feedback-wire historical-import ios-history-import \
          ios-bank-senders.generated ios-bank-senders local-message-record ios-apple-pay-record ios-capture-health ios-local-capture ios-notification-replay \
          wafra-assistant wafra-assistant-ai assistant-spending-analysis assistant-patterns home-widget-preferences \
+         home-hero home-needs-you home-tilt home-copy \
          local-semantic-model local-semantic-runtime local-semantic-scheduler local-semantic-background-policy local-semantic-shadow local-semantic-inbox-shadow \
          local-semantic-review local-semantic-review-runtime local-assistant-grounding growth-funnel-diagnostics stability-diagnostics \
          local-semantic-flags on-device-ai on-device-assistant on-device-category best-effort-autopost; do

@@ -6,6 +6,13 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { chromium } from 'playwright';
 
+// Home v3 keeps the transfers notice off by default (the Needs-you pill carries it); this suite
+// drives that notice, so it switches the section on through a saved v3 layout.
+const HOME_LAYOUT = JSON.stringify({ version: 3,
+  order: ['greeting', 'hero', 'today', 'overview', 'week', 'transfers', 'activity', 'due', 'upcoming', 'insight', 'assistant', 'capture'],
+  hidden: ['today', 'overview', 'week', 'due', 'upcoming', 'insight', 'assistant', 'capture'] });
+const withHomeLayout = (context) => context.addInitScript(layout => {
+  if (!localStorage.getItem('wafra/ui/home-widgets/v1')) localStorage.setItem('wafra/ui/home-widgets/v1', layout); }, HOME_LAYOUT);
 const BASE = process.env.BASE ?? 'http://127.0.0.1:8134';
 assert.ok(['127.0.0.1', 'localhost', '[::1]'].includes(new URL(BASE).hostname));
 const OUT = process.env.E2E_ARTIFACT_DIR ?? path.join(tmpdir(), 'wafra-transfer-review-e2e');
@@ -196,6 +203,7 @@ try {
       localStorage.setItem(key, JSON.stringify(state));
       localStorage.setItem('wafra/e2e-transfer-seeded', '1');
     }, { key: KEY, state: seed(language, mode) });
+    await withHomeLayout(context);
     const page = await context.newPage();
     page.setDefaultTimeout(12000);
     const errors = [];
@@ -344,6 +352,7 @@ try {
           localStorage.setItem(key, JSON.stringify(state));
           localStorage.setItem('wafra/e2e-transfer-seeded', '1');
         }, { key: KEY, state: { ...seed(language, mode), transactions: settledRows } });
+        await withHomeLayout(settledContext);
         const settledPage = await settledContext.newPage();
         settledPage.on('pageerror', error => errors.push(String(error)));
         await home(settledPage, [230000, 21000, 209000], 0, 0);

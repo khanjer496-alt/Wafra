@@ -1,5 +1,5 @@
 import { useCategoryCatalog } from '@/hooks/use-category-catalog';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -7,6 +7,7 @@ import { MerchantSpendingLink } from '@/components/merchant-spending-link';
 import { accountDisplayName, isMoneyMovementOnly, isTransfer as isLedgerTransfer, isUnassignedIncome, cachedTransferReconciliationForState } from '@/lib/ledger';
 import { canMarkOwnTransfer, isTransferCandidate, transferOwnership, type TransferAssessment } from '@/lib/transfer-reconciliation';
 import { currentAnswer, ownCandidates, transferFingerprintsOf, type TransferAnswer } from '@/lib/transfer-answer';
+import { rowsByIdFor } from '@/lib/rows-by-id';
 import { transferActivityCopy, transferMetaLine, unbroken } from '@/lib/transfer-activity-copy';
 import { useTransferAnswer } from '@/hooks/use-transfer-answer';
 import { TransferAnswerChoices } from '@/components/transfers/transfer-answer-choices';
@@ -140,7 +141,9 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   const { answer, undo, busy } = transferAnswers ?? ownAnswers;
   const activityWords = transferActivityCopy(language);
   const answerWords = activityWords.answers;
-  const rowsById = useMemo(() => new Map(state.transactions.map(row => [row.id, row] as const)), [state.transactions]);
+  // Shared per ledger snapshot: a closed sheet on every host screen no longer
+  // rebuilds its own index of the whole ledger on each change.
+  const rowsById = rowsByIdFor(state.transactions);
   const opensOnPicker = () => startWithAccountPicker && !!transaction &&
     ownCandidates(transaction, transferAssessment, rowsById).length > 1;
   const [picking, setPicking] = useState(opensOnPicker);

@@ -89,7 +89,11 @@ try {
       }, { language, businessIncomeFils });
       await page.reload({ waitUntil: 'networkidle' });
       const sourceLabel = `${language === 'ar' ? 'عرض مصدر الدخل' : 'View income source'}: `;
-      await tapOnTop(page.getByTestId('home-widget-activity').getByRole('button', { name: `${sourceLabel}Careem Business`, exact: true }));
+      // Home rows open the entry sheet as one tap target (Home v3); the direct source/merchant
+      // links are on the full Transactions list behind Home's "See all".
+      await tapOnTop(page.getByTestId('home-see-all'));
+      await page.waitForURL(url => url.pathname.includes('/transactions'));
+      await tapOnTop(page.getByRole('button', { name: `${sourceLabel}Careem Business`, exact: true }).first());
       await page.waitForURL(/\/merchant\?name=Careem%20Business&type=income$/);
       await active(page, 'merchant-total-received').waitFor({ state: 'visible' });
       assert.equal(minor(await active(page, 'merchant-total-received').innerText()), businessIncomeFils);
@@ -111,7 +115,9 @@ try {
       await tapOnTop(page.getByRole('button', { name: language === 'ar' ? 'رجوع' : 'Back', exact: true }));
       await page.waitForURL(url => !url.pathname.includes('/merchant'));
       const merchantLabel = `${language === 'ar' ? 'عرض تفاصيل التاجر' : 'View merchant details'}: Careem`;
-      const homeLink = page.getByTestId('home-widget-activity').getByRole('button', { name: merchantLabel, exact: true }).first();
+      // Back on the full Transactions list (reached from Home's "See all" above).
+      await page.waitForURL(url => url.pathname.includes('/transactions'));
+      const homeLink = page.getByRole('button', { name: merchantLabel, exact: true }).first();
       await tapOnTop(homeLink);
       await page.getByTestId('merchant-total-spent').waitFor({ state: 'visible' });
       assert.equal(new URL(page.url()).pathname, '/merchant');
@@ -139,7 +145,8 @@ try {
       await tapOnTop(viewAll);
       await page.waitForURL(/\/transactions\?type=all&merchant=Careem$/);
       assert.equal(new URL(page.url()).searchParams.get('type'), 'all');
-      const activitySearch = page.getByPlaceholder(language === 'ar' ? 'التاجر أو الفئة' : 'Merchant or category', { exact: true });
+      // The Transactions list this journey started from stays mounted under the stack; use the visible one.
+      const activitySearch = page.getByPlaceholder(language === 'ar' ? 'التاجر أو الفئة' : 'Merchant or category', { exact: true }).filter({ visible: true });
       await activitySearch.waitFor({ state: 'visible' });
       assert.equal(await activitySearch.isEditable(), true);
       assert.equal(await activitySearch.getAttribute('aria-label'), language === 'ar' ? 'ابحث في المتاجر أو التصنيفات' : 'Search merchants or categories');

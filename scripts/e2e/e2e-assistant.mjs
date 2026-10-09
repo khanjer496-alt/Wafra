@@ -169,6 +169,11 @@ try {
       notSubscriptions: [], merchantOverrides: {}, billAliases: {}, historyImport: null,
       ...(overrides.state ?? {}),
     } });
+    // Home v3 opens on Spent and the transactions; this suite reads sections that are now off by
+    // default, so it switches them on through a saved v3 layout (as Customize Home would).
+    await context.addInitScript(layout => { if (!localStorage.getItem('wafra/ui/home-widgets/v1')) localStorage.setItem('wafra/ui/home-widgets/v1', layout); }, JSON.stringify({ version: 3,
+      order: ['greeting', 'hero', 'today', 'overview', 'week', 'due', 'upcoming', 'activity', 'transfers', 'insight', 'assistant', 'capture'],
+      hidden: ['today', 'week', 'due', 'upcoming', 'transfers', 'insight', 'capture'] }));
     const page = await context.newPage(); page.setDefaultTimeout(12000);
     await page.clock.setFixedTime(new Date(NOW));
     page.on('pageerror', error => errors.push({ scenario: name, error: String(error) }));

@@ -52,7 +52,7 @@ function createHarness(options = {}) {
   };
   const platform=options.platform??'android';
   const native={View:'View',ActivityIndicator:'ActivityIndicator',Text:'Text',TextInput:'TextInput',Pressable:'Pressable',ScrollView:p=>jsx('ScrollView',p),RefreshControl:'RefreshControl',StyleSheet:nativeStyles,
-    Platform:{OS:platform,select:x=>x[platform]??x.default},AppState:{addEventListener:()=>({remove(){}})},InteractionManager:{runAfterInteractions:task=>{task();return{cancel(){}};}},Alert:{alert:m=>events.push(['alert',m])},useWindowDimensions:()=>({width:options.width??390,fontScale:options.largeText?1.3:1}),
+    Platform:{OS:platform,select:x=>x[platform]??x.default},AppState:{addEventListener:()=>({remove(){}})},InteractionManager:{runAfterInteractions:task=>{task();return{cancel(){}};}},Alert:{alert:m=>events.push(['alert',m])},useWindowDimensions:()=>({width:options.width??390,height:options.height??844,fontScale:options.largeText?1.3:1}),
     // Core Animated as the final frame: values hold what they are given, and runs never start.
     Animated:(()=>{const run={start(){},stop(){}};class Value{constructor(v){this.value=v;}setValue(v){this.value=v;}interpolate(){return this;}}
       return {View:'View',Value,add:(a)=>a,multiply:(a)=>a,timing:()=>run,spring:()=>run,delay:()=>run,sequence:()=>run,parallel:()=>run};})(),
@@ -267,6 +267,9 @@ function createHarness(options = {}) {
   deps['react-native-safe-area-context']={useSafeAreaInsets:()=>({top:0,bottom:10,left:0,right:0})};
   deps['@/components/ui/tab-bar-metrics']={useTabBarMetrics:()=>({measuredHeight:78,setMeasuredHeight(){}})};
   local('@/components/tab-bar');
+  // Home v3: the Spent hero, the transactions list and the Needs you pill
+  // from source, and the saved layout every case starts from (home-v3-harness.cjs).
+  require('./home-v3-harness.cjs').installHomeV3(deps,{load,jsx,language:lang,events,options,globals:{Date:Clock}});
   function loadDetail() {
     deps['@/lib/fx'].formatOriginalCurrency=(f,c)=>c+' '+amount(f);
     // Reading a stored original is pure; use the shipping reader.
