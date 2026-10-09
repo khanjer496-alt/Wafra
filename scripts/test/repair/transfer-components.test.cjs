@@ -46,22 +46,39 @@ test('route row reads From → To with the tag', () => {
   assert.ok(text(tree).includes('Someone else · counted'));
 });
 
-test('question card asks by direction, shows its step and hides See all for one item', () => {
+test('question card asks by direction, shows its step, answers in full-width rows and has no See all', () => {
   const h = harness('en');
   const { TransferQuestionCard } = h.deps['@/components/transfers/transfer-question-card'];
   const words = h.deps['@/lib/transfer-activity-copy'].transferActivityCopy('en');
   const transaction = { id: 'q', type: 'expense', amountFils: 500000, date: '2026-10-02', accountId: 'fab', title: 'Transfer', category: 'other' };
   const answers = [];
   const one = TransferQuestionCard({ transaction, index: 0, total: 1, accountLabel: 'FAB', palette: palette(h), busy: false,
-    onAnswer: a => answers.push(a), onSeeAll() {} });
+    onAnswer: a => answers.push(a) });
   assert.ok(text(one).includes(words.card.whereOut));
+  // Select in the list head replaces the card's own "See all"; the unnamed link moved to the list too.
   assert.equal(byId(one, 'transfer-question-see-all'), undefined);
+  assert.equal(byId(one, 'transfer-question-unnamed'), undefined);
+  // Full-width answers, each saying what it does to the totals.
+  for (const answer of ['own', 'external', 'none']) {
+    const effect = answer === 'none' ? words.answers.effect.none : words.answers.effect[answer](false);
+    assert.equal(byId(one, `transfer-answer-${answer}`).props.accessibilityLabel, `${words.answers.out[answer]}. ${effect}`);
+  }
   byId(one, 'transfer-answer-none').props.onPress();
   assert.deepEqual(answers, ['none']);
   const two = TransferQuestionCard({ transaction, index: 0, total: 2, accountLabel: 'FAB', palette: palette(h), busy: false,
-    onAnswer() {}, onSeeAll() {} });
+    onAnswer() {} });
+  // The step is shown; the count is spoken once, with it, by the card's header.
   assert.ok(text(two).includes(words.card.step(1, 2)));
-  assert.ok(byId(two, 'transfer-question-see-all'));
+  assert.ok(!text(two).includes(words.card.title(2)), 'the count is on the To answer tab, not printed twice');
+  const head = walk(two).find(n => n.props?.accessibilityRole === 'header');
+  assert.equal(head.props.accessibilityLabel, `${words.card.title(2)}. ${words.card.step(1, 2)}`);
+  assert.equal(byId(two, 'transfer-question-see-all'), undefined);
+  // Queued entries the card cannot ask about: the header names the whole count instead of a step.
+  const more = TransferQuestionCard({ transaction, index: 0, total: 2, more: 1, accountLabel: 'FAB', palette: palette(h), busy: false,
+    onAnswer() {} });
+  assert.ok(text(more).includes(words.card.title(3)));
+  assert.ok(!text(more).includes(words.card.step(1, 2)));
+  assert.equal(walk(more).find(n => n.props?.accessibilityRole === 'header').props.accessibilityLabel, words.card.title(3));
 });
 
 // ---- Fix round 1 ----

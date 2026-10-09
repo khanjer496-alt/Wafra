@@ -144,6 +144,8 @@ const save = h => byId(sheetOf(h), 'transfer-answer-sheet-save').props.onPress()
 const startSelecting = h => byId(h.render(), 'transfers-select').props.onPress();
 const footer = h => byId(h.render(), 'transfer-selection-footer');
 const detailSheet = tree => walk(tree).find(node => node.type === 'EntryDetailSheet');
+/** Switches to the History view (the period's transfers, under the tiles) and renders it. */
+const showHistory = h => { byId(h.render(), 'transfers-view-history').props.onPress(); return h.render(); };
 
 // ---- Groups: several entries with the same account and other side ----
 
@@ -412,12 +414,12 @@ test('Undo never clears an answer given since the save: it says the transfers ch
 
 test('while Undo runs the page knows: its controls wait until it is done', async () => {
   const undoing = deferred();
-  const h = createPage({ bulk: true, transactions: [row('one'), row('two'), row('three', { accountId: 'other' })],
-    groupDefinitions: [{ id: 'group', transactionIds: ['one', 'two'], bulkEligible: true }, { id: 'solo', transactionIds: ['three'], bulkEligible: false }],
+  const h = createPage({ bulk: true, transactions: [row('one'), row('two'), row('three', { accountId: 'other' }), row('four', { accountId: 'other' })],
+    groupDefinitions: [{ id: 'group', transactionIds: ['one', 'two'], bulkEligible: true }, { id: 'solo', transactionIds: ['three', 'four'], bulkEligible: false }],
     resolveTransferBatch: async (request, state) => {
       if (request.decisions[0].ownership === null) return undoing.promise;
       const decidedAt = Date.now();
-      state.transactions = state.transactions.map(tx => tx.id === 'three' ? tx
+      state.transactions = state.transactions.map(tx => tx.id === 'three' || tx.id === 'four' ? tx
         : { ...tx, transferDecision: { version: 1, ownership: 'own', decidedAt } });
     } });
   // The page's real answer hook keeps its busy flag in state; this harness re-renders from its slots.
@@ -429,6 +431,8 @@ test('while Undo runs the page knows: its controls wait until it is done', async
   assert.equal(byId(tree, 'transfers-select').props.disabled, true, 'Select waits');
   assert.equal(walk(tree).find(n => n.type === 'Scaffold').props.nav.backDisabled, true, 'leaving waits');
   assert.equal(byId(byId(tree, 'transfer-question-card'), 'transfer-answer-own').props.disabled, true, 'the question card waits');
+  byId(tree, 'transfers-view-history').props.onPress();
+  assert.equal(byId(h.render(), 'transfers-view-answer').props.accessibilityState.selected, true, 'the view stays put');
   undoing.resolve(); await flush(); await flush();
   assert.equal(byId(h.render(), 'transfers-select').props.disabled, false, 'and comes back once Undo is done');
 });
@@ -450,9 +454,11 @@ test('3,106 waiting entries stay one bounded group row; its entries page 20 at a
   assert.equal(byId(sheet, 'transfer-answer-sheet-save'), undefined);
   assert.equal(byId(sheet, 'transfer-answer-own'), undefined);
   byId(sheet, 'transfer-answer-sheet-cancel').props.onPress();
+  // A single group of thousands of entries can still be searched under To answer.
   walk(h.render()).find(node => node.type === 'TextInput').props.onChangeText('Synthetic');
   tree = h.render();
   assert.equal(groupRows(tree).length, 1, 'search narrows the group, it does not unfold it');
+  assert.equal(list(tree).props.data.length, 1, 'still one list item');
   walk(h.render()).find(node => node.type === 'TextInput').props.onChangeText('nothing like this');
   assert.equal(groupRows(h.render()).length, 0);
   assert.deepEqual(h.events, []);
@@ -533,6 +539,9 @@ test('a link to one entry opens its "What is this?" on Transfers; closing shows 
   detailSheet(tree).props.onClose();
   tree = h.render();
   assert.equal(detailSheet(tree).props.transaction, null);
+  assert.ok(byId(tree, 'transfer-question-card'), 'To answer asks about what still waits');
+  tree = showHistory(h);
+  assert.equal(detailSheet(tree).props.transaction, null);
   assert.deepEqual(routeRows(tree).map(node => node.props.testID).sort(), ['transfer-row-a', 'transfer-row-b']);
   assert.deepEqual(h.events, [], 'opening a link never classifies');
 });
@@ -549,10 +558,19 @@ test('a link to a low-signal transfer opens it; it needs an answer and select mo
   assert.equal(byId(general, 'transfer-question-card'), undefined, 'an unnamed one-off is not walked by the card');
   const link = byId(general, 'transfers-review-link');
   assert.ok(link && text(link).includes(copyFor('en').card.title(1)), 'but it is counted, and select mode answers it');
-  link.props.onPress();
-  assert.ok(byId(page.render(), 'transfer-selection-footer'));
   assert.equal(groupRows(general).length, 0, 'it names nobody: no person, no group');
-  const rowNode = byId(general, 'transfer-row-low-signal');
+  // To answer lists it as the one "without a name" row, which opens select mode too.
+  const unnamed = byId(general, 'transfer-question-unnamed');
+  assert.ok(unnamed, 'the unnamed one-off is listed under To answer');
+  assert.equal(unnamed.props.accessibilityLabel, `${copyFor('en').card.unnamedTitle(1)}. ${copyFor('en').card.unnamedBody}`);
+  assert.equal(routeRows(general).length, 0, 'the period\'s transfers are under History');
+  link.props.onPress();
+  const selecting = page.render();
+  assert.ok(byId(selecting, 'transfer-selection-footer'));
+  assert.ok(byId(selecting, 'transfer-row-low-signal'), 'select mode lists it to be ticked');
+  // History lists it among the period's transfers, waiting.
+  const history = createPage({ transactions: [tx], groupDefinitions: [] });
+  const rowNode = byId(showHistory(history), 'transfer-row-low-signal');
   assert.ok(text(rowNode).includes(copyFor('en').tags.needsAnswer), 'one term for every unanswered transfer');
 });
 
@@ -630,9 +648,10 @@ for (const language of ['en', 'ar']) {
 }
 
 test('a suggested pair answered "someone else" answers both legs, each alone and never linked', async () => {
-  const h = createPage(manyPairs(1));
+  // Two pairs: with one movement alone the card asks it and there is nothing else to select.
+  const h = createPage(manyPairs(2));
   startSelecting(h);
-  pairChecks(h)[0].props.onPress();
+  byId(h.render(), 'transfer-row-out-0|in-0').props.onPress();
   // A pair moves money out of one account and into another: its answers are worded for both directions.
   const bar = byId(footer(h), 'transfer-answer-external');
   assert.ok(bar.props.accessibilityLabel.includes(h.words.answers.mixed.external));
@@ -761,7 +780,7 @@ test('select controls, the bar and the sheet use the Transfers page\'s buttons; 
 });
 
 test('large text stacks the routes, the controls and the answer buttons', () => {
-  const h = createPage({ ...manyPairs(1), largeText: true });
+  const h = createPage({ ...manyPairs(2), largeText: true });
   startSelecting(h);
   const tree = h.render();
   assert.equal(flatStyle(byId(tree, 'transfer-route-out-0|in-0').props.style).flexDirection, 'column');
@@ -781,8 +800,13 @@ test('select mode: a group is one tick; no checkbox outside select mode; Select 
   let tree = h.render();
   assert.equal(byId(tree, 'transfer-group-two').props.accessibilityRole, 'button', 'no checkbox outside select mode');
   assert.ok(byId(byId(tree, 'transfer-group-two'), 'transfer-group-count'), 'several entries keep their count');
-  assert.ok(byId(tree, 'transfer-row-b'), 'a lone listed entry is its own row');
+  // A lone entry is never a group of one: the card asks about it, and History lists it as its own row.
+  assert.equal(byId(tree, 'transfer-group-one'), undefined, 'a lone entry is not a group row');
+  assert.ok(byId(showHistory(createPage({ transactions: [row('a'), row('b', { accountId: 'other' }), row('c')],
+    groupDefinitions: [{ id: 'one', transactionIds: ['b'], bulkEligible: false }, { id: 'two', transactionIds: ['a', 'c'], bulkEligible: true }] })),
+  'transfer-row-b'), 'a lone listed entry is its own row');
   startSelecting(h); tree = h.render();
+  assert.equal(byId(tree, 'transfer-row-b').props.accessibilityRole, 'checkbox', 'select mode ticks the lone entry on its own');
   const group = byId(tree, 'transfer-group-two');
   assert.equal(group.props.accessibilityRole, 'checkbox');
   assert.ok(group.props.accessibilityLabel.startsWith(h.words.select.item));
@@ -1072,8 +1096,9 @@ test('previews sign single entries like the list and show each amount once; a pa
 });
 
 test('pair legs with different amounts show both, never one merged figure', () => {
-  const h = createPage({ ...manyPairs(1), transactions: [row('out-0'), row('in-0', { type: 'income', accountId: 'other', amountFils: 12000 })] });
-  startSelecting(h); byId(h.render(), 'transfer-select-shown').props.onPress(); answerIn(footer(h), 'own');
+  const pairs = manyPairs(2);
+  const h = createPage({ ...pairs, transactions: pairs.transactions.map(tx => tx.id === 'in-0' ? { ...tx, amountFils: 12000 } : tx) });
+  startSelecting(h); byId(h.render(), 'transfer-row-out-0|in-0').props.onPress(); answerIn(footer(h), 'own');
   // One ticked item is drawn at the top of the sheet as its route.
   const item = text(byId(sheetOf(h), 'transfer-answer-sheet-route'));
   assert.ok(item.includes('AED 123.45') && item.includes('AED 120.00'));
@@ -1103,7 +1128,10 @@ test('Home and the question card reach this one page; nothing routes to the old 
   assert.match(home, /transferWaitingSummary\(activity\)/, 'Home counts what the card counts: every transfer waiting');
   assert.match(transfers0(), /transferWaitingSummary\(activity\)\.transfers/, 'and the card says the same number');
   const transfers = fs.readFileSync(path.join(root, 'src/app/transfers.tsx'), 'utf8');
-  assert.match(transfers, /onSeeAll=\{startSelecting\}/, 'See all selects several on this page');
+  // The card no longer carries See all: Select in the list head under it, and the "without a name" row, select here.
+  assert.doesNotMatch(transfers, /onSeeAll|onSelectUnnamed/, 'the card has no select links of its own');
+  assert.match(transfers, /testID="transfers-select"[^>]*?onPress=\{startSelecting\}/, 'Select selects several on this page');
+  assert.match(transfers, /testID="transfer-question-unnamed"[^>]*?onPress=\{startSelecting\}/, 'and so does the unnamed row');
   assert.match(transfers, /back: \(\) => \{ if \(router\.canGoBack\(\)\) router\.back\(\);/);
   // Every entry point (rows, groups, Home, Transactions, Accounts, Spending, entry sheets, links) lands on
   // Transfers or the entry's own "What is this?": no source names the old address except the redirect itself
@@ -1124,12 +1152,24 @@ test('Home and the question card reach this one page; nothing routes to the old 
   }
 });
 
-test('See all on the question card turns on select mode', () => {
+test('Select under the question card turns on select mode (the card has no See all of its own)', () => {
   const h = createPage({ transactions: [row('q1'), row('q2', { accountId: 'other' })], pending: ['q1', 'q2'],
     groupDefinitions: [{ id: 'g1', transactionIds: ['q1'], bulkEligible: false }, { id: 'g2', transactionIds: ['q2'], bulkEligible: false }] });
-  const card = byId(h.render(), 'transfer-question-card');
-  byId(card, 'transfer-question-see-all').props.onPress();
-  assert.ok(byId(h.render(), 'transfer-selection-footer'));
+  const tree = h.render();
+  const card = byId(tree, 'transfer-question-card');
+  assert.equal(byId(card, 'transfer-question-see-all'), undefined);
+  // Nothing is listed under the card, but two wait: the head says what Select does, as a quiet line.
+  assert.equal(list(tree).props.data.length, 0);
+  const head = byId(tree, 'transfers-list-head');
+  assert.ok(text(head).includes(h.words.select.actionHint));
+  const select = byId(head, 'transfers-select');
+  assert.equal(select.props.accessibilityLabel, h.words.select.action);
+  assert.ok(flatStyle(select.props.style).minHeight >= 44);
+  select.props.onPress();
+  const selecting = h.render();
+  assert.ok(byId(selecting, 'transfer-selection-footer'));
+  assert.equal(byId(selecting, 'transfers-views'), undefined, 'select mode hides the views switch');
+  assert.deepEqual(routeRows(selecting).map(node => node.props.testID).sort(), ['transfer-row-q1', 'transfer-row-q2'], 'both can be ticked');
   assert.deepEqual(h.events, []);
 });
 
@@ -1342,29 +1382,54 @@ const savingPage = () => peoplePage({ resolveTransferBatch: async (request, stat
     : { ...tx, transferDecision: { version: 1, ownership: byIdDecision.get(tx.id), decidedAt } });
 } });
 
+// Money keeps its currency and figure on one line (a no-break space); compare the words, not the space.
+const spaced = value => String(value).replace(/\u00A0/g, ' ');
+
 for (const language of ['en', 'ar']) {
-  test(`${language}: a person is one row: initial, name, how many transfers, money each way, dates and the open tag`, () => {
+  test(`${language}: a person is one row: initial, name, how many transfers and when; the money and the open tag are spoken`, () => {
     const h = peoplePage({ language });
-    const tree = h.render();
+    let tree = h.render();
+    // The card asks about Mariam (most transfers): she is not listed under it a second time.
+    assert.equal(personOf(tree, 'person:mariam s'), undefined, 'the card\'s person is not listed twice');
+    const khalid = personOf(tree, 'person:khalid r');
+    assert.ok(khalid, 'one transfer is still a person');
+    assert.equal(khalid.props.accessibilityRole, 'button');
+    for (const id of ['m1', 'm2', 'm3', 'k1', 'u1']) assert.equal(byId(tree, `transfer-row-${id}`), undefined, `${id}: To answer lists no routes`);
+    // The transfer naming nobody is the one "without a name" row.
+    const unnamedRow = byId(tree, 'transfer-question-unnamed');
+    assert.ok(unnamedRow, 'a transfer naming nobody is listed under To answer');
+    assert.equal(unnamedRow.props.accessibilityLabel, `${h.words.card.unnamedTitle(1)}. ${h.words.card.unnamedBody}`);
+    assert.ok(text(byId(tree, 'transfers-list-head')).includes(h.words.group.alsoWaiting), 'under the card: "Also waiting"');
+    // Searching lists every match, the card's person too.
+    searchFor(h.render, 'mariam');
+    tree = h.render();
     const mariam = personOf(tree, 'person:mariam s');
     assert.ok(mariam, 'every spelling of the name is one person');
     assert.ok(text(mariam).includes('MARIAM S'), 'the spelling the bank used most');
     assert.ok(text(mariam).includes('M'), 'the avatar initial');
-    assert.ok(text(byId(mariam, 'transfer-person-count')).includes(h.words.person.transfers(3)));
-    assert.ok(text(mariam).includes(h.words.person.sent('AED 246.90', 2)), 'money out, with how many');
-    assert.ok(text(mariam).includes(h.words.person.received('AED 50.00', 1)), 'money in, with how many');
-    assert.ok(text(mariam).includes(h.words.tags.needsAnswer));
+    const meta = text(byId(mariam, 'transfer-person-count'));
+    assert.ok(meta.includes(h.words.person.transfers(3)), 'how many');
+    assert.ok(meta.includes('2026-09-08'), 'and when');
+    assert.ok(!spaced(text(mariam)).includes(h.words.person.sent('AED 246.90')), 'no money line on screen (the card and the sheet show it)');
+    assert.ok(!spaced(text(mariam)).includes('246.90'), 'no figure on screen at all');
+    assert.ok(!text(mariam).includes(h.words.tags.needsAnswer), 'everything under To answer waits: no tag on screen');
+    assert.ok(walk(mariam).some(node => node.type === 'Icon' && node.props.name === 'chevron-right'), 'a chevron: it opens');
     assert.equal(mariam.props.accessibilityRole, 'button');
-    for (const part of ['MARIAM S', h.words.person.transfers(3), h.words.tags.needsAnswer]) {
-      assert.ok(mariam.props.accessibilityLabel.includes(part), part);
+    for (const part of ['MARIAM S', h.words.person.transfers(3), h.words.person.sent('AED 246.90'), h.words.person.received('AED 50.00'),
+      '2026-09-08', h.words.tags.needsAnswer]) {
+      assert.ok(spaced(mariam.props.accessibilityLabel).includes(part), part);
     }
+    assert.ok(!mariam.props.accessibilityLabel.includes('(2)'), 'the money each way no longer repeats a count');
     assert.ok(flatStyle(mariam.props.style).minHeight >= 44);
-    assert.ok(personOf(tree, 'person:khalid r'), 'one transfer is still a person');
-    for (const id of ['m1', 'm2', 'm3', 'k1']) assert.equal(byId(tree, `transfer-row-${id}`), undefined, `${id} is answered with its person`);
-    const unnamed = byId(tree, 'transfer-row-u1');
+    // History lists the transfer naming nobody as its own row, with the same one term.
+    const history = showHistory(peoplePage({ language }));
+    const unnamed = byId(history, 'transfer-row-u1');
     assert.ok(unnamed, 'a transfer naming nobody stays its own row');
     assert.ok(text(unnamed).includes(h.words.tags.needsAnswer), 'with the same one term');
-    assert.ok(text(byId(tree, 'transfers-list-head')).includes(h.words.group.section));
+    // Pressing a listed person asks the one question for all their transfers.
+    searchFor(h.render, '');
+    personOf(h.render(), 'person:khalid r').props.onPress();
+    assert.ok(text(byId(sheetOf(h), 'transfer-answer-sheet-person')).includes(h.words.person.oneAnswer('KHALID R')));
     assert.deepEqual(h.events, [], 'drawing people never writes');
   });
 }
@@ -1372,14 +1437,24 @@ for (const language of ['en', 'ar']) {
 test('the card asks about the top person; an answer opens the sheet with every entry and its count, nothing saved yet', () => {
   const h = peoplePage();
   const card = byId(h.render(), 'transfer-question-card');
-  assert.ok(text(card).includes(h.words.person.question('MARIAM S')), 'the person with the most transfers first');
-  assert.ok(text(card).includes(h.words.card.title(5)), 'every transfer waiting: three with Mariam, one with Khalid, one unnamed');
-  assert.ok(text(card).includes(h.words.card.step(1, 2)), 'the card walks the two people; the unnamed one-off is not a question');
-  const unnamed = byId(card, 'transfer-question-unnamed');
-  assert.ok(text(unnamed).includes(h.words.card.moreUnnamed(1)));
-  assert.equal(unnamed.props.accessibilityRole, 'button');
-  // Money both ways: the answers are worded for both directions.
-  assert.ok(text(card).includes(h.words.answers.mixed.own));
+  // The name leads; it is spoken as the question.
+  const name = walk(card).find(node => node.props?.accessibilityLabel === h.words.person.question('MARIAM S'));
+  assert.ok(name, 'the person with the most transfers first');
+  assert.equal(text(name).trim(), 'MARIAM S');
+  assert.ok(text(card).includes(h.words.person.who), 'then the question, in words');
+  assert.ok(text(card).includes(h.words.person.transfers(3)) && text(card).includes('2026-09-08'), 'how many and when');
+  assert.ok(spaced(text(card)).includes(h.words.person.sent('AED 246.90')) && spaced(text(card)).includes(h.words.person.received('AED 50.00')),
+    'the money each way is on the card');
+  const head = walk(card).find(node => node.props?.accessibilityRole === 'header');
+  assert.equal(head.props.accessibilityLabel, `${h.words.card.title(5)}. ${h.words.card.step(1, 2)}`,
+    'every transfer waiting: three with Mariam, one with Khalid, one unnamed; the card walks the two people');
+  assert.ok(text(card).includes(h.words.card.step(1, 2)));
+  // The unnamed one-off is not a question: it is listed under the card, not linked from it.
+  assert.equal(byId(card, 'transfer-question-unnamed'), undefined);
+  assert.ok(byId(h.render(), 'transfer-question-unnamed'));
+  // Money both ways: the answers are worded for both directions, each saying what it does.
+  assert.equal(byId(card, 'transfer-answer-own').props.accessibilityLabel,
+    `${h.words.answers.mixed.own}. ${h.words.answers.mixedEffect.own}`);
   answerIn(card, 'external');
   assert.deepEqual(h.events, [], 'a person is never answered by one tap: the sheet shows what it covers');
   const sheet = sheetOf(h);
@@ -1391,11 +1466,18 @@ test('the card asks about the top person; an answer opens the sheet with every e
   assert.equal(byId(sheet, 'transfer-answer-sheet-save').props.accessibilityLabel, h.words.batch.save(3));
 });
 
-test('the card\'s "N more without a name" opens select mode, where each unnamed transfer can be ticked', () => {
+test('the "without a name" row under the card opens select mode, where each unnamed transfer can be ticked', () => {
   const h = peoplePage();
-  byId(byId(h.render(), 'transfer-question-card'), 'transfer-question-unnamed').props.onPress();
+  const before = h.render();
+  assert.equal(byId(byId(before, 'transfer-question-card'), 'transfer-question-unnamed'), undefined, 'not on the card');
+  const unnamed = byId(before, 'transfer-question-unnamed');
+  assert.equal(unnamed.type, 'Pressable');
+  assert.equal(unnamed.props.accessibilityRole, 'button');
+  assert.ok(text(unnamed).includes(h.words.card.unnamedTitle(1)) && text(unnamed).includes(h.words.card.unnamedBody));
+  unnamed.props.onPress();
   const tree = h.render();
   assert.ok(byId(tree, 'transfer-selection-footer'), 'select mode');
+  assert.equal(byId(tree, 'transfer-question-unnamed'), undefined, 'select mode lists the transfers themselves');
   const row = byId(tree, 'transfer-row-u1');
   assert.equal(row.props.accessibilityRole, 'checkbox');
   row.props.onPress();
@@ -1405,8 +1487,9 @@ test('the card\'s "N more without a name" opens select mode, where each unnamed 
 
 test('a person\'s answer is one single-entry decision per transfer, with Undo clearing exactly those', async () => {
   const h = savingPage();
-  byId(h.render(), `transfer-person-person:mariam s`).props.onPress();
-  answerIn(sheetOf(h), 'own');
+  // Mariam is the card's person: her answer starts there and opens the sheet on it.
+  answerIn(byId(h.render(), 'transfer-question-card'), 'own');
+  assert.equal(byId(sheetOf(h), 'transfer-answer-own').props.accessibilityState.checked, true);
   const original = Object.fromEntries(h.state.transactions.filter(tx => tx.id.startsWith('m')).map(tx => [tx.id, fingerprint(tx)]));
   save(h); await flush();
   const request = h.events.find(event => event[0] === 'batch')[1];
@@ -1416,18 +1499,27 @@ test('a person\'s answer is one single-entry decision per transfer, with Undo cl
   assert.equal(request.expectedGeneration, 1);
   const [message, options] = h.toasts.at(-1);
   assert.equal(message, h.words.batch.saved(3));
-  assert.equal(personOf(h.render(), 'person:mariam s'), undefined, 'answered: the person leaves the waiting list');
+  // The person the card asks about, as its name is spoken.
+  const card = tree => walk(byId(tree, 'transfer-question-person')).find(node => node.type === 'Text' && node.props.accessibilityLabel)
+    ?.props.accessibilityLabel;
+  let tree = h.render();
+  assert.equal(card(tree), h.words.person.question('KHALID R'), 'answered: the card moves on to the next person');
+  assert.equal(personOf(tree, 'person:mariam s'), undefined, 'and Mariam leaves the waiting list');
+  searchFor(h.render, 'mariam');
+  assert.equal(personOf(h.render(), 'person:mariam s'), undefined, 'even when searched for');
+  searchFor(h.render, '');
   options.actions.find(action => action.label === h.words.answers.undo).onPress(); await flush(); await flush();
   const undo = h.events.filter(event => event[0] === 'batch').at(-1)[1];
   assert.deepEqual(undo.decisions, [{ ids: ['m1'], ownership: null }, { ids: ['m2'], ownership: null }, { ids: ['m3'], ownership: null }]);
   assert.deepEqual(h.events.at(-1), ['toast', h.words.answers.undone]);
-  assert.ok(personOf(h.render(), 'person:mariam s'), 'back to waiting');
+  tree = h.render();
+  assert.equal(card(tree), h.words.person.question('MARIAM S'), 'back to waiting: the card asks about her again');
+  assert.ok(personOf(tree, 'person:khalid r'), 'and Khalid is listed under it again');
 });
 
 test('a person changed after it was opened blocks Save and says so; nothing is written', () => {
   const h = peoplePage();
-  byId(h.render(), `transfer-person-person:mariam s`).props.onPress();
-  answerIn(sheetOf(h), 'external');
+  answerIn(byId(h.render(), 'transfer-question-card'), 'external');
   h.state.transactions = h.state.transactions.map(tx => tx.id === 'm2' ? { ...tx, amountFils: 5100 } : tx);
   const sheet = sheetOf(h);
   assert.equal(byId(sheet, 'transfer-answer-sheet-save').props.disabled, true);
@@ -1468,26 +1560,128 @@ test('search narrows a person to the transfers it matches; the answer covers onl
 });
 
 test('many people: the first five, then "Show all N people"; select mode lists everyone', () => {
-  const names = ['AMAL A', 'BADR B', 'CYRUS C', 'DIMA D', 'EHAB E', 'FARAH F', 'GHADA G'];
+  const names = ['AMAL A', 'BADR B', 'CYRUS C', 'DIMA D', 'EHAB E', 'FARAH F', 'GHADA G', 'HANA H'];
   const h = createPage({ groupDefinitions: [], transactions: names.flatMap((name, i) =>
-    Array.from({ length: 7 - i }, (_, k) => named(`${i}-${k}`, name))) });
+    Array.from({ length: 8 - i }, (_, k) => named(`${i}-${k}`, name))) });
+  const people = tree => walk(tree).filter(node => node.props?.testID?.startsWith('transfer-person-person:'));
   let tree = h.render();
-  const shown = walk(tree).filter(node => node.props?.testID?.startsWith('transfer-person-person:'));
-  assert.deepEqual(shown.map(node => node.props.testID.slice('transfer-person-'.length)),
-    ['person:amal a', 'person:badr b', 'person:cyrus c', 'person:dima d', 'person:ehab e'], 'most transfers first');
+  // Amal (most transfers) is the card's question; the seven others are listed under it, most transfers first.
+  assert.equal(personOf(tree, 'person:amal a'), undefined, 'the card\'s person is not listed twice');
+  assert.deepEqual(people(tree).map(node => node.props.testID.slice('transfer-person-'.length)),
+    ['person:badr b', 'person:cyrus c', 'person:dima d', 'person:ehab e', 'person:farah f'], 'most transfers first');
   const toggle = byId(tree, 'transfer-people-toggle');
-  assert.equal(toggle.props.accessibilityLabel, h.words.person.showAll(7));
+  assert.equal(toggle.props.accessibilityLabel, h.words.person.showAll(7), 'counts the people listed, not the card\'s');
   assert.equal(toggle.props.accessibilityState.expanded, false);
+  // Eight rows: the search field sits under the card, above the list head.
+  const header = list(tree).props.ListHeaderComponent;
+  const order = walk(header).map(node => node.props?.testID ?? (node.type === 'TextInput' ? 'search' : null)).filter(Boolean);
+  assert.ok(order.indexOf('transfer-question-card') < order.indexOf('search') && order.indexOf('search') < order.indexOf('transfers-list-head'),
+    order.join(' '));
   toggle.props.onPress();
   tree = h.render();
-  assert.equal(walk(tree).filter(node => node.props?.testID?.startsWith('transfer-person-person:')).length, 7);
+  assert.equal(people(tree).length, 7);
   assert.equal(byId(tree, 'transfer-people-toggle').props.accessibilityLabel, h.words.person.showFewer);
   byId(tree, 'transfer-people-toggle').props.onPress();
   startSelecting(h);
   tree = h.render();
-  assert.equal(walk(tree).filter(node => node.props?.testID?.startsWith('transfer-person-person:')).length, 7);
+  assert.equal(people(tree).length, 8, 'select mode lists everyone, the card\'s person too');
   assert.equal(byId(tree, 'transfer-people-toggle'), undefined);
-  assert.equal(byId(tree, 'transfer-select-shown').props.accessibilityLabel, h.words.select.all(7));
+  assert.equal(byId(tree, 'transfer-select-shown').props.accessibilityLabel, h.words.select.all(8));
+});
+
+// ---- To answer | History ----
+
+const tabs = tree => ({ answer: byId(tree, 'transfers-view-answer'), history: byId(tree, 'transfers-view-history') });
+const selectedTab = tree => Object.entries(tabs(tree)).filter(([, node]) => node?.props.accessibilityState.selected).map(([key]) => key);
+
+test('the page opens on To answer while anything waits, else on History; select mode forces To answer and hides the switch', () => {
+  // Answered only: History, with its tiles and the period's transfers, and no card or Select.
+  const answered = createPage({ groupDefinitions: [],
+    transactions: [row('done', { transferDecision: { version: 1, ownership: 'external', decidedAt: 2 } })] });
+  let tree = answered.render();
+  assert.equal(byId(tree, 'transfers-views').props.accessibilityRole, 'tablist');
+  assert.equal(tabs(tree).history.props.accessibilityRole, 'tab');
+  assert.deepEqual(selectedTab(tree), ['history']);
+  assert.ok(byId(tree, 'transfers-tile-own'));
+  assert.ok(byId(tree, 'transfer-row-done'));
+  assert.equal(byId(tree, 'transfer-question-card'), undefined);
+  assert.equal(byId(tree, 'transfers-select'), undefined, 'History has no Select');
+  assert.equal(text(tabs(tree).answer).trim(), answered.words.views.answer, 'no count when nothing waits');
+  // To answer with nothing waiting says so, and leads back to History.
+  tabs(tree).answer.props.onPress();
+  tree = answered.render();
+  assert.deepEqual(selectedTab(tree), ['answer']);
+  assert.ok(text(tree).includes(answered.words.card.allDone) && text(tree).includes(answered.words.card.allDoneBody));
+  assert.equal(byId(tree, 'transfer-row-done'), undefined, 'the period\'s transfers stay under History');
+  assert.equal(byId(tree, 'transfers-tile-own'), undefined, 'and so do the tiles');
+  byId(tree, 'transfers-open-history').props.onPress();
+  assert.deepEqual(selectedTab(answered.render()), ['history']);
+  // Each kind of waiting opens To answer: a question, a person, a group, an unnamed transfer, an entry the card cannot ask.
+  for (const [label, page] of [
+    ['person', peoplePage()],
+    ['group', createPage()],
+    ['unnamed', createPage({ groupDefinitions: [], transactions: [row('u1')] })],
+  ]) assert.deepEqual(selectedTab(page.render()), ['answer'], label);
+  const h = peoplePage();
+  tree = h.render();
+  assert.ok(text(tabs(tree).answer).includes('5'), 'the To answer tab carries the waiting count');
+  assert.ok(tabs(tree).answer.props.accessibilityLabel.includes(h.words.card.title(5)));
+  startSelecting(h);
+  tree = h.render();
+  assert.equal(byId(tree, 'transfers-views'), undefined, 'select mode hides the switch');
+  assert.ok(byId(tree, 'transfer-select-controls'));
+  assert.equal(byId(tree, 'transfers-tile-own'), undefined);
+  assert.deepEqual(h.events, []);
+});
+
+test('switching views clears the search and the History filter; pressing the open tab does nothing', () => {
+  const h = createPage({ groupDefinitions: [], transactions: [
+    row('sent', { transferDecision: { version: 1, ownership: 'external', decidedAt: 2 } }),
+    row('got', { type: 'income', transferDecision: { version: 1, ownership: 'external', decidedAt: 3 } })] });
+  const field = () => walk(h.render()).find(node => node.type === 'TextInput');
+  byId(h.render(), 'transfers-tile-sent').props.onPress();
+  field().props.onChangeText('sent');
+  let tree = h.render();
+  assert.equal(byId(tree, 'transfers-tile-sent').props.accessibilityState.selected, true);
+  assert.equal(field().props.value, 'sent');
+  tabs(tree).history.props.onPress();
+  assert.equal(field().props.value, 'sent', 'the open tab keeps its search');
+  assert.equal(byId(h.render(), 'transfers-tile-sent').props.accessibilityState.selected, true, 'and its filter');
+  tabs(h.render()).answer.props.onPress();
+  tree = h.render();
+  assert.deepEqual(selectedTab(tree), ['answer']);
+  assert.equal(walk(tree).find(node => node.type === 'TextInput'), undefined, 'nothing listed, no query: no search field');
+  tabs(tree).history.props.onPress();
+  tree = h.render();
+  assert.equal(field().props.value, '', 'the search does not follow into the other view');
+  assert.equal(byId(tree, 'transfers-tile-sent').props.accessibilityState.selected, false, 'nor the tile filter');
+  assert.deepEqual(routeRows(tree).map(node => node.props.testID).sort(), ['transfer-row-got', 'transfer-row-sent']);
+  assert.deepEqual(h.events, []);
+});
+
+test('To answer: the search sits under the card and narrows the list below; History has it above the transfers', () => {
+  const h = peoplePage();
+  let tree = h.render();
+  const header = list(tree).props.ListHeaderComponent;
+  const order = walk(header).map(node => node.props?.testID ?? (node.type === 'TextInput' ? 'search' : null)).filter(Boolean);
+  assert.ok(order.indexOf('transfers-views') < order.indexOf('transfer-question-card'), order.join(' '));
+  assert.ok(order.indexOf('transfer-question-card') < order.indexOf('search') && order.indexOf('search') < order.indexOf('transfers-list-head'),
+    order.join(' '));
+  searchFor(h.render, 'khalid');
+  tree = h.render();
+  assert.ok(byId(tree, 'transfer-question-card'), 'the card stays: it asks whatever the search');
+  assert.ok(personOf(tree, 'person:khalid r'));
+  assert.equal(personOf(tree, 'person:mariam s'), undefined, 'the search narrows the list under the card');
+  // With nothing listed under the card and no query, there is nothing to search.
+  const lone = createPage({ transactions: [row('q1'), row('q2', { accountId: 'other' })], pending: ['q1', 'q2'],
+    groupDefinitions: [{ id: 'g1', transactionIds: ['q1'], bulkEligible: false }, { id: 'g2', transactionIds: ['q2'], bulkEligible: false }] });
+  assert.equal(walk(lone.render()).find(node => node.type === 'TextInput'), undefined);
+  const history = showHistory(peoplePage());
+  const historyOrder = walk(list(history).props.ListHeaderComponent)
+    .map(node => node.props?.testID ?? (node.type === 'TextInput' ? 'search' : null)).filter(Boolean);
+  assert.ok(historyOrder.indexOf('transfers-tiles') < historyOrder.indexOf('search')
+    && historyOrder.indexOf('search') < historyOrder.indexOf('transfers-list-head'), historyOrder.join(' '));
+  assert.ok(text(byId(history, 'transfers-list-head')).includes(h.words.listTitle), 'the period\'s title heads History');
 });
 
 for (const language of ['en', 'ar']) {
@@ -1495,10 +1689,15 @@ for (const language of ['en', 'ar']) {
     const words = copyFor(language).person;
     const en = copyFor('en').person;
     assert.deepEqual(Object.keys(words).sort(), Object.keys(en).sort());
+    assert.deepEqual(Object.keys(copyFor(language).views).sort(), ['answer', 'history']);
+    assert.notEqual(copyFor(language).views.answer, copyFor(language).views.history);
     if (language === 'ar') {
       for (const value of [words.question('مريم'), words.transfers(1), words.transfers(2), words.transfers(5), words.transfers(40),
         words.oneAnswer('مريم'), words.people(1), words.people(2), words.people(7), words.people(24), words.showAll(24), words.showFewer,
-        copyFor('ar').card.moreUnnamed(1), copyFor('ar').card.moreUnnamed(2), copyFor('ar').card.moreUnnamed(40)]) {
+        copyFor('ar').card.moreUnnamed(1), copyFor('ar').card.moreUnnamed(2), copyFor('ar').card.moreUnnamed(40),
+        words.who, words.sent('٥٠'), words.received('٥٠'), copyFor('ar').group.alsoWaiting,
+        copyFor('ar').card.unnamedTitle(1), copyFor('ar').card.unnamedTitle(2), copyFor('ar').card.unnamedTitle(40), copyFor('ar').card.unnamedBody,
+        copyFor('ar').card.allDone, copyFor('ar').card.allDoneBody, copyFor('ar').views.answer, copyFor('ar').views.history]) {
         assert.doesNotMatch(value, /[A-Za-z]/, value);
       }
       assert.equal(words.transfers(1), 'تحويل واحد');
@@ -1509,6 +1708,10 @@ for (const language of ['en', 'ar']) {
       assert.equal(words.transfers(1), '1 transfer');
       assert.equal(words.transfers(40), '40 transfers');
       assert.equal(copyFor('en').card.moreUnnamed(12), '12 more without a name — select to answer');
+      assert.equal(copyFor('en').card.unnamedTitle(1), '1 transfer without a name');
+      assert.equal(copyFor('en').card.unnamedTitle(3), '3 transfers without a name');
+      assert.equal(words.sent('AED 5.00'), 'Sent ⁨AED 5.00⁩', 'no count after the amount');
+      assert.equal(words.received('AED 5.00'), 'Received ⁨AED 5.00⁩');
       assert.equal(words.question('Mariam S'), '⁨Mariam S⁩: your own account or someone else?');
     }
   });

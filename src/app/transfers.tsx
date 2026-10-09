@@ -586,8 +586,8 @@ export default function TransfersScreen() {
     {(['answer', 'history'] as const).map(key => {
       const on = tab === key;
       const label = key === 'answer' && answerCount > 0 ? `${words.views.answer} · ${answerCount}` : words.views[key];
-      return <Pressable key={key} testID={`transfers-view-${key}`} accessibilityRole="tab" accessibilityState={{ selected: on }}
-        aria-selected={on} accessibilityLabel={key === 'answer' && answerCount > 0 ? `${words.views.answer}. ${words.card.title(answerCount)}` : words.views[key]}
+      return <Pressable key={key} testID={`transfers-view-${key}`} accessibilityRole="tab" accessibilityState={{ selected: on, disabled: busy }}
+        aria-selected={on} disabled={busy} accessibilityLabel={key === 'answer' && answerCount > 0 ? `${words.views.answer}. ${words.card.title(answerCount)}` : words.views[key]}
         onPress={() => showView(key)} style={[styles.viewTab, on && { backgroundColor: band.fill }]}>
         <ThemedText type="smallBold" numberOfLines={large ? undefined : 1} style={{ color: on ? band.onFill : band.text, textAlign: 'center' }}>{label}</ThemedText>
       </Pressable>;
