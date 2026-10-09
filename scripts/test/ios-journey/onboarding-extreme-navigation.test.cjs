@@ -261,7 +261,10 @@ async function gate(options = {}) {
   dependencies['@/lib/purchases'] = { trialDaysLeft: () => options.trialDays ?? 3, billingStore: () => 'appStore' };
   dependencies['@/lib/public-links'] = { configuredPublicUrl: () => null };
   dependencies['@/lib/home-widgets'] = {
-    loadHomeWidgetPreferences: async () => ({ order: ['due', 'assistant', 'insight', 'activity', 'upcoming'], hidden: [] }),
+    // What the real loader returns for a first run (Home v3 default; an older stored layout reads as this too).
+    loadHomeWidgetPreferences: async () => ({
+      order: ['greeting', 'hero', 'today', 'overview', 'week', 'activity', 'due', 'upcoming', 'transfers', 'insight', 'assistant', 'capture'],
+      hidden: ['today', 'overview', 'week', 'due', 'upcoming', 'transfers', 'insight', 'assistant', 'capture'] }),
     saveHomeWidgetPreferences: async value => record('saveHomeWidgets', value),
   };
   dependencies['@/lib/categories'] = { categoryLabel: category => category, getCategory: () => ({ icon: 'receipt' }) };
@@ -392,8 +395,11 @@ for (const language of ['en', 'ar']) {
     await h.press('continue'); at(h, 'watch');
     assert.deepEqual(h.state.wafraGoals, ['salary', 'bills']);
     // Home's sections follow the goals through Customize Home's preference.
-    // The bills goal leads the sheet; the band's greeting, totals and week stay first.
-    assert.deepEqual(calls(h, 'saveHomeWidgets').at(-1)[1].order.slice(0, 6), ['greeting', 'overview', 'today', 'week', 'due', 'upcoming']);
+    // The bills goal leads the sheet, under the band's greeting and Spent hero (switched-off band
+    // sections keep their place), and the goal switches those sections on.
+    const savedHome = calls(h, 'saveHomeWidgets').at(-1)[1];
+    assert.deepEqual(savedHome.order.slice(0, 7), ['greeting', 'hero', 'today', 'overview', 'week', 'due', 'upcoming']);
+    assert.equal(savedHome.hidden.includes('due') || savedHome.hidden.includes('upcoming'), false);
     await h.tap('onboarding-watch-dining');
     assert.equal(h.byTestID('onboarding-watch-continue').props.accessibilityLabel, h.eWords.skipForNow, 'an open row alone saves nothing');
     await h.tap('onboarding-watch-limit-quick-1'); // 500, in the currency's scale
