@@ -166,7 +166,7 @@ const en = {
   },
   card: {
     title: (n: number) => `${n} transfer${n === 1 ? ' needs' : 's need'} an answer`,
-    step: (i: number, n: number) => `${i} of ${n}`,
+    step: (i: number, n: number) => `Question ${i} of ${n}`,
     whereOut: 'Where did this go?',
     whereIn: 'Where did this come from?',
     looksLike: (account: string) => `looks like your ${isolateText(boundDigits(account))}`,
@@ -262,7 +262,7 @@ const ar: typeof en = {
   },
   person: {
     question: (name) => `${isolateText(name)}: حسابك أم شخص آخر؟`,
-    who: 'هل هذا أنت، أم شخص آخر؟',
+    who: 'هل هذا أنت أم شخص آخر؟',
     transfers: arTransfers,
     sent: (amount) => `أُرسل ${isolateText(amount)}`,
     received: (amount) => `استُلم ${isolateText(amount)}`,
@@ -300,7 +300,7 @@ const ar: typeof en = {
   },
   card: {
     title: (n) => `${n} من التحويلات بانتظار إجابتك`,
-    step: (i, n) => `${i} من ${n}`,
+    step: (i, n) => `السؤال ${i} من ${n}`,
     whereOut: 'إلى أين ذهبت؟',
     whereIn: 'من أين جاءت؟',
     looksLike: (account) => `يبدو أنها حسابك ${isolateText(boundDigits(account))}`,
@@ -312,7 +312,7 @@ const ar: typeof en = {
     allDoneBody: 'لكل التحويلات إجابة. تجد تحويلاتك في السجل.',
   },
   views: {
-    answer: 'للإجابة',
+    answer: 'بانتظار الإجابة',
     history: 'السجل',
   },
 };

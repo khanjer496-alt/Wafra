@@ -556,15 +556,16 @@ test('a link to a low-signal transfer opens it; it needs an answer and select mo
   const page = createPage({ transactions: [tx], groupDefinitions: [] });
   const general = page.render();
   assert.equal(byId(general, 'transfer-question-card'), undefined, 'an unnamed one-off is not walked by the card');
-  const link = byId(general, 'transfers-review-link');
-  assert.ok(link && text(link).includes(copyFor('en').card.title(1)), 'but it is counted, and select mode answers it');
+  // It is counted on the To answer tab, and its one way in is the "without a name" row (no second link).
+  assert.equal(byId(general, 'transfers-view-answer').props.accessibilityLabel,
+    `${copyFor('en').views.answer}. ${copyFor('en').card.title(1)}`, 'but it is counted');
+  assert.equal(byId(general, 'transfers-review-link'), undefined, 'one entry point, not two');
   assert.equal(groupRows(general).length, 0, 'it names nobody: no person, no group');
-  // To answer lists it as the one "without a name" row, which opens select mode too.
   const unnamed = byId(general, 'transfer-question-unnamed');
   assert.ok(unnamed, 'the unnamed one-off is listed under To answer');
   assert.equal(unnamed.props.accessibilityLabel, `${copyFor('en').card.unnamedTitle(1)}. ${copyFor('en').card.unnamedBody}`);
   assert.equal(routeRows(general).length, 0, 'the period\'s transfers are under History');
-  link.props.onPress();
+  unnamed.props.onPress();
   const selecting = page.render();
   assert.ok(byId(selecting, 'transfer-selection-footer'));
   assert.ok(byId(selecting, 'transfer-row-low-signal'), 'select mode lists it to be ticked');
@@ -1505,9 +1506,8 @@ test('a person\'s answer is one single-entry decision per transfer, with Undo cl
   let tree = h.render();
   assert.equal(card(tree), h.words.person.question('KHALID R'), 'answered: the card moves on to the next person');
   assert.equal(personOf(tree, 'person:mariam s'), undefined, 'and Mariam leaves the waiting list');
-  searchFor(h.render, 'mariam');
-  assert.equal(personOf(h.render(), 'person:mariam s'), undefined, 'even when searched for');
-  searchFor(h.render, '');
+  // Khalid, the card's person, is all that waits: nothing is listed to narrow, so there is no search field.
+  assert.equal(walk(tree).find(node => node.type === 'TextInput'), undefined, 'no search with nothing listed');
   options.actions.find(action => action.label === h.words.answers.undo).onPress(); await flush(); await flush();
   const undo = h.events.filter(event => event[0] === 'batch').at(-1)[1];
   assert.deepEqual(undo.decisions, [{ ids: ['m1'], ownership: null }, { ids: ['m2'], ownership: null }, { ids: ['m3'], ownership: null }]);
@@ -1716,3 +1716,31 @@ for (const language of ['en', 'ar']) {
     }
   });
 }
+
+test('History lists every transfer of the period, a person\'s waiting ones included, each tagged', () => {
+  const tree = showHistory(peoplePage());
+  const ids = routeRows(tree).map(node => node.props.testID).sort();
+  for (const id of ['m1', 'm2', 'm3', 'k1', 'u1']) assert.ok(ids.includes(`transfer-row-${id}`), `${id} is in History`);
+  for (const node of routeRows(tree)) assert.ok(text(node).includes(copyFor('en').tags.needsAnswer), `${node.props.testID} waits`);
+});
+
+test('To answer: a search that matches nobody says so under the card', () => {
+  const h = peoplePage();
+  searchFor(h.render, 'nobody by this name');
+  const tree = h.render();
+  assert.ok(byId(tree, 'transfer-question-card'), 'the card stays');
+  assert.equal(walk(tree).filter(node => node.props?.testID?.startsWith('transfer-person-')).length, 0);
+  assert.ok(walk(tree).some(node => node.type === 'Text' && text(node) === copyFor('en').empty), 'no matches is said');
+});
+
+test('once To answer has opened it stays: answering the last transfer shows Nothing to answer, not History', () => {
+  const h = createPage({ transactions: [row('last')], groupDefinitions: [] });
+  const render = withEffects(h);
+  render(); render();
+  assert.equal(byId(render(), 'transfers-view-answer').props.accessibilityState.selected, true);
+  h.state.transactions = h.state.transactions.map(tx => ({ ...tx, transferDecision: { version: 1, ownership: 'external', decidedAt: Date.now() } }));
+  const tree = render();
+  assert.equal(byId(tree, 'transfers-view-answer').props.accessibilityState.selected, true, 'still To answer');
+  assert.ok(walk(tree).some(node => node.type === 'Text' && text(node) === copyFor('en').card.allDone));
+  assert.ok(byId(tree, 'transfers-open-history'));
+});

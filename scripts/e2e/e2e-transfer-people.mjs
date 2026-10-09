@@ -138,10 +138,10 @@ try {
       await expect(screen.getByTestId('transfer-person-person:khalid r').getByTestId('transfer-person-count')).toContainText(words.person.transfers(1));
       await fits(page, screen, `${name} page`);
       await page.screenshot({ path: path.join(OUT, `${name}-1-people.png`) });
-      // History lists the period's transfers: the unnamed one waits there; Mariam's are answered as the person.
+      // History lists every transfer of the period, waiting ones included: the unnamed one and Mariam's.
       await page.getByTestId('transfers-view-history').click();
       await expect(screen.getByTestId('transfer-row-u1')).toContainText(words.tags.needsAnswer);
-      for (const id of MARIAM) await expect(screen.getByTestId(`transfer-row-${id}`)).toHaveCount(0);
+      for (const id of MARIAM) await expect(screen.getByTestId(`transfer-row-${id}`)).toContainText(words.tags.needsAnswer);
       await page.getByTestId('transfers-view-answer').click();
 
       // The card's answer opens the sheet: the person, every entry and the count; nothing saved yet.
@@ -196,9 +196,10 @@ try {
       await expect.poll(async () => (await decided(page, ['k1'])).map(row => row.transferDecision.ownership)).toEqual(['own']);
       assert.equal((await decided(page, ['k1']))[0].transferDecision.counterpartId, undefined);
       const netOwn = await sameCount(page, words, home, WAITING - 4);
-      // Only the unnamed transfer waits: no question card, the counted link opens select mode.
+      // Only the unnamed transfer waits: no question card; its row is the one way to select mode.
       await expect(page.getByTestId('transfer-question-card')).toHaveCount(0);
-      await expect(page.getByTestId('transfers-review-link')).toBeVisible();
+      await expect(page.getByTestId('transfers-review-link')).toHaveCount(0);
+      await expect(page.getByTestId('transfer-question-unnamed')).toBeVisible();
       assert.equal(netOwn, netAfter, 'own money stays out of Net');
       await page.reload({ waitUntil: 'networkidle' });
       assert.equal((await decided(page, [...MARIAM, 'k1'])).length, 4, 'answers survive reopening');

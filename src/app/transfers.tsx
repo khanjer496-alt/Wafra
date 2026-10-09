@@ -6,7 +6,7 @@ import { FlatList, Keyboard, Platform, Pressable, StyleSheet, View } from 'react
 import { EntryDetailSheet } from '@/components/entry-detail-sheet';
 import { PeriodSheet } from '@/components/period-sheet';
 import { ThemedText } from '@/components/themed-text';
-import { introCues, legTags, newlyAnsweredRoutes, routeLegIds, type CoinCue } from '@/components/transfer-coins/coin-cues';
+import { introCues, legTags, newlyAnsweredRoutes, type CoinCue } from '@/components/transfer-coins/coin-cues';
 import { TransferAnswerChoices } from '@/components/transfers/transfer-answer-choices';
 import { TransferAnswerSheet } from '@/components/transfers/transfer-answer-sheet';
 import { TransferGroupRow, type TransferGroupView } from '@/components/transfers/transfer-group-row';
@@ -313,14 +313,17 @@ export default function TransfersScreen() {
   const shownPeople = useMemo<(PersonRow | ToggleRow)[]>(() => listedPeople.length > PEOPLE_SHOWN + 1
     ? [...(allPeople ? listedPeople : listedPeople.slice(0, PEOPLE_SHOWN)), { kind: 'people-toggle', key: 'people-toggle' }]
     : listedPeople, [listedPeople, allPeople]);
-  const unnamedRows = useMemo<UnnamedRow[]>(() => unnamedCount > 0 ? [{ kind: 'unnamed', key: 'unnamed', count: unnamedCount }] : [],
-    [unnamedCount]);
+  // Search does not narrow the unnamed transfers (they name nobody), so their row steps aside while searching.
+  const unnamedRows = useMemo<UnnamedRow[]>(() => unnamedCount > 0 && !search ? [{ kind: 'unnamed', key: 'unnamed', count: unnamedCount }] : [],
+    [unnamedCount, search]);
   // Something waits that this page can answer: the card's questions, people, groups or unnamed transfers.
   const anyWaiting = questions.length + personRows.length + groupRows.length + unnamedCount + unasked > 0;
   const tab: TransfersView = selecting ? 'answer' : view ?? (anyWaiting ? 'answer' : 'history');
-  // A grouped entry is answered with its group, so it is not listed a second time on its own.
-  const periodRows = useMemo(() => filterTransferItems(items, tile).filter(item => !routeLegIds(item).some(id => groupedIds.has(id))),
-    [items, tile, groupedIds]);
+  // Once To answer has opened, it stays: answering the last question shows "Nothing to answer", not History.
+  useEffect(() => { if (view === null && anyWaiting) setView('answer'); }, [view, anyWaiting]);
+  // History is every transfer of the period, waiting ones included (a person's or a group's too, tagged
+  // Needs an answer): To answer is where they are answered together, History is where they are found.
+  const periodRows = useMemo(() => filterTransferItems(items, tile), [items, tile]);
   const activityById = useMemo(() => new Map(activity.map(record => [record.transaction.id, record] as const)), [activity]);
   /** A catch-all group's entries as their own rows (select mode, opened): each is ticked on its own. */
   const groupEntryRows = (view: TransferGroupView): TransferListItem[] => transferListItems(view.ids.flatMap(id => {
@@ -508,11 +511,12 @@ export default function TransfersScreen() {
   const introduced = useRef(false);
   const lastTags = useRef<ReadonlyMap<string, TransferTag> | null>(null);
   useEffect(() => {
-    if (introduced.current || !periodRows.length) return;
+    // The routes are drawn under History: the intro waits until that view shows them.
+    if (introduced.current || !periodRows.length || tab !== 'history') return;
     introduced.current = true;
     const intro = introCues(periodRows.map(item => item.key), Date.now());
     setCoins(previous => new Map([...previous, ...intro]));
-  }, [periodRows]);
+  }, [periodRows, tab]);
   useEffect(() => {
     const previous = lastTags.current;
     lastTags.current = legTags(periodItems);
@@ -672,7 +676,8 @@ export default function TransfersScreen() {
             more={unasked} onAnswer={answerCurrent} />
             // No question left, but entries still wait (unnamed one-offs, queued rows the card cannot ask): select mode
             // answers them. Only when it has something to answer: duplicate-id rows alone are shown read-only in the list.
-            : unasked + unnamedCount > 0 && answerable > 0 ? <Pressable testID="transfers-review-link" accessibilityRole="button"
+            // (Unnamed transfers alone have their own row in the list below.)
+            : unasked > 0 && answerable > 0 ? <Pressable testID="transfers-review-link" accessibilityRole="button"
               accessibilityLabel={`${words.card.title(waitingCount + unasked)}. ${words.card.seeAllPlain}`}
               onPress={startSelecting}
               style={({ pressed }) => [styles.reviewLink, { backgroundColor: band.card, borderColor: band.statusNear, opacity: pressed ? 0.7 : 1 }]}>
@@ -680,7 +685,7 @@ export default function TransfersScreen() {
               <ThemedText type="small" style={{ color: band.tint }}>{words.card.seeAllPlain}</ThemedText>
             </Pressable> : null}
           {/* Under the card in To answer (it narrows the list below), above the transfers in History. */}
-          {tab === 'history' || selecting || data.length > 0 || query ? <TextField label={words.search} value={query} onChangeText={setQuery}
+          {tab === 'history' || selecting || listedPeople.length + groupRows.length > 0 || query ? <TextField label={words.search} value={query} onChangeText={setQuery}
             inputMode="search" returnKeyType="search" placeholder={words.searchPlaceholder}
             onSubmitEditing={() => Keyboard.dismiss()}
             leading={<Icon name="search" size={17} color={band.textSecondary} />}
@@ -743,8 +748,9 @@ export default function TransfersScreen() {
           </View>;
         }}
         // To answer with the card up and nothing else waiting: the card is the page, no empty state under it.
-        ListEmptyComponent={!selecting && tab === 'answer' && (question || unasked > 0) ? null : <View style={styles.empty}><Icon name="repeat" size={30} color={band.textSecondary} />
-          {selecting ? <>
+        ListEmptyComponent={!selecting && tab === 'answer' && (question || unasked > 0) && !search ? null : <View style={styles.empty}><Icon name="repeat" size={30} color={band.textSecondary} />
+          {selecting || (tab === 'answer' && search) ? <>
+            {/* Select mode with nothing to tick, or a search in To answer that matches nobody. */}
             <ThemedText type="heading" style={styles.emptyCopy}>{words.empty}</ThemedText>
           </> : tab === 'answer' ? <>
             <ThemedText type="heading" style={styles.emptyCopy}>{words.card.allDone}</ThemedText>
