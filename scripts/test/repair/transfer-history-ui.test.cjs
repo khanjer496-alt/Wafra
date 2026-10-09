@@ -97,9 +97,10 @@ function renderTransfers({ language = 'en', transactions, accounts, adjust = () 
   return { events, answers, screen, list, records, items, band, words: deps['@/lib/transfer-activity-copy'].transferActivityCopy(language) };
 }
 
-// Owner decision (Transfers grouped by person): every transfer kept out of the totals is asked about.
-// A generic unknown with no name is "Needs an answer" like a queued row and is asked after the queue.
-for (const language of ['en', 'ar']) test(`${language}: a generic unknown needs an answer too, asked after the reconciler's queue`, () => {
+// Owner decision (Transfers grouped by person): every transfer kept out of the totals needs an answer and is
+// counted. A generic unknown with no name reads "Needs an answer" like a queued row; the card does not walk such
+// one-offs, it offers select mode for them.
+for (const language of ['en', 'ar']) test(`${language}: a generic unknown needs an answer too, reached from the card's footer`, () => {
   const accounts = [{ id: 'bank', name: 'Bank', kind: 'bank', openingFils: 0 },
     { id: 'old', name: 'Old', kind: 'bank', openingFils: 0, archived: true }];
   const transactions = [
@@ -150,5 +151,7 @@ for (const language of ['en', 'ar']) test(`${language}: a generic unknown needs 
   assert.ok(text(card).includes(h.words.card.whereOut));
   // The title counts everything waiting: the queued row, the generic unknown and the duplicate observation it cannot ask.
   assert.ok(text(card).includes(h.words.card.title(3)), 'two questions plus one it cannot ask');
-  assert.ok(!text(card).includes(h.words.card.step(1, 2)), 'no step while the card cannot walk them all');
+  assert.ok(!text(card).includes(h.words.card.step(1, 1)), 'no step while queued entries wait that no question reaches');
+  const unnamed = walk(card).find(node => node.props?.testID === 'transfer-question-unnamed');
+  assert.ok(unnamed && text(unnamed).includes(h.words.card.moreUnnamed(1)), 'the unnamed one-off is offered through select mode');
 });

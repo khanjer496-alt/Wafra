@@ -133,13 +133,17 @@ test('a row with own-account evidence keeps its own question and never joins a p
   assert.deepEqual(plain(people.transferQuestions(activity).map(question => question.key)), ['pair-out']);
 });
 
-test('the card asks people first, then the reconciler’s queue, then each unnamed transfer: everything waiting', () => {
+test('the card asks people first, then the reconciler’s queue; unnamed one-offs wait for select mode: everything waiting', () => {
   const rows = ledgerRows();
   const { activity } = assess(rows);
   const questions = people.transferQuestions(activity);
-  assert.deepEqual(plain(questions.map(question => question.key)), ['person:mariam s', 'person:al hashimi', 'u1', 'u2']);
+  assert.deepEqual(plain(questions.map(question => question.key)), ['person:mariam s', 'person:al hashimi'],
+    'the card walks people and the queue, never each unnamed one-off');
+  const unnamed = people.transferUnnamedWaiting(activity);
+  assert.deepEqual(plain(unnamed.map(record => record.transaction.id)), ['u1', 'u2'], 'newest first');
   const covered = questions.reduce((sum, question) => sum + (question.kind === 'person' ? question.person.ids.length : 1), 0);
-  assert.equal(covered, people.transferWaitingSummary(activity).transfers, 'every waiting transfer is reached by one question');
+  assert.equal(covered + unnamed.length, people.transferWaitingSummary(activity).transfers,
+    'the card\'s questions and the unnamed one-offs are every waiting transfer, each once');
   assert.deepEqual(plain(people.transferWaitingSummary(activity)), { transfers: 7, people: 2, withPeople: 5 });
 });
 
@@ -242,7 +246,8 @@ test('15k rows with ~3k named transfers: people, the count and the questions in 
     const groups = people.transferPeople(activity);
     const summary = people.transferWaitingSummary(activity);
     const questions = people.transferQuestions(activity);
-    return { ms: performance.now() - started, groups, summary, questions, activity };
+    const unnamed = people.transferUnnamedWaiting(activity);
+    return { ms: performance.now() - started, groups, summary, questions, unnamed, activity };
   };
   run(3000, 600); // warm the loader
   const big = run(15000, 3000);
@@ -251,7 +256,7 @@ test('15k rows with ~3k named transfers: people, the count and the questions in 
   assert.ok(big.groups[0].ids.length > 100, 'the most frequent person collects every spelling of the name');
   assert.ok(big.summary.withPeople > 1500, `${big.summary.withPeople} transfers with people`);
   const covered = big.questions.reduce((sum, question) => sum + (question.kind === 'person' ? question.person.ids.length : 1), 0);
-  assert.equal(covered, big.summary.transfers, 'the questions reach every waiting transfer');
+  assert.equal(covered + big.unnamed.length, big.summary.transfers, 'the questions and the unnamed one-offs reach every waiting transfer');
   assert.ok(big.ms < 400, `activity, people, count and questions took ${big.ms.toFixed(1)}ms`);
   const double = run(30000, 6000);
   assert.ok(double.ms < big.ms * 4 + 50, `twice the ledger took ${double.ms.toFixed(1)}ms vs ${big.ms.toFixed(1)}ms: linear, not quadratic`);

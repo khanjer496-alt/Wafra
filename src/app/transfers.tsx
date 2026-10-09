@@ -43,7 +43,7 @@ import { freezeTransferRows, transferAnswerGroups, transferBatchChangedIds, tran
 import { absorbedOwnIncoming, filterTransferItems, transferListItems, transferTotals,
   type RouteEnd, type TransferListItem, type TransferTag, type TransferTile } from '@/lib/transfer-list';
 import { matchedTransferPairs, suggestedTransferPairs } from '@/lib/transfer-pairs';
-import { personGroup, transferPeople, transferQuestions, transferWaitingSummary } from '@/lib/transfer-people';
+import { personGroup, transferPeople, transferQuestions, transferUnnamedWaiting, transferWaitingSummary } from '@/lib/transfer-people';
 import { isTransferCandidate, reconcileTransfers } from '@/lib/transfer-reconciliation';
 import type { TransferEvidence } from '@/lib/transfer-reconciliation-types';
 import { projectTransferHistory } from '@/lib/transfer-review-presentation';
@@ -500,9 +500,11 @@ export default function TransfersScreen() {
   // Saving an answer takes the row out of the queue, so the card always shows the first one.
   // A pair with both legs queued is one movement: one question, asked about its outgoing leg.
   // Home and the Transactions summary count the same transfers (transferWaitingSummary), so the numbers agree.
-  // Before them come the people, most transfers first (one answer settles each person), and after
-  // them every other waiting transfer with no name (transferQuestions): together, everything waiting.
+  // Before them come the people, most transfers first (one answer settles each person) (transferQuestions).
+  // Waiting transfers that name nobody are not walked one by one: they stay listed as "Needs an answer"
+  // rows and the card's footer opens select mode for them.
   const questions = useMemo(() => transferQuestions(activity), [activity]);
+  const unnamedCount = useMemo(() => transferUnnamedWaiting(activity).length, [activity]);
   // How many transfers wait (a pair once): the same count as Home's Needs you and the Transactions summary.
   const waitingCount = useMemo(() => transferWaitingSummary(activity).transfers, [activity]);
   // Queued entries the card cannot ask about (duplicate observations, archived accounts,
@@ -637,13 +639,14 @@ export default function TransfersScreen() {
           {selecting ? selectControls : question ? <TransferQuestionCard transaction={current?.transaction}
             person={question.kind === 'person' ? question.person : undefined} index={0} total={questions.length} waiting={waitingCount}
             accountLabel={current ? accountName(current.transaction.accountId) : undefined} hint={hint} palette={band} busy={busy}
-            more={unasked} onAnswer={answerCurrent} onSeeAll={startSelecting} />
-            // Only when select mode has something to answer: duplicate-id rows alone are shown read-only in the list.
-            : unasked > 0 && answerable > 0 ? <Pressable testID="transfers-review-link" accessibilityRole="button"
-              accessibilityLabel={`${words.card.title(unasked)}. ${words.card.seeAllPlain}`}
+            more={unasked} unnamed={unnamedCount} onAnswer={answerCurrent} onSeeAll={startSelecting} onSelectUnnamed={startSelecting} />
+            // No question left, but entries still wait (unnamed one-offs, queued rows the card cannot ask): select mode
+            // answers them. Only when it has something to answer: duplicate-id rows alone are shown read-only in the list.
+            : unasked + unnamedCount > 0 && answerable > 0 ? <Pressable testID="transfers-review-link" accessibilityRole="button"
+              accessibilityLabel={`${words.card.title(waitingCount + unasked)}. ${words.card.seeAllPlain}`}
               onPress={startSelecting}
               style={({ pressed }) => [styles.reviewLink, { backgroundColor: band.card, borderColor: band.statusNear, opacity: pressed ? 0.7 : 1 }]}>
-              <ThemedText type="smallBold" style={[styles.grow, { color: band.statusNear }]}>{words.card.title(unasked)}</ThemedText>
+              <ThemedText type="smallBold" style={[styles.grow, { color: band.statusNear }]}>{words.card.title(waitingCount + unasked)}</ThemedText>
               <ThemedText type="small" style={{ color: band.tint }}>{words.card.seeAllPlain}</ThemedText>
             </Pressable> : null}
           {listHead}

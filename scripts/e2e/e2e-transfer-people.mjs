@@ -91,7 +91,9 @@ async function sameCount(page, words, home, count) {
   else await expect(strip).not.toContainText(words.strip.needsAnswer(1).replace(/^1/, ''));
   const net = minor(await page.getByTestId('transactions-net-total').innerText());
   await page.goto(`${BASE}/transfers`, { waitUntil: 'networkidle' });
-  if (count > 0) await expect(page.getByTestId('transfer-question-card')).toContainText(words.card.title(count));
+  // The card, or, once only transfers that name nobody wait, the link that opens select mode for them.
+  if (count > 0) await expect(page.locator('[data-testid="transfer-question-card"], [data-testid="transfers-review-link"]'))
+    .toContainText(words.card.title(count));
   return net;
 }
 
@@ -121,7 +123,9 @@ try {
       await expect(screen).toBeVisible();
       const card = page.getByTestId('transfer-question-card');
       await expect(card.getByTestId('transfer-question-person')).toContainText('MARIAM S');
-      await expect(card).toContainText(words.card.step(1, 3));
+      // The card walks the two people; the transfer that names nobody is counted and offered through select mode.
+      await expect(card).toContainText(words.card.step(1, 2));
+      await expect(card.getByTestId('transfer-question-unnamed')).toHaveAttribute('aria-label', words.card.moreUnnamed(1));
       const mariam = screen.getByTestId('transfer-person-person:mariam s');
       await expect(mariam).toBeVisible();
       await expect(mariam.getByTestId('transfer-person-count')).toContainText(words.person.transfers(3));
@@ -164,8 +168,10 @@ try {
       const netAfter = await sameCount(page, words, home, WAITING - 3);
       assert.equal(netAfter - netBefore, MARIAM_IN - MARIAM_OUT, 'paid and received from someone else now count in Net');
 
-      // Select mode: a person is one tick; own for Khalid saves one own answer, never linked.
-      await screen.getByTestId('transfers-select').click();
+      // Select mode: a person is one tick; own for Khalid saves one own answer, never linked. The unnamed
+      // transfer is a tick of its own there.
+      await page.getByTestId('transfer-question-unnamed').click();
+      await expect(screen.getByTestId('transfer-row-u1')).toHaveAttribute('role', 'checkbox');
       await screen.getByTestId('transfer-person-person:khalid r').click();
       const bar = page.getByTestId('transfer-selection-footer');
       await expect(bar).toContainText(words.select.selected(1));
@@ -176,6 +182,9 @@ try {
       await expect.poll(async () => (await decided(page, ['k1'])).map(row => row.transferDecision.ownership)).toEqual(['own']);
       assert.equal((await decided(page, ['k1']))[0].transferDecision.counterpartId, undefined);
       const netOwn = await sameCount(page, words, home, WAITING - 4);
+      // Only the unnamed transfer waits: no question card, the counted link opens select mode.
+      await expect(page.getByTestId('transfer-question-card')).toHaveCount(0);
+      await expect(page.getByTestId('transfers-review-link')).toBeVisible();
       assert.equal(netOwn, netAfter, 'own money stays out of Net');
       await page.reload({ waitUntil: 'networkidle' });
       assert.equal((await decided(page, [...MARIAM, 'k1'])).length, 4, 'answers survive reopening');

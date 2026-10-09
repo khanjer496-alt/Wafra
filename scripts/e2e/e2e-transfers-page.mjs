@@ -54,13 +54,12 @@ const transactions = [
   tx('p-in', 'income', 5600, 240),
   tx('q-out', 'expense', 12300, 200),
   tx('q-in', 'income', 12300, 190),
-  // A flagged transfer nobody has answered and the reconciler does not queue. It names nobody, so it is
-  // asked about on its own, after the reconciler's queue (Transfers grouped by person).
+  // A flagged transfer nobody has answered and the reconciler does not queue. It names nobody: it needs an
+  // answer and is counted, but the card does not walk such one-offs; its footer offers select mode for them.
   tx('unk-out', 'expense', NONE_FILS, 100, { isTransfer: true, transferEvidence: undefined }),
 ];
 const OPEN_ROWS = 8; // own pair (one row), ext-out, ext-in, p-out, p-in, q-out, q-in, unk-out
-// Questions on the card: one per queued pair (two), then the unnamed transfer the reconciler does not queue.
-const QUEUED = 3;
+const QUEUED = 2; // movements needing an answer: one question per pair
 const seed = (language, theme) => ({
   ledgerMoney: { schemaVersion: 2, currency: 'AED', exponent: 2 }, accounts, transactions,
   budgets: [], bills: [], cardDues: [], goals: [], merchantOverrides: {}, accountHints: {}, notSubscriptions: [],
@@ -154,15 +153,19 @@ try {
 
       // 2. The question card: answer, Undo, and the count follows.
       await stepOf(page, 1, QUEUED);
+      // Every transfer waiting is counted (two movements and the unnamed one); the unnamed one is offered via select mode.
+      await expect(page.getByTestId('transfer-question-card')).toContainText(words.card.title(3));
+      await expect(page.getByTestId('transfer-question-unnamed')).toHaveAttribute('aria-label', words.card.moreUnnamed(1));
       await page.getByTestId('transfer-answer-external').click();
       const toast = page.getByText(new RegExp(`^${words.answers.saved}`)).first();
       await expect(toast).toBeVisible();
       const undo = page.getByRole('button', { name: words.answers.undo, exact: true });
       await expect(undo).toBeVisible();
-      // The other leg of the answered movement is not counted yet, so it still needs an answer: it joins the
-      // questions after the queue, and the card moves on to the other queued movement.
-      await stepOf(page, 1, QUEUED);
-      await expect(page.getByTestId('transfer-question-card')).toContainText('56.00');
+      await stepOf(page, 1, QUEUED / 2);
+      // The other leg of the answered movement is not counted yet, so it still needs an answer: it is counted
+      // and joins the unnamed one-offs offered through select mode.
+      await expect(page.getByTestId('transfer-question-card')).toContainText(words.card.title(3));
+      await expect(page.getByTestId('transfer-question-unnamed')).toHaveAttribute('aria-label', words.card.moreUnnamed(2));
       const answered = (await stored(page)).filter(row => row.transferDecision);
       assert.equal(answered.length, 1, 'one decision saved');
       assert.equal(answered[0].transferDecision.ownership, 'external');

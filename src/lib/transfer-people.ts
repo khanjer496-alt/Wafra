@@ -181,21 +181,28 @@ export type TransferQuestion<T extends TransferActivityRecord = TransferActivity
   | { kind: 'entry'; key: string; record: T };
 
 /**
+ * Waiting transfers that name nobody and that the reconciler does not queue,
+ * newest first. One-offs with nothing to group them by: the card does not
+ * walk them one by one; they stay listed as "Needs an answer" rows, each with
+ * its own sheet, and are answered together in select mode.
+ */
+export function transferUnnamedWaiting<T extends TransferActivityRecord>(activity: readonly T[]): T[] {
+  const named = new Set(transferPeople(activity).flatMap(group => group.ids));
+  return onePerPair(activity.filter(record => isUnqueuedWaiting(record) && !named.has(record.transaction.id)))
+    .sort((a, b) => newestFirst(a.transaction, b.transaction));
+}
+
+/**
  * The card's questions in order: people first, most transfers first (one
  * answer settles the most), then the reconciler's queue (newest first, one
- * question per movement), then every other waiting transfer with no name,
- * newest first. Together they are every transfer waiting except the ones
- * only the review groups reach (duplicate ids, archived accounts, likely card
- * repayments), which `unaskedPendingIds` counts.
+ * question per movement). Together with `transferUnnamedWaiting` they are
+ * every transfer waiting except the ones only the review groups reach
+ * (duplicate ids, archived accounts, likely card repayments), which
+ * `unaskedPendingIds` counts.
  */
 export function transferQuestions<T extends TransferActivityRecord>(activity: readonly T[]): TransferQuestion<T>[] {
-  const people = transferPeople(activity);
-  const named = new Set(people.flatMap(group => group.ids));
-  const unnamed = onePerPair(activity.filter(record => isUnqueuedWaiting(record) && !named.has(record.transaction.id)))
-    .sort((a, b) => newestFirst(a.transaction, b.transaction));
   return [
-    ...people.map(person => ({ kind: 'person' as const, key: person.key, person })),
+    ...transferPeople(activity).map(person => ({ kind: 'person' as const, key: person.key, person })),
     ...transferQuestionQueue(activity).map(record => ({ kind: 'entry' as const, key: record.transaction.id, record })),
-    ...unnamed.map(record => ({ kind: 'entry' as const, key: record.transaction.id, record })),
   ];
 }

@@ -538,16 +538,19 @@ test('a link to one entry opens its "What is this?" on Transfers; closing shows 
 });
 
 // Owner decision (Transfers grouped by person): a generic unknown is kept out of the totals, so it is asked about.
-test('a link to a low-signal transfer opens it, and the transfer is asked about like every other one waiting', () => {
+test('a link to a low-signal transfer opens it; it needs an answer and select mode reaches it', () => {
   const tx = row('low-signal');
   const h = createPage({ transactions: [tx], params: { transactionId: tx.id }, groupDefinitions: [] });
   const tree = h.render();
   assert.equal(detailSheet(tree).props.transaction.id, tx.id, 'the requested record is reachable despite no pending group');
   assert.deepEqual(h.events, [], 'opening the route cannot classify a record');
-  const general = createPage({ transactions: [tx], groupDefinitions: [] }).render();
-  const card = byId(general, 'transfer-question-card');
-  assert.ok(card, 'kept out of the totals until answered: the card asks about it');
-  assert.ok(text(card).includes(copyFor('en').card.title(1)));
+  const page = createPage({ transactions: [tx], groupDefinitions: [] });
+  const general = page.render();
+  assert.equal(byId(general, 'transfer-question-card'), undefined, 'an unnamed one-off is not walked by the card');
+  const link = byId(general, 'transfers-review-link');
+  assert.ok(link && text(link).includes(copyFor('en').card.title(1)), 'but it is counted, and select mode answers it');
+  link.props.onPress();
+  assert.ok(byId(page.render(), 'transfer-selection-footer'));
   assert.equal(groupRows(general).length, 0, 'it names nobody: no person, no group');
   const rowNode = byId(general, 'transfer-row-low-signal');
   assert.ok(text(rowNode).includes(copyFor('en').tags.needsAnswer), 'one term for every unanswered transfer');
@@ -1371,7 +1374,10 @@ test('the card asks about the top person; an answer opens the sheet with every e
   const card = byId(h.render(), 'transfer-question-card');
   assert.ok(text(card).includes(h.words.person.question('MARIAM S')), 'the person with the most transfers first');
   assert.ok(text(card).includes(h.words.card.title(5)), 'every transfer waiting: three with Mariam, one with Khalid, one unnamed');
-  assert.ok(text(card).includes(h.words.card.step(1, 3)), 'two people and one unnamed transfer: three questions');
+  assert.ok(text(card).includes(h.words.card.step(1, 2)), 'the card walks the two people; the unnamed one-off is not a question');
+  const unnamed = byId(card, 'transfer-question-unnamed');
+  assert.ok(text(unnamed).includes(h.words.card.moreUnnamed(1)));
+  assert.equal(unnamed.props.accessibilityRole, 'button');
   // Money both ways: the answers are worded for both directions.
   assert.ok(text(card).includes(h.words.answers.mixed.own));
   answerIn(card, 'external');
@@ -1383,6 +1389,18 @@ test('the card asks about the top person; an answer opens the sheet with every e
   assert.ok(byId(sheet, 'transfer-batch-preview-person'));
   assert.equal(allById(sheet, 'transfer-group-entry').length, 3, 'every entry is listed');
   assert.equal(byId(sheet, 'transfer-answer-sheet-save').props.accessibilityLabel, h.words.batch.save(3));
+});
+
+test('the card\'s "N more without a name" opens select mode, where each unnamed transfer can be ticked', () => {
+  const h = peoplePage();
+  byId(byId(h.render(), 'transfer-question-card'), 'transfer-question-unnamed').props.onPress();
+  const tree = h.render();
+  assert.ok(byId(tree, 'transfer-selection-footer'), 'select mode');
+  const row = byId(tree, 'transfer-row-u1');
+  assert.equal(row.props.accessibilityRole, 'checkbox');
+  row.props.onPress();
+  assert.equal(byId(h.render(), 'transfer-row-u1').props.accessibilityState.checked, true);
+  assert.deepEqual(h.events, []);
 });
 
 test('a person\'s answer is one single-entry decision per transfer, with Undo clearing exactly those', async () => {
@@ -1479,7 +1497,8 @@ for (const language of ['en', 'ar']) {
     assert.deepEqual(Object.keys(words).sort(), Object.keys(en).sort());
     if (language === 'ar') {
       for (const value of [words.question('مريم'), words.transfers(1), words.transfers(2), words.transfers(5), words.transfers(40),
-        words.oneAnswer('مريم'), words.people(1), words.people(2), words.people(7), words.people(24), words.showAll(24), words.showFewer]) {
+        words.oneAnswer('مريم'), words.people(1), words.people(2), words.people(7), words.people(24), words.showAll(24), words.showFewer,
+        copyFor('ar').card.moreUnnamed(1), copyFor('ar').card.moreUnnamed(2), copyFor('ar').card.moreUnnamed(40)]) {
         assert.doesNotMatch(value, /[A-Za-z]/, value);
       }
       assert.equal(words.transfers(1), 'تحويل واحد');
@@ -1489,6 +1508,7 @@ for (const language of ['en', 'ar']) {
     } else {
       assert.equal(words.transfers(1), '1 transfer');
       assert.equal(words.transfers(40), '40 transfers');
+      assert.equal(copyFor('en').card.moreUnnamed(12), '12 more without a name — select to answer');
       assert.equal(words.question('Mariam S'), '⁨Mariam S⁩: your own account or someone else?');
     }
   });

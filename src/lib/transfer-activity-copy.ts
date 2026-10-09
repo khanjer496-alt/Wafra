@@ -168,6 +168,8 @@ const en = {
     looksLike: (account: string) => `looks like your ${isolateText(boundDigits(account))}`,
     /** "See all" when the card's title already gives the count. */
     seeAllPlain: 'See all',
+    /** Waiting transfers that name nobody: not asked one by one on the card, answered in select mode. */
+    moreUnnamed: (n: number) => `${n} more without a name — select to answer`,
   },
 };
 
@@ -288,6 +290,7 @@ const ar: typeof en = {
     whereIn: 'من أين جاءت؟',
     looksLike: (account) => `يبدو أنها حسابك ${isolateText(boundDigits(account))}`,
     seeAllPlain: 'عرض الكل',
+    moreUnnamed: (n) => `بلا اسم: ${arTransfers(n)} أيضاً — استخدم التحديد للإجابة`,
   },
 };
 

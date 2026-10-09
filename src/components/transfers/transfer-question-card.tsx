@@ -22,8 +22,8 @@ import type { Transaction } from '@/lib/types';
  * the confirmation sheet with the entries and their count before anything is
  * saved; an entry's answer is saved at once with Undo.
  */
-export function TransferQuestionCard({ transaction, person, index, total, waiting: waitingCount, more = 0, accountLabel, hint, palette, busy,
-  onAnswer, onSeeAll }: {
+export function TransferQuestionCard({ transaction, person, index, total, waiting: waitingCount, more = 0, unnamed = 0, accountLabel, hint,
+  palette, busy, onAnswer, onSeeAll, onSelectUnnamed }: {
   /** The entry asked about; or `person`. */
   transaction?: Transaction;
   /** A person asked about as a whole. */
@@ -34,6 +34,12 @@ export function TransferQuestionCard({ transaction, person, index, total, waitin
   waiting?: number;
   /** Queued entries this card cannot ask about; "See all" stays open while there are any. */
   more?: number;
+  /**
+   * Waiting transfers that name nobody. Counted in `waiting` but not walked by the card (they are not in
+   * `total`): the footer offers select mode for them.
+   */
+  unnamed?: number;
+  onSelectUnnamed?: () => void;
   accountLabel?: string; hint?: string;
   palette: BandPalette; busy: boolean; onAnswer: (answer: TransferAnswer) => void; onSeeAll: () => void;
 }) {
@@ -43,7 +49,8 @@ export function TransferQuestionCard({ transaction, person, index, total, waitin
   const incoming = person ? person.direction === 'between' ? 'mixed' as const : person.direction === 'income'
     : transaction?.type === 'income';
   // Everything waiting for an answer, the card's own questions and the ones it cannot ask, so the
-  // title and See all never disagree. The step only counts when the card can walk all of them.
+  // title and See all never disagree. The step counts the card's own questions (people and the
+  // reconciler's queue); it is hidden only while queued entries wait that no question reaches.
   const waiting = (waitingCount ?? total) + more;
   const money = (fils: number) => `${ledgerMoney?.currency ?? ledgerCurrencyDisplay()} ${formatAmount(fils, { decimals: true })}`;
   const what = person ? <View testID="transfer-question-person" style={styles.person}>
@@ -77,6 +84,10 @@ export function TransferQuestionCard({ transaction, person, index, total, waitin
     {waiting > 1 ? <Pressable testID="transfer-question-see-all" accessibilityRole="button" onPress={onSeeAll} style={styles.seeAll}>
       {/* The title already says how many. */}
       <ThemedText type="small" style={{ color: palette.tint }}>{words.card.seeAllPlain}</ThemedText>
+    </Pressable> : null}
+    {unnamed > 0 ? <Pressable testID="transfer-question-unnamed" accessibilityRole="button" accessibilityLabel={words.card.moreUnnamed(unnamed)}
+      disabled={busy} onPress={onSelectUnnamed ?? onSeeAll} style={({ pressed }) => [styles.seeAll, { opacity: pressed ? 0.7 : 1 }]}>
+      <ThemedText type="small" style={{ color: palette.tint }}>{words.card.moreUnnamed(unnamed)}</ThemedText>
     </Pressable> : null}
   </View>;
 }
