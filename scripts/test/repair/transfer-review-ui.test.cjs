@@ -371,7 +371,9 @@ test('Cancel leaves the entries unanswered: no write, no announcement', () => {
 test('a saved group answer offers Undo, which clears each entry from its current state', async () => {
   const h = createPage({ bulk: true, resolveTransferBatch: async (request, state) => {
     if (request.decisions[0].ownership === null) return;
-    state.transactions = state.transactions.map(tx => ({ ...tx, transferDecision: { version: 1, ownership: 'own', decidedAt: Date.now() } }));
+    // One stamp per save, as the store's batch write does (request.now); a stamp per row can tick between rows.
+    const decidedAt = Date.now();
+    state.transactions = state.transactions.map(tx => ({ ...tx, transferDecision: { version: 1, ownership: 'own', decidedAt } }));
   } });
   answerIn(openGroup(h), 'own');
   save(h); await flush();
@@ -390,7 +392,9 @@ test('a saved group answer offers Undo, which clears each entry from its current
 test('Undo never clears an answer given since the save: it says the transfers changed', async () => {
   const h = createPage({ bulk: true, resolveTransferBatch: async (request, state) => {
     if (request.decisions[0].ownership === null) return;
-    state.transactions = state.transactions.map(tx => ({ ...tx, transferDecision: { version: 1, ownership: 'own', decidedAt: Date.now() } }));
+    // One stamp per save, as the store's batch write does (request.now); a stamp per row can tick between rows.
+    const decidedAt = Date.now();
+    state.transactions = state.transactions.map(tx => ({ ...tx, transferDecision: { version: 1, ownership: 'own', decidedAt } }));
   } });
   answerIn(openGroup(h), 'own');
   save(h); await flush();
@@ -411,8 +415,9 @@ test('while Undo runs the page knows: its controls wait until it is done', async
     groupDefinitions: [{ id: 'group', transactionIds: ['one', 'two'], bulkEligible: true }, { id: 'solo', transactionIds: ['three'], bulkEligible: false }],
     resolveTransferBatch: async (request, state) => {
       if (request.decisions[0].ownership === null) return undoing.promise;
+      const decidedAt = Date.now();
       state.transactions = state.transactions.map(tx => tx.id === 'three' ? tx
-        : { ...tx, transferDecision: { version: 1, ownership: 'own', decidedAt: Date.now() } });
+        : { ...tx, transferDecision: { version: 1, ownership: 'own', decidedAt } });
     } });
   // The page's real answer hook keeps its busy flag in state; this harness re-renders from its slots.
   answerIn(openGroup(h), 'own');
@@ -955,8 +960,9 @@ test('the toast\'s Undo waits for a save that is still writing: one transfer wri
       if (request.decisions[0].ownership === null) return;
       saves += 1;
       const ids = new Set(request.decisions.flatMap(decision => decision.ids));
+      const decidedAt = Date.now();
       state.transactions = state.transactions.map(tx => ids.has(tx.id)
-        ? { ...tx, transferDecision: { version: 1, ownership: request.decisions[0].ownership, decidedAt: Date.now() } } : tx);
+        ? { ...tx, transferDecision: { version: 1, ownership: request.decisions[0].ownership, decidedAt } } : tx);
       if (saves === 2) await writing.promise;
     } });
   answerIn(openGroup(h), 'own');

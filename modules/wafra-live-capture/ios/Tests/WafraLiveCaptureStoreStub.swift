@@ -91,6 +91,15 @@ public final class WafraLiveCaptureStore {
     calls.append("setCaptureEnabled:\(enabled)")
   }
 
+  public func instantAlertsEnabled() throws -> Bool {
+    calls.append("instantAlertsEnabled")
+    return true
+  }
+
+  public func setInstantAlertsEnabled(_ enabled: Bool) throws {
+    calls.append("setInstantAlertsEnabled:\(enabled)")
+  }
+
   public func listPendingRecords(limit: Int, includeNotifications: Bool = true, includeApplePay: Bool = false, excluding: [String] = []) throws -> [String] {
     calls.append("listPendingRecords")
     listLimits.append(limit)

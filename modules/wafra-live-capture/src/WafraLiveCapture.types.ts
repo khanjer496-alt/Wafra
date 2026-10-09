@@ -43,6 +43,9 @@ export interface WafraLiveCaptureNativeModule {
     verifiedAtMs: number,
   ): Promise<boolean>;
   setCaptureEnabled(enabled: boolean): Promise<void>;
+  /** Per-charge banner preference for capture automations. Absent on older binaries. */
+  getInstantAlertsEnabled?(): Promise<boolean>;
+  setInstantAlertsEnabled?(enabled: boolean): Promise<void>;
   /** Legacy reader deliberately exposes message records only. */
   listPendingRecords(limit: number): Promise<string[]>;
   /** Opt in only when notificationCaptureSupported is true and decoder handles both sources. */

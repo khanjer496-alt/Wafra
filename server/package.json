@@ -13,14 +13,14 @@
     "types": "wrangler types",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build:check": "wrangler deploy --dry-run",
-    "test": "rm -rf .test-build && tsc src/push.ts --module commonjs --target es2022 --lib es2022,dom --outDir .test-build --skipLibCheck && esbuild src/imports.ts --bundle --platform=node --format=cjs --outfile=.test-build/imports.cjs && node test/push.test.cjs && node test/imports.test.cjs && node test/schema.test.cjs && node test/deploy.test.cjs",
+    "test": "rm -rf .test-build && tsc src/push.ts --module commonjs --target es2022 --lib es2022,dom --outDir .test-build --skipLibCheck && esbuild src/imports.ts --bundle --platform=node --format=cjs --outfile=.test-build/imports.cjs && esbuild src/xlsx-records.ts --bundle --platform=node --format=cjs --outfile=.test-build/xlsx-records.cjs && esbuild src/index.ts --bundle --platform=node --format=cjs --outfile=.test-build/worker.cjs --log-level=warning && node test/push.test.cjs && node test/imports.test.cjs && node test/statement-files.test.cjs && node test/import-routes.test.cjs && node test/schema.test.cjs && node test/deploy.test.cjs",
     "migrate": "node scripts/d1.mjs check && wrangler d1 execute wafra --remote --file=./schema.sql --yes && wrangler d1 migrations apply wafra --remote"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260730.1",
     "esbuild": "0.28.1",
     "typescript": "5.9.2",
-    "wrangler": "4.120.0"
+    "wrangler": "4.149.0"
   },
   "packageManager": "npm@11.12.1",
   "dependencies": {

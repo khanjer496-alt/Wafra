@@ -55,6 +55,7 @@ private struct WafraLiveCaptureBridgeBehaviorTests {
         "getAutomationInputProbeAt",
         "getCaptureStatus",
         "getHistoryShortcutURL",
+        "getInstantAlertsEnabled",
         "getMessageShortcutURL",
         "getNotificationShortcutURL",
         "listPendingApplePayRecords",
@@ -64,6 +65,7 @@ private struct WafraLiveCaptureBridgeBehaviorTests {
         "purgeExpired",
         "recordFirstCapturedAt",
         "setCaptureEnabled",
+        "setInstantAlertsEnabled",
         "setLocalCaptureEntitlementLease",
         "setStoreCaptureEntitlementLease",
       ])
@@ -146,6 +148,13 @@ private struct WafraLiveCaptureBridgeBehaviorTests {
     _ = try TestAsyncFunctionRegistry.invoke("setCaptureEnabled", [true])
     check("setCaptureEnabled reaches the store with its argument",
       WafraLiveCaptureStore.shared.calls.last == "setCaptureEnabled:true")
+
+    _ = try TestAsyncFunctionRegistry.invoke("setInstantAlertsEnabled", [false])
+    check("setInstantAlertsEnabled reaches the store with its argument",
+      WafraLiveCaptureStore.shared.calls.last == "setInstantAlertsEnabled:false")
+    let instantAlerts = try invoke("getInstantAlertsEnabled", as: Bool.self)
+    check("getInstantAlertsEnabled returns the store preference",
+      instantAlerts && WafraLiveCaptureStore.shared.calls.last == "instantAlertsEnabled")
 
     let rows = try invoke("listPendingRecords", [7.0], as: [String].self)
     check("listPendingRecords returns the store result", rows == ["pending:7"])

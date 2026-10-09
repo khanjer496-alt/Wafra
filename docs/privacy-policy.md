@@ -1,6 +1,6 @@
 # Wafra Privacy Policy
 
-_Last updated: 24 September 2026_
+_Last updated: 8 October 2026_
 
 Wafra ("the app") is a personal money manager for Android and iOS published by
 **Nasidaapps LLC** ("Wafra", "we", "us").
@@ -355,6 +355,20 @@ store biometric templates.
   contain no device, advertising, installation or push identifier.
 
 Wafra does not include advertising, third-party analytics or crash reporting.
+
+## Website
+
+Wafra's public website sets no cookies and runs no scripts in the browser. It is
+hosted on Cloudflare Pages. To learn whether the site helps people find Wafra,
+the server counts landing-page views and download-button clicks. Each count
+records only the time, the page or button, the visitor's country as determined by
+Cloudflare, the hostname of the referring website, a campaign tag if the link
+carried one (for example `utm_source`), and whether the request appears to come
+from an automated client. Wafra does not record IP addresses, browser or device
+identifiers, or full referring addresses, and does not combine these counts with
+app data. Cloudflare keeps the counts for three months. As the hosting provider,
+Cloudflare also processes connection data such as IP addresses to deliver the
+site.
 
 ## Automated processing
 

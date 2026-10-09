@@ -155,6 +155,8 @@ test('a queue-full upload still drains accepted rows even when no file returned 
   finishQueuedImport:async()=>{finishes++},rememberCoverage:async()=>{throw Error('failed file has no range')},
   CloudImportError:contract.CloudImportError,copy:{fileFailed:'failed',fileLocked:'locked'},interpolate:s=>s,
   errorText:()=> 'queue full',failed:noop,sleep:async()=>{},RATE_LIMIT_RETRY_MS:1,
+  stopRequestedRef:{current:false},stopWakeRef:{current:null},setStopping:noop,setPacing:noop,BatchStopped:class extends Error{},
+  statementBatches:{running:0,copies:new Set()},setSending:noop,
  };
  vm.runInNewContext(ts.transpileModule(body+'\nglobalThis.pick = pickAndUpload;', {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,ctx);
  await ctx.pick({}, {pdf:{accepts:['application/pdf']},csv:{accepts:['text/csv']}});
@@ -171,4 +173,14 @@ test('replayed or legacy files cannot claim a newly interpreted activity range',
  for(const statementImportId of ['raw file name','b'.repeat(64),'']) {
   assert.equal(contract.parseCsvImportAccepted({acceptedRows:1,rejectedRows:0,totalRows:1,statementImportId}),null);
  }
+});
+test('statement screen errors say what happened: pairing failures, unusable passwords, the hourly limit', () => {
+ const screen = fs.readFileSync(path.join(root, 'src/components/supplement-imports.tsx'), 'utf8');
+ const copy = fs.readFileSync(path.join(root, 'src/lib/supplement-copy.ts'), 'utf8');
+ // Connecting the phone fails before any upload, so it must not say rows may be queued.
+ assert.match(screen, /if \(value instanceof RelayError\) return value\.retryable \? copy\.errNetwork : copy\.serviceError;/);
+ assert.match(screen, /value\.code === 'pdf_password_incorrect' \|\| value\.code === 'pdf_password_required'\) return copy\.passwordWrong/);
+ // The relay's statement budget is hourly; the copy must not promise a minute.
+ assert.doesNotMatch(copy, /Wait a minute|انتظر دقيقة/);
+ assert.match(screen, /returnKeyType="go"[\s\S]{0,120}onSubmitEditing=\{\(\) => \{ if \(pdfPassword && busy === null\) void retryProtectedPdf\(\); \}\}/);
 });

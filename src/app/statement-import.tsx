@@ -1,7 +1,7 @@
 import { useLocalSearchParams } from 'expo-router';
 import { useRouter } from '@/hooks/use-app-router';
 import React from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { SupplementImports } from '@/components/supplement-imports';
 import { ThemedText } from '@/components/themed-text';
@@ -21,12 +21,19 @@ import { t } from '@/lib/i18n';
 export default function StatementImportScreen() {
   const router = useRouter();
   const band = useBand('settings');
-  const params = useLocalSearchParams<{ fromOnboarding?: string }>();
+  const params = useLocalSearchParams<{ fromOnboarding?: string; incomingStatement?: string }>();
   const fromOnboarding = params.fromOnboarding === '1';
   const title = fromOnboarding ? t('onboardPastTitle') : t('statementImportTitle');
+  // A statement opened in Wafra from the iOS Share Sheet or Files arrives as
+  // a one-time token from +native-intent. The importer asks before anything
+  // is sent: its card shows only in the foreground with App Lock cleared, and
+  // the lock is checked again when Import is tapped and before the upload.
+  const incomingStatement = Platform.OS === 'ios' && typeof params.incomingStatement === 'string'
+    ? params.incomingStatement : undefined;
   return (
     <SupplementImports
       onboarding={fromOnboarding ? { onContinue: router.back } : undefined}
+      incomingStatement={incomingStatement}
       frame={({ band: bandPart, sheet }) => (
         <BandScaffold
           band="settings"

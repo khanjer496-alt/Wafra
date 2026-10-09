@@ -4,13 +4,12 @@ import React from 'react';
 import { WafraMark } from '@/marketing/wafra-mark.web';
 import styles from '@/marketing/home.module.css';
 import {
-  ANDROID_APK_URL,
+  DOWNLOAD_PATHS,
   FAQ_SCHEMA,
   MARKETING_DESCRIPTION,
   MARKETING_TITLE,
   PRODUCT_SCHEMA,
   SITE_URL,
-  TESTFLIGHT_URL,
   captureLanes,
   faqItems,
   featureCards,
@@ -148,9 +147,9 @@ export default function MarketingHome() {
             <div className={styles.heroActions}>
               <a
                 className={styles.primaryAction}
-                href={TESTFLIGHT_URL}
+                href={DOWNLOAD_PATHS.iphone}
                 target="_blank"
-                rel="noreferrer"
+                rel="noopener"
                 aria-label="Join the Wafra beta on Apple TestFlight"
               >
                 <span className={styles.actionPlatform}>iPhone</span>
@@ -159,9 +158,9 @@ export default function MarketingHome() {
               </a>
               <a
                 className={styles.secondaryAction}
-                href={ANDROID_APK_URL}
+                href={DOWNLOAD_PATHS.android}
                 target="_blank"
-                rel="noreferrer"
+                rel="noopener"
                 aria-label="Download the Wafra Android test APK"
               >
                 <span className={styles.actionPlatform}>Android</span>

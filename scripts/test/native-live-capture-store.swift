@@ -415,6 +415,80 @@ struct NativeLiveCaptureStoreTests {
       && reopened.status().lastNotificationReceivedAt == nil)
   }
 
+  private static func testCaptureOffNotice() throws {
+    var now = fixedClock
+    let noticeRoot = root("capture-off-notice")
+    let queue = store(root: noticeRoot, now: { now })
+    let day = WafraLiveCaptureStore.captureOffNoticeInterval
+
+    check("capture switched off claims one off notice", try queue.claimCaptureOffNotice() == .off)
+    check("a second off message stays silent", try queue.claimCaptureOffNotice() == nil)
+    now = now.addingTimeInterval(day * 3)
+    check("off is announced once, not daily", try queue.claimCaptureOffNotice() == nil)
+
+    _ = try queue.setLocalEntitlementLease(expiresAt: now.addingTimeInterval(60), lifetime: false)
+    try queue.setCaptureEnabled(true)
+    check("working capture claims no notice", try queue.claimCaptureOffNotice() == nil)
+
+    now = now.addingTimeInterval(120)
+    check("a lapsed lease claims a paused notice", try queue.claimCaptureOffNotice() == .paused)
+    check("paused stays silent within a day", try queue.claimCaptureOffNotice() == nil)
+    check("the throttle survives reopening the store",
+      try store(root: noticeRoot, now: { now }).claimCaptureOffNotice() == nil)
+    now = now.addingTimeInterval(day - 1)
+    check("paused stays silent until a full day passes", try queue.claimCaptureOffNotice() == nil)
+    now = now.addingTimeInterval(1)
+    check("paused is announced again after a day", try queue.claimCaptureOffNotice() == .paused)
+    now = now.addingTimeInterval(-60)
+    check("a clock moved backwards notifies rather than staying silent",
+      try queue.claimCaptureOffNotice() == .paused)
+
+    try queue.setCaptureEnabled(false)
+    check("switching off after a pause is new news", try queue.claimCaptureOffNotice() == .off)
+
+    _ = try queue.setStoreEntitlementLease(
+      expiresAt: now.addingTimeInterval(60), lifetime: false, verifiedAt: now)
+    try queue.setCaptureEnabled(true)
+    now = now.addingTimeInterval(120)
+    check("a lapsed store lease claims a paused notice", try queue.claimCaptureOffNotice() == .paused)
+    _ = try queue.setStoreEntitlementLease(
+      expiresAt: now.addingTimeInterval(60), lifetime: false, verifiedAt: now)
+    check("a renewed lease admits the next message", try queue.stage(
+      sender: knownSender, body: messageBody, eventId: eventId(97_000), observedAt: now) == .accepted)
+    now = now.addingTimeInterval(120)
+    check("capture that worked in between announces the next pause within the day",
+      try queue.claimCaptureOffNotice() == .paused)
+
+    _ = try queue.setLocalEntitlementLease(expiresAt: nil, lifetime: true)
+    try queue.setCaptureEnabled(false)
+    check("switching off claims an off notice", try queue.claimCaptureOffNotice() == .off)
+    try queue.setCaptureEnabled(true)
+    try queue.setCaptureEnabled(false)
+    check("turning capture on resets the one-time off notice", try queue.claimCaptureOffNotice() == .off)
+
+    try queue.eraseAll()
+    check("erase forgets notice history", try queue.claimCaptureOffNotice() == .off)
+  }
+
+  private static func testInstantAlertPreference() throws {
+    let alertRoot = root("instant-alerts")
+    let queue = store(root: alertRoot)
+    check("charge banners are on by default, as on Android", try queue.instantAlertsEnabled())
+    try queue.setInstantAlertsEnabled(false)
+    check("turning charge banners off persists across reopening",
+      try store(root: alertRoot).instantAlertsEnabled() == false)
+    try grantLifetimeAndEnable(queue)
+    check("capture admission is independent of the banner preference", try queue.stage(
+      sender: knownSender, body: messageBody, eventId: eventId(98_000), observedAt: fixedClock) == .accepted)
+    try queue.setInstantAlertsEnabled(true)
+    check("turning charge banners back on persists", try store(root: alertRoot).instantAlertsEnabled())
+    try queue.setInstantAlertsEnabled(false)
+    try queue.eraseAll()
+    try queue.setInstantAlertsEnabled(true)
+    try queue.eraseAll()
+    check("erase turns charge banners off, as Android's erase does", try queue.instantAlertsEnabled() == false)
+  }
+
   private static func testApplePay() throws {
     let queueRoot = root("apple-pay")
     let leaseRoot = root("apple-pay-expired-lease")
@@ -1847,6 +1921,8 @@ struct NativeLiveCaptureStoreTests {
       recordProtection == .completeUntilFirstUserAuthentication
     )
 
+    try testCaptureOffNotice()
+    try testInstantAlertPreference()
     try testApplePay()
     try testNotifications()
     try testAutomationMessages()

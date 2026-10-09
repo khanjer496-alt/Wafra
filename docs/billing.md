@@ -101,7 +101,43 @@ subscriber. Confirmed `INACTIVE` revokes Pro; confirmed `ACTIVE` grants it.
 For iPhone automatic capture, a confirmed active subscription is mirrored into
 the native App Intent gate. When exact transaction expiration is not yet
 available, Wafra uses only a short bounded lease and replaces it when customer
-information arrives.
+information arrives. A plan that is set to renew, with no billing retry, keeps
+capture for seven days past the current period end, because Apple renews in the
+background and Wafra only sees the renewal when it next runs. A cancelled plan
+or one in billing retry stops at the exact period end, and a confirmed inactive
+answer clears the lease at once.
+
+While capture is off or the lease has lapsed, the capture automations finish
+without an error, so Shortcuts does not post an "Automation failed" banner for
+every incoming message. Instead Wafra posts its own notification, if the user
+allows Wafra notifications:
+
+- capture switched off: once, until capture is turned on again;
+- capture on but access lapsed ("paused"): at most once a day.
+
+A message saved in between, or turning capture on, resets that throttle. The
+notice carries no message text. With the provisional permission iOS setup
+requests, it is delivered quietly to Notification Center without a banner. Capture status in Wafra shows the off or paused
+state, and the Notification and Apple Pay setup checks still report it as an
+error. Messages that arrive while capture is off are not saved; History import
+is the way to recover them. iOS's own "Running your automation" banner is a
+per-automation setting (Notify When Run) that the user controls in Shortcuts.
+
+While capture is working, a bank SMS the automation hands Wafra gets the same
+per-charge banner Android posts ("AED 45.00 · CARREFOUR", bank and card
+underneath). On iPhone the bank-app Notification automation posts it too, at the
+user's request; Android does not, because the bank's own push is already
+showing, so an iPhone user sees both. It is a preview only: the App Intent has no
+JavaScript parser, so `WafraInstantAlertReader.swift` reads the text with the
+patterns of Android's `InstantAlert.kt`, generated into
+`WafraInstantAlertPatterns.generated.swift` by
+`scripts/generate-ios-instant-alert.mjs`. Nothing it reads is stored; the
+ledger row is still the TypeScript parser's. It stays silent for credentials,
+declines, promotions, pending or future charges and anything else that does
+not plainly say money moved. Settings → "Alert me on every charge" turns it
+off; erase turns it off, as on Android. After changing `InstantAlert.kt`, regenerate the Swift
+file; CI fails while they disagree, and the macOS job checks the iPhone reader
+against every corpus message.
 
 ## Existing RevenueCat subscribers
 

@@ -140,6 +140,16 @@ private struct WafraLiveCaptureResourcesBehaviorTests {
       check("Arabic differs from English for \(key)", arabic?.1 != english?.1)
     }
 
+    for key in ["live.notice.off.title", "live.notice.off.body",
+                "live.notice.paused.title", "live.notice.paused.body"] {
+      let text = WafraLiveCaptureResources.string(key)
+      check("notice text resolves for \(key)", text?.isEmpty == false && text != key)
+      check("Arabic notice text exists for \(key)",
+        resolve(key, localization: "ar").map { $0.1 != "__WAFRA_TEST_MISSING_LOCALIZATION__" && $0.1 != key } == true)
+    }
+    check("notice text is nil, not a crash, for a missing key",
+      WafraLiveCaptureResources.string("live.missing.test.key") == nil)
+
     print("\nNative live capture resources: \(passed) passed, \(failed) failed")
     precondition(failed == 0, "Native live capture resource behavior failed.")
   }
