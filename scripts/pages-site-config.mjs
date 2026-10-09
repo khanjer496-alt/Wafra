@@ -40,6 +40,16 @@ export const productionPatch = (production = {}) => {
   };
 };
 
+/**
+ * The PATCH body. Cloudflare rejects a fail_open change on one environment
+ * unless the other is sent with the same value (error 8000066), so preview
+ * gets fail_open alone and nothing else of its configuration is touched.
+ */
+export const deploymentConfigsPatch = (production = {}) => ({
+  production: productionPatch(production),
+  preview: { fail_open: true },
+});
+
 /** Names of every production setting and binding, to compare before and after. */
 export const settingNames = (production = {}) => Object.entries(production).flatMap(([key, value]) =>
   value && typeof value === 'object' && !Array.isArray(value)
@@ -79,15 +89,17 @@ const main = async () => {
 
   await api(`/pages/projects/${encodeURIComponent(project.name)}`, {
     method: 'PATCH',
-    body: JSON.stringify({ deployment_configs: { production: productionPatch(production) } }),
+    body: JSON.stringify({ deployment_configs: deploymentConfigsPatch(production) }),
   });
 
-  const updated = (await api(`/pages/projects/${encodeURIComponent(project.name)}`)).deployment_configs?.production ?? {};
+  const configs = (await api(`/pages/projects/${encodeURIComponent(project.name)}`)).deployment_configs ?? {};
+  const updated = configs.production ?? {};
   const after = settingNames(updated);
   const lost = before.filter((name) => !after.includes(name));
   console.error(`Production settings after: ${after.join(', ')}`);
   if (lost.length) throw new Error(`Settings disappeared after the update: ${lost.join(', ')}. Restore them in the dashboard.`);
-  if (updated.analytics_engine_datasets?.[SITE_EVENTS_BINDING]?.dataset !== SITE_EVENTS_DATASET || updated.fail_open !== true) {
+  if (updated.analytics_engine_datasets?.[SITE_EVENTS_BINDING]?.dataset !== SITE_EVENTS_DATASET || updated.fail_open !== true ||
+    configs.preview?.fail_open !== true) {
     throw new Error('The binding or fail-open setting did not apply.');
   }
   console.log(`project=${project.name}`);
