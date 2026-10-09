@@ -22,14 +22,17 @@ import { useMotionPreference } from '@/hooks/use-reduced-motion';
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 
 /** The pill's height plus the gap above it: what Home's sheet adds at its end while it shows. */
-export const NEEDS_YOU_CLEARANCE = 48 + 12;
+export const NEEDS_YOU_CLEARANCE = 44 + 12;
 /** Android's floating Add (56pt) and its gap: the pill stops short of it. */
 const ADD_BUTTON_ROOM = 56 + 16 + 12;
 
-export function NeedsYouPill({ needKey, label, hint, icon, warning, dismissLabel, onPress, onDismiss, band, hold }: {
+export function NeedsYouPill({ needKey, label, spokenLabel, hint, icon, warning, dismissLabel, onPress, onDismiss, band, hold }: {
   /** Which need is shown: a new one slides in again. */
   needKey: string;
+  /** One short visible line ("Card payment overdue"). */
   label: string;
+  /** The full sentence a screen reader hears ("Skywards Infinite payment overdue"). */
+  spokenLabel?: string;
   hint: string;
   icon: IconName;
   /** Tracking or an overdue payment: drawn in the warning colours. */
@@ -69,10 +72,12 @@ export function NeedsYouPill({ needKey, label, hint, icon, warning, dismissLabel
     style={[styles.frame, { bottom: clearance, end: Platform.OS === 'android' ? ADD_BUTTON_ROOM : 16 },
       { opacity: value, transform: [{ translateY: value.interpolate({ inputRange: [0, 1], outputRange: [28, 0] }) }] }]}>
     <View style={[styles.pill, { backgroundColor: ground, borderColor: band.bandRule }]}>
-      <Pressable testID="home-needs-you-open" accessibilityRole="button" accessibilityLabel={label} accessibilityHint={hint}
+      <Pressable testID="home-needs-you-open" accessibilityRole="button" accessibilityLabel={spokenLabel ?? label} accessibilityHint={hint}
         onPress={onPress} style={({ pressed }) => [styles.open, { opacity: pressed ? 0.7 : 1 }]}>
         <Icon name={icon} size={16} color={ink} strokeWidth={2.2} />
-        <ThemedText type="smallBold" numberOfLines={2} style={[styles.text, { color: ink }]}>{label}</ThemedText>
+        {/* One line at every text size: capped scaling, then an ellipsis; the full sentence is spoken. */}
+        <ThemedText type="smallBold" numberOfLines={1} ellipsizeMode="tail" maxFontSizeMultiplier={1.2}
+          style={[styles.text, { color: ink }]}>{label}</ThemedText>
       </Pressable>
       <Pressable testID="home-needs-you-dismiss" accessibilityRole="button" accessibilityLabel={dismissLabel}
         onPress={onDismiss} hitSlop={4} style={({ pressed }) => [styles.close, { opacity: pressed ? 0.6 : 1 }]}>
@@ -84,10 +89,10 @@ export function NeedsYouPill({ needKey, label, hint, icon, warning, dismissLabel
 
 const styles = StyleSheet.create({
   frame: { position: 'absolute', start: 16, alignItems: 'flex-start' },
-  pill: { minHeight: 48, maxWidth: '100%', borderRadius: 24, borderWidth: StyleSheet.hairlineWidth, flexDirection: 'row',
+  pill: { height: 44, maxWidth: '100%', borderRadius: 24, borderWidth: StyleSheet.hairlineWidth, flexDirection: 'row',
     alignItems: 'center', paddingStart: 14, paddingEnd: 2, elevation: 3,
     shadowColor: Elevation.shadowColor, shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
-  open: { minHeight: 44, flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: 8, paddingEnd: 4 },
-  text: { flexShrink: 1, fontSize: 15, lineHeight: 20 },
+  open: { height: 44, flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: 8, paddingEnd: 4 },
+  text: { flexShrink: 1, fontSize: 14, lineHeight: 18 },
   close: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
 });

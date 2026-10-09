@@ -212,7 +212,7 @@ test('Home copy has the same keys in English and Arabic, and no English in Arabi
   const strings = [ar.spentIn('أكتوبر'), ar.versusSameDays('سبتمبر'), ar.spokenTrend('up', 12, 'سبتمبر', true),
     ar.spokenTrend('same', 0, 'سبتمبر', false), ar.transfersToAnswer(1), ar.transfersToAnswer(2), ar.transfersToAnswer(5),
     ar.transfersToAnswer(12), ar.limitsOver(3), ar.cardOverdue('سكاي'), ...Object.values(ar).filter((v) => typeof v === 'string'),
-    ...Object.values(ar.needHint)];
+    ...Object.values(ar.needHint), ...Object.values(ar.needShort)];
   for (const value of strings) assert.doesNotMatch(value, /[A-Za-z]/, value);
   assert.equal(en.spokenTrend('up', 12, 'September', true), 'up 12% versus the same days of September');
   assert.equal(en.spokenTrend('down', -8, 'September', false), 'down 8% versus September');

@@ -1021,6 +1021,11 @@ export default function JournalHomeScreen() {
     ? shown.tracking === 'paused' ? homeWords.trackingPaused : shown.tracking === 'stopped' ? homeWords.trackingStopped : homeWords.trackingOff
     : shown.kind === 'card' ? homeWords.cardOverdue(shown.title)
       : shown.kind === 'transfers' ? homeWords.transfersToAnswer(shown.count) : homeWords.limitsOver(shown.count);
+  // The pill's one visible line; it speaks needLabel in full.
+  const needShortLabel = (shown: Need) => shown.kind === 'tracking'
+    ? shown.tracking === 'paused' ? homeWords.needShort.trackingPaused
+      : shown.tracking === 'stopped' ? homeWords.needShort.trackingStopped : homeWords.needShort.trackingOff
+    : shown.kind === 'card' ? homeWords.needShort.cardOverdue : needLabel(shown);
   const founderUnlockEnabled = process.env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK === '1';
   const unlockFounder = founderUnlockEnabled && !state.founderPro
     ? () => {
@@ -1273,7 +1278,7 @@ export default function JournalHomeScreen() {
     <BillDetailSheet subscription={recurring} onClose={() => setRecurring(null)} />
     {budgetMonthKey ? <LimitSheet category={null} open={budgetSheetOpen} monthKey={budgetMonthKey} onClose={() => setBudgetSheetOpen(false)} /> : null}
     {Platform.OS === 'android' && state.hydrated ? <HomeAddButton label={words.add} onPress={() => router.push('/add-transaction')} /> : null}
-    {need ? <NeedsYouPill needKey={need.key} label={needLabel(need)} hint={homeWords.needHint[need.kind]}
+    {need ? <NeedsYouPill needKey={need.key} label={needShortLabel(need)} spokenLabel={needLabel(need)} hint={homeWords.needHint[need.kind]}
       icon={need.kind === 'transfers' ? 'repeat' : need.kind === 'card' ? 'calendar' : 'alert'}
       warning={need.kind === 'tracking' || need.kind === 'card'} dismissLabel={homeWords.dismiss}
       onPress={() => openNeed(need)} onDismiss={() => dismissNeed(need.key)} band={band} hold={!revealReady} /> : null}

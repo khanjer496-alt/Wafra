@@ -37,6 +37,13 @@ const en = {
   seeAll: 'See all',
   seeAllHint: 'Opens every transaction',
   needsYou: 'Needs you',
+  /** The pill's one visible line; the full sentence above is what it speaks. */
+  needShort: {
+    trackingPaused: 'Tracking paused',
+    trackingStopped: 'Alerts stopped',
+    trackingOff: 'Tracking off',
+    cardOverdue: 'Card payment overdue',
+  },
   dismiss: 'Dismiss',
   trackingPaused: 'Tracking is paused',
   trackingStopped: 'Bank alerts stopped arriving',
@@ -81,6 +88,12 @@ const ar: HomeCopy = {
   seeAll: 'عرض الكل',
   seeAllHint: 'يفتح كل المعاملات',
   needsYou: 'يحتاج إليك',
+  needShort: {
+    trackingPaused: 'التتبع متوقف',
+    trackingStopped: 'توقفت التنبيهات',
+    trackingOff: 'التتبع غير مفعّل',
+    cardOverdue: 'دفعة بطاقة متأخرة',
+  },
   dismiss: 'إخفاء',
   trackingPaused: 'التتبع متوقف مؤقتًا',
   trackingStopped: 'توقف وصول تنبيهات البنك',

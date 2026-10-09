@@ -86,6 +86,13 @@ test('Needs you: nothing, or only the highest-priority need, with a way there an
   assert.equal(byId(card.tree, 'home-needs-you-open').props.accessibilityLabel, 'Sky payment overdue');
   byId(card.tree, 'home-needs-you-open').props.onPress();
   assert.equal(JSON.stringify(card.events.at(-1)), JSON.stringify(['state', { id: 'due-1' }]));
+  // One short visible line at every text size; the full sentence is what it speaks.
+  const line = walk(byId(card.tree, 'home-needs-you-open')).find((node) => node.props?.numberOfLines !== undefined);
+  assert.equal(line.props.numberOfLines, 1);
+  assert.ok(line.props.maxFontSizeMultiplier <= 1.2);
+  assert.equal(text(line).trim(), 'Card payment overdue');
+  const pillStyle = Object.assign({}, ...[walk(byId(card.tree, 'home-needs-you'))[1].props.style].flat(Infinity).filter(Boolean));
+  assert.equal(pillStyle.height, 44, 'a fixed one-line pill');
   // A deliberate opt-out of capture is not nagged about.
   assert.equal(byId(harness({ homeWidgets: 'default', optOut: true }).tree, 'home-needs-you'), undefined);
 });
