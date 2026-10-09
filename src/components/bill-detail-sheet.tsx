@@ -31,6 +31,7 @@ import {
   parseAmountWithMoneySpec,
   shiftMonthKey,
   shortDate,
+  shortDateWithYear,
   toISODate,
   totalAsShown,
 } from '@/lib/format';
@@ -273,7 +274,7 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
             <ThemedText type="heading" accessibilityRole="header">{subscriptionLabel(subscription)}</ThemedText>
             <ThemedText type="meta" themeColor="textSecondary">
               {stopped
-                ? tf('stoppedLastCharged', { date: shortDate(subscription.lastChargedISO) })
+                ? tf('stoppedLastCharged', { date: shortDateWithYear(subscription.lastChargedISO) })
                 : subscription.cadence === 'as-needed'
                   ? cadenceLabel(subscription.cadence)
                   : tf('recurringMeta', {
@@ -314,7 +315,7 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
                   label: subscription.category === 'loan'
                     ? t('payingFor')
                     : subscription.group === 'subscription' ? t('subscribedFor') : t('trackingSince'),
-                  value: `${subscribedFor(data.firstISO)} · ${tf('walletSince', { date: shortDate(data.firstISO) })}`,
+                  value: `${subscribedFor(data.firstISO)} · ${tf('walletSince', { date: shortDateWithYear(data.firstISO) })}`,
                 }, {
                   key: 'count',
                   label: subscription.group === 'subscription' ? t('charges') : t('payments'),

@@ -21,7 +21,7 @@ import { Fonts } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { assistantCopy } from '@/lib/assistant-copy';
+import { assistantCopy, assistantCopyFor } from '@/lib/assistant-copy';
 
 import { everydayBandCopy } from '@/lib/everyday-band-copy';
 import { friendlyDate, toISODate } from '@/lib/format';
@@ -97,7 +97,7 @@ function MerchantScreen({ merchant, activityType }: { merchant: string; activity
 
   const bandContent = state.hydrated ? <View style={styles.band}>
     <View style={[styles.identity, large && styles.stack]}>
-      <MerchantAvatar title={merchant} category={summary.activity[0]?.category ?? 'other'} size={48} />
+      <MerchantAvatar title={merchant} category={summary.activity[0]?.category ?? 'other'} size={48} plate />
       <View style={styles.identityCopy}>
         <ThemedText type="heading" accessibilityRole="header" numberOfLines={large ? undefined : 2}
           style={[styles.name, { color: band.onBand }]}>{displayName || pickLabel}</ThemedText>
@@ -133,10 +133,11 @@ function MerchantScreen({ merchant, activityType }: { merchant: string; activity
       }}
       bandContent={bandContent}>
       {!state.hydrated ? <View style={styles.empty}><SkeletonRows count={3} height={80} /></View> : <>
-        {merchant ? <MerchantCategoryRule merchant={merchant} kind={income ? 'income' : 'expense'} palette={band} /> : null}
+        {merchant ? <MerchantCategoryRule merchant={merchant} kind={income ? 'income' : 'expense'} palette={band}
+          currentCategory={category} /> : null}
         {merchant && view !== 'all' && <View testID="merchant-ask-wafra">
           <EButton palette={band} variant="secondary" icon="spark"
-            label={income ? assistantCopy.askIncome : assistantCopy.askMerchant}
+            label={income ? assistantCopyFor(language).askIncome : assistantCopyFor(language).askMerchant}
             onPress={() => router.push({ pathname: '/assistant', params: { question: income
               ? assistantCopy.incomeQuestion(merchant)
               : assistantCopy.merchantChangedQuestion(merchant) } })} />

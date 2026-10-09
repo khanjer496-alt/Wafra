@@ -333,7 +333,11 @@ for (const language of ['en', 'ar']) {
     const h = transactions({ language, state: { transactions: [] } });
     assert.equal(netSummary(h), undefined);
     assert.equal(h.list.props.sections.length, 0);
-    assert.ok(text(h.list.props.ListEmptyComponent).includes(h.deps['@/lib/i18n'].t('nothingMatches')));
+    // An empty ledger says so (with ways to add one); "Nothing matches" is
+    // only for a search or filter that narrowed a ledger with rows in it.
+    const empty = text(h.list.props.ListEmptyComponent);
+    assert.ok(empty.includes(language === 'ar' ? 'لا توجد عمليات بعد' : 'No transactions yet'), empty);
+    assert.ok(!empty.includes(h.deps['@/lib/i18n'].t('nothingMatches')));
   });
 }
 

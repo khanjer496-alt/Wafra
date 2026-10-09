@@ -164,6 +164,8 @@ function addHarness({ reduced = false, review = null } = {}) {
     useMotionPreference: () => ({ ready: true, reducedMotion: reduced }) };
   h.local('@/lib/review-alert-copy', 'src/lib/review-alert-copy.ts');
   h.local('@/components/universal-review-fields');
+  // A new entry has no preselected category; save() picks one through the picker boundary.
+  h.deps['@/components/ui/category-chips'] = { CategoryChips: 'CategoryChips' };
   h.deps['react-native'].Animated.timing = (value, config) => {
     h.events.push(['coin', value.value, config.toValue, config.useNativeDriver, config.duration]);
     return { start() { h.events.push(['coin-start']); }, stop() {} };
@@ -183,6 +185,9 @@ function addHarness({ reduced = false, review = null } = {}) {
   const save = () => {
     const tree = render();
     for (const key of ['4', '2']) walk(tree).find(node => node.type === 'AmountKeypad').props.onKey(key);
+    const chips = () => walk(render()).find(node => node.type === 'CategoryChips');
+    if (!chips()) byId(render(), 'category-picker-trigger').props.onPress();
+    if (chips().props.selected == null) chips().props.onToggle('groceries');
     walk(render()).find(node => node.props?.onPress && node.props.accessibilityLabel === h.deps['@/lib/i18n'].t('saveTransaction')).props.onPress();
   };
   const confirmReview = async () => {

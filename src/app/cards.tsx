@@ -274,7 +274,7 @@ export default function CardsScreen() {
               reason: on its own, "Set limit" under AED 5,353 reads as the
               limit BEING 5,353, while Wallet captions the identical figure
               "spent this month" one tap away. */}
-          <ThemedText type="nano" themeColor="textTertiary">
+          <ThemedText type="meta" themeColor="textTertiary">
             {outstanding !== null ? t('outstandingTitle') : t('thisMonth')}
             {limitLeft !== null
               ? ` · ${tf('creditLeft', { amount: formatAmount(limitLeft, { decimals: false }) })}`
@@ -297,7 +297,9 @@ export default function CardsScreen() {
         scrollProps={{ showsVerticalScrollIndicator: false }}
         bandContent={(
           <View style={styles.bandChips}>
-            <BandChip palette={band} label={placeWords.cardsCount(activeCards.length)} testID="cards-count-chip" />
+            {/* Counted the way Accounts lists them: credit cards and debit cards. */}
+            <BandChip palette={band} testID="cards-count-chip"
+              label={placeWords.cardsByKind(activeCreditCards.length, activeCards.length - activeCreditCards.length)} />
             {inactiveCards.length > 0
               ? <BandChip palette={band} label={`${t('inactiveCards')} · ${inactiveCards.length}`} />
               : null}

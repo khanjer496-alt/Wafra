@@ -718,7 +718,7 @@ export default function LedgerHomeScreen() {
       },
       {
         label: t('settingsTitle'),
-        icon: 'sliders',
+        icon: 'gear',
         onPress: () => router.push('/settings'),
       },
     ],

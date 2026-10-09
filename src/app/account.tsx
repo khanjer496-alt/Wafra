@@ -1,4 +1,4 @@
-import { useLocalSearchParams } from 'expo-router';
+import { Redirect, useLocalSearchParams } from 'expo-router';
 import { useRouter } from '@/hooks/use-app-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
@@ -28,7 +28,7 @@ import { reliableBalanceFils } from '@/lib/balances';
 import { formatAED, formatAmountForInput, parseAmountWithMoneySpec } from '@/lib/format';
 import { bankPickerOptions } from '@/lib/known-banks';
 import { corroboratingTransferIdsForState } from '@/lib/ledger';
-import { accountMonthFlow, isAccountDetailTarget, recentAccountTransactions } from '@/lib/money-places';
+import { accountMonthFlow, isAccountDetailTarget, isPaymentCard, recentAccountTransactions } from '@/lib/money-places';
 import { moneyPlacesWords } from '@/lib/money-places-copy';
 import { tapped } from '@/lib/haptics';
 import { useStoreActions, useStoreSelector } from '@/lib/store';
@@ -115,7 +115,7 @@ function AccountScreen({ accountId, askBalance }: { accountId: string; askBalanc
   // The account's name is the band's headline; the nav row keeps back and Manage.
   const nav: BandNav = {
     back: () => router.back(),
-    actions: account ? [{ label: w.manage, icon: 'sliders', onPress: () => setManaging(true), testID: 'account-manage' }] : [],
+    actions: account ? [{ label: w.manage, icon: 'pencil', onPress: () => setManaging(true), testID: 'account-manage' }] : [],
   };
 
   if (!account) {
@@ -125,6 +125,10 @@ function AccountScreen({ accountId, askBalance }: { accountId: string; askBalanc
       </BandScaffold>
     );
   }
+
+  // A card is not a bank account: its own screen says what it is (a debit
+  // card has no balance of its own). Old links to /account land there.
+  if (isPaymentCard(account)) return <Redirect href={`/card?id=${encodeURIComponent(account.id)}`} />;
 
   // Only a balance snapshot dates the figure shown; a quoted limit is not one.
   const freshness = account.snapshotKind === 'balance' ? accountSnapshotFreshness(account, now, language) : null;

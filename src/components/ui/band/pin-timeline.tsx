@@ -52,7 +52,7 @@ export function PinTimeline({ pins, palette, days = 30, testID }: {
       {drawn.map((pin, index) => <View key={pin.key}
         style={[styles.pin, { start: `${pinPosition(pin.dayOffset, days)}%` }]}>
         <View style={[styles.logo, { borderColor: palette.bandRule }]}>
-          <MerchantAvatar title={pin.title} category={pin.category ?? 'other'} size={30} />
+          <MerchantAvatar title={pin.title} category={pin.category ?? 'other'} size={30} plate={palette.statusBar === 'light'} />
         </View>
         <View style={[styles.stem, { height: 18 + (index % 3) * 16, backgroundColor: palette.onBand }]} />
       </View>)}

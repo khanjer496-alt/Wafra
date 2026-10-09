@@ -21,6 +21,7 @@ const SAMPLES = {
   timedBase: (fn) => `${fn(1)} ${fn(237)}`,
   timeBar: (fn) => fn('X', 3),
   busiest: (fn) => fn('X'),
+  emptyTitle: (fn) => fn('X'),
   dayShort: (fn) => [0, 1, 2, 3, 4, 5, 6].map(fn).join(' '),
 };
 const sample = (key, fn) => {

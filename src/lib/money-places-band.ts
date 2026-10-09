@@ -35,6 +35,32 @@ export function openAgendaSummary(items: readonly Pick<PaymentAgendaItem, 'amoun
   return { totalFils, count, estimated };
 }
 
+/** A window's band figure: what falls due from today on, with what is already late kept apart. */
+export interface WindowAgendaSummary extends AgendaSummary {
+  overdueFils: number;
+  overdueCount: number;
+}
+
+/**
+ * "Due in the next 30 days" counts what falls due from today to the end of
+ * the window. A payment already past its date is not "in the next 30 days":
+ * it is late, and its figure is said beside the total rather than inside it,
+ * so an overdue card statement never inflates (or hides inside) the window.
+ */
+export function windowAgendaSummary(
+  items: readonly Pick<PaymentAgendaItem, 'amountFils' | 'paid' | 'estimated' | 'daysLeft'>[],
+): WindowAgendaSummary {
+  const upcoming = openAgendaSummary(items.filter((item) => !(item.daysLeft < 0)));
+  let overdueFils = 0;
+  let overdueCount = 0;
+  for (const item of items) {
+    if (item.paid || !(item.daysLeft < 0)) continue;
+    overdueFils += item.amountFils;
+    overdueCount += 1;
+  }
+  return { ...upcoming, overdueFils, overdueCount };
+}
+
 export interface BillsPin {
   key: string;
   /** Days from today; 0 is today. */

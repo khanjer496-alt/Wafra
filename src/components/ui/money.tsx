@@ -1,4 +1,4 @@
-import { StyleSheet, TextInput, useWindowDimensions, View, type StyleProp, type ViewStyle } from 'react-native';
+import { Platform, StyleSheet, TextInput, useWindowDimensions, View, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
 
 import { ThemedText, type TextType } from '@/components/themed-text';
 import { Fonts, Spacing } from '@/constants/theme';
@@ -7,7 +7,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { useLedgerMoney, useMoneyLocaleKey } from '@/hooks/use-ledger-money';
 import { scaleTextStyleForE2E } from '@/lib/e2e-font-scale';
 import { formatAmount } from '@/lib/format';
-import { figureFontMultiplier } from '@/lib/large-text-figure';
+import { figureFontMultiplier, MIN_FIGURE_SCALE } from '@/lib/large-text-figure';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
 import { currencyDisplayLabel, currencyPlacement, formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
 
@@ -83,6 +83,9 @@ function CurrencyPrefix({ label, color }: { label?: string; color?: string }) {
   );
 }
 
+/** react-native-web passes this through to CSS; native Text has numberOfLines instead. */
+const WEB_NO_WRAP = { whiteSpace: 'nowrap' } as unknown as TextStyle;
+
 /** Base size and ramp cap of the hero figure types (see ThemedText RAMP_CAP). */
 const HERO_FIGURE: Partial<Record<TextType, { size: number; cap: number }>> = {
   display: { size: 36, cap: 1.75 },
@@ -137,13 +140,19 @@ export function Money({
   const placement = placementFor(currency, localeKey);
   const currencyNode = prefix ? <CurrencyPrefix label={currency} color={currencyColor} /> : null;
   const fitMultiplier = useHeroFigureMultiplier(amount, type, fitInset);
-  // A figure has no good place to break. At the accessibility sizes it keeps
-  // its full width and the row around it wraps it onto its own line, instead
-  // of being squeezed until the digits break (or spill past the screen edge).
+  // A figure has no good place to break: "AED 1,752.6" over "7" is a wrong
+  // number. At every text size it keeps its full width and the row around it
+  // wraps the currency onto its own line first. A figure still wider than its
+  // box shrinks to fit on iOS and Android (never below 60%), and on the web it
+  // stays on one line — digits are never split across lines.
+  // At the accessibility sizes the row already stacks the figure on its own
+  // line at full width (the long-standing rule), so the web keeps its wrap there.
   const large = useLargeTextLayout();
   const figure = (
     <ThemedText type={type} tabular maxFontSizeMultiplier={fitMultiplier}
-      style={[styles.value, large && styles.valueWhole, color ? { color } : undefined]}>
+      numberOfLines={Platform.OS === 'web' ? undefined : 1}
+      adjustsFontSizeToFit={Platform.OS !== 'web'} minimumFontScale={MIN_FIGURE_SCALE}
+      style={[styles.value, Platform.OS === 'web' && !large && WEB_NO_WRAP, color ? { color } : undefined]}>
       {amount}
     </ThemedText>
   );
@@ -236,8 +245,7 @@ const styles = StyleSheet.create({
     gap: Spacing.two - 2,
   },
   tight: { gap: 1 },
-  value: { flexShrink: 1, minWidth: 0 },
-  valueWhole: { flexShrink: 0, maxWidth: '100%' },
+  value: { flexShrink: 0, maxWidth: '100%' },
   field: {
     gap: Spacing.two,
   },

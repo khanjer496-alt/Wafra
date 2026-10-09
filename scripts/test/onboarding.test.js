@@ -750,9 +750,9 @@ ok(
     /const showOverlay\s*=[\s\S]{0,280}!isIosSetupRoute[\s\S]{0,80}!isOnboardingStatementRoute/.test(gateSource),
 );
 eq('iOS onboarding uses the compact bank-alert heading', i18n.t('onboardCaptureTitleIos', 'en'), 'Choose how to add activity');
-eq('iOS onboarding explains that the capture choice can change', i18n.t('onboardCaptureBodyIos', 'en'), 'Connect supported bank alerts, or start manually. You can change this later.');
+eq('iOS onboarding explains that the capture choice can change', i18n.t('onboardCaptureBodyIos', 'en'), 'Connect supported bank messages, or start manually. You can change this later.');
 eq('iOS automatic choice explains the Shortcut and keeps history optional', i18n.t('onboardAutomaticChoiceIosBody', 'en'), 'Add one Wafra Shortcut, then turn on a Message automation. Past messages are optional.');
-eq('iOS automatic action names the bank-alert connection', i18n.t('onboardAutomaticChoiceIos', 'en'), 'Connect bank alerts');
+eq('iOS automatic action names the bank-alert connection', i18n.t('onboardAutomaticChoiceIos', 'en'), 'Connect bank messages');
 eq('statement import is a first-run choice on either phone', i18n.t('onboardStatementChoice', 'en'), 'Import bank statements');
 eq('statement import discloses its secure relay before file selection', i18n.t('onboardStatementChoiceBody', 'en'), 'Send PDF, CSV, or TSV through Wafra’s secure relay. Raw files are parsed in memory, then discarded.');
 eq('capture trust distinguishes local alerts from cloud statement import', i18n.t('onboardCaptureLocalAutomaticBody', 'en'), 'SMS/Message capture is local. Statement import uses the secure relay only when you choose it.');

@@ -91,6 +91,18 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
         return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/transaction-presentation.ts'), {
           '@/lib/ledger': require('../build/ledger.js'),
           '@/lib/transfer-reconciliation': require('../build/transfer-reconciliation.js'),
+          // The harness's own i18n when it stubs the title labels, else the real one.
+          '@/lib/i18n': typeof dependencies['@/lib/i18n']?.structuralTitleLabel === 'function'
+            ? dependencies['@/lib/i18n'] : require('../build/i18n.js'),
+        });
+      }
+      // Figure fitting is layout arithmetic: run the shipping hook against the harness's React.
+      if (name === '@/hooks/use-fit-text') {
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/hooks/use-fit-text.ts'), {
+          react: dependencies.react,
+          'react-native': { ...dependencies['react-native'], useWindowDimensions: dependencies['react-native']?.useWindowDimensions
+            ?? (() => ({ width: 390, height: 844, scale: 3, fontScale: 1 })) },
+          '@/lib/large-text-figure': loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/large-text-figure.ts')),
         });
       }
       // Widget snapshots resolve only bundled, allowlisted logo ids. Execute

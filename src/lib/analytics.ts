@@ -305,6 +305,91 @@ export function categoryTrend(
   return buckets;
 }
 
+/**
+ * Spending in the first `days` days of each money month in `keys`.
+ *
+ * A running month compared with whole earlier months always looks low: on the
+ * 8th, "↓83% vs Sep" set eight days against thirty. This counts the same days
+ * of every month — days 1..N from each money month's own first day (salary-day
+ * aware), clamped to that month's length — as Compare's headline does. With
+ * `category`, only that category's share of each row (splits included).
+ */
+export function spendingThroughDay(
+  transactions: readonly Transaction[],
+  keys: readonly string[],
+  days: number,
+  live?: Set<string>,
+  internal?: Set<string>,
+  category?: CategoryId,
+): Map<string, number> {
+  const totals = new Map<string, number>(keys.map((key) => [key, 0]));
+  if (!(days >= 1)) return totals;
+  const cutoff = new Map<string, string>();
+  for (const key of keys) {
+    const start = new Date(`${monthStartISO(key)}T12:00:00Z`);
+    start.setUTCDate(start.getUTCDate() + Math.floor(days) - 1);
+    const through = start.toISOString().slice(0, 10);
+    const end = monthEndISO(key);
+    cutoff.set(key, through < end ? through : end);
+  }
+  for (const t of transactions) {
+    const key = monthKey(t.date);
+    const last = cutoff.get(key);
+    if (last === undefined || t.date > last) continue;
+    if (!isSpending(t, live, internal)) continue;
+    totals.set(key, totals.get(key)! + (category ? amountInCategory(t, category) : t.amountFils));
+  }
+  return totals;
+}
+
+/** A change in percent, rounded, or null when there is nothing to compare with. */
+export function percentChange(currentFils: number, previousFils: number): number | null {
+  if (!(previousFils > 0)) return null;
+  return Math.round((currentFils - previousFils) / previousFils * 100);
+}
+
+export interface MonthComparison {
+  /** The month compared with, or null when the selected one is the first. */
+  previousKey: string | null;
+  /** The selected month against `previousKey`, in percent. */
+  previousDeltaPercent: number | null;
+  /** The average the selected month is set against. */
+  averageFils: number;
+  averageDeltaPercent: number | null;
+  /** True when both are like-for-like: the same first days of each month. */
+  sameDays: boolean;
+}
+
+/**
+ * One category's month against the one before and against the average.
+ *
+ * `series` is the six-month strip; `sameDays`, when the selected month is
+ * still running, is `spendingThroughDay` for the same keys. Then the earlier
+ * months are cut to the same days and the average is theirs alone (the
+ * running month is what is being judged, not part of the yardstick). Without
+ * it the months are whole, as before.
+ */
+export function monthComparison(
+  series: readonly { key: string; fils: number }[],
+  selectedKey: string,
+  currentFils: number,
+  sameDays?: ReadonlyMap<string, number> | null,
+): MonthComparison {
+  const index = series.findIndex((month) => month.key === selectedKey);
+  const value = (month: { key: string; fils: number }) => sameDays ? sameDays.get(month.key) ?? 0 : month.fils;
+  const previous = index > 0 ? series[index - 1]! : null;
+  const yardstick = sameDays ? (index > 0 ? series.slice(0, index) : []) : series;
+  const averageFils = yardstick.length > 0
+    ? Math.round(yardstick.reduce((total, month) => total + value(month), 0) / yardstick.length) : 0;
+  return {
+    previousKey: previous?.key ?? null,
+    previousDeltaPercent: previous ? percentChange(currentFils, value(previous)) : null,
+    averageFils,
+    averageDeltaPercent: index >= 0 ? percentChange(currentFils, averageFils) : null,
+    sameDays: !!sameDays,
+  };
+}
+
 export interface TrendShape {
   averageFils: number;
   latestFils: number;

@@ -185,7 +185,9 @@ export default function AddTransactionScreen() {
   const suggestedCurrency = useMemo(suggestedLedgerCurrency, []);
   const [category, setCategory] = useState<CategoryId | null>(
     rememberedReview ? rememberedReview.category as CategoryId : reviewItem
-      ? reviewCategory && categorySupportsType(reviewCategory, reviewType) ? reviewCategory : 'other' : 'groceries',
+      // A new entry starts with no category: a preselected Groceries was
+      // saved as Groceries whenever nobody changed it.
+      ? reviewCategory && categorySupportsType(reviewCategory, reviewType) ? reviewCategory : 'other' : null,
   );
   const [accountId, setAccountId] = useState(
     reviewItem ? rememberedReview?.accountId ?? matchedAccount?.id ?? '' : state.accounts[0]?.id ?? '',

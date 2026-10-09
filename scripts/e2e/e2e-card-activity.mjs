@@ -183,10 +183,11 @@ try {
       await statementDetail.waitFor({ state: 'hidden' });
       await back('card-screen'); await choosePeriod('This month', 'هذا الشهر');
       await back('wallet-screen');
-      await tap(page.getByTestId('wallet-card-details-credit'));
+      // Accounts is a compact list: the card's row itself opens its activity (no Details pill).
+      await tap(page.getByTestId('wallet-card-credit').getByRole('button', { name: /^QA Credit\./ }));
       await page.waitForURL(url => url.pathname === '/card' && url.searchParams.get('id') === 'credit');
       await card().getByTestId('card-spending').waitFor({ state: 'visible' });
-      check(minor(await card().getByTestId('card-spending').innerText()), 16000, 'Wallet Details opens identical card activity');
+      check(minor(await card().getByTestId('card-spending').innerText()), 16000, 'Wallet card row opens identical card activity');
       await back('wallet-screen');
       await tap(page.getByTestId('wallet-account-debit').getByRole('button', { name: /^QA Debit\./ }));
       await page.waitForURL(url => url.pathname === '/card' && url.searchParams.get('id') === 'debit');
