@@ -4,7 +4,8 @@ const { test } = require('node:test');
 const { harness, walk, text } = require('./journal-harness.cjs');
 // The same exact selected-period amount is visible and spoken above daily spending.
 const periodMinor = (nodes) => {
-  const amount=nodes.find(node=>node.props.testID==='home-spending-total');
+  // The money overview (on in these cases) under the Spent hero, which carries the same id.
+  const amount=walk(nodes.find(node=>node.props.testID==='home-section-overview')).find(node=>node.props.testID==='home-spending-total');
   const match=amount.props.accessibilityLabel.match(/AED ([\d,]+(?:\.\d+)?)/);
   assert.ok(match);
   assert.ok(text(amount).includes(match[1]),'visible amount matches the spoken amount');
@@ -24,8 +25,8 @@ test('Home draws one selected-period month line on its band, then the week, then
   assert.ok(section('home-widget-activity') < section('journal-import-controls'));
   assert.equal(periodMinor(nodes), 508700);
   // The Spent figure is the button into the breakdown, and says so.
-  assert.match(nodes.find((node) => node.props.testID === 'home-spending-total').props.accessibilityLabel, /View spending breakdown/);
-  assert.match(text(nodes.find((node) => node.props.testID === 'home-widget-activity')), /Recent transactions/);
+  assert.match(walk(nodes.find((node) => node.props.testID === 'home-section-overview')).find((node) => node.props.testID === 'home-spending-total').props.accessibilityLabel, /View spending breakdown/);
+  assert.match(text(nodes.find((node) => node.props.testID === 'home-widget-activity')), /Transactions/);
 });
 test('settings and explicit manual entry remain working visible quick actions', () => {
   const ios = harness({ platform: 'ios' });
@@ -133,8 +134,8 @@ test('incoming transfer remains positive but not coloured as earned income', () 
 });
 test('Arabic and larger text render the same controls without English journal headings', () => {
   const h = harness({ language: 'ar', largeText: true, theme: 'dark' });
-  assert.match(text(h.tree), /حركتك المالية/);
-  assert.doesNotMatch(text(h.tree), /Your activity/);
+  assert.match(text(h.tree), /المعاملات/);
+  assert.doesNotMatch(text(h.tree), /Your activity|Transactions|See all/);
   assert.ok(walk(h.tree).some((node) => node.props.testID === 'journal-import-controls'));
 });
 
@@ -197,12 +198,13 @@ test('payment headings show their count and total; an estimate is marked and spo
   assert.equal(text(total).trim(), '≈ AED 380.00');
   assert.equal(total.props.accessibilityLabel, 'View all payments. 1 payment, Estimated AED 380.00');
 });
-test('activity days carry their whole total, signed when spoken, and none when unfinished', () => {
+test('Home v3: each day is a quiet label, with no repeated day totals', () => {
   const nodes = walk(harness({ dayTotals: new Map([['2026-09-06', -24435]]) }).tree);
-  const heading = (date) => walk(nodes.find((node) => node.props.testID === `home-activity-day-${date}`))
-    .find((node) => node.props.accessibilityRole === 'header');
-  assert.equal(heading('2026-09-06').props.accessibilityLabel, 'Sunday 6 Sept, −AED 244.35');
-  assert.equal(heading('2026-09-05').props.accessibilityLabel, 'Saturday 5 Sept', 'an unfinished day shows no partial total');
-  assert.equal(walk(heading('2026-09-06')).some((node) => node.type === 'Money'), true);
-  assert.equal(walk(heading('2026-09-05')).some((node) => node.type === 'Money'), false);
+  const day = (date) => nodes.find((node) => node.props.testID === `home-activity-day-${date}`);
+  const heading = (date) => walk(day(date)).find((node) => node.props.accessibilityRole === 'header');
+  assert.equal(text(heading('2026-09-06')).trim(), 'Sunday 6 Sept');
+  assert.equal(text(heading('2026-09-05')).trim(), 'Saturday 5 Sept');
+  for (const date of ['2026-09-06', '2026-09-05']) {
+    assert.equal(walk(heading(date)).some((node) => node.type === 'Money'), false, `${date}: the day label carries no total`);
+  }
 });

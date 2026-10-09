@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { loadHomeWidgetPreferences, saveHomeWidgetPreferences } from '@/lib/home-widgets';
+import { HOME_WIDGETS_LAYOUT_VERSION, loadHomeWidgetPreferences, saveHomeWidgetPreferences, type HomeWidgetPreferences } from '@/lib/home-widgets';
 import { repairGoalOrderedHome } from '@/lib/onboarding-e';
 
 /** Set once the check has run on this device, whatever it found. */
@@ -16,7 +16,12 @@ async function run(): Promise<void> {
     // read failure with the defaults, which would look like "nothing to
     // repair" and wrongly retire the check.
     const raw = await AsyncStorage.getItem(HOME_WIDGETS_KEY);
-    if (raw !== null && repairGoalOrderedHome(JSON.parse(raw))) {
+    const parsed: unknown = raw === null ? null : JSON.parse(raw);
+    // A layout saved before Home v3 reads as the new default, which has no
+    // goal-first shape to repair (readStoredHomeWidgets).
+    const current = parsed !== null && typeof parsed === 'object'
+      && (parsed as { version?: unknown }).version === HOME_WIDGETS_LAYOUT_VERSION;
+    if (current && repairGoalOrderedHome(parsed as HomeWidgetPreferences)) {
       // Repair the serialized load, so a Customize Home save in flight wins.
       // If that no longer needs repair (the person rearranged it, or the load
       // fell back to defaults), leave the check for the next launch.

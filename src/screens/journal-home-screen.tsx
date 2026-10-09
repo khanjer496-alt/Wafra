@@ -1,7 +1,7 @@
 import { HistoryReadingStatus } from '@/components/history-reading-status';
 import { MoneyPictureProgress } from '@/components/money-picture-progress';
 import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Animated, AppState, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { Alert, Animated, AppState, Platform, Pressable, RefreshControl, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { useRouter } from '@/hooks/use-app-router';
 import { CoinToken } from '@/components/ui/coins/coin-token';
 import {
@@ -14,7 +14,6 @@ import { Fonts } from '@/constants/theme';
 import { useFocusEffect } from '@react-navigation/native';
 
 import { ThemedText } from '@/components/themed-text';
-import { TransactionRow } from '@/components/transaction-row';
 import { PeriodSheet } from '@/components/period-sheet';
 import { EntryDetailSheet } from '@/components/entry-detail-sheet';
 import { CardPaymentSheet } from '@/components/card-payment-sheet';
@@ -46,7 +45,7 @@ import type { Insight } from '@/lib/insights';
 import { measureRuntimeOperation } from '@/lib/runtime-performance';
 import { openSmsPermissionSettings } from '@/lib/auto-import';
 import { buildReferenceFxUpdates } from '@/lib/fx';
-import { friendlyDate, monthEndISO, monthKey, monthStartISO } from '@/lib/format';
+import { monthEndISO, monthKey, monthLabel, monthStartISO, shiftMonthKey } from '@/lib/format';
 import { daysPhrase, leavingSoon, type Outgoing } from '@/lib/leaving-soon';
 import { markLaunchPhase } from '@/lib/launch-performance';
 import { ledgerCurrencyCode, marketCurrencyCode } from '@/lib/markets';
@@ -80,6 +79,19 @@ import { loadViewedRecaps } from '@/lib/recap-view-state';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { getTransferActivity, transferQuestionQueue, unaskedPendingIds } from '@/lib/transfer-activity';
 import { isTransferCandidate } from '@/lib/transfer-reconciliation';
+import { HomeHero, type HeroMonth } from '@/components/home/home-hero';
+import { HomeRecent } from '@/components/home/home-recent';
+import { NEEDS_YOU_CLEARANCE, NeedsYouPill } from '@/components/home/needs-you-pill';
+import { homeCopy } from '@/lib/home-copy';
+import { nextPaceMemory, paceState, projectHeroMonth, type PaceMemory } from '@/lib/home-hero';
+import { loadPaceMemory, savePaceMemory } from '@/lib/home-pace-nudge';
+import { dismissedNeeds, dismissNeed, earliestOverdueCard, needsYouInline, pickNeed, subscribeDismissedNeeds, type Need } from '@/lib/home-needs-you';
+import { summarizeMonth } from '@/lib/insights';
+import { spendingCategoryRows } from '@/lib/reference-presentation';
+import { captured as nudgeHaptic } from '@/lib/haptics';
+
+/** Home v3 lists this many of the period's latest rows. */
+const HOME_RECENT_ROWS = 12;
 
 /** Presentation-only vocabulary; every amount still comes from the shared ledger. */
 const copy = {
@@ -99,19 +111,8 @@ const copy = {
     dueTotal: (count: number, total: string) => `${count === 1 ? 'دفعة واحدة' : count === 2 ? 'دفعتان' : `${count} دفعات`}، ${total}` },
 } as const;
 
-/** Recent rows grouped by their date, newest first, in display order. */
 /** The transfer notice's queue, with how many of its entries the Transfers card can ask about. */
 type HomeTransferQueue = PendingTransferSummary & { questions: number };
-
-function activityDays(rows: readonly Transaction[]): { date: string; rows: Transaction[] }[] {
-  const days: { date: string; rows: Transaction[] }[] = [];
-  for (const row of rows) {
-    const last = days.at(-1);
-    if (last && last.date === row.date) last.rows.push(row);
-    else days.push({ date: row.date, rows: [row] });
-  }
-  return days;
-}
 
 const sameHomeWidgets = (a: HomeWidgetPreferences, b: HomeWidgetPreferences): boolean =>
   a === b || JSON.stringify(a) === JSON.stringify(b);
@@ -270,6 +271,24 @@ function keepRecapEntry<T extends { descriptor: RecapDescriptor; unread: boolean
   return current?.descriptor.id === descriptor.id && current.unread === unread ? current : { descriptor, unread };
 }
 
+/**
+ * One month for the Spent hero: its summarizeMonth (Spent, In, categories,
+ * the same projection the dashboard and Spending use) and its day-by-day line
+ * and like-for-like trend (home-hero.ts). Named "October", with the year only
+ * when it is not this year's.
+ */
+function heroMonthFor(transactions: Transaction[], key: string, dayISO: string, live: Set<string>, internal: Set<string>): HeroMonth {
+  const today = new Date(`${dayISO}T12:00:00`);
+  const year = monthKey(today).slice(0, 4);
+  const name = (monthKeyed: string) => monthKeyed.slice(0, 4) === year
+    ? monthLabel(monthKeyed).replace(/\s*\d{4}$/, '') : monthLabel(monthKeyed);
+  return {
+    key, name: name(key), comparedName: name(shiftMonthKey(key, -1)),
+    summary: summarizeMonth(transactions, { mode: 'month', key }, live, internal),
+    series: projectHeroMonth(transactions, key, today, live, internal),
+  };
+}
+
 export default function JournalHomeScreen() {
   const theme = useTheme();
   // Design language E: Home wears the ink band in both schemes.
@@ -278,6 +297,7 @@ export default function JournalHomeScreen() {
   const words = copy[language === 'ar' ? 'ar' : 'en'];
   const transferWords = transferActivityCopy(language);
   const largeText = useLargeTextLayout();
+  const { height: windowHeight, fontScale } = useWindowDimensions();
   const privacyGateCleared = usePrivacyGateCleared();
   // Splash gone, lock cleared, app in the foreground: Home's coins may move.
   const revealReady = useHomeRevealReady();
@@ -321,6 +341,10 @@ export default function JournalHomeScreen() {
   const [captureSnoozedAt, setCaptureSnoozedAt] = useState<number | null>(null);
   const [budgetSheetOpen, setBudgetSheetOpen] = useState(false);
   const summaryWords = homeSummaryCopy[language === 'ar' ? 'ar' : 'en'];
+  const homeWords = homeCopy(language);
+  // Needs-you pills dismissed this session (home-needs-you.ts).
+  const [dismissedNeedKeys, setDismissedNeedKeys] = useState(dismissedNeeds);
+  useEffect(() => subscribeDismissedNeeds(() => setDismissedNeedKeys(dismissedNeeds())), []);
   const paymentWords = paymentAgendaCopy[language === 'ar' ? 'ar' : 'en'];
   // The clock is refreshed on every foreground resume for greeting/review
   // freshness, but Home's money projections are day-based. Keep the derived
@@ -465,6 +489,7 @@ export default function JournalHomeScreen() {
     // Keeping them off Home makes the normal navigation path O(current period)
     // rather than O(full ledger) on a 10k+ row history.
     includeCleanupPrompts: false,
+    activityLimit: HOME_RECENT_ROWS,
   }),
     // Progress counters do not change totals. Transfer receipts can change
     // financial scope even when finalization preserves the ledger arrays.
@@ -546,7 +571,10 @@ export default function JournalHomeScreen() {
     state.cancelledSubscriptions, state.customCategories]);
   // Today and this week use the same spending definition and transfer scope as
   // the period totals below them. Budget pace applies only to the live month.
+  // Only drawn by the Today and Last 7 days sections, both off by default.
+  const todayShown = homeWidgetVisible(homeWidgets, 'today') || homeWidgetVisible(homeWidgets, 'week');
   const homeToday = useMemo(() => {
+    if (!todayShown) return undefined;
     const live = liveAccounts as Set<string>;
     const internal = dashboard.internalTransactionIds as Set<string>;
     const budgetMonth = period.mode === 'month' && period.key === monthKey(now) ? period.key : null;
@@ -565,7 +593,49 @@ export default function JournalHomeScreen() {
     });
     // Day-keyed like the dashboard: a foreground resume must not re-walk the ledger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.transactions, state.budgets, liveAccounts, dashboard.internalTransactionIds, period, projectionDay]);
+  }, [todayShown, state.transactions, state.budgets, liveAccounts, dashboard.internalTransactionIds, period, projectionDay]);
+  // Home v3's hero: the period's month (the running month unless another month
+  // is chosen), its trend against the same days of the month before, and last
+  // month only once the person turns the card to it. Day-keyed like the
+  // dashboard, so a resume does not re-walk the ledger.
+  const heroKey = period.mode === 'month' ? period.key : monthKey(now);
+  const runningMonth = monthKey(now);
+  const heroInternal = dashboard.internalTransactionIds as Set<string>;
+  const heroCurrent = useMemo(() => heroMonthFor(state.transactions, heroKey, projectionDay, liveAccounts as Set<string>, heroInternal),
+    // monthLabel follows the app language.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.transactions, heroKey, projectionDay, liveAccounts, heroInternal, language]);
+  const [heroPreviousWanted, setHeroPreviousWanted] = useState<string | null>(null);
+  const heroPrevious = useMemo(() => heroPreviousWanted === heroKey
+    ? heroMonthFor(state.transactions, shiftMonthKey(heroKey, -1), projectionDay, liveAccounts as Set<string>, heroInternal) : null,
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [heroPreviousWanted, state.transactions, heroKey, projectionDay, liveAccounts, heroInternal, language]);
+  const wantHeroPrevious = useCallback(() => setHeroPreviousWanted(heroKey), [heroKey]);
+  // Limits over this running month, as Spending's limited view counts them.
+  const limitsOver = useMemo(() => {
+    if (!state.budgets.some((budget) => budget.limitFils > 0)) return 0;
+    const summary = runningMonth === heroKey ? heroCurrent.summary
+      : summarizeMonth(state.transactions, { mode: 'month', key: runningMonth }, liveAccounts as Set<string>, heroInternal);
+    return spendingCategoryRows(summary, state.budgets, true)
+      .filter((row) => row.limitFils !== null && row.spentFils > row.limitFils).length;
+  }, [state.budgets, state.transactions, runningMonth, heroKey, heroCurrent, liveAccounts, heroInternal]);
+  // Over last month's pace (the running month only): the chip's warning
+  // colour, and a short haptic when Home sees the crossing, once a day.
+  const livePace = heroKey === runningMonth ? paceState(heroCurrent.series.trend) : null;
+  const paceMemory = useRef<PaceMemory | null | undefined>(undefined);
+  useEffect(() => {
+    if (!state.hydrated || !state.onboarded || livePace === null || !revealReady) return;
+    let alive = true;
+    const observe = (memory: PaceMemory | null) => {
+      const { memory: next, nudge } = nextPaceMemory(memory, heroKey, livePace, projectionDay);
+      paceMemory.current = next;
+      if (next && next !== memory) void savePaceMemory(next);
+      if (nudge) nudgeHaptic();
+    };
+    if (paceMemory.current !== undefined) observe(paceMemory.current);
+    else void loadPaceMemory().then((memory) => { if (alive) observe(memory); });
+    return () => { alive = false; };
+  }, [state.hydrated, state.onboarded, livePace, heroKey, projectionDay, revealReady]);
   // Native widgets use Bills' complete 30-day recurring projection, never
   // Home's deliberately shorter 9-day list (which adds detected subscriptions
   // only once that shared projection has an answer).
@@ -937,6 +1007,54 @@ export default function JournalHomeScreen() {
   const transferNotice = pendingTransfers && pendingTransfers.count > 0 ? <TransferReviewNotice
     pendingCount={pendingTransfers.count} incomingFils={pendingTransfers.incomingFils} outgoingFils={pendingTransfers.outgoingFils}
     onPress={() => router.push('/transfers')} /> : null;
+  const transfersLink = <Pressable testID="home-transfers-link" accessibilityRole="button" accessibilityLabel={transferWords.viewAll}
+    accessibilityHint={transferWords.walletDetail} onPress={() => router.push('/transfers')}
+    style={({ pressed }) => [styles.utilityRow, styles.transferAction, { borderColor: band.rule, opacity: pressed ? 0.7 : 1 }]}>
+    <View style={[styles.rowGlyph, { backgroundColor: band.glyphGround }]}><Icon name="repeat" size={18} color={band.text} /></View>
+    <View style={[styles.grow, styles.utilityCopy]}>
+      <ThemedText type="smallBold">{transferWords.viewAll}</ThemedText>
+      <ThemedText type="meta" style={{ color: band.textSecondary }}>{transferWords.walletDetail}</ThemedText>
+    </View>
+    <Icon name="chevron-right" size={18} color={band.textSecondary} />
+  </Pressable>;
+
+  // ── Needs you: the one thing that truly needs the person, highest priority
+  // first (home-needs-you.ts). Dismissed for the session per need. ──
+  const trackingNeed = !state.hydrated || !state.onboarded || history ? null
+    : status === 'paused' ? 'paused' as const
+      : captureStopped ? 'stopped' as const
+        : !state.captureOptOut && (needsPermission || (Platform.OS === 'ios' && (status === 'off' || status === 'needs-automation')))
+          ? 'off' as const : null;
+  const need = state.hydrated && state.onboarded ? pickNeed({
+    tracking: trackingNeed,
+    overdueCard: earliestOverdueCard(payments),
+    transferQuestions: pendingTransfers?.questions ?? 0,
+    limitsOver,
+    dismissed: dismissedNeedKeys,
+  }) : null;
+  const openNeed = (shown: Need) => {
+    if (shown.kind === 'tracking') {
+      if (shown.tracking === 'stopped') checkCaptureSetup();
+      else openCapture();
+    } else if (shown.kind === 'card') setCardDue(state.cardDues.find((due) => due.id === shown.dueId) ?? null);
+    else if (shown.kind === 'transfers') router.push('/transfers');
+    else router.push('/flow?view=categories&filter=limited');
+  };
+  const needLabel = (shown: Need) => shown.kind === 'tracking'
+    ? shown.tracking === 'paused' ? homeWords.trackingPaused : shown.tracking === 'stopped' ? homeWords.trackingStopped : homeWords.trackingOff
+    : shown.kind === 'card' ? homeWords.cardOverdue(shown.title)
+      : shown.kind === 'transfers' ? homeWords.transfersToAnswer(shown.count) : homeWords.limitsOver(shown.count);
+  // The pill's one visible line; it speaks needLabel in full.
+  const needShortLabel = (shown: Need) => shown.kind === 'tracking'
+    ? shown.tracking === 'paused' ? homeWords.needShort.trackingPaused
+      : shown.tracking === 'stopped' ? homeWords.needShort.trackingStopped : homeWords.needShort.trackingOff
+    : shown.kind === 'card' ? homeWords.needShort.cardOverdue : needLabel(shown);
+  // Large text or a short window: the pill sits at the top of the sheet, so it never covers the first rows.
+  const pillInline = needsYouInline({ largeText, fontScale, height: windowHeight });
+  const needsYouPill = need ? <NeedsYouPill needKey={need.key} label={needShortLabel(need)} spokenLabel={needLabel(need)}
+    hint={homeWords.needHint[need.kind]} icon={need.kind === 'transfers' ? 'repeat' : need.kind === 'card' ? 'calendar' : 'alert'}
+    warning={need.kind === 'tracking' || need.kind === 'card'} dismissLabel={homeWords.dismiss} inline={pillInline}
+    onPress={() => openNeed(need)} onDismiss={() => dismissNeed(need.key)} band={band} hold={!revealReady} /> : null;
   const founderUnlockEnabled = process.env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK === '1';
   const unlockFounder = founderUnlockEnabled && !state.founderPro
     ? () => {
@@ -1020,41 +1138,21 @@ export default function JournalHomeScreen() {
           </View></Pressable>)}</View>
       </View>;
     }
+    // Transfers waiting for an answer, and the way to every transfer: off by
+    // default (the Needs you pill names the queue when it has questions).
+    if (id === 'transfers') {
+      if (!transferNotice && !hasPeriodTransfers) return null;
+      return <View key={id} style={styles.transfersBlock} testID="home-widget-transfers">{transferNotice}{hasPeriodTransfers ? transfersLink : null}</View>;
+    }
     if (id !== 'activity') return null;
-    return <View key={id} style={styles.section} testID="home-widget-activity">
-      <View style={styles.sectionHeading}><View style={styles.activityHeading}><ThemedText type="smallBold" style={styles.sectionTitle}>{words.activity}</ThemedText>
-        <ThemedText testID="home-activity-period" type="meta" style={{ color: band.textSecondary }}>{periodLabel(period)}</ThemedText></View>
-        <Pressable onPress={() => router.push('/transactions')} accessibilityRole="button" style={styles.smallAction}><Icon name="search" size={18} color={theme.text} /><ThemedText type="meta">{t('allActivity')}</ThemedText></Pressable></View>
-      {/* Grouped by day; each day carries its whole cash-flow total, not only
-          the rows shown here (dashboard-projection activityDayTotals). */}
-      {activityDays(dashboard.activityRows.slice(0, 5)).map(day => {
-        const dayTotal = dashboard.activityDayTotals.get(day.date);
-        return <View key={day.date} testID={`home-activity-day-${day.date}`}>
-        <View style={styles.dayHeading} accessible accessibilityRole="header"
-          accessibilityLabel={[friendlyDate(day.date, projectionDay), dayTotal === undefined ? null : spokenMoney(dayTotal, true)].filter(Boolean).join(', ')}>
-          <ThemedText type="meta" style={[styles.grow, styles.dayTitle, { color: band.textSecondary }]}>{friendlyDate(day.date, projectionDay)}</ThemedText>
-          {dayTotal === undefined ? null
-            : <Money fils={dayTotal} moneySpec={moneySpec} type="meta" decimals sign={dayTotal === 0 ? 'none' : 'auto'} color={band.textSecondary} />}
-        </View>
-        <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{day.rows.map(transaction => {
-          const row = <TransactionRow key={transaction.id} transaction={transaction} account={dashboard.accountById.get(transaction.accountId)} onPress={setEntry} internal={dashboard.internalTransactionIds.has(transaction.id)} />;
-          // Only the row that just arrived carries the motion; the rest are drawn plain.
-          return transaction.id === arrivedRowId ? <ArrivingRow key={transaction.id} hold={!revealReady}>{row}</ArrivingRow> : row;
-        })}</View>
-      </View>;
-      })}
-      {hasPeriodTransfers && <Pressable testID="home-transfers-link" accessibilityRole="button" accessibilityLabel={transferWords.viewAll}
-        accessibilityHint={transferWords.walletDetail} onPress={() => router.push('/transfers')}
-        style={({ pressed }) => [styles.utilityRow, styles.transferAction, { borderColor: band.rule, opacity: pressed ? 0.7 : 1 }]}>
-        <View style={[styles.rowGlyph, { backgroundColor: band.glyphGround }]}><Icon name="repeat" size={18} color={band.text} /></View>
-        <View style={[styles.grow, styles.utilityCopy]}>
-          <ThemedText type="smallBold">{transferWords.viewAll}</ThemedText>
-          <ThemedText type="meta" style={{ color: band.textSecondary }}>{transferWords.walletDetail}</ThemedText>
-        </View>
-        <Icon name="chevron-right" size={18} color={band.textSecondary} />
-      </Pressable>}
-      {dashboard.activityRows.length === 0 && !hasPeriodRecords && <EmptyMonth monthName={periodLabel(period)} onReadInbox={() => void onRefresh()} primaryLabel={t('checkBankAlerts')} onAddManually={() => router.push('/add-transaction')} />}
-    </View>;
+    // The period's latest rows, grouped by day; the whole row opens its sheet.
+    return <HomeRecent key={id} rows={dashboard.activityRows.slice(0, HOME_RECENT_ROWS)} accountById={dashboard.accountById}
+      internalIds={dashboard.internalTransactionIds} onPress={setEntry} arrivedRowId={arrivedRowId} Arriving={ArrivingRow}
+      hold={!revealReady} todayISO={projectionDay} band={band} title={homeWords.transactions} seeAll={homeWords.seeAll}
+      seeAllHint={homeWords.seeAllHint} onSeeAll={() => router.push('/transactions')}
+      note={period.mode === 'month' && period.key === runningMonth ? undefined : periodLabel(period)}
+      empty={!hasPeriodRecords ? <EmptyMonth monthName={periodLabel(period)} onReadInbox={() => void onRefresh()} primaryLabel={t('checkBankAlerts')} onAddManually={() => router.push('/add-transaction')} />
+        : hasPeriodTransfers ? transfersLink : null} />;
   };
 
   const summaryProps = {
@@ -1082,6 +1180,7 @@ export default function JournalHomeScreen() {
   const sheetPalette = { ...band, onBand: band.text, onBandSecondary: band.textSecondary,
     tile: band.glyphGround, bandMark: band.textSecondary, bandRule: band.rule };
   const renderCapture = () => (<View style={styles.captureBlock}>
+    {captureStoppedNotice}
     {!history && moneyPicture ? <MoneyPictureProgress model={moneyPicture} onResume={retryHistory} /> : null}
         {captureSetUp && !hasLiveCapture && !history ? <View testID="home-capture-ready" accessible accessibilityRole="text"
           accessibilityLabel={`${Platform.OS === 'android' ? summaryWords.readyAndroid : summaryWords.readyIos}. ${summaryWords.readyBody}`}
@@ -1141,6 +1240,9 @@ export default function JournalHomeScreen() {
     const props = { ...sectionProps, band: onBand ? band : sheetPalette, figureInset: onBand ? 0 : 32,
       pattern: id === 'greeting' && !greetingInToolbar ? <YourPattern compact testID="home-personal-pattern" tile={24} gap={3} /> : undefined };
     const content = id === 'greeting' ? <ReferenceHomeGreeting {...props} />
+      : id === 'hero' ? <HomeHero band={props.band} moneySpec={moneySpec} language={language} largeText={largeText}
+          current={heroCurrent} previous={heroPrevious} onWantPrevious={wantHeroPrevious} budgets={state.budgets}
+          warning={livePace === 'over'} hold={!revealReady} />
       : id === 'overview' ? <ReferenceHomeSummary {...props} onBand={onBand} />
       : id === 'today' ? <ReferenceHomeToday {...props} />
       : id === 'week' ? <ReferenceHomeWeek {...props} />
@@ -1153,7 +1255,7 @@ export default function JournalHomeScreen() {
 
   return <>
     <BandScaffold band="home" tabbed testID="home-screen" contentStyle={styles.screen}
-      floatingClearance={Platform.OS === 'android' ? HOME_ADD_BUTTON_CLEARANCE : 0}
+      floatingClearance={Math.max(Platform.OS === 'android' ? HOME_ADD_BUTTON_CLEARANCE : 0, need && !pillInline ? NEEDS_YOU_CLEARANCE : 0)}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={band.onBand} />}
       bandContent={state.hydrated ? <ReferenceHomeBand {...sectionProps}
         sections={layout.band.map(id => renderSection(id, true))}
@@ -1177,20 +1279,20 @@ export default function JournalHomeScreen() {
       {!state.hydrated ? <View accessibilityRole="progressbar" accessibilityLabel={t('loadingLedger')} style={styles.loading}>
         <SkeletonRows count={1} height={160} /><SkeletonRows count={4} height={66} />
       </View> : <>
-        {/* Notices that change how the band's figures read come first on the sheet. */}
-        {/* Needs you: at most one card, the most urgent first. Capture that has
-            stopped outranks transfers waiting for a decision; the next shows
-            once the first is resolved. */}
-        {captureStoppedNotice ?? transferNotice}
+        {/* What needs the person (capture stopped, transfers to answer, …) is
+            the Needs you pill: here, at the top of the sheet, with large text
+            or on a short window; otherwise floating above the tab bar. The
+            full notices live in Capture status and Transfers in Customize Home. */}
+        {pillInline ? needsYouPill : null}
         {/* First week: one truthful progress surface. After it retires, blocking
             history states keep their existing compact recovery card. */}
         {history ? (moneyPicture ? <MoneyPictureProgress model={moneyPicture} onResume={retryHistory} />
           : <HistoryReadingStatus progress={history} onResume={retryHistory} />) : null}
 
 
-        {/* The band holds the greeting, Today and the week. The sheet leads
-            with the selected-period totals, then payments and activity in
-            the saved order. */}
+        {/* The band holds the greeting and the Spent hero. The sheet leads
+            with the transactions, then any section switched on in Customize
+            Home, in the saved order. */}
         {layout.sheet.map(id => renderSection(id))}
 
 
@@ -1207,6 +1309,7 @@ export default function JournalHomeScreen() {
     <BillDetailSheet subscription={recurring} onClose={() => setRecurring(null)} />
     {budgetMonthKey ? <LimitSheet category={null} open={budgetSheetOpen} monthKey={budgetMonthKey} onClose={() => setBudgetSheetOpen(false)} /> : null}
     {Platform.OS === 'android' && state.hydrated ? <HomeAddButton label={words.add} onPress={() => router.push('/add-transaction')} /> : null}
+    {pillInline ? null : needsYouPill}
   </>;
 }
 
@@ -1251,6 +1354,7 @@ const styles = StyleSheet.create({
   utilityGlyph: { width: 44, height: 44, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
   utilityCopy: { gap: 4 },
   transferAction: { marginTop: 14 },
+  transfersBlock: { gap: 4 },
   utilityTitle: { fontSize: 17, lineHeight: 23 },
   insightHeading: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   insightTitle: { fontSize: 24, lineHeight: 30, letterSpacing: -0.6 },

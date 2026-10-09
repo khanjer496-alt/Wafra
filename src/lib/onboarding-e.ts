@@ -120,8 +120,9 @@ export function onboardingEResumeStep(
  *
  * "What should Wafra do?" reorders Home through the SAME preference Customize
  * Home edits (home-widget-preferences). Nothing is hidden and nothing new is
- * stored: the chosen goals only decide which existing sections come first on
- * the sheet, under the band's greeting, totals and week.
+ * stored: the chosen goals decide which existing sections come first on the
+ * sheet, under the band's greeting and Spent hero, and switch those sections
+ * on (Home v3 starts with them off).
  *
  *   bills          → Due payments, then Upcoming payments
  *   subscriptions  → Upcoming payments (renewals are listed there)
@@ -178,7 +179,10 @@ export function homeOrderForGoals(
     && (isHomeBandSection(base.order[bandRun]) || base.hidden.includes(base.order[bandRun]))) bandRun++;
   const band = base.order.slice(0, bandRun).filter((section) => !promoted.includes(section));
   const rest = base.order.slice(bandRun).filter((section) => !promoted.includes(section));
-  return { order: [...band, ...paymentsBeforeActivity([...promoted, ...rest])], hidden: [...base.hidden] };
+  // A section the person's goals ask for is switched on: Home v3 starts with
+  // the extra sections off, and a goal is the person asking for one.
+  return { order: [...band, ...paymentsBeforeActivity([...promoted, ...rest])],
+    hidden: base.hidden.filter((section) => !promoted.includes(section)) };
 }
 
 const PAYMENT_SECTIONS: readonly HomeWidgetId[] = ['due', 'upcoming'];

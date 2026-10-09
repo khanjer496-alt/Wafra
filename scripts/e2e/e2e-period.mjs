@@ -140,6 +140,11 @@ const browser = await chromium.launch(
   existsSync(CHROMIUM) ? { executablePath: CHROMIUM } : {},
 );
 const page = await browser.newPage({ viewport: { width: 412, height: 915 } });
+// Home v3 opens on Spent and the transactions without a period pill; the money
+// overview (which carries Home's period pill) is switched on for this suite.
+await page.addInitScript(layout => { if (!localStorage.getItem('wafra/ui/home-widgets/v1')) localStorage.setItem('wafra/ui/home-widgets/v1', layout); }, JSON.stringify({ version: 3,
+  order: ['greeting', 'hero', 'today', 'overview', 'week', 'activity', 'due', 'upcoming', 'transfers', 'insight', 'assistant', 'capture'],
+  hidden: ['today', 'week', 'due', 'upcoming', 'transfers', 'insight', 'assistant', 'capture'] }));
 await page.context().route('**/*', route => route.request().url().startsWith(BASE + '/') ? route.continue() : route.abort());
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
@@ -162,14 +167,14 @@ const monthPeriod = (offset = 0) => {
 
 // 1) Home opens on the current month, live.
 ok('home: period pill shows the current month', !!(await visibleText(page, shortMonth())));
-ok('home: the spending summary is visible', await page.getByTestId('home-spending-total').isVisible());
+ok('home: the spending summary is visible', await page.getByTestId('home-section-overview').getByTestId('home-spending-total').isVisible());
 
 // 2) The pill opens the sheet; Last month re-scopes the hero.
 await tapPeriod(page, monthPeriod(), 1200);
 ok('sheet: reporting period opens', !!(await visibleText(page, /^Reporting period$/i)));
 await tapText(page, /^Last month$/i, 1200);
 ok('home: past month applies beside the hero',
-  !!(await visibleText(page, monthPeriod(-1))) && await page.getByTestId('home-spending-total').isVisible());
+  !!(await visibleText(page, monthPeriod(-1))) && await page.getByTestId('home-section-overview').getByTestId('home-spending-total').isVisible());
 
 // 3) Spending follows the same period.
 await tapTab(page, 'Spending');
@@ -189,13 +194,13 @@ await tapText(page, /^This year$/i, 1200);
 const yr = String(new Date().getFullYear());
 ok('home: year mode applies', !!(await visibleText(page, yr)));
 
-await tapText(page, 'All activity', 1600);
+await tapText(page, 'See all', 1600);
 ok('activity: header carries the selected scope', !!(await visibleText(page, `· ${yr}`)));
 await tapLabel(page, 'Back', 1200);
 
 // 6) The spending-first Home opens the category breakdown; its activity view
 // preserves the same period and provides an explicitly expense-filtered ledger.
-await page.getByTestId('home-spending-total').click();
+await page.getByTestId('home-section-overview').getByTestId('home-spending-total').click();
 await page.waitForTimeout(1000);
 ok('Home spending opens the category breakdown', /\/flow/.test(page.url()));
 await tapText(page, /^Calendar$/, 800);
@@ -210,7 +215,7 @@ await page.goto(BASE, { waitUntil: 'networkidle' });
 await page.waitForTimeout(2000);
 ok('persistence: reload keeps onboarded state',
   !(await visibleText(page, 'Your bank already texts you', 2500)));
-ok('persistence: reload keeps the ledger', await page.getByTestId('home-spending-total').isVisible());
+ok('persistence: reload keeps the ledger', await page.getByTestId('home-section-overview').getByTestId('home-spending-total').isVisible());
 
 ok('no page errors', errors.length === 0);
 if (errors.length) console.log(errors.slice(0, 3));

@@ -1,7 +1,9 @@
 'use strict';
 // The one-time repair for Homes saved by the earlier goal-first Goals step:
 // it runs once per device, repairs only that step's exact output, and never
-// retires itself after a failed read or write.
+// retires itself after a failed read or write. Since Home v3 every layout
+// saved before it reads as the new default (readStoredHomeWidgets), so such a
+// layout needs no repair: the check retires without writing it.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
@@ -10,9 +12,7 @@ const root = path.resolve(__dirname, '../../..');
 
 const LAYOUT = 'wafra/ui/home-widgets/v1';
 const MARKER = 'wafra/ui/home-widgets/goal-order-repair/v1';
-const TOP = ['greeting', 'overview', 'today', 'week'];
-// What the band draws: the month line (overview) right under Today (splitHomeWidgetLayout).
-const BAND = ['greeting', 'today', 'overview', 'week'];
+const TOP = ['greeting', 'hero', 'today', 'overview', 'week'];
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
 function setup(initial = {}, { failRead = 0, failWrite = 0 } = {}) {
@@ -44,13 +44,17 @@ function setup(initial = {}, { failRead = 0, failWrite = 0 } = {}) {
   return { repair, store, writes, layout, model };
 }
 
-const earlierBills = { order: ['due', 'upcoming', ...TOP, 'assistant', 'insight', 'activity', 'capture'], hidden: [] };
+const v3 = (value) => ({ version: 3, ...value });
+const REST = ['activity', 'transfers', 'insight', 'assistant', 'capture'];
+// The earlier step's goal-first shape, in a v3 layout.
+const earlierBills = v3({ order: ['due', 'upcoming', ...TOP, ...REST], hidden: [] });
 
 test('an earlier goal-first Home is repaired once and the check is retired', async () => {
   const h = setup({ [LAYOUT]: JSON.stringify(earlierBills) });
   await h.repair.repairGoalOrderedHomeOnce();
-  assert.deepEqual(h.layout().order, [...TOP, 'due', 'upcoming', 'assistant', 'insight', 'activity', 'capture']);
-  assert.deepEqual(plain(h.model.splitHomeWidgetLayout(h.layout()).band), BAND);
+  // Payments are drawn before recent activity (onboarding-e.ts paymentsBeforeActivity).
+  assert.deepEqual(h.layout().order, [...TOP, 'due', 'upcoming', ...REST]);
+  assert.deepEqual(plain(h.model.splitHomeWidgetLayout(h.layout()).band), ['greeting', 'hero', 'today', 'overview', 'week']);
   assert.equal(h.store.get(MARKER), '1');
   assert.deepEqual(h.writes, [LAYOUT, MARKER], 'layout saved before the check is retired');
   // The person later puts the goal sections first again in Customize Home: never undone.
@@ -59,9 +63,17 @@ test('an earlier goal-first Home is repaired once and the check is retired', asy
   assert.deepEqual(h.layout(), earlierBills);
 });
 
+test('a layout saved before Home v3 is not rewritten: it reads as the new default, and the check retires', async () => {
+  const old = { order: ['due', 'upcoming', 'greeting', 'overview', 'today', 'week', 'assistant', 'insight', 'activity', 'capture'], hidden: [] };
+  const h = setup({ [LAYOUT]: JSON.stringify(old) });
+  await h.repair.repairGoalOrderedHomeOnce();
+  assert.deepEqual(h.layout(), old, 'nothing is written over the stored layout');
+  assert.deepEqual(h.writes, [MARKER]);
+});
+
 test('a layout arranged by hand and a fresh install are left alone', async () => {
   // Ask Wafra is never promoted by a goal, so this cannot be the earlier step's output.
-  const custom = { order: ['due', 'assistant', ...TOP, 'upcoming', 'activity', 'insight', 'capture'], hidden: ['insight'] };
+  const custom = v3({ order: ['due', 'assistant', ...TOP, 'upcoming', 'activity', 'transfers', 'insight', 'capture'], hidden: ['insight'] });
   const h = setup({ [LAYOUT]: JSON.stringify(custom) });
   await h.repair.repairGoalOrderedHomeOnce();
   assert.deepEqual(h.layout(), custom);
@@ -71,7 +83,6 @@ test('a layout arranged by hand and a fresh install are left alone', async () =>
   await fresh.repair.repairGoalOrderedHomeOnce();
   assert.equal(fresh.layout(), null, 'no layout is written where none was saved');
   assert.deepEqual(fresh.writes, [MARKER]);
-
 });
 
 test('a failed read or write leaves the check for the next launch', async () => {
@@ -81,22 +92,21 @@ test('a failed read or write leaves the check for the next launch', async () => 
   assert.deepEqual(unread.layout(), earlierBills);
   await unread.repair.repairGoalOrderedHomeOnce();
   assert.equal(unread.store.get(MARKER), '1');
-  assert.deepEqual(unread.layout().order.slice(0, 4), TOP);
+  assert.deepEqual(unread.layout().order.slice(0, 5), TOP);
 
   const unwritten = setup({ [LAYOUT]: JSON.stringify(earlierBills) }, { failWrite: 1 });
   await unwritten.repair.repairGoalOrderedHomeOnce();
   assert.equal(unwritten.store.has(MARKER), false, 'a layout that was not saved is not marked done');
   await unwritten.repair.repairGoalOrderedHomeOnce();
   assert.equal(unwritten.store.get(MARKER), '1');
-  assert.deepEqual(unwritten.layout().order.slice(0, 4), TOP);
+  assert.deepEqual(unwritten.layout().order.slice(0, 5), TOP);
 });
 
 test('a stacked order from going Back in the Goals step is repaired too', async () => {
-  const stacked = { order: ['activity', 'insight', 'due', 'upcoming', ...TOP, 'assistant', 'capture'], hidden: ['insight'] };
+  const stacked = v3({ order: ['activity', 'insight', 'due', 'upcoming', ...TOP, 'transfers', 'assistant', 'capture'], hidden: ['insight'] });
   const h = setup({ [LAYOUT]: JSON.stringify(stacked) });
   await h.repair.repairGoalOrderedHomeOnce();
-  // Payments are drawn before recent activity (onboarding-e.ts paymentsBeforeActivity).
-  assert.deepEqual(h.layout(), { order: [...TOP, 'due', 'upcoming', 'activity', 'insight', 'assistant', 'capture'], hidden: ['insight'] });
+  assert.deepEqual(h.layout(), v3({ order: [...TOP, 'due', 'upcoming', 'activity', 'insight', 'transfers', 'assistant', 'capture'], hidden: ['insight'] }));
   assert.equal(h.store.get(MARKER), '1');
 });
 
@@ -106,7 +116,7 @@ test('a load that no longer needs repair leaves the check for the next launch', 
   const h = setup({ [LAYOUT]: JSON.stringify(earlierBills) }, { failRead: 0 });
   let reads = 0;
   const realGet = h.store.get.bind(h.store);
-  h.store.get = (key) => key === LAYOUT && ++reads >= 2 ? JSON.stringify({ order: [...TOP], hidden: [] }) : realGet(key);
+  h.store.get = (key) => key === LAYOUT && ++reads >= 2 ? JSON.stringify(v3({ order: [...TOP], hidden: [] })) : realGet(key);
   await h.repair.repairGoalOrderedHomeOnce();
   assert.equal(h.store.has(MARKER), false);
   assert.deepEqual(h.writes, []);

@@ -198,6 +198,11 @@ const browser = await chromium.launch(
   existsSync(CHROMIUM) ? { executablePath: CHROMIUM } : {},
 );
 const page = await browser.newPage({ viewport: { width: 412, height: 915 }, colorScheme: 'dark' });
+// Home v3 opens on Spent and the transactions; this suite also reconciles the
+// Due soon and Coming up sections against Bills, so it switches them on (a v3 layout).
+await page.addInitScript(layout => { if (!localStorage.getItem('wafra/ui/home-widgets/v1')) localStorage.setItem('wafra/ui/home-widgets/v1', layout); }, JSON.stringify({ version: 3,
+  order: ['greeting', 'hero', 'today', 'overview', 'week', 'due', 'upcoming', 'activity', 'transfers', 'insight', 'assistant', 'capture'],
+  hidden: ['today', 'overview', 'week', 'transfers', 'insight', 'assistant', 'capture'] }));
 // Keep the seeded merchant/category coverage stable at the start of a real month.
 // Let Date.now advance too: React Native sheet animations depend on elapsed time.
 await page.clock.install({ time: new Date('2026-09-27T08:00:00Z') });
@@ -216,7 +221,7 @@ ok('home hero focuses on spending instead of a total balance',
   await page.getByText('Recorded balances', { exact: true }).count() === 0);
 ok('home splits income and spending', await page.getByTestId('home-spending-total').count() === 1 && await page.getByTestId('home-income-summary').count() === 1);
 ok('home lists due or upcoming obligations', !!(await visibleText(page, /^(Due & overdue|Due payments|Upcoming|Coming up)$/i)));
-ok('home links to all activity', !!(await visibleText(page, /ALL ACTIVITY/i)));
+ok('home links to all activity', !!(await visibleText(page, /^See all$/i)));
 
 // Ledger & Light splits due/upcoming widgets and exposes the row's text as
 // its accessible name. The old journal-payments aria-label no longer exists.
@@ -458,7 +463,7 @@ ok('wallet lists goals', !!(await visibleText(page, /SAVINGS GOALS/i)));
 
 // ── Activity ──────────────────────────────────────────────────────────
 await tapTab(page, 'Home');
-await tapText(page, 'All activity', 1600);
+await tapText(page, 'See all', 1600);
 ok('activity opens scoped to the period', !!(await visibleText(page, /\d+ transactions? ·/i)));
 // Keep the visible wording concise without making search inaccessible.
 const activitySearch = page.getByPlaceholder('Merchant or category', { exact: true });

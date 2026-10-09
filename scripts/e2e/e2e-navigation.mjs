@@ -118,7 +118,7 @@ const tapTab = async (page, name) => {
   }, name, { timeout: 8000 });
   // Home's wordmark is not a semantic heading. Verify its actionable content.
   if (name === 'Home' || name === 'الرئيسية') {
-    await page.getByTestId('home-spending-total').waitFor({ state: 'visible', timeout: 8000 });
+    await page.getByTestId('home-section-hero').waitFor({ state: 'visible', timeout: 8000 });
     return;
   }
   const headingName = name;
@@ -262,6 +262,11 @@ const browser = await chromium.launch(
   existsSync(CHROMIUM) ? { executablePath: CHROMIUM } : {},
 );
 const page = await browser.newPage({ viewport: { width: 412, height: 915 }, colorScheme: 'dark', reducedMotion: 'reduce' });
+// Home v3 opens on Spent and the transactions. This suite also presses the
+// month line's Spending and Income facts, so it switches the money overview on.
+await page.addInitScript(layout => { if (!localStorage.getItem('wafra/ui/home-widgets/v1')) localStorage.setItem('wafra/ui/home-widgets/v1', layout); }, JSON.stringify({ version: 3,
+  order: ['greeting', 'hero', 'today', 'overview', 'week', 'activity', 'due', 'upcoming', 'transfers', 'insight', 'assistant', 'capture'],
+  hidden: ['today', 'week', 'due', 'upcoming', 'transfers', 'insight', 'assistant', 'capture'] }));
 // Keep the seeded merchant/category coverage stable at the start of a real month.
 // Let Date.now advance too: React Native sheet animations depend on elapsed time.
 await page.clock.install({ time: new Date('2026-09-27T08:00:00Z') });
@@ -448,7 +453,7 @@ const spendingView = async (name) => {
 const homeFactControl = (name) => {
   const id = { Spending: 'home-spending-total', Income: 'home-income-summary' }[name];
   if (!id) throw new Error(`Unknown Home financial control: ${name}`);
-  return page.getByTestId(id);
+  return page.getByTestId('home-section-overview').getByTestId(id);
 };
 const homeFact = async (name) => {
   const row = homeFactControl(name);
@@ -476,7 +481,7 @@ await pressEverything('transactions', async () => {
   await home();
   // Re-entry can follow a sheet/filter layout change. Let Playwright wait for
   // this unique button to be actionable instead of ignoring a failed tapKey.
-  await page.getByRole('button', { name: 'All activity', exact: true }).click();
+  await page.getByRole('button', { name: 'See all', exact: true }).click();
   await page.waitForURL(/\/transactions/);
 });
 // Settings is two screens: the main list, and Data and help (exports,
@@ -578,7 +583,7 @@ const goesTo = async (name, enter, key, pattern) => {
   const at = await url(page);
   ok(`${name} (${key} → ${at})`, reached === true && pattern.test(at), reached ? at : 'not reachable');
 };
-await goesTo('Home all activity opens the ledger', home, 'All activity', /^\/transactions/);
+await goesTo('Home See all opens the ledger', home, 'See all', /^\/transactions/);
 await goesTo('Home settings action', home, 'Settings', /^\/settings/);
 await goesTo('Accounts payment cards', wallet, 'Payment cards', /^\/cards/);
 await goesTo('Accounts manual import', wallet, 'Paste a bank message', /^\/import-sms/);
@@ -592,7 +597,7 @@ await goesTo('Data and help feedback', settingsData, 'Send feedback', /^\/feedba
 
 /* ── 3. Search, manual entry, cancellation and filter clearing ────────── */
 {
-  await home(); await tapKey(page, 'All activity'); await page.waitForURL(/\/transactions/);
+  await home(); await tapKey(page, 'See all'); await page.waitForURL(/\/transactions/);
   const search = page.getByPlaceholder('Merchant or category', { exact: true }).last();
   await search.waitFor({ state: 'visible' });
   ok('Transactions exposes its real merchant search field', await search.isEditable());
@@ -611,7 +616,7 @@ await goesTo('Data and help feedback', settingsData, 'Send feedback', /^\/feedba
 /* ── 4. Back gets you out of every pushed screen ──────────────────────── */
 
 for (const [name, enter] of [
-  ['transactions', async () => { await home(); await tapKey(page, 'All activity'); }],
+  ['transactions', async () => { await home(); await tapKey(page, 'See all'); }],
   ['settings', async () => { await home(); await tapKey(page, 'Settings'); }],
   ['cards', async () => { await wallet(); await tapKey(page, 'Payment cards'); }],
   ['import-sms', async () => { await wallet(); await tapKey(page, 'Paste a bank message'); }],
@@ -871,7 +876,7 @@ for (const [name, enter] of [
   }
   await tapKey(page, 'Home', 5000);
   await page.waitForTimeout(600);
-  await tapKey(page, 'All activity', 5000);
+  await tapKey(page, 'See all', 5000);
   await page.waitForTimeout(900);
   // Normal text uses an intentional horizontal filter strip. Reveal each
   // chip and verify its whole label, rather than treating its offscreen
