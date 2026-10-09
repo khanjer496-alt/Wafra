@@ -268,10 +268,13 @@ export function HomeHero({ band, moneySpec, language, largeText, current, previo
     <Pressable testID="home-hero-card" accessibilityRole="button" accessibilityLabel={heroSpoken}
       accessibilityHint={expanded ? words.heroHintExpanded : words.heroHintCollapsed}
       accessibilityState={{ expanded }} aria-expanded={expanded}
-      accessibilityActions={[{ name: 'increment', label: words.nextMonth }, { name: 'decrement', label: words.previousMonth }]}
+      // Named actions, not increment/decrement: those reach VoiceOver only on an
+      // adjustable control, and this card is a button (it opens the categories).
+      accessibilityActions={front ? [{ name: 'previousMonth', label: words.showMonth(otherName ?? words.previousMonth) }]
+        : [{ name: 'currentMonth', label: words.backTo(current.name) }]}
       onAccessibilityAction={(event) => {
-        if (event.nativeEvent.actionName === 'decrement') show('previous');
-        else if (event.nativeEvent.actionName === 'increment') show('current');
+        if (event.nativeEvent.actionName === 'previousMonth') show('previous');
+        else if (event.nativeEvent.actionName === 'currentMonth') show('current');
       }}
       onPress={toggle} style={styles.body}>
       <BandFigure testID="home-spending-total" fils={spent} moneySpec={moneySpec} palette={band} size="hero" fitInset={PAD * 2} />
@@ -305,7 +308,7 @@ export function HomeHero({ band, moneySpec, language, largeText, current, previo
     </Pressable>
     {categoriesShown ? <Animated.View testID="home-hero-categories" style={[styles.categories, openPaint]}>
       <HeroCategories summary={month.summary} budgets={budgets} band={band} moneySpec={moneySpec}
-        label={words.byCategory} empty={words.noSpendingYet} />
+        label={words.byCategory} empty={front ? words.noSpendingYet : words.noSpendingIn(month.name)} />
     </Animated.View> : null}
   </Animated.View>;
 }

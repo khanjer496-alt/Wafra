@@ -42,7 +42,9 @@ test('the hero speaks the month, the figure, the trend, In and Net in one label'
   assert.equal(card.props.accessibilityRole, 'button');
   assert.equal(card.props.accessibilityState.expanded, false);
   assert.match(card.props.accessibilityLabel, /^Spent in September, AED 379\.34\. In AED 0\.00\. Net AED −379\.34$/);
-  assert.equal(card.props.accessibilityActions.map((action) => action.name).join(), 'increment,decrement');
+  // Named actions: increment/decrement reach VoiceOver only on an adjustable control, and the card is a button.
+  assert.equal(card.props.accessibilityActions.map((action) => action.name).join(), 'previousMonth');
+  assert.ok(card.props.accessibilityActions[0].label.startsWith('Show '));
   assert.ok(byId(h.tree, 'home-hero-previous').props.accessibilityLabel.startsWith('Show '), 'a chevron button for last month');
   // Decorative pieces are hidden from assistive tech.
   for (const id of ['home-hero-line', 'home-hero-flow']) assert.equal(byId(h.tree, id).props.accessibilityElementsHidden, true, id);
@@ -95,6 +97,33 @@ test('Needs you: nothing, or only the highest-priority need, with a way there an
   assert.equal(pillStyle.height, 44, 'a fixed one-line pill');
   // A deliberate opt-out of capture is not nagged about.
   assert.equal(byId(harness({ homeWidgets: 'default', optOut: true }).tree, 'home-needs-you'), undefined);
+});
+
+test('Capture shows by itself while tracking needs the person, and not once it is running', () => {
+  const ids = (tree) => walk(tree).map((node) => node.props?.testID).filter(Boolean);
+  assert.ok(!ids(harness({ homeWidgets: 'default' }).tree).includes('journal-import-controls'), 'running: off as saved');
+  const off = harness({ homeWidgets: 'default', needsPermission: true });
+  const drawn = ids(off.tree);
+  assert.ok(drawn.includes('home-section-capture'), 'tracking off: Capture is drawn');
+  assert.ok(drawn.indexOf('home-section-capture') > drawn.indexOf('home-widget-activity'), 'at its saved place, after the transactions');
+  assert.ok(ids(harness({ homeWidgets: 'default', pro: false }).tree).includes('home-section-capture'),
+    'paused (Android without Pro): drawn too');
+  // A deliberate opt-out is not a need.
+  assert.ok(!ids(harness({ homeWidgets: 'default', optOut: true }).tree).includes('journal-import-controls'));
+});
+
+test('Home: a quiet line for transfers the Needs you pill does not name; no heading over an empty list', () => {
+  const home = fs.readFileSync(path.join(root, 'src/screens/journal-home-screen.tsx'), 'utf8');
+  assert.match(home, /const quietTransfers = !homeWidgetVisible\(drawnWidgets, 'transfers'\) && pendingTransfers\s*&& pendingTransfers\.count > 0 && pendingTransfers\.questions === 0/);
+  assert.match(home, /footer=\{quietTransfers\}/);
+  assert.match(home, /testID="home-transfers-waiting"[\s\S]{0,200}accessibilityLabel=\{homeWords\.transfersToAnswer\(pendingTransfers\.count\)\}/);
+  const recent = fs.readFileSync(path.join(root, 'src/components/home/home-recent.tsx'), 'utf8');
+  assert.match(recent, /if \(count === 0 && !empty && !footer\) return null;/);
+  // Last month's side says which month had nothing, not "this month".
+  const heroSource = fs.readFileSync(path.join(root, 'src/components/home/home-hero.tsx'), 'utf8');
+  assert.match(heroSource, /empty=\{front \? words\.noSpendingYet : words\.noSpendingIn\(month\.name\)\}/);
+  // The early return sits after every hook.
+  assert.ok(recent.indexOf('return null;') > recent.lastIndexOf('useMemo('));
 });
 
 test('Needs you floats above the tab bar normally, and sits inline at the top of the sheet with large text or a short window', () => {

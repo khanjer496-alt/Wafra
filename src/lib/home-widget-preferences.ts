@@ -111,6 +111,22 @@ export function homeWidgetVisible(preferences: HomeWidgetPreferences, id: HomeWi
   return !preferences.hidden.includes(id);
 }
 
+/** The sections Home may show by itself while they need the person. */
+const SHOWN_WHEN_NEEDED: readonly HomeWidgetId[] = ['capture'];
+
+/**
+ * The layout Home draws right now: the saved one, with a switched-off section
+ * shown at its saved place while it needs the person (Capture while tracking
+ * is off, paused or stopped, or in the first days). Never saved, so the
+ * section is off again once the need passes. Unchanged, it returns the same
+ * object.
+ */
+export function withNeededHomeSections(preferences: HomeWidgetPreferences, needed: readonly HomeWidgetId[]): HomeWidgetPreferences {
+  const shown = needed.filter((id) => SHOWN_WHEN_NEEDED.includes(id) && preferences.hidden.includes(id));
+  if (shown.length === 0) return preferences;
+  return { order: preferences.order, hidden: preferences.hidden.filter((id) => !shown.includes(id)) };
+}
+
 /**
  * Only the visible opening run of header sections belongs on the band: the
  * greeting, the Spent hero and, when switched on, Today | Left in budgets,

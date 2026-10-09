@@ -37,7 +37,7 @@ export function recentDays(rows: readonly Transaction[]): { date: string; rows: 
 }
 
 export function HomeRecent({ rows, accountById, internalIds, onPress, arrivedRowId, Arriving, hold, todayISO, band,
-  title, seeAll, seeAllHint, onSeeAll, note, empty }: {
+  title, seeAll, seeAllHint, onSeeAll, note, empty, footer }: {
   rows: readonly Transaction[];
   accountById: ReadonlyMap<string, Account>;
   internalIds: ReadonlySet<string>;
@@ -56,6 +56,8 @@ export function HomeRecent({ rows, accountById, internalIds, onPress, arrivedRow
   note?: string;
   /** Drawn instead of the rows when the period has none. */
   empty?: React.ReactNode;
+  /** A quiet line under the rows (transfers waiting that the Needs you pill does not name). */
+  footer?: React.ReactNode;
 }) {
   const motion = useMotionPreference();
   const active = useAppActive();
@@ -89,6 +91,9 @@ export function HomeRecent({ rows, accountById, internalIds, onPress, arrivedRow
   // A row added after the plan (a later capture) shares the last row's track: at rest, in place.
   const paint = (at: number) => paints[Math.min(at, paints.length - 1)] ?? null;
   let index = 0;
+  // A heading over nothing says nothing: with no rows, no empty state and no
+  // footer, the section is left out.
+  if (count === 0 && !empty && !footer) return null;
   return <View style={styles.section} testID="home-widget-activity">
     <View style={styles.heading}>
       <View style={styles.grow}>
@@ -119,6 +124,7 @@ export function HomeRecent({ rows, accountById, internalIds, onPress, arrivedRow
         })}
       </View>;
     })}
+    {footer ?? null}
   </View>;
 }
 

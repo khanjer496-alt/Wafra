@@ -73,7 +73,7 @@ import type { AppState as LedgerState, CardDue, Transaction } from '@/lib/types'
 import { t, tf } from '@/lib/i18n';
 import { homeWidgetVisible, loadHomeWidgetPreferences, peekHomeWidgetPreferences, splitHomeWidgetLayout, subscribeHomeWidgetPreferences, type HomeWidgetId, type HomeWidgetPreferences } from '@/lib/home-widgets';
 import { repairGoalOrderedHomeOnce } from '@/lib/home-goal-order-repair';
-import { defaultHomeWidgetPreferences } from '@/lib/home-widget-preferences';
+import { defaultHomeWidgetPreferences, withNeededHomeSections } from '@/lib/home-widget-preferences';
 import { hasRecapActivity, recapCandidates, type RecapDescriptor } from '@/lib/recap';
 import { loadViewedRecaps } from '@/lib/recap-view-state';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
@@ -282,7 +282,8 @@ function keepRecapEntry<T extends { descriptor: RecapDescriptor; unread: boolean
  * and like-for-like trend (home-hero.ts). Named "October", with the year only
  * when it is not this year's.
  */
-function heroMonthFor(transactions: Transaction[], key: string, dayISO: string, live: Set<string>, internal: Set<string>): HeroMonth {
+function heroMonthFor(transactions: Transaction[], key: string, dayISO: string, live: Set<string>, internal: Set<string>,
+  withSeries = true): HeroMonth {
   const today = new Date(`${dayISO}T12:00:00`);
   const year = monthKey(today).slice(0, 4);
   const name = (monthKeyed: string) => monthKeyed.slice(0, 4) === year
@@ -290,7 +291,9 @@ function heroMonthFor(transactions: Transaction[], key: string, dayISO: string, 
   return {
     key, name: name(key), comparedName: name(shiftMonthKey(key, -1)),
     summary: summarizeMonth(transactions, { mode: 'month', key }, live, internal),
-    series: projectHeroMonth(transactions, key, today, live, internal),
+    // Off in Customize Home: no line or trend to draw, so no second pass over the ledger.
+    series: withSeries ? projectHeroMonth(transactions, key, today, live, internal)
+      : { key, monthDays: 0, cumulative: [], trend: null },
   };
 }
 
@@ -606,10 +609,13 @@ export default function JournalHomeScreen() {
   const heroKey = period.mode === 'month' ? period.key : monthKey(now);
   const runningMonth = monthKey(now);
   const heroInternal = dashboard.internalTransactionIds as Set<string>;
-  const heroCurrent = useMemo(() => heroMonthFor(state.transactions, heroKey, projectionDay, liveAccounts as Set<string>, heroInternal),
+  // Switched off, the hero keeps only the month summary (limits over); its line,
+  // trend and pace are not worked out.
+  const heroShown = homeWidgetVisible(homeWidgets, 'hero');
+  const heroCurrent = useMemo(() => heroMonthFor(state.transactions, heroKey, projectionDay, liveAccounts as Set<string>, heroInternal, heroShown),
     // monthLabel follows the app language.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.transactions, heroKey, projectionDay, liveAccounts, heroInternal, language]);
+    [state.transactions, heroKey, projectionDay, liveAccounts, heroInternal, language, heroShown]);
   const [heroPreviousWanted, setHeroPreviousWanted] = useState<string | null>(null);
   const heroPrevious = useMemo(() => heroPreviousWanted === heroKey
     ? heroMonthFor(state.transactions, shiftMonthKey(heroKey, -1), projectionDay, liveAccounts as Set<string>, heroInternal) : null,
@@ -1063,6 +1069,26 @@ export default function JournalHomeScreen() {
     hint={homeWords.needHint[need.kind]} icon={need.kind === 'transfers' ? 'repeat' : need.kind === 'card' ? 'calendar' : 'alert'}
     warning={need.kind === 'tracking' || need.kind === 'card'} dismissLabel={homeWords.dismiss} inline={pillInline}
     onPress={() => openNeed(need)} onDismiss={() => dismissNeed(need.key)} band={band} hold={!revealReady} /> : null;
+  // Capture shows by itself while it needs the person (tracking off, paused or
+  // stopped, the first week's progress, set up with no message read yet), even
+  // when switched off in Customize Home, and goes again once it does not. The
+  // offer to fill in the past is only an offer: it waits in the section.
+  const captureNeeded = state.hydrated && state.onboarded && (trackingNeed !== null || captureStopped
+    || (!history && moneyPicture !== null) || (captureSetUp && !hasLiveCapture && !history));
+  const drawnWidgets = withNeededHomeSections(homeWidgets, captureNeeded ? ['capture'] : []);
+  // Transfers still waiting that the Needs you pill does not name (no question
+  // the card can ask: a likely card repayment, an archived account): one quiet
+  // line under the transactions while the Transfers section is off.
+  const quietTransfers = !homeWidgetVisible(drawnWidgets, 'transfers') && pendingTransfers
+    && pendingTransfers.count > 0 && pendingTransfers.questions === 0
+    ? <Pressable testID="home-transfers-waiting" accessibilityRole="button"
+        accessibilityLabel={homeWords.transfersToAnswer(pendingTransfers.count)} accessibilityHint={homeWords.needHint.transfers}
+        onPress={() => router.push('/transfers')}
+        style={({ pressed }) => [styles.quietLine, { opacity: pressed ? 0.6 : 1 }]}>
+        <Icon name="repeat" size={16} color={band.textSecondary} />
+        <ThemedText type="meta" style={[styles.grow, { color: band.textSecondary }]}>{homeWords.transfersToAnswer(pendingTransfers.count)}</ThemedText>
+        <Icon name="chevron-right" size={16} color={band.textSecondary} />
+      </Pressable> : null;
   const founderUnlockEnabled = process.env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK === '1';
   const unlockFounder = founderUnlockEnabled && !state.founderPro
     ? () => {
@@ -1160,7 +1186,8 @@ export default function JournalHomeScreen() {
       seeAllHint={homeWords.seeAllHint} onSeeAll={() => router.push('/transactions')}
       note={period.mode === 'month' && period.key === runningMonth ? undefined : periodLabel(period)}
       empty={!hasPeriodRecords ? <EmptyMonth monthName={periodLabel(period)} onReadInbox={() => void onRefresh()} primaryLabel={t('checkBankAlerts')} onAddManually={() => router.push('/add-transaction')} />
-        : hasPeriodTransfers ? transfersLink : null} />;
+        : hasPeriodTransfers ? transfersLink : null}
+      footer={quietTransfers} />;
   };
 
   const summaryProps = {
@@ -1173,7 +1200,7 @@ export default function JournalHomeScreen() {
     onSpending: () => router.push('/flow'),
   };
 
-  const layout = splitHomeWidgetLayout(homeWidgets);
+  const layout = splitHomeWidgetLayout(drawnWidgets);
   // On the band, the month line sits right under the Today tiles and names the
   // period; anywhere else (hidden, or moved down the sheet) the tiles name it.
   const sectionProps = { ...summaryProps, today: homeToday,
@@ -1324,6 +1351,7 @@ export default function JournalHomeScreen() {
 const styles = StyleSheet.create({
   screen: { gap: 24 },
   captureBlock: { gap: 16 },
+  quietLine: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 8 },
   movedMoneyBlock: { padding: 16, borderRadius: 24 },
   utilityStacked: { flexDirection: 'column', alignItems: 'stretch' },
   loading: { gap: 20, paddingTop: 20 },

@@ -16,7 +16,7 @@ export type TrendDirection = 'up' | 'down' | 'same';
 
 /** This month's spending so far against the same days of the month before. */
 export interface SpendTrend {
-  /** Spending from the month's first day to today (or its last day, once it has ended). */
+  /** The month's spending to date: its first day to today (or its last day, once it has ended), later-dated rows on today. */
   currentFils: number;
   /** Spending over the same number of days from the start of the month before. */
   previousFils: number;
@@ -71,7 +71,10 @@ export function projectHeroMonth(
   const monthDays = daysInPeriod(period, today);
   const elapsed = Math.max(0, Math.min(monthDays, elapsedDays(period, today, [])));
   const startISO = monthStartISO(key);
-  const endISO = elapsed > 0 ? addDays(startISO, elapsed - 1) : '';
+  // Rows dated later this month (entered ahead, or a bank's clock past
+  // midnight) count on today: the Spent figure is the whole month, so the
+  // line's end and the trend's side add up to it.
+  const monthEnd = elapsed > 0 ? monthEndISO(key) : '';
   const daily = new Array<number>(elapsed).fill(0);
   const dayIndex = new Map<string, number>();
   for (let day = 0; day < elapsed; day += 1) dayIndex.set(addDays(startISO, day), day);
@@ -82,13 +85,12 @@ export function projectHeroMonth(
   let previousRows = 0;
   for (const transaction of transactions) {
     const date = transaction.date;
-    const inside = elapsed > 0 && date >= startISO && date <= endISO;
+    const inside = elapsed > 0 && date >= startISO && date <= monthEnd;
     const earlier = before !== null && date >= before.from && date <= before.to;
     if (!inside && !earlier) continue;
     if (!isSpending(transaction, live, internal)) continue;
     if (inside) {
-      const at = dayIndex.get(date);
-      if (at !== undefined) daily[at]! += transaction.amountFils;
+      daily[dayIndex.get(date) ?? elapsed - 1]! += transaction.amountFils;
     } else {
       previousFils += transaction.amountFils;
       previousRows += 1;
