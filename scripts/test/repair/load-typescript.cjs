@@ -243,6 +243,11 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       if (name === '@/lib/universal-template-certification') {
         return require('../build/universal-template-certification.js');
       }
+      // Gulf-neighbour (QA/KW/BH/OM) posting decision: pure, and inert for any
+      // alert the router did not send to one of those four markets.
+      if (name === '@/lib/gulf-neighbour-alerts') {
+        return require('../build/gulf-neighbour-alerts.js');
+      }
       if (name === '@/lib/local-semantic-shadow') {
         return {
           canCollectLocalSemanticShadow: () => false,

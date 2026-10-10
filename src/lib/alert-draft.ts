@@ -47,6 +47,15 @@ export type CurrencyAliasMap = Readonly<Record<string, readonly CurrencyCode[]>>
 export interface AlertDraftContext {
   /** Market-scoped aliases such as KD or ج.م. Never apply these globally. */
   currencyAliases?: CurrencyAliasMap;
+  /**
+   * Three-decimal currencies whose ROUTED market prints a single full stop as
+   * the decimal point (Kuwait, Bahrain, Oman: "KWD 12.345" is 12.345 KWD).
+   * Supplied only by a market pack after routing, and only for that market's
+   * own currency. It resolves exactly one shape: one full stop followed by
+   * three digits and no comma. Repeated separators, commas and every other
+   * currency (USD 1.250 on a Kuwaiti alert) keep their ambiguity.
+   */
+  dotDecimalCurrencies?: readonly CurrencyCode[];
 }
 
 const DIGIT_ZEROES = [0x0660, 0x06f0, 0x0966, 0x09e6, 0x0e50, 0x1040, 0xff10] as const;
@@ -82,7 +91,7 @@ interface ParsedNumber {
   alternateMinorUnits: string | null;
 }
 
-function parseNumber(source: string, exponent: number): ParsedNumber | null {
+function parseNumber(source: string, exponent: number, dotDecimal = false): ParsedNumber | null {
   let value = source.trim().replace(/[+]/g, '');
   const negative = value.startsWith('-');
   if (negative) value = value.slice(1);
@@ -132,8 +141,9 @@ function parseNumber(source: string, exponent: number): ParsedNumber | null {
     if (locations.length === 1 && exponent > 0 && tail > 0 && tail <= exponent) {
       decimalAt = last;
       // A single three-digit suffix can also be a thousands group. Preserve
-      // the candidate but force review rather than pretending certainty.
-      ambiguous = exponent === 3 && tail === 3;
+      // the candidate but force review rather than pretending certainty,
+      // unless the routed market's own currency settles it (dotDecimal).
+      ambiguous = exponent === 3 && tail === 3 && !(dotDecimal && separator === '.');
     } else if (exponent === 3 && tail === 3 &&
       validGroupedInteger(value.slice(0, last), separator)) {
       // Even repeated separators are kept ambiguous for three-decimal
@@ -321,7 +331,7 @@ export function inspectAlertDraft(source: string, context: AlertDraftContext = {
     for (const currency of raw.currencies) {
       const exponent = currencyMinorUnits(currency);
       if (exponent === null) continue;
-      const parsed = parseNumber(raw.amount, exponent);
+      const parsed = parseNumber(raw.amount, exponent, context.dotDecimalCurrencies?.includes(currency) === true);
       if (!parsed) continue;
       interpretations.push({ currency, minorUnits: parsed.minorUnits, exponent });
       if (parsed.alternateMinorUnits !== null) {

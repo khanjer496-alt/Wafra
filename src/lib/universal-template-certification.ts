@@ -1,5 +1,6 @@
 import type { UniversalMarket } from '@/lib/alert-market-pack-types';
 import { alertMarketPack } from '@/lib/alert-market-packs';
+import { BANK_MUSCAT_CARD_PURCHASE_TEMPLATE } from '@/lib/gulf-neighbour-templates';
 import { assessUniversalEventConfidence } from '@/lib/universal-confidence';
 import type { UniversalBankEvent } from '@/lib/universal-types';
 
@@ -122,6 +123,14 @@ const CERTIFIED_RULES: readonly CertificationRule[] = [
     source: /^Banorte: \d{2}\/\d{2} devoluci[oó]n (?:MXN|\$) ?\d{1,3}(?:,\d{3})*\.\d{2} [A-Z0-9][A-Z0-9 &'.*/-]{0,60}\. Tarjeta terminaci[oó]n \d{4}\.?$/u },
   { id: 'sg-dbs-paynow-outgoing-v1', market: 'SG', institution: 'dbs-singapore', family: 'transfer', direction: 'debit',
     source: /^DBS(?: Bank)?: PayNow outgoing SGD \d{1,3}(?:,\d{3})*\.\d{2} to [A-Z0-9][A-Z0-9 &'.*/-]{0,60}[A-Z0-9]\.?$/u },
+
+  // Gulf neighbours. Bank Muscat's Arabic debit-card purchase ("تم خصم …
+  // بإستخدام بطاقة الخصم المباشر في …") states its own completion; the whole
+  // message is anchored, OMR on either side of a three-decimal amount. Its
+  // evidence is community-derived structure (three alerts, one shape), written
+  // here in Wafra's own fixtures; no other Gulf-neighbour family has a sample.
+  { id: 'om-bank-muscat-card-purchase-v1', market: 'OM', institution: 'bank-muscat', family: 'purchase', direction: 'debit',
+    source: BANK_MUSCAT_CARD_PURCHASE_TEMPLATE },
 ] as const;
 
 const NON_TRANSACTION_FAMILIES = new Set<UniversalBankEvent['family']>([

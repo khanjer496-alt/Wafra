@@ -903,7 +903,9 @@ export function inspectSourceFreeRefusedAlert(input: {
     // issuer routing and can be very expensive on rich OEM notification text.
     // Leave the encrypted row unresolved for a future parser instead.
     if (input.skipUniversalFallback) return { kind: 'ignored', reason: 'unrecognized' };
-    const event = inspectGenericBankEventForReview(input.source, input.sender);
+    // A Gulf-neighbour route reads its own currency spellings for the amount.
+    const event = inspectGenericBankEventForReview(input.source, input.sender,
+      inspection?.route.decision === 'single' ? inspection.route.market : null);
     const universal = event ? prepareUniversalReviewAlert({
       id: 'capture_probe_id_0001',
       sourceKey: 'capture_probe_key_001',

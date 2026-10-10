@@ -72,6 +72,106 @@ market and is tracked separately from these packs. Other known gaps are pinned i
 fixture file: non-posted transfer/recurring rows read family `unknown`, and a
 "was canceled" Zelle alert is refused as `unknown` rather than `failed`.
 
+## Gulf neighbours (Qatar, Kuwait, Bahrain, Oman)
+
+These four first-wave markets now have a posting rule of their own. Its
+evidence is thin and stated plainly: no Qatari, Kuwaiti or Bahraini alert text
+exists anywhere in our sources (the banks and regulators say only that alerts
+exist), and Oman has one Bank Muscat family whose structure comes from three
+community-collected alerts. None is a consented real alert, none counts toward
+the gates below, and nothing here claims "Gulf coverage".
+
+**Money.** A three-decimal figure written with one full stop and no comma
+(`KWD 12.345`, `0.650 OMR`, `BD 4.250`) is a decimal, 12.345 KWD, only after
+the alert is routed to Kuwait, Bahrain or Oman and only for that market's own
+currency (`dotDecimalCurrencies` in the pack, read by `alert-draft.ts`). It is
+never twelve thousand. Unrouted figures, other currencies on the same alert
+(`USD 1.250`), comma-written figures (`KWD 12,500`) and repeated separators
+keep their ambiguity, and the riyal (two decimals) never reads a three-digit
+tail as a decimal. After routing, the packs also accept `QR` beside a figure
+(never "QR code"), `ريال قطري`, `دينار كويتي`, `دينار بحريني` and
+`ريال عماني`; a bare `ريال` or `دينار` is shared by several countries and is
+never evidence.
+
+**Routing.** Brands that also bank elsewhere count as a market's institution
+only when the alert also states that market's own currency (ISO code, unique
+Arabic abbreviation, spelled-out currency, or the Latin abbreviation beside a
+figure): QNB (Egypt), NBK (Egypt), KFH (Bahrain, Turkey), BBK, Ahli United,
+Bank ABC, Burgan, Doha Bank, Gulf Bank, QIB and HSBC Oman. A QNB or NBK alert in
+EGP is therefore no longer routed to Qatar or Kuwait. The reverse also holds:
+a `CITI`/`Citibank` sender used to route to the US by name even when the alert
+stated BHD or KWD; such an alert (neighbour money and no USD or `$`) is no
+longer US evidence and stays unrouted. Every other Citi alert keeps its US
+route. Standard Chartered has no grammar in any of the four markets, and an
+`HSBC` sender stays ambiguous (it is a UAE launch sender and a UK one), so
+neither routes by name. The UAE launch registry
+is untouched: ADIB, Mashreq, Emirates NBD and the rest keep their routes, and
+`scripts/test/gulf-neighbour-alerts.test.js` pins today's behaviour (an ADIB
+QAR purchase on an AED ledger still posts through the launch grammar; a
+Mashreq KWD alert on a KWD ledger still does not post).
+
+Institutions, by reach: QA: QNB, Commercial Bank of Qatar, Doha Bank, QIB,
+Masraf Al Rayan, Dukhan Bank. KW: NBK, KFH, Gulf Bank, Burgan, Boubyan,
+Warba, Commercial Bank of Kuwait. BH: NBB, BBK, Ahli United, Bahrain Islamic
+Bank, KFH Bahrain (and Bank ABC). OM: Bank Muscat, Bank Dhofar, National Bank
+of Oman, Sohar International, Bank Nizwa, HSBC Oman. The banks added in this
+pass have body (bank-name) identities only: no SMS sender id for them is
+verified, so none was invented. Bank Muscat gained `BKMUSCAT`, the one extra
+sender the research records.
+
+Notification packages, pending Play verification and deliberately absent from
+`trusted-bank-notification-packages.ts`: `com.vipera.ts.starter.QNB` (QNB; a
+third-party audit site only, and QNB is multi-country). No package id for any
+other QA/KW/BH/OM bank has been verified.
+
+**Posting.** One decision, `decideGulfNeighbourPosting` in
+`src/lib/gulf-neighbour-alerts.ts`, called from the same unproven-format seam
+as every other non-launch alert (`parseUniversalPostedEvent` in
+`launch-alert-parser.ts`, reached from `parse` and `parseUnproven`):
+
+- It applies only when the router proves a single QA/KW/BH/OM route through a
+  recognised institution. Anything else keeps the generic best-effort policy
+  unchanged.
+- **Best-effort (QA, KW, BH, and Oman beyond the one template).** The alert is
+  read by the SAME launch grammar the UAE and Saudi Arabia use (`parseSms`),
+  not by a new one. The market's own spellings are first rewritten to the ISO
+  code, so the grammar reads them as exact foreign money (KWD keeps 12345
+  thousandths). Its offline-table conversion and any balance snapshot are
+  discarded. The row posts only when every check passes: the setting is on;
+  the shared non-completed-wording guard and a limit-change guard find
+  nothing; the alert states a completion verb; the grammar reads one
+  transaction in exactly the market's currency; the universal reader, scoped
+  to the same market, reads the same amount and does not contradict the
+  direction; the date is not in the future; and foreign money has a dated
+  rate on the device. The row carries the existing `bestEffort` marker
+  ("Auto-added — check"). Anything else from such an institution goes to
+  Review, with the amount filled once the currency is routed. The generic
+  universal reader may not post it alone.
+- **Certified (Oman, Bank Muscat, one family).** `om-bank-muscat-card-purchase-v1`
+  (`gulf-neighbour-templates.ts`, also registered in
+  `universal-template-certification.ts`) anchors the whole Arabic debit-card
+  purchase alert: OMR on one side of a three-decimal amount, a masked account,
+  the merchant (numeric terminal ids stripped), a `YYYY/MM/DD hh:mm:ss` date
+  and the balance sentence, with nothing before or after. Delivered by Bank
+  Muscat's own SMS sender, it posts without the marker, following the ANZ and
+  US certified-template precedent. The same wording, future-date, money and FX
+  guards still apply. Outside AE/SA every SMS path honours the best-effort
+  setting, so this one does too. Bank Muscat's deposit, transfer, payment, ATM
+  and refund alerts have no real sample, so they have no template. They take
+  the marked grammar path or Review.
+- **Heading-only notices** (an amount and a card with no completion verb) are
+  never booked here. They could be booked only inside an exact per-bank
+  certified template with a masked card and no negation, pending, OTP or promo
+  wording, and no such template exists for these markets.
+- **Never posted**, each pinned in English and Arabic: OTP and verification
+  codes, declines, pending holds, promotions and cashback offers, balance-only
+  notices, limit changes, mini-statements, bills and amounts due, future-dated
+  alerts and template-shaped alerts carrying OTP wording.
+
+Fixtures: `scripts/test/fixtures/gulf-neighbour-alert-fixtures.js`, written in
+Wafra's own words with fictional values and per-row provenance (`synthetic`
+for every QA/KW/BH row; `community-derived` structure for OM-BM-1).
+
 A routed alert reads numeric dates with its market's convention from the
 country model (`src/lib/country.ts`, keyed by the same ISO code): Australia,
 Brazil, Mexico and Singapore are day-first; Canada stays undecided, so an
@@ -268,6 +368,12 @@ Channels: Android SMS inbox and delivery, Android bank-app notifications
 (`ios-local-capture.ts`) builds its parser sessions with the policy disabled,
 so it stays review-only for unverified formats. None of this is a claim of verified coverage for any bank outside
 AE/SA.
+
+An alert a recognised Qatari, Kuwaiti, Bahraini or Omani institution routes is
+decided by `decideGulfNeighbourPosting` instead (see "Gulf neighbours" above).
+It reads the alert with the launch grammar as it is, without widening it or
+changing what it reads for AE/SA, under the same setting, marker, wording,
+future-date and FX guardrails. What it declines stays in Review.
 
 ## AI reading of unrecognised alerts (optional on-device model)
 
