@@ -232,6 +232,9 @@ jobs:
 
       - name: Preserve browser screenshots and verification results
         if: always()
+        # Evidence only: a full artifact quota must not fail a run whose tests
+        # passed. A test failure still fails the job at End-to-end above.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: browser-evidence-${{ github.sha }}
