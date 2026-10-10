@@ -415,7 +415,7 @@ async function historyCardTests() {
   // run URL resolves by installed name.
   const savedHistoryUrl = process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL;
   const savedPagedFlag = process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA;
-  process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL = 'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v6-20260919/Wafra-History-v6.signed.shortcut';
+  process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL = 'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d';
   delete process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA;
   try {
     const production = execute('src/lib/ios-history-setup.ts', {
@@ -424,7 +424,7 @@ async function historyCardTests() {
     eq(
       'iOS history: a production build runs the name Apple installs for its configured record',
       [production.IOS_HISTORY_SHORTCUT_NAME, new URL(production.historyShortcutRunUrl()).searchParams.get('name')],
-      ['Wafra-History-v6.signed', 'Wafra-History-v6.signed'],
+      ['Wafra-History-v2-typed-date.signed', 'Wafra-History-v2-typed-date.signed'],
     );
     eq(
       'iOS history: Continue re-runs a paged graph because it resumes its saved cursor',
@@ -436,10 +436,15 @@ async function historyCardTests() {
     eq(
       'iOS history: the paged module and the public-record check name the same installed Shortcut',
       [
-        /Wafra-History-v6\.signed\.shortcut': 'Wafra-History-v6\.signed'/.test(pagedSetup),
-        /installedName: 'Wafra-History-v6\.signed'/.test(releaseCheck),
+        /bc30c7ae89d6494c9ef0aea1a666d72d': 'Wafra-History-v2-typed-date\.signed'/.test(pagedSetup),
+        /installedName: 'Wafra-History-v2-typed-date\.signed'/.test(releaseCheck),
       ],
       [true, true],
+    );
+    eq(
+      'iOS history: a link into the private repository is no longer a known record',
+      production.normalizeIosHistoryShortcutUrl('https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v6-20260919/Wafra-History-v6.signed.shortcut'),
+      null,
     );
     eq(
       'iOS history: an unknown record falls back to the generator name',

@@ -180,12 +180,17 @@ async function historyNativeModule() {
   return (await import('../../modules/wafra-message-history')).default;
 }
 
-/** The installed History Shortcut name: the bundled v8 file when this build ships it. */
-async function historyShortcutName(): Promise<string> {
+/** Whether this build ships the History Shortcut file inside the app. */
+async function bundledHistoryShortcut(): Promise<boolean> {
   try {
     const capture = (await import('../../modules/wafra-live-capture')).default;
-    return typeof capture?.getHistoryShortcutURL === 'function' ? BUNDLED_HISTORY_SHORTCUT_NAME : IOS_HISTORY_SHORTCUT_NAME;
-  } catch { return IOS_HISTORY_SHORTCUT_NAME; }
+    return typeof capture?.getHistoryShortcutURL === 'function';
+  } catch { return false; }
+}
+
+/** The installed History Shortcut name: the bundled v8 file when this build ships it. */
+async function historyShortcutName(): Promise<string> {
+  return await bundledHistoryShortcut() ? BUNDLED_HISTORY_SHORTCUT_NAME : IOS_HISTORY_SHORTCUT_NAME;
 }
 
 /**
@@ -309,8 +314,16 @@ export default function ImportSmsScreen() {
   // A forged Android deep link must remain the ordinary inbox/paste screen.
   // The native history session exists only in the Apple module graph.
   const history = Platform.OS === 'ios' ? historyParam : undefined;
+  // Current builds install the bundled History Shortcut from the paging screen.
+  const [bundledHistory, setBundledHistory] = useState(false);
+  useEffect(() => {
+    if (Platform.OS !== 'ios') return;
+    let alive = true;
+    void bundledHistoryShortcut().then((bundled) => { if (alive) setBundledHistory(bundled); });
+    return () => { alive = false; };
+  }, []);
   const usePagedHistory = Platform.OS === 'ios' && Number.parseInt(String(Platform.Version), 10) >= 26 &&
-    pagedHistoryEnabled();
+    pagedHistoryEnabled(bundledHistory);
   const { state, getStateSnapshot, importBatch, ensureDurable, stageReviewAlerts } = useStore();
 
   // The sheet reads the ordinary surface tokens; the band is the green flow band.

@@ -4914,6 +4914,23 @@ struct WafraBankSenderRegistryTests {
   }
 
   {
+    // The History Shortcut ships inside the app; a failed status read must
+    // not hide it behind "unavailable".
+    const native = {
+      async getCaptureStatus() { throw new Error('status-read-failed'); },
+      async setCaptureEnabled() {},
+      async getHistoryShortcutURL() { return 'file:///app/Wafra%20History%20v8.shortcut'; },
+    };
+    const harness = controllerHarness({ dependencyOverrides: { getNativeModule: () => native } });
+    await harness.controller.send({ type: 'load' });
+    const model = harness.controller.getModel();
+    ok('setup controller: a failed status read still offers the bundled History Shortcut',
+      model.failure === 'load' && model.bundledHistorySupported === true,
+      JSON.stringify(model));
+    harness.controller.dispose();
+  }
+
+  {
     const harness = controllerHarness({ nativeAvailable: false });
     await harness.controller.send({ type: 'load' });
     ok('setup controller: a supported iPhone with a missing module fails closed',

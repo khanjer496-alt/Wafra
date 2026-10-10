@@ -4,7 +4,6 @@ import React from 'react';
 import { WafraMark } from '@/marketing/wafra-mark.web';
 import styles from '@/marketing/home.module.css';
 import {
-  ANDROID_APK_URL,
   FAQ_SCHEMA,
   MARKETING_DESCRIPTION,
   MARKETING_TITLE,
@@ -157,19 +156,8 @@ export default function MarketingHome() {
                 <span>Join TestFlight</span>
                 <span className={styles.actionArrow} aria-hidden="true">↗</span>
               </a>
-              <a
-                className={styles.secondaryAction}
-                href={ANDROID_APK_URL}
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Download the Wafra Android test APK"
-              >
-                <span className={styles.actionPlatform}>Android</span>
-                <span>Download APK</span>
-                <span className={styles.actionArrow} aria-hidden="true">↓</span>
-              </a>
             </div>
-            <p className={styles.betaNote}>Public beta builds · Android installs outside Google Play</p>
+            <p className={styles.betaNote}>Public iPhone beta on TestFlight</p>
             <p className={styles.languageNote}>Available in English and Arabic.</p>
           </div>
 

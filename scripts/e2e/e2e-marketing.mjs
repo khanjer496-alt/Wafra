@@ -90,10 +90,7 @@ try {
       await page.keyboard.press('Enter');
     }
     assert.equal(await page.locator('a[href="https://testflight.apple.com/join/jbwzCgZ6"]').count(), 1);
-    const android = page.getByRole('link', { name: 'Download the Wafra Android test APK', exact: true });
-    const apkUrl = await android.getAttribute('href');
-    assert.match(apkUrl, /^https:\/\/github\.com\/khanjer496-alt\/Wafra\/releases\/download\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\.apk$/);
-    if (process.env.EXPECTED_APK_URL) assert.equal(apkUrl, process.env.EXPECTED_APK_URL);
+    assert.equal(await page.locator('a[href$=".apk"]').count(), 0);
     const tour = page.locator('#inside-wafra');
     assert.equal(await tour.getByRole('heading', { name: 'Home', exact: true }).count(), 1);
     assert.equal(await tour.getByRole('heading', { name: 'Spending', exact: true }).count(), 1);

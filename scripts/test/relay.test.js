@@ -261,15 +261,8 @@ async function queueItem(id, row, publicKey) {
       relay.normalizeShortcutInstallUrl(
         'https://www.icloud.com/shortcuts/85bd1e080e5849b591049eccffb9a3a1',
       ), null);
-    eq('shortcut URL: a signed beta file is rejected by default',
+    eq('shortcut URL: a file in the private GitHub repository is rejected',
       relay.normalizeShortcutInstallUrl(betaFile), null);
-    eq('shortcut URL: the explicit beta gate accepts only the Wafra release asset',
-      relay.normalizeShortcutInstallUrl(betaFile, true), betaFile);
-    eq('shortcut URL: the beta gate does not accept arbitrary GitHub files',
-      relay.normalizeShortcutInstallUrl(
-        'https://raw.githubusercontent.com/other/repo/3f43134e280bfe7b0cd82aabe55a664139debf1a/assets/shortcuts/Wafra%20Capture.shortcut',
-        true,
-      ), null);
     ok('legacy charge alerts are unavailable without a relay pairing',
       relay.isLegacyShortcutCaptureActive(null) === false);
     ok('generic pairing is not proof that the old Shortcut automation exists',

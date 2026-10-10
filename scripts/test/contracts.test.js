@@ -996,7 +996,7 @@ function ktSources(dir) {
       env: {
         ...otaEnv,
         EXPO_PUBLIC_WAFRA_SHORTCUT_URL: captureUrl,
-        EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: historyUrl,
+        ...(historyUrl === undefined ? {} : { EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: historyUrl }),
       },
       encoding: 'utf8',
     },
@@ -1005,6 +1005,13 @@ function ktSources(dir) {
   const historyUrl = 'https://www.icloud.com/shortcuts/e0ba137df950416e8c8cba8528287d95';
   ok('OTA accepts distinct canonical current Shortcut artifacts',
     otaStatus(captureUrl, historyUrl) === 0);
+  ok('OTA accepts no History link: the app installs its bundled History Shortcut',
+    otaStatus(captureUrl, undefined) === 0);
+  ok('OTA rejects a History link into the private repository',
+    otaStatus(
+      captureUrl,
+      'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v6-20260919/Wafra-History-v6.signed.shortcut',
+    ) !== 0);
   ok('OTA rejects a Shortcut URL with an explicit port that runtime refuses',
     otaStatus(
       'https://www.icloud.com:8443/shortcuts/9a85d5f8b44d416181a76e68fcdf569d',

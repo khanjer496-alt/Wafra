@@ -149,13 +149,13 @@ test('Arabic help and errors remain usable without Shortcuts or device automatio
   assert.match(s.text(), /تطبيق الاختصارات غير متاح/);
 });
 
-test('a blocked scheme probe cannot block the signed HTTPS install; actual runs still fail safely', async () => {
-  const v4 = 'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v4-20260919/Wafra-History-v4.signed.shortcut';
-  const s = await screen({ available: false, installUrl: v4 });
+test('a blocked scheme probe cannot block the HTTPS install; actual runs still fail safely', async () => {
+  const record = 'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d';
+  const s = await screen({ available: false, installUrl: record });
   s.button('Add the history Shortcut').onPress(); await s.flush();
-  assert.deepEqual(s.urls, [v4]);
+  assert.deepEqual(s.urls, [record]);
   s.button('I added it — start import').onPress(); await s.flush();
-  assert.deepEqual(s.urls, [v4]); assert.deepEqual(s.handoffs, []);
+  assert.deepEqual(s.urls, [record]); assert.deepEqual(s.handoffs, []);
   assert.match(s.text(), /Shortcuts is not available/);
 });
 test('return without route origin restores first-run appearance; Settings retains normal presentation', async () => {
