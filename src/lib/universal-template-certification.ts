@@ -1,6 +1,7 @@
 import type { UniversalMarket } from '@/lib/alert-market-pack-types';
 import { alertMarketPack } from '@/lib/alert-market-packs';
 import { assessUniversalEventConfidence } from '@/lib/universal-confidence';
+import { certifiedLatamTemplateId } from '@/lib/latam-alert-templates';
 import type { UniversalBankEvent } from '@/lib/universal-types';
 
 export type UniversalTemplateCertificationDecision =
@@ -207,6 +208,11 @@ export function certifyUniversalTemplate(
     rule.family === event.family &&
     (rule.direction === 'either' || rule.direction === event.direction) &&
     rule.source.test(source));
+  // Brazil, Colombia, Mexico and Peru: an exact per-bank template whose own
+  // guards proved the posting (including an authorisation-time card alert with
+  // a masked card) and whose institution the router identified independently.
+  const latamTemplate = match ? null : certifiedLatamTemplateId(input.source, input.market, input.institution, event);
+  if (latamTemplate) return { decision: 'automatic', templateId: latamTemplate, reason: 'certified-template' };
   if (!match) {
     if (semanticGeneralizationIsSafe(input, confidence)) {
       return { decision: 'semantic-generalized', templateId: null, reason: 'semantic-generalization' };

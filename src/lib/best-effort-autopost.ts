@@ -170,6 +170,15 @@ const NON_COMPLETED_WORDING: readonly RegExp[] = [
   /\bstatement\b|\bminimum\s+(?:amount\s+)?(?:due|payment)\b|\btotal\s+(?:amount\s+)?due\b|\bamount\s+due\b|\bdue\s+(?:date|on|by)\b|\bpayment\s+due\b|\bbill\s+(?:is\s+)?(?:due|generated|ready)\b|\breminder\b|\boverdue\b|\brelev[ée](?!\p{L})|\bkontoauszug\b|\bextracto\b|\bestratto\s+conto\b|\brekeningoverzicht\b|\bfatura\s+(?:fechada|vence)\b|كشف\s+(?:ال)?حساب|مستحق|تذكير|الحد\s+الأدنى/iu,
   // future / scheduled / mandates
   /\bwill\s+be\s+(?:debited|charged|deducted|paid|processed|collected|credited)\b|\bscheduled\b|\bupcoming\b|\bstanding\s+(?:instruction|order)\b|\bmandate\b|\bpre-?debit\b|\bauto-?pay\s+(?:set|scheduled|registered)\b|\bsera\s+(?:d[ée]bit[ée]|pr[ée]lev[ée])|\bwird\s+(?:abgebucht|belastet)\b|\bser[áa]\s+(?:cargad[oa]|debitad[oa])\b|\bsar[àa]\s+addebitat[oa]\b|\bwordt\s+afgeschreven\b|سيتم/iu,
+  // Latin American Spanish and Brazilian Portuguese: purchase/security codes,
+  // two-step confirmations ("foi você?", "responde SI"), scheduled Pix,
+  // bills and reminders, loan and limit offers, unfinished transactions.
+  /(?<!\p{L})(?:c[óo]digo\s+(?:de\s+)?(?:seguridad|autorizaci[óo]n|autoriza[çc][ãa]o|confirmaci[óo]n|confirma[çc][ãa]o|acceso|acesso|compra|transacci[óo]n)|c[óo]d\.\s*de\s+seguridad|tu\s+c[óo]digo|es\s+tu\s+c[óo]digo|clave\s+din[áa]mica|token)(?!\p{L})/iu,
+  /(?<!\p{L})(?:foi\s+voc[êe]|fuiste\s+t[úu]|reconoces|reconhece|responda|responde\s+(?:s[íi]|sim|no|n[ãa]o|cancelar)|confirma\s+(?:tu|su)\s+(?:pago|compra|transacci[óo]n|operaci[óo]n)|confirme)(?!\p{L})/iu,
+  /(?<!\p{L})(?:agendad[oa]|programad[oa]|se\s+(?:cargar|debitar)[áa]|en\s+proceso|vence(?:\s+amanh[ãa])?|vencimento|pago\s+m[íi]nimo|tienes\s+un\s+pago|completa\s+tu\s+pago|fa[çc]a\s+o\s+pagamento|j[áa]\s+pode\s+agendar|novo\s+boleto|sua\s+fatura\s+(?:de\s+R\$\s?[\d.,]+\s+)?(?:est[áa]\s+dispon[íi]vel|fechou|vence)|a\s+fatura\s+do\s+cart[ãa]o\s+fechou)(?!\p{L})/iu,
+  // Loan OFFERS only: a loan repayment ("pagamento do empréstimo") is real money.
+  /(?<!\p{L})(?:empr[ée]stimo\s+foi\s+aprovado|pr[ée]-?aprovad[oa]|pr[ée]-?aprobad[oa]|cr[ée]dito\s+(?:de\s+R?\$\s?[\d.,]+\s+)?dispon[íi]vel|simul(?:ar|e)|limite\s+subiu|cupo\s+disponible|ganhe|garanta|cupom|invista|meses\s+sin\s+intereses)(?!\p{L})/iu,
+  /(?<!\p{L})(?:n[ãa]o\s+(?:conclu[íi]d[oa]|aprovad[oa]|autorizad[oa]|realizad[oa])|no\s+fue\s+posible|no\s+(?:aprobad[oa]|autorizad[oa]))(?!\p{L})/iu,
 ];
 
 /** Temporary holds/charges are never a completed movement. */
@@ -261,6 +270,25 @@ const resolvePrincipalMoney = (
 };
 
 /**
+ * AMOUNT SHAPE MAY ONLY BLOCK. Mexican pesos print `1,234.56`; a dot used for
+ * grouping (`$45.000`) or a comma decimal (`$1.234,56`) in an alert read as
+ * MXN is the Colombian shape and goes to Review rather than becoming 45 or
+ * 45,000 MXN. A Colombian card purchase under 50 pesos is almost certainly a
+ * mangled `45.000`. Neither rule can route or change an amount.
+ */
+const amountShapeConflict = (
+  source: string,
+  event: UniversalBankEvent,
+  principal: UniversalMoney,
+): boolean => {
+  const span = event.amount.spans.length === 1 ? event.amount.spans[0] : null;
+  const figure = span ? source.slice(span.start, span.end).match(/\d[\d.,]*\d|\d/u)?.[0] ?? '' : '';
+  if (principal.currency === 'MXN' && (/\d\.\d{3}(?!\d)/u.test(figure) || /,\d{2}$/u.test(figure))) return true;
+  return principal.currency === 'COP' && event.family === 'purchase' && principal.exponent === 2 &&
+    /^\d+$/.test(principal.minorUnits) && BigInt(principal.minorUnits) < 5000n;
+};
+
+/**
  * Exactly one principal figure. Balance/limit/due observations are separate
  * roles and allowed; a second transaction figure or an unlabelled one is not,
  * except a figure in the ledger currency beside a foreign charge (the card's
@@ -323,6 +351,7 @@ export function decideBestEffortAutoPost(input: BestEffortInput): BestEffortDeci
 
   const principal = resolvePrincipalMoney(input.source, event, input.country, input.routedMarket);
   if (typeof principal === 'string') return review(principal);
+  if (amountShapeConflict(input.source, event, principal)) return review('amount-unclear');
   if (hasCompetingAmounts(event, principal, input.ledgerCurrency)) return review('competing-amounts');
 
   const observedDay = localIsoDay(input.observedAt);

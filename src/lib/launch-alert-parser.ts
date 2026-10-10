@@ -18,6 +18,7 @@ import { nonPostingReason, parseSmsBatch, type ParsedSms } from '@/lib/sms-parse
 import type { CategoryId } from '@/lib/types';
 import { CURRENCY_SYMBOL_CANDIDATES, currencyMinorUnits } from '@/lib/currency-metadata';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
+import { latamPolicySource, matchLatamTemplate } from '@/lib/latam-alert-templates';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { FxQuote } from '@/lib/fx';
 import { cachedReferenceQuote, convertForeignConfirmation, quoteFitsDay } from '@/lib/fx-rates';
@@ -27,7 +28,7 @@ type CurrencyAliasMap = NonNullable<UniversalParseContext['currencyAliases']>;
 
 // Cheap supersets used only to decide whether market routing must run. The
 // parser/reviewer remains the authority; matching one of these never imports.
-export const REVIEW_MONEY_HINT = /\b(?:USD|GBP|EUR|INR|QAR|KWD|BHD|OMR|EGP|JOD|CAD|AUD|BRL|MXN|SGD|Rs\.?|KD|BD|RO|R\.O\.|LE|L\.E\.|JD)\b|[$€£₹]|ر\.ق|د\.ك|د\.ب|ر\.ع|ج\.م|د\.[أا]/iu;
+export const REVIEW_MONEY_HINT = /\b(?:USD|GBP|EUR|INR|QAR|KWD|BHD|OMR|EGP|JOD|CAD|AUD|BRL|MXN|SGD|Rs\.?|KD|BD|RO|R\.O\.|LE|L\.E\.|JD)\b|\b(?:COP|PEN)\s?\d|(?<![\p{L}\p{N}])S\/\.?\s?\d|[$€£₹]|ر\.ق|د\.ك|د\.ب|ر\.ع|ج\.م|د\.[أا]/iu;
 const LAUNCH_MONEY_HINT = /\b(?:AED|Dhs?\.?|SAR|SR)\b|د\.?[إا]\.?|دراهم|درهم|ر\.?\s?س\.?|ريال/iu;
 
 export const hasBankAlertMoneyHint = (source: string): boolean =>
@@ -67,7 +68,10 @@ const UNIVERSAL_FIELD_LIST_HINT =
 const shouldTryUniversalPosting = (source: string, sender: string): boolean =>
   hasUniversalInstitutionSender(sender) ||
   UNIVERSAL_POSTED_EVENT_HINT.test(source) ||
-  (!!detectLaunchMarketFromSender(sender) && UNIVERSAL_FIELD_LIST_HINT.test(source));
+  (!!detectLaunchMarketFromSender(sender) && UNIVERSAL_FIELD_LIST_HINT.test(source)) ||
+  // An exact Latin American bank template ("Te yapeó S/ 20", "DAVIVIENDA:
+  // Compra . Aprobado(a)") carries none of the generic posting verbs.
+  matchLatamTemplate(source, { sender }) !== null;
 
 // Review eligibility needs financial-alert context, not merely a currency in
 // a personal conversation. None of these words grants automatic import.
@@ -82,7 +86,8 @@ export const inspectGenericBankEventForReview = (
   source: string,
   sender = '',
 ): UniversalBankEvent | null => {
-  if (!hasGenericBankAlertContext(source, sender)) return null;
+  // An exact LatAm bank template is bank-alert context in its own right.
+  if (!hasGenericBankAlertContext(source, sender) && !matchLatamTemplate(source, { sender })) return null;
   const event = inspectUniversalBankEvent(source, { sender, dateOrder: activeCountryDateOrder() });
   if (event.decision !== 'review') return null;
   const hasGroundedMoney =
@@ -456,8 +461,11 @@ const parseUniversalPostedEvent = (
       raw: source.trim(),
     };
   }
+  // Yape's payee-side receipt check is not an OTP, and is never kept: the
+  // wording guard and the stored excerpt see the message without it.
+  const policySource = latamPolicySource(readSource, { sender });
   const decision = decideBestEffortAutoPost({
-    source: readSource,
+    source: policySource,
     event,
     enabled: context.enabled,
     country: context.country,
@@ -512,7 +520,7 @@ const parseUniversalPostedEvent = (
     snapshotKind: null,
     categoryGuess,
     categoryDeliberate: classified.deliberate,
-    raw: source.trim(),
+    raw: (readSource === source ? policySource : source).trim(),
   };
 };
 
@@ -688,7 +696,8 @@ export const createLaunchAlertSession = ({
     // create a valid ledger row. Bank context is still consumed by the review
     // pipeline after this function returns null. The person's own country
     // may supply money a bare "R" or a currency-less UPI alert states.
-    if (!hasBankAlertMoneyHint(source) && !countryMoneyHint(source, bestEffort.country)) return null;
+    if (!hasBankAlertMoneyHint(source) && !countryMoneyHint(source, bestEffort.country) &&
+      !matchLatamTemplate(source, { sender })) return null;
     if (!shouldTryUniversalPosting(source, sender)) return null;
     /**
      * ONE PUBLIC PARSER, WITH A MATURE LOCAL EVIDENCE PACK.
@@ -754,7 +763,10 @@ export const createLaunchAlertSession = ({
     // this path (it is no launch-bank sender) and must not post as an
     // "unverified format" either.
     if (isBnplProviderSource(sender)) return null;
-    if (!hasBankAlertMoneyHint(source) && !countryMoneyHint(source, bestEffort.country)) return null;
+    // Nu Colombia's transfer-in prints a bare amount; only its exact template
+    // (with Nu Colombia identity) makes that money.
+    if (!hasBankAlertMoneyHint(source) && !countryMoneyHint(source, bestEffort.country) &&
+      !matchLatamTemplate(source, { sender })) return null;
     if (!shouldTryUniversalPosting(source, sender)) return null;
     const routedMarket = inspection?.route.decision === 'single' ? inspection.route.market : null;
     // Same rule as parse(): see sharedSenderOutsideGulf.

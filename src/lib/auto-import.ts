@@ -59,6 +59,7 @@ import { bestEffortAutoPostEnabled, decideBestEffortAutoPost } from '@/lib/best-
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { UniversalBankEvent } from '@/lib/universal-types';
 import { certifyUniversalTemplate } from '@/lib/universal-template-certification';
+import { latamPolicySource } from '@/lib/latam-alert-templates';
 import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
 import { captureTrace, captureTraceEnabled } from '@/lib/capture-trace';
 import { measureRuntimeOperation } from '@/lib/runtime-performance';
@@ -821,7 +822,8 @@ function parsedUniversalPosting(
     snapshotKind: null,
     categoryGuess: suggestion.category,
     categoryDeliberate: !suggestion.needsReview,
-    raw: source,
+    // Yape's receipt check never reaches the stored excerpt.
+    raw: latamPolicySource(source),
   };
 }
 
@@ -1634,9 +1636,11 @@ export async function scanInbox(
         // through the same best-effort policy (and setting) as every other
         // unproven alert, and carries the "Auto-added — check" marker. The
         // ledger-currency gate below still refuses any foreign row here.
+        // Yape's receipt check is neither an OTP nor something to keep.
+        const policySource = latamPolicySource(source, { sender });
         const semanticDecision = certification?.decision === 'semantic-generalized' && universalEvent
           ? decideBestEffortAutoPost({
-              source,
+              source: policySource,
               event: universalEvent,
               enabled: bestEffortAutoPostEnabled(),
               country: getActiveCountry(),
