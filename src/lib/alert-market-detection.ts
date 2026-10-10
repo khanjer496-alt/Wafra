@@ -77,9 +77,10 @@ const GRAMMAR_MARKERS: Partial<Record<DetectedMarket, RegExp>> = {
   BR: /\b(?:pix|transfer[eê]ncia\s+ted)\b/iu,
   MX: /\b(?:spei|codi|dimo)\b/iu,
   SG: /\b(?:paynow|fast\s+transfer|sgqr)\b/iu,
-  // Bre-B (and its "llave" keys), PSE, TransfiYa, Botón Bancolombia and the
-  // T.Deb/T.Cred card abbreviations; Yape, Plin and CCI.
-  CO: /\b(?:bre-?b|pse|transfiya|bot[oó]n\s+bancolombia)\b|\bllave\b[\s\S]{0,80}\btransfer|\btransfer[\s\S]{0,80}\bllave\b|\bt\.(?:deb|cred(?:ito)?)\b/iu,
+  // Bre-B (and its "llave" keys), TransfiYa, Botón Bancolombia and the
+  // T.Deb/T.Cred card abbreviations; Yape, Plin and CCI. PSE is separate
+  // (CO_PSE below): "PSE&G" and "PSE HOLDINGS" are US payees.
+  CO: /\b(?:bre-?b|transfiya|bot[oó]n\s+bancolombia)\b|\bllave\b[\s\S]{0,80}\btransfer|\btransfer[\s\S]{0,80}\bllave\b|\bt\.(?:deb|cred(?:ito)?)\b/iu,
   PE: /\b(?:yape(?:aste|ó|o|aron)?|plin(?:eó|earon)?|cci)(?=$|[^\p{L}\p{N}])/iu,
 };
 
@@ -91,6 +92,12 @@ const UNIQUE_SYMBOL_MARKETS: readonly { pattern: RegExp; market: DetectedMarket 
   { pattern: /(?<![\p{L}\p{N}])S\/\.?\s?\d/u, market: 'PE' },
 ];
 const BARE_DOLLAR = /(?<![\p{L}$])\$\s?\d/u;
+// Colombia's PSE rail counts only with Colombian context: a COP figure, a
+// Colombian issuer, or Spanish payment wording next to it.
+const CO_PSE = /(?<![\p{L}\p{N}&])pse(?![\p{L}\p{N}&])/iu;
+const CO_PSE_CONTEXT = /\bCOP\s?\d|\d\s?COP\b|\b(?:bancolombia|davivienda|daviplata|nequi|colpatria|av\s+villas|banco\s+de\s+bogot[aá]|colombia)\b|(?<![\p{L}])(?:pagaste|pago|pagos|compra|transferencia|transferiste|cuenta|ahorros|desde|realizaste|exitos[oa]|aprobad[oa]|tu|su)(?![\p{L}])/iu;
+const grammarMatches = (market: DetectedMarket, marker: RegExp | undefined, source: string): boolean =>
+  !!marker?.test(source) || (market === 'CO' && CO_PSE.test(source) && CO_PSE_CONTEXT.test(source));
 const DOLLAR_RAIL_MARKETS: ReadonlySet<DetectedMarket> = new Set(['CO', 'MX']);
 
 const regionMarket = (hint?: string | null): DetectedMarket | null => {
@@ -157,7 +164,7 @@ const evidenceFor = (input: AlertMarketRoutingInput): MarketRouteEvidenceSummary
   }
   for (const market of currencyMarkets(source)) add(market, 'currency');
   for (const [market, marker] of Object.entries(GRAMMAR_MARKERS)) {
-    if (!marker?.test(source)) continue;
+    if (!grammarMatches(market as DetectedMarket, marker, source)) continue;
     add(market as DetectedMarket, 'grammar');
     // "SPEI ... $500.00" or "Bre-B ... $45.000": the domestic rail says which
     // dollar this is. Neither alone routes anything.

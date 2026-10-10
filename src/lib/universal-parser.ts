@@ -429,9 +429,10 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
   const reviewable = hasAmount || hasStatement || hasBalance;
   const decision = reviewable && status !== 'failed' && !authentication && !pending && !promotion ? 'review' : 'ignore';
   // Banks with synthetic-only evidence (Plin, Interbank, BBVA Perú, Santander
-  // México, Citibanamex) are identified for Review but never post.
+  // México, Citibanamex) are identified for Review but never post. Only with
+  // that market's context: "Interbank transfer of $500.00" is a US alert.
   const reviewOnlyIssuer = status === 'posted' && REVIEW_ONLY_ISSUER_HINT.test(`${source} ${context.sender ?? ''}`) &&
-    isReviewOnlyLatamInstitution(source, context.sender);
+    isReviewOnlyLatamInstitution(source, context.sender, context.market);
   if (reviewOnlyIssuer) status = 'unknown';
   const issues = [
     ...money.amount.issues,

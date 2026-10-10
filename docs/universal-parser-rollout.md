@@ -109,7 +109,11 @@ per-bank templates in `src/lib/latam-alert-templates.ts` whose mode is
 `approval`, and only when every one of these holds:
 
 1. the whole message matches that bank's anchored template (prefix, field
-   order and terminator; only the captured merchant/name/key text varies);
+   order and terminator; only the captured merchant/name/key text varies).
+   Captured free text never crosses a sentence boundary: it holds no `!`,
+   `?`, `¡`, `¿` or line break, and a dot only when a non-space follows it
+   (`LIVRARIA.COM.BR`), so "MERCADO SOL. Compra estornada." cannot hide its
+   second sentence inside the merchant;
 2. the template captured a masked card or account (its last four digits);
 3. nothing outside the captured merchant, name, key, place and concept text
    is negation (`não`, `no`, `rechaz…`, `recus…`, `negad…`, `insuficiente`,
@@ -118,7 +122,18 @@ per-bank templates in `src/lib/latam-alert-templates.ts` whose mode is
    pending, hold or scheduled wording (`pendiente`, `pendente`, `en proceso`,
    `retenido`, `agendado`, `programado`, `será`), a code, OTP or token, a loan,
    offer, limit or promotion (`empréstimo`, `pré-aprovado`, `cashback`,
-   `cupom`, `limite`, `cupo`, `meses sin intereses`) or a link.
+   `cupom`, `limite`, `cupo`, `meses sin intereses`) or a link;
+4. the captured merchant, name, key, place and concept text ITSELF holds no
+   veto either: a negation phrase (`no realizada`, `não aprovada`), a
+   decline, reversal or cancellation (`revers…`, `cancel…`, `estorn…`,
+   `reembols…`), a confirmation (`foi você`, `responda`), pending or
+   scheduled wording (`pendiente`, `aguarde`, `agendamento`, `amanhã`,
+   `mañana`, `em análise`) or a code. A hit there sends the alert to Review;
+   it is never blanked out. Only a stand-alone `no`/`não` and offer words are
+   left to the outside scan, so a merchant called "NO FRILLS" still posts.
+   The outside scan blanks each capture by its exact span (match indices,
+   with an ordered left-to-right fallback), never the first occurrence of the
+   same text elsewhere in the message.
 
 Approval wording with no masked card (Bradesco Cartões, C6 Bank, Itaucard,
 PicPay, the short "BB: Compra aprovada", "Compra aprovada no seu Nubank",
@@ -132,7 +147,7 @@ behaviour above (refuse or Review).
 
 Templates whose own verb states completion ("Compraste", "Retiraste", "Você
 enviou", "Você recebeu", "Yapeaste", "te envió un pago") are mode `posted` and
-pass the same guards. A guard failure returns the message to the generic
+pass the same guards. An outside-text guard failure returns the message to the generic
 parser, never to a template posting.
 
 A posted template event is not an import by itself. From SMS and history it
@@ -146,12 +161,12 @@ is not issuer proof for that unmarked path.
 
 | Country | Bank | Posts (mode `posted` / `approval`, masked card where approval) | Review only |
 |---|---|---|---|
-| BR | Nubank | card purchase (incl. instalment total), debit/credit "acaba de comprar", Pix out, Pix/transfer in, estorno, card-bill payment (as a transfer), boleto paid (purchase, never a guessed utility) | feed line "… com Nubank final", "Compra aprovada no seu Nubank" |
+| BR | Nubank | card purchase (incl. instalment total), debit/credit "acaba de comprar", Pix out, Pix/transfer in, estorno, card-bill payment (a "Card payment" transfer), boleto paid (purchase, never a guessed utility) | feed line "… com Nubank final", "Compra aprovada no seu Nubank" |
 | BR | Itaú | card purchase "Compra aprovada no cartão final NNNN", Pix out/in, TED in | Itaucard purchase (no masked card) |
 | BR | Banco do Brasil, Caixa, Inter, Santander Brasil | card purchase with "final NNNN"; Inter Pix in | BB short form, Inter Mastercard |
 | BR | Mercado Pago | "Você pagou" (incl. "próxima fatura" card purchase), reembolso | — |
 | BR | Bradesco, C6 Bank, PicPay | — | card purchase/payment (no masked card) |
-| CO | Bancolombia | credit/debit purchase (incl. "asociada a T.Cred"), ATM, transfer out (account, Bre-B), QR and Botón payments, PSE/bill payment, card-bill payment and cash advance (both as transfers), transfer in (account, llave), payroll (salary) | the older "le informa" generation |
+| CO | Bancolombia | credit/debit purchase (incl. "asociada a T.Cred"), ATM, transfer out (account, Bre-B), QR and Botón payments, PSE/bill payment, card-bill payment (the card-payment row for the paid card), cash advance (an own-account transfer), transfer in (account, llave), payroll (salary) | the older "le informa" generation |
 | CO | Davivienda | purchase and advance "Aprobado(a) … Tarjeta *NNNN" (time only; the date is the observation day) | — |
 | CO | Nequi, DaviPlata | "Pagaste … con Nequi"; P2P out/in (Nequi needs Nequi identity); DaviPlata "paso plata" | — |
 | CO | Nu Colombia (needs "Nu Colombia" identity) | "Compra aprobada … terminada en NNNN"; transfer in with a bare `d.ddd.ddd,dd` amount | body-only purchase line |
@@ -164,12 +179,24 @@ is not issuer proof for that unmarked path.
 Interbank, BBVA Perú, Scotiabank Perú, Santander México and Citibanamex are
 identified for routing and Review only: any generic "posted" reading of an
 alert naming them is downgraded to Review (`institution-review-only`).
+"Interbank" and "Plin" need Peruvian context for this (soles, PEN, "Perú",
+a Peru route or the bank's own sender): "Interbank transfer of $500.00" from
+a US bank is not a Peruvian alert and keeps its US behaviour.
+
+The Spanish and Portuguese non-completion wording the best-effort policy
+refuses (purchase and security codes, "token", "confirme", "foi você",
+scheduled Pix, bills, loan offers, "em análise", "en análisis", "en
+proceso") applies only to an alert routed to BR/CO/MX/PE, a person in one of
+those countries, or money already resolved as BRL/COP/MXN/PEN. A US alert
+paid "with your Apple Pay token" or at a cafe called CONFIRME is unaffected.
 
 ### Money and routing
 
 - A bare `$` is COP only after the alert is routed to Colombia and MXN only
   after it is routed to Mexico, by bank identity, a domestic rail (Bre-B,
-  PSE, TransfiYa; SPEI, CoDi, DiMo) or an ISO code. Nu, Mercado Pago, BBVA,
+  PSE, TransfiYa; SPEI, CoDi, DiMo) or an ISO code. PSE counts only with
+  Colombian context (a COP figure, a Colombian issuer or Spanish payment
+  wording): "PSE&G" and "PSE HOLDINGS" are US payees. Nu, Mercado Pago, BBVA,
   Santander, Scotiabank and Itaú are shared brands and route only with a
   country-qualified signal (`R$`, `S/`, an ISO code, "BBVA México", "BBVA
   Perú", "Nu Colombia", "Santander" next to `R$`). The person's own country
@@ -204,8 +231,12 @@ A Bancolombia cash advance arrives as the advance and a matching "Recibiste
 una transferencia". Both read as transfers of the same amount (the advance as
 an outgoing transfer from the card, the receipt as an incoming transfer), so
 neither can be counted as income, and the import planner's duplicate guard
-drops a rescan of either. Card-bill payments (Bancolombia, Nubank) are
-transfers too, never spending.
+drops a rescan of either; the advance carries the app's "Own account
+transfer" title. Card-bill payments are never spending: Bancolombia's names
+the paid card, so it becomes the app's card-payment row for that card
+(`Card •NNNN payment`, the debit side; notifications hand it to the
+card-payment adapter rather than certifying it), and Nubank's, which names no
+card, is a transfer titled "Card payment".
 
 ### Android notification packages (pending verification)
 

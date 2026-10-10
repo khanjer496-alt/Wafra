@@ -18,7 +18,7 @@ import { nonPostingReason, parseSmsBatch, type ParsedSms } from '@/lib/sms-parse
 import type { CategoryId } from '@/lib/types';
 import { CURRENCY_SYMBOL_CANDIDATES, currencyMinorUnits } from '@/lib/currency-metadata';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
-import { latamPolicySource, matchLatamTemplate } from '@/lib/latam-alert-templates';
+import { isLatamOwnCardPayment, latamOwnTransferTitle, latamPolicySource, matchLatamTemplate } from '@/lib/latam-alert-templates';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { FxQuote } from '@/lib/fx';
 import { cachedReferenceQuote, convertForeignConfirmation, quoteFitsDay } from '@/lib/fx-rates';
@@ -223,7 +223,10 @@ const universalCardObligation = (
   observedAt?: number,
 ): Omit<ParsedSms, 'raw' | 'bestEffort'> | null => {
   if (event.decision !== 'review' || nonPostingReason(source)) return null;
-  if (NOT_CARD_OBLIGATION.test(source) || !CREDIT_CARD_WORDS.test(source)) return null;
+  // An exact Latin American own card-bill template ("Pagaste ... en la tarjeta
+  // de credito *4321 desde la cuenta *1234") names the paid card in Spanish.
+  const latamCardPayment = event.family === 'card-payment' && isLatamOwnCardPayment(source);
+  if (NOT_CARD_OBLIGATION.test(source) || (!CREDIT_CARD_WORDS.test(source) && !latamCardPayment)) return null;
   const today = localIsoDay(observedAt);
   if (event.status === 'failed' || event.issues.some((issue) =>
     issue === 'authentication-not-posting' || issue === 'pending-not-posting' || issue === 'failed-not-posting')) return null;
@@ -261,7 +264,7 @@ const universalCardObligation = (
     (event.direction === 'credit' || event.direction === 'debit')) {
     // The same completed-money guard every other worldwide posting passes:
     // reversed, processing, scheduled or auto-debit-later payments are not paid.
-    if (hasNonCompletedWording(source)) return null;
+    if (hasNonCompletedWording(source, country)) return null;
     const amount = ledgerMinorOf(event.amount, country, ledgerCurrency, ledgerExponent);
     if (!amount) return null;
     const date = event.transactionDate.evidence === 'explicit' ? event.transactionDate.value : null;
@@ -487,8 +490,11 @@ const parseUniversalPostedEvent = (
   // Transfer ownership is a separate reconciliation question: keep the
   // structural title so a recipient name cannot turn it into spending.
   const classified = universalRowCategory(source, event, context.overrides ?? {}, context.routedMarket ?? context.country);
+  // A LatAm card-bill payment or own-account move keeps the app's own title
+  // for it ("Card payment", "Own account transfer"), never a payee's.
+  const ownTitle = transfer ? latamOwnTransferTitle(policySource, { sender }) : null;
   const merchant = transfer
-    ? classified.category === 'salary' ? 'Salary' : event.direction === 'credit' ? 'Incoming transfer' : 'Outgoing transfer'
+    ? ownTitle ?? (classified.category === 'salary' ? 'Salary' : event.direction === 'credit' ? 'Incoming transfer' : 'Outgoing transfer')
     : classified.merchant
       ? classified.merchant
       : event.family === 'cash-withdrawal'

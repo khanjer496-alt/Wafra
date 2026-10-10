@@ -59,7 +59,7 @@ import { bestEffortAutoPostEnabled, decideBestEffortAutoPost } from '@/lib/best-
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { UniversalBankEvent } from '@/lib/universal-types';
 import { certifyUniversalTemplate } from '@/lib/universal-template-certification';
-import { latamPolicySource } from '@/lib/latam-alert-templates';
+import { latamOwnTransferTitle, latamPolicySource } from '@/lib/latam-alert-templates';
 import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
 import { captureTrace, captureTraceEnabled } from '@/lib/capture-trace';
 import { measureRuntimeOperation } from '@/lib/runtime-performance';
@@ -796,8 +796,9 @@ function parsedUniversalPosting(
   // structural title so the ledger keeps this row in the unresolved-transfer
   // bucket until it can prove own vs external; a recipient name must not turn a
   // transfer into ordinary spending merely because merchant extraction found it.
+  // A LatAm card-bill payment or own-account move keeps its own-product title.
   const merchant = event.family === 'transfer'
-    ? fallbackTitle
+    ? latamOwnTransferTitle(source) ?? fallbackTitle
     : suggestion.merchant || explicitMerchant || fallbackTitle;
   const instrument = event.instrument.evidence === 'explicit' ? event.instrument.value : null;
   const card = instrument?.last4

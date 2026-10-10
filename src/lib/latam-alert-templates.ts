@@ -23,7 +23,11 @@ import { missingUniversalField } from '@/lib/universal-types';
  *  - the template captured a masked card or account (its last four digits);
  *  - nothing outside the captured merchant/name text is negation, a two-step
  *    confirmation ("confirme", "responda"), pending/hold/scheduled wording,
- *    a decline, a code/OTP/token, a loan, an offer or a promotion, or a link.
+ *    a decline, a code/OTP/token, a loan, an offer or a promotion, or a link;
+ *  - the captured merchant/name text itself carries no negation phrase,
+ *    reversal, confirmation, pending/scheduled wording or code (a hit sends
+ *    the alert to Review rather than being blanked), and no capture runs
+ *    across a sentence boundary into the next sentence.
  *
  * Templates whose own verb states completion ("Compraste", "Você enviou",
  * "Retiraste") are `mode: 'posted'` and pass through the same guards.
@@ -42,6 +46,7 @@ export type LatamMarket = Extract<UniversalMarket, 'BR' | 'CO' | 'MX' | 'PE'>;
 type LatamCurrency = 'BRL' | 'COP' | 'MXN' | 'PEN';
 type TemplateFamily = 'purchase' | 'transfer' | 'cash-withdrawal' | 'refund';
 type TemplateMode = 'posted' | 'approval' | 'review';
+export type OwnTransferKind = 'card-payment' | 'own-account';
 
 interface LatamTemplate {
   /** Stable code-owned id; never derived from message text. */
@@ -60,11 +65,22 @@ interface LatamTemplate {
   mode: TemplateMode;
   currency: LatamCurrency;
   pattern: RegExp;
-  /** A transfer between the person's own products (card bill, cash advance). */
-  ownTransfer?: true;
+  /**
+   * A movement between the person's own products. `card-payment` settles a
+   * card bill (a card payment, never spending); `own-account` moves money
+   * between the person's own card and account (a Bancolombia cash advance).
+   */
+  ownTransfer?: OwnTransferKind;
   /** Yape's payee-side receipt check: exempt from the code guard, never kept. */
   receiptCode?: true;
 }
+
+// Free text (a merchant, a name, a place, a concept) never crosses a sentence
+// boundary: no `!`, `?`, `¡`, `¿` or line break, and a dot only when a
+// non-space follows it ("LIVRARIA.COM.BR", "S.A.S"). Otherwise "MERCADO SOL.
+// Compra estornada" would be read as the merchant and its veto never seen.
+const freeText = (group: string, max: number): string =>
+  String.raw`(?<${group}>[^\s.!?¡¿](?:[^.!?¡¿\n\r\u2028\u2029]|\.(?!\s|$)){0,${max}}?)`;
 
 // Template grammar tokens. A literal space means one or more whitespace
 // characters and `~` means optional whitespace, so line-wrapped notifications
@@ -74,9 +90,14 @@ const TOKENS: Readonly<Record<string, string>> = {
   '{COP}': String.raw`(?:\$|COP)~(?<amount>\d[\d.,]*\d|\d)`,
   '{MXN}': String.raw`\$~(?<amount>\d[\d.,]*\d|\d)(?: MXN)?`,
   '{PEN}': String.raw`S/\.?~(?<amount>\d[\d.,]*\d|\d)`,
-  '{M}': String.raw`(?<merchant>\S.{0,78}?)`,
-  '{N}': String.raw`(?<name>\S.{0,78}?)`,
-  '{P}': String.raw`(?<payee>\S.{0,78}?)`,
+  '{M}': freeText('merchant', 78),
+  '{N}': freeText('name', 78),
+  '{P}': freeText('payee', 78),
+  '{PLACE}': freeText('place', 40),
+  '{CONCEPT}': freeText('concept', 60),
+  '{FROM}': freeText('from', 40),
+  '{TO}': freeText('to', 40),
+  '{KEY}': String.raw`(?<key>[^\s!?¡¿]{1,40})`,
   '{DATE}': String.raw`(?<date>\d{2}/\d{2}/\d{4})`,
   '{DATE2}': String.raw`(?<date>\d{2}/\d{2}/\d{2})`,
   '{TIME}': String.raw`(?<time>\d{2}:\d{2}(?::\d{2})?)`,
@@ -86,11 +107,21 @@ const TOKENS: Readonly<Record<string, string>> = {
   '{NU}': String.raw`(?:Nubank(?:~[:·-])? )?`,
 };
 
+// Match indices (the `d` flag) give each capture's exact span. Feature-detected
+// once: an engine without them falls back to an ordered walk (blankFreeText).
+const HAS_MATCH_INDICES = (() => {
+  try {
+    return !!(new RegExp('a', 'd').exec('a') as (RegExpExecArray & { indices?: unknown }) | null)?.indices;
+  } catch {
+    return false;
+  }
+})();
+
 const compile = (template: string): RegExp => {
   let source = template;
   for (const [token, value] of Object.entries(TOKENS)) source = source.split(token).join(value);
   source = source.replace(/ /g, String.raw`\s+`).replace(/~/g, String.raw`\s*`);
-  return new RegExp(String.raw`^\s*${source}\s*$`, 'u');
+  return new RegExp(String.raw`^\s*${source}\s*$`, HAS_MATCH_INDICES ? 'du' : 'u');
 };
 
 const t = (
@@ -131,11 +162,11 @@ const TEMPLATES: readonly LatamTemplate[] = [
     String.raw`{NU}Estorno de compra de {BRL} em {M} creditado\.?`),
   // A card-bill payment settles the card; it is never spending or income.
   t('br-nubank-card-bill-payment-v1', 'BR', 'nubank-brasil', 'self', 'transfer', 'debit', 'posted',
-    String.raw`{NU}Pagamento da fatura de {BRL} confirmado\.?`, { ownTransfer: true }),
+    String.raw`{NU}Pagamento da fatura de {BRL} confirmado\.?`, { ownTransfer: 'card-payment' }),
   t('br-nubank-card-bill-payment-v1', 'BR', 'nubank-brasil', 'self', 'transfer', 'debit', 'posted',
-    String.raw`{NU}Recebemos o pagamento de {BRL} da sua fatura\.?`, { ownTransfer: true }),
+    String.raw`{NU}Recebemos o pagamento de {BRL} da sua fatura\.?`, { ownTransfer: 'card-payment' }),
   t('br-nubank-card-bill-payment-v1', 'BR', 'nubank-brasil', 'self', 'transfer', 'debit', 'posted',
-    String.raw`{NU}Recebemos o pagamento da sua fatura de {BRL}\.?`, { ownTransfer: true }),
+    String.raw`{NU}Recebemos o pagamento da sua fatura de {BRL}\.?`, { ownTransfer: 'card-payment' }),
   // A boleto can settle anything (a shop, a loan, a utility): never guessed as a bill.
   t('br-nubank-boleto-paid-v1', 'BR', 'nubank-brasil', 'self', 'purchase', 'debit', 'posted',
     String.raw`{NU}O pagamento do seu boleto no valor de {BRL} foi realizado com sucesso\.?`),
@@ -186,44 +217,44 @@ const TEMPLATES: readonly LatamTemplate[] = [
   t('co-bancolombia-card-purchase-v1', 'CO', 'bancolombia', 'self', 'purchase', 'debit', 'posted',
     String.raw`Bancolombia: Compraste {COP} en {M}, el {DATE} a las {TIME}\. Esta compra esta asociada a T\.(?:Cred|Deb) \*(?<last4>\d{4})\.{FOOT}`),
   t('co-bancolombia-atm-v1', 'CO', 'bancolombia', 'self', 'cash-withdrawal', 'debit', 'posted',
-    String.raw`Bancolombia: Retiraste {COP} en (?<place>\S.{0,40}?) de tu T\.Deb \*{1,2}(?<last4>\d{4}) el {DATE} a las {TIME}\.{FOOT}`),
+    String.raw`Bancolombia: Retiraste {COP} en {PLACE} de tu T\.Deb \*{1,2}(?<last4>\d{4}) el {DATE} a las {TIME}\.{FOOT}`),
   t('co-bancolombia-transfer-out-v1', 'CO', 'bancolombia', 'self', 'transfer', 'debit', 'posted',
     String.raw`Bancolombia: Transferiste {COP} desde tu cuenta \*?(?<last4>\d{4}) a la cuenta \*(?<counterpart>\d{4,16}) el {DATE} a las {TIME}\.{FOOT}`),
   t('co-bancolombia-breb-out-v1', 'CO', 'bancolombia', 'self', 'transfer', 'debit', 'posted',
-    String.raw`Bancolombia: {N}, transferiste {COP} a la llave (?<key>\S{1,40}) desde tu cuenta \*(?<last4>\d{4}) a {P} el {DATE2} a las {TIME}\.{FOOT}`),
+    String.raw`Bancolombia: {N}, transferiste {COP} a la llave {KEY} desde tu cuenta \*(?<last4>\d{4}) a {P} el {DATE2} a las {TIME}\.{FOOT}`),
   t('co-bancolombia-qr-payment-v1', 'CO', 'bancolombia', 'self', 'purchase', 'debit', 'posted',
-    String.raw`Bancolombia: {N} pagaste {COP} por codigo QR desde tu cuenta \*(?<last4>\d{4}) a la llave (?<key>\S{1,40}) el {DATE} a las {TIME}\.{FOOT}`),
+    String.raw`Bancolombia: {N} pagaste {COP} por codigo QR desde tu cuenta \*(?<last4>\d{4}) a la llave {KEY} el {DATE} a las {TIME}\.{FOOT}`),
   // Botón Bancolombia says "Transferiste" but pays a merchant.
   t('co-bancolombia-boton-payment-v1', 'CO', 'bancolombia', 'self', 'purchase', 'debit', 'posted',
     String.raw`Bancolombia: Transferiste {COP} por Boton Bancolombia a {M} desde producto \*(?<last4>\d{4})\. {DATE} {TIME}\.?{FOOT}`),
   // Before the bill template: both open with "Pagaste".
   t('co-bancolombia-card-payment-v1', 'CO', 'bancolombia', 'self', 'transfer', 'debit', 'posted',
     String.raw`Bancolombia: Pagaste {COP} en la tarjeta de credito \*(?<card>\d{4}) desde la cuenta \*(?<last4>\d{4}), el {DATE} {TIME}\.{FOOT}`,
-    { ownTransfer: true }),
+    { ownTransfer: 'card-payment' }),
   t('co-bancolombia-bill-payment-v1', 'CO', 'bancolombia', 'self', 'purchase', 'debit', 'posted',
     String.raw`Bancolombia: Pagaste {COP} a {M} desde tu producto \*?(?<last4>\d{4}) el {DATE} {TIME}\.{FOOT}`),
   // The bank also sends "Recibiste una transferencia" for the same money; both
   // legs are transfers, so the pair can never be counted as income.
   t('co-bancolombia-cash-advance-v1', 'CO', 'bancolombia', 'self', 'transfer', 'debit', 'posted',
-    String.raw`Bancolombia: Hiciste un avance de {COP} en tu (?<place>\S.{0,40}?) el {TIME} {DATE} desde tu T\.Credito \*(?<last4>\d{4}) a la cuenta \*(?<counterpart>\d{4})\.{FOOT}`,
-    { ownTransfer: true }),
+    String.raw`Bancolombia: Hiciste un avance de {COP} en tu {PLACE} el {TIME} {DATE} desde tu T\.Credito \*(?<last4>\d{4}) a la cuenta \*(?<counterpart>\d{4})\.{FOOT}`,
+    { ownTransfer: 'own-account' }),
   t('co-bancolombia-transfer-in-v1', 'CO', 'bancolombia', 'self', 'transfer', 'credit', 'posted',
     String.raw`Bancolombia: Recibiste una transferencia por {COP} de {N} en tu cuenta \*{1,2}(?<last4>\d{4}), el {DATE} a las {TIME}\.{FOOT}`),
   t('co-bancolombia-breb-in-v1', 'CO', 'bancolombia', 'self', 'transfer', 'credit', 'posted',
-    String.raw`Bancolombia: {N}, recibiste una transferencia de {P} por {COP} en tu cuenta \*(?<last4>\d{4}) conectada a la llave (?<key>\S{1,40}) el {DATE2} a las {TIME}\.{FOOT}`),
+    String.raw`Bancolombia: {N}, recibiste una transferencia de {P} por {COP} en tu cuenta \*(?<last4>\d{4}) conectada a la llave {KEY} el {DATE2} a las {TIME}\.{FOOT}`),
   t('co-bancolombia-payroll-v1', 'CO', 'bancolombia', 'self', 'transfer', 'credit', 'posted',
     String.raw`Bancolombia: Recibiste un pago de Nomina de {N} por {COP} en tu cuenta de Ahorros el {DATE} a las {TIME}\.{FOOT}`),
   // The older "le informa" generation has community and synthetic evidence only.
   t('co-bancolombia-legacy-purchase-v1', 'CO', 'bancolombia', 'self', 'purchase', 'debit', 'review',
     String.raw`Bancolombia le informa [Cc]ompra por {COP}(?: con T\.(?:Deb|Cred) \*(?<last4>\d{4}))? en {M}(?: a las {TIME}\. {DATE})?(?:\. Saldo {BAL_COP})?\.?`),
   t('co-bancolombia-legacy-atm-v1', 'CO', 'bancolombia', 'self', 'cash-withdrawal', 'debit', 'review',
-    String.raw`Bancolombia le informa retiro por {COP} en (?<place>\S.{0,40}?) a las {TIME}\. {DATE}(?:\. Saldo {BAL_COP})?\.?`),
+    String.raw`Bancolombia le informa retiro por {COP} en {PLACE} a las {TIME}\. {DATE}(?:\. Saldo {BAL_COP})?\.?`),
   t('co-bancolombia-legacy-transfer-in-v1', 'CO', 'bancolombia', 'self', 'transfer', 'credit', 'review',
     String.raw`Bancolombia le informa transferencia recibida de {N} por {COP}(?: el {DATE})?\.?`),
   t('co-davivienda-purchase-v1', 'CO', 'davivienda', 'self', 'purchase', 'debit', 'approval',
     String.raw`DAVIVIENDA: Compra~\.~Aprobado\(a\),~{COP},~Tarjeta \*(?<last4>\d{4}),~Hora {TIME},~Lugar~{M}~\.`),
   t('co-davivienda-advance-v1', 'CO', 'davivienda', 'self', 'cash-withdrawal', 'debit', 'approval',
-    String.raw`DAVIVIENDA: Avance~\.~Aprobado\(a\),~{COP},~Tarjeta \*(?<last4>\d{4}),~Hora {TIME},~Lugar~(?<place>\S.{0,40}?)~\.`),
+    String.raw`DAVIVIENDA: Avance~\.~Aprobado\(a\),~{COP},~Tarjeta \*(?<last4>\d{4}),~Hora {TIME},~Lugar~{PLACE}~\.`),
   t('co-nequi-payment-v1', 'CO', 'nequi', 'self', 'purchase', 'debit', 'posted',
     String.raw`(?:Nequi:? )?Pagaste {COP} a {M} con Nequi(?:\. Tu saldo disponible es {BAL_COP})?\.?`),
   t('co-nequi-send-v1', 'CO', 'nequi', 'required', 'transfer', 'debit', 'posted',
@@ -249,9 +280,9 @@ const TEMPLATES: readonly LatamTemplate[] = [
   t('mx-bbva-atm-v1', 'MX', 'bbva-mexico', 'required', 'cash-withdrawal', 'debit', 'posted',
     String.raw`(?:BBVA México:? )?Retiraste {MXN} en Cajero(?: Automático| BBVA)?\.?`),
   t('mx-bbva-transfer-out-v1', 'MX', 'bbva-mexico', 'required', 'transfer', 'debit', 'posted',
-    String.raw`(?:BBVA México:? )?Transferencia enviada por {MXN} a {N}(?: concepto (?<concept>\S.{0,60}?))?\.?`),
+    String.raw`(?:BBVA México:? )?Transferencia enviada por {MXN} a {N}(?: concepto {CONCEPT})?\.?`),
   t('mx-bbva-transfer-in-v1', 'MX', 'bbva-mexico', 'required', 'transfer', 'credit', 'posted',
-    String.raw`(?:BBVA México:? )?Transferencia recibida por {MXN} de {N}(?: concepto (?<concept>\S.{0,60}?))?\.?`),
+    String.raw`(?:BBVA México:? )?Transferencia recibida por {MXN} de {N}(?: concepto {CONCEPT})?\.?`),
   // Headings ("Compra por"), approvals without a card, a cardless-withdrawal
   // code and an own-account move with no side: Review only.
   t('mx-bbva-purchase-v1', 'MX', 'bbva-mexico', 'required', 'purchase', 'debit', 'review',
@@ -263,7 +294,7 @@ const TEMPLATES: readonly LatamTemplate[] = [
   t('mx-bbva-cardless-withdrawal-v1', 'MX', 'bbva-mexico', 'required', 'cash-withdrawal', 'debit', 'review',
     String.raw`(?:BBVA México:? )?Retiro sin tarjeta por {MXN} en Cajero BBVA el {DATE}\.?`),
   t('mx-bbva-own-transfer-v1', 'MX', 'bbva-mexico', 'required', 'transfer', 'debit', 'review',
-    String.raw`(?:BBVA México:? )?Traspaso entre tus cuentas por {MXN} de (?<from>\S.{0,40}?) a (?<to>\S.{0,40}?)\.?`),
+    String.raw`(?:BBVA México:? )?Traspaso entre tus cuentas por {MXN} de {FROM} a {TO}\.?`),
 
   // ── Peru ── S/ is unique to Peru.
   t('pe-yape-received-v1', 'PE', 'yape', 'self', 'transfer', 'credit', 'posted',
@@ -301,25 +332,41 @@ const TEMPLATES: readonly LatamTemplate[] = [
 const PREFILTER = /R\$|\$|COP|S\/|te envi[oóí]|\d,\d{2}/u;
 
 // ── Guards ──────────────────────────────────────────────────────────────────
-// Applied to the message with the captured free text (merchant, names, keys,
-// places, concepts) blanked, so "NO FRILLS STORE" or a payee called PROMO
-// cannot veto, and any of these words anywhere else can.
+// Two scans. The message with the captured free text (merchant, names, keys,
+// places, concepts) blanked must carry none of the words below, so "NO
+// FRILLS STORE" or a payee called PROMO cannot veto on a stand-alone "no" or
+// an offer word. The captured text ITSELF is scanned separately for the
+// phrases that can never be part of a payee (CAPTURE_VETO): a hit there sends
+// the alert to Review instead of being blanked away.
 // Portuguese "no" is a preposition ("no cartão", "no valor de"), so the
 // stand-alone negation words differ by language.
-const NEGATION = /rechaz|recus|negad[oa]|insuficient|declin|fallid|falh|cancelad|anulad|revertid|estornad|bloquead|bloquea/iu;
+const NEGATION = /rechaz|recus|negad[oa]|insuficient|declin|fallid|falh|cancel|anulad|anulaci|revertid|revers|estornad|bloquead|bloquea/iu;
 const NEGATION_PT = /(?<![\p{L}\p{N}])(?:n[ãa]o|nunca|jamais)(?![\p{L}\p{N}])/iu;
 const NEGATION_ES = /(?<![\p{L}\p{N}])(?:no|nunca|jam[aá]s|ni)(?![\p{L}\p{N}])/iu;
 const CONFIRMATION = /(?<![\p{L}])(?:confirme|confirmar|confirma(?=\s)|responda|responde|reconoces|reconhece|autorizas|autoriza\s+esta|sim)(?![\p{L}])|foi\s+voc[eê]|fuiste\s+t[uú]|toque\s+aqui|clique|haz\s+clic|ingresa\s+aqu|[?¿]/iu;
 // Bancolombia's help footer opens with "¿Dudas?"; it asks nothing about the payment.
 const HELP_QUESTION = /¿\s*dudas\s*\?/giu;
-const PENDING_OR_HOLD = /pendent|pendient|en\s+proceso|em\s+processamento|em\s+an[aá]lise|retenid|reservad|pr[eé]-?autoriz|preautoriz|agendad|programad|(?<![\p{L}])ser[aá](?![\p{L}])|se\s+(?:cargar|debitar|abonar)[aá]|en\s+espera|aguardando|por\s+aceptar|(?<![\p{L}])(?:acepta|aceita|hold)(?![\p{L}])/iu;
+const PENDING_OR_HOLD = /pendent|pendient|en\s+proceso|em\s+processamento|em\s+an[aá]lise|en\s+an[aá]lisis|retenid|reservad|pr[eé]-?autoriz|preautoriz|agendad|agendament|programad|(?<![\p{L}])ser[aá](?![\p{L}])|se\s+(?:cargar|debitar|abonar)[aá]|en\s+espera|aguard|por\s+aceptar|(?<![\p{L}])(?:acepta|aceita|hold|amanh[ãa]|ma[ñn]ana)(?![\p{L}])/iu;
 const CODE_OR_OTP = /c[óo]d(?:igo|\.)|token|(?<![\p{L}])otp(?![\p{L}])|clave|senha|contrase[ñn]a|verificaci|verifica[çc]/iu;
 const OFFER_OR_LOAN = /empr[eé]stimo|pr[eé]-?aprova|pr[eé]-?aproba|cashback|cup[oó]n|cupom|promo|oferta|ganhe|ganha|gan[aá]ste|garant|simul|invist|invierte|meses\s+sin\s+intereses|desconto|descuento|l[ií]mite|(?<![\p{L}])cupo(?![\p{L}])|pr[eé]stamo|cr[eé]dito\s+(?:pre|dispon)/iu;
 const LINK = /https?:\/\/|www\.|(?<![\p{L}])bit\.ly|\.(?:com|co|pe|mx|br)\/\S/iu;
 // "por codigo QR" names the payment channel; it is not a security code.
 const QR_CHANNEL = /c[óo]digo\s+QR/giu;
+// Inside captured free text: negation PHRASES (a bare "no"/"não" may be part
+// of a name), and refund or return wording that cannot belong to a payee of
+// a purchase or transfer.
+const CAPTURE_NEGATION = /(?<![\p{L}])(?:no|n[ãa]o)\s+(?:fue\s+|foi\s+)?(?:realizad|aprobad|aprovad|autorizad|procesad|efetuad|efectuad|conclu|exitos|reconoc|reconhec|completad)/iu;
+const CAPTURE_REFUND = /estorn|reembols|devolu[cç]/iu;
 
-const FREE_TEXT_GROUPS = ['merchant', 'name', 'payee', 'key', 'place', 'concept', 'from', 'to', 'brand', 'product'] as const;
+const FREE_TEXT_GROUPS: ReadonlySet<string> = new Set(
+  ['merchant', 'name', 'payee', 'key', 'place', 'concept', 'from', 'to', 'brand', 'product']);
+
+/** A veto inside captured free text: the alert goes to Review, never posts. */
+const captureVetoed = (value: string): boolean => {
+  const text = value.replace(QR_CHANNEL, ' ');
+  return NEGATION.test(text) || CAPTURE_NEGATION.test(text) || CAPTURE_REFUND.test(text) ||
+    CONFIRMATION.test(text) || PENDING_OR_HOLD.test(text) || CODE_OR_OTP.test(text);
+};
 
 export interface LatamTemplateMatch {
   templateId: string;
@@ -339,7 +386,10 @@ export interface LatamTemplateMatch {
   instrumentKind: UniversalInstrument['kind'] | null;
   transactionDate: string | null;
   balance: UniversalMoney | null;
-  ownTransfer: boolean;
+  /** A movement between the person's own products, by kind; null otherwise. */
+  ownTransfer: OwnTransferKind | null;
+  /** For an own card-bill payment: the last four of the card being paid. */
+  paidCard: string | null;
   /**
    * The message with Yape's receipt check removed. Callers hand this, never
    * the original, to wording guards and to anything that might be stored.
@@ -427,14 +477,40 @@ const identified = (
   return review.decision === 'identified' && review.institution === template.institution;
 };
 
-const blankGroups = (text: string, match: RegExpExecArray): string => {
-  let out = text;
-  for (const group of FREE_TEXT_GROUPS) {
-    const value = match.groups?.[group];
-    if (!value) continue;
-    const at = out.indexOf(value, match.index);
-    if (at >= 0) out = out.slice(0, at) + ' '.repeat(value.length) + out.slice(at + value.length);
+type IndexedMatch = RegExpExecArray & { indices?: { groups?: Record<string, [number, number] | undefined> } };
+
+/**
+ * The exact [start, end) span of every captured free-text group. With match
+ * indices this is the engine's own answer. Without them, the groups are walked
+ * in pattern order (named groups are listed left to right), each searched
+ * only after the previous group's end, so a merchant called "Compra" can never
+ * be located inside the template's own "Compra aprovada" heading.
+ */
+const freeTextSpans = (source: string, match: IndexedMatch, useIndices: boolean): [number, number][] => {
+  const groups = match.groups ?? {};
+  const indexed = useIndices ? match.indices?.groups : undefined;
+  if (indexed) {
+    return Object.keys(groups).flatMap((name) => {
+      const span = indexed[name];
+      return FREE_TEXT_GROUPS.has(name) && span && span[1] > span[0] ? [span] : [];
+    });
   }
+  const spans: [number, number][] = [];
+  let cursor = match.index;
+  for (const name of Object.keys(groups)) {
+    const value = groups[name];
+    if (!value) continue;
+    const at = source.indexOf(value, cursor);
+    if (at < 0) continue;
+    if (FREE_TEXT_GROUPS.has(name)) spans.push([at, at + value.length]);
+    cursor = at + value.length;
+  }
+  return spans;
+};
+
+const blankSpans = (text: string, spans: readonly [number, number][]): string => {
+  let out = text;
+  for (const [start, end] of spans) out = out.slice(0, start) + ' '.repeat(end - start) + out.slice(end);
   return out;
 };
 
@@ -467,11 +543,20 @@ export function matchLatamTemplate(
   source: string,
   context: LatamTemplateContext = {},
 ): LatamTemplateMatch | null {
+  return matchTemplates(source, context, HAS_MATCH_INDICES);
+}
+
+function matchTemplates(
+  source: string,
+  context: LatamTemplateContext,
+  useIndices: boolean,
+  onGuardText?: (text: string) => void,
+): LatamTemplateMatch | null {
   if (typeof source !== 'string' || source.length > 1024 || !PREFILTER.test(source)) return null;
   const sender = context.sender?.slice(0, 256) ?? '';
   for (const template of TEMPLATES) {
     if (context.market && context.market !== template.market) continue;
-    const match = template.pattern.exec(source);
+    const match = template.pattern.exec(source) as IndexedMatch | null;
     if (!match || !identified(source, template, sender, context.institution)) continue;
     const groups = match.groups ?? {};
     const parsed = parseFigure(template.currency, groups.amount ?? '');
@@ -489,11 +574,15 @@ export function matchLatamTemplate(
     const policySource = template.receiptCode && groups.codeClause
       ? source.replace(groups.codeClause, '').trim()
       : source;
-    const guardText = blankGroups(template.receiptCode && groups.codeClause
+    const spans = freeTextSpans(source, match, useIndices);
+    const guardText = blankSpans(template.receiptCode && groups.codeClause
       ? source.replace(groups.codeClause, ' '.repeat(groups.codeClause.length))
-      : source, match);
+      : source, spans);
     const last4 = groups.last4 && /^\d{4}$/.test(groups.last4) ? groups.last4 : null;
+    onGuardText?.(guardText);
     const guarded = guardsPass(guardText, template.market);
+    // A veto inside the merchant/name text is never blanked away: Review.
+    const captureVeto = spans.some(([start, end]) => captureVetoed(source.slice(start, end)));
     // Approval wording counts as posted only inside its exact template, with a
     // masked card or account and no vetoing wording (the user decision).
     const certified = template.mode === 'posted' || (template.mode === 'approval' && last4 !== null);
@@ -505,7 +594,7 @@ export function matchLatamTemplate(
       institution: template.institution,
       family: template.family,
       direction: template.direction,
-      status: certified && guarded && !amountIssue ? 'posted' : 'unknown',
+      status: certified && guarded && !captureVeto && !amountIssue ? 'posted' : 'unknown',
       money: parsed === 'conflict' ? null : money(template.currency, parsed.minor),
       amountIssue,
       merchant: template.family === 'transfer' ? null : cleanMerchant(groups.merchant),
@@ -516,7 +605,8 @@ export function matchLatamTemplate(
         : null,
       transactionDate: isoDate(groups.date),
       balance: balanceParsed && balanceParsed !== 'conflict' ? money(template.currency, balanceParsed.minor) : null,
-      ownTransfer: !!template.ownTransfer,
+      ownTransfer: template.ownTransfer ?? null,
+      paidCard: template.ownTransfer === 'card-payment' && groups.card && /^\d{4}$/.test(groups.card) ? groups.card : null,
       policySource,
     };
   }
@@ -526,6 +616,27 @@ export function matchLatamTemplate(
 /** The message a wording guard or a stored excerpt may see (Yape code removed). */
 export const latamPolicySource = (source: string, context: LatamTemplateContext = {}): string =>
   matchLatamTemplate(source, context)?.policySource ?? source;
+
+/**
+ * The structural title of a POSTED own-product transfer, matching how the app
+ * already names these rows: a card-bill payment is a "Card payment" (or, with
+ * the paid card's digits, the card-payment row itself) and a move between the
+ * person's own card and account is an "Own account transfer". Never a payee.
+ */
+export const latamOwnTransferTitle = (
+  source: string,
+  context: LatamTemplateContext = {},
+): 'Card payment' | 'Own account transfer' | null => {
+  const match = matchLatamTemplate(source, context);
+  if (!match || match.status !== 'posted' || !match.ownTransfer) return null;
+  return match.ownTransfer === 'card-payment' ? 'Card payment' : 'Own account transfer';
+};
+
+/** True for an exact, posted own card-bill payment template that names the paid card. */
+export const isLatamOwnCardPayment = (source: string, context: LatamTemplateContext = {}): boolean => {
+  const match = matchLatamTemplate(source, context);
+  return !!match && match.status === 'posted' && match.ownTransfer === 'card-payment' && match.paidCard !== null;
+};
 
 const explicit = <T>(value: T, source: string, text: string | null): UniversalField<T> => {
   const at = text ? source.indexOf(text) : -1;
@@ -561,10 +672,14 @@ export function latamTemplateEvent(source: string, match: LatamTemplateMatch): U
     ...(match.balance ? [{ role: 'balance' as const, field: balance }] : []),
   ];
   const posted = match.status === 'posted';
+  // An own card-bill payment that names the paid card is the app's
+  // card-payment event (settled by the card-payment adapter), with that card
+  // as its instrument; without the card's digits it stays an own transfer.
+  const cardPayment = match.ownTransfer === 'card-payment' && match.paidCard !== null;
   return {
     version: 1,
     decision: 'review',
-    family: match.family,
+    family: cardPayment ? 'card-payment' : match.family,
     status: match.status,
     direction: match.direction,
     amount,
@@ -578,9 +693,11 @@ export function latamTemplateEvent(source: string, match: LatamTemplateMatch): U
       : missingUniversalField(),
     dueDate: missingUniversalField(),
     statementDate: missingUniversalField(),
-    instrument: match.last4 && match.instrumentKind
-      ? { value: { kind: match.instrumentKind, last4: match.last4 }, evidence: 'explicit', spans: [], alternatives: [], issues: [] }
-      : missingUniversalField(),
+    instrument: cardPayment && match.paidCard
+      ? { value: { kind: 'card', last4: match.paidCard }, evidence: 'explicit', spans: [], alternatives: [], issues: [] }
+      : match.last4 && match.instrumentKind
+        ? { value: { kind: match.instrumentKind, last4: match.last4 }, evidence: 'explicit', spans: [], alternatives: [], issues: [] }
+        : missingUniversalField(),
     observations,
     issues: [
       ...(posted ? [] : ['posting-status-unresolved', 'latam-template-review-only']),
@@ -614,18 +731,48 @@ export function certifiedLatamTemplateId(
  * reviewed, but nothing they send posts: a generic reading of "posted" is
  * downgraded to Review. Plin is a rail hosted by several banks.
  */
-const REVIEW_ONLY_IDENTITIES: readonly { market: LatamMarket; institutions: readonly string[] }[] = [
-  { market: 'PE', institutions: ['plin', 'interbank', 'bbva-peru', 'scotiabank-peru'] },
+const REVIEW_ONLY_IDENTITIES: readonly {
+  market: LatamMarket;
+  institutions: readonly string[];
+  /**
+   * Body context that makes the market certain. "Interbank" and "plin" are
+   * also ordinary words ("Interbank transfer of $500.00" from a US bank), so
+   * a Peruvian identity needs soles, PEN or Perú in the body, a Peru route,
+   * or the bank's own sender.
+   */
+  context?: RegExp;
+}[] = [
+  {
+    market: 'PE',
+    institutions: ['plin', 'interbank', 'bbva-peru', 'scotiabank-peru'],
+    context: /(?<![\p{L}\p{N}])S\/\.?\s?\d|\bPEN\s?\d|\d\s?PEN\b|\bper[uú](?![\p{L}])/iu,
+  },
   { market: 'MX', institutions: ['santander-mexico', 'citibanamex'] },
 ];
 
-export function isReviewOnlyLatamInstitution(source: string, sender?: string | null): boolean {
-  for (const { market, institutions } of REVIEW_ONLY_IDENTITIES) {
+export function isReviewOnlyLatamInstitution(
+  source: string,
+  sender?: string | null,
+  routedMarket?: UniversalMarket | null,
+): boolean {
+  for (const { market, institutions, context } of REVIEW_ONLY_IDENTITIES) {
+    if (routedMarket && routedMarket !== market) continue;
     const review = inspectAlertInstitutionGrammar(source, market, sender);
-    if (review.candidates.some((candidate) => institutions.includes(candidate.institution))) return true;
+    const inMarket = !context || routedMarket === market || context.test(source);
+    if (review.candidates.some((candidate) => institutions.includes(candidate.institution) &&
+      (inMarket || candidate.evidence.includes('sender')))) return true;
   }
   return false;
 }
+
+/** Test hook: the text the word-level guards see, by either span strategy. */
+export const __latamTemplateTesting = {
+  guardText: (source: string, context: LatamTemplateContext = {}, useIndices = HAS_MATCH_INDICES): string | null => {
+    let seen: string | null = null;
+    matchTemplates(source, context, useIndices && HAS_MATCH_INDICES, (text) => { seen = text; });
+    return seen;
+  },
+};
 
 /** Stable ids only; for diagnostics and tests. */
 export const latamTemplateIds = (mode?: TemplateMode): string[] =>

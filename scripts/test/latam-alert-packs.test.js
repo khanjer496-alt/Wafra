@@ -119,21 +119,21 @@ for (const row of fixtures.filter((item) => item.kind === 'money')) {
 }
 {
   // A Mexican route never turns the Colombian shape into pesos of either size.
-  const event = inspectUniversalBankEvent('Retiraste $45.000 en Cajero Automático', { market: 'MX', sender: 'BBVA MEXICO' });
-  ok('#7 an MX-routed "$45.000" goes to Review with a format conflict',
+  const event = inspectUniversalBankEvent('Retiraste $72.000 en Cajero BBVA', { market: 'MX', sender: 'BBVA MEXICO' });
+  ok('#7 an MX-routed "$72.000" goes to Review with a format conflict',
     event.decision === 'review' && event.status !== 'posted' && event.amount.evidence !== 'explicit' &&
       event.issues.includes('amount-format-conflict'), event);
-  const generic = inspectUniversalBankEvent('Compra realizada con tarjeta por $45.000 en TIENDA DEMO', { market: 'MX' });
+  const generic = inspectUniversalBankEvent('Cargo realizado a tu tarjeta por $72.000 en REFACCIONARIA EL PISTON', { market: 'MX' });
   const decision = decideBestEffortAutoPost({
-    source: 'Compra realizada con tarjeta por $45.000 en TIENDA DEMO', event: generic, enabled: true, country: 'MX',
+    source: 'Cargo realizado a tu tarjeta por $72.000 en REFACCIONARIA EL PISTON', event: generic, enabled: true, country: 'MX',
     routedMarket: 'MX', ledgerCurrency: 'MXN', ledgerExponent: 2, observedAt: OBSERVED,
   });
-  ok('#7 amount shape may only block: a generic MX alert printing "$45.000" never auto-posts',
+  ok('#7 amount shape may only block: a generic MX alert printing "$72.000" never auto-posts',
     decision.outcome === 'review', { decision, amount: generic.amount, status: generic.status });
-  const sub50 = templates.matchLatamTemplate('Bancolombia: Compraste $45 en TIENDA DEMO con tu T.Cred *1234, el 02/10/2026 a las 09:15.');
-  ok('a Colombian card purchase under 50 pesos is a mangled "45.000": Review, not posted',
+  const sub50 = templates.matchLatamTemplate('Bancolombia: Compraste $38 en PANIFICADORA LA ESPIGA con tu T.Cred *7302, el 14/09/2026 a las 07:52.');
+  ok('a Colombian card purchase under 50 pesos is a mangled "38.000": Review, not posted',
     sub50?.status === 'unknown' && sub50.amountIssue === 'amount-implausible', sub50);
-  const bareNu = templates.matchLatamTemplate('BANCO DEMO te envió 2.653.381,00.');
+  const bareNu = templates.matchLatamTemplate('COOPERATIVA AURORA te envió 1.318.540,00.');
   ok('#10 the Nu Colombia bare amount is not COP without Nu Colombia identity', bareNu === null, bareNu);
 }
 
@@ -159,19 +159,19 @@ for (const row of fixtures.filter((item) => item.kind === 'route')) {
   ok('#21 two independent consistent Colombian alerts resolve the capture market; a duplicate stays provisional',
     resolved.market === 'CO' && resolved.decision === 'resolved' &&
       duplicate.market === 'CO' && duplicate.decision === 'provisional', { resolved, duplicate });
-  const shortCode = inspectAlertInstitutionGrammar('Compra aprobada por $45.000 en TIENDA DEMO', 'CO', '85540');
+  const shortCode = inspectAlertInstitutionGrammar('Pago aprobado de $61.000 en VIVERO LAS ACACIAS', 'CO', '85540');
   ok('a shared numeric short code is not issuer evidence without the bank in the body',
     shortCode.decision === 'unknown', shortCode);
-  const agreeing = inspectAlertInstitutionGrammar('Bancolombia: Compraste $45.000 en TIENDA DEMO', 'CO', '85540');
+  const agreeing = inspectAlertInstitutionGrammar('Bancolombia: Compraste $61.000 en VIVERO LAS ACACIAS', 'CO', '85540');
   ok('a shared numeric short code agrees with a body that names the bank',
     agreeing.institution === 'bancolombia' && agreeing.candidates[0].evidence.includes('sender'), agreeing);
   ok('BBVA Perú and Banco Santander México are not Spanish issuer evidence',
-    inspectAlertInstitutionGrammar('BBVA Perú: transferencia de S/ 50.00', 'ES').decision === 'unknown' &&
+    inspectAlertInstitutionGrammar('BBVA Perú: abono de S/ 84.00', 'ES').decision === 'unknown' &&
       inspectAlertInstitutionGrammar('BANCO SANTANDER MEXICO: compra $50.00', 'ES').decision === 'unknown');
   ok('Santander and Mercado Pago are Brazilian only next to R$',
-    inspectAlertInstitutionGrammar('Santander: Compra aprovada de R$ 95,00', 'BR').institution === 'santander-brasil' &&
-      inspectAlertInstitutionGrammar('Santander: compra por $95.00', 'BR').decision === 'unknown' &&
-      inspectAlertInstitutionGrammar('Mercado Pago: pagaste $45.000', 'BR').decision === 'unknown');
+    inspectAlertInstitutionGrammar('Santander: gasto de R$ 249,00 no cartao', 'BR').institution === 'santander-brasil' &&
+      inspectAlertInstitutionGrammar('Santander: gasto de $249.00', 'BR').decision === 'unknown' &&
+      inspectAlertInstitutionGrammar('Mercado Pago: tu pago de $61.000', 'BR').decision === 'unknown');
 }
 
 /* ── 22-70 posting templates ───────────────────────────────────────────── */
@@ -190,7 +190,9 @@ for (const row of fixtures.filter((item) => item.kind === 'post')) {
   if (expect.merchant) ok(`${label}: merchant "${expect.merchant}"`, parsed.merchant === expect.merchant, parsed.merchant);
   if (expect.family === 'transfer') {
     ok(`${label}: a transfer keeps its structural title, never a person's name`,
-      ['Incoming transfer', 'Outgoing transfer', 'Salary'].includes(parsed.merchant), parsed.merchant);
+      (expect.title ?? null) === null
+        ? ['Incoming transfer', 'Outgoing transfer', 'Salary'].includes(parsed.merchant)
+        : parsed.merchant === expect.title, parsed.merchant);
   }
   if (expect.last4) ok(`${label}: card/account •${expect.last4}`, parsed.card?.last4 === expect.last4, parsed.card);
   if ('date' in expect) ok(`${label}: date ${expect.date}`, parsed.date === expect.date, parsed.date);
@@ -218,7 +220,7 @@ for (const row of fixtures.filter((item) => item.kind === 'post')) {
     certification.decision !== 'automatic', certification);
   const wrongBank = certifyUniversalTemplate({ market: 'BR', institution: 'itau-brasil', source: nubank.body, event });
   ok('a template certifies only for its own institution', wrongBank.decision !== 'automatic', wrongBank);
-  const unidentifiedNequi = smsDecision('Enviaste $40.000 a ANA PRUEBA', 'CO');
+  const unidentifiedNequi = smsDecision('Enviaste $57.000 a OTAVIO BRANDAO', 'CO');
   ok('a "$" template that needs issuer identity does not post without it',
     unidentifiedNequi.parsed === null, unidentifiedNequi.parsed);
 }
@@ -256,16 +258,16 @@ ok('never-post categories cover OTP, declines, bills, balances, loans, promos, o
     'scheduled', 'pending', 'approval-outside-template', 'review-only-issuer'].every((category) => neverCategories.has(category)),
   [...neverCategories]);
 {
-  const usDollar = smsDecision('Chase Bank: Card purchase $20.00 at SAMPLE SHOP was charged.', 'CO', { sender: 'CHASE' });
+  const usDollar = smsDecision('Chase Bank: Card purchase $27.00 at HARBOR NOODLE BAR was charged.', 'CO', { sender: 'CHASE' });
   ok('#wrong-market a US alert\'s "$" never becomes COP on a Colombian ledger',
     usDollar.parsed === null || usDollar.parsed.currency !== 'COP' || usDollar.parsed.originalCurrency === 'USD', usDollar.parsed);
-  const unrouted = smsDecision('Compraste $45.000 en TIENDA DEMO con tu tarjeta', 'CO', { userCountry: null });
+  const unrouted = smsDecision('Compraste $61.000 en VIVERO LAS ACACIAS con tu tarjeta', 'CO', { userCountry: null });
   ok('#wrong-market a "$" with no route and no user country never posts', unrouted.parsed === null, unrouted.parsed);
-  const yapeCode = templates.matchLatamTemplate('Yape! ANA PRUEBA te envió un pago por S/ 35. El cód. de seguridad es: 482');
+  const yapeCode = templates.matchLatamTemplate('RENATA ZEVALLOS te envió un pago por S/ 48. Código de seguridad: 715');
   ok('the Yape exemption removes only the receipt clause from what guards and storage see',
-    yapeCode?.status === 'posted' && !yapeCode.policySource.includes('482') && yapeCode.policySource.startsWith('Yape! ANA PRUEBA'),
+    yapeCode?.status === 'posted' && !yapeCode.policySource.includes('715') && yapeCode.policySource.startsWith('RENATA ZEVALLOS te envió'),
     yapeCode);
-  const mpFuture = templates.matchLatamTemplate('Você pagou R$ 12,40 a TRANSPORTE DEMO - O valor vai entrar na próxima fatura do seu Cartão Mercado Pago.');
+  const mpFuture = templates.matchLatamTemplate('Mercado Pago: Você pagou R$ 18,75 a BICICLETARIA PEDAL - O valor vai entrar na próxima fatura do seu Cartão Mercado Pago');
   ok('"próxima fatura" names the card bill a posted purchase lands on; it is not a future charge',
     mpFuture?.status === 'posted' && mpFuture.family === 'purchase', mpFuture);
 }
@@ -320,6 +322,110 @@ ok('never-post categories cover OTP, declines, bills, balances, loans, promos, o
   const itau = publicEvidence.find((row) => row.id === 'br-itau-purchase-sms');
   ok('the Itaú heading with no masked card stays a pinned known gap',
     itau?.knownGap?.decision === 'refuse' && templates.matchLatamTemplate(itau.body) === null);
+}
+
+/* ── 89 free text never hides a veto ───────────────────────────────────── */
+{
+  // A free-text capture stops at a sentence boundary: the template no longer
+  // matches, so nothing after the merchant can be blanked out of the guards.
+  const sentence = templates.matchLatamTemplate(
+    'Itaú: Compra aprovada no cartão final 7302 valor R$ 83,15 no EMPORIO ALVORADA. Esta compra foi estornada.');
+  ok('#89 a merchant capture never runs across ". " into the next sentence',
+    sentence === null || (sentence.status !== 'posted' && !/estorn/iu.test(sentence.merchant ?? '')), sentence);
+  // A veto INSIDE the captured text goes to Review instead of being blanked.
+  const inside = templates.matchLatamTemplate('Enviaste $2,340.00 a RAMIRO TELLEZ operacion no realizada vía SPEI');
+  ok('#89 "no realizada" inside a captured name sends the template to Review',
+    inside?.status === 'unknown' && inside.templateId === 'mx-bbva-spei-out-v1', inside);
+  const midMerchant = templates.matchLatamTemplate(
+    'DAVIVIENDA: Compra . Aprobado(a), $61.700, Tarjeta *5521, Hora 19:44, Lugar MERCADITO REVERSADA LA ESQUINA .');
+  ok('#89 "reversada" in the middle of a captured place sends the template to Review',
+    midMerchant?.status === 'unknown', midMerchant);
+  // Merchant punctuation that is not a sentence boundary still matches and posts.
+  const dotted = smsDecision('Itaú: Compra aprovada no cartão final 7302 valor R$ 83,15 no LIVRARIA.COM.BR', 'BR').parsed;
+  ok('#89 a dot inside a merchant descriptor is not a sentence boundary',
+    dotted?.amountFils === 8315 && dotted.type === 'expense', dotted);
+  // An ordinary merchant that happens to read "NO ..." is still blanked from
+  // the word-level negation guard, so it keeps posting.
+  const noFrills = smsDecision('DAVIVIENDA: Compra . Aprobado(a), $61.700, Tarjeta *5521, Hora 19:44, Lugar NO FRILLS MARKET .', 'CO').parsed;
+  ok('#89 a merchant named "NO FRILLS" is not read as a negation', noFrills?.amountFils === 6170000, noFrills);
+}
+
+/* ── LOW 5: guards blank the exact captured span ───────────────────────── */
+{
+  // The merchant "Compra" also appears earlier as template text; only the
+  // captured span may be blanked, never the first occurrence of its text.
+  const body = 'Itaú: Compra aprovada no cartão final 6610 valor R$ 29,90 no Compra';
+  for (const useIndices of [true, false]) {
+    const guard = templates.__latamTemplateTesting.guardText(body, {}, useIndices);
+    ok(`the guard text blanks the captured span itself (${useIndices ? 'match indices' : 'ordered fallback'})`,
+      typeof guard === 'string' && guard.startsWith('Itaú: Compra aprovada') && /no\s+$/u.test(guard) && guard.length === body.length,
+      guard);
+  }
+}
+
+/* ── LOW 4: own-card payments and own transfers ────────────────────────── */
+for (const row of fixtures.filter((item) => item.kind === 'card-payment')) {
+  const { parsed } = smsDecision(row.body, row.market, { sender: row.sender });
+  ok(`#${row.n} ${row.id}: a card payment for card •${row.expect.card}, never spending or a third-party transfer`,
+    parsed?.kind === 'cardPayment' && parsed.card?.last4 === row.expect.card && parsed.cardPaymentSide === row.expect.side &&
+      parsed.transferHint === true && parsed.amountFils === row.expect.minor && parsed.currency === LEDGER[row.market] &&
+      parsed.merchant === `Card •${row.expect.card} payment` && parsed.date === row.expect.date &&
+      parsed.bestEffort?.format === 'universal:card-payment:debit', parsed);
+  const event = inspectUniversalBankEvent(row.body, { market: row.market, sender: row.sender });
+  const certification = certifyUniversalTemplate({ market: row.market, institution: row.institution, source: row.body, event });
+  ok(`#${row.n} ${row.id}: notifications hand it to the card-payment adapter, never an automatic purchase`,
+    certification.decision === 'adapter-required', certification);
+}
+{
+  const bill = smsDecision('Bancolombia: Pagaste $1.180.000 en la tarjeta de credito *9034 desde la cuenta *2210, el 05/10/2026 17:25.', 'CO').parsed;
+  ok('a Bancolombia card-bill payment is a card payment for the paid card, not spending',
+    bill?.kind === 'cardPayment' && bill.card?.last4 === '9034' && bill.cardPaymentSide === 'debit' &&
+      bill.transferHint === true && bill.amountFils === 118000000 && bill.merchant === 'Card •9034 payment' &&
+      bill.date === '2026-10-05', bill);
+  const billEvent = inspectUniversalBankEvent(
+    'Bancolombia: Pagaste $1.180.000 en la tarjeta de credito *9034 desde la cuenta *2210, el 05/10/2026 17:25.', { market: 'CO' });
+  ok('the card-bill template event is the card-payment family with the paid card as its instrument',
+    billEvent.family === 'card-payment' && billEvent.instrument.value?.last4 === '9034' && billEvent.status === 'posted', billEvent);
+  const fatura = smsDecision('Nubank: Recebemos o pagamento de R$ 2.315,70 da sua fatura.', 'BR').parsed;
+  ok('a Nubank card-bill payment with no card number is a "Card payment" transfer, never spending',
+    fatura?.kind === 'transaction' && fatura.transferHint === true && fatura.merchant === 'Card payment' &&
+      fatura.amountFils === 231570 && fatura.type === 'expense', fatura);
+  const advance = smsDecision('Bancolombia: Hiciste un avance de $410.000 en tu APP MOVIL el 16:05 04/10/2026 desde tu T.Credito *9034 a la cuenta *2210.', 'CO').parsed;
+  ok('a Bancolombia cash advance into the own account is an own-account transfer',
+    advance?.transferHint === true && advance.merchant === 'Own account transfer', advance);
+  const third = smsDecision('Nubank: Você enviou R$ 64,00 para BEATRIZ LOPES via Pix.', 'BR').parsed;
+  ok('a Pix to another person keeps the third-party transfer title', third?.merchant === 'Outgoing transfer', third);
+}
+
+/* ── MEDIUM 2: US alerts behave exactly as on b3a33f4 ──────────────────── */
+{
+  const us = (body) => smsDecision(body, 'US', { ledger: 'USD', userCountry: 'US' }).parsed;
+  const pick = (parsed) => parsed && {
+    kind: parsed.kind, type: parsed.type, amountFils: parsed.amountFils, currency: parsed.currency,
+    merchant: parsed.merchant, transferHint: !!parsed.transferHint,
+  };
+  const BASE = [
+    ['You sent $120.00 to PSE&G with Zelle.',
+      { kind: 'transaction', type: 'expense', amountFils: 12000, currency: 'USD', merchant: 'Outgoing transfer', transferHint: true }],
+    ['Your card ending 1234 was charged $45.00 at PSE HOLDINGS.',
+      { kind: 'transaction', type: 'expense', amountFils: 4500, currency: 'USD', merchant: 'PSE HOLDINGS', transferHint: false }],
+    ['Chase: You made a $45.00 transaction with your Apple Pay token at TARGET.',
+      { kind: 'transaction', type: 'expense', amountFils: 4500, currency: 'USD', merchant: 'TARGET', transferHint: false }],
+    ['A charge of $45.00 at CONFIRME CAFE was made on your card ending 1234.',
+      { kind: 'transaction', type: 'expense', amountFils: 4500, currency: 'USD', merchant: 'CONFIRME CAFE', transferHint: false }],
+    ['Chase: Interbank transfer of $500.00 received in account ending 1234.',
+      { kind: 'transaction', type: 'income', amountFils: 50000, currency: 'USD', merchant: 'Incoming transfer', transferHint: true }],
+  ];
+  for (const [body, expected] of BASE) {
+    const got = pick(us(body));
+    ok(`US regression (as b3a33f4): ${body}`, JSON.stringify(got) === JSON.stringify(expected), got);
+  }
+  ok('PSE counts as Colombian only with Colombian context',
+    routeAlertMarket({ source: 'You sent $120.00 to PSE&G with Zelle.', sender: '' }).candidates.every((c) => c.market !== 'CO') &&
+      routeAlertMarket({ source: 'Pagaste $85.000 por PSE desde tu cuenta de ahorros', sender: '' }).candidates.some((c) => c.market === 'CO'));
+  ok('"Interbank" is a review-only Peruvian issuer only with S/ or a Peru route',
+    !templates.isReviewOnlyLatamInstitution('Chase: Interbank transfer of $500.00 received in account ending 1234.') &&
+      templates.isReviewOnlyLatamInstitution('Interbank: Realizaste un consumo de S/ 50.00 en TIENDA con tu tarjeta ****1234.'));
 }
 
 console.log(`\nlatam-alert-packs: ${pass} passed, ${fail} failed · ${fixtures.length} fixtures`);

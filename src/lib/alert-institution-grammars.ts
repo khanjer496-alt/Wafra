@@ -226,7 +226,9 @@ const INSTITUTIONS: Record<InstitutionGrammarMarket, readonly InstitutionGrammar
   PE: [
     { institution: 'bcp', senders: ['bcp', 'viabcp'], bodyBoundSenders: ['19896'], body: /\bbcp\b|\bbanco\s+de\s+cr[eé]dito\s+del\s+per[uú](?=$|[^\p{L}\p{N}])/iu },
     { institution: 'yape', senders: ['yape'], body: /\byape\b/iu },
-    { institution: 'interbank', senders: ['interbank'], body: /\binterbank\b/iu },
+    // "Interbank transfer" is ordinary banking English: the Peruvian bank's
+    // name counts as body evidence only next to soles, PEN or Perú.
+    { institution: 'interbank', senders: ['interbank'], body: /\binterbank\b(?=[\s\S]{0,240}(?:S\/\.?\s?\d|\bPEN\b|\bper[uú](?![\p{L}])))|(?:S\/\.?\s?\d|\bPEN\b|\bper[uú](?![\p{L}]))[\s\S]{0,240}\binterbank\b/iu },
     { institution: 'plin', senders: ['plin'], body: /\bplin\b/iu },
     { institution: 'bbva-peru', senders: ['bbvaperu'], body: /\bbbva\s+(?:per[uú]|continental)(?=$|[^\p{L}\p{N}])/iu },
     { institution: 'scotiabank-peru', senders: ['scotiabankperu'], body: /\bscotiabank\s+per[uú](?=$|[^\p{L}\p{N}])/iu },

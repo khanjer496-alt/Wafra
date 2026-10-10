@@ -170,12 +170,23 @@ const NON_COMPLETED_WORDING: readonly RegExp[] = [
   /\bstatement\b|\bminimum\s+(?:amount\s+)?(?:due|payment)\b|\btotal\s+(?:amount\s+)?due\b|\bamount\s+due\b|\bdue\s+(?:date|on|by)\b|\bpayment\s+due\b|\bbill\s+(?:is\s+)?(?:due|generated|ready)\b|\breminder\b|\boverdue\b|\brelev[ée](?!\p{L})|\bkontoauszug\b|\bextracto\b|\bestratto\s+conto\b|\brekeningoverzicht\b|\bfatura\s+(?:fechada|vence)\b|كشف\s+(?:ال)?حساب|مستحق|تذكير|الحد\s+الأدنى/iu,
   // future / scheduled / mandates
   /\bwill\s+be\s+(?:debited|charged|deducted|paid|processed|collected|credited)\b|\bscheduled\b|\bupcoming\b|\bstanding\s+(?:instruction|order)\b|\bmandate\b|\bpre-?debit\b|\bauto-?pay\s+(?:set|scheduled|registered)\b|\bsera\s+(?:d[ée]bit[ée]|pr[ée]lev[ée])|\bwird\s+(?:abgebucht|belastet)\b|\bser[áa]\s+(?:cargad[oa]|debitad[oa])\b|\bsar[àa]\s+addebitat[oa]\b|\bwordt\s+afgeschreven\b|سيتم/iu,
-  // Latin American Spanish and Brazilian Portuguese: purchase/security codes,
-  // two-step confirmations ("foi você?", "responde SI"), scheduled Pix,
-  // bills and reminders, loan and limit offers, unfinished transactions.
+];
+
+/**
+ * LATIN AMERICAN WORDING, SCOPED TO BR/CO/MX/PE. Spanish and Brazilian
+ * Portuguese purchase/security codes, two-step confirmations ("foi você?",
+ * "responde SI"), scheduled Pix, bills and reminders, loan and limit offers,
+ * transactions under analysis or unfinished. Applied only to an alert routed
+ * to one of these markets, a person in one of them, or money in BRL/COP/MXN/
+ * PEN: "token", "confirme" or "programado" in a US alert ("your Apple Pay
+ * token", a cafe called CONFIRME) must not change what a US alert does.
+ */
+const LATAM_MARKETS: ReadonlySet<string> = new Set(['BR', 'CO', 'MX', 'PE']);
+const LATAM_CURRENCIES: ReadonlySet<string> = new Set(['BRL', 'COP', 'MXN', 'PEN']);
+const LATAM_NON_COMPLETED_WORDING: readonly RegExp[] = [
   /(?<!\p{L})(?:c[óo]digo\s+(?:de\s+)?(?:seguridad|autorizaci[óo]n|autoriza[çc][ãa]o|confirmaci[óo]n|confirma[çc][ãa]o|acceso|acesso|compra|transacci[óo]n)|c[óo]d\.\s*de\s+seguridad|tu\s+c[óo]digo|es\s+tu\s+c[óo]digo|clave\s+din[áa]mica|token)(?!\p{L})/iu,
   /(?<!\p{L})(?:foi\s+voc[êe]|fuiste\s+t[úu]|reconoces|reconhece|responda|responde\s+(?:s[íi]|sim|no|n[ãa]o|cancelar)|confirma\s+(?:tu|su)\s+(?:pago|compra|transacci[óo]n|operaci[óo]n)|confirme)(?!\p{L})/iu,
-  /(?<!\p{L})(?:agendad[oa]|programad[oa]|se\s+(?:cargar|debitar)[áa]|en\s+proceso|vence(?:\s+amanh[ãa])?|vencimento|pago\s+m[íi]nimo|tienes\s+un\s+pago|completa\s+tu\s+pago|fa[çc]a\s+o\s+pagamento|j[áa]\s+pode\s+agendar|novo\s+boleto|sua\s+fatura\s+(?:de\s+R\$\s?[\d.,]+\s+)?(?:est[áa]\s+dispon[íi]vel|fechou|vence)|a\s+fatura\s+do\s+cart[ãa]o\s+fechou)(?!\p{L})/iu,
+  /(?<!\p{L})(?:agendad[oa]|programad[oa]|se\s+(?:cargar|debitar)[áa]|en\s+proceso|em\s+processamento|em\s+an[áa]lise|en\s+an[áa]lisis|vence(?:\s+amanh[ãa])?|vencimento|pago\s+m[íi]nimo|tienes\s+un\s+pago|completa\s+tu\s+pago|fa[çc]a\s+o\s+pagamento|j[áa]\s+pode\s+agendar|novo\s+boleto|sua\s+fatura\s+(?:de\s+R\$\s?[\d.,]+\s+)?(?:est[áa]\s+dispon[íi]vel|fechou|vence)|a\s+fatura\s+do\s+cart[ãa]o\s+fechou)(?!\p{L})/iu,
   // Loan OFFERS only: a loan repayment ("pagamento do empréstimo") is real money.
   /(?<!\p{L})(?:empr[ée]stimo\s+foi\s+aprovado|pr[ée]-?aprovad[oa]|pr[ée]-?aprobad[oa]|cr[ée]dito\s+(?:de\s+R?\$\s?[\d.,]+\s+)?dispon[íi]vel|simul(?:ar|e)|limite\s+subiu|cupo\s+disponible|ganhe|garanta|cupom|invista|meses\s+sin\s+intereses)(?!\p{L})/iu,
   /(?<!\p{L})(?:n[ãa]o\s+(?:conclu[íi]d[oa]|aprovad[oa]|autorizad[oa]|realizad[oa])|no\s+fue\s+posible|no\s+(?:aprobad[oa]|autorizad[oa]))(?!\p{L})/iu,
@@ -190,9 +201,23 @@ const TEMPORARY_HOLD = /\btemporary\s+(?:authori[sz]ation|hold|charge|debit|bloc
 const AUTHORISATION = /\bauthori[sz](?:ed|ation)\b/iu;
 const COMPLETED = /\b(?:completed|posted|settled)\b/iu;
 
-export const hasNonCompletedWording = (source: string): boolean =>
+/** `market` (an ISO country or routed market) adds that region's own wording. */
+export const hasNonCompletedWording = (source: string, market?: string | null): boolean =>
   nonPostingReason(source) !== null || NON_COMPLETED_WORDING.some((pattern) => pattern.test(source)) ||
+  (!!market && LATAM_MARKETS.has(market) && LATAM_NON_COMPLETED_WORDING.some((pattern) => pattern.test(source))) ||
   TEMPORARY_HOLD.test(source) || (AUTHORISATION.test(source) && !COMPLETED.test(source));
+
+/** Whether an alert is Latin American by route, by the person's country, or by its money. */
+const latamScope = (input: BestEffortInput): string | null => {
+  if (input.routedMarket && LATAM_MARKETS.has(input.routedMarket)) return input.routedMarket;
+  if (input.country && LATAM_MARKETS.has(input.country)) return input.country;
+  // Only a RESOLVED currency counts: a bare "$" lists COP and MXN among its
+  // alternatives in every market, and must not make a US alert Latin American.
+  const currency = input.event?.amount?.value?.currency;
+  return currency && LATAM_CURRENCIES.has(currency)
+    ? ({ BRL: 'BR', COP: 'CO', MXN: 'MX', PEN: 'PE' } as Record<string, string>)[currency]
+    : null;
+};
 
 const localIsoDay = (epochMs: number | undefined): string | null => {
   if (epochMs === undefined || !Number.isFinite(epochMs)) return null;
@@ -340,7 +365,7 @@ export function decideBestEffortAutoPost(input: BestEffortInput): BestEffortDeci
   if (!event || event.version !== 1 || event.decision !== 'review' || event.status !== 'posted') {
     return review('not-posted');
   }
-  if (typeof input.source !== 'string' || hasNonCompletedWording(input.source)) {
+  if (typeof input.source !== 'string' || hasNonCompletedWording(input.source, latamScope(input))) {
     return review('non-posting-wording');
   }
   if (!POSTABLE_FAMILIES.has(event.family)) return review('unsupported-family');
