@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { Icon } from '@/components/ui/icon';
 import { Spacing, type BandPalette } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
@@ -18,7 +19,11 @@ const ORDER: TransferAnswer[] = ['own', 'external', 'none'];
 export function TransferAnswerChoices({ incoming, value, onChange, palette, layout, linkedLabel, suggestion, suggestionDetail, disabled }: {
   /** 'mixed' when one answer is given to money in and money out together (a selection). */
   incoming: boolean | 'mixed'; value: TransferAnswer | null; onChange: (answer: TransferAnswer) => void;
-  palette: BandPalette; layout: 'buttons' | 'radios'; linkedLabel?: string;
+  /**
+   * 'buttons': three side by side (select mode's footer). 'stack': full-width rows, each saying what
+   * the answer does (the question card). 'radios': the detail sheet's radio rows.
+   */
+  palette: BandPalette; layout: 'buttons' | 'stack' | 'radios'; linkedLabel?: string;
   /**
    * The likely other side ("Linked to ADCB Credit Card ••7720"): a matching
    * entry on another of the person's accounts or cards. Shown under the own
@@ -34,6 +39,26 @@ export function TransferAnswerChoices({ incoming, value, onChange, palette, layo
   const labels = incoming === 'mixed' ? words.mixed : incoming ? words.in : words.out;
   const effect = (answer: TransferAnswer) => answer === 'none' ? words.effect.none
     : incoming === 'mixed' ? words.mixedEffect[answer] : words.effect[answer](incoming);
+  if (layout === 'stack') {
+    return <View accessibilityRole="radiogroup" style={styles.stackList}>
+      {ORDER.map((answer, i) => {
+        const lead = i === 0;
+        return <Pressable key={answer} testID={`transfer-answer-${answer}`} disabled={disabled}
+          accessibilityRole="radio" accessibilityState={{ checked: value === answer, disabled: !!disabled }} aria-checked={value === answer}
+          accessibilityLabel={`${labels[answer]}. ${effect(answer)}`}
+          onPress={() => { if (answer !== value) onChange(answer); }}
+          style={({ pressed }) => [styles.stackRow, lead ? { backgroundColor: palette.fill }
+            : { backgroundColor: palette.sheet, borderWidth: 1, borderColor: palette.rule },
+          { opacity: pressed || disabled ? 0.7 : 1 }]}>
+          <View style={styles.radioText}>
+            <ThemedText type="smallBold" style={{ color: lead ? palette.onFill : palette.text }}>{labels[answer]}</ThemedText>
+            <ThemedText type="meta" style={{ color: lead ? palette.onFill : palette.textSecondary, opacity: lead ? 0.85 : 1 }}>{effect(answer)}</ThemedText>
+          </View>
+          <Icon name="chevron-right" size={16} color={lead ? palette.onFill : palette.textSecondary} />
+        </Pressable>;
+      })}
+    </View>;
+  }
   if (layout === 'buttons') {
     return <View accessibilityRole="radiogroup" style={[styles.buttons, large && styles.stack]}>
       {ORDER.map((answer, i) => <Pressable key={answer} testID={`transfer-answer-${answer}`} disabled={disabled}
@@ -86,6 +111,9 @@ const styles = StyleSheet.create({
   button: { flex: 1, minHeight: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center', paddingHorizontal: Spacing.two, paddingVertical: Spacing.two },
   buttonLarge: { flex: 0, alignSelf: 'stretch' },
   radios: { gap: Spacing.two },
+  stackList: { gap: Spacing.two },
+  stackRow: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: Spacing.two, borderRadius: 14,
+    paddingHorizontal: Spacing.three, paddingVertical: Spacing.two + 2 },
   radioRow: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: Spacing.three - 4, paddingHorizontal: Spacing.three - 2,
     paddingVertical: Spacing.two + 2, borderRadius: 14, borderWidth: 1.5 },
   radio: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },

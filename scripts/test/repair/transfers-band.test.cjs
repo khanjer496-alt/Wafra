@@ -177,13 +177,20 @@ const stateOf = (h, value) => h.events.find(event => event[0] === 'state' && eve
 
 test('searching for the incoming account keeps a linked pair as one route row', () => {
   const rows = [leg('out', 'expense', 'current'), leg('in', 'income', 'savings')];
-  // Hook order: tile is state 0 and the search query is state 1.
-  const h = harness({ language: 'en', states: { 1: 'savings' }, state: { transactions: rows, accounts: accountsFixture } });
+  // The search field's hook slot, read from what typing into it asks for (nothing waits: History holds the field).
+  const probe = harness({ language: 'en', state: { transactions: rows, accounts: accountsFixture } });
+  withReconciliation(probe, pairEntries);
+  const words = probe.deps['@/lib/transfer-activity-copy'].transferActivityCopy('en');
+  const field = walk(probe.renderScreen('transfers')).find(node => node.props?.onChangeText && node.props.accessibilityLabel === words.search);
+  assert.ok(field, 'History offers the search field');
+  field.props.onChangeText('savings');
+  const slot = stateOf(probe, 'savings')[1];
+  const h = harness({ language: 'en', states: { [slot]: 'savings' }, state: { transactions: rows, accounts: accountsFixture } });
   withReconciliation(h, pairEntries);
   const tree = h.renderScreen('transfers');
   assert.deepEqual(rowIds(tree), ['transfer-row-out|in'], 'one pair row, not a one-sided leg');
   assert.match(byId(tree, 'transfer-row-out|in').props.accessibilityLabel, /Current account.*Savings/);
-  const none = harness({ language: 'en', states: { 1: 'nomatch' }, state: { transactions: rows, accounts: accountsFixture } });
+  const none = harness({ language: 'en', states: { [slot]: 'nomatch' }, state: { transactions: rows, accounts: accountsFixture } });
   withReconciliation(none, pairEntries);
   assert.deepEqual(rowIds(none.renderScreen('transfers')), []);
 });
@@ -209,24 +216,40 @@ test('the period chip sits in the band nav row and opens the period sheet', () =
   assert.ok(stateOf(h, true), 'pressing it opens the period sheet');
 });
 
-test('large text moves the tiles from the band into the list header', () => {
+test('the tiles live on the sheet under History at every text size; the band keeps only the figure', () => {
   const inBand = tree => !!byId(byId(tree, 'transfers-band'), 'transfers-tile-own');
   const inHeader = tree => !!byId(byId(tree, 'transfer-history').props.ListHeaderComponent, 'transfers-tile-own');
-  const normal = harness({ language: 'en' }).renderScreen('transfers');
-  assert.ok(inBand(normal) && !byId(byId(normal, 'transfer-history').props.ListHeaderComponent, 'transfers-tile-own'));
-  const large = harness({ language: 'en', largeText: true }).renderScreen('transfers');
-  assert.ok(!inBand(large), 'the fixed band no longer holds the tiles');
-  assert.ok(inHeader(large), 'the tiles scroll with the list');
-  assert.ok(byId(byId(large, 'transfers-band'), 'transfers-band') || text(byId(large, 'transfers-band')).includes('AED'), 'the figure stays in the band');
+  for (const largeText of [false, true]) {
+    // Nothing waits: the page opens on History, with the three tiles above the period's transfers.
+    const tree = harness({ language: 'en', largeText }).renderScreen('transfers');
+    assert.equal(byId(byId(tree, 'transfer-history').props.ListHeaderComponent, 'transfers-view-history').props.accessibilityState.selected, true);
+    assert.ok(!inBand(tree), `large ${largeText}: the fixed band never holds the tiles`);
+    assert.ok(inHeader(tree), `large ${largeText}: the tiles scroll with the list`);
+    assert.ok(text(byId(tree, 'transfers-band')).includes('AED'), 'the figure stays in the band');
+  }
+  // While something waits, To answer shows the card instead; the tiles wait under History.
+  const rows = [leg('q1', 'expense', 'current')];
+  const asking = harness({ language: 'en', state: { transactions: rows, accounts: accountsFixture } });
+  withReconciliation(asking, [['q1', { id: 'q1', status: 'ownership-unknown', reason: 'missing-evidence', candidateIds: [] }]], ['q1']);
+  const answer = asking.renderScreen('transfers');
+  assert.ok(byId(answer, 'transfer-question-card'));
+  assert.ok(!inBand(answer) && !inHeader(answer), 'no tiles in To answer');
+  byId(answer, 'transfers-view-history').props.onPress();
+  const slot = stateOf(asking, 'history')[1];
+  const history = harness({ language: 'en', states: { [slot]: 'history' }, state: { transactions: rows, accounts: accountsFixture } });
+  withReconciliation(history, [['q1', { id: 'q1', status: 'ownership-unknown', reason: 'missing-evidence', candidateIds: [] }]], ['q1']);
+  const switched = history.renderScreen('transfers');
+  assert.ok(inHeader(switched) && !inBand(switched), 'History holds the tiles on the sheet');
+  assert.equal(byId(switched, 'transfer-question-card'), undefined, 'History asks nothing');
 });
 
 const flat = style => Object.assign({}, ...[style].flat(Infinity).filter(Boolean));
 const textNodes = node => walk(node).filter(n => n.type === 'Text');
 
-test('every tile figure draws its currency label in the tile\'s own secondary colour, on the band and on the sheet', () => {
+test('every tile figure draws its currency label in the tile\'s own secondary colour, plain, selected and at large text', () => {
   const words = harness({ language: 'en' }).deps['@/lib/transfer-activity-copy'].transferActivityCopy('en');
-  for (const [label, options, states] of [['band', { language: 'en' }, undefined], ['selected on band', { language: 'en' }, { 0: 'sent' }],
-    ['sheet at large text', { language: 'en', largeText: true }, undefined]]) {
+  for (const [label, options, states] of [['plain', { language: 'en' }, undefined], ['selected', { language: 'en' }, { 0: 'sent' }],
+    ['large text', { language: 'en', largeText: true }, undefined]]) {
     const h = harness({ ...options, states });
     const tree = h.renderScreen('transfers');
     for (const key of ['own', 'sent', 'received']) {
@@ -292,8 +315,12 @@ test('a likely pair with both legs queued is one question, asked about the outgo
   ], ['p-in', 'p-out', 'q1']);
   const card = byId(h.renderScreen('transfers'), 'transfer-question-card');
   const words = h.deps['@/lib/transfer-activity-copy'].transferActivityCopy('en');
-  assert.ok(text(card).includes(words.card.title(2)), 'two movements need an answer, not three entries');
+  // The count is spoken by the card's header with its step; the step is what it shows.
+  const head = walk(card).find(node => node.props?.accessibilityRole === 'header');
+  assert.equal(head.props.accessibilityLabel, `${words.card.title(2)}. ${words.card.step(1, 2)}`, 'two movements need an answer, not three entries');
   assert.ok(text(card).includes(words.card.step(1, 2)));
+  // The To answer tab shows the same count.
+  assert.ok(text(byId(h.renderScreen('transfers'), 'transfers-view-answer')).includes('2'));
   await byId(card, 'transfer-answer-own').props.onPress();
   assert.equal(h.answers[0].transaction.id, 'p-out');
   assert.equal(h.answers[0].counterpart.id, 'p-in', 'answering own links the other leg');

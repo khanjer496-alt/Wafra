@@ -107,6 +107,8 @@ const en = {
   group: {
     entries: (n: number) => `${n} entr${n === 1 ? 'y' : 'ies'}`,
     section: 'Waiting for your answer',
+    /** To answer: everyone and everything waiting after the card's own question. */
+    alsoWaiting: 'Also waiting',
     entriesTitle: 'Entries',
     openEntry: 'Open this entry on its own',
     more: (shown: number, total: number) => `Show more · ${shown} of ${total}`,
@@ -124,9 +126,11 @@ const en = {
    */
   person: {
     question: (name: string) => `${isolateText(name)}: your own account or someone else?`,
+    /** The question card's prompt under the person's name. */
+    who: 'Is this you, or someone else?',
     transfers: (n: number) => `${n} transfer${n === 1 ? '' : 's'}`,
-    sent: (amount: string, n: number) => `Sent ${isolateText(amount)} (${n})`,
-    received: (amount: string, n: number) => `Received ${isolateText(amount)} (${n})`,
+    sent: (amount: string) => `Sent ${isolateText(amount)}`,
+    received: (amount: string) => `Received ${isolateText(amount)}`,
     oneAnswer: (name: string) => `One answer for every waiting transfer with ${isolateText(name)}. Pick your own account only if this name is you.`,
     people: (n: number) => `${n} ${n === 1 ? 'person' : 'people'}`,
     showAll: (n: number) => `Show all ${n} people`,
@@ -162,7 +166,7 @@ const en = {
   },
   card: {
     title: (n: number) => `${n} transfer${n === 1 ? ' needs' : 's need'} an answer`,
-    step: (i: number, n: number) => `${i} of ${n}`,
+    step: (i: number, n: number) => `Question ${i} of ${n}`,
     whereOut: 'Where did this go?',
     whereIn: 'Where did this come from?',
     looksLike: (account: string) => `looks like your ${isolateText(boundDigits(account))}`,
@@ -170,6 +174,15 @@ const en = {
     seeAllPlain: 'See all',
     /** Waiting transfers that name nobody: not asked one by one on the card, answered in select mode. */
     moreUnnamed: (n: number) => `${n} more without a name — select to answer`,
+    unnamedTitle: (n: number) => `${n} transfer${n === 1 ? '' : 's'} without a name`,
+    unnamedBody: 'Tick the ones you know and answer them together',
+    allDone: 'Nothing to answer',
+    allDoneBody: 'Every transfer has an answer. Your transfers are under History.',
+  },
+  /** The page's two views: what waits for an answer, and the period's transfers. */
+  views: {
+    answer: 'To answer',
+    history: 'History',
   },
 };
 
@@ -238,6 +251,7 @@ const ar: typeof en = {
   group: {
     entries: arEntries,
     section: 'بانتظار إجابتك',
+    alsoWaiting: 'بانتظار إجابتك أيضاً',
     entriesTitle: 'القيود',
     openEntry: 'افتح هذا القيد وحده',
     more: (shown, total) => `عرض المزيد · ${shown} من ${total}`,
@@ -248,9 +262,10 @@ const ar: typeof en = {
   },
   person: {
     question: (name) => `${isolateText(name)}: حسابك أم شخص آخر؟`,
+    who: 'هل هذا أنت أم شخص آخر؟',
     transfers: arTransfers,
-    sent: (amount, n) => `أُرسل ${isolateText(amount)} (${n})`,
-    received: (amount, n) => `استُلم ${isolateText(amount)} (${n})`,
+    sent: (amount) => `أُرسل ${isolateText(amount)}`,
+    received: (amount) => `استُلم ${isolateText(amount)}`,
     oneAnswer: (name) => `إجابة واحدة لكل التحويلات المنتظرة مع ${isolateText(name)}. اختر حسابك فقط إن كان هذا الاسم هو أنت.`,
     people: arPeople,
     showAll: (n) => `عرض كل الأشخاص (${n})`,
@@ -285,12 +300,20 @@ const ar: typeof en = {
   },
   card: {
     title: (n) => `${n} من التحويلات بانتظار إجابتك`,
-    step: (i, n) => `${i} من ${n}`,
+    step: (i, n) => `السؤال ${i} من ${n}`,
     whereOut: 'إلى أين ذهبت؟',
     whereIn: 'من أين جاءت؟',
     looksLike: (account) => `يبدو أنها حسابك ${isolateText(boundDigits(account))}`,
     seeAllPlain: 'عرض الكل',
     moreUnnamed: (n) => `بلا اسم: ${arTransfers(n)} أيضاً — استخدم التحديد للإجابة`,
+    unnamedTitle: (n) => `${arTransfers(n)} بلا اسم`,
+    unnamedBody: 'حدّد ما تعرفه منها وأجب عنها معاً',
+    allDone: 'لا شيء بانتظار إجابتك',
+    allDoneBody: 'لكل التحويلات إجابة. تجد تحويلاتك في السجل.',
+  },
+  views: {
+    answer: 'بانتظار الإجابة',
+    history: 'السجل',
   },
 };
 

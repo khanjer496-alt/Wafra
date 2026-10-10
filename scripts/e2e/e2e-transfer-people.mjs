@@ -91,9 +91,11 @@ async function sameCount(page, words, home, count) {
   else await expect(strip).not.toContainText(words.strip.needsAnswer(1).replace(/^1/, ''));
   const net = minor(await page.getByTestId('transactions-net-total').innerText());
   await page.goto(`${BASE}/transfers`, { waitUntil: 'networkidle' });
-  // The card, or, once only transfers that name nobody wait, the link that opens select mode for them.
-  if (count > 0) await expect(page.locator('[data-testid="transfer-question-card"], [data-testid="transfers-review-link"]'))
-    .toContainText(words.card.title(count));
+  // The To answer tab says the count (and is the view the page opens on while anything waits).
+  if (count > 0) {
+    await expect(page.getByTestId('transfers-view-answer')).toHaveAttribute('aria-label', `${words.views.answer}. ${words.card.title(count)}`);
+    await expect(page.getByTestId('transfers-view-answer')).toHaveAttribute('aria-selected', 'true');
+  }
   return net;
 }
 
@@ -123,17 +125,24 @@ try {
       await expect(screen).toBeVisible();
       const card = page.getByTestId('transfer-question-card');
       await expect(card.getByTestId('transfer-question-person')).toContainText('MARIAM S');
-      // The card walks the two people; the transfer that names nobody is counted and offered through select mode.
+      // The card walks the two people; the transfer that names nobody is counted and is one row in the list
+      // that opens select mode.
       await expect(card).toContainText(words.card.step(1, 2));
-      await expect(card.getByTestId('transfer-question-unnamed')).toHaveAttribute('aria-label', words.card.moreUnnamed(1));
+      await expect(card.getByTestId('transfer-question-person')).toContainText(words.person.transfers(3));
+      await expect(screen.getByTestId('transfer-question-unnamed')).toHaveAttribute('aria-label',
+        `${words.card.unnamedTitle(1)}. ${words.card.unnamedBody}`);
+      // The person on the card is not listed under it a second time.
       const mariam = screen.getByTestId('transfer-person-person:mariam s');
-      await expect(mariam).toBeVisible();
-      await expect(mariam.getByTestId('transfer-person-count')).toContainText(words.person.transfers(3));
+      await expect(mariam).toHaveCount(0);
       await expect(screen.getByTestId('transfer-person-person:khalid r')).toBeVisible();
-      await expect(screen.getByTestId('transfer-row-u1')).toContainText(words.tags.needsAnswer);
-      for (const id of MARIAM) await expect(screen.getByTestId(`transfer-row-${id}`)).toHaveCount(0);
+      await expect(screen.getByTestId('transfer-person-person:khalid r').getByTestId('transfer-person-count')).toContainText(words.person.transfers(1));
       await fits(page, screen, `${name} page`);
       await page.screenshot({ path: path.join(OUT, `${name}-1-people.png`) });
+      // History lists every transfer of the period, waiting ones included: the unnamed one and Mariam's.
+      await page.getByTestId('transfers-view-history').click();
+      await expect(screen.getByTestId('transfer-row-u1')).toContainText(words.tags.needsAnswer);
+      for (const id of MARIAM) await expect(screen.getByTestId(`transfer-row-${id}`)).toContainText(words.tags.needsAnswer);
+      await page.getByTestId('transfers-view-answer').click();
 
       // The card's answer opens the sheet: the person, every entry and the count; nothing saved yet.
       await card.getByTestId('transfer-answer-external').click();
@@ -154,13 +163,18 @@ try {
         assert.equal(row.transferDecision.ownership, 'external');
         assert.equal(row.transferDecision.counterpartId, undefined, 'never linked');
       }
-      await expect(mariam).toHaveCount(0);
-      // Undo from the toast clears all three.
+      // Answered: the card moves on to Khalid.
+      await expect(card.getByTestId('transfer-question-person')).toContainText('KHALID R');
+      // Undo from the toast clears all three, and the card asks about Mariam again.
       await page.getByRole('button', { name: words.answers.undo, exact: true }).click();
       await expect.poll(async () => (await decided(page, MARIAM)).length).toBe(0);
-      await expect(mariam).toHaveCount(1);
+      await expect(card.getByTestId('transfer-question-person')).toContainText('MARIAM S');
 
-      // Saved again, from the row this time: someone else counts in Net on Transactions, and every count follows.
+      // Saved again, from the list this time (searching lists the card's person too): someone else counts in Net
+      // on Transactions, and every count follows.
+      await screen.locator('input').first().fill('mariam');
+      await expect(mariam).toBeVisible();
+      await expect(mariam.getByTestId('transfer-person-count')).toContainText(words.person.transfers(3));
       await mariam.click();
       await sheet.getByTestId('transfer-answer-external').click();
       await sheet.getByTestId('transfer-answer-sheet-save').click();
@@ -182,9 +196,10 @@ try {
       await expect.poll(async () => (await decided(page, ['k1'])).map(row => row.transferDecision.ownership)).toEqual(['own']);
       assert.equal((await decided(page, ['k1']))[0].transferDecision.counterpartId, undefined);
       const netOwn = await sameCount(page, words, home, WAITING - 4);
-      // Only the unnamed transfer waits: no question card, the counted link opens select mode.
+      // Only the unnamed transfer waits: no question card; its row is the one way to select mode.
       await expect(page.getByTestId('transfer-question-card')).toHaveCount(0);
-      await expect(page.getByTestId('transfers-review-link')).toBeVisible();
+      await expect(page.getByTestId('transfers-review-link')).toHaveCount(0);
+      await expect(page.getByTestId('transfer-question-unnamed')).toBeVisible();
       assert.equal(netOwn, netAfter, 'own money stays out of Net');
       await page.reload({ waitUntil: 'networkidle' });
       assert.equal((await decided(page, [...MARIAM, 'k1'])).length, 4, 'answers survive reopening');

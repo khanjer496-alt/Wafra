@@ -224,6 +224,8 @@ try {
       await page.waitForURL(/\/transfers(?:[?#]|$)/);
       await page.getByTestId('transfers-screen').waitFor({ state: 'visible' });
       await page.getByTestId('transfer-question-card').waitFor({ state: 'visible' });
+      // The period's transfers are under History; the page opens on To answer while anything waits.
+      await click(page.getByTestId('transfers-view-history'));
       await click(page.getByTestId('transfer-row-unknown-out'));
       // The detail sheet asks the one question; its three answers are always offered.
       await fits(page.getByTestId('entry-transfer-question'));
@@ -232,10 +234,11 @@ try {
       }
       await click(page.getByTestId('entry-detail-done'));
       await page.getByTestId('entry-detail-sheet').waitFor({ state: 'hidden' });
-      // "See all" on the question card selects several on this same page: no second screen.
-      await click(page.getByTestId('transfer-question-see-all'));
+      // Select (To answer) selects several on this same page: no second screen.
+      await click(page.getByTestId('transfers-view-answer'));
+      await click(page.getByTestId('transfers-select'));
       await page.getByTestId('transfer-selection-footer').waitFor({ state: 'visible' });
-      assert.match(page.url(), /\/transfers(?:[?#]|$)/, 'See all stays on Transfers');
+      assert.match(page.url(), /\/transfers(?:[?#]|$)/, 'Select stays on Transfers');
       await click(page.getByTestId('transfer-cancel-selection'));
       await page.getByTestId('transfer-selection-footer').waitFor({ state: 'hidden' });
       // An old Review transfers link to one entry opens that entry's question on Transfers.
