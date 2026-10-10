@@ -17,7 +17,11 @@ const billing = load(path.join(root, 'src/lib/billing.ts'), {
     publishIosCaptureStatusRefresh() {},
     setIosStoreCaptureEntitlementLease: async () => true,
   },
-  '@/lib/purchases': { ENTITLEMENT_ID: 'pro', PRO_SKUS: { monthly: 'pro_monthly', yearly: 'pro_yearly' } },
+  '@/lib/purchases': {
+    ENTITLEMENT_ID: 'pro',
+    PRO_SKUS: { weekly: 'pro_weekly', yearly: 'pro_yearly' },
+    PRO_ENTITLEMENT_PRODUCT_IDS: ['pro_weekly', 'pro_yearly', 'pro_monthly'],
+  },
 });
 
 const NOW = Date.parse('2026-10-06T08:00:00Z');
@@ -25,7 +29,7 @@ const PERIOD_END = '2026-10-10T08:00:00Z';
 const active = { status: 'ACTIVE', entitlements: [{ id: 'pro' }] };
 const info = (overrides) => ({
   subscriptions: [{
-    productId: 'pro_monthly', isActive: true, isRevoked: false, willRenew: true,
+    productId: 'pro_yearly', isActive: true, isRevoked: false, willRenew: true,
     isInGracePeriod: false, isInBillingRetryPeriod: false, expirationDate: PERIOD_END,
     ...overrides,
   }],
@@ -57,4 +61,25 @@ test('an already expired or revoked transaction never earns grace', () => {
 test('a confirmed inactive answer still clears capture', () => {
   const snapshot = billing.entitlementSnapshot({ status: 'INACTIVE' }, info({}), NOW);
   assert.deepEqual({ ...snapshot }, { active: false, requestDateMs: NOW, expirationDateMs: null });
+});
+
+test('a holder of a retired plan keeps the exact deadline and renewal grace', () => {
+  const snapshot = billing.entitlementSnapshot(active, info({ productId: 'pro_monthly' }), NOW);
+  assert.equal(snapshot.expirationDateMs, Date.parse(PERIOD_END) + billing.STORE_CAPTURE_RENEWAL_GRACE_MS);
+});
+
+test('a product outside Wafra Pro never sets the deadline', () => {
+  const snapshot = billing.entitlementSnapshot(active, info({ productId: 'some_other_app' }), NOW);
+  assert.equal(snapshot.expirationDateMs, NOW + billing.STORE_CAPTURE_FALLBACK_LEASE_MS);
+});
+
+test('a weekly plan set to renew gets a shorter grace than its own period', () => {
+  const snapshot = billing.entitlementSnapshot(active, info({ productId: 'pro_weekly' }), NOW);
+  assert.equal(snapshot.expirationDateMs, Date.parse(PERIOD_END) + billing.STORE_CAPTURE_WEEKLY_RENEWAL_GRACE_MS);
+  assert.equal(billing.STORE_CAPTURE_WEEKLY_RENEWAL_GRACE_MS, 2 * 24 * 60 * 60 * 1000);
+});
+
+test('a cancelled weekly plan stops capture exactly at the period end', () => {
+  const snapshot = billing.entitlementSnapshot(active, info({ productId: 'pro_weekly', willRenew: false }), NOW);
+  assert.equal(snapshot.expirationDateMs, Date.parse(PERIOD_END));
 });

@@ -48,14 +48,14 @@
       }
     },
     "subscriptionLocalizations": {
-      "wafra_pro_monthly": {
+      "wafra_pro_weekly": {
         "en-US": {
-          "displayName": "Wafra Pro Monthly",
-          "description": "Automatic capture after 3 app days, monthly."
+          "displayName": "Wafra Pro Weekly",
+          "description": "Automatic capture after 3 app days, weekly."
         },
         "ar-SA": {
-          "displayName": "وفرة برو شهرياً",
-          "description": "التقاط تلقائي بعد 3 أيام، بفوترة شهرية."
+          "displayName": "وفرة برو أسبوعياً",
+          "description": "التقاط تلقائي بعد 3 أيام، بفوترة أسبوعية."
         }
       },
       "wafra_pro_yearly": {
@@ -117,17 +117,17 @@
       "Personal finance"
     ],
     "subscriptionLocalizations": {
-      "wafra_pro_monthly": {
+      "wafra_pro_weekly": {
         "en-US": {
-          "title": "Wafra Pro Monthly",
-          "description": "Automatic capture after three included app days, billed monthly.",
+          "title": "Wafra Pro Weekly",
+          "description": "Automatic capture after three included app days, billed weekly.",
           "benefits": [
             "Automatic capture"
           ]
         },
         "ar": {
-          "title": "وفرة برو شهرياً",
-          "description": "الالتقاط التلقائي بعد ثلاثة أيام مضمنة، بفوترة شهرية.",
+          "title": "وفرة برو أسبوعياً",
+          "description": "الالتقاط التلقائي بعد ثلاثة أيام مضمنة، بفوترة أسبوعية.",
           "benefits": [
             "الالتقاط التلقائي"
           ]

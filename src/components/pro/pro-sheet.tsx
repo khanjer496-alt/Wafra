@@ -27,6 +27,7 @@ import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useProCheckout } from '@/hooks/use-pro-checkout';
+import { planLabel } from '@/lib/pro-plans';
 import { t, tf } from '@/lib/i18n';
 import type { ProGatedFeature } from '@/lib/pro-gate';
 import { proCopy } from '@/lib/pro-copy';
@@ -93,7 +94,7 @@ function ProSheetSession({ feature, visible, onClose }: {
               ? t('purchaseInProgress')
               : selectedOffer
                 ? tf('startPlanWithPrice', {
-                    plan: selectedPlan === 'yearly' ? t('yearly') : t('monthly'),
+                    plan: planLabel(selectedPlan),
                     price: selectedOffer.priceString,
                   })
                 : t('getPro')}

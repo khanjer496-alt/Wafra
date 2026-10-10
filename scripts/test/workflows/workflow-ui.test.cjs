@@ -225,7 +225,7 @@ test('feedback submission is reachable only through the confirmation callback',a
 });
 for(const platform of ['android','ios'])test(`paywall does not manufacture a storefront price: ${platform}`,()=>{
  const h=createWorkflowHarness({platform,state:{pro:false,founderPro:false}}),tree=h.renderScreen('pro');
- const content=text(tree);assert.ok(!content.includes('US$9.99'));assert.ok(!content.includes('US$74.99'));
+ const content=text(tree);assert.ok(!content.includes('US$4.99'));assert.ok(!content.includes('US$49.99'));
  assert.ok(content.includes(h.deps['@/lib/i18n'].t('getPro')));assert.ok(content.includes(h.deps['@/lib/i18n'].t('restorePurchase')));assert.deepEqual(h.events,[]);
 });
 test('unpaired trusted devices preserves privacy disclosure and makes no connection on render',()=>{

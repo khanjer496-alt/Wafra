@@ -12,7 +12,7 @@ import {
   publishIosCaptureStatusRefresh,
   setIosStoreCaptureEntitlementLease,
 } from '@/lib/capture';
-import { ENTITLEMENT_ID, PRO_SKUS } from '@/lib/purchases';
+import { ENTITLEMENT_ID, PRO_ENTITLEMENT_PRODUCT_IDS, PRO_SKUS } from '@/lib/purchases';
 
 /**
  * A verified store answer mirrored into the app and the iOS App Intent gate.
@@ -49,7 +49,19 @@ export const STORE_CAPTURE_FALLBACK_LEASE_MS = 25 * 60 * 60 * 1000;
  */
 export const STORE_CAPTURE_RENEWAL_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 
-const PRO_PRODUCT_IDS = new Set<string>(Object.values(PRO_SKUS));
+/**
+ * The same grace for the weekly plan. Seven days would be a whole period: a
+ * weekly subscriber who turned renewal off after the lease was written could
+ * keep iPhone capture for a second, unpaid week. Two days still covers a
+ * renewal that lands while Wafra is not opened over a weekend.
+ */
+export const STORE_CAPTURE_WEEKLY_RENEWAL_GRACE_MS = 2 * 24 * 60 * 60 * 1000;
+
+function renewalGraceMs(productId: string): number {
+  return productId === PRO_SKUS.weekly ? STORE_CAPTURE_WEEKLY_RENEWAL_GRACE_MS : STORE_CAPTURE_RENEWAL_GRACE_MS;
+}
+
+const PRO_PRODUCT_IDS = new Set<string>(PRO_ENTITLEMENT_PRODUCT_IDS);
 
 function futureExpirationMs(info: CustomerInfo | null, nowMs: number): number | null {
   if (!info) return null;
@@ -62,7 +74,7 @@ function futureExpirationMs(info: CustomerInfo | null, nowMs: number): number | 
     const expiration = Date.parse(subscription.expirationDate);
     if (!Number.isFinite(expiration) || expiration <= nowMs) continue;
     const renews = subscription.willRenew === true && subscription.isInBillingRetryPeriod !== true;
-    const candidate = renews ? expiration + STORE_CAPTURE_RENEWAL_GRACE_MS : expiration;
+    const candidate = renews ? expiration + renewalGraceMs(subscription.productId) : expiration;
     latest = latest === null ? candidate : Math.max(latest, candidate);
   }
   return latest;

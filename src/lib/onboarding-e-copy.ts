@@ -140,7 +140,7 @@ const en = {
   trialEndBody: 'Automatic capture pauses. Nothing is charged, and your ledger stays.',
   continuePro: 'Continue with Pro',
   planYearly: 'Yearly',
-  planMonthly: 'Monthly',
+  planWeekly: 'Weekly',
   startFree: (days: number) => days === 1 ? 'Start the free day' : `Start the free ${days} days`,
   continueFree: 'Continue without Pro',
   trialTimelineLabel: 'What happens during the free days',
@@ -246,7 +246,7 @@ const ar: OnboardingECopy = {
   trialEndBody: 'يتوقف الالتقاط التلقائي مؤقتاً. لا يُخصم أي مبلغ، ويبقى سجلك كما هو.',
   continuePro: 'المتابعة مع Pro',
   planYearly: 'سنوي',
-  planMonthly: 'شهري',
+  planWeekly: 'أسبوعي',
   startFree: (days: number) => days === 1 ? 'ابدأ اليوم المجاني'
     : days === 2 ? 'ابدأ اليومين المجانيين'
       : `ابدأ ${arabicCount(days, { one: 'يوماً مجانياً', two: 'يومين مجانيين', few: 'أيام مجانية', many: 'يوماً مجانياً', hundreds: 'يوم مجاني' })}`,

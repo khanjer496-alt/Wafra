@@ -16,6 +16,7 @@ import { Spacing } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useProCheckout } from '@/hooks/use-pro-checkout';
+import { planLabel } from '@/lib/pro-plans';
 import { t, tf } from '@/lib/i18n';
 import { autoCaptureMethod } from '@/lib/purchases';
 import { proCopy } from '@/lib/pro-copy';
@@ -198,7 +199,7 @@ export default function ProScreen() {
                 ? t('purchaseInProgress')
                 : selectedOffer
                   ? tf('startPlanWithPrice', {
-                      plan: selectedPlan === 'yearly' ? t('yearly') : t('monthly'),
+                      plan: planLabel(selectedPlan),
                       price: selectedOffer.priceString,
                     })
                   : t('getPro')}

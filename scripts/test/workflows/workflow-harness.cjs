@@ -153,6 +153,7 @@ function createWorkflowHarness(options={}) {
    })};
    store.setPro=record('setPro');
    // The shared checkout and plan radios run from source, over the stubbed store.
+   h.local('@/lib/pro-plans','src/lib/pro-plans.ts');
    h.local('@/hooks/use-pro-checkout','src/hooks/use-pro-checkout.ts');
    h.local('@/components/pro/pro-plan-options');
   }
@@ -200,7 +201,8 @@ function createWorkflowHarness(options={}) {
    // The Goals step's Home preview names sections as Customize Home does.
    h.local('@/lib/customize-copy','src/lib/customize-copy.ts');
    h.local('@/lib/pattern','src/lib/pattern.ts');
-   Object.assign(d['@/lib/purchases'],{billingStore:()=>'play'});
+   Object.assign(d['@/lib/purchases'],{billingStore:()=>'play',yearlySavingPercent:()=>null});
+   h.local('@/lib/pro-plans','src/lib/pro-plans.ts');
    Object.assign(d['react-native-reanimated'],{ZoomIn:d['react-native-reanimated'].FadeInDown,useAnimatedProps:f=>f()});
    Object.assign(d['react-native-reanimated'].Easing,{bezier:()=>value=>value});
    d['react-native-safe-area-context'].useSafeAreaInsets=()=>({top:0,bottom:0,left:0,right:0});
