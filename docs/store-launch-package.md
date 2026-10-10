@@ -100,8 +100,9 @@ The draft answers live in `docs/store-compliance/apple-app-store.md`.
 
 Products remain:
 
-- `wafra_pro_monthly`
+- `wafra_pro_weekly`
 - `wafra_pro_yearly`
+- `wafra_pro_monthly` (retired: no longer offered, still carries `pro`)
 - RevenueCat entitlement: `pro`
 
 The commercial price is **not approved yet**. Reference values in repository

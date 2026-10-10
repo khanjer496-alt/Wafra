@@ -23,15 +23,13 @@ import {
 } from '@/components/superwall-billing-context';
 import { subscriptionManagementUrl } from '@/lib/billing';
 import { t } from '@/lib/i18n';
-import { billingStore, trialDaysLeft, type ProPlan } from '@/lib/purchases';
+import { billingStore, trialDaysLeft, yearlySavingPercent, type ProPlan } from '@/lib/purchases';
+import { PLAN_ORDER } from '@/lib/pro-plans';
 import { configuredPublicUrl } from '@/lib/public-links';
 import { useStore } from '@/lib/store';
 
 export type BillingAction = 'purchase' | 'restore' | 'manage' | null;
 export type OfferState = 'loading' | 'ready' | 'unavailable';
-
-/** Yearly first: it is the plan the screen recommends when the store has both. */
-export const PLAN_ORDER: ProPlan[] = ['yearly', 'monthly'];
 
 export function useProCheckout() {
   const { state } = useStore();
@@ -92,6 +90,8 @@ export function useProCheckout() {
     : null;
   const missingPlans = PLAN_ORDER.filter(
     (plan) => !offers.some((offer) => offer.plan === plan));
+  // From the two prices this storefront returned; null hides the badge.
+  const savingPercent = offerState === 'ready' ? yearlySavingPercent(offers) : null;
 
   /**
    * The one action that can charge money. It refuses before the store is asked
@@ -206,6 +206,7 @@ export function useProCheckout() {
     setSelectedPlan,
     selectedOffer,
     missingPlans,
+    savingPercent,
     notice,
     trial,
     entitled,

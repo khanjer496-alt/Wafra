@@ -46,15 +46,15 @@ const ok = (name, condition, detail = '') => {
   ok('canonical pending pricing is valid', validateStorePricing(pricing, metadata).length === 0);
   ok('complete approved pricing is valid', validateStorePricing(approvedPricing(), metadata).length === 0);
   ok('approved pricing rejects an unapproved base price', rejects(
-    (value) => { value.products.monthly.approvedBasePrice.publisherApproved = false; },
+    (value) => { value.products.weekly.approvedBasePrice.publisherApproved = false; },
     /publisher-approved base price/,
   ));
   ok('approved pricing rejects a base currency that differs from the reference', rejects(
-    (value) => { value.products.monthly.approvedBasePrice.currency = 'EUR'; },
+    (value) => { value.products.weekly.approvedBasePrice.currency = 'EUR'; },
     /publisher-approved base price/,
   ));
   ok('approved pricing rejects malformed base amounts', rejects(
-    (value) => { value.products.monthly.approvedBasePrice.amount = '29.999'; },
+    (value) => { value.products.weekly.approvedBasePrice.amount = '29.999'; },
     /publisher-approved base price/,
   ));
   ok('pricing rejects store introductory offers', rejects(
@@ -62,11 +62,11 @@ const ok = (name, condition, detail = '') => {
     /introductory offers/,
   ));
   ok('pricing rejects Google base-plan drift', rejects(
-    (value) => { value.products.monthly.googleBasePlanId = 'monthly-v2'; },
+    (value) => { value.products.weekly.googleBasePlanId = 'weekly-v2'; },
     /base plan/,
   ));
   ok('approved pricing requires store read-back evidence', rejects(
-    (value) => { value.products.monthly.readBackEvidence.JPY.googleVerified = false; },
+    (value) => { value.products.weekly.readBackEvidence.JPY.googleVerified = false; },
     /read-back evidence for JPY/,
   ));
   ok('pricing rejects product identifier drift', rejects(

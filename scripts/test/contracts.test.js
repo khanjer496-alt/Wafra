@@ -459,14 +459,11 @@ function ktSources(dir) {
   );
   ok('the paywall builds no English sentence inline', suspects.length === 0, suspects.slice(0, 3));
 
-  const { PRO_PRICES, yearlySavingMonths } = require('./build/purchases');
-  const months = yearlySavingMonths();
-  const saved = PRO_PRICES.monthly.fils * 12 - PRO_PRICES.yearly.fils;
-  ok('the yearly saving is derived from the prices, not written down',
-    months === Math.floor(saved / PRO_PRICES.monthly.fils) && months > 0,
-    { months, saved });
-  ok('no hard-coded month count survives in the copy',
-    !/\d+ months free/.test(fs.readFileSync(path.join(ROOT, 'src/lib/i18n.ts'), 'utf8')));
+  ok('the yearly saving is derived from the store prices, not written down',
+    /yearlySavingPercent\(offers\)/.test(read('src/hooks/use-pro-checkout.ts')) &&
+      /yearlySavingPercent\(checkout\.offers\)/.test(read('src/components/onboarding/e-paywall.tsx')));
+  ok('no hard-coded saving survives in the copy',
+    !/\d+ months free|[Ss]ave \d+\s?%/.test(fs.readFileSync(path.join(ROOT, 'src/lib/i18n.ts'), 'utf8')));
 
   const store = fs.readFileSync(path.join(ROOT, 'src/lib/store.tsx'), 'utf8');
   ok('an editable ledger backup cannot grant Pro or restart the trial',

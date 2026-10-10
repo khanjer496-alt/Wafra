@@ -201,7 +201,7 @@ these three facts.
   removed later, the store offer and all paywall/listing copy must change in the
   same release.
 - SKUs (create in Play Console → Monetize → Subscriptions):
-  `wafra_pro_monthly`, `wafra_pro_yearly`. Use Google Play's territory price
+  `wafra_pro_weekly`, `wafra_pro_yearly`. Use Google Play's territory price
   tiers; the paywall renders the storefront's localized price string.
 - Code: paywall entry at `src/app/pro.tsx`; entitlement cache `state.pro`;
   Superwall runtime integration in `src/components/superwall-billing-provider.native.tsx`.

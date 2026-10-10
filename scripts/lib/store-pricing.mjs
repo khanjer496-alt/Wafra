@@ -1,14 +1,14 @@
 const MONEY = /^\d+(?:\.\d{1,2})?$/;
 const EXPECTED_PRODUCTS = {
-  monthly: {
-    productId: 'wafra_pro_monthly',
-    googleBasePlanId: 'monthly',
-    referenceAmount: '9.99',
+  weekly: {
+    productId: 'wafra_pro_weekly',
+    googleBasePlanId: 'weekly',
+    referenceAmount: '4.99',
   },
   yearly: {
     productId: 'wafra_pro_yearly',
     googleBasePlanId: 'yearly',
-    referenceAmount: '74.99',
+    referenceAmount: '49.99',
   },
 };
 
@@ -42,8 +42,8 @@ export function validateStorePricing(pricing, metadata) {
     errors.push('pricing read-back samples must cover representative 0/2/3-decimal storefront currencies');
   }
   const actualPlans = Object.keys(pricing.products ?? {}).sort();
-  if (JSON.stringify(actualPlans) !== JSON.stringify(Object.keys(EXPECTED_PRODUCTS))) {
-    errors.push('pricing products must be exactly monthly and yearly');
+  if (JSON.stringify(actualPlans) !== JSON.stringify(Object.keys(EXPECTED_PRODUCTS).sort())) {
+    errors.push('pricing products must be exactly weekly and yearly');
   }
 
   for (const [plan, expected] of Object.entries(EXPECTED_PRODUCTS)) {

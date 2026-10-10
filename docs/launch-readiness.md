@@ -252,7 +252,7 @@ curl --fail --show-error https://<production-relay>/v1/health
   [push setup guide](https://docs.expo.dev/push-notifications/push-notifications-setup/)
   requires a paid Apple Developer account for iOS credentials.
 - [ ] In App Store Connect create one subscription group and products with the
-  exact IDs `wafra_pro_monthly` and `wafra_pro_yearly`; add localized display
+  exact IDs `wafra_pro_weekly` and `wafra_pro_yearly`; add localized display
   names/descriptions, UAE prices matching the approved commercial decision,
   and review screenshots. Do not add an introductory free trial while Wafra's
   local three-day trial remains enabled; the clocks would stack.
@@ -369,7 +369,7 @@ curl --fail --show-error https://<production-relay>/v1/health
   actual categories truthfully rather than guessing a license requirement.
 - [ ] Complete main store listing and Arabic localization, developer contact,
   support/privacy URLs, category/tags, countries, pricing, and distribution.
-- [ ] Create subscriptions `wafra_pro_monthly` and `wafra_pro_yearly`, base
+- [ ] Create subscriptions `wafra_pro_weekly` and `wafra_pro_yearly`, base
   plans/offers, localized prices and descriptions, with no introductory store
   trial while the app's local three-day trial is enabled. Activate them, attach
   them to Superwall entitlement `pro`, publish `pro_upgrade`, and verify the

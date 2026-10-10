@@ -1548,10 +1548,12 @@ const S = {
     en: 'Charged {price} when you confirm. Renews yearly until cancelled.',
     ar: 'يُخصم {price} عند التأكيد، ثم يتجدد سنوياً حتى الإلغاء.',
   },
-  proChargeTimingMonth: {
-    en: 'Charged {price} when you confirm. Renews monthly until cancelled.',
-    ar: 'يُخصم {price} عند التأكيد، ثم يتجدد شهرياً حتى الإلغاء.',
+  proChargeTimingWeek: {
+    en: 'Charged {price} when you confirm. Renews weekly until cancelled.',
+    ar: 'يُخصم {price} عند التأكيد، ثم يتجدد أسبوعياً حتى الإلغاء.',
   },
+  proMostPopular: { en: 'Most popular', ar: 'الأكثر اختياراً' },
+  proYearlyPerWeek: { en: 'Just {price} a week', ar: 'فقط {price} أسبوعياً' },
   proStoreConfirmsPrice: {
     en: 'Your store shows the exact charge and renewal details before you confirm.',
     ar: 'يعرض المتجر المبلغ الدقيق وتفاصيل التجديد قبل التأكيد.',
@@ -1577,8 +1579,8 @@ const S = {
   purchaseInProgress: { en: 'Opening the store…', ar: 'جارٍ فتح المتجر…' },
   restorePurchase: { en: 'Restore purchase', ar: 'استعادة الشراء' },
   yearly: { en: 'YEARLY', ar: 'سنوي' },
-  monthly: { en: 'MONTHLY', ar: 'شهري' },
-  perMonth: { en: 'per month', ar: 'شهرياً' },
+  weekly: { en: 'WEEKLY', ar: 'أسبوعي' },
+  perWeek: { en: 'per week', ar: 'أسبوعياً' },
   transferLabel: { en: 'Transfer', ar: 'تحويل' },
   // ── strings screens used to write in English inline ──
   noScreenLock: { en: 'No screen lock set up', ar: 'لا يوجد قفل شاشة' },
@@ -2400,7 +2402,6 @@ const S = {
     en: 'The store could not confirm Pro yet. Check your connection, then restore purchases before trying to buy again.',
     ar: 'لم يتمكن المتجر من تأكيد وفرة برو بعد. تحقق من الاتصال، ثم استعد المشتريات قبل محاولة الشراء مجدداً.',
   },
-  monthsFreeSuffix: { en: '· {months} months free', ar: '· {months} أشهر مجاناً' },
   trialDaysLeftPaywall: {
     en: 'Everything is free for your first {total} days — {left} day{s} left. Keep it going:',
     ar: 'كل شيء مجاني في أول {total} أيام — تبقّى {left} يوم. تابع الاستخدام:',

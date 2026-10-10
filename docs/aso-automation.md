@@ -77,7 +77,7 @@ internal track. EAS handles binaries through the production submit profile.
 ## Pricing and subscriptions
 
 `store-pricing.json` stays `pending-commercial-approval` until the Account
-Holder approves UAE and Saudi monthly/yearly prices. Approval requires, for
+Holder approves UAE and Saudi weekly/yearly prices. Approval requires, for
 each product and storefront:
 
 - an Apple subscription price-point identifier;

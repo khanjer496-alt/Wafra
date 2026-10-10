@@ -3,10 +3,14 @@
  *
  * Radio rows in design language E: a card per plan on the sheet, the chosen
  * one ringed in the band's own tint. Every price is the display string the
- * device's store returned (`offer.priceString`); nothing here computes,
- * converts or compares prices, so there is no percentage-off badge. A plan the
- * store did not return is drawn as unavailable rather than dropped, and the
- * renewal terms for the store in use sit under the choice.
+ * device's store returned (`offer.priceString`); nothing here formats or
+ * converts a price. The yearly row carries "Most popular", the saving against
+ * a year of weekly payments (`checkout.savingPercent`, compared from the
+ * store's own two prices and left out when it cannot be), and the store's own
+ * per-week figure. The billed amount stays the largest price on the row, as
+ * App Review requires. A plan the store did not return is drawn as
+ * unavailable rather than dropped, and the renewal terms for the store in use
+ * sit under the choice.
  */
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
@@ -16,7 +20,8 @@ import type { ProPlanOffer } from '@/components/superwall-billing-context';
 import { Icon } from '@/components/ui/icon';
 import type { BandPalette } from '@/constants/theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { PLAN_ORDER, type ProCheckout } from '@/hooks/use-pro-checkout';
+import type { ProCheckout } from '@/hooks/use-pro-checkout';
+import { PLAN_ORDER, planChargeTimingKey, planLabel, planPeriod } from '@/lib/pro-plans';
 import { t, tf } from '@/lib/i18n';
 import type { ProPlan } from '@/lib/purchases';
 
@@ -27,18 +32,27 @@ export function ProPlanOptions({ checkout, palette, testIDPrefix = 'pro-plan' }:
   testIDPrefix?: string;
 }) {
   const largeText = useLargeTextLayout();
-  const { offers, offerState, selectedPlan, setSelectedPlan, selectedOffer, missingPlans, store, checkoutReady, loadOffers } = checkout;
+  const {
+    offers, offerState, selectedPlan, setSelectedPlan, selectedOffer, missingPlans, savingPercent,
+    store, checkoutReady, loadOffers,
+  } = checkout;
 
   const planRow = (offer: ProPlanOffer) => {
     const selected = offer.plan === selectedPlan;
-    const label = offer.plan === 'yearly' ? t('yearly') : t('monthly');
-    const period = offer.plan === 'yearly' ? t('perYear') : t('perMonth');
+    const label = planLabel(offer.plan);
+    const period = planPeriod(offer.plan);
+    const yearly = offer.plan === 'yearly';
+    const saving = yearly && savingPercent !== null ? tf('proSavePercent', { percent: savingPercent }) : null;
+    const perWeek = yearly && offer.weeklyPriceString
+      ? tf('proYearlyPerWeek', { price: offer.weeklyPriceString }) : null;
+    const spoken = [label, yearly ? t('proMostPopular') : null, saving, `${offer.priceString} ${period}`, perWeek]
+      .filter(Boolean).join(' · ');
     return (
       <Pressable
         key={offer.productId}
         accessibilityRole="radio"
         accessibilityState={{ selected, checked: selected }}
-        accessibilityLabel={`${label} · ${offer.priceString} ${period}`}
+        accessibilityLabel={spoken}
         testID={`${testIDPrefix}-${offer.plan}`}
         onPress={() => setSelectedPlan(offer.plan)}
         style={({ pressed }) => [
@@ -54,10 +68,31 @@ export function ProPlanOptions({ checkout, palette, testIDPrefix = 'pro-plan' }:
         <View style={[styles.planMark, { borderColor: selected ? palette.tint : palette.textSecondary }]}>
           {selected && <View style={[styles.planDot, { backgroundColor: palette.tint }]} />}
         </View>
-        <ThemedText type="smallBold" style={[styles.grow, { color: palette.text }]}>{label}</ThemedText>
+        <View style={styles.grow}>
+          <ThemedText type="smallBold" style={{ color: palette.text }}>{label}</ThemedText>
+          {yearly ? (
+            <View style={styles.badges}>
+              <ThemedText type="meta" style={{ color: palette.tint }} testID={`${testIDPrefix}-yearly-popular`}>
+                {t('proMostPopular')}
+              </ThemedText>
+              {saving ? (
+                <View style={[styles.badge, { backgroundColor: palette.fill }]}>
+                  <ThemedText type="meta" style={{ color: palette.onFill }} testID={`${testIDPrefix}-yearly-saving`}>
+                    {saving}
+                  </ThemedText>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
+        </View>
         <View style={[styles.planPrice, largeText && styles.planPriceStacked]}>
           <ThemedText type="smallBold" tabular style={{ color: palette.text }}>{offer.priceString}</ThemedText>
           <ThemedText type="meta" style={{ color: palette.textSecondary }}>{period}</ThemedText>
+          {perWeek ? (
+            <ThemedText type="meta" tabular style={{ color: palette.textSecondary }} testID={`${testIDPrefix}-yearly-per-week`}>
+              {perWeek}
+            </ThemedText>
+          ) : null}
         </View>
       </Pressable>
     );
@@ -75,7 +110,7 @@ export function ProPlanOptions({ checkout, palette, testIDPrefix = 'pro-plan' }:
       accessibilityRole="summary"
       style={[styles.planRow, largeText && styles.planRowWrap, { borderColor: palette.rule, borderWidth: 1.5, backgroundColor: palette.card }]}>
       <View style={styles.grow}>
-        <ThemedText type="smallBold" style={{ color: palette.text }}>{plan === 'yearly' ? t('yearly') : t('monthly')}</ThemedText>
+        <ThemedText type="smallBold" style={{ color: palette.text }}>{planLabel(plan)}</ThemedText>
         <ThemedText type="meta" style={{ color: palette.textSecondary }}>{t('priceUnavailable')}</ThemedText>
       </View>
       <Icon name="alert" size={16} color={palette.statusNear} />
@@ -129,10 +164,7 @@ export function ProPlanOptions({ checkout, palette, testIDPrefix = 'pro-plan' }:
       )}
       {selectedOffer && (
         <ThemedText type="meta" style={{ color: palette.textSecondary }}>
-          {tf(
-            selectedPlan === 'yearly' ? 'proChargeTimingYear' : 'proChargeTimingMonth',
-            { price: selectedOffer.priceString },
-          )}
+          {tf(planChargeTimingKey(selectedPlan), { price: selectedOffer.priceString })}
         </ThemedText>
       )}
       <ThemedText type="meta" style={{ color: palette.textSecondary }}>
@@ -170,6 +202,8 @@ const styles = StyleSheet.create({
   },
   planDot: { width: 10, height: 10, borderRadius: 5 },
   planPrice: { alignItems: 'flex-end', gap: 2 },
+  badges: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6 },
+  badge: { borderRadius: 8, paddingHorizontal: 6, paddingVertical: 1 },
   planPriceStacked: { flexBasis: '100%', alignItems: 'flex-start', paddingStart: 22 + 12 },
   unavailable: {
     flexDirection: 'row',

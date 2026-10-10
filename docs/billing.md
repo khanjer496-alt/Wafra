@@ -32,11 +32,34 @@ Create these subscriptions in both stores:
 
 | plan | product id | reference price |
 | --- | --- | --- |
-| monthly | `wafra_pro_monthly` | US$9.99 |
-| yearly | `wafra_pro_yearly` | US$74.99 |
+| weekly | `wafra_pro_weekly` | US$4.99 |
+| yearly | `wafra_pro_yearly` | US$49.99 |
 
 The reference prices are documentation only. The shipped paywall must use the
 storefront-formatted prices supplied by Apple/Google through Superwall.
+
+Suggested storefront prices, pending commercial approval (store prices include
+VAT; pick the nearest price point each store offers):
+
+| storefront | weekly | yearly |
+| --- | --- | --- |
+| United Arab Emirates | AED 18.99 | AED 189.99 |
+| Saudi Arabia | SAR 19.99 | SAR 199.99 |
+| Kuwait, Qatar, Bahrain, Oman | store equivalent of US$4.99 | store equivalent of US$49.99 |
+
+The paywall lists yearly first and preselects it, with "Most popular", the
+saving against 52 weekly payments and the per-week cost of the yearly plan.
+The saving is computed on the device from the two raw prices the storefront
+returned (`yearlySavingPercent`), rounded down, and left out whenever the two
+prices cannot be compared; the per-week figure is the Superwall SDK's own
+`weeklyPrice` string. The billed amount stays the largest price on each plan,
+as App Review Guideline 3.1.2 requires. Wafra does not use a free-trial
+toggle: App Review rejects toggle paywalls.
+
+`wafra_pro_monthly` is retired: it is no longer offered, but it stays in
+`RETIRED_PRO_SKUS` so anyone holding it keeps Pro, the exact store deadline
+and the renewal grace for iPhone capture. Keep it attached to `pro` in
+Superwall and do not delete it from either store while it has subscribers.
 
 Wafra currently grants its own local three-day Pro access period. **Do not add a
 store introductory trial while that local clock ships**, or the two trials will
@@ -47,13 +70,14 @@ clock and updates every paywall/listing claim together.
 
 1. Add the Wafra iOS and Android apps and connect their store products.
 2. Use the entitlement named exactly `pro`.
-3. Attach both monthly and yearly products to `pro` on both platforms.
+3. Attach the weekly and yearly products (and the retired monthly one) to `pro`
+   on both platforms.
 4. Create placement `onboarding` using `docs/superwall-flow-spec.md`.
 5. Keep `pro_upgrade` and `post_import_pro` reserved: the app does not register
    either one, so publishing a campaign on them changes nothing a user sees.
 
 Both plan products must be fetchable by the SKUs above. On Play the SDK may
-return `wafra_pro_monthly:<base plan id>`; Wafra matches on the first segment,
+return `wafra_pro_weekly:<base plan id>`; Wafra matches on the first segment,
 so either identifier works — but a product that is not connected to the app in
 Superwall returns nothing, and `/pro` then reports the price as unavailable.
 
@@ -149,7 +173,13 @@ reporting/audit; it is not the new runtime source.
 
 ## Physical-store QA
 
-- Test monthly and yearly purchase on TestFlight and a Play-installed internal build.
+- Test weekly and yearly purchase on TestFlight and a Play-installed internal build,
+  and check the yearly row's saving and per-week figure against the store prices.
+  On iPhone confirm the "Save N%" badge actually appears: it is left out
+  whenever the SDK does not hand back a numeric price, which fails safe but
+  silently.
+- A renewing weekly plan keeps iPhone capture 2 days past its period end
+  (`STORE_CAPTURE_WEEKLY_RENEWAL_GRACE_MS`) instead of the 7 days other plans get.
 - Test Restore for subscriptions created before the Superwall migration.
 - Test cancel/refund/expiry and verify revocation occurs only on confirmed inactive state.
 - Launch offline after a confirmed subscription and verify cached access is preserved.

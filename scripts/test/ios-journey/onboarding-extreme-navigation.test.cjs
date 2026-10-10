@@ -258,7 +258,8 @@ async function gate(options = {}) {
   dependencies['@/lib/format'] = { parseAmountWithMoneySpec: text => /^\d+(\.\d{1,2})?$/.test(text) ? Math.round(Number(text) * 100) : null };
   dependencies['@/lib/pattern'] = lib('pattern');
   dependencies['@/lib/period'] = { currentMonthPeriod: () => ({ mode: 'month', key: '2026-09' }), inPeriod: () => true };
-  dependencies['@/lib/purchases'] = { trialDaysLeft: () => options.trialDays ?? 3, billingStore: () => 'appStore' };
+  dependencies['@/lib/purchases'] = { trialDaysLeft: () => options.trialDays ?? 3, billingStore: () => 'appStore', yearlySavingPercent: () => null };
+  dependencies['@/lib/pro-plans'] = lib('pro-plans', dependencies);
   dependencies['@/lib/public-links'] = { configuredPublicUrl: () => null };
   dependencies['@/lib/home-widgets'] = {
     // A saved layout; a case can pass `homeWidgets` (e.g. the Home v3 default a first run reads).
