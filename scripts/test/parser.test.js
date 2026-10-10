@@ -6655,6 +6655,81 @@ t('a spaced masked card number keeps its LAST four digits',
   t('an Arabic refund is an offset, not business revenue',
     'استرداد مبلغ\nبطاقة: 4321;مدى\nمبلغ: 120 SAR\nمن: NOON\nفي: 2026-10-02 18:00',
     { type: 'income', amountFils: 12000, category: 'other' });
+  // Independently authored synthetic controls for a source-observed Arabic
+  // internet-purchase refund heading. All values, layout and merchant are
+  // fictional; no private/GPL message body is copied or counted as real evidence.
+  // The refund heading must beat the purchase word without changing the
+  // ordinary purchase twin or promoting non-posting refund notices.
+  const internetRefund = 'استرداد شراء الانترنت\nمبلغ: 67.80 SAR\nبطاقة: **2468;مدى\n' +
+    'لدى: LANTERN MARKET\nفي: 2026-09-18 10:20';
+  t('synthetic Arabic internet-purchase refund is credit with exact SAR money',
+    internetRefund,
+    { kind: 'transaction', type: 'income', amountFils: 6780, currency: 'SAR', category: 'other' });
+  t('the synthetic refund heading survives normal Arabic orthography and CRLF',
+    'استرداد شراء الإنترنت\r\nمبلغ: 21.35 SAR\r\nبطاقة: **1357;مدى\r\n' +
+      'لدى: COPPER SHOP\r\nفي: 2026-09-17 11:30',
+    { kind: 'transaction', type: 'income', amountFils: 2135, currency: 'SAR' });
+  t('synthetic Arabic internet-purchase twin remains a debit',
+    'شراء الانترنت\nمبلغ: 67.80 SAR\nبطاقة: **2468;مدى\nلدى: LANTERN MARKET\nفي: 2026-09-18 10:20',
+    { kind: 'transaction', type: 'expense', amountFils: 6780, currency: 'SAR' });
+  t('an Arabic refund phrase in a purchase help footer cannot reverse its direction',
+    'شراء الانترنت\nمبلغ: 67.80 SAR\nبطاقة: **2468;مدى\nلدى: LANTERN MARKET\nفي: 2026-09-18 10:20\n' +
+      'للاستفسار عن استرداد شراء الانترنت اتصل بخدمة العملاء',
+    { kind: 'transaction', type: 'expense', amountFils: 6780, currency: 'SAR' });
+  t('synthetic Arabic internet refund requiring OTP remains non-posting',
+    `${internetRefund}\nEnter OTP 654321 to complete this refund.`, null);
+  t('synthetic Arabic internet refund scheduled for later remains non-posting',
+    `${internetRefund}\nThe amount will be refunded tomorrow.`, null);
+  t('a native Arabic future internet refund is not rescued by its balance',
+    `${internetRefund}\nسيتم استرداد المبلغ غداً. الرصيد المتاح 920.15 SAR`, null);
+  t('an ordinary purchase retains its independent future-refund footer',
+    'شراء الانترنت\nمبلغ: 67.80 SAR\nبطاقة: **2468;مدى\nلدى: LANTERN MARKET\nفي: 2026-09-18 10:20\n' +
+      'The amount will be refunded tomorrow.',
+    { kind: 'transaction', type: 'expense', amountFils: 6780, currency: 'SAR' });
+  t('a completed Arabic internet refund retains an independent future-fee footer',
+    `${internetRefund}\nThe refund has been credited to your card. A service fee will be charged tomorrow.`,
+    { kind: 'transaction', type: 'income', amountFils: 6780, currency: 'SAR' });
+  t('synthetic Arabic internet refund declined remains non-posting',
+    `${internetRefund}\nRefund declined due to insufficient funds.`, null);
+  t('synthetic Arabic internet refund pending processing remains non-posting',
+    `${internetRefund}\nالعملية قيد الانتظار`, null);
+  t('synthetic Arabic internet refund request received remains non-posting',
+    `${internetRefund}\nYour refund request has been received.`, null);
+  t('a native Arabic refund-request receipt is not rescued by its balance',
+    `${internetRefund}\nتم استلام طلب استرداد المبلغ. الرصيد المتاح 920.15 SAR`, null);
+  t('an independently credited refund may retain a request acknowledgement',
+    `${internetRefund}\nYour refund request has been received. The refund was credited to your card.`,
+    { kind: 'transaction', type: 'income', amountFils: 6780, currency: 'SAR' });
+  t('a question about refund credit cannot confirm its request acknowledgement',
+    `${internetRefund}\nYour refund request has been received. The refund was credited to your card?`, null);
+  const refundAcknowledgements = [
+    'تم استلام طلب الاسترداد. الرصيد المتاح 920.15 SAR',
+    'We have received your refund request. Available balance SAR 920.15.',
+    'Your request for a refund has been received. Available balance SAR 920.15.',
+  ];
+  for (const [i, acknowledgement] of refundAcknowledgements.entries()) {
+    t(`synthetic refund acknowledgement word order ${i + 1} cannot post`,
+      `${internetRefund}\n${acknowledgement}`, null);
+    t(`acknowledgement word order ${i + 1} does not hide an independently credited refund`,
+      `${internetRefund}\n${acknowledgement}\nThe refund was credited to your card.`,
+      { kind: 'transaction', type: 'income', amountFils: 6780, currency: 'SAR' });
+  }
+  for (const [i, notice] of [
+    'The amount will be refunded tomorrow. The original purchase was charged to your card.',
+    'Your refund request has been received. The original purchase has been processed.',
+    'سيتم استرداد المبلغ غداً. تم شراء السلعة الأصلية سابقاً.',
+    'تم استلام طلب استرداد المبلغ. تم شراء السلعة الأصلية سابقاً.',
+  ].entries()) {
+    t(`the original purchase cannot confirm an unfinished refund ${i + 1}`,
+      `${internetRefund}\n${notice}`, null);
+  }
+  t('a negated Arabic refund cannot confirm its own future notice',
+    `${internetRefund}\nسيتم استرداد المبلغ غداً. لم يتم استرداد المبلغ.`, null);
+  t('a hypothetical Arabic refund cannot confirm its request acknowledgement',
+    `${internetRefund}\nتم استلام طلب الاسترداد. إذا تم استرداد المبلغ ستصلك رسالة.`, null);
+  t('an independently completed Arabic refund may retain a request acknowledgement',
+    `${internetRefund}\nتم استلام طلب استرداد المبلغ. تم استرداد المبلغ إلى بطاقتك.`,
+    { kind: 'transaction', type: 'income', amountFils: 6780, currency: 'SAR' });
   t('a bill reminder sentence is still not a bill-payment header',
     'يرجى سداد فاتورة STC بمبلغ 230 SAR قبل تاريخ الاستحقاق 25/10/2026', { kind: 'billDue' });
   t('an English labelled block reads its Merchant: field without the label',

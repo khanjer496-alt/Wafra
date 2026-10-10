@@ -478,8 +478,13 @@ export interface ParsedCard {
  * `billerAccountTail`, a fold guard bills.ts never reads, so a settlement for
  * one e& account cannot absorb a same-amount receipt for another. Future
  * captures plus the bounded recent reread; PARSER_BACKFILL_VERSION remains 49.
+ *
+ * 63: a first-line Arabic internet-purchase refund heading is income even
+ * though it contains the purchase word. Future and request notices under
+ * that heading still require independent completed-movement evidence.
+ * Shared settled-refund suppression exemptions and full backfill stay unchanged.
  */
-export const PARSER_VERSION = 62;
+export const PARSER_VERSION = 63;
 /**
  * Historical-repair contract for already-saved data.
  *
@@ -1501,6 +1506,19 @@ const INCOMING_CREDIT_REVERSAL_RE =
  */
 const REFUND_RE =
   /\brefund(?:ed)?\b(?:[^.\n]|\.\d){0,40}?\b(?:to|into|onto|posted|processed|credited)\b|\b(?:has|have|had|been)\s+(?:been\s+)?refunded\b|^(?:(?:credit|debit|covered|prepaid|charge)\s+card\s+)?refund\b[ .\r]*$/im;
+// This source-observed noun heading establishes refund direction, not a
+// settled verb. Keep it out of REFUND_RE's pending/preauthorisation exemptions.
+// Only the first whole line qualifies; merchant/help-footer mentions do not.
+const AR_PURCHASE_REFUND_HEADER_RE = /^استرداد[ \t]+شراء[ \t]+الانترنت[ \t]*(?:\r?\n|$)/;
+// Contradictory notices are considered only under that exact first heading.
+// Used only by blank(), never a stateful global .test().
+const AR_PURCHASE_REFUND_NOTICE_RE =
+  /\b(?:refund\s+request|request\s+for\s+(?:a\s+)?refund)\b(?:[^.\n]|\.\d){0,64}?\b(?:received|submitted|created|awaiting|pending)\b|\b(?:received|submitted|created)\b(?:[^.\n]|\.\d){0,48}?\b(?:refund\s+request|request\s+for\s+(?:a\s+)?refund)\b|(?<![ء-ي])و?(?:سيتم\s+(?:ال)?استرداد|تم\s+استلام\s+طلب\s+(?:ال)?استرداد)(?:[^.\n]|\.\d)*/gi;
+// A completed ORIGINAL purchase cannot rescue an unfinished refund. Require
+// a whole current-refund credit clause with an owned destination. Starting at
+// the clause also excludes negated/hypothetical and previous-refund wording.
+const AR_PURCHASE_REFUND_COMPLETED_RE =
+  /(?:^|[.!?\n])[ \t]*(?:((?:(?:the|your|this)[ \t]+)?refund[ \t]+(?:was|has[ \t]+been)[ \t]+(?:successfully[ \t]+)?(?:credited|posted|refunded))[ \t]+(?:back[ \t]+)?(?:to|into)[ \t]+your[ \t]+(?:(?:credit|debit)[ \t]+)?(?:card|account)\b|(تم[ \t]+استرداد[ \t]+(?:ال)?مبلغ)[ \t]+(?:الي|في)[ \t]+(?:بطاقتك|حسابك))(?:[ \t]*[.!](?=\s|$)|[ \t]*\r?\n|[ \t]*$)/i;
 const PROMO_RE =
   /cashback|voucher|promo|discount|t&cs?\b|terms apply|conditions apply|shop now|hurry|limited time|congratulations|you (?:could|can) win|opt-?out|\bdnd\d*\b|bit\.ly|wa\.me|tinyurl|payment plan|bonus|rewards? (?:on|program|draw)|earn \d+x|https?:\/\//i;
 /**
@@ -5432,6 +5450,7 @@ function parseSmsInner(
   const clean = stripInvisible(source);
   const raw = sanitizeLocalMoney(foldOrthography(clean));
   if (raw === null) return null;
+  const arabicPurchaseRefundHeader = AR_PURCHASE_REFUND_HEADER_RE.test(raw);
   ensureCurrencyPatterns();
   // The same for every branch of one message, so read once here. Both are
   // stamped onto all ten `return` sites below; a branch that quietly shipped
@@ -5524,6 +5543,22 @@ function parseSmsInner(
   // forecast its own evidence of settlement and nothing was ever suppressed.
   {
     const settled = blank(blank(raw, FUTURE_CLAUSE_RE), SCHEDULED_CLAUSE_RE);
+    const refundSettled = arabicPurchaseRefundHeader
+      ? blank(settled, AR_PURCHASE_REFUND_NOTICE_RE) : settled;
+    // A noun field list cannot confirm its own forecast/request. Remove every
+    // notice first, then require THIS refund's completed credit outside
+    // merchant names; original purchases and balance/limit figures cannot
+    // confirm that the separate refund moved money.
+    if (arabicPurchaseRefundHeader && refundSettled !== raw) {
+      const completion = AR_PURCHASE_REFUND_COMPLETED_RE.exec(refundSettled);
+      if (!completion) return null;
+      const subjectAndVerb = completion[1] ?? completion[2];
+      const at = completion.index + completion[0].indexOf(subjectAndVerb);
+      // The generic merchant mask can blank "your" in "to your card". The
+      // full clause above proves ownership; its refund subject/verb must still
+      // survive the length-preserving mask rather than come from a shop name.
+      if (maskMerchantNames(refundSettled).slice(at, at + subjectAndVerb.length) !== subjectAndVerb) return null;
+    }
     // A posting-noun clause opening a sentence ("Cash advance of AED 1,000.00
     // on your Credit Card 9876 at ATM") is the alert's own completed event; a
     // fee FOOTER forecasting a separate charge ("Cash advance fee AED 105.00
@@ -6761,7 +6796,8 @@ function parseSmsInner(
   // A refund or reversal reverses spending: money coming back IN, whatever
   // verbs the message uses ("Purchase amount of AED X ... has been refunded").
   const isIncomingCreditReversal = INCOMING_CREDIT_REVERSAL_RE.test(prose);
-  const isRefund = !isIncomingCreditReversal && (REFUND_RE.test(prose) || REVERSAL_RE.test(prose));
+  const isRefund = !isIncomingCreditReversal &&
+    (REFUND_RE.test(prose) || REVERSAL_RE.test(prose) || arabicPurchaseRefundHeader);
 
   if (PROMO_RE.test(raw) && !TXN_EVIDENCE_RE.test(raw)) return null;
   // "AED 500.00 has been reversed to your Card ending 1234" names no verb from
