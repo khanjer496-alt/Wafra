@@ -11,8 +11,11 @@ import { XlsxError, xlsxSheetRecords } from './xlsx-records';
 
 const MAX_NORMALIZED_CHARS = 128_000;
 const MAX_CSV_RECORD_CHARS = 8_192;
-/** How many leading CSV records may precede the header row (bank preambles). */
-const MAX_CSV_PREAMBLE_RECORDS = 10;
+/**
+ * How many leading CSV records may precede the header row (bank preambles).
+ * ING Germany prints 14 lines and Mashreq 11 before the table.
+ */
+const MAX_CSV_PREAMBLE_RECORDS = 20;
 /** The widest header row a CSV/XLSX statement may have. */
 const MAX_STATEMENT_COLUMNS = 64;
 /**
@@ -97,7 +100,7 @@ const LOOKS_LIKE_MONEY_LINE = new RegExp(`\\d\\.\\d{1,3}(?:\\D|$)|\\d,\\d{1,2}(?
 // the description so a merchant merely containing the word is untouched.
 // "Total" only counts when a figure, a colon or a totals word follows it;
 // "TOTAL ENERGIES FUEL 120.00" is a merchant.
-const SUMMARY_DESCRIPTION = /^(?:(?:opening|closing|new|previous|prev|beginning|ending|starting)\s+balance\b|balance\s+(?:b\/?f|c\/?f|brought|carried|outstanding)\b|(?:brought|carried)\s+forward\b|(?:sub)?totals?(?=\s*(?:$|:|(?:[A-Z]{3})?\s*[\d,]+(?:\.\d{1,3})?\b)|\s+(?:debits?|credits?|amounts?|for|of)\b)|الرصيد الافتتاحي|الرصيد الختامي|الإجمالي|المجموع)/iu;
+const SUMMARY_DESCRIPTION = /^(?:(?:opening|closing|new|previous|prev|beginning|ending|starting)\s+balance\b|balance\s+(?:b\/?f|c\/?f|brought|carried|outstanding)\b|(?:brought|carried)\s+forward\b|(?:sub)?totals?(?=\s*(?:$|:|(?:[A-Z]{3})?\s*[\d,]+(?:\.\d{1,3})?\b)|\s+(?:debits?|credits?|amounts?|for|of)\b)|الرصيد الافتتاحي|الرصيد الختامي|الإجمالي|المجموع|(?:saldo|solde)\s+(?:iniziale|finale|inicial|final|initial|précédent|precedent|anterior|anteriore|contabile)\b|(?:ancien|nouveau)\s+solde\b|(?:anfangs|end|schluss)saldo\b|(?:alter|neuer)\s+kontostand\b|(?:begin|eind)saldo\b|(?:açılış|acilis|kapanış|kapanis|devir)\s+bakiyes?i?\b|saldo\s+(?:awal|akhir)\b)/iu;
 const NAMED_ENTITIES: Record<string, string> = {
   amp: '&', apos: "'", gt: '>', lt: '<', nbsp: ' ', quot: '"',
 };
@@ -193,36 +196,106 @@ export interface StatementCsvResult {
   ambiguousDateRows: number;
 }
 
+/**
+ * Column names a statement export may use, per role. English and Arabic came
+ * from the launch fixtures; the other languages are the exact header text of
+ * published exports (see docs/statement-import-formats-2026-10-11.md): German
+ * (Sparkasse, ING, DKB, comdirect, Commerzbank, Postbank, Deutsche Bank, N26),
+ * Dutch (ING, Rabobank, bunq), French (Société Générale, Crédit Agricole,
+ * Boursorama, N26), Spanish/Catalan (BBVA, CaixaBank, N26), Portuguese
+ * (Nubank, Inter), Italian (Intesa Sanpaolo, Fineco, BancoPosta), and the
+ * standard Turkish and Indonesian statement words.
+ *
+ * Order matters only inside a role: the first alias a file has wins, so a
+ * counterparty name is preferred over a booking-type column, and a
+ * transaction date over a value date. Matching is exact after headerKey().
+ */
 const HEADER_ALIASES = {
   date: [
-    'transaction date', 'posting date', 'posted date', 'value date', 'txn date', 'date',
+    'transaction date', 'trans date', 'tran date', 'txn date', 'date of transaction',
+    'posting date', 'posted date', 'post date', 'booking date', 'completed date', 'started date',
+    'value date', 'date',
     'تاريخ العملية', 'تاريخ القيد', 'التاريخ',
+    // Booking/transaction dates in German, French, Spanish, Portuguese,
+    // Italian, Dutch, Turkish and Indonesian …
+    'belegdatum', 'buchungstag', 'buchungsdatum', 'buchung', 'datum',
+    'date de l opération', 'date de l operation', 'date opération', 'date operation', 'date op',
+    'fecha', 'fecha operación', 'fecha operacion',
+    'data', 'data lançamento', 'data lancamento', 'data movimento', 'data operazione',
+    'data contabile', 'data registrazione',
+    'boekdatum', 'transactiedatum',
+    'tarih', 'işlem tarihi', 'islem tarihi', 'tanggal', 'tanggal transaksi',
+    // … and only then value dates, which name the date column only when a
+    // file has nothing else. Dutch and Italian `Valuta` is a currency column
+    // beside a `Datum`/`Data`, so it must never outrank one.
+    'wertstellung', 'wert', 'valutadatum', 'date de valeur', 'date valeur', 'fecha valor', 'f valor',
+    'data valor', 'data valuta', 'rentedatum', 'valuta',
   ],
   description: [
     'transaction description', 'transaction details', 'description', 'details', 'narration',
-    'particulars', 'merchant', 'remarks', 'تفاصيل العملية', 'البيان', 'الوصف', 'التفاصيل',
+    'particulars', 'transaction remarks', 'merchant', 'payee', 'counter party', 'partner name',
+    'name description', 'transactions', 'remarks', 'تفاصيل العملية', 'البيان', 'الوصف', 'التفاصيل',
+    // German: the counterparty first, then free text, then the booking text.
+    'auftraggeber empfänger', 'auftraggeber empfaenger', 'beguenstigter zahlungspflichtiger',
+    'begünstigter zahlungspflichtiger', 'begünstigter auftraggeber', 'auftraggeber begünstigter',
+    'zahlungsempfänger in', 'zahlungsempfaenger in', 'empfänger', 'beschreibung',
+    'transaktionsbeschreibung', 'verwendungszweck', 'buchungstext',
+    // Dutch
+    'naam tegenpartij', 'name counterpty', 'naam omschrijving', 'naam', 'omschrijving', 'omschrijving 1',
+    // French
+    'libellé', 'libelle', 'bénéficiaire', 'beneficiaire', 'label',
+    // Spanish, Catalan, Portuguese, Italian
+    'movimiento', 'concepto', 'descripción', 'descripcion', 'beneficiario', 'moviment',
+    'establiment concepte', 'descrição', 'descricao', 'histórico', 'historico',
+    'dettagli', 'descrizione', 'descrizione operazioni',
+    // Turkish, Indonesian
+    'açıklama', 'aciklama', 'keterangan', 'uraian',
     // Last: Barclays exports name the payee only in "Memo".
     'memo',
   ],
   debit: [
-    'debit amount', 'amount debited', 'withdrawal amount', 'withdrawals', 'withdrawal',
-    'paid out', 'debit', 'مبلغ مدين', 'المسحوبات', 'مدين', 'خصم',
+    'debit amount', 'amount debited', 'withdrawal amount', 'withdrawal amt', 'withdrawals', 'withdrawal',
+    'paid out', 'funds out', 'outflow', 'debits', 'debit', 'dr', 'مبلغ مدين', 'المسحوبات', 'مدين', 'خصم',
+    'soll', 'débit', 'débito', 'debito', 'cargo', 'cargos', 'addebiti', 'uscite', 'debet', 'borç', 'borc',
   ],
   credit: [
-    'credit amount', 'amount credited', 'deposit amount', 'deposits', 'deposit', 'paid in',
-    'credit', 'مبلغ دائن', 'الإيداعات', 'دائن', 'إيداع',
+    'credit amount', 'amount credited', 'deposit amount', 'deposit amt', 'deposits', 'deposit',
+    'paid in', 'funds in', 'inflow', 'credits', 'credit', 'cr', 'مبلغ دائن', 'الإيداعات', 'دائن', 'إيداع',
+    'haben', 'crédit', 'crédito', 'credito', 'abono', 'abonos', 'accrediti', 'entrate', 'kredit', 'alacak',
   ],
-  amount: ['transaction amount', 'amount', 'مبلغ العملية', 'المبلغ'],
-  direction: [
-    'debit credit', 'dr cr', 'transaction type', 'direction', 'type',
-    'نوع العملية', 'نوع القيد', 'النوع',
+  amount: [
+    'transaction amount', 'amount', 'مبلغ العملية', 'المبلغ',
+    'betrag', 'buchungsbetrag', 'umsatz', 'bedrag', 'transactiebedrag', 'montant',
+    'montant de l opération', 'montant de l operation', 'importe', 'import', 'cantidad', 'valor',
+    'importo', 'tutar', 'meblağ', 'meblag', 'jumlah',
   ],
-  status: ['transaction status', 'status'],
-  currency: ['currency code', 'transaction currency', 'currency', 'ccy', 'curr', 'العملة'],
+  // NatWest's money column. Only an amount when no column above is one, so a
+  // file with both `Value` and `Amount` keeps reading `Amount`.
+  amountFallback: ['value'],
+  // A column whose cells ARE a direction (DR/CR, Af/Bij, Debit/Credit).
+  direction: ['debit credit', 'dr cr', 'cr dr', 'direction', 'af bij', 'نوع القيد'],
+  // A transaction-type column: sometimes a direction (DR, Eingang), more
+  // often a channel (POS, ATM, Income). Used as the direction column only
+  // when the file has no column of the kind above.
+  transactionType: [
+    'transaction type', 'type', 'نوع العملية', 'النوع',
+    'umsatztyp', 'transaktionstyp', 'type de transaction', 'tipo de transacción', 'tipo de transaccion',
+  ],
+  status: [
+    'transaction status', 'status', 'state', 'stato', 'stato operazione', 'contabilizzazione', 'estat',
+  ],
+  currency: [
+    'currency code', 'transaction currency', 'currency', 'ccy', 'curr', 'العملة',
+    'währung', 'waehrung', 'buchungswährung', 'buchungswaehrung', 'munt', 'devise', 'divisa',
+    'moeda', 'para birimi', 'mata uang',
+  ],
   sourceAccount: [
     'source account number', 'source account no', 'from account number', 'from account no',
     'debit account number', 'debit account no', 'account number', 'account no', 'account no.',
     'a/c number', 'masked account number', 'رقم الحساب', 'الحساب المصدر',
+    // The statement's OWN account in German and Dutch exports. The
+    // counterparty's account (Kontonummer/IBAN, Tegenrekening) is not one.
+    'auftragskonto', 'iban kontoinhaber', 'iban auftraggeberkonto', 'rekening', 'iban bban',
   ],
   sourceCard: [
     'source card number', 'source card no', 'credit card number', 'card number', 'card no',
@@ -235,6 +308,28 @@ const HEADER_ALIASES = {
   ],
 } as const;
 
+type HeaderRole = keyof typeof HEADER_ALIASES;
+
+/**
+ * Column names that can only be the statement's OWN account (Sparkasse
+ * Auftragskonto, Commerzbank IBAN Kontoinhaber, ING/bunq Rekening, Rabobank
+ * IBAN/BBAN). An English `Account Number` column is not one: card exports
+ * print the card account there too.
+ */
+const OWN_ACCOUNT_HEADERS = new Set(['auftragskonto', 'iban kontoinhaber', 'iban auftraggeberkonto', 'rekening', 'iban bban']);
+
+/** Any transaction status word, posted or not. */
+const STATUS_WORD = /^(?:posted|completed|cleared|settled|booked|pending|reverted|declined|failed|cancelled|canceled|authori[sz]ed)$/;
+
+/** Status cells that establish a completed posting (Gebucht, Contabilizzato, Liquidat …). */
+const POSTED_STATUS = /^(?:posted|completed|cleared|settled|booked|gebucht|geboekt|contabilizzato|liquidat|liquidado|comptabilisé|comptabilise)$/;
+
+/** Header names that only a card export carries. */
+const CARD_EXPORT_HEADERS = ['credit card number', 'card member', 'card holder name', 'cardholder name'];
+
+/** A running-balance column, in any of the supported languages. */
+const BALANCE_HEADER = /(?:^|\s)(?:balance|bal|saldo|solde|kontostand|bakiye|disponible)(?:\s|$)|الرصيد/u;
+
 function normalizedHeader(value: string): string {
   return value
     .normalize('NFKC')
@@ -245,12 +340,58 @@ function normalizedHeader(value: string): string {
     .trim();
 }
 
+const ALIAS_KEYS = new Set(
+  Object.values(HEADER_ALIASES).flatMap((aliases) => aliases.map((alias) => normalizedHeader(alias))),
+);
+
+/** The ledger currencies a money symbol printed in a column name can stand for. */
+const HEADER_SYMBOL_CURRENCIES: Record<string, readonly string[]> = {
+  '€': ['EUR'], '£': ['GBP'], '₹': ['INR'], '₺': ['TRY'], '₱': ['PHP'], '₩': ['KRW'], '₦': ['NGN'],
+  '₪': ['ILS'], '₫': ['VND'], '¥': ['JPY', 'CNY'], '￥': ['JPY', 'CNY'],
+  '$': ['USD', 'CAD', 'AUD', 'NZD', 'SGD', 'HKD', 'MXN', 'ARS', 'CLP', 'COP', 'BRL', 'TWD'],
+};
+
+/**
+ * A header cell as matched against HEADER_ALIASES, plus the currencies the
+ * cell can name, if it names one. `Amount (GBP)`, `Betrag (€)`, `Amount in
+ * AED`, `Paid in (£)`, `Withdrawal Amount (INR )`, `Montant(EUROS)` and
+ * `Débit euros` are the plain role with a stated currency; it is kept so a
+ * money column naming another currency than the ledger is refused, never
+ * read as the ledger's. A code suffix is only removed when what remains is a
+ * known column name, so `Account Top` or a reference column is left alone.
+ * A money symbol this table cannot place names some currency all the same,
+ * and matches no ledger. CamelCase names (`TransactionDate`) are split first.
+ */
+function headerKey(value: string): { key: string; currencies: readonly string[] | null } {
+  const symbols = [...value.matchAll(/\p{Sc}/gu)].map((match) => match[0]);
+  const symbolCurrencies = symbols.length === 0
+    ? null
+    : symbols.every((symbol) => symbol === symbols[0]) ? HEADER_SYMBOL_CURRENCIES[symbols[0]] ?? [] : [];
+  const key = normalizedHeader(value.replace(/(\p{Ll})(\p{Lu})/gu, '$1 $2'));
+  if (ALIAS_KEYS.has(key)) return { key, currencies: symbolCurrencies };
+  for (const pattern of [/^(.+) ([a-z]{3}|euros?)$/, /^(.+) in ([a-z]{3}|euros?)$/]) {
+    const suffixed = pattern.exec(key);
+    if (!suffixed || !ALIAS_KEYS.has(suffixed[1])) continue;
+    const code = /^euros?$/.test(suffixed[2]) ? 'EUR' : suffixed[2].toUpperCase();
+    if (!ledgerMoneySpec(code)) continue;
+    const agrees = symbolCurrencies === null || symbolCurrencies.includes(code);
+    return { key: suffixed[1], currencies: agrees ? [code] : [] };
+  }
+  return { key, currencies: symbolCurrencies };
+}
+
 function headerIndex(headers: string[], aliases: readonly string[]): number {
   for (const alias of aliases) {
     const index = headers.indexOf(normalizedHeader(alias));
     if (index >= 0) return index;
   }
   return -1;
+}
+
+/** Every column whose name is one of the role's aliases. */
+function headerIndices(headers: string[], role: HeaderRole): number[] {
+  const aliases = new Set(HEADER_ALIASES[role].map((alias) => normalizedHeader(alias)));
+  return headers.flatMap((header, index) => aliases.has(header) ? [index] : []);
 }
 
 function delimiterCount(line: string, delimiter: string): number {
@@ -1077,6 +1218,14 @@ function amountMinor(
     if (!(CURRENCY_SYMBOLS[symbol[1]] ?? []).includes(currency)) return null;
     normalized = normalized.slice(symbol[0].length).trim();
     takeSign();
+  } else {
+    // `-10,80 €` (DKB): the symbol after the figure, as continental exports print it.
+    const trailing = /\s*([£€$])$/.exec(normalized);
+    if (trailing) {
+      if (!(CURRENCY_SYMBOLS[trailing[1]] ?? []).includes(currency)) return null;
+      normalized = normalized.slice(0, normalized.length - trailing[0].length).trim();
+      takeSign();
+    }
   }
   const localAlias = String.raw`(?:AED|DHS?|D\.E|DIRHAMS?|د\.?\s*إ|درهم(?: إماراتي)?|SAR|SR|S\.R|RIYALS?|ر\.?\s*س|ريال(?: سعودي)?|[A-Z]{3})`;
   const prefixCurrency = new RegExp(`^(${localAlias})\\s*`, 'iu').exec(normalized)?.[1];
@@ -1101,7 +1250,10 @@ function amountMinor(
   const group = comma ? `[.'’ ]` : `[,'’]`;
   const mark = comma ? ',' : '\\.';
   const fractionPattern = spec.exponent === 0 ? '' : `(?:${mark}(\\d{1,${spec.exponent}}))?`;
-  const match = new RegExp(`^(\\d{1,3}(${group})\\d{3}(?:\\2\\d{3})*|\\d+)${fractionPattern}$`).exec(normalized);
+  // Rupee figures group in lakhs and crores (`1,85,000.00`, `2,04,759.22`).
+  // Only a rupee ledger reads that grouping; elsewhere it is not a figure.
+  const lakh = currency === 'INR' && !comma ? String.raw`|\d{1,2}(?:,\d{2})+,\d{3}` : '';
+  const match = new RegExp(`^(\\d{1,3}(${group})\\d{3}(?:\\2\\d{3})*|\\d+${lakh})${fractionPattern}$`).exec(normalized);
   if (!match) return null;
   const whole = match[1].replace(/\D/g, '');
   const fraction = spec.exponent === 0 ? '' : (match[3] ?? '');
@@ -1119,8 +1271,8 @@ function amountMinor(
 
 function rowDirection(value: string): 'expense' | 'income' | null {
   const normalized = normalizedHeader(value);
-  if (/^(?:dr|d|debit|withdrawal|withdrawn|paid out|مدين|خصم|سحب)$/.test(normalized)) return 'expense';
-  if (/^(?:cr|c|credit|deposit|deposited|paid in|دائن|إيداع)$/.test(normalized)) return 'income';
+  if (/^(?:dr|d|debit|withdrawal|withdrawn|paid out|مدين|خصم|سحب|af|ausgang|soll|débit|debet|borç)$/.test(normalized)) return 'expense';
+  if (/^(?:cr|c|credit|deposit|deposited|paid in|دائن|إيداع|bij|eingang|haben|crédit|kredit|alacak)$/.test(normalized)) return 'income';
   return null;
 }
 
@@ -1210,6 +1362,12 @@ const CARD_CREDIT_ROW = /\brefund|\breturn|\bcash\s*back\b|\bcredit\b|\brevers(?
 const CARD_CREDIT_TYPE = /^(?:payment|payment credit|return|refund|credit|adjustment)$/;
 /** Money a current account receives. Only used to recognise a bank export. */
 const ACCOUNT_INCOME_HINT = /\bsalar(?:y|ies)\b|\bpayroll\b|\bwages?\b|\bdir\s+dep\b|\bdirect\s+dep(?:osit)?\b|\bdeposit|\btransfer\b|\btrf\b|\binterest\b|\bdividend|\bpaid\s+in\b|\breceived\b|\bfrom\b|\bcredit\b|\brefund|\bcash\s*back\b|\brevers|\bzelle\b|راتب|ايداع|إيداع|تحويل/iu;
+/**
+ * The same money-in words in the other export languages: salary, credit
+ * notes, received transfers and deposits. Whole words only, tested against a
+ * row's description and its type cell (N26 `Income`, DKB `Gutschrift`).
+ */
+const ACCOUNT_INCOME_WORDS = /(?<![\p{L}\p{N}])(?:income|gehalt|lohn|gutschrift|eingang|einzahlung|salaire|vir(?:ement)?\s+(?:sepa\s+)?re[çc]u|virement\s+en\s+votre\s+faveur|revenus?|remboursement|n[óo]mina|ingreso|transferencia\s+recibida|sal[áa]rio|recebid[oa]|stipendio|accredito|salaris|bijschrijving|storting|terugbetaling|ma[aâ][sş]|gaji|setoran)(?![\p{L}\p{N}])/iu;
 
 /**
  * The sign convention a bare amount column follows, read from the rows when
@@ -1236,6 +1394,12 @@ function inferCsvSignConvention(
     currency: StatementCurrency; decimal: DecimalConvention; cardStatement: boolean;
     /** The file labels itself as an ACCOUNT (an account column or preamble). */
     accountLabelled: boolean;
+    /**
+     * One own-account number in a column on every row (Sparkasse
+     * Auftragskonto, Rabobank IBAN/BBAN): an account export by its own
+     * statement, which no card export prints.
+     */
+    ownAccountColumn: boolean;
   },
 ): SignConvention | null {
   const samples: { sign: '-' | '+' | null; description: string; typeCell: string }[] = [];
@@ -1260,8 +1424,9 @@ function inferCsvSignConvention(
   const creditLike = (sample: typeof samples[number]) => CARD_PAYMENT_PHRASE.test(sample.description) ||
     CARD_CREDIT_ROW.test(sample.description) || CARD_CREDIT_TYPE.test(sample.typeCell);
   const cardPayment = (sample: typeof samples[number]) => CARD_PAYMENT_PHRASE.test(sample.description);
-  const incomeLike = (sample: typeof samples[number]) => ACCOUNT_INCOME_HINT.test(sample.description);
-  const balanceColumn = options.headers.some((header) => /\b(?:balance|bal)\b|الرصيد/u.test(header));
+  const incomeLike = (sample: typeof samples[number]) => ACCOUNT_INCOME_HINT.test(sample.description) ||
+    ACCOUNT_INCOME_WORDS.test(sample.description) || ACCOUNT_INCOME_WORDS.test(sample.typeCell);
+  const balanceColumn = options.headers.some((header) => BALANCE_HEADER.test(header));
   // An account-labelled file is never re-read as a card's: its AUTOPAY rows
   // are bills and its "payment received" rows are money in.
   if (plus.length === 0 && !balanceColumn && !options.accountLabelled) {
@@ -1274,10 +1439,63 @@ function inferCsvSignConvention(
     }
   }
   if (!options.cardStatement && minus.some((sample) => !creditLike(sample)) &&
-      (balanceColumn || plain.every(incomeLike))) {
+      (balanceColumn || options.ownAccountColumn || plain.every(incomeLike))) {
     return 'account-unsigned-credit';
   }
   return null;
+}
+
+/** A row that undoes an earlier one, in the export languages read here. */
+const REVERSAL_WORDING = /(?<![\p{L}\p{N}])(?:revers(?:al|ed)|refund(?:ed)?|returns?|chargeback|cancel(?:led|ed|lation)?|credit\s+adjustment|عكس|استرداد|storno|r[üu]ckbuchung|r[üu]ckerstattung|annulation|remboursement|retour|reembolso|devoluci[óo]n|anulaci[óo]n|rimborso|storno|terugboeking|terugbetaling|estorno|iade)(?![\p{L}\p{N}])/iu;
+
+/** Wording a card statement prints on a payment it receives. */
+const PAYMENT_WORDING = /\b(?:payments?|pymt|autopay|directpay|full\s+balance|ach\s+deposit)\b/i;
+
+/**
+ * Whether a bare amount column has the shape a card export prints just as
+ * well as an account export does: minus figures beside plain ones, no plus
+ * anywhere, and every minus row a payment, refund, return or credit by its
+ * description or type cell. Read as an account those rows are spending; read
+ * as a card export (Discover, Apple Card: plain charges, negative payments
+ * and returns) they are money in, and the file does not say which. One minus
+ * row that is an ordinary purchase is the account's own evidence and leaves
+ * the account reading alone. Rows whose direction column already names a
+ * direction are not counted.
+ */
+function cardShapedSigns(
+  records: string[][],
+  options: {
+    amountIndex: number; descriptionIndex: number; directionIndex: number; headers: string[];
+    currency: StatementCurrency; decimal: DecimalConvention;
+  },
+): boolean {
+  let minus = 0;
+  let plus = 0;
+  let plain = 0;
+  let minusPurchase = false;
+  for (const record of records) {
+    if (record.length !== options.headers.length) continue;
+    const typeCell = options.directionIndex >= 0 ? record[options.directionIndex] ?? '' : '';
+    if (rowDirection(typeCell)) continue;
+    const cell = record[options.amountIndex] ?? '';
+    const signed = amountMinor(cell, options.currency, true, options.decimal);
+    if (signed !== null) {
+      if (signed > 0) {
+        plus += 1;
+        continue;
+      }
+      minus += 1;
+      const description = normalizeDigits(record[options.descriptionIndex] ?? '').normalize('NFKC');
+      const type = normalizedHeader(typeCell);
+      if (!(CARD_PAYMENT_PHRASE.test(description) || CARD_CREDIT_ROW.test(description) ||
+          PAYMENT_WORDING.test(description) || CARD_CREDIT_TYPE.test(type))) {
+        minusPurchase = true;
+      }
+    } else if (amountMinor(cell, options.currency, false, options.decimal) !== null) {
+      plain += 1;
+    }
+  }
+  return minus > 0 && plain > 0 && plus === 0 && !minusPurchase;
 }
 
 /**
@@ -1392,10 +1610,11 @@ export function parseStatementRecords(
   // preambles, and a blank or repeated header cell is a column to ignore (first
   // occurrence wins), not grounds to refuse the whole file.
   const headerRow = records.slice(0, MAX_CSV_PREAMBLE_RECORDS).findIndex((record) => {
-    const candidate = record.map(normalizedHeader);
+    const candidate = record.map((cell) => headerKey(cell).key);
     return candidate.length >= 3 && candidate.length <= MAX_STATEMENT_COLUMNS &&
       headerIndex(candidate, HEADER_ALIASES.date) >= 0 && (
         headerIndex(candidate, HEADER_ALIASES.amount) >= 0 ||
+        headerIndex(candidate, HEADER_ALIASES.amountFallback) >= 0 ||
         headerIndex(candidate, HEADER_ALIASES.debit) >= 0 ||
         headerIndex(candidate, HEADER_ALIASES.credit) >= 0
       );
@@ -1403,19 +1622,47 @@ export function parseStatementRecords(
   if (headerRow < 0 || records.length < headerRow + 2) {
     throw new Error('unsupported_statement_format');
   }
-  let dataRecords = records.slice(headerRow + 1);
+  const headerCells = records[headerRow].map(headerKey);
+  const headers = headerCells.map((cell) => cell.key);
+  // Exports pad rows and headers differently: a trailing delimiter on every
+  // data row (ADCB) or only on the header (Lloyds). Blank cells past the other
+  // side's width are padding, never a column; a non-blank one still makes the
+  // row the wrong shape and it is rejected below.
+  const fitWidth = (record: string[]): string[] => {
+    if (record.length > headers.length && record.slice(headers.length).every((cell) => !cell.trim())) {
+      return record.slice(0, headers.length);
+    }
+    if (record.length < headers.length && headers.slice(record.length).every((header) => !header)) {
+      return [...record, ...Array<string>(headers.length - record.length).fill('')];
+    }
+    return record;
+  };
+  let dataRecords = records.slice(headerRow + 1).map(fitWidth);
   // Apply the resource limit to every record, including summaries and headers.
   const inputRows = dataRecords.length;
   if (inputRows > maxRows) throw new Error('too_many_rows');
-  const headers = records[headerRow].map(normalizedHeader);
   const dateIndex = headerIndex(headers, HEADER_ALIASES.date);
   const descriptionIndex = headerIndex(headers, HEADER_ALIASES.description);
   const debitIndex = headerIndex(headers, HEADER_ALIASES.debit);
   const creditIndex = headerIndex(headers, HEADER_ALIASES.credit);
-  const amountIndex = headerIndex(headers, HEADER_ALIASES.amount);
-  const directionIndex = headerIndex(headers, HEADER_ALIASES.direction);
-  const currencyIndex = headerIndex(headers, HEADER_ALIASES.currency);
-  const statusIndex = headerIndex(headers, HEADER_ALIASES.status);
+  const amountIndex = headerIndices(headers, 'amount').length > 0
+    ? headerIndex(headers, HEADER_ALIASES.amount)
+    : headerIndex(headers, HEADER_ALIASES.amountFallback);
+  const directionIndex = headerIndices(headers, 'direction').length > 0
+    ? headerIndex(headers, HEADER_ALIASES.direction)
+    : headerIndex(headers, HEADER_ALIASES.transactionType);
+  // A type column beside the direction column: when its cell also names a
+  // direction (DR, Credit) and disagrees, the row is refused.
+  const typeIndex = headerIndex(headers, HEADER_ALIASES.transactionType);
+  const secondTypeIndex = typeIndex !== directionIndex ? typeIndex : -1;
+  const currencyIndices = headerIndices(headers, 'currency');
+  // `State` is Revolut's status column, and a US address column elsewhere.
+  // It is a status only when some row holds a status word.
+  const statusCandidate = headerIndex(headers, HEADER_ALIASES.status);
+  const statusIndex = statusCandidate >= 0 && headers[statusCandidate] === 'state' &&
+      !records.slice(headerRow + 1).some((record) => STATUS_WORD.test(normalizedHeader(record[statusCandidate] ?? '')))
+    ? -1
+    : statusCandidate;
   const sourceAccountIndex = headerIndex(headers, HEADER_ALIASES.sourceAccount);
   const sourceCardIndex = headerIndex(headers, HEADER_ALIASES.sourceCard);
   const referenceIndex = headerIndex(headers, HEADER_ALIASES.reference);
@@ -1426,16 +1673,25 @@ export function parseStatementRecords(
     throw new Error('unsupported_statement_format');
   }
   // Competing monetary/identity columns have no safe first-column default.
-  for (const role of ['debit', 'credit', 'amount', 'direction', 'currency', 'sourceAccount', 'sourceCard', 'status'] as const) {
-    const aliases = new Set(HEADER_ALIASES[role].map(normalizedHeader));
-    if (headers.filter((header) => aliases.has(header)).length > 1) {
-      throw new Error('unsupported_statement_format');
-    }
+  // Several currency columns are allowed: each row must then name one
+  // currency in all of them (ING Germany prints Währung beside both Saldo
+  // and Betrag; BBVA prints Divisa twice).
+  for (const role of ['debit', 'credit', 'amount', 'amountFallback', 'direction', 'sourceAccount', 'sourceCard', 'status'] as const) {
+    if (headerIndices(headers, role).length > 1) throw new Error('unsupported_statement_format');
+  }
+  if (headerIndices(headers, 'direction').length === 0 && headerIndices(headers, 'transactionType').length > 1) {
+    throw new Error('unsupported_statement_format');
+  }
+  // A money column that names its currency (`Amount (GBP)`, `Débit euros`)
+  // must name the ledger's: those figures are never read as another currency.
+  for (const index of [debitIndex, creditIndex, amountIndex]) {
+    const stated = index >= 0 ? headerCells[index].currencies : null;
+    if (stated && !stated.includes(defaultCurrency)) throw new Error('statement_currency_mismatch');
   }
   dataRecords = dataRecords.filter((record) => {
     if (record.length !== headers.length) return true;
-    if (record.every((cell, index) => normalizedHeader(cell) === headers[index])) return false;
-    const candidate = record.map(normalizedHeader);
+    const candidate = record.map((cell) => headerKey(cell).key);
+    if (candidate.every((cell, index) => cell === headers[index])) return false;
     if (headerIndex(candidate, HEADER_ALIASES.date) >= 0 &&
         headerIndex(candidate, HEADER_ALIASES.description) >= 0 &&
         (['debit', 'credit', 'amount'] as const).some((role) =>
@@ -1490,7 +1746,8 @@ export function parseStatementRecords(
   const cardPaymentRows = dataRecords.some((record) =>
     CARD_PAYMENT_PHRASE.test(normalizeDigits(record[descriptionIndex] ?? '').normalize('NFKC')));
   const cardColumnOnly = sourceCardIndex >= 0 && sourceAccountIndex < 0;
-  let cardEvidence = isCardStatement(preamble) || headers.includes(normalizedHeader('credit card number')) ||
+  const cardHeader = CARD_EXPORT_HEADERS.some((name) => headers.includes(name));
+  let cardEvidence = isCardStatement(preamble) || cardHeader ||
     (cardColumnOnly && (creditMarker || cardPaymentRows));
   const signEvidence = cardEvidence || (sourceAccountIndex < 0 && creditMarker);
   let convention = signConvention(signEvidence, preamble);
@@ -1502,17 +1759,56 @@ export function parseStatementRecords(
       amountIndex, descriptionIndex, directionIndex, headers, currency: defaultCurrency, decimal,
       cardStatement: signEvidence,
       accountLabelled: sourceAccountIndex >= 0 || statedInstrument?.kind === 'account',
+      ownAccountColumn: columnInstrument?.kind === 'account' && OWN_ACCOUNT_HEADERS.has(headers[sourceAccountIndex]) &&
+        dataRecords.every((record) => record.length !== headers.length || maskedTail(record[sourceAccountIndex] ?? '') !== null),
     });
     if (inferred) {
       convention = inferred;
       if (inferred !== 'account-unsigned-credit') cardEvidence = true;
+    } else if (convention === 'account' && cardShapedSigns(dataRecords, {
+      amountIndex, descriptionIndex, directionIndex, headers, currency: defaultCurrency, decimal,
+    })) {
+      // Both an account and a card reading fit (see cardShapedSigns), so
+      // neither is taken: the bare signs are refused exactly like an
+      // unexplained card statement's.
+      convention = 'refuse';
     }
   }
   const creditCard = cardEvidence && (creditMarker || cardPaymentRows ||
-    headers.includes(normalizedHeader('credit card number')) || convention === 'minus-credit' || convention === 'minus-debit');
+    cardHeader || convention === 'minus-credit' || convention === 'minus-debit');
   const asCredit = (instrument: ParsedSms['card']): ParsedSms['card'] =>
     instrument?.kind === 'unknown' && creditCard ? { last4: instrument.last4, kind: 'credit' } : instrument;
   const sourceInstrument = asCredit(statedInstrument);
+
+  // A sign that only repeats its column: EVERY figure in the debit column
+  // carries a minus (Postbank and Deutsche Bank Soll, Mashreq, Fineco
+  // Uscite), or every figure in the credit column a plus (Mashreq). Then the
+  // sign is the column's convention and agrees with it. A minus on just some
+  // debit rows is a reversal or refund written as a negative debit, and a
+  // minus in a credit column (Citi) contradicts it; both stay refused. A sign
+  // never overrides a named column.
+  // At least three figures, none of them described as a reversal, so a
+  // column holding only a storno or two is not mistaken for a convention.
+  // Once one column proves its convention that way, the other column's
+  // mirrored sign (a + on every credit beside a - on every debit, Mashreq)
+  // needs only one clean figure: a month can carry a single salary credit.
+  const signedColumn = (index: number, sign: 'expense' | 'income'): number => {
+    let seen = 0;
+    for (const record of dataRecords) {
+      if (record.length !== headers.length) continue;
+      const cell = record[index] ?? '';
+      if (/^(?:|--?|N\/?A|0+(?:[.,]0{1,3})?)$/i.test(normalizeDigits(cell).normalize('NFKC').trim())) continue;
+      const signed = amountMinor(cell, defaultCurrency, true, decimal);
+      if (signed === null || (signed < 0 ? 'expense' : 'income') !== sign) return 0;
+      if (REVERSAL_WORDING.test(normalizeDigits(record[descriptionIndex] ?? '').normalize('NFKC'))) return 0;
+      seen += 1;
+    }
+    return seen;
+  };
+  const debitSigned = splitColumns ? signedColumn(debitIndex, 'expense') : 0;
+  const creditSigned = splitColumns ? signedColumn(creditIndex, 'income') : 0;
+  const debitRepeatsMinus = debitSigned >= 3 || (debitSigned >= 1 && creditSigned >= 3);
+  const creditRepeatsPlus = creditSigned >= 3 || (creditSigned >= 1 && debitSigned >= 3);
 
   const rows: StatementParsedRow[] = [];
   let rejectedRows = 0;
@@ -1526,7 +1822,7 @@ export function parseStatementRecords(
     // An export may include authorisations, rejected requests and cancelled
     // entries beside posted transactions. Explicit status must establish a
     // completed posting; absent status keeps the supported legacy format.
-    if (statusIndex >= 0 && !/^(?:posted|completed|cleared|settled)$/.test(
+    if (statusIndex >= 0 && !POSTED_STATUS.test(
       normalizedHeader(record[statusIndex] ?? ''),
     )) {
       rejectedRows += 1;
@@ -1534,16 +1830,28 @@ export function parseStatementRecords(
     }
     const date = isoDate(record[dateIndex] ?? '', dateOrder);
     const description = record[descriptionIndex] ?? '';
-    const unsafeDescription = /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/.test(description);
+    // Tabs and line breaks inside a quoted cell are whitespace (Barclays pads
+    // its Memo with tabs; Crédit Agricole wraps its Libellé); every other
+    // control or bidi-override character is not text a title may carry.
+    const unsafeDescription = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/.test(description);
     const merchant = description.normalize('NFKC').replace(/\s+/g, ' ').trim();
-    const currency: StatementCurrency | null = currencyIndex >= 0
-      ? statementCurrency(record[currencyIndex] ?? '')
-      : defaultCurrency;
+    const rowCurrencies = currencyIndices.map((index) => statementCurrency(record[index] ?? ''));
+    const currency: StatementCurrency | null = rowCurrencies.length === 0
+      ? defaultCurrency
+      : rowCurrencies.every((value) => value !== null && value === rowCurrencies[0]) ? rowCurrencies[0] : null;
     let type: 'expense' | 'income' | null = null;
     let minor: number | null = null;
     if (currency === defaultCurrency && splitColumns) {
-      const debit = amountMinor(record[debitIndex] ?? '', currency, false, decimal);
-      const credit = amountMinor(record[creditIndex] ?? '', currency, false, decimal);
+      // A signed cell is read only where its whole column prints that sign
+      // (see signedColumn above); anywhere else it stays a contradiction.
+      const columnMinor = (cell: string, repeatsSign: boolean): number | null => {
+        const plain = amountMinor(cell, currency, false, decimal);
+        if (plain !== null || !repeatsSign) return plain;
+        const signed = amountMinor(cell, currency, true, decimal);
+        return signed === null ? null : Math.abs(signed);
+      };
+      const debit = columnMinor(record[debitIndex] ?? '', debitRepeatsMinus);
+      const credit = columnMinor(record[creditIndex] ?? '', creditRepeatsPlus);
       // A failed parse is not an empty cell: foreign amounts, bad precision,
       // signs or corrupt data on the other side make the row contradictory.
       const emptyMoney = (cell: string) => /^(?:|--?|N\/?A|0+(?:[.,]0{1,3})?)$/i.test(
@@ -1560,6 +1868,7 @@ export function parseStatementRecords(
       // amount carries a sign, the sign is the explicit marker; when both
       // speak and disagree, neither is trusted.
       const labelled = rowDirection(record[directionIndex] ?? '');
+      const typeLabel = secondTypeIndex >= 0 ? rowDirection(record[secondTypeIndex] ?? '') : null;
       const unsignedMinor = amountMinor(record[amountIndex] ?? '', currency, false, decimal);
       const signedMinor = unsignedMinor === null
         ? amountMinor(record[amountIndex] ?? '', currency, true, decimal)
@@ -1573,7 +1882,7 @@ export function parseStatementRecords(
       const plainType = !labelled && unsignedMinor !== null && PLAIN_FIGURE_CONVENTIONS.has(convention)
         ? directionFromSign(null, convention)
         : null;
-      if (labelled && signedType && labelled !== signedType) {
+      if ((labelled && signedType && labelled !== signedType) || (labelled && typeLabel && labelled !== typeLabel)) {
         type = null;
       } else {
         type = labelled ?? signedType ?? plainType;
@@ -1692,6 +2001,17 @@ export function statementDateHintFrom(value: unknown): StatementDateHint | undef
 const LOCAL_NUMERIC_DATE = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/;
 
 /**
+ * A date cell without the clock time some exports append
+ * (`02/09/2026 09:15:00` ADCB, `2026-09-02 09:00:00` Revolut,
+ * `2026-09-30T17:43:43` comdirect). Only a colon-separated time is removed;
+ * the date before it is read exactly as it would be alone.
+ */
+function dateCellText(value: string): string {
+  return normalizeDigits(value).normalize('NFC').replace(/\s+/g, ' ').trim()
+    .replace(/(?:[ T]\d{1,2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?: ?[AaPp][Mm])?(?:Z|[+-]\d{2}:?\d{2})?)$/, '');
+}
+
+/**
  * Decide how a file's numeric dates read. A first field above 12 can only be
  * a day; a second field above 12 can only be a month-first export. File
  * evidence always wins over the country. Contradictory evidence leaves the
@@ -1704,7 +2024,7 @@ function inferDateOrder(values: Iterable<string>, hint: StatementDateHint): Date
   let dayFirst = false;
   let monthFirst = false;
   for (const value of values) {
-    const local = LOCAL_NUMERIC_DATE.exec(normalizeDigits(value).trim());
+    const local = LOCAL_NUMERIC_DATE.exec(dateCellText(value));
     if (!local) continue;
     if (Number(local[1]) > 12) dayFirst = true;
     if (Number(local[2]) > 12) monthFirst = true;
@@ -1717,7 +2037,7 @@ function inferDateOrder(values: Iterable<string>, hint: StatementDateHint): Date
 
 /** A numeric date whose day and month are both ≤ 12 and differ. */
 function ambiguousLocalDate(value: string): boolean {
-  const local = LOCAL_NUMERIC_DATE.exec(normalizeDigits(value).replace(/\s+/g, ' ').trim());
+  const local = LOCAL_NUMERIC_DATE.exec(dateCellText(value));
   if (!local) return false;
   const first = Number(local[1]);
   const second = Number(local[2]);
@@ -1729,11 +2049,16 @@ const NAMED_DE_DATE = new RegExp(`^(\\d{1,2})\\s+de\\s+(${MONTH_NAME})\\.?\\s+(?
 const NAMED_MONTH_FIRST_DATE = new RegExp(`^(${ENGLISH_MONTH_NAME})\\.?\\s+(\\d{1,2}),?\\s+(\\d{4})$`, 'i');
 
 function isoDate(value: string, order: DateOrder = 'day-first'): string | null {
-  value = normalizeDigits(value).normalize('NFC').replace(/\s+/g, ' ').trim();
+  value = dateCellText(value);
   let year: number;
   let month: number;
   let day: number;
-  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  // Year-first is unambiguous in any country: ISO, `2026/09/01` and
+  // `2026.09.01` (South African, Al Rajhi, Colombian exports), and the
+  // compact `20260901` Dutch exports print (checked as a real date below).
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value) ??
+    /^(\d{4})[\/.](\d{1,2})[\/.](\d{1,2})$/.exec(value) ??
+    /^((?:19|20)\d{2})(\d{2})(\d{2})$/.exec(value);
   const named = NAMED_DAY_FIRST_DATE.exec(value) ?? NAMED_DE_DATE.exec(value);
   const monthFirstNamed = named ? null : NAMED_MONTH_FIRST_DATE.exec(value);
   if (iso) {
@@ -1774,6 +2099,12 @@ type ColumnOrder = 'debit-first' | 'credit-first' | 'unknown';
  * line is checked anyway so the rare Credit | Debit layout is not read inverted.
  */
 function statementColumnOrder(text: string): ColumnOrder {
+  const orders = columnOrderEvidence(text);
+  return orders.size > 1 ? 'unknown' : [...orders][0] ?? 'debit-first';
+}
+
+/** The column orders the document's own table headers state (empty when none does). */
+function columnOrderEvidence(text: string): Set<ColumnOrder> {
   const orders = new Set<ColumnOrder>();
   for (const original of text.split(/\n+/)) {
     const line = original.replace(/\s+/g, ' ').trim();
@@ -1792,7 +2123,7 @@ function statementColumnOrder(text: string): ColumnOrder {
     if (debit < 0 || credit < 0) continue;
     orders.add(credit < debit ? 'credit-first' : 'debit-first');
   }
-  return orders.size > 1 ? 'unknown' : [...orders][0] ?? 'debit-first';
+  return orders;
 }
 
 type MoneyToken =
@@ -2223,6 +2554,10 @@ function parseColumnTail(
   }
   const merchant = words.slice(0, cut).join(' ').trim();
   if (merchant.length < 2 || merchant.length > 180 || tail.length === 0 || tail.length > 3) return null;
+  // `PAYMENT RECEIVED AED 1,000.00 CR - 125.50` (RAKBANK): a direction label
+  // just before the columns means the amount and its label were left in the
+  // description, and the columns read here are a separator and the balance.
+  if (/^(?:DR|CR|DEBIT|CREDIT)$/i.test(words[cut - 1] ?? '') && classifyMoneyToken(words[cut - 2] ?? '', currency)) return null;
   const [first, second] = tail;
   if (first.kind === 'signed') {
     if (tail.length > 2) return null;
@@ -2254,6 +2589,20 @@ function parseColumnTail(
     return { merchant, amountFils: credit.minor, type: 'income' };
   }
   return null;
+}
+
+/**
+ * The running balance at the end of a flattened `debit credit balance` row:
+ * the last of three trailing money figures, the first two of which may be an
+ * empty-cell placeholder. Null for any other shape.
+ */
+function columnRowBalance(rest: string, currency: StatementCurrency): number | null {
+  const words = rest.trim().split(' ');
+  if (words.length < 4) return null;
+  const [first, second, last] = words.slice(-3).map((word) => classifyMoneyToken(word, currency));
+  if (!first || !second || !last || last.kind === 'placeholder') return null;
+  if (first.kind === 'placeholder' && second.kind === 'placeholder') return null;
+  return last.kind === 'signed' && last.type === 'expense' ? -last.minor : last.minor;
 }
 
 /**
@@ -2426,6 +2775,10 @@ export function parseStatementLines(
     if (!/^\s*(?:credit\s+card|card|account|a\/c)\s+(?:number|no\.?|ending)\b/i.test(line) &&
         !/^\s*(?:account|acct|a\/c|iban|card)\s*[:#-]?\s*[*xX•·\d]/i.test(line) &&
         !/^\s*number\s+card\s+credit\b/i.test(line)) continue;
+    // `Card 123456789` under a card-payment row (Bank AlJazira) names the
+    // card that was paid, not a statement section: an unmasked run of fewer
+    // than 12 digits after a bare `Card` is not a card number at all.
+    if (/^\s*card\s*[:#-]?\s*\d{1,11}\s*$/i.test(normalizeDigits(line))) continue;
     const instrument = statementInstrument(line, { iban: false }) ?? statementHeaderInstrument(line);
     if (!instrument) continue;
     if (instrument.kind !== 'account' && singleCardAccount) continue;
@@ -2471,6 +2824,9 @@ export function parseStatementLines(
   const dateOrder = inferDateOrder(lines.map((line) => ROW_DATE_PREFIX.exec(line)?.[1] ?? ''), dateHint);
   let ambiguousDateRows = 0;
   const columnOrder = statementColumnOrder(text);
+  // No header names the debit and credit columns: the order is the Gulf
+  // Debit-first default, which only the running balance can check.
+  const columnOrderAssumed = columnOrderEvidence(text).size === 0;
   const trailingBalanceHeader = rawLines.some((line) => line.length <= 120 &&
     line.split(' ').length <= 12 && !DATE_LED_LINE.test(line) &&
     /\bdate\b/i.test(line) && /\b(?:description|details|particulars|narration)\b/i.test(line) &&
@@ -2484,6 +2840,12 @@ export function parseStatementLines(
   const balanceLabels = !cardEvidence ? labelledBalanceConvention(lines, currency) : null;
   const balanceTrailing = !cardEvidence && (balanceLabels === 'balance' || trailingBalanceRuns(lines, currency));
   let previousBalance: number | null = null;
+  let previousTailBalance: number | null = null;
+  // Rows read through the debit/credit column order, and whether any row's
+  // own balance disproved that order (see below the loop).
+  const columnRowIndices: number[] = [];
+  let columnOrderContradictions = 0;
+  let columnOrderAgreements = 0;
   const push = (
     date: string,
     description: string,
@@ -2532,6 +2894,10 @@ export function parseStatementLines(
   for (const line of lines) {
     if (!line) continue;
     const prefixed = ROW_DATE_PREFIX.exec(line);
+    // The column branch's running balance is only valid from the row just
+    // before: any other date-led row (labelled, summary, skipped) breaks it.
+    const tailBefore: number | null = previousTailBalance;
+    if (prefixed) previousTailBalance = null;
     // An opening balance is not a transaction, but it IS the running balance
     // the first row steps from. Without it that row's direction had nothing
     // to be measured against and, with blank debit/credit cells, was lost.
@@ -2634,8 +3000,11 @@ export function parseStatementLines(
       const descriptionCurrency = /(?:^|\s)([A-Z]{3})\s*[\d,]+(?:\.\d{1,3})?$/.exec(merchant)?.[1];
       const foreignBeforeBalance = trailingBalanceHeader && descriptionCurrency !== undefined &&
         statementCurrency(descriptionCurrency) !== null && statementCurrency(descriptionCurrency) !== currency;
+      // A SIGNED figure before the label is the same case: ENBD prints
+      // `-1250.00 3341.06 Cr`, the debit and then the balance's polarity.
+      const lastDescriptionFigure = classifyMoneyToken(descriptionWords.at(-1) ?? '', currency)?.kind;
       const balanceLabelled = !exactRepayment &&
-        classifyMoneyToken(descriptionWords.at(-1) ?? '', currency)?.kind === 'unsigned' &&
+        (lastDescriptionFigure === 'unsigned' || lastDescriptionFigure === 'signed') &&
         statementCurrency(descriptionWords.at(-2) ?? '') === null;
       if (
         (!explicitCurrency || explicitCurrency === currency) && date && !balanceLabelled && !foreignBeforeBalance &&
@@ -2646,7 +3015,9 @@ export function parseStatementLines(
         balanceLabelled && date && figures &&
         (!explicitCurrency || explicitCurrency === currency)
       ) {
-        if (balanceLabels === 'transaction') {
+        const amountToken = classifyMoneyToken(descriptionWords.at(-1) ?? '', currency);
+        const signDisagrees = amountToken?.kind === 'signed' && amountToken.type !== (credit ? 'income' : 'expense');
+        if (balanceLabels === 'transaction' && !signDisagrees) {
           push(date, figures.merchant, figures.amountMinor, credit ? 'income' : 'expense', line);
         } else if (balanceLabels === 'balance' && priorBalance !== null) {
           const delta = figures.balanceMinor - priorBalance;
@@ -2662,7 +3033,23 @@ export function parseStatementLines(
         : null;
       if (tail === 'ambiguous-card-sign') ambiguousCardSignRows += 1;
       const column = tail === 'ambiguous-card-sign' ? null : tail;
-      if (date && column) push(date, column.merchant, column.amountFils, column.type, line);
+      // A debit/credit/balance row whose running balance moved by exactly its
+      // amount the OTHER way was read with the columns swapped (a headerless
+      // table keeps the Debit-first default). The balance is evidence the
+      // column guess is wrong, so the row is refused rather than filed.
+      const tailBalance = prefixed ? columnRowBalance(prefixed[2], currency) : null;
+      const priorTail = tailBefore;
+      previousTailBalance = prefixed ? tailBalance : tailBefore;
+      const balanceChecks = columnOrderAssumed && column !== null && !cardEvidence && priorTail !== null &&
+        tailBalance !== null && Math.abs(tailBalance - priorTail) === column.amountFils;
+      const balanceContradicts = balanceChecks && (tailBalance! > priorTail! ? 'income' : 'expense') !== column!.type;
+      if (balanceContradicts) columnOrderContradictions += 1;
+      else if (balanceChecks) columnOrderAgreements += 1;
+      if (date && column && !balanceContradicts) {
+        // Only a three-figure `debit credit balance` row depends on the order.
+        if (tailBalance !== null) columnRowIndices.push(rows.length);
+        push(date, column.merchant, column.amountFils, column.type, line);
+      }
       else if (date && figures && priorBalance !== null) {
         // No label and no placeholder to say which column is populated: the
         // step in the balance says it instead, and only when it matches this
@@ -2676,6 +3063,17 @@ export function parseStatementLines(
     if (countable && rows.length === accepted) {
       rejectedRows += 1;
       if (dateOrder === 'unknown' && prefixed && ambiguousLocalDate(prefixed[1])) ambiguousDateRows += 1;
+    }
+  }
+  // A balance step that disproves the assumed column order, with none
+  // confirming it, disproves it for the whole table, including rows with no
+  // prior balance to check (the first row of a page). Every row read through
+  // that order is refused and counted. (A newest-first table can produce
+  // such a step by coincidence; refusing it is the safe side.)
+  if (columnOrderContradictions >= 1 && columnOrderAgreements === 0) {
+    for (const index of columnRowIndices.reverse()) {
+      rows.splice(index, 1);
+      rejectedRows += 1;
     }
   }
   // Only beside transactions this parser could read: a summary alone is what
