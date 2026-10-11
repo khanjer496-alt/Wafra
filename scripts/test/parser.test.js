@@ -7073,5 +7073,40 @@ t('a spaced masked card number keeps its LAST four digits',
     { type: 'expense', amountFils: 35000 });
 }
 
+// PARSER_VERSION 65 changed only the worldwide (unverified-format) layer. The
+// launch grammar keeps refusing the smishing shape that layer used to post:
+// a "charged" sentence whose call to action is a dispute link.
+for (const body of [
+  'Your credit card ending 4421 has been charged AED 499.00 for an iPhone purchase. If this was not you, dispute here: http://billing-dispute.example',
+  'Your credit card has been charged SAR 499 for an iPhone purchase. If this was not you, dispute here: http://billing-dispute.example',
+]) {
+  ok(`launch grammar: a dispute-link smishing text is not a transaction — ${body.slice(0, 50)}…`, parseSms(body) === null,
+    JSON.stringify(parseSms(body)));
+}
+
+// UAE (owner-approved, PARSER_VERSION 65): a notice that an EXISTING purchase
+// was converted to an instalment plan quotes money already on the ledger from
+// the purchase alert; posting it counted the purchase twice. Synthetic text;
+// the Arabic wording follows a real CIB (Egypt) notice ("لقد تم تقسيط مبلغ …
+// بقسط شهري …") with the dirham substituted.
+for (const body of [
+  'Your purchase of AED 2,400.00 at CORNER SHOP has been converted to EMI for 12 months.',
+  'Your transaction of AED 3,600.00 at APPLE STORE has been successfully converted into 12 instalments. Monthly instalment AED 300.00.',
+  'Your purchase of AED 3,600.00 at APPLE STORE on Credit Card ending 1234 has been converted to an Easy Payment Plan of 12 months.',
+  'لقد تم تقسيط مبلغ 11495.00 درهم من CORNER SHOP على بطاقتكم الائتمانية المنتهية بـ 8016 بقسط شهري 957.92 درهم على 12 شهر',
+]) {
+  ok(`UAE: an instalment-plan conversion is not a new expense — ${body.slice(0, 50)}…`, parseSms(body) === null,
+    JSON.stringify(parseSms(body)));
+}
+t('UAE control: an EMI debited from the account still posts',
+  'EMI of AED 200.00 has been debited from your account XXXX1234 on 02/10/2026.',
+  { type: 'expense', amountFils: 20000 });
+t('UAE control: a loan instalment debited still posts',
+  'Loan instalment of AED 2,500.00 has been debited from your account 1234.',
+  { type: 'expense', amountFils: 250000 });
+t('UAE control: a purchase with a "convert now" instalment footer keeps its purchase',
+  'Purchase of AED 3,600.00 with Credit Card ending 1234 at APPLE STORE. Avl Cr. Limit is AED 5,000.00. Convert now to easy instalments.',
+  { type: 'expense', amountFils: 360000 });
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

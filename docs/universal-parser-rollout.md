@@ -232,6 +232,39 @@ it. Every guardrail is required:
   Portuguese, Arabic). Temporary authorisations, holds and charges are refused,
   and so is a bare "authorised/authorisation" unless the text also says
   completed, posted or settled;
+- no link whose call to action is dispute/verify/cancel/claim/accept/log in
+  (and similar): "If this wasn't you, dispute here: http://…" is smishing
+  bait, so the money sentence before it is never posted. It counts when the
+  action is imperative at the link ("here", "now", a colon), a weak verb
+  (update, log in, sign in, receive, get) names the person's own details or
+  money, or the link is a shortener, a lookalike registrable domain or a
+  spoofed one ("chase.com-refund.example"); a weak verb with "now"/"here"/a
+  colon counts unless the link is the header brand's own domain or an app
+  store; in a "Not you?" sentence a hyphenated domain counts only when it
+  borrows a brand or security word and is not the alert's own brand
+  ("chase-x.example" does; "first-direct.com", "credit-agricole.fr",
+  "co-operativebank.co.uk" do not). A purpose-clause footer to a plain domain
+  ("To dispute this charge visit www.chase.com/dispute"), a bank subdomain
+  ("Sign in at secure.chase.com"), an app store, "Report Dispute", "To cancel
+  alerts, visit …" and "Not you? Visit chase.com/fraud" are not.
+  The same check keeps a certified template out of automatic posting;
+- no wording that withdraws or questions the money sentence: fraud prompts
+  ("Fraud alert", "Was this you?", "Did you authorize this?", "Reply Y/N",
+  "flagged", "held", a security or bare code — never an auth, approval or
+  merchant code — "that we blocked", "under review"), an unnamed
+  payer ("Somebody paid you $500!"),
+  earn-per-event adverts ("Earn $5 every time…", not "Earn 5% back on
+  groceries"), "Tap to accept", or a question or
+  condition about the payment itself ("Has JORDAN paid you $48.20?", "If
+  JORDAN LEE paid you $48.20, …");
+- money that is a new movement of the person's own cash: a purchase converted
+  to EMI/instalments, airtime received, a merchant's own order notice (it
+  repeats the bank's debit alert), a fund crediting units and a payment to the
+  person's own card ("You paid $X to your … Card") are not auto-added. Whether
+  such a message then appears in Review is the refusal inspector's decision;
+  on the iPhone History import most of them are not imported at all. These
+  checks apply only to automatic posting; user-taught (learned) templates
+  keep their own wording guard;
 - a supported family (purchase, cash withdrawal, refund, fee, utility,
   recurring payment, transfer) whose direction matches it: refunds are
   credits, transfers must state their direction and post as transfers;

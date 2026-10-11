@@ -86,6 +86,10 @@ const completedMovement = (source: string): { status: PostingStatus; direction: 
     /\[[^\]]{1,12}카드\]\s*(?:해외\s*)?승인\s+[\d,]+원/u,
     /डेबिट\s+(?:किया\s+गया|किए\s+गए)/u,
     phrase(String.raw`charged\s+to\s+(?:your\s+)?card[\s\S]{0,60}\bat`),
+    // Chase's authorised-user alert: a header, then the cardholder's name in
+    // capitals: "Prime Visa 1234: ALEX made a $19.99 transaction with CAFE".
+    // Case-sensitive on purpose; "someone/SOMEONE made …" is a fraud prompt.
+    /(?:^|:[ \t]*)(?!(?:SOMEONE|SOMEBODY|ANYONE|ANYBODY|UNKNOWN)\b)[A-Z][A-Z'.-]+(?:[ \t]+[A-Z][A-Z'.-]+){0,3}[ \t]+made[ \t]+an?[ \t]+(?!(?:[^.;\n?]|\.\d){0,40}?\b(?:return|refund|credit)\b)(?:[^.;\n?]|\.\d){0,40}?\btransaction[ \t]+with\b/u,
     /カード利用のお知らせ[\s\S]{0,40}ご利用金額/u,
     /(?:カード利用|購入)が完了しました/u,
     /(?:消费|支付|付款)(?:成功|已完成)/u,
@@ -298,7 +302,7 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
   const controlText = roleUnresolved ? wholeContext : semanticSource;
   const pending = /\b(?:pending|awaiting)\s+(?:authori[sz]ation|approval|confirmation|processing|clearance)\b/iu.test(controlText);
   const explicitlyUnsuccessful = [...controlText.matchAll(
-    /\bnot\s+(?:(?:yet|been|be|successfully)\s+){0,2}(?:successful|completed|processed|posted|approved|paid|debited|credited)\b/giu,
+    /\bnot\s+(?:(?:yet|been|be|successfully)\s+){0,2}(?:successful|completed|processed|posted|approved|paid|debited|deducted|credited)\b/giu,
   )].some((match) => !/\bif(?:\s+\w+){0,6}\s*$/iu.test(
     controlText.slice(Math.max(0, match.index! - 65), match.index!),
   ));
@@ -411,7 +415,22 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
     .test(source);
   const readDirection = status === 'posted' || status === 'unknown'
     ? roleUnresolved || directionConflict ? 'unknown' : knownDirection === 'unknown' && completion ? completion.direction : knownDirection : 'none';
-  const direction = counterpartyReceipt && readDirection === 'credit' ? 'unknown' : readDirection;
+  // "JAMIE ROE has received your bank transfer of €75" (N26) is the named
+  // recipient acknowledging money that LEFT this account. Only a personal name
+  // in capitals (2-4 words opening the message, no fintech or account noun)
+  // proves that. "Trade Republic has received …" (a broker top-up), "Revolut
+  // has received your transfer" (a top-up), "Your savings space has received
+  // …", a mixed-case name and "Once JAMIE ROE has received …" leave the
+  // direction to the person.
+  const receivedYourTransfer = /\bhas\s+received\s+your\s+(?:bank\s+)?transfer\b/iu.test(source);
+  const personSubject = source.match(
+    /^\s*([A-Z][A-Z'’-]+(?:[ \t]+[A-Z][A-Z'’-]+){1,3})[ \t]+has[ \t]+received[ \t]+your[ \t]+(?:bank[ \t]+)?transfer\b/u,
+  )?.[1] ?? null;
+  const personReceivedYourTransfer = personSubject !== null &&
+    !/\b(?:revolut|n26|paypal|wise|monzo|starling|bunq|venmo|cash\s*app|zelle|klarna|ltd|limited|inc|gmbh|plc|llc|bank|account|space|pocket|vault|savings|wallet|card)\b/iu.test(personSubject);
+  const direction = counterpartyReceipt && readDirection === 'credit' ? 'unknown'
+    : receivedYourTransfer && readDirection === 'credit' ? personReceivedYourTransfer ? 'debit' : 'unknown'
+      : readDirection;
   const authentication = challenge || readings.some((reading) => reading.family === 'authentication');
   const promotion = [...readings, ...wholeReadings].some((reading) => reading.draft.reasons.includes('promotion'));
   const reviewable = hasAmount || hasStatement || hasBalance;

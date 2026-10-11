@@ -225,5 +225,15 @@ ok('certified unresolved transfers cannot swing exact totals before ownership re
     countsInCashflowTotals(unresolvedCertifiedTransfer, live, new Set()) === true,
   JSON.stringify({ ownership: transferOwnership(unresolvedCertifiedTransfer) }));
 
+// A certified shape with a smishing call-to-action link stays in Review.
+{
+  const genuine = certify('Chase Bank: Card purchase USD 42.10 was charged at SAMPLE SHOP. Not you? Visit chase.com/fraud', 'US', 'jpmorgan-chase');
+  ok('a certified purchase with a plain bank-site footer stays automatic',
+    genuine.decision === 'automatic' && genuine.templateId === 'us-chase-purchase-v1', JSON.stringify(genuine));
+  const bait = certify('Chase Bank: Card purchase USD 42.10 was charged at SAMPLE SHOP. Not you? Dispute here: http://chase-dispute.example/form', 'US', 'jpmorgan-chase');
+  ok('a certified shape whose link asks you to dispute is never automatic',
+    bait.decision === 'review' && bait.templateId === null, JSON.stringify(bait));
+}
+
 console.log(`\nuniversal-template-certification: ${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

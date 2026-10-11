@@ -581,5 +581,299 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
   }
 }
 
+/* ── 2026-10 batch 2: wrong money from unverified formats ─────────────────
+ * Every message here is synthetic text shaped like a public sample. Each
+ * negative is paired with the genuine alert it must not take down. */
+{
+  const country = require('./build/country');
+  const OBSERVED = Date.parse('2026-10-03T08:00:00Z');
+  const worldwide = (currency, cc, sender, body) => {
+    markets.setActiveMarket('ZZ');
+    markets.setLedgerCurrency(currency, 2);
+    country.setActiveCountry(cc);
+    const s = createLaunchAlertSession({ overrides: {}, regionHint: cc, fxLookup: () => null,
+      bestEffort: { enabled: true, country: cc } });
+    try { return s.parse(body, sender, s.inspect(body, sender), undefined, OBSERVED); }
+    finally { markets.setLedgerCurrency(null); country.setActiveCountry(null); markets.setActiveMarket('AE'); }
+  };
+
+  // (a) A link that asks you to dispute/verify/cancel/claim is the scam's
+  // call to action, whatever the money sentence before it says.
+  for (const [currency, cc, body] of [
+    ['USD', 'US', 'Your card ending 4421 was charged $612.00 at LAPTOP WORLD. If this was not you, dispute here: http://card-dispute-centre.example'],
+    ['USD', 'US', 'Your credit card has been charged $350 for a tablet purchase. Not you? Dispute at https://charge-help.example/claim'],
+    ['GBP', 'GB', 'Your card was charged £89.00 at ONLINE STORE. Not you? Cancel now: https://secure-refund.example/x'],
+    ['USD', 'US', 'Your card was charged USD 45.00 at CITY MART. Verify the charge at www.card-verify.example'],
+    ['USD', 'US', 'Your card was charged USD 45.00 at CITY MART. Visit card-help.example/verify to cancel this payment.'],
+    ['NGN', 'NG', 'Your account was credited NGN 7,500.00. Claim it here: bit.ly/claim-funds'],
+  ]) {
+    ok(`${cc}: a link call-to-action never auto-posts — ${body.slice(0, 52)}…`,
+      worldwide(currency, cc, 'UNKNOWN', body) === null && policy.isNotAutoPostableMoney(body));
+  }
+  for (const [currency, cc, body, minor] of [
+    ['USD', 'US', 'Chase: You made a $24.86 purchase at NORTH STAR MARKET with card ending 4421. Not you? Visit chase.com/fraud', 2486],
+    ['USD', 'US', 'Your card ending 4421 was charged USD 24.86 at NORTH STAR MARKET. For details visit https://www.examplebank.com/alerts', 2486],
+  ]) {
+    const row = worldwide(currency, cc, 'CHASE', body);
+    ok(`${cc}: a plain bank-site footer still posts — ${body.slice(0, 52)}…`,
+      row?.type === 'expense' && row.amountFils === minor && !!row.bestEffort, row);
+  }
+
+  // (b) "NAME paid you" is money in; "You paid NAME" stays money out.
+  {
+    const incoming = worldwide('USD', 'US', '86753', 'JORDAN LEE paid you $48.20 dinner');
+    ok('a peer who paid you is income, posted as an incoming transfer',
+      incoming?.type === 'income' && incoming.amountFils === 4820 && incoming.transferHint === true &&
+        incoming.bestEffort?.format === 'universal:transfer:credit', incoming);
+    const outgoing = worldwide('USD', 'US', '86753', 'You paid JORDAN LEE $48.20');
+    ok('…while you paying a peer stays an expense', outgoing?.type === 'expense' && outgoing.amountFils === 4820, outgoing);
+    ok('…and a request to pay you never posts', worldwide('USD', 'US', '86753', 'JORDAN LEE requested $48.20 from you') === null);
+  }
+
+  // (c) "NAME has received your bank transfer" is the counterparty's receipt:
+  // the money left this account.
+  {
+    const sent = worldwide('EUR', 'DE', 'de.number26.android', 'JAMIE ROE has received your bank transfer of €75 ║ N26');
+    ok('a counterparty receiving your transfer is money out',
+      sent?.type === 'expense' && sent.amountFils === 7500 && sent.transferHint === true &&
+        sent.bestEffort?.format === 'universal:transfer:debit', sent);
+    const received = worldwide('EUR', 'DE', 'de.number26.android', "You've received a transfer of € 75.00 from JAMIE ROE.");
+    ok('…while a transfer you received stays money in', received?.type === 'income' && received.amountFils === 7500, received);
+  }
+
+  // (d) Not a new movement of the person's money.
+  for (const [label, currency, cc, sender, body] of [
+    ['an EMI conversion of an earlier purchase', 'BDT', 'BD', 'BANK', 'Your purchase of BDT 2,400.00 at CORNER SHOP has been converted to EMI for 12 months at 15% p.a. interest.'],
+    ['an instalment-plan conversion', 'INR', 'IN', 'VM-BANK', 'Your purchase of Rs 9,999.00 at PHONE HOUSE has been converted into instalments of Rs 1,700.00 for 6 months.'],
+    ['airtime received (phone credit, not money)', 'KES', 'KE', 'MPESA', 'QX12AB34CD confirmed. You have received Airtime of Ksh50.00 from SAMPLE SHOP on 2/3/26 at 9:10 AM.'],
+    ['airtime received, lower case', 'GHS', 'GH', 'MTN', 'Transaction ID: 000001234 confirmed. You have received airtime of GHS5.00 from 0240000000 - SAMPLE NAME on 2026-03-02 at 10:00:00.'],
+    ['a merchant order receipt', 'INR', 'IN', 'TX-FOODAP-S', 'Payment Confirmed! Your FoodApp Order #998877665544 of Rs. 420.0 was successfully paid on 02/03/2026 at 8:10 PM. Txn ID: 1122334455. Enjoy!'],
+    ['a fund unit allocation', 'KES', 'KE', 'SAMPLEFUND', 'Dear MEMBER, Your account for Sample Money Market Fund has been credited with Kes 3,000.00 and 3,000.00 units, as of 02 Mar, 2026.'],
+    ['a payment to your own card (a settlement, not spending)', 'USD', 'US', '227898', 'Capital One Alert: You paid $1,250.00 to your Sample Rewards Card…(1234) on May 8, 2026. Msg & data rates may apply.'],
+  ]) {
+    ok(`never auto-added: ${label}`, worldwide(currency, cc, sender, body) === null);
+  }
+  for (const [label, currency, cc, sender, body, minor, type] of [
+    ['buying airtime is still spending', 'KES', 'KE', 'MPESA', 'QX12AB34CE Confirmed. Ksh50.00 sent to SAFARICOM for airtime on 2/3/26 at 9:12 AM. New M-PESA balance is Ksh1,200.00.', 5000, 'expense'],
+    ['a bank debit for the same order still posts', 'INR', 'IN', 'VM-HDFCBK', 'Rs.420.00 spent on HDFC Bank Card x1234 at FOODAPP on 2026-03-02:20:10:10. Avl Lmt: Rs.85,000.00', 42000, 'expense'],
+  ]) {
+    const row = worldwide(currency, cc, sender, body);
+    ok(`still posts: ${label}`, row?.type === type && row.amountFils === minor, row);
+  }
+}
+
+/* ── 2026-10 batch 2: US/UK/EU card-alert recall, each with its twins ───── */
+{
+  const country = require('./build/country');
+  const OBSERVED = Date.parse('2026-10-03T08:00:00Z');
+  const worldwide = (currency, cc, sender, body) => {
+    markets.setActiveMarket('ZZ');
+    markets.setLedgerCurrency(currency, 2);
+    country.setActiveCountry(cc);
+    const s = createLaunchAlertSession({ overrides: {}, regionHint: cc, fxLookup: () => null,
+      bestEffort: { enabled: true, country: cc } });
+    try { return s.parse(body, sender, s.inspect(body, sender), undefined, OBSERVED); }
+    finally { markets.setLedgerCurrency(null); country.setActiveCountry(null); markets.setActiveMarket('AE'); }
+  };
+  for (const [label, currency, cc, sender, body, minor, date] of [
+    ['Chase card-not-present wording', 'USD', 'US', '24273', 'Chase Freedom: You made an online, phone, or mail transaction of $27.40 with SAMPLE BOOKS on Oct 2, 2026 at 3:15 PM ET.', 2740, '2026-10-02'],
+    ['Chase authorised-user wording', 'USD', 'US', '24273', 'Prime Visa 1234: ALEX made a $19.99 transaction with CORNER CAFE on Oct 2, 2026 at 9:41 AM ET.', 1999, '2026-10-02'],
+    ['BofA "was deducted"', 'USD', 'US', '73981', 'Bank of America: Money transfer of $250.00 for account 1234 was deducted on 10/02/2026. Go online to view details.', 25000, '2026-10-02'],
+    ['BofA card-not-present charge', 'USD', 'US', '73981', 'BofA: Debit card 1234 charge made online, by phone, or mail on 10/02/2026 for $30.00. Log in to view details.', 3000, '2026-10-02'],
+    ['Capital One approved purchase', 'USD', 'US', '227898', 'Capital One: Your purchase for $23.50 at SAMPLE DINER was approved.', 2350, null],
+    ['Revolut spend beside available credit', 'EUR', 'LT', 'Revolut', '🛒 You spent 150 € Available credit: 1.288,73 € ║ Sample Fuel', 15000, null],
+    ['Revolut decimal-comma spend', 'EUR', 'LT', 'Revolut', 'You spent 525,60 € Available credit: 1.443,68 € ║ Sample Shop', 52560, null],
+  ]) {
+    const row = worldwide(currency, cc, sender, body);
+    ok(`posts: ${label}`, row?.type === 'expense' && row.amountFils === minor && row.currency === currency &&
+      !!row.bestEffort && (date === null || row.date === date), row);
+  }
+  {
+    const cnp = worldwide('USD', 'US', '24273', 'Chase Freedom: You made an online, phone, or mail transaction of $27.40 with SAMPLE BOOKS on Oct 2, 2026 at 3:15 PM ET.');
+    ok('the card-not-present merchant is the name after WITH', cnp?.merchant === 'SAMPLE BOOKS', cnp);
+  }
+  for (const [label, currency, cc, sender, body] of [
+    ['Chase pending', 'USD', 'US', '24273', 'Chase: You have a $27.40 pending transaction with SAMPLE BOOKS.'],
+    ['Chase declined card-not-present', 'USD', 'US', '24273', 'Chase Freedom: Your online, phone, or mail transaction of $27.40 with SAMPLE BOOKS was declined.'],
+    ['Chase question', 'USD', 'US', '24273', 'Chase: Did ALEX make a $19.99 transaction with CORNER CAFE? Reply YES or NO.'],
+    ['Chase negated', 'USD', 'US', '24273', 'Chase: ALEX has not made a $19.99 transaction with CORNER CAFE.'],
+    ['Chase code', 'USD', 'US', '24273', 'Chase: Use code 123456 to verify your online, phone, or mail transaction of $27.40 with SAMPLE BOOKS. Do not share.'],
+    ['BofA declined prefix', 'USD', 'US', '73981', 'Declined, Debit card 1234 charge made online, by phone, or mail on 10/02/2026 for $30.00. ║ BofA'],
+    ['BofA (Declined) prefix', 'USD', 'US', '73981', 'Bank of America: (Declined) Money transfer of $250.00 for account 1234 was deducted on 10/02/2026.'],
+    ['BofA future deduction', 'USD', 'US', '73981', 'Bank of America: Money transfer of $250.00 for account 1234 will be deducted on 10/09/2026.'],
+    ['BofA negated deduction', 'USD', 'US', '73981', 'Bank of America: Money transfer of $250.00 for account 1234 was not deducted on 10/02/2026.'],
+    ['Capital One declined', 'USD', 'US', '227898', 'Capital One: Your purchase for $23.50 at SAMPLE DINER was declined.'],
+    ['Capital One pending', 'USD', 'US', '227898', 'Capital One: Your purchase for $23.50 at SAMPLE DINER is pending approval.'],
+    ['Revolut declined', 'EUR', 'LT', 'Revolut', '🚫 Your payment of 10 € to SAMPLE NAME has been declined. Available credit: 1.288,73 €'],
+    ['Revolut pending', 'EUR', 'LT', 'Revolut', 'Your payment of 150 € at Sample Fuel is pending. Available credit: 1.288,73 €'],
+    ['available credit alone', 'EUR', 'LT', 'Revolut', 'Available credit: 1.288,73 € ║ Revolut'],
+  ]) {
+    ok(`never auto-added: ${label}`, worldwide(currency, cc, sender, body) === null);
+  }
+  // A threshold, a daily total or a credit headroom is never the amount.
+  for (const [label, currency, cc, sender, body, notMinor, principal] of [
+    ['a Chase alert threshold', 'USD', 'US', '24273', 'Chase acct 1234: A charge of $64.10 at SAMPLE GRILL on Oct 2, 2026 at 7:00 PM ET is greater than your $5.00 limit in your Alerts settings.', 500, 6410],
+    ['a Chase alert threshold without "limit"', 'USD', 'US', '24273', 'Chase acct 1234: Your $1.75 debit card transaction with SAMPLE SHOP on Oct 2, 2026 at 7:00 PM ET was more than the $0.01 in your Alerts settings.', 1, 175],
+    ['a Monzo daily total', 'GBP', 'GB', 'Monzo', 'You’ve spent £54.20 on your card today. ║ 💳 £12.40 at Sample Bakery', 5420, 1240],
+    ['a Revolut spent-today total', 'EUR', 'LT', 'Revolut', '😉 Paid €12.30 at Sample Store 😉 Spent today: €40.00 ║ Sample Store', 4000, 1230],
+    ['Revolut available credit', 'EUR', 'LT', 'Revolut', '🛒 You spent 150 € Available credit: 1.288,73 € ║ Sample Fuel', 128873, 15000],
+  ]) {
+    const row = worldwide(currency, cc, sender, body);
+    const event = inspectUniversalBankEvent(body, { sender });
+    ok(`never the amount: ${label}`, (row === null || row.amountFils === principal) &&
+      event.amount.value?.minorUnits !== String(notMinor), { row, amount: event.amount.value });
+  }
+}
+
+/* ── 2026-10 batch 2, review round: every reviewer probe is pinned ─────── */
+{
+  const country = require('./build/country');
+  const OBSERVED = Date.parse('2026-10-03T08:00:00Z');
+  const worldwide = (currency, cc, sender, body) => {
+    markets.setActiveMarket('ZZ');
+    markets.setLedgerCurrency(currency, 2);
+    country.setActiveCountry(cc);
+    const s = createLaunchAlertSession({ overrides: {}, regionHint: cc, fxLookup: () => null,
+      bestEffort: { enabled: true, country: cc } });
+    try { return s.parse(body, sender, s.inspect(body, sender), undefined, OBSERVED); }
+    finally { markets.setLedgerCurrency(null); country.setActiveCountry(null); markets.setActiveMarket('AE'); }
+  };
+  const never = (label, currency, cc, sender, body) =>
+    ok(`review round, never auto-added: ${label}`, worldwide(currency, cc, sender, body) === null,
+      worldwide(currency, cc, sender, body));
+  const posts = (label, currency, cc, sender, body, minor, type) => {
+    const row = worldwide(currency, cc, sender, body);
+    ok(`review round, posts: ${label}`, row?.type === type && row.amountFils === minor, row);
+  };
+
+  // 1. "[name] made a … transaction": only a header-prefixed ALL-CAPS name.
+  for (const body of [
+    'Chase: Fraud alert. Somebody made a $499.00 transaction with BESTBUY. Text YES if it was you, NO if not.',
+    'Unusual activity: someone made a $499.00 transaction with BESTBUY on Oct 2, 2026.',
+    'Your card was locked after someone made a $499.00 transaction with BESTBUY.',
+    'Chase: SOMEONE made a $499.00 transaction with BESTBUY on Oct 2, 2026.',
+    'Chase: If ALEX made a $19.99 transaction with CORNER CAFE, no action is needed.',
+    'Chase: If you see that ALEX made a $19.99 transaction with CORNER CAFE, let us know.',
+    'Prime Visa 1234: ALEX made a $19.99 transaction with CORNER CAFE that we blocked.',
+    'Prime Visa 1234: ALEX made a $19.99 transaction with CORNER CAFE that we stopped for your protection.',
+    'Prime Visa 1234: ALEX made a $19.99 transaction with CORNER CAFE that is under review.',
+    'Chase: You made a $19.99 transaction with CORNER CAFE. Was this you? Reply YES or NO.',
+    'Chase: Suspicious activity. You made a $19.99 transaction with CORNER CAFE on Oct 2, 2026.',
+  ]) never(body.slice(0, 60), 'USD', 'US', '24273', body);
+  posts('a conditional "suspicious" footer does not stop a completed purchase', 'QAR', 'QA', 'QNB',
+    'Your QNB debit card SAMPLE1 has been used for a purchase for QAR 120 at SAMPLE STORE and the available balance is QAR 900. In case the transaction is suspicious Please Call 40000000', 12000, 'expense');
+  posts('the real authorised-user shape still posts', 'USD', 'US', '24273',
+    'Prime Visa 1234: ALEX made a $19.99 transaction with CORNER CAFE on Oct 2, 2026 at 9:41 AM ET.', 1999, 'expense');
+
+  // 2. "has received your transfer": only a named person flips it to money out.
+  for (const body of [
+    'Revolut has received your bank transfer of €500',
+    'N26 has received your transfer of €500',
+    'PayPal has received your transfer of €500',
+    'Wise has received your transfer of €500',
+    'Revolut Ltd has received your transfer of €75 — your top-up is complete',
+    'Your savings space has received your transfer of €100',
+    'Once JAMIE ROE has received your bank transfer of €75 we will notify you.',
+  ]) never(body.slice(0, 60), 'EUR', 'DE', 'de.number26.android', body);
+  posts('a named person receiving your transfer is money out', 'EUR', 'DE', 'de.number26.android',
+    'JAMIE ROE has received your bank transfer of €75 ║ N26', 7500, 'expense');
+
+  // 3. "paid you": a sentence-initial payer only, never an ad or a question.
+  for (const body of [
+    'Earn $5 every time a friend has paid you via Venmo',
+    'JORDAN LEE paid you $48.20\nTap to accept: venmo-claim.example/claim',
+    "JORDAN LEE hasn't paid you $48.20 yet. Remind them?",
+    'Has JORDAN paid you $48.20? Mark as paid.',
+    'If JORDAN LEE paid you $48.20, mark it received.',
+  ]) never(body.slice(0, 60), 'USD', 'US', '86753', body);
+  posts('a peer who paid you is still income', 'USD', 'US', '86753', 'JORDAN LEE paid you $48.20 dinner', 4820, 'income');
+
+  // 4. Real footers are not scam calls to action; bait still is.
+  posts('UCO-shaped "Report Dispute <short link>" footer', 'INR', 'IN', 'VM-UCOBNK',
+    'A/c XX1234 Credited with Rs.6.00 on 07-02-2024 by UCO-UPI.Avl Bal Rs.51.98. Report Dispute https://bit.ly/sample1 .For feedback https://rb.gy/sample2', 600, 'income');
+  posts('"To cancel alerts, visit chase.com/alerts"', 'USD', 'US', 'CHASE',
+    'Chase: You made a $24.86 purchase at NORTH STAR MARKET with card ending 4421. To cancel alerts, visit chase.com/alerts', 2486, 'expense');
+  posts('"To dispute this charge visit <bank domain>" on a completed alert', 'USD', 'US', 'CHASE',
+    'Chase: You made a $24.86 purchase at NORTH STAR MARKET with card ending 4421. To dispute this charge visit www.chase.com/dispute', 2486, 'expense');
+  never('"To dispute this charge visit <short link>"', 'USD', 'US', 'UNKNOWN',
+    'Your card ending 4421 was charged $612.00 at LAPTOP WORLD. To dispute this charge visit bit.ly/card-help');
+  never('"log in" at a lookalike link', 'USD', 'US', 'UNKNOWN',
+    'Your card ending 4421 was charged $612.00 at LAPTOP WORLD. Not you? Log in at https://card-secure-login.example');
+
+  // 5. Narrowed shapes.
+  posts('paying a friend with your card is not a payment TO your card', 'USD', 'US', '86753',
+    'You paid $50.00 to your friend using your debit card', 5000, 'expense');
+  never('a merchant shipping notice that repeats the payment', 'USD', 'US', 'AMAZON',
+    'Your order #12345 has shipped. You paid $50.00 with card 1234 at AMAZON.');
+
+  // Re-review round.
+  // 1. Fraud prompts under the header-colon authorised-user shape.
+  for (const body of [
+    'Chase: ALEX made a $19.99 transaction with CORNER CAFE. Did you authorize this? Reply Y/N',
+    'Chase: ALEX made a $19.99 transaction with CORNER CAFE. Reply 1 if you recognize it, 2 if not.',
+    'Chase: ALEX made a $19.99 transaction with CORNER CAFE that we flagged as suspicious.',
+    'Chase: ALEX made a $19.99 transaction with CORNER CAFE that we held.',
+    'Chase: ALEX made a $19.99 transaction with CORNER CAFE. Code 123456.',
+    'Chase: ALEX made a $19.99 return transaction with CORNER CAFE.',
+  ]) never(body.slice(0, 70), 'USD', 'US', '24273', body);
+  // 2. Anonymous payers and money-claim links.
+  for (const body of [
+    'Somebody paid you $500! Collect now at venmo-pay.example/collect',
+    'Somebody paid you $500!',
+    'JORDAN LEE wants to know if they paid you $48.20',
+  ]) never(body.slice(0, 60), 'USD', 'US', '86753', body);
+  // 3. Only an ALL-CAPS personal name flips "has received your transfer".
+  for (const body of [
+    'Trade Republic has received your transfer of €500',
+    'Scalable Capital has received your bank transfer of €500',
+  ]) {
+    const row = worldwide('EUR', 'DE', 'de.number26.android', body);
+    ok(`a broker top-up is never money out — ${body.slice(0, 40)}`, row === null || row.type !== 'expense', row);
+  }
+  // 4. Real bank footers on a completed alert.
+  for (const footer of [
+    'Not you? Sign in at secure.chase.com/alerts',
+    'To update your alerts, log in at https://secure.chase.com',
+    'Update the app: https://apps.apple.com/us/app/chase-mobile/id298867247',
+    'Log in: https://www.chase.com',
+  ]) {
+    posts(`real footer "${footer.slice(0, 40)}"`, 'USD', 'US', 'CHASE',
+      `Chase: You made a $24.86 purchase at NORTH STAR MARKET with card ending 4421. ${footer}`, 2486, 'expense');
+  }
+  never('"update your details" at a link', 'USD', 'US', 'UNKNOWN',
+    'Your card ending 4421 was charged $612.00 at LAPTOP WORLD. Update your details here: https://cardholder-portal.example');
+  // 5. Lookalike hosts in a "not you" footer, and a TLD-spoofing host.
+  for (const footer of [
+    'Not you? Click https://chase-x.example',
+    'Visit https://chase.com-refund.example/x',
+    'To stop this payment visit chasebank-alerts.example/x',
+  ]) {
+    never(`lookalike footer "${footer.slice(0, 40)}"`, 'USD', 'US', 'UNKNOWN',
+      `Your card ending 4421 was charged $612.00 at LAPTOP WORLD. ${footer}`);
+  }
+
+  // Round 3: genuine footers must not cost a completed alert.
+  for (const [label, currency, cc, sender, body, minor] of [
+    ['first direct hyphenated fraud link', 'GBP', 'GB', 'firstdirect', 'first direct: You spent £12.50 at Tesco Express. Not you? Visit www.first-direct.com/fraud', 1250],
+    ['Co-operative Bank fraud link', 'GBP', 'GB', 'CoopBank', 'Co-operative Bank: You spent £12.50 at Tesco Express. Not you? Visit www.co-operativebank.co.uk/fraud', 1250],
+    ['Co-operative Bank help link', 'GBP', 'GB', 'CoopBank', 'You spent £12.50 at Tesco Express. For help visit https://www.co-operativebank.co.uk/help', 1250],
+    ['a hyphenated bank domain', 'USD', 'US', 'CHASE', 'Chase: You made a $24.86 purchase at NORTH STAR MARKET with card ending 4421. Manage cards at https://www.bank-abc.com/cards', 2486],
+    ['a net-banking domain', 'USD', 'US', 'CHASE', 'Chase: You made a $24.86 purchase at NORTH STAR MARKET with card ending 4421. Statements: www.net-banking.example.com/home', 2486],
+    ['Crédit Agricole fraud link', 'EUR', 'FR', 'CA', 'Paiement par carte effectué : 32,00 EUR chez MARCHE BIO le 02/10/2026. Not you? Visit www.credit-agricole.fr/fraude', 3200],
+    ['Sparkasse block link', 'EUR', 'DE', 'Sparkasse', 'Kartenzahlung erfolgreich: 34,90 EUR bei REWE Markt GmbH am 02.10.2026. Not you? Visit www.sparkasse-koelnbonn.de/sperren', 3490],
+    ['an authorisation code footer', 'INR', 'IN', 'VM-HDFCBK', 'Rs.420.00 spent on HDFC Bank Card x1234 at FOODAPP on 2026-10-02:20:10:10. Auth code 123456.', 42000],
+    ['a merchant category code', 'USD', 'US', 'CHASE', 'Chase: You made a $24.86 purchase at TARGET with card ending 4421, merchant code 5411.', 2486],
+    ['a lost-card locking tip', 'USD', 'US', 'CHASE', 'Chase: You made a $24.86 purchase at NORTH STAR MARKET with card ending 4421. If your card is lost, it can be locked in the app.', 2486],
+    ['a rewards tagline', 'USD', 'US', 'CHASE', 'Chase: You made a $24.86 purchase at NORTH STAR MARKET with card ending 4421. Earn 5% back on groceries.', 2486],
+  ]) posts(label, currency, cc, sender, body, minor, 'expense');
+  never('a weak verb with "now" at a non-brand domain', 'USD', 'US', 'UNKNOWN',
+    'Your card was charged $612.00 at LAPTOP WORLD. Log in now: http://chasebank.example/x');
+  never('a branded header does not vouch for a different domain', 'USD', 'US', 'UNKNOWN',
+    'Chase: Your card was charged $612.00 at LAPTOP WORLD. Log in now: http://chasebank.example/x');
+
+  // 7. "will have been" is future.
+  never('"will have been debited"', 'USD', 'US', 'CHASE', 'Chase: $40.00 will have been debited from your account ending 4421 by Friday.');
+}
+
 console.log(`\nbest-effort-autopost: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

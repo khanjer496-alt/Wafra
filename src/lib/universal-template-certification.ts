@@ -1,5 +1,6 @@
 import type { UniversalMarket } from '@/lib/alert-market-pack-types';
 import { alertMarketPack } from '@/lib/alert-market-packs';
+import { isNotAutoPostableMoney } from '@/lib/best-effort-autopost';
 import { assessUniversalEventConfidence } from '@/lib/universal-confidence';
 import type { UniversalBankEvent } from '@/lib/universal-types';
 
@@ -186,6 +187,14 @@ export function certifyUniversalTemplate(
   const { event } = input;
   if (event.status !== 'posted') {
     return { decision: 'never-post', templateId: null, reason: 'non-posting' };
+  }
+  // A smishing link call-to-action ("dispute here: http://…"), wording that
+  // withdraws the money sentence (fraud prompt, question, condition) or money
+  // that is not a new movement (EMI conversion, airtime received, a merchant's
+  // order notice, fund units) is never automatic, even in a certified shape.
+  // The decision is 'review', not 'never-post', so the caller may still offer it.
+  if (isNotAutoPostableMoney(input.source)) {
+    return { decision: 'review', templateId: null, reason: 'non-posting' };
   }
   if (NON_TRANSACTION_FAMILIES.has(event.family)) {
     return { decision: 'never-post', templateId: null, reason: 'non-transaction-fact' };

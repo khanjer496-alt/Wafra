@@ -28,11 +28,11 @@ export interface UniversalMoneyExtraction {
 const LABEL = new RegExp([
   String.raw`(?<minimum>\bpay\s+min\.|\bmin(?:imum)?\.?\s+(?:(?:amount|amt|payment)\s+)?due\b|\bminimum\s+payment\b|\bpago\s+mínimo\b|(?<![\p{L}\p{M}\p{N}_])(?:paiement\s+minimum|न्यूनतम\s+देय\s+राशि)(?![\p{L}\p{M}\p{N}_])|الحد\s+(?:الادنى|الأدنى)\s+(?:المستحق|للدفع|للسداد))`,
   String.raw`(?<total>\b(?:statement\s+(?:total|balance|amount)|closing\s+balance|total\s+(?:(?:amount|amt)\s+)?due(?:\s+to\s+avoid\s+fin\.\s+charges)?|total\s+outstanding(?:\s+balance)?|new\s+balance|saldo\s+total\s+del\s+estado)\b|(?<![\p{L}\p{M}\p{N}_])(?:total\s+à\s+payer|कुल\s+देय\s+राशि)(?![\p{L}\p{M}\p{N}_])|(?:اجمالي|إجمالي)\s+(?:المبلغ\s+المستحق|مبلغ\s+الكشف))`,
-  String.raw`(?<limit>\b(?:(?:available|avl|avail)\.?\s+(?:credit|cr\.?)\s+limit|(?:available|credit|avl|avail)\.?\s+(?:limit|lmt))\b|الحد\s+(?:المتاح|الائتماني))`,
+  String.raw`(?<limit>\b(?:(?:available|avl|avail)\.?\s+(?:credit|cr\.?)\s+limit|(?:available|credit|avl|avail)\.?\s+(?:limit|lmt)|available\s+credit|credit\s+available)\b|الحد\s+(?:المتاح|الائتماني))`,
   String.raw`(?<balance>\b(?:(?:available|current|avl|avail)\.?\s+)?bal(?:ance)?\b|\b(?:solde(?:\s+disponible)?|kontostand|saldo|(?:kullanılabilir\s+)?bakiye)\b|الرصيد(?:\s+(?:الحالي|المتاح))?|(?<![\p{L}\p{M}\p{N}_])رصيد\s+حسابك(?:\s+(?:الحالي|المتاح))?(?![\p{L}\p{M}\p{N}_])|(?:उपलब्ध\s+)?शेष\s+राशि|(?:利用可能)?残高|(?:可用)?余额)`,
   String.raw`(?<bill>\b(?:bill(?:\s+amount)?\s+(?:due|of)|amount\s+due|payment\s+due|bill\s+amount|bill\s+for|montant\s+à\s+payer|importo\s+da\s+pagare)\b|مبلغ\s+الفاتورة|المبلغ\s+المستحق|देय\s+राशि)`,
   String.raw`(?<fee>\b(?:fee|fees|commission|service\s+charge)\b|رسوم|عمولة)`,
-  String.raw`(?<transaction>\b(?:virement(?:\s+reçu)?|pix(?:\s+(?:enviado|recebido))?|transaksi|havale|bizum|cargo\s+de|consumo\s+de|na\s+kwot[eę]|lastschrift(?:\s+über)?|payment\s+made\s+for|you\s+have\s+(?:sent|received)|(?:you\s+)?made\s+an?|charge\s+of|transaction(?!\s+(?:id|no|number|ref|reference|date|time|alert)\b)|used\s+for|charged\s+for|withdrew|purchase|purchased|spend|spent|paid|charged|debited|credited|received|sent|withdrawn|withdrawal|deposited|deposit|refund|reversal|transfer(?:red)?|payment|amount|paiement|débité|crédité|remboursement|kartenzahlung|abonnementzahlung|belastet|gutgeschrieben|compra|reembolso|abonado|pagamento|pinbetaling|pasbetaling|kaartbetaling|betaling)\b|(?<![\p{L}\p{N}])(?:alışveriş(?:iniz)?|ödemeniz|tutarında)(?![\p{L}\p{N}])|شراء|خصم|إيداع|ايداع|تحويل|استرداد|دفع|भुगतान|रिफंड\s+राशि|(?<![\p{L}\p{M}\p{N}_])(?:überweisung|overboeking|acquisto|rimborso|accreditato|cargados?|debitados?|रिफंड)(?![\p{L}\p{M}\p{N}_])|(?:利用)?金額|金额|退回|退款|引き落とされました|扣款|승인|डेबिट|क्रेडिट)`,
+  String.raw`(?<transaction>\b(?:virement(?:\s+reçu)?|pix(?:\s+(?:enviado|recebido))?|transaksi|havale|bizum|cargo\s+de|consumo\s+de|na\s+kwot[eę]|lastschrift(?:\s+über)?|payment\s+made\s+for|you\s+have\s+(?:sent|received)|(?:you\s+)?made\s+an?|charge\s+(?:of|made)|transaction(?!\s+(?:id|no|number|ref|reference|date|time|alert)\b)|used\s+for|charged\s+for|withdrew|purchase|purchased|spend|spent|paid|charged|debited|credited|received|sent|withdrawn|withdrawal|deposited|deposit|refund|reversal|transfer(?:red)?|payment|amount|paiement|débité|crédité|remboursement|kartenzahlung|abonnementzahlung|belastet|gutgeschrieben|compra|reembolso|abonado|pagamento|pinbetaling|pasbetaling|kaartbetaling|betaling)\b|(?<![\p{L}\p{N}])(?:alışveriş(?:iniz)?|ödemeniz|tutarında)(?![\p{L}\p{N}])|شراء|خصم|إيداع|ايداع|تحويل|استرداد|دفع|भुगतान|रिफंड\s+राशि|(?<![\p{L}\p{M}\p{N}_])(?:überweisung|overboeking|acquisto|rimborso|accreditato|cargados?|debitados?|रिफंड)(?![\p{L}\p{M}\p{N}_])|(?:利用)?金額|金额|退回|退款|引き落とされました|扣款|승인|डेबिट|क्रेडिट)`,
 ].join('|'), 'giu');
 
 interface OwnedCandidate {
@@ -46,15 +46,28 @@ interface OwnedCandidate {
 // Public CommBank notifications pair a purchase with "So far this month
 // you've spent ...". The latter is a period/category statistic, never another
 // posting or a fallback principal. Keep the observed value for inspection.
-const AGGREGATE_PREFIX = /\b(?:(?:so far(?:\s+(?:this|the)\s+(?:day|week|month|year))?|(?:this|last)\s+(?:week|month|year)|(?:month|year|week)[ -]to[ -]date|(?:monthly|weekly|yearly|annual|cumulative|category)\s+(?:spend(?:ing)?|spends|expenditure)(?:\s+total)?)\b)[^.!?;\n]*$/iu;
+// "Spent today: €40.00" (Revolut) is the day's running total, never a posting.
+const AGGREGATE_PREFIX = /\b(?:(?:so far(?:\s+(?:this|the)\s+(?:day|week|month|year))?|(?:this|last)\s+(?:week|month|year)|(?:month|year|week)[ -]to[ -]date|(?:monthly|weekly|yearly|annual|cumulative|category)\s+(?:spend(?:ing)?|spends|expenditure)(?:\s+total)?)\b|spent\s+today\s*:)[^.!?;\n]*$/iu;
+
+/**
+ * The alert threshold the person set: "… is greater than your $5.00 limit in
+ * your Alerts settings", "… was more than the $0.01 in your Alerts settings"
+ * (Chase). It qualifies the alert, not the money; an earlier label in the
+ * same sentence ("transaction") belongs to the principal, not to this figure.
+ */
+const ALERT_THRESHOLD_PREFIX = /\b(?:is|was)\s+(?:greater|more|higher|larger)\s+than\s+(?:the|your)\s*$/iu;
+const ALERT_THRESHOLD_SUFFIX = /^\s*(?:limit\s+)?(?:set\s+)?in\s+your\s+alerts?\s+settings\b/iu;
 
 function aggregateAmount(prefix: string, suffix: string, label: { role: UniversalMoneyRole; text: string } | undefined): boolean {
+  if (ALERT_THRESHOLD_PREFIX.test(prefix) && ALERT_THRESHOLD_SUFFIX.test(suffix)) return true;
   // An independently labelled purchase/fee in the same clause retains its own
   // authority; period wording must qualify spending, not merely occur nearby.
   if (label && (label.role !== 'transaction' || !/^(?:spend|spent|amount)$/i.test(label.text))) return false;
   if (AGGREGATE_PREFIX.test(prefix)) return true;
   // Postfixed period summaries: "$40 on Food so far this month". A following
   // posting verb belongs to a separate field, so cannot qualify this amount.
+  // "You've spent £67.64 on your card today" (Monzo) is the day's total.
+  if (/^\s*on\s+your\s+card\s+today\b/iu.test(suffix)) return true;
   return !labels(suffix).some(row => row.role === 'transaction') &&
     /^\s*(?:on\s+[^.!?;\n]+?\s+)?(?:so far(?:\s+(?:this|the)\s+(?:day|week|month|year))?|(?:this|last)\s+(?:week|month|year)|(?:month|year|week)[ -]to[ -]date)\b/iu.test(suffix);
 }
@@ -92,9 +105,21 @@ function marketLabelPattern(market: UniversalParseContext['market']): RegExp | n
   return pattern;
 }
 
+/**
+ * Commas that list one thing rather than separate fields: the US card-not-
+ * present phrase "online, (by) phone, or (by) mail" and an English month-day
+ * date "Oct 2, 2026". Splitting there cut "You made an online, phone, or mail
+ * transaction of $30.00" away from its own verb, and "… on Mar 29, 2020 at …"
+ * away from the rest of its sentence.
+ */
+const NON_SEPARATING_COMMAS = /\bonline,\s+(?:by\s+)?phone,?\s+or\s+(?:by\s+)?mail\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]{0,6}\.?\s+\d{1,2},\s+\d{4}\b/giu;
+
 /** Separators between monetary fields; decimal and domain punctuation is excluded. */
 function separators(text: string): number[] {
+  const listed = [...text.matchAll(NON_SEPARATING_COMMAS)]
+    .map((match) => ({ start: match.index!, end: match.index! + match[0].length }));
   return [...text.matchAll(/[;\n!?。।]|[.,](?=\s|$)/g)]
+    .filter((match) => match[0] !== ',' || !listed.some((range) => match.index! > range.start && match.index! < range.end))
     .filter((match) => match[0] !== '.' || !/\b(?:min|avl|avail|cr|dr|amt|bal)$/i.test(text.slice(0, match.index)))
     // The observed ADCB total label includes an abbreviation, not a clause
     // boundary. Its qualifier must stay attached to its own total only.

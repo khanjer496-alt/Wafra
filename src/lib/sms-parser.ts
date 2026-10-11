@@ -524,8 +524,44 @@ export interface ParsedCard {
  *    a date only with a sourceDateCorrection proof, which today only the ADIB
  *    receipt template produces.
  * Future captures and the bounded recent reread get every change above.
+ *
+ * 65: worldwide (unverified-format) money, measured on the west and
+ * github-global research corpora, plus one owner-approved UAE/Saudi repair.
+ *  - Never auto-posted by the unverified-format policy or a certified
+ *    template (Review only where the refusal inspector admits it): a link
+ *    whose call to action is dispute/verify/cancel/claim/accept/log in when
+ *    it is imperative at the link or the link is a shortener or lookalike
+ *    host (smishing bait); fraud prompts (did you authorize, reply Y/N,
+ *    flagged, held, a code), an unnamed payer, adverts, "tap to accept", and
+ *    a question or condition about the payment; a purchase converted to
+ *    EMI/instalments; airtime RECEIVED; a merchant's own order notice; a fund
+ *    crediting units; "You paid $X to your … Card" (a settlement). Bank
+ *    footers ("Not you? Visit chase.com/fraud", "Report Dispute <link>", "To
+ *    cancel alerts, visit …", "To dispute this charge visit www.chase.com/…")
+ *    do not stop a completed alert. User-taught templates are unaffected.
+ *  - Direction: a sentence-initial "NAME paid you $X" (Venmo) is an incoming
+ *    transfer; "FIRST LAST has received your bank transfer of €X" (N26) is
+ *    money out only for an ALL-CAPS personal name; a fintech, an own space or a
+ *    conditional subject leaves the direction to the person.
+ *  - Read: Chase "online, phone, or mail transaction of $X with M" and the
+ *    authorised-user "Header: NAME made a $X transaction with M" (capitals,
+ *    never "someone"); Bank of America "… was deducted" and "Debit card N
+ *    charge made online, by phone, or mail … for $X"; Revolut "You spent X €
+ *    Available credit: Y €" (the available credit is a limit, never the
+ *    amount). A Chase alert threshold, a Monzo "spent £X on your card today"
+ *    and a Revolut "Spent today: €X" total are statistics, never the amount.
+ *    "will have been debited" is future.
+ *  - UAE/Saudi grammar (owner-approved): a completed instalment-plan
+ *    conversion of an existing purchase ("… has been converted to EMI for 12
+ *    months", "… converted into 12 instalments", "تم تقسيط مبلغ …") is not a
+ *    new expense; an EMI or loan instalment DEBITED still posts.
+ * Future captures and the bounded recent reread only; PARSER_BACKFILL_VERSION
+ * remains 50. The worldwide rows carry the "Auto-added — check" marker and
+ * can be undone. A saved UAE/Saudi EMI-conversion row would not be repaired
+ * by a backfill anyway: a row the parser now refuses is kept, never deleted
+ * (store.tsx preserves it), so the bump would cost a full reread for nothing.
  */
-export const PARSER_VERSION = 64;
+export const PARSER_VERSION = 65;
 /**
  * Historical-repair contract for already-saved data.
  *
@@ -4876,8 +4912,18 @@ export function hasArabicRefundHeading(message: string): boolean {
   return AR_PURCHASE_REFUND_HEADER_RE.test(normalizeArabic(message.trim()));
 }
 
+/**
+ * A completed instalment-plan conversion of an EXISTING purchase ("… has been
+ * converted to EMI for 12 months", "… converted into 12 instalments", Arabic
+ * "تم تقسيط مبلغ …"). See parseSmsInner; listed here too so the semantic
+ * fallback cannot rebuild it from the purchase word.
+ */
+const INSTALMENT_CONVERSION_NOTICE_RE =
+  /\b(?:has|have)\s+been\s+(?:successfully\s+)?converted\s+(?:in)?to\s+(?:an?\s+)?(?:\d+\s+)?(?:(?:easy\s+)?instal(?:l)?ments?|emi|easy\s+payment\s+plan|instal(?:l)?ment\s+plan|epp)\b|(?:^|\s)(?:لقد\s+)?تم\s+تقسيط\s+مبلغ/iu;
+
 function nonCashNoticeInBody(body: string): boolean {
-  return AR_CASHBACK_WALLET_CREDIT_RE.test(body) || AR_SHARE_TRADE_RE.test(body);
+  return AR_CASHBACK_WALLET_CREDIT_RE.test(body) || AR_SHARE_TRADE_RE.test(body) ||
+    INSTALMENT_CONVERSION_NOTICE_RE.test(body);
 }
 
 /**
@@ -5935,6 +5981,15 @@ function parseSmsInner(
   // The `posted && SETTLED_TENSE_RE` escape hatch below covers all of them
   // unchanged: an EPP line stapled to a real alert ("…Avl Cr. Limit is AED
   // 5,000.00. Convert now to easy instalments.") still keeps its purchase.
+  // A COMPLETED conversion notice ("Your purchase of AED 2,400.00 at CORNER
+  // SHOP has been converted to EMI for 12 months", "… converted into 12
+  // instalments", Arabic "تم تقسيط مبلغ …") restates a purchase that is
+  // already on the ledger from its own alert. Unlike the offer voice below it
+  // has no posted-alert escape: the settled tense IS the conversion, and
+  // posting it counted the purchase twice. An instalment DEBITED from an
+  // account ("EMI of AED 200.00 has been debited") is a real payment and is
+  // not this shape.
+  if (INSTALMENT_CONVERSION_NOTICE_RE.test(raw)) return null;
   if (
     /\*?convert now\*?|converted in(?:to)? instal?ments?|\bcan\s+be\s+converted\b|\bconvert\s+your\b(?:[^.\n]|\.\d){0,72}?\binto\b|\beligible\s+for\b(?:[^.\n]|\.\d){0,40}?(?:conversion|instal?ments?|payment\s+plan|0\s*%)|interest payment plan|easy payment plan|\b(?:enjoy|avail|get)\s+(?:easy\s+)?monthly\s+instal?ments?\s+on\s+your\s+purchase\b/i.test(raw) &&
     !(posted && SETTLED_TENSE_RE.test(raw))

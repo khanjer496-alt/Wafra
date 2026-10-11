@@ -1,7 +1,7 @@
 import { inspectUniversalAlert, type UniversalAlertReview } from '@/lib/alert-market-detection';
 import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars';
 import { activeCountryDateOrder, getActiveCountry } from '@/lib/country';
-import { bestEffortAutoPostEnabled, decideBestEffortAutoPost, hasNonCompletedWording, sharedSymbolCurrencyForCountry } from '@/lib/best-effort-autopost';
+import { bestEffortAutoPostEnabled, decideBestEffortAutoPost, hasNonCompletedWording, isNotAutoPostableMoney, sharedSymbolCurrencyForCountry } from '@/lib/best-effort-autopost';
 import {
   interpretBankAlert,
   type BankAlertInterpretation,
@@ -57,7 +57,7 @@ export const hasBankAlertMoneyHint = (source: string): boolean =>
 // Unicode-aware boundaries: `\b` treats an accented letter as a non-letter,
 // so "effectué" and "payé" never matched and French alerts were dropped here.
 const UNIVERSAL_POSTED_EVENT_HINT =
-  /(?<![\p{L}\p{N}])(?:purchase|purchased|debit(?:ed)?|credit(?:ed)?|charged|charge\s+of|spent|paid|payment|received|refund(?:ed)?|reversal|withdraw(?:n|al)?|withdrew|made\s+an?|was\s+made|used\s+for|deposit(?:ed)?|transferr(?:ed|ing)|sent|realizad[oa]|efetuad[oa]|zrealizowana|consumo|realizaste|lastschrift|paiement|gerçekleşmiştir|gelmiştir|alışveriş\w*|havale|virement|reçu|pix|enviado|enviou|recebeu|recebido|transaksi|berhasil|kaartbetaling|voltooid|cash\s+(?:withdrawal|advance)|used\s+(?:for|at|on)|transaction|completed|processed|successful|successfully|approved|authori[sz]ed|settled|posted|débité|crédité|effectué|payé|payée|belastet|abgebucht|bezahlt|gutgeschrieben|cargado|pagado|abonado|addebitato|pagata|accreditato|afgeschreven|betaald|bijgeschreven)(?![\p{L}\p{N}])|(?:خصم|دفع|شراء|سحب|تحويل|ايداع|إيداع|استرداد|استرجاع|تمت|تم|ご利用|利用金額|消费|支付|승인|डेबिट|क्रेडिट)/iu;
+  /(?<![\p{L}\p{N}])(?:purchase|purchased|debit(?:ed)?|credit(?:ed)?|charged|charge\s+(?:of|made)|deducted|spent|paid|payment|received|refund(?:ed)?|reversal|withdraw(?:n|al)?|withdrew|made\s+an?|was\s+made|used\s+for|deposit(?:ed)?|transferr(?:ed|ing)|sent|realizad[oa]|efetuad[oa]|zrealizowana|consumo|realizaste|lastschrift|paiement|gerçekleşmiştir|gelmiştir|alışveriş\w*|havale|virement|reçu|pix|enviado|enviou|recebeu|recebido|transaksi|berhasil|kaartbetaling|voltooid|cash\s+(?:withdrawal|advance)|used\s+(?:for|at|on)|transaction|completed|processed|successful|successfully|approved|authori[sz]ed|settled|posted|débité|crédité|effectué|payé|payée|belastet|abgebucht|bezahlt|gutgeschrieben|cargado|pagado|abonado|addebitato|pagata|accreditato|afgeschreven|betaald|bijgeschreven)(?![\p{L}\p{N}])|(?:خصم|دفع|شراء|سحب|تحويل|ايداع|إيداع|استرداد|استرجاع|تمت|تم|ご利用|利用金額|消费|支付|승인|डेबिट|क्रेडिट)/iu;
 
 // A small family of real bank field-list alerts has amount + instrument +
 // merchant but no verb at all. The 30k Jev benchmark found one such rescued FAB
@@ -219,7 +219,7 @@ const universalCardObligation = (
   country: string | null,
   observedAt?: number,
 ): Omit<ParsedSms, 'raw' | 'bestEffort'> | null => {
-  if (event.decision !== 'review' || nonPostingReason(source)) return null;
+  if (event.decision !== 'review' || nonPostingReason(source) || isNotAutoPostableMoney(source)) return null;
   if (NOT_CARD_OBLIGATION.test(source) || !CREDIT_CARD_WORDS.test(source)) return null;
   const today = localIsoDay(observedAt);
   if (event.status === 'failed' || event.issues.some((issue) =>
