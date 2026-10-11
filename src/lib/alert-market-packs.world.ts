@@ -1,8 +1,8 @@
 import type { AlertMarketPack } from '@/lib/alert-market-pack-types';
 
 /**
- * Second-wave review-only market packs: Canada, Australia, Brazil, Mexico and
- * Singapore.
+ * Second-wave review-only market packs: Canada, Australia, Brazil, Mexico,
+ * Singapore, Colombia and Peru.
  *
  * Like the first-wave packs these add vocabulary and routing evidence only.
  * They do not authorize automatic ledger import by themselves, and their
@@ -47,6 +47,9 @@ export const WORLD_ALERT_MARKET_PACKS = {
       'debitado', 'debitada', 'creditado', 'creditada', 'recebido', 'recebida',
       'foi pago', 'foi paga', 'concluído', 'concluido', 'compra realizada', 'pagamento realizado',
       'pagamento efetuado', 'foi estornado', 'foi estornada',
+      // Completed person-to-person transfers.
+      'você enviou', 'voce enviou', 'você recebeu', 'voce recebeu', 'pix enviado', 'transferência enviada',
+      'transferencia enviada',
     ],
     failedTerms: [
       'recusado', 'recusada', 'negado', 'negada', 'falhou', 'não aprovado', 'nao aprovado',
@@ -61,9 +64,13 @@ export const WORLD_ALERT_MARKET_PACKS = {
     ],
     debitTerms: [
       'compra com cartão', 'compra com cartao', 'compra aprovada', 'debitado', 'debitada',
-      'cobrado', 'cobrada', 'foi pago', 'foi paga',
+      'cobrado', 'cobrada', 'foi pago', 'foi paga', 'você enviou', 'voce enviou', 'pix enviado',
+      'transferência enviada', 'transferencia enviada',
     ],
-    creditTerms: ['creditado', 'creditada', 'recebido', 'recebida', 'estorno', 'estornado', 'estornada'],
+    creditTerms: [
+      'creditado', 'creditada', 'recebido', 'recebida', 'estorno', 'estornado', 'estornada',
+      'você recebeu', 'voce recebeu',
+    ],
     purchaseTerms: ['compra com cartão', 'compra com cartao', 'compra aprovada', 'compra no débito', 'compra no crédito'],
     refundTerms: ['estorno', 'estornado', 'estornada', 'reembolso'],
     cashTerms: ['saque'],
@@ -82,6 +89,8 @@ export const WORLD_ALERT_MARKET_PACKS = {
     postedTerms: [
       'compra realizada', 'compra aplicada', 'cargo aplicado', 'devolución aplicada', 'devolucion aplicada',
       'fue cargado', 'fue cargada', 'fue abonado', 'fue abonada',
+      // Second-person preterites state completion.
+      'enviaste', 'recibiste', 'retiraste', 'transferencia enviada', 'transferencia recibida',
     ],
     failedTerms: [
       'rechazado', 'rechazada', 'fallido', 'fallida', 'no aprobado', 'no aprobada',
@@ -95,13 +104,76 @@ export const WORLD_ALERT_MARKET_PACKS = {
       'será abonado', 'sera abonado', 'será abonada', 'sera abonada', 'programado', 'programada',
       'próxima compra', 'proxima compra', 'siguiente compra', 'tus compras', 'meses sin intereses',
     ],
-    debitTerms: ['compra', 'cargo recurrente', 'cargado', 'cargada', 'debitado', 'debitada', 'pagado', 'pagada'],
-    creditTerms: ['devolución', 'devolucion', 'reembolso', 'abonado', 'abonada', 'acreditado', 'acreditada'],
+    debitTerms: [
+      'compra', 'cargo recurrente', 'cargado', 'cargada', 'debitado', 'debitada', 'pagado', 'pagada',
+      'enviaste', 'retiraste', 'transferencia enviada',
+    ],
+    creditTerms: [
+      'devolución', 'devolucion', 'reembolso', 'abonado', 'abonada', 'acreditado', 'acreditada',
+      'recibiste', 'transferencia recibida',
+    ],
     purchaseTerms: ['compra'],
     refundTerms: ['devolución', 'devolucion', 'reembolso'],
-    cashTerms: ['retiro de efectivo', 'retiro en cajero'],
+    cashTerms: ['retiro de efectivo', 'retiro en cajero', 'retiraste'],
     feeTerms: ['comisión', 'comision'],
     moneyLabels: ['cargo recurrente', 'devolución', 'devolucion', 'retiro de efectivo', 'spei'],
+  },
+  // Colombia and Peru: review/best-effort only, exactly like the packs above.
+  // "$" is COP only after an alert has been routed to Colombia (issuer, Bre-B,
+  // PSE or TransfiYa); S/ is unique to Peru. Spanish second-person preterites
+  // ("compraste", "pagaste", "recibiste") state completion; approval words
+  // ("aprobado(a)") do not, and post only inside an exact bank template
+  // (src/lib/latam-alert-templates.ts).
+  CO: {
+    market: 'CO', currencies: ['COP'], currencyAliases: { '$': ['COP'], 'COP$': ['COP'] },
+    rails: ['bre-b', 'breb', 'pse', 'transfiya'],
+    transferTerms: ['transferiste', 'enviaste', 'te enviaron', 'recibiste una transferencia', 'transferencia', 'bre-b', 'transfiya'],
+    utilityTerms: ['servicios públicos', 'servicios publicos', 'factura de energía', 'factura de energia', 'factura de agua', 'factura de gas'],
+    recurringTerms: ['débito automático', 'debito automatico', 'pago automático', 'pago automatico'],
+    postedTerms: [
+      'compraste', 'pagaste', 'retiraste', 'transferiste', 'enviaste', 'recibiste', 'te enviaron',
+      'te envió', 'te envio', 'paso plata',
+    ],
+    failedTerms: [
+      'rechazada', 'rechazado', 'declinada', 'declinado', 'no aprobada', 'no aprobado', 'no autorizada',
+      'no autorizado', 'no fue posible', 'fallida', 'fallido', 'cancelada', 'cancelado',
+    ],
+    futureTerms: [
+      'programado', 'programada', 'se debitará', 'se debitara', 'tienes un pago', 'completa tu pago',
+      'pago mínimo', 'pago minimo', 'fecha límite', 'fecha limite', 'te pidió', 'te pidio',
+    ],
+    debitTerms: ['compraste', 'compra', 'pagaste', 'retiraste', 'transferiste', 'enviaste', 'paso plata', 'avance'],
+    creditTerms: ['recibiste', 'te enviaron', 'te envió', 'te envio', 'consignación', 'consignacion', 'abono'],
+    purchaseTerms: ['compraste', 'compra', 'pagaste'],
+    refundTerms: ['devolución', 'devolucion', 'reembolso', 'reverso'],
+    cashTerms: ['retiraste', 'retiro', 'cajero'],
+    feeTerms: ['cuota de manejo', 'comisión', 'comision'],
+    moneyLabels: ['compraste', 'pagaste', 'retiraste', 'transferiste', 'enviaste', 'recibiste', 'te enviaron', 'paso plata'],
+  },
+  PE: {
+    // Only S/ is the sol: BCP and Interbank print dollar amounts as US$, which
+    // stays dollar money (never PEN) in a Peru-routed alert.
+    market: 'PE', currencies: ['PEN'], currencyAliases: { 'S/': ['PEN'], 'S/.': ['PEN'] },
+    rails: ['yape', 'plin', 'cci'],
+    transferTerms: ['yapeaste', 'te yapeó', 'te yapeo', 'te envió un pago', 'te envio un pago', 'has enviado', 'enviaste', 'transferencia', 'plin', 'cci'],
+    utilityTerms: ['recibo de luz', 'recibo de agua', 'pago de servicios'],
+    recurringTerms: ['débito automático', 'debito automatico', 'cargo recurrente'],
+    postedTerms: [
+      'realizaste', 'yapeaste', 'te yapeó', 'te yapeo', 'te envió', 'te envio', 'te envío', 'te ha enviado',
+      'has enviado', 'enviaste', 'recibiste', 'pagaste', 'transferencia efectuada', 'transferencia recibida',
+    ],
+    failedTerms: [
+      'rechazada', 'rechazado', 'declinada', 'declinado', 'no aprobada', 'no aprobado', 'no autorizada',
+      'no autorizado', 'no fue posible', 'fallida', 'fallido', 'cancelada', 'cancelado',
+    ],
+    futureTerms: ['programado', 'programada', 'se cargará', 'se cargara', 'pago mínimo', 'pago minimo', 'fecha límite', 'fecha limite'],
+    debitTerms: ['realizaste un consumo', 'consumo', 'compra', 'yapeaste', 'has enviado', 'enviaste', 'pagaste', 'transferencia efectuada'],
+    creditTerms: ['te yapeó', 'te yapeo', 'te envió', 'te envio', 'te envío', 'te ha enviado', 'recibiste', 'abono', 'transferencia recibida'],
+    purchaseTerms: ['consumo', 'compra'],
+    refundTerms: ['devolución', 'devolucion', 'extorno', 'reembolso'],
+    cashTerms: ['retiro', 'cajero'],
+    feeTerms: ['comisión', 'comision'],
+    moneyLabels: ['consumo', 'yapeaste', 'te yapeó', 'te envió', 'te ha enviado', 'has enviado', 'enviaste', 'recibiste'],
   },
   SG: {
     market: 'SG', currencies: ['SGD'], currencyAliases: { 'S$': ['SGD'], '$': ['SGD'] },

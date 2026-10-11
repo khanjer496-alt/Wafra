@@ -72,12 +72,12 @@ import {
   setLedgerCurrency as setGlobalLedgerCurrency,
 } from '@/lib/markets';
 import {
+  demoProfile,
+  type DemoMarket,
   generateSeedAccounts,
   generateSeedCardDues,
   generateSeedTransactions,
   SEED_ACCOUNTS,
-  SEED_BILLS,
-  SEED_BUDGETS,
 } from '@/lib/seed';
 import { applyHealPatch, healPatch } from '@/lib/heal';
 import {
@@ -2262,23 +2262,27 @@ function persistedQualificationIds(
  */
 function demoState(): Partial<Omit<AppState, 'hydrated'>> {
   const now = new Date();
-  const transactions = generateSeedTransactions(now);
+  // Store art renders the same demo per storefront market; every suite reads
+  // the default `ae` ledger. See DemoMarket in seed.ts.
+  const market = (process.env.EXPO_PUBLIC_WAFRA_DEMO_MARKET ?? 'ae') as DemoMarket;
+  const profile = demoProfile(market);
+  const transactions = generateSeedTransactions(now, market);
   return {
     // Balances quoted against this ledger, not fixed constants — see
     // generateSeedAccounts.
-    accounts: generateSeedAccounts(now, transactions),
+    accounts: generateSeedAccounts(now, transactions, market),
     transactions,
-    budgets: SEED_BUDGETS,
-    bills: SEED_BILLS,
+    budgets: profile.budgets,
+    bills: profile.bills,
     // Derived from the same statement windows the seed's card payments were
     // written against, so the open due matches what the card actually spent.
-    cardDues: generateSeedCardDues(now, transactions),
-    // Six months of the demo's own outgoings, roughly 40% of the way there —
-    // an AED 20,000 target next to a AED 93,000 bank balance read as a goal
-    // already met and left on the screen by mistake.
-    goals: [{ id: 'goal-demo', title: 'Emergency fund', emoji: 'target', targetFils: 6_000_000, savedFils: 2_400_000 }],
+    cardDues: generateSeedCardDues(now, transactions, market),
+    goals: [{ id: 'goal-demo', title: 'Emergency fund', emoji: 'target', ...profile.goal }],
     onboarded: true,
     userName: 'there',
+    ...(market === 'sa' ? { marketId: 'SA' } : {}),
+    // The default ledger keeps deriving AED from the market, as it always has.
+    ...(market === 'ae' ? {} : { ledgerMoney: ledgerMoneySpec(profile.currency) }),
   };
 }
 

@@ -22,6 +22,7 @@ import {
   statementUploadOf,
   statementRowKey,
   statementDescriptorsAgree,
+  statedBalanceInText,
   type CaptureChannel,
   type DuplicateCandidate,
 } from '@/lib/dedupe';
@@ -465,6 +466,21 @@ function walletNearMatchReview(
     event,
   });
   return review ? { ...review, attentionReason: 'possible-apple-pay-duplicate', walletTransactionId } : null;
+}
+
+/**
+ * The post-transaction balance/limit an alert states, for duplicate evidence
+ * only. The parser's snapshot when it read one; otherwise the bare figure
+ * after an "Avl. card bal is 14939.05" label, which names no currency and so
+ * never becomes a snapshot. Two otherwise identical alerts stating different
+ * figures here are two movements (dedupe.ts statedBalanceFils).
+ */
+function statedBalanceOf(p: ScannedSms): { statedBalanceFils?: number } {
+  if (p.snapshotFils != null && p.snapshotKind && Number.isSafeInteger(p.snapshotFils)) {
+    return { statedBalanceFils: p.snapshotFils };
+  }
+  const fils = statedBalanceInText(p.raw);
+  return fils !== undefined ? { statedBalanceFils: fils } : {};
 }
 
 /**
@@ -1916,6 +1932,8 @@ function buildImportPlanInMarket(
       eventKind: 'transaction' as const,
       captureInstrument: captureInstrumentOf(p),
       ...(eventIdentity ? { eventIdentity } : {}),
+      // Differing stated balances prove two movements (see dedupe.ts).
+      ...statedBalanceOf(p),
     };
     const protectedEditedPush = exactPrior ? undefined : protectedEditedPushFor(p, date);
     if (protectedEditedPush && smsKey) {
@@ -2156,6 +2174,10 @@ function buildImportPlanInMarket(
       date,
       ts: p.smsTs,
       ...(textClock !== undefined ? { textClock } : {}),
+      // A cash-account balance the alert stated after this movement; the
+      // own-account transfer tier reads it (transfer-reconciliation.ts).
+      ...(p.snapshotKind === 'balance' && p.snapshotFils != null && Number.isSafeInteger(p.snapshotFils) &&
+        p.card?.kind !== 'credit' ? { statedBalanceFils: p.snapshotFils } : {}),
       source: 'sms',
       captureInstrument: captureInstrumentOf(p),
       ...(p.bestEffort ? { bestEffort: p.bestEffort } : {}),

@@ -47,6 +47,15 @@ export type CurrencyAliasMap = Readonly<Record<string, readonly CurrencyCode[]>>
 export interface AlertDraftContext {
   /** Market-scoped aliases such as KD or ج.م. Never apply these globally. */
   currencyAliases?: CurrencyAliasMap;
+  /**
+   * Three-decimal currencies whose ROUTED market prints a single full stop as
+   * the decimal point (Kuwait, Bahrain, Oman: "KWD 12.345" is 12.345 KWD).
+   * Supplied only by a market pack after routing, and only for that market's
+   * own currency. It resolves exactly one shape: one full stop followed by
+   * three digits and no comma. Repeated separators, commas and every other
+   * currency (USD 1.250 on a Kuwaiti alert) keep their ambiguity.
+   */
+  dotDecimalCurrencies?: readonly CurrencyCode[];
 }
 
 const DIGIT_ZEROES = [0x0660, 0x06f0, 0x0966, 0x09e6, 0x0e50, 0x1040, 0xff10] as const;
@@ -82,7 +91,14 @@ interface ParsedNumber {
   alternateMinorUnits: string | null;
 }
 
-function parseNumber(source: string, exponent: number): ParsedNumber | null {
+/**
+ * Two-decimal ISO currencies whose own banks never print the minor unit and
+ * group thousands with a dot ("Rp 125.000"): the dot-three-digit reading is
+ * not ambiguous for them.
+ */
+const DOT_GROUPING_CURRENCIES = new Set(['IDR', 'COP']);
+
+function parseNumber(source: string, exponent: number, currency = '', dotDecimal = false): ParsedNumber | null {
   let value = source.trim().replace(/[+]/g, '');
   const negative = value.startsWith('-');
   if (negative) value = value.slice(1);
@@ -94,6 +110,7 @@ function parseNumber(source: string, exponent: number): ParsedNumber | null {
   const comma = value.lastIndexOf(',');
   let decimalAt = -1;
   let ambiguous = false;
+  let dotThreeDecimal: string | null = null;
 
   const validGroupedInteger = (raw: string, separator: string): boolean => {
     const parts = raw.split(separator);
@@ -132,8 +149,9 @@ function parseNumber(source: string, exponent: number): ParsedNumber | null {
     if (locations.length === 1 && exponent > 0 && tail > 0 && tail <= exponent) {
       decimalAt = last;
       // A single three-digit suffix can also be a thousands group. Preserve
-      // the candidate but force review rather than pretending certainty.
-      ambiguous = exponent === 3 && tail === 3;
+      // the candidate but force review rather than pretending certainty,
+      // unless the routed market's own currency settles it (dotDecimal).
+      ambiguous = exponent === 3 && tail === 3 && !(dotDecimal && separator === '.');
     } else if (exponent === 3 && tail === 3 &&
       validGroupedInteger(value.slice(0, last), separator)) {
       // Even repeated separators are kept ambiguous for three-decimal
@@ -141,6 +159,15 @@ function parseNumber(source: string, exponent: number): ParsedNumber | null {
       // decimal before an exact value can be selected.
       decimalAt = last;
       ambiguous = true;
+    } else if (separator === '.' && locations.length === 1 && exponent > 0 && exponent < 3 && tail === 3 &&
+      !DOT_GROUPING_CURRENCIES.has(currency) && validGroupedInteger(value, separator)) {
+      // "Rs. 5.000" in a two-decimal currency is 5,000.00 (a European
+      // thousands dot) or 5.00 printed with a third decimal. Nothing in the
+      // text decides, so keep the grouping reading and the exact decimal one
+      // (when its last digit is zero) and force review instead of guessing a
+      // 1000x figure.
+      ambiguous = true;
+      if (value.endsWith('0')) dotThreeDecimal = value.slice(0, -1);
     } else if (!validGroupedInteger(value, separator)) {
       return null;
     }
@@ -154,7 +181,15 @@ function parseNumber(source: string, exponent: number): ParsedNumber | null {
   const digits = `${integer}${fractionRaw.padEnd(exponent, '0')}`.replace(/^0+(?=\d)/, '');
   const minorUnits = `${negative ? '-' : ''}${digits || '0'}`;
   let alternateMinorUnits: string | null = null;
-  if (ambiguous) {
+  if (ambiguous && decimalAt < 0) {
+    // The two-decimal dot-thousands case above: minorUnits is the grouping
+    // reading; the alternative is the exact decimal one, when there is one.
+    if (dotThreeDecimal !== null) {
+      const [whole, fraction] = dotThreeDecimal.split('.');
+      const decimal = `${whole}${fraction.padEnd(exponent, '0')}`.replace(/^0+(?=\d)/, '') || '0';
+      alternateMinorUnits = `${negative ? '-' : ''}${decimal}`;
+    }
+  } else if (ambiguous) {
     const grouped = value.replace(/[.,٫]/g, '').replace(/^0+(?=\d)/, '') || '0';
     alternateMinorUnits = `${negative ? '-' : ''}${grouped}${'0'.repeat(exponent)}`;
   }
@@ -259,6 +294,10 @@ function collectRaw(normalized: string, aliases: CurrencyAliasMap = {}): RawCand
       const token = prefix ? match[1] : match[2];
       const currencies = CURRENCY_SYMBOL_CANDIDATES[token];
       if (!currencies) continue;
+      // A dollar sign glued to a Latin letter is some OTHER qualified dollar
+      // ("RD$", or "S$" inside an unknown prefix): never the bare "$".
+      if (prefix && token.endsWith('$') && (match.index as number) > 0 &&
+        /[A-Za-z]/.test(normalized[(match.index as number) - 1])) continue;
       // "جنيه استرليني" is pound STERLING, not the Egyptian pound.
       if (token === 'جنيه' && /^\s*[اإأ]?سترلين/u.test(normalized.slice(matchEnd))) continue;
       found.push({
@@ -278,7 +317,13 @@ function collectRaw(normalized: string, aliases: CurrencyAliasMap = {}): RawCand
   found.push(...collectAliasRaw(normalized, aliases));
   scanSymbol(SYMBOL_PREFIX, true);
   scanSymbol(SYMBOL_SUFFIX, false);
+  // A clock is never money: in "38.15 KRW 9:45 HANA STORE" the "KRW 9" reading
+  // is the hour of a time, and it was booked in place of the real figure.
+  const clock = (item: RawCandidate): boolean =>
+    (normalized[item.end] === ':' && /\d/.test(normalized[item.end + 1] ?? '')) ||
+    (normalized[item.start - 1] === ':' && /\d/.test(normalized[item.start - 2] ?? ''));
   const sorted = found
+    .filter((item) => !clock(item))
     .sort((a, b) => a.start - b.start || b.end - a.end)
     .filter((item, index, all) => !all.slice(0, index).some((prior) => prior.start === item.start && prior.end === item.end));
   // "$350.00 MXN" is ONE amount written with both a symbol and its ISO code.
@@ -321,9 +366,11 @@ export function inspectAlertDraft(source: string, context: AlertDraftContext = {
     for (const currency of raw.currencies) {
       const exponent = currencyMinorUnits(currency);
       if (exponent === null) continue;
-      const parsed = parseNumber(raw.amount, exponent);
+      const parsed = parseNumber(raw.amount, exponent, currency,
+        context.dotDecimalCurrencies?.includes(currency) === true);
       if (!parsed) continue;
       interpretations.push({ currency, minorUnits: parsed.minorUnits, exponent });
+      if (parsed.ambiguous) numberAmbiguous = true;
       if (parsed.alternateMinorUnits !== null) {
         numberAmbiguous = true;
         interpretations.push({ currency, minorUnits: parsed.alternateMinorUnits, exponent });
@@ -334,7 +381,27 @@ export function inspectAlertDraft(source: string, context: AlertDraftContext = {
         other.currency === item.currency &&
         other.minorUnits === item.minorUnits &&
         other.exponent === item.exponent) === index);
-    if (!uniqueInterpretations.length) continue;
+    if (!uniqueInterpretations.length) {
+      // "812.40 JPY": a plain decimal written against currencies whose
+      // exponent cannot hold it (the yen and won have no minor unit). That
+      // figure IS the transaction amount, unreadable; skipping it let a
+      // merchant digit or a clock hour become the amount instead.
+      const figure = raw.amount.trim().replace(/^[+-]/, '');
+      const fraction = /^\d{1,3}(?:,\d{3})*\.(\d+)$|^\d+\.(\d+)$/.exec(figure);
+      const decimals = fraction ? fraction[1] ?? fraction[2] : '';
+      const exponents = raw.currencies.map((currency) => currencyMinorUnits(currency));
+      // An all-zero excess ("JPY 4,650.00") is a padded integer, not this.
+      // Zero-decimal currencies only (JPY, KRW, VND ...), and never a figure
+      // behind a balance label: "Good Baln: NPR 54321.123" is a malformed
+      // balance, not the movement, and must not cost the real amount.
+      const labelled = /\b(?:bal(?:ance|n)?|avl|avail(?:able)?|limit)\b[^\d\n]{0,16}$/i
+        .test(normalizedText.slice(Math.max(0, raw.start - 24), raw.start));
+      if (fraction && !labelled && exponents.every((exponent) => exponent === 0) &&
+        /[1-9]/.test(decimals)) {
+        reasons.push('exponent-invalid-money');
+      }
+      continue;
+    }
     const values = [...new Set(uniqueInterpretations.map((item) => `${item.exponent}:${item.minorUnits}`))];
     const everyCurrencyParsed = new Set(uniqueInterpretations.map((item) => item.currency)).size === raw.currencies.length;
     const canonical = values.length === 1 && everyCurrencyParsed ? uniqueInterpretations[0] : null;

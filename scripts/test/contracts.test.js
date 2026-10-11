@@ -2397,6 +2397,9 @@ ok('the spoken label matches the visible repayment exception and direction',
     'ai-alert-extractor.ts',
     'ai-alert-cues.ts',
     'learned-alert-formats.ts',
+    // Gulf-neighbour posting checks the launch grammar's original amount is
+    // at its own currency's exponent (KWD/BHD/OMR three, QAR two).
+    'gulf-neighbour-alerts.ts',
   ]);
   ok('ISO metadata is confined to currency routing, exact money and transfer evidence validation',
     metadataConsumers.length === extraMetadataConsumers.size && metadataConsumers.every((file) => extraMetadataConsumers.has(path.basename(file))),

@@ -61,7 +61,8 @@ const account: Check = (value) => record(value) && required(value, {
   snapshotTs: nonnegative, manualSnapshotTs: nonnegative, archived: boolean, renewedFrom: id,
 });
 const captureInstrument: Check = (value) => record(value) && required(value, {
-  last4: (tail) => typeof tail === 'string' && /^\d{4}$/.test(tail),
+  // A masked tail may be three digits (ADIB's "card ending with *482").
+  last4: (tail) => typeof tail === 'string' && /^\d{3,4}$/.test(tail),
   kind: oneOf('credit', 'debit', 'account', 'unknown'),
 }) && optional(value, { bankIdentity: id });
 // Code-owned identifiers only (e.g. `universal:purchase:debit`), never text.
@@ -92,7 +93,7 @@ const transaction: Check = (value) => {
     originalAmountMinor: positive, originalCurrency: (v) => typeof v === 'string' && /^[A-Z]{3}$/.test(v),
     originalMinorUnits: positive, originalExponent: oneOf(0, 2, 3),
     fxRate: finitePositive, fxRateDate: isoDate, fxSource: oneOf('bank', 'reference', 'fallback'),
-    note: text, ts: nonnegative, textClock: nonnegative, source: oneOf('sms', 'manual'), smsKey: text,
+    note: text, ts: nonnegative, textClock: nonnegative, statedBalanceFils: (v) => integer(v), source: oneOf('sms', 'manual'), smsKey: text,
     notificationObservationId: (v) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v),
     messageObservationId: (v) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v),
     captureEventIdentity: (v) => typeof v === 'string' && /^e1:[0-9a-f]{16}:(?:[0-9a-f]{16}|-)$/.test(v),

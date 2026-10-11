@@ -455,6 +455,100 @@ const hits = parsed.filter((x) => x.p);
     ledger.internalTransferIds(selfPair, accountsWith(true)).size === 0);
 }
 
+/* ── E1: own-account pairs proven by the bank's own balance trail ───────── */
+
+/**
+ * A generic "AED X was debited from your account *917 ... balance B1" and,
+ * a minute later, "AED X was credited to your account *348 ... balance B2" on
+ * two of the person's OWN accounts at the same bank. Amount and clock alone
+ * prove nothing (see the coincidence test above, which must stay unpaired).
+ * The extra evidence here is the bank's stated balance on each leg: it moved
+ * by exactly that amount from the previous balance stated for that account.
+ * Synthetic ADIB-style fixtures; no counterparty is named on either leg.
+ */
+{
+  const ledger = require('./build/ledger');
+  const { reconcileTransfers } = require('./build/transfer-reconciliation');
+  const accounts = [
+    { id: 'a917', name: 'ADIB 917', kind: 'bank', bankName: 'ADIB', last4: '917', openingFils: 0, color: '#000' },
+    { id: 'a348', name: 'ADIB 348', kind: 'bank', bankName: 'ADIB', last4: '348', openingFils: 0, color: '#000' },
+  ];
+  const t0 = Date.parse('2026-04-02T09:00:00Z');
+  const debit = (amount, balance) => `Dear Customer, AED ${amount} was debited from your account *917. Your available account balance is AED ${balance}`;
+  const credit = (amount, balance, account = '348') => `Dear Customer, AED ${amount} was credited to your account *${account}. Your available account balance is AED ${balance}`;
+  const row = (id, type, amountFils, accountId, at, raw, title) => ({ id, type, amountFils, category: 'other', accountId,
+    title: title ?? (type === 'expense' ? 'Account debit' : 'Incoming transfer'), date: '2026-04-02', source: 'sms',
+    ts: at, smsKey: `s${at}-${amountFils}`, raw });
+  const seed = [
+    row('p917', 'expense', 12000, 'a917', t0, debit('120.00', '5120.00')),
+    row('p348', 'income', 5000, 'a348', t0 + 1000, credit('50.00', '800.00')),
+  ];
+  const internal = (txs, accts = accounts) => ledger.internalTransferIds(txs, accts);
+  const t1 = t0 + 3_600_000;
+
+  const pair = [...seed,
+    row('out', 'expense', 200000, 'a917', t1, debit('2000.00', '3120.00')),
+    row('in', 'income', 200000, 'a348', t1 + 60_000, credit('2000.00', '2800.00'))];
+  const proven = internal(pair);
+  ok('own-account pair: both legs on own accounts with balances moving by the amount pair as one transfer',
+    proven.has('out') && proven.has('in') && !proven.has('p917') && !proven.has('p348'), [...proven].join(','));
+  const assessment = reconcileTransfers(pair, accounts).byId;
+  ok('own-account pair: each leg links to the other through the existing assessment',
+    assessment.get('out')?.status === 'confirmed-own' && assessment.get('out')?.counterpartId === 'in' &&
+      assessment.get('in')?.counterpartId === 'out' && assessment.get('in')?.counterpartyAccountId === 'a917');
+
+  const named = [...seed,
+    row('out', 'expense', 200000, 'a917', t1, debit('2000.00', '3120.00')),
+    row('in', 'income', 200000, 'a348', t1 + 60_000,
+      'Dear Customer, AED 2000.00 was received from AHMED SALEM to your account *348. Your available account balance is AED 2800.00')];
+  ok('own-account pair: a credit that names a payer is never paired', internal(named).size === 0);
+
+  const late = [...seed,
+    row('out', 'expense', 200000, 'a917', t1, debit('2000.00', '3120.00')),
+    row('in', 'income', 200000, 'a348', t1 + 20 * 60_000, credit('2000.00', '2800.00'))];
+  ok('own-account pair: the same amount 20 minutes later is not paired', internal(late).size === 0);
+
+  const twoDebits = [...seed,
+    row('out', 'expense', 200000, 'a917', t1, debit('2000.00', '3120.00')),
+    row('out2', 'expense', 200000, 'a348', t1 + 60_000,
+      'Dear Customer, AED 2000.00 was debited from your account *348. Your available account balance is AED -1200.00')];
+  ok('own-account pair: two debits are never a pair', internal(twoDebits).size === 0);
+
+  const twoCredits = [...seed,
+    row('in1', 'income', 200000, 'a917', t1,
+      'Dear Customer, AED 2000.00 was credited to your account *917. Your available account balance is AED 7120.00'),
+    row('in', 'income', 200000, 'a348', t1 + 60_000, credit('2000.00', '2800.00'))];
+  ok('own-account pair: two credits are never a pair', internal(twoCredits).size === 0);
+
+  const notOwn = [...seed,
+    row('out', 'expense', 200000, 'a917', t1, debit('2000.00', '3120.00')),
+    row('in', 'income', 200000, 'elsewhere', t1 + 60_000, credit('2000.00', '2800.00', '555'))];
+  ok('own-account pair: a leg on an account that is not in the ledger is not paired', internal(notOwn).size === 0);
+
+  const wrongBalance = [...seed,
+    row('out', 'expense', 200000, 'a917', t1, debit('2000.00', '3120.00')),
+    row('in', 'income', 200000, 'a348', t1 + 60_000, credit('2000.00', '2950.00'))];
+  ok('own-account pair: a balance that did not move by the amount is not paired', internal(wrongBalance).size === 0);
+
+  const noHistory = [
+    row('out', 'expense', 200000, 'a917', t1, debit('2000.00', '3120.00')),
+    row('in', 'income', 200000, 'a348', t1 + 60_000, credit('2000.00', '2800.00'))];
+  ok('own-account pair: without a previous stated balance on each account nothing is paired', internal(noHistory).size === 0);
+
+  const stored = pair.map(({ raw, ...tx }) => ({ ...tx,
+    statedBalanceFils: Math.round(Number(raw.match(/balance is AED ([\d.]+)/)[1]) * 100) }));
+  const storedInternal = internal(stored);
+  ok('own-account pair: the persisted stated balances alone (no retained text) are the same evidence',
+    storedInternal.has('out') && storedInternal.has('in') && storedInternal.size === 2, [...storedInternal].join(','));
+  const noText = pair.map(({ raw, ...tx }) => tx);
+  ok('own-account pair: without the stated balances (no retained text) behaviour is unchanged', internal(noText).size === 0);
+
+  const salary = [...seed,
+    row('out', 'expense', 200000, 'a917', t1, debit('2000.00', '3120.00')),
+    { ...row('in', 'income', 200000, 'a348', t1 + 60_000, credit('2000.00', '2800.00')), category: 'salary', title: 'Salary' }];
+  ok('own-account pair: a salary credit is never eaten as an arriving leg', internal(salary).size === 0);
+}
+
 /* ── Coverage, reported rather than asserted ─────────────────────────── */
 
 {

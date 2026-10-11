@@ -50,13 +50,14 @@ export interface CaptureMarketInference {
 
 const UNIVERSAL_MARKETS: readonly UniversalMarket[] = [
   'US', 'GB', 'FR', 'DE', 'ES', 'IT', 'NL', 'IN', 'QA', 'KW', 'BH', 'OM', 'EG', 'JO',
-  'CA', 'AU', 'BR', 'MX', 'SG',
+  'CA', 'AU', 'BR', 'MX', 'SG', 'CO', 'PE',
 ];
 const ALL_MARKETS: readonly DetectedMarket[] = ['AE', 'SA', ...UNIVERSAL_MARKETS];
 const MARKET_CURRENCY: Record<DetectedMarket, string> = {
   AE: 'AED', SA: 'SAR', US: 'USD', GB: 'GBP', FR: 'EUR', DE: 'EUR', ES: 'EUR',
   IT: 'EUR', NL: 'EUR', IN: 'INR', QA: 'QAR', KW: 'KWD', BH: 'BHD', OM: 'OMR',
   EG: 'EGP', JO: 'JOD', CA: 'CAD', AU: 'AUD', BR: 'BRL', MX: 'MXN', SG: 'SGD',
+  CO: 'COP', PE: 'PEN',
 };
 const GRAMMAR_MARKERS: Partial<Record<DetectedMarket, RegExp>> = {
   IN: /\b(?:upi|imps|neft|rtgs|aeps|nach)\b|₹|रु(?:पये)?/iu,
@@ -76,7 +77,28 @@ const GRAMMAR_MARKERS: Partial<Record<DetectedMarket, RegExp>> = {
   BR: /\b(?:pix|transfer[eê]ncia\s+ted)\b/iu,
   MX: /\b(?:spei|codi|dimo)\b/iu,
   SG: /\b(?:paynow|fast\s+transfer|sgqr)\b/iu,
+  // Bre-B (and its "llave" keys), TransfiYa, Botón Bancolombia and the
+  // T.Deb/T.Cred card abbreviations; Yape, Plin and CCI. PSE is separate
+  // (CO_PSE below): "PSE&G" and "PSE HOLDINGS" are US payees.
+  CO: /\b(?:bre-?b|transfiya|bot[oó]n\s+bancolombia)\b|\bllave\b[\s\S]{0,80}\btransfer|\btransfer[\s\S]{0,80}\bllave\b|\bt\.(?:deb|cred(?:ito)?)\b/iu,
+  PE: /\b(?:yape(?:aste|ó|o|aron)?|plin(?:eó|earon)?|cci)(?=$|[^\p{L}\p{N}])/iu,
 };
+
+// A symbol whose currency set is unique to one market is that market's
+// currency evidence, exactly like its ISO code. A shared `$` is never evidence
+// on its own; it only backs a Colombian or Mexican domestic rail.
+const UNIQUE_SYMBOL_MARKETS: readonly { pattern: RegExp; market: DetectedMarket }[] = [
+  { pattern: /R\$\s?\d/u, market: 'BR' },
+  { pattern: /(?<![\p{L}\p{N}/.])S\/\.?\s?\d/u, market: 'PE' },
+];
+const BARE_DOLLAR = /(?<![\p{L}$])\$\s?\d/u;
+// Colombia's PSE rail counts only with Colombian context: a COP figure, a
+// Colombian issuer, or Spanish payment wording next to it.
+const CO_PSE = /(?<![\p{L}\p{N}&])pse(?![\p{L}\p{N}&])/iu;
+const CO_PSE_CONTEXT = /\bCOP\s?\d|\d\s?COP\b|\b(?:bancolombia|davivienda|daviplata|nequi|colpatria|av\s+villas|banco\s+de\s+bogot[aá]|colombia)\b|(?<![\p{L}])(?:pagaste|pago|pagos|compra|transferencia|transferiste|cuenta|ahorros|desde|realizaste|exitos[oa]|aprobad[oa]|tu|su)(?![\p{L}])/iu;
+const grammarMatches = (market: DetectedMarket, marker: RegExp | undefined, source: string): boolean =>
+  !!marker?.test(source) || (market === 'CO' && CO_PSE.test(source) && CO_PSE_CONTEXT.test(source));
+const DOLLAR_RAIL_MARKETS: ReadonlySet<DetectedMarket> = new Set(['CO', 'MX']);
 
 const regionMarket = (hint?: string | null): DetectedMarket | null => {
   if (!hint) return null;
@@ -88,12 +110,16 @@ const regionMarket = (hint?: string | null): DetectedMarket | null => {
 };
 
 const currencyMarkets = (source: string): Set<DetectedMarket> => {
+  // COP and PEN count only next to a figure: "pen" and "cop" are words.
   const codes = new Set(
-    source.slice(0, 4096).toUpperCase().match(/\b(?:AED|SAR|USD|GBP|EUR|INR|QAR|KWD|BHD|OMR|EGP|JOD|CAD|AUD|BRL|MXN|SGD)\b/g) ?? [],
+    source.slice(0, 4096).toUpperCase().match(/\b(?:AED|SAR|USD|GBP|EUR|INR|QAR|KWD|BHD|OMR|EGP|JOD|CAD|AUD|BRL|MXN|SGD)\b|\b(?:COP|PEN)(?=\s?\d)|(?<=\d\s?)(?:COP|PEN)\b/g) ?? [],
   );
   const markets = new Set<DetectedMarket>();
   for (const market of ALL_MARKETS) {
     if (codes.has(MARKET_CURRENCY[market])) markets.add(market);
+  }
+  for (const { pattern, market } of UNIQUE_SYMBOL_MARKETS) {
+    if (pattern.test(source)) markets.add(market);
   }
   return markets;
 };
@@ -138,7 +164,13 @@ const evidenceFor = (input: AlertMarketRoutingInput): MarketRouteEvidenceSummary
   }
   for (const market of currencyMarkets(source)) add(market, 'currency');
   for (const [market, marker] of Object.entries(GRAMMAR_MARKERS)) {
-    if (marker?.test(source)) add(market as DetectedMarket, 'grammar');
+    if (!grammarMatches(market as DetectedMarket, marker, source)) continue;
+    add(market as DetectedMarket, 'grammar');
+    // "SPEI ... $500.00" or "Bre-B ... $45.000": the domestic rail says which
+    // dollar this is. Neither alone routes anything.
+    if (DOLLAR_RAIL_MARKETS.has(market as DetectedMarket) && BARE_DOLLAR.test(source)) {
+      add(market as DetectedMarket, 'currency');
+    }
   }
   const region = regionMarket(input.regionHint);
   if (region && evidence.has(region)) add(region, 'region-hint');
