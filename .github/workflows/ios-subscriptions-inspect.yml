@@ -1,0 +1,116 @@
+name: Inspect Wafra App Store subscriptions
+
+# Read-only: every App Store Connect call below is a GET. It lists the
+# subscription groups and products, their prices in the UAE, Saudi Arabia and
+# the US, any introductory (free-trial) offers, localizations, and the latest
+# builds and app versions, so the store setup can be checked against
+# docs/billing.md and docs/store-pricing.json without opening the console.
+# The API key is read from secrets and never printed.
+
+on:
+  workflow_dispatch:
+  push:
+    paths: ['.github/workflows/ios-subscriptions-inspect.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      EXPO_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+      EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+      EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+      ASC_APP_ID: '6799171482'
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+      - name: List subscriptions, prices, offers and builds
+        run: |
+          node --input-type=module <<'NODE'
+          import { createPrivateKey, sign } from 'node:crypto';
+          const raw = process.env.EXPO_ASC_API_KEY_P8 || '';
+          if (!raw || !process.env.EXPO_ASC_KEY_ID || !process.env.EXPO_ASC_ISSUER_ID) {
+            console.log('App Store Connect API secrets are not available to this run.');
+            process.exit(1);
+          }
+          const pem = raw.includes('BEGIN PRIVATE KEY') ? raw : Buffer.from(raw.replace(/\s/g, ''), 'base64').toString('utf8');
+          const key = createPrivateKey(pem);
+          const kid = process.env.EXPO_ASC_KEY_ID, iss = process.env.EXPO_ASC_ISSUER_ID, app = process.env.ASC_APP_ID;
+          const b64 = (d) => Buffer.from(JSON.stringify(d)).toString('base64url');
+          async function get(path) {
+            const now = Math.floor(Date.now() / 1000);
+            const signed = `${b64({ alg: 'ES256', kid, typ: 'JWT' })}.${b64({ iss, iat: now, exp: now + 600, aud: 'appstoreconnect-v1' })}`;
+            const jwt = `${signed}.${sign('sha256', Buffer.from(signed), { key, dsaEncoding: 'ieee-p1363' }).toString('base64url')}`;
+            const url = path.startsWith('http') ? path : `https://api.appstoreconnect.apple.com/v1/${path}`;
+            const r = await fetch(url, { headers: { Authorization: `Bearer ${jwt}` } });
+            if (!r.ok) return { error: `${r.status} ${(await r.text()).slice(0, 300)}` };
+            return r.json();
+          }
+          const section = (title) => console.log(`\n===== ${title} =====`);
+
+          section('Subscription groups and products');
+          const groups = await get(`apps/${app}/subscriptionGroups?limit=20`);
+          if (groups.error) console.log('subscriptionGroups:', groups.error);
+          for (const group of groups.data ?? []) {
+            console.log(`\nGroup "${group.attributes.referenceName}" (${group.id})`);
+            const subs = await get(`subscriptionGroups/${group.id}/subscriptions?limit=50`);
+            if (subs.error) { console.log('  subscriptions:', subs.error); continue; }
+            for (const sub of subs.data ?? []) {
+              const a = sub.attributes;
+              console.log(`\n  ${a.productId}  name="${a.name}"  state=${a.state}  period=${a.subscriptionPeriod}  familySharable=${a.familySharable}`);
+
+              const prices = await get(`subscriptions/${sub.id}/prices?filter[territory]=ARE,SAU,USA&include=subscriptionPricePoint,territory&limit=50`);
+              if (prices.error) console.log('    prices:', prices.error);
+              else {
+                const inc = new Map((prices.included ?? []).map((e) => [`${e.type}:${e.id}`, e]));
+                const rows = (prices.data ?? []).map((p) => {
+                  const pp = p.relationships?.subscriptionPricePoint?.data;
+                  const t = p.relationships?.territory?.data;
+                  const point = pp ? inc.get(`${pp.type}:${pp.id}`)?.attributes : null;
+                  const terr = t ? inc.get(`${t.type}:${t.id}`) : null;
+                  return { territory: terr?.id ?? t?.id, currency: terr?.attributes?.currency,
+                    customerPrice: point?.customerPrice, proceeds: point?.proceeds,
+                    startDate: p.attributes?.startDate ?? 'current', preserved: p.attributes?.preserved };
+                });
+                if (rows.length === 0) console.log('    prices: none set for ARE/SAU/USA');
+                for (const row of rows) console.log(`    price ${row.territory} ${row.currency}: ${row.customerPrice} (proceeds ${row.proceeds}) from ${row.startDate}${row.preserved ? ' [preserved]' : ''}`);
+              }
+
+              const offers = await get(`subscriptions/${sub.id}/introductoryOffers?limit=50&include=territory`);
+              if (offers.error) console.log('    introductory offers:', offers.error);
+              else if ((offers.data ?? []).length === 0) console.log('    introductory offers: none');
+              else {
+                const summary = new Map();
+                for (const o of offers.data) {
+                  const k = `${o.attributes.offerMode} ${o.attributes.duration} x${o.attributes.numberOfPeriods}`;
+                  summary.set(k, (summary.get(k) ?? 0) + 1);
+                }
+                for (const [k, n] of summary) console.log(`    introductory offer: ${k} in ${n} territories`);
+              }
+
+              const locs = await get(`subscriptions/${sub.id}/subscriptionLocalizations?limit=50`);
+              if (locs.error) console.log('    localizations:', locs.error);
+              else for (const l of locs.data ?? []) console.log(`    localization ${l.attributes.locale}: "${l.attributes.name}" - "${l.attributes.description}" (${l.attributes.state})`);
+            }
+          }
+
+          section('Latest builds');
+          const builds = await get(`builds?filter[app]=${app}&sort=-uploadedDate&limit=5`);
+          if (builds.error) console.log('builds:', builds.error);
+          for (const b of builds.data ?? []) {
+            const a = b.attributes;
+            console.log(`  build ${a.version}  uploaded=${a.uploadedDate}  processing=${a.processingState}  expired=${a.expired}`);
+          }
+
+          section('App Store versions');
+          const versions = await get(`apps/${app}/appStoreVersions?limit=5`);
+          if (versions.error) console.log('appStoreVersions:', versions.error);
+          for (const v of versions.data ?? []) {
+            const a = v.attributes;
+            console.log(`  ${a.platform} ${a.versionString}  state=${a.appStoreState ?? a.appVersionState}  created=${a.createdDate}`);
+          }
+          NODE
