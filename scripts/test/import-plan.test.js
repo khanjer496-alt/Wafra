@@ -3827,6 +3827,40 @@ const DECLINE_SMS = [{
   const sameSecondCopies = scan([0, 1].map(() => ({ body: batchCard('11387.53', '17:51'), ts: t0, sender: 'ADIB' })));
   ok('control: the same purchase delivered twice in the same second with the same balance is one purchase',
     buildImportPlan(sameSecondCopies.parsed, BASE, sameSecondCopies.newestTs).batch.transactions.length === 1);
+  {
+    // Fold review (#151): the different-balance veto is batch evidence. A
+    // STORED row whose persisted balance an older (or newer) parser read
+    // differently is still the same SMS on re-read, never a second movement.
+    const one = scan([{ body: debit('161,447.88'), ts: t0, sender: 'ADIB' }]);
+    const booked = buildImportPlan(one.parsed, BASE, one.newestTs).batch.transactions[0];
+    for (const [label, stored] of [
+      ['with its text retained', { ...booked, id: 'stored1', accountId: 'a1', statedBalanceFils: 15644788 }],
+      ['without its text (iOS seals the body away)', { ...booked, id: 'stored1', accountId: 'a1', statedBalanceFils: 15644788, raw: undefined }],
+    ]) {
+      const reread = buildImportPlan(one.parsed, { ...BASE, transactions: [stored] }, one.newestTs);
+      ok(`fold review: a re-read of a stored row ${label} is not duplicated by a differently read balance`,
+        reread.batch.transactions.length === 0, reread.batch.transactions.map((t) => t.statedBalanceFils));
+    }
+  }
+  {
+    // The exact capture key is the last net when a parser upgrade ALSO
+    // retitles the row: the different-balance veto must not cut it. It
+    // applies only against a row from the same batch, or when the two texts
+    // differ; a stored row with no retained text keeps its key match.
+    const { duplicateGuard } = require('./build/dedupe.js');
+    const raw = debit('161,447.88');
+    const ts = t0;
+    const base = { type: 'expense', amountFils: 500000, date: '2026-03-02', title: 'Account debit', smsKey: `s${ts}-500000`, ts, source: 'sms' };
+    for (const storedRaw of [raw, undefined]) {
+      const guard = duplicateGuard([{ ...base, id: 'x', accountId: 'a1', category: 'other', statedBalanceFils: 15644788, raw: storedRaw }]);
+      ok(`fold review: a retitled re-read of a stored row (${storedRaw ? 'text kept' : 'no text'}) with a differently read balance is the same row`,
+        guard.has({ ...base, title: 'Outgoing transfer', raw, statedBalanceFils: 16144788 }) === true);
+    }
+    const other = duplicateGuard([{ ...base, id: 'x', accountId: 'a1', category: 'other', statedBalanceFils: 15644788,
+      raw: debit('156,447.88') }]);
+    ok('fold review control: a different text with a different balance under the same key is a second movement',
+      other.has({ ...base, title: 'Outgoing transfer', raw, statedBalanceFils: 16144788 }) === false);
+  }
   const { carrierRedeliveryIndexes } = require('./build/auto-import.js');
   // A balance that moved away and back between two identical bodies proves a
   // second movement: credit -> 1,275.40, debit -> 900.40, credit -> 1,275.40.

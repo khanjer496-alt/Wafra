@@ -584,7 +584,9 @@ export interface ParsedCard {
  *    and no call to action; a credit from a phone number, e-mail, generic or
  *    BLANK sender that names no own tail waits in Review; promo footers and
  *    merchant names no longer veto a completed own-tail alert.
- *  - Ledger: alerts with different stated balances are never deduped; two equal,
+ *  - Ledger: two alerts stating different balances are not folded as
+ *    duplicates within one batch, or when their texts differ (a stored row
+ *    re-read by a parser that reads the balance differently stays one); two equal,
  *    opposite movements on two own accounts at the same bank whose stated
  *    balances each moved by the amount are SUGGESTED as one own transfer
  *    (the person is asked), never confirmed on that evidence alone.

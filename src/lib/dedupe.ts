@@ -964,6 +964,18 @@ export function duplicateGuard(
     exactRows.set(key, rows);
   };
   for (const t of existing) noteExact(t);
+  /** Rows of THIS import batch in exactRows (see balanceVeto). */
+  const batchExactRows = new WeakSet<object>();
+  /**
+   * The different-stated-balance veto is batch evidence. Against a STORED
+   * row it applies only when both texts are known and differ: a parser that
+   * reads a balance differently from the same SMS on re-read must not turn
+   * one stored movement into two.
+   */
+  const balanceVeto = (row: DuplicateCandidate | Transaction, c: DuplicateCandidate): boolean =>
+    differentStatedBalance(row.statedBalanceFils, c.statedBalanceFils) &&
+    (batchExactRows.has(row) ||
+      (typeof row.raw === 'string' && typeof c.raw === 'string' && bodyPrint(row.raw) !== bodyPrint(c.raw)));
   const exactMatch = (key: string, c: DuplicateCandidate) =>
     (exactRows.get(canonicalCaptureSourceKey(key, c.ts)) ?? []).find((row) => key.startsWith('h') || (
       isStatementCaptureSource(row.captureSource) === isStatementCaptureSource(c.captureSource) &&
@@ -975,7 +987,7 @@ export function duplicateGuard(
       // A batch of alerts delivered in the same second for the same amount
       // shares one `s{ts}-{amount}` key; their stated balances (11,387.53,
       // 11,377.53, 11,367.53) still prove three purchases, never one.
-      !differentStatedBalance(row.statedBalanceFils, c.statedBalanceFils)
+      !balanceVeto(row, c)
     ));
   /** A day/amount/direction key still needs a capture time to identify an event. */
   const crossChannel = new Map<string, SeenEvent[]>();
@@ -1562,6 +1574,7 @@ export function duplicateGuard(
           push: c.channel === 'push', eventIdentity: c.eventIdentity, textClock: c.textClock,
           statedBalanceFils: c.statedBalanceFils,
         });
+      batchExactRows.add(c);
       noteExact(c);
       const cross: SeenEvent = {
         ts,
