@@ -571,6 +571,11 @@ export interface ParsedCard {
  *    Paid" never post; "Transaction Error … issue processing" is a decline;
  *    ADIB's three-digit masked tail names its card; a fund-transfer request
  *    acknowledgement is not income.
+ *  - UAE/Saudi grammar, sender trust (fold review): from a BLANK sender
+ *    (iPhone History) or a phone number, e-mail or generic word, a smishing
+ *    link, fraud prompt or not-a-new-movement text never posts, and a credit
+ *    naming no own account or card tail is not auto-posted (Aani/SARIE claims
+ *    reach Review). Registered bank headers are unchanged.
  *  - Gulf neighbours (QA, KW, BH, OM): a recognised institution's alert is read
  *    by the launch grammar in marked best-effort mode, money only in the
  *    market's own currency (three decimals for KWD/BHD/OMR after routing);

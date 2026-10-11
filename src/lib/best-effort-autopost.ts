@@ -570,9 +570,11 @@ export const isRegisteredAlertSender = (sender: string | undefined): boolean => 
  * ("Ref *4410") or a USSD code ("Dial *334#"). A fully masked "a/c XXXXXX"
  * names nothing. A masked IBAN after the account word ("Your account
  * BH19BBKUXXXXXXXXXXXX74", BBK) names its tail like any other mask.
+ * So does a dash-grouped mask ("your account XXXX-XXXXX6-001", Emirates
+ * Islamic's official sample).
  */
 const OWN_INSTRUMENT_TAIL =
-  /(?:\b(?:a\/c|acc(?:oun)?t|acct|card|ending|wallet(?:\s+(?:no\.?|number))?)\b|(?<!\p{L})(?:حساب|بطاق[ةه])(?:\s+رقم)?)\.?\s*(?:no\.?|number|#)?\s*:?\s*(?:ending\s+(?:in|with)\s+)?(?:(?:[A-Z]{2}\d{2}[A-Z]{0,4})?\d{0,6}[*xX•·…]+\s?-?\d{2,6}|\.{2,3}\s?\d{2,6}|\d{3,6})(?![\d#])/iu;
+  /(?:\b(?:a\/c|acc(?:oun)?t|acct|card|ending|wallet(?:\s+(?:no\.?|number))?)\b|(?<!\p{L})(?:حساب|بطاق[ةه])(?:\s+رقم)?)\.?\s*(?:no\.?|number|#)?\s*:?\s*(?:ending\s+(?:in|with)\s+)?(?:(?:[*xX•·]{2,}[\d*xX•·]*-){1,3}[\d*xX•·]*\d{2,6}|(?:[A-Z]{2}\d{2}[A-Z]{0,4})?\d{0,6}[*xX•·…]+\s?-?\d{2,6}|\.{2,3}\s?\d{2,6}|\d{3,6})(?![\d#])/iu;
 /** Exposed for tests: whether the text names an own card or account by its tail. */
 export const namesOwnInstrumentTail = (text: string): boolean => OWN_INSTRUMENT_TAIL.test(text);
 const namesOwnInstrument = (source: string, event: UniversalBankEvent): boolean =>

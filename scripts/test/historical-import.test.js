@@ -1510,6 +1510,46 @@ async function main() {
     markets.setLedgerCurrency(null);
     markets.setActiveMarket('AE');
   }
+  {
+    // Fold review (#151), launch-critical: on the UAE/Saudi launch grammar a
+    // BLANK sender (iPhone History) or a phone-number sender is not a bank.
+    // A scam-link text never posts, and a credit that names no own account or
+    // card tail waits in Review instead of being booked as income. A
+    // registered bank header keeps today's behaviour.
+    markets.setActiveMarket('AE');
+    markets.setLedgerCurrency('AED', 2);
+    const at = '2026-10-10T08:00:00.000Z';
+    const one = (key, text, sender) => parseHistoricalMessageRecords(
+      [record({ id: id(key), text, ...(sender === undefined ? { sender: undefined } : { sender }), receivedAt: at })],
+      {}, new Date('2026-10-10T09:00:00.000Z'), new Set());
+    const phishing = 'Dear Customer, AED 5,000.00 has been credited to your account. Click https://enbd-verify.com to confirm';
+    const blankPhish = one('a', phishing, undefined);
+    ok('launch history: a blank-sender phishing credit with a verify link never posts',
+      blankPhish.parsed.length === 0, blankPhish.parsed);
+    const aani = 'You have received AED 1,500.00 from JOHN via Aani.';
+    const phone = one('b', aani, '+971501234567');
+    ok('launch history: a phone-number "you have received" credit naming no own account is not posted',
+      phone.parsed.length === 0, phone.parsed);
+    const blankAani = one('c', aani, undefined);
+    ok('launch history: the same credit with no sender is not posted', blankAani.parsed.length === 0, blankAani.parsed);
+    ok('launch history: both unverified Aani credits wait in Review instead of being dropped',
+      phone.reviewCandidates.length === 1 && blankAani.reviewCandidates.length === 1, [phone, blankAani]);
+    const tailed = one('d', 'AED 1,500.00 has been credited to your account XXX1234.', undefined);
+    ok('launch history control: a blank-sender credit naming the own account still posts as income',
+      tailed.parsed.length === 1 && tailed.parsed[0].type === 'income' && tailed.parsed[0].amountFils === 150000, tailed.parsed);
+    const bank = one('e', 'Dear Customer, AED 5,000.00 has been credited to your account.', 'ENBD');
+    ok('launch history control: a registered bank header credit with no tail still posts as income',
+      bank.parsed.length === 1 && bank.parsed[0].type === 'income' && bank.parsed[0].amountFils === 500000, bank.parsed);
+    // Emirates Islamic's official sample has no sender on History and writes
+    // the own account as a dash-grouped mask.
+    const ei = one('p', 'AED 1,000.00 has been deposited to your account XXXX-XXXXX6-001 through the ATM ... visit www.emiratesislamic.ae', undefined);
+    ok('launch history control: a blank-sender deposit naming a dash-grouped own account still posts',
+      ei.parsed.length === 1 && ei.parsed[0].type === 'income' && ei.parsed[0].amountFils === 100000, ei);
+    const spend = one('f', 'Purchase of AED 120.00 with Debit Card ending 1234 at CARREFOUR, DUBAI.', undefined);
+    ok('launch history control: a blank-sender purchase still posts', spend.parsed.length === 1 && spend.parsed[0].type === 'expense', spend.parsed);
+    markets.setLedgerCurrency(null);
+    markets.setActiveMarket('AE');
+  }
   if (fail > 0) {
     console.error(`\nhistorical-import: ${pass} passed, ${fail} failed`);
     process.exit(1);

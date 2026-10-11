@@ -3,7 +3,8 @@ import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars'
 import { activeCountryDateOrder, dateOrderForCountry, getActiveCountry } from '@/lib/country';
 import {
   bestEffortAutoPostEnabled, decideBestEffortAutoPost, hasLinkFromUnregisteredSender, hasNonCompletedWording,
-  isNotAutoPostableMoney, isRegisteredAlertSender, isUnverifiedAlertSender, refusedOnlyByShopOrPromoWording,
+  isNotAutoPostableMoney, isRegisteredAlertSender, isUnverifiedAlertSender, namesOwnInstrumentTail,
+  refusedOnlyByShopOrPromoWording,
   sharedSymbolCurrencyForCountry,
 } from '@/lib/best-effort-autopost';
 import {
@@ -112,7 +113,7 @@ const MONEY_ARRIVED_CLAIM =
  * ("QX81TR4KLM"). A chat ("you received Ksh 2,000 from me?") has none.
  */
 const MONEY_CLAIM_EVIDENCE =
-  /(?<!\p{L})(?:\p{L}*bank|banco|banque|wallet|carteira|billetera|account|acct|a\/c|conta|cuenta|compte|konto|rekening|balance|bal|avl|saldo|solde|ref(?:erence)?|txn|trx|tid|transaction|transfer|transferencia|transfer[êe]ncia|virement|[ée]-?transfer|pix|spei|yape|plin|nequi|daviplata|m-?pesa|mpesa|upi|imps|neft|rtgs|zelle|interac|gcash|maya|paytm|jazzcash|easypaisa|momo|airtel\s+money)(?!\p{L})/iu;
+  /(?<!\p{L})(?:\p{L}*bank|banco|banque|wallet|carteira|billetera|account|acct|a\/c|conta|cuenta|compte|konto|rekening|balance|bal|avl|saldo|solde|ref(?:erence)?|txn|trx|tid|transaction|transfer|transferencia|transfer[êe]ncia|virement|[ée]-?transfer|pix|spei|aani|sarie|yape|plin|nequi|daviplata|m-?pesa|mpesa|upi|imps|neft|rtgs|zelle|interac|gcash|maya|paytm|jazzcash|easypaisa|momo|airtel\s+money)(?!\p{L})/iu;
 const TRANSACTION_CODE = /\b(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{8,12}\b/u;
 /**
  * First- and second-person chat: the writer says THEY sent it, or asks
@@ -649,6 +650,26 @@ const sharedSenderOutsideGulf = (
   inspection?.route.decision === 'ambiguous' &&
   inspection.route.candidates.some((candidate) => candidate.market !== 'AE' && candidate.market !== 'SA');
 
+/**
+ * THE UAE/SAUDI GRAMMAR TRUSTS ITS SENDER. A blank sender (an iPhone History
+ * record: iOS 26 Find Messages exposes none) or a phone number, e-mail or
+ * generic word is not a bank, and the launch grammar would otherwise book
+ * "Dear Customer, AED 5,000.00 has been credited to your account. Click
+ * https://enbd-verify.com to confirm" or "+971…: You have received AED
+ * 1,500.00 from JOHN via Aani." as income. From such a sender:
+ *  - a smishing link call-to-action, a fraud prompt or not-a-new-movement
+ *    wording (isNotAutoPostableMoney) never posts;
+ *  - a credit must name the person's own account or card (its masked tail),
+ *    or it is not auto-posted; the Review seam decides what to show.
+ * A registered header (a bank's sender ID) keeps the grammar's decision.
+ */
+const launchSenderAnswersFor = (source: string, sender: string, parsed: ParsedSms): boolean => {
+  if (sender.trim() && !isUnverifiedAlertSender(sender)) return true;
+  if (parsed.kind !== 'transaction') return true;
+  if (isNotAutoPostableMoney(source)) return false;
+  return parsed.type !== 'income' || namesOwnInstrumentTail(source) || !!parsed.card?.last4;
+};
+
 export interface LaunchAlertSession {
   inspect(source: string, sender: string): UniversalAlertReview | null;
   parse(
@@ -791,7 +812,7 @@ export const createLaunchAlertSession = ({
     // worldwide fallback below must not resurrect it on an unpinned ledger.
     if (isBnplProviderSource(sender)) return null;
     const local = parseRegionalEvidence(source, sender, inspection, forcedMarket, observedAt)?.parsed ?? null;
-    if (local) return local;
+    if (local) return launchSenderAnswersFor(source, sender, local) ? local : null;
     // The worldwide parser is intentionally broader and therefore more
     // expensive. Ordinary conversations, delivery updates and generic service
     // SMS must not pay that cost after the launch parser already failed fast.
