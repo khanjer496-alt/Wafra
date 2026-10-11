@@ -10,10 +10,8 @@ const RETIRED_CAPTURE_SHORTCUT_IDS = new Set([
   '85bd1e080e5849b591049eccffb9a3a1',
   '96f93402213144e8885db33f48fc6168',
 ]);
-const HISTORY_V4_SIGNED_ASSET =
-  'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v4-20260919/Wafra-History-v4.signed.shortcut';
-const HISTORY_V6_SIGNED_ASSET =
-  'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v6-20260919/Wafra-History-v6.signed.shortcut';
+// The repository is private, so its release assets are not public downloads.
+const PRIVATE_REPOSITORY_ASSET = /^https:\/\/(?:github\.com\/khanjer496-alt\/Wafra\/|raw\.githubusercontent\.com\/khanjer496-alt\/Wafra\/)/i;
 const RETIRED_HISTORY_SHORTCUT_IDS = new Set([
   'cc85a21db99a4e4698c1a498de670199',
   '2869584d40ed454691cf3f916cbee158',
@@ -268,16 +266,13 @@ const checkProductionRuntime = (expo, eas, platform, publicEnv, findings) => {
     requireHttps(captureUrl, 'capture-shortcut', 'EXPO_PUBLIC_WAFRA_SHORTCUT_URL', findings, {
       host: 'www.icloud.com', pathPattern: SHORTCUT_PATH,
     });
-    if (historyUrl === 'https://wafra-app-azg.pages.dev/wafra-history-import.shortcut') {
+    if (historyUrl === undefined || historyUrl === null || historyUrl === '') {
+      // The app installs the History Shortcut bundled in the binary.
+    } else if (PRIVATE_REPOSITORY_ASSET.test(String(historyUrl))) {
+      findings.push(finding('private-history-shortcut', 'The History Shortcut link points at the private repository', 'Release assets of a private GitHub repository cannot be downloaded by customers.', 'Remove EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL so the app installs its bundled History Shortcut.'));
+    } else if (historyUrl === 'https://wafra-app-azg.pages.dev/wafra-history-import.shortcut') {
       requireHttps(historyUrl, 'history-shortcut', 'EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL', findings, {
         host: 'wafra-app-azg.pages.dev', pathPattern: /^\/wafra-history-import\.shortcut$/,
-      });
-    } else if (historyUrl === HISTORY_V4_SIGNED_ASSET || historyUrl === HISTORY_V6_SIGNED_ASSET) {
-      // Typed-date History v4: an Apple-signed release asset whose exact URL and
-      // digest are pinned by scripts/release/ios-public-shortcut-check.mjs and
-      // whitelisted at runtime by src/lib/ios-history-setup.ts.
-      requireHttps(historyUrl, 'history-shortcut', 'EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL', findings, {
-        host: 'github.com', pathPattern: /^\/khanjer496-alt\/Wafra\/releases\/download\/ios-history-v[46]-20260919\/Wafra-History-v[46]\.signed\.shortcut$/,
       });
     } else {
       requireHttps(historyUrl, 'history-shortcut', 'EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL', findings, {

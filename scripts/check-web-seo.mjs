@@ -75,13 +75,16 @@ check('three static product previews with alt text', imageCount === 3 && accessi
 check('static product image URLs', ['/wafra-app-home.png', '/wafra-app-spending.png', '/wafra-app-bills-light.png']
   .every((image) => index.includes(`src="${image}"`) && fs.existsSync(path.join(outputDir, image))));
 const redirects = fs.existsSync(path.join(outputDir, '_redirects')) ? read('_redirects') : '';
-const apkUrl = redirects.match(/^\/get\/android (https:\/\/github\.com\/khanjer496-alt\/Wafra\/releases\/download\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\.apk) 302$/m)?.[1];
 check(
   'public beta download links',
-  index.includes('href="/get/iphone"') && index.includes('href="/get/android"') &&
+  index.includes('href="/get/iphone"') &&
     /^\/get\/iphone https:\/\/testflight\.apple\.com\/join\/jbwzCgZ6 302$/m.test(redirects) &&
-    Boolean(apkUrl) && (!process.env.EXPECTED_APK_URL || apkUrl === process.env.EXPECTED_APK_URL) &&
-    index.includes('Download APK'),
+    !index.includes('/get/android') && !/^\/get\/android /m.test(redirects) &&
+    !/\.apk"/.test(index) && !index.includes('Download APK'),
+);
+check(
+  'no downloads from the private source repository',
+  !/github\.com\/khanjer496-alt\/Wafra|raw\.githubusercontent\.com\/khanjer496-alt\/Wafra/.test(`${index}\n${redirects}`),
 );
 check(
   'worldwide audience positioning',

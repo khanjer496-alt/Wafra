@@ -30,10 +30,11 @@ const getSiteUrl = () => {
 };
 
 export const SITE_URL = getSiteUrl();
-// The website's download buttons link to these first-party paths. The deployed
+// The website's download button links to this first-party path. The deployed
 // Pages Function counts the click and redirects to the destination in
 // site-events.mjs; the finalizer's _redirects file covers a static-only host.
-export const DOWNLOAD_PATHS = { iphone: '/get/iphone', android: '/get/android' } as const;
+// There is no Android download while the source repository is private.
+export const DOWNLOAD_PATHS = { iphone: '/get/iphone' } as const;
 export const MARKETING_TITLE = 'Wafra — Private Budget & Expense Tracker';
 export const MARKETING_DESCRIPTION =
   'Track spending, budgets, bills and subscriptions anywhere without a bank login. Start manually or use optional supported imports.';

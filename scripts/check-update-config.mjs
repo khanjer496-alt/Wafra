@@ -101,7 +101,14 @@ if (environment) {
   const captureId = canonicalShortcutId('EXPO_PUBLIC_WAFRA_SHORTCUT_URL');
   const historyValue = process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL ?? '';
   const hostedHistory = historyValue === 'https://wafra-app-azg.pages.dev/wafra-history-import.shortcut';
-  const historyId = hostedHistory ? null : canonicalShortcutId('EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL');
+  // Unset is the normal case: the app installs its bundled History Shortcut.
+  // The source repository is private, so its release assets are not public.
+  if (/^https:\/\/(?:github\.com|raw\.githubusercontent\.com)\/khanjer496-alt\/Wafra\//i.test(historyValue)) {
+    fail('EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL points into the private repository; remove it so the app installs its bundled History Shortcut.');
+  }
+  const historyId = hostedHistory || historyValue === '' || /^https:\/\/(?:github\.com|raw\.githubusercontent\.com)\//i.test(historyValue)
+    ? null
+    : canonicalShortcutId('EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL');
   if (new Set([
     '03d2ab22a33f4fef9d503142575a70fb',
     '85bd1e080e5849b591049eccffb9a3a1',

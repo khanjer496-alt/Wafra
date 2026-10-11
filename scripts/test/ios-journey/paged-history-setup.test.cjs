@@ -68,21 +68,24 @@ test('run link contains only the matching Shortcut name and local return routes'
   assert.equal(unverified.pagedHistoryEnabled(), true);
   assert.equal(unverified.PAGED_HISTORY_INSTALL_URL, null);
 });
-test('every iOS profile installs the windowed v6 record and retains the native paging intents', () => {
+test('every iOS profile installs the bundled History Shortcut and retains the native paging intents', () => {
   const config = JSON.parse(fs.readFileSync(path.join(root, 'eas.json')));
-  const v4 = 'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v6-20260919/Wafra-History-v6.signed.shortcut';
+  // The repository is private: no profile may download History from GitHub.
   for (const profile of ['history-beta', 'production', 'ios-parity-device']) {
-    assert.equal(config.build[profile].env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL, v4, profile);
+    assert.equal(config.build[profile].env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL, undefined, profile);
   }
   // The paged surfaces follow the installed record, so the beta flag stays off.
   for (const key of ['WAFRA_PAGED_HISTORY_BETA', 'EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA']) {
     assert.equal(config.build['history-beta'].env[key], '0');
   }
-  const v4Setup = load(path.join(root, 'src/lib/ios-paged-setup.ts'), {}, { process: { env: { EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: v4 } } });
-  assert.equal(v4Setup.PAGED_HISTORY_SHORTCUT_NAME, 'Wafra-History-v6.signed');
-  assert.equal(v4Setup.PAGED_HISTORY_INSTALL_URL, v4);
-  assert.equal(v4Setup.pagedHistoryEnabled(), true);
-  assert.equal(new URL(v4Setup.pagedHistoryRunUrl()).searchParams.get('name'), 'Wafra-History-v6.signed');
+  const bundled = load(path.join(root, 'src/lib/ios-paged-setup.ts'), {}, { process: { env: {} } });
+  assert.equal(bundled.PAGED_HISTORY_INSTALL_URL, null);
+  assert.equal(bundled.pagedHistoryEnabled(true), true);
+  assert.equal(new URL(bundled.pagedHistoryRunUrl(true)).searchParams.get('name'), 'Wafra History v8');
+  const retired = load(path.join(root, 'src/lib/ios-paged-setup.ts'), {}, { process: { env: {
+    EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: 'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v6-20260919/Wafra-History-v6.signed.shortcut',
+  } } });
+  assert.equal(retired.PAGED_HISTORY_INSTALL_URL, null);
   const base = { name: 'Wafra', plugins: ['original'] };
   const factory = require(path.join(root, 'app.config.js'));
   assert.deepEqual(factory({ config: base }).plugins,
