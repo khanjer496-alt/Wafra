@@ -1,4 +1,4 @@
-import { hasNonCompletedWording } from '@/lib/best-effort-autopost';
+import { hasNonCompletedWording, isNotAutoPostableMoney } from '@/lib/best-effort-autopost';
 import { dateOrderForCountry } from '@/lib/country';
 import { currencyMinorUnits } from '@/lib/currency-metadata';
 import type { FxQuote } from '@/lib/fx';
@@ -115,7 +115,7 @@ export const gulfNeighbourReadSource = (source: string, market: GulfNeighbourMar
  * own completed-purchase phrase; a bare heading ("POS", "Card transaction",
  * "شراء بطاقة") is not.
  */
-const COMPLETION = /\b(?:purchase\s+of|was\s+used\s+(?:for|at)|debited|credited|deducted|withdrawn|deposited|paid|spent|refunded|transferred|received|charged|was\s+successful)\b|تمت?\s+(?:عملية\s+)?(?:ال)?(?:خصم|إيداع|ايداع|تحويل|سداد|سحب|شراء|استرداد|قيد|إضافة|اضافة|دفع)/iu;
+const COMPLETION = /\b(?:purchase\s+of|(?:was|has\s+been)\s+used\s+(?:for|at)|debited|credited|deducted|withdrawn|deposited|paid|spent|refunded|transferred|received|charged|was\s+successful)\b|تمت?\s+(?:عملية\s+)?(?:ال)?(?:خصم|إيداع|ايداع|تحويل|سداد|سحب|شراء|استرداد|قيد|إضافة|اضافة|دفع)/iu;
 
 /**
  * Paying the card's own bill moves money between the person's accounts; it is
@@ -232,7 +232,10 @@ export function decideGulfNeighbourPosting(input: GulfNeighbourInput): GulfNeigh
   // other alert keeps the generic unproven-format policy it had before.
   if (!market || !input.institution) return { outcome: 'not-applicable' };
   if (!input.enabled) return review('disabled');
-  if (hasNonCompletedWording(input.source, null, input.sender) || LIMIT_CHANGE.test(input.source)) return review('non-posting-wording');
+  // The same smishing-link, fraud-prompt and not-a-new-movement gate as the
+  // generic best-effort policy and certified templates.
+  if (hasNonCompletedWording(input.source, null, input.sender) || isNotAutoPostableMoney(input.source) ||
+    LIMIT_CHANGE.test(input.source)) return review('non-posting-wording');
   if (CARD_BILL_PAYMENT.test(input.source)) return review('card-payment');
 
   const own = GULF_NEIGHBOUR_CURRENCY[market];

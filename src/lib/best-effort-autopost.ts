@@ -457,9 +457,21 @@ const NOT_A_SETTLED_FACT: readonly RegExp[] = [
 const NOT_A_NEW_MOVEMENT: readonly RegExp[] = [
   /\bconverted\s+(?:in)?to\s+(?:an?\s+)?(?:emi|instal(?:l)?ments?|instal(?:l)?ment\s+plan)\b/iu,
   /\breceived\s+(?:an?\s+)?airtime\b/iu,
-  /\border\s*(?:#|no\.?|number|id)\s*[:.-]?\s*[A-Z0-9-]*\d[\s\S]{0,80}?\b(?:paid|payment)\b|\b(?:paid|payment)\b[\s\S]{0,40}?\border\s*(?:#|no\.?|number|id)\s*[:.-]?\s*[A-Z0-9-]*\d/iu,
   /\b(?:money\s+market|unit\s+trust|mutual|investment)\s+fund\b[\s\S]{0,120}?\b\d[\d,.]*\s+units\b/iu,
 ];
+
+/**
+ * A merchant's order notice ("Your FoodApp Order #… was paid", "Your order
+ * #12345 has shipped. You paid $50.00 …") repeats the bank's own debit alert
+ * for the same payment. A wallet's or bank's own debit that merely carries an
+ * order id ("Paid Rs.120.00 to GREEN GROCERS. Order ID: 77120334. Updated
+ * Balance: Wallet Rs 880.00") states the payer's own balance, which a merchant
+ * cannot know: that is the movement itself and stays postable.
+ */
+const MERCHANT_ORDER_RECEIPT =
+  /\border\s*(?:#|no\.?|number|id)\s*[:.-]?\s*[A-Z0-9-]*\d[\s\S]{0,80}?\b(?:paid|payment)\b|\b(?:paid|payment)\b[\s\S]{0,40}?\border\s*(?:#|no\.?|number|id)\s*[:.-]?\s*[A-Z0-9-]*\d/iu;
+const OWN_BALANCE_STATED =
+  /\b(?:updated|avl\.?|available|new|closing|current)\s+(?:wallet\s+|account\s+|a\/c\s+)?bal(?:ance)?\b|\bbal(?:ance)?\s*(?:is|:)\s*(?:[A-Z]{3}|Rs\.?|[$£€₹])/iu;
 
 /**
  * "You paid $4,493.74 to your Venture X Card…(9792)": a payment to the
@@ -482,7 +494,8 @@ const OWN_CARD_PAYMENT = /\b(?:[Yy]ou\s+)?paid\b(?:[^.\n]|\.\d){0,40}?\bto\s+you
  */
 export const isNotAutoPostableMoney = (source: string): boolean =>
   hasLinkCallToAction(source) || NOT_A_SETTLED_FACT.some((pattern) => pattern.test(source)) ||
-  NOT_A_NEW_MOVEMENT.some((pattern) => pattern.test(source));
+  NOT_A_NEW_MOVEMENT.some((pattern) => pattern.test(source)) ||
+  (MERCHANT_ORDER_RECEIPT.test(source) && !OWN_BALANCE_STATED.test(source));
 
 /**
  * A link next to the money. Lures always carry one ("confirm your
@@ -510,6 +523,9 @@ const registeredAlphaSender = (sender: string | undefined): boolean => {
   if (/^\d{3,6}$/.test(raw)) return true;
   if (/^[a-z][a-z0-9_]*(?:\.[a-z0-9_]+){2,}$/i.test(raw) && !raw.includes('@')) return true;
   const id = raw.replace(/^[A-Z]{2}-/, '').replace(/-[A-Z]$/, '');
+  // A two-letter header ("CA" Crédit Agricole, "SG") is operator-registered
+  // like a longer one; no personal phone can send from either.
+  if (/^[A-Za-z]{2}$/.test(id)) return true;
   return /^[A-Za-z][A-Za-z0-9 ]{2,15}$/.test(id) && (id.match(/[A-Za-z]/g) ?? []).length >= 3 &&
     !GENERIC_SENDER.test(id);
 };

@@ -341,5 +341,26 @@ const certifyOm = (source, institution = 'bank-muscat', allowSemanticGeneralizat
   }
 }
 
+{
+  // Fold of PR #151 into the parser stack: the Gulf path applies the same
+  // smishing-link / fraud-prompt / not-a-new-movement gate as the generic
+  // best-effort policy, and "has been used for" is a completion verb. The
+  // base text is the QNB debit-card shape pinned in best-effort-autopost.
+  const qnb = 'Your QNB debit card SAMPLE1 has been used for a purchase for QAR 120 at SAMPLE STORE and the available balance is QAR 900.';
+  const row = capture(`${qnb} In case the transaction is suspicious Please Call 40000000`, 'QNB', 'QA', 'QAR');
+  ok('fold: QNB "has been used for a purchase" posts through the Gulf path',
+    row?.type === 'expense' && row.amountFils === 12000 && !!row.bestEffort, row);
+  for (const tail of [
+    ' Was this you? Reply Y/N.',
+    ' Fraud alert: if this was not you, dispute here: http://qnb-card-dispute.example',
+    ' Not you? Verify now: bit.ly/qnb-verify',
+    ' This transaction was flagged.',
+    ' Details: https://qnb.com-secure.example/x',
+  ]) {
+    ok(`fold: the Gulf path never auto-adds a fraud prompt or bait link —${tail.slice(0, 40)}`,
+      capture(`${qnb}${tail}`, 'QNB', 'QA', 'QAR') === null);
+  }
+}
+
 console.log(`\ngulf-neighbour-alerts: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);
