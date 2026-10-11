@@ -516,7 +516,7 @@ function pagedPdf(pages) {
   let deepPreambleCsv = '';
   try {
     parseStatementCsv([
-      ...Array.from({ length: 11 }, (_, index) => `Preamble line ${index},x,y`),
+      ...Array.from({ length: 21 }, (_, index) => `Preamble line ${index},x,y`),
       'Date,Description,Debit,Credit',
       '01/07/2026,Carrefour,40.00,',
     ].join('\n'), 'AED');
