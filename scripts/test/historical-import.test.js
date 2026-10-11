@@ -1438,6 +1438,78 @@ async function main() {
     ok('a recognised sender still outranks the bank claimed in the body',
       withSender.parsed.length === 1 && withSender.parsed[0].bankHint === 'Emirates NBD', withSender.parsed[0]);
   }
+  {
+    // Saudi launch repairs (PARSER_VERSION 64) through the iPhone History path
+    // on a SAR ledger. Synthetic bodies in observed Saudi layouts; each record
+    // arrives the day after its stated date, as a real one does.
+    markets.setLedgerCurrency(null);
+    markets.setActiveMarket('SA');
+    markets.setLedgerCurrency('SAR', 2);
+    const one = (key, text, sender, receivedAt) => {
+      const result = parseHistoricalMessageRecords([record({ id: id(key), text, sender, receivedAt })], {}, new Date(Date.parse(receivedAt) + 3600000), new Set());
+      return result;
+    };
+    const refund = one('a', 'استرداد شراء\nبطاقة:6612;مدى\nمبلغ:SAR 27.40\nلدى:Hala Bakery\nفي:25-6-21 16:03',
+      'AlRajhiBank', '2025-06-21T14:00:00.000Z');
+    ok('history: a Saudi refund heading posts as income on its year-first date',
+      refund.parsed.length === 1 && refund.parsed[0].type === 'income' && refund.parsed[0].amountFils === 2740 &&
+        refund.parsed[0].date === '2025-06-21', refund.parsed);
+    const code = one('b', 'ننصح بعدم مشاركة الرمز لحمايتك من الاحتيال\nالرمز:572614\nبطاقة:*4417\nمبلغ:SAR 61.25\nلدى:Zain\nفي:24-7-12 18:20',
+      'AlRajhiBank', '2024-07-12T16:00:00.000Z');
+    ok('history: a labelled Arabic code field never posts', code.parsed.length === 0, code);
+    const glued = one('c', 'Internal incoming transfer\nAmount:140SR\nFrom:NAME\nAcc:381\nAt:12/08/26 21:01',
+      'STC Bank', '2026-08-12T19:00:00.000Z');
+    ok('history: a digit-glued SR amount reaches the parser and posts as income',
+      glued.parsed.length === 1 && glued.parsed[0].type === 'income' && glued.parsed[0].amountFils === 14000 &&
+        glued.parsed[0].date === '2026-08-12', glued.parsed);
+    const beneficiary = one('d', 'حوالة محلية\nالمصرفARNB\nالمبلغSAR 1,250.40\nمنX5501\nالى:NOVA SAVINGS AND DEPOSIT CLIENT FUNDS\nالىX8830\nالرسوم SAR 0\nفي07-12 08:49',
+      'SAIB', '2026-07-12T08:00:00.000Z');
+    ok('history: a deposit word in a beneficiary name cannot make a transfer income',
+      beneficiary.parsed.length === 1 && beneficiary.parsed[0].type === 'expense' &&
+        beneficiary.parsed[0].amountFils === 125040, beneficiary.parsed);
+    // Review round: once parseSms refuses, the semantic layer must not
+    // rebuild the same message from a purchase word.
+    const R = '2026-10-10T08:00:00.000Z';
+    const none = (key, text, sender, name) => {
+      const r = one(key, text, sender, R);
+      ok(`history: ${name}`, r.parsed.length === 0, r.parsed);
+    };
+    none('a', 'الرمز:483920\nشراء انترنت\nبطاقة:*8791\nمبلغ:SAR 23.00\nلدى:Mobily', 'AlRajhiBank',
+      'a code field above a purchase line never posts');
+    none('b', 'ننصح بعدم مشاركة الرمز لحمايتك من الاحتيال\nالرمز:572614\nشراء\nبطاقة:*4417\nمبلغ:SAR 61.25\nلدى:Zain\nفي:24-7-12 18:20',
+      'AlRajhiBank', 'a code-field challenge with a purchase heading never posts');
+    none('c', 'تم تنفيذ عملية شراء شركة المراعي لمحفظتك XXXX17-2 بسعر 50.10 SAR لعدد 2 سهم', 'alinma',
+      'a short share-purchase confirmation never posts');
+    none('d', 'تم إضافة 4.10 ريال إلى محفظة الاسترجاع النقدي لبطاقة كاش باك بلس', 'AlRajhiBank',
+      'cashback-wallet points never post');
+    none('e', 'حوالة عكسية\nAmount: SAR 250\nStatus: Pending', 'alinma', 'a pending reverse transfer never posts');
+    none('f', 'حوالة عكسية\nمبلغ: 250 ريال\nالحالة: قيد المعالجة', 'alinma', 'a reverse transfer in processing never posts');
+    none('o', 'استرداد شراء انترنت\nبطاقة:4471;مدى\nمبلغ:SAR 100\nلدى:NOON\nالحالة: قيد المعالجة\nفي:26-10-9 21:34',
+      'AlRajhiBank', 'an unfinished refund under a refund heading is never rebuilt as a debit');
+    const onRequest = one('p', 'استرداد شراء انترنت\nبطاقة:4471;مدى\nمبلغ:SAR 100\nلدى:NOON\nبناء على طلب الاسترداد المقدم منكم\nفي:26-10-9 21:34',
+      'AlRajhiBank', R);
+    ok('history: a refund carried out on request posts as income',
+      onRequest.parsed.length === 1 && onRequest.parsed[0].type === 'income' && onRequest.parsed[0].amountFils === 10000,
+      onRequest.parsed);
+    markets.setLedgerCurrency(null);
+    markets.setActiveMarket('AE');
+    markets.setLedgerCurrency('AED', 2);
+    const ei = one('e', 'تمّ خصم ٢٫٣٠٠ درهم من حسابك كعملية شراء من نقطة بيع. يرجى زيارة www.emiratesislamic.ae',
+      'EmiratesIslamic', '2026-08-12T08:00:00.000Z');
+    ok('history: an Emirates Islamic ٫-grouped dirham figure posts in thousands',
+      ei.parsed.length === 1 && ei.parsed[0].type === 'expense' && ei.parsed[0].amountFils === 230000, ei.parsed);
+    const balanceOnly = one('f', 'أخبار سارة. تمّ إيداع الراتب الخاص بك اليوم. الرصيد المتوفر في حسابك رقم XXX-XXXXXX-٠٠٤٤ هو ٣،٢٠٠ درهم.',
+      'EmiratesIslamic', '2026-08-12T08:00:00.000Z');
+    ok('history: an available balance is never posted as the salary', balanceOnly.parsed.length === 0, balanceOnly.parsed);
+    const uaeCode = one('g', 'الرمز: 483920\nلعملية شراء بمبلغ 120 درهم', 'ENBD', '2026-10-10T08:00:00.000Z');
+    ok('history: a UAE Arabic code field never posts', uaeCode.parsed.length === 0, uaeCode.parsed);
+    const gluedRef = parseHistoricalMessageRecords([record({ id: id('o'), text: 'Purchase of AED 100.00 at OLIVE CAFE with Debit Card ending 7731. Ref 5521SR',
+      sender: 'SHOPALERT', receivedAt: '2026-10-10T08:00:00.000Z' })], {}, new Date('2026-10-10T09:00:00.000Z'), new Set());
+    ok('history: a glued SR reference does not unroute an AED purchase from an unknown sender',
+      gluedRef.parsed.length === 1 && gluedRef.parsed[0].amountFils === 10000, gluedRef);
+    markets.setLedgerCurrency(null);
+    markets.setActiveMarket('AE');
+  }
   if (fail > 0) {
     console.error(`\nhistorical-import: ${pass} passed, ${fail} failed`);
     process.exit(1);

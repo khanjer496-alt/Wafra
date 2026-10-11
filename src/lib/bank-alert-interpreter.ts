@@ -21,7 +21,13 @@ import {
   pinnedLedgerCurrencyCode,
   withMarketPackForParsing,
 } from '@/lib/markets';
-import { hasMalformedBankAmount, normalizeArabic, parseSms, type ParsedSms } from '@/lib/sms-parser';
+import {
+  hasArabicRefundHeading,
+  hasMalformedBankAmount,
+  normalizeArabic,
+  parseSms,
+  type ParsedSms,
+} from '@/lib/sms-parser';
 import {
   hasAffirmativeSettledMovement,
   inspectUnparsedLaunchAlert,
@@ -249,7 +255,7 @@ export const interpretBankAlert = ({
     ledgerCurrencyExponent() !== 2)) {
     return { outcome: 'refuse', meaning: 'unknown', reason: 'unsupported-currency', evidence: [] };
   }
-  if (withMarketPackForParsing(market, () => hasMalformedBankAmount(source))) {
+  if (withMarketPackForParsing(market, () => hasMalformedBankAmount(source, sender))) {
     return { outcome: 'refuse', meaning: 'unknown', reason: 'unclear-amount', evidence: [] };
   }
   const legacy = withMarketPackForParsing(market, () =>
@@ -278,10 +284,26 @@ export const interpretBankAlert = ({
   if (usableLegacy && isCompletedCardPurchaseReturn(semanticText, usableLegacy)) {
     return legacyResult(usableLegacy, 'refund');
   }
+  // A Saudi refund heading over a purchase field list. parseSms already proved
+  // the completed refund (its forecast/request guards run first); the purchase
+  // word beneath the heading is not independent debit evidence.
+  if (usableLegacy?.kind === 'transaction' && usableLegacy.type === 'income' &&
+    hasArabicRefundHeading(source)) {
+    return legacyResult(usableLegacy, 'refund');
+  }
   if (usableLegacy && !SEMANTIC_CANDIDATE_LANGUAGE.test(semanticText)) {
     return legacyResult(usableLegacy);
   }
   const fallback = inspectUnparsedLaunchAlert(source, sender);
+  // parseSms refused a refund-headed alert because an unfinished notice sits
+  // under the heading. The purchase word beneath the heading is the purchase
+  // being refunded, so the fallback must never rebuild it as money OUT:
+  // Review at most.
+  if (!usableLegacy && hasArabicRefundHeading(source)) {
+    return fallback.outcome === 'review'
+      ? finalFallback(fallback, null)
+      : { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+  }
   // A legacy salary label inside an acquisition offer is not proof that money
   // moved. Keep this narrow: real bank alerts often use field-list purchase
   // headings plus promotional footers and must retain their legacy result.
