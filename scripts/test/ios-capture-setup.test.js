@@ -303,6 +303,7 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       listPendingRecordsIncludingNotifications?(limit: number): Promise<string[]>;
       listPendingRecordsExcluding?(limit: number, excludeIds: string[]): Promise<string[]>;
       listPendingApplePayRecords?(limit: number): Promise<string[]>;
+      listRecentApplePayCardObservations?(): Promise<string[]>;
       acknowledgeRecords(ids: string[]): Promise<void>;
       purgeExpired(): Promise<number>;
       getCaptureStatus(): Promise<WafraLiveCaptureStatus>;
@@ -358,6 +359,7 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       'listPendingRecords',
       'listPendingRecordsIncludingNotifications',
       'listPendingApplePayRecords',
+      'listRecentApplePayCardObservations',
       'acknowledgeRecords',
       'purgeExpired',
       'getCaptureStatus',
@@ -390,6 +392,7 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
           getCaptureStatus: 'status',
           listPendingRecordsIncludingNotifications: 'listPendingRecords',
           getAutomationInputProbeAt: 'automationInputProbeAt',
+          listRecentApplePayCardObservations: 'recentApplePayCardObservations',
           setLocalCaptureEntitlementLease: 'setLocalEntitlementLease',
           setStoreCaptureEntitlementLease: 'setStoreEntitlementLease',
         }[method] || method;
@@ -455,6 +458,7 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       'live.apple_pay.title',
       'live.apple_pay.amount.parameter',
       'live.apple_pay.merchant.parameter',
+      'live.apple_pay.card_or_pass.parameter',
       'live.apple_pay.invalid',
       'live.apple_pay.error',
       'live.apple_pay.setup.title',
@@ -599,19 +603,19 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
     ok('legacy bridge excludes notifications and the additive reader explicitly opts in',
       /AsyncFunction\("listPendingRecords"\)[\s\S]*?listPendingRecords\(limit: nativeLimit, includeNotifications: false\)/.test(swiftModule) &&
         /AsyncFunction\("listPendingRecordsIncludingNotifications"\)[\s\S]*?listPendingRecords\(limit: nativeLimit, includeNotifications: true\)/.test(swiftModule), swiftModule);
-    eq('probe plus live paths expose the exact nine parameters',
-      generatedIntent.match(/@Parameter\(/g)?.length || 0, 9);
+    eq('probe plus live paths expose the exact ten parameters',
+      generatedIntent.match(/@Parameter\(/g)?.length || 0, 10);
     eq('Apple-extracted titles and parameters initialize LocalizedStringResource directly', [
       generatedIntent.match(/static let title\s*=\s*LocalizedStringResource\(/g)?.length || 0,
       generatedIntent.match(/@Parameter\(\s*title:\s*LocalizedStringResource\(/g)?.length || 0,
       generatedIntent.match(
         /(?:static let title\s*=|@Parameter\(title:)\s*WafraLiveCaptureResources\.localized\(/g,
       )?.length || 0,
-    ], [8, 9, 0]);
+    ], [8, 10, 0]);
     eq('Apple-extracted title and parameter resources use the required main bundle', [
       generatedIntent.match(/bundle:\s*\.main/g)?.length || 0,
       generatedIntent.match(/bundle:\s*\.atURL/g)?.length || 0,
-    ], [17, 0]);
+    ], [18, 0]);
     ok('every intent title, parameter, and source-free error uses the closed localization keys',
       expectedLocalizationKeys.filter((key) => !/^live\.(?:notice|alert)\./.test(key))
         .every((key) => generatedIntent.includes(`"${key}"`)) &&

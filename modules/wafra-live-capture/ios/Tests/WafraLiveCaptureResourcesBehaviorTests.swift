@@ -4,6 +4,7 @@ private let englishValues = [
   "live.apple_pay.title": "Capture Apple Pay purchase",
   "live.apple_pay.amount.parameter": "Wallet amount",
   "live.apple_pay.merchant.parameter": "Merchant",
+  "live.apple_pay.card_or_pass.parameter": "Card or Pass",
   "live.apple_pay.invalid": "Wafra could not read this Wallet amount. Connect the Wallet Amount value and merchant to this action, then try again.",
   "live.apple_pay.error": "Wafra could not save this Apple Pay event. Open Wafra and check Capture status.",
   "live.apple_pay.setup.title": "Check Wafra Apple Pay setup",
@@ -29,6 +30,7 @@ private let arabicValues = [
   "live.apple_pay.title": "التقاط عملية Apple Pay",
   "live.apple_pay.amount.parameter": "مبلغ المحفظة",
   "live.apple_pay.merchant.parameter": "التاجر",
+  "live.apple_pay.card_or_pass.parameter": "البطاقة أو التذكرة",
   "live.apple_pay.invalid": "تعذّر على وفرة قراءة مبلغ المحفظة. اربط مبلغ المحفظة والتاجر بهذا الإجراء ثم حاول مرة أخرى.",
   "live.apple_pay.error": "تعذّر على وفرة حفظ حدث Apple Pay. افتح وفرة وتحقق من حالة الالتقاط.",
   "live.apple_pay.setup.title": "التحقق من إعداد Apple Pay في وفرة",
@@ -118,7 +120,7 @@ private struct WafraLiveCaptureResourcesBehaviorTests {
     check("bundled notification Shortcut is the signed AEA asset",
       shortcutBytes?.count == 22747 && shortcutBytes?.prefix(4) == Data("AEA1".utf8))
 
-    for (name, byteCount) in [("Wafra Capture v3", 25672), ("Wafra History v8", 47954), ("Wafra Apple Pay v1", 22481)] {
+    for (name, byteCount) in [("Wafra Capture v3", 25672), ("Wafra History v8", 47954), ("Wafra Apple Pay v1", 22596)] {
       let assetURL = WafraLiveCaptureResources.bundle().url(forResource: name, withExtension: "shortcut")
       check("resource bundle resolves the exact \(name) Shortcut file",
         assetURL?.isFileURL == true && assetURL?.lastPathComponent == "\(name).shortcut")
