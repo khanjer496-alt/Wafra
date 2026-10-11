@@ -2401,7 +2401,10 @@ const DECLINE_SMS = [{
   ];
 
   const s = scan(FAB_INBOX);
-  const imported = apply(BASE, buildImportPlan(s.parsed, BASE, s.newestTs));
+  // The scenario's own day: undated, the plan used the real clock, and from
+  // 2026-10-11 it judged the August reminder stale and the test began to fail.
+  const fabToday = new Date('2026-08-08T09:00:00Z');
+  const imported = apply(BASE, buildImportPlan(s.parsed, BASE, s.newestTs, fabToday));
   const named = (state, id) => state.accounts.find((a) => a.id === id)?.name;
 
   ok('FAB: the reminder mints a second card row for one statement',
@@ -2417,7 +2420,7 @@ const DECLINE_SMS = [{
       (t) => t.isTransfer && t.amountFils === 564507 && named(imported, t.accountId) === 'FAB Credit Card •3749'),
     imported.transactions.map((t) => [t.title, named(imported, t.accountId)]));
 
-  const before = cardsLib.openDues(imported, new Date('2026-08-08T09:00:00Z'));
+  const before = cardsLib.openDues(imported, fabToday);
   ok('FAB repro: the paid statement is billed a second time on a card with no history',
     before.length === 1 &&
       before[0].remainingFils === 564507 &&
@@ -2426,7 +2429,7 @@ const DECLINE_SMS = [{
 
   // What store.tsx does with the batch once it has landed.
   const repaired = acc.repairDuplicateStatements(imported);
-  const after = cardsLib.openDues(repaired, new Date('2026-08-08T09:00:00Z'));
+  const after = cardsLib.openDues(repaired, fabToday);
   ok('FAB fixed: nothing is owed, because the payment covered the statement',
     after.length === 0, after.map((d) => [named(repaired, d.due.accountId), d.remainingFils]));
   ok('FAB fixed: both card rows are still there for the user to reconcile',
@@ -3755,7 +3758,8 @@ const DECLINE_SMS = [{
 {
   const t = Date.parse('2026-10-05T09:00:00Z');
   const scanned = scan([{ body: 'Your Credit Card XX4321 statement: Total Due AED 1,500.00 Cr Limit AED 20,000.00 Min Due AED 75.00 Due Date 25/10/2026', ts: t }]);
-  const plan = buildImportPlan(scanned.parsed, BASE, scanned.newestTs);
+  // Dated to the scenario: on the real clock the statement turns stale with time.
+  const plan = buildImportPlan(scanned.parsed, BASE, scanned.newestTs, new Date('2026-10-06T09:00:00Z'));
   ok('a credit LIMIT beside the total keeps the statement owed',
     plan.batch.newDues.length === 1 && plan.batch.newDues[0].totalDueFils === 150000,
     plan.batch.newDues.map((d) => d.totalDueFils));
@@ -3770,7 +3774,7 @@ const DECLINE_SMS = [{
   const state = { ...BASE, accounts: [card],
     cardDues: [{ id: 'd1', accountId: 'cc', totalDueFils: 15000, minDueFils: 750, dueDate: '2026-10-25', paidFils: 0 }] };
   const scanned = scan([{ body: 'Your Credit Card ending 4321 statement: Total Amount Due AED 150.00 CR. Minimum Amount Due AED 0.00. Payment Due Date 25/10/2026.', ts: t, sender: 'EmiratesNBD' }]);
-  const plan = buildImportPlan(scanned.parsed, state, scanned.newestTs);
+  const plan = buildImportPlan(scanned.parsed, state, scanned.newestTs, new Date('2026-10-06T09:00:00Z'));
   const merged = mergeImportedCardDues(state.cardDues, plan.batch.newDues.map((d, i) => ({ ...d, id: `n${i}`, accountId: 'cc' })), state.accounts);
   ok('a CR re-read of a stored positive due leaves nothing owed',
     merged.length === 1 && merged[0].totalDueFils === 0 && merged[0].minDueFils === 0 && !('creditBalance' in merged[0]),
