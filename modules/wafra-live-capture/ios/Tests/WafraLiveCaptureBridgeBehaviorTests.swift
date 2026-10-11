@@ -46,7 +46,7 @@ private struct WafraLiveCaptureBridgeBehaviorTests {
     check("bridge advertises notification text intake capability", TestEventRegistry.constants["notificationCaptureSupported"] as? Bool == true)
     check("bridge registers the exact native module name",
       TestAsyncFunctionRegistry.moduleName == "WafraLiveCapture")
-    check("bridge registers exactly the eighteen public functions",
+    check("bridge registers exactly the twenty-one public functions",
       TestAsyncFunctionRegistry.functions.keys.sorted() == [
         "acknowledgeCaptureWarning",
         "acknowledgeRecords",
@@ -62,6 +62,7 @@ private struct WafraLiveCaptureBridgeBehaviorTests {
         "listPendingRecords",
         "listPendingRecordsExcluding",
         "listPendingRecordsIncludingNotifications",
+        "listRecentApplePayCardObservations",
         "purgeExpired",
         "recordFirstCapturedAt",
         "setCaptureEnabled",
@@ -299,6 +300,13 @@ private struct WafraLiveCaptureBridgeBehaviorTests {
       check("Wallet-only reader rejects invalid limit case \(index + 1)", rejects("listPendingApplePayRecords", [limit]))
     }
     check("invalid Wallet limits never reach protected store", WafraLiveCaptureStore.shared.listLimits.count == walletCallsBeforeInvalidInput)
+
+    let cardRows = try invoke("listRecentApplePayCardObservations", as: [String].self)
+    check("card observations bridge calls the dedicated read-only store reader", WafraLiveCaptureStore.shared.calls.last == "recentApplePayCardObservations")
+    check("card observation without a card omits the key and converts to milliseconds", cardRows.first == #"{"receivedAt":1410500}"#)
+    let cardRow = cardRows.last.flatMap { $0.data(using: .utf8) }.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+    check("card observation JSON round-trips quotes and slashes", cardRows.count == 2 && cardRow?["cardOrPass"] as? String == "Visa \"Gold\" / 1234" && cardRow?["receivedAt"] as? Double == 1_420_750 && cardRow?.count == 2)
+    check("card observations bridge takes no arguments", rejects("listRecentApplePayCardObservations", [1.0]))
 
     let timestampCallsBeforeInvalidInput = WafraLiveCaptureStore.shared.firstCapturedDates.count
     let invalidTimestamps = [Double.nan, Double.infinity, -Double.infinity]

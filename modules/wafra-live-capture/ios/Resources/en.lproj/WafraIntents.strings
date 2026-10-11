@@ -22,6 +22,7 @@
 "live.apple_pay.title" = "Capture Apple Pay purchase";
 "live.apple_pay.amount.parameter" = "Wallet amount";
 "live.apple_pay.merchant.parameter" = "Merchant";
+"live.apple_pay.card_or_pass.parameter" = "Card or Pass";
 "live.apple_pay.invalid" = "Wafra could not read this Wallet amount. Connect the Wallet Amount value and merchant to this action, then try again.";
 "live.apple_pay.error" = "Wafra could not save this Apple Pay event. Open Wafra and check Capture status.";
 "live.apple_pay.setup.title" = "Check Wafra Apple Pay setup";

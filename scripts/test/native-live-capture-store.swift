@@ -563,6 +563,83 @@ struct NativeLiveCaptureStoreTests {
     check("erase clears Wallet receipts and setup proof", try reopened.status().firstApplePayReceivedAt == nil && reopened.status().lastApplePayReceivedAt == nil && reopened.status().applePaySetupProofAt == nil && reopened.status().lastApplePayIncompleteAt == nil && reopened.status().applePayPending == 0)
   }
 
+  /// Wallet "Card or Pass" is optional and observe-only: it is never part of
+  /// the queued record, so it cannot change whether or how a payment is queued.
+  private static func testApplePayCardOrPass() throws {
+    let queueRoot = root("apple-pay-card")
+    let plainRoot = root("apple-pay-card-plain")
+    defer { remove([queueRoot, plainRoot]) }
+    var now = fixedClock
+    let queue = store(root: queueRoot, now: { now })
+    let plain = store(root: plainRoot, now: { now })
+    try grantLifetimeAndEnable(queue)
+    try grantLifetimeAndEnable(plain)
+    func recordBytes(_ root: URL, _ id: String) -> Data? {
+      try? Data(contentsOf: root.appendingPathComponent("records/\(id).json"))
+    }
+
+    // Shared table with the JS reader (scripts/test/fixtures/apple-pay-card-or-pass.json).
+    let table = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: "scripts/test/fixtures/apple-pay-card-or-pass.json"))) as! [String: Any]
+    for row in table["cases"] as! [[String: Any]] {
+      let input = row["input"] as! String
+      let expected = row["expected"] as? String
+      let once = WafraLiveCaptureStore.sanitizedApplePayCardOrPass(input)
+      check("Card or Pass table: \(row["name"] as! String)", once == expected && WafraLiveCaptureStore.sanitizedApplePayCardOrPass(once) == once && (once?.utf16.count ?? 0) <= WafraLiveCaptureStore.maxApplePayCardOrPassCharacters)
+    }
+
+    // Same payment with and without a card: identical record bytes, digest and replay.
+    let cards: [String?] = [nil, "Visa Gold 1234", "", "a\u{202E}b", String(repeating: "a", count: 500), "\u{0000}"]
+    for (index, card) in cards.enumerated() {
+      let id = eventId(97_000 + index)
+      check("payment with card case \(index + 1) is accepted", try queue.stageApplePay(amount: Decimal(string: "12.5")!, currency: "AED", merchant: "Shop", cardOrPass: card, eventId: id, observedAt: fixedClock) == .accepted)
+      check("payment without card case \(index + 1) is accepted", try plain.stageApplePay(amount: Decimal(string: "12.5")!, currency: "AED", merchant: "Shop", eventId: id, observedAt: fixedClock) == .accepted)
+      check("record bytes never depend on card case \(index + 1)", recordBytes(queueRoot, id) != nil && recordBytes(queueRoot, id) == recordBytes(plainRoot, id))
+      check("replay with a different card is still the same record, case \(index + 1)", try queue.stageApplePay(amount: Decimal(string: "12.5")!, currency: "AED", merchant: "Shop", cardOrPass: "Other Card", eventId: id, observedAt: fixedClock) == .accepted)
+    }
+    let body = try decoded(queue.listPendingApplePayRecords(limit: 1)[0])?["text"] as? String
+    check("queued Apple Pay body is exactly the v1 body", body == #"{"amount":"12.5","currency":"AED","merchant":"Shop"}"#)
+    check("no queued record contains card text", try queue.listPendingApplePayRecords(limit: 50).allSatisfy { !$0.contains("Visa") && !$0.contains("Other Card") })
+    try queue.acknowledgeRecords(ids: [eventId(97_001)])
+    try plain.acknowledgeRecords(ids: [eventId(97_001)])
+    check("acknowledged replay with a new card is still accepted (digest has no card)", try queue.stageApplePay(amount: Decimal(string: "12.5")!, currency: "AED", merchant: "Shop", cardOrPass: "Amex", eventId: eventId(97_001), observedAt: fixedClock) == .accepted)
+    check("Card or Pass does not loosen merchant validation", try queue.stageApplePay(amount: Decimal(5), currency: "AED", merchant: "Shop\u{0000}", cardOrPass: "Visa", eventId: eventId(97_030), observedAt: now) == .ignored)
+    check("Card or Pass cannot rescue a missing amount", try queue.stageApplePay(amount: nil, currency: "AED", merchant: "Shop", cardOrPass: "Visa", eventId: eventId(97_031), observedAt: now) == .ignored)
+
+    // Observations: one per newly queued payment (replays add none), newest last, bounded.
+    let observations = try queue.recentApplePayCardObservations()
+    check("each new receipt adds exactly one observation; replays and refusals add none", observations.count == WafraLiveCaptureStore.maxApplePayCardObservations && observations.map { $0.cardOrPass } == ["Visa Gold 1234", nil, "ab", String(repeating: "a", count: 80), nil])
+    check("plain receipts record that no card was sent", try plain.recentApplePayCardObservations().allSatisfy { $0.cardOrPass == nil })
+    check("card observations are not money: pending count is unchanged", try queue.status().applePayPending == 5)
+    now = now.addingTimeInterval(10)
+    _ = try queue.stageApplePay(amount: Decimal(7), currency: "AED", merchant: "Shop", cardOrPass: "Amex", eventId: eventId(97_040), observedAt: now)
+    let latest = try queue.recentApplePayCardObservations()
+    check("observation ring keeps the newest five", latest.count == 5 && latest.last == WafraApplePayCardObservation(receivedAt: now.timeIntervalSince1970, cardOrPass: "Amex"))
+    try queue.acknowledgeRecords(ids: (try queue.listPendingApplePayRecords(limit: 50)).compactMap(rowId))
+    check("draining the queue keeps the observations for the setup screen", try queue.status().applePayPending == 0 && queue.recentApplePayCardObservations().count == 5)
+
+    // Older and malformed manifests.
+    let manifestURL = queueRoot.appendingPathComponent("manifest.plist")
+    var manifest = try PropertyListSerialization.propertyList(from: Data(contentsOf: manifestURL), format: nil) as! [String: Any]
+    manifest["applePayCardObservations"] = [["receivedAt": "not-a-number"]]
+    try PropertyListSerialization.data(fromPropertyList: manifest, format: .binary, options: 0).write(to: manifestURL, options: .atomic)
+    check("malformed observations are dropped, not queue corruption", try queue.recentApplePayCardObservations().isEmpty && !queue.status().corrupt && queue.status().lastApplePayReceivedAt == now.timeIntervalSince1970)
+    manifest.removeValue(forKey: "applePayCardObservations")
+    try PropertyListSerialization.data(fromPropertyList: manifest, format: .binary, options: 0).write(to: manifestURL, options: .atomic)
+    check("manifests without observations decode", try queue.recentApplePayCardObservations().isEmpty && !queue.status().corrupt)
+
+    // Purge prunes expired observations durably, like the records they describe.
+    _ = try queue.stageApplePay(amount: Decimal(9), currency: "AED", merchant: "Shop", cardOrPass: "Visa", eventId: eventId(97_050), observedAt: now)
+    try queue.acknowledgeRecords(ids: [eventId(97_050)])
+    now = now.addingTimeInterval(WafraLiveCaptureStore.recordTTL + 60)
+    _ = try queue.purgeExpired()
+    let purged = try PropertyListSerialization.propertyList(from: Data(contentsOf: manifestURL), format: nil) as! [String: Any]
+    check("purge removes expired observations from the stored manifest", (purged["applePayCardObservations"] as? [Any])?.isEmpty ?? true)
+    check("expired observations are not served", try queue.recentApplePayCardObservations().isEmpty)
+    _ = try queue.stageApplePay(amount: Decimal(9), currency: "AED", merchant: "Shop", cardOrPass: "Visa", eventId: eventId(97_060), observedAt: now)
+    try queue.eraseAll()
+    check("erase clears card observations", try queue.recentApplePayCardObservations().isEmpty)
+  }
+
   static func main() throws {
     if try runChildIfRequested() { return }
 
@@ -1924,6 +2001,7 @@ struct NativeLiveCaptureStoreTests {
     try testCaptureOffNotice()
     try testInstantAlertPreference()
     try testApplePay()
+    try testApplePayCardOrPass()
     try testNotifications()
     try testAutomationMessages()
 

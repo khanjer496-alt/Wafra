@@ -34,6 +34,12 @@ private struct WafraLiveCaptureStatusRecord: Record {
   @Field var lastApplePayReceivedAt: Double?
 }
 
+/// Bridge row: epoch milliseconds plus the card text; nil card is omitted.
+private struct WafraApplePayCardObservationRow: Encodable {
+  let receivedAt: Double
+  let cardOrPass: String?
+}
+
 private func bridgeLimit(_ limit: Double) throws -> Int {
   guard
     limit.isFinite,
@@ -198,6 +204,21 @@ public class WafraLiveCaptureModule: Module {
     AsyncFunction("listPendingApplePayRecords") { (limit: Double) -> [String] in
       let nativeLimit = try bridgeLimit(limit)
       return try WafraLiveCaptureStore.shared.listPendingApplePayRecords(limit: nativeLimit)
+    }
+
+    // Observe-only Wallet "Card or Pass" text for the on-device Apple Pay
+    // setup screen. Not a queue reader: these rows carry no money, are never
+    // acknowledged, and are not used for attribution or dedupe.
+    AsyncFunction("listRecentApplePayCardObservations") { () -> [String] in
+      let encoder = JSONEncoder()
+      encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+      return try WafraLiveCaptureStore.shared.recentApplePayCardObservations().map { observation in
+        guard let receivedAt = try epochMilliseconds(observation.receivedAt) else {
+          throw WafraLiveCaptureBridgeError.invalidTimestamp
+        }
+        let row = WafraApplePayCardObservationRow(receivedAt: receivedAt, cardOrPass: observation.cardOrPass)
+        return String(decoding: try encoder.encode(row), as: UTF8.self)
+      }
     }
 
     AsyncFunction("acknowledgeRecords") { (ids: [String]) in

@@ -38,11 +38,53 @@ export function resolveApplePaySetupState(
   return { active, installed, checked, confirmed, received, incomplete, pending, canConfirm: active && installed && checked };
 }
 
+/** One recent Apple Pay receipt and the Wallet card text it carried (observe-only). */
+export interface ApplePayCardObservation {
+  receivedAt: number;
+  /** null: the automation supplied no usable Card or Pass value. */
+  cardOrPass: string | null;
+}
+
+const MAX_CARD_OBSERVATIONS = 5;
+/** Mirrors WafraLiveCaptureStore.maxApplePayCardOrPassCharacters (UTF-16 units). */
+export const MAX_APPLE_PAY_CARD_OR_PASS_LENGTH = 80;
+const UNSAFE_CARD_RE = /[\u0000-\u001F\u007F-\u009F\u061C\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/u;
+
+/** Accepts exactly what the native sanitizer can emit: trimmed, bounded, no unsafe scalars. */
+export const usableCardOrPass = (value: unknown): value is string =>
+  typeof value === 'string' && value.length > 0 && value === value.trim() &&
+  value.length <= MAX_APPLE_PAY_CARD_OR_PASS_LENGTH && !UNSAFE_CARD_RE.test(value) &&
+  Array.from(value).every(character => {
+    const codePoint = character.codePointAt(0)!;
+    return codePoint < 0xd800 || codePoint > 0xdfff;
+  });
+
+/**
+ * Validate the native diagnostic rows, newest first. Anything malformed is
+ * skipped: this list is for the owner to read, never an input to money.
+ */
+export function parseApplePayCardObservations(rows: unknown): ApplePayCardObservation[] {
+  if (!Array.isArray(rows)) return [];
+  const observations: ApplePayCardObservation[] = [];
+  for (const row of rows.slice(-MAX_CARD_OBSERVATIONS)) {
+    if (typeof row !== 'string' || row.length > 1024) continue;
+    let value: unknown;
+    try { value = JSON.parse(row); } catch { continue; }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+    const record = value as Record<string, unknown>;
+    if (Object.keys(record).some(key => key !== 'receivedAt' && key !== 'cardOrPass')) continue;
+    if (!isCaptureTimestamp(record.receivedAt)) continue;
+    if ('cardOrPass' in record && !usableCardOrPass(record.cardOrPass)) continue;
+    observations.push({ receivedAt: record.receivedAt, cardOrPass: usableCardOrPass(record.cardOrPass) ? record.cardOrPass : null });
+  }
+  return observations.reverse();
+}
+
 const COPY = {
   en: {
     title: 'Apple Pay purchases', subtitle: 'Wafra Apple Pay setup · iOS 27 or later',
     intro: 'Capture new card taps with Apple Pay. Each supported purchase goes to Review, where you choose the account before adding it.',
-    scope: 'This covers positive purchase amounts. It does not import Wallet history, refunds, card identity or payment status. No bank selection is needed here.',
+    scope: 'This covers positive purchase amounts. It does not import Wallet history, refunds, card numbers or payment status. No bank selection is needed here.',
     unsupported: 'Wafra Apple Pay setup is available on iOS 27 or later. Use regular bank-message setup on earlier versions.',
     checking: 'Checking Apple Pay capture support…', update: 'Update Wafra to a build with Apple Pay capture before continuing.',
     enable: 'Enable capture on this iPhone', inactive: 'Capture access is inactive. Check your Wafra access before continuing.',
@@ -64,6 +106,9 @@ const COPY = {
     received: 'An Apple Pay event reached this iPhone. Check Review to decide whether to add it; this is not a payment-settlement confirmation.',
     incomplete: 'Wallet reached Wafra without usable purchase details. No purchase was added from that event. Check that Amount and Merchant come from Shortcut Input.',
     pending: 'Apple Pay events waiting to be reviewed or processed', last: 'Last Apple Pay event received',
+    cardTitle: 'Card or Pass from Wallet',
+    cardHelp: 'Optional. What Wallet passed with each recent event, shown only so you can check it. It stays on this iPhone and is not used to choose an account. Older or manually built automations do not send it, and that is fine.',
+    cardMissing: 'No card name sent (optional)',
     review: 'Open Review', reviewOnboarding: 'Finish setup to open Review and choose the account for captured purchases.',
     manual: 'Set up the action manually', manualHelp: [
       'In Shortcuts, run Wafra’s “Check Wafra Apple Pay setup” action once with your iPhone unlocked. Allow access when asked. This adds no purchase.',
@@ -76,12 +121,12 @@ const COPY = {
     missing: 'Could not open or share the Shortcut. Check that Apple Shortcuts is installed, or use the manual steps.',
     error: 'Could not complete this step. Try again. Your existing transactions are unchanged.',
     confirmNeeded: 'Confirm the Shortcut is installed and run its permission check before confirming the automation.',
-    privacy: 'Only the amount, currency and merchant passed by your automation are saved on this iPhone. Wafra cannot inspect or create the card automation for you. Manage it in Shortcuts.',
+    privacy: 'Only the amount, currency, merchant and card or pass name passed by your automation are saved on this iPhone. Wafra cannot inspect or create the card automation for you. Manage it in Shortcuts.',
   },
   ar: {
     title: 'مشتريات Apple Pay', subtitle: 'إعداد Apple Pay في وفرة · iOS 27 أو أحدث',
     intro: 'التقط عمليات الشراء الجديدة بالبطاقة عبر Apple Pay. تنتقل كل عملية مدعومة إلى المراجعة لتختار الحساب قبل إضافتها.',
-    scope: 'يشمل هذا المبالغ الموجبة للمشتريات فقط. لا يستورد سجل المحفظة أو المبالغ المستردة أو هوية البطاقة أو حالة الدفع. لا تحتاج إلى اختيار البنك هنا.',
+    scope: 'يشمل هذا المبالغ الموجبة للمشتريات فقط. لا يستورد سجل المحفظة أو المبالغ المستردة أو أرقام البطاقات أو حالة الدفع. لا تحتاج إلى اختيار البنك هنا.',
     unsupported: 'يتوفر إعداد Apple Pay في وفرة على iOS 27 أو أحدث. استخدم إعداد رسائل البنك المعتاد في الإصدارات الأقدم.',
     checking: 'جارٍ فحص دعم التقاط Apple Pay…', update: 'حدّث وفرة إلى إصدار يدعم التقاط Apple Pay قبل المتابعة.',
     enable: 'تفعيل الالتقاط على هذا الآيفون', inactive: 'الوصول إلى الالتقاط غير نشط. تحقّق من صلاحية الوصول في وفرة قبل المتابعة.',
@@ -103,6 +148,9 @@ const COPY = {
     received: 'وصل حدث Apple Pay إلى هذا الآيفون. افتح المراجعة لتقرر إضافته؛ هذا ليس تأكيداً لتسوية الدفع.',
     incomplete: 'وصلت المحفظة إلى وفرة دون تفاصيل شراء صالحة. لم تُضف عملية من هذا الحدث. تحقّق من أن المبلغ والتاجر مأخوذان من إدخال الاختصار.',
     pending: 'أحداث Apple Pay بانتظار المراجعة أو المعالجة', last: 'آخر حدث Apple Pay وصل',
+    cardTitle: 'البطاقة من المحفظة',
+    cardHelp: 'اختياري. ما مرّرته المحفظة مع كل حدث حديث، يظهر هنا لتتحقق منه فقط. يبقى على هذا الآيفون ولا يُستخدم لاختيار الحساب. الأتمتة الأقدم أو المُعدّة يدوياً لا ترسله، وهذا طبيعي.',
+    cardMissing: 'لم يُرسل اسم البطاقة (اختياري)',
     review: 'فتح المراجعة', reviewOnboarding: 'أكمل الإعداد لفتح المراجعة واختيار الحساب للمشتريات الملتقطة.',
     manual: 'إعداد الإجراء يدوياً', manualHelp: [
       'شغّل إجراء وفرة «التحقق من إعداد Apple Pay في وفرة» مرة في الاختصارات والآيفون مفتوح. اسمح بالوصول عند الطلب. لا يضيف ذلك عملية شراء.',
@@ -115,7 +163,7 @@ const COPY = {
     missing: 'تعذّر فتح الاختصار أو مشاركته. تحقّق من تثبيت اختصارات Apple أو استخدم الخطوات اليدوية.',
     error: 'تعذّر إكمال هذه الخطوة. حاول مجدداً. عملياتك الحالية لم تتغير.',
     confirmNeeded: 'أكّد تثبيت الاختصار وشغّل فحص الأذونات قبل تأكيد الأتمتة.',
-    privacy: 'يُحفظ على هذا الآيفون فقط المبلغ والعملة والتاجر الذين تمرّرهم الأتمتة. لا يستطيع وفرة فحص أتمتة البطاقة أو إنشاؤها نيابةً عنك. أدِرها من الاختصارات.',
+    privacy: 'يُحفظ على هذا الآيفون فقط المبلغ والعملة والتاجر واسم البطاقة التي تمرّرها الأتمتة. لا يستطيع وفرة فحص أتمتة البطاقة أو إنشاؤها نيابةً عنك. أدِرها من الاختصارات.',
   },
 } as const;
 
