@@ -97,9 +97,9 @@ Limits:
   the directory; entries the reader never opens are never inflated.
 - At most 4 MB of XML inflated in total, covering the workbook, relationships,
   styles, shared strings and the sheet.
-  - Why 4 MB: a statement has at most about 211 non-empty rows (200 data
-    rows, a 10-row preamble and the header) of at most 8,192 characters each.
-    That is about 1.7 M characters in the most extreme legal case. A real
+  - Why 4 MB: a statement has at most about 221 non-empty rows (200 data
+    rows, a 20-row preamble and the header) of at most 8,192 characters each.
+    That is about 1.8 M characters in the most extreme legal case. A real
     bank export is well under 500 KB of XML.
 - Each entry's output is capped at its declared size while it inflates, and
   its size and CRC-32 must match.
