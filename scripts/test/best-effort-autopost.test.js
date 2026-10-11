@@ -775,15 +775,18 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
   }
   /* H4. Reported smishing, round 7 (IMC25 families, Kaggle India suspects).
    * All wording below is Wafra's own; none is copied from a corpus. */
-  // (a) A "money arrived" claim from a phone number or no sender, naming none
-  // of the reader's own accounts or cards, waits in Review; the same text
-  // from the wallet's registered header or short code still auto-adds.
+  // (a) A "money arrived" claim from a phone number, naming none of the
+  // reader's own accounts or cards, waits in Review; the same text from the
+  // wallet's registered header or short code still auto-adds, and so does
+  // the same text with NO sender (an iOS History record or a paste): a
+  // missing sender is not an unverified one, it is marked "Auto-added — check".
   {
     const mpesa = 'QX81TR4KLM Confirmed. You have received Ksh 6,400.00 from PETER KAMAU 0711000333 on 4/10/26 at 9:15 AM. New M-PESA balance is Ksh 6,512.40.';
-    for (const sender of ['+254711000222', '']) {
-      ok(`KE: a received-money claim from "${sender}" with no own account is never auto-added`,
-        auto('KES', 'KE', mpesa, 2, sender) === null, auto('KES', 'KE', mpesa, 2, sender));
-    }
+    ok('KE: a received-money claim from a mobile number with no own account is never auto-added',
+      auto('KES', 'KE', mpesa, 2, '+254711000222') === null, auto('KES', 'KE', mpesa, 2, '+254711000222'));
+    const senderlessMpesa = auto('KES', 'KE', mpesa);
+    ok('KE: the same credit with no sender at all auto-adds, marked for a check',
+      senderlessMpesa?.bestEffort && senderlessMpesa.type === 'income' && senderlessMpesa.amountFils === 640000, senderlessMpesa);
     const genuine = auto('KES', 'KE', mpesa, 2, 'MPESA');
     ok('KE control: the same M-Pesa credit from MPESA still auto-adds',
       genuine?.bestEffort && genuine.type === 'income' && genuine.amountFils === 640000, genuine);
@@ -792,26 +795,77 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
     const shortCode = auto('PKR', 'PK', wallet, 2, '8558');
     ok('PK control: the same wallet credit from a carrier short code still auto-adds',
       shortCode?.bestEffort && shortCode.type === 'income' && shortCode.amountFils === 750000, shortCode);
-    ok('PH: a senderless "You have received PHP" claim is never auto-added',
-      auto('PHP', 'PH', 'You have received PHP 2,500.00 from J. SANTOS 09170000000. Your new balance is PHP 2,612.75. Ref. No. 40021.') === null);
+    const php = 'You have received PHP 2,500.00 from J. SANTOS 09170000000. Your new balance is PHP 2,612.75. Ref. No. 40021.';
+    ok('PH: a "You have received PHP" claim from a mobile number is never auto-added',
+      auto('PHP', 'PH', php, 2, '+639170000000') === null);
+    const phpSenderless = auto('PHP', 'PH', php);
+    ok('PH: the same claim with no sender auto-adds, marked for a check',
+      phpSenderless?.bestEffort && phpSenderless.type === 'income' && phpSenderless.amountFils === 250000, phpSenderless);
     ok('KE: a USSD code ("Dial *334#") is not an own-card reference',
-      auto('KES', 'KE', 'Dial *334# to join. Confirmed. You have received Ksh 9,930.00 from MARY ATIENO. New balance is Ksh 9,940.00.') === null);
+      auto('KES', 'KE', 'Dial *334# to join. Confirmed. You have received Ksh 9,930.00 from MARY ATIENO. New balance is Ksh 9,940.00.', 2, '+254711000222') === null);
+    // A masked figure that is NOT the reader's own (the payer's phone, a
+    // reference) does not answer for an unverified sender.
+    for (const body of [
+      'RT55KQ19ZX Confirmed. You have received Ksh18,250.00 from ALICE WANJIRU 0722***519 on 6/10/26 at 2:40 PM. New M-PESA balance is Ksh18,301.10.',
+      'RT55KQ19ZX Confirmed. You have received Ksh18,250.00 from ALICE WANJIRU 2547*****519 on 6/10/26 at 2:40 PM New M-PESA balance is Ksh18,301.10.',
+    ]) {
+      ok(`KE: a masked payer phone is not an own account — ${body.slice(70, 98)}`,
+        auto('KES', 'KE', body, 2, '+254733000444') === null, auto('KES', 'KE', body, 2, '+254733000444'));
+    }
+    ok('US: a masked reference ("Ref *2207") is not an own account',
+      auto('USD', 'US', 'You have received $1,450.00 from MARK JONES. Ref *2207.', 2, '+12025550147') === null);
+    // Own-instrument words with a tail still answer for it, in any script.
+    for (const [currency, cc, body, minor] of [
+      ['INR', 'IN', 'Rs 1,800.00 credited to a/c *917 on 06-10-26 by IMPS from RAVI K. Ref 600123.', 180000],
+      ['INR', 'IN', 'INR 2,250.00 credited to A/c XX5520 on 06-10-26 by NEFT. Ref 600124.', 225000],
+      ['USD', 'US', 'Your refund of $31.00 from CITY BOOKS was credited to card ending 4421.', 3100],
+    ]) {
+      const row = auto(currency, cc, body, 2, '+12025550147');
+      ok(`${cc}: an own account or card tail answers for a phone sender — ${body.slice(0, 40)}`,
+        row?.bestEffort && row.type === 'income' && row.amountFils === minor, row);
+    }
+    for (const [name, text] of [
+      ['Arabic account number', 'تم إيداع مبلغ 500 في حساب رقم XXXX1234'],
+      ['Arabic card tail', 'عملية على بطاقة …1234'],
+      ['card ending in', 'paid with card ending in 4421'],
+      ['masked account with prefix digits', 'account 0312XXXXX4410 credited'],
+      ['two-dot account mask', 'paid from cheq a/c..123456 @ store'],
+    ]) {
+      ok(`own-instrument tail: ${name}`, policy.namesOwnInstrumentTail(text) === true);
+    }
+    for (const [name, text] of [
+      ['payer phone', 'from JOHN DOE 0712***678'],
+      ['reference', 'Ref *4410.'],
+      ['USSD code', 'Dial *334# now'],
+      ['fully masked account', 'credited to a/c XXXXXX'],
+    ]) {
+      ok(`not an own-instrument tail: ${name}`, policy.namesOwnInstrumentTail(text) === false);
+    }
     const tailed = auto('INR', 'IN', 'Rs. 2,400.00 credited to your A/c XX4410 on 05/10/2026 by A/c linked to VPA asha@upi (UPI Ref No 512233).', 2, '+919812345678');
     ok('IN control: a credit naming the own account tail still auto-adds from a long number',
       tailed?.bestEffort && tailed.type === 'income' && tailed.amountFils === 240000, tailed);
   }
   {
-    // An exact certified template stands in for a MISSING sender only.
+    // A senderless exact template posts like any senderless alert; from a
+    // mobile number it is still an unverified claim.
     const yape = 'Te yapeo S/ 15.00 ROSA QUISPE';
     const senderless = auto('PEN', 'PE', yape);
     ok('PE control: a senderless exact Yape template still auto-adds',
       senderless?.bestEffort && senderless.type === 'income' && senderless.amountFils === 1500, senderless);
     ok('PE: the same Yape text from a mobile number is never auto-added', auto('PEN', 'PE', yape, 2, '+51987000111') === null);
   }
-  // (b) A debit whose only hook is a callback, from no sender and with no own
-  // card or account, waits in Review; with the card tail it still adds.
-  ok('GB: a senderless purchase claim with only a callback hook is never auto-added',
-    auto('GBP', 'GB', 'You paid £2,150.00 for a laptop on 03/10/2026. Need help? Call 0800 000 1111.') === null);
+  // (b) A debit whose only hook is a callback, from a phone number and with
+  // no own card or account, waits in Review; with the card tail it still
+  // adds. With no sender at all the text alone decides, and this one carries
+  // no lure wording, so it is auto-added marked for a check (the honest cost
+  // of not treating a missing sender as unverified).
+  ok('GB: a purchase claim from a mobile number with only a callback hook is never auto-added',
+    auto('GBP', 'GB', 'You paid £2,150.00 for a laptop on 03/10/2026. Need help? Call 0800 000 1111.', 2, '+447700900321') === null);
+  {
+    const row = auto('GBP', 'GB', 'You paid £2,150.00 for a laptop on 03/10/2026. Need help? Call 0800 000 1111.');
+    ok('GB: the same text with no sender is auto-added, marked for a check',
+      row?.bestEffort && row.type === 'expense' && row.amountFils === 215000, row);
+  }
   {
     const row = auto('GBP', 'GB', 'You paid £21.50 at CORNER CAFE with card ending 4410 on 03/10/2026. Need help? Call 0800 000 1111.');
     ok('GB control: the same footer on a purchase naming the card still auto-adds',
@@ -835,7 +889,15 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
     ['INR', 'IN', 'AD-TATACD', "Rs.50,000.00 spent on your Example Card ending 4410 at KIRAN TRADERS. If this trx. wasn't done by you, click pay.example.in/x"],
     ['INR', 'IN', 'AD-SBIINB', 'Chq 004512 for INR 41,227.00 fvr GREEN TRUST recd in clg wl be paid if in order. If not issued by you call 1800 000 000.'],
     ['ZAR', 'ZA', 'FNBALERT', 'R 50.00 paid into your dormant account. Visit a branch before Friday to activate the account.'],
+    // The order-number + callback rule on its own: a registered header, so
+    // the unverified-sender rule is not what refuses it.
+    ['USD', 'US', 'SHOPALERT', 'Your card was charged $1,249.00 for a 65-inch television. Order no. TV-55812. If this was not you, call 1-888-555-0199.'],
     ['USD', 'US', '', 'Your card was charged $1,249.00 for a 65-inch television. Order no. TV-55812. If this was not you, call 1-888-555-0199.'],
+    // Lures added in round 8.
+    ['USD', 'US', '', 'You are due to receive $640.00 from the settlement fund. Reply to this message to begin.'],
+    ['GBP', 'GB', '', 'A refund of £212.90 has been credited for you. Please verify your details at the counter to release it.'],
+    ['USD', 'US', '', 'Your refund of $19.75 is now available. Visit the portal to finish.'],
+    ['INR', 'IN', 'AD-REFNDX', 'Rs 3,400 refund approved. Use the payment link to receive it in your bank.'],
     // Kaggle India: an upper-case activation code with a charge to pay in cash.
     ['INR', 'IN', 'AP-PAYBNK', 'Your Payments Bank savings a/c ACTIVATION CODE is: 552910. To continue opening the a/c, share this code with our agent. A one-time charge of Rs. 50 must be paid in cash to the agent.'],
   ]) {
@@ -856,8 +918,56 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
     ok(`${cc} control: a genuine alert still auto-adds — ${body.slice(0, 44)}…`,
       row?.bestEffort && row.type === type && row.amountFils === minor, row);
   }
-  for (const sender of ['', '+254711000222', '0244 000 111', 'alerts@wallet.example', 'INFO']) {
+  // (e) Round 8: a merchant name or a bank's own promo footer is not lure
+  // wording. Each of these is a completed movement naming the own card or
+  // account (or from a registered header) and auto-adds.
+  for (const [currency, cc, sender, body, type, minor] of [
+    ['USD', 'US', 'CHASE', 'Chase: You made a $38.20 purchase at HURRY CURRY OF OSAKA with card ending 5512.', 'expense', 3820],
+    ['USD', 'US', 'CHASE', 'Chase: You made a $6.75 purchase at PAY NOW GARAGE with card ending 5512.', 'expense', 675],
+    ['USD', 'US', 'CHASE', 'Chase: Direct deposit of $2,300.00 posted to account ending 5512. Get paid up to 2 days early with Chase.', 'income', 230000],
+    ['USD', 'US', 'WELLSFARGO', 'Wells Fargo: A refund of $27.50 is available in account ending 5512.', 'income', 2750],
+    ['CAD', 'CA', 'RBC', 'RBC: Purchase of $62.00 at CANADIAN TIRE on card ending 5512. If any dispute, call 1-800-000-0000.', 'expense', 6200],
+    ['INR', 'IN', 'VM-ICICIB', 'Dear Customer, Acct XX552 is credited with Rs 12,000.00 on 06-Oct-26 from PRIYA. UPI:600125-ICICI Bank. Earn up to 7.25% on FD - apply now', 'income', 1200000],
+    ['INR', 'IN', 'AD-ICICIB', 'INR 1,349.00 spent using ICICI Bank Card XX5520 on 06-Oct-26 on MYNTRA. Avl Limit: INR 52,000. Track your order on the Myntra app.', 'expense', 134900],
+    ['INR', 'IN', 'VM-HDFCBK', 'Rs.3500 credited to a/c **5520 on 06-10-26 by payment link plink_q from CASHFREE', 'income', 350000],
+    ['INR', 'IN', 'VM-SBIINB', 'Dear Customer, INR 4,000.00 credited to your A/c XX5520 on 06-10-26 by cash deposit at CDM. To deposit cash anytime use our CDM. -SBI', 'income', 400000],
+    ['INR', 'IN', 'VM-HDFCBK', 'Rs.900.00 spent on HDFC Bank Card x5520 at ZOMATO on 06-10-26. Reward points will be added to your account. Not you? Call 1800 000 0000', 'expense', 90000],
+  ]) {
+    const row = auto(currency, cc, body, 2, sender);
+    ok(`${cc}: a merchant name or promo footer is not lure wording — ${body.slice(0, 48)}…`,
+      row?.bestEffort && row.type === type && row.amountFils === minor, row);
+  }
+  // The same advert words with no completed movement, no own tail, or as the
+  // whole message, still refuse.
+  for (const [currency, cc, sender, body] of [
+    ['USD', 'US', 'GIGWORK', 'Get paid $400 a week by placing our logo on your car.'],
+    ['INR', 'IN', 'QP-GAMERX', 'Big bonus waiting! Make your first purchase of Rs. 99 using code START99. Hurry!'],
+    ['KES', 'KE', '+254711000555', 'You have received Ksh 7,700.00. Earn up to Ksh 20,000 weekly, apply now.'],
+    ['INR', 'IN', 'AD-SHOPKT', 'Paid Rs 2,100 for order no. 55190. If you did not place it, call our helpline 9800000000.'],
+    // A registered header does not excuse an advert dressed as a credit that
+    // carries a link.
+    ['INR', 'IN', 'VK-LOANAP', 'Rs.12,00,000 has been Credited to your account. To see it, apply now for your Personal Loan in our app: https://ln.example/a1'],
+  ]) {
+    ok(`${cc}: advert or order wording without an own completed movement still refuses — ${body.slice(0, 40)}…`,
+      auto(currency, cc, body, 2, sender) === null, auto(currency, cc, body, 2, sender));
+  }
+  // "Received this message in error" is a mail footer, not the
+  // sent-by-mistake scam.
+  ok('"if you received this message in error" is not lure wording',
+    policy.hasNonCompletedWording('You made a purchase on card ending in 2210 for $86.00 at HARBOUR HARDWARE. If you received this message in error, contact us.') === false);
+  ok('"credited to you in error, send it back" is lure wording',
+    policy.hasNonCompletedWording('Ksh 4,000 was credited to you in error. Please send it back to 0711000999.') === true);
+  // Merchant masking never hides prose: a title-case "Hurry!" still counts.
+  ok('a merchant descriptor is not wording, prose is', policy.hasNonCompletedWording('Paid $9.00 at HURRY CURRY with card ending 5512.') === false &&
+    policy.hasNonCompletedWording('Hurry! Only a few seats left.') === true);
+  // A payment link that is a lure, not a rail.
+  ok('"use the payment link to receive" is lure wording', policy.hasNonCompletedWording('Use the payment link to receive your Rs 3,400.') === true);
+  ok('"by payment link ... from RAZORPAY" is a rail, not a lure', policy.hasNonCompletedWording('Rs.2000 credited to a/c **4410 by payment link plink_x from RAZORPAY') === false);
+  for (const sender of ['+254711000222', '0244 000 111', '29610101', 'alerts@wallet.example', 'INFO']) {
     ok(`"${sender}" is an unverified sender for a money claim`, policy.isUnverifiedAlertSender(sender) === true);
+  }
+  for (const sender of [undefined, '', '   ']) {
+    ok(`a missing sender (${JSON.stringify(sender)}) is not an unverified one`, policy.isUnverifiedAlertSender(sender) === false);
   }
   for (const sender of ['MPESA', 'SG', 'SANLAM_UT', 'T-CASH', 'VM-HDFCBK', '8558', 'com.wallet.app']) {
     ok(`"${sender}" is a bank or wallet header, not a person`, policy.isUnverifiedAlertSender(sender) === false);
@@ -879,8 +989,11 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
   };
   const mpesa = 'QX81TR4KLM Confirmed. You have received Ksh 6,400.00 from PETER KAMAU 0711000333 on 4/10/26 at 9:15 AM. New M-PESA balance is Ksh 6,512.40.';
   const senderless = history('KES', 'KE', mpesa);
-  ok('History: a senderless M-Pesa credit waits in Review instead of being dropped',
-    senderless.parsed.length === 0 && senderless.reviewCandidates.length === 1, senderless);
+  ok('History: a senderless M-Pesa credit is auto-added, marked for a check',
+    senderless.parsed.length === 1 && !!senderless.parsed[0].bestEffort && senderless.parsed[0].amountFils === 640000, senderless);
+  const fromPhone = history('KES', 'KE', mpesa, '+254711000222');
+  ok('History: the same credit from a mobile number waits in Review instead of being dropped',
+    fromPhone.parsed.length === 0 && fromPhone.reviewCandidates.length === 1, fromPhone);
   const fromWallet = history('KES', 'KE', mpesa, 'MPESA');
   ok('History control: the same credit from MPESA is added', fromWallet.parsed.length === 1, fromWallet);
   const linked = history('INR', 'IN', 'Your A/C XXXXX771204 is credited with INR 12,500.00 on 04/10/26 10:12. Your new balance is INR 40,210.55. Chat with us: examplebank.in/chat');
@@ -892,12 +1005,66 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
   const linkedClaim = history('INR', 'IN', 'Your wallet amount of Rs. 48,200 is credited to 98XXXXXX10. Sign up today: w4l.example/k2', '+919800000001');
   ok('History: a phone-number credit claim with a link never becomes a Review card',
     linkedClaim.parsed.length === 0 && linkedClaim.reviewCandidates.length === 0, linkedClaim);
-  for (const [currency, cc, text] of [
-    ['BRL', 'BR', 'Pix recebido de R$ 90,00 de MARINA SOUZA.'],
-    ['USD', 'US', 'Refund of $35.00 from RIVER SHOES'],
+  // A missing sender is not an unverified one: a senderless genuine-looking
+  // credit is auto-added with the "Auto-added — check" marker.
+  for (const [currency, cc, text, minor] of [
+    ['BRL', 'BR', 'Pix recebido de R$ 90,00 de MARINA SOUZA.', 9000],
+    ['USD', 'US', 'Refund of $35.00 from RIVER SHOES', 3500],
   ]) {
     const row = history(currency, cc, text);
-    ok(`History: a senderless credit the policy holds back waits in Review — ${text.slice(0, 30)}`,
+    ok(`History: a senderless credit is auto-added, marked for a check — ${text.slice(0, 30)}`,
+      row.parsed.length === 1 && !!row.parsed[0].bestEffort && row.parsed[0].amountFils === minor, row);
+  }
+  // From a mobile number the same credits wait in Review.
+  {
+    const row = history('BRL', 'BR', 'Pix recebido de R$ 90,00 de MARINA SOUZA.', '+5511988887777');
+    ok('History: a Pix credit claim from a mobile number waits in Review',
+      row.parsed.length === 0 && row.reviewCandidates.length === 1, row);
+  }
+  // Senderless LURES are still refused by their wording or their link.
+  for (const [currency, cc, text] of [
+    ['USD', 'US', 'You are due to receive $640.00 from the settlement fund. Reply to this message to begin.'],
+    ['GBP', 'GB', 'A refund of £212.90 has been credited for you. Please verify your details at the counter to release it.'],
+    ['INR', 'IN', 'Congrats, INR 30,000.00 Can Be Credited To Your Bank A/c. Check Now: lv.example/x'],
+    ['USD', 'US', 'You have received $820.00 from the rebate office. Details: rebate-desk.example/claim'],
+    ['KES', 'KE', 'Confirmed. You have received Ksh 9,000 from PAUL. Kindly send it back, it was a mistake. Call 0711000999'],
+  ]) {
+    const row = history(currency, cc, text);
+    ok(`History: a senderless lure is never auto-added — ${text.slice(0, 36)}`, row.parsed.length === 0, row);
+  }
+  // A personal chat is not a bank alert, even from a phone number with a
+  // "you received" line in it: neither added nor a Review card.
+  for (const [currency, cc, text, sender] of [
+    ['KES', 'KE', 'Hi Ann, you received Ksh 3,000 from me? I sent it at lunch', '+254722000111'],
+    ['USD', 'US', 'Did you get it? You received $60 from me on Venmo', '+12025550190'],
+    ['USD', 'US', 'The neighbour refunded $120 of the party money today!', '+12025550190'],
+  ]) {
+    const row = history(currency, cc, text, sender);
+    ok(`History: a personal chat is neither added nor reviewed — ${text.slice(0, 30)}`,
+      row.parsed.length === 0 && row.reviewCandidates.length === 0, row);
+  }
+  // Item 4: a registered wallet header's completed payment refused only by an
+  // order-callback footer reaches Review instead of being dropped.
+  {
+    const row = history('INR', 'IN', 'Rs.350 paid to Zomato from Paytm wallet. Order ID: 4471. Need help? Contact 24x7 Helpline', 'VM-PAYTMB');
+    ok('History: a registered wallet payment refused only for its order footer waits in Review',
+      row.parsed.length === 0 && row.reviewCandidates.length === 1, row);
+  }
+  // Known trade-off (documented): a bank that alerts from a full phone
+  // number, with no own account tail, reaches Review, not the ledger.
+  {
+    const row = history('EUR', 'LV', '410 EUR received from MARIJA OZOLA. Notification from Examplebank', '29610101');
+    ok('History: a bank credit from a full phone number with no own tail waits in Review (trade-off)',
+      row.parsed.length === 0 && row.reviewCandidates.length === 1, row);
+  }
+  {
+    const row = history('PKR', 'PK', 'TID 55120077. You have received Rs. 4,200.00 from SANA IQBAL. Your new wallet balance is Rs. 4,310.00. Get paid instantly with JazzCash.', '8558');
+    ok('History: a short-code wallet credit with a "Get paid" footer is auto-added',
+      row.parsed.length === 1 && !!row.parsed[0].bestEffort && row.parsed[0].amountFils === 420000, row);
+  }
+  {
+    const row = history('GBP', 'GB', "You've paid £58.00 to Amazon. Order ID 204-7781234. If you did not make this payment, call us on 0345 000 0000.", 'HSBC');
+    ok('History: a registered-bank payment with an order number and callback (no card tail) waits in Review',
       row.parsed.length === 0 && row.reviewCandidates.length === 1, row);
   }
 }

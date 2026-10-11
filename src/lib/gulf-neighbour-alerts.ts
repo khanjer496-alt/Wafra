@@ -232,7 +232,7 @@ export function decideGulfNeighbourPosting(input: GulfNeighbourInput): GulfNeigh
   // other alert keeps the generic unproven-format policy it had before.
   if (!market || !input.institution) return { outcome: 'not-applicable' };
   if (!input.enabled) return review('disabled');
-  if (hasNonCompletedWording(input.source) || LIMIT_CHANGE.test(input.source)) return review('non-posting-wording');
+  if (hasNonCompletedWording(input.source, null, input.sender) || LIMIT_CHANGE.test(input.source)) return review('non-posting-wording');
   if (CARD_BILL_PAYMENT.test(input.source)) return review('card-payment');
 
   const own = GULF_NEIGHBOUR_CURRENCY[market];

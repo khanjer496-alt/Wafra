@@ -30,9 +30,11 @@ import type { UniversalBankEvent, UniversalMoney } from '@/lib/universal-types';
  *    initiated refund/bank-details ask, promotion, statement/bill/due,
  *    scheduled), including lure wording (money owed or waiting to be
  *    released, apply/register now, shop order notices, dispute desks);
- *  - from a phone number, an e-mail address, a generic header or no sender,
- *    a credit (or a debit whose only hook is "Not you? call") must name one
- *    of the reader's own accounts or cards by its tail (unverifiedMoneyClaim);
+ *  - from a PRESENT sender that is a phone number of 7+ digits, an e-mail
+ *    address or a generic header ("INFO"), a credit (or a debit whose only
+ *    hook is "Not you? call") must name one of the reader's own accounts or
+ *    cards by its tail (unverifiedMoneyClaim); no sender at all is not
+ *    unverified, and the wording guard and link gate alone decide;
  *  - a supported money-movement family whose direction matches its wording
  *    (purchases/fees/withdrawals/utilities/recurring are debits, refunds are
  *    credits, transfers must say which way) with no direction issue;
@@ -99,14 +101,11 @@ export interface BestEffortInput {
   observedAt?: number;
   /** Network-free dated rate lookup (rates already on this device). */
   fxLookup?: (base: string, quote: string, date: string) => FxQuote | null;
-  /** The capture's sender ID, when known; only decides whether a link may stand. */
-  sender?: string;
   /**
-   * The text matched an exact certified bank template (latam-alert-templates).
-   * With NO sender at all the template stands in for it; a phone number,
-   * e-mail or generic sender is still an unverified money claim.
+   * The capture's sender ID, when known: decides whether a link may stand,
+   * whether a money claim is unverified, and whether a promo footer may stand aside.
    */
-  exactTemplate?: boolean;
+  sender?: string;
   /** Code-owned format prefix: 'universal' or 'semantic'. Never source text. */
   formatPrefix?: 'universal' | 'semantic' | 'ai';
 }
@@ -196,7 +195,7 @@ const NON_COMPLETED_WORDING: readonly RegExp[] = [
   /\bdid\s+(?:you|u)\s+(?:make|authori[sz]e|initiate|attempt|do)\b|\bwas\s+(?:this|that|it)\s+(?:made\s+by\s+)?(?:you|yours)\b|\breply\s+(?:with\s+)?["']?(?:yes|y)["']?\s*(?:\/|or|,)\s*["']?(?:no|n)["']?\b|\b(?:respond|reply|text)\s+(?:with\s+)?["']?(?:yes|y)["']?(?=[\s.,;!]|$)|\bverify\s+(?:this|the)\s+(?:transaction|purchase|payment|charge|activity)\b|\bverify\s+(?:your\s+)?account\s+activity\b|\bif\s+(?:this\s+(?:transaction\s+)?was\s+|it\s+was\s+)?not\s+(?:made\s+by\s+|done\s+by\s+|initiated\s+by\s+)?you\b[^.\n]{0,60}?\b(?:click|tap|visit|follow|open)\b|\bif\s+(?:you\s+)?did\s+not\s+(?:make|authori[sz]e|authenticate|initiate)\b[^.\n]{0,60}?\b(?:click|tap|visit|follow|open|check\s+here)\b|\bverifique\b|\bsi\s+no\s+(?:reconoce|ha\s+sido\s+usted)\b/iu,
   // lures: refund/grant/prize bait asking the reader to act ("You will
   // receive a tax refund of $573.00 ... confirm your information")
-  /\bclaim\b|\bcongrat(?:s|ulations?)\b|\byou\s+(?:have\s+|'ve\s+)?won\b|\byou\s+will\s+receive\b|\bcan\s+be\s+credited\b|\beligible\s+for\b|\bconfirm\s+(?:your\s+)?(?:information|info|details|identity)\b|\bupdate\s+(?:your\s+)?(?:details|kyc|information|info)\b|\bkyc\b|\b(?:click|tap)\s+(?:here|below|on\s+(?:the|this)\s+link|(?:the|this)\s+link)\b|\bverify\s+your\s+(?:account|identity)\b|\b(?:you|card|account)\s+(?:\(?do\s+not\)?\s+)?(?:has|have)\s+(?:an?\s+)?(?:outstanding\s+)?(?:tax\s+)?refund\s+of\b|\breply\s+with\s+your\s+(?:bank|account|card|details)\b|\buse\s+code\b/iu,
+  /\bclaim\b|\bcongrat(?:s|ulations?)\b|\byou\s+(?:have\s+|'ve\s+)?won\b|\byou\s+will\s+receive\b|\bcan\s+be\s+credited\b|\beligible\s+for\b|\bconfirm\s+(?:your\s+)?(?:information|info|details|identity)\b|\bupdate\s+(?:your\s+)?(?:details|kyc|information|info)\b|\bkyc\b|\b(?:click|tap)\s+(?:here|below|on\s+(?:the|this)\s+link|(?:the|this)\s+link)\b|\bverify\s+your\s+(?:account|identity|details)\b|\b(?:you|card|account)\s+(?:\(?do\s+not\)?\s+)?(?:has|have)\s+(?:an?\s+)?(?:outstanding\s+)?(?:tax\s+)?refund\s+of\b|\breply\s+with\s+your\s+(?:bank|account|card|details)\b|\buse\s+code\b/iu,
   // activation / verification / PIN code messages quote an amount they are
   // authorising, never one that moved
   // (any case: "Savings a/c ACTIVATION CODE is: 434165"); OTP and PIN stay
@@ -217,30 +216,28 @@ const NON_COMPLETED_WORDING: readonly RegExp[] = [
   // Money that is owed, waiting or promised rather than moved (reported
   // smishing, round 7): "you're due a tax refund", "we owe you a refund",
   // "we have to refund you", "I will refund you", "entitled to",
-  // "ready for disbursement", "refund payment link", "eligible to get".
-  /\byou(?:'re|\s+are)\s+due\s+(?:a|an|your)\b|\bwe\s+owe\s+you\b|\b(?:have|need)\s+to\s+refund\s+you\b|\b(?:i|we)\s+will\s+(?:refund|repay|return)\b|\bentitled\s+to\b|\bready\s+for\s+disbursement\b|\b(?:refund|payment)\s*link\b|\beligible\s+to\s+(?:get|receive|claim)\b/iu,
+  // "ready for disbursement", "refund payment link", "use the payment link
+  // to receive", "eligible to get", "due to receive"; the "sent to you by
+  // mistake, kindly send it back" reversal scam.
+  /\byou(?:'re|\s+are)\s+due\s+(?:a|an|your)\b|\bwe\s+owe\s+you\b|\b(?:have|need)\s+to\s+refund\s+you\b|\b(?:i|we)\s+will\s+(?:refund|repay|return)\b|\bentitled\s+to\b|\bready\s+for\s+disbursement\b|\brefund\s+(?:payment\s+)?link\b|\b(?:click|tap|use|open|pay\s+(?:via|through|using|with))\s+(?:on\s+)?(?:the|this|our|a)\s+(?:payment\s+)?link\b|\bpayment\s*link\s+to\s+(?:receive|claim|get|collect|deposit|accept)\b|\beligible\s+to\s+(?:get|receive|claim)\b|\bdue\s+to\s+receive\b|\bsend\s+(?:it|the\s+(?:money|amount|funds))?\s*back\b|\bby\s+mistake\b|\b(?:sent|credited|transferred|deposited)\s+(?:to\s+(?:you|your\s+\w+)\s+)?in\s+error\b|\bwas\s+a\s+mistake\b|\bwrongly\s+(?:sent|credited|transferred)\b/iu,
   // The reader must act before the money is theirs: "to deposit the funds",
   // "to receive the amount", "download and withdraw it now", "collect your
   // refund", "follow the steps", "complete the form", "submit a refund
   // application", "provide your account details". A completed alert reports;
   // it never asks for a step to release the money.
   /\b(?:to|and)\s+(?:deposit|accept|collect|release|receive|withdraw)\s+(?:your\s+|the\s+|this\s+)?(?:funds?|money|refund|payment|amount|deposit|cash)\b|\bwithdraw\s+it\s+now\b|\b(?:get|collect|claim)\s+your\s+(?:\S+\s+){0,2}refund\b|\bfollow\s+the\s+steps\b|\bcomplete\s+(?:your|the|this|a)\s+(?:\w+\s+){0,2}(?:form|return|application|verification|registration)\b|\bsubmit\s+(?:a|an|your|the)\s+(?:\w+\s+)?(?:application|form|claim)\b|\bprovide\s+(?:us\s+)?(?:with\s+)?your\s+(?:full\s+name|account|bank|card)\b/iu,
-  // Marketing hooks that never close a real alert: "apply now", "register
-  // now", "Hurry!",
-  // "using code WELCOME300", "get paid $500", "earn over Ksh7,700".
-  /\bapply\s+(?:now|here|today)\b|\bto\s+apply\b|\bregister\s+now\b|\bhurry\b|\b(?:using|apply|enter)\s+(?:the\s+)?(?:promo\s+|coupon\s+)?code\b|\bget\s+paid\b|\bearn\s+(?:over|up\s*to|upto|extra)\b/iu,
   // A charge the sender still holds open or wants confirmed: "we have noticed
   // a purchase", "please confirm the following", "to confirm please call",
   // "you can view or cancel this payment"; a dormant account to activate.
   /\bnoticed\s+(?:a|an|the|some)\s+(?:\w+\s+)?(?:purchase|transaction|charge|payment|debit)\b|\bconfirm\s+(?:the\s+)?following\b|\bto\s+confirm,?\s+(?:please\s+)?(?:call|reply|click|visit)\b|\bcancel\s+(?:this|the)\s+(?:payment|transaction|transfer|order)\b|\bdormant\b|\bto\s+activate\s+(?:your|the|this)\s+(?:\w+\s+){0,2}(?:account|card)\b/iu,
-  // Shop order notices and future collection: the bank alert is the money,
-  // the shop's "will be delivered / amount to be paid / when it ships" is not.
-  /\bwill\s+be\s+(?:added|delivered|shipped|dispatched|refunded|deposited)\b|\b(?:to|must)\s+be\s+paid\b|\bwhen\s+it\s+ships\b|\btrack\s+your\s+(?:order|parcel|package|shipment)\b|\border\s+(?:update|confirmed)\b/iu,
+  // Future collection: the shop's "amount to be paid / when it ships" is not
+  // money that moved (the shop-notice words are in PROMO_AND_SHOP_WORDING).
+  /\b(?:will|wil|wl)\s+be\s+(?:refunded|deposited)\b|\b(?:to|must)\s+be\s+paid\b|\bwhen\s+it\s+ships\b/iu,
   // Still to happen, in SMS shorthand or the French subjunctive: a cheque in
-  // clearing that "wl be paid if in order", "click to pay", "pay now", a
-  // refund "now available" or waiting "to deposit", an amount that "soit
+  // clearing that "wl be paid if in order", "click to pay", a refund
+  // waiting "to deposit", an amount that "soit
   // débité" unless the reader updates their identity.
-  /\b(?:wl|wil)\s+be\s+(?:paid|debited|credited|charged)\b|\b(?:click|tap)\s+to\s+pay\b|\bpay\s+now\b|\brefund\b[^\n]{0,30}?\b(?:is|are)\s+(?:now\s+)?(?:available|ready)\b|\bto\s+deposit\b|\bsoit\s+(?:d[ée]bit[ée]|pr[ée]lev[ée])|\bmettre\s+[àa]\s+jour\s+vos?\b/iu,
+  /\b(?:wl|wil)\s+be\s+(?:paid|debited|credited|charged)\b|\b(?:click|tap)\s+to\s+pay\b|\bto\s+deposit\b|\bsoit\s+(?:d[ée]bit[ée]|pr[ée]lev[ée])|\bmettre\s+[àa]\s+jour\s+vos?\b/iu,
   // A security question that sends the reader to a link: "If this trx.
   // wasn't done by you, click ...".
   /\b(?:wasn'?t|was\s+not)\s+(?:done|made|initiated)\s+by\s+you\b[^\n]{0,30}?\b(?:click|tap|visit)\b/iu,
@@ -328,26 +325,42 @@ const registeredAlphaSender = (sender: string | undefined): boolean => {
 export const hasLinkFromUnregisteredSender = (source: string, sender?: string): boolean =>
   LINK_RE.test(source) && !registeredAlphaSender(sender);
 /**
- * A sender nobody is accountable for: none at all (a pasted text or a
- * senderless history record), a full phone number, an e-mail address or a
- * generic "INFO"-style word. Narrower than !registeredAlphaSender on purpose:
- * a short or punctuated bank header ("SG", "SANLAM_UT", "T-CASH") is not a
- * person's phone.
+ * A sender nobody is accountable for, when one IS present: a full phone
+ * number (seven or more digits), an e-mail address or a generic "INFO"-style
+ * word. Narrower than !registeredAlphaSender on purpose: a short or
+ * punctuated bank header ("SG", "SANLAM_UT", "T-CASH") is not a person's
+ * phone. NO sender at all (an iOS History record, a pasted text, the AI path
+ * without one) is NOT unverified: the text alone decides, through the wording
+ * guard and the link gate, exactly as before this rule existed.
+ *
+ * Known trade-off: a few banks really do send from a full phone number (US
+ * toll-free alert numbers, Swedbank Latvia's 29610101). Their credits that do
+ * not name the own account or card tail go to Review, not auto-add. No
+ * per-bank exception is made without real evidence of the sender.
  */
 export const isUnverifiedAlertSender = (sender: string | undefined): boolean => {
   const raw = typeof sender === 'string' ? sender.trim() : '';
-  if (!raw || raw.includes('@') || /^\+?[\d\s().-]{7,}$/.test(raw)) return true;
+  if (!raw) return false;
+  if (raw.includes('@') || /^\+?[\d\s().-]{7,}$/.test(raw)) return true;
   return GENERIC_SENDER.test(raw.replace(/^[A-Z]{2}-/, '').replace(/-[A-Z]$/, ''));
 };
+/** Exposed for the Review admission in launch-alert-parser.ts. */
+export const isRegisteredAlertSender = (sender: string | undefined): boolean => registeredAlphaSender(sender);
 
 /**
  * The alert names one of the reader's own accounts or cards by its visible
- * tail: "A/c XX4410", "card ending 2201", "Acct: ******1736", "account 3231",
- * "BH19BBKU00200XXXXXXX74". A fully masked "a/c XXXXXX" names nothing, and
- * a USSD code ("Dial *334#") is not a card.
+ * tail, and the tail sits next to an own-instrument word: "A/c XX4410",
+ * "Card x4410", "card ending 2201", "card ending in 4421", "Acct: ******1736",
+ * "account 3231", "account 0312XXXXX4410", "cheq a/c..123456", "a/c *917",
+ * Arabic "حساب رقم XXXX1234", "بطاقة …1234". A masked figure anywhere else is
+ * NOT the reader's: a payer's phone ("from JOHN DOE 0712***678"), a reference
+ * ("Ref *4410") or a USSD code ("Dial *334#"). A fully masked "a/c XXXXXX"
+ * names nothing.
  */
 const OWN_INSTRUMENT_TAIL =
-  /(?<![A-Za-z])[*xX•·]+\s?-?\d{2,6}(?![\d#])|\.{3}\s?\d{2,6}(?!\d)|\b(?:a\/c|acc(?:oun)?t|acct|card|ending)\b\.?\s*(?:no\.?|number|#)?\s*:?\s*(?:ending\s+(?:in|with)\s+)?\d{3,6}(?!\d)/iu;
+  /(?:\b(?:a\/c|acc(?:oun)?t|acct|card|ending|wallet(?:\s+(?:no\.?|number))?)\b|(?<!\p{L})(?:حساب|بطاق[ةه])(?:\s+رقم)?)\.?\s*(?:no\.?|number|#)?\s*:?\s*(?:ending\s+(?:in|with)\s+)?(?:\d{0,6}[*xX•·…]+\s?-?\d{2,6}|\.{2,3}\s?\d{2,6}|\d{3,6})(?![\d#])/iu;
+/** Exposed for tests: whether the text names an own card or account by its tail. */
+export const namesOwnInstrumentTail = (text: string): boolean => OWN_INSTRUMENT_TAIL.test(text);
 const namesOwnInstrument = (source: string, event: UniversalBankEvent): boolean =>
   (event.instrument?.evidence === 'explicit' && !!event.instrument.value?.last4 &&
     /\d{2,}/.test(event.instrument.value.last4)) || OWN_INSTRUMENT_TAIL.test(source);
@@ -360,38 +373,130 @@ const CALLBACK_HOOK =
   /\b(?:not\s+(?:you|u|correct)|not\s+(?:done|made|authori[sz]ed)\s+by\s+you|wasn'?t\s+you|if\s+(?:you\s+)?(?:did|do)\s+not|dispute|helpline|need\s+help)\b/iu;
 
 /**
- * A MONEY CLAIM NOBODY ACCOUNTABLE SENT. Banks and wallets alert from an
- * operator-registered header, short code or app package. A message from a
- * personal phone number, an e-mail address, a generic "INFO" header, or with
- * no sender at all (a pasted or senderless history record), that says money
- * ARRIVED but names none of the reader's own accounts or cards, is exactly the
- * shape of the fake "Confirmed. You have received Ksh 17,500" and "your tax
- * refund of $258.44" texts. The same from a debit side, with only a callback
- * hook to show for it, is the fake-purchase vishing text. Neither is refused:
- * it waits in Review. Applied only when the caller passed the sender; a
- * caller that does not know it (the push semantic path, which has its own
- * package-trust gate) is unaffected, and a senderless text that matches an
- * exact certified bank template keeps that template's evidence.
+ * A MONEY CLAIM FROM A SENDER NOBODY IS ACCOUNTABLE FOR. Banks and wallets
+ * alert from an operator-registered header, short code or app package. A
+ * message from a personal phone number, an e-mail address or a generic "INFO"
+ * header that says money ARRIVED but names none of the reader's own accounts
+ * or cards is exactly the shape of the fake "Confirmed. You have received Ksh
+ * 17,500" and "your tax refund of $258.44" texts. The same from a debit side,
+ * with only a callback hook to show for it, is the fake-purchase vishing
+ * text. Neither is refused: it waits in Review. A missing sender is not
+ * unverified (isUnverifiedAlertSender): a senderless genuine-looking credit
+ * auto-adds with the usual "Auto-added — check" marker, and only the wording
+ * guard and the link gate stand between a senderless lure and the ledger.
  */
 const unverifiedMoneyClaim = (
   source: string,
   event: UniversalBankEvent,
   sender: string | undefined,
-  exactTemplate: boolean,
 ): boolean => {
-  if (typeof sender !== 'string' || !isUnverifiedAlertSender(sender)) return false;
-  if (exactTemplate && sender.trim() === '') return false;
+  if (!isUnverifiedAlertSender(sender)) return false;
   if (namesOwnInstrument(source, event)) return false;
   if (event.direction === 'credit') return true;
   return event.direction === 'debit' && CALLBACK_HOOK.test(source);
 };
 
-/** `market` (an ISO country or routed market) adds that region's own wording. */
-export const hasNonCompletedWording = (source: string, market?: string | null): boolean =>
+/**
+ * A completed movement stated in the past ("spent", "debited", "credited",
+ * "paid", "posted", "You made a $45.00 purchase", "Purchase of KWD 12.345",
+ * "was used for", "is available in account ending"). A bare "purchase" or
+ * "payment" noun is not one: "Make your first purchase using code ..." is an
+ * advert.
+ */
+const COMPLETED_MOVEMENT =
+  /\b(?:spent|debited|credited|paid|posted|withdrawn|transferred|received|charged|deposited|purchased|refunded)\b|\bmade\s+an?\s+\S+\s+(?:purchase|transaction|payment)\b|\b(?:purchase|payment|transaction)\s+of\s+(?:[A-Z]{3}|Rs\.?|[$£€₹])\s?\d|\bused\s+(?:for|at)\b|\bavailable\s+in\s+(?:your\s+)?(?:account|a\/c|acct|card)\b/iu;
+
+/**
+ * Trailing promotional footers banks append to completed alerts: "Apply now
+ * for a personal loan", "Earn up to 7.5% on FD", "Get paid up to 2 days
+ * early", "Track your order in the app", "To deposit cash anytime use our
+ * CDM", "Reward points will be added". The sentence is set aside (never the
+ * rest of the text) only when the alert states a completed movement AND names
+ * the own card/account tail or comes from a registered header (with no link
+ * in the message); a lure that
+ * merely sounds like one keeps every veto.
+ */
+const PROMO_FOOTER_SENTENCE =
+  /(?:^|(?<=[.!;\n]))(?:[^.!;\n]|\.(?=\d))*?\b(?:apply\s+(?:now|here|today)|earn\s+(?:over|up\s*to|upto|extra)|get\s+paid|track\s+your\s+(?:order|parcel|package|shipment|spending)|to\s+deposit\b(?:[^.!;\n]|\.(?=\d))*?\buse|reward\s+points?\s+will\s+be\s+added)\b(?:[^.!;\n]|\.(?=\d))*[.!]?/giu;
+
+/**
+ * A card or wallet descriptor is a NAME, not wording: "purchase at HURRY
+ * CURRY OF TOKYO", "at PAY NOW PARKING", "with HURRY BURGER". The upper-case
+ * run after a merchant preposition is masked before the advert and shop
+ * arms below are tested. Case-sensitive on purpose: "Hurry! Use code" is
+ * prose, not a descriptor.
+ */
+const MERCHANT_DESCRIPTOR =
+  /((?:\b(?:at|to|from|with|on|in|by|via|for)|@|لدى:?)\s+(?:the\s+)?)(?!(?:APPLY|REGISTER|CLAIM|CLICK|TAP|REPLY|EARN|GET)\b)[A-Z][A-Z0-9&'’.-]*(?:\s+[A-Z0-9&][A-Z0-9&'’.-]*)*/gu;
+const maskMerchantDescriptors = (source: string): string => source.replace(MERCHANT_DESCRIPTOR, '$1MERCHANT');
+
+/**
+ * Advert and shop wording, tested on the merchant-masked text: "apply now",
+ * "register now", "Hurry!", "using code WELCOME300", "get paid $500", "earn
+ * over Ksh7,700", "pay now", a shop's "will be delivered", "track your
+ * order", "order confirmed".
+ */
+const PROMO_AND_SHOP_WORDING: readonly RegExp[] = [
+  /\bapply\s+(?:now|here|today)\b|\bto\s+apply\b|\bregister\s+now\b|\bhurry\b|\b(?:using|apply|enter)\s+(?:the\s+)?(?:promo\s+|coupon\s+)?code\b|\bget\s+paid\b|\bearn\s+(?:over|up\s*to|upto|extra)\b|\bpay\s+now\b/iu,
+  /\bwill\s+be\s+(?:added|delivered|shipped|dispatched)\b|\btrack\s+your\s+(?:order|parcel|package|shipment)\b|\border\s+(?:update|confirmed)\b/iu,
+];
+
+/**
+ * Vetoes that a genuine completed alert naming the reader's own card or
+ * account answers for itself: a refund that "is available" (a lure when it
+ * names nothing; "is available in account ending 4410" when posted), a shop
+ * order number beside a callback hook, a dispute desk.
+ */
+const REFUND_AVAILABLE = /\brefund\b[^\n]{0,30}?\b(?:is|are)\s+(?:now\s+)?(?:available|ready)\b/iu;
+
+const hardNonCompletedWording = (source: string, market?: string | null): boolean =>
   nonPostingReason(source) !== null || NON_COMPLETED_WORDING.some((pattern) => pattern.test(source)) ||
   (!!market && LATAM_MARKETS.has(market) && LATAM_NON_COMPLETED_WORDING.some((pattern) => pattern.test(source))) ||
-  TEMPORARY_HOLD.test(source) || (AUTHORISATION.test(source) && !COMPLETED.test(source)) ||
-  (ORDER_REFERENCE.test(source) && ORDER_CALLBACK_HOOK.test(source)) || DISPUTE_DESK.test(source);
+  TEMPORARY_HOLD.test(source) || (AUTHORISATION.test(source) && !COMPLETED.test(source));
+
+const softNonCompletedWording = (source: string, ownCompleted: boolean): boolean => {
+  const masked = maskMerchantDescriptors(source);
+  if (PROMO_AND_SHOP_WORDING.some((pattern) => pattern.test(masked))) return true;
+  if (ownCompleted) return false;
+  return REFUND_AVAILABLE.test(source) || (ORDER_REFERENCE.test(source) && ORDER_CALLBACK_HOOK.test(source)) ||
+    DISPUTE_DESK.test(source);
+};
+
+/** The text the wording guard reads: promo footers set aside when the alert answers for itself. */
+const wordingGuardText = (source: string, sender: string | undefined): { text: string; ownCompleted: boolean } => {
+  // The movement must be stated OUTSIDE the footer: "Get paid $400 a week"
+  // is the whole advert, not a completed payment beside one.
+  const withoutFooters = source.replace(PROMO_FOOTER_SENTENCE, ' ');
+  const completed = COMPLETED_MOVEMENT.test(withoutFooters);
+  const ownCompleted = completed && OWN_INSTRUMENT_TAIL.test(withoutFooters);
+  // A registered header alone answers only for a footer with no link in the
+  // message: "Rs.25,00,000 has been Credited to your account. To get this
+  // message, apply now ... http://..." is an advert dressed as a credit.
+  const footerExempt = completed && (ownCompleted || (registeredAlphaSender(sender) && !LINK_RE.test(source)));
+  return { text: footerExempt ? withoutFooters : source, ownCompleted };
+};
+
+/**
+ * `market` (an ISO country or routed market) adds that region's own wording.
+ * `sender`, when known, lets a registered header's promo footer stand aside.
+ */
+export const hasNonCompletedWording = (source: string, market?: string | null, sender?: string): boolean => {
+  const { text, ownCompleted } = wordingGuardText(source, sender);
+  return hardNonCompletedWording(text, market) || softNonCompletedWording(text, ownCompleted);
+};
+
+/**
+ * Refused ONLY by advert, shop-notice, order-callback or dispute-desk wording,
+ * never by a lure, hold, decline, code or future arm. From a registered
+ * header such an alert ("Rs.200 paid to Swiggy from Paytm wallet. Order ID:
+ * 9988. Need help? Contact 24x7 Helpline") reaches Review instead of being
+ * dropped as unrecognised (launch-alert-parser.ts).
+ */
+export const refusedOnlyByShopOrPromoWording = (source: string, sender?: string): boolean => {
+  const { text, ownCompleted } = wordingGuardText(source, sender);
+  return !hardNonCompletedWording(text) && softNonCompletedWording(text, ownCompleted) &&
+    COMPLETED_MOVEMENT.test(source.replace(PROMO_FOOTER_SENTENCE, ' '));
+};
 
 /** Whether an alert is Latin American by route, by the person's country, or by its money. */
 const latamScope = (input: BestEffortInput): string | null => {
@@ -575,11 +680,11 @@ export function decideBestEffortAutoPost(input: BestEffortInput): BestEffortDeci
   if (!event || event.version !== 1 || event.decision !== 'review' || event.status !== 'posted') {
     return review('not-posted');
   }
-  if (typeof input.source !== 'string' || hasNonCompletedWording(input.source, latamScope(input))) {
+  if (typeof input.source !== 'string' || hasNonCompletedWording(input.source, latamScope(input), input.sender)) {
     return review('non-posting-wording');
   }
   if (hasLinkFromUnregisteredSender(input.source, input.sender)) return review('non-posting-wording');
-  if (unverifiedMoneyClaim(input.source, event, input.sender, input.exactTemplate === true)) return review('unverified-sender');
+  if (unverifiedMoneyClaim(input.source, event, input.sender)) return review('unverified-sender');
   if (!POSTABLE_FAMILIES.has(event.family)) return review('unsupported-family');
   if (!directionMatchesFamily(event)) return review('direction-unclear');
   if (event.direction === 'debit' && inboundSentToOwnAccount(input.source)) return review('direction-unclear');
