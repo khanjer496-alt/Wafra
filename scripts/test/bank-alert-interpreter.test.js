@@ -461,4 +461,44 @@ for (const merchant of ['LOCAL CAFE', 'SECURITY CODE CAFE', 'OTP123456 CAFE', 'U
     result.outcome === 'parsed' && result.parsed.amountFils === 2490, JSON.stringify(result));
 }
 
+
+// Saudi refund headings (PARSER_VERSION 64). The legacy parser reads them as
+// money coming back; the semantic layer used to see the purchase word under
+// the heading and rebuild the row as a card-purchase EXPENSE, so the history
+// import and live capture disagreed with parseSms. Synthetic bodies; fictional
+// values in the observed Al Rajhi / Alinma layouts.
+for (const [heading, sender] of [
+  ['استرداد شراء الانترنت', 'AlRajhiBank'],
+  ['استرداد شراء', 'AlRajhiBank'],
+  ['حوالة عكسية', 'alinma'],
+]) {
+  const source = `${heading}\nبطاقة:6612;مدى\nمبلغ:SAR 27.40\nلدى:Hala Bakery\nفي:25-6-21 16:03`;
+  const result = interpretBankAlert({ source, sender, market: 'SA', observedAt: Date.parse('2025-06-21T14:00:00Z') });
+  ok(`"${heading}" stays a refund through the semantic layer`,
+    result.outcome === 'parsed' && result.parsed.type === 'income' && result.parsed.amountFils === 2740 &&
+      result.meaning === 'refund' && result.parsed.date === '2025-06-21', JSON.stringify(result));
+  const session = createLaunchAlertSession({ overrides: {}, pinnedCurrency: 'SAR' });
+  const captured = session.parse(source, sender, session.inspect(source, sender), undefined, Date.parse('2025-06-21T14:00:00Z'));
+  ok(`"${heading}" is income on the capture session path too`,
+    captured?.type === 'income' && captured.amountFils === 2740, JSON.stringify(captured));
+}
+// When parseSms refuses a refund-headed alert (an unfinished notice under
+// the heading), the fallback reader must not rebuild it from the purchase
+// word as money OUT. Review or refusal only.
+for (const [i, source] of [
+  'استرداد شراء انترنت\nبطاقة:4471;مدى\nمبلغ:SAR 100\nلدى:NOON\nالحالة: قيد المعالجة\nفي:26-10-9 21:34',
+  'استرداد شراء\nبطاقة:4471;مدى\nمبلغ:SAR 100\nلدى:NOON\nطلب استرداد مقدم\nفي:26-10-9 21:34',
+  'استرداد شراء\nبطاقة:4471;مدى\nمبلغ:SAR 100\nلدى:NOON\nStatus: Pending\nفي:26-10-9 21:34',
+].entries()) {
+  const result = interpretBankAlert({ source, sender: 'AlRajhiBank', market: 'SA' });
+  ok(`refund heading refused by parseSms is never rebuilt as a debit ${i + 1}`,
+    result.outcome !== 'parsed', JSON.stringify(result));
+}
+{
+  const source = 'شراء\nبطاقة:6612;مدى\nمبلغ:SAR 27.40\nلدى:Hala Bakery\nفي:25-6-21 16:03';
+  const result = interpretBankAlert({ source, sender: 'AlRajhiBank', market: 'SA' });
+  ok('the plain purchase twin stays an expense through the semantic layer',
+    result.outcome === 'parsed' && result.parsed.type === 'expense' && result.parsed.amountFils === 2740,
+    JSON.stringify(result));
+}
 console.log(`\nbank-alert-interpreter: ${pass} passed, 0 failed`);

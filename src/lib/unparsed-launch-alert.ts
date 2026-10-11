@@ -2,7 +2,7 @@ import { inspectAlertDraft, type CurrencyAliasMap } from '@/lib/alert-draft';
 import type { InstitutionGrammarMetadata } from '@/lib/alert-institution-grammars';
 import type { ReviewAlert } from '@/lib/alert-review-tray';
 import { MARKETS } from '@/lib/markets';
-import { nonPostingReason, normalizeArabic } from '@/lib/sms-parser';
+import { isNonCashNotice, nonPostingReason, normalizeArabic } from '@/lib/sms-parser';
 
 export const UNPARSED_LAUNCH_REVIEW_VERSION = 1;
 
@@ -101,7 +101,7 @@ const EXPLICIT_EXTERNAL_DEBIT = /\bbeneficiary\b(?:[^.\n]|\.(?=\d)){0,96}\brecei
 const EXPLICIT_FEE_DEBIT = /\b(?:fee|commission|charge)\b(?:[^.\n]|\.(?=\d)){0,96}\b(?:has\s+been\s+applied|was\s+assessed)\b|\b(?:has\s+been\s+applied|was\s+assessed)\b(?:[^.\n]|\.(?=\d)){0,96}\b(?:fee|commission|charge)\b/iu;
 const EXPLICIT_ATM_DEBIT = /\batm\s+wdl\b(?:[^.\n]|\.(?=\d)){0,96}\b(?:db|debit(?:ed)?)\b(?:[^.\n]|\.(?=\d)){0,48}\bfrom\s+(?:your\s+)?(?:account|a\/?c)\b/iu;
 const EXPLICIT_FOR_DEBIT = /\b(?:debited|deducted)\b(?:[^.\n]|\.(?=\d)){0,80}\bfor\b/iu;
-const BALANCE_OR_DUE = /\b(?:available|current|remaining|closing)\s+(?:balance|limit)|\b(?:balance|credit limit|amount due|minimum due|statement total|outstanding)\b|الرصيد (?:الحالي|المتاح)|الحد (?:المتاح|الائتماني)|المبلغ المستحق/iu;
+const BALANCE_OR_DUE = /\b(?:available|current|remaining|closing)\s+(?:balance|limit)|\b(?:balance|credit limit|amount due|minimum due|statement total|outstanding)\b|الرصيد (?:الحالي|المتاح|المتوفر)|المتوفر في حسابك|الحد (?:المتاح|الائتماني)|المبلغ المستحق/iu;
 const MOVEMENT = /\b(?:credited|deposited|received|salary|payroll|wages|wps|monthly\s+pay|remuneration|emoluments?|posted|debited|deducted|withdrawn|cash withdrawal|charged|purchase|payment|paid|sent|transfer|transferred|moved|refund|refunded|re-?credited|reversed|bill payment|ft|atm\s+wdl|applied|assessed)\b|تم (?:ايداع|استلام|ارسال|استقطاع|خصم|دفع|سداد|تحويل|استرداد|رد|عكس|الخصم|الدفع|التحويل)|خصم|سحب|شراء|راتب|مرتب|سداد|استرداد|تحويل/iu;
 
 const slug = (value: string): string => value
@@ -189,7 +189,10 @@ export const inspectUnparsedLaunchSemantics = (
   allowFutureFooter = false,
 ): UnparsedLaunchSemanticDecision => {
   const bounded = normalizeArabic(source.slice(0, 4096).normalize('NFKC')).replace(/\s+/gu, ' ');
-  if (!bounded || nonPostingReason(bounded) || (!allowFutureFooter && AUTH_OR_FUTURE.test(bounded)) ||
+  // The classifiers also read the LINE layout: a "الرمز:483920" code field is
+  // anchored to its own line, which collapsing whitespace destroys.
+  const lined = source.slice(0, 4096).normalize('NFKC');
+  if (!bounded || nonPostingReason(bounded) || nonPostingReason(lined) || isNonCashNotice(lined) || (!allowFutureFooter && AUTH_OR_FUTURE.test(bounded)) ||
     (!POSTED_MOVEMENT.test(bounded) && !COMPACT_LEDGER_POSTED.test(bounded))) {
     return { outcome: 'refuse', reason: 'non-posting' };
   }

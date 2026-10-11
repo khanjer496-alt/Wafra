@@ -394,6 +394,10 @@ export function setActiveMarket(id: string): boolean {
 
 const AED_ALERT = /\b(?:AED|Dhs?\.?)\b|د\.?[إا]\.?|دراهم|درهم/iu;
 const SAR_ALERT = /\b(?:SAR|SR)\b|ر\.?\s?س\.?|ريال/iu;
+// STC Bank glues the code to the figure ("Amount:100SR"). That form is weaker
+// evidence — "Ref 5521SR" is a reference — so it counts only when nothing in
+// the body names the dirham.
+const SAR_GLUED_ALERT = /(?<=\d)(?:SAR|SR)\b/iu;
 
 const launchMarketsFromSender = (sender?: string): MarketPack[] => {
   const senderText = sender?.trim() ?? '';
@@ -430,7 +434,7 @@ export function detectLaunchMarketFromAlert(
   if (senderMarkets.length === 1) return senderMarkets[0].id as 'AE' | 'SA';
   if (senderMarkets.length > 1) return null;
   const aed = AED_ALERT.test(source);
-  const sar = SAR_ALERT.test(source);
+  const sar = SAR_ALERT.test(source) || (!aed && SAR_GLUED_ALERT.test(source));
   if (aed === sar) return null;
   return aed ? 'AE' : 'SA';
 }

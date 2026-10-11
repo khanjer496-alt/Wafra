@@ -6743,5 +6743,335 @@ t('a spaced masked card number keeps its LAST four digits',
   setActiveMarket('AE');
 }
 
+
+// Saudi launch repairs, PARSER_VERSION 64. Every body below is an independently
+// written synthetic message: the LAYOUT follows real Saudi alerts observed in
+// the research corpus, but every amount, card, account, code, merchant and
+// date is fictional. Each posting fix is paired with a non-posting or
+// opposite-direction control.
+{
+  const { setActiveMarket } = require('./build/markets');
+  setActiveMarket('SA');
+  const at = (iso) => ({ observedAt: Date.parse(iso) });
+
+  // ── A. Code challenges and refusals never post ─────────────────────────
+  // A labelled code FIELD ("الرمز:") is the subject of the message, whatever
+  // amount and shop it quotes. Real codes are 4-8 digits.
+  for (const code of ['4839', '72615', '483920', '90817263']) {
+    t(`a labelled Arabic code field (${code.length} digits) is a challenge, not a purchase`,
+      `ننصح بعدم مشاركة الرمز لحمايتك من الاحتيال\nالرمز:${code}\nبطاقة:*4417\nمبلغ:SAR 61.25\nلدى:Zain\nفي:24-7-12 18:20`,
+      null);
+  }
+  t('a purchase with a do-not-share-the-code footer still posts',
+    'شراء انترنت\nبطاقة:4417;مدى\nمبلغ:SAR 61.25\nلدى:Zain\nفي:24-7-12 18:20\nننصح بعدم مشاركة الرمز لحمايتك من الاحتيال',
+    { type: 'expense', amountFils: 6125, currency: 'SAR' });
+  t('a labelled code field is a security challenge for stored-row repair too',
+    'الرمز:572614\nبطاقة:*4417\nمبلغ:SAR 61.25\nلدى:Zain', null);
+  if (nonPostingReason('الرمز:572614\nبطاقة:*4417\nمبلغ:SAR 61.25\nلدى:Zain') !== 'security-challenge') {
+    fail++; console.log('FAIL labelled code field -> nonPostingReason security-challenge');
+  } else pass++;
+  for (const code of ['8264', '826417']) {
+    t(`an activation-code request (${code.length} digits) to finish an online purchase never posts`,
+      `لإتمام عملية الشراء عبر الإنترنت\nللبطاقة رقم: 7720\nبمبلغ: 45.0 SAR\nمن البائع: Jahez\nنأمل استخدام رمز التفعيل ${code}\nفي: 21:05 2025-12-02`,
+      null);
+    t(`an online-purchase code heading (${code.length} digits) never posts`,
+      `رمز شراء أونلاين ${code}\nللبطاقة *7720\nبـ 45 SAR\nمن Jahez\nفي 21:05 25-12-02`, null);
+  }
+  t('the completed online purchase twin of the code heading still posts',
+    'شراء إنترنت 45 SAR\nبطاقة 7720* مدى\nحساب *3001\nمن Jahez\nفي 21:05 25-12-02',
+    { type: 'expense', amountFils: 4500, currency: 'SAR', date: '2025-12-02' });
+  t('a completed purchase that tells you never to share an activation code still posts',
+    'شراء عبر نقاط بيع\nمبلغ 45 SAR\nبطاقة 7720* مدى\nمن Jahez\nفي 21:05 25-12-02\nلا تشارك رمز التفعيل مع أي شخص',
+    { type: 'expense', amountFils: 4500, currency: 'SAR' });
+  t('a temporary-code heading for a payment never posts',
+    'رمز مؤقت\nلـ: عملية دفع\nالمبلغ: 240 SAR', null);
+  t('a temporary-code heading with its code never posts',
+    'رمز مؤقت: 7731\nلـ: عملية دفع\nالمبلغ: 240 SAR', null);
+  t('a payment receipt that only mentions a temporary code later still posts',
+    'شراء انترنت\nبطاقة:5521;مدى\nمبلغ:SAR 240\nلدى:Wasel\nفي:25-4-03 11:00\nلن نطلب منك الرمز المؤقت',
+    { type: 'expense', amountFils: 24000 });
+  t('a card balance that is not enough for the purchase is a refusal',
+    'رصيد البطاقة *7720 لا يكفي لإتمام مشترياتك\nمبلغ: SAR 33\nمن: CAFE NOOR\nفي: 2025/12/04\nالرصيد المتاح : 2',
+    null);
+  if (!isDeclinedMessage('رصيد البطاقة *7720 لا يكفي لإتمام مشترياتك\nمبلغ: SAR 33\nمن: CAFE NOOR')) {
+    fail++; console.log('FAIL insufficient Arabic card balance is a declined message');
+  } else pass++;
+  t('a completed purchase quoting its remaining balance still posts',
+    'شراء عبر نقاط البيع\nبطاقة مدى: 7720*\nمبلغ 33 SAR\nمن CAFE NOOR\nفي 13:04 25-12-04\nالرصيد المتاح : 2',
+    { type: 'expense', amountFils: 3300 });
+  t('cashback points added to a cashback wallet are not cash income',
+    'بطاقة ائتمانية استرجاع نقدي :\nتم إضافة 4.10 ريال إلى محفظة الاسترجاع النقدي لبطاقة كاش باك بلس', null);
+  t('cashback actually credited to the card balance is still income',
+    'استرداد نقدي إلى البطاقة:\nتم استرداد و إضافة 120.00 ريال مبلغ الاسترداد النقدي إلى رصيد بطاقتك 7788',
+    { type: 'income', amountFils: 12000 });
+  t('a brokerage share purchase confirmation is not shopping',
+    'عميلنا العزيز،\nتم تنفيذ عملية شراء شركة الاتصالات السعودية لمحفظتك XXXX17-2 في الاثنين 3 أغسطس 2026 10:15:0 ص بسعر 41.20 SAR لعدد 3 سهم بقيمة إجمالية 123.60 عمولة 0.19 ضريبة 0.03',
+    null);
+  t('a purchase at a shop whose name has no share count still posts',
+    'شراء عبر نقاط البيع\nبطاقة:3390;مدى\nمبلغ:SAR 18\nلدى:SAHM CAFE\nفي:26-8-03 09:10',
+    { type: 'expense', amountFils: 1800 });
+
+  // ── Own-account transfers are transfers, never income ───────────────────
+  t('an outgoing transfer to your own investment account is an own-account transfer',
+    'حوالة صادرة لحسابك الاستثماري في بنك الانماء\nمبلغ: 250 ريال\nمن: **3001\nمن بنك: الإنماء\nإلى حساب: **4012\nفي: 2026-07-14 09:30',
+    { type: 'expense', amountFils: 25000, transfer: true, merchant: 'Own account transfer', category: 'other' });
+  t('an outgoing transfer between your accounts is an own-account transfer',
+    'حوالة صادرة: بين حساباتك\nمن: XXX5501\nمبلغ: SAR 140\nالى: XXX5502\nفي: 07-14 21:45',
+    { type: 'expense', amountFils: 14000, transfer: true, merchant: 'Own account transfer', category: 'other' });
+  t('an incoming transfer into your account is still income, not an own-account move',
+    'حوالة واردة محلية\nمبلغ 250 SAR\nمن NAME\nلحسابك **3001\nفي: 2026-07-14 09:30',
+    { type: 'income', amountFils: 25000, transfer: false });
+  t('an outgoing transfer to another person is spending, not an own-account move',
+    'حوالة صادرة داخلية\nمبلغ 250.00 ريال\nلـ NAME\nلحساب *4012\nفي 26-07-14 09:30',
+    { type: 'expense', amountFils: 25000, transfer: false });
+
+  // ── B. Direction ────────────────────────────────────────────────────────
+  // The refund heading family: the purchase word under a refund heading is
+  // the purchase being refunded.
+  for (const heading of ['استرداد شراء', 'استرداد شراء PoS', 'استرداد شراء عبر نقاط البيع', 'استرداد شراء إنترنت']) {
+    t(`"${heading}" heading is money coming back`,
+      `${heading}\nبطاقة:6612;مدى\nمبلغ:SAR 14\nلدى:Hala Bakery\nفي:25-6-21 16:03`,
+      { type: 'income', amountFils: 1400, currency: 'SAR' });
+  }
+  t('a plain purchase heading with the same fields stays spending',
+    'شراء\nبطاقة:6612;مدى\nمبلغ:SAR 14\nلدى:Hala Bakery\nفي:25-6-21 16:03',
+    { type: 'expense', amountFils: 1400 });
+  t('a refund heading over a future refund notice still waits for completion',
+    'استرداد شراء\nبطاقة:6612;مدى\nمبلغ:SAR 14\nلدى:Hala Bakery\nسيتم استرداد المبلغ خلال 3 أيام', null);
+  t('a purchase whose shop name begins with the refund word stays spending',
+    'شراء نقاط البيع\nبطاقة:6612;مدى\nمبلغ:SAR 14\nلدى:استرداد شراء للتجارة\nفي:25-6-21 16:03',
+    { type: 'expense', amountFils: 1400 });
+  t('a reverse transfer from a merchant is money coming back',
+    'حوالة عكسية\nمبلغ: 9 SAR\nلبطاقة مدى: 6612*\nالحساب: **3001\nمن البائع: Jahez\nفي: 2025-12-02 21:40',
+    { type: 'income', amountFils: 900, category: 'other', date: '2025-12-02' });
+  t('an outgoing transfer heading stays money leaving',
+    'حوالة صادرة\nمبلغ: 9 SAR\nالحساب: **3001\nالى: NAME\nفي: 2025-12-02 21:40',
+    { type: 'expense', amountFils: 900 });
+  t('a government support deposit is income despite its usage note',
+    'إيداع دعم حكومي - حساب المواطن\nالمبلغ:SAR 720\nالى:5560\n؜14\\2\\26 03:15\nيمكن استخدامه في نقاط البيع ودفع الفواتير وسحب من مكائن المصرف',
+    { type: 'income', amountFils: 72000 });
+  t('a cash withdrawal is still a withdrawal',
+    'سحب:صراف آلي بSR 300\nعبر5560;مدى\nمنCA-RIYADH BR. 4\n14/2/26 03:15',
+    { type: 'expense', amountFils: 30000 });
+  t('other dues paid by your employer are income',
+    'مستحقات أخرى من صاحب العمل\nمبلغ 2210.45SAR\nحساب7781*\nفي14/07/26 06:48',
+    { type: 'income', amountFils: 221045, category: 'salary' });
+  t('a bill reminder for dues is not income',
+    'مستحقات فاتورة الكهرباء\nالمبلغ المستحق 210.45 SAR\nآخر موعد للسداد 30/07/2026', null);
+  // A beneficiary NAME is free text. "DEPOSIT" inside it is not a direction.
+  t('a deposit word inside a transfer beneficiary name cannot make it income',
+    'حوالة محلية\nالمصرفARNB\nالمبلغSAR 1,250.40\nمنX5501\nالى:NOVA SAVINGS AND DEPOSIT CLIENT FUNDS\nالىX8830\nالرسوم SAR 0\nفي07-12 08:49',
+    { type: 'expense', amountFils: 125040, merchant: 'Nova Savings And Deposit Client Funds' });
+  t('a genuine incoming local transfer with a labelled sender is still income',
+    'حوالة محلية واردة\nعبر:SAUDI CENTRAL BANK\nمبلغ:SAR 1250.40\nالى:5501\nمن:شركة الندى\n26/7/12 00:42',
+    { type: 'income', amountFils: 125040 });
+
+  // ── C. Dates: Saudi two-digit-year order ────────────────────────────────
+  // Al Rajhi and Alinma write year-first with a two-digit year; Al Rajhi also
+  // writes day-first. A single-digit end field cannot be a year; otherwise the
+  // receipt time decides; without one, a dashed date reads year-first.
+  const rajhiPurchase = (stamp) => `شراء انترنت\nبطاقة:4417;مدى\nمبلغ:SAR 61.25\nلدى:Wasel\nفي:${stamp}`;
+  t('Al Rajhi dashed YY-M-D is year-first', rajhiPurchase('24-7-12 18:20'),
+    { amountFils: 6125, date: '2024-07-12' });
+  t('Al Rajhi dashed YY-M-D with a single-digit day is year-first', rajhiPurchase('25-3-8 10:15'),
+    { amountFils: 6125, date: '2025-03-08' });
+  t('Al Rajhi dashed YY-MM-DD is year-first', rajhiPurchase('23-06-14 11:09'),
+    { amountFils: 6125, date: '2023-06-14' });
+  t('the receipt time agrees with a dashed year-first reading',
+    rajhiPurchase('24-10-28 09:00'), { date: '2024-10-28' }, at('2024-10-28T07:00:00Z'));
+  t('Alinma time-first YY-MM-DD is year-first',
+    'شراء عبر نقاط بيع\nمبلغ 12 SAR\nبطاقة 7720* مدى\nمن RAYHAN\nفي 19:01 25-10-29',
+    { amountFils: 1200, date: '2025-10-29' });
+  t('Alinma glued في with YY-MM-DD is year-first',
+    'تم إيداع الراتب\nمبلغ 6400 SAR\nلـ **3001\nفي26-05-27 17:07',
+    { type: 'income', amountFils: 640000, date: '2026-05-27' });
+  const rajhiTransfer = (stamp) => `حوالة داخلية واردة بـSR 75\nلـ5501\nمن6610;NAME\n${stamp}`;
+  t('Al Rajhi slashed YY/M/D with a single-digit day is year-first',
+    rajhiTransfer('26/10/3 21:34'), { type: 'income', date: '2026-10-03' });
+  t('Al Rajhi slashed D/M/YY with a single-digit day stays day-first',
+    rajhiTransfer('؜4/10/26 21:34'), { type: 'income', date: '2026-10-04' });
+  t('a day above 12 in front stays day-first', rajhiTransfer('13/9/26 22:03'), { date: '2026-09-13' });
+  t('an ambiguous slashed date takes the reading the receipt time allows (year-first)',
+    rajhiTransfer('26/9/24 04:28'), { date: '2026-09-24' }, at('2026-09-24T01:30:00Z'));
+  t('an ambiguous slashed date takes the reading the receipt time allows (day-first)',
+    rajhiTransfer('26/9/24 04:28'), { date: '2024-09-26' }, at('2024-09-26T01:30:00Z'));
+  t('an ambiguous slashed date with no receipt time keeps the day-first reading',
+    rajhiTransfer('26/9/24 04:28'), { date: '2024-09-26' });
+  t('backslash separators are a date too',
+    'إيداع دعم حكومي - حساب المواطن\nالمبلغ:SAR 720\nالى:5560\n14\\2\\26 03:15',
+    { type: 'income', date: '2026-02-14' }, at('2026-02-14T00:20:00Z'));
+  t('a reference number shaped like a date is not a date',
+    'شراء انترنت\nبطاقة:4417;مدى\nمبلغ:SAR 61.25\nلدى:Wasel\nالمرجع: 24-7-12', { date: null });
+  t('Alinma time-first ISO date is read', 'شراء عبر: POS\nالبطاقة الائتمانية: **5520\nمبلغ: SAR 30.50\nلدى: SAFWA\nفي: 11:34 2026-08-19',
+    { amountFils: 3050, date: '2026-08-19' });
+  t('a D360 "On:" ISO date with time is read',
+    'Local POS Purchase\nAmount: SAR 8.00\nCard: *7004 - mada (Apple Pay)\nAt: Rose Laundry\nOn: 2026-08-26 17:15',
+    { amountFils: 800, date: '2026-08-26' });
+  t('a bare ISO date-time line is read',
+    'شراء نقاط بيع\nمدى10.00 SAR\nرصيد10.00\nلدىLAYAN\n2026-08-07 21:08', { amountFils: 1000, date: '2026-08-07' });
+  t('an ISO-shaped reference with no time is not a date',
+    'شراء نقاط بيع\nمدى10.00 SAR\nرصيد10.00\nلدىLAYAN\nRef 2026-08-07', { amountFils: 1000, date: null });
+
+  // ── D. Amount: a fee line is not the purchase ───────────────────────────
+  t('a foreign online purchase takes the total due, not the fee line',
+    'Online Purchase\nVia: *7004,Visa\nAmount: 12 USD\nFrom: ORBITAL\nExchange rate: 3.755217\nVAT: 0.00 SAR\nFees: 0.90 SAR\nTotal due amount: 45.96 SAR\nRemaining balance: 210.40 SAR\nCountry: US\nAt: 18/08/26 23:40',
+    { type: 'expense', amountFils: 4596, originalCurrency: 'USD', date: '2026-08-18' });
+  t('a local transfer still takes its amount before a fee line',
+    'Debit local transfer (SARIE)\nAmount: 75.00 SAR\nFees: 0.50 SAR\nVAT: 0.08 SAR\nTo: NAME\nreceiver account:***6201\nDate: 2024-03-11\nTime: 10:43 AM',
+    { type: 'expense', amountFils: 7500 });
+  t('a fee alert whose only figure is the fee still posts the fee',
+    'Fees: 15.00 SAR\nCard annual fee charged to card *7004', { type: 'expense', amountFils: 1500 });
+
+  // ── E. Missed Saudi postings (recall), first-line anchored ─────────────
+  t('an Al Rajhi English "PoS By:" alert is a purchase',
+    'PoS By:4471;mada Amount:SAR 64 At:NAJD SWEETS CO Date:23-07-14 20:10',
+    { type: 'expense', amountFils: 6400, date: '2023-07-14' });
+  t('"PoS" later in a sentence is not purchase evidence on its own',
+    'Visit any PoS by 30/07 to activate your card and enjoy SAR 50 off', null);
+  t('an STC internal incoming transfer heading is money in',
+    'Internal incoming transfer\nAmount:140SR\nFrom:NAME\nAcc:381\nAt:12/08/26 21:01',
+    { type: 'income', amountFils: 14000, date: '2026-08-12' });
+  t('an STC internal outward transfer heading is money out',
+    'Internal outward transfer\nAmount:35SR\nTo:NAME\nAcc:472\nAt:12/08/26 17:10',
+    { type: 'expense', amountFils: 3500 });
+  t('an STC SARIE inward transfer heading is money in',
+    'Inward transfer (SARIE)\n250.00 SAR\nFrom NAME\nFrom RJHI\nAccount\n12-08-2026 22:22\nRef. No. *0QQQ',
+    { type: 'income', amountFils: 25000 });
+  t('an STC SARIE outward transfer heading is money out',
+    'Outward transfer (SARIE)\n400.00 SAR\nTo NAME\nTo SAUDI NATIONAL BANK\nAccount *812\nFees 0.58 SAR\n12/08/26 04:19\nRef. No. *0RRR',
+    { type: 'expense', amountFils: 40000 });
+  t('a failed outward transfer under the same heading still never posts',
+    'Outward transfer (SARIE)\n400.00 SAR\nTo NAME\nTransfer failed, amount not deducted', null);
+  t('an incoming transfer heading inside a sentence is not a heading',
+    'Get SAR 25 when your first incoming transfer arrives. Terms apply.', null);
+
+  // ── Review round (PARSER_VERSION 64) ────────────────────────────────────
+  // 1. A fee line yields only to a TOTAL, never to the transfer it is a fee on.
+  t('a fee alert keeps its fee, not the transfer amount it names',
+    'خصم رسوم\nرسوم: 0.58 ريال\nعلى حوالة بمبلغ 500 ريال\nفي 14:18 26-10-09', { amountFils: 58 });
+  t('an English fee alert keeps its fee, not the transfer amount it names',
+    'Fee charged\nFee: 2.30 SAR\nfor your transfer of SAR 10,000 to NAME', { amountFils: 230 });
+  // 2. A pending or requested reverse transfer / refund is not money yet.
+  t('a reverse transfer in processing never posts',
+    'حوالة عكسية\nمبلغ: 250 ريال\nالحالة: قيد المعالجة', null);
+  t('a reverse transfer with an English pending status never posts',
+    'حوالة عكسية\nAmount: SAR 250\nStatus: Pending', null);
+  t('a reverse-transfer request under review never posts',
+    'حوالة عكسية\nطلب حوالة عكسية بمبلغ 250 ريال قيد المراجعة', null);
+  t('a purchase refund still in processing never posts',
+    'استرداد شراء\nبطاقة:6612;مدى\nمبلغ:SAR 100\nلدى:Hala Bakery\nالحالة: قيد المعالجة', null);
+  t('a purchase refund awaiting execution never posts',
+    'استرداد شراء\nبطاقة:6612;مدى\nمبلغ:SAR 100\nلدى:Hala Bakery\nقيد التنفيذ', null);
+  // 4. Only the CARD/ACCOUNT balance being short for THIS purchase is a decline.
+  t('a top-up suggestion about a future shortfall does not decline a completed purchase',
+    'شراء انترنت\nبطاقة:4417;مدى\nمبلغ:SAR 61.25\nلدى:Wasel\nفي:24-7-12 18:20\nاذا كان رصيدك لا يكفي لعمليات قادمة اشحن بطاقتك',
+    { type: 'expense', amountFils: 6125 });
+  t('a points balance too low to redeem does not decline a completed purchase',
+    'تم شراء بمبلغ 55 ريال لدى PANDA بالبطاقة 4417. رصيد نقاطك لا يكفي للاستبدال',
+    { type: 'expense', amountFils: 5500 });
+  t('your balance not enough to complete the purchase is a decline',
+    'رصيدك لا يكفي لاتمام عملية الشراء\nمبلغ: SAR 33\nمن: CAFE NOOR', null);
+  // Re-review: a refund carried out "on your request" is completed, and a
+  // help footer about disputes is not this refund's status.
+  t('a refund carried out on the customer\'s request is income',
+    'استرداد شراء انترنت\nبطاقة:4471;مدى\nمبلغ:SAR 100\nلدى:NOON\nبناء على طلب الاسترداد المقدم منكم\nفي:26-10-9 21:34',
+    { type: 'income', amountFils: 10000, date: '2026-10-09' });
+  t('a disputes-under-review help footer does not hold a completed refund',
+    'استرداد شراء\nبطاقة:4471;مدى\nمبلغ:SAR 100\nلدى:NOON\nفي:26-10-9 21:34\nFor disputes under review call 920003344',
+    { type: 'income', amountFils: 10000 });
+  t('a refund REQUEST line under the heading still never posts',
+    'استرداد شراء\nبطاقة:4471;مدى\nمبلغ:SAR 100\nلدى:NOON\nطلب استرداد مقدم', null);
+  t('an English pending status line under the heading still never posts',
+    'استرداد شراء\nبطاقة:4471;مدى\nمبلغ:SAR 100\nلدى:NOON\nStatus: Under review', null);
+  // Final review: a pending status stated in a SENTENCE about this refund.
+  {
+    const head = 'استرداد شراء انترنت\nبطاقة:4471;مدى\nمبلغ:SAR 100\nلدى:NOON\nفي:26-10-9 21:34\n';
+    for (const notice of [
+      'Your refund request is under review',
+      'Refund pending with merchant',
+      'Your refund is being processed',
+      'تم استلام طلبك لاسترداد المبلغ',
+    ]) t(`a refund heading over "${notice}" never posts`, head + notice, null);
+    t('a reverse transfer pending approval never posts',
+      'حوالة عكسية\nمبلغ: 250 ريال\nمن البائع: Jahez\nThis reversal is pending approval', null);
+    t('a completed refund with a disputes-under-review footer still posts',
+      head + 'For disputes under review call 920003344', { type: 'income', amountFils: 10000 });
+    t('a completed refund stating it was credited still posts',
+      head + 'The refund has been credited to your card.', { type: 'income', amountFils: 10000 });
+  }
+  // A cash debit to fund a share purchase is a real debit; only the
+  // brokerage's own execution confirmation is not.
+  t('an account debit to buy shares is still a debit',
+    'تم خصم مبلغ 82.50 ريال من حسابك **3001 لشراء اسهم لمحفظتك الاستثمارية لعدد 3 سهم',
+    { type: 'expense', amountFils: 8250 });
+  t('a points-account balance too low to redeem does not decline a completed purchase',
+    'شراء انترنت\nبطاقة:4417;مدى\nمبلغ:SAR 61.25\nلدى:Wasel\nفي:24-7-12 18:20\nرصيد حساب النقاط لا يكفي للاستبدال',
+    { type: 'expense', amountFils: 6125 });
+  t('a card balance too low is still a decline',
+    'رصيد حسابك لا يكفي لإتمام العملية\nمبلغ: SAR 33\nمن: CAFE NOOR', null);
+
+  // 5. SAIB's unlabelled local transfer: an INCOMING one names a masked
+  // destination (the user's) and must not become money out.
+  t('an unlabelled local transfer into a masked account is not money out',
+    'حوالة محلية\nمبلغ: SAR 500\nمن: XXX4455\nالى: XXX7001', null);
+  t('an unlabelled local transfer whose source is the second line is still money out',
+    'حوالة محلية\nمن:X5501\nالمبلغSAR 320\nالى:NOVA TRADING\nالرسوم SAR 0', { type: 'expense', amountFils: 32000 });
+  // 6. "PoS By:" is the fallback direction only; a refund word wins.
+  t('a PoS By alert marked Refund stays money coming back',
+    'PoS By:4471;mada Amount:SAR 64 At:PANDA Refund', { type: 'income', amountFils: 6400 });
+  // Date rule: a receipt time far from both readings (a pasted import) falls
+  // back to the separator default rather than the later reading.
+  t('an ambiguous slashed date pasted years later keeps the day-first default',
+    'حوالة داخلية واردة بـSR 75\nلـ5501\nمن6610;NAME\n26/9/24 04:28', { date: '2024-09-26' }, at('2030-01-01T00:00:00Z'));
+  t('an ambiguous dashed date pasted years later keeps the year-first default',
+    'شراء انترنت\nبطاقة:4417;مدى\nمبلغ:SAR 61.25\nلدى:Wasel\nفي:24-10-26 18:20', { date: '2024-10-26' }, at('2030-01-01T00:00:00Z'));
+
+  setActiveMarket('AE');
+  // UAE day-first two-digit-year dates are untouched by the Saudi order rule.
+  t('a UAE dashed DD-MM-YY timestamp stays day-first',
+    'Purchase of AED 40.00 with Debit Card ending 7731 at OLIVE CAFE, Dubai. 24-05-25 10:20',
+    { amountFils: 4000, date: '2025-05-24' });
+  // Emirates Islamic's published Arabic templates (synthetic values, same
+  // layout). An available balance is never the salary.
+  t('an Arabic salary notice whose only figure is the available balance is not income',
+    'أخبار سارة. تمّ إيداع الراتب الخاص بك اليوم. الرصيد المتوفر في حسابك رقم XXX-XXXXXX-٠٠٤٤ هو ٣،٢٠٠ درهم. يرجى زيارة www.emiratesislamic.ae',
+    null);
+  t('the same notice with a sender is still not income',
+    'أخبار سارة. تمّ إيداع الراتب الخاص بك اليوم. الرصيد المتوفر في حسابك رقم XXX-XXXXXX-٠٠٤٤ هو ٣،٢٠٠ درهم.',
+    null, { sender: 'EmiratesIslamic' });
+  t('an Arabic salary credit that states its amount still posts the salary, not the balance',
+    'تم إيداع راتب بمبلغ ٨،٥٠٠ درهم في حسابك. الرصيد المتوفر في حسابك هو ٩،١٠٠ درهم.',
+    { type: 'income', amountFils: 850000, category: 'salary' });
+  // "١٫٨٠٠ درهم": U+066B written as a THOUSANDS separator. AED has two
+  // decimals, so three digits after it before درهم cannot be fils — read as
+  // thousands only with the Emirates Islamic sender; otherwise still refused.
+  t('Emirates Islamic: ٫ before exactly three digits and درهم is a thousands separator',
+    'تمّ خصم ٢٫٣٠٠ درهم من حسابك كعملية شراء من نقطة بيع. يرجى زيارة www.emiratesislamic.ae',
+    { type: 'expense', amountFils: 230000 }, { sender: 'EmiratesIslamic' });
+  t('Emirates Islamic: a withdrawal reads ٫ thousands and skips the ، balance',
+    'تمّ سحب ١٫٢٠٠ درهم من حسابك كعملية من جهاز صراف آلي. الرصيد المتوفر في حسابك هو ٤،٣٠٠ درهم.',
+    { type: 'expense', amountFils: 120000 }, { sender: 'EmiratesIslamic' });
+  t('without bank evidence the ambiguous ٫ figure is still refused',
+    'تمّ خصم ٢٫٣٠٠ درهم من حسابك كعملية شراء من نقطة بيع.', null);
+  t('Emirates Islamic: ٫ before two digits stays a decimal point',
+    'تمّ خصم ٢٫٥٠ درهم من حسابك كعملية شراء من نقطة بيع.',
+    { type: 'expense', amountFils: 250 }, { sender: 'EmiratesIslamic' });
+  t('Emirates Islamic: a multi-group ٫ figure is still refused',
+    'تمّ خصم ١٢٫٣٤٥٫٦٧٨ درهم من حسابك كعملية شراء من نقطة بيع.', null, { sender: 'EmiratesIslamic' });
+  t('Emirates Islamic: ٫ before three digits and a dinar word is not regrouped',
+    'تمّ خصم ٢٫٣٠٠ دينار من حسابك كعملية شراء من نقطة بيع.', null, { sender: 'EmiratesIslamic' });
+  t('UAE: a glued SR reference does not stop an AED purchase',
+    'Purchase of AED 100.00 at OLIVE CAFE with Debit Card ending 7731. Ref 5521SR', { type: 'expense', amountFils: 10000 });
+  t('another bank\'s ٫ figure before three digits is still refused',
+    'تمّ خصم ٢٫٣٠٠ درهم من حسابك كعملية شراء من نقطة بيع.', null, { sender: 'ENBD' });
+  // ADCB's abbreviated credit/debit transaction alert.
+  t('a "Cr." transaction on your account is money in',
+    'A Cr. transaction of AED 350.00 on your account number XXX990021 was successful.Available balance is AED 1,420.75.',
+    { type: 'income', amountFils: 35000 });
+  t('a "Dr." transaction on your account stays money out',
+    'A Dr. transaction of AED 350.00 on your account number XXX990021 was successful.Available balance is AED 1,070.75.',
+    { type: 'expense', amountFils: 35000 });
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
