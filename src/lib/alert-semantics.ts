@@ -226,7 +226,8 @@ export const inspectMarketAlert = (
   context: MarketAlertContext = {},
 ): MarketAlertReview => {
   const pack = alertMarketPack(market);
-  const draft = inspectAlertDraft(source, { currencyAliases: pack.currencyAliases });
+  const draftContext = { currencyAliases: pack.currencyAliases, dotDecimalCurrencies: pack.dotDecimalCurrencies };
+  const draft = inspectAlertDraft(source, draftContext);
   const text = draft.normalizedText.toLowerCase();
   const moneyRoles = draft.candidates.map((candidate) =>
     moneyCandidateRole(text, candidate.span, pack));
@@ -235,7 +236,7 @@ export const inspectMarketAlert = (
     ? null
     : draft.candidates[primaryCandidateIndex]?.span ?? null;
   const semanticText = semanticClause(text, primarySpan);
-  const semanticDraft = inspectAlertDraft(semanticText, { currencyAliases: pack.currencyAliases });
+  const semanticDraft = inspectAlertDraft(semanticText, draftContext);
   const classificationText = semanticText.replace(/\s+/gu, ' ');
   const initialStatus = postingStatus(
     classificationText,

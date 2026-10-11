@@ -255,7 +255,10 @@ function selectFields(rows: UniversalMoneyObservation[]): UniversalField<Univers
 export function inspectUniversalMoneyDraft(source: string, context: UniversalParseContext = {}): AlertDraft {
   // Existing unique KSh metadata, matched case-insensitively by the alias path.
   const currencyAliases = { KSh: CURRENCY_SYMBOL_CANDIDATES.KSh, ...context.currencyAliases };
-  const draft = inspectAlertDraft(source, { currencyAliases });
+  // A routed market's own three-decimal currency (KW, BH, OM) reads "12.345"
+  // as a decimal; nothing changes for an unrouted alert or another currency.
+  const dotDecimalCurrencies = context.market ? alertMarketPack(context.market).dotDecimalCurrencies : undefined;
+  const draft = inspectAlertDraft(source, { currencyAliases, dotDecimalCurrencies });
   if (source.length > 4096) return draft;
   const candidates = [...draft.candidates];
   // The frozen Japanese renewal places an ISO amount immediately before で.
@@ -267,7 +270,7 @@ export function inspectUniversalMoneyDraft(source: string, context: UniversalPar
     const start = match.index!;
     const end = start + match[0].length;
     if (candidates.some(row => start < row.span.end && end > row.span.start)) continue;
-    const tokenDraft = inspectAlertDraft(match[0], { currencyAliases });
+    const tokenDraft = inspectAlertDraft(match[0], { currencyAliases, dotDecimalCurrencies });
     const candidate = tokenDraft.candidates[0];
     if (tokenDraft.candidates.length !== 1 || candidate.evidence !== 'iso-code' ||
       candidate.span.start !== 0 || candidate.span.end !== match[0].length ||

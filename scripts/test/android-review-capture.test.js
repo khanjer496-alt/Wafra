@@ -427,6 +427,68 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
     JSON.stringify(learnedKwd));
   await learnedKwd.commit();
 
+  // Gulf neighbours on the notification path (review of 9776500). An alert
+  // routed to QA/KW/BH/OM through a recognised institution is decided by
+  // decideGulfNeighbourPosting, as on SMS: the universal certification and
+  // semantic generalization may not post it on their own, and the person's
+  // best-effort setting gates it. Texts are Wafra's own fixtures.
+  {
+    const bestEffort = require('./build/best-effort-autopost.js');
+    const gulfPush = async (id, appLabel, text, ledger, exponent) => {
+      markets.setLedgerCurrency(ledger, exponent);
+      // Bank Muscat's alert is the whole notification body; a title would
+      // sit in front of the anchored template.
+      const title = appLabel === 'Bank Muscat' ? '' : appLabel;
+      notificationRows = [{ id, pkg: `com.example.${id.replace(/[^a-z]/g, '')}`, appLabel, title, text, ts: NOW + 5_195 }];
+      const result = await scanInbox(0, {}, undefined, 'ar-KW', { notificationOnly: true });
+      await result.commit();
+      return result;
+    };
+    for (const [id, text] of [
+      ['gulf-heading-ar-000001', 'بطاقة 1234 شراء KWD 5.000 SAMPLE SHOP'],
+      ['gulf-heading-en-000001', 'Card 1234 purchase KWD 5.000 at SAMPLE SHOP'],
+    ]) {
+      const result = await gulfPush(id, 'NBK', text, 'KWD', 3);
+      ok(`a heading-only NBK push is Review, never semantic-generalized into the ledger (${id})`,
+        result.parsed.length === 0 && result.reviewCandidates.length === 1, JSON.stringify(result));
+    }
+    const completed = await gulfPush('gulf-complete-en-0001', 'NBK',
+      'Purchase of KWD 12.345 with Debit Card ending 1234 at SAMPLE SHOP on 05/08/2026.', 'KWD', 3);
+    ok('a completed NBK purchase push posts once, marked, through the Gulf decision',
+      completed.parsed.length === 1 && completed.parsed[0]?.amountFils === 12345 &&
+        completed.parsed[0]?.currency === 'KWD' && !!completed.parsed[0]?.bestEffort,
+      JSON.stringify(completed));
+    const muscat = 'تم خصم OMR 2.640 من حسابك رقم ****4417 باستخدام بطاقة الخصم المباشر في SAMPLE OPTICS';
+    const muscatTail = ' بتاريخ 2026/08/09 17:24:08. رصيدك الحالي هو 55.180 OMR.';
+    for (const [id, insert] of [
+      ['gulf-muscat-veto-ar-01', '. ألغيت العملية'],
+      ['gulf-muscat-veto-ar-02', '. العملية مرفوضة'],
+      ['gulf-muscat-veto-en-01', '. Transaction failed'],
+      ['gulf-muscat-veto-en-02', ' Amount refunded'],
+    ]) {
+      const result = await gulfPush(id, 'Bank Muscat', `${muscat}${insert}${muscatTail}`, 'OMR', 3);
+      ok(`a Bank Muscat push with "${insert.trim()}" in the merchant slot is not imported (${id})`,
+        result.parsed.length === 0, JSON.stringify(result.parsed));
+    }
+    const cleanMuscat = await gulfPush('gulf-muscat-clean-0001', 'Bank Muscat', `${muscat}${muscatTail}`, 'OMR', 3);
+    ok('a clean Bank Muscat card purchase push imports 2.640 OMR',
+      cleanMuscat.parsed.length === 1 && cleanMuscat.parsed[0]?.amountFils === 2640 &&
+        cleanMuscat.parsed[0]?.currency === 'OMR', JSON.stringify(cleanMuscat));
+    bestEffort.setBestEffortAutoPostEnabled(false);
+    try {
+      const off = await gulfPush('gulf-muscat-off-00001', 'Bank Muscat',
+        `${muscat.replace('2.640', '3.115')}${muscatTail}`, 'OMR', 3);
+      ok('with the best-effort setting off a Bank Muscat push waits in Review',
+        off.parsed.length === 0 && off.reviewCandidates.length === 1, JSON.stringify(off));
+      const offNbk = await gulfPush('gulf-complete-off-001', 'NBK',
+        'Purchase of KWD 7.500 with Debit Card ending 1234 at SAMPLE SHOP on 05/08/2026.', 'KWD', 3);
+      ok('with the best-effort setting off an NBK purchase push waits in Review',
+        offNbk.parsed.length === 0 && offNbk.reviewCandidates.length === 1, JSON.stringify(offNbk));
+    } finally {
+      bestEffort.setBestEffortAutoPostEnabled(true);
+    }
+  }
+
   markets.setLedgerCurrency(null);
   markets.setActiveMarket('AE');
 

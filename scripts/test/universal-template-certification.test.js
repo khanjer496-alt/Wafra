@@ -203,7 +203,7 @@ for (const source of [
 }
 
 ok('certification registry exposes only stable ids to diagnostics',
-  certifiedUniversalTemplateIds().length === 22 &&
+  certifiedUniversalTemplateIds().length === 23 &&
     certifiedUniversalTemplateIds().every((id) => /^[a-z0-9-]+-v\d+$/.test(id)));
 
 const unresolvedCertifiedTransfer = {

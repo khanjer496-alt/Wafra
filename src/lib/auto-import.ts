@@ -59,6 +59,7 @@ import { bestEffortAutoPostEnabled, decideBestEffortAutoPost } from '@/lib/best-
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { UniversalBankEvent } from '@/lib/universal-types';
 import { certifyUniversalTemplate } from '@/lib/universal-template-certification';
+import { isGulfNeighbourMarket } from '@/lib/gulf-neighbour-alerts';
 import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
 import { captureTrace, captureTraceEnabled } from '@/lib/capture-trace';
 import { measureRuntimeOperation } from '@/lib/runtime-performance';
@@ -928,7 +929,9 @@ export function inspectSourceFreeRefusedAlert(input: {
     // issuer routing and can be very expensive on rich OEM notification text.
     // Leave the encrypted row unresolved for a future parser instead.
     if (input.skipUniversalFallback) return { kind: 'ignored', reason: 'unrecognized' };
-    const event = inspectGenericBankEventForReview(input.source, input.sender);
+    // A Gulf-neighbour route reads its own currency spellings for the amount.
+    const event = inspectGenericBankEventForReview(input.source, input.sender,
+      inspection?.route.decision === 'single' ? inspection.route.market : null);
     const universal = event ? prepareUniversalReviewAlert({
       id: 'capture_probe_id_0001',
       sourceKey: 'capture_probe_key_001',
@@ -1625,6 +1628,13 @@ export async function scanInbox(
         const universalEvent = universalInspection?.decision === 'review'
           ? universalInspection
           : null;
+        // Qatar, Kuwait, Bahrain and Oman through a recognised institution are
+        // decided by decideGulfNeighbourPosting inside parseLaunchAlert, as on
+        // SMS: launch grammar or the exact Bank Muscat template, wording and
+        // completion guards, under the best-effort setting. Certification and
+        // semantic generalization below never post one on their own.
+        const gulfNeighbourOwned = isGulfNeighbourMarket(globalMarket) &&
+          worldwide?.review?.institution.decision === 'identified' && !!worldwide.review.institution.institution;
         const certification = universalInspection && globalMarket
           ? certifyUniversalTemplate({
               market: globalMarket,
@@ -1659,7 +1669,8 @@ export async function scanInbox(
         // through the same best-effort policy (and setting) as every other
         // unproven alert, and carries the "Auto-added — check" marker. The
         // ledger-currency gate below still refuses any foreign row here.
-        const semanticDecision = certification?.decision === 'semantic-generalized' && universalEvent
+        const semanticDecision = certification?.decision === 'semantic-generalized' && universalEvent &&
+          !gulfNeighbourOwned
           ? decideBestEffortAutoPost({
               source,
               event: universalEvent,
@@ -1673,7 +1684,7 @@ export async function scanInbox(
               formatPrefix: 'semantic',
             })
           : null;
-        const universalPosting = universalEvent &&
+        const universalPosting = universalEvent && !gulfNeighbourOwned &&
           (certification?.decision === 'automatic' || semanticDecision?.outcome === 'post')
           ? parsedUniversalPosting(universalEvent, source, overrides, routedMarket)
           : null;
@@ -1685,7 +1696,8 @@ export async function scanInbox(
         const requiredCurrency = pinnedLedgerCurrencyCode() ?? batchCurrency;
         // A certified template is a PROVEN format: the universal reading of
         // the same alert is not "best effort" and must not carry the marker.
-        const launchCandidate = launchParsed?.bestEffort && certification?.decision === 'automatic'
+        const launchCandidate = launchParsed?.bestEffort && certification?.decision === 'automatic' &&
+          !gulfNeighbourOwned
           ? (({ bestEffort: _marker, ...proven }) => proven)(launchParsed)
           : launchParsed;
         const parsedCandidate = launchCandidate ?? universalParsed;
