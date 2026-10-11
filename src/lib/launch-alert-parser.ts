@@ -1,7 +1,11 @@
 import { inspectUniversalAlert, type UniversalAlertReview } from '@/lib/alert-market-detection';
 import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars';
 import { activeCountryDateOrder, dateOrderForCountry, getActiveCountry } from '@/lib/country';
-import { bestEffortAutoPostEnabled, decideBestEffortAutoPost, hasNonCompletedWording, isNotAutoPostableMoney, sharedSymbolCurrencyForCountry } from '@/lib/best-effort-autopost';
+import {
+  bestEffortAutoPostEnabled, decideBestEffortAutoPost, hasLinkFromUnregisteredSender, hasNonCompletedWording,
+  isNotAutoPostableMoney, isUnverifiedAlertSender,
+  sharedSymbolCurrencyForCountry,
+} from '@/lib/best-effort-autopost';
 import {
   interpretBankAlert,
   type BankAlertInterpretation,
@@ -86,8 +90,20 @@ const shouldTryUniversalPosting = (source: string, sender: string): boolean =>
 // "sent to SCB PK A/C ****9901" (money sent INTO a masked bank account) is a
 // bank's own wording: it keeps that refused, direction-ambiguous alert in
 // Review (best-effort-autopost.ts inboundSentToOwnAccount). Deliberately not
-// every masked "A/c XX1234", which would widen Review worldwide.
-const GENERIC_BANK_CONTEXT = /\b(?:(?:credit|debit|covered|prepaid|charge)\s+card|card\s+(?:purchase|payment|ending|number|no\b)|(?:your|available|current)\s+(?:account|balance|credit)|bank\s+(?:alert|account|fee|transfer|statement|notification)|(?:minimum|total)\s+(?:amount\s+)?due|(?:account|a\/?c)\s+(?:ending|number|no\b)|sent\s+to\s+(?:your\s+)?(?:[A-Za-z][A-Za-z&]{1,2}\s+){0,3}(?:a\/c|acc(?:oun)?t)\.?\s*(?:no\.?\s*)?[*xX•·]+\d{2,6}|iban|swift|sepa|upi|neft|imps|statement|paiement\s+par\s+carte|kartenzahlung|kontoauszug|compra\s+con\s+tarjeta|pagamento\s+con\s+carta|rekeningoverzicht)\b|بطاق[هة]|حساب|رصيد|كشف\s+حساب|فاتور[هة]/iu;
+// every masked "A/c XX1234", which would widen Review worldwide: only one the
+// text itself says was credited or debited ("Your A/C XXXXX543758 is credited
+// with INR ..."), so a bank credit refused for its link footer from an unknown
+// sender waits in Review instead of being dropped as unrecognised.
+const GENERIC_BANK_CONTEXT = /\b(?:(?:credit|debit|covered|prepaid|charge)\s+card|card\s+(?:purchase|payment|ending|number|no\b)|(?:your|available|current)\s+(?:account|balance|credit)|bank\s+(?:alert|account|fee|transfer|statement|notification)|(?:minimum|total)\s+(?:amount\s+)?due|(?:account|a\/?c)\s+(?:ending|number|no\b)|(?:a\/c|acc(?:oun)?t)\.?\s*(?:no\.?\s*)?[*xX•·]{2,}\d{2,6}\s+(?:is\s+|has\s+been\s+|was\s+)?(?:credited|debited)|sent\s+to\s+(?:your\s+)?(?:[A-Za-z][A-Za-z&]{1,2}\s+){0,3}(?:a\/c|acc(?:oun)?t)\.?\s*(?:no\.?\s*)?[*xX•·]+\d{2,6}|iban|swift|sepa|upi|neft|imps|statement|paiement\s+par\s+carte|kartenzahlung|kontoauszug|compra\s+con\s+tarjeta|pagamento\s+con\s+carta|rekeningoverzicht)\b|بطاق[هة]|حساب|رصيد|كشف\s+حساب|فاتور[هة]/iu;
+
+/**
+ * Wording that says money reached the reader: "You have received", "credited
+ * to", "refund"; Portuguese/Spanish "recebeu", "Pix recebido", "estorno",
+ * "recibiste", "te envió", "abonado"; French "reçu", "crédité"; German
+ * "gutgeschrieben"; Malay/Indonesian "diterima", "dikreditkan".
+ */
+const MONEY_ARRIVED_CLAIM =
+  /(?<!\p{L})(?:you\s+have\s+received|you\s+received|received\s+(?:from|for)|(?:is|has\s+been|was)\s+credited|credited\s+(?:to|in|into|with)|deposited|refund(?:ed)?|recebeu|recebid[oa]|creditad[oa]|estorno|recibiste|recibid[oa]|te\s+(?:envi[óo]|ha\s+enviado)|yape[óo]|abonad[oa]|acreditad[oa]|reembolso|devoluci[óo]n|re[çc]u|cr[ée]dit[ée]e?|gutgeschrieben|diterima|dikreditkan)(?!\p{L})/iu;
 
 export const hasGenericBankAlertContext = (source: string, sender = ''): boolean =>
   GENERIC_BANK_CONTEXT.test(source) || detectLaunchMarketFromSender(sender) !== null ||
@@ -104,13 +120,25 @@ export const inspectGenericBankEventForReview = (
   market?: string | null,
 ): UniversalBankEvent | null => {
   // An exact LatAm bank template is bank-alert context in its own right.
-  if (!hasGenericBankAlertContext(source, sender) && !matchLatamTemplate(source, { sender })) return null;
+  const noContext = !hasGenericBankAlertContext(source, sender) && !matchLatamTemplate(source, { sender });
+  // A "money arrived" claim from a phone number, e-mail, generic header or
+  // no sender has no bank context of its own, and the best-effort policy will
+  // not auto-add it (unverified-sender). It waits in Review instead of being
+  // dropped, so a genuine wallet credit read without its sender (iOS history)
+  // is never lost. A registered sender keeps the context requirement, and a
+  // claim the wording guard already refuses ("Congrats, INR 30,000 Can Be
+  // Credited ... Check Now") or that carries a link ("... is credited to
+  // 98XXXXXXXX Register now d5m.example/x") is not admitted this way.
+  if (noContext && !(isUnverifiedAlertSender(sender) && MONEY_ARRIVED_CLAIM.test(source) &&
+    !hasNonCompletedWording(source) && !hasLinkFromUnregisteredSender(source, sender))) return null;
   const event = isGulfNeighbourMarket(market)
     ? inspectUniversalBankEvent(gulfNeighbourReadSource(source, market), {
         sender, market, dateOrder: dateOrderForCountry(market) ?? undefined,
       })
     : inspectUniversalBankEvent(source, { sender, dateOrder: activeCountryDateOrder() });
   if (event.decision !== 'review') return null;
+  if (noContext && !(event.direction === 'credit' && event.status === 'posted' &&
+    event.amount.evidence !== 'missing')) return null;
   const hasGroundedMoney =
     event.amount.evidence !== 'missing' ||
     event.observations.some((observation) => observation.field.evidence !== 'missing');
@@ -520,6 +548,7 @@ const parseUniversalPostedEvent = (
     ledgerExponent: pinnedExponent,
     observedAt,
     fxLookup,
+    exactTemplate: matchLatamTemplate(readSource, { sender }) !== null,
   });
   if (decision.outcome !== 'post') return null;
 
