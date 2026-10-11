@@ -60,7 +60,41 @@ interface InstitutionGrammar {
   senders: readonly string[];
   body: RegExp;
   metadata?: InstitutionGrammarMetadata;
+  /**
+   * Country qualifier for a brand that also banks in another country (QNB in
+   * Egypt, NBK in Egypt, KFH in Bahrain and Turkey, BBK in Kuwait, HSBC
+   * everywhere). When present, neither the sender nor the body counts as this
+   * market's evidence unless the alert ALSO states the market's own currency
+   * (or names the country next to the brand). The name alone never routes.
+   */
+  qualifier?: RegExp;
+  /**
+   * The reverse guard, for a brand routed by name in its home market: when
+   * this matches, neither the sender nor the body counts as evidence. Citi
+   * sends as "CITI" in the US and in the Gulf; a Citi alert stating Qatari,
+   * Kuwaiti, Bahraini or Omani money (and no USD) is not a US alert.
+   */
+  disqualifier?: RegExp;
 }
+
+/*
+ * Own-currency evidence for the Gulf neighbours: the ISO code, the unique
+ * Arabic abbreviation, the spelled-out currency with its country adjective,
+ * and the Latin abbreviation only directly beside a figure ("KD 12.500",
+ * "12.500 KD"; "QR 150.00", never "QR code"). A bare ريال or دينار is shared
+ * by several countries and is never evidence here.
+ */
+const beside = (token: string): string =>
+  String.raw`(?<![\p{L}\p{N}])${token}\s{0,3}\d|\d\s{0,3}${token}(?![\p{L}\p{N}])`;
+const QAR_EVIDENCE = new RegExp(String.raw`\bQAR\b|ر\.\s?ق|ريال\s+قطري|${beside('QR')}`, 'iu');
+const KWD_EVIDENCE = new RegExp(String.raw`\bKWD\b|د\.\s?ك|دينار\s+كويتي|${beside('KD')}`, 'iu');
+const BHD_EVIDENCE = new RegExp(String.raw`\bBHD\b|د\.\s?ب|دينار\s+بحريني|${beside('BD')}`, 'iu');
+const OMR_EVIDENCE = new RegExp(String.raw`\bOMR\b|ر\.\s?ع|ريال\s+عماني|${beside(String.raw`R\.O\.?`)}|${beside('RO')}`, 'iu');
+const or = (...patterns: RegExp[]): RegExp =>
+  new RegExp(patterns.map((pattern) => pattern.source).join('|'), 'iu');
+/** Gulf-neighbour own money with no US dollar anywhere in the alert. */
+const NEIGHBOUR_MONEY_WITHOUT_USD = new RegExp(
+  String.raw`^(?![\s\S]*(?:\bUSD\b|\$))[\s\S]*(?:${or(QAR_EVIDENCE, KWD_EVIDENCE, BHD_EVIDENCE, OMR_EVIDENCE).source})`, 'iu');
 
 const experimentalGrammar = (institution: string): InstitutionGrammarMetadata => ({
   id: `${institution}-sms-v1`,
@@ -94,7 +128,8 @@ const INSTITUTIONS: Record<InstitutionGrammarMarket, readonly InstitutionGrammar
     { institution: 'jpmorgan-chase', senders: ['chase', 'chasebank'], body: /\b(?:jpmorgan chase|chase bank)\b/iu },
     { institution: 'bank-of-america', senders: ['bankofamerica', 'bofa'], body: /\bbank of america\b/iu },
     { institution: 'wells-fargo', senders: ['wellsfargo'], body: /\bwells fargo\b/iu },
-    { institution: 'citi-us', senders: ['citibank', 'citi'], body: /\b(?:citibank|citi bank)\b/iu },
+    { institution: 'citi-us', senders: ['citibank', 'citi'], body: /\b(?:citibank|citi bank)\b/iu,
+      disqualifier: NEIGHBOUR_MONEY_WITHOUT_USD },
     { institution: 'discover-card-us', senders: ['discover', 'discovercard'], body: /\bdiscover card\b/iu },
   ],
   GB: [
@@ -131,25 +166,51 @@ const INSTITUTIONS: Record<InstitutionGrammarMarket, readonly InstitutionGrammar
     { institution: 'rabobank-nl', senders: ['rabobank', 'rabo'], body: /\brabobank\b/iu },
     { institution: 'abn-amro-nl', senders: ['abnamro'], body: /\babn amro\b/iu },
   ],
+  // Gulf neighbours. Every brand here that also banks in another country
+  // carries a currency qualifier (see InstitutionGrammar.qualifier). Sender
+  // keys exist only where the spec's evidence names one; the rest are
+  // body-only until a sender id is verified.
   QA: [
-    { institution: 'qnb-qatar', senders: ['qnb', 'qnbqatar'], body: /\bqnb(?: qatar)?\b|بنك قطر الوطني/iu },
-    { institution: 'qatar-islamic-bank', senders: ['qib', 'qibbank'], body: /\bqatar islamic bank\b|مصرف قطر الإسلامي/iu },
+    { institution: 'qnb-qatar', senders: ['qnb', 'qnbqatar'], body: /\bqnb(?: qatar)?\b|بنك قطر الوطني/iu,
+      qualifier: or(QAR_EVIDENCE, /\bqnb\s+qatar\b/iu) },
     { institution: 'commercial-bank-qatar', senders: ['cbq', 'cbqbank'], body: /\bcommercial bank(?: of)? qatar\b|البنك التجاري القطري/iu },
+    { institution: 'doha-bank', senders: [], body: /\bdoha bank\b|بنك الدوحة/iu, qualifier: QAR_EVIDENCE },
+    { institution: 'qatar-islamic-bank', senders: ['qib', 'qibbank'], body: /\bqatar islamic bank\b|مصرف قطر الإسلامي/iu,
+      qualifier: QAR_EVIDENCE },
+    { institution: 'masraf-al-rayan', senders: [], body: /\bmasraf al[ -]?rayan\b|مصرف الريان/iu },
+    { institution: 'dukhan-bank', senders: [], body: /\bdukhan bank\b|بنك دخان/iu },
   ],
   KW: [
-    { institution: 'national-bank-of-kuwait', senders: ['nbk', 'nbkbank'], body: /\bnational bank of kuwait\b|بنك الكويت الوطني/iu },
-    { institution: 'kuwait-finance-house', senders: ['kfh', 'kfhonline'], body: /\bkuwait finance house\b|بيت التمويل الكويتي/iu },
+    { institution: 'national-bank-of-kuwait', senders: ['nbk', 'nbkbank'], body: /\bnational bank of kuwait\b|بنك الكويت الوطني/iu,
+      qualifier: KWD_EVIDENCE },
+    { institution: 'kuwait-finance-house', senders: ['kfh', 'kfhonline'], body: /\bkuwait finance house\b|بيت التمويل الكويتي/iu,
+      qualifier: KWD_EVIDENCE },
+    { institution: 'gulf-bank-kuwait', senders: [], body: /\bgulf bank\b|بنك الخليج/iu, qualifier: KWD_EVIDENCE },
+    { institution: 'burgan-bank', senders: [], body: /\bburgan bank\b|بنك برقان/iu, qualifier: KWD_EVIDENCE },
     { institution: 'boubyan-bank', senders: ['boubyan', 'boubyanbank'], body: /\bboubyan bank\b|بنك بوبيان/iu },
+    { institution: 'warba-bank', senders: [], body: /\bwarba bank\b|بنك وربة/iu },
+    { institution: 'commercial-bank-of-kuwait', senders: [], body: /\bcommercial bank of kuwait\b|البنك التجاري الكويتي/iu },
   ],
   BH: [
     { institution: 'national-bank-of-bahrain', senders: ['nbb', 'nbbonline'], body: /\bnational bank of bahrain\b|بنك البحرين الوطني/iu },
-    { institution: 'bank-of-bahrain-and-kuwait', senders: ['bbk', 'bbkbank'], body: /\bbank of bahrain and kuwait\b|بنك البحرين والكويت/iu },
-    { institution: 'bank-abc-bahrain', senders: ['bankabc', 'abcbahrain'], body: /\bbank abc\b|بنك\s+abc/iu },
+    { institution: 'bank-of-bahrain-and-kuwait', senders: ['bbk', 'bbkbank'], body: /\bbank of bahrain and kuwait\b|بنك البحرين والكويت/iu,
+      qualifier: BHD_EVIDENCE },
+    { institution: 'ahli-united-bank', senders: [], body: /\bahli united bank\b|البنك الأهلي المتحد/iu, qualifier: BHD_EVIDENCE },
+    { institution: 'bahrain-islamic-bank', senders: [], body: /\bbahrain islamic bank\b|بنك البحرين الإسلامي/iu },
+    // The Bahraini KFH shares its name with the Kuwaiti one; only BHD decides.
+    { institution: 'kuwait-finance-house-bahrain', senders: [], body: /\bkuwait finance house\b|بيت التمويل الكويتي/iu,
+      qualifier: BHD_EVIDENCE },
+    { institution: 'bank-abc-bahrain', senders: ['bankabc', 'abcbahrain'], body: /\bbank abc\b|بنك\s+abc/iu, qualifier: BHD_EVIDENCE },
   ],
   OM: [
-    { institution: 'bank-muscat', senders: ['bankmuscat', 'bmuscat'], body: /\bbank muscat\b|بنك مسقط/iu },
+    { institution: 'bank-muscat', senders: ['bankmuscat', 'bmuscat', 'bkmuscat'], body: /\bbank muscat\b|بنك مسقط/iu },
     { institution: 'bank-dhofar', senders: ['bankdhofar', 'dhofarbank'], body: /\bbank dhofar\b|بنك ظفار/iu },
+    { institution: 'national-bank-of-oman', senders: [], body: /\bnational bank of oman\b|البنك الوطني العماني/iu },
     { institution: 'sohar-international', senders: ['soharintl', 'soharinternational'], body: /\bsohar international\b|صحار الدولي/iu },
+    { institution: 'bank-nizwa', senders: [], body: /\bbank nizwa\b|بنك نزوى/iu },
+    // HSBC sends as "HSBC" in the UAE and the UK: only body text naming
+    // HSBC Oman, with OMR, is Omani evidence. No sender key.
+    { institution: 'hsbc-oman', senders: [], body: /\bhsbc\s+oman\b/iu, qualifier: OMR_EVIDENCE },
   ],
   EG: [
     { institution: 'national-bank-of-egypt', senders: ['nbe', 'nbeegypt'], body: /\bnational bank of egypt\b|البنك الأهلي المصري/iu },
@@ -291,6 +352,9 @@ export const inspectAlertInstitutionGrammar = (
     };
   }
   const candidates = INSTITUTIONS[market].flatMap((grammar) => {
+    // A shared brand without its country qualifier is not this market's evidence.
+    if (grammar.qualifier && !grammar.qualifier.test(normalizedSource)) return [];
+    if (grammar.disqualifier?.test(normalizedSource)) return [];
     const evidence: InstitutionEvidenceKind[] = [];
     if (normalizedSender && grammar.senders.some(
       (alias) => senderMatches(market, boundedSender || normalizedSender, alias),

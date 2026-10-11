@@ -1,6 +1,6 @@
 import { inspectUniversalAlert, type UniversalAlertReview } from '@/lib/alert-market-detection';
 import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars';
-import { activeCountryDateOrder, getActiveCountry } from '@/lib/country';
+import { activeCountryDateOrder, dateOrderForCountry, getActiveCountry } from '@/lib/country';
 import { bestEffortAutoPostEnabled, decideBestEffortAutoPost, hasNonCompletedWording, sharedSymbolCurrencyForCountry } from '@/lib/best-effort-autopost';
 import {
   interpretBankAlert,
@@ -17,6 +17,7 @@ import { isBnplProviderSource } from '@/lib/bnpl-providers';
 import { nonPostingReason, parseSmsBatch, type ParsedSms } from '@/lib/sms-parser';
 import type { CategoryId } from '@/lib/types';
 import { CURRENCY_SYMBOL_CANDIDATES, currencyMinorUnits } from '@/lib/currency-metadata';
+import { decideGulfNeighbourPosting, gulfNeighbourReadSource, isGulfNeighbourMarket } from '@/lib/gulf-neighbour-alerts';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { FxQuote } from '@/lib/fx';
@@ -27,7 +28,10 @@ type CurrencyAliasMap = NonNullable<UniversalParseContext['currencyAliases']>;
 
 // Cheap supersets used only to decide whether market routing must run. The
 // parser/reviewer remains the authority; matching one of these never imports.
-export const REVIEW_MONEY_HINT = /\b(?:USD|GBP|EUR|INR|QAR|KWD|BHD|OMR|EGP|JOD|CAD|AUD|BRL|MXN|SGD|Rs\.?|KD|BD|RO|R\.O\.|LE|L\.E\.|JD)\b|[$€£₹]|ر\.ق|د\.ك|د\.ب|ر\.ع|ج\.م|د\.[أا]/iu;
+// "QR" counts only beside a two-decimal figure (never "Scan QR 3 times" or
+// "QR 123456"), and a dinar only with its country: a bare دينار is shared by
+// several countries and is everyday speech.
+export const REVIEW_MONEY_HINT = /\b(?:USD|GBP|EUR|INR|QAR|KWD|BHD|OMR|EGP|JOD|CAD|AUD|BRL|MXN|SGD|Rs\.?|KD|BD|RO|R\.O\.|LE|L\.E\.|JD)\b|\bQR\s{0,3}\d{1,3}(?:,\d{3})*\.\d{2}(?!\d)|(?<![\d.,])\d{1,3}(?:,\d{3})*\.\d{2}\s{0,3}QR\b|[$€£₹]|ر\.ق|د\.ك|د\.ب|ر\.ع|ج\.م|د\.[أا]|دينار\s+(?:كويتي|بحريني)|ريال\s+(?:قطري|عماني)/iu;
 const LAUNCH_MONEY_HINT = /\b(?:AED|Dhs?\.?|SAR|SR)\b|د\.?[إا]\.?|دراهم|درهم|ر\.?\s?س\.?|ريال/iu;
 
 export const hasBankAlertMoneyHint = (source: string): boolean =>
@@ -81,13 +85,22 @@ export const hasGenericBankAlertContext = (source: string, sender = ''): boolean
   GENERIC_BANK_CONTEXT.test(source) || detectLaunchMarketFromSender(sender) !== null ||
   hasUniversalInstitutionSender(sender);
 
-/** Generic evidence augments misses in every country; it is always review-only. */
+/**
+ * Generic evidence augments misses in every country; it is always review-only.
+ * `market` is passed only for an alert routed to a Gulf neighbour, so its own
+ * currency spellings (KD, ر.ع …) and three-decimal figures fill the amount.
+ */
 export const inspectGenericBankEventForReview = (
   source: string,
   sender = '',
+  market?: string | null,
 ): UniversalBankEvent | null => {
   if (!hasGenericBankAlertContext(source, sender)) return null;
-  const event = inspectUniversalBankEvent(source, { sender, dateOrder: activeCountryDateOrder() });
+  const event = isGulfNeighbourMarket(market)
+    ? inspectUniversalBankEvent(gulfNeighbourReadSource(source, market), {
+        sender, market, dateOrder: dateOrderForCountry(market) ?? undefined,
+      })
+    : inspectUniversalBankEvent(source, { sender, dateOrder: activeCountryDateOrder() });
   if (event.decision !== 'review') return null;
   const hasGroundedMoney =
     event.amount.evidence !== 'missing' ||
@@ -410,7 +423,17 @@ interface UnprovenPostingContext {
   /** Launch (AE/SA) sender evidence; the policy then refuses unconditionally. */
   launchSenderMarket: string | null;
   overrides?: Record<string, CategoryId>;
+  /** The routed market's identified institution (Gulf-neighbour posting needs one). */
+  institution?: { id: string; sender: boolean } | null;
 }
+
+/** The identified institution of a single route, and whether the sender itself proved it. */
+const routedInstitution = (inspection: UniversalAlertReview | null): { id: string; sender: boolean } | null => {
+  const review = inspection?.route.decision === 'single' ? inspection.review?.institution : null;
+  if (!review || review.decision !== 'identified' || !review.institution) return null;
+  const candidate = review.candidates.find((item) => item.institution === review.institution);
+  return { id: review.institution, sender: !!candidate?.evidence.includes('sender') };
+};
 
 /**
  * Promote only a self-proving universal event — an UNPROVEN format.
@@ -460,6 +483,16 @@ const parseUniversalPostedEvent = (
       raw: source.trim(),
     };
   }
+  // Qatar, Kuwait, Bahrain and Oman: read by the launch grammar (or an exact
+  // certified bank template), never by the generic reader alone. A neighbour
+  // alert this declines waits in Review. See gulf-neighbour-alerts.ts.
+  const neighbour = decideGulfNeighbourPosting({
+    source, sender, routedMarket: context.routedMarket, institution: context.institution ?? null,
+    enabled: context.enabled, ledgerCurrency: pinnedCurrency, ledgerExponent: pinnedExponent,
+    observedAt, fxLookup, overrides: context.overrides,
+  });
+  if (neighbour.outcome === 'post') return neighbour.parsed;
+  if (neighbour.outcome === 'review') return null;
   const decision = decideBestEffortAutoPost({
     source: readSource,
     sender,
@@ -745,6 +778,7 @@ export const createLaunchAlertSession = ({
       routedMarket,
       launchSenderMarket: null,
       overrides,
+      institution: routedInstitution(inspection),
     });
   };
 
@@ -779,6 +813,7 @@ export const createLaunchAlertSession = ({
       routedMarket,
       launchSenderMarket,
       overrides,
+      institution: routedInstitution(inspection),
     });
   };
 

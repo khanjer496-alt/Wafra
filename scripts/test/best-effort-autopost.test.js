@@ -417,7 +417,12 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
     /onPress=\{\(\) => setConfirmingUndo\(true\)\}/.test(sheet) && /autoAddedUndoConfirm/.test(sheet));
   const autoImport = read('src/lib/auto-import.ts');
   ok('semantic generalisation posts only through the same policy',
-    /certification\?\.decision === 'semantic-generalized' && universalEvent\s*\?\s*decideBestEffortAutoPost/.test(autoImport));
+    /certification\?\.decision === 'semantic-generalized' && universalEvent(?:\s*&&\s*!gulfNeighbourOwned)?\s*\?\s*decideBestEffortAutoPost/.test(autoImport));
+  // Qatar/Kuwait/Bahrain/Oman via a recognised institution are owned by
+  // decideGulfNeighbourPosting: neither semantic generalization nor
+  // certification may post them on the notification path.
+  ok('a Gulf-neighbour notification is never posted by certification or semantic generalization',
+    /const universalPosting = universalEvent && !gulfNeighbourOwned &&/.test(autoImport));
   ok('a certified template reading never carries the marker',
     /launchParsed\?\.bestEffort && certification\?\.decision === 'automatic'/.test(autoImport));
 }
