@@ -203,6 +203,14 @@ export interface Transaction {
    * state no seconds; nothing may be inferred from its absence.
    */
   textClock?: number;
+  /**
+   * The account balance the alert itself stated AFTER this movement, in the
+   * ledger's minor units ("Your available account balance is AED 3,120.00").
+   * Evidence only: transfer reconciliation pairs two own-account legs when
+   * both balances moved by exactly the amount. Absent when the alert stated
+   * none, on card limits, and on rows imported before it existed.
+   */
+  statedBalanceFils?: number;
   /** Where this entry came from. Undefined = manual (pre-v2 data). */
   source?: 'sms' | 'manual';
   /** Explicit claim created by Mark paid; removed when its expense is undone. */

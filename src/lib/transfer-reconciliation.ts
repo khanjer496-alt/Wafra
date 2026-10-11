@@ -891,6 +891,120 @@ function* observedOwnedTransferPairsSteps(
   });
 }
 
+/**
+ * OWN-ACCOUNT PAIRS PROVEN BY THE BANK'S OWN BALANCE TRAIL.
+ *
+ * A generic "AED 2,000.00 was debited from your account *917 … balance
+ * 3,120.00" and "AED 2,000.00 was credited to your account *348 … balance
+ * 2,800.00" a minute later name no transfer at all. Equal money and close
+ * clocks prove nothing on their own (a salary and an unrelated equal payment
+ * coincide), so this tier pairs only when EVERY one of these holds:
+ *  - one outgoing and one incoming leg, exact same amount, ledger currency;
+ *  - on two DIFFERENT accounts already in the ledger, same issuer, distinct
+ *    tails (credit cards are not own-account cash and are excluded);
+ *  - generic posting titles, and the retained alert names no payer, payee or
+ *    merchant ("to/from/at <name>");
+ *  - within three minutes, and the pairing is mutually unique;
+ *  - each alert states its post-transaction balance, and that balance equals
+ *    the previous balance stated for the SAME account minus (debit) or plus
+ *    (credit) the amount. That agreement on both accounts is the evidence.
+ * No retained text or no previous stated balance means no pairing: today's
+ * behaviour. Nothing is persisted; the pair is re-derived on every pass.
+ */
+const BALANCE_PAIR_WINDOW_MS = 3 * 60_000;
+const BALANCE_PAIR_DEBIT_TITLE = /^(?:account debit|outgoing transfer|own account transfer)$/i;
+const BALANCE_PAIR_CREDIT_TITLE = /^(?:incoming transfer|account credit|own account transfer)$/i;
+const STATED_ACCOUNT_BALANCE =
+  /\b(?:avl|avail|available)\.?\s+(?:account\s+|a\/c\s+)?bal(?:ance)?\.?\s*(?:is|:)?\s*(?:[A-Z]{3}\.?\s*)?(-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})(?!\d)/i;
+// "debited from your account" / "credited to your account" are the legs
+// themselves; any other to/from/at/by-order-of followed by a word names a party.
+const NAMED_PARTY = /\b(?:to|from|at|b\/o|by\s+order\s+of|received\s+from|sent\s+to)\s+(?!(?:your|the|a|an|my)\b)[\p{L}]/iu;
+const statedAccountBalance = (raw: unknown): number | undefined => {
+  if (typeof raw !== 'string') return undefined;
+  const figure = raw.match(STATED_ACCOUNT_BALANCE)?.[1];
+  if (!figure) return undefined;
+  const value = Math.round(Number(figure.replace(/,/g, '')) * 100);
+  return Number.isSafeInteger(value) ? value : undefined;
+};
+
+function* balanceProvenOwnPairsSteps(ctx: Context, taken: (id: string) => boolean): Generator<void, Map<string, string>, void> {
+  let steps = 0;
+  if (currencyMinorUnits(ctx.ledgerCurrency) !== 2) return new Map();
+  // Every retained alert with a stated balance, per account, in clock order.
+  const trail = new Map<string, { tx: Transaction; at: number; balance: number }[]>();
+  for (const tx of ctx.rows.values()) {
+    if (++steps % YIELD_EVERY === 0) yield;
+    if (ctx.duplicateIds.has(tx.id) || (tx.source !== 'sms' && !tx.smsKey) || !minor(tx.amountFils)) continue;
+    const balance = Number.isSafeInteger(tx.statedBalanceFils) ? tx.statedBalanceFils
+      : statedAccountBalance((tx as TransferRow & { raw?: unknown }).raw);
+    const at = sourceTime(tx);
+    if (balance === undefined || at === undefined) continue;
+    const list = trail.get(tx.accountId) ?? [];
+    list.push({ tx, at, balance });
+    trail.set(tx.accountId, list);
+  }
+  // Cheap arithmetic first: legs whose stated balance moved by exactly their
+  // amount from the previous one stated for the same account.
+  const consistent: { tx: Transaction; at: number; bank: string }[] = [];
+  for (const [accountId, list] of trail) {
+    const account = ctx.accounts.get(accountId);
+    if (!eligibleAccount(account) || !account.bankName || typeof account.last4 !== 'string' ||
+        !/^\d{3,4}$/.test(account.last4)) continue;
+    const bank = bankIdentityForName(account.bankName);
+    if (!bank) continue;
+    list.sort((a, b) => a.at - b.at || (a.tx.id < b.tx.id ? -1 : a.tx.id > b.tx.id ? 1 : 0));
+    for (let index = 1; index < list.length; index++) {
+      if (++steps % YIELD_EVERY === 0) yield;
+      const { tx, at, balance } = list[index];
+      const previous = list[index - 1];
+      if (previous.at === at) continue;
+      const expected = tx.type === 'expense' ? previous.balance - tx.amountFils
+        : tx.type === 'income' ? previous.balance + tx.amountFils : NaN;
+      if (balance === expected) consistent.push({ tx, at, bank });
+    }
+  }
+  // Only a leg with an opposite, equal, balance-consistent leg on another
+  // account of the same bank inside the window can pair; the regex-heavy
+  // eligibility checks run on those alone.
+  const byMoney = new Map<number, typeof consistent>();
+  for (const row of consistent) {
+    const bucket = byMoney.get(row.tx.amountFils);
+    if (bucket) bucket.push(row);
+    else byMoney.set(row.tx.amountFils, [row]);
+  }
+  const rows: ObservedRow[] = [];
+  for (const bucket of byMoney.values()) {
+    if (bucket.length < 2) continue;
+    bucket.sort((a, b) => a.at - b.at);
+    let left = 0;
+    for (const row of bucket) {
+      if (++steps % YIELD_EVERY === 0) yield;
+      while (left < bucket.length && bucket[left].at < row.at - BALANCE_PAIR_WINDOW_MS) left++;
+      let counterpart = false;
+      for (let i = left; i < bucket.length && bucket[i].at <= row.at + BALANCE_PAIR_WINDOW_MS; i++) {
+        const other = bucket[i];
+        if (other.tx.type !== row.tx.type && other.tx.accountId !== row.tx.accountId && other.bank === row.bank) {
+          counterpart = true;
+          break;
+        }
+      }
+      if (!counterpart) continue;
+      const { tx } = row;
+      if (taken(tx.id) || tx.userEdited || decisionOf(tx as TransferRow) || excludedFromTransfers(tx) ||
+          tx.originalCurrency !== undefined || tx.fxSource !== undefined) continue;
+      const raw = (tx as TransferRow & { raw?: unknown }).raw;
+      if (!(tx.type === 'expense' ? BALANCE_PAIR_DEBIT_TITLE : BALANCE_PAIR_CREDIT_TITLE).test(tx.title.trim()) ||
+          (typeof raw === 'string' && NAMED_PARTY.test(raw)) || evidenceOf(tx)?.counterpartyName ||
+          evidenceOf(tx)?.counterparty || evidenceOf(tx)?.explicitExternal) continue;
+      rows.push({ tx, at: row.at, money: `${ctx.ledgerCurrency}:${tx.amountFils}`, bank: row.bank, credit: false });
+    }
+  }
+  const lastFour = (tx: Transaction): string | undefined => ctx.accounts.get(tx.accountId)?.last4;
+  return uniqueObservedPairs(rows, BALANCE_PAIR_WINDOW_MS, (a, b) =>
+    a.tx.type !== b.tx.type && a.tx.accountId !== b.tx.accountId && a.bank === b.bank &&
+    lastFour(a.tx) !== lastFour(b.tx));
+}
+
 function* suggestObservedPairsSteps(ctx: Context, pending: Set<string>, internal: Set<string>, secondary: Set<string>,
   cardPairs: Map<string, string>, byId: Map<string, TransferAssessment>): Generator<void, void, void> {
   let steps = 0;
@@ -1284,6 +1398,20 @@ function* reconcileSteps(ctx: Context): Generator<void, TransferReconciliationRe
     pendingIds.delete(txId); pendingIds.delete(counterpartId);
     byId.set(txId, { id: txId, status: 'confirmed-own', reason: 'amount-time', counterpartId, candidateIds: [] });
     byId.set(counterpartId, { id: counterpartId, status: 'confirmed-own', reason: 'amount-time', counterpartId: txId, candidateIds: [] });
+  }
+  // Asked lazily, only for the few legs that have a balance-proven partner.
+  const repaidCards = new Set(cardRepaymentPairs.values());
+  const settled = (id: string): boolean => internalIds.has(id) || corroboratingIds.has(id) ||
+    cardRepaymentPairs.has(id) || repaidCards.has(id) || knownCardRepayments.has(id) || userLinked.has(id) ||
+    stale.has(id) || (byId.get(id)?.status ?? 'ownership-unknown') !== 'ownership-unknown';
+  const balancePairs = yield* balanceProvenOwnPairsSteps(ctx, settled);
+  for (const [txId, counterpartId] of balancePairs) {
+    const counterpart = ctx.rows.get(counterpartId);
+    if (!counterpart || balancePairs.get(counterpartId) !== txId) continue;
+    internalIds.add(txId);
+    unresolvedIds.delete(txId); pendingIds.delete(txId);
+    byId.set(txId, { id: txId, status: 'confirmed-own', reason: 'known-account', counterpartId,
+      counterpartyAccountId: counterpart.accountId, candidateIds: [] });
   }
   yield* suggestObservedPairsSteps(ctx, unresolvedIds, internalIds, corroboratingIds, cardRepaymentPairs, byId);
   // Suggestions are deliberately non-destructive: they are the small subset

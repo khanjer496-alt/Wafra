@@ -71,7 +71,11 @@ const shouldTryUniversalPosting = (source: string, sender: string): boolean =>
 
 // Review eligibility needs financial-alert context, not merely a currency in
 // a personal conversation. None of these words grants automatic import.
-const GENERIC_BANK_CONTEXT = /\b(?:(?:credit|debit|covered|prepaid|charge)\s+card|card\s+(?:purchase|payment|ending|number|no\b)|(?:your|available|current)\s+(?:account|balance|credit)|bank\s+(?:alert|account|fee|transfer|statement|notification)|(?:minimum|total)\s+(?:amount\s+)?due|(?:account|a\/?c)\s+(?:ending|number|no\b)|iban|swift|sepa|upi|neft|imps|statement|paiement\s+par\s+carte|kartenzahlung|kontoauszug|compra\s+con\s+tarjeta|pagamento\s+con\s+carta|rekeningoverzicht)\b|بطاق[هة]|حساب|رصيد|كشف\s+حساب|فاتور[هة]/iu;
+// "sent to SCB PK A/C ****9901" (money sent INTO a masked bank account) is a
+// bank's own wording: it keeps that refused, direction-ambiguous alert in
+// Review (best-effort-autopost.ts inboundSentToOwnAccount). Deliberately not
+// every masked "A/c XX1234", which would widen Review worldwide.
+const GENERIC_BANK_CONTEXT = /\b(?:(?:credit|debit|covered|prepaid|charge)\s+card|card\s+(?:purchase|payment|ending|number|no\b)|(?:your|available|current)\s+(?:account|balance|credit)|bank\s+(?:alert|account|fee|transfer|statement|notification)|(?:minimum|total)\s+(?:amount\s+)?due|(?:account|a\/?c)\s+(?:ending|number|no\b)|sent\s+to\s+(?:your\s+)?(?:[A-Za-z][A-Za-z&]{1,2}\s+){0,3}(?:a\/c|acc(?:oun)?t)\.?\s*(?:no\.?\s*)?[*xX•·]+\d{2,6}|iban|swift|sepa|upi|neft|imps|statement|paiement\s+par\s+carte|kartenzahlung|kontoauszug|compra\s+con\s+tarjeta|pagamento\s+con\s+carta|rekeningoverzicht)\b|بطاق[هة]|حساب|رصيد|كشف\s+حساب|فاتور[هة]/iu;
 
 export const hasGenericBankAlertContext = (source: string, sender = ''): boolean =>
   GENERIC_BANK_CONTEXT.test(source) || detectLaunchMarketFromSender(sender) !== null ||
@@ -458,6 +462,7 @@ const parseUniversalPostedEvent = (
   }
   const decision = decideBestEffortAutoPost({
     source: readSource,
+    sender,
     event,
     enabled: context.enabled,
     country: context.country,

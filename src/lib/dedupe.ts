@@ -307,6 +307,13 @@ export interface DuplicateCandidate {
   liveObservation?: boolean;
   /** captureEventIdentity() of the alert, when its text stated a clock with seconds. */
   eventIdentity?: string;
+  /**
+   * Post-transaction balance/limit the alert itself stated (minor units).
+   * Ephemeral batch evidence: two otherwise identical alerts that state
+   * DIFFERENT balances are two movements ("AED 5,000.00 debited … balance
+   * 161,447.88", then "… 156,447.88" a minute later), never one re-delivery.
+   */
+  statedBalanceFils?: number;
 }
 
 export interface DuplicateGuard {
@@ -507,6 +514,29 @@ interface SeenOccurrence {
   /** A bank-app notification copy, and the event its text stated (captureEventIdentity). */
   push?: boolean;
   eventIdentity?: string;
+  /** See DuplicateCandidate.statedBalanceFils. */
+  statedBalanceFils?: number;
+}
+
+/** Two stated balances that both exist and disagree prove two movements. */
+function differentStatedBalance(a: number | undefined, b: number | undefined): boolean {
+  return Number.isSafeInteger(a) && Number.isSafeInteger(b) && a !== b;
+}
+
+/**
+ * The post-transaction balance/limit figure an alert's text states, in
+ * hundredths, for DUPLICATE EVIDENCE only ("Avl. card bal is 14939.05",
+ * "Your available account balance is AED 3,120.00"). Never a snapshot: it
+ * may name no currency. Undefined when the text states none.
+ */
+const STATED_BALANCE_RE =
+  /\b(?:avl|avail|available)\.?\s+(?:card\s+|account\s+|a\/c\s+)?(?:bal(?:ance)?|limit|lmt)\.?\s*(?:is|:)?\s*(?:[A-Z]{3}\.?\s*)?(\d{1,3}(?:,\d{3})+\.\d{2}|\d+\.\d{2})(?!\d)/i;
+export function statedBalanceInText(raw: unknown): number | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const figure = raw.match(STATED_BALANCE_RE)?.[1];
+  if (!figure) return undefined;
+  const value = Math.round(Number(figure.replace(/,/g, '')) * 100);
+  return Number.isSafeInteger(value) ? value : undefined;
 }
 
 /** One stored or batch capture filed under its stated bank event. */
@@ -841,7 +871,7 @@ export function duplicateGuard(
     flags: {
       liveObservation?: boolean; renamed?: boolean; boundLiveCopy?: boolean;
       statement?: Pick<DuplicateCandidate, 'captureSource' | 'statementImportId'>;
-      push?: boolean; eventIdentity?: string; textClock?: number;
+      push?: boolean; eventIdentity?: string; textClock?: number; statedBalanceFils?: number;
     } = {},
   ) => {
     // File row clocks are synthetic; only statement matching may use these rows.
@@ -852,6 +882,7 @@ export function duplicateGuard(
       ts, id, type, captureInstrument, historyIdentity, textClock: flags.textClock,
       ...(flags.push ? { push: true } : {}),
       ...(flags.eventIdentity ? { eventIdentity: flags.eventIdentity } : {}),
+      ...(flags.statedBalanceFils !== undefined ? { statedBalanceFils: flags.statedBalanceFils } : {}),
       ...(flags.statement && isStatementCaptureSource(flags.statement.captureSource)
         ? { statement: { captureSource: flags.statement.captureSource,
           statementImportId: flags.statement.statementImportId } } : {}),
@@ -940,7 +971,11 @@ export function duplicateGuard(
       (!statementRowKey(row) || !statementRowKey(c) || statementRowKey(row) === statementRowKey(c)) &&
       (row.type === c.type || c.eventKind === 'cardPayment' ||
         (row.raw !== undefined && c.raw !== undefined && bodyPrint(row.raw) === bodyPrint(c.raw))) &&
-      compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument)
+      compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument) &&
+      // A batch of alerts delivered in the same second for the same amount
+      // shares one `s{ts}-{amount}` key; their stated balances (11,387.53,
+      // 11,377.53, 11,367.53) still prove three purchases, never one.
+      !differentStatedBalance(row.statedBalanceFils, c.statedBalanceFils)
     ));
   /** A day/amount/direction key still needs a capture time to identify an event. */
   const crossChannel = new Map<string, SeenEvent[]>();
@@ -1371,6 +1406,7 @@ export function duplicateGuard(
           const incomingPush = c.channel === 'push';
           const comparable = at.filter((row) =>
             !differentTextClock(row.textClock, c.textClock) &&
+            !differentStatedBalance(row.statedBalanceFils, c.statedBalanceFils) &&
             !(incomingPush && row.push === true && distinctCaptureEvents(row.eventIdentity, c.eventIdentity)) &&
             row.type === c.type &&
             !(row.statement && fromDifferentStatementUploads(row.statement, c)) &&
@@ -1524,6 +1560,7 @@ export function duplicateGuard(
         c.captureInstrument, {
           liveObservation: c.liveObservation === true, statement: c,
           push: c.channel === 'push', eventIdentity: c.eventIdentity, textClock: c.textClock,
+          statedBalanceFils: c.statedBalanceFils,
         });
       noteExact(c);
       const cross: SeenEvent = {

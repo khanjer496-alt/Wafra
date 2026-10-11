@@ -317,8 +317,11 @@ export function extractUniversalMoney(
       source.slice(transactionSpan.start, transactionSpan.end),
       { currencyAliases },
     ).reasons.includes('authentication-or-otp'));
+  // A figure the currency cannot hold ("812.40 JPY") is the unreadable
+  // transaction amount: never let another number stand in for it.
   const refusal = draft.reasons.includes('input-too-long') ? 'input-too-long'
-    : scopedAuthentication ? 'authentication-or-otp' : undefined;
+    : scopedAuthentication ? 'authentication-or-otp'
+      : draft.reasons.includes('exponent-invalid-money') ? 'exponent-invalid-money' : undefined;
   if (refusal) { amount = missingUniversalField(refusal); transactionSpan = null; }
   return {
     draft, observations, amount, transactionSpan,

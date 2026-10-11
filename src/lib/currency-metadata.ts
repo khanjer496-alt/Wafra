@@ -67,6 +67,20 @@ export const CURRENCY_SYMBOL_CANDIDATES: Readonly<Record<string, readonly Curren
   '₩': ['KRW'],
   '₦': ['NGN'],
   '$': ['USD', 'AUD', 'CAD', 'NZD', 'SGD', 'HKD', 'MXN', 'ARS', 'CLP', 'COP'],
+  // A QUALIFIED dollar names one currency. "NT$350.00" on a USD ledger was
+  // read through the bare "$" and booked as USD 350.00; these spellings are
+  // longer than "$", so they win at the same position. C$ is also the
+  // Nicaraguan cordoba.
+  'US$': ['USD'],
+  'NT$': ['TWD'],
+  'NZ$': ['NZD'],
+  'AU$': ['AUD'],
+  'A$': ['AUD'],
+  'CA$': ['CAD'],
+  'C$': ['CAD', 'NIO'],
+  'S$': ['SGD'],
+  'HK$': ['HKD'],
+  'MX$': ['MXN'],
   '¥': ['JPY', 'CNY'],
   Rs: ['INR', 'PKR', 'LKR', 'NPR', 'MUR', 'SCR'],
   // The abbreviation with its full stop is how Indian, Pakistani and Sri

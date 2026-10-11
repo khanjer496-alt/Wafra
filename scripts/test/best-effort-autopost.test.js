@@ -581,5 +581,194 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
   }
 }
 
+/* ── External-corpus wrong bookings (synthetic fixtures; own wording) ──── */
+{
+  const country = require('./build/country');
+  const OBS = Date.parse('2026-10-10T08:00:00Z');
+  const auto = (currency, cc, body, exponent = 2, sender = '') => {
+    markets.setActiveMarket('ZZ');
+    markets.setLedgerCurrency(currency, exponent);
+    country.setActiveCountry(cc);
+    const s = createLaunchAlertSession({ overrides: {}, regionHint: cc, pinnedCurrency: currency, fxLookup: () => null,
+      bestEffort: { enabled: true, country: cc } });
+    try { return s.parseUnproven(body, sender, s.inspect(body, sender), OBS); }
+    finally { markets.setLedgerCurrency(null); country.setActiveCountry(null); markets.setActiveMarket('AE'); }
+  };
+  // B6. A fraud check or unconfirmed authorisation is not a completed purchase.
+  for (const body of [
+    'Kestrel CU alert for card x5501: online order AUD $318.40 (CITY GADGETS) is under review. Text back Y to approve or N to decline.',
+    'Kestrel CU: card x2290 is on hold. We spotted a purchase attempt of AUD $92.10 that looks unusual. Text Y if this was you, N if not.',
+    'Kestrel CU: before card x4473 is used again we need to confirm AUD $57.80 at MOSSVALE PANTRY. Text Y (yes, mine) or N (not mine).',
+    'Kestrel CU is checking recent activity on card x3318: AUD $140.00 online at a new store. Text Y to confirm or N to report it.',
+    'Kestrel CU: AUD $480.00 purchase attempt on card x6604. Restrictions were placed until you answer: text Y if genuine, N otherwise.',
+    'Kestrel CU security: AUD 77.25 at GEARHOUSE went through on card x9031. Was it yours? Text Y or N.',
+  ]) {
+    ok(`AU: a fraud check is never auto-added — ${body.slice(0, 60)}…`, auto('AUD', 'AU', body) === null, auto('AUD', 'AU', body));
+  }
+  {
+    const row = auto('AUD', 'AU', 'Kestrel CU: AUD 64.90 spent at MOSSVALE PANTRY on card ending 4473 on 08/10/2026. Available balance AUD 1,203.55.');
+    ok('AU control: a completed purchase is still auto-added', row?.bestEffort && row.amountFils === 6490 && row.type === 'expense', row);
+  }
+  ok('a refusal of the fraud-question wording is reflected in the wording guard',
+    policy.hasNonCompletedWording('Before card x4473 is used again we need to confirm AUD $57.80 at MOSSVALE PANTRY.') &&
+      policy.hasNonCompletedWording('Restrictions were placed on card ending 6604.') &&
+      !policy.hasNonCompletedWording('AUD 64.90 spent at MOSSVALE PANTRY. Not you? SMS BLOCK 4473 to 5676.'));
+  // B7. "Refund initiated … update your bank details" is neither completed nor safe.
+  ok('IN: an initiated refund asking for bank details is never auto-added',
+    auto('INR', 'IN', 'Refund initiated: Amt: Rs.7815.40 on Axis Bank Credit Card 2203. To receive your Refund, please update your Bank details: bit.ly/x') === null);
+  {
+    const row = auto('INR', 'IN', 'Refund of INR 781.40 from NORTH MART credited to card ending 2203.');
+    ok('IN control: a completed refund credit is still auto-added as income',
+      row?.bestEffort && row.type === 'income' && row.amountFils === 78140, row);
+  }
+  // B8. One dot and three digits in a two-decimal currency is 7.00 OR 7,000.00.
+  ok('IN: "Rs. 7.000" is ambiguous and never auto-added',
+    auto('INR', 'IN', 'Rs. 7.000 credited to your A/c xxxxxx5512 on 04/10/2026 through NEFT by NORTHWIND SUPPLY PVT LTD') === null);
+  ok('DE: "EUR 1.234" is ambiguous and never auto-added',
+    auto('EUR', 'DE', 'EUR 1.234 debited from your account on 04/10/2026 at MEDIAMARKT BERLIN.') === null);
+  for (const [currency, cc, body, minor, exponent] of [
+    ['INR', 'IN', 'Rs. 7.00 credited to your A/c xxxxxx5512 on 04/10/2026 through NEFT by NORTHWIND SUPPLY PVT LTD', 700, 2],
+    ['INR', 'IN', 'Rs. 7,000.00 credited to your A/c xxxxxx5512 on 04/10/2026 through NEFT by NORTHWIND SUPPLY PVT LTD', 700000, 2],
+    ['KWD', 'KW', 'KWD 12.345 debited from your account 4410 at THE AVENUES MALL on 05/10/2026.', 12345, 3],
+    ['BHD', 'BH', 'BHD 7.250 spent on your card ending 8812 at CITY CENTRE BAHRAIN on 05/10/2026.', 7250, 3],
+    ['OMR', 'OM', 'OMR 4.125 debited from your account 2207 at LULU MUSCAT on 05/10/2026.', 4125, 3],
+  ]) {
+    const row = auto(currency, cc, body, exponent);
+    ok(`${cc} control: ${body.slice(0, 40)}… posts exactly ${minor}`, row?.amountFils === minor && row.currency === currency, row);
+  }
+  {
+    const row = auto('EUR', 'DE', 'EUR 1.234,56 debited from your account on 04/10/2026 at MEDIAMARKT BERLIN.');
+    ok('DE control: a comma-decimal "1.234,56" never posts a wrong value', row === null || row.amountFils === 123456, row);
+  }
+  // F1. "sent to <the alerting bank's own masked account>" is money arriving.
+  for (const body of [
+    'Raast: PKR 4,750.00 sent to SCB PK A/C ***8821 from AYESHA KHAN via MEEZAN BANK on 06-Oct-26. TID 61822',
+    'PKR 12,300.00 has been sent to SCB PK A/C ****4410 through Raast from BILAL TRADERS. Ref 7781',
+  ]) {
+    ok(`PK: an inbound "sent to <own account>" alert is never auto-added as spending — ${body.slice(0, 40)}`,
+      auto('PKR', 'PK', body, 2, 'SCB') === null, auto('PKR', 'PK', body, 2, 'SCB'));
+  }
+  {
+    // Refused from auto-add, but still a possible money movement: a masked
+    // account reference is bank context, so the refusal lands in Review.
+    const { hasGenericBankAlertContext } = require('./build/launch-alert-parser');
+    ok('PK: the refused inbound alert keeps bank context for Review',
+      hasGenericBankAlertContext('Dear Customer, PKR 9,800.00 sent to SCB PK A/C ****4410 for FUNDS TRANSFER via RAAST', ''));
+    ok('control: a personal message with an amount still has no bank context',
+      !hasGenericBankAlertContext('I sent you PKR 500 for lunch, see you at 4', ''));
+  }
+  {
+    const row = auto('PKR', 'PK', 'PKR 1,250.00 sent to HAMZA ALI via Raast from your A/C ****4410 on 06-Oct-26.', 2, 'SCB');
+    ok('PK control: an outbound "sent to <named person> from your A/C" is still auto-added as an expense',
+      row?.bestEffort && row.type === 'expense' && row.amountFils === 125000, row);
+    const named = auto('PKR', 'PK', 'Raast: PKR 4,750.00 sent to AYESHA KHAN MEEZAN A/C ***8821 from your SCB PK A/C ****4410 on 06-Oct-26. TID 61822', 2, 'SCB');
+    ok('PK control: an outbound transfer to a named payee account from your account still auto-adds as an expense',
+      named?.bestEffort && named.type === 'expense' && named.amountFils === 475000, named);
+  }
+  // G1. A zero-decimal figure with decimals is unreadable; never book a substitute.
+  ok('JP: "812.40 JPY 7 SAKURA MART" is never auto-added as JPY 7',
+    auto('JPY', 'JP', 'Card purchase 812.40 JPY 7 SAKURA MART 2 Balance 15,200 JPY', 0) === null);
+  ok('KR: a clock "9:45" is never read as KRW 9',
+    auto('KRW', 'KR', '38.15 KRW 9:45 HANA STORE card ending 4410', 0) === null);
+  {
+    const row = auto('JPY', 'JP', 'Purchase of JPY 4,650 at SAKURA MART with card ending 4410 on 05/10/2026.', 0);
+    ok('JP control: a whole-yen purchase still auto-adds exactly', row?.amountFils === 4650 && row.currency === 'JPY', row);
+  }
+  // G2. "Transaction Error ... encountered an issue processing" is a failed payment.
+  ok('US: a transaction-error alert is never auto-added',
+    auto('USD', 'US', 'Transaction Error: We encountered an issue processing your transaction of USD 64.20 at HARBOR OUTFITTERS. Card ending 4410.') === null);
+  {
+    const row = auto('USD', 'US', 'USD 64.20 spent at HARBOR OUTFITTERS with card ending 4410 on 05/10/2026. To report errors call 1-800-555-0100.');
+    ok('US control: a posted alert with a "report errors" footer still auto-adds', row?.amountFils === 6420 && row.type === 'expense', row);
+  }
+  // D3. An offer is not a purchase.
+  ok('MY: "Get RM50 off your next purchase" is never auto-added',
+    auto('MYR', 'MY', 'Flash sale! Get RM50 off your next purchase at KEDAI MAJU this weekend.') === null);
+  // D4. A qualified dollar prefix names its own currency.
+  for (const [currency, cc, body] of [
+    ['USD', 'US', 'You paid NT$350.00 at TAIPEI NOODLE HOUSE with card ending 4410 on 05/10/2026.'],
+    ['SGD', 'SG', 'You paid US$42.00 at HARBOUR BOOKS with card ending 4410 on 05/10/2026.'],
+    ['AUD', 'AU', 'You paid US$42.00 at HARBOUR BOOKS with card ending 4410 on 05/10/2026.'],
+    ['USD', 'US', 'You paid NZ$15.00 at KIWI CAFE with card ending 4410 on 05/10/2026.'],
+    ['USD', 'US', 'You paid RD$900.00 at COLMADO SOL with card ending 4410 on 05/10/2026.'],
+  ]) {
+    const row = auto(currency, cc, body);
+    ok(`${cc}: a foreign dollar prefix is never relabelled as ${currency} — ${body.slice(9, 20)}`,
+      row === null || row.currency !== currency || row.originalCurrency !== undefined, row);
+  }
+  // H1. Scam lures and fraud questions with an amount are never auto-added.
+  for (const [currency, cc, body] of [
+    // (a) fraud questions
+    ['USD', 'US', 'Lakeside Bank: Did you make a purchase of $412.18 at HOME DEPOT on card ending 2201? Reply Y/N.'],
+    ['USD', 'US', 'Lakeside Bank: a $388.40 charge at BEST BUY on card ending 2201. Was this you? Reply YES or NO.'],
+    ['GBP', 'GB', 'Northgate: your card was used for £640.12 at CURRYS. If this was not you, click to verify this transaction.'],
+    ['USD', 'US', 'You sent a payment of $249.99 to M. CARTER. If you did not authorize this transaction, check here.'],
+    ['USD', 'US', 'Lakeside Bank: verify account activity. A purchase of $511.20 at TARGET on card 2201. Respond Y to approve.'],
+    // (b) refund / grant lures
+    ['USD', 'US', '[Tax Office] You will receive a tax refund of $612.00, but we need you to confirm your information in the link.'],
+    ['GBP', 'GB', 'Revenue Office: you are eligible for a rebate of £286.40. Claim your money today.'],
+    // (c) a link next to the money
+    ['EUR', 'DE', 'Belastung von 1.250,00 EUR auf Ihrem Konto. Nicht Sie? Pruefen: konto-sicher.example/check'],
+    ['USD', 'US', 'Your account was charged $329.00 for a renewal. Details: https://acct-help.example/renew'],
+    // (d) India promo / loan bait
+    ['INR', 'IN', 'Rs. 750 credited to your account. Only 45 mins left. Tap here to Claim Now! shopzy.example/u/a81f'],
+    ['INR', 'IN', 'Congrats, INR 45,000.00 Can Be Credited To Your A/c xxxxx4410. Check Now: qk7.example/z1'],
+    // (e) an initiated refund that will only reflect later
+    ['INR', 'IN', 'Refund of Rs 84.0 has been initiated for your order FD5521. Updated balance should reflect in 3-5 days.'],
+    // (f) activation / PIN codes
+    ['INR', 'IN', 'ACTIVATION CODE 448812 for your card 4410: a charge of Rs.50 applies on activation.'],
+    ['USD', 'US', 'Your PIN 9921 authorises the purchase of $75.00 at QUICKMART. Do not share it.'],
+  ]) {
+    ok(`${cc}: a lure or fraud question is never auto-added — ${body.slice(0, 50)}…`, auto(currency, cc, body) === null,
+      auto(currency, cc, body));
+  }
+  for (const [currency, cc, body, type, minor] of [
+    ['INR', 'IN', 'Rs. 2,400.00 credited to your A/c XX4410 on 05/10/2026 by A/c linked to VPA asha@upi (UPI Ref No 512233).', 'income', 240000],
+    ['USD', 'US', 'Lakeside Bank: $64.90 spent at RIVERSIDE GROCER on card ending 2201. Not you? Call 1-800-555-0100.', 'expense', 6490],
+    ['QAR', 'QA', 'Your debit card has been used for a purchase of QAR 318 at CITY MART and the available balance is QAR 1,120. In case the transaction is suspicious please call 4440000.', 'expense', 31800],
+  ]) {
+    const row = auto(currency, cc, body);
+    ok(`${cc} control: a genuine alert still auto-adds — ${body.slice(0, 40)}…`,
+      row?.bestEffort && row.type === type && row.amountFils === minor, row);
+  }
+  {
+    // A link footer: allowed from a registered alphanumeric bank header,
+    // never from a phone number, an e-mail address or a generic header.
+    const body = 'Rs.640.00 paid to KIRAN STORES from your a/c XX4410 on 05/10/2026. History: https://m.walletbank.example/h';
+    const row = auto('INR', 'IN', body, 2, 'AD-WLTBNK');
+    ok('IN control: a registered bank header with a link footer still auto-adds',
+      row?.bestEffort && row.type === 'expense' && row.amountFils === 64000, row);
+    for (const sender of ['56161', 'com.walletbank.android']) {
+      const r = auto('INR', 'IN', body, 2, sender);
+      ok(`IN control: a carrier short code / app package "${sender}" with a link footer still auto-adds`,
+        r?.bestEffort && r.amountFils === 64000, r);
+    }
+    for (const sender of ['+919812345678', 'alerts@walletbank.example', 'INFO', '']) {
+      ok(`IN: the same link-carrying alert from "${sender}" is never auto-added`, auto('INR', 'IN', body, 2, sender) === null);
+    }
+    const descriptor = auto('THB', 'TH', 'Purchase 412.00 THB WWW.SIAMRIDE.COM from card x-4801 (06/03/26, 11:22 hr)', 2, '');
+    ok('TH control: an upper-case merchant domain in a card descriptor is not a link',
+      descriptor?.bestEffort && descriptor.amountFils === 41200, descriptor);
+  }
+  // H3. "<payee> has received your transfer" is money OUT, never income.
+  ok('DE: "<payee> has received your bank transfer" is never auto-added as income',
+    auto('EUR', 'DE', 'Jonas Albrecht has received your bank transfer of €210 from your account.') === null ||
+      auto('EUR', 'DE', 'Jonas Albrecht has received your bank transfer of €210 from your account.')?.type !== 'income');
+  // F1 control: a named payee before A/C is not the alerting bank's account.
+  {
+    const row = auto('KES', 'KE', 'KES 18,250 sent to WANJIRU MAINA A/C ****5520. Pesalink transfer complete.');
+    ok('KE control: "sent to <NAMED PAYEE> A/C ****" still auto-adds as an expense',
+      row?.bestEffort && row.type === 'expense' && row.amountFils === 1825000, row);
+  }
+  for (const [currency, cc, body, minor] of [
+    ['USD', 'US', 'You paid $15.00 at CORNER CAFE with card ending 4410 on 05/10/2026.', 1500],
+    ['SGD', 'SG', 'You paid S$15.00 at CORNER CAFE with card ending 4410 on 05/10/2026.', 1500],
+    ['USD', 'US', 'You paid US$15.00 at CORNER CAFE with card ending 4410 on 05/10/2026.', 1500],
+  ]) {
+    const row = auto(currency, cc, body);
+    ok(`${cc} control: ${body.slice(9, 17)} on a ${currency} ledger posts ${minor}`, row?.amountFils === minor && row.currency === currency, row);
+  }
+}
+
 console.log(`\nbest-effort-autopost: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

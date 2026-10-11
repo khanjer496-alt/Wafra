@@ -174,5 +174,25 @@ for (const [label, source, reason] of [
   ok('two different figures stay two amounts', two.candidates.length === 2, two.candidates);
 }
 
+// G1 (synthetic). A figure the currency's exponent cannot hold is the
+// unreadable transaction amount; it must not hand the amount to another number.
+{
+  const yen = inspectAlertDraft('Card purchase 812.40 JPY 7 SAKURA MART 2 Balance 15,200 JPY');
+  ok('an impossible yen figure is flagged, never silently skipped', yen.reasons.includes('exponent-invalid-money') &&
+    yen.decision === 'refuse', yen.reasons);
+  const clock = inspectAlertDraft('38.15 KRW 9:45 HANA STORE card ending 4410');
+  ok('a clock is never a money candidate', !clock.candidates.some((c) => c.minorUnits === '9'), clock.candidates);
+  ok('a won figure with decimals is flagged', clock.reasons.includes('exponent-invalid-money'), clock.reasons);
+  const valid = inspectAlertDraft('Purchase of JPY 4,650 at SAKURA MART');
+  ok('control: a whole yen figure still reads exactly', valid.candidates.length === 1 &&
+    valid.candidates[0].minorUnits === '4650' && !valid.reasons.includes('exponent-invalid-money'), valid);
+  const padded = inspectAlertDraft('Purchase of JPY 4,650.00 at SAKURA MART. AED 113.85');
+  ok('control: an all-zero yen fraction is not treated as an impossible figure',
+    !padded.reasons.includes('exponent-invalid-money'), padded.reasons);
+  const kwd = inspectAlertDraft('KWD 12.345 debited at THE AVENUES');
+  ok('control: a three-decimal dinar is not flagged', !kwd.reasons.includes('exponent-invalid-money') &&
+    kwd.candidates[0].interpretations.some((i) => i.minorUnits === '12345'), kwd);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
