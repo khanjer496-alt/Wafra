@@ -7299,5 +7299,29 @@ t('control: a payment credited to a named biller account stays an expense',
   'Your payment of AED 200.00 has been credited to your du account 0551234567.',
   { kind: 'transaction', type: 'expense', amountFils: 20000 });
 
+// Fold review (#151), LOW: ADIB's three-digit masked tail ("*482") sits
+// directly behind the mask. A mask, a space and a decimal figure is an
+// amount, never a card or account identity.
+{
+  const { setActiveMarket } = require('./build/markets');
+  setActiveMarket('AE');
+  for (const [body, bad] of [
+    ['Your Credit Card XXX 250.00 AED purchase at NOON', '250'],
+    ['Your a/c *** 250 has been credited with AED 250.00', '250'],
+    ['AED 100.00 debited from card ** 100.00 remaining', '100'],
+  ]) {
+    const p = parseSms(body);
+    ok(`fold review: "${body.slice(0, 40)}" never names •${bad}`, !p || !p.card || p.card.last4 !== bad, p && p.card);
+  }
+  t('fold review control: ADIB "card ending with *482" still names the card',
+    'Your ADIB Card ending with *482 was used for AED 54.00 at CARREFOUR on 02/10/2026',
+    { kind: 'transaction', type: 'expense', amountFils: 5400, card: { last4: '482', kind: 'unknown' } });
+  t('fold review control: ADCB "Credit Card ending *** 6383" still names the card',
+    'Your Credit Card ending *** 6383 was used for AED 54.00 at CARREFOUR on 02/10/2026',
+    { kind: 'transaction', type: 'expense', amountFils: 5400 });
+  const adcb = parseSms('Your Credit Card ending *** 6383 was used for AED 54.00 at CARREFOUR on 02/10/2026');
+  ok('fold review control: the spaced four-digit ADCB tail is •6383', adcb?.card?.last4 === '6383', adcb?.card);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

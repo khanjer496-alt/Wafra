@@ -2953,12 +2953,17 @@ const CARD_KIND_WORDS = /credit|covered|charge/i;
 // ADIB alerts carry 3- and 4-digit tails only, and the corpus invariant holds
 // a card identity to three or four digits (a two-digit tail collides one time
 // in a hundred). Group 2 is the masked tail, group 3 the plain four digits.
+// The THREE-digit tail sits directly behind the mask ("*482"); after a space
+// only four digits are a tail ("*** 6383"). Neither may be the start of a
+// decimal figure: "Credit Card XXX 250.00 AED" and "card ** 100.00" are
+// amounts, not cards.
 const CARD_RE =
-  /(credit|debit|covered|charge|prepaid)?\s*card(?:\s*(?:no\.?|number))?\s*:?\s*(?:ending(?:\s+(?:in|with))?)?\s*(?:(?:\.\.+|x+|\*+|[·•]+)\s*(\d{3,4})|(\d{4}))\b/i;
+  /(credit|debit|covered|charge|prepaid)?\s*card(?:\s*(?:no\.?|number))?\s*:?\s*(?:ending(?:\s+(?:in|with))?)?\s*(?:(?:\.\.+|x+|\*+|[·•]+)(?:\s*(?=\d{4}\b)|(?=\d{3}\b))(\d{3,4})|(\d{4}))\b(?![.,]\d)/i;
 // ADIB's "your account *917" is the same three-digit masked tail as its card
 // form; accepted only behind a mask run (group 1 masked, group 2 plain).
+// Same tail rule as CARD_RE: "a/c *** 250 has been credited" is not •250.
 const ACCOUNT_RE =
-  /a\/?c(?:count)?\s*(?:no\.?|number)?\s*:?\s*(?:(?:\.\.+|x+|\*+|[·•]+)\s*(\d{3,4})|(?:ending(?:\s+(?:in|with))?)?\s*(\d{4}))\b/i;
+  /a\/?c(?:count)?\s*(?:no\.?|number)?\s*:?\s*(?:(?:\.\.+|x+|\*+|[·•]+)(?:\s*(?=\d{4}\b)|(?=\d{3}\b))(\d{3,4})|(?:ending(?:\s+(?:in|with))?)?\s*(\d{4}))\b(?![.,]\d)/i;
 /** Account identity with a formatted masked middle: "095-XXX11XXX-0001". */
 // FAB writes its account numbers this way, and the plain ACCOUNT_RE below
 // stops at the first mask run — so "account no. 095-XXX11XXX-0001" either
