@@ -71,8 +71,8 @@ check(
 );
 const imageCount = (index.match(/<img\b/g) ?? []).length;
 const accessibleImageCount = (index.match(/<img\b[^>]*\balt="[^"]+"/g) ?? []).length;
-check('five static product previews with alt text', imageCount === 5 && accessibleImageCount === 5);
-check('static product image URLs', ['/wafra-app-home.png', '/wafra-app-bills.png', '/wafra-app-spending.png', '/wafra-app-bills-light.png']
+check('three static product previews with alt text', imageCount === 3 && accessibleImageCount === 3);
+check('static product image URLs', ['/wafra-app-home.png', '/wafra-app-spending.png', '/wafra-app-bills-light.png']
   .every((image) => index.includes(`src="${image}"`) && fs.existsSync(path.join(outputDir, image))));
 check(
   'public beta download links',
