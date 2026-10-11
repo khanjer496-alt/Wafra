@@ -65,16 +65,18 @@ const POSTING = [
   { id: 'om-ar-salary', market: 'OM', ledger: 'OMR', sender: 'BankMuscat', provenance: 'synthetic',
     text: 'تم إيداع راتب بمبلغ 850.000 ريال عماني في حسابك رقم XXXX1234',
     expect: 'best-effort', type: 'income', minor: 850000, date: null },
-  // Oman: OM-BM-1 certified template (OMR after, then before the amount)
+  // Oman: OM-BM-1 certified template. Only the bank's fixed Arabic skeleton
+  // is kept; mask lengths, clock times, merchants, terminal ids, amounts and
+  // the ب[إا]ستخدام spelling are Wafra's own choices.
   { id: 'om-bm1-suffix', market: 'OM', ledger: 'OMR', sender: 'BankMuscat', provenance: 'community-derived',
-    text: 'تم خصم 0.750 OMR من حسابك رقم XXXXX1234 بإستخدام بطاقة الخصم المباشر في 123456-SAMPLE GROCERY MUSCAT بتاريخ 2026/10/02 14:43:57. رصيدك الحالي هو 500.120 OMR.',
-    expect: 'certified', type: 'expense', minor: 750, date: '2026-10-02', merchant: 'SAMPLE GROCERY MUSCAT', last4: '1234' },
+    text: 'تم خصم 2.375 OMR من حسابك رقم XXXX5821 باستخدام بطاقة الخصم المباشر في SAMPLE PHARMACY SALALAH بتاريخ 2026/09/21 08:27:41. رصيدك الحالي هو 318.640 OMR.',
+    expect: 'certified', type: 'expense', minor: 2375, date: '2026-09-21', merchant: 'SAMPLE PHARMACY SALALAH', last4: '5821' },
   { id: 'om-bm1-prefix', market: 'OM', ledger: 'OMR', sender: 'BankMuscat', provenance: 'community-derived',
-    text: 'تم خصم OMR 1.200 من حسابك رقم XXXXXXX1234 بإستخدام بطاقة الخصم المباشر في SAMPLE CAFE-654321 SEEB بتاريخ 2026/10/03 09:15:00. رصيدك الحالي هو 1498.920 OMR.',
-    expect: 'certified', type: 'expense', minor: 1200, date: '2026-10-03', merchant: 'SAMPLE CAFE SEEB', last4: '1234' },
+    text: 'تم خصم OMR 4.050 من حسابك رقم ******3307 بإستخدام بطاقة الخصم المباشر في 7031-SAMPLE BOOKSHOP بتاريخ 2026/09/28 19:52:06. رصيدك الحالي هو 92.415 OMR.',
+    expect: 'certified', type: 'expense', minor: 4050, date: '2026-09-28', merchant: 'SAMPLE BOOKSHOP', last4: '3307' },
   { id: 'om-bm1-grouped', market: 'OM', ledger: 'OMR', sender: 'BankMuscat', provenance: 'community-derived',
-    text: 'تم خصم 1,250.000 OMR من حسابك رقم XXXXX1234 بإستخدام بطاقة الخصم المباشر في SAMPLE FURNITURE-778899 بتاريخ 2026/10/04 18:02:11. رصيدك الحالي هو 2,100.500 OMR.',
-    expect: 'certified', type: 'expense', minor: 1250000, date: '2026-10-04', merchant: 'SAMPLE FURNITURE', last4: '1234' },
+    text: 'تم خصم 3,480.000 OMR من حسابك رقم XXXXXXXX9046 باستخدام بطاقة الخصم المباشر في SAMPLE MOTORS-40917 SOHAR بتاريخ 2026/10/07 11:05:33. رصيدك الحالي هو 6,212.875 OMR.',
+    expect: 'certified', type: 'expense', minor: 3480000, date: '2026-10-07', merchant: 'SAMPLE MOTORS SOHAR', last4: '9046' },
 ];
 
 // Never-post cases, English and Arabic, each on a recognised-institution route.
@@ -87,8 +89,8 @@ const NEVER = [
   { id: 'pending-ar', market: 'BH', ledger: 'BHD', sender: 'NBB', text: 'عملية بمبلغ 4.250 د.ب على بطاقتك المنتهية 1234 لدى SAMPLE SHOP معلقة' },
   { id: 'promo-en', market: 'QA', ledger: 'QAR', sender: 'QNB', text: 'QNB: Get 10% cashback on purchases above QAR 200.00 at SAMPLE MALL this weekend. T&Cs apply.' },
   { id: 'promo-ar', market: 'QA', ledger: 'QAR', sender: 'QNB', text: 'عرض خاص: استرداد نقدي 10% على مشترياتك فوق 200.00 ر.ق لدى SAMPLE MALL' },
-  { id: 'balance-en', market: 'OM', ledger: 'OMR', sender: 'BankMuscat', text: 'Your available balance in account XXXX1234 is OMR 500.120 as of 05/10/2026.' },
-  { id: 'balance-ar', market: 'OM', ledger: 'OMR', sender: 'BankMuscat', text: 'رصيدك الحالي هو 500.120 OMR في حسابك رقم XXXXX1234' },
+  { id: 'balance-en', market: 'OM', ledger: 'OMR', sender: 'BankMuscat', text: 'Balance update: account ending 5821 holds OMR 318.640 as at 05/10/2026.' },
+  { id: 'balance-ar', market: 'OM', ledger: 'OMR', sender: 'BankMuscat', text: 'الرصيد المتوفر لحسابك المنتهي بـ 5821 هو 318.640 OMR' },
   { id: 'limit-en', market: 'KW', ledger: 'KWD', sender: 'NBK', text: 'Your credit card ending 1234 limit has been increased to KWD 2,000.000.' },
   { id: 'limit-ar', market: 'KW', ledger: 'KWD', sender: 'NBK', text: 'تم رفع الحد الائتماني لبطاقتك المنتهية 1234 إلى 2,000.000 د.ك' },
   { id: 'ministatement-en', market: 'BH', ledger: 'BHD', sender: 'BBK', text: 'Mini statement A/C XX1234: 01/10 BHD 5.000 DR; 02/10 BHD 12.000 CR; 03/10 BHD 3.500 DR.' },
@@ -100,9 +102,9 @@ const NEVER = [
   { id: 'heading-ar', market: 'KW', ledger: 'KWD', sender: 'NBK', text: 'بطاقة 1234 شراء KWD 5.000 SAMPLE SHOP' },
   // A stated date after the alert arrived.
   { id: 'future-en', market: 'KW', ledger: 'KWD', sender: 'NBK', text: 'Purchase of KWD 12.345 with Debit Card ending 1234 at SAMPLE SHOP on 25/12/2026.' },
-  { id: 'future-bm1', market: 'OM', ledger: 'OMR', sender: 'BankMuscat', text: 'تم خصم 0.750 OMR من حسابك رقم XXXXX1234 بإستخدام بطاقة الخصم المباشر في SAMPLE GROCERY بتاريخ 2026/12/02 14:43:57. رصيدك الحالي هو 500.120 OMR.' },
+  { id: 'future-bm1', market: 'OM', ledger: 'OMR', sender: 'BankMuscat', text: 'تم خصم 6.200 OMR من حسابك رقم XXXX5821 باستخدام بطاقة الخصم المباشر في SAMPLE TAILOR NIZWA بتاريخ 2026/12/14 16:38:20. رصيدك الحالي هو 74.905 OMR.' },
   // A template-shaped alert carrying OTP wording.
-  { id: 'bm1-otp', market: 'OM', ledger: 'OMR', sender: 'BankMuscat', text: 'تم خصم 0.750 OMR من حسابك رقم XXXXX1234 بإستخدام بطاقة الخصم المباشر في SAMPLE GROCERY بتاريخ 2026/10/02 14:43:57. رصيدك الحالي هو 500.120 OMR. لا تشارك رمز التحقق' },
+  { id: 'bm1-otp', market: 'OM', ledger: 'OMR', sender: 'BankMuscat', text: 'تم خصم 1.900 OMR من حسابك رقم ******3307 بإستخدام بطاقة الخصم المباشر في SAMPLE LAUNDRY بتاريخ 2026/09/30 07:12:49. رصيدك الحالي هو 41.330 OMR. لا تشارك رمز التحقق' },
   // A comma-written three-decimal figure stays ambiguous even when routed.
   { id: 'comma-kwd', market: 'KW', ledger: 'KWD', sender: 'NBK', text: 'Purchase of KWD 12,500 with Debit Card ending 1234 at SAMPLE SHOP on 05/10/2026.' },
   // A three-digit dot tail in a two-decimal currency is never a decimal.

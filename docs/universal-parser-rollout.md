@@ -88,10 +88,15 @@ currency (`dotDecimalCurrencies` in the pack, read by `alert-draft.ts`). It is
 never twelve thousand. Unrouted figures, other currencies on the same alert
 (`USD 1.250`), comma-written figures (`KWD 12,500`) and repeated separators
 keep their ambiguity, and the riyal (two decimals) never reads a three-digit
-tail as a decimal. After routing, the packs also accept `QR` beside a figure
-(never "QR code"), `ريال قطري`, `دينار كويتي`, `دينار بحريني` and
+tail as a decimal. After routing, the packs also accept `QR` beside a
+two-decimal figure (`QR 42.50`, `42.50 QR`; never "QR code", "Scan QR 3
+times" or `QR 123456`), `ريال قطري`, `دينار كويتي`, `دينار بحريني` and
 `ريال عماني`; a bare `ريال` or `دينار` is shared by several countries and is
-never evidence.
+never evidence. The pre-routing money hint (`REVIEW_MONEY_HINT`) follows the
+same rule, so a chat saying "دينار" or "12 QR codes" never reaches the
+worldwide router. A spelling the universal reader did not use as money stays
+as written for the launch grammar, so "at BD 12 STORE" keeps its merchant
+name instead of becoming "BHD 12 Store".
 
 **Routing.** Brands that also bank elsewhere count as a market's institution
 only when the alert also states that market's own currency (ISO code, unique
@@ -159,6 +164,27 @@ as every other non-launch alert (`parseUniversalPostedEvent` in
   setting, so this one does too. Bank Muscat's deposit, transfer, payment, ATM
   and refund alerts have no real sample, so they have no template. They take
   the marked grammar path or Review.
+  The merchant slot accepts only a card descriptor (Latin letters, digits,
+  space and `& ' * / -`, a full stop only inside a token), so a sentence such
+  as "SHOP. ألغيت العملية" or "SHOP. Transaction failed" between the merchant
+  and `بتاريخ` can never be read as part of the name. The template reader and
+  the certification registry also check the WHOLE message against the shared
+  non-completed wording guard plus template-only words (refunded, returned,
+  blocked, disputed, `استرجاع/استرداد/إرجاع/إعادة`, `تعليق/إيقاف`, `بانتظار`,
+  `قيد المراجعة`, `لا تشارك`, `إذا لم تقم`); certification no longer returns
+  `automatic` on `event.status` alone.
+- **Notifications.** The same decision owns a notification routed to QA/KW/BH/OM
+  through a recognised institution: `auto-import.ts` lets
+  `parseLaunchAlert` (and so `decideGulfNeighbourPosting`) decide, and the
+  universal certification and Green semantic generalization never post such a
+  row on their own. Heading-only notices therefore go to Review on
+  notifications too, and the best-effort setting gates Bank Muscat's template
+  there as it does on SMS. (Certified templates in other countries keep their
+  existing notification rule; the Gulf-neighbour rule is stricter because
+  every neighbour post, template included, is under the setting.)
+- **Card bill payments** ("Your card 1234 bill of KWD 120.500 has been paid",
+  "تم سداد فاتورة البطاقة …", "payment … towards your card") are moving money
+  between the person's own accounts, never spending: they go to Review.
 - **Heading-only notices** (an amount and a card with no completion verb) are
   never booked here. They could be booked only inside an exact per-bank
   certified template with a masked card and no negation, pending, OTP or promo
@@ -166,7 +192,36 @@ as every other non-launch alert (`parseUniversalPostedEvent` in
 - **Never posted**, each pinned in English and Arabic: OTP and verification
   codes, declines, pending holds, promotions and cashback offers, balance-only
   notices, limit changes, mini-statements, bills and amounts due, future-dated
-  alerts and template-shaped alerts carrying OTP wording.
+  alerts and template-shaped alerts carrying OTP wording. The shared
+  non-completed guard (`best-effort-autopost.ts`, every marked path) now also
+  refuses `ألغيت`, `لم تنجح`, `غير ناجحة`, `غير مكتملة`, a suspended or stopped
+  card, `استرجاع/استرداد/إرجاع/إعادة المبلغ`, `بانتظار`, `قيد المراجعة`,
+  `لا تشارك`, "amount refunded/returned", "to be debited", "blocked" and a
+  raised dispute. "إذا لم تقم بهذه العملية اتصل بنا" is a security footer on
+  genuine completed alerts and is deliberately not a veto on the marked path
+  (it does break the exact template).
+
+**Conservative outcomes, by design.** These go to Review after this change
+where they posted (marked) before, and are pinned in
+`gulf-neighbour-alerts.test.js`:
+
+- `Purchase of QAR 1.500 …`: a riyal never has three decimals, and the
+  grouped reading (QAR 1,500) is not stated, so the figure is not trusted.
+- `Purchase of KWD 1.234.500 …`: repeated full stops stay ambiguous even on a
+  Kuwaiti route.
+- `QR 123456 reference: …`: `QR` beside a bare integer is a code, not money.
+- `You have sent KWD 50.000 to TEST PERSON`: no completion verb the policy
+  recognises ("sent" alone), so it waits in Review.
+- Body-only brands (Dukhan Bank, Bank Nizwa, National Bank of Oman, and the
+  other body identities above) route by name even when the alert states
+  another currency: `Bank Nizwa: USD 50.00 debited …` on a US/USD ledger used
+  to post as a marked US alert and now routes to Oman, where its USD is not
+  the market's own currency, so it waits in Review with the amount filled.
+  This is intentional. These are single-country banks, so a USD alert from
+  one is a foreign spend in Oman, not a US alert; requiring OMR before the
+  name counts would hand the alert back to the generic policy under a US
+  route, which attributes it to the wrong country. Review is the
+  conservative outcome. Multi-country brands keep the own-currency rule.
 
 Fixtures: `scripts/test/fixtures/gulf-neighbour-alert-fixtures.js`, written in
 Wafra's own words with fictional values and per-row provenance (`synthetic`

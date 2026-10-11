@@ -1,6 +1,7 @@
 import type { UniversalMarket } from '@/lib/alert-market-pack-types';
 import { alertMarketPack } from '@/lib/alert-market-packs';
-import { BANK_MUSCAT_CARD_PURCHASE_TEMPLATE } from '@/lib/gulf-neighbour-templates';
+import { hasNonCompletedWording } from '@/lib/best-effort-autopost';
+import { BANK_MUSCAT_CARD_PURCHASE_TEMPLATE, readBankMuscatCardPurchase } from '@/lib/gulf-neighbour-templates';
 import { assessUniversalEventConfidence } from '@/lib/universal-confidence';
 import type { UniversalBankEvent } from '@/lib/universal-types';
 
@@ -49,6 +50,8 @@ interface CertificationRule {
   family: UniversalBankEvent['family'];
   direction: 'debit' | 'credit' | 'either';
   source: RegExp;
+  /** Extra whole-message check the shape alone cannot express (field validity, slot vetoes). */
+  accept?: (source: string) => boolean;
 }
 
 /**
@@ -130,7 +133,9 @@ const CERTIFIED_RULES: readonly CertificationRule[] = [
   // evidence is community-derived structure (three alerts, one shape), written
   // here in Wafra's own fixtures; no other Gulf-neighbour family has a sample.
   { id: 'om-bank-muscat-card-purchase-v1', market: 'OM', institution: 'bank-muscat', family: 'purchase', direction: 'debit',
-    source: BANK_MUSCAT_CARD_PURCHASE_TEMPLATE },
+    source: BANK_MUSCAT_CARD_PURCHASE_TEMPLATE,
+    // The template's own reader: valid fields and no veto anywhere in the message.
+    accept: (source) => readBankMuscatCardPurchase(source) !== null },
 ] as const;
 
 const NON_TRANSACTION_FAMILIES = new Set<UniversalBankEvent['family']>([
@@ -215,7 +220,8 @@ export function certifyUniversalTemplate(
     rule.institution === input.institution &&
     rule.family === event.family &&
     (rule.direction === 'either' || rule.direction === event.direction) &&
-    rule.source.test(source));
+    rule.source.test(source) &&
+    (!rule.accept || rule.accept(source)));
   if (!match) {
     if (semanticGeneralizationIsSafe(input, confidence)) {
       return { decision: 'semantic-generalized', templateId: null, reason: 'semantic-generalization' };
@@ -224,6 +230,12 @@ export function certifyUniversalTemplate(
       decision: 'review', templateId: null,
       reason: input.allowSemanticGeneralization ? 'semantic-guard-failed' : 'uncertified-template',
     };
+  }
+  // event.status alone is not enough: an anchored shape can still carry a
+  // declined/reversed/pending sentence in a free slot. The whole message must
+  // pass the shared non-completed wording guard before it is automatic.
+  if (hasNonCompletedWording(source)) {
+    return { decision: 'never-post', templateId: null, reason: 'non-posting' };
   }
   return { decision: 'automatic', templateId: match.id, reason: 'certified-template' };
 }

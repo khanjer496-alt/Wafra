@@ -55,6 +55,12 @@ export const isGulfNeighbourMarket = (market: string | null | undefined): market
 
 const latinBeside = (token: string): RegExp =>
   new RegExp(String.raw`(?<![\p{L}\p{N}])${token}(?=\s{0,3}\d)|(?<=\d\s{0,3})${token}(?![\p{L}\p{N}])`, 'giu');
+/**
+ * "QR" is also the QR code ("Scan QR 3 times", "QR 123456 reference"), so it
+ * is money only beside a two-decimal riyal figure ("QR 42.50", "42.50 QR").
+ */
+const QR_BESIDE_MONEY =
+  /(?<![\p{L}\p{N}])QR(?=\s{0,3}\d{1,3}(?:,\d{3})*\.\d{2}(?!\d))|(?<=(?<![\d.,])\d{1,3}(?:,\d{3})*\.\d{2}\s{0,3})QR(?![\p{L}\p{N}])/giu;
 
 /**
  * Route-scoped spellings of the market's own currency, rewritten to its ISO
@@ -63,15 +69,46 @@ const latinBeside = (token: string): RegExp =>
  * directly beside a figure, so "QR code" or a "BD" reference is never money.
  */
 const LOCAL_SPELLINGS: Readonly<Record<GulfNeighbourMarket, readonly RegExp[]>> = {
-  QA: [/ر\.\s?ق\.?/gu, /ريال\s+قطري/gu, latinBeside('QR')],
+  QA: [/ر\.\s?ق\.?/gu, /ريال\s+قطري/gu, QR_BESIDE_MONEY],
   KW: [/د\.\s?ك\.?/gu, /دينار\s+كويتي/gu, latinBeside('KD')],
   BH: [/د\.\s?ب\.?/gu, /دينار\s+بحريني/gu, latinBeside('BD')],
   OM: [/ر\.\s?ع\.?/gu, /ريال\s+عماني/gu, latinBeside(String.raw`R\.O\.?`), latinBeside('RO')],
 };
 
+interface SpellingEdit { start: number; end: number; original: string }
+
+/** Every local spelling in `source` (original offsets), earliest first, never overlapping. */
+const spellingEdits = (source: string, market: GulfNeighbourMarket): SpellingEdit[] => {
+  const found: SpellingEdit[] = [];
+  for (const pattern of LOCAL_SPELLINGS[market]) {
+    for (const match of source.matchAll(new RegExp(pattern.source, pattern.flags))) {
+      const start = match.index!;
+      const end = start + match[0].length;
+      if (!found.some((edit) => start < edit.end && end > edit.start)) found.push({ start, end, original: match[0] });
+    }
+  }
+  return found.sort((a, b) => a.start - b.start);
+};
+
+/** `source` with the chosen edits rewritten to the ISO code, plus each edit's span in the result. */
+const applyEdits = (
+  source: string, market: GulfNeighbourMarket, edits: readonly SpellingEdit[],
+): { text: string; spans: { start: number; end: number }[] } => {
+  const iso = GULF_NEIGHBOUR_CURRENCY[market];
+  let text = '';
+  let at = 0;
+  const spans: { start: number; end: number }[] = [];
+  for (const edit of edits) {
+    text += source.slice(at, edit.start);
+    spans.push({ start: text.length, end: text.length + iso.length });
+    text += iso;
+    at = edit.end;
+  }
+  return { text: text + source.slice(at), spans };
+};
+
 export const gulfNeighbourReadSource = (source: string, market: GulfNeighbourMarket): string =>
-  LOCAL_SPELLINGS[market].reduce(
-    (text, pattern) => text.replace(pattern, GULF_NEIGHBOUR_CURRENCY[market]), source);
+  applyEdits(source, market, spellingEdits(source, market)).text;
 
 /**
  * A completion verb, English or Arabic. "Purchase of" is the launch grammar's
@@ -79,6 +116,14 @@ export const gulfNeighbourReadSource = (source: string, market: GulfNeighbourMar
  * "شراء بطاقة") is not.
  */
 const COMPLETION = /\b(?:purchase\s+of|was\s+used\s+(?:for|at)|debited|credited|deducted|withdrawn|deposited|paid|spent|refunded|transferred|received|charged|was\s+successful)\b|تمت?\s+(?:عملية\s+)?(?:ال)?(?:خصم|إيداع|ايداع|تحويل|سداد|سحب|شراء|استرداد|قيد|إضافة|اضافة|دفع)/iu;
+
+/**
+ * Paying the card's own bill moves money between the person's accounts; it is
+ * a card payment, never spending. ("Your card 1234 bill of KWD 120.500 has
+ * been paid", "تم سداد فاتورة البطاقة …".)
+ */
+// Within one sentence: a full stop counts only when a digit follows (120.500).
+const CARD_BILL_PAYMENT = /\bcard\b(?:[^.\n]|\.(?=\d)){0,40}\b(?:bill|dues?|outstanding|statement\s+balance)\b(?:[^.\n]|\.(?=\d)){0,60}\b(?:paid|settled|received)\b|\b(?:payment|repayment)\b(?:[^.\n]|\.(?=\d)){0,40}\b(?:towards|to|for)\s+(?:your\s+)?(?:credit\s+)?card\b|(?:سداد|تسديد|دفع)\s+(?:فاتورة\s+|مستحقات\s+)?(?:ال)?بطاق/iu;
 
 /** A changed card or account limit is information, never a movement. */
 const LIMIT_CHANGE = /\blimit\b[^.\n]{0,40}\b(?:increased|decreased|reduced|changed|updated|revised|enhanced|raised)\b|\b(?:increase|decrease|reduction|change)\s+(?:of|in|to)\s+(?:your\s+)?(?:credit\s+|card\s+)?limit\b|(?:رفع|زيادة|تخفيض|تعديل|تغيير)\s+(?:ال)?حد/iu;
@@ -95,6 +140,7 @@ const POSTABLE_FAMILIES = new Set<UniversalBankEvent['family']>([
 export type GulfNeighbourRefusal =
   | 'disabled'
   | 'non-posting-wording'
+  | 'card-payment'
   | 'not-posted'
   | 'no-completion-verb'
   | 'grammar-unmatched'
@@ -187,13 +233,27 @@ export function decideGulfNeighbourPosting(input: GulfNeighbourInput): GulfNeigh
   if (!market || !input.institution) return { outcome: 'not-applicable' };
   if (!input.enabled) return review('disabled');
   if (hasNonCompletedWording(input.source) || LIMIT_CHANGE.test(input.source)) return review('non-posting-wording');
+  if (CARD_BILL_PAYMENT.test(input.source)) return review('card-payment');
 
   const own = GULF_NEIGHBOUR_CURRENCY[market];
   const exponent = currencyMinorUnits(own)!;
-  const read = gulfNeighbourReadSource(input.source, market);
+  const edits = spellingEdits(input.source, market);
+  const rewritten = applyEdits(input.source, market, edits);
+  const read = rewritten.text;
   const event = inspectUniversalBankEvent(read, {
     sender: input.sender, market, dateOrder: dateOrderForCountry(market) ?? undefined,
   });
+  // The grammar reads a copy where ONLY spellings the universal reader used
+  // as money (the amount, a balance) are ISO codes. A spelling it did not
+  // read as money ("at BD 12 STORE") is part of a name and stays as written,
+  // so the merchant comes from the original text.
+  const moneySpans = event.observations
+    .filter((observation) => observation.role !== 'unknown')
+    .flatMap((observation) => observation.field.spans);
+  const grammarRead = applyEdits(input.source, market, edits.filter((_edit, index) => {
+    const span = rewritten.spans[index];
+    return moneySpans.some((money) => span.start < money.end && span.end > money.start);
+  })).text;
   if (event.decision !== 'review' || event.status !== 'posted' ||
     ['statement', 'balance', 'authentication', 'bill', 'card-payment'].includes(event.family) ||
     event.issues.some((issue) => BLOCKING_ISSUES.has(issue))) {
@@ -219,7 +279,7 @@ export function decideGulfNeighbourPosting(input: GulfNeighbourInput): GulfNeigh
     };
   } else {
     if (!COMPLETION.test(read)) return review('no-completion-verb');
-    const grammar = grammarReading(read, own, input);
+    const grammar = grammarReading(grammarRead, own, input);
     if (typeof grammar === 'string') return review(grammar);
     reading = grammar;
   }

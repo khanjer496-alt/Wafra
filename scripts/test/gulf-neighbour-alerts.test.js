@@ -19,6 +19,7 @@ const { inspectAlertInstitutionGrammar } = require('./build/alert-institution-gr
 const { inspectUniversalBankEvent } = require('./build/universal-parser');
 const { createLaunchAlertSession } = require('./build/launch-alert-parser');
 const { decideGulfNeighbourPosting, gulfNeighbourReadSource } = require('./build/gulf-neighbour-alerts');
+const { REVIEW_MONEY_HINT } = require('./build/launch-alert-parser');
 const { readBankMuscatCardPurchase } = require('./build/gulf-neighbour-templates');
 const { certifyUniversalTemplate } = require('./build/universal-template-certification');
 const markets = require('./build/markets');
@@ -66,7 +67,8 @@ const primary = (review) => review.primaryCandidateIndex === null ? null : revie
     comma.minorUnits === null && comma.ambiguities.includes('decimal-or-grouping'), comma);
   const repeated = inspectAlertDraft('KWD 1.234.500 debited', { dotDecimalCurrencies: ['KWD'] }).candidates[0];
   ok('repeated full stops stay ambiguous even when routed',
-    !repeated || repeated.minorUnits === null, repeated);
+    repeated?.currency === 'KWD' && repeated.minorUnits === null &&
+      repeated.ambiguities.includes('decimal-or-grouping'), repeated);
   const grouped = inspectAlertDraft('KWD 1,234.500 debited', { dotDecimalCurrencies: ['KWD'] }).candidates[0];
   ok('KWD 1,234.500 is 1234500 thousandths', grouped.minorUnits === '1234500', grouped);
 
@@ -79,9 +81,11 @@ const primary = (review) => review.primaryCandidateIndex === null ? null : revie
   const om = primary(inspectMarketAlert('Card purchase 0.650 OMR was debited at SAMPLE SHOP', 'OM'));
   ok('the Oman pack reads 0.650 OMR as 650 thousandths', om?.currency === 'OMR' && om.minorUnits === '650', om);
   const kwInBh = primary(inspectMarketAlert('Card purchase KWD 12.345 was debited at SAMPLE SHOP', 'BH'));
-  ok('a Bahrain route does not settle a Kuwaiti dinar figure', kwInBh?.minorUnits !== '12345', kwInBh);
+  ok('a Bahrain route does not settle a Kuwaiti dinar figure',
+    kwInBh?.currency === 'KWD' && kwInBh.minorUnits === null && kwInBh.ambiguities.includes('decimal-or-grouping'), kwInBh);
   const qa = primary(inspectMarketAlert('Card purchase QAR 12.345 was debited at SAMPLE SHOP', 'QA'));
-  ok('a Qatar route never reads a three-digit tail as a riyal decimal', qa?.minorUnits !== '1234' && qa?.minorUnits !== '12345', qa);
+  ok('a Qatar route never reads a three-digit tail as a riyal decimal (QAR 12.345 is twelve thousand riyals)',
+    qa?.currency === 'QAR' && qa.exponent === 2 && qa.minorUnits === '1234500', qa);
   const qr = primary(inspectMarketAlert('Card purchase QR 150.00 was debited at SAMPLE SHOP', 'QA'));
   ok('QR 150.00 is QAR 15000 after a Qatar route', qr?.currency === 'QAR' && qr.minorUnits === '15000', qr);
   ok('"QR" with no figure is never money',
@@ -186,11 +190,11 @@ for (const row of POSTING) {
   const tail = capture(`${bm.text} للاستفسار اتصل بنا`, bm.sender, bm.market, bm.ledger);
   ok('a Bank Muscat alert with extra text is never certified', !tail || !!tail.bestEffort, tail);
   ok('the template refuses an invalid calendar date',
-    readBankMuscatCardPurchase(bm.text.replace('2026/10/02', '2026/02/30')) === null);
+    bm.text.includes('2026/09/21') && readBankMuscatCardPurchase(bm.text.replace('2026/09/21', '2026/02/30')) === null);
   ok('the template refuses a two-decimal amount',
-    readBankMuscatCardPurchase(bm.text.replace('0.750 OMR', '0.75 OMR')) === null);
+    bm.text.includes('2.375 OMR') && readBankMuscatCardPurchase(bm.text.replace('2.375 OMR', '2.37 OMR')) === null);
   ok('the template refuses a currency on both sides',
-    readBankMuscatCardPurchase(bm.text.replace('0.750 OMR', 'OMR 0.750 OMR')) === null);
+    bm.text.includes('2.375 OMR') && readBankMuscatCardPurchase(bm.text.replace('2.375 OMR', 'OMR 2.375 OMR')) === null);
   // Direct policy: a route with no recognised institution is not this path's.
   ok('no recognised institution leaves the generic policy in charge',
     decideGulfNeighbourPosting({ source: kw.text, sender: '', routedMarket: 'KW', institution: null, enabled: true,
@@ -217,6 +221,123 @@ for (const row of POSTING) {
 for (const row of NEVER) {
   const parsed = capture(row.text, row.sender, row.market, row.ledger);
   ok(`never posted: ${row.id}`, parsed === null, parsed);
+}
+
+/* ── 5. Review findings on 9776500 ─────────────────────────────────────── */
+// Sentences that say the money did not (or not finally) leave the account.
+// Each is written here in Wafra's own words.
+const VETO_AR = [
+  'ألغيت العملية', 'لم تنجح العملية', 'عملية غير ناجحة', 'العملية غير مكتملة', 'تم تعليق البطاقة',
+  'تم إيقاف البطاقة', 'تم استرجاع المبلغ', 'تم استرداد المبلغ', 'تم إرجاع المبلغ', 'تمت إعادة المبلغ',
+  'بانتظار التأكيد', 'قيد المراجعة', 'لا تشارك الرمز مع أحد',
+];
+const VETO_EN = ['Amount refunded.', 'To be debited on 06/10/2026.', 'Blocked.', 'Dispute raised.'];
+// A security footer on a genuine completed alert: never part of the exact template, but not a veto.
+const FOOTER_AR = 'إذا لم تقم بهذه العملية اتصل بنا';
+const bmClean = POSTING.find((row) => row.id === 'om-bm1-prefix');
+const bmWith = (insert) => bmClean.text.replace('SAMPLE BOOKSHOP', `SAMPLE BOOKSHOP${insert}`);
+const certifyOm = (source, institution = 'bank-muscat', allowSemanticGeneralization = false) => certifyUniversalTemplate({
+  market: 'OM', institution, source, event: inspectUniversalBankEvent(source, { market: 'OM' }), rail: null,
+  allowSemanticGeneralization,
+});
+{
+  // HIGH 1: the template's merchant slot must not swallow a sentence.
+  for (const veto of [...VETO_AR, ...VETO_EN, FOOTER_AR]) {
+    for (const insert of [`. ${veto}`, ` ${veto.replace(/\.$/, '')}`]) {
+      const text = bmWith(insert);
+      ok(`template refuses "…BOOKSHOP${insert}" in the merchant slot`, readBankMuscatCardPurchase(text) === null,
+        readBankMuscatCardPurchase(text));
+      const certified = certifyOm(text);
+      ok(`certification refuses "…BOOKSHOP${insert}"`, certified.decision !== 'automatic', certified);
+      const parsed = capture(text, bmClean.sender, bmClean.market, bmClean.ledger);
+      if (veto === FOOTER_AR) {
+        ok(`SMS never posts "…BOOKSHOP${insert}" unmarked`, parsed === null || !!parsed.bestEffort, parsed);
+      } else {
+        ok(`SMS sends "…BOOKSHOP${insert}" to Review`, parsed === null, parsed);
+      }
+    }
+  }
+  ok('a merchant written in Arabic is not the certified template',
+    readBankMuscatCardPurchase(bmClean.text.replace('7031-SAMPLE BOOKSHOP', 'مكتبة العينة')) === null);
+  ok('a merchant holding a full stop and a space is not the certified template',
+    readBankMuscatCardPurchase(bmClean.text.replace('7031-SAMPLE BOOKSHOP', 'SAMPLE CO. BOOKSHOP')) === null);
+  ok('a merchant with an internal abbreviation dot still reads (S.A.M BOOKSHOP)',
+    readBankMuscatCardPurchase(bmClean.text.replace('7031-SAMPLE BOOKSHOP', 'S.A.M BOOKSHOP'))?.merchant === 'S.A.M BOOKSHOP');
+  ok('the clean Bank Muscat alert still certifies',
+    certifyOm(bmClean.text).decision === 'automatic' && readBankMuscatCardPurchase(bmClean.text)?.minorUnits === 4050);
+  ok('certification never returns automatic for non-completed wording anywhere in a certified shape',
+    certifyOm(bmWith(' Transaction failed')).decision !== 'automatic' &&
+      certifyOm(bmWith(' TXN REVERSED')).decision !== 'automatic');
+}
+{
+  // MEDIUM 3: the same sentences after the merchant on the marked grammar path.
+  for (const veto of VETO_AR) {
+    const text = `تم خصم 3.500 د.ك من حسابك رقم XXXX1234 لدى SAMPLE SHOP. ${veto}`;
+    ok(`marked path sends "${veto}" to Review (KW)`, capture(text, 'KFH', 'KW', 'KWD') === null);
+  }
+  for (const veto of VETO_EN) {
+    const text = `Purchase of KWD 12.345 with Debit Card ending 1234 at SAMPLE SHOP on 05/10/2026. ${veto}`;
+    ok(`marked path sends "${veto}" to Review (KW)`, capture(text, 'NBK', 'KW', 'KWD') === null);
+  }
+  const footer = capture(`تم خصم 3.500 د.ك من حسابك رقم XXXX1234 لدى SAMPLE SHOP. ${FOOTER_AR}`, 'KFH', 'KW', 'KWD');
+  ok('a security footer alone does not veto a completed marked debit', footer?.amountFils === 3500 && !!footer.bestEffort, footer);
+}
+{
+  // MEDIUM 2: a heading-only notice is semantic-generalizable, so the Gulf decision must own it.
+  for (const text of ['بطاقة 1234 شراء KWD 5.000 SAMPLE SHOP', 'Card 1234 purchase KWD 5.000 at SAMPLE SHOP']) {
+    const decision = decideGulfNeighbourPosting({ source: text, sender: 'NBK', routedMarket: 'KW',
+      institution: { id: 'national-bank-of-kuwait', sender: true }, enabled: true,
+      ledgerCurrency: 'KWD', ledgerExponent: 3, observedAt: OBSERVED, fxLookup: () => null });
+    ok(`heading-only "${text}" is Review in the Gulf decision`,
+      decision.outcome === 'review' && decision.reason === 'no-completion-verb', decision);
+  }
+}
+{
+  // LOW 4: paying the card's own bill is not spending.
+  for (const text of [
+    'Your card 1234 bill of KWD 120.500 has been paid. Thank you',
+    'Your credit card ending 1234 bill of KWD 120.500 was paid from A/C XX5678.',
+    'تم سداد فاتورة البطاقة 1234 بمبلغ 120.500 د.ك',
+  ]) {
+    ok(`card bill payment "${text.slice(0, 40)}…" is not a purchase`, capture(text, 'NBK', 'KW', 'KWD') === null);
+  }
+}
+{
+  // LOW 5: the routing hint needs the dinar's country or a decimal beside QR.
+  for (const text of ['عندي دينار واحد بس', 'Scan QR 3 times to win', 'Your order of 12 QR codes shipped', 'QR 123456 reference: TEST']) {
+    ok(`no money hint in "${text}"`, !REVIEW_MONEY_HINT.test(text));
+  }
+  for (const text of ['تم خصم 5.000 دينار كويتي', 'تم خصم 5.000 دينار بحريني', 'Purchase of QR 42.50 at SAMPLE', 'Paid 42.50 QR at SAMPLE']) {
+    ok(`money hint in "${text}"`, REVIEW_MONEY_HINT.test(text));
+  }
+  ok('QR beside a bare integer is not rewritten to QAR',
+    gulfNeighbourReadSource('Purchase of QR 15 at SAMPLE', 'QA') === 'Purchase of QR 15 at SAMPLE');
+  ok('QR beside a two-decimal figure is rewritten to QAR',
+    gulfNeighbourReadSource('Purchase of QR 15.00 at SAMPLE', 'QA') === 'Purchase of QAR 15.00 at SAMPLE');
+}
+{
+  // LOW 6: a currency spelling inside the merchant name stays as written.
+  for (const [text, sender, market, ledger, name] of [
+    ['Purchase of BHD 4.250 with Debit Card ending 1234 at BD 12 STORE on 05/10/2026.', 'NBB', 'BH', 'BHD', /^BD 12 Store$/i],
+    ['Purchase of BD 4.250 with Debit Card ending 1234 at BD 12 STORE on 05/10/2026.', 'NBB', 'BH', 'BHD', /^BD 12 Store$/i],
+    ['Purchase of KWD 4.250 with Debit Card ending 1234 at KD 5 MART on 05/10/2026.', 'NBK', 'KW', 'KWD', /^KD 5 Mart$/i],
+  ]) {
+    const parsed = capture(text, sender, market, ledger);
+    ok(`merchant keeps its own spelling: ${text.slice(0, 50)}…`,
+      parsed?.amountFils === 4250 && name.test(parsed.merchant ?? ''), parsed);
+  }
+}
+{
+  // LOW 7 and LOW 8: documented conservative outcomes (docs/universal-parser-rollout.md).
+  for (const [text, sender, market, ledger] of [
+    ['Bank Nizwa: USD 50.00 debited from A/C XX1234 at SAMPLE SHOP on 05/10/2026.', '', 'US', 'USD'],
+    ['Purchase of QAR 1.500 with Debit Card ending 1234 at SAMPLE SHOP on 05/10/2026.', 'QNB', 'QA', 'QAR'],
+    ['Purchase of KWD 1.234.500 with Debit Card ending 1234 at SAMPLE SHOP on 05/10/2026.', 'NBK', 'KW', 'KWD'],
+    ['QR 123456 reference: TEST debited from A/C XX1234.', 'QNB', 'QA', 'QAR'],
+    ['You have sent KWD 50.000 to TEST PERSON', 'NBK', 'KW', 'KWD'],
+  ]) {
+    ok(`Review, by design: ${text.slice(0, 50)}…`, capture(text, sender, market, ledger) === null);
+  }
 }
 
 console.log(`\ngulf-neighbour-alerts: ${pass} passed, ${fail} failed`);
