@@ -3781,5 +3781,115 @@ const DECLINE_SMS = [{
     { newDues: plan.batch.newDues, merged });
 }
 
+// ── D2: DIFFERENT STATED BALANCES ARE DIFFERENT MOVEMENTS (synthetic) ──
+// Three equal debits a minute apart, each stating the balance AFTER it. The
+// balances step down by the amount, so these are three withdrawals, not one
+// alert delivered three times.
+{
+  const t0 = Date.parse('2026-03-02T10:15:00+04:00');
+  const debit = (balance) =>
+    `Dear Customer, AED 5000.00 was debited from your account *917. Your available account balance is AED ${balance}`;
+  const stepped = scan(['161,447.88', '156,447.88', '151,447.88'].map((b, i) => ({ body: debit(b), ts: t0 + i * 60_000, sender: 'ADIB' })));
+  const plan = buildImportPlan(stepped.parsed, BASE, stepped.newestTs);
+  ok('three equal debits with different stated balances are three transactions',
+    plan.batch.transactions.length === 3 && plan.batch.transactions.every((t) => t.amountFils === 500000),
+    plan.batch.transactions.map((t) => t.amountFils));
+  const same = scan([0, 1, 2].map((i) => ({ body: debit('161,447.88'), ts: t0 + i * 30_000, sender: 'ADIB' })));
+  const samePlan = buildImportPlan(same.parsed, BASE, same.newestTs);
+  ok('control: byte-identical re-deliveries with the same balance still fold to one',
+    samePlan.batch.transactions.length === 1, samePlan.batch.transactions.length);
+  const noBalance = scan([0, 1].map((i) => ({ body: 'Dear Customer, AED 5000.00 was debited from your account *917.', ts: t0 + i * 30_000, sender: 'ADIB' })));
+  const noBalancePlan = buildImportPlan(noBalance.parsed, BASE, noBalance.newestTs);
+  ok('control: without stated balances the existing same-event fold is unchanged',
+    noBalancePlan.batch.transactions.length === 1, noBalancePlan.batch.transactions.length);
+  const card = (balance) =>
+    `Trx. of AED10.00 on your card ending *482 at CORNER KIOSK, UAE is Approved. Avl. card bal is ${balance}. Trx Date: 06/12/22 22:29`;
+  const cards = scan(['11377.53', '11367.53', '11357.53'].map((b, i) => ({ body: card(b), ts: t0 + i * 5_000, sender: 'ADIB' })));
+  const cardPlan = buildImportPlan(cards.parsed, BASE, cards.newestTs);
+  ok('three equal card purchases in one minute with falling card balances are three purchases',
+    cards.parsed.length === 3 && cardPlan.batch.transactions.length === 3, cardPlan.batch.transactions.length);
+  {
+    // A three-digit masked tail becomes the row's capture instrument; the
+    // rows it books (and their stated balances) must survive a backup.
+    const { isValidBackupState } = require('./build/backup-validation.js');
+    const rows = cardPlan.batch.transactions.map((t, i) => ({ ...t, id: `t${i}`, accountId: 'a1' }));
+    ok('three-digit card tails: the booked rows carry the tail and restore from a backup',
+      rows.every((t) => t.captureInstrument?.last4 === '482') && isValidBackupState({ transactions: rows }),
+      rows.map((t) => t.captureInstrument));
+  }
+  const cardCopies = scan([0, 1].map((i) => ({ body: card('11377.53'), ts: t0 + i * 5_000, sender: 'ADIB' })));
+  ok('control: the same card purchase delivered twice with the same balance is one purchase',
+    buildImportPlan(cardCopies.parsed, BASE, cardCopies.newestTs).batch.transactions.length === 1);
+  // Delivered in ONE batch: the same SMS clock and amount (one `s{ts}-{amount}`
+  // key), but each states its own balance and Trx clock. Three purchases.
+  const batchCard = (balance, clock) =>
+    `Trx. of AED10.00 on your card ending *482 at CORNER KIOSK, UAE is Approved. Avl. card bal is ${balance}. Trx Date: 03/03/26 ${clock}`;
+  const sameSecond = scan([['11387.53', '17:51'], ['11377.53', '18:09'], ['11367.53', '19:22']]
+    .map(([b, c]) => ({ body: batchCard(b, c), ts: t0, sender: 'ADIB' })));
+  ok('equal purchases delivered in the same second with different balances are three purchases',
+    buildImportPlan(sameSecond.parsed, BASE, sameSecond.newestTs).batch.transactions.length === 3);
+  const sameSecondCopies = scan([0, 1].map(() => ({ body: batchCard('11387.53', '17:51'), ts: t0, sender: 'ADIB' })));
+  ok('control: the same purchase delivered twice in the same second with the same balance is one purchase',
+    buildImportPlan(sameSecondCopies.parsed, BASE, sameSecondCopies.newestTs).batch.transactions.length === 1);
+  {
+    // Fold review (#151): the different-balance veto is batch evidence. A
+    // STORED row whose persisted balance an older (or newer) parser read
+    // differently is still the same SMS on re-read, never a second movement.
+    const one = scan([{ body: debit('161,447.88'), ts: t0, sender: 'ADIB' }]);
+    const booked = buildImportPlan(one.parsed, BASE, one.newestTs).batch.transactions[0];
+    for (const [label, stored] of [
+      ['with its text retained', { ...booked, id: 'stored1', accountId: 'a1', statedBalanceFils: 15644788 }],
+      ['without its text (iOS seals the body away)', { ...booked, id: 'stored1', accountId: 'a1', statedBalanceFils: 15644788, raw: undefined }],
+    ]) {
+      const reread = buildImportPlan(one.parsed, { ...BASE, transactions: [stored] }, one.newestTs);
+      ok(`fold review: a re-read of a stored row ${label} is not duplicated by a differently read balance`,
+        reread.batch.transactions.length === 0, reread.batch.transactions.map((t) => t.statedBalanceFils));
+    }
+  }
+  {
+    // The exact capture key is the last net when a parser upgrade ALSO
+    // retitles the row: the different-balance veto must not cut it. It
+    // applies only against a row from the same batch, or when the two texts
+    // differ; a stored row with no retained text keeps its key match.
+    const { duplicateGuard } = require('./build/dedupe.js');
+    const raw = debit('161,447.88');
+    const ts = t0;
+    const base = { type: 'expense', amountFils: 500000, date: '2026-03-02', title: 'Account debit', smsKey: `s${ts}-500000`, ts, source: 'sms' };
+    for (const storedRaw of [raw, undefined]) {
+      const guard = duplicateGuard([{ ...base, id: 'x', accountId: 'a1', category: 'other', statedBalanceFils: 15644788, raw: storedRaw }]);
+      ok(`fold review: a retitled re-read of a stored row (${storedRaw ? 'text kept' : 'no text'}) with a differently read balance is the same row`,
+        guard.has({ ...base, title: 'Outgoing transfer', raw, statedBalanceFils: 16144788 }) === true);
+    }
+    const other = duplicateGuard([{ ...base, id: 'x', accountId: 'a1', category: 'other', statedBalanceFils: 15644788,
+      raw: debit('156,447.88') }]);
+    ok('fold review control: a different text with a different balance under the same key is a second movement',
+      other.has({ ...base, title: 'Outgoing transfer', raw, statedBalanceFils: 16144788 }) === false);
+  }
+  const { carrierRedeliveryIndexes } = require('./build/auto-import.js');
+  // A balance that moved away and back between two identical bodies proves a
+  // second movement: credit -> 1,275.40, debit -> 900.40, credit -> 1,275.40.
+  const credit375 = 'Dear Customer, AED 375.00 was credited to your account *917. Your available account balance is AED 1275.40';
+  const oscillation = carrierRedeliveryIndexes([
+    { address: 'ADIB', body: credit375, date: t0 },
+    { address: 'ADIB', body: 'Transaction of AED 375.00 debited from your a/c *917 at CITY PERMITS. Avl Bal is AED 900.40', date: t0 + 120_000 },
+    { address: 'ADIB', body: credit375, date: t0 + 240_000 },
+  ]);
+  ok('carrier fold: an identical body after the same sender stated a different balance is not a re-delivery',
+    oscillation.size === 0, [...oscillation]);
+  const quiet = carrierRedeliveryIndexes([
+    { address: 'ADIB', body: credit375, date: t0 },
+    { address: 'ADIB', body: 'Dear Customer, your security code is 5813', date: t0 + 60_000 },
+    { address: 'ADIB', body: credit375, date: t0 + 120_000 },
+  ]);
+  ok('control: an identical body with no contradicting balance in between still folds', quiet.has(2) && quiet.size === 1);
+  const folded = carrierRedeliveryIndexes([
+    { address: 'ADIB', body: debit('161,447.88'), date: t0 },
+    { address: 'ADIB', body: debit('161,447.88'), date: t0 + 20_000 },
+    { address: 'ADIB', body: debit('156,447.88'), date: t0 + 60_000 },
+  ]);
+  ok('carrier fold: an identical body with the same balance folds, a different balance never does',
+    folded.has(1) && !folded.has(2) && folded.size === 1, [...folded]);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

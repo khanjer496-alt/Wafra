@@ -11,7 +11,8 @@
 export type InstitutionGrammarMarket =
   | 'US' | 'GB' | 'FR' | 'DE' | 'ES' | 'IT' | 'NL'
   | 'IN' | 'QA' | 'KW' | 'BH' | 'OM' | 'EG' | 'JO'
-  | 'CA' | 'AU' | 'BR' | 'MX' | 'SG';
+  | 'CA' | 'AU' | 'BR' | 'MX' | 'SG'
+  | 'CO' | 'PE';
 
 export type InstitutionEvidenceKind = 'sender' | 'body';
 export type InstitutionGrammarStatus = 'experimental' | 'verified';
@@ -59,8 +60,48 @@ interface InstitutionGrammar {
   institution: string;
   senders: readonly string[];
   body: RegExp;
+  /**
+   * Numeric short codes a bank sends from but does not own exclusively (a
+   * carrier reassigns them, and one code can serve two banks). They count as
+   * sender evidence only when the body names the same institution.
+   */
+  bodyBoundSenders?: readonly string[];
   metadata?: InstitutionGrammarMetadata;
+  /**
+   * Country qualifier for a brand that also banks in another country (QNB in
+   * Egypt, NBK in Egypt, KFH in Bahrain and Turkey, BBK in Kuwait, HSBC
+   * everywhere). When present, neither the sender nor the body counts as this
+   * market's evidence unless the alert ALSO states the market's own currency
+   * (or names the country next to the brand). The name alone never routes.
+   */
+  qualifier?: RegExp;
+  /**
+   * The reverse guard, for a brand routed by name in its home market: when
+   * this matches, neither the sender nor the body counts as evidence. Citi
+   * sends as "CITI" in the US and in the Gulf; a Citi alert stating Qatari,
+   * Kuwaiti, Bahraini or Omani money (and no USD) is not a US alert.
+   */
+  disqualifier?: RegExp;
 }
+
+/*
+ * Own-currency evidence for the Gulf neighbours: the ISO code, the unique
+ * Arabic abbreviation, the spelled-out currency with its country adjective,
+ * and the Latin abbreviation only directly beside a figure ("KD 12.500",
+ * "12.500 KD"; "QR 150.00", never "QR code"). A bare ريال or دينار is shared
+ * by several countries and is never evidence here.
+ */
+const beside = (token: string): string =>
+  String.raw`(?<![\p{L}\p{N}])${token}\s{0,3}\d|\d\s{0,3}${token}(?![\p{L}\p{N}])`;
+const QAR_EVIDENCE = new RegExp(String.raw`\bQAR\b|ر\.\s?ق|ريال\s+قطري|${beside('QR')}`, 'iu');
+const KWD_EVIDENCE = new RegExp(String.raw`\bKWD\b|د\.\s?ك|دينار\s+كويتي|${beside('KD')}`, 'iu');
+const BHD_EVIDENCE = new RegExp(String.raw`\bBHD\b|د\.\s?ب|دينار\s+بحريني|${beside('BD')}`, 'iu');
+const OMR_EVIDENCE = new RegExp(String.raw`\bOMR\b|ر\.\s?ع|ريال\s+عماني|${beside(String.raw`R\.O\.?`)}|${beside('RO')}`, 'iu');
+const or = (...patterns: RegExp[]): RegExp =>
+  new RegExp(patterns.map((pattern) => pattern.source).join('|'), 'iu');
+/** Gulf-neighbour own money with no US dollar anywhere in the alert. */
+const NEIGHBOUR_MONEY_WITHOUT_USD = new RegExp(
+  String.raw`^(?![\s\S]*(?:\bUSD\b|\$))[\s\S]*(?:${or(QAR_EVIDENCE, KWD_EVIDENCE, BHD_EVIDENCE, OMR_EVIDENCE).source})`, 'iu');
 
 const experimentalGrammar = (institution: string): InstitutionGrammarMetadata => ({
   id: `${institution}-sms-v1`,
@@ -94,7 +135,8 @@ const INSTITUTIONS: Record<InstitutionGrammarMarket, readonly InstitutionGrammar
     { institution: 'jpmorgan-chase', senders: ['chase', 'chasebank'], body: /\b(?:jpmorgan chase|chase bank)\b/iu },
     { institution: 'bank-of-america', senders: ['bankofamerica', 'bofa'], body: /\bbank of america\b/iu },
     { institution: 'wells-fargo', senders: ['wellsfargo'], body: /\bwells fargo\b/iu },
-    { institution: 'citi-us', senders: ['citibank', 'citi'], body: /\b(?:citibank|citi bank)\b/iu },
+    { institution: 'citi-us', senders: ['citibank', 'citi'], body: /\b(?:citibank|citi bank)\b/iu,
+      disqualifier: NEIGHBOUR_MONEY_WITHOUT_USD },
     { institution: 'discover-card-us', senders: ['discover', 'discovercard'], body: /\bdiscover card\b/iu },
   ],
   GB: [
@@ -115,10 +157,11 @@ const INSTITUTIONS: Record<InstitutionGrammarMarket, readonly InstitutionGrammar
     { institution: 'n26-de', senders: ['n26'], body: /\bn26\b/iu },
   ],
   ES: [
-    { institution: 'santander-es', senders: ['santander', 'bancosantander'], body: /\bbanco santander\b/iu },
-    // BBVA is multinational. "BBVA México" is the Mexican issuer's own brand
-    // and must not be read as Spanish body evidence; plain "BBVA" stays ES.
-    { institution: 'bbva-es', senders: ['bbva'], body: /\bbbva\b(?!\s+m[eé]xico)/iu },
+    // Santander and BBVA are multinational. "Banco Santander México/Brasil",
+    // "BBVA México" and "BBVA Perú" are those issuers' own brands and must not
+    // be read as Spanish body evidence; plain "Banco Santander"/"BBVA" stays ES.
+    { institution: 'santander-es', senders: ['santander', 'bancosantander'], body: /\bbanco santander\b(?!\s+(?:m[eé]xico|brasil)\b)/iu },
+    { institution: 'bbva-es', senders: ['bbva'], body: /\bbbva\b(?!\s+(?:m[eé]xico|per[uú]|continental|colombia)(?=$|[^\p{L}\p{N}]))/iu },
     { institution: 'caixabank-es', senders: ['caixabank'], body: /\bcaixabank\b/iu },
   ],
   IT: [
@@ -131,25 +174,51 @@ const INSTITUTIONS: Record<InstitutionGrammarMarket, readonly InstitutionGrammar
     { institution: 'rabobank-nl', senders: ['rabobank', 'rabo'], body: /\brabobank\b/iu },
     { institution: 'abn-amro-nl', senders: ['abnamro'], body: /\babn amro\b/iu },
   ],
+  // Gulf neighbours. Every brand here that also banks in another country
+  // carries a currency qualifier (see InstitutionGrammar.qualifier). Sender
+  // keys exist only where the spec's evidence names one; the rest are
+  // body-only until a sender id is verified.
   QA: [
-    { institution: 'qnb-qatar', senders: ['qnb', 'qnbqatar'], body: /\bqnb(?: qatar)?\b|بنك قطر الوطني/iu },
-    { institution: 'qatar-islamic-bank', senders: ['qib', 'qibbank'], body: /\bqatar islamic bank\b|مصرف قطر الإسلامي/iu },
+    { institution: 'qnb-qatar', senders: ['qnb', 'qnbqatar'], body: /\bqnb(?: qatar)?\b|بنك قطر الوطني/iu,
+      qualifier: or(QAR_EVIDENCE, /\bqnb\s+qatar\b/iu) },
     { institution: 'commercial-bank-qatar', senders: ['cbq', 'cbqbank'], body: /\bcommercial bank(?: of)? qatar\b|البنك التجاري القطري/iu },
+    { institution: 'doha-bank', senders: [], body: /\bdoha bank\b|بنك الدوحة/iu, qualifier: QAR_EVIDENCE },
+    { institution: 'qatar-islamic-bank', senders: ['qib', 'qibbank'], body: /\bqatar islamic bank\b|مصرف قطر الإسلامي/iu,
+      qualifier: QAR_EVIDENCE },
+    { institution: 'masraf-al-rayan', senders: [], body: /\bmasraf al[ -]?rayan\b|مصرف الريان/iu },
+    { institution: 'dukhan-bank', senders: [], body: /\bdukhan bank\b|بنك دخان/iu },
   ],
   KW: [
-    { institution: 'national-bank-of-kuwait', senders: ['nbk', 'nbkbank'], body: /\bnational bank of kuwait\b|بنك الكويت الوطني/iu },
-    { institution: 'kuwait-finance-house', senders: ['kfh', 'kfhonline'], body: /\bkuwait finance house\b|بيت التمويل الكويتي/iu },
+    { institution: 'national-bank-of-kuwait', senders: ['nbk', 'nbkbank'], body: /\bnational bank of kuwait\b|بنك الكويت الوطني/iu,
+      qualifier: KWD_EVIDENCE },
+    { institution: 'kuwait-finance-house', senders: ['kfh', 'kfhonline'], body: /\bkuwait finance house\b|بيت التمويل الكويتي/iu,
+      qualifier: KWD_EVIDENCE },
+    { institution: 'gulf-bank-kuwait', senders: [], body: /\bgulf bank\b|بنك الخليج/iu, qualifier: KWD_EVIDENCE },
+    { institution: 'burgan-bank', senders: [], body: /\bburgan bank\b|بنك برقان/iu, qualifier: KWD_EVIDENCE },
     { institution: 'boubyan-bank', senders: ['boubyan', 'boubyanbank'], body: /\bboubyan bank\b|بنك بوبيان/iu },
+    { institution: 'warba-bank', senders: [], body: /\bwarba bank\b|بنك وربة/iu },
+    { institution: 'commercial-bank-of-kuwait', senders: [], body: /\bcommercial bank of kuwait\b|البنك التجاري الكويتي/iu },
   ],
   BH: [
     { institution: 'national-bank-of-bahrain', senders: ['nbb', 'nbbonline'], body: /\bnational bank of bahrain\b|بنك البحرين الوطني/iu },
-    { institution: 'bank-of-bahrain-and-kuwait', senders: ['bbk', 'bbkbank'], body: /\bbank of bahrain and kuwait\b|بنك البحرين والكويت/iu },
-    { institution: 'bank-abc-bahrain', senders: ['bankabc', 'abcbahrain'], body: /\bbank abc\b|بنك\s+abc/iu },
+    { institution: 'bank-of-bahrain-and-kuwait', senders: ['bbk', 'bbkbank'], body: /\bbank of bahrain and kuwait\b|بنك البحرين والكويت/iu,
+      qualifier: BHD_EVIDENCE },
+    { institution: 'ahli-united-bank', senders: [], body: /\bahli united bank\b|البنك الأهلي المتحد/iu, qualifier: BHD_EVIDENCE },
+    { institution: 'bahrain-islamic-bank', senders: [], body: /\bbahrain islamic bank\b|بنك البحرين الإسلامي/iu },
+    // The Bahraini KFH shares its name with the Kuwaiti one; only BHD decides.
+    { institution: 'kuwait-finance-house-bahrain', senders: [], body: /\bkuwait finance house\b|بيت التمويل الكويتي/iu,
+      qualifier: BHD_EVIDENCE },
+    { institution: 'bank-abc-bahrain', senders: ['bankabc', 'abcbahrain'], body: /\bbank abc\b|بنك\s+abc/iu, qualifier: BHD_EVIDENCE },
   ],
   OM: [
-    { institution: 'bank-muscat', senders: ['bankmuscat', 'bmuscat'], body: /\bbank muscat\b|بنك مسقط/iu },
+    { institution: 'bank-muscat', senders: ['bankmuscat', 'bmuscat', 'bkmuscat'], body: /\bbank muscat\b|بنك مسقط/iu },
     { institution: 'bank-dhofar', senders: ['bankdhofar', 'dhofarbank'], body: /\bbank dhofar\b|بنك ظفار/iu },
+    { institution: 'national-bank-of-oman', senders: [], body: /\bnational bank of oman\b|البنك الوطني العماني/iu },
     { institution: 'sohar-international', senders: ['soharintl', 'soharinternational'], body: /\bsohar international\b|صحار الدولي/iu },
+    { institution: 'bank-nizwa', senders: [], body: /\bbank nizwa\b|بنك نزوى/iu },
+    // HSBC sends as "HSBC" in the UAE and the UK: only body text naming
+    // HSBC Oman, with OMR, is Omani evidence. No sender key.
+    { institution: 'hsbc-oman', senders: [], body: /\bhsbc\s+oman\b/iu, qualifier: OMR_EVIDENCE },
   ],
   EG: [
     { institution: 'national-bank-of-egypt', senders: ['nbe', 'nbeegypt'], body: /\bnational bank of egypt\b|البنك الأهلي المصري/iu },
@@ -181,14 +250,49 @@ const INSTITUTIONS: Record<InstitutionGrammarMarket, readonly InstitutionGrammar
   BR: [
     { institution: 'itau-brasil', senders: ['itau', 'itaubank'], body: /(?:^|[^\p{L}\p{N}])ita[uú](?:\s+unibanco)?(?=$|[^\p{L}\p{N}])/iu },
     { institution: 'bradesco-brasil', senders: ['bradesco'], body: /\bbradesco\b/iu },
-    { institution: 'banco-do-brasil', senders: ['bancodobrasil'], body: /\bbanco do brasil\b/iu },
+    // Ourocard is Banco do Brasil's own card brand; a bare "BB" is not evidence.
+    { institution: 'banco-do-brasil', senders: ['bancodobrasil'], body: /\bbanco do brasil\b|\bourocard\b/iu },
     { institution: 'nubank-brasil', senders: ['nubank'], body: /\bnubank\b/iu },
+    // "Inter" alone is an ordinary word: only the bank's own prefix or names.
+    { institution: 'inter-brasil', senders: ['bancointer'], body: /\bbanco\s+inter\b|^\s*inter\s*:|\binter\s+(?:mastercard|shop)\b/iu },
+    { institution: 'c6-bank-brasil', senders: ['c6bank'], body: /\bc6\s*bank\b/iu },
+    // "caixa eletrônico" is an ATM, not the bank.
+    { institution: 'caixa-brasil', senders: ['caixa'], body: /^\s*caixa\s*:|\bcaixa\s+econ[oô]mica\b/iu },
+    // Shared brands (Santander also banks in Spain and Mexico, Mercado Pago in
+    // most of Latin America) are Brazilian only next to an R$ amount.
+    { institution: 'santander-brasil', senders: ['santanderbrasil'], body: /\bsantander\s+brasil\b|\bsantander\b(?=[\s\S]{0,200}R\$)/iu },
+    { institution: 'mercado-pago-brasil', senders: [], body: /\bmercado\s*pago\b(?=[\s\S]{0,240}R\$)|R\$[\s\S]{0,240}\bmercado\s*pago\b/iu },
+    { institution: 'picpay-brasil', senders: ['picpay'], body: /\bpicpay\b/iu },
   ],
   MX: [
     { institution: 'bbva-mexico', senders: ['bbvamexico', 'bbvamx'], body: /\bbbva\s+m[eé]xico(?=$|[^\p{L}\p{N}])/iu },
     { institution: 'banorte-mexico', senders: ['banorte'], body: /\bbanorte\b/iu },
     { institution: 'santander-mexico', senders: ['santandermx', 'santandermexico'], body: /\bsantander\s+m[eé]xico(?=$|[^\p{L}\p{N}])/iu },
     { institution: 'citibanamex', senders: ['citibanamex', 'banamex'], body: /\b(?:citibanamex|banamex)\b/iu },
+  ],
+  // Colombia. Numeric short codes are shared between banks (87188 is used for
+  // Davivienda and fits the Bancolombia range), so they only agree with a body
+  // that names the bank. Nu's app package and brand also serve Brazil and
+  // Mexico: only "Nu Colombia" is Colombian evidence.
+  CO: [
+    { institution: 'bancolombia', senders: ['bancolombia'], bodyBoundSenders: ['85540', '85784', '87400'], body: /\bbancolombia\b/iu },
+    { institution: 'davivienda', senders: ['davivienda'], bodyBoundSenders: ['890077', '891000', '87188'], body: /\bdavivienda\b/iu },
+    { institution: 'daviplata', senders: ['daviplata'], body: /\bdaviplata\b/iu },
+    { institution: 'nequi', senders: ['nequi'], body: /\bnequi\b/iu },
+    { institution: 'banco-de-bogota', senders: ['bancodebogota'], body: /\bbanco\s+de\s+bogot[aá](?=$|[^\p{L}\p{N}])/iu },
+    { institution: 'nu-colombia', senders: ['nucolombia'], body: /\bnu\s+colombia\b/iu },
+  ],
+  // Peru. Plin is a wallet rail hosted by several banks; BBVA and Scotiabank
+  // count only with "Perú" (or BBVA's former Continental brand).
+  PE: [
+    { institution: 'bcp', senders: ['bcp', 'viabcp'], bodyBoundSenders: ['19896'], body: /\bbcp\b|\bbanco\s+de\s+cr[eé]dito\s+del\s+per[uú](?=$|[^\p{L}\p{N}])/iu },
+    { institution: 'yape', senders: ['yape'], body: /\byape\b/iu },
+    // "Interbank transfer" is ordinary banking English: the Peruvian bank's
+    // name counts as body evidence only next to soles, PEN or Perú.
+    { institution: 'interbank', senders: ['interbank'], body: /\binterbank\b(?=[\s\S]{0,240}(?:S\/\.?\s?\d|\bPEN\b|\bper[uú](?![\p{L}])))|(?:S\/\.?\s?\d|\bPEN\b|\bper[uú](?![\p{L}]))[\s\S]{0,240}\binterbank\b/iu },
+    { institution: 'plin', senders: ['plin'], body: /\bplin\b/iu },
+    { institution: 'bbva-peru', senders: ['bbvaperu'], body: /\bbbva\s+(?:per[uú]|continental)(?=$|[^\p{L}\p{N}])/iu },
+    { institution: 'scotiabank-peru', senders: ['scotiabankperu'], body: /\bscotiabank\s+per[uú](?=$|[^\p{L}\p{N}])/iu },
   ],
   SG: [
     { institution: 'dbs-singapore', senders: ['dbs', 'dbssg', 'posb'], body: /\b(?:dbs(?!\s+bank\s+(?:india|\(?hong\s+kong\)?|taiwan|indonesia|china)\b)|posb)(?: bank)?\b/iu },
@@ -291,13 +395,17 @@ export const inspectAlertInstitutionGrammar = (
     };
   }
   const candidates = INSTITUTIONS[market].flatMap((grammar) => {
+    // A shared brand without its country qualifier is not this market's evidence.
+    if (grammar.qualifier && !grammar.qualifier.test(normalizedSource)) return [];
+    if (grammar.disqualifier?.test(normalizedSource)) return [];
     const evidence: InstitutionEvidenceKind[] = [];
-    if (normalizedSender && grammar.senders.some(
+    const bodyMatches = grammar.body.test(normalizedSource);
+    if (normalizedSender && (grammar.senders.some(
       (alias) => senderMatches(market, boundedSender || normalizedSender, alias),
-    )) {
+    ) || (bodyMatches && grammar.bodyBoundSenders?.includes(normalizedSender)))) {
       evidence.push('sender');
     }
-    if (grammar.body.test(normalizedSource)) evidence.push('body');
+    if (bodyMatches) evidence.push('body');
     return evidence.length ? [{
       institution: grammar.institution,
       evidence,

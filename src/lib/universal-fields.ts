@@ -53,8 +53,9 @@ const merchantFields = (text: string, moneySpans: readonly SourceSpan[]): Univer
   const billSupplier = /(?:stromrechnung\s+von|factura\s+de\s+agua\s+de|assinatura\s+da|mensalidade\s+da)\s+/giu;
   const symbolicAt = /\s@\s+/gu;
   // "You made a $45.67 transaction with STARBUCKS" names the seller after
-  // WITH, which is otherwise a payment-method word ("with your card").
-  const transactionWith = /(?:^|[^\p{L}\p{N}])transaction\s+with\s+(?!(?:your|the|an?)\b)/giu;
+  // WITH, which is otherwise a payment-method word ("with your card"); so does
+  // "an online, phone, or mail transaction of $30.00 with EXXON".
+  const transactionWith = /(?:^|[^\p{L}\p{N}])transaction(?:\s+of\s+(?:[A-Z]{3}\s?)?[$€£]?\d[\d.,]{0,15})?\s+with\s+(?!(?:your|the|an?)\b)/giu;
   for (const pattern of [MERCHANT_LABEL, MERCHANT_PREPOSITION, refundFrom, symbolicAt, billSupplier, transactionWith]) {
     for (const match of text.matchAll(pattern)) {
       // "From HSBC:" is an issuer header; "contact us at ..." is support.

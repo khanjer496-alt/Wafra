@@ -4,7 +4,8 @@ import type { CurrencyCode } from '@/lib/currency-metadata';
 export type UniversalMarket =
   | 'US' | 'GB' | 'FR' | 'DE' | 'ES' | 'IT' | 'NL'
   | 'IN' | 'QA' | 'KW' | 'BH' | 'OM' | 'EG' | 'JO'
-  | 'CA' | 'AU' | 'BR' | 'MX' | 'SG';
+  | 'CA' | 'AU' | 'BR' | 'MX' | 'SG'
+  | 'CO' | 'PE';
 
 export type AlertFamily =
   | 'purchase'
@@ -51,4 +52,10 @@ export interface AlertMarketPack {
    * ownership is exactly the shared global vocabulary.
    */
   moneyLabels?: readonly string[];
+  /**
+   * This market's own three-decimal currency, written with a full stop as
+   * the decimal point ("KWD 12.345" = 12.345 KWD). Applied to money only after
+   * an alert has been routed here; see AlertDraftContext.dotDecimalCurrencies.
+   */
+  dotDecimalCurrencies?: readonly CurrencyCode[];
 }

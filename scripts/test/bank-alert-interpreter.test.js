@@ -462,6 +462,22 @@ for (const merchant of ['LOCAL CAFE', 'SECURITY CODE CAFE', 'OTP123456 CAFE', 'U
 }
 
 
+// UAE instalment-plan conversions (PARSER_VERSION 65) are refused by parseSms;
+// the semantic fallback and the capture session must not rebuild them from
+// the purchase word as a new expense.
+for (const source of [
+  'Your purchase of AED 2,400.00 at CORNER SHOP has been converted to EMI for 12 months.',
+  'Your transaction of AED 3,600.00 at APPLE STORE has been successfully converted into 12 instalments. Monthly instalment AED 300.00.',
+  'لقد تم تقسيط مبلغ 11495.00 درهم من CORNER SHOP على بطاقتكم الائتمانية المنتهية بـ 8016 بقسط شهري 957.92 درهم على 12 شهر',
+]) {
+  const result = interpretBankAlert({ source, sender: 'ADCBAlert', market: 'AE' });
+  ok(`UAE instalment conversion is not rebuilt as a purchase — ${source.slice(0, 40)}`,
+    result.outcome !== 'parsed', JSON.stringify(result));
+  const session = createLaunchAlertSession({ overrides: {}, pinnedCurrency: 'AED' });
+  ok(`…nor posted on the capture session — ${source.slice(0, 40)}`,
+    session.parse(source, 'ADCBAlert', session.inspect(source, 'ADCBAlert')) === null);
+}
+
 // Saudi refund headings (PARSER_VERSION 64). The legacy parser reads them as
 // money coming back; the semantic layer used to see the purchase word under
 // the heading and rebuild the row as a card-purchase EXPENSE, so the history
@@ -501,4 +517,21 @@ for (const [i, source] of [
     result.outcome === 'parsed' && result.parsed.type === 'expense' && result.parsed.amountFils === 2740,
     JSON.stringify(result));
 }
+// Information-only texts (synthetic). The semantic fallback must not rebuild a
+// purchase from the "شراء" heading of an available-limit notice that parseSms
+// refused, and a help text is never income.
+for (const [label, source, sender] of [
+  ['Arabic purchase-info limit notice', 'شراء معلومة: ب 450.00 SR هو الحد المتاح التاجر: متجر النخبة 02/06/2026 11:05', 'AlRajhiBank'],
+  ['Arabic purchase-note limit notice', 'شراء ملاحظة: SAR 275.50 هو الحد المتاح من متجر الواحة', 'SNB-AlAhli'],
+  ['help text about refund timing', 'Help: card refunds are usually credited within 7 working days. Amount: SAR 18.25 At: SOUQ DESK', 'AlRajhiBank'],
+]) {
+  const result = interpretBankAlert({ source, sender, market: 'SA' });
+  ok(`${label} is never a posted row`, result.outcome !== 'parsed', JSON.stringify(result));
+}
+{
+  const result = interpretBankAlert({ source: 'شراء انترنت بـ88.40 SAR من مكتبة الريان مدى *3391', sender: 'SNB-AlAhli', market: 'SA' });
+  ok('control: an Arabic online purchase still posts', result.outcome === 'parsed' && result.parsed.amountFils === 8840 &&
+    result.parsed.type === 'expense', JSON.stringify(result));
+}
+
 console.log(`\nbank-alert-interpreter: ${pass} passed, 0 failed`);

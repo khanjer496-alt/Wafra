@@ -13,26 +13,31 @@ export const INDIA_ME_ALERT_MARKET_PACKS = {
     futureTerms: ['will be processed', 'डेबिट किया जाएगा', 'भुगतान देय'],
   },
   QA: {
-    market: 'QA', currencies: ['QAR'], currencyAliases: { 'ر.ق': ['QAR'] },
+    // QR is money only directly beside a figure ("QR 150.00"); "QR code"
+    // carries no digits and is never read. Aliases apply only after routing.
+    market: 'QA', currencies: ['QAR'], currencyAliases: { 'ر.ق': ['QAR'], 'ريال قطري': ['QAR'], QR: ['QAR'] },
     rails: ['fawran', 'tahweel', 'qmp', 'naps', 'qpay'],
     transferTerms: ['transfer', 'تحويل'],
     utilityTerms: ['electricity bill', 'water bill', 'telecom bill', 'فاتورة كهرباء', 'فاتورة مياه', 'فاتورة هاتف'],
     recurringTerms: ['recurring', 'متكرر', 'متكررة'],
   },
   KW: {
-    market: 'KW', currencies: ['KWD'], currencyAliases: { KD: ['KWD'], 'د.ك': ['KWD'] },
+    market: 'KW', currencies: ['KWD'], currencyAliases: { KD: ['KWD'], 'د.ك': ['KWD'], 'دينار كويتي': ['KWD'] },
+    dotDecimalCurrencies: ['KWD'],
     rails: ['wamd', 'wamdh', 'knet'], transferTerms: ['transfer', 'تحويل'],
     utilityTerms: ['electricity bill', 'water bill', 'telecom bill', 'فاتورة كهرباء', 'فاتورة مياه', 'فاتورة هاتف'], recurringTerms: ['recurring', 'متكرر', 'متكررة'],
   },
   BH: {
-    market: 'BH', currencies: ['BHD'], currencyAliases: { BD: ['BHD'], 'د.ب': ['BHD'] },
+    market: 'BH', currencies: ['BHD'], currencyAliases: { BD: ['BHD'], 'د.ب': ['BHD'], 'دينار بحريني': ['BHD'] },
+    dotDecimalCurrencies: ['BHD'],
     rails: ['fawri+', 'fawri', 'fawateer', 'benefitpay', 'efts'],
     transferTerms: ['transfer', 'تحويل'],
     utilityTerms: ['electricity bill', 'water bill', 'telecom bill', 'فاتورة كهرباء', 'فاتورة مياه', 'فاتورة هاتف'],
     recurringTerms: ['recurring', 'متكرر', 'متكررة'],
   },
   OM: {
-    market: 'OM', currencies: ['OMR'], currencyAliases: { RO: ['OMR'], 'R.O.': ['OMR'], 'ر.ع': ['OMR'] },
+    market: 'OM', currencies: ['OMR'], currencyAliases: { RO: ['OMR'], 'R.O.': ['OMR'], 'ر.ع': ['OMR'], 'ريال عماني': ['OMR'] },
+    dotDecimalCurrencies: ['OMR'],
     rails: ['omannet', 'mp-clear', 'mpcss', 'ach'], transferTerms: ['transfer', 'تحويل'],
     utilityTerms: ['electricity bill', 'water bill', 'telecom bill', 'فاتورة كهرباء', 'فاتورة مياه', 'فاتورة هاتف'], recurringTerms: ['recurring', 'متكرر', 'متكررة'],
   },

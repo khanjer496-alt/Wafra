@@ -17,12 +17,13 @@ import {
   type UniversalReviewAlert,
 } from '@/lib/alert-review-tray';
 import { toISODate } from '@/lib/format';
-import { bodyPrint, type CaptureChannel } from '@/lib/dedupe';
+import { bodyPrint, statedBalanceInText, type CaptureChannel } from '@/lib/dedupe';
 import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
 import {
   nonPostingReason,
   parseForeignAwaitingRate,
+  parseSms,
   PARSER_VERSION,
   type NonPostingReason,
   type ParsedSms,
@@ -32,6 +33,8 @@ import {
   hasBankAlertMoneyHint,
   hasGenericBankAlertContext,
   inspectGenericBankEventForReview,
+  isHeldLaunchCredit,
+  isUnaccountableLaunchSender,
   type LaunchAlertSession,
 } from '@/lib/launch-alert-parser';
 import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars';
@@ -59,6 +62,8 @@ import { bestEffortAutoPostEnabled, decideBestEffortAutoPost } from '@/lib/best-
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { UniversalBankEvent } from '@/lib/universal-types';
 import { certifyUniversalTemplate } from '@/lib/universal-template-certification';
+import { isGulfNeighbourMarket } from '@/lib/gulf-neighbour-alerts';
+import { latamOwnTransferTitle, latamPolicySource } from '@/lib/latam-alert-templates';
 import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
 import { captureTrace, captureTraceEnabled } from '@/lib/capture-trace';
 import { measureRuntimeOperation } from '@/lib/runtime-performance';
@@ -219,13 +224,38 @@ export const carrierRedeliveryIndexes = (
     if (bucket) bucket.push(index);
     else byKey.set(key, [index]);
   });
+  // Every stated balance per sender, in delivery order. An identical body
+  // whose balance the SAME sender contradicted in between is a new movement
+  // that returned the balance to the same figure (credit 375 -> 1,275.93,
+  // debit 375 -> 900.93, credit 375 -> 1,275.93 again), never a re-delivery.
+  let balances: Map<string, { date: number; index: number; balance: number }[]> | null = null;
+  const balanceMovedBetween = (address: string, from: number, fromIndex: number, to: number, toIndex: number,
+    balance: number): boolean => {
+    if (!balances) {
+      balances = new Map();
+      rows.forEach((row, index) => {
+        const stated = statedBalanceInText(row.body);
+        if (stated === undefined) return;
+        const list = balances!.get(row.address) ?? [];
+        list.push({ date: row.date, index, balance: stated });
+        balances!.set(row.address, list);
+      });
+    }
+    return (balances.get(address) ?? []).some((entry) =>
+      entry.balance !== balance &&
+      (entry.date > from || (entry.date === from && entry.index > fromIndex)) &&
+      (entry.date < to || (entry.date === to && entry.index < toIndex)));
+  };
   for (const indexes of byKey.values()) {
     if (indexes.length < 2) continue;
     indexes.sort((a, b) => rows[a].date - rows[b].date || a - b);
-    let keptDate = rows[indexes[0]].date;
+    let kept = indexes[0];
+    const balance = statedBalanceInText(rows[kept].body);
     for (const index of indexes.slice(1)) {
-      if (rows[index].date - keptDate <= CARRIER_DUPLICATE_MS) skipped.add(index);
-      else keptDate = rows[index].date;
+      if (rows[index].date - rows[kept].date <= CARRIER_DUPLICATE_MS &&
+        !(balance !== undefined && balanceMovedBetween(rows[index].address, rows[kept].date, kept,
+          rows[index].date, index, balance))) skipped.add(index);
+      else kept = index;
     }
   }
   return skipped;
@@ -795,8 +825,9 @@ function parsedUniversalPosting(
   // structural title so the ledger keeps this row in the unresolved-transfer
   // bucket until it can prove own vs external; a recipient name must not turn a
   // transfer into ordinary spending merely because merchant extraction found it.
+  // A LatAm card-bill payment or own-account move keeps its own-product title.
   const merchant = event.family === 'transfer'
-    ? fallbackTitle
+    ? latamOwnTransferTitle(source) ?? fallbackTitle
     : suggestion.merchant || explicitMerchant || fallbackTitle;
   const instrument = event.instrument.evidence === 'explicit' ? event.instrument.value : null;
   const card = instrument?.last4
@@ -821,7 +852,8 @@ function parsedUniversalPosting(
     snapshotKind: null,
     categoryGuess: suggestion.category,
     categoryDeliberate: !suggestion.needsReview,
-    raw: source,
+    // Yape's receipt check never reaches the stored excerpt.
+    raw: latamPolicySource(source),
   };
 }
 
@@ -872,6 +904,21 @@ export function inspectSourceFreeRefusedAlert(input: {
     if (candidate) return { kind: 'review', candidate: { ...candidate, channel: input.channel } };
   }
 
+  // A UAE/Saudi credit the sender-trust rule held back (blank, phone, e-mail
+  // or generic sender; no own account or card tail; no scam wording) waits in
+  // Review with its amount filled in. It is never dropped: a genuine incoming
+  // transfer read from iPhone History has no sender at all.
+  if (launchMarket && isUnaccountableLaunchSender(input.sender)) {
+    const credit = withMarketPackForParsing(launchMarket, () => parseSms(input.source, undefined, {
+      sender: input.sender, observedAt: input.observedAt,
+    }));
+    if (credit && isHeldLaunchCredit(input.source, input.sender, credit)) {
+      const { raw: _raw, ...facts } = credit;
+      const candidate = parsedFinancialCandidateReview(facts, input.observedAt);
+      if (candidate) return { kind: 'review', candidate: { ...candidate, channel: input.channel } };
+    }
+  }
+
   const inspection = input.existingInspection ?? input.session.inspect(input.source, input.sender);
   const prepared = inspection
     ? prepareReviewAlert({
@@ -903,7 +950,9 @@ export function inspectSourceFreeRefusedAlert(input: {
     // issuer routing and can be very expensive on rich OEM notification text.
     // Leave the encrypted row unresolved for a future parser instead.
     if (input.skipUniversalFallback) return { kind: 'ignored', reason: 'unrecognized' };
-    const event = inspectGenericBankEventForReview(input.source, input.sender);
+    // A Gulf-neighbour route reads its own currency spellings for the amount.
+    const event = inspectGenericBankEventForReview(input.source, input.sender,
+      inspection?.route.decision === 'single' ? inspection.route.market : null);
     const universal = event ? prepareUniversalReviewAlert({
       id: 'capture_probe_id_0001',
       sourceKey: 'capture_probe_key_001',
@@ -1600,6 +1649,13 @@ export async function scanInbox(
         const universalEvent = universalInspection?.decision === 'review'
           ? universalInspection
           : null;
+        // Qatar, Kuwait, Bahrain and Oman through a recognised institution are
+        // decided by decideGulfNeighbourPosting inside parseLaunchAlert, as on
+        // SMS: launch grammar or the exact Bank Muscat template, wording and
+        // completion guards, under the best-effort setting. Certification and
+        // semantic generalization below never post one on their own.
+        const gulfNeighbourOwned = isGulfNeighbourMarket(globalMarket) &&
+          worldwide?.review?.institution.decision === 'identified' && !!worldwide.review.institution.institution;
         const certification = universalInspection && globalMarket
           ? certifyUniversalTemplate({
               market: globalMarket,
@@ -1634,9 +1690,12 @@ export async function scanInbox(
         // through the same best-effort policy (and setting) as every other
         // unproven alert, and carries the "Auto-added — check" marker. The
         // ledger-currency gate below still refuses any foreign row here.
-        const semanticDecision = certification?.decision === 'semantic-generalized' && universalEvent
+        // Yape's receipt check is neither an OTP nor something to keep.
+        const policySource = latamPolicySource(source, { sender });
+        const semanticDecision = certification?.decision === 'semantic-generalized' && universalEvent &&
+          !gulfNeighbourOwned
           ? decideBestEffortAutoPost({
-              source,
+              source: policySource,
               event: universalEvent,
               enabled: bestEffortAutoPostEnabled(),
               country: getActiveCountry(),
@@ -1648,7 +1707,7 @@ export async function scanInbox(
               formatPrefix: 'semantic',
             })
           : null;
-        const universalPosting = universalEvent &&
+        const universalPosting = universalEvent && !gulfNeighbourOwned &&
           (certification?.decision === 'automatic' || semanticDecision?.outcome === 'post')
           ? parsedUniversalPosting(universalEvent, source, overrides, routedMarket)
           : null;
@@ -1660,7 +1719,8 @@ export async function scanInbox(
         const requiredCurrency = pinnedLedgerCurrencyCode() ?? batchCurrency;
         // A certified template is a PROVEN format: the universal reading of
         // the same alert is not "best effort" and must not carry the marker.
-        const launchCandidate = launchParsed?.bestEffort && certification?.decision === 'automatic'
+        const launchCandidate = launchParsed?.bestEffort && certification?.decision === 'automatic' &&
+          !gulfNeighbourOwned
           ? (({ bestEffort: _marker, ...proven }) => proven)(launchParsed)
           : launchParsed;
         const parsedCandidate = launchCandidate ?? universalParsed;

@@ -46,7 +46,7 @@ const NEGATED_POSTING = [
   /\bnicht\s+(?:[\p{L}\p{M}'’-]+\s+){0,3}(?:bezahlt|abgebucht|belastet|gutgeschrieben|erstattet)(?=$|[^\p{L}\p{N}])/iu,
   /\bniet\s+(?:[\p{L}\p{M}'’-]+\s+){0,3}(?:betaald|afgeschreven|bijgeschreven|terugbetaald)(?=$|[^\p{L}\p{N}])/iu,
   /(?:^|[^\p{L}\p{N}])n[aã]o\s+(?:[\p{L}\p{M}'’-]+\s+){0,4}(?:pag[oa]|debitad[oa]|creditad[oa]|cobrad[oa]|reembolsad[oa]|conclu[ií]d[oa])(?=$|[^\p{L}\p{N}])/iu,
-  /\b(?:not|never)\s+(?:(?:yet|been|be)\s+){0,2}(?:received|credited|debited|deposited|charged|paid)\b/iu,
+  /\b(?:not|never|hasn['’]t|haven['’]t|didn['’]t)\s+(?:(?:yet|been|be)\s+){0,2}(?:received|credited|debited|deducted|deposited|charged|paid)\b/iu,
 ] as const;
 /** "nothing was charged" / "no funds were debited" negate, not prove, settlement. */
 const NEGATED_SETTLEMENT = /\b(?:nothing|no\s+(?:funds|amount|money|charges?|payment))\s+(?:(?:was|were|has|have)\s+)?(?:(?:yet|been)\s+){0,2}(?:debited|credited|charged|paid|transferred|deposited)\b/iu;
@@ -69,17 +69,34 @@ const REQUEST_LIFECYCLE = /\b(?:(?:interac\s+e-?transfer|payto(?:\s+agreement)?|
  * and request controls above. A future "will be debited from" does not.
  */
 const EXPLICIT_SETTLEMENT = /\b(?:was|has\s+been|have\s+been|were|successfully)\s+(?:debited|credited|charged|paid|transferred|deposited)\b|(?:^|[^\p{L}\p{N}])(?:foi\s+(?:debitad[oa]|creditad[oa]|pag[oa])|fue\s+(?:cargad[oa]|abonad[oa]|pagad[oa])|ha\s+sido\s+(?:cargad[oa]|abonad[oa]|pagad[oa]))(?=$|[^\p{L}\p{N}])/iu;
-const FUTURE = /\b(?:will be (?:debited|credited|deposited|refunded|charged|deducted|collected)|will apply|pre[ -]?debit|collect request|payment request|scheduled|due on|payment due|upcoming|mandate (?:created|registered))\b|سيتم (?:خصم|سحب|تحصيل|إيداع|رد)|طلب تحصيل|مستحق|डेबिट किया जाएगा|क्रेडिट किया जाएगा|भुगतान देय/i;
+const FUTURE = /\b(?:will (?:be|have been) (?:debited|credited|deposited|refunded|charged|deducted|collected)|will apply|pre[ -]?debit|collect request|payment request|scheduled|due on|payment due|upcoming|mandate (?:created|registered))\b|سيتم (?:خصم|سحب|تحصيل|إيداع|رد)|طلب تحصيل|مستحق|डेबिट किया जाएगा|क्रेडिट किया जाएगा|भुगतान देय/i;
 const STATEMENT = /\b(?:statement|credit card bill|card bill|minimum (?:amount )?due|amount due|payment due date|kontoauszug|extracto|estratto conto|rekeningoverzicht)\b|relev[ée]|كشف حساب|الحد الأدنى المستحق/i;
 const BALANCE = /\b(?:available balance|current balance|avl bal|available limit|credit limit|solde|kontostand|saldo)\b|الرصيد (?:الحالي|المتاح)|الحد (?:المتاح|الائتماني)/i;
-const POSTED = /(?:^|[:.]\s*)payment\s+(?:of\s+)?(?:[a-z]{3}|[$€£₹])\s*[\d.,]+\s+at\b|\byou\s+made\s+an?\b(?:[^.;\n]|\.\d){0,40}?\btransaction\b|\b(?:charge|transaction)\s+(?:of|with)\b(?:[^.;\n]|\.\w){0,80}?\bwas\s+made\b|\bwas\s+used\s+for\b|\bwas\s+charged\s+for\b|\byou\s+withdrew\b|\byou\s+(?:have\s+)?sent\b|\bsent\s+you\b|\b(?:spent|purchase(?:d)?|paid|debited|credited|received|sent|withdrawn|deposited|refund(?:ed)?|revers(?:al|ed)|completed|successful|charged|posted|débité|crédité|effectué|belastet|abgebucht|gutgeschrieben|bezahlt|cargado|abonado|pagado|addebitato|accreditato|afgeschreven|bijgeschreven|betaald)\b|تم (?:الخصم|الإيداع|الدفع|التحويل)|سحب|شراء|دفع|استرداد|डेबिट किया गया|क्रेडिट किया गया|जमा किया गया|भुगतान किया गया/i;
+const POSTED = /(?:^|[:.]\s*)payment\s+(?:of\s+)?(?:[a-z]{3}|[$€£₹])\s*[\d.,]+\s+at\b|\byou\s+made\s+an?\b(?:[^.;\n]|\.\d){0,40}?\btransaction\b|\bcharge\s+made\s+(?:online|by\s+phone|in\s+store)\b|\b(?:was|has\s+been|were|have\s+been)\s+deducted\b|\b(?:charge|transaction)\s+(?:of|with)\b(?:[^.;\n]|\.\w){0,80}?\bwas\s+made\b|\bwas\s+used\s+for\b|\bwas\s+charged\s+for\b|\byou\s+withdrew\b|\byou\s+(?:have\s+)?sent\b|\bsent\s+you\b|\b(?:spent|purchase(?:d)?|paid|debited|credited|received|sent|withdrawn|deposited|refund(?:ed)?|revers(?:al|ed)|completed|successful|charged|posted|débité|crédité|effectué|belastet|abgebucht|gutgeschrieben|bezahlt|cargado|abonado|pagado|addebitato|accreditato|afgeschreven|bijgeschreven|betaald)\b|تم (?:الخصم|الإيداع|الدفع|التحويل)|سحب|شراء|دفع|استرداد|डेबिट किया गया|क्रेडिट किया गया|जमा किया गया|भुगतान किया गया/i;
 const CREDIT = /\bsent\s+you\b|\b(?:credited|received|deposit(?:ed)?|refund(?:ed)?|revers(?:al|ed)|credited back|crédité|gutschrift|gutgeschrieben|abonado|accredito|accreditato|bijgeschreven|terugbetaling)\b|تم (?:الإيداع|رد)|استرداد|क्रेडिट|जमा/i;
-const DEBIT = /(?:^|[:.]\s*)payment\s+(?:of\s+)?(?:[a-z]{3}|[$€£₹])\s*[\d.,]+\s+at\b|\byou\s+made\s+an?\b(?:[^.;\n]|\.\d){0,40}?\btransaction\b|\b(?:charge|transaction)\s+(?:of|with)\b(?:[^.;\n]|\.\w){0,80}?\bwas\s+made\b|\bcharge\s+of\b|\bwas\s+used\s+for\b|\bwas\s+charged\s+for\b|\bwithdrew\b|\byou\s+(?:have\s+)?sent\b|\b(?:spent|purchase(?:d)?|paid|debited|withdrawn|charged|débité|belastet|abgebucht|cargado|pagado|addebitato|afgeschreven|betaald)\b|تم (?:الخصم|الدفع)|سحب|شراء|دفع|डेबिट|निकासी|भुगतान/i;
+const DEBIT = /(?:^|[:.]\s*)payment\s+(?:of\s+)?(?:[a-z]{3}|[$€£₹])\s*[\d.,]+\s+at\b|\byou\s+made\s+an?\b(?:[^.;\n]|\.\d){0,40}?\btransaction\b|\bcharge\s+made\s+(?:online|by\s+phone|in\s+store)\b|\b(?:was|has\s+been|were|have\s+been)\s+deducted\b|\b(?:charge|transaction)\s+(?:of|with)\b(?:[^.;\n]|\.\w){0,80}?\bwas\s+made\b|\bcharge\s+of\b|\bwas\s+used\s+for\b|\bwas\s+charged\s+for\b|\bwithdrew\b|\byou\s+(?:have\s+)?sent\b|\b(?:spent|purchase(?:d)?|paid|debited|withdrawn|charged|débité|belastet|abgebucht|cargado|pagado|addebitato|afgeschreven|betaald)\b|تم (?:الخصم|الدفع)|سحب|شراء|دفع|डेबिट|निकासी|भुगतान/i;
 const REFUND = /\b(?:refund(?:ed)?|revers(?:al|ed)|credited back|remboursement|avoir|erstattung|devolución|reembolso|rimborso|storno|terugbetaling|correctieboeking)\b|استرداد|تم رد|धनवापसी|रिफंड/i;
 const CASH = /\byou\s+withdrew\b|\b(?:atm|cash machine|cash withdrawal|geldautomat|bargeldabhebung|retrait|retirada|prelievo|geldopname|aeps cash withdrawal)\b|صراف آلي|سحب نقدي|नकद निकासी|एटीएम निकासी/i;
 const FEE = /\b(?:bank fee|service charge|annual fee|annual card fee|monthly fee|monthly account maintenance fee|maintenance fee|commission|overdraft fee|nsf fee|frais|cotisation|gebühr|entgelt|comisión|commissione|canone|kosten)\b|رسوم|عمولة/i;
-const PURCHASE = /(?:^|[:.]\s*)payment\s+(?:of\s+)?(?:[a-z]{3}|[$€£₹])\s*[\d.,]+\s+at\b|\btransaction\s+(?:with|at)\b|\b(?:charge|transaction)\s+of\b(?:[^.;\n]|\.\d){0,80}?\bat\b|\bwas\s+(?:used|charged)\s+for\b(?:[^.;\n]|\.\d){0,60}?\bat\b|\b(?:debited|charged)\s+from\s+your\s+(?:a\/?c|account|card)\b(?:[^.;\n]|\.\d){0,40}?\bat\b|\b(?:purchase|card charged?|card(?:\s+(?:ending\s+)?\d{2,4})?\s+(?:was\s+)?charged|card payment|card used|paid|spent|paiement par carte|achat|kartenzahlung|kartenumsatz|compra con tarjeta|pagamento con carta|acquisto|pinbetaling|pasbetaling)\b|شراء|دفع بالبطاقة|कार्ड खरीद|कार्ड भुगतान|खरीद/i;
+const PURCHASE = /(?:^|[:.]\s*)payment\s+(?:of\s+)?(?:[a-z]{3}|[$€£₹])\s*[\d.,]+\s+at\b|\bcard(?:\s+(?:ending\s+|-\s*)?\d{2,4})?\s+charge\s+made\b|\btransaction\s+(?:with|at)\b|\b(?:charge|transaction)\s+of\b(?:[^.;\n]|\.\d){0,80}?\bat\b|\bwas\s+(?:used|charged)\s+for\b(?:[^.;\n]|\.\d){0,60}?\bat\b|\b(?:debited|charged)\s+from\s+your\s+(?:a\/?c|account|card)\b(?:[^.;\n]|\.\d){0,40}?\bat\b|\b(?:purchase|card charged?|card(?:\s+(?:ending\s+)?\d{2,4})?\s+(?:was\s+)?charged|card payment|card used|paid|spent|paiement par carte|achat|kartenzahlung|kartenumsatz|compra con tarjeta|pagamento con carta|acquisto|pinbetaling|pasbetaling)\b|شراء|دفع بالبطاقة|कार्ड खरीद|कार्ड भुगतान|खरीद/i;
 
+/**
+ * A third party paying the reader: "JORDAN LEE paid you $48.20" (Venmo). The
+ * payer must open its own sentence (or follow a header colon): an advert
+ * ("Earn $5 every time a friend has paid you"), a condition ("If JORDAN paid
+ * you…"), a question ("Has JORDAN paid you…?") or a negation ("hasn't paid
+ * you") is not money in.
+ */
+const PAID_YOU = /\bpaid\s+you\b/giu;
+const NOT_A_PAYER = /\b(?:someone|somebody|anyone|anybody|a\s+friend|if|whether|when|whenever|once|unless|after|every\s+time|earn|get|has|have|had|did|does|do|not|never|hasn['’]t|haven['’]t|didn['’]t|who|that)\b/iu;
+const peerPaidYou = (text: string): boolean => [...text.matchAll(PAID_YOU)].some((match) => {
+  const before = text.slice(0, match.index!);
+  const start = Math.max(before.search(/[^.!?:\n]*$/u), 0);
+  const subject = before.slice(start).trim();
+  const sentenceEnd = text.slice(match.index!).search(/[.!\n](?!\d)|$/u);
+  const sentence = text.slice(match.index!, match.index! + sentenceEnd);
+  return subject.length > 0 && subject.length <= 60 && !NOT_A_PAYER.test(subject) && !sentence.includes('?');
+});
 const NEAR_BALANCE = /(?:available|current|closing|remaining)\s+balance|avl\s+bal|solde(?: disponible)?|kontostand|الرصيد (?:الحالي|المتاح)/i;
 const NEAR_LIMIT = /(?:available|credit)\s+limit|\bavl\.?\s*lmt\b|الحد (?:المتاح|الائتماني)/i;
 const NEAR_DUE = /(?:minimum (?:amount )?due|amount due|payment due|statement total|outstanding balance)|الحد الأدنى المستحق|المبلغ المستحق/i;
@@ -195,6 +212,8 @@ const moneyDirection = (
   const accountCredit = /\bcredited to (?:your|the) (?:bank )?account\b/i.test(text);
   const accountDebit = /\bdebited from (?:your|the) (?:bank )?account\b/i.test(text);
   if (accountCredit !== accountDebit) return accountCredit ? 'credit' : 'debit';
+  // Who did the paying decides, not the bare verb: "NAME paid you" is money in.
+  if (peerPaidYou(text)) return 'credit';
   const credit = CREDIT.test(text) || Boolean(findTerm(text, creditTerms));
   const debit = DEBIT.test(text) || Boolean(findTerm(text, debitTerms));
   if (credit === debit) return 'unknown';
@@ -207,7 +226,8 @@ export const inspectMarketAlert = (
   context: MarketAlertContext = {},
 ): MarketAlertReview => {
   const pack = alertMarketPack(market);
-  const draft = inspectAlertDraft(source, { currencyAliases: pack.currencyAliases });
+  const draftContext = { currencyAliases: pack.currencyAliases, dotDecimalCurrencies: pack.dotDecimalCurrencies };
+  const draft = inspectAlertDraft(source, draftContext);
   const text = draft.normalizedText.toLowerCase();
   const moneyRoles = draft.candidates.map((candidate) =>
     moneyCandidateRole(text, candidate.span, pack));
@@ -216,7 +236,7 @@ export const inspectMarketAlert = (
     ? null
     : draft.candidates[primaryCandidateIndex]?.span ?? null;
   const semanticText = semanticClause(text, primarySpan);
-  const semanticDraft = inspectAlertDraft(semanticText, { currencyAliases: pack.currencyAliases });
+  const semanticDraft = inspectAlertDraft(semanticText, draftContext);
   const classificationText = semanticText.replace(/\s+/gu, ' ');
   const initialStatus = postingStatus(
     classificationText,
@@ -267,6 +287,8 @@ export const inspectMarketAlert = (
   else if (status === 'posted' && utility) family = 'utility';
   else if (status === 'posted' && recurring) family = 'recurring-payment';
   else if (status === 'posted' && transfer) family = 'transfer';
+  // "NAME paid you $X" is a person-to-person transfer in, not a purchase.
+  else if (status === 'posted' && peerPaidYou(classificationText)) family = 'transfer';
   else if (PURCHASE.test(classificationText) || findTerm(classificationText, pack.purchaseTerms ?? [])) family = 'purchase';
 
   const reasons = [

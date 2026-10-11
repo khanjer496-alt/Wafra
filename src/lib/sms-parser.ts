@@ -524,8 +524,86 @@ export interface ParsedCard {
  *    a date only with a sourceDateCorrection proof, which today only the ADIB
  *    receipt template produces.
  * Future captures and the bounded recent reread get every change above.
+ *
+ * 65: worldwide (unverified-format) money, measured on the west and
+ * github-global research corpora, plus one owner-approved UAE/Saudi repair.
+ *  - Never auto-posted by the unverified-format policy or a certified
+ *    template (Review only where the refusal inspector admits it): a link
+ *    whose call to action is dispute/verify/cancel/claim/accept/log in when
+ *    it is imperative at the link or the link is a shortener or lookalike
+ *    host (smishing bait); fraud prompts (did you authorize, reply Y/N,
+ *    flagged, held, a code), an unnamed payer, adverts, "tap to accept", and
+ *    a question or condition about the payment; a purchase converted to
+ *    EMI/instalments; airtime RECEIVED; a merchant's own order notice; a fund
+ *    crediting units; "You paid $X to your … Card" (a settlement). Bank
+ *    footers ("Not you? Visit chase.com/fraud", "Report Dispute <link>", "To
+ *    cancel alerts, visit …", "To dispute this charge visit www.chase.com/…")
+ *    do not stop a completed alert. User-taught templates are unaffected.
+ *  - Direction: a sentence-initial "NAME paid you $X" (Venmo) is an incoming
+ *    transfer; "FIRST LAST has received your bank transfer of €X" (N26) is
+ *    money out only for an ALL-CAPS personal name; a fintech, an own space or a
+ *    conditional subject leaves the direction to the person.
+ *  - Read: Chase "online, phone, or mail transaction of $X with M" and the
+ *    authorised-user "Header: NAME made a $X transaction with M" (capitals,
+ *    never "someone"); Bank of America "… was deducted" and "Debit card N
+ *    charge made online, by phone, or mail … for $X"; Revolut "You spent X €
+ *    Available credit: Y €" (the available credit is a limit, never the
+ *    amount). A Chase alert threshold, a Monzo "spent £X on your card today"
+ *    and a Revolut "Spent today: €X" total are statistics, never the amount.
+ *    "will have been debited" is future.
+ *  - UAE/Saudi grammar (owner-approved): a completed instalment-plan
+ *    conversion of an existing purchase ("… has been converted to EMI for 12
+ *    months", "… converted into 12 instalments", "تم تقسيط مبلغ …") is not a
+ *    new expense; an EMI or loan instalment DEBITED still posts.
+ * Future captures and the bounded recent reread only; PARSER_BACKFILL_VERSION
+ * remains 50. The worldwide rows carry the "Auto-added — check" marker and
+ * can be undone. A saved UAE/Saudi EMI-conversion row would not be repaired
+ * by a backfill anyway: a row the parser now refuses is kept, never deleted
+ * (store.tsx preserves it), so the bump would cost a full reread for nothing.
+ *
+ * 66: PR #151 folded in (Gulf neighbours, LatAm templates, dataset fixes,
+ * scam lures), measured on every research corpus.
+ *  - UAE/Saudi grammar: an English or Arabic PURCHASE-REFUND heading ("Purchase
+ *    Refund Amount: …", "PoS Purchase Refund By:…", "استرجاع شراء …") is money
+ *    back, never new spending; "Cr.transaction" and "Cr transaction" join "Cr.
+ *    transaction" as credits; OTP/purchase-confirmation codes, available-limit
+ *    and help texts and a loyalty "Redemption Request registered … Amount
+ *    Paid" never post; "Transaction Error … issue processing" is a decline;
+ *    ADIB's three-digit masked tail names its card; a fund-transfer request
+ *    acknowledgement is not income.
+ *  - UAE/Saudi grammar, sender trust (fold review): from a BLANK sender
+ *    (iPhone History) or a phone number, e-mail or generic word, a smishing
+ *    link, fraud prompt or not-a-new-movement text never posts, and a credit
+ *    naming no own account or card tail is not auto-posted (Aani/SARIE claims
+ *    reach Review). Registered bank headers are unchanged.
+ *  - Gulf neighbours (QA, KW, BH, OM): a recognised institution's alert is read
+ *    by the launch grammar in marked best-effort mode, money only in the
+ *    market's own currency (three decimals for KWD/BHD/OMR after routing);
+ *    Bank Muscat's Arabic card purchase is a certified template. The same
+ *    smishing-link/fraud-prompt gate as every other best-effort path applies.
+ *  - Colombia, Mexico, Peru, Brazil: review-only packs plus exact certified
+ *    per-bank templates.
+ *  - Best-effort: more lure wording refused (money owed or waiting, act-first,
+ *    unconfirmed charges, order id + callback, dispute desks); a link needs a
+ *    registered sender, or a blank sender with an own-tail completed movement
+ *    and no call to action; a credit from a phone number, e-mail, generic or
+ *    BLANK sender that names no own tail waits in Review; promo footers and
+ *    merchant names no longer veto a completed own-tail alert.
+ *  - Ledger: two alerts stating different balances are not folded as
+ *    duplicates within one batch, or when their texts differ (a stored row
+ *    re-read by a parser that reads the balance differently stays one); two equal,
+ *    opposite movements on two own accounts at the same bank whose stated
+ *    balances each moved by the amount are SUGGESTED as one own transfer
+ *    (the person is asked), never confirmed on that evidence alone.
+ * Future captures and the bounded recent reread. PARSER_BACKFILL_VERSION
+ * stays 50: main ships 49, and 50 (owner-approved, see 64) is unreleased in
+ * this same batch, so its full reread already re-reads the saved UAE/Saudi
+ * rows whose direction #151 corrects (a "Purchase Refund" heading or a
+ * "Cr.transaction" saved as an expense). As 64 says, rows the parser now
+ * refuses (codes, limit notices, redemptions) are kept, not deleted. If #151's
+ * grammar changes ever ship apart from 50, they need their own bump.
  */
-export const PARSER_VERSION = 64;
+export const PARSER_VERSION = 66;
 /**
  * Historical-repair contract for already-saved data.
  *
@@ -813,7 +891,9 @@ const AR_CREDIT_WORDS =
 // spending.
 const CREDIT_WORDS = new RegExp(
   `credited|\\bcredit(?=\\s+(?:of|to|for|amount|advice|note|entry|txn|transaction|aed|dhs|sar)\\b)` +
-    `|\\bcr\\.?(?=\\s{1,3}transaction\\s+(?:of|amount)\\b)` +
+    // "Cr." / "Cr" abbreviated (ADCB): "A Cr. transaction of AED 715.00 ...",
+    // "A Cr.transaction of ...", "A Cr transaction of ...".
+    `|\\bcr(?=(?:\\.\\s{0,3}|\\s{1,3})transaction\\s+(?:of|amount)\\b)` +
     `|\\bpayroll\\s+credit(?:ed)?\\b(?!\\s+(?:card|limit|line|facility))` +
     `|received|salary|refund(?:ed)?|deposit(?:ed)?|transferred to your|${AR_CREDIT_WORDS}`,
   'i',
@@ -824,9 +904,12 @@ const CREDIT_WORDS = new RegExp(
  * The purchase-evidence list is what keeps a CARD's "Credit transaction of
  * AED 350.00 at NOON.COM on card …" a purchase.
  */
-// ADCB abbreviates it: "A Cr. transaction of AED 200.00 on your account ...".
-const CREDIT_TRANSACTION_RE = /\b(?:credit|cr\.?)\s{1,3}transaction\s+(?:of|amount)\b/i;
-const CREDIT_TRANSACTION_ALL_RE = /\b(?:credit|cr\.?)\s{1,3}transaction\s+(?:of|amount)\b/gi;
+// "Cr." is the same word abbreviated: ADCB's "A Cr. transaction of AED 715.00
+// on your account ... was successful" is money in ("A Dr. transaction" is its
+// debit twin and stays one through DEBIT_WORDS). Also "Cr.transaction" and a
+// dotless "Cr transaction".
+const CREDIT_TRANSACTION_RE = /\b(?:credit\s{1,3}|cr(?:\.\s{0,3}|\s{1,3}))transaction\s+(?:of|amount)\b/i;
+const CREDIT_TRANSACTION_ALL_RE = /\b(?:credit\s{1,3}|cr(?:\.\s{0,3}|\s{1,3}))transaction\s+(?:of|amount)\b/gi;
 const CREDIT_TRANSACTION_PURCHASE_RE = /\b(?:card|visa|mastercard|merchant|pos)\b|\bat\s+[^\d\s]/i;
 /**
  * Direction settled by the CLAUSE that says WHERE the money went. These beat
@@ -837,6 +920,14 @@ const CREDIT_TRANSACTION_PURCHASE_RE = /\b(?:card|visa|mastercard|merchant|pos)\
  */
 // "...has been transferred from JOHN DOE to your account XXXX9876" puts the
 // sender between the verb and the destination; it is money arriving.
+const CREDITED_PASSIVE_RE = /\b(?:has|have)\s+been\s+(?:successfully\s+)?credited\b|\b(?:was|were|is)\s+(?:successfully\s+)?credited\b/i;
+/** See the transfer-request guard in parseSmsInner. */
+const TRANSFER_REQUEST_ACK_RE =
+  /\brequest\s+(?:has\s+been\s+|was\s+)?received\s+for\s+(?:an?\s+|your\s+)?(?:fund|funds|money|own\s+account)?\s*transfer\b|\b(?:fund|funds|money)\s+transfer\s+request\b/i;
+/** "Your GlobalCash Card ending with 2931 was loaded with SAR 100". */
+const PREPAID_CARD_LOAD_RE =
+  /\bcard\b[^\n]{0,60}?\b(?:was|has\s+been|is)\s+(?:successfully\s+)?(?:re)?loaded\s+with\b|\b(?:re)?loaded\s+(?:on|onto|to|into)\s+your\s+(?:\w+\s+){0,2}card\b/i;
+const DEBITED_PASSIVE_RE =/\b(?:debited|deducted|charged|spent|withdrawn|paid\s+(?:to|at|for)|purchase[ds]?\b|used\s+(?:for|at))\b/i;
 const CREDIT_CLAUSE_RE =
   /(?:credited|deposited|paid|transferred|remitted|added)\s+(?:back\s+)?(?:in)?to\s+(?:your|the|a\/?c)|\b(?:transferred|remitted|sent)\s+from\s+(?!your\b|my\b|the\b)(?:(?!\b(?:account|a\/c|ac|acc|acct|card|ending|wallet)\b)[^\d.\n*•·]){2,60}?\s+(?:in)?to\s+your\s+(?:\w+\s+){0,2}(?:account|a\/?c)\b|credited\s+(?:with|back)\b|received\s+(?:from|(?:a\s+)?(?:payment|transfer|amount))|\bcash\s+deposit(?:ed)?\b|refunded\s+to\s+your|reversed\s+to\s+your|\binward\s+remittance\b|(?:الي|في)\s+حسابك|لحسابك/i;
 const DEBIT_CLAUSE_RE =
@@ -1517,7 +1608,7 @@ const FRAUD_FOOTER_RE =
  * CAFE and TIME OUT MARKET stay safe because the bare nouns are not here.
  */
 const DECLINED_VERB_RE =
-  /\b(?:declined|rejected|refused|denied|failed|unsuccessful|timed\s+out)\s+(?:due\s+to|because|owing\s+to|for\s+(?:insufficient|want\s+of))\b|\b(?:was|is|were|are|has\s+been|have\s+been|been)\s+(?:declined|rejected|refused|denied|unsuccessful|dishonou?red)\b|\b(?:declined|rejected|failed|unsuccessful|timed\s+out)\s*[.!:;]|\btransaction\s+(?:has\s+)?(?:declined|failed|rejected)\b|\b(?:returned|rejected)\s+(?:a\s+)?(?:direct\s+)?debit\s+(?:request|instruction)\b|\bplease\s+(?:retry|try\s+again)\b|\bcould\s+not\s+be\s+(?:processed|completed|authoris\w*|authoriz\w*|approved|honou?red)\b/i;
+  /\b(?:declined|rejected|refused|denied|failed|unsuccessful|timed\s+out)\s+(?:due\s+to|because|owing\s+to|for\s+(?:insufficient|want\s+of))\b|\b(?:was|is|were|are|has\s+been|have\s+been|been)\s+(?:declined|rejected|refused|denied|unsuccessful|dishonou?red)\b|\b(?:declined|rejected|failed|unsuccessful|timed\s+out)\s*[.!:;]|\btransaction\s+(?:has\s+)?(?:declined|failed|rejected)\b|\b(?:returned|rejected)\s+(?:a\s+)?(?:direct\s+)?debit\s+(?:request|instruction)\b|\bplease\s+(?:retry|try\s+again)\b|\bcould\s+not\s+be\s+(?:processed|completed|authoris\w*|authoriz\w*|approved|honou?red)\b|^\W{0,3}(?:transaction|payment|purchase)\s+error\s*[:!.\-]|\b(?:encountered|experienced|ran\s+into)\s+(?:an?\s+)?(?:issue|error|problem)\s+(?:while\s+)?processing\b/im;
 const DECLINED_RE =
   /declin|reject(?:ed|ion)|refused|\bdenied\b|not\s+(?:approved|successful|authoris\w*|authoriz\w*|completed|processed|honou?red)|unapproved|disapproved|unauthoris|unauthoriz|unsuccessful|\binsufficient\s+(?:funds?|balance|credit)\b(?![^.\n]{0,24}\b(?:fee|charge|penalty)\b)|could not be (?:processed|completed|authoris\w*|authoriz\w*|approved|verified|honou?red)|unable to (?:process|complete|authoris\w*|authoriz\w*|approve)|has not been (?:processed|approved|completed)|did not (?:go through|succeed|complete)|\bfail(?:ed|ure|s)\b|was stopped|\baborted\b|\bterminated\b|\bvoided\b|\b(?:transaction|txn|purchase|payment|transfer|withdrawal|request)\b(?:[^.\n]|\.\d){0,40}?\s(?:was|is|has\s+been|been)\s+cancell?ed\b|exceeds\s+(?:your\s+)?(?:available\s+)?(?:limit|balance)|limit exceeded|do not honou?r|card\s+(?:has\s+)?expired|expired card|card is blocked|blocked for (?:online|international)|card restricted|invalid\s+(?:card|cvv|pin|otp|expiry|transaction)|\bis invalid\b|incorrect\s+(?:cvv|pin|otp|expiry)|wrong\s+(?:cvv|pin)|pin tries exceeded|no response from (?:the\s+)?issuer|\btimed\s+out\b|\b(?:transaction|txn|request|session|connection|response|network|terminal)\s+time-?\s?outs?\b|مرفوض|تم رفض|لم تتم|لم يتم تنفيذ|فشلت|رصيد غير كاف|غير كافي|عدم كفايه|معكوسه|(?<!(?:اذا|حال|لو)[^.\n]{0,24})(?:رصيد[ \t]+(?:ال)?(?:بطاقه|حساب)(?![ \t]+(?:ال)?نقاط)[^.\n]{0,40}لا\s+يكفي|رصيدك[^.\n]{0,24}لا\s+يكفي\s+(?:ل)?(?:اتمام|اكمال))/i;
 /**
@@ -1584,7 +1675,7 @@ const AR_PURCHASE_REFUND_HEADER_RE =
   /^(?:استرداد[ \t]+شراء(?:[ \t]+(?:ال)?انترنت|[ \t]+pos|[ \t]+(?:عبر[ \t]+)?نقاط[ \t]+البيع)?|حواله[ \t]+عكسيه)[ \t]*(?:\r?\n|$)/i;
 // Contradictory notices are considered only under that exact first heading.
 // Used only by blank(), never a stateful global .test().
-const AR_PURCHASE_REFUND_NOTICE_RE = new RegExp(String.raw`\b(?:refund\s+request|request\s+for\s+(?:a\s+)?refund)\b(?:[^.\n]|\.\d){0,64}?\b(?:received|submitted|created|awaiting|pending)\b|\b(?:received|submitted|created)\b(?:[^.\n]|\.\d){0,48}?\b(?:refund\s+request|request\s+for\s+(?:a\s+)?refund)\b|(?<![ء-ي])و?(?:سيتم\s+(?:ال)?استرداد|تم\s+استلام\s+طلب\s+(?:ال)?استرداد)(?:[^.\n]|\.\d)*` +
+const AR_PURCHASE_REFUND_NOTICE_RE = new RegExp(String.raw`\b(?:refund\s+request|request\s+for\s+(?:a\s+)?refund)\b(?:[^.\n]|\.\d){0,64}?\b(?:received|submitted|created|awaiting|pending)\b|\b(?:received|submitted|created)\b(?:[^.\n]|\.\d){0,48}?\b(?:refund\s+request|request\s+for\s+(?:a\s+)?refund)\b|(?<![ء-ي])و?(?:سيتم\s+(?:ال)?(?:استرداد|استرجاع)|تم\s+استلام\s+طلب\s+(?:ال)?(?:استرداد|استرجاع))(?:[^.\n]|\.\d)*` +
   // A status or request under the heading ("الحاله: قيد المعالجه", "Status:
   // Pending", a line opening "طلب استرداد ...") is not a completed refund.
   // The English words only on a STATUS line — "For disputes under review
@@ -1592,7 +1683,7 @@ const AR_PURCHASE_REFUND_NOTICE_RE = new RegExp(String.raw`\b(?:refund\s+request
   // "بناء علي طلب الاسترداد المقدم منكم" is the completed refund's reason.
   String.raw`|قيد\s+(?:ال)?(?:معالجه|مراجعه|تنفيذ|انتظار)` +
   String.raw`|(?:^|\n)[ \t]*(?:status|الحاله)[ \t]*:?[ \t]*(?:pending|in\s+progress|under\s+review|processing)\b[^\n]*` +
-  String.raw`|(?:^|\n)[ \t]*طلب\s+(?:ال)?(?:حواله|استرداد)[^\n]*` +
+  String.raw`|(?:^|\n)[ \t]*طلب\s+(?:ال)?(?:حواله|استرداد|استرجاع)[^\n]*` +
   // ...and a pending status stated in a sentence ABOUT this refund ("Your
   // refund request is under review", "Refund pending with merchant", "This
   // reversal is pending approval", "تم استلام طلبك ..."). Subject-scoped, so
@@ -1669,6 +1760,37 @@ const SA_TRANSFER_IN_HEADING_RE =
 const SA_TRANSFER_OUT_HEADING_RE =
   /^(?:internal[ \t]+)?(?:outward|outgoing)[ \t]+transfer(?:[ \t]*\(sarie\))?[ \t]*\r?\n/i;
 const SA_POS_BY_HEADING_RE = /^pos[ \t]+by[ \t]*:[ \t]*\d{4}\b/i;
+/**
+ * A PURCHASE-REFUND heading on a field-list alert: "Purchase Refund Amount:
+ * 46.20 SAR At: ...", "PoS Purchase Refund By:4417;mada Amount: ...", and the
+ * Arabic "استرجاع شراء بـ88.40 SAR" (purchase return). The heading names no
+ * destination, so REFUND_RE missed it and the "purchase" noun booked the
+ * refund as NEW spending. Used for direction only — deliberately not part of
+ * REFUND_RE, whose settled-refund reading may outrank pending vocabulary.
+ * Declined/failed refunds are refused before direction is ever read.
+ *
+ * The Arabic alternative is "استرجاع" only: an "استرداد شراء" heading is
+ * AR_PURCHASE_REFUND_HEADER_RE's, which is first-line-only and carries the
+ * pending/request guards (AR_PURCHASE_REFUND_NOTICE_RE). Matching it anywhere
+ * here would let "طلب استرداد شراء ... قيد المعالجه" bypass them.
+ */
+// FIRST LINE ONLY (no m flag): "No purchase refund for gift cards", "لطلب
+// استرجاع شراء اتصل …" and a "سياسة استرجاع مشتريات" footer under a real
+// purchase are help text, and booked those purchases as income. A heading
+// that does open the alert gets the same request/pending/future guards as
+// the "استرداد" heading (AR_PURCHASE_REFUND_NOTICE_RE in parseSmsInner).
+const REFUND_HEADING_RE =
+  /^\s*(?:(?:pos|online|card)\s+)?purchase\s+refund\b(?!\s+(?:request|policy|claim))|^\s*استرجاع\s+(?:عمليه\s+)?(?:شراء|مشتريات)(?![؀-ۿ])/i;
+/**
+ * A first line that is a purchase-refund REQUEST or FORECAST ("طلب استرجاع
+ * شراء …", "سيتم استرداد شراء …"): no money has come back yet, and the purchase
+ * word in it is the purchase being refunded, so neither income nor a new
+ * expense. Refused.
+ */
+const AR_REFUND_NOTICE_HEADING_RE =
+  /^\s*(?:طلب|سيتم)\s+(?:ال)?(?:استرجاع|استرداد)\s+(?:عمليه\s+)?(?:شراء|مشتريات)(?![؀-ۿ])/;
+/** "تم استلام طلب استرجاع|استرداد …" anywhere: a received refund REQUEST, not money. */
+const AR_REFUND_REQUEST_RECEIVED_RE = /تم\s+استلام\s+طلب(?:ك)?\s+(?:ال)?(?:استرجاع|استرداد)/;
 const PROMO_RE =
   /cashback|voucher|promo|discount|t&cs?\b|terms apply|conditions apply|shop now|hurry|limited time|congratulations|you (?:could|can) win|opt-?out|\bdnd\d*\b|bit\.ly|wa\.me|tinyurl|payment plan|bonus|rewards? (?:on|program|draw)|earn \d+x|https?:\/\//i;
 /**
@@ -2017,6 +2139,20 @@ const AR_COMPLETED_RE = new RegExp(`(?<![${AR_LETTER}])و?تمت(?![${AR_LETTER}
 const STRONG_SENDERLESS_POSTING_RE =
   /\b(?:transaction|txn|payment|purchase|withdrawal|transfer|debit|credit)\b(?:[^.\n]|\.\d){0,120}?\b(?:amount\s+(?:of|is)|for|of)?\s*(?:[A-Z]{3}|Dhs?)\s*[\d,]+(?:\.\d{1,3})?(?:[^.\n]|\.\d){0,120}?\b(?:has\s+been|was|is)\s+(?:successfully\s+)?(?:paid|completed|processed|posted|debited|credited|charged|refunded|reversed|successful|succeeded)\b|\b(?:[A-Z]{3}|Dhs?)\s*[\d,]+(?:\.\d{1,3})?(?:[^.\n]|\.\d){0,96}?\b(?:has\s+been|was)\s+(?:successfully\s+)?(?:debited|deducted|credited|charged|paid|posted|processed|refunded|reversed|received|withdrawn|transferred)\b/i;
 /**
+ * Help/FAQ text and available-limit INFORMATION that quote a figure which did
+ * not move. Each arm is anchored to the marker that makes the text
+ * informational, never to the figure alone:
+ *  - a leading "Help:" / "FAQ:" / "Tip:" heading;
+ *  - a general statement of processing time ("refunds are usually credited
+ *    within 7 working days");
+ *  - the Arabic "معلومة:" / "ملاحظة:" (information / note) heading whose figure
+ *    IS the available limit ("معلومة: ب 450.00 SR هو الحد المتاح"). A real
+ *    purchase that merely ends with its available balance carries no such
+ *    heading and is untouched. Post-fold, so ة is ه.
+ */
+const INFORMATION_ONLY_RE =
+  /^\s*(?:help|faq|tip)\s*:|\b(?:refunds?|transfers?|payments?)\s+(?:are|is)\s+(?:usually\s+|normally\s+|typically\s+|generally\s+)?(?:processed|credited|completed|posted|reflected)\s+within\s+\d|(?:^|[^ء-ي])(?:معلومه|ملاحظه)\s*:[^\n]{0,24}?[\d.,]+\s*(?:[A-Za-z]{2,3}\.?\s*)?هو\s+(?:ال)?(?:حد|رصيد)\s+(?:ال)?متاح/i;
+/**
  * A returned, bounced or dishonoured cheque is money that did NOT leave the
  * account. It is stated in the perfect tense ("has been returned unpaid"), so
  * the future gate cannot see it and DECLINED_RE never carried the wording.
@@ -2068,8 +2204,10 @@ function arabicPendingPosting(body: string): boolean {
 }
 const EXPECTED_FUTURE_MOVEMENT_RE =
   /\b(?:expected|anticipated)\b(?:[^.]|\.\d){0,80}\b(?:salary|payroll|wages|wps|payment|transfer|credit|deposit|refund|reversal|fee|charge|payout|settlement)\b|\b(?:salary|payroll|wages|wps|payment|transfer|credit|deposit|refund|reversal|fee|charge|payout|settlement)\b(?:[^.]|\.\d){0,80}\b(?:expected|anticipated)\b|(?:راتب|مرتب|دفع|تحويل|ايداع)[\s\S]{0,80}متوقع|سيصل[\s\S]{0,80}(?:راتب|مرتب|دفع|تحويل|ايداع)/iu;
+// A loyalty "Redemption Request registered successfully ... Amount Paid: AED
+// 240.00" is a request, not a posted cash movement.
 const REQUEST_RECEIVED_RE =
-  /\b(?:payment|transfer|purchase)\s+request\b(?:[^.]|\.\d){0,64}\b(?:received|submitted|created|awaiting|pending)\b|\b(?:received|submitted|created)\b(?:[^.]|\.\d){0,48}\b(?:payment|transfer|purchase)\s+request\b|تم\s+استلام\s+طلب\s+(?:سداد|دفع|تحويل)/iu;
+  /\b(?:payment|transfer|purchase|redemption)\s+request\b(?:[^.]|\.\d){0,64}\b(?:received|submitted|created|awaiting|pending|registered)\b|\b(?:received|submitted|created)\b(?:[^.]|\.\d){0,48}\b(?:payment|transfer|purchase)\s+request\b|تم\s+استلام\s+طلب\s+(?:سداد|دفع|تحويل)/iu;
 const MANDATE_LIFECYCLE_RE =
   /\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b(?:[^.]|\.\d){0,96}\b(?:will\s+(?:start|begin|commence|activate)|has\s+been\s+(?:created|registered|set\s*up|activated)|is\s+(?:now\s+)?active)\b|\b(?:created|registered|set\s*up|activated)\b(?:[^.]|\.\d){0,64}\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b|تم\s+(?:تسجيل|انشاء|تفعيل)[^\n]{0,64}(?:امر\s+)?(?:خصم\s+(?:تلقايي|مباشر)|تعليمات\s+مستديمه)/iu;
 const CONDITIONAL_PAYOUT_RE =
@@ -2426,6 +2564,10 @@ function ensureCurrencyPatterns(): void {
       // never reach it. Keep the optional gap to a date only; this must not
       // cross a bill/payee clause and turn a utility payment into settlement.
       `|(?:your\\s+)?payment\\s+of\\s+(?:${CUR})\\s*[\\d,.]+(?:\\s+on\\s+\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4})?\\s+for\\s+(?:your\\s+)?${CARD_GAP}\\s*(?:no\\.?|number|ending(?:\\s+(?:in|with))?)?\\s*[\\dXx*•-]{0,20}\\s+(?:has\\s+been|was|is)\\s+credited\\b` +
+      // Card-first receipt order: "Payment of AED 412.30 towards your Credit
+      // Card ending 5531 on 02/03/2026 was received". The card (and an
+      // optional date) sit between "towards" and the receipt verb.
+      `|payment\\s+of\\s+(?:${CUR})\\s*[\\d,.]+(?:\\s+on\\s+\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4})?\\s+towards?\\s+(?:your\\s+)?${CARD_GAP}\\s*(?:no\\.?|number|ending(?:\\s+(?:in|with))?)?\\s*[\\dXx*•-]{0,20}(?:\\s+on\\s+\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4})?\\s+(?:has\\s+been|was|is)\\s+(?:received|credited)\\b` +
       `|received\\s+payment\\s+for\\s+your\\s+${CARD_GAP}` +
       `|thank\\s+you\\s+for\\s+(?:your\\s+)?payment[^\\n]{0,48}?(?:towards?|to|for|against)\\s+(?:your\\s+)?${CARD_GAP}` +
       `|card\\s+(?:no\\.?\\s*)?[\\dXx*•]*\\s*has\\s+been\\s+paid` +
@@ -2575,6 +2717,12 @@ function foreignHundredths(amount: Pick<ForeignAmount, 'amountMinor' | 'exponent
  * in that currency and returns null.
  */
 function foreignFigureToMinor(figure: string, exponent: MinorExponent): number | null {
+  // "EUR 1.200" in a two-decimal currency is EUR 1,200.00 (a European
+  // thousands dot) or EUR 1.20 with a padded third decimal. Nothing in the
+  // text decides, and the trailing-zero rule below would silently pick 1.20.
+  // The local-money twin already refuses "AED 5.000" (malformedLocalMoney-
+  // Tokens); refuse the foreign figure the same way so the alert is reviewed.
+  if (exponent === 2 && /^\d{1,3}\.\d{3}$/.test(figure.trim())) return null;
   const value = figure.replace(/,/g, '');
   const match = /^(\d*)(?:\.(\d+))?$/.exec(value);
   if (!match || (!match[1] && !match[2])) return null;
@@ -2605,8 +2753,9 @@ function foreignFigureToMinor(figure: string, exponent: MinorExponent): number |
  */
 function extractForeignAmount(raw: string): ForeignAmount | null {
   /** Where the CODE starts (the balance window ends there) and where the digits do. */
-  const candidates: { at: number; digitsAt: number; code: string; num: string }[] = [];
-  const collect = (re: RegExp, codeGroup: 1 | 2, flags = 'gi') => {
+  type Candidate = { at: number; digitsAt: number; code: string; num: string };
+  const candidates: Candidate[] = [];
+  const scanAll = (re: RegExp, codeGroup: 1 | 2, flags: string, into: Candidate[]) => {
     const scan = new RegExp(re.source, flags);
     let m: RegExpExecArray | null;
     while ((m = scan.exec(raw))) {
@@ -2614,14 +2763,37 @@ function extractForeignAmount(raw: string): ForeignAmount | null {
       // Prefix form: the digits sit at the END of the match, after the code.
       // Suffix form: the match STARTS on them.
       const digitsAt = codeGroup === 1 ? m.index + m[0].length - num.length : m.index;
-      candidates.push({ at: m.index, digitsAt, code: m[codeGroup].toUpperCase(), num });
+      // A clock is never money: "KRW 9:45 HANA STORE" names a time, and
+      // reading its hour as KRW 9 booked a substitute for the real figure.
+      if (raw[digitsAt + num.length] === ':' && /\d/.test(raw[digitsAt + num.length + 1] ?? '')) continue;
+      if (raw[digitsAt - 1] === ':' && /\d/.test(raw[digitsAt - 2] ?? '')) continue;
+      into.push({ at: m.index, digitsAt, code: m[codeGroup].toUpperCase(), num });
     }
   };
+  const collect = (re: RegExp, codeGroup: 1 | 2, flags = 'gi') => scanAll(re, codeGroup, flags, candidates);
   collect(FX_PREFIX_RE, 1);
   if (!candidates.length) collect(FX_SUFFIX_RE, 2);
   if (!candidates.length && extendedRates) {
     collect(EXT_FX_PREFIX_RE, 1, 'g');
     if (!candidates.length) collect(EXT_FX_SUFFIX_RE, 2, 'g');
+  }
+  // A figure written against a currency code that is IMPOSSIBLE for that
+  // currency's exponent ("812.40 JPY", "38.15 KRW": the yen and won have no
+  // minor unit) is the transaction amount the parser cannot read, not a
+  // reason to pick another number. Prefix candidates used to win outright,
+  // so "Card purchase 812.40 JPY 7 SAKURA MART" booked JPY 7 from the
+  // merchant's digit. Refuse the whole extraction instead (the alert goes to
+  // Review). Zero-decimal currencies only; exponent-valid figures are left
+  // to the walk.
+  const attached: Candidate[] = [];
+  scanAll(FX_PREFIX_RE, 1, 'gi', attached);
+  scanAll(FX_SUFFIX_RE, 2, 'gi', attached);
+  for (const c of attached) {
+    if (!/\d/.test(c.num) || isMaskedFigure(raw, c.digitsAt)) continue;
+    if (BALANCE_PREFIX_RE.test(raw.slice(Math.max(0, c.at - 56), c.at))) continue;
+    if (currencyExponent(c.code) !== 0) continue;
+    const fraction = c.num.replace(/,/g, '').split('.')[1] ?? '';
+    if (/[1-9]/.test(fraction)) return null;
   }
 
   for (const c of candidates) {
@@ -2786,10 +2958,23 @@ const CARD_KIND_WORDS = /credit|covered|charge/i;
 // The labelled field-list form puts a colon after the noun — "Card: **4321
 // (mada)", "Account: ***2501" — and without it the line named no card at all,
 // so the row attached to no account.
+// ADIB has written "card ending with *482" (one mask character and THREE
+// digits) since 2021. A three-digit tail is accepted only behind a mask run,
+// so a bare "card 482" never becomes a card identity. Not two digits: real
+// ADIB alerts carry 3- and 4-digit tails only, and the corpus invariant holds
+// a card identity to three or four digits (a two-digit tail collides one time
+// in a hundred). Group 2 is the masked tail, group 3 the plain four digits.
+// The THREE-digit tail sits directly behind the mask ("*482"); after a space
+// only four digits are a tail ("*** 6383"). Neither may be the start of a
+// decimal figure: "Credit Card XXX 250.00 AED" and "card ** 100.00" are
+// amounts, not cards.
 const CARD_RE =
-  /(credit|debit|covered|charge|prepaid)?\s*card(?:\s*(?:no\.?|number))?\s*:?\s*(?:ending(?:\s+(?:in|with))?)?\s*(?:\.\.+|x+|\*+|[·•]+)?\s*(\d{4})\b/i;
+  /(credit|debit|covered|charge|prepaid)?\s*card(?:\s*(?:no\.?|number))?\s*:?\s*(?:ending(?:\s+(?:in|with))?)?\s*(?:(?:\.\.+|x+|\*+|[·•]+)(?:\s*(?=\d{4}\b)|(?=\d{3}\b))(\d{3,4})|(\d{4}))\b(?![.,]\d)/i;
+// ADIB's "your account *917" is the same three-digit masked tail as its card
+// form; accepted only behind a mask run (group 1 masked, group 2 plain).
+// Same tail rule as CARD_RE: "a/c *** 250 has been credited" is not •250.
 const ACCOUNT_RE =
-  /a\/?c(?:count)?\s*(?:no\.?|number)?\s*:?\s*(?:ending(?:\s+(?:in|with))?|\.\.+|x+|\*+|[·•]+)?\s*(\d{4})\b/i;
+  /a\/?c(?:count)?\s*(?:no\.?|number)?\s*:?\s*(?:(?:\.\.+|x+|\*+|[·•]+)(?:\s*(?=\d{4}\b)|(?=\d{3}\b))(\d{3,4})|(?:ending(?:\s+(?:in|with))?)?\s*(\d{4}))\b(?![.,]\d)/i;
 /** Account identity with a formatted masked middle: "095-XXX11XXX-0001". */
 // FAB writes its account numbers this way, and the plain ACCOUNT_RE below
 // stops at the first mask run — so "account no. 095-XXX11XXX-0001" either
@@ -4804,6 +4989,15 @@ export type NonPostingReason =
 const CARD_LIFECYCLE_NOTICE_RE =
   /(?:\b(?:credit|debit|covered|prepaid)?\s*card\b[^.\n]{0,120}\bexpir(?:y|e[sd]?|ing)\b|\bexpir(?:y|e[sd]?|ing)\b[^.\n]{0,120}\b(?:credit|debit|covered|prepaid)?\s*card\b)/i;
 
+/**
+ * "الرقم السري لتأكيد شراء عبر الانترنت: 731905 ..." — the secret number to
+ * CONFIRM an online purchase (post-fold). The subject is the code, so the
+ * message is a challenge even when the digits are redacted, and the amount it
+ * quotes is an attempt, never a purchase.
+ */
+const AR_PURCHASE_CONFIRMATION_CODE_RE =
+  /(?:الرقم السري|الرمز السري|رمز|كلمه السر|كلمه المرور)\s+(?:ل|ال)?(?:تاكيد|اتمام)\s+(?:عمليه\s+)?(?:ال)?(?:شراء|دفع|عمليه)/;
+
 function nonPostingReasonInBody(
   body: string,
   suppressible: string,
@@ -4817,6 +5011,7 @@ function nonPostingReasonInBody(
     PIN_TRANSACTION_CHALLENGE_RE.test(body) ||
     AR_CODE_CHALLENGE_RE.test(body) ||
     TRANSACTION_APPROVAL_REQUEST_RE.test(body) ||
+    AR_PURCHASE_CONFIRMATION_CODE_RE.test(body) ||
     ((CODE_CHALLENGE_QUOTED_RE.test(body) || CODE_CHALLENGE_FOR_RE.test(body)) &&
       CODE_VALIDITY_WINDOW_RE.test(body))
   ) {
@@ -4876,8 +5071,18 @@ export function hasArabicRefundHeading(message: string): boolean {
   return AR_PURCHASE_REFUND_HEADER_RE.test(normalizeArabic(message.trim()));
 }
 
+/**
+ * A completed instalment-plan conversion of an EXISTING purchase ("… has been
+ * converted to EMI for 12 months", "… converted into 12 instalments", Arabic
+ * "تم تقسيط مبلغ …"). See parseSmsInner; listed here too so the semantic
+ * fallback cannot rebuild it from the purchase word.
+ */
+const INSTALMENT_CONVERSION_NOTICE_RE =
+  /\b(?:has|have)\s+been\s+(?:successfully\s+)?converted\s+(?:in)?to\s+(?:an?\s+)?(?:\d+\s+)?(?:(?:easy\s+)?instal(?:l)?ments?|emi|easy\s+payment\s+plan|instal(?:l)?ment\s+plan|epp)\b|(?:^|\s)(?:لقد\s+)?تم\s+تقسيط\s+مبلغ/iu;
+
 function nonCashNoticeInBody(body: string): boolean {
-  return AR_CASHBACK_WALLET_CREDIT_RE.test(body) || AR_SHARE_TRADE_RE.test(body);
+  return AR_CASHBACK_WALLET_CREDIT_RE.test(body) || AR_SHARE_TRADE_RE.test(body) ||
+    INSTALMENT_CONVERSION_NOTICE_RE.test(body);
 }
 
 /**
@@ -4888,6 +5093,15 @@ function nonCashNoticeInBody(body: string): boolean {
  */
 export function isNonCashNotice(message: string): boolean {
   return nonCashNoticeInBody(normalizeArabic(message.trim()));
+}
+
+/**
+ * A help/FAQ text or an available-limit notice that quotes a figure which did
+ * not move (see INFORMATION_ONLY_RE). Exported so the launch semantic fallback
+ * cannot rebuild the "purchase" parseSms refused from the same words.
+ */
+export function isInformationOnlyAlert(message: string): boolean {
+  return INFORMATION_ONLY_RE.test(foldOrthography(stripInvisible(message.trim())));
 }
 
 export function isNonPostingMessage(message: string): boolean {
@@ -5195,7 +5409,7 @@ function extractCard(raw: string, bank?: BankProfile | null): ParsedCard | null 
       : /debit|prepaid/i.test(kindWord)
         ? 'debit'
         : cardKindNear(raw, endOf(cardMatch), islamicCredit);
-    return { last4: cardMatch[2], kind };
+    return { last4: cardMatch[2] ?? cardMatch[3], kind };
   }
   const usedTail = raw.match(USED_CARD_TAIL_RE);
   if (usedTail) {
@@ -5207,7 +5421,7 @@ function extractCard(raw: string, bank?: BankProfile | null): ParsedCard | null 
   const maskedAccount = raw.match(MASKED_ACCOUNT_RE);
   if (maskedAccount) return { last4: maskedAccount[1], kind: 'account' };
   const accMatch = raw.match(ACCOUNT_RE);
-  if (accMatch) return { last4: accMatch[1], kind: 'account' };
+  if (accMatch) return { last4: accMatch[1] ?? accMatch[2], kind: 'account' };
   // Arabic last, and only when there IS Arabic: on a bilingual body the
   // English clause is what the rest of the machinery is tuned for, so it has
   // to win. Card before account — "كشف حساب البطاقة المنتهية 4833" names both,
@@ -5744,6 +5958,15 @@ function parseSmsInner(
   const raw = sanitizeLocalMoney(foldOrthography(clean));
   if (raw === null) return null;
   const arabicPurchaseRefundHeader = AR_PURCHASE_REFUND_HEADER_RE.test(raw);
+  // Either refund-heading family: the "استرداد" one above, or #151's English
+  // "Purchase Refund" / Arabic "استرجاع شراء" first line. Both must clear the
+  // same request/pending/future notice guard below.
+  const purchaseRefundHeading = arabicPurchaseRefundHeader || REFUND_HEADING_RE.test(raw);
+  // A received refund request is not money, unless this alert also states
+  // the completed refund to the person's card/account (checked under a
+  // heading by the notice guard below; here for any other first line).
+  if (AR_REFUND_NOTICE_HEADING_RE.test(raw) ||
+    (AR_REFUND_REQUEST_RECEIVED_RE.test(raw) && !AR_PURCHASE_REFUND_COMPLETED_RE.test(raw))) return null;
   ensureCurrencyPatterns();
   // The same for every branch of one message, so read once here. Both are
   // stamped onto all ten `return` sites below; a branch that quietly shipped
@@ -5780,6 +6003,12 @@ function parseSmsInner(
   ) {
     return null;
   }
+  // Help/FAQ texts and available-limit information quote a figure that did
+  // not move: "Help: refunds are credited within 7 days. Amount: SAR 18.25",
+  // "شراء معلومة: ب 450.00 SR هو الحد المتاح" (the figure IS the available
+  // limit). Refused here, not in nonPostingReason: they never were postings,
+  // so they are no evidence for deleting a stored row either.
+  if (INFORMATION_ONLY_RE.test(raw)) return null;
   // Read once: this is what every boilerplate-shaped suppression rule below
   // has to beat before it may delete a message.
   const posted = hasPostedEvidence(raw, card);
@@ -5838,13 +6067,13 @@ function parseSmsInner(
   // forecast its own evidence of settlement and nothing was ever suppressed.
   {
     const settled = blank(blank(raw, FUTURE_CLAUSE_RE), SCHEDULED_CLAUSE_RE);
-    const refundSettled = arabicPurchaseRefundHeader
+    const refundSettled = purchaseRefundHeading
       ? blank(settled, AR_PURCHASE_REFUND_NOTICE_RE) : settled;
     // A noun field list cannot confirm its own forecast/request. Remove every
     // notice first, then require THIS refund's completed credit outside
     // merchant names; original purchases and balance/limit figures cannot
     // confirm that the separate refund moved money.
-    if (arabicPurchaseRefundHeader && refundSettled !== raw) {
+    if (purchaseRefundHeading && refundSettled !== raw) {
       const completion = AR_PURCHASE_REFUND_COMPLETED_RE.exec(refundSettled);
       if (!completion) return null;
       const subjectAndVerb = completion[1] ?? completion[2];
@@ -5935,6 +6164,15 @@ function parseSmsInner(
   // The `posted && SETTLED_TENSE_RE` escape hatch below covers all of them
   // unchanged: an EPP line stapled to a real alert ("…Avl Cr. Limit is AED
   // 5,000.00. Convert now to easy instalments.") still keeps its purchase.
+  // A COMPLETED conversion notice ("Your purchase of AED 2,400.00 at CORNER
+  // SHOP has been converted to EMI for 12 months", "… converted into 12
+  // instalments", Arabic "تم تقسيط مبلغ …") restates a purchase that is
+  // already on the ledger from its own alert. Unlike the offer voice below it
+  // has no posted-alert escape: the settled tense IS the conversion, and
+  // posting it counted the purchase twice. An instalment DEBITED from an
+  // account ("EMI of AED 200.00 has been debited") is a real payment and is
+  // not this shape.
+  if (INSTALMENT_CONVERSION_NOTICE_RE.test(raw)) return null;
   if (
     /\*?convert now\*?|converted in(?:to)? instal?ments?|\bcan\s+be\s+converted\b|\bconvert\s+your\b(?:[^.\n]|\.\d){0,72}?\binto\b|\beligible\s+for\b(?:[^.\n]|\.\d){0,40}?(?:conversion|instal?ments?|payment\s+plan|0\s*%)|interest payment plan|easy payment plan|\b(?:enjoy|avail|get)\s+(?:easy\s+)?monthly\s+instal?ments?\s+on\s+your\s+purchase\b/i.test(raw) &&
     !(posted && SETTLED_TENSE_RE.test(raw))
@@ -7102,7 +7340,8 @@ function parseSmsInner(
   // verbs the message uses ("Purchase amount of AED X ... has been refunded").
   const isIncomingCreditReversal = INCOMING_CREDIT_REVERSAL_RE.test(prose);
   const isRefund = !isIncomingCreditReversal &&
-    (REFUND_RE.test(prose) || REVERSAL_RE.test(prose) || arabicPurchaseRefundHeader);
+    (REFUND_RE.test(prose) || REVERSAL_RE.test(prose) || arabicPurchaseRefundHeader ||
+      REFUND_HEADING_RE.test(prose));
 
   if (PROMO_RE.test(raw) && !TXN_EVIDENCE_RE.test(raw)) return null;
   // "AED 500.00 has been reversed to your Card ending 1234" names no verb from
@@ -7151,6 +7390,24 @@ function parseSmsInner(
       : debitClause || hasDebit || !hasCredit
         ? 'expense'
         : 'income';
+
+  // A message whose only movement is that money WAS CREDITED cannot be
+  // spending. "Your payment of AED 410.00 has been credited. Thank you" names
+  // no destination; "payment" satisfied DEBIT_WORDS and booked it as an
+  // expense. With no debit clause and no biller/bill/reversal explanation the
+  // direction is unknown, so the alert goes to Review instead of guessing.
+  if (type === 'expense' && !debitClause && !billerPaid && !isBillDue && !isIncomingCreditReversal &&
+    CREDITED_PASSIVE_RE.test(stated) && !DEBITED_PASSIVE_RE.test(stated)) {
+    return null;
+  }
+  // A transfer REQUEST acknowledgement ("Request received for fund transfer of
+  // AED 7,546", "Fund Transfer request of AED 3,000.00 ... received") says the
+  // bank took an instruction; "received" is about the request, not money in.
+  // With no clause crediting the reader's account it is never income.
+  if (type === 'income' && !creditClause && TRANSFER_REQUEST_ACK_RE.test(stated)) return null;
+  // A prepaid/travel card "was loaded with SAR 100" moves the reader's own
+  // money onto their own card: neither spending nor income. Review decides.
+  if (PREPAID_CARD_LOAD_RE.test(stated)) return null;
 
   let merchant = '';
   /** The descriptor before cleanup — ".com" survives here, so Capital.com and
@@ -7375,7 +7632,7 @@ function parseSmsInner(
         ? /\bcash\s*back\b|\bcashback\b/i.test(raw) &&
           /\b(?:credited|posted|received|applied)\b/i.test(raw)
           ? 'Cashback'
-          : /\brefund(?:ed)?\b/i.test(raw) || REVERSAL_RE.test(raw)
+          : /\brefund(?:ed)?\b/i.test(raw) || REVERSAL_RE.test(raw) || REFUND_HEADING_RE.test(raw)
           ? 'Refund'
           // Salary/remuneration/paycheck wording is stronger than the generic
           // deposit verb. "Remuneration ... was deposited into your account"
@@ -7773,6 +8030,8 @@ export function parseForeignAwaitingRate(
   };
 }
 
+const FOREIGN_DOMESTIC_RAIL_RE = /\b(?:NEFT|IMPS|RTGS|UPI)\b/;
+
 export function parseSms(
   message: string,
   overrides?: Record<string, CategoryId>,
@@ -7804,6 +8063,15 @@ export function parseSms(
     }
   }
   if (!parsed) return null;
+  // An Indian domestic-rail (NEFT/IMPS/RTGS/UPI) movement in a foreign
+  // currency is an account at a bank abroad: "HSBC" is a UAE sender too, and an
+  // HSBC India credit of INR 3,200 was booked as AED income at the offline
+  // fallback rate. A UAE/Saudi account never moves money over those rails, so
+  // refuse it here (Review keeps it) instead of guessing a conversion.
+  if (parsed.originalCurrency && parsed.originalCurrency !== getActiveMarket().currency.code &&
+    parsed.fxSource !== 'bank' && FOREIGN_DOMESTIC_RAIL_RE.test(message)) {
+    return null;
+  }
   // The same obligation is named on both sides of its lifecycle: a provider
   // reminder calls it an account/party ID, while a bank bill-pay receipt often
   // calls it a consumer number. Keep the closed label + last4 on both. The

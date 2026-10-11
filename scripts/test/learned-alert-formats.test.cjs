@@ -257,3 +257,14 @@ test('validate round-trips, drops tampered templates, rejects malformed stores a
   const oversized = { version: 1, templates: [...big.templates, ...chaseStore().templates] };
   assert.equal(L.validateLearnedFormatStore(JSON.parse(JSON.stringify(oversized))).templates.length, 40);
 });
+
+/* ── The best-effort scam-link guard is not a learned-format refusal ───── */
+test('a taught template with a dispute-link footer keeps learning and matching', () => {
+  const taught = 'Sample Bank: Card 4421 charged USD 24.86 at NORTH STAR MARKET on 09/03/2026. Report Dispute https://bit.ly/sample1 To dispute this charge visit bit.ly/sample-help';
+  const store = learnInto(L.emptyLearnedFormatStore(), taught, 'SAMPLEBANK',
+    usd(2486, { merchant: 'NORTH STAR MARKET', date: '2026-09-03' }), { country: 'US' });
+  assert.equal(store.templates.length, 1);
+  const hit = match('Sample Bank: Card 9912 charged USD 7.10 at CORNER CAFE on 09/21/2026. Report Dispute https://bit.ly/sample1 To dispute this charge visit bit.ly/sample-help', 'SAMPLEBANK', store);
+  assert.equal(hit.kind, 'prefill');
+  assert.equal(hit.fields.amountMinor, 710);
+});
