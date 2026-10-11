@@ -773,6 +773,133 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
     const row = auto(currency, cc, body);
     ok(`${cc} control: ${body.slice(9, 17)} on a ${currency} ledger posts ${minor}`, row?.amountFils === minor && row.currency === currency, row);
   }
+  /* H4. Reported smishing, round 7 (IMC25 families, Kaggle India suspects).
+   * All wording below is Wafra's own; none is copied from a corpus. */
+  // (a) A "money arrived" claim from a phone number or no sender, naming none
+  // of the reader's own accounts or cards, waits in Review; the same text
+  // from the wallet's registered header or short code still auto-adds.
+  {
+    const mpesa = 'QX81TR4KLM Confirmed. You have received Ksh 6,400.00 from PETER KAMAU 0711000333 on 4/10/26 at 9:15 AM. New M-PESA balance is Ksh 6,512.40.';
+    for (const sender of ['+254711000222', '']) {
+      ok(`KE: a received-money claim from "${sender}" with no own account is never auto-added`,
+        auto('KES', 'KE', mpesa, 2, sender) === null, auto('KES', 'KE', mpesa, 2, sender));
+    }
+    const genuine = auto('KES', 'KE', mpesa, 2, 'MPESA');
+    ok('KE control: the same M-Pesa credit from MPESA still auto-adds',
+      genuine?.bestEffort && genuine.type === 'income' && genuine.amountFils === 640000, genuine);
+    const wallet = 'TID 88120044. You have received Rs. 7,500.00 from NADIA PERVEEN. Your new wallet balance is Rs. 7,612.40.';
+    ok('PK: a wallet credit claim from a mobile number is never auto-added', auto('PKR', 'PK', wallet, 2, '03001234567') === null);
+    const shortCode = auto('PKR', 'PK', wallet, 2, '8558');
+    ok('PK control: the same wallet credit from a carrier short code still auto-adds',
+      shortCode?.bestEffort && shortCode.type === 'income' && shortCode.amountFils === 750000, shortCode);
+    ok('PH: a senderless "You have received PHP" claim is never auto-added',
+      auto('PHP', 'PH', 'You have received PHP 2,500.00 from J. SANTOS 09170000000. Your new balance is PHP 2,612.75. Ref. No. 40021.') === null);
+    ok('KE: a USSD code ("Dial *334#") is not an own-card reference',
+      auto('KES', 'KE', 'Dial *334# to join. Confirmed. You have received Ksh 9,930.00 from MARY ATIENO. New balance is Ksh 9,940.00.') === null);
+    const tailed = auto('INR', 'IN', 'Rs. 2,400.00 credited to your A/c XX4410 on 05/10/2026 by A/c linked to VPA asha@upi (UPI Ref No 512233).', 2, '+919812345678');
+    ok('IN control: a credit naming the own account tail still auto-adds from a long number',
+      tailed?.bestEffort && tailed.type === 'income' && tailed.amountFils === 240000, tailed);
+  }
+  {
+    // An exact certified template stands in for a MISSING sender only.
+    const yape = 'Te yapeo S/ 15.00 ROSA QUISPE';
+    const senderless = auto('PEN', 'PE', yape);
+    ok('PE control: a senderless exact Yape template still auto-adds',
+      senderless?.bestEffort && senderless.type === 'income' && senderless.amountFils === 1500, senderless);
+    ok('PE: the same Yape text from a mobile number is never auto-added', auto('PEN', 'PE', yape, 2, '+51987000111') === null);
+  }
+  // (b) A debit whose only hook is a callback, from no sender and with no own
+  // card or account, waits in Review; with the card tail it still adds.
+  ok('GB: a senderless purchase claim with only a callback hook is never auto-added',
+    auto('GBP', 'GB', 'You paid £2,150.00 for a laptop on 03/10/2026. Need help? Call 0800 000 1111.') === null);
+  {
+    const row = auto('GBP', 'GB', 'You paid £21.50 at CORNER CAFE with card ending 4410 on 03/10/2026. Need help? Call 0800 000 1111.');
+    ok('GB control: the same footer on a purchase naming the card still auto-adds',
+      row?.bestEffort && row.type === 'expense' && row.amountFils === 2150, row);
+  }
+  // (c) Lure wording, refused whoever the sender is.
+  for (const [currency, cc, sender, body] of [
+    ['GBP', 'GB', 'GOVREFUND', 'You are due a tax refund of £318.40 for the last tax year. Complete the short form to release your payment.'],
+    ['GBP', 'GB', 'GOVREFUND', 'At this time we owe you a refund of £96.30 for last year.'],
+    ['GBP', 'GB', 'GOVUK', 'You have an outstanding vehicle tax refund of £104. To deposit it, visit the portal.'],
+    ['USD', 'US', 'ACCTSVC', 'Your refund of $19.75 is now available. Visit the portal to finish.'],
+    ['CAD', 'CA', 'ETRANSFER', 'Interac e-Transfer: CITY UTILITIES sent you a refund of $58.20. To deposit the funds, follow the steps in the portal.'],
+    ['INR', 'IN', 'AD-EXCHX', 'Rs.9,800 is credited in your trading account. Install the app and verify details to receive the amount.'],
+    ['INR', 'IN', 'AD-REFNDX', 'Rs 18,846 is Credited in your Demat Account. Download and withdraw it now.'],
+    ['INR', 'IN', 'QP-GAMERX', 'Big bonus waiting! Make your first purchase of Rs. 99 using code START99. Hurry!'],
+    ['USD', 'US', 'GIGWORK', 'Get paid $400 a week by placing our logo on your car.'],
+    ['INR', 'IN', 'AD-SHOPKT', 'Your order for running shoes will be delivered tomorrow. Amount to be paid is Rs. 2,499.'],
+    ['INR', 'IN', 'AD-SHOPKT', 'Thanks for your purchase of Rs. 640.00 from CRAFT CORNER! We will let you know when it ships.'],
+    ['INR', 'IN', 'AD-SHOPKT', 'You have made a purchase of Rs 5,000 from KIRAN TRADERS. Click to pay: pay.example.in/k'],
+    ['INR', 'IN', 'AD-CARDSX', 'To activate your new credit card, please confirm the following: Rs. 12,400 spent at ONLINE STORE on card ending 8821. To confirm please call 1800 000 000.'],
+    ['INR', 'IN', 'AD-TATACD', "Rs.50,000.00 spent on your Example Card ending 4410 at KIRAN TRADERS. If this trx. wasn't done by you, click pay.example.in/x"],
+    ['INR', 'IN', 'AD-SBIINB', 'Chq 004512 for INR 41,227.00 fvr GREEN TRUST recd in clg wl be paid if in order. If not issued by you call 1800 000 000.'],
+    ['ZAR', 'ZA', 'FNBALERT', 'R 50.00 paid into your dormant account. Visit a branch before Friday to activate the account.'],
+    ['USD', 'US', '', 'Your card was charged $1,249.00 for a 65-inch television. Order no. TV-55812. If this was not you, call 1-888-555-0199.'],
+    // Kaggle India: an upper-case activation code with a charge to pay in cash.
+    ['INR', 'IN', 'AP-PAYBNK', 'Your Payments Bank savings a/c ACTIVATION CODE is: 552910. To continue opening the a/c, share this code with our agent. A one-time charge of Rs. 50 must be paid in cash to the agent.'],
+  ]) {
+    ok(`${cc}: lure wording is never auto-added — ${body.slice(0, 54)}…`, auto(currency, cc, body, 2, sender) === null,
+      auto(currency, cc, body, 2, sender));
+  }
+  // (d) Genuine alerts that share words with those lures still auto-add.
+  for (const [currency, cc, sender, body, type, minor] of [
+    ['INR', 'IN', 'VM-EXBANK', 'Rs.45 paid at RIVERSIDE Toll Plaza for KA01AB1234 on 04-10-2026 08:10:11 with Example Bank FASTag. Bal Rs.320. Call 18000001234 for dispute', 'expense', 4500],
+    ['CAD', 'CA', 'CIBC', 'INTERAC e-Transfer: JOHN SMITH sent you $50.00 and the money has been automatically deposited into your account ending 4410.', 'income', 5000],
+    ['INR', 'IN', 'AD-PAYTMB', 'Paid Rs.120.00 to GREEN GROCERS. Order ID: 77120334. Updated Balance: Wallet Rs 880.00', 'expense', 12000],
+    ['INR', 'IN', 'AD-ITDEPT', 'Refund of Rs 4,210 for AY 2026-27 has been credited to your A/c XX7781 on 03-10-2026.', 'income', 421000],
+    ['INR', 'IN', 'AD-SBIINB', 'Rs. 3,200.00 credited to A/c XX5521 on 04-10-26 by NEFT from ACME PAYROLL. Avl Bal Rs 41,200.00', 'income', 320000],
+    ['USD', 'US', 'CHASE', 'Chase: You made a $24.86 purchase at NORTH STAR MARKET with card ending 4421. If this was not you, call us.', 'expense', 2486],
+    ['KES', 'KE', 'SANLAM_UT', 'Dear Member, your account for Fixed Income Fund has been credited with KES 5,000.00 as of 04 Oct, 2026.', 'income', 500000],
+  ]) {
+    const row = auto(currency, cc, body, 2, sender);
+    ok(`${cc} control: a genuine alert still auto-adds — ${body.slice(0, 44)}…`,
+      row?.bestEffort && row.type === type && row.amountFils === minor, row);
+  }
+  for (const sender of ['', '+254711000222', '0244 000 111', 'alerts@wallet.example', 'INFO']) {
+    ok(`"${sender}" is an unverified sender for a money claim`, policy.isUnverifiedAlertSender(sender) === true);
+  }
+  for (const sender of ['MPESA', 'SG', 'SANLAM_UT', 'T-CASH', 'VM-HDFCBK', '8558', 'com.wallet.app']) {
+    ok(`"${sender}" is a bank or wallet header, not a person`, policy.isUnverifiedAlertSender(sender) === false);
+  }
+}
+
+/* ── Review, not silence: refused claims and refused bank credits ───── */
+{
+  const record = (id, text, sender) => JSON.stringify({ v: 1, id: id.repeat(64), text, ...(sender ? { sender } : {}),
+    receivedAt: '2026-10-05T10:00:00.000Z' });
+  const history = (currency, cc, text, sender) => {
+    markets.setLedgerCurrency(currency, 2);
+    const country = require('./build/country');
+    country.setActiveCountry(cc);
+    try {
+      return parseHistoricalMessageRecords([record('a', text, sender)], {}, new Date('2026-10-10T08:00:00Z'), new Set(),
+        createLaunchAlertSession({ overrides: {}, pinnedCurrency: currency, fxLookup: () => null, bestEffort: { enabled: true, country: cc } }));
+    } finally { markets.setLedgerCurrency(null); country.setActiveCountry(null); }
+  };
+  const mpesa = 'QX81TR4KLM Confirmed. You have received Ksh 6,400.00 from PETER KAMAU 0711000333 on 4/10/26 at 9:15 AM. New M-PESA balance is Ksh 6,512.40.';
+  const senderless = history('KES', 'KE', mpesa);
+  ok('History: a senderless M-Pesa credit waits in Review instead of being dropped',
+    senderless.parsed.length === 0 && senderless.reviewCandidates.length === 1, senderless);
+  const fromWallet = history('KES', 'KE', mpesa, 'MPESA');
+  ok('History control: the same credit from MPESA is added', fromWallet.parsed.length === 1, fromWallet);
+  const linked = history('INR', 'IN', 'Your A/C XXXXX771204 is credited with INR 12,500.00 on 04/10/26 10:12. Your new balance is INR 40,210.55. Chat with us: examplebank.in/chat');
+  ok('History: a bank credit refused only for its link footer waits in Review',
+    linked.parsed.length === 0 && linked.reviewCandidates.length === 1, linked);
+  const bait = history('INR', 'IN', 'Congrats, INR 30,000.00 Can Be Credited To Your Bank A/c. Check Now: lv.example/x', '+919800000000');
+  ok('History: a refused "Can Be Credited" bait never becomes a Review card',
+    bait.parsed.length === 0 && bait.reviewCandidates.length === 0, bait);
+  const linkedClaim = history('INR', 'IN', 'Your wallet amount of Rs. 48,200 is credited to 98XXXXXX10. Sign up today: w4l.example/k2', '+919800000001');
+  ok('History: a phone-number credit claim with a link never becomes a Review card',
+    linkedClaim.parsed.length === 0 && linkedClaim.reviewCandidates.length === 0, linkedClaim);
+  for (const [currency, cc, text] of [
+    ['BRL', 'BR', 'Pix recebido de R$ 90,00 de MARINA SOUZA.'],
+    ['USD', 'US', 'Refund of $35.00 from RIVER SHOES'],
+  ]) {
+    const row = history(currency, cc, text);
+    ok(`History: a senderless credit the policy holds back waits in Review — ${text.slice(0, 30)}`,
+      row.parsed.length === 0 && row.reviewCandidates.length === 1, row);
+  }
 }
 
 console.log(`\nbest-effort-autopost: ${pass} passed, ${fail} failed`);
