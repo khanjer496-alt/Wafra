@@ -1,6 +1,6 @@
 // Website measurement for Cloudflare Pages Functions. The landing page ships
 // no JavaScript and sets no cookies, so counting happens on the server: the
-// home page and the two download paths write one aggregate data point each to
+// home page and the download path write one aggregate data point each to
 // a Workers Analytics Engine dataset bound as SITE_EVENTS.
 //
 // A data point holds only coarse labels: the event, its target, the country
@@ -11,9 +11,10 @@
 
 // Single source for the download destinations behind /get/<platform>. The
 // finalizer writes the same map into _redirects for a static-only deploy.
+// Android has no public download while the source repository is private, so
+// /get/android falls through to the site's 404 page.
 export const DOWNLOAD_DESTINATIONS = Object.freeze({
   iphone: 'https://testflight.apple.com/join/jbwzCgZ6',
-  android: 'https://github.com/khanjer496-alt/Wafra/releases/download/ledger-light-135-ios-54/Wafra-Ledger-Light-135.apk',
 });
 
 export const SITE_EVENTS_DATASET = 'wafra_site_events';

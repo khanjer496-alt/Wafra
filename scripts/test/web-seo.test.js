@@ -87,8 +87,9 @@ ok(
 );
 ok(
   'download buttons use the counted first-party paths and keep a same-origin referrer',
-  ['href={DOWNLOAD_PATHS.iphone}', 'href={DOWNLOAD_PATHS.android}'].every((href) => landing.includes(href)) &&
-    content.includes("iphone: '/get/iphone'") && content.includes("android: '/get/android'") &&
+  landing.includes('href={DOWNLOAD_PATHS.iphone}') && content.includes("iphone: '/get/iphone'") &&
+    // No Android download while the source repository is private.
+    !landing.includes('DOWNLOAD_PATHS.android') && !content.includes('/get/android') &&
     !/testflight\.apple\.com|releases\/download/.test(`${landing}\n${content}`) &&
     !landing.includes('rel="noreferrer"'),
 );
@@ -195,8 +196,7 @@ try {
       '_expo/static/css/home.css', 'wafra-history-import.shortcut', 'robots.txt']
       .every((file) => fs.existsSync(path.join(output, file))));
   ok('static-host fallback redirects send each download path to its destination',
-    read('_redirects') === '/get/iphone https://testflight.apple.com/join/jbwzCgZ6 302\n' +
-      '/get/android https://github.com/khanjer496-alt/Wafra/releases/download/ledger-light-135-ios-54/Wafra-Ledger-Light-135.apk 302\n');
+    read('_redirects') === '/get/iphone https://testflight.apple.com/join/jbwzCgZ6 302\n');
   const sitemap = read('sitemap.xml');
   ok('sitemap contains the public documents and excludes 404 and private routes',
     routes.every((route) => sitemap.includes(`<loc>https://wafra-seo-fixture.dev/${route}/</loc>`)) &&
@@ -239,8 +239,9 @@ const siteEvents = spawnSync(process.execPath, ['--input-type=module', '-e', `
   recordSiteEvent(env, request('https://wafra.dev/', { 'user-agent': 'Googlebot/2.1' }), 'view', 'home');
   recordSiteEvent(env, request('https://wafra.dev/', { 'sec-purpose': 'prefetch' }), 'view', 'home');
   recordSiteEvent(env, request('https://wafra.dev/', {}, 'HEAD'), 'view', 'home');
-  const click = downloadResponse(env, request('https://wafra.dev/get/android',
-    { referer: 'https://wafra.dev/?utm_source=newsletter' }), 'android');
+  const click = downloadResponse(env, request('https://wafra.dev/get/iphone',
+    { referer: 'https://wafra.dev/?utm_source=newsletter' }), 'iphone');
+  const android = downloadResponse(env, request('https://wafra.dev/get/android'), 'android');
   const unknown = downloadResponse(env, request('https://wafra.dev/get/windows'), 'windows');
   const inherited = downloadResponse(env, request('https://wafra.dev/get/toString'), 'toString');
   let unbound = 'not run';
@@ -251,7 +252,7 @@ const siteEvents = spawnSync(process.execPath, ['--input-type=module', '-e', `
     points, unbound, unknown, inherited, brokenStatus: broken.status,
     click: { status: click.status, location: click.headers.get('location'), referrer: click.headers.get('referrer-policy'),
       cache: click.headers.get('cache-control') },
-    android: DOWNLOAD_DESTINATIONS.android,
+    iphone: DOWNLOAD_DESTINATIONS.iphone, android,
   }));
 `], { cwd: root, encoding: 'utf8' });
 let events = {};
@@ -264,13 +265,15 @@ ok('a landing view records only coarse labels: campaign, referring site and coun
 ok('automated clients are labelled, and prefetches and HEAD requests are not counted',
   events.points?.length === 3 && events.points[1].blobs[5] === 'automated');
 ok('a download click carries the landing campaign and redirects without leaking it',
-  JSON.stringify(events.points?.[2]?.blobs) === JSON.stringify(['download', 'android', 'ae', '', 'newsletter', 'browser']) &&
-    events.click?.status === 302 && events.click.location === events.android &&
+  JSON.stringify(events.points?.[2]?.blobs) === JSON.stringify(['download', 'iphone', 'ae', '', 'newsletter', 'browser']) &&
+    events.click?.status === 302 && events.click.location === events.iphone &&
     events.click.referrer === 'no-referrer' && events.click.cache === 'no-store');
 ok('no IP address, city, user agent, email or referrer path is written',
   !/203\.0\.113|dubai|mozilla|iphone os|googlebot|a@b|secret-post|igsh/i.test(JSON.stringify(events.points ?? [])));
 ok('unknown and inherited platform names fall through to the 404 page',
   events.unknown === null && events.inherited === null);
+ok('Android has no download while the source repository is private',
+  events.android === null);
 ok('a missing or failing analytics binding never breaks the download',
   events.unbound === 302 && events.brokenStatus === 302);
 ok('Pages Functions route the home page and download paths through site events',

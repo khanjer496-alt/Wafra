@@ -58,6 +58,12 @@ export interface WafraLiveCaptureNativeModule {
   listPendingRecordsExcluding?(limit: number, excludeIds: string[]): Promise<string[]>;
   /** Reads only structured Apple Pay envelopes; older readers deliberately exclude these. */
   listPendingApplePayRecords?(limit: number): Promise<string[]>;
+  /**
+   * Observe-only diagnostics: JSON rows `{ receivedAt, cardOrPass? }` for
+   * recent Apple Pay receipts. Not queue records; never acknowledged and never
+   * used for attribution or dedupe. Absent on older binaries.
+   */
+  listRecentApplePayCardObservations?(): Promise<string[]>;
   acknowledgeRecords(ids: string[]): Promise<void>;
   purgeExpired(): Promise<number>;
   getCaptureStatus(): Promise<WafraLiveCaptureStatus>;

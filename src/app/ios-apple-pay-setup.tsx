@@ -19,7 +19,8 @@ import { formatCaptureReceipt } from '@/lib/ios-capture-health';
 import { dispatchIosMessageSetup, loadIosMessageSetupProgress, progressForSource, type IosMessageSetupProgress } from '@/lib/ios-message-onboarding';
 import {
   iosApplePayCheckUrl, iosApplePayCopy, iosSupportsApplePayAutomation,
-  isBundledApplePayShortcutUri, resolveApplePaySetupState,
+  isBundledApplePayShortcutUri, parseApplePayCardObservations, resolveApplePaySetupState,
+  type ApplePayCardObservation,
 } from '@/lib/ios-apple-pay-setup';
 import { useStore } from '@/lib/store';
 
@@ -74,6 +75,7 @@ function ApplePaySetupScreen() {
   const supported = Platform.OS === 'ios' && iosSupportsApplePayAutomation(Platform.Version);
   const [status, setStatus] = useState<WafraLiveCaptureStatus | null>(null);
   const [progress, setProgress] = useState<IosMessageSetupProgress | null>(null);
+  const [cards, setCards] = useState<ApplePayCardObservation[]>([]);
   const [available, setAvailable] = useState(false);
   const [bundled, setBundled] = useState(false);
   const [manual, setManual] = useState(false);
@@ -98,9 +100,14 @@ function ApplePaySetupScreen() {
         if (current()) { setAvailable(false); setStatus(null); }
         return;
       }
-      const [next, saved] = await Promise.all([native.getCaptureStatus(), loadIosMessageSetupProgress()]);
+      // Observe-only card text: an older binary or a failed read shows none.
+      const cardRows = native.listRecentApplePayCardObservations
+        ? native.listRecentApplePayCardObservations().catch(() => [])
+        : Promise.resolve([]);
+      const [next, saved, rows] = await Promise.all([native.getCaptureStatus(), loadIosMessageSetupProgress(), cardRows]);
       if (current()) {
         setStatus(next); setProgress(saved); setAvailable(true);
+        setCards(parseApplePayCardObservations(rows));
         setBundled(typeof native.getApplePayShortcutURL === 'function');
       }
     } catch {
@@ -263,6 +270,13 @@ function ApplePaySetupScreen() {
           {flow.incomplete && <ThemedText accessibilityRole="alert" style={{ color: band.statusOver }}>{w.incomplete}</ThemedText>}
           {flow.pending > 0 && <ThemedText type="small" style={{ color: band.text }}>{w.pending}: {flow.pending}</ThemedText>}
           {flow.received && <ThemedText type="meta" style={muted}>{w.last}: {formatCaptureReceipt(status?.lastApplePayReceivedAt ?? null, language)}</ThemedText>}
+          {cards.length > 0 && <View testID="apple-pay-card-observations" style={styles.cards}>
+            <ThemedText type="smallBold" accessibilityRole="header" style={{ color: band.text }}>{w.cardTitle}</ThemedText>
+            {cards.map((card, index) => <ThemedText key={`${card.receivedAt}-${index}`} type="small" style={{ color: band.text }}>
+              {formatCaptureReceipt(card.receivedAt, language)} · {card.cardOrPass ?? w.cardMissing}
+            </ThemedText>)}
+            <ThemedText type="meta" style={muted}>{w.cardHelp}</ThemedText>
+          </View>}
           {onboarding ? <ThemedText type="small" style={muted}>{w.reviewOnboarding}</ThemedText> :
             <EButton palette={band} variant="secondary" label={w.review} onPress={() => router.push('/review-alerts')} disabled={busy} />}
         </View>
@@ -291,4 +305,5 @@ const styles = StyleSheet.create({
   stepCopy: { flex: 1, minWidth: 0, gap: 2 },
   stepBody: { gap: 10 },
   delivery: { gap: 8, paddingTop: 6 },
+  cards: { gap: 4, paddingTop: 4 },
 });

@@ -171,14 +171,21 @@ it receives only the text the user's automation passes.
 The user can separately create an Apple Wallet **Transaction** automation for
 the cards they choose and run Wafra's Apple Pay Shortcut or its **Capture Apple
 Pay purchase** action. Wafra's action accepts only the transaction's
-**Amount** (a decimal amount with its currency code) and **Merchant** name.
+**Amount** (a decimal amount with its currency code), **Merchant** name and,
+optionally, the **Card or Pass** name Wallet shows for the card used.
 
 - Wafra stores the amount, currency and merchant name (up to 96 characters)
   with a random identifier and the time it arrived in the same protected
-  queue. It does not receive the card number, card name, Wallet history or
-  payment status. Refunds and other non-positive amounts are not captured.
-- If the amount or currency is missing or any field is invalid, nothing is
-  queued; Wafra records only the time an incomplete event arrived.
+  queue. It does not receive the card number, Wallet history or payment
+  status. Refunds and other non-positive amounts are not captured.
+- The optional Card or Pass name (up to 80 characters) is kept separately from
+  the purchase, on the device only, for the five most recent purchases and at
+  most 30 days. It is shown only on Wafra's Apple Pay setup screen and is not
+  added to the ledger, Review items or diagnostic exports. Erasing Wafra's data
+  removes it.
+- If the amount or currency is missing or invalid, nothing is queued; Wafra
+  records only the time an incomplete event arrived. A missing or unusable
+  Card or Pass name never stops a purchase from being queued.
 - Each captured purchase goes to Review. Nothing enters the ledger until the
   user chooses an account and adds it.
 - The queued record is deleted once its Review item is saved; until then it

@@ -22,6 +22,11 @@ public struct WafraLiveCaptureStatus {
   public let lastApplePayReceivedAt: TimeInterval?
 }
 
+public struct WafraApplePayCardObservation {
+  public let receivedAt: TimeInterval
+  public let cardOrPass: String?
+}
+
 public final class WafraLiveCaptureStore {
   public static let shared = WafraLiveCaptureStore()
   public static let queueChangedNotificationName = "app.wafra.live-capture.queue-changed.v1"
@@ -113,6 +118,16 @@ public final class WafraLiveCaptureStore {
     calls.append("listPendingApplePayRecords")
     listLimits.append(limit)
     return ["apple-pay:\(limit)"]
+  }
+
+  public var cardObservationsResult = [
+    WafraApplePayCardObservation(receivedAt: 1410.5, cardOrPass: nil),
+    WafraApplePayCardObservation(receivedAt: 1420.75, cardOrPass: "Visa \"Gold\" / 1234"),
+  ]
+
+  public func recentApplePayCardObservations() throws -> [WafraApplePayCardObservation] {
+    calls.append("recentApplePayCardObservations")
+    return cardObservationsResult
   }
 
   public func acknowledgeRecords(ids: [String]) throws {

@@ -2401,7 +2401,11 @@ const DECLINE_SMS = [{
   ];
 
   const s = scan(FAB_INBOX);
-  const imported = apply(BASE, buildImportPlan(s.parsed, BASE, s.newestTs));
+  // Pin the planner's clock to the week of these messages. With the real
+  // clock, the 26 Aug 2026 due date fell past the 45-day stale-due cutoff
+  // on 11 Oct 2026 and the reminder this test is about was dropped.
+  const FAB_TODAY = new Date('2026-08-08T09:00:00Z');
+  const imported = apply(BASE, buildImportPlan(s.parsed, BASE, s.newestTs, FAB_TODAY));
   const named = (state, id) => state.accounts.find((a) => a.id === id)?.name;
 
   ok('FAB: the reminder mints a second card row for one statement',

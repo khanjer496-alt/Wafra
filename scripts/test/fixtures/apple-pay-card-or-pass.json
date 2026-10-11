@@ -1,0 +1,115 @@
+{
+  "description": "Shared table: native WafraLiveCaptureStore.sanitizedApplePayCardOrPass(input) must equal expected; the JS observation reader must accept every non-null expected value.",
+  "cases": [
+    {
+      "name": "plain",
+      "input": "Visa Gold 1234",
+      "expected": "Visa Gold 1234"
+    },
+    {
+      "name": "whitespace, bidi override and zero-width are removed",
+      "input": "  Visa\n\tGold‮ ​1234  ",
+      "expected": "Visa Gold 1234"
+    },
+    {
+      "name": "combining mark kept with its base",
+      "input": "école Card",
+      "expected": "école Card"
+    },
+    {
+      "name": "leading combining mark kept",
+      "input": "́Card",
+      "expected": "́Card"
+    },
+    {
+      "name": "ZWJ emoji loses its joiners",
+      "input": "Family 👨‍👩‍👧 Card",
+      "expected": "Family 👨👩👧 Card"
+    },
+    {
+      "name": "tag-sequence flag loses its tag characters",
+      "input": "Flag 🏴󠁧󠁢󠁳󠁣󠁴󠁿",
+      "expected": "Flag 🏴"
+    },
+    {
+      "name": "a single grapheme over 80 UTF-16 units is dropped",
+      "input": "á́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́",
+      "expected": null
+    },
+    {
+      "name": "an over-long trailing grapheme is cut and the space trimmed",
+      "input": "Visa á́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́́",
+      "expected": "Visa"
+    },
+    {
+      "name": "ideographic space collapses",
+      "input": "Card　One",
+      "expected": "Card One"
+    },
+    {
+      "name": "line separator collapses",
+      "input": "Card Two",
+      "expected": "Card Two"
+    },
+    {
+      "name": "no-break space collapses",
+      "input": "Card Three",
+      "expected": "Card Three"
+    },
+    {
+      "name": "soft hyphen (format character) is removed",
+      "input": "Soft­hyphen",
+      "expected": "Softhyphen"
+    },
+    {
+      "name": "NEL control becomes a space",
+      "input": "AB",
+      "expected": "A B"
+    },
+    {
+      "name": "over-long text is capped at 80 units",
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "name": "cap never splits a surrogate pair",
+      "input": "💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳",
+      "expected": "💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳💳"
+    },
+    {
+      "name": "cap boundary trims a trailing space",
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa bcd",
+      "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "name": "empty is none",
+      "input": "",
+      "expected": null
+    },
+    {
+      "name": "blank is none",
+      "input": "   \n",
+      "expected": null
+    },
+    {
+      "name": "only unsafe scalars is none",
+      "input": "\u0000​﻿⁦",
+      "expected": null
+    },
+    {
+      "name": "bell control is none",
+      "input": "\u0007",
+      "expected": null
+    },
+    {
+      "name": "Arabic kept",
+      "input": "بطاقة الراجحي",
+      "expected": "بطاقة الراجحي"
+    },
+    {
+      "name": "masked number kept",
+      "input": "Mastercard •••• 1234",
+      "expected": "Mastercard •••• 1234"
+    }
+  ]
+}

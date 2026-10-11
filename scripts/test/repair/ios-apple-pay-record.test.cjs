@@ -74,6 +74,8 @@ test('strict structured payload rejects unknown keys and does not parse arbitrar
   for (const raw of ['not JSON', 'Your OTP is 123456 for AED 80.00.', '[]', 'null',
     JSON.stringify({ amount: '1', currency: 'AED' }),
     JSON.stringify({ amount: '1', currency: 'AED', merchant: '', cardName: 'Private Card' }),
+    // Card or Pass is observe-only native metadata and never part of a queued record.
+    JSON.stringify({ amount: '1', cardOrPass: 'Visa Gold 1234', currency: 'AED', merchant: '' }),
     JSON.stringify({ amount: '1', currency: 'AED', merchant: '', status: 'posted' }),
     JSON.stringify({ amount: '1', currency: 'AED', merchant: '', date: '2026-09-23' })]) {
     refused(parseIosApplePayRecord(raw, id, observedAt), 'invalid-payload');

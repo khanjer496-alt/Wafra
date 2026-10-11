@@ -94,17 +94,12 @@ try {
     // cannot follow them; under `wrangler pages dev` set EXPECT_REDIRECTS=1.
     assert.equal(await page.getByRole('link', { name: 'Join the Wafra beta on Apple TestFlight', exact: true })
       .getAttribute('href'), '/get/iphone');
-    assert.equal(await page.getByRole('link', { name: 'Download the Wafra Android test APK', exact: true })
-      .getAttribute('href'), '/get/android');
+    // No Android download while the source repository is private.
+    assert.equal(await page.locator('a[href="/get/android"], a[href$=".apk"]').count(), 0);
     if (process.env.EXPECT_REDIRECTS === '1') {
       const iphone = await page.request.get(`${base}/get/iphone`, { maxRedirects: 0 });
       assert.equal(iphone.status(), 302);
       assert.equal(iphone.headers().location, 'https://testflight.apple.com/join/jbwzCgZ6');
-      const android = await page.request.get(`${base}/get/android`, { maxRedirects: 0 });
-      assert.equal(android.status(), 302);
-      const apkUrl = android.headers().location;
-      assert.match(apkUrl, /^https:\/\/github\.com\/khanjer496-alt\/Wafra\/releases\/download\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\.apk$/);
-      if (process.env.EXPECTED_APK_URL) assert.equal(apkUrl, process.env.EXPECTED_APK_URL);
     }
     const tour = page.locator('#inside-wafra');
     assert.equal(await tour.getByRole('heading', { name: 'Home', exact: true }).count(), 1);

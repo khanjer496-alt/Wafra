@@ -11,7 +11,7 @@ const progressApi = load(path.join(root, 'src/lib/ios-message-onboarding.ts'), {
   './ios-history-setup': { isIosHistoryShortcutInstalled: async () => false },
 });
 
-async function screen({ version = '27.0', nativePresent = true, capability = true, enabled = false, entitled = true, proof = null, received = null, bundled = true, installed = false, saved = null, fromOnboarding = '1', onboarded = false } = {}) {
+async function screen({ version = '27.0', nativePresent = true, capability = true, enabled = false, entitled = true, proof = null, received = null, bundled = true, installed = false, saved = null, fromOnboarding = '1', onboarded = false, cards } = {}) {
   const slots = [], effects = [], events = [], urls = [], shares = [], routes = [], listeners = [];
   let cursor = 0, generation = 1, holdNext;
   const generationFn = () => generation;
@@ -32,6 +32,8 @@ async function screen({ version = '27.0', nativePresent = true, capability = tru
     ...(bundled ? { getApplePayShortcutURL: async () => 'file:///app/WafraLiveCaptureResources.bundle/Wafra%20Apple%20Pay%20v1.shortcut' } : {}),
     getCaptureStatus: async () => { events.push('read-status'); const snapshot = { ...status }; if (holdNext) { const waiting = holdNext; holdNext = null; await waiting; } return snapshot; },
     setCaptureEnabled: async enabled => { events.push(`enabled:${enabled}`); status = { ...status, enabled }; },
+    ...(cards === undefined ? {} : { listRecentApplePayCardObservations: async () => {
+      if (cards === 'throw') throw new Error('read failed'); return cards; } }),
   };
   const component = load(path.join(root, 'src/app/ios-apple-pay-setup.tsx'), {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx },
@@ -241,4 +243,58 @@ test('Apple Pay video appears only with supported native capture and the matchin
   assert.match(steps, /Shortcuts editor.*Automation section.*Transaction trigger/);
   assert.match(steps, /Amount and Merchant bound to Shortcut Input/);
   assert.doesNotMatch(steps, /Add Run Shortcut|Automation → \+/);
+});
+
+test('recent Wallet Card or Pass values are listed newest first, on device only, with absent values named', async () => {
+  const at = Date.parse('2026-10-11T09:00:00Z');
+  const h = await screen({ enabled: true, received: at, cards: [
+    JSON.stringify({ receivedAt: at - 60_000 }),
+    JSON.stringify({ cardOrPass: 'Visa Gold 1234', receivedAt: at - 30_000 }),
+    JSON.stringify({ cardOrPass: 'Apple Card', receivedAt: at }),
+    JSON.stringify({ cardOrPass: 'bad\u202e', receivedAt: at }),
+    'not json',
+  ] });
+  const block = walk(h.tree()).find(n => n.props?.testID === 'apple-pay-card-observations');
+  assert.ok(block, 'card observations block is shown');
+  const lines = walk(block).filter(n => n.type === 'Text' && n.props.type === 'small').map(n => [].concat(n.props.children).join(''));
+  assert.equal(lines.length, 3);
+  assert.match(lines[0], /· Apple Card$/); assert.match(lines[1], /· Visa Gold 1234$/); assert.match(lines[2], /· No card name sent \(optional\)$/);
+  assert.match(h.text(), /Card or Pass from Wallet/);
+  assert.match(h.text(), /not used to choose an account/);
+  assert.match(h.text(), /Optional\./);
+});
+
+test('no card block on older binaries, empty lists or a failed read; the rest of the screen still loads', async () => {
+  for (const cards of [undefined, [], 'throw']) {
+    const h = await screen({ enabled: true, received: Date.now(), cards });
+    assert.equal(walk(h.tree()).some(n => n.props?.testID === 'apple-pay-card-observations'), false);
+    assert.ok(h.text().includes('Last Apple Pay event received'), String(cards));
+  }
+});
+
+test('card observation helper validates rows and keeps at most five, newest first', () => {
+  const at = Date.parse('2026-10-11T09:00:00Z');
+  const rows = Array.from({ length: 7 }, (_, i) => JSON.stringify({ cardOrPass: `Card ${i}`, receivedAt: at + i }));
+  const parsed = helper.parseApplePayCardObservations(rows);
+  assert.deepEqual(JSON.parse(JSON.stringify(parsed.map(row => row.cardOrPass))), ['Card 6', 'Card 5', 'Card 4', 'Card 3', 'Card 2']);
+  for (const bad of [null, 'x', {}, [42], [JSON.stringify({ receivedAt: 'now' })], [JSON.stringify({ receivedAt: at, cardOrPass: ' x' })],
+    [JSON.stringify({ receivedAt: at, cardOrPass: 'x'.repeat(81) })], [JSON.stringify({ receivedAt: at, extra: 1 })]]) {
+    assert.equal(helper.parseApplePayCardObservations(bad).length, 0, JSON.stringify(bad));
+  }
+});
+
+test('the JS reader accepts every value the native sanitizer emits (shared table)', () => {
+  const table = JSON.parse(require('node:fs').readFileSync(path.join(root, 'scripts/test/fixtures/apple-pay-card-or-pass.json'), 'utf8'));
+  assert.ok(table.cases.length >= 20);
+  for (const { name, input, expected } of table.cases) {
+    if (expected === null) continue;
+    assert.equal(helper.usableCardOrPass(expected), true, name);
+    assert.ok(expected.length <= helper.MAX_APPLE_PAY_CARD_OR_PASS_LENGTH, name);
+    const [row] = helper.parseApplePayCardObservations([JSON.stringify({ cardOrPass: expected, receivedAt: 1 })]);
+    assert.equal(row.cardOrPass, expected, name);
+    // Raw inputs carrying controls, bidi or zero-width scalars are never read as-is.
+    if (/[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/u.test(input)) {
+      assert.equal(helper.usableCardOrPass(input), false, name);
+    }
+  }
 });

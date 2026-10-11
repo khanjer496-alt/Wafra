@@ -22,6 +22,7 @@
 "live.apple_pay.title" = "التقاط عملية Apple Pay";
 "live.apple_pay.amount.parameter" = "مبلغ المحفظة";
 "live.apple_pay.merchant.parameter" = "التاجر";
+"live.apple_pay.card_or_pass.parameter" = "البطاقة أو التذكرة";
 "live.apple_pay.invalid" = "تعذّر على وفرة قراءة مبلغ المحفظة. اربط مبلغ المحفظة والتاجر بهذا الإجراء ثم حاول مرة أخرى.";
 "live.apple_pay.error" = "تعذّر على وفرة حفظ حدث Apple Pay. افتح وفرة وتحقق من حالة الالتقاط.";
 "live.apple_pay.setup.title" = "التحقق من إعداد Apple Pay في وفرة";

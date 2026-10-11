@@ -24,7 +24,8 @@ function trace(graph, input) {
     assert.equal(property.Type, 'WFPropertyVariableAggrandizement');
     if (input?.kind !== 'wallet-transaction') throw new Error('cannot coerce input to Wallet Transaction');
     return property.PropertyName === 'Amount' ? input.amount
-      : property.PropertyName === 'Merchant' ? input.merchant : assert.fail('unapproved property');
+      : property.PropertyName === 'Merchant' ? input.merchant
+        : property.PropertyName === 'Card or Pass' ? input.cardOrPass : assert.fail('unapproved property');
   };
   for (const action of graph.WFWorkflowActions) {
     const p = action.WFWorkflowActionParameters, id = action.WFWorkflowActionIdentifier;
@@ -39,7 +40,12 @@ function trace(graph, input) {
       if (id === setupId) {
         assert.deepEqual(Object.keys(p).sort(), ['AppIntentDescriptor', 'UUID']);
         effects.push({ action: 'setup-proof' });
-      } else if (id === captureId) effects.push({ action: 'capture', amount: read(p.amount), merchant: read(p.merchant) });
+      } else if (id === captureId) {
+        // Keys a v1 copy without the binding omits stay absent, not empty.
+        const effect = { action: 'capture', amount: read(p.amount), merchant: read(p.merchant) };
+        if (p.cardOrPass) effect.cardOrPass = read(p.cardOrPass);
+        effects.push(effect);
+      }
       else if (id === 'is.workflow.actions.exit') { effects.push({ action: 'stop' }); break; }
       else assert.fail(`unapproved action ${id}`);
     }
@@ -59,8 +65,8 @@ test('Wallet amount is passed as a typed currency object without decimal convers
     ['Shop', 'USD', '10.50'], ['متجر', 'KWD', '0.001'], ['Café', 'JPY', '1250'],
   ]) {
     const amount = { currencyCode: currency, decimal };
-    const effects = trace(graph, { kind: 'wallet-transaction', amount, merchant });
-    assert.deepEqual(effects, [{ action: 'capture', amount, merchant }, { action: 'stop' }]);
+    const effects = trace(graph, { kind: 'wallet-transaction', amount, merchant, cardOrPass: 'Visa' });
+    assert.deepEqual(effects, [{ action: 'capture', amount, merchant, cardOrPass: 'Visa' }, { action: 'stop' }]);
     assert.equal(effects[0].amount, amount, 'preserve the typed object, not a formatted/stringified monetary value');
   }
   assert.doesNotMatch(JSON.stringify(graph), /getitemtype|WFConditionalActionString|formatnumber|calculate|WFNumberContentItem|WFStringContentItem/);
@@ -69,12 +75,29 @@ test('Wallet amount is passed as a typed currency object without decimal convers
 test('missing amount or merchant remains absent and foreign input is not treated as a transaction', async () => {
   const a = await api, graph = a.buildApplePayShortcut();
   assert.deepEqual(trace(graph, { kind: 'wallet-transaction' }),
-    [{ action: 'capture', amount: undefined, merchant: undefined }, { action: 'stop' }]);
+    [{ action: 'capture', amount: undefined, merchant: undefined, cardOrPass: undefined }, { action: 'stop' }]);
   for (const input of ['10 USD', { amount: 10 }, 'WAFRA_SETUP_CHECK_V1'])
     assert.throws(() => trace(graph, input), /cannot coerce/);
 });
 
-test('metadata pins exact native intents and allowed properties without card, date, status or financial identifiers', async () => {
+test('Card or Pass is bound only to the optional observe-only parameter, after Amount and Merchant', async () => {
+  const a = await api, graph = a.buildApplePayShortcut();
+  const p = graph.WFWorkflowActions[4].WFWorkflowActionParameters;
+  const names = ['amount', 'merchant', 'cardOrPass'].map(key =>
+    p[key].Value.attachmentsByRange['{0, 1}'].Aggrandizements[1].PropertyName);
+  assert.deepEqual(names, ['Amount', 'Merchant', 'Card or Pass']);
+  // The card text reaches only the native capture action; no other action reads Shortcut Input.
+  assert.equal((JSON.stringify(graph).match(/Card or Pass/g) ?? []).length, 1);
+  // A v1 copy installed before the binding (no cardOrPass key) still captures amount and merchant.
+  const legacy = a.buildApplePayShortcut();
+  delete legacy.WFWorkflowActions[4].WFWorkflowActionParameters.cardOrPass;
+  assert.throws(() => a.verifyApplePayShortcutGraph(legacy), /dataflow changed/);
+  const amount = { currencyCode: 'AED', decimal: '12.00' };
+  assert.deepEqual(trace(legacy, { kind: 'wallet-transaction', amount, merchant: 'Shop', cardOrPass: 'Visa' }),
+    [{ action: 'capture', amount, merchant: 'Shop' }, { action: 'stop' }]);
+});
+
+test('metadata pins exact native intents and allowed properties without card number, date, status or financial identifiers', async () => {
   const a = await api, graph = a.buildApplePayShortcut();
   assert.equal(a.IOS_APPLE_PAY_SHORTCUT_NAME, 'Wafra Apple Pay v1');
   assert.equal(graph.WFWorkflowName, a.IOS_APPLE_PAY_SHORTCUT_NAME);
@@ -96,9 +119,9 @@ test('metadata pins exact native intents and allowed properties without card, da
       TeamIdentifier: 'UV7YN4GQ66', BundleIdentifier: 'app.wafra.ios', Name: 'Wafra', AppIntentIdentifier: name,
     });
   }
-  assert.deepEqual(Object.keys(graph.WFWorkflowActions[4].WFWorkflowActionParameters).sort(), ['AppIntentDescriptor', 'UUID', 'amount', 'merchant']);
+  assert.deepEqual(Object.keys(graph.WFWorkflowActions[4].WFWorkflowActionParameters).sort(), ['AppIntentDescriptor', 'UUID', 'amount', 'cardOrPass', 'merchant']);
   const json = JSON.stringify(graph);
-  assert.doesNotMatch(json, /https?:|downloadurl|clipboard|savefile|sendmessage|sendemail|notification|MobileSMS|WalletTransactionTrigger|Card or Pass|Currency Code|Currency Amount|"PropertyName":"(?:Date|Status|Identifier)"/i);
+  assert.doesNotMatch(json, /https?:|downloadurl|clipboard|savefile|sendmessage|sendemail|notification|MobileSMS|WalletTransactionTrigger|Card Number|Payment Method|Currency Code|Currency Amount|"PropertyName":"(?:Date|Status|Identifier)"/i);
 });
 
 test('verification rejects altered native targets, scalar bindings, control flow and hidden external actions', async () => {
@@ -106,6 +129,8 @@ test('verification rejects altered native targets, scalar bindings, control flow
   for (const mutate of [
     graph => { graph.WFWorkflowActions[1].WFWorkflowActionIdentifier = captureId; },
     graph => { graph.WFWorkflowActions[4].WFWorkflowActionParameters.amount = '0'; },
+    graph => { graph.WFWorkflowActions[4].WFWorkflowActionParameters.cardOrPass.Value.attachmentsByRange['{0, 1}'].Aggrandizements[1].PropertyName = 'Name'; },
+    graph => { delete graph.WFWorkflowActions[4].WFWorkflowActionParameters.cardOrPass; },
     graph => { graph.WFWorkflowActions[4].WFWorkflowActionParameters.AppIntentDescriptor.BundleIdentifier = 'other.app'; },
     graph => { graph.WFWorkflowActions[0].WFWorkflowActionParameters.WFCondition = 100; },
     graph => { graph.WFWorkflowActions.push({ WFWorkflowActionIdentifier: 'is.workflow.actions.openurl', WFWorkflowActionParameters: { WFURLActionURL: 'https://example.com' } }); },

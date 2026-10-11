@@ -419,11 +419,28 @@ const validFixture = () => {
         intent: { kind: 'build', platform: 'ios', profile: 'production', submit: true },
       });
       const codes = report.findings.map(({ code }) => code);
+      // No History link: the app installs its bundled History Shortcut.
       ok(`production iOS rejects retired Capture Shortcut ${retiredId}`,
-        codes.includes('broken-capture-shortcut') && codes.includes('history-shortcut'),
+        codes.includes('broken-capture-shortcut') && !codes.includes('history-shortcut'),
         codes.join(','));
       fs.rmSync(root, { recursive: true, force: true });
     }
+  }
+
+  {
+    const root = validFixture();
+    const eas = JSON.parse(fs.readFileSync(path.join(root, 'eas.json'), 'utf8'));
+    eas.build.production.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL =
+      'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v6-20260919/Wafra-History-v6.signed.shortcut';
+    write(root, 'eas.json', eas);
+    const report = await assessReleaseReadiness({
+      root,
+      intent: { kind: 'build', platform: 'ios', profile: 'production', submit: true },
+    });
+    ok('production iOS rejects a History Shortcut hosted in the private repository',
+      report.findings.some(({ code }) => code === 'private-history-shortcut'),
+      report.findings.map(({ code }) => code).join(','));
+    fs.rmSync(root, { recursive: true, force: true });
   }
 
   {

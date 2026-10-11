@@ -50,6 +50,9 @@ const transactionProperty = name => ({
 // retaining its object across Run Shortcut still needs device qualification.
 // If that handoff loses the type, configure the native capture AppIntent
 // directly in the automation with its Amount and Merchant magic variables.
+// The name stays "Wafra Apple Pay v1" across the additive Card or Pass
+// binding: the app runs the setup check by this exact name and users' Wallet
+// automations already point at it, while the native parameter is optional.
 const createApplePayShortcut = () => ({
   WFWorkflowName: IOS_APPLE_PAY_SHORTCUT_NAME,
   // Shortcuts serialization versions, not minimum iOS version declarations.
@@ -82,6 +85,11 @@ const createApplePayShortcut = () => ({
     native(CAPTURE_INTENT, 5, {
       amount: transactionProperty('Amount'),
       merchant: transactionProperty('Merchant'),
+      // Observe-only: Wallet's "Card or Pass" content property, bound to the
+      // optional String parameter. The binary stores it for the setup screen
+      // and never uses it for attribution or dedupe. Copies of this graph
+      // that predate the binding omit the key and still record payments.
+      cardOrPass: transactionProperty('Card or Pass'),
     }),
     action('is.workflow.actions.exit', { UUID: uuid(6) }),
   ],
