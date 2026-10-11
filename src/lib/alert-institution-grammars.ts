@@ -11,7 +11,8 @@
 export type InstitutionGrammarMarket =
   | 'US' | 'GB' | 'FR' | 'DE' | 'ES' | 'IT' | 'NL'
   | 'IN' | 'QA' | 'KW' | 'BH' | 'OM' | 'EG' | 'JO'
-  | 'CA' | 'AU' | 'BR' | 'MX' | 'SG';
+  | 'CA' | 'AU' | 'BR' | 'MX' | 'SG'
+  | 'CO' | 'PE';
 
 export type InstitutionEvidenceKind = 'sender' | 'body';
 export type InstitutionGrammarStatus = 'experimental' | 'verified';
@@ -59,6 +60,12 @@ interface InstitutionGrammar {
   institution: string;
   senders: readonly string[];
   body: RegExp;
+  /**
+   * Numeric short codes a bank sends from but does not own exclusively (a
+   * carrier reassigns them, and one code can serve two banks). They count as
+   * sender evidence only when the body names the same institution.
+   */
+  bodyBoundSenders?: readonly string[];
   metadata?: InstitutionGrammarMetadata;
   /**
    * Country qualifier for a brand that also banks in another country (QNB in
@@ -150,10 +157,11 @@ const INSTITUTIONS: Record<InstitutionGrammarMarket, readonly InstitutionGrammar
     { institution: 'n26-de', senders: ['n26'], body: /\bn26\b/iu },
   ],
   ES: [
-    { institution: 'santander-es', senders: ['santander', 'bancosantander'], body: /\bbanco santander\b/iu },
-    // BBVA is multinational. "BBVA México" is the Mexican issuer's own brand
-    // and must not be read as Spanish body evidence; plain "BBVA" stays ES.
-    { institution: 'bbva-es', senders: ['bbva'], body: /\bbbva\b(?!\s+m[eé]xico)/iu },
+    // Santander and BBVA are multinational. "Banco Santander México/Brasil",
+    // "BBVA México" and "BBVA Perú" are those issuers' own brands and must not
+    // be read as Spanish body evidence; plain "Banco Santander"/"BBVA" stays ES.
+    { institution: 'santander-es', senders: ['santander', 'bancosantander'], body: /\bbanco santander\b(?!\s+(?:m[eé]xico|brasil)\b)/iu },
+    { institution: 'bbva-es', senders: ['bbva'], body: /\bbbva\b(?!\s+(?:m[eé]xico|per[uú]|continental|colombia)(?=$|[^\p{L}\p{N}]))/iu },
     { institution: 'caixabank-es', senders: ['caixabank'], body: /\bcaixabank\b/iu },
   ],
   IT: [
@@ -242,14 +250,49 @@ const INSTITUTIONS: Record<InstitutionGrammarMarket, readonly InstitutionGrammar
   BR: [
     { institution: 'itau-brasil', senders: ['itau', 'itaubank'], body: /(?:^|[^\p{L}\p{N}])ita[uú](?:\s+unibanco)?(?=$|[^\p{L}\p{N}])/iu },
     { institution: 'bradesco-brasil', senders: ['bradesco'], body: /\bbradesco\b/iu },
-    { institution: 'banco-do-brasil', senders: ['bancodobrasil'], body: /\bbanco do brasil\b/iu },
+    // Ourocard is Banco do Brasil's own card brand; a bare "BB" is not evidence.
+    { institution: 'banco-do-brasil', senders: ['bancodobrasil'], body: /\bbanco do brasil\b|\bourocard\b/iu },
     { institution: 'nubank-brasil', senders: ['nubank'], body: /\bnubank\b/iu },
+    // "Inter" alone is an ordinary word: only the bank's own prefix or names.
+    { institution: 'inter-brasil', senders: ['bancointer'], body: /\bbanco\s+inter\b|^\s*inter\s*:|\binter\s+(?:mastercard|shop)\b/iu },
+    { institution: 'c6-bank-brasil', senders: ['c6bank'], body: /\bc6\s*bank\b/iu },
+    // "caixa eletrônico" is an ATM, not the bank.
+    { institution: 'caixa-brasil', senders: ['caixa'], body: /^\s*caixa\s*:|\bcaixa\s+econ[oô]mica\b/iu },
+    // Shared brands (Santander also banks in Spain and Mexico, Mercado Pago in
+    // most of Latin America) are Brazilian only next to an R$ amount.
+    { institution: 'santander-brasil', senders: ['santanderbrasil'], body: /\bsantander\s+brasil\b|\bsantander\b(?=[\s\S]{0,200}R\$)/iu },
+    { institution: 'mercado-pago-brasil', senders: [], body: /\bmercado\s*pago\b(?=[\s\S]{0,240}R\$)|R\$[\s\S]{0,240}\bmercado\s*pago\b/iu },
+    { institution: 'picpay-brasil', senders: ['picpay'], body: /\bpicpay\b/iu },
   ],
   MX: [
     { institution: 'bbva-mexico', senders: ['bbvamexico', 'bbvamx'], body: /\bbbva\s+m[eé]xico(?=$|[^\p{L}\p{N}])/iu },
     { institution: 'banorte-mexico', senders: ['banorte'], body: /\bbanorte\b/iu },
     { institution: 'santander-mexico', senders: ['santandermx', 'santandermexico'], body: /\bsantander\s+m[eé]xico(?=$|[^\p{L}\p{N}])/iu },
     { institution: 'citibanamex', senders: ['citibanamex', 'banamex'], body: /\b(?:citibanamex|banamex)\b/iu },
+  ],
+  // Colombia. Numeric short codes are shared between banks (87188 is used for
+  // Davivienda and fits the Bancolombia range), so they only agree with a body
+  // that names the bank. Nu's app package and brand also serve Brazil and
+  // Mexico: only "Nu Colombia" is Colombian evidence.
+  CO: [
+    { institution: 'bancolombia', senders: ['bancolombia'], bodyBoundSenders: ['85540', '85784', '87400'], body: /\bbancolombia\b/iu },
+    { institution: 'davivienda', senders: ['davivienda'], bodyBoundSenders: ['890077', '891000', '87188'], body: /\bdavivienda\b/iu },
+    { institution: 'daviplata', senders: ['daviplata'], body: /\bdaviplata\b/iu },
+    { institution: 'nequi', senders: ['nequi'], body: /\bnequi\b/iu },
+    { institution: 'banco-de-bogota', senders: ['bancodebogota'], body: /\bbanco\s+de\s+bogot[aá](?=$|[^\p{L}\p{N}])/iu },
+    { institution: 'nu-colombia', senders: ['nucolombia'], body: /\bnu\s+colombia\b/iu },
+  ],
+  // Peru. Plin is a wallet rail hosted by several banks; BBVA and Scotiabank
+  // count only with "Perú" (or BBVA's former Continental brand).
+  PE: [
+    { institution: 'bcp', senders: ['bcp', 'viabcp'], bodyBoundSenders: ['19896'], body: /\bbcp\b|\bbanco\s+de\s+cr[eé]dito\s+del\s+per[uú](?=$|[^\p{L}\p{N}])/iu },
+    { institution: 'yape', senders: ['yape'], body: /\byape\b/iu },
+    // "Interbank transfer" is ordinary banking English: the Peruvian bank's
+    // name counts as body evidence only next to soles, PEN or Perú.
+    { institution: 'interbank', senders: ['interbank'], body: /\binterbank\b(?=[\s\S]{0,240}(?:S\/\.?\s?\d|\bPEN\b|\bper[uú](?![\p{L}])))|(?:S\/\.?\s?\d|\bPEN\b|\bper[uú](?![\p{L}]))[\s\S]{0,240}\binterbank\b/iu },
+    { institution: 'plin', senders: ['plin'], body: /\bplin\b/iu },
+    { institution: 'bbva-peru', senders: ['bbvaperu'], body: /\bbbva\s+(?:per[uú]|continental)(?=$|[^\p{L}\p{N}])/iu },
+    { institution: 'scotiabank-peru', senders: ['scotiabankperu'], body: /\bscotiabank\s+per[uú](?=$|[^\p{L}\p{N}])/iu },
   ],
   SG: [
     { institution: 'dbs-singapore', senders: ['dbs', 'dbssg', 'posb'], body: /\b(?:dbs(?!\s+bank\s+(?:india|\(?hong\s+kong\)?|taiwan|indonesia|china)\b)|posb)(?: bank)?\b/iu },
@@ -356,12 +399,13 @@ export const inspectAlertInstitutionGrammar = (
     if (grammar.qualifier && !grammar.qualifier.test(normalizedSource)) return [];
     if (grammar.disqualifier?.test(normalizedSource)) return [];
     const evidence: InstitutionEvidenceKind[] = [];
-    if (normalizedSender && grammar.senders.some(
+    const bodyMatches = grammar.body.test(normalizedSource);
+    if (normalizedSender && (grammar.senders.some(
       (alias) => senderMatches(market, boundedSender || normalizedSender, alias),
-    )) {
+    ) || (bodyMatches && grammar.bodyBoundSenders?.includes(normalizedSender)))) {
       evidence.push('sender');
     }
-    if (grammar.body.test(normalizedSource)) evidence.push('body');
+    if (bodyMatches) evidence.push('body');
     return evidence.length ? [{
       institution: grammar.institution,
       evidence,

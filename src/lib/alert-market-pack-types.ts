@@ -4,7 +4,8 @@ import type { CurrencyCode } from '@/lib/currency-metadata';
 export type UniversalMarket =
   | 'US' | 'GB' | 'FR' | 'DE' | 'ES' | 'IT' | 'NL'
   | 'IN' | 'QA' | 'KW' | 'BH' | 'OM' | 'EG' | 'JO'
-  | 'CA' | 'AU' | 'BR' | 'MX' | 'SG';
+  | 'CA' | 'AU' | 'BR' | 'MX' | 'SG'
+  | 'CO' | 'PE';
 
 export type AlertFamily =
   | 'purchase'

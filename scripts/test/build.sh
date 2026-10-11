@@ -78,7 +78,7 @@ for f in types routes format categories custom-categories ledger bill-alias capt
          universal-types universal-dates universal-fields universal-money universal-parser universal-confidence gulf-neighbour-templates gulf-neighbour-alerts universal-template-certification universal-import brand-categories universal-categorization ai-alert-words ai-alert-cues ai-alert-gates ai-alert-flags ai-alert-model-manifest ai-alert-model ai-alert-extractor ai-alert-reader \
          ledger-money paste-sample backup-validation ledger-export parsed-review-event wallet-near-match review-promotion launch-review-rollout trusted-bank-notification-packages \
          sms-corpus parser-research-contract parser-research founder-pro large-text-figure \
-         alert-market-pack-types alert-market-packs.us-eu alert-market-packs.india-me alert-market-packs.world \
+         alert-market-pack-types alert-market-packs.us-eu alert-market-packs.india-me alert-market-packs.world latam-alert-templates \
          alert-market-packs alert-semantics alert-rollout feedback-wire historical-import ios-history-import \
          ios-bank-senders.generated ios-bank-senders local-message-record ios-apple-pay-record ios-capture-health ios-local-capture ios-notification-replay \
          wafra-assistant wafra-assistant-ai assistant-spending-analysis assistant-patterns home-widget-preferences \
