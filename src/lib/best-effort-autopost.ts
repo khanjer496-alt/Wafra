@@ -575,11 +575,58 @@ export const isRegisteredAlertSender = (sender: string | undefined): boolean => 
  */
 const OWN_INSTRUMENT_TAIL =
   /(?:\b(?:a\/c|acc(?:oun)?t|acct|card|ending|wallet(?:\s+(?:no\.?|number))?)\b|(?<!\p{L})(?:حساب|بطاق[ةه])(?:\s+رقم)?)\.?\s*(?:no\.?|number|#)?\s*:?\s*(?:ending\s+(?:in|with)\s+)?(?:(?:[*xX•·]{2,}[\d*xX•·]*-){1,3}[\d*xX•·]*\d{2,6}|(?:[A-Z]{2}\d{2}[A-Z]{0,4})?\d{0,6}[*xX•·…]+\s?-?\d{2,6}|\.{2,3}\s?\d{2,6}|\d{3,6})(?![\d#])/iu;
-/** Exposed for tests: whether the text names an own card or account by its tail. */
-export const namesOwnInstrumentTail = (text: string): boolean => OWN_INSTRUMENT_TAIL.test(text);
+const OWN_INSTRUMENT_TAIL_ALL = new RegExp(OWN_INSTRUMENT_TAIL.source, 'giu');
+/**
+ * The tail must be the READER's. A payer's account or card is named after a
+ * payer word ("You have received AED 5,000.00 from account XXXX9876 of JOHN",
+ * "credited from card 1234 holder JOHN", "من: …") and never counts. The
+ * reader's is named after an owner word ("to/into/in/on/with your … account
+ * XX1234", "الى", "في") or opens a clause ("A/c XX8360 Credited …", "Dear
+ * Customer, Acct XX552 is credited").
+ */
+const PAYER_BEFORE = /(?:\b(?:from|sender|by|of)|(?<!\p{L})من)[ \t]*:?[ \t]*(?:(?:the|a|an)[ \t]+)?$/iu;
+const OWNER_BEFORE =
+  /(?:\b(?:your|to|in|into|on|with|using)|(?<!\p{L})(?:الى|إلى|الي|في|على))[ \t]*:?[ \t]*(?:[^\s.,;:!?]+[ \t]+){0,2}$/iu;
+const CLAUSE_START_BEFORE = /(?:^|[\n.,;:!?(])[ \t]*(?:dear[ \t]+(?:customer|client|member)[ \t]*,?[ \t]*)?$/iu;
+/** A field label naming the destination account: "To: **1234", "الى: 1234", "حساب: XX1234". */
+const OWN_FIELD_TAIL = /(?:^|\n)[ \t]*(?:to|الى|إلى|الي|حساب)[ \t]*:[ \t]*[*xX•·]*\d{3,4}(?![\d#])/iu;
+/**
+ * The alert already said whose instrument it is ("Your card has been credited
+ * CHF 32.70 Refund ZKB Visa Debit card no. xxxx 5387"): a later tail with no
+ * payer word in front of it is that same own card or account.
+ */
+const YOUR_INSTRUMENT_EARLIER = /\byour[ \t]+(?:[\p{L}]+[ \t]+){0,2}(?:card|account|a\/c|acct)\b/iu;
+/** On a DEBIT "from" is the reader's own origin ("paid from cheq a/c..123456"). */
+const DEBIT_ORIGIN_BEFORE = /\bfrom[ \t]+(?:[^\s.,;:!?]+[ \t]+){0,2}$/iu;
+/** Wording that makes an undirected text a credit, for the payer-word rule. */
+const CREDIT_CUE = /\b(?:credited|received|deposited|incoming|inward|refund(?:ed)?)\b|(?<!\p{L})(?:وارد|ايداع|إيداع|استلام)/iu;
+const ownInstrumentTailIn = (text: string, direction?: 'credit' | 'debit' | 'unknown'): boolean => {
+  if (OWN_FIELD_TAIL.test(text)) return true;
+  const credit = direction === 'credit' || ((direction === undefined || direction === 'unknown') && CREDIT_CUE.test(text));
+  for (const match of text.matchAll(OWN_INSTRUMENT_TAIL_ALL)) {
+    const at = match.index ?? 0;
+    const before = text.slice(0, at);
+    const near = before.slice(-48);
+    if (credit && PAYER_BEFORE.test(near)) continue;
+    if (OWNER_BEFORE.test(near) || CLAUSE_START_BEFORE.test(before) || (!credit && DEBIT_ORIGIN_BEFORE.test(near)) ||
+      YOUR_INSTRUMENT_EARLIER.test(before)) return true;
+  }
+  return false;
+};
+/**
+ * Exposed for tests and the launch path: whether the text names the reader's
+ * own card or account by its tail. `direction`, when known, decides whether
+ * "from" names a payer (credit) or the reader's own origin (debit); without
+ * it, credit wording in the text decides.
+ */
+export const namesOwnInstrumentTail = (text: string, direction?: 'credit' | 'debit'): boolean =>
+  ownInstrumentTailIn(text, direction);
+// On a credit the reader's instrument must be named by the text's own-tail
+// rule: the universal reader's instrument is whatever account the alert
+// names, and "from account XXXX9876 of JOHN" is the payer's.
 const namesOwnInstrument = (source: string, event: UniversalBankEvent): boolean =>
-  (event.instrument?.evidence === 'explicit' && !!event.instrument.value?.last4 &&
-    /\d{2,}/.test(event.instrument.value.last4)) || OWN_INSTRUMENT_TAIL.test(source);
+  (event.direction !== 'credit' && event.instrument?.evidence === 'explicit' && !!event.instrument.value?.last4 &&
+    /\d{2,}/.test(event.instrument.value.last4)) || ownInstrumentTailIn(source, event.direction === 'credit' || event.direction === 'debit' ? event.direction : undefined);
 /**
  * The callback hook of a fake purchase alert: it exists to make the reader
  * phone or visit someone ("Not you? Ring us", "If any dispute, call our
@@ -694,7 +741,7 @@ const wordingGuardText = (source: string, sender: string | undefined): { text: s
   // is the whole advert, not a completed payment beside one.
   const withoutFooters = source.replace(PROMO_FOOTER_SENTENCE, ' ');
   const completed = COMPLETED_MOVEMENT.test(withoutFooters);
-  const ownCompleted = completed && OWN_INSTRUMENT_TAIL.test(withoutFooters);
+  const ownCompleted = completed && ownInstrumentTailIn(withoutFooters);
   // A registered header alone answers only for a footer with no link in the
   // message: "Rs.25,00,000 has been Credited to your account. To get this
   // message, apply now ... http://..." is an advert dressed as a credit.
@@ -907,7 +954,7 @@ const LAUNCH_ROUTE = (market: string | null | undefined): boolean => !!market &&
  */
 const senderlessOwnAlertLink = (source: string, sender: string | undefined): boolean =>
   (sender === undefined || sender.trim() === '') && COMPLETED_MOVEMENT.test(source) &&
-  OWN_INSTRUMENT_TAIL.test(source) && !hasLinkCallToAction(source);
+  ownInstrumentTailIn(source) && !hasLinkCallToAction(source);
 
 /** The single decision for an unproven format. Pure: no storage, no network. */
 export function decideBestEffortAutoPost(input: BestEffortInput): BestEffortDecision {

@@ -1789,6 +1789,8 @@ const REFUND_HEADING_RE =
  */
 const AR_REFUND_NOTICE_HEADING_RE =
   /^\s*(?:طلب|سيتم)\s+(?:ال)?(?:استرجاع|استرداد)\s+(?:عمليه\s+)?(?:شراء|مشتريات)(?![؀-ۿ])/;
+/** "تم استلام طلب استرجاع|استرداد …" anywhere: a received refund REQUEST, not money. */
+const AR_REFUND_REQUEST_RECEIVED_RE = /تم\s+استلام\s+طلب(?:ك)?\s+(?:ال)?(?:استرجاع|استرداد)/;
 const PROMO_RE =
   /cashback|voucher|promo|discount|t&cs?\b|terms apply|conditions apply|shop now|hurry|limited time|congratulations|you (?:could|can) win|opt-?out|\bdnd\d*\b|bit\.ly|wa\.me|tinyurl|payment plan|bonus|rewards? (?:on|program|draw)|earn \d+x|https?:\/\//i;
 /**
@@ -5960,7 +5962,11 @@ function parseSmsInner(
   // "Purchase Refund" / Arabic "استرجاع شراء" first line. Both must clear the
   // same request/pending/future notice guard below.
   const purchaseRefundHeading = arabicPurchaseRefundHeader || REFUND_HEADING_RE.test(raw);
-  if (AR_REFUND_NOTICE_HEADING_RE.test(raw)) return null;
+  // A received refund request is not money, unless this alert also states
+  // the completed refund to the person's card/account (checked under a
+  // heading by the notice guard below; here for any other first line).
+  if (AR_REFUND_NOTICE_HEADING_RE.test(raw) ||
+    (AR_REFUND_REQUEST_RECEIVED_RE.test(raw) && !AR_PURCHASE_REFUND_COMPLETED_RE.test(raw))) return null;
   ensureCurrencyPatterns();
   // The same for every branch of one message, so read once here. Both are
   // stamped onto all ten `return` sites below; a branch that quietly shipped

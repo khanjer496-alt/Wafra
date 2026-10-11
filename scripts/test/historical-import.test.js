@@ -1550,6 +1550,46 @@ async function main() {
     markets.setLedgerCurrency(null);
     markets.setActiveMarket('AE');
   }
+  {
+    // Re-review of the sender-trust rule. (A) a PAYER's account or card is
+    // not the reader's own; (B) a credit the rule holds back waits in Review
+    // with its amount, never silently dropped, and a field-labelled own tail
+    // ("To: **1234", "الى: 1234") counts. Registered bank headers unchanged.
+    const recordAt = '2026-10-10T08:00:00.000Z';
+    let next = 0x40;
+    const run = (market, text, sender) => {
+      markets.setActiveMarket(market);
+      markets.setLedgerCurrency(market === 'AE' ? 'AED' : 'SAR', 2);
+      const key = (next++).toString(16).padStart(2, '0').repeat(32);
+      try {
+        return parseHistoricalMessageRecords([JSON.stringify({ v: 1, id: key, text, ...(sender ? { sender } : {}), receivedAt: recordAt })],
+          {}, new Date('2026-10-10T09:00:00.000Z'), new Set());
+      } finally { markets.setLedgerCurrency(null); markets.setActiveMarket('AE'); }
+    };
+    const held = (label, market, text, sender, minor) => {
+      const r = run(market, text, sender);
+      ok(`sender trust: ${label} waits in Review with its amount, never posted or dropped`,
+        r.parsed.length === 0 && r.reviewCandidates.length === 1 && r.ignoredCount === 0 &&
+          JSON.stringify(r.reviewCandidates[0]).includes(String(minor)), r);
+    };
+    const posts = (label, market, text, sender, minor) => {
+      const r = run(market, text, sender);
+      ok(`sender trust: ${label} posts as income`,
+        r.parsed.length === 1 && r.parsed[0].type === 'income' && r.parsed[0].amountFils === minor, r);
+    };
+    held('a blank-sender credit from the PAYER\'s account', 'AE', 'You have received AED 5,000.00 from account XXXX9876 of JOHN', undefined, 500000);
+    held('a blank-sender credit from the PAYER\'s card', 'AE', 'Transfer of AED 5,000.00 credited from card 1234 holder JOHN', undefined, 500000);
+    posts('a blank-sender Al Rajhi incoming transfer to a labelled own account', 'SA', 'حوالة واردة\nالمبلغ: 500 ريال\nالى: 1234\nمن: احمد', undefined, 50000);
+    held('the same Al Rajhi incoming transfer with no own account line', 'SA', 'حوالة واردة\nالمبلغ: 500 ريال\nمن: احمد', undefined, 50000);
+    posts('a blank-sender "Incoming Transfer … To: **1234"', 'SA', 'Incoming Transfer\nAmount: 500 SAR\nTo: **1234\nFrom: AHMED', undefined, 50000);
+    posts('a phone-sender "Incoming Transfer … To: **1234"', 'SA', 'Incoming Transfer\nAmount: 500 SAR\nTo: **1234\nFrom: AHMED', '+966501234567', 50000);
+    held('a blank-sender "Incoming Transfer" with no To line', 'SA', 'Incoming Transfer\nAmount: 500 SAR\nFrom: AHMED', undefined, 50000);
+    held('a phone-sender "Incoming Transfer" with no To line', 'SA', 'Incoming Transfer\nAmount: 500 SAR\nFrom: AHMED', '+966501234567', 50000);
+    held('a blank-sender "credited. Ref No 1234"', 'AE', 'AED 5,000.00 credited. Ref No 1234', undefined, 500000);
+    held('a phone-sender "credited. Ref No 1234"', 'AE', 'AED 5,000.00 credited. Ref No 1234', '+971501234567', 500000);
+    posts('control: Al Rajhi\'s registered header is unchanged', 'SA', 'حوالة واردة\nالمبلغ: 500 ريال\nالى: 1234\nمن: احمد', 'AlRajhiBank', 50000);
+    posts('control: STC Bank\'s registered header is unchanged without a tail', 'SA', 'Incoming Transfer\nAmount: 500 SAR\nFrom: AHMED', 'STC Bank', 50000);
+  }
   if (fail > 0) {
     console.error(`\nhistorical-import: ${pass} passed, ${fail} failed`);
     process.exit(1);

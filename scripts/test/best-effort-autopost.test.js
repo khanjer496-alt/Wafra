@@ -1385,5 +1385,47 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
   }
 }
 
+/* ── Fold re-review: a PAYER's account or card is not the reader's own ── */
+{
+  const country = require('./build/country');
+  const OBSERVED = Date.parse('2026-10-03T08:00:00Z');
+  const worldwide = (sender, body) => {
+    markets.setActiveMarket('ZZ');
+    markets.setLedgerCurrency('USD', 2);
+    country.setActiveCountry('US');
+    const s = createLaunchAlertSession({ overrides: {}, regionHint: 'US', fxLookup: () => null,
+      bestEffort: { enabled: true, country: 'US' } });
+    try { return s.parse(body, sender, s.inspect(body, sender), undefined, OBSERVED); }
+    finally { markets.setLedgerCurrency(null); country.setActiveCountry(null); markets.setActiveMarket('AE'); }
+  };
+  for (const sender of ['', '+15551234567']) {
+    for (const body of [
+      'You have received USD 5,000.00 from account XXXX9876 of JOHN',
+      'Transfer of USD 5,000.00 credited from card 1234 holder JOHN',
+    ]) {
+      ok(`a credit naming only the PAYER's account/card is not auto-added from "${sender}" — ${body.slice(0, 44)}`,
+        worldwide(sender, body) === null, worldwide(sender, body));
+    }
+  }
+  ok('the payer word decides only on a credit: "paid from cheq a/c..123456" is the own account',
+    policy.namesOwnInstrumentTail('paid from cheq a/c..123456 @ store', 'debit'));
+  ok('…and "from account XXXX9876" on a credit is the payer\'s',
+    !policy.namesOwnInstrumentTail('You have received USD 5,000.00 from account XXXX9876 of JOHN', 'credit'));
+  ok('a field-labelled destination "To: **1234" names the own account',
+    policy.namesOwnInstrumentTail('Incoming Transfer\nAmount: 500 SAR\nTo: **1234\nFrom: AHMED', 'credit'));
+  {
+    // Real (west corpus, ZKB, phone sender): "Your card" earlier makes the
+    // later "Visa Debit card no. xxxx 5387" the reader's own card.
+    const zkb = 'online@zkb.ch Your card has been credited CHF 32.70 Refund ZKB Visa Debit card no. xxxx 5387, digitec Galaxus (Online).';
+    ok('a credit whose text first says "Your card" names that own card by its later tail',
+      policy.namesOwnInstrumentTail(zkb, 'credit'));
+    ok('…but "Your account" earlier never makes a payer\'s "from account XXXX9876" own',
+      !policy.namesOwnInstrumentTail('Your account has been credited USD 5,000.00 from account XXXX9876 of JOHN', 'credit'));
+  }
+  const control = worldwide('', 'USD 5,000.00 has been credited to your account XXXX1234 from JOHN.');
+  ok('control: a senderless credit to "your account XXXX1234" still auto-adds',
+    control?.type === 'income' && control.amountFils === 500000, control);
+}
+
 console.log(`\nbest-effort-autopost: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

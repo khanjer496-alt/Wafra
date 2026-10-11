@@ -23,6 +23,7 @@ import { isBnplProviderSource } from '@/lib/bnpl-providers';
 import {
   nonPostingReason,
   parseForeignAwaitingRate,
+  parseSms,
   PARSER_VERSION,
   type NonPostingReason,
   type ParsedSms,
@@ -32,6 +33,8 @@ import {
   hasBankAlertMoneyHint,
   hasGenericBankAlertContext,
   inspectGenericBankEventForReview,
+  isHeldLaunchCredit,
+  isUnaccountableLaunchSender,
   type LaunchAlertSession,
 } from '@/lib/launch-alert-parser';
 import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars';
@@ -899,6 +902,21 @@ export function inspectSourceFreeRefusedAlert(input: {
     const { raw: _raw, ...facts } = awaitingRate;
     const candidate = parsedFinancialCandidateReview(facts, input.observedAt);
     if (candidate) return { kind: 'review', candidate: { ...candidate, channel: input.channel } };
+  }
+
+  // A UAE/Saudi credit the sender-trust rule held back (blank, phone, e-mail
+  // or generic sender; no own account or card tail; no scam wording) waits in
+  // Review with its amount filled in. It is never dropped: a genuine incoming
+  // transfer read from iPhone History has no sender at all.
+  if (launchMarket && isUnaccountableLaunchSender(input.sender)) {
+    const credit = withMarketPackForParsing(launchMarket, () => parseSms(input.source, undefined, {
+      sender: input.sender, observedAt: input.observedAt,
+    }));
+    if (credit && isHeldLaunchCredit(input.source, input.sender, credit)) {
+      const { raw: _raw, ...facts } = credit;
+      const candidate = parsedFinancialCandidateReview(facts, input.observedAt);
+      if (candidate) return { kind: 'review', candidate: { ...candidate, channel: input.channel } };
+    }
   }
 
   const inspection = input.existingInspection ?? input.session.inspect(input.source, input.sender);

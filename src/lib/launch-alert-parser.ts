@@ -659,15 +659,29 @@ const sharedSenderOutsideGulf = (
  * 1,500.00 from JOHN via Aani." as income. From such a sender:
  *  - a smishing link call-to-action, a fraud prompt or not-a-new-movement
  *    wording (isNotAutoPostableMoney) never posts;
- *  - a credit must name the person's own account or card (its masked tail),
- *    or it is not auto-posted; the Review seam decides what to show.
+ *  - a credit must name the person's OWN account or card by its tail
+ *    (namesOwnInstrumentTail: never a payer's "from account XXXX9876"; a
+ *    field-labelled "To: **1234" counts), or it is not auto-posted: it waits
+ *    in Review with its amount (heldLaunchCreditForReview, auto-import.ts).
+ * The parser's own card identity is NOT evidence: it reads a payer's
+ * "from card 1234" as readily as the reader's.
  * A registered header (a bank's sender ID) keeps the grammar's decision.
  */
+/** A blank sender, or a phone number, e-mail or generic word: nobody a bank registered. */
+export const isUnaccountableLaunchSender = (sender: string): boolean =>
+  !sender.trim() || isUnverifiedAlertSender(sender);
+/**
+ * The credit the sender-trust rule held back (no own tail, no scam wording),
+ * for the refusal path to offer in Review with its amount. Null otherwise.
+ */
+export const isHeldLaunchCredit = (source: string, sender: string, parsed: ParsedSms | null): boolean =>
+  !!parsed && isUnaccountableLaunchSender(sender) && parsed.kind === 'transaction' && parsed.type === 'income' &&
+  !isNotAutoPostableMoney(source) && !namesOwnInstrumentTail(source, 'credit');
 const launchSenderAnswersFor = (source: string, sender: string, parsed: ParsedSms): boolean => {
   if (sender.trim() && !isUnverifiedAlertSender(sender)) return true;
   if (parsed.kind !== 'transaction') return true;
   if (isNotAutoPostableMoney(source)) return false;
-  return parsed.type !== 'income' || namesOwnInstrumentTail(source) || !!parsed.card?.last4;
+  return parsed.type !== 'income' || namesOwnInstrumentTail(source, 'credit');
 };
 
 export interface LaunchAlertSession {

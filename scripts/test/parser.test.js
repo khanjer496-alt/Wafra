@@ -7151,6 +7151,8 @@ t('UAE control: a purchase with a "convert now" instalment footer keeps its purc
     ['a future Arabic refund', 'سيتم استرجاع شراء بـ34.56 SAR من SOME STORE الى بطاقتك مدى *0007', 'SNB-AlAhli'],
     ['an English purchase refund with Status: Pending', 'Purchase Refund\nAmount: 7.89 SAR\nAt: STORE\nStatus: Pending', 'AlRajhiBank'],
   ]) t(`fold review: never income — ${label}`, body, null, { sender });
+  t('fold re-review: "تم استلام طلب استرجاع شراء" is a refund request, never an expense',
+    'تم استلام طلب استرجاع شراء بمبلغ 34.56 SAR من SOME STORE', null, { sender: 'SNB-AlAhli' });
   t('fold review control: a first-line English purchase refund heading is income',
     'Purchase Refund\nAmount: 7.89 SAR\nAt: STORE\n01/01/2030 10:20',
     { kind: 'transaction', type: 'income', amountFils: 789 }, { sender: 'AlRajhiBank' });
