@@ -3,7 +3,7 @@ import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars'
 import { activeCountryDateOrder, dateOrderForCountry, getActiveCountry } from '@/lib/country';
 import {
   bestEffortAutoPostEnabled, decideBestEffortAutoPost, hasLinkFromUnregisteredSender, hasNonCompletedWording,
-  isNotAutoPostableMoney, isUnverifiedAlertSender,
+  isNotAutoPostableMoney, isRegisteredAlertSender, isUnverifiedAlertSender, refusedOnlyByShopOrPromoWording,
   sharedSymbolCurrencyForCountry,
 } from '@/lib/best-effort-autopost';
 import {
@@ -104,6 +104,22 @@ const GENERIC_BANK_CONTEXT = /\b(?:(?:credit|debit|covered|prepaid|charge)\s+car
  */
 const MONEY_ARRIVED_CLAIM =
   /(?<!\p{L})(?:you\s+have\s+received|you\s+received|received\s+(?:from|for)|(?:is|has\s+been|was)\s+credited|credited\s+(?:to|in|into|with)|deposited|refund(?:ed)?|recebeu|recebid[oa]|creditad[oa]|estorno|recibiste|recibid[oa]|te\s+(?:envi[óo]|ha\s+enviado)|yape[óo]|abonad[oa]|acreditad[oa]|reembolso|devoluci[óo]n|re[çc]u|cr[ée]dit[ée]e?|gutgeschrieben|diterima|dikreditkan)(?!\p{L})/iu;
+/**
+ * Something only a bank or wallet writes beside such a claim: a bank name
+ * ("Swedbank", "Citibank"), a wallet,
+ * account or rail word ("M-PESA", "Pix", "SPEI", "UPI", "Zelle", "Interac"),
+ * a balance, a reference or transaction id, or an upper-case transaction code
+ * ("QX81TR4KLM"). A chat ("you received Ksh 2,000 from me?") has none.
+ */
+const MONEY_CLAIM_EVIDENCE =
+  /(?<!\p{L})(?:\p{L}*bank|banco|banque|wallet|carteira|billetera|account|acct|a\/c|conta|cuenta|compte|konto|rekening|balance|bal|avl|saldo|solde|ref(?:erence)?|txn|trx|tid|transaction|transfer|transferencia|transfer[êe]ncia|virement|[ée]-?transfer|pix|spei|yape|plin|nequi|daviplata|m-?pesa|mpesa|upi|imps|neft|rtgs|zelle|interac|gcash|maya|paytm|jazzcash|easypaisa|momo|airtel\s+money)(?!\p{L})/iu;
+const TRANSACTION_CODE = /\b(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{8,12}\b/u;
+/**
+ * First- and second-person chat: the writer says THEY sent it, or asks
+ * whether it arrived. A bank never writes "from me" or "did you get it".
+ */
+const PERSONAL_CHAT =
+  /\b(?:from\s+me|i\s+(?:have\s+|'ve\s+|just\s+)?(?:sent|deposited|transferred|paid|refunded)|sent\s+it|did\s+(?:you|u)\s+(?:get|receive)|have\s+(?:you|u)\s+(?:got|received)|te\s+mandei|ukipata|nimekutumia)\b/iu;
 
 export const hasGenericBankAlertContext = (source: string, sender = ''): boolean =>
   GENERIC_BANK_CONTEXT.test(source) || detectLaunchMarketFromSender(sender) !== null ||
@@ -122,23 +138,35 @@ export const inspectGenericBankEventForReview = (
   // An exact LatAm bank template is bank-alert context in its own right.
   const noContext = !hasGenericBankAlertContext(source, sender) && !matchLatamTemplate(source, { sender });
   // A "money arrived" claim from a phone number, e-mail, generic header or
-  // no sender has no bank context of its own, and the best-effort policy will
-  // not auto-add it (unverified-sender). It waits in Review instead of being
-  // dropped, so a genuine wallet credit read without its sender (iOS history)
-  // is never lost. A registered sender keeps the context requirement, and a
-  // claim the wording guard already refuses ("Congrats, INR 30,000 Can Be
-  // Credited ... Check Now") or that carries a link ("... is credited to
-  // 98XXXXXXXX Register now d5m.example/x") is not admitted this way.
-  if (noContext && !(isUnverifiedAlertSender(sender) && MONEY_ARRIVED_CLAIM.test(source) &&
-    !hasNonCompletedWording(source) && !hasLinkFromUnregisteredSender(source, sender))) return null;
+  // no sender has no bank context of its own. From an unverified sender the
+  // best-effort policy will not auto-add it (unverified-sender); without a
+  // sender the policy may still refuse it for another reason. Either way it
+  // waits in Review instead of being dropped, so a genuine wallet credit is
+  // never lost, provided it carries something only a bank or wallet writes
+  // (a rail, a balance, a reference or transaction code) and is not a chat
+  // ("you received Ksh 2,000 from me?"). A registered sender keeps the
+  // context requirement, and a claim the wording guard already refuses
+  // ("Congrats, INR 30,000 Can Be Credited ... Check Now") or that carries a
+  // link ("... is credited to 98XXXXXXXX Register now d5m.example/x") is not
+  // admitted this way.
+  const claimAdmitted = noContext && (!sender.trim() || isUnverifiedAlertSender(sender)) &&
+    MONEY_ARRIVED_CLAIM.test(source) && (MONEY_CLAIM_EVIDENCE.test(source) || TRANSACTION_CODE.test(source)) && !PERSONAL_CHAT.test(source) &&
+    !hasNonCompletedWording(source, null, sender) && !hasLinkFromUnregisteredSender(source, sender);
+  // A completed movement from a registered header that only advert, shop
+  // notice or order-callback wording refused ("Rs.200 paid to Swiggy from
+  // Paytm wallet. Order ID: 9988. Need help? Contact 24x7 Helpline") also
+  // waits in Review rather than being dropped.
+  const footerAdmitted = noContext && !claimAdmitted && isRegisteredAlertSender(sender) &&
+    refusedOnlyByShopOrPromoWording(source, sender);
+  if (noContext && !claimAdmitted && !footerAdmitted) return null;
   const event = isGulfNeighbourMarket(market)
     ? inspectUniversalBankEvent(gulfNeighbourReadSource(source, market), {
         sender, market, dateOrder: dateOrderForCountry(market) ?? undefined,
       })
     : inspectUniversalBankEvent(source, { sender, dateOrder: activeCountryDateOrder() });
   if (event.decision !== 'review') return null;
-  if (noContext && !(event.direction === 'credit' && event.status === 'posted' &&
-    event.amount.evidence !== 'missing')) return null;
+  if (noContext && !((event.direction === 'credit' || (footerAdmitted && event.direction === 'debit')) &&
+    event.status === 'posted' && event.amount.evidence !== 'missing')) return null;
   const hasGroundedMoney =
     event.amount.evidence !== 'missing' ||
     event.observations.some((observation) => observation.field.evidence !== 'missing');
@@ -548,7 +576,6 @@ const parseUniversalPostedEvent = (
     ledgerExponent: pinnedExponent,
     observedAt,
     fxLookup,
-    exactTemplate: matchLatamTemplate(readSource, { sender }) !== null,
   });
   if (decision.outcome !== 'post') return null;
 

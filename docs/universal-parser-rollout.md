@@ -576,7 +576,23 @@ it. Every guardrail is required:
   mandate language (English, French, German, Spanish, Italian, Dutch,
   Portuguese, Arabic). Temporary authorisations, holds and charges are refused,
   and so is a bare "authorised/authorisation" unless the text also says
-  completed, posted or settled;
+  completed, posted or settled. Lure wording is refused whoever sent it:
+  money owed, promised or waiting to be released ("you're due a refund",
+  "due to receive", "entitled to", "to release the funds", "verify your
+  details", "use the payment link to receive", "sent by mistake, send it
+  back"), unconfirmed charges ("we noticed a purchase", "confirm the
+  following") and future shop collection ("amount to be paid"). Advert and
+  shop wording ("apply now", "Hurry", "using code", "get paid", "earn up to",
+  "pay now", "will be delivered", "track your order") is tested with the
+  merchant descriptor masked, so a shop called HURRY CURRY or PAY NOW PARKING
+  is a name, not wording. A bank's own trailing promo footer ("Apply now for
+  a personal loan", "Earn up to 7.5% on FD", "Get paid up to 2 days early",
+  "Track your order", "To deposit cash anytime use ...", "Reward points will
+  be added") is set aside only when the rest of the text states a completed
+  movement and names the reader's own card or account tail or comes from a
+  registered header. A shop order number with a callback hook, a "refund is
+  available" line and an "If any dispute" desk are refused unless the text
+  states a completed movement on the reader's own card or account tail;
 - no link whose call to action is dispute/verify/cancel/claim/accept/log in
   (and similar): "If this wasn't you, dispute here: http://…" is smishing
   bait, so the money sentence before it is never posted. It counts when the
@@ -610,6 +626,27 @@ it. Every guardrail is required:
   on the iPhone History import most of them are not imported at all. These
   checks apply only to automatic posting; user-taught (learned) templates
   keep their own wording guard;
+- the unverified-sender rule. It applies only to a sender that is PRESENT and
+  is a phone number of seven or more digits, an e-mail address or a generic
+  word ("INFO", "ALERT", "SMS", ...): a credit from such a sender, or a debit
+  whose only hook is a callback ("Not you? Call ..."), must name one of the
+  reader's own cards or accounts by its tail next to an own-instrument word
+  ("A/c XX4410", "card ending 4421", "Acct: ******1736", "حساب رقم XXXX1234").
+  A masked figure elsewhere (a payer's phone "0712***678", "Ref *4410") does
+  not count. Otherwise it waits in Review (`unverified-sender`). A registered
+  alphanumeric header, a carrier short code (three to six digits) or an app
+  package is not affected. NO sender at all (an iOS Messages History record,
+  pasted text, the AI path without one) is not treated as unverified: such a
+  credit is auto-added with the "Auto-added — check" marker when every other
+  guardrail passes, and only the wording guard and the link gate stand
+  between a senderless lure and the ledger. Known trade-off: a few banks
+  alert from a full phone number (US toll-free alert numbers; Swedbank
+  Latvia's 29610101 on Android); their credits that print no own account or
+  card tail go to Review. No per-bank exception is made without real
+  evidence of that bank's sender;
+- a link (http, www., a short-link or a lower-case domain path) blocks
+  auto-add unless the sender is a registered header, short code or app
+  package;
 - a supported family (purchase, cash withdrawal, refund, fee, utility,
   recurring payment, transfer) whose direction matches it: refunds are
   credits, transfers must state their direction and post as transfers;
@@ -623,6 +660,14 @@ it. Every guardrail is required:
   `fx-rate-unavailable`;
 - a pinned ledger currency, so a best-effort row can never make a batch
   mixed-currency (an AED/SAR ledger additionally requires a single non-Gulf route).
+
+Refusals of a "money arrived" claim from a phone number, e-mail, generic
+header or no sender wait in Review rather than being dropped when the text
+carries something only a bank or wallet writes (a rail such as M-PESA, Pix,
+UPI or Zelle, a balance, a reference or a transaction code) and is not a
+personal chat ("from me", "I sent it", "did you get it"). A completed
+movement from a registered header refused only by advert, shop-notice or
+order-callback wording also waits in Review.
 
 Posted rows still pass the import planner's duplicate guard and Wallet
 near-match hold. Each carries `bestEffort: {v, format, market}`, with
