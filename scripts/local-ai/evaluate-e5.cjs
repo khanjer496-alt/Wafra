@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { execFileSync } = require('node:child_process');
 const root = path.resolve(__dirname, '../..');
 const { Tokenizer } = require('@huggingface/tokenizers');
 const { createLoader } = require('../universal-test/load-ts.cjs');
@@ -21,9 +22,8 @@ const read = file => JSON.parse(fs.readFileSync(file,'utf8'));
  for(const [name,bytes,sha] of specs){
   const file = path.join(cache,name);
   if(!fs.existsSync(file)){
-   const response = await fetch(`https://github.com/khanjer496-alt/Wafra/releases/download/local-ai-e5-v1/${name}`);
-   if(!response.ok) throw Error(`download ${name}: ${response.status}`);
-   fs.writeFileSync(file,Buffer.from(await response.arrayBuffer()));
+   // The repository is private; download through the signed-in GitHub CLI.
+   execFileSync('gh',['release','download','local-ai-e5-v1','--repo','khanjer496-alt/Wafra','--pattern',name,'--dir',cache],{stdio:'inherit'});
   }
   const data = fs.readFileSync(file);
   if(data.length!==bytes || crypto.createHash('sha256').update(data).digest('hex')!==sha) throw Error(`artifact mismatch: ${name}`);

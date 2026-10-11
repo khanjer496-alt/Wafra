@@ -99,7 +99,6 @@ export const DEFAULT_RELAY_URL = normalizeRelayBaseUrl(
 /** The published, credential-free Shortcut skeleton. */
 export const DEFAULT_SHORTCUT_URL = normalizeShortcutInstallUrl(
   process.env.EXPO_PUBLIC_WAFRA_SHORTCUT_URL,
-  process.env.EXPO_PUBLIC_WAFRA_SHORTCUT_FILE_BETA === '1',
 );
 
 const KEY = 'wafra.relay.v1';
@@ -258,7 +257,6 @@ export function normalizeRelayBaseUrl(value: string | null | undefined): string 
 
 export function normalizeShortcutInstallUrl(
   value: string | null | undefined,
-  allowSignedFileBeta = false,
 ): string | null {
   if (!value?.trim()) return null;
   try {
@@ -268,15 +266,9 @@ export function normalizeShortcutInstallUrl(
       (url.hostname === 'www.icloud.com' || url.hostname === 'icloud.com') &&
       iCloudPath !== null &&
       iCloudPath[1] !== RETIRED_CAPTURE_SHORTCUT_ID;
-    const isSignedBetaFile =
-      allowSignedFileBeta &&
-      url.hostname === 'raw.githubusercontent.com' &&
-      /^\/khanjer496-alt\/Wafra\/[0-9a-f]{40}\/assets\/shortcuts\/Wafra%20Capture\.shortcut$/.test(
-        url.pathname,
-      );
     if (
       url.protocol !== 'https:' ||
-      (!isICloudShortcut && !isSignedBetaFile) ||
+      !isICloudShortcut ||
       url.search ||
       url.hash
     ) {

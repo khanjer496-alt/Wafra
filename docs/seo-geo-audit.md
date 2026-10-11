@@ -77,8 +77,8 @@ The SEO check verifies:
 - one H1 and semantic FAQ markup;
 - public indexability, the static 404 page, and that no app screen or app
   JavaScript is published;
-- `/get/iphone` and `/get/android` download links and their `_redirects`
-  fallback;
+- the `/get/iphone` download link and its `_redirects` fallback, and that
+  no Android or GitHub download is published;
 - Open Graph and X/Twitter metadata;
 - both JSON-LD graphs;
 - image alt text;
@@ -100,7 +100,9 @@ measure field Core Web Vitals on the production origin.
 The site cannot use a JavaScript analytics tag without breaking its zero-JS and
 no-third-party-analytics promises, so it counts on the server instead:
 
-- The download buttons link to first-party `/get/iphone` and `/get/android`.
+- The download button links to first-party `/get/iphone`. There is no
+  Android download while the source repository is private; `/get/android`
+  returns the 404 page.
 - `functions/index.js` and `functions/get/[platform].js` are Cloudflare Pages
   Functions. They write one data point per landing view or download click to
   the Workers Analytics Engine dataset `wafra_site_events`, then serve the

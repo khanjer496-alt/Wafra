@@ -98,7 +98,7 @@ jobs:
           expect /transactions 404
           expect /settings 404
           expect /get/iphone 302
-          expect /get/android 302
+          expect /get/android 404
           # Only the Function sends this header; _redirects does not.
           if curl -sI "$site/get/iphone" | grep -qi '^referrer-policy: no-referrer'; then
             echo "/get/iphone is served by the counting Function"

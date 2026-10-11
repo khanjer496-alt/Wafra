@@ -11,8 +11,6 @@ export type IosHistoryCardState =
   | 'review';
 
 export const IOS_HISTORY_HANDOFF_TTL_MS = 60 * 60_000;
-export const IOS_HISTORY_BASELINE_200_URL =
-  'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-baseline-200-20260917/Wafra-History-Baseline-200.signed.shortcut';
 /**
  * Name Apple installs for each canonical public History record.
  *
@@ -21,8 +19,8 @@ export const IOS_HISTORY_BASELINE_200_URL =
  * run name therefore has to follow the configured install URL: a build that
  * installs one record and runs another name fails inside Shortcuts and bounces
  * the user back with no session. Keep this table in agreement with
- * `scripts/release/ios-public-shortcut-check.mjs` and
  * `PAGED_HISTORY_SHORTCUT_NAME` in `ios-paged-setup.ts`; a test pins both.
+ * Current builds install the History Shortcut bundled in the app instead.
  */
 export interface IosHistoryShortcutRecord {
   /** Name Apple installs from the public record; the run URL must use it. */
@@ -37,34 +35,8 @@ export interface IosHistoryShortcutRecord {
 export const IOS_HISTORY_SHORTCUT_INSTALLED_RECORDS: Readonly<Record<string, IosHistoryShortcutRecord>> = {
   'bc30c7ae89d6494c9ef0aea1a666d72d': { name: 'Wafra-History-v2-typed-date.signed', resumesOnRerun: true },
 };
-/**
- * Typed-date paged graph (v4), Apple-signed on a Mac and published as a
- * release asset. Apple installs a signed file under its basename. Every date
- * reaches Wafra as a typed `Date` App Intent parameter; Shortcuts never
- * formats one as text (the v2 failure on iOS 26).
- */
-export const IOS_HISTORY_V4_URL =
-  'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v4-20260919/Wafra-History-v4.signed.shortcut';
-export const IOS_HISTORY_V4_NAME = 'Wafra-History-v4.signed';
-/**
- * v6: v4 plus date-windowed Messages queries, so Apple never has to load the
- * whole inbox (a large inbox failed our unbounded query with Apple's own
- * error). Requires the window-start intent shipped from build 155.
- */
-export const IOS_HISTORY_V6_URL =
-  'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v6-20260919/Wafra-History-v6.signed.shortcut';
-export const IOS_HISTORY_V6_NAME = 'Wafra-History-v6.signed';
 export const IOS_HISTORY_SHORTCUT_DEFAULT_NAME = 'Wafra History Import';
 const iosHistoryShortcutRecord = (installUrl: unknown): IosHistoryShortcutRecord | null => {
-  if (installUrl === IOS_HISTORY_BASELINE_200_URL) {
-    return { name: IOS_HISTORY_SHORTCUT_DEFAULT_NAME, resumesOnRerun: false };
-  }
-  if (installUrl === IOS_HISTORY_V4_URL) {
-    return { name: IOS_HISTORY_V4_NAME, resumesOnRerun: true };
-  }
-  if (installUrl === IOS_HISTORY_V6_URL) {
-    return { name: IOS_HISTORY_V6_NAME, resumesOnRerun: true };
-  }
   const id = typeof installUrl === 'string'
     ? /^https:\/\/www\.icloud\.com\/shortcuts\/([0-9A-Fa-f]{32})$/.exec(installUrl)?.[1]?.toLowerCase()
     : undefined;
@@ -193,9 +165,6 @@ export const historyShortcutContinueUrl = (): string =>
   iosHistoryShortcutResumesOnRerun() ? historyShortcutRunUrl() : 'shortcuts://';
 
 export const normalizeIosHistoryShortcutUrl = (value: unknown): string | null => {
-  if (value === IOS_HISTORY_BASELINE_200_URL) return IOS_HISTORY_BASELINE_200_URL;
-  if (value === IOS_HISTORY_V4_URL) return IOS_HISTORY_V4_URL;
-  if (value === IOS_HISTORY_V6_URL) return IOS_HISTORY_V6_URL;
   if (typeof value !== 'string') return null;
   const match = /^https:\/\/www\.icloud\.com\/shortcuts\/([0-9A-Fa-f]{32})$/.exec(value);
   if (!match) return null;

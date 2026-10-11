@@ -434,6 +434,9 @@ export function createIosCaptureSetup({
       return;
     }
 
+    // The History Shortcut ships inside the app, so offering it does not
+    // depend on the capture status read succeeding.
+    const bundledHistory = native.getHistoryShortcutURL ? { bundledHistorySupported: true } : {};
     try {
       const status = await native.getCaptureStatus();
       if (disposed) return;
@@ -450,7 +453,7 @@ export function createIosCaptureSetup({
         supported: true,
         shortcutAvailable: shortcutUrl !== null || typeof native.getMessageShortcutURL === 'function',
         ...(native.getMessageShortcutURL ? { shortcutName: IOS_BUNDLED_CAPTURE_SHORTCUT_NAME, shortcutVersion: 3 as const } : {}),
-        ...(native.getHistoryShortcutURL ? { bundledHistorySupported: true } : {}),
+        ...bundledHistory,
         readiness,
         captureHealth: readIosCaptureHealth(status),
         setupProofVersion: typeof status.setupProofVersion === 'number' ? status.setupProofVersion : null,
@@ -469,6 +472,7 @@ export function createIosCaptureSetup({
         loading: false,
         supported: true,
         shortcutAvailable: false,
+        ...bundledHistory,
         readiness: 'not-added',
         captureHealth: null,
         setupProofVersion: null, setupProofAt: null, lastMessageReceivedAt: null,

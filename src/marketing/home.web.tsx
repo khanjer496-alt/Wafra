@@ -156,19 +156,8 @@ export default function MarketingHome() {
                 <span>Join TestFlight</span>
                 <span className={styles.actionArrow} aria-hidden="true">↗</span>
               </a>
-              <a
-                className={styles.secondaryAction}
-                href={DOWNLOAD_PATHS.android}
-                target="_blank"
-                rel="noopener"
-                aria-label="Download the Wafra Android test APK"
-              >
-                <span className={styles.actionPlatform}>Android</span>
-                <span>Download APK</span>
-                <span className={styles.actionArrow} aria-hidden="true">↓</span>
-              </a>
             </div>
-            <p className={styles.betaNote}>Public beta builds · Android installs outside Google Play</p>
+            <p className={styles.betaNote}>Public iPhone beta on TestFlight</p>
             <p className={styles.languageNote}>Available in English and Arabic.</p>
           </div>
 

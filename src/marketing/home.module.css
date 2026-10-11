@@ -105,11 +105,9 @@
 .hero h1 { font-family: Geist-SemiBold, sans-serif; font-size: clamp(42px, 4.5vw, 64px); font-weight: normal; letter-spacing: -0.045em; line-height: 1.07; margin: 0; text-wrap: balance; }
 .lede { color: var(--muted); font-size: 18px; line-height: 1.65; margin: 28px 0 0; max-width: 520px; }
 .heroActions { align-items: stretch; display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
-.primaryAction, .secondaryAction { align-items: center; border-radius: 12px; display: grid; font-family: Geist-SemiBold, sans-serif; font-size: 15px; gap: 4px 16px; grid-template-columns: 1fr auto; min-height: 72px; min-width: 196px; padding: 12px 18px; transition: background 160ms ease; }
+.primaryAction { align-items: center; border-radius: 12px; display: grid; font-family: Geist-SemiBold, sans-serif; font-size: 15px; gap: 4px 16px; grid-template-columns: 1fr auto; min-height: 72px; min-width: 196px; padding: 12px 18px; transition: background 160ms ease; }
 .primaryAction { background: var(--green); border: 1px solid var(--green); color: #FBF9F4 !important; }
 .primaryAction:hover { background: #17513E; }
-.secondaryAction { background: #FBF9F4; border: 1px solid var(--control); color: var(--green) !important; }
-.secondaryAction:hover { background: #E4EDE8; }
 .actionPlatform { font-family: Geist, sans-serif; font-size: 12px; grid-column: 1; }
 .actionArrow { font-size: 20px; grid-column: 2; grid-row: 1 / span 2; }
 .betaNote, .languageNote { color: var(--muted); font-size: 12px; line-height: 1.6; margin: 14px 0 0; }
@@ -534,7 +532,7 @@
   .hero h1 { font-size: clamp(37px, 9.5vw, 56px); }
   .lede { font-size: 17px; }
   .heroActions { flex-direction: column; }
-  .primaryAction, .secondaryAction { min-width: 0; width: 100%; }
+  .primaryAction { min-width: 0; width: 100%; }
   .stageScene { padding-inline: 3%; }
   .tape { margin: -30cqi 0 0; }
   .capture { padding: 56px 20px; }
