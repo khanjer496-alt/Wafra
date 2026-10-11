@@ -7,6 +7,7 @@ const {
   isDeclinedMessage,
   nonPostingReason,
   isBnplProviderSource,
+  isInformationOnlyAlert,
 } = require('./build/sms-parser');
 
 let pass = 0, fail = 0;
@@ -57,6 +58,7 @@ function t(name, msg, expect, options) {
       if (expect.originalCurrency !== undefined && p.originalCurrency !== expect.originalCurrency) errs.push(`originalCurrency ${p.originalCurrency} != ${expect.originalCurrency}`);
       if (expect.originalAmountMinor !== undefined && p.originalAmountMinor !== expect.originalAmountMinor) errs.push(`originalAmountMinor ${p.originalAmountMinor} != ${expect.originalAmountMinor}`);
       if (expect.fxSource !== undefined && p.fxSource !== expect.fxSource) errs.push(`fxSource ${p.fxSource} != ${expect.fxSource}`);
+      if (expect.originalMinorUnits !== undefined && p.originalMinorUnits !== expect.originalMinorUnits) errs.push(`originalMinorUnits ${p.originalMinorUnits} != ${expect.originalMinorUnits}`);
       // `other` means two opposite things — a settlement that HAS no category,
       // and a row nothing could read. heal.ts and the accuracy report both
       // branch on the difference.
@@ -7107,6 +7109,174 @@ t('UAE control: a loan instalment debited still posts',
 t('UAE control: a purchase with a "convert now" instalment footer keeps its purchase',
   'Purchase of AED 3,600.00 with Credit Card ending 1234 at APPLE STORE. Avl Cr. Limit is AED 5,000.00. Convert now to easy instalments.',
   { type: 'expense', amountFils: 360000 });
+// ── EXTERNAL-CORPUS WRONG BOOKINGS (synthetic fixtures; own wording) ──
+// Each pair is the failing shape and its negative control. Messages are
+// written for this suite: merchants, amounts, digits and dates are invented.
+{
+  const { setActiveMarket } = require('./build/markets');
+  setActiveMarket('SA');
+  // A1. A purchase REFUND heading is money back in, never fresh spending.
+  t('a labelled purchase refund is income, not an expense',
+    'Purchase Refund Amount: 46.20 SAR At: NOVA HOME CENTER 14/05/2026 18:42',
+    { kind: 'transaction', type: 'income', amountFils: 4620 }, { sender: 'AlRajhiBank' });
+  t('a PoS purchase refund with a card field is income',
+    'PoS Purchase Refund By:4417;mada Amount: 61.75 SAR At: BAYT AL OUD 15/05/2026 09:12',
+    { kind: 'transaction', type: 'income', amountFils: 6175 }, { sender: 'AlRajhiBank' });
+  t('an Arabic purchase refund (استرجاع شراء) is income',
+    'استرجاع شراء بـ88.40 SAR من مكتبة الريان مدى *3391',
+    { kind: 'transaction', type: 'income', amountFils: 8840, merchant: 'Refund', transfer: false }, { sender: 'SNB-AlAhli' });
+  t('control: the same PoS purchase without Refund stays an expense',
+    'PoS Purchase By:4417;mada Amount: 61.75 SAR At: BAYT AL OUD 15/05/2026 09:12',
+    { kind: 'transaction', type: 'expense', amountFils: 6175 }, { sender: 'AlRajhiBank' });
+  t('control: an Arabic online purchase stays an expense',
+    'شراء انترنت بـ88.40 SAR من مكتبة الريان مدى *3391',
+    { kind: 'transaction', type: 'expense', amountFils: 8840 }, { sender: 'SNB-AlAhli' });
+  t('control: a previously rejected purchase refund is still refused',
+    'Refund for previously rejected purchase Amount: SAR 31.10 Card: *5520', null, { sender: 'D360' });
+  // A3. A secret number to confirm an online purchase is a code challenge.
+  t('an Arabic purchase-confirmation PIN with an English amount is not a purchase',
+    'الرقم السري لتأكيد شراء عبر الانترنت: 731905 Amount: SAR 219.00', null, { sender: 'D360' });
+  t('an Arabic purchase-confirmation PIN with an Arabic amount is not a purchase',
+    'الرقم السري لتأكيد شراء عبر الانترنت: 482216 مبلغ 74.10 SAR بطاقة *5520', null, { sender: 'SNB-AlAhli' });
+  t('an Arabic purchase-confirmation PIN whose code is redacted is still not a purchase',
+    'الرقم السري لتأكيد شراء عبر الانترنت: <CODE> مبلغ 74.10 SAR بطاقة *5520', null, { sender: 'SNB-AlAhli' });
+  ok('the Arabic purchase-confirmation PIN is repairable security-challenge evidence',
+    nonPostingReason('الرقم السري لتأكيد شراء عبر الانترنت: 731905 Amount: SAR 219.00') === 'security-challenge');
+  // A4. Help and available-limit information is not a movement.
+  t('a help text about refund timing with an amount is not income',
+    'Help: card refunds are usually credited within 7 working days. Amount: SAR 18.25 At: SOUQ DESK', null,
+    { sender: 'AlRajhiBank' });
+  t('an Arabic purchase-info text quoting the available limit is not a purchase',
+    'شراء معلومة: ب 450.00 SR هو الحد المتاح التاجر: متجر النخبة 02/06/2026 11:05', null, { sender: 'AlRajhiBank' });
+  t('an Arabic purchase-note text quoting the available limit is not a purchase',
+    'شراء ملاحظة: SAR 275.50 هو الحد المتاح من متجر الواحة', null, { sender: 'SNB-AlAhli' });
+  ok('control: a purchase whose footer states the available balance is not information-only',
+    !isInformationOnlyAlert('شراء انترنت بـ88.40 SAR من مكتبة الريان مدى *3391 و 1,204.10 SAR هو الرصيد المتاح') &&
+      !isInformationOnlyAlert('Note: AED 52.00 spent on your card ending 4417 at OASIS LAUNDRY.'));
+  t('control: a real refund credited to the card is still income',
+    'Refund of SAR 64.00 from JARIR BOOKSTORE has been credited to your card ending 4417.',
+    { kind: 'transaction', type: 'income', amountFils: 6400 }, { sender: 'AlRajhiBank' });
+  setActiveMarket('AE');
+}
+// A2. "Cr." is the credit abbreviation; "Dr." stays a debit.
+t('an abbreviated Cr. transaction on an account is money in',
+  'A Cr. transaction of AED 715.00 on your account number XXX904417 was successful.Available balance is AED 3,120.40.',
+  { kind: 'transaction', type: 'income', amountFils: 71500 }, { sender: 'ADCBAlert' });
+t('control: an abbreviated Dr. transaction stays an expense',
+  'A Dr. transaction of AED 64.30 on your account number XXX904417 was successful.Available balance is AED 2,405.40.',
+  { kind: 'transaction', type: 'expense', amountFils: 6430 }, { sender: 'ADCBAlert' });
+// A5. A points redemption REQUEST is not a posted cash movement.
+t('a loyalty points redemption request is not spending',
+  'TouchPoints Redemption Request registered successfully on 03-09-2026 10:14:22 Amount Paid: AED 240.00 TouchPoints Remaining: 1185.',
+  null, { sender: 'ADCBAlert' });
+ok('a points redemption request is repairable pending evidence',
+  nonPostingReason('TouchPoints Redemption Request registered successfully on 03-09-2026 10:14:22 Amount Paid: AED 240.00 TouchPoints Remaining: 1185.') === 'pending-processing');
+// C9. An Indian-rail credit in INR from a sender that shares a UAE bank brand
+// is not an AED account movement; it must not post at a fallback rate.
+t('a foreign-currency NEFT credit is not posted on an AED ledger at a guessed rate',
+  'HSBC: A/c 052-118***-004 is credited with INR 3200.00 on 14SEP at 09.12.44 with UTR HDFCH00004417 as NEFT from HDFC A/c ***7721 of Ravi Menon . Your Avl Bal is INR 41200.50.',
+  null, { sender: 'HSBC' });
+t('control: an AED credit from the same sender still posts',
+  'Your account 012-345678-001 has been credited with AED 3,200.00 on 14/09/2026. Available balance AED 9,840.12.',
+  { kind: 'transaction', type: 'income', amountFils: 320000 }, { sender: 'HSBC' });
+t('control: a USD credit to a UAE account still posts with its conversion',
+  'USD 200.00 has been credited to account 095XXX44XXX02. Current balance is AED 6,410.00.',
+  { kind: 'transaction', type: 'income', originalCurrency: 'USD' }, { sender: 'Liv' });
+// D1. ADIB's three-digit masked card tail ("*482") names a card exactly as "**0482" does.
+t('ADIB card payment receipt with a three-digit masked tail is a card payment',
+  'Dear Customer, your payment of AED1,250.00 on 3/14/2026 for card ending with *482 has been credited. Thank you',
+  { kind: 'cardPayment', amountFils: 125000, side: 'receipt', transfer: true, card: { last4: '482', kind: 'credit' } },
+  { sender: 'ADIB' });
+t('ADIB card purchase with a three-digit masked tail books as the purchase',
+  'Trx. of AED 86.40 on your card ending *482 at BLUE FIN SEAFOOD, UAE is Approved. Avl. card bal is 7,431.60. Trx Date: 14/03/26 19:22',
+  { kind: 'transaction', type: 'expense', amountFils: 8640, merchant: 'Blue Fin Seafood' }, { sender: 'ADIB' });
+t('control: the four-digit ADIB purchase still books identically',
+  'Trx. of AED 86.40 on your card ending **0482 at BLUE FIN SEAFOOD, UAE is Approved. Avl. card bal is 7,431.60. Trx Date: 14/03/26 19:22',
+  { kind: 'transaction', type: 'expense', amountFils: 8640, merchant: 'Blue Fin Seafood', card: { last4: '0482', kind: 'unknown' } },
+  { sender: 'ADIB' });
+t('a three-digit masked account tail names the account',
+  'Dear Customer, AED 120.00 was debited from your account *917. Your available account balance is AED 5,120.00',
+  { kind: 'transaction', type: 'expense', amountFils: 12000, card: { last4: '917', kind: 'account' } }, { sender: 'ADIB' });
+t('an unmasked three-digit number after "card" is not a card identity',
+  'AED 52.00 spent on your card 482 at OASIS LAUNDRY on 14/03/2026.',
+  { kind: 'transaction', amountFils: 5200, card: null }, { sender: 'ADIB' });
+// B8 on the launch path. One dot and exactly three digits in a two-decimal
+// currency is 5.00 or 5,000.00; nothing in the text decides, so never book it.
+t('an AED figure with a lone dot and three digits is not booked',
+  'Purchase of AED 5.000 with Debit Card ending 4417 at CORNER CAFE, DUBAI. Avl Balance is AED 1,200.00.', null,
+  { sender: 'EmiratesNBD' });
+t('a comma-decimal AED figure is not booked as a wrong value',
+  'Purchase of AED 1.234,56 with Debit Card ending 4417 at CORNER CAFE, DUBAI.', null, { sender: 'EmiratesNBD' });
+t('a foreign two-decimal leg with a lone dot and three digits is not booked at a guessed size',
+  'Purchase of EUR 1.200 with Credit Card ending 4417 at BERLIN SHOP, DE.', null, { sender: 'EmiratesNBD' });
+t('control: a grouped foreign figure still converts',
+  'Purchase of EUR 1,200.00 with Credit Card ending 4417 at BERLIN SHOP, DE.',
+  { kind: 'transaction', type: 'expense', originalCurrency: 'EUR', originalMinorUnits: 120000 }, { sender: 'EmiratesNBD' });
+t('control: a three-decimal dinar leg keeps all three decimals',
+  'Purchase of KWD 12.345 with Credit Card ending 4417 at AVENUES MALL, KW.',
+  { kind: 'transaction', type: 'expense', originalCurrency: 'KWD', originalMinorUnits: 12345 }, { sender: 'EmiratesNBD' });
+t('control: a three-decimal Bahraini dinar leg keeps all three decimals',
+  'Purchase of BHD 7.250 with Credit Card ending 4417 at CITY CENTRE, BH.',
+  { kind: 'transaction', type: 'expense', originalCurrency: 'BHD', originalMinorUnits: 7250 }, { sender: 'EmiratesNBD' });
+{
+  const { setActiveMarket } = require('./build/markets');
+  setActiveMarket('SA');
+  t('a SAR figure with a lone dot and three digits is not booked',
+    'PoS Purchase By:4417;mada Amount: 5.000 SAR At: BAYT AL OUD 15/05/2026 09:12', null, { sender: 'AlRajhiBank' });
+  setActiveMarket('AE');
+}
+// G1. A zero-decimal currency printed with decimals is unreadable: no other
+// number (a merchant digit, a clock hour) may stand in for it.
+t('a yen figure with decimals never books a nearby digit instead',
+  'Purchase of 812.40 JPY 7 at SAKURA MART with Credit Card ending 4417.', null, { sender: 'EmiratesNBD' });
+t('a clock beside a won figure is never the amount',
+  'Purchase of 38.15 KRW 9:45 at HANA STORE with Credit Card ending 4417.', null, { sender: 'EmiratesNBD' });
+t('control: a whole-yen purchase still converts exactly',
+  'Purchase of JPY 4,650 at SAKURA MART with Credit Card ending 4417.',
+  { kind: 'transaction', type: 'expense', originalCurrency: 'JPY', originalMinorUnits: 4650 }, { sender: 'EmiratesNBD' });
+// G2. "Transaction Error ... encountered an issue processing" is a failed payment.
+t('a transaction-error alert is refused like a decline',
+  'Transaction Error: We encountered an issue processing your transaction of USD 64.20 at HARBOR OUTFITTERS with Credit Card ending 4417.',
+  null, { sender: 'EmiratesNBD' });
+ok('the transaction-error alert is declined evidence',
+  nonPostingReason('Transaction Error: We encountered an issue processing your transaction of AED 64.20 at HARBOR OUTFITTERS.') === 'declined');
+t('control: a posted purchase with a "report errors" footer still posts',
+  'Purchase of AED 64.20 at HARBOR OUTFITTERS with Credit Card ending 4417. To report errors call 800 555.',
+  { kind: 'transaction', type: 'expense', amountFils: 6420 }, { sender: 'EmiratesNBD' });
+// H2. A transfer REQUEST acknowledgement is not money in.
+t('a "request received for fund transfer" acknowledgement is not income',
+  'Request received for fund transfer of AED 2,815 (excl. applicable charges) with ref. no. QX44100. Call 600 if you did not initiate this.',
+  null, { sender: 'Mashreq' });
+t('a "fund transfer request ... received" acknowledgement is not income',
+  'Fund Transfer request of AED1250.00 via Personal Internet Banking from acc.no. XXX451001 on Mar 02 2026 10:05AM received. Avl. bal. AED 8,210.40.',
+  null, { sender: 'ADCBAlert' });
+t('control: a processed funds transfer request from your account stays an expense',
+  'Dear Customer, your funds transfer request of AED 1,500.00 to IBAN/Account/Card XXXX4410 has been processed successfully from your account XXXX9001 on 02/03/2026 10:05',
+  { kind: 'transaction', type: 'expense', amountFils: 150000 }, { sender: 'FAB' });
+t('control: money received into your account is still income',
+  'AED 2,815.00 has been received in your account XXXX9001 from KHALID SAEED on 02/03/2026.',
+  { kind: 'transaction', type: 'income', amountFils: 281500 }, { sender: 'Mashreq' });
+// H4. Loading a prepaid card is the reader's own money changing place.
+t('a prepaid card load is not an expense',
+  'Your TravelCash Card ending with 5531 was loaded with SAR 250. Your available balance is SAR 410.75.',
+  null, { sender: 'EmiratesNBD' });
+// Card repayment receipts in card-first order are settlements, not spending.
+t('a "payment towards your Credit Card ... has been received" receipt is a card payment',
+  'Payment of AED 412.30 on 02/03/2026 towards your Credit Card XXX5531 has been received.',
+  { kind: 'cardPayment', amountFils: 41230, side: 'receipt', transfer: true, card: { last4: '5531', kind: 'credit' } },
+  { sender: 'ADCBAlert' });
+t('a "payment towards your Credit Card ending ... was received" receipt is a card payment',
+  'Payment of AED 2,040.00 towards your Credit Card ending 5531 on 02/03/2026 was received through Bank Transfer. Your available limit is AED 18,300.00.',
+  { kind: 'cardPayment', amountFils: 204000, side: 'receipt', transfer: true }, { sender: 'EmiratesNBD' });
+t('control: a bill paid with a card is still spending, not a card settlement',
+  'Payment of AED 200.00 for your DEWA bill has been received using Credit Card ending 5531.',
+  { kind: 'transaction', type: 'expense', amountFils: 20000 }, { sender: 'EmiratesNBD' });
+// D1 guard. Money said to be CREDITED never falls through to an expense.
+t('a payment "has been credited" with no destination is not booked as an expense',
+  'Dear Customer, your payment of AED 410.00 has been credited. Thank you', null, { sender: 'ADIB' });
+t('control: a payment credited to a named biller account stays an expense',
+  'Your payment of AED 200.00 has been credited to your du account 0551234567.',
+  { kind: 'transaction', type: 'expense', amountFils: 20000 });
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

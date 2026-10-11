@@ -24,6 +24,7 @@ import {
 import {
   hasArabicRefundHeading,
   hasMalformedBankAmount,
+  isInformationOnlyAlert,
   normalizeArabic,
   parseSms,
   type ParsedSms,
@@ -245,6 +246,12 @@ export const interpretBankAlert = ({
   observedAt,
 }: InterpretBankAlertInput): BankAlertInterpretation => {
   if (isExpectedFutureMoneyNotice(source)) {
+    return { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+  }
+  // Help text and available-limit information quote a figure that did not
+  // move; "شراء معلومة: ب 450.00 SR هو الحد المتاح" must not be rebuilt as a
+  // purchase from its "شراء" heading once parseSms has refused it.
+  if (isInformationOnlyAlert(source)) {
     return { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
   }
   // A refused legacy parse is not permission to reconstruct the same money

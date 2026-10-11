@@ -17,7 +17,7 @@ import {
   type UniversalReviewAlert,
 } from '@/lib/alert-review-tray';
 import { toISODate } from '@/lib/format';
-import { bodyPrint, type CaptureChannel } from '@/lib/dedupe';
+import { bodyPrint, statedBalanceInText, type CaptureChannel } from '@/lib/dedupe';
 import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
 import {
@@ -219,13 +219,38 @@ export const carrierRedeliveryIndexes = (
     if (bucket) bucket.push(index);
     else byKey.set(key, [index]);
   });
+  // Every stated balance per sender, in delivery order. An identical body
+  // whose balance the SAME sender contradicted in between is a new movement
+  // that returned the balance to the same figure (credit 375 -> 1,275.93,
+  // debit 375 -> 900.93, credit 375 -> 1,275.93 again), never a re-delivery.
+  let balances: Map<string, { date: number; index: number; balance: number }[]> | null = null;
+  const balanceMovedBetween = (address: string, from: number, fromIndex: number, to: number, toIndex: number,
+    balance: number): boolean => {
+    if (!balances) {
+      balances = new Map();
+      rows.forEach((row, index) => {
+        const stated = statedBalanceInText(row.body);
+        if (stated === undefined) return;
+        const list = balances!.get(row.address) ?? [];
+        list.push({ date: row.date, index, balance: stated });
+        balances!.set(row.address, list);
+      });
+    }
+    return (balances.get(address) ?? []).some((entry) =>
+      entry.balance !== balance &&
+      (entry.date > from || (entry.date === from && entry.index > fromIndex)) &&
+      (entry.date < to || (entry.date === to && entry.index < toIndex)));
+  };
   for (const indexes of byKey.values()) {
     if (indexes.length < 2) continue;
     indexes.sort((a, b) => rows[a].date - rows[b].date || a - b);
-    let keptDate = rows[indexes[0]].date;
+    let kept = indexes[0];
+    const balance = statedBalanceInText(rows[kept].body);
     for (const index of indexes.slice(1)) {
-      if (rows[index].date - keptDate <= CARRIER_DUPLICATE_MS) skipped.add(index);
-      else keptDate = rows[index].date;
+      if (rows[index].date - rows[kept].date <= CARRIER_DUPLICATE_MS &&
+        !(balance !== undefined && balanceMovedBetween(rows[index].address, rows[kept].date, kept,
+          rows[index].date, index, balance))) skipped.add(index);
+      else kept = index;
     }
   }
   return skipped;

@@ -26,7 +26,9 @@ import type { UniversalBankEvent, UniversalMoney } from '@/lib/universal-types';
  *  - the universal parser reads status `posted` (never pending, future,
  *    failed, informational) and no wording in the text says otherwise
  *    (pending/hold/authorisation, request, declined/failed, reversed/
- *    cancelled, OTP/verification, promotion, statement/bill/due, scheduled);
+ *    cancelled, OTP/verification, fraud check/unusual attempt/restriction,
+ *    initiated refund/bank-details ask, promotion, statement/bill/due,
+ *    scheduled);
  *  - a supported money-movement family whose direction matches its wording
  *    (purchases/fees/withdrawals/utilities/recurring are debits, refunds are
  *    credits, transfers must say which way) with no direction issue;
@@ -92,6 +94,8 @@ export interface BestEffortInput {
   observedAt?: number;
   /** Network-free dated rate lookup (rates already on this device). */
   fxLookup?: (base: string, quote: string, date: string) => FxQuote | null;
+  /** The capture's sender ID, when known; only decides whether a link may stand. */
+  sender?: string;
   /** Code-owned format prefix: 'universal' or 'semantic'. Never source text. */
   formatPrefix?: 'universal' | 'semantic' | 'ai';
 }
@@ -168,6 +172,25 @@ const NON_COMPLETED_WORDING: readonly RegExp[] = [
   /\bcashback\b|\bcash\s+back\b|\bdiscount\b|\b\d{1,3}\s?%\s*off\b|\boffers?\b|\bpromo(?:tion|code)?\b|\bvoucher\b|\bcoupon\b|\bwin\b|\bgiveaway\b|\bredeem\b|\bangebot\b|\brabatt\b|\bpromoci[óo]n\b|\bdescuento\b|\bsconto\b|\bkorting\b|\bdesconto\b|\bpromo[çc][aã]o|عرض|تخفيض/iu,
   // statements / bills / dues / reminders / balance-only
   /\bstatement\b|\bminimum\s+(?:amount\s+)?(?:due|payment)\b|\btotal\s+(?:amount\s+)?due\b|\bamount\s+due\b|\bdue\s+(?:date|on|by)\b|\bpayment\s+due\b|\bbill\s+(?:is\s+)?(?:due|generated|ready)\b|\breminder\b|\boverdue\b|\brelev[ée](?!\p{L})|\bkontoauszug\b|\bextracto\b|\bestratto\s+conto\b|\brekeningoverzicht\b|\bfatura\s+(?:fechada|vence)\b|كشف\s+(?:ال)?حساب|مستحق|تذكير|الحد\s+الأدنى/iu,
+  // fraud checks and unconfirmed authorisations: the bank is asking, holding
+  // or investigating, not reporting a completed charge ("is under review",
+  // "after an unusual … purchase attempt", "We need to confirm a … purchase",
+  // "checking recent activity", "Restrictions were placed on card …")
+  /\bunder\s+review\b|\bunusual\b|\bsuspicious\s+(?:activity|transaction|purchase|attempt|login)\s+(?:was\s+|has\s+been\s+)?(?:detected|noticed|flagged|identified)\b|\b(?:detected|noticed|flagged)\s+(?:a\s+|some\s+)?suspicious\b|\battempt(?:ed|s)?\b|\bneed\s+to\s+(?:confirm|verify)\b|\bchecking\s+(?:(?:recent|some|your)\s+)*(?:activity|transactions?|purchases?)\b|\brestrictions?\s+(?:(?:was|were|has|have)\s+(?:been\s+)?)?(?:placed|applied|added)\b|\b(?:card|account)\s+(?:(?:has|have)\s+been\s+|is\s+(?:now\s+)?|was\s+)?(?:temporarily\s+)?(?:blocked|frozen|suspended|locked|restricted)\b|\bwas\s+(?:this|that|it)\s+(?:transaction\s+)?(?:you|yours)\b|\breply\s+(?:with\s+)?["']?(?:yes|y)["']?\s+(?:or|if)\b/iu,
+  // initiated (not completed) refunds and phishing-style "update your bank
+  // details to receive your refund" asks
+  /\brefund\s+(?:has\s+been\s+|is\s+|was\s+)?initiated\b|\brefund\b[^.\n]{0,48}?\b(?:has\s+been|is|was)\s+initiated\b|\b(?:should|will)\s+reflect\s+(?:in|within)\s+\d|\binitiated\s+(?:a\s+|your\s+)?refund\b|\bupdate\s+(?:your\s+)?(?:bank|account|kyc|card|pan)\s+(?:details|information|info)\b|\bto\s+receive\s+(?:your|the)\s+refund\b/iu,
+  // fraud questions: the bank (or a fraudster posing as one) is asking
+  // whether the customer made it, which is not a report that it posted
+  /\bdid\s+(?:you|u)\s+(?:make|authori[sz]e|initiate|attempt|do)\b|\bwas\s+(?:this|that|it)\s+(?:made\s+by\s+)?(?:you|yours)\b|\breply\s+(?:with\s+)?["']?(?:yes|y)["']?\s*(?:\/|or|,)\s*["']?(?:no|n)["']?\b|\b(?:respond|reply|text)\s+(?:with\s+)?["']?(?:yes|y)["']?(?=[\s.,;!]|$)|\bverify\s+(?:this|the)\s+(?:transaction|purchase|payment|charge|activity)\b|\bverify\s+(?:your\s+)?account\s+activity\b|\bif\s+(?:this\s+(?:transaction\s+)?was\s+|it\s+was\s+)?not\s+(?:made\s+by\s+|done\s+by\s+|initiated\s+by\s+)?you\b[^.\n]{0,60}?\b(?:click|tap|visit|follow|open)\b|\bif\s+(?:you\s+)?did\s+not\s+(?:make|authori[sz]e|authenticate|initiate)\b[^.\n]{0,60}?\b(?:click|tap|visit|follow|open|check\s+here)\b|\bverifique\b|\bsi\s+no\s+(?:reconoce|ha\s+sido\s+usted)\b/iu,
+  // lures: refund/grant/prize bait asking the reader to act ("You will
+  // receive a tax refund of $573.00 ... confirm your information")
+  /\bclaim\b|\bcongrat(?:s|ulations?)\b|\byou\s+(?:have\s+|'ve\s+)?won\b|\byou\s+will\s+receive\b|\bcan\s+be\s+credited\b|\beligible\s+for\b|\bconfirm\s+(?:your\s+)?(?:information|info|details|identity)\b|\bupdate\s+(?:your\s+)?(?:details|kyc|information|info)\b|\bkyc\b|\b(?:click|tap)\s+(?:here|below|on\s+(?:the|this)\s+link|(?:the|this)\s+link)\b|\bverify\s+your\s+(?:account|identity)\b|\b(?:you|card|account)\s+(?:\(?do\s+not\)?\s+)?(?:has|have)\s+(?:an?\s+)?(?:outstanding\s+)?(?:tax\s+)?refund\s+of\b|\breply\s+with\s+your\s+(?:bank|account|card|details)\b|\buse\s+code\b/iu,
+  // activation / verification / PIN code messages quote an amount they are
+  // authorising, never one that moved
+  /\bactivation\s+code\b|\bverification\s+code\b|\bauth(?:entication|ori[sz]ation)\s+code\b|\bOTP\b|\bPIN\b/u,
+  // offers phrased as an amount off a future purchase
+  /\bflash\s+sale\b|\boff\s+(?:your|on\s+(?:your|the|all))\s+(?:next\s+|first\s+)?(?:purchase|order|bill|booking|ride|meal|trip)s?\b/iu,
   // future / scheduled / mandates
   /\bwill\s+(?:be|have\s+been)\s+(?:debited|charged|deducted|paid|processed|collected|credited)\b|\bscheduled\b|\bupcoming\b|\bstanding\s+(?:instruction|order)\b|\bmandate\b|\bpre-?debit\b|\bauto-?pay\s+(?:set|scheduled|registered)\b|\bsera\s+(?:d[ée]bit[ée]|pr[ée]lev[ée])|\bwird\s+(?:abgebucht|belastet)\b|\bser[áa]\s+(?:cargad[oa]|debitad[oa])\b|\bsar[àa]\s+addebitat[oa]\b|\bwordt\s+afgeschreven\b|سيتم/iu,
 ];
@@ -372,6 +395,38 @@ export const isNotAutoPostableMoney = (source: string): boolean =>
   hasLinkCallToAction(source) || NOT_A_SETTLED_FACT.some((pattern) => pattern.test(source)) ||
   NOT_A_NEW_MOVEMENT.some((pattern) => pattern.test(source));
 
+/**
+ * A link next to the money. Lures always carry one ("confirm your
+ * information in the link"); a genuine alert from a registered bank header
+ * sometimes has an app/history link in its footer. So a link blocks
+ * auto-add unless the sender is a registered header, short code or app
+ * package (see registeredAlphaSender): from a phone number, an e-mail
+ * address, a generic
+ * "INFO"-style header or an unknown sender, the row goes to Review at most.
+ * www./domain arms are lower-case only: an upper-case "WWW.GRAB.COM" or
+ * "AMZN.COM/BI" is a card descriptor naming the merchant, not a link to tap.
+ */
+const LINK_RE =
+  /\bhttps?:\/\/|\bwww\.[a-z0-9-]|\b(?:bit\.ly|tinyurl\.com|t\.co|goo\.gl|cutt\.ly|rb\.gy|is\.gd|ow\.ly|shorturl\.at)\/|\b[a-z0-9][a-z0-9-]{0,62}\.[a-z]{2,24}\/[\w-]/u;
+const GENERIC_SENDER = /^(?:info|infos|alert|alerts|notice|notify|sms|msg|message|verify|secure|security|service|support|update|bank|banking)$/i;
+/**
+ * A sender a stranger cannot simply type: an operator-registered alphanumeric
+ * header ("AD-HDFCBK", "EmiratesNBD"), a carrier short code of three to six
+ * digits, or an installed app's package name (push). Never a full phone
+ * number, an e-mail address or a generic word such as "INFO".
+ */
+const registeredAlphaSender = (sender: string | undefined): boolean => {
+  if (typeof sender !== 'string') return false;
+  const raw = sender.trim();
+  if (/^\d{3,6}$/.test(raw)) return true;
+  if (/^[a-z][a-z0-9_]*(?:\.[a-z0-9_]+){2,}$/i.test(raw) && !raw.includes('@')) return true;
+  const id = raw.replace(/^[A-Z]{2}-/, '').replace(/-[A-Z]$/, '');
+  return /^[A-Za-z][A-Za-z0-9 ]{2,15}$/.test(id) && (id.match(/[A-Za-z]/g) ?? []).length >= 3 &&
+    !GENERIC_SENDER.test(id);
+};
+export const hasLinkFromUnregisteredSender = (source: string, sender?: string): boolean =>
+  LINK_RE.test(source) && !registeredAlphaSender(sender);
+
 export const hasNonCompletedWording = (source: string): boolean =>
   nonPostingReason(source) !== null || NON_COMPLETED_WORDING.some((pattern) => pattern.test(source)) ||
   TEMPORARY_HOLD.test(source) || (AUTHORISATION.test(source) && !COMPLETED.test(source));
@@ -389,6 +444,30 @@ const directionMatchesFamily = (event: UniversalBankEvent): boolean => {
   if (event.family === 'transfer') return true;
   return event.direction === 'debit';
 };
+
+/**
+ * "PKR 4,750.00 sent to SCB PK A/C ***8821 from AYESHA KHAN via Raast" is an
+ * INBOUND alert: the destination is a masked account at the alerting bank
+ * (the reader's own), and "sent" is the payer's verb. The universal reader
+ * sees "sent" and calls it a debit. When the only destination named is a bank
+ * account reference (at most three institution abbreviations of two or three
+ * letters, "SCB PK", then A/C and a masked tail; a payee name such as "BRIAN
+ * DOE" is longer) and the text never says the money left "from your" account,
+ * the direction is not knowable from wording, so it goes to Review instead of
+ * being auto-added either way. "sent to HAMZA ALI ... from your A/C" (a named
+ * payee, or an origin stated as yours) is untouched.
+ */
+const SENT_TO_ACCOUNT_REFERENCE =
+  /\bsent\s+to\s+(?:your\s+)?(?:[A-Za-z][A-Za-z&]{1,2}\s+){0,3}(?:a\/c|acc(?:oun)?t)\.?\s*(?:no\.?\s*)?[*xX•·]+\d{2,6}\b/iu;
+const FROM_YOUR_ORIGIN = /\bfrom\s+your\b/iu;
+/**
+ * "LAYLA HADDAD has received your bank transfer of EUR 144" is the payee
+ * confirming the reader's OUTGOING transfer; "received" is the payee's verb.
+ * Never auto-added as income.
+ */
+const PAYEE_RECEIVED_YOUR_TRANSFER = /\b(?:has|have)\s+(?:now\s+)?received\s+your\s+(?:\w+\s+){0,2}(?:transfer|payment|money|remittance)\b/iu;
+const inboundSentToOwnAccount = (source: string): boolean =>
+  SENT_TO_ACCOUNT_REFERENCE.test(source) && !FROM_YOUR_ORIGIN.test(source);
 
 const validMoney = (money: UniversalMoney | null | undefined): money is UniversalMoney => {
   if (!money || typeof money.currency !== 'string' || !/^[A-Z]{3}$/.test(money.currency)) return false;
@@ -506,8 +585,11 @@ export function decideBestEffortAutoPost(input: BestEffortInput): BestEffortDeci
   if (typeof input.source !== 'string' || hasNonCompletedWording(input.source) || isNotAutoPostableMoney(input.source)) {
     return review('non-posting-wording');
   }
+  if (hasLinkFromUnregisteredSender(input.source, input.sender)) return review('non-posting-wording');
   if (!POSTABLE_FAMILIES.has(event.family) || OWN_CARD_PAYMENT.test(input.source)) return review('unsupported-family');
   if (!directionMatchesFamily(event)) return review('direction-unclear');
+  if (event.direction === 'debit' && inboundSentToOwnAccount(input.source)) return review('direction-unclear');
+  if (event.direction === 'credit' && PAYEE_RECEIVED_YOUR_TRANSFER.test(input.source)) return review('direction-unclear');
   if (event.issues.some((issue) => BLOCKING_ISSUES.has(issue))) {
     return review(event.issues.some((issue) => issue.startsWith('direction')) ? 'direction-unclear' : 'not-posted');
   }
