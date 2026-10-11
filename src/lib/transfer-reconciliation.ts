@@ -892,7 +892,7 @@ function* observedOwnedTransferPairsSteps(
 }
 
 /**
- * OWN-ACCOUNT PAIRS PROVEN BY THE BANK'S OWN BALANCE TRAIL.
+ * OWN-ACCOUNT PAIRS SUGGESTED BY THE BANK'S OWN BALANCE TRAIL.
  *
  * A generic "AED 2,000.00 was debited from your account *917 … balance
  * 3,120.00" and "AED 2,000.00 was credited to your account *348 … balance
@@ -910,6 +910,8 @@ function* observedOwnedTransferPairsSteps(
  *    (credit) the amount. That agreement on both accounts is the evidence.
  * No retained text or no previous stated balance means no pairing: today's
  * behaviour. Nothing is persisted; the pair is re-derived on every pass.
+ * The result is only ever a "likely own" suggestion the person is asked
+ * about, never a confirmed internal transfer (see the caller).
  */
 const BALANCE_PAIR_WINDOW_MS = 3 * 60_000;
 const BALANCE_PAIR_DEBIT_TITLE = /^(?:account debit|outgoing transfer|own account transfer)$/i;
@@ -1405,15 +1407,22 @@ function* reconcileSteps(ctx: Context): Generator<void, TransferReconciliationRe
     cardRepaymentPairs.has(id) || repaidCards.has(id) || knownCardRepayments.has(id) || userLinked.has(id) ||
     stale.has(id) || (byId.get(id)?.status ?? 'ownership-unknown') !== 'ownership-unknown';
   const balancePairs = yield* balanceProvenOwnPairsSteps(ctx, settled);
+  yield* suggestObservedPairsSteps(ctx, unresolvedIds, internalIds, corroboratingIds, cardRepaymentPairs, byId);
+  // The balance trail is a SUGGESTION, never a confirmed own-account move: a
+  // rent debit from one account and a friend's equal credit to another at the
+  // same bank, a minute apart, move both balances by the amount too. Each leg
+  // is asked about (pending), linked to its partner, and counted as ordinary
+  // cash flow until the person says otherwise. Only legs nothing else has
+  // classified are touched.
   for (const [txId, counterpartId] of balancePairs) {
+    if (++steps % YIELD_EVERY === 0) yield;
     const counterpart = ctx.rows.get(counterpartId);
     if (!counterpart || balancePairs.get(counterpartId) !== txId) continue;
-    internalIds.add(txId);
-    unresolvedIds.delete(txId); pendingIds.delete(txId);
-    byId.set(txId, { id: txId, status: 'confirmed-own', reason: 'known-account', counterpartId,
-      counterpartyAccountId: counterpart.accountId, candidateIds: [] });
+    if ((byId.get(txId)?.status ?? 'ownership-unknown') !== 'ownership-unknown') continue;
+    byId.set(txId, { id: txId, status: 'likely-own', reason: 'amount-time', counterpartId,
+      counterpartyAccountId: counterpart.accountId, candidateIds: [counterpartId] });
+    pendingIds.add(txId);
   }
-  yield* suggestObservedPairsSteps(ctx, unresolvedIds, internalIds, corroboratingIds, cardRepaymentPairs, byId);
   // Suggestions are deliberately non-destructive: they are the small subset
   // worth asking the user about. Everything else unresolved defaults to normal
   // cash-flow treatment and remains editable from the transaction itself.

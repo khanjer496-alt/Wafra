@@ -584,8 +584,10 @@ export interface ParsedCard {
  *    and no call to action; a credit from a phone number, e-mail, generic or
  *    BLANK sender that names no own tail waits in Review; promo footers and
  *    merchant names no longer veto a completed own-tail alert.
- *  - Ledger: alerts with different stated balances are never deduped;
- *    own-account transfers pair only on balance evidence.
+ *  - Ledger: alerts with different stated balances are never deduped; two equal,
+ *    opposite movements on two own accounts at the same bank whose stated
+ *    balances each moved by the amount are SUGGESTED as one own transfer
+ *    (the person is asked), never confirmed on that evidence alone.
  * Future captures and the bounded recent reread. PARSER_BACKFILL_VERSION
  * stays 50: main ships 49, and 50 (owner-approved, see 64) is unreleased in
  * this same batch, so its full reread already re-reads the saved UAE/Saudi
