@@ -7133,6 +7133,27 @@ t('UAE control: a purchase with a "convert now" instalment footer keeps its purc
     { kind: 'transaction', type: 'expense', amountFils: 8840 }, { sender: 'SNB-AlAhli' });
   t('control: a previously rejected purchase refund is still refused',
     'Refund for previously rejected purchase Amount: SAR 31.10 Card: *5520', null, { sender: 'D360' });
+  // Fold review (#151): the refund heading is the FIRST LINE only, and a
+  // request/pending/future notice under it is not a completed refund.
+  // Footers that merely mention purchase refunds never flip a purchase.
+  t('fold review: a "No purchase refund" footer leaves a PoS purchase an expense',
+    'PoS Purchase\nBy:4417;mada\nAmount: 46.20 SAR\nAt: STORE\nNo purchase refund for gift cards',
+    { kind: 'transaction', type: 'expense', amountFils: 4620 }, { sender: 'AlRajhiBank' });
+  t('fold review: a "لطلب استرجاع شراء" help footer leaves a purchase an expense',
+    'شراء\nبـ34.56 SAR\nمن SOME STORE\nمدى *0007\nلطلب استرجاع شراء اتصل 920001000',
+    { kind: 'transaction', type: 'expense', amountFils: 3456 }, { sender: 'SNB-AlAhli' });
+  t('fold review: a "سياسة استرجاع مشتريات" policy footer leaves a purchase an expense',
+    'شراء\nبـ34.56 SAR\nمن SOME STORE\nمدى *0007\nسياسة استرجاع مشتريات المتجر خلال 14 يوم',
+    { kind: 'transaction', type: 'expense', amountFils: 3456 }, { sender: 'SNB-AlAhli' });
+  for (const [label, body, sender] of [
+    ['an Arabic refund heading still being processed', 'استرجاع شراء\nبـ34.56 SAR\nمن SOME STORE\nمدى *0007\nقيد المعالجة', 'SNB-AlAhli'],
+    ['an Arabic refund REQUEST being processed', 'طلب استرجاع شراء\nبـ34.56 SAR\nمن SOME STORE\nمدى *0007\nالحالة: قيد المعالجة', 'SNB-AlAhli'],
+    ['a future Arabic refund', 'سيتم استرجاع شراء بـ34.56 SAR من SOME STORE الى بطاقتك مدى *0007', 'SNB-AlAhli'],
+    ['an English purchase refund with Status: Pending', 'Purchase Refund\nAmount: 7.89 SAR\nAt: STORE\nStatus: Pending', 'AlRajhiBank'],
+  ]) t(`fold review: never income — ${label}`, body, null, { sender });
+  t('fold review control: a first-line English purchase refund heading is income',
+    'Purchase Refund\nAmount: 7.89 SAR\nAt: STORE\n01/01/2030 10:20',
+    { kind: 'transaction', type: 'income', amountFils: 789 }, { sender: 'AlRajhiBank' });
   // A3. A secret number to confirm an online purchase is a code challenge.
   t('an Arabic purchase-confirmation PIN with an English amount is not a purchase',
     'الرقم السري لتأكيد شراء عبر الانترنت: 731905 Amount: SAR 219.00', null, { sender: 'D360' });

@@ -1666,7 +1666,7 @@ const AR_PURCHASE_REFUND_HEADER_RE =
   /^(?:استرداد[ \t]+شراء(?:[ \t]+(?:ال)?انترنت|[ \t]+pos|[ \t]+(?:عبر[ \t]+)?نقاط[ \t]+البيع)?|حواله[ \t]+عكسيه)[ \t]*(?:\r?\n|$)/i;
 // Contradictory notices are considered only under that exact first heading.
 // Used only by blank(), never a stateful global .test().
-const AR_PURCHASE_REFUND_NOTICE_RE = new RegExp(String.raw`\b(?:refund\s+request|request\s+for\s+(?:a\s+)?refund)\b(?:[^.\n]|\.\d){0,64}?\b(?:received|submitted|created|awaiting|pending)\b|\b(?:received|submitted|created)\b(?:[^.\n]|\.\d){0,48}?\b(?:refund\s+request|request\s+for\s+(?:a\s+)?refund)\b|(?<![ء-ي])و?(?:سيتم\s+(?:ال)?استرداد|تم\s+استلام\s+طلب\s+(?:ال)?استرداد)(?:[^.\n]|\.\d)*` +
+const AR_PURCHASE_REFUND_NOTICE_RE = new RegExp(String.raw`\b(?:refund\s+request|request\s+for\s+(?:a\s+)?refund)\b(?:[^.\n]|\.\d){0,64}?\b(?:received|submitted|created|awaiting|pending)\b|\b(?:received|submitted|created)\b(?:[^.\n]|\.\d){0,48}?\b(?:refund\s+request|request\s+for\s+(?:a\s+)?refund)\b|(?<![ء-ي])و?(?:سيتم\s+(?:ال)?(?:استرداد|استرجاع)|تم\s+استلام\s+طلب\s+(?:ال)?(?:استرداد|استرجاع))(?:[^.\n]|\.\d)*` +
   // A status or request under the heading ("الحاله: قيد المعالجه", "Status:
   // Pending", a line opening "طلب استرداد ...") is not a completed refund.
   // The English words only on a STATUS line — "For disputes under review
@@ -1674,7 +1674,7 @@ const AR_PURCHASE_REFUND_NOTICE_RE = new RegExp(String.raw`\b(?:refund\s+request
   // "بناء علي طلب الاسترداد المقدم منكم" is the completed refund's reason.
   String.raw`|قيد\s+(?:ال)?(?:معالجه|مراجعه|تنفيذ|انتظار)` +
   String.raw`|(?:^|\n)[ \t]*(?:status|الحاله)[ \t]*:?[ \t]*(?:pending|in\s+progress|under\s+review|processing)\b[^\n]*` +
-  String.raw`|(?:^|\n)[ \t]*طلب\s+(?:ال)?(?:حواله|استرداد)[^\n]*` +
+  String.raw`|(?:^|\n)[ \t]*طلب\s+(?:ال)?(?:حواله|استرداد|استرجاع)[^\n]*` +
   // ...and a pending status stated in a sentence ABOUT this refund ("Your
   // refund request is under review", "Refund pending with merchant", "This
   // reversal is pending approval", "تم استلام طلبك ..."). Subject-scoped, so
@@ -1765,8 +1765,21 @@ const SA_POS_BY_HEADING_RE = /^pos[ \t]+by[ \t]*:[ \t]*\d{4}\b/i;
  * pending/request guards (AR_PURCHASE_REFUND_NOTICE_RE). Matching it anywhere
  * here would let "طلب استرداد شراء ... قيد المعالجه" bypass them.
  */
+// FIRST LINE ONLY (no m flag): "No purchase refund for gift cards", "لطلب
+// استرجاع شراء اتصل …" and a "سياسة استرجاع مشتريات" footer under a real
+// purchase are help text, and booked those purchases as income. A heading
+// that does open the alert gets the same request/pending/future guards as
+// the "استرداد" heading (AR_PURCHASE_REFUND_NOTICE_RE in parseSmsInner).
 const REFUND_HEADING_RE =
-  /\b(?:pos\s+|online\s+|card\s+)?purchase\s+refund\b(?!\s+(?:request|policy|claim))|(?:^|[^؀-ۿ])استرجاع\s+(?:عمليه\s+)?(?:شراء|مشتريات)(?![؀-ۿ])/i;
+  /^\s*(?:(?:pos|online|card)\s+)?purchase\s+refund\b(?!\s+(?:request|policy|claim))|^\s*استرجاع\s+(?:عمليه\s+)?(?:شراء|مشتريات)(?![؀-ۿ])/i;
+/**
+ * A first line that is a purchase-refund REQUEST or FORECAST ("طلب استرجاع
+ * شراء …", "سيتم استرداد شراء …"): no money has come back yet, and the purchase
+ * word in it is the purchase being refunded, so neither income nor a new
+ * expense. Refused.
+ */
+const AR_REFUND_NOTICE_HEADING_RE =
+  /^\s*(?:طلب|سيتم)\s+(?:ال)?(?:استرجاع|استرداد)\s+(?:عمليه\s+)?(?:شراء|مشتريات)(?![؀-ۿ])/;
 const PROMO_RE =
   /cashback|voucher|promo|discount|t&cs?\b|terms apply|conditions apply|shop now|hurry|limited time|congratulations|you (?:could|can) win|opt-?out|\bdnd\d*\b|bit\.ly|wa\.me|tinyurl|payment plan|bonus|rewards? (?:on|program|draw)|earn \d+x|https?:\/\//i;
 /**
@@ -5929,6 +5942,11 @@ function parseSmsInner(
   const raw = sanitizeLocalMoney(foldOrthography(clean));
   if (raw === null) return null;
   const arabicPurchaseRefundHeader = AR_PURCHASE_REFUND_HEADER_RE.test(raw);
+  // Either refund-heading family: the "استرداد" one above, or #151's English
+  // "Purchase Refund" / Arabic "استرجاع شراء" first line. Both must clear the
+  // same request/pending/future notice guard below.
+  const purchaseRefundHeading = arabicPurchaseRefundHeader || REFUND_HEADING_RE.test(raw);
+  if (AR_REFUND_NOTICE_HEADING_RE.test(raw)) return null;
   ensureCurrencyPatterns();
   // The same for every branch of one message, so read once here. Both are
   // stamped onto all ten `return` sites below; a branch that quietly shipped
@@ -6029,13 +6047,13 @@ function parseSmsInner(
   // forecast its own evidence of settlement and nothing was ever suppressed.
   {
     const settled = blank(blank(raw, FUTURE_CLAUSE_RE), SCHEDULED_CLAUSE_RE);
-    const refundSettled = arabicPurchaseRefundHeader
+    const refundSettled = purchaseRefundHeading
       ? blank(settled, AR_PURCHASE_REFUND_NOTICE_RE) : settled;
     // A noun field list cannot confirm its own forecast/request. Remove every
     // notice first, then require THIS refund's completed credit outside
     // merchant names; original purchases and balance/limit figures cannot
     // confirm that the separate refund moved money.
-    if (arabicPurchaseRefundHeader && refundSettled !== raw) {
+    if (purchaseRefundHeading && refundSettled !== raw) {
       const completion = AR_PURCHASE_REFUND_COMPLETED_RE.exec(refundSettled);
       if (!completion) return null;
       const subjectAndVerb = completion[1] ?? completion[2];
