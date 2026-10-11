@@ -32,13 +32,16 @@ the shared import planner and ledger reducer, alongside Android `scanInbox`.
   the policy proves a completed movement in the pinned ledger currency; the row
   is marked "Auto-added — check". iOS live capture deliberately stays
   review-only for unverified formats. The policy's unverified-sender rule
-  applies only to a present sender that is a 7+ digit phone number, an e-mail
-  address or a generic word: on Android such a credit without the user's own
-  card or account tail waits in Review (including the few banks that send
-  from a full number, such as US toll-free alerts). An iOS History record
-  that carries no sender is not treated as unverified, so the same credit is
-  auto-added with the marker there unless its wording or a link refuses it.
-  The two platforms can therefore differ for a phone-number sender.
+  applies to a sender that is a 7+ digit phone number, an e-mail address or a
+  generic word, and to a BLANK sender (an iOS History record, since Find
+  Messages exposes none, or pasted text): such a credit without the user's
+  own card or account tail waits in Review on both platforms (including the
+  few banks that send from a full number, such as US toll-free alerts), and
+  is never auto-added. A blank-sender record that matched an exact certified
+  bank template, or that names the own tail, is decided by the other
+  guardrails. A blank-sender record may keep a link only when it states a
+  completed movement on the own account or card tail and the link carries
+  no call to action (UCO's "Report Dispute <link>").
 - Live declines preserve valid Apple message identities, so an unrelated posting
   sharing the same received second cannot be removed by timestamp matching.
 - An admitted date-only repair runs before account discovery and snapshots. It

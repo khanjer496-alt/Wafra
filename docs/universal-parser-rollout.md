@@ -626,27 +626,34 @@ it. Every guardrail is required:
   on the iPhone History import most of them are not imported at all. These
   checks apply only to automatic posting; user-taught (learned) templates
   keep their own wording guard;
-- the unverified-sender rule. It applies only to a sender that is PRESENT and
-  is a phone number of seven or more digits, an e-mail address or a generic
-  word ("INFO", "ALERT", "SMS", ...): a credit from such a sender, or a debit
+- the unverified-sender rule. It applies to a sender that is a phone number
+  of seven or more digits, an e-mail address or a generic word ("INFO",
+  "ALERT", "SMS", ...), and to a BLANK sender: a credit from such a sender, or a debit
   whose only hook is a callback ("Not you? Call ..."), must name one of the
   reader's own cards or accounts by its tail next to an own-instrument word
-  ("A/c XX4410", "card ending 4421", "Acct: ******1736", "حساب رقم XXXX1234").
+  ("A/c XX4410", "card ending 4421", "Acct: ******1736", "حساب رقم XXXX1234",
+  a masked IBAN "account BH19BBKUXXXXXXXXXXXX74").
   A masked figure elsewhere (a payer's phone "0712***678", "Ref *4410") does
   not count. Otherwise it waits in Review (`unverified-sender`). A registered
   alphanumeric header, a carrier short code (three to six digits) or an app
-  package is not affected. NO sender at all (an iOS Messages History record,
-  pasted text, the AI path without one) is not treated as unverified: such a
-  credit is auto-added with the "Auto-added — check" marker when every other
-  guardrail passes, and only the wording guard and the link gate stand
-  between a senderless lure and the ledger. Known trade-off: a few banks
+  package is not affected. A BLANK sender (an iOS Messages History record —
+  iOS 26's Find Messages exposes no sender — or pasted text) is treated as
+  unverified for these two shapes, because it is the iPhone's main history
+  path and a fake "You have received Ksh 17,500 …" with no lure word and no
+  link would otherwise be booked as income; such a credit waits in Review
+  with its amount filled, unless it names the own tail or matched an exact
+  certified bank template (latam-alert-templates). A caller that does not
+  know the sender at all (the push semantic path, which has its own
+  package-trust gate) is unaffected. Known trade-off: a few banks
   alert from a full phone number (US toll-free alert numbers; Swedbank
   Latvia's 29610101 on Android); their credits that print no own account or
   card tail go to Review. No per-bank exception is made without real
   evidence of that bank's sender;
 - a link (http, www., a short-link or a lower-case domain path) blocks
-  auto-add unless the sender is a registered header, short code or app
-  package;
+  auto-add unless the sender is a registered header (two letters or more),
+  short code or app package, or the sender is blank and the text states a
+  completed movement on the own account or card tail with no call to action
+  at the link (UCO's "A/c XX8360 Credited … Report Dispute <link>");
 - a supported family (purchase, cash withdrawal, refund, fee, utility,
   recurring payment, transfer) whose direction matches it: refunds are
   credits, transfers must state their direction and post as transfers;

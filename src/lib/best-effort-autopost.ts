@@ -30,11 +30,11 @@ import type { UniversalBankEvent, UniversalMoney } from '@/lib/universal-types';
  *    initiated refund/bank-details ask, promotion, statement/bill/due,
  *    scheduled), including lure wording (money owed or waiting to be
  *    released, apply/register now, shop order notices, dispute desks);
- *  - from a PRESENT sender that is a phone number of 7+ digits, an e-mail
- *    address or a generic header ("INFO"), a credit (or a debit whose only
- *    hook is "Not you? call") must name one of the reader's own accounts or
- *    cards by its tail (unverifiedMoneyClaim); no sender at all is not
- *    unverified, and the wording guard and link gate alone decide;
+ *  - from a phone number of 7+ digits, an e-mail address, a generic header
+ *    ("INFO") or a BLANK sender (iOS History, pasted text), a credit (or a
+ *    debit whose only hook is "Not you? call") must name one of the reader's
+ *    own accounts or cards by its tail, or match an exact certified bank
+ *    template when the sender is blank (unverifiedMoneyClaim);
  *  - a supported money-movement family whose direction matches its wording
  *    (purchases/fees/withdrawals/utilities/recurring are debits, refunds are
  *    credits, transfers must say which way) with no direction issue;
@@ -106,6 +106,12 @@ export interface BestEffortInput {
    * whether a money claim is unverified, and whether a promo footer may stand aside.
    */
   sender?: string;
+  /**
+   * The text matched an exact certified bank template (latam-alert-templates).
+   * With a blank sender the template stands in for it; a phone number,
+   * e-mail or generic sender is still an unverified money claim.
+   */
+  exactTemplate?: boolean;
   /** Code-owned format prefix: 'universal' or 'semantic'. Never source text. */
   formatPrefix?: 'universal' | 'semantic' | 'ai';
 }
@@ -562,10 +568,11 @@ export const isRegisteredAlertSender = (sender: string | undefined): boolean => 
  * Arabic "حساب رقم XXXX1234", "بطاقة …1234". A masked figure anywhere else is
  * NOT the reader's: a payer's phone ("from JOHN DOE 0712***678"), a reference
  * ("Ref *4410") or a USSD code ("Dial *334#"). A fully masked "a/c XXXXXX"
- * names nothing.
+ * names nothing. A masked IBAN after the account word ("Your account
+ * BH19BBKUXXXXXXXXXXXX74", BBK) names its tail like any other mask.
  */
 const OWN_INSTRUMENT_TAIL =
-  /(?:\b(?:a\/c|acc(?:oun)?t|acct|card|ending|wallet(?:\s+(?:no\.?|number))?)\b|(?<!\p{L})(?:حساب|بطاق[ةه])(?:\s+رقم)?)\.?\s*(?:no\.?|number|#)?\s*:?\s*(?:ending\s+(?:in|with)\s+)?(?:\d{0,6}[*xX•·…]+\s?-?\d{2,6}|\.{2,3}\s?\d{2,6}|\d{3,6})(?![\d#])/iu;
+  /(?:\b(?:a\/c|acc(?:oun)?t|acct|card|ending|wallet(?:\s+(?:no\.?|number))?)\b|(?<!\p{L})(?:حساب|بطاق[ةه])(?:\s+رقم)?)\.?\s*(?:no\.?|number|#)?\s*:?\s*(?:ending\s+(?:in|with)\s+)?(?:(?:[A-Z]{2}\d{2}[A-Z]{0,4})?\d{0,6}[*xX•·…]+\s?-?\d{2,6}|\.{2,3}\s?\d{2,6}|\d{3,6})(?![\d#])/iu;
 /** Exposed for tests: whether the text names an own card or account by its tail. */
 export const namesOwnInstrumentTail = (text: string): boolean => OWN_INSTRUMENT_TAIL.test(text);
 const namesOwnInstrument = (source: string, event: UniversalBankEvent): boolean =>
@@ -587,17 +594,27 @@ const CALLBACK_HOOK =
  * or cards is exactly the shape of the fake "Confirmed. You have received Ksh
  * 17,500" and "your tax refund of $258.44" texts. The same from a debit side,
  * with only a callback hook to show for it, is the fake-purchase vishing
- * text. Neither is refused: it waits in Review. A missing sender is not
- * unverified (isUnverifiedAlertSender): a senderless genuine-looking credit
- * auto-adds with the usual "Auto-added — check" marker, and only the wording
- * guard and the link gate stand between a senderless lure and the ledger.
+ * text. Neither is refused: it waits in Review.
+ *
+ * A BLANK sender (an iOS 26 Messages History record — Find Messages exposes
+ * no sender — or pasted text) is treated the same way for these two shapes.
+ * A senderless record is the iPhone's main history path, and a fake "You
+ * have received Ksh 17,500 …" with no lure word and no link would otherwise
+ * be booked as income; such a credit waits in Review with its amount filled
+ * (the Review admission in launch-alert-parser.ts lets it through), unless it
+ * names the reader's own account or card tail or matched an exact certified
+ * bank template (latam-alert-templates). A caller that does not know the
+ * sender at all (`undefined`: the push semantic path, which has its own
+ * package-trust gate) is unaffected.
  */
 const unverifiedMoneyClaim = (
   source: string,
   event: UniversalBankEvent,
   sender: string | undefined,
+  exactTemplate: boolean,
 ): boolean => {
-  if (!isUnverifiedAlertSender(sender)) return false;
+  const blank = typeof sender === 'string' && sender.trim() === '';
+  if (!isUnverifiedAlertSender(sender) && !(blank && !exactTemplate)) return false;
   if (namesOwnInstrument(source, event)) return false;
   if (event.direction === 'credit') return true;
   return event.direction === 'debit' && CALLBACK_HOOK.test(source);
@@ -876,6 +893,20 @@ const hasCompetingAmounts = (
 
 const LAUNCH_ROUTE = (market: string | null | undefined): boolean => !!market && LAUNCH_MARKETS.has(market);
 
+/**
+ * A link on a record with NO sender (iOS History, pasted text) may stand when
+ * the text itself answers for the alert: it states a completed movement on
+ * the reader's own account or card tail, and the link carries no call to
+ * action (hasLinkCallToAction, checked first through isNotAutoPostableMoney,
+ * already refuses dispute/verify/claim links, shorteners used as bait and
+ * lookalike hosts). UCO Bank's "A/c XX8360 Credited with Rs.6.00 … Report
+ * Dispute https://bit.ly/… .For feedback https://rb.gy/…" is a real alert;
+ * a phone number, e-mail or generic sender still never carries a link.
+ */
+const senderlessOwnAlertLink = (source: string, sender: string | undefined): boolean =>
+  (sender === undefined || sender.trim() === '') && COMPLETED_MOVEMENT.test(source) &&
+  OWN_INSTRUMENT_TAIL.test(source) && !hasLinkCallToAction(source);
+
 /** The single decision for an unproven format. Pure: no storage, no network. */
 export function decideBestEffortAutoPost(input: BestEffortInput): BestEffortDecision {
   const review = (reason: BestEffortRefusal): BestEffortDecision => ({ outcome: 'review', reason });
@@ -891,8 +922,10 @@ export function decideBestEffortAutoPost(input: BestEffortInput): BestEffortDeci
     isNotAutoPostableMoney(input.source)) {
     return review('non-posting-wording');
   }
-  if (hasLinkFromUnregisteredSender(input.source, input.sender)) return review('non-posting-wording');
-  if (unverifiedMoneyClaim(input.source, event, input.sender)) return review('unverified-sender');
+  if (hasLinkFromUnregisteredSender(input.source, input.sender) && !senderlessOwnAlertLink(input.source, input.sender)) {
+    return review('non-posting-wording');
+  }
+  if (unverifiedMoneyClaim(input.source, event, input.sender, input.exactTemplate === true)) return review('unverified-sender');
   if (!POSTABLE_FAMILIES.has(event.family) || OWN_CARD_PAYMENT.test(input.source)) return review('unsupported-family');
   if (!directionMatchesFamily(event)) return review('direction-unclear');
   if (event.direction === 'debit' && inboundSentToOwnAccount(input.source)) return review('direction-unclear');

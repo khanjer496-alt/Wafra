@@ -576,6 +576,7 @@ const parseUniversalPostedEvent = (
     ledgerExponent: pinnedExponent,
     observedAt,
     fxLookup,
+    exactTemplate: matchLatamTemplate(readSource, { sender }) !== null,
   });
   if (decision.outcome !== 'post') return null;
 

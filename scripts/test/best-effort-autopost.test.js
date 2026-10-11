@@ -1042,8 +1042,21 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
       ok(`IN control: a carrier short code / app package "${sender}" with a link footer still auto-adds`,
         r?.bestEffort && r.amountFils === 64000, r);
     }
-    for (const sender of ['+919812345678', 'alerts@walletbank.example', 'INFO', '']) {
+    for (const sender of ['+919812345678', 'alerts@walletbank.example', 'INFO']) {
       ok(`IN: the same link-carrying alert from "${sender}" is never auto-added`, auto('INR', 'IN', body, 2, sender) === null);
+    }
+    // Parser fold of #151: with NO sender (iOS History, paste) a link stands
+    // only beside a completed movement on the own account tail and with no
+    // call to action — the UCO "Report Dispute <link>" shape.
+    const senderless = auto('INR', 'IN', body, 2, '');
+    ok('IN: the same own-account alert with no sender keeps its link footer and auto-adds',
+      senderless?.bestEffort && senderless.amountFils === 64000, senderless);
+    for (const bait of [
+      'Rs.640.00 paid to KIRAN STORES from your a/c XX4410 on 05/10/2026. Not you? Dispute here: https://m.walletbank.example/h',
+      'Rs.640.00 paid to KIRAN STORES on 05/10/2026. History: https://m.walletbank.example/h',
+    ]) {
+      ok(`IN: a senderless link without an own tail, or with a call to action, never auto-adds — ${bait.slice(40, 80)}`,
+        auto('INR', 'IN', bait, 2, '') === null);
     }
     const descriptor = auto('THB', 'TH', 'Purchase 412.00 THB WWW.SIAMRIDE.COM from card x-4801 (06/03/26, 11:22 hr)', 2, '');
     ok('TH control: an upper-case merchant domain in a card descriptor is not a link',
@@ -1078,9 +1091,10 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
     const mpesa = 'QX81TR4KLM Confirmed. You have received Ksh 6,400.00 from PETER KAMAU 0711000333 on 4/10/26 at 9:15 AM. New M-PESA balance is Ksh 6,512.40.';
     ok('KE: a received-money claim from a mobile number with no own account is never auto-added',
       auto('KES', 'KE', mpesa, 2, '+254711000222') === null, auto('KES', 'KE', mpesa, 2, '+254711000222'));
-    const senderlessMpesa = auto('KES', 'KE', mpesa);
-    ok('KE: the same credit with no sender at all auto-adds, marked for a check',
-      senderlessMpesa?.bestEffort && senderlessMpesa.type === 'income' && senderlessMpesa.amountFils === 640000, senderlessMpesa);
+    // Parser fold of #151: a BLANK sender (iOS History, paste) is treated
+    // like a phone number for a money-arrived claim with no own tail.
+    ok('KE: the same credit with no sender at all is never auto-added',
+      auto('KES', 'KE', mpesa) === null, auto('KES', 'KE', mpesa));
     const genuine = auto('KES', 'KE', mpesa, 2, 'MPESA');
     ok('KE control: the same M-Pesa credit from MPESA still auto-adds',
       genuine?.bestEffort && genuine.type === 'income' && genuine.amountFils === 640000, genuine);
@@ -1092,9 +1106,7 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
     const php = 'You have received PHP 2,500.00 from J. SANTOS 09170000000. Your new balance is PHP 2,612.75. Ref. No. 40021.';
     ok('PH: a "You have received PHP" claim from a mobile number is never auto-added',
       auto('PHP', 'PH', php, 2, '+639170000000') === null);
-    const phpSenderless = auto('PHP', 'PH', php);
-    ok('PH: the same claim with no sender auto-adds, marked for a check',
-      phpSenderless?.bestEffort && phpSenderless.type === 'income' && phpSenderless.amountFils === 250000, phpSenderless);
+    ok('PH: the same claim with no sender is never auto-added', auto('PHP', 'PH', php) === null);
     ok('KE: a USSD code ("Dial *334#") is not an own-card reference',
       auto('KES', 'KE', 'Dial *334# to join. Confirmed. You have received Ksh 9,930.00 from MARY ATIENO. New balance is Ksh 9,940.00.', 2, '+254711000222') === null);
     // A masked figure that is NOT the reader's own (the payer's phone, a
@@ -1157,8 +1169,8 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
     auto('GBP', 'GB', 'You paid £2,150.00 for a laptop on 03/10/2026. Need help? Call 0800 000 1111.', 2, '+447700900321') === null);
   {
     const row = auto('GBP', 'GB', 'You paid £2,150.00 for a laptop on 03/10/2026. Need help? Call 0800 000 1111.');
-    ok('GB: the same text with no sender is auto-added, marked for a check',
-      row?.bestEffort && row.type === 'expense' && row.amountFils === 215000, row);
+    ok('GB: the same text with no sender is never auto-added (blank sender, callback hook, no own card)',
+      row === null, row);
   }
   {
     const row = auto('GBP', 'GB', 'You paid £21.50 at CORNER CAFE with card ending 4410 on 03/10/2026. Need help? Call 0800 000 1111.');
@@ -1283,31 +1295,41 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
   };
   const mpesa = 'QX81TR4KLM Confirmed. You have received Ksh 6,400.00 from PETER KAMAU 0711000333 on 4/10/26 at 9:15 AM. New M-PESA balance is Ksh 6,512.40.';
   const senderless = history('KES', 'KE', mpesa);
-  ok('History: a senderless M-Pesa credit is auto-added, marked for a check',
-    senderless.parsed.length === 1 && !!senderless.parsed[0].bestEffort && senderless.parsed[0].amountFils === 640000, senderless);
+  ok('History: a senderless M-Pesa credit naming no own account waits in Review instead of being auto-added',
+    senderless.parsed.length === 0 && senderless.reviewCandidates.length === 1, senderless);
   const fromPhone = history('KES', 'KE', mpesa, '+254711000222');
   ok('History: the same credit from a mobile number waits in Review instead of being dropped',
     fromPhone.parsed.length === 0 && fromPhone.reviewCandidates.length === 1, fromPhone);
   const fromWallet = history('KES', 'KE', mpesa, 'MPESA');
   ok('History control: the same credit from MPESA is added', fromWallet.parsed.length === 1, fromWallet);
   const linked = history('INR', 'IN', 'Your A/C XXXXX771204 is credited with INR 12,500.00 on 04/10/26 10:12. Your new balance is INR 40,210.55. Chat with us: examplebank.in/chat');
-  ok('History: a bank credit refused only for its link footer waits in Review',
-    linked.parsed.length === 0 && linked.reviewCandidates.length === 1, linked);
+  // Parser fold of #151: a senderless credit on the own account tail keeps
+  // a link footer with no call to action (the UCO "Report Dispute" shape).
+  ok('History: a senderless bank credit on the own account keeps its link footer and is added, marked',
+    linked.parsed.length === 1 && !!linked.parsed[0].bestEffort && linked.parsed[0].amountFils === 1250000, linked);
+  {
+    const uco = history('INR', 'IN', 'A/c XX8360 Credited with Rs.6.00 on 07-02-2024 by UCO-UPI.Avl Bal Rs.51.98. Report Dispute https://bit.ly/3y39tLP .For feedback https://rb.gy/fdfmda');
+    ok('History: UCO "Report Dispute <link>" with no sender is added',
+      uco.parsed.length === 1 && uco.parsed[0].type === 'income' && uco.parsed[0].amountFils === 600, uco);
+    const bbk = history('BHD', 'BH', 'Your account BH19BBKUXXXXXXXXXXXX74 was credited by BHD975.000 from BH51BBMEXXXXXXXXXXXX20 for Fawri 001 on 16/02/2023 14:06 ref:LP SEF3013J5.For help 17207777');
+    ok('History: a senderless BBK credit naming the own masked IBAN is not an unverified claim',
+      bbk.parsed.length === 1 || bbk.reviewCandidates.length === 1, bbk);
+  }
   const bait = history('INR', 'IN', 'Congrats, INR 30,000.00 Can Be Credited To Your Bank A/c. Check Now: lv.example/x', '+919800000000');
   ok('History: a refused "Can Be Credited" bait never becomes a Review card',
     bait.parsed.length === 0 && bait.reviewCandidates.length === 0, bait);
   const linkedClaim = history('INR', 'IN', 'Your wallet amount of Rs. 48,200 is credited to 98XXXXXX10. Sign up today: w4l.example/k2', '+919800000001');
   ok('History: a phone-number credit claim with a link never becomes a Review card',
     linkedClaim.parsed.length === 0 && linkedClaim.reviewCandidates.length === 0, linkedClaim);
-  // A missing sender is not an unverified one: a senderless genuine-looking
-  // credit is auto-added with the "Auto-added — check" marker.
-  for (const [currency, cc, text, minor] of [
-    ['BRL', 'BR', 'Pix recebido de R$ 90,00 de MARINA SOUZA.', 9000],
-    ['USD', 'US', 'Refund of $35.00 from RIVER SHOES', 3500],
-  ]) {
-    const row = history(currency, cc, text);
-    ok(`History: a senderless credit is auto-added, marked for a check — ${text.slice(0, 30)}`,
-      row.parsed.length === 1 && !!row.parsed[0].bestEffort && row.parsed[0].amountFils === minor, row);
+  // Parser fold of #151: a senderless credit that names no own account or
+  // card is never auto-added (it is the shape of a fake "you received" text).
+  // One with a rail or bank word waits in Review; a bare one is not imported.
+  {
+    const pix = history('BRL', 'BR', 'Pix recebido de R$ 90,00 de MARINA SOUZA.');
+    ok('History: a senderless Pix credit naming no own account waits in Review',
+      pix.parsed.length === 0 && pix.reviewCandidates.length === 1, pix);
+    const refund = history('USD', 'US', 'Refund of $35.00 from RIVER SHOES');
+    ok('History: a bare senderless refund claim is never auto-added', refund.parsed.length === 0, refund);
   }
   // From a mobile number the same credits wait in Review.
   {
