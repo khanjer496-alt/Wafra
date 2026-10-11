@@ -60,6 +60,7 @@ import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { UniversalBankEvent } from '@/lib/universal-types';
 import { certifyUniversalTemplate } from '@/lib/universal-template-certification';
 import { isGulfNeighbourMarket } from '@/lib/gulf-neighbour-alerts';
+import { latamOwnTransferTitle, latamPolicySource } from '@/lib/latam-alert-templates';
 import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
 import { captureTrace, captureTraceEnabled } from '@/lib/capture-trace';
 import { measureRuntimeOperation } from '@/lib/runtime-performance';
@@ -821,8 +822,9 @@ function parsedUniversalPosting(
   // structural title so the ledger keeps this row in the unresolved-transfer
   // bucket until it can prove own vs external; a recipient name must not turn a
   // transfer into ordinary spending merely because merchant extraction found it.
+  // A LatAm card-bill payment or own-account move keeps its own-product title.
   const merchant = event.family === 'transfer'
-    ? fallbackTitle
+    ? latamOwnTransferTitle(source) ?? fallbackTitle
     : suggestion.merchant || explicitMerchant || fallbackTitle;
   const instrument = event.instrument.evidence === 'explicit' ? event.instrument.value : null;
   const card = instrument?.last4
@@ -847,7 +849,8 @@ function parsedUniversalPosting(
     snapshotKind: null,
     categoryGuess: suggestion.category,
     categoryDeliberate: !suggestion.needsReview,
-    raw: source,
+    // Yape's receipt check never reaches the stored excerpt.
+    raw: latamPolicySource(source),
   };
 }
 
@@ -1669,10 +1672,12 @@ export async function scanInbox(
         // through the same best-effort policy (and setting) as every other
         // unproven alert, and carries the "Auto-added — check" marker. The
         // ledger-currency gate below still refuses any foreign row here.
+        // Yape's receipt check is neither an OTP nor something to keep.
+        const policySource = latamPolicySource(source, { sender });
         const semanticDecision = certification?.decision === 'semantic-generalized' && universalEvent &&
           !gulfNeighbourOwned
           ? decideBestEffortAutoPost({
-              source,
+              source: policySource,
               event: universalEvent,
               enabled: bestEffortAutoPostEnabled(),
               country: getActiveCountry(),

@@ -4,6 +4,11 @@ import type { MoneyDirection, PostingStatus, UniversalMarket } from '@/lib/alert
 import { extractUniversalFields } from '@/lib/universal-fields';
 import { extractUniversalMoney, inspectUniversalMoneyDraft } from '@/lib/universal-money';
 import {
+  isReviewOnlyLatamInstitution,
+  latamTemplateEvent,
+  matchLatamTemplate,
+} from '@/lib/latam-alert-templates';
+import {
   isApplicationPurchaseOffer,
   isExpectedFutureMoneyNotice,
   isTransactionVerificationChallenge,
@@ -46,6 +51,8 @@ const phrase = (pattern: string): RegExp => {
   phrasePatterns.set(pattern, compiled);
   return compiled;
 };
+
+const REVIEW_ONLY_ISSUER_HINT = /plin|interbank|bbva|scotiabank|santander|banamex/iu;
 
 /** Completed movement predicates, independent of issuer/country selection. */
 const completedMovement = (source: string): { status: PostingStatus; direction: 'debit' | 'credit'; family: UniversalBankEvent['family'] } | null => {
@@ -238,6 +245,11 @@ const explicitNonPosting = (source: string, includeLifecycle = true): {
 export function inspectUniversalBankEvent(source: string, context: UniversalParseContext = {}): UniversalBankEvent {
   if (typeof source !== 'string' || !source.trim()) return emptyEvent('empty-input');
   if (source.length > 4096) return emptyEvent('input-too-long');
+  // An exact Brazilian, Colombian, Mexican or Peruvian bank template owns its
+  // whole message: its money, family, direction and posting decision come from
+  // that template alone (src/lib/latam-alert-templates.ts).
+  const latam = matchLatamTemplate(source, { market: context.market, sender: context.sender });
+  if (latam) return latamTemplateEvent(source, latam);
   const draft = inspectUniversalMoneyDraft(source, context);
   const fields = extractUniversalFields(source, context, draft.candidates.map((candidate) => candidate.span));
   const money = extractUniversalMoney(source, context,
@@ -435,11 +447,18 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
   const promotion = [...readings, ...wholeReadings].some((reading) => reading.draft.reasons.includes('promotion'));
   const reviewable = hasAmount || hasStatement || hasBalance;
   const decision = reviewable && status !== 'failed' && !authentication && !pending && !promotion ? 'review' : 'ignore';
+  // Banks with synthetic-only evidence (Plin, Interbank, BBVA Perú, Santander
+  // México, Citibanamex) are identified for Review but never post. Only with
+  // that market's context: "Interbank transfer of $500.00" is a US alert.
+  const reviewOnlyIssuer = status === 'posted' && REVIEW_ONLY_ISSUER_HINT.test(`${source} ${context.sender ?? ''}`) &&
+    isReviewOnlyLatamInstitution(source, context.sender, context.market);
+  if (reviewOnlyIssuer) status = 'unknown';
   const issues = [
     ...money.amount.issues,
     ...money.observations.flatMap((observation) => observation.field.issues),
     ...Object.values(fields).flatMap((field) => field.issues),
     ...(status === 'unknown' ? ['posting-status-unresolved'] : []),
+    ...(reviewOnlyIssuer ? ['institution-review-only'] : []),
     ...(direction === 'unknown' ? ['direction-unresolved'] : []),
     ...(directionConflict ? ['direction-conflict'] : []),
     ...(multiplePostings ? ['multiple-event-adapter-required'] : []),

@@ -202,6 +202,31 @@ const NON_COMPLETED_WORDING: readonly RegExp[] = [
   /ألغيت|أُلغيت|لم\s+تنجح|غير\s+ناجحة?|غير\s+مكتملة?|(?:تعليق|إيقاف|ايقاف)\s+(?:ال)?بطاق|(?:استرجاع|استرداد|إرجاع|ارجاع|إعادة|اعادة)\s+المبلغ|بانتظار|قيد\s+المراجعة|لا\s+تشارك|\bamount\s+(?:has\s+been\s+|was\s+)?(?:refunded|returned)\b|\bto\s+be\s+(?:debited|charged|deducted|collected)\b|\bblocked\b|\bdispute\s+(?:raised|registered|logged|lodged|opened|filed|initiated)\b|\bdisputed\b/iu,
 ];
 
+/**
+ * LATIN AMERICAN WORDING, SCOPED TO BR/CO/MX/PE. Spanish and Brazilian
+ * Portuguese purchase/security codes, two-step confirmations ("foi você?",
+ * "responde SI"), scheduled Pix, bills and reminders, loan and limit offers,
+ * transactions under analysis or unfinished. Applied only to an alert routed
+ * to one of these markets, a person in one of them, or money in BRL/COP/MXN/
+ * PEN: "token", "confirme" or "programado" in a US alert ("your Apple Pay
+ * token", a cafe called CONFIRME) must not change what a US alert does.
+ */
+const LATAM_MARKETS: ReadonlySet<string> = new Set(['BR', 'CO', 'MX', 'PE']);
+const LATAM_CURRENCIES: ReadonlySet<string> = new Set(['BRL', 'COP', 'MXN', 'PEN']);
+const LATAM_NON_COMPLETED_WORDING: readonly RegExp[] = [
+  /(?<!\p{L})(?:c[óo]digo\s+(?:de\s+)?(?:seguridad|autorizaci[óo]n|autoriza[çc][ãa]o|confirmaci[óo]n|confirma[çc][ãa]o|acceso|acesso|compra|transacci[óo]n)|c[óo]d\.\s*de\s+seguridad|tu\s+c[óo]digo|es\s+tu\s+c[óo]digo|clave\s+din[áa]mica|token)(?!\p{L})/iu,
+  /(?<!\p{L})(?:foi\s+voc[êe]|fuiste\s+t[úu]|reconoces|reconhece|responda|responde\s+(?:s[íi]|sim|no|n[ãa]o|cancelar)|confirma\s+(?:tu|su)\s+(?:pago|compra|transacci[óo]n|operaci[óo]n)|confirme)(?!\p{L})/iu,
+  /(?<!\p{L})(?:agendad[oa]|programad[oa]|se\s+(?:cargar|debitar)[áa]|en\s+proceso|em\s+processamento|em\s+an[áa]lise|en\s+an[áa]lisis|vence(?:\s+amanh[ãa])?|vencimento|pago\s+m[íi]nimo|tienes\s+un\s+pago|completa\s+tu\s+pago|fa[çc]a\s+o\s+pagamento|j[áa]\s+pode\s+agendar|novo\s+boleto|sua\s+fatura\s+(?:de\s+R\$\s?[\d.,]+\s+)?(?:est[áa]\s+dispon[íi]vel|fechou|vence)|a\s+fatura\s+do\s+cart[ãa]o\s+fechou)(?!\p{L})/iu,
+  // Loan OFFERS only: a loan repayment ("pagamento do empréstimo") is real money.
+  /(?<!\p{L})(?:empr[ée]stimo\s+foi\s+aprovado|pr[ée]-?aprovad[oa]|pr[ée]-?aprobad[oa]|cr[ée]dito\s+(?:de\s+R?\$\s?[\d.,]+\s+)?dispon[íi]vel|simul(?:ar|e)|limite\s+subiu|cupo\s+disponible|ganhe|garanta|cupom|invista|meses\s+sin\s+intereses)(?!\p{L})/iu,
+  /(?<!\p{L})(?:n[ãa]o\s+(?:conclu[íi]d[oa]|aprovad[oa]|autorizad[oa]|realizad[oa])|no\s+fue\s+posible|no\s+(?:aprobad[oa]|autorizad[oa]))(?!\p{L})/iu,
+  // A movement already reversed, returned, failed, disputed, suspended or
+  // still processing ("Consumo extornado", "Pix devolvido", "en trámite").
+  // Participles only: a refund NOUN ("extorno de S/ 20", "estorno de compra")
+  // can announce money really credited and is left to the other guards.
+  /(?<!\p{L})(?:extornad[oa]|estornad[oa]|reversad[oa]|devuelt[oa]|devolvid[oa]|sin\s+[ée]xito|sem\s+sucesso|fallid[oa]|fall[óo]|procesando|processando|n[ãa]o\s+processad[oa]|en\s+tr[áa]mite|desfeit[oa]|contestad[oa]|suspendid[oa]|suspens[oa]|no\s+se\s+pudo)(?!\p{L})/iu,
+];
+
 /** Temporary holds/charges are never a completed movement. */
 const TEMPORARY_HOLD = /\btemporary\s+(?:authori[sz]ation|hold|charge|debit|block)\b|\bhold\s+amount\b/iu;
 /**
@@ -434,9 +459,23 @@ const registeredAlphaSender = (sender: string | undefined): boolean => {
 export const hasLinkFromUnregisteredSender = (source: string, sender?: string): boolean =>
   LINK_RE.test(source) && !registeredAlphaSender(sender);
 
-export const hasNonCompletedWording = (source: string): boolean =>
+/** `market` (an ISO country or routed market) adds that region's own wording. */
+export const hasNonCompletedWording = (source: string, market?: string | null): boolean =>
   nonPostingReason(source) !== null || NON_COMPLETED_WORDING.some((pattern) => pattern.test(source)) ||
+  (!!market && LATAM_MARKETS.has(market) && LATAM_NON_COMPLETED_WORDING.some((pattern) => pattern.test(source))) ||
   TEMPORARY_HOLD.test(source) || (AUTHORISATION.test(source) && !COMPLETED.test(source));
+
+/** Whether an alert is Latin American by route, by the person's country, or by its money. */
+const latamScope = (input: BestEffortInput): string | null => {
+  if (input.routedMarket && LATAM_MARKETS.has(input.routedMarket)) return input.routedMarket;
+  if (input.country && LATAM_MARKETS.has(input.country)) return input.country;
+  // Only a RESOLVED currency counts: a bare "$" lists COP and MXN among its
+  // alternatives in every market, and must not make a US alert Latin American.
+  const currency = input.event?.amount?.value?.currency;
+  return currency && LATAM_CURRENCIES.has(currency)
+    ? ({ BRL: 'BR', COP: 'CO', MXN: 'MX', PEN: 'PE' } as Record<string, string>)[currency]
+    : null;
+};
 
 const localIsoDay = (epochMs: number | undefined): string | null => {
   if (epochMs === undefined || !Number.isFinite(epochMs)) return null;
@@ -538,6 +577,25 @@ const resolvePrincipalMoney = (
 };
 
 /**
+ * AMOUNT SHAPE MAY ONLY BLOCK. Mexican pesos print `1,234.56`; a dot used for
+ * grouping (`$45.000`) or a comma decimal (`$1.234,56`) in an alert read as
+ * MXN is the Colombian shape and goes to Review rather than becoming 45 or
+ * 45,000 MXN. A Colombian card purchase under 50 pesos is almost certainly a
+ * mangled `45.000`. Neither rule can route or change an amount.
+ */
+const amountShapeConflict = (
+  source: string,
+  event: UniversalBankEvent,
+  principal: UniversalMoney,
+): boolean => {
+  const span = event.amount.spans.length === 1 ? event.amount.spans[0] : null;
+  const figure = span ? source.slice(span.start, span.end).match(/\d[\d.,]*\d|\d/u)?.[0] ?? '' : '';
+  if (principal.currency === 'MXN' && (/\d\.\d{3}(?!\d)/u.test(figure) || /,\d{2}$/u.test(figure))) return true;
+  return principal.currency === 'COP' && event.family === 'purchase' && principal.exponent === 2 &&
+    /^\d+$/.test(principal.minorUnits) && BigInt(principal.minorUnits) < 5000n;
+};
+
+/**
  * Exactly one principal figure. Balance/limit/due observations are separate
  * roles and allowed; a second transaction figure or an unlabelled one is not,
  * except a figure in the ledger currency beside a foreign charge (the card's
@@ -589,7 +647,8 @@ export function decideBestEffortAutoPost(input: BestEffortInput): BestEffortDeci
   if (!event || event.version !== 1 || event.decision !== 'review' || event.status !== 'posted') {
     return review('not-posted');
   }
-  if (typeof input.source !== 'string' || hasNonCompletedWording(input.source) || isNotAutoPostableMoney(input.source)) {
+  if (typeof input.source !== 'string' || hasNonCompletedWording(input.source, latamScope(input)) ||
+    isNotAutoPostableMoney(input.source)) {
     return review('non-posting-wording');
   }
   if (hasLinkFromUnregisteredSender(input.source, input.sender)) return review('non-posting-wording');
@@ -603,6 +662,7 @@ export function decideBestEffortAutoPost(input: BestEffortInput): BestEffortDeci
 
   const principal = resolvePrincipalMoney(input.source, event, input.country, input.routedMarket);
   if (typeof principal === 'string') return review(principal);
+  if (amountShapeConflict(input.source, event, principal)) return review('amount-unclear');
   if (hasCompetingAmounts(event, principal, input.ledgerCurrency)) return review('competing-amounts');
 
   const observedDay = localIsoDay(input.observedAt);

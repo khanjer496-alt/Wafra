@@ -19,6 +19,7 @@ import type { CategoryId } from '@/lib/types';
 import { CURRENCY_SYMBOL_CANDIDATES, currencyMinorUnits } from '@/lib/currency-metadata';
 import { decideGulfNeighbourPosting, gulfNeighbourReadSource, isGulfNeighbourMarket } from '@/lib/gulf-neighbour-alerts';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
+import { isLatamOwnCardPayment, latamOwnTransferTitle, latamPolicySource, matchLatamTemplate } from '@/lib/latam-alert-templates';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { FxQuote } from '@/lib/fx';
 import { cachedReferenceQuote, convertForeignConfirmation, quoteFitsDay } from '@/lib/fx-rates';
@@ -31,7 +32,9 @@ type CurrencyAliasMap = NonNullable<UniversalParseContext['currencyAliases']>;
 // "QR" counts only beside a two-decimal figure (never "Scan QR 3 times" or
 // "QR 123456"), and a dinar only with its country: a bare دينار is shared by
 // several countries and is everyday speech.
-export const REVIEW_MONEY_HINT = /\b(?:USD|GBP|EUR|INR|QAR|KWD|BHD|OMR|EGP|JOD|CAD|AUD|BRL|MXN|SGD|Rs\.?|KD|BD|RO|R\.O\.|LE|L\.E\.|JD)\b|\bQR\s{0,3}\d{1,3}(?:,\d{3})*\.\d{2}(?!\d)|(?<![\d.,])\d{1,3}(?:,\d{3})*\.\d{2}\s{0,3}QR\b|[$€£₹]|ر\.ق|د\.ك|د\.ب|ر\.ع|ج\.م|د\.[أا]|دينار\s+(?:كويتي|بحريني)|ريال\s+(?:قطري|عماني)/iu;
+// Peru's "S/" never counts after a letter, digit, slash or dot, so a short
+// link path ("go.example/s/9Kx") does not read as soles.
+export const REVIEW_MONEY_HINT = /\b(?:USD|GBP|EUR|INR|QAR|KWD|BHD|OMR|EGP|JOD|CAD|AUD|BRL|MXN|SGD|Rs\.?|KD|BD|RO|R\.O\.|LE|L\.E\.|JD)\b|\bQR\s{0,3}\d{1,3}(?:,\d{3})*\.\d{2}(?!\d)|(?<![\d.,])\d{1,3}(?:,\d{3})*\.\d{2}\s{0,3}QR\b|\b(?:COP|PEN)\s?\d|(?<![\p{L}\p{N}/.])S\/\.?\s?\d|[$€£₹]|ر\.ق|د\.ك|د\.ب|ر\.ع|ج\.م|د\.[أا]|دينار\s+(?:كويتي|بحريني)|ريال\s+(?:قطري|عماني)/iu;
 // A code glued to its figure ("Amount:100SR", STC Bank) has no word boundary
 // before it; the digit lookbehind admits it. Still a superset gate only.
 const LAUNCH_MONEY_HINT = /(?:\b|(?<=\d))(?:AED|Dhs?\.?|SAR|SR)\b|د\.?[إا]\.?|دراهم|درهم|ر\.?\s?س\.?|ريال/iu;
@@ -73,7 +76,10 @@ const UNIVERSAL_FIELD_LIST_HINT =
 const shouldTryUniversalPosting = (source: string, sender: string): boolean =>
   hasUniversalInstitutionSender(sender) ||
   UNIVERSAL_POSTED_EVENT_HINT.test(source) ||
-  (!!detectLaunchMarketFromSender(sender) && UNIVERSAL_FIELD_LIST_HINT.test(source));
+  (!!detectLaunchMarketFromSender(sender) && UNIVERSAL_FIELD_LIST_HINT.test(source)) ||
+  // An exact Latin American bank template ("Te yapeó S/ 20", "DAVIVIENDA:
+  // Compra . Aprobado(a)") carries none of the generic posting verbs.
+  matchLatamTemplate(source, { sender }) !== null;
 
 // Review eligibility needs financial-alert context, not merely a currency in
 // a personal conversation. None of these words grants automatic import.
@@ -97,7 +103,8 @@ export const inspectGenericBankEventForReview = (
   sender = '',
   market?: string | null,
 ): UniversalBankEvent | null => {
-  if (!hasGenericBankAlertContext(source, sender)) return null;
+  // An exact LatAm bank template is bank-alert context in its own right.
+  if (!hasGenericBankAlertContext(source, sender) && !matchLatamTemplate(source, { sender })) return null;
   const event = isGulfNeighbourMarket(market)
     ? inspectUniversalBankEvent(gulfNeighbourReadSource(source, market), {
         sender, market, dateOrder: dateOrderForCountry(market) ?? undefined,
@@ -237,7 +244,10 @@ const universalCardObligation = (
   observedAt?: number,
 ): Omit<ParsedSms, 'raw' | 'bestEffort'> | null => {
   if (event.decision !== 'review' || nonPostingReason(source) || isNotAutoPostableMoney(source)) return null;
-  if (NOT_CARD_OBLIGATION.test(source) || !CREDIT_CARD_WORDS.test(source)) return null;
+  // An exact Latin American own card-bill template ("Pagaste ... en la tarjeta
+  // de credito *4321 desde la cuenta *1234") names the paid card in Spanish.
+  const latamCardPayment = event.family === 'card-payment' && isLatamOwnCardPayment(source);
+  if (NOT_CARD_OBLIGATION.test(source) || (!CREDIT_CARD_WORDS.test(source) && !latamCardPayment)) return null;
   const today = localIsoDay(observedAt);
   if (event.status === 'failed' || event.issues.some((issue) =>
     issue === 'authentication-not-posting' || issue === 'pending-not-posting' || issue === 'failed-not-posting')) return null;
@@ -275,7 +285,7 @@ const universalCardObligation = (
     (event.direction === 'credit' || event.direction === 'debit')) {
     // The same completed-money guard every other worldwide posting passes:
     // reversed, processing, scheduled or auto-debit-later payments are not paid.
-    if (hasNonCompletedWording(source)) return null;
+    if (hasNonCompletedWording(source, country)) return null;
     const amount = ledgerMinorOf(event.amount, country, ledgerCurrency, ledgerExponent);
     if (!amount) return null;
     const date = event.transactionDate.evidence === 'explicit' ? event.transactionDate.value : null;
@@ -495,8 +505,11 @@ const parseUniversalPostedEvent = (
   });
   if (neighbour.outcome === 'post') return neighbour.parsed;
   if (neighbour.outcome === 'review') return null;
+  // Yape's payee-side receipt check is not an OTP, and is never kept: the
+  // wording guard and the stored excerpt see the message without it.
+  const policySource = latamPolicySource(readSource, { sender });
   const decision = decideBestEffortAutoPost({
-    source: readSource,
+    source: policySource,
     sender,
     event,
     enabled: context.enabled,
@@ -519,8 +532,11 @@ const parseUniversalPostedEvent = (
   // Transfer ownership is a separate reconciliation question: keep the
   // structural title so a recipient name cannot turn it into spending.
   const classified = universalRowCategory(source, event, context.overrides ?? {}, context.routedMarket ?? context.country);
+  // A LatAm card-bill payment or own-account move keeps the app's own title
+  // for it ("Card payment", "Own account transfer"), never a payee's.
+  const ownTitle = transfer ? latamOwnTransferTitle(policySource, { sender }) : null;
   const merchant = transfer
-    ? classified.category === 'salary' ? 'Salary' : event.direction === 'credit' ? 'Incoming transfer' : 'Outgoing transfer'
+    ? ownTitle ?? (classified.category === 'salary' ? 'Salary' : event.direction === 'credit' ? 'Incoming transfer' : 'Outgoing transfer')
     : classified.merchant
       ? classified.merchant
       : event.family === 'cash-withdrawal'
@@ -552,7 +568,7 @@ const parseUniversalPostedEvent = (
     snapshotKind: null,
     categoryGuess,
     categoryDeliberate: classified.deliberate,
-    raw: source.trim(),
+    raw: (readSource === source ? policySource : source).trim(),
   };
 };
 
@@ -728,7 +744,8 @@ export const createLaunchAlertSession = ({
     // create a valid ledger row. Bank context is still consumed by the review
     // pipeline after this function returns null. The person's own country
     // may supply money a bare "R" or a currency-less UPI alert states.
-    if (!hasBankAlertMoneyHint(source) && !countryMoneyHint(source, bestEffort.country)) return null;
+    if (!hasBankAlertMoneyHint(source) && !countryMoneyHint(source, bestEffort.country) &&
+      !matchLatamTemplate(source, { sender })) return null;
     if (!shouldTryUniversalPosting(source, sender)) return null;
     /**
      * ONE PUBLIC PARSER, WITH A MATURE LOCAL EVIDENCE PACK.
@@ -795,7 +812,10 @@ export const createLaunchAlertSession = ({
     // this path (it is no launch-bank sender) and must not post as an
     // "unverified format" either.
     if (isBnplProviderSource(sender)) return null;
-    if (!hasBankAlertMoneyHint(source) && !countryMoneyHint(source, bestEffort.country)) return null;
+    // Nu Colombia's transfer-in prints a bare amount; only its exact template
+    // (with Nu Colombia identity) makes that money.
+    if (!hasBankAlertMoneyHint(source) && !countryMoneyHint(source, bestEffort.country) &&
+      !matchLatamTemplate(source, { sender })) return null;
     if (!shouldTryUniversalPosting(source, sender)) return null;
     const routedMarket = inspection?.route.decision === 'single' ? inspection.route.market : null;
     // Same rule as parse(): see sharedSenderOutsideGulf.

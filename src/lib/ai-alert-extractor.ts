@@ -291,7 +291,7 @@ export function gateAiAlert(
   }
   if (prediction.status !== 'completed' || prediction.family === 'non-posting') return refuse('not-completed');
   if (!(prediction.statusP >= thresholds.prefillStatus)) return refuse('low-confidence');
-  if (hasNonCompletedWording(source)) return refuse('non-posting-wording');
+  if (hasNonCompletedWording(source, ctx.routedMarket ?? ctx.country)) return refuse('non-posting-wording');
   const universal = inspectUniversalBankEvent(source, { sender: ctx.sender, dateOrder: ctx.dateOrder });
   if (universal.issues.some((issue) => NON_POSTING_ISSUES.has(issue)) ||
     universal.family === 'authentication' || universal.status === 'failed' || universal.status === 'future') {
