@@ -89,7 +89,7 @@ const GRAMMAR_MARKERS: Partial<Record<DetectedMarket, RegExp>> = {
 // on its own; it only backs a Colombian or Mexican domestic rail.
 const UNIQUE_SYMBOL_MARKETS: readonly { pattern: RegExp; market: DetectedMarket }[] = [
   { pattern: /R\$\s?\d/u, market: 'BR' },
-  { pattern: /(?<![\p{L}\p{N}])S\/\.?\s?\d/u, market: 'PE' },
+  { pattern: /(?<![\p{L}\p{N}/.])S\/\.?\s?\d/u, market: 'PE' },
 ];
 const BARE_DOLLAR = /(?<![\p{L}$])\$\s?\d/u;
 // Colombia's PSE rail counts only with Colombian context: a COP figure, a

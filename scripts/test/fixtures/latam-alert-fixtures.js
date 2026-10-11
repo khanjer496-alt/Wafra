@@ -1,10 +1,10 @@
 /**
- * Brazil, Colombia, Mexico and Peru alert fixtures (SPEC §6, rows 1-88).
+ * Brazil, Colombia, Mexico and Peru alert fixtures (SPEC §6, rows 1-88; review rows 89-92).
  *
  * Every body is written in Wafra's own words around the abstracted template
  * shapes described in docs/universal-parser-rollout.md. Names, merchants,
  * amounts, dates, footers and card digits are invented; a posting row shares
- * only its bank's fixed template skeleton (the words the parser must match)
+ * only the fixed template wording (the words the parser must match)
  * with any public description, and uses the template's alternative word order
  * or optional clauses where it has them. No row reproduces bank, open-source
  * or corpus message text (checked by an n-gram similarity scan against the
@@ -387,4 +387,86 @@ module.exports = Object.freeze([
   never(90, 'br-pix-em-analise-comma', 'BR', 'Pix enviado: R$ 72,00, em análise', 'pending'),
   never(90, 'pe-transfer-en-analisis', 'PE', 'Transferencia enviada por S/ 140.00 a VALERIA PALACIOS, en análisis', 'pending'),
   never(90, 'co-transfer-en-proceso', 'CO', 'Bancolombia: transferencia de $95.000 a la cuenta *8841 en proceso', 'pending'),
+
+  // ── Abbreviations inside free text ("STA.", "CRA.", "S.A.", "AV.", "SR.",
+  // "Ma.", "depto.") are part of the merchant or name, not a sentence break.
+  post(91, 'co-bancolombia-purchase-sta', 'CO',
+    'Bancolombia: Compraste $52.700 en FRUVER STA. TERESA con tu T.Deb *4418, el 03/10/2026 a las 18:12.',
+    { type: 'expense', family: 'purchase', direction: 'debit', minor: 5270000, transfer: false, merchant: 'FRUVER STA. TERESA', last4: '4418', date: '2026-10-03' },
+    SYN('bancolombia', 'co-bancolombia-card-purchase-v1')),
+  post(91, 'co-bancolombia-purchase-sa', 'CO',
+    'Bancolombia: Compraste $119.900 en DISTRIBUIDORA ANDINA S.A. con tu T.Cred *4418, el 04/10/2026 a las 12:40.',
+    { type: 'expense', family: 'purchase', direction: 'debit', minor: 11990000, transfer: false, merchant: 'DISTRIBUIDORA ANDINA S.A.', last4: '4418', date: '2026-10-04' },
+    SYN('bancolombia', 'co-bancolombia-card-purchase-v1')),
+  post(91, 'co-bancolombia-atm-cra', 'CO',
+    'Bancolombia: Retiraste $200.000 en CAJERO CRA. 43 de tu T.Deb *4418 el 05/10/2026 a las 07:15.',
+    { type: 'expense', family: 'cash-withdrawal', direction: 'debit', minor: 20000000, transfer: false, last4: '4418', date: '2026-10-05', category: 'cash-withdrawal' },
+    SYN('bancolombia', 'co-bancolombia-atm-v1')),
+  post(91, 'co-nequi-payment-cra', 'CO', 'Nequi: Pagaste $18.500 a PANADERIA CRA. 70 con Nequi',
+    { type: 'expense', family: 'purchase', direction: 'debit', minor: 1850000, transfer: false, merchant: 'PANADERIA CRA. 70' },
+    SYN('nequi', 'co-nequi-payment-v1', 'push')),
+  post(91, 'co-davivienda-purchase-av', 'CO',
+    'DAVIVIENDA: Compra . Aprobado(a), $27.900, Tarjeta *4418, Hora 13:05, Lugar FERRETERIA AV. BOYACA .',
+    { type: 'expense', family: 'purchase', direction: 'debit', minor: 2790000, transfer: false, merchant: 'FERRETERIA AV. BOYACA', last4: '4418', date: null },
+    SYN('davivienda', 'co-davivienda-purchase-v1')),
+  post(91, 'pe-bcp-consumo-av', 'PE',
+    'BCP: Realizaste un consumo de S/ 42.90 en CAFETERIA AV. AREQUIPA con tu tarjeta ****2290',
+    { type: 'expense', family: 'purchase', direction: 'debit', minor: 4290, transfer: false, merchant: 'CAFETERIA AV. AREQUIPA', last4: '2290' },
+    SYN('bcp', 'pe-bcp-consumo-v1')),
+  post(91, 'pe-yape-sent-ma', 'PE', 'Yapeaste S/ 15.50 a Ma. Rosario Quispe',
+    { type: 'expense', family: 'transfer', direction: 'debit', minor: 1550, transfer: true },
+    SYN('yape', 'pe-yape-sent-v1', 'push')),
+  post(91, 'mx-bbva-transfer-out-depto', 'MX', 'BBVA México: Transferencia enviada por $1,850.00 a ADRIANA VEGA concepto Renta depto. 4B',
+    { type: 'expense', family: 'transfer', direction: 'debit', minor: 185000, transfer: true },
+    SYN('bbva-mexico', 'mx-bbva-transfer-out-v1', 'push'), 'BBVA MEXICO'),
+  post(91, 'br-nubank-pix-out-initial', 'BR', 'Nubank: Você enviou R$ 87,00 para RAQUEL M. DUARTE via Pix.',
+    { type: 'expense', family: 'transfer', direction: 'debit', minor: 8700, transfer: true },
+    SYN('nubank-brasil', 'br-nubank-pix-out-v1', 'push')),
+  post(91, 'br-itau-purchase-drog', 'BR', 'Itaú: Compra aprovada no cartão final 2290 valor R$ 46,30 na DROG. SAO BENTO',
+    { type: 'expense', family: 'purchase', direction: 'debit', minor: 4630, transfer: false, merchant: 'DROG. SAO BENTO', last4: '2290' },
+    SYN('itau-brasil', 'br-itau-card-purchase-v2')),
+  post(91, 'br-itau-pix-out-sr', 'BR', 'Itaú: Pix de R$ 120,00 realizado para SR. ANTONIO PRADO',
+    { type: 'expense', family: 'transfer', direction: 'debit', minor: 12000, transfer: true },
+    SYN('itau-brasil', 'br-itau-pix-out-v1')),
+  // The same abbreviations followed by a sentence that vetoes the movement:
+  // the text after the break is never blanked, so the guards see it.
+  never(91, 'co-bancolombia-sta-then-reversal', 'CO',
+    'Bancolombia: Compraste $52.700 en FRUVER STA. TERESA. Compra reversada con tu T.Deb *4418, el 03/10/2026 a las 18:12.', 'veto-after-abbreviation'),
+  never(91, 'co-bancolombia-sa-then-declined', 'CO',
+    'Bancolombia: Compraste $119.900 en DISTRIBUIDORA ANDINA S.A. Pago rechazado con tu T.Cred *4418, el 04/10/2026 a las 12:40.', 'veto-after-abbreviation'),
+  never(91, 'co-bancolombia-cra-then-failed', 'CO',
+    'Bancolombia: Retiraste $200.000 en CAJERO CRA. 43. Retiro fallido de tu T.Deb *4418 el 05/10/2026 a las 07:15.', 'veto-after-abbreviation'),
+  never(91, 'co-nequi-cra-then-pending', 'CO', 'Nequi: Pagaste $18.500 a PANADERIA CRA. 70. Pago pendiente con Nequi', 'veto-after-abbreviation'),
+  never(91, 'co-davivienda-av-then-annulled', 'CO',
+    'DAVIVIENDA: Compra . Aprobado(a), $27.900, Tarjeta *4418, Hora 13:05, Lugar FERRETERIA AV. BOYACA. Compra anulada .', 'veto-after-abbreviation'),
+  never(91, 'pe-bcp-av-then-reversal', 'PE',
+    'BCP: Realizaste un consumo de S/ 42.90 en CAFETERIA AV. AREQUIPA. Consumo extornado con tu tarjeta ****2290', 'veto-after-abbreviation'),
+  never(91, 'pe-yape-ma-then-not-done', 'PE', 'Yapeaste S/ 15.50 a Ma. Rosario. Operacion no realizada', 'veto-after-abbreviation'),
+  never(91, 'mx-bbva-depto-then-declined', 'MX',
+    'BBVA México: Transferencia enviada por $1,850.00 a ADRIANA VEGA concepto Renta depto. Operacion rechazada', 'veto-after-abbreviation', 'BBVA MEXICO'),
+  never(91, 'br-nubank-initial-then-cancelled', 'BR',
+    'Nubank: Você enviou R$ 87,00 para RAQUEL M. Envio cancelado via Pix.', 'veto-after-abbreviation'),
+  never(91, 'br-itau-drog-then-estorno', 'BR',
+    'Itaú: Compra aprovada no cartão final 2290 valor R$ 46,30 na DROG. SAO BENTO. Compra estornada', 'veto-after-abbreviation'),
+  never(91, 'br-itau-sr-then-returned', 'BR', 'Itaú: Pix de R$ 120,00 realizado para SR. ANTONIO. Pix devolvido', 'veto-after-abbreviation'),
+
+  // ── Failed, returned, disputed or still-processing wording right after the
+  // free text, or in a template's footer, is never a completed movement.
+  ...['processando', 'não processada', 'sem sucesso', 'devolvida', 'desfeita', 'contestada', 'suspensa', 'erro',
+    'refunded', 'reverted', 'pending', 'failed', 'voided', '(pending)', 'inválida', 'em aberto'].map((tail) =>
+    never(92, `br-itau-not-completed-${tail.replace(/\W+/gu, '-')}`, 'BR',
+      `Itaú: Compra aprovada no cartão final 2290 valor R$ 46,30 no ARMAZEM DO PORTO ${tail}`, 'not-completed')),
+  ...['procesando', 'devuelta', 'sin exito', 'fallo', 'suspendida', 'en tramite', 'error'].map((tail) =>
+    never(92, `co-davivienda-not-completed-${tail.replace(/\W+/gu, '-')}`, 'CO',
+      `DAVIVIENDA: Compra . Aprobado(a), $27.900, Tarjeta *4418, Hora 13:05, Lugar MISCELANEA EL ROBLE ${tail} .`, 'not-completed')),
+  never(92, 'mx-bbva-transfer-returned', 'MX', 'BBVA México: Transferencia enviada por $1,850.00 a ADRIANA VEGA devuelta', 'not-completed', 'BBVA MEXICO'),
+  never(92, 'mx-bbva-transfer-could-not', 'MX',
+    'BBVA México: Transferencia enviada por $1,850.00 a ADRIANA VEGA, no se pudo completar', 'not-completed', 'BBVA MEXICO'),
+  never(92, 'br-nubank-pix-returned', 'BR', 'Nubank: Você enviou R$ 87,00 para RAQUEL DUARTE devolvido via Pix.', 'not-completed'),
+  never(92, 'br-nubank-pix-processing', 'BR', 'Nubank: Você enviou R$ 87,00 para RAQUEL DUARTE (processando) via Pix.', 'not-completed'),
+  never(92, 'pe-yape-sent-unsuccessful', 'PE', 'Yapeaste S/ 15.50 a ROSARIO QUISPE sin exito', 'not-completed'),
+  never(92, 'pe-yape-sent-returned', 'PE', 'Yapeaste S/ 15.50 a ROSARIO QUISPE devuelto', 'not-completed'),
+  ...['Transaction failed', 'Pending', 'Transaccion fallo', 'Compra devuelta', 'Refunded', 'Compra sin exito', 'Compra en tramite'].map((footer) =>
+    never(92, `co-bancolombia-footer-${footer.replace(/\W+/gu, '-').toLowerCase()}`, 'CO',
+      `Bancolombia: Compraste $52.700 en MISCELANEA EL ROBLE con tu T.Deb *4418, el 03/10/2026 a las 18:12. ${footer}`, 'not-completed')),
 ]);

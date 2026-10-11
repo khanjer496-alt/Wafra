@@ -1,5 +1,7 @@
 import { inspectAlertInstitutionGrammar } from '@/lib/alert-institution-grammars';
 import type { UniversalMarket } from '@/lib/alert-market-pack-types';
+import { hasNonCompletedWording } from '@/lib/best-effort-autopost';
+import { nonPostingReason } from '@/lib/sms-parser';
 import type {
   UniversalBankEvent,
   UniversalField,
@@ -25,9 +27,12 @@ import { missingUniversalField } from '@/lib/universal-types';
  *    confirmation ("confirme", "responda"), pending/hold/scheduled wording,
  *    a decline, a code/OTP/token, a loan, an offer or a promotion, or a link;
  *  - the captured merchant/name text itself carries no negation phrase,
- *    reversal, confirmation, pending/scheduled wording or code (a hit sends
- *    the alert to Review rather than being blanked), and no capture runs
- *    across a sentence boundary into the next sentence.
+ *    reversal, return, failure, dispute, processing, confirmation,
+ *    pending/scheduled wording or code (a hit sends the alert to Review
+ *    rather than being blanked), and the outside scan blanks a capture only
+ *    up to its first sentence break (". "): an abbreviation ("STA. LUCIA",
+ *    "SR. PEDRO") still matches, while anything after that break stays
+ *    visible to the outside scan.
  *
  * Templates whose own verb states completion ("Compraste", "Você enviou",
  * "Retiraste") are `mode: 'posted'` and pass through the same guards.
@@ -39,7 +44,7 @@ import { missingUniversalField } from '@/lib/universal-types';
  * goes through the best-effort policy (SMS) or template certification
  * (notifications), the import planner's duplicate guard and the ledger
  * currency gate. Every wording is Wafra's own abstraction of public
- * descriptions; no bank or open-source message text is copied.
+ * descriptions and shares only the fixed template wording with them.
  */
 
 export type LatamMarket = Extract<UniversalMarket, 'BR' | 'CO' | 'MX' | 'PE'>;
@@ -75,12 +80,16 @@ interface LatamTemplate {
   receiptCode?: true;
 }
 
-// Free text (a merchant, a name, a place, a concept) never crosses a sentence
-// boundary: no `!`, `?`, `¡`, `¿` or line break, and a dot only when a
-// non-space follows it ("LIVRARIA.COM.BR", "S.A.S"). Otherwise "MERCADO SOL.
-// Compra estornada" would be read as the merchant and its veto never seen.
+// Free text (a merchant, a name, a place, a concept) holds no `!`, `?`, `¡`,
+// `¿` or line break. A dot may appear anywhere, including before a space:
+// real merchants and names abbreviate ("SUPERMERCADO STA. LUCIA", "EXITO
+// S.A.", "CAJERO CRA. 7", "SR. PEDRO", "Ma. Elena", "depto. 3"). What keeps
+// "MERCADO SOL. Compra estornada" from hiding its second sentence is the
+// guard side, not the grammar: a capture is blanked only up to its first
+// sentence break (see `blankableSpan`), and the whole capture is also scanned
+// by `captureVetoed`.
 const freeText = (group: string, max: number): string =>
-  String.raw`(?<${group}>[^\s.!?¡¿](?:[^.!?¡¿\n\r\u2028\u2029]|\.(?!\s|$)){0,${max}}?)`;
+  String.raw`(?<${group}>[^\s.!?¡¿][^!?¡¿\n\r\u2028\u2029]{0,${max}}?)`;
 
 // Template grammar tokens. A literal space means one or more whitespace
 // characters and `~` means optional whitespace, so line-wrapped notifications
@@ -356,7 +365,12 @@ const QR_CHANNEL = /c[óo]digo\s+QR/giu;
 // of a name), and refund or return wording that cannot belong to a payee of
 // a purchase or transfer.
 const CAPTURE_NEGATION = /(?<![\p{L}])(?:no|n[ãa]o)\s+(?:fue\s+|foi\s+)?(?:realizad|aprobad|aprovad|autorizad|procesad|efetuad|efectuad|conclu|exitos|reconoc|reconhec|completad)/iu;
-const CAPTURE_REFUND = /estorn|reembols|devolu[cç]/iu;
+const CAPTURE_REFUND = /estorn|extorn|reembols|devolu[cç]/iu;
+// Failed, returned, disputed, suspended or still-processing wording. Checked
+// both outside and inside the captured text: none of it can describe a
+// completed movement, and a payee whose name happens to contain it ("CANCELA
+// SHOES") goes to Review, which is the safe direction.
+const NOT_COMPLETED = /proces?s(?:ad|and)|devol|devuel|fall[oó]|sin\s+[eé]xito|sem\s+sucesso|tr[aá]mite|no\s+se\s+pudo|suspen|contestad|desfeit|extorn|(?<![\p{L}])erro(?:r)?(?![\p{L}])|fail|pending|refund|revert|(?<![\p{L}])void|inv[aá]lid|em\s+aberto/iu;
 
 const FREE_TEXT_GROUPS: ReadonlySet<string> = new Set(
   ['merchant', 'name', 'payee', 'key', 'place', 'concept', 'from', 'to', 'brand', 'product']);
@@ -365,7 +379,7 @@ const FREE_TEXT_GROUPS: ReadonlySet<string> = new Set(
 const captureVetoed = (value: string): boolean => {
   const text = value.replace(QR_CHANNEL, ' ');
   return NEGATION.test(text) || CAPTURE_NEGATION.test(text) || CAPTURE_REFUND.test(text) ||
-    CONFIRMATION.test(text) || PENDING_OR_HOLD.test(text) || CODE_OR_OTP.test(text);
+    NOT_COMPLETED.test(text) || CONFIRMATION.test(text) || PENDING_OR_HOLD.test(text) || CODE_OR_OTP.test(text);
 };
 
 export interface LatamTemplateMatch {
@@ -508,6 +522,19 @@ const freeTextSpans = (source: string, match: IndexedMatch, useIndices: boolean)
   return spans;
 };
 
+/**
+ * The part of a captured span the outside scan may blank: up to and including
+ * the capture's first sentence break (a dot followed by whitespace). In
+ * "FRUVER STA. TERESA" only "FRUVER STA." is blanked and "TERESA" is scanned
+ * as ordinary message text, so a capture can never carry a second sentence
+ * ("... SOL. Compra estornada") past the guards.
+ */
+const SENTENCE_BREAK = /\.\s/u;
+const blankableSpan = (source: string, [start, end]: [number, number]): [number, number] => {
+  const at = source.slice(start, end).search(SENTENCE_BREAK);
+  return at < 0 ? [start, end] : [start, start + at + 1];
+};
+
 const blankSpans = (text: string, spans: readonly [number, number][]): string => {
   let out = text;
   for (const [start, end] of spans) out = out.slice(0, start) + ' '.repeat(end - start) + out.slice(end);
@@ -517,7 +544,7 @@ const blankSpans = (text: string, spans: readonly [number, number][]): string =>
 const guardsPass = (guardText: string, market: LatamMarket): boolean => {
   const text = guardText.replace(QR_CHANNEL, ' ').replace(HELP_QUESTION, ' ');
   return !NEGATION.test(text) && !(market === 'BR' ? NEGATION_PT : NEGATION_ES).test(text) &&
-    !CONFIRMATION.test(text) && !PENDING_OR_HOLD.test(text) &&
+    !NOT_COMPLETED.test(text) && !CONFIRMATION.test(text) && !PENDING_OR_HOLD.test(text) &&
     !CODE_OR_OTP.test(text) && !OFFER_OR_LOAN.test(text) && !LINK.test(text);
 };
 
@@ -577,7 +604,7 @@ function matchTemplates(
     const spans = freeTextSpans(source, match, useIndices);
     const guardText = blankSpans(template.receiptCode && groups.codeClause
       ? source.replace(groups.codeClause, ' '.repeat(groups.codeClause.length))
-      : source, spans);
+      : source, spans.map((span) => blankableSpan(source, span)));
     const last4 = groups.last4 && /^\d{4}$/.test(groups.last4) ? groups.last4 : null;
     onGuardText?.(guardText);
     const guarded = guardsPass(guardText, template.market);
@@ -723,6 +750,11 @@ export function certifiedLatamTemplateId(
   const match = matchLatamTemplate(source, { market, institution });
   if (!match || match.status !== 'posted' || match.institution !== institution ||
     match.family !== event.family || match.direction !== event.direction) return null;
+  // The same completed-money guard the SMS path applies through the
+  // best-effort policy, on the same text (Yape's receipt check removed):
+  // wording only that shared guard knows ("processing", "in progress",
+  // "chargeback") must not certify here either.
+  if (nonPostingReason(source) !== null || hasNonCompletedWording(match.policySource, market)) return null;
   return match.templateId;
 }
 
@@ -745,7 +777,7 @@ const REVIEW_ONLY_IDENTITIES: readonly {
   {
     market: 'PE',
     institutions: ['plin', 'interbank', 'bbva-peru', 'scotiabank-peru'],
-    context: /(?<![\p{L}\p{N}])S\/\.?\s?\d|\bPEN\s?\d|\d\s?PEN\b|\bper[uú](?![\p{L}])/iu,
+    context: /(?<![\p{L}\p{N}/.])S\/\.?\s?\d|\bPEN\s?\d|\d\s?PEN\b|\bper[uú](?![\p{L}])/iu,
   },
   { market: 'MX', institutions: ['santander-mexico', 'citibanamex'] },
 ];
@@ -772,6 +804,9 @@ export const __latamTemplateTesting = {
     matchTemplates(source, context, useIndices && HAS_MATCH_INDICES, (text) => { seen = text; });
     return seen;
   },
+  /** The match status by either span strategy; null when no template matches. */
+  status: (source: string, context: LatamTemplateContext = {}, useIndices = HAS_MATCH_INDICES): 'posted' | 'unknown' | null =>
+    matchTemplates(source, context, useIndices && HAS_MATCH_INDICES)?.status ?? null,
 };
 
 /** Stable ids only; for diagnostics and tests. */

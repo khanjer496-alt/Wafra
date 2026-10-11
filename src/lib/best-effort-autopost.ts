@@ -190,6 +190,11 @@ const LATAM_NON_COMPLETED_WORDING: readonly RegExp[] = [
   // Loan OFFERS only: a loan repayment ("pagamento do empréstimo") is real money.
   /(?<!\p{L})(?:empr[ée]stimo\s+foi\s+aprovado|pr[ée]-?aprovad[oa]|pr[ée]-?aprobad[oa]|cr[ée]dito\s+(?:de\s+R?\$\s?[\d.,]+\s+)?dispon[íi]vel|simul(?:ar|e)|limite\s+subiu|cupo\s+disponible|ganhe|garanta|cupom|invista|meses\s+sin\s+intereses)(?!\p{L})/iu,
   /(?<!\p{L})(?:n[ãa]o\s+(?:conclu[íi]d[oa]|aprovad[oa]|autorizad[oa]|realizad[oa])|no\s+fue\s+posible|no\s+(?:aprobad[oa]|autorizad[oa]))(?!\p{L})/iu,
+  // A movement already reversed, returned, failed, disputed, suspended or
+  // still processing ("Consumo extornado", "Pix devolvido", "en trámite").
+  // Participles only: a refund NOUN ("extorno de S/ 20", "estorno de compra")
+  // can announce money really credited and is left to the other guards.
+  /(?<!\p{L})(?:extornad[oa]|estornad[oa]|reversad[oa]|devuelt[oa]|devolvid[oa]|sin\s+[ée]xito|sem\s+sucesso|fallid[oa]|fall[óo]|procesando|processando|n[ãa]o\s+processad[oa]|en\s+tr[áa]mite|desfeit[oa]|contestad[oa]|suspendid[oa]|suspens[oa]|no\s+se\s+pudo)(?!\p{L})/iu,
 ];
 
 /** Temporary holds/charges are never a completed movement. */

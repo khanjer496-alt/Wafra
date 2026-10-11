@@ -361,6 +361,84 @@ ok('never-post categories cover OTP, declines, bills, balances, loans, promos, o
       typeof guard === 'string' && guard.startsWith('Itaú: Compra aprovada') && /no\s+$/u.test(guard) && guard.length === body.length,
       guard);
   }
+  // The ordered walk may be the shipped path (an engine without match
+  // indices), so it must reach the same DECISION, not only the same text.
+  const hook = templates.__latamTemplateTesting;
+  const bodies = fixtures.filter((row) => ['post', 'never', 'review'].includes(row.kind) && row.body).map((row) => [row.body, row.sender]);
+  const split = bodies.filter(([text, sender]) =>
+    hook.status(text, { sender }, true) !== hook.status(text, { sender }, false) ||
+    hook.guardText(text, { sender }, true) !== hook.guardText(text, { sender }, false));
+  ok(`match indices and the ordered fallback agree on status and guard text for all ${bodies.length} template fixtures`,
+    split.length === 0, split.map(([text, sender]) => ({
+      text, indices: hook.status(text, { sender }, true), fallback: hook.status(text, { sender }, false),
+    })));
+  ok('the hook reports a posted status for a posting template under both strategies',
+    hook.status(body, {}, true) === 'posted' && hook.status(body, {}, false) === 'posted',
+    [hook.status(body, {}, true), hook.status(body, {}, false)]);
+}
+
+/* ── 91 abbreviations: blanked only up to the sentence break ───────────── */
+{
+  const hook = templates.__latamTemplateTesting;
+  const abbreviated = 'Bancolombia: Compraste $52.700 en FRUVER STA. TERESA con tu T.Deb *4418, el 03/10/2026 a las 18:12.';
+  for (const useIndices of [true, false]) {
+    const guard = hook.guardText(abbreviated, {}, useIndices);
+    ok(`#91 a capture is blanked only up to its first ". "; the rest stays visible to the guards (${useIndices ? 'indices' : 'fallback'})`,
+      typeof guard === 'string' && !/FRUVER/u.test(guard) && /TERESA/u.test(guard) && guard.length === abbreviated.length, guard);
+  }
+  const bcp = smsDecision('BCP: Realizaste un consumo de S/ 42.90 en CAFETERIA AV. AREQUIPA con tu tarjeta ****2290', 'PE').parsed;
+  ok('#91 a BCP merchant with "AV." keeps its full name instead of being cut at the abbreviation',
+    bcp?.merchant === 'CAFETERIA AV. AREQUIPA', bcp && bcp.merchant);
+}
+
+/* ── 92 non-completed wording: template, SMS and certification agree ───── */
+{
+  // Wording only the shared best-effort guard knows ("processing", "in
+  // progress", "awaiting", "chargeback") leaves the template itself posted;
+  // template certification must refuse it exactly as the SMS path does.
+  for (const tail of ['processing', 'in progress', 'awaiting confirmation', 'chargeback']) {
+    const body = `Itaú: Compra aprovada no cartão final 2290 valor R$ 46,30 no ARMAZEM DO PORTO ${tail}`;
+    const event = inspectUniversalBankEvent(body, { market: 'BR' });
+    const certification = certifyUniversalTemplate({ market: 'BR', institution: 'itau-brasil', source: body, event });
+    const { parsed } = smsDecision(body, 'BR');
+    ok(`#92 "${tail}" after an Itaú merchant: no automatic certification and no SMS posting`,
+      certification.decision !== 'automatic' && parsed === null, { certification, status: event.status, parsed: parsed && parsed.amountFils });
+  }
+  const plain = 'Itaú: Compra aprovada no cartão final 2290 valor R$ 46,30 no ARMAZEM DO PORTO';
+  const plainEvent = inspectUniversalBankEvent(plain, { market: 'BR' });
+  ok('#92 the same alert without that wording still certifies automatically',
+    certifyUniversalTemplate({ market: 'BR', institution: 'itau-brasil', source: plain, event: plainEvent }).decision === 'automatic');
+  // A template whose guard fails returns no match, and the generic reading
+  // then meets the best-effort policy: its LatAm wording must refuse the same
+  // reversed/returned/failed participles, and only in LatAm scope.
+  const { hasNonCompletedWording } = require('./build/best-effort-autopost');
+  for (const tail of ['Consumo extornado', 'Compra estornada', 'Pix devolvido', 'Transferencia devuelta', 'Pago sin éxito',
+    'Operação sem sucesso', 'Compra fallida', 'Envio processando', 'Pago en trámite', 'Compra contestada', 'no se pudo completar']) {
+    const body = `Realizaste un consumo de S/ 42.90 en CAFETERIA SOL. ${tail}`;
+    ok(`#92 best-effort LatAm wording refuses "${tail}" in Peru but not in a US alert`,
+      hasNonCompletedWording(body, 'PE') && !hasNonCompletedWording(`Card purchase of $42.90 at CAFETERIA SOL. ${tail}`, 'US'));
+  }
+  ok('#92 a refund NOUN is left to the other guards ("extorno de S/ 20" can be money really credited)',
+    !hasNonCompletedWording('BCP: Recibiste un extorno de S/ 20.00 en tu cuenta ****2290', 'PE'));
+  const yape = 'RENATA ZEVALLOS te envió un pago por S/ 48. Código de seguridad: 715';
+  const yapeEvent = inspectUniversalBankEvent(yape, { market: 'PE' });
+  ok('#92 Yape\'s receipt check does not stop certification (the guard reads the policy source)',
+    certifyUniversalTemplate({ market: 'PE', institution: 'yape', source: yape, event: yapeEvent }).decision === 'automatic');
+}
+
+/* ── 93 Peru's "S/" is not a link path ───────────────────────────────── */
+{
+  const { hasBankAlertMoneyHint } = require('./build/launch-alert-parser');
+  for (const promo of ['Win a bonus of up to 2000 points, play now: qk7.example/s/9Kx2Lm',
+    'Your rank was updated this month: <URL>.s/4tz8pq', 'Data packs for your trip, see shop.example.vn/s/3days']) {
+    ok(`#93 a short-link path is no money hint: ${promo.slice(0, 40)}`, !hasBankAlertMoneyHint(promo));
+    const route = routeAlertMarket({ source: promo, sender: '' });
+    ok(`#93 ...and is not routed to Peru: ${promo.slice(0, 40)}`, route.market !== 'PE', route);
+  }
+  const capital = routeAlertMarket({ source: 'Track your parcel at go.example/S/7Qp4', sender: '' });
+  ok('#93 a capital "/S/7" link path is not routed to Peru either', capital.market !== 'PE', capital);
+  ok('#93 Peruvian soles still read as a money hint ("S/ 64.00", "s/.120")',
+    hasBankAlertMoneyHint('Pagaste S/ 64.00 en LIBRERIA SAN BLAS') && hasBankAlertMoneyHint('consumo por s/.120 con su tarjeta'));
 }
 
 /* ── LOW 4: own-card payments and own transfers ────────────────────────── */

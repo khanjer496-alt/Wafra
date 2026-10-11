@@ -110,23 +110,32 @@ per-bank templates in `src/lib/latam-alert-templates.ts` whose mode is
 
 1. the whole message matches that bank's anchored template (prefix, field
    order and terminator; only the captured merchant/name/key text varies).
-   Captured free text never crosses a sentence boundary: it holds no `!`,
-   `?`, `¡`, `¿` or line break, and a dot only when a non-space follows it
-   (`LIVRARIA.COM.BR`), so "MERCADO SOL. Compra estornada." cannot hide its
-   second sentence inside the merchant;
+   Captured free text holds no `!`, `?`, `¡`, `¿` or line break. A dot is
+   allowed anywhere, because real merchants and names abbreviate
+   (`SUPERMERCADO STA. LUCIA`, `EXITO S.A.`, `CAJERO CRA. 7`, `SR. PEDRO`).
+   The outside scan blanks a capture only up to its first sentence break
+   (`. `), so everything after it stays visible to the guards and
+   "MERCADO SOL. Compra estornada." cannot hide its second sentence inside
+   the merchant;
 2. the template captured a masked card or account (its last four digits);
 3. nothing outside the captured merchant, name, key, place and concept text
    is negation (`não`, `no`, `rechaz…`, `recus…`, `negad…`, `insuficiente`,
    `cancelad…`, `bloquead…`), a two-step confirmation or question (`confirme`,
    `confirma tu`, `responda`, `responde`, `reconoces`, `foi você`, `SIM`, `?`),
    pending, hold or scheduled wording (`pendiente`, `pendente`, `en proceso`,
-   `retenido`, `agendado`, `programado`, `será`), a code, OTP or token, a loan,
-   offer, limit or promotion (`empréstimo`, `pré-aprovado`, `cashback`,
-   `cupom`, `limite`, `cupo`, `meses sin intereses`) or a link;
+   `retenido`, `agendado`, `programado`, `será`), failed, returned, disputed,
+   suspended or still-processing wording (`procesando`, `processando`,
+   `devuelt…`, `devolvid…`, `falló`, `sin éxito`, `sem sucesso`, `en trámite`,
+   `no se pudo`, `suspen…`, `contestad…`, `desfeit…`, `extorn…`, `erro(r)`,
+   `failed`, `pending`, `refund…`, `revert…`, `void…`, `inválid…`,
+   `em aberto`), a code, OTP or token, a loan, offer, limit or promotion
+   (`empréstimo`, `pré-aprovado`, `cashback`, `cupom`, `limite`, `cupo`,
+   `meses sin intereses`) or a link;
 4. the captured merchant, name, key, place and concept text ITSELF holds no
    veto either: a negation phrase (`no realizada`, `não aprovada`), a
    decline, reversal or cancellation (`revers…`, `cancel…`, `estorn…`,
-   `reembols…`), a confirmation (`foi você`, `responda`), pending or
+   `extorn…`, `reembols…`), the failed/returned/processing wording of point 3,
+   a confirmation (`foi você`, `responda`), pending or
    scheduled wording (`pendiente`, `aguarde`, `agendamento`, `amanhã`,
    `mañana`, `em análise`) or a code. A hit there sends the alert to Review;
    it is never blanked out. Only a stand-alone `no`/`não` and offer words are
@@ -186,9 +195,13 @@ a US bank is not a Peruvian alert and keeps its US behaviour.
 The Spanish and Portuguese non-completion wording the best-effort policy
 refuses (purchase and security codes, "token", "confirme", "foi você",
 scheduled Pix, bills, loan offers, "em análise", "en análisis", "en
-proceso") applies only to an alert routed to BR/CO/MX/PE, a person in one of
-those countries, or money already resolved as BRL/COP/MXN/PEN. A US alert
-paid "with your Apple Pay token" or at a cafe called CONFIRME is unaffected.
+proceso", and reversed, returned, failed, disputed or still-processing
+participles such as "extornado", "estornada", "devuelta", "devolvido",
+"fallida", "sin éxito", "sem sucesso", "procesando", "en trámite",
+"contestada", "suspendida", "no se pudo") applies only to an alert routed
+to BR/CO/MX/PE, a person in one of those countries, or money already
+resolved as BRL/COP/MXN/PEN. A US alert paid "with your Apple Pay token"
+or at a cafe called CONFIRME is unaffected.
 
 ### Money and routing
 
@@ -257,7 +270,8 @@ against Google Play before any is added: Colombia
 market.
 
 Evidence: `scripts/test/fixtures/latam-alert-fixtures.js` (synthetic and
-community-derived rows in Wafra's own words, fictional values) and
+community-derived rows in Wafra's own words, fictional values; each shares
+only the fixed template wording with public descriptions) and
 `scripts/test/latam-alert-packs.test.js`.
 
 ## Automatic market routing
