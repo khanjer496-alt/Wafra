@@ -560,8 +560,41 @@ export interface ParsedCard {
  * can be undone. A saved UAE/Saudi EMI-conversion row would not be repaired
  * by a backfill anyway: a row the parser now refuses is kept, never deleted
  * (store.tsx preserves it), so the bump would cost a full reread for nothing.
+ *
+ * 66: PR #151 folded in (Gulf neighbours, LatAm templates, dataset fixes,
+ * scam lures), measured on every research corpus.
+ *  - UAE/Saudi grammar: an English or Arabic PURCHASE-REFUND heading ("Purchase
+ *    Refund Amount: …", "PoS Purchase Refund By:…", "استرجاع شراء …") is money
+ *    back, never new spending; "Cr.transaction" and "Cr transaction" join "Cr.
+ *    transaction" as credits; OTP/purchase-confirmation codes, available-limit
+ *    and help texts and a loyalty "Redemption Request registered … Amount
+ *    Paid" never post; "Transaction Error … issue processing" is a decline;
+ *    ADIB's three-digit masked tail names its card; a fund-transfer request
+ *    acknowledgement is not income.
+ *  - Gulf neighbours (QA, KW, BH, OM): a recognised institution's alert is read
+ *    by the launch grammar in marked best-effort mode, money only in the
+ *    market's own currency (three decimals for KWD/BHD/OMR after routing);
+ *    Bank Muscat's Arabic card purchase is a certified template. The same
+ *    smishing-link/fraud-prompt gate as every other best-effort path applies.
+ *  - Colombia, Mexico, Peru, Brazil: review-only packs plus exact certified
+ *    per-bank templates.
+ *  - Best-effort: more lure wording refused (money owed or waiting, act-first,
+ *    unconfirmed charges, order id + callback, dispute desks); a link needs a
+ *    registered sender, or a blank sender with an own-tail completed movement
+ *    and no call to action; a credit from a phone number, e-mail, generic or
+ *    BLANK sender that names no own tail waits in Review; promo footers and
+ *    merchant names no longer veto a completed own-tail alert.
+ *  - Ledger: alerts with different stated balances are never deduped;
+ *    own-account transfers pair only on balance evidence.
+ * Future captures and the bounded recent reread. PARSER_BACKFILL_VERSION
+ * stays 50: main ships 49, and 50 (owner-approved, see 64) is unreleased in
+ * this same batch, so its full reread already re-reads the saved UAE/Saudi
+ * rows whose direction #151 corrects (a "Purchase Refund" heading or a
+ * "Cr.transaction" saved as an expense). As 64 says, rows the parser now
+ * refuses (codes, limit notices, redemptions) are kept, not deleted. If #151's
+ * grammar changes ever ship apart from 50, they need their own bump.
  */
-export const PARSER_VERSION = 65;
+export const PARSER_VERSION = 66;
 /**
  * Historical-repair contract for already-saved data.
  *
