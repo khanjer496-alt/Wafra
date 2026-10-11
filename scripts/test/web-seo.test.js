@@ -86,6 +86,14 @@ ok(
     !/<strong>Private mode<\/strong>[\s\S]{0,220}Leave message access off/.test(landing),
 );
 ok(
+  'download buttons use the counted first-party paths and keep a same-origin referrer',
+  landing.includes('href={DOWNLOAD_PATHS.iphone}') && content.includes("iphone: '/get/iphone'") &&
+    // No Android download while the source repository is private.
+    !landing.includes('DOWNLOAD_PATHS.android') && !content.includes('/get/android') &&
+    !/testflight\.apple\.com|releases\/download/.test(`${landing}\n${content}`) &&
+    !landing.includes('rel="noreferrer"'),
+);
+ok(
   'the landing links to dedicated privacy, terms and support pages',
   ['/privacy/', '/terms/', '/support/'].every((route) => landing.includes(`href="${route}"`)),
 );
@@ -124,6 +132,16 @@ try {
   fs.writeFileSync(path.join(output, 'index.html'), `<html><body><h1>Wafra</h1>${runtime}</body></html>`);
   fs.writeFileSync(path.join(output, 'robots.txt'), 'User-agent: *\nAllow: /\n');
   fs.writeFileSync(path.join(output, 'settings.html'), `<meta name="robots" content="noindex, nofollow, noarchive">${runtime}`);
+  fs.mkdirSync(path.join(output, 'card'));
+  fs.writeFileSync(path.join(output, 'card', '[id].html'), runtime);
+  fs.mkdirSync(path.join(output, '_expo', 'static', 'js', 'web'), { recursive: true });
+  fs.writeFileSync(path.join(output, '_expo', 'static', 'js', 'web', 'entry-fixture.js'), 'app();');
+  fs.writeFileSync(path.join(output, '_expo', '.routes.json'), '{"redirects":[]}');
+  fs.mkdirSync(path.join(output, '_expo', 'static', 'css'), { recursive: true });
+  fs.writeFileSync(path.join(output, '_expo', 'static', 'css', 'home.css'), 'h1{color:green}');
+  fs.mkdirSync(path.join(output, 'assets', 'merchants'), { recursive: true });
+  fs.writeFileSync(path.join(output, 'assets', 'merchants', 'logo.png'), 'png');
+  fs.writeFileSync(path.join(output, 'wafra-history-import.shortcut'), 'shortcut');
   fs.mkdirSync(path.join(output, '(tabs)'));
   fs.writeFileSync(path.join(output, '(tabs)', 'index.html'), 'duplicate');
   const finalize = () => spawnSync(process.execPath, [finalizer, output], {
@@ -167,15 +185,30 @@ try {
   ok('404 has its own noindex document with a home recovery link',
     notFound.includes('That page is not here.') && notFound.includes('noindex, nofollow, noarchive') &&
     notFound.includes('href="/"') && !/<script\b/i.test(notFound));
-  ok('only root runtime and duplicate route-group HTML are removed',
-    !read('index.html').includes(runtime) && read('settings.html').includes(runtime) &&
-    !fs.existsSync(path.join(output, '(tabs)')));
+  ok('root runtime and duplicate route-group HTML are removed',
+    !read('index.html').includes(runtime) && !fs.existsSync(path.join(output, '(tabs)')));
+  ok('app screens, app JavaScript and unreferenced app assets are not published',
+    !fs.existsSync(path.join(output, 'settings.html')) && !fs.existsSync(path.join(output, 'card')) &&
+    !fs.existsSync(path.join(output, '_expo', 'static', 'js')) && !fs.existsSync(path.join(output, '_expo', '.routes.json')) &&
+    !fs.existsSync(path.join(output, 'assets')));
+  ok('public pages, stylesheets and hosted files survive app-route removal',
+    ['index.html', '404.html', 'privacy/index.html', 'terms/index.html', 'support/index.html',
+      '_expo/static/css/home.css', 'wafra-history-import.shortcut', 'robots.txt']
+      .every((file) => fs.existsSync(path.join(output, file))));
+  ok('static-host fallback redirects send each download path to its destination',
+    read('_redirects') === '/get/iphone https://testflight.apple.com/join/jbwzCgZ6 302\n');
   const sitemap = read('sitemap.xml');
   ok('sitemap contains the public documents and excludes 404 and private routes',
     routes.every((route) => sitemap.includes(`<loc>https://wafra-seo-fixture.dev/${route}/</loc>`)) &&
     !/404|settings/.test(sitemap));
   ok('repeated finalization keeps exactly one sitemap declaration',
     finalize().status === 0 && (read('robots.txt').match(/^Sitemap:/gm) || []).length === 1);
+
+  fs.mkdirSync(path.join(output, 'assets'));
+  fs.writeFileSync(path.join(output, 'assets', 'kept.png'), 'png');
+  fs.writeFileSync(path.join(output, '_expo', 'static', 'css', 'home.css'), 'a{background:url(/assets/kept.png)}');
+  ok('an assets directory a public stylesheet still uses is kept',
+    finalize().status === 0 && fs.existsSync(path.join(output, 'assets', 'kept.png')));
 
   const renderMarkdown = spawnSync(process.execPath, ['--input-type=module', '-e', `
     import { markdownToHtml } from ${JSON.stringify(require('url').pathToFileURL(path.join(root, 'scripts/public-web-pages.mjs')).href)};
@@ -191,6 +224,117 @@ try {
 } finally {
   fs.rmSync(output, { recursive: true, force: true });
 }
+
+const siteEvents = spawnSync(process.execPath, ['--input-type=module', '-e', `
+  import { downloadResponse, recordSiteEvent, DOWNLOAD_DESTINATIONS } from
+    ${JSON.stringify(require('url').pathToFileURL(path.join(root, 'src/marketing/site-events.mjs')).href)};
+  const points = [];
+  const env = { SITE_EVENTS: { writeDataPoint: (point) => points.push(point) } };
+  const browser = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Safari/604.1';
+  const request = (url, headers = {}, method = 'GET') => Object.assign(
+    new Request(url, { method, headers: { 'user-agent': browser, 'cf-connecting-ip': '203.0.113.9', ...headers } }),
+    { cf: { country: 'AE', city: 'Dubai' } });
+  recordSiteEvent(env, request('https://wafra.dev/?utm_source=Instagram%20Bio&email=a@b.c',
+    { referer: 'https://www.instagram.com/p/secret-post?igsh=abc' }), 'view', 'home');
+  recordSiteEvent(env, request('https://wafra.dev/', { 'user-agent': 'Googlebot/2.1' }), 'view', 'home');
+  recordSiteEvent(env, request('https://wafra.dev/', { 'sec-purpose': 'prefetch' }), 'view', 'home');
+  recordSiteEvent(env, request('https://wafra.dev/', {}, 'HEAD'), 'view', 'home');
+  const click = downloadResponse(env, request('https://wafra.dev/get/iphone',
+    { referer: 'https://wafra.dev/?utm_source=newsletter' }), 'iphone');
+  const android = downloadResponse(env, request('https://wafra.dev/get/android'), 'android');
+  const unknown = downloadResponse(env, request('https://wafra.dev/get/windows'), 'windows');
+  const inherited = downloadResponse(env, request('https://wafra.dev/get/toString'), 'toString');
+  let unbound = 'not run';
+  try { unbound = downloadResponse({}, request('https://wafra.dev/get/iphone'), 'iphone').status; } catch (error) { unbound = String(error); }
+  const broken = downloadResponse({ SITE_EVENTS: { writeDataPoint() { throw new Error('quota'); } } },
+    request('https://wafra.dev/get/iphone'), 'iphone');
+  process.stdout.write(JSON.stringify({
+    points, unbound, unknown, inherited, brokenStatus: broken.status,
+    click: { status: click.status, location: click.headers.get('location'), referrer: click.headers.get('referrer-policy'),
+      cache: click.headers.get('cache-control') },
+    iphone: DOWNLOAD_DESTINATIONS.iphone, android,
+  }));
+`], { cwd: root, encoding: 'utf8' });
+let events = {};
+try { events = JSON.parse(siteEvents.stdout); } catch { events = {}; }
+ok('site events run', siteEvents.status === 0, siteEvents.stderr);
+ok('a landing view records only coarse labels: campaign, referring site and country',
+  JSON.stringify(events.points?.[0]) === JSON.stringify({
+    indexes: ['view'], blobs: ['view', 'home', 'ae', 'instagram.com', 'instagrambio', 'browser'], doubles: [1],
+  }));
+ok('automated clients are labelled, and prefetches and HEAD requests are not counted',
+  events.points?.length === 3 && events.points[1].blobs[5] === 'automated');
+ok('a download click carries the landing campaign and redirects without leaking it',
+  JSON.stringify(events.points?.[2]?.blobs) === JSON.stringify(['download', 'iphone', 'ae', '', 'newsletter', 'browser']) &&
+    events.click?.status === 302 && events.click.location === events.iphone &&
+    events.click.referrer === 'no-referrer' && events.click.cache === 'no-store');
+ok('no IP address, city, user agent, email or referrer path is written',
+  !/203\.0\.113|dubai|mozilla|iphone os|googlebot|a@b|secret-post|igsh/i.test(JSON.stringify(events.points ?? [])));
+ok('unknown and inherited platform names fall through to the 404 page',
+  events.unknown === null && events.inherited === null);
+ok('Android has no download while the source repository is private',
+  events.android === null);
+ok('a missing or failing analytics binding never breaks the download',
+  events.unbound === 302 && events.brokenStatus === 302);
+ok('Pages Functions route the home page and download paths through site events',
+  fs.readFileSync(path.join(root, 'functions/index.js'), 'utf8').includes("recordSiteEvent(context.env, context.request, 'view', 'home')") &&
+    fs.readFileSync(path.join(root, 'functions/get/[platform].js'), 'utf8').includes('downloadResponse(env, request, params.platform)'));
+
+const funnel = spawnSync(process.execPath, ['--input-type=module', '-e', `
+  import { summarizeFunnel, renderFunnel, funnelQuery } from
+    ${JSON.stringify(require('url').pathToFileURL(path.join(root, 'scripts/site-funnel.mjs')).href)};
+  const summary = summarizeFunnel([
+    { event: 'view', target: 'home', country: 'ae', referrer: 'instagram.com', campaign: 'bio', client: 'browser', hits: '40' },
+    { event: 'view', target: 'home', country: 'sa', referrer: '', campaign: '', client: 'browser', hits: 60 },
+    { event: 'view', target: 'home', country: 'us', referrer: '', campaign: '', client: 'automated', hits: 500 },
+    { event: 'download', target: 'iphone', country: 'ae', referrer: '', campaign: 'bio', client: 'browser', hits: 8 },
+    { event: 'download', target: 'android', country: 'sa', referrer: '', campaign: '', client: 'browser', hits: 2 },
+  ]);
+  process.stdout.write(JSON.stringify({ text: renderFunnel(summary, 30, 17), query: funnelQuery(7) }));
+`], { cwd: root, encoding: 'utf8' });
+let report = {};
+try { report = JSON.parse(funnel.stdout); } catch { report = {}; }
+ok('the funnel report excludes automated clients and computes click-through from views',
+  funnel.status === 0 && /Landing views\s+100\n/.test(report.text) && /Download clicks\s+10 {2}\(10\.0% of views\)/.test(report.text) &&
+    /iPhone\/TestFlight\s+8\n/.test(report.text) && /500 automated requests excluded/.test(report.text) &&
+    report.text.includes('Top sources (campaign tag, views + clicks): (none) 62, bio 48') &&
+    report.text.includes('Top countries (views): SA 60, AE 40') && report.text.includes('(all time, any source): 17'),
+  funnel.stderr || report.text);
+ok('the funnel query reads the site events dataset for the requested window',
+  /FROM wafra_site_events\nWHERE timestamp > NOW\(\) - INTERVAL '7' DAY/.test(report.query ?? ''));
+
+const pagesConfig = spawnSync(process.execPath, ['--input-type=module', '-e', `
+  import { deploymentConfigsPatch, productionPatch, settingNames } from
+    ${JSON.stringify(require('url').pathToFileURL(path.join(root, 'scripts/pages-site-config.mjs')).href)};
+  const attempt = (production) => { try { return productionPatch(production); } catch (error) { return { error: error.message }; } };
+  const existing = { compatibility_date: '2026-03-01', compatibility_flags: ['nodejs_compat'],
+    env_vars: { MODE: { type: 'plain_text', value: 'site' } }, kv_namespaces: { CACHE: { namespace_id: 'k1' } }, fail_open: false };
+  process.stdout.write(JSON.stringify({
+    empty: attempt(undefined),
+    merged: attempt(existing),
+    secret: attempt({ env_vars: { TOKEN: { type: 'secret_text' } } }),
+    otherDataset: attempt({ analytics_engine_datasets: { SITE_EVENTS: { dataset: 'something_else' } } }),
+    names: settingNames(existing),
+    configs: deploymentConfigsPatch(existing),
+  }));
+`], { cwd: root, encoding: 'utf8' });
+let pages = {};
+try { pages = JSON.parse(pagesConfig.stdout); } catch { pages = {}; }
+ok('a project without settings gets the binding, fail open and a supported compatibility date',
+  pagesConfig.status === 0 && JSON.stringify(pages.empty) === JSON.stringify({
+    compatibility_date: '2026-08-01', analytics_engine_datasets: { SITE_EVENTS: { dataset: 'wafra_site_events' } }, fail_open: true,
+  }), pagesConfig.stderr);
+ok('existing production settings are re-sent unchanged alongside the binding',
+  pages.merged?.compatibility_date === '2026-03-01' && pages.merged.compatibility_flags?.[0] === 'nodejs_compat' &&
+    pages.merged.env_vars?.MODE?.value === 'site' && pages.merged.kv_namespaces?.CACHE?.namespace_id === 'k1' &&
+    pages.merged.fail_open === true && pages.merged.analytics_engine_datasets?.SITE_EVENTS?.dataset === 'wafra_site_events');
+ok('secrets or a different SITE_EVENTS dataset stop the update instead of being overwritten',
+  /secret variables \(TOKEN\)/.test(pages.secret?.error ?? '') && /already bound to dataset something_else/.test(pages.otherDataset?.error ?? ''));
+ok('fail open is sent for preview too, because Cloudflare rejects a production-only change (8000066)',
+  pages.configs?.preview?.fail_open === true && Object.keys(pages.configs.preview).length === 1 &&
+    JSON.stringify(pages.configs.production) === JSON.stringify(pages.merged));
+ok('setting names include nested bindings so a lost one is detected',
+  ['env_vars.MODE', 'kv_namespaces.CACHE', 'compatibility_date', 'fail_open'].every((name) => pages.names?.includes(name)));
 
 console.log(`\nweb-seo: ${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

@@ -12,17 +12,17 @@
   },
   "readBackSampleCurrencies": ["JPY", "USD", "KWD"],
   "products": {
-    "monthly": {
-      "productId": "wafra_pro_monthly",
-      "googleBasePlanId": "monthly",
-      "referencePrice": { "currency": "USD", "amount": "9.99" },
+    "weekly": {
+      "productId": "wafra_pro_weekly",
+      "googleBasePlanId": "weekly",
+      "referencePrice": { "currency": "USD", "amount": "4.99" },
       "approvedBasePrice": null,
       "readBackEvidence": null
     },
     "yearly": {
       "productId": "wafra_pro_yearly",
       "googleBasePlanId": "yearly",
-      "referencePrice": { "currency": "USD", "amount": "74.99" },
+      "referencePrice": { "currency": "USD", "amount": "49.99" },
       "approvedBasePrice": null,
       "readBackEvidence": null
     }

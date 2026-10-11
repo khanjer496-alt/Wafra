@@ -14,6 +14,7 @@ function harness(language) {
   h.local('@/components/transfer-coins/coin-cues', 'src/components/transfer-coins/coin-cues.ts');
   h.local('@/components/transfer-coins/route-coin');
   h.local('@/components/transfers/transfer-route-row');
+  h.local('@/components/transfers/transfer-person-row');
   h.local('@/components/transfers/transfer-question-card');
   return h;
 }
@@ -45,22 +46,39 @@ test('route row reads From → To with the tag', () => {
   assert.ok(text(tree).includes('Someone else · counted'));
 });
 
-test('question card asks by direction, shows its step and hides See all for one item', () => {
+test('question card asks by direction, shows its step, answers in full-width rows and has no See all', () => {
   const h = harness('en');
   const { TransferQuestionCard } = h.deps['@/components/transfers/transfer-question-card'];
   const words = h.deps['@/lib/transfer-activity-copy'].transferActivityCopy('en');
   const transaction = { id: 'q', type: 'expense', amountFils: 500000, date: '2026-10-02', accountId: 'fab', title: 'Transfer', category: 'other' };
   const answers = [];
   const one = TransferQuestionCard({ transaction, index: 0, total: 1, accountLabel: 'FAB', palette: palette(h), busy: false,
-    onAnswer: a => answers.push(a), onSeeAll() {} });
+    onAnswer: a => answers.push(a) });
   assert.ok(text(one).includes(words.card.whereOut));
+  // Select in the list head replaces the card's own "See all"; the unnamed link moved to the list too.
   assert.equal(byId(one, 'transfer-question-see-all'), undefined);
+  assert.equal(byId(one, 'transfer-question-unnamed'), undefined);
+  // Full-width answers, each saying what it does to the totals.
+  for (const answer of ['own', 'external', 'none']) {
+    const effect = answer === 'none' ? words.answers.effect.none : words.answers.effect[answer](false);
+    assert.equal(byId(one, `transfer-answer-${answer}`).props.accessibilityLabel, `${words.answers.out[answer]}. ${effect}`);
+  }
   byId(one, 'transfer-answer-none').props.onPress();
   assert.deepEqual(answers, ['none']);
   const two = TransferQuestionCard({ transaction, index: 0, total: 2, accountLabel: 'FAB', palette: palette(h), busy: false,
-    onAnswer() {}, onSeeAll() {} });
+    onAnswer() {} });
+  // The step is shown; the count is spoken once, with it, by the card's header.
   assert.ok(text(two).includes(words.card.step(1, 2)));
-  assert.ok(byId(two, 'transfer-question-see-all'));
+  assert.ok(!text(two).includes(words.card.title(2)), 'the count is on the To answer tab, not printed twice');
+  const head = walk(two).find(n => n.props?.accessibilityRole === 'header');
+  assert.equal(head.props.accessibilityLabel, `${words.card.title(2)}. ${words.card.step(1, 2)}`);
+  assert.equal(byId(two, 'transfer-question-see-all'), undefined);
+  // Queued entries the card cannot ask about: the header names the whole count instead of a step.
+  const more = TransferQuestionCard({ transaction, index: 0, total: 2, more: 1, accountLabel: 'FAB', palette: palette(h), busy: false,
+    onAnswer() {} });
+  assert.ok(text(more).includes(words.card.title(3)));
+  assert.ok(!text(more).includes(words.card.step(1, 2)));
+  assert.equal(walk(more).find(n => n.props?.accessibilityRole === 'header').props.accessibilityLabel, words.card.title(3));
 });
 
 // ---- Fix round 1 ----
@@ -96,7 +114,8 @@ test('large text stacks the route row and lets names wrap', () => {
   const route = byId(tree, 'transfer-route-p');
   assert.equal(flat(route.props.style).flexDirection, 'column');
   assert.equal(flat(route.props.style).alignItems, 'flex-start');
-  const names = walk(tree).filter(n => n.props?.numberOfLines === 1);
+  // A money figure is one line that shrinks to fit (Money), never a truncated name.
+  const names = walk(tree).filter(n => n.props?.numberOfLines === 1 && !n.props.adjustsFontSizeToFit);
   assert.equal(names.length, 0, 'names wrap instead of truncating');
   assert.equal(flat(byId(tree, 'transfer-route-p').props.style).flexDirection, 'column');
   const normal = row(harness('en'), {});
@@ -173,6 +192,11 @@ test('question card stacks its question and amount at large text', () => {
   const h = createWorkflowHarness({ language: 'en', largeText: true });
   h.local('@/lib/transfer-activity-copy', 'src/lib/transfer-activity-copy.ts');
   h.local('@/components/transfers/transfer-answer-choices');
+  // The card draws a person with the person row's avatar, which sits on the route row's chips.
+  h.local('@/components/transfer-coins/coin-cues', 'src/components/transfer-coins/coin-cues.ts');
+  h.local('@/components/transfer-coins/route-coin');
+  h.local('@/components/transfers/transfer-route-row');
+  h.local('@/components/transfers/transfer-person-row');
   h.local('@/components/transfers/transfer-question-card');
   const transaction = { id: 'q', type: 'expense', amountFils: 500000, date: '2026-10-02', accountId: 'fab', title: 'Transfer', category: 'other' };
   const tree = h.deps['@/components/transfers/transfer-question-card'].TransferQuestionCard(

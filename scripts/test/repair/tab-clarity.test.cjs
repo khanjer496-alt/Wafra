@@ -71,7 +71,7 @@ test('Home keeps accounts out of its hero and exposes one Add and one Settings a
     assert.deepEqual(h.events.at(-1), ['route', '/add-transaction']);
   }
 });
-test('Home renders at most five recent transactions without losing the full activity route', () => {
+test('Home renders at most twelve recent transactions without losing the full activity route', () => {
   const h = createHarness();
   // Home derives its preview from the ledger (not the projection's full list),
   // so seed twenty eligible period rows ahead of the fixture ledger.
@@ -81,8 +81,8 @@ test('Home renders at most five recent transactions without losing the full acti
   h.deps['@/lib/dashboard-projection'].projectDashboard = (...args) => ({ ...project(...args), activityRows: fixtures });
   const activity = nodeById(h.render('home'), 'home-widget-activity');
   assert.ok(activity, 'the recent activity widget is rendered');
-  assert.equal(walk(activity).filter(n => n.props?.testID === 'transaction-details-link' && n.props?.onPress && n.props?.accessibilityLabel?.includes('Fixture')).length, 5);
-  const all = walk(activity).find(n => n.props?.onPress && text(n).includes(h.deps['@/lib/i18n'].t('allActivity')));
+  assert.equal(walk(activity).filter(n => n.props?.testID === 'transaction-details-link' && n.props?.onPress && n.props?.accessibilityLabel?.includes('Fixture')).length, 12);
+  const all = walk(activity).find(n => n.props?.testID === 'home-see-all');
   assert.ok(all); all.props.onPress(); assert.deepEqual(h.events.at(-1), ['route', '/transactions']);
 });
 test('Bills All keeps every obligation in one due-date timeline instead of type silos', () => {

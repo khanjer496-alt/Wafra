@@ -29,7 +29,7 @@ import {
 import { t } from '@/lib/i18n';
 
 const ICONS: Record<HomeWidgetId, IconName> = {
-  greeting: 'sun', overview: 'wallet', today: 'calendar', week: 'chart', capture: 'mail',
+  greeting: 'sun', hero: 'arrow-up-right', overview: 'wallet', today: 'calendar', week: 'chart', capture: 'mail', transfers: 'repeat',
   assistant: 'spark', insight: 'trend', due: 'calendar', activity: 'receipt', upcoming: 'repeat',
 };
 /** One meta line plus the footer's top padding, until the panel reports its size. */

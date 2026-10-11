@@ -31,10 +31,11 @@ const { ONBOARDING_E_COPY, onboardingECopy } = load(path.join(root, 'src/lib/onb
 const ARABIC = /[؀-ۿ]/;
 /** Source without its comments, for assertions about code. */
 const code = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-const DEFAULT = ['due', 'assistant', 'insight', 'activity', 'upcoming'];
-const TOP = ['greeting', 'overview', 'today', 'week'];
-// What the band draws: the month line (overview) right under Today (splitHomeWidgetLayout).
-const BAND = ['greeting', 'today', 'overview', 'week'];
+// A whole Home layout with every section on (Home v3 ids); these cases order the sheet like this.
+const DEFAULT = ['due', 'assistant', 'insight', 'activity', 'upcoming', 'transfers'];
+const TOP = ['greeting', 'hero', 'today', 'overview', 'week'];
+// What the band draws: the greeting, the Spent hero, Today, its month line, the week (splitHomeWidgetLayout).
+const BAND = ['greeting', 'hero', 'today', 'overview', 'week'];
 const EXPANDED_DEFAULT = [...TOP, ...DEFAULT, 'capture'];
 
 /* ── copy ─────────────────────────────────────────────────────────────── */
@@ -126,43 +127,53 @@ test('reminders name only what Wafra sends; the daily summary time matches SUMMA
 /* ── goals → Home order ───────────────────────────────────────────────── */
 
 test('goals reorder Home through the Customize Home preference', () => {
-  const base = { order: [...DEFAULT], hidden: [] };
-  assert.deepEqual(e.homeOrderForGoals(['bills'], base).order, [...TOP, 'due', 'upcoming', 'assistant', 'insight', 'activity', 'capture']);
-  assert.deepEqual(e.homeOrderForGoals(['subscriptions'], base).order, [...TOP, 'upcoming', 'due', 'assistant', 'insight', 'activity', 'capture']);
-  assert.deepEqual(e.homeOrderForGoals(['spend-less'], base).order, [...TOP, 'insight', 'due', 'assistant', 'upcoming', 'activity', 'capture']);
-  assert.deepEqual(e.homeOrderForGoals(['salary'], base).order, [...TOP, 'due', 'upcoming', 'activity', 'insight', 'assistant', 'capture']);
-  assert.deepEqual(e.homeOrderForGoals(['cash-cards'], base).order, [...TOP, 'due', 'upcoming', 'activity', 'assistant', 'insight', 'capture']);
+  const base = { order: [...EXPANDED_DEFAULT], hidden: [] };
+  assert.deepEqual(e.homeOrderForGoals(['bills'], base).order, [...TOP, 'due', 'upcoming', 'assistant', 'insight', 'activity', 'transfers', 'capture']);
+  assert.deepEqual(e.homeOrderForGoals(['subscriptions'], base).order, [...TOP, 'upcoming', 'due', 'assistant', 'insight', 'activity', 'transfers', 'capture']);
+  assert.deepEqual(e.homeOrderForGoals(['spend-less'], base).order, [...TOP, 'insight', 'due', 'assistant', 'upcoming', 'activity', 'transfers', 'capture']);
+  assert.deepEqual(e.homeOrderForGoals(['salary'], base).order, [...TOP, 'due', 'upcoming', 'activity', 'insight', 'assistant', 'transfers', 'capture']);
+  assert.deepEqual(e.homeOrderForGoals(['cash-cards'], base).order, [...TOP, 'due', 'upcoming', 'activity', 'assistant', 'insight', 'transfers', 'capture']);
   assert.deepEqual(e.homeOrderForGoals(['salary', 'bills'], base).order,
-    [...TOP, 'due', 'upcoming', 'activity', 'insight', 'assistant', 'capture'], 'precedence, not tap order: bills before salary');
+    [...TOP, 'due', 'upcoming', 'activity', 'insight', 'assistant', 'transfers', 'capture'], 'precedence, not tap order: bills before salary');
   assert.deepEqual(e.homeOrderForGoals(['bills', 'salary'], base), e.homeOrderForGoals(['salary', 'bills'], base));
+});
+
+test('Home v3: a goal switches on the sections it promotes, and nothing else', () => {
+  const fresh = prefs.defaultHomeWidgetPreferences();
+  const bills = e.homeOrderForGoals(['bills'], fresh);
+  assert.ok(!bills.hidden.includes('due') && !bills.hidden.includes('upcoming'), 'Bills asks for Due soon and Coming up');
+  assert.deepEqual(JSON.parse(JSON.stringify(prefs.splitHomeWidgetLayout(bills))), { band: ['greeting', 'hero'], sheet: ['due', 'upcoming', 'activity'] });
+  const spendLess = e.homeOrderForGoals(['spend-less'], fresh);
+  assert.deepEqual(JSON.parse(JSON.stringify(prefs.splitHomeWidgetLayout(spendLess))).sheet, ['insight', 'activity']);
+  assert.deepEqual(JSON.parse(JSON.stringify(e.homeOrderForGoals([], fresh))), JSON.parse(JSON.stringify(fresh)), 'no goals: the minimal Home');
 });
 
 test('goals reorder the sheet and never take the band away', () => {
   for (const goals of [['bills'], ['subscriptions'], ['spend-less'], ['salary'], ['cash-cards'], ['bills', 'salary', 'spend-less']]) {
-    const next = e.homeOrderForGoals(goals, { order: [...DEFAULT], hidden: [] });
+    const next = e.homeOrderForGoals(goals, { order: [...EXPANDED_DEFAULT], hidden: [] });
     assert.deepEqual(JSON.parse(JSON.stringify(prefs.splitHomeWidgetLayout(next).band)), BAND, goals.join());
   }
   // A Home whose owner already moved a band section down keeps that choice.
-  const moved = { order: ['greeting', 'due', 'overview', 'today', 'week', 'upcoming', 'activity', 'assistant', 'insight', 'capture'], hidden: [] };
+  const moved = { order: ['greeting', 'hero', 'due', 'overview', 'today', 'week', 'upcoming', 'activity', 'transfers', 'assistant', 'insight', 'capture'], hidden: [] };
   assert.deepEqual(e.homeOrderForGoals(['subscriptions'], moved).order,
-    ['greeting', 'upcoming', 'due', 'overview', 'today', 'week', 'activity', 'assistant', 'insight', 'capture']);
+    ['greeting', 'hero', 'upcoming', 'due', 'overview', 'today', 'week', 'activity', 'transfers', 'assistant', 'insight', 'capture']);
   // A hidden section ahead of the band is invisible to the split, so it does not end the band either.
-  const hiddenFirst = { order: ['due', ...TOP, 'upcoming', 'activity', 'assistant', 'insight', 'capture'], hidden: ['due'] };
+  const hiddenFirst = { order: ['due', ...TOP, 'upcoming', 'activity', 'transfers', 'assistant', 'insight', 'capture'], hidden: ['due'] };
   const next = e.homeOrderForGoals(['subscriptions'], hiddenFirst);
   assert.deepEqual(JSON.parse(JSON.stringify(prefs.splitHomeWidgetLayout(next).band)), BAND);
-  assert.deepEqual(next.order, ['due', ...TOP, 'upcoming', 'activity', 'assistant', 'insight', 'capture']);
+  assert.deepEqual(next.order, ['due', ...TOP, 'upcoming', 'activity', 'transfers', 'assistant', 'insight', 'capture']);
 });
 
 test('goals never hide a section and no goals leaves the order alone', () => {
-  const custom = { order: ['activity', 'assistant', 'upcoming', 'insight', 'due'], hidden: ['assistant'] };
-  assert.deepEqual(e.homeOrderForGoals([], custom), { order: [...TOP, ...custom.order, 'capture'], hidden: custom.hidden });
-  assert.deepEqual(e.homeOrderForGoals(['nonsense'], custom), { order: [...TOP, ...custom.order, 'capture'], hidden: custom.hidden });
+  const custom = { order: [...TOP, 'activity', 'assistant', 'upcoming', 'insight', 'due', 'transfers', 'capture'], hidden: ['assistant'] };
+  assert.deepEqual(e.homeOrderForGoals([], custom), custom);
+  assert.deepEqual(e.homeOrderForGoals(['nonsense'], custom), custom);
   const expanded = { order: [...EXPANDED_DEFAULT].reverse(), hidden: ['greeting', 'today'] };
   assert.deepEqual(e.homeOrderForGoals([], expanded), expanded, 'existing whole-Home choices remain unchanged');
   const next = e.homeOrderForGoals(['bills'], custom);
   assert.deepEqual(next.hidden, ['assistant']);
-  assert.deepEqual(next.order, [...TOP, 'due', 'upcoming', 'activity', 'assistant', 'insight', 'capture']);
-  assert.deepEqual([...next.order].sort(), [...EXPANDED_DEFAULT].sort(), 'all ten sections, each once');
+  assert.deepEqual(next.order, [...TOP, 'due', 'upcoming', 'activity', 'assistant', 'insight', 'transfers', 'capture']);
+  assert.deepEqual([...next.order].sort(), [...EXPANDED_DEFAULT].sort(), 'all twelve sections, each once');
   // A preference the reader would normalise is normalised first.
   assert.deepEqual(e.homeOrderForGoals(['bills'], { order: ['bogus'], hidden: 'x' }).order.slice(TOP.length, TOP.length + 2), ['due', 'upcoming']);
 });
@@ -174,7 +185,7 @@ test('the Goals hint names the section that really goes first', () => {
   for (const goals of [['bills'], ['subscriptions'], ['spend-less'], ['salary'], ['cash-cards'], ['salary', 'spend-less']]) {
     const first = e.firstHomeSectionForGoals(goals);
     // Due and upcoming payments may still draw ahead of it (paymentsBeforeActivity); the activity hint says so.
-    const sheet = e.homeOrderForGoals(goals, { order: [...DEFAULT], hidden: [] }).order.slice(TOP.length);
+    const sheet = e.homeOrderForGoals(goals, { order: [...EXPANDED_DEFAULT], hidden: [] }).order.slice(TOP.length);
     const promoted = goals.flatMap((goal) => e.GOAL_HOME_SECTIONS[goal]);
     assert.equal(sheet.find((id) => promoted.includes(id) || !['due', 'upcoming'].includes(id)), first, goals.join());
     assert.ok(ONBOARDING_E_COPY.en.goalsHint[first] && ONBOARDING_E_COPY.ar.goalsHint[first]);
@@ -405,17 +416,17 @@ const shown = (layout) => JSON.parse(JSON.stringify(prefs.splitHomeWidgetLayout(
 test('a Home saved by the earlier goal-first Goals step gets its band back', () => {
   const cases = [['bills'], ['subscriptions'], ['spend-less'], ['salary'], ['cash-cards'], ['salary', 'bills'], ['bills', 'spend-less', 'cash-cards']];
   for (const goals of cases) {
-    const saved = earlierGoals(goals, { order: [...DEFAULT], hidden: ['assistant'] });
+    const saved = earlierGoals(goals, { order: [...EXPANDED_DEFAULT], hidden: ['assistant'] });
     assert.deepEqual(shown(saved).band, [], `${goals.join()}: the earlier step emptied the band`);
     const repaired = e.repairGoalOrderedHome(saved);
-    assert.deepEqual(repaired, e.homeOrderForGoals(goals, { order: [...DEFAULT], hidden: ['assistant'] }), `${goals.join()}: same as today's Goals step`);
+    assert.deepEqual(repaired, e.homeOrderForGoals(goals, { order: [...EXPANDED_DEFAULT], hidden: ['assistant'] }), `${goals.join()}: same as today's Goals step`);
     assert.deepEqual(shown(repaired).band, BAND);
     assert.equal(e.repairGoalOrderedHome(repaired), null, 'a repaired Home is left alone');
   }
 });
 
 test('going Back and choosing again stacked the runs; the repair still restores the band', () => {
-  const once = earlierGoals(['bills'], { order: [...DEFAULT], hidden: [] });
+  const once = earlierGoals(['bills'], { order: [...EXPANDED_DEFAULT], hidden: [] });
   for (const second of [['salary'], ['bills', 'salary'], ['subscriptions']]) {
     const twice = earlierGoals(second, once);
     const repaired = e.repairGoalOrderedHome(twice);
@@ -438,7 +449,7 @@ test('the repair leaves every other layout alone', () => {
   assert.equal(e.repairGoalOrderedHome({ order: ['due', 'upcoming', 'capture', ...TOP, ...rest.slice(0, 3)], hidden: [] }), null);
   // Today's default and today's Goals output.
   assert.equal(e.repairGoalOrderedHome({ order: [...EXPANDED_DEFAULT], hidden: [] }), null);
-  assert.equal(e.repairGoalOrderedHome(e.homeOrderForGoals(['bills'], { order: [...DEFAULT], hidden: [] })), null);
+  assert.equal(e.repairGoalOrderedHome(e.homeOrderForGoals(['bills'], { order: [...EXPANDED_DEFAULT], hidden: [] })), null);
   // Accepted: a Customize Home layout with only goal sections above the band
   // is indistinguishable from the earlier step's output and is repaired once.
   assert.deepEqual(shown(e.repairGoalOrderedHome({ order: ['insight', ...TOP, 'due', 'upcoming', 'assistant', 'activity', 'capture'], hidden: [] })).band, BAND);

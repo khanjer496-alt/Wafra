@@ -37,9 +37,9 @@ import { trialTimeline } from '@/lib/onboarding-e';
 import { onboardingECopy } from '@/lib/onboarding-e-copy';
 import { compactPattern, patternSize, type PatternTile } from '@/lib/pattern';
 import { configuredPublicUrl } from '@/lib/public-links';
-import { billingStore, type ProPlan } from '@/lib/purchases';
+import { PLAN_ORDER, planChargeTimingKey, planPeriod } from '@/lib/pro-plans';
+import { billingStore, yearlySavingPercent, type ProPlan } from '@/lib/purchases';
 
-const PLAN_ORDER: ProPlan[] = ['yearly', 'monthly'];
 /** How strongly the pattern shows behind the paywall's words, per scheme. */
 const BACKDROP_LIGHT = 0.42;
 const BACKDROP_DARK = 0.62;
@@ -140,16 +140,23 @@ function useOnboardingCheckout(enabled: boolean, onPurchased: () => void) {
   return { checkoutReady, offers, state, plan, setPlan, selected, busy, notice, setNotice, purchase, restore, load };
 }
 
-function PlanCard({ offer, plan, selected, onPress, palette }: {
+/**
+ * One plan. The yearly card adds "Most popular", the saving against a year of
+ * weekly payments (from the store's own two prices, absent when it cannot be
+ * compared) and the store SDK's per-week figure, all smaller than the billed
+ * price, which stays the clearest number on the card.
+ */
+function PlanCard({ offer, plan, selected, onPress, palette, savingPercent }: {
   offer: ProPlanOffer | null;
   plan: ProPlan;
   selected: boolean;
   onPress: () => void;
   palette: BandPalette;
+  savingPercent: number | null;
 }) {
   const words = onboardingECopy(useLanguage());
-  const label = plan === 'yearly' ? words.planYearly : words.planMonthly;
-  const period = plan === 'yearly' ? t('perYear') : t('perMonth');
+  const label = plan === 'yearly' ? words.planYearly : words.planWeekly;
+  const period = planPeriod(plan);
   if (!offer) {
     return <View accessible accessibilityLabel={`${label}. ${t('priceUnavailable')}`}
       style={[styles.plan, { borderColor: palette.bandRule }]} testID={`onboarding-plan-${plan}-unavailable`}>
@@ -157,8 +164,13 @@ function PlanCard({ offer, plan, selected, onPress, palette }: {
       <ThemedText type="meta" style={{ color: palette.onBandSecondary }}>{t('priceUnavailable')}</ThemedText>
     </View>;
   }
+  const yearly = plan === 'yearly';
+  const saving = yearly && savingPercent !== null ? tf('proSavePercent', { percent: savingPercent }) : null;
+  const perWeek = yearly && offer.weeklyPriceString ? tf('proYearlyPerWeek', { price: offer.weeklyPriceString }) : null;
+  const spoken = [label, yearly ? t('proMostPopular') : null, saving, `${offer.priceString} ${period}`, perWeek]
+    .filter(Boolean).join(' · ');
   return <Pressable accessibilityRole="radio" accessibilityState={{ checked: selected }}
-    accessibilityLabel={`${label} · ${offer.priceString} ${period}`} testID={`onboarding-plan-${plan}`}
+    accessibilityLabel={spoken} testID={`onboarding-plan-${plan}`}
     onPress={onPress}
     style={({ pressed }) => [styles.plan, {
       borderColor: selected ? palette.accent : palette.bandRule,
@@ -170,8 +182,14 @@ function PlanCard({ offer, plan, selected, onPress, palette }: {
       {selected ? <View style={[styles.radioDot, { backgroundColor: palette.accent }]} /> : null}
     </View>
     <ThemedText type="smallBold" style={{ color: palette.onBand }}>{label}</ThemedText>
-    <ThemedText type="small" tabular style={{ color: palette.onBand }}>{offer.priceString}</ThemedText>
+    {yearly ? <ThemedText type="meta" style={{ color: palette.accentOnBand }} testID="onboarding-plan-yearly-popular">
+      {saving ? `${t('proMostPopular')} · ${saving}` : t('proMostPopular')}
+    </ThemedText> : null}
+    <ThemedText type="smallBold" tabular style={{ color: palette.onBand }}>{offer.priceString}</ThemedText>
     <ThemedText type="meta" style={{ color: palette.onBandSecondary }}>{period}</ThemedText>
+    {perWeek ? <ThemedText type="meta" tabular style={{ color: palette.onBandSecondary }} testID="onboarding-plan-yearly-per-week">
+      {perWeek}
+    </ThemedText> : null}
   </Pressable>;
 }
 
@@ -357,6 +375,8 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, ca
   const dim = paywallBackdropOpacity(band.scheme);
   const backdrop_ = useBackdropSettle(arrivedFrom === 'pattern', dim);
   const timeline = trialTimeline(trialDays);
+  // From the two prices this storefront returned; null leaves the saving out.
+  const savingPercent = checkout.state === 'ready' ? yearlySavingPercent(checkout.offers) : null;
   const store = billingStore();
   const privacyUrl = configuredPublicUrl('privacyPolicyUrl');
   const termsUrl = configuredPublicUrl('termsOfUseUrl');
@@ -422,10 +442,11 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, ca
           <View style={[styles.plans, largeText && styles.stacked]} accessibilityRole="radiogroup" testID="onboarding-plans">
             {PLAN_ORDER.map((plan) => <PlanCard key={plan} plan={plan} palette={band}
               offer={checkout.offers.find((offer) => offer.plan === plan) ?? null}
+              savingPercent={savingPercent}
               selected={checkout.plan === plan} onPress={() => checkout.setPlan(plan)} />)}
           </View>
-          {checkout.selected ? <ThemedText type="micro" style={{ color: band.onBandSecondary }}>
-            {tf(checkout.plan === 'yearly' ? 'proChargeTimingYear' : 'proChargeTimingMonth', { price: checkout.selected.priceString })}
+          {checkout.selected ? <ThemedText type="meta" style={{ color: band.onBandSecondary }}>
+            {tf(planChargeTimingKey(checkout.plan), { price: checkout.selected.priceString })}
             {' '}
             {store === 'appStore' ? t('subscriptionRenewalTermsIos') : store === 'play' ? t('subscriptionRenewalTermsAndroid') : t('proStoreConfirmsPrice')}
           </ThemedText> : null}
@@ -440,11 +461,11 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, ca
       {privacyUrl || termsUrl ? <View style={styles.legal}>
         {privacyUrl ? <Pressable accessibilityRole="link" accessibilityLabel={t('privacyPolicy')} hitSlop={8}
           onPress={() => openLegal(privacyUrl)} style={styles.legalLink}>
-          <ThemedText type="micro" style={{ color: band.onBand }}>{t('privacyPolicy')}</ThemedText>
+          <ThemedText type="meta" style={{ color: band.onBand }}>{t('privacyPolicy')}</ThemedText>
         </Pressable> : null}
         {termsUrl ? <Pressable accessibilityRole="link" accessibilityLabel={t('termsOfUse')} hitSlop={8}
           onPress={() => openLegal(termsUrl)} style={styles.legalLink}>
-          <ThemedText type="micro" style={{ color: band.onBand }}>{t('termsOfUse')}</ThemedText>
+          <ThemedText type="meta" style={{ color: band.onBand }}>{t('termsOfUse')}</ThemedText>
         </Pressable> : null}
       </View> : null}
     </EStepFrame>

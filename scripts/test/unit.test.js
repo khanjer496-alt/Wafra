@@ -1082,18 +1082,19 @@ ok('trial: purchase beats an expired trial',
 
 // ── Pro plans: only what the storefront actually returned ──
 const playOffers = purch.proOffersFromProducts([
-  { productIdentifier: 'wafra_pro_monthly:p1m', localizedPrice: 'AED 36.99' },
-  { productIdentifier: 'wafra_pro_yearly:p1y', localizedPrice: 'AED 274.99' },
+  { productIdentifier: 'wafra_pro_weekly:p1w', localizedPrice: 'AED 18.99' },
+  { productIdentifier: 'wafra_pro_yearly:p1y', localizedPrice: 'AED 189.99' },
 ]);
 ok('plans: a Play base-plan suffix still resolves to Wafra\'s two plans',
   playOffers.length === 2 &&
     playOffers.every((offer) => offer.productId.includes(':')) &&
-    playOffers.find((offer) => offer.plan === 'yearly').priceString === 'AED 274.99');
+    playOffers.find((offer) => offer.plan === 'yearly').priceString === 'AED 189.99');
 ok('plans: the App Store identifiers resolve unchanged',
   JSON.stringify(purch.proOffersFromProducts([
-    { productIdentifier: 'wafra_pro_monthly', localizedPrice: 'AED 36.99' },
+    { productIdentifier: 'wafra_pro_weekly', localizedPrice: 'AED 18.99' },
   ])) === JSON.stringify([
-    { plan: 'monthly', productId: 'wafra_pro_monthly', priceString: 'AED 36.99' },
+    { plan: 'weekly', productId: 'wafra_pro_weekly', priceString: 'AED 18.99',
+      price: null, currencyCode: null, weeklyPriceString: null },
   ]));
 ok('plans: a plan the store priced blank is dropped rather than shown priceless',
   purch.proOffersFromProducts([
@@ -1101,9 +1102,46 @@ ok('plans: a plan the store priced blank is dropped rather than shown priceless'
   ]).length === 0);
 ok('plans: a foreign product is never sold as a Wafra plan',
   purch.proOffersFromProducts([
-    { productIdentifier: 'wafra_pro_monthly_legacy', localizedPrice: 'AED 1.00' },
+    { productIdentifier: 'wafra_pro_weekly_legacy', localizedPrice: 'AED 1.00' },
     { productIdentifier: 'some_other_app_yearly', localizedPrice: 'AED 2.00' },
   ]).length === 0);
+ok('plans: every sold product and the retired monthly one still carry Pro',
+  Object.values(purch.PRO_SKUS).every((sku) => purch.PRO_ENTITLEMENT_PRODUCT_IDS.includes(sku)) &&
+    purch.PRO_ENTITLEMENT_PRODUCT_IDS.includes('wafra_pro_monthly'));
+ok('plans: the retired monthly product is no longer offered',
+  purch.proOffersFromProducts([
+    { productIdentifier: 'wafra_pro_monthly', localizedPrice: 'AED 36.99' },
+  ]).length === 0);
+
+// ── Pro plans: the yearly saving and per-week figure come from the store ──
+const storeOffers = (weekly, yearly) => purch.proOffersFromProducts([
+  { productIdentifier: 'wafra_pro_weekly', localizedPrice: 'w', weeklyPrice: 'w/wk', ...weekly },
+  { productIdentifier: 'wafra_pro_yearly', localizedPrice: 'y', weeklyPrice: 'AED 3.65', ...yearly },
+]);
+ok('saving: AED 18.99 a week against AED 189.99 a year saves 80%, rounded down',
+  // 1 - 189.99 / (18.99 × 52) = 80.76…% → 80, never 81.
+  purch.yearlySavingPercent(storeOffers(
+    { price: 18.99, currencyCode: 'AED' }, { price: 189.99, currencyCode: 'AED' })) === 80);
+ok('saving: an exact percentage is not lost to float noise',
+  // 1 - 41.6 / (1 × 52) = exactly 20%.
+  purch.yearlySavingPercent(storeOffers({ price: 1 }, { price: 41.6 })) === 20);
+ok('saving: no claim across two currencies',
+  purch.yearlySavingPercent(storeOffers(
+    { price: 18.99, currencyCode: 'AED' }, { price: 199.99, currencyCode: 'SAR' })) === null);
+ok('saving: no claim without a numeric store price',
+  purch.yearlySavingPercent(storeOffers({}, { price: 189.99 })) === null &&
+    purch.yearlySavingPercent(storeOffers({ price: 0 }, { price: 189.99 })) === null &&
+    purch.yearlySavingPercent(storeOffers({ price: Number.NaN }, { price: 189.99 })) === null);
+ok('saving: no claim when yearly does not save',
+  purch.yearlySavingPercent(storeOffers({ price: 1 }, { price: 52 })) === null &&
+    purch.yearlySavingPercent(storeOffers({ price: 1 }, { price: 60 })) === null);
+ok('saving: no claim with only one plan',
+  purch.yearlySavingPercent(storeOffers({ price: 18.99 }, {}).filter((o) => o.plan === 'weekly')) === null);
+const perWeekOffers = storeOffers({ price: 18.99 }, { price: 189.99 });
+ok('per week: the yearly plan carries the store SDK\'s own per-week string',
+  perWeekOffers.find((o) => o.plan === 'yearly').weeklyPriceString === 'AED 3.65');
+ok('per week: the weekly plan never repeats itself as a per-week figure',
+  perWeekOffers.find((o) => o.plan === 'weekly').weeklyPriceString === null);
 
 // ── market packs: automatic localization (runs last: mutates globals) ──
 const markets = require('./build/markets');

@@ -23,6 +23,8 @@ export interface DashboardProjectionRequest {
   includeCleanupPrompts?: boolean;
   /** Home renders cashflow, cards/bills and one priority prompt. */
   surface?: 'dashboard' | 'home';
+  /** Recent activity rows to list (default six). */
+  activityLimit?: number;
 }
 
 export interface DashboardProjection {
@@ -109,8 +111,10 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
     dismissedInsightId,
     includeInsights = true,
     includeCleanupPrompts = true,
+    activityLimit: requestedLimit = 6,
   } = request;
   const homeOnly = request.surface === 'home';
+  const activityLimit = Math.max(1, Math.floor(requestedLimit));
   const liveAccounts = liveAccountIds(state.accounts);
   const internal = internalTransferIdsForState(state);
   const summary = summarizeMonth(state.transactions, period, liveAccounts, internal);
@@ -130,7 +134,7 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
   const unreadFormats = unreadCount === null ? null
     : { count: unreadCount, shouldPrompt: unreadCount >= REPORT_PROMPT_THRESHOLD };
 
-  // The store already provides display order. Stop at the six visible rows
+  // The store already provides display order. Stop at the visible rows (six unless asked)
   // rather than allocating a filtered copy of the entire transaction history.
   // Home leaves out transfers that the Transfers screen is guaranteed to list.
   // It must not rebuild the transfer graph here, so the test is row-local:
@@ -154,9 +158,9 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
   let lookahead = 0;
   let duplicates: ReadonlySet<string> | undefined;
   for (const transaction of state.transactions) {
-    const full = activityRows.length === 6;
-    if (full && (!dayTotals || transaction.date < activityRows[5]!.date)) break;
-    if (full && ++lookahead > DAY_TOTAL_LOOKAHEAD) { activityDayTotals.delete(activityRows[5]!.date); break; }
+    const full = activityRows.length === activityLimit;
+    if (full && (!dayTotals || transaction.date < activityRows[activityLimit - 1]!.date)) break;
+    if (full && ++lookahead > DAY_TOTAL_LOOKAHEAD) { activityDayTotals.delete(activityRows[activityLimit - 1]!.date); break; }
     if (countsInCashflowTotals(transaction, liveAccounts, internal) && inPeriod(transaction.date, period)) {
       if (homeOnly && isTransferCandidate(transaction)) {
         if (!duplicates) duplicates = duplicateTransactionIds(state.transactions);

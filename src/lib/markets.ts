@@ -258,7 +258,7 @@ const SA: MarketPack = {
   ],
 };
 
-export const MARKETS: MarketPack[] = [AE, SA];
+export const MARKETS: readonly MarketPack[] = [AE, SA];
 
 /**
  * The parser pack for every country without a launch-tested one.
@@ -634,6 +634,9 @@ export function bankBrandForName(
   return null;
 }
 
+const BANK_IDENTITY_CACHE_MAX = 512;
+const bankIdentityCache = new Map<string, string | undefined>();
+
 /**
  * Stable identity key for a displayed bank name.
  *
@@ -643,13 +646,23 @@ export function bankBrandForName(
  */
 export function bankIdentityForName(name: string | undefined): string | undefined {
   if (!name) return undefined;
+  // A pure function of the name over the fixed MARKETS packs, and transfer
+  // reconciliation asks it about the same few bank names thousands of times
+  // per pass (every candidate row's source and counterparty bank). Each miss
+  // tests every bank's pattern and runs a Unicode-property regex, which is
+  // slow on Hermes. Bounded: a full table is dropped rather than grown.
+  const cached = bankIdentityCache.get(name);
+  if (cached !== undefined || bankIdentityCache.has(name)) return cached;
   const branded = bankBrandForName(name)?.name ?? name;
   const normalized = branded
     .normalize('NFKC')
     .toLocaleLowerCase('en-US')
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim();
-  return normalized || undefined;
+  const identity = normalized || undefined;
+  if (bankIdentityCache.size >= BANK_IDENTITY_CACHE_MAX) bankIdentityCache.clear();
+  bankIdentityCache.set(name, identity);
+  return identity;
 }
 
 /** Logo domain for a bank NAME shown in the UI (any market's pack). */

@@ -10,7 +10,7 @@ import { homeSummaryCopy } from '@/lib/reference-copy';
 import { transferReviewCopy } from '@/lib/transfer-review-copy';
 
 export interface TransferReviewNoticeProps {
-  /** Rows in the transfer review queue (reconcileTransfers().pendingIds). */
+  /** Transfers waiting for an answer (transferWaitingSummary; a pair once), or queued rows only Transfers reaches. */
   pendingCount: number;
   incomingFils: number;
   outgoingFils: number;

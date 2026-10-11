@@ -220,12 +220,13 @@ test('an unresolved transfer moves to its own view without contributing to regul
   const words = h.deps['@/lib/transfer-activity-copy'].transferActivityCopy('en');
   const notice = walk(h.tree).find(n => n.props?.testID === 'transactions-separated-transfers');
   assert.ok(notice);
-  assert.ok(text(notice).includes(words.strip.kept(1)));
+  assert.ok(text(notice).includes(words.strip.listed(1)));
   assert.doesNotMatch(text(notice), /in the net/, 'an unknown-ownership transfer adds nothing to the net, so the strip does not claim it does');
-  assert.doesNotMatch(text(notice), /need an answer|needs an answer/,
-    'a generic unknown transfer is not announced as a review chore');
+  // Owner decision (Transfers grouped by person): a transfer kept out of the totals is asked about,
+  // so the summary counts it with the one term every screen uses.
+  assert.ok(text(notice).includes(words.strip.needsAnswer(1)), 'kept out of the totals until answered: it needs an answer');
   assert.equal(notice.props.accessibilityRole, 'button');
-  assert.ok(notice.props.accessibilityLabel.includes(words.strip.kept(1)));
+  assert.ok(notice.props.accessibilityLabel.includes(words.strip.listed(1)));
   assert.ok(style(notice).minHeight >= 44);
   const link = notice;
   link.props.onPress();
@@ -234,7 +235,7 @@ test('an unresolved transfer moves to its own view without contributing to regul
     'transfer review belongs under Accounts rather than the transaction summary');
 });
 
-for (const language of ['en', 'ar']) test(`${language}: the review note appears when a separated transfer is in the reconciler's review queue`, () => {
+for (const language of ['en', 'ar']) test(`${language}: every separated transfer still waiting is counted as needing an answer, a queued one too`, () => {
   const rows = [
     fixtureRow('purchase', { amountFils: 12500 }),
     fixtureRow('generic', { title: 'Incoming transfer', type: 'income', category: 'other', amountFils: 25000 }),
@@ -246,7 +247,7 @@ for (const language of ['en', 'ar']) test(`${language}: the review note appears 
   h.deps['@react-native-community/datetimepicker'] = { __esModule: true, default: 'DateTimePicker' };
   h.deps['@/lib/period'].periodRange = () => '';
   // The reconciler queues only a credible own-account match. Mark one row as
-  // such a suggestion; the generic unknown stays out of the queue.
+  // such a suggestion; the generic unknown is not queued but still waits for an answer.
   const ledger = h.deps['@/lib/ledger'];
   const real = ledger.transferReconciliationForState;
   ledger.transferReconciliationForState = state => {
@@ -259,8 +260,8 @@ for (const language of ['en', 'ar']) test(`${language}: the review note appears 
   const notice = walk(tree).find(n => n.props?.testID === 'transactions-separated-transfers');
   assert.ok(notice);
   const words = h.deps['@/lib/transfer-activity-copy'].transferActivityCopy(language);
-  assert.ok(text(notice).includes(words.strip.kept(2)));
-  assert.ok(text(notice).includes(words.strip.needsAnswer(1)), 'one queued record in view says it needs an answer');
+  assert.ok(text(notice).includes(words.strip.listed(2)));
+  assert.ok(text(notice).includes(words.strip.needsAnswer(2)), 'the queued record and the generic unknown both need an answer');
 });
 
 const fixtureRow = (id, overrides = {}) => ({
@@ -333,7 +334,11 @@ for (const language of ['en', 'ar']) {
     const h = transactions({ language, state: { transactions: [] } });
     assert.equal(netSummary(h), undefined);
     assert.equal(h.list.props.sections.length, 0);
-    assert.ok(text(h.list.props.ListEmptyComponent).includes(h.deps['@/lib/i18n'].t('nothingMatches')));
+    // An empty ledger says so (with ways to add one); "Nothing matches" is
+    // only for a search or filter that narrowed a ledger with rows in it.
+    const empty = text(h.list.props.ListEmptyComponent);
+    assert.ok(empty.includes(language === 'ar' ? 'لا توجد عمليات بعد' : 'No transactions yet'), empty);
+    assert.ok(!empty.includes(h.deps['@/lib/i18n'].t('nothingMatches')));
   });
 }
 
@@ -347,7 +352,7 @@ for (const language of ['en', 'ar']) test(`${language}: the transfer strip says 
   const words = h.deps['@/lib/transfer-activity-copy'].transferActivityCopy(language);
   const strip = walk(h.tree).find(n => n.props?.testID === 'transactions-separated-transfers');
   assert.ok(strip);
-  assert.ok(text(strip).includes(words.strip.kept(1)));
+  assert.ok(text(strip).includes(words.strip.listed(1)));
   assert.match(text(strip), language === 'en' ? /sent to others is in the net/ : /أُرسلت لآخرين ضمن الصافي/);
   assert.ok(/400/.test(text(strip)) && !/400\.00/.test(text(strip)), 'a whole amount shows no decimals');
   assert.ok(strip.props.accessibilityLabel.includes(words.viewAll));

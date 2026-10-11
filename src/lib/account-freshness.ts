@@ -45,10 +45,10 @@ const arabicDaysAgo = (n: number): string =>
 const words = {
   en: {
     bank: {
-      today: (time: string) => `Bank alert · today ${time}`,
-      yesterday: 'Bank alert · yesterday',
-      daysAgo: (n: number) => `Bank alert · ${n} days ago`,
-      quiet: (n: number) => `No bank alert for ${n} days`,
+      today: (time: string) => `Bank message · today ${time}`,
+      yesterday: 'Bank message · yesterday',
+      daysAgo: (n: number) => `Bank message · ${n} days ago`,
+      quiet: (n: number) => `No bank message for ${n} days`,
     },
     manual: {
       today: (time: string) => `Set by you · today ${time}`,
@@ -59,9 +59,9 @@ const words = {
   },
   ar: {
     bank: {
-      today: (time: string) => `تنبيه البنك · اليوم ${time}`,
-      yesterday: 'تنبيه البنك · أمس',
-      daysAgo: (n: number) => `تنبيه البنك · ${arabicDaysAgo(n)}`,
+      today: (time: string) => `رسالة البنك · اليوم ${time}`,
+      yesterday: 'رسالة البنك · أمس',
+      daysAgo: (n: number) => `رسالة البنك · ${arabicDaysAgo(n)}`,
       quiet: (n: number) => `لا تنبيهات من البنك منذ ${n} يوماً`,
     },
     manual: {

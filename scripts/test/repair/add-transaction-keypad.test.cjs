@@ -23,19 +23,31 @@ function harness({ ledgerMoney = { schemaVersion: 2, currency: 'USD', exponent: 
   h.deps['@/lib/universal-categorization'] = { suggestUniversalCategory: () => null };
   h.local('@/lib/review-alert-copy', 'src/lib/review-alert-copy.ts');
   h.local('@/components/universal-review-fields');
+  // The category picker is a boundary here: tests choose through its onToggle.
+  h.deps['@/components/ui/category-chips'] = { CategoryChips: 'CategoryChips' };
   const store = h.deps['@/lib/store'].useStore();
   store.getStateGeneration = () => 0;
   store.getStateSnapshot = () => h.state;
   store.addTransaction = (input, spec) => h.events.push(['add', input, spec]);
   const render = () => { stateIndex = 0; refIndex = 0; return h.renderScreen('add-transaction'); };
   const press = (...keys) => { for (const key of keys) byType(render(), 'AmountKeypad').props.onKey(key); return render(); };
+  // A new entry starts with no category (no preselected Groceries), so a
+  // test that saves picks one first, as a person must.
+  const findChips = () => walk(render()).find((node) => node.type === 'CategoryChips');
+  const pickCategory = (category = 'groceries') => {
+    if (!findChips()) byId(render(), 'category-picker-trigger').props.onPress();
+    const chips = findChips();
+    assert.ok(chips, 'category picker');
+    if (chips.props.selected == null) chips.props.onToggle(category);
+  };
   const save = () => {
+    pickCategory();
     const button = walk(render()).find((node) => node.props?.onPress &&
       node.props.accessibilityLabel === h.deps['@/lib/i18n'].t('saveTransaction'));
     assert.ok(button, 'save button');
     button.props.onPress();
   };
-  return { ...h, render, press, save, store };
+  return { ...h, render, press, save, store, pickCategory, findChips };
 }
 
 test('the keypad writes exact minor units for a two-decimal ledger', () => {
@@ -165,4 +177,18 @@ test('an entry mounted during cold hydration takes its suggestion history from t
   h.state.transactions = [{ id: 'loaded', type: 'expense', category: 'entertainment',
     date: new Date().toISOString().slice(0, 10), amountFils: 999, accountId: 'cash' }];
   assert.ok(byId(h.render(), 'suggested-category-entertainment'));
+});
+
+test('a new entry starts with no category and asks for one before saving', () => {
+  const h = harness();
+  // Save moves focus to the first invalid group; the native focus bridge is a boundary here.
+  h.deps['react-native'] = { ...h.deps['react-native'], findNodeHandle: () => null,
+    AccessibilityInfo: { ...(h.deps['react-native'].AccessibilityInfo ?? {}), setAccessibilityFocus: () => {} } };
+  byId(h.render(), 'category-picker-trigger').props.onPress();
+  assert.equal(h.findChips().props.selected, null, 'no category is preselected');
+  h.press('5');
+  const button = walk(h.render()).find((node) => node.props?.onPress &&
+    node.props.accessibilityLabel === h.deps['@/lib/i18n'].t('saveTransaction'));
+  button.props.onPress();
+  assert.equal(h.events.find((event) => event[0] === 'add'), undefined, 'nothing is saved without a category');
 });

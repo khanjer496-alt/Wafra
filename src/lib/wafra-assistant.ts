@@ -1426,7 +1426,12 @@ function driverFinding(state: AppState, now: Date, request: AssistantFilters & {
   return {
     id: `${dimension}:${driver.key}`,
     title: `${title} · ${dimension}`,
-    body: `${formatLedgerMoney(driver.currentFils)} across ${driver.currentCount} purchase${driver.currentCount === 1 ? '' : 's'}, compared with ${formatLedgerMoney(driver.previousFils)} across ${driver.previousCount}. ${formatLedgerMoney(Math.abs(driver.deltaFils))} ${driver.deltaFils >= 0 ? 'higher' : 'lower'} in recorded spending.`,
+    // A side with no purchases is said in words: "compared with AED 0 across 0" read as a broken sentence.
+    body: driver.previousCount === 0
+      ? `${formatLedgerMoney(driver.currentFils)} across ${driver.currentCount} purchase${driver.currentCount === 1 ? '' : 's'}, with none recorded in the earlier period.`
+      : driver.currentCount === 0
+        ? `None recorded this period, after ${formatLedgerMoney(driver.previousFils)} across ${driver.previousCount} purchase${driver.previousCount === 1 ? '' : 's'} in the earlier period.`
+        : `${formatLedgerMoney(driver.currentFils)} across ${driver.currentCount} purchase${driver.currentCount === 1 ? '' : 's'}, compared with ${formatLedgerMoney(driver.previousFils)} across ${driver.previousCount}. ${formatLedgerMoney(Math.abs(driver.deltaFils))} ${driver.deltaFils >= 0 ? 'higher' : 'lower'} in recorded spending.`,
     evidence: [evidenceFor(state, now, 'Current contributions', fromMap(driver.currentContributionsFils), period),
       evidenceFor(state, now, 'Earlier contributions', fromMap(driver.previousContributionsFils), previous)],
     question: `Explore ${title}`,

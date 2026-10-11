@@ -121,6 +121,8 @@ function createWorkflowHarness(options={}) {
    d['@/lib/markets']={...d['@/lib/markets'],bankBrandForName:d['@/lib/markets']?.bankBrandForName??(()=>undefined)};
    d['@/lib/store']={...d['@/lib/store'],useStoreActions:d['@/lib/store'].useStoreActions??(()=>d['@/lib/store'].useStore())};
    if(!d['@/lib/transfer-batch'])h.local('@/lib/transfer-batch','src/lib/transfer-batch.ts');
+   if(!d['@/lib/transfer-people'])h.local('@/lib/transfer-people','src/lib/transfer-people.ts');
+   if(!d['@/components/transfers/transfer-person-row'])h.local('@/components/transfers/transfer-person-row');
    if(!d['@/lib/transfer-review-presentation'])h.local('@/lib/transfer-review-presentation','src/lib/transfer-review-presentation.ts');
    if(!d['@/hooks/use-transfer-batch'])h.local('@/hooks/use-transfer-batch','src/hooks/use-transfer-batch.ts');
    h.local('@/components/transfers/transfer-group-row');h.local('@/components/transfers/transfer-answer-sheet');
@@ -151,6 +153,7 @@ function createWorkflowHarness(options={}) {
    })};
    store.setPro=record('setPro');
    // The shared checkout and plan radios run from source, over the stubbed store.
+   h.local('@/lib/pro-plans','src/lib/pro-plans.ts');
    h.local('@/hooks/use-pro-checkout','src/hooks/use-pro-checkout.ts');
    h.local('@/components/pro/pro-plan-options');
   }
@@ -198,7 +201,8 @@ function createWorkflowHarness(options={}) {
    // The Goals step's Home preview names sections as Customize Home does.
    h.local('@/lib/customize-copy','src/lib/customize-copy.ts');
    h.local('@/lib/pattern','src/lib/pattern.ts');
-   Object.assign(d['@/lib/purchases'],{billingStore:()=>'play'});
+   Object.assign(d['@/lib/purchases'],{billingStore:()=>'play',yearlySavingPercent:()=>null});
+   h.local('@/lib/pro-plans','src/lib/pro-plans.ts');
    Object.assign(d['react-native-reanimated'],{ZoomIn:d['react-native-reanimated'].FadeInDown,useAnimatedProps:f=>f()});
    Object.assign(d['react-native-reanimated'].Easing,{bezier:()=>value=>value});
    d['react-native-safe-area-context'].useSafeAreaInsets=()=>({top:0,bottom:0,left:0,right:0});

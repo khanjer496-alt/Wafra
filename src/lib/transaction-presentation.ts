@@ -1,3 +1,4 @@
+import { structuralTitleLabel } from '@/lib/i18n';
 import type { Transaction } from '@/lib/types';
 import { isTransfer } from '@/lib/ledger';
 import { isTransferCandidate } from '@/lib/transfer-reconciliation';
@@ -75,10 +76,15 @@ export function transactionPresentation(row: Transaction, language = 'en', inter
     ? /^cash\s*back$/i.test(row.title.trim()) ? words.cashback
       : /^refund$/i.test(row.title.trim()) ? words.refund
         : row.category === 'other' ? words.received : null : null;
+  // A title the parser minted ("Incoming transfer", "Card payment", "Salary")
+  // is a label, not a merchant name: it reads in the app's language. A real
+  // merchant name passes through structuralTitleLabel untouched.
+  const minted = protectedTitle ? null : structuralTitleLabel(stored.trim(), language === 'ar' ? 'ar' : 'en');
   const title = protectedTitle ? stored : repayment ? words.repayment
     : purposeUnclear ? row.type === 'income' ? words.bankCredit : words.bankDebit
       : creditKind === words.cashback || creditKind === words.refund ? creditKind
-        : readableBankDescription(stored);
+        : minted !== null && minted !== stored.trim() ? minted
+          : readableBankDescription(stored);
   return {
     title, repayment, purposeUnclear,
     tag: repayment ? words.repaymentTag : purposeUnclear ? words.unclear : creditKind,

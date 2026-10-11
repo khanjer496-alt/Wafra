@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 
 import { Icon } from '@/components/ui/icon';
-import { Radius } from '@/constants/theme';
+import { BandPalettes, Radius } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
 import { resolveBankLogo, type ResolvedBankLogo } from '@/lib/bank-logo-resolver';
@@ -38,15 +38,18 @@ function BankAvatarInner({ account, size = 36 }: { account: Account; size?: numb
     };
   }, [account.bankName, allowRemote]);
 
-  const credit = account.cardType === 'credit';
-  const fallbackColor = credit ? theme.expenseSoftBg : theme.primarySoft;
-  // In dark mode the credit tile's soft red is nearly the sheet's own colour;
+  // A card's tile wears the Accounts slate, never the expense red: a pink
+  // tile beside every credit card read as an error on each of them.
+  const card = account.kind === 'card' || account.cardType !== undefined;
+  const slate = BandPalettes[dark ? 'dark' : 'light'].accounts;
+  const fallbackColor = card ? slate.glyphGround : theme.primarySoft;
+  // In dark mode the card tile's ground is close to the sheet's own colour;
   // its edge keeps the tile visible.
-  const fallbackEdge = dark && credit ? { borderWidth: 1, borderColor: theme.expenseSoftBorder } : null;
+  const fallbackEdge = dark && card ? { borderWidth: 1, borderColor: slate.rule } : null;
   const fallback = <Icon
-    name={account.kind === 'card' || account.cardType ? 'wallet' : 'bank'}
+    name={card ? 'wallet' : 'bank'}
     size={Math.round(size * 0.5)}
-    color={credit ? theme.expense : theme.primary}
+    color={card ? slate.tint : theme.primary}
   />;
 
   if (!allowRemote || !logo || failed) {

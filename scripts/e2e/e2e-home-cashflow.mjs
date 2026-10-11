@@ -25,6 +25,11 @@ try {
       for (const width of [320, 390]) {
         const context = await browser.newContext({ viewport: { width, height: 900 },
           locale: language === 'ar' ? 'ar-AE' : 'en-AE', colorScheme: mode, reducedMotion: 'reduce' });
+        // Home v3 opens on the Spent hero; the month line, Today and the week this
+        // suite reads are switched on in Customize Home (a v3 layout).
+        await context.addInitScript(layout => localStorage.setItem('wafra/ui/home-widgets/v1', layout), JSON.stringify({ version: 3,
+          order: ['greeting', 'hero', 'today', 'overview', 'week', 'activity', 'due', 'upcoming', 'transfers', 'insight', 'assistant', 'capture'],
+          hidden: ['due', 'upcoming', 'transfers', 'insight', 'assistant', 'capture'] }));
         await context.route('**/*', route => {
           const url = route.request().url();
           return url.startsWith(base + '/') || url.startsWith('data:') || url.startsWith('blob:')
@@ -36,12 +41,13 @@ try {
         const name = `${language}-${mode}-${width}`;
         try {
           await page.goto(base + '/', { waitUntil: 'networkidle' });
-          const summary = page.getByTestId('reference-home-summary');
+          const overview = page.getByTestId('home-section-overview');
+          const summary = overview.getByTestId('reference-home-summary');
           await summary.waitFor({ state: 'visible' });
           await page.evaluate(() => document.fonts.ready);
-          const incoming = page.getByTestId('home-income-summary');
-          const outgoing = page.getByTestId('home-spending-total');
-          const net = page.getByTestId('home-net-summary');
+          const incoming = overview.getByTestId('home-income-summary');
+          const outgoing = overview.getByTestId('home-spending-total');
+          const net = overview.getByTestId('home-net-summary');
           const labels = await Promise.all([incoming, outgoing, net].map(row => row.getAttribute('aria-label')));
           const visible = await Promise.all([incoming, outgoing, net].map(row => row.innerText()));
           assert.match(labels[0], language === 'ar' ? /^الدخل,/ : /^Income,/);
@@ -50,6 +56,14 @@ try {
           const amounts = labels.map(minor);
           assert.deepEqual(visible.map(minor), amounts, 'visible and accessible amounts are identical');
           assert.equal(amounts[2], amounts[0] - amounts[1], 'net reconciles exactly in cents');
+          // The Spent hero shows the same month's figures as the month line, to the cent.
+          const hero = page.getByTestId('home-section-hero');
+          const heroAmount = async id => minor((await hero.getByTestId(id).innerText())
+            .replace(/[A-Z]{3}|د\.إ\.?/g, ' ').replace(/^\s*([−-])\s*/, '-').trim());
+          assert.deepEqual([await heroAmount('home-income-summary'), await heroAmount('home-spending-total'), await heroAmount('home-net-summary')],
+            amounts, 'the hero and the month line agree on In, Spent and Net');
+          const heroLabel = await hero.getByTestId('home-hero-card').getAttribute('aria-label');
+          assert.match(heroLabel, language === 'ar' ? /^الإنفاق في / : /^Spent in /, 'the hero speaks its month first');
           const background = await summary.evaluate(node => {
             for (let n = node; n; n = n.parentElement) {
               const value = getComputedStyle(n).backgroundColor;

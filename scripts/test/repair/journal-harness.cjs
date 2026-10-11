@@ -40,7 +40,7 @@ function harness(options = {}) {
     captureOptOut: options.optOut ?? false, historyImport: options.history ?? null, privateMode: true,
     trialStartTs: options.trialStartTs ?? 0,
     founderPro: options.founderPro ?? false,
-    transactions: options.empty ? [] : transactions, accounts: [account], budgets: [], bills: [], cardDues: [],
+    transactions: options.empty ? [] : transactions, accounts: [account], budgets: options.budgets ?? [], bills: [], cardDues: options.cardDues ?? [],
     notSubscriptions: [], merchantOverrides: {}, marketId: 'AE', ledgerMoney: { currency: 'AED', exponent: 2 },
     reviewTray: { pending: options.reviews ? [{ expiresAt: Date.now() + 86400000 }] : [] },
   };
@@ -49,11 +49,11 @@ function harness(options = {}) {
     activityRows: state.transactions, accountById: new Map([['bank', account]]), internalTransactionIds: new Set(),
     activityDayTotals: options.dayTotals ?? dayTotals(state.transactions),
     unreadFormats: { count: 0, shouldPrompt: false }, uncategorised: { shouldPrompt: false, summary: { merchants: [], paymentPurposes: [], rowCount: 0, totalFils: 0 } },
-    upcoming: { items: options.empty ? [] : [{ id: 'utility', title: 'Electricity', kind: 'bill',
-      dateISO: '2026-09-09', daysLeft: 3, amountFils: 38000, overdue: false, urgent: false }] },
+    upcoming: { items: options.upcoming ?? (options.empty ? [] : [{ id: 'utility', title: 'Electricity', kind: 'bill',
+      dateISO: '2026-09-09', daysLeft: 3, amountFils: 38000, overdue: false, urgent: false }]) },
   };
   const native = { View: 'View', ActivityIndicator: 'ActivityIndicator', Text: 'Text', TextInput: 'TextInput', Pressable: 'Pressable', RefreshControl: 'RefreshControl',
-    useWindowDimensions: () => ({ width: options.width ?? 390, fontScale: options.largeText ? 1.3 : 1 }),
+    useWindowDimensions: () => ({ width: options.width ?? 390, height: options.height ?? 844, fontScale: options.fontScale ?? (options.largeText ? 1.3 : 1) }),
     Platform: { OS: options.platform ?? 'android' }, StyleSheet: { create: (style) => style, flatten: (style) => Object.assign({}, ...(Array.isArray(style) ? style.flat(Infinity).filter(Boolean) : [style])), hairlineWidth: 1 },
     Alert: { alert: (message) => events.push(['alert', message]) }, AppState: { addEventListener: () => ({ remove() {} }) },
     // Home defers its insight projection until interactions settle. Run it
@@ -204,8 +204,9 @@ function harness(options = {}) {
   dependencies['@noble/hashes/sha2.js'] = require('@noble/hashes/sha2.js');
   dependencies['@noble/hashes/utils.js'] = require('@noble/hashes/utils.js');
   dependencies['@/lib/transfer-reconciliation'] = load(path.join(root, 'src/lib/transfer-reconciliation.ts'), dependencies);
-  // Home counts the Transfers question card's queue (transferQuestionQueue), from source.
+  // Home counts every transfer waiting, as the Transfers card does (transferWaitingSummary), from source.
   dependencies['@/lib/transfer-activity'] = load(path.join(root, 'src/lib/transfer-activity.ts'), dependencies);
+  dependencies['@/lib/transfer-people'] = load(path.join(root, 'src/lib/transfer-people.ts'), dependencies);
   dependencies['@/lib/transfer-review-copy'] = load(path.join(root, 'src/lib/transfer-review-copy.ts'), dependencies);
   dependencies['@/lib/transfer-activity-copy'] = load(path.join(root, 'src/lib/transfer-activity-copy.ts'), dependencies);
   dependencies['@/lib/period'].inPeriod = require('../build/period.js').inPeriod;
@@ -213,6 +214,10 @@ function harness(options = {}) {
   dependencies['@/lib/ledger'] = load(path.join(root, 'src/lib/ledger.ts'), dependencies);
   const { TransactionRow } = load(path.join(root, 'src/components/transaction-row.tsx'), dependencies);
   dependencies['@/components/transaction-row'] = { TransactionRow };
+  // Home v3: the Spent hero, the transactions list and the Needs you pill
+  // from source, and the saved layout every case starts from (home-v3-harness.cjs).
+  dependencies['@/hooks/use-app-active'] = { useAppActive: () => true };
+  require('./home-v3-harness.cjs').installHomeV3(dependencies, { load, jsx, language, events, options });
   const { default: Home } = load(
     path.join(root, 'src/screens/journal-home-screen.tsx'),
     dependencies,

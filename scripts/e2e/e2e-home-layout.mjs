@@ -11,7 +11,9 @@ assert.ok(['localhost', '127.0.0.1', '[::1]'].includes(new URL(base).hostname));
 const out = path.resolve(process.env.OUT ?? 'artifacts/e2e-home-layout');
 await mkdir(out, { recursive: true });
 const prefsKey = 'wafra/ui/home-widgets/v1';
-const ids = ['greeting', 'overview', 'today', 'week', 'capture', 'due', 'upcoming', 'activity', 'assistant', 'insight'];
+const ids = ['greeting', 'hero', 'overview', 'today', 'week', 'capture', 'due', 'upcoming', 'activity', 'transfers', 'assistant', 'insight'];
+// Home v3 (owner decision): the greeting, the Spent hero and the transactions; the rest is off by default.
+const defaultHidden = ['today', 'overview', 'week', 'due', 'upcoming', 'transfers', 'insight', 'assistant', 'capture'];
 const executablePath = process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium';
 const browser = await chromium.launch(existsSync(executablePath) ? { executablePath } : {});
 const results = []; const errors = []; let assertions = 0;
@@ -81,7 +83,7 @@ async function seed(page, language, incomeFils = 50000) {
     localStorage.removeItem(prefsKey);
   }, { language, prefsKey, incomeFils });
   await page.reload({ waitUntil: 'networkidle' });
-  await page.getByTestId('home-section-overview').waitFor({ state: 'visible' });
+  await page.getByTestId('home-section-hero').waitFor({ state: 'visible' });
   await settle(page);
 }
 
@@ -124,13 +126,20 @@ try {
       const hugeIncome = scale === 3.1;
       await seed(page, language, hugeIncome ? 123456789 : 50000);
       const defaultRendered = await sections(page);
-      check(defaultRendered.includes('overview') && defaultRendered.includes('week') && defaultRendered.includes('capture'), true, 'primary content renders by default');
-      check(await page.getByTestId('home-fill-past').count(), 1, 'fixture exposes the optional import prompt before hiding capture');
+      check(defaultRendered, ['greeting', 'hero', 'activity'], 'Home v3 opens on the greeting, Spent and the transactions');
+      check(await page.getByTestId('home-fill-past').count(), 0, 'the optional import prompt is off by default with capture status');
       check(await page.getByTestId('home-screen').getByRole('img', { name: language === 'ar' ? 'نمطك' : 'Your pattern', exact: true }).count(), 1,
         'personal pattern is present before hiding greeting');
       await open();
       const defaultOrder = await rows(page);
-      check([...defaultOrder].sort(), [...ids].sort(), 'all ten Home sections are customizable');
+      check([...defaultOrder].sort(), [...ids].sort(), 'all twelve Home sections are customizable');
+      // Every earlier section is one switch away; switch on the ones this suite exercises.
+      for (const id of ['overview', 'week', 'capture']) await setVisible(id, true);
+      await done();
+      const shownRendered = await sections(page);
+      check(shownRendered.includes('overview') && shownRendered.includes('week') && shownRendered.includes('capture'), true, 'switched-on sections render');
+      check(await page.getByTestId('home-fill-past').count(), 1, 'fixture exposes the optional import prompt before hiding capture');
+      await open();
       check(await page.getByTestId('home-customize-fixed').count(), 0, 'money overview and capture are not fixed choices');
       await shot(page, `${name}-customize`, page.getByTestId('home-customize-overview'));
       // Move a former sheet section above former band content using actual buttons.
@@ -181,7 +190,7 @@ try {
       for (const id of ['home-fill-past', 'home-capture-ready', 'journal-import-controls']) {
         check(await page.getByTestId(id).count(), 0, `${id}: optional capture content follows its visibility`);
       }
-      check(await page.getByTestId('home-spending-total').count(), 0, 'primary total is actually hidden');
+      check(await page.getByTestId('journal-summary').count(), 0, 'the money overview is actually hidden');
       check(await page.getByTestId('home-week').count(), 0, 'daily graph is actually hidden');
       await page.reload({ waitUntil: 'networkidle' });
       await page.getByTestId('home-customize-link').waitFor({ state: 'visible' }); await settle(page);
@@ -205,14 +214,14 @@ try {
       await open(); // Reachable even with everything hidden.
       await tap(page.getByTestId('home-customize-reset'));
       await page.waitForFunction(key => {
-        const prefs = JSON.parse(localStorage.getItem(key) ?? 'null'); return prefs && prefs.hidden.length === 0;
+        const prefs = JSON.parse(localStorage.getItem(key) ?? 'null'); return prefs && prefs.hidden.length === 9;
       }, prefsKey);
       check(await rows(page), defaultOrder, 'reset restores the default full order');
-      check((await stored(page)).hidden, [], 'reset restores visibility');
+      check((await stored(page)).hidden, defaultHidden, 'reset restores the default visibility');
       await done();
       check(await sections(page), defaultRendered, 'reset restores the same available content');
       check(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, 'no document horizontal overflow');
-      await shot(page, `${name}-reset`, page.getByTestId('home-section-overview'));
+      await shot(page, `${name}-reset`, page.getByTestId('home-section-hero'));
       results.push({ name, passed: true }); console.log(`PASS ${name}`);
     } catch (error) {
       results.push({ name, passed: false, error: String(error) });

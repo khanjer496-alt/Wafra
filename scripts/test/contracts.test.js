@@ -459,14 +459,11 @@ function ktSources(dir) {
   );
   ok('the paywall builds no English sentence inline', suspects.length === 0, suspects.slice(0, 3));
 
-  const { PRO_PRICES, yearlySavingMonths } = require('./build/purchases');
-  const months = yearlySavingMonths();
-  const saved = PRO_PRICES.monthly.fils * 12 - PRO_PRICES.yearly.fils;
-  ok('the yearly saving is derived from the prices, not written down',
-    months === Math.floor(saved / PRO_PRICES.monthly.fils) && months > 0,
-    { months, saved });
-  ok('no hard-coded month count survives in the copy',
-    !/\d+ months free/.test(fs.readFileSync(path.join(ROOT, 'src/lib/i18n.ts'), 'utf8')));
+  ok('the yearly saving is derived from the store prices, not written down',
+    /yearlySavingPercent\(offers\)/.test(read('src/hooks/use-pro-checkout.ts')) &&
+      /yearlySavingPercent\(checkout\.offers\)/.test(read('src/components/onboarding/e-paywall.tsx')));
+  ok('no hard-coded saving survives in the copy',
+    !/\d+ months free|[Ss]ave \d+\s?%/.test(fs.readFileSync(path.join(ROOT, 'src/lib/i18n.ts'), 'utf8')));
 
   const store = fs.readFileSync(path.join(ROOT, 'src/lib/store.tsx'), 'utf8');
   ok('an editable ledger backup cannot grant Pro or restart the trial',
@@ -1371,8 +1368,8 @@ function ktSources(dir) {
 
   for (const [key, english] of [
     ['captureIosNeedsAutomation', 'Finish the one-time Message automation'],
-    ['captureIosWaitingForAlert', 'Ready — waiting for the first bank alert'],
-    ['captureIosFirstAlertCaptured', 'First bank alert captured locally'],
+    ['captureIosWaitingForAlert', 'Ready — waiting for the first bank message'],
+    ['captureIosFirstAlertCaptured', 'First bank message captured locally'],
     ['captureIosQueueWarning', 'Capture needs attention; open recovery'],
     ['captureIosMigrationRetry', 'Local capture works; finish retiring the old Shortcut upload'],
   ]) {
@@ -1401,11 +1398,11 @@ function ktSources(dir) {
   )?.[0] || '';
   ok('Home waiting state qualifies local no-upload truth against the old uploading automation',
     /active[\s\S]*?Platform\.OS === 'ios' \? t\('captureIosLocalPrivacy'\)/.test(home) &&
-      /new bank-alert capture path/.test(localPrivacyDetail) &&
+      /new bank-message capture path/.test(localPrivacyDetail) &&
       /does not upload/.test(localPrivacyDetail) &&
       /old Wafra Capture automation may still upload/.test(localPrivacyDetail) &&
       /until removed or retired/.test(localPrivacyDetail) &&
-      /مسار التقاط التنبيهات المصرفية الجديد/.test(localPrivacyDetail) &&
+      /مسار الالتقاط الجديد رسائل البنك/.test(localPrivacyDetail) &&
       /Wafra Capture/.test(localPrivacyDetail) &&
       /تستمر[^\n]*في الرفع/.test(localPrivacyDetail));
   const migrationRetryDetail = copy.match(
@@ -1480,13 +1477,13 @@ function ktSources(dir) {
       /processed Message text is not retained in the ledger/.test(settingsAccuracyRow) &&
       /pending records expire after 30 days/.test(settingsAccuracyRow) &&
       /removed on the next queue access/.test(settingsAccuracyRow) &&
-      /parses new bank alerts on this iPhone/.test(iosAccuracyCopy) &&
+      /parses new bank messages on this iPhone/.test(iosAccuracyCopy) &&
       /Successfully processed raw text is deleted/.test(iosAccuracyCopy) &&
       !/low-confidence text can remain/.test(iosAccuracyCopy) &&
       /protected pending records expire after 30 days/.test(iosAccuracyCopy) &&
       /removed on the next queue access/.test(iosAccuracyCopy) &&
       /old Wafra Capture relay never included Message text/.test(iosAccuracyCopy) &&
-      /يعالج[^\n]*التنبيهات المصرفية الجديدة/.test(iosAccuracyCopy) &&
+      /يعالج[^\n]*رسائل البنك الجديدة/.test(iosAccuracyCopy) &&
       /٣٠ يوماً/.test(iosAccuracyCopy));
 
   const purchases = read('src/lib/purchases.ts');
@@ -1499,8 +1496,8 @@ function ktSources(dir) {
       /Platform\.OS === 'ios'\) return 'localAutomation'/.test(purchases) &&
       !/relayCapture/.test(purchases) && !/relayCapture/.test(proScreen) &&
       /autoCaptureMethod\(\) === 'localAutomation'/.test(proScreen) &&
-      /Supported bank alerts passed by your personal automation are processed locally/.test(proIosCopy) &&
-      /تنبيهات البنوك المدعومة/.test(proIosCopy));
+      /Supported bank messages passed by your personal automation are processed locally/.test(proIosCopy) &&
+      /رسائل البنوك المدعومة/.test(proIosCopy));
 }
 
 /* ── the budget editor answers the same question as the budget bar ──── */
@@ -1666,7 +1663,7 @@ function ktSources(dir) {
   const an = read('src/lib/analytics.ts');
   const calls = an.match(/isSpending\([^)]*\)/g) ?? [];
   ok('every analytics rollup applies both exclusions',
-    calls.length === 7 && calls.every((c) => c === 'isSpending(t, live, internal)'),
+    calls.length === 8 && calls.every((c) => c === 'isSpending(t, live, internal)'),
     calls.join(' | '));
 
   // The one insight that names a single row rather than a total. It sits on

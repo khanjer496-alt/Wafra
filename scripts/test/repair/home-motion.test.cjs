@@ -217,9 +217,12 @@ function homeProbe(options = {}) {
     dispose() { for (const slot of slots) slot?.cleanup?.(); },
   };
 }
-const isArrival = (node) => node.type?.name === 'ArrivingRow';
-const arrived = (tree) => walk(tree).filter(isArrival).map((node) => node.key);
-const shownRows = (tree) => walk(tree).filter((node) => node.props?.transaction?.id).map((node) => node.props.transaction.id);
+// Home v3 hands its rows to HomeRecent (src/components/home/home-recent.tsx) with the row that
+// arrived and the screen's ArrivingRow; that component wraps only that row (home-v3.test.cjs).
+const recent = (tree) => walk(tree).find((node) => node.type?.name === 'HomeRecent');
+const arrived = (tree) => { const list = recent(tree); const id = list?.props.arrivedRowId;
+  return id && list.props.rows.some((row) => row.id === id) ? [id] : []; };
+const shownRows = (tree) => recent(tree)?.props.rows.map((row) => row.id) ?? [];
 /** A live capture (a bank text) the phone just received, or one from `ageMs` ago. */
 const capture = (id, date, amountFils, ageMs = 0) => ({ ...expense(id, date, amountFils), ts: Date.now() - ageMs });
 
@@ -232,7 +235,7 @@ test('a live capture landing at the top of Recent transactions arrives; first pa
   p.state = { ...p.state, transactions: [capture('new-capture', '2026-09-06', 1850), ...p.state.transactions] };
   const landed = p.render();
   assert.deepEqual(arrived(landed), ['new-capture']);
-  assert.equal(walk(landed).filter(isArrival).length, 1, 'only the arriving row is wrapped; the rest are plain');
+  assert.equal(recent(landed).props.Arriving.name, 'ArrivingRow', 'the arriving row carries the arrival from the screen');
   assert.ok(shownRows(landed).includes('new-capture'));
   assert.deepEqual(arrived(p.render()), ['new-capture'], 'the same mount keeps it until another arrives');
   p.state = { ...p.state, transactions: [capture('second', '2026-09-06', 400), ...p.state.transactions] };

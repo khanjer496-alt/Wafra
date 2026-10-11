@@ -27,7 +27,7 @@ const S = {
   // Rows added automatically from an unverified bank-alert format.
   autoAddedCheck: { en: 'Auto-added — check', ar: 'أُضيفت تلقائيًا — راجِعها' },
   autoAddedExplain: {
-    en: 'Wafra added this from a bank alert format it has not verified yet. Check the amount, date and whether money left or arrived.',
+    en: 'Wafra added this from a bank message format it has not verified yet. Check the amount, date and whether money left or arrived.',
     ar: 'أضاف وفرة هذه العملية من صيغة رسالة بنكية لم يتحقق منها بعد. راجِع المبلغ والتاريخ وهل خرج المال أم دخل.',
   },
   autoAddedSettingSaveFailed: {
@@ -242,27 +242,27 @@ const S = {
   trackingPrivacy: { en: 'Wafra reads bank SMS on this device only', ar: 'وفرة تقرأ رسائل البنك على هذا الجهاز فقط' },
   automaticCapture: { en: 'Automatic capture', ar: 'الالتقاط التلقائي' },
   captureAndroidOn: {
-    en: 'Watching bank alerts',
-    ar: 'يراقب تنبيهات البنك',
+    en: 'Watching bank messages',
+    ar: 'يراقب رسائل البنك',
   },
   captureAndroidPrivate: {
     en: 'Parsed here · nothing uploaded',
     ar: 'تُحلَّل هنا · لا يُرفع شيء',
   },
   captureIosOn: {
-    en: 'Message automation verified by a bank alert',
-    ar: 'تم التحقق من أتمتة الرسائل بتنبيه بنكي',
+    en: 'Message automation verified by a bank message',
+    ar: 'تم التحقق من أتمتة الرسائل برسالة بنكية',
   },
   captureIosNeedsAutomation: {
     en: 'Finish the one-time Message automation',
     ar: 'أكمل إعداد أتمتة الرسائل لمرة واحدة',
   },
   captureIosWaitingForAlert: {
-    en: 'Ready — waiting for the first bank alert',
+    en: 'Ready — waiting for the first bank message',
     ar: 'جاهز — بانتظار أول تنبيه مصرفي',
   },
   captureIosFirstAlertCaptured: {
-    en: 'First bank alert captured locally',
+    en: 'First bank message captured locally',
     ar: 'تم التقاط أول تنبيه مصرفي محلياً',
   },
   captureIosQueueWarning: {
@@ -274,8 +274,8 @@ const S = {
     ar: 'يعمل الالتقاط المحلي؛ أكمل إيقاف رفع الاختصار القديم',
   },
   captureIosLocalPrivacy: {
-    en: 'The new bank-alert capture path processes Messages on this iPhone and does not upload their text. An old Wafra Capture automation may still upload until removed or retired.',
-    ar: 'يعالج مسار التقاط التنبيهات المصرفية الجديد الرسائل على هذا الآيفون ولا يرفع نصوصها. وقد تستمر أتمتة Wafra Capture القديمة في الرفع حتى تحذفها أو يكتمل إيقافها.',
+    en: 'The new bank-message capture path processes Messages on this iPhone and does not upload their text. An old Wafra Capture automation may still upload until removed or retired.',
+    ar: 'يعالج مسار الالتقاط الجديد رسائل البنك على هذا الآيفون ولا يرفع نصوصها. وقد تستمر أتمتة Wafra Capture القديمة في الرفع حتى تحذفها أو يكتمل إيقافها.',
   },
   captureIosQueueWarningDetail: {
     en: 'This status shows only source-free counts. Accepted pending records may keep Message text and sender protected and encrypted on this iPhone; they expire after 30 days and are removed the next time capture runs or Wafra checks the queue.',
@@ -325,7 +325,7 @@ const S = {
     en: 'Private pipe verified · Message automation not proven yet',
     ar: 'تم التحقق من المسار الخاص · لم تثبت أتمتة الرسائل بعد',
   },
-  captureIosOff: { en: 'Set up bank alerts', ar: 'إعداد تنبيهات البنك' },
+  captureIosOff: { en: 'Set up bank messages', ar: 'إعداد رسائل البنك' },
   captureIosRevoked: {
     en: 'This iPhone was removed · capture stopped',
     ar: 'أُزيل هذا الآيفون · توقّف الالتقاط',
@@ -338,7 +338,7 @@ const S = {
     en: 'Could not refresh. Pull down to try again.',
     ar: 'تعذّر التحديث. اسحب للأسفل للمحاولة مرة أخرى.',
   },
-  capturePhoneOnly: { en: 'Bank alerts need the phone app', ar: 'تنبيهات البنك تتطلب تطبيق الهاتف' },
+  capturePhoneOnly: { en: 'Bank messages need the phone app', ar: 'رسائل البنك تتطلب تطبيق الهاتف' },
   captureReady: { en: 'ON', ar: 'مفعّل' },
   captureFinish: { en: 'FINISH', ar: 'أكمل' },
   captureRecover: { en: 'RECOVER', ar: 'استرداد' },
@@ -360,7 +360,7 @@ const S = {
   genericUsePasteDate: { en: 'Use date added', ar: 'استخدم تاريخ الإضافة' },
   genericReviewCount: { en: 'Review {count} alert{s}', ar: 'راجع التنبيهات: {count}' },
   genericReviewSaveFailed: { en: 'Could not save these details for review. Try again.', ar: 'تعذر حفظ هذه التفاصيل للمراجعة. حاول مجدداً.' },
-  genericReviewTitle: { en: 'Check bank alert', ar: 'تحقق من تنبيه البنك' },
+  genericReviewTitle: { en: 'Check bank message', ar: 'تحقق من رسالة البنك' },
   genericReviewDetails: { en: 'Review details', ar: 'راجع التفاصيل' },
   genericUnverifiedIssuer: { en: 'Issuer not verified', ar: 'الجهة المرسلة غير متحققة' },
   genericStatement: { en: 'Card statement', ar: 'كشف البطاقة' },
@@ -417,7 +417,7 @@ const S = {
     ar: 'يُحفظ بعملة {ledger} بالسعر المرجعي لهذا اليوم، مع الاحتفاظ بالمبلغ بعملة {currency}.',
   },
   genericSourceChanged: { en: 'This alert changed or expired. Reopen it to review.', ar: 'تغير هذا التنبيه أو انتهت صلاحيته. افتحه مجدداً للمراجعة.' },
-  reviewAlertsTitle: { en: 'Bank alerts needing help', ar: 'تنبيهات بنكية تحتاج مساعدتك' },
+  reviewAlertsTitle: { en: 'Bank messages needing help', ar: 'رسائل بنكية تحتاج مساعدتك' },
   reviewAlertsHomeCount: {
     en: '{count} alert{s} to review',
     ar: '{count} تنبيه مالي للمراجعة',
@@ -432,8 +432,8 @@ const S = {
     ar: 'راجع التفاصيل الملتقطة قبل إضافة أي شيء إلى سجلك.',
   },
   reviewAlertsPrivacy: {
-    en: 'Only a structured summary is kept here. The bank-alert text is not stored.',
-    ar: 'يُحفظ هنا ملخص منظّم فقط. لا يُحفظ نص التنبيه البنكي.',
+    en: 'Only a structured summary is kept here. The bank message text is not stored.',
+    ar: 'يُحفظ هنا ملخص منظّم فقط. لا يُحفظ نص الرسالة البنكية.',
   },
   reviewAlertsEmptyTitle: { en: 'All clear', ar: 'تمت مراجعة كل شيء' },
   reviewAlertsEmptyBody: {
@@ -578,7 +578,7 @@ const S = {
   billsSummaryEstimated: { en: '{count} estimated', ar: '{count} تقديرية' },
   noCardDues: { en: 'No card payments due', ar: 'لا مستحقات على البطاقات' },
   noCardDuesText: {
-    en: 'When your bank sends a statement SMS, the amount and pay-by date show up here.',
+    en: 'When your bank sends a statement message, the amount and pay-by date show up here.',
     ar: 'عند وصول رسالة كشف الحساب من البنك، يظهر المبلغ وتاريخ السداد هنا.',
   },
   dueAcrossCards: { en: 'Due across cards', ar: 'المستحق على البطاقات' },
@@ -605,8 +605,8 @@ const S = {
   totalPaid: { en: 'Total paid', ar: 'إجمالي المدفوع' },
   paidWith: { en: 'Paid with', ar: 'الدفع عبر' },
   paymentInstrumentNotStated: {
-    en: 'Card or account not stated in the bank alert',
-    ar: 'لم يحدد التنبيه البنكي البطاقة أو الحساب',
+    en: 'Card or account not stated in the bank message',
+    ar: 'لم تحدد الرسالة البنكية البطاقة أو الحساب',
   },
   paymentInstrumentMissingCount: {
     en: '{count} payment{s} did not state a card or account',
@@ -780,8 +780,8 @@ const S = {
   // A credit card's open statement, less what was paid on it: not the card's whole balance.
   statementLeftToPay: { en: 'statement left to pay', ar: 'المتبقي من الكشف' },
   nothingSpentThisMonth: { en: 'nothing spent this month', ar: 'لا مصروف هذا الشهر' },
-  perBankSms: { en: 'per bank SMS', ar: 'حسب رسالة البنك' },
-  noBalanceYet: { en: 'no balance SMS yet', ar: 'لا رسالة رصيد بعد' },
+  perBankSms: { en: 'per bank message', ar: 'حسب رسالة البنك' },
+  noBalanceYet: { en: 'no balance message yet', ar: 'لا رسالة رصيد بعد' },
   trackedManually: { en: 'Tracked manually', ar: 'يُتابع يدويًا' },
   // The other branch added a second `reminderSet` here, reading "Reminder on",
   // for the chip on a Bills row. There is already a `reminderSet` further down
@@ -841,8 +841,8 @@ const S = {
     ar: 'لم تتضمن العمليات التي سلّمها مُرحّل Wafra Capture القديم نص الرسالة، لذلك لا يمكن أن تظهر في هذه القائمة ولا يعني خلوّها أن تلك العمليات خضعت للتدقيق. أما تشخيص البطاقات بالأسفل فيعرض ما فعله السجل بكل عملية مرتبطة ببطاقة.',
   },
   formatsNotKeptIosLocal: {
-    en: 'Local capture parses new bank alerts on this iPhone. Successfully processed raw text is deleted before the ledger or accuracy report retains it; protected pending records expire after 30 days and are removed on the next queue access. Rows from the old Wafra Capture relay never included Message text, so this list cannot audit those legacy rows. The card diagnostic below still works for every card row.',
-    ar: 'يعالج الالتقاط المحلي التنبيهات المصرفية الجديدة على هذا الآيفون. يُحذف النص الخام بعد نجاح المعالجة قبل أن يحتفظ به السجل أو تقرير الدقة؛ وتنتهي صلاحية السجلات المعلّقة المحمية بعد ٣٠ يوماً وتُزال عند الوصول التالي إلى الصف. لم تتضمن عمليات مُرحّل Wafra Capture القديم نص الرسالة، لذلك لا تستطيع هذه القائمة تدقيق تلك العمليات القديمة. ويعمل تشخيص البطاقات بالأسفل لكل عملية مرتبطة ببطاقة.',
+    en: 'Local capture parses new bank messages on this iPhone. Successfully processed raw text is deleted before the ledger or accuracy report retains it; protected pending records expire after 30 days and are removed on the next queue access. Rows from the old Wafra Capture relay never included Message text, so this list cannot audit those legacy rows. The card diagnostic below still works for every card row.',
+    ar: 'يعالج الالتقاط المحلي رسائل البنك الجديدة على هذا الآيفون. يُحذف النص الخام بعد نجاح المعالجة قبل أن يحتفظ به السجل أو تقرير الدقة؛ وتنتهي صلاحية السجلات المعلّقة المحمية بعد ٣٠ يوماً وتُزال عند الوصول التالي إلى الصف. لم تتضمن عمليات مُرحّل Wafra Capture القديم نص الرسالة، لذلك لا تستطيع هذه القائمة تدقيق تلك العمليات القديمة. ويعمل تشخيص البطاقات بالأسفل لكل عملية مرتبطة ببطاقة.',
   },
   formatsNotKeptPrivate: {
     en: 'Private Mode removes diagnostic Message text from the ledger and prevents new ledger entries from retaining it, so this list cannot identify misread formats. Local capture still works; protected pending records expire after 30 days and are removed on the next queue access. The card diagnostic below still reports what the ledger did with every card row.',
@@ -906,8 +906,8 @@ const S = {
   // the app asks them once per shop instead of shipping another release.
   categoriseMerchants: { en: 'Improve categories', ar: 'تحسين التصنيفات' },
   categoriseIntro: {
-    en: 'Wafra reads the shop name off your bank alert but cannot know what it sells. Choose once and every entry from that shop moves with it — the ones already in your ledger, and the ones still to come.',
-    ar: 'تقرأ وفرة اسم المتجر من تنبيه البنك لكنها لا تعرف ماذا يبيع. اختر التصنيف مرة واحدة وتنتقل معه كل عمليات هذا المتجر: الموجودة في سجلك والقادمة لاحقاً.',
+    en: 'Wafra reads the shop name off your bank message but cannot know what it sells. Choose once and every entry from that shop moves with it — the ones already in your ledger, and the ones still to come.',
+    ar: 'تقرأ وفرة اسم المتجر من رسالة البنك لكنها لا تعرف ماذا يبيع. اختر التصنيف مرة واحدة وتنتقل معه كل عمليات هذا المتجر: الموجودة في سجلك والقادمة لاحقاً.',
   },
   categoriseRemaining: {
     en: '{count} merchant{s} · {rows} entr{ending}',
@@ -1243,7 +1243,7 @@ const S = {
   },
   turnOnBankCaptureFirst: {
     en: 'Turn on bank capture first',
-    ar: 'فعّل التقاط تنبيهات البنك أولاً',
+    ar: 'فعّل التقاط رسائل البنك أولاً',
   },
   turnOnBankCaptureFirstBody: {
     en: 'Enable bank SMS reading or bank app notifications, then turn on per-transaction alerts.',
@@ -1255,7 +1255,7 @@ const S = {
   },
   instantAlertsSmsPermissionBody: {
     en: 'Instant banners need Android’s incoming SMS permission. Bank-alert history import still works with the separate SMS-reading permission.',
-    ar: 'تحتاج التنبيهات الفورية إذن أندرويد للرسائل الواردة. ويظل استيراد سجل تنبيهات البنك يعمل بإذن قراءة الرسائل المنفصل.',
+    ar: 'تحتاج التنبيهات الفورية إذن أندرويد للرسائل الواردة. ويظل استيراد سجل رسائل البنك يعمل بإذن قراءة الرسائل المنفصل.',
   },
   instantAlertsLivePermissionPrompt: {
     en: 'Live purchase alerts need incoming SMS access and Wafra notification permission. Enable them so Wafra can alert you as soon as a bank SMS arrives.',
@@ -1387,8 +1387,8 @@ const S = {
     ar: 'لا تحتفظ حالة الالتقاط والتنبيه في هذه الشاشة إلا بأعداد خالية من بيانات المصدر، ولا تحفظان نص الرسالة أو اسم المرسل. تبقى سجلات الرسائل المعلّقة في صف الالتقاط المحلي المحمي، وهو صف مشفّر قصير الأجل. وتنتهي صلاحيتها بعد ٣٠ يوماً وتُزال عند تشغيل الالتقاط أو فحص وفرة للصف في المرة التالية. ويستمر الالتقاط المحلي وفق تفضيلاتك المحفوظة.',
   },
   privacySecurityExact: {
-    en: 'Automatic capture is optional. Android SMS alerts are processed on this phone, and local iPhone capture never uploads SMS content. However, an old Wafra Shortcut automation can continue uploading the bank alerts you selected until you remove it or Wafra confirms retirement. Wafra cannot sign in to a bank, directly access your Messages inbox, reply, approve a payment or move money. For separately connected email, PDF or CSV imports, the encrypted relay parses them, discards raw text immediately, and returns only structured rows.',
-    ar: 'الالتقاط التلقائي اختياري. تُعالج تنبيهات رسائل أندرويد على هذا الهاتف، ولا يرفع الالتقاط المحلي على الآيفون محتوى الرسائل. لكن أتمتة الاختصار القديمة «Wafra Capture» قد تستمر في رفع تنبيهات البنوك التي اخترتها إلى أن تحذفها أو تؤكد وفرة اكتمال إيقافها. لا تستطيع وفرة تسجيل الدخول إلى بنك أو الوصول مباشرةً إلى صندوق رسائلك أو الرد أو الموافقة على دفعة أو نقل الأموال. أما واردات البريد أو PDF أو CSV المربوطة منفصلةً، فيحللها المرحّل المشفّر ويحذف النص فوراً ويعيد عمليات منظّمة فقط.',
+    en: 'Automatic capture is optional. Android SMS alerts are processed on this phone, and local iPhone capture never uploads SMS content. However, an old Wafra Shortcut automation can continue uploading the bank messages you selected until you remove it or Wafra confirms retirement. Wafra cannot sign in to a bank, directly access your Messages inbox, reply, approve a payment or move money. For separately connected email, PDF or CSV imports, the encrypted relay parses them, discards raw text immediately, and returns only structured rows.',
+    ar: 'الالتقاط التلقائي اختياري. تُعالج تنبيهات رسائل أندرويد على هذا الهاتف، ولا يرفع الالتقاط المحلي على الآيفون محتوى الرسائل. لكن أتمتة الاختصار القديمة «Wafra Capture» قد تستمر في رفع رسائل البنوك التي اخترتها إلى أن تحذفها أو تؤكد وفرة اكتمال إيقافها. لا تستطيع وفرة تسجيل الدخول إلى بنك أو الوصول مباشرةً إلى صندوق رسائلك أو الرد أو الموافقة على دفعة أو نقل الأموال. أما واردات البريد أو PDF أو CSV المربوطة منفصلةً، فيحللها المرحّل المشفّر ويحذف النص فوراً ويعيد عمليات منظّمة فقط.',
   },
   country: { en: 'Country', ar: 'الدولة' },
   language: { en: 'Language', ar: 'اللغة' },
@@ -1402,7 +1402,7 @@ const S = {
     en: 'Add history from one or several PDF, CSV, or TSV statements',
     ar: 'أضف السجل من كشف واحد أو عدة كشوف PDF أو CSV أو TSV',
   },
-  settingsAlertDeliveryHeader: { en: 'Bank alerts', ar: 'تنبيهات البنك' },
+  settingsAlertDeliveryHeader: { en: 'Bank messages', ar: 'رسائل البنك' },
   settingsAlertDeliveryTitle: { en: 'How your bank reaches you', ar: 'كيف يصلك بنكك' },
   settingsAlertDeliveryUnset: { en: 'Not set — this decides how far back Wafra can go', ar: 'غير محدد — هذا يحدد إلى أي مدى يستطيع وفرة الرجوع' },
   statementImportNoCaptureDetail: {
@@ -1538,8 +1538,8 @@ const S = {
     ar: 'الالتقاط التلقائي مشمول لمدة {left} يوم إضافي.',
   },
   proTrialEndedBody: {
-    en: 'Automatic bank-alert capture is paused. Your ledger and manual entries still work.',
-    ar: 'توقف الالتقاط التلقائي لتنبيهات البنك. يظل سجلك والإدخال اليدوي متاحين.',
+    en: 'Automatic bank-message capture is paused. Your ledger and manual entries still work.',
+    ar: 'توقف الالتقاط التلقائي لرسائل البنك. يظل سجلك والإدخال اليدوي متاحين.',
   },
   proBenefitsTitle: { en: 'Included with Pro', ar: 'مشمول مع برو' },
   proChoosePlan: { en: 'Choose your plan', ar: 'اختر خطتك' },
@@ -1548,10 +1548,12 @@ const S = {
     en: 'Charged {price} when you confirm. Renews yearly until cancelled.',
     ar: 'يُخصم {price} عند التأكيد، ثم يتجدد سنوياً حتى الإلغاء.',
   },
-  proChargeTimingMonth: {
-    en: 'Charged {price} when you confirm. Renews monthly until cancelled.',
-    ar: 'يُخصم {price} عند التأكيد، ثم يتجدد شهرياً حتى الإلغاء.',
+  proChargeTimingWeek: {
+    en: 'Charged {price} when you confirm. Renews weekly until cancelled.',
+    ar: 'يُخصم {price} عند التأكيد، ثم يتجدد أسبوعياً حتى الإلغاء.',
   },
+  proMostPopular: { en: 'Most popular', ar: 'الأكثر اختياراً' },
+  proYearlyPerWeek: { en: 'Just {price} a week', ar: 'فقط {price} أسبوعياً' },
   proStoreConfirmsPrice: {
     en: 'Your store shows the exact charge and renewal details before you confirm.',
     ar: 'يعرض المتجر المبلغ الدقيق وتفاصيل التجديد قبل التأكيد.',
@@ -1577,8 +1579,8 @@ const S = {
   purchaseInProgress: { en: 'Opening the store…', ar: 'جارٍ فتح المتجر…' },
   restorePurchase: { en: 'Restore purchase', ar: 'استعادة الشراء' },
   yearly: { en: 'YEARLY', ar: 'سنوي' },
-  monthly: { en: 'MONTHLY', ar: 'شهري' },
-  perMonth: { en: 'per month', ar: 'شهرياً' },
+  weekly: { en: 'WEEKLY', ar: 'أسبوعي' },
+  perWeek: { en: 'per week', ar: 'أسبوعياً' },
   transferLabel: { en: 'Transfer', ar: 'تحويل' },
   // ── strings screens used to write in English inline ──
   noScreenLock: { en: 'No screen lock set up', ar: 'لا يوجد قفل شاشة' },
@@ -1667,16 +1669,16 @@ const S = {
     ar: 'تحقق من وجود اختصار قديم',
   },
   shortcutCleanupErased: {
-    en: 'Everything on this phone is gone and the relay rejects this iPhone’s token from now on. If you previously installed the old “Wafra Capture” automation, it can remain in Shortcuts and keep sending selected bank alerts over the network, where they are now refused. Check Shortcuts → Automation and My Shortcuts, and delete the old Wafra items if present.',
-    ar: 'حُذف كل شيء على هذا الهاتف وأصبح المرحّل يرفض رمز هذا الآيفون من الآن. إذا سبق أن ثبّتَّ أتمتة «Wafra Capture» القديمة فقد تبقى في تطبيق الاختصارات وتواصل إرسال تنبيهات البنوك المحددة عبر الشبكة، حيث تُرفض الآن. تحقق من «الاختصارات» ← «الأتمتة» ومن «اختصاراتي»، واحذف عناصر Wafra القديمة إن وُجدت.',
+    en: 'Everything on this phone is gone and the relay rejects this iPhone’s token from now on. If you previously installed the old “Wafra Capture” automation, it can remain in Shortcuts and keep sending selected bank messages over the network, where they are now refused. Check Shortcuts → Automation and My Shortcuts, and delete the old Wafra items if present.',
+    ar: 'حُذف كل شيء على هذا الهاتف وأصبح المرحّل يرفض رمز هذا الآيفون من الآن. إذا سبق أن ثبّتَّ أتمتة «Wafra Capture» القديمة فقد تبقى في تطبيق الاختصارات وتواصل إرسال رسائل البنوك المحددة عبر الشبكة، حيث تُرفض الآن. تحقق من «الاختصارات» ← «الأتمتة» ومن «اختصاراتي»، واحذف عناصر Wafra القديمة إن وُجدت.',
   },
   shortcutCleanupLeft: {
-    en: 'This iPhone’s relay token is revoked, so nothing it sends can be filed again. If you previously installed the old “Wafra Capture” automation, it can remain in Shortcuts and keep forwarding selected bank alerts over the network, where they are now refused. Check Shortcuts → Automation and My Shortcuts, and delete the old Wafra items if present.',
-    ar: 'أُلغي رمز ترحيل هذا الآيفون، فلن يُسجَّل أي شيء يرسله بعد الآن. إذا سبق أن ثبّتَّ أتمتة «Wafra Capture» القديمة فقد تبقى في تطبيق الاختصارات وتواصل تمرير تنبيهات البنوك المحددة عبر الشبكة، حيث تُرفض الآن. تحقق من «الاختصارات» ← «الأتمتة» ومن «اختصاراتي»، واحذف عناصر Wafra القديمة إن وُجدت.',
+    en: 'This iPhone’s relay token is revoked, so nothing it sends can be filed again. If you previously installed the old “Wafra Capture” automation, it can remain in Shortcuts and keep forwarding selected bank messages over the network, where they are now refused. Check Shortcuts → Automation and My Shortcuts, and delete the old Wafra items if present.',
+    ar: 'أُلغي رمز ترحيل هذا الآيفون، فلن يُسجَّل أي شيء يرسله بعد الآن. إذا سبق أن ثبّتَّ أتمتة «Wafra Capture» القديمة فقد تبقى في تطبيق الاختصارات وتواصل تمرير رسائل البنوك المحددة عبر الشبكة، حيث تُرفض الآن. تحقق من «الاختصارات» ← «الأتمتة» ومن «اختصاراتي»، واحذف عناصر Wafra القديمة إن وُجدت.',
   },
   shortcutCleanupUncertain: {
-    en: 'Wafra could not confirm that this iPhone’s relay token was revoked. Automatic capture is off in Wafra. If you previously installed the old “Wafra Capture” automation, it may still forward selected bank alerts over the network. Delete the old Wafra items if present in Shortcuts → Automation or My Shortcuts, then retry disconnection when you are online.',
-    ar: 'تعذّر على وفرة تأكيد إلغاء رمز ترحيل هذا الآيفون. الالتقاط التلقائي متوقف داخل وفرة. إذا سبق أن ثبّتَّ أتمتة «Wafra Capture» القديمة فقد تستمر في تمرير تنبيهات البنوك المحددة عبر الشبكة. احذف عناصر Wafra القديمة إن وُجدت من «الاختصارات» ← «الأتمتة» أو «اختصاراتي»، ثم أعد محاولة الفصل عند توفر الإنترنت.',
+    en: 'Wafra could not confirm that this iPhone’s relay token was revoked. Automatic capture is off in Wafra. If you previously installed the old “Wafra Capture” automation, it may still forward selected bank messages over the network. Delete the old Wafra items if present in Shortcuts → Automation or My Shortcuts, then retry disconnection when you are online.',
+    ar: 'تعذّر على وفرة تأكيد إلغاء رمز ترحيل هذا الآيفون. الالتقاط التلقائي متوقف داخل وفرة. إذا سبق أن ثبّتَّ أتمتة «Wafra Capture» القديمة فقد تستمر في تمرير رسائل البنوك المحددة عبر الشبكة. احذف عناصر Wafra القديمة إن وُجدت من «الاختصارات» ← «الأتمتة» أو «اختصاراتي»، ثم أعد محاولة الفصل عند توفر الإنترنت.',
   },
   /**
    * Removing SOMEBODY ELSE'S iPhone. Their Shortcut is on their phone, which
@@ -1684,8 +1686,8 @@ const S = {
    * button anyone here can press.
    */
   trustedRemoveShortcutNote: {
-    en: 'If that device is an iPhone and its owner previously installed the old Wafra Capture automation, it can remain there and keep sending selected bank alerts to the relay — refused from now on, but still leaving that phone. Ask its owner to check the Shortcuts app and delete the old Wafra items if present.',
-    ar: 'إذا كان ذلك الجهاز آيفون وسبق لمالكه تثبيت أتمتة Wafra Capture القديمة، فقد تبقى هناك وتواصل إرسال تنبيهات البنوك المحددة إلى المرحّل — وهي مرفوضة من الآن، لكنها تغادر ذلك الهاتف فعلاً. اطلب من مالكه التحقق من تطبيق الاختصارات وحذف عناصر Wafra القديمة إن وُجدت.',
+    en: 'If that device is an iPhone and its owner previously installed the old Wafra Capture automation, it can remain there and keep sending selected bank messages to the relay — refused from now on, but still leaving that phone. Ask its owner to check the Shortcuts app and delete the old Wafra items if present.',
+    ar: 'إذا كان ذلك الجهاز آيفون وسبق لمالكه تثبيت أتمتة Wafra Capture القديمة، فقد تبقى هناك وتواصل إرسال رسائل البنوك المحددة إلى المرحّل — وهي مرفوضة من الآن، لكنها تغادر ذلك الهاتف فعلاً. اطلب من مالكه التحقق من تطبيق الاختصارات وحذف عناصر Wafra القديمة إن وُجدت.',
   },
   activeOnThisDevice: { en: 'Active on this device', ar: 'مفعّل على هذا الجهاز' },
   founderProActive: { en: 'Founder access · active on this device', ar: 'وصول المؤسس · مفعّل على هذا الجهاز' },
@@ -1716,7 +1718,7 @@ const S = {
   stillLoading: { en: 'Still loading your data — try again in a second.', ar: 'ما زال تحميل بياناتك جارياً — أعد المحاولة بعد لحظة.' },
   upToDateNoNew: { en: 'Up to date. No new bank messages.', ar: 'كل شيء محدّث. لا رسائل بنكية جديدة.' },
   rescanHint: { en: 'Rescans your whole inbox and shows what would be filed. Cards are matched automatically and nothing imports twice. You can also paste messages below.', ar: 'يعيد فحص كل رسائلك ويعرض ما سيُسجَّل. تُطابَق البطاقات تلقائياً ولا يُستورد شيء مرتين. يمكنك أيضاً لصق رسائل بالأسفل.' },
-  pasteHint: { en: 'Paste one or more bank alerts below, separated by a blank line. Everything is read on this device.', ar: 'ألصق رسالة بنكية أو أكثر بالأسفل، بينها سطر فارغ. تُقرأ كلها على هذا الجهاز.' },
+  pasteHint: { en: 'Paste one or more bank messages below, separated by a blank line. Everything is read on this device.', ar: 'ألصق رسالة بنكية أو أكثر بالأسفل، بينها سطر فارغ. تُقرأ كلها على هذا الجهاز.' },
   whereItWent: { en: 'Where it went', ar: 'أين ذهبت' },
   addedByHand: { en: 'Added by hand', ar: 'أُضيفت يدوياً' },
   appLockPhoneOnly: { en: 'App lock works on the phone app only.', ar: 'قفل التطبيق يعمل على تطبيق الهاتف فقط.' },
@@ -1726,11 +1728,12 @@ const S = {
   hiddenFromLists: { en: 'Hidden from lists.', ar: 'مخفي من القوائم.' },
   markStatementPaid: { en: 'Mark this statement paid?', ar: 'تعليم هذا الكشف كمدفوع؟' },
   noCardPaymentYet: { en: 'No payment to this card has been detected yet.', ar: 'لم تُكتشف أي دفعة لهذه البطاقة بعد.' },
+  noBankPaymentMatched: { en: 'The paid amount was recorded in Wafra; no bank payment to this card is matched yet.', ar: 'سُجّل المبلغ المدفوع في وفرة، ولم تُطابَق بعد أي دفعة بنكية لهذه البطاقة.' },
   notRecurringQ: { en: 'Not a recurring charge?', ar: 'ليست عملية متكررة؟' },
   notifsAreOff: { en: 'Notifications are off', ar: 'الإشعارات مغلقة' },
   onboardPrivacyBody: {
-    en: 'Add entries yourself or connect supported bank alerts',
-    ar: 'أضف العمليات بنفسك أو اربط تنبيهات البنوك المدعومة',
+    en: 'Add entries yourself or connect supported bank messages',
+    ar: 'أضف العمليات بنفسك أو اربط رسائل البنوك المدعومة',
   },
   readMyInbox: { en: 'Read my inbox', ar: 'اقرأ رسائلي' },
   setCreditLimit: { en: 'Set credit limit', ar: 'تحديد حد الائتمان' },
@@ -1841,8 +1844,8 @@ const S = {
   onboardEyebrow: { en: 'YOUR MONEY, MADE CLEAR', ar: 'أموالك، بصورة أوضح' },
   onboardHeadline: { en: 'Your money,\nfinally clear.', ar: 'أموالك،\nواضحة أخيراً.' },
   onboardWelcomeBody: {
-    en: 'Bank alerts arrive separately. Wafra organizes them into one money view.',
-    ar: 'تصل تنبيهات البنك بشكل منفصل. ينظّمها وفرة في صورة مالية واحدة.',
+    en: 'Bank messages arrive separately. Wafra organizes them into one money view.',
+    ar: 'تصل رسائل البنك بشكل منفصل. ينظّمها وفرة في صورة مالية واحدة.',
   },
   onboardRegionalExample: { en: 'Examples from your region', ar: 'أمثلة من منطقتك' },
   onboardRegionalBankGeneric: { en: 'Bank', ar: 'بنك' },
@@ -1868,7 +1871,7 @@ const S = {
   onboardSceneThisMonth: { en: 'THIS MONTH', ar: 'هذا الشهر' },
   onboardSceneDueBills: { en: 'due · 3 bills', ar: 'مستحق · ٣ فواتير' },
   onboardSceneOrganized: { en: 'Organized automatically', ar: 'منظّمة تلقائياً' },
-  onboardSceneFromAlerts: { en: 'BANK ALERTS', ar: 'تنبيهات البنك' },
+  onboardSceneFromAlerts: { en: 'BANK MESSAGES', ar: 'رسائل البنك' },
   onboardSceneToLedger: { en: 'YOUR LEDGER', ar: 'سجلك' },
   onboardSceneRevealFootnote: { en: 'Same activity. Less mess.', ar: 'النشاط نفسه. فوضى أقل.' },
   onboardScenePreviewLabel: { en: 'PREVIEW', ar: 'معاينة' },
@@ -1885,7 +1888,7 @@ const S = {
   onboardTrackingSpreadsheetScene: { en: 'Wafra keeps new activity organized as it arrives.', ar: 'ينظّم وفرة النشاط الجديد عند وصوله.' },
   onboardTrackingFinanceScene: { en: 'Wafra does not need your bank login.', ar: 'لا يحتاج وفرة إلى تسجيل الدخول إلى بنكك.' },
   onboardTrackingFreshSceneTitle: { en: 'Start clean.', ar: 'ابدأ بصورة نظيفة.' },
-  onboardTrackingFreshSceneBody: { en: 'Start with your first entry or a supported bank alert.', ar: 'ابدأ بأول عملية أو بتنبيه بنك مدعوم.' },
+  onboardTrackingFreshSceneBody: { en: 'Start with your first entry or a supported bank message.', ar: 'ابدأ بأول عملية أو برسالة بنك مدعومة.' },
   onboardSceneYourView: { en: 'Your Wafra view', ar: 'صورتك في وفرة' },
   onboardCaptureSceneIncoming: { en: 'Bank activity arrives', ar: 'يصل نشاط البنك' },
   onboardCaptureSceneOrganized: { en: 'Wafra files supported activity into your ledger.', ar: 'ينظّم وفرة النشاط المدعوم في سجلك.' },
@@ -1999,8 +2002,8 @@ const S = {
   },
   onboardBasedOnAnswers: { en: 'BASED ON YOUR ANSWERS', ar: 'بناءً على إجاباتك' },
   onboardConnectMyMoney: { en: 'Choose how to track', ar: 'اختر طريقة التتبع' },
-  onboardOutcomeBody: { en: 'Supported bank alerts become a clean ledger, then Wafra turns that ledger into the view you chose.', ar: 'تتحول تنبيهات البنك المدعومة إلى سجل واضح، ثم يحوّل وفرة هذا السجل إلى الصورة التي اخترتها.' },
-  onboardOutcomeTrackingNone: { en: 'No system to clean up. Wafra can start organizing from your first real entry or supported bank alert.', ar: 'لا يوجد نظام قديم لترتيبه. يمكن لوفرة أن يبدأ التنظيم من أول عملية حقيقية أو تنبيه بنك مدعوم.' },
+  onboardOutcomeBody: { en: 'Supported bank messages become a clean ledger, then Wafra turns that ledger into the view you chose.', ar: 'تتحول رسائل البنك المدعومة إلى سجل واضح، ثم يحوّل وفرة هذا السجل إلى الصورة التي اخترتها.' },
+  onboardOutcomeTrackingNone: { en: 'No system to clean up. Wafra can start organizing from your first real entry or supported bank message.', ar: 'لا يوجد نظام قديم لترتيبه. يمكن لوفرة أن يبدأ التنظيم من أول عملية حقيقية أو رسالة بنك مدعومة.' },
   onboardOutcomeTrackingBankApps: { en: 'Instead of checking separate bank apps, supported alerts can become one organized ledger in Wafra.', ar: 'بدلاً من مراجعة تطبيقات بنوك متعددة، يمكن أن تتحول التنبيهات المدعومة إلى سجل واحد منظم في وفرة.' },
   onboardOutcomeTrackingSpreadsheet: { en: 'Keep the useful structure without the spreadsheet cleanup. Wafra organizes supported activity as it arrives.', ar: 'احتفظ بالبنية المفيدة دون ترتيب الجداول يدوياً. ينظم وفرة النشاط المدعوم عند وصوله.' },
   onboardOutcomeTrackingFinanceApp: { en: 'Keep the clarity you expect from a finance app without giving Wafra your bank login.', ar: 'احتفظ بالوضوح الذي تتوقعه من تطبيق مالي دون إعطاء وفرة بيانات تسجيل الدخول إلى البنك.' },
@@ -2009,7 +2012,7 @@ const S = {
   onboardOutcomeCashflow: { en: 'You’ll land on Money in, Money out, and Net.', ar: 'ستبدأ من الداخل والخارج والصافي.' },
   onboardOutcomeOverview: { en: 'You’ll land on a simple overview of your money.', ar: 'ستبدأ من نظرة بسيطة على أموالك.' },
   onboardPrivacyTitle: { en: 'Your data stays under your control.', ar: 'بياناتك تبقى تحت سيطرتك.' },
-  onboardDataControlBody: { en: 'Wafra does not need your bank username or password. You decide whether to connect supported bank alerts or enter things manually.', ar: 'لا يحتاج وفرة اسم المستخدم أو كلمة مرور البنك. أنت تقرر إن كنت ستربط تنبيهات البنك المدعومة أو تضيف العمليات يدوياً.' },
+  onboardDataControlBody: { en: 'Wafra does not need your bank username or password. You decide whether to connect supported bank messages or enter things manually.', ar: 'لا يحتاج وفرة اسم المستخدم أو كلمة مرور البنك. أنت تقرر إن كنت ستربط رسائل البنك المدعومة أو تضيف العمليات يدوياً.' },
   onboardPrivacyLocalTitle: { en: 'Processed on your device', ar: 'تتم المعالجة على جهازك' },
   onboardPrivacyLocalBody: { en: 'Android bank-message text stays on your phone. iPhone setup uses Apple Shortcuts and local processing.', ar: 'يبقى نص رسائل البنك على هاتف أندرويد. ويستخدم إعداد الآيفون اختصارات Apple والمعالجة المحلية.' },
   onboardPrivacyNoLoginTitle: { en: 'No bank login', ar: 'دون تسجيل دخول للبنك' },
@@ -2032,7 +2035,7 @@ const S = {
   onboardOpenSpending: { en: 'Open Spending', ar: 'افتح المصروفات' },
   onboardOpenBills: { en: 'Open Bills', ar: 'افتح الفواتير' },
   onboardOpenHome: { en: 'Open Home', ar: 'افتح الرئيسية' },
-  onboardSampleBefore: { en: '01 / Bank alert', ar: '01 / تنبيه البنك' },
+  onboardSampleBefore: { en: '01 / Bank message', ar: '01 / رسالة البنك' },
   onboardSampleAfter: { en: '02 / In your ledger', ar: '02 / في سجلك' },
   onboardSampleBankAlert: { en: 'A moment in your day', ar: 'لحظة من يومك' },
   onboardSampleInsight: { en: 'Organized by category. Easier to see where it went.', ar: 'مرتّبة حسب التصنيف، لترى أين أنفقتها بسهولة.' },
@@ -2059,7 +2062,7 @@ const S = {
   onboardSampleNote: { en: 'Example only. Nothing is saved.', ar: 'مثال فقط. لا يُحفظ شيء.' },
   onboardResumeError: { en: 'Could not restore setup progress. Try again to continue safely.', ar: 'تعذّر استعادة تقدّم الإعداد. أعد المحاولة للمتابعة بأمان.' },
   onboardSkipPersonalization: { en: 'Set this up later', ar: 'إعداد هذا لاحقاً' },
-  onboardSub: { en: 'Supported bank alerts. One clear ledger.', ar: 'تنبيهات البنوك المدعومة في سجل واضح.' },
+  onboardSub: { en: 'Supported bank messages. One clear ledger.', ar: 'رسائل البنوك المدعومة في سجل واضح.' },
   onboardPersonalizeCta: { en: 'Get started', ar: 'ابدأ الآن' },
   onboardSetupTime: { en: 'No bank login required', ar: 'لا يتطلب تسجيل الدخول إلى البنك' },
   onboardPreviewOverline: { en: 'EXAMPLE MONEY STORY', ar: 'مثال لصورة مالية' },
@@ -2124,9 +2127,9 @@ const S = {
   onboardSalaryDay: { en: 'Salary day', ar: 'يوم الراتب' },
   onboardDayNumber: { en: 'Day {day}', ar: 'اليوم \u2066{day}\u2069' },
   onboardCaptureTitleAndroid: { en: 'Choose how to add activity', ar: 'اختر كيف تضيف نشاطك' },
-  onboardCaptureBodyAndroid: { en: 'Connect supported bank alerts, or start manually. You can change this later.', ar: 'اربط تنبيهات البنوك المدعومة أو ابدأ يدوياً. يمكنك تغيير ذلك لاحقاً.' },
+  onboardCaptureBodyAndroid: { en: 'Connect supported bank messages, or start manually. You can change this later.', ar: 'اربط رسائل البنوك المدعومة أو ابدأ يدوياً. يمكنك تغيير ذلك لاحقاً.' },
   onboardCaptureTitleIos: { en: 'Choose how to add activity', ar: 'اختر كيف تضيف نشاطك' },
-  onboardCaptureBodyIos: { en: 'Connect supported bank alerts, or start manually. You can change this later.', ar: 'اربط تنبيهات البنوك المدعومة أو ابدأ يدوياً. يمكنك تغيير ذلك لاحقاً.' },
+  onboardCaptureBodyIos: { en: 'Connect supported bank messages, or start manually. You can change this later.', ar: 'اربط رسائل البنوك المدعومة أو ابدأ يدوياً. يمكنك تغيير ذلك لاحقاً.' },
   onboardCaptureTitleWeb: { en: 'Start your way', ar: 'ابدأ بطريقتك' },
   onboardCaptureBodyWeb: {
     en: 'Automatic bank-message capture is available in the phone apps.',
@@ -2144,7 +2147,7 @@ const S = {
   onboardSmsDeniedInline: { en: 'SMS access stayed off. You can retry it, use bank-app alerts instead, or continue manually.', ar: 'بقي وصول الرسائل متوقفاً. يمكنك إعادة المحاولة أو استخدام تنبيهات تطبيق البنك أو المتابعة يدوياً.' },
   onboardCaptureContinueBoth: { en: 'Continue with both connected', ar: 'متابعة بعد ربط المصدرين' },
   onboardCaptureContinueOne: { en: 'Continue with this source', ar: 'متابعة بهذا المصدر' },
-  onboardAutomaticChoiceIos: { en: 'Connect bank alerts', ar: 'ربط تنبيهات البنك' },
+  onboardAutomaticChoiceIos: { en: 'Connect bank messages', ar: 'ربط رسائل البنك' },
   onboardAutomaticChoiceIosBody: { en: 'Add one Wafra Shortcut, then turn on a Message automation. Past messages are optional.', ar: 'أضف اختصار وفرة مرة واحدة، ثم فعّل أتمتة الرسائل. استيراد الرسائل السابقة اختياري.' },
   onboardStatementChoice: { en: 'Import bank statements', ar: 'استيراد كشوف البنك' },
   onboardStatementChoiceBody: {
@@ -2193,7 +2196,7 @@ const S = {
     ar: 'التقط العمليات الجديدة',
   },
   onboardLiveBody: {
-    en: 'A Shortcut sends new bank texts to Wafra on this iPhone.',
+    en: 'A Shortcut sends new bank messages to Wafra on this iPhone.',
     ar: 'يرسل اختصار رسائل بنكك الجديدة إلى وفرة على هذا الآيفون.',
   },
   onboardLiveAction: {
@@ -2233,10 +2236,10 @@ const S = {
     ar: 'يتم التقاط الرسائل محلياً. يستخدم استيراد الكشوف الخدمة الآمنة فقط عندما تختاره.',
   },
   onboardCaptureLearnMoreAction: { en: 'Learn more', ar: 'معرفة المزيد' },
-  onboardCaptureLearnMoreTitle: { en: 'About bank alerts', ar: 'حول تنبيهات البنك' },
+  onboardCaptureLearnMoreTitle: { en: 'About bank messages', ar: 'حول رسائل البنك' },
   onboardCaptureLearnMorePrivacy: {
-    en: 'Wafra does not access your Messages inbox. An Apple automation you create passes new messages to Wafra, which keeps bank alerts and discards the rest on this iPhone.',
-    ar: 'لا يصل وفرة إلى صندوق الرسائل. تمرّر أتمتة Apple التي تنشئها الرسائل الجديدة إلى وفرة، الذي يحتفظ بتنبيهات البنك ويتجاهل البقية على هذا الآيفون.',
+    en: 'Wafra does not access your Messages inbox. An Apple automation you create passes new messages to Wafra, which keeps bank messages and discards the rest on this iPhone.',
+    ar: 'لا يصل وفرة إلى صندوق الرسائل. تمرّر أتمتة Apple التي تنشئها الرسائل الجديدة إلى وفرة، الذي يحتفظ برسائل البنك ويتجاهل البقية على هذا الآيفون.',
   },
   onboardCaptureLearnMoreRetention: {
     en: 'Raw Message Content and Sender expire logically after 30 days. Physical deletion happens on the next capture or queue check, so protected bytes can remain longer.',
@@ -2300,11 +2303,11 @@ const S = {
     ar: 'قراءة الرسائل تعمل في تطبيق أندرويد. اختر نقطة البداية:',
   },
   iosOnboardHeadline: { en: 'Money,\nmade clear.', ar: 'أموالك،\nبوضوح.' },
-  iosOnboardSub: { en: 'Supported bank alerts. One clear ledger.', ar: 'تنبيهات البنوك المدعومة في سجل واضح.' },
+  iosOnboardSub: { en: 'Supported bank messages. One clear ledger.', ar: 'رسائل البنوك المدعومة في سجل واضح.' },
   iosOnboardAutomatic: { en: 'Start your way', ar: 'ابدأ بطريقتك' },
   iosOnboardAutomaticBody: {
-    en: 'Add entries yourself or connect supported bank alerts',
-    ar: 'أضف العمليات بنفسك أو اربط تنبيهات البنوك المدعومة',
+    en: 'Add entries yourself or connect supported bank messages',
+    ar: 'أضف العمليات بنفسك أو اربط رسائل البنوك المدعومة',
   },
   iosOnboardPrivate: { en: 'Raw messages are never kept', ar: 'نص الرسالة الخام لا يُحفظ أبداً' },
   iosOnboardPrivateBody: {
@@ -2313,16 +2316,16 @@ const S = {
   },
   iosOnboardSetupTitle: { en: 'Make it automatic.', ar: 'اجعله تلقائياً.' },
   iosOnboardSetupBody: {
-    en: 'A guided setup connects the private relay. Your first supported bank alert verifies Apple’s automation afterward.',
-    ar: 'إعداد موجه يربط المرحّل الخاص. وبعده يتحقق أول تنبيه بنكي مدعوم من أتمتة آبل.',
+    en: 'A guided setup connects the private relay. Your first supported bank message verifies Apple’s automation afterward.',
+    ar: 'إعداد موجه يربط المرحّل الخاص. وبعده تتحقق أول رسالة بنكية مدعومة من أتمتة آبل.',
   },
   iosOnboardSetupCta: { en: 'Set up automatic capture', ar: 'إعداد الالتقاط التلقائي' },
   readingInbox: { en: 'Reading your inbox.', ar: 'جارٍ قراءة رسائلك.' },
   openWafra: { en: 'Open Wafra', ar: 'افتح وفرة' },
   continueWord: { en: 'Continue', ar: 'متابعة' },
   notifNoteOnboard: {
-    en: 'Android calls this broad “read, reply & control” access. Wafra only reads supported bank alerts; it never replies or changes a notification.',
-    ar: 'يسمي أندرويد هذا الإذن الواسع «قراءة ورد وتحكم». وفرة يقرأ تنبيهات البنوك المدعومة فقط، ولا يرد على إشعار أو يغيّره.',
+    en: 'Android calls this broad “read, reply & control” access. Wafra only reads supported bank messages; it never replies or changes a notification.',
+    ar: 'يسمي أندرويد هذا الإذن الواسع «قراءة ورد وتحكم». وفرة يقرأ رسائل البنوك المدعومة فقط، ولا يرد على إشعار أو يغيّره.',
   },
   nothingOutYet: { en: 'No spending in this period yet.', ar: 'لا يوجد إنفاق في هذه الفترة بعد.' },
   noAccountsYet: { en: 'No bank or cash accounts yet.', ar: 'لا حسابات بنكية أو نقدية بعد.' },
@@ -2399,7 +2402,6 @@ const S = {
     en: 'The store could not confirm Pro yet. Check your connection, then restore purchases before trying to buy again.',
     ar: 'لم يتمكن المتجر من تأكيد وفرة برو بعد. تحقق من الاتصال، ثم استعد المشتريات قبل محاولة الشراء مجدداً.',
   },
-  monthsFreeSuffix: { en: '· {months} months free', ar: '· {months} أشهر مجاناً' },
   trialDaysLeftPaywall: {
     en: 'Everything is free for your first {total} days — {left} day{s} left. Keep it going:',
     ar: 'كل شيء مجاني في أول {total} أيام — تبقّى {left} يوم. تابع الاستخدام:',
@@ -2409,7 +2411,7 @@ const S = {
   // iPhone gets the same feature by a different road — Apple lets no app read
   // Messages, so a Shortcut forwards them. Describing it as "reads your SMS"
   // there would promise something the platform forbids.
-  featAutoTrackingIosText: { en: 'Supported bank alerts passed by your personal automation are processed locally into transactions, cards, dues, or review when needed. Set up once.', ar: 'تُعالج تنبيهات البنوك المدعومة التي تمررها أتمتتك الشخصية محلياً لتصبح عمليات أو بطاقات أو مستحقات، أو تُرسل للمراجعة عند الحاجة. إعداد مرة واحدة.' },
+  featAutoTrackingIosText: { en: 'Supported bank messages passed by your personal automation are processed locally into transactions, cards, dues, or review when needed. Set up once.', ar: 'تُعالج رسائل البنوك المدعومة التي تمررها أتمتتك الشخصية محلياً لتصبح عمليات أو بطاقات أو مستحقات، أو تُرسل للمراجعة عند الحاجة. إعداد مرة واحدة.' },
   featPasteFreeText: { en: 'Reading a bank message you hand over — and typing entries — never needs a subscription, on any phone.', ar: 'قراءة رسالة بنكية تلصقها بنفسك وإضافة العمليات يدوياً لا تحتاج اشتراكاً أبداً على أي هاتف.' },
   featSalaryMonths: { en: 'Salary-day months', ar: 'الشهر يبدأ يوم الراتب' },
   featSalaryMonthsText: { en: 'Your money month starts on payday, not the 1st.', ar: 'شهرك المالي يبدأ يوم استلام راتبك.' },
@@ -2706,8 +2708,8 @@ const S = {
   importTitle: { en: 'Import from SMS', ar: 'استيراد من الرسائل' },
   scanFullInbox: { en: 'Scan full inbox', ar: 'فحص كل الرسائل' },
   historyImportRunningTitle: {
-    en: 'Reading your bank-alert history',
-    ar: 'جارٍ قراءة سجل تنبيهات البنك',
+    en: 'Reading your bank-message history',
+    ar: 'جارٍ قراءة سجل رسائل البنك',
   },
   historyImportSavedTitle: {
     en: 'Inbox progress saved',
@@ -2732,16 +2734,16 @@ const S = {
   retryHistoryImport: { en: 'Retry inbox import', ar: 'إعادة محاولة استيراد الرسائل' },
   choiceColor: { en: 'Color {count}', ar: 'اللون {count}' },
   choiceIcon: { en: 'Icon {count}', ar: 'الأيقونة {count}' },
-  findBankAlerts: { en: 'Find bank alerts', ar: 'ابحث عن التنبيهات البنكية' },
+  findBankAlerts: { en: 'Find bank messages', ar: 'ابحث عن الرسائل البنكية' },
   scanBankAlertsPrivacy: {
-    en: 'Finds supported bank alerts on this phone. They are parsed here; raw messages never leave.',
-    ar: 'يبحث عن تنبيهات البنوك المدعومة على هذا الهاتف. تُحلّل هنا ولا تغادر الرسائل الخام الجهاز.',
+    en: 'Finds supported bank messages on this phone. They are parsed here; raw messages never leave.',
+    ar: 'يبحث عن رسائل البنوك المدعومة على هذا الهاتف. تُحلّل هنا ولا تغادر الرسائل الخام الجهاز.',
   },
   pasteInstead: { en: 'Paste messages instead', ar: 'الصق الرسائل بدلاً من ذلك' },
   hideManualPaste: { en: 'Hide manual paste', ar: 'إخفاء اللصق اليدوي' },
   importBankActivity: { en: 'Import bank activity', ar: 'استيراد النشاط البنكي' },
   importBankActivityIosDetail: {
-    en: 'Paste a bank text or add a statement',
+    en: 'Paste a bank message or add a statement',
     ar: 'الصق رسالة بنكية أو أضف كشفاً',
   },
   parsePasted: { en: 'Parse pasted text', ar: 'تحليل النص الملصق' },
@@ -2855,7 +2857,7 @@ const S = {
     ar: 'لم يُعثر على نشاط بنكي مدعوم',
   },
   historyImportNoneFoundBody: {
-    en: 'Wafra checked {read} distinct readable retained Messages; {skipped} did not match a supported bank alert. Nothing was filed.',
+    en: 'Wafra checked {read} distinct readable retained Messages; {skipped} did not match a supported bank message. Nothing was filed.',
     ar: 'فحص وفرة {read} رسالة محتفظاً بها ومميزة وقابلة للقراءة؛ لم تطابق {skipped} منها تنبيهاً بنكياً مدعوماً. لم يُسجّل شيء.',
   },
   historyImportMissing: { en: 'No staged messages found', ar: 'لم تُوجد رسائل مؤقتة' },
@@ -2943,7 +2945,7 @@ const S = {
   // platform, so it is translated as carefully as anything in the app. The
   // Arabic is written as Arabic rather than transliterated from the English:
   // "Shortcut" is اختصار, the Apple term, not شورت‌كت.
-  legacyCapturePrivacyWarning: { en: 'An old Shortcut may still upload bank alerts. Review it in Shortcuts.', ar: 'قد يواصل اختصار قديم رفع التنبيهات البنكية. راجعه في تطبيق الاختصارات.' },
+  legacyCapturePrivacyWarning: { en: 'An old Shortcut may still upload bank messages. Review it in Shortcuts.', ar: 'قد يواصل اختصار قديم رفع الرسائل البنكية. راجعه في تطبيق الاختصارات.' },
   messagesPrivacy: { en: 'Privacy and data', ar: 'الخصوصية والبيانات' },
   iosSetupTitle: {
     en: 'Capture sources',
@@ -2968,8 +2970,8 @@ const S = {
   iosMessageSetupHeading: { en: 'Bank messages', ar: 'رسائل البنك' },
   iosMessageSetupSubtitle: { en: 'First connect new alerts. Importing old messages is optional.', ar: 'اربط التنبيهات الجديدة أولاً. استيراد الرسائل القديمة اختياري.' },
   iosMessageFutureTitle: {
-    en: 'Automatic bank alerts',
-    ar: 'تنبيهات البنك التلقائية',
+    en: 'Automatic bank messages',
+    ar: 'رسائل البنك التلقائية',
   },
   iosMessageFutureDetail: {
     en: 'Purchases, refunds, income, transfers and statements from supported bank messages.',
@@ -3013,7 +3015,7 @@ const S = {
   iosMessageHistoryKeepOpen: { en: 'Keep Shortcuts open and iPhone unlocked.', ar: 'أبقِ الاختصارات مفتوحاً والآيفون دون قفل.' },
   iosMessageHistoryCoverage: { en: 'Imports saved Messages in smaller batches.', ar: 'يستورد الرسائل المحفوظة على دفعات أصغر.' },
   iosMessageGuideSender: { en: 'Sender: leave empty · Message Contains: one space', ar: 'المرسل: اتركه فارغاً · تحتوي الرسالة على: مسافة واحدة' },
-  iosMessageGuideNoFilter: { en: 'Type a single space in “Message Contains” so Next turns on. Messages containing a space run the Shortcut. Wafra keeps bank alerts and discards other messages on this iPhone.', ar: 'اكتب مسافة واحدة في «تحتوي الرسالة على» لتفعيل «التالي». تشغّل الرسائل التي تحتوي على مسافة الاختصار، ويصفّيها وفرة على هذا الآيفون.' },
+  iosMessageGuideNoFilter: { en: 'Type a single space in “Message Contains” so Next turns on. Messages containing a space run the Shortcut. Wafra keeps bank messages and discards other messages on this iPhone.', ar: 'اكتب مسافة واحدة في «تحتوي الرسالة على» لتفعيل «التالي». تشغّل الرسائل التي تحتوي على مسافة الاختصار، ويصفّيها وفرة على هذا الآيفون.' },
   iosMessageFutureInstallHelp: {
     en: 'Tap Add Shortcut, then add {shortcut} in Shortcuts.',
     ar: 'اضغط «إضافة الاختصار»، ثم أضف {shortcut} في الاختصارات.',
@@ -3024,7 +3026,7 @@ const S = {
     en: 'Run test',
     ar: 'تشغيل الاختبار',
   },
-  iosMessagePermissionBody: { en: 'Run the setup check with this iPhone unlocked. Allow access to Wafra when Apple asks, then return here. The setup check tests the Shortcut; your first bank alert confirms automatic delivery.', ar: 'شغّل فحص الإعداد والآيفون مفتوح. اسمح بالوصول إلى وفرة عندما تطلب Apple ذلك، ثم عد إلى هنا. يختبر فحص الإعداد الاختصار؛ ويؤكد أول تنبيه بنكي وصول الرسائل تلقائياً.' },
+  iosMessagePermissionBody: { en: 'Run the setup check with this iPhone unlocked. Allow access to Wafra when Apple asks, then return here. The setup check tests the Shortcut; your first bank message confirms automatic delivery.', ar: 'شغّل فحص الإعداد والآيفون مفتوح. اسمح بالوصول إلى وفرة عندما تطلب Apple ذلك، ثم عد إلى هنا. يختبر فحص الإعداد الاختصار؛ وتؤكد أول رسالة بنكية وصول الرسائل تلقائياً.' },
   iosMessagePermissionLocked: { en: 'If a background run reports a permission error, open the Shortcut’s details → Privacy. Allow Wafra access and enable “Allow Running When Locked” if shown.', ar: 'إذا ظهر خطأ أذونات أثناء التشغيل في الخلفية، افتح تفاصيل الاختصار ← الخصوصية. اسمح بالوصول إلى وفرة وفعّل «السماح بالتشغيل عند القفل» إذا ظهر الخيار.' },
   iosMessageFutureReadyChoice: { en: 'New alerts are set up. Importing past messages is optional — now or later from Settings.', ar: 'تم إعداد التنبيهات الجديدة. استيراد الرسائل السابقة اختياري — الآن أو لاحقاً من الإعدادات.' },
   iosMessageNextHistory: { en: 'Import past messages', ar: 'استيراد الرسائل السابقة' },
@@ -3040,7 +3042,7 @@ const S = {
   iosMessageHistoryUnavailableHelp: { en: 'You can continue to Wafra now and import past messages later from Settings.', ar: 'يمكنك متابعة استخدام وفرة الآن واستيراد الرسائل السابقة لاحقاً من الإعدادات.' },
   iosMessageSkipHistory: { en: 'Skip past messages for now', ar: 'تخطي الرسائل السابقة حالياً' },
   iosMessageSkipHistoryTitle: { en: 'Use future alerts only?', ar: 'استخدام التنبيهات الجديدة فقط؟' },
-  iosMessageSkipHistoryBody: { en: 'Past messages will stay unimported. Any unfinished import will be cleared; saved entries stay. Import later from Settings. A real bank alert is still separate evidence.', ar: 'ستبقى الرسائل السابقة دون استيراد. سيُزال أي استيراد غير مكتمل وتبقى العمليات المحفوظة. استورد لاحقاً من الإعدادات. يظل التنبيه البنكي الحقيقي دليلاً منفصلاً.' },
+  iosMessageSkipHistoryBody: { en: 'Past messages will stay unimported. Any unfinished import will be cleared; saved entries stay. Import later from Settings. A real bank message is still separate evidence.', ar: 'ستبقى الرسائل السابقة دون استيراد. سيُزال أي استيراد غير مكتمل وتبقى العمليات المحفوظة. استورد لاحقاً من الإعدادات. تظل الرسالة البنكية الحقيقية دليلاً منفصلاً.' },
   iosMessageSkipStoppedHistoryBody: { en: 'Stop the history Shortcut first. This clears the unfinished import; saved entries stay. Past messages remain unimported. You can try again from Settings.', ar: 'أوقف اختصار السجل أولاً. سيُزال الاستيراد غير المكتمل وتبقى العمليات المحفوظة. ستبقى الرسائل السابقة دون استيراد. يمكنك المحاولة لاحقاً من الإعدادات.' },
   iosMessageFutureBeforeSkip: { en: 'Set up and confirm future alerts before skipping past messages.', ar: 'أعدّ التنبيهات الجديدة وأكّدها قبل تخطي الرسائل السابقة.' },
   iosMessageSkipHistoryChanged: { en: 'A history import has started. Stop it in Shortcuts, then try skipping again.', ar: 'بدأ استيراد السجل. أوقفه في الاختصارات، ثم حاول التخطي مجدداً.' },
@@ -3070,12 +3072,12 @@ const S = {
   iosMessageHelpLocal: { en: 'Processed on this iPhone.', ar: 'تُعالج على هذا الآيفون.' },
   iosMessageHelpReadable: { en: 'Only readable messages saved on this iPhone.', ar: 'الرسائل المحفوظة والقابلة للقراءة على هذا الآيفون فقط.' },
   iosMessageHelpCoverage: { en: 'History imports in smaller batches and can resume if interrupted.', ar: 'يُستورد السجل على دفعات أصغر ويمكن استئنافه إذا توقف.' },
-  iosMessageHelpProof: { en: 'A real bank alert confirms automatic capture.', ar: 'تنبيه بنكي حقيقي يؤكد الالتقاط التلقائي.' },
+  iosMessageHelpProof: { en: 'A real bank message confirms automatic capture.', ar: 'رسالة بنكية حقيقية تؤكد الالتقاط التلقائي.' },
   iosMessagePrivacyDetails: { en: 'Privacy details', ar: 'تفاصيل الخصوصية' },
   iosMessageDetailsTitle: { en: 'Setup help', ar: 'مساعدة الإعداد' },
   iosMessageFutureDetailsTitle: {
-    en: 'Automatic bank alerts',
-    ar: 'تنبيهات البنك التلقائية',
+    en: 'Automatic bank messages',
+    ar: 'رسائل البنك التلقائية',
   },
   iosMessagePastDetailsTitle: {
     en: 'Past alerts',
@@ -3124,16 +3126,16 @@ const S = {
     ar: 'هل تستخدم الأتمتة القديمة؟',
   },
   iosLocalMigrationBody: {
-    en: 'If you still have the old “Wafra Capture” automation, it can continue uploading the bank alerts you selected until you delete it or Wafra confirms retirement after the first local bank alert.',
-    ar: 'إذا كانت أتمتة «Wafra Capture» القديمة ما زالت موجودة، فقد تستمر في رفع تنبيهات البنوك التي اخترتها إلى أن تحذفها أو تؤكد وفرة إيقافها بعد أول تنبيه بنكي محلي.',
+    en: 'If you still have the old “Wafra Capture” automation, it can continue uploading the bank messages you selected until you delete it or Wafra confirms retirement after the first local bank message.',
+    ar: 'إذا كانت أتمتة «Wafra Capture» القديمة ما زالت موجودة، فقد تستمر في رفع رسائل البنوك التي اخترتها إلى أن تحذفها أو تؤكد وفرة إيقافها بعد أول رسالة بنكية محلية.',
   },
   iosLocalAutomationTitle: {
     en: 'Turn on automatic capture',
     ar: 'فعّل الالتقاط التلقائي',
   },
   iosLocalAutomationBody: {
-    en: 'Apple’s Sender picker shows Contacts only, so leave Sender empty and type a single space in “Message Contains” so Next turns on. The automation then passes each new message to Wafra, which keeps bank alerts and discards the rest on this iPhone.',
-    ar: 'تعرض قائمة المرسلين لدى Apple جهات الاتصال فقط، لذلك اترك المرسل فارغاً واكتب مسافة واحدة في «تحتوي الرسالة على» حتى يُفعَّل زر التالي. تمرّر الأتمتة عندها كل رسالة جديدة إلى وفرة، الذي يحتفظ بتنبيهات البنك ويتجاهل البقية على هذا الآيفون.',
+    en: 'Apple’s Sender picker shows Contacts only, so leave Sender empty and type a single space in “Message Contains” so Next turns on. The automation then passes each new message to Wafra, which keeps bank messages and discards the rest on this iPhone.',
+    ar: 'تعرض قائمة المرسلين لدى Apple جهات الاتصال فقط، لذلك اترك المرسل فارغاً واكتب مسافة واحدة في «تحتوي الرسالة على» حتى يُفعَّل زر التالي. تمرّر الأتمتة عندها كل رسالة جديدة إلى وفرة، الذي يحتفظ برسائل البنك ويتجاهل البقية على هذا الآيفون.',
   },
   iosMessageContinueManual: {
     en: 'Skip for now',
@@ -3186,8 +3188,8 @@ const S = {
     ar: 'اربط هذا الآيفون، وأضف «Wafra Capture»، وشغّل اختباراً آمناً للمسار، ثم أنشئ أتمتة «رسالة».',
   },
   iosIntroBody2: {
-    en: 'A safe probe verifies the private pipe. Only a later supported bank alert can prove Apple’s Message automation runs while Wafra is closed.',
-    ar: 'يتحقق الاختبار الآمن من المسار الخاص. ولا يثبت عمل أتمتة «الرسالة» من Apple ووفرة مغلق إلا تنبيه بنكي مدعوم لاحق.',
+    en: 'A safe probe verifies the private pipe. Only a later supported bank message can prove Apple’s Message automation runs while Wafra is closed.',
+    ar: 'يتحقق الاختبار الآمن من المسار الخاص. ولا يثبت عمل أتمتة «الرسالة» من Apple ووفرة مغلق إلا رسالة بنكية مدعومة لاحقة.',
   },
   iosPreviewTime: {
     en: 'ABOUT 3 MINUTES · APPLE SHORTCUTS OPENS NEXT',
@@ -3205,13 +3207,13 @@ const S = {
   },
   iosPreviewProof: { en: 'Run one safe test', ar: 'شغّل اختباراً آمناً واحداً' },
   iosPreviewProofBody: {
-    en: 'A safe probe checks the pipe; the first supported bank alert verifies the trigger.',
-    ar: 'يفحص اختبار آمن المسار؛ ويتحقق أول تنبيه بنكي مدعوم من المشغّل.',
+    en: 'A safe probe checks the pipe; the first supported bank message verifies the trigger.',
+    ar: 'يفحص اختبار آمن المسار؛ وتتحقق أول رسالة بنكية مدعومة من المشغّل.',
   },
   /** Retained for old screen snapshots; current setup uses iosLocalPrivacyBody. */
   iosPrivacyNote: {
-    en: 'Apple gives no app access to the Messages inbox. A personal automation passes each new Message to Wafra on this iPhone, where supported bank alerts are filtered and processed locally without uploading their text. Protected pending records expire after 30 days and are physically removed on the next capture or queue check.',
-    ar: 'لا تتيح آبل لأي تطبيق الوصول إلى صندوق الرسائل. تمرّر أتمتة شخصية كل رسالة جديدة إلى وفرة على هذا الآيفون، حيث تُرشّح تنبيهات البنوك المدعومة وتُعالج محلياً من دون رفع نصوصها. تنتهي صلاحية السجلات المعلّقة المحمية بعد ٣٠ يوماً وتُزال فعلياً عند تشغيل الالتقاط أو فحص الصف في المرة التالية.',
+    en: 'Apple gives no app access to the Messages inbox. A personal automation passes each new Message to Wafra on this iPhone, where supported bank messages are filtered and processed locally without uploading their text. Protected pending records expire after 30 days and are physically removed on the next capture or queue check.',
+    ar: 'لا تتيح آبل لأي تطبيق الوصول إلى صندوق الرسائل. تمرّر أتمتة شخصية كل رسالة جديدة إلى وفرة على هذا الآيفون، حيث تُرشّح رسائل البنوك المدعومة وتُعالج محلياً من دون رفع نصوصها. تنتهي صلاحية السجلات المعلّقة المحمية بعد ٣٠ يوماً وتُزال فعلياً عند تشغيل الالتقاط أو فحص الصف في المرة التالية.',
   },
   iosConnecting: { en: 'Connecting…', ar: 'جارٍ الربط…' },
   iosConnectCta: { en: 'Connect this iPhone', ar: 'اربط هذا الآيفون' },
@@ -3339,8 +3341,8 @@ const S = {
     ar: 'يرسل «Wafra Capture» اختباراً آمناً عبر المسار الخاص. في المرة الأولى، اضغط «سماح» عندما تطلب Apple الوصول إلى الشبكة. ولا يضيف أي عملية.',
   },
   iosTestLimit: {
-    en: 'The Shortcut and private sync work. Create the Message automation next. The first supported bank alert is the final check: it should appear under the correct bank or card.',
-    ar: 'يعمل الاختصار والمزامنة الخاصة. أنشئ أتمتة «الرسالة» تالياً. التنبيه البنكي المدعوم الأول هو الاختبار الأخير: يجب أن يظهر تحت البنك أو البطاقة الصحيحة.',
+    en: 'The Shortcut and private sync work. Create the Message automation next. The first supported bank message is the final check: it should appear under the correct bank or card.',
+    ar: 'يعمل الاختصار والمزامنة الخاصة. أنشئ أتمتة «الرسالة» تالياً. الرسالة البنكية المدعومة الأولى هي الاختبار الأخير: يجب أن تظهر تحت البنك أو البطاقة الصحيحة.',
   },
   iosCaught: {
     en: 'Captured and filed through the same path future alerts use.',
@@ -3379,7 +3381,7 @@ const S = {
   // caused it, or a finished setup that still asked to be proved.
   iosAlreadyWorkingTitle: { en: 'Automatic capture is verified', ar: 'تم التحقق من الالتقاط التلقائي' },
   iosAlreadyWorkingBody: {
-    en: 'Wafra received a supported bank alert through the Message automation. New matching alerts are captured automatically and filed when Wafra next runs.',
+    en: 'Wafra received a supported bank message through the Message automation. New matching alerts are captured automatically and filed when Wafra next runs.',
     ar: 'استلمت وفرة تنبيهاً بنكياً مدعوماً عبر أتمتة «الرسالة». تُلتقط التنبيهات المطابقة تلقائياً وتُسجّل عند تشغيل وفرة لاحقاً.',
   },
   iosAutomationWaitingTitle: {
@@ -3387,8 +3389,8 @@ const S = {
     ar: 'تم التحقق من المسار الخاص',
   },
   iosAutomationWaitingBody: {
-    en: 'Wafra cannot create or inspect Apple’s automation. The next supported bank alert will prove that its Message trigger ran. Until then, automatic capture is not verified.',
-    ar: 'لا يمكن لوفرة إنشاء أتمتة Apple أو فحصها. سيثبت التنبيه البنكي المدعوم التالي أن مشغّل «الرسالة» عمل. وحتى ذلك لم يتم التحقق من الالتقاط التلقائي.',
+    en: 'Wafra cannot create or inspect Apple’s automation. The next supported bank message will prove that its Message trigger ran. Until then, automatic capture is not verified.',
+    ar: 'لا يمكن لوفرة إنشاء أتمتة Apple أو فحصها. ستثبت الرسالة البنكية المدعومة التالية أن مشغّل «الرسالة» عمل. وحتى ذلك لم يتم التحقق من الالتقاط التلقائي.',
   },
   iosContinueToAutomation: {
     en: 'Create Message automation',
@@ -3548,8 +3550,8 @@ const S = {
   },
   smsPermissionNeeded: { en: 'Permission needed', ar: 'الإذن مطلوب' },
   smsPermissionNeededBody: {
-    en: 'SMS access is optional and used only for on-device bank-alert import. Anything that is not supported financial activity is discarded before storage. You can keep access off and paste messages manually below.',
-    ar: 'إذن الرسائل اختياري ويُستخدم فقط لاستيراد تنبيهات البنك على الجهاز. يُتخلص من أي محتوى لا يمثل نشاطاً مالياً مدعوماً قبل الحفظ. يمكنك إبقاء الإذن مغلقاً ولصق الرسائل يدوياً أدناه.',
+    en: 'SMS access is optional and used only for on-device bank-message import. Anything that is not supported financial activity is discarded before storage. You can keep access off and paste messages manually below.',
+    ar: 'إذن الرسائل اختياري ويُستخدم فقط لاستيراد رسائل البنك على الجهاز. يُتخلص من أي محتوى لا يمثل نشاطاً مالياً مدعوماً قبل الحفظ. يمكنك إبقاء الإذن مغلقاً ولصق الرسائل يدوياً أدناه.',
   },
   matchedLabel: { en: 'Matched', ar: 'مطابقة' },
   unreadLabel: { en: 'Unread', ar: 'غير مقروءة' },
@@ -3564,7 +3566,7 @@ const S = {
   fixEntries: { en: 'Fix {count} entr{ending}', ar: 'تصحيح {count} عملية' },
 
   noEntriesInMonth: { en: 'No entries in {month} yet', ar: 'لا عمليات في {month} بعد' },
-  emptyMonthHelp: { en: 'Add an entry or check bank alerts.', ar: 'أضف عملية أو تحقّق من تنبيهات البنك.' },
+  emptyMonthHelp: { en: 'Add an entry or check bank messages.', ar: 'أضف عملية أو تحقّق من رسائل البنك.' },
   readInbox: { en: 'Read inbox', ar: 'قراءة الرسائل' },
   checkBankAlerts: { en: 'Check alerts', ar: 'تحقق من التنبيهات' },
   emptyMonthCaptureHelp: { en: 'Add your first entry.', ar: 'أضف عمليتك الأولى.' },
@@ -3723,23 +3725,23 @@ const S = {
     ar: 'يفحص وفرة صندوق رسائل أندرويد كاملاً في الذاكرة، ويحتفظ بالتنبيهات المالية المحتملة، ثم يجهّز قوالب منقّحة للرسائل التي حلّلها والتي تعذّر عليه تحليلها.',
   },
   parserResearchIosIntro: {
-    en: 'iPhone does not let Wafra read Messages. Copy bank alerts with Apple Shortcuts, paste them here, then Wafra will filter and redact them on this phone.',
-    ar: 'لا يسمح الآيفون لوفرة بقراءة الرسائل. انسخ تنبيهات البنك عبر اختصارات Apple والصقها هنا، ثم يرشّحها وفرة وينقّحها على هذا الهاتف.',
+    en: 'iPhone does not let Wafra read Messages. Copy bank messages with Apple Shortcuts, paste them here, then Wafra will filter and redact them on this phone.',
+    ar: 'لا يسمح الآيفون لوفرة بقراءة الرسائل. انسخ رسائل البنك عبر اختصارات Apple والصقها هنا، ثم يرشّحها وفرة وينقّحها على هذا الهاتف.',
   },
   parserResearchPasteIntro: {
-    en: 'This tester build cannot scan the inbox automatically. Paste bank alerts here, then Wafra will filter and redact them on this device.',
-    ar: 'لا تستطيع نسخة الاختبار هذه فحص صندوق الرسائل تلقائياً. ألصق تنبيهات البنك هنا، ثم يرشّحها وفرة وينقّحها على هذا الجهاز.',
+    en: 'This tester build cannot scan the inbox automatically. Paste bank messages here, then Wafra will filter and redact them on this device.',
+    ar: 'لا تستطيع نسخة الاختبار هذه فحص صندوق الرسائل تلقائياً. ألصق رسائل البنك هنا، ثم يرشّحها وفرة وينقّحها على هذا الجهاز.',
   },
   parserResearchPrivacy: {
     en: 'Raw messages never upload. Every digit and timestamp is removed. Recipient and merchant spans, plus every word outside a strict financial grammar, become [text]. Only the redacted report can be copied or exported.',
     ar: 'لا تُرفع الرسائل الخام. تُحذف كل الأرقام والتوقيتات، وتُستبدل مواضع المستفيدين والمتاجر وكل كلمة خارج قواعد مالية محدودة بـ [text]. ولا يمكن نسخ أو تصدير سوى التقرير المنقّح.',
   },
-  parserResearchPasteHeader: { en: 'PASTE BANK ALERTS', ar: 'ألصق تنبيهات البنك' },
+  parserResearchPasteHeader: { en: 'PASTE BANK MESSAGES', ar: 'ألصق رسائل البنك' },
   parserResearchPasteHelp: {
     en: 'Put a blank line between messages. You may add “From: ADIB” as the first line of a message; unknown senders become aliases.',
     ar: 'ضع سطراً فارغاً بين الرسائل. يمكنك إضافة «From: ADIB» في أول سطر؛ ويستبدل وفرة المرسلين غير المعروفين بأسماء مستعارة.',
   },
-  parserResearchPasteA11y: { en: 'Paste bank alert messages', ar: 'ألصق رسائل تنبيهات البنك' },
+  parserResearchPasteA11y: { en: 'Paste bank messages', ar: 'ألصق رسائل البنك' },
   parserResearchPastePlaceholder: {
     en: 'From: YOUR BANK\nYour card purchase alert…\n\nFrom: YOUR BANK\nYour transfer alert…',
     ar: 'From: YOUR BANK\nرسالة شراء بالبطاقة…\n\nFrom: YOUR BANK\nرسالة تحويل…',
@@ -3750,7 +3752,7 @@ const S = {
   },
   parserResearchPasteRequiredTitle: { en: 'Paste an alert first', ar: 'ألصق تنبيهاً أولاً' },
   parserResearchPasteRequired: {
-    en: 'Paste at least one bank alert above, then prepare the safe report.',
+    en: 'Paste at least one bank message above, then prepare the safe report.',
     ar: 'ألصق تنبيهاً بنكياً واحداً على الأقل أعلاه، ثم جهّز التقرير الآمن.',
   },
   parserResearchPrepareInbox: { en: 'Prepare safe inbox report', ar: 'تجهيز تقرير آمن من الرسائل' },

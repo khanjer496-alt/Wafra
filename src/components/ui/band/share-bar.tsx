@@ -162,7 +162,7 @@ export function ShareBar({ segments, palette, labelled = 3, label, formatShare, 
           { opacity: selected >= 0 && index !== selected ? DIMMED : 1 }]}>
         <View style={[styles.swatch, { backgroundColor: coin.color }]} />
         <View style={styles.legendText}>
-          <ThemedText type="meta" numberOfLines={large ? undefined : 1}
+          <ThemedText type="meta" numberOfLines={large ? undefined : 2}
             style={[{ color: palette.onBandSecondary }, index === selected && styles.selectedName]}>{coin.label}</ThemedText>
           <ThemedText type="meta" style={{ color: palette.onBand }}>
             {[formatValue?.(coin.value), shareText(coin.from, coin.to)].filter(Boolean).join(' · ')}</ThemedText>

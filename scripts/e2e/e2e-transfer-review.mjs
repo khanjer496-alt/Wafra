@@ -6,6 +6,13 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { chromium } from 'playwright';
 
+// Home v3 keeps the transfers notice off by default (the Needs-you pill carries it); this suite
+// drives that notice, so it switches the section on through a saved v3 layout.
+const HOME_LAYOUT = JSON.stringify({ version: 3,
+  order: ['greeting', 'hero', 'today', 'overview', 'week', 'transfers', 'activity', 'due', 'upcoming', 'insight', 'assistant', 'capture'],
+  hidden: ['today', 'overview', 'week', 'due', 'upcoming', 'insight', 'assistant', 'capture'] });
+const withHomeLayout = (context) => context.addInitScript(layout => {
+  if (!localStorage.getItem('wafra/ui/home-widgets/v1')) localStorage.setItem('wafra/ui/home-widgets/v1', layout); }, HOME_LAYOUT);
 const BASE = process.env.BASE ?? 'http://127.0.0.1:8134';
 assert.ok(['127.0.0.1', 'localhost', '[::1]'].includes(new URL(BASE).hostname));
 const OUT = process.env.E2E_ARTIFACT_DIR ?? path.join(tmpdir(), 'wafra-transfer-review-e2e');
@@ -122,13 +129,14 @@ async function home(page, expected, currentPendingCount, historicalPendingCount 
     amounts.push(minor(await item.getAttribute('aria-label')));
   }
   assert.deepEqual(amounts, expected, 'confirmed Home income, spending and Net');
-  // Home counts the entire review queue, including the intentionally unresolved
-  // historical collision backlog. Completing today's four decisions does not
+  // Home counts every transfer waiting, including the intentionally unresolved
+  // historical collision backlog. Home v3 says it in the Needs you pill (the
+  // Transfers section with its notice is off by default). Completing today's four decisions does not
   // silently classify those 3,106 old records. Wait for the deferred projection,
   // then assert its exact count in either language.
   const pendingCount = historicalPendingCount + currentPendingCount;
   await page.waitForFunction(expectedCount => {
-    const notices = [...document.querySelectorAll('[data-testid="transfer-review-notice"]')];
+    const notices = [...document.querySelectorAll('[data-testid="home-needs-you-open"]')];
     if (expectedCount === 0) return notices.length === 0;
     if (notices.length !== 1) return false;
     const label = (notices[0].getAttribute('aria-label') ?? '')
@@ -136,7 +144,7 @@ async function home(page, expected, currentPendingCount, historicalPendingCount 
       .replace(/[۰-۹]/g, d => String(d.charCodeAt(0) - 0x6f0)).replace(/[,٬]/g, '');
     return Number(label.match(/\d+/)?.[0]) === expectedCount;
   }, pendingCount, { timeout: 10000 });
-  const notice = page.getByTestId('transfer-review-notice');
+  const notice = page.getByTestId('home-needs-you-open');
   assert.equal(await notice.count(), pendingCount === 0 ? 0 : 1);
   if (pendingCount > 0) assert.equal(minor(await notice.getAttribute('aria-label')) / 100, pendingCount,
     'Home names the exact full review queue, including historical entries');
@@ -196,6 +204,7 @@ try {
       localStorage.setItem(key, JSON.stringify(state));
       localStorage.setItem('wafra/e2e-transfer-seeded', '1');
     }, { key: KEY, state: seed(language, mode) });
+    await withHomeLayout(context);
     const page = await context.newPage();
     page.setDefaultTimeout(12000);
     const errors = [];
@@ -209,12 +218,14 @@ try {
       await page.goto(`${BASE}/transactions`, { waitUntil: 'networkidle' });
       assert.equal(await page.getByRole('button', { name: /^Outgoing transfer,/ }).count(), 0,
         'transfer records are not regular transaction rows');
-      // Home's notice opens the Transfers page, whose question card takes the queue one at a time.
+      // Home's Needs you pill opens the Transfers page, whose question card takes the queue one at a time.
       await page.goto(BASE + '/', { waitUntil: 'networkidle' });
-      await click(page.getByTestId('transfer-review-notice'));
+      await click(page.getByTestId('home-needs-you-open'));
       await page.waitForURL(/\/transfers(?:[?#]|$)/);
       await page.getByTestId('transfers-screen').waitFor({ state: 'visible' });
       await page.getByTestId('transfer-question-card').waitFor({ state: 'visible' });
+      // The period's transfers are under History; the page opens on To answer while anything waits.
+      await click(page.getByTestId('transfers-view-history'));
       await click(page.getByTestId('transfer-row-unknown-out'));
       // The detail sheet asks the one question; its three answers are always offered.
       await fits(page.getByTestId('entry-transfer-question'));
@@ -223,10 +234,11 @@ try {
       }
       await click(page.getByTestId('entry-detail-done'));
       await page.getByTestId('entry-detail-sheet').waitFor({ state: 'hidden' });
-      // "See all" on the question card selects several on this same page: no second screen.
-      await click(page.getByTestId('transfer-question-see-all'));
+      // Select (To answer) selects several on this same page: no second screen.
+      await click(page.getByTestId('transfers-view-answer'));
+      await click(page.getByTestId('transfers-select'));
       await page.getByTestId('transfer-selection-footer').waitFor({ state: 'visible' });
-      assert.match(page.url(), /\/transfers(?:[?#]|$)/, 'See all stays on Transfers');
+      assert.match(page.url(), /\/transfers(?:[?#]|$)/, 'Select stays on Transfers');
       await click(page.getByTestId('transfer-cancel-selection'));
       await page.getByTestId('transfer-selection-footer').waitFor({ state: 'hidden' });
       // An old Review transfers link to one entry opens that entry's question on Transfers.
@@ -344,6 +356,7 @@ try {
           localStorage.setItem(key, JSON.stringify(state));
           localStorage.setItem('wafra/e2e-transfer-seeded', '1');
         }, { key: KEY, state: { ...seed(language, mode), transactions: settledRows } });
+        await withHomeLayout(settledContext);
         const settledPage = await settledContext.newPage();
         settledPage.on('pageerror', error => errors.push(String(error)));
         await home(settledPage, [230000, 21000, 209000], 0, 0);

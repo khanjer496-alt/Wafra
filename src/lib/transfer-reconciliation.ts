@@ -79,10 +79,69 @@ export function isTransferMatch(value: unknown): value is TransferMatch {
     signature(value.signature) && signature(value.counterpartSignature);
 }
 
+/**
+ * Validation memo for ONE synchronous reconciliation pass.
+ *
+ * A pass reads each row's evidence and decision several times (context,
+ * ownership, receipts, pairing, grouping): about six strict validations per
+ * row, each with regex and currency checks. On a 15k-row Hermes ledger that
+ * repetition was a third of every transfer graph build, which runs at launch
+ * (Home's transfer queue), on every transfer answer and on canonical captures.
+ * The memo lives only while a pass runs and is dropped in `finally`, so a
+ * verdict can never outlive the pass that computed it, and nothing outside a
+ * pass (backup validation, row editors) ever sees a cached answer. Rows are
+ * not mutated while a pass runs; keys are the validated objects themselves.
+ */
+let passCache: {
+  evidence: WeakMap<object, boolean>;
+  decision: WeakMap<object, boolean>;
+  candidate: WeakMap<object, boolean>;
+} | null = null;
+
+function newPassCache(): NonNullable<typeof passCache> {
+  return { evidence: new WeakMap(), decision: new WeakMap(), candidate: new WeakMap() };
+}
+
+function withPassCache<T>(work: () => T): T {
+  if (passCache) return work();
+  passCache = newPassCache();
+  try {
+    return work();
+  } finally {
+    passCache = null;
+  }
+}
+
+function validatedInPass(cache: WeakMap<object, boolean> | undefined, value: unknown, validate: (value: unknown) => boolean): boolean {
+  if (!cache || value === null || typeof value !== 'object') return validate(value);
+  let valid = cache.get(value);
+  if (valid === undefined) {
+    valid = validate(value);
+    cache.set(value, valid);
+  }
+  return valid;
+}
+
+/**
+ * The graph build is written once, as resumable steps (the `*Steps`
+ * generators below), and driven two ways: to completion in one call by every
+ * synchronous caller (reducer, import, Transfers' render), or in short slices
+ * by `beginTransferReconciliation` for screens that can wait a few frames.
+ * Each phase yields every YIELD_EVERY rows; a yield changes nothing about what
+ * the phase computes.
+ */
+const YIELD_EVERY = 128;
+
+function drain<T>(steps: Generator<void, T, void>): T {
+  let step = steps.next();
+  while (!step.done) step = steps.next();
+  return step.value;
+}
+
 const evidenceOf = (tx: TransferRow): TransferEvidence | undefined =>
-  isTransferEvidence(tx.transferEvidence) ? tx.transferEvidence : undefined;
+  validatedInPass(passCache?.evidence, tx.transferEvidence, isTransferEvidence) ? tx.transferEvidence : undefined;
 const decisionOf = (tx: TransferRow): TransferDecision | undefined =>
-  isTransferDecision(tx.transferDecision) ? tx.transferDecision : undefined;
+  validatedInPass(passCache?.decision, tx.transferDecision, isTransferDecision) ? tx.transferDecision : undefined;
 const manual = (tx: Transaction): boolean => tx.source !== 'sms' && !tx.smsKey;
 
 /** A holding reference is deliberately NOT an account and proves no ownership. */
@@ -108,6 +167,17 @@ const excludedFromTransfers = (tx: Transaction): boolean =>
   CARD_SETTLEMENT_TITLE.test(tx.title);
 
 export function isTransferCandidate(tx: Transaction): boolean {
+  const cache = passCache?.candidate;
+  if (!cache || tx === null || typeof tx !== 'object') return transferCandidateUncached(tx);
+  let candidate = cache.get(tx);
+  if (candidate === undefined) {
+    candidate = transferCandidateUncached(tx);
+    cache.set(tx, candidate);
+  }
+  return candidate;
+}
+
+function transferCandidateUncached(tx: Transaction): boolean {
   const row = tx as TransferRow;
   if ((tx.type !== 'income' && tx.type !== 'expense') || typeof tx.title !== 'string') return false;
   // The person's choice remains authoritative after a parser/category edit,
@@ -274,6 +344,8 @@ interface Context {
   instrumentKey: (value: unknown, allowStatementTail?: boolean) => string | undefined;
   corroboratingOf: Map<string, string>;
   knownCounterparties: Map<string, Account>;
+  /** Read once when the build starts, so a build in slices sees one ledger currency throughout. */
+  ledgerCurrency: string;
 }
 
 function contextFingerprint(ctx: Context, transactionId: string): string | undefined {
@@ -290,10 +362,11 @@ function contextFingerprint(ctx: Context, transactionId: string): string | undef
  * an instrument independently observed in other bank SMS does not need a
  * same-amount receipt to establish ownership. Never learn from beneficiary
  * mentions, editable Wallet metadata alone, or our own inferred links. */
-function knownTransferCounterparties(
+function* knownTransferCounterpartiesSteps(
   rows: Map<string, TransferRow>, duplicateIds: Set<string>, accounts: Account[],
   entries: Map<string, Entry>,
-): Map<string, Account> {
+): Generator<void, Map<string, Account>, void> {
+  let steps = 0;
   const bankCache = new Map<string, string | undefined>();
   const bankKey = (name: string | undefined): string | undefined => {
     if (!name) return undefined;
@@ -330,6 +403,7 @@ function knownTransferCounterparties(
     typeof tx.smsKey === 'string' && tx.smsKey.length > 0 ? tx.smsKey :
       sourceTime(tx) === undefined ? undefined : `clock:${sourceTime(tx)}`;
   for (const tx of rows.values()) {
+    if (++steps % YIELD_EVERY === 0) yield;
     const account = byId.get(tx.accountId), capture = tx.captureInstrument;
     const evidence = evidenceOf(tx), source = sourceOf(tx);
     if (duplicateIds.has(tx.id) || tx.userEdited || manual(tx) || !source || !account ||
@@ -351,6 +425,7 @@ function knownTransferCounterparties(
   }
   const result = new Map<string, Account>();
   for (const entry of entries.values()) {
+    if (++steps % YIELD_EVERY === 0) yield;
     const tx = entry.tx, evidence = evidenceOf(tx), cp = evidence?.counterparty;
     if (tx.userEdited || decisionOf(tx) || !cp || evidence?.endpointProof !== 'explicit-transfer' ||
         evidence.explicitExternal || !evidence.sourceBank || bankKey(evidence.sourceBank) !== entry.bank) continue;
@@ -372,7 +447,9 @@ function knownTransferCounterparties(
   return result;
 }
 
-function context(transactions: Transaction[], accounts: Account[]): Context {
+function* contextSteps(transactions: Transaction[], accounts: Account[]): Generator<void, Context, void> {
+  let steps = 0;
+  const ledgerCurrency = ledgerCurrencyCode();
   const bankCache = new Map<string, string | undefined>();
   const normalizeBank = (name: string): string | undefined => {
     if (!bankCache.has(name)) {
@@ -422,6 +499,7 @@ function context(transactions: Transaction[], accounts: Account[]): Context {
   const rows = new Map<string, TransferRow>();
   const duplicateIds = new Set<string>();
   for (const tx of transactions) {
+    if (++steps % YIELD_EVERY === 0) yield;
     if (rows.has(tx.id)) duplicateIds.add(tx.id);
     rows.set(tx.id, tx);
   }
@@ -432,6 +510,7 @@ function context(transactions: Transaction[], accounts: Account[]): Context {
   // independently captured bank-account posting establishes that identity.
   const observedBankAccounts = new Set<string>();
   for (const tx of rows.values()) {
+    if (++steps % YIELD_EVERY === 0) yield;
     if (duplicateIds.has(tx.id) || tx.userEdited || (tx.source !== 'sms' && !tx.smsKey)) continue;
     const account = accountById.get(tx.accountId);
     const capture = tx.captureInstrument;
@@ -441,6 +520,7 @@ function context(transactions: Transaction[], accounts: Account[]): Context {
     }
   }
   for (const tx of rows.values()) {
+    if (++steps % YIELD_EVERY === 0) yield;
     const evidence = evidenceOf(tx);
     // An observed reused reference stays reused when another row is reviewed
     // or reclassified. Count before semantic eligibility: later identifying a
@@ -494,6 +574,7 @@ function context(transactions: Transaction[], accounts: Account[]): Context {
   // two unrelated 100 and 50 payments each appear falsely unique in a bucket.
   const referenceKey = (entry: Entry): string => JSON.stringify([entry.bank, entry.reference]);
   for (const entry of entries.values()) {
+    if (++steps % YIELD_EVERY === 0) yield;
     if (!entry.reference) continue;
     const count = referenceCounts.get(referenceKey(entry))!;
     entry.referenceUnique = count === 2;
@@ -505,8 +586,9 @@ function context(transactions: Transaction[], accounts: Account[]): Context {
   for (const [id, entry] of entries) {
     if (transferOwnership(entry.tx) === 'external' || transferDeclined(entry.tx)) entries.delete(id);
   }
-  const knownCounterparties = knownTransferCounterparties(rows, duplicateIds, accounts, entries);
-  return { rows, duplicateIds, accounts: accountById, entries, fingerprints, instrumentKey, corroboratingOf, knownCounterparties };
+  const knownCounterparties = yield* knownTransferCounterpartiesSteps(rows, duplicateIds, accounts, entries);
+  return { rows, duplicateIds, accounts: accountById, entries, fingerprints, instrumentKey, corroboratingOf, knownCounterparties,
+    ledgerCurrency };
 }
 
 /** Two narrowly identified issuer formats, not two arbitrary equal payments.
@@ -626,7 +708,7 @@ function observedReceipt(tx: Transaction, ctx: Context): ObservedRow | undefined
       capture.last4 !== account.last4 || !capture.bankIdentity || !account.bankName ||
       bankIdentityForName(capture.bankIdentity) !== bankIdentityForName(account.bankName)) return;
   const at = sourceTime(tx);
-  const money = sourceMoney(tx, { version: 1, currency: ledgerCurrencyCode(), attribution: 'source' });
+  const money = sourceMoney(tx, { version: 1, currency: ctx.ledgerCurrency, attribution: 'source' });
   if (at === undefined || !money) return;
   return { tx, at, money, bank: bankIdentityForName(capture.bankIdentity)!, credit: true };
 }
@@ -662,15 +744,18 @@ function uniqueObservedPairs(
   return pairs;
 }
 
-function observedCardRepayments(ctx: Context, pending: Set<string>, secondary: Set<string>): Map<string, string> {
+function* observedCardRepaymentsSteps(ctx: Context, pending: Set<string>, secondary: Set<string>): Generator<void, Map<string, string>, void> {
+  let steps = 0;
   const rows: ObservedRow[] = [];
   const receipts: ObservedRow[] = [];
   for (const entry of ctx.entries.values()) {
+    if (++steps % YIELD_EVERY === 0) yield;
     if (!pending.has(entry.tx.id) || secondary.has(entry.tx.id) || entry.tx.type !== 'expense' ||
         entry.tx.transferDecision || entry.tx.userEdited || evidenceOf(entry.tx)?.endpointProof !== 'explicit-transfer') continue;
     rows.push({ tx: entry.tx, at: entry.at, money: entry.money, bank: entry.bank, credit: false });
   }
   for (const tx of ctx.rows.values()) {
+    if (++steps % YIELD_EVERY === 0) yield;
     const receipt = observedReceipt(tx, ctx);
     if (receipt) { rows.push(receipt); receipts.push(receipt); }
   }
@@ -691,6 +776,7 @@ function observedCardRepayments(ctx: Context, pending: Set<string>, secondary: S
   // one unique debit, one unique receipt, and a five-minute window.
   const implicitRows: ObservedRow[] = [...receipts];
   for (const tx of ctx.rows.values()) {
+    if (++steps % YIELD_EVERY === 0) yield;
     if (!pending.has(tx.id) || secondary.has(tx.id) || confirmed.has(tx.id) || tx.type !== 'expense' ||
         tx.transferDecision || tx.userEdited || (tx.source !== 'sms' && !tx.smsKey)) continue;
     const ev = evidenceOf(tx);
@@ -770,15 +856,17 @@ function ownedTransferObservation(tx: TransferRow, ctx: Context): OwnedTransferO
  * remittance. Neither alert alone proves the destination's ownership; together
  * they do without forcing the user through hundreds of review rows.
  */
-function observedOwnedTransferPairs(
+function* observedOwnedTransferPairsSteps(
   ctx: Context,
   pending: Set<string>,
   secondary: Set<string>,
   cardPairs: Map<string, string>,
-): Map<string, string> {
+): Generator<void, Map<string, string>, void> {
+  let steps = 0;
   const pairedReceipts = new Set(cardPairs.values());
   const rows: OwnedTransferObservation[] = [];
   for (const tx of ctx.rows.values()) {
+    if (++steps % YIELD_EVERY === 0) yield;
     if (!pending.has(tx.id) || secondary.has(tx.id) || cardPairs.has(tx.id) || pairedReceipts.has(tx.id)) continue;
     const observed = ownedTransferObservation(tx, ctx);
     if (observed) rows.push(observed);
@@ -803,11 +891,13 @@ function observedOwnedTransferPairs(
   });
 }
 
-function suggestObservedPairs(ctx: Context, pending: Set<string>, internal: Set<string>, secondary: Set<string>,
-  cardPairs: Map<string, string>, byId: Map<string, TransferAssessment>): void {
+function* suggestObservedPairsSteps(ctx: Context, pending: Set<string>, internal: Set<string>, secondary: Set<string>,
+  cardPairs: Map<string, string>, byId: Map<string, TransferAssessment>): Generator<void, void, void> {
+  let steps = 0;
   const pairedReceipts = new Set(cardPairs.values());
   const rows: ObservedRow[] = [];
   for (const tx of ctx.rows.values()) {
+    if (++steps % YIELD_EVERY === 0) yield;
     if (ctx.duplicateIds.has(tx.id) || tx.userEdited || tx.transferDecision || secondary.has(tx.id) ||
         internal.has(tx.id) || pairedReceipts.has(tx.id) || cardPairs.has(tx.id)) continue;
     const receipt = observedReceipt(tx, ctx);
@@ -844,7 +934,8 @@ function suggestObservedPairs(ctx: Context, pending: Set<string>, internal: Set<
   }
 }
 
-function reconcile(ctx: Context): TransferReconciliationResult {
+function* reconcileSteps(ctx: Context): Generator<void, TransferReconciliationResult, void> {
+  let steps = 0;
   const byId = new Map<string, TransferAssessment>();
   const internalIds = new Set<string>();
   // All unresolved candidates are assessed for automatic evidence, but only
@@ -859,6 +950,7 @@ function reconcile(ctx: Context): TransferReconciliationResult {
   const corroboratingIds = new Set(corroboratingOf.keys());
   const knownCardRepayments = new Map<string, string>();
   for (const tx of ctx.rows.values()) {
+    if (++steps % YIELD_EVERY === 0) yield;
     const ownership = transferOwnership(tx);
     const declined = transferDeclined(tx);
     if ((ownership === null && !declined) || !id(tx.id)) continue;
@@ -932,6 +1024,7 @@ function reconcile(ctx: Context): TransferReconciliationResult {
       tx.originalAmountMinor ?? null,
     ]);
     for (const tx of ctx.rows.values()) {
+      if (++steps % YIELD_EVERY === 0) yield;
       if (!minor(tx.amountFils) || movementTime(tx) === undefined ||
           !eligibleAccount(ctx.accounts.get(tx.accountId))) continue;
       // Only row-local explicit ownership may seed this automatic absorption.
@@ -996,6 +1089,7 @@ function reconcile(ctx: Context): TransferReconciliationResult {
     }
     const unresolvedBuckets = new Map<string, AbsorptionBucket>();
     for (const tx of unresolvedRows) {
+      if (++steps % YIELD_EVERY === 0) yield;
       const key = JSON.stringify([moneyKey(tx), tx.type]);
       const bucket: AbsorptionBucket = unresolvedBuckets.get(key) ?? {
         timed: [], byDate: new Map(), untimedByDate: new Map(),
@@ -1067,6 +1161,7 @@ function reconcile(ctx: Context): TransferReconciliationResult {
       // ledger cannot exhaust the bounded scan.
       const byAccount = new Map<string, { tx: TransferRow; at: number }[]>();
       for (const tx of unresolvedRows) {
+        if (++steps % YIELD_EVERY === 0) yield;
         const at = sourceTime(tx);
         if (at === undefined || absorbed.has(tx.id) || nearCandidates.has(tx.id)) continue;
         const key = JSON.stringify([moneyKey(tx), tx.type, tx.accountId]);
@@ -1131,6 +1226,7 @@ function reconcile(ctx: Context): TransferReconciliationResult {
     return result;
   };
   for (const entry of ctx.entries.values()) {
+    if (++steps % YIELD_EVERY === 0) yield;
     if (stale.has(entry.tx.id) || userLinked.has(entry.tx.id) || corroboratingIds.has(entry.tx.id) || knownCardRepayments.has(entry.tx.id)) continue;
     for (const key of keys(entry)) {
       const bucket = indexes.get(key);
@@ -1141,6 +1237,7 @@ function reconcile(ctx: Context): TransferReconciliationResult {
   const candidates = new Map<string, Map<string, Exclude<Basis, 'user'>>>();
   const overflow = new Set<string>();
   for (const entry of ctx.entries.values()) {
+    if (++steps % YIELD_EVERY === 0) yield;
     if (stale.has(entry.tx.id) || userLinked.has(entry.tx.id) || corroboratingIds.has(entry.tx.id) || knownCardRepayments.has(entry.tx.id)) continue;
     const possible = new Map<string, Exclude<Basis, 'user'>>();
     for (const key of keys(entry, true)) {
@@ -1158,6 +1255,7 @@ function reconcile(ctx: Context): TransferReconciliationResult {
     candidates.set(entry.tx.id, possible);
   }
   for (const [txId, possible] of candidates) {
+    if (++steps % YIELD_EVERY === 0) yield;
     const own = internalIds.has(txId);
     const ids = [...possible.keys()].sort();
     const only = ids.length === 1 ? ids[0] : undefined;
@@ -1172,13 +1270,13 @@ function reconcile(ctx: Context): TransferReconciliationResult {
       byId.set(txId, { id: txId, status: 'ambiguous', reason: 'multiple-candidates', candidateIds: ids });
     }
   }
-  const cardRepaymentPairs = observedCardRepayments(ctx, new Set([...unresolvedIds, ...knownCardRepayments.keys()]), corroboratingIds);
+  const cardRepaymentPairs = yield* observedCardRepaymentsSteps(ctx, new Set([...unresolvedIds, ...knownCardRepayments.keys()]), corroboratingIds);
   for (const [debitId, receiptId] of cardRepaymentPairs) {
     unresolvedIds.delete(debitId);
     pendingIds.delete(debitId);
     byId.set(debitId, { id: debitId, status: 'card-repayment', reason: 'credit-card-receipt', counterpartId: receiptId, candidateIds: [] });
   }
-  const observedOwnPairs = observedOwnedTransferPairs(ctx, unresolvedIds, corroboratingIds, cardRepaymentPairs);
+  const observedOwnPairs = yield* observedOwnedTransferPairsSteps(ctx, unresolvedIds, corroboratingIds, cardRepaymentPairs);
   for (const [txId, counterpartId] of observedOwnPairs) {
     if (!unresolvedIds.has(txId) || !unresolvedIds.has(counterpartId)) continue;
     internalIds.add(txId); internalIds.add(counterpartId);
@@ -1187,16 +1285,18 @@ function reconcile(ctx: Context): TransferReconciliationResult {
     byId.set(txId, { id: txId, status: 'confirmed-own', reason: 'amount-time', counterpartId, candidateIds: [] });
     byId.set(counterpartId, { id: counterpartId, status: 'confirmed-own', reason: 'amount-time', counterpartId: txId, candidateIds: [] });
   }
-  suggestObservedPairs(ctx, unresolvedIds, internalIds, corroboratingIds, cardRepaymentPairs, byId);
+  yield* suggestObservedPairsSteps(ctx, unresolvedIds, internalIds, corroboratingIds, cardRepaymentPairs, byId);
   // Suggestions are deliberately non-destructive: they are the small subset
   // worth asking the user about. Everything else unresolved defaults to normal
   // cash-flow treatment and remains editable from the transaction itself.
   for (const txId of unresolvedIds) {
+    if (++steps % YIELD_EVERY === 0) yield;
     const status = byId.get(txId)?.status;
     if (status === 'likely-own' || status === 'likely-card-repayment') pendingIds.add(txId);
   }
   const groups = new Map<string, TransferReviewGroup>();
   for (const txId of pendingIds) {
+    if (++steps % YIELD_EVERY === 0) yield;
     const tx = ctx.rows.get(txId)!;
     const assessment = byId.get(txId)!;
     const ev = evidenceOf(tx);
@@ -1216,18 +1316,101 @@ function reconcile(ctx: Context): TransferReconciliationResult {
   return { byId, internalIds, pendingIds, groups: orderedGroups, corroboratingIds, corroboratingOf, cardRepaymentPairs, knownCardRepayments };
 }
 
+function context(transactions: Transaction[], accounts: Account[]): Context {
+  return drain(contextSteps(transactions, accounts));
+}
+
+function reconcile(ctx: Context): TransferReconciliationResult {
+  return drain(reconcileSteps(ctx));
+}
+
 // Store arrays are immutable snapshots. Retain only their last paired result;
 // replacing transactions OR accounts (including restore/erase) invalidates it.
 let previous: { transactions: Transaction[]; accounts: Account[]; result: TransferReconciliationResult } | undefined;
+// Counts writes to `previous`, so a build in slices can tell whether a newer
+// graph was memoised while it was paused (and then leave that one in place).
+let previousWrites = 0;
+function remember(transactions: Transaction[], accounts: Account[], result: TransferReconciliationResult): void {
+  previous = { transactions, accounts, result };
+  previousWrites += 1;
+}
 function memoizedReconcile(transactions: Transaction[], accounts: Account[], ctx?: Context): TransferReconciliationResult {
   if (previous?.transactions === transactions && previous.accounts === accounts) return previous.result;
-  const result = reconcile(ctx ?? context(transactions, accounts));
-  previous = { transactions, accounts, result };
+  const result = withPassCache(() => reconcile(ctx ?? context(transactions, accounts)));
+  remember(transactions, accounts, result);
   return result;
 }
 
 export function reconcileTransfers(transactions: Transaction[], accounts: Account[]): TransferReconciliationResult {
   return memoizedReconcile(transactions, accounts);
+}
+
+/** A graph build that runs in slices; see `beginTransferReconciliation`. */
+export interface SlicedTransferReconciliation {
+  /**
+   * Run for about `sliceMs` (at least one step), then stop at the next yield.
+   * Returns the result once the build has finished, otherwise undefined.
+   */
+  step(sliceMs: number): TransferReconciliationResult | undefined;
+}
+
+/**
+ * The same graph as `reconcileTransfers`, built in slices. Its validation memo
+ * (see `passCache`) belongs to this one build and is installed only while a
+ * slice runs, so a synchronous pass between slices never sees it. The arrays
+ * must be immutable store snapshots; a caller whose ledger changed abandons
+ * the build rather than finishing it. A finished build becomes the memoised
+ * answer for exactly these arrays, as a synchronous build would, unless a
+ * newer graph was memoised while it was paused. If a synchronous caller built
+ * this same graph meanwhile, the build ends with that answer. A step that
+ * throws fails the build: every later step throws the same error.
+ */
+export function beginTransferReconciliation(transactions: Transaction[], accounts: Account[]): SlicedTransferReconciliation {
+  const memoised = (): TransferReconciliationResult | undefined =>
+    previous?.transactions === transactions && previous.accounts === accounts ? previous.result : undefined;
+  const known = memoised();
+  if (known) return { step: () => known };
+  const writesAtStart = previousWrites;
+  const cache = newPassCache();
+  const steps = (function* build(): Generator<void, TransferReconciliationResult, void> {
+    const ctx = yield* contextSteps(transactions, accounts);
+    return yield* reconcileSteps(ctx);
+  })();
+  let result: TransferReconciliationResult | undefined;
+  let failure: { error: unknown } | null = null;
+  return {
+    step(sliceMs) {
+      if (result) return result;
+      // A failed build stays failed: a finished generator would otherwise
+      // report done with no result.
+      if (failure) throw failure.error;
+      // A synchronous caller may have built this exact graph while we were
+      // paused; take its answer instead of finishing a second copy.
+      const built = memoised();
+      if (built) {
+        result = built;
+        return result;
+      }
+      const outer = passCache;
+      passCache = cache;
+      try {
+        const startedAt = Date.now();
+        let next = steps.next();
+        while (!next.done && Date.now() - startedAt < sliceMs) next = steps.next();
+        if (!next.done) return undefined;
+        result = next.value;
+      } catch (error) {
+        failure = { error };
+        throw error;
+      } finally {
+        passCache = outer;
+      }
+      // Memoise only when nothing newer was memoised meanwhile: a build of an
+      // older ledger finishing late must not replace the current answer.
+      if (previousWrites === writesAtStart) remember(transactions, accounts, result);
+      return result;
+    },
+  };
 }
 
 /** The exact transaction ids analytics treats as internal after reconciliation. */
@@ -1249,6 +1432,10 @@ export const TRANSFER_NORMALIZATION_VERSION = 2;
 
 /** Never changes amounts, routing, type, IDs or legacy transfer flags. */
 export function normalizeTransferLinks(transactions: Transaction[], accounts: Account[]): Transaction[] {
+  return withPassCache(() => normalizeTransferLinksInPass(transactions, accounts));
+}
+
+function normalizeTransferLinksInPass(transactions: Transaction[], accounts: Account[]): Transaction[] {
   const ctx = context(transactions, accounts);
   const result = memoizedReconcile(transactions, accounts, ctx);
   let changed = false;
@@ -1294,6 +1481,12 @@ export function applyTransferDecision(
 
 /** Validate every selected item against the same snapshot before changing any row. */
 export function applyTransferDecisionBatch(
+  transactions: Transaction[], accounts: Account[], request: TransferDecisionBatchRequest,
+): Transaction[] {
+  return withPassCache(() => applyTransferDecisionBatchInPass(transactions, accounts, request));
+}
+
+function applyTransferDecisionBatchInPass(
   transactions: Transaction[], accounts: Account[], request: TransferDecisionBatchRequest,
 ): Transaction[] {
   if (!record(request) || !Array.isArray(request.decisions) || request.decisions.length === 0 ||

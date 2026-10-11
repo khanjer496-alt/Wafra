@@ -32,6 +32,8 @@ interface TransactionRowProps {
   /** The row's swipe actions, offered to screen readers on the main target. */
   accessibilityActions?: readonly RowAccessibilityAction[];
   onAccessibilityAction?: (name: string) => void;
+  /** Test id for the single-target row (merchantLinks off); the split row keeps its own two ids. */
+  testID?: string;
 }
 
 /**
@@ -40,7 +42,7 @@ interface TransactionRowProps {
  * are never ellipsized. The merchant logo tile stays on every merchant row.
  */
 function TransactionRowInner({ transaction, account, onPress, internal, merchantLinks = true,
-  accessibilityActions, onAccessibilityAction }: TransactionRowProps) {
+  accessibilityActions, onAccessibilityAction, testID }: TransactionRowProps) {
   const { getCategory, categoryLabel } = useCategoryCatalog();
   const router = useRouter();
   const theme = useTheme();
@@ -73,8 +75,10 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
   const accountReview = isUnassignedIncome(transaction) || transaction.accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID
     ? t('incomeAccountReview', language) : null;
   const accountLabel = accountReview ?? account?.name;
+  // "••1234" is held left to right: in Arabic the dots would otherwise move
+  // past the digits and read as a second separator ("· ·").
   const accountShort = !accountReview && account?.last4
-    ? [account.bankName, `••${account.last4}`].filter(Boolean).join(' · ') : null;
+    ? [account.bankName, `\u2066••${account.last4}\u2069`].filter(Boolean).join(' · ') : null;
   const detailLine = meaning ?? [clock, source, accountShort].filter(Boolean).join(' · ');
   const autoAdded = transaction.bestEffort ? t('autoAddedCheck', language) : null;
   const label = [presentation.title, autoAdded, where, presentation.note, accountLabel, clock, source,
@@ -129,7 +133,7 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
     </View>;
   }
 
-  return <Pressable accessibilityRole={onPress ? 'button' : undefined} accessibilityLabel={label}
+  return <Pressable testID={testID} accessibilityRole={onPress ? 'button' : undefined} accessibilityLabel={label}
     onPress={onPress ? () => onPress(transaction) : undefined}
     android_ripple={{ color: theme.backgroundSelected }}
     {...(onPress ? a11yActions : {})}

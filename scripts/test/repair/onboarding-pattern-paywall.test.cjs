@@ -57,7 +57,8 @@ function setup({ language = 'en', theme = 'dark', motion = 'reduced', platform =
   h.deps['@/components/onboarding/e-motion'] = { useStepPhase: () => ({ leaving: false, paint: stepFade }), STEP_ARRIVE_DELAY_MS: 120 };
   h.deps['@/lib/onboarding-e'] = { trialTimeline: (days) => days > 0 ? [{ key: 'today', day: 0 }, { key: 'end', day: days }] : [] };
   h.deps['@/lib/public-links'] = { configuredPublicUrl: (key) => `https://example.test/${key}` };
-  h.deps['@/lib/purchases'] = { ...h.deps['@/lib/purchases'], billingStore: () => 'appStore' };
+  h.deps['@/lib/purchases'] = { ...h.deps['@/lib/purchases'], billingStore: () => 'appStore', yearlySavingPercent: () => null };
+  h.local('@/lib/pro-plans', 'src/lib/pro-plans.ts');
   h.deps['@/components/superwall-billing-context'] = { useWafraBilling: () => ({ available: true, configured: true,
     configurationError: null, fetchProOffers: async () => [], purchasePro: async () => 'cancelled', restorePro: async () => null }) };
   h.local('@/lib/pattern', 'src/lib/pattern.ts');

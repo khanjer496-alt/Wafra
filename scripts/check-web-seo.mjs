@@ -74,14 +74,17 @@ const accessibleImageCount = (index.match(/<img\b[^>]*\balt="[^"]+"/g) ?? []).le
 check('three static product previews with alt text', imageCount === 3 && accessibleImageCount === 3);
 check('static product image URLs', ['/wafra-app-home.png', '/wafra-app-spending.png', '/wafra-app-bills-light.png']
   .every((image) => index.includes(`src="${image}"`) && fs.existsSync(path.join(outputDir, image))));
+const redirects = fs.existsSync(path.join(outputDir, '_redirects')) ? read('_redirects') : '';
 check(
   'public beta download links',
-  index.includes('https://testflight.apple.com/join/jbwzCgZ6') &&
+  index.includes('href="/get/iphone"') &&
+    /^\/get\/iphone https:\/\/testflight\.apple\.com\/join\/jbwzCgZ6 302$/m.test(redirects) &&
+    !index.includes('/get/android') && !/^\/get\/android /m.test(redirects) &&
     !/\.apk"/.test(index) && !index.includes('Download APK'),
 );
 check(
   'no downloads from the private source repository',
-  !/github\.com\/khanjer496-alt\/Wafra|raw\.githubusercontent\.com\/khanjer496-alt\/Wafra/.test(index),
+  !/github\.com\/khanjer496-alt\/Wafra|raw\.githubusercontent\.com\/khanjer496-alt\/Wafra/.test(`${index}\n${redirects}`),
 );
 check(
   'worldwide audience positioning',
@@ -123,15 +126,8 @@ check(
   readOptional('404.html').includes('That page is not here.') && readOptional('404.html').includes('href="/"') &&
   !/<script\b/i.test(readOptional('404.html')),
 );
-check(
-  'every private app route is noindex',
-  privatePages.length > 0 &&
-  privatePages.every((file) => /name="robots" content="noindex, nofollow, noarchive"/.test(read(file))),
-);
-check(
-  'private app routes retain JavaScript',
-  privatePages.every((file) => /<script\b[^>]*\bsrc=/.test(read(file))),
-);
+check('no app screens are published', privatePages.length === 0, privatePages.slice(0, 3).join(', '));
+check('no app JavaScript is published', !fs.existsSync(path.join(outputDir, '_expo', 'static', 'js')));
 
 check('production site URL configured', Boolean(siteUrl));
 if (siteUrl) {

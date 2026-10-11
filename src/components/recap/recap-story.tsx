@@ -287,7 +287,7 @@ function WhereWhenScene({ snapshot, moneySpec, palette, w, compact }: SceneProps
     <Animated.View testID="recap-top-merchant" entering={enter(FadeInUp.duration(420))} accessible accessibilityRole="text"
       accessibilityLabel={`${w.merchant}: ${top.title}. ${meta}`} style={styles.merchantFeature}>
       <View style={styles.merchantIdentity}>
-        <MerchantAvatar title={top.title} category={top.category} size={compact || large ? 52 : 64} />
+        <MerchantAvatar title={top.title} category={top.category} size={compact || large ? 52 : 64} plate={palette.statusBar === 'light'} />
         <View style={styles.flex}>
           <CardLabel text={w.merchant} palette={palette} />
           <ThemedText maxFontSizeMultiplier={STORY_TITLE_SMALL_MAX} numberOfLines={2}
@@ -303,7 +303,7 @@ function WhereWhenScene({ snapshot, moneySpec, palette, w, compact }: SceneProps
         <Animated.View key={merchant.key} entering={enter(FadeInUp.delay(120 + index * 50).duration(320))}
           style={[styles.merchantRow, { borderTopColor: palette.bandRule }]}>
           <ThemedText type="smallBold" style={[styles.runnerRank, styles.tabularSans, { color: palette.onBandSecondary }]}>{index + 2}</ThemedText>
-          <MerchantAvatar title={merchant.title} category={merchant.category} size={timed || compact ? 32 : 40} />
+          <MerchantAvatar title={merchant.title} category={merchant.category} size={timed || compact ? 32 : 40} plate={palette.statusBar === 'light'} />
           <View style={styles.flex}>
             <ThemedText type="smallBold" numberOfLines={1} style={{ color: palette.onBand }}>{merchant.title}</ThemedText>
             <ThemedText type="meta" style={{ color: palette.onBandSecondary }}>{w.paymentsCount(merchant.count)}</ThemedText>
@@ -449,7 +449,7 @@ function HighlightScene({ snapshot, moneySpec, palette, w, compact }: SceneProps
     <CardLabel text={w.biggest} palette={palette} />
     <Animated.View entering={enter(FadeInUp.duration(420))} style={styles.bigPurchase}>
       <View style={styles.bigPurchaseTop}>
-        <MerchantAvatar title={purchase.title} category={purchase.category} size={compact || large ? 56 : 72} />
+        <MerchantAvatar title={purchase.title} category={purchase.category} size={compact || large ? 56 : 72} plate={palette.statusBar === 'light'} />
         <ThemedText type="meta" style={{ color: palette.onBandSecondary }}>{shortDate(purchase.date)}</ThemedText>
       </View>
       <ThemedText maxFontSizeMultiplier={STORY_TITLE_MAX} numberOfLines={2}

@@ -45,7 +45,7 @@ const SF_SYMBOLS: Record<IconName, SFSymbol> = {
   home: 'house', chart: 'chart.bar.xaxis', target: 'target', wallet: 'wallet.pass',
   plus: 'plus', search: 'magnifyingglass', trash: 'trash', close: 'xmark',
   'chevron-right': 'chevron.right', 'chevron-left': 'chevron.left', 'chevron-down': 'chevron.down',
-  sliders: 'slider.horizontal.3', filter: 'line.3.horizontal.decrease',
+  sliders: 'slider.horizontal.3', gear: 'gearshape', pencil: 'pencil', filter: 'line.3.horizontal.decrease',
   'arrow-up': 'arrow.up', 'arrow-down': 'arrow.down', 'arrow-up-right': 'arrow.up.right', 'arrow-down-right': 'arrow.down.right',
   spark: 'sparkles', check: 'checkmark', cart: 'cart', dining: 'fork.knife', car: 'car', bolt: 'bolt',
   phone: 'iphone', bag: 'bag', heart: 'heart', cap: 'graduationcap', plane: 'airplane',
@@ -132,9 +132,24 @@ function SvgIcon({ name, size = 24, color = '#fff', strokeWidth = 1.8 }: IconPro
           <Path {...p} d="M9 5 V9 M15 10 V14 M7 15 V19" />
         </>
       )}
-      {/* A funnel, and only a funnel. `sliders` is this set's SETTINGS glyph —
-          it opens Settings from Home and from Wallet — so a filter control
-          cannot borrow it any more than it could borrow `chart`. */}
+      {/* Settings: a gear. `sliders` arranges something (Customize Home) and
+          the pencil edits one thing (an account, a goal); each glyph has one
+          meaning so a control is never mistaken for another. */}
+      {name === 'gear' && (
+        <>
+          <Circle {...p} cx={12} cy={12} r={2.8} />
+          <Circle {...p} cx={12} cy={12} r={6.6} />
+          <Path {...p} strokeWidth={strokeWidth + 1.2} d="M18.6 12.0 L21.4 12.0 M16.7 16.7 L18.6 18.6 M12.0 18.6 L12.0 21.4 M7.3 16.7 L5.4 18.6 M5.4 12.0 L2.6 12.0 M7.3 7.3 L5.4 5.4 M12.0 5.4 L12.0 2.6 M16.7 7.3 L18.6 5.4" />
+        </>
+      )}
+      {name === 'pencil' && (
+        <>
+          <Path {...p} d="M4 20 L4.8 16.2 L15.6 5.4 a2 2 0 0 1 2.8 0 l0.2 0.2 a2 2 0 0 1 0 2.8 L7.8 19.2 Z" />
+          <Line {...p} x1={13.6} y1={7.4} x2={16.6} y2={10.4} />
+        </>
+      )}
+      {/* A funnel, and only a funnel. `sliders` is Customize's glyph and the
+          gear is Settings', so a filter control borrows neither. */}
       {name === 'filter' && (
         <Path {...p} d="M3.5 5.5 H20.5 L14 13 V20.5 L10 18.2 V13 Z" />
       )}

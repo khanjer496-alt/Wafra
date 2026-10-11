@@ -42,7 +42,11 @@ type TransactionFilterOptions = {
   reviewIds?: ReadonlySet<string>;
   /** Ledger minor-unit exponent, for matching a typed amount. Defaults to 2. */
   amountExponent?: number;
-  /** Separated records the reconciler queued for an ownership decision. */
+  /**
+   * Transfers waiting for an answer (ownership not settled), queued by the
+   * reconciler or not. Counted in the summary whether the row moved to
+   * Transfers or stays in this list (an account not identified).
+   */
   reviewTransferIds?: ReadonlySet<string>;
   /**
    * The other leg of each linked or likely own-account pair among the
@@ -257,18 +261,20 @@ export function projectTransactionFilter(index: ReturnType<typeof createTransact
     const part = !counts ? 0 : filters.categories.size > 0 ? amountInCategories(row, filters.categories) : row.amountFils;
     const contribution = row.type === 'expense' ? -part : part;
     totalShown += contribution;
+    // Every transfer waiting for an answer in view is counted once (a pair once), the same rule as
+    // Home's Needs you, whether it moves to Transfers below or stays in this list.
+    const partner = options.separatedPartnerIds?.get(row.id);
+    if (kind !== 'transfers' && options.reviewTransferIds?.has(row.id)) {
+      if (partner === undefined || !countedReviewLegs.has(partner)) separatedTransfers.reviewCount++;
+      if (partner !== undefined) countedReviewLegs.add(row.id);
+    }
     // The Transfers chip is the one place confirmed transfers are listed here.
     // A row on a hidden (archived) account stays in this list and in the
     // hidden count below, as it does everywhere else; only rows that belong to
     // a live account or already count in totals move to Transfers.
     if (kind !== 'transfers' && options.separateTransferIds?.has(row.id) && (counts || options.live.has(row.accountId))) {
-      const partner = options.separatedPartnerIds?.get(row.id);
       if (partner === undefined || !countedLegs.has(partner)) separatedTransfers.count++;
       if (partner !== undefined) countedLegs.add(row.id);
-      if (options.reviewTransferIds?.has(row.id)) {
-        if (partner === undefined || !countedReviewLegs.has(partner)) separatedTransfers.reviewCount++;
-        if (partner !== undefined) countedReviewLegs.add(row.id);
-      }
       if (row.type === 'income') separatedTransfers.incomeFils += part;
       else separatedTransfers.expenseFils += part;
       continue;

@@ -31,34 +31,40 @@ test('a bank account row opens its detail screen, and a card opens its activity'
   assert.deepEqual(h.events.filter((e) => e[0] === 'route').map((e) => e[1]), ['/account?id=enbd', '/card?id=credit']);
 });
 
-test('a card with an open statement says Mark paid, offers the stated minimum, and labels captured spending', () => {
+// Accounts is a compact list (owner-approved): one short row per card with
+// the bank's figure and the statement on its own line. Recording a payment
+// lives on the card and on Bills, not on the row.
+test('a credit card row leads with the bank figure and puts the open statement on its own line', () => {
   const h = createHarness();
   const tree = h.render('wallet');
-  assert.match(text(byId(tree, 'wallet-card-statement')), /Statement AED 2,800/);
-  assert.match(text(byId(tree, 'wallet-mark-paid-credit')), /^Mark paid$/);
-  assert.match(text(byId(tree, 'wallet-mark-minimum-credit')), /^Mark minimum paid$/);
-  assert.doesNotMatch(text(tree), /Pay in full|Pay minimum/);
-  // No limit entered: no usage bar, whatever the bank quoted.
-  assert.equal(byId(tree, 'wallet-card-usage'), undefined);
-  // Mark paid opens the payment sheet (with its own confirmation), never commits from the row.
-  press(byId(tree, 'wallet-mark-paid-credit'));
-  assert.deepEqual(h.events.filter((e) => e[0] === 'payCardDue'), []);
-  assert.ok(h.events.some((e) => e[0] === 'state' && e[2]?.choice === 'full' && e[2]?.due?.id === 'statement'));
+  const row = text(byId(tree, 'wallet-card-credit'));
+  assert.match(row, /2,800\.00/);
+  assert.match(row, /owed/);
+  assert.match(text(byId(tree, 'wallet-status-credit')), /Statement left AED 2,800(\.00)? · due 10 Sept?/);
+  assert.equal(byId(tree, 'wallet-mark-paid-credit'), undefined);
+  assert.doesNotMatch(text(tree), /Pay in full|Pay minimum|Mark paid/);
+  // One "owed" figure, never a second one for the statement.
+  assert.equal((row.match(/owed/g) ?? []).length, 1);
 });
 
-test('an estimated minimum is never offered on the card row', () => {
+test('a settled statement says paid beside the bank figure, never "AED 0.00 owed"', () => {
   const h = createHarness({ state: { cardDues: [{ id: 'statement', accountId: 'credit', dueDate: '2026-09-10',
-    totalDueFils: 280000, minDueFils: 14000, minDueEstimated: true, paidFils: 0 }] } });
+    totalDueFils: 280000, minDueFils: 14000, paidFils: 280000 }] } });
+  h.deps['@/lib/cards'].openDues = () => [];
   const tree = h.render('wallet');
-  assert.ok(byId(tree, 'wallet-mark-paid-credit'));
-  assert.equal(byId(tree, 'wallet-mark-minimum-credit'), undefined);
+  assert.match(text(byId(tree, 'wallet-status-credit')), /Statement paid ✓/);
+  assert.doesNotMatch(text(byId(tree, 'wallet-card-credit')), /(^|[^\d,])0\.00/);
 });
 
-test('a usage bar appears only with a limit the user entered', () => {
+test('with a limit the user entered, quoted headroom becomes the used figure', () => {
   const h = createHarness();
-  h.state.accounts = h.state.accounts.map((a) => a.id === 'credit' ? { ...a, creditLimitFils: 1000000 } : a);
+  h.state.accounts = h.state.accounts.map((a) => a.id === 'credit'
+    ? { ...a, creditLimitFils: 1000000, snapshotKind: 'limit', snapshotFils: 720000 } : a);
   const tree = h.render('wallet');
-  assert.match(text(byId(tree, 'wallet-card-usage')), /AED 2,800 used of your AED 10,000 limit/);
+  const row = text(byId(tree, 'wallet-card-credit'));
+  assert.match(row, /2,800\.00/);
+  assert.match(row, /used/);
+  assert.doesNotMatch(row, /owed/);
 });
 
 test('a quiet account offers Update balance and Hide inline', () => {
@@ -74,18 +80,26 @@ test('a quiet account offers Update balance and Hide inline', () => {
   assert.equal(byId(tree, 'wallet-update-balance-enbd'), undefined);
 });
 
-test('a credit card on its ink card names its figure, and a quiet one can still be hidden', () => {
-  const h = createHarness();
-  const tree = h.render('wallet');
-  // An open statement: the figure is what is left of it, not the card's whole balance.
-  assert.match(text(byId(tree, 'wallet-card-credit')), /· statement left to pay ·/);
-  assert.doesNotMatch(text(byId(tree, 'wallet-card-credit')), /· owed ·/);
+test('a quiet credit card can still be hidden from its row', () => {
   const quiet = createHarness({ state: { cardDues: [] } });
   quiet.state.accounts = quiet.state.accounts.map((a) => a.id === 'credit' ? { ...a, snapshotTs: QUIET_TS } : a);
   const quietTree = quiet.render('wallet');
   assert.ok(byId(quietTree, 'wallet-quiet-line'));
   press(byId(quietTree, 'wallet-hide-credit'));
   assert.deepEqual(JSON.parse(JSON.stringify(quiet.events.filter((e) => e[0] === 'editAccount'))), [['editAccount', 'credit', { archived: true }]]);
+});
+
+test('a debit card is a card with no balance, and balances count only accounts that hold money', () => {
+  const h = createHarness();
+  h.state.accounts = [...h.state.accounts,
+    { id: 'debit', name: 'ADCB Debit Card', kind: 'card', cardType: 'debit', bankName: 'ADCB', last4: '1111', openingFils: 0 }];
+  const tree = h.render('wallet');
+  const row = text(byId(tree, 'wallet-account-debit'));
+  assert.match(row, /Debit card · uses ADCB/);
+  assert.doesNotMatch(row, /no balance|—/i);
+  assert.ok(byId(tree, 'account-group-debit'));
+  assert.match(text(byId(tree, 'wallet-coverage-chip')), /3 of 3 balances recorded/);
+  assert.match(text(byId(tree, 'wallet-cards-apart-chip')), /1 credit card, shown on its own/);
 });
 
 test('Add activity lists statement import, add by hand and paste, each to an existing screen', () => {
@@ -108,7 +122,7 @@ test('account detail shows the reported balance, who reported it, and recorded i
   // Design language E: the balance is the slate band's figure, with who
   // reported it and when on the line under it.
   assert.match(text(byId(tree, 'account-detail-balance')), /Latest balance[\s\S]*25,000/);
-  assert.match(text(byId(tree, 'account-detail-freshness')), /Bank alert/);
+  assert.match(text(byId(tree, 'account-detail-freshness')), /Bank message/);
   const flow = text(byId(tree, 'account-detail-flow'));
   assert.match(flow, /Recorded in this month/);
   assert.match(flow, /Recorded out this month/);
@@ -118,14 +132,14 @@ test('account detail shows the reported balance, who reported it, and recorded i
   assert.deepEqual(h.events.filter((e) => e[0] === 'route').map((e) => e[1]), ['/transactions?account=enbd']);
 });
 
-test('a balance the user set reads "Set by you", never "Bank alert"', () => {
+test('a balance the user set reads "Set by you", never "Bank message"', () => {
   const h = createHarness();
   const ts = Date.parse('2026-09-15T08:00:00Z');
   h.state.accounts = h.state.accounts.map((a) => a.id === 'enbd' ? { ...a, snapshotTs: ts, manualSnapshotTs: ts } : a);
   const tree = renderAccount(h, { id: 'enbd' });
   const balance = text(byId(tree, 'account-detail-freshness'));
   assert.match(balance, /Set by you/);
-  assert.doesNotMatch(balance, /Bank alert/);
+  assert.doesNotMatch(balance, /Bank message/);
 });
 
 test('Set today\'s balance is offered, and the quiet-row shortcut opens it straight away', () => {

@@ -31,9 +31,15 @@ function renderTransfers({ language = 'en', transactions, accounts, adjust = () 
     fill: 'fill', onFill: 'on-fill', text: 'text' };
   const state = { language, transactions, accounts };
   const answers = [];
+  // State persists across renders (in hook order) so a press followed by rerender() shows its effect.
+  const slots = [];
+  let cursor = 0;
   const deps = {
     react: { useDeferredValue: v => v, useMemo: f => f(), useRef: v => ({ current: v }), useEffect() {},
-      useState: initial => [typeof initial === 'function' ? initial() : initial, () => {}] },
+      useState: initial => {
+        const index = cursor++; if (!(index in slots)) slots[index] = typeof initial === 'function' ? initial() : initial;
+        return [slots[index], value => { slots[index] = typeof value === 'function' ? value(slots[index]) : value; }];
+      } },
     'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
     'react-native': { Keyboard: { dismiss() {} }, Platform: { OS: 'ios' }, Pressable: 'Pressable', View: 'View',
       FlatList: props => ({ type: 'FlatList', props }), StyleSheet: { create: s => s, hairlineWidth: 1 } },
@@ -77,6 +83,7 @@ function renderTransfers({ language = 'en', transactions, accounts, adjust = () 
   const src = file => load(path.join(root, file), deps);
   deps['@/lib/transfer-pairs'] = src('src/lib/transfer-pairs.ts');
   deps['@/lib/transfer-activity'] = src('src/lib/transfer-activity.ts');
+  deps['@/lib/transfer-people'] = src('src/lib/transfer-people.ts');
   deps['@/lib/transfer-activity-copy'] = load(path.join(root, 'src/lib/transfer-activity-copy.ts'),
     { '@/lib/i18n': { getLanguage: () => language } });
   deps['@/lib/transfer-answer'] = src('src/lib/transfer-answer.ts');
@@ -85,18 +92,27 @@ function renderTransfers({ language = 'en', transactions, accounts, adjust = () 
   deps['@/lib/transfer-batch'] = src('src/lib/transfer-batch.ts');
   deps['@/lib/transfer-review-presentation'] = src('src/lib/transfer-review-presentation.ts');
   deps['@/hooks/use-transfer-batch'] = src('src/hooks/use-transfer-batch.ts');
-  for (const name of ['transfer-select-mark', 'transfer-answer-choices', 'transfer-route-row', 'transfer-question-card',
+  for (const name of ['transfer-select-mark', 'transfer-answer-choices', 'transfer-route-row', 'transfer-person-row', 'transfer-question-card',
     'transfer-group-row', 'transfer-answer-sheet']) {
     deps[`@/components/transfers/${name}`] = src(`src/components/transfers/${name}.tsx`);
   }
-  const screen = load(path.join(root, 'src/app/transfers.tsx'), deps).default();
-  const list = walk(screen).find(node => node.type === 'FlatList');
-  const records = list.props.data;
-  const items = records.map((item, index) => ({ item, tree: list.props.renderItem({ item, index }) }));
-  return { events, answers, screen, list, records, items, band, words: deps['@/lib/transfer-activity-copy'].transferActivityCopy(language) };
+  const Screen = load(path.join(root, 'src/app/transfers.tsx'), deps).default;
+  const render = () => {
+    cursor = 0;
+    const screen = Screen();
+    const list = walk(screen).find(node => node.type === 'FlatList');
+    const records = list.props.data;
+    const items = records.map((item, index) => ({ item, tree: list.props.renderItem({ item, index }) }));
+    return { screen, list, records, items };
+  };
+  return { events, answers, ...render(), rerender: render, band, words: deps['@/lib/transfer-activity-copy'].transferActivityCopy(language) };
 }
 
-for (const language of ['en', 'ar']) test(`${language}: generic unknowns are neutral; only reconciler review items are queued as questions`, () => {
+// Owner decision (Transfers grouped by person): every transfer kept out of the totals needs an answer and is
+// counted. A generic unknown with no name reads "Needs an answer" like a queued row; the card does not walk such
+// one-offs: To answer lists them as one "without a name" row that opens select mode for them.
+const byTestId = (tree, id) => walk(tree).find(node => node.props?.testID === id);
+for (const language of ['en', 'ar']) test(`${language}: a generic unknown needs an answer too, reached from the To answer list`, () => {
   const accounts = [{ id: 'bank', name: 'Bank', kind: 'bank', openingFils: 0 },
     { id: 'old', name: 'Old', kind: 'bank', openingFils: 0, archived: true }];
   const transactions = [
@@ -105,13 +121,18 @@ for (const language of ['en', 'ar']) test(`${language}: generic unknowns are neu
     row('archived', { accountId: 'old' }),
     row('twice'), row('twice', { amountFils: 20000 }),
   ];
-  const h = renderTransfers({ language, transactions, accounts, adjust: result => {
+  const adjust = result => {
     result.byId.set('queued', { id: 'queued', status: 'likely-own', reason: 'amount-time', candidateIds: ['x'] });
     result.pendingIds.add('queued');
-  } });
-  const routes = h.records.filter(item => !item.kind);
-  const ids = Array.from(routes, item => item.transactionId);
-  assert.deepEqual(ids.slice().sort(), ['generic', 'queued', 'sent'], 'archived and duplicate-id rows are not listed as transfers');
+  };
+  const h = renderTransfers({ language, transactions, accounts, adjust });
+  // Something waits, so the page opens on To answer.
+  const header = h.list.props.ListHeaderComponent;
+  assert.equal(byTestId(header, 'transfers-view-answer').props.accessibilityState.selected, true);
+  assert.equal(byTestId(header, 'transfers-view-history').props.accessibilityState.selected, false);
+  assert.equal(byTestId(header, 'transfers-view-answer').props.accessibilityRole, 'tab');
+  // To answer lists only what waits: the period's transfers are under History.
+  assert.equal(h.records.filter(item => !item.kind).length, 0, 'no period routes in To answer');
   // The queued duplicate observation is still reachable: it waits as a group row the card cannot ask about.
   const groups = h.records.filter(item => item.kind === 'group');
   assert.deepEqual(Array.from(groups, item => Array.from(item.group.ids)), [['twice']]);
@@ -124,28 +145,66 @@ for (const language of ['en', 'ar']) test(`${language}: generic unknowns are neu
   assert.ok(text(blocked).includes(h.words.group.duplicate));
   assert.ok(blockedRow.props.accessibilityLabel.includes(h.words.group.duplicate));
   assert.equal(h.records[0].kind, 'group', 'what waits for an answer comes first');
-  assert.deepEqual(Array.from(h.records.filter(item => item.kind === 'header'), item => item.title), [h.words.listTitle],
-    'the period heading sits above the period\'s transfers');
+  // The unnamed one-off is not walked by the card: it is one row in the list, after the groups.
+  assert.deepEqual(Array.from(h.records, item => item.kind), ['group', 'unnamed']);
   const keys = h.records.map(item => h.list.props.keyExtractor(item));
   assert.equal(new Set(keys).size, keys.length, 'every rendered record has a unique key');
-  const by = id => h.items.find(entry => entry.item.transactionId === id).tree;
+  const card = walk(header).find(node => node.props?.testID === 'transfer-question-card');
+  assert.ok(card, 'a queued transfer shows the question card');
+  // The reconciler's queue first: the likely own-account match is the first question.
+  assert.ok(text(card).includes(h.words.card.whereOut));
+  // The title counts everything waiting: the queued row, the generic unknown and the duplicate observation it cannot ask.
+  assert.ok(text(card).includes(h.words.card.title(3)), 'two questions plus one it cannot ask');
+  assert.ok(!text(card).includes(h.words.card.step(1, 1)), 'no step while queued entries wait that no question reaches');
+  assert.equal(walk(card).find(node => node.props?.testID === 'transfer-question-unnamed'), undefined, 'the unnamed link left the card');
+  const unnamedTree = h.items.find(entry => entry.item.kind === 'unnamed').tree;
+  const unnamed = byTestId(unnamedTree, 'transfer-question-unnamed');
+  assert.equal(unnamed.type, 'Pressable');
+  assert.equal(unnamed.props.accessibilityRole, 'button');
+  assert.equal(unnamed.props.accessibilityLabel, `${h.words.card.unnamedTitle(1)}. ${h.words.card.unnamedBody}`);
+  assert.ok(text(unnamedTree).includes(h.words.card.unnamedTitle(1)));
+  // Anything listed under the card can be searched: the field sits under the card, above the list head.
+  const order = walk(header).map(node => node.props?.testID ?? (node.type === 'TextField' ? 'search' : null)).filter(Boolean);
+  assert.ok(order.indexOf('transfer-question-card') < order.indexOf('search') && order.indexOf('search') < order.indexOf('transfers-list-head'),
+    order.join(' '));
+
+  // History: the period's transfers, under the period's heading, with the tiles above them.
+  byTestId(header, 'transfers-view-history').props.onPress();
+  const history = h.rerender();
+  const historyHeader = history.list.props.ListHeaderComponent;
+  assert.equal(byTestId(historyHeader, 'transfers-view-history').props.accessibilityState.selected, true);
+  assert.equal(byTestId(historyHeader, 'transfer-question-card'), undefined, 'History asks nothing');
+  assert.equal(byTestId(historyHeader, 'transfers-select'), undefined);
+  assert.ok(byTestId(historyHeader, 'transfers-tile-own'));
+  assert.ok(walk(historyHeader).find(node => node.type === 'TextField'), 'History can be searched');
+  const routes = history.records.filter(item => !item.kind);
+  const ids = Array.from(routes, item => item.transactionId);
+  assert.deepEqual(ids.slice().sort(), ['generic', 'queued', 'sent'], 'archived and duplicate-id rows are not listed as transfers');
+  assert.equal(routes.length, history.records.length, 'History lists the period\'s routes only');
+  assert.ok(text(byTestId(historyHeader, 'transfers-list-head')).includes(h.words.listTitle),
+    'the period heading sits above the period\'s transfers');
+  const historyKeys = history.records.map(item => history.list.props.keyExtractor(item));
+  assert.equal(new Set(historyKeys).size, historyKeys.length, 'every rendered record has a unique key');
+  const by = id => history.items.find(entry => entry.item.transactionId === id).tree;
   // The tag pill is the View whose only child is its label.
   const tagBox = (tree, label) => walk(tree).find(node => node.type === 'View'
     && node.props.children?.type === 'Text' && node.props.children.props.children === label);
-  const tagLabels = [h.words.tags.unconfirmed, h.words.tags.needsAnswer, h.words.tags.external, h.words.tags.own];
+  const tagLabels = [h.words.tags.needsAnswer, h.words.tags.external, h.words.tags.own];
   const tagOf = tree => tagLabels.find(label => tagBox(tree, label)?.props.style);
-  assert.equal(tagOf(by('generic')), h.words.tags.unconfirmed);
-  const generic = walk(by('generic')).find(node => node.type === 'Text' && node.props.children === h.words.tags.unconfirmed);
-  assert.equal(generic.props.style.color, h.band.textSecondary);
-  assert.equal(tagOf(by('queued')), h.words.tags.needsAnswer);
-  assert.equal(tagBox(by('queued'), h.words.tags.needsAnswer).props.style[1].backgroundColor, h.band.statusNear);
+  assert.equal(h.words.tags.unconfirmed, undefined, 'one term for an unanswered transfer: "Not answered yet" is gone');
+  for (const id of ['generic', 'queued']) {
+    assert.equal(tagOf(by(id)), h.words.tags.needsAnswer, `${id}: Needs an answer`);
+    assert.equal(tagBox(by(id), h.words.tags.needsAnswer).props.style[1].backgroundColor, h.band.statusNear);
+  }
   assert.equal(tagOf(by('sent')), h.words.tags.external);
-  assert.doesNotMatch(text(by('generic')), new RegExp(h.words.tags.needsAnswer));
   assert.equal(walk(by('generic')).filter(node => node.type === 'Pressable').length, 1, 'a row carries no second per-row Review button');
-  // The question card lists exactly the queued rows, not the generic unknown.
-  const card = walk(h.list.props.ListHeaderComponent).find(node => node.props?.testID === 'transfer-question-card');
-  assert.ok(card, 'a queued transfer shows the question card');
-  // The title counts everything waiting: the one question and the duplicate observation it cannot ask.
-  assert.ok(text(card).includes(h.words.card.title(2)), 'one queued row plus one it cannot ask');
-  assert.ok(!text(card).includes(h.words.card.step(1, 1)), 'no step while the card cannot walk them all');
+
+  // The unnamed row opens select mode, where the generic unknown can be ticked on its own.
+  const fresh = renderTransfers({ language, transactions, accounts, adjust });
+  byTestId(fresh.items.find(entry => entry.item.kind === 'unnamed').tree, 'transfer-question-unnamed').props.onPress();
+  const selecting = fresh.rerender();
+  assert.ok(byTestId(selecting.list.props.ListHeaderComponent, 'transfer-select-controls'), 'select mode is on');
+  assert.equal(byTestId(selecting.list.props.ListHeaderComponent, 'transfers-views'), undefined, 'select mode hides the views switch');
+  assert.ok(selecting.records.some(item => !item.kind && item.transactionId === 'generic'), 'the unnamed transfer can be ticked');
+  assert.deepEqual(fresh.answers, [], 'opening select mode saves nothing');
 });

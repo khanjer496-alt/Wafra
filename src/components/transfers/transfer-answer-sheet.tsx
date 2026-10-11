@@ -3,29 +3,44 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { TransferAnswerChoices } from '@/components/transfers/transfer-answer-choices';
+import { PersonAvatar, personMoneyLine } from '@/components/transfers/transfer-person-row';
 import { TransferRoute } from '@/components/transfers/transfer-route-row';
 import { EButton } from '@/components/ui/band/e-button';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { Money } from '@/components/ui/money';
 import { Spacing, type BandPalette } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
+import { useLedgerMoney } from '@/hooks/use-ledger-money';
 import type { TransferBatch } from '@/hooks/use-transfer-batch';
-import { clockTime, shortDateWithYear } from '@/lib/format';
+import { clockTime, formatAmount, shortDateWithYear } from '@/lib/format';
+import { ledgerCurrencyDisplay } from '@/lib/markets';
 import type { TransferAnswer } from '@/lib/transfer-answer';
-import { transferActivityCopy } from '@/lib/transfer-activity-copy';
+import { isolateText, transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { transferBatchChangedIds, transferBatchIncoming, type TransferBatchItem } from '@/lib/transfer-batch';
 import { TRANSFER_HISTORY_PAGE_SIZE } from '@/lib/transfer-review-presentation';
 import type { Transaction } from '@/lib/types';
 
 function PreviewRoute({ item, palette, testID }: { item: TransferBatchItem; palette: BandPalette; testID: string }) {
   const words = transferActivityCopy(useLanguage());
+  const ledgerMoney = useLedgerMoney();
   const { preview } = item;
+  const person = preview.person;
+  const money = (fils: number) => `${ledgerMoney?.currency ?? ledgerCurrencyDisplay()} ${formatAmount(fils, { decimals: true })}`;
+  const moneyLine = person ? personMoneyLine(person, words, money) : undefined;
   return <View testID={testID} accessible accessibilityRole="text"
-    accessibilityLabel={[preview.spoken, preview.count > 1 ? words.group.entries(preview.count) : null, preview.dates, preview.note, preview.hint]
+    accessibilityLabel={[preview.spoken, preview.count > 1 ? words.group.entries(preview.count) : null, moneyLine, preview.dates, preview.note, preview.hint]
       .filter(Boolean).join('. ')}
     style={styles.preview}>
-    <TransferRoute from={preview.from} to={preview.to} fromLabel={preview.fromLabel} toLabel={preview.toLabel}
-      amountFils={preview.amountFils} sign={preview.sign} palette={palette} full />
+    {/* A person is drawn as the person (initial, name, money each way); everything else as its route. */}
+    {person ? <View testID="transfer-batch-preview-person" style={styles.person}>
+      <PersonAvatar initial={person.initial} palette={palette} />
+      <View style={styles.personText}>
+        {/* Shown whole, so it keeps the page's alignment; isolated, a Latin name on an Arabic page keeps its order. */}
+        <ThemedText type="smallBold">{isolateText(person.name)}</ThemedText>
+        <ThemedText type="meta" style={{ color: palette.textSecondary }}>{moneyLine}</ThemedText>
+      </View>
+    </View> : <TransferRoute from={preview.from} to={preview.to} fromLabel={preview.fromLabel} toLabel={preview.toLabel}
+      amountFils={preview.amountFils} sign={preview.sign} palette={palette} full />}
     <View style={styles.meta}>
       {preview.count > 1 ? <View style={[styles.count, { backgroundColor: palette.glyphGround }]}>
         <ThemedText type="meta" style={{ color: palette.text }}>{words.group.entries(preview.count)}</ThemedText>
@@ -80,6 +95,9 @@ export function TransferAnswerSheet({ batch, palette, busy, stale, error, needsD
       {single ? <PreviewRoute item={single} palette={palette} testID="transfer-answer-sheet-route" />
         : <ThemedText type="subtitle" accessibilityRole="header">{words.batch.selected(items.length)}</ThemedText>}
       {listOnly ? <ThemedText testID="transfer-answer-sheet-one-by-one" type="small" themeColor="textSecondary">{words.group.oneByOne}</ThemedText>
+        // One person: one answer for every transfer with them, and what an own answer claims.
+        : single?.preview.person ? <ThemedText testID="transfer-answer-sheet-person" type="small" themeColor="textSecondary">
+          {words.person.oneAnswer(single.preview.person.name)}</ThemedText>
         : items.length > 1 || batch.answer === null
           ? <ThemedText type="small" themeColor="textSecondary">{words.batch.choose}</ThemedText> : null}
       {listOnly ? null : <TransferAnswerChoices incoming={transferBatchIncoming(items)} value={batch.answer} onChange={onChoose} palette={palette}
@@ -119,6 +137,8 @@ const styles = StyleSheet.create({
   list: { gap: Spacing.two },
   preview: { gap: Spacing.one },
   previewItem: { borderWidth: 1, borderRadius: 14, padding: Spacing.three },
+  person: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
+  personText: { flex: 1, minWidth: 0, gap: 2 },
   meta: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.two },
   count: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 },
   entry: { minHeight: 56, borderWidth: 1, borderRadius: 14, padding: Spacing.three, flexDirection: 'row', alignItems: 'center',

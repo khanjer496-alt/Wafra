@@ -5,7 +5,8 @@ import { ThemedText } from '@/components/themed-text';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { useTheme } from '@/hooks/use-theme';
-import { assistantCopy as copy } from '@/lib/assistant-copy';
+import { assistantCopyFor, assistantText } from '@/lib/assistant-copy';
+import { useLanguage } from '@/hooks/use-language';
 import { tapped } from '@/lib/haptics';
 import type { AssistantAnswer, AssistantFinding } from '@/lib/wafra-assistant';
 
@@ -17,11 +18,13 @@ export function AssistantFindings({ findings, stale, onReview, onAsk }: {
   onAsk: (finding: AssistantFinding) => void;
 }) {
   const theme = useTheme();
+  const language = useLanguage();
+  const copy = assistantCopyFor(language);
   return <View style={styles.list}>
     {findings.slice(0, 3).map((finding) => <View key={finding.id} testID="assistant-finding"
       style={[styles.finding, { borderColor: theme.primaryBorder }]}>
-      <ThemedText type="smallBold" selectable>{finding.title}</ThemedText>
-      <ThemedText type="small" selectable>{finding.body}</ThemedText>
+      <ThemedText type="smallBold" selectable>{assistantText(finding.title, language)}</ThemedText>
+      <ThemedText type="small" selectable>{assistantText(finding.body, language)}</ThemedText>
       {finding.evidence.length > 0 ? <Button label={copy.reviewFinding} variant="outline"
         disabled={stale} onPress={() => onReview(finding.id)} /> : null}
       {finding.question || finding.request ? <Button label={copy.exploreFinding} variant="ghost" disabled={stale}
@@ -32,6 +35,8 @@ export function AssistantFindings({ findings, stale, onReview, onAsk }: {
 
 export function AssistantCoverage({ coverage }: { coverage: NonNullable<AssistantAnswer['coverage']> }) {
   const theme = useTheme();
+  const language = useLanguage();
+  const copy = assistantCopyFor(language);
   const [expanded, setExpanded] = useState(false);
   return <View testID="assistant-coverage" style={[styles.coverage, { borderTopColor: theme.primaryBorder }]}>
     <Pressable accessibilityRole="button" accessibilityLabel={copy.dataUsed}
@@ -48,7 +53,7 @@ export function AssistantCoverage({ coverage }: { coverage: NonNullable<Assistan
       {coverage.firstDate && coverage.lastDate ? <ThemedText type="meta" themeColor="textSecondary" selectable>
         {copy.observedDates(coverage.firstDate, coverage.lastDate)}
       </ThemedText> : null}
-      {coverage.notes.map((note, index) => <ThemedText key={index} type="meta" themeColor="textSecondary" selectable>{note}</ThemedText>)}
+      {coverage.notes.map((note, index) => <ThemedText key={index} type="meta" themeColor="textSecondary" selectable>{assistantText(note, language)}</ThemedText>)}
     </View> : null}
   </View>;
 }

@@ -348,7 +348,7 @@ eq(
 );
 eq('iOS local setup: migration copy discloses the old upload until retirement',
   translated('iosLocalMigrationBody', 'en'),
-  'If you still have the old “Wafra Capture” automation, it can continue uploading the bank alerts you selected until you delete it or Wafra confirms retirement after the first local bank alert.');
+  'If you still have the old “Wafra Capture” automation, it can continue uploading the bank messages you selected until you delete it or Wafra confirms retirement after the first local bank message.');
 ok(
   'iOS local setup: Arabic privacy copy includes local processing, 30 days, and migration',
   /الآيفون/.test(translated('iosLocalPrivacyBody', 'ar')) &&

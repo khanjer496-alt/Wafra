@@ -6,8 +6,8 @@
  * platforms, and on Android the bank-app notification reader and the past-SMS
  * inbox import, which are the same "Wafra collects messages without being
  * asked" feature. Insights, subscriptions, statement imports, Apple Pay rows,
- * backup and exports are free, so they are never sold here, and no saving
- * percentage is shown: the store returns display strings, not numeric prices.
+ * backup and exports are free, so they are never sold here. Prices and the
+ * yearly saving live with the plan rows (pro-plan-options.tsx), never here.
  */
 type Lang = 'en' | 'ar';
 
@@ -15,7 +15,7 @@ const en = {
   notificationsTitle: 'Bank-app notifications',
   notificationsText: 'Alerts some banks only send inside their app are added too.',
   historyTitle: 'Past SMS on this phone',
-  historyText: 'Bank texts already in your inbox fill in earlier months.',
+  historyText: 'Bank messages already in your inbox fill in earlier months.',
   freeTitle: 'Always free',
   freeText: 'Your ledger, manual entries, pasted bank messages and statement imports never need Pro.',
   selected: 'Selected',

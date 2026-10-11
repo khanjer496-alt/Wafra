@@ -6,8 +6,9 @@ import type { Transaction } from '@/lib/types';
 
 /**
  * One thing the person answers on the Transfers page with a single tap: a
- * suggested pair (both legs), one entry, or a group of entries the reconciler
- * put together (same account, same kind, same other side). Everything is
+ * suggested pair (both legs), one entry, a group of entries the reconciler
+ * put together (same account, same kind, same other side), or every waiting
+ * transfer with one person (a person group, `preview.person`). Everything is
  * frozen when it is picked; the store re-checks every fingerprint and the
  * generation before it changes anything.
  */
@@ -21,6 +22,7 @@ export interface TransferBatchItem {
   ids: string[];
   /** A suggested pair's other leg: linked when the answer is own, answered alongside otherwise. */
   counterpartId?: string;
+  /** 'between' for a suggested pair, and for a person with money both in and out. */
   direction: 'income' | 'expense' | 'between';
   expectedFingerprints: Record<string, string>;
   expectedGeneration: number;
@@ -48,6 +50,15 @@ export interface TransferBatchPreview {
   note?: string;
   /** Its own likely other side ("Looks like your …"), shown with it rather than merged into one line. */
   hint?: string;
+  /** A person group: drawn as the person (initial, name, money in and out) rather than as a route. */
+  person?: TransferPersonPreview;
+}
+
+/** What a person group's preview shows. */
+export interface TransferPersonPreview {
+  name: string; initial: string;
+  incoming: number; outgoing: number;
+  inFils: number; outFils: number;
 }
 
 /**
@@ -87,19 +98,37 @@ export function transferBatchDecisions(
   });
 }
 
+/**
+ * Store rows are immutable snapshots: an unchanged row is the same object in
+ * the next state, so its fingerprint is worked out once. A person group can
+ * hold hundreds of rows and the open sheet re-checks them on every render;
+ * hashing each again would be a long task. The store's resolver still checks
+ * every fingerprint itself, uncached, before it writes.
+ */
+const shownFingerprints = new WeakMap<Transaction, string>();
+function shownFingerprint(row: Transaction): string {
+  let print = shownFingerprints.get(row);
+  if (print === undefined) {
+    print = transferFingerprint(row);
+    shownFingerprints.set(row, print);
+  }
+  return print;
+}
+
 /** Fingerprint exactly the rows shown, at the moment they are picked. */
 export function freezeTransferRows(rows: readonly Transaction[]): Record<string, string> {
-  return Object.fromEntries(rows.map(row => [row.id, transferFingerprint(row)]));
+  return Object.fromEntries(rows.map(row => [row.id, shownFingerprint(row)]));
 }
 
 /** True when the ledger moved since the fingerprints were taken (or a row is gone). */
 export function transferRowsChanged(
   expectedFingerprints: Readonly<Record<string, string>>, rowsById: ReadonlyMap<string, Transaction>,
 ): boolean {
-  return Object.entries(expectedFingerprints).some(([id, expected]) => {
+  for (const id of Object.keys(expectedFingerprints)) {
     const current = rowsById.get(id);
-    return !current || transferFingerprint(current) !== expected;
-  });
+    if (!current || shownFingerprint(current) !== expectedFingerprints[id]) return true;
+  }
+  return false;
 }
 
 /** Assessments that name one specific other side worth suggesting. */

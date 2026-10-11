@@ -18,7 +18,9 @@ permissions:
 jobs:
   repair:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The repair suite alone takes about 14 minutes on a hosted runner; the
+    # benchmark and evidence upload run after it.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -41,8 +43,12 @@ jobs:
         run: node scripts/test/repair/benchmark.cjs > transfer-benchmark.json
       - uses: actions/upload-artifact@v4
         if: always()
+        # Evidence only: a full artifact quota must not fail a run whose tests
+        # passed. A test failure still fails the job at its own step.
+        continue-on-error: true
         with:
           name: android-repair-evidence-${{ github.sha }}
           path: |
             repair-tests.txt
             transfer-benchmark.json
+          retention-days: 7

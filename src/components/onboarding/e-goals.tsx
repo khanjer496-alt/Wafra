@@ -72,7 +72,7 @@ export function trayTiles(tiles: readonly PatternTile[]): PatternTile[] {
 
 /** Home's section glyphs, as Customize Home draws them. */
 const SECTION_ICONS: Record<HomeWidgetId, IconName> = {
-  greeting: 'sun', overview: 'wallet', today: 'calendar', week: 'chart', capture: 'mail',
+  greeting: 'sun', hero: 'arrow-up-right', overview: 'wallet', today: 'calendar', week: 'chart', capture: 'mail', transfers: 'repeat',
   assistant: 'spark', insight: 'trend', due: 'calendar', activity: 'receipt', upcoming: 'repeat',
 };
 /** The preview: the totals row, then this many of Home's sheet sections. */

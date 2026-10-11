@@ -387,7 +387,7 @@ export function ReferenceHomeBand(p: BandProps) {
         </Pressable>}
         <Pressable testID="home-settings" accessibilityRole="button" accessibilityLabel={w.settings} onPress={p.onSettings}
           style={({ pressed }) => [styles.round, { backgroundColor: band.tile, opacity: pressed ? 0.75 : 1 }]}>
-          <Icon name="sliders" size={20} color={band.onBand} strokeWidth={2} />
+          <Icon name="gear" size={20} color={band.onBand} strokeWidth={2} />
         </Pressable>
       </View>
     </View>

@@ -258,10 +258,12 @@ async function gate(options = {}) {
   dependencies['@/lib/format'] = { parseAmountWithMoneySpec: text => /^\d+(\.\d{1,2})?$/.test(text) ? Math.round(Number(text) * 100) : null };
   dependencies['@/lib/pattern'] = lib('pattern');
   dependencies['@/lib/period'] = { currentMonthPeriod: () => ({ mode: 'month', key: '2026-09' }), inPeriod: () => true };
-  dependencies['@/lib/purchases'] = { trialDaysLeft: () => options.trialDays ?? 3, billingStore: () => 'appStore' };
+  dependencies['@/lib/purchases'] = { trialDaysLeft: () => options.trialDays ?? 3, billingStore: () => 'appStore', yearlySavingPercent: () => null };
+  dependencies['@/lib/pro-plans'] = lib('pro-plans', dependencies);
   dependencies['@/lib/public-links'] = { configuredPublicUrl: () => null };
   dependencies['@/lib/home-widgets'] = {
-    loadHomeWidgetPreferences: async () => ({ order: ['due', 'assistant', 'insight', 'activity', 'upcoming'], hidden: [] }),
+    // A saved layout; a case can pass `homeWidgets` (e.g. the Home v3 default a first run reads).
+    loadHomeWidgetPreferences: async () => options.homeWidgets ?? ({ order: ['due', 'assistant', 'insight', 'activity', 'upcoming'], hidden: [] }),
     saveHomeWidgetPreferences: async value => record('saveHomeWidgets', value),
   };
   dependencies['@/lib/categories'] = { categoryLabel: category => category, getCategory: () => ({ icon: 'receipt' }) };
@@ -383,7 +385,11 @@ const toLive = async h => {
 
 for (const language of ['en', 'ar']) {
   test(`every step supports Back and Next without losing answers: ${language}`, async () => {
-    const h = await gate({ language }); at(h, 'welcome');
+    // What the real loader returns for a first run (Home v3 default; an older stored layout reads as this too).
+    const homeWidgets = {
+      order: ['greeting', 'hero', 'today', 'overview', 'week', 'activity', 'due', 'upcoming', 'transfers', 'insight', 'assistant', 'capture'],
+      hidden: ['today', 'overview', 'week', 'due', 'upcoming', 'transfers', 'insight', 'assistant', 'capture'] };
+    const h = await gate({ language, homeWidgets }); at(h, 'welcome');
     await h.press('getStarted'); at(h, 'name');
     assert.equal(h.control('continue').disabled, true, 'an empty name cannot be saved; Skip is the way past');
     await h.changeText('onboarding-name-input', 'Sara'); await h.press('continue'); at(h, 'goals');
@@ -392,8 +398,11 @@ for (const language of ['en', 'ar']) {
     await h.press('continue'); at(h, 'watch');
     assert.deepEqual(h.state.wafraGoals, ['salary', 'bills']);
     // Home's sections follow the goals through Customize Home's preference.
-    // The bills goal leads the sheet; the band's greeting, totals and week stay first.
-    assert.deepEqual(calls(h, 'saveHomeWidgets').at(-1)[1].order.slice(0, 6), ['greeting', 'overview', 'today', 'week', 'due', 'upcoming']);
+    // The bills goal leads the sheet, under the band's greeting and Spent hero (switched-off band
+    // sections keep their place), and the goal switches those sections on.
+    const savedHome = calls(h, 'saveHomeWidgets').at(-1)[1];
+    assert.deepEqual(savedHome.order.slice(0, 7), ['greeting', 'hero', 'today', 'overview', 'week', 'due', 'upcoming']);
+    assert.equal(savedHome.hidden.includes('due') || savedHome.hidden.includes('upcoming'), false);
     await h.tap('onboarding-watch-dining');
     assert.equal(h.byTestID('onboarding-watch-continue').props.accessibilityLabel, h.eWords.skipForNow, 'an open row alone saves nothing');
     await h.tap('onboarding-watch-limit-quick-1'); // 500, in the currency's scale

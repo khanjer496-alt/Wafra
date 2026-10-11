@@ -12,6 +12,8 @@ export type IconName =
   | 'chevron-left'
   | 'chevron-down'
   | 'sliders'
+  | 'gear'
+  | 'pencil'
   | 'filter'
   | 'arrow-up'
   | 'arrow-down'

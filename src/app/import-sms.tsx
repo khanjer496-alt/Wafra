@@ -2157,7 +2157,7 @@ const styles = StyleSheet.create({
   },
   ringSvg: { position: 'absolute', top: 0, left: 0 },
   ringCopy: { alignItems: 'center', maxWidth: 136 },
-  ringFigure: { fontSize: 44, lineHeight: 50, letterSpacing: -1.6 },
+  ringFigure: { fontSize: 44, lineHeight: 50, letterSpacing: -1.6, textAlign: 'center' },
   ringCaption: { textAlign: 'center' },
   sheetTitle: { fontSize: 17, lineHeight: 24 },
   liveFound: { gap: Spacing.one },

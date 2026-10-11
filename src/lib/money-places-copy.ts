@@ -102,6 +102,7 @@ export const moneyPlacesCopy = {
     // Bills
     next30Days: 'Next 30 days',
     next30Total: 'Due in the next 30 days',
+    plusPastDue: (amount: string) => `plus ${amount} past due`,
     today: 'Today',
     markedCancelled: (title: string) => `${title} marked as cancelled`,
     undo: 'Undo',
@@ -146,7 +147,7 @@ export const moneyPlacesCopy = {
     estimatesCount: (n: number) => n === 1 ? '1 is an estimate' : `${n} are estimates`,
     about: 'About',
     lastSixMonths: 'Last 6 months',
-    cardsApart: (n: number) => n === 1 ? '1 card, shown on its own' : `${n} cards, shown on their own`,
+    cardsApart: (n: number) => n === 1 ? '1 credit card, shown on its own' : `${n} credit cards, shown on their own`,
     details: 'Details',
     detailsA11y: (card: string) => `Details for ${card}`,
     noBalanceFigure: 'No balance yet',
@@ -157,6 +158,24 @@ export const moneyPlacesCopy = {
     asBankStated: 'As your bank stated',
     typeIt: 'Type it',
     cardsCount: (n: number) => n === 1 ? '1 card' : `${n} cards`,
+    // Payment cards: the same two kinds Accounts lists, counted the same way.
+    cardsByKind: (credit: number, debit: number) => [
+      credit > 0 ? credit === 1 ? '1 credit card' : `${credit} credit cards` : null,
+      debit > 0 ? debit === 1 ? '1 debit card' : `${debit} debit cards` : null,
+    ].filter(Boolean).join(' · ') || 'No cards',
+    // Accounts, compact list: a credit card's figure and its statement line.
+    usedCaption: 'used',
+    availableCredit: (amount: string) => `${amount} available`,
+    statementPaid: 'Statement paid ✓',
+    statementLeft: (amount: string, date: string) => `Statement left ${amount} · due ${date}`,
+    statementLeftLate: (amount: string, date: string) => `Statement left ${amount} · was due ${date}`,
+    wasDueOn: (date: string) => `Was due ${date}`,
+    debitCard: 'Debit card',
+    drawsFrom: (account: string) => `uses ${account}`,
+    inactiveSplit: (accounts: number, cards: number) => `Inactive · ${[
+      accounts > 0 ? accounts === 1 ? '1 account' : `${accounts} accounts` : null,
+      cards > 0 ? cards === 1 ? '1 card' : `${cards} cards` : null,
+    ].filter(Boolean).join(', ')}`,
   },
   ar: {
     updateBalance: 'تحديث الرصيد',
@@ -238,6 +257,7 @@ export const moneyPlacesCopy = {
     paymentNote: 'هذا يسجّل دفعة أجريتها من بنكك فقط. لا ترسل وفرة أي مال، ولن تُحتسب كإنفاق مرتين.',
     next30Days: 'الأيام الثلاثون القادمة',
     next30Total: 'المستحق خلال الأيام الثلاثين القادمة',
+    plusPastDue: (amount: string) => `إضافة إلى ${amount} متأخرة`,
     today: 'اليوم',
     markedCancelled: (title: string) => `علّمت ${title} كملغى`,
     undo: 'تراجع',
@@ -285,8 +305,8 @@ export const moneyPlacesCopy = {
       : `${n} منها تقديرية`,
     about: 'حوالي',
     lastSixMonths: 'آخر 6 أشهر',
-    cardsApart: (n: number) => n === 1 ? 'بطاقة واحدة تظهر منفصلة' : n === 2 ? 'بطاقتان تظهران منفصلتين'
-      : n >= 3 && n <= 10 ? `${n} بطاقات تظهر منفصلة` : `${n} بطاقة تظهر منفصلة`,
+    cardsApart: (n: number) => n === 1 ? 'بطاقة ائتمانية واحدة تظهر منفصلة' : n === 2 ? 'بطاقتان ائتمانيتان تظهران منفصلتين'
+      : n >= 3 && n <= 10 ? `${n} بطاقات ائتمانية تظهر منفصلة` : `${n} بطاقة ائتمانية تظهر منفصلة`,
     details: 'التفاصيل',
     detailsA11y: (card: string) => `تفاصيل ${card}`,
     noBalanceFigure: 'لا يوجد رصيد بعد',
@@ -298,6 +318,24 @@ export const moneyPlacesCopy = {
     typeIt: 'اكتبه',
     cardsCount: (n: number) => n === 1 ? 'بطاقة واحدة' : n === 2 ? 'بطاقتان'
       : n >= 3 && n <= 10 ? `${n} بطاقات` : `${n} بطاقة`,
+    cardsByKind: (credit: number, debit: number) => [
+      credit > 0 ? credit === 1 ? 'بطاقة ائتمانية واحدة' : credit === 2 ? 'بطاقتان ائتمانيتان'
+        : credit <= 10 ? `${credit} بطاقات ائتمانية` : `${credit} بطاقة ائتمانية` : null,
+      debit > 0 ? debit === 1 ? 'بطاقة خصم واحدة' : debit === 2 ? 'بطاقتا خصم'
+        : debit <= 10 ? `${debit} بطاقات خصم` : `${debit} بطاقة خصم` : null,
+    ].filter(Boolean).join(' · ') || 'لا توجد بطاقات',
+    usedCaption: 'مستخدم',
+    availableCredit: (amount: string) => `المتاح ${amount}`,
+    statementPaid: 'الكشف مدفوع ✓',
+    statementLeft: (amount: string, date: string) => `المتبقي من الكشف ${amount} · الاستحقاق ${date}`,
+    statementLeftLate: (amount: string, date: string) => `المتبقي من الكشف ${amount} · كان مستحقاً ${date}`,
+    wasDueOn: (date: string) => `كان مستحقاً ${date}`,
+    debitCard: 'بطاقة خصم',
+    drawsFrom: (account: string) => `تسحب من ${account}`,
+    inactiveSplit: (accounts: number, cards: number) => `غير نشطة · ${[
+      accounts > 0 ? accounts === 1 ? 'حساب واحد' : accounts === 2 ? 'حسابان' : accounts <= 10 ? `${accounts} حسابات` : `${accounts} حساباً` : null,
+      cards > 0 ? cards === 1 ? 'بطاقة واحدة' : cards === 2 ? 'بطاقتان' : cards <= 10 ? `${cards} بطاقات` : `${cards} بطاقة` : null,
+    ].filter(Boolean).join('، ')}`,
   },
 } as const;
 

@@ -76,7 +76,7 @@ if (metadata.googlePlay.launchDefaultListing !== 'global-en') {
   errors.push('Google Play default launch listing must be global-en');
 }
 
-const productIds = ['wafra_pro_monthly', 'wafra_pro_yearly'];
+const productIds = ['wafra_pro_weekly', 'wafra_pro_yearly'];
 for (const productId of productIds) {
   const apple = metadata.apple.subscriptionLocalizations?.[productId] ?? {};
   if (!apple['en-US']) errors.push(`Apple ${productId} must include en-US launch copy`);

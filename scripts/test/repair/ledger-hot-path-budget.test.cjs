@@ -71,6 +71,51 @@ function best(label, rows, prepare, run, runs = 3) {
   return { ms: min, value };
 }
 
+/**
+ * Doubling the ledger should about double a linear step (~2x); a pass that is
+ * quadratic in the rows, like the receipts x purchases scan this file guards
+ * against, comes out near 4x. The check allows up to 3x plus `slackMs`.
+ *
+ * Measuring each size as one best-of batch, back to back, could not tell those
+ * apart on a shared CI runner: a lucky fast 15k batch lowered the bar while a
+ * collector pause or a busy neighbour landed in the 30k batch (58 -> 223 ms on
+ * one hosted run of the card-purchase apply, against 1.5-2.3x on every local
+ * run). So the two sizes are timed alternately, round by round, under the same
+ * host conditions, and a super-linear reading is re-measured from fresh
+ * samples before it fails: noise rarely repeats, while a real quadratic is
+ * super-linear on every attempt.
+ *
+ * `measure(rows)` times one run at that size and returns milliseconds.
+ */
+function scalesLinearly(label, measure, slackMs, { rounds = 4, attempts = 3 } = {}) {
+  const tries = [];
+  let fastestSmall = Infinity;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    let small = Infinity;
+    let large = Infinity;
+    for (let round = 0; round < rounds; round += 1) {
+      small = Math.min(small, measure(15000));
+      large = Math.min(large, measure(30000));
+    }
+    fastestSmall = Math.min(fastestSmall, small);
+    tries.push(`${small.toFixed(1)} -> ${large.toFixed(1)} ms`);
+    if (large < 3 * small + slackMs) {
+      (report[15000] ??= {})[label] = +small.toFixed(1);
+      (report[30000] ??= {})[label] = +large.toFixed(1);
+      return { linear: true, small: fastestSmall, tries };
+    }
+  }
+  return { linear: false, small: fastestSmall, tries };
+}
+
+/** One timed run of `run` on a fresh input from `prepare`. */
+function timeOnce(prepare, run) {
+  const input = prepare();
+  const started = performance.now();
+  const value = run(input);
+  return { ms: performance.now() - started, value };
+}
+
 const cache = new Map();
 /** A hydrated snapshot as the store holds it: normalized links + receipt. */
 function snapshot(count) {
@@ -165,34 +210,48 @@ for (const count of [15000, 30000]) {
   });
 }
 
-test('capture: applying one card purchase is bounded and scales linearly', () => {
-  const measured = {};
-  for (const count of [15000, 30000]) {
-    const state = snapshot(count);
-    let i = 0;
-    const { ms, value } = best('capture apply (card purchase)', count, () => fresh(state),
-      (s) => li.applyMaterializedImportBatch(s, batchOf(s, [cardPurchase(s, i++)])), 4);
-    assert.equal(value.transactions.length, state.transactions.length + 1);
-    measured[count] = ms;
+test('the scaling check flags a quadratic step and forgives one noisy attempt', () => {
+  // Synthetic timings at the hosted runner's speed (58 ms at 15k rows).
+  const linear = (rows) => (rows / 15000) * 58;
+  const quadratic = (rows) => (rows / 15000) ** 2 * 58;
+  let calls = 0;
+  // The whole first attempt sees a slow 30k host, the hosted run's 3.8x.
+  const noisy = (rows) => { calls += 1; return linear(rows) * (calls <= 8 && rows === 30000 ? 1.92 : 1); };
+  assert.equal(scalesLinearly('probe linear', linear, 20).linear, true);
+  const quad = scalesLinearly('probe quadratic', quadratic, 20);
+  assert.equal(quad.linear, false);
+  assert.equal(quad.tries.length, 3, 'a real quadratic is re-measured, then fails');
+  assert.equal(scalesLinearly('probe noisy', noisy, 20).linear, true);
+  for (const label of ['probe linear', 'probe quadratic', 'probe noisy']) {
+    delete report[15000]?.[label];
+    delete report[30000]?.[label];
   }
-  assert.ok(measured[15000] < 250, `capture apply at 15k took ${measured[15000].toFixed(1)} ms (budget 250)`);
-  assert.ok(measured[30000] < 3 * measured[15000] + 20,
-    `capture apply grew super-linearly: ${measured[15000].toFixed(1)} -> ${measured[30000].toFixed(1)} ms`);
+});
+
+test('capture: applying one card purchase is bounded and scales linearly', () => {
+  let i = 0;
+  const apply = (count) => {
+    const state = snapshot(count);
+    const { ms, value } = timeOnce(() => fresh(state),
+      (s) => li.applyMaterializedImportBatch(s, batchOf(s, [cardPurchase(s, i++)])));
+    assert.equal(value.transactions.length, state.transactions.length + 1);
+    return ms;
+  };
+  const scaling = scalesLinearly('capture apply (card purchase)', apply, 20);
+  assert.ok(scaling.small < 250, `capture apply at 15k took ${scaling.small.toFixed(1)} ms (budget 250)`);
+  assert.ok(scaling.linear, `capture apply grew super-linearly on every attempt: ${scaling.tries.join('; ')}`);
 });
 
 test('capture: the whole-ledger repair passes are linear, not receipts x purchases', () => {
-  const measured = {};
-  for (const count of [15000, 30000]) {
-    const state = snapshot(count);
-    const flows = best('reconcilePaymentFlows', count, () => [...state.transactions], (rows) => pf.reconcilePaymentFlows(rows), 4);
-    const dup = best('reconcileCaptureDuplicates', count, () => [...state.transactions],
-      (rows) => dedupe.reconcileCaptureDuplicates(rows), 4);
-    measured[count] = { flows: flows.ms, dup: dup.ms };
-  }
-  assert.ok(measured[15000].flows < 40, `payment-flow repair took ${measured[15000].flows.toFixed(1)} ms at 15k (budget 40)`);
-  assert.ok(measured[15000].dup < 120, `duplicate repair took ${measured[15000].dup.toFixed(1)} ms at 15k (budget 120)`);
-  assert.ok(measured[30000].flows < 3 * measured[15000].flows + 10, 'payment-flow repair grew super-linearly');
-  assert.ok(measured[30000].dup < 3 * measured[15000].dup + 10, 'duplicate repair grew super-linearly');
+  const rowsOf = (count) => () => [...snapshot(count).transactions];
+  const flows = scalesLinearly('reconcilePaymentFlows',
+    (count) => timeOnce(rowsOf(count), (rows) => pf.reconcilePaymentFlows(rows)).ms, 10);
+  const dup = scalesLinearly('reconcileCaptureDuplicates',
+    (count) => timeOnce(rowsOf(count), (rows) => dedupe.reconcileCaptureDuplicates(rows)).ms, 10);
+  assert.ok(flows.small < 40, `payment-flow repair took ${flows.small.toFixed(1)} ms at 15k (budget 40)`);
+  assert.ok(dup.small < 120, `duplicate repair took ${dup.small.toFixed(1)} ms at 15k (budget 120)`);
+  assert.ok(flows.linear, `payment-flow repair grew super-linearly on every attempt: ${flows.tries.join('; ')}`);
+  assert.ok(dup.linear, `duplicate repair grew super-linearly on every attempt: ${dup.tries.join('; ')}`);
 });
 
 test('capture: planning one new message against the ledger is bounded', () => {

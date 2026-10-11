@@ -54,7 +54,8 @@ const transactions = [
   tx('p-in', 'income', 5600, 240),
   tx('q-out', 'expense', 12300, 200),
   tx('q-in', 'income', 12300, 190),
-  // A flagged transfer nobody has answered and the reconciler does not queue.
+  // A flagged transfer nobody has answered and the reconciler does not queue. It names nobody: it needs an
+  // answer and is counted, but the card does not walk such one-offs; its footer offers select mode for them.
   tx('unk-out', 'expense', NONE_FILS, 100, { isTransfer: true, transferEvidence: undefined }),
 ];
 const OPEN_ROWS = 8; // own pair (one row), ext-out, ext-in, p-out, p-in, q-out, q-in, unk-out
@@ -135,9 +136,14 @@ try {
       const netBefore = minor(await page.getByTestId('transactions-net-total').innerText());
       await page.screenshot({ path: path.join(OUT, `${name}-transactions.png`) });
 
-      // 1. Tiles: own total, and Sent filters to external rows only.
+      // 1. Tiles (History): own total, and Sent filters to external rows only.
       await page.goto(`${BASE}/transfers`, { waitUntil: 'networkidle' });
       await expect(page.getByTestId('transfers-screen')).toBeVisible();
+      // Something waits, so the page opens on To answer; the period's transfers are under History.
+      await expect(page.getByTestId('transfers-view-answer')).toHaveAttribute('aria-selected', 'true');
+      await expect(page.getByTestId('transfers-tile-own')).toHaveCount(0);
+      await page.getByTestId('transfers-view-history').click();
+      await expect(page.getByTestId('transfers-view-history')).toHaveAttribute('aria-selected', 'true');
       assert.equal(minor(await page.getByTestId('transfers-tile-own').getAttribute('aria-label')), OWN_FILS, 'Your accounts tile total');
       assert.equal(minor(await page.getByTestId('transfers-tile-sent').getAttribute('aria-label')), SENT_FILS, 'Sent tile total');
       assert.equal(minor(await page.getByTestId('transfers-tile-received').getAttribute('aria-label')), RECEIVED_FILS, 'Received tile total');
@@ -150,14 +156,24 @@ try {
       await page.getByTestId('transfers-tile-sent').click();
       await expect.poll(() => rowIds(page).then(ids => ids.length)).toBe(OPEN_ROWS);
 
-      // 2. The question card: answer, Undo, and the count follows.
+      // 2. The question card (To answer): answer, Undo, and the count follows.
+      await page.getByTestId('transfers-view-answer').click();
       await stepOf(page, 1, QUEUED);
+      // Every transfer waiting is counted on the tab (two movements and the unnamed one); the unnamed one is a
+      // row in the list that opens select mode.
+      const answerTab = page.getByTestId('transfers-view-answer');
+      await expect(answerTab).toHaveAttribute('aria-label', `${words.views.answer}. ${words.card.title(3)}`);
+      await expect(page.getByTestId('transfer-question-unnamed')).toHaveAttribute('aria-label', `${words.card.unnamedTitle(1)}. ${words.card.unnamedBody}`);
       await page.getByTestId('transfer-answer-external').click();
       const toast = page.getByText(new RegExp(`^${words.answers.saved}`)).first();
       await expect(toast).toBeVisible();
       const undo = page.getByRole('button', { name: words.answers.undo, exact: true });
       await expect(undo).toBeVisible();
       await stepOf(page, 1, QUEUED / 2);
+      // The other leg of the answered movement is not counted yet, so it still needs an answer: it is counted
+      // and joins the unnamed one-offs offered through select mode.
+      await expect(answerTab).toHaveAttribute('aria-label', `${words.views.answer}. ${words.card.title(3)}`);
+      await expect(page.getByTestId('transfer-question-unnamed')).toHaveAttribute('aria-label', `${words.card.unnamedTitle(2)}. ${words.card.unnamedBody}`);
       const answered = (await stored(page)).filter(row => row.transferDecision);
       assert.equal(answered.length, 1, 'one decision saved');
       assert.equal(answered[0].transferDecision.ownership, 'external');
@@ -166,7 +182,8 @@ try {
       await expect.poll(async () => (await stored(page)).filter(row => row.transferDecision).length).toBe(0);
       await page.screenshot({ path: path.join(OUT, `${name}-question.png`) });
 
-      // 3. Not a transfer: the row leaves Transfers and is counted in Net on Transactions.
+      // 3. Not a transfer (History): the row leaves Transfers and is counted in Net on Transactions.
+      await page.getByTestId('transfers-view-history').click();
       await page.getByTestId('transfer-row-unk-out').click();
       await expect(page.getByTestId('entry-transfer-question')).toBeVisible();
       await fits(page, 'entry-transfer-question');
@@ -180,6 +197,8 @@ try {
       const netAfter = minor(await page.getByTestId('transactions-net-total').innerText());
       assert.equal(netBefore - netAfter, NONE_FILS, 'the answered row now counts in Net');
       await page.goto(`${BASE}/transfers`, { waitUntil: 'networkidle' });
+      await page.getByTestId('transfers-view-history').click();
+      await expect(page.getByTestId('transfer-row-p-out')).toBeVisible();
       await expect(page.getByTestId('transfer-row-unk-out')).toHaveCount(0);
       await page.screenshot({ path: path.join(OUT, `${name}-transfers-after.png`) });
       assert.deepEqual(errors, []);

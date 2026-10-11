@@ -119,9 +119,9 @@ test('Customize Home copy has matching keys and a title for every Home section',
   const customize = load(path.join(root, 'src/lib/customize-copy.ts'));
   const { en, ar } = customize.CUSTOMIZE_COPY;
   assert.deepEqual(shape(ar), shape(en));
-  assert.deepEqual(Object.keys(en.widgetTitle).sort(), ['activity', 'assistant', 'capture', 'due', 'greeting', 'insight', 'overview', 'today', 'upcoming', 'week']);
-  assert.equal(en.widgetTitle.due, 'Due soon');
-  assert.equal(en.widgetTitle.activity, 'Latest activity');
+  assert.deepEqual(Object.keys(en.widgetTitle).sort(), ['activity', 'assistant', 'capture', 'due', 'greeting', 'hero', 'insight', 'overview', 'today', 'transfers', 'upcoming', 'week']);
+  assert.equal(en.widgetTitle.due, 'Due payments');
+  assert.equal(en.widgetTitle.activity, 'Transactions');
   for (const value of Object.values(ar.widgetTitle)) assert.match(value, /[؀-ۿ]/);
 });
 

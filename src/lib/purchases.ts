@@ -38,27 +38,59 @@ import { Platform } from 'react-native';
 /** The entitlement id configured in Superwall. One, for everything Pro. */
 export const ENTITLEMENT_ID = 'pro';
 
+/**
+ * Weekly and yearly, and no monthly. The paywall pairs a low-commitment weekly
+ * plan with a yearly plan shown as the better deal; a third, middle plan only
+ * slows the choice. A subscriber already on the retired monthly plan keeps
+ * Pro (RETIRED_PRO_SKUS below).
+ */
 export const PRO_SKUS = {
-  monthly: 'wafra_pro_monthly',
+  weekly: 'wafra_pro_weekly',
   yearly: 'wafra_pro_yearly',
 } as const;
+
+/**
+ * Products no longer sold that still carry Pro for whoever holds one. Never
+ * offered (PRO_SKUS is the catalogue), but a renewing holder must keep the
+ * exact store deadline and renewal grace for iPhone capture (billing.ts)
+ * rather than falling back to the short lease meant for missing detail.
+ */
+export const RETIRED_PRO_SKUS = ['wafra_pro_monthly'] as const;
+
+/** Every product that can carry the `pro` entitlement: sold now, or retired. */
+export const PRO_ENTITLEMENT_PRODUCT_IDS: readonly string[] = [
+  ...Object.values(PRO_SKUS),
+  ...RETIRED_PRO_SKUS,
+];
 
 export type ProPlan = keyof typeof PRO_SKUS;
 
 /**
  * One plan as the device's own storefront describes it. `priceString` is the
  * localized price the store returned; Wafra never composes a price itself.
+ *
+ * `price` and `currencyCode` are the store's raw figures, kept only so two
+ * plans from the same storefront can be compared (`yearlySavingPercent`).
+ * `weeklyPriceString` is the store SDK's own formatting of the per-week cost
+ * of a longer plan. Each is null when the store did not supply it, and the
+ * screen then simply leaves out what depended on it.
  */
 export interface ProPlanOffer {
   plan: ProPlan;
   productId: string;
   priceString: string;
+  price?: number | null;
+  currencyCode?: string | null;
+  weeklyPriceString?: string | null;
 }
 
 /** The subset of a store product Wafra reads. */
 export interface StoreProductLike {
   productIdentifier: string;
   localizedPrice: string;
+  price?: number | null;
+  currencyCode?: string | null;
+  weeklyPrice?: string | null;
 }
 
 /**
@@ -79,9 +111,42 @@ export function proOffersFromProducts(products: readonly StoreProductLike[]): Pr
     });
     const priceString = match?.localizedPrice?.trim() ?? '';
     if (!match || !priceString) continue;
-    offers.push({ plan, productId: match.productIdentifier, priceString });
+    const price = typeof match.price === 'number' && Number.isFinite(match.price) && match.price > 0
+      ? match.price : null;
+    const currencyCode = match.currencyCode?.trim() || null;
+    // The SDK writes "n/a" for a product with no subscription period; only a
+    // string carrying an amount is a per-week price.
+    const weeklyText = match.weeklyPrice?.trim() ?? '';
+    const weeklyPriceString = plan !== 'weekly' && /\d/.test(weeklyText) ? weeklyText : null;
+    offers.push({ plan, productId: match.productIdentifier, priceString, price, currencyCode, weeklyPriceString });
   }
   return offers;
+}
+
+/** Weeks a yearly plan is compared against: 52, the count stores use for "per week". */
+const WEEKS_PER_YEAR = 52;
+
+/**
+ * Whole percent the yearly plan saves against paying weekly for a year, from
+ * the storefront's own two prices, or null when the claim cannot be made.
+ *
+ * Rounded DOWN, so the badge can understate the saving but never overstate it:
+ * it is a price claim on the screen that sells the product. Null when either
+ * plan is missing or has no usable price, when the two prices come from
+ * different currencies, or when yearly does not actually save anything.
+ */
+export function yearlySavingPercent(offers: readonly ProPlanOffer[]): number | null {
+  const weekly = offers.find((offer) => offer.plan === 'weekly');
+  const yearly = offers.find((offer) => offer.plan === 'yearly');
+  const weeklyPrice = weekly?.price;
+  const yearlyPrice = yearly?.price;
+  if (typeof weeklyPrice !== 'number' || typeof yearlyPrice !== 'number') return null;
+  if (!(weeklyPrice > 0) || !(yearlyPrice > 0)) return null;
+  if (weekly?.currencyCode && yearly?.currencyCode && weekly.currencyCode !== yearly.currencyCode) return null;
+  // The epsilon only absorbs binary-float noise (80.99999… for an exact 81);
+  // it is far below any real hundredth of a percent.
+  const percent = Math.floor((1 - yearlyPrice / (weeklyPrice * WEEKS_PER_YEAR)) * 100 + 1e-9);
+  return percent >= 1 && percent < 100 ? percent : null;
 }
 
 /**
@@ -94,28 +159,14 @@ export function proOffersFromProducts(products: readonly StoreProductLike[]): Pr
  * references with `priceString` from the active storefront.
  */
 export const PRO_PRICES: Record<ProPlan, { fils: number }> = {
-  monthly: { fils: 999 },
-  yearly: { fils: 7499 },
+  weekly: { fils: 499 },
+  yearly: { fils: 4999 },
 };
 
 export const PRO_REFERENCE_PRICE_STRINGS: Record<ProPlan, string> = {
-  monthly: 'US$9.99',
-  yearly: 'US$74.99',
+  weekly: 'US$4.99',
+  yearly: 'US$49.99',
 };
-
-/**
- * How many months of the monthly price the yearly plan saves.
- *
- * Derived rather than written down. The paywall claimed "2 months free"
- * beside prices that actually save four and a half — a number in the sales
- * copy and a number in the price table, with nothing checking they agreed.
- * Understating the discount only cost conversions, but the next edit could
- * as easily have overstated it, and that is a claim in a store listing.
- */
-export function yearlySavingMonths(prices = PRO_PRICES): number {
-  const saved = prices.monthly.fils * 12 - prices.yearly.fils;
-  return Math.floor(saved / prices.monthly.fils);
-}
 
 /** Every Pro feature is free for this long after first launch. Do not also add
  *  a storefront introductory trial: it would begin after this local trial and

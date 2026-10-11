@@ -88,6 +88,11 @@ try {
       txChunks: 1, txChunkOrder: 'oldest-first', bills: [], cardDues: [], budgets: [], goals: [],
       notSubscriptions: [], cancelledSubscriptions: {}, merchantOverrides: {}, billAliases: {}, historyImport: null,
     } });
+    // Home v3 opens on Spent and the transactions; this suite reads sections that are now off by
+    // default, so it switches them on through a saved v3 layout (as Customize Home would).
+    await context.addInitScript(layout => { if (!localStorage.getItem('wafra/ui/home-widgets/v1')) localStorage.setItem('wafra/ui/home-widgets/v1', layout); }, JSON.stringify({ version: 3,
+      order: ['greeting', 'hero', 'today', 'overview', 'week', 'due', 'upcoming', 'activity', 'transfers', 'insight', 'assistant', 'capture'],
+      hidden: ['today', 'overview', 'week', 'transfers', 'insight', 'assistant', 'capture'] }));
     const page = await context.newPage(); page.setDefaultTimeout(12000);
     await page.clock.setFixedTime(new Date('2026-09-30T12:00:00Z'));
     const errors = [];

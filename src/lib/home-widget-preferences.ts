@@ -1,56 +1,83 @@
 export type HomeWidgetId =
-  | 'greeting' | 'overview' | 'today' | 'week'
-  | 'due' | 'upcoming' | 'activity' | 'assistant' | 'insight' | 'capture';
+  | 'greeting' | 'hero' | 'overview' | 'today' | 'week'
+  | 'due' | 'upcoming' | 'activity' | 'transfers' | 'assistant' | 'insight' | 'capture';
 
 export interface HomeWidgetPreferences {
   order: HomeWidgetId[];
   hidden: HomeWidgetId[];
 }
 
+/**
+ * Home v3 (owner decision, October 2026): "Spent in <Month>" with its trend
+ * and In · Net, then the transactions. Every other section keeps its place in
+ * the order and in Customize Home, switched off until the person turns it on.
+ */
 export const DEFAULT_HOME_WIDGETS: HomeWidgetPreferences = {
-  order: ['greeting', 'overview', 'today', 'week', 'due', 'upcoming', 'activity', 'assistant', 'insight', 'capture'],
-  hidden: [],
+  order: ['greeting', 'hero', 'today', 'overview', 'week', 'activity', 'due', 'upcoming', 'transfers', 'insight', 'assistant', 'capture'],
+  hidden: ['today', 'overview', 'week', 'due', 'upcoming', 'transfers', 'insight', 'assistant', 'capture'],
 };
 
-const LEGACY_ORDER: readonly HomeWidgetId[] = ['due', 'upcoming', 'activity', 'assistant', 'insight'];
-const BAND_SECTIONS: readonly HomeWidgetId[] = ['greeting', 'overview', 'today', 'week'];
+/**
+ * The stored layout's version. A layout saved before Home v3 (no version) is
+ * replaced by the new default once, on its first read: the owner chose one
+ * new Home for everyone. Every section the person had stays listed in
+ * Customize Home, where any of them can be switched back on.
+ */
+export const HOME_WIDGETS_LAYOUT_VERSION = 3;
+
+const BAND_SECTIONS: readonly HomeWidgetId[] = ['greeting', 'hero', 'overview', 'today', 'week'];
 /** On the band, the overview is the month line under the Today tiles (splitHomeWidgetLayout). */
 const MONTH_LINE: HomeWidgetId = 'overview';
 
 /**
- * Whether a section belongs to Home's opening group (greeting, overview,
- * Today, week). All but the overview are drawn on the colour band.
+ * Whether a section belongs to Home's opening group (greeting, the Spent
+ * hero, overview, Today, week). All but the overview are drawn on the band.
  */
 export function isHomeBandSection(id: HomeWidgetId): boolean {
   return BAND_SECTIONS.includes(id);
 }
-const ADDED = new Set<HomeWidgetId>([...BAND_SECTIONS, 'capture']);
 const VALID = new Set<HomeWidgetId>(DEFAULT_HOME_WIDGETS.order);
 const ids = (value: unknown): HomeWidgetId[] => Array.isArray(value)
   ? [...new Set(value.filter((id): id is HomeWidgetId => typeof id === 'string' && VALID.has(id as HomeWidgetId)))] : [];
 
 export function defaultHomeWidgetPreferences(): HomeWidgetPreferences {
-  return { order: [...DEFAULT_HOME_WIDGETS.order], hidden: [] };
+  return { order: [...DEFAULT_HOME_WIDGETS.order], hidden: [...DEFAULT_HOME_WIDGETS.hidden] };
 }
 
+/**
+ * A layout as Home draws it: unknown and repeated ids removed, every known
+ * section once, in the chosen positions. A known section the value leaves
+ * out is restored once at the end, switched off when the default switches it
+ * off, so a section added later never appears on someone's Home by itself.
+ */
 export function normalizeHomeWidgetPreferences(value: unknown): HomeWidgetPreferences {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return defaultHomeWidgetPreferences();
   const raw = value as { order?: unknown; hidden?: unknown };
   const order = ids(raw.order);
   const hidden = ids(raw.hidden);
-  // v1 originally stored only five lower sections. Keep every old ordering
-  // and visibility choice; the formerly fixed content becomes movable around
-  // it. No extra persisted schema/appearance field is needed.
-  const legacy = ![...order, ...hidden].some(id => ADDED.has(id));
-  if (legacy) {
-    const middle = [...order];
-    for (const id of LEGACY_ORDER) if (!middle.includes(id)) middle.push(id);
-    return { order: [...BAND_SECTIONS, ...middle, 'capture'], hidden };
+  for (const id of DEFAULT_HOME_WIDGETS.order) {
+    if (order.includes(id)) continue;
+    order.push(id);
+    if (DEFAULT_HOME_WIDGETS.hidden.includes(id) && !hidden.includes(id)) hidden.push(id);
   }
-  // Expanded layouts retain their chosen positions. Unknown/duplicate ids
-  // are removed, and an omitted known section is restored once at the end.
-  for (const id of DEFAULT_HOME_WIDGETS.order) if (!order.includes(id)) order.push(id);
   return { order, hidden };
+}
+
+/**
+ * A layout read from storage. Only a layout written by this version keeps
+ * its choices; anything older or unreadable is the new default
+ * (HOME_WIDGETS_LAYOUT_VERSION).
+ */
+export function readStoredHomeWidgets(value: unknown): HomeWidgetPreferences {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return defaultHomeWidgetPreferences();
+  if ((value as { version?: unknown }).version !== HOME_WIDGETS_LAYOUT_VERSION) return defaultHomeWidgetPreferences();
+  return normalizeHomeWidgetPreferences(value);
+}
+
+/** What storage keeps: the layout and the version that wrote it. */
+export function storedHomeWidgets(preferences: HomeWidgetPreferences): HomeWidgetPreferences & { version: number } {
+  const current = normalizeHomeWidgetPreferences(preferences);
+  return { version: HOME_WIDGETS_LAYOUT_VERSION, order: current.order, hidden: current.hidden };
 }
 
 export function setHomeWidgetVisible(
@@ -84,10 +111,34 @@ export function homeWidgetVisible(preferences: HomeWidgetPreferences, id: HomeWi
   return !preferences.hidden.includes(id);
 }
 
+/** The sections Home may show by itself while they need the person. */
+const SHOWN_WHEN_NEEDED: readonly HomeWidgetId[] = ['capture'];
+
 /**
- * Only the visible opening run of header sections belongs on the band. Home
- * v2 draws it as the greeting, Today | Left in budgets, the month line
- * (the overview: Spent · In · Net) and the week: within the band the
+ * The layout Home draws right now: the saved one, with a switched-off section
+ * shown at its saved place while it needs the person (Capture while tracking
+ * is off or has stopped, or in the first week). A place among the band's
+ * sections would end the band early, so it is drawn just after them instead.
+ * Never saved, so the section is off again once the need passes. Unchanged,
+ * it returns the same object.
+ */
+export function withNeededHomeSections(preferences: HomeWidgetPreferences, needed: readonly HomeWidgetId[]): HomeWidgetPreferences {
+  const shown = needed.filter((id) => SHOWN_WHEN_NEEDED.includes(id) && preferences.hidden.includes(id));
+  if (shown.length === 0) return preferences;
+  const lastBand = preferences.order.reduce((last, id, index) => BAND_SECTIONS.includes(id) ? index : last, -1);
+  const early = shown.filter((id) => preferences.order.indexOf(id) < lastBand);
+  const order = early.length === 0 ? preferences.order : (() => {
+    const rest = preferences.order.filter((id) => !early.includes(id));
+    const after = rest.indexOf(preferences.order[lastBand]!) + 1;
+    return [...rest.slice(0, after), ...early, ...rest.slice(after)];
+  })();
+  return { order, hidden: preferences.hidden.filter((id) => !shown.includes(id)) };
+}
+
+/**
+ * Only the visible opening run of header sections belongs on the band: the
+ * greeting, the Spent hero and, when switched on, Today | Left in budgets,
+ * the month line (the overview: Spent · In · Net) and the week. Within the band the
  * overview always follows the Today tiles. Placed lower by the person, it is
  * drawn on the sheet where they put it, as its full card.
  */

@@ -58,17 +58,17 @@ function harness({ language = 'en', large = false, initial, save } = {}) {
 // The preview lists sections in the order Home draws them: on the band the month line follows Today.
 const drawnOrder = (preferences) => { const { band, sheet } = model.splitHomeWidgetLayout(preferences); return clone([...band, ...sheet]); };
 function previewIds(tree) { return walk(tree).filter(node => String(node.props.testID ?? '').startsWith('home-customize-preview-') && node.props.testID !== 'home-customize-preview-empty').map(node => node.props.testID.replace('home-customize-preview-', '')); }
-for (const language of ['en', 'ar']) test(`all ten sections have visible preview, independent visibility and accessible movement (${language})`, async () => {
+for (const language of ['en', 'ar']) test(`all twelve sections are listed with independent visibility and accessible movement; the preview shows the default Home (${language})`, async () => {
   const h = harness({ language, large: true }); const tree = await h.mount();
-  assert.equal(model.DEFAULT_HOME_WIDGETS.order.length, 10);
+  assert.equal(model.DEFAULT_HOME_WIDGETS.order.length, 12);
   assert.deepEqual(previewIds(tree), drawnOrder(model.DEFAULT_HOME_WIDGETS));
-  assert.deepEqual(previewIds(tree).slice(0, 4), ['greeting', 'today', 'overview', 'week']);
+  assert.deepEqual(previewIds(tree), ['greeting', 'hero', 'activity'], 'Home v3: Spent, then the transactions');
   assert.equal(byId(tree, 'home-customize-fixed'), undefined);
   for (const id of model.DEFAULT_HOME_WIDGETS.order) {
     assert.ok(byId(tree, `home-customize-${id}`));
     const toggle = byId(tree, `home-customize-toggle-${id}`);
     assert.equal(toggle.props.accessibilityRole, 'switch');
-    assert.equal(toggle.props['aria-checked'], true);
+    assert.equal(toggle.props['aria-checked'], !model.DEFAULT_HOME_WIDGETS.hidden.includes(id));
     assert.equal(toggle.props.accessibilityLabel, copy.customizeCopy(language).widgetTitle[id]);
     const up = byId(tree, `home-customize-up-${id}`);
     const style = flat(up.props.style({ pressed: false }));
@@ -79,7 +79,7 @@ for (const language of ['en', 'ar']) test(`all ten sections have visible preview
   // The list follows the drawn order, and a step Home cannot draw is disabled.
   const ids = new Set(model.DEFAULT_HOME_WIDGETS.order.map(id => `home-customize-${id}`));
   const listed = walk(tree).filter(node => ids.has(node.props.testID)).map(node => node.props.testID.replace('home-customize-', ''));
-  assert.deepEqual(listed, drawnOrder(model.DEFAULT_HOME_WIDGETS));
+  assert.deepEqual(listed, clone(model.drawnHomeWidgetOrder(model.DEFAULT_HOME_WIDGETS)), 'every section is listed, switched off or on');
   assert.equal(byId(tree, 'home-customize-up-overview').props.disabled, true, 'the month line always follows Today on the band');
 });
 test('initial loading cannot overwrite edits because controls wait for stored preferences', async () => {
@@ -95,12 +95,13 @@ test('rapid moves use newest order; hiding changes preview and reset restores ev
   const move = byId(tree, 'home-customize-up-capture').props.onPress;
   move(); move(); move(); await tick(); tree = h.render();
   assert.deepEqual(previewIds(tree), drawnOrder(h.saves.at(-1)));
-  assert.equal(previewIds(tree).indexOf('capture'), 6);
-  assert.equal(h.saves.at(-1).order.indexOf('capture'), 6);
-  for (const id of model.DEFAULT_HOME_WIDGETS.order) byId(tree, `home-customize-toggle-${id}`).props.onPress();
+  assert.equal(h.saves.at(-1).order.indexOf('capture'), 8);
+  byId(tree, 'home-customize-toggle-capture').props.onPress(); await tick(); tree = h.render();
+  assert.equal(previewIds(tree).indexOf('capture'), 3, 'switched on, it shows where it was moved: after the transactions');
+  for (const id of model.DEFAULT_HOME_WIDGETS.order) if (byId(tree, `home-customize-toggle-${id}`).props['aria-checked']) byId(tree, `home-customize-toggle-${id}`).props.onPress();
   await tick(); tree = h.render();
   assert.ok(byId(tree, 'home-customize-preview-empty'));
-  assert.equal(h.saves.at(-1).hidden.length, 10);
+  assert.equal(h.saves.at(-1).hidden.length, 12);
   byId(tree, 'home-customize-reset').props.onPress(); await tick();
   assert.deepEqual(previewIds(h.render()), drawnOrder(model.DEFAULT_HOME_WIDGETS));
   assert.deepEqual(h.saves.at(-1), clone(model.DEFAULT_HOME_WIDGETS));
@@ -108,23 +109,23 @@ test('rapid moves use newest order; hiding changes preview and reset restores ev
 test('queued storage writes never race and Done waits for the final layout', async () => {
   const first = deferred(), h = harness({ save: (_value, count) => count === 1 ? first.promise : undefined });
   let tree = await h.mount();
-  byId(tree, 'home-customize-toggle-overview').props.onPress();
-  byId(tree, 'home-customize-toggle-week').props.onPress();
+  byId(tree, 'home-customize-toggle-hero').props.onPress();
+  byId(tree, 'home-customize-toggle-activity').props.onPress();
   await tick(); assert.equal(h.saves.length, 1);
   h.render().props.nav.actions[0].onPress(); await tick(); assert.deepEqual(h.events, []);
   first.resolve(); await tick(); await tick();
-  assert.equal(h.saves.length, 2); assert.deepEqual(h.saves.at(-1).hidden, ['overview', 'week']);
+  assert.equal(h.saves.length, 2); assert.deepEqual(h.saves.at(-1).hidden, [...model.DEFAULT_HOME_WIDGETS.hidden, 'hero', 'activity']);
   assert.deepEqual(h.events, ['dispatch:GO_BACK']);
 });
 test('save failure remains visible, does not claim success or close, and retries the latest layout', async () => {
   let fail = true; const h = harness({ save: () => { if (fail) throw new Error('synthetic full storage'); } });
-  let tree = await h.mount(); byId(tree, 'home-customize-toggle-week').props.onPress(); await tick();
+  let tree = await h.mount(); byId(tree, 'home-customize-toggle-hero').props.onPress(); await tick();
   tree = h.render(); assert.equal(byId(tree, 'home-customize-save-status').props.accessibilityRole, 'alert');
   assert.equal(text(byId(tree, 'home-customize-save-status')), copy.customizeCopy('en').saveError);
   tree.props.nav.actions[0].onPress(); await tick(); assert.deepEqual(h.events, []);
   fail = false; byId(h.render(), 'home-customize-retry').props.onPress(); await tick();
   tree = h.render(); assert.equal(text(byId(tree, 'home-customize-save-status')), copy.customizeCopy('en').saved);
-  assert.deepEqual(h.saves.at(-1).hidden, ['week']);
+  assert.deepEqual(h.saves.at(-1).hidden, [...model.DEFAULT_HOME_WIDGETS.hidden, 'hero']);
   tree.props.nav.actions[0].onPress(); await tick(); assert.deepEqual(h.events, ['back']);
 });
 test('persistent failure offers an explicit exit without pretending the layout saved', async () => {

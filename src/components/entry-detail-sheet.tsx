@@ -1,5 +1,5 @@
 import { useCategoryCatalog } from '@/hooks/use-category-catalog';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -7,6 +7,7 @@ import { MerchantSpendingLink } from '@/components/merchant-spending-link';
 import { accountDisplayName, isMoneyMovementOnly, isTransfer as isLedgerTransfer, isUnassignedIncome, cachedTransferReconciliationForState } from '@/lib/ledger';
 import { canMarkOwnTransfer, isTransferCandidate, transferOwnership, type TransferAssessment } from '@/lib/transfer-reconciliation';
 import { currentAnswer, ownCandidates, transferFingerprintsOf, type TransferAnswer } from '@/lib/transfer-answer';
+import { rowsByIdFor } from '@/lib/rows-by-id';
 import { transferActivityCopy, transferMetaLine, unbroken } from '@/lib/transfer-activity-copy';
 import { useTransferAnswer } from '@/hooks/use-transfer-answer';
 import { TransferAnswerChoices } from '@/components/transfers/transfer-answer-choices';
@@ -140,7 +141,9 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   const { answer, undo, busy } = transferAnswers ?? ownAnswers;
   const activityWords = transferActivityCopy(language);
   const answerWords = activityWords.answers;
-  const rowsById = useMemo(() => new Map(state.transactions.map(row => [row.id, row] as const)), [state.transactions]);
+  // Shared per ledger snapshot: a closed sheet on every host screen no longer
+  // rebuilds its own index of the whole ledger on each change.
+  const rowsById = rowsByIdFor(state.transactions);
   const opensOnPicker = () => startWithAccountPicker && !!transaction &&
     ownCandidates(transaction, transferAssessment, rowsById).length > 1;
   const [picking, setPicking] = useState(opensOnPicker);
@@ -233,7 +236,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     ? rowsById.get(transferAssessment.counterpartId) : undefined;
   const answerLabels = transaction.type === 'income' ? answerWords.in : answerWords.out;
   // The transfer status, said once: a waiting or own transfer's explainer below already leads with
-  // it ("Transfer needs review · not counted yet"), so the chip is drawn only when it says more.
+  // it ("Needs an answer · not counted yet"), so the chip is drawn only when it says more.
   const explainerTitle = confirmedOwnTransfer ? transferWords.confirmedOwn : pendingTransfer ? transferWords.ownershipUnknown : null;
   const transferStatus = presentation.repayment ? presentation.tag : pendingTransfer ? transferWords.ownershipUnknown
     : confirmedOwnTransfer ? transferWords.confirmedOwn : t('transferLabel');
@@ -562,7 +565,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
         <View style={styles.questionHead}>
           <ThemedText type="smallBold" accessibilityRole="header">{answerWords.question}</ThemedText>
           {/* A waiting transfer's status, said once, as the question's lead rather than a chip and a
-              card above it: "Transfer needs review · not counted yet. Wafra keeps it out of …". */}
+              card above it: "Needs an answer · not counted yet. Wafra keeps it out of …". */}
           {pendingTransfer ? <ThemedText testID="pending-transfer-explainer" type="meta" themeColor="textSecondary">
             <ThemedText type="meta" style={{ color: band.text, fontFamily: Fonts.sansSemi }}>{`${transferWords.ownershipUnknown}. `}</ThemedText>
             {transferWords.pendingBody}
