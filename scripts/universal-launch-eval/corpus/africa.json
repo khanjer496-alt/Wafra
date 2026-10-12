@@ -1,0 +1,572 @@
+[
+  {
+    "id": "AF-KE-MPESA-1",
+    "country": "KE",
+    "ledger": "KES",
+    "sender": "MPESA",
+    "body": "UIC4K7HB2N Confirmed. Ksh350.00 paid to NAIVAS SUPERMARKET WESTLANDS. on 4/9/26 at 7:45 PM.New M-PESA balance is Ksh2,150.40. Transaction cost, Ksh0.00. Amount you can transact within the day is 499,650.00. Save frequent Tills for quick payment on M-PESA app https://bit.ly/mpesalnk",
+    "expect": { "post": true, "amountMinor": 35000, "type": "expense", "transfer": false, "merchant": "naivas" },
+    "notes": "Safaricom M-PESA Lipa na M-PESA Buy Goods (till) confirmation: code+Confirmed, 'paid to X.', missing space after time, daily-limit tail and promo bit.ly link that real messages carry",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-KE-MPESA-2",
+    "country": "KE",
+    "ledger": "KES",
+    "sender": "MPESA",
+    "body": "UIF3K8LM2P Confirmed. Ksh1,500.00 sent to JOHN KAMAU 0712***678 on 15/9/26 at 10:12 AM. New M-PESA balance is Ksh3,420.00. Transaction cost, Ksh23.00. Amount you can transact within the day is 498,500.00. Earn interest daily on Ziidi MMF,Dial *334#",
+    "expect": { "post": true, "amountMinor": 150000, "type": "expense", "transfer": true, "merchant": "kamau" },
+    "notes": "M-PESA Send Money to a person with the post-2023 masked MSISDN; amount, not the transaction cost or balance or daily limit; P2P so transfer true",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-KE-MPESA-3",
+    "country": "KE",
+    "ledger": "KES",
+    "sender": "MPESA",
+    "body": "UIG7QW2ER4 Confirmed.You have received Ksh2,000.00 from MARY WANJIKU 0722***456 on 16/9/26 at 3:05 PM  New M-PESA balance is Ksh5,420.00. Earn interest daily on Ziidi MMF,Dial *334#",
+    "expect": { "post": true, "amountMinor": 200000, "type": "income", "transfer": true, "merchant": "wanjiku" },
+    "notes": "M-PESA 'Confirmed.You have received ... from NAME MSISDN' P2P credit with the double-space before the balance clause",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-KE-MPESA-4",
+    "country": "KE",
+    "ledger": "KES",
+    "sender": "MPESA",
+    "body": "UIH2TY6UI8 Confirmed. Ksh1,200.00 sent to KPLC PREPAID for account 37123456789 on 17/9/26 at 8:30 AM New M-PESA balance is Ksh4,220.00. Transaction cost, Ksh0.00.Amount you can transact within the day is 498,800.00. Save frequent paybills for quick payment on M-PESA app https://bit.ly/mpesalnk",
+    "expect": { "post": true, "amountMinor": 120000, "type": "expense", "transfer": false, "merchant": "kplc" },
+    "notes": "M-PESA Paybill ('sent to BUSINESS for account N') for prepaid electricity tokens; a bill payment, not P2P, so transfer false",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-KE-MPESA-5",
+    "country": "KE",
+    "ledger": "KES",
+    "sender": "MPESA",
+    "body": "UIJ5OP9AS1 Confirmed.on 18/9/26 at 6:15 PMWithdraw Ksh3,000.00 from 123456 - QUICKMART AGENT KILIMANI New M-PESA balance is Ksh1,220.00. Transaction cost, Ksh53.00. Amount you can transact within the day is 497,000.00.",
+    "expect": { "post": true, "amountMinor": 300000, "type": "expense", "transfer": false },
+    "notes": "M-PESA agent cash withdrawal with the real run-together 'PMWithdraw' and agent number - name; cash out counts as money out of the wallet",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-KE-MPESA-6",
+    "country": "KE",
+    "ledger": "KES",
+    "sender": "MPESA",
+    "body": "UIK8DF3GH5 confirmed. Reversal of transaction UIF3K8LM2P has been successfully reversed  on 20/9/26  at 11:02 AM and Ksh1,500.00 is credited to your M-PESA account. New M-PESA account balance is Ksh4,920.00.",
+    "expect": { "post": true, "amountMinor": 150000, "type": "income", "transfer": false },
+    "notes": "M-PESA reversal confirmation (customer-requested reversal of a wrong send) crediting the money back; reversal in = income, transfer false",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-KE-MPESA-7",
+    "country": "KE",
+    "ledger": "KES",
+    "sender": "MPESA",
+    "body": "Failed. You do not have enough money in your M-PESA account to send Ksh5,000.00. You must be able to pay the transaction fees as well as the requested amount.Your M-PESA balance is Ksh1,220.00.",
+    "expect": { "post": false, "why": "declined" },
+    "notes": "M-PESA insufficient-funds failure notice; nothing moved",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-KE-MPESA-8",
+    "country": "KE",
+    "ledger": "KES",
+    "sender": "MPESA",
+    "body": "UIL3ZX7CV9 Confirmed. Fuliza M-PESA amount is Ksh 450.00. Access Fee charged Ksh 4.50. Total Fuliza M-PESA outstanding amount is Ksh 454.50 due on 21/10/26. To check daily charges, Dial *234*0#OK Select Query Charges",
+    "expect": { "post": false, "why": "other" },
+    "notes": "Fuliza overdraft drawdown notice that accompanies a separate 'paid to' alert for the actual purchase; booking it would double-count the spend, so post false (judgement call)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-KE-SCAM-1",
+    "country": "KE",
+    "ledger": "KES",
+    "sender": "+254790112233",
+    "body": "UIM4BN8MK2 Confirmed.You have received Ksh3,500.00 from GRACE ACHIENG 0790***112 on 22/9/26 at 7:40 PM New M-PESA balance is Ksh3,620.00.",
+    "expect": { "post": false, "why": "phishing" },
+    "notes": "Classic Kenyan 'wrong send' scam: a fake M-PESA received text typed and sent from a personal mobile number (real M-PESA only comes from the MPESA sender); a follow-up asks to send it back",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-KE-EQUITY-1",
+    "country": "KE",
+    "ledger": "KES",
+    "sender": "Equity Bank",
+    "body": "Dear JANE, your Equity card ending 4417 has been used for KES 2,340.00 at CARREFOUR JUNCTION MALL on 10-09-2026 at 14:32. Ref: 626010432871. Not you? Call 0763 063 000.",
+    "expect": { "post": true, "amountMinor": 234000, "type": "expense", "transfer": false, "merchant": "carrefour" },
+    "notes": "Equity Bank debit card POS usage alert with first-name salutation and contact-centre footer",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-KE-EQUITY-2",
+    "country": "KE",
+    "ledger": "KES",
+    "sender": "Equity Bank",
+    "body": "Your Equity Bank one-time PIN is 482913. Use it to complete your Equity Mobile transfer of KES 15,000.00 to PAUL NJOROGE. Never share this code. Equity will never call to ask for it.",
+    "expect": { "post": false, "why": "otp" },
+    "notes": "Equity Mobile OTP that names an amount and payee; must not post",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-KE-KCB-1",
+    "country": "KE",
+    "ledger": "KES",
+    "sender": "KCB",
+    "body": "Dear Customer, your KCB account ****4521 has been credited with KES 12,000.00 from M-PESA - JAMES MWANGI 0721***890 on 19/09/2026 at 16:40. Ref: UIP2RT5YU7. Available balance KES 18,430.50. Call 0711 087 000.",
+    "expect": { "post": true, "amountMinor": 1200000, "type": "income", "transfer": true, "merchant": "mwangi" },
+    "notes": "KCB credit from an M-PESA B2B send by another person (Ref carries the M-PESA receipt code); P2P inflow so transfer true",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-KE-COOP-1",
+    "country": "KE",
+    "ledger": "KES",
+    "sender": "Co-opBank",
+    "body": "Dear JANE, your Co-op Bank A/C 01100*****4500 has been credited with KES 68,500.00 on 27-Sep-2026. Desc: SALARY SEP 2026 ACME KENYA LTD. Ref: FT26270ABC12. Avail Bal KES 71,204.10. Co-op Bank, We are you.",
+    "expect": { "post": true, "amountMinor": 6850000, "type": "income", "transfer": false, "merchant": "acme" },
+    "notes": "Co-op Bank salary credit with Desc/Ref/Avail Bal and slogan footer; salary narration rather than a named transfer rail, so transfer false (soft)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-KE-NCBA-1",
+    "country": "KE",
+    "ledger": "KES",
+    "sender": "NCBA",
+    "body": "NCBA: KES 1,100.00 has been debited from your account ****7788 on 21/09/2026 for NETFLIX.COM via card ****3344. Bal: KES 22,103.45. Not you? Call 0711 056 444.",
+    "expect": { "post": true, "amountMinor": 110000, "type": "expense", "transfer": false, "merchant": "netflix" },
+    "notes": "NCBA card-not-present subscription debit billed in KES",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-KE-AIRTEL-1",
+    "country": "KE",
+    "ledger": "KES",
+    "sender": "AirtelMoney",
+    "body": "TID:MP260923.1412.H45678. Confirmed. You have sent Ksh 500.00 to 0733***210 PETER OTIENO on 23/09/26 at 14:12. Your balance is Ksh 1,240.00. Cost Ksh 0.00. Airtel Money",
+    "expect": { "post": true, "amountMinor": 50000, "type": "expense", "transfer": true, "merchant": "otieno" },
+    "notes": "Airtel Money Kenya send-money confirmation led by the TID, number before name",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-KE-CHAT-1",
+    "country": "KE",
+    "ledger": "KES",
+    "sender": "+254722111333",
+    "body": "Boss nimekutumia 2k kwa mpesa ya lunch, nitumie ile balance kesho sawa? Pia ile 1,500 ya fuel bado",
+    "expect": { "post": false, "why": "chat" },
+    "notes": "Sheng/Swahili personal chat about an M-PESA send; not a bank alert",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-NG-GTB-1",
+    "country": "NG",
+    "ledger": "NGN",
+    "sender": "GTBank",
+    "body": "Acct: 012****789\nAmt: NGN7,850.00 DR\nDesc: POS PURCHASE @ SHOPRITE LEKKI LANG\nAvail Bal: NGN145,320.55\nDate: 2026-09-12 2:14:07 PM",
+    "expect": { "post": true, "amountMinor": 785000, "type": "expense", "transfer": false, "merchant": "shoprite" },
+    "notes": "GTBank field-list debit alert (Acct/Amt ... DR/Desc/Avail Bal/Date) for a POS purchase; DR suffix gives the direction",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-NG-GTB-2",
+    "country": "NG",
+    "ledger": "NGN",
+    "sender": "GTBank",
+    "body": "Acct: 012****789\nAmt: NGN150,000.00 CR\nDesc: TRANSFER FROM ADEBAYO OLUWASEUN-OPAY-Rent contribution\nAvail Bal: NGN295,320.55\nDate: 2026-09-14 9:05:33 AM",
+    "expect": { "post": true, "amountMinor": 15000000, "type": "income", "transfer": true, "merchant": "adebayo" },
+    "notes": "GTBank field-list credit (CR) for an inbound NIP transfer from a person via OPay",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-NG-GTB-3",
+    "country": "NG",
+    "ledger": "NGN",
+    "sender": "GTBank",
+    "body": "Your GTBank one-time password is 739214 for a transfer of NGN85,000.00 to TUNDE BAKARE. It expires in 5 minutes. Do not disclose to anyone.",
+    "expect": { "post": false, "why": "otp" },
+    "notes": "GTBank transfer OTP naming amount and beneficiary",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-NG-ACCESS-1",
+    "country": "NG",
+    "ledger": "NGN",
+    "sender": "AccessBank",
+    "body": "Txn: Debit\nAcct:089**456\nAmt:NGN25,000.00\nDes:MOB/UTO/CHIOMA NWOSU/Sept dues\nDate:16/09/2026 11:05\nBal:NGN81,240.00\nDial *901# for quick airtime/data top-up",
+    "expect": { "post": true, "amountMinor": 2500000, "type": "expense", "transfer": true, "merchant": "chioma" },
+    "notes": "Access Bank 'Txn: Debit' field list with no spaces after colons; mobile-app outward transfer (MOB/UTO) to a person",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-NG-ACCESS-2",
+    "country": "NG",
+    "ledger": "NGN",
+    "sender": "AccessBank",
+    "body": "Dear Customer, your transfer of NGN50,000.00 to BLESSING OKON could not be completed due to insufficient funds. Your account has not been debited. AccessBank",
+    "expect": { "post": false, "why": "failed" },
+    "notes": "Failed transfer, insufficient funds, explicitly not debited",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-NG-ZENITH-1",
+    "country": "NG",
+    "ledger": "NGN",
+    "sender": "ZENITHBANK",
+    "body": "Acct:22******67\nDT:17/09/2026:11:45:20AM\nWEB PURCHASE @ JUMIA NIGERIA\nDR Amt:18,450.00\nBal:203,115.40\nDial *966# for quick airtime/data purchase",
+    "expect": { "post": true, "amountMinor": 1845000, "type": "expense", "transfer": false, "merchant": "jumia" },
+    "notes": "Zenith Bank alert: DT line, unlabelled narration line, 'DR Amt:' with NO currency code at all (home NGN implied), *966# footer",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-NG-UBA-1",
+    "country": "NG",
+    "ledger": "NGN",
+    "sender": "UBA",
+    "body": "Txn: Credit\nAc:21XXXXX456\nAmt:NGN 45,000.00\nDes:TRF FROM IBRAHIM MUSA/NIP/000013260918\nDate:18-Sep-2026 15:22\nBal:NGN 61,880.10\nDial *919# for UBA services",
+    "expect": { "post": true, "amountMinor": 4500000, "type": "income", "transfer": true, "merchant": "ibrahim" },
+    "notes": "UBA 'Txn: Credit' field list (Ac/Amt/Des/Date/Bal) for an inbound NIP transfer",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-NG-FIRSTBANK-1",
+    "country": "NG",
+    "ledger": "NGN",
+    "sender": "FirstBank",
+    "body": "Your Acct 301XXXX345 Has Been Debited with NGN1,000.00 On 19-Sep-2026 10:22 By AIRTIME/MTN/0803***4567. Bal: NGN23,456.78CR. Dial *894# for FirstBank services",
+    "expect": { "post": true, "amountMinor": 100000, "type": "expense", "transfer": false },
+    "notes": "FirstBank title-case prose debit for an airtime top-up; balance carries a 'CR' (credit-balance) suffix that must not flip the direction",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-NG-OPAY-1",
+    "country": "NG",
+    "ledger": "NGN",
+    "sender": "OPay",
+    "body": "Transfer Successful\n₦5,000.00 has been sent to EMEKA OKONKWO | Access Bank 069****321. Your OPay wallet balance is ₦12,450.30.",
+    "expect": { "post": true, "amountMinor": 500000, "type": "expense", "transfer": true, "merchant": "emeka" },
+    "notes": "OPay app push for an outbound bank transfer, naira sign, beneficiary | bank separator",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-NG-OPAY-2",
+    "country": "NG",
+    "ledger": "NGN",
+    "sender": "OPay",
+    "body": "OPay: Enjoy up to 20% cashback when you pay ₦5,000 or more with your OPay card at Shoprite this weekend! T&Cs apply.",
+    "expect": { "post": false, "why": "promotion" },
+    "notes": "OPay cashback promotion with an amount and a merchant",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-NG-MONIEPOINT-1",
+    "country": "NG",
+    "ledger": "NGN",
+    "sender": "Moniepoint",
+    "body": "Moniepoint MFB\nCredit Alert!\nAmt: NGN25,000.00\nAcc: 50****1234\nDesc: TRF FROM FUNMILAYO ADEYEMI/Kuda/Order 118\nBal: NGN61,000.00\nDate: 22-09-2026 12:10",
+    "expect": { "post": true, "amountMinor": 2500000, "type": "income", "transfer": true, "merchant": "funmilayo" },
+    "notes": "Moniepoint MFB 'Credit Alert!' field list for a customer transfer into a small-business account",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-NG-KUDA-1",
+    "country": "NG",
+    "ledger": "NGN",
+    "sender": "Kuda",
+    "body": "You spent ₦3,500.00 at CHICKEN REPUBLIC ADMIRALTY with your Kuda card ending 2290.",
+    "expect": { "post": true, "amountMinor": 350000, "type": "expense", "transfer": false, "merchant": "chicken republic" },
+    "notes": "Kuda app push for a card purchase, short one-line style",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-NG-PHISH-1",
+    "country": "NG",
+    "ledger": "NGN",
+    "sender": "+2348031234567",
+    "body": "GTBank: Your BVN has been suspended due to incomplete NIN linkage and your account will be restricted. Update now: http://gtb-bvn-update.com.ng",
+    "expect": { "post": false, "why": "phishing" },
+    "notes": "Nigerian BVN/NIN-linkage smishing from a personal number impersonating a bank",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-GH-MOMO-1",
+    "country": "GH",
+    "ledger": "GHS",
+    "sender": "MobileMoney",
+    "body": "Payment made for GHS 85.00 to KWAME ASANTE. Current Balance: GHS 340.20. Available Balance: GHS 340.20. Reference: lunch. Transaction ID: 52103894712. Fee charged: GHS 0.85 TAX charged: GHS 0.00. Download the MoMo App for a Faster & Easier Experience.",
+    "expect": { "post": true, "amountMinor": 8500, "type": "expense", "transfer": true, "merchant": "kwame" },
+    "notes": "MTN MoMo Ghana 'Payment made for GHS X to NAME' P2P send with Current/Available balance, fee and E-levy tax fields",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-GH-MOMO-2",
+    "country": "GH",
+    "ledger": "GHS",
+    "sender": "MobileMoney",
+    "body": "Payment received for GHS 600.00 from ABENA OWUSU Current Balance: GHS 940.20 . Available Balance: GHS 940.20. Reference: school fees. Transaction ID: 52104412987. TRANSACTION FEE: 0.00",
+    "expect": { "post": true, "amountMinor": 60000, "type": "income", "transfer": true, "merchant": "abena" },
+    "notes": "MTN MoMo Ghana 'Payment received for GHS X from NAME' with the stray ' . ' spacing of the real template",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-GH-MOMO-3",
+    "country": "GH",
+    "ledger": "GHS",
+    "sender": "MobileMoney",
+    "body": "KOJO BOATENG (024***5678) has sent you a payment request of GHS 120.00. Reference: shoes. Dial *170# > My Wallet > My Approvals to approve. Ignore to decline.",
+    "expect": { "post": false, "why": "request" },
+    "notes": "MTN MoMo Ghana pending payment request awaiting approval in *170# My Approvals",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-GH-GCB-1",
+    "country": "GH",
+    "ledger": "GHS",
+    "sender": "GCB Bank",
+    "body": "GCB: Your Acct ***5678 has been debited with GHS450.00 on 11-SEP-26. Desc: POS PURCHASE MELCOM ACHIMOTA. Avail Bal GHS2,345.67. Call 0302 201 456",
+    "expect": { "post": true, "amountMinor": 45000, "type": "expense", "transfer": false, "merchant": "melcom" },
+    "notes": "GCB Bank debit alert, currency glued to amount (GHS450.00), dd-MON-yy date",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-GH-ECOBANK-1",
+    "country": "GH",
+    "ledger": "GHS",
+    "sender": "Ecobank",
+    "body": "Ecobank: Acct ****4567 credited with GHS 6,800.00 on 26/09/2026. Narr: SALARY SEP26 ACME GHANA LTD. Bal: GHS 7,250.10",
+    "expect": { "post": true, "amountMinor": 680000, "type": "income", "transfer": false, "merchant": "acme" },
+    "notes": "Ecobank Ghana terse credit alert with Narr: salary narration",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-ZA-FNB-1",
+    "country": "ZA",
+    "ledger": "ZAR",
+    "sender": "FNB",
+    "body": "FNB :-) R4,500.00 paid from Cheq a/c..123456 @ Online Banking. Ref.Rent Sept Mr Dlamini. 01Sep 08:10",
+    "expect": { "post": true, "amountMinor": 450000, "type": "expense", "transfer": true },
+    "notes": "FNB smiley-prefixed 'paid from Cheq a/c..NNNNNN @ Online Banking. Ref.X. ddMon hh:mm' outgoing EFT to a landlord; payee only appears inside the Ref so merchant omitted",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-ZA-FNB-2",
+    "country": "ZA",
+    "ledger": "ZAR",
+    "sender": "FNB",
+    "body": "FNB :-) R28,450.00 paid to Cheq a/c..123456 @ Eft. Ref.ACME PTY LTD SALARY. 25Sep 05:47",
+    "expect": { "post": true, "amountMinor": 2845000, "type": "income", "transfer": true, "merchant": "acme" },
+    "notes": "FNB 'paid to Cheq a/c' inbound EFT salary; arrives as a plain EFT so transfer true (soft); 'paid to' here means INTO the customer's account",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-ZA-FNB-3",
+    "country": "ZA",
+    "ledger": "ZAR",
+    "sender": "FNB",
+    "body": "FNB :-) R1,249.00 reserved for purchase @ Takealot from Cheq a/c..123456 using card..7890. Avail R12,340. 28Sep 21:05",
+    "expect": { "post": false, "why": "hold" },
+    "notes": "FNB 'reserved for purchase' card authorisation hold; funds are reserved, not yet paid, so post false (judgement: the later settled debit is the bookable event)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-ZA-ABSA-1",
+    "country": "ZA",
+    "ledger": "ZAR",
+    "sender": "Absa",
+    "body": "Absa: CHEQ4521, Pur, 13/09/26 POS PURCHASE, PICK N PAY ROSEBANK, R-612.45, Available R8,231.10. Help 0860008600",
+    "expect": { "post": true, "amountMinor": 61245, "type": "expense", "transfer": false, "merchant": "pick n pay" },
+    "notes": "Absa comma-separated alert (ACCOUNT, TxnCode, date DESCRIPTION, MERCHANT, R-amount, Available) where the minus sign sits after the R",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-ZA-ABSA-2",
+    "country": "ZA",
+    "ledger": "ZAR",
+    "sender": "Absa",
+    "body": "Absa: CHEQ4521, Declined, 14/09/26 POS PURCHASE, INSUFFICIENT FUNDS, WOOLWORTHS SANDTON, R-2,450.00, Available R231.10. Help 0860008600",
+    "expect": { "post": false, "why": "declined" },
+    "notes": "Absa comma-format declined purchase, insufficient funds",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-ZA-CAPITEC-1",
+    "country": "ZA",
+    "ledger": "ZAR",
+    "sender": "Capitec",
+    "body": "Capitec: Purchase of R1 250.00 at MAKRO WOODMEAD on 15/09/2026 14:02 with card *3321. Available balance R4 870.55.",
+    "expect": { "post": true, "amountMinor": 125000, "type": "expense", "transfer": false, "merchant": "makro" },
+    "notes": "Capitec card purchase with South African space thousands separator (R1 250.00)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-ZA-STDBANK-1",
+    "country": "ZA",
+    "ledger": "ZAR",
+    "sender": "StandardBank",
+    "body": "Standard Bank: Debit order of R350.00 paid to VODACOM from acc ..4410 on 01/10/2026. Avail bal R3,215.20. Queries 0860 123 000",
+    "expect": { "post": true, "amountMinor": 35000, "type": "expense", "transfer": false, "merchant": "vodacom" },
+    "notes": "Standard Bank completed debit order (direct debit) to a mobile network; 'paid to' a merchant here means money out",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-ZA-NEDBANK-1",
+    "country": "ZA",
+    "ledger": "ZAR",
+    "sender": "Nedbank",
+    "body": "Nedbank: A debit order of R899.00 from MULTICHOICE DSTV will be processed on your account ..1234 on 03/10/2026. To stop or dispute it, use the Nedbank Money app.",
+    "expect": { "post": false, "why": "scheduled" },
+    "notes": "Upcoming debit order notice (will be processed on a future date)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-UG-MTN-1",
+    "country": "UG",
+    "ledger": "UGX",
+    "sender": "MTNMobMoney",
+    "body": "Y'ello. You have sent UGX 50,000 to JOHN SSEMPA 256772***456 on 2026-09-15 10:22:31. Reason: rent. Your new balance: UGX 120,500. Fee was UGX 1,000. Tax was UGX 250. TID: 21345678901.",
+    "expect": { "post": true, "amountMinor": 50000, "type": "expense", "transfer": true, "merchant": "ssempa" },
+    "notes": "MTN MoMo Uganda send money with Reason, fee and mobile-money tax lines; UGX has 0 decimals so 50,000 -> 50000",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-UG-MTN-2",
+    "country": "UG",
+    "ledger": "UGX",
+    "sender": "MTNMobMoney",
+    "body": "Y'ello! You qualify for a MoKash loan of up to UGX 500,000. Dial *165*5# to borrow now. T&Cs apply.",
+    "expect": { "post": false, "why": "offer" },
+    "notes": "MoKash mobile-loan offer with an amount",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-UG-AIRTEL-1",
+    "country": "UG",
+    "ledger": "UGX",
+    "sender": "AirtelMoney",
+    "body": "You have received UGX 75,000 from 0752***789, JANE NAKATO. Your balance is UGX 112,300. TID: 98765432101. Thank you for using Airtel Money.",
+    "expect": { "post": true, "amountMinor": 75000, "type": "income", "transfer": true, "merchant": "nakato" },
+    "notes": "Airtel Money Uganda P2P received, number before name; UGX 0 decimals",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-TZ-MPESA-1",
+    "country": "TZ",
+    "ledger": "TZS",
+    "sender": "M-PESA",
+    "body": "UIQ7GH2JK4 Imethibitishwa. Umetuma Tsh25,000.00 kwa ASHA JUMA 0754***321 tarehe 24/9/26 saa 4:15 PM. Salio lako jipya la M-Pesa ni Tsh63,400.00. Ada ya muamala ni Tsh1,200.00.",
+    "expect": { "post": true, "amountMinor": 2500000, "type": "expense", "transfer": true, "merchant": "asha" },
+    "notes": "Vodacom Tanzania M-Pesa send-money confirmation in Swahili (Imethibitishwa / Umetuma ... kwa ... tarehe ... saa / Salio / Ada ya muamala)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-TZ-MPESA-2",
+    "country": "TZ",
+    "ledger": "TZS",
+    "sender": "M-PESA",
+    "body": "Muamala umeshindwa. Huna salio la kutosha kutuma Tsh50,000.00 kwa BARAKA MUSHI. Salio lako la M-Pesa ni Tsh12,300.00.",
+    "expect": { "post": false, "why": "failed" },
+    "notes": "Swahili failed transaction (insufficient balance) from Vodacom M-Pesa",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-TZ-CRDB-1",
+    "country": "TZ",
+    "ledger": "TZS",
+    "sender": "CRDB BANK",
+    "body": "CRDB BANK: Kiasi cha TZS 150,000.00 kimetolewa kwenye akaunti yako 0152****3300 tarehe 25/09/2026 kupitia ATM CRDB MLIMANI CITY. Salio: TZS 1,204,550.00",
+    "expect": { "post": true, "amountMinor": 15000000, "type": "expense", "transfer": false },
+    "notes": "CRDB Swahili ATM withdrawal alert (kimetolewa = withdrawn); balance larger than amount must not be taken",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-MA-ATTIJARI-1",
+    "country": "MA",
+    "ledger": "MAD",
+    "sender": "Attijari",
+    "body": "Attijariwafa bank: Paiement par carte ****1234 d'un montant de 450,00 MAD chez MARJANE CALIFORNIE le 15/09/2026 a 14:22. Solde disponible: 12 345,67 MAD.",
+    "expect": { "post": true, "amountMinor": 45000, "type": "expense", "transfer": false, "merchant": "marjane" },
+    "notes": "Attijariwafa French card payment alert with decimal comma and space-grouped balance",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-MA-BP-1",
+    "country": "MA",
+    "ledger": "MAD",
+    "sender": "BCP",
+    "body": "Banque Populaire: Votre compte ***2210 a été crédité de 8 500,00 MAD le 28/09/2026. Motif: VIREMENT SALAIRE ACME MAROC SARL. Solde: 9 120,40 MAD",
+    "expect": { "post": true, "amountMinor": 850000, "type": "income", "transfer": true, "merchant": "acme" },
+    "notes": "Banque Populaire French credit alert, 'a été crédité de 8 500,00 MAD', salary by virement (plain transfer, transfer true soft)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-MA-CIH-1",
+    "country": "MA",
+    "ledger": "MAD",
+    "sender": "CIH BANK",
+    "body": "CIH BANK: Votre code de confirmation est 583920 pour le paiement de 1 299,00 MAD chez JUMIA.MA. Ne communiquez jamais ce code.",
+    "expect": { "post": false, "why": "otp" },
+    "notes": "French 3-D Secure confirmation code naming amount and merchant",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-ET-CBE-1",
+    "country": "ET",
+    "ledger": "ETB",
+    "sender": "CBE",
+    "body": "Dear Abebe your Account 1*********5678 has been debited with ETB 2,350.00 .Service charge of  ETB 2 and VAT(15%) of ETB0.30 with a total of ETB 2,352.30. Your Current Balance is ETB 18,640.25. Thank you for Banking with CBE! https://apps.cbe.com.et:100/?id=FT26272K9QW15678",
+    "expect": { "post": true, "amountMinor": 235000, "type": "expense", "transfer": false },
+    "notes": "Commercial Bank of Ethiopia debit with service charge + VAT + total and receipt link; amount is the debited principal 2,350.00, not the fee-inclusive total or balance",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-ET-CBE-2",
+    "country": "ET",
+    "ledger": "ETB",
+    "sender": "CBE",
+    "body": "Dear Abebe, the balance of your Account 1*********5678 as of 05/10/2026 is ETB 18,640.25. Thank you for Banking with CBE!",
+    "expect": { "post": false, "why": "balance" },
+    "notes": "CBE balance-only notice",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-ET-TELEBIRR-1",
+    "country": "ET",
+    "ledger": "ETB",
+    "sender": "127",
+    "body": "Dear Customer\nYou have paid ETB 230.00 for goods purchased from 512345 - Shoa Supermarket on 30/09/2026 19:02:44. Your transaction number is CIU8XYZ12A. Your current E-Money Account balance is ETB 1,104.56.\nThank you for using telebirr\nEthio telecom",
+    "expect": { "post": true, "amountMinor": 23000, "type": "expense", "transfer": false, "merchant": "shoa" },
+    "notes": "Ethio telecom telebirr merchant payment from short code 127 with E-Money Account balance",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-RW-MTN-1",
+    "country": "RW",
+    "ledger": "RWF",
+    "sender": "M-Money",
+    "body": "*165*S*15000 RWF transferred to Jean Bosco Habimana (250788***123) at 2026-10-02 09:14:22 . Fee was: 100 RWF. New balance: 42350 RWF. *EN#",
+    "expect": { "post": true, "amountMinor": 15000, "type": "expense", "transfer": true, "merchant": "habimana" },
+    "notes": "MTN MoMo Rwanda USSD-style transfer receipt with *165*S* prefix and *EN# suffix, ungrouped amounts; RWF 0 decimals",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-ZM-ZANACO-1",
+    "country": "ZM",
+    "ledger": "ZMW",
+    "sender": "ZANACO",
+    "body": "Zanaco: Acc ***1234 debited ZMW 850.00 on 15/09/2026 POS SHOPRITE MANDA HILL. Avail Bal ZMW 3,456.78",
+    "expect": { "post": true, "amountMinor": 85000, "type": "expense", "transfer": false, "merchant": "shoprite" },
+    "notes": "Zanaco terse POS debit alert",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "AF-ZM-ZANACO-2",
+    "country": "ZM",
+    "ledger": "ZMW",
+    "sender": "ZANACO",
+    "body": "Zanaco: Dear Customer, your loan instalment of ZMW 2,450.00 is due on 05/10/2026. Please ensure your account ***1234 is funded to avoid penalty charges.",
+    "expect": { "post": false, "why": "reminder" },
+    "notes": "Loan instalment due reminder",
+    "provenance": "synthetic"
+  }
+]

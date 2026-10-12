@@ -1,0 +1,824 @@
+[
+  {
+    "id": "EAT-JP-SMBC-1",
+    "country": "JP",
+    "ledger": "JPY",
+    "sender": "三井住友カード",
+    "body": "【ご利用のお知らせ】\nいつも三井住友カードをご利用頂きありがとうございます。\nお客様のカードご利用内容をお知らせいたします。\n\nご利用カード：三井住友カード\n\n◇利用日：2026/09/14 12:41\n◇利用先：セブン－イレブン\n◇利用取引：買物\n◇利用金額：1,280円",
+    "expect": {
+      "post": true,
+      "amountMinor": 1280,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "セブン"
+    },
+    "notes": "Vpass (SMBC card) 'ご利用のお知らせ' notice with ◇利用日/利用先/利用取引/利用金額 lines; sent at authorisation and the only real-time notice, so a bookkeeper records the purchase",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-JP-MUFG-DEBIT-1",
+    "country": "JP",
+    "ledger": "JPY",
+    "sender": "三菱UFJ銀行",
+    "body": "【三菱UFJ-VISAデビット】ご利用のお知らせ\nいつも三菱UFJ-VISAデビットをご利用いただき、ありがとうございます。\nカード番号末尾4桁：1234\n【ご利用日時(日本時間)】2026年9月16日 19:05:22\n【ご利用金額】4,620円\n【ご利用先】AMAZON CO JP\n【承認番号】482910",
+    "expect": {
+      "post": true,
+      "amountMinor": 4620,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "amazon"
+    },
+    "notes": "MUFG VISA debit usage notice with bracketed 【ご利用金額】/【ご利用先】/【承認番号】 fields; debit is taken from the account immediately",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-JP-MUFG-ATM-1",
+    "country": "JP",
+    "ledger": "JPY",
+    "sender": "三菱UFJ銀行",
+    "body": "入出金のお知らせ\n2026年9月20日 10:12\n普通預金 口座番号末尾4567\nお引出し 30,000円\nお取引内容：ATM\n残高 182,345円",
+    "expect": {
+      "post": true,
+      "amountMinor": 30000,
+      "type": "expense",
+      "transfer": false
+    },
+    "notes": "MUFG app deposit/withdrawal (入出金) push for an ATM cash withdrawal (お引出し); amount is the withdrawal, not the 残高 balance",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-JP-MIZUHO-SAL-1",
+    "country": "JP",
+    "ledger": "JPY",
+    "sender": "みずほ銀行",
+    "body": "【みずほ銀行】入金のお知らせ\nいつもみずほ銀行をご利用いただきありがとうございます。\n下記のとおりご入金がありましたのでお知らせします。\n\n入金日：2026年09月25日\n口座：普通預金 *****89\n金額：285,400円\n摘要：給与 カ）サクラシヨウジ\n\n※本メールは送信専用です。",
+    "expect": {
+      "post": true,
+      "amountMinor": 285400,
+      "type": "income",
+      "transfer": false
+    },
+    "notes": "Mizuho Direct incoming-funds notice (入金のお知らせ) for payroll with 摘要 給与 and the employer in half-width-style katakana; salary, not a plain P2P transfer",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-JP-RAKUTEN-1",
+    "country": "JP",
+    "ledger": "JPY",
+    "sender": "楽天カード",
+    "body": "【速報版】カード利用のお知らせ(本人ご利用分)\n楽天カードをご利用いただき誠にありがとうございます。\nお客様のカードご利用情報をお知らせいたします。\n\n■利用日: 2026/09/18\n■利用先: ローソン\n■利用者: 本人\n■支払方法: 1回\n■利用金額: 648 円\n■支払月: 2026/10\n■カード利用獲得ポイント: 6 P",
+    "expect": {
+      "post": true,
+      "amountMinor": 648,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "ローソン"
+    },
+    "notes": "Rakuten Card 'カード利用お知らせメール' 速報版 with ■ fields, '648 円' with a space and a points line; the prompt usage notice is what the customer gets at purchase time, so it posts",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-JP-PAYPAY-1",
+    "country": "JP",
+    "ledger": "JPY",
+    "sender": "PayPay",
+    "body": "支払い完了\nファミリーマート 新宿三丁目店\n¥580\n2026/09/21 08:14\nPayPay残高",
+    "expect": {
+      "post": true,
+      "amountMinor": 580,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "ファミリーマート"
+    },
+    "notes": "PayPay payment-complete (支払い完了) notification using the ¥ sign rather than 円; wallet payment at a convenience store",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-JP-PAYPAY-RECV-1",
+    "country": "JP",
+    "ledger": "JPY",
+    "sender": "PayPay",
+    "body": "山田 太郎さんから1,500円を受け取りました。\nメッセージ：ランチ代ありがとう",
+    "expect": {
+      "post": true,
+      "amountMinor": 1500,
+      "type": "income",
+      "transfer": true,
+      "merchant": "山田"
+    },
+    "notes": "PayPay P2P money received (送る・受け取る) notice from a friend; P2P so transfer true",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-JP-SMBC-PHISH-1",
+    "country": "JP",
+    "ledger": "JPY",
+    "sender": "+81 80-4821-7730",
+    "body": "【三井住友カード】お客様のカードで不正利用の疑いがある取引（83,400円）を検知しました。ご利用確認はこちら https://smbc-card-kakunin.top/",
+    "expect": {
+      "post": false,
+      "why": "phishing"
+    },
+    "notes": "Widely reported Japanese card smishing impersonating SMBC from a mobile number with a lookalike link; no money moved",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-JP-RAKUTEN-OTP-1",
+    "country": "JP",
+    "ledger": "JPY",
+    "sender": "楽天カード",
+    "body": "【楽天カード】本人認証サービス ワンタイムパスワード：482019\nご利用先：APPLE.COM/JP\nご利用金額：12,800円\n有効期限：5分\n※このパスワードを他人に教えないでください。",
+    "expect": {
+      "post": false,
+      "why": "otp"
+    },
+    "notes": "Rakuten Card 3-D Secure one-time password naming merchant and amount; a verification code, never a booked purchase",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-JP-PAYPAY-REQ-1",
+    "country": "JP",
+    "ledger": "JPY",
+    "sender": "PayPay",
+    "body": "佐藤 花子さんから2,400円の請求が届きました。\n内容を確認して支払ってください。",
+    "expect": {
+      "post": false,
+      "why": "request"
+    },
+    "notes": "PayPay 'わりかん/請求' payment request from a friend; nothing paid yet",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-KR-KBCARD-1",
+    "country": "KR",
+    "ledger": "KRW",
+    "sender": "15881688",
+    "body": "[Web발신]\nKB국민카드1234승인\n김*수님\n15,000원 일시불\n09/15 13:22\n이마트24 역삼점\n누적523,400원",
+    "expect": {
+      "post": true,
+      "amountMinor": 15000,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "이마트24"
+    },
+    "notes": "KB Kookmin Card 승인 SMS (card, masked name, amount 일시불, MM/DD time, merchant, 누적 running total); Korean card approvals are the only alert for the purchase, so a bookkeeper records it; 누적 is not the amount",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-KR-SHINHANCARD-1",
+    "country": "KR",
+    "ledger": "KRW",
+    "sender": "15447000",
+    "body": "[Web발신]\n신한카드(5678)승인 박*영 32,000원(일시불)09/17 19:22 교촌치킨 누적1,184,500원",
+    "expect": {
+      "post": true,
+      "amountMinor": 32000,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "교촌"
+    },
+    "notes": "Shinhan Card single-line 승인 SMS with (일시불) glued to the date; approval at purchase time is the booking signal for Korean card spend",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-KR-SAMSUNG-1",
+    "country": "KR",
+    "ledger": "KRW",
+    "sender": "15888700",
+    "body": "[Web발신]\n삼성1234승인 이*진\n58,900원 일시불\n09/18 20:15 쿠팡\n누적1,520,300원",
+    "expect": {
+      "post": true,
+      "amountMinor": 58900,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "쿠팡"
+    },
+    "notes": "Samsung Card 승인 SMS ('삼성1234승인' header, date and merchant on one line); card approval recorded as spending",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-KR-HYUNDAI-CANCEL-1",
+    "country": "KR",
+    "ledger": "KRW",
+    "sender": "15776000",
+    "body": "[Web발신]\n현대카드 M 승인취소\n최*호님\n45,000원 일시불\n09/19 11:02\n무신사스토어\n누적767,000원",
+    "expect": {
+      "post": true,
+      "amountMinor": 45000,
+      "type": "income",
+      "transfer": false,
+      "merchant": "무신사"
+    },
+    "notes": "Hyundai Card 승인취소 (approval cancellation) SMS after a returned order; the earlier approval was booked as spend, so the cancellation is a refund credited back (income)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-KR-KBBANK-ATM-1",
+    "country": "KR",
+    "ledger": "KRW",
+    "sender": "15889999",
+    "body": "[Web발신]\n[KB]09/20 14:22\n801202**456\nATM출금\n100,000\n잔액1,134,567",
+    "expect": {
+      "post": true,
+      "amountMinor": 100000,
+      "type": "expense",
+      "transfer": false
+    },
+    "notes": "KB Kookmin Bank deposit/withdrawal SMS in its terse line format ([KB] date, masked account, ATM출금, bare amount without 원, 잔액 balance)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-KR-WOORI-SAL-1",
+    "country": "KR",
+    "ledger": "KRW",
+    "sender": "15885000",
+    "body": "[Web발신]\n[우리은행]입금 3,250,000원\n09/25 09:01\n1002***123456\n급여 (주)한빛소프트\n잔액 4,180,220원",
+    "expect": {
+      "post": true,
+      "amountMinor": 3250000,
+      "type": "income",
+      "transfer": false
+    },
+    "notes": "Woori Bank 입금 SMS for monthly salary (급여 with employer); payroll, so transfer false",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-KR-HANA-1",
+    "country": "KR",
+    "ledger": "KRW",
+    "sender": "15991111",
+    "body": "[Web발신]\n하나,09/22,18:40\n123-******-12345\n출금200,000원\n김민지\n잔액845,300원",
+    "expect": {
+      "post": true,
+      "amountMinor": 200000,
+      "type": "expense",
+      "transfer": true,
+      "merchant": "김민지"
+    },
+    "notes": "Hana Bank comma-delimited account SMS (하나,MM/DD,HH:MM) for an outgoing transfer to a person (출금 with recipient name); P2P transfer",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-KR-TOSS-1",
+    "country": "KR",
+    "ledger": "KRW",
+    "sender": "토스",
+    "body": "송금 완료\n김민수님에게 30,000원을 보냈어요.",
+    "expect": {
+      "post": true,
+      "amountMinor": 30000,
+      "type": "expense",
+      "transfer": true,
+      "merchant": "김민수"
+    },
+    "notes": "Toss app push for a completed P2P send ('~님에게 ~원을 보냈어요')",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-KR-KBCARD-OTP-1",
+    "country": "KR",
+    "ledger": "KRW",
+    "sender": "15881688",
+    "body": "[Web발신]\n[KB국민카드] 인증번호 [482915]를 입력해주세요. 온라인결제 129,000원(쿠팡) 타인에게 절대 알려주지 마세요.",
+    "expect": {
+      "post": false,
+      "why": "otp"
+    },
+    "notes": "KB Kookmin Card online-payment 인증번호 SMS naming amount and merchant; a verification code, not a purchase",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-KR-SMISH-1",
+    "country": "KR",
+    "ledger": "KRW",
+    "sender": "+639171234567",
+    "body": "[국제발신]\n해외결제 승인 1,290,000원\n09/23 아마존\n본인 아닐 시 즉시 신고\n☎070-8892-1234",
+    "expect": {
+      "post": false,
+      "why": "phishing"
+    },
+    "notes": "The very common Korean '[국제발신] 해외결제 승인' smishing/vishing lure from an overseas number pushing a callback; mimics a card approval but is fraud",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-KR-SHINHAN-DECLINE-1",
+    "country": "KR",
+    "ledger": "KRW",
+    "sender": "15447000",
+    "body": "[Web발신]\n신한카드(5678)승인거절 박*영 450,000원 한도초과 09/24 21:05 롯데하이마트",
+    "expect": {
+      "post": false,
+      "why": "declined"
+    },
+    "notes": "Shinhan Card 승인거절 (declined, 한도초과 over limit) SMS in the same layout as an approval; nothing charged",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-CN-ICBC-1",
+    "country": "CN",
+    "ledger": "CNY",
+    "sender": "95588",
+    "body": "您尾号1234卡9月15日12:34快捷支付支出(财付通-美团)45.80元，余额3,245.67元。【工商银行】",
+    "expect": {
+      "post": true,
+      "amountMinor": 4580,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "美团"
+    },
+    "notes": "ICBC 95588 account-movement SMS (您尾号…卡…快捷支付支出(channel-merchant)…元，余额…【工商银行】) for a WeChat Pay/Tenpay-routed Meituan purchase",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-CN-ICBC-SAL-1",
+    "country": "CN",
+    "ledger": "CNY",
+    "sender": "95588",
+    "body": "您尾号1234卡9月25日10:02工资收入12,500.00元，余额15,745.67元。【工商银行】",
+    "expect": {
+      "post": true,
+      "amountMinor": 1250000,
+      "type": "income",
+      "transfer": false
+    },
+    "notes": "ICBC 95588 payroll credit SMS (工资收入); salary, transfer false",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-CN-CCB-1",
+    "country": "CN",
+    "ledger": "CNY",
+    "sender": "95533",
+    "body": "您尾号5678的储蓄卡账户9月16日18时22分向张伟转账支出人民币500.00元,活期余额5,432.10元。[建设银行]",
+    "expect": {
+      "post": true,
+      "amountMinor": 50000,
+      "type": "expense",
+      "transfer": true,
+      "merchant": "张伟"
+    },
+    "notes": "CCB 95533 savings-card SMS with 时/分 time and square-bracket signature for a transfer out to a person (向…转账支出人民币)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-CN-BOC-1",
+    "country": "CN",
+    "ledger": "CNY",
+    "sender": "95566",
+    "body": "您的借记卡账户4567，于09月17日网上快捷支付交易人民币88.00元，交易后余额1,234.56【中国银行】",
+    "expect": {
+      "post": true,
+      "amountMinor": 8800,
+      "type": "expense",
+      "transfer": false
+    },
+    "notes": "Bank of China 95566 debit-card SMS for an online quick-pay (网上快捷支付) with no merchant named; amount is the 交易 figure, not 交易后余额",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-CN-CMB-1",
+    "country": "CN",
+    "ledger": "CNY",
+    "sender": "95555",
+    "body": "您账户1234于09月18日12:30在【财付通-微信支付-瑞幸咖啡】快捷支付19.90元，余额2,345.67【招商银行】",
+    "expect": {
+      "post": true,
+      "amountMinor": 1990,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "瑞幸"
+    },
+    "notes": "China Merchants Bank 95555 account SMS naming the payment chain in 【】 (Tenpay-WeChat Pay-merchant)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-CN-ALIPAY-1",
+    "country": "CN",
+    "ledger": "CNY",
+    "sender": "支付宝",
+    "body": "交易提醒\n付款金额：¥128.50\n交易对象：盒马鲜生\n付款方式：余额宝\n交易时间：2026-09-19 18:42",
+    "expect": {
+      "post": true,
+      "amountMinor": 12850,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "盒马"
+    },
+    "notes": "Alipay 交易提醒 card-style push with 付款金额/交易对象/付款方式 rows for a supermarket payment",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-CN-ICBC-OTP-1",
+    "country": "CN",
+    "ledger": "CNY",
+    "sender": "95588",
+    "body": "【工商银行】验证码：482913，您正在使用尾号1234卡向京东支付人民币2,399.00元，请勿向任何人泄露。",
+    "expect": {
+      "post": false,
+      "why": "otp"
+    },
+    "notes": "ICBC payment 验证码 SMS naming merchant and amount; a verification code, not a completed payment",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-CN-CMB-STMT-1",
+    "country": "CN",
+    "ledger": "CNY",
+    "sender": "95555",
+    "body": "【招商银行】您的招行信用卡9月账单人民币3,456.78元，最低还款345.68元，到期还款日10月08日。",
+    "expect": {
+      "post": false,
+      "why": "statement"
+    },
+    "notes": "CMB credit-card monthly bill (账单 with 最低还款 and 到期还款日); a statement, not spending",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-CN-CCB-SEC-1",
+    "country": "CN",
+    "ledger": "CNY",
+    "sender": "95533",
+    "body": "您尾号5678的账户于9月26日20:41在新设备登录手机银行，如非本人操作，请立即致电95533。[建设银行]",
+    "expect": {
+      "post": false,
+      "why": "security"
+    },
+    "notes": "CCB new-device mobile-banking login alert; security notice with no money movement",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-HK-HSBC-CARD-1",
+    "country": "HK",
+    "ledger": "HKD",
+    "sender": "#HSBC",
+    "body": "HSBC: A transaction of HKD 268.40 was made with your Visa card ending 1234 at PARKNSHOP on 15 Sep 2026 13:05 (HK time). If this was not you, call 2233 3322.",
+    "expect": {
+      "post": true,
+      "amountMinor": 26840,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "parknshop"
+    },
+    "notes": "HSBC HK card transaction alert (registered '#' SMS sender) sent at authorisation; the only real-time alert for the purchase, so it posts",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-HK-HSBC-FPS-1",
+    "country": "HK",
+    "ledger": "HKD",
+    "sender": "#HSBC",
+    "body": "HSBC: You have received HKD 500.00 from CHAN TAI MAN via FPS to your account ending 838 on 16 Sep 2026 20:11. Ref: FRN20260916PAYC0101234567",
+    "expect": {
+      "post": true,
+      "amountMinor": 50000,
+      "type": "income",
+      "transfer": true,
+      "merchant": "chan tai man"
+    },
+    "notes": "HSBC HK FPS (轉數快) incoming-payment alert with an FRN reference; P2P transfer received",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-HK-HANGSENG-1",
+    "country": "HK",
+    "ledger": "HKD",
+    "sender": "#HangSeng",
+    "body": "恒生銀行：閣下尾數1234之信用卡於17/09/2026 12:48在大家樂簽賬港幣52.00。如有查詢，請致電2998 8222。",
+    "expect": {
+      "post": true,
+      "amountMinor": 5200,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "大家樂"
+    },
+    "notes": "Hang Seng traditional-Chinese card spend alert (簽賬港幣) with DD/MM/YYYY date; card alert at purchase time posts",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-HK-BOCHK-1",
+    "country": "HK",
+    "ledger": "HKD",
+    "sender": "#BOCHK",
+    "body": "BOCHK: Your card ending 5678 was charged HKD 1,280.00 at FORTRESS on 18/09/2026 19:02. Please call 2853 8828 if you did not make this transaction.",
+    "expect": {
+      "post": true,
+      "amountMinor": 128000,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "fortress"
+    },
+    "notes": "BOCHK English card transaction alert with thousands grouping",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-HK-PAYME-1",
+    "country": "HK",
+    "ledger": "HKD",
+    "sender": "PayMe",
+    "body": "Payment of HK$85.00 to Kam Kee Cafe was successful.",
+    "expect": {
+      "post": true,
+      "amountMinor": 8500,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "kam kee"
+    },
+    "notes": "PayMe (HSBC wallet) push for a QR merchant payment using HK$",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-HK-HSBC-OTP-1",
+    "country": "HK",
+    "ledger": "HKD",
+    "sender": "#HSBC",
+    "body": "HSBC: Your one-time password is 482913 for the online transaction of HKD 3,280.00 at APPLE.COM/HK with card ending 1234. Never share this password with anyone.",
+    "expect": {
+      "post": false,
+      "why": "otp"
+    },
+    "notes": "HSBC HK 3-D Secure OTP naming amount and merchant; verification code only",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-HK-SMISH-1",
+    "country": "HK",
+    "ledger": "HKD",
+    "sender": "+852 6123 4567",
+    "body": "【中銀香港】閣下的戶口因安全理由已被暫停，請於24小時內透過 https://bochk-verify.cc 重新驗證，以免被收取港幣1,500.00手續費。",
+    "expect": {
+      "post": false,
+      "why": "phishing"
+    },
+    "notes": "HK bank-impersonation smishing from an unregistered mobile number (no '#' sender) with a lookalike link and a fee threat",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-HK-SCB-PROMO-1",
+    "country": "HK",
+    "ledger": "HKD",
+    "sender": "#StanChart",
+    "body": "StanChart: Spend HKD 8,000 or more with your Smart Card by 31/10/2026 to earn HKD 300 cashback! Register at sc.com/hk/smart. T&Cs apply. Reply STOP to unsubscribe.",
+    "expect": {
+      "post": false,
+      "why": "promotion"
+    },
+    "notes": "Standard Chartered HK spend-and-earn cashback promotion with amounts; no money moved",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-TW-CTBC-1",
+    "country": "TW",
+    "ledger": "TWD",
+    "sender": "中國信託",
+    "body": "中信卡友您好，您末四碼1234的卡片於09/15 12:34在全家便利商店消費新台幣1,280元，如有疑問請洽客服。",
+    "expect": {
+      "post": true,
+      "amountMinor": 128000,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "全家"
+    },
+    "notes": "CTBC credit-card spend SMS (末四碼…於MM/DD…在商店消費新台幣…元); Taiwan card spend alerts are sent at authorisation and are the purchase record; TWD has 2 minor digits",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-TW-CATHAY-1",
+    "country": "TW",
+    "ledger": "TWD",
+    "sender": "國泰世華",
+    "body": "國泰世華卡友您好，您的卡片末四碼5678於2026/09/16 18:22刷卡消費新台幣2,450元，商店名稱：家樂福。非本人消費請速洽客服。",
+    "expect": {
+      "post": true,
+      "amountMinor": 245000,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "家樂福"
+    },
+    "notes": "Cathay United Bank 刷卡消費 notice with 商店名稱 field and YYYY/MM/DD date",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-TW-ESUN-1",
+    "country": "TW",
+    "ledger": "TWD",
+    "sender": "玉山銀行",
+    "body": "【玉山銀行】您的玉山卡末四碼9012於09/17 20:15消費NT$890，消費地點：誠品書店。如非本人交易請撥客服。",
+    "expect": {
+      "post": true,
+      "amountMinor": 89000,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "誠品"
+    },
+    "notes": "E.SUN card spend SMS using NT$ with no decimals and a 消費地點 field",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-TW-LINEPAY-1",
+    "country": "TW",
+    "ledger": "TWD",
+    "sender": "LINE Pay",
+    "body": "付款完成\n商店：7-ELEVEN\n付款金額：NT$350\n付款方式：LINE Pay Money\n2026/09/18 08:20",
+    "expect": {
+      "post": true,
+      "amountMinor": 35000,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "7-eleven"
+    },
+    "notes": "LINE Pay Taiwan payment-complete (付款完成) notification with 商店/付款金額 rows",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-TW-CATHAY-SAL-1",
+    "country": "TW",
+    "ledger": "TWD",
+    "sender": "國泰世華",
+    "body": "國泰世華銀行通知：您的帳戶末四碼3456於09/30 08:05薪資轉入新台幣48,500元，可用餘額新台幣62,341元。",
+    "expect": {
+      "post": true,
+      "amountMinor": 4850000,
+      "type": "income",
+      "transfer": false
+    },
+    "notes": "Cathay United account notice for salary credit (薪資轉入) with a trailing balance; payroll, transfer false",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-TW-ESUN-OTP-1",
+    "country": "TW",
+    "ledger": "TWD",
+    "sender": "玉山銀行",
+    "body": "【玉山銀行】您的網路交易驗證碼為482913，交易金額NT$2,980，商店：MOMO購物網，10分鐘內有效，請勿告知他人。",
+    "expect": {
+      "post": false,
+      "why": "otp"
+    },
+    "notes": "E.SUN online-transaction 驗證碼 naming amount and merchant; OTP only",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-TW-ESUN-BAL-1",
+    "country": "TW",
+    "ledger": "TWD",
+    "sender": "玉山銀行",
+    "body": "【玉山銀行】您的帳戶末四碼3344截至09/30 23:59可用餘額為新台幣45,210元。",
+    "expect": {
+      "post": false,
+      "why": "balance"
+    },
+    "notes": "E.SUN month-end balance notice; balance only, nothing moved",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-TR-GARANTI-1",
+    "country": "TR",
+    "ledger": "TRY",
+    "sender": "GARANTI BBVA",
+    "body": "Garanti BBVA Bonus kartınızla 15.09.2026 12:34'te MIGROS KADIKOY işyerinden 245,50 TL tutarında alışveriş yapılmıştır. Kart no: **1234. Mesaj iptali için RET yazıp 3340'a gönderin.",
+    "expect": {
+      "post": true,
+      "amountMinor": 24550,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "migros"
+    },
+    "notes": "Garanti BBVA Bonus card purchase SMS with Turkish diacritics ('alışveriş yapılmıştır') and comma decimals",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-TR-AKBANK-1",
+    "country": "TR",
+    "ledger": "TRY",
+    "sender": "AKBANK",
+    "body": "Axess kartinizla 16/09/2026 13:15'te A101 YENI MAGAZACILIK isyerinden 89,90 TL alisveris yapilmistir. Kart: ****5678 Kalan limit: 14.210,10 TL",
+    "expect": {
+      "post": true,
+      "amountMinor": 8990,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "a101"
+    },
+    "notes": "Akbank Axess purchase SMS in ASCII-only Turkish ('alisveris yapilmistir') with a remaining-limit distractor",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-TR-ISBANK-1",
+    "country": "TR",
+    "ledger": "TRY",
+    "sender": "ISBANK",
+    "body": "Maximum kartiniz ile 17.09.2026 18:40'ta SHELL PETROL ISTANBUL'dan 1.250,00 TL harcama yapildi. Kullanilabilir limitiniz 18.750,00 TL. Bilgi: 0850 724 0 724",
+    "expect": {
+      "post": true,
+      "amountMinor": 125000,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "shell"
+    },
+    "notes": "Is Bankasi Maximum card spend SMS ('harcama yapildi') with dot thousands and a larger limit figure that must not be read as the amount",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-TR-ZIRAAT-1",
+    "country": "TR",
+    "ledger": "TRY",
+    "sender": "ZIRAATBANK",
+    "body": "Sayın Müşterimiz, 4567 sonlu hesabınıza 18.09.2026 14:05 tarihinde AHMET YILMAZ tarafından FAST ile 2.500,00 TL gelmiştir. Açıklama: Kira payı",
+    "expect": {
+      "post": true,
+      "amountMinor": 250000,
+      "type": "income",
+      "transfer": true,
+      "merchant": "ahmet"
+    },
+    "notes": "Ziraat Bankasi incoming FAST transfer ('hesabınıza … gelmiştir') from a person with Açıklama; P2P transfer received",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-TR-YAPIKREDI-1",
+    "country": "TR",
+    "ledger": "TRY",
+    "sender": "YAPIKREDI",
+    "body": "World kartinizla 19/09/2026 tarihinde TRENDYOL.COM'dan 649,99 TL tutarinda alisveris yapilmistir. Worldpuan: 3,25 TL. Yapi Kredi",
+    "expect": {
+      "post": true,
+      "amountMinor": 64999,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "trendyol"
+    },
+    "notes": "Yapi Kredi World card purchase SMS without diacritics, with a Worldpuan reward line that must not be read as the amount",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-TR-ENPARA-1",
+    "country": "TR",
+    "ledger": "TRY",
+    "sender": "ENPARA",
+    "body": "Enpara.com hesabınızdan 21.09.2026 10:12'de MEHMET DEMİR adlı alıcıya 3.000,00 TL EFT gönderilmiştir. Referans: 2609211012345",
+    "expect": {
+      "post": true,
+      "amountMinor": 300000,
+      "type": "expense",
+      "transfer": true,
+      "merchant": "mehmet"
+    },
+    "notes": "Enpara.com outgoing EFT notice to a named person; P2P transfer sent",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-TR-PAPARA-1",
+    "country": "TR",
+    "ledger": "TRY",
+    "sender": "Papara",
+    "body": "Papara Card ile STARBUCKS NISANTASI işyerinde ₺145,00 tutarında ödeme yaptın. Bakiyen: ₺1.230,45",
+    "expect": {
+      "post": true,
+      "amountMinor": 14500,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "starbucks"
+    },
+    "notes": "Papara app push in informal second person ('ödeme yaptın') using the ₺ sign and a trailing balance",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-TR-GARANTI-OTP-1",
+    "country": "TR",
+    "ledger": "TRY",
+    "sender": "GARANTI BBVA",
+    "body": "Garanti BBVA 3D Secure dogrulama kodunuz: 482913. TRENDYOL isyerindeki 1.299,00 TL tutarli islem icin kullaniniz. Bu kodu kimseyle paylasmayiniz.",
+    "expect": {
+      "post": false,
+      "why": "otp"
+    },
+    "notes": "Garanti BBVA 3D Secure verification code naming merchant and amount; OTP only",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-TR-AKBANK-DECLINE-1",
+    "country": "TR",
+    "ledger": "TRY",
+    "sender": "AKBANK",
+    "body": "Axess kartinizla 22/09/2026 20:41'de MEDIAMARKT isyerinden yapilmak istenen 12.499,00 TL tutarindaki islem yetersiz limit nedeniyle gerceklestirilememistir.",
+    "expect": {
+      "post": false,
+      "why": "declined"
+    },
+    "notes": "Akbank declined-transaction SMS (yetersiz limit … gerceklestirilememistir); nothing charged",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EAT-TR-SMISH-1",
+    "country": "TR",
+    "ledger": "TRY",
+    "sender": "+90 532 481 7730",
+    "body": "e-Devlet: Adiniza 2.500 TL tutarinda enflasyon destek odemesi tanimlanmistir. Odemenizi almak icin 24 saat icinde https://edevlet-destek-odeme.com adresinden IBAN bilgilerinizi giriniz.",
+    "expect": {
+      "post": false,
+      "why": "phishing"
+    },
+    "notes": "Widely reported Turkish 'e-Devlet destek ödemesi' smishing from a mobile number with a lookalike link; a fake credit claim",
+    "provenance": "synthetic"
+  }
+]

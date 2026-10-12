@@ -1,0 +1,17 @@
+{
+  "corpus": {},
+  "holdout": {},
+  "knownUnsafe": {
+    "_comment": "Ratchet: rows the shipping parser books wrongly today. A NEW unsafe row fails the gate; a listed row that is fixed must be removed from this list.",
+    "corpus": [
+      "AF-ZA-FNB-2/android-sms",
+      "AF-ZA-FNB-2/ios-history",
+      "NA-CA-TD-ETR-SENT-1/android-sms",
+      "UKANZ-GB-BARC-SAL-1/android-sms",
+      "UKANZ-GB-BARC-SAL-1/ios-history",
+      "UKANZ-GB-HFX-SAL-1/android-sms",
+      "UKANZ-GB-HFX-SAL-1/ios-history"
+    ],
+    "holdout": []
+  }
+}
