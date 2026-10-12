@@ -96,11 +96,15 @@ async function relayFetch(
 
 /**
  * What this build understands, sent on the capability read and on statement
- * uploads. A relay shows Excel and the specific PDF errors (damaged,
- * unsupported protection) only to builds that send it; older builds keep
- * the answers they always had.
+ * uploads. A relay shows Excel, the structured statement files (OFX, QIF,
+ * camt, MT940), the specific PDF errors (damaged, unsupported protection)
+ * and the statement checks (rows that do not add up to the stated balances,
+ * dates printed without a year) only to builds that send it; older builds
+ * keep the answers they always had.
  */
-export const IMPORT_FEATURES_HEADER = { 'x-wafra-import-features': 'xlsx,pdf-error-detail,structured' } as const;
+export const IMPORT_FEATURES_HEADER = {
+  'x-wafra-import-features': 'xlsx,pdf-error-detail,structured,statement-checks',
+} as const;
 
 /**
  * Structured statement files (OFX/QFX, QIF, ISO 20022 camt XML, MT940) and the

@@ -254,6 +254,32 @@ ok('both languages define the filing progress line',
   (copySource.match(/acceptedFiling:/g) || []).length === 2,
   'a missing Arabic string would fall through to an undefined status');
 
+// A parse that provably does not add up, and rows printed without a year, are
+// refused by the Worker (to builds that send `statement-checks`). The client
+// has to recognise both refusals rather than fall through to "unexpected":
+// nothing was imported, and the user is told what to download instead.
+for (const code of ['statement_does_not_reconcile', 'dates_without_year']) {
+  ok(`${code} is a known refusal, not an unexpected error`, pdfImportError(422, { error: code }).code === code);
+}
+for (const [code, key] of [['statement_does_not_reconcile', 'errReconcile'], ['dates_without_year', 'errDatesNoYear']]) {
+  ok(`${code} has copy in both languages and is shown by the statement screen`,
+    (copySource.match(new RegExp(`${key}:`, 'g')) || []).length === 2 &&
+      new RegExp(`value\\.code === '${code}'\\) return copy\\.${key}`).test(surface));
+}
+ok('this build asks for the statement checks on every statement request',
+  /'x-wafra-import-features': 'xlsx,pdf-error-detail,structured,statement-checks'/.test(transport));
+// The layout fingerprint a Worker returns with an unsupported statement is
+// carried across the client error boundary, not dropped there.
+const unsupportedLayout = pdfImportError(422, {
+  error: 'unsupported_statement_format',
+  layout: { headers: ['transaction date'], shapes: [{ shape: 'DATE WORD+ MONEY', count: 3 }] },
+});
+ok('the layout survives the client error boundary',
+  unsupportedLayout.code === 'unsupported_statement_format' &&
+    JSON.stringify(unsupportedLayout.layout) ===
+      '{"headers":["transaction date"],"shapes":[{"shape":"DATE WORD+ MONEY","count":3}]}');
+ok('an error with no layout still constructs', pdfImportError(429, { error: 'rate_limited' }).layout === undefined);
+
 ok('one failed file no longer aborts the batch: every file gets its own result and the loop never rethrows',
   uploadLoop.length > 0 && !/throw e;/.test(uploadLoop) && /fileResults\.push\(/.test(uploadLoop) &&
     /copy\.fileFailed/.test(surface) && /copy\.fileImported/.test(surface));
