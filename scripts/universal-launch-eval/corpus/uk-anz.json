@@ -424,7 +424,7 @@
     "country": "GB",
     "ledger": "GBP",
     "sender": "Nationwide",
-    "body": "Nationwide: A Direct Debit of £38.99 to SKY UK LIMITED is due to be paid from your FlexDirect account ending 7731 on 15/10/26. Make sure you have enough money in your account.",
+    "body": "Nationwide: A Direct Debit of £38.99 to SKY UK LIMITED is due to be paid from your FlexDirect account ending 7731 on 09/10/26. Make sure you have enough money in your account.",
     "expect": { "post": false, "why": "scheduled" },
     "notes": "Nationwide upcoming Direct Debit warning (due on a future date); not yet collected",
     "provenance": "synthetic"
@@ -434,7 +434,7 @@
     "country": "GB",
     "ledger": "GBP",
     "sender": "Barclaycard",
-    "body": "Barclaycard: Your minimum payment of £25.00 is due on 18/10/26. Statement balance £612.40. Pay easily in the Barclaycard app.",
+    "body": "Barclaycard: Your minimum payment of £25.00 is due on 10/10/26. Statement balance £612.40. Pay easily in the Barclaycard app.",
     "expect": { "post": false, "why": "reminder" },
     "notes": "Barclaycard credit card payment-due reminder with minimum payment and statement balance",
     "provenance": "synthetic"
@@ -444,7 +444,7 @@
     "country": "GB",
     "ledger": "GBP",
     "sender": "+447700900123",
-    "body": "HMRC: You are eligible for a tax refund of £284.62. Please submit your claim before 14/10/2026 at: hmrc-taxrefund-claim.co.uk/verify",
+    "body": "HMRC: You are eligible for a tax refund of £284.62. Please submit your claim before 11/10/2026 at: hmrc-taxrefund-claim.co.uk/verify",
     "expect": { "post": false, "why": "phishing" },
     "notes": "Classic UK tax-refund smishing from a mobile number with a look-alike domain; no money moved",
     "provenance": "synthetic"
@@ -504,7 +504,7 @@
     "country": "IE",
     "ledger": "EUR",
     "sender": "PTSB",
-    "body": "PTSB: A new SEPA Direct Debit mandate from VIRGIN MEDIA IRELAND has been set up on your account ending 3390. First collection of €65.00 is due on 20/10/2026.",
+    "body": "PTSB: A new SEPA Direct Debit mandate from VIRGIN MEDIA IRELAND has been set up on your account ending 3390. First collection of €65.00 is due on 09/10/2026.",
     "expect": { "post": false, "why": "mandate-setup" },
     "notes": "PTSB new SEPA mandate notice with a future first collection; nothing collected yet",
     "provenance": "synthetic"
