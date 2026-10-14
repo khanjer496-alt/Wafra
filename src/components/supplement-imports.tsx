@@ -332,6 +332,7 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
     // it was sent (too long, or a line break), so the user's fix is the same.
     if (value.code === 'pdf_password_incorrect' || value.code === 'pdf_password_required') return copy.passwordWrong;
     if (value.code === 'unsupported_statement_format') return copy.errFormat;
+    if (value.code === 'statement_does_not_reconcile') return copy.errReconcile;
     if (value.code === 'ambiguous_card_signs') return copy.errCardSigns;
     if (value.code === 'ambiguous_dates') return copy.errDates;
     if (value.code === 'statement_options_conflict') return copy.errOptionsConflict;
