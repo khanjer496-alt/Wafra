@@ -1,0 +1,12 @@
+{
+  "corpus": {
+    "android-sms": 0.3130434782608696,
+    "ios-history": 0.2753623188405797
+  },
+  "holdout": {},
+  "knownUnsafe": {
+    "_comment": "Ratchet: no synthetic row may newly book unsafe money. Fixed rows cannot be exempted again.",
+    "corpus": [],
+    "holdout": []
+  }
+}

@@ -1,6 +1,7 @@
-import { inspectAlertDraft, type AlertDraft, type MoneyCandidate, type SourceSpan } from '@/lib/alert-draft';
+import { inspectAlertDraft, type AlertDraft, type CurrencyAliasMap, type MoneyCandidate, type SourceSpan } from '@/lib/alert-draft';
 import { alertMarketPack } from '@/lib/alert-market-packs';
 import { CURRENCY_SYMBOL_CANDIDATES } from '@/lib/currency-metadata';
+import { extractUniversalFields } from '@/lib/universal-fields';
 import {
   missingUniversalField,
   type UniversalField,
@@ -23,16 +24,30 @@ export interface UniversalMoneyExtraction {
   transactionSpan: SourceSpan | null;
 }
 
+// Literal source units, not aliases inferred from the person's ledger locale.
+// Public Tanzanian wallet receipts use Tsh for TZS, alongside separately
+// labelled transfer principal, charges and balance fields (issue #524).
+const SOURCE_UNIT_ALIASES: CurrencyAliasMap = {
+  KSh: CURRENCY_SYMBOL_CANDIDATES.KSh,
+  TSh: ['TZS'],
+};
+
+const sourceCurrencyAliases = (context: UniversalParseContext): CurrencyAliasMap => {
+  const market = context.moneyMarket ?? context.market;
+  return { ...SOURCE_UNIT_ALIASES, ...(market ? alertMarketPack(market).currencyAliases : {}),
+    ...context.currencyAliases };
+};
+
 // Long labels consume their component words: "minimum payment due" must not
 // leave a second, stronger-looking "payment" or "amount due" match behind.
 const LABEL = new RegExp([
-  String.raw`(?<minimum>\bpay\s+min\.|\bmin(?:imum)?\.?\s+(?:(?:amount|amt|payment)\s+)?due\b|\bminimum\s+payment\b|\bpago\s+mínimo\b|(?<![\p{L}\p{M}\p{N}_])(?:paiement\s+minimum|न्यूनतम\s+देय\s+राशि)(?![\p{L}\p{M}\p{N}_])|الحد\s+(?:الادنى|الأدنى)\s+(?:المستحق|للدفع|للسداد))`,
+  String.raw`(?<minimum>\bpay\s+min\.|\bmin(?:imum)?(?:\s+|\.\s*)(?:(?:amount|amt|payment)\s+)?due\b|\bminimum\s+payment\b|\bpago\s+mínimo\b|(?<![\p{L}\p{M}\p{N}_])(?:paiement\s+minimum|न्यूनतम\s+देय\s+राशि)(?![\p{L}\p{M}\p{N}_])|الحد\s+(?:الادنى|الأدنى)\s+(?:المستحق|للدفع|للسداد))`,
   String.raw`(?<total>\b(?:statement\s+(?:total|balance|amount)|closing\s+balance|total\s+(?:(?:amount|amt)\s+)?due(?:\s+to\s+avoid\s+fin\.\s+charges)?|total\s+outstanding(?:\s+balance)?|new\s+balance|saldo\s+total\s+del\s+estado)\b|(?<![\p{L}\p{M}\p{N}_])(?:total\s+à\s+payer|कुल\s+देय\s+राशि)(?![\p{L}\p{M}\p{N}_])|(?:اجمالي|إجمالي)\s+(?:المبلغ\s+المستحق|مبلغ\s+الكشف))`,
   String.raw`(?<limit>\b(?:(?:available|avl|avail)\.?\s+(?:credit|cr\.?)\s+limit|(?:available|credit|avl|avail)\.?\s+(?:limit|lmt)|available\s+credit|credit\s+available)\b|الحد\s+(?:المتاح|الائتماني))`,
   String.raw`(?<balance>\b(?:(?:available|current|avl|avail)\.?\s+)?bal(?:ance)?\b|\b(?:solde(?:\s+disponible)?|kontostand|saldo|(?:kullanılabilir\s+)?bakiye)\b|الرصيد(?:\s+(?:الحالي|المتاح))?|(?<![\p{L}\p{M}\p{N}_])رصيد\s+حسابك(?:\s+(?:الحالي|المتاح))?(?![\p{L}\p{M}\p{N}_])|(?:उपलब्ध\s+)?शेष\s+राशि|(?:利用可能)?残高|(?:可用)?余额)`,
   String.raw`(?<bill>\b(?:bill(?:\s+amount)?\s+(?:due|of)|amount\s+due|payment\s+due|bill\s+amount|bill\s+for|montant\s+à\s+payer|importo\s+da\s+pagare)\b|مبلغ\s+الفاتورة|المبلغ\s+المستحق|देय\s+राशि)`,
-  String.raw`(?<fee>\b(?:fee|fees|commission|service\s+charge)\b|رسوم|عمولة)`,
-  String.raw`(?<transaction>\b(?:virement(?:\s+reçu)?|pix(?:\s+(?:enviado|recebido))?|transaksi|havale|bizum|cargo\s+de|consumo\s+de|na\s+kwot[eę]|lastschrift(?:\s+über)?|payment\s+made\s+for|you\s+have\s+(?:sent|received)|(?:you\s+)?made\s+an?|charge\s+(?:of|made)|transaction(?!\s+(?:id|no|number|ref|reference|date|time|alert)\b)|used\s+for|charged\s+for|withdrew|purchase|purchased|spend|spent|paid|charged|debited|credited|received|sent|withdrawn|withdrawal|deposited|deposit|refund|reversal|transfer(?:red)?|payment|amount|paiement|débité|crédité|remboursement|kartenzahlung|abonnementzahlung|belastet|gutgeschrieben|compra|reembolso|abonado|pagamento|pinbetaling|pasbetaling|kaartbetaling|betaling)\b|(?<![\p{L}\p{N}])(?:alışveriş(?:iniz)?|ödemeniz|tutarında)(?![\p{L}\p{N}])|شراء|خصم|إيداع|ايداع|تحويل|استرداد|دفع|भुगतान|रिफंड\s+राशि|(?<![\p{L}\p{M}\p{N}_])(?:überweisung|overboeking|acquisto|rimborso|accreditato|cargados?|debitados?|रिफंड)(?![\p{L}\p{M}\p{N}_])|(?:利用)?金額|金额|退回|退款|引き落とされました|扣款|승인|डेबिट|क्रेडिट)`,
+  String.raw`(?<fee>\b(?:total\s+charges|fee|fees|commission|service\s+charge)\b|رسوم|عمولة)`,
+  String.raw`(?<transaction>\b(?:virement(?:\s+reçu)?|pix(?:\s+(?:enviado|recebido))?|transaksi|havale|bizum|cargo\s+de|consumo\s+de|na\s+kwot[eę]|lastschrift(?:\s+über)?|payment\s+made\s+for|you\s+have\s+(?:sent|received)|(?:you\s+)?made\s+an?|charge\s+(?:of|made)|transaction(?!\s+(?:id|no|number|ref|reference|date|time|alert)\b)|used\s+for|charged\s+for|withdrew|purchase|purchased|spend|spent|paid|charged|debited|credited|received|sent|withdrawn|withdrawal|cash\s+out|deposited|deposit|refund|reversal|transfer(?:red)?|payment|amount|amt|amnt|paiement|débité|crédité|remboursement|kartenzahlung|abonnementzahlung|belastet|gutgeschrieben|compra|reembolso|abonado|pagamento|pinbetaling|pasbetaling|kaartbetaling|betaling)\b|(?<![\p{L}\p{N}])(?:alışveriş(?:iniz)?|ödemeniz|tutarında|مبلغ)(?![\p{L}\p{N}])|شراء|خصم|إيداع|ايداع|تحويل|استرداد|دفع|भुगतान|रिफंड\s+राशि|(?<![\p{L}\p{M}\p{N}_])(?:überweisung|overboeking|acquisto|rimborso|accreditato|cargados?|debitados?|रिफंड)(?![\p{L}\p{M}\p{N}_])|(?:利用)?金額|金额|退回|退款|引き落とされました|扣款|승인|डेबिट|क्रेडिट)`,
 ].join('|'), 'giu');
 
 interface OwnedCandidate {
@@ -129,6 +144,55 @@ function separators(text: string): number[] {
     .map((match) => match.index!);
 }
 
+/**
+ * Two source-backed statement sentences without ordinary total/minimum labels.
+ * Own only the existing exact money candidates; no number, currency, date or
+ * account is inferred. Bare total-of/minimum-of may be rewards, not debt.
+ */
+function contextualStatementRoles(
+  draft: AlertDraft,
+  roleText: string,
+): Map<number, { role: UniversalMoneyRole; labelStart: number }> {
+  const roles = new Map<number, { role: UniversalMoneyRole; labelStart: number }>();
+  const currencies = (candidate: MoneyCandidate) =>
+    [...new Set(candidate.interpretations.map(value => value.currency))].sort().join('|');
+  const statementContext = (prefix: string) =>
+    /\bstatement\b/iu.test(prefix) &&
+    /\b(?:(?:credit|covered|charge)\s+card|card\s+statement)\b/iu.test(prefix);
+  for (let index = 0; index < draft.candidates.length; index++) {
+    const first = draft.candidates[index];
+    const prefix = roleText.slice(0, first.span.start);
+    const totalLabel = prefix.match(/\btotal\s+of\s*$/iu);
+    const second = draft.candidates[index + 1];
+    if (totalLabel && second && statementContext(prefix)) {
+      const between = roleText.slice(first.span.end, second.span.start);
+      const minimumLabel = between.match(/^\s*(?:,|and|&)\s*(minimum\s+of)\s*$/iu);
+      const after = roleText.slice(second.span.end, draft.candidates[index + 2]?.span.start);
+      const sameCurrency = currencies(first) !== '' && currencies(first) === currencies(second);
+      if (minimumLabel && sameCurrency && /^\s+(?:is|are)\s+due\s+(?:by|on)\b/iu.test(after)) {
+        roles.set(first.span.start, { role: 'statement-total', labelStart: totalLabel.index! });
+        roles.set(second.span.start, { role: 'minimum-due',
+          labelStart: first.span.end + between.indexOf(minimumLabel[1]) });
+      }
+    }
+    const generatedHeader = prefix.match(
+      /\bstatement\s+for\s+(?:your\s+)?(?:[A-Za-z]+\s+){0,3}(?:credit|covered|charge)\s+card\s+[Xx*•·\d-]{4,24}\s+of\s*$/iu,
+    );
+    if (!generatedHeader || !/^\s+has\s+been\s+(?:generated|issued)\b/iu.test(
+      roleText.slice(first.span.end, draft.candidates[index + 1]?.span.start),
+    )) continue;
+    // Reuse the field resolver, including masked PANs and conflicting cards.
+    // An unrelated account or a BIN-only prefix cannot bind this debt.
+    const instrument = extractUniversalFields(roleText, {}, draft.candidates.map(value => value.span)).instrument;
+    const owner = extractUniversalFields(generatedHeader[0]).instrument;
+    if (instrument.evidence !== 'explicit' || owner.evidence !== 'explicit' ||
+        instrument.value?.kind !== 'card' || !instrument.value.last4 ||
+        instrument.value.last4 !== owner.value?.last4) continue;
+    roles.set(first.span.start, { role: 'statement-total', labelStart: generatedHeader.index! });
+  }
+  return roles;
+}
+
 function ownCandidates(
   draft: AlertDraft,
   excludedRoleSpans: readonly SourceSpan[],
@@ -142,6 +206,7 @@ function ownCandidates(
     roleText = roleText.slice(0, span.start) + ' '.repeat(span.end - span.start) + roleText.slice(span.end);
   }
   const owned: OwnedCandidate[] = [];
+  const statementRoles = contextualStatementRoles(draft, roleText);
   draft.candidates.forEach((candidate, index) => {
     const previousEnd = draft.candidates[index - 1]?.span.end ?? 0;
     const nextStart = draft.candidates[index + 1]?.span.start ?? text.length;
@@ -185,6 +250,11 @@ function ownCandidates(
       const marker = roleText.slice(prefixStart, candidate.span.start).match(AGGREGATE_PREFIX);
       if (marker) labelStart = prefixStart + marker.index!;
     }
+    const statementRole = statementRoles.get(candidate.span.start);
+    if (statementRole && !aggregate) {
+      role = statementRole.role;
+      labelStart = statementRole.labelStart;
+    }
     owned.push({ candidate, role, labelStart, aggregate,
       span: { start: previousEnd > 0 ? labelStart ?? prefixStart : prefixStart, end: suffixEnd } });
   });
@@ -211,6 +281,13 @@ function completeNumericToken(candidate: MoneyCandidate, text: string): boolean 
   const end = start + match[0].length;
   const before = text[start - 1] ?? '';
   const after = text[end] ?? '';
+  // Alias suffixes must not recover a numeric tail from an alphanumeric ID.
+  // The existing Chinese card layout glues its labelled principal to 元:
+  // ",金额58.00元". Admit that field boundary and literal unit only, never an
+  // arbitrary CJK letter or a reference such as "AB金额58.00元".
+  const labelledYuan = text.slice(end, candidate.span.end).trim() === '元' &&
+    /(?:^|[,，;；。！？\n])\s*金额\s*[:：]?\s*$/u.test(text.slice(0, start));
+  if (start === candidate.span.start && /[\p{L}\p{N}_]/u.test(before) && !labelledYuan) return false;
   if (/[xX*•·/\\]/.test(before) || /[xX*•·/\\]/.test(after)) return false;
   // A suffix match must not recover the visible tail of a masked or malformed token.
   if (start === candidate.span.start && /[.,٫'’+\-]/.test(before)) return false;
@@ -254,10 +331,11 @@ function selectFields(rows: UniversalMoneyObservation[]): UniversalField<Univers
 /** Same draft contract and source coordinates, with bounded evidenced tokens. */
 export function inspectUniversalMoneyDraft(source: string, context: UniversalParseContext = {}): AlertDraft {
   // Existing unique KSh metadata, matched case-insensitively by the alias path.
-  const currencyAliases = { KSh: CURRENCY_SYMBOL_CANDIDATES.KSh, ...context.currencyAliases };
-  // A routed market's own three-decimal currency (KW, BH, OM) reads "12.345"
+  const currencyAliases = sourceCurrencyAliases(context);
+  // A routed market's own three-decimal currency (KW, BH, OM, JO) reads "12.345"
   // as a decimal; nothing changes for an unrouted alert or another currency.
-  const dotDecimalCurrencies = context.market ? alertMarketPack(context.market).dotDecimalCurrencies : undefined;
+  const moneyMarket = context.moneyMarket ?? context.market;
+  const dotDecimalCurrencies = moneyMarket ? alertMarketPack(moneyMarket).dotDecimalCurrencies : undefined;
   const draft = inspectAlertDraft(source, { currencyAliases, dotDecimalCurrencies });
   if (source.length > 4096) return draft;
   const candidates = [...draft.candidates];
@@ -303,12 +381,12 @@ export function extractUniversalMoney(
   // Safaricom excerpt spells it Ksh; the alias collector preserves source spans
   // while matching this documented symbol case-insensitively. No ledger locale
   // or new currency-symbol interpretation is introduced.
-  const currencyAliases = { KSh: CURRENCY_SYMBOL_CANDIDATES.KSh, ...context.currencyAliases };
+  const currencyAliases = sourceCurrencyAliases(context);
   const draft = inspectUniversalMoneyDraft(source, context);
   const candidates = draft.candidates.filter((candidate) =>
     // The alias collector accepts suffixes; identifiers such as AB250Ksh are
     // not monetary tokens. Keep the same leading boundary as global symbols.
-    !(/ksh$/i.test(candidate.sourceText) && candidate.span.start > 0 &&
+    !(/(?:ksh|tsh)$/i.test(candidate.sourceText) && candidate.span.start > 0 &&
       /[\p{L}\p{N}]/u.test(draft.normalizedText[candidate.span.start - 1])) &&
     !excludedMoneySpans.some((span) =>
     Number.isInteger(span.start) && Number.isInteger(span.end) &&

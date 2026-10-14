@@ -2370,11 +2370,41 @@ ok('the spoken label matches the visible repayment exception and direction',
     // Per-user learned formats ground the confirmed amount on a draft money
     // token; they store slot types and anchors only, never message text.
     'learned-alert-formats.ts',
+    // Source selection is read-only and cannot write the ledger or call a provider.
+    'ai-alert-source-contract.ts',
+    'private-alert-formats.ts',
+    'private-alert-format-review.ts',
+    'alert-source-ownership.ts',
+    // Review routing normalizes shaped letters; it cannot inspect raw drafts.
+    'launch-alert-parser.ts',
   ]);
   ok('drafts reach only the reviewed extraction modules and isolated research redactor',
     alertConsumers.length === reviewDraftModules.size &&
       alertConsumers.every((file) => reviewDraftModules.has(path.basename(file))),
     alertConsumers.join(' | '));
+  const routingSource = read('src/lib/launch-alert-parser.ts');
+  const ts = require('typescript');
+  const usesOnlyDraftNormalizer = (source) => {
+    const ast = ts.createSourceFile('routing.ts', source, ts.ScriptTarget.Latest, true);
+    const fromDraft = (node) => node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier) &&
+      /(?:^|\/)alert-draft(?:\.ts)?$/.test(node.moduleSpecifier.text);
+    const imports = ast.statements.filter((node) => ts.isImportDeclaration(node) && fromDraft(node));
+    const exports = ast.statements.filter((node) => ts.isExportDeclaration(node) && fromDraft(node));
+    const clause = imports[0]?.importClause;
+    const bindings = clause?.namedBindings;
+    return imports.length === 1 && exports.length === 0 && clause && !clause.name && bindings &&
+      ts.isNamedImports(bindings) && bindings.elements.length === 1 &&
+      bindings.elements[0].name.text === 'normalizeAlertText' && !bindings.elements[0].propertyName &&
+      !/\binspectAlertDraft\b/.test(source) &&
+      !/(?:require|import)\(\s*['"][^'"]*alert-draft['"]/.test(source);
+  };
+  ok('Review routing imports only the length-preserving draft normalizer',
+    usesOnlyDraftNormalizer(routingSource));
+  ok('the routing dependency boundary refuses namespace, default and extra draft access',
+    ["import * as draft from '@/lib/alert-draft';", "import draft from '@/lib/alert-draft';",
+      "import { inspectAlertDraft } from '@/lib/alert-draft';",
+      "export { inspectAlertDraft } from '@/lib/alert-draft';", "import '@/lib/alert-draft';"]
+      .every((extra) => !usesOnlyDraftNormalizer(routingSource + '\n' + extra)));
   ok('the Gulf fallback can reach only the explicit encrypted review path',
     !/(?:from\s+|require\(\s*|import\(\s*)['"][^'"]*(?:store|import-plan|ledger-import)['"]/.test(
       launchFallback,
@@ -2388,6 +2418,10 @@ ok('the spoken label matches the visible repayment exception and direction',
     ) && /rawMessages: false/.test(parserResearchContract) &&
       /timestamps: false/.test(parserResearchContract));
   const extraMetadataConsumers = new Set([
+    // The native preview validates source units; its preference snapshot
+    // validates the selected exponent without accessing ledger rows.
+    'ios-background-alert-parser.ts',
+    'ios-native-parser-context.ts',
     'ledger-currency-sheet.tsx',
     'launch-alert-parser.ts',
     'universal-money.ts',
@@ -2407,6 +2441,7 @@ ok('the spoken label matches the visible repayment exception and direction',
     // Gulf-neighbour posting checks the launch grammar's original amount is
     // at its own currency's exponent (KWD/BHD/OMR three, QAR two).
     'gulf-neighbour-alerts.ts',
+    'private-alert-formats.ts',
   ]);
   ok('ISO metadata is confined to currency routing, exact money and transfer evidence validation',
     metadataConsumers.length === extraMetadataConsumers.size && metadataConsumers.every((file) => extraMetadataConsumers.has(path.basename(file))),
@@ -2415,7 +2450,7 @@ ok('the spoken label matches the visible repayment exception and direction',
   // certification reads them only to refuse a market-inconsistent currency;
   // the money extractor reads only a routed pack's own transaction labels.
   // None may write the ledger or reach the network.
-  const marketReviewModules = new Set(['universal-parser.ts', 'universal-template-certification.ts', 'universal-money.ts']);
+  const marketReviewModules = new Set(['universal-parser.ts', 'universal-template-certification.ts', 'universal-money.ts', 'launch-alert-parser.ts']);
   const directWriterOrTransport = /(?:fetch\s*\(|XMLHttpRequest|WebSocket|(?:from\s+|require\(\s*|import\(\s*)['"][^'"]*(?:store|import-plan|ledger-import))/;
   ok('global review semantics have no direct ledger writer or network transport',
     marketReviewConsumers.length === marketReviewModules.size &&

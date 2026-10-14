@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const environmentIndex = process.argv.indexOf('--environment');
@@ -27,6 +28,16 @@ const expo = app.expo ?? {};
 const projectId = expo.extra?.eas?.projectId;
 const expectedUrl = `https://u.expo.dev/${projectId}`;
 const fail = (message) => failures.push(message);
+
+// The native parser source hash and resources must match the foreground parser
+// before deriving a fingerprint or publishing an OTA update. Read-only check:
+// regeneration belongs to the native build/source preparation route.
+const nativeParserCheck = spawnSync(process.execPath,
+  [path.join(root, 'scripts/generate-ios-background-parser.cjs'), '--check'],
+  { cwd: root, encoding: 'utf8' });
+if (nativeParserCheck.status !== 0) {
+  fail(nativeParserCheck.stderr.trim() || 'Native parser resource freshness check failed.');
+}
 
 if (!pkg.dependencies?.['expo-updates']?.startsWith('~55.')) {
   fail('expo-updates must be installed at the Expo SDK 55-compatible version.');

@@ -390,6 +390,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Generate and check the shipping iOS background parser
+        if: inputs.submit_build_id == ''
+        run: |
+          node scripts/generate-ios-background-parser.cjs
+          node scripts/generate-ios-background-parser.cjs --check
+
       - name: Validate OTA-enabled store build configuration
         if: inputs.submit_build_id == '' && inputs.profile != 'preview'
         run: npm run update:check
@@ -913,6 +919,11 @@ jobs:
           fastlane --version
           pod --version
 
+      - name: Generate and check the shipping iOS background parser
+        run: |
+          node scripts/generate-ios-background-parser.cjs
+          node scripts/generate-ios-background-parser.cjs --check
+
       - name: Prepare existing Apple credentials without printing them
         env:
           ASC_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
@@ -965,6 +976,7 @@ jobs:
           security cms -D -i "$APP/embedded.mobileprovision" > "$RUNNER_TEMP/wafra-profile.plist"
           bash scripts/test/native-history-store.sh --verify-app-intents-metadata "$APP/Metadata.appintents/extract.actionsdata"
           bash scripts/test/native-history-store.sh --verify-history-resources "$APP" "$APP/WafraMessageHistoryResources.bundle"
+          node scripts/generate-ios-background-parser.cjs --verify-resource-directory "$APP/WafraLiveCaptureResources.bundle"
           if [ "${{ inputs.profile }}" = history-beta ] && node -e 'process.exit(require("./eas.json").build["history-beta"].env.WAFRA_PAGED_HISTORY_BETA === "1" ? 0 : 1)'; then
             node scripts/check-ios-paging-metadata.mjs "$APP/Metadata.appintents/extract.actionsdata"
           fi
@@ -985,13 +997,15 @@ jobs:
           actions=json.loads((app/'Metadata.appintents/extract.actionsdata').read_text())['actions']
           assert 'StageWafraLiveMessageIntent' in actions and 'RecordWafraCaptureSetupProofIntent' in actions
           assert 'ProbeWafraAutomationInputIntent' not in actions
+          parser_meta=json.loads((app/'WafraLiveCaptureResources.bundle/WafraBackgroundParser.meta.json').read_text())
           number=str(info['CFBundleVersion']); version=info['CFBundleShortVersionString']
           source=temp/'Wafra-local.ipa'; target=pathlib.Path('artifacts/ios-local')/f'Wafra-{version}-{number}.ipa'
           shutil.copyfile(source,target)
           report={'sourceCommit':os.environ['SOURCE_COMMIT'],'buildHost':'github-macos','profile':os.environ.get('BUILD_PROFILE','history-beta'),
               'version':version,'buildNumber':number,'bundleIdentifier':info['CFBundleIdentifier'],
               'sha256':hashlib.file_digest(target.open('rb'),'sha256').hexdigest(),'bytes':target.stat().st_size,
-              'intentCount':len(actions),'storeSigningVerified':True,'physicalCaptureVerified':False}
+              'intentCount':len(actions),'storeSigningVerified':True,'physicalCaptureVerified':False,
+              'nativeParser':{key:parser_meta[key] for key in ('parserVersion','sourceHash','bundleSha256','moduleCount')}}
           pathlib.Path('artifacts/ios-local/verification.json').write_text(json.dumps(report,indent=2)+'\n')
           with open(os.environ['GITHUB_OUTPUT'],'a') as out:
               out.write('build_number='+number+'\n'); out.write('ipa_path='+str(target)+'\n')

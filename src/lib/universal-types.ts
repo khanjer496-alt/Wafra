@@ -32,6 +32,8 @@ export interface UniversalInstrument {
 export interface UniversalParseContext {
   /** An existing language/market pack assists interpretation; it is not required. */
   market?: UniversalMarket;
+  /** Routed source money conventions only; does not narrow semantic language packs. */
+  moneyMarket?: UniversalMarket;
   sender?: string;
   /**
    * Supply only a documented source convention (a routed institution's own

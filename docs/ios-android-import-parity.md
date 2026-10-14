@@ -23,12 +23,10 @@ the shared import planner and ledger reducer, alongside Android `scanInbox`.
   planning uses the same proven money system without changing the user's device
   preference. A Saudi import no longer loses issuer identity because the initial
   parser preference was UAE, or vice versa.
-- Known worldwide SMS institutions use the same review-first handling as Android
-  inbox capture, including when they quote AED. A currency token is not evidence
-  that a foreign issuer is a supported regional bank. Unsupported automatic
-  postings remain available through the existing source-free Review flow.
-  Since the best-effort policy (`src/lib/best-effort-autopost.ts`), History
-  import and Android inbox/notification capture may add such an alert when
+- A currency token is not evidence that a foreign issuer is a supported
+  regional bank, including when it quotes AED. History import and Android
+  inbox/notification capture may auto-add an unverified format under the
+  default best-effort setting (`src/lib/best-effort-autopost.ts`) when
   the policy proves a completed movement in the pinned ledger currency; the row
   is marked "Auto-added — check". iOS live capture deliberately stays
   review-only for unverified formats. The policy's unverified-sender rule
@@ -93,3 +91,34 @@ user's saved dataset still require an updated iPhone build and device validation
 The Android 317 artifact is unchanged. These checks were completed before the
 follow-up iOS release; build and distribution evidence must identify its exact
 source revision separately.
+
+
+## Live capture boundary — 14 October 2026
+
+The guided iOS Message trigger is independent of country and ledger currency.
+It uses one space, so only messages containing a space match; it is not proof
+of every language or format. Per-currency triggers were withdrawn because they
+would miss foreign-currency alerts. Source checks retain foreign-currency Review
+facts and true three-decimal JOD units without changing the ledger preference.
+
+The iOS native queue refuses recognized credentials before storage, using the
+Android SMS credential policy with grouped/Unicode codes and localized labels.
+Explicit first-person conversation cannot produce a native preview or enter the
+local parser's AI/private-format enrichment. Unfamiliar financial messages keep
+their existing parser or Review route. These guards do not prove complete bank
+classification or worldwide automatic posting.
+
+Android can run the parser in a bounded background JS task. The approved iOS
+integration now evaluates the shared parser in isolated JavaScriptCore for a
+guarded source-currency notification or Review caption after queueing input.
+It does not post ledger rows: the full ledger pipeline still runs when Wafra
+drains the queue while active or on resume. Apple controls the
+Shortcuts automation banner; filtering after delivery cannot prevent that
+system trigger notification. Run Immediately and Notify When Run off where
+offered remain user settings. Quiet pre-iOS-27 execution has not been verified
+on an affected physical phone. See the [current candidate evidence](test-evidence/2026-10-12-parser-launch-candidate.md).
+
+
+The integration preserves nullable country/parser-pack/ledger preferences,
+exact receipt bytes and current consent/entitlement/alert gates. Host and
+simulator checks are recorded in the [integration evidence](test-evidence/2026-10-14-ios-native-parser-integration.md); signed app and physical iPhone execution remain separate gates.

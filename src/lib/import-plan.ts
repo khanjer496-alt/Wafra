@@ -53,7 +53,7 @@ import {
   type NonPostingReason,
   type ParsedSms,
 } from '@/lib/sms-parser';
-import { bestEffortObservationKey } from '@/lib/best-effort-autopost';
+import { bestEffortCardPaymentObservationKey, bestEffortObservationKey } from '@/lib/best-effort-autopost';
 import type { Account, AppState, Bill, CaptureInstrument, CaptureSource, CardDue, ImportBatchInput, Transaction, TxHealUpdate } from '@/lib/types';
 
 
@@ -1633,6 +1633,19 @@ function buildImportPlanInMarket(
       if ((undoKey && undoneBestEffort.has(undoKey)) ||
         (p.bestEffort && undoneBestEffort.has(bestEffortObservationKey(p.smsTs, p.currency, p.amountFils) ?? ''))) continue;
     }
+    if (undoneBestEffort.size > 0 && p.kind === 'cardPayment') {
+      // Distinct provider/GUID identities are distinct payments even when
+      // their card, amount and clock match. Generic t/s keys may belong to
+      // ordinary spending and are never settlement identity.
+      if (p.sourceEventId) {
+        const exact = smsKeyOf(p);
+        if (exact && undoneBestEffort.has(exact)) continue;
+      } else if (p.bestEffort) {
+        const scoped = bestEffortCardPaymentObservationKey({ ts: p.smsTs, amountFils: p.amountFils,
+          captureInstrument: captureInstrumentOf(p), cardPaymentSide: p.cardPaymentSide }, p.currency);
+        if (scoped && undoneBestEffort.has(scoped)) continue;
+      }
+    }
     const date = p.date ?? toISODate(new Date());
     if (p.kind === 'billDue') {
       // Same stale-misread sweep the cardStatement branch does below, and it
@@ -1900,6 +1913,7 @@ function buildImportPlanInMarket(
         smsKey,
         captureSource: p.captureSource,
         ...statementFactsOf(p),
+        ...(p.bestEffort ? { bestEffort: p.bestEffort } : {}),
         cardPaymentSide,
         isTransfer: true,
         captureInstrument: captureInstrumentOf(p),

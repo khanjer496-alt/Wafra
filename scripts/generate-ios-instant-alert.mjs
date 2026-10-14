@@ -47,7 +47,13 @@ export function instantAlertPatternSources() {
   const sources = Object.fromEntries(PATTERNS.map((name) => [
     camel(name), patternSource('InstantAlert', name, { CUR, CUR_AR }),
   ]));
-  sources.credential = patternSource('SensitiveMessageFilter', 'CREDENTIAL_RE');
+  const labels = unescape(constant('SensitiveMessageFilter', 'LOCAL_CREDENTIAL_LABELS'));
+  const code = unescape(constant('SensitiveMessageFilter', 'LOCAL_CREDENTIAL_CODE'));
+  sources.credential = `${patternSource('SensitiveMessageFilter', 'CREDENTIAL_RE')}|${
+    patternSource('SensitiveMessageFilter', 'LOCAL_CREDENTIAL_RE', {
+      LOCAL_CREDENTIAL_LABELS: labels, LOCAL_CREDENTIAL_CODE: code,
+    })}`;
+  sources.credentialFormat = patternSource('SensitiveMessageFilter', 'FORMAT_MARK_RE');
   return sources;
 }
 

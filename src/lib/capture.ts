@@ -279,7 +279,15 @@ export const eraseIosCaptureStore = async (): Promise<void> => {
   if (Platform.OS !== 'ios' || iosVersionMajor() < 16) return;
   const native = getIosCaptureNativeModule();
   if (!native) throw new Error('iOS live capture module is unavailable');
-  await native.eraseAll();
+  const { invalidateIosNativeParserContext } = require('@/lib/ios-native-parser-context') as
+    typeof import('@/lib/ios-native-parser-context');
+  invalidateIosNativeParserContext(native);
+  try {
+    await native.eraseAll();
+  } finally {
+    // A late pre-erase native call must not suppress the next hydrated sync.
+    invalidateIosNativeParserContext(native);
+  }
   publishIosCaptureEntitlementReset();
 };
 

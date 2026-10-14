@@ -455,6 +455,24 @@ async function queueItem(id, row, publicKey) {
     freshDevice();
     eq('config: a strict destructive read distinguishes proven absence',
       await relay.getRelayConfigStrict(), null);
+    const originalSecureRead = secure.getItemAsync;
+    let unsupportedReads = 0;
+    secure.getItemAsync = async () => { unsupportedReads++; throw new Error('native store unavailable'); };
+    try {
+      rn.Platform.OS = 'web';
+      eq('web strict credential absence permits local erase without unsupported native storage',
+        await relay.getRelayConfigStrict(), null);
+      eq('web strict absence performs no native credential read', unsupportedReads, 0);
+      rn.Platform.OS = 'ios';
+      let nativeFailure;
+      try { await relay.getRelayConfigStrict(); } catch (error) { nativeFailure = error; }
+      ok('the same native read failure still blocks irreversible credential operations',
+        nativeFailure instanceof relay.RelayError && nativeFailure.message === 'Stored relay credentials could not be verified.');
+    } finally {
+      secure.getItemAsync = originalSecureRead;
+      rn.Platform.OS = 'ios';
+    }
+
 
     freshDevice();
     const net = transport().install();

@@ -12,6 +12,11 @@ const families = ['purchase', 'transfer', 'cash-withdrawal', 'refund', 'fee', 'u
   'recurring-payment', 'statement', 'balance', 'authentication', 'unknown', 'bill', 'card-payment'] as const;
 const roles = ['transaction', 'bill-due', 'statement-total', 'minimum-due', 'balance',
   'credit-limit', 'fee', 'unknown'] as const;
+// Persist only fixed provenance codes. Arbitrary diagnostics and coordinates
+// can contain source text and remain ephemeral.
+const safeIssues = (input: unknown): string[] => Array.isArray(input)
+  ? [...new Set(input.filter((value): value is string =>
+      value === 'ai-proposed' || value === 'source-profile-field-excluded' || value === 'learned-format'))] : [];
 
 const money = (value: unknown): UniversalMoney | null => {
   if (!record(value) || typeof value.currency !== 'string' ||
@@ -51,7 +56,7 @@ const field = <T>(input: unknown, sanitize: (value: unknown) => T | null): Unive
   if (input.evidence === 'ambiguous' && value === null && alternatives.length === 0) return null;
   // Coordinates and diagnostics can contain accidental source fragments at a
   // runtime boundary. Persist only facts, never those arbitrary containers.
-  return { value, evidence: input.evidence, alternatives, spans: [], issues: [] };
+  return { value, evidence: input.evidence, alternatives, spans: [], issues: safeIssues(input.issues) };
 };
 
 /** Reconstruct bounded review facts; never persist a parser object by spreading it. */
@@ -89,6 +94,24 @@ export const sanitizeUniversalReviewEvent = (input: unknown): UniversalBankEvent
     version: 1, decision: 'review', family: input.family, status: input.status,
     direction: input.direction, amount, statementTotal, minimumDue, balance, creditLimit,
     merchant, transactionDate, dueDate, statementDate, instrument: capturedInstrument,
-    observations, issues: [],
+    observations, issues: safeIssues(input.issues),
   };
 };
+
+/** Preserve known facts; only a field-specific source ownership correction
+ * can clear or replace a known date/payee. Both capture platforms use this. */
+export const mergeAiReviewEvent = (
+  prior: UniversalBankEvent, proposed: UniversalBankEvent,
+): UniversalBankEvent => ({
+  ...prior,
+  family: prior.family === 'unknown' ? proposed.family : prior.family,
+  direction: prior.direction === 'unknown' && proposed.issues.includes('learned-format')
+    ? proposed.direction : prior.direction,
+  status: proposed.issues.includes('learned-format') && proposed.status === 'unknown' ? 'unknown' : prior.status,
+  amount: prior.amount.evidence === 'missing' ? proposed.amount : prior.amount,
+  merchant: prior.merchant.evidence === 'missing' ||
+    proposed.merchant.issues.includes('source-profile-field-excluded') ? proposed.merchant : prior.merchant,
+  transactionDate: prior.transactionDate.evidence === 'missing' ||
+    proposed.transactionDate.issues.includes('source-profile-field-excluded') ? proposed.transactionDate : prior.transactionDate,
+  issues: [...new Set([...prior.issues, ...proposed.issues])],
+});

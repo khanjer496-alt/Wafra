@@ -208,7 +208,34 @@ struct NativeLiveCaptureStoreTests {
 
     check("disabled automation Message stays out of the queue", try queue.stageAutomationMessage(
       sender: knownSender, body: messageBody, eventId: guidHash, observedAt: messageDate) == .disabled)
+    check("credentials are ignored even before capture is enabled", try queue.stageAutomationMessage(
+      sender: knownSender, body: "Your OTP is 448122. Do not share it.",
+      eventId: guidHash, observedAt: messageDate) == .ignored && pending().isEmpty)
     try grantLifetimeAndEnable(queue)
+    for body in [
+      "Your OTP is 448122. Do not share it.",
+      "448122 is your verification code",
+      "رمز التحقق: 448122",
+      "Confirm this transaction of JOD 15.250 using OTP 448122",
+      "Your OTP for the transaction of AED 500.00 is 448122. Do not share it with anyone.",
+      "Verification code: 123 456 for AED 25.00 purchase.",
+      "OTP ١٢٣٤٥٦ for AED 25.00 purchase.",
+      "Your OTP is １２３４５６ for USD 25.00 purchase.",
+      "Sicherheitscode: 123 456 für EUR 25,00.",
+      "رمز التحقق: ١٢٣ ٤٥٦ لعملية بقيمة 25.000 دينار.",
+    ] {
+      check("credentials never enter the enabled protected queue", try queue.stageAutomationMessage(
+        sender: knownSender, body: body, eventId: UUID().uuidString,
+        observedAt: messageDate) == .ignored && pending().isEmpty)
+    }
+
+    // Advice plus a receipt reference is safe financial text, not an OTP.
+    let adviceId = UUID().uuidString
+    check("credential advice cannot turn a receipt reference into a code", try queue.stageAutomationMessage(
+      sender: knownSender,
+      body: "Card ending 1234 was used for JOD 15.251. Never share your OTP for any transaction. Your reference is 123456.",
+      eventId: adviceId, observedAt: messageDate) == .accepted && pending().count == 1)
+    try queue.acknowledgeRecords(ids: [adviceId])
 
     check("GUID and date present stage under SHA-256(GUID) with the Message date",
       try queue.stageAutomationMessage(sender: knownSender, body: messageBody,

@@ -1,0 +1,576 @@
+[
+  {
+    "id": "UKANZ-GB-BARC-CARD-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Barclays",
+    "body": "Barclays: You've made a debit card payment of £23.45 at TESCO STORES 2934 from your account ending 4821 on 14/09/26. Not you? Call us on 0800 000 0347.",
+    "expect": { "post": true, "amountMinor": 2345, "type": "expense", "transfer": false, "merchant": "tesco" },
+    "notes": "Barclays text alert for a debit card payment: DD/MM/YY date, 'account ending' tail and a call-back footer",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-GB-BARC-SAL-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Barclays",
+    "body": "Barclays: £2,315.60 has been paid into your account ending 4821 from NORTHWIND TRADING LTD on 25/09/26. Ref: SALARY SEP",
+    "expect": { "post": true, "amountMinor": 231560, "type": "income", "transfer": false, "merchant": "northwind" },
+    "notes": "Barclays money-in text for a BACS salary credit; employer payroll reference, so transfer false",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-GB-HSBC-FPS-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "HSBC UK",
+    "body": "HSBC UK: You've sent £45.00 to J SMITH from your account ending 1234 on 15 Sep 2026. If you didn't make this payment, call us on 03457 000 000.",
+    "expect": { "post": true, "amountMinor": 4500, "type": "expense", "transfer": true, "merchant": "smith" },
+    "notes": "HSBC UK Faster Payment sent confirmation to a person (D Mon YYYY date, fraud call-back footer); P2P so transfer true",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-GB-LLOY-DD-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Lloyds",
+    "body": "Lloyds: A Direct Debit of £62.50 to OCTOPUS ENERGY has been paid from your Classic account ending 5678 on 01/10/26.",
+    "expect": { "post": true, "amountMinor": 6250, "type": "expense", "transfer": false, "merchant": "octopus" },
+    "notes": "Lloyds text alert for a Direct Debit that has been paid (completed, not upcoming); utility bill so transfer false",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-GB-LLOY-FEE-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Lloyds",
+    "body": "Lloyds: We've taken your Club Lloyds monthly fee of £3.00 from your account ending 5678 on 15/09/26.",
+    "expect": { "post": true, "amountMinor": 300, "type": "expense", "transfer": false },
+    "notes": "Lloyds packaged-account monthly fee taken; a bank charge is an expense, no merchant",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-GB-HFX-SAL-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Halifax",
+    "body": "Halifax: £1,850.00 has been paid into your Reward Current Account ending 4321 from ACME PAYROLL SERVICES on 30/09/26.",
+    "expect": { "post": true, "amountMinor": 185000, "type": "income", "transfer": false, "merchant": "acme" },
+    "notes": "Halifax (Lloyds Banking Group) money-in text for a payroll credit; product name between amount and tail",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-GB-NWST-CONT-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "NatWest",
+    "body": "You've paid £3.40 to PRET A MANGER using contactless on your debit card ending 2468.",
+    "expect": { "post": true, "amountMinor": 340, "type": "expense", "transfer": false, "merchant": "pret" },
+    "notes": "NatWest app spending push notification for a contactless card payment; no date or bank prefix in the body. 'paid ... to' a merchant is a purchase, not a transfer",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-GB-NWST-FPS-IN-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "NatWest",
+    "body": "NatWest: You've received £75.00 from MISS K WILSON into your account ending 2468. Reference: CONCERT TIX",
+    "expect": { "post": true, "amountMinor": 7500, "type": "income", "transfer": true, "merchant": "wilson" },
+    "notes": "NatWest incoming Faster Payment alert from a person with the payer reference; P2P so transfer true",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-GB-SANT-CARD-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Santander",
+    "body": "Santander: Debit card payment of £56.20 at SAINSBURYS S/MKTS on 18/09/2026 from your account ending 9012. Don't recognise it? Call 0800 000 9065.",
+    "expect": { "post": true, "amountMinor": 5620, "type": "expense", "transfer": false, "merchant": "sainsbury" },
+    "notes": "Santander UK debit card transaction text with the card-scheme merchant descriptor (S/MKTS) and DD/MM/YYYY date",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-GB-NWIDE-DD-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Nationwide",
+    "body": "Nationwide: A Direct Debit of £38.99 to SKY UK LIMITED has been paid from your FlexDirect account ending 7731 on 02/10/2026.",
+    "expect": { "post": true, "amountMinor": 3899, "type": "expense", "transfer": false, "merchant": "sky" },
+    "notes": "Nationwide Building Society text for a Direct Debit collected from a FlexDirect current account (completed)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-GB-MONZO-CARD-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Monzo",
+    "body": "🛒 £24.67 at Tesco",
+    "expect": { "post": true, "amountMinor": 2467, "type": "expense", "transfer": false, "merchant": "tesco" },
+    "notes": "Monzo instant spending push: category emoji, amount, 'at' cleaned merchant name; no date, no account, no verb. Monzo only notifies settled-or-approved card spends this way and sends no later alert",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-GB-MONZO-P2P-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Monzo",
+    "body": "Sarah Jones sent you £20.00\n🍕 Pizza Friday",
+    "expect": { "post": true, "amountMinor": 2000, "type": "income", "transfer": true, "merchant": "sarah" },
+    "notes": "Monzo push for money received from a contact (title line + payment note with emoji on a second line); P2P so transfer true",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-GB-MONZO-DD-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Monzo",
+    "body": "Your £41.20 Direct Debit to Thames Water was paid 💧",
+    "expect": { "post": true, "amountMinor": 4120, "type": "expense", "transfer": false, "merchant": "thames" },
+    "notes": "Monzo push confirming a Direct Debit was paid today (completed, distinct from Monzo's 'due tomorrow' heads-up)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-GB-STAR-CARD-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Starling Bank",
+    "body": "You spent £12.40 at COSTA COFFEE. Your balance is now £1,045.18.",
+    "expect": { "post": true, "amountMinor": 1240, "type": "expense", "transfer": false, "merchant": "costa" },
+    "notes": "Starling app push for a card spend followed by the new balance; amount is the spend, not the balance",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-GB-STAR-IN-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Starling Bank",
+    "body": "You received £150.00 from TOM BAKER. Reference: Holiday money",
+    "expect": { "post": true, "amountMinor": 15000, "type": "income", "transfer": true, "merchant": "tom baker" },
+    "notes": "Starling push for an incoming Faster Payment from a person with the sender's reference",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-GB-REVO-CARD-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Revolut",
+    "body": "💳 Paid £8.95 at Uber",
+    "expect": { "post": true, "amountMinor": 895, "type": "expense", "transfer": false, "merchant": "uber" },
+    "notes": "Revolut UK card payment push ('Paid <amount> at <merchant>') for a GBP account holder",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-GB-AMEX-CARD-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "AMEX",
+    "body": "American Express: A purchase of £145.00 was made at JOHN LEWIS on your Card ending 31005 on 19 Sep 2026. If you don't recognise this, call the number on the back of your Card.",
+    "expect": { "post": true, "amountMinor": 14500, "type": "expense", "transfer": false, "merchant": "john lewis" },
+    "notes": "American Express UK purchase alert on a credit card (5-digit Amex card tail); the only per-purchase alert the customer gets, so a bookkeeper records it",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-GB-BCARD-REFUND-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Barclaycard",
+    "body": "Barclaycard: A refund of £39.99 from ARGOS LTD has been credited to your card ending 7788 on 23/09/26.",
+    "expect": { "post": true, "amountMinor": 3999, "type": "income", "transfer": false, "merchant": "argos" },
+    "notes": "Barclaycard credit card merchant refund credited back; refund in is income",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-IE-AIB-CARD-1",
+    "country": "IE",
+    "ledger": "EUR",
+    "sender": "AIB",
+    "body": "AIB: Card ending 4455 used for EUR12.40 at TESCO STORES 3051 DUBLIN on 12/09/26 13:05.",
+    "expect": { "post": true, "amountMinor": 1240, "type": "expense", "transfer": false, "merchant": "tesco" },
+    "notes": "AIB debit card usage text: ISO code glued to the amount (EUR12.40), card tail first, DD/MM/YY + 24h time",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-IE-AIB-SAL-1",
+    "country": "IE",
+    "ledger": "EUR",
+    "sender": "AIB",
+    "body": "AIB: A lodgement of €2,640.00 was credited to your account ending 7720 on 25/09/26. Narrative: CONTOSO IRL SAL",
+    "expect": { "post": true, "amountMinor": 264000, "type": "income", "transfer": false, "merchant": "contoso" },
+    "notes": "AIB lodgement (Irish banking term for a deposit) with a SEPA credit narrative for salary; payroll so transfer false",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-IE-BOI-SEPA-1",
+    "country": "IE",
+    "ledger": "EUR",
+    "sender": "BOI",
+    "body": "Bank of Ireland: You sent €250.00 to SEAN MURPHY from your Current Account ending 1188 on 16/09/2026. Ref: Stag do",
+    "expect": { "post": true, "amountMinor": 25000, "type": "expense", "transfer": true, "merchant": "murphy" },
+    "notes": "Bank of Ireland 365 payment-sent confirmation to a person (SEPA instant); transfer true",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-IE-BOI-DD-1",
+    "country": "IE",
+    "ledger": "EUR",
+    "sender": "BOI",
+    "body": "Bank of Ireland: A Direct Debit of €89.00 to ELECTRIC IRELAND has been paid from your Current Account ending 1188 on 01/10/2026.",
+    "expect": { "post": true, "amountMinor": 8900, "type": "expense", "transfer": false, "merchant": "electric ireland" },
+    "notes": "Bank of Ireland SEPA Direct Debit paid to a utility (completed collection)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-IE-PTSB-ATM-1",
+    "country": "IE",
+    "ledger": "EUR",
+    "sender": "PTSB",
+    "body": "PTSB: ATM withdrawal of €200.00 from your account ending 3390 on 27/09/2026 at 10:41. Available balance: €1,312.55.",
+    "expect": { "post": true, "amountMinor": 20000, "type": "expense", "transfer": false },
+    "notes": "PTSB (permanent tsb) ATM withdrawal text with trailing available balance; amount is the withdrawal",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-IE-PTSB-CONT-1",
+    "country": "IE",
+    "ledger": "EUR",
+    "sender": "PTSB",
+    "body": "PTSB: Contactless payment of €4.80 at INSOMNIA COFFEE CO made with your debit card ending 3390 on 03/10/2026.",
+    "expect": { "post": true, "amountMinor": 480, "type": "expense", "transfer": false, "merchant": "insomnia" },
+    "notes": "PTSB contactless debit card purchase text",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-AU-CBA-CARD-1",
+    "country": "AU",
+    "ledger": "AUD",
+    "sender": "CommBank",
+    "body": "You've spent $45.00 at Woolworths Bondi Junction with your card ending 7890.",
+    "expect": { "post": true, "amountMinor": 4500, "type": "expense", "transfer": false, "merchant": "woolworths" },
+    "notes": "CommBank app spending push notification; bare '$' means AUD for an Australian ledger",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-AU-CBA-SAL-1",
+    "country": "AU",
+    "ledger": "AUD",
+    "sender": "CommBank",
+    "body": "Money in: $1,250.00 from ACME PTY LTD has been deposited into your Smart Access account. Description: PAYROLL",
+    "expect": { "post": true, "amountMinor": 125000, "type": "income", "transfer": false, "merchant": "acme" },
+    "notes": "CommBank 'Money in' push for a payroll deposit into a Smart Access account; payroll so transfer false",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-AU-CBA-PAYID-1",
+    "country": "AU",
+    "ledger": "AUD",
+    "sender": "CommBank",
+    "body": "CommBank: You've sent $120.00 to JANE CITIZEN (PayID jane.c@example.com) via Osko on 18/09/2026. Description: Rent share. Receipt No. N0918274635",
+    "expect": { "post": true, "amountMinor": 12000, "type": "expense", "transfer": true, "merchant": "jane citizen" },
+    "notes": "Osko/PayID fast payment sent receipt from CommBank with the payee's email PayID and receipt number; P2P so transfer true",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-AU-ANZ-CARD-1",
+    "country": "AU",
+    "ledger": "AUD",
+    "sender": "ANZ",
+    "body": "ANZ: Your Visa Debit card ending 2211 was used for $67.30 at COLES 0745 MELBOURNE on 21/09/2026.",
+    "expect": { "post": true, "amountMinor": 6730, "type": "expense", "transfer": false, "merchant": "coles" },
+    "notes": "ANZ Australia card-used text alert with store number and suburb in the descriptor",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-AU-ANZ-ATM-1",
+    "country": "AU",
+    "ledger": "AUD",
+    "sender": "ANZ",
+    "body": "ANZ: $200.00 was withdrawn at an ATM using your card ending 2211 on 28/09/2026 at 6:12pm.",
+    "expect": { "post": true, "amountMinor": 20000, "type": "expense", "transfer": false },
+    "notes": "ANZ Australia ATM cash withdrawal text with 12-hour lower-case pm time",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-AU-WBC-CARD-1",
+    "country": "AU",
+    "ledger": "AUD",
+    "sender": "Westpac",
+    "body": "You spent $23.50 at BP CONNECT PARRAMATTA",
+    "expect": { "post": true, "amountMinor": 2350, "type": "expense", "transfer": false, "merchant": "bp" },
+    "notes": "Westpac app spending push: one line, no date, no card tail, no trailing period",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-AU-WBC-BPAY-1",
+    "country": "AU",
+    "ledger": "AUD",
+    "sender": "Westpac",
+    "body": "Westpac: Your BPAY payment of $186.40 to AGL ENERGY (Biller code 12345) was successful on 04/10/2026. Receipt number 7382910.",
+    "expect": { "post": true, "amountMinor": 18640, "type": "expense", "transfer": false, "merchant": "agl" },
+    "notes": "Westpac BPAY bill payment completed confirmation with biller code and receipt number; bill so transfer false",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-AU-NAB-OSKO-1",
+    "country": "AU",
+    "ledger": "AUD",
+    "sender": "NAB",
+    "body": "You've received $50.00 from JOHN CITIZEN via Osko. Description: Dinner",
+    "expect": { "post": true, "amountMinor": 5000, "type": "income", "transfer": true, "merchant": "john citizen" },
+    "notes": "NAB app push for an Osko (NPP) payment received from a person; transfer true",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-AU-UP-CARD-1",
+    "country": "AU",
+    "ledger": "AUD",
+    "sender": "Up",
+    "body": "☕ $5.50 at Code Black Coffee",
+    "expect": { "post": true, "amountMinor": 550, "type": "expense", "transfer": false, "merchant": "code black" },
+    "notes": "Up Bank card purchase push: category emoji, amount, 'at' merchant; sender is the app's short display name 'Up'",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-AU-UP-SAL-1",
+    "country": "AU",
+    "ledger": "AUD",
+    "sender": "Up",
+    "body": "Cha-ching! 💰 $2,845.12 from NORTHWIND PTY LTD just landed in Spending.\nSALARY SEP",
+    "expect": { "post": true, "amountMinor": 284512, "type": "income", "transfer": false, "merchant": "northwind" },
+    "notes": "Up Bank's casual money-in push ('just landed in Spending') with the payroll description on a second line; salary so transfer false",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-NZ-ASB-CARD-1",
+    "country": "NZ",
+    "ledger": "NZD",
+    "sender": "ASB",
+    "body": "ASB: Your Visa Debit card ending 6543 was used for $34.50 at WOOLWORTHS PONSONBY on 17/09/2026.",
+    "expect": { "post": true, "amountMinor": 3450, "type": "expense", "transfer": false, "merchant": "woolworths" },
+    "notes": "ASB card-used text alert; bare '$' is NZD for a New Zealand ledger",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-NZ-ASB-SAL-1",
+    "country": "NZ",
+    "ledger": "NZD",
+    "sender": "ASB",
+    "body": "ASB: $1,920.00 has been deposited into your account ending 0001 from KIWI LOGISTICS LTD. Particulars: WAGES",
+    "expect": { "post": true, "amountMinor": 192000, "type": "income", "transfer": false, "merchant": "kiwi logistics" },
+    "notes": "ASB deposit alert with NZ payment 'Particulars' field showing wages; payroll so transfer false",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-NZ-BNZ-CARD-1",
+    "country": "NZ",
+    "ledger": "NZD",
+    "sender": "BNZ",
+    "body": "You've spent $18.90 at Z ENERGY TAKAPUNA with your Flexi Debit Visa ending 4321.",
+    "expect": { "post": true, "amountMinor": 1890, "type": "expense", "transfer": false, "merchant": "z energy" },
+    "notes": "BNZ app spending push for a fuel purchase on a Flexi Debit Visa",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-NZ-BNZ-REFUND-1",
+    "country": "NZ",
+    "ledger": "NZD",
+    "sender": "BNZ",
+    "body": "BNZ: A refund of $59.99 from THE WAREHOUSE has been credited to your Flexi Debit Visa ending 4321 on 06/10/2026.",
+    "expect": { "post": true, "amountMinor": 5999, "type": "income", "transfer": false, "merchant": "warehouse" },
+    "notes": "BNZ merchant refund credited back to the debit card; refund in is income",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-NZ-KIWI-TFR-1",
+    "country": "NZ",
+    "ledger": "NZD",
+    "sender": "Kiwibank",
+    "body": "Kiwibank: $85.00 was paid to A WILLIAMS from your Everyday account ending 012 on 22/09/2026. Particulars: Flatmate Code: Power Ref: SEPT",
+    "expect": { "post": true, "amountMinor": 8500, "type": "expense", "transfer": true, "merchant": "williams" },
+    "notes": "Kiwibank payment-to-person confirmation with NZ Particulars/Code/Reference fields; transfer true",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-GB-SANT-OTP-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Santander",
+    "body": "Santander: This OTP is to MAKE A NEW PAYMENT of £150.00 to account ending 6621. Call us on 0800 000 9065 if this wasn't you. Don't share this code with anyone, not even Santander. 482915",
+    "expect": { "post": false, "why": "otp" },
+    "notes": "Santander UK one-time passcode for a new payment, naming amount and payee tail with the code at the very end; nothing has moved yet",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-GB-MONZO-DECL-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Monzo",
+    "body": "Declined: £18.99 at Deliveroo\nYou don't have enough money in your account. Top up and try again.",
+    "expect": { "post": false, "why": "declined" },
+    "notes": "Monzo declined-card push for insufficient funds; same 'amount at merchant' shape as a real spend",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-GB-BARC-BAL-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Barclays",
+    "body": "Barclays: Your balance on account ending 4821 at 07:00 on 02/10/26 is £1,243.67. Including your arranged overdraft, you have £1,743.67 available.",
+    "expect": { "post": false, "why": "balance" },
+    "notes": "Barclays daily balance text alert; balance only, no transaction",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-GB-NWIDE-SCHED-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Nationwide",
+    "body": "Nationwide: A Direct Debit of £38.99 to SKY UK LIMITED is due to be paid from your FlexDirect account ending 7731 on 09/10/26. Make sure you have enough money in your account.",
+    "expect": { "post": false, "why": "scheduled" },
+    "notes": "Nationwide upcoming Direct Debit warning (due on a future date); not yet collected",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-GB-BCARD-REM-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Barclaycard",
+    "body": "Barclaycard: Your minimum payment of £25.00 is due on 10/10/26. Statement balance £612.40. Pay easily in the Barclaycard app.",
+    "expect": { "post": false, "why": "reminder" },
+    "notes": "Barclaycard credit card payment-due reminder with minimum payment and statement balance",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-GB-HMRC-PHISH-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "+447700900123",
+    "body": "HMRC: You are eligible for a tax refund of £284.62. Please submit your claim before 11/10/2026 at: hmrc-taxrefund-claim.co.uk/verify",
+    "expect": { "post": false, "why": "phishing" },
+    "notes": "Classic UK tax-refund smishing from a mobile number with a look-alike domain; no money moved",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-GB-HSBC-SEC-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "HSBC UK",
+    "body": "HSBC UK: Did you try to pay £249.99 at CURRYS ONLINE with your card ending 1234? Reply Y if this was you or N if not. We've put a temporary block on your card until we hear from you.",
+    "expect": { "post": false, "why": "security" },
+    "notes": "HSBC UK fraud-check text asking to confirm a card attempt; card blocked, payment not completed",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-GB-MONZO-REQ-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Monzo",
+    "body": "Alex Turner requested £15.00 for 🎳 Bowling\nTap to pay them back.",
+    "expect": { "post": false, "why": "request" },
+    "notes": "Monzo payment request from a contact; nothing paid until the user acts",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-GB-AMEX-PAYRCVD-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "AMEX",
+    "body": "American Express: We've received your payment of £500.00 for your Card ending 31005 on 30 Sep 2026. Thank you.",
+    "expect": { "post": false, "why": "other" },
+    "expectByPath": {
+      "android-sms": { "post": false, "why": "settlement, not spending", "acceptedObligation": { "kind": "cardPayment", "amountMinor": 50000, "currency": "GBP", "card": { "last4": "1005", "kind": "credit" }, "cardPaymentSide": "receipt" } },
+      "ios-history": { "post": false, "why": "unverified settlement remains in Review" }
+    },
+    "notes": "Credit card bill payment received by Amex; a settlement of the card balance, not new income or spending",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-IE-AIB-OTP-1",
+    "country": "IE",
+    "ledger": "EUR",
+    "sender": "AIB",
+    "body": "AIB: 618204 is your one-time passcode for an online purchase of EUR 89.99 at ZALANDO. Never share this code. AIB will never ask you for it.",
+    "expect": { "post": false, "why": "otp" },
+    "notes": "AIB 3-D Secure one-time passcode naming the amount and merchant; purchase not completed",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-IE-BOI-OFFER-1",
+    "country": "IE",
+    "ledger": "EUR",
+    "sender": "BOI",
+    "body": "Bank of Ireland: Moving home? Get 3% cash back on your mortgage drawdown, up to €3,000. Lending criteria & T&Cs apply. Text STOP to 50100 to opt out.",
+    "expect": { "post": false, "why": "offer" },
+    "notes": "Bank of Ireland mortgage cashback marketing text with an opt-out footer",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-IE-PTSB-MANDATE-1",
+    "country": "IE",
+    "ledger": "EUR",
+    "sender": "PTSB",
+    "body": "PTSB: A new SEPA Direct Debit mandate from VIRGIN MEDIA IRELAND has been set up on your account ending 3390. First collection of €65.00 is due on 09/10/2026.",
+    "expect": { "post": false, "why": "mandate-setup" },
+    "notes": "PTSB new SEPA mandate notice with a future first collection; nothing collected yet",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-AU-CBA-OTP-1",
+    "country": "AU",
+    "ledger": "AUD",
+    "sender": "CommBank",
+    "body": "Your NetCode is 482019. Use it to confirm a $1,500.00 transfer to J CITIZEN. Never share it, CommBank will never ask you for it.",
+    "expect": { "post": false, "why": "otp" },
+    "notes": "CommBank NetCode SMS step-up for a transfer, naming amount and payee; transfer not yet made",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-AU-ANZ-DECL-1",
+    "country": "AU",
+    "ledger": "AUD",
+    "sender": "ANZ",
+    "body": "ANZ: A $129.00 transaction at JB HI-FI ONLINE on your card ending 2211 was declined on 24/09/2026 due to insufficient funds.",
+    "expect": { "post": false, "why": "declined" },
+    "notes": "ANZ Australia declined card transaction text (insufficient funds)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-AU-WBC-HOLD-1",
+    "country": "AU",
+    "ledger": "AUD",
+    "sender": "Westpac",
+    "body": "Westpac: A pending authorisation of $150.00 from AMPOL CHATSWOOD has been placed on your card ending 5521. The final amount may differ once the transaction is processed.",
+    "expect": { "post": false, "why": "hold" },
+    "notes": "Westpac fuel pre-authorisation hold at a pay-at-pump; final amount unknown, not a completed spend",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-AU-CHAT-1",
+    "country": "AU",
+    "ledger": "AUD",
+    "sender": "+61491570156",
+    "body": "hey just paid you $40 for the uber, check ur NAB 👍",
+    "expect": { "post": false, "why": "chat" },
+    "notes": "Personal SMS from a friend mentioning a payment; not a bank alert",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-NZ-BNZ-SEC-1",
+    "country": "NZ",
+    "ledger": "NZD",
+    "sender": "BNZ",
+    "body": "BNZ: Your BNZ app was registered on a new device on 03/10/2026 at 9:14pm. If this wasn't you, call us on 0800 000 269 straight away.",
+    "expect": { "post": false, "why": "security" },
+    "notes": "BNZ new-device registration security alert",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "UKANZ-NZ-KIWI-PHISH-1",
+    "country": "NZ",
+    "ledger": "NZD",
+    "sender": "+6421000111",
+    "body": "Kiwibank: A payment of $1,299.00 to ANDERSON TRADING has been placed on hold due to unusual activity. If you did not authorise this, cancel it at kiwibank-secure-nz.com",
+    "expect": { "post": false, "why": "phishing" },
+    "notes": "Bank-impersonation smishing from a mobile number with a look-alike domain; no real money movement",
+    "provenance": "synthetic"
+  }
+]

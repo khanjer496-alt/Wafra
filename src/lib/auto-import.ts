@@ -1,4 +1,6 @@
-import { aiReviewEventForRefusedAlert } from '@/lib/ai-alert-reader';
+import { createAiAlertReviewSession } from '@/lib/ai-alert-reader';
+import { createPrivateAlertFormatSession, type PrivateAlertFormatSessionOptions } from '@/lib/private-alert-format-runtime';
+import { canEnrichPrivateFormatReview, privateAlertFormatReviewEvent } from '@/lib/private-alert-format-review';
 import { AppState as RNAppState, Linking, PermissionsAndroid, Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
@@ -70,7 +72,7 @@ import { measureRuntimeOperation } from '@/lib/runtime-performance';
 import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
 import { canCollectLocalSemanticShadow, queueLocalSemanticParserShadow, buildLocalParserSemanticWindow } from '@/lib/local-semantic-shadow';
 import { eligibleLocalReviewEvent, localReviewAdvisor } from '@/lib/local-semantic-review';
-import { sanitizeUniversalReviewEvent } from '@/lib/generic-review-entry';
+import { mergeAiReviewEvent, sanitizeUniversalReviewEvent } from '@/lib/generic-review-entry';
 
 const DEFAULT_PAGE_SIZE = 1_000;
 const MAX_PAGE_SIZE = 2_000;
@@ -395,6 +397,8 @@ export interface InboxScanCursor {
 }
 
 export interface ScanInboxOptions {
+  /** Ready local formats advise Review only; parser-version repair always disables them. */
+  privateFormatReview?: PrivateAlertFormatSessionOptions;
   /** Read the bank-app queue without requiring or advancing the SMS inbox. */
   notificationOnly?: boolean;
   /** Packages explicitly learned after the user confirmed a review candidate. */
@@ -1025,6 +1029,8 @@ export async function scanInbox(
     sourceEventId?: string;
   })[] = [];
   const reviewCandidates: ReviewEntry[] = [];
+  const aiReviewSession = createAiAlertReviewSession(options.historyRepair ? { enabled: false } : {});
+  const privateFormatSession = createPrivateAlertFormatSession({ ...options.privateFormatReview, historyRepair: options.historyRepair });
   let deferredInboxReviews = false;
   const reviewSourceBindings: ReviewSourceBinding[] = [];
   const requestedLegacySources = new Set((options.legacyReviewSourceKeys ?? [])
@@ -1114,6 +1120,8 @@ export async function scanInbox(
     /** Only for alerts NO parser read (`!p`); never for a parsed row under review. */
     aiEligible = false,
     notificationId?: string,
+    /** The parser read an obligation that this transport may only review. */
+    preferParsedFallback = false,
   ): Promise<SourceFreeRefusedAlertDecision> => {
     let decision = inspectSourceFreeRefusedAlert({
       source: body,
@@ -1124,19 +1132,37 @@ export async function scanInbox(
       existingInspection,
       skipUniversalFallback,
     });
+    if (preferParsedFallback && parsedFallback && decision.kind === 'review') {
+      decision = { kind: 'review', candidate: parsedFallback };
+    }
     if (decision.kind === 'ignored' && decision.reason === 'unrecognized' && parsedFallback) {
       decision = { kind: 'review', candidate: parsedFallback };
     }
-    // AI reading (ai-alert-reader.ts): only for an alert every proven path and
-    // the refusal pipeline left unrecognised, only when the person downloaded
-    // the model, never for AE/SA senders. It can only add a Review item with
-    // suggested fields; with no model it resolves null and nothing changes.
-    if (aiEligible && !parsedFallback && !skipUniversalFallback &&
-      decision.kind === 'ignored' && decision.reason === 'unrecognized') {
-      const aiEvent = await aiReviewEventForRefusedAlert(body, sender, ts);
+    // Enrich unfamiliar generic Review while source is still available. The
+    // shared session bounds actual inference to one attempt per whole scan.
+    const eligibleUniversalFallback = parsedFallback && 'kind' in parsedFallback &&
+      parsedFallback.kind === 'universal' && canEnrichPrivateFormatReview(parsedFallback.event);
+    if (aiEligible && (!parsedFallback || eligibleUniversalFallback) && !skipUniversalFallback &&
+      ((decision.kind === 'ignored' && decision.reason === 'unrecognized') ||
+        (decision.kind === 'review' && 'kind' in decision.candidate &&
+          decision.candidate.kind === 'universal' && canEnrichPrivateFormatReview(decision.candidate.event)))) {
+      const country = getActiveCountry();
+      const formatContext = { country, dateOrder: dateOrderForCountry(country) ?? undefined,
+        routedMarket: detectLaunchMarketFromAlert(body, sender) ?? detectLaunchMarketFromSender(sender) };
+      const learned = await privateFormatSession.read(body, sender, ts, formatContext);
+      const learnedEvent = learned ? privateAlertFormatReviewEvent(body, sender, ts, learned, formatContext) : null;
+      const aiStillEligible = decision.kind === 'ignored' || (decision.kind === 'review' && 'kind' in decision.candidate &&
+        decision.candidate.kind === 'universal' && decision.candidate.event.family === 'unknown');
+      const aiEvent = learnedEvent ?? (aiStillEligible ? await aiReviewSession.read(body, sender, ts) : null);
       let aiCandidate: SourceFreeReviewCandidate | null = null;
       try { aiCandidate = aiEvent ? universalEventReviewCandidate(aiEvent, ts, channel) : null; } catch { aiCandidate = null; }
-      if (aiCandidate) decision = { kind: 'review', candidate: aiCandidate };
+      if (aiCandidate) {
+        if (decision.kind === 'review' && 'kind' in decision.candidate &&
+            decision.candidate.kind === 'universal' && 'kind' in aiCandidate && aiCandidate.kind === 'universal') {
+          decision = { kind: 'review', candidate: { ...decision.candidate,
+            event: mergeAiReviewEvent(decision.candidate.event, aiCandidate.event) } };
+        } else decision = { kind: 'review', candidate: aiCandidate };
+      }
     }
     // Counted, not classified: a text already set aside that reads as an
     // offer (the same wording test the bank-app path uses to skip them) and
@@ -1454,11 +1480,17 @@ export async function scanInbox(
           const p = launchSenderMarket
             ? parseLaunchAlert(sms.body, sms.address, worldwide, launchSenderMarket, sms.date)
             : launchSession.parseUnproven(sms.body, sms.address, worldwide, sms.date);
-          const reviewDecision = p && shouldReviewParsedIncome(p)
-            ? await inspectRefused(sms.body, sms.date, sms.address, 'delivery', worldwide)
+          // Retired delivery buffers carry no provider identity. Preserve an
+          // unverified repayment's parsed facts in Review, as with bank pushes.
+          const heldPayment = p?.kind === 'cardPayment' && p.bestEffort ? p : null;
+          const obligation = heldPayment ? parsedFinancialCandidateReview(heldPayment, sms.date) : null;
+          const deliveryFallback = obligation ? { ...obligation, channel: 'delivery' as const } : null;
+          const reviewDecision = p && (heldPayment || shouldReviewParsedIncome(p))
+            ? await inspectRefused(sms.body, sms.date, sms.address, 'delivery', worldwide,
+                undefined, undefined, deliveryFallback, false, false, undefined, !!heldPayment)
             : null;
           const reviewed = reviewDecision?.kind === 'review';
-          if (p && !reviewed) {
+          if (p && !reviewed && !heldPayment) {
             parsed.push({
               ...p,
               date: p.kind === 'cardStatement' ? p.date : p.date ?? toISODate(new Date(sms.date)),
@@ -1717,13 +1749,18 @@ export async function scanInbox(
         const parsedCurrencies = new Set(parsed.map((row) => row.currency));
         const batchCurrency = parsedCurrencies.size === 1 ? [...parsedCurrencies][0] : null;
         const requiredCurrency = pinnedLedgerCurrencyCode() ?? batchCurrency;
+        // A bank-app notification has no exact Message/provider identity.
+        // Unverified settlements stay typed Review; its weak observation
+        // cannot safely support payment Undo or settlement replay matching.
+        const heldPayment = launchParsed?.kind === 'cardPayment' && launchParsed.bestEffort
+          ? launchParsed : null;
         // A certified template is a PROVEN format: the universal reading of
         // the same alert is not "best effort" and must not carry the marker.
         const launchCandidate = launchParsed?.bestEffort && certification?.decision === 'automatic' &&
           !gulfNeighbourOwned
           ? (({ bestEffort: _marker, ...proven }) => proven)(launchParsed)
           : launchParsed;
-        const parsedCandidate = launchCandidate ?? universalParsed;
+        const parsedCandidate = heldPayment ? null : launchCandidate ?? universalParsed;
         // Parser success is not admission to the ledger. A trusted bank-app
         // package may auto-post globally, but only in the ledger's established
         // currency (or the single currency already established by this batch).
@@ -1735,9 +1772,9 @@ export async function scanInbox(
         // A messaging row carries no package identity into Review, so
         // confirming it can never teach Wafra to trust the Messages app.
         const pushSource = messagingRow ? undefined : { packageName: n.pkg, sourceClass } as const;
-        const parsedCandidateFallback = p && !autoAuthorized
-          ? parsedFinancialCandidateReview(p, n.ts)
-          : null;
+        const parsedCandidateFallback = heldPayment
+          ? parsedFinancialCandidateReview(heldPayment, n.ts)
+          : p && !autoAuthorized ? parsedFinancialCandidateReview(p, n.ts) : null;
         const universalCandidateFallback = !p && universalEvent
           ? universalEventReviewCandidate(universalEvent, n.ts)
           : null;
@@ -1772,8 +1809,9 @@ export async function scanInbox(
             pushSource,
             reviewFallback,
             skipKnownLaunchUniversal,
-            true,
+            !heldPayment,
             n.id,
+            !!heldPayment,
           );
         }
         if (refusal?.kind === 'review') {

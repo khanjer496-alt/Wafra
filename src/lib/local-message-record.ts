@@ -8,6 +8,7 @@ import {
   appleMessageReviewIdentity,
   isUniversalReviewAlert,
   prepareUniversalReviewAlert,
+  type UniversalReviewAdmissionInput,
   type ReviewEntry,
 } from '@/lib/alert-review-tray';
 import { toISODate } from '@/lib/format';
@@ -15,7 +16,7 @@ import {
   iosBankSenderIdentity,
   type IosBankSenderRegistry,
 } from '@/lib/ios-bank-senders';
-import type { LaunchAlertSession } from '@/lib/launch-alert-parser';
+import { hasPersonalMessagePrefix, type LaunchAlertSession } from '@/lib/launch-alert-parser';
 import {
   MARKETS,
   bankFromSender,
@@ -31,6 +32,11 @@ import { parseIosApplePayRecord } from '@/lib/ios-apple-pay-record';
 import { parsedObligationReviewEvent } from '@/lib/parsed-review-event';
 import type { FxQuote, MinorExponent } from '@/lib/fx';
 import { convertWithReferenceQuote, quoteFitsDay } from '@/lib/fx-rates';
+import type { createAiAlertReviewSession } from '@/lib/ai-alert-reader';
+import { mergeAiReviewEvent } from '@/lib/generic-review-entry';
+import type { createPrivateAlertFormatSession } from '@/lib/private-alert-format-runtime';
+import { canEnrichPrivateFormatReview, privateAlertFormatReviewEvent } from '@/lib/private-alert-format-review';
+import { activeCountryDateOrder, getActiveCountry } from '@/lib/country';
 
 export const LOCAL_MESSAGE_RECORD_VERSION = 1 as const;
 export const MAX_LOCAL_MESSAGE_TEXT_BYTES = 16 * 1024;
@@ -244,6 +250,88 @@ function localReviewIdentity(id: string): { id: string; sourceKey: string } {
   };
 }
 
+/** Preserve source facts; allow a source-owned profile exclusion to correct its own field. */
+export function prepareAiEnrichedLocalReview(
+  input: UniversalReviewAdmissionInput,
+  existing?: ReviewEntry,
+): ReviewEntry | null {
+  if (input.event.decision !== 'review') return null;
+  if (existing && (!isUniversalReviewAlert(existing) || (existing.event.family !== 'unknown' &&
+    !(input.event.issues.includes('learned-format') && canEnrichPrivateFormatReview(existing.event))))) return null;
+  const prior = existing && isUniversalReviewAlert(existing) ? existing.event : null;
+  const item = prepareUniversalReviewAlert({
+    ...input,
+    event: prior ? mergeAiReviewEvent(prior, input.event) : input.event,
+  });
+  // An existing row owns its identity, delivery channel and expiry window.
+  return item && existing ? { ...existing, event: item.event } as ReviewEntry : item;
+}
+
+/**
+ * Enrich a refused record before its caller clears every ephemeral source
+ * copy. The synchronous parser and all its financial outcomes stay intact.
+ */
+export async function parseLocalMessageRecordWithAi(
+  serialized: string,
+  now: Date,
+  expectedMarket: 'AE' | 'SA' | null,
+  session: LaunchAlertSession,
+  ai: Pick<ReturnType<typeof createAiAlertReviewSession>, 'read'>,
+  cancelled?: () => boolean,
+  original?: LocalMessageParseOutcome,
+  privateEnrichment = false,
+): Promise<LocalMessageParseOutcome> {
+  const baseline = original ?? parseLocalMessageRecord(serialized, now, expectedMarket, session);
+  if (expectedMarket !== null || cancelled?.() ||
+    (baseline.kind !== 'ignored' && !(baseline.kind === 'review' &&
+      isUniversalReviewAlert(baseline.item) && (baseline.item.event.family === 'unknown' ||
+        (privateEnrichment && canEnrichPrivateFormatReview(baseline.item.event))) &&
+      !baseline.item.event.issues.includes('learned-format')))) return baseline;
+  const decoded = decodeLocalMessageEnvelope(serialized, now.getTime());
+  if (!decoded || decoded.envelope.source === 'apple-pay') return baseline;
+  const { envelope, observedAt } = decoded;
+  // A deliberate personal-message refusal must not become a model or learned
+  // format proposal merely because its currency routes outside the Gulf.
+  if (hasPersonalMessagePrefix(envelope.text)) return baseline;
+  try {
+    if (baseline.kind === 'ignored') {
+      const refusal = inspectSourceFreeRefusedAlert({ source: envelope.text, sender: envelope.sender,
+        observedAt, channel: envelope.source === 'notification' ? 'push' : 'inbox', session });
+      // A declined, security, future, promotional or other deliberate refusal
+      // must never be resurrected by a model proposal.
+      if (refusal.kind !== 'ignored' || refusal.reason !== 'unrecognized') return baseline;
+    }
+    const event = await ai.read(envelope.text, envelope.sender, observedAt);
+    if (!event || cancelled?.()) return baseline;
+    const item = prepareAiEnrichedLocalReview({
+      ...localReviewIdentity(envelope.id), observedAt,
+      channel: envelope.source === 'notification' ? 'push' : 'inbox', event,
+    }, baseline.kind === 'review' ? baseline.item : undefined);
+    return item ? { kind: 'review', market: null, item, milestone: 'none' } : baseline;
+  } catch {
+    return baseline;
+  }
+}
+
+/** A ready, keyed local format can advise the same source-free Review lane. */
+export async function parseLocalMessageRecordWithPrivateFormat(
+  serialized: string,
+  now: Date,
+  expectedMarket: 'AE' | 'SA' | null,
+  session: LaunchAlertSession,
+  formats: Pick<ReturnType<typeof createPrivateAlertFormatSession>, 'read'>,
+  cancelled?: () => boolean,
+  original?: LocalMessageParseOutcome,
+): Promise<LocalMessageParseOutcome> {
+  const context = { country: getActiveCountry(), dateOrder: activeCountryDateOrder(), routedMarket: expectedMarket };
+  return parseLocalMessageRecordWithAi(serialized, now, expectedMarket, session, {
+    async read(source, sender, observedAt) {
+      const match = await formats.read(source, sender, observedAt, context);
+      return !match || cancelled?.() ? null : privateAlertFormatReviewEvent(source, sender, observedAt, match, context);
+    },
+  }, cancelled, original, true);
+}
+
 /** The pair and day a currency-conflict purchase needs converted, or null. */
 export function currencyConflictFxNeed(
   outcome: Extract<LocalMessageParseOutcome, { kind: 'parsed' }>,
@@ -412,6 +500,12 @@ export function parseLocalMessageRecord(
   }
 
   try {
+    // This consumes every currency while refusing only explicit personal chat.
+    // Do not gate unknown bank formats on a generic-context vocabulary: real
+    // compact field lists can lack those words and still carry sound evidence.
+    if (hasPersonalMessagePrefix(envelope.text)) {
+      return { kind: 'ignored', market: expectedMarket, milestone: 'none' };
+    }
     const inspection = session.inspect(envelope.text, envelope.sender);
     // Apply the same push promotion/non-posting policy as Android before a
     // permissive transaction grammar can mistake an offer for actual money.

@@ -1,4 +1,5 @@
 import type { SourceSpan } from '@/lib/alert-draft';
+import { isOwnerProfileClause, ownerProfilePrefixLength } from '@/lib/alert-source-ownership';
 import { missingUniversalField, type UniversalBankEvent, type UniversalField, type UniversalParseContext } from '@/lib/universal-types';
 
 type DateRole = 'transactionDate' | 'dueDate' | 'statementDate';
@@ -58,6 +59,16 @@ const valuesFor = (token: string, order: UniversalParseContext['dateOrder']): Pi
 /** Labels govern dates; numbers in references and merchant names do not. */
 const dateRole = (text: string, start: number, end: number): DateRole | null => {
   const prefix = text.slice(Math.max(0, start - 140), start);
+  const ownerClause = text.slice(0, start).split(/[\n;!?。।]|\.(?=\s|$)/u).at(-1) ?? '';
+  // An owner/lifecycle label can end in the ordinary word "date" or "on".
+  // Keep its calendar value out; a Dear-name greeting ends at its comma, so
+  // a separately stated transaction after that prefix retains ownership.
+  if (isOwnerProfileClause(ownerClause) && ownerProfilePrefixLength(ownerClause) >= ownerClause.length) return null;
+  // A support/offer instruction may say "on <date>". Its calendar token
+  // does not compete with the transaction's labelled or completed date.
+  const clause = prefix.split(/[\n;!?。।]|\.(?=\s|$)/u).at(-1) ?? '';
+  if (/^\s*(?:for\s+(?:help|support|offers?|promotions?|details)|(?:please\s+)?(?:call|contact|visit|log\s*in))\b/iu.test(clause)) return null;
+  if (/(?:^|\n)\s*في\s*:\s*$/u.test(prefix)) return 'transactionDate';
   if (/(?:\bdue(?:\s+date)?|\bpay(?:ment)?\s+(?:by|before)|\bdeadline|\bdate\s+limite(?:\s+de\s+paiement)?|\bfällig\s+am|支払期限|अंतिम\s+तिथि|\bfecha\s+límite\s+de\s+pago|\bscadenza|भुगतान\s+की\s+अंतिम\s+तिथि|تاريخ\s+استحقاق\s+الدفع|تاريخ\s+(?:الاستحقاق|الإستحقاق)|مستحق(?:ة)?\s*(?:بتاريخ)?|قبل\s+تاريخ)\s*(?:(?:is|on|by|before)\s*)?[:：=-]?\s*$/iu.test(prefix)) return 'dueDate';
   if (/(?:\bstatement\s+(?:date|dated|generated|issued)|\bgenerated|\bissued|تاريخ\s+(?:الكشف|كشف\s+الحساب|الإصدار|الاصدار))\s*(?:(?:is|on)\s*)?[:：=-]?\s*$/iu.test(prefix)) return 'statementDate';
   if (/(?:\b(?:transaction|purchase|payment|posting)\s+date|\bdate|\bdatum|利用日|日時|تاريخ\s+(?:العملية|العمليه|المعاملة|المعامله))\s*(?:(?:is|on)\s*)?[:：=-]?\s*$/iu.test(prefix)) return 'transactionDate';

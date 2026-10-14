@@ -69,7 +69,9 @@ if [ "$(uname -s)" = "Darwin" ]; then
   bash native-history-store.sh
   NATIVE_SUITES=$((NATIVE_SUITES + 1))
   bash native-live-capture-store.sh
-  NATIVE_SUITES=$((NATIVE_SUITES + 1))
+  bash native-parser-context.sh
+  bash native-background-alert-parser.sh
+  NATIVE_SUITES=$((NATIVE_SUITES + 3))
   bash native-live-queue-signal.sh
   NATIVE_SUITES=$((NATIVE_SUITES + 1))
 fi
@@ -110,7 +112,7 @@ done
 #   1. every name below must have a file  — catches a deleted suite
 #   2. the count of *.test.js on disk must match  — catches an unwired suite
 #   3. the count must equal EXPECTED_SUITES  — catches a suite dropped from both
-EXPECTED_SUITES=90
+EXPECTED_SUITES=91
 SUITES=(parser bank-corpus invariants unit worker relay import-plan arabic instant-alert \
         charge-alert kotlin-regex routes perf-config contracts onboarding report \
         trusted-devices cloud-import fx db uncategorised bills categories feedback alert-draft)
@@ -179,6 +181,7 @@ SUITES+=(biller-receipt-dedupe)
 SUITES+=(verification-challenge)
 SUITES+=(gulf-neighbour-alerts)
 SUITES+=(latam-alert-packs)
+SUITES+=(universal-launch-coverage)
 
 missing=""
 for t in "${SUITES[@]}"; do

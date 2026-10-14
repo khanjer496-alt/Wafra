@@ -7,7 +7,10 @@ swiftc -parse-as-library -emit-module -emit-object -module-name ExpoModulesCore 
   -emit-module-path "$scratch/ExpoModulesCore.swiftmodule" \
   modules/wafra-live-capture/ios/Tests/ExpoModulesCoreStub.swift -o "$scratch/ExpoModulesCore.o"
 swiftc -I "$scratch" "$scratch/ExpoModulesCore.o" \
+  modules/wafra-live-capture/ios/WafraNativeParserContext.swift \
   modules/wafra-live-capture/ios/WafraLiveCaptureStore.swift \
+  modules/wafra-live-capture/ios/WafraInstantAlertPatterns.generated.swift \
+  modules/wafra-live-capture/ios/WafraInstantAlertReader.swift \
   modules/wafra-live-capture/ios/WafraLiveCaptureResources.swift \
   modules/wafra-live-capture/ios/WafraLiveCaptureModule.swift \
   scripts/test/native-live-queue-signal.swift -o "$scratch/queue-signal-tests"

@@ -136,6 +136,20 @@ import {
 } from '@/lib/ledger-import';
 import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
 import {
+  emptyPrivateAlertFormatStore,
+  isValidPrivateAlertFormatStore,
+  normalizePrivateAlertFormatStore,
+  removePrivateAlertFormat,
+  type PrivateAlertFormat,
+  type PrivateAlertFormatStore,
+} from '@/lib/private-alert-formats';
+import {
+  activatePrivateAlertFormats,
+  canSavePrivateAlertFormat,
+  erasePrivateAlertFormatKey,
+  invalidatePrivateAlertFormats,
+} from '@/lib/private-alert-format-runtime';
+import {
   setBestEffortAutoPostEnabled,
   tombstonesForRemoved,
 } from '@/lib/best-effort-autopost';
@@ -242,6 +256,7 @@ const STORAGE_KEY = 'wafra/state/v1';
 export const HYDRATION_FINALIZE_VERSION = 2;
 
 const EMPTY_STATE: AppState = {
+  privateAlertFormats: emptyPrivateAlertFormatStore(),
   customCategories: [],
   hydrated: false,
   ledgerMoney: null,
@@ -444,6 +459,8 @@ export function migratePersistedState(
   // return, which uses it to tell "these are still the stored rows" from
   // "these have been rewritten under a receipt that predates them".
   const loadedTransactions = parsed.transactions;
+  const privateFormats = normalizePrivateAlertFormatStore(parsed.privateAlertFormats);
+  parsed.privateAlertFormats = { ...privateFormats, templates: privateFormats.templates.filter(format => format.status === 'validated') };
   parsed.ledgerMoney = migrateLegacyLedgerMoney(parsed);
   parsed.reviewTray = normalizeAlertReviewTray(parsed.reviewTray, Date.now());
   parsed.localCaptureQualifications = normalizeLocalCaptureQualifications(
@@ -885,7 +902,10 @@ export function parseBackupForRestore(
     ) {
       return null;
     }
-    return migratePersistedState(parsed.data as Partial<Omit<AppState, 'hydrated'>>);
+    const incoming = parsed.data as Partial<Omit<AppState, 'hydrated'>>;
+    // Device keys are deliberately absent from portable backups. Even this
+    // phone's own old export cannot resurrect an erased local teaching rule.
+    return migratePersistedState({ ...incoming, privateAlertFormats: emptyPrivateAlertFormatStore() });
   } catch {
     return null;
   } finally {
@@ -894,6 +914,7 @@ export function parseBackupForRestore(
 }
 
 type Action =
+  | { type: 'setPrivateAlertFormats'; formats: PrivateAlertFormatStore }
   | { type: 'createCustomCategory'; category: CustomCategory }
   | { type: 'resolveTransfers'; request: TransferDecisionRequest }
   | { type: 'resolveTransferBatch'; request: TransferDecisionBatchRequest }
@@ -1367,6 +1388,12 @@ function actionMayChangeTransferLinks(state: AppState, reduced: AppState, action
 
 function reduceState(state: AppState, action: Action): AppState {
   switch (action.type) {
+    case 'setPrivateAlertFormats':
+      if (!state.hydrated || !isValidPrivateAlertFormatStore(action.formats) ||
+          action.formats.templates.some(format => format.status !== 'validated')) {
+        throw new Error('Private bank format could not be saved');
+      }
+      return { ...state, privateAlertFormats: action.formats };
     case 'createCustomCategory': {
       if (!state.hydrated) return state;
       const result = prepareCustomCategory(action.category.name, action.category.type, state.customCategories ?? [], action.category.id);
@@ -1381,6 +1408,11 @@ function reduceState(state: AppState, action: Action): AppState {
     case 'restore': {
       // Merge over defaults so states saved by older app versions stay valid.
       const next = { ...EMPTY_STATE, ...action.state, hydrated: true };
+      next.privateAlertFormats = action.type === 'hydrate'
+        ? normalizePrivateAlertFormatStore(next.privateAlertFormats)
+        : emptyPrivateAlertFormatStore();
+      next.privateAlertFormats = { ...next.privateAlertFormats,
+        templates: next.privateAlertFormats.templates.filter(format => format.status === 'validated') };
       next.customCategories = sanitizeCustomCategoryCatalog(next.customCategories);
       // Orphan money keeps its opaque category for honest history. Orphan
       // automation rules cannot keep assigning an unregistered category.
@@ -2078,6 +2110,9 @@ interface StoreValue {
    * this before acknowledging a row that deduped against in-memory state.
    */
   ensureDurable: () => Promise<void>;
+  addPrivateAlertFormat: (template: PrivateAlertFormat) => Promise<void>;
+  removePrivateAlertFormat: (id: string) => Promise<void>;
+  clearPrivateAlertFormats: () => Promise<void>;
   undoBatch: (ids: string[]) => void;
   upsertBudget: (b: Budget) => void;
   deleteBudget: (category: Budget['category']) => void;
@@ -2404,6 +2439,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (replacesLedger) {
       stateGeneration.current += 1;
     }
+    if (replacesLedger || action.type === 'blockPersistence' || action.type === 'setPrivateAlertFormats' ||
+        action.type === 'setPrivateMode' || action.type === 'setCaptureOptOut') {
+      invalidatePrivateAlertFormats();
+      if (replacesLedger && action.type !== 'clearAll' && next.hydrated) {
+        activatePrivateAlertFormats(next.privateAlertFormats);
+      }
+      // Private Mode permits local parsing. Retire old sessions, then make
+      // source-free metadata available to fresh explicit teaching requests.
+      if ((action.type === 'setPrivateMode' || action.type === 'setCaptureOptOut') && next.hydrated) {
+        activatePrivateAlertFormats(next.privateAlertFormats);
+      }
+    }
     if (replacesLedger ||
         ((action.type === 'setPrivateMode' || action.type === 'setCaptureOptOut') && action.enabled)) {
       cancelLocalSemanticBackgroundWork();
@@ -2585,6 +2632,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     // cancelling it: the same mechanism a retry uses.
     return () => {
       hydrationRun.current += 1;
+      invalidatePrivateAlertFormats();
     };
   }, [hydrate]);
 
@@ -2866,6 +2914,73 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     };
   }, [dispatch, persist]);
 
+  const addPrivateAlertFormat = useCallback(async (template: PrivateAlertFormat) => {
+    const generation = stateGeneration.current;
+    if (!authoritativeState.current.hydrated || template?.status !== 'validated' ||
+        !(await canSavePrivateAlertFormat(template)) || generation !== stateGeneration.current) {
+      throw new Error('Private bank format could not be saved');
+    }
+    const current = authoritativeState.current.privateAlertFormats ?? emptyPrivateAlertFormatStore();
+    const formats: PrivateAlertFormatStore = {
+      version: 1,
+      templates: [...current.templates.filter(row => row.id !== template.id), template],
+    };
+    if (!isValidPrivateAlertFormatStore(formats)) throw new Error('Private bank format could not be saved');
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+    const next = dispatch({ type: 'setPrivateAlertFormats', formats });
+    if (!(await persist(next))) {
+      if (generation === stateGeneration.current && authoritativeState.current.privateAlertFormats === formats) {
+        const rolledBack = dispatch({ type: 'setPrivateAlertFormats', formats: current });
+        if (rolledBack.hydrated) activatePrivateAlertFormats(current);
+      }
+      throw new Error('Private bank format could not be saved');
+    }
+    // No pending capture may use an uncommitted teaching rule. A concurrent
+    // remove/clear/restore owns the runtime instead of this older writer.
+    if (generation === stateGeneration.current && authoritativeState.current.privateAlertFormats === formats &&
+        authoritativeState.current.hydrated) activatePrivateAlertFormats(formats);
+  }, [dispatch, persist]);
+
+  const removePrivateAlertFormatAction = useCallback(async (id: string) => {
+    const generation = stateGeneration.current;
+    if (!authoritativeState.current.hydrated) throw new Error('Private bank format could not be removed');
+    const current = authoritativeState.current.privateAlertFormats ?? emptyPrivateAlertFormatStore();
+    const formats = removePrivateAlertFormat(current, id);
+    if (!isValidPrivateAlertFormatStore(formats)) throw new Error('Private bank format could not be removed');
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+    const next = dispatch({ type: 'setPrivateAlertFormats', formats });
+    if (!(await persist(next))) {
+      if (generation === stateGeneration.current && authoritativeState.current.privateAlertFormats === formats) {
+        const rolledBack = dispatch({ type: 'setPrivateAlertFormats', formats: current });
+        if (rolledBack.hydrated) activatePrivateAlertFormats(current);
+      }
+      throw new Error('Private bank format could not be removed');
+    }
+    if (generation === stateGeneration.current && authoritativeState.current.privateAlertFormats === formats &&
+        authoritativeState.current.hydrated) activatePrivateAlertFormats(formats);
+  }, [dispatch, persist]);
+
+  const clearPrivateAlertFormats = useCallback(async () => {
+    const generation = stateGeneration.current;
+    if (!authoritativeState.current.hydrated) throw new Error('Private bank formats could not be cleared');
+    const current = authoritativeState.current.privateAlertFormats ?? emptyPrivateAlertFormatStore();
+    const formats = emptyPrivateAlertFormatStore();
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+    const next = dispatch({ type: 'setPrivateAlertFormats', formats });
+    if (!(await persist(next))) {
+      if (generation === stateGeneration.current && authoritativeState.current.privateAlertFormats === formats) {
+        const rolledBack = dispatch({ type: 'setPrivateAlertFormats', formats: current });
+        if (rolledBack.hydrated) activatePrivateAlertFormats(current);
+      }
+      throw new Error('Private bank formats could not be cleared');
+    }
+    if (generation === stateGeneration.current && authoritativeState.current.privateAlertFormats === formats) {
+      await erasePrivateAlertFormatKey();
+      if (generation === stateGeneration.current && authoritativeState.current.privateAlertFormats === formats &&
+          authoritativeState.current.hydrated) activatePrivateAlertFormats(formats);
+    }
+  }, [dispatch, persist]);
+
   const ensureDurable = useCallback(async () => {
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
@@ -3142,6 +3257,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [dispatch]);
 
   const setPrivateMode = useCallback(async (enabled: boolean) => {
+    const generation = stateGeneration.current;
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
@@ -3149,9 +3265,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const next = dispatch({ type: 'setPrivateMode', enabled });
     const written = await persist(next);
     if (!written) throw new Error('Private Mode could not be saved');
+    const current = authoritativeState.current;
+    if (generation === stateGeneration.current && current.hydrated && current.privateMode === enabled &&
+        current.privateAlertFormats === next.privateAlertFormats) activatePrivateAlertFormats(current.privateAlertFormats);
   }, [dispatch, persist]);
 
   const setCaptureOptOut = useCallback(async (enabled: boolean) => {
+    const generation = stateGeneration.current;
     if (enabled) {
       if (Platform.OS === 'android') {
         const { default: reader } = await import('../../modules/notification-reader');
@@ -3171,6 +3291,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const next = dispatch({ type: 'setCaptureOptOut', enabled });
     const written = await persist(next);
     if (!written) throw new Error('Capture preference could not be saved');
+    const current = authoritativeState.current;
+    if (generation === stateGeneration.current && current.hydrated && current.captureOptOut === enabled &&
+        current.privateAlertFormats === next.privateAlertFormats) activatePrivateAlertFormats(current.privateAlertFormats);
   }, [dispatch, persist]);
 
   const setAndroidCaptureSources = useCallback(async (sources: AndroidCaptureSources) => {
@@ -3337,6 +3460,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       founderPro: _founderPro,
       trialStartTs: _trial,
       reviewTray: _reviewTray,
+      privateAlertFormats: _privateAlertFormats,
       hydrationReparseKey: _hydrationReparseKey,
       hydrationFinalizeVersion: _hydrationFinalizeVersion,
       bnplCategoryRepairVersion: _bnplCategoryRepairVersion,
@@ -3389,6 +3513,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const clearAll = useCallback(async (captureCleanup?: () => Promise<void>) => {
     const afterErase = async () => {
+      await erasePrivateAlertFormatKey();
       await captureCleanup?.();
       await cleanupGeneratedExports({ eraseAll: true });
       // Widgets hold a copy of a few figures; erasing the ledger erases those too.
@@ -3497,6 +3622,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       dismissReviewAlert,
       promoteReviewAlert,
       ensureDurable,
+      addPrivateAlertFormat,
+      removePrivateAlertFormat: removePrivateAlertFormatAction,
+      clearPrivateAlertFormats,
       undoBatch,
       upsertBudget,
       deleteBudget,
@@ -3573,6 +3701,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       dismissReviewAlert,
       promoteReviewAlert,
       ensureDurable,
+      addPrivateAlertFormat,
+      removePrivateAlertFormatAction,
+      clearPrivateAlertFormats,
       undoBatch,
       upsertBudget,
       deleteBudget,

@@ -152,7 +152,7 @@ eq('iOS message setup: Future guide tells the user to leave Sender empty because
 ok('iOS message setup: the unfiltered trigger is explained as on-device filtering, never a fake contact or a skip',
   translated('iosMessageGuideNoFilter', 'en').includes('Message Contains') &&
     translated('iosMessageGuideNoFilter', 'en').includes('single space') &&
-    translated('iosMessageGuideNoFilter', 'en').includes('discards other messages on this iPhone') &&
+    translated('iosMessageGuideNoFilter', 'en').includes('regardless of currency') &&
     translated('iosMessageContinueManual', 'en') === 'Skip for now' &&
     !/skip this setup|fake contact|add .* to Contacts/i.test(translated('iosMessageGuideNoFilter', 'en')));
 ok('iOS message setup: obsolete universal-trigger instructions are absent',
@@ -180,8 +180,8 @@ ok('iOS message setup: completion copy never calls the automation verified',
   ));
 ok('iOS message setup: Help explains why no Contact is picked as Sender',
   /iosMessageSenderUnavailable/.test(detailsSheet) &&
-    translated('iosMessageSenderUnavailable', 'en')?.includes('Do not pick a Contact as Sender') &&
-    translated('iosMessageSenderUnavailable', 'en')?.includes('bank SMS IDs are not Contacts'));
+    /leave Sender empty/i.test(translated('iosMessageSenderUnavailable', 'en')) &&
+    translated('iosMessageSenderUnavailable', 'en')?.includes('Notify When Run'));
 
 eq('iOS message setup: Past row keeps only the compact inline disclosures', [
   translated('iosMessagePastDetail', 'en'),

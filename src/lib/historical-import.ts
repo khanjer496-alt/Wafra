@@ -322,9 +322,10 @@ export function parseHistoricalMessageRecords(
     const result = foreignIssuer || foreignRoute
       ? launchSession.parseUnproven(record.text, sender ?? '', inspection, timestamp)
       : launchSession.parse(record.text, sender ?? '', inspection, undefined, timestamp);
-    // Launch-tested AED/SAR rows as before. An unproven-format row passed the
-    // best-effort policy and is marked for checking; it must be in the pinned
-    // ledger currency so it can never make a history batch mixed-currency.
+    // Launch-tested AED/SAR rows as before. Only ordinary best-effort
+    // transactions have complete check/Undo support. Card dues have no
+    // visible marker, and settlement Undo cannot roll back account changes;
+    // keep unproven obligations in typed Review with their extracted facts.
     const bestEffortAccepted = !!result?.bestEffort && result.kind === 'transaction' &&
       result.currency === pinnedLedgerCurrencyCode();
     if (!result || (!bestEffortAccepted && (result.bestEffort ||

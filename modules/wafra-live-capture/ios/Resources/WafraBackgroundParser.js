@@ -1,0 +1,15226 @@
+// Generated from normal shipping TypeScript. Source SHA-256: 653dd30cbfe3088f0fcde2a90ab55bbddb032a898db13cf544f96222b7b6a1d8
+(function(){'use strict';
+const factories={
+"alert-draft":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.ALERT_DRAFT_VERSION = void 0;
+exports.normalizeAlertText = normalizeAlertText;
+exports.inspectAlertDraft = inspectAlertDraft;
+const currency_metadata_1 = require("@/lib/currency-metadata");
+exports.ALERT_DRAFT_VERSION = 1;
+const DIGIT_ZEROES = [0x0660, 0x06f0, 0x0966, 0x09e6, 0x0e50, 0x1040, 0xff10];
+function normalizeAlertText(source) {
+    let out = '';
+    for (const character of source) {
+        const code = character.codePointAt(0);
+        let replaced = character;
+        for (const zero of DIGIT_ZEROES) {
+            if (code >= zero && code <= zero + 9) {
+                replaced = String(code - zero);
+                break;
+            }
+        }
+        if (character === '٬')
+            replaced = ',';
+        else if (character === '−')
+            replaced = '-';
+        else if (character === '\u00a0' || character === '\u2007' || character === '\u202f')
+            replaced = ' ';
+        else if ((code >= 0x200e && code <= 0x200f) || (code >= 0x202a && code <= 0x202e) ||
+            (code >= 0x2066 && code <= 0x2069))
+            replaced = ' ';
+        else if ((code >= 0xfb50 && code <= 0xfdff) || (code >= 0xfe70 && code <= 0xfeff)) {
+            const folded = character.normalize('NFKC');
+            if (folded.length === character.length)
+                replaced = folded;
+        }
+        out += replaced;
+    }
+    return out;
+}
+const DOT_GROUPING_CURRENCIES = new Set(['IDR', 'COP']);
+function parseNumber(source, exponent, currency = '', dotDecimal = false) {
+    let value = source.trim().replace(/[+]/g, '');
+    const negative = value.startsWith('-');
+    if (negative)
+        value = value.slice(1);
+    value = value.replace(/[ '\u2019]/g, '');
+    if (!/^\d[\d.,٫]*$/.test(value) || value.length > 48)
+        return null;
+    const arabicDecimal = value.lastIndexOf('٫');
+    const dot = value.lastIndexOf('.');
+    const comma = value.lastIndexOf(',');
+    let decimalAt = -1;
+    let ambiguous = false;
+    let dotThreeDecimal = null;
+    const validGroupedInteger = (raw, separator) => {
+        const parts = raw.split(separator);
+        if (parts.length < 2 || !/^\d{1,3}$/.test(parts[0]) || !/^\d{3}$/.test(parts[parts.length - 1])) {
+            return false;
+        }
+        const middle = parts.slice(1, -1);
+        return middle.length === 0 || middle.every((part) => /^\d{3}$/.test(part)) ||
+            middle.every((part) => /^\d{2}$/.test(part));
+    };
+    if (arabicDecimal >= 0) {
+        if (value.indexOf('٫') !== arabicDecimal || dot >= 0)
+            return null;
+        const tail = value.length - arabicDecimal - 1;
+        if (exponent <= 0 || tail < 1 || tail > exponent)
+            return null;
+        const integerPart = value.slice(0, arabicDecimal);
+        if (integerPart.includes(',') && !validGroupedInteger(integerPart, ','))
+            return null;
+        decimalAt = arabicDecimal;
+    }
+    else if (dot >= 0 && comma >= 0) {
+        const last = Math.max(dot, comma);
+        const tail = value.length - last - 1;
+        if (exponent <= 0 || tail !== exponent)
+            return null;
+        const decimalSeparator = value[last];
+        const groupingSeparator = decimalSeparator === '.' ? ',' : '.';
+        const integerPart = value.slice(0, last);
+        if (integerPart.includes(decimalSeparator) ||
+            (integerPart.includes(groupingSeparator) && !validGroupedInteger(integerPart, groupingSeparator))) {
+            return null;
+        }
+        decimalAt = last;
+    }
+    else if (dot >= 0 || comma >= 0) {
+        const separator = dot >= 0 ? '.' : ',';
+        const locations = [...value.matchAll(new RegExp(`\\${separator}`, 'g'))].map((m) => m.index);
+        const last = locations[locations.length - 1];
+        const tail = value.length - last - 1;
+        if (locations.length === 1 && exponent > 0 && tail > 0 && tail <= exponent) {
+            decimalAt = last;
+            ambiguous = exponent === 3 && tail === 3 && !(dotDecimal && separator === '.');
+        }
+        else if (exponent === 3 && tail === 3 &&
+            validGroupedInteger(value.slice(0, last), separator)) {
+            decimalAt = last;
+            ambiguous = true;
+        }
+        else if (separator === '.' && locations.length === 1 && exponent > 0 && exponent < 3 && tail === 3 &&
+            !DOT_GROUPING_CURRENCIES.has(currency) && validGroupedInteger(value, separator)) {
+            ambiguous = true;
+            if (value.endsWith('0'))
+                dotThreeDecimal = value.slice(0, -1);
+        }
+        else if (!validGroupedInteger(value, separator)) {
+            return null;
+        }
+    }
+    const integerRaw = decimalAt >= 0 ? value.slice(0, decimalAt) : value;
+    const fractionRaw = decimalAt >= 0 ? value.slice(decimalAt + 1) : '';
+    const integer = integerRaw.replace(/[.,٫]/g, '');
+    if (!/^\d+$/.test(integer) || (fractionRaw && !/^\d+$/.test(fractionRaw)))
+        return null;
+    if (fractionRaw.length > exponent)
+        return null;
+    const digits = `${integer}${fractionRaw.padEnd(exponent, '0')}`.replace(/^0+(?=\d)/, '');
+    const minorUnits = `${negative ? '-' : ''}${digits || '0'}`;
+    let alternateMinorUnits = null;
+    if (ambiguous && decimalAt < 0) {
+        if (dotThreeDecimal !== null) {
+            const [whole, fraction] = dotThreeDecimal.split('.');
+            const decimal = `${whole}${fraction.padEnd(exponent, '0')}`.replace(/^0+(?=\d)/, '') || '0';
+            alternateMinorUnits = `${negative ? '-' : ''}${decimal}`;
+        }
+    }
+    else if (ambiguous) {
+        const grouped = value.replace(/[.,٫]/g, '').replace(/^0+(?=\d)/, '') || '0';
+        alternateMinorUnits = `${negative ? '-' : ''}${grouped}${'0'.repeat(exponent)}`;
+    }
+    return { minorUnits, ambiguous, alternateMinorUnits };
+}
+const NUMBER = `[+-]?(?:\\d[\\d.,٫' \\u2019]{0,46}\\d|\\d)`;
+const TOKEN_GAP = '\\s{0,3}';
+const ISO_PREFIX = new RegExp(`\\b([A-Za-z]{3})${TOKEN_GAP}(${NUMBER})`, 'g');
+const ISO_SUFFIX = new RegExp(`(${NUMBER})${TOKEN_GAP}([A-Za-z]{3})\\b`, 'g');
+const SYMBOLS = Object.keys(currency_metadata_1.CURRENCY_SYMBOL_CANDIDATES).sort((a, b) => b.length - a.length);
+const escapeRe = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const SYMBOL_PATTERN = SYMBOLS.map(escapeRe).join('|');
+const SYMBOL_PREFIX = new RegExp(`(${SYMBOL_PATTERN})${TOKEN_GAP}(${NUMBER})`, 'g');
+const SYMBOL_SUFFIX = new RegExp(`(${NUMBER})${TOKEN_GAP}(${SYMBOL_PATTERN})`, 'g');
+const aliasPatterns = new Map();
+const aliasPatternPair = (pattern) => {
+    const cached = aliasPatterns.get(pattern);
+    if (cached)
+        return cached;
+    const pair = [
+        new RegExp(`(^|[^\\p{L}\\p{N}])(${pattern})${TOKEN_GAP}(${NUMBER})`, 'giu'),
+        new RegExp(`(${NUMBER})${TOKEN_GAP}(${pattern})(?=$|[^\\p{L}\\p{N}])`, 'giu'),
+    ];
+    if (aliasPatterns.size >= 32)
+        aliasPatterns.clear();
+    aliasPatterns.set(pattern, pair);
+    return pair;
+};
+const collectAliasRaw = (normalized, aliases) => {
+    const tokens = Object.keys(aliases).sort((a, b) => b.length - a.length);
+    if (!tokens.length)
+        return [];
+    const currenciesByToken = new Map(tokens.map((token) => [token.toLowerCase(), aliases[token]]));
+    const pattern = tokens.map(escapeRe).join('|');
+    const [prefix, suffix] = aliasPatternPair(pattern);
+    const found = [];
+    for (const [re, tokenAt, amountAt] of [[prefix, 2, 3], [suffix, 2, 1]]) {
+        re.lastIndex = 0;
+        for (const match of normalized.matchAll(re)) {
+            const leading = re === prefix ? match[1].length : 0;
+            const token = match[tokenAt];
+            const currencies = currenciesByToken.get(token.toLowerCase());
+            if (!currencies?.length)
+                continue;
+            found.push({
+                start: match.index + leading,
+                end: match.index + match[0].length,
+                amount: match[amountAt],
+                token,
+                currencies,
+                evidence: currencies.length === 1 ? 'unique-symbol' : 'ambiguous-symbol',
+            });
+        }
+    }
+    return found;
+};
+function collectRaw(normalized, aliases = {}) {
+    const found = [];
+    const scanIso = (re, prefix) => {
+        re.lastIndex = 0;
+        for (const match of normalized.matchAll(re)) {
+            if (!prefix && match.index > 0 &&
+                /[\p{L}\p{N}]/u.test(normalized[match.index - 1]))
+                continue;
+            const matchEnd = match.index + match[0].length;
+            if (matchEnd < normalized.length && /[\p{L}\p{N}]/u.test(normalized[matchEnd]))
+                continue;
+            const code = (prefix ? match[1] : match[2]).toUpperCase();
+            if ((0, currency_metadata_1.currencyMinorUnits)(code) === null)
+                continue;
+            found.push({
+                start: match.index,
+                end: match.index + match[0].length,
+                amount: prefix ? match[2] : match[1],
+                token: code,
+                currencies: [code],
+                evidence: 'iso-code',
+            });
+        }
+    };
+    const scanSymbol = (re, prefix) => {
+        re.lastIndex = 0;
+        for (const match of normalized.matchAll(re)) {
+            if (!prefix && match.index > 0 &&
+                /[\p{L}\p{N}]/u.test(normalized[match.index - 1]) &&
+                !/[\p{Script=Han}\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(normalized[match.index - 1]))
+                continue;
+            const matchEnd = match.index + match[0].length;
+            if (matchEnd < normalized.length && /[\p{L}\p{N}]/u.test(normalized[matchEnd]))
+                continue;
+            const token = prefix ? match[1] : match[2];
+            const currencies = currency_metadata_1.CURRENCY_SYMBOL_CANDIDATES[token];
+            if (!currencies)
+                continue;
+            if (prefix && token.endsWith('$') && match.index > 0 &&
+                /[A-Za-z]/.test(normalized[match.index - 1]))
+                continue;
+            if (token === 'جنيه' && /^\s*[اإأ]?سترلين/u.test(normalized.slice(matchEnd)))
+                continue;
+            found.push({
+                start: match.index,
+                end: match.index + match[0].length,
+                amount: prefix ? match[2] : match[1],
+                token,
+                currencies,
+                evidence: currencies.length === 1 ? 'unique-symbol' : 'ambiguous-symbol',
+            });
+        }
+    };
+    scanIso(ISO_PREFIX, true);
+    scanIso(ISO_SUFFIX, false);
+    found.push(...collectAliasRaw(normalized, aliases));
+    scanSymbol(SYMBOL_PREFIX, true);
+    scanSymbol(SYMBOL_SUFFIX, false);
+    const clock = (item) => (normalized[item.end] === ':' && /\d/.test(normalized[item.end + 1] ?? '')) ||
+        (normalized[item.start - 1] === ':' && /\d/.test(normalized[item.start - 2] ?? ''));
+    const sorted = found
+        .filter((item) => !clock(item))
+        .sort((a, b) => a.start - b.start || b.end - a.end)
+        .filter((item, index, all) => !all.slice(0, index).some((prior) => prior.start === item.start && prior.end === item.end));
+    return sorted.filter((item) => item.evidence === 'iso-code' || !sorted.some((other) => other.evidence === 'iso-code' && other.start < item.end && item.start < other.end &&
+        other.amount.replace(/[^\d]/g, '') === item.amount.replace(/[^\d]/g, '') &&
+        item.currencies.includes(other.currencies[0])));
+}
+const HARD_NEGATIVES = [
+    ['authentication-or-otp', /\b(?:otp|one[ -]?time password|verification code|authorization code|security code|do not share|pin)\b|رمز (?:التحقق|التأكيد)|كلمة المرور/i],
+    ['declined-or-failed', /\b(?:declined|failed|unsuccessful|rejected|not approved)\b|مرفوض|فشل(?:ت|ت)?/i],
+    ['scheduled-or-due', /\b(?:pre[ -]?debit|will be (?:debited|charged|deducted|collected)|will apply|scheduled|due on|payment due|reminder)\b|سيتم (?:خصم|سحب|تحصيل)|مستحق/i],
+    ['promotion', /\b(?:offer|promotion|promo code|discount voucher|apply now)\b|عرض ترويجي|خصم خاص/i],
+    ['aggregate-or-summary', /\b(?:spend to date|spending summary|totaling|statement total|monthly total)\b|ملخص (?:الإنفاق|المصروفات)/i],
+];
+const MOVEMENT_WORDS = /\b(?:spent|purchase|purchased|paid|charged|debited|credited|received|sent|withdrawn|deposited|refund|reversal|transfer)\b|شراء|خصم|إيداع|تحويل|استرداد/i;
+const BALANCE_ONLY = /\b(?:available balance|current balance|available limit|credit limit|outstanding balance)\b|الرصيد (?:الحالي|المتاح)|الحد (?:المتاح|الائتماني)/i;
+function inspectAlertDraft(source, context = {}) {
+    const normalizedText = normalizeAlertText(source.slice(0, 4096));
+    const reasons = HARD_NEGATIVES.filter(([, pattern]) => pattern.test(normalizedText)).map(([reason]) => reason);
+    if (source.length > 4096)
+        reasons.push('input-too-long');
+    if (BALANCE_ONLY.test(normalizedText) && !MOVEMENT_WORDS.test(normalizedText))
+        reasons.push('balance-only');
+    const candidates = [];
+    const rawCandidates = collectRaw(normalizedText, context.currencyAliases);
+    if (rawCandidates.length > 16)
+        reasons.push('too-many-money-candidates');
+    for (const raw of rawCandidates.slice(0, 16)) {
+        const interpretations = [];
+        let numberAmbiguous = false;
+        for (const currency of raw.currencies) {
+            const exponent = (0, currency_metadata_1.currencyMinorUnits)(currency);
+            if (exponent === null)
+                continue;
+            const parsed = parseNumber(raw.amount, exponent, currency, context.dotDecimalCurrencies?.includes(currency) === true);
+            if (!parsed)
+                continue;
+            interpretations.push({ currency, minorUnits: parsed.minorUnits, exponent });
+            if (parsed.ambiguous)
+                numberAmbiguous = true;
+            if (parsed.alternateMinorUnits !== null) {
+                numberAmbiguous = true;
+                interpretations.push({ currency, minorUnits: parsed.alternateMinorUnits, exponent });
+            }
+        }
+        const uniqueInterpretations = interpretations.filter((item, index, all) => all.findIndex((other) => other.currency === item.currency &&
+            other.minorUnits === item.minorUnits &&
+            other.exponent === item.exponent) === index);
+        if (!uniqueInterpretations.length) {
+            const figure = raw.amount.trim().replace(/^[+-]/, '');
+            const fraction = /^\d{1,3}(?:,\d{3})*\.(\d+)$|^\d+\.(\d+)$/.exec(figure);
+            const decimals = fraction ? fraction[1] ?? fraction[2] : '';
+            const exponents = raw.currencies.map((currency) => (0, currency_metadata_1.currencyMinorUnits)(currency));
+            const labelled = /\b(?:bal(?:ance|n)?|avl|avail(?:able)?|limit)\b[^\d\n]{0,16}$/i
+                .test(normalizedText.slice(Math.max(0, raw.start - 24), raw.start));
+            if (fraction && !labelled && exponents.every((exponent) => exponent === 0) &&
+                /[1-9]/.test(decimals)) {
+                reasons.push('exponent-invalid-money');
+            }
+            continue;
+        }
+        const values = [...new Set(uniqueInterpretations.map((item) => `${item.exponent}:${item.minorUnits}`))];
+        const everyCurrencyParsed = new Set(uniqueInterpretations.map((item) => item.currency)).size === raw.currencies.length;
+        const canonical = values.length === 1 && everyCurrencyParsed ? uniqueInterpretations[0] : null;
+        const ambiguities = [];
+        if (raw.currencies.length > 1)
+            ambiguities.push('currency-symbol');
+        if (numberAmbiguous)
+            ambiguities.push('decimal-or-grouping');
+        if (values.length > 1 && raw.currencies.length > 1)
+            ambiguities.push('currency-exponent');
+        candidates.push({
+            currency: raw.currencies.length === 1 ? raw.currencies[0] : null,
+            currencyCandidates: raw.currencies,
+            minorUnits: canonical?.minorUnits ?? null,
+            exponent: canonical?.exponent ?? null,
+            interpretations: uniqueInterpretations,
+            sourceText: source.slice(raw.start, raw.end),
+            span: { start: raw.start, end: raw.end },
+            evidence: raw.evidence,
+            confidence: raw.evidence === 'iso-code'
+                ? (numberAmbiguous ? 0.72 : 0.98)
+                : raw.evidence === 'unique-symbol'
+                    ? (numberAmbiguous ? 0.65 : 0.9)
+                    : 0.55,
+            ambiguities,
+        });
+    }
+    if (!candidates.length)
+        reasons.push('no-grounded-money');
+    else if (candidates.some((candidate) => candidate.ambiguities.length > 0))
+        reasons.push('ambiguous-money');
+    return {
+        parserVersion: exports.ALERT_DRAFT_VERSION,
+        normalizedText,
+        decision: reasons.some((reason) => reason !== 'ambiguous-money') ? 'refuse' : 'review',
+        reasons: [...new Set(reasons)],
+        candidates,
+    };
+}
+},
+"alert-event-evidence":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.inspectAlertEventEvidence = void 0;
+const MANDATE = /\b(?:e[ -]?mandate|upi mandate|autopay mandate|mandate)\b|تفويض|[أا]مر دفع/i;
+const STANDING_ORDER = /\b(?:standing order|standing instruction|dauerauftrag|ordine permanente)\b|[أا]مر مستديم/i;
+const DIRECT_DEBIT = /\b(?:direct debit|sepa direct debit|pr[eé]l[eè]vement|lastschrift|domiciliaci[oó]n|addebito diretto|automatische incasso|nach|ecs)\b|خصم مباشر/i;
+const SCHEDULED = /\b(?:pre[ -]?debit|will be (?:debited|charged|deducted|collected)|will apply|scheduled debit|next debit|upcoming debit|collect request|due on)\b|سيتم (?:الخصم|السحب|التحصيل)|خصم قادم/i;
+const CREATED = /\b(?:created|registered|set up|setup successful|activated|approved)\b|تم (?:[إا]نشاء|تسجيل|تفعيل|الموافق[ةه])/i;
+const MODIFIED = /\b(?:modified|amended|updated)\b|تم (?:تعديل|تحديث)/i;
+const PAUSED = /\b(?:paused|suspended)\b|تم (?:تعليق|[إا]يقاف مؤقت)/i;
+const RESUMED = /\b(?:resumed|reactivated)\b|تم (?:استئناف|[إا]عاده التفعيل)/i;
+const CANCELLED = /\b(?:cancelled|canceled|revoked|stopped|deactivated|terminated)\b|تم (?:[إا]لغاء|[إا]يقاف)|ملغ[يى]/i;
+const FAILED = /\b(?:failed|declined|rejected|unsuccessful|returned unpaid)\b|فشل|مرفوض/i;
+const REVERSED = /\b(?:reversed|refunded|returned)\b|تم (?:العكس|الاسترداد|الرد)/i;
+const FUNDS_RELEASED = /\b(?:funds?|amount) (?:unblocked|released)\b|تم (?:فك الحجز|تحرير المبلغ)/i;
+const EXECUTED = /\bexecuted\b|تم التنفيذ/i;
+const POSTED = /\b(?:charged|debited|paid|posted|processed|completed|successful)\b|تم (?:الخصم|الدفع|التنفيذ)/i;
+const MOVEMENT = /\b(?:charged|debited|credited|paid|withdrawn|deposited)\b|تم (?:الخصم|الدفع|الإيداع)/i;
+const REFERENCE = /\b(?:mandate id|mandate reference|umn|unique mandate reference|instruction id|reference)\b|رقم (?:التفويض|المرجع)/i;
+const FEE = /\b(?:annual|monthly|maintenance|service|membership|renewal|overdraft|late payment)(?:\s+(?:bank|account|card|maintenance|service|membership)){0,3}\s+(?:fee|charge)\b|\b(?:bank|account|card)\s+(?:fee|charge)\b|رسوم (?:سنوي[ةه]|شهري[ةه]|حساب|بطاق[ةه]|خدم[ةه])/i;
+const CARD_SCOPE = /\b(?:credit|debit)?\s*card\b|بطاق[ةه]/i;
+const ACCOUNT_SCOPE = /\b(?:bank )?account\b|\ba\/?c\b|حساب/i;
+const WALLET_SCOPE = /\bwallet\b|محفظه/i;
+const CARD_LAST4 = /\bcard(?:\s+(?:ending(?:\s+in)?|no\.?|number))?\s*[*xX•-]*(\d{4})\b/i;
+const ACCOUNT_LAST4 = /\b(?:account|a\/?c)(?:\s+(?:ending(?:\s+in)?|no\.?|number))?\s*[*xX•-]*(\d{4})\b/i;
+const WALLET_LAST4 = /\bwallet(?:\s+(?:ending(?:\s+in)?|no\.?|number))?\s*[*xX•-]*(\d{4})\b/i;
+const ARABIC_CARD_LAST4 = /بطاق[ةه].{0,24}(?:تنتهي|[آا]خر\s*(?:4|[أا]ربع[ةه])|رقم)\s*[*xX•-]*(\d{4})/i;
+const ARABIC_ACCOUNT_LAST4 = /حساب.{0,24}(?:ينتهي|[آا]خر\s*(?:4|[أا]ربع[ةه])|رقم)\s*[*xX•-]*(\d{4})/i;
+const scheduledDebitEvent = (text) => {
+    if (CANCELLED.test(text))
+        return 'cancelled';
+    if (PAUSED.test(text))
+        return 'paused';
+    if (RESUMED.test(text))
+        return 'resumed';
+    if (MODIFIED.test(text))
+        return 'modified';
+    if (FAILED.test(text))
+        return 'failed';
+    if (FUNDS_RELEASED.test(text))
+        return 'funds-released';
+    if (REVERSED.test(text))
+        return 'reversed';
+    if (CREATED.test(text))
+        return 'created';
+    if (SCHEDULED.test(text))
+        return 'scheduled';
+    if (EXECUTED.test(text))
+        return 'executed';
+    if (POSTED.test(text))
+        return 'posted';
+    return 'unknown';
+};
+const scheduledDebitScheme = (text) => {
+    if (/\bupi(?:\s+autopay)?\b/i.test(text))
+        return 'upi-autopay';
+    if (/\bnach\b/i.test(text))
+        return 'nach';
+    if (/\becs\b/i.test(text))
+        return 'ecs';
+    if (/\bsepa(?:\s+direct debit)?\b|pr[eé]l[eè]vement|lastschrift|domiciliaci[oó]n|addebito diretto|automatische incasso/i.test(text)) {
+        return 'sepa-direct-debit';
+    }
+    if (/\bbacs\b/i.test(text))
+        return 'bacs-direct-debit';
+    if (/\bach\b/i.test(text))
+        return 'ach-debit';
+    if (STANDING_ORDER.test(text))
+        return 'standing-order';
+    return 'unknown';
+};
+const scheduledDebitFor = (text, recurringTerm, primaryCandidateIndex) => {
+    let subject = null;
+    if (MANDATE.test(text))
+        subject = 'mandate';
+    else if (STANDING_ORDER.test(text))
+        subject = 'standing-instruction';
+    else if (DIRECT_DEBIT.test(text))
+        subject = 'direct-debit';
+    else if (SCHEDULED.test(text) && recurringTerm)
+        subject = 'merchant-agreement';
+    if (!subject)
+        return null;
+    const event = scheduledDebitEvent(text);
+    const amountRole = event === 'scheduled' ? 'scheduled' :
+        event === 'executed' && MOVEMENT.test(text) ? 'posted' :
+            event === 'posted' || event === 'reversed' ? 'posted' :
+                event === 'created' || event === 'modified' ? 'maximum' : 'none';
+    return {
+        subject,
+        scheme: scheduledDebitScheme(text),
+        event,
+        amountRole,
+        amountCandidateIndex: amountRole === 'none' ? null : primaryCandidateIndex,
+        hasReference: REFERENCE.test(text),
+    };
+};
+const feeFor = (text) => {
+    if (!FEE.test(text))
+        return null;
+    const event = FAILED.test(text) ? 'failed' : SCHEDULED.test(text) ? 'scheduled' :
+        POSTED.test(text) ? 'posted' : 'unknown';
+    return {
+        scope: CARD_SCOPE.test(text) ? 'card' : ACCOUNT_SCOPE.test(text) ? 'account' : 'bank',
+        event,
+    };
+};
+const utilityFor = (text, utilityTerm) => {
+    if (!utilityTerm)
+        return null;
+    const event = FAILED.test(text) ? 'failed' : POSTED.test(text) ? 'posted' :
+        SCHEDULED.test(text) || /\b(?:amount due|payment due|bill due)\b|مستحق/i.test(text) ?
+            'due' : 'unknown';
+    return { event };
+};
+const instrumentFor = (text) => {
+    const card = CARD_LAST4.exec(text);
+    if (card)
+        return { kind: 'card', last4: card[1] };
+    const account = ACCOUNT_LAST4.exec(text);
+    if (account)
+        return { kind: 'account', last4: account[1] };
+    const wallet = WALLET_LAST4.exec(text);
+    if (wallet)
+        return { kind: 'wallet', last4: wallet[1] };
+    const arabicCard = ARABIC_CARD_LAST4.exec(text);
+    if (arabicCard)
+        return { kind: 'card', last4: arabicCard[1] };
+    const arabicAccount = ARABIC_ACCOUNT_LAST4.exec(text);
+    if (arabicAccount)
+        return { kind: 'account', last4: arabicAccount[1] };
+    if (CARD_SCOPE.test(text))
+        return { kind: 'card', last4: null };
+    if (ACCOUNT_SCOPE.test(text))
+        return { kind: 'account', last4: null };
+    if (WALLET_SCOPE.test(text))
+        return { kind: 'wallet', last4: null };
+    return null;
+};
+const inspectAlertEventEvidence = (normalizedText, context) => ({
+    scheduledDebit: scheduledDebitFor(normalizedText, context.recurringTerm, context.primaryCandidateIndex),
+    fee: feeFor(normalizedText),
+    utility: utilityFor(normalizedText, context.utilityTerm),
+    instrument: instrumentFor(normalizedText),
+});
+exports.inspectAlertEventEvidence = inspectAlertEventEvidence;
+},
+"alert-institution-grammars":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.inspectAlertInstitutionGrammar = exports.hasUniversalInstitutionSender = void 0;
+const beside = (token) => String.raw `(?<![\p{L}\p{N}])${token}\s{0,3}\d|\d\s{0,3}${token}(?![\p{L}\p{N}])`;
+const QAR_EVIDENCE = new RegExp(String.raw `\bQAR\b|ر\.\s?ق|ريال\s+قطري|${beside('QR')}`, 'iu');
+const KWD_EVIDENCE = new RegExp(String.raw `\bKWD\b|د\.\s?ك|دينار\s+كويتي|${beside('KD')}`, 'iu');
+const BHD_EVIDENCE = new RegExp(String.raw `\bBHD\b|د\.\s?ب|دينار\s+بحريني|${beside('BD')}`, 'iu');
+const OMR_EVIDENCE = new RegExp(String.raw `\bOMR\b|ر\.\s?ع|ريال\s+عماني|${beside(String.raw `R\.O\.?`)}|${beside('RO')}`, 'iu');
+const or = (...patterns) => new RegExp(patterns.map((pattern) => pattern.source).join('|'), 'iu');
+const NEIGHBOUR_MONEY_WITHOUT_USD = new RegExp(String.raw `^(?![\s\S]*(?:\bUSD\b|\$))[\s\S]*(?:${or(QAR_EVIDENCE, KWD_EVIDENCE, BHD_EVIDENCE, OMR_EVIDENCE).source})`, 'iu');
+const experimentalGrammar = (institution) => ({
+    id: `${institution}-sms-v1`,
+    version: 1,
+    channel: 'bank-alert',
+    status: 'experimental',
+    provenance: 'synthetic-seed',
+});
+const grammar = (institution, senders, body) => ({
+    institution,
+    senders,
+    body,
+    metadata: experimentalGrammar(institution),
+});
+const INSTITUTIONS = {
+    IN: [
+        grammar('state-bank-of-india', ['sbi', 'sbibnk', 'sbiinb'], /\b(?:state bank of india|sbi)\b/iu),
+        grammar('hdfc-bank', ['hdfcbk', 'hdfcbank'], /\bhdfc bank\b/iu),
+        grammar('icici-bank', ['icicib', 'icicibank'], /\bicici bank\b/iu),
+        grammar('axis-bank', ['axisbk', 'axisbank'], /\baxis bank\b/iu),
+        grammar('kotak-mahindra-bank', ['kotakb', 'kotakbank'], /\bkotak(?: mahindra)? bank\b/iu),
+        grammar('punjab-national-bank', ['pnb', 'pnbbank'], /\bpunjab national bank\b/iu),
+    ],
+    US: [
+        { institution: 'jpmorgan-chase', senders: ['chase', 'chasebank'], body: /\b(?:jpmorgan chase|chase bank)\b/iu },
+        { institution: 'bank-of-america', senders: ['bankofamerica', 'bofa'], body: /\bbank of america\b/iu },
+        { institution: 'wells-fargo', senders: ['wellsfargo'], body: /\bwells fargo\b/iu },
+        { institution: 'citi-us', senders: ['citibank', 'citi'], body: /\b(?:citibank|citi bank)\b/iu,
+            disqualifier: NEIGHBOUR_MONEY_WITHOUT_USD },
+        { institution: 'discover-card-us', senders: ['discover', 'discovercard'], body: /\bdiscover card\b/iu },
+    ],
+    GB: [
+        { institution: 'barclays-uk', senders: ['barclays', 'barclaysuk'], body: /\bbarclays\b/iu },
+        { institution: 'hsbc-uk', senders: ['hsbcuk', 'hsbc'], body: /\bhsbc(?: uk)?\b/iu },
+        { institution: 'lloyds-bank', senders: ['lloyds', 'lloydsbank'], body: /\blloyds bank\b/iu },
+        { institution: 'natwest', senders: ['natwest'], body: /\bnatwest\b/iu },
+    ],
+    FR: [
+        { institution: 'bnp-paribas-fr', senders: ['bnpparibas', 'bnp'], body: /\bbnp paribas\b/iu },
+        { institution: 'societe-generale-fr', senders: ['societegenerale', 'sg'], body: /\bsoci(?:é|e)té générale\b|\bsociete generale\b/iu },
+        { institution: 'credit-agricole-fr', senders: ['creditagricole', 'ca'], body: /\bcrédit agricole\b|\bcredit agricole\b/iu },
+    ],
+    DE: [
+        { institution: 'deutsche-bank-de', senders: ['deutschebank'], body: /\bdeutsche bank\b/iu },
+        { institution: 'commerzbank-de', senders: ['commerzbank'], body: /\bcommerzbank\b/iu },
+        { institution: 'sparkasse-de', senders: ['sparkasse'], body: /\bsparkasse\b/iu },
+        { institution: 'n26-de', senders: ['n26'], body: /\bn26\b/iu },
+    ],
+    ES: [
+        { institution: 'santander-es', senders: ['santander', 'bancosantander'], body: /\bbanco santander\b(?!\s+(?:m[eé]xico|brasil)\b)/iu },
+        { institution: 'bbva-es', senders: ['bbva'], body: /\bbbva\b(?!\s+(?:m[eé]xico|per[uú]|continental|colombia)(?=$|[^\p{L}\p{N}]))/iu },
+        { institution: 'caixabank-es', senders: ['caixabank'], body: /\bcaixabank\b/iu },
+    ],
+    IT: [
+        { institution: 'intesa-sanpaolo-it', senders: ['intesasanpaolo', 'intesa'], body: /\bintesa sanpaolo\b/iu },
+        { institution: 'unicredit-it', senders: ['unicredit'], body: /\bunicredit\b/iu },
+        { institution: 'banco-bpm-it', senders: ['bancobpm', 'bpm'], body: /\bbanco bpm\b/iu },
+    ],
+    NL: [
+        { institution: 'ing-nl', senders: ['ingnl', 'ingbank'], body: /\b(?:ing nederland|ing bank)\b/iu },
+        { institution: 'rabobank-nl', senders: ['rabobank', 'rabo'], body: /\brabobank\b/iu },
+        { institution: 'abn-amro-nl', senders: ['abnamro'], body: /\babn amro\b/iu },
+    ],
+    QA: [
+        { institution: 'qnb-qatar', senders: ['qnb', 'qnbqatar'], body: /\bqnb(?: qatar)?\b|بنك قطر الوطني/iu,
+            qualifier: or(QAR_EVIDENCE, /\bqnb\s+qatar\b/iu) },
+        { institution: 'commercial-bank-qatar', senders: ['cbq', 'cbqbank'], body: /\bcommercial bank(?: of)? qatar\b|البنك التجاري القطري/iu },
+        { institution: 'doha-bank', senders: [], body: /\bdoha bank\b|بنك الدوحة/iu, qualifier: QAR_EVIDENCE },
+        { institution: 'qatar-islamic-bank', senders: ['qib', 'qibbank'], body: /\bqatar islamic bank\b|مصرف قطر الإسلامي/iu,
+            qualifier: QAR_EVIDENCE },
+        { institution: 'masraf-al-rayan', senders: [], body: /\bmasraf al[ -]?rayan\b|مصرف الريان/iu },
+        { institution: 'dukhan-bank', senders: [], body: /\bdukhan bank\b|بنك دخان/iu },
+    ],
+    KW: [
+        { institution: 'national-bank-of-kuwait', senders: ['nbk', 'nbkbank'], body: /\bnational bank of kuwait\b|بنك الكويت الوطني/iu,
+            qualifier: KWD_EVIDENCE },
+        { institution: 'kuwait-finance-house', senders: ['kfh', 'kfhonline'], body: /\bkuwait finance house\b|بيت التمويل الكويتي/iu,
+            qualifier: KWD_EVIDENCE },
+        { institution: 'gulf-bank-kuwait', senders: [], body: /\bgulf bank\b|بنك الخليج/iu, qualifier: KWD_EVIDENCE },
+        { institution: 'burgan-bank', senders: [], body: /\bburgan bank\b|بنك برقان/iu, qualifier: KWD_EVIDENCE },
+        { institution: 'boubyan-bank', senders: ['boubyan', 'boubyanbank'], body: /\bboubyan bank\b|بنك بوبيان/iu },
+        { institution: 'warba-bank', senders: [], body: /\bwarba bank\b|بنك وربة/iu },
+        { institution: 'commercial-bank-of-kuwait', senders: [], body: /\bcommercial bank of kuwait\b|البنك التجاري الكويتي/iu },
+    ],
+    BH: [
+        { institution: 'national-bank-of-bahrain', senders: ['nbb', 'nbbonline'], body: /\bnational bank of bahrain\b|بنك البحرين الوطني/iu },
+        { institution: 'bank-of-bahrain-and-kuwait', senders: ['bbk', 'bbkbank'], body: /\bbank of bahrain and kuwait\b|بنك البحرين والكويت/iu,
+            qualifier: BHD_EVIDENCE },
+        { institution: 'ahli-united-bank', senders: [], body: /\bahli united bank\b|البنك الأهلي المتحد/iu, qualifier: BHD_EVIDENCE },
+        { institution: 'bahrain-islamic-bank', senders: [], body: /\bbahrain islamic bank\b|بنك البحرين الإسلامي/iu },
+        { institution: 'kuwait-finance-house-bahrain', senders: [], body: /\bkuwait finance house\b|بيت التمويل الكويتي/iu,
+            qualifier: BHD_EVIDENCE },
+        { institution: 'bank-abc-bahrain', senders: ['bankabc', 'abcbahrain'], body: /\bbank abc\b|بنك\s+abc/iu, qualifier: BHD_EVIDENCE },
+    ],
+    OM: [
+        { institution: 'bank-muscat', senders: ['bankmuscat', 'bmuscat', 'bkmuscat'], body: /\bbank muscat\b|بنك مسقط/iu },
+        { institution: 'bank-dhofar', senders: ['bankdhofar', 'dhofarbank'], body: /\bbank dhofar\b|بنك ظفار/iu },
+        { institution: 'national-bank-of-oman', senders: [], body: /\bnational bank of oman\b|البنك الوطني العماني/iu },
+        { institution: 'sohar-international', senders: ['soharintl', 'soharinternational'], body: /\bsohar international\b|صحار الدولي/iu },
+        { institution: 'bank-nizwa', senders: [], body: /\bbank nizwa\b|بنك نزوى/iu },
+        { institution: 'hsbc-oman', senders: [], body: /\bhsbc\s+oman\b/iu, qualifier: OMR_EVIDENCE },
+    ],
+    EG: [
+        { institution: 'national-bank-of-egypt', senders: ['nbe', 'nbeegypt'], body: /\bnational bank of egypt\b|البنك الأهلي المصري/iu },
+        { institution: 'banque-misr', senders: ['banquemisr', 'bmisr'], body: /\bbanque misr\b|بنك مصر/iu },
+        { institution: 'cib-egypt', senders: ['cibegypt', 'cibeg'], body: /\b(?:commercial international bank|cib egypt)\b|البنك التجاري الدولي/iu },
+    ],
+    JO: [
+        { institution: 'arab-bank-jordan', senders: ['arabbank', 'arabbankjo'], body: /\barab bank\b|البنك العربي/iu },
+        { institution: 'bank-al-etihad', senders: ['bankaletihad', 'aletihad'], body: /\bbank al etihad\b|بنك الاتحاد/iu },
+        { institution: 'housing-bank-jordan', senders: ['housingbank', 'hbtf'], body: /\b(?:housing bank|hbtf)\b|بنك الإسكان/iu },
+    ],
+    CA: [
+        { institution: 'royal-bank-of-canada', senders: ['rbc', 'rbcroyalbank'], body: /\b(?:rbc|royal bank of canada)\b/iu },
+        { institution: 'td-canada-trust', senders: ['tdcanadatrust', 'tdcanada'], body: /\btd canada trust\b/iu },
+        { institution: 'bmo-canada', senders: ['bmocanada', 'bankofmontreal'], body: /\bbank of montreal\b/iu },
+    ],
+    AU: [
+        { institution: 'commonwealth-bank-australia', senders: ['commbank', 'cba'], body: /\b(?:commonwealth bank|commbank)\b/iu },
+        { institution: 'anz-australia', senders: ['anz', 'anzbank'], body: /\banz(?: bank)?\b/iu },
+        { institution: 'westpac-australia', senders: ['westpac'], body: /\bwestpac\b/iu },
+        { institution: 'nab-australia', senders: ['nab', 'nationalaustraliabank'], body: /\bnational australia bank\b/iu },
+    ],
+    BR: [
+        { institution: 'itau-brasil', senders: ['itau', 'itaubank'], body: /(?:^|[^\p{L}\p{N}])ita[uú](?:\s+unibanco)?(?=$|[^\p{L}\p{N}])/iu },
+        { institution: 'bradesco-brasil', senders: ['bradesco'], body: /\bbradesco\b/iu },
+        { institution: 'banco-do-brasil', senders: ['bancodobrasil'], body: /\bbanco do brasil\b|\bourocard\b/iu },
+        { institution: 'nubank-brasil', senders: ['nubank'], body: /\bnubank\b/iu },
+        { institution: 'inter-brasil', senders: ['bancointer'], body: /\bbanco\s+inter\b|^\s*inter\s*:|\binter\s+(?:mastercard|shop)\b/iu },
+        { institution: 'c6-bank-brasil', senders: ['c6bank'], body: /\bc6\s*bank\b/iu },
+        { institution: 'caixa-brasil', senders: ['caixa'], body: /^\s*caixa\s*:|\bcaixa\s+econ[oô]mica\b/iu },
+        { institution: 'santander-brasil', senders: ['santanderbrasil'], body: /\bsantander\s+brasil\b|\bsantander\b(?=[\s\S]{0,200}R\$)/iu },
+        { institution: 'mercado-pago-brasil', senders: [], body: /\bmercado\s*pago\b(?=[\s\S]{0,240}R\$)|R\$[\s\S]{0,240}\bmercado\s*pago\b/iu },
+        { institution: 'picpay-brasil', senders: ['picpay'], body: /\bpicpay\b/iu },
+    ],
+    MX: [
+        { institution: 'bbva-mexico', senders: ['bbvamexico', 'bbvamx'], body: /\bbbva\s+m[eé]xico(?=$|[^\p{L}\p{N}])/iu },
+        { institution: 'banorte-mexico', senders: ['banorte'], body: /\bbanorte\b/iu },
+        { institution: 'santander-mexico', senders: ['santandermx', 'santandermexico'], body: /\bsantander\s+m[eé]xico(?=$|[^\p{L}\p{N}])/iu },
+        { institution: 'citibanamex', senders: ['citibanamex', 'banamex'], body: /\b(?:citibanamex|banamex)\b/iu },
+    ],
+    CO: [
+        { institution: 'bancolombia', senders: ['bancolombia'], bodyBoundSenders: ['85540', '85784', '87400'], body: /\bbancolombia\b/iu },
+        { institution: 'davivienda', senders: ['davivienda'], bodyBoundSenders: ['890077', '891000', '87188'], body: /\bdavivienda\b/iu },
+        { institution: 'daviplata', senders: ['daviplata'], body: /\bdaviplata\b/iu },
+        { institution: 'nequi', senders: ['nequi'], body: /\bnequi\b/iu },
+        { institution: 'banco-de-bogota', senders: ['bancodebogota'], body: /\bbanco\s+de\s+bogot[aá](?=$|[^\p{L}\p{N}])/iu },
+        { institution: 'nu-colombia', senders: ['nucolombia'], body: /\bnu\s+colombia\b/iu },
+    ],
+    PE: [
+        { institution: 'bcp', senders: ['bcp', 'viabcp'], bodyBoundSenders: ['19896'], body: /\bbcp\b|\bbanco\s+de\s+cr[eé]dito\s+del\s+per[uú](?=$|[^\p{L}\p{N}])/iu },
+        { institution: 'yape', senders: ['yape'], body: /\byape\b/iu },
+        { institution: 'interbank', senders: ['interbank'], body: /\binterbank\b(?=[\s\S]{0,240}(?:S\/\.?\s?\d|\bPEN\b|\bper[uú](?![\p{L}])))|(?:S\/\.?\s?\d|\bPEN\b|\bper[uú](?![\p{L}]))[\s\S]{0,240}\binterbank\b/iu },
+        { institution: 'plin', senders: ['plin'], body: /\bplin\b/iu },
+        { institution: 'bbva-peru', senders: ['bbvaperu'], body: /\bbbva\s+(?:per[uú]|continental)(?=$|[^\p{L}\p{N}])/iu },
+        { institution: 'scotiabank-peru', senders: ['scotiabankperu'], body: /\bscotiabank\s+per[uú](?=$|[^\p{L}\p{N}])/iu },
+    ],
+    SG: [
+        { institution: 'dbs-singapore', senders: ['dbs', 'dbssg', 'posb'], body: /\b(?:dbs(?!\s+bank\s+(?:india|\(?hong\s+kong\)?|taiwan|indonesia|china)\b)|posb)(?: bank)?\b/iu },
+        { institution: 'ocbc-singapore', senders: ['ocbc', 'ocbcsg'], body: /\bocbc(?: bank)?\b/iu },
+        { institution: 'uob-singapore', senders: ['uob', 'uobsg'], body: /\buob(?: bank)?\b/iu },
+    ],
+};
+const TEMPLATE_RULES = [
+    { template: 'authentication', pattern: /\b(?:otp|one[ -]?time password|verification code|security code)\b|رمز (?:التحقق|التأكيد)/iu },
+    { template: 'cash-withdrawal', pattern: /\b(?:cash withdrawal|atm withdrawal|geldautomat|retrait d['’]?espèces|retiro de efectivo|prelievo contanti|geldopname|saque(?: em)? caixa eletr[oô]nico)\b|سحب نقدي|صراف آلي/iu },
+    { template: 'recurring-debit', pattern: /\b(?:recurring|autopay|auto[ -]?debit|direct debit|standing order|pre-authorized debit|payto|pix autom[aá]tico|d[eé]bito autom[aá]tico|prélèvement|lastschrift|domiciliación|addebito diretto|automatische incasso)\b|خصم (?:تلقائي|دوري)/iu },
+    { template: 'card-activity', pattern: /\b(?:card (?:purchase|payment|charged|used)|paiement par carte|kartenzahlung|compra con tarjeta|compra com cart[aã]o|pagamento con carta|pagamento com cart[aã]o|pasbetaling|pinbetaling)\b|شراء[^.\n]{0,24}بطاقة|دفع بالبطاقة/iu },
+    { template: 'fund-transfer', pattern: /\b(?:fund transfer|bank transfer|wire transfer|zelle|interac e-?transfer|osko|payid|pix|spei|paynow|upi|imps|neft|rtgs|faster payments|sepa|virement|überweisung|transferencia|bonifico|overboeking)\b|تحويل/iu },
+    { template: 'fee', pattern: /\b(?:annual fee|monthly fee|service charge|bank fee|frais|gebühr|comisión|commissione|kosten)\b|رسوم|عمولة/iu },
+    { template: 'balance', pattern: /\b(?:available balance|current balance|account balance|solde|kontostand|saldo)\b|الرصيد (?:الحالي|المتاح)/iu },
+    { template: 'account-debit', pattern: /\b(?:debited|charged|withdrawn|débité|belastet|abgebucht|cargado|addebitato|afgeschreven|debitad[oa])\b|تم الخصم|خُصم/iu },
+    { template: 'account-credit', pattern: /\b(?:credited|deposited|received|crédité|gutgeschrieben|abonado|accreditato|bijgeschreven|creditad[oa]|recebid[oa])\b|تم الإيداع|أودع/iu },
+];
+const senderKey = (sender) => sender.normalize('NFKC').toLocaleLowerCase('en-US').replace(/[^\p{L}\p{N}]+/gu, '');
+const indiaSenderEnvelope = (sender) => {
+    const normalized = sender.slice(0, 256).normalize('NFKC').trim().toUpperCase();
+    const match = /^(?:[A-Z]{2}-)([A-Z0-9]+)(?:-([STGP]))?$/.exec(normalized);
+    if (!match)
+        return null;
+    return { core: senderKey(match[1]), route: match[2] ?? null };
+};
+const senderMatches = (market, sender, alias) => {
+    const expected = senderKey(alias);
+    if (senderKey(sender) === expected)
+        return true;
+    if (market !== 'IN')
+        return false;
+    const envelope = indiaSenderEnvelope(sender);
+    return !!envelope && envelope.route !== 'P' && envelope.core === expected;
+};
+const UNIVERSAL_SENDER_KEYS = new Set(Object.values(INSTITUTIONS).flatMap((institutions) => institutions.flatMap((institution) => institution.senders.map(senderKey))));
+const INDIA_SENDER_KEYS = new Set(INSTITUTIONS.IN.flatMap((institution) => institution.senders.map(senderKey)));
+const hasUniversalInstitutionSender = (sender) => {
+    const bounded = sender?.slice(0, 256) ?? '';
+    if (!bounded)
+        return false;
+    if (UNIVERSAL_SENDER_KEYS.has(senderKey(bounded)))
+        return true;
+    const indiaEnvelope = indiaSenderEnvelope(bounded);
+    return !!indiaEnvelope && indiaEnvelope.route !== 'P' && INDIA_SENDER_KEYS.has(indiaEnvelope.core);
+};
+exports.hasUniversalInstitutionSender = hasUniversalInstitutionSender;
+const templateEvidence = (source) => {
+    const normalized = source.normalize('NFKC');
+    const rule = TEMPLATE_RULES.find(({ pattern }) => pattern.test(normalized));
+    return rule ? { template: rule.template, evidence: 'source-pattern' } : null;
+};
+const inspectAlertInstitutionGrammar = (source, market, sender) => {
+    const normalizedSource = source.slice(0, 4096).normalize('NFKC');
+    const boundedSender = sender?.slice(0, 256) ?? '';
+    const normalizedSender = boundedSender ? senderKey(boundedSender) : '';
+    const indiaEnvelope = market === 'IN' && boundedSender
+        ? indiaSenderEnvelope(boundedSender)
+        : null;
+    if (indiaEnvelope?.route === 'P') {
+        return {
+            market,
+            decision: 'unknown',
+            institution: null,
+            template: templateEvidence(normalizedSource),
+            candidates: [],
+            reasons: ['promotional-sender-route'],
+        };
+    }
+    const candidates = INSTITUTIONS[market].flatMap((grammar) => {
+        if (grammar.qualifier && !grammar.qualifier.test(normalizedSource))
+            return [];
+        if (grammar.disqualifier?.test(normalizedSource))
+            return [];
+        const evidence = [];
+        const bodyMatches = grammar.body.test(normalizedSource);
+        if (normalizedSender && (grammar.senders.some((alias) => senderMatches(market, boundedSender || normalizedSender, alias)) || (bodyMatches && grammar.bodyBoundSenders?.includes(normalizedSender)))) {
+            evidence.push('sender');
+        }
+        if (bodyMatches)
+            evidence.push('body');
+        return evidence.length ? [{
+                institution: grammar.institution,
+                evidence,
+                grammar: grammar.metadata ?? experimentalGrammar(grammar.institution),
+            }] : [];
+    });
+    const template = templateEvidence(normalizedSource);
+    if (candidates.length === 0) {
+        return {
+            market, decision: 'unknown', institution: null, template, candidates: [],
+            reasons: [
+                'no-institution-evidence',
+                ...(source.length > 4096 ? ['input-too-long'] : []),
+            ],
+        };
+    }
+    if (candidates.length > 1) {
+        const senderConflict = candidates.some(({ evidence }) => evidence.includes('sender'));
+        return {
+            market, decision: 'ambiguous', institution: null, template, candidates,
+            reasons: [
+                senderConflict ? 'sender-body-conflict' : 'multiple-institution-evidence',
+                ...(source.length > 4096 ? ['input-too-long'] : []),
+            ],
+        };
+    }
+    return {
+        market,
+        decision: 'identified',
+        institution: candidates[0].institution,
+        template,
+        candidates,
+        reasons: [
+            ...(template ? [] : ['no-template-evidence']),
+            ...(source.length > 4096 ? ['input-too-long'] : []),
+        ],
+    };
+};
+exports.inspectAlertInstitutionGrammar = inspectAlertInstitutionGrammar;
+},
+"alert-market-detection":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.inferCaptureMarket = exports.inspectUniversalAlert = exports.routeAlertMarket = void 0;
+const alert_institution_grammars_1 = require("@/lib/alert-institution-grammars");
+const alert_semantics_1 = require("@/lib/alert-semantics");
+const markets_1 = require("@/lib/markets");
+const UNIVERSAL_MARKETS = [
+    'US', 'GB', 'FR', 'DE', 'ES', 'IT', 'NL', 'IN', 'QA', 'KW', 'BH', 'OM', 'EG', 'JO',
+    'CA', 'AU', 'BR', 'MX', 'SG', 'CO', 'PE',
+];
+const ALL_MARKETS = ['AE', 'SA', ...UNIVERSAL_MARKETS];
+const MARKET_CURRENCY = {
+    AE: 'AED', SA: 'SAR', US: 'USD', GB: 'GBP', FR: 'EUR', DE: 'EUR', ES: 'EUR',
+    IT: 'EUR', NL: 'EUR', IN: 'INR', QA: 'QAR', KW: 'KWD', BH: 'BHD', OM: 'OMR',
+    EG: 'EGP', JO: 'JOD', CA: 'CAD', AU: 'AUD', BR: 'BRL', MX: 'MXN', SG: 'SGD',
+    CO: 'COP', PE: 'PEN',
+};
+const GRAMMAR_MARKERS = {
+    IN: /\b(?:upi|imps|neft|rtgs|aeps|nach)\b|₹|रु(?:पये)?/iu,
+    US: /\b(?:zelle|ach debit)\b/iu,
+    GB: /\b(?:faster payments|bacs|sort code)\b/iu,
+    FR: /\b(?:d[eé]bit[eé]|cr[eé]dit[eé]|pr[eé]l[eè]vement)\b/iu,
+    DE: /\b(?:abgebucht|gutgeschrieben|lastschrift|dauerauftrag)\b/iu,
+    ES: /\b(?:domiciliaci[oó]n|cargado|abonado)\b/iu,
+    IT: /\b(?:addebito|accreditato|bonifico)\b/iu,
+    NL: /\b(?:afgeschreven|bijgeschreven|incasso)\b/iu,
+    KW: /\bknet\b/iu,
+    EG: /\bmeeza\b|ميزة/iu,
+    CA: /\binterac\s+e-?transfer\b/iu,
+    AU: /\b(?:npp|osko|payid|payto|bpay)\b/iu,
+    BR: /\b(?:pix|transfer[eê]ncia\s+ted)\b/iu,
+    MX: /\b(?:spei|codi|dimo)\b/iu,
+    SG: /\b(?:paynow|fast\s+transfer|sgqr)\b/iu,
+    CO: /\b(?:bre-?b|transfiya|bot[oó]n\s+bancolombia)\b|\bllave\b[\s\S]{0,80}\btransfer|\btransfer[\s\S]{0,80}\bllave\b|\bt\.(?:deb|cred(?:ito)?)\b/iu,
+    PE: /\b(?:yape(?:aste|ó|o|aron)?|plin(?:eó|earon)?|cci)(?=$|[^\p{L}\p{N}])/iu,
+};
+const UNIQUE_SYMBOL_MARKETS = [
+    { pattern: /R\$\s?\d/u, market: 'BR' },
+    { pattern: /(?<![\p{L}\p{N}/.])S\/\.?\s?\d/u, market: 'PE' },
+];
+const BARE_DOLLAR = /(?<![\p{L}$])\$\s?\d/u;
+const CO_PSE = /(?<![\p{L}\p{N}&])pse(?![\p{L}\p{N}&])/iu;
+const CO_PSE_CONTEXT = /\bCOP\s?\d|\d\s?COP\b|\b(?:bancolombia|davivienda|daviplata|nequi|colpatria|av\s+villas|banco\s+de\s+bogot[aá]|colombia)\b|(?<![\p{L}])(?:pagaste|pago|pagos|compra|transferencia|transferiste|cuenta|ahorros|desde|realizaste|exitos[oa]|aprobad[oa]|tu|su)(?![\p{L}])/iu;
+const grammarMatches = (market, marker, source) => !!marker?.test(source) || (market === 'CO' && CO_PSE.test(source) && CO_PSE_CONTEXT.test(source));
+const DOLLAR_RAIL_MARKETS = new Set(['CO', 'MX']);
+const regionMarket = (hint) => {
+    if (!hint)
+        return null;
+    const parts = hint.replace('_', '-').split('-');
+    const region = [...parts].reverse().find((part) => /^[A-Za-z]{2}$/.test(part))?.toUpperCase();
+    return region && ALL_MARKETS.includes(region)
+        ? region
+        : null;
+};
+const currencyMarkets = (source) => {
+    const codes = new Set(source.slice(0, 4096).toUpperCase().match(/\b(?:AED|SAR|USD|GBP|EUR|INR|QAR|KWD|BHD|OMR|EGP|JOD|CAD|AUD|BRL|MXN|SGD)\b|\b(?:COP|PEN)(?=\s?\d)|(?<=\d\s?)(?:COP|PEN)\b/g) ?? []);
+    const markets = new Set();
+    for (const market of ALL_MARKETS) {
+        if (codes.has(MARKET_CURRENCY[market]))
+            markets.add(market);
+    }
+    for (const { pattern, market } of UNIQUE_SYMBOL_MARKETS) {
+        if (pattern.test(source))
+            markets.add(market);
+    }
+    return markets;
+};
+const evidenceFor = (input) => {
+    const evidence = new Map();
+    let institutionConflict = false;
+    const add = (market, kind) => {
+        const kinds = evidence.get(market) ?? new Set();
+        kinds.add(kind);
+        evidence.set(market, kinds);
+    };
+    const source = input.source.slice(0, 4096);
+    const sender = input.sender?.slice(0, 256) ?? '';
+    for (const market of UNIVERSAL_MARKETS) {
+        const review = (0, alert_institution_grammars_1.inspectAlertInstitutionGrammar)(source, market, sender);
+        for (const candidate of review.candidates) {
+            if (candidate.evidence.includes('sender'))
+                add(market, 'sender');
+            if (candidate.evidence.includes('body'))
+                add(market, 'institution');
+        }
+        if (review.decision === 'ambiguous' &&
+            review.candidates.some((candidate) => candidate.evidence.includes('sender')) &&
+            review.candidates.some((candidate) => candidate.evidence.includes('body'))) {
+            institutionConflict = true;
+        }
+    }
+    for (const market of markets_1.MARKETS) {
+        if (!sender || (market.id !== 'AE' && market.id !== 'SA'))
+            continue;
+        if (market.banks.some((bank) => bank.re.test(sender)))
+            add(market.id, 'sender');
+    }
+    for (const market of currencyMarkets(source))
+        add(market, 'currency');
+    for (const [market, marker] of Object.entries(GRAMMAR_MARKERS)) {
+        if (!grammarMatches(market, marker, source))
+            continue;
+        add(market, 'grammar');
+        if (DOLLAR_RAIL_MARKETS.has(market) && BARE_DOLLAR.test(source)) {
+            add(market, 'currency');
+        }
+    }
+    const region = regionMarket(input.regionHint);
+    if (region && evidence.has(region))
+        add(region, 'region-hint');
+    return { evidence, institutionConflict };
+};
+const candidatesFrom = (evidence) => [...evidence].map(([market, kinds]) => ({
+    market,
+    evidence: [...kinds].sort(),
+})).sort((a, b) => a.market.localeCompare(b.market));
+const routeAlertMarket = (input) => {
+    const { evidence, institutionConflict } = evidenceFor(input);
+    const candidates = candidatesFrom(evidence);
+    if (institutionConflict) {
+        return { decision: 'ambiguous', market: null, candidates, reasons: ['sender-institution-conflict'] };
+    }
+    const withKind = (kind) => candidates.filter((candidate) => candidate.evidence.includes(kind));
+    const sender = withKind('sender');
+    const institution = withKind('institution');
+    if (sender.length > 1) {
+        return { decision: 'ambiguous', market: null, candidates, reasons: ['overlapping-sender'] };
+    }
+    if (sender.length === 1) {
+        const bodyConflict = institution.some((candidate) => candidate.market !== sender[0].market);
+        if (bodyConflict) {
+            return { decision: 'ambiguous', market: null, candidates, reasons: ['sender-institution-conflict'] };
+        }
+        return { decision: 'single', market: sender[0].market, candidates, reasons: [] };
+    }
+    if (institution.length === 1) {
+        return { decision: 'single', market: institution[0].market, candidates, reasons: [] };
+    }
+    if (institution.length > 1) {
+        return { decision: 'ambiguous', market: null, candidates, reasons: ['multiple-institutions'] };
+    }
+    const grammar = withKind('grammar');
+    const grammarWithCurrency = grammar.filter((candidate) => candidate.evidence.includes('currency'));
+    if (grammarWithCurrency.length === 1) {
+        return { decision: 'single', market: grammarWithCurrency[0].market, candidates, reasons: [] };
+    }
+    if (candidates.length > 0) {
+        return { decision: 'ambiguous', market: null, candidates, reasons: ['insufficient-market-evidence'] };
+    }
+    return { decision: 'unknown', market: null, candidates: [], reasons: ['no-market-evidence'] };
+};
+exports.routeAlertMarket = routeAlertMarket;
+const inspectUniversalAlert = (input) => {
+    const route = (0, exports.routeAlertMarket)(input);
+    if (route.decision !== 'single' || !route.market || route.market === 'AE' || route.market === 'SA') {
+        return { route, review: null };
+    }
+    return {
+        route,
+        review: (0, alert_semantics_1.inspectMarketAlert)(input.source, route.market, { sender: input.sender }),
+    };
+};
+exports.inspectUniversalAlert = inspectUniversalAlert;
+const inferCaptureMarket = (input) => {
+    const seen = new Set();
+    const routes = [];
+    for (const alert of input.alerts.slice(0, 50)) {
+        if (!/^[A-Za-z0-9_-]{16,128}$/.test(alert.sourceKey) || seen.has(alert.sourceKey))
+            continue;
+        seen.add(alert.sourceKey);
+        routes.push((0, exports.routeAlertMarket)({
+            source: alert.source,
+            sender: alert.sender,
+            regionHint: input.regionHint,
+        }));
+    }
+    const single = routes.filter((route) => route.decision === 'single' && route.market);
+    const markets = [...new Set(single.map((route) => route.market))].sort();
+    if (markets.length > 1) {
+        return { decision: 'ambiguous', market: null, candidates: markets, reasons: ['conflicting-alert-markets'] };
+    }
+    if (markets.length === 1) {
+        const market = markets[0];
+        const matching = single.filter((route) => route.market === market);
+        const oneFullyCorroborated = matching.some((route) => {
+            const candidate = route.candidates.find((item) => item.market === market);
+            return candidate?.evidence.includes('sender') && candidate.evidence.includes('currency') &&
+                candidate.evidence.includes('region-hint');
+        });
+        return {
+            decision: matching.length >= 2 || oneFullyCorroborated ? 'resolved' : 'provisional',
+            market,
+            candidates: [market],
+            reasons: matching.length >= 2 || oneFullyCorroborated ? [] : ['needs-independent-alert'],
+        };
+    }
+    const region = regionMarket(input.regionHint);
+    if (region) {
+        return { decision: 'provisional', market: region, candidates: [region], reasons: ['region-hint-only'] };
+    }
+    return { decision: 'unknown', market: null, candidates: [], reasons: ['no-market-evidence'] };
+};
+exports.inferCaptureMarket = inferCaptureMarket;
+},
+"alert-market-packs":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.alertMarketPack = void 0;
+const alert_market_packs_india_me_1 = require("@/lib/alert-market-packs.india-me");
+const alert_market_packs_us_eu_1 = require("@/lib/alert-market-packs.us-eu");
+const alert_market_packs_world_1 = require("@/lib/alert-market-packs.world");
+const ALERT_MARKET_PACKS = {
+    ...alert_market_packs_us_eu_1.US_EU_ALERT_MARKET_PACKS,
+    ...alert_market_packs_india_me_1.INDIA_ME_ALERT_MARKET_PACKS,
+    ...alert_market_packs_world_1.WORLD_ALERT_MARKET_PACKS,
+};
+const alertMarketPack = (market) => ALERT_MARKET_PACKS[market];
+exports.alertMarketPack = alertMarketPack;
+},
+"alert-market-packs.india-me":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.INDIA_ME_ALERT_MARKET_PACKS = void 0;
+exports.INDIA_ME_ALERT_MARKET_PACKS = {
+    IN: {
+        market: 'IN', currencies: ['INR'], currencyAliases: { 'Rs.': ['INR'], Rs: ['INR'] },
+        rails: ['upi', 'imps', 'neft', 'rtgs', 'nach', 'ecs', 'aeps', 'bbps', 'fastag'],
+        transferTerms: ['fund transfer', 'upi transfer', 'transferred to', 'received from beneficiary'],
+        utilityTerms: [
+            'electricity bill', 'water bill', 'gas bill', 'mobile bill',
+            'बिजली बिल', 'पानी बिल', 'गैस बिल', 'मोबाइल बिल',
+        ],
+        recurringTerms: ['upi autopay', 'auto debit', 'यूपीआई ऑटोपे', 'ई-मैंडेट'],
+        futureTerms: ['will be processed', 'डेबिट किया जाएगा', 'भुगतान देय'],
+    },
+    QA: {
+        market: 'QA', currencies: ['QAR'], currencyAliases: { 'ر.ق': ['QAR'], 'ريال قطري': ['QAR'], QR: ['QAR'] },
+        rails: ['fawran', 'tahweel', 'qmp', 'naps', 'qpay'],
+        transferTerms: ['transfer', 'تحويل'],
+        utilityTerms: ['electricity bill', 'water bill', 'telecom bill', 'فاتورة كهرباء', 'فاتورة مياه', 'فاتورة هاتف'],
+        recurringTerms: ['recurring', 'متكرر', 'متكررة'],
+    },
+    KW: {
+        market: 'KW', currencies: ['KWD'], currencyAliases: { KD: ['KWD'], 'د.ك': ['KWD'], 'دينار كويتي': ['KWD'] },
+        dotDecimalCurrencies: ['KWD'],
+        rails: ['wamd', 'wamdh', 'knet'], transferTerms: ['transfer', 'تحويل'],
+        utilityTerms: ['electricity bill', 'water bill', 'telecom bill', 'فاتورة كهرباء', 'فاتورة مياه', 'فاتورة هاتف'], recurringTerms: ['recurring', 'متكرر', 'متكررة'],
+    },
+    BH: {
+        market: 'BH', currencies: ['BHD'], currencyAliases: { BD: ['BHD'], 'د.ب': ['BHD'], 'دينار بحريني': ['BHD'] },
+        dotDecimalCurrencies: ['BHD'],
+        rails: ['fawri+', 'fawri', 'fawateer', 'benefitpay', 'efts'],
+        transferTerms: ['transfer', 'تحويل'],
+        utilityTerms: ['electricity bill', 'water bill', 'telecom bill', 'فاتورة كهرباء', 'فاتورة مياه', 'فاتورة هاتف'],
+        recurringTerms: ['recurring', 'متكرر', 'متكررة'],
+    },
+    OM: {
+        market: 'OM', currencies: ['OMR'], currencyAliases: { RO: ['OMR'], 'R.O.': ['OMR'], 'ر.ع': ['OMR'], 'ريال عماني': ['OMR'] },
+        dotDecimalCurrencies: ['OMR'],
+        rails: ['omannet', 'mp-clear', 'mpcss', 'ach'], transferTerms: ['transfer', 'تحويل'],
+        utilityTerms: ['electricity bill', 'water bill', 'telecom bill', 'فاتورة كهرباء', 'فاتورة مياه', 'فاتورة هاتف'], recurringTerms: ['recurring', 'متكرر', 'متكررة'],
+    },
+    EG: {
+        market: 'EG', currencies: ['EGP'], currencyAliases: { LE: ['EGP'], 'L.E.': ['EGP'], 'ج.م': ['EGP'] },
+        rails: ['instapay', 'ipn', 'meeza'], transferTerms: ['transfer', 'تحويل'],
+        utilityTerms: ['electricity bill', 'water bill', 'gas bill', 'mobile bill', 'فاتورة كهرباء', 'فاتورة مياه', 'فاتورة غاز', 'فاتورة هاتف'], recurringTerms: ['recurring', 'متكرر', 'متكررة'],
+    },
+    JO: {
+        market: 'JO', currencies: ['JOD'], currencyAliases: { JD: ['JOD'], 'د.أ': ['JOD'] },
+        dotDecimalCurrencies: ['JOD'],
+        rails: ['cliq', 'efawateercom', 'jomopay', 'ach'], transferTerms: ['transfer', 'تحويل'],
+        utilityTerms: ['electricity bill', 'water bill', 'telecom bill', 'فاتورة كهرباء', 'فاتورة مياه', 'فاتورة هاتف'], recurringTerms: ['recurring', 'متكرر', 'متكررة'],
+    },
+};
+},
+"alert-market-packs.us-eu":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.US_EU_ALERT_MARKET_PACKS = void 0;
+exports.US_EU_ALERT_MARKET_PACKS = {
+    US: {
+        market: 'US', currencies: ['USD'], currencyAliases: { '$': ['USD'] },
+        rails: ['ach', 'wire transfer', 'zelle'],
+        transferTerms: ['transfer', 'direct deposit', 'zelle', 'venmo', 'cash app'],
+        utilityTerms: ['utility', 'electric', 'water bill', 'gas bill'],
+        recurringTerms: ['recurring', 'autopay', 'standing instruction'],
+    },
+    GB: {
+        market: 'GB', currencies: ['GBP'], currencyAliases: {},
+        rails: ['faster payments', 'bacs', 'chaps'],
+        transferTerms: ['bank transfer', 'faster payment', 'faster payments'],
+        utilityTerms: ['council tax', 'energy bill', 'water bill', 'mobile bill'],
+        recurringTerms: ['recurring', 'standing order'],
+    },
+    FR: {
+        market: 'FR', currencies: ['EUR'], currencyAliases: {},
+        rails: ['sepa'], transferTerms: ['virement'],
+        utilityTerms: ['électricité', 'gaz', 'eau', 'téléphone'],
+        recurringTerms: ['récurrent', 'abonnement'],
+        postedTerms: ['débité', 'crédité', 'effectué', 'payé', 'payée'],
+        failedTerms: ['refusé', 'rejeté', 'échoué', 'non payé', 'non payée', 'pas été payé', 'pas été payée'],
+        futureTerms: ['sera débité', 'sera crédité', 'à venir'],
+        debitTerms: ['débité', 'payé', 'payée'], creditTerms: ['crédité'],
+    },
+    DE: {
+        market: 'DE', currencies: ['EUR'], currencyAliases: {},
+        rails: ['sepa'], transferTerms: ['überweisung'],
+        utilityTerms: ['strom', 'gas', 'wasser', 'telefon'],
+        recurringTerms: ['dauerauftrag', 'abonnement'],
+        failedTerms: ['abgelehnt', 'fehlgeschlagen', 'nicht bezahlt', 'nicht abgebucht'],
+        futureTerms: ['wird abgebucht', 'wird morgen abgebucht', 'wird morgen gutgeschrieben', 'fällig'],
+        debitTerms: ['belastet', 'abgebucht', 'bezahlt'], creditTerms: ['gutgeschrieben'],
+    },
+    ES: {
+        market: 'ES', currencies: ['EUR'], currencyAliases: {},
+        rails: ['sepa', 'bizum'], transferTerms: ['transferencia'],
+        utilityTerms: ['suministros', 'electricidad', 'agua', 'teléfono'],
+        recurringTerms: ['recurrente', 'suscripción'],
+        failedTerms: ['rechazado', 'fallido', 'no pagado', 'no cargado'],
+        futureTerms: ['se cargará', 'será abonado', 'próximo'],
+        debitTerms: ['cargado', 'pagado'], creditTerms: ['abonado'],
+    },
+    IT: {
+        market: 'IT', currencies: ['EUR'], currencyAliases: {},
+        rails: ['sepa'], transferTerms: ['bonifico'],
+        utilityTerms: ['utenza', 'elettricità', 'acqua', 'telefono'],
+        recurringTerms: ['ricorrente', 'abbonamento'],
+        postedTerms: ['pagato', 'pagata'],
+        failedTerms: ['rifiutato', 'fallito', 'non pagato', 'non addebitato'],
+        futureTerms: ['sarà addebitato', 'sarà accreditato', 'in scadenza'],
+        debitTerms: ['addebitato', 'pagato', 'pagata'], creditTerms: ['accreditato'],
+    },
+    NL: {
+        market: 'NL', currencies: ['EUR'], currencyAliases: {},
+        rails: ['sepa', 'ideal'], transferTerms: ['overboeking'],
+        utilityTerms: ['energie', 'water', 'telefoon'],
+        recurringTerms: ['periodiek', 'abonnement'],
+        failedTerms: ['geweigerd', 'mislukt', 'niet betaald', 'niet afgeschreven'],
+        futureTerms: ['wordt afgeschreven', 'wordt morgen afgeschreven', 'wordt morgen bijgeschreven', 'aankomend'],
+        debitTerms: ['afgeschreven', 'betaald'], creditTerms: ['bijgeschreven'],
+    },
+};
+},
+"alert-market-packs.world":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.WORLD_ALERT_MARKET_PACKS = void 0;
+exports.WORLD_ALERT_MARKET_PACKS = {
+    CA: {
+        market: 'CA', currencies: ['CAD'], currencyAliases: { 'C$': ['CAD'], '$': ['CAD'] },
+        rails: ['interac e-transfer', 'interac etransfer', 'eft'],
+        transferTerms: ['interac e-transfer', 'interac etransfer', 'electronic funds transfer', 'bank transfer'],
+        utilityTerms: ['utility', 'hydro bill', 'electricity bill', 'gas bill', 'water bill', 'mobile bill'],
+        recurringTerms: ['recurring', 'pre-authorized debit', 'pre-authorized payment', 'automatic payment'],
+    },
+    AU: {
+        market: 'AU', currencies: ['AUD'], currencyAliases: { 'A$': ['AUD'], '$': ['AUD'] },
+        rails: ['npp', 'osko', 'payid', 'payto', 'bpay'],
+        transferTerms: ['npp payment', 'osko', 'payid', 'bank transfer'],
+        utilityTerms: ['electricity bill', 'energy bill', 'water bill', 'mobile bill'],
+        recurringTerms: ['payto', 'direct debit', 'recurring payment', 'scheduled payment'],
+    },
+    BR: {
+        market: 'BR', currencies: ['BRL'], currencyAliases: { 'R$': ['BRL'] },
+        rails: ['pix', 'ted'],
+        transferTerms: ['pix', 'transferência', 'transferencia', 'ted'],
+        utilityTerms: [
+            'conta de luz', 'energia elétrica', 'energia eletrica', 'conta de água', 'conta de agua',
+            'conta de telefone', 'conta de internet',
+        ],
+        recurringTerms: ['pix automático', 'pix automatico', 'débito automático', 'debito automatico', 'assinatura recorrente'],
+        postedTerms: [
+            'debitado', 'debitada', 'creditado', 'creditada', 'recebido', 'recebida',
+            'foi pago', 'foi paga', 'concluído', 'concluido', 'compra realizada', 'pagamento realizado',
+            'pagamento efetuado', 'foi estornado', 'foi estornada',
+            'você enviou', 'voce enviou', 'você recebeu', 'voce recebeu', 'pix enviado', 'transferência enviada',
+            'transferencia enviada',
+        ],
+        failedTerms: [
+            'recusado', 'recusada', 'negado', 'negada', 'falhou', 'não aprovado', 'nao aprovado',
+            'não aprovada', 'nao aprovada', 'não autorizada', 'nao autorizada', 'cancelado', 'cancelada',
+        ],
+        futureTerms: [
+            'será debitado', 'sera debitado', 'será debitada', 'sera debitada', 'será creditado', 'sera creditado',
+            'será creditada', 'sera creditada', 'será pago', 'sera pago', 'será paga', 'sera paga',
+            'será cobrado', 'sera cobrado', 'será cobrada', 'sera cobrada', 'será lançada', 'sera lancada',
+            'será lançado', 'sera lancado', 'será processada', 'sera processada', 'será processado', 'sera processado',
+            'agendado', 'agendada', 'próxima compra', 'proxima compra', 'suas compras',
+        ],
+        debitTerms: [
+            'compra com cartão', 'compra com cartao', 'compra aprovada', 'debitado', 'debitada',
+            'cobrado', 'cobrada', 'foi pago', 'foi paga', 'você enviou', 'voce enviou', 'pix enviado',
+            'transferência enviada', 'transferencia enviada',
+        ],
+        creditTerms: [
+            'creditado', 'creditada', 'recebido', 'recebida', 'estorno', 'estornado', 'estornada',
+            'você recebeu', 'voce recebeu',
+        ],
+        purchaseTerms: ['compra com cartão', 'compra com cartao', 'compra aprovada', 'compra no débito', 'compra no crédito'],
+        refundTerms: ['estorno', 'estornado', 'estornada', 'reembolso'],
+        cashTerms: ['saque'],
+        feeTerms: ['tarifa'],
+        moneyLabels: ['recebido', 'recebida', 'creditado', 'creditada', 'debitada', 'estorno', 'saque', 'pix'],
+    },
+    MX: {
+        market: 'MX', currencies: ['MXN'], currencyAliases: { 'MX$': ['MXN'], '$': ['MXN'] },
+        rails: ['spei', 'codi', 'dimo'],
+        transferTerms: ['spei', 'transferencia', 'transferencia electrónica', 'transferencia electronica'],
+        utilityTerms: ['recibo de luz', 'recibo de agua', 'recibo de teléfono', 'recibo de telefono', 'electricidad'],
+        recurringTerms: ['domiciliación', 'domiciliacion', 'pago recurrente', 'cargo recurrente'],
+        postedTerms: [
+            'compra realizada', 'compra aplicada', 'cargo aplicado', 'devolución aplicada', 'devolucion aplicada',
+            'fue cargado', 'fue cargada', 'fue abonado', 'fue abonada',
+            'enviaste', 'recibiste', 'retiraste', 'transferencia enviada', 'transferencia recibida',
+        ],
+        failedTerms: [
+            'rechazado', 'rechazada', 'fallido', 'fallida', 'no aprobado', 'no aprobada',
+            'no autorizado', 'no autorizada', 'declinada', 'declinado', 'cancelado', 'cancelada',
+        ],
+        futureTerms: [
+            'se cargará', 'se cargara', 'se abonará', 'se abonara', 'se aplicará', 'se aplicara',
+            'se reflejará', 'se reflejara', 'será cargado', 'sera cargado', 'será cargada', 'sera cargada',
+            'será abonado', 'sera abonado', 'será abonada', 'sera abonada', 'programado', 'programada',
+            'próxima compra', 'proxima compra', 'siguiente compra', 'tus compras', 'meses sin intereses',
+        ],
+        debitTerms: [
+            'compra', 'cargo recurrente', 'cargado', 'cargada', 'debitado', 'debitada', 'pagado', 'pagada',
+            'enviaste', 'retiraste', 'transferencia enviada',
+        ],
+        creditTerms: [
+            'devolución', 'devolucion', 'reembolso', 'abonado', 'abonada', 'acreditado', 'acreditada',
+            'recibiste', 'transferencia recibida',
+        ],
+        purchaseTerms: ['compra'],
+        refundTerms: ['devolución', 'devolucion', 'reembolso'],
+        cashTerms: ['retiro de efectivo', 'retiro en cajero', 'retiraste'],
+        feeTerms: ['comisión', 'comision'],
+        moneyLabels: ['cargo recurrente', 'devolución', 'devolucion', 'retiro de efectivo', 'spei'],
+    },
+    CO: {
+        market: 'CO', currencies: ['COP'], currencyAliases: { '$': ['COP'], 'COP$': ['COP'] },
+        rails: ['bre-b', 'breb', 'pse', 'transfiya'],
+        transferTerms: ['transferiste', 'enviaste', 'te enviaron', 'recibiste una transferencia', 'transferencia', 'bre-b', 'transfiya'],
+        utilityTerms: ['servicios públicos', 'servicios publicos', 'factura de energía', 'factura de energia', 'factura de agua', 'factura de gas'],
+        recurringTerms: ['débito automático', 'debito automatico', 'pago automático', 'pago automatico'],
+        postedTerms: [
+            'compraste', 'pagaste', 'retiraste', 'transferiste', 'enviaste', 'recibiste', 'te enviaron',
+            'te envió', 'te envio', 'paso plata',
+        ],
+        failedTerms: [
+            'rechazada', 'rechazado', 'declinada', 'declinado', 'no aprobada', 'no aprobado', 'no autorizada',
+            'no autorizado', 'no fue posible', 'fallida', 'fallido', 'cancelada', 'cancelado',
+        ],
+        futureTerms: [
+            'programado', 'programada', 'se debitará', 'se debitara', 'tienes un pago', 'completa tu pago',
+            'pago mínimo', 'pago minimo', 'fecha límite', 'fecha limite', 'te pidió', 'te pidio',
+        ],
+        debitTerms: ['compraste', 'compra', 'pagaste', 'retiraste', 'transferiste', 'enviaste', 'paso plata', 'avance'],
+        creditTerms: ['recibiste', 'te enviaron', 'te envió', 'te envio', 'consignación', 'consignacion', 'abono'],
+        purchaseTerms: ['compraste', 'compra', 'pagaste'],
+        refundTerms: ['devolución', 'devolucion', 'reembolso', 'reverso'],
+        cashTerms: ['retiraste', 'retiro', 'cajero'],
+        feeTerms: ['cuota de manejo', 'comisión', 'comision'],
+        moneyLabels: ['compraste', 'pagaste', 'retiraste', 'transferiste', 'enviaste', 'recibiste', 'te enviaron', 'paso plata'],
+    },
+    PE: {
+        market: 'PE', currencies: ['PEN'], currencyAliases: { 'S/': ['PEN'], 'S/.': ['PEN'] },
+        rails: ['yape', 'plin', 'cci'],
+        transferTerms: ['yapeaste', 'te yapeó', 'te yapeo', 'te envió un pago', 'te envio un pago', 'has enviado', 'enviaste', 'transferencia', 'plin', 'cci'],
+        utilityTerms: ['recibo de luz', 'recibo de agua', 'pago de servicios'],
+        recurringTerms: ['débito automático', 'debito automatico', 'cargo recurrente'],
+        postedTerms: [
+            'realizaste', 'yapeaste', 'te yapeó', 'te yapeo', 'te envió', 'te envio', 'te envío', 'te ha enviado',
+            'has enviado', 'enviaste', 'recibiste', 'pagaste', 'transferencia efectuada', 'transferencia recibida',
+        ],
+        failedTerms: [
+            'rechazada', 'rechazado', 'declinada', 'declinado', 'no aprobada', 'no aprobado', 'no autorizada',
+            'no autorizado', 'no fue posible', 'fallida', 'fallido', 'cancelada', 'cancelado',
+        ],
+        futureTerms: ['programado', 'programada', 'se cargará', 'se cargara', 'pago mínimo', 'pago minimo', 'fecha límite', 'fecha limite'],
+        debitTerms: ['realizaste un consumo', 'consumo', 'compra', 'yapeaste', 'has enviado', 'enviaste', 'pagaste', 'transferencia efectuada'],
+        creditTerms: ['te yapeó', 'te yapeo', 'te envió', 'te envio', 'te envío', 'te ha enviado', 'recibiste', 'abono', 'transferencia recibida'],
+        purchaseTerms: ['consumo', 'compra'],
+        refundTerms: ['devolución', 'devolucion', 'extorno', 'reembolso'],
+        cashTerms: ['retiro', 'cajero'],
+        feeTerms: ['comisión', 'comision'],
+        moneyLabels: ['consumo', 'yapeaste', 'te yapeó', 'te envió', 'te ha enviado', 'has enviado', 'enviaste', 'recibiste'],
+    },
+    SG: {
+        market: 'SG', currencies: ['SGD'], currencyAliases: { 'S$': ['SGD'], '$': ['SGD'] },
+        rails: ['paynow', 'fast transfer', 'giro', 'sgqr'],
+        transferTerms: ['paynow', 'fast transfer', 'fund transfer', 'funds transfer', 'bank transfer'],
+        utilityTerms: ['utility bill', 'electricity bill', 'water bill', 'gas bill', 'mobile bill'],
+        recurringTerms: ['giro', 'recurring', 'standing instruction', 'scheduled payment'],
+        debitTerms: ['paynow outgoing', 'local card transaction', 'online card transaction'],
+        purchaseTerms: ['local card transaction', 'online card transaction'],
+        moneyLabels: ['paynow outgoing', 'local card transaction', 'online card transaction'],
+    },
+};
+},
+"alert-semantics":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.inspectMarketAlert = exports.accountMovementDirection = void 0;
+const alert_draft_1 = require("@/lib/alert-draft");
+const alert_event_evidence_1 = require("@/lib/alert-event-evidence");
+const alert_institution_grammars_1 = require("@/lib/alert-institution-grammars");
+const alert_market_packs_1 = require("@/lib/alert-market-packs");
+const bank_alert_semantic_rules_1 = require("@/lib/bank-alert-semantic-rules");
+const AUTHENTICATION = /\b(?:otp|one[ -]?time password|3d secure|3ds|verification code|security code|sicherheitscode|c[óo]digo de (?:seguridad|verifica[cç][aã]o|verificaci[oó]n)|codice di sicurezza|beveiligingscode|approve (?:this )?(?:payment|purchase)|fraud (?:check|alert)|did you (?:make|recogni[sz]e|authori[sz]e) (?:this|the) (?:\w+ ){0,3}(?:purchase|transaction|charge|payment)|reconoces (?:esta|este|la|el) (?:compra|cargo|transacci[oó]n|operaci[oó]n)|reconhece (?:esta|essa|a|o) (?:compra|transa[cç][aã]o|opera[cç][aã]o))\b|code de s[ée]curit[ée]|رمز (?:التحقق|التأكيد)|كلمة المرور/i;
+const FAILED = /\b(?:declined|failed|unsuccessful|rejected|not approved|insufficient funds|returned unpaid|recusad[oa]|rechazad[oa]|declinad[oa]|no aprobad[oa]|no autorizad[oa]|no procede|no aplicad[oa])\b|\bn[aã]o\s+(?:aprovad[oa]|autorizad[oa])\b|مرفوض(?:ة)?|فشل(?:ت)?|تعذر|असफल|अस्वीकृत/i;
+const NEGATED_POSTING = [
+    /(?:(?:\bne\s+|n['’])(?:[\p{L}\p{M}'’-]+\s+){0,4}pas\s+(?:[\p{L}\p{M}'’-]+\s+){0,2}|\bnon\s+)(?:payé|payée|paye|payee|débité|débitée|debite|debitee|crédité|créditée|credite|creditee|remboursé|remboursée|effectué|effectuée)(?=$|[^\p{L}\p{N}])/iu,
+    /\bno\s+(?:[\p{L}\p{M}'’-]+\s+){0,4}(?:pagad[oa]s?|cargad[oa]s?|abonad[oa]s?|reembolsad[oa]s?)(?=$|[^\p{L}\p{N}])/iu,
+    /\bnon\s+(?:[\p{L}\p{M}'’-]+\s+){0,4}(?:pagat[oa]|addebitat[oa]|accreditat[oa]|rimborsat[oa])(?=$|[^\p{L}\p{N}])/iu,
+    /\bnicht\s+(?:[\p{L}\p{M}'’-]+\s+){0,3}(?:bezahlt|abgebucht|belastet|gutgeschrieben|erstattet)(?=$|[^\p{L}\p{N}])/iu,
+    /\bniet\s+(?:[\p{L}\p{M}'’-]+\s+){0,3}(?:betaald|afgeschreven|bijgeschreven|terugbetaald)(?=$|[^\p{L}\p{N}])/iu,
+    /(?:^|[^\p{L}\p{N}])n[aã]o\s+(?:[\p{L}\p{M}'’-]+\s+){0,4}(?:pag[oa]|debitad[oa]|creditad[oa]|cobrad[oa]|reembolsad[oa]|conclu[ií]d[oa])(?=$|[^\p{L}\p{N}])/iu,
+    /\b(?:not|never|hasn['’]t|haven['’]t|didn['’]t)\s+(?:(?:yet|been|be)\s+){0,2}(?:received|credited|debited|deducted|deposited|charged|paid)\b/iu,
+];
+const NEGATED_SETTLEMENT = /\b(?:nothing|no\s+(?:funds|amount|money|charges?|payment))\s+(?:(?:was|were|has|have)\s+)?(?:(?:yet|been)\s+){0,2}(?:debited|credited|charged|paid|transferred|deposited)\b/iu;
+const PENDING_OR_AUTHORIZED = /\b(?:pending(?:\s+(?:acceptance|review|authori[sz]ation|approval|processing|transaction|confirmation))?|awaiting\s+(?:acceptance|review|authori[sz]ation|approval|processing|confirmation)|authori[sz]ation\s+(?:only|hold|pending)|pre-?authori[sz]ation(?!\s+(?:debit|payment))|on\s+hold|being\s+(?:processed|authori[sz]ed|reviewed)|requires?\s+(?:your\s+)?(?:approval|authori[sz]ation|confirmation)|limit\s+(?:changed|set|updated|increased|reduced))\b|(?:^|[^\p{L}\p{N}])(?:pendente|pendiente|em\s+processamento|em\s+an[aá]lise|en\s+proceso|en\s+revisi[oó]n|aguardando\s+(?:aprova[cç][aã]o|confirma[cç][aã]o|autoriza[cç][aã]o)|aguarda\s+(?:aprova[cç][aã]o|confirma[cç][aã]o|autoriza[cç][aã]o)|pendiente\s+de\s+(?:autorizaci[oó]n|aprobaci[oó]n)|requiere\s+(?:tu\s+|su\s+)?(?:autorizaci[oó]n|aprobaci[oó]n|confirmaci[oó]n)|por\s+autorizar|retenid[oa]|bloquead[oa]|pr[eé]-?autoriza[cç][aã]o|preautorizaci[oó]n)(?=$|[^\p{L}\p{N}])/iu;
+const REQUEST_LIFECYCLE = /\b(?:(?:interac\s+e-?transfer|payto(?:\s+agreement)?|transfer|payment|purchase|money)\s+request)\b(?:[^.!?]|\.(?=\d)){0,140}\b(?:received|approved|accepted|created|sent|awaiting\s+approval|awaiting\s+confirmation)\b|(?:^|[^\p{L}\p{N}])(?:solicita[cç][aã]o\s+de\s+(?:pagamento|transfer[eê]ncia|pix)|pedido\s+de\s+(?:pagamento|pix)|solicitud\s+de\s+(?:pago|transferencia|cobro|dinero))(?=$|[^\p{L}\p{N}])/iu;
+const EXPLICIT_SETTLEMENT = /\b(?:was|has\s+been|have\s+been|were|successfully)\s+(?:debited|credited|charged|paid|transferred|deposited)\b|(?:^|[^\p{L}\p{N}])(?:foi\s+(?:debitad[oa]|creditad[oa]|pag[oa])|fue\s+(?:cargad[oa]|abonad[oa]|pagad[oa])|ha\s+sido\s+(?:cargad[oa]|abonad[oa]|pagad[oa]))(?=$|[^\p{L}\p{N}])/iu;
+const FUTURE = /\b(?:will (?:be|have been) (?:debited|credited|deposited|refunded|charged|deducted|collected)|will apply|pre[ -]?debit|collect request|payment request|scheduled|due on|payment due|upcoming|mandate (?:created|registered))\b|سيتم (?:خصم|سحب|تحصيل|إيداع|رد)|طلب تحصيل|مستحق|डेबिट किया जाएगा|क्रेडिट किया जाएगा|भुगतान देय/i;
+const STATEMENT = /\b(?:statement|credit card bill|card bill|minimum (?:amount )?due|amount due|payment due date|kontoauszug|extracto|estratto conto|rekeningoverzicht)\b|relev[ée]|كشف حساب|الحد الأدنى المستحق/i;
+const BALANCE = /\b(?:available balance|current balance|avl bal|available limit|credit limit|solde|kontostand|saldo)\b|الرصيد (?:الحالي|المتاح)|الحد (?:المتاح|الائتماني)/i;
+const POSTED = /(?:^|[:.]\s*)payment\s+(?:of\s+)?(?:[a-z]{3}|[$€£₹])\s*[\d.,]+\s+at\b|\byou\s+made\s+an?\b(?:[^.;\n]|\.\d){0,40}?\btransaction\b|\bcharge\s+made\s+(?:online|by\s+phone|in\s+store)\b|\b(?:was|has\s+been|were|have\s+been)\s+deducted\b|\b(?:charge|transaction)\s+(?:of|with)\b(?:[^.;\n]|\.\w){0,80}?\bwas\s+made\b|\bwas\s+used\s+for\b|\bwas\s+charged\s+for\b|\byou\s+withdrew\b|\byou\s+(?:have\s+)?sent\b|\bsent\s+you\b|\b(?:spent|purchase(?:d)?|paid|debited|credited|received|sent|withdrawn|deposited|refund(?:ed)?|revers(?:al|ed)|completed|successful|charged|posted|débité|crédité|effectué|belastet|abgebucht|gutgeschrieben|bezahlt|cargado|abonado|pagado|addebitato|accreditato|afgeschreven|bijgeschreven|betaald)\b|تم (?:الخصم|الإيداع|الدفع|التحويل)|سحب|شراء|دفع|استرداد|डेबिट किया गया|क्रेडिट किया गया|जमा किया गया|भुगतान किया गया/i;
+const CREDIT = /\bsent\s+you\b|\b(?:credited|received|deposit(?:ed)?|refund(?:ed)?|revers(?:al|ed)|credited back|crédité|gutschrift|gutgeschrieben|abonado|accredito|accreditato|bijgeschreven|terugbetaling)\b|تم (?:الإيداع|رد)|استرداد|क्रेडिट|जमा/i;
+const DEBIT = /(?:^|[:.]\s*)payment\s+(?:of\s+)?(?:[a-z]{3}|[$€£₹])\s*[\d.,]+\s+at\b|\byou\s+made\s+an?\b(?:[^.;\n]|\.\d){0,40}?\btransaction\b|\bcharge\s+made\s+(?:online|by\s+phone|in\s+store)\b|\b(?:was|has\s+been|were|have\s+been)\s+deducted\b|\b(?:charge|transaction)\s+(?:of|with)\b(?:[^.;\n]|\.\w){0,80}?\bwas\s+made\b|\bcharge\s+of\b|\bwas\s+used\s+for\b|\bwas\s+charged\s+for\b|\bwithdrew\b|\byou\s+(?:have\s+)?sent\b|\b(?:spent|purchase(?:d)?|paid|debited|withdrawn|charged|débité|belastet|abgebucht|cargado|pagado|addebitato|afgeschreven|betaald)\b|تم (?:الخصم|الدفع)|سحب|شراء|دفع|डेबिट|निकासी|भुगतान/i;
+const REFUND = /\b(?:refund(?:ed)?|revers(?:al|ed)|credited back|remboursement|avoir|erstattung|devolución|reembolso|rimborso|storno|terugbetaling|correctieboeking)\b|استرداد|تم رد|धनवापसी|रिफंड/i;
+const CASH = /\byou\s+withdrew\b|\b(?:atm|cash machine|cash withdrawal|geldautomat|bargeldabhebung|retrait|retirada|prelievo|geldopname|aeps cash withdrawal)\b|صراف آلي|سحب نقدي|नकद निकासी|एटीएम निकासी/i;
+const FEE = /\b(?:bank fee|service charge|annual fee|annual card fee|monthly fee|monthly account maintenance fee|maintenance fee|commission|overdraft fee|nsf fee|frais|cotisation|gebühr|entgelt|comisión|commissione|canone|kosten)\b|رسوم|عمولة/i;
+const PURCHASE = /(?:^|[:.]\s*)payment\s+(?:of\s+)?(?:[a-z]{3}|[$€£₹])\s*[\d.,]+\s+at\b|\bcard(?:\s+(?:ending\s+|-\s*)?\d{2,4})?\s+charge\s+made\b|\btransaction\s+(?:with|at)\b|\b(?:charge|transaction)\s+of\b(?:[^.;\n]|\.\d){0,80}?\bat\b|\bwas\s+(?:used|charged)\s+for\b(?:[^.;\n]|\.\d){0,60}?\bat\b|\b(?:debited|charged)\s+from\s+your\s+(?:a\/?c|account|card)\b(?:[^.;\n]|\.\d){0,40}?\bat\b|\b(?:purchase|card charged?|card(?:\s+(?:ending\s+)?\d{2,4})?\s+(?:was\s+)?charged|card payment|card used|paid|spent|paiement par carte|achat|kartenzahlung|kartenumsatz|compra con tarjeta|pagamento con carta|acquisto|pinbetaling|pasbetaling)\b|شراء|دفع بالبطاقة|कार्ड खरीद|कार्ड भुगतान|खरीद/i;
+const PAID_YOU = /\bpaid\s+you\b/giu;
+const NOT_A_PAYER = /\b(?:someone|somebody|anyone|anybody|a\s+friend|if|whether|when|whenever|once|unless|after|every\s+time|earn|get|has|have|had|did|does|do|not|never|hasn['’]t|haven['’]t|didn['’]t|who|that)\b/iu;
+const peerPaidYou = (text) => [...text.matchAll(PAID_YOU)].some((match) => {
+    const before = text.slice(0, match.index);
+    const start = Math.max(before.search(/[^.!?:\n]*$/u), 0);
+    const subject = before.slice(start).trim();
+    const sentenceEnd = text.slice(match.index).search(/[.!\n](?!\d)|$/u);
+    const sentence = text.slice(match.index, match.index + sentenceEnd);
+    return subject.length > 0 && subject.length <= 60 && !NOT_A_PAYER.test(subject) && !sentence.includes('?');
+});
+const accountMovementDirection = (text, qualificationPrefix = '') => {
+    const paidIntoOwnAccount = /\b(?:has\s+been|have\s+been|was|were)\s+paid\s+into\s+your\s+(?:[\p{L}-]+\s+){0,3}?(?:account|acct|a\/?c)\b/iu.exec(text);
+    const ownTransferDeposited = /\byour\s+interac\s+e[ -]?transfer\s+of\b(?:[^;!?\n]|\.(?=\d)){0,120}?\bto\s+(?:[^;!?\n]|\.(?=\d)){1,80}?\b(?:was|has\s+been)\s+deposited\b(?=\s*(?:[.,;!?]|$)|\s+(?:on|into|in|at|by|and)\b)/iu.exec(text);
+    const paidToUnownedAccount = /\bpaid\b(?:[^;!?\n]|\.(?=\d)){0,60}?\b(?:to|into)\s+(?!your\b)(?:[\p{L}-]+\s+){0,3}?(?:account|acct|a\/?c)\b/iu.exec(text);
+    if (!paidIntoOwnAccount && !ownTransferDeposited && !paidToUnownedAccount)
+        return null;
+    const explicitDebit = /\b(?:debited|charged|deducted|withdrawn)\b|\byou\s+(?:have\s+)?sent\b/iu.test(text);
+    const explicitCredit = /\b(?:credited|received|refunded)\b/iu.test(text);
+    const movement = paidIntoOwnAccount ?? ownTransferDeposited ?? paidToUnownedAccount;
+    const leadIn = (qualificationPrefix + text.slice(0, movement.index + movement[0].length))
+        .split(/[;!?\n]|\.(?=\s|$)/u).at(-1) ?? '';
+    const conditional = /\b(?:if|when|once|unless|whether|suppose|imagine)\b|\b(?:for\s+(?:example|instance)|as\s+an?\s+example|sample\s+(?:alert|message|transaction|transfer))\b|(?:^|:\s*)example\s*:/iu.test(leadIn);
+    if (conditional || text.includes('?') || (paidIntoOwnAccount && ownTransferDeposited))
+        return 'unknown';
+    if (paidIntoOwnAccount) {
+        const nonDepositAccount = /\bpaid\s+into\s+your\s+(?:(?:credit|covered|charge)\s+card|loan|mortgage|merchant|trading|investment)\b/iu.test(text);
+        return explicitDebit || nonDepositAccount ? 'unknown' : 'credit';
+    }
+    if (ownTransferDeposited) {
+        const ownDestination = /\bto\s+your\b/iu.test(text);
+        return explicitCredit || ownDestination ? 'unknown' : 'debit';
+    }
+    const ownFunding = /\bfrom\s+your\s+(?:[\p{L}-]+\s+){0,3}?(?:account|acct|a\/?c)\b/iu.test(text);
+    if (ownFunding)
+        return explicitCredit ? 'unknown' : 'debit';
+    return explicitDebit || explicitCredit ? null : 'unknown';
+};
+exports.accountMovementDirection = accountMovementDirection;
+const NEAR_BALANCE = /(?:available|current|closing|remaining)\s+balance|avl\s+bal|solde(?: disponible)?|kontostand|الرصيد (?:الحالي|المتاح)/i;
+const NEAR_LIMIT = /(?:available|credit)\s+limit|\bavl\.?\s*lmt\b|الحد (?:المتاح|الائتماني)/i;
+const NEAR_DUE = /(?:minimum (?:amount )?due|amount due|payment due|statement total|outstanding balance)|الحد الأدنى المستحق|المبلغ المستحق/i;
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const termPatterns = new Map();
+const termPattern = (term) => {
+    const cached = termPatterns.get(term);
+    if (cached)
+        return cached;
+    const flexibleTerm = term.trim().split(/\s+/u).map(escapeRegExp).join('\\s+');
+    const pattern = new RegExp(`(^|[^\\p{L}\\p{N}])${flexibleTerm}(?=$|[^\\p{L}\\p{N}])`, 'iu');
+    if (termPatterns.size >= 1024)
+        termPatterns.clear();
+    termPatterns.set(term, pattern);
+    return pattern;
+};
+const findTerm = (text, terms) => {
+    for (const term of terms) {
+        if (termPattern(term).test(text))
+            return term;
+    }
+    return null;
+};
+const isClauseBoundary = (text, index) => {
+    const character = text[index];
+    if (character === '\n' || character === '\r' || character === ';')
+        return true;
+    if (character !== '.' && character !== '!' && character !== '?')
+        return false;
+    return !/\d/u.test(text[index - 1] ?? '') || !/\d/u.test(text[index + 1] ?? '');
+};
+const semanticClause = (text, span) => {
+    if (!span)
+        return text;
+    let start = Math.max(0, Math.min(span.start, text.length));
+    let end = Math.max(start, Math.min(span.end, text.length));
+    while (start > 0 && !isClauseBoundary(text, start - 1))
+        start -= 1;
+    while (end < text.length && !isClauseBoundary(text, end))
+        end += 1;
+    return text.slice(start, end).trim() || text;
+};
+const moneyCandidateRole = (text, span, pack) => {
+    const nearby = semanticClause(text, span).replace(/\s+/gu, ' ');
+    if (NEAR_LIMIT.test(nearby))
+        return 'limit';
+    if (NEAR_DUE.test(nearby))
+        return 'due';
+    if (NEAR_BALANCE.test(nearby))
+        return 'balance';
+    if (FEE.test(nearby))
+        return 'fee';
+    if (DEBIT.test(nearby) || CREDIT.test(nearby) || PURCHASE.test(nearby) ||
+        CASH.test(nearby) || REFUND.test(nearby) ||
+        findTerm(nearby, pack.purchaseTerms ?? []) ||
+        findTerm(nearby, pack.refundTerms ?? []) ||
+        findTerm(nearby, pack.cashTerms ?? []) ||
+        findTerm(nearby, pack.postedTerms ?? []) ||
+        findTerm(nearby, pack.debitTerms ?? []) ||
+        findTerm(nearby, pack.creditTerms ?? []))
+        return 'transaction';
+    return 'unknown';
+};
+const primaryCandidate = (roles) => {
+    const explicit = roles
+        .map((role, index) => ({ role, index }))
+        .filter(({ role }) => role === 'transaction' || role === 'fee');
+    if (explicit.length === 1)
+        return explicit[0].index;
+    if (explicit.length > 1)
+        return null;
+    return roles.length === 1 && roles[0] === 'unknown' ? 0 : null;
+};
+const postingStatus = (text, postedTerms = [], failedTerms = [], futureTerms = []) => {
+    if (AUTHENTICATION.test(text))
+        return 'informational';
+    if (FAILED.test(text) || NEGATED_POSTING.some((pattern) => pattern.test(text)) ||
+        findTerm(text, failedTerms))
+        return 'failed';
+    if (STATEMENT.test(text))
+        return 'informational';
+    const hasTransactionEvidence = POSTED.test(text) || Boolean(findTerm(text, postedTerms));
+    if (FUTURE.test(text) || findTerm(text, futureTerms))
+        return 'future';
+    const settled = EXPLICIT_SETTLEMENT.test(text) && !NEGATED_SETTLEMENT.test(text);
+    if (REQUEST_LIFECYCLE.test(text) && !settled)
+        return 'informational';
+    if (PENDING_OR_AUTHORIZED.test(text) && !settled)
+        return 'future';
+    if (BALANCE.test(text) && !hasTransactionEvidence)
+        return 'informational';
+    return hasTransactionEvidence ? 'posted' : 'unknown';
+};
+const moneyDirection = (text, debitTerms = [], creditTerms = []) => {
+    const accountMovement = (0, exports.accountMovementDirection)(text);
+    if (accountMovement !== null)
+        return accountMovement;
+    const accountCredit = /\bcredited to (?:your|the) (?:bank )?account\b/i.test(text);
+    const accountDebit = /\bdebited from (?:your|the) (?:bank )?account\b/i.test(text);
+    if (accountCredit !== accountDebit)
+        return accountCredit ? 'credit' : 'debit';
+    if (peerPaidYou(text))
+        return 'credit';
+    const credit = CREDIT.test(text) || Boolean(findTerm(text, creditTerms));
+    const debit = DEBIT.test(text) || Boolean(findTerm(text, debitTerms));
+    if (credit === debit)
+        return 'unknown';
+    return credit ? 'credit' : 'debit';
+};
+const inspectMarketAlert = (source, market, context = {}) => {
+    const pack = (0, alert_market_packs_1.alertMarketPack)(market);
+    const draftContext = { currencyAliases: pack.currencyAliases, dotDecimalCurrencies: pack.dotDecimalCurrencies };
+    const draft = (0, alert_draft_1.inspectAlertDraft)(source, draftContext);
+    const text = draft.normalizedText.toLowerCase();
+    const moneyRoles = draft.candidates.map((candidate) => moneyCandidateRole(text, candidate.span, pack));
+    const primaryCandidateIndex = primaryCandidate(moneyRoles);
+    const primarySpan = primaryCandidateIndex === null
+        ? null
+        : draft.candidates[primaryCandidateIndex]?.span ?? null;
+    const semanticText = semanticClause(text, primarySpan);
+    const semanticDraft = (0, alert_draft_1.inspectAlertDraft)(semanticText, draftContext);
+    const classificationText = semanticText.replace(/\s+/gu, ' ');
+    const initialStatus = postingStatus(classificationText, pack.postedTerms, pack.failedTerms, pack.futureTerms);
+    const rail = findTerm(classificationText, pack.rails);
+    const transfer = findTerm(classificationText, pack.transferTerms);
+    const utility = findTerm(classificationText, pack.utilityTerms);
+    const recurring = findTerm(classificationText, pack.recurringTerms);
+    const eventEvidence = (0, alert_event_evidence_1.inspectAlertEventEvidence)(text, {
+        recurringTerm: recurring,
+        utilityTerm: utility,
+        primaryCandidateIndex,
+    });
+    const lifecycleOnly = eventEvidence.scheduledDebit && [
+        'created', 'modified', 'paused', 'resumed', 'cancelled', 'funds-released',
+    ].includes(eventEvidence.scheduledDebit.event);
+    const ungroundedExecution = eventEvidence.scheduledDebit?.event === 'executed' &&
+        initialStatus !== 'posted';
+    const challenged = initialStatus === 'posted' && (0, bank_alert_semantic_rules_1.isTransactionVerificationChallenge)(text);
+    const status = lifecycleOnly || ungroundedExecution
+        ? 'informational'
+        : challenged ? 'unknown' : initialStatus;
+    const institution = (0, alert_institution_grammars_1.inspectAlertInstitutionGrammar)(draft.normalizedText, market, context.sender);
+    let family = 'unknown';
+    if (AUTHENTICATION.test(classificationText))
+        family = 'authentication';
+    else if (status === 'informational' && STATEMENT.test(classificationText))
+        family = 'statement';
+    else if (status === 'informational' && BALANCE.test(classificationText))
+        family = 'balance';
+    else if (REFUND.test(classificationText) || findTerm(classificationText, pack.refundTerms ?? []))
+        family = 'refund';
+    else if (CASH.test(classificationText) || findTerm(classificationText, pack.cashTerms ?? []))
+        family = 'cash-withdrawal';
+    else if (FEE.test(classificationText) || eventEvidence.fee ||
+        findTerm(classificationText, pack.feeTerms ?? []))
+        family = 'fee';
+    else if (status === 'posted' && utility)
+        family = 'utility';
+    else if (status === 'posted' && recurring)
+        family = 'recurring-payment';
+    else if (status === 'posted' && transfer)
+        family = 'transfer';
+    else if (status === 'posted' && (0, exports.accountMovementDirection)(classificationText) !== null)
+        family = 'transfer';
+    else if (status === 'posted' && peerPaidYou(classificationText))
+        family = 'transfer';
+    else if (PURCHASE.test(classificationText) || findTerm(classificationText, pack.purchaseTerms ?? []))
+        family = 'purchase';
+    const reasons = [
+        ...semanticDraft.reasons,
+        ...draft.reasons.filter((reason) => reason === 'input-too-long' || reason === 'too-many-money-candidates'),
+    ];
+    if (status !== 'posted')
+        reasons.push(`posting-status:${status}`);
+    if (family === 'unknown')
+        reasons.push('unknown-family');
+    if (draft.candidates.length && primaryCandidateIndex === null) {
+        reasons.push('no-unique-transaction-amount');
+    }
+    if (eventEvidence.scheduledDebit) {
+        reasons.push(`scheduled-debit:${eventEvidence.scheduledDebit.event}`);
+    }
+    const fullMessageSafe = !draft.reasons.includes('input-too-long') &&
+        !draft.reasons.includes('too-many-money-candidates');
+    const decision = semanticDraft.decision === 'review' && fullMessageSafe && status === 'posted' &&
+        primaryCandidateIndex !== null ? 'review' : 'refuse';
+    return {
+        market,
+        decision,
+        status,
+        family,
+        direction: status === 'posted'
+            ? moneyDirection(classificationText, pack.debitTerms, pack.creditTerms)
+            : 'none',
+        rail,
+        moneyRoles,
+        primaryCandidateIndex,
+        institution,
+        eventEvidence,
+        reasons: [...new Set(reasons)],
+        draft,
+    };
+};
+exports.inspectMarketAlert = inspectMarketAlert;
+},
+"alert-source-ownership":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.isOwnerProfileClause = void 0;
+exports.ownerProfilePrefixLength = ownerProfilePrefixLength;
+const alert_draft_1 = require("@/lib/alert-draft");
+const PROFILE = new RegExp(String.raw `^\s*(?:${[
+    String.raw `(?:account\s+holder|card\s*holder|customer|owner|user|member)(?:\s+(?:full|legal|first|last))?\s+name|account\s+holder|card\s*holder`,
+    String.raw `(?:account|card)\s+(?:opened|created|registered|issued|expires|opening\s+date|creation\s+date|registration\s+date|issuance\s+date|expiry(?:\s+date)?|expiration(?:\s+date)?)`,
+    String.raw `(?:customer|member)\s+since|date\s+of\s+birth|birth\s+date|dear`,
+    String.raw `اسم\s+(?:صاحب\s+الحساب|مالك\s+الحساب|حامل\s+البطاق[ةه]|العميل)|صاحب\s+الحساب|حامل\s+البطاق[ةه]`,
+    String.raw `الاسم(?:\s+(?:الكامل|القانوني|الأول|الاول|الأخير|الاخير))?\s+(?:للعميل|لصاحب\s+الحساب|لحامل\s+البطاق[ةه])`,
+    String.raw `تاريخ\s+(?:فتح\s+الحساب|إنشاء\s+الحساب|انشاء\s+الحساب|إصدار\s+البطاق[ةه]|اصدار\s+البطاق[ةه]|انتهاء\s+(?:البطاق[ةه]|الصلاحية)|الميلاد)`,
+].join('|')})(?=$|[^\p{L}\p{M}\p{N}])`, 'iu');
+const isOwnerProfileClause = (clause) => PROFILE.test((0, alert_draft_1.normalizeAlertText)(clause));
+exports.isOwnerProfileClause = isOwnerProfileClause;
+function ownerProfilePrefixLength(clause) {
+    const greeting = (0, alert_draft_1.normalizeAlertText)(clause).match(/^\s*dear\b[^,，،]*[,，،]\s*/iu);
+    return greeting ? greeting[0].length : clause.length;
+}
+},
+"bank-alert-interpreter":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.interpretBankAlert = void 0;
+const bank_alert_semantic_rules_1 = require("@/lib/bank-alert-semantic-rules");
+const categories_1 = require("@/lib/categories");
+const bank_alert_semantic_output_1 = require("@/lib/bank-alert-semantic-output");
+const markets_1 = require("@/lib/markets");
+const sms_parser_1 = require("@/lib/sms-parser");
+const unparsed_launch_alert_1 = require("@/lib/unparsed-launch-alert");
+const legacyResult = (parsed, meaning = (0, bank_alert_semantic_output_1.meaningFromParsed)(parsed)) => ({
+    outcome: 'parsed',
+    origin: 'legacy',
+    parsed,
+    meaning,
+    evidence: ['legacy-parser'],
+});
+const GENERIC_PURCHASE_TITLES = new Set([
+    'Card purchase',
+    'Card payment',
+    'Account debit',
+    'Outgoing transfer',
+    'Bank transfer',
+    'Card',
+]);
+const isPostedCardPurchase = (source, legacy) => legacy.kind === 'transaction' && legacy.type === 'expense' && legacy.card !== null &&
+    legacy.card.kind !== 'account' &&
+    legacy.categoryGuess !== 'cash-withdrawal' && legacy.categoryGuess !== 'utilities' &&
+    legacy.categoryGuess !== 'telecom' && legacy.categoryGuess !== 'home-services' &&
+    legacy.cardPaymentSide === undefined &&
+    legacy.paymentFlowSide === undefined &&
+    (/\b(?:card\b[^.\n]{0,56}\b(?:charged|used)|(?:card\s+|pos\s+)?purchase(?:d)?\b)\b|شراء|دفع بالبطاق[هة]/iu.test(source) ||
+        (legacy.merchant === 'Card purchase' &&
+            /\b(?:debited|charged)\b[^.\n]{0,56}\b(?:using|from)\s+(?:your\s+)?card\b/iu.test(source)));
+const protectedCardPurchaseResult = (legacy) => {
+    if (!legacy.transferHint)
+        return legacyResult(legacy, 'card-purchase');
+    return {
+        outcome: 'parsed',
+        origin: 'semantic',
+        parsed: { ...legacy, transferHint: false },
+        meaning: 'card-purchase',
+        evidence: ['legacy-parser', 'card-purchase-language'],
+    };
+};
+const feePostingPrecedesVerb = (source) => {
+    const feeIndex = source.search(/\b(?:annual|monthly|maintenance|service|membership|renewal|overdraft|overlimit|late payment|insufficient balance|nsf)?\s*(?:card\s+|account\s+|bank\s+)?(?:fee|commission|charge)\b[\s\S]{0,80}\b(?:charged|debited|deducted)\b/iu);
+    if (feeIndex < 0)
+        return false;
+    const purchaseIndex = source.search(/\b(?:card\b[^.\n]{0,56}\b(?:charged|used)|(?:card\s+|pos\s+)?purchase(?:d)?\b)|شراء|دفع بالبطاق[هة]/iu);
+    return purchaseIndex < 0 || feeIndex <= purchaseIndex;
+};
+const isCompactCardCreditReturn = (source) => /\bcr\b/iu.test(source) && /\bcard\b/iu.test(source) &&
+    /\b(?:pos|(?:card\s+)?pur)\b/iu.test(source);
+const isCompletedCardPurchaseReturn = (source, legacy) => legacy.kind === 'transaction' && legacy.type === 'income' &&
+    legacy.categoryGuess === 'other' && !legacy.transferHint &&
+    legacy.card !== null && legacy.card.kind !== 'account' &&
+    /^(?:your\s+)?(?:card\s+|pos\s+)?purchase\s+of\b(?:[^.\n]|\.(?=\d)){0,160}?\b(?:with|using|on)\s+(?:your\s+)?(?:(?:credit|debit|covered)\s+)?card\s+(?:ending(?:\s+with)?\s+)?[x*\d -]{4,32}\s+(?:has\s+been|was)\s+(?:successfully\s+)?(?:reversed|refunded)\b/iu.test(source);
+const mistookInstrumentLast4ForAmount = (source, market, legacy) => {
+    const last4 = legacy?.card?.last4;
+    if (!legacy || !last4 || legacy.amountFils !== Number(last4) * 100)
+        return false;
+    const currency = market === 'AE' ? 'AED' : 'SAR';
+    const escapedLast4 = last4.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(String.raw `(?:\b(?:account|card|cc)|a\/?c)\b[^.\n]{0,24}\b${escapedLast4}\s+${currency}\s+[\d,.]+`, 'iu').test(source);
+};
+const isUnpostedSalaryPromotion = (source, legacy) => legacy.categoryGuess === 'salary' &&
+    /\b(?:salary|payroll|wps)\b(?:[^.\n]|\.(?=\d)){0,48}\b(?:advance\s+)?offer\b|\bsalary\s+advance\b/iu.test(source) &&
+    /\b(?:apply\s+(?:now|today)|switch|open\s+(?:an?\s+)?account|sign\s*up|join)\b/iu.test(source) &&
+    !(0, unparsed_launch_alert_1.hasAffirmativeSettledMovement)(source);
+const semanticDecision = (source, market, fallback, legacy) => {
+    if (fallback.outcome === 'review')
+        return fallback;
+    return legacy ? (0, unparsed_launch_alert_1.inspectUnparsedLaunchSemantics)(source, market, true) : fallback;
+};
+const parseSemanticReview = (source, market, fallback, decision, legacy) => {
+    if ('market' in decision.review && decision.review.market !== market)
+        return null;
+    const trustedInstitution = 'market' in decision.review;
+    const evidence = (0, bank_alert_semantic_output_1.reviewEvidence)(decision.review, trustedInstitution);
+    const meaning = (0, bank_alert_semantic_rules_1.automaticMeaning)(source, decision.review, legacy);
+    if (!meaning) {
+        if (!legacy && trustedInstitution && fallback.outcome === 'review') {
+            return {
+                outcome: 'review',
+                meaning: fallback.review.direction === 'credit' ? 'generic-income' : 'unknown',
+                review: fallback.review,
+                evidence,
+            };
+        }
+        return null;
+    }
+    const legacyMeaning = legacy ? (0, bank_alert_semantic_output_1.meaningFromParsed)(legacy) : null;
+    if (legacy && meaning !== 'card-purchase' && isPostedCardPurchase(source, legacy) &&
+        !(meaning === 'fee' && feePostingPrecedesVerb(source)) &&
+        !(meaning === 'refund' && decision.review.direction === 'credit' &&
+            isCompactCardCreditReturn(source))) {
+        return protectedCardPurchaseResult(legacy);
+    }
+    if (legacy && legacy.kind !== 'transaction' &&
+        !(legacy.kind === 'cardPayment' && meaning === 'card-settlement')) {
+        return legacyResult(legacy, legacyMeaning ?? (0, bank_alert_semantic_output_1.meaningFromParsed)(legacy));
+    }
+    const expectedType = decision.review.direction === 'credit' ? 'income' : 'expense';
+    const expectedCardSide = decision.review.direction === 'credit' ? 'receipt' : 'debit';
+    const needsNormalization = meaning === 'own-account-transfer' ||
+        (meaning === 'external-transfer' && legacy?.transferHint === true) ||
+        (meaning === 'utility-payment' && legacy?.paymentFlowSide !== 'receipt') ||
+        (meaning === 'card-purchase' && legacy !== null &&
+            GENERIC_PURCHASE_TITLES.has(legacy.merchant)) ||
+        (meaning === 'card-settlement' &&
+            (legacy?.type !== expectedType || legacy.cardPaymentSide !== expectedCardSide));
+    if (legacy && legacyMeaning === meaning && !needsNormalization) {
+        return legacyResult(legacy, meaning);
+    }
+    const parsed = (0, bank_alert_semantic_output_1.semanticParsed)(source, decision.review, legacy, meaning);
+    if (!parsed || (!legacy && !trustedInstitution))
+        return null;
+    return {
+        outcome: 'parsed',
+        origin: 'semantic',
+        parsed,
+        meaning,
+        evidence: [...evidence, (0, bank_alert_semantic_output_1.evidenceForMeaning)(meaning)],
+    };
+};
+const finalFallback = (fallback, legacy) => {
+    if (legacy)
+        return legacyResult(legacy);
+    if (fallback.outcome === 'review') {
+        return {
+            outcome: 'review',
+            meaning: fallback.review.direction === 'credit' ? 'generic-income' : 'unknown',
+            review: fallback.review,
+            evidence: (0, bank_alert_semantic_output_1.reviewEvidence)(fallback.review, true),
+        };
+    }
+    return {
+        outcome: 'refuse',
+        meaning: 'unknown',
+        reason: fallback.reason,
+        evidence: [],
+    };
+};
+const interpretBankAlert = ({ source, sender, market, overrides = {}, observedAt, }) => {
+    if ((0, bank_alert_semantic_rules_1.isExpectedFutureMoneyNotice)(source)) {
+        return { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+    }
+    if ((0, sms_parser_1.isInformationOnlyAlert)(source)) {
+        return { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+    }
+    const pinnedCurrency = (0, markets_1.pinnedLedgerCurrencyCode)();
+    if (pinnedCurrency && (pinnedCurrency !== (market === 'AE' ? 'AED' : 'SAR') ||
+        (0, markets_1.ledgerCurrencyExponent)() !== 2)) {
+        return { outcome: 'refuse', meaning: 'unknown', reason: 'unsupported-currency', evidence: [] };
+    }
+    if ((0, markets_1.withMarketPackForParsing)(market, () => (0, sms_parser_1.hasMalformedBankAmount)(source, sender))) {
+        return { outcome: 'refuse', meaning: 'unknown', reason: 'unclear-amount', evidence: [] };
+    }
+    const legacy = (0, markets_1.withMarketPackForParsing)(market, () => (0, sms_parser_1.parseSms)(source, overrides, { sender, observedAt }));
+    if (!legacy && (0, bank_alert_semantic_rules_1.isApplicationPurchaseOffer)(source) && !(0, unparsed_launch_alert_1.hasAffirmativeSettledMovement)(source)) {
+        return { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+    }
+    const capturedLegacy = mistookInstrumentLast4ForAmount(source, market, legacy) ? null : legacy;
+    const cashback = capturedLegacy && (0, bank_alert_semantic_rules_1.isCompletedCashbackCredit)(source, capturedLegacy);
+    const cashbackCategory = cashback ? (0, categories_1.readMerchantCategoryOverride)(overrides, 'Cashback', 'income') : undefined;
+    const usableLegacy = cashback && capturedLegacy
+        ? { ...capturedLegacy, merchant: 'Cashback', ...(cashbackCategory ? {
+                categoryGuess: cashbackCategory, categoryDeliberate: true, categoryPinned: true,
+            } : {}) }
+        : capturedLegacy;
+    const semanticText = (0, sms_parser_1.normalizeArabic)(source).replace(/\s+/gu, ' ');
+    if (usableLegacy && isCompletedCardPurchaseReturn(semanticText, usableLegacy)) {
+        return legacyResult(usableLegacy, 'refund');
+    }
+    if (usableLegacy?.kind === 'transaction' && usableLegacy.type === 'income' &&
+        (0, sms_parser_1.hasArabicRefundHeading)(source)) {
+        return legacyResult(usableLegacy, 'refund');
+    }
+    if (usableLegacy && !bank_alert_semantic_rules_1.SEMANTIC_CANDIDATE_LANGUAGE.test(semanticText)) {
+        return legacyResult(usableLegacy);
+    }
+    const fallback = (0, unparsed_launch_alert_1.inspectUnparsedLaunchAlert)(source, sender);
+    if (!usableLegacy && (0, sms_parser_1.hasArabicRefundHeading)(source)) {
+        return fallback.outcome === 'review'
+            ? finalFallback(fallback, null)
+            : { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+    }
+    if (usableLegacy && fallback.outcome === 'refuse' &&
+        isUnpostedSalaryPromotion(source, usableLegacy)) {
+        return finalFallback(fallback, null);
+    }
+    const decision = semanticDecision(source, market, fallback, usableLegacy);
+    if (decision.outcome === 'review') {
+        const semantic = parseSemanticReview(source, market, fallback, decision, usableLegacy);
+        if (semantic)
+            return semantic;
+    }
+    return finalFallback(fallback, usableLegacy);
+};
+exports.interpretBankAlert = interpretBankAlert;
+},
+"bank-alert-semantic-output":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.semanticParsed = exports.evidenceForMeaning = exports.reviewEvidence = exports.meaningFromParsed = void 0;
+const STRUCTURAL_FEE_TITLES = new Set([
+    'Bank fee',
+    'Annual card fee',
+    'Annual bank fee',
+    'Account maintenance fee',
+    'Overlimit fee',
+    'Insufficient balance fee',
+    'Late payment fee',
+    'Overdraft fee',
+    'Service charge',
+    'VAT fee',
+]);
+const meaningFromParsed = (parsed) => {
+    if (parsed.kind === 'billDue')
+        return 'bill-due';
+    if (parsed.kind === 'cardStatement')
+        return 'card-statement';
+    if (parsed.kind === 'cardPayment')
+        return 'card-settlement';
+    if (parsed.type === 'income') {
+        if (parsed.categoryGuess === 'salary')
+            return 'salary-income';
+        if (parsed.categoryGuess === 'business')
+            return 'business-income';
+        if (/refund/i.test(parsed.merchant))
+            return 'refund';
+        if (parsed.transferHint)
+            return 'own-account-transfer';
+        return 'generic-income';
+    }
+    if (parsed.transferHint)
+        return 'own-account-transfer';
+    if (parsed.paymentFlowSide === 'receipt' || parsed.categoryGuess === 'utilities') {
+        return 'utility-payment';
+    }
+    if (parsed.categoryGuess === 'cash-withdrawal')
+        return 'cash-withdrawal';
+    if (STRUCTURAL_FEE_TITLES.has(parsed.merchant))
+        return 'fee';
+    if (parsed.card && parsed.card.kind !== 'account')
+        return 'card-purchase';
+    if (/transfer/i.test(parsed.merchant))
+        return 'external-transfer';
+    return parsed.card ? 'card-purchase' : 'purchase';
+};
+exports.meaningFromParsed = meaningFromParsed;
+const reviewEvidence = (review, trustedInstitution) => [
+    ...(trustedInstitution ? ['trusted-institution-sender'] : []),
+    'posted-status',
+    'single-local-amount',
+    review.direction === 'credit' ? 'credit-direction' : 'debit-direction',
+];
+exports.reviewEvidence = reviewEvidence;
+const EVIDENCE_BY_MEANING = {
+    'salary-income': 'salary-language',
+    'business-income': 'business-income-language',
+    'credit-reversal': 'credit-reversal-language',
+    'own-account-transfer': 'own-account-language',
+    'external-transfer': 'external-transfer-language',
+    'card-purchase': 'card-purchase-language',
+    'card-settlement': 'card-settlement-language',
+    'utility-payment': 'utility-payment-language',
+    'cash-withdrawal': 'cash-withdrawal-language',
+    refund: 'refund-language',
+    fee: 'fee-language',
+};
+const evidenceForMeaning = (meaning) => EVIDENCE_BY_MEANING[meaning];
+exports.evidenceForMeaning = evidenceForMeaning;
+const amountFilsFrom = (review) => {
+    if (review.amount.exponent !== 2 || !/^\d{1,15}$/.test(review.amount.minorUnits))
+        return null;
+    const amountFils = Number(review.amount.minorUnits);
+    return Number.isSafeInteger(amountFils) && amountFils > 0 ? amountFils : null;
+};
+const parsedCardFrom = (review) => {
+    if (!review.instrument?.last4)
+        return null;
+    return {
+        last4: review.instrument.last4,
+        kind: review.instrument.kind === 'account' ? 'account' : 'unknown',
+    };
+};
+const feeMerchant = (source) => {
+    if (/\binsufficient balance|\bnsf\b/iu.test(source))
+        return 'Insufficient balance fee';
+    if (/\boverlimit\b/iu.test(source))
+        return 'Overlimit fee';
+    if (/\blate payment\b/iu.test(source))
+        return 'Late payment fee';
+    if (/\boverdraft\b/iu.test(source))
+        return 'Overdraft fee';
+    if (/\b(?:monthly|maintenance)\b/iu.test(source))
+        return 'Account maintenance fee';
+    if (/\bannual\b/iu.test(source)) {
+        return /\bcard\b/iu.test(source) ? 'Annual card fee' : 'Annual bank fee';
+    }
+    if (/\bservice charge\b|رسم خدم[هة]/iu.test(source))
+        return 'Service charge';
+    return 'Bank fee';
+};
+const subscriptionMerchant = (source) => {
+    const match = source.match(/(?:^|[.!?]\s*)(?:your\s+)?([\p{L}\p{N}][\p{L}\p{N} .&+_'’-]{1,47}?)\s+(?:(?:monthly|annual|yearly)\s+)?(?:subscription|membership)\b/iu);
+    if (!match)
+        return null;
+    const value = match[1].trim().replace(/\s+/gu, ' ');
+    if (/^(?:a|an|the|my|your|new|monthly|annual|yearly)$/iu.test(value))
+        return null;
+    return value.replace(/\b\p{L}/gu, (letter) => letter.toLocaleUpperCase());
+};
+const genericMerchant = (meaning, source, card) => {
+    if (meaning === 'salary-income')
+        return 'Salary';
+    if (meaning === 'business-income')
+        return 'Business income';
+    if (meaning === 'credit-reversal')
+        return 'Credit reversal';
+    if (meaning === 'own-account-transfer')
+        return 'Own account transfer';
+    if (meaning === 'external-transfer')
+        return 'Outgoing transfer';
+    if (meaning === 'card-purchase')
+        return subscriptionMerchant(source) ?? 'Card purchase';
+    if (meaning === 'card-settlement') {
+        return card?.last4 ? `Card •${card.last4} payment` : 'Card payment';
+    }
+    if (meaning === 'utility-payment') {
+        if (/(?:\betisalat\b|\be&(?=\s|$)|\beand(?:\.ae)?\b)/iu.test(source))
+            return 'E&';
+        if (/\bdewa\b/iu.test(source))
+            return 'DEWA';
+        if (/\bsewa\b/iu.test(source))
+            return 'SEWA';
+        if (/\bdu\b/iu.test(source))
+            return 'du';
+        if (/\bstc\b/iu.test(source))
+            return 'STC';
+        return 'Utility payment';
+    }
+    if (meaning === 'cash-withdrawal')
+        return 'ATM withdrawal';
+    if (meaning === 'refund')
+        return 'Refund';
+    return feeMerchant(source);
+};
+const GENERIC_LEGACY_MERCHANT = new Set([
+    'Incoming transfer',
+    'Account credit',
+    'Bank transfer',
+    'Outgoing transfer',
+    'Card purchase',
+    'Card',
+    'Bill payment',
+]);
+const categoryForMeaning = (meaning) => {
+    if (meaning === 'salary-income')
+        return 'salary';
+    if (meaning === 'business-income')
+        return 'business';
+    if (meaning === 'utility-payment')
+        return 'utilities';
+    if (meaning === 'cash-withdrawal')
+        return 'cash-withdrawal';
+    return 'other';
+};
+const semanticParsed = (source, review, legacy, meaning) => {
+    const amountFils = amountFilsFrom(review);
+    if (amountFils === null)
+        return null;
+    if (legacy && (legacy.amountFils !== amountFils || legacy.currency !== review.amount.currency)) {
+        return null;
+    }
+    const type = review.direction === 'credit' ? 'income' : 'expense';
+    const parsedCard = legacy?.card ?? parsedCardFrom(review);
+    const card = meaning === 'card-settlement' && parsedCard?.kind === 'unknown'
+        ? { ...parsedCard, kind: 'credit' }
+        : parsedCard;
+    const fallbackMerchant = genericMerchant(meaning, source, card);
+    const keepLegacyMerchant = legacy && !GENERIC_LEGACY_MERCHANT.has(legacy.merchant) &&
+        meaning !== 'own-account-transfer' && meaning !== 'salary-income' &&
+        meaning !== 'credit-reversal' && meaning !== 'refund' &&
+        meaning !== 'cash-withdrawal' && meaning !== 'fee' &&
+        meaning !== 'card-settlement';
+    const merchant = legacy?.categoryPinned
+        ? legacy.merchant
+        : keepLegacyMerchant ? legacy.merchant : fallbackMerchant;
+    const keepSpecificUtilityCategory = meaning === 'utility-payment' &&
+        legacy?.categoryDeliberate === true &&
+        (legacy.categoryGuess === 'utilities' || legacy.categoryGuess === 'telecom' ||
+            legacy.categoryGuess === 'home-services');
+    const keepSpecificPurchaseCategory = meaning === 'card-purchase' &&
+        legacy?.categoryDeliberate === true;
+    const keepSpecificTransferCategory = meaning === 'external-transfer' &&
+        legacy?.categoryDeliberate === true && legacy.categoryGuess !== 'salary' &&
+        legacy.categoryGuess !== 'business';
+    const categoryGuess = legacy?.categoryPinned
+        ? legacy.categoryGuess
+        : keepSpecificUtilityCategory || keepSpecificPurchaseCategory || keepSpecificTransferCategory
+            ? legacy.categoryGuess
+            : categoryForMeaning(meaning);
+    const categoryDeliberate = legacy?.categoryPinned ||
+        (meaning === 'card-purchase' ? legacy?.categoryDeliberate === true : true);
+    const cardPayment = meaning === 'card-settlement';
+    const utilityPayment = meaning === 'utility-payment';
+    const transferHint = meaning === 'own-account-transfer' || cardPayment;
+    const base = legacy ?? {
+        kind: cardPayment ? 'cardPayment' : 'transaction',
+        type,
+        amountFils,
+        currency: review.amount.currency,
+        merchant,
+        date: null,
+        dueDay: null,
+        minDueFils: null,
+        card,
+        reference: null,
+        transferHint,
+        snapshotFils: null,
+        snapshotKind: null,
+        categoryGuess,
+        categoryDeliberate,
+        raw: source,
+    };
+    return {
+        ...base,
+        kind: cardPayment ? 'cardPayment' : 'transaction',
+        type,
+        amountFils,
+        currency: review.amount.currency,
+        merchant,
+        card,
+        cardPaymentSide: cardPayment
+            ? review.direction === 'credit' ? 'receipt' : 'debit'
+            : undefined,
+        paymentFlowSide: utilityPayment ? 'receipt' : undefined,
+        transferHint,
+        categoryGuess,
+        categoryDeliberate,
+        categoryPinned: legacy?.categoryPinned,
+        raw: source,
+    };
+};
+exports.semanticParsed = semanticParsed;
+},
+"bank-alert-semantic-rules":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.isTransactionVerificationChallenge = exports.automaticMeaning = exports.SEMANTIC_CANDIDATE_LANGUAGE = exports.isApplicationPurchaseOffer = exports.isExpectedFutureMoneyNotice = exports.isCompletedCashbackCredit = void 0;
+const sms_parser_1 = require("@/lib/sms-parser");
+const SALARY_LANGUAGE = /\b(?:salar(?:y|ies)|payroll|wages?|wps)(?:\s+(?:payment|credit|transfer))?\b|\b(?:sal(?:ary)?\s+pay|monthly\s+pay|net\s+pay|remuneration|emoluments?|pay[ -]?cheques?|paychecks?)\b|راتب|الراتب|مرتب|رواتب|اجر شهري|اجور|مستحقات راتب/iu;
+const OWN_ACCOUNT_LANGUAGE = /\b(?:own|self)\s+(?:(?:account|a\/?c)\s+)?(?:transfer|trf)\b(?:[^.\n]|\.(?=\d)){0,96}\b(?:debited|credited|completed|processed|successful|dr|cr)\b|\bdr\b(?:[^.\n]|\.(?=\d)){0,48}\b(?:account|a\/?c)\b(?:[^.\n]|\.(?=\d)){0,96}\bown\s+(?:account|a\/?c)\s+(?:transfer|trf)\b(?:[^.\n]|\.(?=\d)){0,96}\bcr\b(?:[^.\n]|\.(?=\d)){0,48}\b(?:account|a\/?c)\b|\btransferred\s+between\s+(?:your|my|own)\s+accounts\b|\btransfer\s+between\s+(?:your|my|own)\s+accounts\b(?:[^.\n]|\.(?=\d)){0,96}\b(?:completed|processed|successful)\b|\bfrom\s+(?:your|my)\s+(?:account|a\/?c)\b[^.\n]{0,96}\bto\s+(?:(?:your|my)(?:\s+(?:own|other))?|another\s+of\s+(?:your|my)|another|own)\s+(?:accounts?|a\/?c)\b|\bfrom\s+(?:your\s+)?(?:account|a\/?c)\b(?:[^.\n]|\.(?=\d)){0,96}\bto\s+(?:another\s+account\s+of\s+yours|another\s+of\s+your\s+accounts?)\b|\bmoved?\s+from\s+(?:your|my)\s+(?:account|a\/?c)\b[^.\n]{0,96}\b(?:to|into)\s+(?:(?:your|my)(?:\s+(?:own|other))?|another\s+of\s+(?:your|my)|another|own)\s+(?:accounts?|a\/?c)\b|\bdebited\s+from\s+(?:your\s+)?(?:account|a\/?c)\b[^.\n]{0,112}\bcredited\s+to\s+(?:another\s+of\s+your|your\s+other|your\s+own)\s+(?:accounts?|a\/?c)\b|\b(?:account|a\/?c)\b(?:[^.\n]|\.(?=\d)){0,64}\bcredited\b(?:[^.\n]|\.(?=\d)){0,96}\bfrom\s+(?:your\s+)?(?:own|other)\s+(?:account|a\/?c)\b|\breceived\b(?:[^.\n]|\.(?=\d)){0,96}\bfrom\s+(?:your\s+)?(?:own|other)\s+(?:account|a\/?c)\b|تحويل\s+(?:بين\s+حساباتك|بين\s+حساباتي)[\s\S]{0,72}تم\s+بنجاح|تم\s+تحويل[\s\S]{0,80}من\s+حسابك[\s\S]{0,80}(?:الي|الى)\s+حسابك/iu;
+const BUSINESS_INCOME_LANGUAGE = /\b(?:merchant|business|seller|vendor|restaurant|platform|marketplace|aggregator|acquirer|sales?|pos)\s+(?:earnings|payout|settlement|proceeds|disbursement)\b|\b(?:talabat|deliveroo|careem|uber\s+eats|noon\s+food)\s+(?:earnings|payout|settlement|proceeds|disbursement)\b|\b(?:delivery|courier|rider|driver)\s+(?:partner\s+)?earnings\b|\bproceeds\s+from\s+(?:sales|orders|deliveries|merchant activity)\b|\bbusiness\s+income\b|\binvoice(?:\s+(?:no\.?|number|#)?\s*[a-z0-9-]+)?\s+(?:was\s+)?(?:paid|settled)\b|\bpayment\s+(?:for|against)\s+invoice\b|تسوي[هة]\s+(?:تاجر|مبيعات)|ايرادات\s+(?:مبيعات|طلبات)|ارباح\s+(?:توصيل|متجر)/iu;
+const REFUND_LANGUAGE = /\b(?:refund(?:ed)?(?!\s+(?:policy|policies|terms|rules|offer))|revers(?:al|ed)|charge[ -]?back|credited back|re-?credited)\b|استرداد|استرجاع|تم رد|اعاد[هة] المبلغ/iu;
+const COMPACT_RETURNED_DEBIT_LANGUAGE = /\b(?:atm\s+wdl|cash\s+wdl|billpay|annual\s+fee|monthly\s+fee|maintenance\s+fee|commission|pos)\b(?:[^.\n]|\.(?=\d)){0,64}\bcr\b|\bcr\b(?:[^.\n]|\.(?=\d)){0,64}\b(?:atm\s+wdl|cash\s+wdl|billpay|annual\s+fee|monthly\s+fee|maintenance\s+fee|commission|pos)\b/iu;
+const CREDIT_REVERSAL_LANGUAGE = /\b(?:salary|sal(?:ary)?\s+pay|payroll|wages|wps|refund|credit(?:ed)?|deposit(?:ed)?|incoming (?:payment|transfer)|inward remittance)\b[\s\S]{0,96}\b(?:was\s+|has\s+been\s+)?reversed\b|تم\s+عكس[\s\S]{0,64}(?:راتب|مرتب|ايداع|استرداد)/iu;
+const CASH_WITHDRAWAL_LANGUAGE = /\b(?:atm\b[\s\S]{0,40}\b(?:withdraw\w*|wdl)|cash\s+wdl\b|cash\s+withdrawal\b[\s\S]{0,32}(?:\b(?:aed|sar|dhs?)\b|\d)|withdraw\w*\b[\s\S]{0,40}\b(?:atm|cash machine))\b|تم\s+سحب\s+نقدي[\s\S]{0,32}(?:\b(?:aed|sar)\b|\d)|سحب[\s\S]{0,32}(?:صراف|جهاز الصراف)/iu;
+const FEE_LANGUAGE = /\b(?:bank|account|card|annual|monthly|maintenance|service|membership|renewal|overdraft|overlimit|late payment|insufficient balance|nsf)\s+(?:fee|charge)\b|\b(?:fee|commission)\b(?:[^.\n]|\.(?=\d)){0,56}\b(?:charged|debited|deducted|dr)\b|رسوم|عمول[هة]/iu;
+const CASHBACK_CREDIT_LANGUAGE = /\bcashback\s+amount\b(?:[^.\n]|\.(?=\d)){0,96}\b(?:has\s+been|was)\s+credited\s+(?:to|into)\s+your\s+(?:credit|covered)\s+card(?:\s+account)?\b/iu;
+const isCompletedCashbackCredit = (source, legacy) => legacy?.kind === 'transaction' && legacy.type === 'income' && !legacy.transferHint &&
+    CASHBACK_CREDIT_LANGUAGE.test((0, sms_parser_1.normalizeArabic)(source).replace(/\s+/gu, ' '));
+exports.isCompletedCashbackCredit = isCompletedCashbackCredit;
+const CARD_SETTLEMENT_LANGUAGE = /\b(?:payment|amount)\b[\s\S]{0,80}\b(?:to|towards?|against|for)\b[\s\S]{0,40}\b(?:credit|covered)\s+card\b|\b(?:debited|deducted|paid)\b[\s\S]{0,96}\b(?:to|towards?|against|for)\b[\s\S]{0,40}\b(?:credit|covered)\s+card\b[\s\S]{0,40}\bpayment\b|\b(?:credit|covered)\s+card\b[\s\S]{0,64}\bpayment\b[\s\S]{0,64}\b(?:received|credited|posted|applied|debited|deducted|paid|processed|completed|successful)\b|\bpayment\b[\s\S]{0,64}\b(?:received|credited|posted|applied)\b[\s\S]{0,40}\b(?:to\s+)?(?:your\s+)?(?:credit|covered)\s+card\b|\b(?:credit|covered)\s+card\b[\s\S]{0,40}\bcredited\s+with\s+(?:a\s+)?payment\b|\b(?:cc|card)\s+p(?:ay|y)?mt\b|\bcc\b[^.\n]{0,48}\bcard\s+p(?:ay|y)?mt\b|(?:استلام[\s\S]{0,48})?سداد[\s\S]{0,64}(?:للبطاق[هة]|بطاق[هة])\s+(?:ال)?ا?يتماني[هة]/iu;
+const UTILITY_PAYMENT_LANGUAGE = /\b(?:electricity|water|utility|telecom|internet|mobile|gas)\s+(?:bill|account|payment)\b|\bpaid\b[^.\n]{0,80}\bfor\s+(?:an?\s+)?(?:electricity|water|utility|telecom|internet|mobile|gas)\s+(?:bill|account)\b|(?:\b(?:sewa|dewa|etisalat|du)\b|\be&(?=\s|$))[^.\n]{0,72}\b(?:bill|account|consumer|payment|paid|processed)\b|\b(?:bill|utility)\s+(?:payment|pymt)\b|\bbillpay\b|فاتور[هة]\s+(?:كهرباء|مياه|هاتف|انترنت|غاز)/iu;
+const EXTERNAL_TRANSFER_LANGUAGE = /\b(?:sent|transferred|remitted)\b[^.\n]{0,96}\bto\s+(?!(?:your|my|own)\s+(?:account|a\/?c)\b)|\b(?:funds?|bank|instant|money)?\s*transfer\b(?:[^.\n]|\.(?=\d)){0,96}\bto\s+(?:a\s+)?beneficiary\b|\b(?:funds?|bank|instant|money)\s+transfer\b(?:[^.\n]|\.(?=\d)){0,96}\bto\s+(?!(?:your|my|own)\s+(?:account|a\/?c)\b)|\b(?:ben|beneficiary)\b(?:[^.\n]|\.(?=\d)){0,96}\b(?:received|cr)\b(?:[^.\n]|\.(?=\d)){0,96}\bfrom\s+your\s+(?:account|a\/?c)\b|\b(?:ft|ibft|trf)\b(?:[^.\n]|\.(?=\d)){0,96}\b(?:dr\b(?:[^.\n]|\.(?=\d)){0,48})?(?:from\s+)?(?:your\s+)?(?:account|a\/?c)\b(?:[^.\n]|\.(?=\d)){0,96}\b(?:to\s+)?(?:a\s+)?(?:ben|beneficiary)\b|\b(?:account|a\/?c)\b(?:[^.\n]|\.(?=\d)){0,48}\bdr\b(?:[^.\n]|\.(?=\d)){0,80}\b(?:ft|ibft|trf)\b(?:[^.\n]|\.(?=\d)){0,64}\b(?:ben|beneficiary)\b|\boutward\s+remittance\b|(?:تحويل|ارسال)[^\n]{0,80}(?:صادر|الي\s+(?:ال)?مستفيد)/iu;
+const CARD_PURCHASE_LANGUAGE = /\b(?:card\s+purchase|purchase(?:d)?|card\b[^.\n]{0,40}\b(?:used|charged)|(?:subscription|membership)\b(?:[^.]|\.\d){0,64}\bcharged\s+(?:to|on)\s+(?:your\s+)?card|pos\s+(?:purchase|transaction)|pos\b(?:[^.\n]|\.(?=\d)){0,64}\bdr\b(?:[^.\n]|\.(?=\d)){0,48}\bcard\b|card\b(?:[^.\n]|\.(?=\d)){0,48}\bdr\b(?:[^.\n]|\.(?=\d)){0,80}\bpos\b|(?:card\s+)?pur\b(?:[^.\n]|\.(?=\d)){0,80}\bcard\b)\b|شراء|دفع بالبطاق[هة]/iu;
+const isExpectedFutureMoneyNotice = (source) => {
+    const text = (0, sms_parser_1.normalizeArabic)(source).replace(/\s+/gu, ' ');
+    return /\b(?:expected|anticipated)\s+(?:refund|reversal|credit|deposit|transfer|payment)\b/iu.test(text) ||
+        /\b(?:refund|reversal|credit|deposit|transfer|payment)\b[^.!?]{0,80}\b(?:expected|anticipated)\b/iu.test(text);
+};
+exports.isExpectedFutureMoneyNotice = isExpectedFutureMoneyNotice;
+const isApplicationPurchaseOffer = (source) => {
+    const text = (0, sms_parser_1.normalizeArabic)(source).replace(/\s+/gu, ' ');
+    return /\bapply\b/iu.test(text) &&
+        /\bpurchases?\b/iu.test(text) &&
+        /\b\d{1,3}\s*%/u.test(text) &&
+        /\b\d{1,3}\s+months?\b/iu.test(text);
+};
+exports.isApplicationPurchaseOffer = isApplicationPurchaseOffer;
+exports.SEMANTIC_CANDIDATE_LANGUAGE = new RegExp([
+    SALARY_LANGUAGE.source,
+    BUSINESS_INCOME_LANGUAGE.source,
+    CREDIT_REVERSAL_LANGUAGE.source,
+    OWN_ACCOUNT_LANGUAGE.source,
+    EXTERNAL_TRANSFER_LANGUAGE.source,
+    CARD_PURCHASE_LANGUAGE.source,
+    CARD_SETTLEMENT_LANGUAGE.source,
+    UTILITY_PAYMENT_LANGUAGE.source,
+    CASH_WITHDRAWAL_LANGUAGE.source,
+    REFUND_LANGUAGE.source,
+    COMPACT_RETURNED_DEBIT_LANGUAGE.source,
+    FEE_LANGUAGE.source,
+].join('|'), 'iu');
+const matchIndex = (pattern, source) => pattern.exec(source)?.index ?? Infinity;
+const automaticMeaning = (source, review, legacy) => {
+    const semanticText = (0, sms_parser_1.normalizeArabic)(source).replace(/\s+/gu, ' ');
+    const credit = review.direction === 'credit';
+    const debit = review.direction === 'debit';
+    if (debit && CREDIT_REVERSAL_LANGUAGE.test(semanticText))
+        return 'credit-reversal';
+    if (credit && (REFUND_LANGUAGE.test(semanticText) ||
+        (COMPACT_RETURNED_DEBIT_LANGUAGE.test(semanticText) &&
+            !BUSINESS_INCOME_LANGUAGE.test(semanticText))))
+        return 'refund';
+    if (credit && SALARY_LANGUAGE.test(semanticText))
+        return 'salary-income';
+    if (credit && BUSINESS_INCOME_LANGUAGE.test(semanticText))
+        return 'business-income';
+    if (OWN_ACCOUNT_LANGUAGE.test(semanticText))
+        return 'own-account-transfer';
+    if (credit && (0, exports.isCompletedCashbackCredit)(semanticText, legacy))
+        return null;
+    const hasCreditCard = (review.instrument?.kind === 'card' && review.instrument.last4) ||
+        (legacy?.card?.kind === 'credit' && legacy.card.last4);
+    const cardSettlementIndex = hasCreditCard
+        ? matchIndex(CARD_SETTLEMENT_LANGUAGE, semanticText)
+        : Infinity;
+    if (debit && cardSettlementIndex < Infinity) {
+        const debitSpecialists = [
+            [matchIndex(CASH_WITHDRAWAL_LANGUAGE, semanticText), 'cash-withdrawal'],
+            [matchIndex(FEE_LANGUAGE, semanticText), 'fee'],
+            [matchIndex(UTILITY_PAYMENT_LANGUAGE, semanticText), 'utility-payment'],
+        ];
+        const firstSpecialist = debitSpecialists
+            .filter(([index]) => index < cardSettlementIndex)
+            .sort(([left], [right]) => left - right)[0];
+        if (firstSpecialist)
+            return firstSpecialist[1];
+    }
+    if (cardSettlementIndex < Infinity)
+        return 'card-settlement';
+    if (debit && CASH_WITHDRAWAL_LANGUAGE.test(semanticText))
+        return 'cash-withdrawal';
+    if (debit && FEE_LANGUAGE.test(semanticText))
+        return 'fee';
+    if (debit && UTILITY_PAYMENT_LANGUAGE.test(semanticText))
+        return 'utility-payment';
+    if (debit && EXTERNAL_TRANSFER_LANGUAGE.test(semanticText))
+        return 'external-transfer';
+    if (debit && CARD_PURCHASE_LANGUAGE.test(semanticText))
+        return 'card-purchase';
+    return null;
+};
+exports.automaticMeaning = automaticMeaning;
+const VERIFICATION_CHALLENGE = /\b(?:did|have)\s+you\s+(?:recently\s+)?(?:attempt|attempted|make|made|try|tried|authori[sz]e|authori[sz]ed|initiate|initiated|use|used)\b[^.?!\n]{0,60}?(?:\b(?:transaction|purchase|payment|charge|withdrawal|transfer)\b|\b[A-Z]{3}\s?\d|\d[\d,]*\.\d{2})|\bwas\s+(?:this|that|it)\s+(?:transaction\s+)?(?:you|yours)\b|\breply\s+(?:with\s+)?(?:"|')?(?:yes|y)(?:"|')?\s+if\s+(?:you\s+(?:made|did|authori[sz]ed|recogni[sz]e)|(?:it|this|that)\s+was\s+(?:you|yours))\b|\breply\s+(?:with\s+)?(?:"|')?(?:yes|y)(?:"|')?\s*(?:or|\/|,)\s*(?:"|')?(?:no|n)(?:"|')?\b(?=[^.?!\n]{0,80}?\b(?:if\s+you\s+(?:made|did|authori[sz]ed|recogni[sz]e)|to\s+confirm|confirm(?:ing)?\s+(?:this|the|it)|was\s+(?:this|it)\s+you|genuine|fraud)\b)|\b(?:to\s+confirm|confirm(?:ing)?\s+(?:this|the|it)|if\s+you\s+(?:made|did|authori[sz]ed|recogni[sz]e)|was\s+(?:this|it)\s+you|genuine|fraud)\b[^.?!\n]{0,80}?\breply\s+(?:with\s+)?(?:"|')?(?:yes|y)(?:"|')?\s*(?:or|\/|,)\s*(?:"|')?(?:no|n)(?:"|')?\b|(?:^|[^\p{L}\p{M}])هل\s+(?:قمت|أجريت|حاولت|استخدمت)(?=$|[^\p{L}\p{M}])/iu;
+const isTransactionVerificationChallenge = (source) => VERIFICATION_CHALLENGE.test(source);
+exports.isTransactionVerificationChallenge = isTransactionVerificationChallenge;
+},
+"bank-amount-tokens":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.localMoneyPrefixPattern = localMoneyPrefixPattern;
+exports.malformedLocalMoneyTokens = malformedLocalMoneyTokens;
+const VALID_LOCAL_NUMBER = /^(?:(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d{1,2})?|\.\d{1,2})$/;
+const scanners = new Map();
+function localMoneyPrefixPattern(currencyAliases) {
+    const aliases = currencyAliases.map((alias) => alias.endsWith(String.raw `\.?`) ? alias.slice(0, -3) : alias);
+    return String.raw `(?:${aliases.join('|')})(?:\.(?=\s))?`;
+}
+function malformedLocalMoneyTokens(text, currencyAliases) {
+    const key = currencyAliases.join('|');
+    let scanner = scanners.get(key);
+    if (!scanner) {
+        const currency = `(?:${key})`;
+        const dateField = String.raw `(?:\d{1,2}[/-]\d{1,2}[/-]\d{4}|\d{1,2}\.\d{1,2}\.\d{4})(?!\d)` +
+            String.raw `(?=[    ]+(?:bal(?:ance)?|avl|avail(?:able)?)\b)`;
+        const dateGroup = `(?!${dateField})`;
+        const number = String.raw `(?:\d[\d.,]*|\.\d[\d.,]*)(?:[ \u00a0\u2009\u202f]+${dateGroup}\d[\d.,]*)*(?:[eE][+-]?\d+)?`;
+        scanner = {
+            prefix: new RegExp(String.raw `(?<![\p{L}])${localMoneyPrefixPattern(currencyAliases)}(?![\p{L}])\s*(${number})`, 'giu'),
+            suffix: new RegExp(String.raw `(${number})\s*${currency}(?![\p{L}])`, 'giu'),
+            localCode: new RegExp(`^${currency}$`, 'iu'),
+        };
+        scanners.set(key, scanner);
+    }
+    const { prefix, suffix, localCode } = scanner;
+    const invalid = new Map();
+    const note = (match, prefixForm) => {
+        const numberText = match[1].replace(/[.,]+$/, '');
+        const start = prefixForm ? match.index + match[0].length - match[1].length : match.index;
+        if (!prefixForm) {
+            if (/[\p{L}\d*•·.,/\-]/u.test(text[start - 1] ?? ''))
+                return;
+            if (/[Xx*•·]+\s*$/.test(text.slice(Math.max(0, start - 20), start)))
+                return;
+            const foreign = text.slice(Math.max(0, start - 10), start).match(/\b([A-Z]{3})\s*$/i);
+            if (foreign && !localCode.test(foreign[1]))
+                return;
+        }
+        if (VALID_LOCAL_NUMBER.test(numberText))
+            return;
+        const end = start + numberText.length;
+        const key = `${start}:${end}`;
+        if (!invalid.has(key))
+            invalid.set(key, { start, end, contextStart: match.index });
+    };
+    for (const match of text.matchAll(prefix))
+        note(match, true);
+    for (const match of text.matchAll(suffix))
+        note(match, false);
+    return [...invalid.values()].sort((a, b) => a.start - b.start);
+}
+},
+"best-effort-autopost":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.appendBestEffortUndo = exports.tombstonesForRemoved = exports.bestEffortUndoKeys = exports.bestEffortCardPaymentObservationKey = exports.bestEffortObservationKey = exports.BEST_EFFORT_UNDO_CAP = exports.refusedOnlyByShopOrPromoWording = exports.hasNonCompletedWording = exports.namesOwnInstrumentTail = exports.isRegisteredAlertSender = exports.isUnverifiedAlertSender = exports.hasLinkFromUnregisteredSender = exports.isNotAutoPostableMoney = exports.sharedSymbolCurrencyForCountry = void 0;
+exports.decideBestEffortAutoPost = decideBestEffortAutoPost;
+exports.setBestEffortAutoPostEnabled = setBestEffortAutoPostEnabled;
+exports.bestEffortAutoPostEnabled = bestEffortAutoPostEnabled;
+const currency_metadata_1 = require("@/lib/currency-metadata");
+const capture_source_identity_1 = require("@/lib/capture-source-identity");
+const fx_rates_1 = require("@/lib/fx-rates");
+const sms_parser_1 = require("@/lib/sms-parser");
+const SHARED_SYMBOL_COUNTRY_CURRENCY = {
+    US: 'USD', PR: 'USD', GU: 'USD', VI: 'USD', AS: 'USD', MP: 'USD', EC: 'USD', SV: 'USD',
+    CA: 'CAD', AU: 'AUD', NZ: 'NZD', SG: 'SGD', HK: 'HKD', MX: 'MXN', AR: 'ARS', CL: 'CLP', CO: 'COP',
+    JP: 'JPY', CN: 'CNY',
+    IN: 'INR', PK: 'PKR', LK: 'LKR', NP: 'NPR', MU: 'MUR', SC: 'SCR',
+    EG: 'EGP', SD: 'SDG', SS: 'SSP',
+};
+const sharedSymbolCurrencyForCountry = (country) => (country && SHARED_SYMBOL_COUNTRY_CURRENCY[country.toUpperCase()]) || null;
+exports.sharedSymbolCurrencyForCountry = sharedSymbolCurrencyForCountry;
+const THREE_DECIMAL_COUNTRY_CURRENCY = {
+    KW: 'KWD', BH: 'BHD', OM: 'OMR', JO: 'JOD',
+};
+const LAUNCH_MARKETS = new Set(['AE', 'SA']);
+const POSTABLE_FAMILIES = new Set([
+    'purchase', 'cash-withdrawal', 'refund', 'fee', 'utility', 'recurring-payment', 'transfer',
+]);
+const BLOCKING_ISSUES = new Set([
+    'amount-role-unresolved',
+    'posting-status-unresolved',
+    'direction-unresolved',
+    'direction-conflict',
+    'multiple-event-adapter-required',
+    'authentication-not-posting',
+    'authentication-or-otp',
+    'pending-not-posting',
+    'promotion-not-posting',
+    'settlement-adapter-required',
+    'failed-not-posting',
+]);
+const NON_COMPLETED_WORDING = [
+    /취소|거절|거부|불가|반려|대기|가승인|실패|한도|캐시백|할인|쿠폰|이벤트|撤销|冲正|取消|预授权|預授權|\bnie\s+zosta|\boczekuje\b|\bblokada\b|वापस|रिवर्स|रद्द/iu,
+    /\bpending\b|\bon\s+hold\b|\bhold\s+(?:placed|of|on|for)\b|\bpre-?auth(?:ori[sz](?:ation|ed))?\b|\bauthori[sz]ation\s+(?:hold|request|only)\b|\bblocked\s+amount\b|\bamount\s+(?:blocked|reserved)\b|\breserved\b|\bprocessing\b|\bin\s+progress\b|\bawaiting\b/iu,
+    /\ben\s+attente\b|\bausstehend\b|\bvorgemerkt\b|\breserviert\b|\bpendiente\b|\bretenid[oa]\b|\bin\s+attesa\b|\bin\s+behandeling\b|\bgereserveerd\b|\bpendente\b|\bem\s+processamento\b|معلق|قيد\s+(?:المعالجة|التنفيذ)|محجوز/iu,
+    /\brequest(?:ed|s|ing)?\b|\bcollect\s+request\b|\bapprove\s+(?:this|the)\b|\bconfirm\s+(?:this|the|your)\s+(?:payment|transaction|purchase)\b|\bdemande\b|\banfrage\b|\bsolicitud\b|\brichiesta\b|\bverzoek\b|\bsolicita[çc][aã]o|طلب/iu,
+    /\bdeclin(?:e|ed|ing)\b|\bfail(?:ed|ure|s)?\b|\bunsuccessful\b|\bnot\s+(?:been\s+)?(?:processed|completed|successful|approved|authori[sz]ed)\b|\brejected\b|\binsufficient\b|\brefus(?:[ée]e?|ed)?(?!\p{L})|(?<!\p{L})[ée]chou[ée]|\babgelehnt\b|\bfehlgeschlagen\b|\brechazad[oa]\b|\brifiutat[oa]\b|\bnon\s+riuscit[oa]\b|\bgeweigerd\b|\bmislukt\b|\brecusad[oa]\b|\bnegad[oa]\b|مرفوض|رفض|فشل|لم\s+تتم/iu,
+    /\brevers(?:al|ed|e)\b|\bchargeback\b|\bcancel(?:l)?(?:ed|ation)\b|\bvoid(?:ed)?\b|\bannul[ée]|\bstorniert\b|\banulad[oa]\b|\bannullat[oa]\b|\bgeannuleerd\b|\bcancelad[oa]\b|عكس|إلغاء|الغاء|ملغ/iu,
+    /\botp\b|\bone[-\s]?time\s+(?:pass(?:word|code)?|code|pin)\b|\bverification\s+code\b|\bsecurity\s+code\b|\bpasscode\b|\bdo\s+not\s+share\b|\bnever\s+share\b|\b2fa\b|\bverify\s+(?:this|the|your)\s+(?:transaction|payment|purchase)\b|\bcode\s+(?:de\s+)?(?:v[ée]rification|s[ée]curit[ée])|\bbest[äa]tigungscode\b|\bc[óo]digo\s+de\s+(?:verificaci[óo]n|seguran[çc]a|verifica[çc][aã]o)\b|\bcodice\s+(?:di\s+)?(?:verifica|sicurezza)\b|رمز\s+(?:التحقق|التفعيل)|كلمة\s+(?:المرور|السر)\s+لمرة/iu,
+    /\bcashback\b|\bcash\s+back\b|\bdiscount\b|\b\d{1,3}\s?%\s*off\b|\boffers?\b|\bpromo(?:tion|code)?\b|\bvoucher\b|\bcoupon\b|\bwin\b|\bgiveaway\b|\bredeem\b|\bangebot\b|\brabatt\b|\bpromoci[óo]n\b|\bdescuento\b|\bsconto\b|\bkorting\b|\bdesconto\b|\bpromo[çc][aã]o|عرض|تخفيض/iu,
+    /\bstatement\b|\bminimum\s+(?:amount\s+)?(?:due|payment)\b|\btotal\s+(?:amount\s+)?due\b|\bamount\s+due\b|\bdue\s+(?:date|on|by)\b|\bpayment\s+due\b|\bbill\s+(?:is\s+)?(?:due|generated|ready)\b|\breminder\b|\boverdue\b|\brelev[ée](?!\p{L})|\bkontoauszug\b|\bextracto\b|\bestratto\s+conto\b|\brekeningoverzicht\b|\bfatura\s+(?:fechada|vence)\b|كشف\s+(?:ال)?حساب|مستحق|تذكير|الحد\s+الأدنى/iu,
+    /\bunder\s+review\b|\bunusual\b|\bsuspicious\s+(?:activity|transaction|purchase|attempt|login)\s+(?:was\s+|has\s+been\s+)?(?:detected|noticed|flagged|identified)\b|\b(?:detected|noticed|flagged)\s+(?:a\s+|some\s+)?suspicious\b|\battempt(?:ed|s)?\b|\bneed\s+to\s+(?:confirm|verify)\b|\bchecking\s+(?:(?:recent|some|your)\s+)*(?:activity|transactions?|purchases?)\b|\brestrictions?\s+(?:(?:was|were|has|have)\s+(?:been\s+)?)?(?:placed|applied|added)\b|\b(?:card|account)\s+(?:(?:has|have)\s+been\s+|is\s+(?:now\s+)?|was\s+)?(?:temporarily\s+)?(?:blocked|frozen|suspended|locked|restricted)\b|\bwas\s+(?:this|that|it)\s+(?:transaction\s+)?(?:you|yours)\b|\breply\s+(?:with\s+)?["']?(?:yes|y)["']?\s+(?:or|if)\b/iu,
+    /\brefund\s+(?:has\s+been\s+|is\s+|was\s+)?initiated\b|\brefund\b[^.\n]{0,48}?\b(?:has\s+been|is|was)\s+initiated\b|\b(?:should|will)\s+reflect\s+(?:in|within)\s+\d|\binitiated\s+(?:a\s+|your\s+)?refund\b|\bupdate\s+(?:your\s+)?(?:bank|account|kyc|card|pan)\s+(?:details|information|info)\b|\bto\s+receive\s+(?:your|the)\s+refund\b/iu,
+    /\bdid\s+(?:you|u)\s+(?:make|authori[sz]e|initiate|attempt|do)\b|\bwas\s+(?:this|that|it)\s+(?:made\s+by\s+)?(?:you|yours)\b|\breply\s+(?:with\s+)?["']?(?:yes|y)["']?\s*(?:\/|or|,)\s*["']?(?:no|n)["']?\b|\b(?:respond|reply|text)\s+(?:with\s+)?["']?(?:yes|y)["']?(?=[\s.,;!]|$)|\bverify\s+(?:this|the)\s+(?:transaction|purchase|payment|charge|activity)\b|\bverify\s+(?:your\s+)?account\s+activity\b|\bif\s+(?:this\s+(?:transaction\s+)?was\s+|it\s+was\s+)?not\s+(?:made\s+by\s+|done\s+by\s+|initiated\s+by\s+)?you\b[^.\n]{0,60}?\b(?:click|tap|visit|follow|open)\b|\bif\s+(?:you\s+)?did\s+not\s+(?:make|authori[sz]e|authenticate|initiate)\b[^.\n]{0,60}?\b(?:click|tap|visit|follow|open|check\s+here)\b|\bverifique\b|\bsi\s+no\s+(?:reconoce|ha\s+sido\s+usted)\b/iu,
+    /\bclaim\b|\bcongrat(?:s|ulations?)\b|\byou\s+(?:have\s+|'ve\s+)?won\b|\byou\s+will\s+receive\b|\bcan\s+be\s+credited\b|\beligible\s+for\b|\bconfirm\s+(?:your\s+)?(?:information|info|details|identity)\b|\bupdate\s+(?:your\s+)?(?:details|kyc|information|info)\b|\bkyc\b|\b(?:click|tap)\s+(?:here|below|on\s+(?:the|this)\s+link|(?:the|this)\s+link)\b|\bverify\s+your\s+(?:account|identity|details)\b|\b(?:you|card|account)\s+(?:\(?do\s+not\)?\s+)?(?:has|have)\s+(?:an?\s+)?(?:outstanding\s+)?(?:tax\s+)?refund\s+of\b|\breply\s+with\s+your\s+(?:bank|account|card|details)\b|\buse\s+code\b/iu,
+    /\bactivation\s+code\b|\bverification\s+code\b|\bauth(?:entication|ori[sz]ation)\s+code\b|\bshare\s+(?:this|the)\s+code\b/iu,
+    /\bOTP\b|\bPIN\b/u,
+    /\bflash\s+sale\b|\boff\s+(?:your|on\s+(?:your|the|all))\s+(?:next\s+|first\s+)?(?:purchase|order|bill|booking|ride|meal|trip)s?\b/iu,
+    /\bwill\s+(?:be|have\s+been)\s+(?:debited|charged|deducted|paid|processed|collected|credited|received)\b|\bscheduled\b|\bupcoming\b|\bstanding\s+(?:instruction|order)\b|\bmandate\b|\bpre-?debit\b|\bauto-?pay\s+(?:set|scheduled|registered)\b|\bsera\s+(?:d[ée]bit[ée]|pr[ée]lev[ée])|\bwird\s+(?:abgebucht|belastet)\b|\bser[áa]\s+(?:cargad[oa]|debitad[oa])\b|\bsar[àa]\s+addebitat[oa]\b|\bwordt\s+afgeschreven\b|سيتم/iu,
+    /ألغيت|أُلغيت|لم\s+تنجح|غير\s+ناجحة?|غير\s+مكتملة?|(?:تعليق|إيقاف|ايقاف)\s+(?:ال)?بطاق|(?:استرجاع|استرداد|إرجاع|ارجاع|إعادة|اعادة)\s+المبلغ|بانتظار|قيد\s+المراجعة|لا\s+تشارك|\bamount\s+(?:has\s+been\s+|was\s+)?(?:refunded|returned)\b|\bto\s+be\s+(?:debited|charged|deducted|collected)\b|\bblocked\b|\bdispute\s+(?:raised|registered|logged|lodged|opened|filed|initiated)\b|\bdisputed\b/iu,
+    /\byou(?:'re|\s+are)\s+due\s+(?:a|an|your)\b|\bwe\s+owe\s+you\b|\b(?:have|need)\s+to\s+refund\s+you\b|\b(?:i|we)\s+will\s+(?:refund|repay|return)\b|\bentitled\s+to\b|\bready\s+for\s+disbursement\b|\brefund\s+(?:payment\s+)?link\b|\b(?:click|tap|use|open|pay\s+(?:via|through|using|with))\s+(?:on\s+)?(?:the|this|our|a)\s+(?:payment\s+)?link\b|\bpayment\s*link\s+to\s+(?:receive|claim|get|collect|deposit|accept)\b|\beligible\s+to\s+(?:get|receive|claim)\b|\bdue\s+to\s+receive\b|\bsend\s+(?:it|the\s+(?:money|amount|funds))?\s*back\b|\bby\s+mistake\b|\b(?:sent|credited|transferred|deposited)\s+(?:to\s+(?:you|your\s+\w+)\s+)?in\s+error\b|\bwas\s+a\s+mistake\b|\bwrongly\s+(?:sent|credited|transferred)\b/iu,
+    /\b(?:to|and)\s+(?:deposit|accept|collect|release|receive|withdraw)\s+(?:your\s+|the\s+|this\s+)?(?:funds?|money|refund|payment|amount|deposit|cash)\b|\bwithdraw\s+it\s+now\b|\b(?:get|collect|claim)\s+your\s+(?:\S+\s+){0,2}refund\b|\bfollow\s+the\s+steps\b|\bcomplete\s+(?:your|the|this|a)\s+(?:\w+\s+){0,2}(?:form|return|application|verification|registration)\b|\bsubmit\s+(?:a|an|your|the)\s+(?:\w+\s+)?(?:application|form|claim)\b|\bprovide\s+(?:us\s+)?(?:with\s+)?your\s+(?:full\s+name|account|bank|card)\b/iu,
+    /\bnoticed\s+(?:a|an|the|some)\s+(?:\w+\s+)?(?:purchase|transaction|charge|payment|debit)\b|\bconfirm\s+(?:the\s+)?following\b|\bto\s+confirm,?\s+(?:please\s+)?(?:call|reply|click|visit)\b|\bcancel\s+(?:this|the)\s+(?:payment|transaction|transfer|order)\b|\bdormant\b|\bto\s+activate\s+(?:your|the|this)\s+(?:\w+\s+){0,2}(?:account|card)\b/iu,
+    /\b(?:will|wil|wl)\s+be\s+(?:refunded|deposited)\b|\b(?:to|must)\s+be\s+paid\b|\bwhen\s+it\s+ships\b/iu,
+    /\b(?:wl|wil)\s+be\s+(?:paid|debited|credited|charged)\b|\b(?:click|tap)\s+to\s+pay\b|\bto\s+deposit\b|\bsoit\s+(?:d[ée]bit[ée]|pr[ée]lev[ée])|\bmettre\s+[àa]\s+jour\s+vos?\b/iu,
+    /\b(?:wasn'?t|was\s+not)\s+(?:done|made|initiated)\s+by\s+you\b[^\n]{0,30}?\b(?:click|tap|visit)\b/iu,
+];
+const ORDER_REFERENCE = /\border[\s-]*(?:id|#|no\b\.?|number)/iu;
+const ORDER_CALLBACK_HOOK = /\b(?:not\s+you|not\s+(?:done|made)\s+by\s+you|wasn'?t\s+you|if\s+(?:you\s+)?(?:did|do)\s+not|if\s+(?:it|this)\s+(?:was|is)\s+not|dispute|helpline|ring\s+us|call\s+(?:us|immediately|now))\b/iu;
+const DISPUTE_DESK = /\bif\s+any\s+(?:query\s+or\s+)?dispute\b/iu;
+const LATAM_MARKETS = new Set(['BR', 'CO', 'MX', 'PE']);
+const LATAM_CURRENCIES = new Set(['BRL', 'COP', 'MXN', 'PEN']);
+const LATAM_NON_COMPLETED_WORDING = [
+    /(?<!\p{L})(?:c[óo]digo\s+(?:de\s+)?(?:seguridad|autorizaci[óo]n|autoriza[çc][ãa]o|confirmaci[óo]n|confirma[çc][ãa]o|acceso|acesso|compra|transacci[óo]n)|c[óo]d\.\s*de\s+seguridad|tu\s+c[óo]digo|es\s+tu\s+c[óo]digo|clave\s+din[áa]mica|token)(?!\p{L})/iu,
+    /(?<!\p{L})(?:foi\s+voc[êe]|fuiste\s+t[úu]|reconoces|reconhece|responda|responde\s+(?:s[íi]|sim|no|n[ãa]o|cancelar)|confirma\s+(?:tu|su)\s+(?:pago|compra|transacci[óo]n|operaci[óo]n)|confirme)(?!\p{L})/iu,
+    /(?<!\p{L})(?:agendad[oa]|programad[oa]|se\s+(?:cargar|debitar)[áa]|en\s+proceso|em\s+processamento|em\s+an[áa]lise|en\s+an[áa]lisis|vence(?:\s+amanh[ãa])?|vencimento|pago\s+m[íi]nimo|tienes\s+un\s+pago|completa\s+tu\s+pago|fa[çc]a\s+o\s+pagamento|j[áa]\s+pode\s+agendar|novo\s+boleto|sua\s+fatura\s+(?:de\s+R\$\s?[\d.,]+\s+)?(?:est[áa]\s+dispon[íi]vel|fechou|vence)|a\s+fatura\s+do\s+cart[ãa]o\s+fechou)(?!\p{L})/iu,
+    /(?<!\p{L})(?:empr[ée]stimo\s+foi\s+aprovado|pr[ée]-?aprovad[oa]|pr[ée]-?aprobad[oa]|cr[ée]dito\s+(?:de\s+R?\$\s?[\d.,]+\s+)?dispon[íi]vel|simul(?:ar|e)|limite\s+subiu|cupo\s+disponible|ganhe|garanta|cupom|invista|meses\s+sin\s+intereses)(?!\p{L})/iu,
+    /(?<!\p{L})(?:n[ãa]o\s+(?:conclu[íi]d[oa]|aprovad[oa]|autorizad[oa]|realizad[oa])|no\s+fue\s+posible|no\s+(?:aprobad[oa]|autorizad[oa]))(?!\p{L})/iu,
+    /(?<!\p{L})(?:extornad[oa]|estornad[oa]|reversad[oa]|devuelt[oa]|devolvid[oa]|sin\s+[ée]xito|sem\s+sucesso|fallid[oa]|fall[óo]|procesando|processando|n[ãa]o\s+processad[oa]|en\s+tr[áa]mite|desfeit[oa]|contestad[oa]|suspendid[oa]|suspens[oa]|no\s+se\s+pudo)(?!\p{L})/iu,
+];
+const TEMPORARY_HOLD = /\btemporary\s+(?:authori[sz]ation|hold|charge|debit|block)\b|\bhold\s+amount\b/iu;
+const AUTHORISATION = /\bauthori[sz](?:ed|ation)\b/iu;
+const COMPLETED = /\b(?:completed|posted|settled)\b/iu;
+const LINK = String.raw `(?:https?:\/\/|www\.)([^\s/?#]+)[^\s]*|\b([a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.[a-z]{2,12})\/[^\s]*`;
+const STRONG_ACTION = String.raw `dispute|verify|validate|confirm|cancel|claim|collect|unlock|unblock|reactivate|restore|redeem|reverse|accept`;
+const WEAK_ACTION = String.raw `update|log\s?in|sign\s?in|receive|get`;
+const LINK_ACTION = `${STRONG_ACTION}|${WEAK_ACTION}`;
+const ACTION_THEN_LINK = new RegExp(String.raw `\b(${LINK_ACTION})\b([^.!?\n]{0,30}?)(?:${LINK})`, 'giu');
+const LINK_THEN_ACTION = new RegExp(String.raw `(?:${LINK})[^.!?\n]{0,12}?\bto\s+(?:${LINK_ACTION})\b`, 'giu');
+const WEAK_ACTION_ONLY = new RegExp(String.raw `^(?:${WEAK_ACTION})$`, 'iu');
+const OWN_DETAILS = /^\s*(?:your\s+)(?:details|information|info|account|card|kyc|money|funds|payment|refund|reward)\b/iu;
+const SHORTENER = /^(?:bit\.ly|tinyurl\.com|rb\.gy|t\.co|cutt\.ly|is\.gd|goo\.gl|ow\.ly|shorturl\.at|tiny\.cc|s\.id|t\.ly)$/iu;
+const APP_STORE = /^(?:apps\.apple\.com|play\.google\.com)$/iu;
+const BAIT_HOST = /verify|secure|dispute|claim|refund|login|signin|support|help|billing|unlock|update|confirm|account/iu;
+const registrableDomain = (host) => {
+    const labels = host.toLowerCase().replace(/^www\./u, '').replace(/[:.]+$/u, '').split('.');
+    const take = labels.length >= 3 && /^[a-z]{2}$/u.test(labels.at(-1)) &&
+        /^(?:co|com|net|org|gov|ac|edu|bank)$/u.test(labels.at(-2)) ? 3 : 2;
+    return labels.slice(-take).join('.');
+};
+const SPOOFED_TLD = /\.(?:com|net|org|bank)-[^.]+\./iu;
+const spoofedHost = (host) => SPOOFED_TLD.test(host.replace(/^www\./iu, ''));
+const LOOKALIKE_WORD = /chase|paypal|amazon|apple|bank|secure|verify|login|refund|wells|citi|hsbc|barclays|venmo|zelle|account|support|help/iu;
+const letters = (value) => value.toLowerCase().replace(/[^a-z0-9]/gu, '');
+const headerBrand = (source) => {
+    const header = source.match(/^\s*([\p{L}][\p{L}&' .-]{1,40}?)\s*:/u)?.[1];
+    return header ? letters(header) : null;
+};
+const ownBrandHost = (host, brand) => {
+    if (!brand)
+        return false;
+    const label = letters(registrableDomain(host).split('.')[0]);
+    return label.length >= 3 && (label === brand || brand.startsWith(label) && /^(?:bank|uk|us|card|cards)?$/u.test(brand.slice(label.length)));
+};
+const baitHost = (host) => {
+    if (!host)
+        return false;
+    if (APP_STORE.test(host.replace(/^www\./iu, '')))
+        return false;
+    return SHORTENER.test(host) || spoofedHost(host) || BAIT_HOST.test(registrableDomain(host));
+};
+const DENIAL_CONTEXT = /\bnot\s+you\b|\bwasn['’]t\s+you\b|\bwas\s+not\s+you\b|\bdidn['’]t\s+make\b|\bstop\s+this\s+(?:payment|transaction|charge)\b/iu;
+const ANY_LINK = new RegExp(LINK, 'giu');
+const FOOTER_SERVICE = /\breport\s+dispute\b|\b(?:cancel|stop|unsubscribe\s+from)\s+(?:these\s+|all\s+|text\s+|sms\s+|account\s+)?alerts?\b/giu;
+const hasLinkCallToAction = (source) => {
+    const text = source.replace(FOOTER_SERVICE, (phrase) => ' '.repeat(phrase.length));
+    const brand = headerBrand(source);
+    for (const match of text.matchAll(ACTION_THEN_LINK)) {
+        const action = match[1] ?? '';
+        const between = match[2] ?? '';
+        const host = match[3] ?? match[4];
+        if (baitHost(host))
+            return true;
+        if (WEAK_ACTION_ONLY.test(action)) {
+            if (OWN_DETAILS.test(between))
+                return true;
+            if (/\b(?:here|now|immediately|below)\b|:/iu.test(between) && !(host && (ownBrandHost(host, brand) || APP_STORE.test(host.replace(/^www\./iu, '')))))
+                return true;
+            continue;
+        }
+        const purpose = /\bto\s*$/iu.test(text.slice(Math.max(0, match.index - 4), match.index));
+        if (!purpose && /\b(?:here|now|immediately|below)\b|:/iu.test(between))
+            return true;
+    }
+    for (const match of text.matchAll(LINK_THEN_ACTION)) {
+        if (baitHost(match[1] ?? match[2]))
+            return true;
+    }
+    const sentences = text.split(/(?<=[.!?\n])\s+/u);
+    for (const [index, sentence] of sentences.entries()) {
+        const context = `${sentences[index - 1] ?? ''} ${sentence}`;
+        for (const match of sentence.matchAll(ANY_LINK)) {
+            const host = match[1] ?? match[2];
+            if (host && spoofedHost(host))
+                return true;
+            const label = host ? registrableDomain(host).split('.')[0] : '';
+            if (host && DENIAL_CONTEXT.test(context) && !APP_STORE.test(host.replace(/^www\./iu, '')) &&
+                !ownBrandHost(host, brand) &&
+                (baitHost(host) || (label.includes('-') && LOOKALIKE_WORD.test(label))))
+                return true;
+        }
+    }
+    return false;
+};
+const NOT_A_SETTLED_FACT = [
+    /\bfraud\s+alert\b|(?<!\b(?:if|in\s+case|should)\b[^.!?\n]{0,60})\b(?:suspicious\s+(?:activity|transaction|charge|payment|login|purchase)|unusual\s+activity)\b|\bif\s+it\s+was\s+you\b|\bwas\s+this\s+you\b|\bwe\s+(?:have\s+)?(?:blocked|stopped|declined|locked)\b|(?<!\b(?:if|in\s+case|should|can|could|may)\b[^.!?\n]{0,60})\blocked\b|\bunder\s+review\b/iu,
+    /\bearn\s+(?:up\s+to\s+)?(?:[$€£₹]\s?\d|\d[\d.,]*\s*(?:%|[A-Z]{3}\b))(?:[^.!?\n]|\.\d){0,40}?\b(?:when|every\s+time|each\s+time|for\s+every)\b|\btap\s+to\s+accept\b/iu,
+    /\bdid\s+you\s+(?:authori[sz]e|make|attempt|use)\b|\breply\s+(?:y|yes|n|no|1|2)\b|(?<!\b(?:if|in\s+case|should)\b[^.!?\n]{0,40})\brecogni[sz]e\b|\bflagged\b|\bheld\b|\b(?:otp|one[-\s]time|verification|security)\s+code\b|(?<!\b(?:auth|authori[sz]ation|approval|merchant|branch|postal|zip|sort|mcc|promo|category|reference|ref)\s+)\bcode\s*:?\s*\d{4,}\b/iu,
+    /\b(?:someone|somebody|anyone|anybody|a\s+friend)\s+(?:has\s+)?(?:paid|sent)\s+you\b|\b(?:if|whether)\s+(?:they|he|she|you|[\p{L}]+)\s+(?:have\s+|has\s+)?(?:paid|sent)\s+you\b/iu,
+    /(?:^|[.!?\n:]\s*)(?:has|have|did|does|do|is|was|were)\s+(?:[^.!?\n]|\.\d){0,80}?\d(?:[^.!?\n]|\.\d){0,40}\?/iu,
+    /(?:^|[.!?\n:]\s*)(?:if|when|once|unless)\b(?:[^.!?\n]|\.\d){0,80}?\b(?:paid|made|sent|received|charged|spent|debited|credited)\b(?:[^.!?\n]|\.\d){0,40}?(?:[$€£₹]\s?\d|\b[A-Z]{3}\s?\d)/iu,
+];
+const NOT_A_NEW_MOVEMENT = [
+    /\bconverted\s+(?:in)?to\s+(?:an?\s+)?(?:emi|instal(?:l)?ments?|instal(?:l)?ment\s+plan)\b/iu,
+    /\breceived\s+(?:an?\s+)?airtime\b/iu,
+    /\b(?:money\s+market|unit\s+trust|mutual|investment)\s+fund\b[\s\S]{0,120}?\b\d[\d,.]*\s+units\b/iu,
+];
+const MERCHANT_ORDER_RECEIPT = /\border\s*(?:#|no\.?|number|id)\s*[:.-]?\s*[A-Z0-9-]*\d[\s\S]{0,80}?\b(?:paid|payment)\b|\b(?:paid|payment)\b[\s\S]{0,40}?\border\s*(?:#|no\.?|number|id)\s*[:.-]?\s*[A-Z0-9-]*\d/iu;
+const OWN_BALANCE_STATED = /\b(?:updated|avl\.?|available|new|closing|current)\s+(?:wallet\s+|account\s+|a\/c\s+)?bal(?:ance)?\b|\bbal(?:ance)?\s*(?:is|:)\s*(?:[A-Z]{3}|Rs\.?|[$£€₹])/iu;
+const OWN_CARD_PAYMENT = /\b(?:[Yy]ou\s+)?paid\b(?:[^.\n]|\.\d){0,40}?\bto\s+your\s+(?:(?:[A-Z][\p{L}\p{N}&.'’-]*|credit|charge)\s+){0,4}?[Cc]ard\b/u;
+const isNotAutoPostableMoney = (source) => hasLinkCallToAction(source) || NOT_A_SETTLED_FACT.some((pattern) => pattern.test(source)) ||
+    NOT_A_NEW_MOVEMENT.some((pattern) => pattern.test(source)) ||
+    (MERCHANT_ORDER_RECEIPT.test(source) && !OWN_BALANCE_STATED.test(source));
+exports.isNotAutoPostableMoney = isNotAutoPostableMoney;
+const LINK_RE = /\bhttps?:\/\/|\bwww\.[a-z0-9-]|\b(?:bit\.ly|tinyurl\.com|t\.co|goo\.gl|cutt\.ly|rb\.gy|is\.gd|ow\.ly|shorturl\.at)\/|\b[a-z0-9][a-z0-9-]{0,62}\.[a-z]{2,24}\/[\w-]/u;
+const GENERIC_SENDER = /^(?:info|infos|alert|alerts|notice|notify|sms|msg|message|verify|secure|security|service|support|update|bank|banking)$/i;
+const registeredAlphaSender = (sender) => {
+    if (typeof sender !== 'string')
+        return false;
+    const raw = sender.trim();
+    if (/^\d{3,6}$/.test(raw))
+        return true;
+    if (/^[a-z][a-z0-9_]*(?:\.[a-z0-9_]+){2,}$/i.test(raw) && !raw.includes('@'))
+        return true;
+    const id = raw.replace(/^[A-Z]{2}-/, '').replace(/-[A-Z]$/, '');
+    if (/^[A-Za-z]{2}$/.test(id))
+        return true;
+    return /^[A-Za-z][A-Za-z0-9 ]{2,15}$/.test(id) && (id.match(/[A-Za-z]/g) ?? []).length >= 3 &&
+        !GENERIC_SENDER.test(id);
+};
+const hasLinkFromUnregisteredSender = (source, sender) => LINK_RE.test(source) && !registeredAlphaSender(sender);
+exports.hasLinkFromUnregisteredSender = hasLinkFromUnregisteredSender;
+const isUnverifiedAlertSender = (sender) => {
+    const raw = typeof sender === 'string' ? sender.trim() : '';
+    if (!raw)
+        return false;
+    if (raw.includes('@') || /^\+?[\d\s().-]{7,}$/.test(raw))
+        return true;
+    return GENERIC_SENDER.test(raw.replace(/^[A-Z]{2}-/, '').replace(/-[A-Z]$/, ''));
+};
+exports.isUnverifiedAlertSender = isUnverifiedAlertSender;
+const isRegisteredAlertSender = (sender) => registeredAlphaSender(sender);
+exports.isRegisteredAlertSender = isRegisteredAlertSender;
+const OWN_INSTRUMENT_TAIL = /(?:\b(?:a\/c|acc(?:oun)?t|acct|card|ending|wallet(?:\s+(?:no\.?|number))?)\b|(?<!\p{L})(?:حساب|بطاق[ةه])(?:\s+رقم)?)\.?\s*(?:no\.?|number|#)?\s*:?\s*(?:ending\s+(?:in|with)\s+)?(?:(?:[*xX•·]{2,}[\d*xX•·]*-){1,3}[\d*xX•·]*\d{2,6}|(?:[A-Z]{2}\d{2}[A-Z]{0,4})?\d{0,6}[*xX•·…]+\s?-?\d{2,6}|\.{2,3}\s?\d{2,6}|\d{3,6})(?![\d#])/iu;
+const OWN_INSTRUMENT_TAIL_ALL = new RegExp(OWN_INSTRUMENT_TAIL.source, 'giu');
+const PAYER_BEFORE = /(?:\b(?:from|sender|by|of)|(?<!\p{L})من)[ \t]*:?[ \t]*(?:(?:the|a|an)[ \t]+)?$/iu;
+const OWNER_BEFORE = /(?:\b(?:your|to|in|into|on|with|using)|(?<!\p{L})(?:الى|إلى|الي|في|على))[ \t]*:?[ \t]*(?:[^\s.,;:!?]+[ \t]+){0,2}$/iu;
+const CLAUSE_START_BEFORE = /(?:^|[\n.,;:!?(])[ \t]*(?:dear[ \t]+(?:customer|client|member)[ \t]*,?[ \t]*)?$/iu;
+const OWN_FIELD_TAIL = /(?:^|\n)[ \t]*(?:to|الى|إلى|الي|حساب)[ \t]*:[ \t]*[*xX•·]*\d{3,4}(?![\d#])/iu;
+const YOUR_INSTRUMENT_EARLIER = /\byour[ \t]+(?:[\p{L}]+[ \t]+){0,2}(?:card|account|a\/c|acct)\b/iu;
+const DEBIT_ORIGIN_BEFORE = /\bfrom[ \t]+(?:[^\s.,;:!?]+[ \t]+){0,2}$/iu;
+const CREDIT_CUE = /\b(?:credited|received|deposited|incoming|inward|refund(?:ed)?)\b|(?<!\p{L})(?:وارد|ايداع|إيداع|استلام)/iu;
+const ownInstrumentTailIn = (text, direction) => {
+    if (OWN_FIELD_TAIL.test(text))
+        return true;
+    const credit = direction === 'credit' || ((direction === undefined || direction === 'unknown') && CREDIT_CUE.test(text));
+    for (const match of text.matchAll(OWN_INSTRUMENT_TAIL_ALL)) {
+        const at = match.index ?? 0;
+        const before = text.slice(0, at);
+        const near = before.slice(-48);
+        if (credit && PAYER_BEFORE.test(near))
+            continue;
+        if (OWNER_BEFORE.test(near) || CLAUSE_START_BEFORE.test(before) || (!credit && DEBIT_ORIGIN_BEFORE.test(near)) ||
+            YOUR_INSTRUMENT_EARLIER.test(before))
+            return true;
+    }
+    return false;
+};
+const namesOwnInstrumentTail = (text, direction) => ownInstrumentTailIn(text, direction);
+exports.namesOwnInstrumentTail = namesOwnInstrumentTail;
+const namesOwnInstrument = (source, event) => (event.direction !== 'credit' && event.instrument?.evidence === 'explicit' && !!event.instrument.value?.last4 &&
+    /\d{2,}/.test(event.instrument.value.last4)) || ownInstrumentTailIn(source, event.direction === 'credit' || event.direction === 'debit' ? event.direction : undefined);
+const CALLBACK_HOOK = /\b(?:not\s+(?:you|u|correct)|not\s+(?:done|made|authori[sz]ed)\s+by\s+you|wasn'?t\s+you|if\s+(?:you\s+)?(?:did|do)\s+not|dispute|helpline|need\s+help)\b/iu;
+const unverifiedMoneyClaim = (source, event, sender, exactTemplate) => {
+    const blank = typeof sender === 'string' && sender.trim() === '';
+    if (!(0, exports.isUnverifiedAlertSender)(sender) && !(blank && !exactTemplate))
+        return false;
+    if (namesOwnInstrument(source, event))
+        return false;
+    if (event.direction === 'credit')
+        return true;
+    return event.direction === 'debit' && CALLBACK_HOOK.test(source);
+};
+const COMPLETED_MOVEMENT = /\b(?:spent|debited|credited|paid|posted|withdrawn|transferred|received|charged|deposited|purchased|refunded)\b|\bmade\s+an?\s+\S+\s+(?:purchase|transaction|payment)\b|\b(?:purchase|payment|transaction)\s+of\s+(?:[A-Z]{3}|Rs\.?|[$£€₹])\s?\d|\bused\s+(?:for|at)\b|\bavailable\s+in\s+(?:your\s+)?(?:account|a\/c|acct|card)\b/iu;
+const PROMO_FOOTER_SENTENCE = /(?:^|(?<=[.!;\n]))(?:[^.!;\n]|\.(?=\d))*?\b(?:apply\s+(?:now|here|today)|earn\s+(?:over|up\s*to|upto|extra)|get\s+paid|track\s+your\s+(?:order|parcel|package|shipment|spending)|to\s+deposit\b(?:[^.!;\n]|\.(?=\d))*?\buse|reward\s+points?\s+will\s+be\s+added)\b(?:[^.!;\n]|\.(?=\d))*[.!]?/giu;
+const MERCHANT_DESCRIPTOR = /((?:\b(?:at|to|from|with|on|in|by|via|for)|@|لدى:?)\s+(?:the\s+)?)(?!(?:APPLY|REGISTER|CLAIM|CLICK|TAP|REPLY|EARN|GET)\b)[A-Z][A-Z0-9&'’.-]*(?:\s+[A-Z0-9&][A-Z0-9&'’.-]*)*/gu;
+const maskMerchantDescriptors = (source) => source.replace(MERCHANT_DESCRIPTOR, '$1MERCHANT');
+const PROMO_AND_SHOP_WORDING = [
+    /\bapply\s+(?:now|here|today)\b|\bto\s+apply\b|\bregister\s+now\b|\bhurry\b|\b(?:using|apply|enter)\s+(?:the\s+)?(?:promo\s+|coupon\s+)?code\b|\bget\s+paid\b|\bearn\s+(?:over|up\s*to|upto|extra)\b|\bpay\s+now\b/iu,
+    /\bwill\s+be\s+(?:added|delivered|shipped|dispatched)\b|\btrack\s+your\s+(?:order|parcel|package|shipment)\b|\border\s+(?:update|confirmed)\b/iu,
+];
+const REFUND_AVAILABLE = /\brefund\b[^\n]{0,30}?\b(?:is|are)\s+(?:now\s+)?(?:available|ready)\b/iu;
+const hardNonCompletedWording = (source, market) => (0, sms_parser_1.nonPostingReason)(source) !== null || NON_COMPLETED_WORDING.some((pattern) => pattern.test(source)) ||
+    (!!market && LATAM_MARKETS.has(market) && LATAM_NON_COMPLETED_WORDING.some((pattern) => pattern.test(source))) ||
+    TEMPORARY_HOLD.test(source) || (AUTHORISATION.test(source) && !COMPLETED.test(source));
+const softNonCompletedWording = (source, ownCompleted) => {
+    const masked = maskMerchantDescriptors(source);
+    if (PROMO_AND_SHOP_WORDING.some((pattern) => pattern.test(masked)))
+        return true;
+    if (ownCompleted)
+        return false;
+    return REFUND_AVAILABLE.test(source) || (ORDER_REFERENCE.test(source) && ORDER_CALLBACK_HOOK.test(source)) ||
+        DISPUTE_DESK.test(source);
+};
+const wordingGuardText = (source, sender) => {
+    const withoutFooters = source.replace(PROMO_FOOTER_SENTENCE, ' ');
+    const completed = COMPLETED_MOVEMENT.test(withoutFooters);
+    const ownCompleted = completed && ownInstrumentTailIn(withoutFooters);
+    const footerExempt = completed && (ownCompleted || (registeredAlphaSender(sender) && !LINK_RE.test(source)));
+    return { text: footerExempt ? withoutFooters : source, ownCompleted };
+};
+const hasNonCompletedWording = (source, market, sender) => {
+    const { text, ownCompleted } = wordingGuardText(source, sender);
+    return hardNonCompletedWording(text, market) || softNonCompletedWording(text, ownCompleted);
+};
+exports.hasNonCompletedWording = hasNonCompletedWording;
+const refusedOnlyByShopOrPromoWording = (source, sender) => {
+    const { text, ownCompleted } = wordingGuardText(source, sender);
+    return !hardNonCompletedWording(text) && softNonCompletedWording(text, ownCompleted) &&
+        COMPLETED_MOVEMENT.test(source.replace(PROMO_FOOTER_SENTENCE, ' '));
+};
+exports.refusedOnlyByShopOrPromoWording = refusedOnlyByShopOrPromoWording;
+const latamScope = (input) => {
+    if (input.routedMarket && LATAM_MARKETS.has(input.routedMarket))
+        return input.routedMarket;
+    if (input.country && LATAM_MARKETS.has(input.country))
+        return input.country;
+    const currency = input.event?.amount?.value?.currency;
+    return currency && LATAM_CURRENCIES.has(currency)
+        ? { BRL: 'BR', COP: 'CO', MXN: 'MX', PEN: 'PE' }[currency]
+        : null;
+};
+const localIsoDay = (epochMs) => {
+    if (epochMs === undefined || !Number.isFinite(epochMs))
+        return null;
+    const day = new Date(epochMs);
+    if (!Number.isFinite(day.getTime()))
+        return null;
+    return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+};
+const directionMatchesFamily = (event) => {
+    if (event.direction !== 'debit' && event.direction !== 'credit')
+        return false;
+    if (event.family === 'refund')
+        return event.direction === 'credit';
+    if (event.family === 'transfer')
+        return true;
+    return event.direction === 'debit';
+};
+const SENT_TO_ACCOUNT_REFERENCE = /\bsent\s+to\s+(?:your\s+)?(?:[A-Za-z][A-Za-z&]{1,2}\s+){0,3}(?:a\/c|acc(?:oun)?t)\.?\s*(?:no\.?\s*)?[*xX•·]+\d{2,6}\b/iu;
+const FROM_YOUR_ORIGIN = /\bfrom\s+your\b/iu;
+const PAYEE_RECEIVED_YOUR_TRANSFER = /\b(?:has|have)\s+(?:now\s+)?received\s+your\s+(?:\w+\s+){0,2}(?:transfer|payment|money|remittance)\b/iu;
+const inboundSentToOwnAccount = (source) => SENT_TO_ACCOUNT_REFERENCE.test(source) && !FROM_YOUR_ORIGIN.test(source);
+const validMoney = (money) => {
+    if (!money || typeof money.currency !== 'string' || !/^[A-Z]{3}$/.test(money.currency))
+        return false;
+    const exponent = (0, currency_metadata_1.currencyMinorUnits)(money.currency);
+    if (exponent === null || exponent !== money.exponent)
+        return false;
+    if (typeof money.minorUnits !== 'string' || !/^[1-9]\d{0,15}$/.test(money.minorUnits))
+        return false;
+    return Number.isSafeInteger(Number(money.minorUnits));
+};
+const resolvePrincipalMoney = (source, event, country, routedMarket) => {
+    const field = event.amount;
+    if (field.evidence === 'explicit') {
+        if (field.alternatives.length !== 0 || !validMoney(field.value))
+            return 'amount-unclear';
+        return field.value;
+    }
+    if (field.evidence !== 'ambiguous')
+        return 'amount-unclear';
+    const localThreeDecimal = THREE_DECIMAL_COUNTRY_CURRENCY[(routedMarket ?? country ?? '').toUpperCase()];
+    const figure = field.spans.length === 1 ? source.slice(field.spans[0].start, field.spans[0].end) : '';
+    const [decimal, grouped] = [...field.alternatives].sort((a, b) => a.minorUnits.length - b.minorUnits.length);
+    if (localThreeDecimal && field.issues.length > 0 && field.issues.every((issue) => issue === 'decimal-or-grouping') &&
+        field.value === null && field.alternatives.length === 2 &&
+        /^[^,]*\d\.\d{3}(?!\d)[^,]*$/.test(figure) &&
+        validMoney(decimal) && decimal.currency === localThreeDecimal && grouped?.currency === localThreeDecimal &&
+        BigInt(grouped.minorUnits) === BigInt(decimal.minorUnits) * 1000n) {
+        return decimal;
+    }
+    const symbolOnly = field.issues.length > 0 &&
+        field.issues.every((issue) => issue === 'currency-symbol' || issue === 'currency-exponent');
+    if (!symbolOnly)
+        return 'amount-unclear';
+    const wanted = routedMarket
+        ? (0, exports.sharedSymbolCurrencyForCountry)(routedMarket)
+        : (0, exports.sharedSymbolCurrencyForCountry)(country);
+    if (!wanted)
+        return 'currency-unclear';
+    const options = [...(field.value ? [field.value] : []), ...field.alternatives]
+        .filter((money) => money && money.currency === wanted);
+    const distinct = new Set(options.map((money) => `${money.minorUnits}/${money.exponent}`));
+    if (distinct.size !== 1 || !validMoney(options[0]))
+        return 'currency-unclear';
+    return options[0];
+};
+const amountShapeConflict = (source, event, principal) => {
+    const span = event.amount.spans.length === 1 ? event.amount.spans[0] : null;
+    const figure = span ? source.slice(span.start, span.end).match(/\d[\d.,]*\d|\d/u)?.[0] ?? '' : '';
+    if (principal.currency === 'MXN' && (/\d\.\d{3}(?!\d)/u.test(figure) || /,\d{2}$/u.test(figure)))
+        return true;
+    return principal.currency === 'COP' && event.family === 'purchase' && principal.exponent === 2 &&
+        /^\d+$/.test(principal.minorUnits) && BigInt(principal.minorUnits) < 5000n;
+};
+const hasCompetingAmounts = (event, principal, ledgerCurrency) => {
+    const principalRoles = event.family === 'fee' ? new Set(['transaction', 'fee']) : new Set(['transaction']);
+    const statedLedger = (money) => !!money && !!ledgerCurrency && principal.currency !== ledgerCurrency && money.currency === ledgerCurrency;
+    let principals = 0;
+    for (const observation of event.observations) {
+        const value = observation.field.value;
+        if (observation.role === 'unknown') {
+            if (statedLedger(value))
+                continue;
+            return true;
+        }
+        if (!principalRoles.has(observation.role))
+            continue;
+        if (statedLedger(value))
+            continue;
+        principals += 1;
+        const others = [...observation.field.alternatives, ...(value ? [value] : [])]
+            .filter((money) => !(money.currency === principal.currency && money.minorUnits === principal.minorUnits))
+            .filter((money) => !(observation.field.issues.includes('decimal-or-grouping') &&
+            money.currency === principal.currency && /^\d+$/.test(money.minorUnits) &&
+            BigInt(money.minorUnits) === BigInt(principal.minorUnits) * 1000n))
+            .filter((money) => !statedLedger(money));
+        if (others.some((money) => money.minorUnits !== principal.minorUnits &&
+            (0, currency_metadata_1.currencyMinorUnits)(money.currency) === principal.exponent))
+            return true;
+    }
+    return principals !== 1;
+};
+const LAUNCH_ROUTE = (market) => !!market && LAUNCH_MARKETS.has(market);
+const senderlessOwnAlertLink = (source, sender) => (sender === undefined || sender.trim() === '') && COMPLETED_MOVEMENT.test(source) &&
+    ownInstrumentTailIn(source) && !hasLinkCallToAction(source);
+function decideBestEffortAutoPost(input) {
+    const review = (reason) => ({ outcome: 'review', reason });
+    const { event } = input;
+    if (!input.enabled)
+        return review('disabled');
+    if (LAUNCH_ROUTE(input.routedMarket) || LAUNCH_ROUTE(input.launchSenderMarket ?? null)) {
+        return review('launch-market');
+    }
+    if (!event || event.version !== 1 || event.decision !== 'review' || event.status !== 'posted') {
+        return review('not-posted');
+    }
+    if (typeof input.source !== 'string' || (0, exports.hasNonCompletedWording)(input.source, latamScope(input), input.sender) ||
+        (0, exports.isNotAutoPostableMoney)(input.source)) {
+        return review('non-posting-wording');
+    }
+    if ((0, exports.hasLinkFromUnregisteredSender)(input.source, input.sender) && !senderlessOwnAlertLink(input.source, input.sender)) {
+        return review('non-posting-wording');
+    }
+    if (unverifiedMoneyClaim(input.source, event, input.sender, input.exactTemplate === true))
+        return review('unverified-sender');
+    if (!POSTABLE_FAMILIES.has(event.family) || OWN_CARD_PAYMENT.test(input.source))
+        return review('unsupported-family');
+    if (!directionMatchesFamily(event))
+        return review('direction-unclear');
+    if (event.direction === 'debit' && inboundSentToOwnAccount(input.source))
+        return review('direction-unclear');
+    if (event.direction === 'credit' && PAYEE_RECEIVED_YOUR_TRANSFER.test(input.source))
+        return review('direction-unclear');
+    if (event.issues.some((issue) => BLOCKING_ISSUES.has(issue))) {
+        return review(event.issues.some((issue) => issue.startsWith('direction')) ? 'direction-unclear' : 'not-posted');
+    }
+    const principal = resolvePrincipalMoney(input.source, event, input.country, input.routedMarket);
+    if (typeof principal === 'string')
+        return review(principal);
+    if (amountShapeConflict(input.source, event, principal))
+        return review('amount-unclear');
+    if (hasCompetingAmounts(event, principal, input.ledgerCurrency))
+        return review('competing-amounts');
+    const observedDay = localIsoDay(input.observedAt);
+    const date = event.transactionDate.evidence === 'explicit' ? event.transactionDate.value : null;
+    if (date !== null) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date))
+            return review('future-dated');
+        if (observedDay && date > observedDay)
+            return review('future-dated');
+    }
+    const originalMinor = Number(principal.minorUnits);
+    let amountFils = originalMinor;
+    let currency = principal.currency;
+    let conversion = null;
+    if (input.ledgerCurrency && input.ledgerCurrency !== principal.currency) {
+        const exponent = input.ledgerExponent;
+        if (exponent !== 0 && exponent !== 2 && exponent !== 3)
+            return review('invalid-money');
+        const day = date ?? observedDay;
+        if (!day)
+            return review('fx-rate-unavailable');
+        const quote = input.fxLookup ? input.fxLookup(principal.currency, input.ledgerCurrency, day) : null;
+        const converted = (0, fx_rates_1.convertForeignConfirmation)(event, { currency: principal.currency, minorUnits: originalMinor, exponent: principal.exponent }, { currency: input.ledgerCurrency, exponent }, (0, fx_rates_1.quoteFitsDay)(quote, day) ? quote : null, { requireQuoteForStated: true });
+        if (converted === 'fx-rate-unavailable')
+            return review('fx-rate-unavailable');
+        if (converted === 'invalid-money')
+            return review('invalid-money');
+        conversion = converted;
+        amountFils = converted.amountFils;
+        currency = input.ledgerCurrency;
+    }
+    else if (input.ledgerCurrency && input.ledgerExponent !== null &&
+        input.ledgerExponent !== principal.exponent) {
+        return review('invalid-money');
+    }
+    if (!Number.isSafeInteger(amountFils) || amountFils <= 0)
+        return review('invalid-money');
+    const market = input.routedMarket && /^[A-Z]{2}$/.test(input.routedMarket)
+        ? input.routedMarket
+        : input.country && /^[A-Z]{2}$/.test(input.country) ? input.country : 'ZZ';
+    return {
+        outcome: 'post',
+        amountFils,
+        currency,
+        original: principal,
+        conversion,
+        date,
+        marker: {
+            v: 1,
+            format: `${input.formatPrefix ?? 'universal'}:${event.family}:${event.direction}`,
+            market,
+        },
+    };
+}
+let bestEffortEnabled = true;
+function setBestEffortAutoPostEnabled(enabled) {
+    bestEffortEnabled = enabled !== false;
+}
+function bestEffortAutoPostEnabled() {
+    return bestEffortEnabled;
+}
+exports.BEST_EFFORT_UNDO_CAP = 2000;
+const bestEffortObservationKey = (ts, currency, amountFils) => typeof ts === 'number' && Number.isFinite(ts) && typeof currency === 'string' && /^[A-Z]{3}$/.test(currency) &&
+    Number.isSafeInteger(amountFils) && amountFils > 0
+    ? `t${ts}:${currency}${amountFils}`
+    : null;
+exports.bestEffortObservationKey = bestEffortObservationKey;
+const bestEffortCardPaymentObservationKey = (row, ledgerCurrency) => {
+    const observed = (0, exports.bestEffortObservationKey)(row.ts, ledgerCurrency, row.amountFils);
+    const instrument = row.captureInstrument;
+    const bank = instrument?.bankIdentity;
+    if (!observed || instrument?.kind !== 'credit' || !/^\d{4}$/.test(instrument.last4) ||
+        typeof bank !== 'string' || !bank || bank !== bank.trim() || bank.length > 120 || /\p{C}/u.test(bank) ||
+        (row.cardPaymentSide !== 'receipt' && row.cardPaymentSide !== 'debit'))
+        return null;
+    const key = `p${observed.slice(1)}:${encodeURIComponent(bank)}:credit:${instrument.last4}:${row.cardPaymentSide}`;
+    return key.length <= 256 ? key : null;
+};
+exports.bestEffortCardPaymentObservationKey = bestEffortCardPaymentObservationKey;
+const isCardPaymentUndoRow = (row) => {
+    const marker = row.bestEffort;
+    const format = marker && typeof marker === 'object' && 'format' in marker ? marker.format : undefined;
+    return row.cardPaymentSide !== undefined ||
+        (typeof format === 'string' && /(?:^|:)card-payment(?:$|:)/.test(format));
+};
+const bestEffortUndoKeys = (row, ledgerCurrency) => {
+    const keys = new Set();
+    const cardPayment = isCardPaymentUndoRow(row);
+    if (typeof row.smsKey === 'string' && row.smsKey && (!cardPayment ||
+        (row.smsKey.startsWith('h') && (0, capture_source_identity_1.isUsableCaptureSourceIdentity)(row.smsKey, row.ts) &&
+            !(0, capture_source_identity_1.isUnboundAndroidSourceKey)(row.smsKey))))
+        keys.add(row.smsKey);
+    if (cardPayment) {
+        const scoped = (0, exports.bestEffortCardPaymentObservationKey)(row, ledgerCurrency);
+        if (scoped)
+            keys.add(scoped);
+        return [...keys];
+    }
+    const observed = (0, exports.bestEffortObservationKey)(row.ts, ledgerCurrency, row.amountFils);
+    if (observed)
+        keys.add(observed);
+    return [...keys];
+};
+exports.bestEffortUndoKeys = bestEffortUndoKeys;
+const tombstonesForRemoved = (existing, removed, ledgerCurrency) => {
+    const keys = removed.filter((row) => row.bestEffort).flatMap((row) => (0, exports.bestEffortUndoKeys)(row, ledgerCurrency));
+    return keys.length > 0 ? (0, exports.appendBestEffortUndo)(existing, keys) : undefined;
+};
+exports.tombstonesForRemoved = tombstonesForRemoved;
+const appendBestEffortUndo = (existing, keys) => {
+    const next = [...(existing ?? []).filter((key) => !keys.includes(key)), ...keys];
+    return next.length > exports.BEST_EFFORT_UNDO_CAP ? next.slice(next.length - exports.BEST_EFFORT_UNDO_CAP) : next;
+};
+exports.appendBestEffortUndo = appendBestEffortUndo;
+},
+"bnpl-providers":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.isBnplProviderSource = isBnplProviderSource;
+const BNPL_PROVIDER_PACKAGES = new Set(['app.tabby.client', 'co.tamara.user']);
+const BNPL_PROVIDER_SENDER_RE = /^(?:ad)?(?:tabby(?:ai)?|tamara(?:co)?|postpay|cashew)(?:ad)?$/;
+function isBnplProviderSource(sender) {
+    if (typeof sender !== 'string')
+        return false;
+    const value = sender.normalize('NFKC').trim().toLowerCase();
+    if (!value || value.length > 200)
+        return false;
+    if (BNPL_PROVIDER_PACKAGES.has(value.split(/\s+/)[0]))
+        return true;
+    return BNPL_PROVIDER_SENDER_RE.test(value.replace(/[\s._-]/g, ''));
+}
+},
+"brand-categories":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.compileBrandTable = compileBrandTable;
+exports.normalizeBrandDescriptor = normalizeBrandDescriptor;
+exports.matchBrandCategory = matchBrandCategory;
+exports.brandTableStats = brandTableStats;
+const ALIAS = {
+    g: 'groceries', d: 'dining', t: 'transport', u: 'utilities', c: 'telecom', s: 'shopping', h: 'health',
+    p: 'personal-care', hs: 'home-services', e: 'education', tr: 'travel', en: 'entertainment',
+    sw: 'software', i: 'investing', ch: 'charity', gv: 'government',
+};
+const TABLE = {
+    GLOBAL: `
+sw: APPLE COM BILL; ITUNES COM; ITUNES; ICLOUD; GOOGLE (?:STORAGE|ONE|WORKSPACE|GSUITE|CLOUD|PLAY|DOMAINS); GSUITE; MICROSOFT; MSFT; ADOBE; DROPBOX; GITHUB; OPENAI; CHATGPT; ANTHROPIC; CLAUDE AI; NOTION (?:LABS|SO); CANVA; ZOOM (?:US|COM|VIDEO); SLACK; FIGMA; JETBRAINS; ATLASSIAN; 1PASSWORD; LASTPASS; NORDVPN; NORD SEC; EXPRESSVPN; GODADDY; NAMECHEAP; SQUARESPACE; WIX COM; SHOPIFY; AWS (?:EMEA|AMAZON|US); AMAZON WEB SERVICES; DIGITALOCEAN; HEROKU; VERCEL; CLOUDFLARE; MAILCHIMP; GRAMMARLY; EVERNOTE; TODOIST; CURSOR (?:AI|COM); ANYSPHERE; MIDJOURNEY; PERPLEXITY; KASPERSKY; NORTONLIFELOCK; MCAFEE; SURFSHARK; PROTON (?:AG|MAIL|VPN)
+en: NETFLIX; SPOTIFY; DISNEY (?:PLUS|\\+); HULU; HBO MAX; HBOMAX; YOUTUBE; YOUTUBE ?(?:PREMIUM|MUSIC|TV); PRIME VIDEO; AMAZON PRIME VIDEO; AMAZON MUSIC; AMZN DIGITAL; AMAZON DIGITAL; KINDLE (?:UNLIMITED|STORE|SVCS|EDITION); APPLE (?:TV|MUSIC|ARCADE); PARAMOUNT (?:PLUS|\\+); PEACOCK; CRUNCHYROLL; DAZN; STEAMGAMES; STEAM (?:GAMES|POWERED|PURCHASE|COM); STEAMPOWERED; PLAYSTATION; SONY PLAYSTATION; XBOX; NINTENDO; EPIC GAMES; RIOT GAMES; BLIZZARD; BATTLE NET; ELECTRONIC ARTS; ROBLOX; TWITCH; AUDIBLE; DEEZER; TIDAL (?:COM|MUSIC); SOUNDCLOUD; PATREON; TICKETMASTER; LIVE NATION; EVENTBRITE; STUBHUB; VIAGOGO; IMAX; SHOWMAX; SHAHID; STARZPLAY; ANGHAMI; OSN (?:PLUS|\\+|STREAMING); APPLE COM TV
+s: AMAZON; AMZN; AMZN MKTP; EBAY; ALIEXPRESS; ALIBABA; TEMU; SHEIN; ETSY; WISH COM; IKEA; ZARA; H & M; HM COM; UNIQLO; NIKE; ADIDAS; PUMA (?:STORE|COM|SE); APPLE (?:STORE|ONLINE STORE|RETAIL); SAMSUNG (?:STORE|ELECTRONICS|SHOP|COM); DECATHLON; PRIMARK; MASSIMO DUTTI; PULL (?:&|AND) BEAR; BERSHKA; STRADIVARIUS; OYSHO; LEVIS; LEVI STRAUSS; C & A; LEGO; TOYS R US; MUJI; SWAROVSKI; TK MAXX; TJ MAXX; FOREVER 21; ZALANDO; ASOS; FARFETCH; LOUIS VUITTON; GUCCI; SKECHERS; FOOT LOCKER; SUPERDRY; MINISO; DAISO; FLYING TIGER; LULULEMON; UNDER ARMOUR; NEW BALANCE; CONVERSE (?:COM|STORE); VANS STORE; CRATE (?:&|AND) BARREL; POTTERY BARN; WILLIAMS SONOMA; BIRKENSTOCK; PANDORA JEWEL
+g: CARREFOUR; LIDL; ALDI; SPAR; EUROSPAR; INTERSPAR; 7 ELEVEN; SEVEN ELEVEN; COSTCO; WHOLE FOODS; WHOLEFDS; AMAZON FRESH; INSTACART; AUCHAN; SHOPRITE; FAMILYMART; FAMILY MART; LAWSON; GETIR; GORILLAS; FLINK; NETTO; MINISTOP; GRAB MART; GRABMART
+d: MCDONALDS; MC DONALDS; BURGER KING; KFC; PIZZA HUT; DOMINOS; DOMINO S PIZZA; PAPA JOHNS; LITTLE CAESARS; STARBUCKS; COSTA COFFEE; TIM HORTONS; DUNKIN; KRISPY KREME; WENDYS; TACO BELL; CHIPOTLE; FIVE GUYS; SHAKE SHACK; POPEYES; CHICK FIL A; DAIRY QUEEN; HARDEES; CARLS JR; JOLLIBEE; NANDOS; PRET A MANGER; WAGAMAMA; PANDA EXPRESS; OUTBACK STEAKHOUSE; TGI FRIDAYS; HARD ROCK CAFE; CHEESECAKE FACTORY; JOHNNY ROCKETS; BASKIN ROBBINS; COLD STONE; HAAGEN DAZS; CINNABON; AUNTIE ANNES; WINGSTOP; DELIVEROO; JUST EAT; UBER EATS; UBEREATS; DOORDASH; GRUBHUB; POSTMATES; FOODPANDA; GLOVO; WOLT; RAPPI; IFOOD; SWIGGY; ZOMATO; TALABAT; MENULOG; SKIPTHEDISHES; SKIP THE DISHES; LIEFERANDO; THUISBEZORGD; YEMEKSEPETI; PEDIDOSYA; PEDIDOS YA; DIDI FOOD; GRAB FOOD; GRABFOOD; GOFOOD; GO FOOD; SHOPEEFOOD; SHOPEE FOOD; BOLT FOOD; CAREEM FOOD; CAREEM NOW; CAFFE NERO; PAUL BAKERY; CHATIME; DIN TAI FUNG; SUBWAY; GRAB (?:AND|N) GO; PEETS COFFEE; BLUE BOTTLE; ARABICA COFFEE; % ARABICA
+t: UBER; LYFT; BOLT; BOLT EU; CAREEM; GRAB; GOJEK; GO JEK; GORIDE; GOCAR; DIDI; CABIFY; OLACABS; OLA CABS; INDRIVE; INDRIVER; YANGO; FREE NOW; FREENOW; MYTAXI; HEETCH; BLABLACAR; FLIXBUS; FLIXTRAIN; GREYHOUND; MEGABUS; NATIONAL EXPRESS; LIME (?:RIDE|SCOOTER|BIKE); LIMEBIKE; VOI (?:TECHNOLOGY|SCOOTER); SHELL; BP (?:OIL|CONNECT|EXPRESS|PULSE|SERVICE STATION|STATION|FUEL); BP \\d{3,}; ESSO; EXXON; EXXONMOBIL; MOBIL (?:OIL|\\d{3,}); CHEVRON; TEXACO; CALTEX; TOTALENERGIES; TOTAL ENERGIES; TOTAL ACCESS; Q8; REPSOL; CEPSA; MOEVE; GALP; AGIP; ENILIVE; OMV; CIRCLE K; PETRONAS; PETROBRAS; PERTAMINA; PUMA ENERGY; VIVO ENERGY; RUBIS; ENGEN; SASOL; ADNOC; ENOC; EPPCO; ALDREES; SASCO; PARKMOBILE; PAYBYPHONE; EASYPARK; Q PARK; APCOA; INDIGO PARK; INDIGO PARKING; SPOTHERO; TESLA SUPERCHARGER; CHARGEPOINT; IONITY
+h: BUPA; BOOTS (?:PHARMACY|UK|THE CHEMIST|OPTICIANS); SPECSAVERS; VISION EXPRESS; ANYTIME FITNESS; PLANET FITNESS; GOLDS GYM; FITNESS FIRST; BASIC FIT; PUREGYM; PURE GYM; CLASSPASS; F45 TRAINING; ORANGETHEORY; CRUNCH FITNESS; LA FITNESS; 24 HOUR FITNESS; EQUINOX; VIRGIN ACTIVE; SNAP FITNESS; MCFIT; SMART FIT; SMARTFIT; BODYTECH; GUARDIAN PHARMACY; LENSCRAFTERS; WARBY PARKER
+p: SEPHORA; ULTA; LUSH; THE BODY SHOP; BODY SHOP; BATH (?:&|AND) BODY WORKS; MAC COSMETICS; KIKO; KIKO MILANO; YVES ROCHER; SALLY BEAUTY; SUPERCUTS; GREAT CLIPS; SPORT CLIPS; TONI (?:&|AND) GUY; RITUALS; L OCCITANE; LOCCITANE; WATSONS; FACES BEAUTY; DOUGLAS (?:PARFUM|COSMETICS|PARFUMERIE); PARFUMERIE DOUGLAS; NOCIBE; MARIONNAUD; DM DROGERIE; DM FIL; ROSSMANN; KRUIDVAT; BENEFIT COSMETICS; CHARLOTTE TILBURY
+e: COURSERA; UDEMY; EDX; SKILLSHARE; MASTERCLASS; DUOLINGO; BABBEL; BUSUU; LINKEDIN LEARNING; PLURALSIGHT; CODECADEMY; DATACAMP; CHEGG; QUIZLET; STUDOCU; IELTS; ETS TOEFL; TOEFL; COLLEGE BOARD; BYJUS; UNACADEMY
+ch: UNICEF; RED CROSS; CROIX ROUGE; CRUZ ROJA; CROCE ROSSA; RODE KRUIS; ROTES KREUZ; RED CRESCENT; OXFAM; SAVE THE CHILDREN; WWF; MEDECINS SANS FRONTIERES; MSF DONATION; DOCTORS WITHOUT BORDERS; AMNESTY; GREENPEACE; WIKIMEDIA; WIKIPEDIA; UNHCR; WORLD VISION; ISLAMIC RELIEF; GOFUNDME; JUSTGIVING; CANCER RESEARCH; SALVATION ARMY; HABITAT FOR HUMANITY; WORLD FOOD PROGRAMME; WFP DONATION; PLAN INTERNATIONAL; CHARITY WATER; KHAN ACADEMY
+i: ROBINHOOD; COINBASE; BINANCE; KRAKEN; ETORO; TRADING 212; TRADING212; DEGIRO; INTERACTIVE BROKERS; IBKR; CHARLES SCHWAB; SCHWAB; VANGUARD; E TRADE; ETRADE; WEBULL; CRYPTO COM; BYBIT; OKX; KUCOIN; BITSTAMP; BITPANDA; LUNO; MOOMOO; FUTU; TIGER BROKERS; STASHAWAY; FREETRADE; SCALABLE CAPITAL; TRADE REPUBLIC; ACORNS; BETTERMENT; WEALTHFRONT; TASTYTRADE; WEALTHSIMPLE; QUESTRADE; SHARESIES; COMMSEC; SELFWEALTH; HARGREAVES LANSDOWN; AJ BELL; NUTMEG; MONEYBOX; ZERODHA; GROWW; UPSTOX; ANGEL ONE; ANGEL BROKING; SMALLCASE; BITSO; INDODAX; COINDCX; WAZIRX; EASYEQUITIES; BITKUB
+tr: BOOKING COM; AIRBNB; EXPEDIA; HOTELS COM; AGODA; TRIVAGO; KAYAK; SKYSCANNER; TRIP COM; MARRIOTT; HILTON; HYATT; IHG; HOLIDAY INN; ACCOR; NOVOTEL; IBIS (?:HOTEL|BUDGET|STYLES); SOFITEL; MERCURE; RADISSON; FOUR SEASONS; SHERATON; WESTIN; RITZ CARLTON; BEST WESTERN; WYNDHAM; EMIRATES (?:AIRLINE|AIRLINES|SKYWARDS); QATAR (?:AIRWAYS|AIR); ETIHAD; TURKISH AIRLINES; LUFTHANSA; BRITISH AIRWAYS; AIR FRANCE; KLM; RYANAIR; EASYJET; WIZZ AIR; WIZZAIR; SINGAPORE AIRLINES; CATHAY PACIFIC; QANTAS; DELTA (?:AIR|AIRLINES); UNITED AIRLINES; AMERICAN AIRLINES; AA COM; SOUTHWEST (?:AIR|AIRLINES); JETBLUE; ALASKA AIR; AIR CANADA; WESTJET; IBERIA; VUELING; TAP AIR PORTUGAL; FLYTAP; SWISS INTL AIR; SWISS INTERNATIONAL; AUSTRIAN AIRLINES; FLYSAS; FINNAIR; AEGEAN; FLYPGS; PEGASUS (?:AIRLINES|HAVA); AIR INDIA; INDIGO AIRLINES; SPICEJET; AIRASIA; AIR ASIA; CEBU PACIFIC; PHILIPPINE AIRLINES; GARUDA; LION AIR; MALAYSIA AIRLINES; FLYSCOOT; JETSTAR; VIRGIN (?:AUSTRALIA|ATLANTIC); AIR NEW ZEALAND; LATAM (?:AIRLINES|AIR|AIRWAYS|COM); AVIANCA; AEROMEXICO; VOLARIS; VIVA AEROBUS; VIVAAEROBUS; AEROLINEAS ARGENTINAS; SOUTH AFRICAN AIRWAYS; FLYSAFAIR; KULULA; KENYA AIRWAYS; ETHIOPIAN AIRLINES; EGYPTAIR; ROYAL AIR MAROC; AIR ARABIA; FLYDUBAI; SAUDIA; FLYNAS; GULF AIR; OMAN AIR; HERTZ; AVIS (?:RENT|BUDGET|CAR|UK|RAC); EUROPCAR; SIXT; ENTERPRISE RENT A CAR; BUDGET RENT; ALAMO RENT; GETYOURGUIDE; VIATOR; KLOOK; HOSTELWORLD; VRBO; MAKEMYTRIP; GOIBIBO; CLEARTRIP; TRAVELOKA; TIKET COM; DESPEGAR; DECOLAR; EDREAMS; LASTMINUTE; OPODO; EUROSTAR; OYO ROOMS; OYO HOTELS
+c: VODAFONE; AIRTEL; MTN (?:AIRTIME|DATA|MOBILE|GROUP|NIGERIA|SA|UGANDA|GHANA); T MOBILE; LEBARA; LYCAMOBILE
+`,
+    US: `
+g: KROGER; SAFEWAY; PUBLIX; TRADER JOES?; ALBERTSONS; H-E-B; !HEB; MEIJER; WEGMANS; HY VEE; FOOD LION; STOP (?:&|AND) SHOP; GIANT EAGLE; GIANT FOOD; HARRIS TEETER; SPROUTS; FRED MEYER; RALPHS; VONS; JEWEL OSCO; WINCO; RALEYS; SAVE A LOT; PIGGLY WIGGLY; WINN DIXIE; !INGLES; KING SOOPERS; FOOD 4 LESS; STATER BROS; SAMS CLUB; SAMSCLUB; BJS WHOLESALE; WALMART; WAL MART; WM SUPERCENTER; WALMART SUPERCENTER; WAWA; FOOD CITY; SHOPRITE; ACME MARKETS; PRICE CHOPPER; SMART (?:&|AND) FINAL; GROCERY OUTLET; LUCKY SUPERMARKET; MARKET BASKET; HANNAFORD; DILLONS; TOM THUMB; RANDALLS
+s: WALMART COM; WALMART MARKETPLACE; !TARGET; TARGET COM; HOME DEPOT; THE HOME DEPOT; LOWES; BEST BUY; BESTBUY; MACYS; NORDSTROM; KOHLS; JCPENNEY; JC PENNEY; MARSHALLS; ROSS STORES; ROSS DRESS; BURLINGTON (?:STORES|COAT); OLD NAVY; BANANA REPUBLIC; WAYFAIR; CHEWY; PETSMART; PETCO; STAPLES; OFFICE DEPOT; OFFICEMAX; BED BATH; VICTORIAS SECRET; AMERICAN EAGLE; ABERCROMBIE; HOLLISTER; DICKS SPORTING; ACADEMY SPORTS; REI COOP; REI COM; !REI; JOANN; HOBBY LOBBY; GAMESTOP; MICRO CENTER; B (?:&|AND) H PHOTO; NEWEGG; SAKS; BLOOMINGDALES; NEIMAN MARCUS; DOLLAR TREE; DOLLAR GENERAL; FAMILY DOLLAR; FIVE BELOW; BIG LOTS; OLLIES; TRACTOR SUPPLY; HARBOR FREIGHT; KMART; ZAPPOS; QVC
+d: CHIPOTLE; PANERA; CHICK FIL A; SONIC DRIVE; ARBYS; JACK IN THE BOX; IN N OUT; WHATABURGER; OLIVE GARDEN; APPLEBEES; IHOP; DENNYS; CRACKER BARREL; RED LOBSTER; BUFFALO WILD WINGS; CHILIS; TEXAS ROADHOUSE; !SEAMLESS; SEAMLESSWEB; CARIBOU COFFEE; DUTCH BROS; JERSEY MIKES; JIMMY JOHNS; FIREHOUSE SUBS; RAISING CANES; ZAXBYS; CULVERS; SWEETGREEN; !CAVA; QDOBA; EL POLLO LOCO; DEL TACO; JAMBA; TST; TOAST TAB
+t: MTA; MTA NYCT; NYCT PAYGO; OMNY; !BART; CLIPPER CARD; WMATA; SMARTRIP; VENTRA; MBTA; SEPTA; METRA; NJ TRANSIT; !NJT; LIRR; AMTRAK; E ?ZPASS; SUNPASS; FASTRAK; TXTAG; PARKWHIZ; LAZ PARKING; SP PLUS; JIFFY LUBE; VALVOLINE; AUTOZONE; OREILLY AUTO; ADVANCE AUTO; PEP BOYS; NAPA AUTO; ELECTRIFY AMERICA; EVGO; SHEETZ; QUIKTRIP; RACETRAC; !SPEEDWAY; MARATHON PETRO; SUNOCO; VALERO; CITGO; PHILLIPS 66; CONOCO; !ARCO; ARCO AMPM; LOVES TRAVEL; PILOT TRAVEL; FLYING J; CASEYS GENERAL
+h: CVS; WALGREENS; RITE AID; DUANE READE; KAISER PERMANENTE; QUEST DIAGNOSTICS; LABCORP; ONE MEDICAL; TELADOC; GOODRX; ZOCDOC; HIMS; MINUTECLINIC; PELOTON; 1 800 CONTACTS
+en: !AMC; AMC THEATRES; AMC \\d{3,}; REGAL CINEMAS; !REGAL; CINEMARK; FANDANGO; SIRIUSXM; SIRIUS XM; !PANDORA; DAVE (?:&|AND) BUSTERS; TOPGOLF; SIX FLAGS; DISNEYLAND; WALT DISNEY WORLD; SEATGEEK; DIRECTV; DISH NETWORK; SLING TV
+c: VERIZON; VZW; AT & T; AT (?:&|AND) T MOBILITY; !ATT; ATT BILL; !SPRINT; COMCAST; XFINITY; !SPECTRUM; CHARTER SPECTRUM; COX COMM; CRICKET WIRELESS; MINT MOBILE; METROPCS; METRO BY T MOBILE; BOOST MOBILE; GOOGLE FI; US CELLULAR; FRONTIER COMM; CENTURYLINK; !OPTIMUM; VISIBLE WIRELESS; STRAIGHT TALK; TRACFONE
+u: CON ED; CONED; CONSOLIDATED EDISON; PG (?:&|AND) E; PGANDE; PACIFIC GAS; DUKE ENERGY; SOUTHERN CALIFORNIA EDISON; SO CAL EDISON; SDG (?:&|AND) E; DOMINION ENERGY; FLORIDA POWER; !FPL; XCEL ENERGY; NATIONAL GRID; EVERSOURCE; PSEG; !COMED; GEORGIA POWER; ENTERGY; AMEREN; DTE ENERGY; CONSUMERS ENERGY; !PECO; !BGE; AMERICAN ELECTRIC POWER; TXU ENERGY; RELIANT ENERGY; !SPIRE; CENTERPOINT; LADWP; AMERICAN WATER; WASTE MANAGEMENT; WM EZPAY; REPUBLIC SERVICES; SOCALGAS; PEOPLES GAS; NICOR GAS
+gv: IRS; USATAXPYMT; IRS TREAS; US TREASURY; DMV; TSA PRECHECK; TRAVEL STATE GOV; USCIS
+hs: TASKRABBIT; !ANGI; ANGIES LIST; HANDY COM; THUMBTACK; ROTO ROOTER; TERMINIX; ORKIN; MOLLY MAID; MERRY MAIDS; SERVPRO
+i: FIDELITY INVESTMENTS; FIDELITY BROKERAGE; STASH INVEST; M1 FINANCE; PUBLIC COM; SOFI INVEST
+`,
+    CA: `
+g: LOBLAWS; SOBEYS; NO FRILLS; NOFRILLS; !METRO; METRO INC; FOOD BASICS; FRESHCO; FARM BOY; SAVE ON FOODS; REAL CANADIAN SUPERSTORE; RCSS; T (?:&|AND) T SUPERMARKET; LONGOS; ZEHRS; FORTINOS; PROVIGO; !MAXI; IGA; FOODLAND; VALU MART; YOUR INDEPENDENT GROCER; INDEPENDENT GROCER; !SAQ; LCBO; BEER STORE; WALMART
+d: A & W; HARVEYS; SWISS CHALET; MARY BROWNS; BOSTON PIZZA; THE KEG; EAST SIDE MARIOS; SECOND CUP; PIZZA PIZZA; MONTANAS; KELSEYS; MR SUB; ST HUBERT; TIMS
+t: PETRO CANADA; PETROCAN; ULTRAMAR; !HUSKY; !PRESTO; !TTC; !STM; OC TRANSPO; TRANSLINK; COMPASS CARD; GO TRANSIT; VIA RAIL; UP EXPRESS; 407 ETR; !GREEN P; IMPARK; CANADIAN TIRE GAS; CO OP GAS
+h: SHOPPERS DRUG MART; SHOPPERS DRUG; !SDM; REXALL; JEAN COUTU; PHARMAPRIX; UNIPRIX; FAMILIPRIX; GOODLIFE FITNESS
+s: CANADIAN TIRE; HUDSONS BAY; !WINNERS; HOMESENSE; SPORT CHEK; MARKS WORK; !SIMONS; DOLLARAMA; LONDON DRUGS; !RONA; HOME HARDWARE; !INDIGO; INDIGO BOOKS; CHAPTERS INDIGO; !ROOTS; ARITZIA; CANADA COMPUTERS; !MEC; MOUNTAIN EQUIPMENT; GIANT TIGER; LEONS FURNITURE; !THE BRICK; BEST BUY
+c: !ROGERS; BELL CANADA; BELL MOBILITY; !BELL; TELUS; !FIDO; KOODO; VIRGIN PLUS; VIRGIN MOBILE; FREEDOM MOBILE; VIDEOTRON; SHAW (?:CABLE|COMM|DIRECT); PUBLIC MOBILE; CHATR; LUCKY MOBILE; COGECO
+u: HYDRO ONE; HYDRO QUEBEC; BC HYDRO; TORONTO HYDRO; ENBRIDGE; FORTISBC; FORTIS ALBERTA; !EPCOR; ENMAX; !ATCO; ALECTRA
+en: CINEPLEX; !CRAVE; CRAVE TV
+tr: PORTER AIRLINES; FLYPORTER; FLAIR AIRLINES; SUNWING; AIR TRANSAT
+gv: SERVICE ?ONTARIO; CANADA REVENUE; !CRA; SERVICE CANADA; SAAQ
+`,
+    GB: `
+g: TESCO; SAINSBURYS?; SAINSBURY S; JS ONLINE; ASDA; MORRISONS; WM MORRISON; WAITROSE; OCADO; !ICELAND; ICELAND FOODS; CO ?OP (?:FOOD|GROUP|RETAIL|STORES?); COOPERATIVE FOOD; CO OPERATIVE FOOD; M ?& ?S SIMPLY FOOD; M ?& ?S FOOD; !NISA; BUDGENS; COSTCUTTER; !ONE STOP; FARMFOODS; HERON FOODS; !BOOTHS; MAJESTIC WINE; GOPUFF; !ZAPP
+d: !PRET; CAFFE NERO; GREGGS; ITSU; PIZZA EXPRESS; PIZZAEXPRESS; ZIZZI; ASK ITALIAN; FRANKIE (?:&|AND) BENNYS; TOBY CARVERY; HARVESTER; BEEFEATER; WETHERSPOON; JD WETHERSPOON; GOURMET BURGER; YO SUSHI; !TORTILLA; DISHOOM; HONEST BURGERS; LEON RESTAURANTS; WASABI SUSHI; GAILS BAKERY; BILLS RESTAURANT; PIZZA HUT DELIVERY
+t: TFL; TRANSPORT FOR LONDON; TRAINLINE; NATIONAL RAIL; LNER; AVANTI WEST COAST; GWR; GREAT WESTERN RAIL; SOUTHERN RAIL; SOUTHEASTERN; NORTHERN (?:RAIL|TRAINS); SCOTRAIL; THAMESLINK; ARRIVA; STAGECOACH; FIRST BUS; RINGGO; JUSTPARK; NCP; DART CHARGE; ADDISON LEE; KWIK FIT; !HALFORDS; GREATER ANGLIA; C2C RAIL; ELIZABETH LINE; MERSEYRAIL
+h: !BOOTS; SUPERDRUG; LLOYDS PHARMACY; LLOYDSPHARMACY; THE GYM GROUP; GYM GROUP; DAVID LLOYD; NUFFIELD HEALTH; BANNATYNE; PHARMACY2U
+s: ARGOS; JOHN LEWIS; CURRYS; B (?:&|AND) Q; MARKS (?:&|AND) SPENCER; M & S; NEXT (?:RETAIL|PLC|DIRECTORY); !NEXT; SPORTS DIRECT; JD SPORTS; HOMEBASE; WICKES; SCREWFIX; TOOLSTATION; DUNELM; B & M (?:RETAIL|BARGAINS|STORES); POUNDLAND; WILKO; HOBBYCRAFT; WHSMITH; WH SMITH; WATERSTONES; DEBENHAMS; SELFRIDGES; HARRODS; HARVEY NICHOLS; !FRASERS; HOUSE OF FRASER; RIVER ISLAND; NEW LOOK; BOOHOO; PRETTYLITTLETHING; VERY CO UK; AO COM; AO RETAIL; ROBERT DYAS; MATALAN; PETS AT HOME; THE WORKS; CARD FACTORY; SCHUH
+tr: JET2; VIRGIN ATLANTIC; PREMIER INN; TRAVELODGE; LOGANAIR
+c: EE (?:LIMITED|LTD|MOBILE|BROADBAND); !EE; !O2; O2 UK; THREE (?:UK|MOBILE|CO UK); BT (?:GROUP|BROADBAND|PLC|MOBILE); BRITISH TELECOM; VIRGIN MEDIA; TALKTALK; GIFFGAFF; TESCO MOBILE; PLUSNET; HYPEROPTIC; COMMUNITY FIBRE; !SMARTY; ID MOBILE; SKY MOBILE; SKY BROADBAND
+u: BRITISH GAS; OCTOPUS ENERGY; EDF ENERGY; EON NEXT; E ON (?:ENERGY|NEXT|UK); OVO ENERGY; SCOTTISH POWER; !SSE; THAMES WATER; SEVERN TRENT; ANGLIAN WATER; UNITED UTILITIES; YORKSHIRE WATER; SOUTHERN WATER; WESSEX WATER; SOUTH EAST WATER; AFFINITY WATER; NORTHUMBRIAN WATER; WELSH WATER; DWR CYMRU; SCOTTISH WATER; SHELL ENERGY; UTILITA; SO ENERGY
+gv: HMRC; DVLA; COUNCIL TAX; TV LICEN[CS]E; TV LICENSING; HM PASSPORT; GOV UK
+en: ODEON; VUE CINEMA; VUE ENTERTAINMENT; CINEWORLD; EVERYMAN CINEMA; PICTUREHOUSE; NOW TV; NOWTV; BRITBOX; SKY (?:DIGITAL|UK|SUBSCRIPTION|TV|STORE); !SKY; SEETICKETS; SEE TICKETS
+ch: BRITISH RED CROSS; !MACMILLAN; BRITISH HEART; RNLI; NSPCC; RSPCA; BARNARDOS; MIND CHARITY
+`,
+    IE: `
+g: TESCO; DUNNES; DUNNES STORES; SUPERVALU; !CENTRA; !MACE; LIDL; ALDI; SPAR
+t: APPLEGREEN; MAXOL; !TOPAZ; CIRCLE K; LEAP CARD; IRISH RAIL; IARNROD EIREANN; DUBLIN BUS; !LUAS; BUS EIREANN; EFLOW; FREENOW
+d: SUPERMACS; BUTLERS CHOCOLATE; INSOMNIA COFFEE; BEWLEYS; ABRAKEBABRA
+h: !BOOTS; LLOYDS PHARMACY; HICKEYS PHARMACY; !VHI; LAYA HEALTHCARE; IRISH LIFE HEALTH
+s: PENNEYS; BROWN THOMAS; ARNOTTS; HARVEY NORMAN; DID ELECTRICAL; WOODIES; EZ LIVING; DEALZ; MR PRICE
+tr: AER LINGUS; RYANAIR; IRISH FERRIES; STENA LINE
+c: !EIR; EIR MOBILE; !THREE; VIRGIN MEDIA; !GOMO
+u: ELECTRIC IRELAND; BORD GAIS; SSE AIRTRICITY; !ENERGIA; UISCE EIREANN; IRISH WATER; FLOGAS; PANDA POWER
+gv: MOTOR TAX; REVENUE COMMISSIONERS
+en: IMC CINEMAS; OMNIPLEX; !SKY
+`,
+    FR: `
+g: E LECLERC; LECLERC; INTERMARCHE; MONOPRIX; FRANPRIX; !CASINO; CASINO SUPERMARCHE; GEANT CASINO; !PICARD; SYSTEME U; SUPER U; HYPER U; U EXPRESS; !CORA; GRAND FRAIS; BIOCOOP; NATURALIA; LA VIE CLAIRE; CARREFOUR (?:CITY|MARKET|EXPRESS|CONTACT); NICOLAS VINS
+d: MCDO; !QUICK; QUICK RESTAURANT; BUFFALO GRILL; COURTEPAILLE; HIPPOPOTAMUS; BRIOCHE DOREE; COLUMBUS CAFE; PAUL (?:BOULANGERIE|SAS); !PAUL; LA MIE CALINE; MARIE BLACHERE; POMME DE PAIN; FLUNCH; LEON DE BRUXELLES; DEL ARTE; BIG FERNAND; O TACOS; FRICHTI
+t: SNCF; OUIGO; TGV INOUI; RATP; NAVIGO; !TOTAL; VINCI AUTOROUTES; SANEF; APRR; AREA AUTOROUTE; ESCOTA; ASF AUTOROUTE; G7 TAXI; !G7; TRANSDEV; KEOLIS; MARCEL CAB; !LE CAB; INDIGO PARK; SAEMES; EFFIA
+h: DOCTOLIB; MULTIPHARMA; !KRYS; ALAIN AFFLELOU; OPTIC 2000; L APPART FITNESS; FITNESS PARK; NEONESS
+s: FNAC; DARTY; LEROY MERLIN; CASTORAMA; !BOULANGER; KIABI; CDISCOUNT; VINTED; GALERIES LAFAYETTE; !PRINTEMPS; PRINTEMPS HAUSSMANN; CELIO; !ACTION; LA REDOUTE; BRICO DEPOT; BRICORAMA; MR BRICOLAGE; !GIFI; !LA HALLE; !JULES; !CULTURA; BOULANGER COM; MAISONS DU MONDE; BUT (?:SAS|COM); CONFORAMA; GO SPORT; INTERSPORT; JOUE CLUB; KING JOUET; NATURE (?:&|ET) DECOUVERTES; LA GRANDE RECRE; ELECTRO DEPOT; BOULANGER SA
+tr: TRANSAVIA; SOFITEL; CLUB MED; PIERRE (?:&|ET) VACANCES; CENTER PARCS; CORSAIR; FRENCH BEE
+c: ORANGE (?:SA|FRANCE|MOBILE); !ORANGE; SFR; BOUYGUES TELECOM; BOUYGTEL; FREE (?:MOBILE|TELECOM); FREE SAS; !FREE; SOSH; RED BY SFR
+u: EDF; ENGIE; VEOLIA; EAU DE PARIS; SUEZ EAU; TOTALENERGIES ELECTRICITE
+en: CANAL ?\\+; CANALPLUS; UGC; PATHE; GAUMONT; MOLOTOV; MK2; CGR CINEMAS; FNAC SPECTACLES
+p: YVES ROCHER; NOCIBE; MARIONNAUD; SEPHORA; JEAN LOUIS DAVID; FRANCK PROVOST
+gv: DGFIP; IMPOTS GOUV; !ANTS; AMENDES GOUV; TRESOR PUBLIC; URSSAF
+e: OPENCLASSROOMS
+`,
+    DE: `
+g: REWE; EDEKA; ALDI (?:NORD|SUED|SUD); KAUFLAND; PENNY (?:MARKT)?; !NORMA; !GLOBUS; TEGUT; DENNS BIOMARKT; ALNATURA; BIO COMPANY; MARKTKAUF; NETTO MARKEN DISCOUNT; !E CENTER; KNUSPR
+d: BACKWERK; VAPIANO; NORDSEE; KAMPS; BACKFACTORY; DITSCH; L OSTERIA; BLOCK HOUSE; HANS IM GLUCK; HANS IM GLUECK; DEAN (?:&|AND) DAVID; JIM BLOCK; BACK FACTORY; WIENERWALD
+t: DB (?:VERTRIEB|BAHN|FERNVERKEHR|REGIO|NAVIGATOR); DEUTSCHE BAHN; BAHN DE; !BVG; !MVG; !HVV; !RMV; !KVB; !VRR; !VVS; !ARAL; ARAL STATION; JET (?:TANKSTELLE|DANKT); STAR TANKSTELLE; !AVIA; HEM TANKSTELLE; SHARE NOW; MILES MOBILITY; TIER MOBILITY; DEUTSCHLANDTICKET; !ADAC
+h: DOCMORRIS; SHOP APOTHEKE; CLEVER FIT; FITX; URBAN SPORTS CLUB; FIELMANN; APOLLO OPTIK; MEDPEX
+p: DM (?:DROGERIE|MARKT); MULLER DROGERIE; MUELLER DROGERIE; !MULLER; !MUELLER; BUDNI
+s: MEDIA ?MARKT; !SATURN; SATURN ELECTRO; OTTO (?:GMBH|DE|VERSAND); !OBI; OBI BAUMARKT; HORNBACH; !BAUHAUS; TOOM BAUMARKT; HAGEBAU; !GALERIA; GALERIA KAUFHOF; KARSTADT; DEICHMANN; PEEK (?:&|AND) CLOPPENBURG; !ACTION; !TEDI; KIK TEXTIL; !KIK; !WOOLWORTH; THALIA; HUGENDUBEL; CONRAD ELECTRONIC; CYBERPORT; NOTEBOOKSBILLIGER; TCHIBO; DEPOT GMBH; JYSK; !POCO; XXXLUTZ; ROLLER GMBH; SPORTSCHECK; ABOUT YOU; EXPERT TECHNOMARKT
+tr: EUROWINGS; !CONDOR; CONDOR FLUGDIENST; !TUI; HOLIDAYCHECK; CHECK24 REISEN
+c: O2 (?:GERMANY|DE|TELEFONICA); !O2; 1 ?& ?1 (?:TELECOM|INTERNET|VERSATEL); 1UND1; CONGSTAR; ALDI TALK; FREENET; WINSIM; SIMYO; TELEFONICA GERMANY; VODAFONE KABEL; PYUR
+u: STADTWERKE; E ON (?:ENERGIE|SE|VERTRIEB|ENERGY); EON ENERGIE; VATTENFALL; ENBW; RWE; !EWE; YELLO; LICHTBLICK; NATURSTROM; TIBBER; GASAG; MAINOVA; !SWM
+gv: RUNDFUNK; ARD ZDF; BEITRAGSSERVICE; FINANZAMT; BUERGERAMT; BURGERAMT; BUNDESKASSE; STADTKASSE
+en: CINEMAXX; CINESTAR; UCI KINOWELT; SKY DEUTSCHLAND; RTL ?\\+; JOYN; EVENTIM
+i: SCALABLE; FLATEX; SMARTBROKER; JUSTTRADE
+`,
+    ES: `
+g: MERCADONA; !DIA; DIA %; SUPERMERCADOS DIA; EROSKI; ALCAMPO; !CONSUM; HIPERCOR; SUPERCOR; BONAREA; BON PREU; AHORRAMAS; CONDIS; CAPRABO; GADIS; FROIZ; COVIRAN; BM SUPERMERCADOS; LA SIRENA; EL CORTE INGLES SUPERMERCADO; SUPERSOL; MAS Y MAS
+d: TELEPIZZA; 100 MONTADITOS; RODILLA; VIPS; GINOS; FOSTERS HOLLYWOOD; THE GOOD BURGER; !TGB; GOIKO; LIZARRAN; LA TAGLIATELLA; !UDON; FAST GOOD; PANS (?:&|AND) COMPANY
+t: RENFE; METRO (?:DE )?MADRID; METRO DE BARCELONA; !TMB; !EMT; PETRONOR; BALLENOIL; PLENOIL; !ALSA; !AUTOPISTAS; !VIA T; BICIMAD; !BICING; !FGC
+h: SANITAS; ADESLAS; ALTAFIT; VIVAGYM; DREAMFIT; GENERAL OPTICA; MULTIOPTICAS; FARMACIA
+s: EL CORTE INGLES; !MANGO; MANGO COM; BRICOMART; BRICO DEPOT; !SPRINGFIELD; CORTEFIEL; LEFTIES; PCCOMPONENTES; WORTEN; MIRAVIA; TIGER STORES; CASA DEL LIBRO; !SFERA; TENDAM; LEROY MERLIN; FNAC
+p: PRIMOR; DRUNI; KIKO
+tr: AIR EUROPA; VOLOTEA; BINTER; MELIA; NH HOTEL; BARCELO; PARADORES; !RIU; RIU HOTELS; LEVEL AIRLINE
+c: MOVISTAR; !ORANGE; YOIGO; MASMOVIL; MASORANGE; !DIGI; DIGI MOBIL; PEPEPHONE; !LOWI; JAZZTEL; FINETWORK
+u: IBERDROLA; ENDESA; NATURGY; HOLALUZ; CANAL DE ISABEL II; AGBAR; AGUAS DE BARCELONA; AQUALIA; REPSOL LUZ
+gv: AGENCIA TRIBUTARIA; AEAT; !DGT; DGT MULTAS; SEGURIDAD SOCIAL; AYUNTAMIENTO
+en: CINESA; YELMO; KINEPOLIS; MOVISTAR ?\\+; MOVISTAR PLUS
+i: MYINVESTOR; INDEXA CAPITAL
+`,
+    IT: `
+g: ESSELUNGA; !COOP; COOP ITALIA; IPERCOOP; CONAD; !PAM; PAM PANORAMA; EUROSPIN; MD DISCOUNT; MD SPA; !IPER; !BENNET; TIGROS; DESPAR; !SIGMA; !CRAI; !UNES; TODIS; INS MERCATO; NATURASI; !PENNY; CARREFOUR MARKET; !FAMILA; LIDL ITALIA; ALDI ITALIA; IPERAL; PRIX QUALITY
+d: AUTOGRILL; OLD WILD WEST; SPONTINI; !CAMST; CHEF EXPRESS; ROADHOUSE RESTAURANT; RISTORANTE; !GROM; PIADINERIA
+t: TRENITALIA; ITALO (?:TRENO|SPA|NTV); !ITALO; ATM MILANO; ATAC ROMA; !ATAC; !ENI; ENI STATION; ENI SPA; IP (?:STATION|STAZIONE); ITALIANA PETROLI; TAMOIL; AUTOSTRADE; TELEPASS; ITABUS; GTT TORINO; !TPER; MYCICERO; FRECCIAROSSA
+h: FARMACIA; FARMACIE COMUNALI; GRANDVISION; SALMOIRAGHI
+s: UNIEURO; MEDIAWORLD; EURONICS; !OVS; RINASCENTE; BRICOMAN; BRICO IO; CALZEDONIA; INTIMISSIMI; TEZENIS; YAMAMAY; BENETTON; UNITED COLORS; FELTRINELLI; MONDADORI; COIN CASA; COIN SPA; LEROY MERLIN; MEDIA WORLD; !TRONY; EXPERT ITALIA; ZARA HOME; GIOCHI PREZIOSI; PIAZZA ITALIA; TERRANOVA
+p: TIGOTA; ACQUA (?:&|E) SAPONE; KIKO; PINALLI; DOUGLAS ITALIA
+tr: ITA AIRWAYS; ALITALIA; NEOS AIR
+c: !TIM; TIM SPA; TELECOM ITALIA; WINDTRE; WIND TRE; !ILIAD; ILIAD ITALIA; FASTWEB; HO MOBILE; KENA MOBILE; VERY MOBILE; POSTEMOBILE; POSTE MOBILE
+u: ENEL; HERA COMM; !HERA; !A2A; !IREN; IREN MERCATO; !ACEA; !EDISON; EDISON ENERGIA; SORGENIA; ENI PLENITUDE; PLENITUDE; SERVIZIO ELETTRICO
+gv: AGENZIA (?:DELLE )?ENTRATE; PAGOPA; AGENZIA ENTRATE
+en: THE SPACE CINEMA; UCI CINEMAS; SKY ITALIA; TIMVISION; NOW TV ITALIA; INFINITY TV
+`,
+    NL: `
+g: ALBERT HEIJN; AH TO GO; !AH; !JUMBO; JUMBO SUPERMARKT; !PLUS; PLUS SUPERMARKT; DIRK (?:VAN DEN BROEK|VD BROEK); !DIRK; DEKAMARKT; VOMAR; HOOGVLIET; !COOP; COOP SUPERMARKT; !PICNIC; EKOPLAZA; !CRISP APP; GALL (?:&|AND) GALL; JAN LINDERS; POIESZ; BONI SUPERMARKT; NETTO NL
+d: FEBO; NEW YORK PIZZA; SMULLERS; !LA PLACE; KWALITARIA; BURGERMEESTER; BAGELS (?:&|AND) BEANS
+t: NS (?:GROEP|REIZIGERS|INTERNATIONAL|NL); NS \\d{3,}; GVB; RET ROTTERDAM; !RET; !HTM; OV CHIPKAART; TRANSLINK SYSTEMS; CONNEXXION; QBUZZ; TINQ; !TANGO; YELLOWBRICK; ARRIVA; SWAPFIETS; OV FIETS
+h: SPORTCITY; !PEARLE; HANS ANDERS; APOTHEEK
+p: KRUIDVAT; !ETOS; ETOS BV; TREKPLEISTER; DA DROGIST
+s: HEMA; BOL COM; !BOL; COOLBLUE; !ACTION; ACTION NEDERLAND; GAMMA BOUWMARKT; !GAMMA; !PRAXIS; PRAXIS BOUWMARKT; KARWEI; BLOKKER; WIBRA; ZEEMAN; BIJENKORF; WEHKAMP; INTERTOYS; !XENOS; !BRUNA; MEDIAMARKT; LEEN BAKKER; BEDDENREUS; KWANTUM; PRIMERA; AMAZON NL
+tr: TRANSAVIA; CORENDON; SUNWEB
+c: KPN; ZIGGO; ODIDO; TELE2; !SIMPEL; YOUFONE; LEBARA; HOLLANDSNIEUWE; DELTA FIBER
+u: ENECO; ESSENT; GREENCHOICE; BUDGET ENERGIE; VANDEBRON; WATERNET; VITENS; EVIDES; BRABANT WATER; !PWN; OXXIO; ENERGIEDIRECT; FRANK ENERGIE
+gv: BELASTINGDIENST; CJIB; GEMEENTE; RDW; WATERSCHAP
+en: PATHE; !VUE; KINEPOLIS; VIDEOLAND; NLZIET
+i: !BUX; MEESMAN; BRAND NEW DAY; BITVAVO
+`,
+    BE: `
+g: DELHAIZE; COLRUYT; !OKAY; OKAY COMPACT; BIO PLANET; INTERMARCHE; !CORA; !MATCH; SMATCH; PROXY DELHAIZE; AD DELHAIZE; !JUMBO; ALBERT HEIJN
+d: !QUICK; !PANOS; EXKI; LE PAIN QUOTIDIEN; TAKEAWAY COM
+t: SNCB; NMBS; STIB; MIVB; DE LIJN; !TEC; LUKOIL; DATS 24; !TOTAL
+p: KRUIDVAT; !ETOS
+s: HEMA; !ACTION; !BRICO; BRICO PLANIT; !GAMMA; MEDIAMARKT; KREFEL; VANDEN BORRE; FNAC; COOLBLUE; BOL COM; !ZEEMAN; TORFS; STANDAARD BOEKHANDEL
+c: PROXIMUS; !ORANGE; ORANGE BELGIUM; TELENET; !SCARLET; BASE MOBILE
+u: ENGIE ELECTRABEL; ELECTRABEL; !LUMINUS; ENECO; VIVAQUA; FLUVIUS; DE WATERGROEP; !ENGIE
+tr: BRUSSELS AIRLINES; TUI FLY
+en: KINEPOLIS; UGC
+gv: FOD FINANCIEN; SPF FINANCES; MYMINFIN
+`,
+    CH: `
+g: MIGROS; !COOP; COOP PRONTO; DENNER; ALDI SUISSE; !VOLG; MIGROLINO; AVEC SHOP; !LANDI; GLOBUS DELICATESSA
+t: SBB (?:CFF|MOBILE|TICKET); SBB CFF FFS; !SBB; ZVV; !BLS; POSTAUTO; POSTBUS; AGROLA; TAMOIL; !AVIA; SOCAR; MOBILITY CARSHARING
+h: AMAVITA; !SUN STORE; SUNSTORE; TOPPHARM
+s: !MANOR; GALAXUS; DIGITEC; INTERDISCOUNT; !JUMBO; JUMBO MARKT; !BAUHAUS; !OBI; !FUST; !MICASA; !PFISTER; !JELMOLI; ORELL FUSSLI; !BRACK
+c: SWISSCOM; SALT (?:MOBILE|COMMUNICATIONS); !SALT; SUNRISE (?:UPC|COMMUNICATIONS|GMBH|MOBILE); !WINGO; !YALLO
+u: !EWZ; !BKW; !IWB; SIG GENEVE; ROMANDE ENERGIE; !AXPO; !CKW
+tr: SWISS (?:INTERNATIONAL|INTL)? AIR ?LINES; SWISSAIR; EDELWEISS AIR
+en: PATHE; KITAG; BLUE ENTERTAINMENT
+gv: STEUERVERWALTUNG; SERAFE
+`,
+    PT: `
+g: !CONTINENTE; PINGO DOCE; MINIPRECO; INTERMARCHE; MERCADONA; !AUCHAN; FROIZ
+t: CP COMBOIOS; COMBOIOS DE PORTUGAL; METRO (?:LISBOA|DO PORTO); METROPOLITANO DE LISBOA; !CARRIS; VIA VERDE; !PRIO; PRIO ENERGY; GALP; REPSOL
+h: !WELLS; WELLS PT
+s: WORTEN; FNAC; RADIO POPULAR; EL CORTE INGLES; SPORT ZONE; LEROY MERLIN; BERTRAND LIVREIROS; !SONAE
+c: !MEO; !NOS; NOS COMUNICACOES; !NOWO; DIGI PORTUGAL
+u: !EDP; EDP COMERCIAL; !EPAL; GALP GAS; ENDESA
+tr: TAP (?:AIR|PORTUGAL)
+gv: PORTAL DAS FINANCAS; AUTORIDADE TRIBUTARIA
+`,
+    TR: `
+g: !BIM; BIM BIRLESIK; A101; SOK MARKET; SOK MARKETLER; CARREFOURSA; MACROCENTER; ISTEGELSIN; HAKMAR; FILE MARKET; !METRO; MIGROS JET
+d: GETIR YEMEK; TRENDYOL YEMEK; SIMIT SARAYI; KOFTECI YUSUF; !MADO; KAHVE DUNYASI; BURGER KING TURKIYE; TAVUK DUNYASI; USTA DONERCI
+t: OPET; PETROL OFISI; !PO; AYTEMIZ; ISTANBULKART; BITAKSI; !MARTI; MARTI SCOOTER; !HGS; TCDD; TCDD TASIMACILIK; OBILET; BELBIM
+s: TRENDYOL; HEPSIBURADA; !N11; LC WAIKIKI; !DEFACTO; !KOTON; !MAVI; MAVI GIYIM; TEKNOSA; VATAN BILGISAYAR; KOCTAS; !BOYNER; ENGLISH HOME; MADAME COCO; !FLO; CICEKSEPETI; AMAZON TR
+p: !GRATIS; GRATIS MAGAZA; EVEN (?:&|AND) GOOD
+tr: !THY; TURK HAVA YOLLARI; !PEGASUS; SUNEXPRESS; !AJET
+c: TURKCELL; TURK TELEKOM; TTNET; SUPERONLINE; VODAFONE TR
+u: ENERJISA; IGDAS; !ISKI; CK ENERJI; CK BOGAZICI; !ASKI; BASKENTGAZ
+gv: GELIR IDARESI; !GIB; E DEVLET
+en: CINEMAXIMUM; BLUTV; EXXEN; BIUBIU
+i: MIDAS MENKUL
+`,
+    BR: `
+g: PAO DE ACUCAR; !ASSAI; ATACADAO; !EXTRA; EXTRA HIPER; !DIA; ZAFFARI; ST MARCHE; !SONDA; SONDA SUPERMERCADO; !GUANABARA; SAVEGNAGO; CONDOR SUPER; SUPERMERCADO BH; MAMBO SUPERMERCADO; OXXO
+d: HABIBS; !BOBS; BOBS LANCHES; GIRAFFAS; !SPOLETO; CHINA IN BOX; COCO BAMBU; !MADERO; !RAGAZZO; AMERICAN BURGER
+t: 99 (?:TAXI|APP|POP|TECNOLOGIA); IPIRANGA; POSTO IPIRANGA; BR MANIA; !RAIZEN; SEM PARAR; CONECTCAR; VELOE; METRO SAO PAULO; METRO SP; CPTM; BILHETE UNICO; ESTAPAR; ZONA AZUL
+h: DROGASIL; DROGA RAIA; !RAIA; PAGUE MENOS; DROGARIA SAO PAULO; PANVEL; DROGARIAS PACHECO
+s: MERCADO ?LIVRE; MAGAZINE LUIZA; MAGALU; AMERICANAS; !RENNER; RIACHUELO; CASAS BAHIA; NETSHOES; !CENTAURO; TOK (?:&|AND) STOK; CAMICADO; KALUNGA; FAST SHOP; PONTO FRIO; SHOPEE BR; LEROY MERLIN
+p: BOTICARIO; O BOTICARIO; !NATURA; NATURA COSMETICOS; !EUDORA; QUEM DISSE BERENICE
+tr: GOL LINHAS; VOEGOL; !GOL; AZUL LINHAS; VOEAZUL; !AZUL; 123MILHAS; !HURB
+c: !VIVO; TELEFONICA BRASIL; !CLARO; !TIM; TIM CELULAR; !OI; OI FIBRA; OI MOVEL
+u: SABESP; CEMIG; COPEL; LIGHT (?:SA|SERVICOS); CPFL; ELETROPAULO; COMGAS; SANEPAR; CEDAE; NEOENERGIA; COELBA; CELPE; EQUATORIAL ENERGIA; ENEL
+gv: DETRAN; RECEITA FEDERAL; DARF; IPVA
+en: GLOBOPLAY; CINEMARK; CINEPOLIS; INGRESSO COM; SYMPLA; TELECINE
+i: XP INVESTIMENTOS; RICO INVESTIMENTOS; NUINVEST; CLEAR CORRETORA
+`,
+    MX: `
+g: OXXO; SORIANA; CHEDRAUI; LA COMER; BODEGA AURRERA; SUPERAMA; !SAMS; CITY MARKET; !FRESKO; !HEB; CASA LEY; CIRCULO K; WALMART; SMART (?:&|AND) FINAL
+d: VIPS; !TOKS; ITALIANNIS; EL PORTON; SANBORNS CAFE; POTZOLLCALLI; FINCA SANTA VERACRUZ; CAFEBRERIA; LA ESQUINA DE LOS CAFES; EL FAROLITO
+t: PEMEX; OXXO GAS; !G500; HIDROSINA; !ORSAN; !IAVE; TELEVIA; PASE URBANO; !ADO; ADO AUTOBUSES; !ETN; METRO CDMX; !METROBUS; ECOBICI; CAPUFE
+h: FARMACIAS GUADALAJARA; FARMACIAS DEL AHORRO; FARMACIAS SIMILARES; FARMACIAS SAN PABLO; !BENAVIDES; !SPORT CITY
+s: !LIVERPOOL; LIVERPOOL MX; COPPEL; MERCADO ?LIBRE; PALACIO DE HIERRO; !SUBURBIA; !ELEKTRA; !SEARS; SANBORNS; OFFICE DEPOT; CLAROSHOP
+c: TELCEL; TELMEX; !CLARO; AT & T MEXICO; MOVISTAR; IZZI; TOTALPLAY; MEGACABLE; !BAIT
+u: !CFE; CFE SUMINISTRADOR; NATURGY
+gv: !SAT; SAT PAGO; SAT MX; SERVICIO DE ADMINISTRACION TRIBUTARIA
+en: CINEPOLIS; CINEMEX
+i: !GBM; CETES ?DIRECTO; !HAPI
+`,
+    CO: `
+g: !EXITO; ALMACENES EXITO; CARULLA; !OLIMPICA; !D1; TIENDAS D1; !ARA; TIENDAS ARA; JUSTO (?:&|Y) BUENO; !JUMBO; SURTIMAX; !ISIMO; !METRO
+d: CREPES (?:&|AND) WAFFLES; !EL CORRAL; !FRISBY; JUAN VALDEZ; !OMA; !TOSTAO; DOMICILIOS COM; FRESCOS Y CALIENTES
+t: TERPEL; !PRIMAX; !BIOMAX; TRANSMILENIO; METRO DE MEDELLIN; !PEAJE
+h: CRUZ VERDE; FARMATODO; LOCATEL
+s: FALABELLA; ALKOSTO; KTRONIX; HOMECENTER; !PANAMERICANA; ARTURO CALLE; MERCADO ?LIBRE; LINIO
+tr: !WINGO; FLY WINGO
+c: !CLARO; MOVISTAR; !TIGO; !WOM; !ETB
+u: !EPM; CODENSA; ENEL COLOMBIA; !VANTI; ACUEDUCTO; GAS NATURAL
+gv: !DIAN; !SIMIT
+en: CINE COLOMBIA; PROCINAL; CINEMARK
+`,
+    AR: `
+g: !COTO; !DIA; !JUMBO; !DISCO; !VEA; !CHANGOMAS; !LA ANONIMA; VITAL MAYORISTA
+d: !MOSTAZA; HAVANNA; CAFE MARTINEZ; !FREDDO; !GRIDO
+t: YPF; !AXION; !SUBE; CARGA SUBE; AUTOPISTAS DEL SOL; !AUSA
+h: FARMACITY; !DR AHORRO
+s: MERCADO ?LIBRE; FRAVEGA; GARBARINO; MUSIMUNDO; FALABELLA; !EASY; SODIMAC
+tr: FLYBONDI; JETSMART
+c: !PERSONAL; TELECOM PERSONAL; !CLARO; MOVISTAR; TELECENTRO; FIBERTEL
+u: EDENOR; EDESUR; METROGAS; AYSA; NATURGY
+gv: !AFIP; !ARCA
+en: HOYTS; CINEMARK
+i: INVERTIRONLINE; BALANZ
+`,
+    IN: `
+g: BIGBASKET; BIG BASKET; DMART; D MART; AVENUE SUPERMARTS; RELIANCE (?:FRESH|SMART|MART|RETAIL); SMART BAZAAR; BLINKIT; GROFERS; ZEPTO; INSTAMART; SWIGGY INSTAMART; MORE (?:RETAIL|SUPERMARKET); !SPENCERS; NATURES BASKET; STAR BAZAAR; JIOMART; BB DAILY; BBNOW; METRO CASH (?:&|AND) CARRY; LULU HYPER
+d: HALDIRAMS; CAFE COFFEE DAY; !CCD; CHAAYOS; BARBEQUE NATION; THIRD WAVE COFFEE; BLUE TOKAI; BEHROUZ; FAASOS; REBEL FOODS; EATSURE; BIKANERVALA; SAGAR RATNA; WOW MOMO
+t: !OLA; !RAPIDO; RAPIDO BIKE; IOCL; INDIAN OIL; HPCL; HP PETROL; HINDUSTAN PETROLEUM; BPCL; BHARAT PETROLEUM; NAYARA; FASTAG; NHAI; DELHI METRO; DMRC; BMRCL; NAMMA METRO; MUMBAI METRO; REDBUS; ABHIBUS; !YULU; BLUSMART; PARK ?PLUS
+h: APOLLO PHARMACY; !APOLLO; APOLLO HOSPITALS; PHARMEASY; 1MG; TATA 1MG; NETMEDS; !MEDPLUS; PRACTO; !FORTIS; MAX HEALTHCARE; MANIPAL HOSPITAL; CULT FIT; CULTFIT; CURE FIT; CUREFIT; HEALTHIFYME; LENSKART
+s: FLIPKART; MYNTRA; AJIO; MEESHO; CROMA; RELIANCE (?:DIGITAL|TRENDS); VIJAY SALES; TATA CLIQ; SHOPPERS STOP; !LIFESTYLE; PANTALOONS; !WESTSIDE; MAX FASHION; FIRSTCRY; PEPPERFRY; URBAN LADDER; TANISHQ
+p: NYKAA; PURPLLE; MAMAEARTH
+tr: IRCTC; YATRA; !INDIGO; 6E INDIGO; INTERGLOBE AVIATION; AKASA AIR; VISTARA; IXIGO
+c: JIO; RELIANCE JIO; VI (?:POSTPAID|PREPAID|RECHARGE); VODAFONE IDEA; BSNL; ACT FIBERNET; HATHWAY
+u: BESCOM; TATA POWER; ADANI ELECTRICITY; MSEDCL; MAHADISCOM; BSES; TORRENT POWER; MAHANAGAR GAS; !MGL; INDRAPRASTHA GAS; !IGL; BWSSB; DELHI JAL BOARD; TANGEDCO; TNEB; CESC; KSEB
+gv: INCOME ?TAX; PASSPORT SEVA; PARIVAHAN
+en: BOOKMYSHOW; HOTSTAR; JIOHOTSTAR; !PVR; !INOX; SONYLIV; ZEE5; JIOCINEMA; GAANA; TATA PLAY
+e: VEDANTU; PHYSICS ?WALLAH; UPGRAD; SIMPLILEARN
+i: KUVERA; PAYTM MONEY
+hs: URBAN COMPANY; URBANCLAP
+`,
+    PK: `
+g: !IMTIAZ; IMTIAZ SUPER; !AL FATAH; !CHASE UP; !NAHEED; NAHEED SUPERMARKET; HASH MART; !GREEN VALLEY
+d: CHEEZIOUS; !OPTP; SAVOUR FOODS; BUNDU KHAN; KABABJEES; !HOWDY; JOHNNY (?:&|AND) JUGNU
+t: !PSO; PAKISTAN STATE OIL; TOTAL PARCO; ATTOCK PETROLEUM; BYKEA; M ?TAG; HASCOL
+h: DAWAAI; SEHAT KAHANI; SHAUKAT KHANUM; !SERVAID; !D WATSON; OLADOC; !MARHAM
+s: DARAZ; KHAADI; GUL AHMED; !SAPPHIRE; !OUTFITTERS; !LIMELIGHT; ALKARAM; BONANZA SATRANGI; SANA SAFINAZ; !J DOT; JUNAID JAMSHED
+tr: !PIA; PAKISTAN INTERNATIONAL AIRLINES; AIRBLUE; SERENE AIR; AIRSIAL; FLY JINNAH
+c: !JAZZ; JAZZ CASH; TELENOR; ZONG; UFONE; PTCL; NAYATEL; STORMFIBER
+u: !K ?ELECTRIC; !LESCO; !IESCO; !MEPCO; !FESCO; !PESCO; !GEPCO; !HESCO; SSGC; SUI SOUTHERN; SNGPL; SUI NORTHERN; !KWSC; !WASA
+gv: !FBR; NADRA; EXCISE (?:&|AND) TAXATION
+en: CINEPAX; NUEPLEX; TAPMAD
+`,
+    ID: `
+g: INDOMARET; ALFAMART; ALFAMIDI; SUPERINDO; HYPERMART; LOTTE MART; !TRANSMART; !GIANT; RANCH MARKET; GRAND LUCKY; SAYURBOX; HERO SUPERMARKET; !FOODHALL
+d: KOPI KENANGAN; JANJI JIWA; FORE COFFEE; !SOLARIA; HOKBEN; HOKA HOKA BENTO; !RICHEESE; MIXUE; J ?CO DONUTS; BAKMI GM; ES TEH INDONESIA; KOPI KULO; PADANG SEDERHANA
+t: BP AKR; !KAI; KERETA API; !KRL; COMMUTER LINE; KAI COMMUTER; TRANSJAKARTA; MRT JAKARTA; JASA MARGA; !BLUEBIRD; !BLUE BIRD; !MAXIM
+h: KIMIA FARMA; APOTEK K ?24; !CENTURY; HALODOC; ALODOKTER; SILOAM; MITRA KELUARGA; BPJS
+s: TOKOPEDIA; SHOPEE; LAZADA; BUKALAPAK; BLIBLI; !INFORMA; !MATAHARI; ERAFONE; ZALORA
+p: SOCIOLLA
+tr: CITILINK; BATIK AIR; TIKET COM; PEGIPEGI
+c: TELKOMSEL; INDOSAT; !IM3; XL AXIATA; XL (?:PREPAID|POSTPAID); SMARTFREN; INDIHOME; BIZNET; !FIRST MEDIA; !BY U
+u: !PLN; PLN PREPAID; TOKEN PLN; !PDAM; PDAM JAYA; !PGN
+en: CGV; CINEMA XXI; !XXI; VIDIO
+i: !BIBIT; !AJAIB; PLUANG; BAREKSA
+e: RUANG ?GURU; !ZENIUS
+`,
+    MY: `
+g: AEON BIG; AEON MAXVALU; LOTUSS; LOTUS S; !TESCO; !GIANT; !MYDIN; JAYA GROCER; VILLAGE GROCER; !MERCATO; 99 SPEEDMART; KK (?:SUPER )?MART; !ECONSAVE; !NSK TRADE
+d: OLDTOWN WHITE COFFEE; !OLDTOWN; SECRET RECIPE; MARRYBROWN; TEALIVE; ZUS COFFEE; PAPPARICH; SUSHI KING; KENNY ROGERS; !RICHIAMO
+t: PETRON; BHPETROL; TOUCH N GO TOLL; PLUS MALAYSIA; PLUSMILES; RAPID ?KL; MRT CORP; !KTM; KTM BERHAD; KLIA EKSPRES
+h: CARING PHARMACY; BIG PHARMACY; ALPRO PHARMACY; !KPJ; SUNWAY MEDICAL; PANTAI HOSPITAL; !GUARDIAN
+s: MR ?DIY; ECO ?SHOP; !PARKSON; SENHENG; HARVEY NORMAN; !PADINI; !COURTS
+tr: !FIREFLY; FIREFLY AIRLINES; BATIK AIR
+c: MAXIS; CELCOM; CELCOMDIGI; !DIGI; U MOBILE; !UNIFI; TIME DOTCOM; !HOTLINK; TUNETALK; !YES 5G
+u: !TNB; TENAGA NASIONAL; AIR SELANGOR; SYABAS; INDAH WATER; !SESB; GAS MALAYSIA
+gv: LHDN; !HASIL; !JPJ
+en: !GSC; GOLDEN SCREEN; TGV CINEMAS; !ASTRO; ASTRO MALAYSIA
+i: RAKUTEN TRADE
+`,
+    SG: `
+g: NTUC FAIRPRICE; FAIRPRICE; COLD STORAGE; SHENG SIONG; !GIANT; PRIME SUPERMARKET; REDMART; DON DON DONKI; !CHEERS
+d: KOPITIAM; YA KUN; TOAST BOX; BREADTALK; OLD CHANG KEE; SWENSENS; !KOI; !LIHO; SUBWAY SG; GONG CHA; PASTAMANIA
+t: BUS ?/? ?MRT; SIMPLYGO; TRANSITLINK; EZ ?LINK; COMFORTDELGRO; CDG ZIG; COMFORT TAXI; !TADA; !RYDE; SPC SERVICE; !SPC; SINOPEC
+h: UNITY PHARMACY; RAFFLES MEDICAL; !PARKWAY; GUARDIAN HEALTH; !GUARDIAN
+s: QOO10; !COURTS; BEST DENKI; !CHALLENGER; POPULAR BOOK; TAKASHIMAYA; ISETAN; !TANGS; !MUSTAFA; MUSTAFA CENTRE; HARVEY NORMAN
+tr: !CHANGI; !SCOOT
+c: SINGTEL; STARHUB; !M1; M1 LIMITED; !SIMBA; CIRCLES LIFE; MYREPUBLIC
+u: SP SERVICES; !SP GROUP; !CITY ENERGY; !GENECO
+gv: IRAS; !ICA; !HDB; !LTA
+en: GOLDEN VILLAGE; !GV; SHAW THEATRES; CATHAY CINEPLEX
+i: SYFE; ENDOWUS
+`,
+    PH: `
+g: SM (?:SUPERMARKET|HYPERMARKET|SAVEMORE); !SAVEMORE; PUREGOLD; ROBINSONS SUPERMARKET; WALTERMART; !LANDERS; !S ?& ?R; ALL DAY SUPERMARKET; RUSTANS SUPERMARKET; ALFAMART
+d: CHOWKING; !GREENWICH; MANG INASAL; !RED RIBBON; !GOLDILOCKS; SHAKEYS; YELLOW CAB PIZZA
+t: PETRON; !SEAOIL; !PHOENIX; !ANGKAS; !JOYRIDE; BEEP CARD; AUTOSWEEP; !EASYTRIP; !LRT
+h: MERCURY DRUG; SOUTHSTAR DRUG; THE GENERICS PHARMACY; ROSE PHARMACY
+s: SM STORE; SM DEPT; !RUSTANS; ABENSON; !ANSONS; WILCON; NATIONAL BOOK ?STORE
+tr: !PAL; CEBU PAC
+c: !GLOBE; GLOBE TELECOM; !SMART; SMART (?:COMM|PREPAID); PLDT; !CONVERGE; SKY CABLE; !DITO
+u: MERALCO; MANILA WATER; MAYNILAD; !VECO
+gv: !BIR; !LTO; !SSS; PHILHEALTH; PAG ?IBIG
+en: SM CINEMA
+`,
+    AU: `
+g: !WOOLWORTHS; WOOLWORTHS METRO; !COLES; COLES SUPERMARKETS; IGA; FOODWORKS; HARRIS FARM; !DRAKES; !BWS; DAN MURPHYS; LIQUORLAND; FIRST CHOICE LIQUOR
+d: GUZMAN Y GOMEZ; !GYG; HUNGRY JACKS; BOOST JUICE; !OPORTO; RED ROOSTER; GRILLD; ZAMBRERO; SUMO SALAD; !SCHNITZ; MUFFIN BREAK; GLORIA JEANS
+t: MYKI; !OPAL; !GO CARD; TRANSLINK QLD; ADELAIDE METRO; SMARTRIDER; TRANSPERTH; AMPOL; UNITED PETROLEUM; COLES EXPRESS; LINKT; EASTLINK; 13CABS; SECURE PARKING; WILSON PARKING; SUPERCHEAP AUTO
+h: CHEMIST WAREHOUSE; PRICELINE PHARMACY; TERRY ?WHITE; !AMCAL; BLOOMS THE CHEMIST; MEDIBANK; !NIB; !HCF; !JETTS; !OPSM
+s: JB HI ?FI; BUNNINGS; !TARGET; BIG W; !MYER; !DAVID JONES; HARVEY NORMAN; THE GOOD GUYS; OFFICEWORKS; REBEL SPORT; !BCF; !ANACONDA; !SPOTLIGHT; COTTON ON; CATCH COM; THE ICONIC; EB GAMES; !ADAIRS
+tr: !REX; WEBJET; WOTIF
+c: TELSTRA; OPTUS; !TPG; AUSSIE BROADBAND; IINET; !BELONG; AMAYSIM; !DODO
+u: !AGL; ORIGIN ENERGY; ENERGY ?AUSTRALIA; RED ENERGY; ALINTA; SYDNEY WATER; YARRA VALLEY WATER; SA WATER; ACTEWAGL; SIMPLY ENERGY; POWERSHOP
+gv: !ATO; AUSTRALIAN TAXATION; SERVICE NSW; VICROADS
+en: STAN COM AU; !STAN; FOXTEL; !KAYO; !BINGE; HOYTS; EVENT CINEMAS; VILLAGE CINEMAS; READING CINEMAS
+i: !RAIZ; !SPACESHIP; !PEARLER; !STAKE
+`,
+    NZ: `
+g: !COUNTDOWN; !WOOLWORTHS; PAK N SAVE; PAKNSAVE; !NEW WORLD; !FOUR SQUARE; FRESHCHOICE; !SUPERVALUE; LIQUORLAND; SUPER LIQUOR
+d: HELL PIZZA; BURGER ?FUEL; DELIVEREASY
+t: Z ENERGY; !MOBIL; !GULL; !WAITOMO; AT HOP; AUCKLAND TRANSPORT; !SNAPPER; !METLINK; WAKA KOTAHI; KIWIRAIL; !INTERCITY
+h: UNICHEM; !SOUTHERN CROSS; LES MILLS; CHEMIST WAREHOUSE
+s: !THE WAREHOUSE; WAREHOUSE STATIONERY; NOEL LEEMING; BRISCOES; !FARMERS; MITRE 10; BUNNINGS; REBEL SPORT; !SPOTLIGHT; !TRADE ?ME; !KATHMANDU; TORPEDO7
+tr: AIR NZ
+c: !SPARK; ONE NZ; ONE NEW ZEALAND; 2DEGREES; !SKINNY
+u: !MERCURY; GENESIS ENERGY; CONTACT ENERGY; MERIDIAN ENERGY; TRUSTPOWER; ELECTRIC KIWI; WATERCARE
+gv: !IRD; INLAND REVENUE
+en: !SKY; SKY TV; !NEON; EVENT CINEMAS; HOYTS
+i: !HATCH; HATCH INVEST
+`,
+    ZA: `
+g: !CHECKERS; PICK N PAY; !PNP; PNP ASAP; WOOLWORTHS FOOD; !USAVE; !BOXER; FOOD LOVERS MARKET; OK FOODS; OK MINIMARK; SIXTY60
+d: !MR D; MRD FOOD; !STEERS; !WIMPY; !SPUR; SPUR STEAK; OCEAN BASKET; !DEBONAIRS; ROMANS PIZZA; FISHAWAYS; !KAUAI; VIDA E CAFFE; MUGG (?:&|AND) BEAN; CHICKEN LICKEN; SEATTLE COFFEE
+t: GAUTRAIN; !SANRAL; !E ?TOLL; !MYCITI
+h: !CLICKS; DIS ?CHEM; MEDIRITE; NETCARE; MEDICLINIC; LIFE HEALTHCARE
+s: TAKEALOT; MR PRICE; !WOOLWORTHS; !EDGARS; TRUWORTHS; FOSCHINI; ACKERMANS; !PEP; PEP STORES; CASHBUILD; BUILDERS WAREHOUSE; BUILDERS EXPRESS; INCREDIBLE CONNECTION; HIFI CORP; !GAME; GAME STORES; EXCLUSIVE BOOKS; !CNA; SUPERBALIST
+tr: !SAA; !AIRLINK; LIFT AIRLINE
+c: VODACOM; MTN; !CELL ?C; TELKOM; !RAIN; AFRIHOST
+u: ESKOM; !CITY POWER; CITY OF (?:CAPE TOWN|JOHANNESBURG|TSHWANE|EKURHULENI)
+gv: !SARS; SA REVENUE SERVICE
+en: DSTV; MULTICHOICE; STER ?KINEKOR; !NU METRO; COMPUTICKET
+i: !SATRIX; VALR
+`,
+    NG: `
+g: JUSTRITE; !EBEANO; PRINCE EBEANO; !MARKET SQUARE; !HUBMART
+d: CHICKEN REPUBLIC; CHOWDECK; !KILIMANJARO; MR BIGGS; TANTALIZERS; !SWEET SENSATION
+t: !RIDA; NNPC; OANDO; CONOIL; ARDOVA; FORTE OIL; MRS OIL
+h: MEDPLUS; !HEALTHPLUS
+s: JUMIA; KONGA; !SLOT; SLOT SYSTEMS
+tr: AIR PEACE; ARIK AIR; IBOM AIR; DANA AIR; UNITED NIGERIA
+c: MTN; !GLO; GLOBACOM; 9MOBILE; SPECTRANET
+u: IKEDC; IKEJA ELECTRIC; EKEDC; EKO ELECTRIC; AEDC; ABUJA ELECTRIC; !PHED; IBEDC; KEDCO; EEDC
+gv: !FIRS; !LIRS
+en: DSTV; GOTV; FILMHOUSE
+i: !BAMBOO; !CHAKA; !TROVE; RISEVEST
+`,
+    KE: `
+g: NAIVAS; !QUICKMART; CHANDARANA; CLEANSHELF
+d: JAVA HOUSE; ARTCAFFE; CHICKEN INN; PIZZA INN; GALITOS
+t: LITTLE (?:CAB|RIDE); OLA ENERGY; !KENOL
+h: GOODLIFE PHARMACY; !AGA KHAN; NAIROBI HOSPITAL
+s: JUMIA; KILIMALL; !HOTPOINT
+tr: JAMBOJET; SAFARILINK
+c: SAFARICOM; TELKOM KENYA; !ZUKU; !FAIBA
+u: KPLC; KENYA POWER; NAIROBI WATER
+gv: !KRA; KENYA REVENUE; E ?CITIZEN; NTSA
+en: DSTV; GOTV; CENTURY CINEMAX
+`,
+    EG: `
+g: SEOUDI; METRO MARKETS; KHEIR ZAMAN; HYPERONE; BREADFAST; !RABBIT; OSCAR GRAND STORES
+d: ELMENUS; !KOSHARY; BUFFALO BURGER; !CILANTRO; COOK DOOR; !MOMEN
+t: SWVL; MISR PETROLEUM; !WATANIYA; EMARAT MISR
+h: EL ?EZABY; SEIF PHARMACY; !19011; VEZEETA
+s: !B ?TECH; JUMIA; !NOON; RAYA SHOP; !2B
+tr: AIR CAIRO; NILE AIR
+c: WE TELECOM; TELECOM EGYPT; !ORANGE; ORANGE EGYPT; ETISALAT
+`,
+    MA: `
+g: MARJANE; LABEL VIE; !BIM; !ACIMA; ASWAK ASSALAM
+t: AFRIQUIA; !WINXO; ONCF; AL BORAQ; !TRAMWAY
+s: ELECTROPLANET; JUMIA; KITEA
+tr: !RAM; ROYAL AIR MAROC
+c: MAROC TELECOM; !IAM; INWI; !ORANGE; ORANGE MAROC
+u: LYDEC; !REDAL; AMENDIS; !ONEE
+`,
+};
+const SEPARATOR = "[\\s./&+,-]*";
+function compilePattern(body) {
+    const source = body.replace(/ /g, SEPARATOR);
+    const tail = /\d$/.test(body) ? '(?![A-Z0-9])' : '(?![A-Z])';
+    return new RegExp(`(?<![A-Z0-9])(?:${source})${tail}`, 'u');
+}
+let compiled = null;
+let index = null;
+function literalKey(pattern) {
+    let depth = 0;
+    for (const ch of pattern) {
+        if (ch === '(')
+            depth++;
+        else if (ch === ')')
+            depth--;
+        else if (ch === '|' && depth === 0)
+            return null;
+    }
+    const plain = (i) => /[A-Z0-9]/.test(pattern[i] ?? '') && !/[?*{]/.test(pattern[i + 1] ?? '');
+    if (!plain(0))
+        return null;
+    return plain(1) ? pattern.slice(0, 2) : pattern[0];
+}
+function brandIndex() {
+    if (index)
+        return index;
+    const byKey = new Map();
+    const always = [];
+    for (const brand of compileBrandTable()) {
+        const key = literalKey(brand.pattern);
+        if (!key) {
+            always.push(brand);
+            continue;
+        }
+        const list = byKey.get(key);
+        if (list)
+            list.push(brand);
+        else
+            byKey.set(key, [brand]);
+    }
+    index = { byKey, always };
+    return index;
+}
+function compileBrandTable() {
+    if (compiled)
+        return compiled;
+    const out = [];
+    for (const [table, block] of Object.entries(TABLE)) {
+        for (const rawLine of block.split('\n')) {
+            const line = rawLine.trim();
+            if (!line)
+                continue;
+            const colon = line.indexOf(':');
+            const alias = line.slice(0, colon).trim();
+            const category = ALIAS[alias];
+            if (colon < 1 || !category)
+                throw new Error(`brand-categories: bad alias "${alias}" in ${table}`);
+            for (const rawPattern of line.slice(colon + 1).split(';')) {
+                let pattern = rawPattern.trim();
+                if (!pattern)
+                    continue;
+                const gated = pattern.startsWith('!');
+                if (gated)
+                    pattern = pattern.slice(1).trim();
+                if (gated && table === 'GLOBAL')
+                    throw new Error(`brand-categories: GLOBAL pattern cannot be gated: ${pattern}`);
+                out.push({ table, pattern, category, regex: compilePattern(pattern), gate: gated ? table : null });
+            }
+        }
+    }
+    compiled = out;
+    return out;
+}
+function normalizeBrandDescriptor(descriptor) {
+    return descriptor
+        .normalize('NFKD')
+        .replace(/[̀-ͯ]/gu, '')
+        .toUpperCase()
+        .replace(/['’`]/gu, '')
+        .replace(/[*_#|~]+/gu, ' ')
+        .replace(/\s+/gu, ' ')
+        .trim();
+}
+function matchBrandCategory(descriptor, market) {
+    if (typeof descriptor !== 'string' || !descriptor.trim() || descriptor.length > 256)
+        return null;
+    const text = normalizeBrandDescriptor(descriptor);
+    if (!text)
+        return null;
+    const country = typeof market === 'string' ? market.trim().toUpperCase() : null;
+    const hits = [];
+    const { byKey, always } = brandIndex();
+    const candidates = new Set(always);
+    for (let i = 0; i < text.length; i++) {
+        if (!/[A-Z0-9]/.test(text[i]) || (i > 0 && /[A-Z0-9]/.test(text[i - 1])))
+            continue;
+        for (const key of [text[i], text.slice(i, i + 2)])
+            for (const brand of byKey.get(key) ?? [])
+                candidates.add(brand);
+    }
+    for (const brand of candidates) {
+        if (brand.gate && brand.gate !== country)
+            continue;
+        const m = brand.regex.exec(text);
+        if (m)
+            hits.push({ brand, start: m.index, end: m.index + m[0].length });
+    }
+    if (!hits.length)
+        return null;
+    let best = hits[0];
+    for (const hit of hits)
+        if (hit.end - hit.start > best.end - best.start)
+            best = hit;
+    for (const hit of hits) {
+        if (hit.brand.category === best.brand.category)
+            continue;
+        const inside = hit.start >= best.start && hit.end <= best.end;
+        if (!inside || hit.end - hit.start === best.end - best.start)
+            return null;
+    }
+    const { table, pattern, category } = best.brand;
+    return { table, pattern, category };
+}
+function brandTableStats() {
+    const all = compileBrandTable();
+    const countries = Object.keys(TABLE).filter((key) => key !== 'GLOBAL');
+    return { patterns: all.length, tables: Object.keys(TABLE).length, countries, gated: all.filter((b) => b.gate).length };
+}
+},
+"capture-source-identity":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.isUsableCaptureSourceIdentity = exports.captureSourceTimeMatches = exports.isValidAndroidSourceKey = exports.isUnboundAndroidSourceKey = exports.canonicalCaptureSourceKey = void 0;
+exports.alertTextClock = alertTextClock;
+const SOURCE_KEY = {
+    apple: /^apple_message_review_source_([a-f0-9]{64})$/,
+    android: /^(?:h|android_message_review_source_)(a(?:0|[1-9]\d{0,39}))(?:t(0|[1-9]\d{0,15}))?$/,
+    androidComposedTime: /^(?:h|android_message_review_source_)a\d+t(\d+)$/,
+    opaqueHistory: /^h[a-f0-9]{64}$/,
+    opaqueApple: /^apple_message_review_source_[a-f0-9]{64}$/,
+    androidNamespace: /^ha(?:$|[\d+-])/,
+};
+const KEY_SHAPE_LIMIT = 65536;
+let keyShapes = new Map();
+const validTimestamp = (encoded) => {
+    if (encoded === undefined)
+        return true;
+    const timestamp = Number(encoded);
+    return Number.isSafeInteger(timestamp) && Number.isFinite(new Date(timestamp).getTime());
+};
+function shapeOf(key) {
+    const cached = keyShapes.get(key);
+    if (cached)
+        return cached;
+    const apple = key.match(SOURCE_KEY.apple);
+    const android = apple ? null : key.match(SOURCE_KEY.android);
+    const composed = key.match(SOURCE_KEY.androidComposedTime);
+    const shape = {
+        apple: apple ? apple[1] : null,
+        android: android ? android[1] : null,
+        encoded: android ? android[2] : undefined,
+        validAndroid: android !== null && validTimestamp(android[2]),
+        composedTime: composed ? composed[1] : null,
+        opaque: SOURCE_KEY.opaqueHistory.test(key) || SOURCE_KEY.opaqueApple.test(key),
+        androidNamespace: SOURCE_KEY.androidNamespace.test(key) || key.startsWith('android_message_review_source_'),
+    };
+    if (keyShapes.size >= KEY_SHAPE_LIMIT)
+        keyShapes = new Map();
+    keyShapes.set(key, shape);
+    return shape;
+}
+const canonicalCaptureSourceKey = (key, observedAt) => {
+    const shape = shapeOf(key);
+    if (shape.apple !== null)
+        return `h${shape.apple}`;
+    if (shape.android === null)
+        return key;
+    if (shape.encoded !== undefined)
+        return `h${shape.android}t${shape.encoded}`;
+    return Number.isSafeInteger(observedAt) && observedAt >= 0 &&
+        Number.isFinite(new Date(observedAt).getTime())
+        ? `h${shape.android}t${observedAt}` : `h${shape.android}`;
+};
+exports.canonicalCaptureSourceKey = canonicalCaptureSourceKey;
+const isUnboundAndroidSourceKey = (key) => {
+    const shape = shapeOf(key);
+    return shape.android !== null && shape.encoded === undefined;
+};
+exports.isUnboundAndroidSourceKey = isUnboundAndroidSourceKey;
+const isValidAndroidSourceKey = (key) => shapeOf(key).validAndroid;
+exports.isValidAndroidSourceKey = isValidAndroidSourceKey;
+const captureSourceTimeMatches = (key, observedAt) => {
+    const shape = shapeOf(key);
+    return shape.composedTime === null ||
+        (shape.validAndroid && Number(shape.composedTime) === observedAt);
+};
+exports.captureSourceTimeMatches = captureSourceTimeMatches;
+const isUsableCaptureSourceIdentity = (key, observedAt) => {
+    if (key === undefined)
+        return true;
+    if (typeof key !== 'string')
+        return false;
+    const shape = shapeOf(key);
+    if (shape.opaque)
+        return true;
+    if (!shape.androidNamespace)
+        return true;
+    return shape.validAndroid && Number.isSafeInteger(observedAt) && observedAt >= 0 &&
+        Number.isFinite(new Date(observedAt).getTime()) && (0, exports.captureSourceTimeMatches)(key, observedAt);
+};
+exports.isUsableCaptureSourceIdentity = isUsableCaptureSourceIdentity;
+const NUMERIC_TEXT_CLOCK_RE = /(?<![\d/.:-])(\d{1,2})[/.-](\d{1,2})[/.-](\d{4}|\d{2})(?:[ \t]*,)?[ \t]+(?:at[ \t]+)?(\d{1,2}):(\d{2}):(\d{2})(?:[ \t]*([AaPp])\.?[Mm]\.?)?(?![\d:])/g;
+const ISO_TEXT_CLOCK_RE = /(?<![\d/.:-])(\d{4})-(\d{1,2})-(\d{1,2})(?:[ \t]+|T)(\d{1,2}):(\d{2}):(\d{2})(?:[ \t]*([AaPp])\.?[Mm]\.?)?(?![\d:])/g;
+const localClock = (year, month, day, hour, minute, second) => {
+    if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 59)
+        return null;
+    const at = new Date(year, month - 1, day, hour, minute, second, 0);
+    if (at.getFullYear() !== year || at.getMonth() !== month - 1 || at.getDate() !== day ||
+        at.getHours() !== hour || at.getMinutes() !== minute || at.getSeconds() !== second)
+        return null;
+    const ms = at.getTime();
+    return Number.isSafeInteger(ms) && ms >= 0 ? ms : null;
+};
+const clockHour = (raw, meridiem) => {
+    const hour = Number(raw);
+    if (!meridiem)
+        return hour;
+    if (hour < 1 || hour > 12)
+        return null;
+    const pm = meridiem.toLowerCase() === 'p';
+    return pm ? (hour === 12 ? 12 : hour + 12) : (hour === 12 ? 0 : hour);
+};
+function alertTextClock(source, isoDate) {
+    if (typeof source !== 'string' || !source || typeof isoDate !== 'string')
+        return null;
+    const day = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!day)
+        return null;
+    const wantYear = Number(day[1]);
+    const wantMonth = Number(day[2]);
+    const wantDay = Number(day[3]);
+    const clocks = new Set();
+    const consider = (year, month, dayOfMonth, time) => {
+        if (year !== wantYear || month !== wantMonth || dayOfMonth !== wantDay)
+            return false;
+        const hour = clockHour(time[4], time[7]);
+        if (hour === null)
+            return false;
+        const minute = Number(time[5]);
+        const second = Number(time[6]);
+        if ((hour === 0 && minute === 0 && second === 0) || (hour === 23 && minute === 59 && second === 59))
+            return false;
+        const at = localClock(year, month, dayOfMonth, hour, minute, second);
+        if (at === null)
+            return false;
+        clocks.add(at);
+        return true;
+    };
+    for (const match of source.matchAll(NUMERIC_TEXT_CLOCK_RE)) {
+        const year = match[3].length === 2 ? 2000 + Number(match[3]) : Number(match[3]);
+        const first = Number(match[1]);
+        const second = Number(match[2]);
+        if (!consider(year, second, first, match))
+            consider(year, first, second, match);
+    }
+    for (const match of source.matchAll(ISO_TEXT_CLOCK_RE)) {
+        consider(Number(match[1]), Number(match[2]), Number(match[3]), match);
+    }
+    return clocks.size === 1 ? [...clocks][0] : null;
+}
+},
+"categories":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.FIXED_COMMITMENT_CATEGORIES = exports.INCOME_CATEGORIES = exports.EXPENSE_CATEGORIES = exports.CATEGORIES = void 0;
+exports.isCustomCategoryId = isCustomCategoryId;
+exports.isRegisteredCategory = isRegisteredCategory;
+exports.getCategory = getCategory;
+exports.categorySupportsType = categorySupportsType;
+exports.scopedMerchantOverrideKey = scopedMerchantOverrideKey;
+exports.readMerchantCategoryOverride = readMerchantCategoryOverride;
+exports.categoryLabel = categoryLabel;
+exports.categoriesForType = categoriesForType;
+exports.isFixedCommitment = isFixedCommitment;
+const i18n_1 = require("@/lib/i18n");
+exports.CATEGORIES = [
+    { id: 'groceries', label: 'Groceries', labelAr: 'البقالة', icon: 'cart', type: 'expense' },
+    { id: 'dining', label: 'Dining', labelAr: 'المطاعم', icon: 'dining', type: 'expense' },
+    { id: 'transport', label: 'Transport', labelAr: 'المواصلات', icon: 'car', type: 'expense' },
+    { id: 'cash-withdrawal', label: 'Cash withdrawal', labelAr: 'سحب نقدي', icon: 'cash', type: 'expense' },
+    { id: 'utilities', label: 'Utilities', labelAr: 'المرافق', icon: 'bolt', type: 'expense' },
+    { id: 'telecom', label: 'Telecom', labelAr: 'الاتصالات', icon: 'phone', type: 'expense' },
+    { id: 'rent', label: 'Rent', labelAr: 'الإيجار', icon: 'home', type: 'expense' },
+    { id: 'shopping', label: 'Shopping', labelAr: 'التسوق', icon: 'bag', type: 'expense' },
+    { id: 'health', label: 'Health', labelAr: 'الصحة', icon: 'heart', type: 'expense' },
+    { id: 'personal-care', label: 'Personal care', labelAr: 'العناية الشخصية', icon: 'scissors', type: 'expense' },
+    { id: 'home-services', label: 'Home services', labelAr: 'خدمات المنزل', icon: 'tools', type: 'expense' },
+    { id: 'education', label: 'Education', labelAr: 'التعليم', icon: 'cap', type: 'expense' },
+    { id: 'travel', label: 'Travel', labelAr: 'السفر', icon: 'plane', type: 'expense' },
+    { id: 'entertainment', label: 'Entertainment', labelAr: 'الترفيه', icon: 'play', type: 'expense' },
+    { id: 'software', label: 'Software', labelAr: 'البرمجيات', icon: 'code', type: 'expense' },
+    { id: 'investing', label: 'Investing', labelAr: 'الاستثمار', icon: 'trend', type: 'expense' },
+    { id: 'charity', label: 'Charity', labelAr: 'الصدقة', icon: 'gift', type: 'expense' },
+    { id: 'government', label: 'Government', labelAr: 'الخدمات الحكومية', icon: 'bank', type: 'expense' },
+    { id: 'loan', label: 'Loan', labelAr: 'القروض', icon: 'bank', type: 'expense' },
+    { id: 'other', label: 'Other', labelAr: 'أخرى', icon: 'receipt', type: 'expense' },
+    { id: 'salary', label: 'Salary', labelAr: 'الراتب', icon: 'briefcase', type: 'income' },
+    { id: 'business', label: 'Business', labelAr: 'الأعمال', icon: 'chart', type: 'income' },
+];
+const byId = new Map(exports.CATEGORIES.map((c) => [c.id, c]));
+function isCustomCategoryId(value) {
+    return typeof value === 'string' && /^custom:(expense|income):[a-f0-9]{32}$/.test(value);
+}
+function isRegisteredCategory(id, catalog = []) {
+    return typeof id === 'string' && (byId.has(id) ||
+        (isCustomCategoryId(id) && catalog.some((category) => category.id === id && categorySupportsType(id, category.type))));
+}
+function getCategory(id, catalog = []) {
+    const builtin = byId.get(id);
+    if (builtin)
+        return builtin;
+    if (isCustomCategoryId(id)) {
+        const saved = catalog.find((category) => category.id === id && categorySupportsType(id, category.type));
+        return { id, label: saved?.name ?? 'Custom category', labelAr: saved?.name ?? 'فئة مخصصة',
+            icon: 'receipt', type: id.startsWith('custom:income:') ? 'income' : 'expense' };
+    }
+    return byId.get('other');
+}
+function categorySupportsType(id, type) {
+    if (typeof id !== 'string' || (type !== 'income' && type !== 'expense'))
+        return false;
+    if (isCustomCategoryId(id))
+        return id.startsWith(`custom:${type}:`);
+    const category = byId.get(id);
+    return Boolean(category && (category.id === 'other' || category.type === type));
+}
+function scopedMerchantOverrideKey(merchant, type) {
+    return `${type}:${merchant.trim().toLowerCase()}`;
+}
+function readMerchantCategoryOverride(overrides, merchant, type) {
+    if (!overrides || (type !== 'income' && type !== 'expense'))
+        return undefined;
+    const scoped = scopedMerchantOverrideKey(merchant, type);
+    if (Object.prototype.hasOwnProperty.call(overrides, scoped)) {
+        const category = overrides[scoped];
+        return categorySupportsType(category, type) ? category : undefined;
+    }
+    const legacy = merchant.trim().toLowerCase();
+    if (!Object.prototype.hasOwnProperty.call(overrides, legacy))
+        return undefined;
+    const category = overrides[legacy];
+    if (category === 'other' && type === 'income')
+        return undefined;
+    return categorySupportsType(category, type) ? category : undefined;
+}
+function categoryLabel(category, language = (0, i18n_1.getLanguage)(), catalog = []) {
+    const meta = typeof category === 'string' ? getCategory(category, catalog) : category;
+    return language === 'ar' ? meta.labelAr : meta.label;
+}
+exports.EXPENSE_CATEGORIES = exports.CATEGORIES.filter((c) => c.type === 'expense');
+exports.INCOME_CATEGORIES = [
+    ...exports.CATEGORIES.filter((c) => c.type === 'income'),
+    { ...byId.get('other'), type: 'income' },
+];
+function categoriesForType(type, catalog = []) {
+    return [...(type === 'income' ? exports.INCOME_CATEGORIES : exports.EXPENSE_CATEGORIES),
+        ...catalog.filter((category) => isCustomCategoryId(category.id) && category.type === type &&
+            categorySupportsType(category.id, type)).map((category) => getCategory(category.id, catalog))];
+}
+exports.FIXED_COMMITMENT_CATEGORIES = ['rent', 'business'];
+function isFixedCommitment(id) {
+    return exports.FIXED_COMMITMENT_CATEGORIES.includes(id);
+}
+},
+"country":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.NEUTRAL_MARKET_ID = exports.COUNTRY_CODES = exports.COUNTRY_UNKNOWN = void 0;
+exports.normalizeCountryCode = normalizeCountryCode;
+exports.isKnownCountry = isKnownCountry;
+exports.countryFromLocaleTag = countryFromLocaleTag;
+exports.countryFromDeviceRegions = countryFromDeviceRegions;
+exports.dateOrderForCountry = dateOrderForCountry;
+exports.statementDateOrderForCountry = statementDateOrderForCountry;
+exports.countryDisplayName = countryDisplayName;
+exports.countryFlag = countryFlag;
+exports.parserMarketForCountry = parserMarketForCountry;
+exports.migrateCountryState = migrateCountryState;
+exports.setActiveCountry = setActiveCountry;
+exports.getActiveCountry = getActiveCountry;
+exports.activeCountryDateOrder = activeCountryDateOrder;
+const country_names_1 = require("@/lib/country-names");
+exports.COUNTRY_UNKNOWN = 'ZZ';
+const MONTH_FIRST = new Set(['US', 'AS', 'GU', 'MP', 'PR', 'VI', 'UM', 'FM', 'MH', 'PW', 'PH']);
+const YEAR_FIRST = new Set(['CN', 'JP', 'KR', 'KP', 'TW', 'HU', 'LT', 'MN']);
+const UNDECIDED = new Set(['CA', 'IR', 'AF', 'NP', 'ET']);
+exports.COUNTRY_CODES = Object.freeze(Object.keys(country_names_1.COUNTRY_NAMES));
+const KNOWN = new Set(exports.COUNTRY_CODES);
+function normalizeCountryCode(value) {
+    if (typeof value !== 'string')
+        return null;
+    const code = value.trim().toUpperCase();
+    if (code === exports.COUNTRY_UNKNOWN)
+        return exports.COUNTRY_UNKNOWN;
+    return KNOWN.has(code) ? code : null;
+}
+function isKnownCountry(value) {
+    const code = normalizeCountryCode(value);
+    return code !== null && code !== exports.COUNTRY_UNKNOWN;
+}
+function countryFromLocaleTag(tag) {
+    if (!tag)
+        return null;
+    for (const part of tag.replace(/_/g, '-').split('-').slice(1)) {
+        if (/^[A-Za-z]{2}$/.test(part)) {
+            const code = normalizeCountryCode(part);
+            return code && code !== exports.COUNTRY_UNKNOWN ? code : null;
+        }
+    }
+    return null;
+}
+function countryFromDeviceRegions(candidates) {
+    for (const candidate of candidates) {
+        if (!candidate)
+            continue;
+        const direct = /^[A-Za-z]{2}$/.test(candidate.trim()) ? normalizeCountryCode(candidate) : null;
+        const code = direct && direct !== exports.COUNTRY_UNKNOWN ? direct : countryFromLocaleTag(candidate);
+        if (code)
+            return code;
+    }
+    return exports.COUNTRY_UNKNOWN;
+}
+function dateOrderForCountry(country) {
+    const code = normalizeCountryCode(country);
+    if (!code || code === exports.COUNTRY_UNKNOWN || UNDECIDED.has(code))
+        return null;
+    if (MONTH_FIRST.has(code))
+        return 'MDY';
+    if (YEAR_FIRST.has(code))
+        return 'YMD';
+    return 'DMY';
+}
+function statementDateOrderForCountry(country) {
+    const order = dateOrderForCountry(country);
+    return order === 'DMY' ? 'day-first' : order === 'MDY' ? 'month-first' : null;
+}
+function countryDisplayName(code, language) {
+    const names = country_names_1.COUNTRY_NAMES[code];
+    return names ? names[language === 'ar' ? 1 : 0] : code;
+}
+function countryFlag(code) {
+    const normalized = normalizeCountryCode(code);
+    if (!normalized || normalized === exports.COUNTRY_UNKNOWN)
+        return '\u{1F30D}';
+    return String.fromCodePoint(...[...normalized].map((char) => 0x1f1e6 + char.charCodeAt(0) - 65));
+}
+const PACKED = new Set(['AE', 'SA']);
+exports.NEUTRAL_MARKET_ID = 'ZZ';
+function parserMarketForCountry(country, current = {}) {
+    const ledger = current.ledgerCurrency?.toUpperCase() ?? null;
+    const gulfLedger = ledger === 'AED' ? 'AE' : ledger === 'SAR' ? 'SA' : null;
+    if (gulfLedger) {
+        return current.marketId && PACKED.has(current.marketId) ? current.marketId : gulfLedger;
+    }
+    const code = normalizeCountryCode(country);
+    return code && PACKED.has(code) ? code : exports.NEUTRAL_MARKET_ID;
+}
+function migrateCountryState(input) {
+    const marketId = typeof input.marketId === 'string' ? input.marketId : '';
+    const ledgerCurrency = input.ledgerCurrency ?? null;
+    const device = normalizeCountryCode(input.deviceCountry) ?? exports.COUNTRY_UNKNOWN;
+    const stored = normalizeCountryCode(input.country);
+    if (stored) {
+        return {
+            country: stored,
+            marketId: PACKED.has(marketId) || marketId === exports.NEUTRAL_MARKET_ID
+                ? marketId
+                : parserMarketForCountry(stored, { marketId, ledgerCurrency }),
+        };
+    }
+    const onboarding = normalizeCountryCode(input.onboardingCountry);
+    let country;
+    if (onboarding && onboarding !== exports.COUNTRY_UNKNOWN) {
+        country = onboarding;
+    }
+    else if (PACKED.has(marketId) && (ledgerCurrency === (marketId === 'SA' ? 'SAR' : 'AED') ||
+        (!ledgerCurrency && (device === marketId || device === exports.COUNTRY_UNKNOWN)))) {
+        country = marketId;
+    }
+    else {
+        country = device;
+    }
+    return { country, marketId: parserMarketForCountry(country, { marketId, ledgerCurrency }) };
+}
+let activeCountry = null;
+function setActiveCountry(code) {
+    activeCountry = normalizeCountryCode(code);
+}
+function getActiveCountry() {
+    return activeCountry;
+}
+function activeCountryDateOrder() {
+    return dateOrderForCountry(activeCountry) ?? undefined;
+}
+},
+"country-names":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.COUNTRY_NAMES = void 0;
+exports.COUNTRY_NAMES = Object.freeze({
+    AD: ["Andorra", "أندورا"],
+    AE: ["United Arab Emirates", "الإمارات العربية المتحدة"],
+    AF: ["Afghanistan", "أفغانستان"],
+    AG: ["Antigua & Barbuda", "أنتيغوا وبربودا"],
+    AI: ["Anguilla", "أنغويلا"],
+    AL: ["Albania", "ألبانيا"],
+    AM: ["Armenia", "أرمينيا"],
+    AO: ["Angola", "أنغولا"],
+    AQ: ["Antarctica", "أنتاركتيكا"],
+    AR: ["Argentina", "الأرجنتين"],
+    AS: ["American Samoa", "ساموا الأمريكية"],
+    AT: ["Austria", "النمسا"],
+    AU: ["Australia", "أستراليا"],
+    AW: ["Aruba", "أروبا"],
+    AX: ["Åland Islands", "جزر آلاند"],
+    AZ: ["Azerbaijan", "أذربيجان"],
+    BA: ["Bosnia & Herzegovina", "البوسنة والهرسك"],
+    BB: ["Barbados", "بربادوس"],
+    BD: ["Bangladesh", "بنغلاديش"],
+    BE: ["Belgium", "بلجيكا"],
+    BF: ["Burkina Faso", "بوركينا فاسو"],
+    BG: ["Bulgaria", "بلغاريا"],
+    BH: ["Bahrain", "البحرين"],
+    BI: ["Burundi", "بوروندي"],
+    BJ: ["Benin", "بنين"],
+    BL: ["St. Barthélemy", "سان بارتليمي"],
+    BM: ["Bermuda", "برمودا"],
+    BN: ["Brunei", "بروناي"],
+    BO: ["Bolivia", "بوليفيا"],
+    BQ: ["Caribbean Netherlands", "هولندا الكاريبية"],
+    BR: ["Brazil", "البرازيل"],
+    BS: ["Bahamas", "جزر البهاما"],
+    BT: ["Bhutan", "بوتان"],
+    BV: ["Bouvet Island", "جزيرة بوفيه"],
+    BW: ["Botswana", "بوتسوانا"],
+    BY: ["Belarus", "بيلاروس"],
+    BZ: ["Belize", "بليز"],
+    CA: ["Canada", "كندا"],
+    CC: ["Cocos (Keeling) Islands", "جزر كوكوس (كيلينغ)"],
+    CD: ["Congo - Kinshasa", "الكونغو - كينشاسا"],
+    CF: ["Central African Republic", "جمهورية أفريقيا الوسطى"],
+    CG: ["Congo - Brazzaville", "الكونغو - برازافيل"],
+    CH: ["Switzerland", "سويسرا"],
+    CI: ["Côte d’Ivoire", "ساحل العاج"],
+    CK: ["Cook Islands", "جزر كوك"],
+    CL: ["Chile", "تشيلي"],
+    CM: ["Cameroon", "الكاميرون"],
+    CN: ["China", "الصين"],
+    CO: ["Colombia", "كولومبيا"],
+    CR: ["Costa Rica", "كوستاريكا"],
+    CU: ["Cuba", "كوبا"],
+    CV: ["Cape Verde", "الرأس الأخضر"],
+    CW: ["Curaçao", "كوراساو"],
+    CX: ["Christmas Island", "جزيرة كريسماس"],
+    CY: ["Cyprus", "قبرص"],
+    CZ: ["Czechia", "التشيك"],
+    DE: ["Germany", "ألمانيا"],
+    DJ: ["Djibouti", "جيبوتي"],
+    DK: ["Denmark", "الدانمرك"],
+    DM: ["Dominica", "دومينيكا"],
+    DO: ["Dominican Republic", "جمهورية الدومينيكان"],
+    DZ: ["Algeria", "الجزائر"],
+    EC: ["Ecuador", "الإكوادور"],
+    EE: ["Estonia", "إستونيا"],
+    EG: ["Egypt", "مصر"],
+    EH: ["Western Sahara", "الصحراء الغربية"],
+    ER: ["Eritrea", "إريتريا"],
+    ES: ["Spain", "إسبانيا"],
+    ET: ["Ethiopia", "إثيوبيا"],
+    FI: ["Finland", "فنلندا"],
+    FJ: ["Fiji", "فيجي"],
+    FK: ["Falkland Islands", "جزر فوكلاند"],
+    FM: ["Micronesia", "ميكرونيزيا"],
+    FO: ["Faroe Islands", "جزر فارو"],
+    FR: ["France", "فرنسا"],
+    GA: ["Gabon", "الغابون"],
+    GB: ["United Kingdom", "المملكة المتحدة"],
+    GD: ["Grenada", "غرينادا"],
+    GE: ["Georgia", "جورجيا"],
+    GF: ["French Guiana", "غويانا الفرنسية"],
+    GG: ["Guernsey", "غيرنزي"],
+    GH: ["Ghana", "غانا"],
+    GI: ["Gibraltar", "جبل طارق"],
+    GL: ["Greenland", "غرينلاند"],
+    GM: ["Gambia", "غامبيا"],
+    GN: ["Guinea", "غينيا"],
+    GP: ["Guadeloupe", "غوادلوب"],
+    GQ: ["Equatorial Guinea", "غينيا الاستوائية"],
+    GR: ["Greece", "اليونان"],
+    GS: ["South Georgia & South Sandwich Islands", "جورجيا الجنوبية وجزر ساندويتش الجنوبية"],
+    GT: ["Guatemala", "غواتيمالا"],
+    GU: ["Guam", "غوام"],
+    GW: ["Guinea-Bissau", "غينيا بيساو"],
+    GY: ["Guyana", "غيانا"],
+    HK: ["Hong Kong SAR China", "هونغ كونغ الصينية (منطقة إدارية خاصة)"],
+    HM: ["Heard & McDonald Islands", "جزيرة هيرد وجزر ماكدونالد"],
+    HN: ["Honduras", "هندوراس"],
+    HR: ["Croatia", "كرواتيا"],
+    HT: ["Haiti", "هايتي"],
+    HU: ["Hungary", "هنغاريا"],
+    ID: ["Indonesia", "إندونيسيا"],
+    IE: ["Ireland", "أيرلندا"],
+    IL: ["Israel", "إسرائيل"],
+    IM: ["Isle of Man", "جزيرة مان"],
+    IN: ["India", "الهند"],
+    IO: ["British Indian Ocean Territory", "الإقليم البريطاني في المحيط الهندي"],
+    IQ: ["Iraq", "العراق"],
+    IR: ["Iran", "إيران"],
+    IS: ["Iceland", "آيسلندا"],
+    IT: ["Italy", "إيطاليا"],
+    JE: ["Jersey", "جيرسي"],
+    JM: ["Jamaica", "جامايكا"],
+    JO: ["Jordan", "الأردن"],
+    JP: ["Japan", "اليابان"],
+    KE: ["Kenya", "كينيا"],
+    KG: ["Kyrgyzstan", "قيرغيزستان"],
+    KH: ["Cambodia", "كمبوديا"],
+    KI: ["Kiribati", "كيريباتي"],
+    KM: ["Comoros", "جزر القمر"],
+    KN: ["St. Kitts & Nevis", "سانت كيتس ونيفيس"],
+    KP: ["North Korea", "كوريا الشمالية"],
+    KR: ["South Korea", "كوريا الجنوبية"],
+    KW: ["Kuwait", "الكويت"],
+    KY: ["Cayman Islands", "جزر كايمان"],
+    KZ: ["Kazakhstan", "كازاخستان"],
+    LA: ["Laos", "لاوس"],
+    LB: ["Lebanon", "لبنان"],
+    LC: ["St. Lucia", "سانت لوسيا"],
+    LI: ["Liechtenstein", "ليختنشتاين"],
+    LK: ["Sri Lanka", "سريلانكا"],
+    LR: ["Liberia", "ليبيريا"],
+    LS: ["Lesotho", "ليسوتو"],
+    LT: ["Lithuania", "ليتوانيا"],
+    LU: ["Luxembourg", "لوكسمبورغ"],
+    LV: ["Latvia", "لاتفيا"],
+    LY: ["Libya", "ليبيا"],
+    MA: ["Morocco", "المغرب"],
+    MC: ["Monaco", "موناكو"],
+    MD: ["Moldova", "مولدوفا"],
+    ME: ["Montenegro", "الجبل الأسود"],
+    MF: ["St. Martin", "سان مارتن"],
+    MG: ["Madagascar", "مدغشقر"],
+    MH: ["Marshall Islands", "جزر مارشال"],
+    MK: ["North Macedonia", "مقدونيا الشمالية"],
+    ML: ["Mali", "مالي"],
+    MM: ["Myanmar (Burma)", "ميانمار (بورما)"],
+    MN: ["Mongolia", "منغوليا"],
+    MO: ["Macao SAR China", "منطقة ماكاو الإدارية الخاصة"],
+    MP: ["Northern Mariana Islands", "جزر ماريانا الشمالية"],
+    MQ: ["Martinique", "جزر المارتينيك"],
+    MR: ["Mauritania", "موريتانيا"],
+    MS: ["Montserrat", "مونتسرات"],
+    MT: ["Malta", "مالطا"],
+    MU: ["Mauritius", "موريشيوس"],
+    MV: ["Maldives", "جزر المالديف"],
+    MW: ["Malawi", "ملاوي"],
+    MX: ["Mexico", "المكسيك"],
+    MY: ["Malaysia", "ماليزيا"],
+    MZ: ["Mozambique", "موزمبيق"],
+    NA: ["Namibia", "ناميبيا"],
+    NC: ["New Caledonia", "كاليدونيا الجديدة"],
+    NE: ["Niger", "النيجر"],
+    NF: ["Norfolk Island", "جزيرة نورفولك"],
+    NG: ["Nigeria", "نيجيريا"],
+    NI: ["Nicaragua", "نيكاراغوا"],
+    NL: ["Netherlands", "هولندا"],
+    NO: ["Norway", "النرويج"],
+    NP: ["Nepal", "نيبال"],
+    NR: ["Nauru", "ناورو"],
+    NU: ["Niue", "نيوي"],
+    NZ: ["New Zealand", "نيوزيلندا"],
+    OM: ["Oman", "عُمان"],
+    PA: ["Panama", "بنما"],
+    PE: ["Peru", "بيرو"],
+    PF: ["French Polynesia", "بولينيزيا الفرنسية"],
+    PG: ["Papua New Guinea", "بابوا غينيا الجديدة"],
+    PH: ["Philippines", "الفلبين"],
+    PK: ["Pakistan", "باكستان"],
+    PL: ["Poland", "بولندا"],
+    PM: ["St. Pierre & Miquelon", "سان بيير ومكويلون"],
+    PN: ["Pitcairn Islands", "جزر بيتكيرن"],
+    PR: ["Puerto Rico", "بورتوريكو"],
+    PS: ["Palestinian Territories", "الأراضي الفلسطينية"],
+    PT: ["Portugal", "البرتغال"],
+    PW: ["Palau", "بالاو"],
+    PY: ["Paraguay", "باراغواي"],
+    QA: ["Qatar", "قطر"],
+    RE: ["Réunion", "روينيون"],
+    RO: ["Romania", "رومانيا"],
+    RS: ["Serbia", "صربيا"],
+    RU: ["Russia", "روسيا"],
+    RW: ["Rwanda", "رواندا"],
+    SA: ["Saudi Arabia", "المملكة العربية السعودية"],
+    SB: ["Solomon Islands", "جزر سليمان"],
+    SC: ["Seychelles", "سيشل"],
+    SD: ["Sudan", "السودان"],
+    SE: ["Sweden", "السويد"],
+    SG: ["Singapore", "سنغافورة"],
+    SH: ["St. Helena", "سانت هيلينا"],
+    SI: ["Slovenia", "سلوفينيا"],
+    SJ: ["Svalbard & Jan Mayen", "سفالبارد وجان ماين"],
+    SK: ["Slovakia", "سلوفاكيا"],
+    SL: ["Sierra Leone", "سيراليون"],
+    SM: ["San Marino", "سان مارينو"],
+    SN: ["Senegal", "السنغال"],
+    SO: ["Somalia", "الصومال"],
+    SR: ["Suriname", "سورينام"],
+    SS: ["South Sudan", "جنوب السودان"],
+    ST: ["São Tomé & Príncipe", "ساو تومي وبرينسيبي"],
+    SV: ["El Salvador", "السلفادور"],
+    SX: ["Sint Maarten", "سانت مارتن"],
+    SY: ["Syria", "سوريا"],
+    SZ: ["Eswatini", "إسواتيني"],
+    TC: ["Turks & Caicos Islands", "جزر توركس وكايكوس"],
+    TD: ["Chad", "تشاد"],
+    TF: ["French Southern Territories", "الأقاليم الجنوبية الفرنسية"],
+    TG: ["Togo", "توغو"],
+    TH: ["Thailand", "تايلاند"],
+    TJ: ["Tajikistan", "طاجيكستان"],
+    TK: ["Tokelau", "توكيلاو"],
+    TL: ["Timor-Leste", "تيمور - ليشتي"],
+    TM: ["Turkmenistan", "تركمانستان"],
+    TN: ["Tunisia", "تونس"],
+    TO: ["Tonga", "تونغا"],
+    TR: ["Türkiye", "تركيا"],
+    TT: ["Trinidad & Tobago", "ترينيداد وتوباغو"],
+    TV: ["Tuvalu", "توفالو"],
+    TW: ["Taiwan", "تايوان"],
+    TZ: ["Tanzania", "تنزانيا"],
+    UA: ["Ukraine", "أوكرانيا"],
+    UG: ["Uganda", "أوغندا"],
+    UM: ["U.S. Outlying Islands", "جزر الولايات المتحدة النائية"],
+    US: ["United States", "الولايات المتحدة"],
+    UY: ["Uruguay", "أورغواي"],
+    UZ: ["Uzbekistan", "أوزبكستان"],
+    VA: ["Vatican City", "الفاتيكان"],
+    VC: ["St. Vincent & Grenadines", "سانت فنسنت وجزر غرينادين"],
+    VE: ["Venezuela", "فنزويلا"],
+    VG: ["British Virgin Islands", "جزر فيرجن البريطانية"],
+    VI: ["U.S. Virgin Islands", "جزر فيرجن الأمريكية"],
+    VN: ["Vietnam", "فيتنام"],
+    VU: ["Vanuatu", "فانواتو"],
+    WF: ["Wallis & Futuna", "جزر والس وفوتونا"],
+    WS: ["Samoa", "ساموا"],
+    YE: ["Yemen", "اليمن"],
+    YT: ["Mayotte", "مايوت"],
+    ZA: ["South Africa", "جنوب أفريقيا"],
+    ZM: ["Zambia", "زامبيا"],
+    ZW: ["Zimbabwe", "زيمبابوي"],
+});
+},
+"currency-metadata":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.CURRENCY_SYMBOL_CANDIDATES = exports.CURRENCY_MINOR_UNITS = exports.ISO_4217_SOURCE_URL = exports.ISO_4217_SNAPSHOT_DATE = void 0;
+exports.currencyMinorUnits = currencyMinorUnits;
+exports.ISO_4217_SNAPSHOT_DATE = '2026-01-01';
+exports.ISO_4217_SOURCE_URL = 'https://www.six-group.com/dam/download/financial-information/data-center/iso-currrency/lists/list-one.xml';
+exports.CURRENCY_MINOR_UNITS = {
+    AED: 2, AFN: 2, ALL: 2, AMD: 2, AOA: 2, ARS: 2, AUD: 2, AWG: 2, AZN: 2,
+    BAM: 2, BBD: 2, BDT: 2, BHD: 3, BIF: 0, BMD: 2, BND: 2, BOB: 2, BOV: 2,
+    BRL: 2, BSD: 2, BTN: 2, BWP: 2, BYN: 2, BZD: 2, CAD: 2, CDF: 2, CHE: 2,
+    CHF: 2, CHW: 2, CLF: 4, CLP: 0, CNY: 2, COP: 2, COU: 2, CRC: 2, CUP: 2,
+    CVE: 2, CZK: 2, DJF: 0, DKK: 2, DOP: 2, DZD: 2, EGP: 2, ERN: 2, ETB: 2,
+    EUR: 2, FJD: 2, FKP: 2, GBP: 2, GEL: 2, GHS: 2, GIP: 2, GMD: 2, GNF: 0,
+    GTQ: 2, GYD: 2, HKD: 2, HNL: 2, HTG: 2, HUF: 2, IDR: 2, ILS: 2, INR: 2,
+    IQD: 3, IRR: 2, ISK: 0, JMD: 2, JOD: 3, JPY: 0, KES: 2, KGS: 2, KHR: 2,
+    KMF: 0, KPW: 2, KRW: 0, KWD: 3, KYD: 2, KZT: 2, LAK: 2, LBP: 2, LKR: 2,
+    LRD: 2, LSL: 2, LYD: 3, MAD: 2, MDL: 2, MGA: 2, MKD: 2, MMK: 2, MNT: 2,
+    MOP: 2, MRU: 2, MUR: 2, MVR: 2, MWK: 2, MXN: 2, MXV: 2, MYR: 2, MZN: 2,
+    NAD: 2, NGN: 2, NIO: 2, NOK: 2, NPR: 2, NZD: 2, OMR: 3, PAB: 2, PEN: 2,
+    PGK: 2, PHP: 2, PKR: 2, PLN: 2, PYG: 0, QAR: 2, RON: 2, RSD: 2, RUB: 2,
+    RWF: 0, SAR: 2, SBD: 2, SCR: 2, SDG: 2, SEK: 2, SGD: 2, SHP: 2, SLE: 2,
+    SOS: 2, SRD: 2, SSP: 2, STN: 2, SVC: 2, SYP: 2, SZL: 2, THB: 2, TJS: 2,
+    TMT: 2, TND: 3, TOP: 2, TRY: 2, TTD: 2, TWD: 2, TZS: 2, UAH: 2, UGX: 0,
+    USD: 2, USN: 2, UYI: 0, UYU: 2, UYW: 4, UZS: 2, VED: 2, VES: 2, VND: 0,
+    VUV: 0, WST: 2, XAD: 2, XAF: 0, XCD: 2, XCG: 2, XOF: 0, XPF: 0, YER: 2,
+    ZAR: 2, ZMW: 2, ZWG: 2,
+};
+function currencyMinorUnits(code) {
+    const normalized = code.trim().toUpperCase();
+    return Object.prototype.hasOwnProperty.call(exports.CURRENCY_MINOR_UNITS, normalized)
+        ? exports.CURRENCY_MINOR_UNITS[normalized]
+        : null;
+}
+exports.CURRENCY_SYMBOL_CANDIDATES = {
+    'R$': ['BRL'],
+    KSh: ['KES'],
+    RM: ['MYR'],
+    Rp: ['IDR'],
+    'د.إ': ['AED'],
+    'د.ب': ['BHD'],
+    'ج.م': ['EGP'],
+    'د.أ': ['JOD'],
+    'د.ك': ['KWD'],
+    'ر.ع': ['OMR'],
+    'ر.ق': ['QAR'],
+    'ر.س': ['SAR'],
+    '₹': ['INR'],
+    '€': ['EUR'],
+    '£': ['GBP'],
+    '₩': ['KRW'],
+    '₦': ['NGN'],
+    '$': ['USD', 'AUD', 'CAD', 'NZD', 'SGD', 'HKD', 'MXN', 'ARS', 'CLP', 'COP'],
+    'US$': ['USD'],
+    'NT$': ['TWD'],
+    'NZ$': ['NZD'],
+    'AU$': ['AUD'],
+    'A$': ['AUD'],
+    'CA$': ['CAD'],
+    'C$': ['CAD', 'NIO'],
+    'S$': ['SGD'],
+    'HK$': ['HKD'],
+    'MX$': ['MXN'],
+    '¥': ['JPY', 'CNY'],
+    Rs: ['INR', 'PKR', 'LKR', 'NPR', 'MUR', 'SCR'],
+    'Rs.': ['INR', 'PKR', 'LKR', 'NPR', 'MUR', 'SCR'],
+    TL: ['TRY'],
+    Tk: ['BDT'],
+    'Tk.': ['BDT'],
+    '৳': ['BDT'],
+    '円': ['JPY'],
+    'रु': ['INR', 'NPR'],
+    '원': ['KRW'],
+    '元': ['CNY'],
+    'S/': ['PEN'],
+    'रू': ['INR', 'NPR'],
+    'جنيه': ['EGP', 'SDG', 'SSP'],
+};
+},
+"fx":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.FX_API_ORIGIN = exports.FX_PROVIDER_NAME = void 0;
+exports.currencyExponent = currencyExponent;
+exports.referenceQuoteUrl = referenceQuoteUrl;
+exports.isQuoteFor = isQuoteFor;
+exports.fetchReferenceQuote = fetchReferenceQuote;
+exports.convertMinorUnits = convertMinorUnits;
+exports.convertOriginalMinorToLocalFils = convertOriginalMinorToLocalFils;
+exports.originalMoneyOf = originalMoneyOf;
+exports.originalMoneyFields = originalMoneyFields;
+exports.buildReferenceFxUpdates = buildReferenceFxUpdates;
+exports.formatOriginalCurrency = formatOriginalCurrency;
+const currency_metadata_1 = require("@/lib/currency-metadata");
+const ledger_money_1 = require("@/lib/ledger-money");
+exports.FX_PROVIDER_NAME = 'Frankfurter reference rate';
+exports.FX_API_ORIGIN = 'https://api.frankfurter.dev';
+function currencyCode(value) {
+    const code = value.trim().toUpperCase();
+    if (!/^[A-Z]{3}$/.test(code))
+        throw new Error('Invalid currency code');
+    return code;
+}
+function isoDate(value) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value))
+        throw new Error('Invalid FX date');
+    return value;
+}
+function currencyExponent(code) {
+    const exponent = (0, currency_metadata_1.currencyMinorUnits)(code);
+    return exponent === 0 || exponent === 2 || exponent === 3 ? exponent : null;
+}
+function referenceQuoteUrl(base, quote, date) {
+    return `${exports.FX_API_ORIGIN}/v2/rate/${currencyCode(base)}/${currencyCode(quote)}?date=${isoDate(date)}`;
+}
+function readQuote(value, expectedBase, expectedQuote) {
+    if (typeof value !== 'object' || value === null)
+        throw new Error('Invalid FX response');
+    const row = value;
+    const base = typeof row.base === 'string' ? row.base.toUpperCase() : '';
+    const quote = typeof row.quote === 'string' ? row.quote.toUpperCase() : '';
+    if (base !== expectedBase ||
+        quote !== expectedQuote ||
+        typeof row.rate !== 'number' ||
+        !Number.isFinite(row.rate) ||
+        row.rate <= 0 ||
+        typeof row.date !== 'string' ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(row.date)) {
+        throw new Error('Invalid FX response');
+    }
+    return { base, quote, rate: row.rate, date: row.date };
+}
+function isQuoteFor(quote, base, target) {
+    try {
+        readQuote(quote, currencyCode(base), currencyCode(target));
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+async function fetchReferenceQuote(baseInput, quoteInput, date, fetchImpl = fetch, timeoutMs = 6000) {
+    const base = currencyCode(baseInput);
+    const quote = currencyCode(quoteInput);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const response = await fetchImpl(referenceQuoteUrl(base, quote, date), {
+            method: 'GET',
+            headers: { accept: 'application/json' },
+            signal: controller.signal,
+        });
+        if (!response.ok)
+            throw new Error(`FX request failed (${response.status})`);
+        return readQuote(await response.json(), base, quote);
+    }
+    finally {
+        clearTimeout(timer);
+    }
+}
+function decimalRate(rate) {
+    if (!Number.isFinite(rate) || rate <= 0)
+        throw new Error('Invalid FX rate');
+    const match = /^(\d+)(?:\.(\d+))?(?:e([+-]\d+))?$/i.exec(String(rate));
+    if (!match)
+        throw new Error('Invalid FX rate');
+    const fraction = match[2] ?? '';
+    let scale = fraction.length - Number(match[3] ?? 0);
+    let digits = BigInt(`${match[1]}${fraction}`);
+    if (scale < 0) {
+        digits *= 10n ** BigInt(-scale);
+        scale = 0;
+    }
+    if (digits <= 0n)
+        throw new Error('Invalid FX rate');
+    return { digits, scale };
+}
+function convertMinorUnits(originalMinor, originalExponent, rate, ledgerExponent) {
+    if (!Number.isSafeInteger(originalMinor) || originalMinor <= 0) {
+        throw new Error('Invalid original amount');
+    }
+    if (![0, 2, 3].includes(originalExponent) || ![0, 2, 3].includes(ledgerExponent)) {
+        throw new Error('Unsupported currency exponent');
+    }
+    const { digits, scale } = decimalRate(rate);
+    const numerator = BigInt(originalMinor) * digits * 10n ** BigInt(ledgerExponent);
+    const denominator = 10n ** BigInt(scale + originalExponent);
+    const result = (numerator * 2n + denominator) / (denominator * 2n);
+    if (result <= 0n || result > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new Error('Converted amount out of range');
+    }
+    return Number(result);
+}
+function convertOriginalMinorToLocalFils(originalMinor, rate) {
+    if (!Number.isSafeInteger(originalMinor) || originalMinor <= 0) {
+        throw new Error('Invalid original amount');
+    }
+    if (!Number.isFinite(rate) || rate <= 0)
+        throw new Error('Invalid FX rate');
+    return Math.round(originalMinor * rate);
+}
+function originalMoneyOf(tx) {
+    const currency = typeof tx.originalCurrency === 'string' ? tx.originalCurrency.toUpperCase() : '';
+    if (!/^[A-Z]{3}$/.test(currency))
+        return null;
+    if (tx.originalExponent !== undefined &&
+        (tx.originalExponent === 0 || tx.originalExponent === 2 || tx.originalExponent === 3) &&
+        Number.isSafeInteger(tx.originalMinorUnits) && (tx.originalMinorUnits ?? 0) > 0) {
+        return { currency, minorUnits: tx.originalMinorUnits, exponent: tx.originalExponent };
+    }
+    if (Number.isSafeInteger(tx.originalAmountMinor) && (tx.originalAmountMinor ?? 0) > 0) {
+        return { currency, minorUnits: tx.originalAmountMinor, exponent: 2 };
+    }
+    return null;
+}
+function originalMoneyFields(money) {
+    const currency = currencyCode(money.currency);
+    if (!Number.isSafeInteger(money.minorUnits) || money.minorUnits <= 0 ||
+        ![0, 2, 3].includes(money.exponent))
+        throw new Error('Invalid original amount');
+    let legacy;
+    if (money.exponent === 2)
+        legacy = money.minorUnits;
+    else if (money.exponent === 0)
+        legacy = money.minorUnits * 100;
+    else if (money.minorUnits % 10 === 0)
+        legacy = money.minorUnits / 10;
+    return {
+        originalCurrency: currency,
+        ...(legacy !== undefined && Number.isSafeInteger(legacy) ? { originalAmountMinor: legacy } : {}),
+        originalMinorUnits: money.minorUnits,
+        originalExponent: money.exponent,
+    };
+}
+async function buildReferenceFxUpdates(transactions, localCurrency, load = fetchReferenceQuote, maxQuotes = 16, ledgerExponent = 2) {
+    const quoteCurrency = currencyCode(localCurrency);
+    const pending = transactions.flatMap((tx) => {
+        if (tx.fxSource !== 'fallback')
+            return [];
+        const original = originalMoneyOf(tx);
+        return original && original.currency !== quoteCurrency ? [{ tx, original }] : [];
+    });
+    const keys = [
+        ...new Set(pending.map(({ tx, original }) => `${original.currency}|${isoDate(tx.date)}`)),
+    ].slice(0, Math.max(0, maxQuotes));
+    const quotes = await Promise.all(keys.map(async (key) => {
+        const [base, date] = key.split('|');
+        try {
+            const quote = await load(base, quoteCurrency, date);
+            return [key, isQuoteFor(quote, base, quoteCurrency) ? quote : null];
+        }
+        catch {
+            return [key, null];
+        }
+    }));
+    const byKey = new Map(quotes);
+    const updates = [];
+    for (const { tx, original } of pending) {
+        const quote = byKey.get(`${original.currency}|${isoDate(tx.date)}`);
+        if (!quote)
+            continue;
+        let amountFils;
+        try {
+            amountFils = convertMinorUnits(original.minorUnits, original.exponent, quote.rate, ledgerExponent);
+        }
+        catch {
+            continue;
+        }
+        updates.push({
+            id: tx.id,
+            amountFils,
+            fxRate: quote.rate,
+            fxRateDate: quote.date,
+            fxSource: 'reference',
+        });
+    }
+    return updates;
+}
+function formatOriginalCurrency(amountMinor, currency, _language, exponent = 2) {
+    const code = currencyCode(currency);
+    const spec = { schemaVersion: 2, currency: code, exponent };
+    return `${code} ${(0, ledger_money_1.formatMinorUnits)(amountMinor, spec, { decimals: true })}`;
+}
+},
+"fx-rates":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.originalMoneyOf = exports.convertForeignConfirmation = exports.statedLedgerAmount = void 0;
+exports.quoteFitsDay = quoteFitsDay;
+exports.rememberReferenceQuote = rememberReferenceQuote;
+exports.clearReferenceQuoteCache = clearReferenceQuoteCache;
+exports.quoteFromLedger = quoteFromLedger;
+exports.cachedReferenceQuote = cachedReferenceQuote;
+exports.loadReferenceQuote = loadReferenceQuote;
+exports.convertWithReferenceQuote = convertWithReferenceQuote;
+exports.bankStatedConversion = bankStatedConversion;
+const fx_1 = require("@/lib/fx");
+Object.defineProperty(exports, "originalMoneyOf", { enumerable: true, get: function () { return fx_1.originalMoneyOf; } });
+const MAX_CACHED = 512;
+const memory = new Map();
+const failures = new Map();
+const FAILURE_BACKOFF_MS = 60000;
+const code = (value) => {
+    const normalized = value.trim().toUpperCase();
+    return /^[A-Z]{3}$/.test(normalized) ? normalized : null;
+};
+const validDay = (value) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value))
+        return false;
+    const parsed = new Date(`${value}T00:00:00Z`);
+    return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+};
+const keyOf = (base, quote, date) => `${base}|${quote}|${date}`;
+const MAX_QUOTE_AGE_DAYS = 7;
+function quoteFitsDay(quote, day) {
+    if (!quote || !validDay(day) || !validDay(quote.date) || quote.date > day)
+        return false;
+    const age = (Date.parse(`${day}T00:00:00Z`) - Date.parse(`${quote.date}T00:00:00Z`)) / 86400000;
+    return age <= MAX_QUOTE_AGE_DAYS;
+}
+function rememberReferenceQuote(requestedDate, quote) {
+    if (!validDay(requestedDate) || !(0, fx_1.isQuoteFor)(quote, quote.base, quote.quote))
+        return;
+    const key = keyOf(quote.base.toUpperCase(), quote.quote.toUpperCase(), requestedDate);
+    memory.delete(key);
+    memory.set(key, { base: quote.base.toUpperCase(), quote: quote.quote.toUpperCase(), rate: quote.rate, date: quote.date });
+    failures.delete(key);
+    while (memory.size > MAX_CACHED)
+        memory.delete(memory.keys().next().value);
+}
+function clearReferenceQuoteCache() {
+    memory.clear();
+    failures.clear();
+}
+function quoteFromLedger(transactions, baseInput, quoteInput, date) {
+    const base = code(baseInput);
+    const quote = code(quoteInput);
+    if (!base || !quote || !transactions || !validDay(date))
+        return null;
+    for (const tx of transactions) {
+        if (tx.fxSource !== 'reference' || tx.date !== date || tx.originalCurrency?.toUpperCase() !== base)
+            continue;
+        const candidate = { base, quote, rate: tx.fxRate, date: tx.fxRateDate };
+        if ((0, fx_1.isQuoteFor)(candidate, base, quote) && quoteFitsDay(candidate, date))
+            return candidate;
+    }
+    return null;
+}
+function cachedReferenceQuote(baseInput, quoteInput, date, transactions) {
+    const base = code(baseInput);
+    const quote = code(quoteInput);
+    if (!base || !quote || base === quote || !validDay(date))
+        return null;
+    const cached = memory.get(keyOf(base, quote, date));
+    if (cached)
+        return cached;
+    return quoteFromLedger(transactions, base, quote, date);
+}
+async function loadReferenceQuote(baseInput, quoteInput, date, options = {}) {
+    const base = code(baseInput);
+    const quote = code(quoteInput);
+    if (!base || !quote || base === quote || !validDay(date))
+        return null;
+    const cached = cachedReferenceQuote(base, quote, date, options.transactions);
+    if (cached)
+        return cached;
+    const key = keyOf(base, quote, date);
+    const now = options.now ?? Date.now();
+    const failedAt = failures.get(key);
+    if (failedAt !== undefined && now - failedAt < FAILURE_BACKOFF_MS)
+        return null;
+    try {
+        const fetched = await (0, fx_1.fetchReferenceQuote)(base, quote, date, options.fetchImpl ?? fetch);
+        rememberReferenceQuote(date, fetched);
+        return fetched;
+    }
+    catch {
+        failures.set(key, now);
+        return null;
+    }
+}
+function convertWithReferenceQuote(original, ledgerCurrency, ledgerExponent, quote) {
+    const target = code(ledgerCurrency);
+    if (!target || !quote || !(0, fx_1.isQuoteFor)(quote, original.currency, target))
+        return null;
+    if ((0, fx_1.currencyExponent)(original.currency) !== original.exponent)
+        return null;
+    try {
+        const amountFils = (0, fx_1.convertMinorUnits)(original.minorUnits, original.exponent, quote.rate, ledgerExponent);
+        return {
+            amountFils,
+            fields: {
+                ...(0, fx_1.originalMoneyFields)(original),
+                fxRate: quote.rate,
+                fxRateDate: quote.date,
+                fxSource: 'reference',
+            },
+        };
+    }
+    catch {
+        return null;
+    }
+}
+function bankStatedConversion(original, chargedLedgerMinor, ledgerExponent) {
+    if (!Number.isSafeInteger(chargedLedgerMinor) || chargedLedgerMinor <= 0)
+        return null;
+    if ((0, fx_1.currencyExponent)(original.currency) !== original.exponent)
+        return null;
+    const rate = (chargedLedgerMinor / 10 ** ledgerExponent) / (original.minorUnits / 10 ** original.exponent);
+    if (!Number.isFinite(rate) || rate <= 0)
+        return null;
+    try {
+        return {
+            amountFils: chargedLedgerMinor,
+            fields: { ...(0, fx_1.originalMoneyFields)(original), fxRate: rate, fxSource: 'bank' },
+        };
+    }
+    catch {
+        return null;
+    }
+}
+const statedLedgerAmount = (event, ledgerCurrency, ledgerExponent, options = {}) => {
+    const candidates = [
+        ...(event.amount?.evidence === 'explicit' && event.amount.value ? [event.amount.value] : []),
+        ...(Array.isArray(event.observations) ? event.observations : [])
+            .filter((observation) => observation?.role === 'transaction' ||
+            (options.includeUnknownRole === true && observation?.role === 'unknown'))
+            .flatMap((observation) => [
+            ...(observation.field?.value ? [observation.field.value] : []),
+            ...(Array.isArray(observation.field?.alternatives) ? observation.field.alternatives : []),
+        ]),
+    ];
+    const figures = new Set(candidates
+        .filter((money) => money && money.currency === ledgerCurrency && money.exponent === ledgerExponent &&
+        typeof money.minorUnits === 'string' && /^[1-9]\d{0,15}$/.test(money.minorUnits))
+        .map((money) => money.minorUnits));
+    if (figures.size !== 1)
+        return null;
+    const minor = Number([...figures][0]);
+    return Number.isSafeInteger(minor) && minor > 0 ? minor : null;
+};
+exports.statedLedgerAmount = statedLedgerAmount;
+const convertForeignConfirmation = (event, selected, ledger, fxQuote, options = {}) => {
+    if (![0, 2, 3].includes(selected.exponent) || ![0, 2, 3].includes(ledger.exponent))
+        return 'invalid-money';
+    const original = {
+        currency: selected.currency,
+        minorUnits: selected.minorUnits,
+        exponent: selected.exponent,
+    };
+    const ledgerExponent = ledger.exponent;
+    const quote = fxQuote && (0, fx_1.isQuoteFor)(fxQuote, original.currency, ledger.currency) ? fxQuote : null;
+    const charged = event
+        ? (0, exports.statedLedgerAmount)(event, ledger.currency, ledger.exponent, { includeUnknownRole: quote !== null })
+        : null;
+    if (charged !== null && (quote || !options.requireQuoteForStated)) {
+        const stated = bankStatedConversion(original, charged, ledgerExponent);
+        const ratio = stated && quote ? stated.fields.fxRate / quote.rate : 1;
+        if (stated && ratio <= 1.25 && ratio >= 0.8)
+            return stated;
+        if (!stated && !quote)
+            return 'invalid-money';
+    }
+    if (!quote)
+        return 'fx-rate-unavailable';
+    return convertWithReferenceQuote(original, ledger.currency, ledgerExponent, quote) ??
+        'fx-rate-unavailable';
+};
+exports.convertForeignConfirmation = convertForeignConfirmation;
+},
+"gulf-neighbour-alerts":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.gulfNeighbourReadSource = exports.isGulfNeighbourMarket = exports.GULF_NEIGHBOUR_CURRENCY = void 0;
+exports.decideGulfNeighbourPosting = decideGulfNeighbourPosting;
+const best_effort_autopost_1 = require("@/lib/best-effort-autopost");
+const country_1 = require("@/lib/country");
+const currency_metadata_1 = require("@/lib/currency-metadata");
+const fx_rates_1 = require("@/lib/fx-rates");
+const gulf_neighbour_templates_1 = require("@/lib/gulf-neighbour-templates");
+const sms_parser_1 = require("@/lib/sms-parser");
+const universal_parser_1 = require("@/lib/universal-parser");
+exports.GULF_NEIGHBOUR_CURRENCY = { QA: 'QAR', KW: 'KWD', BH: 'BHD', OM: 'OMR' };
+const isGulfNeighbourMarket = (market) => !!market && Object.prototype.hasOwnProperty.call(exports.GULF_NEIGHBOUR_CURRENCY, market);
+exports.isGulfNeighbourMarket = isGulfNeighbourMarket;
+const latinBeside = (token) => new RegExp(String.raw `(?<![\p{L}\p{N}])${token}(?=\s{0,3}\d)|(?<=\d\s{0,3})${token}(?![\p{L}\p{N}])`, 'giu');
+const QR_BESIDE_MONEY = /(?<![\p{L}\p{N}])QR(?=\s{0,3}\d{1,3}(?:,\d{3})*\.\d{2}(?!\d))|(?<=(?<![\d.,])\d{1,3}(?:,\d{3})*\.\d{2}\s{0,3})QR(?![\p{L}\p{N}])/giu;
+const LOCAL_SPELLINGS = {
+    QA: [/ر\.\s?ق\.?/gu, /ريال\s+قطري/gu, QR_BESIDE_MONEY],
+    KW: [/د\.\s?ك\.?/gu, /دينار\s+كويتي/gu, latinBeside('KD')],
+    BH: [/د\.\s?ب\.?/gu, /دينار\s+بحريني/gu, latinBeside('BD')],
+    OM: [/ر\.\s?ع\.?/gu, /ريال\s+عماني/gu, latinBeside(String.raw `R\.O\.?`), latinBeside('RO')],
+};
+const spellingEdits = (source, market) => {
+    const found = [];
+    for (const pattern of LOCAL_SPELLINGS[market]) {
+        for (const match of source.matchAll(new RegExp(pattern.source, pattern.flags))) {
+            const start = match.index;
+            const end = start + match[0].length;
+            if (!found.some((edit) => start < edit.end && end > edit.start))
+                found.push({ start, end, original: match[0] });
+        }
+    }
+    return found.sort((a, b) => a.start - b.start);
+};
+const applyEdits = (source, market, edits) => {
+    const iso = exports.GULF_NEIGHBOUR_CURRENCY[market];
+    let text = '';
+    let at = 0;
+    const spans = [];
+    for (const edit of edits) {
+        text += source.slice(at, edit.start);
+        spans.push({ start: text.length, end: text.length + iso.length });
+        text += iso;
+        at = edit.end;
+    }
+    return { text: text + source.slice(at), spans };
+};
+const gulfNeighbourReadSource = (source, market) => applyEdits(source, market, spellingEdits(source, market)).text;
+exports.gulfNeighbourReadSource = gulfNeighbourReadSource;
+const COMPLETION = /\b(?:purchase\s+of|(?:was|has\s+been)\s+used\s+(?:for|at)|debited|credited|deducted|withdrawn|deposited|paid|spent|refunded|transferred|received|charged|was\s+successful)\b|تمت?\s+(?:عملية\s+)?(?:ال)?(?:خصم|إيداع|ايداع|تحويل|سداد|سحب|شراء|استرداد|قيد|إضافة|اضافة|دفع)/iu;
+const CARD_BILL_PAYMENT = /\bcard\b(?:[^.\n]|\.(?=\d)){0,40}\b(?:bill|dues?|outstanding|statement\s+balance)\b(?:[^.\n]|\.(?=\d)){0,60}\b(?:paid|settled|received)\b|\b(?:payment|repayment)\b(?:[^.\n]|\.(?=\d)){0,40}\b(?:towards|to|for)\s+(?:your\s+)?(?:credit\s+)?card\b|(?:سداد|تسديد|دفع)\s+(?:فاتورة\s+|مستحقات\s+)?(?:ال)?بطاق/iu;
+const LIMIT_CHANGE = /\blimit\b[^.\n]{0,40}\b(?:increased|decreased|reduced|changed|updated|revised|enhanced|raised)\b|\b(?:increase|decrease|reduction|change)\s+(?:of|in|to)\s+(?:your\s+)?(?:credit\s+|card\s+)?limit\b|(?:رفع|زيادة|تخفيض|تعديل|تغيير)\s+(?:ال)?حد/iu;
+const BLOCKING_ISSUES = new Set([
+    'direction-conflict', 'multiple-event-adapter-required', 'authentication-not-posting',
+    'authentication-or-otp', 'pending-not-posting', 'promotion-not-posting', 'settlement-adapter-required',
+    'failed-not-posting',
+]);
+const POSTABLE_FAMILIES = new Set([
+    'purchase', 'cash-withdrawal', 'refund', 'fee', 'utility', 'recurring-payment', 'transfer',
+]);
+const localIsoDay = (epochMs) => {
+    if (epochMs === undefined || !Number.isFinite(epochMs))
+        return null;
+    const day = new Date(epochMs);
+    if (!Number.isFinite(day.getTime()))
+        return null;
+    return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+};
+const grammarReading = (read, own, input) => {
+    const parsed = (0, sms_parser_1.parseSms)(read, input.overrides ?? {}, {
+        sender: input.sender, observedAt: input.observedAt, fxLookup: () => null,
+    });
+    if (!parsed || parsed.kind !== 'transaction')
+        return 'grammar-unmatched';
+    if (parsed.originalCurrency !== own || parsed.fxSource !== 'fallback' ||
+        parsed.originalExponent !== (0, currency_metadata_1.currencyMinorUnits)(own) ||
+        !Number.isSafeInteger(parsed.originalMinorUnits) || (parsed.originalMinorUnits ?? 0) <= 0) {
+        return 'currency-mismatch';
+    }
+    const { amountFils: _amount, currency: _currency, raw: _raw, type, originalAmountMinor: _legacy, originalCurrency: _originalCurrency, originalMinorUnits, originalExponent: _exponent, fxRate: _rate, fxRateDate: _rateDate, fxSource: _source, snapshotFils: _snapshot, snapshotKind: _snapshotKind, bankHint: _bank, ...row } = parsed;
+    return {
+        type, minorUnits: originalMinorUnits, date: parsed.date,
+        row: { ...row, snapshotFils: null, snapshotKind: null }, templateId: null,
+    };
+};
+const directionOf = (type) => type === 'expense' ? 'debit' : 'credit';
+function decideGulfNeighbourPosting(input) {
+    const review = (reason) => ({ outcome: 'review', reason });
+    const market = (0, exports.isGulfNeighbourMarket)(input.routedMarket) ? input.routedMarket : null;
+    if (!market || !input.institution)
+        return { outcome: 'not-applicable' };
+    if (!input.enabled)
+        return review('disabled');
+    if ((0, best_effort_autopost_1.hasNonCompletedWording)(input.source, null, input.sender) || (0, best_effort_autopost_1.isNotAutoPostableMoney)(input.source) ||
+        LIMIT_CHANGE.test(input.source))
+        return review('non-posting-wording');
+    if (CARD_BILL_PAYMENT.test(input.source))
+        return review('card-payment');
+    const own = exports.GULF_NEIGHBOUR_CURRENCY[market];
+    const exponent = (0, currency_metadata_1.currencyMinorUnits)(own);
+    const edits = spellingEdits(input.source, market);
+    const rewritten = applyEdits(input.source, market, edits);
+    const read = rewritten.text;
+    const event = (0, universal_parser_1.inspectUniversalBankEvent)(read, {
+        sender: input.sender, market, dateOrder: (0, country_1.dateOrderForCountry)(market) ?? undefined,
+    });
+    const moneySpans = event.observations
+        .filter((observation) => observation.role !== 'unknown')
+        .flatMap((observation) => observation.field.spans);
+    const grammarRead = applyEdits(input.source, market, edits.filter((_edit, index) => {
+        const span = rewritten.spans[index];
+        return moneySpans.some((money) => span.start < money.end && span.end > money.start);
+    })).text;
+    if (event.decision !== 'review' || event.status !== 'posted' ||
+        ['statement', 'balance', 'authentication', 'bill', 'card-payment'].includes(event.family) ||
+        event.issues.some((issue) => BLOCKING_ISSUES.has(issue))) {
+        return review('not-posted');
+    }
+    let reading;
+    const template = market === 'OM' && input.institution.id === 'bank-muscat'
+        ? (0, gulf_neighbour_templates_1.readBankMuscatCardPurchase)(input.source)
+        : null;
+    if (template) {
+        const classified = (0, sms_parser_1.classifyMerchantDescription)(template.merchant, 'expense', null);
+        reading = {
+            type: 'expense', minorUnits: template.minorUnits, date: template.date,
+            row: {
+                kind: 'transaction', merchant: classified.merchant, date: template.date, dueDay: null, minDueFils: null,
+                card: { last4: template.last4, kind: 'account' }, reference: null, transferHint: false,
+                snapshotFils: null, snapshotKind: null, categoryGuess: classified.categoryGuess,
+                categoryDeliberate: classified.categoryDeliberate,
+            },
+            templateId: input.institution.sender ? template.templateId : null,
+        };
+    }
+    else {
+        if (!COMPLETION.test(read))
+            return review('no-completion-verb');
+        const grammar = grammarReading(grammarRead, own, input);
+        if (typeof grammar === 'string')
+            return review(grammar);
+        reading = grammar;
+    }
+    const universal = event.amount.evidence === 'explicit' ? event.amount.value : null;
+    if (!universal || universal.currency !== own || universal.exponent !== exponent ||
+        universal.minorUnits !== String(reading.minorUnits)) {
+        return review('readers-disagree');
+    }
+    const direction = directionOf(reading.type);
+    if (event.direction !== direction && event.direction !== 'unknown')
+        return review('readers-disagree');
+    if (template && (event.family !== 'purchase' || event.direction !== 'debit'))
+        return review('readers-disagree');
+    const stated = event.transactionDate.evidence === 'explicit' ? event.transactionDate.value : null;
+    if (stated && reading.date && stated !== reading.date)
+        return review('readers-disagree');
+    const date = reading.date ?? stated;
+    const today = localIsoDay(input.observedAt);
+    if (date !== null && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || (today !== null && date > today))) {
+        return review('future-dated');
+    }
+    let amountFils = reading.minorUnits;
+    let fx = {};
+    if (input.ledgerCurrency !== own) {
+        const ledgerExponent = input.ledgerExponent;
+        if (ledgerExponent !== 0 && ledgerExponent !== 2 && ledgerExponent !== 3)
+            return review('invalid-money');
+        const day = date ?? today;
+        if (!day)
+            return review('fx-rate-unavailable');
+        const quote = input.fxLookup(own, input.ledgerCurrency, day);
+        const converted = (0, fx_rates_1.convertForeignConfirmation)(event, { currency: own, minorUnits: reading.minorUnits, exponent }, { currency: input.ledgerCurrency, exponent: ledgerExponent }, (0, fx_rates_1.quoteFitsDay)(quote, day) ? quote : null, { requireQuoteForStated: true });
+        if (converted === 'fx-rate-unavailable')
+            return review('fx-rate-unavailable');
+        if (converted === 'invalid-money')
+            return review('invalid-money');
+        amountFils = converted.amountFils;
+        fx = converted.fields;
+    }
+    else if (input.ledgerExponent !== null && input.ledgerExponent !== exponent) {
+        return review('invalid-money');
+    }
+    if (!Number.isSafeInteger(amountFils) || amountFils <= 0)
+        return review('invalid-money');
+    const family = reading.row.categoryGuess === 'cash-withdrawal' ? 'cash-withdrawal'
+        : reading.row.transferHint ? 'transfer'
+            : POSTABLE_FAMILIES.has(event.family) ? event.family
+                : reading.type === 'income' ? 'transfer' : 'purchase';
+    const marker = { v: 1, format: `universal:${family}:${direction}`, market };
+    const parsed = {
+        ...reading.row,
+        kind: 'transaction',
+        type: reading.type,
+        amountFils,
+        currency: input.ledgerCurrency,
+        ...fx,
+        date,
+        ...(reading.templateId ? {} : { bestEffort: marker }),
+        raw: input.source.trim(),
+    };
+    return { outcome: 'post', parsed, templateId: reading.templateId };
+}
+},
+"gulf-neighbour-templates":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.normalizeTemplateSource = exports.templateVetoed = exports.BANK_MUSCAT_CARD_PURCHASE_TEMPLATE = void 0;
+exports.readBankMuscatCardPurchase = readBankMuscatCardPurchase;
+const best_effort_autopost_1 = require("@/lib/best-effort-autopost");
+exports.BANK_MUSCAT_CARD_PURCHASE_TEMPLATE = /^تم خصم (?:OMR ?(?<pre>(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{3})|(?<post>(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{3}) ?OMR) من حسابك رقم [Xx*]{3,}(?<last4>\d{4}) ب[إا]ستخدام بطاقة الخصم المباشر في (?<merchant>[A-Za-z0-9&'*/-](?:[A-Za-z0-9&'*/ -]|\.(?! )){1,95}) بتاريخ (?<y>\d{4})\/(?<m>\d{2})\/(?<d>\d{2}) \d{2}:\d{2}:\d{2}\. رصيدك الحالي هو -?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{3} OMR\.?$/u;
+const TEMPLATE_VETO = /\b(?:refund(?:ed|s)?|return(?:ed|s)?|revers(?:al|ed|e)|blocked|suspended|disputed?|chargeback|transaction|txn|amount|unsuccessful|fail(?:ed|ure|s)?|declined|pending|hold)\b|إلغاء|الغاء|ألغي|الغي|ملغ|مرفوض|رفض|فشل|لم\s+تتم|لم\s+تنجح|غير\s+(?:ناجح|مكتمل)|تعليق|إيقاف|ايقاف|استرجاع|استرداد|إرجاع|ارجاع|إعادة|اعادة|بانتظار|قيد\s+(?:المراجعة|المعالجة)|معلق|لا\s+تشارك|إذا\s+لم\s+تقم|اذا\s+لم\s+تقم/iu;
+const templateVetoed = (source) => (0, best_effort_autopost_1.hasNonCompletedWording)(source) || TEMPLATE_VETO.test(source);
+exports.templateVetoed = templateVetoed;
+const normalizeTemplateSource = (source) => source.slice(0, 4096).normalize('NFKC').replace(/\s+/gu, ' ').trim();
+exports.normalizeTemplateSource = normalizeTemplateSource;
+const stripTerminalIds = (merchant) => merchant
+    .replace(/^\d{4,}\s?-\s?/u, '')
+    .replace(/\s?-\s?\d{4,}(?=\s|$)/gu, '')
+    .replace(/\s+/gu, ' ')
+    .trim();
+const validDay = (y, m, d) => {
+    const year = Number(y);
+    const month = Number(m);
+    const day = Number(d);
+    if (year < 2000 || month < 1 || month > 12 || day < 1)
+        return null;
+    const last = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    return day <= last ? `${y}-${m}-${d}` : null;
+};
+function readBankMuscatCardPurchase(source) {
+    const normalized = (0, exports.normalizeTemplateSource)(source);
+    if ((0, exports.templateVetoed)(normalized))
+        return null;
+    const match = exports.BANK_MUSCAT_CARD_PURCHASE_TEMPLATE.exec(normalized);
+    if (!match?.groups)
+        return null;
+    const figure = match.groups.pre ?? match.groups.post;
+    if (!figure)
+        return null;
+    const minorUnits = Number(figure.replace(/[,.]/g, ''));
+    if (!Number.isSafeInteger(minorUnits) || minorUnits <= 0)
+        return null;
+    const merchant = stripTerminalIds(match.groups.merchant);
+    if (!/\p{L}{2}/u.test(merchant) || merchant.length > 80)
+        return null;
+    const date = validDay(match.groups.y, match.groups.m, match.groups.d);
+    if (!date)
+        return null;
+    return {
+        templateId: 'om-bank-muscat-card-purchase-v1',
+        market: 'OM',
+        institution: 'bank-muscat',
+        family: 'purchase',
+        direction: 'debit',
+        currency: 'OMR',
+        minorUnits,
+        exponent: 3,
+        last4: match.groups.last4,
+        merchant,
+        date,
+    };
+}
+},
+"i18n":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.getLanguage = getLanguage;
+exports.setLanguage = setLanguage;
+exports.isRTL = isRTL;
+exports.alignEnd = alignEnd;
+exports.detectLanguage = detectLanguage;
+exports.t = t;
+exports.tf = tf;
+exports.hasArabicScript = hasArabicScript;
+exports.structuralTitleLabel = structuralTitleLabel;
+const S = {
+    transactionSearchLabel: { en: 'Search transactions', ar: 'البحث في العمليات' },
+    transactionSearchPlaceholder: { en: 'Merchant or category', ar: 'التاجر أو الفئة' },
+    transactionNetPending: { en: 'Net', ar: 'الصافي' },
+    transactionConfirmedSubtotal: {
+        en: 'Confirmed entries: {amount}',
+        ar: 'العمليات المؤكدة: {amount}',
+    },
+    unresolvedTransfersSummary: {
+        en: '{count} transfer{s} excluded from Net',
+        ar: '{count} تحويلات مستبعدة من الصافي',
+    },
+    transactionDayTotal: { en: 'Day total', ar: 'إجمالي اليوم' },
+    autoAddedCheck: { en: 'Auto-added — check', ar: 'أُضيفت تلقائيًا — راجِعها' },
+    autoAddedExplain: {
+        en: 'Wafra added this from a bank message format it has not verified yet. Check the amount, date and whether money left or arrived.',
+        ar: 'أضاف وفرة هذه العملية من صيغة رسالة بنكية لم يتحقق منها بعد. راجِع المبلغ والتاريخ وهل خرج المال أم دخل.',
+    },
+    autoAddedSettingSaveFailed: {
+        en: 'This setting could not be saved. Try again.',
+        ar: 'تعذر حفظ هذا الإعداد. حاول مجدداً.',
+    },
+    autoAddedLooksRight: { en: 'Looks right', ar: 'صحيحة' },
+    autoAddedUndo: { en: 'Undo — remove', ar: 'تراجع — احذفها' },
+    autoAddedUndoConfirm: { en: 'Remove this auto-added entry?', ar: 'حذف هذه العملية المضافة تلقائيًا؟' },
+    autoAddedUndoHint: {
+        en: 'Removes this entry. This alert will not be added again.',
+        ar: 'يحذف هذه العملية، ولن تُضاف هذه الرسالة مرة أخرى.',
+    },
+    autoAddedFilter: { en: 'Auto-added to check', ar: 'مضافة تلقائيًا للمراجعة' },
+    autoAddedCount: {
+        en: '{count} auto-added to check',
+        ar: 'عمليات مضافة تلقائيًا للمراجعة: {count}',
+    },
+    autoAddedSettingTitle: {
+        en: 'Auto-add alerts from unverified bank formats',
+        ar: 'إضافة رسائل البنوك غير المُتحقَّق منها تلقائيًا',
+    },
+    autoAddedSettingBody: {
+        en: 'On: completed payments in these formats are added, marked “Auto-added — check”. Off: they wait in Review.',
+        ar: 'التشغيل: تُضاف الدفعات المكتملة من هذه الصيغ بعلامة «أُضيفت تلقائيًا — راجِعها». الإيقاف: تبقى للمراجعة.',
+    },
+    rememberThisBill: { en: 'Remember this bill?', ar: 'تذكّر هذه الفاتورة؟' },
+    billAliasAlso: {
+        en: 'Use {title} · {category} for {n} matching past payment{s} and future payments from this biller.',
+        ar: 'استخدم {title} · {category} لعدد {n} من الدفعات السابقة المطابقة وللدفعات القادمة لهذا المفوتر.',
+    },
+    billAliasFuture: {
+        en: 'Future matching payments from this biller will use {title} · {category}.',
+        ar: 'ستستخدم الدفعات القادمة المطابقة لهذا المفوتر {title} · {category}.',
+    },
+    registeredBillPayment: { en: 'Bill payment', ar: 'دفعة فاتورة' },
+    billPatternHint: {
+        en: 'Wafra found {count} payments with this same bill reference. If the bank’s name is unclear, edit it once and Wafra can remember the name and category for matching payments.',
+        ar: 'وجد وفرة {count} دفعات تحمل مرجع الفاتورة نفسه. إذا كان اسم البنك غير واضح، عدّله مرة واحدة ويمكن لوفرة تذكّر الاسم والفئة للدفعات المطابقة.',
+    },
+    accountTransferHistory: { en: 'Transfers', ar: 'التحويلات' },
+    transactionDateLabel: { en: 'Transaction date', ar: 'تاريخ العملية' },
+    ledgerCurrencyTitle: { en: 'Ledger currency', ar: 'عملة السجل' },
+    ledgerCurrencyBody: {
+        en: 'Choose the currency your main ledger is recorded in. You can still track purchases made in other currencies.',
+        ar: 'اختر العملة التي يُسجّل بها سجلك الرئيسي. يمكنك مع ذلك تتبع المشتريات بعملات أخرى.',
+    },
+    chooseLedgerCurrency: { en: 'Choose currency', ar: 'اختر العملة' },
+    ledgerCurrencyRequiredHint: {
+        en: 'Required before your first manual entry.',
+        ar: 'مطلوبة قبل أول عملية يدوية.',
+    },
+    ledgerCurrencyPermanentHint: {
+        en: 'Locked after money is recorded to protect historical amounts.',
+        ar: 'تُثبّت بعد تسجيل المال لحماية المبالغ التاريخية.',
+    },
+    currencyPhoneSuggestion: {
+        en: 'Your phone suggests {currency}. Confirm the currency you actually use.',
+        ar: 'يقترح هاتفك {currency}. أكّد العملة التي تستخدمها فعلياً.',
+    },
+    currencySuggestedByPhone: { en: 'Suggested by your phone region', ar: 'مقترحة حسب منطقة الهاتف' },
+    currencyDecimalPlaces: { en: '{count} decimal places', ar: '{count} منازل عشرية' },
+    searchCurrency: { en: 'Search currency code', ar: 'ابحث عن رمز العملة' },
+    currencyCodeExample: { en: 'USD, EUR, JPY…', ar: 'USD، EUR، JPY…' },
+    currencyNotSupported: {
+        en: 'That currency is not supported for a Wafra ledger yet.',
+        ar: 'هذه العملة غير مدعومة لسجل وفرة حالياً.',
+    },
+    instantSmsDisclosureTitle: {
+        en: 'Allow live bank-SMS delivery?',
+        ar: 'السماح باستقبال رسائل البنك فور وصولها؟',
+    },
+    instantSmsDisclosureBody: {
+        en: 'To show an instant transaction alert, Wafra receives SMS as they arrive and checks them on this device for financial activity. Raw message text is not uploaded or kept by Wafra after the delivery check, and non-financial messages are ignored. This is separate from inbox-history access.',
+        ar: 'لعرض تنبيه فوري للعملية، يستقبل وفرة رسائل SMS عند وصولها ويفحصها على هذا الجهاز بحثاً عن نشاط مالي. لا يرفع وفرة نص الرسالة الخام ولا يحتفظ به بعد فحص الوصول، ويتجاهل الرسائل غير المالية. هذا الإذن منفصل عن الوصول إلى سجل الرسائل.',
+    },
+    bankPushNoticeTitle: { en: 'Bank transaction added', ar: 'تمت إضافة عملية بنكية' },
+    bankPushNoticeBody: {
+        en: '{merchant} was added to Wafra.',
+        ar: 'تمت إضافة {merchant} إلى وفرة.',
+    },
+    bankPushNoticeGroupTitle: {
+        en: '{count} bank transactions added',
+        ar: 'تمت إضافة {count} عمليات بنكية',
+    },
+    bankPushNoticeGroupBody: {
+        en: 'Wafra updated your ledger automatically.',
+        ar: 'حدّثت وفرة سجلك تلقائياً.',
+    },
+    liveTransactionAdded: { en: 'Transaction added to Wafra', ar: 'تمت إضافة العملية إلى وفرة' },
+    liveTransactionsAdded: {
+        en: '{count} transactions added to Wafra',
+        ar: 'تمت إضافة {count} عمليات إلى وفرة',
+    },
+    testerDiagnosticsSend: { en: 'Send test diagnostics', ar: 'إرسال تشخيص الاختبار' },
+    testerDiagnosticsCollecting: { en: 'Collecting diagnostics…', ar: 'جارٍ جمع التشخيص…' },
+    testerDiagnosticsChecked: { en: '{count} messages checked', ar: 'تم فحص {count} رسالة' },
+    testerDiagnosticsSending: { en: 'Sending diagnostics…', ar: 'جارٍ إرسال التشخيص…' },
+    testerDiagnosticsDetail: {
+        en: 'Sends one privacy-safe report to Wafra Cloudflare with performance, parser/category, SMS import and bank-notification health. Raw SMS, names, card/account numbers and exact amounts are not uploaded.',
+        ar: 'يرسل تقريراً واحداً آمناً للخصوصية إلى Cloudflare يتضمن الأداء والمحلل والتصنيفات واستيراد SMS وحالة إشعارات البنوك. لا يتم رفع نص الرسائل أو الأسماء أو أرقام البطاقات/الحسابات أو المبالغ الدقيقة.',
+    },
+    testerDiagnosticsSentTitle: { en: 'Diagnostics sent', ar: 'تم إرسال التشخيص' },
+    testerDiagnosticsSentBody: {
+        en: 'Report ID: {id}\n\nKeep this ID so the report can be retrieved from Cloudflare.',
+        ar: 'معرّف التقرير: {id}\n\nاحتفظ بهذا المعرّف لاسترجاع التقرير من Cloudflare.',
+    },
+    testerDiagnosticsFailedTitle: { en: 'Could not send diagnostics', ar: 'تعذر إرسال التشخيص' },
+    testerDiagnosticsFailedBody: {
+        en: 'Delivery could not be confirmed. Check your connection and try again.',
+        ar: 'تعذر تأكيد وصول التقرير. تحقق من الاتصال وحاول مرة أخرى.',
+    },
+    filterUpdating: { en: 'Updating results…', ar: 'جارٍ تحديث النتائج…' },
+    incomeAccountReview: { en: 'Account needs review', ar: 'الحساب بحاجة إلى مراجعة' },
+    incomeAccountReviewBody: { en: 'This payment counts as income, but the message did not identify its bank account. Edit this entry to select the correct account. No bank balance has been inferred.', ar: 'تُحتسب هذه الدفعة ضمن الدخل، لكن الرسالة لم تحدد حسابها المصرفي. عدّل العملية لاختيار الحساب الصحيح. لم يتم افتراض أي رصيد مصرفي.' },
+    tabHome: { en: 'Home', ar: 'الرئيسية' },
+    tabFlow: { en: 'Spending', ar: 'الإنفاق' },
+    tabBills: { en: 'Bills', ar: 'الفواتير' },
+    tabWallet: { en: 'Accounts', ar: 'الحسابات' },
+    tabAdd: { en: 'Add an entry', ar: 'إضافة عملية' },
+    tabAddHint: {
+        en: 'Opens the cash entry form',
+        ar: 'يفتح نموذج إضافة عملية نقدية',
+    },
+    cancel: { en: 'Cancel', ar: 'إلغاء' },
+    back: { en: 'Back', ar: 'رجوع' },
+    close: { en: 'Close', ar: 'إغلاق' },
+    delete: { en: 'Delete', ar: 'حذف' },
+    save: { en: 'Save', ar: 'حفظ' },
+    seeAll: { en: 'See all', ar: 'عرض الكل' },
+    markPaid: { en: 'Record as paid', ar: 'تسجيل كمدفوعة' },
+    remindMe: { en: 'Remind me', ar: 'ذكّرني' },
+    report: { en: 'Report', ar: 'التقرير' },
+    review: { en: 'Review', ar: 'مراجعة' },
+    today: { en: 'Today', ar: 'اليوم' },
+    yesterday: { en: 'Yesterday', ar: 'أمس' },
+    reportingPeriod: {
+        en: 'Reporting period: {period}. Tap to change.',
+        ar: 'فترة التقرير: {period}. اضغط للتغيير.',
+    },
+    assistantCorrectionUpdatedTitle: {
+        en: 'Updated · {title}',
+        ar: 'تم التحديث · {title}',
+    },
+    assistantCorrectionMerchantCategoryIncome: {
+        en: 'Updated {merchant} to {category} for matching income transactions.',
+        ar: 'تم تحديث {merchant} إلى {category} لعمليات الدخل المطابقة.',
+    },
+    assistantCorrectionMerchantCategoryExpense: {
+        en: 'Updated {merchant} to {category} for matching expense transactions.',
+        ar: 'تم تحديث {merchant} إلى {category} لعمليات المصروفات المطابقة.',
+    },
+    assistantCorrectionTransactionCategory: {
+        en: 'Updated that transaction to {category}.',
+        ar: 'تم تحديث تلك العملية إلى {category}.',
+    },
+    assistantCorrectionNotSubscription: {
+        en: 'Marked {merchant} as not a subscription.',
+        ar: 'تم اعتبار {merchant} غير اشتراك.',
+    },
+    assistantCorrectionTargetMissing: {
+        en: 'Correction target disappeared',
+        ar: 'لم تعد العملية المستهدفة للتصحيح متاحة',
+    },
+    assistantCorrectionOwnTransfer: {
+        en: 'Marked that transaction as a transfer involving your own accounts.',
+        ar: 'تم اعتبار تلك العملية تحويلاً بين حساباتك.',
+    },
+    assistantCorrectionExternalTransfer: {
+        en: 'Marked that transfer as involving an external party.',
+        ar: 'تم اعتبار ذلك التحويل مع طرف خارجي.',
+    },
+    goodMorning: { en: 'Good morning', ar: 'صباح الخير' },
+    goodAfternoon: { en: 'Good afternoon', ar: 'مساء الخير' },
+    goodEvening: { en: 'Good evening', ar: 'مساء الخير' },
+    heroSavedCaption: { en: 'Saved so far this month', ar: 'المدخر هذا الشهر' },
+    heroNetCaption: { en: 'Net for this period', ar: 'الصافي لهذه الفترة' },
+    inLabel: { en: 'In', ar: 'الدخل' },
+    outLabel: { en: 'Spent', ar: 'الإنفاق' },
+    cashOutLabel: { en: 'Cash out', ar: 'النقد الخارج' },
+    cashOutHint: {
+        en: 'Money that actually left your accounts, including card payments once.',
+        ar: 'الأموال التي خرجت فعلياً من حساباتك، بما فيها دفعات البطاقات مرة واحدة.',
+    },
+    cashOutBreakdown: {
+        en: 'Card repayments {cards} · bank, debit and cash {accounts}',
+        ar: 'سداد البطاقات {cards} · البنك والخصم والنقد {accounts}',
+    },
+    loadingLedger: { en: 'Loading your ledger', ar: 'جارٍ تحميل سجلك المالي' },
+    insightsHeader: { en: 'INSIGHTS', ar: 'ملاحظات' },
+    budgetsHeader: { en: 'BUDGETS', ar: 'الميزانيات' },
+    recentHeader: { en: 'RECENT ACTIVITY', ar: 'أحدث العمليات' },
+    manage: { en: 'Manage', ar: 'إدارة' },
+    cardPaymentsDue: { en: 'Card payments due', ar: 'دفعات البطاقات المستحقة' },
+    paidCardsRecently: { en: 'PAID RECENTLY', ar: 'دُفعت مؤخراً' },
+    paidCardsRecentlyHint: {
+        en: 'Statements Wafra matched to a card payment.',
+        ar: 'كشوف طابقتها وفرة مع دفعة بطاقة.',
+    },
+    paidStatementDue: { en: 'Statement due {date} · paid', ar: 'كشف مستحق {date} · مدفوع' },
+    trialEndedBanner: { en: 'Trial ended · tracking paused', ar: 'انتهت التجربة · توقف التتبع' },
+    trialEndedBannerSub: { en: 'Subscribe to keep importing your bank SMS', ar: 'اشترك لمواصلة قراءة رسائل البنك' },
+    turnOnTracking: { en: 'Turn on automatic tracking', ar: 'فعّل التتبع التلقائي' },
+    trackingPrivacy: { en: 'Wafra reads bank SMS on this device only', ar: 'وفرة تقرأ رسائل البنك على هذا الجهاز فقط' },
+    automaticCapture: { en: 'Automatic capture', ar: 'الالتقاط التلقائي' },
+    captureAndroidOn: {
+        en: 'Watching bank messages',
+        ar: 'يراقب رسائل البنك',
+    },
+    captureAndroidPrivate: {
+        en: 'Parsed here · nothing uploaded',
+        ar: 'تُحلَّل هنا · لا يُرفع شيء',
+    },
+    captureIosOn: {
+        en: 'Message automation verified by a bank message',
+        ar: 'تم التحقق من أتمتة الرسائل برسالة بنكية',
+    },
+    captureIosNeedsAutomation: {
+        en: 'Finish the one-time Message automation',
+        ar: 'أكمل إعداد أتمتة الرسائل لمرة واحدة',
+    },
+    captureIosWaitingForAlert: {
+        en: 'Ready — waiting for the first bank message',
+        ar: 'جاهز — بانتظار أول تنبيه مصرفي',
+    },
+    captureIosFirstAlertCaptured: {
+        en: 'First bank message captured locally',
+        ar: 'تم التقاط أول تنبيه مصرفي محلياً',
+    },
+    captureIosQueueWarning: {
+        en: 'Capture needs attention; open recovery',
+        ar: 'يحتاج الالتقاط إلى انتباه؛ افتح الاسترداد',
+    },
+    captureIosMigrationRetry: {
+        en: 'Local capture works; finish retiring the old Shortcut upload',
+        ar: 'يعمل الالتقاط المحلي؛ أكمل إيقاف رفع الاختصار القديم',
+    },
+    captureIosLocalPrivacy: {
+        en: 'The new bank-message capture path processes Messages on this iPhone and does not upload their text. An old Wafra Capture automation may still upload until removed or retired.',
+        ar: 'يعالج مسار الالتقاط الجديد رسائل البنك على هذا الآيفون ولا يرفع نصوصها. وقد تستمر أتمتة Wafra Capture القديمة في الرفع حتى تحذفها أو يكتمل إيقافها.',
+    },
+    captureIosQueueWarningDetail: {
+        en: 'This status shows only source-free counts. Accepted pending records may keep Message text and sender protected and encrypted on this iPhone; they expire after 30 days and are removed the next time capture runs or Wafra checks the queue.',
+        ar: 'تعرض هذه الحالة أعداداً خالية من بيانات المصدر فقط. وقد تحتفظ السجلات المعلّقة المقبولة بنص الرسالة واسم المرسل محميَّين ومشفَّرين على هذا الآيفون؛ وتنتهي صلاحيتها بعد ٣٠ يوماً وتُزال عند تشغيل الالتقاط أو فحص وفرة للصف في المرة التالية.',
+    },
+    captureIosQueueCounts: {
+        en: 'Pending {pending} · dropped {dropped} · corrupt {corrupt}',
+        ar: 'قيد الانتظار {pending} · مفقودة {dropped} · تالفة {corrupt}',
+    },
+    captureIosRecoveryTitle: {
+        en: 'Process pending alerts and finish recovery?',
+        ar: 'معالجة التنبيهات المعلّقة وإكمال الاسترداد؟',
+    },
+    captureIosRecoveryBody: {
+        en: 'Wafra will process the protected pending queue. If a dropped or corrupt warning exists, Wafra clears only that exact warning. Alerts already reported as dropped or corrupt cannot be restored; add any missing entries manually. Recovery works while tracking is paused and does not turn capture on.',
+        ar: 'ستعالج وفرة صف الانتظار المحمي. وإذا وُجد تحذير عن تنبيهات مفقودة أو تالفة، فستمحو وفرة ذلك التحذير المحدد فقط. لا يمكن استعادة التنبيهات التي أُبلغ بأنها مفقودة أو تالفة؛ أضف أي عمليات ناقصة يدوياً. يعمل الاسترداد أثناء توقف التتبع ولا يفعّل الالتقاط.',
+    },
+    captureIosRecoveryAction: {
+        en: 'Process & recover',
+        ar: 'عالج واسترد',
+    },
+    captureIosRecoveryCompleteTitle: {
+        en: 'Capture recovery complete',
+        ar: 'اكتمل استرداد الالتقاط',
+    },
+    captureIosRecoveryCompleteBody: {
+        en: 'Recoverable pending alerts were processed. Check the ledger and add any alert that was previously dropped or corrupt.',
+        ar: 'تمت معالجة التنبيهات المعلّقة القابلة للاسترداد. تحقق من السجل وأضف يدوياً أي تنبيه كان مفقوداً أو تالفاً.',
+    },
+    captureIosRecoveryRetryTitle: {
+        en: 'Recovery needs another try',
+        ar: 'يحتاج الاسترداد إلى محاولة أخرى',
+    },
+    captureIosRecoveryRetryBody: {
+        en: 'A new warning arrived or some pending alerts could not be saved. Nothing was cleared early. Keep Wafra open and try recovery again.',
+        ar: 'وصل تحذير جديد أو تعذّر حفظ بعض التنبيهات المعلّقة. لم يُمسح شيء مبكراً. أبقِ وفرة مفتوحة وحاول الاسترداد مرة أخرى.',
+    },
+    captureIosMigrationRetryDetail: {
+        en: 'The new capture path stays local, but the old Shortcut automation may keep uploading until cleanup succeeds or you remove it.',
+        ar: 'يبقى مسار الالتقاط الجديد محلياً، لكن أتمتة الاختصار القديمة قد تستمر في الرفع حتى يكتمل إيقافها أو تحذفها.',
+    },
+    captureIosNeedsTest: {
+        en: 'Connected · run the safe test',
+        ar: 'متصل · شغّل الاختبار الآمن',
+    },
+    captureIosPipeReady: {
+        en: 'Private pipe verified · Message automation not proven yet',
+        ar: 'تم التحقق من المسار الخاص · لم تثبت أتمتة الرسائل بعد',
+    },
+    captureIosOff: { en: 'Set up bank messages', ar: 'إعداد رسائل البنك' },
+    captureIosRevoked: {
+        en: 'This iPhone was removed · capture stopped',
+        ar: 'أُزيل هذا الآيفون · توقّف الالتقاط',
+    },
+    captureIosRevokedDetail: {
+        en: 'Another device removed it from your vault. Set it up again to resume.',
+        ar: 'أزاله جهاز آخر من خزنتك. أعد الإعداد لاستئناف الالتقاط.',
+    },
+    captureRefreshFailed: {
+        en: 'Could not refresh. Pull down to try again.',
+        ar: 'تعذّر التحديث. اسحب للأسفل للمحاولة مرة أخرى.',
+    },
+    capturePhoneOnly: { en: 'Bank messages need the phone app', ar: 'رسائل البنك تتطلب تطبيق الهاتف' },
+    captureReady: { en: 'ON', ar: 'مفعّل' },
+    captureFinish: { en: 'FINISH', ar: 'أكمل' },
+    captureRecover: { en: 'RECOVER', ar: 'استرداد' },
+    captureVerify: { en: 'VERIFY', ar: 'تحقق' },
+    captureEnable: { en: 'ENABLE', ar: 'فعّل' },
+    capturePaused: { en: 'Tracking paused', ar: 'توقف التتبع' },
+    pausedBadge: { en: 'PAUSED', ar: 'متوقف' },
+    captureChecking: { en: 'Checking capture…', ar: 'جارٍ التحقق من الالتقاط…' },
+    captureSyncNow: { en: 'Up to date · new alerts are captured automatically', ar: 'محدّث · تُلتقط التنبيهات الجديدة تلقائياً' },
+    captureIosSetupDetail: { en: 'Past and future messages', ar: 'الرسائل السابقة والجديدة' },
+    captureLatest: { en: 'Latest filed {date}', ar: 'آخر عملية مسجّلة {date}' },
+    emptyPeriodBody: { en: 'Pull down to check for new bank activity. One transaction is enough to start the month.', ar: 'اسحب للأسفل للتحقق من نشاط بنكي جديد. تكفي عملية واحدة لبدء الشهر.' },
+    genericMerchantTitle: { en: 'Merchant or description', ar: 'المتجر أو الوصف' },
+    genericShortenTitle: { en: 'Keep the description within 80 characters.', ar: 'اجعل الوصف في حدود ٨٠ حرفاً.' },
+    genericUsePasteDate: { en: 'Use date added', ar: 'استخدم تاريخ الإضافة' },
+    genericReviewCount: { en: 'Review {count} alert{s}', ar: 'راجع التنبيهات: {count}' },
+    genericReviewSaveFailed: { en: 'Could not save these details for review. Try again.', ar: 'تعذر حفظ هذه التفاصيل للمراجعة. حاول مجدداً.' },
+    genericReviewTitle: { en: 'Check bank message', ar: 'تحقق من رسالة البنك' },
+    genericReviewDetails: { en: 'Review details', ar: 'راجع التفاصيل' },
+    genericUnverifiedIssuer: { en: 'Issuer not verified', ar: 'الجهة المرسلة غير متحققة' },
+    genericStatement: { en: 'Card statement', ar: 'كشف البطاقة' },
+    genericBalanceUpdate: { en: 'Balance update', ar: 'تحديث الرصيد' },
+    genericCardPayment: { en: 'Card payment', ar: 'سداد بطاقة' },
+    genericBill: { en: 'Upcoming payment', ar: 'دفعة قادمة' },
+    genericAmountNeedsReview: { en: 'Amount needs review', ar: 'المبلغ يحتاج إلى مراجعة' },
+    genericTransactionDate: { en: 'Transaction date', ar: 'تاريخ العملية' },
+    genericAmount: { en: 'Amount', ar: 'المبلغ' },
+    genericChooseAmount: { en: 'Choose the transaction amount', ar: 'اختر مبلغ العملية' },
+    genericMissingAmount: { en: 'The transaction amount needs checking.', ar: 'يحتاج مبلغ العملية إلى مراجعة.' },
+    genericChooseInstrument: { en: 'Choose the card or account', ar: 'اختر البطاقة أو الحساب' },
+    genericCard: { en: 'Card', ar: 'بطاقة' },
+    genericAccount: { en: 'Account', ar: 'حساب' },
+    genericWallet: { en: 'Wallet', ar: 'محفظة' },
+    genericChooseDate: { en: 'Confirm the transaction date', ar: 'أكد تاريخ العملية' },
+    genericUseMessageDate: { en: 'Use alert date', ar: 'استخدم تاريخ التنبيه' },
+    genericConfirmPosted: { en: 'I confirm this money has moved.', ar: 'أؤكد أن هذه العملية المالية تمت.' },
+    genericChooseDirection: { en: 'Choose money in or money out.', ar: 'اختر دخلاً أو مصروفاً.' },
+    genericStatementTotal: { en: 'Statement total', ar: 'إجمالي الكشف' },
+    genericMinimumDue: { en: 'Minimum payment', ar: 'الحد الأدنى للسداد' },
+    genericBalance: { en: 'Balance', ar: 'الرصيد' },
+    genericCreditLimit: { en: 'Credit limit', ar: 'الحد الائتماني' },
+    genericStatementDate: { en: 'Statement date', ar: 'تاريخ الكشف' },
+    genericDueDate: { en: 'Due date', ar: 'تاريخ الاستحقاق' },
+    genericMissingStatementTotal: { en: 'The total balance is not stated. A minimum payment is not the full amount owed.', ar: 'لم يُذكر إجمالي المستحق. الحد الأدنى للسداد ليس كامل المبلغ المستحق.' },
+    genericInformational: { en: 'These are account details, not a new transaction.', ar: 'هذه تفاصيل للحساب وليست عملية جديدة.' },
+    genericOpenCards: { en: 'Open cards', ar: 'افتح البطاقات' },
+    genericOpenWallet: { en: 'Open wallet', ar: 'افتح المحفظة' },
+    genericOpenBills: { en: 'Open bills', ar: 'افتح الفواتير' },
+    genericConfirmAdd: { en: 'Confirm and add', ar: 'أكد وأضف' },
+    genericCompleteFields: { en: 'Complete the missing detail before adding.', ar: 'أكمل المعلومة الناقصة قبل الإضافة.' },
+    genericCurrencyMismatch: { en: 'Choose an amount in your ledger’s currency.', ar: 'اختر مبلغاً بعملة سجلك.' },
+    foreignReviewConversionNote: {
+        en: 'Added in {ledger}: the card’s own {ledger} amount when the alert states it, otherwise a dated reference rate. The original amount is kept.',
+        ar: 'تُضاف بعملة {ledger}: بمبلغ البطاقة بعملة {ledger} إن ذكره التنبيه، وإلا بسعر مرجعي مؤرّخ. ويُحفظ المبلغ الأصلي.',
+    },
+    fxRateUnavailable: {
+        en: 'No exchange rate for that day yet. Nothing was added. Try again when you are online.',
+        ar: 'لا يتوفر سعر صرف لذلك اليوم بعد. لم تتم إضافة شيء. حاول مجدداً عند الاتصال بالإنترنت.',
+    },
+    amountInCurrency: { en: 'Amount in {currency}', ar: 'المبلغ بعملة {currency}' },
+    spendCurrencyTitle: { en: 'Currency paid', ar: 'عملة الدفع' },
+    spendCurrencyHint: {
+        en: 'Paid in another currency? Choose it here.',
+        ar: 'دفعت بعملة أخرى؟ اخترها هنا.',
+    },
+    spendCurrencyBody: {
+        en: 'Choose the currency on the receipt. Wafra records it in {ledger} with the dated public reference rate for that day and keeps the original amount. Only the two currency codes and the date are sent to get the rate.',
+        ar: 'اختر العملة المذكورة في الإيصال. يسجلها وفرة بعملة {ledger} بسعر مرجعي عام لذلك اليوم ويحتفظ بالمبلغ الأصلي. لا يُرسل للحصول على السعر إلا رمزا العملتين والتاريخ.',
+    },
+    foreignManualNote: {
+        en: 'Saved in {ledger} at the reference rate for this day; the {currency} amount is kept.',
+        ar: 'يُحفظ بعملة {ledger} بالسعر المرجعي لهذا اليوم، مع الاحتفاظ بالمبلغ بعملة {currency}.',
+    },
+    genericSourceChanged: { en: 'This alert changed or expired. Reopen it to review.', ar: 'تغير هذا التنبيه أو انتهت صلاحيته. افتحه مجدداً للمراجعة.' },
+    reviewAlertsTitle: { en: 'Bank messages needing help', ar: 'رسائل بنكية تحتاج مساعدتك' },
+    reviewAlertsHomeCount: {
+        en: '{count} alert{s} to review',
+        ar: '{count} تنبيه مالي للمراجعة',
+    },
+    reviewAlertsSettingsCount: {
+        en: '{count} could not be added automatically',
+        ar: 'تعذّرت إضافة {count} تلقائياً',
+    },
+    reviewAlertsNone: { en: 'Nothing waiting', ar: 'لا شيء قيد المراجعة' },
+    reviewAlertsIntro: {
+        en: 'Check the captured details before adding anything to your ledger.',
+        ar: 'راجع التفاصيل الملتقطة قبل إضافة أي شيء إلى سجلك.',
+    },
+    reviewAlertsPrivacy: {
+        en: 'Only a structured summary is kept here. The bank message text is not stored.',
+        ar: 'يُحفظ هنا ملخص منظّم فقط. لا يُحفظ نص الرسالة البنكية.',
+    },
+    reviewAlertsEmptyTitle: { en: 'All clear', ar: 'تمت مراجعة كل شيء' },
+    reviewAlertsEmptyBody: {
+        en: 'Captured alerts that need your review will appear here.',
+        ar: 'ستظهر هنا التنبيهات الملتقطة التي تحتاج إلى مراجعتك.',
+    },
+    reviewAlertPossiblePurchase: { en: 'Possible purchase', ar: 'عملية شراء محتملة' },
+    reviewAlertPossibleTransfer: { en: 'Possible transfer', ar: 'تحويل محتمل' },
+    reviewAlertPossibleCash: { en: 'Possible cash withdrawal', ar: 'سحب نقدي محتمل' },
+    reviewAlertPossibleRefund: { en: 'Possible refund', ar: 'استرداد محتمل' },
+    reviewAlertPossibleFee: { en: 'Possible fee', ar: 'رسوم محتملة' },
+    reviewAlertPossibleUtility: { en: 'Possible utility payment', ar: 'دفعة خدمات محتملة' },
+    reviewAlertPossibleRecurring: { en: 'Possible recurring payment', ar: 'دفعة متكررة محتملة' },
+    reviewAlertMoneyOut: { en: 'Money out', ar: 'مبلغ خارج' },
+    reviewAlertMoneyIn: { en: 'Money in', ar: 'مبلغ داخل' },
+    reviewAlertObservedDate: { en: 'Alert date', ar: 'تاريخ التنبيه' },
+    applePayReviewTitle: { en: 'Apple Pay purchase', ar: 'عملية Apple Pay' },
+    applePayReviewSource: { en: 'Apple Pay via Shortcuts', ar: 'Apple Pay عبر الاختصارات' },
+    applePayReviewObserved: { en: 'Apple Pay capture date', ar: 'تاريخ التقاط Apple Pay' },
+    applePayReviewUseDate: { en: 'Use Apple Pay capture date', ar: 'استخدام تاريخ التقاط Apple Pay' },
+    applePayReviewQuestion: { en: 'Is this purchase already recorded?', ar: 'هل هذه العملية مسجلة بالفعل؟' },
+    applePayReviewBody: { en: 'A matching purchase is already in your transactions. Choose Already recorded if they are the same purchase. If this is a different purchase, keep it in Review while you check your transactions.', ar: 'توجد عملية مطابقة في معاملاتك. اختر مسجلة بالفعل إذا كانت العملية نفسها. إذا كانت عملية مختلفة، احتفظ بها في المراجعة حتى تتحقق من معاملاتك.' },
+    applePayReviewKeep: { en: 'Keep in Review', ar: 'الاحتفاظ في المراجعة' },
+    applePayReviewRecorded: { en: 'Already recorded', ar: 'مسجلة بالفعل' },
+    applePayReviewRetry: { en: 'Retry saving', ar: 'إعادة محاولة الحفظ' },
+    applePayReviewFailed: { en: 'The decision could not be saved. Retry to finish recording it securely.', ar: 'تعذر حفظ القرار. أعد المحاولة لإكمال حفظه بأمان.' },
+    iosApplePayWalletHelp: { en: 'Card taps use the Transaction trigger in Shortcuts. Check the amount, account and payment date in Review. A permission check does not prove that a payment was received.', ar: 'تستخدم عمليات الدفع ببطاقتك مشغّل المعاملة في الاختصارات. تحقق من المبلغ والحساب وتاريخ الدفع في المراجعة. فحص الإذن لا يثبت وصول عملية دفع.' },
+    reviewAlertCardEnding: { en: 'Card ending {last4}', ar: 'بطاقة تنتهي بـ {last4}' },
+    reviewAlertAccountEnding: { en: 'Account ending {last4}', ar: 'حساب ينتهي بـ {last4}' },
+    reviewAlertWalletEnding: { en: 'Wallet ending {last4}', ar: 'محفظة تنتهي بـ {last4}' },
+    reviewAlertDismissQuestion: { en: 'Dismiss this alert?', ar: 'تجاهل هذا التنبيه؟' },
+    reviewAlertDismissBody: {
+        en: 'It will remain outside your ledger and will not appear in this review list again.',
+        ar: 'سيبقى خارج سجلك ولن يظهر في قائمة المراجعة مرة أخرى.',
+    },
+    reviewAlertDismissed: { en: 'Alert dismissed', ar: 'تم تجاهل التنبيه' },
+    reviewAlertDismissFailed: {
+        en: 'Could not save that change. The alert may return next time.',
+        ar: 'تعذّر حفظ هذا التغيير. قد يعود التنبيه في المرة القادمة.',
+    },
+    reviewAlertReview: { en: 'Check & add', ar: 'تحقق وأضف' },
+    reviewAlertAdd: { en: 'Add to Wafra', ar: 'أضف إلى وفرة' },
+    reviewAlertAddHint: {
+        en: "Fix only the detail Wafra couldn't determine, then add it.",
+        ar: 'حدّد فقط المعلومة التي لم تستطع وفرة معرفتها، ثم أضف العملية.',
+    },
+    reviewAlertAddTitle: { en: 'Review transaction', ar: 'مراجعة العملية' },
+    reviewAlertAdded: { en: 'Transaction added', ar: 'تمت إضافة العملية' },
+    reviewAlertAddFailed: {
+        en: 'Could not add this alert. Check its currency, account and date.',
+        ar: 'تعذّرت إضافة هذا التنبيه. تحقق من العملة والحساب والتاريخ.',
+    },
+    reviewAlertMatchesApplePay: {
+        en: 'A matching Apple Pay purchase is already in your transactions. Choose Already recorded if this alert is the same purchase. If you made two separate purchases, you can add it as a separate purchase.',
+        ar: 'توجد عملية Apple Pay مطابقة في معاملاتك بالفعل. اختر مسجلة بالفعل إذا كان هذا التنبيه للعملية نفسها. إذا أجريت عمليتين منفصلتين، يمكنك إضافته كعملية منفصلة.',
+    },
+    duplicateAddSeparate: { en: 'Add as a separate purchase', ar: 'إضافة كعملية منفصلة' },
+    duplicateSeparateConfirmTitle: { en: 'Add a second transaction?', ar: 'إضافة معاملة ثانية؟' },
+    duplicateSeparateConfirmBody: {
+        en: 'This adds a second transaction for the same amount, next to the matching one already recorded. Only continue if these were two separate purchases.',
+        ar: 'سيؤدي هذا إلى إضافة معاملة ثانية بالمبلغ نفسه، إلى جانب المعاملة المطابقة المسجلة بالفعل. تابع فقط إذا كانت هاتان عمليتين منفصلتين.',
+    },
+    duplicateSeparateConfirm: { en: 'Add second transaction', ar: 'إضافة المعاملة الثانية' },
+    duplicateSeparateFailed: {
+        en: 'The purchase could not be saved. Check your transactions before trying again.',
+        ar: 'تعذر حفظ العملية. تحقق من معاملاتك قبل المحاولة مرة أخرى.',
+    },
+    reviewAlertChooseCategory: {
+        en: 'Choose the category before adding this alert.',
+        ar: 'اختر التصنيف قبل إضافة هذا التنبيه.',
+    },
+    reviewAlertChooseAccount: {
+        en: 'Choose the account this alert belongs to.',
+        ar: 'اختر الحساب الذي ينتمي إليه هذا التنبيه.',
+    },
+    reviewAlertCreateAccount: {
+        en: 'Create an account in Wallet first',
+        ar: 'أنشئ حساباً في المحفظة أولاً',
+    },
+    savingSecurely: { en: 'Saving securely…', ar: 'جارٍ الحفظ بأمان…' },
+    reviewAlertDateA11y: {
+        en: 'Transaction date in year month day format',
+        ar: 'تاريخ العملية بصيغة سنة شهر يوم',
+    },
+    foreignActivity: { en: 'Foreign activity', ar: 'العمليات بالعملات الأجنبية' },
+    foreignSpending: { en: 'Foreign spending', ar: 'الإنفاق بالعملات الأجنبية' },
+    foreignSpendingSubtitle: {
+        en: 'See foreign-currency spending in the original and ledger currencies.',
+        ar: 'اعرض الإنفاق بالعملات الأجنبية بالعملة الأصلية وعملة السجل.',
+    },
+    searchForeignSpending: { en: 'Search merchant or currency', ar: 'ابحث عن تاجر أو عملة' },
+    foreignActivityCaption: {
+        en: '{count} charge{s} · {currencies} currenc{ending}',
+        ar: '{count} عملية · {currencies} عملة',
+    },
+    foreignConvertedTotal: {
+        en: 'Spent in foreign currencies',
+        ar: 'الإنفاق بالعملات الأجنبية',
+    },
+    foreignOriginalsKept: {
+        en: 'Original amounts stay beside the ledger amount on every charge.',
+        ar: 'يبقى المبلغ الأصلي بجانب مبلغ السجل في كل عملية.',
+    },
+    currencyBreakdown: { en: 'Currencies', ar: 'العملات' },
+    foreignCurrencyOriginalSummary: {
+        en: '{amount} · {count} charge{s}',
+        ar: '{amount} · {count} عملية',
+    },
+    foreignCurrencyFilter: {
+        en: '{currency} · {count} charge{s}',
+        ar: '{currency} · {count} عملية',
+    },
+    foreignSeeAllCurrencies: { en: 'See all {count}', ar: 'عرض كل العملات · {count}' },
+    foreignShowFewerCurrencies: { en: 'Show fewer currencies', ar: 'عرض عملات أقل' },
+    conversionQuality: { en: 'Conversion quality', ar: 'جودة التحويل' },
+    bankQuoted: { en: 'Bank quoted', ar: 'حسب البنك' },
+    referenceRate: { en: 'Reference rate', ar: 'سعر مرجعي' },
+    offlineEstimate: { en: 'Offline estimate', ar: 'تقدير دون اتصال' },
+    foreignRecent: { en: 'Transactions', ar: 'العمليات' },
+    noForeignActivity: {
+        en: 'No foreign-currency charges in this period.',
+        ar: 'لا توجد عمليات بعملة أجنبية في هذه الفترة.',
+    },
+    billsTitle: { en: 'Bills', ar: 'الفواتير' },
+    billsSubtitle: { en: 'Dues, subscriptions and utilities', ar: 'مستحقات واشتراكات وفواتير' },
+    subscriptionsSeg: { en: 'Subscriptions', ar: 'الاشتراكات' },
+    remindersSeg: { en: 'Reminders', ar: 'التذكيرات' },
+    cardsSeg: { en: 'Credit cards', ar: 'البطاقات الائتمانية' },
+    seeAllCategoryTx: { en: 'See all transactions', ar: 'عرض كل العمليات' },
+    utilitiesSeg: { en: 'Utilities', ar: 'المرافق' },
+    billsUpcomingTotal: { en: 'Upcoming total', ar: 'إجمالي الاستحقاقات القادمة' },
+    billsCheckingRecurring: { en: 'Checking recurring payments…', ar: 'جارٍ التحقق من الدفعات المتكررة…' },
+    billsSubscriptionsTotal: { en: 'Subscriptions due', ar: 'الاشتراكات المستحقة' },
+    billsUtilitiesTotal: { en: 'Utilities due', ar: 'المرافق المستحقة' },
+    billsCardsTotal: { en: 'Card payments due', ar: 'دفعات البطاقات المستحقة' },
+    billsAllTotal: { en: 'Open total', ar: 'إجمالي المستحق المفتوح' },
+    billsSummaryPayments: { en: '{count} payment{s}', ar: '{count} دفعات' },
+    billsSummaryEstimated: { en: '{count} estimated', ar: '{count} تقديرية' },
+    noCardDues: { en: 'No card payments due', ar: 'لا مستحقات على البطاقات' },
+    noCardDuesText: {
+        en: 'When your bank sends a statement message, the amount and pay-by date show up here.',
+        ar: 'عند وصول رسالة كشف الحساب من البنك، يظهر المبلغ وتاريخ السداد هنا.',
+    },
+    dueAcrossCards: { en: 'Due across cards', ar: 'المستحق على البطاقات' },
+    monthlySpendOnly: { en: 'tracking spend only', ar: 'تتبع المصروف فقط' },
+    detectedHint: { en: 'Found automatically from your charges', ar: 'مكتشفة تلقائياً من عملياتك' },
+    stoppedSubs: { en: 'Stopped subscriptions', ar: 'اشتراكات متوقفة' },
+    stoppedSubsHint: { en: 'No charges for over two cycles — most likely cancelled.', ar: 'لا توجد عمليات خصم لدورتين — على الأغلب ملغاة.' },
+    utilitiesHeader: { en: 'Utilities & fixed bills', ar: 'المرافق والفواتير الثابتة' },
+    loansHeader: { en: 'Loans & instalments', ar: 'القروض والأقساط' },
+    otherRecurringHeader: { en: 'Other repeat payments', ar: 'مدفوعات متكررة أخرى' },
+    otherRecurringHint: {
+        en: 'Places you pay on a regular cycle. Not bills — long-press one to stop tracking it.',
+        ar: 'جهات تدفع لها بشكل منتظم. ليست فواتير — اضغط مطولاً لإيقاف تتبعها.',
+    },
+    loansHint: { en: 'Fixed repayments detected from your bank messages. Wafra shows what you have paid so far — it cannot see the loan term or balance.', ar: 'أقساط ثابتة مكتشفة من رسائل البنك. يعرض وفرة ما دفعته حتى الآن فقط — لا يمكنه معرفة مدة القرض أو رصيده.' },
+    paidSoFar: { en: 'Paid so far', ar: 'المدفوع حتى الآن' },
+    payingFor: { en: 'Paying for', ar: 'يُدفع منذ' },
+    instalment: { en: 'Instalment', ar: 'القسط' },
+    payments: { en: 'Payments', ar: 'عدد الدفعات' },
+    utilitiesHint: { en: 'Electricity, internet, rent and other regular payments that recur every month.', ar: 'الكهرباء والإنترنت والإيجار ودفعات شهرية أخرى.' },
+    subscribedFor: { en: 'Subscribed for', ar: 'مشترك منذ' },
+    trackingSince: { en: 'Tracking since', ar: 'قيد المتابعة منذ' },
+    charges: { en: 'Charges', ar: 'عدد الدفعات' },
+    totalPaid: { en: 'Total paid', ar: 'إجمالي المدفوع' },
+    paidWith: { en: 'Paid with', ar: 'الدفع عبر' },
+    paymentInstrumentNotStated: {
+        en: 'Card or account not stated in the bank message',
+        ar: 'لم تحدد الرسالة البنكية البطاقة أو الحساب',
+    },
+    paymentInstrumentMissingCount: {
+        en: '{count} payment{s} did not state a card or account',
+        ar: '{count} دفعة لم يحدد تنبيهها البطاقة أو الحساب',
+    },
+    history: { en: 'History', ar: 'السجل' },
+    paymentHistory: { en: 'Payment history', ar: 'سجل الدفعات' },
+    notASubscription: { en: 'Not a subscription', ar: 'ليس اشتراكاً' },
+    noSubscriptionsTitle: { en: 'No subscriptions detected yet', ar: 'لم تُكتشف اشتراكات بعد' },
+    noSubscriptionsBody: { en: 'Import bank activity and repeat charges will appear here.', ar: 'استورد نشاطك البنكي وستظهر العمليات المتكررة هنا.' },
+    noUtilitiesTitle: { en: 'No utilities yet', ar: 'لا فواتير مرافق بعد' },
+    noUtilitiesBody: { en: 'Tap + to track DEWA, rent, or any monthly payment. Detected charges appear automatically.', ar: 'اضغط + لتتبع ديوا أو الإيجار أو أي دفعة شهرية. تظهر العمليات المكتشفة تلقائياً.' },
+    newReminder: { en: 'New reminder', ar: 'تذكير جديد' },
+    reminderNamePlaceholder: { en: 'Name (e.g. DEWA, Netflix, Rent)', ar: 'الاسم (مثل ديوا أو نتفلكس أو الإيجار)' },
+    amount: { en: 'Amount', ar: 'المبلغ' },
+    day: { en: 'Day', ar: 'اليوم' },
+    saveReminder: { en: 'Save reminder', ar: 'حفظ التذكير' },
+    deleteReminderTitle: { en: 'Delete reminder?', ar: 'حذف التذكير؟' },
+    deleteReminderBody: { en: '“{title}” will no longer be tracked.', ar: 'لن تتم متابعة «{title}» بعد الآن.' },
+    remove: { en: 'Remove', ar: 'إزالة' },
+    removeSubscriptionBody: { en: '“{title}” will leave subscriptions and the monthly total.', ar: 'سيُزال «{title}» من الاشتراكات والإجمالي الشهري.' },
+    markBillPaidTitle: { en: 'Mark “{title}” as paid?', ar: 'تعليم «{title}» كمدفوع؟' },
+    accountPaymentTitle: { en: '{name} payment', ar: 'دفعة {name}' },
+    subscriptionUnderMonth: { en: 'under a month', ar: 'أقل من شهر' },
+    subscriptionMonths: { en: '{count} month{s}', ar: '{count} شهر' },
+    subscriptionYearsMonths: { en: '{years} yr {months} mo', ar: '{years} سنة و{months} شهر' },
+    subscriptionYears: { en: '{count} year{s}', ar: '{count} سنة' },
+    priceUp: { en: 'price up', ar: 'ارتفع السعر' },
+    cadenceWeekly: { en: 'Weekly', ar: 'أسبوعي' },
+    cadenceBiweekly: { en: 'Every 2 weeks', ar: 'كل أسبوعين' },
+    cadenceMonthly: { en: 'Monthly', ar: 'شهري' },
+    cadenceQuarterly: { en: 'Quarterly', ar: 'ربع سنوي' },
+    cadenceYearly: { en: 'Yearly', ar: 'سنوي' },
+    cadenceAsNeeded: { en: 'As needed', ar: 'عند الحاجة' },
+    stoppedLast: { en: 'stopped · last {date}', ar: 'متوقف · آخر خصم {date}' },
+    stoppedLastCharged: { en: 'stopped · last charged {date}', ar: 'متوقف · آخر خصم {date}' },
+    cadenceNext: { en: '{cadence} · next {date} ({days}d)', ar: '{cadence} · التالي {date} (خلال {days} يوم)' },
+    cadenceScheduleList: {
+        en: '{cadence} · {date} · {when}',
+        ar: '{cadence} · {date} · {when}',
+    },
+    asNeededScheduleList: {
+        en: 'As needed · last paid {date}',
+        ar: 'عند الحاجة · آخر دفعة {date}',
+    },
+    scheduleInTwoDays: { en: 'in 2 days', ar: 'خلال يومين' },
+    scheduleInFewDays: { en: 'in {days} days', ar: 'خلال {days} أيام' },
+    scheduleInManyDays: { en: 'in {days} days', ar: 'خلال {days} يوماً' },
+    cadenceExpectedAgo: { en: '{cadence} · expected {days}d ago', ar: '{cadence} · كان متوقعاً قبل {days} يوم' },
+    recurringPaidObserved: {
+        en: 'Paid {date} · {cadence}',
+        ar: 'دُفع في {date} · {cadence}',
+    },
+    recurringLastPaidObserved: {
+        en: 'Last paid {date} · {cadence}',
+        ar: 'آخر دفع في {date} · {cadence}',
+    },
+    perMonthShort: { en: '/mo', ar: 'شهرياً' },
+    monthlyTotal: {
+        en: '{amount} / month',
+        ar: '\u2066{amount}\u2069 · شهرياً',
+    },
+    perYearShort: { en: '/yr', ar: 'سنوياً' },
+    perWeekShort: { en: '/wk', ar: 'أسبوعياً' },
+    remindAboutA11y: { en: 'Remind me about {title}', ar: 'ذكّرني بـ {title}' },
+    detailCadenceMonthly: { en: '{cadence} · {amount}/mo', ar: '{cadence} · {amount} شهرياً' },
+    olderCharges: { en: '+ {count} older charges', ar: '+ {count} عمليات خصم أقدم' },
+    recurringDetected: { en: 'Recurring · detected', ar: 'متكرر · مكتشف' },
+    recurringMeta: { en: '{cadence} · next {date} · {when}', ar: '{cadence} · التالي {date} · {when}' },
+    recurringStableVerdict: {
+        en: '{amount} every {period}, {count} month{s} running — nothing to watch here.',
+        ar: '{amount} كل {period}، مستمر منذ {count} شهر — لا شيء يستدعي المراقبة.',
+    },
+    recurringPriceUpVerdict: {
+        en: 'The last charge was {last} against a usual {usual}. The price went up.',
+        ar: 'آخر خصم كان {last} مقابل {usual} معتادة. ارتفع السعر.',
+    },
+    cadencePeriodWeek: { en: 'week', ar: 'أسبوع' },
+    cadencePeriodTwoWeeks: { en: '2 weeks', ar: 'أسبوعين' },
+    cadencePeriodMonth: { en: 'month', ar: 'شهر' },
+    cadencePeriodQuarter: { en: 'quarter', ar: 'ثلاثة أشهر' },
+    cadencePeriodYear: { en: 'year', ar: 'سنة' },
+    reminderDayBeforeBody: {
+        en: 'You’ll hear about this the day before {date}.',
+        ar: 'سنذكّرك بها قبل {date} بيوم.',
+    },
+    stopRecurringBody: {
+        en: '{title} will stop being tracked as one, and stops counting toward your monthly commitments.',
+        ar: 'سيتوقف تتبع {title} كعملية متكررة، ولن تُحتسب ضمن الالتزامات الشهرية.',
+    },
+    notRecurring: { en: 'Not recurring', ar: 'ليست متكررة' },
+    paidFrom: { en: 'Paid from', ar: 'الدفع من' },
+    unknownAccount: { en: 'Unknown account', ar: 'حساب غير معروف' },
+    paid: { en: 'Paid', ar: 'مدفوع' },
+    overdueDays: { en: '{days}d overdue', ar: 'متأخر {days} يوم' },
+    lateDays: { en: '{days}d late', ar: 'متأخر {days} يوم' },
+    daysShort: { en: '{days}d', ar: '{days} يوم' },
+    dueToday: { en: 'Due today', ar: 'مستحق اليوم' },
+    dueInDays: { en: 'Due in {days}d', ar: 'مستحق خلال {days} يوم' },
+    longPressDeleteReminder: { en: 'Long-press a reminder to delete it.', ar: 'اضغط مطولاً على التذكير لحذفه.' },
+    walletTitle: { en: 'Accounts', ar: 'الحسابات' },
+    availableBalances: { en: 'Recorded balances', ar: 'الأرصدة المسجلة' },
+    refTryExample: { en: 'Try an example', ar: 'جرّب مثالاً' },
+    refCategoryHistory: { en: 'Category over six money months', ar: 'اتجاه الفئة خلال ستة أشهر مالية' },
+    refDuesAndMovements: { en: 'Dues & money movements', ar: 'الدفعات وحركة الأموال' },
+    refUpcoming: { en: 'Upcoming', ar: 'القادمة' },
+    refAll: { en: 'All', ar: 'الكل' },
+    refUnscheduled: { en: 'Other regular spending', ar: 'مصروفات متكررة أخرى' },
+    refStopped: { en: 'Stopped recurring payments', ar: 'الدفعات المتكررة المتوقفة' },
+    refHideStopped: { en: 'Hide stopped payments', ar: 'إخفاء الدفعات المتوقفة' },
+    refShowStopped: { en: 'Show stopped payments', ar: 'عرض الدفعات المتوقفة' },
+    showMoreRecurring: { en: 'Show {count} more', ar: 'عرض {count} أخرى' },
+    balanceCoverage: {
+        en: '{known} of {total} balances recorded',
+        ar: 'أرصدة مسجلة: {known} من {total}',
+    },
+    addAccountForBalances: {
+        en: 'Add an account to see its latest reported balance.',
+        ar: 'أضف حساباً لعرض أحدث رصيد وارد من البنك.',
+    },
+    paidFromAccounts: { en: 'Paid from accounts this month', ar: 'المدفوع من الحسابات هذا الشهر' },
+    netWorth: { en: 'Net worth', ar: 'صافي الثروة' },
+    estimatedNetWorth: { en: 'Estimated net worth', ar: 'صافي الثروة التقديري' },
+    partialEstimate: { en: 'Partial estimate', ar: 'تقدير جزئي' },
+    allAccountsIncluded: { en: 'All active accounts included', ar: 'تم تضمين كل الحسابات النشطة' },
+    noActiveAccounts: { en: 'No active accounts yet', ar: 'لا توجد حسابات نشطة بعد' },
+    addAccountForEstimate: {
+        en: 'Use + to add an account and start your estimate.',
+        ar: 'استخدم + لإضافة حساب وبدء التقدير.',
+    },
+    knownBalances: { en: 'Known balances', ar: 'الأرصدة المعروفة' },
+    amountsOwed: { en: 'Amounts owed', ar: 'المبالغ المستحقة' },
+    netWorthCoverage: {
+        en: '{known} of {total} active accounts included',
+        ar: 'تم تضمين {known} من أصل {total} حسابات نشطة',
+    },
+    netWorthMissing: {
+        en: 'Accounts excluded until a reliable balance arrives: {count}',
+        ar: 'حسابات مستبعدة حتى يتوفر رصيد موثوق: {count}',
+    },
+    howNetWorthCalculated: { en: 'How this is calculated', ar: 'كيف يتم احتسابه' },
+    netWorthExplanation: {
+        en: 'Wafra adds the latest bank-reported balances and balances you track manually, then subtracts credit-card amounts owed. Inactive accounts and accounts without a reliable balance are left out.',
+        ar: 'تجمع وفرة أحدث الأرصدة الواردة من البنك والأرصدة التي تتابعها يدوياً، ثم تطرح المبالغ المستحقة على البطاقات الائتمانية. لا تُحتسب الحسابات غير النشطة أو التي لا يتوفر لها رصيد موثوق.',
+    },
+    ledgerTrend6mo: { en: 'Recorded movement · 6 months', ar: 'حركة السجل · ٦ أشهر' },
+    ledgerTrendExplanation: {
+        en: 'From opening balances and filed activity—not the estimate above.',
+        ar: 'استناداً إلى الأرصدة الافتتاحية والعمليات المسجلة، وليس التقدير أعلاه.',
+    },
+    moreCards: { en: 'View more cards · {count}', ar: 'عرض بطاقات أخرى · {count}' },
+    cardsHeader: { en: 'Payment cards', ar: 'بطاقات الدفع' },
+    moneySourcesHeader: { en: 'Money sources', ar: 'مصادر الأموال' },
+    otherSources: { en: 'Other sources', ar: 'مصادر أخرى' },
+    showMoreSources: { en: 'Show {count} more', ar: 'عرض {count} أخرى' },
+    showFewerSources: { en: 'Show fewer', ar: 'عرض أقل' },
+    showMoreRows: { en: 'Show {count} more', ar: 'عرض {count} أخرى' },
+    noMoneySourcesYet: { en: 'No money sources yet.', ar: 'لا توجد مصادر أموال بعد.' },
+    accountsHeader: { en: 'Accounts', ar: 'الحسابات' },
+    inactiveHeader: { en: 'Inactive', ar: 'غير نشطة' },
+    goalsHeader: { en: 'Savings goals', ar: 'أهداف الادخار' },
+    newGoal: { en: '+ New goal', ar: '+ هدف جديد' },
+    outstanding: { en: 'outstanding', ar: 'مستحق' },
+    owed: { en: 'owed', ar: 'المستحق عليك' },
+    statementLeftToPay: { en: 'statement left to pay', ar: 'المتبقي من الكشف' },
+    nothingSpentThisMonth: { en: 'nothing spent this month', ar: 'لا مصروف هذا الشهر' },
+    perBankSms: { en: 'per bank message', ar: 'حسب رسالة البنك' },
+    noBalanceYet: { en: 'no balance message yet', ar: 'لا رسالة رصيد بعد' },
+    trackedManually: { en: 'Tracked manually', ar: 'يُتابع يدويًا' },
+    recurringHint: {
+        en: 'Tap a row for its charge history, or to set a reminder.',
+        ar: 'اضغط على أي صف لعرض سجل الخصومات أو لضبط تذكير.',
+    },
+    improveAccuracy: { en: 'Improve accuracy', ar: 'تحسين الدقة' },
+    sortShops: { en: 'Improve categories', ar: 'تحسين التصنيفات' },
+    sortShopsCount: {
+        en: '{count} item{s} need your input',
+        ar: '{count} حالات تحتاج إدخالك',
+    },
+    sortShopsNone: { en: 'Nothing needs your input', ar: 'لا توجد حالات تحتاج إدخالك' },
+    sortShopsSettingsDetail: {
+        en: 'Review unclear merchant and bank-payment categories',
+        ar: 'راجع تصنيفات المتاجر ودفعات البنك غير الواضحة',
+    },
+    improveAccuracyHint: {
+        en: 'Messages still needing attention. Share formats with no merchant so the parser can improve. For a named shop, sort it once on this phone and Wafra remembers your choice for past and future entries. Long account numbers are masked.',
+        ar: 'رسائل ما زالت تحتاج إلى مراجعة. شارك الصيغ التي بلا اسم متجر لتحسين القارئ. أما المتجر المعروف فصنّفه مرة واحدة على هذا الهاتف، وستتذكر وفرة اختيارك للعمليات السابقة والقادمة. الأرقام الطويلة مخفية.',
+    },
+    improveAccuracySettingsDetail: {
+        en: 'Review bank-message formats Wafra could not read confidently',
+        ar: 'راجع صيغ الرسائل البنكية التي لم يقرأها وفرة بثقة',
+    },
+    couldNotRead: { en: 'Could not read', ar: 'تعذّرت القراءة' },
+    noCategoryYet: { en: 'Read, but no category', ar: 'مقروءة بلا تصنيف' },
+    shareUnrecognized: { en: 'Share formats', ar: 'مشاركة الصيغ' },
+    readAs: { en: 'Read as', ar: 'قُرئت كـ' },
+    noUnrecognized: { en: 'Everything reads clean', ar: 'كل الرسائل مقروءة' },
+    noUnrecognizedText: {
+        en: 'No unrecognized bank formats in your data. Rows appear here after a scan when the parser has to guess.',
+        ar: 'لا توجد صيغ غير معروفة في بياناتك. تظهر الرسائل هنا بعد الفحص عندما يضطر التطبيق للتخمين.',
+    },
+    formatsNotKeptRow: {
+        en: 'Accuracy report · processed Message text is not retained in the ledger; protected pending records expire after 30 days and are removed on the next queue access',
+        ar: 'تقرير الدقة · لا يُحتفظ بنص الرسالة المعالَجة في السجل؛ وتنتهي صلاحية السجلات المعلّقة المحمية بعد ٣٠ يوماً وتُزال عند الوصول التالي إلى الصف',
+    },
+    formatsNotKeptRelay: {
+        en: 'Rows delivered by the old Wafra Capture relay never included Message text, so they cannot appear in this list and an empty list does not audit them. The card diagnostic below still works: it reports what the ledger did with every card row.',
+        ar: 'لم تتضمن العمليات التي سلّمها مُرحّل Wafra Capture القديم نص الرسالة، لذلك لا يمكن أن تظهر في هذه القائمة ولا يعني خلوّها أن تلك العمليات خضعت للتدقيق. أما تشخيص البطاقات بالأسفل فيعرض ما فعله السجل بكل عملية مرتبطة ببطاقة.',
+    },
+    formatsNotKeptIosLocal: {
+        en: 'Local capture parses new bank messages on this iPhone. Successfully processed raw text is deleted before the ledger or accuracy report retains it; protected pending records expire after 30 days and are removed on the next queue access. Rows from the old Wafra Capture relay never included Message text, so this list cannot audit those legacy rows. The card diagnostic below still works for every card row.',
+        ar: 'يعالج الالتقاط المحلي رسائل البنك الجديدة على هذا الآيفون. يُحذف النص الخام بعد نجاح المعالجة قبل أن يحتفظ به السجل أو تقرير الدقة؛ وتنتهي صلاحية السجلات المعلّقة المحمية بعد ٣٠ يوماً وتُزال عند الوصول التالي إلى الصف. لم تتضمن عمليات مُرحّل Wafra Capture القديم نص الرسالة، لذلك لا تستطيع هذه القائمة تدقيق تلك العمليات القديمة. ويعمل تشخيص البطاقات بالأسفل لكل عملية مرتبطة ببطاقة.',
+    },
+    formatsNotKeptPrivate: {
+        en: 'Private Mode removes diagnostic Message text from the ledger and prevents new ledger entries from retaining it, so this list cannot identify misread formats. Local capture still works; protected pending records expire after 30 days and are removed on the next queue access. The card diagnostic below still reports what the ledger did with every card row.',
+        ar: 'يحذف الوضع الخاص نص الرسالة التشخيصي من السجل ويمنع العمليات الجديدة من الاحتفاظ به، لذلك لا تستطيع هذه القائمة تحديد الصيغ التي أسيءت قراءتها. ويستمر الالتقاط المحلي؛ وتنتهي صلاحية السجلات المعلّقة المحمية بعد ٣٠ يوماً وتُزال عند الوصول التالي إلى الصف. أما تشخيص البطاقات بالأسفل فيعرض ما فعله السجل بكل عملية مرتبطة ببطاقة.',
+    },
+    coverageHeading: {
+        en: 'How much of your bank this reads',
+        ar: 'ما تقرأه وفرة من رسائل بنكك',
+    },
+    coverageShops: {
+        en: 'Wafra read {imported} bank message{s} into this ledger, and named the shop in {named} of the {measured} purchases that should carry a name.',
+        ar: 'قرأت وفرة {imported} رسالة بنكية إلى هذا السجل، وتعرّفت على اسم المتجر في {named} من {measured} عملية شراء يُفترض أن تحمل اسماً.',
+    },
+    coverageNoShops: {
+        en: 'Wafra read {imported} bank message{s} into this ledger, and none of them is a purchase with a shop to name — they are all transfers, card payments and the like.',
+        ar: 'قرأت وفرة {imported} رسالة بنكية إلى هذا السجل، وليس بينها عملية شراء يُفترض أن تحمل اسم متجر — كلها تحويلات ودفعات بطاقات وما شابهها.',
+    },
+    coverageCategories: {
+        en: 'Of the {categoryMeasured} purchases whose category it was actually asked for, it filed {categorised} under a real category.',
+        ar: 'ومن بين {categoryMeasured} عملية شراء سُئلت وفرة عن تصنيفها فعلاً، وضعت {categorised} تحت تصنيف حقيقي.',
+    },
+    coverageDecided: {
+        en: 'You have already answered for {decided} of them yourself — a shop you pinned, or an entry you filed by hand — so Wafra is not scored on those.',
+        ar: 'وقد أجبت بنفسك عن {decided} منها — متجر ثبّتّه أو عملية صنّفتها بيدك — فلا تُحاسَب وفرة عليها.',
+    },
+    coverageSkipped: {
+        en: 'A further {skipped} messages are transfers, card payments, ATM withdrawals, fees and money coming in. These are not shop purchases whose merchant or category Wafra needs to infer, so they are left out of both counts rather than counted as failures.',
+        ar: 'وهناك {skipped} رسالة أخرى هي تحويلات ودفعات بطاقات وسحوبات صراف ورسوم ومبالغ واردة. ليست هذه مشتريات من متجر تحتاج وفرة إلى استنتاج اسمه أو تصنيفه، لذا تُستثنى من العدّين بدل أن تُحسب أخطاءً.',
+    },
+    coverageNoText: {
+        en: 'The misses are counted here, but the messages behind them were never kept on this phone, so they cannot be listed below or shared.',
+        ar: 'الأخطاء محسوبة هنا، لكن الرسائل التي وراءها لم تُحفظ على هذا الهاتف إطلاقاً، فلا يمكن عرضها بالأسفل ولا مشاركتها.',
+    },
+    coverageNothingYet: {
+        en: 'No bank message has been read into this ledger yet, so there is nothing to measure.',
+        ar: 'لم تُقرأ أي رسالة بنكية إلى هذا السجل بعد، فلا يوجد ما يُقاس.',
+    },
+    categoriseMerchants: { en: 'Improve categories', ar: 'تحسين التصنيفات' },
+    categoriseIntro: {
+        en: 'Wafra reads the shop name off your bank message but cannot know what it sells. Choose once and every entry from that shop moves with it — the ones already in your ledger, and the ones still to come.',
+        ar: 'تقرأ وفرة اسم المتجر من رسالة البنك لكنها لا تعرف ماذا يبيع. اختر التصنيف مرة واحدة وتنتقل معه كل عمليات هذا المتجر: الموجودة في سجلك والقادمة لاحقاً.',
+    },
+    categoriseRemaining: {
+        en: '{count} merchant{s} · {rows} entr{ending}',
+        ar: '{count} متجر · {rows} عملية',
+    },
+    categoriseEntries: {
+        en: '{count} entr{ending} · last {date}',
+        ar: '{count} عملية · آخرها {date}',
+    },
+    categoriseAssigned: {
+        en: '{count} entr{ending} moved to {category}',
+        ar: 'نُقلت {count} عملية إلى {category}',
+    },
+    categorisePurposeAssigned: {
+        en: '{count} matching entr{ending} moved to {category}. Wafra will remember this bill reference.',
+        ar: 'نُقلت {count} دفعة مطابقة إلى {category}. سيتذكر وفرة مرجع هذه الفاتورة.',
+    },
+    categorisePaymentPurpose: {
+        en: 'BANK PAYMENT · PURPOSE UNKNOWN',
+        ar: 'دفعة بنكية · الغرض غير معروف',
+    },
+    categorisePaymentPurposeHint: {
+        en: 'This is the name saved in your bank, not necessarily the real biller. Choose what the payment was for. Wafra remembers only this bill reference — not every transaction with this name.',
+        ar: 'هذا هو الاسم المحفوظ في البنك وليس بالضرورة اسم المفوتر الحقيقي. اختر غرض الدفعة. سيتذكر وفرة مرجع هذه الفاتورة فقط، وليس كل عملية تحمل الاسم نفسه.',
+    },
+    categorisePurposeA11y: {
+        en: 'Choose what the bank payment {merchant} was for',
+        ar: 'اختر غرض الدفعة البنكية {merchant}',
+    },
+    categoriseShowAll: {
+        en: 'Review all {count}',
+        ar: 'عرض كل الحالات: {count}',
+    },
+    categoriseShowPriority: { en: 'Show priority items only', ar: 'عرض الحالات الأهم فقط' },
+    categoriseChooseA11y: {
+        en: 'Choose a category for {merchant}',
+        ar: 'اختر تصنيفاً لـ {merchant}',
+    },
+    categoriseAiSuggestion: {
+        en: 'On-device AI suggests: {category}',
+        ar: 'يقترح الذكاء الاصطناعي على جهازك: {category}',
+    },
+    categoriseRuleSuggestion: {
+        en: 'Suggested from the merchant name: {category}',
+        ar: 'مقترح من اسم التاجر: {category}',
+    },
+    categoriseSuggestionUse: { en: 'Use {category}', ar: 'استخدم {category}' },
+    categoriseSuggestionNote: {
+        en: 'Suggestion only. Nothing changes until you choose. Choosing applies it to {count} entr{ending}.',
+        ar: 'اقتراح فقط. لن يتغير شيء حتى تختار. عند الاختيار يُطبّق على {count} عملية.',
+    },
+    categoriseSuggestionChecking: { en: 'Checking the name on your device…', ar: 'جارٍ فحص الاسم على جهازك…' },
+    categoriseDone: { en: 'Nothing needs your input', ar: 'لا توجد حالات تحتاج إدخالك' },
+    categoriseDoneBody: {
+        en: 'Confident matches are handled automatically. New unclear merchants or bank-payment nicknames will appear here only when Wafra cannot classify them safely.',
+        ar: 'يتعامل وفرة تلقائياً مع الحالات الواضحة. لن تظهر هنا إلا المتاجر أو أسماء دفعات البنك التي لا يمكن تصنيفها بأمان.',
+    },
+    categoriseDoneCount: {
+        en: 'You sorted {count} entr{ending} just now.',
+        ar: 'صنّفت {count} عملية للتو.',
+    },
+    uncategorisedMerchantCount: {
+        en: '{count} item{s} need your input',
+        ar: '{count} حالات تحتاج إدخالك',
+    },
+    uncategorisedMerchantHint: {
+        en: 'One tap files every entry from that shop, past and future.',
+        ar: 'ضغطة واحدة تصنّف كل عمليات المتجر، السابقة والقادمة.',
+    },
+    categoriseMerchantsA11y: {
+        en: 'Review {count} unclear categories',
+        ar: 'راجع {count} تصنيفات غير واضحة',
+    },
+    spentThisMonthCaption: { en: 'spent this month', ar: 'مصروف هذا الشهر' },
+    cardSpentThisMonth: {
+        en: '{amount} spent this month',
+        ar: 'مصروف الشهر \u2066{amount}\u2069',
+    },
+    longPressHint: { en: 'Long-press a card or account to hide or remove it', ar: 'اضغط مطولاً على بطاقة أو حساب لإخفائه أو حذفه' },
+    walletCurrencies: { en: 'Currencies', ar: 'العملات' },
+    currencyActivityTitle: { en: 'Foreign activity', ar: 'النشاط بالعملات الأجنبية' },
+    currencyActivityDetail: { en: 'Original amounts kept with every charge', ar: 'يُحفظ المبلغ الأصلي مع كل عملية' },
+    chargeWord: { en: 'charge', ar: 'عملية' },
+    chargesWord: { en: 'charges', ar: 'عمليات' },
+    cardDetail: { en: 'Card detail', ar: 'تفاصيل البطاقة' },
+    credit: { en: 'Credit', ar: 'ائتمانية' },
+    debit: { en: 'Debit', ar: 'خصم' },
+    stillOwed: { en: 'Still owed', ar: 'المتبقي عليك' },
+    openStatements: { en: '{count} open statement{s}', ar: '{count} كشف مفتوح' },
+    statements: { en: 'Statements', ar: 'كشوف الحساب' },
+    dueDate: { en: 'Due {date}', ar: 'مستحق {date}' },
+    settled: { en: 'Settled', ar: 'مسدّد' },
+    percentPaid: { en: '{percent}% paid', ar: 'دُفع {percent}٪' },
+    paymentsMade: { en: 'Payments made', ar: 'الدفعات المسددة' },
+    reminderSet: { en: 'Reminder set', ar: 'تم ضبط التذكير' },
+    reminderFailed: { en: 'Reminder not set', ar: 'لم يُضبط التذكير' },
+    reminderFailedBody: {
+        en: 'Your phone didn’t accept the reminder. Try again in a moment.',
+        ar: 'لم يقبل هاتفك التذكير. حاول مرة أخرى بعد قليل.',
+    },
+    cardReminderBody: { en: 'You will be reminded three days before {date}, and again on the day.', ar: 'سنذكّرك قبل {date} بثلاثة أيام، ومرة أخرى في يوم الاستحقاق.' },
+    fileCardPaymentBody: { en: 'Files a {amount} payment to {name} today.', ar: 'يسجّل دفعة بقيمة {amount} إلى {name} اليوم.' },
+    paidOfTotal: { en: 'Paid {paid} of {total}', ar: 'دُفع {paid} من {total}' },
+    minimumShort: { en: 'Min {amount}', ar: 'الحد الأدنى {amount}' },
+    minimumDueLabel: { en: 'Minimum due', ar: 'الحد الأدنى' },
+    statementMinimumUnconfirmed: { en: 'Minimum not confirmed in this alert', ar: 'الحد الأدنى غير مؤكد في هذا التنبيه' },
+    card: { en: 'Card', ar: 'البطاقة' },
+    matched: { en: 'Matched', ar: 'المطابقة' },
+    chargesAcross: { en: '{amount} across {count} charge{s}', ar: '{amount} عبر {count} عملية' },
+    matchedPayments: { en: '{count} payment{s} matched oldest-first to this card’s statements.', ar: 'طابقت {count} دفعة كشوف هذه البطاقة من الأقدم إلى الأحدث.' },
+    settingsTitle: { en: 'Settings', ar: 'الإعدادات' },
+    trustedTitle: { en: 'Trusted devices', ar: 'الأجهزة الموثوقة' },
+    trustedSettingsRow: { en: 'Trusted devices & family', ar: 'الأجهزة الموثوقة والعائلة' },
+    trustedSettingsDetail: {
+        en: 'Share future relay-delivered supplemental imports with up to 8 devices',
+        ar: 'شارك الواردات الإضافية المستقبلية المرسلة عبر المرحّل مع ما يصل إلى ٨ أجهزة',
+    },
+    trustedHeroTitle: { en: 'One vault. Your trusted phones.', ar: 'خزنة واحدة. لأجهزتك الموثوقة.' },
+    trustedHeroBody: {
+        en: 'New structured captures delivered through Wafra’s relay can reach every trusted device, sealed separately for each one. Your existing ledger is not copied.',
+        ar: 'يمكن لعمليات الالتقاط المنظمة الجديدة المرسلة عبر مرحّل وفرة أن تصل إلى كل جهاز موثوق، مشفّرة لكل جهاز على حدة. لا يُنسخ سجلك الحالي.',
+    },
+    trustedAndroidTruth: {
+        en: 'Bank SMS still parse only on this Android and are not uploaded. Trusted devices receive only future items delivered through the relay.',
+        ar: 'تبقى رسائل البنك على هذا الأندرويد وتُحلَّل محلياً ولا تُرفع. تستقبل الأجهزة الموثوقة فقط العناصر المستقبلية المرسلة عبر المرحّل.',
+    },
+    trustedIosTruth: {
+        en: 'Local iPhone Message captures stay on this iPhone. Only separately relay-delivered supplemental imports can reach trusted devices, and joining never backfills older transactions.',
+        ar: 'تبقى التقاطات الرسائل المحلية على هذا الآيفون. لا تصل إلى الأجهزة الموثوقة إلا الواردات الإضافية المرسلة بشكل منفصل عبر المرحّل، ولا يسترجع الانضمام العمليات السابقة.',
+    },
+    trustedPreview: { en: 'SAMPLE HOUSEHOLD', ar: 'عائلة تجريبية' },
+    trustedDisabled: { en: 'DEMO', ar: 'تجريبي' },
+    trustedPreviewBody: {
+        en: 'See how a family’s trusted phones receive new relayed items. Older transactions are not copied. Invitations are disabled in this demo.',
+        ar: 'شاهد كيف تستقبل هواتف العائلة الموثوقة العناصر الجديدة المرسلة عبر المرحّل. لا تُنسخ العمليات السابقة. الدعوات معطلة في هذا العرض التجريبي.',
+    },
+    trustedPreviewA11y: { en: 'Sample device, controls disabled', ar: 'جهاز تجريبي، عناصر التحكم معطلة' },
+    trustedStartHeader: { en: 'START A TRUSTED VAULT', ar: 'ابدأ خزنة موثوقة' },
+    trustedStartBody: {
+        en: 'Create the first owner device, or paste a one-use invite from someone you trust. No bank or ledger data is stored in an invite.',
+        ar: 'أنشئ جهاز المالك الأول، أو الصق دعوة للاستخدام مرة واحدة من شخص تثق به. لا تحتوي الدعوة على بيانات بنكية أو بيانات السجل.',
+    },
+    trustedPrivateModeBody: {
+        en: 'Your saved local-only preference pauses online services. Review it in Settings → Privacy and data before connecting trusted devices.',
+        ar: 'يوقف تفضيل المعالجة المحلية المحفوظ الخدمات المتصلة. راجعه في الإعدادات ← الخصوصية والبيانات قبل ربط الأجهزة الموثوقة.',
+    },
+    trustedConnecting: { en: 'Connecting…', ar: 'جارٍ الاتصال…' },
+    trustedCreateVault: { en: 'Create trusted vault', ar: 'أنشئ خزنة موثوقة' },
+    trustedJoinVault: { en: 'Join with an invite', ar: 'انضم بدعوة' },
+    trustedDevicesHeader: { en: 'TRUSTED DEVICES', ar: 'الأجهزة الموثوقة' },
+    trustedThisDevice: { en: 'THIS DEVICE', ar: 'هذا الجهاز' },
+    trustedRoleOwner: { en: 'Owner', ar: 'المالك' },
+    trustedRoleMember: { en: 'Member', ar: 'عضو' },
+    trustedSeenNow: { en: 'seen now', ar: 'نشط الآن' },
+    trustedSeenMinutes: { en: 'seen {count}m ago', ar: 'نشط قبل {count} د' },
+    trustedSeenHours: { en: 'seen {count}h ago', ar: 'نشط قبل {count} س' },
+    trustedUnnamed: { en: 'Unnamed device', ar: 'جهاز بلا اسم' },
+    trustedManageA11y: { en: 'Opens device controls', ar: 'يفتح عناصر التحكم بالجهاز' },
+    trustedOfflineBody: {
+        en: 'Relay unavailable. Showing the last list on this screen; no changes were made.',
+        ar: 'المرحّل غير متاح. تُعرض آخر قائمة في هذه الشاشة ولم تُجرَ أي تغييرات.',
+    },
+    trustedRetry: { en: 'RETRY', ar: 'أعد المحاولة' },
+    trustedInviteHeader: { en: 'ADD SOMEONE YOU TRUST', ar: 'أضف شخصاً تثق به' },
+    trustedInviteAction: { en: 'Create 10-minute invite', ar: 'أنشئ دعوة لمدة ١٠ دقائق' },
+    trustedInviteReady: { en: 'One-use invite ready', ar: 'الدعوة صالحة لاستخدام واحد' },
+    trustedInviteCountdown: { en: 'Expires in {minutes}:{seconds}', ar: 'تنتهي خلال {minutes}:{seconds}' },
+    trustedInviteExpired: { en: 'This invite has expired', ar: 'انتهت صلاحية هذه الدعوة' },
+    trustedInviteUntilExpiry: { en: 'until it expires', ar: 'حتى تنتهي صلاحيتها' },
+    trustedRelayOnly: {
+        en: 'The phone that joins receives only new items relayed after it joins. Older transactions are not copied.',
+        ar: 'يستقبل الهاتف المنضم فقط العناصر الجديدة المرسلة عبر المرحّل بعد انضمامه. لا تُنسخ العمليات السابقة.',
+    },
+    trustedInvitePrivacy: {
+        en: 'The invite contains a short-lived enrollment token and relay address only—no balances, transactions, bank details, or device secrets.',
+        ar: 'تحتوي الدعوة فقط على رمز انضمام قصير الصلاحية وعنوان المرحّل — بلا أرصدة أو عمليات أو بيانات بنكية أو أسرار الجهاز.',
+    },
+    trustedShareInvite: { en: 'Share secure invite', ar: 'شارك الدعوة الآمنة' },
+    trustedNewInvite: { en: 'Create a new invite', ar: 'أنشئ دعوة جديدة' },
+    trustedShareTitle: { en: 'Wafra trusted-device invite', ar: 'دعوة جهاز موثوق من وفرة' },
+    trustedShareMessage: {
+        en: 'Join my Wafra trusted vault. Open or paste this one-use link in Wafra within 10 minutes:',
+        ar: 'انضم إلى خزنة وفرة الموثوقة. افتح أو الصق هذا الرابط الصالح لاستخدام واحد في وفرة خلال ١٠ دقائق:',
+    },
+    trustedVaultHeader: { en: 'TRUSTED VAULT', ar: 'الخزنة الموثوقة' },
+    trustedVaultBody: {
+        en: 'Deleting the vault revokes every device and removes queued relay captures. Transactions already saved on each phone stay local to that phone.',
+        ar: 'حذف الخزنة يلغي وصول كل الأجهزة ويحذف عمليات الالتقاط المنتظرة في المرحّل. تبقى العمليات المحفوظة على كل هاتف محلياً فيه.',
+    },
+    trustedDeleteVaultTitle: { en: 'Delete the trusted vault?', ar: 'حذف الخزنة الموثوقة؟' },
+    trustedDeleteVaultBody: {
+        en: 'Every device will lose future relay delivery and all queued captures will be deleted. Local ledgers already saved on each device are not remotely erased.',
+        ar: 'ستفقد جميع الأجهزة عمليات الترحيل المستقبلية وستُحذف كل العمليات المنتظرة. لن تُمسح السجلات المحلية المحفوظة على الأجهزة عن بُعد.',
+    },
+    trustedDeleteVaultAction: { en: 'Delete trusted vault', ar: 'احذف الخزنة الموثوقة' },
+    trustedJoinSheetTitle: { en: 'JOIN TRUSTED VAULT', ar: 'الانضمام إلى خزنة موثوقة' },
+    trustedJoinSheetBody: {
+        en: 'Paste the one-use link shared by the owner. This phone creates its own encryption key; no private key is copied from another device.',
+        ar: 'الصق رابط الاستخدام الواحد الذي شاركه المالك. ينشئ هذا الهاتف مفتاح تشفير خاصاً به؛ ولا يُنسخ أي مفتاح خاص من جهاز آخر.',
+    },
+    trustedDeviceName: { en: 'DEVICE NAME', ar: 'اسم الجهاز' },
+    trustedInviteCode: { en: 'INVITE LINK OR CODE', ar: 'رابط الدعوة أو رمزها' },
+    trustedInvitePlaceholder: { en: 'Paste the Wafra invite', ar: 'الصق دعوة وفرة' },
+    trustedJoining: { en: 'Joining…', ar: 'جارٍ الانضمام…' },
+    trustedJoinAction: { en: 'Join trusted vault', ar: 'انضم إلى الخزنة الموثوقة' },
+    trustedManageDevice: { en: 'MANAGE DEVICE', ar: 'إدارة الجهاز' },
+    trustedLeaveTitle: { en: 'Leave this trusted vault?', ar: 'مغادرة هذه الخزنة الموثوقة؟' },
+    trustedLeaveBody: {
+        en: 'This device will stop receiving future relay captures. Its local ledger stays on this phone.',
+        ar: 'سيتوقف هذا الجهاز عن استقبال عمليات الالتقاط المستقبلية من المرحّل. يبقى سجله المحلي على هذا الهاتف.',
+    },
+    trustedLeaveAction: { en: 'Leave vault', ar: 'غادر الخزنة' },
+    trustedRemoveTitle: { en: 'Remove this device?', ar: 'إزالة هذا الجهاز؟' },
+    trustedRemoveBody: {
+        en: '{name} will lose future relay access. Its already-saved local ledger cannot be erased remotely.',
+        ar: 'سيفقد {name} الوصول المستقبلي إلى المرحّل. لا يمكن مسح سجله المحلي المحفوظ مسبقاً عن بُعد.',
+    },
+    trustedRemoveAction: { en: 'Remove access', ar: 'أزل الوصول' },
+    trustedOwnerProtected: { en: 'Owner protected', ar: 'المالك محمي' },
+    trustedOwnerProtectedBody: {
+        en: 'The last owner cannot be removed. Use Delete trusted vault if you intend to end this vault for everyone.',
+        ar: 'لا يمكن إزالة آخر مالك. استخدم «احذف الخزنة الموثوقة» إذا أردت إنهاء الخزنة للجميع.',
+    },
+    trustedOwnerOnly: { en: 'Owner approval needed', ar: 'تلزم موافقة المالك' },
+    trustedOwnerOnlyBody: {
+        en: 'Only the vault owner can invite or remove another device.',
+        ar: 'يمكن لمالك الخزنة وحده دعوة جهاز آخر أو إزالته.',
+    },
+    trustedLimitTitle: { en: 'Vault is full', ar: 'الخزنة ممتلئة' },
+    trustedLimitBody: {
+        en: 'A trusted vault supports up to 8 devices. Remove one before creating another invite.',
+        ar: 'تدعم الخزنة الموثوقة ما يصل إلى ٨ أجهزة. أزل جهازاً قبل إنشاء دعوة أخرى.',
+    },
+    trustedInviteExpiredTitle: { en: 'Invite did not work', ar: 'لم تنجح الدعوة' },
+    trustedInviteExpiredBody: {
+        en: 'It may be expired, already used, or incomplete. Ask the owner for a fresh invite.',
+        ar: 'قد تكون منتهية أو مستخدمة مسبقاً أو غير مكتملة. اطلب من المالك دعوة جديدة.',
+    },
+    trustedAccessEnded: { en: 'Access ended', ar: 'انتهى الوصول' },
+    trustedAccessEndedBody: {
+        en: 'This device is no longer authorized for that vault.',
+        ar: 'لم يعد هذا الجهاز مصرحاً له بالوصول إلى تلك الخزنة.',
+    },
+    trustedTryLater: { en: 'Try again shortly', ar: 'حاول مجدداً بعد قليل' },
+    trustedTryLaterBody: {
+        en: 'Too many enrollment attempts were made. Wait a moment before retrying.',
+        ar: 'تمت محاولات انضمام كثيرة. انتظر قليلاً قبل إعادة المحاولة.',
+    },
+    trustedNameInvalid: { en: 'Check the device name', ar: 'تحقق من اسم الجهاز' },
+    trustedNameInvalidBody: {
+        en: 'Use between 1 and 40 characters, without control characters.',
+        ar: 'استخدم من حرف واحد إلى ٤٠ حرفاً، من دون محارف تحكم.',
+    },
+    trustedUnavailableTitle: { en: 'Relay unavailable', ar: 'المرحّل غير متاح' },
+    trustedUnavailableBody: {
+        en: 'No change was made. Check your connection and try again.',
+        ar: 'لم يُجرَ أي تغيير. تحقق من اتصالك وحاول مجدداً.',
+    },
+    notAvailable: { en: 'Not available', ar: 'غير متاح' },
+    openSettings: { en: 'Open settings', ar: 'فتح الإعدادات' },
+    enableAction: { en: 'Enable', ar: 'تفعيل' },
+    restoreAction: { en: 'Restore', ar: 'استعادة' },
+    restoreBackupQ: { en: 'Restore backup?', ar: 'استعادة النسخة الاحتياطية؟' },
+    invalidFile: { en: 'Invalid file', ar: 'ملف غير صالح' },
+    couldNotReadFileBody: {
+        en: 'Try exporting a fresh backup and restoring that.',
+        ar: 'جرّب تصدير نسخة احتياطية جديدة ثم استعادتها.',
+    },
+    featuresHeader: { en: 'Features', ar: 'الميزات' },
+    dataHeader: { en: 'Data', ar: 'البيانات' },
+    moneyMonthHeader: { en: 'Money month', ar: 'الشهر المالي' },
+    moneyMonthStarts: { en: 'Starts on the {day}', ar: 'يبدأ في اليوم {day}' },
+    moneyMonthDayA11y: {
+        en: 'Money month starts on day {day}',
+        ar: 'يبدأ الشهر المالي في اليوم {day}',
+    },
+    moneyMonthRange: {
+        en: 'Your {month} month runs {from} – {to}, so salary and rent land in the same month.',
+        ar: 'يمتد شهر {month} المالي من {from} إلى {to}، فيقع الراتب والإيجار في الشهر نفسه.',
+    },
+    calendarMonthHint: {
+        en: 'Day 1 means calendar months. Next month starts {date}.',
+        ar: 'اليوم ١ يعني الأشهر الميلادية. يبدأ الشهر التالي في {date}.',
+    },
+    appearanceHeader: { en: 'Appearance', ar: 'المظهر' },
+    themeSystem: { en: 'System', ar: 'النظام' },
+    themeSystemDetail: { en: 'System · follows phone', ar: 'النظام · يتبع الهاتف' },
+    themeLight: { en: 'Light', ar: 'فاتح' },
+    themeDark: { en: 'Dark', ar: 'داكن' },
+    pinnedTheme: {
+        en: 'Pinned to {theme}, whatever your phone is set to.',
+        ar: 'ثُبّت المظهر على {theme} بغض النظر عن إعداد الهاتف.',
+    },
+    privacyHeader: { en: 'Privacy', ar: 'الخصوصية' },
+    appLockTitle: { en: 'App lock', ar: 'قفل التطبيق' },
+    appLockDetail: {
+        en: 'Fingerprint, face unlock, or your phone PIN',
+        ar: 'البصمة أو التعرّف على الوجه أو رمز الهاتف',
+    },
+    readBankSms: { en: 'Read bank SMS', ar: 'قراءة رسائل البنك' },
+    smsGrantedLocal: {
+        en: 'Granted · nothing is uploaded',
+        ar: 'مسموح · لا يُرفع أي شيء',
+    },
+    smsOffNoImport: {
+        en: 'Off · nothing can import',
+        ar: 'متوقف · لن تُستورد أي عملية',
+    },
+    turnSmsReadingOff: { en: 'Turn SMS reading off', ar: 'إيقاف قراءة الرسائل' },
+    instantAlertsOn: {
+        en: 'On · visible alert with sound and vibration',
+        ar: 'مفعّل · تنبيه مرئي مع صوت واهتزاز',
+    },
+    instantAlertsOff: {
+        en: 'Off · charges appear when Wafra next opens',
+        ar: 'متوقف · تظهر العمليات عند فتح وفرة لاحقاً',
+    },
+    instantAlertsNeedSms: {
+        en: 'Needs bank SMS reading above',
+        ar: 'يحتاج تفعيل قراءة رسائل البنك أعلاه',
+    },
+    instantAlertsNeedBankSource: {
+        en: 'Turn on bank SMS or bank app notifications first',
+        ar: 'فعّل رسائل البنك أو إشعارات تطبيق البنك أولاً',
+    },
+    turnOnBankCaptureFirst: {
+        en: 'Turn on bank capture first',
+        ar: 'فعّل التقاط رسائل البنك أولاً',
+    },
+    turnOnBankCaptureFirstBody: {
+        en: 'Enable bank SMS reading or bank app notifications, then turn on per-transaction alerts.',
+        ar: 'فعّل قراءة رسائل البنك أو إشعارات تطبيق البنك، ثم فعّل تنبيهات كل عملية.',
+    },
+    instantAlertsSmsPermissionTitle: {
+        en: 'Incoming SMS access was not allowed',
+        ar: 'لم يُسمح بالوصول إلى الرسائل الواردة',
+    },
+    instantAlertsSmsPermissionBody: {
+        en: 'Instant banners need Android’s incoming SMS permission. Bank-alert history import still works with the separate SMS-reading permission.',
+        ar: 'تحتاج التنبيهات الفورية إذن أندرويد للرسائل الواردة. ويظل استيراد سجل رسائل البنك يعمل بإذن قراءة الرسائل المنفصل.',
+    },
+    instantAlertsLivePermissionPrompt: {
+        en: 'Live purchase alerts need incoming SMS access and Wafra notification permission. Enable them so Wafra can alert you as soon as a bank SMS arrives.',
+        ar: 'تحتاج تنبيهات المشتريات الفورية إلى إذن الرسائل الواردة وإذن إشعارات وفرة. فعّلهما ليصلك تنبيه وفرة فور وصول رسالة البنك.',
+    },
+    bankPushOn: {
+        en: 'On · new bank notifications are added automatically',
+        ar: 'مفعّل · تُضاف إشعارات البنك الجديدة تلقائياً',
+    },
+    bankPushOff: {
+        en: 'Off · grant bank notification access',
+        ar: 'متوقف · امنح إذن إشعارات البنوك',
+    },
+    regionHeader: { en: 'Language & bank formats', ar: 'اللغة وتنسيقات البنوك' },
+    countryPack: { en: 'Country pack', ar: 'حزمة الدولة' },
+    parserPack: { en: 'Bank-message region', ar: 'منطقة رسائل البنك' },
+    countryPackDetail: {
+        en: '{country} · {currency} · bank and shop names in new messages',
+        ar: '{country} · {currency} · أسماء البنوك والمتاجر في الرسائل الجديدة',
+    },
+    parserPackDetail: {
+        en: '{country} · {currency} automatic import; Android can detect other supported formats for review',
+        ar: '{country} · استيراد تلقائي بعملة {currency}؛ يستطيع أندرويد اكتشاف تنسيقات مدعومة أخرى للمراجعة',
+    },
+    globalParserPackDetail: {
+        en: '{currency} ledger · other bank formats may need Review; automatic coverage varies',
+        ar: 'سجل بعملة {currency} · قد تحتاج تنسيقات البنوك الأخرى إلى المراجعة؛ تختلف تغطية الاستيراد التلقائي',
+    },
+    parserPackPickerBody: {
+        en: 'UAE and Saudi packs have tested automatic formats. Android and iPhone History may auto-add other completed movements marked Auto-added — check. Unfamiliar live iPhone alerts wait in Review.',
+        ar: 'تضم حزمتا الإمارات والسعودية تنسيقات مختبرة للاستيراد التلقائي. قد يضيف أندرويد وسجل رسائل الآيفون حركات مكتملة أخرى بعلامة أُضيف تلقائياً — تحقّق. تنتظر تنبيهات الآيفون المباشرة غير المألوفة في المراجعة.',
+    },
+    marketPinned: {
+        en: 'Your money is recorded in {currency}. Switching would relabel it, not convert it.',
+        ar: 'أموالك مسجّلة بـ {currency}. التبديل سيغيّر التسمية فقط ولن يحوّل المبالغ.',
+    },
+    uaeName: { en: 'United Arab Emirates', ar: 'الإمارات العربية المتحدة' },
+    saudiName: { en: 'Saudi Arabia', ar: 'المملكة العربية السعودية' },
+    languageSettingDetail: {
+        en: 'English · العربية is available instantly',
+        ar: 'العربية · English متاحة فوراً',
+    },
+    unreadFormatsCount: {
+        en: '{count} unread message format{s} · digits masked',
+        ar: '{count} صيغة رسالة غير مقروءة · الأرقام مخفية',
+    },
+    settingsTagline: {
+        en: 'Know where it goes. Watch it grow.',
+        ar: 'اعرف أين تذهب أموالك وراقبها تنمو.',
+    },
+    settingsViewOnboarding: { en: 'View onboarding', ar: 'عرض تجربة البداية' },
+    settingsViewOnboardingDetail: {
+        en: 'Replay the welcome flow without changing your data or settings',
+        ar: 'أعد مشاهدة تجربة البداية دون تغيير بياناتك أو إعداداتك',
+    },
+    settingsTrialDays: {
+        en: 'Free trial · {count} day{s} left',
+        ar: 'تجربة مجانية · متبقٍ {count} يوم',
+    },
+    wafraPro: { en: 'Wafra Pro', ar: 'وفرة برو' },
+    proActive: { en: 'Active', ar: 'مفعّل' },
+    billsAndSubs: { en: 'Bills and subscriptions', ar: 'الفواتير والاشتراكات' },
+    importFromSms: { en: 'Import from bank SMS', ar: 'استيراد من رسائل البنك' },
+    bankAppNotifs: { en: 'Bank app notifications (beta)', ar: 'إشعارات تطبيقات البنوك (تجريبي)' },
+    appLock: { en: 'App lock (biometric)', ar: 'قفل التطبيق (بصمة)' },
+    privacyBuiltInDetail: {
+        en: 'Protected on your phone. Sharing is your choice.',
+        ar: 'بياناتك محمية على هاتفك، ومشاركتها باختيارك.',
+    },
+    privacyBuiltInBody: {
+        en: 'Privacy is built into Wafra. Your ledger is encrypted on iPhone and Android. Local bank-message capture works without uploading your messages. App lock adds protection when someone else is using your unlocked phone.',
+        ar: 'الخصوصية جزء أساسي من وفرة. سجلك مشفّر على آيفون وأندرويد، ويعمل الالتقاط المحلي لرسائل البنك دون رفع رسائلك. ويضيف قفل التطبيق حماية عندما يستخدم شخص آخر هاتفك المفتوح.',
+    },
+    privacyLogosBody: {
+        en: 'Logos appear automatically. Many merchant and bank identities ship with the app. For other merchants or banks, Wafra may send only a cleaned brand or institution name — not the amount, account/card number or bank message — to Brandfetch to find a confident match, then load its logo. Brandfetch can see that name lookup, the requested brand domain and your network address.',
+        ar: 'تظهر الشعارات تلقائياً، ويأتي كثير من هويات التجّار والبنوك مع التطبيق. وللتجّار أو البنوك الأخرى قد ترسل وفرة اسم العلامة أو المؤسسة المنظّف فقط — دون المبلغ أو رقم الحساب أو البطاقة أو نص رسالة البنك — إلى Brandfetch للعثور على تطابق موثوق ثم تحميل شعاره. ويمكن لـ Brandfetch رؤية بحث الاسم ونطاق العلامة المطلوب وعنوان اتصالك بالشبكة.',
+    },
+    privacyLegacyTitle: { en: 'Your earlier local-only choice is saved', ar: 'اختيارك السابق للمعالجة المحلية محفوظ' },
+    privacyLegacyBody: {
+        en: 'Your earlier choice still pauses cloud imports, reference exchange rates and online logos, and prevents new diagnostic message text from being kept. Local capture still works. Wafra has not changed that choice.',
+        ar: 'يبقى اختيارك السابق بإيقاف الاستيراد السحابي وأسعار الصرف المرجعية والشعارات المتصلة ومنع الاحتفاظ بنصوص رسائل تشخيصية جديدة محفوظاً. ويستمر الالتقاط المحلي. لم تغيّر وفرة هذا الاختيار.',
+    },
+    privacyLegacyReview: { en: 'Review online features', ar: 'مراجعة الميزات المتصلة' },
+    privacyResumeTitle: { en: 'Resume optional online features?', ar: 'استئناف الميزات المتصلة الاختيارية؟' },
+    privacyResumeBody: {
+        en: 'This restores automatic reference exchange-rate and logo requests, allows you to set up cloud imports, and lets unclear message text stay on this phone for correction. A previously connected relay can resume syncing. Creating a connection or uploading a statement still needs its own action. Previously removed message text cannot be recovered.',
+        ar: 'يستأنف هذا طلبات أسعار الصرف المرجعية والشعارات التلقائية، ويتيح إعداد الاستيراد السحابي والاحتفاظ بنص الرسائل غير الواضحة على هذا الهاتف لتصحيحها. وقد تستأنف خدمة مربوطة سابقاً المزامنة. ويتطلب إنشاء اتصال أو رفع كشف إجراءً منفصلاً. ولا يمكن استعادة نصوص الرسائل المحذوفة سابقاً.',
+    },
+    privacyResumeAction: { en: 'Resume online features', ar: 'استئناف الميزات المتصلة' },
+    privacyPreferenceFailed: { en: 'Wafra could not save this preference. Try again.', ar: 'تعذّر على وفرة حفظ هذا التفضيل. حاول مرة أخرى.' },
+    privateMode: { en: 'Saved local-only preference', ar: 'تفضيل المعالجة المحلية المحفوظ' },
+    privateModeOn: {
+        en: 'On · local structured data only; raw text is dropped',
+        ar: 'مفعّل · بيانات منظّمة محلية فقط؛ يُحذف النص الخام',
+    },
+    privateModeOff: {
+        en: 'Off · low-confidence text may stay on this phone for correction',
+        ar: 'متوقف · قد يبقى نص العمليات غير الواضحة على الهاتف لتصحيحها',
+    },
+    privateModeEnableTitle: { en: 'Turn on Private Mode?', ar: 'تفعيل الوضع الخاص؟' },
+    privateModeEnableIosBody: {
+        en: 'This removes retained diagnostic message text and disconnects the old relay. Local automatic capture and structured entries on this iPhone stay.',
+        ar: 'سيحذف نصوص الرسائل التشخيصية المحفوظة ويفصل المرحّل القديم. سيبقى الالتقاط التلقائي المحلي والعمليات المنظّمة على هذا الآيفون.',
+    },
+    privateModeEnable: { en: 'Turn on', ar: 'تفعيل' },
+    privateModeFailed: {
+        en: 'Private Mode could not disconnect the relay. Connect to the internet and try again.',
+        ar: 'تعذّر على الوضع الخاص فصل المرحّل. اتصل بالإنترنت وحاول مرة أخرى.',
+    },
+    capturePreferenceFailed: {
+        en: 'Capture setting didn’t save. Try again.',
+        ar: 'لم يُحفظ إعداد الالتقاط. حاول مجدداً.',
+    },
+    privacyRetentionExact: {
+        en: 'The capture status and warning on this screen keep only source-free counts; they do not keep Message text or sender. Pending Message records wait in the protected local capture queue—a short-lived encrypted queue. They expire after 30 days and are removed the next time capture runs or Wafra checks the queue. Local capture works with your saved preferences.',
+        ar: 'لا تحتفظ حالة الالتقاط والتنبيه في هذه الشاشة إلا بأعداد خالية من بيانات المصدر، ولا تحفظان نص الرسالة أو اسم المرسل. تبقى سجلات الرسائل المعلّقة في صف الالتقاط المحلي المحمي، وهو صف مشفّر قصير الأجل. وتنتهي صلاحيتها بعد ٣٠ يوماً وتُزال عند تشغيل الالتقاط أو فحص وفرة للصف في المرة التالية. ويستمر الالتقاط المحلي وفق تفضيلاتك المحفوظة.',
+    },
+    privacySecurityExact: {
+        en: 'Automatic capture is optional. Android SMS alerts are processed on this phone, and local iPhone capture never uploads SMS content. However, an old Wafra Shortcut automation can continue uploading the bank messages you selected until you remove it or Wafra confirms retirement. Wafra cannot sign in to a bank, directly access your Messages inbox, reply, approve a payment or move money. For separately connected email, PDF or CSV imports, the encrypted relay parses them, discards raw text immediately, and returns only structured rows.',
+        ar: 'الالتقاط التلقائي اختياري. تُعالج تنبيهات رسائل أندرويد على هذا الهاتف، ولا يرفع الالتقاط المحلي على الآيفون محتوى الرسائل. لكن أتمتة الاختصار القديمة «Wafra Capture» قد تستمر في رفع رسائل البنوك التي اخترتها إلى أن تحذفها أو تؤكد وفرة اكتمال إيقافها. لا تستطيع وفرة تسجيل الدخول إلى بنك أو الوصول مباشرةً إلى صندوق رسائلك أو الرد أو الموافقة على دفعة أو نقل الأموال. أما واردات البريد أو PDF أو CSV المربوطة منفصلةً، فيحللها المرحّل المشفّر ويحذف النص فوراً ويعيد عمليات منظّمة فقط.',
+    },
+    country: { en: 'Country', ar: 'الدولة' },
+    language: { en: 'Language', ar: 'اللغة' },
+    monthStartsOn: { en: 'Month starts on day', ar: 'يبدأ الشهر في يوم' },
+    calendarMonths: { en: 'Calendar months (1st to end)', ar: 'أشهر ميلادية (من ١ حتى النهاية)' },
+    backupJson: { en: 'Back up everything (JSON)', ar: 'نسخ احتياطي كامل (JSON)' },
+    restoreBackup: { en: 'Restore from backup', ar: 'استعادة من نسخة احتياطية' },
+    exportCsv: { en: 'Export transactions (CSV)', ar: 'تصدير العمليات (CSV)' },
+    statementImportTitle: { en: 'Add bank statements', ar: 'أضف كشوف البنك' },
+    statementImportSettingsDetail: {
+        en: 'Add history from one or several PDF, CSV, or TSV statements',
+        ar: 'أضف السجل من كشف واحد أو عدة كشوف PDF أو CSV أو TSV',
+    },
+    settingsAlertDeliveryHeader: { en: 'Bank messages', ar: 'رسائل البنك' },
+    settingsAlertDeliveryTitle: { en: 'How your bank reaches you', ar: 'كيف يصلك بنكك' },
+    settingsAlertDeliveryUnset: { en: 'Not set — this decides how far back Wafra can go', ar: 'غير محدد — هذا يحدد إلى أي مدى يستطيع وفرة الرجوع' },
+    statementImportNoCaptureDetail: {
+        en: 'Your bank sends nothing Wafra can read, so a statement is how this spending gets in',
+        ar: 'بنكك لا يرسل شيئاً يمكن لوفرة قراءته، لذا فإن كشف الحساب هو طريقة إدخال هذه العمليات',
+    },
+    statementImportGapDetail: {
+        en: 'Your bank leaves no history to read, so a statement is how earlier months get in',
+        ar: 'بنكك لا يترك سجلاً يمكن قراءته، لذا فإن كشف الحساب هو طريقة إدخال الأشهر السابقة',
+    },
+    launchMetricsInternal: { en: 'Launch metrics (internal)', ar: 'مقاييس التشغيل (داخلية)' },
+    launchMetricsDetail: {
+        en: 'Fixed timings only · no ledger data',
+        ar: 'أزمنة ثابتة فقط · بلا بيانات مالية',
+    },
+    launchMetricsDialog: { en: 'Export launch metrics', ar: 'تصدير مقاييس التشغيل' },
+    launchMetricsExportFailed: {
+        en: 'Launch metrics export failed',
+        ar: 'تعذّر تصدير مقاييس التشغيل',
+    },
+    smsCorpusExportTitle: {
+        en: 'Export parser corpus (temporary)',
+        ar: 'تصدير مجموعة رسائل للمحلّل (مؤقت)',
+    },
+    personalReviewExportTitle: {
+        en: 'Export my data for review',
+        ar: 'تصدير بياناتي للمراجعة',
+    },
+    personalReviewExportDetail: {
+        en: 'Personal test build · full received SMS and Wafra backup in one file. Save it, then attach it to Codex yourself.',
+        ar: 'نسخة اختبار شخصية · الرسائل المستلمة كاملة ونسخة وفرة الاحتياطية في ملف واحد. احفظه ثم أرفقه بنفسك في Codex.',
+    },
+    personalReviewExportConfirmTitle: {
+        en: 'Export your messages and Wafra data?',
+        ar: 'تصدير رسائلك وبيانات وفرة؟',
+    },
+    personalReviewExportConfirmBody: {
+        en: 'This unencrypted JSON file contains every received SMS with its full sender, date and text, including personal messages and verification codes. It also includes your Wafra backup: transactions, account details, balances, saved categories and preferences. Nothing is redacted. Wafra does not upload it; you choose where to save or share it. Sent messages, deleted messages and other apps are not included.',
+        ar: 'يحتوي ملف JSON غير المشفّر على كل رسالة مستلمة مع المرسل والتاريخ والنص الكامل، بما فيها الرسائل الشخصية ورموز التحقق. ويشمل أيضاً نسخة وفرة الاحتياطية: العمليات وتفاصيل الحسابات والأرصدة والتصنيفات المحفوظة والتفضيلات. لا تُحجب أي بيانات. لا يرفعه وفرة؛ أنت تختار أين تحفظه أو تشاركه. لا يشمل الرسائل المرسلة أو المحذوفة أو التطبيقات الأخرى.',
+    },
+    personalReviewExportConfirm: { en: 'Prepare my file', ar: 'تجهيز ملفي' },
+    personalReviewExportPrivateMode: {
+        en: 'Your saved preference excludes original message text. Review it in Settings → Privacy and data.',
+        ar: 'يستبعد تفضيلك المحفوظ نص الرسائل الأصلية. راجعه في الإعدادات ← الخصوصية والبيانات.',
+    },
+    personalReviewExportFailed: { en: 'Could not export your data', ar: 'تعذّر تصدير بياناتك' },
+    smsCorpusExportDetail: {
+        en: 'Share every received SMS from this Android phone',
+        ar: 'مشاركة جميع الرسائل المستلمة من هاتف أندرويد هذا',
+    },
+    smsCorpusExportProgress: {
+        en: 'Preparing {count} messages…',
+        ar: 'جارٍ تجهيز {count} رسالة…',
+    },
+    smsCorpusConfirmTitle: {
+        en: 'Export every received SMS?',
+        ar: 'تصدير جميع الرسائل المستلمة؟',
+    },
+    smsCorpusConfirmBody: {
+        en: 'This temporary diagnostic reads the full sender, date and text of every received SMS on this phone and prepares a local JSON file. Wafra does not upload it; you choose where to send it in the Android share sheet.',
+        ar: 'تقرأ هذه الأداة التشخيصية المؤقتة اسم المرسل والتاريخ والنص الكامل لكل رسالة مستلمة على هذا الهاتف، ثم تُنشئ ملف JSON محلياً. لا يرفعه وفرة؛ أنت تختار وجهته من قائمة المشاركة في أندرويد.',
+    },
+    smsCorpusConfirmAction: { en: 'Prepare file', ar: 'تجهيز الملف' },
+    smsCorpusPermissionTitle: {
+        en: 'SMS permission is needed',
+        ar: 'يلزم إذن الرسائل',
+    },
+    smsCorpusPermissionBody: {
+        en: 'Allow SMS access, then try the temporary export again.',
+        ar: 'اسمح بالوصول إلى الرسائل ثم أعد محاولة التصدير المؤقت.',
+    },
+    smsCorpusFailedTitle: {
+        en: 'Corpus export failed',
+        ar: 'تعذّر تصدير مجموعة الرسائل',
+    },
+    smsCorpusFailedBody: {
+        en: 'No file was shared. Keep Wafra open and try again.',
+        ar: 'لم تتم مشاركة أي ملف. أبقِ وفرة مفتوحاً وحاول مرة أخرى.',
+    },
+    exportExpensePdf: { en: 'Expense report (PDF)', ar: 'تقرير المصروفات (PDF)' },
+    expenseReportPeriod: { en: 'Expense report period', ar: 'فترة تقرير المصروفات' },
+    expenseReportPeriodBody: {
+        en: 'Choose the expenses to include. Transfers and income are never included.',
+        ar: 'اختر المصروفات التي تريد تضمينها. لا يشمل التقرير التحويلات أو الدخل.',
+    },
+    currentMoneyMonth: { en: 'Current money month', ar: 'الشهر المالي الحالي' },
+    allExpenses: { en: 'All expenses', ar: 'كل المصروفات' },
+    originalAmount: { en: 'Original amount', ar: 'المبلغ الأصلي' },
+    exchangeRate: { en: 'Exchange rate', ar: 'سعر الصرف' },
+    bankQuotedRate: { en: 'Bank-quoted {currency} equivalent', ar: 'ما يعادله بعملة {currency} حسب البنك' },
+    datedReferenceRate: { en: 'Dated reference rate · {date}', ar: 'سعر مرجعي بتاريخ {date}' },
+    offlineFxEstimate: {
+        en: 'Offline estimate · updates when online',
+        ar: 'تقدير دون اتصال · يُحدَّث عند الاتصال',
+    },
+    fxRateValue: {
+        en: '1 {from} = {to} {rate} · {source}',
+        ar: '١ {from} = {rate} {to} · {source}',
+    },
+    retainedBankMessage: { en: 'Bank message', ar: 'رسالة البنك' },
+    bankSmsSource: { en: 'Bank SMS', ar: 'رسالة بنكية' },
+    bankNotificationSource: { en: 'Bank notification', ar: 'إشعار بنكي' },
+    noExpensesToExport: {
+        en: 'There are no expenses in that period.',
+        ar: 'لا توجد مصروفات في هذه الفترة.',
+    },
+    reportShareUnavailable: {
+        en: 'File sharing is not available on this device.',
+        ar: 'مشاركة الملفات غير متاحة على هذا الجهاز.',
+    },
+    reportExportFailed: {
+        en: 'The PDF could not be created. Try again.',
+        ar: 'تعذّر إنشاء ملف PDF. حاول مرة أخرى.',
+    },
+    loadDemo: { en: 'Load demo data', ar: 'تحميل بيانات تجريبية' },
+    eraseAll: { en: 'Erase all data', ar: 'مسح كل البيانات' },
+    tapToChange: { en: 'tap to change', ar: 'اضغط للتغيير' },
+    languageChanged: { en: 'Language changed', ar: 'تم تغيير اللغة' },
+    mirrorOnNextOpen: {
+        en: 'The text has changed already. Android can only mirror the layout right-to-left when the app starts, so that part arrives next time you open Wafra.',
+        ar: 'تغيّر النص بالفعل. لا يستطيع أندرويد عكس اتجاه الواجهة إلى اليمين إلا عند بدء التطبيق، لذا سيظهر ذلك في المرة القادمة التي تفتح فيها وفرة.',
+    },
+    proTagline: { en: 'A few power features fund the app.', ar: 'ميزات إضافية تدعم استمرار التطبيق.' },
+    proActiveThanks: { en: 'Active on this device. Thank you for supporting Wafra.', ar: 'مفعّل على هذا الجهاز. شكراً لدعمك وفرة.' },
+    proOutcomeTitle: {
+        en: 'Keep your ledger up to date, automatically.',
+        ar: 'حافظ على تحديث سجلك تلقائياً.',
+    },
+    proTrialActiveBody: {
+        en: 'Automatic capture is included for {left} more day{s}.',
+        ar: 'الالتقاط التلقائي مشمول لمدة {left} يوم إضافي.',
+    },
+    proTrialEndedBody: {
+        en: 'Automatic bank-message capture is paused. Your ledger and manual entries still work.',
+        ar: 'توقف الالتقاط التلقائي لرسائل البنك. يظل سجلك والإدخال اليدوي متاحين.',
+    },
+    proBenefitsTitle: { en: 'Included with Pro', ar: 'مشمول مع برو' },
+    proChoosePlan: { en: 'Choose your plan', ar: 'اختر خطتك' },
+    proSavePercent: { en: 'Save {percent}%', ar: 'وفّر {percent}٪' },
+    proChargeTimingYear: {
+        en: 'Charged {price} when you confirm. Renews yearly until cancelled.',
+        ar: 'يُخصم {price} عند التأكيد، ثم يتجدد سنوياً حتى الإلغاء.',
+    },
+    proChargeTimingWeek: {
+        en: 'Charged {price} when you confirm. Renews weekly until cancelled.',
+        ar: 'يُخصم {price} عند التأكيد، ثم يتجدد أسبوعياً حتى الإلغاء.',
+    },
+    proMostPopular: { en: 'Most popular', ar: 'الأكثر اختياراً' },
+    proYearlyPerWeek: { en: 'Just {price} a week', ar: 'فقط {price} أسبوعياً' },
+    proStoreConfirmsPrice: {
+        en: 'Your store shows the exact charge and renewal details before you confirm.',
+        ar: 'يعرض المتجر المبلغ الدقيق وتفاصيل التجديد قبل التأكيد.',
+    },
+    proPurchaseSuccessTitle: { en: 'Wafra Pro is active', ar: 'وفرة برو مفعّل' },
+    proPurchaseSuccessBody: {
+        en: 'Your subscription is confirmed. You can manage it anytime from Settings.',
+        ar: 'تم تأكيد اشتراكك. يمكنك إدارته في أي وقت من الإعدادات.',
+    },
+    proRestoreSuccessTitle: { en: 'Purchase restored', ar: 'تمت استعادة الشراء' },
+    proRestoreSuccessBody: {
+        en: 'Wafra Pro is active again on this device.',
+        ar: 'وفرة برو مفعّل مجدداً على هذا الجهاز.',
+    },
+    proContinue: { en: 'Continue to Wafra', ar: 'متابعة إلى وفرة' },
+    trialEndedPaywall: { en: 'Your free trial has ended and tracking is paused. Subscribe to keep Wafra working — your data never leaves your phone either way.', ar: 'انتهت تجربتك المجانية وتوقف التتبع. اشترك لمواصلة استخدام وفرة — بياناتك لا تغادر هاتفك في كل الأحوال.' },
+    freeTrialActive: { en: 'FREE TRIAL ACTIVE', ar: 'التجربة المجانية مفعّلة' },
+    getPro: { en: 'Get Wafra Pro', ar: 'اشترك في وفرة برو' },
+    startPlanWithPrice: {
+        en: 'Start {plan} — {price}',
+        ar: 'ابدأ الاشتراك {plan} — {price}',
+    },
+    purchaseInProgress: { en: 'Opening the store…', ar: 'جارٍ فتح المتجر…' },
+    restorePurchase: { en: 'Restore purchase', ar: 'استعادة الشراء' },
+    yearly: { en: 'YEARLY', ar: 'سنوي' },
+    weekly: { en: 'WEEKLY', ar: 'أسبوعي' },
+    perWeek: { en: 'per week', ar: 'أسبوعياً' },
+    transferLabel: { en: 'Transfer', ar: 'تحويل' },
+    noScreenLock: { en: 'No screen lock set up', ar: 'لا يوجد قفل شاشة' },
+    noScreenLockBody: { en: 'Set up a fingerprint, face unlock, or PIN in your phone settings first.', ar: 'أعدّ بصمة أو تعرّفاً على الوجه أو رمز PIN في إعدادات هاتفك أولاً.' },
+    confirmAppLock: { en: 'Confirm to enable app lock', ar: 'أكّد لتفعيل قفل التطبيق' },
+    smsRevokeHint: { en: 'Android only revokes this in its own settings: Settings → Apps → Wafra → Permissions → SMS.', ar: 'يُلغى هذا الإذن من إعدادات أندرويد فقط: الإعدادات ← التطبيقات ← وفرة ← الأذونات ← الرسائل.' },
+    notificationsOff: { en: 'Notifications are off', ar: 'الإشعارات مغلقة' },
+    notificationsOffBody: { en: 'Wafra needs notification permission to alert you. Turn it on in Settings → Apps → Wafra → Notifications.', ar: 'يحتاج وفرة إذن الإشعارات لتنبيهك. فعّله من الإعدادات ← التطبيقات ← وفرة ← الإشعارات.' },
+    bankAppNotifsTitle: { en: 'Bank app notifications', ar: 'إشعارات تطبيقات البنوك' },
+    eraseEverythingQ: { en: 'Erase everything on this phone?', ar: 'حذف كل شيء من هذا الهاتف؟' },
+    eraseAction: { en: 'Erase', ar: 'مسح' },
+    eraseEverythingBody: {
+        en: 'All accounts, entries, bills, and goals will be permanently deleted.',
+        ar: 'ستُحذف جميع الحسابات والعمليات والفواتير والأهداف نهائياً.',
+    },
+    eraseEverythingSmsBody: {
+        en: 'All accounts, entries, bills, and goals will be permanently deleted. Your bank messages stay in your phone’s inbox — Wafra cannot delete those — so the entries will be read in again the next time it scans. What you taught it will not come back.',
+        ar: 'ستُحذف جميع الحسابات والعمليات والفواتير والأهداف نهائياً. أما رسائل بنكك فتبقى في صندوق رسائل هاتفك — ولا تستطيع وفرة حذفها — لذا ستُقرأ العمليات من جديد عند الفحص التالي. أما ما علّمته لوفرة فلن يعود.',
+    },
+    eraseEverythingIosBody: {
+        en: 'All accounts, entries, bills, goals, and this iPhone’s relay queue will be permanently deleted. If you previously installed the old Wafra Capture automation, Wafra cannot delete it — Apple gives no app that power — so you will get a link to check Shortcuts straight afterwards.',
+        ar: 'ستُحذف جميع الحسابات والعمليات والفواتير والأهداف وصف انتظار الترحيل لهذا الآيفون نهائياً. إذا سبق أن ثبّتَّ أتمتة Wafra Capture القديمة فلا تستطيع وفرة حذفها — لا تمنح آبل أي تطبيق هذه الصلاحية — لذلك ستحصل بعد ذلك مباشرةً على رابط للتحقق من تطبيق الاختصارات.',
+    },
+    eraseRelayFailedTitle: {
+        en: 'Could not erase everything',
+        ar: 'تعذّر مسح كل شيء',
+    },
+    eraseRelayFailedBody: {
+        en: 'The relay could not be reached, so nothing was erased. Connect to the internet and try again. Wafra kept this iPhone’s relay key so it can still delete the encrypted queue and revoke the token your Shortcut carries.',
+        ar: 'تعذّر الوصول إلى المرحّل، لذا لم يُمسح أي شيء. اتصل بالإنترنت وحاول مجدداً. احتفظت وفرة بمفتاح ترحيل هذا الآيفون كي تتمكن من حذف صف الانتظار المشفّر وإلغاء الرمز الذي يحمله اختصارك.',
+    },
+    eraseVaultOwnerTitle: {
+        en: 'Other trusted devices depend on this iPhone',
+        ar: 'أجهزة موثوقة أخرى تعتمد على هذا الآيفون',
+    },
+    eraseVaultOwnerBody: {
+        en: 'This iPhone owns a trusted vault that other devices still use, so the relay will not release it and nothing has been erased. Remove the other devices, or delete the whole vault, then erase again.',
+        ar: 'يملك هذا الآيفون خزنة موثوقة ما زالت أجهزة أخرى تستخدمها، لذا لن يحرّرها المرحّل ولم يُمسح أي شيء. أزل الأجهزة الأخرى أو احذف الخزنة بالكامل، ثم أعد المسح.',
+    },
+    eraseLocalFailedTitle: {
+        en: 'Your data is still on this phone',
+        ar: 'بياناتك ما زالت على هذا الهاتف',
+    },
+    eraseLocalFailedBody: {
+        en: 'Wafra disconnected the relay and revoked this iPhone’s tokens, but the encrypted ledger on this phone could not be deleted. Restart Wafra and erase again.',
+        ar: 'فصلت وفرة المرحّل وألغت رموز هذا الآيفون، لكن تعذّر حذف السجل المشفّر الموجود على هذا الهاتف. أعد تشغيل وفرة ثم امسح مرة أخرى.',
+    },
+    eraseCaptureDisableFailedBody: {
+        en: 'Wafra could not stop new local alerts before erasing. Nothing was erased. Restart Wafra and try again.',
+        ar: 'تعذّر على وفرة إيقاف التنبيهات المحلية الجديدة قبل المسح. لم يُمسح شيء. أعد تشغيل وفرة وحاول مرة أخرى.',
+    },
+    eraseLocalInitializeFailedTitle: {
+        en: 'Your data was erased',
+        ar: 'تم محو بياناتك',
+    },
+    eraseLocalInitializeFailedBody: {
+        en: 'The ledger was deleted, but Wafra could not restart secure storage. Saving is paused so new changes are not lost. Use Try again on the recovery screen.',
+        ar: 'حُذف السجل، لكن تعذّر على وفرة إعادة تشغيل التخزين الآمن. أُوقف الحفظ كي لا تضيع تغييرات جديدة. استخدم «إعادة المحاولة» في شاشة الاسترداد.',
+    },
+    eraseQueueCleanupFailedTitle: {
+        en: 'Your ledger was erased',
+        ar: 'تم محو سجلك',
+    },
+    eraseQueueCleanupFailedBody: {
+        en: 'Wafra erased the ledger, but could not delete encrypted captured messages still waiting on this phone. Import and saving are paused. Use Try again on the recovery screen.',
+        ar: 'محَت وفرة السجل، لكن تعذّر حذف رسائل بنكية مشفّرة ما زالت بانتظار الاستيراد على هذا الهاتف. أُوقف الاستيراد والحفظ. استخدم «إعادة المحاولة» في شاشة الاسترداد.',
+    },
+    shortcutStillInstalledTitle: {
+        en: 'Check for an old Shortcut',
+        ar: 'تحقق من وجود اختصار قديم',
+    },
+    shortcutCleanupErased: {
+        en: 'Everything on this phone is gone and the relay rejects this iPhone’s token from now on. If you previously installed the old “Wafra Capture” automation, it can remain in Shortcuts and keep sending selected bank messages over the network, where they are now refused. Check Shortcuts → Automation and My Shortcuts, and delete the old Wafra items if present.',
+        ar: 'حُذف كل شيء على هذا الهاتف وأصبح المرحّل يرفض رمز هذا الآيفون من الآن. إذا سبق أن ثبّتَّ أتمتة «Wafra Capture» القديمة فقد تبقى في تطبيق الاختصارات وتواصل إرسال رسائل البنوك المحددة عبر الشبكة، حيث تُرفض الآن. تحقق من «الاختصارات» ← «الأتمتة» ومن «اختصاراتي»، واحذف عناصر Wafra القديمة إن وُجدت.',
+    },
+    shortcutCleanupLeft: {
+        en: 'This iPhone’s relay token is revoked, so nothing it sends can be filed again. If you previously installed the old “Wafra Capture” automation, it can remain in Shortcuts and keep forwarding selected bank messages over the network, where they are now refused. Check Shortcuts → Automation and My Shortcuts, and delete the old Wafra items if present.',
+        ar: 'أُلغي رمز ترحيل هذا الآيفون، فلن يُسجَّل أي شيء يرسله بعد الآن. إذا سبق أن ثبّتَّ أتمتة «Wafra Capture» القديمة فقد تبقى في تطبيق الاختصارات وتواصل تمرير رسائل البنوك المحددة عبر الشبكة، حيث تُرفض الآن. تحقق من «الاختصارات» ← «الأتمتة» ومن «اختصاراتي»، واحذف عناصر Wafra القديمة إن وُجدت.',
+    },
+    shortcutCleanupUncertain: {
+        en: 'Wafra could not confirm that this iPhone’s relay token was revoked. Automatic capture is off in Wafra. If you previously installed the old “Wafra Capture” automation, it may still forward selected bank messages over the network. Delete the old Wafra items if present in Shortcuts → Automation or My Shortcuts, then retry disconnection when you are online.',
+        ar: 'تعذّر على وفرة تأكيد إلغاء رمز ترحيل هذا الآيفون. الالتقاط التلقائي متوقف داخل وفرة. إذا سبق أن ثبّتَّ أتمتة «Wafra Capture» القديمة فقد تستمر في تمرير رسائل البنوك المحددة عبر الشبكة. احذف عناصر Wafra القديمة إن وُجدت من «الاختصارات» ← «الأتمتة» أو «اختصاراتي»، ثم أعد محاولة الفصل عند توفر الإنترنت.',
+    },
+    trustedRemoveShortcutNote: {
+        en: 'If that device is an iPhone and its owner previously installed the old Wafra Capture automation, it can remain there and keep sending selected bank messages to the relay — refused from now on, but still leaving that phone. Ask its owner to check the Shortcuts app and delete the old Wafra items if present.',
+        ar: 'إذا كان ذلك الجهاز آيفون وسبق لمالكه تثبيت أتمتة Wafra Capture القديمة، فقد تبقى هناك وتواصل إرسال رسائل البنوك المحددة إلى المرحّل — وهي مرفوضة من الآن، لكنها تغادر ذلك الهاتف فعلاً. اطلب من مالكه التحقق من تطبيق الاختصارات وحذف عناصر Wafra القديمة إن وُجدت.',
+    },
+    activeOnThisDevice: { en: 'Active on this device', ar: 'مفعّل على هذا الجهاز' },
+    founderProActive: { en: 'Founder access · active on this device', ar: 'وصول المؤسس · مفعّل على هذا الجهاز' },
+    founderProUnlockedTitle: { en: 'Founder Pro unlocked', ar: 'تم فتح وفرة برو للمؤسس' },
+    founderProUnlockedBody: {
+        en: 'Pro stays active on this test device, including after you erase the ledger.',
+        ar: 'يبقى برو مفعّلاً على جهاز الاختبار هذا، حتى بعد مسح السجل.',
+    },
+    founderProFailedTitle: { en: 'Could not unlock Founder Pro', ar: 'تعذّر فتح وفرة برو للمؤسس' },
+    founderProFailedBody: {
+        en: 'The encrypted local grant could not be saved. Keep Wafra open and try five taps again.',
+        ar: 'تعذّر حفظ المنحة المحلية المشفّرة. أبقِ وفرة مفتوحاً وحاول خمس ضغطات مجدداً.',
+    },
+    wafraLogo: { en: 'Wafra logo', ar: 'شعار وفرة' },
+    followingPhone: { en: 'Following your phone. Wafra turns over when it does.', ar: 'يتبع هاتفك. يتغيّر وفرة بتغيّره.' },
+    alertEveryCharge: { en: 'Alert me on every charge', ar: 'نبّهني عند كل عملية' },
+    turnOnSmsFirst: { en: 'Turn on bank SMS first', ar: 'فعّل قراءة رسائل البنك أولاً' },
+    turnOnSmsFirstBody: { en: 'Wafra can only alert you about a charge it is allowed to read.', ar: 'لا يمكن لوفرة تنبيهك عن عملية لا يُسمح له بقراءتها.' },
+    unhide: { en: 'Unhide', ar: 'إظهار' },
+    hideFromLists: { en: 'Hide from lists', ar: 'إخفاء من القوائم' },
+    hidden: { en: 'Hidden', ar: 'مخفي' },
+    noActivity90: { en: 'No activity for 90+ days', ar: 'لا نشاط منذ أكثر من 90 يوماً' },
+    pasteBankMessage: { en: 'Paste a bank message', ar: 'ألصق رسالة بنكية' },
+    inboxNotRead: { en: 'Inbox not read yet', ar: 'لم تُقرأ الرسائل بعد' },
+    inboxNeedsAndroid: { en: 'Reading the inbox needs the Android app; pasting works anywhere', ar: 'قراءة الرسائل تحتاج تطبيق أندرويد؛ اللصق يعمل في كل مكان' },
+    deleteCardAndEntries: { en: 'Delete card and its entries', ar: 'حذف البطاقة وعملياتها' },
+    notASubscriptionQ: { en: 'Not a subscription?', ar: 'ليس اشتراكاً؟' },
+    stillLoading: { en: 'Still loading your data — try again in a second.', ar: 'ما زال تحميل بياناتك جارياً — أعد المحاولة بعد لحظة.' },
+    upToDateNoNew: { en: 'Up to date. No new bank messages.', ar: 'كل شيء محدّث. لا رسائل بنكية جديدة.' },
+    rescanHint: { en: 'Rescans your whole inbox and shows what would be filed. Cards are matched automatically and nothing imports twice. You can also paste messages below.', ar: 'يعيد فحص كل رسائلك ويعرض ما سيُسجَّل. تُطابَق البطاقات تلقائياً ولا يُستورد شيء مرتين. يمكنك أيضاً لصق رسائل بالأسفل.' },
+    pasteHint: { en: 'Paste one or more bank messages below, separated by a blank line. Everything is read on this device.', ar: 'ألصق رسالة بنكية أو أكثر بالأسفل، بينها سطر فارغ. تُقرأ كلها على هذا الجهاز.' },
+    whereItWent: { en: 'Where it went', ar: 'أين ذهبت' },
+    addedByHand: { en: 'Added by hand', ar: 'أُضيفت يدوياً' },
+    appLockPhoneOnly: { en: 'App lock works on the phone app only.', ar: 'قفل التطبيق يعمل على تطبيق الهاتف فقط.' },
+    notifsPhoneOnly: { en: 'Bank app notifications work on the phone app only.', ar: 'إشعارات تطبيقات البنوك تعمل على تطبيق الهاتف فقط.' },
+    couldNotReadFile: { en: 'Could not read file', ar: 'تعذّرت قراءة الملف' },
+    deleteThisEntry: { en: 'Delete this entry?', ar: 'حذف هذه العملية؟' },
+    hiddenFromLists: { en: 'Hidden from lists.', ar: 'مخفي من القوائم.' },
+    markStatementPaid: { en: 'Mark this statement paid?', ar: 'تعليم هذا الكشف كمدفوع؟' },
+    noCardPaymentYet: { en: 'No payment to this card has been detected yet.', ar: 'لم تُكتشف أي دفعة لهذه البطاقة بعد.' },
+    noBankPaymentMatched: { en: 'The paid amount was recorded in Wafra; no bank payment to this card is matched yet.', ar: 'سُجّل المبلغ المدفوع في وفرة، ولم تُطابَق بعد أي دفعة بنكية لهذه البطاقة.' },
+    notRecurringQ: { en: 'Not a recurring charge?', ar: 'ليست عملية متكررة؟' },
+    notifsAreOff: { en: 'Notifications are off', ar: 'الإشعارات مغلقة' },
+    onboardPrivacyBody: {
+        en: 'Add entries yourself or connect supported bank messages',
+        ar: 'أضف العمليات بنفسك أو اربط رسائل البنوك المدعومة',
+    },
+    readMyInbox: { en: 'Read my inbox', ar: 'اقرأ رسائلي' },
+    setCreditLimit: { en: 'Set credit limit', ar: 'تحديد حد الائتمان' },
+    notifAccessBody: { en: 'Some banks send push notifications instead of SMS. Grant Wafra notification access and ', ar: 'ترسل بعض البنوك إشعارات بدل الرسائل. امنح وفرة إذن قراءة الإشعارات و' },
+    notAWafraBackup: { en: 'That does not look like a Wafra backup.', ar: 'لا يبدو هذا ملف نسخ احتياطي لوفرة.' },
+    noServerTitle: { en: 'Processed on this phone', ar: 'تُعالَج على هذا الهاتف' },
+    restoreReplacesAll: { en: 'This replaces everything currently in the app.', ar: 'سيستبدل هذا كل ما في التطبيق حالياً.' },
+    upToDate: { en: 'Up to date', ar: 'كل شيء محدّث' },
+    notifsForCardDue: { en: 'Wafra needs notification permission to remind you before a payment is due.', ar: 'يحتاج وفرة إذن الإشعارات لتذكيرك قبل موعد السداد.' },
+    notifsForBill: { en: 'Wafra needs notification permission to warn you before a charge lands.', ar: 'يحتاج وفرة إذن الإشعارات لتنبيهك قبل خصم أي مبلغ.' },
+    warnsBeforeMoneyLeaves: { en: 'Warns before the money leaves', ar: 'ينبّهك قبل خروج المال' },
+    readInboxLater: { en: 'You can read your inbox later from Wallet.', ar: 'يمكنك قراءة رسائلك لاحقاً من المحفظة.' },
+    dataStillLoading: { en: 'Your data is still loading. Try again in a second.', ar: 'ما زال تحميل بياناتك جارياً. أعد المحاولة بعد لحظة.' },
+    historyIsIn: { en: 'Your history is in.', ar: 'تم إدخال سجلّك.' },
+    inVsOut6: { en: 'Income vs spent · 6 months', ar: 'الدخل مقابل الإنفاق · ٦ أشهر' },
+    noEntriesPeriod: { en: 'No entries in this period yet', ar: 'لا عمليات في هذه الفترة بعد' },
+    totalCreditLimit: { en: 'Total credit limit', ar: 'إجمالي حد الائتمان' },
+    parsePastedText: { en: 'Parse pasted text', ar: 'تحليل النص الملصق' },
+    billRemindersDetected: { en: 'Bill reminders detected', ar: 'تم اكتشاف تذكيرات فواتير' },
+    searchMerchants: { en: 'Search merchants or categories', ar: 'ابحث في المتاجر أو التصنيفات' },
+    searchAccounts: { en: 'Search accounts or last-four digits', ar: 'ابحث بالحساب أو آخر أربعة أرقام' },
+    searchLabel: { en: 'Search', ar: 'بحث' },
+    remindDayBefore: { en: 'Remind me the day before', ar: 'ذكّرني قبل يوم' },
+    cardPaymentDue: { en: 'Card payment due', ar: 'دفعة بطاقة مستحقة' },
+    openPhoneSettings: { en: 'Open settings', ar: 'افتح الإعدادات' },
+    billRecordsExpense: { en: 'Records an expense of {amount} today.', ar: 'يسجّل مصروفاً بقيمة {amount} اليوم.' },
+    overdueAndLeaving: { en: 'Overdue and leaving in {days} days', ar: 'متأخرة وتخرج خلال {days} أيام' },
+    merchantRuleOnly: { en: 'Future imports from {merchant} will use this category.', ar: 'ستستخدم العمليات القادمة من {merchant} هذا التصنيف.' },
+    merchantRuleAlso: { en: 'Future imports from {merchant} will use this category. Also update {n} existing {entries}?', ar: 'ستستخدم العمليات القادمة من {merchant} هذا التصنيف. هل تحدّث أيضاً {n} من العمليات الحالية؟' },
+    leavingInDays: { en: 'Leaving in {days} days', ar: 'تخرج خلال {days} أيام' },
+    rememberForMerchant: { en: 'Remember for {merchant}?', ar: 'تذكّر لـ {merchant}؟' },
+    notifAccessFull: { en: 'Wafra can process financial notifications from Google Play apps without SMS access. Known bank apps and Android Finance apps can use the local parser automatically. A new app that only looks financial goes to Review first; if you confirm it, Wafra learns that app on this phone for future alerts. Temporary candidates are encrypted locally, and OTP/security alerts are rejected before queueing. Android Notification access is required, and not every bank format is guaranteed.', ar: 'يمكن لوفرة معالجة الإشعارات المالية من التطبيقات المثبّتة عبر Google Play من دون إذن الرسائل. يمكن لتطبيقات البنوك المعروفة وتطبيقات فئة التمويل في أندرويد استخدام المحلل المحلي تلقائياً. إذا كان التطبيق جديداً ويبدو مالياً فقط، ينتقل التنبيه أولاً إلى المراجعة؛ وبعد تأكيدك يتعلّم وفرة هذا التطبيق على هذا الهاتف للتنبيهات القادمة. تُشفّر البيانات المؤقتة محلياً، وتُرفض رموز التحقق والتنبيهات الأمنية قبل إدخالها إلى قائمة الانتظار. يلزم إذن الوصول إلى إشعارات أندرويد، ولا يوجد ضمان لدعم كل صيغة بنكية.' },
+    notifAccessAutoPrompt: { en: 'Wafra automatically uses eligible financial app notifications when tracking is active. Android requires you to approve Notification access once. No SMS permission is required. New unrecognized financial apps are reviewed before Wafra learns them on this phone.', ar: 'يستخدم وفرة تلقائياً إشعارات التطبيقات المالية المؤهلة عندما يكون التتبع مفعّلاً. يتطلب أندرويد موافقتك مرة واحدة على إذن الوصول إلى الإشعارات. لا يلزم إذن الرسائل. تُراجع التطبيقات المالية الجديدة غير المعروفة قبل أن يتعلّمها وفرة على هذا الهاتف.' },
+    notifDiagnosticsTitle: { en: 'Bank notification diagnostics', ar: 'تشخيص إشعارات البنك' },
+    notifDiagnosticsAccess: { en: 'System access: {system} · admission: {admission} · listener connected: {listener}', ar: 'إذن النظام: {system} · السماح المحلي: {admission} · المستمع متصل: {listener}' },
+    notifDiagnosticsVisible: { en: 'Android exposes {active} active notifications · trusted banks: {trusted} · ADCB visible: {adcb} ({adcbCount})', ar: 'يعرض أندرويد {active} إشعاراً نشطاً · بنوك موثوقة: {trusted} · ADCB ظاهر: {adcb} ({adcbCount})' },
+    notifDiagnosticsQueue: { en: 'Encrypted candidates waiting: {queued}', ar: 'العناصر المشفّرة المنتظرة: {queued}' },
+    notifDiagnosticsStages: { en: 'ADCB admission stages: {stages}', ar: 'مراحل قبول ADCB: {stages}' },
+    notifDiagnosticsUnavailable: { en: 'Diagnostics are not available on this build.', ar: 'التشخيص غير متاح في هذا الإصدار.' },
+    notifDiagnosticsRefresh: { en: 'Refresh diagnostics', ar: 'تحديث التشخيص' },
+    startWithSample: { en: 'Start with sample data', ar: 'ابدأ ببيانات تجريبية' },
+    alsoReadNotifs: { en: 'Also read bank notifications', ar: 'اقرأ أيضاً إشعارات البنوك' },
+    storageRecoveryTitle: { en: 'Your ledger could not be opened', ar: 'تعذّر فتح سجلك' },
+    storageRecoveryBody: {
+        en: 'Wafra could not read the encrypted ledger on this device. Nothing has been changed or deleted — your entries are still here, and saving is paused so nothing can write over them.',
+        ar: 'تعذّر على وفرة قراءة السجل المشفّر على هذا الجهاز. لم يُغيَّر أو يُحذف أي شيء — عملياتك ما زالت موجودة، وأُوقف الحفظ مؤقتاً كي لا يُكتب فوقها شيء.',
+    },
+    storageRecoveryInitializeTitle: {
+        en: 'Your data was erased',
+        ar: 'تم محو بياناتك',
+    },
+    storageRecoveryInitializeBody: {
+        en: 'Wafra deleted the old ledger, but secure storage did not restart. Saving is paused so new changes cannot appear successful and then disappear. Try again to finish creating the empty encrypted ledger.',
+        ar: 'حذفت وفرة السجل القديم، لكن التخزين الآمن لم يُعَد تشغيله. أُوقف الحفظ كي لا تبدو التغييرات الجديدة ناجحة ثم تختفي. أعد المحاولة لإكمال إنشاء السجل المشفّر الفارغ.',
+    },
+    storageRecoveryCleanupBody: {
+        en: 'The ledger was erased, but encrypted captured messages are still waiting on this phone. Import and saving are paused so those entries cannot return. Try again to delete them and durably create the empty ledger.',
+        ar: 'تم محو السجل، لكن ما زالت رسائل بنكية مشفّرة بانتظار الاستيراد على هذا الهاتف. أُوقف الاستيراد والحفظ كي لا تعود تلك العمليات. أعد المحاولة لحذفها وإنشاء السجل الفارغ بشكل دائم.',
+    },
+    storageRecoveryKeyBody: {
+        en: 'The encrypted ledger is still on this device, but the key that opens it is no longer in this phone’s secure storage. Nothing has been changed or deleted, and saving is paused. Trying again will not recover it.',
+        ar: 'السجل المشفّر ما زال على هذا الجهاز، لكن المفتاح الذي يفتحه لم يعد في التخزين الآمن للهاتف. لم يُغيَّر أو يُحذف أي شيء، وأُوقف الحفظ مؤقتاً. إعادة المحاولة لن تستعيده.',
+    },
+    storageRecoveryHint: {
+        en: 'Unlocking this phone and trying again resolves most cases.',
+        ar: 'فتح قفل الهاتف ثم إعادة المحاولة يحلّ معظم الحالات.',
+    },
+    storageRecoveryRetry: { en: 'Try again', ar: 'إعادة المحاولة' },
+    storageRecoveryRetrying: { en: 'Trying again…', ar: 'جارٍ إعادة المحاولة…' },
+    storageRecoveryRetryFailed: {
+        en: 'Still could not open your ledger. Nothing has been changed.',
+        ar: 'ما زال تعذّر فتح سجلك. لم يُغيَّر أي شيء.',
+    },
+    storageRecoveryInitializeRetryFailed: {
+        en: 'Secure storage still could not restart. Saving remains paused.',
+        ar: 'ما زال تعذّر إعادة تشغيل التخزين الآمن. سيبقى الحفظ متوقفاً.',
+    },
+    storageRecoveryCleanupRetryFailed: {
+        en: 'Captured messages still could not be deleted. Import and saving remain paused.',
+        ar: 'ما زال تعذّر حذف الرسائل الملتقطة. سيبقى الاستيراد والحفظ متوقفين.',
+    },
+    storageRecoveryEraseCta: { en: 'Erase and start over', ar: 'محو والبدء من جديد' },
+    storageRecoveryEraseTitle: { en: 'Erase everything on this device?', ar: 'محو كل شيء على هذا الجهاز؟' },
+    storageRecoveryEraseBody: {
+        en: 'This destroys Wafra’s encrypted ledger and any captured messages waiting inside Wafra. It cannot be undone. Bank SMS remain in Messages. If this iPhone previously configured the old “Wafra Capture” automation, Wafra opens Shortcuts afterward so you can remove the old items.',
+        ar: 'سيؤدي هذا إلى إتلاف سجل وفرة المشفّر وأي رسائل ملتقطة تنتظر داخل وفرة. لا يمكن التراجع. ستبقى رسائل البنك في تطبيق الرسائل. إذا سبق إعداد أتمتة «Wafra Capture» القديمة على هذا الآيفون، فستفتح وفرة تطبيق الاختصارات بعد ذلك كي تتمكن من حذف العناصر القديمة.',
+    },
+    storageRecoveryEraseConfirm: { en: 'Erase permanently', ar: 'محو نهائي' },
+    storageRecoveryEraseKeep: { en: 'Keep my data', ar: 'احتفظ ببياناتي' },
+    storageRecoveryEraseFailed: {
+        en: 'The erase did not finish. Wafra is keeping recovery open and saving paused until you try again.',
+        ar: 'لم تكتمل عملية المحو. ستُبقي وفرة شاشة الاسترداد مفتوحة والحفظ متوقفاً حتى تعيد المحاولة.',
+    },
+    appName: { en: 'Wafra', ar: 'وفرة' },
+    importMoneyMismatchTitle: { en: 'Check the currency', ar: 'تحقّق من العملة' },
+    importMoneyMismatchBody: {
+        en: 'These alerts use a different currency from your ledger, or contain an amount Wafra cannot safely import. Nothing was added.',
+        ar: 'تستخدم هذه التنبيهات عملة مختلفة عن سجلك، أو تتضمن مبلغاً لا يمكن لوفرة استيراده بأمان. لم تُضف أي عملية.',
+    },
+    recommended: { en: 'RECOMMENDED', ar: 'مقترح' },
+    onboardEyebrow: { en: 'YOUR MONEY, MADE CLEAR', ar: 'أموالك، بصورة أوضح' },
+    onboardHeadline: { en: 'Your money,\nfinally clear.', ar: 'أموالك،\nواضحة أخيراً.' },
+    onboardWelcomeBody: {
+        en: 'Bank messages arrive separately. Wafra organizes them into one money view.',
+        ar: 'تصل رسائل البنك بشكل منفصل. ينظّمها وفرة في صورة مالية واحدة.',
+    },
+    onboardRegionalExample: { en: 'Examples from your region', ar: 'أمثلة من منطقتك' },
+    onboardRegionalBankGeneric: { en: 'Bank', ar: 'بنك' },
+    onboardScenePurchase: { en: 'Card purchase', ar: 'شراء بالبطاقة' },
+    onboardSceneBill: { en: 'Bill payment', ar: 'دفع فاتورة' },
+    onboardSceneIncome: { en: 'Salary credited', ar: 'إيداع الراتب' },
+    onboardSceneToday: { en: 'Today', ar: 'اليوم' },
+    onboardSceneDebitCard: { en: 'Debit card', ar: 'بطاقة خصم' },
+    onboardSceneAccount: { en: 'Account', ar: 'الحساب' },
+    onboardSceneFiledAutomatically: { en: 'Filed automatically', ar: 'صُنّفت تلقائياً' },
+    onboardParseNote: {
+        en: 'Wafra reads the amount, merchant and card. The balance is never stored.',
+        ar: 'يقرأ وفرة المبلغ والتاجر والبطاقة. لا يُحفظ الرصيد أبداً.',
+    },
+    onboardSceneGroceries: { en: 'Groceries', ar: 'بقالة' },
+    onboardSceneGroceryStore: { en: 'Grocery store', ar: 'متجر بقالة' },
+    onboardSceneUtilities: { en: 'Utilities', ar: 'خدمات' },
+    onboardSceneIncomeCategory: { en: 'Salary', ar: 'راتب' },
+    onboardSceneDining: { en: 'Dining', ar: 'مطاعم' },
+    onboardSceneTransport: { en: 'Transport', ar: 'مواصلات' },
+    onboardSceneStatement: { en: 'Statement', ar: 'كشف' },
+    onboardSceneTelecom: { en: 'Telecom', ar: 'اتصالات' },
+    onboardSceneThisMonth: { en: 'THIS MONTH', ar: 'هذا الشهر' },
+    onboardSceneDueBills: { en: 'due · 3 bills', ar: 'مستحق · ٣ فواتير' },
+    onboardSceneOrganized: { en: 'Organized automatically', ar: 'منظّمة تلقائياً' },
+    onboardSceneFromAlerts: { en: 'BANK MESSAGES', ar: 'رسائل البنك' },
+    onboardSceneToLedger: { en: 'YOUR LEDGER', ar: 'سجلك' },
+    onboardSceneRevealFootnote: { en: 'Same activity. Less mess.', ar: 'النشاط نفسه. فوضى أقل.' },
+    onboardScenePreviewLabel: { en: 'PREVIEW', ar: 'معاينة' },
+    onboardSceneElectricity: { en: 'Electricity', ar: 'الكهرباء' },
+    onboardSceneCardDue: { en: 'Card due', ar: 'استحقاق البطاقة' },
+    onboardSceneInternet: { en: 'Internet', ar: 'الإنترنت' },
+    onboardSceneSpent: { en: 'Spent', ar: 'الإنفاق' },
+    onboardSceneBills: { en: 'Bills', ar: 'الفواتير' },
+    onboardSceneAccounts: { en: 'Accounts', ar: 'الحسابات' },
+    onboardSceneNet: { en: 'net', ar: 'صافي' },
+    onboardTrackingToday: { en: 'Today', ar: 'اليوم' },
+    onboardTrackingScattered: { en: 'Different places. Different formats.', ar: 'أماكن وصيغ مختلفة.' },
+    onboardTrackingOneView: { en: 'Supported bank activity in one view.', ar: 'نشاط البنوك المدعوم في صورة واحدة.' },
+    onboardTrackingSpreadsheetScene: { en: 'Wafra keeps new activity organized as it arrives.', ar: 'ينظّم وفرة النشاط الجديد عند وصوله.' },
+    onboardTrackingFinanceScene: { en: 'Wafra does not need your bank login.', ar: 'لا يحتاج وفرة إلى تسجيل الدخول إلى بنكك.' },
+    onboardTrackingFreshSceneTitle: { en: 'Start clean.', ar: 'ابدأ بصورة نظيفة.' },
+    onboardTrackingFreshSceneBody: { en: 'Start with your first entry or a supported bank message.', ar: 'ابدأ بأول عملية أو برسالة بنك مدعومة.' },
+    onboardSceneYourView: { en: 'Your Wafra view', ar: 'صورتك في وفرة' },
+    onboardCaptureSceneIncoming: { en: 'Bank activity arrives', ar: 'يصل نشاط البنك' },
+    onboardCaptureSceneOrganized: { en: 'Wafra files supported activity into your ledger.', ar: 'ينظّم وفرة النشاط المدعوم في سجلك.' },
+    onboardSceneCoffee: { en: 'Coffee shop', ar: 'مقهى' },
+    onboardSceneUtility: { en: 'Utility bill', ar: 'فاتورة خدمات' },
+    onboardSceneAlertsToPicture: { en: '3 ALERTS ORGANIZED', ar: 'تم تنظيم 3 تنبيهات' },
+    onboardSceneNetWeek: { en: 'net this week', ar: 'صافي هذا الأسبوع' },
+    onboardBuildingReadAnswers: { en: 'Read your answers', ar: 'قرأنا إجاباتك' },
+    onboardBuildingFormats: { en: 'Loaded alert formats for your region', ar: 'حمّلنا صيغ التنبيهات لمنطقتك' },
+    onboardBuildingArrange: { en: 'Put your first view up front', ar: 'وضعنا صورتك الأولى في المقدمة' },
+    onboardChooseStart: { en: 'Build my money picture', ar: 'ابنِ صورتي المالية' },
+    onboardNameTitle: { en: 'What should we call you?', ar: 'بماذا تحب أن نناديك؟' },
+    onboardNameBody: {
+        en: 'A first name or nickname is enough. We’ll use it for your greetings.',
+        ar: 'يكفي الاسم الأول أو اسم تفضّله. سنستخدمه في تحيتك داخل التطبيق.',
+    },
+    onboardNamePlaceholder: { en: 'Your name', ar: 'اسمك' },
+    onboardNamePreviewEmpty: { en: 'Make Wafra feel like yours.', ar: 'اجعل وفرة أقرب إليك.' },
+    onboardNamePreview: { en: 'Good to meet you, {name}.', ar: 'سعداء بمعرفتك، {name}.' },
+    onboardNameContinue: { en: 'Continue', ar: 'متابعة' },
+    onboardNameSkip: { en: 'Skip for now', ar: 'تخطي الآن' },
+    onboardNamePrivacy: { en: 'Used only to personalize Wafra on this device.', ar: 'يُستخدم فقط لتخصيص وفرة على هذا الجهاز.' },
+    onboardFocusTitle: { en: 'What do you want to understand first?', ar: 'ما الذي تريد فهمه أولاً؟' },
+    onboardFocusTitleNamed: { en: '{name}, what do you want to understand first?', ar: '{name}، ما الذي تريد فهمه أولاً؟' },
+    onboardFocusBody: { en: 'Wafra will put that view first after setup.', ar: 'سيضع وفرة هذه الصورة في المقدمة بعد الإعداد.' },
+    onboardFocusSpending: { en: 'Where my money goes', ar: 'أين تذهب أموالي' },
+    onboardFocusSpendingDetail: { en: 'Categories, merchants, and the spending that adds up', ar: 'التصنيفات والتجار والمصروفات التي تتراكم' },
+    onboardFocusBills: { en: 'Bills & subscriptions', ar: 'الفواتير والاشتراكات' },
+    onboardFocusBillsDetail: { en: 'See what is due and separate utilities from subscriptions', ar: 'اعرف ما هو مستحق وافصل الخدمات عن الاشتراكات' },
+    onboardFocusCashflow: { en: 'Money in vs money out', ar: 'الداخل مقابل الخارج' },
+    onboardFocusCashflowDetail: { en: 'Understand income, spending, and your real net', ar: 'افهم الدخل والمصروف وصافي التدفق الحقيقي' },
+    onboardFocusOverview: { en: 'Give me the full picture', ar: 'أعطني الصورة الكاملة' },
+    onboardFocusOverviewDetail: { en: 'A simple overview across spending, bills, and accounts', ar: 'نظرة بسيطة على المصروفات والفواتير والحسابات' },
+    onboardTrackingTitle: { en: 'How do you track money today?', ar: 'كيف تتابع أموالك اليوم؟' },
+    onboardTrackingBody: { en: 'Pick the way you keep track today. Wafra will start from there.', ar: 'اختر الطريقة التي تتابع بها أموالك اليوم. سيبدأ وفرة من هناك.' },
+    onboardTrackingNone: { en: 'I don’t track it', ar: 'لا أتابعها حالياً' },
+    onboardTrackingNoneDetail: { en: 'Start simple. Wafra will organize the picture for you.', ar: 'ابدأ ببساطة. سينظّم وفرة الصورة لك.' },
+    onboardTrackingBankApps: { en: 'I check my bank apps', ar: 'أراجع تطبيقات البنك' },
+    onboardTrackingBankAppsDetail: { en: 'Bring activity from different banks into one view.', ar: 'اجمع نشاط بنوك مختلفة في صورة واحدة.' },
+    onboardTrackingSpreadsheet: { en: 'Spreadsheet or notes', ar: 'جدول أو ملاحظات' },
+    onboardTrackingSpreadsheetDetail: { en: 'Less manual cleanup. Keep the useful structure.', ar: 'ترتيب يدوي أقل مع الاحتفاظ بالبنية المفيدة.' },
+    onboardTrackingFinanceApp: { en: 'Another finance app', ar: 'تطبيق مالي آخر' },
+    onboardTrackingFinanceAppDetail: { en: 'Keep the clarity, without connecting your bank login.', ar: 'احتفظ بالوضوح دون ربط تسجيل الدخول إلى البنك.' },
+    onboardCountryAE: { en: 'United Arab Emirates', ar: 'الإمارات العربية المتحدة' },
+    onboardCountrySA: { en: 'Saudi Arabia', ar: 'المملكة العربية السعودية' },
+    onboardCountryQA: { en: 'Qatar', ar: 'قطر' },
+    onboardCountryKW: { en: 'Kuwait', ar: 'الكويت' },
+    onboardCountryBH: { en: 'Bahrain', ar: 'البحرين' },
+    onboardCountryOM: { en: 'Oman', ar: 'عُمان' },
+    onboardCountryEG: { en: 'Egypt', ar: 'مصر' },
+    onboardCountryJO: { en: 'Jordan', ar: 'الأردن' },
+    onboardCountryIN: { en: 'India', ar: 'الهند' },
+    onboardCountryGB: { en: 'United Kingdom', ar: 'المملكة المتحدة' },
+    onboardCountryUS: { en: 'United States', ar: 'الولايات المتحدة' },
+    onboardCountryFR: { en: 'France', ar: 'فرنسا' },
+    onboardCountryDE: { en: 'Germany', ar: 'ألمانيا' },
+    onboardCountryES: { en: 'Spain', ar: 'إسبانيا' },
+    onboardCountryIT: { en: 'Italy', ar: 'إيطاليا' },
+    onboardCountryNL: { en: 'Netherlands', ar: 'هولندا' },
+    onboardCountryElsewhere: { en: 'Somewhere else', ar: 'مكان آخر' },
+    onboardCountrySheetTitle: { en: 'Where do you bank?', ar: 'أين تتعامل مصرفياً؟' },
+    onboardCountrySheetBody: { en: 'This sets how dates in your bank messages and statements are read, and the example banks Wafra shows. Your own accounts still come from your alerts, whichever country they are in.', ar: 'يحدد هذا طريقة قراءة التواريخ في رسائل بنكك وكشوفه، وأمثلة البنوك التي يعرضها وفرة. أما حساباتك فتأتي دائماً من تنبيهاتك، في أي بلد كانت.' },
+    onboardCountryShowing: { en: 'Country:', ar: 'البلد:' },
+    settingsCountryTitle: { en: 'Country', ar: 'البلد' },
+    settingsCountryDetail: { en: 'Date format for alerts and statements', ar: 'صيغة التاريخ في التنبيهات والكشوف' },
+    settingsCountrySheetBody: { en: 'Wafra reads a date like 03/04 the way your country writes it. It does not change your ledger currency or which banks Wafra can read.', ar: 'يقرأ وفرة تاريخاً مثل 03/04 بالطريقة التي يكتبها بلدك. ولا يغيّر ذلك عملة سجلك ولا البنوك التي يستطيع وفرة قراءتها.' },
+    countrySearch: { en: 'Search countries', ar: 'ابحث عن بلد' },
+    countryNoMatch: { en: 'No country matches that search.', ar: 'لا يوجد بلد يطابق هذا البحث.' },
+    onboardCountryUnknown: { en: 'Choose your country', ar: 'اختر بلدك' },
+    onboardCountryChange: { en: 'Change', ar: 'تغيير' },
+    onboardAlertsTitle: { en: 'How does your bank tell you about a payment?', ar: 'كيف يخبرك بنكك بعملية الدفع؟' },
+    onboardAlertsBody: { en: 'This decides how far back Wafra can go. Pick what your main bank does.', ar: 'هذا يحدد إلى أي مدى يستطيع وفرة الرجوع في الماضي. اختر ما يفعله بنكك الرئيسي.' },
+    onboardAlertsSms: { en: 'It texts me', ar: 'يرسل لي رسالة نصية' },
+    onboardAlertsSmsDetail: { en: 'Your inbox keeps them, so Wafra can rebuild past months too.', ar: 'رسائلك محفوظة، لذا يستطيع وفرة إعادة بناء الأشهر السابقة أيضاً.' },
+    onboardAlertsNotifications: { en: 'App notifications only', ar: 'إشعارات التطبيق فقط' },
+    onboardAlertsNotificationsDetail: { en: 'Wafra can follow new ones. Older ones are already gone from the phone.', ar: 'يستطيع وفرة متابعة الجديد منها. أما القديمة فلم تعد موجودة على الهاتف.' },
+    onboardAlertsNeither: { en: 'Neither — I check the app or a statement', ar: 'لا هذا ولا ذاك — أراجع التطبيق أو كشف الحساب' },
+    onboardAlertsNeitherDetail: { en: 'A statement is the fastest way to bring that money in.', ar: 'كشف الحساب هو أسرع طريقة لإدخال تلك العمليات.' },
+    onboardAlertsUnsure: { en: 'I’m not sure', ar: 'لست متأكداً' },
+    onboardAlertsUnsureDetail: { en: 'Wafra will look, and show you what it could and could not find.', ar: 'سيبحث وفرة، ثم يعرض لك ما وجده وما لم يجده.' },
+    onboardAlertsReachPast: { en: 'Earlier months', ar: 'الأشهر السابقة' },
+    onboardAlertsReachFuture: { en: 'From now on', ar: 'من الآن فصاعداً' },
+    onboardAlertsReachCovered: { en: 'Wafra reads these', ar: 'يقرأها وفرة' },
+    onboardAlertsReachStatement: { en: 'Needs a statement', ar: 'تحتاج كشف حساب' },
+    onboardAlertsReachManual: { en: 'You add these yourself', ar: 'تضيفها بنفسك' },
+    onboardAlertsReachUnknown: { en: 'Wafra will check', ar: 'سيتحقق وفرة' },
+    onboardAlertsNotificationHint: { en: 'You said your bank uses notifications — turn on bank notifications below so Wafra sees them.', ar: 'ذكرت أن بنكك يستخدم الإشعارات — فعّل إشعارات البنك أدناه ليتمكن وفرة من رؤيتها.' },
+    onboardHistoryGapTitle: { en: 'Your past months need a statement', ar: 'الأشهر السابقة تحتاج كشف حساب' },
+    onboardHistoryGapBody: { en: 'Wafra will catch everything from here on its own. To get earlier months right, import a statement — it takes a minute and nothing leaves your phone.', ar: 'سيلتقط وفرة كل ما يأتي من الآن تلقائياً. وللحصول على الأشهر السابقة بدقة، استورد كشف حساب — يستغرق دقيقة ولا تغادر بياناتك هاتفك.' },
+    onboardHistoryGapManualTitle: { en: 'This bank needs a statement', ar: 'هذا البنك يحتاج كشف حساب' },
+    onboardHistoryGapManualBody: { en: 'A bank that sends nothing leaves Wafra nothing to read, now or later. Import a statement to bring this spending in — you can also add entries yourself. Nothing leaves your phone.', ar: 'البنك الذي لا يرسل شيئاً لا يترك لوفرة ما يقرأه، لا الآن ولا لاحقاً. استورد كشف حساب لإدخال هذه العمليات — ويمكنك أيضاً إضافتها بنفسك. ولا تغادر بياناتك هاتفك.' },
+    onboardHistoryGapAction: { en: 'Import a statement', ar: 'استيراد كشف حساب' },
+    onboardIntentionTitle: { en: 'What would make money feel easier?', ar: 'ما الذي سيجعل إدارة المال أسهل؟' },
+    onboardIntentionBody: { en: 'Choose what you want Wafra to make easier first.', ar: 'اختر ما تريد من وفرة أن يجعله أسهل أولاً.' },
+    onboardIntentionControl: { en: 'Feel more in control', ar: 'أشعر بسيطرة أكبر' },
+    onboardIntentionSpend: { en: 'Spend more intentionally', ar: 'أنفق بوعي أكبر' },
+    onboardIntentionAhead: { en: 'Stay ahead of bills', ar: 'أبقى متقدماً على الفواتير' },
+    onboardIntentionBuffer: { en: 'Build a safety buffer', ar: 'أبني احتياطياً آمناً' },
+    onboardIntentionControlScene: { en: 'Spending, bills, and accounts in one place.', ar: 'المصروفات والفواتير والحسابات في مكان واحد.' },
+    onboardIntentionSpendScene: { en: 'Spot rising categories before month-end.', ar: 'لاحظ التصنيفات التي يرتفع إنفاقها قبل نهاية الشهر.' },
+    onboardIntentionAheadScene: { en: 'See upcoming bills and due dates in one timeline.', ar: 'شاهد الفواتير القادمة ومواعيد الاستحقاق في مسار واحد.' },
+    onboardIntentionBufferScene: { en: 'See what is left after money in and money out.', ar: 'شاهد ما يتبقى بعد الداخل والخارج.' },
+    onboardPreviewFrom: { en: 'YOU TRACK TODAY', ar: 'طريقتك اليوم' },
+    onboardPreviewForYou: { en: 'YOUR STARTING VIEW', ar: 'صورتك الأولى' },
+    onboardOutcomeTitle: { en: 'Wafra does the organizing.', ar: 'وفرة يتولى التنظيم.' },
+    onboardPersonalizedTitle: { en: 'Your starting view is ready.', ar: 'صورتك الأولى جاهزة.' },
+    onboardPersonalizedTitleNamed: { en: '{name}, your starting view is ready.', ar: '{name}، صورتك الأولى جاهزة.' },
+    onboardPersonalizedBody: {
+        en: 'Wafra will open with the view you chose. You can change it anytime.',
+        ar: 'سيفتح وفرة بالصورة التي اخترتها. ويمكنك تغييرها في أي وقت.',
+    },
+    onboardBasedOnAnswers: { en: 'BASED ON YOUR ANSWERS', ar: 'بناءً على إجاباتك' },
+    onboardConnectMyMoney: { en: 'Choose how to track', ar: 'اختر طريقة التتبع' },
+    onboardOutcomeBody: { en: 'Supported bank messages become a clean ledger, then Wafra turns that ledger into the view you chose.', ar: 'تتحول رسائل البنك المدعومة إلى سجل واضح، ثم يحوّل وفرة هذا السجل إلى الصورة التي اخترتها.' },
+    onboardOutcomeTrackingNone: { en: 'No system to clean up. Wafra can start organizing from your first real entry or supported bank message.', ar: 'لا يوجد نظام قديم لترتيبه. يمكن لوفرة أن يبدأ التنظيم من أول عملية حقيقية أو رسالة بنك مدعومة.' },
+    onboardOutcomeTrackingBankApps: { en: 'Instead of checking separate bank apps, supported alerts can become one organized ledger in Wafra.', ar: 'بدلاً من مراجعة تطبيقات بنوك متعددة، يمكن أن تتحول التنبيهات المدعومة إلى سجل واحد منظم في وفرة.' },
+    onboardOutcomeTrackingSpreadsheet: { en: 'Keep the useful structure without the spreadsheet cleanup. Wafra organizes supported activity as it arrives.', ar: 'احتفظ بالبنية المفيدة دون ترتيب الجداول يدوياً. ينظم وفرة النشاط المدعوم عند وصوله.' },
+    onboardOutcomeTrackingFinanceApp: { en: 'Keep the clarity you expect from a finance app without giving Wafra your bank login.', ar: 'احتفظ بالوضوح الذي تتوقعه من تطبيق مالي دون إعطاء وفرة بيانات تسجيل الدخول إلى البنك.' },
+    onboardOutcomeSpending: { en: 'You’ll land on spending by category and merchant.', ar: 'ستبدأ من المصروفات حسب التصنيف والتاجر.' },
+    onboardOutcomeBills: { en: 'You’ll land on upcoming bills, subscriptions, and utilities.', ar: 'ستبدأ من الفواتير القادمة والاشتراكات والخدمات.' },
+    onboardOutcomeCashflow: { en: 'You’ll land on Money in, Money out, and Net.', ar: 'ستبدأ من الداخل والخارج والصافي.' },
+    onboardOutcomeOverview: { en: 'You’ll land on a simple overview of your money.', ar: 'ستبدأ من نظرة بسيطة على أموالك.' },
+    onboardPrivacyTitle: { en: 'Your data stays under your control.', ar: 'بياناتك تبقى تحت سيطرتك.' },
+    onboardDataControlBody: { en: 'Wafra does not need your bank username or password. You decide whether to connect supported bank messages or enter things manually.', ar: 'لا يحتاج وفرة اسم المستخدم أو كلمة مرور البنك. أنت تقرر إن كنت ستربط رسائل البنك المدعومة أو تضيف العمليات يدوياً.' },
+    onboardPrivacyLocalTitle: { en: 'Processed on your device', ar: 'تتم المعالجة على جهازك' },
+    onboardPrivacyLocalBody: { en: 'Android bank-message text stays on your phone. iPhone setup uses Apple Shortcuts and local processing.', ar: 'يبقى نص رسائل البنك على هاتف أندرويد. ويستخدم إعداد الآيفون اختصارات Apple والمعالجة المحلية.' },
+    onboardPrivacyNoLoginTitle: { en: 'No bank login', ar: 'دون تسجيل دخول للبنك' },
+    onboardPrivacyNoLoginBody: { en: 'Wafra never asks for your banking password.', ar: 'لا يطلب وفرة كلمة مرور حسابك البنكي.' },
+    onboardPrivacyChoiceTitle: { en: 'You can change this later', ar: 'يمكنك تغيير هذا لاحقاً' },
+    onboardPrivacyChoiceBody: { en: 'Automatic capture is optional. Manual tracking always remains available.', ar: 'الالتقاط التلقائي اختياري. ويظل الإدخال اليدوي متاحاً دائماً.' },
+    onboardPrivacyContinue: { en: 'Choose how to connect', ar: 'اختر طريقة الربط' },
+    onboardInsightSpendingTitle: { en: 'Start with where it went', ar: 'ابدأ من أين ذهبت أموالك' },
+    onboardInsightSpendingBody: { en: 'Wafra will open Spending first, with categories and merchants ready as your activity arrives.', ar: 'سيفتح وفرة قسم المصروفات أولاً، مع التصنيفات والتجار كلما وصل نشاطك.' },
+    onboardInsightBillsTitle: { en: 'Start with what is coming up', ar: 'ابدأ بما هو قادم' },
+    onboardInsightBillsBody: { en: 'Wafra will open Bills first and keep subscriptions separate from utilities and telecom.', ar: 'سيفتح وفرة قسم الفواتير أولاً، ويفصل الاشتراكات عن الخدمات والاتصالات.' },
+    onboardInsightCashflowTitle: { en: 'Start with your real flow', ar: 'ابدأ بتدفقك الحقيقي' },
+    onboardInsightCashflowBody: { en: 'Home will put Money in, Money out, and Net together without counting matched internal transfers as spending.', ar: 'ستجمع الصفحة الرئيسية الداخل والخارج والصافي دون احتساب التحويلات الداخلية المتطابقة كمصروف.' },
+    onboardInsightOverviewTitle: { en: 'Start with the whole picture', ar: 'ابدأ بالصورة الكاملة' },
+    onboardInsightOverviewBody: { en: 'Home will give you the simplest overview first, then you can drill into spending, bills, and accounts.', ar: 'ستمنحك الصفحة الرئيسية أبسط نظرة أولاً، ثم يمكنك التعمق في المصروفات والفواتير والحسابات.' },
+    onboardBillsFound: { en: 'bills recognised', ar: 'فواتير تم التعرف عليها' },
+    onboardProPreviewTitle: { en: 'Want Wafra to keep doing more automatically?', ar: 'هل تريد من وفرة أن يواصل العمل تلقائياً؟' },
+    onboardProPreviewBody: { en: 'See what Pro adds after your own activity is already in Wafra.', ar: 'شاهد ما يضيفه Pro بعد أن يصبح نشاطك الحقيقي داخل وفرة.' },
+    onboardProPreviewAction: { en: 'See Wafra Pro', ar: 'شاهد وفرة برو' },
+    onboardOpenSpending: { en: 'Open Spending', ar: 'افتح المصروفات' },
+    onboardOpenBills: { en: 'Open Bills', ar: 'افتح الفواتير' },
+    onboardOpenHome: { en: 'Open Home', ar: 'افتح الرئيسية' },
+    onboardSampleBefore: { en: '01 / Bank message', ar: '01 / رسالة البنك' },
+    onboardSampleAfter: { en: '02 / In your ledger', ar: '02 / في سجلك' },
+    onboardSampleBankAlert: { en: 'A moment in your day', ar: 'لحظة من يومك' },
+    onboardSampleInsight: { en: 'Organized by category. Easier to see where it went.', ar: 'مرتّبة حسب التصنيف، لترى أين أنفقتها بسهولة.' },
+    onboardOptionalPlanNote: { en: 'Optional goals and budget style. No amounts to set now.', ar: 'أهداف ونمط ميزانية اختياريان. دون تحديد مبالغ الآن.' },
+    onboardSavedPlanNote: { en: 'Preferences saved. Budget amounts wait for real income.', ar: 'تم حفظ تفضيلاتك. تنتظر مبالغ الميزانية دخلاً حقيقياً.' },
+    onboardEditPlan: { en: 'Edit your preferences', ar: 'عدّل تفضيلاتك' },
+    onboardManualChoiceWebBody: { en: 'Add your own entries. Automatic capture is available in the phone apps.', ar: 'أضف عملياتك بنفسك. الالتقاط التلقائي متاح في تطبيقات الهاتف.' },
+    onboardFinishSaveFailedTitle: { en: 'Your choice could not be saved.', ar: 'تعذّر حفظ اختيارك.' },
+    onboardFinishSaveFailedBody: { en: 'Try again to save your setup. You can continue once it’s saved.', ar: 'حاول مجدداً لحفظ إعدادك. يمكنك المتابعة بعد حفظه.' },
+    onboardSetupWorking: { en: 'Saving your choice…', ar: 'جارٍ حفظ اختيارك…' },
+    onboardAddFirstEntry: { en: 'Add my first entry', ar: 'أضف أول عملية لي' },
+    onboardExploreLedger: { en: 'Explore my ledger', ar: 'استكشف سجلي' },
+    onboardRetrySetup: { en: 'Back to setup choices', ar: 'العودة إلى خيارات الإعداد' },
+    onboardPermissionChoiceTitle: { en: 'You’re in control.', ar: 'القرار لك.' },
+    onboardPermissionChoiceBody: { en: 'SMS access is optional. Retry when you’re ready, or start with manual entries.', ar: 'الوصول للرسائل اختياري. أعد المحاولة عندما تكون مستعداً، أو ابدأ بإدخال يدوي.' },
+    onboardStartNow: { en: 'Start tracking', ar: 'ابدأ التتبع' },
+    onboardPersonalizeOptional: { en: 'Make it yours', ar: 'خصّص تجربتك' },
+    onboardSampleLabel: { en: 'INTERACTIVE EXAMPLE', ar: 'مثال تفاعلي' },
+    onboardSampleMessage: { en: 'Card purchase at Coffee shop. Card ending 4582.', ar: 'شراء بالبطاقة من مقهى. البطاقة المنتهية بـ 4582.' },
+    onboardSampleAction: { en: 'Organize this alert', ar: 'نظّم هذا التنبيه' },
+    onboardSampleReset: { en: 'See the alert again', ar: 'شاهد التنبيه مجدداً' },
+    onboardSampleMerchant: { en: 'Coffee shop', ar: 'مقهى' },
+    onboardSampleCategory: { en: 'Dining · Card purchase', ar: 'مطاعم · شراء بالبطاقة' },
+    onboardSampleNote: { en: 'Example only. Nothing is saved.', ar: 'مثال فقط. لا يُحفظ شيء.' },
+    onboardResumeError: { en: 'Could not restore setup progress. Try again to continue safely.', ar: 'تعذّر استعادة تقدّم الإعداد. أعد المحاولة للمتابعة بأمان.' },
+    onboardSkipPersonalization: { en: 'Set this up later', ar: 'إعداد هذا لاحقاً' },
+    onboardSub: { en: 'Supported bank messages. One clear ledger.', ar: 'رسائل البنوك المدعومة في سجل واضح.' },
+    onboardPersonalizeCta: { en: 'Get started', ar: 'ابدأ الآن' },
+    onboardSetupTime: { en: 'No bank login required', ar: 'لا يتطلب تسجيل الدخول إلى البنك' },
+    onboardPreviewOverline: { en: 'EXAMPLE MONEY STORY', ar: 'مثال لصورة مالية' },
+    onboardPreviewLive: { en: 'WHAT WAFRA CAN ORGANISE', ar: 'ما يمكن لوفرة تنظيمه' },
+    onboardPreviewIncome: { en: 'Income received', ar: 'دخل مستلم' },
+    onboardPreviewIncomeDetail: { en: 'Incoming money recognised', ar: 'تم التعرف على المال الوارد' },
+    onboardPreviewBill: { en: 'Upcoming bill', ar: 'فاتورة قادمة' },
+    onboardPreviewBillDetail: { en: 'Due date kept visible', ar: 'موعد الاستحقاق يبقى واضحاً' },
+    onboardPreviewCard: { en: 'Card repayment', ar: 'سداد بطاقة' },
+    onboardPreviewCardDetail: { en: 'Matched and counted once', ar: 'تمت مطابقتها واحتسابها مرة واحدة' },
+    onboardPreviewFooter: { en: 'One timeline. No spreadsheet cleanup.', ar: 'مسار واحد، دون ترتيب جداول.' },
+    onboardPreviewAccessibility: {
+        en: 'Example: Wafra can recognise income, bring bills forward, and count matched card payments once.',
+        ar: 'مثال: يمكن لوفرة التعرف على الدخل وعرض الفواتير واحتساب دفعات البطاقات المتطابقة مرة واحدة.',
+    },
+    onboardStepOf: { en: 'Step {step} of {total}', ar: 'الخطوة {step} من {total}' },
+    onboardBack: { en: 'Back', ar: 'رجوع' },
+    onboardMarketTitle: { en: 'Where does your money live?', ar: 'أين تعيش أموالك؟' },
+    onboardMarketBody: {
+        en: 'This sets the currency and local money calendar across Wafra.',
+        ar: 'يحدّد هذا العملة وتقويمك المالي المحلي في وفرة.',
+    },
+    onboardMarketUae: { en: 'United Arab Emirates', ar: 'الإمارات العربية المتحدة' },
+    onboardMarketUaeDetail: { en: 'AED · UAE bank coverage', ar: 'درهم · دعم البنوك الإماراتية' },
+    onboardMarketSaudi: { en: 'Saudi Arabia', ar: 'المملكة العربية السعودية' },
+    onboardMarketSaudiDetail: { en: 'SAR · Saudi money format', ar: 'ريال · تنسيق الأموال السعودي' },
+    onboardGoalsTitle: { en: 'Your goals', ar: 'أهدافك' },
+    onboardGoalsBody: { en: 'Choose up to two.', ar: 'اختر هدفين كحد أقصى.' },
+    onboardGoalSelectionHint: {
+        en: 'Choose up to two goals.',
+        ar: 'اختر هدفين كحد أقصى.',
+    },
+    onboardGoalMax: { en: 'Two goals is the limit for setup.', ar: 'يمكن اختيار هدفين أثناء الإعداد.' },
+    onboardGoalEmergency: { en: 'Emergency fund', ar: 'صندوق الطوارئ' },
+    onboardGoalEmergencyDetail: { en: 'A visible safety buffer', ar: 'احتياطي أمان واضح أمامك' },
+    onboardGoalTravel: { en: 'A proper holiday', ar: 'إجازة تستحقها' },
+    onboardGoalTravelDetail: { en: 'Flights, stays, and spending money', ar: 'رحلات وإقامة ومصروف' },
+    onboardGoalHome: { en: 'A home deposit', ar: 'دفعة منزل أولى' },
+    onboardGoalHomeDetail: { en: 'Make the first big milestone visible', ar: 'اجعل أول محطة كبيرة واضحة' },
+    onboardBudgetTitle: { en: 'Your spending plan', ar: 'خطة إنفاقك' },
+    onboardBudgetBody: { en: 'Pick a starting style.', ar: 'اختر أسلوباً مبدئياً.' },
+    onboardBudgetEssentials: { en: 'Essentials first', ar: 'الأساسيات أولاً' },
+    onboardBudgetEssentialsDetail: { en: 'A tighter plan for focused months', ar: 'خطة أدق للأشهر المنضبطة' },
+    onboardBudgetBalanced: { en: 'Balanced', ar: 'متوازنة' },
+    onboardBudgetBalancedDetail: { en: 'Comfort with clear guardrails', ar: 'راحة مع حدود واضحة' },
+    onboardBudgetFlexible: { en: 'More flexible', ar: 'أكثر مرونة' },
+    onboardBudgetFlexibleDetail: { en: 'More room for dining and shopping', ar: 'مساحة أكبر للمطاعم والتسوق' },
+    onboardPlanActivatesLater: { en: 'Limits start after real income is recorded.', ar: 'تبدأ الحدود بعد تسجيل دخل حقيقي.' },
+    onboardPlanPending: { en: 'Plan saved. Waiting for real income.', ar: 'حُفظت الخطة. بانتظار دخل حقيقي.' },
+    onboardBudgetContinue: { en: 'Save plan', ar: 'حفظ الخطة' },
+    onboardBudgetPreview: {
+        en: '{count} limits · {amount} per month',
+        ar: '{count} حدود · {amount} شهرياً',
+    },
+    onboardMoneyMonthTitle: { en: 'When does your money month begin?', ar: 'متى يبدأ شهرك المالي؟' },
+    onboardMoneyMonthBody: {
+        en: 'Charts, budgets, and insights will all follow this date.',
+        ar: 'ستتبع الرسوم والميزانيات والرؤى هذا التاريخ.',
+    },
+    onboardCalendarMonth: { en: 'Calendar month', ar: 'الشهر الميلادي' },
+    onboardCalendarMonthDetail: { en: 'Starts on day 1', ar: 'يبدأ في اليوم 1' },
+    onboardSalaryDay: { en: 'Salary day', ar: 'يوم الراتب' },
+    onboardDayNumber: { en: 'Day {day}', ar: 'اليوم \u2066{day}\u2069' },
+    onboardCaptureTitleAndroid: { en: 'Choose how to add activity', ar: 'اختر كيف تضيف نشاطك' },
+    onboardCaptureBodyAndroid: { en: 'Connect supported bank messages, or start manually. You can change this later.', ar: 'اربط رسائل البنوك المدعومة أو ابدأ يدوياً. يمكنك تغيير ذلك لاحقاً.' },
+    onboardCaptureTitleIos: { en: 'Choose how to add activity', ar: 'اختر كيف تضيف نشاطك' },
+    onboardCaptureBodyIos: { en: 'Connect supported bank messages, or start manually. You can change this later.', ar: 'اربط رسائل البنوك المدعومة أو ابدأ يدوياً. يمكنك تغيير ذلك لاحقاً.' },
+    onboardCaptureTitleWeb: { en: 'Start your way', ar: 'ابدأ بطريقتك' },
+    onboardCaptureBodyWeb: {
+        en: 'Automatic bank-message capture is available in the phone apps.',
+        ar: 'التقاط رسائل البنك تلقائياً متاح في تطبيقات الهاتف.',
+    },
+    onboardCaptureAndroidCta: { en: 'Enable SMS capture', ar: 'فعّل التقاط الرسائل' },
+    onboardCaptureIosCta: { en: 'Set up automatic capture', ar: 'إعداد الالتقاط التلقائي' },
+    onboardAutomaticChoice: { en: 'Set up bank SMS', ar: 'إعداد رسائل البنك' },
+    onboardAutomaticChoiceAndroidBody: { en: 'Import past SMS and capture new supported alerts. Needs SMS permission. Free for your first 3 app days, then Wafra Pro.', ar: 'استورد رسائل البنك السابقة والتقط التنبيهات المدعومة الجديدة. يتطلب إذن الرسائل. مجاني لأول ٣ أيام من استخدام التطبيق، ثم يتطلب وفرة برو.' },
+    onboardAndroidSmsSourceTitle: { en: 'Bank SMS', ar: 'رسائل البنك' },
+    onboardAndroidSmsSourceBody: { en: 'Bring in past messages and keep reading supported bank SMS on this phone.', ar: 'استورد الرسائل السابقة واستمر بقراءة رسائل البنوك المدعومة على هذا الهاتف.' },
+    onboardAndroidPushSourceTitle: { en: 'Bank app alerts', ar: 'تنبيهات تطبيقات البنوك' },
+    onboardAndroidPushSourceBody: { en: 'Let Wafra read supported transaction notifications from your bank apps.', ar: 'اسمح لوفرة بقراءة إشعارات العمليات المدعومة من تطبيقات البنوك.' },
+    onboardAndroidPushAwaiting: { en: 'Turn on Wafra in Android Notification access, then come back here.', ar: 'فعّل وفرة في وصول إشعارات أندرويد ثم عد إلى هنا.' },
+    onboardSmsDeniedInline: { en: 'SMS access stayed off. You can retry it, use bank-app alerts instead, or continue manually.', ar: 'بقي وصول الرسائل متوقفاً. يمكنك إعادة المحاولة أو استخدام تنبيهات تطبيق البنك أو المتابعة يدوياً.' },
+    onboardCaptureContinueBoth: { en: 'Continue with both connected', ar: 'متابعة بعد ربط المصدرين' },
+    onboardCaptureContinueOne: { en: 'Continue with this source', ar: 'متابعة بهذا المصدر' },
+    onboardAutomaticChoiceIos: { en: 'Connect bank messages', ar: 'ربط رسائل البنك' },
+    onboardAutomaticChoiceIosBody: { en: 'Add one Wafra Shortcut, then turn on a Message automation. Past messages are optional.', ar: 'أضف اختصار وفرة مرة واحدة، ثم فعّل أتمتة الرسائل. استيراد الرسائل السابقة اختياري.' },
+    onboardStatementChoice: { en: 'Import bank statements', ar: 'استيراد كشوف البنك' },
+    onboardStatementChoiceBody: {
+        en: 'Send PDF, CSV, or TSV through Wafra’s secure relay. Raw files are parsed in memory, then discarded.',
+        ar: 'أرسل ملفات PDF أو CSV أو TSV عبر خدمة وفرة الآمنة. تُحلل الملفات الخام في الذاكرة ثم تُحذف.',
+    },
+    onboardStatementBack: { en: 'Back to setup', ar: 'العودة إلى الإعداد' },
+    onboardPastTitle: {
+        en: 'Bring in your past spending',
+        ar: 'أضف مصروفاتك السابقة',
+    },
+    onboardPastBody: {
+        en: 'Download a statement from your bank app and add it here.',
+        ar: 'نزّل كشفاً من تطبيق بنكك وأضفه هنا.',
+    },
+    onboardPastAction: {
+        en: 'Add a statement',
+        ar: 'أضف كشفاً',
+    },
+    onboardLater: {
+        en: 'Later',
+        ar: 'لاحقاً',
+    },
+    onboardHowItWorks: {
+        en: 'How it works',
+        ar: 'كيف يعمل',
+    },
+    onboardPastHowTitle: {
+        en: 'Bank statements',
+        ar: 'كشوف البنك',
+    },
+    onboardPastHowDownload: {
+        en: 'In your bank app, open Statements and download a PDF or CSV.',
+        ar: 'في تطبيق بنكك، افتح «الكشوف» ونزّل ملف PDF أو CSV.',
+    },
+    onboardPastHowPrivacy: {
+        en: 'Wafra’s server reads the file in memory, keeps only the transactions, and sends them encrypted to your devices.',
+        ar: 'يقرأ خادم وفرة الملف في الذاكرة، ويحتفظ بالعمليات فقط، ويرسلها مشفّرة إلى أجهزتك.',
+    },
+    onboardPastHowPassword: {
+        en: 'Password-protected PDFs work. Wafra asks for the password once and does not save it.',
+        ar: 'ملفات PDF المحمية بكلمة مرور مدعومة. يطلب وفرة كلمة المرور مرة واحدة ولا يحفظها.',
+    },
+    onboardLiveTitle: {
+        en: 'Catch new transactions',
+        ar: 'التقط العمليات الجديدة',
+    },
+    onboardLiveBody: {
+        en: 'A Shortcut sends new bank messages to Wafra on this iPhone.',
+        ar: 'يرسل اختصار رسائل بنكك الجديدة إلى وفرة على هذا الآيفون.',
+    },
+    onboardLiveAction: {
+        en: 'Set up',
+        ar: 'إعداد',
+    },
+    onboardNotNow: {
+        en: 'Not now',
+        ar: 'ليس الآن',
+    },
+    onboardManualChoice: { en: 'Start manually', ar: 'ابدأ يدوياً' },
+    onboardManualChoiceIos: { en: 'Start manually', ar: 'ابدأ يدوياً' },
+    onboardManualChoiceBody: { en: 'Add entries yourself. No SMS access. Set up capture later.', ar: 'أضف العمليات بنفسك. دون وصول للرسائل. يمكنك إعداد الالتقاط لاحقاً.' },
+    onboardManualChoiceIosBody: { en: 'Add entries yourself. No Messages access. Connect later.', ar: 'أضف العمليات بنفسك. دون وصول إلى الرسائل. يمكنك الربط لاحقاً.' },
+    onboardAlertsChecked: { en: 'alerts checked', ar: 'تنبيهات تم فحصها' },
+    onboardMoneyFound: { en: 'money entries found', ar: 'عمليات مالية وُجدت' },
+    onboardEntryFound: { en: 'entry organised', ar: 'عملية تم تنظيمها' },
+    onboardEntriesFound: { en: 'entries organised', ar: 'عمليات تم تنظيمها' },
+    onboardAccountFound: { en: 'account recognised', ar: 'حساب تم التعرف عليه' },
+    onboardAccountsFound: { en: 'accounts recognised', ar: 'حسابات تم التعرف عليها' },
+    onboardCaptureSkip: { en: 'Finish without capture', ar: 'إنهاء دون التقاط' },
+    onboardCaptureNoSms: { en: 'Maximum privacy · no SMS access', ar: 'أقصى خصوصية · دون وصول إلى الرسائل' },
+    onboardCapturePrivacyAndroid: {
+        en: 'Processed on this phone. SMS text is never uploaded.',
+        ar: 'تتم المعالجة على هذا الهاتف. لا يُرفع نص الرسائل أبداً.',
+    },
+    onboardCapturePrivacyIos: {
+        en: 'Processed on this iPhone. Nothing uploaded.',
+        ar: 'تتم المعالجة على هذا الآيفون. لا يُرفع شيء.',
+    },
+    onboardCaptureLocalAutomaticTitle: {
+        en: 'Automatic alerts stay on your phone',
+        ar: 'تبقى التنبيهات التلقائية على هاتفك',
+    },
+    onboardCaptureLocalAutomaticBody: {
+        en: 'SMS/Message capture is local. Statement import uses the secure relay only when you choose it.',
+        ar: 'يتم التقاط الرسائل محلياً. يستخدم استيراد الكشوف الخدمة الآمنة فقط عندما تختاره.',
+    },
+    onboardCaptureLearnMoreAction: { en: 'Learn more', ar: 'معرفة المزيد' },
+    onboardCaptureLearnMoreTitle: { en: 'About bank messages', ar: 'حول رسائل البنك' },
+    onboardCaptureLearnMorePrivacy: {
+        en: 'Wafra does not access your Messages inbox. An Apple automation you create passes new messages to Wafra, which keeps bank messages and discards the rest on this iPhone.',
+        ar: 'لا يصل وفرة إلى صندوق الرسائل. تمرّر أتمتة Apple التي تنشئها الرسائل الجديدة إلى وفرة، الذي يحتفظ برسائل البنك ويتجاهل البقية على هذا الآيفون.',
+    },
+    onboardCaptureLearnMoreRetention: {
+        en: 'Raw Message Content and Sender expire logically after 30 days. Physical deletion happens on the next capture or queue check, so protected bytes can remain longer.',
+        ar: 'تنتهي صلاحية محتوى الرسالة الخام واسم المرسل منطقياً بعد ٣٠ يوماً. يحدث الحذف الفعلي عند تشغيل الالتقاط أو فحص الصف التالي، لذا قد تبقى البيانات المحمية مدة أطول.',
+    },
+    onboardCaptureLearnMoreLegacy: {
+        en: 'An older Wafra Capture automation may continue uploading selected alerts until you remove or retire it.',
+        ar: 'قد تستمر أتمتة Wafra Capture الأقدم في رفع التنبيهات المحددة حتى تزيلها أو توقفها نهائياً.',
+    },
+    onboardCaptureLearnMoreLimits: {
+        en: 'Apple’s automation cannot select bank SMS IDs as senders, so it runs for every new message and Wafra filters on this iPhone. Past-alert import is separate and checks retained Messages only when you start it.',
+        ar: 'لا تستطيع أتمتة Apple تحديد معرّفات رسائل البنوك كمرسلين، لذلك تعمل لكل رسالة جديدة ويقوم وفرة بالتصفية على هذا الآيفون. استيراد التنبيهات السابقة منفصل ويفحص الرسائل المحتفظ بها فقط عندما تبدأه.',
+    },
+    onboardSmsDenied: {
+        en: 'SMS access was not granted. You can continue and enable capture later.',
+        ar: 'لم يُمنح إذن الرسائل. يمكنك المتابعة وتفعيل الالتقاط لاحقاً.',
+    },
+    onboardCompleteTitle: { en: 'Wafra is yours.', ar: 'وفرة أصبح لك.' },
+    onboardCompleteAutomaticTitle: { en: 'You’re ready.', ar: 'أنت جاهز.' },
+    onboardCompleteManualTitle: { en: 'Add your first entry.', ar: 'أضف أول عملية.' },
+    onboardCompleteManualBody: { en: 'A coffee, groceries, or your first income is enough to start.', ar: 'تكفي قهوة أو مشتريات أو أول دخل لتبدأ.' },
+    onboardCompleteNeedsAttentionTitle: { en: 'Setup needs another look.', ar: 'الإعداد يحتاج إلى مراجعة.' },
+    onboardCompleteNeedsAttentionBody: { en: 'Setup could not finish. Try again, or choose manual tracking to continue without message capture.', ar: 'لم يكتمل الإعداد. حاول مجدداً، أو اختر التتبع اليدوي للمتابعة دون التقاط الرسائل.' },
+    onboardCompleteBody: {
+        en: '{goals} goal{s}, {budgets} live budgets, and a money month from day {day}.',
+        ar: '{goals} أهداف و{budgets} ميزانيات مفعّلة، وشهر مالي يبدأ في اليوم \u2066{day}\u2069.',
+    },
+    onboardCompleteBodyAutomatic: {
+        en: 'Open Wafra. Your first history import will continue in the background.',
+        ar: 'افتح وفرة. سيستمر أول استيراد للسجل في الخلفية.',
+    },
+    onboardCompleteBodyAutomaticIos: {
+        en: 'Open Wafra. The view you chose is ready.',
+        ar: 'افتح وفرة. الصورة التي اخترتها جاهزة.',
+    },
+    onboardNotificationsTitle: {
+        en: 'Stay ahead of your money',
+        ar: 'ابقَ على اطلاع بأموالك',
+    },
+    onboardNotificationsBody: {
+        en: 'Get alerts for upcoming bills, card payments, and your daily spending summary.',
+        ar: 'احصل على تنبيهات للفواتير القادمة ودفعات البطاقات وملخص إنفاقك اليومي.',
+    },
+    onboardNotificationsEnable: { en: 'Enable notifications', ar: 'تفعيل الإشعارات' },
+    onboardNotificationsNotNow: { en: 'Not now', ar: 'ليس الآن' },
+    onboardSummaryGoals: { en: 'Savings goals', ar: 'أهداف الادخار' },
+    onboardSummaryBudgets: { en: 'Category budgets', ar: 'ميزانيات التصنيفات' },
+    onboardSummaryMonth: { en: 'Money month', ar: 'الشهر المالي' },
+    onboardSummaryActive: { en: '{count} active', ar: '{count} مفعّلة' },
+    onboardReadsSms: { en: 'Start your way', ar: 'ابدأ بطريقتك' },
+    onboardWarnsDetail: { en: 'Card dues, utility bills, rent, and quiet subscriptions', ar: 'مستحقات البطاقات وفواتير الخدمات والإيجار والاشتراكات الصامتة' },
+    onboardNoServerDetail: {
+        en: 'Android bank-message text is never uploaded',
+        ar: 'لا يُرفع نص رسائل البنك من أندرويد أبداً',
+    },
+    onboardStartTitle: { en: 'Start somewhere.', ar: 'ابدأ من نقطة ما.' },
+    inboxChecked: { en: 'Inbox checked.', ar: 'تم فحص الرسائل.' },
+    onboardStartEmpty: { en: 'Start empty', ar: 'ابدأ بسجل فارغ' },
+    onboardWebChoice: {
+        en: 'Reading SMS works in the Android app. Pick a starting point:',
+        ar: 'قراءة الرسائل تعمل في تطبيق أندرويد. اختر نقطة البداية:',
+    },
+    iosOnboardHeadline: { en: 'Money,\nmade clear.', ar: 'أموالك،\nبوضوح.' },
+    iosOnboardSub: { en: 'Supported bank messages. One clear ledger.', ar: 'رسائل البنوك المدعومة في سجل واضح.' },
+    iosOnboardAutomatic: { en: 'Start your way', ar: 'ابدأ بطريقتك' },
+    iosOnboardAutomaticBody: {
+        en: 'Add entries yourself or connect supported bank messages',
+        ar: 'أضف العمليات بنفسك أو اربط رسائل البنوك المدعومة',
+    },
+    iosOnboardPrivate: { en: 'Raw messages are never kept', ar: 'نص الرسالة الخام لا يُحفظ أبداً' },
+    iosOnboardPrivateBody: {
+        en: 'The relay parses, discards the text, and seals the transaction separately for this iPhone and trusted devices',
+        ar: 'يحلّل المرحّل الرسالة ثم يحذف نصها ويشفّر العملية بشكل منفصل لهذا الآيفون وللأجهزة الموثوقة',
+    },
+    iosOnboardSetupTitle: { en: 'Make it automatic.', ar: 'اجعله تلقائياً.' },
+    iosOnboardSetupBody: {
+        en: 'A guided setup connects the private relay. Your first supported bank message verifies Apple’s automation afterward.',
+        ar: 'إعداد موجه يربط المرحّل الخاص. وبعده تتحقق أول رسالة بنكية مدعومة من أتمتة آبل.',
+    },
+    iosOnboardSetupCta: { en: 'Set up automatic capture', ar: 'إعداد الالتقاط التلقائي' },
+    readingInbox: { en: 'Reading your inbox.', ar: 'جارٍ قراءة رسائلك.' },
+    openWafra: { en: 'Open Wafra', ar: 'افتح وفرة' },
+    continueWord: { en: 'Continue', ar: 'متابعة' },
+    notifNoteOnboard: {
+        en: 'Android calls this broad “read, reply & control” access. Wafra only reads supported bank messages; it never replies or changes a notification.',
+        ar: 'يسمي أندرويد هذا الإذن الواسع «قراءة ورد وتحكم». وفرة يقرأ رسائل البنوك المدعومة فقط، ولا يرد على إشعار أو يغيّره.',
+    },
+    nothingOutYet: { en: 'No spending in this period yet.', ar: 'لا يوجد إنفاق في هذه الفترة بعد.' },
+    noAccountsYet: { en: 'No bank or cash accounts yet.', ar: 'لا حسابات بنكية أو نقدية بعد.' },
+    noStatementYet: { en: 'No statement message has arrived for this card yet.', ar: 'لم تصل رسالة كشف حساب لهذه البطاقة بعد.' },
+    debitHasNoStatement: {
+        en: 'A debit card has no statement and no bill to pay — it spends the balance in the account.',
+        ar: 'بطاقة الخصم المباشر ليس لها كشف حساب ولا فاتورة تُسدَّد — فهي تنفق الرصيد الموجود في الحساب.',
+    },
+    underMinimumDue: { en: 'Still under the minimum due.', ar: 'ما زال أقل من الحد الأدنى المستحق.' },
+    perYear: { en: 'per year', ar: 'سنوياً' },
+    playOnlyTitle: { en: 'Purchases unavailable in this build', ar: 'الشراء غير متاح في هذا الإصدار' },
+    playOnlyBody: {
+        en: 'Install Wafra from the App Store or Google Play to purchase Pro.',
+        ar: 'ثبّت وفرة من App Store أو Google Play لشراء برو.',
+    },
+    priceLoading: { en: 'Loading price…', ar: 'جارٍ تحميل السعر…' },
+    priceUnavailable: { en: 'Price unavailable', ar: 'السعر غير متاح' },
+    priceUnavailableBody: {
+        en: 'The store did not return this plan. Check your connection and try loading prices again.',
+        ar: 'لم يُرجع المتجر هذه الخطة. تحقّق من الاتصال وحاول تحميل الأسعار مجدداً.',
+    },
+    retryPrices: { en: 'Try loading prices again', ar: 'إعادة تحميل الأسعار' },
+    manageSubscription: { en: 'Manage or cancel subscription', ar: 'إدارة الاشتراك أو إلغاؤه' },
+    manageSubscriptionFailed: { en: 'Could not open subscriptions', ar: 'تعذّر فتح الاشتراكات' },
+    manageSubscriptionFailedBody: {
+        en: 'Open your App Store or Google Play account to manage the subscription.',
+        ar: 'افتح حسابك في App Store أو Google Play لإدارة الاشتراك.',
+    },
+    subscriptionRenewalTermsIos: {
+        en: 'Payment is charged to your store account. The subscription renews automatically unless cancelled at least 24 hours before the current period ends.',
+        ar: 'يُخصم المبلغ من حساب المتجر. يتجدد الاشتراك تلقائياً ما لم يُلغَ قبل 24 ساعة على الأقل من نهاية الفترة الحالية.',
+    },
+    subscriptionRenewalTermsAndroid: {
+        en: 'Payment is charged to Google Play. The subscription renews automatically unless cancelled in Google Play before the next renewal date; access continues through the paid period.',
+        ar: 'يُخصم المبلغ من Google Play. يتجدد الاشتراك تلقائياً ما لم يُلغَ في Google Play قبل موعد التجديد التالي، ويستمر الوصول حتى نهاية المدة المدفوعة.',
+    },
+    privacyPolicy: { en: 'Privacy Policy', ar: 'سياسة الخصوصية' },
+    termsOfUse: { en: 'Terms of Use', ar: 'شروط الاستخدام' },
+    purchaseUnavailable: { en: 'Purchase unavailable', ar: 'الشراء غير متاح' },
+    purchaseLegalMissingBody: {
+        en: 'Purchases are temporarily unavailable because the required legal links are not configured.',
+        ar: 'الشراء غير متاح مؤقتاً لأن الروابط القانونية المطلوبة غير مهيأة.',
+    },
+    legalLinkFailed: { en: 'Could not open the legal page', ar: 'تعذّر فتح الصفحة القانونية' },
+    legalLinkFailedBody: {
+        en: 'Check your connection and try the link again.',
+        ar: 'تحقق من اتصالك وحاول فتح الرابط مرة أخرى.',
+    },
+    nothingToRestore: { en: 'Nothing to restore', ar: 'لا شيء لاستعادته' },
+    nothingToRestoreBody: { en: 'Install Wafra from the App Store or Google Play to restore a purchase.', ar: 'ثبّت وفرة من App Store أو Google Play لاستعادة عملية شراء.' },
+    noPurchaseFound: { en: 'No purchase found', ar: 'لم يُعثر على عملية شراء' },
+    noPurchaseFoundBody: {
+        en: 'No previous Wafra Pro purchase was found on this store account.',
+        ar: 'لم يُعثر على عملية شراء سابقة لوفرة برو في حساب المتجر هذا.',
+    },
+    restoreFailed: { en: 'Could not reach the store', ar: 'تعذّر الوصول إلى المتجر' },
+    restoreFailedBody: {
+        en: 'Your purchase has not been checked yet. Check your connection and try again.',
+        ar: 'لم يتم التحقق من عملية الشراء بعد. تحقق من الاتصال وحاول مرة أخرى.',
+    },
+    purchasePendingTitle: { en: 'Waiting on the store', ar: 'بانتظار المتجر' },
+    purchasePendingBody: {
+        en: 'The store has not completed this purchase yet. Wafra Pro switches on by itself once it does.',
+        ar: 'لم يُكمل المتجر عملية الشراء بعد. سيُفعَّل وفرة برو تلقائياً بمجرد اكتمالها.',
+    },
+    purchaseFailed: { en: 'Purchase not confirmed', ar: 'لم يتم تأكيد الشراء' },
+    purchaseFailedBody: {
+        en: 'The store could not confirm Pro yet. Check your connection, then restore purchases before trying to buy again.',
+        ar: 'لم يتمكن المتجر من تأكيد وفرة برو بعد. تحقق من الاتصال، ثم استعد المشتريات قبل محاولة الشراء مجدداً.',
+    },
+    trialDaysLeftPaywall: {
+        en: 'Everything is free for your first {total} days — {left} day{s} left. Keep it going:',
+        ar: 'كل شيء مجاني في أول {total} أيام — تبقّى {left} يوم. تابع الاستخدام:',
+    },
+    featAutoTracking: { en: 'Automatic tracking', ar: 'تتبع تلقائي' },
+    featAutoTrackingText: { en: 'Bank SMS and app notifications become transactions, cards and dues by themselves.', ar: 'رسائل البنك والإشعارات تتحول تلقائياً إلى عمليات وبطاقات ومستحقات.' },
+    featAutoTrackingIosText: { en: 'Supported bank messages passed by your personal automation are processed locally into transactions, cards, dues, or review when needed. Set up once.', ar: 'تُعالج رسائل البنوك المدعومة التي تمررها أتمتتك الشخصية محلياً لتصبح عمليات أو بطاقات أو مستحقات، أو تُرسل للمراجعة عند الحاجة. إعداد مرة واحدة.' },
+    featPasteFreeText: { en: 'Reading a bank message you hand over — and typing entries — never needs a subscription, on any phone.', ar: 'قراءة رسالة بنكية تلصقها بنفسك وإضافة العمليات يدوياً لا تحتاج اشتراكاً أبداً على أي هاتف.' },
+    featSalaryMonths: { en: 'Salary-day months', ar: 'الشهر يبدأ يوم الراتب' },
+    featSalaryMonthsText: { en: 'Your money month starts on payday, not the 1st.', ar: 'شهرك المالي يبدأ يوم استلام راتبك.' },
+    obTagline: { en: 'Know where it goes. Watch it grow.', ar: 'اعرف أين تذهب أموالك. وراقبها تنمو.' },
+    obSubtitle: { en: 'Track your money privately, in your own currency.', ar: 'تتبّع أموالك بخصوصية وبعملتك.' },
+    getStarted: { en: 'Get started', ar: 'ابدأ الآن' },
+    exploreSample: { en: 'Explore with sample data', ar: 'جرّب ببيانات تجريبية' },
+    saved: { en: 'Saved', ar: 'المدخر' },
+    overspent: { en: 'Overspent', ar: 'تجاوزت' },
+    netAfterSpending: { en: 'Net after spending', ar: 'الصافي بعد الإنفاق' },
+    spentAboveIncome: { en: 'Spent above income', ar: 'الإنفاق فوق الدخل' },
+    soFarThisMonth: { en: 'so far this month', ar: 'حتى الآن هذا الشهر' },
+    homeVsMorePartial: {
+        en: '{amount} more spent than {period} at the same point',
+        ar: 'صرفت {amount} أكثر من {period} عند النقطة نفسها',
+    },
+    homeVsLessPartial: {
+        en: '{amount} less spent than {period} at the same point',
+        ar: 'صرفت {amount} أقل من {period} عند النقطة نفسها',
+    },
+    homeVsSamePartial: {
+        en: 'The same spent as {period} at the same point',
+        ar: 'الصرف نفسه مقارنةً بـ{period} عند النقطة نفسها',
+    },
+    homeVsMoreWhole: {
+        en: '{amount} more spent than {period}',
+        ar: 'صرفت {amount} أكثر من {period}',
+    },
+    homeVsLessWhole: {
+        en: '{amount} less spent than {period}',
+        ar: 'صرفت {amount} أقل من {period}',
+    },
+    homeVsSameWhole: {
+        en: 'The same spent as {period}',
+        ar: 'الصرف نفسه مقارنةً بـ{period}',
+    },
+    allTime: { en: 'All time', ar: 'كل الفترات' },
+    inWord: { en: 'in', ar: 'في' },
+    inMinusOut: { en: 'in minus out', ar: 'الدخل ناقص المصروف' },
+    tapToChangePeriod: { en: 'Tap to change period', ar: 'اضغط لتغيير الفترة' },
+    projected: { en: 'Projected', ar: 'متوقع' },
+    spentLabel: { en: 'Spent', ar: 'المصروف' },
+    biggestChangesVs: { en: 'Biggest changes vs', ar: 'أكبر التغيرات مقابل' },
+    whereMoneyWent: { en: 'Where the money went', ar: 'أين ذهبت الأموال' },
+    spendingByWeekday: { en: 'Spending by weekday', ar: 'الصرف حسب أيام الأسبوع' },
+    netWorth6mo: { en: 'Net worth · 6 months', ar: 'صافي الثروة · ٦ أشهر' },
+    walletChangeSince: {
+        en: '{amount} since {date}',
+        ar: '\u2066{amount}\u2069 منذ {date}',
+    },
+    cashflow6mo: { en: 'Cashflow · 6 months', ar: 'التدفق النقدي · ٦ أشهر' },
+    whatNumbersSay: { en: 'What the numbers say', ar: 'ماذا تقول الأرقام' },
+    tapMonthToOpen: { en: 'Tap a month to open it', ar: 'اضغط على شهر لفتحه' },
+    flowSummary: { en: 'Spent {total}', ar: 'الإنفاق {total}' },
+    flowLimitSummary: {
+        en: '{spent} of {limit} in limits',
+        ar: '{spent} من {limit} ضمن الحدود',
+    },
+    ofWord: { en: 'of', ar: 'من' },
+    inLimits: { en: 'in limits', ar: 'ضمن الحدود' },
+    monthGone: { en: 'of the month gone', ar: 'من الشهر انقضى' },
+    flowMonthGone: { en: '{percent}% of the month gone', ar: 'انقضى {percent}% من الشهر' },
+    moreCategories: { en: '{count} more', ar: '{count} أخرى' },
+    limitsHeader: { en: 'Limits', ar: 'الحدود' },
+    totalOut: { en: 'Total spent', ar: 'إجمالي الإنفاق' },
+    limitedSpend: { en: 'With limits', ar: 'ضمن الحدود' },
+    periodProgress: { en: 'Period progress', ar: 'تقدّم الفترة' },
+    fixedPayments: { en: 'Fixed payments', ar: 'الدفعات الثابتة' },
+    itemsTracked: { en: '{count} tracked', ar: '{count} قيد التتبع' },
+    newLimit: { en: 'New limit', ar: 'حد جديد' },
+    setLimitCategory: { en: 'Set a limit on a category', ar: 'ضع حداً لتصنيف' },
+    setLimitBody: {
+        en: 'Wafra already knows what you spend. Give one category a number and it will tell you whether you are on pace, not just what you have left.',
+        ar: 'يعرف وفرة مصروفك بالفعل. ضع رقماً لتصنيف واحد وسيخبرك إن كنت على المسار الصحيح، لا بما تبقّى فقط.',
+    },
+    overByAmount: { en: 'Over by {amount}', ar: 'تجاوزت بمقدار {amount}' },
+    amountLeft: { en: '{amount} left', ar: 'متبقي {amount}' },
+    daysLeft: { en: '{count} day{s} left', ar: 'متبقي {count} يوم' },
+    fasterThanMonth: { en: 'faster than the month', ar: 'أسرع من وتيرة الشهر' },
+    averageSuffix: { en: 'avg', ar: 'متوسط' },
+    worthKnowing: { en: 'Worth knowing', ar: 'جدير بالمعرفة' },
+    statsTitle: { en: 'Stats', ar: 'الإحصاءات' },
+    statsEmptyTitle: {
+        en: 'Nothing to measure in {period}',
+        ar: 'لا يوجد ما يُقاس في {period}',
+    },
+    statsEmptyBody: {
+        en: 'Stats reads the ledger you already have. Import a month of bank messages, or pick another period, and every section below fills itself in.',
+        ar: 'تقرأ الإحصاءات سجلّك الحالي. استورد شهراً من رسائل البنك أو اختر فترة أخرى، وستمتلئ كل الأقسام أدناه تلقائياً.',
+    },
+    statsWhereItGoes: { en: 'Where it goes', ar: 'أين يذهب المال' },
+    statsWhatChanged: { en: 'What changed', ar: 'ما الذي تغيّر' },
+    statsMoversCaption: {
+        en: 'Against the period before this one.',
+        ar: 'مقارنةً بالفترة السابقة لهذه.',
+    },
+    statsMoverUp: { en: '{category}, up', ar: '{category}، ارتفع' },
+    statsMoverDown: { en: '{category}, down', ar: '{category}، انخفض' },
+    statsCategoryMonths: {
+        en: '{category} · {count} months',
+        ar: '{category} · {count} أشهر',
+    },
+    statsTrendFlat: {
+        en: "{amount} every month for {count} months — it hasn't moved.",
+        ar: '{amount} كل شهر على مدى {count} أشهر — لم يتغيّر إطلاقاً.',
+    },
+    statsTrendOnAverage: {
+        en: '{amount} a month on average, and {month} lands right on it.',
+        ar: '{amount} شهرياً في المتوسط، و{month} جاء مطابقاً له تماماً.',
+    },
+    statsTrendAbove: {
+        en: '{amount} a month on average. {month} came to {latest} — {percent}% above.',
+        ar: '{amount} شهرياً في المتوسط. بلغ {month} مقدار {latest} — أي {percent}% فوق المتوسط.',
+    },
+    statsTrendAboveHighest: {
+        en: '{amount} a month on average. {month} came to {latest} — {percent}% above, the highest of the {count}.',
+        ar: '{amount} شهرياً في المتوسط. بلغ {month} مقدار {latest} — أي {percent}% فوق المتوسط، وهو الأعلى بين الـ{count}.',
+    },
+    statsTrendBelow: {
+        en: '{amount} a month on average. {month} came to {latest} — {percent}% below.',
+        ar: '{amount} شهرياً في المتوسط. بلغ {month} مقدار {latest} — أي {percent}% دون المتوسط.',
+    },
+    statsTrendBelowLowest: {
+        en: '{amount} a month on average. {month} came to {latest} — {percent}% below, the lowest of the {count}.',
+        ar: '{amount} شهرياً في المتوسط. بلغ {month} مقدار {latest} — أي {percent}% دون المتوسط، وهو الأدنى بين الـ{count}.',
+    },
+    statsWhenItGoes: { en: 'When it goes', ar: 'متى يذهب المال' },
+    statsWeekdayCaption: {
+        en: 'Day-to-day spending only. Rent and other fixed commitments land on whichever weekday the standing order falls on, which is a calendar, not a habit.',
+        ar: 'المصروف اليومي فقط. الإيجار وغيره من الالتزامات الثابتة يقع في اليوم الذي يصادفه الأمر المستديم، وهذا تقويم لا عادة.',
+    },
+    statsHeaviestDay: {
+        en: '{day} is your heaviest day — {amount} of the {total} you chose to spend in {period}.',
+        ar: '{day} هو أثقل أيامك — {amount} من أصل {total} اخترت صرفها في {period}.',
+    },
+    statsAlsoWorthALook: { en: 'Also worth a look', ar: 'يستحق النظر أيضاً' },
+    statsNetWorthLink: {
+        en: '{count} months of balance, on Wallet',
+        ar: '{count} أشهر من الرصيد، في المحفظة',
+    },
+    statsNetWorthLinkA11y: {
+        en: 'Net worth over {count} months, on Wallet',
+        ar: 'صافي الثروة خلال {count} أشهر، في المحفظة',
+    },
+    statsInVsOut: { en: 'In vs out', ar: 'الدخل مقابل المصروف' },
+    statsInVsOutLink: {
+        en: '{count} months of earning and spending, on Flow',
+        ar: '{count} أشهر من الدخل والصرف، في التدفق',
+    },
+    statsInVsOutLinkA11y: {
+        en: 'In versus out over {count} months, on Flow',
+        ar: 'الدخل مقابل المصروف خلال {count} أشهر، في التدفق',
+    },
+    transactionsTitle: { en: 'Transactions', ar: 'العمليات' },
+    budgetsTitle: { en: 'Budgets', ar: 'الميزانيات' },
+    cardsTitle: { en: 'Payment cards', ar: 'بطاقات الدفع' },
+    cardsPurpose: {
+        en: 'Group purchases, balances, and amounts due by card. These are records in Wafra, not bank connections.',
+        ar: 'اجمع المشتريات والأرصدة والمبالغ المستحقة حسب البطاقة. هذه سجلات داخل وفرة وليست روابط مصرفية.',
+    },
+    inactiveCards: { en: 'Inactive cards', ar: 'بطاقات غير نشطة' },
+    lastUsed: { en: 'Last used', ar: 'آخر استخدام' },
+    addTransactionTitle: { en: 'Add transaction', ar: 'إضافة عملية' },
+    addCashEntry: { en: 'Add cash entry', ar: 'إضافة عملية نقدية' },
+    expenseLabel: { en: 'Expense', ar: 'مصروف' },
+    incomeLabel: { en: 'Income', ar: 'دخل' },
+    filtersTitle: { en: 'Filters', ar: 'عوامل التصفية' },
+    filtersButton: { en: 'Filter transactions', ar: 'تصفية العمليات' },
+    clearSearch: { en: 'Clear search', ar: 'مسح البحث' },
+    clearFilter: { en: 'Clear filter', ar: 'مسح التصفية' },
+    clearAllFilters: { en: 'Clear all filters', ar: 'مسح كل عوامل التصفية' },
+    typeFilter: { en: 'Type', ar: 'النوع' },
+    periodFilter: { en: 'Period', ar: 'الفترة' },
+    accountFilter: { en: 'Account', ar: 'الحساب' },
+    categoriesFilter: { en: 'Categories', ar: 'التصنيفات' },
+    minimumAmountFilter: { en: 'Minimum amount', ar: 'الحد الأدنى للمبلغ' },
+    sortFilter: { en: 'Sort', ar: 'الترتيب' },
+    selectedPeriod: { en: 'Selected period', ar: 'الفترة المختارة' },
+    thisMonth: { en: 'This month', ar: 'هذا الشهر' },
+    lastMonth: { en: 'Last month', ar: 'الشهر الماضي' },
+    lastThreeMonths: { en: 'Last 3 months', ar: 'آخر ٣ أشهر' },
+    dateRange: { en: 'Date range', ar: 'نطاق التاريخ' },
+    fromLabel: { en: 'From', ar: 'من' },
+    toLabel: { en: 'To', ar: 'إلى' },
+    anyLabel: { en: 'Any', ar: 'أي مبلغ' },
+    newest: { en: 'Newest', ar: 'الأحدث' },
+    oldest: { en: 'Oldest', ar: 'الأقدم' },
+    largest: { en: 'Largest', ar: 'الأكبر' },
+    largestFirst: { en: 'Largest first', ar: 'الأكبر أولاً' },
+    reset: { en: 'Reset', ar: 'إعادة ضبط' },
+    transactionsCount: { en: '{count} transaction{s}', ar: '{count} عملية' },
+    activeFiltersCount: { en: '{count} filter{s}', ar: '{count} عامل تصفية' },
+    transfersExcluded: {
+        en: '{count} transfer{s} not counted',
+        ar: '{count} تحويل مستبعد من الإجمالي',
+    },
+    movementsExcluded: {
+        en: '{count} money movement{s} not counted',
+        ar: '{count} حركة أموال مستبعدة من الإجمالي',
+    },
+    cashWithdrawalsExcluded: { en: '{count} cash withdrawal{s} not counted', ar: '{count} سحب نقدي مستبعد من الإجمالي' },
+    investingExcluded: { en: '{count} investment{s} not counted', ar: '{count} استثمار مستبعد من الإجمالي' },
+    cashDepositsExcluded: { en: '{count} cash deposit{s} not counted', ar: '{count} إيداع نقدي مستبعد من الإجمالي' },
+    hiddenAccountsExcluded: {
+        en: '{count} on hidden accounts',
+        ar: '{count} في حسابات مخفية',
+    },
+    smsImportsOnly: { en: 'Imported messages', ar: 'الرسائل المستوردة' },
+    showResults: { en: 'Show {count} result{s}', ar: 'عرض {count} نتيجة' },
+    nothingMatches: {
+        en: 'Nothing matches. Adjust search or filters.',
+        ar: 'لا توجد نتائج. عدّل البحث أو عوامل التصفية.',
+    },
+    plusWord: { en: 'plus', ar: 'زائد' },
+    minusWord: { en: 'minus', ar: 'ناقص' },
+    cardPayments: { en: 'Card payments', ar: 'دفعات البطاقات' },
+    upcomingBills: { en: 'Upcoming bills', ar: 'فواتير قادمة' },
+    budgetsSection: { en: 'Budgets', ar: 'الميزانيات' },
+    recentActivity: { en: 'Recent activity', ar: 'أحدث العمليات' },
+    insightsSection: { en: 'Insights', ar: 'ملاحظات' },
+    subscriptionWord: { en: 'subscription', ar: 'اشتراك' },
+    subscriptionsWord: { en: 'subscriptions', ar: 'اشتراكات' },
+    nextWord: { en: 'next', ar: 'التالي' },
+    allWord: { en: 'All', ar: 'الكل' },
+    moneyPictureTitle: { en: 'Your money picture', ar: 'صورتك المالية' },
+    moneyPictureBuilding: {
+        en: 'Wafra is organizing real activity as it arrives.',
+        ar: 'ينظّم وفرة نشاطك الحقيقي كلما وصل.',
+    },
+    moneyPictureSaved: {
+        en: 'Progress is saved. Continue whenever you are ready.',
+        ar: 'تم حفظ التقدّم. تابع متى كنت جاهزاً.',
+    },
+    moneyPictureAttention: {
+        en: 'History import needs attention before it can continue.',
+        ar: 'يحتاج استيراد السجل إلى مراجعة قبل أن يتابع.',
+    },
+    moneyPictureStarting: {
+        en: 'Add or connect real activity and this picture will fill itself in.',
+        ar: 'أضف أو اربط نشاطاً حقيقياً وستمتلئ هذه الصورة تلقائياً.',
+    },
+    moneyPictureContinue: { en: 'Continue', ar: 'متابعة' },
+    moneyPictureMessagesChecked: { en: 'messages checked', ar: 'رسائل تم فحصها' },
+    moneyPictureEntries: { en: 'entries organized', ar: 'عمليات تم تنظيمها' },
+    moneyPictureAccounts: { en: 'accounts recognized', ar: 'حسابات تم التعرف عليها' },
+    moneyPicturePayments: { en: 'bills & card dues', ar: 'فواتير ومستحقات بطاقات' },
+    moneyPictureHistoryFound: {
+        en: '{count} money entries found in history',
+        ar: 'عُثر على {count} عملية مالية في السجل',
+    },
+    moneyPictureTruthNote: {
+        en: 'Only activity already found in your ledger is shown here.',
+        ar: 'يظهر هنا فقط النشاط الذي تم العثور عليه فعلاً في سجلك.',
+    },
+    importTitle: { en: 'Import from SMS', ar: 'استيراد من الرسائل' },
+    scanFullInbox: { en: 'Scan full inbox', ar: 'فحص كل الرسائل' },
+    historyImportRunningTitle: {
+        en: 'Reading your bank-message history',
+        ar: 'جارٍ قراءة سجل رسائل البنك',
+    },
+    historyImportSavedTitle: {
+        en: 'Inbox progress saved',
+        ar: 'تم حفظ تقدّم قراءة الرسائل',
+    },
+    historyImportSavedBody: {
+        en: 'Nothing was lost. Open Wafra and retry to continue from the last saved page.',
+        ar: 'لم يُفقد شيء. افتح وفرة وأعد المحاولة للمتابعة من آخر صفحة محفوظة.',
+    },
+    historyImportAccessBody: {
+        en: 'Android blocked inbox history access. Open phone settings, allow access, then return to continue safely.',
+        ar: 'منع أندرويد الوصول إلى سجل الرسائل. افتح إعدادات الهاتف واسمح بالوصول ثم ارجع للمتابعة بأمان.',
+    },
+    historyImportLiveProgress: {
+        en: '{scanned} messages checked · {found} money entries found. You can keep using Wafra.',
+        ar: 'تم فحص {scanned} رسالة · عُثر على {found} قيد مالي. يمكنك متابعة استخدام وفرة.',
+    },
+    historyImportSettingsTitle: {
+        en: 'First inbox import',
+        ar: 'الاستيراد الأول من الرسائل',
+    },
+    retryHistoryImport: { en: 'Retry inbox import', ar: 'إعادة محاولة استيراد الرسائل' },
+    choiceColor: { en: 'Color {count}', ar: 'اللون {count}' },
+    choiceIcon: { en: 'Icon {count}', ar: 'الأيقونة {count}' },
+    findBankAlerts: { en: 'Find bank messages', ar: 'ابحث عن الرسائل البنكية' },
+    scanBankAlertsPrivacy: {
+        en: 'Finds supported bank messages on this phone. They are parsed here; raw messages never leave.',
+        ar: 'يبحث عن رسائل البنوك المدعومة على هذا الهاتف. تُحلّل هنا ولا تغادر الرسائل الخام الجهاز.',
+    },
+    pasteInstead: { en: 'Paste messages instead', ar: 'الصق الرسائل بدلاً من ذلك' },
+    hideManualPaste: { en: 'Hide manual paste', ar: 'إخفاء اللصق اليدوي' },
+    importBankActivity: { en: 'Import bank activity', ar: 'استيراد النشاط البنكي' },
+    importBankActivityIosDetail: {
+        en: 'Paste a bank message or add a statement',
+        ar: 'الصق رسالة بنكية أو أضف كشفاً',
+    },
+    parsePasted: { en: 'Parse pasted text', ar: 'تحليل النص الملصق' },
+    trySample: { en: 'Try sample', ar: 'جرّب مثالاً' },
+    importPastMessages: { en: 'Import past Messages', ar: 'استيراد الرسائل السابقة' },
+    installHistoryShortcut: { en: 'Install history Shortcut', ar: 'تثبيت اختصار السجل' },
+    historyCardTitle: { en: 'Import past alerts', ar: 'استيراد التنبيهات السابقة' },
+    historyLast30Days: { en: 'Last 30 days', ar: 'آخر ٣٠ يوماً' },
+    historyThisYear: { en: 'This year', ar: 'هذا العام' },
+    historyChooseDates: { en: 'Choose dates', ar: 'اختيار التواريخ' },
+    historyChooseYear: { en: 'Choose a year', ar: 'اختيار عام' },
+    historyDateChoices: {
+        en: 'Tap Start once. The Shortcut checks the newest and oldest retained Messages automatically; there is no date setup.',
+        ar: 'اضغط «بدء» مرة واحدة. يفحص الاختصار أحدث الرسائل المحتفظ بها وأقدمها تلقائياً من دون إعداد تواريخ.',
+    },
+    historyAddAction: { en: 'Add history Shortcut', ar: 'إضافة اختصار السجل' },
+    historyAddedAction: { en: 'Continue after adding', ar: 'متابعة بعد الإضافة' },
+    historyStartAction: { en: 'Import history', ar: 'استيراد السجل' },
+    historyContinueAction: { en: 'Open Shortcuts', ar: 'فتح الاختصارات' },
+    historyReviewAction: { en: 'Review imported alerts', ar: 'مراجعة التنبيهات المستوردة' },
+    historyTryAgain: { en: 'Try again', ar: 'حاول مرة أخرى' },
+    historyReinstallAction: { en: 'Reinstall Shortcut', ar: 'إعادة تثبيت الاختصار' },
+    historyPasteManually: { en: 'Paste messages manually', ar: 'لصق الرسائل يدوياً' },
+    historyRequiresIos26: {
+        en: 'Automatic retained-Message search requires iOS 26 or later. Manual paste stays free.',
+        ar: 'يتطلب البحث التلقائي في الرسائل المحتفظ بها iOS 26 أو أحدث. يظل اللصق اليدوي مجانياً.',
+    },
+    historyInstallUnavailable: {
+        en: 'History Import is unavailable in this build because its published Shortcut link is not configured.',
+        ar: 'استيراد السجل غير متاح في هذه النسخة لأن رابط الاختصار المنشور غير مُعدّ.',
+    },
+    historyInstallUnavailableAction: {
+        en: 'History Import unavailable',
+        ar: 'استيراد السجل غير متاح',
+    },
+    historyLocalProcessing: { en: 'Reads saved Messages in smaller batches. Wafra processes and deduplicates them on this iPhone; nothing is uploaded.', ar: 'يقرأ الرسائل المحفوظة على دفعات أصغر. يعالجها وفرة ويمنع التكرار على هذا الآيفون؛ ولا يُرفع شيء.' },
+    historyReadyCompact: {
+        en: 'Choose Always Allow when Apple asks',
+        ar: 'اختر «السماح دائماً» عندما تطلب Apple',
+    },
+    historyRunningCompact: {
+        en: 'Shortcuts is still working. Keep the iPhone unlocked',
+        ar: 'لا يزال تطبيق الاختصارات يعمل. أبقِ الآيفون مفتوح القفل',
+    },
+    historyReviewCompact: {
+        en: 'Nothing is saved until you confirm',
+        ar: 'لن يُحفظ شيء حتى تؤكد',
+    },
+    historyNoSupportedCompact: {
+        en: 'No supported bank activity was saved.',
+        ar: 'لم يُحفظ أي نشاط بنكي مدعوم.',
+    },
+    historyNoNewCompact: {
+        en: 'Nothing new was saved.',
+        ar: 'لم يُحفظ أي شيء جديد.',
+    },
+    historyLearnMore: { en: 'Learn more', ar: 'معرفة المزيد' },
+    historyDetailsTitle: {
+        en: 'Past alerts and privacy',
+        ar: 'التنبيهات السابقة والخصوصية',
+    },
+    historyNoLiveProgressDetails: {
+        en: 'Apple does not share live progress or a percentage with Wafra while the Shortcut runs.',
+        ar: 'لا تشارك Apple تقدماً مباشراً أو نسبة مئوية مع وفرة أثناء تشغيل الاختصار.',
+    },
+    historyFirstRunGuidance: { en: 'Choose Always Allow. Keep the iPhone unlocked while Apple reads Messages. If the import stops, open it again to continue.', ar: 'اختر «السماح دائماً». أبقِ الآيفون مفتوح القفل أثناء قراءة Apple للرسائل. إذا توقف الاستيراد، افتحه مرة أخرى للمتابعة.' },
+    historyContinueBody: { en: 'Continue in Shortcuts. Wafra keeps completed progress locally, so you can resume instead of starting over.', ar: 'تابع في الاختصارات. يحتفظ وفرة بالتقدم المكتمل محلياً، لذلك يمكنك الاستئناف بدلاً من البدء من جديد.' },
+    historyReviewBody: {
+        en: 'Review the local matches below. Nothing is filed until you confirm.',
+        ar: 'راجع المطابقات المحلية أدناه. لن يُسجّل شيء حتى تؤكد.',
+    },
+    historySourceCounts: {
+        en: '{understood} understood · {alreadyFiled} already filed · {notAlreadyFiled} understood, not previously filed · {unread} unread or non-financial',
+        ar: 'فُهمت {understood} · سُجّلت سابقاً {alreadyFiled} · فُهمت {notAlreadyFiled} ولم تُسجّل سابقاً · تعذّرت قراءة {unread} أو لم تكن مالية',
+    },
+    historySourceCountsRead: {
+        en: '{understood} understood · {unread} unread or non-financial',
+        ar: 'فُهمت {understood} · تعذّرت قراءة {unread} أو لم تكن مالية',
+    },
+    historySourceCountsFiled: {
+        en: '{alreadyFiled} already filed · {notAlreadyFiled} not previously filed',
+        ar: 'سُجّلت سابقاً {alreadyFiled} · لم تُسجّل سابقاً {notAlreadyFiled}',
+    },
+    historyImportNoNewSourceCounts: {
+        en: '{read} messages checked · {alreadyFiled} already filed · {notAlreadyFiled} understood but needed no new entry · {unread} unread or non-financial',
+        ar: 'فُحصت {read} رسالة · سُجّلت سابقاً {alreadyFiled} · فُهمت {notAlreadyFiled} ولم تحتج إلى قيد جديد · تعذّرت قراءة {unread} أو لم تكن مالية',
+    },
+    historyImportReviewSourceCounts: {
+        en: '{understood} understood · {alreadyFiled} already filed · {notAlreadyFiled} understood, not previously filed · {unread} unread or non-financial',
+        ar: 'فُهمت {understood} · سُجّلت سابقاً {alreadyFiled} · فُهمت {notAlreadyFiled} ولم تُسجّل سابقاً · تعذّرت قراءة {unread} أو لم تكن مالية',
+    },
+    historyImportPrivacy: { en: 'Nothing is uploaded. Wafra removes raw message and sender copies after saving or canceling completed imports. Unfinished copies expire and are removed on a later history check. Your Messages inbox is unchanged.', ar: 'لا يُرفع شيء. يحذف وفرة نسخ نص الرسالة والمرسل بعد حفظ الاستيراد المكتمل أو إلغائه. تنتهي صلاحية النسخ غير المكتملة وتُحذف عند فحص السجل لاحقاً. لا يتغير صندوق رسائلك.' },
+    historyProgressPrivacy: {
+        en: 'Reading protected local history batches. Message text and sender remain only in temporary protected staging until you save, cancel, or the staging expires; nothing is uploaded.',
+        ar: 'تجري قراءة دفعات السجل المحلية المحمية. يبقى نص الرسالة والمرسل فقط في تخزين مؤقت محمي حتى تحفظ أو تلغي أو تنتهي صلاحيته؛ ولا يُرفع أي شيء.',
+    },
+    historyReviewPrivacy: {
+        en: 'Review only. The bounded retained-Message coverage check passed on this iPhone; Message text is not uploaded and is removed from staging after a successful save or explicit cancel.',
+        ar: 'للمراجعة فقط. اجتاز فحص التغطية المحدود للرسائل المحتفظ بها على هذا الآيفون؛ لا يُرفع نص الرسائل ويُحذف من التخزين المؤقت بعد الحفظ الناجح أو الإلغاء الصريح.',
+    },
+    historyPreparingReview: { en: 'Preparing review…', ar: 'جارٍ إعداد المراجعة…' },
+    retryHistoryRead: { en: 'Try reading again', ar: 'إعادة محاولة القراءة' },
+    historyShortcutMissing: { en: 'History Shortcut not installed', ar: 'اختصار السجل غير مثبت' },
+    historyShortcutMissingBody: {
+        en: 'Install “{shortcut}” in Apple Shortcuts, then try again.',
+        ar: 'ثبّت «{shortcut}» في تطبيق اختصارات Apple ثم أعد المحاولة.',
+    },
+    historyImportReviewReady: { en: 'Ready for review', ar: 'جاهز للمراجعة' },
+    historyImportNoneFound: {
+        en: 'No supported bank activity found',
+        ar: 'لم يُعثر على نشاط بنكي مدعوم',
+    },
+    historyImportNoneFoundBody: {
+        en: 'Wafra checked {read} distinct readable retained Messages; {skipped} did not match a supported bank message. Nothing was filed.',
+        ar: 'فحص وفرة {read} رسالة محتفظاً بها ومميزة وقابلة للقراءة؛ لم تطابق {skipped} منها تنبيهاً بنكياً مدعوماً. لم يُسجّل شيء.',
+    },
+    historyImportMissing: { en: 'No staged messages found', ar: 'لم تُوجد رسائل مؤقتة' },
+    historyImportMissingBody: {
+        en: 'Run {shortcut} again and keep Wafra installed while the Shortcut finishes.',
+        ar: 'شغّل «{shortcut}» مجدداً واترك وفرة مثبتاً حتى ينتهي الاختصار.',
+    },
+    historyImportInvalid: { en: 'This import link is invalid', ar: 'رابط الاستيراد غير صالح' },
+    historyImportInvalidBody: {
+        en: 'Nothing was read. Leave this screen and run {shortcut} again from Apple Shortcuts.',
+        ar: 'لم تتم قراءة أي شيء. غادر هذه الشاشة وشغّل «{shortcut}» مجدداً من اختصارات Apple.',
+    },
+    historyImportFailed: { en: 'Could not finish the import', ar: 'تعذّر إكمال الاستيراد' },
+    historyLeaveReviewTitle: { en: 'Discard this import?', ar: 'حذف هذا الاستيراد؟' },
+    historyLeaveReviewBody: {
+        en: 'This closes the review and deletes its temporary import. Transactions already saved and your Messages inbox stay unchanged.',
+        ar: 'سيؤدي هذا إلى إغلاق المراجعة وحذف نسخة الاستيراد المؤقتة. لن تتغير العمليات المحفوظة سابقاً ولا صندوق رسائلك.',
+    },
+    historyKeepReviewing: { en: 'Keep reviewing', ar: 'متابعة المراجعة' },
+    historyDiscardAndLeave: { en: 'Discard and leave', ar: 'حذف ومغادرة' },
+    historyImportFailedBody: {
+        en: 'The protected source session is still on this iPhone. Try reading it again or cancel to delete it.',
+        ar: 'ما زالت جلسة المصدر المحمية على هذا الآيفون. أعد قراءتها أو ألغِ لحذفها.',
+    },
+    historySourceDiscarded: {
+        en: 'The staged session was removed after the import could not be read. Run the Shortcut again to start a new import.',
+        ar: 'حُذفت الجلسة المؤقتة بعد تعذّر قراءة الاستيراد. شغّل الاختصار مجدداً لبدء استيراد جديد.',
+    },
+    historySourceCleanupFailed: {
+        en: 'The import could not be read, and Wafra could not delete its protected staged messages. Try deletion again, or leave them. They become eligible after one hour and are removed the next time Wafra checks history.',
+        ar: 'تعذّرت قراءة الاستيراد ولم يتمكن وفرة من حذف الرسائل المؤقتة المحمية. أعد محاولة الحذف أو اتركها. تصبح مؤهلة للحذف بعد ساعة وتُزال في المرة التالية التي يفحص فيها وفرة سجل الاستيراد.',
+    },
+    historyCancelCleanupFailed: {
+        en: 'Nothing was filed. Wafra could not delete the protected staged messages you cancelled. Try deletion again, or leave them. They become eligible after one hour and are removed the next time Wafra checks history.',
+        ar: 'لم يُسجّل شيء. لم يتمكن وفرة من حذف الرسائل المؤقتة المحمية التي ألغيتها. أعد محاولة الحذف أو اتركها. تصبح مؤهلة للحذف بعد ساعة وتُزال في المرة التالية التي يفحص فيها وفرة سجل الاستيراد.',
+    },
+    iosSetupProgressReadFailed: {
+        en: 'Saved setup progress couldn’t be read. Tap Try again.',
+        ar: 'تعذّرت قراءة تقدّم الإعداد المحفوظ. اضغط «حاول مجدداً».',
+    },
+    iosHistoryRefreshFailed: {
+        en: 'Past-message import couldn’t be checked. Tap Try again.',
+        ar: 'تعذّر التحقق من استيراد الرسائل السابقة. اضغط «حاول مجدداً».',
+    },
+    historySetupStateFailed: {
+        en: 'Setup progress didn’t save. Tap Try again.',
+        ar: 'لم يُحفظ تقدّم الإعداد. اضغط «حاول مجدداً».',
+    },
+    historyStorageFailed: { en: 'Secure save failed', ar: 'فشل الحفظ الآمن' },
+    historyStorageFailedBody: {
+        en: 'The review was applied in this open session but SQLCipher did not confirm the save. Retry the secure save, or leave; the protected source stays available for recovery and becomes eligible for cleanup after one hour.',
+        ar: 'طُبقت المراجعة في هذه الجلسة المفتوحة لكن SQLCipher لم يؤكد الحفظ. أعد محاولة الحفظ الآمن أو غادر؛ سيبقى المصدر المحمي متاحاً للاسترداد ويصبح مؤهلاً للتنظيف بعد ساعة.',
+    },
+    importStorageFailedBody: {
+        en: 'The entries were applied in this open session but encrypted storage did not confirm the save. Do not repeat this import now.',
+        ar: 'طُبقت العمليات في هذه الجلسة المفتوحة لكن التخزين المشفر لم يؤكد الحفظ. لا تكرر الاستيراد الآن.',
+    },
+    notificationCleanupFailedTitle: {
+        en: 'Saved, but notification cleanup needs attention',
+        ar: 'تم الحفظ لكن تنظيف التنبيهات يحتاج إجراءً',
+    },
+    notificationCleanupFailedBody: {
+        en: 'Your ledger is safe, but Wafra could not clear its encrypted notification queue. A later scan may see the same alert again; duplicate protection will ignore it.',
+        ar: 'سجلك محفوظ، لكن تعذّر على وفرة مسح قائمة التنبيهات المشفرة. قد يرى الفحص اللاحق التنبيه نفسه مجدداً، وستتجاهله حماية التكرار.',
+    },
+    historyCleanupFailed: { en: 'Saved, but cleanup needs attention', ar: 'تم الحفظ لكن التنظيف يحتاج إجراءً' },
+    historyCleanupFailedBody: {
+        en: 'Your ledger is saved. Retry deletion, or leave; the protected staged Message text becomes eligible for cleanup after one hour.',
+        ar: 'تم حفظ سجلك. أعد محاولة الحذف أو غادر؛ يصبح نص الرسائل المؤقت المحمي مؤهلاً للتنظيف بعد ساعة.',
+    },
+    deleteStagedMessages: { en: 'Delete staged messages', ar: 'حذف الرسائل المؤقتة' },
+    retrySecureSave: { en: 'Retry secure save', ar: 'إعادة محاولة الحفظ الآمن' },
+    leaveImportScreen: { en: 'Leave this screen', ar: 'مغادرة هذه الشاشة' },
+    readyToFile: { en: 'Ready to file', ar: 'جاهز للتسجيل' },
+    skippedLabel: { en: 'skipped', ar: 'تم تخطيها' },
+    filesOnConfirm: { en: 'Files when you confirm', ar: 'يُسجَّل عند التأكيد' },
+    fileBillReminders: {
+        en: 'File {count} bill reminder{s}',
+        ar: 'تسجيل {count} من تذكيرات الفواتير',
+    },
+    legacyCapturePrivacyWarning: { en: 'An old Shortcut may still upload bank messages. Review it in Shortcuts.', ar: 'قد يواصل اختصار قديم رفع الرسائل البنكية. راجعه في تطبيق الاختصارات.' },
+    messagesPrivacy: { en: 'Privacy and data', ar: 'الخصوصية والبيانات' },
+    iosSetupTitle: {
+        en: 'Capture sources',
+        ar: 'مصادر الالتقاط',
+    },
+    iosMessageSettingsDetail: {
+        en: 'Set up and check capture',
+        ar: 'إعداد الالتقاط والتحقق منه',
+    },
+    iosPastSmsTitle: {
+        en: 'Import past SMS (experimental)',
+        ar: 'استيراد الرسائل السابقة (تجريبي)',
+    },
+    iosPastSmsDetail: {
+        en: 'Slow and experimental. Statements are faster.',
+        ar: 'بطيء وتجريبي. الكشوف أسرع.',
+    },
+    settingsAdvancedHeader: {
+        en: 'Advanced',
+        ar: 'متقدم',
+    },
+    iosMessageSetupHeading: { en: 'Bank messages', ar: 'رسائل البنك' },
+    iosMessageSetupSubtitle: { en: 'First connect new alerts. Importing old messages is optional.', ar: 'اربط التنبيهات الجديدة أولاً. استيراد الرسائل القديمة اختياري.' },
+    iosMessageFutureTitle: {
+        en: 'Automatic bank messages',
+        ar: 'رسائل البنك التلقائية',
+    },
+    iosMessageFutureDetail: {
+        en: 'Purchases, refunds, income, transfers and statements from supported bank messages.',
+        ar: 'المشتريات والمبالغ المستردة والدخل والتحويلات والكشوف من رسائل البنوك المدعومة.',
+    },
+    iosMessagePastTitle: { en: 'Past messages · Optional', ar: 'الرسائل السابقة · اختياري' },
+    iosMessagePastDetail: {
+        en: 'Checks retained Messages on this iPhone.',
+        ar: 'يفحص الرسائل المحتفظ بها على هذا الآيفون.',
+    },
+    iosMessagePastTiming: { en: 'Resumes if interrupted', ar: 'يستأنف إذا توقف' },
+    iosMessageGuideTitle: { en: 'In Shortcuts', ar: 'في الاختصارات' },
+    iosNotificationSetupAction: { en: 'Set up bank app notifications', ar: 'إعداد إشعارات تطبيق البنك' },
+    iosNotificationSetupSummary: { en: 'iOS 27 notification automation. Select your bank app in Shortcuts; Wafra will ask about unclear bank identities during review.', ar: 'أتمتة إشعارات iOS 27. اختر تطبيق البنك في الاختصارات؛ سيطلب وفرة توضيح هوية البنك غير الواضحة أثناء المراجعة.' },
+    iosNotificationChooseSms: { en: 'Show SMS setup', ar: 'عرض إعداد الرسائل' },
+    reviewAlertPossibleNotificationReplay: { en: 'Possible repeat notification. Compare it with your saved transactions before adding.', ar: 'قد يكون هذا إشعاراً مكرراً. قارنه بمعاملاتك المحفوظة قبل إضافته.' },
+    reviewAlertNotificationSource: { en: 'Notification capture', ar: 'التقاط الإشعارات' },
+    reviewAlertPossibleApplePayDuplicate: { en: 'Possible Apple Pay duplicate. A matching Apple Pay purchase is already in your transactions.', ar: 'قد تكون عملية Apple Pay مكررة. توجد عملية Apple Pay مطابقة في معاملاتك بالفعل.' },
+    reviewAlertsFullWaiting: { en: 'Review is full — {count} alerts waiting. Add or dismiss alerts here to make room; waiting alerts are kept on this iPhone until then.', ar: 'قائمة المراجعة ممتلئة — {count} من التنبيهات بالانتظار. أضف تنبيهات أو تجاهلها هنا لإفساح المجال، وستبقى التنبيهات المنتظرة على هذا الآيفون حتى ذلك الحين.' },
+    reviewAlertsExpiredCount: { en: 'Expired before review in the last 30 days: {count}', ar: 'انتهت صلاحيتها قبل المراجعة خلال آخر 30 يوماً: {count}' },
+    reviewAlertsEvictedCount: { en: 'Alerts that could not be kept for review because Review was full, in the last 30 days: {count}', ar: 'تنبيهات تعذّر الاحتفاظ بها للمراجعة لأن قائمة المراجعة كانت ممتلئة خلال آخر 30 يوماً: {count}' },
+    reviewAlertsCurrencyEvictedCount: { en: 'Other-currency alerts not kept for review in the last 30 days: {count}. Review keeps the newest 50 waiting for an exchange rate.', ar: 'تنبيهات بعملة أخرى لم يُحتفظ بها للمراجعة خلال آخر 30 يوماً: {count}. تحتفظ المراجعة بأحدث 50 تنبيهاً بانتظار سعر الصرف.' },
+    reviewAlertsCurrencySkipped: { en: 'Statements and notices in another currency skipped: {count}. Purchases are converted into your ledger currency instead.', ar: 'كشوف وإشعارات بعملة أخرى تم تخطيها: {count}. أما المشتريات فتُحوَّل إلى عملة سجلك.' },
+    reviewAlertExpiresIn: { en: 'Days left to review: {count}', ar: 'الأيام المتبقية للمراجعة: {count}' },
+    iosNotificationHelpInput: { en: 'Pass notification text to Capture bank notification. Replace the setup test phrase with Shortcut Input before saving the automation.', ar: 'مرّر نص الإشعار إلى «التقاط إشعار بنكي». استبدل عبارة فحص الإعداد بمتغير إدخال الاختصار قبل حفظ الأتمتة.' },
+    iosNotificationHelpStatus: { en: 'The permission check and your confirmation are separate from a real notification receipt. Check notification setup to see whether any text has arrived.', ar: 'فحص الأذونات وتأكيدك منفصلان عن استلام إشعار حقيقي. افحص إعداد الإشعارات لمعرفة ما إذا وصل نص فعلاً.' },
+    iosNotificationPrivacyBody: { en: 'Only text passed by your Apple Shortcuts automation is saved to Wafra’s protected local queue. Wafra cannot inspect other apps or read old notifications. No raw notification text is uploaded by this capture path.', ar: 'يُحفظ فقط النص الذي تمرّره أتمتة اختصارات Apple في قائمة وفرة المحلية المحمية. لا يستطيع وفرة فحص التطبيقات الأخرى أو قراءة الإشعارات القديمة. لا يرفع مسار الالتقاط هذا نصوص الإشعارات.' },
+    iosMessageGuideMessage: { en: 'Message', ar: 'رسالة' },
+    iosMessageGuideEntry: {
+        en: 'In New Automation, tap Message',
+        ar: 'في «أتمتة جديدة»، اضغط «رسالة»',
+    },
+    iosMessageAddAgain: { en: 'Reinstall Shortcut', ar: 'إعادة تثبيت الاختصار' },
+    iosMessageHelpReinstall: {
+        en: 'App updates do not replace an installed Shortcut. Use Reinstall Shortcut, open it in Shortcuts, and choose Replace if asked. Keep your existing automation linked to the shortcut you installed.',
+        ar: 'تحديث التطبيق لا يستبدل الاختصار المثبّت. استخدم «إعادة تثبيت الاختصار»، وافتحه في الاختصارات، واختر «استبدال» إذا طُلب منك. أبقِ الأتمتة الحالية مرتبطة بالاختصار الذي ثبّتّه.',
+    },
+    iosMessageReviewAutomation: { en: 'Automation steps', ar: 'خطوات الأتمتة' },
+    iosMessageRetryCheck: { en: 'Run setup check again', ar: 'إعادة تشغيل فحص الإعداد' },
+    iosMessageRetrySetup: { en: 'Try again', ar: 'حاول مجدداً' },
+    iosMessageHistoryKeepOpen: { en: 'Keep Shortcuts open and iPhone unlocked.', ar: 'أبقِ الاختصارات مفتوحاً والآيفون دون قفل.' },
+    iosMessageHistoryCoverage: { en: 'Imports saved Messages in smaller batches.', ar: 'يستورد الرسائل المحفوظة على دفعات أصغر.' },
+    iosMessageGuideSender: {
+        en: "Sender: leave empty · Message Contains: one space",
+        ar: "المرسل: اتركه فارغاً · تحتوي الرسالة على: مسافة واحدة",
+    },
+    iosMessageGuideNoFilter: {
+        en: "Type a single space in “Message Contains” so Next turns on. Messages containing a space reach Wafra regardless of currency. Wafra checks them on this iPhone; this does not turn off Apple’s automation notifications.",
+        ar: "اكتب مسافة واحدة في «تحتوي الرسالة على» لتفعيل «التالي». تصل الرسائل التي تحتوي على مسافة إلى وفرة بغض النظر عن العملة، ويفحصها وفرة على هذا الآيفون. هذا لا يوقف إشعارات أتمتة Apple.",
+    },
+    iosMessageFutureInstallHelp: {
+        en: 'Tap Add Shortcut, then add {shortcut} in Shortcuts.',
+        ar: 'اضغط «إضافة الاختصار»، ثم أضف {shortcut} في الاختصارات.',
+    },
+    iosMessageFutureReturnHelp: { en: 'Added {shortcut}?', ar: 'أضفت {shortcut}؟' },
+    iosMessagePermissionTitle: { en: 'Setup check', ar: 'فحص الإعداد' },
+    iosMessageRunPermissionCheck: {
+        en: 'Run test',
+        ar: 'تشغيل الاختبار',
+    },
+    iosMessagePermissionBody: { en: 'Run the setup check with this iPhone unlocked. Allow access to Wafra when Apple asks, then return here. The setup check tests the Shortcut; your first bank message confirms automatic delivery.', ar: 'شغّل فحص الإعداد والآيفون مفتوح. اسمح بالوصول إلى وفرة عندما تطلب Apple ذلك، ثم عد إلى هنا. يختبر فحص الإعداد الاختصار؛ وتؤكد أول رسالة بنكية وصول الرسائل تلقائياً.' },
+    iosMessagePermissionLocked: { en: 'If a background run reports a permission error, open the Shortcut’s details → Privacy. Allow Wafra access and enable “Allow Running When Locked” if shown.', ar: 'إذا ظهر خطأ أذونات أثناء التشغيل في الخلفية، افتح تفاصيل الاختصار ← الخصوصية. اسمح بالوصول إلى وفرة وفعّل «السماح بالتشغيل عند القفل» إذا ظهر الخيار.' },
+    iosMessageFutureReadyChoice: { en: 'New alerts are set up. Importing past messages is optional — now or later from Settings.', ar: 'تم إعداد التنبيهات الجديدة. استيراد الرسائل السابقة اختياري — الآن أو لاحقاً من الإعدادات.' },
+    iosMessageNextHistory: { en: 'Import past messages', ar: 'استيراد الرسائل السابقة' },
+    iosMessageNextFuture: { en: 'Set up new alerts', ar: 'إعداد التنبيهات الجديدة' },
+    iosMessageImportAgain: { en: 'Import again', ar: 'استيراد مجدداً' },
+    iosMessageHistoryDone: { en: 'History imported', ar: 'تم استيراد السجل' },
+    iosMessageContinue: { en: 'Finish setup', ar: 'إنهاء الإعداد' },
+    iosMessageHistoryInstallHelp: { en: 'Add the Shortcut to import history.', ar: 'أضف الاختصار لاستيراد السجل.' },
+    iosMessageHistoryReturnHelp: { en: 'Added {shortcut}?', ar: 'أضفت {shortcut}؟' },
+    iosMessageHistoryStartHelp: { en: 'Shortcuts brings messages into Wafra in batches. Wafra processes them after transfer.', ar: 'يجلب تطبيق الاختصارات الرسائل إلى وفرة على دفعات، ثم يعالجها وفرة بعد النقل.' },
+    iosMessageHistoryStartAfterAdding: { en: 'I added it · import', ar: 'أضفته · استيراد' },
+    iosMessageHistoryUnavailableOnboarding: { en: 'History is optional. Continue to Wafra now and import past messages later from Settings.', ar: 'استيراد السجل اختياري. تابع إلى وفرة الآن واستورد الرسائل السابقة لاحقاً من الإعدادات.' },
+    iosMessageHistoryUnavailableHelp: { en: 'You can continue to Wafra now and import past messages later from Settings.', ar: 'يمكنك متابعة استخدام وفرة الآن واستيراد الرسائل السابقة لاحقاً من الإعدادات.' },
+    iosMessageSkipHistory: { en: 'Skip past messages for now', ar: 'تخطي الرسائل السابقة حالياً' },
+    iosMessageSkipHistoryTitle: { en: 'Use future alerts only?', ar: 'استخدام التنبيهات الجديدة فقط؟' },
+    iosMessageSkipHistoryBody: { en: 'Past messages will stay unimported. Any unfinished import will be cleared; saved entries stay. Import later from Settings. A real bank message is still separate evidence.', ar: 'ستبقى الرسائل السابقة دون استيراد. سيُزال أي استيراد غير مكتمل وتبقى العمليات المحفوظة. استورد لاحقاً من الإعدادات. تظل الرسالة البنكية الحقيقية دليلاً منفصلاً.' },
+    iosMessageSkipStoppedHistoryBody: { en: 'Stop the history Shortcut first. This clears the unfinished import; saved entries stay. Past messages remain unimported. You can try again from Settings.', ar: 'أوقف اختصار السجل أولاً. سيُزال الاستيراد غير المكتمل وتبقى العمليات المحفوظة. ستبقى الرسائل السابقة دون استيراد. يمكنك المحاولة لاحقاً من الإعدادات.' },
+    iosMessageFutureBeforeSkip: { en: 'Set up and confirm future alerts before skipping past messages.', ar: 'أعدّ التنبيهات الجديدة وأكّدها قبل تخطي الرسائل السابقة.' },
+    iosMessageSkipHistoryChanged: { en: 'A history import has started. Stop it in Shortcuts, then try skipping again.', ar: 'بدأ استيراد السجل. أوقفه في الاختصارات، ثم حاول التخطي مجدداً.' },
+    iosMessageHistoryDeferred: { en: 'Skipped for now · past messages not imported', ar: 'تم التخطي حالياً · لم تُستورد الرسائل السابقة' },
+    iosMessageHistoryDeferredHelp: { en: 'Future alerts are separate from past-message coverage. Resume history here whenever you are ready.', ar: 'التنبيهات الجديدة منفصلة عن تغطية الرسائل السابقة. استأنف استيراد السجل هنا عندما تكون مستعداً.' },
+    iosMessageResumeHistory: { en: 'Resume history import', ar: 'استئناف استيراد السجل' },
+    iosMessageHistoryRunningHelp: { en: 'Keep the iPhone unlocked. If it stops, run it again; finished progress is kept.', ar: 'أبقِ الآيفون مفتوح القفل. إذا توقف، شغّله مرة أخرى؛ سيتم الاحتفاظ بالتقدم المكتمل.' },
+    iosMessageResetHistory: { en: 'Reset import', ar: 'إعادة ضبط الاستيراد' },
+    iosMessageResetHistoryTitle: { en: 'Stopped in Shortcuts?', ar: 'أوقفته في الاختصارات؟' },
+    iosMessageResetHistoryBody: { en: 'Stop the Shortcut first. Reset this attempt; saved entries stay unchanged.', ar: 'أوقف الاختصار أولاً. أعد ضبط المحاولة؛ تبقى العمليات المحفوظة كما هي.' },
+    iosMessageGuideImmediate: { en: 'Choose Run Immediately, turn off Notify When Run if shown, then Next', ar: 'اختر تشغيل فوراً، وأوقف الإشعار عند التشغيل إن ظهر، ثم اضغط التالي' },
+    iosMessageGuideRunShortcut: { en: 'Pick {shortcut} from the list (not New Blank Automation). Tap Done if it appears.', ar: 'اختر {shortcut} من القائمة (وليس أتمتة جديدة فارغة). اضغط «تم» إن ظهر.' },
+    iosMessageLearnMore: {
+        en: 'How it works',
+        ar: 'كيف يعمل',
+    },
+    iosMessageDone: { en: 'Done', ar: 'تم' },
+    iosMessageCloseSetup: { en: 'Close setup', ar: 'إغلاق الإعداد' },
+    iosMessageStatusNotStarted: { en: 'Not started', ar: 'لم يبدأ' },
+    iosMessageStatusInProgress: { en: 'In progress', ar: 'قيد الإعداد' },
+    iosMessageStatusComplete: { en: 'Complete', ar: 'مكتمل' },
+    iosMessageStatusSkipped: { en: 'Not finished', ar: 'غير مكتمل' },
+    iosMessageFinishFailed: {
+        en: 'Setup didn’t save. Try again.',
+        ar: 'لم يُحفظ الإعداد. حاول مجدداً.',
+    },
+    iosMessageHelpLocal: { en: 'Processed on this iPhone.', ar: 'تُعالج على هذا الآيفون.' },
+    iosMessageHelpReadable: { en: 'Only readable messages saved on this iPhone.', ar: 'الرسائل المحفوظة والقابلة للقراءة على هذا الآيفون فقط.' },
+    iosMessageHelpCoverage: { en: 'History imports in smaller batches and can resume if interrupted.', ar: 'يُستورد السجل على دفعات أصغر ويمكن استئنافه إذا توقف.' },
+    iosMessageHelpProof: { en: 'A real bank message confirms automatic capture.', ar: 'رسالة بنكية حقيقية تؤكد الالتقاط التلقائي.' },
+    iosMessagePrivacyDetails: { en: 'Privacy details', ar: 'تفاصيل الخصوصية' },
+    iosMessageDetailsTitle: { en: 'Setup help', ar: 'مساعدة الإعداد' },
+    iosMessageFutureDetailsTitle: {
+        en: 'Automatic bank messages',
+        ar: 'رسائل البنك التلقائية',
+    },
+    iosMessagePastDetailsTitle: {
+        en: 'Past alerts',
+        ar: 'التنبيهات السابقة',
+    },
+    iosMessageSenderUnavailable: {
+        en: "Leave Sender empty for alphanumeric bank SMS IDs. Use one space in Message Contains to avoid filtering by currency. Choose Run Immediately and turn off Notify When Run if shown. Wafra cannot change Apple’s notification settings.",
+        ar: "اترك المرسل فارغاً لمعرّفات البنك النصية. استخدم مسافة واحدة في «تحتوي الرسالة على» لتجنب التصفية حسب العملة. اختر «تشغيل فوراً» وأوقف «الإشعار عند التشغيل» إن ظهر. لا يستطيع وفرة تغيير إعدادات إشعارات Apple.",
+    },
+    iosStepConnect: { en: 'Connect', ar: 'الربط' },
+    iosStepBanks: { en: 'Banks', ar: 'البنوك' },
+    iosStepShortcut: { en: 'Add Wafra Capture', ar: 'أضف «Wafra Capture»' },
+    iosStepAutomation: { en: 'Message automation', ar: 'أتمتة الرسائل' },
+    iosStepTest: { en: 'Safe test', ar: 'اختبار آمن' },
+    iosStepProgress: { en: 'Step {n} of {total}: {name}', ar: 'الخطوة {n} من {total}: {name}' },
+    iosLocalStepShortcut: { en: 'Add Shortcut', ar: 'إضافة الاختصار' },
+    iosLocalStepAutomation: { en: 'Message automation', ar: 'أتمتة الرسائل' },
+    iosLocalShortcutTitle: {
+        en: 'Add Wafra Local Capture',
+        ar: 'أضف «Wafra Local Capture»',
+    },
+    iosLocalShortcutBody: {
+        en: 'Add the ordinary Shortcut once. It has no account code to paste and cannot install Apple’s personal automation for you.',
+        ar: 'أضف الاختصار العادي مرة واحدة. لا يحتوي على رمز حساب للصقه، ولا يمكنه تثبيت أتمتة Apple الشخصية نيابةً عنك.',
+    },
+    iosLocalInstallShortcut: { en: 'Add Shortcut', ar: 'إضافة الاختصار' },
+    iosLocalAlreadyAdded: { en: 'I added it', ar: 'أضفته' },
+    iosLocalShortcutUnavailable: {
+        en: 'This build can’t add the shortcut. Update Wafra.',
+        ar: 'لا يمكن لهذا الإصدار إضافة الاختصار. حدّث وفرة.',
+    },
+    iosLocalUnsupported: { en: 'Requires iOS 16 or later.', ar: 'يتطلب iOS 16 أو أحدث.' },
+    iosLocalUpdateRequired: {
+        en: 'This version can’t capture messages. Update Wafra.',
+        ar: 'هذا الإصدار لا يلتقط الرسائل. حدّث وفرة.',
+    },
+    iosLocalPrivacyTitle: {
+        en: 'Processed on this iPhone',
+        ar: 'تُعالج على هذا الآيفون',
+    },
+    iosLocalPrivacyBody: {
+        en: 'Apple does not give Wafra access to your Messages inbox. A Message automation you create in Shortcuts passes each new Message to Wafra’s protected queue on this iPhone. Apple’s Sender picker lists Contacts only and bank SMS IDs are not Contacts, so the automation runs with an empty Sender for every new message. Wafra checks Content and Sender locally, keeps only supported structured financial results, and uploads no Message data. After a durable local result, Wafra deletes the raw Message. If processing cannot finish, raw Content and Sender stay protected for up to 30 days and are removed on the next capture or queue check.',
+        ar: 'لا تمنح Apple وفرة وصولاً إلى صندوق رسائلك. تمرّر أتمتة الرسائل التي تنشئها في الاختصارات كل رسالة جديدة إلى صف وفرة المحمي على هذا الآيفون. تعرض قائمة المرسلين لدى Apple جهات الاتصال فقط ومعرّفات رسائل البنوك ليست جهات اتصال، لذلك تعمل الأتمتة بمرسل فارغ لكل رسالة جديدة. يفحص وفرة المحتوى واسم المرسل محلياً، ويحتفظ فقط بالنتائج المالية المنظمة والمدعومة، ولا يرفع بيانات الرسائل. بعد حفظ نتيجة محلية بشكل دائم، يحذف وفرة الرسالة الخام. وإذا تعذرت المعالجة، يبقى المحتوى الخام واسم المرسل محمياً لمدة تصل إلى ٣٠ يوماً ثم يُحذف عند تشغيل الالتقاط أو فحص الصف في المرة التالية.',
+    },
+    iosLocalMigrationTitle: {
+        en: 'Using the older automation?',
+        ar: 'هل تستخدم الأتمتة القديمة؟',
+    },
+    iosLocalMigrationBody: {
+        en: 'If you still have the old “Wafra Capture” automation, it can continue uploading the bank messages you selected until you delete it or Wafra confirms retirement after the first local bank message.',
+        ar: 'إذا كانت أتمتة «Wafra Capture» القديمة ما زالت موجودة، فقد تستمر في رفع رسائل البنوك التي اخترتها إلى أن تحذفها أو تؤكد وفرة إيقافها بعد أول رسالة بنكية محلية.',
+    },
+    iosLocalAutomationTitle: {
+        en: 'Turn on automatic capture',
+        ar: 'فعّل الالتقاط التلقائي',
+    },
+    iosLocalAutomationBody: {
+        en: "Leave Sender empty and type one space in Message Contains. Messages containing a space reach Wafra in any currency. Choose Run Immediately and turn off Notify When Run if shown. Edit your existing Wafra automation instead of adding another.",
+        ar: "اترك المرسل فارغاً واكتب مسافة واحدة في «تحتوي الرسالة على». تصل الرسائل التي تحتوي على مسافة إلى وفرة بأي عملة. اختر «تشغيل فوراً» وأوقف «الإشعار عند التشغيل» إن ظهر. عدّل أتمتة وفرة الحالية بدلاً من إضافة أتمتة أخرى.",
+    },
+    iosMessageContinueManual: {
+        en: 'Skip for now',
+        ar: 'تخطَّ حالياً',
+    },
+    iosLocalOpenAutomation: { en: 'Open Shortcuts', ar: 'فتح الاختصارات' },
+    iosLocalAutomationAdded: {
+        en: 'I turned it on',
+        ar: 'فعّلتها',
+    },
+    iosLocalTestExplainer: {
+        en: 'Confirmation runs only a harmless setup check. It cannot add a purchase or prove that Apple’s Message trigger works.',
+        ar: 'يشغّل التأكيد فحص إعداد آمناً فقط. لا يمكنه إضافة عملية شراء أو إثبات عمل مشغّل الرسائل من Apple.',
+    },
+    iosLocalWaitingTitle: { en: 'Waiting for first alert', ar: 'بانتظار أول تنبيه' },
+    iosLocalWaitingBody: { en: 'A real bank message confirms the automation.', ar: 'رسالة بنكية حقيقية تؤكد عمل الأتمتة.' },
+    iosLocalFirstAlertCaptured: { en: 'First alert received', ar: 'وصل أول تنبيه' },
+    iosLocalFirstAlertBody: {
+        en: 'Wafra durably processed the first qualifying alert on this iPhone. It may have been filed, reviewed, reconciled, or recognized as an existing entry.',
+        ar: 'عالجت وفرة أول تنبيه مؤهل بشكل دائم على هذا الآيفون. ربما سُجّل أو أُرسل للمراجعة أو استُخدم للمطابقة أو تم التعرّف عليه كعملية موجودة.',
+    },
+    iosLocalNotProvenTitle: {
+        en: 'Finish the one-time automation',
+        ar: 'أكمل الأتمتة لمرة واحدة',
+    },
+    iosLocalNotProvenBody: {
+        en: 'Wafra cannot create or inspect Apple’s personal automation. Follow the choices below, then confirm it here.',
+        ar: 'لا يمكن لوفرة إنشاء أتمتة Apple الشخصية أو فحصها. اتبع الخيارات أدناه ثم أكّدها هنا.',
+    },
+    iosLocalManualTracking: { en: 'Manual tracking', ar: 'التسجيل اليدوي' },
+    iosLocalImportPast: { en: 'Import past alerts', ar: 'استيراد التنبيهات السابقة' },
+    iosLocalContinue: { en: 'Continue', ar: 'متابعة' },
+    iosLocalBackToShortcut: { en: 'Back to Shortcut', ar: 'العودة إلى الاختصار' },
+    iosLocalShortcutInstallFailed: {
+        en: 'Shortcuts didn’t open. Tap Add Shortcut to try again.',
+        ar: 'لم تُفتح الاختصارات. اضغط «إضافة الاختصار» للمحاولة مجدداً.',
+    },
+    iosLocalShortcutRunFailed: {
+        en: 'The test didn’t finish. Unlock your iPhone, then tap Run test.',
+        ar: 'لم يكتمل الاختبار. افتح قفل الآيفون، ثم اضغط «تشغيل الاختبار».',
+    },
+    iosLocalManualExitFailed: {
+        en: 'Wafra could not stop local capture. Stay on this screen and try again.',
+        ar: 'تعذّر على وفرة إيقاف الالتقاط المحلي. ابقَ في هذه الشاشة وحاول مجدداً.',
+    },
+    iosIntroTitle: { en: 'Set it once. Wafra keeps up.', ar: 'اضبطه مرة. ووفرة يتابع.' },
+    iosIntroBody1: {
+        en: 'Connect this iPhone, add Wafra Capture, run one safe pipe test, then create a Message automation.',
+        ar: 'اربط هذا الآيفون، وأضف «Wafra Capture»، وشغّل اختباراً آمناً للمسار، ثم أنشئ أتمتة «رسالة».',
+    },
+    iosIntroBody2: {
+        en: 'A safe probe verifies the private pipe. Only a later supported bank message can prove Apple’s Message automation runs while Wafra is closed.',
+        ar: 'يتحقق الاختبار الآمن من المسار الخاص. ولا يثبت عمل أتمتة «الرسالة» من Apple ووفرة مغلق إلا رسالة بنكية مدعومة لاحقة.',
+    },
+    iosPreviewTime: {
+        en: 'ABOUT 3 MINUTES · APPLE SHORTCUTS OPENS NEXT',
+        ar: 'نحو ٣ دقائق · سيفتح تطبيق الاختصارات تالياً',
+    },
+    iosPreviewInstall: { en: 'Add Wafra Capture', ar: 'أضف «Wafra Capture»' },
+    iosPreviewInstallBody: {
+        en: 'Paste this iPhone’s private setup code once.',
+        ar: 'ألصق رمز الإعداد الخاص بهذا الآيفون مرة واحدة.',
+    },
+    iosPreviewAutomation: { en: 'Create a Message automation', ar: 'أنشئ أتمتة «رسالة»' },
+    iosPreviewAutomationBody: {
+        en: 'Apple’s sender picker limits exactly which alerts can run.',
+        ar: 'تحدد قائمة مرسلي آبل التنبيهات المسموح بتشغيلها بدقة.',
+    },
+    iosPreviewProof: { en: 'Run one safe test', ar: 'شغّل اختباراً آمناً واحداً' },
+    iosPreviewProofBody: {
+        en: 'A safe probe checks the pipe; the first supported bank message verifies the trigger.',
+        ar: 'يفحص اختبار آمن المسار؛ وتتحقق أول رسالة بنكية مدعومة من المشغّل.',
+    },
+    iosPrivacyNote: {
+        en: 'Apple gives no app access to the Messages inbox. A personal automation passes each new Message to Wafra on this iPhone, where supported bank messages are filtered and processed locally without uploading their text. Protected pending records expire after 30 days and are physically removed on the next capture or queue check.',
+        ar: 'لا تتيح آبل لأي تطبيق الوصول إلى صندوق الرسائل. تمرّر أتمتة شخصية كل رسالة جديدة إلى وفرة على هذا الآيفون، حيث تُرشّح رسائل البنوك المدعومة وتُعالج محلياً من دون رفع نصوصها. تنتهي صلاحية السجلات المعلّقة المحمية بعد ٣٠ يوماً وتُزال فعلياً عند تشغيل الالتقاط أو فحص الصف في المرة التالية.',
+    },
+    iosConnecting: { en: 'Connecting…', ar: 'جارٍ الربط…' },
+    iosConnectCta: { en: 'Connect this iPhone', ar: 'اربط هذا الآيفون' },
+    iosConnectFailed: { en: 'Could not connect.', ar: 'تعذّر الربط.' },
+    iosPushPermissionRequired: {
+        en: 'Silent delivery is disabled in iPhone Settings. Enable Wafra notifications, then try again.',
+        ar: 'التسليم الصامت معطل في إعدادات الآيفون. فعّل إشعارات وفرة ثم أعد المحاولة.',
+    },
+    iosPushSetupFailed: {
+        en: 'Silent capture is not ready in this build. Check the project and push configuration, then try again.',
+        ar: 'الالتقاط الصامت غير جاهز في هذا الإصدار. تحقق من إعدادات المشروع والإشعارات ثم حاول مجدداً.',
+    },
+    iosRelayUnavailable: {
+        en: 'Automatic capture is not configured in this build.',
+        ar: 'الالتقاط التلقائي غير مهيأ في هذا الإصدار.',
+    },
+    iosPrivateModeTitle: {
+        en: 'Turn off Private Mode?',
+        ar: 'إيقاف الوضع الخاص؟',
+    },
+    iosPrivateModeBody: {
+        en: 'iPhone automatic capture needs the relay. Turning Private Mode off allows only bank senders you select to leave this phone; raw text is discarded immediately after parsing.',
+        ar: 'يحتاج الالتقاط التلقائي على الآيفون إلى خادم الترحيل. يسمح إيقاف الوضع الخاص بمغادرة تنبيهات مرسلي البنوك الذين تحددهم فقط؛ ويُتخلص من النص الخام فور تحليله.',
+    },
+    iosTurnOffPrivateMode: {
+        en: 'Turn off & connect',
+        ar: 'أوقفه واتصل',
+    },
+    iosContinueManual: {
+        en: 'Maximum privacy · no Messages access',
+        ar: 'أقصى خصوصية · دون وصول إلى الرسائل',
+    },
+    iosBanksTitle: { en: 'Which banks text you?', ar: 'أي البنوك تراسلك؟' },
+    iosBanksBody: {
+        en: 'Pick the banks that send card or account alerts. In the next step, Shortcuts will ask you to select their existing message conversations as senders.',
+        ar: 'اختر البنوك التي ترسل تنبيهات البطاقات أو الحسابات. في الخطوة التالية سيطلب منك تطبيق الاختصارات تحديد محادثاتها الحالية كمرسلين.',
+    },
+    iosSenderCaveat: {
+        en: 'Sender names vary by carrier, and Apple owns the picker. Choose the existing bank conversation—not a typed guess. If it is missing, add that sender to Contacts first. A real future alert is the only complete trigger test.',
+        ar: 'تختلف أسماء المرسلين حسب شركة الاتصالات، وتتحكم آبل في قائمة الاختيار. اختر محادثة البنك الموجودة، لا اسماً تخمينياً. إن لم تظهر فأضف المرسل إلى جهات الاتصال أولاً. التنبيه الحقيقي التالي هو الاختبار الكامل الوحيد للمشغّل.',
+    },
+    iosBanksSelected: { en: 'SELECTED · {n}', ar: 'المحدد · {n}' },
+    iosBanksNext: { en: 'Next', ar: 'التالي' },
+    iosBanksSkip: { en: 'Skip — I will pick later', ar: 'تخطَّ — سأختار لاحقاً' },
+    iosBankSelected: { en: '{name}, selected', ar: '{name}، محدد' },
+    accountSetBank: { en: 'Set bank', ar: 'تحديد البنك' },
+    accountNoBank: { en: 'No bank', ar: 'بدون بنك' },
+    accountBankQuestion: { en: 'Which bank is this account with?', ar: 'مع أي بنك هذا الحساب؟' },
+    iosShortcutTitle: { en: 'Add Wafra Capture', ar: 'أضف «Wafra Capture»' },
+    iosShortcutBody: {
+        en: 'Open the install page, add Wafra Capture, then run it once. Paste this iPhone’s setup code when asked. Return only after Wafra Capture says it is ready.',
+        ar: 'افتح صفحة التثبيت، وأضف «Wafra Capture»، ثم شغّله مرة. الصق رمز إعداد هذا الآيفون عندما يُطلب منك. لا تعد إلا بعد أن يؤكد «Wafra Capture» أنه جاهز.',
+    },
+    iosShortcutReplaceNote: {
+        en: 'Already installed Wafra Capture? Delete the old Shortcut before adding this version. Keeping both can make Apple run the broken copy.',
+        ar: 'هل ثبّتَّ «Wafra Capture» من قبل؟ احذف الاختصار القديم قبل إضافة هذا الإصدار. وجود النسختين قد يجعل Apple تشغّل النسخة المعطلة.',
+    },
+    iosSetupCode: { en: 'THIS IPHONE’S SETUP CODE', ar: 'رمز إعداد هذا الآيفون' },
+    iosYourAddress: { en: 'YOUR ADDRESS', ar: 'عنوانك' },
+    iosCopy: { en: 'COPY', ar: 'نسخ' },
+    iosCopied: { en: 'COPIED', ar: 'تم النسخ' },
+    iosCopySetupCode: { en: 'Copy the private setup code', ar: 'انسخ رمز الإعداد الخاص' },
+    iosCopyAddress: { en: 'Copy your Wafra address', ar: 'انسخ عنوان وفرة الخاص بك' },
+    iosCopyToken: { en: 'Copy your secret key', ar: 'انسخ مفتاحك السري' },
+    iosRunFor: { en: 'SET THE AUTOMATION TO RUN FOR', ar: 'اضبط الأتمتة لتعمل مع' },
+    iosOpenShortcut: { en: 'Copy code & open latest Shortcut', ar: 'انسخ الرمز وافتح أحدث اختصار' },
+    iosOpenShortcutsApp: { en: 'Open Shortcuts', ar: 'افتح تطبيق الاختصارات' },
+    iosShortcutMissing: {
+        en: 'This build has no published install link. You can still build “Wafra Capture” manually with the address and token below.',
+        ar: 'لا يحتوي هذا الإصدار على رابط تثبيت منشور. ما زال بإمكانك إنشاء «Wafra Capture» يدوياً باستخدام العنوان والرمز أدناه.',
+    },
+    iosInstalledIt: {
+        en: 'I added Wafra Capture',
+        ar: 'أضفت «Wafra Capture»',
+    },
+    iosShortcutsMissing: {
+        en: 'Apple Shortcuts isn’t installed. Install it, then try again.',
+        ar: 'تطبيق «الاختصارات» من Apple غير مثبّت. ثبّته ثم حاول مجدداً.',
+    },
+    iosShortcutsMissingRecovery: {
+        en: 'Install Shortcuts from the App Store, return to Wafra, and try this step again.',
+        ar: 'ثبّت «الاختصارات» من App Store، ثم عد إلى وفرة وأعد محاولة هذه الخطوة.',
+    },
+    iosInstallShortcuts: {
+        en: 'Install Apple Shortcuts',
+        ar: 'ثبّت «الاختصارات» من Apple',
+    },
+    iosAutomationTitle: { en: 'Create a Message automation', ar: 'أنشئ أتمتة «رسالة»' },
+    iosAutomationBody: {
+        en: 'In Shortcuts → Automation, create a Message automation with these five choices:',
+        ar: 'في الاختصارات ← الأتمتة، أنشئ أتمتة «رسالة» بهذه الخيارات الخمسة:',
+    },
+    iosAutomationTrigger: {
+        en: '1. Trigger: Message',
+        ar: '١. المشغّل: رسالة',
+    },
+    iosAutomationSenders: {
+        en: '2. Sender: choose the bank conversations listed below',
+        ar: '٢. المرسل: اختر محادثات البنوك المدرجة أدناه',
+    },
+    iosAutomationImmediate: {
+        en: '3. Choose Run Immediately',
+        ar: '٣. اختر «تشغيل فوراً»',
+    },
+    iosAutomationAction: {
+        en: '4. Action: Run Shortcut → Wafra Capture',
+        ar: '٤. الإجراء: تشغيل اختصار ← Wafra Capture',
+    },
+    iosAutomationInput: {
+        en: '5. Input: Received Message (not only Content)',
+        ar: '٥. الإدخال: «الرسالة المستلمة» (وليس «المحتوى» فقط)',
+    },
+    iosAutomationReady: {
+        en: 'I chose Run Immediately',
+        ar: 'اخترت «تشغيل فوراً»',
+    },
+    iosTestTitle: { en: 'Run a safe test', ar: 'شغّل اختباراً آمناً' },
+    iosTestBody: {
+        en: 'Wafra Capture sends a harmless probe through the private pipe. The first time, tap Allow when Apple asks for network access. It does not add a transaction.',
+        ar: 'يرسل «Wafra Capture» اختباراً آمناً عبر المسار الخاص. في المرة الأولى، اضغط «سماح» عندما تطلب Apple الوصول إلى الشبكة. ولا يضيف أي عملية.',
+    },
+    iosTestLimit: {
+        en: 'The Shortcut and private sync work. Create the Message automation next. The first supported bank message is the final check: it should appear under the correct bank or card.',
+        ar: 'يعمل الاختصار والمزامنة الخاصة. أنشئ أتمتة «الرسالة» تالياً. الرسالة البنكية المدعومة الأولى هي الاختبار الأخير: يجب أن تظهر تحت البنك أو البطاقة الصحيحة.',
+    },
+    iosCaught: {
+        en: 'Captured and filed through the same path future alerts use.',
+        ar: 'التُقطت وسُجّلت عبر المسار نفسه الذي ستستخدمه التنبيهات لاحقاً.',
+    },
+    iosTestCaught: {
+        en: 'The Shortcut, relay, and encrypted sync are verified. Automatic capture is not verified yet; create the Message automation next.',
+        ar: 'تم التحقق من الاختصار والترحيل والمزامنة المشفّرة. لم يتم التحقق من الالتقاط التلقائي بعد؛ أنشئ أتمتة «الرسالة» تالياً.',
+    },
+    iosListening: { en: 'Waiting for the Shortcut…', ar: 'في انتظار الاختصار…' },
+    iosWaitingLabel: {
+        en: 'Waiting for the Wafra Capture Shortcut',
+        ar: 'في انتظار اختصار Wafra Capture',
+    },
+    iosTimedOut: {
+        en: 'The Shortcut did not finish. If Shortcuts showed “Invalid file path,” delete the old Wafra Capture and install the latest version below. Otherwise, open the Shortcut once and allow network access, then try again.',
+        ar: 'لم يكتمل تشغيل الاختصار. إذا عرض تطبيق الاختصارات «مسار ملف غير صالح»، فاحذف نسخة Wafra Capture القديمة وثبّت أحدث إصدار أدناه. وإلا فافتح الاختصار مرة واحدة واسمح له بالوصول إلى الشبكة ثم حاول مجدداً.',
+    },
+    iosTryAgain: { en: 'Try again', ar: 'حاول مرة أخرى' },
+    iosStartListening: { en: 'Run capture test', ar: 'شغّل اختبار الالتقاط' },
+    iosDone: { en: 'Done', ar: 'تم' },
+    iosSkipForNow: {
+        en: 'Finish for now — manual tracking still works',
+        ar: 'إنهاء الآن — يظل التسجيل اليدوي متاحاً',
+    },
+    iosDisconnect: { en: 'Disconnect this iPhone', ar: 'افصل هذا الآيفون' },
+    iosDisconnecting: { en: 'Disconnecting…', ar: 'جارٍ الفصل…' },
+    iosDisconnectFailed: {
+        en: 'Could not disconnect. Stay online and try again so the relay copy can be erased.',
+        ar: 'تعذّر الفصل. ابقَ متصلاً وحاول مجدداً حتى يمكن مسح نسخة الترحيل.',
+    },
+    iosAlreadyWorkingTitle: { en: 'Automatic capture is verified', ar: 'تم التحقق من الالتقاط التلقائي' },
+    iosAlreadyWorkingBody: {
+        en: 'Wafra received a supported bank message through the Message automation. New matching alerts are captured automatically and filed when Wafra next runs.',
+        ar: 'استلمت وفرة تنبيهاً بنكياً مدعوماً عبر أتمتة «الرسالة». تُلتقط التنبيهات المطابقة تلقائياً وتُسجّل عند تشغيل وفرة لاحقاً.',
+    },
+    iosAutomationWaitingTitle: {
+        en: 'Private pipe verified',
+        ar: 'تم التحقق من المسار الخاص',
+    },
+    iosAutomationWaitingBody: {
+        en: 'Wafra cannot create or inspect Apple’s automation. The next supported bank message will prove that its Message trigger ran. Until then, automatic capture is not verified.',
+        ar: 'لا يمكن لوفرة إنشاء أتمتة Apple أو فحصها. ستثبت الرسالة البنكية المدعومة التالية أن مشغّل «الرسالة» عمل. وحتى ذلك لم يتم التحقق من الالتقاط التلقائي.',
+    },
+    iosContinueToAutomation: {
+        en: 'Create Message automation',
+        ar: 'أنشئ أتمتة الرسائل',
+    },
+    iosRunTestAgain: { en: 'Run the test again', ar: 'أعد تشغيل الاختبار' },
+    iosBackToShortcut: { en: 'Back to the setup code', ar: 'العودة إلى رمز الإعداد' },
+    iosBackToTest: { en: 'Back to the safe test', ar: 'العودة إلى الاختبار الآمن' },
+    iosBackToAutomation: { en: 'Back to the automation steps', ar: 'العودة إلى خطوات الأتمتة' },
+    iosReinstallShortcut: { en: 'Reinstall the Shortcut', ar: 'أعد تثبيت الاختصار' },
+    iosAutomationReadyTest: { en: 'I created the Message automation', ar: 'أنشأت أتمتة «الرسالة»' },
+    iosShortcutInstallFailed: {
+        en: 'Could not open the install page. Check your connection and try again.',
+        ar: 'تعذّر فتح صفحة التثبيت. تحقق من اتصالك ثم حاول مجدداً.',
+    },
+    iosShortcutsOpenFailed: {
+        en: 'Could not open Shortcuts. If it was removed from this iPhone, reinstall it from the App Store, then try again.',
+        ar: 'تعذّر فتح تطبيق الاختصارات. إن كان محذوفاً من هذا الآيفون فأعد تثبيته من App Store ثم حاول مجدداً.',
+    },
+    iosShortcutRunFailed: {
+        en: 'Could not run Wafra Capture. Check that the Shortcut is installed and still named “Wafra Capture”, then try again.',
+        ar: 'تعذّر تشغيل Wafra Capture. تأكد من تثبيت الاختصار ومن بقاء اسمه «Wafra Capture» ثم حاول مجدداً.',
+    },
+    yes: { en: 'Yes', ar: 'نعم' },
+    no: { en: 'No', ar: 'لا' },
+    show: { en: 'Show', ar: 'إظهار' },
+    hide: { en: 'Hide', ar: 'إخفاء' },
+    remember: { en: 'Remember', ar: 'تذكّر' },
+    justFuture: { en: 'Just future', ar: 'العمليات القادمة فقط' },
+    yesUpdateAll: { en: 'Yes, update all', ar: 'نعم، حدّث الكل' },
+    category: { en: 'Category', ar: 'التصنيف' },
+    account: { en: 'Account', ar: 'الحساب' },
+    source: { en: 'Source', ar: 'المصدر' },
+    unassigned: { en: 'Unassigned', ar: 'غير معيّن' },
+    date: { en: 'Date', ar: 'التاريخ' },
+    description: { en: 'Description', ar: 'الوصف' },
+    when: { en: 'When', ar: 'متى' },
+    editEntry: { en: 'Edit transaction', ar: 'تعديل العملية' },
+    entryDetail: { en: 'Transaction details', ar: 'تفاصيل العملية' },
+    saveChanges: { en: 'Save changes', ar: 'حفظ التغييرات' },
+    filedOn: { en: 'filed {date}', ar: 'سُجّلت في {date}' },
+    transfersNoCategory: {
+        en: 'Transfers have no category — this moves money between your own accounts rather than spending it.',
+        ar: 'لا تصنيف للتحويلات — فهي تنقل المال بين حساباتك بدلاً من إنفاقه.',
+    },
+    merchantCategoryRule: {
+        en: 'This merchant is always {category} — change it once and the other {count} {merchant} charge{s} follow.',
+        ar: 'يُصنّف هذا المتجر دائماً ضمن {category} — غيّره مرة واحدة وستتبع ذلك {count} من عمليات {merchant} الأخرى.',
+    },
+    newTransaction: { en: 'New transaction', ar: 'عملية جديدة' },
+    saveTransaction: { en: 'Save transaction', ar: 'حفظ العملية' },
+    amountInDirhams: { en: 'Amount', ar: 'المبلغ' },
+    amountInLedgerCurrency: { en: 'Amount in your ledger currency', ar: 'المبلغ بعملة سجلك' },
+    descriptionOptional: { en: 'Description (optional)', ar: 'الوصف (اختياري)' },
+    descriptionOptionalA11y: { en: 'Description, optional', ar: 'الوصف، اختياري' },
+    twoDaysAgo: { en: '2 days ago', ar: 'قبل يومين' },
+    threeDaysAgo: { en: '3 days ago', ar: 'قبل ٣ أيام' },
+    expenseExample: { en: 'e.g. Carrefour weekly shop', ar: 'مثال: مشتريات كارفور الأسبوعية' },
+    incomeExample: { en: 'e.g. July salary', ar: 'مثال: راتب يوليو' },
+    reportingPeriodTitle: { en: 'Reporting period', ar: 'فترة التقرير' },
+    periodPreviousYear: { en: 'Previous year, {year}', ar: 'السنة السابقة، {year}' },
+    periodNextYear: { en: 'Next year, {year}', ar: 'السنة التالية، {year}' },
+    lastSevenDays: { en: 'Last 7 days', ar: 'آخر ٧ أيام' },
+    lastThirtyDays: { en: 'Last 30 days', ar: 'آخر ٣٠ يوماً' },
+    lastNinetyDays: { en: 'Last 90 days', ar: 'آخر ٩٠ يوماً' },
+    thisYear: { en: 'This year', ar: 'هذا العام' },
+    allTimeTitle: { en: 'All time', ar: 'كل الفترات' },
+    customRange: { en: 'Custom range', ar: 'نطاق مخصص' },
+    fromDate: { en: 'From date', ar: 'تاريخ البداية' },
+    toDate: { en: 'To date', ar: 'تاريخ النهاية' },
+    fromDatePlaceholder: { en: 'YYYY-MM-DD', ar: 'YYYY-MM-DD' },
+    toDatePlaceholder: { en: 'YYYY-MM-DD', ar: 'YYYY-MM-DD' },
+    applyRange: { en: 'Apply range', ar: 'تطبيق النطاق' },
+    unlockWafra: { en: 'Unlock Wafra', ar: 'فتح وفرة' },
+    phoneHasNoLock: { en: 'This phone has no screen lock', ar: 'لا يوجد قفل شاشة لهذا الهاتف' },
+    setPhoneLockBody: {
+        en: 'Set up a fingerprint, face unlock, or a PIN and Wafra can use it.',
+        ar: 'أعدّ بصمة أو تعرّفاً على الوجه أو رمز PIN ليتمكن وفرة من استخدامه.',
+    },
+    newLimitTitle: { en: 'New limit', ar: 'حد جديد' },
+    categoryLimit: { en: '{category} limit', ar: 'حد {category}' },
+    spentThisMonth: { en: 'Spent this month', ar: 'المصروف هذا الشهر' },
+    monthlyLimit: { en: 'Monthly limit', ar: 'الحد الشهري' },
+    limitOverBy: { en: 'Over by {amount}', ar: 'تجاوزت بمقدار {amount}' },
+    limitAmountLeft: { en: '{amount} left', ar: 'متبقي {amount}' },
+    timeStillToGo: {
+        en: ' with {days} day{s} still to go.',
+        ar: ' مع بقاء {days} يوم.',
+    },
+    threeMonthAverageNote: { en: 'your 3-month average', ar: 'متوسطك لثلاثة أشهر' },
+    tenPercentUnderMonth: { en: '10% under this month', ar: 'أقل ١٠٪ من هذا الشهر' },
+    moreMerchants: { en: '{count} more merchant{s}', ar: '{count} متجر إضافي' },
+    saveLimit: { en: 'Save limit', ar: 'حفظ الحد' },
+    hideCard: { en: 'Hide card', ar: 'إخفاء البطاقة' },
+    deleteCardTitle: { en: 'Delete card?', ar: 'حذف البطاقة؟' },
+    deleteCardBody: {
+        en: '“{name}” and all its entries will be removed.',
+        ar: 'ستُحذف «{name}» وجميع عملياتها.',
+    },
+    cardOpenHistoryA11y: {
+        en: '{name}, open statements and payments',
+        ar: '{name}، افتح الكشوف والدفعات',
+    },
+    dueOn: { en: 'due {date}', ar: 'مستحق {date}' },
+    outstandingTitle: { en: 'Outstanding', ar: 'المستحق' },
+    creditLeft: { en: '{amount} left', ar: 'متاح {amount}' },
+    setLimit: { en: 'Set limit', ar: 'تحديد الحد' },
+    noCardsYet: {
+        en: 'No cards yet. One appears here as soon as a bank message names a card number.',
+        ar: 'لا توجد بطاقات بعد. ستظهر هنا بطاقة فور أن تذكر رسالة البنك رقم بطاقة.',
+    },
+    creditLimitTitle: { en: 'Credit limit', ar: 'حد الائتمان' },
+    creditLimitBody: {
+        en: 'Set the credit limit for {name}.',
+        ar: 'حدّد الحد الائتماني لـ {name}.',
+    },
+    recurringMonthlyEstimate: { en: 'Monthly estimate', ar: 'تقدير شهري' },
+    recurringEstimatedCharge: { en: 'Estimated charge', ar: 'مبلغ متوقع' },
+    recurringLastCharge: { en: 'Last charge', ar: 'آخر خصم' },
+    homeUpcomingPayments: { en: 'Upcoming payments', ar: 'الدفعات القادمة' },
+    homeDuePayments: { en: 'Due & overdue', ar: 'المستحق والمتأخر' },
+    importOneMoment: { en: 'One moment', ar: 'لحظة واحدة' },
+    inboxAlreadyFiled: { en: 'No new supported transactions.', ar: 'لا توجد معاملات جديدة مدعومة.' },
+    importProgress: { en: 'Progress', ar: 'التقدم' },
+    importProgressCounts: { en: '{read} read · {matched} matched', ar: 'قُرئت {read} · طابقت {matched}' },
+    importProgressPrivacy: {
+        en: 'Reading backwards on this phone. Unsupported and private messages are discarded before storage; nothing is uploaded.',
+        ar: 'تجري القراءة عكسياً على هذا الهاتف. يُتخلص من الرسائل غير المدعومة والخاصة قبل الحفظ، ولا يُرفع أي نص.',
+    },
+    pasteBankMessagesA11y: { en: 'Paste bank messages', ar: 'ألصق رسائل البنك' },
+    bankMessageExample: {
+        en: 'Purchase of AED 187.50 with Debit Card ending 1234 at CARREFOUR…',
+        ar: 'شراء بقيمة 187.50 AED ببطاقة خصم تنتهي بـ 1234 لدى CARREFOUR…',
+    },
+    alreadyFiledSkipped: { en: 'already filed · skipped', ar: 'مسجّلة سابقاً · تم تخطيها' },
+    improvedExistingEntries: {
+        en: '{count} existing entr{ending} re-read better — renamed or recategorised in place.',
+        ar: 'أُعيدت قراءة {count} من العمليات الحالية بدقة أفضل — وعُدّل الاسم أو التصنيف مباشرة.',
+    },
+    unknownMessageFormats: {
+        en: '{count} message{s} in a format we do not know',
+        ar: '{count} رسالة بصيغة لا نعرفها',
+    },
+    shareMaskedFormatsHint: {
+        en: 'Send the shapes — digits masked — and they parse next release',
+        ar: 'أرسل الصيغ — مع إخفاء الأرقام — لتصبح قابلة للتحليل في الإصدار القادم',
+    },
+    smsPermissionNeeded: { en: 'Permission needed', ar: 'الإذن مطلوب' },
+    smsPermissionNeededBody: {
+        en: 'SMS access is optional and used only for on-device bank-message import. Anything that is not supported financial activity is discarded before storage. You can keep access off and paste messages manually below.',
+        ar: 'إذن الرسائل اختياري ويُستخدم فقط لاستيراد رسائل البنك على الجهاز. يُتخلص من أي محتوى لا يمثل نشاطاً مالياً مدعوماً قبل الحفظ. يمكنك إبقاء الإذن مغلقاً ولصق الرسائل يدوياً أدناه.',
+    },
+    matchedLabel: { en: 'Matched', ar: 'مطابقة' },
+    unreadLabel: { en: 'Unread', ar: 'غير مقروءة' },
+    newCard: { en: 'New card', ar: 'بطاقة جديدة' },
+    tracked: { en: 'Tracked', ar: 'قيد المتابعة' },
+    track: { en: 'Track', ar: 'متابعة' },
+    dueDay: { en: 'due day {day}', ar: 'مستحق يوم {day}' },
+    justFiled: { en: 'Just filed', ar: 'سُجّلت الآن' },
+    justFiledFirst: { en: 'Just filed · first {shown} of {total}', ar: 'سُجّلت الآن · أول {shown} من {total}' },
+    fileEntries: { en: 'File {count} entr{ending}', ar: 'تسجيل {count} عملية' },
+    fileCardDues: { en: 'File {count} card due{s}', ar: 'تسجيل {count} مستحق بطاقة' },
+    fixEntries: { en: 'Fix {count} entr{ending}', ar: 'تصحيح {count} عملية' },
+    noEntriesInMonth: { en: 'No entries in {month} yet', ar: 'لا عمليات في {month} بعد' },
+    emptyMonthHelp: { en: 'Add an entry or check bank messages.', ar: 'أضف عملية أو تحقّق من رسائل البنك.' },
+    readInbox: { en: 'Read inbox', ar: 'قراءة الرسائل' },
+    checkBankAlerts: { en: 'Check alerts', ar: 'تحقق من التنبيهات' },
+    emptyMonthCaptureHelp: { en: 'Add your first entry.', ar: 'أضف عمليتك الأولى.' },
+    addManually: { en: 'Add manually', ar: 'إضافة يدوية' },
+    smsAccessOff: { en: 'SMS access is off, so nothing can import', ar: 'إذن الرسائل متوقف، لذا لا يمكن استيراد شيء' },
+    smsPermissionPath: {
+        en: 'Turn it back on at Settings → Apps → Wafra → Permissions → SMS.',
+        ar: 'أعد تفعيله من الإعدادات ← التطبيقات ← وفرة ← الأذونات ← الرسائل.',
+    },
+    keepManual: { en: 'Keep manual', ar: 'المتابعة يدوياً' },
+    noSpendingComposition: { en: 'No spending composition data', ar: 'لا توجد بيانات لتوزيع المصروفات' },
+    compositionPercent: { en: '{label}, {percent} percent', ar: '{label}، {percent} بالمئة' },
+    monthCashflowA11y: {
+        en: '{month}, income {income}, spending {spending}',
+        ar: '{month}، الدخل {income}، المصروف {spending}',
+    },
+    monthCashflowNoDataA11y: {
+        en: '{month}, no activity recorded',
+        ar: '{month}، لا توجد عمليات مسجلة',
+    },
+    accountKindBank: { en: 'Bank', ar: 'حساب بنكي' },
+    accountKindCard: { en: 'Card', ar: 'بطاقة' },
+    accountKindCash: { en: 'Cash', ar: 'نقد' },
+    justNow: { en: 'just now', ar: 'الآن' },
+    minutesAgo: { en: '{count}m ago', ar: 'قبل {count} د' },
+    hoursAgo: { en: '{count}h ago', ar: 'قبل {count} س' },
+    differentCard: { en: 'Different card', ar: 'بطاقة مختلفة' },
+    sameCardRenewed: { en: 'Same physical card?', ar: 'هل هذه البطاقة نفسها؟' },
+    renewedCardBody: {
+        en: 'Move entries from {old} to {next}. Link only when both rows are the same physical card.',
+        ar: 'انقل العمليات من {old} إلى {next}. اربطهما فقط إذا كان السطران للبطاقة الفعلية نفسها.',
+    },
+    longPressInactive: { en: 'Long-press to unhide or delete', ar: 'اضغط مطولاً للإظهار أو الحذف' },
+    setSavingsGoal: { en: 'Set a savings goal', ar: 'ضع هدفاً للادخار' },
+    savingsGoalHint: {
+        en: 'Umrah, a car, a rainy-day fund — track it here.',
+        ar: 'عمرة أو سيارة أو صندوق للطوارئ — تابع هدفك هنا.',
+    },
+    newAccount: { en: 'New account', ar: 'حساب جديد' },
+    accountNameLabel: { en: 'Account name', ar: 'اسم الحساب' },
+    accountColorLabel: { en: 'Account color', ar: 'لون الحساب' },
+    accountNamePlaceholder: { en: 'Account name (e.g. ADCB Savings)', ar: 'اسم الحساب (مثال: حساب ادخار ADCB)' },
+    openingBalanceOptional: { en: 'Opening balance (optional)', ar: 'الرصيد الافتتاحي (اختياري)' },
+    addAccount: { en: 'Add account', ar: 'إضافة حساب' },
+    newGoalTitle: { en: 'New goal', ar: 'هدف جديد' },
+    goalNameLabel: { en: 'Goal name', ar: 'اسم الهدف' },
+    goalIconLabel: { en: 'Goal icon', ar: 'رمز الهدف' },
+    goalPlaceholder: { en: 'Goal (e.g. Umrah trip, new car)', ar: 'الهدف (مثال: رحلة عمرة أو سيارة جديدة)' },
+    targetAmount: { en: 'Target amount', ar: 'المبلغ المستهدف' },
+    createGoal: { en: 'Create goal', ar: 'إنشاء الهدف' },
+    deleteGoalTitle: { en: 'Delete goal?', ar: 'حذف الهدف؟' },
+    walletSince: { en: 'since {date}', ar: 'منذ {date}' },
+    addToGoal: { en: 'Add to {goal}', ar: 'أضف إلى {goal}' },
+    amountInAed: { en: 'Amount', ar: 'المبلغ' },
+    removeAccountTitle: { en: 'Remove account?', ar: 'إزالة الحساب؟' },
+    removeAccountBody: {
+        en: '“{name}” and all its transactions will be deleted. This cannot be undone.',
+        ar: 'سيُحذف «{name}» وجميع عملياته. لا يمكن التراجع عن ذلك.',
+    },
+    payAccountTitle: { en: 'Pay {name}?', ar: 'سداد {name}؟' },
+    payAccountBody: {
+        en: 'Marks {amount} as paid and records the transfer.',
+        ar: 'يسجّل {amount} كمدفوع ويسجّل التحويل.',
+    },
+    payByWithDays: { en: 'Pay by {date} · {days}d left', ar: 'السداد قبل {date} · متبقي {days} يوم' },
+    minimumAmountShort: { en: 'min {amount}', ar: 'الحد الأدنى {amount}' },
+    markAccountPaidA11y: { en: 'Mark {name} as paid', ar: 'علّم {name} كمدفوع' },
+    totalSuffix: { en: '{amount} total', ar: 'الإجمالي {amount}' },
+    renewedCardDetected: {
+        en: 'Card •{last4} has a statement but its spending is under {name}. Link only if they are the same card; then payments can settle the right bill.',
+        ar: 'للبطاقة •{last4} كشف حساب، لكن مصروفاتها ظهرت تحت {name}. اربطهما فقط إذا كانتا البطاقة نفسها؛ عندها تسوّي الدفعات الفاتورة الصحيحة.',
+    },
+    linkCardsA11y: { en: 'Link {old} to {next}', ar: 'اربط {old} بـ {next}' },
+    sameAsCard: { en: 'Yes · same as •{last4}', ar: 'نعم · نفسها •{last4}' },
+    keepCardSeparateA11y: { en: 'Keep {last4} separate', ar: 'أبقِ {last4} منفصلة' },
+    daysAgo: { en: '{count} days ago', ar: 'قبل {count} يوم' },
+    inboxScannedAgo: { en: 'Inbox scanned {time}', ar: 'فُحصت الرسائل {time}' },
+    entriesReadLocally: {
+        en: '{count} entr{ending} read on this device · nothing uploaded',
+        ar: 'قُرئت {count} عملية على هذا الجهاز · لم يُرفع شيء',
+    },
+    moreItems: { en: '{count} more', ar: '{count} أخرى' },
+    unreadMessageCount: { en: '{count} message{s} we could not read', ar: '{count} رسالة تعذّرت قراءتها' },
+    unreadMessageHint: {
+        en: 'Send them over and they get recognised next release. Digits are masked.',
+        ar: 'أرسلها لتصبح معروفة في الإصدار القادم. الأرقام مخفية.',
+    },
+    seeBreakdown: { en: 'See the breakdown', ar: 'عرض التفاصيل' },
+    dismiss: { en: 'Dismiss', ar: 'تجاهل' },
+    seeUpcomingPaymentsA11y: {
+        en: 'See all {count} upcoming payments',
+        ar: 'عرض جميع الدفعات القادمة وعددها {count}',
+    },
+    reportUnreadFormatsA11y: {
+        en: 'Report {count} unrecognised bank message formats',
+        ar: 'الإبلاغ عن {count} من صيغ الرسائل البنكية غير المعروفة',
+    },
+    unreadFormatCount: {
+        en: '{count} message format{s} we could not read',
+        ar: '{count} من صيغ الرسائل التي تعذّرت قراءتها',
+    },
+    importedTransactions: {
+        en: 'Imported {count} transaction{s}{bills}{cards}',
+        ar: 'تم استيراد {count} عملية{bills}{cards}',
+    },
+    importedBills: { en: ' · {count} bill reminder{s}', ar: ' · {count} تذكير فواتير' },
+    importedNewCards: { en: ' · {count} new card{s}', ar: ' · {count} بطاقة جديدة' },
+    undo: { en: 'Undo', ar: 'تراجع' },
+    allActivity: { en: 'All activity', ar: 'كل العمليات' },
+    seenCount: { en: 'seen {count}×', ar: 'ظهرت {count}×' },
+    shareCardDiagnostic: { en: 'Share card diagnostic', ar: 'مشاركة تشخيص البطاقات' },
+    shareCardDiagnosticHint: {
+        en: 'Cards, statements, and every row filed against a card — with what each was counted as.',
+        ar: 'البطاقات وكشوفها وكل عملية مرتبطة ببطاقة، مع كيفية احتسابها.',
+    },
+    accuracyShareTitle: {
+        en: 'Wafra — bank SMS the app is not reading well:',
+        ar: 'وفرة — رسائل بنكية لا يقرأها التطبيق جيداً:',
+    },
+    accuracyShareUnread: { en: 'COULD NOT READ — no merchant found', ar: 'تعذّرت القراءة — لم يُعثر على متجر' },
+    accuracyShareRow: {
+        en: '#{index} (seen {count}x, read as “{title}” / {category}):\n{raw}',
+        ar: '#{index} (ظهرت {count}x، قُرئت كـ «{title}» / {category}):\n{raw}',
+    },
+    sendFeedback: { en: 'Send feedback', ar: 'إرسال ملاحظة' },
+    sendFeedbackDetail: {
+        en: 'Send a note or improve the bank parser',
+        ar: 'أرسل ملاحظة أو ساعد في تحسين محلّل البنك',
+    },
+    parserResearchSettingsTitle: {
+        en: 'Send parser samples',
+        ar: 'إرسال عينات للمحلّل',
+    },
+    parserResearchSettingsDetail: {
+        en: 'Tester tool · redacted templates only',
+        ar: 'أداة اختبار · قوالب منقّحة فقط',
+    },
+    parserResearchTitle: { en: 'Parser samples', ar: 'عينات المحلّل' },
+    parserResearchUnavailable: {
+        en: 'This tester tool is not included in this build.',
+        ar: 'أداة الاختبار هذه غير مضمّنة في هذه النسخة.',
+    },
+    parserResearchAndroidIntro: {
+        en: 'Wafra checks the full Android inbox in memory, keeps likely financial alerts, and prepares redacted templates for messages it parsed and messages it could not parse.',
+        ar: 'يفحص وفرة صندوق رسائل أندرويد كاملاً في الذاكرة، ويحتفظ بالتنبيهات المالية المحتملة، ثم يجهّز قوالب منقّحة للرسائل التي حلّلها والتي تعذّر عليه تحليلها.',
+    },
+    parserResearchIosIntro: {
+        en: 'iPhone does not let Wafra read Messages. Copy bank messages with Apple Shortcuts, paste them here, then Wafra will filter and redact them on this phone.',
+        ar: 'لا يسمح الآيفون لوفرة بقراءة الرسائل. انسخ رسائل البنك عبر اختصارات Apple والصقها هنا، ثم يرشّحها وفرة وينقّحها على هذا الهاتف.',
+    },
+    parserResearchPasteIntro: {
+        en: 'This tester build cannot scan the inbox automatically. Paste bank messages here, then Wafra will filter and redact them on this device.',
+        ar: 'لا تستطيع نسخة الاختبار هذه فحص صندوق الرسائل تلقائياً. ألصق رسائل البنك هنا، ثم يرشّحها وفرة وينقّحها على هذا الجهاز.',
+    },
+    parserResearchPrivacy: {
+        en: 'Raw messages never upload. Every digit and timestamp is removed. Recipient and merchant spans, plus every word outside a strict financial grammar, become [text]. Only the redacted report can be copied or exported.',
+        ar: 'لا تُرفع الرسائل الخام. تُحذف كل الأرقام والتوقيتات، وتُستبدل مواضع المستفيدين والمتاجر وكل كلمة خارج قواعد مالية محدودة بـ [text]. ولا يمكن نسخ أو تصدير سوى التقرير المنقّح.',
+    },
+    parserResearchPasteHeader: { en: 'PASTE BANK MESSAGES', ar: 'ألصق رسائل البنك' },
+    parserResearchPasteHelp: {
+        en: 'Put a blank line between messages. You may add “From: ADIB” as the first line of a message; unknown senders become aliases.',
+        ar: 'ضع سطراً فارغاً بين الرسائل. يمكنك إضافة «From: ADIB» في أول سطر؛ ويستبدل وفرة المرسلين غير المعروفين بأسماء مستعارة.',
+    },
+    parserResearchPasteA11y: { en: 'Paste bank messages', ar: 'ألصق رسائل البنك' },
+    parserResearchPastePlaceholder: {
+        en: 'From: YOUR BANK\nYour card purchase alert…\n\nFrom: YOUR BANK\nYour transfer alert…',
+        ar: 'From: YOUR BANK\nرسالة شراء بالبطاقة…\n\nFrom: YOUR BANK\nرسالة تحويل…',
+    },
+    parserResearchPrivateBlocked: {
+        en: 'Private Mode is local-only. Turn it off before preparing or exporting parser samples.',
+        ar: 'الوضع الخاص محلي فقط. أوقفه قبل تجهيز عينات المحلّل أو تصديرها.',
+    },
+    parserResearchPasteRequiredTitle: { en: 'Paste an alert first', ar: 'ألصق تنبيهاً أولاً' },
+    parserResearchPasteRequired: {
+        en: 'Paste at least one bank message above, then prepare the safe report.',
+        ar: 'ألصق تنبيهاً بنكياً واحداً على الأقل أعلاه، ثم جهّز التقرير الآمن.',
+    },
+    parserResearchPrepareInbox: { en: 'Prepare safe inbox report', ar: 'تجهيز تقرير آمن من الرسائل' },
+    parserResearchPreparePaste: { en: 'Prepare safe report', ar: 'تجهيز تقرير آمن' },
+    parserResearchReading: { en: 'Reading {count} messages…', ar: 'جارٍ قراءة {count} رسالة…' },
+    parserResearchPreparing: {
+        en: 'Checking {count} of {total} messages…',
+        ar: 'جارٍ فحص {count} من {total} رسالة…',
+    },
+    parserResearchFinalizing: {
+        en: 'Finalizing safe report…',
+        ar: 'جارٍ إنهاء التقرير الآمن…',
+    },
+    parserResearchPreviewNote: {
+        en: 'The exact local JSON report is shown below in pages. Wafra uploads nothing. Copy it into Codex, or save the file and attach it yourself.',
+        ar: 'يظهر تقرير JSON المحلي نفسه أدناه على صفحات. لا يرفع وفرة شيئاً. انسخه إلى Codex، أو احفظ الملف وأرفقه بنفسك.',
+    },
+    parserResearchReadySummary: {
+        en: 'Checked {checked} inbox messages · {unparsed} unparsed formats · {parsed} parsed formats with assigned categories.',
+        ar: 'تم فحص {checked} رسالة · {unparsed} قوالب غير محلّلة · {parsed} قوالب محلّلة مع التصنيفات المعيّنة.',
+    },
+    parserResearchPreviewPrevious: { en: 'Previous', ar: 'السابق' },
+    parserResearchPreviewNext: { en: 'Next', ar: 'التالي' },
+    parserResearchPreviewPage: {
+        en: 'Page {current} of {total}',
+        ar: 'الصفحة {current} من {total}',
+    },
+    parserResearchCopy: { en: 'Copy AI report', ar: 'نسخ تقرير الذكاء الاصطناعي' },
+    parserResearchCopying: { en: 'Copying safe report…', ar: 'جارٍ نسخ التقرير الآمن…' },
+    parserResearchCopiedTitle: { en: 'Safe report copied', ar: 'تم نسخ التقرير الآمن' },
+    parserResearchCopiedBody: {
+        en: 'Paste it into a Codex task for parser review. No raw messages were copied or uploaded.',
+        ar: 'ألصقه في مهمة Codex لمراجعة المحلّل. لم تُنسخ أو تُرفع أي رسائل خام.',
+    },
+    parserResearchCopyFailedTitle: { en: 'Could not copy the report', ar: 'تعذّر نسخ التقرير' },
+    parserResearchCopyFailedBody: {
+        en: 'Nothing was uploaded. Save the JSON file instead, then attach it to Codex.',
+        ar: 'لم يُرفع شيء. احفظ ملف JSON بدلاً من ذلك، ثم أرفقه في Codex.',
+    },
+    parserResearchCopyTooLargeTitle: { en: 'Report is too large to copy', ar: 'التقرير كبير جداً للنسخ' },
+    parserResearchCopyTooLargeBody: {
+        en: 'Use Export safe report instead. It saves the complete JSON without sending a large clipboard payload to Android.',
+        ar: 'استخدم «تصدير التقرير الآمن» بدلاً من ذلك. فهو يحفظ ملف JSON كاملاً دون إرسال نص كبير إلى حافظة أندرويد.',
+    },
+    parserResearchExport: { en: 'Export safe report', ar: 'تصدير التقرير الآمن' },
+    parserResearchExporting: { en: 'Opening share sheet…', ar: 'جارٍ فتح قائمة المشاركة…' },
+    parserResearchExportHelp: {
+        en: 'Save the JSON file, then attach it to Codex manually. Wafra does not choose or contact a recipient.',
+        ar: 'احفظ ملف JSON ثم أرفقه يدوياً في Codex. لا يختار وفرة مستلماً ولا يتواصل مع أي جهة.',
+    },
+    parserResearchExportFailedTitle: { en: 'Could not export the file', ar: 'تعذّر تصدير الملف' },
+    parserResearchExportFailedBody: {
+        en: 'Nothing was uploaded. Try again, or check that this device can save and share files.',
+        ar: 'لم يُرفع شيء. حاول مرة أخرى، أو تحقق من أن هذا الجهاز يستطيع حفظ الملفات ومشاركتها.',
+    },
+    parserResearchNoneTitle: { en: 'No safe samples found', ar: 'لم تُوجد عينات آمنة' },
+    parserResearchNoneBody: {
+        en: 'Wafra excluded OTPs, security messages and anything that did not look like posted financial activity. Nothing was prepared or uploaded.',
+        ar: 'استبعد وفرة رموز التحقق ورسائل الأمان وكل ما لم يبدُ نشاطاً مالياً منفذاً. لم يُجهّز أو يُرفع شيء.',
+    },
+    parserResearchFailedTitle: { en: 'Could not prepare samples', ar: 'تعذّر تجهيز العينات' },
+    parserResearchFailedBody: {
+        en: 'Nothing was uploaded. Keep Wafra open and try again.',
+        ar: 'لم يُرفع شيء. أبقِ وفرة مفتوحاً وحاول مرة أخرى.',
+    },
+    supportHeader: { en: 'Support & feedback', ar: 'الدعم والملاحظات' },
+    settingsStatusHeader: { en: 'Current state', ar: 'الحالة الحالية' },
+    settingsMoneyHeader: { en: 'Money', ar: 'المال' },
+    settingsImportsHeader: { en: 'Capture', ar: 'الالتقاط' },
+    settingsNotificationsHeader: { en: 'Notifications', ar: 'الإشعارات' },
+    insightsTitle: { en: 'Insight', ar: 'معلومة' },
+    homeWidgetAssistantTitle: { en: 'Ask Wafra', ar: 'اسأل وفرة' },
+    homeWidgetAssistantDetail: { en: 'Questions and quick financial analysis.', ar: 'أسئلة وتحليل مالي سريع.' },
+    homeWidgetInsightTitle: { en: 'Insight', ar: 'معلومة' },
+    homeWidgetInsightDetail: { en: 'One useful observation from your current period.', ar: 'ملاحظة مفيدة واحدة عن فترتك الحالية.' },
+    homeWidgetDueTitle: { en: 'Due payments', ar: 'الدفعات المستحقة' },
+    homeWidgetDueDetail: { en: 'Bills and card payments that need attention.', ar: 'الفواتير ودفعات البطاقات التي تحتاج انتباهك.' },
+    homeWidgetActivityTitle: { en: 'Recent activity', ar: 'أحدث العمليات' },
+    homeWidgetActivityDetail: { en: 'Your latest ledger transactions.', ar: 'أحدث عملياتك في السجل.' },
+    homeWidgetUpcomingTitle: { en: 'Upcoming payments', ar: 'الدفعات القادمة' },
+    homeWidgetUpcomingDetail: { en: 'Payments expected soon.', ar: 'الدفعات المتوقعة قريباً.' },
+    homeCustomizeTitle: { en: 'Customize Home', ar: 'تخصيص الرئيسية' },
+    homeCustomizeBody: { en: 'Choose which Home sections appear and arrange the whole page in your order.', ar: 'اختر أقسام الرئيسية التي تظهر ورتّب الصفحة كاملة كما يناسبك.' },
+    homeCustomizeDetail: { en: 'Choose and reorder Home sections', ar: 'اختر أقسام الرئيسية ورتّبها' },
+    moveUp: { en: 'Move up', ar: 'نقل للأعلى' },
+    moveDown: { en: 'Move down', ar: 'نقل للأسفل' },
+    assistantTitle: { en: 'Wafra Assistant', ar: 'مساعد وفرة' },
+    assistantBack: { en: 'Back', ar: 'رجوع' },
+    assistantHeading: { en: 'Ask about your money', ar: 'اسأل عن أموالك' },
+    assistantPrivacy: {
+        en: 'Wafra calculates answers from your ledger locally. Raw bank messages are not sent anywhere.',
+        ar: 'يحسب وفرة الإجابات من سجلك محلياً على جهازك. لا يتم إرسال رسائل البنك الخام إلى أي مكان.',
+    },
+    assistantPlaceholder: {
+        en: 'Ask about spending, income, merchants or subscriptions',
+        ar: 'اسأل عن الإنفاق أو الدخل أو المتاجر أو الاشتراكات',
+    },
+    assistantAsk: { en: 'Ask Wafra', ar: 'اسأل وفرة' },
+    settingsAppearanceLanguageHeader: { en: 'Appearance & language', ar: 'المظهر واللغة' },
+    settingsPreferencesHeader: { en: 'Appearance', ar: 'المظهر' },
+    settingsDangerHeader: { en: 'Danger zone', ar: 'منطقة الخطر' },
+    supportWebsite: { en: 'Support', ar: 'الدعم' },
+    publicLinkUnavailable: { en: 'Unavailable in this build', ar: 'غير متاح في هذا الإصدار' },
+    settingStatusOn: { en: 'On', ar: 'مفعّل' },
+    settingStatusOff: { en: 'Off', ar: 'متوقف' },
+    settingStatusChecking: { en: 'Checking', ar: 'جارٍ التحقق' },
+    settingStatusYes: { en: 'yes', ar: 'نعم' },
+    settingStatusNo: { en: 'no', ar: 'لا' },
+    settingStatusSetup: { en: 'Set up', ar: 'يحتاج إعداداً' },
+    settingStatusPipeVerified: { en: 'Pipe verified', ar: 'تم التحقق من المسار' },
+    settingStatusAutomationVerified: {
+        en: 'Automation verified',
+        ar: 'تم التحقق من الأتمتة',
+    },
+    feedbackIntro: {
+        en: 'Send a note directly to Wafra maintainers. Nothing from your ledger is attached, and nothing leaves this phone until you confirm.',
+        ar: 'أرسل ملاحظة مباشرة إلى مشرفي وفرة. لا يُرفق شيء من سجلك، ولا يغادر شيء الهاتف حتى تؤكد.',
+    },
+    feedbackParserHeader: { en: 'BANK MESSAGE PROBLEM', ar: 'مشكلة في رسالة بنكية' },
+    feedbackParserTitle: { en: 'Improve the bank parser', ar: 'تحسين محلّل البنك' },
+    feedbackParserDetail: {
+        en: 'Prepare a redacted JSON file, then attach it to Codex yourself.',
+        ar: 'جهّز ملف JSON منقّحاً، ثم أرفقه بنفسك في Codex.',
+    },
+    feedbackWriteHeader: { en: 'WHAT WENT WRONG', ar: 'ما الذي حدث' },
+    feedbackPlaceholder: {
+        en: 'Tuesday’s charge was filed twice.',
+        ar: 'سُجّلت عملية الثلاثاء مرتين.',
+    },
+    feedbackInputA11y: { en: 'Describe what went wrong', ar: 'اكتب ما الذي حدث' },
+    feedbackDigitsMasked: {
+        en: 'Long numbers you type are masked before sending.',
+        ar: 'تُخفى الأرقام الطويلة التي تكتبها قبل الإرسال.',
+    },
+    feedbackChars: { en: '{used} of {max}', ar: '{used} من {max}' },
+    feedbackAttachHeader: { en: 'WHAT TO ATTACH', ar: 'ما الذي يُرفق' },
+    feedbackAttachRow: { en: 'Attached', ar: 'المرفق' },
+    feedbackDetailNone: { en: 'Just what you wrote', ar: 'ما كتبته فقط' },
+    feedbackDetailNoneHint: { en: 'Nothing from your ledger.', ar: 'لا شيء من سجلك.' },
+    feedbackDetailShapes: { en: 'And the message shapes', ar: 'وأشكال الرسائل' },
+    feedbackDetailShapesHint: {
+        en: 'Bank messages with every digit blanked and every name replaced. Send this if an entry was read wrong.',
+        ar: 'رسائل البنك مع حذف كل رقم واستبدال كل اسم. أرسل هذا إذا قُرئت عملية بشكل خاطئ.',
+    },
+    feedbackDetailFigures: { en: 'And the amounts behind your totals', ar: 'والمبالغ خلف مجاميعك' },
+    feedbackDetailFiguresHint: {
+        en: 'Adds balances and statement figures. Still no names. Send this if a total looks wrong.',
+        ar: 'يضيف الأرصدة وأرقام الكشوف. ولا أسماء أيضاً. أرسل هذا إذا بدا أحد المجاميع خاطئاً.',
+    },
+    feedbackPrivateOn: {
+        en: 'Private Mode is on, so only your message can be sent.',
+        ar: 'الوضع الخاص مفعّل، لذا لا يمكن إرسال سوى رسالتك.',
+    },
+    feedbackPrivateBlocked: {
+        en: 'Private Mode keeps your ledger on this phone.',
+        ar: 'الوضع الخاص يُبقي سجلك على هذا الهاتف.',
+    },
+    feedbackPreviewHeader: { en: 'EXACTLY WHAT WILL BE SENT', ar: 'ما سيُرسل بالضبط' },
+    feedbackPreviewNote: {
+        en: 'This is everything sent to Wafra maintainers: your message, the type you picked, and the app version, platform, language, market and currency shown here. No ledger, bank message, amount, account, or merchant is attached.',
+        ar: 'هذا كل ما يُرسل إلى مشرفي وفرة: رسالتك والنوع الذي اخترته وإصدار التطبيق والمنصة واللغة والسوق والعملة الظاهرة هنا. لا يُرفق سجل أو رسالة بنكية أو مبلغ أو حساب أو متجر.',
+    },
+    feedbackSend: { en: 'Send report', ar: 'إرسال التقرير' },
+    feedbackSending: { en: 'Sending…', ar: 'جارٍ الإرسال…' },
+    feedbackSendQ: { en: 'Send this report?', ar: 'إرسال هذا التقرير؟' },
+    feedbackSendBody: {
+        en: 'The report above is what leaves this phone. It is kept for at most 14 days, read by Wafra maintainers, and not sent to third-party AI.',
+        ar: 'التقرير أعلاه هو ما يغادر هذا الهاتف. يُحتفظ به لمدة أقصاها 14 يوماً ويقرأه مشرفو وفرة ولا يُرسل إلى ذكاء اصطناعي خارجي.',
+    },
+    feedbackSaveCopy: { en: 'Save a copy', ar: 'حفظ نسخة' },
+    feedbackNeedsMessage: { en: 'Say what went wrong first.', ar: 'اكتب ما الذي حدث أولاً.' },
+    feedbackSentTitle: { en: 'Report sent', ar: 'أُرسل التقرير' },
+    feedbackSentBody: {
+        en: 'Reference {id}. Wafra maintainers can review it for up to 14 days; no third-party AI receives it.',
+        ar: 'المرجع {id}. يمكن لمشرفي وفرة مراجعته لمدة تصل إلى 14 يوماً، ولا يستلمه أي ذكاء اصطناعي خارجي.',
+    },
+    feedbackNoTransportTitle: { en: 'Sending is not connected yet', ar: 'الإرسال غير موصول بعد' },
+    feedbackNoTransportBody: {
+        en: 'This build has no direct feedback connection, so nothing was uploaded. Install a newer Wafra test build.',
+        ar: 'لا تتضمن هذه النسخة اتصالاً مباشراً للملاحظات، لذا لم يُرفع شيء. ثبّت نسخة اختبار أحدث من وفرة.',
+    },
+    feedbackPreparing: {
+        en: 'Preparing the attachment…',
+        ar: 'جارٍ تجهيز المرفق…',
+    },
+    feedbackFailedTitle: { en: 'Could not send', ar: 'تعذّر الإرسال' },
+    feedbackFailedBody: {
+        en: 'The report did not leave the phone. Your text is still here; try again later.',
+        ar: 'لم يغادر التقرير الهاتف. ما كتبته ما زال هنا؛ حاول مجدداً لاحقاً.',
+    },
+    feedbackNoRelayBody: {
+        en: 'This build has no server address, so waiting will not help. Install a newer Wafra test build to send directly.',
+        ar: 'لا يحتوي هذا الإصدار على عنوان الخادم، لذا لن يفيد الانتظار. ثبّت نسخة اختبار أحدث من وفرة للإرسال المباشر.',
+    },
+    feedbackOfflineTitle: { en: 'Delivery unconfirmed', ar: 'لم يتأكد وصول التقرير' },
+    feedbackOfflineBody: {
+        en: 'Wafra could not confirm that the server received your report. Check your connection and try again.',
+        ar: 'تعذّر على وفرة تأكيد استلام الخادم لتقريرك. تحقق من الاتصال وحاول مرة أخرى.',
+    },
+    feedbackTooLargeTitle: { en: 'Too much attached', ar: 'المرفقات كبيرة جداً' },
+    feedbackTooLargeBody: {
+        en: 'The report is over the size the server accepts. Choose a smaller option under WHAT TO ATTACH, or shorten the message, then send again.',
+        ar: 'حجم التقرير يتجاوز ما يقبله الخادم. اختر خياراً أصغر ضمن «ما الذي يُرفق»، أو اختصر الرسالة، ثم أعد الإرسال.',
+    },
+    feedbackRefusedTitle: { en: 'The server refused it', ar: 'رفضه الخادم' },
+    feedbackRefusedBody: {
+        en: 'The server would not take this report ({code}). Sending it again unchanged will get the same answer. Save a copy.',
+        ar: 'لم يقبل الخادم هذا التقرير ({code}). إعادة إرساله كما هو ستعطي النتيجة نفسها. احفظ نسخة.',
+    },
+    feedbackBusyTitle: { en: 'Too many reports just now', ar: 'تقارير كثيرة الآن' },
+    feedbackBusyBody: {
+        en: 'The server is limiting how many reports it takes per hour. Save a copy and send it again in a while.',
+        ar: 'يحدّ الخادم عدد التقارير المقبولة في الساعة. احفظ نسخة وأعد الإرسال بعد قليل.',
+    },
+    onboardImportResult: {
+        en: '{entries} entr{ending} filed{cards}. Nothing left the phone.',
+        ar: 'سُجّلت {entries} عملية{cards}. لم يغادر شيء الهاتف.',
+    },
+    onboardCardsFound: { en: ' · {count} card{s} found', ar: ' · عُثر على {count} بطاقة' },
+    onboardScanProgress: {
+        en: '{read} messages read · {matched} matched.',
+        ar: 'قُرئت {read} رسالة · طابقت {matched}.',
+    },
+    seeCategoryEntriesA11y: { en: '{category}, see entries', ar: '{category}، عرض العمليات' },
+    insightTrendingHigher: { en: 'Trending {percent}% higher', ar: 'يتجه للارتفاع {percent}٪' },
+    insightTrendingLower: { en: 'Trending {percent}% lower', ar: 'يتجه للانخفاض {percent}٪' },
+    insightPaceBody: {
+        en: 'At today’s pace you will spend about {projected} this month, vs {previous} in {period}.',
+        ar: 'بهذه الوتيرة ستنفق نحو {projected} هذا الشهر، مقابل {previous} في {period}.',
+    },
+    insightSpentMore: { en: 'Spent {percent}% more', ar: 'أنفقت أكثر بنسبة {percent}٪' },
+    insightSpentLess: { en: 'Spent {percent}% less', ar: 'أنفقت أقل بنسبة {percent}٪' },
+    insightComparisonBody: { en: '{current} vs {previous} in {period}.', ar: '{current} مقابل {previous} في {period}.' },
+    insightBudgetExceeded: { en: '{category} budget exceeded', ar: 'تجاوزت ميزانية {category}' },
+    insightBudgetExceededBody: { en: '{spent} spent of your {limit} limit.', ar: 'أنفقت {spent} من حدك البالغ {limit}.' },
+    insightBudgetNear: { en: '{category} almost at limit', ar: 'اقترب {category} من الحد' },
+    insightBudgetNearBody: { en: '{percent}% used — {left} left for the month.', ar: 'استخدمت {percent}٪ — متبقي {left} لهذا الشهر.' },
+    insightCategoryLeads: { en: '{category} leads your spending', ar: '{category} يتصدر مصروفاتك' },
+    insightCategoryLeadsBody: { en: '{amount} — {percent}% of this month’s expenses.', ar: '{amount} — {percent}٪ من مصروفات هذا الشهر.' },
+    insightSavingRate: {
+        en: '{percent}% of income not spent',
+        ar: 'لم يُنفق \u2066{percent}٪\u2069 من الدخل',
+    },
+    insightSavingBodyLive: { en: 'Income is {amount} above expenses so far this month.', ar: 'يزيد الدخل على المصروفات بمقدار {amount} حتى الآن هذا الشهر.' },
+    insightSavingBodyPeriod: { en: 'Income is {amount} above expenses in this period.', ar: 'يزيد الدخل على المصروفات بمقدار {amount} في هذه الفترة.' },
+    insightSpendingExceeds: { en: 'Spending exceeds income', ar: 'المصروف يتجاوز الدخل' },
+    insightOverspendMonth: { en: 'Expenses are {amount} above income this month.', ar: 'تزيد المصروفات على الدخل بمقدار {amount} هذا الشهر.' },
+    insightOverspendPeriod: { en: 'Expenses are {amount} above income in this period.', ar: 'تزيد المصروفات على الدخل بمقدار {amount} في هذه الفترة.' },
+    insightBiggestPurchase: { en: 'Biggest purchase', ar: 'أكبر عملية شراء' },
+    insightBiggestPurchaseBody: { en: '{merchant} — {amount} on {date}.', ar: '{merchant} — {amount} في {date}.' },
+    insightSubscriptionsCost: { en: '{count} subscriptions cost {amount}/mo', ar: '{count} اشتراكاً تكلف {amount} شهرياً' },
+    insightSubscriptionsShare: { en: 'That is {percent}% of this month’s income. Review them in Bills.', ar: 'يمثل ذلك {percent}٪ من دخل هذا الشهر. راجعها في الفواتير.' },
+    insightActiveSubscriptions: { en: '{count} active subscriptions', ar: '{count} اشتراكات نشطة' },
+    insightActiveSubscriptionsBody: { en: 'About {amount} per month combined.', ar: 'نحو {amount} شهرياً إجمالاً.' },
+    insightGotPricier: { en: '{name} got pricier', ar: 'ارتفع سعر {name}' },
+    insightGotPricierBody: { en: 'Last charge {last} vs the usual {usual}.', ar: 'آخر خصم {last} مقابل المعتاد {usual}.' },
+    insightDailyAverage: { en: 'Daily average', ar: 'المتوسط اليومي' },
+    insightDailyAverageMonth: { en: 'You spend about {amount} per day this month.', ar: 'تنفق نحو {amount} يومياً هذا الشهر.' },
+    insightDailyAveragePeriod: { en: 'You spend about {amount} per day in this period.', ar: 'تنفق نحو {amount} يومياً في هذه الفترة.' },
+    tomorrow: { en: 'tomorrow', ar: 'غداً' },
+    inDaysPhrase: { en: 'in {days} days', ar: 'خلال {days} أيام' },
+    daysLatePhrase: { en: '{days} day{s} late', ar: 'متأخر {days} يوم' },
+    notificationChannelPayments: { en: 'Payment reminders', ar: 'تذكيرات الدفعات' },
+    notificationChannelSummary: { en: 'Daily summary', ar: 'الملخص اليومي' },
+    dailySummaryTitle: {
+        en: '{amount} spent today · {count} transaction{s}',
+        ar: 'صرفت {amount} اليوم · {count} عملية',
+    },
+    dailySummaryLine: { en: '{amount} — {merchant}', ar: '{amount} — {merchant}' },
+    dailySummaryMore: { en: '+{count} more', ar: '+{count} أخرى' },
+    dailySummaryBudget: {
+        en: '{spent} of {limit} monthly limits ({percent}%)',
+        ar: '{spent} من {limit} من حدودك الشهرية ({percent}%)',
+    },
+    chargeAlertTitle: { en: '{amount} · {merchant}', ar: '{amount} · {merchant}' },
+    chargeAlertTitlePlain: { en: '{amount} spent', ar: 'صُرف {amount}' },
+    chargeAlertTitleCredit: { en: '{amount} received · {merchant}', ar: 'وصل {amount} · {merchant}' },
+    chargeAlertTitleCreditPlain: { en: '{amount} received', ar: 'وصل {amount}' },
+    chargeAlertGroupTitle: {
+        en: '{amount} spent · {count} charge{s}',
+        ar: 'صُرف {amount} · {count} عملية',
+    },
+    chargeAlertGroupCreditTitle: {
+        en: '{amount} received · {count} payment{s}',
+        ar: 'وصل {amount} · {count} دفعة',
+    },
+    chargeAlertLineCredit: { en: '+{amount} — {merchant}', ar: '+{amount} — {merchant}' },
+    chargeAlertsSetting: { en: 'Transaction alerts', ar: 'تنبيهات المعاملات' },
+    chargeAlertsOn: {
+        en: 'A silent note the moment a charge syncs',
+        ar: 'تنبيه صامت فور مزامنة أي عملية',
+    },
+    dailySummarySetting: { en: 'Daily spend summary', ar: 'ملخص الصرف اليومي' },
+    dailySummaryOn: {
+        en: 'Every evening at 9pm, if you spent anything',
+        ar: 'كل مساء الساعة ٩، إذا صرفت شيئاً',
+    },
+    dailySummaryOff: { en: 'Off', ar: 'متوقف' },
+    notificationBillDue: { en: '{name} due {when}', ar: '{name} مستحق {when}' },
+    notificationBillBody: { en: '{amount} · mark it paid in Wafra once done.', ar: '{amount} · علّمه كمدفوع في وفرة بعد السداد.' },
+    creditCard: { en: 'Credit card', ar: 'بطاقة ائتمانية' },
+    notificationCardDue: { en: '{name} payment due {when}', ar: 'دفعة {name} مستحقة {when}' },
+    notificationOutstandingMinimum: { en: '{amount} outstanding · minimum {minimum}.', ar: 'المستحق {amount} · الحد الأدنى {minimum}.' },
+    notificationOutstanding: { en: '{amount} outstanding.', ar: 'المستحق {amount}.' },
+    notificationRenewsTomorrow: { en: '{name} renews tomorrow', ar: 'يتجدد {name} غداً' },
+    notificationRenewalBody: { en: 'Around {amount} will be charged.', ar: 'سيُخصم نحو {amount}.' },
+    creditCardWithDigits: { en: 'Credit Card •{last4}', ar: 'بطاقة ائتمانية •{last4}' },
+    debitCardWithDigits: { en: 'Debit Card •{last4}', ar: 'بطاقة خصم •{last4}' },
+    cardWithDigits: { en: 'Card •{last4}', ar: 'بطاقة •{last4}' },
+    accountWithDigits: { en: 'Account •{last4}', ar: 'حساب •{last4}' },
+    notFoundTitle: { en: 'That page is not here.', ar: 'هذه الصفحة غير موجودة.' },
+    notFoundBody: {
+        en: 'The link may be old. Your ledger is fine.',
+        ar: 'ربما الرابط قديم. سجلّك سليم.',
+    },
+    goHome: { en: 'Go to Home', ar: 'الذهاب إلى الرئيسية' },
+    titleAtmWithdrawal: { en: 'ATM withdrawal', ar: 'سحب من الصراف' },
+    titleBankFee: { en: 'Bank fee', ar: 'رسوم بنكية' },
+    titleAnnualCardFee: { en: 'Annual card fee', ar: 'رسوم البطاقة السنوية' },
+    titleAnnualBankFee: { en: 'Annual bank fee', ar: 'رسوم بنكية سنوية' },
+    titleAccountMaintenanceFee: { en: 'Account maintenance fee', ar: 'رسوم صيانة الحساب' },
+    titleServiceCharge: { en: 'Service charge', ar: 'رسوم خدمة' },
+    titleOverlimitFee: { en: 'Overlimit fee', ar: 'رسوم تجاوز الحد' },
+    titleInsufficientBalanceFee: { en: 'Insufficient balance fee', ar: 'رسوم عدم كفاية الرصيد' },
+    titleLatePaymentFee: { en: 'Late payment fee', ar: 'رسوم تأخر السداد' },
+    titleOverdraftFee: { en: 'Overdraft fee', ar: 'رسوم السحب على المكشوف' },
+    titleVatFee: { en: 'VAT fee', ar: 'ضريبة القيمة المضافة' },
+    titleCashDeposit: { en: 'Cash deposit', ar: 'إيداع نقدي' },
+    titleCheque: { en: 'Cheque', ar: 'شيك' },
+    titleParking: { en: 'Parking', ar: 'مواقف' },
+    titleOutgoingTransfer: { en: 'Outgoing transfer', ar: 'تحويل صادر' },
+    titleIncomingTransfer: { en: 'Incoming transfer', ar: 'تحويل وارد' },
+    titleRefund: { en: 'Refund', ar: 'استرداد' },
+    titleCreditReversal: { en: 'Credit reversal', ar: 'عكس قيد دائن' },
+    titleInvoicePayment: { en: 'Invoice payment', ar: 'سداد فاتورة' },
+    titleInwardRemittance: { en: 'Inward remittance', ar: 'حوالة واردة' },
+    titleOutwardRemittance: { en: 'Outward remittance', ar: 'حوالة صادرة' },
+    titleTelegraphicTransfer: { en: 'Telegraphic transfer', ar: 'حوالة برقية' },
+    titleBankTransfer: { en: 'Bank transfer', ar: 'تحويل بنكي' },
+    titleOwnAccountTransfer: { en: 'Own account transfer', ar: 'تحويل بين حساباتك' },
+    titleSavingsTransfer: { en: 'Savings transfer', ar: 'تحويل إلى الادخار' },
+    titleCardPayment: { en: 'Card payment', ar: 'دفعة بطاقة' },
+    titlePayment: { en: 'Payment', ar: 'دفعة' },
+    titleAccountDebit: { en: 'Account debit', ar: 'خصم من الحساب' },
+    titleMobileRecharge: { en: 'Mobile recharge', ar: 'شحن رصيد الهاتف' },
+    titleCardStatement: { en: 'Card statement', ar: 'كشف حساب البطاقة' },
+    titleBillPayment: { en: 'Bill payment', ar: 'دفع فاتورة' },
+    titleSalary: { en: 'Salary', ar: 'راتب' },
+};
+let lang = 'en';
+function getLanguage() {
+    return lang;
+}
+function setLanguage(l) {
+    lang = l === 'ar' ? 'ar' : 'en';
+}
+function isRTL() {
+    return lang === 'ar';
+}
+function alignEnd() {
+    return lang === 'ar' ? 'left' : 'right';
+}
+function detectLanguage() {
+    try {
+        const locale = Intl.DateTimeFormat().resolvedOptions().locale ?? '';
+        if (/^ar\b/i.test(locale))
+            return 'ar';
+    }
+    catch {
+    }
+    return 'en';
+}
+function t(key, override) {
+    return S[key][override ?? lang] ?? S[key].en;
+}
+function tf(key, vars, override) {
+    return t(key, override).replace(/\{(\w+)\}/g, (whole, name) => name in vars ? String(vars[name]) : whole);
+}
+function hasArabicScript(text) {
+    return /[؀-ۿݐ-ݿࡰ-ࣿﭐ-﷿ﹰ-ﻼ]/.test(text);
+}
+const STRUCTURAL_TITLE_KEYS = {
+    'ATM withdrawal': 'titleAtmWithdrawal',
+    'Bank fee': 'titleBankFee',
+    'Annual card fee': 'titleAnnualCardFee',
+    'Annual bank fee': 'titleAnnualBankFee',
+    'Account maintenance fee': 'titleAccountMaintenanceFee',
+    'Service charge': 'titleServiceCharge',
+    'Overlimit fee': 'titleOverlimitFee',
+    'Insufficient balance fee': 'titleInsufficientBalanceFee',
+    'Late payment fee': 'titleLatePaymentFee',
+    'Overdraft fee': 'titleOverdraftFee',
+    'VAT fee': 'titleVatFee',
+    'Cash deposit': 'titleCashDeposit',
+    Cheque: 'titleCheque',
+    Parking: 'titleParking',
+    'Outgoing transfer': 'titleOutgoingTransfer',
+    'Incoming transfer': 'titleIncomingTransfer',
+    Refund: 'titleRefund',
+    'Inward remittance': 'titleInwardRemittance',
+    'Outward remittance': 'titleOutwardRemittance',
+    'Telegraphic transfer': 'titleTelegraphicTransfer',
+    'Bank transfer': 'titleBankTransfer',
+    'Own account transfer': 'titleOwnAccountTransfer',
+    'Savings transfer': 'titleSavingsTransfer',
+    'Card payment': 'titleCardPayment',
+    Payment: 'titlePayment',
+    'Account debit': 'titleAccountDebit',
+    'Mobile recharge': 'titleMobileRecharge',
+    'Card statement': 'titleCardStatement',
+    'Bill payment': 'titleBillPayment',
+    'Credit reversal': 'titleCreditReversal',
+    'Invoice payment': 'titleInvoicePayment',
+    Salary: 'titleSalary',
+};
+const CARD_TITLE_RE = /^Card •([0-9Xx*]{2,6})( payment)?$/;
+function structuralTitleLabel(title, override) {
+    const key = STRUCTURAL_TITLE_KEYS[title];
+    if (key)
+        return t(key, override);
+    const card = CARD_TITLE_RE.exec(title);
+    if (!card)
+        return title;
+    const name = tf('cardWithDigits', { last4: card[1] }, override);
+    return card[2] ? tf('accountPaymentTitle', { name }, override) : name;
+}
+},
+"ios-background-alert-parser":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.parseIosBackgroundAlert = parseIosBackgroundAlert;
+const currency_metadata_1 = require("@/lib/currency-metadata");
+const country_1 = require("@/lib/country");
+const markets_1 = require("@/lib/markets");
+const launch_alert_parser_1 = require("@/lib/launch-alert-parser");
+const best_effort_autopost_1 = require("@/lib/best-effort-autopost");
+const fx_1 = require("@/lib/fx");
+const sms_parser_1 = require("@/lib/sms-parser");
+const ignore = () => ({
+    v: 1, parserVersion: sms_parser_1.PARSER_VERSION, route: 'ignore', provenance: null, notification: null,
+});
+const record = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
+const keys = (value, expected) => Object.keys(value).length === expected.length && expected.every((key) => Object.hasOwn(value, key));
+function boundedUtf8(value, limit) {
+    let bytes = 0;
+    for (let index = 0; index < value.length; index += 1) {
+        const code = value.charCodeAt(index);
+        if (code >= 0xd800 && code <= 0xdbff) {
+            const next = value.charCodeAt(index + 1);
+            if (!(next >= 0xdc00 && next <= 0xdfff))
+                return false;
+            index += 1;
+            bytes += 4;
+        }
+        else {
+            if (code >= 0xdc00 && code <= 0xdfff)
+                return false;
+            bytes += code <= 0x7f ? 1 : code <= 0x7ff ? 2 : 3;
+        }
+        if (bytes > limit)
+            return false;
+    }
+    return true;
+}
+function validatedContext(value) {
+    if (!record(value) || !keys(value, ['v', 'country', 'parserMarket', 'ledgerMoney', 'sourceHash']) ||
+        value.v !== 1 || typeof value.sourceHash !== 'string' || !/^[a-f0-9]{64}$/.test(value.sourceHash) ||
+        typeof value.parserMarket !== 'string' || !['AE', 'SA', 'ZZ'].includes(value.parserMarket))
+        return null;
+    if (value.country !== null && (typeof value.country !== 'string' ||
+        (0, country_1.normalizeCountryCode)(value.country) !== value.country))
+        return null;
+    if (value.ledgerMoney !== null) {
+        const money = value.ledgerMoney;
+        if (!record(money) || !keys(money, ['currency', 'exponent']) ||
+            typeof money.currency !== 'string' || !/^[A-Z]{3}$/.test(money.currency) ||
+            ![0, 2, 3].includes(Number(money.exponent)) ||
+            (0, currency_metadata_1.currencyMinorUnits)(money.currency) !== money.exponent)
+            return null;
+    }
+    return value;
+}
+function sourceMoney(value) {
+    if (!value || !/^[A-Z]{3}$/.test(value.currency) ||
+        ![0, 2, 3].includes(value.exponent) || (0, currency_metadata_1.currencyMinorUnits)(value.currency) !== value.exponent ||
+        !/^[1-9]\d{0,15}$/.test(value.minorUnits) || !Number.isSafeInteger(Number(value.minorUnits)))
+        return null;
+    return { currency: value.currency, minorUnits: value.minorUnits, exponent: value.exponent };
+}
+const sameMoney = (left, right) => left.currency === right.currency && left.minorUnits === right.minorUnits && left.exponent === right.exponent;
+const NON_RECEIPT_PREFIX_RE = /^\s*(?:for\s+example\b|e\.g\.|example\s*:|(?:please\s+)?(?:explain|clarify|help\s+me\s+understand)\b|(?:can|could|would)\s+you\s+(?:explain|clarify|help)\b|[^\n:,.!?]{1,32},\s*(?:i\b|my\b)|i(?:['’](?:ve|m))?\s|my\s+(?:(?:credit|debit|bank|prepaid)\s+)?(?:card|account|wallet)\b)/iu;
+function singleSourcePrincipal(source, event, parsed) {
+    if (event.amount.spans.length !== 1)
+        return false;
+    const primary = event.amount.spans[0];
+    return event.observations.every(({ role, field }) => {
+        if (field.spans.length === 1 && field.spans[0].start === primary.start && field.spans[0].end === primary.end)
+            return true;
+        if (['balance', 'credit-limit', 'fee', 'minimum-due', 'statement-total', 'bill-due'].includes(role))
+            return true;
+        if (!parsed || parsed.fxSource !== 'bank' || !parsed.originalCurrency ||
+            parsed.originalCurrency === parsed.currency || !Number.isSafeInteger(parsed.originalMinorUnits) ||
+            (parsed.originalMinorUnits ?? 0) <= 0 || parsed.originalExponent === undefined ||
+            (0, currency_metadata_1.currencyMinorUnits)(parsed.originalCurrency) !== parsed.originalExponent ||
+            field.evidence !== 'explicit' || field.spans.length !== 1)
+            return false;
+        const quoted = sourceMoney(field.value);
+        const span = field.spans[0];
+        const between = source.slice(primary.end, span.start).trim();
+        const parentheticalQuote = between === '(' && source.slice(span.end).trimStart().startsWith(')');
+        const refundQuote = event.family === 'refund' && parsed.type === 'income' &&
+            !/[.!?\n]/.test(between) && /\bhas\s+been\s+(?:successfully\s+)?refunded\s*$/i.test(between);
+        return quoted !== null && quoted.currency === parsed.currency &&
+            quoted.minorUnits === String(parsed.amountFils) && span.start >= primary.end &&
+            (parentheticalQuote || refundQuote);
+    });
+}
+function parsedSourceMoney(parsed, event) {
+    const hasForeignFields = parsed.originalCurrency !== undefined || parsed.originalMinorUnits !== undefined ||
+        parsed.originalExponent !== undefined || parsed.originalAmountMinor !== undefined ||
+        parsed.fxRate !== undefined || parsed.fxSource !== undefined;
+    let money = null;
+    if (hasForeignFields) {
+        if (typeof parsed.originalCurrency !== 'string' ||
+            !Number.isSafeInteger(parsed.originalMinorUnits) || (parsed.originalMinorUnits ?? 0) <= 0 ||
+            parsed.originalExponent === undefined || (0, currency_metadata_1.currencyMinorUnits)(parsed.originalCurrency) !== parsed.originalExponent)
+            return null;
+        const original = (0, fx_1.originalMoneyOf)(parsed);
+        if (original)
+            money = sourceMoney({ ...original, minorUnits: String(original.minorUnits) });
+    }
+    else {
+        if (!Number.isSafeInteger(parsed.amountFils) || parsed.amountFils <= 0)
+            return null;
+        const exponent = (0, currency_metadata_1.currencyMinorUnits)(parsed.currency);
+        if (exponent !== null)
+            money = sourceMoney({ currency: parsed.currency, minorUnits: String(parsed.amountFils), exponent });
+    }
+    if (!money || !event)
+        return null;
+    const principal = event.amount.evidence === 'explicit' ? sourceMoney(event.amount.value) : null;
+    if (principal && sameMoney(money, principal))
+        return money;
+    if (hasForeignFields && event.amount.evidence === 'ambiguous' && event.amount.spans.length === 1 &&
+        event.amount.alternatives.some((alternative) => {
+            const candidate = sourceMoney(alternative);
+            return candidate !== null && sameMoney(money, candidate);
+        }))
+        return money;
+    return null;
+}
+const movementFamily = (family) => ['purchase', 'transfer', 'refund', 'cash-withdrawal', 'fee', 'utility', 'recurring-payment'].includes(family);
+function parsedFamily(parsed, event) {
+    const direction = parsed.type === 'income' ? 'credit' : 'debit';
+    if (direction === 'credit' && parsed.merchant === 'Salary')
+        return 'income';
+    if ((event.direction === direction || event.direction === 'unknown') && movementFamily(event.family))
+        return event.family;
+    if (parsed.transferHint || ['Incoming transfer', 'Outgoing transfer', 'Telegraphic transfer', 'Transfer'].includes(parsed.merchant))
+        return 'transfer';
+    return direction === 'credit' ? 'income' : 'purchase';
+}
+function merchant(value) {
+    if (!value)
+        return null;
+    const text = value.trim();
+    return text.length <= 120 && boundedUtf8(text, 512) && !/[\p{C}]|\d{5,}|[\dXx*·]{6,}/u.test(text) ? text : null;
+}
+const GENERIC_TRANSFER_TITLES = new Set([
+    'incoming transfer', 'outgoing transfer', 'telegraphic transfer', 'bank transfer',
+    'own account transfer', 'savings transfer', 'inward remittance', 'outward remittance',
+    'transfer', 'account debit', 'account credit',
+]);
+function parsedMerchant(parsed, event, family) {
+    const title = merchant(parsed.merchant);
+    if (family !== 'transfer' || !title || !GENERIC_TRANSFER_TITLES.has(title.toLowerCase()))
+        return title;
+    const named = event.merchant.evidence === 'explicit' ? merchant(event.merchant.value) : null;
+    return named?.toLowerCase() === title.toLowerCase() ? title : null;
+}
+function instrument(event, parsed) {
+    const proven = event.instrument.evidence === 'explicit' ? event.instrument.value : null;
+    if (proven && ['card', 'account', 'wallet'].includes(proven.kind)) {
+        return { kind: proven.kind, last4: proven.last4 !== null && /^\d{4}$/.test(proven.last4) ? proven.last4 : null };
+    }
+    if (parsed?.card && /^\d{4}$/.test(parsed.card.last4)) {
+        return { kind: parsed.card.kind === 'account' ? 'account' : 'card', last4: parsed.card.last4 };
+    }
+    return null;
+}
+function futureDate(event, observedAt, parsed) {
+    const date = new Date(observedAt);
+    const today = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    return [parsed?.date, event?.transactionDate.evidence === 'explicit' ? event.transactionDate.value : null]
+        .some((day) => typeof day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(day) && day > today);
+}
+const resetContext = () => {
+    (0, country_1.setActiveCountry)(null);
+    (0, markets_1.setActiveMarket)('ZZ');
+    (0, markets_1.setLedgerCurrency)(null);
+};
+function parseIosBackgroundAlert(input) {
+    resetContext();
+    try {
+        if (!record(input) || !keys(input, ['v', 'context', 'sender', 'body', 'observedAt']) || input.v !== 1 ||
+            typeof input.sender !== 'string' || input.sender.length > 80 || !boundedUtf8(input.sender, 320) ||
+            typeof input.body !== 'string' || !input.body.trim() || !boundedUtf8(input.body, 4096) ||
+            !Number.isSafeInteger(input.observedAt) || input.observedAt < 0 || input.observedAt > 8640000000000000)
+            return ignore();
+        const context = validatedContext(input.context);
+        if (!context?.ledgerMoney)
+            return ignore();
+        const sender = /^(?:wafra(?:\s+(?:automation|shortcut))?|shortcut|automation|unknown|none|null)$/i.test(input.sender.trim())
+            ? '' : input.sender.trim();
+        const source = input.body;
+        (0, country_1.setActiveCountry)(context.country);
+        (0, markets_1.setActiveMarket)(context.parserMarket);
+        (0, markets_1.setLedgerCurrency)(context.ledgerMoney.currency, context.ledgerMoney.exponent);
+        if (NON_RECEIPT_PREFIX_RE.test(source) || (0, sms_parser_1.nonPostingReason)(source) || (0, best_effort_autopost_1.isNotAutoPostableMoney)(source) ||
+            (0, best_effort_autopost_1.hasNonCompletedWording)(source, context.country, sender))
+            return ignore();
+        const session = (0, launch_alert_parser_1.createLaunchAlertSession)({ overrides: {}, activeMarket: context.parserMarket,
+            pinnedCurrency: context.ledgerMoney.currency, fxLookup: () => null,
+            bestEffort: { enabled: false, country: context.country } });
+        const inspection = session.inspect(source, sender);
+        const parsed = session.parse(source, sender, inspection, undefined, input.observedAt);
+        const event = (0, launch_alert_parser_1.inspectGenericBankEventForReview)(source, sender);
+        if (futureDate(event, input.observedAt, parsed ?? undefined))
+            return ignore();
+        if (parsed && parsed.kind !== 'transaction')
+            return ignore();
+        if (event && ['statement', 'balance', 'authentication', 'bill', 'card-payment'].includes(event.family))
+            return ignore();
+        if (!event || !singleSourcePrincipal(source, event, parsed))
+            return ignore();
+        if (parsed && (['failed', 'future', 'informational'].includes(event.status) || event.direction === 'none' ||
+            ((event.direction === 'debit' || event.direction === 'credit') &&
+                event.direction !== (parsed.type === 'income' ? 'credit' : 'debit'))))
+            return ignore();
+        const amount = parsed ? parsedSourceMoney(parsed, event) : null;
+        let result;
+        if (parsed && !parsed.bestEffort && event && amount) {
+            const family = parsedFamily(parsed, event);
+            result = { v: 1, parserVersion: sms_parser_1.PARSER_VERSION, route: 'parsed', provenance: 'launch',
+                notification: { style: 'movement', family,
+                    direction: parsed.type === 'income' ? 'credit' : 'debit', amount,
+                    merchant: parsedMerchant(parsed, event, family), instrument: instrument(event, parsed) } };
+        }
+        else {
+            const reviewMoney = event?.amount.evidence === 'explicit' ? sourceMoney(event.amount.value) : null;
+            if (!event || event.status !== 'posted' || !movementFamily(event.family) ||
+                (event.direction !== 'debit' && event.direction !== 'credit') || !reviewMoney)
+                return ignore();
+            result = { v: 1, parserVersion: sms_parser_1.PARSER_VERSION, route: 'review', provenance: 'unverified',
+                notification: { style: 'review', family: event.family, direction: event.direction, amount: reviewMoney,
+                    merchant: merchant(event.merchant.evidence === 'explicit' ? event.merchant.value : null), instrument: instrument(event) } };
+        }
+        return boundedUtf8(JSON.stringify(result), 2048) ? result : ignore();
+    }
+    catch {
+        return ignore();
+    }
+    finally {
+        resetContext();
+    }
+}
+},
+"latam-alert-templates":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.latamTemplateIds = exports.__latamTemplateTesting = exports.isLatamOwnCardPayment = exports.latamOwnTransferTitle = exports.latamPolicySource = exports.parseBrlFigure = exports.parsePenFigure = exports.parseMxnFigure = exports.parseCopFigure = void 0;
+exports.matchLatamTemplate = matchLatamTemplate;
+exports.latamTemplateEvent = latamTemplateEvent;
+exports.certifiedLatamTemplateId = certifiedLatamTemplateId;
+exports.isReviewOnlyLatamInstitution = isReviewOnlyLatamInstitution;
+const alert_institution_grammars_1 = require("@/lib/alert-institution-grammars");
+const best_effort_autopost_1 = require("@/lib/best-effort-autopost");
+const sms_parser_1 = require("@/lib/sms-parser");
+const universal_types_1 = require("@/lib/universal-types");
+const freeText = (group, max) => String.raw `(?<${group}>[^\s.!?¡¿][^!?¡¿\n\r\u2028\u2029]{0,${max}}?)`;
+const TOKENS = {
+    '{BRL}': String.raw `R\$~(?<amount>\d[\d.]*,\d{2})`,
+    '{COP}': String.raw `(?:\$|COP)~(?<amount>\d[\d.,]*\d|\d)`,
+    '{MXN}': String.raw `\$~(?<amount>\d[\d.,]*\d|\d)(?: MXN)?`,
+    '{PEN}': String.raw `S/\.?~(?<amount>\d[\d.,]*\d|\d)`,
+    '{M}': freeText('merchant', 78),
+    '{N}': freeText('name', 78),
+    '{P}': freeText('payee', 78),
+    '{PLACE}': freeText('place', 40),
+    '{CONCEPT}': freeText('concept', 60),
+    '{FROM}': freeText('from', 40),
+    '{TO}': freeText('to', 40),
+    '{KEY}': String.raw `(?<key>[^\s!?¡¿]{1,40})`,
+    '{DATE}': String.raw `(?<date>\d{2}/\d{2}/\d{4})`,
+    '{DATE2}': String.raw `(?<date>\d{2}/\d{2}/\d{2})`,
+    '{TIME}': String.raw `(?<time>\d{2}:\d{2}(?::\d{2})?)`,
+    '{BAL_BRL}': String.raw `R\$~(?<balance>\d[\d.]*,\d{2})`,
+    '{BAL_COP}': String.raw `\$~(?<balance>\d[\d.,]*\d)`,
+    '{FOOT}': String.raw `(?<footer>\s[\s\S]{0,240})?`,
+    '{NU}': String.raw `(?:Nubank(?:~[:·-])? )?`,
+};
+const HAS_MATCH_INDICES = (() => {
+    try {
+        return !!new RegExp('a', 'd').exec('a')?.indices;
+    }
+    catch {
+        return false;
+    }
+})();
+const compile = (template) => {
+    let source = template;
+    for (const [token, value] of Object.entries(TOKENS))
+        source = source.split(token).join(value);
+    source = source.replace(/ /g, String.raw `\s+`).replace(/~/g, String.raw `\s*`);
+    return new RegExp(String.raw `^\s*${source}\s*$`, HAS_MATCH_INDICES ? 'du' : 'u');
+};
+const t = (id, market, institution, identity, family, direction, mode, pattern, extra = {}) => ({
+    id, market, institution, identity, family, direction, mode,
+    currency: market === 'BR' ? 'BRL' : market === 'CO' ? 'COP' : market === 'MX' ? 'MXN' : 'PEN',
+    pattern: compile(pattern), ...extra,
+});
+const TEMPLATES = [
+    t('br-nubank-card-purchase-v1', 'BR', 'nubank-brasil', 'self', 'purchase', 'debit', 'approval', String.raw `{NU}Compra de {BRL}(?: em (?<installments>\d{1,2})x(?: de R\$~(?<parcel>\d[\d.]*,\d{2}))?)? APROVADA em {M} para o cartão(?: adicional)? com final (?<last4>\d{4})\.?`),
+    t('br-nubank-feed-purchase-v1', 'BR', 'nubank-brasil', 'self', 'purchase', 'debit', 'review', String.raw `{BRL} em {M} com Nubank final (?<last4>\d{4})\.?`),
+    t('br-nubank-approved-short-v1', 'BR', 'nubank-brasil', 'self', 'purchase', 'debit', 'review', String.raw `{NU}Compra aprovada no seu Nubank de {BRL} em {M}(?:\. Saldo disponível: {BAL_BRL})?\.?`),
+    t('br-nubank-debit-purchase-v1', 'BR', 'nubank-brasil', 'self', 'purchase', 'debit', 'posted', String.raw `Olá,? (?<name>[^\s,.!]{1,40})[,.!]? você acaba de comprar no débito (?:no|na|em) {M} o valor de {BRL}\.?`),
+    t('br-nubank-credit-purchase-v1', 'BR', 'nubank-brasil', 'self', 'purchase', 'debit', 'posted', String.raw `(?:Olá,? (?<name>[^\s,.!]{1,40})[,.!] )?Você acaba de comprar {BRL} em {M}\. A compra foi no crédito nacional, com o cartão final (?<last4>\d{4})\.?`),
+    t('br-nubank-pix-out-v1', 'BR', 'nubank-brasil', 'self', 'transfer', 'debit', 'posted', String.raw `{NU}(?:Transferência enviada[.!]? )?Você enviou {BRL} para {N} via Pix\.?`),
+    t('br-nubank-pix-out-v1', 'BR', 'nubank-brasil', 'self', 'transfer', 'debit', 'posted', String.raw `{NU}Você enviou {BRL} via Pix para {N}\.?`),
+    t('br-nubank-pix-in-v1', 'BR', 'nubank-brasil', 'self', 'transfer', 'credit', 'posted', String.raw `{NU}Você recebeu {BRL} de {N} via Pix\.?`),
+    t('br-nubank-pix-in-v1', 'BR', 'nubank-brasil', 'self', 'transfer', 'credit', 'posted', String.raw `{NU}Você recebeu uma transferência(?: Pix)? de {BRL} de {N}\.?`),
+    t('br-nubank-pix-in-v1', 'BR', 'nubank-brasil', 'self', 'transfer', 'credit', 'posted', String.raw `{NU}Transferência recebida de {N} no valor de {BRL}\.?`),
+    t('br-nubank-refund-v1', 'BR', 'nubank-brasil', 'self', 'refund', 'credit', 'posted', String.raw `{NU}Estorno de compra de {BRL} em {M} creditado\.?`),
+    t('br-nubank-card-bill-payment-v1', 'BR', 'nubank-brasil', 'self', 'transfer', 'debit', 'posted', String.raw `{NU}Pagamento da fatura de {BRL} confirmado\.?`, { ownTransfer: 'card-payment' }),
+    t('br-nubank-card-bill-payment-v1', 'BR', 'nubank-brasil', 'self', 'transfer', 'debit', 'posted', String.raw `{NU}Recebemos o pagamento de {BRL} da sua fatura\.?`, { ownTransfer: 'card-payment' }),
+    t('br-nubank-card-bill-payment-v1', 'BR', 'nubank-brasil', 'self', 'transfer', 'debit', 'posted', String.raw `{NU}Recebemos o pagamento da sua fatura de {BRL}\.?`, { ownTransfer: 'card-payment' }),
+    t('br-nubank-boleto-paid-v1', 'BR', 'nubank-brasil', 'self', 'purchase', 'debit', 'posted', String.raw `{NU}O pagamento do seu boleto no valor de {BRL} foi realizado com sucesso\.?`),
+    t('br-itau-card-purchase-v2', 'BR', 'itau-brasil', 'self', 'purchase', 'debit', 'approval', String.raw `Itaú: Compra aprovada no cartão final (?<last4>\d{4}) valor {BRL} (?:no|na|em) {M}(?:\. Saldo em conta: {BAL_BRL})?\.?`),
+    t('br-itau-itaucard-purchase-v1', 'BR', 'itau-brasil', 'self', 'purchase', 'debit', 'review', String.raw `(?:Itaú: )?Compra de {BRL} aprovada no cartão Itaucard em {M}(?:\. Limite disponível: {BAL_BRL})?\.?`),
+    t('br-itau-pix-out-v1', 'BR', 'itau-brasil', 'self', 'transfer', 'debit', 'posted', String.raw `Itaú: Você enviou um Pix de {BRL} para {N}\.?`),
+    t('br-itau-pix-out-v1', 'BR', 'itau-brasil', 'self', 'transfer', 'debit', 'posted', String.raw `Itaú: Pix de {BRL} realizado para {N}\.?`),
+    t('br-itau-pix-in-v1', 'BR', 'itau-brasil', 'self', 'transfer', 'credit', 'posted', String.raw `Itaú: Você recebeu um Pix de {BRL} de {N}\.?`),
+    t('br-itau-pix-in-v1', 'BR', 'itau-brasil', 'self', 'transfer', 'credit', 'posted', String.raw `Itaú: TED recebida no valor de {BRL} de {N}\.?`),
+    t('br-bradesco-card-purchase-v1', 'BR', 'bradesco-brasil', 'self', 'purchase', 'debit', 'review', String.raw `Bradesco Cartões: Compra de {BRL} aprovada em {M}(?:\. Saldo: {BAL_BRL})?\.?`),
+    t('br-bb-ourocard-purchase-v1', 'BR', 'banco-do-brasil', 'self', 'purchase', 'debit', 'approval', String.raw `BB: Compra com Ourocard (?<brand>[A-Za-z]{2,16}) final (?<last4>\d{4}) aprovada no valor de {BRL} em {M}(?:\. Saldo da conta: {BAL_BRL})?\.?`),
+    t('br-bb-short-purchase-v1', 'BR', 'banco-do-brasil', 'self', 'purchase', 'debit', 'review', String.raw `BB: Compra aprovada de {BRL} em {M}\.?`),
+    t('br-caixa-card-purchase-v1', 'BR', 'caixa-brasil', 'self', 'purchase', 'debit', 'approval', String.raw `CAIXA: Compra aprovada {BRL} em {M} no cartao final (?<last4>\d{4})(?:\. Saldo disponível: {BAL_BRL})?\.?`),
+    t('br-inter-card-purchase-v1', 'BR', 'inter-brasil', 'self', 'purchase', 'debit', 'approval', String.raw `Inter: Compra aprovada no cartao final (?<last4>\d{4}) de {BRL} em {M}\.?`),
+    t('br-inter-mastercard-purchase-v1', 'BR', 'inter-brasil', 'self', 'purchase', 'debit', 'review', String.raw `Inter: Compra de {BRL} aprovada no Inter Mastercard em {M}(?:\. Seu saldo é {BAL_BRL})?\.?`),
+    t('br-inter-pix-in-v1', 'BR', 'inter-brasil', 'self', 'transfer', 'credit', 'posted', String.raw `Inter: Você recebeu um Pix de {BRL} de {N}\.?`),
+    t('br-c6-card-purchase-v1', 'BR', 'c6-bank-brasil', 'self', 'purchase', 'debit', 'review', String.raw `C6 Bank: Compra aprovada no valor de {BRL} em {M}(?:\. Saldo em conta: {BAL_BRL})?\.?`),
+    t('br-santander-card-purchase-v1', 'BR', 'santander-brasil', 'self', 'purchase', 'debit', 'approval', String.raw `Santander: Compra aprovada de {BRL} no cartao (?<product>[A-Za-z0-9]{1,16}) final (?<last4>\d{4}) em {M}(?:\. Saldo em conta: {BAL_BRL})?\.?`),
+    t('br-mercadopago-payment-v1', 'BR', 'mercado-pago-brasil', 'self', 'purchase', 'debit', 'posted', String.raw `Mercado Pago: Você pagou {BRL} (?:em|a) {M}(?:\. Saldo disponível: {BAL_BRL})?\.?`),
+    t('br-mercadopago-card-purchase-v1', 'BR', 'mercado-pago-brasil', 'self', 'purchase', 'debit', 'posted', String.raw `(?:Mercado Pago: )?Você pagou {BRL} a {M} - O valor vai entrar na próxima fatura do seu Cartão Mercado Pago\.?`),
+    t('br-mercadopago-refund-v1', 'BR', 'mercado-pago-brasil', 'self', 'refund', 'credit', 'posted', String.raw `Mercado Pago: Reembolso de {BRL} creditado em sua conta\.?`),
+    t('br-picpay-payment-v1', 'BR', 'picpay-brasil', 'self', 'purchase', 'debit', 'review', String.raw `PicPay: Pagamento de {BRL} aprovado em {M}(?:\. Saldo em carteira: {BAL_BRL})?\.?`),
+    t('co-bancolombia-card-purchase-v1', 'CO', 'bancolombia', 'self', 'purchase', 'debit', 'posted', String.raw `Bancolombia: Compraste {COP} en {M} con tu T\.(?:Cred|Deb) \*(?<last4>\d{4}), el {DATE} a las {TIME}\.{FOOT}`),
+    t('co-bancolombia-card-purchase-v1', 'CO', 'bancolombia', 'self', 'purchase', 'debit', 'posted', String.raw `Bancolombia: Compraste {COP} en {M}, el {DATE} a las {TIME}\. Esta compra esta asociada a T\.(?:Cred|Deb) \*(?<last4>\d{4})\.{FOOT}`),
+    t('co-bancolombia-atm-v1', 'CO', 'bancolombia', 'self', 'cash-withdrawal', 'debit', 'posted', String.raw `Bancolombia: Retiraste {COP} en {PLACE} de tu T\.Deb \*{1,2}(?<last4>\d{4}) el {DATE} a las {TIME}\.{FOOT}`),
+    t('co-bancolombia-transfer-out-v1', 'CO', 'bancolombia', 'self', 'transfer', 'debit', 'posted', String.raw `Bancolombia: Transferiste {COP} desde tu cuenta \*?(?<last4>\d{4}) a la cuenta \*(?<counterpart>\d{4,16}) el {DATE} a las {TIME}\.{FOOT}`),
+    t('co-bancolombia-breb-out-v1', 'CO', 'bancolombia', 'self', 'transfer', 'debit', 'posted', String.raw `Bancolombia: {N}, transferiste {COP} a la llave {KEY} desde tu cuenta \*(?<last4>\d{4}) a {P} el {DATE2} a las {TIME}\.{FOOT}`),
+    t('co-bancolombia-qr-payment-v1', 'CO', 'bancolombia', 'self', 'purchase', 'debit', 'posted', String.raw `Bancolombia: {N} pagaste {COP} por codigo QR desde tu cuenta \*(?<last4>\d{4}) a la llave {KEY} el {DATE} a las {TIME}\.{FOOT}`),
+    t('co-bancolombia-boton-payment-v1', 'CO', 'bancolombia', 'self', 'purchase', 'debit', 'posted', String.raw `Bancolombia: Transferiste {COP} por Boton Bancolombia a {M} desde producto \*(?<last4>\d{4})\. {DATE} {TIME}\.?{FOOT}`),
+    t('co-bancolombia-card-payment-v1', 'CO', 'bancolombia', 'self', 'transfer', 'debit', 'posted', String.raw `Bancolombia: Pagaste {COP} en la tarjeta de credito \*(?<card>\d{4}) desde la cuenta \*(?<last4>\d{4}), el {DATE} {TIME}\.{FOOT}`, { ownTransfer: 'card-payment' }),
+    t('co-bancolombia-bill-payment-v1', 'CO', 'bancolombia', 'self', 'purchase', 'debit', 'posted', String.raw `Bancolombia: Pagaste {COP} a {M} desde tu producto \*?(?<last4>\d{4}) el {DATE} {TIME}\.{FOOT}`),
+    t('co-bancolombia-cash-advance-v1', 'CO', 'bancolombia', 'self', 'transfer', 'debit', 'posted', String.raw `Bancolombia: Hiciste un avance de {COP} en tu {PLACE} el {TIME} {DATE} desde tu T\.Credito \*(?<last4>\d{4}) a la cuenta \*(?<counterpart>\d{4})\.{FOOT}`, { ownTransfer: 'own-account' }),
+    t('co-bancolombia-transfer-in-v1', 'CO', 'bancolombia', 'self', 'transfer', 'credit', 'posted', String.raw `Bancolombia: Recibiste una transferencia por {COP} de {N} en tu cuenta \*{1,2}(?<last4>\d{4}), el {DATE} a las {TIME}\.{FOOT}`),
+    t('co-bancolombia-breb-in-v1', 'CO', 'bancolombia', 'self', 'transfer', 'credit', 'posted', String.raw `Bancolombia: {N}, recibiste una transferencia de {P} por {COP} en tu cuenta \*(?<last4>\d{4}) conectada a la llave {KEY} el {DATE2} a las {TIME}\.{FOOT}`),
+    t('co-bancolombia-payroll-v1', 'CO', 'bancolombia', 'self', 'transfer', 'credit', 'posted', String.raw `Bancolombia: Recibiste un pago de Nomina de {N} por {COP} en tu cuenta de Ahorros el {DATE} a las {TIME}\.{FOOT}`),
+    t('co-bancolombia-legacy-purchase-v1', 'CO', 'bancolombia', 'self', 'purchase', 'debit', 'review', String.raw `Bancolombia le informa [Cc]ompra por {COP}(?: con T\.(?:Deb|Cred) \*(?<last4>\d{4}))? en {M}(?: a las {TIME}\. {DATE})?(?:\. Saldo {BAL_COP})?\.?`),
+    t('co-bancolombia-legacy-atm-v1', 'CO', 'bancolombia', 'self', 'cash-withdrawal', 'debit', 'review', String.raw `Bancolombia le informa retiro por {COP} en {PLACE} a las {TIME}\. {DATE}(?:\. Saldo {BAL_COP})?\.?`),
+    t('co-bancolombia-legacy-transfer-in-v1', 'CO', 'bancolombia', 'self', 'transfer', 'credit', 'review', String.raw `Bancolombia le informa transferencia recibida de {N} por {COP}(?: el {DATE})?\.?`),
+    t('co-davivienda-purchase-v1', 'CO', 'davivienda', 'self', 'purchase', 'debit', 'approval', String.raw `DAVIVIENDA: Compra~\.~Aprobado\(a\),~{COP},~Tarjeta \*(?<last4>\d{4}),~Hora {TIME},~Lugar~{M}~\.`),
+    t('co-davivienda-advance-v1', 'CO', 'davivienda', 'self', 'cash-withdrawal', 'debit', 'approval', String.raw `DAVIVIENDA: Avance~\.~Aprobado\(a\),~{COP},~Tarjeta \*(?<last4>\d{4}),~Hora {TIME},~Lugar~{PLACE}~\.`),
+    t('co-nequi-payment-v1', 'CO', 'nequi', 'self', 'purchase', 'debit', 'posted', String.raw `(?:Nequi:? )?Pagaste {COP} a {M} con Nequi(?:\. Tu saldo disponible es {BAL_COP})?\.?`),
+    t('co-nequi-send-v1', 'CO', 'nequi', 'required', 'transfer', 'debit', 'posted', String.raw `(?:Nequi:? )?Enviaste {COP} a {N}\.?`),
+    t('co-nequi-receive-v1', 'CO', 'nequi', 'required', 'transfer', 'credit', 'posted', String.raw `(?:Nequi:? )?Te enviaron {COP} de parte de {N}\.(?: ¡Disfrútalos!)?`),
+    t('co-daviplata-send-v1', 'CO', 'daviplata', 'self', 'transfer', 'debit', 'posted', String.raw `DaviPlata le informa que paso plata por {COP} a (?<phone>\d{7,12})\. Nuevo saldo {BAL_COP}\.?`),
+    t('co-nu-purchase-v1', 'CO', 'nu-colombia', 'required', 'purchase', 'debit', 'approval', String.raw `(?:Nu(?: Colombia)?:? )?Compra aprobada por {COP}\.? Tu compra en {M} por \$~(?<amount2>\d[\d.,]*\d) con tu tarjeta (?:débito|crédito) terminada en (?<last4>\d{4})\.?`),
+    t('co-nu-purchase-body-v1', 'CO', 'nu-colombia', 'required', 'purchase', 'debit', 'review', String.raw `(?:Nu(?: Colombia)?:? )?Tu compra en {M} por {COP} con tu tarjeta (?:débito|crédito) terminada en (?<last4>\d{4})\.?`),
+    t('co-nu-transfer-in-v1', 'CO', 'nu-colombia', 'required', 'transfer', 'credit', 'posted', String.raw `(?:Nu(?: Colombia)?:? )?{N} te envió (?<amount>\d{1,3}(?:\.\d{3})*,\d{2})\.?`),
+    t('co-banco-de-bogota-purchase-v1', 'CO', 'banco-de-bogota', 'self', 'purchase', 'debit', 'review', String.raw `Banco de Bogot[aá]: compra por {COP} en {M}(?:\. Saldo {BAL_COP})?\.?`),
+    t('mx-bbva-spei-out-v1', 'MX', 'bbva-mexico', 'self', 'transfer', 'debit', 'posted', String.raw `(?:BBVA México:? )?Enviaste {MXN} a {N} vía SPEI\.?`),
+    t('mx-bbva-atm-v1', 'MX', 'bbva-mexico', 'required', 'cash-withdrawal', 'debit', 'posted', String.raw `(?:BBVA México:? )?Retiraste {MXN} en Cajero(?: Automático| BBVA)?\.?`),
+    t('mx-bbva-transfer-out-v1', 'MX', 'bbva-mexico', 'required', 'transfer', 'debit', 'posted', String.raw `(?:BBVA México:? )?Transferencia enviada por {MXN} a {N}(?: concepto {CONCEPT})?\.?`),
+    t('mx-bbva-transfer-in-v1', 'MX', 'bbva-mexico', 'required', 'transfer', 'credit', 'posted', String.raw `(?:BBVA México:? )?Transferencia recibida por {MXN} de {N}(?: concepto {CONCEPT})?\.?`),
+    t('mx-bbva-purchase-v1', 'MX', 'bbva-mexico', 'required', 'purchase', 'debit', 'review', String.raw `(?:BBVA México:? )?Compra por {MXN} en {M} con tarjeta(?: (?:débito|crédito))? \*(?<last4>\d{4})(?: el {DATE} a las {TIME} hrs)?\.?`),
+    t('mx-bbva-authorized-purchase-v1', 'MX', 'bbva-mexico', 'required', 'purchase', 'debit', 'review', String.raw `(?:BBVA México:? )?Compra autorizada por {MXN} en {M}\.?`),
+    t('mx-bbva-approved-purchase-v1', 'MX', 'bbva-mexico', 'required', 'purchase', 'debit', 'review', String.raw `(?:BBVA México:? )?Tu compra en {M} por {MXN} fue aprobada\.?`),
+    t('mx-bbva-cardless-withdrawal-v1', 'MX', 'bbva-mexico', 'required', 'cash-withdrawal', 'debit', 'review', String.raw `(?:BBVA México:? )?Retiro sin tarjeta por {MXN} en Cajero BBVA el {DATE}\.?`),
+    t('mx-bbva-own-transfer-v1', 'MX', 'bbva-mexico', 'required', 'transfer', 'debit', 'review', String.raw `(?:BBVA México:? )?Traspaso entre tus cuentas por {MXN} de {FROM} a {TO}\.?`),
+    t('pe-yape-received-v1', 'PE', 'yape', 'self', 'transfer', 'credit', 'posted', String.raw `(?:Yape!? )?{N} te (?:ha enviado|envió|envio|envío) un pago (?:por|de) {PEN}\.?(?: (?<codeClause>(?:El )?[Cc]ód(?:igo|\.) de seguridad(?: es)?:~(?<code>\d{3})\.?))?`, { receiptCode: true }),
+    t('pe-yape-received-v1', 'PE', 'yape', 'self', 'transfer', 'credit', 'posted', String.raw `Te yape(?:ó|o) {PEN} {N}\.?`),
+    t('pe-yape-received-v1', 'PE', 'yape', 'self', 'transfer', 'credit', 'posted', String.raw `¡Te yapearon!~{PEN}\.?`),
+    t('pe-yape-received-v1', 'PE', 'yape', 'self', 'transfer', 'credit', 'posted', String.raw `Recibiste un yape de {PEN} de {N}\.?`),
+    t('pe-yape-sent-v1', 'PE', 'yape', 'self', 'transfer', 'debit', 'posted', String.raw `¡Genial! Tu pago ha sido enviado a {N} por {PEN}\.?`),
+    t('pe-yape-sent-v1', 'PE', 'yape', 'self', 'transfer', 'debit', 'posted', String.raw `Yapeaste {PEN} a {N}\.?`),
+    t('pe-yape-sent-v1', 'PE', 'yape', 'self', 'transfer', 'debit', 'posted', String.raw `Has enviado el monto de {PEN}\.?(?:~[\p{Extended_Pictographic}\u{FE0F}]+)?`),
+    t('pe-bcp-consumo-v1', 'PE', 'bcp', 'self', 'purchase', 'debit', 'posted', String.raw `(?:BCP: )?Realizaste un consumo de {PEN} en {M} con tu tarjeta \*{4}(?<last4>\d{4})\.?`),
+    t('pe-bcp-card-purchase-v1', 'PE', 'bcp', 'self', 'purchase', 'debit', 'review', String.raw `(?:BCP: )?Compra con tarjeta BCP(?: (?:débito|crédito))? por {PEN} en {M}\.?`),
+    t('pe-bcp-transfer-out-v1', 'PE', 'bcp', 'self', 'transfer', 'debit', 'review', String.raw `(?:BCP: )?Transferencia efectuada por {PEN} a {N}\.?`),
+    t('pe-bcp-transfer-in-v1', 'PE', 'bcp', 'self', 'transfer', 'credit', 'review', String.raw `(?:BCP: )?Transferencia recibida por {PEN} de {N}\.?`),
+    t('pe-plin-received-v1', 'PE', 'plin', 'self', 'transfer', 'credit', 'review', String.raw `Plin: Recibiste {PEN} de {N}\.?`),
+    t('pe-plin-received-v1', 'PE', 'plin', 'self', 'transfer', 'credit', 'review', String.raw `{N} te envió un plin de {PEN}\.?`),
+    t('pe-plin-sent-v1', 'PE', 'plin', 'self', 'transfer', 'debit', 'review', String.raw `(?:Plin: )?Le enviaste {PEN} a {N}\.?`),
+];
+const PREFILTER = /R\$|\$|COP|S\/|te envi[oóí]|\d,\d{2}/u;
+const NEGATION = /rechaz|recus|negad[oa]|insuficient|declin|fallid|falh|cancel|anulad|anulaci|revertid|revers|estornad|bloquead|bloquea/iu;
+const NEGATION_PT = /(?<![\p{L}\p{N}])(?:n[ãa]o|nunca|jamais)(?![\p{L}\p{N}])/iu;
+const NEGATION_ES = /(?<![\p{L}\p{N}])(?:no|nunca|jam[aá]s|ni)(?![\p{L}\p{N}])/iu;
+const CONFIRMATION = /(?<![\p{L}])(?:confirme|confirmar|confirma(?=\s)|responda|responde|reconoces|reconhece|autorizas|autoriza\s+esta|sim)(?![\p{L}])|foi\s+voc[eê]|fuiste\s+t[uú]|toque\s+aqui|clique|haz\s+clic|ingresa\s+aqu|[?¿]/iu;
+const HELP_QUESTION = /¿\s*dudas\s*\?/giu;
+const PENDING_OR_HOLD = /pendent|pendient|en\s+proceso|em\s+processamento|em\s+an[aá]lise|en\s+an[aá]lisis|retenid|reservad|pr[eé]-?autoriz|preautoriz|agendad|agendament|programad|(?<![\p{L}])ser[aá](?![\p{L}])|se\s+(?:cargar|debitar|abonar)[aá]|en\s+espera|aguard|por\s+aceptar|(?<![\p{L}])(?:acepta|aceita|hold|amanh[ãa]|ma[ñn]ana)(?![\p{L}])/iu;
+const CODE_OR_OTP = /c[óo]d(?:igo|\.)|token|(?<![\p{L}])otp(?![\p{L}])|clave|senha|contrase[ñn]a|verificaci|verifica[çc]/iu;
+const OFFER_OR_LOAN = /empr[eé]stimo|pr[eé]-?aprova|pr[eé]-?aproba|cashback|cup[oó]n|cupom|promo|oferta|ganhe|ganha|gan[aá]ste|garant|simul|invist|invierte|meses\s+sin\s+intereses|desconto|descuento|l[ií]mite|(?<![\p{L}])cupo(?![\p{L}])|pr[eé]stamo|cr[eé]dito\s+(?:pre|dispon)/iu;
+const LINK = /https?:\/\/|www\.|(?<![\p{L}])bit\.ly|\.(?:com|co|pe|mx|br)\/\S/iu;
+const QR_CHANNEL = /c[óo]digo\s+QR/giu;
+const CAPTURE_NEGATION = /(?<![\p{L}])(?:no|n[ãa]o)\s+(?:fue\s+|foi\s+)?(?:realizad|aprobad|aprovad|autorizad|procesad|efetuad|efectuad|conclu|exitos|reconoc|reconhec|completad)/iu;
+const CAPTURE_REFUND = /estorn|extorn|reembols|devolu[cç]/iu;
+const NOT_COMPLETED = /proces?s(?:ad|and)|devol|devuel|fall[oó]|sin\s+[eé]xito|sem\s+sucesso|tr[aá]mite|no\s+se\s+pudo|suspen|contestad|desfeit|extorn|(?<![\p{L}])erro(?:r)?(?![\p{L}])|fail|pending|refund|revert|(?<![\p{L}])void|inv[aá]lid|em\s+aberto/iu;
+const FREE_TEXT_GROUPS = new Set(['merchant', 'name', 'payee', 'key', 'place', 'concept', 'from', 'to', 'brand', 'product']);
+const captureVetoed = (value) => {
+    const text = value.replace(QR_CHANNEL, ' ');
+    return NEGATION.test(text) || CAPTURE_NEGATION.test(text) || CAPTURE_REFUND.test(text) ||
+        NOT_COMPLETED.test(text) || CONFIRMATION.test(text) || PENDING_OR_HOLD.test(text) || CODE_OR_OTP.test(text);
+};
+const toMinor = (integer, fraction) => BigInt(integer) * 100n + BigInt((fraction + '00').slice(0, 2));
+const parseCopFigure = (figure) => {
+    if (/^\d+$/.test(figure))
+        return { minor: toMinor(figure, '') };
+    const match = /^(\d{1,3})((?:([.,])\d{3})(?:\3\d{3})*)?(?:([.,])(\d{2}))?$/.exec(figure);
+    if (!match)
+        return 'conflict';
+    const [, head, groups = '', groupSep, decimalSep, fraction = ''] = match;
+    if (!groups && !decimalSep)
+        return 'conflict';
+    if (groupSep && decimalSep && groupSep === decimalSep)
+        return 'conflict';
+    return { minor: toMinor(head + groups.replace(/[.,]/g, ''), fraction) };
+};
+exports.parseCopFigure = parseCopFigure;
+const parseMxnFigure = (figure) => {
+    const match = /^(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{2}))?$/.exec(figure);
+    return match ? { minor: toMinor(match[1].replace(/,/g, ''), match[2] ?? '') } : 'conflict';
+};
+exports.parseMxnFigure = parseMxnFigure;
+const parsePenFigure = (figure) => {
+    const match = /^(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{2}))?$/.exec(figure);
+    return match ? { minor: toMinor(match[1].replace(/,/g, ''), match[2] ?? '') } : 'conflict';
+};
+exports.parsePenFigure = parsePenFigure;
+const parseBrlFigure = (figure) => {
+    const match = /^(\d{1,3}(?:\.\d{3})*|\d+),(\d{2})$/.exec(figure);
+    return match ? { minor: toMinor(match[1].replace(/\./g, ''), match[2]) } : 'conflict';
+};
+exports.parseBrlFigure = parseBrlFigure;
+const parseFigure = (currency, figure) => currency === 'COP' ? (0, exports.parseCopFigure)(figure)
+    : currency === 'MXN' ? (0, exports.parseMxnFigure)(figure)
+        : currency === 'PEN' ? (0, exports.parsePenFigure)(figure) : (0, exports.parseBrlFigure)(figure);
+const money = (currency, minor) => ({ currency, minorUnits: minor.toString(), exponent: 2 });
+const isoDate = (value) => {
+    if (!value)
+        return null;
+    const match = /^(\d{2})\/(\d{2})\/(\d{2}|\d{4})$/.exec(value);
+    if (!match)
+        return null;
+    const day = Number(match[1]);
+    const month = Number(match[2]);
+    const year = match[3].length === 2 ? 2000 + Number(match[3]) : Number(match[3]);
+    const probe = new Date(Date.UTC(year, month - 1, day));
+    if (probe.getUTCFullYear() !== year || probe.getUTCMonth() !== month - 1 || probe.getUTCDate() !== day)
+        return null;
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+};
+const identified = (source, template, sender, institution) => {
+    if (template.identity === 'self' || institution === template.institution)
+        return true;
+    const review = (0, alert_institution_grammars_1.inspectAlertInstitutionGrammar)(source, template.market, sender);
+    return review.decision === 'identified' && review.institution === template.institution;
+};
+const freeTextSpans = (source, match, useIndices) => {
+    const groups = match.groups ?? {};
+    const indexed = useIndices ? match.indices?.groups : undefined;
+    if (indexed) {
+        return Object.keys(groups).flatMap((name) => {
+            const span = indexed[name];
+            return FREE_TEXT_GROUPS.has(name) && span && span[1] > span[0] ? [span] : [];
+        });
+    }
+    const spans = [];
+    let cursor = match.index;
+    for (const name of Object.keys(groups)) {
+        const value = groups[name];
+        if (!value)
+            continue;
+        const at = source.indexOf(value, cursor);
+        if (at < 0)
+            continue;
+        if (FREE_TEXT_GROUPS.has(name))
+            spans.push([at, at + value.length]);
+        cursor = at + value.length;
+    }
+    return spans;
+};
+const SENTENCE_BREAK = /\.\s/u;
+const blankableSpan = (source, [start, end]) => {
+    const at = source.slice(start, end).search(SENTENCE_BREAK);
+    return at < 0 ? [start, end] : [start, start + at + 1];
+};
+const blankSpans = (text, spans) => {
+    let out = text;
+    for (const [start, end] of spans)
+        out = out.slice(0, start) + ' '.repeat(end - start) + out.slice(end);
+    return out;
+};
+const guardsPass = (guardText, market) => {
+    const text = guardText.replace(QR_CHANNEL, ' ').replace(HELP_QUESTION, ' ');
+    return !NEGATION.test(text) && !(market === 'BR' ? NEGATION_PT : NEGATION_ES).test(text) &&
+        !NOT_COMPLETED.test(text) && !CONFIRMATION.test(text) && !PENDING_OR_HOLD.test(text) &&
+        !CODE_OR_OTP.test(text) && !OFFER_OR_LOAN.test(text) && !LINK.test(text);
+};
+const figureStart = (source, match, figure) => {
+    if (!figure)
+        return -1;
+    let at = source.indexOf(figure, match.index);
+    const first = at;
+    while (at >= 0) {
+        if (/(?:R\$|\$|COP|S\/\.?)\s*$/u.test(source.slice(Math.max(0, at - 6), at)))
+            return at;
+        at = source.indexOf(figure, at + 1);
+    }
+    return first;
+};
+const cleanMerchant = (value) => {
+    const merchant = value?.replace(/\s+/gu, ' ').trim();
+    return merchant && /\p{L}/u.test(merchant) ? merchant : null;
+};
+function matchLatamTemplate(source, context = {}) {
+    return matchTemplates(source, context, HAS_MATCH_INDICES);
+}
+function matchTemplates(source, context, useIndices, onGuardText) {
+    if (typeof source !== 'string' || source.length > 1024 || !PREFILTER.test(source))
+        return null;
+    const sender = context.sender?.slice(0, 256) ?? '';
+    for (const template of TEMPLATES) {
+        if (context.market && context.market !== template.market)
+            continue;
+        const match = template.pattern.exec(source);
+        if (!match || !identified(source, template, sender, context.institution))
+            continue;
+        const groups = match.groups ?? {};
+        const parsed = parseFigure(template.currency, groups.amount ?? '');
+        if (parsed !== 'conflict' && parsed.minor <= 0n)
+            return null;
+        let amountIssue = parsed === 'conflict' ? 'amount-format-conflict' : null;
+        if (parsed !== 'conflict' && groups.amount2) {
+            const second = parseFigure(template.currency, groups.amount2);
+            if (second === 'conflict' || second.minor !== parsed.minor)
+                amountIssue = 'amount-format-conflict';
+        }
+        if (!amountIssue && parsed !== 'conflict' && template.currency === 'COP' &&
+            template.family === 'purchase' && parsed.minor < 5000n)
+            amountIssue = 'amount-implausible';
+        const policySource = template.receiptCode && groups.codeClause
+            ? source.replace(groups.codeClause, '').trim()
+            : source;
+        const spans = freeTextSpans(source, match, useIndices);
+        const guardText = blankSpans(template.receiptCode && groups.codeClause
+            ? source.replace(groups.codeClause, ' '.repeat(groups.codeClause.length))
+            : source, spans.map((span) => blankableSpan(source, span)));
+        const last4 = groups.last4 && /^\d{4}$/.test(groups.last4) ? groups.last4 : null;
+        onGuardText?.(guardText);
+        const guarded = guardsPass(guardText, template.market);
+        const captureVeto = spans.some(([start, end]) => captureVetoed(source.slice(start, end)));
+        const certified = template.mode === 'posted' || (template.mode === 'approval' && last4 !== null);
+        if (template.mode !== 'review' && !guarded)
+            return null;
+        const balanceParsed = groups.balance ? parseFigure(template.currency, groups.balance) : null;
+        return {
+            templateId: template.id,
+            market: template.market,
+            institution: template.institution,
+            family: template.family,
+            direction: template.direction,
+            status: certified && guarded && !captureVeto && !amountIssue ? 'posted' : 'unknown',
+            money: parsed === 'conflict' ? null : money(template.currency, parsed.minor),
+            amountIssue,
+            merchant: template.family === 'transfer' ? null : cleanMerchant(groups.merchant),
+            amountStart: figureStart(source, match, groups.amount),
+            last4,
+            instrumentKind: last4
+                ? new RegExp(String.raw `(?:cuenta|producto|conta)\s*\*{0,2}${last4}(?!\d)`, 'iu').test(match[0]) ? 'account' : 'card'
+                : null,
+            transactionDate: isoDate(groups.date),
+            balance: balanceParsed && balanceParsed !== 'conflict' ? money(template.currency, balanceParsed.minor) : null,
+            ownTransfer: template.ownTransfer ?? null,
+            paidCard: template.ownTransfer === 'card-payment' && groups.card && /^\d{4}$/.test(groups.card) ? groups.card : null,
+            policySource,
+        };
+    }
+    return null;
+}
+const latamPolicySource = (source, context = {}) => matchLatamTemplate(source, context)?.policySource ?? source;
+exports.latamPolicySource = latamPolicySource;
+const latamOwnTransferTitle = (source, context = {}) => {
+    const match = matchLatamTemplate(source, context);
+    if (!match || match.status !== 'posted' || !match.ownTransfer)
+        return null;
+    return match.ownTransfer === 'card-payment' ? 'Card payment' : 'Own account transfer';
+};
+exports.latamOwnTransferTitle = latamOwnTransferTitle;
+const isLatamOwnCardPayment = (source, context = {}) => {
+    const match = matchLatamTemplate(source, context);
+    return !!match && match.status === 'posted' && match.ownTransfer === 'card-payment' && match.paidCard !== null;
+};
+exports.isLatamOwnCardPayment = isLatamOwnCardPayment;
+const explicit = (value, source, text) => {
+    const at = text ? source.indexOf(text) : -1;
+    return {
+        value, evidence: 'explicit', alternatives: [], issues: [],
+        spans: at >= 0 && text ? [{ start: at, end: at + text.length }] : [],
+    };
+};
+function latamTemplateEvent(source, match) {
+    const figure = match.amountStart >= 0
+        ? /^\d[\d.,]*\d|^\d/u.exec(source.slice(match.amountStart))?.[0] ?? null
+        : null;
+    const amount = match.money && !match.amountIssue
+        ? {
+            value: match.money, evidence: 'explicit', alternatives: [], issues: [],
+            spans: figure ? [{ start: match.amountStart, end: match.amountStart + figure.length }] : [],
+        }
+        : {
+            value: null,
+            evidence: match.money ? 'ambiguous' : 'missing',
+            spans: [],
+            alternatives: match.money ? [match.money] : [],
+            issues: [match.amountIssue ?? 'amount-format-conflict'],
+        };
+    const balance = match.balance ? explicit(match.balance, source, null) : (0, universal_types_1.missingUniversalField)();
+    const observations = [
+        { role: 'transaction', field: amount },
+        ...(match.balance ? [{ role: 'balance', field: balance }] : []),
+    ];
+    const posted = match.status === 'posted';
+    const cardPayment = match.ownTransfer === 'card-payment' && match.paidCard !== null;
+    return {
+        version: 1,
+        decision: 'review',
+        family: cardPayment ? 'card-payment' : match.family,
+        status: match.status,
+        direction: match.direction,
+        amount,
+        statementTotal: (0, universal_types_1.missingUniversalField)(),
+        minimumDue: (0, universal_types_1.missingUniversalField)(),
+        balance,
+        creditLimit: (0, universal_types_1.missingUniversalField)(),
+        merchant: match.merchant ? explicit(match.merchant, source, match.merchant) : (0, universal_types_1.missingUniversalField)('merchant-unresolved'),
+        transactionDate: match.transactionDate
+            ? { value: match.transactionDate, evidence: 'explicit', spans: [], alternatives: [], issues: [] }
+            : (0, universal_types_1.missingUniversalField)(),
+        dueDate: (0, universal_types_1.missingUniversalField)(),
+        statementDate: (0, universal_types_1.missingUniversalField)(),
+        instrument: cardPayment && match.paidCard
+            ? { value: { kind: 'card', last4: match.paidCard }, evidence: 'explicit', spans: [], alternatives: [], issues: [] }
+            : match.last4 && match.instrumentKind
+                ? { value: { kind: match.instrumentKind, last4: match.last4 }, evidence: 'explicit', spans: [], alternatives: [], issues: [] }
+                : (0, universal_types_1.missingUniversalField)(),
+        observations,
+        issues: [
+            ...(posted ? [] : ['posting-status-unresolved', 'latam-template-review-only']),
+            ...(match.amountIssue ? [match.amountIssue] : []),
+            ...(match.merchant ? [] : ['merchant-unresolved']),
+            ...(match.transactionDate ? [] : ['transaction-date-unresolved']),
+        ],
+    };
+}
+function certifiedLatamTemplateId(source, market, institution, event) {
+    if (!institution || event.status !== 'posted')
+        return null;
+    const match = matchLatamTemplate(source, { market, institution });
+    if (!match || match.status !== 'posted' || match.institution !== institution ||
+        match.family !== event.family || match.direction !== event.direction)
+        return null;
+    if ((0, sms_parser_1.nonPostingReason)(source) !== null || (0, best_effort_autopost_1.hasNonCompletedWording)(match.policySource, market))
+        return null;
+    return match.templateId;
+}
+const REVIEW_ONLY_IDENTITIES = [
+    {
+        market: 'PE',
+        institutions: ['plin', 'interbank', 'bbva-peru', 'scotiabank-peru'],
+        context: /(?<![\p{L}\p{N}/.])S\/\.?\s?\d|\bPEN\s?\d|\d\s?PEN\b|\bper[uú](?![\p{L}])/iu,
+    },
+    { market: 'MX', institutions: ['santander-mexico', 'citibanamex'] },
+];
+function isReviewOnlyLatamInstitution(source, sender, routedMarket) {
+    for (const { market, institutions, context } of REVIEW_ONLY_IDENTITIES) {
+        if (routedMarket && routedMarket !== market)
+            continue;
+        const review = (0, alert_institution_grammars_1.inspectAlertInstitutionGrammar)(source, market, sender);
+        const inMarket = !context || routedMarket === market || context.test(source);
+        if (review.candidates.some((candidate) => institutions.includes(candidate.institution) &&
+            (inMarket || candidate.evidence.includes('sender'))))
+            return true;
+    }
+    return false;
+}
+exports.__latamTemplateTesting = {
+    guardText: (source, context = {}, useIndices = HAS_MATCH_INDICES) => {
+        let seen = null;
+        matchTemplates(source, context, useIndices && HAS_MATCH_INDICES, (text) => { seen = text; });
+        return seen;
+    },
+    status: (source, context = {}, useIndices = HAS_MATCH_INDICES) => matchTemplates(source, context, useIndices && HAS_MATCH_INDICES)?.status ?? null,
+};
+const latamTemplateIds = (mode) => [...new Set(TEMPLATES.filter((template) => !mode || template.mode === mode).map((template) => template.id))];
+exports.latamTemplateIds = latamTemplateIds;
+},
+"launch-alert-parser":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.parsePastedBankAlerts = exports.createLaunchAlertSession = exports.isHeldLaunchCredit = exports.isUnaccountableLaunchSender = exports.universalSourceParseContext = exports.inspectGenericBankEventForReview = exports.hasGenericBankAlertContext = exports.hasPersonalMessagePrefix = exports.hasBankAlertMoneyHint = exports.REVIEW_MONEY_HINT = void 0;
+const alert_market_detection_1 = require("@/lib/alert-market-detection");
+const alert_institution_grammars_1 = require("@/lib/alert-institution-grammars");
+const country_1 = require("@/lib/country");
+const best_effort_autopost_1 = require("@/lib/best-effort-autopost");
+const bank_alert_interpreter_1 = require("@/lib/bank-alert-interpreter");
+const markets_1 = require("@/lib/markets");
+const bnpl_providers_1 = require("@/lib/bnpl-providers");
+const sms_parser_1 = require("@/lib/sms-parser");
+const currency_metadata_1 = require("@/lib/currency-metadata");
+const gulf_neighbour_alerts_1 = require("@/lib/gulf-neighbour-alerts");
+const universal_parser_1 = require("@/lib/universal-parser");
+const alert_market_packs_1 = require("@/lib/alert-market-packs");
+const alert_draft_1 = require("@/lib/alert-draft");
+const latam_alert_templates_1 = require("@/lib/latam-alert-templates");
+const universal_categorization_1 = require("@/lib/universal-categorization");
+const fx_rates_1 = require("@/lib/fx-rates");
+exports.REVIEW_MONEY_HINT = /\b(?:USD|GBP|EUR|INR|QAR|KWD|BHD|OMR|EGP|JOD|CAD|AUD|BRL|MXN|SGD|Rs\.?|KD|BD|RO|R\.O\.|LE|L\.E\.|JD)\b|\bQR\s{0,3}\d{1,3}(?:,\d{3})*\.\d{2}(?!\d)|(?<![\d.,])\d{1,3}(?:,\d{3})*\.\d{2}\s{0,3}QR\b|\b(?:COP|PEN)\s?\d|(?<![\p{L}\p{N}/.])S\/\.?\s?\d|[$€£₹]|ر\.ق|د\.ك|د\.ب|ر\.ع|ج\.م|د\.[أا]|دينار\s+(?:كويتي|بحريني)|ريال\s+(?:قطري|عماني)/iu;
+const LAUNCH_MONEY_HINT = /(?:\b|(?<=\d))(?:AED|Dhs?\.?|SAR|SR)\b|د\.?[إا]\.?|دراهم|درهم|ر\.?\s?س\.?|ريال/iu;
+const hasBankAlertMoneyHint = (source) => exports.REVIEW_MONEY_HINT.test(source) || LAUNCH_MONEY_HINT.test(source) ||
+    /(?<![\p{L}\p{N}])TSh\s*\d/iu.test(source) ||
+    [...source.matchAll(/(?<![A-Z])([A-Z]{3})(?![A-Z])/giu)]
+        .some((match) => (0, currency_metadata_1.currencyMinorUnits)(match[1]) !== null) ||
+    Object.keys(currency_metadata_1.CURRENCY_SYMBOL_CANDIDATES).some((symbol) => symbol.length >= 3
+        ? source.toLowerCase().includes(symbol.toLowerCase()) : source.includes(symbol));
+exports.hasBankAlertMoneyHint = hasBankAlertMoneyHint;
+const UNIVERSAL_POSTED_EVENT_HINT = /(?<![\p{L}\p{N}])(?:purchase|purchased|debit(?:ed)?|credit(?:ed)?|charged|charge\s+(?:of|made)|deducted|spent|paid|payment|received|refund(?:ed)?|reversal|withdraw(?:n|al)?|withdrew|made\s+an?|was\s+made|used\s+for|deposit(?:ed)?|transferr(?:ed|ing)|sent|realizad[oa]|efetuad[oa]|zrealizowana|consumo|realizaste|lastschrift|paiement|gerçekleşmiştir|gelmiştir|alışveriş\w*|havale|virement|reçu|pix|enviado|enviou|recebeu|recebido|transaksi|berhasil|kaartbetaling|voltooid|cash\s+(?:withdrawal|advance)|used\s+(?:for|at|on)|transaction|completed|processed|successful|successfully|approved|authori[sz]ed|settled|posted|débité|crédité|effectué|payé|payée|belastet|abgebucht|bezahlt|gutgeschrieben|cargado|pagado|abonado|addebitato|pagata|accreditato|afgeschreven|betaald|bijgeschreven)(?![\p{L}\p{N}])|(?:خصم|دفع|شراء|سحب|تحويل|ايداع|إيداع|استرداد|استرجاع|تمت|تم|ご利用|利用金額|消费|支付|승인|डेबिट|क्रेडिट)/iu;
+const UNIVERSAL_FIELD_LIST_HINT = /\bcards?\b[\s\S]{0,120}\bAED\b[^\d]{0,12}\d[\s\S]{0,120}\b(?:at|to)\b/iu;
+const shouldTryUniversalPosting = (source, sender) => (0, alert_institution_grammars_1.hasUniversalInstitutionSender)(sender) ||
+    UNIVERSAL_POSTED_EVENT_HINT.test(source) ||
+    (!!(0, markets_1.detectLaunchMarketFromSender)(sender) && UNIVERSAL_FIELD_LIST_HINT.test(source)) ||
+    (0, latam_alert_templates_1.matchLatamTemplate)(source, { sender }) !== null;
+const GENERIC_BANK_CONTEXT = /\b(?:(?:credit|debit|covered|prepaid|charge)\s+card|card\s+(?:purchase|payment|ending|number|no\b)|(?:your|available|current)\s+(?:account|balance|credit)|bank\s+(?:alert|account|fee|transfer|statement|notification)|(?:minimum|total)\s+(?:amount\s+)?due|(?:account|a\/?c)\s+(?:ending|number|no\b)|(?:a\/c|acc(?:oun)?t)\.?\s*(?:no\.?\s*)?[*xX•·]{2,}\d{2,6}\s+(?:is\s+|has\s+been\s+|was\s+)?(?:credited|debited)|sent\s+to\s+(?:your\s+)?(?:[A-Za-z][A-Za-z&]{1,2}\s+){0,3}(?:a\/c|acc(?:oun)?t)\.?\s*(?:no\.?\s*)?[*xX•·]+\d{2,6}|iban|swift|sepa|upi|neft|imps|statement|paiement\s+par\s+carte|kartenzahlung|kontoauszug|compra\s+con\s+tarjeta|pagamento\s+con\s+carta|rekeningoverzicht)\b|بطاق[هة]|حساب|رصيد|كشف\s+حساب|فاتور[هة]/iu;
+const MONEY_ARRIVED_CLAIM = /(?<!\p{L})(?:you\s+have\s+received|you\s+received|received\s+(?:from|for)|(?:is|has\s+been|was)\s+credited|credited\s+(?:to|in|into|with)|deposited|refund(?:ed)?|recebeu|recebid[oa]|creditad[oa]|estorno|recibiste|recibid[oa]|te\s+(?:envi[óo]|ha\s+enviado)|yape[óo]|abonad[oa]|acreditad[oa]|reembolso|devoluci[óo]n|re[çc]u|cr[ée]dit[ée]e?|gutgeschrieben|diterima|dikreditkan)(?!\p{L})/iu;
+const MONEY_CLAIM_EVIDENCE = /(?<!\p{L})(?:\p{L}*bank|banco|banque|wallet|carteira|billetera|account|acct|a\/c|conta|cuenta|compte|konto|rekening|balance|bal|avl|saldo|solde|ref(?:erence)?|txn|trx|tid|transaction|transfer|transferencia|transfer[êe]ncia|virement|[ée]-?transfer|pix|spei|aani|sarie|yape|plin|nequi|daviplata|m-?pesa|mpesa|upi|imps|neft|rtgs|zelle|interac|gcash|maya|paytm|jazzcash|easypaisa|momo|airtel\s+money)(?!\p{L})/iu;
+const TRANSACTION_CODE = /\b(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{8,12}\b/u;
+const PERSONAL_MESSAGE_PREFIX_RE = /^\s*(?:(?:hi|hey|hello)\b(?:[^\r\n.!?]{0,40}[,!:]|\s+)\s*)?(?:I(?:\s+(?:(?:have|just|already)\s+){0,2}|['’]ve\s+(?:(?:just|already)\s+)?)(?:spent|paid|bought|sent|deposited|transferred|refunded)\b|[اأ]نا\s+(?:(?:قد|لقد)\s+)?(?:صرفت|دفعت|اشتريت|حولت|حوّلت|أرسلت|ارسلت)(?=\s))/iu;
+const hasPersonalMessagePrefix = (source) => PERSONAL_MESSAGE_PREFIX_RE.test(source);
+exports.hasPersonalMessagePrefix = hasPersonalMessagePrefix;
+const NEGATED_PRINCIPAL_MOVEMENT_RE = /^\s*(?:Dear\s+Customer[,!:]\s*)?((?:[A-Z]{3}|\p{Sc})\s*\d[\d,.]*)\s+(?:(?:has|have)\s+not\s+been|hasn['’]t\s+been|(?:was|were|is|are)\s+not|(?:was|were|is|are)n['’]t)\s+(?:transferred|debited|credited|deducted|charged|withdrawn|paid|deposited|refunded)\b/iu;
+const hasNegatedPrincipalMovement = (source) => {
+    const match = NEGATED_PRINCIPAL_MOVEMENT_RE.exec(source);
+    return !!match && (0, exports.hasBankAlertMoneyHint)(match[1]);
+};
+const PERSONAL_CHAT = /\b(?:from\s+me|i\s+(?:have\s+|'ve\s+|just\s+)?(?:sent|deposited|transferred|paid|refunded)|sent\s+it|did\s+(?:you|u)\s+(?:get|receive)|have\s+(?:you|u)\s+(?:got|received)|te\s+mandei|ukipata|nimekutumia)\b/iu;
+const hasNativeCurrencyAccountContext = (source) => (0, country_1.getActiveCountry)() === 'ZA' && ZA_RAND_HINT.test(source) &&
+    /\b(?:a\/c|acct?|account)\s*(?:ending(?:\s+in)?\s*|[.*x•·]{2,})\d{4,12}\b/iu.test(source) &&
+    /(?<![\p{L}\p{N}])R\s?\d[\d,.]{0,20}\s+(?:(?:has\s+been|was)\s+)?(?:paid|debited|credited|deposited|received)\b/iu.test(source) &&
+    !PERSONAL_CHAT.test(source) && !(0, best_effort_autopost_1.hasNonCompletedWording)(source, null, '') &&
+    !(0, best_effort_autopost_1.hasLinkFromUnregisteredSender)(source, '');
+const hasGenericBankAlertContext = (source, sender = '') => {
+    const text = /[\uFB50-\uFDFF\uFE70-\uFEFF]/u.test(source) ? (0, alert_draft_1.normalizeAlertText)(source) : source;
+    if (GENERIC_BANK_CONTEXT.test(text) || (0, markets_1.detectLaunchMarketFromSender)(sender) !== null ||
+        (0, alert_institution_grammars_1.hasUniversalInstitutionSender)(sender))
+        return true;
+    const accountFieldList = /^\s*(?:debit|credit)\s*!?\s*\r?\n/iu.test(text) &&
+        /(?:^|\n)\s*(?:acct|acc|account|a\/?c)\s*:/iu.test(text) &&
+        /(?:^|\n)\s*(?:amt|amount)\s*:/iu.test(text) && (0, exports.hasBankAlertMoneyHint)(text);
+    const walletReceipt = /(?<![\p{L}\p{N}])TSh\s*\d/iu.test(text) &&
+        /\b(?:balance|bal\s*:)/iu.test(text) &&
+        /\b(?:txn\s*id|transaction\s*id|receipt(?:\s*(?:no|number))?|ref(?:erence)?|id)\s*[:#]/iu.test(text) &&
+        /\b(?:amount|txn\s+amt|you\s+have\s+received|cash\s+out\s+of)\b/iu.test(text) && !PERSONAL_CHAT.test(text);
+    return accountFieldList || walletReceipt || hasNativeCurrencyAccountContext(text);
+};
+exports.hasGenericBankAlertContext = hasGenericBankAlertContext;
+const inspectGenericBankEventForReview = (source, sender = '', market, sourceContext) => {
+    if ((0, exports.hasPersonalMessagePrefix)(source) || hasNegatedPrincipalMovement(source))
+        return null;
+    const noContext = !(0, exports.hasGenericBankAlertContext)(source, sender) && !(0, latam_alert_templates_1.matchLatamTemplate)(source, { sender });
+    const claimAdmitted = noContext && (!sender.trim() || (0, best_effort_autopost_1.isUnverifiedAlertSender)(sender)) &&
+        MONEY_ARRIVED_CLAIM.test(source) && (MONEY_CLAIM_EVIDENCE.test(source) || TRANSACTION_CODE.test(source)) && !PERSONAL_CHAT.test(source) &&
+        !(0, best_effort_autopost_1.hasNonCompletedWording)(source, null, sender) && !(0, best_effort_autopost_1.hasLinkFromUnregisteredSender)(source, sender);
+    const footerAdmitted = noContext && !claimAdmitted && (0, best_effort_autopost_1.isRegisteredAlertSender)(sender) &&
+        (0, best_effort_autopost_1.refusedOnlyByShopOrPromoWording)(source, sender);
+    if (noContext && !claimAdmitted && !footerAdmitted)
+        return null;
+    const event = (0, gulf_neighbour_alerts_1.isGulfNeighbourMarket)(market)
+        ? (0, universal_parser_1.inspectUniversalBankEvent)((0, gulf_neighbour_alerts_1.gulfNeighbourReadSource)(source, market), {
+            sender, market, dateOrder: (0, country_1.dateOrderForCountry)(market) ?? undefined,
+        })
+        : (0, universal_parser_1.inspectUniversalBankEvent)(source, sourceContext
+            ? { ...sourceContext, sender }
+            : (0, exports.universalSourceParseContext)((0, alert_institution_grammars_1.hasUniversalInstitutionSender)(sender)
+                ? (0, alert_market_detection_1.inspectUniversalAlert)({ source, sender }) : null, sender, (0, country_1.getActiveCountry)()));
+    if (event.decision !== 'review')
+        return null;
+    if (hasNativeCurrencyAccountContext(source) && !(0, exports.hasBankAlertMoneyHint)(source) &&
+        (event.amount.evidence !== 'explicit' || event.amount.value?.currency !== 'ZAR'))
+        return null;
+    if (noContext && !((event.direction === 'credit' || (footerAdmitted && event.direction === 'debit')) &&
+        event.status === 'posted' && event.amount.evidence !== 'missing'))
+        return null;
+    const hasGroundedMoney = event.amount.evidence !== 'missing' ||
+        event.observations.some((observation) => observation.field.evidence !== 'missing');
+    if (event.status === 'unknown' && event.family === 'unknown' &&
+        event.instrument.evidence !== 'explicit' && !hasGroundedMoney)
+        return null;
+    return event;
+};
+exports.inspectGenericBankEventForReview = inspectGenericBankEventForReview;
+const WORLD_SALARY_RE = /\b(?:salary|payroll|wages?|pay\s*cheque|paycheck|salaire|gehalt|lohn|salario|sueldo|n[óo]mina|sal[áa]rio|stipendio|salaris|maa[şs]|gaji)\b|راتب|رواتب|वेतन/iu;
+const universalRowCategory = (source, event, overrides, market) => {
+    const explicit = event.merchant.evidence === 'explicit' ? event.merchant.value?.trim() ?? '' : '';
+    if (event.family === 'cash-withdrawal')
+        return { category: 'cash-withdrawal', deliberate: true, merchant: explicit };
+    if (event.direction === 'credit' && event.family === 'transfer' && WORLD_SALARY_RE.test(source)) {
+        return { category: 'salary', deliberate: true, merchant: 'Salary' };
+    }
+    if (event.family === 'transfer' || (event.direction !== 'debit' && event.direction !== 'credit')) {
+        return { category: 'other', deliberate: false, merchant: explicit };
+    }
+    const type = event.direction === 'credit' ? 'income' : 'expense';
+    const suggestion = (0, universal_categorization_1.suggestUniversalCategory)(event, { type, overrides, market: market ?? undefined });
+    if (event.family === 'utility' && suggestion.needsReview) {
+        return { category: 'utilities', deliberate: true, merchant: suggestion.merchant || explicit };
+    }
+    return {
+        category: suggestion.category,
+        deliberate: !suggestion.needsReview,
+        merchant: explicit ? suggestion.merchant || explicit : '',
+    };
+};
+const COUNTRY_CURRENCY_ALIASES = {
+    ZA: { R: ['ZAR'] },
+};
+const ZA_RAND_HINT = /(?<![\p{L}\p{N}])R\s?\d/u;
+const IN_IMPLICIT_RUPEE_RE = /\b(debited|credited)\s+(by|for|with)\s+(?=\d[\d,]*(?:\.\d{1,2})?\b)/i;
+const countryReadSource = (source, country) => {
+    if (country !== 'IN' || (0, exports.hasBankAlertMoneyHint)(source))
+        return source;
+    if (!/\b(?:a\/c|acct?|account)\b/i.test(source) || !/\b(?:upi|imps|neft|rtgs)\b/i.test(source))
+        return source;
+    return source.replace(IN_IMPLICIT_RUPEE_RE, '$1 $2 INR ');
+};
+const countryMoneyHint = (source, country) => (country === 'ZA' && ZA_RAND_HINT.test(source)) || countryReadSource(source, country) !== source;
+const ledgerMinorOf = (field, country, ledgerCurrency, ledgerExponent) => {
+    let money = null;
+    if (field.evidence === 'explicit' && field.value && field.alternatives.length === 0)
+        money = field.value;
+    else if (field.evidence === 'ambiguous' && field.issues.length > 0 &&
+        field.issues.every((issue) => issue === 'currency-symbol' || issue === 'currency-exponent')) {
+        const wanted = (0, best_effort_autopost_1.sharedSymbolCurrencyForCountry)(country);
+        const options = [...(field.value ? [field.value] : []), ...field.alternatives].filter((m) => m.currency === wanted);
+        if (new Set(options.map((m) => `${m.minorUnits}/${m.exponent}`)).size === 1)
+            money = options[0];
+    }
+    if (!money || money.currency !== ledgerCurrency || (ledgerExponent !== null && money.exponent !== ledgerExponent))
+        return null;
+    if (!/^[1-9]\d{0,15}$/.test(money.minorUnits))
+        return null;
+    const minor = Number(money.minorUnits);
+    return Number.isSafeInteger(minor) ? minor : null;
+};
+const CREDIT_CARD_WORDS = /\b(?:credit|charge|covered)\s+card\b|\bcredit\s*card\b|\bbarclaycard\b|\bamerican\s+express\b|\bamex\b|\bcapital\s+one\b|\bdiscover\s+card\b/iu;
+const NOT_CARD_OBLIGATION = /\b(?:loan|emi|mortgage|finance|instal?ment\s+plan)\b/iu;
+const sourceNamesPaidCreditCard = (source, event, last4) => {
+    const template = (0, latam_alert_templates_1.matchLatamTemplate)(source);
+    if (template?.status === 'posted' && template.ownTransfer === 'card-payment')
+        return template.paidCard === last4;
+    const text = (0, alert_draft_1.normalizeAlertText)(source);
+    const kindPrefix = /\b(credit|charge|covered|debit|prepaid|gift)\s*card\s*(?:(?:ending(?:\s+(?:in|with))?|no\.?|number|last\s*4)\s*)?[:#-]?\s*[\dXx*•·-]*(?:[ \t]+[\dXx*•·-]{1,40})*\s*$/iu;
+    const boundary = /[!?;\n]|\.(?!\d)|(?<!\d)\./gu;
+    const sentenceText = text.replace(/\bRs\.(?=\s*\d)/giu, token => token.replace('.', ' '));
+    let paidCredit = false;
+    for (const span of event.instrument.spans) {
+        if (text.slice(span.start, span.end) !== last4)
+            continue;
+        const before = text.slice(Math.max(0, span.start - 120), span.start);
+        const match = before.match(kindPrefix);
+        if (!match)
+            continue;
+        if (/debit|prepaid|gift/i.test(match[1]))
+            return false;
+        const kindStart = span.start - before.length + match.index;
+        const prior = Array.from(sentenceText.slice(0, kindStart).matchAll(boundary)).at(-1);
+        const clauseStart = prior ? prior.index + prior[0].length : 0;
+        const next = sentenceText.slice(span.end).search(boundary);
+        const clauseEnd = next < 0 ? text.length : span.end + next;
+        const clause = text.slice(clauseStart, clauseEnd);
+        const standalone = /^(?:your|the)?\s*$/iu.test(text.slice(clauseStart, kindStart).trim()) &&
+            text.slice(span.end, clauseEnd).trim() === '';
+        if (/\b(?:payment|repayment)\b/iu.test(clause) || standalone)
+            paidCredit = true;
+    }
+    return paidCredit;
+};
+const universalCardPayment = (source, event, ledgerCurrency, ledgerExponent, country, observedAt) => {
+    if (event.family !== 'card-payment' || event.decision !== 'review' ||
+        (0, sms_parser_1.nonPostingReason)(source) || (0, best_effort_autopost_1.isNotAutoPostableMoney)(source))
+        return null;
+    const latamCardPayment = event.family === 'card-payment' && (0, latam_alert_templates_1.isLatamOwnCardPayment)(source);
+    if (NOT_CARD_OBLIGATION.test(source) || (!CREDIT_CARD_WORDS.test(source) && !latamCardPayment))
+        return null;
+    const today = localIsoDay(observedAt);
+    if (event.status === 'failed' || event.issues.some((issue) => issue === 'authentication-not-posting' || issue === 'pending-not-posting' || issue === 'failed-not-posting'))
+        return null;
+    const instrument = event.instrument.evidence === 'explicit' ? event.instrument.value : null;
+    const last4 = instrument?.kind === 'card' && instrument.last4 && /^\d{4}$/.test(instrument.last4) ? instrument.last4 : null;
+    if (!last4 || !sourceNamesPaidCreditCard(source, event, last4))
+        return null;
+    if (event.family === 'card-payment' && event.status === 'posted' && last4 &&
+        (event.direction === 'credit' || event.direction === 'debit')) {
+        if ((0, best_effort_autopost_1.hasNonCompletedWording)(source, country))
+            return null;
+        const amount = ledgerMinorOf(event.amount, country, ledgerCurrency, ledgerExponent);
+        if (!amount)
+            return null;
+        const date = event.transactionDate.evidence === 'explicit' ? event.transactionDate.value : null;
+        if (date && today && date > today)
+            return null;
+        const receipt = event.direction === 'credit';
+        return {
+            kind: 'cardPayment', type: receipt ? 'income' : 'expense', amountFils: amount, currency: ledgerCurrency,
+            merchant: `Card •${last4} payment`, date, dueDay: null, minDueFils: null,
+            card: { last4, kind: 'credit' }, cardPaymentSide: receipt ? 'receipt' : 'debit',
+            reference: null, transferHint: true, snapshotFils: null, snapshotKind: null,
+            categoryGuess: 'other', categoryDeliberate: true,
+        };
+    }
+    return null;
+};
+const localIsoDay = (epochMs) => {
+    if (epochMs === undefined || !Number.isFinite(epochMs))
+        return null;
+    const day = new Date(epochMs);
+    if (!Number.isFinite(day.getTime()))
+        return null;
+    return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+};
+const parseUniversalLaunchStrict = (source, sender, pinnedCurrency, pinnedExponent, fxLookup, observedAt, overrides = {}, market = null) => {
+    const event = (0, universal_parser_1.inspectUniversalBankEvent)(source, { sender, dateOrder: (0, country_1.activeCountryDateOrder)() });
+    if (event.decision !== 'review' || event.status !== 'posted')
+        return null;
+    if (event.direction !== 'debit' && event.direction !== 'credit')
+        return null;
+    if (!['purchase', 'cash-withdrawal', 'refund', 'fee', 'utility', 'recurring-payment'].includes(event.family)) {
+        return null;
+    }
+    if (event.amount.evidence !== 'explicit' || !event.amount.value)
+        return null;
+    const money = event.amount.value;
+    const exponent = (0, currency_metadata_1.currencyMinorUnits)(money.currency);
+    if (exponent === null || exponent !== money.exponent || !/^\d+$/.test(money.minorUnits))
+        return null;
+    const originalMinor = Number(money.minorUnits);
+    if (!Number.isSafeInteger(originalMinor) || originalMinor <= 0)
+        return null;
+    const transactionDay = event.transactionDate.evidence === 'explicit' ? event.transactionDate.value : null;
+    let amountFils = originalMinor;
+    let currency = money.currency;
+    let fx = {};
+    if (pinnedCurrency && pinnedCurrency !== money.currency) {
+        if (pinnedExponent !== 0 && pinnedExponent !== 2 && pinnedExponent !== 3)
+            return null;
+        const day = transactionDay ?? localIsoDay(observedAt);
+        if (!day)
+            return null;
+        const quote = fxLookup(money.currency, pinnedCurrency, day);
+        const converted = (0, fx_rates_1.convertForeignConfirmation)(event, {
+            currency: money.currency, minorUnits: originalMinor, exponent,
+        }, { currency: pinnedCurrency, exponent: pinnedExponent }, (0, fx_rates_1.quoteFitsDay)(quote, day) ? quote : null, { requireQuoteForStated: true });
+        if (converted === 'fx-rate-unavailable' || converted === 'invalid-money')
+            return null;
+        amountFils = converted.amountFils;
+        currency = pinnedCurrency;
+        fx = converted.fields;
+    }
+    else if (pinnedExponent !== null && pinnedExponent !== money.exponent) {
+        return null;
+    }
+    const blockedIssues = new Set([
+        'amount-role-unresolved',
+        'posting-status-unresolved',
+        'direction-unresolved',
+        'direction-conflict',
+        'multiple-event-adapter-required',
+        'authentication-not-posting',
+        'pending-not-posting',
+        'promotion-not-posting',
+        'settlement-adapter-required',
+        'failed-not-posting',
+    ]);
+    if (event.issues.some((issue) => blockedIssues.has(issue)))
+        return null;
+    const instrument = event.instrument.evidence === 'explicit' ? event.instrument.value : null;
+    const card = instrument ? {
+        last4: instrument.last4 ?? '',
+        kind: instrument.kind === 'account' ? 'account' : 'unknown',
+    } : null;
+    const classified = universalRowCategory(source, event, overrides, market);
+    const merchant = classified.merchant
+        ? classified.merchant
+        : event.family === 'cash-withdrawal'
+            ? 'ATM withdrawal'
+            : event.family === 'refund'
+                ? 'Refund'
+                : event.direction === 'credit'
+                    ? 'Incoming transfer'
+                    : 'Account debit';
+    const categoryGuess = classified.category;
+    return {
+        kind: 'transaction',
+        type: event.direction === 'credit' ? 'income' : 'expense',
+        amountFils,
+        currency,
+        ...fx,
+        merchant,
+        date: transactionDay,
+        dueDay: null,
+        minDueFils: null,
+        card: card && card.last4 ? card : null,
+        reference: null,
+        transferHint: false,
+        snapshotFils: null,
+        snapshotKind: null,
+        categoryGuess,
+        categoryDeliberate: classified.deliberate,
+        raw: source.trim(),
+    };
+};
+const routedInstitution = (inspection) => {
+    const review = inspection?.route.decision === 'single' ? inspection.review?.institution : null;
+    if (!review || review.decision !== 'identified' || !review.institution)
+        return null;
+    const candidate = review.candidates.find((item) => item.institution === review.institution);
+    return { id: review.institution, sender: !!candidate?.evidence.includes('sender') };
+};
+const universalSourceParseContext = (inspection, sender, country) => {
+    const route = inspection?.route;
+    const market = route?.decision === 'single' && route.market !== 'AE' && route.market !== 'SA' &&
+        routedInstitution(inspection)?.sender ? route.market : undefined;
+    const issuerConflict = route?.decision === 'ambiguous' && route.reasons.some(reason => reason === 'overlapping-sender' || reason === 'sender-institution-conflict' || reason === 'multiple-institutions');
+    const homeCurrencies = market ? (0, alert_market_packs_1.alertMarketPack)(market).currencies : [];
+    const sourceFields = market && inspection?.review
+        ? (0, universal_parser_1.inspectUniversalBankEvent)(inspection.review.draft.normalizedText, { sender, moneyMarket: market })
+        : null;
+    const principal = sourceFields?.amount.evidence === 'explicit' ? sourceFields.amount
+        : sourceFields?.family === 'statement' && sourceFields.statementTotal.evidence === 'explicit'
+            ? sourceFields.statementTotal : null;
+    const sourceOwnCurrency = !!market && !!inspection?.review?.draft.candidates.some(candidate => {
+        if (!principal?.spans.some(span => span.start === candidate.span.start && span.end === candidate.span.end) ||
+            candidate.evidence === 'ambiguous-symbol' || candidate.interpretations.length === 0 ||
+            !candidate.interpretations.every(value => homeCurrencies.includes(value.currency)))
+            return false;
+        if (candidate.evidence === 'iso-code')
+            return true;
+        const neutral = (0, universal_parser_1.inspectUniversalBankEvent)(candidate.sourceText);
+        const neutralCurrencies = neutral.observations.flatMap(row => row.field.value ? [row.field.value.currency] : row.field.alternatives.map(value => value.currency));
+        return neutralCurrencies.length === 0 || neutralCurrencies.every(currency => homeCurrencies.includes(currency));
+    });
+    const dateOrder = issuerConflict ? null : (0, country_1.dateOrderForCountry)(sourceOwnCurrency ? market : country);
+    const aliases = country ? COUNTRY_CURRENCY_ALIASES[country] : undefined;
+    return { sender, ...(market ? { moneyMarket: market } : {}), ...(dateOrder ? { dateOrder } : {}),
+        ...(aliases ? { currencyAliases: aliases } : {}) };
+};
+exports.universalSourceParseContext = universalSourceParseContext;
+const parseUniversalPostedEvent = (source, sender, pinnedCurrency, pinnedExponent, fxLookup, observedAt, context) => {
+    if (!context.enabled)
+        return null;
+    if (!pinnedCurrency)
+        return null;
+    const readSource = countryReadSource(source, context.country);
+    const event = (0, universal_parser_1.inspectUniversalBankEvent)(readSource, (0, exports.universalSourceParseContext)(context.inspection, sender, context.country));
+    const payment = universalCardPayment(readSource, event, pinnedCurrency, pinnedExponent, context.routedMarket ?? context.country, observedAt);
+    if (payment) {
+        return {
+            ...payment,
+            bestEffort: { v: 1, format: `universal:${event.family}:${event.direction}`, market: context.routedMarket ?? context.country ?? 'ZZ' },
+            raw: source.trim(),
+        };
+    }
+    const neighbour = (0, gulf_neighbour_alerts_1.decideGulfNeighbourPosting)({
+        source, sender, routedMarket: context.routedMarket, institution: context.institution ?? null,
+        enabled: context.enabled, ledgerCurrency: pinnedCurrency, ledgerExponent: pinnedExponent,
+        observedAt, fxLookup, overrides: context.overrides,
+    });
+    if (neighbour.outcome === 'post')
+        return neighbour.parsed;
+    if (neighbour.outcome === 'review')
+        return null;
+    const policySource = (0, latam_alert_templates_1.latamPolicySource)(readSource, { sender });
+    const decision = (0, best_effort_autopost_1.decideBestEffortAutoPost)({
+        source: policySource,
+        sender,
+        event,
+        enabled: context.enabled,
+        country: context.country,
+        routedMarket: context.routedMarket,
+        launchSenderMarket: context.launchSenderMarket,
+        ledgerCurrency: pinnedCurrency,
+        ledgerExponent: pinnedExponent,
+        observedAt,
+        fxLookup,
+        exactTemplate: (0, latam_alert_templates_1.matchLatamTemplate)(readSource, { sender }) !== null,
+    });
+    if (decision.outcome !== 'post')
+        return null;
+    const instrument = event.instrument.evidence === 'explicit' ? event.instrument.value : null;
+    const card = instrument ? {
+        last4: instrument.last4 ?? '',
+        kind: instrument.kind === 'account' ? 'account' : 'unknown',
+    } : null;
+    const transfer = event.family === 'transfer';
+    const classified = universalRowCategory(source, event, context.overrides ?? {}, context.routedMarket ?? context.country);
+    const ownTitle = transfer ? (0, latam_alert_templates_1.latamOwnTransferTitle)(policySource, { sender }) : null;
+    const merchant = transfer
+        ? ownTitle ?? (classified.category === 'salary' ? 'Salary' : event.direction === 'credit' ? 'Incoming transfer' : 'Outgoing transfer')
+        : classified.merchant
+            ? classified.merchant
+            : event.family === 'cash-withdrawal'
+                ? 'ATM withdrawal'
+                : event.family === 'refund'
+                    ? 'Refund'
+                    : event.direction === 'credit'
+                        ? 'Incoming transfer'
+                        : 'Account debit';
+    const categoryGuess = classified.category;
+    return {
+        kind: 'transaction',
+        type: event.direction === 'credit' ? 'income' : 'expense',
+        amountFils: decision.amountFils,
+        currency: decision.currency,
+        ...(decision.conversion ? decision.conversion.fields : {}),
+        bestEffort: decision.marker,
+        merchant,
+        date: decision.date,
+        dueDay: null,
+        minDueFils: null,
+        card: card && card.last4 ? card : null,
+        reference: null,
+        transferHint: transfer && classified.category !== 'salary',
+        snapshotFils: null,
+        snapshotKind: null,
+        categoryGuess,
+        categoryDeliberate: classified.deliberate,
+        raw: (readSource === source ? policySource : source).trim(),
+    };
+};
+const sharedSenderOutsideGulf = (source, inspection, pinnedCurrency) => !!pinnedCurrency && pinnedCurrency !== 'AED' && pinnedCurrency !== 'SAR' &&
+    (0, markets_1.detectLaunchMarketFromAlert)(source, '') === null &&
+    inspection?.route.decision === 'ambiguous' &&
+    inspection.route.candidates.some((candidate) => candidate.market !== 'AE' && candidate.market !== 'SA');
+const isUnaccountableLaunchSender = (sender) => !sender.trim() || (0, best_effort_autopost_1.isUnverifiedAlertSender)(sender);
+exports.isUnaccountableLaunchSender = isUnaccountableLaunchSender;
+const isHeldLaunchCredit = (source, sender, parsed) => !!parsed && (0, exports.isUnaccountableLaunchSender)(sender) && parsed.kind === 'transaction' && parsed.type === 'income' &&
+    !(0, best_effort_autopost_1.isNotAutoPostableMoney)(source) && !(0, best_effort_autopost_1.namesOwnInstrumentTail)(source, 'credit');
+exports.isHeldLaunchCredit = isHeldLaunchCredit;
+const launchSenderAnswersFor = (source, sender, parsed) => {
+    if (sender.trim() && !(0, best_effort_autopost_1.isUnverifiedAlertSender)(sender))
+        return true;
+    if (parsed.kind !== 'transaction')
+        return true;
+    if ((0, best_effort_autopost_1.isNotAutoPostableMoney)(source))
+        return false;
+    return parsed.type !== 'income' || (0, best_effort_autopost_1.namesOwnInstrumentTail)(source, 'credit');
+};
+const createLaunchAlertSession = ({ overrides, regionHint = null, pinnedCurrency = (0, markets_1.pinnedLedgerCurrencyCode)(), activeMarket = (0, markets_1.getActiveMarket)().id, fxLookup = (base, quote, date) => (0, fx_rates_1.cachedReferenceQuote)(base, quote, date), bestEffort = { enabled: (0, best_effort_autopost_1.bestEffortAutoPostEnabled)(), country: (0, country_1.getActiveCountry)() }, }) => {
+    const actualPinned = (0, markets_1.pinnedLedgerCurrencyCode)();
+    const pinnedExponent = pinnedCurrency
+        ? pinnedCurrency === actualPinned
+            ? (0, markets_1.ledgerCurrencyExponent)()
+            : (0, currency_metadata_1.currencyMinorUnits)(pinnedCurrency)
+        : null;
+    let sessionMarket = pinnedCurrency === 'AED' ? 'AE' : pinnedCurrency === 'SAR' ? 'SA' : null;
+    let detected = null;
+    const inspect = (source, sender) => {
+        if ((0, exports.hasPersonalMessagePrefix)(source) || hasNegatedPrincipalMovement(source))
+            return null;
+        if (!exports.REVIEW_MONEY_HINT.test(source))
+            return null;
+        if ((0, markets_1.detectLaunchMarketFromSender)(sender) && !(0, alert_institution_grammars_1.hasUniversalInstitutionSender)(sender))
+            return null;
+        try {
+            return (0, alert_market_detection_1.inspectUniversalAlert)({ source, sender, regionHint });
+        }
+        catch {
+            return null;
+        }
+    };
+    const parseRegionalEvidence = (source, sender, inspection = null, forcedMarket, observedAt) => {
+        if (pinnedCurrency && pinnedCurrency !== 'AED' && pinnedCurrency !== 'SAR')
+            return null;
+        const moneyHint = (0, exports.hasBankAlertMoneyHint)(source);
+        if (!moneyHint)
+            return null;
+        if (inspection?.route.decision === 'single' &&
+            inspection.route.market !== 'AE' &&
+            inspection.route.market !== 'SA')
+            return null;
+        const routed = forcedMarket === 'AE' || forcedMarket === 'SA'
+            ? forcedMarket
+            : inspection?.route.decision === 'single' &&
+                (inspection.route.market === 'AE' || inspection.route.market === 'SA')
+                ? inspection.route.market
+                : (0, markets_1.detectLaunchMarketFromAlert)(source, sender);
+        if (moneyHint && !routed)
+            return null;
+        const desired = routed ?? sessionMarket ?? activeMarket;
+        if (desired !== 'AE' && desired !== 'SA')
+            return null;
+        if (sessionMarket && desired !== sessionMarket)
+            return null;
+        const interpretation = (0, bank_alert_interpreter_1.interpretBankAlert)({
+            source,
+            sender,
+            market: desired,
+            overrides,
+            observedAt,
+        });
+        const result = interpretation.outcome === 'parsed' ? interpretation : null;
+        if (result && routed) {
+            sessionMarket ?? (sessionMarket = routed);
+            detected = routed;
+        }
+        return result;
+    };
+    const parse = (source, sender, inspection = null, forcedMarket, observedAt) => {
+        if ((0, exports.hasPersonalMessagePrefix)(source) || hasNegatedPrincipalMovement(source))
+            return null;
+        if ((0, bnpl_providers_1.isBnplProviderSource)(sender))
+            return null;
+        const local = parseRegionalEvidence(source, sender, inspection, forcedMarket, observedAt)?.parsed ?? null;
+        if (local)
+            return launchSenderAnswersFor(source, sender, local) ? local : null;
+        if (!(0, exports.hasBankAlertMoneyHint)(source) && !countryMoneyHint(source, bestEffort.country) &&
+            !(0, latam_alert_templates_1.matchLatamTemplate)(source, { sender }))
+            return null;
+        if (!shouldTryUniversalPosting(source, sender))
+            return null;
+        const universalRouteIsNonGulf = inspection?.route.decision === 'single' &&
+            inspection.route.market !== 'AE' &&
+            inspection.route.market !== 'SA';
+        const gulfLedger = pinnedCurrency === 'AED' || pinnedCurrency === 'SAR';
+        const namedLaunchMarket = (0, markets_1.detectLaunchMarketFromSender)(sender);
+        const launchSenderMarket = namedLaunchMarket &&
+            !sharedSenderOutsideGulf(source, inspection, pinnedCurrency) ? namedLaunchMarket : null;
+        if (sessionMarket && launchSenderMarket && launchSenderMarket !== sessionMarket)
+            return null;
+        if (gulfLedger && (launchSenderMarket === 'AE' || launchSenderMarket === 'SA'))
+            return null;
+        if (gulfLedger && !universalRouteIsNonGulf)
+            return null;
+        const routedMarket = inspection?.route.decision === 'single' ? inspection.route.market : null;
+        if (launchSenderMarket === 'AE' || launchSenderMarket === 'SA' ||
+            routedMarket === 'AE' || routedMarket === 'SA') {
+            return parseUniversalLaunchStrict(source, sender, pinnedCurrency, pinnedExponent, fxLookup, observedAt, overrides, launchSenderMarket ?? routedMarket);
+        }
+        return parseUniversalPostedEvent(source, sender, pinnedCurrency, pinnedExponent, fxLookup, observedAt, {
+            enabled: bestEffort.enabled,
+            country: bestEffort.country,
+            routedMarket,
+            launchSenderMarket: null,
+            overrides,
+            institution: routedInstitution(inspection),
+            inspection,
+        });
+    };
+    const parseUnproven = (source, sender, inspection = null, observedAt) => {
+        if ((0, exports.hasPersonalMessagePrefix)(source) || hasNegatedPrincipalMovement(source))
+            return null;
+        if (!bestEffort.enabled)
+            return null;
+        if ((0, bnpl_providers_1.isBnplProviderSource)(sender))
+            return null;
+        if (!(0, exports.hasBankAlertMoneyHint)(source) && !countryMoneyHint(source, bestEffort.country) &&
+            !(0, latam_alert_templates_1.matchLatamTemplate)(source, { sender }))
+            return null;
+        if (!shouldTryUniversalPosting(source, sender))
+            return null;
+        const routedMarket = inspection?.route.decision === 'single' ? inspection.route.market : null;
+        const namedLaunchMarket = (0, markets_1.detectLaunchMarketFromSender)(sender);
+        const launchSenderMarket = namedLaunchMarket &&
+            !sharedSenderOutsideGulf(source, inspection, pinnedCurrency) ? namedLaunchMarket : null;
+        if (launchSenderMarket || routedMarket === 'AE' || routedMarket === 'SA')
+            return null;
+        const gulfLedger = pinnedCurrency === 'AED' || pinnedCurrency === 'SAR';
+        if (gulfLedger && routedMarket === null)
+            return null;
+        if (!pinnedCurrency)
+            return null;
+        return parseUniversalPostedEvent(source, sender, pinnedCurrency, pinnedExponent, fxLookup, observedAt, {
+            enabled: bestEffort.enabled,
+            country: bestEffort.country,
+            routedMarket,
+            launchSenderMarket,
+            overrides,
+            institution: routedInstitution(inspection),
+            inspection,
+        });
+    };
+    return { inspect, parse, parseUnproven, detectedMarket: () => detected };
+};
+exports.createLaunchAlertSession = createLaunchAlertSession;
+const parsePastedBankAlerts = (text, overrides, onRefused) => {
+    const session = (0, exports.createLaunchAlertSession)({ overrides });
+    return (0, sms_parser_1.parseSmsBatch)(text, overrides, (source) => {
+        const launchMarket = (0, markets_1.detectLaunchMarketFromAlert)(source, '');
+        const parsed = launchMarket
+            ? session.parse(source, '', session.inspect(source, ''), launchMarket)
+            : null;
+        if (!parsed)
+            onRefused?.(source);
+        return parsed;
+    });
+};
+exports.parsePastedBankAlerts = parsePastedBankAlerts;
+},
+"ledger-money":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.checkedMinorSum = exports.roundToWholeMajorMinor = exports.roundToNiceMinor = exports.wholeMajorUnits = exports.typicalMinorAmount = exports.nominalScaleOf = exports.formatMoneyText = exports.formatMinorUnitsForInput = exports.formatMinorUnits = exports.parseLocalizedMajorToMinor = exports.parseMajorToMinor = exports.currencyDisplayLabel = exports.currencyPlacement = exports.displayRegion = exports.displayNumberConventions = exports.setDisplayMoneyLocale = exports.numberConventionsForLocale = exports.deviceMoneyLocale = exports.CANONICAL_NUMBER_CONVENTIONS = exports.migrateLegacyLedgerMoney = exports.ledgerStateHasMoney = exports.ledgerMoneyMatchesCurrentMetadata = exports.storedLedgerMoneySpec = exports.isLedgerMoneySpec = exports.ledgerMoneySpec = exports.LEDGER_MONEY_SCHEMA_VERSION = void 0;
+const currency_metadata_1 = require("@/lib/currency-metadata");
+exports.LEDGER_MONEY_SCHEMA_VERSION = 2;
+const supportedExponent = (value) => value === 0 || value === 2 || value === 3;
+const ledgerMoneySpec = (currency) => {
+    const code = currency.trim().toUpperCase();
+    const exponent = (0, currency_metadata_1.currencyMinorUnits)(code);
+    if (!supportedExponent(exponent))
+        return null;
+    return {
+        schemaVersion: exports.LEDGER_MONEY_SCHEMA_VERSION,
+        currency: code,
+        exponent,
+    };
+};
+exports.ledgerMoneySpec = ledgerMoneySpec;
+const isLedgerMoneySpec = (value) => {
+    if (!value || typeof value !== 'object')
+        return false;
+    const candidate = value;
+    const currency = typeof candidate.currency === 'string'
+        ? candidate.currency.trim().toUpperCase()
+        : '';
+    return candidate.schemaVersion === exports.LEDGER_MONEY_SCHEMA_VERSION &&
+        (0, currency_metadata_1.currencyMinorUnits)(currency) !== null && candidate.currency === currency &&
+        supportedExponent(candidate.exponent ?? -1);
+};
+exports.isLedgerMoneySpec = isLedgerMoneySpec;
+const storedLedgerMoneySpec = (currency, exponent) => {
+    const candidate = {
+        schemaVersion: exports.LEDGER_MONEY_SCHEMA_VERSION,
+        currency: currency.trim().toUpperCase(),
+        exponent,
+    };
+    return (0, exports.isLedgerMoneySpec)(candidate) ? candidate : null;
+};
+exports.storedLedgerMoneySpec = storedLedgerMoneySpec;
+const ledgerMoneyMatchesCurrentMetadata = (spec) => (0, currency_metadata_1.currencyMinorUnits)(spec.currency) === spec.exponent;
+exports.ledgerMoneyMatchesCurrentMetadata = ledgerMoneyMatchesCurrentMetadata;
+const nonZeroNumber = (value) => typeof value === 'number' && value !== 0;
+const hasRecord = (value, matches) => Array.isArray(value) && value.some((item) => !!item && typeof item === 'object' && (!matches || matches(item)));
+const ledgerStateHasMoney = (state) => hasRecord(state.accounts, (item) => nonZeroNumber(item.openingFils) ||
+    nonZeroNumber(item.snapshotFils) || nonZeroNumber(item.creditLimitFils)) ||
+    hasRecord(state.transactions) ||
+    hasRecord(state.budgets, (item) => nonZeroNumber(item.limitFils)) ||
+    hasRecord(state.bills, (item) => nonZeroNumber(item.amountFils)) ||
+    hasRecord(state.cardDues, (item) => nonZeroNumber(item.totalDueFils) ||
+        nonZeroNumber(item.minDueFils) || nonZeroNumber(item.paidFils)) ||
+    hasRecord(state.goals, (item) => nonZeroNumber(item.targetFils) ||
+        nonZeroNumber(item.savedFils));
+exports.ledgerStateHasMoney = ledgerStateHasMoney;
+const migrateLegacyLedgerMoney = (state) => {
+    if (state.ledgerMoney !== undefined && state.ledgerMoney !== null) {
+        if (!(0, exports.isLedgerMoneySpec)(state.ledgerMoney))
+            throw new Error('Unsupported ledger money specification');
+        return state.ledgerMoney;
+    }
+    const hasMoney = (0, exports.ledgerStateHasMoney)(state);
+    if (!hasMoney)
+        return null;
+    if (state.marketId === 'SA')
+        return (0, exports.ledgerMoneySpec)('SAR');
+    if (state.marketId === 'AE' || state.marketId === undefined || state.marketId === '') {
+        return (0, exports.ledgerMoneySpec)('AED');
+    }
+    throw new Error('Legacy ledger has money in an unknown market');
+};
+exports.migrateLegacyLedgerMoney = migrateLegacyLedgerMoney;
+const scaleFor = (exponent) => 10 ** exponent;
+exports.CANONICAL_NUMBER_CONVENTIONS = Object.freeze({
+    decimal: '.',
+    group: ',',
+    grouping: 'thousands',
+});
+const SPACE_GROUPS = new Set([' ', '\u00A0', '\u202F', '\u2009']);
+const APOSTROPHE_GROUPS = new Set(["'", '\u2019']);
+const isAllowedGroup = (value) => value === ',' || value === '.' || SPACE_GROUPS.has(value) || APOSTROPHE_GROUPS.has(value);
+const latinSeparator = (value) => {
+    if (typeof value !== 'string' || value.length !== 1)
+        return null;
+    if (value === '\u066B')
+        return '.';
+    if (value === '\u066C')
+        return ',';
+    return value;
+};
+const intlConventions = (locale) => {
+    try {
+        const text = new Intl.NumberFormat(locale, { useGrouping: true, minimumFractionDigits: 1 })
+            .format(1234567.5)
+            .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+            .replace(/[\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) - 0x06F0));
+        const match = /^(\d+)(?:(\D)(\d+))?(?:\D(\d+))?(?:\D(\d+))?(\D)5$/.exec(text.replace(/[\u200E\u200F\u061C]/g, ''));
+        if (!match)
+            return null;
+        const runs = [match[1], match[3], match[4], match[5]].filter((run) => !!run)
+            .map((run) => run.length);
+        const decimal = latinSeparator(match[6]);
+        const group = latinSeparator(match[2]);
+        const indian = runs.length === 3 && runs[0] === 2 && runs[1] === 2 && runs[2] === 3;
+        if ((decimal !== '.' && decimal !== ',') || !group || group === decimal || !isAllowedGroup(group)) {
+            return null;
+        }
+        return { decimal, group, grouping: indian ? 'indian' : 'thousands' };
+    }
+    catch {
+        return null;
+    }
+};
+const regionOf = (value) => {
+    const code = value?.trim().toUpperCase();
+    return code && /^[A-Z]{2}$/.test(code) ? code : null;
+};
+const deviceMoneyLocale = (locale) => {
+    if (!locale)
+        return null;
+    const region = regionOf(locale.regionCode) ?? regionOf(locale.languageRegionCode);
+    const language = locale.languageCode?.trim() || locale.languageTag?.split(/[-_]/)[0] || null;
+    return {
+        locale: language && region ? `${language}-${region}` : locale.languageTag ?? language,
+        decimalSeparator: locale.decimalSeparator ?? null,
+        groupSeparator: locale.digitGroupingSeparator ?? null,
+        region,
+    };
+};
+exports.deviceMoneyLocale = deviceMoneyLocale;
+const numberConventionsForLocale = (input) => {
+    const fromLocale = input.locale ? intlConventions(input.locale) : null;
+    const base = fromLocale ?? exports.CANONICAL_NUMBER_CONVENTIONS;
+    const decimal = input.decimalSeparator == null ? base.decimal : latinSeparator(input.decimalSeparator);
+    if (decimal !== '.' && decimal !== ',')
+        return { ...exports.CANONICAL_NUMBER_CONVENTIONS };
+    const candidate = input.groupSeparator == null ? base.group : latinSeparator(input.groupSeparator);
+    const group = candidate && candidate !== decimal && isAllowedGroup(candidate)
+        ? candidate
+        : decimal === ',' ? '.' : ',';
+    return { decimal, group, grouping: base.grouping };
+};
+exports.numberConventionsForLocale = numberConventionsForLocale;
+let displayConventions = { ...exports.CANONICAL_NUMBER_CONVENTIONS };
+let displayLocale = null;
+let deviceRegion = null;
+const placementCache = new Map();
+const supportedLocale = (locale) => {
+    const tag = locale?.trim();
+    if (!tag)
+        return null;
+    try {
+        return Intl.NumberFormat.supportedLocalesOf([tag]).length ? tag : null;
+    }
+    catch {
+        return null;
+    }
+};
+const setDisplayMoneyLocale = (input) => {
+    displayConventions = input ? (0, exports.numberConventionsForLocale)(input) : { ...exports.CANONICAL_NUMBER_CONVENTIONS };
+    const locale = input ? supportedLocale(input.locale) : null;
+    if (locale !== displayLocale)
+        placementCache.clear();
+    displayLocale = locale;
+    deviceRegion = regionOf(input?.region);
+};
+exports.setDisplayMoneyLocale = setDisplayMoneyLocale;
+const displayNumberConventions = () => displayConventions;
+exports.displayNumberConventions = displayNumberConventions;
+const displayRegion = () => deviceRegion;
+exports.displayRegion = displayRegion;
+const ARABIC_SCRIPT = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
+const LETTERS_ONLY = /^[A-Za-z]+$/;
+const CODE_PLACEMENT = (iso) => ({ label: iso, position: 'before', spaced: true });
+const DIGITS = /[\d\u0660-\u0669\u06F0-\u06F9]/;
+const BIDI = /[\u200E\u200F\u061C]/g;
+const SPACE = /[\s\u00A0\u202F]/;
+const currencyPlacement = (code, locale = displayLocale) => {
+    const iso = code.trim().toUpperCase();
+    if (!locale || !/^[A-Z]{3}$/.test(iso))
+        return CODE_PLACEMENT(iso);
+    const key = `${locale}|${iso}`;
+    const cached = placementCache.get(key);
+    if (cached)
+        return cached;
+    let placement = CODE_PLACEMENT(iso);
+    try {
+        const text = new Intl.NumberFormat(locale, {
+            style: 'currency', currency: iso, currencyDisplay: 'symbol',
+            minimumFractionDigits: 0, maximumFractionDigits: 0,
+        }).format(1).replace(BIDI, '');
+        const digit = text.search(DIGITS);
+        const before = digit > 0 ? text.slice(0, digit) : '';
+        const after = digit >= 0 ? text.slice(digit + 1) : '';
+        const symbol = text.replace(new RegExp(DIGITS.source, 'g'), '').replace(/[\s\u00A0\u202F]/g, '').trim();
+        if (digit >= 0 && symbol && symbol.toUpperCase() !== iso && !LETTERS_ONLY.test(symbol) &&
+            !ARABIC_SCRIPT.test(symbol) && symbol.length <= 4) {
+            const prefix = before.trim().length > 0;
+            placement = {
+                label: symbol,
+                position: prefix ? 'before' : 'after',
+                spaced: prefix ? SPACE.test(before.slice(-1)) : SPACE.test(after.charAt(0)),
+            };
+        }
+    }
+    catch {
+        placement = CODE_PLACEMENT(iso);
+    }
+    placementCache.set(key, placement);
+    return placement;
+};
+exports.currencyPlacement = currencyPlacement;
+const currencyDisplayLabel = (code, locale = displayLocale) => (0, exports.currencyPlacement)(code, locale).label;
+exports.currencyDisplayLabel = currencyDisplayLabel;
+const THOUSANDS_GROUPS = /^\d{1,3}(?:,\d{3})+$/;
+const INDIAN_GROUPS = /^\d{1,2}(?:,\d{2})*,\d{3}$/;
+const parseCanonical = (text, spec, grouping) => {
+    const value = text.trim();
+    if (!value || !/^\d[\d,]*(?:\.\d+)?$/.test(value))
+        return null;
+    const [wholeRaw, fractionRaw = ''] = value.split('.');
+    if (fractionRaw.length > spec.exponent)
+        return null;
+    if (wholeRaw.includes(',') && !THOUSANDS_GROUPS.test(wholeRaw) &&
+        !(grouping === 'indian' && INDIAN_GROUPS.test(wholeRaw)))
+        return null;
+    const whole = wholeRaw.replace(/,/g, '').replace(/^0+(?=\d)/, '') || '0';
+    const digits = `${whole}${fractionRaw.padEnd(spec.exponent, '0')}`.replace(/^0+(?=\d)/, '') || '0';
+    let minor;
+    try {
+        minor = BigInt(digits);
+    }
+    catch {
+        return null;
+    }
+    if (minor <= 0n || minor > BigInt(Number.MAX_SAFE_INTEGER))
+        return null;
+    return Number(minor);
+};
+const parseMajorToMinor = (text, spec) => parseCanonical(text, spec, 'thousands');
+exports.parseMajorToMinor = parseMajorToMinor;
+const parseLocalizedMajorToMinor = (text, spec, conventions = displayConventions) => {
+    let value = text.trim();
+    if (!value)
+        return null;
+    const { decimal, group } = conventions;
+    const spacing = SPACE_GROUPS.has(group) || APOSTROPHE_GROUPS.has(group);
+    if (spacing)
+        value = value.replace(/[\s\u00A0\u202F\u2009'\u2019]/g, '');
+    if (/[^\d.,]/.test(value))
+        return null;
+    const other = decimal === '.' ? ',' : '.';
+    const hasDecimal = value.includes(decimal);
+    const otherMarks = value.split(other).length - 1;
+    const afterOther = otherMarks === 1 ? value.length - value.indexOf(other) - 1 : -1;
+    if (!hasDecimal && afterOther === 3 && spec.exponent === 3)
+        return null;
+    if (decimal === ',' && !hasDecimal && afterOther >= 1 && afterOther <= spec.exponent &&
+        afterOther !== 3) {
+        return parseCanonical(value, spec, conventions.grouping);
+    }
+    if (spacing) {
+        if (otherMarks > 0)
+            return null;
+        return parseCanonical(decimal === ',' ? value.replace(',', '.') : value, spec, conventions.grouping);
+    }
+    const canonical = decimal === '.'
+        ? value
+        : value.replace(/[.,]/g, (mark) => (mark === ',' ? '.' : ','));
+    return parseCanonical(canonical, spec, conventions.grouping);
+};
+exports.parseLocalizedMajorToMinor = parseLocalizedMajorToMinor;
+const groupDigits = (digits, conventions) => {
+    if (conventions.grouping === 'indian' && digits.length > 3) {
+        const head = digits.slice(0, -3).replace(/\B(?=(\d{2})+(?!\d))/g, conventions.group);
+        return `${head}${conventions.group}${digits.slice(-3)}`;
+    }
+    return digits.replace(/\B(?=(\d{3})+(?!\d))/g, conventions.group);
+};
+const formatMinorUnits = (minorUnits, spec, options) => {
+    if (!Number.isSafeInteger(minorUnits))
+        throw new Error('Money must be a safe integer');
+    const conventions = options?.conventions ?? displayConventions;
+    const scale = scaleFor(spec.exponent);
+    const absolute = Math.abs(minorUnits);
+    const remainder = absolute % scale;
+    const showDecimals = options?.decimals ?? remainder !== 0;
+    const whole = showDecimals ? Math.floor(absolute / scale) : Math.round(absolute / scale);
+    const sign = minorUnits < 0 && (whole > 0 || (showDecimals && remainder > 0)) ? '-' : '';
+    const digits = options?.grouping === false ? String(whole) : groupDigits(String(whole), conventions);
+    const base = `${sign}${digits}`;
+    if (!showDecimals || spec.exponent === 0)
+        return base;
+    return `${base}${conventions.decimal}${String(remainder).padStart(spec.exponent, '0')}`;
+};
+exports.formatMinorUnits = formatMinorUnits;
+const formatMinorUnitsForInput = (minorUnits, spec, conventions = displayConventions, options) => (0, exports.formatMinorUnits)(minorUnits, spec, {
+    conventions,
+    grouping: false,
+    decimals: options?.decimals === true ? true : undefined,
+});
+exports.formatMinorUnitsForInput = formatMinorUnitsForInput;
+const formatMoneyText = (minorUnits, spec, options) => {
+    const placement = (0, exports.currencyPlacement)(spec.currency, options?.locale === undefined ? displayLocale : options.locale);
+    const figure = (0, exports.formatMinorUnits)(Math.abs(minorUnits), spec, {
+        decimals: options?.decimals,
+        conventions: options?.conventions,
+    });
+    const sign = minorUnits < 0 && /[1-9]/.test(figure) ? '-' : '';
+    if (placement.label === spec.currency && placement.position === 'before') {
+        return `${placement.label} ${sign}${figure}`;
+    }
+    const gap = placement.spaced ? '\u00A0' : '';
+    return placement.position === 'before'
+        ? `${sign}${placement.label}${gap}${figure}`
+        : `${sign}${figure}${gap}${placement.label}`;
+};
+exports.formatMoneyText = formatMoneyText;
+const NOMINAL_SCALE = Object.freeze({
+    BHD: -1, KWD: -1, OMR: -1, JOD: -1,
+    INR: 1, EGP: 1, PHP: 1, THB: 1, TRY: 1, ZAR: 1, MXN: 1, CZK: 1, TWD: 1, UAH: 1,
+    RUB: 1, RSD: 1, GHS: 1, HNL: 1, BOB: 1, MUR: 1,
+    JPY: 2, PKR: 2, BDT: 2, NPR: 2, LKR: 2, KES: 2, HUF: 2, ISK: 2, CLP: 2, KZT: 2,
+    DZD: 2, YER: 2, ETB: 2, XOF: 2, XAF: 2, AMD: 2, AFN: 2, JMD: 2, DOP: 2, ARS: 2,
+    KRW: 3, NGN: 3, COP: 3, TZS: 3, UGX: 3, PYG: 3, MMK: 3, KHR: 3, MNT: 3, IQD: 3,
+    MGA: 3, RWF: 3, CDF: 3, MWK: 3, SOS: 3,
+    IDR: 4, VND: 4, IRR: 4, LBP: 4, UZS: 4, LAK: 4, SYP: 4, GNF: 4,
+});
+const nominalScaleOf = (currency) => NOMINAL_SCALE[currency.trim().toUpperCase()] ?? 0;
+exports.nominalScaleOf = nominalScaleOf;
+const typicalMinorAmount = (spec, referenceMajor) => {
+    const power = spec.exponent + (0, exports.nominalScaleOf)(spec.currency);
+    const value = power >= 0
+        ? referenceMajor * 10 ** power
+        : Math.round(referenceMajor / 10 ** -power);
+    if (!Number.isSafeInteger(value))
+        throw new Error('Typical amount exceeds safe integer range');
+    return value;
+};
+exports.typicalMinorAmount = typicalMinorAmount;
+const wholeMajorUnits = (minorUnits, spec) => Math.round(minorUnits / scaleFor(spec.exponent));
+exports.wholeMajorUnits = wholeMajorUnits;
+const roundToNiceMinor = (minorUnits, spec) => {
+    const step = (0, exports.typicalMinorAmount)(spec, 100);
+    const rounded = Math.max(step, Math.round(minorUnits / step) * step);
+    if (!Number.isSafeInteger(rounded))
+        throw new Error('Rounded money exceeds safe integer range');
+    return rounded;
+};
+exports.roundToNiceMinor = roundToNiceMinor;
+const roundToWholeMajorMinor = (minorUnits, spec) => {
+    if (!Number.isSafeInteger(minorUnits))
+        throw new Error('Money must be a safe integer');
+    const scale = scaleFor(spec.exponent);
+    const rounded = Math.round(minorUnits / scale) * scale;
+    if (!Number.isSafeInteger(rounded))
+        throw new Error('Rounded money exceeds safe integer range');
+    return rounded;
+};
+exports.roundToWholeMajorMinor = roundToWholeMajorMinor;
+const checkedMinorSum = (values) => {
+    let total = 0;
+    for (const value of values) {
+        if (!Number.isSafeInteger(value) || !Number.isSafeInteger(total + value)) {
+            throw new Error('Money total exceeds safe integer range');
+        }
+        total += value;
+    }
+    return total;
+};
+exports.checkedMinorSum = checkedMinorSum;
+},
+"markets":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.MARKETS = void 0;
+exports.globalCategoryKeywords = globalCategoryKeywords;
+exports.keywordsForMarket = keywordsForMarket;
+exports.getActiveMarket = getActiveMarket;
+exports.setLedgerCurrency = setLedgerCurrency;
+exports.marketCurrencyCode = marketCurrencyCode;
+exports.ledgerCurrencyCode = ledgerCurrencyCode;
+exports.pinnedLedgerCurrencyCode = pinnedLedgerCurrencyCode;
+exports.ledgerCurrencyExponent = ledgerCurrencyExponent;
+exports.ledgerCurrencyDisplay = ledgerCurrencyDisplay;
+exports.canSelectMarket = canSelectMarket;
+exports.setActiveMarket = setActiveMarket;
+exports.detectLaunchMarketFromSender = detectLaunchMarketFromSender;
+exports.detectLaunchMarketFromAlert = detectLaunchMarketFromAlert;
+exports.withMarketPackForParsing = withMarketPackForParsing;
+exports.detectMarketId = detectMarketId;
+exports.bankFromSender = bankFromSender;
+exports.bankFromMessage = bankFromMessage;
+exports.soleBankNamedInText = soleBankNamedInText;
+exports.bankFromName = bankFromName;
+exports.issuerIdentityForName = issuerIdentityForName;
+exports.bankBrandForName = bankBrandForName;
+exports.bankIdentityForName = bankIdentityForName;
+exports.bankDomainForName = bankDomainForName;
+exports.bankMonogram = bankMonogram;
+const country_1 = require("@/lib/country");
+const ARABIC_KEYWORDS = [
+    [/مطعم|مطاعم|كافيه|مقهي|قهوه/, 'dining'],
+    [/سوبرماركت|بقاله|تموين|هايبر|جمعيه/, 'groceries'],
+    [/صيدليه|مستشفي|مستوصف|عياده|(?:^|[^ء-ي])(?:ال)?طبي(?:ه|ات|ب|به|بات|ين)?(?![ء-ي])|مختبر/, 'health'],
+    [/محطه|وقود|بنزين|مواقف|موقف/, 'transport'],
+    [/كهرباء|مياه|ماء|غاز/, 'utilities'],
+    [/اتصالات|جوال|هاتف|انترنت/, 'telecom'],
+    [/مدرسه|جامعه|رسوم\s*دراسيه/, 'education'],
+    [/فندق|طيران|تذكره\s*سفر|سياحه|سفر/, 'travel'],
+    [/تامين/, 'health'],
+    [/ايجار/, 'rent'],
+    [/صالون|حلاق|تجميل|مشغل/, 'personal-care'],
+    [/كارفور/, 'groceries'],
+    [/لولو/, 'groceries'],
+    [/العثيم|اسواق\s*عبدالله/, 'groceries'],
+    [/التميمي|بنده|الدانوب|نستو/, 'groceries'],
+    [/نون(?!\s*يه)/, 'shopping'],
+    [/طلبات|كريم\s*ناو|هنقرستيشن|جاهز/, 'dining'],
+    [/كريم|اوبر/, 'transport'],
+    [/ادنوك|اينوك|ارامكو/, 'transport'],
+    [/سالك|درب/, 'transport'],
+    [/امازون|نمشي|شي\s*ان/, 'shopping'],
+    [/نتفلكس|نتفليكس|سبوتيفاي|شاهد|ستارزبلاي/, 'entertainment'],
+    [/دو\b|اتصالات\s*الامارات|موبايلي|زين|اس\s*تي\s*سي/, 'telecom'],
+];
+const CROSS_BORDER_KEYWORDS = [
+    [/\bmcd-\s?\d/i, 'dining'],
+    [/\bcentral\s*(?:phuket|festival|pattaya|embassy|chidlom|ladprao|world)\b|\bcentralworld\b/i, 'shopping'],
+    [/\bgowabi\b/i, 'personal-care'],
+    [/\bmuay\s?thai\b|\bboxing\s+stadium\b/i, 'entertainment'],
+    [/\bgo-?karts?\b|\bkarting\b|\bkarts?\s+(?:speed|racing|track|circuit)\b/i, 'entertainment'],
+    [/\bmuang\s?boran\b/i, 'entertainment'],
+    [/\be-?visas?\b/i, 'travel'],
+    [/\bdon\s?muang\b/i, 'travel'],
+    [/\bzain\s+(?:website|self-?care|self-?c\b|telecom|mobile|cash|prepaid|jordan|kuwait|bahrain|jo\b|kw\b|bh\b|iq\b)/i, 'telecom'],
+    [/\be-?books?\b/i, 'shopping'],
+    [/\bl'?eto\s+(?:dubai|riyadh|jeddah|caffe|cafe|restaurant)\b/i, 'dining'],
+    [/\blittle\s+bangkok\b|\bakiba\s+dori\b|\btum\s+rub\s+thai\b/i, 'dining'],
+    [/\bbartels\s+c\s+bangkok\b|\bmarush\s+phuket\b|\bloof\s+garden\s+phuket\b|\bphukettique\s+phuket\b/i, 'dining'],
+    [/\bmoontree\s*spa\b|\bal\s+mazoon\s+studio\b/i, 'personal-care'],
+    [/\bplenary\s+(?:longevity\s+)?wellness\b/i, 'health'],
+    [/\bsawadee\s*ka\s*thai\s*souvenirs?\b|\bsawadeekathaisouvenirs\b/i, 'shopping'],
+    [/\bmrs\.?\s*wrap\s+co\b/i, 'shopping'],
+    [/\blamsat\s+qotunia\s+gar\s+tr\b/i, 'shopping'],
+];
+const AE = {
+    id: 'AE',
+    name: 'United Arab Emirates',
+    flag: '🇦🇪',
+    currency: { code: 'AED', display: 'AED', aliases: ['AED', 'Dhs?\\.?', 'د\\.?إ\\.?', 'دراهم', 'درهم'] },
+    banks: [
+        { re: /enbd|emirates\s*nbd/i, name: 'Emirates NBD', color: '#2B4C9B', domain: 'emiratesnbd.com' },
+        { re: /\bfab\b|first\s*abu\s*dhabi/i, name: 'FAB', color: '#00A3E0', domain: 'bankfab.com' },
+        { re: /adcb/i, name: 'ADCB', color: '#E4032E', domain: 'adcb.com' },
+        { re: /adib/i, name: 'ADIB', color: '#0E5AA7', domain: 'adib.ae' },
+        { re: /\bdib\b|dubai\s*islamic/i, name: 'DIB', color: '#00704A', domain: 'dib.ae' },
+        { re: /mashreq/i, name: 'Mashreq', color: '#FF5E00', domain: 'mashreqbank.com' },
+        { re: /rak\s*bank/i, name: 'RAKBANK', color: '#D71920', domain: 'rakbank.ae' },
+        { re: /\bcbd\b/i, name: 'CBD', color: '#00857D', domain: 'cbd.ae' },
+        { re: /hsbc/i, name: 'HSBC', color: '#DB0011', domain: 'hsbc.ae' },
+        { re: /emirates\s*islamic|\bei\b/i, name: 'Emirates Islamic', color: '#00843D', domain: 'emiratesislamic.ae' },
+        { re: /\bsib\b|sharjah\s*islamic/i, name: 'Sharjah Islamic', color: '#006B54', domain: 'sib.ae' },
+        { re: /\bnbf\b/i, name: 'NBF', color: '#5C6670', domain: 'nbf.ae' },
+        { re: /\bwio\b/i, name: 'Wio', color: '#C4F04A', domain: 'wio.io' },
+        { re: /\bliv\b/i, name: 'Liv', color: '#00D3B9', domain: 'liv.me', issuer: 'Emirates NBD' },
+        { re: /\bajman\s*bank/i, name: 'Ajman Bank', color: '#00747A', domain: 'ajmanbank.ae' },
+        { re: /\bcbi\b/i, name: 'CBI', color: '#7A2048', domain: 'cbi.ae' },
+    ],
+    keywords: [...ARABIC_KEYWORDS, ...CROSS_BORDER_KEYWORDS],
+};
+const SA = {
+    id: 'SA',
+    name: 'Saudi Arabia',
+    flag: '🇸🇦',
+    currency: { code: 'SAR', display: 'SAR', aliases: ['SAR', 'SR', 'ر\\.س', 'ريال'] },
+    banks: [
+        { re: /al\s*rajhi|alrajhi/i, name: 'Al Rajhi', color: '#2A3C8F', domain: 'alrajhibank.com.sa' },
+        { re: /\bsnb\b|saudi\s*national|alahli|al\s*ahli|\bncb\b/i, name: 'SNB AlAhli', color: '#00A651', domain: 'alahli.com' },
+        { re: /riyad\s*bank|riyadbank/i, name: 'Riyad Bank', color: '#00457C', domain: 'riyadbank.com' },
+        { re: /alinma/i, name: 'Alinma', color: '#7B2E68', domain: 'alinma.com' },
+        { re: /albilad|bank\s*albilad/i, name: 'Bank Albilad', color: '#E63329', domain: 'bankalbilad.com' },
+        { re: /\bsab\b|saudi\s*awwal|sabb/i, name: 'SAB', color: '#5C2D91', domain: 'sab.com' },
+        { re: /\banb\b|arab\s*national/i, name: 'ANB', color: '#0072BC', domain: 'anb.com.sa' },
+        { re: /saudi\s*fransi|\bbsf\b|fransi/i, name: 'Banque Saudi Fransi', color: '#00693E', domain: 'alfransi.com.sa' },
+        { re: /aljazira|al\s*jazira/i, name: 'Bank AlJazira', color: '#F58220', domain: 'baj.com.sa' },
+        { re: /\bstc\s*pay|stcpay/i, name: 'stc pay', color: '#4F008C', domain: 'stcpay.com.sa' },
+        { re: /\burpay\b/i, name: 'urpay', color: '#00C4B3', domain: 'urpay.com.sa' },
+        { re: /\bd360\b/i, name: 'D360', color: '#111827', domain: 'd360.com' },
+    ],
+    keywords: [
+        [/\bstc\b|mobily|zain|salam\s*mobile/i, 'telecom'],
+        [/saudi\s*electric|\bsec\b|marafiq|national\s*water|\bnwc\b/i, 'utilities'],
+        [/hungerstation|jahez|mrsool|toyou|the\s*chefz/i, 'dining'],
+        [/panda|tamimi|danube|othaim|bindawood|lulu/i, 'groceries'],
+        [/petromin|sasco|aldrees|naft/i, 'transport'],
+        [/jarir\s+(?:book\s*store|marketing)|مكتبه\s+جرير/i, 'shopping'],
+        [/nahdi\s+(?:pharmacy|medical)|صيدليه\s+النهدي/i, 'health'],
+        [/flynas|flyadeal|saudia\s+(?:air|airlines?|booking)/i, 'travel'],
+        ...ARABIC_KEYWORDS,
+        ...CROSS_BORDER_KEYWORDS,
+    ],
+};
+exports.MARKETS = [AE, SA];
+const NEUTRAL = {
+    id: country_1.NEUTRAL_MARKET_ID,
+    name: 'Worldwide',
+    flag: '\u{1F30D}',
+    currency: AE.currency,
+    banks: [],
+    keywords: [...ARABIC_KEYWORDS, ...CROSS_BORDER_KEYWORDS],
+};
+function globalCategoryKeywords() {
+    return [...ARABIC_KEYWORDS, ...CROSS_BORDER_KEYWORDS];
+}
+function keywordsForMarket(id) {
+    return exports.MARKETS.find((market) => market.id === id)?.keywords ?? [];
+}
+let active = AE;
+let ledgerCurrency = null;
+let ledgerExponent = null;
+function getActiveMarket() {
+    return active;
+}
+function setLedgerCurrency(code, exponent = 2) {
+    const wanted = code?.trim().toUpperCase();
+    ledgerCurrency = wanted && /^[A-Z]{3}$/.test(wanted) ? wanted : null;
+    ledgerExponent = ledgerCurrency ? exponent : null;
+}
+function marketCurrencyCode(id) {
+    return (exports.MARKETS.find((m) => m.id === id) ?? AE).currency.code;
+}
+function ledgerCurrencyCode() {
+    return ledgerCurrency ?? active.currency.code;
+}
+function pinnedLedgerCurrencyCode() {
+    return ledgerCurrency;
+}
+function ledgerCurrencyExponent() {
+    return ledgerExponent ?? 2;
+}
+function ledgerCurrencyDisplay() {
+    if (!ledgerCurrency)
+        return active.currency.display;
+    return (exports.MARKETS.find((m) => m.currency.code === ledgerCurrency)?.currency.display ?? ledgerCurrency);
+}
+function canSelectMarket(id) {
+    return id === country_1.NEUTRAL_MARKET_ID || exports.MARKETS.some((market) => market.id === id);
+}
+function setActiveMarket(id) {
+    if (!canSelectMarket(id))
+        return false;
+    active = id === country_1.NEUTRAL_MARKET_ID ? NEUTRAL : exports.MARKETS.find((m) => m.id === id);
+    return true;
+}
+const AED_ALERT = /\b(?:AED|Dhs?\.?)\b|د\.?[إا]\.?|دراهم|درهم/iu;
+const SAR_ALERT = /\b(?:SAR|SR)\b|ر\.?\s?س\.?|ريال/iu;
+const SAR_GLUED_ALERT = /(?<=\d)(?:SAR|SR)\b/iu;
+const launchMarketsFromSender = (sender) => {
+    const senderText = sender?.trim() ?? '';
+    if (!senderText)
+        return [];
+    return exports.MARKETS.filter((market) => market.banks.some((bank) => bank.re.test(senderText)));
+};
+function detectLaunchMarketFromSender(sender) {
+    const senderMarkets = launchMarketsFromSender(sender);
+    return senderMarkets.length === 1 ? senderMarkets[0].id : null;
+}
+function detectLaunchMarketFromAlert(source, sender) {
+    const senderMarkets = launchMarketsFromSender(sender);
+    if (senderMarkets.length === 1)
+        return senderMarkets[0].id;
+    if (senderMarkets.length > 1)
+        return null;
+    const aed = AED_ALERT.test(source);
+    const sar = SAR_ALERT.test(source) || (!aed && SAR_GLUED_ALERT.test(source));
+    if (aed === sar)
+        return null;
+    return aed ? 'AE' : 'SA';
+}
+function withMarketPackForParsing(id, parse) {
+    const pack = exports.MARKETS.find((market) => market.id === id);
+    if (!pack || (ledgerCurrency && ledgerCurrency !== pack.currency.code))
+        return null;
+    const previous = active;
+    active = pack;
+    try {
+        return parse();
+    }
+    finally {
+        active = previous;
+    }
+}
+function detectMarketId() {
+    try {
+        const locale = Intl.DateTimeFormat().resolvedOptions().locale ?? '';
+        const region = locale.match(/[-_]([A-Za-z]{2})\b/)?.[1]?.toUpperCase();
+        if (region && exports.MARKETS.some((m) => m.id === region))
+            return region;
+    }
+    catch {
+    }
+    return country_1.NEUTRAL_MARKET_ID;
+}
+function bankFromSender(sender) {
+    if (!sender)
+        return null;
+    for (const b of active.banks) {
+        if (b.re.test(sender))
+            return { name: b.name, color: b.color, domain: b.domain };
+    }
+    return null;
+}
+const bankMessagePatterns = new WeakMap();
+function bankFromMessage(text) {
+    if (!text)
+        return null;
+    for (const b of active.banks) {
+        let re = bankMessagePatterns.get(b.re);
+        if (!re) {
+            re = new RegExp(`(?:${b.re.source})[^\\n]{0,16}?\\b(?:credit|debit|cr\\.?)\\s*card\\b`, 'i');
+            bankMessagePatterns.set(b.re, re);
+        }
+        if (re.test(text))
+            return { name: b.name, color: b.color, domain: b.domain };
+    }
+    return null;
+}
+const bankClaimedPatterns = new WeakMap();
+function bankClaimedPattern(re) {
+    let claimed = bankClaimedPatterns.get(re);
+    if (!claimed) {
+        const bank = `(?:${re.source})\\b\\.?`;
+        claimed = new RegExp(`(?:\\b(to|into|unto)\\s+)?\\byour\\s+${bank}[^\\n.]{0,24}?\\b(?:card|account|acc|a\\/c|acct|wallet)\\b` +
+            `|^\\s*(?:from\\s+)?${bank}\\s*(?:[:\\-\u2013|]|alert\\b|\\n)`, 'ig');
+        bankClaimedPatterns.set(re, claimed);
+    }
+    return claimed;
+}
+const MOVEMENT_WORDING = /\b(?:transfer\w*|trf\w*|tfr\w*|sent|remit\w*|payment|paid|instruction\w*|debit\w*|withdraw\w*|moved|wire\w*|processed)\b/i;
+function bankClaimed(re, text) {
+    const pattern = bankClaimedPattern(re);
+    pattern.lastIndex = 0;
+    const moved = MOVEMENT_WORDING.test(text);
+    for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
+        if (!match[1] || !moved)
+            return true;
+    }
+    return false;
+}
+function soleBankNamedInText(text) {
+    if (!text)
+        return null;
+    let found = null;
+    for (const b of active.banks) {
+        if (!bankClaimed(b.re, text))
+            continue;
+        if (found)
+            return null;
+        found = { name: b.name, color: b.color, domain: b.domain };
+    }
+    return found;
+}
+function bankFromName(name) {
+    if (!name)
+        return null;
+    for (const b of active.banks) {
+        if (b.name === name)
+            return { name: b.name, color: b.color, domain: b.domain };
+    }
+    return null;
+}
+function issuerIdentityForName(name) {
+    if (!name)
+        return undefined;
+    for (const m of exports.MARKETS) {
+        for (const b of m.banks) {
+            if (b.name.toLowerCase() === name.toLowerCase() || b.re.test(name)) {
+                return bankIdentityForName(b.issuer ?? b.name);
+            }
+        }
+    }
+    return bankIdentityForName(name);
+}
+function bankBrandForName(name) {
+    const n = name.toLowerCase();
+    for (const m of exports.MARKETS) {
+        for (const b of m.banks) {
+            if (n.includes(b.name.toLowerCase()) || b.re.test(name)) {
+                return { name: b.name, color: b.color, domain: b.domain };
+            }
+        }
+    }
+    return null;
+}
+const BANK_IDENTITY_CACHE_MAX = 512;
+const bankIdentityCache = new Map();
+function bankIdentityForName(name) {
+    if (!name)
+        return undefined;
+    const cached = bankIdentityCache.get(name);
+    if (cached !== undefined || bankIdentityCache.has(name))
+        return cached;
+    const branded = bankBrandForName(name)?.name ?? name;
+    const normalized = branded
+        .normalize('NFKC')
+        .toLocaleLowerCase('en-US')
+        .replace(/[^\p{L}\p{N}]+/gu, ' ')
+        .trim();
+    const identity = normalized || undefined;
+    if (bankIdentityCache.size >= BANK_IDENTITY_CACHE_MAX)
+        bankIdentityCache.clear();
+    bankIdentityCache.set(name, identity);
+    return identity;
+}
+function bankDomainForName(name) {
+    return bankBrandForName(name)?.domain ?? null;
+}
+function bankMonogram(name) {
+    const words = name.trim().split(/\s+/).filter(Boolean);
+    if (words.length === 0)
+        return '?';
+    const acronym = words.find((w) => /^[A-Z]{2,4}$/.test(w));
+    if (acronym)
+        return acronym;
+    if (words.length === 1)
+        return words[0].slice(0, 4).toUpperCase();
+    return words
+        .map((w) => w[0])
+        .join('')
+        .slice(0, 4)
+        .toUpperCase();
+}
+},
+"sms-parser":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.STRUCTURAL_TITLES = exports.isBnplProviderSource = exports.PARSER_BACKFILL_VERSION = exports.PARSER_VERSION = void 0;
+exports.stripInvisible = stripInvisible;
+exports.foldOrthography = foldOrthography;
+exports.normalizeArabic = normalizeArabic;
+exports.bankProfileForSender = bankProfileForSender;
+exports.hasMalformedBankAmount = hasMalformedBankAmount;
+exports.isBnplPayee = isBnplPayee;
+exports.overrideFitsDirection = overrideFitsDirection;
+exports.guessCategory = guessCategory;
+exports.classifyMerchantDescription = classifyMerchantDescription;
+exports.isDeliberateOtherTitle = isDeliberateOtherTitle;
+exports.normalizeServiceName = normalizeServiceName;
+exports.nonPostingReason = nonPostingReason;
+exports.hasArabicRefundHeading = hasArabicRefundHeading;
+exports.isNonCashNotice = isNonCashNotice;
+exports.isInformationOnlyAlert = isInformationOnlyAlert;
+exports.isNonPostingMessage = isNonPostingMessage;
+exports.isDeclinedMessage = isDeclinedMessage;
+exports.extractOutgoingTransferParties = extractOutgoingTransferParties;
+exports.parseForeignAwaitingRate = parseForeignAwaitingRate;
+exports.parseSms = parseSms;
+exports.parseSmsBatch = parseSmsBatch;
+const categories_1 = require("@/lib/categories");
+const markets_1 = require("@/lib/markets");
+const bank_amount_tokens_1 = require("@/lib/bank-amount-tokens");
+const fx_1 = require("@/lib/fx");
+const currency_metadata_1 = require("@/lib/currency-metadata");
+const fx_rates_1 = require("@/lib/fx-rates");
+const bnpl_providers_1 = require("@/lib/bnpl-providers");
+Object.defineProperty(exports, "isBnplProviderSource", { enumerable: true, get: function () { return bnpl_providers_1.isBnplProviderSource; } });
+const INVISIBLE_RE = /[\u200B-\u200F\u061C\u202A-\u202E\u2066-\u2069\uFEFF\u0640\u064B-\u0655\u0670]/g;
+const NBSP_RE = /[\u00A0\u2007\u202F]/g;
+function stripInvisible(s) {
+    return s.replace(INVISIBLE_RE, '').replace(NBSP_RE, ' ');
+}
+const FOLD_MAP = (() => {
+    const m = {
+        'آ': 'ا', 'أ': 'ا', 'إ': 'ا', 'ٱ': 'ا',
+        'ى': 'ي',
+        'ة': 'ه',
+        'ؤ': 'و',
+        'ئ': 'ي',
+        '٫': '.',
+        '٬': ',',
+        '،': ',',
+        '؛': ';',
+    };
+    for (let i = 0; i < 10; i++) {
+        m[String.fromCharCode(0x0660 + i)] = String(i);
+        m[String.fromCharCode(0x06f0 + i)] = String(i);
+    }
+    return m;
+})();
+const FOLD_RE = /[\u0622\u0623\u0625\u0671\u0649\u0629\u0624\u0626\u066B\u066C\u060C\u061B\u0660-\u0669\u06F0-\u06F9]/g;
+function foldOrthography(s) {
+    return s.replace(FOLD_RE, (ch) => FOLD_MAP[ch] ?? ch);
+}
+function normalizeArabic(s) {
+    return foldOrthography(stripInvisible(s));
+}
+const ARABIC_RE = /[\u0600-\u06FF]/;
+const AR_LETTER = '\\u0621-\\u064A';
+exports.PARSER_VERSION = 67;
+exports.PARSER_BACKFILL_VERSION = 50;
+const BANK_PROFILES = {
+    'Emirates NBD': { brand: /\benbd\b|emirates\s*nbd|\bliv\b/i, ownPot: /\b(?:liv\s+)?goals?\b|\bsavings?\s+pot\b/i },
+    Liv: { brand: /\bliv\b/i, ownPot: /\b(?:liv\s+)?goals?\b|\bsavings?\s+pot\b/i },
+    Wio: { brand: /\bwio\b/i, ownPot: /\b(?:saving\s+)?spaces?\b/i },
+    ADIB: { brand: /\badib\b/i, islamic: true },
+    DIB: { brand: /\bdib\b|dubai\s*islamic/i, islamic: true },
+    'Emirates Islamic': { brand: /emirates\s*islamic\b/i, islamic: true },
+    'Sharjah Islamic': { brand: /\bsib\b|sharjah\s*islamic/i, islamic: true },
+    'Ajman Bank': { brand: /ajman\s*bank/i, islamic: true },
+    RAKBANK: { brand: /\brak\s*bank\b|\brakbank\b/i },
+    Mashreq: { brand: /\bmashreq\b|\bneo\b/i },
+    ADCB: { brand: /\badcb\b/i },
+    FAB: { brand: /\bfab\b|first\s*abu\s*dhabi/i },
+    HSBC: { brand: /\bhsbc\b/i },
+    CBD: { brand: /\bcbd\b/i },
+    NBF: { brand: /\bnbf\b/i },
+    CBI: { brand: /\bcbi\b/i },
+};
+function bankProfileForSender(sender) {
+    const bank = (0, markets_1.bankFromSender)(sender);
+    if (!bank)
+        return null;
+    return { name: bank.name, ...(BANK_PROFILES[bank.name] ?? { brand: /x^/ }) };
+}
+const AR_CREDIT_WORDS = 'ايداع|اودع|قيد داين|راتب|مرتب|رواتب|استرداد|استرجاع|مسترد|اضيف|اضافه مبلغ|' +
+    'من صاحب العمل|' +
+    'حواله (?:(?:محليه|داخليه|دوليه|سريعه|فوريه) )?وارده|تحويل وارد';
+const CREDIT_WORDS = new RegExp(`credited|\\bcredit(?=\\s+(?:of|to|for|amount|advice|note|entry|txn|transaction|aed|dhs|sar)\\b)` +
+    `|\\bcr(?=(?:\\.\\s{0,3}|\\s{1,3})transaction\\s+(?:of|amount)\\b)` +
+    `|\\bpayroll\\s+credit(?:ed)?\\b(?!\\s+(?:card|limit|line|facility))` +
+    `|received|salary|refund(?:ed)?|deposit(?:ed)?|transferred to your|${AR_CREDIT_WORDS}`, 'i');
+const CREDIT_TRANSACTION_RE = /\b(?:credit\s{1,3}|cr(?:\.\s{0,3}|\s{1,3}))transaction\s+(?:of|amount)\b/i;
+const CREDIT_TRANSACTION_ALL_RE = /\b(?:credit\s{1,3}|cr(?:\.\s{0,3}|\s{1,3}))transaction\s+(?:of|amount)\b/gi;
+const CREDIT_TRANSACTION_PURCHASE_RE = /\b(?:card|visa|mastercard|merchant|pos)\b|\bat\s+[^\d\s]/i;
+const CREDITED_PASSIVE_RE = /\b(?:has|have)\s+been\s+(?:successfully\s+)?credited\b|\b(?:was|were|is)\s+(?:successfully\s+)?credited\b/i;
+const TRANSFER_REQUEST_ACK_RE = /\brequest\s+(?:has\s+been\s+|was\s+)?received\s+for\s+(?:an?\s+|your\s+)?(?:fund|funds|money|own\s+account)?\s*transfer\b|\b(?:fund|funds|money)\s+transfer\s+request\b/i;
+const PREPAID_CARD_LOAD_RE = /\bcard\b[^\n]{0,60}?\b(?:was|has\s+been|is)\s+(?:successfully\s+)?(?:re)?loaded\s+with\b|\b(?:re)?loaded\s+(?:on|onto|to|into)\s+your\s+(?:\w+\s+){0,2}card\b/i;
+const DEBITED_PASSIVE_RE = /\b(?:debited|deducted|charged|spent|withdrawn|paid\s+(?:to|at|for)|purchase[ds]?\b|used\s+(?:for|at))\b/i;
+const CREDIT_CLAUSE_RE = /(?:credited|deposited|paid|transferred|remitted|added)\s+(?:back\s+)?(?:in)?to\s+(?:your|the|a\/?c)|\b(?:transferred|remitted|sent)\s+from\s+(?!your\b|my\b|the\b)(?:(?!\b(?:account|a\/c|ac|acc|acct|card|ending|wallet)\b)[^\d.\n*•·]){2,60}?\s+(?:in)?to\s+your\s+(?:\w+\s+){0,2}(?:account|a\/?c)\b|credited\s+(?:with|back)\b|received\s+(?:from|(?:a\s+)?(?:payment|transfer|amount))|\bcash\s+deposit(?:ed)?\b|refunded\s+to\s+your|reversed\s+to\s+your|\binward\s+remittance\b|(?:الي|في)\s+حسابك|لحسابك/i;
+const DEBIT_CLAUSE_RE = /(?:debited|deducted|withdrawn|charged|paid|spent|transferred)\s+from\s+your|charged\s+to\s+your\s+(?:card|account)|من\s+حسابك|من\s+بطاقتك|من\s+رصيدك/i;
+const BILLER_SETTLED_RE = new RegExp(String.raw `\b(?:credited|received|posted|applied)(?:\s+[^\n]{0,24}?)?\s+(?:to|towards?|for|against)\s+(?:your|the)\s+([A-Za-z][A-Za-z0-9 &.'\-]{0,24}?)\s+(?:bill\s+|postpaid\s+|prepaid\s+)?(?:account|wallet|a\/c)\b` +
+    String.raw `|\byour\s+([A-Za-z][A-Za-z0-9 &.'\-]{0,24}?)\s+(?:bill\s+|postpaid\s+|prepaid\s+)?(?:account|wallet|a\/c)\s+(?:has\s+been|have\s+been|was|is|been)\s+(?:credited|recharged|topped[\s-]?up|reloaded|replenished)\b`, 'i');
+const PAYMENT_SUBJECT_RE = /\b(?:your|the|a)\s+payment\b/i;
+const NOT_A_BILLER_RE = /^(?:credit|debit|covered|charge|prepaid|postpaid|bank|savings?|current|salary|joint|linked|registered|new|old|other|same|main|primary|personal|business)$/i;
+const BANK_NAME_RE = /\bbanks?\b|\badib\b|\badcb\b|\benbd\b|emirates\s*nbd|emirates\s*islamic|\bliv\b|\bwio\b|\bmashreq\b|\bneo\b|rak\s*bank|\brakbank\b|\bfab\b|first\s*abu\s*dhabi|\bhsbc\b|\bcbd\b|\bnbf\b|\bcbi\b|\bdib\b|dubai\s*islamic|\bsib\b|sharjah\s*islamic|ajman\s*bank|\bciti\b|standard\s*chartered/i;
+const BILLER_CATEGORIES = ['telecom', 'utilities', 'transport', 'government'];
+function billerSettlement(prose) {
+    const m = prose.match(BILLER_SETTLED_RE);
+    const name = (m?.[1] ?? m?.[2])?.trim();
+    if (!name || NOT_A_BILLER_RE.test(name) || BANK_NAME_RE.test(name))
+        return null;
+    if (PAYMENT_SUBJECT_RE.test(prose))
+        return name;
+    return BILLER_CATEGORIES.includes(guessCategory(name, 'expense')) ? name : null;
+}
+function billerOwnAccountTail(raw, biller) {
+    if (!BILLER_CATEGORIES.includes(guessCategory(biller, 'expense')))
+        return null;
+    const m = raw.match(BILLER_SETTLED_RE);
+    if (!m || m.index === undefined || !m[1])
+        return null;
+    const after = raw.slice(m.index + m[0].length)
+        .match(/^\s*(?:(?:number|no\.?)\s*)?[:#-]?\s*[·•X*]*(\d{4,})(?![\dX*·•])/i);
+    return after ? after[1].slice(-4) : null;
+}
+const AR_DEBIT_WORDS = 'شراء|مشتريات|خصم|خصمت|سحب|قيد مدين|تم دفع|تم الدفع|عمليه دفع|دفعه بمبلغ|تم سداد|سداد بمبلغ|تسديد|تحويل صادر|' +
+    'حواله (?:(?:محليه|داخليه|دوليه|سريعه|فوريه) )?صادره|تم تحويل|استخدمت|استخدام|' +
+    '(?:^|\\n)\\s*سداد(?: فاتوره)?[ \\t]*(?=\\n)(?![\\s\\S]*(?:استحقاق|مستحق|يرجي|يرجى|جديده|قبل تاريخ|اخر موعد))';
+const BILL_DUE_WORDS = /\bdue\s+(?:on|by|date)\b|\bdue\s+(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{1,2}-\d{1,2}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4})\b|\bbill\b.*\b(?:due|generated|payable|to\s+pay)\b|\bbill amount\b|\bamount\s+payable\b|\bpay\s+by\b|\b(?:payment|pymt)\s+due\b|\bmin(?:imum)?\s+(?:amount\s+)?due\b|مستحقه الدفع|مستحق الدفع|تاريخ الاستحقاق|الحد الادني للدفع|يرجي السداد/i;
+const HYPOTHETICAL_PAYMENT_RE = /\b(?:if|in\s+case)\b[^.\n]{0,48}?\balready\b[^.\n]{0,32}?\b(?:paid|settled|cleared|made|processed|deducted|debited)\b/gi;
+const PAYMENT_INSTRUCTION_RE = /\bto\s+(?:pay|settle|clear)\b[^.\n]{0,64}?(?:,\s*(?:please|kindly)\b|\bplease\b|\bkindly\b|\bvisit\b|\bcall\b|\blog\s*in\b|\bsms\b)[^.\n]{0,64}/gi;
+const BILL_NAME_STOP = String.raw `(?:your|the|a|an|due|date|dates|for|of|to|by|on|next|last|latest|current|new|upcoming|total|amount|outstanding|monthly|unpaid|pay|paid|payment|this|that|it|is|was|has|have)\b`;
+const BILL_NAME_WORD = String.raw `(?!${BILL_NAME_STOP})[A-Za-z0-9][A-Za-z0-9&.'\-]{0,20}`;
+const BILL_MERCHANT_RE = new RegExp(String.raw `(?:your|the)\s+((?:${BILL_NAME_WORD}\s+){0,2}${BILL_NAME_WORD})\s+bill\b`, 'i');
+const AR_BILL_MERCHANT_RE = new RegExp(`فاتوره\\s+([${AR_LETTER}][${AR_LETTER}0-9 &.'\\-]{2,40}?)(?=\\s*(?:بمبلغ|بقيمه|مستحق|[,.;\\n]|$))`);
+const STATEMENT_RE = /statement|\blast\s+stmt\b|\bstmt\s+(?:date|bal(?:ance)?)\b|total\s+(?:amount\s+)?due|total\s+billed\s+am(?:oun)?t|min(?:imum)?\s+(?:payment|amount\s+due|due)\b|\bmin\s+amt\b|outstanding\s+(?:amount|balance)\s+of|كشف الحساب|كشف حساب|اجمالي المبلغ المستحق|المبلغ الاجمالي المستحق|الحد الادني للدفع/i;
+const STATEMENT_ANNOUNCEMENT_RE = /\bstatement\b(?:[^.\n]|\.\d){0,60}?\b(?:is\s+(?:now\s+)?(?:ready|available)|has\s+been\s+(?:generated|issued|prepared|sent|emailed|dispatched))\b/i;
+const STATEMENT_TXN_BLOCK_RE = /purchase|was used|charged|withdraw|debited|spent/i;
+const PORTAL_RECEIPT_RE = /(?:payment\s+to\s+(?:the\s+)?account\s+(?:number|no\.?)|لحساب رقم)\s*:?\s*[·•X*]*(\d{4,})[\s\S]*?(?:amount\s+paid|المبلغ المدفوع)\s*:?\s*(?:[A-Z]{3}|Dhs?)?\s*([\d,]+(?:\.\d{1,2})?)/i;
+const PORTAL_RECEIVED_RE = /\bpayment\s+of\s+(?:[A-Z]{3}|Dhs?)\.?\s*[\d,]+(?:\.\d{1,2})?\s+for\s+account\s+(?:(?:number|no\.?)\s*:?\s*)?[·•X*]*(\d{4,})\s+has\s+been\s+received\b[\s\S]*?\bamount\s+paid\s*:?\s*(?:[A-Z]{3}|Dhs?)?\s*([\d,]+(?:\.\d{1,2})?)/i;
+const PORTAL_RECEIVED_REFUSE_RE = /\bcredit\s+card\b|\bmin(?:imum)?\.?\s+(?:amount\s+|payment\s+)?due\b|\boutstanding(?:\s+balance)?\s*:?\s*(?:[A-Z]{3}|Dhs?)?\.?\s*(?!0+(?:\.0+)?\b)\d|\bloan\b/i;
+const PORTAL_RECEIPT_TAIL_RE = /\n[ \t]*\r?\n|\bYou['’]ve\s+earned\s+Smiles\b/i;
+const PORTAL_CHANNEL_RE = /(?:payment\s+channel|تم الدفع عن طريق)\s*:?\s*([^\n]{2,60})/i;
+const RECEIPT_BILLERS = [
+    [/(?:etisalat|اتصالات|(?:^|\s)e\s*(?:&|and)\s*(?:uae)?(?:\s|$))/i, 'Etisalat'],
+];
+const RECEIPT_BILLER_SENDER_RE = /^(?:eandinf|etisalat)$/i;
+const CARD_PAYMENT_DEBIT_LEG_RE = /payment\s+instructions?|(?:debited|deducted)\b[\s\S]*towards?\s+(?:the\s+)?(?:payment|settlement|repayment)|\bpayment\b[\s\S]{0,100}?\b(?:card|covered\s+card|credit\s+card|charge\s+card)\b[\s\S]{0,80}?\b(?:was|has\s+been|is)\s+(?:debited|deducted)\s+from\s+your\s+(?:account|a\/?c)\b/i;
+const CARD_PAYMENT_RECEIPT_LEG_RE = /(?:payment|amount)\b[\s\S]*(?:received|credited)|received\s+(?:your\s+)?payment|has\s+been\s+paid|thank you for (?:your )?payment/i;
+const CARD_PAYMENT_ACCOUNT_FIELD_RE = /^\s*payment\s+towards?\s+(?:your\s+)?(?:credit|covered|charge)\s+card\s+from\s+(?:your\s+)?(?:account|a\/?c)\b/i;
+function cardPaymentLeg(raw) {
+    if (CARD_PAYMENT_DEBIT_LEG_RE.test(raw) || CARD_PAYMENT_ACCOUNT_FIELD_RE.test(raw))
+        return 'debit';
+    if (CARD_PAYMENT_RECEIPT_LEG_RE.test(raw))
+        return 'receipt';
+    return undefined;
+}
+const OTP_CODE_WORD = String.raw `(?:\botp\b|one[\s-]?time\s+(?:password|pin|code|passcode)|(?:verification|validation|authentication|security|secure|access|confirmation)\s+code|3-?d\s*secure|\b3ds\b|رمز التحقق|رمز تحقق|كلمه المرور الموقته|كلمه السر لمره واحده)`;
+const OTP_CODE_DIGITS = String.raw `(?<![\d.,])\d{4,8}\b(?![.,]\d)`;
+const OTP_RE = new RegExp(`${OTP_CODE_WORD}(?:\\s+(?:code|otp|password|pin|number))?\\s*(?:is|:|-|=|هو)?\\s*${OTP_CODE_DIGITS}` +
+    `|${OTP_CODE_WORD}(?:[^.\\n]|\\.\\d|\\.(?=(?:com|ae|sa|net|org|io|co|in|me)\\b)){0,80}?(?:\\bis\\b|[:=]|هو)\\s*${OTP_CODE_DIGITS}` +
+    `|\\b\\d{4,8}\\s+is\\s+(?:your|the)\\s+(?:[a-z]+[\\s-]?){0,2}(?:code|otp|pin|password|passcode)\\b` +
+    `|\\b(?:use|enter)\\s+\\d{4,8}\\s+to\\b` +
+    `|(?:code|otp|password|pin)\\s+(?:for|to\\s+complete)\\s+(?:your\\s+)?3-?d\\s*secure`, 'i');
+const OTP_FOOTER_RE = new RegExp(`do not (?:share|disclose|reveal|give)|never (?:share|disclose|reveal|ask)|will never ask|beware of fraud` +
+    `|${OTP_CODE_WORD}` +
+    `|رمز سري|الرمز السري|لا تشارك|لا تفصح|لا تشاركه|لن يطلب البنك`, 'i');
+const CHALLENGE_CODE_WORD = String.raw `(?:auth(?:oris|oriz)?(?:ation)?\.?\s+code|${OTP_CODE_WORD})`;
+const CODE_MASK = String.raw `[\s·•*xX]{0,10}`;
+const CODE_CHALLENGE_QUOTED_RE = new RegExp(`${CHALLENGE_CODE_WORD}(?:[^.\\n]|\\.\\d){0,120}?(?:\\bis\\b|[:=])${CODE_MASK}${OTP_CODE_DIGITS}` +
+    `|${CHALLENGE_CODE_WORD}\\s*(?:is|:|-|=)?${CODE_MASK}${OTP_CODE_DIGITS}`, 'i');
+const CODE_CHALLENGE_FOR_RE = new RegExp(String.raw `\b(?:your\s+)?(?:double\s*secure\s+)?${CHALLENGE_CODE_WORD}\s+for\b[\s\S]{0,240}?\b(?:is|:)${CODE_MASK}${OTP_CODE_DIGITS}`, 'i');
+const CODE_SUBJECT = String.raw `(?:otp|code|password|passcode|pin)\b[^.\n]{0,12}?`;
+const CODE_VALIDITY_WINDOW_RE = new RegExp(String.raw `\b(?:use|enter|submit)\b(?:[^.\n]{0,24}?)\bwithin\s+\d{1,3}\s*(?:sec|min|hour|hr)` +
+    String.raw `|\b(?:use|enter|submit)\s+(?:it\s+|this\s+(?:\w+\s+){0,2})?in\s+\d{1,3}\s*(?:sec|min|hour|hr)` +
+    String.raw `|${CODE_SUBJECT}\bexpires?\s+(?:in|after|within)\s+(?:the\s+next\s+)?\d{1,3}\s*(?:sec|min|hour|hr)` +
+    String.raw `|${CODE_SUBJECT}\b(?:is\s+)?valid\s+(?:for|till|until|upto|up\s+to)\s+(?:the\s+next\s+)?\d{1,3}\s*(?:sec|min|hour|hr)`, 'i');
+const TRANSACTION_APPROVAL_REQUEST_RE = /(?:^|[.!?]\s*)\s*(?:please\s+)?(?:tap\s+(?:here\s+)?to\s+)?(?:approve|confirm|authoris(?:e|z)e)\s+(?:this\s+|the\s+|your\s+)?(?:card\s+)?(?:purchase|payment|transaction|transfer)\b|\b(?:open|use)\s+(?:the\s+|your\s+)?(?:bank|mobile)?\s*app\s+to\s+(?:approve|confirm|authoris(?:e|z)e)\s+(?:this\s+|the\s+|your\s+)?(?:card\s+)?(?:purchase|payment|transaction|transfer)\b|^\s*(?:(?:يرجي|الرجاء)\s+(?:الموافقه|التاكيد)\s+علي|قم\s+ب?(?:الموافقه|تاكيد))\s+(?:عمليه\s+)?(?:شراء|دفع|تحويل)(?![\u0621-\u064A])/i;
+const GLUED_OTP_REQUEST_RE = new RegExp(String.raw `\b(?:requires?|enter|use)\s+(?:your\s+)?otp${OTP_CODE_DIGITS}(?=\s*(?:[.!?;]|$|\b(?:to|for|within|before)\b))`, 'i');
+const TRANSACTION_CODE_REQUEST_RE = new RegExp(String.raw `\b(?:code|pin|password|passcode)\s*[:=-]?\s*${OTP_CODE_DIGITS}\s+(?:to|for)\s+(?:complete|confirm|authoris(?:e|z)e|authenticate|initiate|make)\s+(?:the\s+|this\s+|your\s+)?(?:payment|purchase|transaction|transfer)\b` +
+    String.raw `|\b(?:use|enter)\s+(?:the\s+|your\s+)?(?:code|pin|password|passcode)\s*[:=-]?\s*${OTP_CODE_DIGITS}\s+(?:to|for)\s+(?:complete|confirm|authoris(?:e|z)e|authenticate|initiate|make)\s+(?:the\s+|this\s+|your\s+)?(?:payment|purchase|transaction|transfer)\b`, 'i');
+const PIN_TRANSACTION_CHALLENGE_RE = new RegExp(String.raw `^\s*pin\b(?:[^.\n]|\.\d){0,180}?\b(?:transaction|payment|purchase|transfer)\b(?:[^.\n]|\.\d){0,180}?\b(?:is|:)\s*${OTP_CODE_DIGITS}`, 'i');
+const AR_CODE_CHALLENGE_RE = new RegExp(String.raw `(?:^|\n)[ \t]*(?:ال)?رمز[ \t]*:[ \t]*${OTP_CODE_DIGITS}[ \t]*(?:\r?\n|$)` +
+    String.raw `|رمز[ \t]+(?:ال)?تفعيل[ \t]*:?[ \t]*${OTP_CODE_DIGITS}` +
+    String.raw `|(?:^|\n)[ \t]*رمز[ \t]+(?:ال)?(?:شراء|دفع)(?:[ \t]+[^\s\d:]+){0,2}[ \t]*:?[ \t]*${OTP_CODE_DIGITS}` +
+    String.raw `|^[ \t]*(?:ال)?رمز[ \t]+(?:ال)?موقت(?![ء-ي])`);
+const PREAUTH_RE = /pre[\s-]?auth|auth(?:oris|oriz)ation\s+hold|\bauth\s+hold\b|amount\s+(?:has been\s+)?blocked|blocked on your(?:\s+\w+){0,2}\s+card|hold\s+(?:of|on|for|amount|placed)|\bon hold\b|temporary\s+(?:hold|charge|debit)|held on your (?:card|account)|earmark(?:ed)?|ring[\s-]?fenced|reserved on your card|has been (?:reserved|frozen)|provisional(?:ly)?\s+(?:debit|charge)|debited provisionally|pending\s+(?:transaction|authoris|authoriz)|not yet (?:posted|settled)|تم حجز|حجز مبلغ|مبلغ محجوز|تفويض مسبق/i;
+const VERIFICATION_HOLD_DESCRIPTOR_RE = /\bgoogle\s*\*?\s*temporary\s+hold\b/i;
+const HOLD_RELEASE_RE = /(?:(?:the|your|this|an?|earlier|previous|original)\s+)*(?:pre[\s-]?auth(?:oris|oriz)ation|auth(?:oris|oriz)ation|temporary|blocked)?\s*hold(?:[^.\n]|\.\d){0,60}?\b(?:released|reversed|removed|lifted|cleared|refunded)\b|\bpre[\s-]?auth(?:oris|oriz)ation\s+(?:(?:has\s+been|is|was)\s+)?(?:released|reversed|removed|lifted|cleared)\b|\bblocked\s+amount(?:[^.\n]|\.\d){0,40}?\b(?:released|reversed|removed)\b|تم الافراج عن المبلغ المحجوز/gi;
+const CONTACT_FOOTER_RE = /\(?\s*(?:\+?[\d·•X][\d·•X\s-]{4,})?\s*if\s+(?:calling|dialing|dialling)\s+from\s+(?:overseas|abroad|outside[^).\n]{0,20})\s*\)?/gi;
+const FRAUD_FOOTER_RE = /\bif\s+(?:this|that|it|the\s+(?:above\s+)?(?:transaction|purchase|payment))\b[^.\n]{0,90}|\bif\s+you\s+(?:have\s*n[o']t|did\s*n[o']t|do\s*n[o']t|didn'?t|haven'?t|don'?t)\b[^.\n]{0,90}|\b(?:to\s+report|report|reporting)\s+(?:an?\s+|any\s+)?unauthoris\w*[^.\n]{0,60}|\b(?:to\s+report|report|reporting)\s+(?:an?\s+|any\s+)?unauthoriz\w*[^.\n]{0,60}|\bunauthoris\w*\s+(?:use|transactions?|access|activity)\b[^.\n]{0,40}|\bunauthoriz\w*\s+(?:use|transactions?|access|activity)\b[^.\n]{0,40}|\bin\s+case\s+of\s+(?:any\s+)?unauthoris\w*[^.\n]{0,60}|\bnot\s+(?:done|made|initiated|authoris\w*|authoriz\w*)\s+by\s+you\b|\bif\s+(?:unauthoris\w*|unauthoriz\w*|not\s+(?:you|recogni[sz]ed|authoris\w*|authoriz\w*))\b[^.\n]{0,90}/gi;
+const DECLINED_VERB_RE = /\b(?:declined|rejected|refused|denied|failed|unsuccessful|timed\s+out)\s+(?:due\s+to|because|owing\s+to|for\s+(?:insufficient|want\s+of))\b|\b(?:was|is|were|are|has\s+been|have\s+been|been)\s+(?:declined|rejected|refused|denied|unsuccessful|dishonou?red)\b|\b(?:declined|rejected|failed|unsuccessful|timed\s+out)\s*[.!:;]|\btransaction\s+(?:has\s+)?(?:declined|failed|rejected)\b|\b(?:returned|rejected)\s+(?:a\s+)?(?:direct\s+)?debit\s+(?:request|instruction)\b|\bplease\s+(?:retry|try\s+again)\b|\bcould\s+not\s+be\s+(?:processed|completed|authoris\w*|authoriz\w*|approved|honou?red)\b|^\W{0,3}(?:transaction|payment|purchase)\s+error\s*[:!.\-]|\b(?:encountered|experienced|ran\s+into)\s+(?:an?\s+)?(?:issue|error|problem)\s+(?:while\s+)?processing\b/im;
+const DECLINED_RE = /declin|reject(?:ed|ion)|refused|\bdenied\b|not\s+(?:approved|successful|authoris\w*|authoriz\w*|completed|processed|honou?red)|unapproved|disapproved|unauthoris|unauthoriz|unsuccessful|\binsufficient\s+(?:funds?|balance|credit)\b(?![^.\n]{0,24}\b(?:fee|charge|penalty)\b)|could not be (?:processed|completed|authoris\w*|authoriz\w*|approved|verified|honou?red)|unable to (?:process|complete|authoris\w*|authoriz\w*|approve)|has not been (?:processed|approved|completed)|did not (?:go through|succeed|complete)|\bfail(?:ed|ure|s)\b|was stopped|\baborted\b|\bterminated\b|\bvoided\b|\b(?:transaction|txn|purchase|payment|transfer|withdrawal|request)\b(?:[^.\n]|\.\d){0,40}?\s(?:was|is|has\s+been|been)\s+cancell?ed\b|exceeds\s+(?:your\s+)?(?:available\s+)?(?:limit|balance)|limit exceeded|do not honou?r|card\s+(?:has\s+)?expired|expired card|card is blocked|blocked for (?:online|international)|card restricted|invalid\s+(?:card|cvv|pin|otp|expiry|transaction)|\bis invalid\b|incorrect\s+(?:cvv|pin|otp|expiry)|wrong\s+(?:cvv|pin)|pin tries exceeded|no response from (?:the\s+)?issuer|\btimed\s+out\b|\b(?:transaction|txn|request|session|connection|response|network|terminal)\s+time-?\s?outs?\b|مرفوض|تم رفض|لم تتم|لم يتم تنفيذ|فشلت|رصيد غير كاف|غير كافي|عدم كفايه|معكوسه|(?<!(?:اذا|حال|لو)[^.\n]{0,24})(?:رصيد[ \t]+(?:ال)?(?:بطاقه|حساب)(?![ \t]+(?:ال)?نقاط)[^.\n]{0,40}لا\s+يكفي|رصيدك[^.\n]{0,24}لا\s+يكفي\s+(?:ل)?(?:اتمام|اكمال))/i;
+const REVERSAL_RE = /\brevers(?:ed|al)\b|charge-?\s?backs?\b|credited back|re-?credited|returned to your (?:card|account)/i;
+const INCOMING_CREDIT_REVERSAL_RE = /\b(?:salary|payroll|wages?|wps|incoming\s+(?:payment|transfer)|inward\s+remittance|deposit(?:ed)?|credit(?:ed)?)\b(?:[^.\n]|\.\d){0,120}?\b(?:was\s+|has\s+been\s+)?reversed\b(?:[^.\n]|\.\d){0,72}?\bfrom\s+(?:your|the)\s+(?:account|a\/?c|card)\b/i;
+const REFUND_RE = /\brefund(?:ed)?\b(?:[^.\n]|\.\d){0,40}?\b(?:to|into|onto|posted|processed|credited)\b|\b(?:has|have|had|been)\s+(?:been\s+)?refunded\b|^(?:(?:credit|debit|covered|prepaid|charge)\s+card\s+)?refund\b[ .\r]*$/im;
+const AR_PURCHASE_REFUND_HEADER_RE = /^(?:استرداد[ \t]+شراء(?:[ \t]+(?:ال)?انترنت|[ \t]+pos|[ \t]+(?:عبر[ \t]+)?نقاط[ \t]+البيع)?|حواله[ \t]+عكسيه)[ \t]*(?:\r?\n|$)/i;
+const AR_PURCHASE_REFUND_NOTICE_RE = new RegExp(String.raw `\b(?:refund\s+request|request\s+for\s+(?:a\s+)?refund)\b(?:[^.\n]|\.\d){0,64}?\b(?:received|submitted|created|awaiting|pending)\b|\b(?:received|submitted|created)\b(?:[^.\n]|\.\d){0,48}?\b(?:refund\s+request|request\s+for\s+(?:a\s+)?refund)\b|(?<![ء-ي])و?(?:سيتم\s+(?:ال)?(?:استرداد|استرجاع)|تم\s+استلام\s+طلب\s+(?:ال)?(?:استرداد|استرجاع))(?:[^.\n]|\.\d)*` +
+    String.raw `|قيد\s+(?:ال)?(?:معالجه|مراجعه|تنفيذ|انتظار)` +
+    String.raw `|(?:^|\n)[ \t]*(?:status|الحاله)[ \t]*:?[ \t]*(?:pending|in\s+progress|under\s+review|processing)\b[^\n]*` +
+    String.raw `|(?:^|\n)[ \t]*طلب\s+(?:ال)?(?:حواله|استرداد|استرجاع)[^\n]*` +
+    String.raw `|\b(?:refund|reversal|request)\b[^.\n]{0,40}\b(?:is|remains)\s+(?:under\s+review|pending|being\s+processed)\b[^.\n]*` +
+    String.raw `|\bpending\s+(?:with|approval)\b[^.\n]*|تم\s+استلام\s+طلبك[^.\n]*`, 'gi');
+const AR_PURCHASE_REFUND_COMPLETED_RE = /(?:^|[.!?\n])[ \t]*(?:((?:(?:the|your|this)[ \t]+)?refund[ \t]+(?:was|has[ \t]+been)[ \t]+(?:successfully[ \t]+)?(?:credited|posted|refunded))[ \t]+(?:back[ \t]+)?(?:to|into)[ \t]+your[ \t]+(?:(?:credit|debit)[ \t]+)?(?:card|account)\b|(تم[ \t]+استرداد[ \t]+(?:ال)?مبلغ)[ \t]+(?:الي|في)[ \t]+(?:بطاقتك|حسابك))(?:[ \t]*[.!](?=\s|$)|[ \t]*\r?\n|[ \t]*$)/i;
+const AR_CASHBACK_WALLET_CREDIT_RE = /(?:الي|في)[ \t]+محفظه[ \t]+(?:ال)?استرجاع[ \t]+(?:ال)?نقدي/;
+const AR_SHARE_TRADE_RE = /تم[ \t]+تنفيذ[ \t]+عمليه[ \t]+(?:شراء|بيع)[\s\S]{0,160}?لمحفظتك[\s\S]{0,240}?لعدد[ \t]+[\d,]+[ \t]+(?:ال)?(?:سهم|اسهم)(?![ء-ي])/;
+const AR_OWN_ACCOUNT_OUTGOING_RE = /^حواله[ \t]+(?:(?:محليه|داخليه)[ \t]+)?صادره[ \t]*:?[ \t]*(?:بين[ \t]+حساباتك|ل?حسابك)(?![ء-ي])/;
+const AR_USAGE_NOTE_RE = /(?:^|\n)[ \t]*يمكن[ \t]+استخدامه[ \t]+في[^\n]*/g;
+const AR_DESTINATION_FIELD_VALUE_RE = /(?<=(?:^|\n)[ \t]*الي[ \t]*:)[^\n]*/g;
+const AR_UNLABELLED_LOCAL_TRANSFER_OUT_RE = /^حواله[ \t]+محليه[ \t]*\r?\n(?=(?:[\s\S]*\n)?من[ \t]*:?[ \t]*[x*•]+\d{3,4}[ \t]*\r?\n)(?=(?:[\s\S]*\n)?الي[ \t]*:(?![ \t]*[x*•]+\d)[ \t]*[^\s\d])/i;
+const SA_TRANSFER_IN_HEADING_RE = /^(?:internal[ \t]+)?(?:incoming|inward)[ \t]+transfer(?:[ \t]*\(sarie\))?[ \t]*\r?\n/i;
+const SA_TRANSFER_OUT_HEADING_RE = /^(?:internal[ \t]+)?(?:outward|outgoing)[ \t]+transfer(?:[ \t]*\(sarie\))?[ \t]*\r?\n/i;
+const SA_POS_BY_HEADING_RE = /^pos[ \t]+by[ \t]*:[ \t]*\d{4}\b/i;
+const REFUND_HEADING_RE = /^\s*(?:(?:pos|online|card)\s+)?purchase\s+refund\b(?!\s+(?:request|policy|claim))|^\s*استرجاع\s+(?:عمليه\s+)?(?:شراء|مشتريات)(?![؀-ۿ])/i;
+const AR_REFUND_NOTICE_HEADING_RE = /^\s*(?:طلب|سيتم)\s+(?:ال)?(?:استرجاع|استرداد)\s+(?:عمليه\s+)?(?:شراء|مشتريات)(?![؀-ۿ])/;
+const AR_REFUND_REQUEST_RECEIVED_RE = /تم\s+استلام\s+طلب(?:ك)?\s+(?:ال)?(?:استرجاع|استرداد)/;
+const PROMO_RE = /cashback|voucher|promo|discount|t&cs?\b|terms apply|conditions apply|shop now|hurry|limited time|congratulations|you (?:could|can) win|opt-?out|\bdnd\d*\b|bit\.ly|wa\.me|tinyurl|payment plan|bonus|rewards? (?:on|program|draw)|earn \d+x|https?:\/\//i;
+const PROMO_SENTENCE_CHAR = String.raw `(?:[^.\n]|\.(?![\d\s]))`;
+const PROMO_SENTENCE_RE = new RegExp(`${PROMO_SENTENCE_CHAR}*(?:` +
+    String.raw `\d{1,3}\s*%\s*(?:off|cash\s?back|back|discount|interest|instal?ments?)` +
+    `|(?:enjoy|get|save|earn|avail|grab|book|shop|redeem|flat|extra|exclusive|up\\s+to)\\b${PROMO_SENTENCE_CHAR}{0,40}?\\d{1,3}\\s*%` +
+    `|\\bredeem\\b${PROMO_SENTENCE_CHAR}{0,40}?\\bpoints?\\b` +
+    `|\\b(?:pay|manage)\\b${PROMO_SENTENCE_CHAR}{0,48}?\\b(?:utility|electricity|water|telecom|internet)\\s+bills?\\b${PROMO_SENTENCE_CHAR}{0,32}?\\b(?:app|online)\\b` +
+    String.raw `|\bt&cs?\b|\bconditions\s+apply\b|\bterms\s+apply\b` +
+    `)${PROMO_SENTENCE_CHAR}*`, 'gi');
+const PROMO_SENTENCE_TRIGGER_RE = /%|\bredeem\b|\b(?:pay|manage)\b|\bt&cs?\b|\bconditions\s+apply\b|\bterms\s+apply\b/i;
+const TXN_EVIDENCE_RE = /purchase (?:of|amount)|purchase\s+(?:aed|dhs?|sar)\b|\d{4}\s+purchase\b|was used for|\bused (?:for|at|on)\b|\bspent\b|\bdebited\b|\bdeducted\b|has been (?:debited|deducted|credited|received)|debited from|deducted from|credited to|withdraw|avl\.?\s*(?:bal|cr|limit)|available (?:balance|credit|limit)|(?:^|\n)\s*bal(?:ance)?\s+(?:aed|dhs?|sar)\b|bill amount|payment due|due (?:on|by|date)|pay by/i;
+const POSTED_CLAUSE_RE = /\b(?:purchase|transaction|payment|withdrawal|transfer|debit)\s+of\b|\b(?:has|have)\s+been\s+(?:successfully\s+)?(?:debited|deducted|credited|charged|paid|posted|processed|made|used|reversed|refunded)\b|\bwas\s+(?:successfully\s+)?(?:used|debited|deducted|charged|made|posted|processed|paid|spent)\b|\b(?:spent|debited|deducted|withdrawn|charged|paid|purchase)\s+(?:at|from|on|to|via|using|with)\b|\bavl\.?\s*(?:bal|balance|cr|limit)\b|\bavailable\s+(?:balance|limit|credit)\b|\b(?:refunded|reversed|credited|transferred|remitted|deposited)\s+(?:back\s+)?(?:to|from|into)\b|\b(?:transaction|txn|purchase|payment|card|debit|credit)\s+alerts?\b|\bnew\s+bal(?:ance)?\b|شراء بمبلغ|تم شراء|تم خصم|تم الخصم|تم سحب|تم دفع|تم الدفع|تم استرداد/i;
+function hasPostedEvidence(raw, card) {
+    if (amountWithFx(raw) === null)
+        return false;
+    if (!card) {
+        if (REFUND_RE.test(raw) &&
+            (!!extractMerchant(raw, MERCHANT_RE) || !!extractArabicMerchant(raw, raw))) {
+            return true;
+        }
+        if (STRONG_SENDERLESS_POSTING_RE.test(raw)) {
+            return true;
+        }
+        return extractOutgoingTransferParties(raw) !== null &&
+            /\bfunds?\s+transfer\s+request\b(?:[^.\n]|\.\d)*?\b(?:has\s+been|was)\s+(?:successfully\s+)?(?:processed|completed)\b/i.test(raw);
+    }
+    if (POSTED_CLAUSE_RE.test(raw))
+        return true;
+    return !!extractMerchant(raw, MERCHANT_RE) || !!extractArabicMerchant(raw, raw);
+}
+const REPORTING_PERIOD = String.raw `(?:(?:this|last|current|past)\s+(?:month|week|year|quarter|billing\s+(?:cycle|period))|(?:in|over|during|for)\s+the\s+(?:last|past)\s+\d{1,3}\s+(?:days?|weeks?|months?)|(?:year|month|week|quarter)[\s-]?to[\s-]?date|to\s+date\b|so\s+far\s+this\s+(?:month|week|year))`;
+const SPEND_SUMMARY_RE = new RegExp(String.raw `\bspent\b(?:[^.\n]|\.\d){0,60}?\b${REPORTING_PERIOD}` +
+    String.raw `|\bso\s+far\s+this\s+(?:month|week|year)\b|\b(?:total|monthly|weekly|yearly)\s+spend(?:ing|s)?\b|\bspend(?:ing)?\s+(?:summary|breakdown|report|insights?|analysis)\b|\byour\s+(?:month|week)\s+in\s+review\b|انفقت خلال هذا الشهر|ملخص الانفاق`, 'i');
+const OFFER_RE = /^\s*(?:(?:offer|promo(?:tion)?|deal)\s*[:!-]|عرض\b)|\bpurchases?\s+(?:above|over|worth|starting\s+(?:at|from))\s+(?:aed|dhs|sar)\b|\bat\s+any\s+(?:store|shop|merchant|outlet|retailer|branch)\b|\bon\s+purchases\s+(?:above|over)\b|\boff\s+your\s+(?:next|first)\b|\b(?:aed|dhs|sar)\s*[\d,]+(?:\.\d{1,2})?\s+off\b|\bup\s+to\s+(?:aed|dhs|sar)\s*[\d,]+(?:\.\d{1,2})?\s+(?:off|cashback|back)\b|\b(?:for|on|per)\s+(?:every|each)\s+(?:aed|dhs|sar)\s*[\d,]+(?:\.\d{1,2})?\b|\b(?:on|for)\s+(?:aed|dhs|sar)\s*[\d,]+(?:\.\d{1,2})?\s+spent\b|\bup\s+to\s+\d{1,3}\s*x\b|\beach\s+of\s+[\d,]+(?:\.\d{1,2})?\s*(?:aed|dhs|sar)\b/i;
+const ARABIC_OFFER_RE = /^\s*عرض(?:\s|$)/u;
+const ARABIC_MARKETING_RE = /عرض|عروض|هديه|لا\s+تفوت|تسوق\s+لدي|اشترك|للاشتراك|لعدم\s+استلام[^.\n]{0,40}الرسائل|قد\s+تربح|فرصه\s+(?:ربح|للفوز)|اربح|السحب\s+الكبير|اول\s+يوم\s+اشتراك\s+مجاني/i;
+const ARABIC_MONTHLY_BILL_RE = /فاتورتك\s+لشهر[\s\S]{0,220}?اجمالي\s+المبلغ\s+المستحق\s+دفعه\s+قبل\s+تاريخ/i;
+const REWARD_RATE_RE = /\b(?:earn|get)\b[^.\n]{0,40}?\b(?:points?|touchpoints?|rewards?|miles?|tps?)\b[^.\n]{0,48}?\b(?:for|per)\s+(?:every\s+|each\s+)?(?:(?:aed|dhs?|sar)\s*[\d,.]+|[\d,.]+\s*(?:aed|dhs?|sar)\b)(?:\s+spent\b)?/i;
+const PERCENT_PURCHASE_OFFER_RE = /\b(?:get|enjoy|save|avail|grab|extra|flat|up\s+to)\b[^.\n]{0,32}?\b\d{1,3}\s*%[^.\n]{0,64}?\bon\b[^.\n]{0,28}?\bpurchases?\b[^.\n]{0,28}?\b(?:aed|dhs?|sar)\b/i;
+const MOBILE_CREDIT_CAMPAIGN_RE = /\b(?:participate|enter|join)\b[^.\n]{0,80}\b(?:offer|draw|prize|promotion|campaign)\b|\b(?:bonus|free)\b[^.\n]{0,60}\bmobile\s+credit\b|\bget\s+(?:up\s+to\s+)?(?:aed|dhs?|sar)\s*[\d,.]+\s+of\s+mobile\s+credit\b/i;
+const FUTURE_PURCHASE_THRESHOLD_RE = /\b(?:spend|pay)\s+(?:aed|dhs?|sar)\s*[\d,.]+\s+(?:on|for)\s+(?:your\s+)?(?:next|first)\s+purchase\b|\b(?:next|first)\s+purchase\s+(?:of|worth)\s+(?:aed|dhs?|sar)\s*[\d,.]+\b|\b(?:get|receive|win)\s+(?:aed|dhs?|sar)\s*[\d,.]+\s+(?:back\s+)?on\s+(?:every|each|your)\s+purchases?\s+(?:of|worth)\s+(?:aed|dhs?|sar)\s*[\d,.]+\b/i;
+const PURCHASE_THRESHOLD_OFFER_RE = /\b(?:on|for)\s+(?:a|any|your)\s+purchases?\s+of\s+(?:aed|dhs?|sar)\s*[\d,.]+\s+(?:or\s+more|and\s+(?:above|over)|minimum)\b/i;
+const CONTEST_MARKETING_RE = /\b(?:chance|opportunity)\s+to\s+win\b|\bcash\s+prize\b|\b(?:entry|entries)\s+(?:to|into)\s+(?:the\s+)?(?:draw|raffle)\b|\bevery\s+(?:aed|dhs?|sar)\s*[\d,.]+\s+spent\b[^.\n]{0,60}\b(?:entry|entries|draw|raffle)\b/i;
+const FINANCIAL_SALES_RE = /\bwe\s+offer\b[\s\S]{0,180}\b(?:personal\s+(?:loans?|finance)|credit\s+cards?|mortgages?|auto\s+finance)\b/i;
+const APPLICATION_PURCHASE_OFFER_RE = /\bapply\b[\s\S]{0,180}\b\d{1,3}\s*%[\s\S]{0,120}\b\d{1,3}\s+months?\b[\s\S]{0,180}\bpurchases?\b|\bapply\b[\s\S]{0,180}\bpurchases?\b[\s\S]{0,180}\b\d{1,3}\s*%[\s\S]{0,120}\b\d{1,3}\s+months?\b/i;
+const SCHEDULED_CLAUSE_RE = /\b(?:is|are|has\s+been|have\s+been|will\s+be)\s+scheduled\b(?:[^.\n]|\.\d)*/gi;
+const FUTURE_CLAUSE_RE = /\b(?:will|shall|would|going\s+to)\s+(?:not\s+)?(?:be\s+)?(?:auto[\s-]?)?(?:debited|deducted|credited|deposited|received|remitted|refunded|reversed|charged|applied|applicable|paid|posted|processed|collected|taken|transferred|withdrawn|deposit|receive|remit|refund|reverse|deduct|debit|charge|credit|apply|applies)\b(?:[^.\n]|\.\d)*|\bscheduled\s+(?:for|on|to\s+be)\b(?:[^.\n]|\.\d)*|سيتم\s+(?:خصم|اضافه|ايداع|تحويل|دفع|سداد)(?:[^.\n]|\.\d)*/gi;
+const SETTLED_TENSE_RE = /\b(?:has|have|had)\s+been\s+(?:successfully\s+)?(?:debited|deducted|credited|charged|paid|posted|processed|made|used|reversed|refunded|received|withdrawn|transferred|spent|blocked)\b|\bwas\s+(?:successfully\s+)?(?:debited|deducted|credited|charged|paid|spent|used|made|posted|processed|withdrawn|transferred|reversed|refunded)\b|\bwere\s+(?:debited|credited|charged|deducted)\b|\b(?:spent|debited|deducted|withdrawn|charged|purchased)\s+(?:at|from|on|via|using|with)\b|\bavl\.?\s*(?:bal|balance|cr|limit)\b|(?<!%\s)\bavailable\s+(?:balance|limit|credit)\b|\bnew\s+bal(?:ance)?\b|تم خصم|تم الخصم|تم شراء|تم سحب/i;
+const SETTLED_MOVEMENT_RE = /\b(?:has|have|had)\s+been\s+(?:successfully\s+)?(?:debited|deducted|credited|charged|paid|posted|processed|made|used|reversed|refunded|received|withdrawn|transferred|spent|blocked)\b|\bwas\s+(?:successfully\s+)?(?:debited|deducted|credited|charged|paid|spent|used|made|posted|processed|withdrawn|transferred|reversed|refunded)\b|\bwere\s+(?:debited|credited|charged|deducted)\b|\b(?:spent|debited|deducted|withdrawn|charged|purchased)\s+(?:at|from|on|via|using|with)\b|\b(?:refunded|reversed|credited|transferred|remitted|deposited)\s+(?:back\s+)?(?:to|from|into)\b|\b(?:transaction|payment|transfer|purchase|withdrawal)\b[^.\n]{0,80}\b(?:completed|successful|succeeded|posted|processed)\b|تم خصم|تم الخصم|تم شراء|تم سحب|تم دفع|تم الدفع|تم استرداد/i;
+const SEPARATE_MOVEMENT_RE = new RegExp(String.raw `\bseparate\s+(?:outgoing\s+|incoming\s+)?(?:refund|purchase|payment|transfer|debit|credit|transaction|withdrawal|charge|deposit|remittance)\b(?:[^.\n]|\.\d){0,80}?\b(?:was|were|has\s+been|have\s+been)\s+(?:also\s+)?(?:credited|debited|posted|charged|refunded|made|processed|completed|executed|transferred)\b` +
+    `|(?<![${AR_LETTER}])و?تم\\s+(?:[${AR_LETTER}]+\\s+){0,2}(?:تحويل|حواله|عمليه|شراء|سحب|دفعه|خصم|ايداع)(?:\\s+[${AR_LETTER}]+){0,2}\\s+منفصله?(?![${AR_LETTER}])` +
+    `(?:\\s+(?:بمبلغ|بقيمه)\\s+(?:[A-Z]{3}\\s*)?\\d[\\d,]*(?:\\.\\d+)?(?:\\s*(?:[A-Z]{3}|درهم|ريال))?)?`, 'i');
+const AMBIGUOUS_AMOUNT_RE = /\bamount\s*:?\s*(AED|SAR|USD|EUR|GBP|QAR|KWD|BHD|OMR|Dhs?)\s*\d[\d,]*(?:\.\d+)?\s+or\s+\1\s*\d|\b(?:corrected|amended|revised)\s+(?:transaction\s+)?amount\b(?:[^.\n]|\.\d){0,40}?\b(?:not\s+(?:yet\s+)?(?:been\s+)?confirmed|unconfirmed|to\s+be\s+confirmed|pending|awaiting)\b/i;
+const MONEY_FIGURE_RE = /\b(?:[A-Z]{3}|Dhs?)\s*\d|\d(?:[\d,]*\.?\d*)\s*(?:[A-Z]{3}\b|Dhs?\b|درهم|ريال)/;
+const AR_SETTLED_VERB_RE = new RegExp(`(?<![${AR_LETTER}])و?تم\\s+(?:ال)?(?:خصم|شراء|سحب|دفع|تحويل|سداد)|^\\s*(?:ال)?خصم\\s+(?:مبلغ\\s+)?(?:[A-Z]{3}\\s*)?\\d`);
+const AR_COMPLETED_RE = new RegExp(`(?<![${AR_LETTER}])و?تمت(?![${AR_LETTER}])`);
+const STRONG_SENDERLESS_POSTING_RE = /\b(?:transaction|txn|payment|purchase|withdrawal|transfer|debit|credit)\b(?:[^.\n]|\.\d){0,120}?\b(?:amount\s+(?:of|is)|for|of)?\s*(?:[A-Z]{3}|Dhs?)\s*[\d,]+(?:\.\d{1,3})?(?:[^.\n]|\.\d){0,120}?\b(?:has\s+been|was|is)\s+(?:successfully\s+)?(?:paid|completed|processed|posted|debited|credited|charged|refunded|reversed|successful|succeeded)\b|\b(?:[A-Z]{3}|Dhs?)\s*[\d,]+(?:\.\d{1,3})?(?:[^.\n]|\.\d){0,96}?\b(?:has\s+been|was)\s+(?:successfully\s+)?(?:debited|deducted|credited|charged|paid|posted|processed|refunded|reversed|received|withdrawn|transferred)\b/i;
+const INFORMATION_ONLY_RE = /^\s*(?:help|faq|tip)\s*:|\b(?:refunds?|transfers?|payments?)\s+(?:are|is)\s+(?:usually\s+|normally\s+|typically\s+|generally\s+)?(?:processed|credited|completed|posted|reflected)\s+within\s+\d|(?:^|[^ء-ي])(?:معلومه|ملاحظه)\s*:[^\n]{0,24}?[\d.,]+\s*(?:[A-Za-z]{2,3}\.?\s*)?هو\s+(?:ال)?(?:حد|رصيد)\s+(?:ال)?متاح/i;
+const RETURNED_UNPAID_RE = /\b(?:cheque|check|chq)\b[^\n]{0,60}?\b(?:returned|bounced|dishonou?red|unpaid|not\s+honou?red)\b|\breturned\s+unpaid\b|\bcheque\s+return(?:ed)?\b|شيك مرتجع|شيك معاد/i;
+const PENDING_PROCESSING_RE = /\bquick\s+cash\b(?:[^.\n]|\.\d){0,160}?\bwill\s+be\s+processed\s+within\s+\d{1,3}\s+working\s+days?\b|\bhas\s+been\s+deposited\b(?:[^.\n]|\.\d){0,100}?\bsubject\s+to\s+(?:being\s+)?clear(?:ed|ance)\b|\b(?:cheque|check|chq)\b[^\n]{0,180}?\bsent\s+for\s+clearing\b|\b(?:cheque|check|chq)\b[\s\S]{0,220}?\bdeposit\s+will\s+be\s+confirmed\s+after\s+(?:successful\s+)?(?:cheque\s+)?clearing\b|\b(?:transaction|payment|transfer|purchase|withdrawal|fee|charge|debit|credit)\b(?:[^.\n]|\.\d){0,60}?\b(?:is|remains?)\s+(?:still\s+)?pending(?:\s+(?:processing|clearance|completion|debit|credit))?\b|\bpending\s+(?:debit|credit|posting|processing|clearance|completion)\b/i;
+const AR_OTHER_SUBJECT = `(?:ال)?(?:طلب|طلبات|شحن|شحنه|توصيل|استرداد|ايداع|سداد|مفوتر|بنك)`;
+const AR_CLAUSE = `(?:(?!\\sو[${AR_LETTER}])(?!(?<![${AR_LETTER}])${AR_OTHER_SUBJECT})(?:[^.\\n,;]|[.,]\\d))`;
+const AR_TXN_NOUN = `(?<![${AR_LETTER}])(?:ال)?(?:عمليه|معامله|حركه|شراء|خصم)(?![${AR_LETTER}])`;
+const AR_PENDING_IDIOM_RE = new RegExp(`${AR_TXN_NOUN}${AR_CLAUSE}{0,60}?\\s*(?<![${AR_LETTER}])قيد\\s+(?:الانتظار|المعالجه|التنفيذ)(?![${AR_LETTER}])` +
+    `|(?<![${AR_LETTER}])(?:عمليه|معامله|حركه)(?:\\s+[${AR_LETTER}]+){0,2}\\s+معلقه(?![${AR_LETTER}])`);
+const AR_NOT_YET_RE = new RegExp(`${AR_TXN_NOUN}${AR_CLAUSE}{0,80}?\\s(?:و)?لم\\s+يتم\\s+(?:قيد\\s+)?(?:الخصم|خصم[${AR_LETTER}]*|الدفع|دفع[${AR_LETTER}]*|القيد)\\s+بعد(?![${AR_LETTER}])`);
+function arabicPendingPosting(body) {
+    if (AR_SETTLED_VERB_RE.test(body))
+        return false;
+    return (AR_PENDING_IDIOM_RE.test(body) && !AR_COMPLETED_RE.test(body)) || AR_NOT_YET_RE.test(body);
+}
+const EXPECTED_FUTURE_MOVEMENT_RE = /\b(?:expected|anticipated)\b(?:[^.]|\.\d){0,80}\b(?:salary|payroll|wages|wps|payment|transfer|credit|deposit|refund|reversal|fee|charge|payout|settlement)\b|\b(?:salary|payroll|wages|wps|payment|transfer|credit|deposit|refund|reversal|fee|charge|payout|settlement)\b(?:[^.]|\.\d){0,80}\b(?:expected|anticipated)\b|(?:راتب|مرتب|دفع|تحويل|ايداع)[\s\S]{0,80}متوقع|سيصل[\s\S]{0,80}(?:راتب|مرتب|دفع|تحويل|ايداع)/iu;
+const REQUEST_RECEIVED_RE = /\b(?:payment|transfer|purchase|redemption)\s+request\b(?:[^.]|\.\d){0,64}\b(?:received|submitted|created|awaiting|pending|registered)\b|\b(?:received|submitted|created)\b(?:[^.]|\.\d){0,48}\b(?:payment|transfer|purchase)\s+request\b|تم\s+استلام\s+طلب\s+(?:سداد|دفع|تحويل)/iu;
+const MANDATE_LIFECYCLE_RE = /\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b(?:[^.]|\.\d){0,96}\b(?:will\s+(?:start|begin|commence|activate)|has\s+been\s+(?:created|registered|set\s*up|activated)|is\s+(?:now\s+)?active)\b|\b(?:created|registered|set\s*up|activated)\b(?:[^.]|\.\d){0,64}\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b|تم\s+(?:تسجيل|انشاء|تفعيل)[^\n]{0,64}(?:امر\s+)?(?:خصم\s+(?:تلقايي|مباشر)|تعليمات\s+مستديمه)/iu;
+const CONDITIONAL_PAYOUT_RE = /\b(?:merchant|business|seller|vendor|restaurant|platform|marketplace|aggregator|acquirer|sales?|delivery|courier|rider|driver)\b(?:[^.]|\.\d){0,160}\b(?:when|once|if)\s+(?:you\s+)?(?:are\s+)?(?:eligible|qualif(?:y|ied))\b|\b(?:merchant|business|seller|vendor|restaurant|platform|marketplace|aggregator|acquirer|sales?|delivery|courier|rider|driver)\b(?:[^.]|\.\d){0,160}\b(?:after\s+(?:(?:your\s+)?registration|you\s+(?:register|sign\s+up|open\s+(?:an?\s+)?account)|opening\s+(?:an?\s+)?account)|upon\s+(?:registration|sign[ -]?up|account\s+opening))\b/iu;
+const CONDITIONAL_MOVEMENT_RE = /\b(?:salary|payroll|wages|wps|monthly\s+pay|remuneration|emoluments?|refund|payout|settlement|proceeds|earnings|disbursement)\b(?:[^.]|\.\d){0,144}\b(?:if|when|once|upon)\s+(?:it\s+is\s+|you\s+are\s+)?(?:approved|authori[sz]ed|verified)\b|\b(?:salary|payroll|wages|wps|monthly\s+pay|remuneration|emoluments?|refund|payout|settlement|proceeds|earnings|disbursement)\b(?:[^.]|\.\d){0,144}\bafter\s+(?:completing\s+)?(?:onboarding|registration|verification|account\s+opening)\b/iu;
+let AED_AMOUNT_RE = /x^/g;
+let AED_SUFFIX_RE = /x^/g;
+let MIN_DUE_RE = /x^/;
+let TOTAL_DUE_RE = /x^/;
+let CARD_PAYMENT_DUE_TOTAL_RE = /x^/;
+let GENERATED_CARD_TOTAL_RE = /x^/;
+let TOTAL_OF_MINIMUM_DUE_RE = /x^/;
+let CARD_PAYMENT_ACCOUNT_POSTING_RE = /x^/;
+let TOTAL_DUE_LABEL_RE = /x^/;
+let AR_MIN_DUE_RE = /x^/;
+let AR_TOTAL_DUE_RE = /x^/;
+let AR_TOTAL_DUE_LABEL_RE = /x^/;
+let OUTSTANDING_RE = /x^/;
+let BARE_BALANCE_RE = /x^/;
+let SNAPSHOT_RE = /x^/;
+let PLAIN_BALANCE_RE = /x^/;
+let CARD_PAYMENT_RE = /x^/;
+let CARD_RECEIPT_DATE_RE = /x^/;
+let FIELD_LIST_DATE_RE = /x^/;
+let FIRST_LOCAL_AMOUNT_RE = /x^/;
+let DEBIT_WORDS = /x^/;
+let SENT_MONEY_RE = /x^/;
+let PAYMENT_FOR_RE = /x^/;
+let FX_PREFIX_RE = /x^/;
+let FX_SUFFIX_RE = /x^/;
+let EXT_FX_PREFIX_RE = /x^/;
+let EXT_FX_SUFFIX_RE = /x^/;
+let compiledForMarket = '';
+let extendedRates = null;
+const EXTENDED_CODE_DENYLIST = new Set(['ALL', 'TOP', 'CUP', 'PEN', 'MOP', 'SOS', 'BOB', 'BAM', 'AMD']);
+const extendedCurrencyCodes = (local) => Object.keys(currency_metadata_1.CURRENCY_MINOR_UNITS).filter((code) => !(code in UNITS_PER_USD) && code !== local && !EXTENDED_CODE_DENYLIST.has(code) &&
+    (0, fx_1.currencyExponent)(code) !== null && !['BOV', 'CHE', 'CHW', 'COU', 'MXV', 'USN', 'UYI', 'XAD', 'XCG'].includes(code));
+const CARD_GAP = String.raw `(?:(?!(?:bill|invoice|loan|finance|mortgage|account|utility|electricity|water|instal?ment|using|via|with|through|from|to|for|by|on|at|and|of)\b)\w+(?:\s+|\.(?=\w))){0,3}?card`;
+const ACCOUNT_GAP = String.raw `(?:(?!(?:bill|invoice|loan|finance|mortgage|utility|electricity|water|instal?ment|using|via|with|through|from|to|for|by|on|at|and|of)\b)\w+\s+){0,2}?(?:a\/?c|acct?|account)`;
+const BALANCE_AS_OF = String.raw `(?:\s*,?\s*as\s+(?:of|on|at)\s+\d{1,2}[/.\-](?:\d{1,2}|[A-Za-z]{3})[/.\-]\d{2,4}` +
+    String.raw `(?:\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AP]M)?)?)?`;
+const BALANCE_REF_CLAUSE = String.raw `(?:\s*(?:on|for|of|in)\s+(?:your\s+)?(?:${CARD_GAP}|${ACCOUNT_GAP})` +
+    String.raw `\s*(?:no\.?|number|ending(?:\s+(?:in|with))?)?\s*[\dXx*•\-]{0,16})?` + BALANCE_AS_OF;
+const UNITS_PER_USD = {
+    USD: 1, AED: 3.6725, SAR: 3.75, EUR: 0.85, GBP: 0.74, QAR: 3.64,
+    KWD: 0.307, BHD: 0.377, OMR: 0.385, INR: 83.5, PKR: 283, PHP: 56,
+    EGP: 48, CAD: 1.37, AUD: 1.52, JPY: 150, CNY: 7.2, CHF: 0.8, TRY: 41,
+    JOD: 0.709, THB: 34, SGD: 1.29, HKD: 7.8, KRW: 1370, MYR: 4.3,
+    IDR: 16200, LKR: 300, NPR: 134, BDT: 120, ZAR: 18, VND: 25400,
+    SEK: 10.5, NOK: 10.7, DKK: 6.4, PLN: 3.9, ILS: 3.7, MAD: 9.8, LBP: 89500,
+    AZN: 1.7, GEL: 2.6198,
+};
+function ensureCurrencyPatterns() {
+    const m = (0, markets_1.getActiveMarket)();
+    if (compiledForMarket === m.id)
+        return;
+    compiledForMarket = m.id;
+    const aliases = m.currency.aliases.map(foldOrthography);
+    const CUR = aliases.join('|');
+    const PREFIX = (0, bank_amount_tokens_1.localMoneyPrefixPattern)(aliases);
+    const FIGURE = String.raw `(?:[\d,]+(?:\.\d{1,2})?|\.\d{1,2})`;
+    AED_AMOUNT_RE = new RegExp(`${PREFIX}\\s*(${FIGURE})`, 'gi');
+    FIRST_LOCAL_AMOUNT_RE = new RegExp(`(?<![A-Za-z])(?:${PREFIX})\\s*${FIGURE}`, 'i');
+    FIELD_LIST_DATE_RE = new RegExp(`^(?:${PREFIX})\\s*${FIGURE}(?:[^\\S\\n]*\\n[^\\S\\n]*|[^\\S\\n]+)` +
+        `(\\d{1,2})[/.-](\\d{1,2})[/.-](\\d{4}|\\d{2})(?!\\d)(?![/.-]\\d)` +
+        `(?=[^\\S\\n]*(?:\\n|$)|[^\\S\\n]+(?:bal(?:ance)?|avl|avail(?:able)?)\\b)`, 'i');
+    AED_SUFFIX_RE = new RegExp(`(${FIGURE})\\s*(?:${CUR})(?![A-Za-z${AR_LETTER}])`, 'gi');
+    MIN_DUE_RE = new RegExp(`(?:min(?:imum)?(?:\\s+|\\.\\s*)(?:(?:amount\\s+)?due(?:\\s+amount)?|payment(?:\\s+(?:of|due))?|amt(?:\\s+due)?)|\\bpay\\s+min\\.)\\s*(?:of|:|is|[-\u2013](?=\\s))?\\s*(?:${PREFIX})\\s*(${FIGURE})`, 'i');
+    const TOTAL_DUE_LABEL = `(?:total\\s+(?:(?:amount|amt)\\s+due|due(?:\\s+to\\s+avoid\\s+fin\\.\\s+charges)?|billed\\s+am(?:oun)?t|outstanding(?:\\s+(?:amount|balance))?)` +
+        `|(?:^|[.!?;\\n]\\s*)(?:your\\s+)?(?:credit|covered)\\s+card\\s+bill` +
+        `|closing\\s+balance|statement\\s+balance|new\\s+balance|statement\\s+amount` +
+        `|statement\\s+(?:for|of)\\s+(?:the\\s+month\\s+(?:of\\s+)?)?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\.?(?:[\\s,]+\\d{2,4})?` +
+        `|total\\s+amt(?=\\s*[-\u2013]\\s)` +
+        `|(?<!\\bmin\\s)(?<!\\bmin\\.\\s)(?<!\\bminimum\\s)amount\\s+due)`;
+    TOTAL_DUE_RE = new RegExp(`${TOTAL_DUE_LABEL}\\s*(?:of|is|:|[-\u2013](?=\\s))?\\s*(?:${PREFIX})\\s*(${FIGURE})`, 'i');
+    GENERATED_CARD_TOTAL_RE = new RegExp(`\\bstatement\\s+for\\s+(?:your\\s+)?(?:[A-Za-z]+\\s+){0,3}(?:credit|covered|charge)\\s+card\\s+[Xx*\u00b7\u2022\\d-]{4,24}\\s+of\\s+(?:${PREFIX})\\s*(${FIGURE})\\s+has\\s+been\\s+(?:generated|issued)\\b`, 'i');
+    TOTAL_OF_MINIMUM_DUE_RE = new RegExp(`\\btotal\\s+of\\s+(?:${PREFIX})\\s*(${FIGURE})\\s*(?:,|and|&)\\s*minimum\\s+of\\s+(?:${PREFIX})\\s*(${FIGURE})\\s+(?:is|are)\\s+due\\s+(?:by|on)\\b`, 'i');
+    CARD_PAYMENT_ACCOUNT_POSTING_RE = new RegExp(`${CARD_PAYMENT_ACCOUNT_FIELD_RE.source}\\s*(?:no\\.?|number)?\\s*:?\\s*[Xx*\u00b7\u2022\\d-]{1,64}(?:\\s+[Xx*\u00b7\u2022\\d-]{1,64})?\\s+amount\\s*:\\s*(?:${PREFIX})\\s*(${FIGURE})\\s*(?:[,;]\\s*)?date\\s*:\\s*(\\d{1,2})[/.-](\\d{1,2})[/.-](\\d{2,4})(?=\\s|$|[.,;](?!\\d))`, 'i');
+    CARD_PAYMENT_DUE_TOTAL_RE = new RegExp(`\\bcard\\b[^.\\n]{0,96}?\\bpayment\\s+is\\s+due\\s+on\\s+` +
+        `\\d{1,2}[-\\s]+[A-Za-z]{3,9}(?:[-\\s]+\\d{2,4})?\\s+is\\s+` +
+        `(?:${PREFIX})\\s*(${FIGURE})`, 'i');
+    TOTAL_DUE_LABEL_RE = new RegExp(TOTAL_DUE_LABEL, 'i');
+    AR_MIN_DUE_RE = new RegExp(`(?:الحد الادني للدفع|الحد الادني المستحق|الحد الادني)\\s*(?:هو|:)?\\s*(?:${PREFIX})?\\s*(${FIGURE})`, 'i');
+    const AR_TOTAL_DUE_LABEL = `(?:اجمالي المبلغ المستحق|المبلغ الاجمالي المستحق|اجمالي المستحق` +
+        `|كشف حساب البطاقه(?: الايتمانيه)?\\s+\\d{4}\\s+المبلغ المستحق` +
+        `|(?:كشف حساب\\s+)?(?:ال)?بطاقه(?:\\s+(?:ال)?(?:ايتمانيه|ايتمان))?\\s+المنتهيه(?:\\s+بـ*)?\\s*\\d{4}\\s*[:،,]?\\s*المبلغ المستحق)`;
+    AR_TOTAL_DUE_RE = new RegExp(`${AR_TOTAL_DUE_LABEL}\\s*(?:هو|:)?\\s*(?:${PREFIX})?\\s*(${FIGURE})`, 'i');
+    AR_TOTAL_DUE_LABEL_RE = new RegExp(AR_TOTAL_DUE_LABEL, 'i');
+    OUTSTANDING_RE = new RegExp(`\\boutstanding(?:\\s+(?:amount|balance))?\\s*(?:is|:|of)?\\s*(?:${PREFIX})?\\s*(${FIGURE})`, 'i');
+    BARE_BALANCE_RE = new RegExp(`(?:^|[\\n.;])\\s*bal(?:ance)?\\s*(?:is|:)?\\s*(?:${PREFIX})\\s*(${FIGURE})`, 'i');
+    const SNAPSHOT_FIGURE = BALANCE_REF_CLAUSE +
+        `\\s*(?:is|:|\\.|-|,)?\\s*(?:now|currently)?\\s*` +
+        `(?:(?:${PREFIX})\\s*(${FIGURE})|(${FIGURE})\\s*(?:${CUR})(?![A-Za-z${AR_LETTER}]))`;
+    SNAPSHOT_RE = new RegExp(`(?:avl|avail(?:able)?|remaining|total)\\.?\\s*(?:cr(?:edit)?\\.?\\s*)?(limit|bal(?:ance)?|outstanding)` +
+        SNAPSHOT_FIGURE, 'i');
+    PLAIN_BALANCE_RE = new RegExp(`(?:your|current|new|updated|net|a\\/?c(?:count)?)\\s+bal(?:ance)?` + SNAPSHOT_FIGURE, 'i');
+    CARD_PAYMENT_RE = new RegExp(`payment\\s+(?:of\\s+(?:${CUR})\\s*[\\d,.]+\\s+)?(?:is\\s+|was\\s+|has\\s+been\\s+)?(?:received|credited|processed)\\s+(?:towards?|to|on|for)\\s+(?:your\\s+)?${CARD_GAP}` +
+        `|received\\s+your\\s+payment\\s+(?:of\\s+(?:${CUR})\\s*[\\d,.]+\\s+)?(?:towards?|to|for|against)\\s+(?:your\\s+)?${CARD_GAP}` +
+        `|payment\\s+of\\s+(?:${CUR})\\s*[\\d,.]+\\s+against\\s+(?:your\\s+)?${CARD_GAP}` +
+        `|(?:your\\s+)?payment\\s+of\\s+(?:${CUR})\\s*[\\d,.]+(?:\\s+on\\s+\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4})?\\s+for\\s+(?:your\\s+)?${CARD_GAP}\\s*(?:no\\.?|number|ending(?:\\s+(?:in|with))?)?\\s*[\\dXx*•-]{0,20}\\s+(?:has\\s+been|was|is)\\s+credited\\b` +
+        `|payment\\s+of\\s+(?:${CUR})\\s*[\\d,.]+(?:\\s+on\\s+\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4})?\\s+towards?\\s+(?:your\\s+)?${CARD_GAP}\\s*(?:no\\.?|number|ending(?:\\s+(?:in|with))?)?\\s*[\\dXx*•-]{0,20}(?:\\s+on\\s+\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4})?\\s+(?:has\\s+been|was|is)\\s+(?:received|credited)\\b` +
+        `|received\\s+payment\\s+for\\s+your\\s+${CARD_GAP}` +
+        `|thank\\s+you\\s+for\\s+(?:your\\s+)?payment[^\\n]{0,48}?(?:towards?|to|for|against)\\s+(?:your\\s+)?${CARD_GAP}` +
+        `|card\\s+(?:no\\.?\\s*)?[\\dXx*•]*\\s*has\\s+been\\s+paid` +
+        `|(?:${CUR})\\s*[\\d,.]+\\s+payment\\s+for\\s+(?:your\\s+)?${CARD_GAP}\\s+(?:was|has\\s+been|is)\\s+(?:debited|deducted)\\s+from\\s+your\\s+(?:account|a\\/?c)\\b` +
+        `|towards?\\s+(?:the\\s+)?(?:payment|settlement|repayment)\\s+of\\s+(?:your\\s+)?${CARD_GAP}`, 'i');
+    CARD_RECEIPT_DATE_RE = new RegExp(`\\b(?:your\\s+)?payment\\s+of\\s+(?:${CUR})\\s*[\\d,.]+\\s+on\\s+(\\d{1,2})[/-](\\d{1,2})[/-](\\d{2}|\\d{4})\\s+for\\s+(?:your\\s+)?${CARD_GAP}\\s*(?:no\\.?|number|ending(?:\\s+(?:in|with))?)?\\s*[\\dXx*•-]{0,20}\\s+(?:has\\s+been|was|is)\\s+credited\\b`, 'i');
+    PAYMENT_FOR_RE = new RegExp(`payment\\s+for\\s+([A-Za-z0-9][^\\n]{1,48}?)\\s+of\\s+(?:${CUR})\\s*[\\d,]`, 'i');
+    DEBIT_WORDS = new RegExp(`purchase|debit(?:ed)?|deducted|spent|\\bpaid\\b|payment(?!\\s+(?:due|of\\s+(?:${CUR})[\\d,. ]+(?:is\\s+)?received))|withdraw(?:n|al)?|\\bused\\b|utilis(?:e|ed)|utiliz(?:e|ed)|swiped|tapped|transacted|transaction\\s+(?:of|amount)|cash\\s+advance|charged|(?:via|using|through)\\s+(?:your\\s+)?(?:credit|debit|covered|charge|prepaid)\\s+card` +
+        `|transferr(?:ed|ing)` +
+        `|${AR_DEBIT_WORDS}`, 'i');
+    SENT_MONEY_RE = new RegExp(`\\byou\\s+(?:have\\s+|just\\s+)?sent\\s+(?:${CUR})\\s*\\d` +
+        `|(?:${CUR})\\s*[\\d,.]+\\s+(?:has\\s+been\\s+|was\\s+)?sent\\s+to\\b(?!\\s+(?:you|your|yours)\\b)`, 'i');
+    const codes = Object.keys(UNITS_PER_USD).filter((c) => c !== m.currency.code).join('|');
+    const FX_FIGURE = String.raw `(?:[\d,]+(?:\.\d{1,3})?|\.\d{1,3})`;
+    FX_PREFIX_RE = new RegExp(`\\b(${codes})[^\\S\\r\\n]*(${FX_FIGURE})`, 'i');
+    FX_SUFFIX_RE = new RegExp(`(${FX_FIGURE})[^\\S\\r\\n]*(${codes})\\b`, 'i');
+    const extended = extendedCurrencyCodes(m.currency.code).join('|');
+    EXT_FX_PREFIX_RE = new RegExp(`\\b(${extended})[^\\S\\r\\n]*(${FX_FIGURE})`);
+    EXT_FX_SUFFIX_RE = new RegExp(`(${FX_FIGURE})[^\\S\\r\\n]*(${extended})\\b`);
+}
+const MASKED_PREFIX_RE = /(?:[·•*]|[Xx]{3,})[^\S\r\n]*$/;
+function isMaskedFigure(raw, index) {
+    return MASKED_PREFIX_RE.test(raw.slice(Math.max(0, index - 12), index));
+}
+function fxMinorPerUnit(code) {
+    const mine = UNITS_PER_USD[(0, markets_1.getActiveMarket)().currency.code] ?? 1;
+    const theirs = UNITS_PER_USD[code];
+    return (mine / theirs) * 100;
+}
+function foreignHundredths(amount) {
+    return amount.exponent === 3 ? amount.amountMinor / 10 : amount.amountMinor * 10 ** (2 - amount.exponent);
+}
+function foreignFigureToMinor(figure, exponent) {
+    if (exponent === 2 && /^\d{1,3}\.\d{3}$/.test(figure.trim()))
+        return null;
+    const value = figure.replace(/,/g, '');
+    const match = /^(\d*)(?:\.(\d+))?$/.exec(value);
+    if (!match || (!match[1] && !match[2]))
+        return null;
+    const fraction = match[2] ?? '';
+    if (fraction.length > exponent && /[1-9]/.test(fraction.slice(exponent)))
+        return null;
+    const digits = `${match[1] || '0'}${fraction.slice(0, exponent).padEnd(exponent, '0')}`;
+    const minor = Number(digits);
+    return Number.isSafeInteger(minor) && minor > 0 ? minor : null;
+}
+function extractForeignAmount(raw) {
+    const candidates = [];
+    const scanAll = (re, codeGroup, flags, into) => {
+        const scan = new RegExp(re.source, flags);
+        let m;
+        while ((m = scan.exec(raw))) {
+            const num = codeGroup === 1 ? m[2] : m[1];
+            const digitsAt = codeGroup === 1 ? m.index + m[0].length - num.length : m.index;
+            if (raw[digitsAt + num.length] === ':' && /\d/.test(raw[digitsAt + num.length + 1] ?? ''))
+                continue;
+            if (raw[digitsAt - 1] === ':' && /\d/.test(raw[digitsAt - 2] ?? ''))
+                continue;
+            into.push({ at: m.index, digitsAt, code: m[codeGroup].toUpperCase(), num });
+        }
+    };
+    const collect = (re, codeGroup, flags = 'gi') => scanAll(re, codeGroup, flags, candidates);
+    collect(FX_PREFIX_RE, 1);
+    if (!candidates.length)
+        collect(FX_SUFFIX_RE, 2);
+    if (!candidates.length && extendedRates) {
+        collect(EXT_FX_PREFIX_RE, 1, 'g');
+        if (!candidates.length)
+            collect(EXT_FX_SUFFIX_RE, 2, 'g');
+    }
+    const attached = [];
+    scanAll(FX_PREFIX_RE, 1, 'gi', attached);
+    scanAll(FX_SUFFIX_RE, 2, 'gi', attached);
+    for (const c of attached) {
+        if (!/\d/.test(c.num) || isMaskedFigure(raw, c.digitsAt))
+            continue;
+        if (BALANCE_PREFIX_RE.test(raw.slice(Math.max(0, c.at - 56), c.at)))
+            continue;
+        if ((0, fx_1.currencyExponent)(c.code) !== 0)
+            continue;
+        const fraction = c.num.replace(/,/g, '').split('.')[1] ?? '';
+        if (/[1-9]/.test(fraction))
+            return null;
+    }
+    for (const c of candidates) {
+        const extended = !(c.code in UNITS_PER_USD) ? extendedRates?.(c.code) ?? null : null;
+        if (!(c.code in UNITS_PER_USD) && !extended)
+            continue;
+        if (isMaskedFigure(raw, c.digitsAt))
+            continue;
+        if (BALANCE_PREFIX_RE.test(raw.slice(Math.max(0, c.at - 56), c.at)))
+            continue;
+        const exponent = (0, fx_1.currencyExponent)(c.code);
+        if (exponent === null)
+            continue;
+        const amountMinor = foreignFigureToMinor(c.num, exponent);
+        if (amountMinor === null)
+            continue;
+        if (extended) {
+            let fils;
+            try {
+                fils = extended.source === 'probe'
+                    ? Math.max(1, Math.round(foreignHundredths({ amountMinor, exponent })))
+                    : (0, fx_1.convertMinorUnits)(amountMinor, exponent, extended.rate, 2);
+            }
+            catch {
+                return null;
+            }
+            if (extended.source === 'reference' && fils > MAX_PLAUSIBLE_AMOUNT_FILS)
+                return null;
+            return {
+                source: extended.source,
+                ...(extended.date ? { rateDate: extended.date } : {}),
+                currency: c.code,
+                amountMinor,
+                exponent,
+                localFils: fils,
+                rate: extended.rate,
+            };
+        }
+        const rate = fxMinorPerUnit(c.code) / 100;
+        const unroundedFils = foreignHundredths({ amountMinor, exponent }) * rate;
+        const fils = Math.floor(unroundedFils + 0.5 + Number.EPSILON * Math.max(1, unroundedFils) * 4);
+        if (!Number.isFinite(fils) || fils <= 0 || fils > MAX_PLAUSIBLE_AMOUNT_FILS)
+            return null;
+        return {
+            source: 'table',
+            currency: c.code,
+            amountMinor,
+            exponent,
+            localFils: fils,
+            rate,
+        };
+    }
+    return null;
+}
+function extractForeignAmountFils(raw) {
+    return extractForeignAmount(raw)?.localFils ?? null;
+}
+const MAX_PLAUSIBLE_AMOUNT_FILS = 100000000;
+const BALANCE_PREFIX_RE = new RegExp(String.raw `(?:bal(?:ance)?|avl|avail(?:able)?|limit|outstanding|total|الرصيد المتاح|الرصيد الحالي|الحد المتاح|المتاح|الرصيد|رصيدك)` +
+    BALANCE_REF_CLAUSE +
+    String.raw `\s*(?:is|:|\.|-|هو)?\s*(?:now|currently|الان)?\s*$` +
+    String.raw `|(?:الرصيد|رصيدك)\s+(?:المتوفر|المتاح)(?:\s+(?:في|ل)\s*حسابك)?(?:\s+رقم)?(?:\s+[\dXx*•\-]{3,24})?\s*(?:هو|:)?\s*$`, 'i');
+function sanitizeLocalMoney(raw) {
+    ensureCurrencyPatterns();
+    const invalid = (0, bank_amount_tokens_1.malformedLocalMoneyTokens)(raw, (0, markets_1.getActiveMarket)().currency.aliases.map(foldOrthography));
+    if (!invalid.length)
+        return raw;
+    for (const token of invalid) {
+        const prefix = raw.slice(Math.max(0, token.contextStart - 56), token.contextStart);
+        const parkingTax = /\bVAT[-:\s]*$/i.test(prefix) &&
+            /\bPlateNo[-:]\s*\d+/i.test(raw) && /\bTicketNo[-:]\s*\d+/i.test(raw) &&
+            /\bFee[-:]\s*(?:AED|DHS)\s*\d+(?:\.\d{1,2})?(?![\d.,])/i.test(raw);
+        if (parkingTax)
+            continue;
+        if (!BALANCE_PREFIX_RE.test(prefix) || TOTAL_DUE_LABEL_RE.test(prefix) ||
+            AR_TOTAL_DUE_LABEL_RE.test(prefix))
+            return null;
+    }
+    let sanitized = raw;
+    for (const token of invalid.slice().reverse()) {
+        sanitized = sanitized.slice(0, token.start) + ' '.repeat(token.end - token.start) +
+            sanitized.slice(token.end);
+    }
+    return sanitized;
+}
+const EI_AR_THOUSANDS_RE = /([\u0660-\u0669])\u066B([\u0660-\u0669]{3})(?![\u0660-\u0669\u066B\u066C\u060C])(?=[ \t]*(?:درهم|دراهم))/g;
+function issuerDigitGrouping(text, sender) {
+    if (!sender || !text.includes('\u066B'))
+        return text;
+    return (0, markets_1.bankFromSender)(sender)?.name === 'Emirates Islamic' ? text.replace(EI_AR_THOUSANDS_RE, '$1\u066C$2') : text;
+}
+function hasMalformedBankAmount(message, sender) {
+    return sanitizeLocalMoney(normalizeArabic(issuerDigitGrouping(message, sender))) === null;
+}
+const CARD_KIND_WORDS = /credit|covered|charge/i;
+const CARD_RE = /(credit|debit|covered|charge|prepaid)?\s*card(?:\s*(?:no\.?|number))?\s*:?\s*(?:ending(?:\s+(?:in|with))?)?\s*(?:(?:\.\.+|x+|\*+|[·•]+)(?:\s*(?=\d{4}\b)|(?=\d{3}\b))(\d{3,4})|(\d{4}))\b(?![.,]\d)/i;
+const ACCOUNT_RE = /a\/?c(?:count)?\s*(?:no\.?|number)?\s*:?\s*(?:(?:\.\.+|x+|\*+|[·•]+)(?:\s*(?=\d{4}\b)|(?=\d{3}\b))(\d{3,4})|(?:ending(?:\s+(?:in|with))?)?\s*(\d{4}))\b(?![.,]\d)/i;
+const MASKED_ACCOUNT_RE = /(?:a\/?c(?:count)?|acct?|account)\s*(?:no\.?|number)?\s+(?:\d{1,4}[- ]?)?(?:[Xx*·•]+\d*)+(?:[- ]+)?(\d{4})\b/i;
+const MASKED_PAN_RE = /\b\d{4,6}(?:[\s-]?[Xx*•]{2,}){1,3}[\s-]?(\d{4})\b/;
+const USED_CARD_TAIL_RE = /[Xx*•]{2,}(\d{4,6})\s+was\s+used\s+for\b/i;
+const AR_CARD_KIND = 'ايتمان';
+const AR_CARD_RE = new RegExp(`بطاق[${AR_LETTER}]{0,4}\\s*((?:ال)?${AR_CARD_KIND}[${AR_LETTER}]{0,3}|الخصم)?[^\\d\\n]{0,28}?(\\d{4})(?!\\d)`);
+const AR_ACCOUNT_RE = new RegExp(`حساب[${AR_LETTER}]{0,3}\\s*(?:رقم)?[^\\d\\n]{0,20}?(\\d{4})(?!\\d)`);
+const REFERENCE_LABEL_RE = /\b(?:ipi\s+tt\s+ref|file\s+ref|reference(?:\s+(?:no|number))?|ref|txn\s+(?:id|ref(?:erence)?)|transaction\s+(?:id|ref(?:erence)?))\b/i;
+const REFERENCE_VALUE_RE = /^[\s.]*(?:no\.?|number)?\s*[:#-]?\s*([A-Z0-9][A-Z0-9Xx*·•-]{3,39})\b/i;
+function extractReference(raw) {
+    const lower = raw.toLowerCase();
+    const mayHaveReference = lower.startsWith('ref:') ||
+        lower.includes(' ref:') ||
+        lower.includes(' ref ') ||
+        lower.includes(' reference') ||
+        lower.includes(' txn id') ||
+        lower.includes(' txn ref') ||
+        lower.includes(' transaction id') ||
+        lower.includes(' transaction ref');
+    if (!mayHaveReference)
+        return null;
+    const label = raw.match(REFERENCE_LABEL_RE);
+    if (!label || label.index === undefined)
+        return null;
+    const tail = raw.slice(label.index + label[0].length);
+    return tail.match(REFERENCE_VALUE_RE)?.[1] ?? null;
+}
+function extractBillIdentity(raw) {
+    const matches = raw.matchAll(/\b(account|consumer|party|customer|contract|service)(?:\s*-?\s*(?:number|no\.?|id))?\s*[:#-]?\s*([A-Z0-9X*·•.-]{4,40})\b/gi);
+    for (const match of matches) {
+        const value = match[2].replace(/[^A-Z0-9]/gi, '').toUpperCase();
+        if (value.length >= 4 && /\d/.test(value)) {
+            const kind = match[1].toLowerCase();
+            return `${kind}:${value.slice(-4)}`;
+        }
+    }
+    const arabic = normalizeArabic(raw).match(/(?:للحساب|الحساب|حسابك|حساب)(?:\s+[\u0600-\u06ff&]+){0,5}\s+رقم\s*[:#-]?\s*([0-9X*·•-]{4,40})/);
+    if (!arabic)
+        return null;
+    const value = arabic[1].replace(/[^0-9X]/gi, '').toUpperCase();
+    return value.length >= 4 ? `account:${value.slice(-4)}` : null;
+}
+const MERCHANT_STOP = String.raw `(?=\s*(?:[\u0600-\u06FF]|,|\.|;|\bon\b(?!-)|\bwith\b|\busing\b|\bvia\b|\bending\b|\bcard\b|\ba\/c\b|\bacc(?:ount)?\b|\bref\b|\btxn\b|\bdated\b|\bavl\b|\bavail(?:able)?\b|\bbal(?:ance)?\b|\botp\b|\bfor\b|\bis\b|\bhas\b|\bhave\b|\bwas\b|\bwere\b|\bare\b|\bbeen\b|\bwill\b|\bdid\b|\bdoes\b|\bcould\b|\bwould\b|\bshould\b|\bas\b|\band the\b|\bbut the\b|\baed\b|\bdhs\b|\bsar\b|\busd\b|\beur\b|\bgbp\b|$))`;
+const HOST_LABELS = String.raw `(?:\.[A-Za-z0-9-]{1,24})*?`;
+const NAME_INITIALS = String.raw `(?:(?:(?:[A-Za-z]\.){2,}|\b(?:Dr|Mr|Mrs|Ms|Prof|St)\.)\s*)?`;
+const MERCHANT_RE = new RegExp(String.raw `(?:\bat|\bto|\bfrom|@)\s+(` +
+    NAME_INITIALS +
+    String.raw `[A-Za-z0-9%][A-Za-z0-9%·• &'\-*/()+_]{1,40}?(?:` +
+    HOST_LABELS +
+    String.raw `\.(?:com|ae|net|org|io|co|ai)\b)?)` +
+    MERCHANT_STOP, 'gi');
+const GATEWAY_URL_MERCHANT_RE = /\b(?:at|to)\s+(?:https?:\/\/)?(?:www\.)?[A-Za-z0-9-]{2,}(?:\.[A-Za-z0-9-]{2,})+\s*\*\s*([A-Za-z0-9][A-Za-z0-9 &'.\-]{1,40}?)(?=\s*[,;(]|\s*$)/i;
+const CHANNEL_BILL_MERCHANT_RE = /\b(?:at|to)\s+(?:[A-Z]{2,4}\s+)?(?:BILL|TRF|TFR|PMT|PYMT|POS|ATM|PUR|PAY|UTIL)\s+(?:DR|CR)\s*:\s*([A-Za-z0-9][A-Za-z0-9 &'.\-]{1,40}?)(?=\s*[,;(]|\s+on\s|\s*$)/;
+const AR_NOT_MERCHANT = 'حساب|الحساب|بطاق|البطاق|رصيد|الرصيد|جهاز|مبلغ|المبلغ|تاريخ|خلال|صراف|الصراف|رقم|خلال';
+const AR_CONNECTOR = 'من|باستخدام|بواسطه|علي|عبر|عن طريق|بحسابك';
+const AR_MERCHANT_RE = new RegExp(`(?:^|[^${AR_LETTER}])(?:لدي|في|الي|عند|من|(?:ال)?مفوتر)\\s*:?\\s+(?!(?:${AR_NOT_MERCHANT}))` +
+    `([${AR_LETTER}A-Za-z][${AR_LETTER}A-Za-z0-9 '\\-&.]{1,40}?)` +
+    `(?=\\s*(?:[,.;:\\n]|بالبطاق|بطاقت|البطاق|بطاق|حساب|بتاريخ|بمبلغ|الرصيد|رصيد|المتاح|(?:${AR_CONNECTOR})\\s+(?:${AR_NOT_MERCHANT})|$))`, 'g');
+const TERMINAL_ID_RE = /(?:[-\s]+[·•X]{2,}\d*|-\d{4,}|\s(?!(?:19|20)\d{2}$)\d{4,})$/i;
+const DATE_RE = /(?:\b(?:on|by|before|is)\b|\bdue\s+date\b|\bvalue\s+date\b|بتاريخ|تاريخ الاستحقاق|حتي تاريخ|بحلول)\s*:?\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})/i;
+const DATETIME_RE = /\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})\s+\d{1,2}:\d{2}(?!\d)/;
+const ARABIC_ISO_DATETIME_RE = /(?:^|\n)\s*في\s*:\s*(\d{4})[-/](\d{1,2})[-/](\d{1,2})\s+\d{1,2}:\d{2}(?!\d)/im;
+const ISO_DATE_RE = /(?:\bdate\b|\bdue\b|تاريخ)[^\d\n]{0,24}(\d{4})-(\d{1,2})-(\d{1,2})(?!\d)/i;
+const HSBC_DATE_RE = /\bfrom\s+hsbc:\s*(\d{1,2})([A-Za-z]{3})(\d{2})\b/i;
+const ATM_RE = /\bcash\s+withdrawal\b[\s\S]{0,32}(?:\b(?:aed|sar|dhs?)\b|\d)|\bcash\s+advance\b[\s\S]{0,96}\bcredit\s+card\b[\s\S]{0,48}\batm\b|\bwithdraw(?:n|al)\b|\batm\b[^.\n]{0,40}\b(?:cash|withdraw)\w*\b|\b(?:cash|withdraw)\w*\b[^.\n]{0,40}\batm\b|(?:تم\s+)?سحب\s+نقدي[\s\S]{0,32}(?:\b(?:aed|sar)\b|\d)|سحب[\s\S]{0,32}(?:الصراف الالي|صراف الي|جهاز الصراف)/i;
+const FEE_RE = /\bfees?\b|\bcharges?\s+(?:of|:)|service charge|\bvat\b|annual membership|رسوم|رسم خدمه|ضريبه القيمه المضافه/i;
+const feeTitle = (raw) => {
+    if (/\binsufficient balance fee\b/i.test(raw))
+        return 'Insufficient balance fee';
+    if (/\boverlimit fee\b/i.test(raw))
+        return 'Overlimit fee';
+    if (/\blate payment fee\b/i.test(raw))
+        return 'Late payment fee';
+    if (/\boverdraft fee\b/i.test(raw))
+        return 'Overdraft fee';
+    if (/\b(?:monthly )?(?:account )?maintenance fee\b|\bmonthly account fee\b/i.test(raw)) {
+        return 'Account maintenance fee';
+    }
+    if (/\bservice charge\b|رسم خدمه/i.test(raw))
+        return 'Service charge';
+    if (/\bannual (?:membership|(?:credit )?card )?fee\b|\bannual membership\b/i.test(raw)) {
+        return /\bcard\b/i.test(raw) ? 'Annual card fee' : 'Annual bank fee';
+    }
+    return 'Bank fee';
+};
+const SALARY_RE = /\bsalar(?:y|ies)\b|\bpayroll\b|\bwages?\b|\bwps\b|\bsal(?:ary)?\s+pay\b|\bmonthly\s+pay\b|\bnet\s+pay\b|\bremuneration\b|\bemoluments?\b|\bpay[ -]?cheques?\b|\bpaychecks?\b|راتب|الراتب|مرتب|رواتب|اجر شهري|اجور|من صاحب العمل/i;
+const DEPOSIT_RE = /cash\s+deposit|\bcdm\b|deposit(?:ed)?\s+(?:in|into|to)\b|ايداع نقدي|جهاز الايداع/i;
+const MOBILE_RECHARGE_RE = /\b(?:mobile|airtime|talktime|prepaid)\s+recharge\b|\brecharge\b[^\n]{0,80}?\b(?:call\s+service|airtime|talktime)\b|\bout\s+of\s+credit\s+call\s+service\b/i;
+const LINE_NOISE_RE = /\bcard\b|a\/?c\b|\baccount\s+(?:no|number|xx)|\bbal(?:ance)?\b|\blimit\b|statement|\bdue\b|payment\s+channel|\bpayment\b(?!\s*[A-Za-z])|purchases\b|purchase\s+of\b|debited|credited|\botp\b|\bref(?:erence)?\b|\btxn\b|\bavl\b|avail|value date|^date\b|paid upto|transaction\s+(?:date|time|id|ref)|^transaction\s*(?:#|no\b|number\b)|mode\s+of\s+payment|amount\s+(?:due|paid)|^remaining\b/i;
+const LINE_PROMO_RE = /^(?:(?:up\s+to|flat|get|earn|enjoy|save|extra|additional)\s+)*\d{1,3}(?:\.\d+)?\s*%|^(?:earn|get)\s+\d{1,3}\s*x\b|^(?:cash\s?back|rewards?|points?)\b(?:\s+(?:earned|credited|awarded))?\s*[:.]?\s*(?:[\d,]+(?:\.\d{1,2})?)?\s*$/i;
+const LINE_DATE_RE = /^\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}/;
+const TRAILING_PLACE_RE = /\s+(?:DXB|DUBAI|ABU DHABI|SHARJAH|AJMAN|ARE|UAE|FRA|USA|GBR|DEU|NLD|ESP|ITA|IRL|SGP|HKG|IND|SAU|KSA|LUX|CAN|AUS|CHE|SWE|POL|JPN|RIYADH|JEDDAH|QAT|GHA|KWT|BHR|OMN|JOR|LBN|EGY|TUR|THA|MYS|KOR|CHN|PAK|LKA|PHL|BGD|ZAF|KEN|NGA|MAR|GRC|PRT|BEL|AUT|DNK|NOR|FIN|CZE|RUS|BRA|MEX|NZL|VNM|IDN|TWN|MCO|LIE)$/i;
+const PLACE_TAIL_RE = /(?:[-\s]+[A-Za-z]?)?(?:DXB|DUBAI|ABU ?DHABI|SHARJAH|AJMAN|FUJAIRAH|UMM AL QUWAIN|AL AIN|RAK)$/i;
+function peelPrefix(name, re) {
+    const peeled = name.replace(re, '').trim();
+    if (peeled === name)
+        return name;
+    return (peeled.match(/[A-Za-z]/g) ?? []).length >= 4 ? peeled : name;
+}
+function cleanDescriptor(name) {
+    let out = name
+        .replace(/\s*\([^)]*\)?\s*/g, ' ')
+        .replace(/^[·•X]{2,}\d*\s+/i, '')
+        .replace(/^(?:pos|tap|wl|sq|alp|eig|web|google|paypal|apl|amzn|mamo|ziina)\s*\*\s*/i, '')
+        .replace(/\s+G\.CO\/\S+(?:\s+[A-Za-z]{2,3})?$/i, '')
+        .replace(/[-\s]+BR\s?\d{1,4}(?:[-\s]\d{1,6})?$/i, '')
+        .replace(TERMINAL_ID_RE, '')
+        .replace(/[-\s]*\b(?:AE|ARE|UAE|BH|BHR|SA|KSA|US|USA|GB|IN)$/i, '')
+        .replace(/[\s,]*\+[\d·•X\s-]{6,}$/i, '')
+        .replace(/(?:^|[\s,]+)(?:[A-Z]{2}-)?\+?\d[\d\s()-]{6,}\d(?:\s+[A-Z]{2,16}){0,2}$/i, '')
+        .trim();
+    out = peelPrefix(out, /^[A-Za-z0-9][A-Za-z0-9.\-& ]{0,14}\*\s*/);
+    out = peelPrefix(out, /^SP\s+/);
+    out = peelPrefix(out, /^2C2P\s+/i);
+    out = peelPrefix(out, /^[A-Za-z]{1,3}\d{3,6}[-\s]\s*/);
+    let prev = '';
+    let peeledPlace = false;
+    while (prev !== out) {
+        prev = out;
+        const peeled = out.replace(PLACE_TAIL_RE, '').trim();
+        if (peeled !== out && (peeled.match(/[A-Za-z]/g) ?? []).length >= 3) {
+            out = peeled;
+            peeledPlace = true;
+        }
+    }
+    if (peeledPlace && /[A-Z][a-z]$/.test(out))
+        out = out.slice(0, -1).trim();
+    out = out.replace(/^www\./i, '').trim();
+    return out.replace(/(?:\s+COM|\.(?:com|ae|net|org|io|co|ai))$/i, '').trim();
+}
+const MERCHANT_FIELD_LINE_RE = /^(?:merchant(?:\s+name)?|payee|beneficiary(?:\s+name)?|biller|vendor|store|shop|at|paid\s+to|to|الي)\s*:\s*(.+)$/i;
+const NON_MERCHANT_FIELD_LINE_RE = /^(?:ref(?:erence)?(?:\s+no\.?)?|txn\s+(?:id|ref)|transaction\s+(?:id|type|ref)|type|channel|mode|status|terminal(?:\s+id)?|auth(?:ori[sz]ation)?(?:\s+code)?|approval(?:\s+code)?|country|city|time|card(?:\s+(?:no\.?|number))?|account(?:\s+(?:no\.?|number))?|a\/c|from|balance|avl\.?\s*bal(?:ance)?|available\s+(?:balance|limit)|limit)\s*:/i;
+function merchantFromLines(raw) {
+    if (!raw.includes('\n'))
+        return '';
+    const codes = [
+        ...Object.keys(UNITS_PER_USD),
+        ...(0, markets_1.getActiveMarket)().currency.aliases.map(foldOrthography),
+    ].join('|');
+    const amountLineRe = new RegExp(`\\b(?:${codes})\\.?\\s*[\\d,]+(?:\\.\\d{1,2})?`, 'i');
+    const lines = raw.split(/\r?\n+/).map((l) => l.trim()).filter(Boolean);
+    const amountIdx = lines.findIndex((l) => amountLineRe.test(l));
+    if (amountIdx < 0)
+        return '';
+    for (const line of lines) {
+        const labelled = line.match(MERCHANT_FIELD_LINE_RE);
+        if (!labelled)
+            continue;
+        const value = labelled[1].trim();
+        if ((value.match(/[A-Za-z]/g) ?? []).length < 3)
+            continue;
+        const service = normalizeServiceName(value);
+        if (service)
+            return service;
+        const cleaned = cleanDescriptor(value.replace(/\s{2,}/g, ' '));
+        if (cleaned.length >= 2 && cleaned.length <= 48)
+            return cleaned;
+    }
+    for (const line of lines.slice(amountIdx + 1)) {
+        if (NON_MERCHANT_FIELD_LINE_RE.test(line))
+            continue;
+        if (LINE_DATE_RE.test(line))
+            continue;
+        if (LINE_NOISE_RE.test(line))
+            continue;
+        if (LINE_PROMO_RE.test(line))
+            continue;
+        if (amountLineRe.test(line))
+            continue;
+        if ((line.match(/[A-Za-z]/g) ?? []).length < 3)
+            continue;
+        const service = normalizeServiceName(line);
+        if (service)
+            return service;
+        const pad = line.search(/\s{2,}/);
+        const tail = pad < 0 ? '' : line.slice(pad).trim();
+        let cleaned = tail && /^[\d\s+()-]{6,}|^[A-Za-z .]{1,30}\s+[A-Z]{2,3}$/.test(tail)
+            ? line.slice(0, pad).trim()
+            : line.replace(/\s{2,}/g, ' ');
+        let prev = '';
+        while (prev !== cleaned) {
+            prev = cleaned;
+            cleaned = cleaned.replace(TRAILING_PLACE_RE, '');
+        }
+        cleaned = cleanDescriptor(cleaned);
+        if (cleaned.length >= 2 && cleaned.length <= 48)
+            return cleaned;
+    }
+    return '';
+}
+const OWN_ACCOUNT_QUALIFIER = String.raw `(?:savings?|current|deposit|call|salary|joint|linked|other|second(?:ary)?|new|` +
+    String.raw `wio|liv|mashreq(?:\s+neo)?|neo|emirates\s+nbd|enbd|adcb|fab|adib|dib|rak\s?bank|cbd|hsbc|citi(?:bank)?|` +
+    String.raw `emirates\s+islamic|al\s*rajhi|snb|alinma|riyad\s+bank|stc\s*pay|urpay|d360|revolut|wise|payoneer|zand|` +
+    String.raw `usd|eur|gbp|aed|sar|inr|pkr|egp|qar|kwd|bhd|omr|jod|cad|aud|chf|jpy|cny|try|foreign\s+currency)`;
+const OWN_DESTINATION_RE = new RegExp(String.raw `\bto\s+your\s+(?:own\s+)?(?:${OWN_ACCOUNT_QUALIFIER}\s+){0,2}(?:account|a\/c|wallet|pot|goal|credit\s+card|debit\s+card|card)\b`, 'i');
+const OUTGOING_MOVE_RE = /\b(?:transferred|transfer|debited|deducted|withdrawn|moved|sent|paid)\b(?:[^.\n]|\.\d){0,40}?\bfrom\s+(?:your\b|my\b|the\s+(?:account|a\/?c)\b|(?:(?:[A-Za-z]+\s+){0,2}(?:a\/?c|acc(?:oun)?t?|card)\b\s*(?:no\.?|number|ending(?:\s+(?:in|with))?)?\s*[:#]?\s*[\dXx*•·])|(?:(?:current|savings?|salary|checking|call|deposit|joint)\s+(?:a\/?c|acc(?:oun)?t?)\b)|(?:x+|\*+|[•·]+)\d{3,})/i;
+const TRANSFER_HINT_RE = /(?:towards?|for)\s+(?:payment\s+of\s+)?(?:your\s+(?:(?:credit|covered|charge|prepaid)\s+)?card|(?:credit|covered|charge|prepaid)\s+card|cr\.?\s*card|card\s+(?:no\.?\s*)?[\dXx*•])|(?:credit|covered|charge)\s+card\s+(?:bill\s+)?payment|c\/?c\s+payment|cc\s*pymt|crd\s*pmt|card\s*e-?pay|card\s+settlement|own\s+account\s+transfer|transfer\s+to\s+(?:your\s+)?own\s+account|self\s+transfer|سداد بطاق|سداد البطاق|تسديد بطاق|دفعه لبطاق|سداد مبلغ(?:[^.\n]|\.\d){0,40}?ل(?:ل)?بطاق\S*\s+(?:ال)?ايتمان|تحويل بين حساباتك|تحويل الي حسابك|حواله داخليه/i;
+const BNPL_PAYEE_RE = /^(?:www\.)?(?:tabby|tamara|postpay|cashew)(?:\.(?:ai|com|co|ae|sa))?(?:[\s,]+(?:fz[\s-]*llc|fzco|fze|llc|l\.l\.c\.?|finance|financing|company|co\.?|technologies|payments?|uae|ae|are|ksa|sa|sau|dubai|abu\s+dhabi|sharjah|riyadh|jeddah))*$/i;
+function isBnplPayee(name) {
+    return BNPL_PAYEE_RE.test(name.trim());
+}
+const CATEGORY_KEYWORDS = [
+    [/\b(?:al\s*ansari|al\s*fardan|lulu|uae|sharaf|index|orient|wall\s*street|al\s*rostamani|gcc|joyalukkas)\s*exchange\b|\bexchange\s*(?:centre|center|house)\b|\bmoney\s*exchange\b|western\s*union|\bmoneygram\b/i, 'other'],
+    [/\bDD\s+instal?lments?\b|\bDDR\s+Reference\b|Direct\s+Debit\s+Service\s+Instructions?|\b(?:loan|finance|emi)\s+instal?lment\b|\b(?:car|auto|vehicle|home|personal|mortgage)\s+(?:loan|finance)\b|\bloan\s+(?:repayment|account|a\/c)\b|\binstal?lment\s+(?:due|paid|debited)\b/i, 'loan'],
+    [/\bmurabaha?\b|\bijarah?\b|\bmusharaka?h?\b|\btawarruq\b|\bdiminishing\s+musharaka/i, 'loan'],
+    [/\btakaful\b/i, 'health'],
+    [/caribou|caffe\s*nero|\bpeets?\b|tgi\s*fridays?|\btgif\b|cinnabon|cravia|bakemart|manazil al sham|al bait al shami|qalat trablus|alfatayir|aldumashqi|raydan|sultan saray|koshari|cookie dealer|malfoof|flurya|little neighborhood|friends\s?avenue|friendsavenue|caterin|chocolala|rabbash|arwa cake|cake n more|roti bhai|al tarbouch|buffalo\s+(?:jumeira|mirdif|wings)|cheese\s?cake|widerange fish|25 hours f and b|bloomfield treat|point seven|\bhutong\b|al baar wa al bahr|casa pons|al bahar al mutawasit|thai corner|golden city|\bgazebo\b|fujiyama|texas ?r(?:oad)?house|texas ?chicken/i, 'dining'],
+    [/hyper\s?ramez|lavender al madina|mark\s*(?:and|&)\s*save|fresh good day|almed retail|\btops-patong\b|dubai refreshment|falcon ?pack/i, 'groceries'],
+    [/max fashion|\bmax\b(?!imum|\s*(?:limit|amount))|new yorker|lefties|la senza|victoria\s?s secret|\bkoton\b|ardene|lovisa|\blevis\b|\bcider\b|mumuso|whsmith|rivoli|malabar gold|l'?oreal|stradivarius|genzy trendz|nice style|honeylove|globale/i, 'shopping'],
+    [/alphamed|wellfit|pilates|\bwatsons?\b|oriana|al khabeer al awal/i, 'health'],
+    [/\blime\s*\*|\blime\s*(?:ride|auth|temp)\b|valtrans|\bcar\s*par(?:k\w*)?\b|golden bay car|yellow line car|smart green line car/i, 'transport'],
+    [/meraas|al zajil fairs|tickets fy events|mushrif national|al safa park|global village|majid al futtaim cinemas?|al futtaim cin/i, 'entertainment'],
+    [/splitwise|camscanner|pixocial|pixelcut|\bfinart\b|scaleup|ar ruler|adobe|\bcanva\b|linkedin|\bzoho\b|\bcraft\s+docs?\b|google\s*\*?\s*domains|domains?\s+g\.co|icloud|microsoft(?!\s*\*?\s*(?:xbox|store\s+games))|msbill|office\s*365|google\s*\*?\s*(?:gemini|workspace|gsuite|cloud)|\bgemini\s+(?:advanced|pro|ultra)\b|\bfigma\b|\bnotion\b|\bdropbox\b|1password|lastpass|nordvpn|expressvpn|surfshark|grammarly|evernote|todoist|calendly|mailchimp|\bshopify\b|squarespace|\bwix\.com|godaddy|\bslack\b|zoom\.us|\bjetbrains\b|\bgithub\b/i, 'software'],
+    [/duolingo|babbel|rosetta\s*stone|\bbusuu\b|brilliant\.org|masterclass|\bblinkist\b/i, 'education'],
+    [/snapchat|\btinder\b|\bbumble\s*(?:app|boost|premium|inc|holding|trading\s+ltd)\b|\bhinge\s*(?:app|dating|\+|plus|premium|x)\b|x\s+corp\.?\s+paid|twitter\s+blue|\bx\s+premium\b/i, 'entertainment'],
+    [/etoro|capital\.com|bfinity|bitfi|binance|crypto\.com|interactive brokers|saxo|exinity|banxa|trustwallet|national bonds|iqoption|vibed\.inc/i, 'investing'],
+    [/netflix|spotify|anghami|shahid|\bosn\b|starz|disney(?!\s+(?:store|shop))\+?|amazon\s*prime|prime\s*video|you\s*tube\s*premium/i, 'entertainment'],
+    [/\bunigaz\b/i, 'utilities'],
+    [/carrefour|\blulu\b(?!\s*(?:exchange|money|intl|international))|spinneys|union coop|choithram|grandiose|waitrose|nesto|al maya|west zone|viva supermarket|\bcoop\b|noon minutes|instashop|careem quik|talabat mart|kibsons|park\s*n\s*shop|wellcome\s+supermarket|plaza\s+vea|tottus|biedronka|[zż]abka|kaufland|barakat|el\s?grocer|freshtohome|fresh\s+to\s+home|family\s*mart|lawson|\b7-?11\b|\b7[ -]?eleven\b|mini ?mart\b|shams al buhaira super|hypermarket|superm\w*|grocer|fresh market|baqala/i, 'groceries'],
+    [/karam al sham gents/i, 'personal-care'],
+    [/uber\s*eats|talabat|deliveroo|zomato|noon food|careem food|eateasy|\bwolt\b|mamaesh|al deek al soori|restaurant|restoran|cafe|coffee|starbucks|costa|tim hortons|mc\s*donald|kfc|hardee|subway|shawarma|shaurma|cafeteria|dining|bakery|baklava|\bpide\b|pizza|burger|grill|chicken|broast|dunkin|krispy|baskin|papa john|pizza hut|domino|wingstop|five guys|shake shack|raising cane|jollibee|al ?baik|karak|chai|juice|catering|kitchen|bistro|donut|gelato|ice ?cream|sweets|pastr|foodcourt|food court|snack|falafel|biryani|mandi|machboos|kabab|kebab|hommus|manakish|allo beirut|wagamama|nando|chili|applebee|cheesecake|paul\b|shakespeare|arabian tea|barista|caribou|filli|karam|zaatar|maraheb|al safadi|automatic\b|\bkeeta\b|americana|kuwait food|restaur|\bsweets?\b|\bbake\b|bakeir|shawerm|noodle|sushi|ramen|bento|taco\b|wings\b|cookies|crumble|pinkberry|kcal\b|tortilla|arabica|hummus|galitos|\bfoods?\b|beverages/i, 'dining'],
+    [/careem(?!\s*food)|uber|yango|\btfl\b|transport\s+for\s+london|bolt\b|udrive|ekar|taxi|\brta\b|road\s*(?:&|and)\s*transport|\bnol\b|salik|darb|mawaqif|mawgif|parkin\b|enoc|eppco|adnoc(?!\s*(?:oasis|coop))|emarat|petrol|fuel|tyre|tire|car wash|autopro|quicklube|oil change|metro|tram|parking|valet|careem bike|\bgrab\b|moi traffic|traffic fines|\brafid\b|cafu\b|cafuae|www cafu|refueled|car cent(?:er|re)|\bdott\b|garage|spare parts|\bcar\s+rentals?\b|\brent-?\s?a-?\s?car\b|\bprkn\b|\bmetro\b|\bmotors\b|\bauto\s+(?:s|se|serv\w*|ac|repair|care|centre|center)\b|\btier\s+(?:[a-z]{2}\s+)?ride\b|mena mobility|cars\s?24|\bferr(?:y|ies)\b|\btolls?\b(?!\s*-?\s*free)/i, 'transport'],
+    [/\b(?:dewa|sewa|sewapayment|fewa|addc|aadc|empower|lootah|tabreed|btu)\b|\b(?:saudi|federal|kuwait|qatar)\s+elec\w*|\bmarafiq\b|chilled water|electricity|cooling|utility|sewerage|ajmansewerage|\blpg\b|gas cylinder|\bwater\b(?!\s*park)/i, 'utilities'],
+    [/etisalat|\be&(?![a-z])|eand\b|\bdu\b|virgin mobile|swyp|telecom|mobile recharge|out of credit call service|internet|five telecom|wifi|\btelephone\b|\blandline\b/i, 'telecom'],
+    [/\brent(?:al|als|ed|ing)?\b|ejari|landlord/i, 'rent'],
+    [/urbanclap|urban ?clap|justlife|just ?life|helpling|matic services|home ?maids?|maids? ?in ?minutes|cleantizer|clentizer|\bfixat\b|servicemarket|service ?market|hitches ?(?:&|and) ?glitches|\bserrurier\b|lock ?smith/i, 'home-services'],
+    [/\bcleanin|\bcleaner|\blaundr|dry ?clean|\bironing\b|housekeep|house ?maid|maid ?service|pest ?control|handyman|\bplumb|\belectrician|\bac (?:service|repair|clean)|\bcarpent|\bmovers?\b|packers?(?: ?(?:&|and)? ?movers)?\b|deep ?clean|car ?wash|washmen/i, 'home-services'],
+    [/fresha|\bglamb\b|\bnstyle\b|tips ?(?:&|and) ?toes|sisters? beauty|laura ?beauty|\bbeautyland\b|pastels? ?salon|\bzenora\b|the ?nail ?spa|qasr al zain/i, 'personal-care'],
+    [/\bsalo{1,2}n\b|\bbarber|\bspa\b|\bnails?\b|\bhaird\w*|\bhair(?:cut|\s?studio)|\bbeauty\b|\bgrooming\b|\bmassage\b|\bmani ?cure|\bpedi ?cure|\bwaxing\b|\bthreading\b|\btattoo\b|cosmetic ?(?:centre|center|clinic)/i, 'personal-care'],
+    [/\bhall?aq\w*|\bhilaqa\b|\bmashghal\b|\bmashgal\b|\btajmeel\b(?![^.\n]{0,24}\b(?:hospital|clinic|medical|polyclinic)\b)|\btajmil\b(?![^.\n]{0,24}\b(?:hospital|clinic|medical|polyclinic)\b)/i, 'personal-care'],
+    [/amazon|noon(?!\s*(?:food|minutes))|shein|temu|aliexpress|tradeling|namshi|ounass|\bsivvi\b|ikea|home centre|homebox|home box|pan emirates|danube home|ace hardware|dragon ?mart|sharaf|jumbo|emax|virgin megastore|decathlon|sun\s*(?:&|and)\s*sands?\b|todd ?snyder|\b[a-z]+cart\b|nike|adidas|puma\b|\bh ?& ?m\b|zara\b|bershka|pull ?& ?bear|matalan|max fashion|centrepoint|splash\b|lifestyle|brands for less|daiso|miniso|mumzworld|firstcry|toys ?r ?us|dubizzle|mall\b|store|shop|boutique|tailor|tailo\b|perfume|jewel|gold ?souk|florist|flower|fashion|garment|abaya|red ?tag|landmark retail|citywalk|matajer|american eagle|hennes|uniqlo|sephora|skechers|lc waikiki|\basos\b|alibaba|duty ?free|dufry|\boutlet\b|jashanmal|hou[es]{2} ?hold|majid al futtaim|\bmaf\b|gmg consumer|al ?shaya|pull ?(?:&|and) ?bear|under armour|crc sports|yzy sply|\byeezy\b|\baiiz\b|brand folio|\bg o a t\b|\bqdf\b|\baneeq\b|\boff ?price\b/i, 'shopping'],
+    [/emirates health servic\w*|pharmacy|phcy|life pharm|bin sina|boots\b|supercare|clinic|hospital|aster|medcare|\bnmc\b|mediclinic|saudi german|burjeel|zulekha|prime medical|\bdental\b|medical|medic\b|polyclinic|physio|optic|vision|lab\b|diagnostic|x-?ray|derma|vet\b|veterinar|sukoon|\bdaman\b|\baxa\b|insuran|\bins\b|wathba|gym\b|fitness|classpass|padel|jiu[-\s]?jitsu|martial\s+arts|karate|taekwondo|phar\b|\bphy\b|pharma|sports? club|fit body|be ?fit\b|bodybuilding|\bseha\b|patient portal|bioniq|supplement|dietary supp|nutrition|ole for sports|sports? ?(?:playgr|ground|centre|center|complex|academy|arena|hall)|football|futsal|tennis|basketball|swimming|athletic|insura\w*/i, 'health'],
+    [/school|university|college|tuition|academy|nursery|kindergarten|\bgems\b|taaleem|kumon|udemy|coursera|coursra|skillshare|training (?:center|centre)|institute/i, 'education'],
+    [/emirates(?!\s*(?:nbd|islamic|coop))|flydubai|etihad|air arabia|airline|airways|\bhotel\b|rotana|marriott|hilton|hyatt|radisson|movenpick|sheraton|ibis\b|novotel|booking|airbnb|agoda|expedia|almosafer|musafir|wego\b|cleartrip|wizz|visa fee|travel|resort|oberoi|chedi|meridien|fairmont|loungekey|dragonpass|airport ?(?:companion|lounge)|dayuse|trip\.?\s?(?:dot ?)?com|viator|makemytrip|airasia|hoteltonight|daypass/i, 'travel'],
+    [/playstation|\bpsn\b|xbox|steam|nintendo|app store|google play|itunes|apple\.com|you\s*tube|national park|cinema|vox\b|reel\b|novo\b|roxy\b|imax|netflix|spotify|anghami|shahid|osn\b|starz|game\b|gaming|arcade|bowling|magic planet|kidzania|global village|ferrari world|yas island|img world|wild wadi|aquaventure|dubai parks|adventure|entertainment|theme park|water ?park|pla[yi]?grou\w*|palygrou\w*|\bmalaeb\b|\bmalaieb\b|ball talent|alldebrid|real-?debrid|\bmuzz\b|pm connect|tod\.?\s?tv|abu ?dhabi ?media|museum|prison island|x ?strike|billiard|snooker|\bgolf\b|shooting|leisure|theentertainer|little fox|g2a\b|cdkeys|oculus|stadia|al futtaim cin|\bcin\b|bounce\b/i, 'entertainment'],
+    [/donat|charity|zakat|sadaqah|dubai cares|red crescent|beit al khair|dar al ber|gofundme/i, 'charity'],
+    [/\bcursor\b|\blovable\b|\bcluely\b|\brork\b|\bloopcv\b|skywork|beautiful\.ai|resume-?now|\brezi\b|bettercv|kickresume|nanonoble|hostgator|namecheap|name\.com|hetzner|openrouter|presentations ?ai|mailsuite|vercel|netlify|supabase|railway\.app|replit|midjourney|perplexity|elevenlabs|runway\b|google ?one|fiverr|mailtrack|\bvpn\b|protonmail|openai|chat\s*gpt|anthropic|\bclaude\b|getresponse|domain\.com|godaddy|hostinger|\bhosting\b|pandadoc|copy\.?ai|hopper ?hq|yamm\.com|yet another mail merge|\bmail ?merge\b|grubtech|zoho(?:-books|\s+books)|template ?monster|\bfoodics\b|\bdeliverect\b/i, 'software'],
+    [/gulf film|al mamzar|mamzar park|\bcinema\b/i, 'entertainment'],
+    [/aafaq|amlak|tamweel|dunia finance|\bfinance house\b|reem finance|\bal hilal\b/i, 'loan'],
+    [/qlub|\botter\b|carriage|deliveryhero|delivery hero|talabat|maxzigoodfood|alsafadi|wardt alsham|al tahadi|la barra|brass monkey|si italiano|tareeq al khalidiah|aseer time|nightjar|alpha flight|kitopi|new star families(?! sprm)/i, 'dining'],
+    [/\baseer\b|\bmataam\b|\bmat3am\b|\bmakhbaz\b|\bmakhbz\b|\bfurn\b|hal[ae]w[iy]?[ay]{1,2}t|\bhalawa\b|\bqahwa\b|\bgahwa\b|\bmashawi\b|\bmeshwi\b|\bmashwi\b|\bfatayer\b|\bfattayer\b|\bsaj\b|\bmandi\b|\bmatbakh\b/i, 'dining'],
+    [/\bthimar\b|\bthimaar\b|\bkhudar\b|\bkhodar\b|\bkhudra\b|\blahm\b|\blahom\b|\bleham\b|\blahham\b|\bsamak\b|\bdajaj\b|\bdajaaj\b|\bbaqal\w*|\bbakal[ae]\b|\btamoor\b/i, 'groceries'],
+    [/\bsaydal\w*|\bsaidal\w*|\bsydal\w*/i, 'health'],
+    [/\balp\*|weixin\*|taobao|otherretail|guangdong|personalservices/i, 'shopping'],
+    [/smart dubai|smartdxbgov|digital sharjah|sharjah finance|govt of|government|ministry|ministries|municipality|sharjah police|dubai police|abu dhabi police|noqodi|ica smart|\bicp\b|vfs global|\bukvi\b|tasheel|amer cent|federal authority|immigration|dubai courts|al etihad credit|tahseel|dubai pay|\bmoi\b|\bmofa\b|emirates id|residency|prosecution|notary|\bgdrfa\b|economic depart|\bdep(?:t|artment)s?\s+of\b|\bded\b|governmen|muncipal|economic zone|free ?zone|\bdmcc\b|\bjafza\b|\bdafza\b|\bifza\b|\bshams\b|masdar city|dubai integrated eco/i, 'government'],
+    [/salary|payroll|wages/i, 'salary'],
+    [/\bwallet\s*temp\b/i, 'other'],
+    [/\bliv\.? ?prime\b/i, 'other'],
+    [/google\s*\*/i, 'entertainment'],
+    [/\bpaypal\b/i, 'other'],
+    [/\bzbooni\b|nextuaeaedecom/i, 'shopping'],
+    [/مطعم|مطاعم|مقهي|قهوه|كافيه|مخبز|مخابز|حلويات|شاورما|بيتزا|برجر|مشاوي|فطاير|عصير|عصاير|كافتيريا|ماكولات|وجبات|مطبخ|بوفيه|كنافه|فلافل|بروست|ايس كريم|ايسكريم|شوكولاته|طلبات|ديليفرو|ستاربكس|ماكدونالدز|كريم فود/i, 'dining'],
+    [/بقاله|بقالات|سوبرماركت|هايبرماركت|هايبر|تموين|خضار|خضروات|فواكه|ثمار|لحوم|اسماك|دواجن|تمور|جمعيه تعاونيه|التعاونيه|كارفور|لولو|سبينيز/i, 'groceries'],
+    [/صيدليه|صيدليات|مستشفي|مستوصف|عياده|عيادات|(?:^|[^ء-ي])(?:ال)?طبي(?:ه|ات|ب|به|بات|ين)?(?![ء-ي])|مختبر|تحاليل|اسنان|بصريات|نظارات|مركز صحي|نادي رياضي|لياقه/i, 'health'],
+    [/بنزين|وقود|محطه وقود|تاكسي|سياره اجره|مواصلات|مواقف|سالك|رسوم مرور|مغسله سيارات|كراج|قطع غيار|مترو|(?:^|[^ء-ي])كريم(?![ء-ي])|اوبر|ادنوك|اينوك/i, 'transport'],
+    [/كهرباء|مياه|تبريد|تكييف مركزي|صرف صحي|اسطوانه غاز|ديوا/i, 'utilities'],
+    [/اتصالات|انترنت|شريحه|رصيد الجوال|شحن الجوال|هاتف|خط ارضي/i, 'telecom'],
+    [/ايجار|عقد ايجار|المالك/i, 'rent'],
+    [/مدرسه|مدارس|جامعه|كليه|حضانه|روضه|معهد|رسوم دراسيه|دورات تدريبيه/i, 'education'],
+    [/طيران|رحله|تذاكر|فندق|فنادق|منتجع|حجز فندقي|سفر|سياحه/i, 'travel'],
+    [/سينما|ملاهي|العاب|ترفيه|حديقه|منتزه|بولينج|نتفليكس|انغامي/i, 'entertainment'],
+    [/تبرع|تبرعات|صدقه|زكاه|جمعيه خيريه|خيريه|بيت الخير|الهلال الاحمر/i, 'charity'],
+    [/قرض|تمويل|قسط|اقساط|مرابحه|اجاره|تمويل شخصي|تمويل عقاري/i, 'loan'],
+    [/بلديه|شرطه|وزاره|حكومه|حكوميه|مخالفه|مخالفات|الهجره|الجوازات|تصريح|اقامه|هويه/i, 'government'],
+    [/محل(?![ء-ي])|محلات|متجر|سوق|مركز تجاري|مول|ازياء|ملابس|احذيه|عطور|مجوهرات|اثاث|الكترونيات|مكتبه|هدايا|صالون|حلاق|خياط|تجاره|تجاريه|ايكيا|(?:^|[^ء-ي])نون(?![ء-ي])|امازون|شين|نامشي|سنتربوينت/i, 'shopping'],
+    [/hypermarket|supermarket|superm\w*|hyperm\w*|mini ?mart?\b|\bmart\b|grocer|baqala|coop\b|co-?op|vegetables|\bfruits?\b|butcher|fish market|meat\b|roastery|adnoc oasis|zoom\b|\b7-?11\b|\b7-?eleven\b|circle k|last chance|day to day|gala\b|west zone|foodstuff|tawfeer|tawpeek|vending|\bmarket\b|\bsupe\w*\b|sprmkt|spmkt|\bsprm\b|\bsmkt\b|now ?now|\bviva\b|smart seven|mazraat|janata|aswaaq|plus point|\bspices?\b|\bdates? (?:llc|tr|trading)\b|\bgro\b|\bgroc\b|\bhymkt\b|hypermkt|\bfoodstuff|nuts? (?:tr|llc)\b|\bbakala|dairy|\bmeats?\b/i, 'groceries'],
+    [/\brest\b|\bres\b|\bresto\b|restur|caf[et]{2}eria|cafteria|cafet|coffe|caffeine|tea ?house|eater|diner\b|canteen|barbecu|\bbbq\b|burgr|\bgrill|charcoal|tacos?\b|shawerma|ice ?cre|icecre|frozen|chocolat|\bcandy\b|sweet ?shop|donuts?\b|waffle|crepe|creperie|smoothie|fruitpunch|fruit ?punch|thai ?food|\bsushi|noodl|\bwok\b|\bcocina\b|trattoria|pizzeria|steak|seafood|fish ?house|fish ?market|chinese|iranian|lebanese|libnan|\blebanan\b|portuguese|\bsoory\b|syrian|shamiah|lukmah|turkish|indian ?restaur|biriyani|kabsa|foodstuff ?tr\b|\bfoodco\b|\bcaf\b|\bfoo\b(?![^.\n]{0,20}\b(?:trading|tr\b|construction|contracting))|(?<!\b(?:tile|tiles|furniture|showroom|interior|interiors|carpet|kitchen|bath|sofa)\s)\blounge\b(?![^.\n]{0,20}\b(?:furniture|tile|tiles|showroom|trading|interiors?))/i, 'dining'],
+    [/trading|general trading|electronics|mobile(?:s| shop)|computer|stationery|bookshop|book ?store|gifts|accessories|garments|textile|readymade|footwear|shoes|optical shop|\bcent(?:er|re)\b|\bcentr[ei]\b|\bplaza\b|\bsouq\b|\bbazaar\b|garments?|ready ?made?|furniture|\bretail\b/i, 'shopping'],
+];
+const TRUNCATED_DESCRIPTOR_KEYWORDS = [
+    [/\s(?:su|sup)$/i, 'groceries'],
+    [/\s(?:cen|cent|centr|cente)$/i, 'shopping'],
+    [/\bgifts?\b|\bdiscounts?\b|\bstationer/i, 'shopping'],
+    [/\bshisha\b|\bsheesha\b|\bhookah?\b|\bchick\w*\b/i, 'dining'],
+    [/^typo\b/i, 'shopping'],
+    [/\belect(?:r|ro|ron|roni|ronics?|rical)?$|\belectronics?\b/i, 'shopping'],
+];
+const ORIGINATOR_RE = /b\/o\b|\b(?:l\.?l\.?c|ltd\b|limited\b|fze|fzco|dmcc|plc\b|inc\b)/i;
+const BUSINESS_INCOME_EVIDENCE_RE = /\b(?:invoice|client|customer|merchant\s+(?:payout|settlement)|net\s+(?:online\s+)?sales|payout|talabat|delivery\s+hero)\b/i;
+const PAID_INVOICE_RE = /\binvoice(?:\s+(?:(?:no\.?|number|#)\s*)?[a-z0-9-]+)?\s+(?:was\s+|has\s+been\s+)?(?:paid|settled)\b/i;
+function businessIncomeTitle(raw) {
+    if (/\bdelivery\s+hero\s+talabat\s+db\s+l\.?l\.?c/i.test(raw))
+        return 'Talabat sales';
+    if (PAID_INVOICE_RE.test(raw))
+        return 'Invoice payment';
+    const sentByCompany = raw.match(/\bsent\s+by\s+([A-Z][A-Z0-9 .&'\/-]{1,72}?\s+(?:L\.?L\.?C|LTD|LIMITED|PJSC|PSC|FZE|FZCO|DMCC|INC|PLC))\b/i)?.[1];
+    if (!sentByCompany)
+        return null;
+    const name = sentByCompany
+        .replace(/\s+(?:L\.?L\.?C|LTD|LIMITED|PJSC|PSC|FZE|FZCO|DMCC|INC|PLC)\.?$/i, '')
+        .trim();
+    return titleCase(cleanDescriptor(name));
+}
+function overrideFitsDirection(category, type) {
+    return (0, categories_1.categorySupportsType)(category, type);
+}
+function categoryOf(text, type, overrides, merchant, marketId) {
+    if (overrides && merchant) {
+        const hit = (0, categories_1.readMerchantCategoryOverride)(overrides, merchant, type);
+        if (hit && overrideFitsDirection(hit, type)) {
+            return { id: hit, deliberate: true, pinned: true };
+        }
+    }
+    text = normalizeArabic(text);
+    if (type === 'income') {
+        if (SALARY_RE.test(text)) {
+            return { id: 'salary', deliberate: true };
+        }
+        if (/refund|revers(?:al|ed)|charge-?\s?back|credited back|re-?credited|adjustment|waive[rd]|cashback|\binterest\b|\bprofit\b|\bcredited\s+(?:to|into)\s+your\s+(?:credit\s+|debit\s+)?card\b|استرداد|استرجاع|مسترد|ارجاع|عكس\s+(?:ال)?عمليه|حواله\s+عكسيه|كاش\s*باك|ارباح|عوائد/i.test(text)) {
+            return { id: 'other', deliberate: true };
+        }
+        if (merchant &&
+            exports.STRUCTURAL_TITLES.has(merchant.trim()) &&
+            !ORIGINATOR_RE.test(text) &&
+            !PAID_INVOICE_RE.test(text)) {
+            return { id: 'other', deliberate: false };
+        }
+        if (!ORIGINATOR_RE.test(text) &&
+            !BUSINESS_INCOME_EVIDENCE_RE.test(text) &&
+            (/(?:\b(?:credited|transferred|sent)\b(?:[^.\n]|\.\d){0,100}?\b(?:to|into)\s+your\b(?:[^.\n]|\.\d){0,60}?\baccount\b(?:[^.\n]|\.\d){0,80}?|\breceived\b(?:[^.\n]|\.\d){0,100}?)\bfrom\s+[a-z]/i.test(text) ||
+                /حواله\s+(?:(?:محليه|داخليه|دوليه|سريعه|فوريه)\s+)?وارده|تحويل\s+وارد/.test(text))) {
+            return { id: 'other', deliberate: false };
+        }
+        return { id: 'business', deliberate: true };
+    }
+    text = text.replace(/\b(?:(?:personal|business|corporate)\s+)?(?:internet|online|mobile|digital|telephone)\s+banking\b/gi, ' ');
+    text = text.replace(/(?:شراء|مشتريات|عمليه\s+شراء)\s+(?:عبر\s+)?(?:ال)?(?:انترنت|اونلاين)|\b(?:internet|online)\s+(?:purchase|transaction|txn|payment|shopping)\b/gi, ' ');
+    text = text.replace(/\bstc\s*pay\b|\burpay\b|\b(?:apple|google|samsung)\s*pay\b|ابل\s*باي/gi, ' ');
+    text = text.replace(/\betisalat(?=\s+(?:(?:credit|debit|covered)\s+)?card\s+(?:ending\b|no\.?\b|number\b|[Xx*\d]))/gi, ' ')
+        .replace(/\bpaypal\s*\*\s*/gi, ' ');
+    const merchantText = normalizeArabic(merchant ?? text);
+    if (/\b(?:al\s*ansari|al\s*fardan|lulu|uae|sharaf|index|orient|wall\s*street|al\s*rostamani|gcc|joyalukkas)\s*exchange\b|\bexchange\s*(?:centre|center|house)\b|\bmoney\s*exchange\b/i.test(merchantText)) {
+        return { id: 'other', deliberate: true };
+    }
+    if (/\bstc\s*pay\b/i.test(merchantText))
+        return { id: 'other', deliberate: true };
+    if (/\bdanube\s+home\b/i.test(merchantText))
+        return { id: 'shopping', deliberate: true };
+    if (LOCAL_TRADE_ACTIVITY_RE.test(merchantText)) {
+        for (const [re, name] of SERVICE_NAMES) {
+            if (AMBIGUOUS_SERVICES.has(name))
+                text = text.replace(re, ' ');
+        }
+    }
+    if (merchant?.trim() === 'ATM withdrawal') {
+        return { id: 'cash-withdrawal', deliberate: true };
+    }
+    if (merchant && /^(?:2c2p)$/i.test(merchant.trim())) {
+        return { id: 'other', deliberate: true };
+    }
+    if (merchant && BNPL_PAYEE_RE.test(merchant.trim())) {
+        return { id: 'shopping', deliberate: true };
+    }
+    const marketKeywords = marketId === null ? (0, markets_1.globalCategoryKeywords)() :
+        marketId === undefined ? (0, markets_1.getActiveMarket)().keywords : (0, markets_1.keywordsForMarket)(marketId);
+    for (const [re, cat] of [...marketKeywords, ...CATEGORY_KEYWORDS]) {
+        if (re.test(text) && overrideFitsDirection(cat, type)) {
+            return { id: cat, deliberate: true };
+        }
+    }
+    if (merchant && !exports.STRUCTURAL_TITLES.has(merchant.trim())) {
+        for (const [re, cat] of TRUNCATED_DESCRIPTOR_KEYWORDS) {
+            if (re.test(merchant))
+                return { id: cat, deliberate: true };
+        }
+    }
+    return { id: 'other', deliberate: false };
+}
+function guessCategory(text, type, overrides, merchant) {
+    return categoryOf(text, type, overrides, merchant).id;
+}
+function classifyMerchantDescription(description, type, marketId) {
+    const normalized = stripInvisible(description)
+        .normalize('NFKC')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const merchant = normalizeServiceName(normalized) ?? normalized;
+    if (type === 'income') {
+        if (SALARY_RE.test(normalized)) {
+            return { merchant, categoryGuess: 'salary', categoryDeliberate: true };
+        }
+        if (/\brefund\b|revers(?:al|ed)|charge-?\s?back|credited back|re-?credited|\bcashback\b|\binterest\b|\bprofit\b/i.test(normalized)) {
+            return { merchant, categoryGuess: 'other', categoryDeliberate: true };
+        }
+        if (/\bmerchant\s+(?:payout|settlement)\b|\bsales?\s+proceeds\b|\bbusiness\s+income\b|\binvoice\s+(?:paid|payment)\b/i.test(normalized)) {
+            return { merchant, categoryGuess: 'business', categoryDeliberate: true };
+        }
+        return { merchant, categoryGuess: 'other', categoryDeliberate: false };
+    }
+    if (/^(?:atm\s+(?:cash\s+)?(?:withdrawal|wdl)\b|cash\s+(?:withdrawal|wdl)\b|سحب\s+نقدي\b)/iu.test(normalized) &&
+        !/\b(?:fee|charge|commission)\b|رسوم|عمولة/iu.test(normalized)) {
+        return {
+            merchant: 'ATM withdrawal',
+            categoryGuess: 'cash-withdrawal',
+            categoryDeliberate: true,
+        };
+    }
+    const category = categoryOf(normalized, type, undefined, merchant, marketId);
+    return {
+        merchant,
+        categoryGuess: category.id,
+        categoryDeliberate: category.deliberate,
+    };
+}
+const SERVICE_NAMES = [
+    [/\bemirates\s+petroleum(?:\s+(?:com|company|products?))?\b|\beppco\b|\benoc\b/i, 'ENOC'],
+    [/\betisalat\b|(?:^|\s)e\s*(?:&|and)\s*(?:uae)?(?:\s|$)/i, 'Etisalat'],
+    [/openai|chat\s*gpt/i, 'ChatGPT'],
+    [/anthropic|claude/i, 'Claude'],
+    [/real-?debrid/i, 'Real-Debrid'],
+    [/all-?debrid/i, 'AllDebrid'],
+    [/\bnetflix\b/i, 'Netflix'],
+    [/\bspotify\b/i, 'Spotify'],
+    [/you\s*tube|yt\s*premium/i, 'YouTube Premium'],
+    [/google\s*one|google\s*storage/i, 'Google One'],
+    [/google\s*\*?\s*domains|domains?\s+g\.co/i, 'Google Domains'],
+    [/apple\.com|apple\s*services|itunes/i, 'Apple'],
+    [/icloud/i, 'iCloud'],
+    [/amazon\s*prime|prime\s*video/i, 'Amazon Prime'],
+    [/\bamz\s*\*|\bamzn\b|\bamazon\b/i, 'Amazon'],
+    [/\bdisney(?!\s+(?:store|shop|land|world|resort|park))(?:\s*\+|\s*plus\b)?|\bdisneyplus\b/i, 'Disney+'],
+    [/\banghami\b/i, 'Anghami'],
+    [/\bshahid\b/i, 'Shahid'],
+    [/\bosn\b/i, 'OSN+'],
+    [/\bstarz(?:\s*play)?\b/i, 'StarzPlay'],
+    [/\bdeezer\b/i, 'Deezer'],
+    [/\baudible\b/i, 'Audible'],
+    [/\bdropbox\b/i, 'Dropbox'],
+    [/\blinkedin\b/i, 'LinkedIn'],
+    [/\badobe\b/i, 'Adobe'],
+    [/\bcanva\b/i, 'Canva'],
+    [/\bviator\b/i, 'Viator'],
+    [/\bwolt\b/i, 'Wolt'],
+    [/zoho(?:-books|\s+books)/i, 'Zoho Books'],
+    [/template ?monster/i, 'TemplateMonster'],
+    [/tradeling/i, 'Tradeling'],
+    [/microsoft\s*365|office\s*365/i, 'Microsoft 365'],
+    [/steam\s*(?:purchase|games)|steampowered/i, 'Steam'],
+    [/capital\.com/i, 'Capital.com'],
+    [/name\.com/i, 'Name.com'],
+    [/coursra\*|coursera/i, 'Coursera'],
+    [/\bkeeta\b/i, 'Keeta'],
+    [/grubtech/i, 'Grubtech'],
+    [/getresponse/i, 'GetResponse'],
+    [/domain\.com/i, 'Domain.com'],
+    [/www\.grab\b|grab\.com/i, 'Grab'],
+    [/instashop/i, 'InstaShop'],
+    [/ajmansewerage/i, 'Ajman Sewerage'],
+    [/liv\.?\s*prime/i, 'Liv Prime'],
+    [/\bcafu\b|cafuae|www cafu/i, 'CAFU'],
+    [/crypto\.com/i, 'Crypto.com'],
+    [/\bbinance\b/i, 'Binance'],
+    [/\bfiverr\b/i, 'Fiverr'],
+    [/\bdiscord\b/i, 'Discord'],
+    [/\bnotion\b/i, 'Notion'],
+    [/\bmidjourney\b/i, 'Midjourney'],
+    [/\bperplexity\b/i, 'Perplexity'],
+    [/\bfigma\b/i, 'Figma'],
+    [/\bduolingo\b/i, 'Duolingo'],
+    [/\bsnapchat\b/i, 'Snapchat+'],
+    [/google\s*\*?\s*gemini|\bgemini\s+(?:advanced|pro|ultra)\b/i, 'Google Gemini'],
+    [/x\s+corp\.?\s+paid\s+features|twitter\s+blue/i, 'X Premium'],
+    [/\bgithub\b/i, 'GitHub'],
+    [/\btelegram\b/i, 'Telegram Premium'],
+    [/xbox\s*game\s*pass/i, 'Xbox Game Pass'],
+    [/urban\s?clap|urban company/i, 'UrbanClap'],
+    [/justlife/i, 'Justlife'],
+    [/cleantizer|clentizer/i, 'Cleantizer'],
+    [/hellochef/i, 'HelloChef'],
+    [/dubai integrated eco/i, 'Dubai Integrated Economic Zones'],
+    [/friends\s?avenue|friendsavenue/i, 'Friends Avenue'],
+    [/manazil al sham/i, 'Manazil Al Sham'],
+    [/valtrans/i, 'Valtrans'],
+    [/mark and save/i, 'Mark & Save'],
+    [/hyper\s?ramez/i, 'Hyper Ramez'],
+    [/almed retail/i, 'Almed Retail'],
+    [/arabian unigaz|\bunigaz\b/i, 'Arabian Unigaz'],
+    [/little neighborhood/i, 'Little Neighborhood'],
+    [/\bshein\b/i, 'Shein'],
+    [/vranjes/i, 'Dr. Vranjes'],
+    [/\bfoot\s?lock(?:er)?/i, 'Foot Locker'],
+    [/^m\.?\s?h\.?\s*al\s?shaya\b/i, 'M.H. Alshaya'],
+    [/tgi\s*fridays?|\btgif\b/i, 'TGI Fridays'],
+    [/caribou/i, 'Caribou Coffee'],
+    [/caffe\s*nero/i, 'Caffe Nero'],
+    [/new yorker/i, 'New Yorker'],
+    [/lefties/i, 'Lefties'],
+    [/mumuso/i, 'Mumuso'],
+    [/laura beauty/i, 'Laura Beauty Salon'],
+    [/ginnys plus/i, 'Ginnys Plus Trading'],
+    [/al faan al raqi/i, 'Al Faan Al Raqi'],
+    [/global village/i, 'Global Village'],
+    [/\blime\s*\*|\blime\s*(?:ride|auth|temp)\b/i, 'Lime'],
+    [/splitwise/i, 'Splitwise'],
+    [/camscanner/i, 'CamScanner'],
+    [/pixocial/i, 'Pixocial'],
+    [/honeylove/i, 'HoneyLove'],
+    [/playstation\s*plus|psn\s*plus/i, 'PlayStation Plus'],
+    [/texas\s*r(?:oad)?house/i, 'Texas Roadhouse'],
+    [/city\s*life\s*ph(?:y|cy|arm)/i, 'City Life Pharmacy'],
+    [/(?:^|[^A-Za-z])simplex(?![A-Za-z])/i, 'Simplex'],
+    [/\bsewa\b|sewapayment|sewa\.gov|shj\s*elec|sharjah\s*elec(?:t|tricity)?(?:\s*(?:and|&)\s*water)?|sharjah\s*electricity\s*(?:and|&)\s*water/i, 'SEWA'],
+    [/\bfewa\b|federal\s*electricity(?:\s*(?:and|&)\s*water)?|federal\s*elec/i, 'FEWA'],
+    [/\bdewa\b|dubai\s*electricity(?:\s*(?:and|&)\s*water)?/i, 'DEWA'],
+    [/\baadc\b|\baddc\b|al\s*ain\s*distribution|abu\s*dhabi\s*distribution/i, 'ADDC'],
+    [/\betihad\s*water|\bewe\b/i, 'Etihad Water & Electricity'],
+    [/\bempower\b|emirates\s*central\s*cooling/i, 'Empower'],
+    [/\btabreed\b/i, 'Tabreed'],
+];
+exports.STRUCTURAL_TITLES = new Set([
+    'ATM withdrawal',
+    'Bank fee',
+    'Annual card fee',
+    'Annual bank fee',
+    'Account maintenance fee',
+    'Service charge',
+    'Overlimit fee',
+    'Insufficient balance fee',
+    'Late payment fee',
+    'Overdraft fee',
+    'VAT fee',
+    'Cash deposit',
+    'Cheque',
+    'Parking',
+    'Outgoing transfer',
+    'Incoming transfer',
+    'Refund',
+    'Credit reversal',
+    'Invoice payment',
+    'Inward remittance',
+    'Bank transfer',
+    'Own account transfer',
+    'Card payment',
+    'Account debit',
+    'Telegraphic transfer',
+    'Outward remittance',
+    'Mobile recharge',
+    'Payment',
+]);
+function isDeliberateOtherTitle(title) {
+    const normalized = title.trim();
+    return (exports.STRUCTURAL_TITLES.has(normalized) ||
+        /^Transfer to [\p{L}\p{M}][\p{L}\p{M} .'-]{0,80}$/u.test(normalized) ||
+        /^Payment to [•Xx*·]{1,8}\d{2,4}$/u.test(normalized) ||
+        /^2c2p$/i.test(normalized));
+}
+const LOCAL_TRADE_ACTIVITY_RE = /\b(?:trad(?:ing|ers?)|caf[eé]|cafeteria|cafteria|restaurant|salo{1,2}n|nursery|kindergarten|garage|spare\s*parts|auto\s+(?:spare|parts|repair)|car\s+rental|rent\s+a\s+car|contracting|construction|real\s*estate|foodstuff|grocer(?:y|ies)|supermarket|hypermarket|laundry|tailoring|advertis(?:ing|ement)|marketing|electronics|interior|decor|technical\s+services|building\s+materials|used\s+furniture|mobile\s+phones?|cargo|tourism|perfumes?|textiles?|stationery|bakery|sweets|catering|pharmacy|clinic)\b/i;
+const AMBIGUOUS_SERVICES = new Set([
+    'Shahid', 'StarzPlay', 'Adobe', 'Amazon', 'Netflix', 'Disney+', 'Anghami',
+    'Audible', 'Fiverr', 'LinkedIn', 'GitHub', 'Telegram Premium', 'Deezer',
+    'Discord', 'Dropbox', 'Binance',
+]);
+function normalizeServiceName(merchant) {
+    const stripped = merchant
+        .replace(/^(?:tap|alp|web|eig|sq|wl)\s*\*\s*/i, '')
+        .replace(/^(?:paypal|google|gpay|apl|amzn|pos|ziina|mamo)\s*\*?\s*/i, '');
+    for (const [re, name] of SERVICE_NAMES) {
+        if (!(re.test(stripped) || re.test(merchant)))
+            continue;
+        if (AMBIGUOUS_SERVICES.has(name) && LOCAL_TRADE_ACTIVITY_RE.test(merchant))
+            continue;
+        return name;
+    }
+    return null;
+}
+const ACRONYMS = new Set([
+    'RTA', 'KFC', 'FAB', 'DEWA', 'SEWA', 'FEWA', 'ADCB', 'ENBD', 'ENOC', 'ADNOC',
+    'VOX', 'PSN', 'NMC', 'DXB', 'AUH', 'HSBC', 'CBD', 'RAK', 'DIB', 'ATM', 'NOL', 'OSN',
+]);
+function titleCase(s) {
+    if (ARABIC_RE.test(s))
+        return s.trim();
+    return s
+        .split(/\s+/)
+        .map((w) => {
+        if (ACRONYMS.has(w.toUpperCase()))
+            return w.toUpperCase();
+        if (/^[A-Z]+\d+[A-Z]+$/.test(w))
+            return w;
+        const lower = w.toLowerCase();
+        return lower ? lower[0].toUpperCase() + lower.slice(1) : lower;
+    })
+        .join(' ');
+}
+const TOTAL_LINE_LABEL_RE = /^[ \t]*(?:total\b|اجمالي|المبلغ[ \t]+المستحق)[^\n\d]{0,40}$/i;
+const FEE_LINE_LABEL_RE = /^[ \t]*(?:fees?|vat|charges?|commission|رسوم|ضريبه)(?:[ \t&]+[^\n:\d]{0,24})?[ \t]*:?[ \t]*(?:[A-Z]{3}[ \t]*)?$/i;
+function extractAmountFils(raw) {
+    const candidates = [];
+    AED_AMOUNT_RE.lastIndex = 0;
+    let match;
+    while ((match = AED_AMOUNT_RE.exec(raw))) {
+        const at = match.index + match[0].length - match[1].length;
+        if (isMaskedFigure(raw, at))
+            continue;
+        candidates.push({ index: match.index, value: Math.round(Number(match[1].replace(/,/g, '')) * 100) });
+    }
+    AED_SUFFIX_RE.lastIndex = 0;
+    while ((match = AED_SUFFIX_RE.exec(raw))) {
+        const before = match.index > 0 ? raw[match.index - 1] : ' ';
+        if (/[A-Za-z0-9*•·.\-/]/.test(before))
+            continue;
+        const identityPrefix = raw.slice(Math.max(0, match.index - 40), match.index);
+        if (/(?:\bcard\s*(?:no\.?|number|ending(?:\s+with)?|#)\s*|\b(?:account|acct|a\/c)\s*(?:no\.?|number|ending(?:\s+with)?|#)?\s*)$/i.test(identityPrefix))
+            continue;
+        candidates.push({ index: match.index, value: Math.round(Number(match[1].replace(/,/g, '')) * 100) });
+    }
+    candidates.sort((a, b) => a.index - b.index);
+    const lineBefore = (index) => raw.slice(raw.lastIndexOf('\n', index - 1) + 1, index);
+    const feeLine = (index) => FEE_LINE_LABEL_RE.test(lineBefore(index));
+    const totalLine = (index) => TOTAL_LINE_LABEL_RE.test(lineBefore(index));
+    const yieldsFeeLine = (0, markets_1.getActiveMarket)().id === 'SA';
+    for (const [i, c] of candidates.entries()) {
+        if (!Number.isFinite(c.value) || c.value <= 0)
+            continue;
+        const prefix = raw.slice(Math.max(0, c.index - 56), c.index);
+        if (BALANCE_PREFIX_RE.test(prefix))
+            continue;
+        if (yieldsFeeLine && feeLine(c.index) && candidates.slice(i + 1).some((later) => Number.isFinite(later.value) && later.value > 0 && later.index > c.index &&
+            totalLine(later.index) &&
+            !BALANCE_PREFIX_RE.test(raw.slice(Math.max(0, later.index - 56), later.index))))
+            continue;
+        if (c.value > MAX_PLAUSIBLE_AMOUNT_FILS)
+            return null;
+        return c.value;
+    }
+    return null;
+}
+function transactionMoney(raw) {
+    const bankLocalFils = extractAmountFils(raw);
+    const foreignCandidate = extractForeignAmount(raw);
+    const fxImplausible = !!foreignCandidate &&
+        bankLocalFils !== null &&
+        (() => {
+            const implied = bankLocalFils / foreignHundredths(foreignCandidate);
+            const table = foreignCandidate.rate;
+            if (!(implied > 0) || !(table > 0))
+                return true;
+            const ratio = implied / table;
+            return ratio > 8 || ratio < 1 / 8;
+        })();
+    const foreignAmount = fxImplausible ? null : foreignCandidate;
+    const amountFils = bankLocalFils ?? foreignAmount?.localFils ?? null;
+    if (!amountFils)
+        return null;
+    return {
+        amountFils,
+        ...(foreignAmount
+            ? {
+                ...(0, fx_1.originalMoneyFields)({
+                    currency: foreignAmount.currency,
+                    minorUnits: foreignAmount.amountMinor,
+                    exponent: foreignAmount.exponent,
+                }),
+                fxRate: bankLocalFils !== null
+                    ? amountFils / foreignHundredths(foreignAmount)
+                    : foreignAmount.rate,
+                fxSource: bankLocalFils !== null ? 'bank'
+                    : foreignAmount.source === 'reference' ? 'reference' : 'fallback',
+                ...(bankLocalFils === null && foreignAmount.source === 'reference' && foreignAmount.rateDate
+                    ? { fxRateDate: foreignAmount.rateDate } : {}),
+            }
+            : {}),
+    };
+}
+function amountWithFx(raw) {
+    return extractAmountFils(raw) ?? extractForeignAmountFils(raw);
+}
+const extractTtPaymentAmount = (raw) => {
+    const ttIndex = raw.search(/\btt\s+payment\b/i);
+    if (ttIndex < 0)
+        return null;
+    const clause = raw.slice(ttIndex, ttIndex + 180).split(/\r?\n/)[0];
+    const candidates = clause.matchAll(/\b(AED|DHS|SAR|USD|EUR|GBP)\s*([\d,]+(?:\.\d{1,2})?)\s*([+-])?/gi);
+    for (const match of candidates) {
+        const at = match.index;
+        if (BALANCE_PREFIX_RE.test(clause.slice(Math.max(0, at - 56), at)))
+            continue;
+        const code = match[1].toUpperCase() === 'DHS' ? 'AED' : match[1].toUpperCase();
+        const major = Number(match[2].replace(/,/g, ''));
+        if (!Number.isFinite(major) || major <= 0)
+            continue;
+        const originalAmountMinor = Math.round(major * 100);
+        const localCode = (0, markets_1.getActiveMarket)().currency.code;
+        if (code === localCode) {
+            if (originalAmountMinor > MAX_PLAUSIBLE_AMOUNT_FILS)
+                return null;
+            return { amountFils: originalAmountMinor, type: match[3] === '+' ? 'income' : 'expense' };
+        }
+        if (!(code in UNITS_PER_USD))
+            continue;
+        const rate = fxMinorPerUnit(code) / 100;
+        const amountFils = Math.round(major * rate * 100);
+        if (!Number.isFinite(amountFils) || amountFils <= 0 ||
+            amountFils > MAX_PLAUSIBLE_AMOUNT_FILS)
+            return null;
+        return {
+            amountFils,
+            type: match[3] === '+' ? 'income' : 'expense',
+            originalAmountMinor,
+            originalCurrency: code,
+            originalMinorUnits: originalAmountMinor,
+            originalExponent: 2,
+            fxRate: rate,
+            fxSource: 'fallback',
+        };
+    }
+    return null;
+};
+function statementTotalFils(raw) {
+    const totalMatch = raw.match(TOTAL_DUE_RE);
+    if (totalMatch)
+        return Math.round(Number(totalMatch[1].replace(/,/g, '')) * 100);
+    const paired = raw.match(TOTAL_OF_MINIMUM_DUE_RE);
+    if (paired) {
+        if (!statementHasSingleCardOwner(raw))
+            return null;
+        return Math.round(Number(paired[1].replace(/,/g, '')) * 100);
+    }
+    const legacyTotal = raw.match(CARD_PAYMENT_DUE_TOTAL_RE) ?? raw.match(AR_TOTAL_DUE_RE);
+    if (legacyTotal)
+        return Math.round(Number(legacyTotal[1].replace(/,/g, '')) * 100);
+    const generated = raw.match(GENERATED_CARD_TOTAL_RE);
+    if (!generated)
+        return null;
+    const ownCard = extractCard(generated[0]);
+    if (!ownCard || !statementHasSingleCardOwner(raw, ownCard.last4))
+        return null;
+    return Math.round(Number(generated[1].replace(/,/g, '')) * 100);
+}
+function statementHasSingleCardOwner(raw, expectedTail) {
+    if (ACCOUNT_RE.test(raw) || MASKED_ACCOUNT_RE.test(raw) || AR_ACCOUNT_RE.test(raw))
+        return false;
+    const finalCard = extractCard(raw);
+    if (finalCard?.kind === 'account' || finalCard?.kind === 'debit')
+        return false;
+    const maskedPan = new RegExp(MASKED_PAN_RE.source, 'g');
+    const identities = new Set();
+    for (const match of raw.matchAll(maskedPan)) {
+        if (saysDebit(transactionWindow(raw, endOf(match))))
+            return false;
+        identities.add(match[1]);
+    }
+    const withoutPans = raw.replace(maskedPan, (match) => ' '.repeat(match.length));
+    for (const match of withoutPans.matchAll(new RegExp(CARD_RE.source, 'gi'))) {
+        if (/debit|prepaid/i.test(match[1] ?? ''))
+            return false;
+        identities.add(match[2] ?? match[3]);
+    }
+    for (const match of withoutPans.matchAll(new RegExp(AR_CARD_RE.source, 'g'))) {
+        if ((match[1] ?? '').includes('الخصم'))
+            return false;
+        identities.add(match[2]);
+    }
+    if (!finalCard)
+        return expectedTail === undefined && identities.size === 0;
+    const ownerTail = expectedTail ?? finalCard.last4;
+    return finalCard.last4 === ownerTail && identities.size === 1 && identities.has(ownerTail);
+}
+function statementMinimumFils(raw, totalFils) {
+    const match = raw.match(MIN_DUE_RE) ?? raw.match(AR_MIN_DUE_RE);
+    const figure = match?.[1] ?? raw.match(TOTAL_OF_MINIMUM_DUE_RE)?.[2];
+    if (!figure)
+        return null;
+    const minimum = Math.round(Number(figure.replace(/,/g, '')) * 100);
+    return Number.isSafeInteger(minimum) && minimum >= 0 && minimum <= totalFils ? minimum : null;
+}
+function extractMerchant(raw, re) {
+    re.lastIndex = 0;
+    let match;
+    while ((match = re.exec(raw))) {
+        const candidate = match[1].trim().replace(/\s{2,}/g, ' ');
+        if (/^your\b/i.test(candidate) || /^(?:the |an? )?account\b/i.test(candidate))
+            continue;
+        if (/^\d+$/.test(candidate))
+            continue;
+        if (/\d{4}[Xx*•]{2,}/.test(candidate) || /^\d{6,}/.test(candidate))
+            continue;
+        if ((candidate.match(/[A-Za-z]/g) ?? []).length < 3)
+            continue;
+        if (/^(?:the|this|that|your|our|an?|and|for|to|date|available|balance|limit|january|february|march|april|may|june|july|august|september|october|november|december)$/i.test(candidate)) {
+            continue;
+        }
+        if (/^\d+\s+(?:month|day|week|year|hr|hour|min)/i.test(candidate))
+            continue;
+        if (/^acc[\s/]|^a\/?c\b|^cr\.?\s*card/i.test(candidate))
+            continue;
+        if (/^iban\b/i.test(candidate))
+            continue;
+        if (/^(?:aed|dhs|sar|usd|eur|gbp)\b/i.test(candidate))
+            continue;
+        if (/^www\.?$/i.test(candidate))
+            continue;
+        if (/^(?:avoid|view|check|see|click|visit|call|contact|update|verify|confirm|download|enjoy|get|earn|save|know|learn|read|use|pay|settle|activate|renew|register|apply|explore|discover|manage|track|start|join|book|order|shop|win|claim|reply|dial|send|scan|switch|upgrade|unlock|redeem|collect|refer|share|follow|subscribe|opt)\b/i.test(candidate)) {
+            continue;
+        }
+        if (/\b(?:you|your|yours|which|whom|their)\b/i.test(candidate))
+            continue;
+        if (candidate)
+            return candidate;
+        if (re.lastIndex === match.index)
+            re.lastIndex++;
+    }
+    return '';
+}
+function blank(text, re) {
+    return text.replace(re, (m) => ' '.repeat(m.length));
+}
+function maskMerchantNames(text) {
+    MERCHANT_RE.lastIndex = 0;
+    let out = text;
+    let m;
+    while ((m = MERCHANT_RE.exec(text))) {
+        if (m.index === MERCHANT_RE.lastIndex)
+            MERCHANT_RE.lastIndex++;
+        const start = m.index + m[0].length - m[1].length;
+        out = out.slice(0, start) + ' '.repeat(m[1].length) + out.slice(start + m[1].length);
+    }
+    return out;
+}
+function declinedInBody(body, suppressible) {
+    return DECLINED_RE.test(suppressible) || DECLINED_VERB_RE.test(body);
+}
+const CARD_LIFECYCLE_NOTICE_RE = /(?:\b(?:credit|debit|covered|prepaid)?\s*card\b[^.\n]{0,120}\bexpir(?:y|e[sd]?|ing)\b|\bexpir(?:y|e[sd]?|ing)\b[^.\n]{0,120}\b(?:credit|debit|covered|prepaid)?\s*card\b)/i;
+const AR_PURCHASE_CONFIRMATION_CODE_RE = /(?:الرقم السري|الرمز السري|رمز|كلمه السر|كلمه المرور)\s+(?:ل|ال)?(?:تاكيد|اتمام)\s+(?:عمليه\s+)?(?:ال)?(?:شراء|دفع|عمليه)/;
+function nonPostingReasonInBody(body, suppressible) {
+    if (CARD_LIFECYCLE_NOTICE_RE.test(suppressible))
+        return 'card-lifecycle';
+    if (declinedInBody(body, suppressible))
+        return 'declined';
+    if (OTP_RE.test(body) ||
+        GLUED_OTP_REQUEST_RE.test(body) ||
+        TRANSACTION_CODE_REQUEST_RE.test(body) ||
+        PIN_TRANSACTION_CHALLENGE_RE.test(body) ||
+        AR_CODE_CHALLENGE_RE.test(body) ||
+        TRANSACTION_APPROVAL_REQUEST_RE.test(body) ||
+        AR_PURCHASE_CONFIRMATION_CODE_RE.test(body) ||
+        ((CODE_CHALLENGE_QUOTED_RE.test(body) || CODE_CHALLENGE_FOR_RE.test(body)) &&
+            CODE_VALIDITY_WINDOW_RE.test(body))) {
+        return 'security-challenge';
+    }
+    const settledRefund = REFUND_RE.test(body);
+    if (VERIFICATION_HOLD_DESCRIPTOR_RE.test(body))
+        return 'preauthorisation';
+    if (!settledRefund &&
+        PREAUTH_RE.test(blank(suppressible, HOLD_RELEASE_RE))) {
+        return 'preauthorisation';
+    }
+    if (RETURNED_UNPAID_RE.test(body))
+        return 'returned-unpaid';
+    if (!settledRefund && (PENDING_PROCESSING_RE.test(body) ||
+        arabicPendingPosting(body) ||
+        EXPECTED_FUTURE_MOVEMENT_RE.test(body) ||
+        REQUEST_RECEIVED_RE.test(body) || MANDATE_LIFECYCLE_RE.test(body) ||
+        CONDITIONAL_PAYOUT_RE.test(body) || CONDITIONAL_MOVEMENT_RE.test(body))) {
+        return 'pending-processing';
+    }
+    return null;
+}
+function nonPostingReason(message) {
+    const source = message.trim();
+    if (!source)
+        return null;
+    const body = foldOrthography(stripInvisible(source));
+    const suppressible = blank(maskMerchantNames(body), FRAUD_FOOTER_RE);
+    return nonPostingReasonInBody(body, suppressible);
+}
+function hasArabicRefundHeading(message) {
+    return AR_PURCHASE_REFUND_HEADER_RE.test(normalizeArabic(message.trim()));
+}
+const INSTALMENT_CONVERSION_NOTICE_RE = /\b(?:has|have)\s+been\s+(?:successfully\s+)?converted\s+(?:in)?to\s+(?:an?\s+)?(?:\d+\s+)?(?:(?:easy\s+)?instal(?:l)?ments?|emi|easy\s+payment\s+plan|instal(?:l)?ment\s+plan|epp)\b|(?:^|\s)(?:لقد\s+)?تم\s+تقسيط\s+مبلغ/iu;
+function nonCashNoticeInBody(body) {
+    return AR_CASHBACK_WALLET_CREDIT_RE.test(body) || AR_SHARE_TRADE_RE.test(body) ||
+        INSTALMENT_CONVERSION_NOTICE_RE.test(body);
+}
+function isNonCashNotice(message) {
+    return nonCashNoticeInBody(normalizeArabic(message.trim()));
+}
+function isInformationOnlyAlert(message) {
+    return INFORMATION_ONLY_RE.test(foldOrthography(stripInvisible(message.trim())));
+}
+function isNonPostingMessage(message) {
+    return nonPostingReason(message) !== null;
+}
+function isDeclinedMessage(message) {
+    return nonPostingReason(message) === 'declined';
+}
+const AR_SNAPSHOT_RE = /(الحد المتاح|الرصيد المتاح|الرصيد الحالي|المبلغ المستحق|الرصيد|رصيدك|رصيد)\s*(?:هو|:)?[^0-9·•*\-\n]{0,12}([\d,]+(?:\.\d{1,2})?)/;
+const MAX_SNAPSHOT_FILS = 1000000000;
+function figureOf(m, from) {
+    for (let i = from; i < m.length; i++) {
+        if (m[i] === undefined)
+            continue;
+        const fils = Math.round(Number(m[i].replace(/,/g, '')) * 100);
+        return Number.isFinite(fils) && fils >= 0 && fils <= MAX_SNAPSHOT_FILS ? fils : null;
+    }
+    return null;
+}
+function extractSnapshot(raw) {
+    const m = raw.match(SNAPSHOT_RE);
+    if (m) {
+        const fils = figureOf(m, 2);
+        if (fils !== null) {
+            const word = m[1].toLowerCase();
+            return {
+                fils,
+                kind: word.startsWith('limit') ? 'limit' : word === 'outstanding' ? 'outstanding' : 'balance',
+            };
+        }
+    }
+    const plain = raw.match(PLAIN_BALANCE_RE);
+    if (plain) {
+        const fils = figureOf(plain, 1);
+        if (fils !== null)
+            return { fils, kind: 'balance' };
+    }
+    if (ARABIC_RE.test(raw)) {
+        const ar = raw.match(AR_SNAPSHOT_RE);
+        if (ar) {
+            const fils = Math.round(Number(ar[2].replace(/,/g, '')) * 100);
+            if (Number.isFinite(fils) && fils >= 0 && fils <= MAX_SNAPSHOT_FILS) {
+                return {
+                    fils,
+                    kind: ar[1] === 'الحد المتاح' ? 'limit' : ar[1] === 'المبلغ المستحق' ? 'outstanding' : 'balance',
+                };
+            }
+        }
+    }
+    const o = raw.match(OUTSTANDING_RE);
+    if (o) {
+        const fils = Math.round(Number(o[1].replace(/,/g, '')) * 100);
+        if (Number.isFinite(fils) && fils >= 0 && fils <= MAX_SNAPSHOT_FILS) {
+            return { fils, kind: 'outstanding' };
+        }
+    }
+    const bare = raw.match(BARE_BALANCE_RE);
+    if (bare) {
+        const fils = Math.round(Number(bare[1].replace(/,/g, '')) * 100);
+        if (Number.isFinite(fils) && fils >= 0 && fils <= MAX_SNAPSHOT_FILS) {
+            return { fils, kind: 'balance' };
+        }
+    }
+    return null;
+}
+const LIMIT_EVIDENCE_RE = /available\s+(?:credit\s+)?limit|avl\.?\s*(?:cr\.?\s*)?limit|credit\s+limit|covered\s+card/i;
+function saysCredit(raw) {
+    return (/(?:credit|covered|charge)\s+card/i.test(raw) ||
+        /\bcr\.?\s*card\b/i.test(raw) ||
+        /\d{4}\s*[;,]\s*credit\b/i.test(raw) ||
+        /\d{4}\s*\(\s*credit\s*\)/i.test(raw));
+}
+function saysDebit(raw) {
+    return (/\bdebit\s+card\b/i.test(raw) ||
+        /\bmada\s+card\b/i.test(raw) ||
+        /\d{4}\s*[;,]\s*(?:debit|mada)\b/i.test(raw) ||
+        /\d{4}\s*\(\s*(?:debit|mada)\s*\)/i.test(raw));
+}
+const CLAUSE_BREAK_RE = /[.!?]\s|\n/;
+function transactionWindow(raw, cardEnd) {
+    const brk = raw.slice(cardEnd).search(CLAUSE_BREAK_RE);
+    return brk === -1 ? raw : raw.slice(0, cardEnd + brk);
+}
+function endOf(m) {
+    return (m.index ?? 0) + m[0].length;
+}
+function cardKindNear(raw, cardEnd, islamicCredit) {
+    const local = transactionWindow(raw, cardEnd);
+    const credit = saysCredit(local);
+    const debit = saysDebit(local);
+    if (credit && debit)
+        return 'unknown';
+    if (credit)
+        return 'credit';
+    if (debit)
+        return 'debit';
+    return islamicCredit ? 'credit' : 'unknown';
+}
+const TRANSFER_PARTY_LABEL = '(?:IBAN\\s*\\/\\s*)?account\\s*\\/\\s*card|account|(?:(?:credit|debit|covered|charge|prepaid)\\s+)?card';
+const OUTGOING_TRANSFER_SOURCE_RE = new RegExp(`\\bfunds?\\s+transfer\\s+request\\b[\\s\\S]*?\\bfrom\\s+your\\s+(${TRANSFER_PARTY_LABEL})\\b`, 'i');
+const TRANSFER_DESTINATION_RE = new RegExp(`\\bto\\s+(?:your\\s+)?(${TRANSFER_PARTY_LABEL})\\b`, 'i');
+function extractOutgoingTransferParties(message) {
+    const raw = normalizeArabic(message);
+    const source = raw.match(OUTGOING_TRANSFER_SOURCE_RE);
+    if (!source)
+        return null;
+    const readParty = (label, afterLabel) => {
+        const identity = afterLabel.match(/^(?:\s*(?:no\.?|number))?\s*(?:ending(?:\s+(?:in|with))?)?\s*(?:[:#]\s*)?[Xx*·•\d.-]+(?:[ -]+\d{4}\b)?(?![\w.*·•-])/i);
+        if (!identity)
+            return null;
+        const terminal = identity[0].trim().match(/(\d{4})\.?$/)?.[1];
+        if (!terminal)
+            return null;
+        const parsed = extractCard(`${label}${identity[0]}`);
+        if (parsed?.last4 !== terminal)
+            return null;
+        return parsed && /^account$/i.test(label) ? { ...parsed, kind: 'account' } : parsed;
+    };
+    const beforeSource = raw.slice(0, endOf(source) - source[1].length);
+    const destination = beforeSource.match(TRANSFER_DESTINATION_RE);
+    return {
+        source: readParty(source[1], raw.slice(endOf(source))),
+        destination: destination
+            ? readParty(destination[1], beforeSource.slice(endOf(destination)))
+            : null,
+        sourceKindAmbiguous: /\baccount\s*\/\s*card$/i.test(source[1]),
+    };
+}
+function extractCard(raw, bank) {
+    const outgoingTransfer = extractOutgoingTransferParties(raw);
+    if (outgoingTransfer)
+        return outgoingTransfer.source;
+    const islamicCredit = !!bank?.islamic && LIMIT_EVIDENCE_RE.test(raw);
+    const masked = raw.match(MASKED_PAN_RE);
+    if (masked) {
+        return { last4: masked[1], kind: cardKindNear(raw, endOf(masked), islamicCredit) };
+    }
+    const cardMatch = raw.match(CARD_RE);
+    if (cardMatch) {
+        const kindWord = cardMatch[1] ?? '';
+        const kind = CARD_KIND_WORDS.test(kindWord)
+            ? 'credit'
+            : /debit|prepaid/i.test(kindWord)
+                ? 'debit'
+                : cardKindNear(raw, endOf(cardMatch), islamicCredit);
+        return { last4: cardMatch[2] ?? cardMatch[3], kind };
+    }
+    const usedTail = raw.match(USED_CARD_TAIL_RE);
+    if (usedTail) {
+        return {
+            last4: usedTail[1].slice(-4),
+            kind: cardKindNear(raw, endOf(usedTail), islamicCredit),
+        };
+    }
+    const maskedAccount = raw.match(MASKED_ACCOUNT_RE);
+    if (maskedAccount)
+        return { last4: maskedAccount[1], kind: 'account' };
+    const accMatch = raw.match(ACCOUNT_RE);
+    if (accMatch)
+        return { last4: accMatch[1] ?? accMatch[2], kind: 'account' };
+    if (ARABIC_RE.test(raw)) {
+        const arCard = raw.match(AR_CARD_RE);
+        if (arCard) {
+            const kindWord = arCard[1] ?? '';
+            const kind = kindWord.includes(AR_CARD_KIND) || (!kindWord && raw.includes(AR_CARD_KIND))
+                ? 'credit'
+                : 'debit';
+            return { last4: arCard[2], kind };
+        }
+        const arAcc = raw.match(AR_ACCOUNT_RE);
+        if (arAcc)
+            return { last4: arAcc[1], kind: 'account' };
+    }
+    return null;
+}
+function sliceUnfolded(clean, m) {
+    const start = (m.index ?? 0) + m[0].length - m[1].length;
+    return clean.slice(start, start + m[1].length).trim();
+}
+function extractArabicMerchant(folded, clean) {
+    if (!ARABIC_RE.test(folded))
+        return '';
+    AR_MERCHANT_RE.lastIndex = 0;
+    let m;
+    while ((m = AR_MERCHANT_RE.exec(folded))) {
+        if (m.index === AR_MERCHANT_RE.lastIndex)
+            AR_MERCHANT_RE.lastIndex++;
+        const candidate = sliceUnfolded(clean, m);
+        if ((candidate.match(new RegExp(`[${AR_LETTER}A-Za-z]`, 'g')) ?? []).length < 3)
+            continue;
+        return candidate;
+    }
+    return '';
+}
+const MONTH_NAMES = {
+    jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+    jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+};
+const MONTH_DATE_RE = /\b(?:on|by|before)\s+([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})/i;
+const DAY_MONTH_DATE_RE = /\b(?:on|by|before|is)\s+(\d{1,2})[-\s]?([A-Za-z]{3,9})[-\s]?(\d{2,4})(?=[^\d]|$)/i;
+const DUE_BY_NUMERIC_RE = /\b(?:by|before)\s+(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})/i;
+const DUE_BY_NAMED_RE = /\b(?:by|before)\s+([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})/i;
+const DUE_BY_DAY_NAMED_RE = /\b(?:by|before)\s+(\d{1,2})[-\s]?([A-Za-z]{3,9})[-\s]?(\d{2,4})\b/i;
+const ARABIC_MONTHS = {
+    يناير: 1,
+    فبراير: 2,
+    مارس: 3,
+    ابريل: 4,
+    مايو: 5,
+    يونيو: 6,
+    يوليو: 7,
+    اغسطس: 8,
+    سبتمبر: 9,
+    اكتوبر: 10,
+    نوفمبر: 11,
+    ديسمبر: 12,
+};
+const ARABIC_DUE_DATE_RE = new RegExp(`قبل\\s+تاريخ\\s+(\\d{1,2})\\s+(${Object.keys(ARABIC_MONTHS).join('|')})\\s+(\\d{4})`);
+const DUE_DATE_TOKEN = String.raw `(?:\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}|\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[-\s]?[A-Za-z]{3,9}[-\s]?\d{2,4}|[A-Za-z]{3,9}\.?\s+\d{1,2},?\s+\d{4})`;
+const DUE_DATE_FOOTER_RE = new RegExp(String.raw `\bdue\s*(?:date)?\s*(?:is|on|by|before|:)?\s*${DUE_DATE_TOKEN}` +
+    String.raw `|\bemi\s+(?:on|due|by)\s+${DUE_DATE_TOKEN}` +
+    String.raw `|\bpay\s+(?:\w+\s+){0,3}?(?:by|before|on)\s+${DUE_DATE_TOKEN}`, 'gi');
+const DUE_PHRASE_NUMERIC_RE = /\b(?:payment\s+)?due\s+date\b[^\n]{0,60}?\b(?:is|on|:)\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})/i;
+const DUE_PHRASE_NAMED_RE = /\b(?:payment\s+)?due\s+date\b[^\n]{0,60}?\b(?:is|on|:)\s*([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})/i;
+const DUE_DIRECT_PREFIX = String.raw `\bdue\b\s*(?:date\b\s*)?(?:(?:is|on|by|before)\b\s*|:\s*)?`;
+const DUE_DIRECT_NUMERIC_RE = new RegExp(DUE_DIRECT_PREFIX + String.raw `(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})(?!\d)`, 'i');
+const DUE_DIRECT_DAY_NAMED_RE = new RegExp(DUE_DIRECT_PREFIX + String.raw `(\d{1,2})[-\s]?([A-Za-z]{3,9})[-\s]?(\d{2,4})(?!\d)`, 'i');
+const DUE_DIRECT_NAMED_RE = new RegExp(DUE_DIRECT_PREFIX + String.raw `([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})(?!\d)`, 'i');
+function namedDate(monthWord, day, year) {
+    const month = MONTH_NAMES[monthWord.slice(0, 3).toLowerCase()];
+    const y = year.length === 2 ? 2000 + Number(year) : Number(year);
+    return month ? isoDate(y, month, Number(day)) : null;
+}
+function extractDueDate(raw) {
+    const arabicNumeric = normalizeArabic(raw).match(/(?:تاريخ|موعد)\s+(?:ال)?استحقاق\s*:?\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})(?!\d)/i);
+    if (arabicNumeric)
+        return numericDate(arabicNumeric[1], arabicNumeric[2], arabicNumeric[3]);
+    const arabic = normalizeArabic(raw).match(ARABIC_DUE_DATE_RE);
+    if (arabic) {
+        const iso = isoDate(Number(arabic[3]), ARABIC_MONTHS[arabic[2]], Number(arabic[1]));
+        if (iso)
+            return iso;
+    }
+    const phrase = raw.match(DUE_PHRASE_NUMERIC_RE);
+    if (phrase) {
+        const iso = numericDate(phrase[1], phrase[2], phrase[3]);
+        if (iso)
+            return iso;
+    }
+    const phraseNamed = raw.match(DUE_PHRASE_NAMED_RE);
+    if (phraseNamed) {
+        const iso = namedDate(phraseNamed[1], phraseNamed[2], phraseNamed[3]);
+        if (iso)
+            return iso;
+    }
+    const direct = raw.match(DUE_DIRECT_NUMERIC_RE);
+    if (direct)
+        return numericDate(direct[1], direct[2], direct[3]);
+    const directDayNamed = raw.match(DUE_DIRECT_DAY_NAMED_RE);
+    if (directDayNamed)
+        return namedDate(directDayNamed[2], directDayNamed[1], directDayNamed[3]);
+    const directNamed = raw.match(DUE_DIRECT_NAMED_RE);
+    if (directNamed)
+        return namedDate(directNamed[1], directNamed[2], directNamed[3]);
+    const by = raw.match(DUE_BY_NUMERIC_RE);
+    if (by) {
+        const iso = numericDate(by[1], by[2], by[3]);
+        if (iso)
+            return iso;
+    }
+    const byNamed = raw.match(DUE_BY_NAMED_RE);
+    if (byNamed) {
+        const iso = namedDate(byNamed[1], byNamed[2], byNamed[3]);
+        if (iso)
+            return iso;
+    }
+    const byDayNamed = raw.match(DUE_BY_DAY_NAMED_RE);
+    if (byDayNamed) {
+        const iso = namedDate(byDayNamed[2], byDayNamed[1], byDayNamed[3]);
+        if (iso)
+            return iso;
+    }
+    const isoDue = raw.match(/\bdue\b[^\d\n]{0,24}(\d{4})-(\d{1,2})-(\d{1,2})(?!\d)/i);
+    if (isoDue) {
+        const iso = isoDate(Number(isoDue[1]), Number(isoDue[2]), Number(isoDue[3]));
+        if (iso)
+            return iso;
+    }
+    return null;
+}
+function extractDueDay(raw) {
+    const full = extractDueDate(raw);
+    if (full)
+        return Number(full.slice(8));
+    if (DUE_DIRECT_NUMERIC_RE.test(raw) || DUE_DIRECT_DAY_NAMED_RE.test(raw) ||
+        DUE_DIRECT_NAMED_RE.test(raw))
+        return null;
+    const numeric = raw.match(new RegExp(DUE_DIRECT_PREFIX + String.raw `(\d{1,2})[/.-](\d{1,2})(?![\d/.-])`, 'i'));
+    if (numeric) {
+        return isoDate(2000, Number(numeric[2]), Number(numeric[1])) ? Number(numeric[1]) : null;
+    }
+    const named = raw.matchAll(new RegExp(DUE_DIRECT_PREFIX + String.raw `(?:(\d{1,2})[-\s]+([A-Za-z]{3,9})|([A-Za-z]{3,9})\.?\s+(\d{1,2}))(?!\w|\s*[-/]?\s*\d)`, 'gi'));
+    for (const match of named) {
+        const month = MONTH_NAMES[(match[2] ?? match[3]).slice(0, 3).toLowerCase()];
+        const day = Number(match[1] ?? match[4]);
+        if (month && isoDate(2000, month, day))
+            return day;
+    }
+    return null;
+}
+function isoDate(y, month, day) {
+    if (!(y >= 2000 && y <= 2100 && month >= 1 && month <= 12 && day >= 1))
+        return null;
+    const daysInMonth = new Date(Date.UTC(y, month, 0)).getUTCDate();
+    if (day > daysInMonth)
+        return null;
+    return `${y}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+function numericDate(d, m, yRaw) {
+    const y = yRaw.length === 2 ? 2000 + Number(yRaw) : Number(yRaw);
+    const first = Number(d);
+    const second = Number(m);
+    return isoDate(y, second, first) ?? isoDate(y, first, second);
+}
+const STATEMENT_ISSUE_LABEL_RE = /\b(?:statement|stmt)(?:\s+of\s+(?:the\s+|your\s+)?(?:credit\s+)?card\s+(?:no\.?\s+|number\s+)?(?:ending\s+(?:with|in)\s+)?[X*•·\d]{4,})?\s*(?:is\s+)?(?:dated|date|dt\.?|generated\s+on|issued\s+on|prepared\s+on)\s*(?:is|:|-|on)?\s*/gi;
+const STATEMENT_DATE_TOKEN_RE = /^(?:(\d{4})-(\d{2})-(\d{2})(?!\d)|(\d{1,2})[/.-](\d{1,2}|[A-Za-z]{3,9})[/.-](\d{2,4})(?!\d)|(\d{1,2})\s*([A-Za-z]{3,9})(?:\s*,?\s*(\d{4})(?![\d:])|(\d{2})(?![\d:])|\s*,?\s+(\d{2})(?![\d:])(?!\s*[A-Za-z])))/;
+const STATEMENT_DATE_RANGE_SEPARATOR_RE = /^\s*(?:-|–|—|to|till|until)\s*/i;
+const isStatementDateRange = (after) => {
+    const separator = after.match(STATEMENT_DATE_RANGE_SEPARATOR_RE);
+    if (!separator)
+        return false;
+    const second = after.slice(separator[0].length).match(STATEMENT_DATE_TOKEN_RE);
+    return !!second && statementTokenDate(second) !== null;
+};
+const STATEMENT_ISSUE_DATE_AR_RE = /تاريخ\s+(?:ال)?كشف\s*:?\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})(?!\d)/;
+function statementTokenDate(m) {
+    if (m[1] !== undefined)
+        return isoDate(Number(m[1]), Number(m[2]), Number(m[3]));
+    const [d, mo, y] = m[4] !== undefined ? [m[4], m[5], m[6]] : [m[7], m[8], m[9] ?? m[10] ?? m[11]];
+    const year = y.length === 2 ? 2000 + Number(y) : Number(y);
+    if (/^\d+$/.test(mo))
+        return numericDate(d, mo, y);
+    const named = MONTH_NAMES[mo.slice(0, 3).toLowerCase()];
+    return named ? isoDate(year, named, Number(d)) : null;
+}
+function extractStatementIssueDate(raw, dueDate) {
+    let date = null;
+    STATEMENT_ISSUE_LABEL_RE.lastIndex = 0;
+    for (let label = STATEMENT_ISSUE_LABEL_RE.exec(raw); label; label = STATEMENT_ISSUE_LABEL_RE.exec(raw)) {
+        const rest = raw.slice(label.index + label[0].length);
+        const token = rest.match(STATEMENT_DATE_TOKEN_RE);
+        if (!token)
+            continue;
+        if (isStatementDateRange(rest.slice(token[0].length)))
+            return null;
+        date = statementTokenDate(token);
+        break;
+    }
+    STATEMENT_ISSUE_LABEL_RE.lastIndex = 0;
+    if (!date) {
+        const ar = raw.match(STATEMENT_ISSUE_DATE_AR_RE);
+        if (ar)
+            date = numericDate(ar[1], ar[2], ar[3]);
+    }
+    if (!date || (dueDate && date >= dueDate))
+        return null;
+    return date;
+}
+function sourceBackedReceiptDate(raw, previous, options) {
+    if (!previous || (0, markets_1.getActiveMarket)().id !== 'AE')
+        return null;
+    const match = raw.match(CARD_RECEIPT_DATE_RE);
+    if (!match || numericDate(match[1], match[2], match[3]) !== previous)
+        return null;
+    const year = match[3].length === 2 ? 2000 + Number(match[3]) : Number(match[3]);
+    const date = isoDate(year, Number(match[1]), Number(match[2]));
+    if (!date || date === previous)
+        return null;
+    const bank = (0, markets_1.bankFromSender)(options?.sender);
+    const sender = options?.sender?.trim() ?? '';
+    if (sender && markets_1.MARKETS.some((market) => market.banks.some((candidate) => candidate.name !== 'ADIB' && candidate.re.test(sender))))
+        return null;
+    if (bank && bank.name !== 'ADIB')
+        return null;
+    if (!bank) {
+        const observedAt = options?.observedAt;
+        if (typeof observedAt !== 'number' || !Number.isFinite(observedAt))
+            return null;
+        const received = new Date(observedAt + 4 * 60 * 60 * 1000);
+        if (!Number.isFinite(received.getTime()) || received.toISOString().slice(0, 10) !== date)
+            return null;
+    }
+    return { date, dateRepairFrom: previous };
+}
+function fieldListPostingDate(raw, options) {
+    ensureCurrencyPatterns();
+    const first = raw.match(FIRST_LOCAL_AMOUNT_RE);
+    if (!first || first.index === undefined)
+        return null;
+    if (BALANCE_PREFIX_RE.test(raw.slice(Math.max(0, first.index - 56), first.index)))
+        return null;
+    const m = raw.slice(first.index).match(FIELD_LIST_DATE_RE);
+    const date = m ? numericDate(m[1], m[2], m[3]) : null;
+    if (!date)
+        return null;
+    const observedAt = options?.observedAt;
+    if (typeof observedAt === 'number' && Number.isFinite(observedAt)) {
+        const received = new Date(observedAt + 4 * 60 * 60 * 1000);
+        if (Number.isFinite(received.getTime()) && date > received.toISOString().slice(0, 10))
+            return null;
+    }
+    return date;
+}
+const SA_SHORT_STAMP_AFTER_RE = /(?<![\d/.\\-])(\d{1,2})([-/\\])(\d{1,2})\2(\d{1,2})[ \t]+\d{1,2}:\d{2}(?!\d)/;
+const SA_SHORT_STAMP_BEFORE_RE = /(?<![\d:])\d{1,2}:\d{2}(?::\d{2})?[ \t]+(\d{1,2})([-/\\])(\d{1,2})\2(\d{1,2})(?![\d/.\\-])/;
+const SA_ISO_STAMP_AFTER_RE = /(?<![\d/.\\-])(20\d{2})([-/])(\d{1,2})\2(\d{1,2})[ \t]+\d{1,2}:\d{2}(?!\d)/;
+const SA_ISO_STAMP_BEFORE_RE = /(?<![\d:])\d{1,2}:\d{2}(?::\d{2})?[ \t]+(20\d{2})([-/])(\d{1,2})\2(\d{1,2})(?![\d/.\\-])/;
+const SA_UTC_OFFSET_MS = 3 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+function saudiTimestampDate(raw, options) {
+    const iso = raw.match(SA_ISO_STAMP_AFTER_RE) ?? raw.match(SA_ISO_STAMP_BEFORE_RE);
+    if (iso) {
+        const date = isoDate(Number(iso[1]), Number(iso[3]), Number(iso[4]));
+        if (date)
+            return date;
+    }
+    const m = raw.match(SA_SHORT_STAMP_AFTER_RE) ?? raw.match(SA_SHORT_STAMP_BEFORE_RE);
+    if (!m)
+        return null;
+    const [, a, separator, b, c] = m;
+    const dayFirst = isoDate(2000 + Number(c), Number(b), Number(a));
+    const yearFirst = isoDate(2000 + Number(a), Number(b), Number(c));
+    if (!dayFirst || !yearFirst)
+        return dayFirst ?? yearFirst;
+    if (dayFirst === yearFirst)
+        return dayFirst;
+    if (a.length === 2 && c.length === 1)
+        return yearFirst;
+    if (a.length === 1 && c.length === 2)
+        return dayFirst;
+    const observedAt = options?.observedAt;
+    if (typeof observedAt === 'number' && Number.isFinite(observedAt)) {
+        const latest = new Date(observedAt + SA_UTC_OFFSET_MS + DAY_MS);
+        if (Number.isFinite(latest.getTime())) {
+            const limit = latest.toISOString().slice(0, 10);
+            const allowed = [dayFirst, yearFirst].filter((date) => date <= limit).sort();
+            if (!allowed.length)
+                return null;
+            if (allowed.length === 1)
+                return allowed[0];
+            const floor = new Date(latest.getTime() - 63 * DAY_MS).toISOString().slice(0, 10);
+            const recent = allowed.filter((date) => date >= floor);
+            if (recent.length === 1)
+                return recent[0];
+        }
+    }
+    return separator === '-' ? yearFirst : dayFirst;
+}
+function extractDate(raw) {
+    const withTime = raw.match(DATETIME_RE);
+    if (withTime) {
+        const iso = numericDate(withTime[1], withTime[2], withTime[3]);
+        if (iso)
+            return iso;
+    }
+    const arabicIsoTime = raw.match(ARABIC_ISO_DATETIME_RE);
+    if (arabicIsoTime) {
+        const iso = isoDate(Number(arabicIsoTime[1]), Number(arabicIsoTime[2]), Number(arabicIsoTime[3]));
+        if (iso)
+            return iso;
+    }
+    const hsbc = raw.match(HSBC_DATE_RE);
+    if (hsbc) {
+        const iso = namedDate(hsbc[2], hsbc[1], String(2000 + Number(hsbc[3])));
+        if (iso)
+            return iso;
+    }
+    const isoOrder = raw.match(ISO_DATE_RE);
+    if (isoOrder) {
+        const iso = isoDate(Number(isoOrder[1]), Number(isoOrder[2]), Number(isoOrder[3]));
+        if (iso)
+            return iso;
+    }
+    const numeric = raw.match(DATE_RE);
+    if (numeric) {
+        const iso = numericDate(numeric[1], numeric[2], numeric[3]);
+        if (iso)
+            return iso;
+    }
+    const named = raw.match(MONTH_DATE_RE);
+    if (named) {
+        const iso = namedDate(named[1], named[2], named[3]);
+        if (iso)
+            return iso;
+    }
+    const dayNamed = raw.match(DAY_MONTH_DATE_RE);
+    if (dayNamed) {
+        const iso = namedDate(dayNamed[2], dayNamed[1], dayNamed[3]);
+        if (iso)
+            return iso;
+    }
+    return null;
+}
+function parseSmsInner(message, overrides, options) {
+    const source = message.trim();
+    if (!source)
+        return null;
+    const clean = issuerDigitGrouping(stripInvisible(source), options?.sender);
+    const raw = sanitizeLocalMoney(foldOrthography(clean));
+    if (raw === null)
+        return null;
+    const arabicPurchaseRefundHeader = AR_PURCHASE_REFUND_HEADER_RE.test(raw);
+    const purchaseRefundHeading = arabicPurchaseRefundHeader || REFUND_HEADING_RE.test(raw);
+    if (AR_REFUND_NOTICE_HEADING_RE.test(raw) ||
+        (AR_REFUND_REQUEST_RECEIVED_RE.test(raw) && !AR_PURCHASE_REFUND_COMPLETED_RE.test(raw)))
+        return null;
+    ensureCurrencyPatterns();
+    const currency = (0, markets_1.getActiveMarket)().currency.code;
+    const reference = extractReference(clean);
+    const bank = bankProfileForSender(options?.sender);
+    const card = extractCard(raw, bank);
+    const suppressible = blank(maskMerchantNames(raw), FRAUD_FOOTER_RE);
+    if (nonPostingReasonInBody(raw, suppressible))
+        return null;
+    if (nonCashNoticeInBody(raw))
+        return null;
+    const separate = SEPARATE_MOVEMENT_RE.exec(suppressible);
+    if ((separate &&
+        MONEY_FIGURE_RE.test(separate[0]) &&
+        MONEY_FIGURE_RE.test(suppressible.slice(0, separate.index) + ' ' + suppressible.slice(separate.index + separate[0].length))) ||
+        AMBIGUOUS_AMOUNT_RE.test(suppressible)) {
+        return null;
+    }
+    if (INFORMATION_ONLY_RE.test(raw))
+        return null;
+    const posted = hasPostedEvidence(raw, card);
+    if (OTP_FOOTER_RE.test(suppressible) && !posted)
+        return null;
+    if (SPEND_SUMMARY_RE.test(raw) && !extractMerchant(raw, MERCHANT_RE))
+        return null;
+    const statementEvidence = STATEMENT_RE.test(raw) &&
+        BILL_DUE_WORDS.test(raw) &&
+        (card !== null || /\b(?:credit|covered)\s*card\b|\bcard\s+statement\b/i.test(raw)) &&
+        statementTotalFils(raw) !== null;
+    const strongFieldListPosting = posted &&
+        card !== null &&
+        extractDate(raw) !== null &&
+        /\b(?:credit|debit|covered|prepaid)\s+card\s+purchase\b/i.test(raw);
+    const marketingMovementText = blank(raw, REWARD_RATE_RE);
+    if ((ARABIC_MARKETING_RE.test(raw) ||
+        REWARD_RATE_RE.test(raw) ||
+        PERCENT_PURCHASE_OFFER_RE.test(raw) ||
+        MOBILE_CREDIT_CAMPAIGN_RE.test(raw) ||
+        FUTURE_PURCHASE_THRESHOLD_RE.test(raw) ||
+        PURCHASE_THRESHOLD_OFFER_RE.test(raw) ||
+        CONTEST_MARKETING_RE.test(raw) ||
+        FINANCIAL_SALES_RE.test(raw) ||
+        APPLICATION_PURCHASE_OFFER_RE.test(raw)) &&
+        !ARABIC_MONTHLY_BILL_RE.test(raw) &&
+        !SETTLED_MOVEMENT_RE.test(marketingMovementText) &&
+        !strongFieldListPosting &&
+        !statementEvidence) {
+        return null;
+    }
+    if ((OFFER_RE.test(raw) || ARABIC_OFFER_RE.test(raw)) && !posted && !statementEvidence) {
+        return null;
+    }
+    {
+        const settled = blank(blank(raw, FUTURE_CLAUSE_RE), SCHEDULED_CLAUSE_RE);
+        const refundSettled = purchaseRefundHeading
+            ? blank(settled, AR_PURCHASE_REFUND_NOTICE_RE) : settled;
+        if (purchaseRefundHeading && refundSettled !== raw) {
+            const completion = AR_PURCHASE_REFUND_COMPLETED_RE.exec(refundSettled);
+            if (!completion)
+                return null;
+            const subjectAndVerb = completion[1] ?? completion[2];
+            const at = completion.index + completion[0].indexOf(subjectAndVerb);
+            if (maskMerchantNames(refundSettled).slice(at, at + subjectAndVerb.length) !== subjectAndVerb)
+                return null;
+        }
+        const postingNounClause = raw.split(/\n|[.!?](?=\s|$)/).some((sentence) => /^\s*(?:(?:your|a)\s+)?(?:purchase|cash\s+advance|cash\s+withdrawal|withdrawal|transaction)\s+of\s+(?:[A-Z]{3}|Dhs?\.?)\s*[\d,]+(?:\.\d{1,3})?/i.test(sentence) &&
+            !new RegExp(FUTURE_CLAUSE_RE.source, 'i').test(sentence) &&
+            !new RegExp(SCHEDULED_CLAUSE_RE.source, 'i').test(sentence));
+        const settledFieldList = card !== null &&
+            extractAmountFils(settled) !== null &&
+            (extractDate(settled) !== null || postingNounClause) &&
+            (/\bcredit\s+card\s+purchase\b/i.test(settled) ||
+                !!extractMerchant(settled, MERCHANT_RE) ||
+                !!extractArabicMerchant(settled, settled));
+        if (settled !== raw && !SETTLED_MOVEMENT_RE.test(settled) && !settledFieldList)
+            return null;
+    }
+    if (/\d\s*(?:aed|dhs|sar)\s*\/\s*min(?:ute)?|roaming minutes/i.test(raw))
+        return null;
+    if (/\bare charged at\b|\bis charged at\b|\bper transaction\b/i.test(raw))
+        return null;
+    if (/autopay service/i.test(raw))
+        return null;
+    if (/deducted from (?:your )?next recharge|will be deducted from next/i.test(raw))
+        return null;
+    if (/will be charged to your (?:default )?(?:card|payment method)|due tomorrow and will be charged|statement for (?:aed\s*)?[\d,.]+ is ready|charged to your (?:card|default payment method) (?:tomorrow|on \d)/i.test(raw)) {
+        return null;
+    }
+    if (INSTALMENT_CONVERSION_NOTICE_RE.test(raw))
+        return null;
+    if (/\*?convert now\*?|converted in(?:to)? instal?ments?|\bcan\s+be\s+converted\b|\bconvert\s+your\b(?:[^.\n]|\.\d){0,72}?\binto\b|\beligible\s+for\b(?:[^.\n]|\.\d){0,40}?(?:conversion|instal?ments?|payment\s+plan|0\s*%)|interest payment plan|easy payment plan|\b(?:enjoy|avail|get)\s+(?:easy\s+)?monthly\s+instal?ments?\s+on\s+your\s+purchase\b/i.test(raw) &&
+        !(posted && SETTLED_TENSE_RE.test(raw))) {
+        return null;
+    }
+    if ((/\b(?:as\s+low\s+as|starting\s+(?:from|at)|only)\b(?:[^.\n]|\.\d){0,60}?\bper\s+month\b/i.test(raw) ||
+        /https?:\/\/[^\s]*\/epp\//i.test(raw)) &&
+        !(posted && SETTLED_TENSE_RE.test(raw))) {
+        return null;
+    }
+    if (/payment reminder|due date reminder|pay immediately to avoid|avoid blockage|is overdue\b/i.test(raw))
+        return null;
+    const ajmanPaySettledReceipt = /\byour\s+transaction\s+(?:for|with)\s+an?\s+amount\s+of\s+(?:AED|Dhs?|SAR|USD|EUR|GBP|QAR|KWD|BHD|OMR)\s*[\d,.]+[\s\S]{0,180}?\bhas\s+been\s+successfully\s+paid\b/i.test(raw);
+    if (/rate our service|successfully redeemed|delivery associate/i.test(raw) ||
+        (/thank you for using ajmanpay/i.test(raw) && !ajmanPaySettledReceipt)) {
+        return null;
+    }
+    if (/\bplate(?:no|source)?\s*[-:]/i.test(raw) &&
+        /\b(?:fee|paid)\s*[-:]?\s*(?:aed|dhs|[\d,])/i.test(raw)) {
+        const feeMatch = raw.match(/\b(?:fee|paid)\s*[-:]?\s*(?:aed|dhs)\s*([\d,]+(?:\.\d{1,2})?)/i) ??
+            raw.match(/\b(?:fee|paid)\s*[-:]?\s*([\d,]+(?:\.\d{1,2})?)\s*(?:aed|dhs)/i);
+        const fils = feeMatch ? Math.round(Number(feeMatch[1].replace(/,/g, '')) * 100) : null;
+        if (!fils || fils <= 0)
+            return null;
+        return {
+            kind: 'transaction',
+            type: 'expense',
+            amountFils: fils,
+            merchant: 'Parking',
+            date: extractDate(raw),
+            dueDay: null,
+            minDueFils: null,
+            card: null,
+            transferHint: false,
+            snapshotFils: null,
+            snapshotKind: null,
+            categoryGuess: 'transport',
+            currency,
+            reference,
+            raw: source,
+        };
+    }
+    const statedDate = extractDate(raw);
+    const postingText = blank(raw, DUE_DATE_FOOTER_RE);
+    const date = ((0, markets_1.getActiveMarket)().id === 'SA' ? saudiTimestampDate(postingText, options) : null) ??
+        extractDate(postingText) ?? fieldListPostingDate(postingText, options);
+    const snapshot = extractSnapshot(raw);
+    const snapshotFils = snapshot?.fils ?? null;
+    let snapshotKind = snapshot?.kind ?? null;
+    if (snapshotKind === 'balance' && card?.kind === 'credit')
+        snapshotKind = 'limit';
+    const fundingAccountBalance = snapshot?.kind === 'balance' && cardPaymentLeg(raw) === 'debit';
+    const cardPaymentSnapshotFils = fundingAccountBalance ? null : snapshotFils;
+    const cardPaymentSnapshotKind = fundingAccountBalance ? null : snapshotKind;
+    const overdueCardReminder = raw.match(/\boverdue\s+payment\s+(?:of\s+)?AED\s*([\d,]+(?:\.\d{1,2})?)\b/i);
+    if (overdueCardReminder &&
+        card &&
+        /\bcredit\s+card\b/i.test(raw) &&
+        /\bpromis(?:e|ed|ing)\b/i.test(raw) &&
+        /\bdeposit\b/i.test(raw)) {
+        const amountFils = Math.round(Number(overdueCardReminder[1].replace(/,/g, '')) * 100);
+        if (Number.isSafeInteger(amountFils) && amountFils > 0) {
+            const reminderDate = extractDueDate(raw) ?? extractDate(raw);
+            return {
+                kind: 'cardStatement',
+                type: 'expense',
+                amountFils,
+                merchant: `Card •${card.last4}`,
+                date: reminderDate,
+                dueDay: reminderDate ? Number(reminderDate.slice(8)) : null,
+                minDueFils: null,
+                card: { ...card, kind: 'credit' },
+                transferHint: false,
+                snapshotFils,
+                snapshotKind,
+                categoryGuess: 'other',
+                categoryDeliberate: true,
+                currency,
+                reference,
+                raw: source,
+            };
+        }
+    }
+    const fabAccountCredit = bank?.name === 'FAB'
+        ? raw.match(/\bcredit\s+account\b[\s\S]{0,32}?(?:[Xx*·•]+\s*)?(\d{4})\b[\s\S]{0,40}?\bAED\s*([\d,]+(?:\.\d{1,2})?)/i)
+        : null;
+    if (fabAccountCredit) {
+        const amountFils = Math.round(Number(fabAccountCredit[2].replace(/,/g, '')) * 100);
+        const fabBalance = raw.match(/\bbalance\s*(?:is|:)?\s*AED\s*([\d,]+(?:\.\d{1,2})?)/i);
+        const fabBalanceFils = fabBalance
+            ? Math.round(Number(fabBalance[1].replace(/,/g, '')) * 100)
+            : null;
+        const fabHeader = raw.slice(0, fabAccountCredit.index ?? 0);
+        const fabSalary = SALARY_RE.test(fabHeader) && !/\b(?:advance|loan|financ\w*)\b/i.test(fabHeader);
+        const fabCategory = fabSalary ? categoryOf('Salary', 'income', overrides, 'Salary') : null;
+        if (Number.isFinite(amountFils) && amountFils > 0) {
+            return {
+                kind: 'transaction',
+                type: 'income',
+                amountFils,
+                merchant: fabSalary ? 'Salary' : 'Account credit',
+                date,
+                dueDay: null,
+                minDueFils: null,
+                card: { last4: fabAccountCredit[1], kind: 'account' },
+                transferHint: false,
+                snapshotFils: Number.isFinite(fabBalanceFils) ? fabBalanceFils : snapshotFils,
+                snapshotKind: Number.isFinite(fabBalanceFils) ? 'balance' : snapshotKind,
+                categoryGuess: fabCategory?.id ?? 'other',
+                categoryDeliberate: fabCategory?.deliberate ?? false,
+                ...(fabCategory?.pinned ? { categoryPinned: true } : {}),
+                currency,
+                reference,
+                raw: source,
+            };
+        }
+    }
+    const salikBareRecharge = /salik/i.test(options?.sender ?? '') && ARABIC_RE.test(raw)
+        ? raw.match(/اضاف(?:ه)?\s+مبلغ\s*(?:قدره|بقيمه|:)?\s*([0-9][\d,]*(?:\.\d{1,2})?)/)
+        : null;
+    if (/salik/i.test(options?.sender ?? '') &&
+        ARABIC_RE.test(raw) &&
+        /اضاف(?:ه)?\s+مبلغ\s+لحساب\s+سالك(?=\s|$)/.test(raw) &&
+        /بطاق/.test(raw) &&
+        /رصيد/.test(raw) &&
+        !salikBareRecharge) {
+        return null;
+    }
+    if (salikBareRecharge && /بطاق/.test(raw) && /رصيد/.test(raw)) {
+        const amountFils = Math.round(Number(salikBareRecharge[1].replace(/,/g, '')) * 100);
+        if (Number.isSafeInteger(amountFils) && amountFils > 0 && amountFils <= MAX_PLAUSIBLE_AMOUNT_FILS) {
+            return {
+                kind: 'transaction',
+                type: 'expense',
+                amountFils,
+                merchant: 'Salik',
+                date,
+                dueDay: null,
+                minDueFils: null,
+                card,
+                transferHint: false,
+                snapshotFils,
+                snapshotKind,
+                categoryGuess: 'transport',
+                categoryDeliberate: true,
+                currency,
+                reference,
+                raw: source,
+            };
+        }
+    }
+    const purchaseRefund = raw.match(/\bpurchase(?:\s+(?:amount|amt))?\s+(?:of\s+)?(?:[A-Z]{3}|Dhs?)\s*[\d,.]+\s+at\s+(.+?)\s+on\s+your\s+(?:credit|debit|covered|prepaid)?\s*card\b[\s\S]{0,120}?\bhas\b[\s\S]{0,24}?\brefunded\b/i);
+    if (purchaseRefund) {
+        const money = transactionMoney(raw);
+        if (money) {
+            const merchant = titleCase(purchaseRefund[1].trim().replace(/\s{2,}/g, ' '));
+            return {
+                kind: 'transaction',
+                type: 'income',
+                ...money,
+                merchant: merchant || 'Refund',
+                date,
+                dueDay: null,
+                minDueFils: null,
+                card,
+                transferHint: false,
+                snapshotFils,
+                snapshotKind,
+                categoryGuess: 'other',
+                categoryDeliberate: false,
+                currency,
+                reference,
+                raw: source,
+            };
+        }
+    }
+    const approvedReturn = raw.match(/\breturn\s*:\s*[A-Z0-9-]{4,40}\s+is\s+approved\b[\s\S]{0,80}?\b(?:AED|Dhs?|SAR|USD|EUR|GBP|QAR|KWD|BHD|OMR)\s*[\d,.]+\s+is\s+now\s+in\s+your\s+(?:account|wallet)\b/i);
+    if (approvedReturn) {
+        const amountFils = amountWithFx(raw);
+        if (amountFils) {
+            return {
+                kind: 'transaction',
+                type: 'income',
+                amountFils,
+                merchant: 'Refund',
+                date,
+                dueDay: null,
+                minDueFils: null,
+                card,
+                transferHint: false,
+                snapshotFils,
+                snapshotKind,
+                categoryGuess: 'other',
+                categoryDeliberate: false,
+                currency,
+                reference,
+                raw: source,
+            };
+        }
+    }
+    const settledAmountOnly = raw.match(/\byour\s+transaction\s+(?:for|with)\s+an?\s+amount\s+of\s+(?:AED|Dhs?|SAR|USD|EUR|GBP|QAR|KWD|BHD|OMR)\s*[\d,.]+[\s\S]{0,180}?\b(?:was\s+successful|has\s+been\s+successfully\s+paid)\b/i);
+    if (settledAmountOnly) {
+        const amountFils = amountWithFx(raw);
+        if (amountFils) {
+            const insurance = /\bpremium\b|\bpolicy\s+(?:no\.?|number)\b/i.test(raw);
+            const gateway = /ajmanpay/i.test(options?.sender ?? '') ? 'AjmanPay' : 'Payment';
+            return {
+                kind: 'transaction',
+                type: 'expense',
+                amountFils,
+                merchant: insurance ? 'Insurance premium' : gateway,
+                date,
+                dueDay: null,
+                minDueFils: null,
+                card,
+                transferHint: false,
+                snapshotFils,
+                snapshotKind,
+                categoryGuess: 'other',
+                categoryDeliberate: false,
+                currency,
+                reference,
+                raw: source,
+            };
+        }
+    }
+    const accountPaymentField = CARD_PAYMENT_ACCOUNT_FIELD_RE.test(raw);
+    if (accountPaymentField && !REFUND_RE.test(raw) && !REVERSAL_RE.test(raw)) {
+        const posting = raw.match(CARD_PAYMENT_ACCOUNT_POSTING_RE);
+        if (!posting || Array.from(raw.matchAll(/\bamount\s*:/gi)).length !== 1 ||
+            Array.from(raw.matchAll(/\bdate\s*:/gi)).length !== 1)
+            return null;
+        const accountPaymentDay = numericDate(posting[2], posting[3], posting[4]);
+        if (!accountPaymentDay)
+            return null;
+        const observedDay = localIsoDay(options?.observedAt);
+        if (observedDay && accountPaymentDay > observedDay)
+            return null;
+        const amountFils = Math.round(Number(posting[1].replace(/,/g, '')) * 100);
+        if (!Number.isSafeInteger(amountFils) || amountFils <= 0 || amountFils > MAX_PLAUSIBLE_AMOUNT_FILS)
+            return null;
+        return {
+            kind: 'cardPayment', type: 'expense', amountFils, merchant: 'Card payment',
+            date: accountPaymentDay, dueDay: null, minDueFils: null, card: null,
+            cardPaymentSide: 'debit', transferHint: true,
+            snapshotFils: null, snapshotKind: null,
+            categoryGuess: 'other', categoryDeliberate: true, currency, reference, raw: source,
+        };
+    }
+    if (card?.kind !== 'account' && card && CARD_PAYMENT_RE.test(raw)) {
+        const amountFils = amountWithFx(raw);
+        if (!amountFils)
+            return null;
+        const side = cardPaymentLeg(raw);
+        const correctedDate = side === 'receipt' ? sourceBackedReceiptDate(raw, date, options) : null;
+        return {
+            kind: 'cardPayment',
+            type: 'expense',
+            amountFils,
+            merchant: `Card •${card.last4} payment`,
+            date,
+            ...correctedDate,
+            dueDay: null,
+            minDueFils: null,
+            card: { ...card, kind: 'credit' },
+            cardPaymentSide: side,
+            transferHint: true,
+            snapshotFils: cardPaymentSnapshotFils,
+            snapshotKind: cardPaymentSnapshotKind,
+            categoryGuess: 'other',
+            categoryDeliberate: true,
+            currency,
+            reference,
+            raw: source,
+        };
+    }
+    if (/payment\s+instructions?\s+of/i.test(raw)) {
+        const masked = raw.match(MASKED_PAN_RE);
+        if (masked) {
+            const amountFils = amountWithFx(raw);
+            if (!amountFils)
+                return null;
+            return {
+                kind: 'cardPayment',
+                type: 'expense',
+                amountFils,
+                merchant: `Card •${masked[1]} payment`,
+                date,
+                dueDay: null,
+                minDueFils: null,
+                card: { last4: masked[1], kind: 'credit' },
+                cardPaymentSide: cardPaymentLeg(raw),
+                transferHint: true,
+                snapshotFils: cardPaymentSnapshotFils,
+                snapshotKind: cardPaymentSnapshotKind,
+                categoryGuess: 'other',
+                categoryDeliberate: true,
+                currency,
+                reference,
+                raw: source,
+            };
+        }
+    }
+    const billerPay = raw.match(/payment\s+instructions?\s+of\s+(?:[A-Z]{3}|Dhs?)?\s*[\d,.]+\s+to\s+(.+?)\s+for\s+consumer\s+number/i);
+    if (billerPay) {
+        const amountFils = amountWithFx(raw);
+        if (!amountFils)
+            return null;
+        const payee = billerPay[1].trim().replace(/\s{2,}/g, ' ');
+        const merchant = normalizeServiceName(payee) ?? titleCase(payee);
+        const cat = categoryOf(payee, 'expense', undefined, merchant);
+        const registeredUtility = !cat.pinned && cat.id === 'other' && /home\s*inet|home\s*internet|villa\s*bill|apt\s*home|off\s*home/i.test(payee);
+        return {
+            kind: 'transaction',
+            type: 'expense',
+            amountFils,
+            merchant,
+            date,
+            dueDay: null,
+            minDueFils: null,
+            card,
+            transferHint: false,
+            paymentFlowSide: 'receipt',
+            snapshotFils,
+            snapshotKind,
+            categoryGuess: registeredUtility ? 'utilities' : cat.id,
+            categoryDeliberate: cat.deliberate || registeredUtility,
+            ...(cat.pinned ? { categoryPinned: true } : {}),
+            currency,
+            reference,
+            raw: source,
+        };
+    }
+    const NOT_A_BILLER_NAME = /\b(?:ACCOUNT|ACCT|A\/C|CARD|REF|REFERENCE|TXN|TRANSACTION|MOBILE|CUSTOMER|CONSUMER|INVOICE|BILL|POLICY|FILE|ORDER|TICKET|PLATE|TRN|IBAN|CHEQUE|CHECK)\b/i;
+    const billerRef = raw.match(/\b([A-Z][A-Z ]{2,20}?)\s+NO\.?\s*[-:]\s*[\dX·]/);
+    if (billerRef && !NOT_A_BILLER_NAME.test(billerRef[1].trim())) {
+        const amountFils = amountWithFx(raw);
+        if (amountFils) {
+            const payee = billerRef[1].trim();
+            const merchant = normalizeServiceName(payee) ?? titleCase(payee);
+            const type = CREDIT_WORDS.test(raw) && !DEBIT_WORDS.test(raw) ? 'income' : 'expense';
+            const cat = categoryOf(type === 'income' ? raw : payee, type, overrides, merchant);
+            return {
+                kind: 'transaction',
+                type,
+                amountFils,
+                merchant,
+                date,
+                dueDay: null,
+                minDueFils: null,
+                card,
+                transferHint: false,
+                snapshotFils,
+                snapshotKind,
+                categoryGuess: cat.id,
+                ...(cat.pinned ? { categoryPinned: true } : {}),
+                currency,
+                reference,
+                raw: source,
+            };
+        }
+    }
+    const portalPay = raw.match(PORTAL_RECEIPT_RE) ?? (() => {
+        const received = raw.match(PORTAL_RECEIVED_RE);
+        if (!received)
+            return null;
+        const blockEnd = (received.index ?? 0) + received[0].length;
+        const tail = raw.slice(blockEnd).search(PORTAL_RECEIPT_TAIL_RE);
+        const block = (tail < 0 ? raw : raw.slice(0, blockEnd + tail))
+            .split('\n').filter((line) => !/^\s*(?:mode\s+of\s+payment|card\s+(?:no\.?|number))\b/i.test(line)).join('\n');
+        if (PORTAL_RECEIVED_REFUSE_RE.test(block))
+            return null;
+        const channel = raw.match(PORTAL_CHANNEL_RE)?.[1] ?? '';
+        const senderId = (options?.sender ?? '').replace(/[\s._-]/g, '');
+        const billerNamed = (channel !== '' && RECEIPT_BILLERS.some(([re]) => re.test(channel))) ||
+            RECEIPT_BILLER_SENDER_RE.test(senderId);
+        return billerNamed ? received : null;
+    })();
+    if (portalPay) {
+        const last4 = portalPay[1].slice(-4);
+        const amountFils = Math.round(Number(portalPay[2].replace(/,/g, '')) * 100);
+        const channel = raw.match(PORTAL_CHANNEL_RE)?.[1] ?? '';
+        const biller = channel ? (RECEIPT_BILLERS.find(([re]) => re.test(channel))?.[1] ?? null) : null;
+        const merchant = biller ?? `Payment to •${last4}`;
+        if (amountFils > 0) {
+            const blockEnd = (portalPay.index ?? 0) + portalPay[0].length;
+            const tail = raw.slice(blockEnd).search(PORTAL_RECEIPT_TAIL_RE);
+            const receiptText = tail < 0 ? raw : raw.slice(0, blockEnd + tail);
+            const cat = categoryOf(receiptText, 'expense', overrides, merchant);
+            const category = cat.deliberate ? cat.id : 'telecom';
+            return {
+                kind: 'transaction',
+                type: 'expense',
+                amountFils,
+                merchant,
+                date,
+                dueDay: null,
+                minDueFils: null,
+                card: card && card.last4 === last4 ? null : card,
+                transferHint: false,
+                paymentFlowSide: 'receipt',
+                snapshotFils: null,
+                snapshotKind: null,
+                categoryGuess: category,
+                categoryDeliberate: true,
+                ...(cat.pinned ? { categoryPinned: true } : {}),
+                currency,
+                reference,
+                raw: source,
+            };
+        }
+    }
+    const hsbcAccountTransfer = raw.match(/^from\s+hsbc:\s*\d{1,2}[a-z]{3}\d{2,4}\s+(?:(?:internet\s+banking\s+)?(?:debit|credit)\s+telegraphic\s+)?transfer\s+(from|to)\s+[\d*x.-]{6,32}\s+(?:aed|dhs?\.?)\s*([\d,]+(?:\.\d{1,2})?)\s*([+-])/i);
+    if (hsbcAccountTransfer) {
+        const [, side, amountText, sign] = hsbcAccountTransfer;
+        const agrees = (side.toLowerCase() === 'from' && sign === '-') ||
+            (side.toLowerCase() === 'to' && sign === '+');
+        const amountFils = Math.round(Number(amountText.replace(/,/g, '')) * 100);
+        if (!agrees || !Number.isSafeInteger(amountFils) || amountFils <= 0)
+            return null;
+        return {
+            kind: 'transaction',
+            type: sign === '+' ? 'income' : 'expense',
+            amountFils,
+            merchant: 'Bank transfer',
+            date,
+            dueDay: null,
+            minDueFils: null,
+            card,
+            transferHint: true,
+            snapshotFils,
+            snapshotKind,
+            categoryGuess: 'other',
+            categoryDeliberate: true,
+            currency,
+            reference,
+            raw: source,
+        };
+    }
+    if (/issuance of telegraphic transfer|debit telegraphic transfer|^outward remittance/i.test(raw)) {
+        const amountFils = amountWithFx(raw);
+        if (!amountFils)
+            return null;
+        return {
+            kind: 'transaction',
+            type: 'expense',
+            amountFils,
+            merchant: /^outward remittance/i.test(raw) ? 'Outward remittance' : 'Telegraphic transfer',
+            date,
+            dueDay: null,
+            minDueFils: null,
+            card,
+            transferHint: true,
+            snapshotFils,
+            snapshotKind,
+            categoryGuess: 'other',
+            currency,
+            reference,
+            raw: source,
+        };
+    }
+    if (/\btt\s+payment\b/i.test(raw)) {
+        const amount = extractTtPaymentAmount(raw);
+        if (!amount)
+            return null;
+        return {
+            kind: 'transaction',
+            ...amount,
+            merchant: 'Bank transfer',
+            date,
+            dueDay: null,
+            minDueFils: null,
+            card,
+            transferHint: true,
+            snapshotFils,
+            snapshotKind,
+            categoryGuess: 'other',
+            currency,
+            reference,
+            raw: source,
+        };
+    }
+    const arabicEandBill = raw.match(/اجمالي\s+المبلغ\s+المستحق\s+دفعه\s+قبل\s+تاريخ\s+\d{1,2}\s+[\u0600-\u06ff]+\s+\d{4}\s+هو\s*:\s*([\d,]+(?:\.\d{1,2})?)\s*\.?\s*درهم(?:ا)?/);
+    if (arabicEandBill &&
+        /فاتورتك\s+لشهر/.test(raw) &&
+        /(?:e&\s*uae|eand\.ae|اي\s+اند|اتصالات|\betisalat\b)/i.test(raw)) {
+        const dueDate = extractDueDate(raw);
+        const amountFils = Math.round(Number(arabicEandBill[1].replace(/,/g, '')) * 100);
+        if (!dueDate || !Number.isSafeInteger(amountFils) || amountFils <= 0)
+            return null;
+        return {
+            kind: 'billDue',
+            type: 'expense',
+            amountFils,
+            merchant: 'E&',
+            date: dueDate,
+            dueDay: Number(dueDate.slice(8)),
+            minDueFils: null,
+            card: null,
+            transferHint: false,
+            snapshotFils,
+            snapshotKind,
+            categoryGuess: 'telecom',
+            categoryDeliberate: true,
+            currency,
+            reference,
+            raw: source,
+        };
+    }
+    const arabicEtisalatDueAmount = raw.match(/(?:مبلغ\s+وقدره|مبلغ|اجمالي\s+المبلغ(?:\s+المستحق)?)\s*([\d,]+(?:\.\d{1,2})?)\s*درهم(?:ا|اً)?/);
+    if (arabicEtisalatDueAmount &&
+        /(?:اتصالات|e&\s*uae|eand\.ae|اي\s+اند|\betisalat\b)/i.test(raw) &&
+        /فاتورتك|الفاتوره|فاتوره/.test(raw) &&
+        /موعد\s+(?:ال)?استحقاق|تاريخ\s+(?:ال)?استحقاق|مستحق\s+الدفع|مستحقه\s+الدفع|يرجي\s+سداد|يرجى\s+سداد|يرجي\s+دفع|يرجى\s+دفع/.test(raw)) {
+        const amountFils = Math.round(Number(arabicEtisalatDueAmount[1].replace(/,/g, '')) * 100);
+        if (Number.isSafeInteger(amountFils) && amountFils > 0) {
+            const dueDate = extractDueDate(raw) ?? extractDate(raw);
+            return {
+                kind: 'billDue',
+                type: 'expense',
+                amountFils,
+                merchant: 'E&',
+                date: dueDate,
+                dueDay: dueDate ? Number(dueDate.slice(8)) : null,
+                minDueFils: null,
+                card: null,
+                transferHint: false,
+                snapshotFils,
+                snapshotKind,
+                categoryGuess: 'telecom',
+                categoryDeliberate: true,
+                currency,
+                reference,
+                raw: source,
+            };
+        }
+    }
+    const duDatedBillDue = raw.match(/\bbill\s+of\s+(?:AED|Dhs?)\s*([\d,]+(?:\.\d{1,2})?)[\s\S]{0,180}?\bdu\s+account\b[\s\S]{0,120}?\bdue\s+on\s+(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})(?!\d)/i);
+    if (duDatedBillDue && !SETTLED_MOVEMENT_RE.test(raw)) {
+        const amountFils = Math.round(Number(duDatedBillDue[1].replace(/,/g, '')) * 100);
+        const dueDate = numericDate(duDatedBillDue[2], duDatedBillDue[3], duDatedBillDue[4]);
+        if (Number.isSafeInteger(amountFils) && amountFils > 0 && dueDate) {
+            return {
+                kind: 'billDue',
+                type: 'expense',
+                amountFils,
+                merchant: 'Du',
+                date: dueDate,
+                dueDay: Number(dueDate.slice(8)),
+                minDueFils: null,
+                card: null,
+                transferHint: false,
+                snapshotFils,
+                snapshotKind,
+                categoryGuess: 'telecom',
+                categoryDeliberate: true,
+                currency,
+                reference,
+                raw: source,
+            };
+        }
+    }
+    if (/\boverdue\s+bill\b/i.test(raw) &&
+        /\bdu\s+account\b/i.test(raw) &&
+        /\boverdue\b[^.\n]{0,48}?(?:AED|Dhs?)\s*[\d,]+(?:\.\d{1,2})?/i.test(raw) &&
+        !SETTLED_MOVEMENT_RE.test(raw))
+        return null;
+    if ((card || /\b(?:credit|covered)\s*card\b|\bcard\s+statement\b/i.test(raw)) &&
+        STATEMENT_RE.test(raw) &&
+        !STATEMENT_TXN_BLOCK_RE.test(raw) &&
+        (MIN_DUE_RE.test(raw) || AR_MIN_DUE_RE.test(raw)) &&
+        statementTotalFils(raw) === null)
+        return null;
+    if (!card &&
+        /\b(?:credit|covered)\s*card\b|\bcard\s+statement\b/i.test(raw) &&
+        STATEMENT_RE.test(raw) &&
+        BILL_DUE_WORDS.test(raw) &&
+        !STATEMENT_TXN_BLOCK_RE.test(raw)) {
+        const amountFils = statementTotalFils(raw);
+        if (!amountFils)
+            return null;
+        const minDueFils = statementMinimumFils(raw, amountFils);
+        const dueDate = extractDueDate(raw);
+        return {
+            kind: 'cardStatement',
+            type: 'expense',
+            amountFils,
+            merchant: 'Card statement',
+            date: dueDate,
+            dueDay: dueDate ? Number(dueDate.slice(8)) : extractDueDay(raw),
+            ...(() => { const issued = extractStatementIssueDate(raw, dueDate); return issued ? { statementDate: issued } : {}; })(),
+            minDueFils,
+            card: null,
+            transferHint: false,
+            snapshotFils,
+            snapshotKind,
+            categoryGuess: 'other',
+            categoryDeliberate: true,
+            currency,
+            reference,
+            raw: source,
+        };
+    }
+    if (card && STATEMENT_RE.test(raw) && BILL_DUE_WORDS.test(raw) && !STATEMENT_TXN_BLOCK_RE.test(raw)) {
+        const amountFils = statementTotalFils(raw);
+        if (!amountFils)
+            return null;
+        const minDueFils = statementMinimumFils(raw, amountFils);
+        const statementDue = extractDueDate(raw);
+        return {
+            kind: 'cardStatement',
+            type: 'expense',
+            amountFils,
+            merchant: `Card •${card.last4}`,
+            date: statementDue,
+            dueDay: statementDue ? Number(statementDue.slice(8)) : extractDueDay(raw),
+            ...(() => { const issued = extractStatementIssueDate(raw, statementDue); return issued ? { statementDate: issued } : {}; })(),
+            minDueFils,
+            card: { ...card, kind: 'credit' },
+            transferHint: false,
+            snapshotFils,
+            snapshotKind,
+            categoryGuess: 'other',
+            currency,
+            reference,
+            raw: source,
+        };
+    }
+    if (STATEMENT_ANNOUNCEMENT_RE.test(raw) &&
+        statementTotalFils(raw) !== null &&
+        !STATEMENT_TXN_BLOCK_RE.test(raw) &&
+        !SETTLED_MOVEMENT_RE.test(raw)) {
+        return null;
+    }
+    const prose = blank(raw.replace(/https?:\/\/\S+/gi, ' '), AR_USAGE_NOTE_RE);
+    const stated = blank(blank(blank(maskMerchantNames(prose), HYPOTHETICAL_PAYMENT_RE), PAYMENT_INSTRUCTION_RE), AR_DESTINATION_FIELD_VALUE_RE);
+    const creditTransactionOnly = CREDIT_TRANSACTION_RE.test(stated) && !CREDIT_TRANSACTION_PURCHASE_RE.test(prose) &&
+        !DEBIT_WORDS.test(blank(stated, CREDIT_TRANSACTION_ALL_RE));
+    const arabicOwnAccountOutgoing = AR_OWN_ACCOUNT_OUTGOING_RE.test(raw);
+    const saudiHeadings = (0, markets_1.getActiveMarket)().id === 'SA';
+    const statedCredit = CREDIT_WORDS.test(stated);
+    const hasDebit = !creditTransactionOnly && (DEBIT_WORDS.test(stated) || SENT_MONEY_RE.test(prose) ||
+        arabicOwnAccountOutgoing || AR_UNLABELLED_LOCAL_TRANSFER_OUT_RE.test(raw) ||
+        (saudiHeadings && (SA_TRANSFER_OUT_HEADING_RE.test(raw) ||
+            (SA_POS_BY_HEADING_RE.test(raw) && !statedCredit))));
+    const hasCredit = statedCredit || (saudiHeadings && SA_TRANSFER_IN_HEADING_RE.test(raw));
+    const carrierBilling = /app\s*store|google play|play store|itunes/i.test(raw);
+    const isBillDue = BILL_DUE_WORDS.test(raw) && !hasDebit && !hasCredit && !carrierBilling;
+    const isIncomingCreditReversal = INCOMING_CREDIT_REVERSAL_RE.test(prose);
+    const isRefund = !isIncomingCreditReversal &&
+        (REFUND_RE.test(prose) || REVERSAL_RE.test(prose) || arabicPurchaseRefundHeader ||
+            REFUND_HEADING_RE.test(prose));
+    if (PROMO_RE.test(raw) && !TXN_EVIDENCE_RE.test(raw))
+        return null;
+    if (!hasDebit && !hasCredit && !isRefund && !isBillDue && !hasPostedEvidence(raw, card)) {
+        return null;
+    }
+    const money = transactionMoney(raw);
+    if (!money)
+        return null;
+    const billerPaid = billerSettlement(prose);
+    const creditClause = CREDIT_CLAUSE_RE.test(prose) && !billerPaid;
+    const debitClause = DEBIT_CLAUSE_RE.test(prose);
+    const type = isBillDue || billerPaid || isIncomingCreditReversal ||
+        arabicOwnAccountOutgoing
+        ? 'expense'
+        : isRefund || (creditClause && !debitClause)
+            ? 'income'
+            : debitClause || hasDebit || !hasCredit
+                ? 'expense'
+                : 'income';
+    if (type === 'expense' && !debitClause && !billerPaid && !isBillDue && !isIncomingCreditReversal &&
+        CREDITED_PASSIVE_RE.test(stated) && !DEBITED_PASSIVE_RE.test(stated)) {
+        return null;
+    }
+    if (type === 'income' && !creditClause && TRANSFER_REQUEST_ACK_RE.test(stated))
+        return null;
+    if (PREPAID_CARD_LOAD_RE.test(stated))
+        return null;
+    let merchant = '';
+    let descriptor = '';
+    const contactFreeText = blank(blank(raw, CONTACT_FOOTER_RE), AR_USAGE_NOTE_RE);
+    const payeeText = PROMO_SENTENCE_TRIGGER_RE.test(contactFreeText)
+        ? blank(contactFreeText, PROMO_SENTENCE_RE)
+        : contactFreeText;
+    if (isBillDue) {
+        const billMatch = raw.match(BILL_MERCHANT_RE);
+        merchant = billMatch ? billMatch[1].trim() : extractMerchant(payeeText, MERCHANT_RE);
+        if (!merchant) {
+            const arBill = raw.match(AR_BILL_MERCHANT_RE);
+            merchant = arBill ? sliceUnfolded(clean, arBill) : extractArabicMerchant(payeeText, clean);
+        }
+        const namedBiller = normalizeServiceName(raw);
+        if (namedBiller)
+            merchant = namedBiller;
+    }
+    else {
+        merchant = extractMerchant(payeeText, MERCHANT_RE);
+        if (!merchant)
+            merchant = extractArabicMerchant(payeeText, clean);
+        if (!merchant) {
+            const gateway = raw.match(GATEWAY_URL_MERCHANT_RE);
+            if (gateway)
+                merchant = gateway[1].trim();
+        }
+        if (!merchant) {
+            const channelBill = raw.match(CHANNEL_BILL_MERCHANT_RE);
+            if (channelBill)
+                merchant = cleanDescriptor(channelBill[1].trim());
+        }
+        if (!merchant) {
+            const paymentFor = raw.match(PAYMENT_FOR_RE);
+            if (paymentFor)
+                merchant = paymentFor[1].trim();
+        }
+        if (!merchant && billerPaid)
+            merchant = billerPaid;
+        if (!merchant && type === 'expense') {
+            const billName = raw.match(BILL_MERCHANT_RE);
+            if (billName)
+                merchant = billName[1].trim();
+        }
+    }
+    const explicitOwnAccountMove = /\b(?:transferred|moved|sent)\b[^.\n]{0,96}\bfrom\s+(?:your|my)\s+(?:account|a\/?c)\b[^.\n]{0,96}\b(?:to|into)\s+(?:(?:your|my)(?:\s+(?:own|other))?|another\s+of\s+(?:your|my)|another|own)\s+(?:accounts?|a\/?c)\b/i.test(raw);
+    const ownedDestinationMove = OWN_DESTINATION_RE.test(prose) && OUTGOING_MOVE_RE.test(prose);
+    let transferHint = !isBillDue &&
+        (explicitOwnAccountMove || TRANSFER_HINT_RE.test(raw) ||
+            ownedDestinationMove || arabicOwnAccountOutgoing);
+    descriptor = merchant;
+    merchant = cleanDescriptor(merchant);
+    if (/^(?:january|february|march|april|may|june|july|august|september|october|november|december)$/i.test(merchant)) {
+        merchant = normalizeServiceName(raw) ?? '';
+    }
+    if (!merchant) {
+        const hsbc = raw.match(/from hsbc:\s*\d{1,2}[a-z]{3}\d{2,4}\s+(.{3,40}?)\s+purchase from/i);
+        if (hsbc)
+            merchant = hsbc[1].trim();
+    }
+    if (!merchant && !isBillDue && type === 'expense' && !transferHint) {
+        const lineMerchant = merchantFromLines(raw);
+        if (lineMerchant)
+            merchant = lineMerchant;
+    }
+    if (!merchant && !isBillDue && type === 'expense' && !transferHint) {
+        const svc = normalizeServiceName(raw);
+        if (svc)
+            merchant = svc;
+    }
+    let structuralMerchant = false;
+    const channelTransfer = !isBillDue && type === 'expense' &&
+        /\b(?:debited|deducted)\b/i.test(prose) &&
+        /\b(?:for|towards)\s+(?:an?\s+)?(?:funds?\s+)?transfer\s+(?:through|via|using)\s+(?:(?:personal|business|corporate)\s+)?(?:internet|online|mobile|digital)\s+banking\b/i.test(prose) &&
+        !FEE_RE.test(prose);
+    if (channelTransfer) {
+        merchant = 'Outgoing transfer';
+        structuralMerchant = true;
+        transferHint = true;
+    }
+    if (isIncomingCreditReversal) {
+        merchant = 'Credit reversal';
+        structuralMerchant = true;
+    }
+    else if (explicitOwnAccountMove || ownedDestinationMove || arabicOwnAccountOutgoing) {
+        merchant = 'Own account transfer';
+        structuralMerchant = true;
+    }
+    const bankOwnedDestination = bank?.ownPot
+        ? new RegExp(`\\b(?:to|into)\\s+(?:your\\s+)?(?:${bank.ownPot.source})`, 'i')
+        : null;
+    const bankOwnedMovement = bankOwnedDestination?.test(raw) === true &&
+        ((type === 'expense' && /\b(?:debited|deducted|sent|moved)\b/i.test(raw)) ||
+            /(?:\brule\s+transfer\b|\btransfer(?:red)?\b|\bmoved\b|\bsweep\b)/i.test(raw) ||
+            /\bto\b[^.\n]{0,60}\bfrom\b/i.test(raw));
+    if (!isBillDue &&
+        (/transfer to savings|savings? (?:rule|goal|pot|plan)\b|round-?up saving|\brule\s+transfer\b|one-?shot\s+sav|\bemergency\s+funds?\b|\bsaving\s+spaces?\b|\bliv\s+goals?\b/i.test(raw) ||
+            bankOwnedMovement)) {
+        merchant = 'Savings transfer';
+        structuralMerchant = true;
+        transferHint = true;
+    }
+    if (!isBillDue && type === 'expense') {
+        const completedNamed = raw.match(/\byou(?:'ve|\s+have)\s+successfully\s+transferred\s+[A-Z]{3}\s+[\d,]+(?:\.\d{1,3})?\s+to\s+([A-Za-z][A-Za-z .'-]{0,40}?)\s*(?:[.;]|$)/i);
+        const named = raw.match(/\b(?:fastpay|instant|local|domestic|international|fund|mobile\s+banking)\s+transfer\s+to\s+([A-Za-z][A-Za-z .'\-]{2,40}?)\s*(?:[.,;]|\bif\b|$)/i);
+        const namedPayee = completedNamed?.[1] ?? named?.[1];
+        if (namedPayee) {
+            merchant = `Transfer to ${namedPayee.trim().replace(/\s{2,}/g, ' ')}`;
+            structuralMerchant = true;
+        }
+        else if (/\btransfer\s+to\s+[A-Z]{2}[\dX·•]/i.test(raw)) {
+            merchant = 'Bank transfer';
+            structuralMerchant = true;
+        }
+        else if (!merchant &&
+            /\bfunds?\s+transfer\b|\bfunds?\s+transferred\b/i.test(raw)) {
+            merchant = 'Outgoing transfer';
+            structuralMerchant = true;
+        }
+    }
+    if (!merchant && !isBillDue && type === 'expense' && !transferHint) {
+        const payeeRe = /\b(?:for|sent\s+to)\s+([A-Za-z][A-Za-z &.'\-]{2,40}?)\s*(?:[.,;]|\bon\b|\bas\s+per\b|\bthrough\b|$)/gi;
+        for (const m of raw.matchAll(payeeRe)) {
+            const candidate = m[1].trim();
+            if (/^vat\b|^value\s+added\s+tax\b/i.test(candidate))
+                continue;
+            if (/^(?:aed|dhs|sar|usd|eur|gbp|your|the|payment|consumer|exact|pay\b|using|below)/i.test(candidate))
+                continue;
+            if ((candidate.match(/[A-Za-z]/g) ?? []).length < 3)
+                continue;
+            merchant = candidate.replace(/\s+(?:PJSC|LLC|PSC|FZE)$/i, '').trim();
+            break;
+        }
+    }
+    if (!merchant) {
+        const service = !isBillDue && type === 'expense' && !transferHint ? normalizeServiceName(raw) : null;
+        const businessTitle = !isBillDue && type === 'income' ? businessIncomeTitle(raw) : null;
+        merchant = service ?? businessTitle ?? (isBillDue
+            ? 'Bill payment'
+            : type === 'income'
+                ? /\bcash\s*back\b|\bcashback\b/i.test(raw) &&
+                    /\b(?:credited|posted|received|applied)\b/i.test(raw)
+                    ? 'Cashback'
+                    : /\brefund(?:ed)?\b/i.test(raw) || REVERSAL_RE.test(raw) || REFUND_HEADING_RE.test(raw)
+                        ? 'Refund'
+                        : SALARY_RE.test(raw)
+                            ? 'Salary'
+                            : DEPOSIT_RE.test(raw)
+                                ? 'Cash deposit'
+                                : /inward\s+remittance/i.test(raw)
+                                    ? 'Inward remittance'
+                                    : /\b(?:profit|interest)\b/i.test(raw)
+                                        ? 'Bank profit'
+                                        : 'Incoming transfer'
+                : transferHint
+                    ? 'Card payment'
+                    : ATM_RE.test(raw)
+                        ? 'ATM withdrawal'
+                        : MOBILE_RECHARGE_RE.test(raw)
+                            ? 'Mobile recharge'
+                            : /cheque|\bchq\b/i.test(raw)
+                                ? 'Cheque'
+                                : /value\s+added\s+tax|\bvat\b\s*(?:@|¡)?\s*\d|\bvat\s+on\b|\bfor\s+vat\b/i.test(raw)
+                                    ? 'VAT fee'
+                                    : FEE_RE.test(raw)
+                                        ? feeTitle(raw)
+                                        : /instant\s+transfer|local\s+transfer|social\s+transfer/i.test(raw)
+                                            ? 'Outgoing transfer'
+                                            : !card || card.kind === 'account'
+                                                ? 'Account debit'
+                                                : 'Card purchase');
+    }
+    else if (!structuralMerchant) {
+        const deUrled = merchant.replace(/^https?\s*[:/]*\s*(?:www[\s.]?)?/i, '').trim() ||
+            normalizeServiceName(raw) ||
+            merchant;
+        const unprefixed = deUrled.replace(/^(?:alp|eig|sq|tap|web|v|paypal|google|gpay|apl|amzn|pos|ziina|mamo|wl)\s*\*\s*/i, '');
+        const cleanedMerchant = cleanDescriptor((unprefixed || deUrled || merchant).replace(/[\s,;.*-]+$/, ''));
+        merchant =
+            normalizeServiceName(descriptor || merchant) ??
+                normalizeServiceName(merchant) ??
+                (cleanedMerchant
+                    ? titleCase(cleanedMerchant)
+                    : type === 'income'
+                        ? 'Incoming transfer'
+                        : transferHint
+                            ? 'Card payment'
+                            : !card || card.kind === 'account'
+                                ? 'Account debit'
+                                : 'Card purchase');
+    }
+    let titlePinned = false;
+    if (arabicOwnAccountOutgoing)
+        titlePinned = true;
+    if (!isBillDue && type === 'expense' && !transferHint && ATM_RE.test(raw)) {
+        merchant = 'ATM withdrawal';
+        titlePinned = true;
+    }
+    if (!isBillDue && type === 'income') {
+        const incomeText = raw.toLowerCase();
+        if (/\bprofit\s+of\b(?:[^.\n]|\.\d){0,96}?\bcredited\s+to\s+your\s+(?:account|a\/?c)\b/i.test(raw)) {
+            merchant = 'Bank profit';
+            titlePinned = true;
+        }
+        else if (incomeText.includes('interest payout') ||
+            (incomeText.includes('bonus multiplier') && incomeText.includes('interest'))) {
+            merchant = 'Interest';
+            titlePinned = true;
+        }
+        else if (incomeText.includes(' rev-') || incomeText.includes(' rev;') || incomeText.includes(' rev:')) {
+            merchant = 'Refund';
+            titlePinned = true;
+        }
+    }
+    if (type === 'expense' && (merchant === 'Outgoing transfer' || merchant === 'Bank transfer')) {
+        transferHint = true;
+    }
+    const cat = categoryOf(titlePinned ? merchant : payeeText, type, overrides, merchant);
+    const billDueDate = isBillDue ? extractDueDate(raw) ?? statedDate : null;
+    const fundingBalance = transferHint && snapshot?.kind === 'balance' && card?.kind === 'credit' &&
+        /\b(?:debited|deducted|transferred|paid)\b(?:[^.\n]|\.\d){0,40}?\bfrom\s+(?:your\s+)?(?:(?:savings?|current)\s+)?(?:a\/?c|acc(?:oun)?t?)\b/i.test(raw);
+    const billerAccount = billerPaid && !isBillDue ? billerOwnAccountTail(raw, billerPaid) : null;
+    const billerOwnsCard = billerAccount !== null && card?.kind === 'account' && card.last4 === billerAccount;
+    return {
+        kind: isBillDue ? 'billDue' : 'transaction',
+        type,
+        ...money,
+        merchant,
+        date: isBillDue ? billDueDate : date,
+        dueDay: billDueDate ? Number(billDueDate.slice(8)) : null,
+        minDueFils: null,
+        card: billerOwnsCard ? null : card,
+        ...(billerAccount ? { billerAccountTail: billerAccount } : {}),
+        transferHint,
+        snapshotFils: fundingBalance ? null : snapshotFils,
+        snapshotKind: fundingBalance ? null : snapshotKind,
+        categoryGuess: cat.id,
+        ...(cat.pinned ? { categoryPinned: true } : {}),
+        categoryDeliberate: cat.deliberate || structuralMerchant || transferHint || exports.STRUCTURAL_TITLES.has(merchant),
+        currency,
+        reference,
+        raw: source,
+    };
+}
+function namesNoMerchant(row) {
+    return (exports.STRUCTURAL_TITLES.has(row.merchant) ||
+        row.merchant === 'Card purchase' ||
+        row.merchant === 'Bill payment' ||
+        /^Card •/.test(row.merchant));
+}
+const AR_LETTER_WORDS = {
+    'اي': 'a', 'ايه': 'a', 'بي': 'b', 'سي': 'c', 'دي': 'd', 'اف': 'f', 'جي': 'g',
+    'اتش': 'h', 'جيه': 'j', 'كي': 'k', 'ال': 'l', 'ام': 'm', 'ان': 'n', 'او': 'o',
+    'كيو': 'q', 'ار': 'r', 'اس': 's', 'تي': 't', 'يو': 'u', 'في': 'v',
+    'دبليو': 'w', 'اكس': 'x', 'واي': 'y', 'زد': 'z',
+};
+const AR_TO_LATIN = {
+    'ا': 'a', 'ب': 'b', 'ت': 't', 'ث': 'th', 'ج': 'j', 'ح': 'h', 'خ': 'kh',
+    'د': 'd', 'ذ': 'd', 'ر': 'r', 'ز': 'z', 'س': 's', 'ش': 'sh', 'ص': 's',
+    'ض': 'd', 'ط': 't', 'ظ': 'z', 'ع': '', 'غ': 'gh', 'ف': 'f', 'ق': 'q',
+    'ك': 'k', 'ل': 'l', 'م': 'm', 'ن': 'n', 'ه': 'h', 'و': 'w', 'ي': 'y',
+    'ء': '', 'پ': 'p', 'چ': 'ch', 'ژ': 'z', 'گ': 'g', 'ڤ': 'v',
+};
+function romanizeArabic(s) {
+    return s
+        .split(/\s+/)
+        .map((w) => AR_LETTER_WORDS[w] ??
+        [...w].map((c) => AR_TO_LATIN[c] ?? (/[a-z0-9]/i.test(c) ? c : ' ')).join(''))
+        .join(' ');
+}
+function merchantKey(name) {
+    let s = normalizeArabic(name).toLowerCase();
+    if (ARABIC_RE.test(s))
+        s = romanizeArabic(s);
+    return s
+        .replace(/[^a-z0-9]+/g, '')
+        .replace(/c(?=[eiy])/g, 's')
+        .replace(/ph/g, 'f')
+        .replace(/sh|ch/g, 's')
+        .replace(/th/g, 't')
+        .replace(/gh/g, 'g')
+        .replace(/kh|ck|qu|q|c/g, 'k')
+        .replace(/x/g, 'ks')
+        .replace(/v/g, 'f')
+        .replace(/g/g, 'j')
+        .replace(/p/g, 'b')
+        .replace(/z/g, 's')
+        .replace(/(.)\1+/g, '$1')
+        .replace(/[aeiouwy]/g, '');
+}
+function merchantsAgree(a, b) {
+    if (a.merchant.trim().toLowerCase() === b.merchant.trim().toLowerCase())
+        return true;
+    if (namesNoMerchant(a) || namesNoMerchant(b))
+        return true;
+    const ka = merchantKey(a.merchant);
+    const kb = merchantKey(b.merchant);
+    if (!ka || !kb)
+        return true;
+    return ka === kb;
+}
+function withExtendedRates(rates, run) {
+    const previous = extendedRates;
+    extendedRates = rates;
+    try {
+        return run();
+    }
+    finally {
+        extendedRates = previous;
+    }
+}
+const localIsoDay = (epochMs) => {
+    if (epochMs === undefined || !Number.isFinite(epochMs))
+        return null;
+    const day = new Date(epochMs);
+    return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+};
+function probeExtendedForeign(message, overrides, options) {
+    ensureCurrencyPatterns();
+    if (!EXT_FX_PREFIX_RE.test(message) && !EXT_FX_SUFFIX_RE.test(message))
+        return null;
+    const probe = withExtendedRates(() => ({ rate: 1, source: 'probe' }), () => parseSmsInner(message, overrides, options));
+    if (!probe || probe.kind !== 'transaction' || probe.fxSource === 'bank' ||
+        typeof probe.originalCurrency !== 'string' || probe.originalCurrency in UNITS_PER_USD ||
+        probe.originalMinorUnits === undefined || probe.originalExponent === undefined)
+        return null;
+    return probe;
+}
+function parseForeignAwaitingRate(message, overrides, options) {
+    ensureCurrencyPatterns();
+    if (!EXT_FX_PREFIX_RE.test(message) && !EXT_FX_SUFFIX_RE.test(message))
+        return null;
+    if (parseSms(message, overrides, options))
+        return null;
+    const probe = probeExtendedForeign(message, overrides, options);
+    if (!probe)
+        return null;
+    const { originalAmountMinor: _legacy, originalCurrency, originalMinorUnits, originalExponent: _exponent, fxRate: _rate, fxRateDate: _rateDate, fxSource: _source, ...rest } = probe;
+    return {
+        ...rest,
+        currency: originalCurrency,
+        amountFils: originalMinorUnits,
+        snapshotFils: null,
+        snapshotKind: null,
+    };
+}
+const FOREIGN_DOMESTIC_RAIL_RE = /\b(?:NEFT|IMPS|RTGS|UPI)\b/;
+function parseSms(message, overrides, options) {
+    if ((0, bnpl_providers_1.isBnplProviderSource)(options?.sender))
+        return null;
+    let parsed = parseSmsInner(message, overrides, options);
+    if (!parsed) {
+        ensureCurrencyPatterns();
+        const probe = probeExtendedForeign(message, overrides, options);
+        const day = probe ? probe.date ?? localIsoDay(options?.observedAt) : null;
+        if (probe && day) {
+            const local = (0, markets_1.getActiveMarket)().currency.code;
+            const lookup = options?.fxLookup ?? ((base, quote, date) => (0, fx_rates_1.cachedReferenceQuote)(base, quote, date));
+            const quote = lookup(probe.originalCurrency, local, day);
+            if ((0, fx_rates_1.quoteFitsDay)(quote, day) && quote.base === probe.originalCurrency && quote.quote === local) {
+                const priced = withExtendedRates((code) => code === quote.base
+                    ? { rate: quote.rate, source: 'reference', date: quote.date } : null, () => parseSmsInner(message, overrides, options));
+                if (priced && priced.fxSource === 'reference' && priced.originalCurrency === quote.base)
+                    parsed = priced;
+            }
+        }
+    }
+    if (!parsed)
+        return null;
+    if (parsed.originalCurrency && parsed.originalCurrency !== (0, markets_1.getActiveMarket)().currency.code &&
+        parsed.fxSource !== 'bank' && FOREIGN_DOMESTIC_RAIL_RE.test(message)) {
+        return null;
+    }
+    const billIdentity = parsed.kind === 'billDue' || parsed.paymentFlowSide === 'receipt'
+        ? extractBillIdentity(message)
+        : null;
+    const named = (0, markets_1.bankFromMessage)(message);
+    return {
+        ...parsed,
+        ...(billIdentity ? { billIdentity } : {}),
+        ...(named ? { bankHint: named.name } : {}),
+    };
+}
+function parseSmsBatch(text, overrides, interpret) {
+    const rows = text
+        .split(/\n\s*\n/)
+        .map((m) => interpret ? interpret(m) : parseSms(m, overrides))
+        .filter((p) => p !== null);
+    const out = [];
+    for (const row of rows) {
+        const prev = out[out.length - 1];
+        const restatement = prev &&
+            prev.amountFils === row.amountFils &&
+            (prev.card?.last4 ?? null) === (row.card?.last4 ?? null) &&
+            prev.date === row.date &&
+            prev.kind === row.kind &&
+            prev.type === row.type &&
+            merchantsAgree(prev, row) &&
+            ARABIC_RE.test(prev.raw) !== ARABIC_RE.test(row.raw);
+        if (!restatement) {
+            out.push(row);
+            continue;
+        }
+        if (ARABIC_RE.test(prev.raw) && !ARABIC_RE.test(row.raw))
+            out[out.length - 1] = row;
+    }
+    return out;
+}
+},
+"universal-categorization":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.categorizeMerchant = categorizeMerchant;
+exports.suggestUniversalCategory = suggestUniversalCategory;
+const brand_categories_1 = require("@/lib/brand-categories");
+const categories_1 = require("@/lib/categories");
+const sms_parser_1 = require("@/lib/sms-parser");
+const key = (value) => (0, sms_parser_1.normalizeArabic)(value).normalize('NFKC').replace(/\s+/gu, ' ').trim().toLowerCase();
+const PROCESSOR_PREFIX = /^(?:paypal|stripe|sq|square|tap|2c2p|opn|ziina|mamo)\s*[*]\s*/iu;
+const PROCESSOR_ONLY = /^(?:paypal|stripe|sq|square|tap|2c2p|opn|ziina|mamo)$/iu;
+const OPAQUE_PLATFORM = /^(?:fiverr(?:\.com)?(?:\s+pro)?|klarna(?:\.com)?)$/iu;
+const MONEY_SERVICE = /^(?:(?:al\s*ansari|al\s*fardan|lulu|uae|sharaf|index|orient|wall\s*street|al\s*rostamani|gcc|joyalukkas)\s+exchange|western\s+union|moneygram|stc\s*pay|urpay)\b/iu;
+const words = (...terms) => new RegExp(`(?<![\\p{L}\\p{N}])(?:${terms.map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})(?![\\p{L}\\p{N}])`, 'iu');
+const ACTIVITY = [
+    [/\b(?:supermarket|hypermarket|grocer(?:y|ies))\b|سوبر\s*ماركت|بقال[ةه]/iu, 'groceries'],
+    [/\b(?:restaurant|caf[eé]|cafeteria|coffee|bakery|bistro|pizzeria)\b|مطعم|مقه[ىي]|كافتيريا/iu, 'dining'],
+    [/\b(?:pharmacy|hospital|clinic|dental|medical\s+cent(?:er|re))\b|صيدلي[ةه]|مستشف[ىي]|عياد[ةه]/iu, 'health'],
+    [/\b(?:salon|barber|spa)\b|صالون|حلاق/iu, 'personal-care'],
+    [/\b(?:furniture|garments?|hardware|jewellery|jewelry)\b|اثاث|أثاث|ملابس/iu, 'shopping'],
+    [/\b(?:garage|motors|car\s+wash|auto\s+repair|spare\s+parts)\b/iu, 'transport'],
+    [/\b(?:plumbing|locksmith|landscaping|interior\s+design)\b|(?<!dry )\bcleaning\b/iu, 'home-services'],
+    [/\b(?:airlines?|airways|hotels?|resorts?)\b/iu, 'travel'],
+    [/\b(?:tuition|university|college|school)\b|مدرس[ةه]|جامع[ةه]/iu, 'education'],
+    [words('supermarché', 'épicerie', 'supermarkt', 'lebensmittel', 'supermercado', 'supermercato', 'alimentari', 'सुपरमार्केट', 'किराना'), 'groceries'],
+    [/超市|スーパーマーケット/u, 'groceries'],
+    [words('boulangerie', 'bäckerei', 'restaurante', 'ristorante', 'panetteria', 'bakkerij', 'padaria', 'रेस्तरां'), 'dining'],
+    [/餐厅|餐廳|レストラン/u, 'dining'],
+    [words('pharmacie', 'apotheke', 'farmacia', 'farmácia', 'apotheek', 'फार्मेसी', 'eczane', 'eczanesi', 'eczanesİ'), 'health'],
+    [/药店|藥店|薬局|医院|醫院/u, 'health'],
+    [words('friseur', 'coiffeur', 'peluquería', 'parrucchiere', 'kapsalon', 'cabeleireiro', 'salão de beleza'), 'personal-care'],
+    [words('waterbedrijf'), 'utilities'],
+    [words('telekom'), 'telecom'],
+    [words('université', 'universität', 'universidad', 'università', 'universiteit', 'universidade'), 'education'],
+    [words('software', 'logiciel', 'सॉफ्टवेयर'), 'software'],
+    [/ソフトウェア|软件|軟體/u, 'software'],
+];
+function vocabularyOutsideBrand(merchant, pattern, category, market) {
+    const brandWords = new Set(pattern.replace(/\(\?:[^)]*\)\??/g, ' ').replace(/[^A-Za-z0-9]+/g, ' ').trim().toLowerCase().split(/\s+/).filter(Boolean));
+    const remainder = merchant.split(/\s+/).filter((word) => !brandWords.has(word.replace(/[^A-Za-z0-9]/g, '').toLowerCase())).join(' ').trim();
+    return !!remainder && (0, sms_parser_1.classifyMerchantDescription)(remainder, 'expense', market).categoryGuess === category;
+}
+const suggestion = (merchant, category, source, reason) => ({
+    merchant, category, source, reason, needsReview: source === 'unresolved',
+});
+function merchantRule(input, names) {
+    for (const name of names) {
+        const matches = (input.rules ?? []).filter((rule) => rule.type === input.type && key(rule.merchant) === key(name) &&
+            (0, categories_1.categorySupportsType)(rule.category, input.type));
+        const unique = [...new Set(matches.map((rule) => rule.category))];
+        if (unique.length > 1)
+            return { conflict: true };
+        if (unique.length)
+            return { category: unique[0] };
+    }
+    for (const scopedOnly of [true, false])
+        for (const name of names) {
+            if (scopedOnly && !Object.prototype.hasOwnProperty.call(input.overrides ?? {}, (0, categories_1.scopedMerchantOverrideKey)(name, input.type)))
+                continue;
+            const category = (0, categories_1.readMerchantCategoryOverride)(input.overrides, name, input.type);
+            if (category)
+                return { category };
+        }
+    return {};
+}
+function categorizeMerchant(input) {
+    if (!input || (input.type !== 'income' && input.type !== 'expense')) {
+        return suggestion('', 'other', 'unresolved', 'direction-unresolved');
+    }
+    const raw = typeof input.merchant === 'string' ? input.merchant.trim() : '';
+    const safe = raw.length <= 256 && !/[\u0000-\u001F\u007F-\u009F]/u.test(raw);
+    let merchant = safe ? (0, sms_parser_1.stripInvisible)(raw).normalize('NFKC').replace(/\s+/gu, ' ').trim() : '';
+    if (input.manualCategory && (0, categories_1.categorySupportsType)(input.manualCategory, input.type)) {
+        return suggestion(merchant, input.manualCategory, 'manual', 'user-transaction-choice');
+    }
+    const meaning = input.meaning ?? 'unknown';
+    const neutral = ['refund', 'own-transfer', 'card-payment', 'fee'].includes(meaning);
+    if (neutral)
+        return suggestion(merchant, 'other', 'movement', meaning);
+    if (meaning === 'cash-withdrawal' && input.type === 'expense') {
+        return suggestion(merchant || 'ATM withdrawal', 'cash-withdrawal', 'movement', meaning);
+    }
+    if (!safe || !merchant)
+        return suggestion('', 'other', 'unresolved', 'merchant-unresolved');
+    if (/\b(?:card|account)\b[\s\S]{0,100}\b(?:ending|credited|debited|charged|used)\b/iu.test(merchant) &&
+        /\b[A-Z]{3}\s*[\d,.]+/iu.test(merchant)) {
+        return suggestion('', 'other', 'unresolved', 'notification-is-not-a-merchant');
+    }
+    for (let depth = 0; depth < 3 && PROCESSOR_PREFIX.test(merchant); depth++) {
+        merchant = merchant.replace(PROCESSOR_PREFIX, '').trim();
+    }
+    if (PROCESSOR_PREFIX.test(merchant))
+        return suggestion(merchant, 'other', 'unresolved', 'processor-prefix-limit');
+    const market = input.market === 'AE' || input.market === 'SA' ? input.market : null;
+    const activities = [...new Set(ACTIVITY.filter(([pattern]) => pattern.test(merchant)).map(([, category]) => category))];
+    const canonical = (0, sms_parser_1.normalizeServiceName)(merchant);
+    const canonicalCategory = canonical ? (0, sms_parser_1.classifyMerchantDescription)(canonical, 'expense', market).categoryGuess : null;
+    const safeCanonical = canonical && (!activities.length || activities.includes(canonicalCategory)) ? canonical : merchant;
+    const rule = merchantRule(input, [raw, merchant, safeCanonical]);
+    if (rule.conflict)
+        return suggestion(merchant, 'other', 'unresolved', 'conflicting-merchant-rules');
+    if (rule.category)
+        return suggestion(safeCanonical, rule.category, 'merchant-rule', 'user-merchant-choice');
+    if (input.type === 'income') {
+        if (meaning === 'salary')
+            return suggestion(merchant, 'salary', 'movement', meaning);
+        if (meaning === 'business-income')
+            return suggestion(merchant, 'business', 'movement', meaning);
+        return suggestion(merchant, 'other', 'unresolved', 'income-purpose-unresolved');
+    }
+    if (meaning === 'salary' || meaning === 'business-income') {
+        return suggestion(merchant, 'other', 'unresolved', 'meaning-direction-conflict');
+    }
+    if (PROCESSOR_ONLY.test(merchant))
+        return suggestion(merchant, 'other', 'unresolved', 'processor-does-not-identify-trade');
+    if (MONEY_SERVICE.test(merchant))
+        return suggestion(merchant, 'other', 'unresolved', 'financial-purpose-unresolved');
+    if (OPAQUE_PLATFORM.test(merchant) || (canonical && OPAQUE_PLATFORM.test(canonical))) {
+        return suggestion(safeCanonical, 'other', 'unresolved', 'platform-purchase-unresolved');
+    }
+    if (/^mark\s*(?:&|and)\s*save$/iu.test(merchant)) {
+        return suggestion('Mark & Save', 'groceries', 'merchant-vocabulary', 'canonical-merchant');
+    }
+    if (/^danube\s+home\b/iu.test(merchant)) {
+        return suggestion(merchant, 'shopping', 'merchant-vocabulary', 'qualified-merchant');
+    }
+    if (activities.length > 1)
+        return suggestion(merchant, 'other', 'unresolved', 'conflicting-merchant-activity');
+    if (activities.length === 1)
+        return suggestion(safeCanonical, activities[0], 'merchant-activity', 'explicit-merchant-activity');
+    if (/\bgeneral\s+trad(?:e|ing)\b/iu.test(merchant)) {
+        return suggestion(merchant, 'shopping', 'merchant-activity', 'explicit-retail-activity');
+    }
+    if (/\binterior\s+decor\b|\bmarketing\b/iu.test(merchant) && !canonical) {
+        return suggestion(merchant, 'other', 'unresolved', 'merchant-activity-unresolved');
+    }
+    const brandMarket = typeof input.market === 'string' ? input.market.trim().toUpperCase() : '';
+    const brand = /^[A-Z]{2}$/.test(brandMarket) && brandMarket !== 'AE' && brandMarket !== 'SA'
+        ? (0, brand_categories_1.matchBrandCategory)(merchant, brandMarket) : null;
+    const result = (0, sms_parser_1.classifyMerchantDescription)(merchant, 'expense', market);
+    if (brand && (result.categoryGuess === 'other' || (brand.category !== result.categoryGuess && !canonical &&
+        !vocabularyOutsideBrand(merchant, brand.pattern, result.categoryGuess, market)))) {
+        return suggestion(result.merchant, brand.category, 'merchant-vocabulary', 'curated-brand-table');
+    }
+    if (result.categoryGuess === 'other') {
+        return suggestion(result.merchant, 'other', 'unresolved', 'merchant-activity-unresolved');
+    }
+    if (result.categoryGuess === 'telecom' && market !== 'AE' && /\bdu\b/iu.test(merchant) &&
+        !/\b(?:telecom|mobile|postpaid|prepaid|internet|telephone)\b/iu.test(merchant)) {
+        return suggestion(merchant, 'other', 'unresolved', 'ambiguous-regional-merchant');
+    }
+    const canonicalKeepsCategory = (0, sms_parser_1.classifyMerchantDescription)(result.merchant, 'expense', market).categoryGuess === result.categoryGuess;
+    return suggestion(canonicalKeepsCategory ? result.merchant : merchant, result.categoryGuess, 'merchant-vocabulary', 'existing-merchant-vocabulary');
+}
+function suggestUniversalCategory(event, options = {}) {
+    const type = options.type ?? (event.direction === 'debit' ? 'expense' : event.direction === 'credit' ? 'income' : null);
+    if (!type)
+        return suggestion(event.merchant.value ?? '', 'other', 'unresolved', 'direction-unresolved');
+    const meaning = event.family === 'refund' ? 'refund'
+        : event.family === 'card-payment' ? 'card-payment'
+            : event.family === 'cash-withdrawal' ? 'cash-withdrawal'
+                : event.family === 'fee' ? 'fee' : 'unknown';
+    return categorizeMerchant({ ...options, type, meaning, merchant: event.merchant.value ?? '' });
+}
+},
+"universal-dates":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.extractUniversalDates = extractUniversalDates;
+const alert_source_ownership_1 = require("@/lib/alert-source-ownership");
+const universal_types_1 = require("@/lib/universal-types");
+const MONTHS = {
+    jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3,
+    apr: 4, april: 4, may: 5, jun: 6, june: 6, jul: 7, july: 7,
+    aug: 8, august: 8, sep: 9, sept: 9, september: 9, oct: 10, october: 10,
+    nov: 11, november: 11, dec: 12, december: 12,
+    يناير: 1, فبراير: 2, مارس: 3, أبريل: 4, ابريل: 4, مايو: 5, يونيو: 6,
+    يوليو: 7, أغسطس: 8, اغسطس: 8, سبتمبر: 9, أكتوبر: 10, اكتوبر: 10,
+    نوفمبر: 11, ديسمبر: 12,
+};
+const MONTH_WORD = Object.keys(MONTHS).sort((a, b) => b.length - a.length).join('|');
+const DAY_NAMED = new RegExp(`^(\\d{1,2})[-\\s]*(${MONTH_WORD})(?:[-\\s]*(\\d{2,4}))?$`, 'iu');
+const MONTH_NAMED = new RegExp(`^(${MONTH_WORD})\\.?\\s+(\\d{1,2})(?:,?\\s+(\\d{2,4}))?$`, 'iu');
+const DATE_TOKENS = new RegExp(`(?:(?<![\\p{L}\\p{N}/.-])|(?<=于))(?:\\d{1,4}(?:[/.-]\\d{1,4}){1,7}` +
+    `|\\d{1,2}[-\\s]*(?:${MONTH_WORD})(?:[-\\s]*\\d{2,4})?` +
+    `|(?:${MONTH_WORD})\\.?\\s+\\d{1,2}(?:,?\\s+\\d{2,4})?)(?:(?![\\p{L}\\p{N}]|[/.-]\\d)|(?=在|存入))`, 'giu');
+const calendarDate = (year, month, day) => {
+    if (!Number.isInteger(year) || year < 1000 || year > 9999 || month < 1 || month > 12 || day < 1)
+        return null;
+    const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    return day <= days ? `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}` : null;
+};
+const valuesFor = (token, order) => {
+    let values = [];
+    const iso = token.match(/^(\d{4})([/.-])(\d{1,2})\2(\d{1,2})$/u);
+    if (iso)
+        values = [calendarDate(Number(iso[1]), Number(iso[3]), Number(iso[4]))];
+    else {
+        const numeric = token.match(/^(\d{1,2})([/.-])(\d{1,2})(?:\2(\d{2,4}))?$/u);
+        if (numeric) {
+            if (numeric[4]?.length !== 4)
+                return { values: [], issues: ['missing-four-digit-year'] };
+            const a = Number(numeric[1]), b = Number(numeric[3]), year = Number(numeric[4]);
+            if (order === 'YMD')
+                return { values: [], issues: ['date-order-conflict'] };
+            values = order === 'DMY' ? [calendarDate(year, b, a)]
+                : order === 'MDY' ? [calendarDate(year, a, b)]
+                    : [calendarDate(year, b, a), calendarDate(year, a, b)];
+        }
+        else {
+            if (/^[\d/.-]+$/u.test(token))
+                return { values: [], issues: ['invalid-date'] };
+            const dayFirst = token.match(DAY_NAMED);
+            const monthFirst = token.match(MONTH_NAMED);
+            const yearText = dayFirst?.[3] ?? monthFirst?.[3];
+            if (yearText?.length !== 4)
+                return { values: [], issues: ['missing-four-digit-year'] };
+            const monthWord = dayFirst?.[2] ?? monthFirst?.[1] ?? '';
+            const day = Number(dayFirst?.[1] ?? monthFirst?.[2]);
+            values = [calendarDate(Number(yearText), MONTHS[monthWord.toLocaleLowerCase()], day)];
+        }
+    }
+    const valid = [...new Set(values.filter((value) => value !== null))];
+    return { values: valid, issues: valid.length ? (valid.length > 1 ? ['ambiguous-date-order'] : []) : ['invalid-date'] };
+};
+const dateRole = (text, start, end) => {
+    const prefix = text.slice(Math.max(0, start - 140), start);
+    const ownerClause = text.slice(0, start).split(/[\n;!?。।]|\.(?=\s|$)/u).at(-1) ?? '';
+    if ((0, alert_source_ownership_1.isOwnerProfileClause)(ownerClause) && (0, alert_source_ownership_1.ownerProfilePrefixLength)(ownerClause) >= ownerClause.length)
+        return null;
+    const clause = prefix.split(/[\n;!?。।]|\.(?=\s|$)/u).at(-1) ?? '';
+    if (/^\s*(?:for\s+(?:help|support|offers?|promotions?|details)|(?:please\s+)?(?:call|contact|visit|log\s*in))\b/iu.test(clause))
+        return null;
+    if (/(?:^|\n)\s*في\s*:\s*$/u.test(prefix))
+        return 'transactionDate';
+    if (/(?:\bdue(?:\s+date)?|\bpay(?:ment)?\s+(?:by|before)|\bdeadline|\bdate\s+limite(?:\s+de\s+paiement)?|\bfällig\s+am|支払期限|अंतिम\s+तिथि|\bfecha\s+límite\s+de\s+pago|\bscadenza|भुगतान\s+की\s+अंतिम\s+तिथि|تاريخ\s+استحقاق\s+الدفع|تاريخ\s+(?:الاستحقاق|الإستحقاق)|مستحق(?:ة)?\s*(?:بتاريخ)?|قبل\s+تاريخ)\s*(?:(?:is|on|by|before)\s*)?[:：=-]?\s*$/iu.test(prefix))
+        return 'dueDate';
+    if (/(?:\bstatement\s+(?:date|dated|generated|issued)|\bgenerated|\bissued|تاريخ\s+(?:الكشف|كشف\s+الحساب|الإصدار|الاصدار))\s*(?:(?:is|on)\s*)?[:：=-]?\s*$/iu.test(prefix))
+        return 'statementDate';
+    if (/(?:\b(?:transaction|purchase|payment|posting)\s+date|\bdate|\bdatum|利用日|日時|تاريخ\s+(?:العملية|العمليه|المعاملة|المعامله))\s*(?:(?:is|on)\s*)?[:：=-]?\s*$/iu.test(prefix))
+        return 'transactionDate';
+    if (/(?:\b(?:on|dated|le|am|el|il|op|em)|بتاريخ)\s*$/iu.test(prefix))
+        return 'transactionDate';
+    const suffix = text.slice(end, Math.min(text.length, end + 180));
+    if (/^\s+tarihinde\s+/u.test(suffix) && /işyerinde(?:ki)?\s+[A-Z]{3}/u.test(suffix) &&
+        !/\b(?:ref(?:erence)?|id)\s*[:#-]?\s*$/iu.test(prefix))
+        return 'transactionDate';
+    if (/^\s+को\s+(?:कार्ड|आपके\s+कार्ड)/u.test(suffix) &&
+        (/^\s*$/u.test(prefix) || /रिफंड\s+राशि\s*$/u.test(prefix)))
+        return 'transactionDate';
+    if (/于$/u.test(prefix) && (/^在[^。]{1,96}消费/u.test(suffix) || /^存入/u.test(suffix)))
+        return 'transactionDate';
+    const lineStart = text.lastIndexOf('\n', start - 1) + 1;
+    const lineEnd = text.indexOf('\n', end);
+    const before = text.slice(lineStart, start).trim();
+    const after = text.slice(end, lineEnd < 0 ? text.length : lineEnd).trim();
+    if (!before && /^(?:\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?)?[.]?$/iu.test(after))
+        return 'transactionDate';
+    return null;
+};
+const fieldFrom = (observations) => {
+    if (!observations.length)
+        return (0, universal_types_1.missingUniversalField)();
+    const values = [...new Set(observations.flatMap((item) => item.values))];
+    const issues = [...new Set(observations.flatMap((item) => item.issues))];
+    const uncertain = observations.some((item) => item.values.length !== 1);
+    const explicit = values.length === 1 && !uncertain;
+    return {
+        value: explicit ? values[0] : null,
+        evidence: explicit ? 'explicit' : values.length ? 'ambiguous' : 'missing',
+        alternatives: explicit ? [] : values,
+        spans: observations.map((item) => item.span),
+        issues: values.length > 1 && !issues.includes('ambiguous-date-order') ? [...issues, 'conflicting-dates'] : issues,
+    };
+};
+function extractUniversalDates(normalizedText, context, moneySpans) {
+    const observations = { transactionDate: [], dueDate: [], statementDate: [] };
+    for (const match of normalizedText.matchAll(DATE_TOKENS)) {
+        const span = { start: match.index, end: match.index + match[0].length };
+        if (moneySpans.some((money) => span.start < money.end && span.end > money.start))
+            continue;
+        const role = dateRole(normalizedText, span.start, span.end);
+        if (role)
+            observations[role].push({ span, ...valuesFor(match[0], context.dateOrder) });
+    }
+    return {
+        transactionDate: fieldFrom(observations.transactionDate),
+        dueDate: fieldFrom(observations.dueDate),
+        statementDate: fieldFrom(observations.statementDate),
+    };
+}
+},
+"universal-fields":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.extractUniversalFields = extractUniversalFields;
+const universal_types_1 = require("@/lib/universal-types");
+const alert_draft_1 = require("@/lib/alert-draft");
+const universal_dates_1 = require("@/lib/universal-dates");
+const resolve = (items) => {
+    if (!items.length)
+        return (0, universal_types_1.missingUniversalField)();
+    const values = items.map((item) => item.value).filter((value, index, all) => all.findIndex((other) => JSON.stringify(other).toLocaleLowerCase() === JSON.stringify(value).toLocaleLowerCase()) === index);
+    return {
+        value: values.length === 1 ? values[0] : null,
+        evidence: values.length === 1 ? 'explicit' : 'ambiguous',
+        spans: items.map((item) => item.span), alternatives: values.length === 1 ? [] : values,
+        issues: values.length > 1 ? ['conflicting-field-values'] : [],
+    };
+};
+const MERCHANT_LABEL = /(?:^|[^\p{L}\p{N}])(?:desc(?:ription)?|narration|merchant|payee|beneficiary|seller|commerçant|bénéficiaire|händler|empfänger|comercio|beneficiario|esercente|begunstigde|利用先|التاجر|المستفيد)\s*[:：=-]\s*/giu;
+const MERCHANT_PREPOSITION = /(?:^|[^\p{L}\p{N}])(?:at|to|trf\s+to|from|chez|bei|von|en|em|an|presso|bij|لدى|عند|لصالح)\s+/giu;
+const MERCHANT_TAIL = /\s+(?:(?:avl|avail(?:able)?)\.?\s*(?:bal(?:ance)?|lmt|limit)\b|(?:on|le|am|el|il|op|em)\s+\d|on\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d|from\s+(?:your\s+)?(?:account|a\/?c|card|checking|savings)\b|posted\b|(?:with|using|via|über)\b|to\s+(?:(?:your|the)\s+)?(?:card|account)\b|\d{1,2}:\d{2}\b|(?:ref(?:erence)?(?:\s*no)?|refno|txn|transaction\s+(?:id|date))\b|(?:was|has|have|is|were|will|wurde|wurden|ist|wird)\b|con\s+(?:tu|su)\s+tarjeta\b|com\s+o\s+cart[aã]o\b|بتاريخ|رقم\s+(?:المرجع|العملية))/iu;
+const BALANCE_FIELD_TAIL = /\s+(?:(?:available|current|remaining|closing)\s+(?:credit\s+)?(?:balance|limit)|(?:avl|avail)\.?\s*(?:bal(?:ance)?|limit)|balance|credit\s+limit|الرصيد(?:\s+(?:المتاح|الحالي))?)\s*[:=-]?\s*$/iu;
+const BALANCE_FIELD_BEFORE_MONEY = new RegExp(BALANCE_FIELD_TAIL.source.replace(/\$$/u, '') + String.raw `(?=(?:[A-Z]{3}\s*[+-]?\d|[+-]?\d[\d.,]*\s*[A-Z]{3}\b))`, 'iu');
+const MERCHANT_STATUS_TAIL = /\s+(?:(?:abgelehnt|geweigerd|rechazado)(?=\s*(?:$|op\b|wegen\b|omdat\b))|requires?\s+(?:(?:an?|your)\s+)?(?:otp(?=\b|\d)|verification\s+code\b|security\s+code\b|one[ -]time\s+(?:code|password)\b)|(?:declined|failed|rejected|unsuccessful)(?=\s*(?:$|due\b|because\b|for\b))|pending(?:\s+(?:authori[sz]ation|processing|approval|confirmation|verification)\b|\s*$)|awaiting\s+(?:authori[sz]ation|approval|confirmation|verification)\b|scheduled\s+(?:for|on|to)\b|(?:pendente|pendiente|rechazad[oa]|recusad[oa]|negad[oa]|declinad[oa]|cancelad[oa]|(?:n[aã]o|no)\s+(?:aprovad[oa]|aprobad[oa]|autorizad[oa]))(?=\s*(?:$|de\b|por\b|pelo\b|pela\b))|(?:se\s+(?:cargar|abonar|aplicar|reflejar)[aá]|ser[aá]\s+(?:cargad|abonad|debitad|creditad|lan[cç]ad|processad)[oa]|retenid[oa]|bloquead[oa]|estornad[oa]|en\s+revisi[oó]n|no\s+procede|requiere|aguarda|on\s+hold|requires?\s+your)(?=$|[^\p{L}\p{N}])|(?:em\s+processamento|en\s+proceso|aguardando\s+(?:aprova[cç][aã]o|confirma[cç][aã]o|autoriza[cç][aã]o)|pendiente\s+de\s+(?:autorizaci[oó]n|aprobaci[oó]n))(?=$|[^\p{L}\p{N}]))/iu;
+const NOT_MERCHANT = /^(?:未払い|今回|本次交易)$|^(?:ihr(?:e|er|em|en)?|tu|su|sus|votre|vos|sua|seu)\s+(?:karte|konto|tarjeta|cuenta|carte|compte|cart[aã]o|conta)\b|^(?:cheq(?:ue)?|current|savings?|checking|credit|debit)\s+(?:a\/?c|acc(?:oun)?t)\b|^(?:su|tu|sua)\s+(?:cuenta|conta)\b|^(?:(?:your|the|an?)\s+)?(?:account|a\/?c|card|credit\s+card|debit\s+card|bank\s+account|statement|USD|AED|SAR|EUR|GBP|INR)\b|^(?:view|avoid|contact|call|visit|check|download|log\s*in|pay|confirm|verify|report)\b|^(?:حساب|بطاق|كشف\s+الحساب)/iu;
+const MOVEMENT_CONTEXT = /\b(?:made\s+an?|withdrew|used\s+for|purchase|charged|paid|debited|credited|received|sent|transfer(?:red)?|spent|payment|paiement|débité|crédité|kartenzahlung|abgebucht|belastet|compra|pagado|pagamento|acquisto|addebitato|pinbetaling|betaling|kaartbetaling|betaald|afgeschreven|abonnementzahlung|remboursement|reembolso)\b|شراء|خصم|دفع|تحويل|استلام/iu;
+const ownsMovement = (text, at, moneySpans) => {
+    let start = at;
+    while (start > 0 && at - start < 160) {
+        const index = start - 1, character = text[index];
+        if (/[\n;!?。।]/u.test(character) || (character === '.' && !/\bno\.$/iu.test(text.slice(Math.max(0, index - 3), index + 1)) &&
+            text[index - 1] !== '.' && text[index + 1] !== '.' &&
+            (!/\d/u.test(text[index - 1] ?? '') || !/\d/u.test(text[index + 1] ?? ''))))
+            break;
+        start -= 1;
+    }
+    const prefix = text.slice(start, at);
+    if (/\b(?:call|contact|visit|log\s*in)\b/iu.test(prefix) || /\b(?:due|owing)\s*$/iu.test(prefix))
+        return false;
+    return MOVEMENT_CONTEXT.test(prefix) || moneySpans.some((span) => span.start >= start && span.end <= at);
+};
+const merchantFields = (text, moneySpans) => {
+    const observations = [];
+    const refundFrom = /(?:remboursement\s+(?:de\s+[A-Z]{3}\s*\d[\d.,]*\s+)?reçu|reembolso\s+recibido)\s+de\s+/giu;
+    const billSupplier = /(?:stromrechnung\s+von|factura\s+de\s+agua\s+de|assinatura\s+da|mensalidade\s+da)\s+/giu;
+    const symbolicAt = /\s@\s+/gu;
+    const transactionWith = /(?:^|[^\p{L}\p{N}])transaction(?:\s+of\s+(?:[A-Z]{3}\s?)?[$€£]?\d[\d.,]{0,15})?\s+with\s+(?!(?:your|the|an?)\b)/giu;
+    const arabicStructuredLabel = /(?:^|\n)\s*(?:لدى|من|جهة|الجهة)\s*[:：]\s*/gu;
+    const arabicFinancialDocument = /^\s*(?:شراء|حوالة\s+واردة|سداد\s+فاتورة|مدفوعات\s+وزارة\s+الداخلية)(?=$|[\s:؛])/u.test(text) &&
+        /(?:^|\n)\s*مبلغ\s*:/u.test(text);
+    const refundFor = /\brefund\s+(?:processed|credited|received|completed|posted)\s+for\s+/giu;
+    for (const pattern of [MERCHANT_LABEL, MERCHANT_PREPOSITION, refundFrom, symbolicAt, billSupplier, transactionWith,
+        arabicStructuredLabel, refundFor]) {
+        for (const match of text.matchAll(pattern)) {
+            if (pattern === arabicStructuredLabel && !arabicFinancialDocument)
+                continue;
+            if ((pattern === MERCHANT_PREPOSITION || pattern === symbolicAt || pattern === transactionWith) && !ownsMovement(text, match.index, moneySpans))
+                continue;
+            if (pattern === billSupplier && /\b(?:call|contact|visit|log\s*in|for\s+help)\b/iu.test(text.slice(Math.max(0, match.index - 160), match.index).split(/[.!?;。।\n]/u).at(-1) ?? ''))
+                continue;
+            const labelEnd = match.index + match[0].length;
+            const candidate = text.slice(labelEnd, labelEnd + 97).match(/^(?:[\p{L}%]|\d{1,3}[- ]?(?=\p{L}))[\p{L}\p{M}\p{N}% &'’*/+()._-]{0,95}/u)?.[0];
+            if (!candidate)
+                continue;
+            let value = candidate.split(/\.(?=\s|$)/u)[0];
+            let lead = 0;
+            if (pattern === MERCHANT_LABEL) {
+                const channel = value.match(/^(?:pos\s+purchase|pos|purchase|card\s+purchase|online\s+purchase)\s+(?=\p{L})/iu);
+                if (channel) {
+                    lead = channel[0].length;
+                    value = value.slice(lead);
+                }
+            }
+            const start = labelEnd + lead;
+            const tails = [pattern === billSupplier ? value.search(/\s+(?:(?:no|não|será|está)\s+)?(?:pagada|paga)(?=\s*$)|\s+será\s+(?:cobrada|renovada)\b/iu) : -1, value.search(MERCHANT_TAIL), value.search(MERCHANT_STATUS_TAIL), value.search(BALANCE_FIELD_BEFORE_MONEY)]
+                .filter((index) => index >= 0);
+            const timeTail = text.slice(start, start + 97).search(/\s+\d{1,2}:\d{2}(?=\s|[.。।!?;]|$)/u);
+            if (timeTail >= 0 && timeTail <= value.length)
+                tails.push(timeTail);
+            const nextMoney = moneySpans.filter((span) => span.start >= start && span.start < start + value.length)
+                .sort((a, b) => a.start - b.start)[0];
+            if (nextMoney) {
+                const beforeMoney = value.slice(0, nextMoney.start - start).replace(/\s+per\s*$/iu, '');
+                const balanceLabel = beforeMoney.search(BALANCE_FIELD_TAIL);
+                tails.push(balanceLabel >= 0 ? balanceLabel : beforeMoney.length);
+            }
+            if (tails.length)
+                value = value.slice(0, Math.min(...tails));
+            value = value.trim().replace(/\s+(?:for|of)$/iu, '').replace(/[.*_-]+$/u, '').trim();
+            const end = start + value.length;
+            if ((value.match(/\p{L}/gu) ?? []).length < 2 || NOT_MERCHANT.test(value) ||
+                /\b(?:your|yours|please)\b/iu.test(value) || /^[A-Z]{2}\d[A-Z\d ]{6,}$/iu.test(value))
+                continue;
+            if (end >= start + 96 && /[\p{L}\p{N}]/u.test(text[end] ?? ''))
+                continue;
+            if (moneySpans.some((span) => start < span.end && end > span.start))
+                continue;
+            observations.push({ value, span: { start, end } });
+        }
+    }
+    const localForms = [
+        /(efetuad[ao]\s+(?:no|na|em)\s+)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+(?=com\b)/giu,
+        /([A-Z]{3}\s+w\s+)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+(?=zosta[lł]a)/gu,
+        /(\d[\d,]*원\s+)([\p{L}\p{M}\p{N}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+(?=\d{1,2}\/\d{1,2}\b)/gu,
+        /((?:^|[।,]\s*))([A-Za-z\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+को\s+(?=भुगतान)/gu,
+        /(\d{4}-\d{2}-\d{2}\s+tarihinde\s+(?:\d{4}\s+ile\s+biten\s+kartınızla\s+)?)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+işyerinde(?:ki)?\s+(?=[A-Z]{3}\s*\d)/giu,
+        /(कार्ड\s+\d{4}\s+से\s+)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+पर\s+(?=[A-Z]{3}\s*\d)/gu,
+        /((?:^|[।\n\]])\s*)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+से\s+(?=[A-Z]{3}\s*\d[\d.,]*\s+(?:की\s+रिफंड\s+राशि|का\s+रिफंड))/gu,
+        /((?:银行卡(?:于\d{4}-\d{2}-\d{2})?|^|[。:：，,\s日])在)([\p{L}\p{M}\p{N} &'’.*_-]{2,96}?)消费(?:成功|失败|被拒绝)/gu,
+        /(退款到账通知[:：]\s*)([\p{L}\p{M}\p{N} &'’.*_-]{2,96}?)退回(?=[A-Z]{3}\s*\d)/gu,
+        /((?:^|[.!?。।;\n\]])\s*)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+işyerindeki\s+(?=[A-Z]{3}\s*\d)/giu,
+        /(\d{2}[./]\d{2}[./]\d{4}\s+tarihinde\s+)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+işyerinden\s+(?=\d)/giu,
+        /((?:^|[.!?。।;\n\]])\s*)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+alışverişiniz\s+tamamlandı/giu,
+        /(تم\s+سداد\s+فاتورة\s+)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+بنجاح(?=\s*[.。।;]|\s*$)/gu,
+        /((?:^|[.!?。।;\n\]])\s*)([\p{L}\p{M}\p{N} &'’.*_-]{2,96}?)での購入が完了しました/gu,
+        /((?:^|[.!?。।;\n\]])\s*)([\p{L}\p{M}\p{N} &'’.*_-]{2,96}?)の電気料金の請求です/gu,
+        /((?:^|[.!?。।;\n\]])\s*您在)([\p{L}\p{M}\p{N} &'’.*_-]{2,96}?)的消费已完成/gu,
+        /((?:^|[.!?。।;\n\]])\s*)([\p{L}\p{M}\p{N} &'’.*_-]{2,96}?)的退款(?=\s*(?:[A-Z]{3}\s*\d|[$€£¥]\s*\d)[\d.,]*\s*已到账)/gu,
+    ];
+    for (const pattern of localForms)
+        for (const match of text.matchAll(pattern)) {
+            const value = match[2].trim();
+            const start = match.index + match[1].length + match[2].indexOf(value);
+            const end = start + value.length;
+            if ((value.match(/\p{L}/gu) ?? []).length < 2 || NOT_MERCHANT.test(value) ||
+                /\b(?:your|yours|please)\b/iu.test(value) || /^[A-Z]{2}\d[A-Z\d ]{6,}$/iu.test(value) ||
+                moneySpans.some((span) => start < span.end && end > span.start))
+                continue;
+            observations.push({ value, span: { start, end } });
+        }
+    return resolve(observations);
+};
+const instrumentFields = (text) => {
+    const observations = [];
+    const pattern = /(?:^|[^\p{L}\p{N}])(card|account|a\/?c|wallet|بطاق[ةه](?:ك)?|حساب(?:ك)?|محفظ[ةه](?:ك)?)\s*(?:(?:ending(?:\s+(?:in|with))?|no\.?|number|last\s*4|رقم|المنتهية|المنتهيه|تنتهي(?:\s+بـ?)?|ينتهي(?:\s+بـ?)?)\s*)?[:#-]?\s*([\dXx*•·-]{2,40}(?:[ \t]+[\dXx*•·-]{1,40}){0,7})(?![\p{L}\p{N}]|[ \t]+[\dXx*•·-])/giu;
+    for (const match of text.matchAll(pattern)) {
+        const label = match[1].toLocaleLowerCase();
+        const kind = /card|بطاق/u.test(label) ? 'card'
+            : /wallet|محفظ/u.test(label) ? 'wallet' : 'account';
+        const groups = match[2].split(/[ \t]+/u);
+        const validGroups = groups.length === 1 || groups.every((group) => /^[\dXx*•·]{4}$/u.test(group));
+        const last4 = validGroups ? match[2].match(/(\d{4})$/u)?.[1] ?? null : null;
+        const end = match.index + match[0].length;
+        observations.push({ value: { kind, last4 }, span: { start: end - (last4?.length ?? match[2].length), end } });
+    }
+    return resolve(observations);
+};
+function extractUniversalFields(source, context = {}, moneySpans = []) {
+    if (source.length > 4096)
+        return {
+            merchant: (0, universal_types_1.missingUniversalField)('input-too-long'),
+            transactionDate: (0, universal_types_1.missingUniversalField)('input-too-long'),
+            dueDate: (0, universal_types_1.missingUniversalField)('input-too-long'),
+            statementDate: (0, universal_types_1.missingUniversalField)('input-too-long'),
+            instrument: (0, universal_types_1.missingUniversalField)('input-too-long'),
+        };
+    const text = (0, alert_draft_1.normalizeAlertText)(source);
+    return {
+        merchant: merchantFields(text, moneySpans),
+        ...(0, universal_dates_1.extractUniversalDates)(text, context, moneySpans),
+        instrument: instrumentFields(text),
+    };
+}
+},
+"universal-money":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.inspectUniversalMoneyDraft = inspectUniversalMoneyDraft;
+exports.extractUniversalMoney = extractUniversalMoney;
+const alert_draft_1 = require("@/lib/alert-draft");
+const alert_market_packs_1 = require("@/lib/alert-market-packs");
+const currency_metadata_1 = require("@/lib/currency-metadata");
+const universal_fields_1 = require("@/lib/universal-fields");
+const universal_types_1 = require("@/lib/universal-types");
+const SOURCE_UNIT_ALIASES = {
+    KSh: currency_metadata_1.CURRENCY_SYMBOL_CANDIDATES.KSh,
+    TSh: ['TZS'],
+};
+const sourceCurrencyAliases = (context) => {
+    const market = context.moneyMarket ?? context.market;
+    return { ...SOURCE_UNIT_ALIASES, ...(market ? (0, alert_market_packs_1.alertMarketPack)(market).currencyAliases : {}),
+        ...context.currencyAliases };
+};
+const LABEL = new RegExp([
+    String.raw `(?<minimum>\bpay\s+min\.|\bmin(?:imum)?(?:\s+|\.\s*)(?:(?:amount|amt|payment)\s+)?due\b|\bminimum\s+payment\b|\bpago\s+mínimo\b|(?<![\p{L}\p{M}\p{N}_])(?:paiement\s+minimum|न्यूनतम\s+देय\s+राशि)(?![\p{L}\p{M}\p{N}_])|الحد\s+(?:الادنى|الأدنى)\s+(?:المستحق|للدفع|للسداد))`,
+    String.raw `(?<total>\b(?:statement\s+(?:total|balance|amount)|closing\s+balance|total\s+(?:(?:amount|amt)\s+)?due(?:\s+to\s+avoid\s+fin\.\s+charges)?|total\s+outstanding(?:\s+balance)?|new\s+balance|saldo\s+total\s+del\s+estado)\b|(?<![\p{L}\p{M}\p{N}_])(?:total\s+à\s+payer|कुल\s+देय\s+राशि)(?![\p{L}\p{M}\p{N}_])|(?:اجمالي|إجمالي)\s+(?:المبلغ\s+المستحق|مبلغ\s+الكشف))`,
+    String.raw `(?<limit>\b(?:(?:available|avl|avail)\.?\s+(?:credit|cr\.?)\s+limit|(?:available|credit|avl|avail)\.?\s+(?:limit|lmt)|available\s+credit|credit\s+available)\b|الحد\s+(?:المتاح|الائتماني))`,
+    String.raw `(?<balance>\b(?:(?:available|current|avl|avail)\.?\s+)?bal(?:ance)?\b|\b(?:solde(?:\s+disponible)?|kontostand|saldo|(?:kullanılabilir\s+)?bakiye)\b|الرصيد(?:\s+(?:الحالي|المتاح))?|(?<![\p{L}\p{M}\p{N}_])رصيد\s+حسابك(?:\s+(?:الحالي|المتاح))?(?![\p{L}\p{M}\p{N}_])|(?:उपलब्ध\s+)?शेष\s+राशि|(?:利用可能)?残高|(?:可用)?余额)`,
+    String.raw `(?<bill>\b(?:bill(?:\s+amount)?\s+(?:due|of)|amount\s+due|payment\s+due|bill\s+amount|bill\s+for|montant\s+à\s+payer|importo\s+da\s+pagare)\b|مبلغ\s+الفاتورة|المبلغ\s+المستحق|देय\s+राशि)`,
+    String.raw `(?<fee>\b(?:total\s+charges|fee|fees|commission|service\s+charge)\b|رسوم|عمولة)`,
+    String.raw `(?<transaction>\b(?:virement(?:\s+reçu)?|pix(?:\s+(?:enviado|recebido))?|transaksi|havale|bizum|cargo\s+de|consumo\s+de|na\s+kwot[eę]|lastschrift(?:\s+über)?|payment\s+made\s+for|you\s+have\s+(?:sent|received)|(?:you\s+)?made\s+an?|charge\s+(?:of|made)|transaction(?!\s+(?:id|no|number|ref|reference|date|time|alert)\b)|used\s+for|charged\s+for|withdrew|purchase|purchased|spend|spent|paid|charged|debited|credited|received|sent|withdrawn|withdrawal|cash\s+out|deposited|deposit|refund|reversal|transfer(?:red)?|payment|amount|amt|amnt|paiement|débité|crédité|remboursement|kartenzahlung|abonnementzahlung|belastet|gutgeschrieben|compra|reembolso|abonado|pagamento|pinbetaling|pasbetaling|kaartbetaling|betaling)\b|(?<![\p{L}\p{N}])(?:alışveriş(?:iniz)?|ödemeniz|tutarında|مبلغ)(?![\p{L}\p{N}])|شراء|خصم|إيداع|ايداع|تحويل|استرداد|دفع|भुगतान|रिफंड\s+राशि|(?<![\p{L}\p{M}\p{N}_])(?:überweisung|overboeking|acquisto|rimborso|accreditato|cargados?|debitados?|रिफंड)(?![\p{L}\p{M}\p{N}_])|(?:利用)?金額|金额|退回|退款|引き落とされました|扣款|승인|डेबिट|क्रेडिट)`,
+].join('|'), 'giu');
+const AGGREGATE_PREFIX = /\b(?:(?:so far(?:\s+(?:this|the)\s+(?:day|week|month|year))?|(?:this|last)\s+(?:week|month|year)|(?:month|year|week)[ -]to[ -]date|(?:monthly|weekly|yearly|annual|cumulative|category)\s+(?:spend(?:ing)?|spends|expenditure)(?:\s+total)?)\b|spent\s+today\s*:)[^.!?;\n]*$/iu;
+const ALERT_THRESHOLD_PREFIX = /\b(?:is|was)\s+(?:greater|more|higher|larger)\s+than\s+(?:the|your)\s*$/iu;
+const ALERT_THRESHOLD_SUFFIX = /^\s*(?:limit\s+)?(?:set\s+)?in\s+your\s+alerts?\s+settings\b/iu;
+function aggregateAmount(prefix, suffix, label) {
+    if (ALERT_THRESHOLD_PREFIX.test(prefix) && ALERT_THRESHOLD_SUFFIX.test(suffix))
+        return true;
+    if (label && (label.role !== 'transaction' || !/^(?:spend|spent|amount)$/i.test(label.text)))
+        return false;
+    if (AGGREGATE_PREFIX.test(prefix))
+        return true;
+    if (/^\s*on\s+your\s+card\s+today\b/iu.test(suffix))
+        return true;
+    return !labels(suffix).some(row => row.role === 'transaction') &&
+        /^\s*(?:on\s+[^.!?;\n]+?\s+)?(?:so far(?:\s+(?:this|the)\s+(?:day|week|month|year))?|(?:this|last)\s+(?:week|month|year)|(?:month|year|week)[ -]to[ -]date)\b/iu.test(suffix);
+}
+const LABEL_ROLES = {
+    minimum: 'minimum-due', total: 'statement-total', limit: 'credit-limit',
+    balance: 'balance', bill: 'bill-due', fee: 'fee', transaction: 'transaction',
+};
+function labels(text, marketLabels = null) {
+    const found = [...text.matchAll(LABEL)].map((match) => ({
+        role: LABEL_ROLES[Object.keys(match.groups ?? {}).find((key) => match.groups?.[key] !== undefined)],
+        start: match.index, text: match[0],
+    }));
+    if (!marketLabels)
+        return found;
+    for (const match of text.matchAll(marketLabels)) {
+        found.push({ role: 'transaction', start: match.index + match[1].length, text: match[2] });
+    }
+    return found.sort((a, b) => a.start - b.start);
+}
+const marketLabelPatterns = new Map();
+function marketLabelPattern(market) {
+    if (!market)
+        return null;
+    if (marketLabelPatterns.has(market))
+        return marketLabelPatterns.get(market);
+    const terms = (0, alert_market_packs_1.alertMarketPack)(market).moneyLabels ?? [];
+    const pattern = terms.length
+        ? new RegExp(String.raw `(^|[^\p{L}\p{N}])(${terms
+            .map((term) => term.trim().split(/\s+/u).map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join(String.raw `\s+`))
+            .join('|')})(?=$|[^\p{L}\p{N}])`, 'giu')
+        : null;
+    marketLabelPatterns.set(market, pattern);
+    return pattern;
+}
+const NON_SEPARATING_COMMAS = /\bonline,\s+(?:by\s+)?phone,?\s+or\s+(?:by\s+)?mail\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]{0,6}\.?\s+\d{1,2},\s+\d{4}\b/giu;
+function separators(text) {
+    const listed = [...text.matchAll(NON_SEPARATING_COMMAS)]
+        .map((match) => ({ start: match.index, end: match.index + match[0].length }));
+    return [...text.matchAll(/[;\n!?。।]|[.,](?=\s|$)/g)]
+        .filter((match) => match[0] !== ',' || !listed.some((range) => match.index > range.start && match.index < range.end))
+        .filter((match) => match[0] !== '.' || !/\b(?:min|avl|avail|cr|dr|amt|bal)$/i.test(text.slice(0, match.index)))
+        .filter((match) => match[0] !== '.' ||
+        !(/\btotal\s+due\s+to\s+avoid\s+fin$/i.test(text.slice(0, match.index)) &&
+            /^\.\s+charges\b/i.test(text.slice(match.index))))
+        .map((match) => match.index);
+}
+function contextualStatementRoles(draft, roleText) {
+    const roles = new Map();
+    const currencies = (candidate) => [...new Set(candidate.interpretations.map(value => value.currency))].sort().join('|');
+    const statementContext = (prefix) => /\bstatement\b/iu.test(prefix) &&
+        /\b(?:(?:credit|covered|charge)\s+card|card\s+statement)\b/iu.test(prefix);
+    for (let index = 0; index < draft.candidates.length; index++) {
+        const first = draft.candidates[index];
+        const prefix = roleText.slice(0, first.span.start);
+        const totalLabel = prefix.match(/\btotal\s+of\s*$/iu);
+        const second = draft.candidates[index + 1];
+        if (totalLabel && second && statementContext(prefix)) {
+            const between = roleText.slice(first.span.end, second.span.start);
+            const minimumLabel = between.match(/^\s*(?:,|and|&)\s*(minimum\s+of)\s*$/iu);
+            const after = roleText.slice(second.span.end, draft.candidates[index + 2]?.span.start);
+            const sameCurrency = currencies(first) !== '' && currencies(first) === currencies(second);
+            if (minimumLabel && sameCurrency && /^\s+(?:is|are)\s+due\s+(?:by|on)\b/iu.test(after)) {
+                roles.set(first.span.start, { role: 'statement-total', labelStart: totalLabel.index });
+                roles.set(second.span.start, { role: 'minimum-due',
+                    labelStart: first.span.end + between.indexOf(minimumLabel[1]) });
+            }
+        }
+        const generatedHeader = prefix.match(/\bstatement\s+for\s+(?:your\s+)?(?:[A-Za-z]+\s+){0,3}(?:credit|covered|charge)\s+card\s+[Xx*•·\d-]{4,24}\s+of\s*$/iu);
+        if (!generatedHeader || !/^\s+has\s+been\s+(?:generated|issued)\b/iu.test(roleText.slice(first.span.end, draft.candidates[index + 1]?.span.start)))
+            continue;
+        const instrument = (0, universal_fields_1.extractUniversalFields)(roleText, {}, draft.candidates.map(value => value.span)).instrument;
+        const owner = (0, universal_fields_1.extractUniversalFields)(generatedHeader[0]).instrument;
+        if (instrument.evidence !== 'explicit' || owner.evidence !== 'explicit' ||
+            instrument.value?.kind !== 'card' || !instrument.value.last4 ||
+            instrument.value.last4 !== owner.value?.last4)
+            continue;
+        roles.set(first.span.start, { role: 'statement-total', labelStart: generatedHeader.index });
+    }
+    return roles;
+}
+function ownCandidates(draft, excludedRoleSpans, marketLabels = null) {
+    const text = draft.normalizedText;
+    let roleText = text;
+    for (const span of excludedRoleSpans) {
+        if (!Number.isInteger(span.start) || !Number.isInteger(span.end) ||
+            span.start < 0 || span.end < span.start || span.end > text.length)
+            continue;
+        roleText = roleText.slice(0, span.start) + ' '.repeat(span.end - span.start) + roleText.slice(span.end);
+    }
+    const owned = [];
+    const statementRoles = contextualStatementRoles(draft, roleText);
+    draft.candidates.forEach((candidate, index) => {
+        const previousEnd = draft.candidates[index - 1]?.span.end ?? 0;
+        const nextStart = draft.candidates[index + 1]?.span.start ?? text.length;
+        const before = text.slice(previousEnd, candidate.span.start);
+        let prefixStart = previousEnd + ((separators(before).at(-1) ?? -1) + 1);
+        let preceding = labels(roleText.slice(prefixStart, candidate.span.start), marketLabels).at(-1);
+        if (!preceding) {
+            const prior = labels(roleText.slice(previousEnd, candidate.span.start), marketLabels).at(-1);
+            if (prior) {
+                const start = previousEnd + prior.start;
+                const tail = roleText.slice(start + prior.text.length, candidate.span.start);
+                const lineStart = Math.max(previousEnd, roleText.lastIndexOf('\n', start - 1) + 1);
+                if (/\n/.test(tail) && /^[\s:;,.\-]*$/.test(tail) &&
+                    /^[\s:;,.\-]*$/.test(roleText.slice(lineStart, start))) {
+                    prefixStart = lineStart;
+                    preceding = { ...prior, start: start - lineStart };
+                }
+            }
+        }
+        const after = text.slice(candidate.span.end, nextStart);
+        const suffixEnd = candidate.span.end + (separators(after)[0] ?? after.length);
+        const following = labels(roleText.slice(candidate.span.end, suffixEnd), marketLabels)[0];
+        const label = preceding ?? following;
+        let role = label?.role ?? 'unknown';
+        if (role === 'bill-due' && label && !/\bbill\b|فاتورة/iu.test(label.text) &&
+            /\b(?:statement|mini\s+stmt)\b/iu.test(roleText.slice(0, candidate.span.start))) {
+            role = 'statement-total';
+        }
+        if (!label && owned.at(-1)?.role === 'transaction' && /^\s*(?:and|plus|,|&)?\s*$/i.test(before)) {
+            role = 'transaction';
+        }
+        let labelStart = preceding ? prefixStart + preceding.start : null;
+        const aggregate = aggregateAmount(roleText.slice(prefixStart, candidate.span.start), roleText.slice(candidate.span.end, suffixEnd), label);
+        if (aggregate) {
+            role = 'unknown';
+            const marker = roleText.slice(prefixStart, candidate.span.start).match(AGGREGATE_PREFIX);
+            if (marker)
+                labelStart = prefixStart + marker.index;
+        }
+        const statementRole = statementRoles.get(candidate.span.start);
+        if (statementRole && !aggregate) {
+            role = statementRole.role;
+            labelStart = statementRole.labelStart;
+        }
+        owned.push({ candidate, role, labelStart, aggregate,
+            span: { start: previousEnd > 0 ? labelStart ?? prefixStart : prefixStart, end: suffixEnd } });
+    });
+    owned.forEach((item, index) => {
+        const next = owned[index + 1];
+        if (next)
+            item.span.end = Math.min(item.span.end, next.labelStart ?? next.candidate.span.start);
+        while (item.span.start < item.span.end && /\s/.test(text[item.span.start]))
+            item.span.start++;
+        while (item.span.end > item.span.start && /\s/.test(text[item.span.end - 1]))
+            item.span.end--;
+    });
+    return owned;
+}
+function completeNumericToken(candidate, text) {
+    const source = text.slice(candidate.span.start, candidate.span.end);
+    const match = source.match(/[+-]?(?:\d[\d.,٫'’ ]*\d|\d)/);
+    if (!match)
+        return false;
+    const start = candidate.span.start + match.index;
+    const end = start + match[0].length;
+    const before = text[start - 1] ?? '';
+    const after = text[end] ?? '';
+    const labelledYuan = text.slice(end, candidate.span.end).trim() === '元' &&
+        /(?:^|[,，;；。！？\n])\s*金额\s*[:：]?\s*$/u.test(text.slice(0, start));
+    if (start === candidate.span.start && /[\p{L}\p{N}_]/u.test(before) && !labelledYuan)
+        return false;
+    if (/[xX*•·/\\]/.test(before) || /[xX*•·/\\]/.test(after))
+        return false;
+    if (start === candidate.span.start && /[.,٫'’+\-]/.test(before))
+        return false;
+    if (end === candidate.span.end && /[+\-'’]/.test(after))
+        return false;
+    if (end === candidate.span.end && /^[ \t]+\d/.test(text.slice(end)))
+        return false;
+    if (start === candidate.span.start && /\d[ \t]+$/.test(text.slice(0, start)))
+        return false;
+    if (end === candidate.span.end && /[.,٫'’]/.test(after) && /[\d.,٫'’]/.test(text[end + 1] ?? ''))
+        return false;
+    const numeric = match[0].replace(/^[+-]/, '').replace(/’/g, "'");
+    if (!/[ ']/.test(numeric))
+        return true;
+    const firstPunctuation = numeric.search(/[.,٫]/);
+    const integer = firstPunctuation < 0 ? numeric : numeric.slice(0, firstPunctuation);
+    const remainder = firstPunctuation < 0 ? '' : numeric.slice(firstPunctuation);
+    if (/[ ']/.test(remainder) || (integer.includes(' ') && integer.includes("'")))
+        return false;
+    const separator = integer.includes("'") ? "'" : ' ';
+    const western = new RegExp(`^\\d{1,3}(?:${separator}\\d{3})+$`);
+    const indian = new RegExp(`^\\d{1,2}(?:${separator}\\d{2})*${separator}\\d{3}$`);
+    return western.test(integer) || indian.test(integer);
+}
+function candidateField(candidate, text) {
+    if (!completeNumericToken(candidate, text)) {
+        return { ...(0, universal_types_1.missingUniversalField)('malformed-money-token'), spans: [candidate.span] };
+    }
+    const alternatives = candidate.interpretations.map(({ currency, minorUnits, exponent }) => ({ currency, minorUnits, exponent }));
+    if (candidate.ambiguities.length > 0 || alternatives.length !== 1) {
+        return { value: null, evidence: 'ambiguous', spans: [candidate.span], alternatives, issues: candidate.ambiguities };
+    }
+    return { value: alternatives[0], evidence: 'explicit', spans: [candidate.span], alternatives: [], issues: [] };
+}
+function selectFields(rows) {
+    if (!rows.length)
+        return (0, universal_types_1.missingUniversalField)();
+    if (rows.length === 1)
+        return rows[0].field;
+    return {
+        value: null, evidence: 'ambiguous', spans: rows.flatMap((row) => row.field.spans),
+        alternatives: rows.flatMap((row) => row.field.value ? [row.field.value] : row.field.alternatives),
+        issues: [...new Set(['multiple-money-fields', ...rows.flatMap((row) => row.field.issues)])],
+    };
+}
+function inspectUniversalMoneyDraft(source, context = {}) {
+    const currencyAliases = sourceCurrencyAliases(context);
+    const moneyMarket = context.moneyMarket ?? context.market;
+    const dotDecimalCurrencies = moneyMarket ? (0, alert_market_packs_1.alertMarketPack)(moneyMarket).dotDecimalCurrencies : undefined;
+    const draft = (0, alert_draft_1.inspectAlertDraft)(source, { currencyAliases, dotDecimalCurrencies });
+    if (source.length > 4096)
+        return draft;
+    const candidates = [...draft.candidates];
+    const particleMoney = /(?:(?<![\p{L}\p{N}_])|(?<=に))([A-Za-z]{3}[ \t]*[+-]?\d(?:[\d.,٫'’ \t]*\d)?)(?=で)/gu;
+    for (const match of draft.normalizedText.matchAll(particleMoney)) {
+        const start = match.index;
+        const end = start + match[0].length;
+        if (candidates.some(row => start < row.span.end && end > row.span.start))
+            continue;
+        const tokenDraft = (0, alert_draft_1.inspectAlertDraft)(match[0], { currencyAliases, dotDecimalCurrencies });
+        const candidate = tokenDraft.candidates[0];
+        if (tokenDraft.candidates.length !== 1 || candidate.evidence !== 'iso-code' ||
+            candidate.span.start !== 0 || candidate.span.end !== match[0].length ||
+            !completeNumericToken(candidate, match[0]))
+            continue;
+        candidates.push({ ...candidate, sourceText: source.slice(start, end), span: { start, end } });
+    }
+    candidates.sort((a, b) => a.span.start - b.span.start);
+    const reasons = draft.reasons.filter(reason => reason !== 'no-grounded-money' || !candidates.length);
+    if (candidates.some(candidate => candidate.ambiguities.length > 0))
+        reasons.push('ambiguous-money');
+    if (candidates.length > 16)
+        reasons.push('too-many-money-candidates');
+    return { ...draft, candidates: candidates.slice(0, 16), reasons: [...new Set(reasons)],
+        decision: reasons.some(reason => reason !== 'ambiguous-money') ? 'refuse' : 'review' };
+}
+function extractUniversalMoney(source, context = {}, excludedRoleSpans = [], excludedMoneySpans = []) {
+    const currencyAliases = sourceCurrencyAliases(context);
+    const draft = inspectUniversalMoneyDraft(source, context);
+    const candidates = draft.candidates.filter((candidate) => !(/(?:ksh|tsh)$/i.test(candidate.sourceText) && candidate.span.start > 0 &&
+        /[\p{L}\p{N}]/u.test(draft.normalizedText[candidate.span.start - 1])) &&
+        !excludedMoneySpans.some((span) => Number.isInteger(span.start) && Number.isInteger(span.end) &&
+            span.start >= 0 && span.end > span.start && span.end <= draft.normalizedText.length &&
+            candidate.span.start < span.end && candidate.span.end > span.start));
+    const owned = ownCandidates({ ...draft, candidates }, excludedRoleSpans, marketLabelPattern(context.market));
+    const observations = owned.map(({ candidate, role, aggregate }) => {
+        const field = candidateField(candidate, draft.normalizedText);
+        if (aggregate)
+            field.issues = [...field.issues, 'aggregate-money-field'];
+        return { role, field };
+    });
+    const withRole = (role) => observations.filter((row, index) => row.role === role && !owned[index].aggregate);
+    const transactions = withRole('transaction');
+    const fees = withRole('fee');
+    const unknown = withRole('unknown');
+    const billDues = withRole('bill-due');
+    const main = transactions.length ? transactions
+        : fees.length ? [...fees, ...unknown] : billDues.length ? billDues : unknown;
+    let amount = selectFields(main);
+    if (main.some((row) => row.role === 'unknown')) {
+        amount = { ...amount, issues: [...new Set([...amount.issues, 'amount-role-unresolved'])] };
+    }
+    let transactionSpan = main.length === 1 ? owned[observations.indexOf(main[0])].span : null;
+    if (amount.value && /^-?0+$/.test(amount.value.minorUnits)) {
+        amount = { ...(0, universal_types_1.missingUniversalField)('zero-transaction-amount'), spans: amount.spans, alternatives: [amount.value] };
+        transactionSpan = null;
+    }
+    const scopedAuthentication = draft.reasons.includes('authentication-or-otp') &&
+        (transactionSpan === null || (0, alert_draft_1.inspectAlertDraft)(source.slice(transactionSpan.start, transactionSpan.end), { currencyAliases }).reasons.includes('authentication-or-otp'));
+    const refusal = draft.reasons.includes('input-too-long') ? 'input-too-long'
+        : scopedAuthentication ? 'authentication-or-otp'
+            : draft.reasons.includes('exponent-invalid-money') ? 'exponent-invalid-money' : undefined;
+    if (refusal) {
+        amount = (0, universal_types_1.missingUniversalField)(refusal);
+        transactionSpan = null;
+    }
+    return {
+        draft, observations, amount, transactionSpan,
+        statementTotal: selectFields(withRole('statement-total')), minimumDue: selectFields(withRole('minimum-due')),
+        balance: selectFields(withRole('balance')), creditLimit: selectFields(withRole('credit-limit')),
+    };
+}
+},
+"universal-parser":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.inspectUniversalBankEvent = inspectUniversalBankEvent;
+const universal_types_1 = require("@/lib/universal-types");
+const alert_semantics_1 = require("@/lib/alert-semantics");
+const universal_fields_1 = require("@/lib/universal-fields");
+const universal_money_1 = require("@/lib/universal-money");
+const latam_alert_templates_1 = require("@/lib/latam-alert-templates");
+const bank_alert_semantic_rules_1 = require("@/lib/bank-alert-semantic-rules");
+const emptyEvent = (issue) => ({
+    version: 1, decision: 'ignore', family: 'unknown', status: 'unknown', direction: 'unknown',
+    amount: (0, universal_types_1.missingUniversalField)(), statementTotal: (0, universal_types_1.missingUniversalField)(), minimumDue: (0, universal_types_1.missingUniversalField)(),
+    balance: (0, universal_types_1.missingUniversalField)(), creditLimit: (0, universal_types_1.missingUniversalField)(), merchant: (0, universal_types_1.missingUniversalField)(),
+    transactionDate: (0, universal_types_1.missingUniversalField)(), dueDate: (0, universal_types_1.missingUniversalField)(), statementDate: (0, universal_types_1.missingUniversalField)(),
+    instrument: (0, universal_types_1.missingUniversalField)(), observations: [], issues: [issue],
+});
+const LANGUAGE_PACKS = [
+    'US', 'GB', 'FR', 'DE', 'ES', 'IT', 'NL',
+    'IN', 'QA', 'KW', 'BH', 'OM', 'EG', 'JO',
+];
+const commonDirection = (directions) => {
+    const known = [...new Set(directions.filter((value) => value === 'debit' || value === 'credit'))];
+    return known.length === 1 ? known[0] : 'unknown';
+};
+const conservativeStatus = (statuses) => {
+    for (const value of ['failed', 'future', 'informational', 'posted']) {
+        if (statuses.includes(value))
+            return value;
+    }
+    return 'unknown';
+};
+const phrasePatterns = new Map();
+const phrase = (pattern) => {
+    const cached = phrasePatterns.get(pattern);
+    if (cached)
+        return cached;
+    const compiled = new RegExp(`(?:^|[^\\p{L}\\p{M}\\p{N}])(?:${pattern})(?=$|[^\\p{L}\\p{M}\\p{N}])`, 'iu');
+    if (phrasePatterns.size >= 64)
+        phrasePatterns.clear();
+    phrasePatterns.set(pattern, compiled);
+    return compiled;
+};
+const REVIEW_ONLY_ISSUER_HINT = /plin|interbank|bbva|scotiabank|santander|banamex/iu;
+const completedMovement = (source) => {
+    const text = source.normalize('NFKC').replace(/\s+/gu, ' ');
+    const debitPatterns = [
+        phrase(String.raw `spend\s+at|sent\s+to`),
+        phrase(String.raw `paiement(?:\s+par\s+carte)?\s+(?:effectué|réalisé|exécuté)`),
+        phrase(String.raw `kartenzahlung\s+(?:erfolgreich|abgeschlossen)`),
+        phrase(String.raw `compra\s+realizada(?:\s+con\s+tarjeta)?`),
+        phrase(String.raw `(?:factura[\s\S]{0,100}pagada|pago\s+se\s+ha\s+completado)`),
+        phrase(String.raw `compra\s+aprovada\s+no\s+cartão`),
+        phrase(String.raw `mensalidade[\s\S]{0,100}paga|pagamento\s+concluído`),
+        phrase(String.raw `pagamento\s+con\s+carta\s+eseguito`),
+        phrase(String.raw `acquisto\s+completato`),
+        phrase(String.raw `kaartbetaling\s+voltooid`),
+        phrase(String.raw `afgeschreven\s+voor\s+(?:een\s+)?pasbetaling`),
+        phrase(String.raw `overboeking\s+voltooid[\s\S]{0,100}afgeschreven`),
+        phrase(String.raw `alışveriş(?:iniz)?\s+(?:gerçekleşmiştir|tamamlandı)`),
+        phrase(String.raw `تم\s+(?:سداد|خصم)`),
+        /भुगतान\s+सफल\s+हुआ/u,
+        phrase(String.raw `transaksi[\s\S]{0,100}berhasil`),
+        phrase(String.raw `debited\s+by[\s\S]{0,80}?\btrf\s+to`),
+        phrase(String.raw `se\s+ha\s+realizado\s+un\s+cargo`),
+        phrase(String.raw `compra\s+de[\s\S]{0,40}efetuad[ao]`),
+        phrase(String.raw `transakcja[\s\S]{0,100}zrealizowana`),
+        phrase(String.raw `realizaste\s+un\s+consumo`),
+        phrase(String.raw `payment\s+made\s+for`),
+        phrase(String.raw `lastschrift[\s\S]{0,100}\b(?:belastet|abgebucht)`),
+        /\[[^\]]{1,12}카드\]\s*(?:해외\s*)?승인\s+[\d,]+원/u,
+        /डेबिट\s+(?:किया\s+गया|किए\s+गए)/u,
+        phrase(String.raw `charged\s+to\s+(?:your\s+)?card[\s\S]{0,60}\bat`),
+        /(?:^|:[ \t]*)(?!(?:SOMEONE|SOMEBODY|ANYONE|ANYBODY|UNKNOWN)\b)[A-Z][A-Z'.-]+(?:[ \t]+[A-Z][A-Z'.-]+){0,3}[ \t]+made[ \t]+an?[ \t]+(?!(?:[^.;\n?]|\.\d){0,40}?\b(?:return|refund|credit)\b)(?:[^.;\n?]|\.\d){0,40}?\btransaction[ \t]+with\b/u,
+        /カード利用のお知らせ[\s\S]{0,40}ご利用金額/u,
+        /(?:カード利用|購入)が完了しました/u,
+        /(?:消费|支付|付款)(?:成功|已完成)/u,
+    ];
+    const refundPatterns = [
+        phrase(String.raw `remboursement\s+(?:non\s+)?reçu`),
+        phrase(String.raw `remboursement\s+de[\s\S]{0,100}reçu\s+de`),
+        phrase(String.raw `reembolso\s+recibido`),
+        phrase(String.raw `rimborso\s+accreditato`),
+        /(?:रिफंड|धनवापसी)[\s\S]{0,140}जमा\s+हो\s+(?:गई|गया)\s+है/u,
+        /退款到账|退款到賬|退款[^。]{0,90}已到账/u,
+    ];
+    const depositPattern = phrase(String.raw `deposit\s*\/\s*transfer\s+to\s+your\s+account|überweisung\s+eingegangen`);
+    const arabicTransferOut = /(?<!\p{L})تم\s+تحويل[\s\S]{0,80}?من\s+حسابك/u;
+    const arabicTransferIn = /(?<!\p{L})تم\s+(?:تحويل|إيداع|ايداع)[\s\S]{0,80}?(?:إلى|الى|في)\s+حسابك/u;
+    const transferOutWords = /(?<!\p{L})(?:pix\s+enviado|você\s+enviou\s+um\s+pix|you\s+have\s+(?:successfully\s+)?sent|money\s+sent\s+successfully\s+to|^\s*sent\s+(?:rs\.?|inr|₹)|has\s+enviado\s+un\s+bizum)(?!\p{L})/iu;
+    const transferInWords = /(?<!\p{L})(?:virement\s+reçu|você\s+recebeu\s+um\s+pix|pix\s+recebido|havale\s+gelmiştir|eft\s+gelmiştir|you\s+have\s+(?:successfully\s+)?received|has\s+recibido\s+un\s+bizum|bizum\s+recibido)(?!\p{L})/iu;
+    const statuses = [];
+    const matches = (pattern) => {
+        let found = false;
+        for (const match of text.matchAll(new RegExp(pattern.source, pattern.flags + 'g'))) {
+            found = true;
+            const prefix = text.slice(Math.max(0, match.index - 100), match.index)
+                .split(/[;!?。।]|\.(?=\s|$)/u).at(-1) ?? '';
+            const suffix = text.slice(match.index + match[0].length, match.index + match[0].length + 70);
+            const conditional = phrase(String.raw `if|unless|si|se|wenn|falls|als|indien|إذا|اذا|إن|هل`).test(prefix) || /如果|若|अगर|यदि/u.test(prefix) ||
+                /^\s*(?:か|吗|嗎|m[ıiuü])(?=\s|[?,，]|$)/u.test(suffix) || /[?؟]/u.test(suffix);
+            const future = phrase(String.raw `will|scheduled|upcoming|sera|será|wird`).test(prefix) ||
+                phrase(String.raw `will|sera|será|wird`).test(match[0]);
+            const negative = phrase(String.raw `no|not|never|cannot|(?:have|has|had|did|was|were|is|are|do|does|could|would|should|must|need|ought)n['’]t|can['’]t|won['’]t|pas|aucun|aucune|nessun|nessuna|geen|niet|nicht|kein(?:e[nmrs]?)?|não|nao|لم|لن|ليس|لا`).test(prefix) ||
+                phrase(String.raw `non|pas|jamais|niet|nicht|não|geen`).test(match[0]) ||
+                /\bno\s+(?:(?:está|ha\s+sido)\s+)?(?:pagad[oa]|realizad[oa]|completad[oa]|recibid[oa])\b/iu.test(match[0]) ||
+                /\bremboursement\s+non\s+reçu\b/iu.test(match[0]) ||
+                /^\s*(?:नहीं|नहि|失败|失敗|尚未|未完成)/u.test(suffix);
+            statuses.push(conditional ? 'informational' : future ? 'future' : negative ? 'failed' : 'posted');
+        }
+        return found;
+    };
+    const debit = debitPatterns.map(matches).some(Boolean);
+    const refund = refundPatterns.map(matches).some(Boolean);
+    const deposit = matches(depositPattern);
+    const transferOut = matches(arabicTransferOut) || matches(transferOutWords);
+    const transferIn = matches(arabicTransferIn) || matches(transferInWords);
+    const cashWithdrawal = matches(phrase(String.raw `cash\s+out\s+of[\s\S]{0,140}?is\s+successful|processed\s+(?:a\s+)?debit\s+card\s+withdrawal\s*:|a\s+debit\s+transaction\s+from\s+withdrawal[\s\S]{0,140}?was\s+posted`));
+    if (cashWithdrawal && !refund && !deposit && !transferIn) {
+        const status = conservativeStatus(statuses);
+        return { status, direction: 'debit', family: status === 'posted' ? 'cash-withdrawal' : 'unknown' };
+    }
+    if (transferOut !== transferIn && !debit && !refund && !deposit) {
+        const status = conservativeStatus(statuses);
+        return { status, direction: transferOut ? 'debit' : 'credit', family: status === 'posted' ? 'transfer' : 'unknown' };
+    }
+    const status = conservativeStatus(statuses);
+    if (status !== 'posted' && statuses.length)
+        return { status, direction: 'debit', family: 'unknown' };
+    if (debit === (refund || deposit))
+        return null;
+    return refund ? { status, direction: 'credit', family: 'refund' }
+        : deposit ? { status, direction: 'credit', family: 'transfer' } : { status, direction: 'debit', family: 'purchase' };
+};
+const referenceSpans = (text) => [...text.matchAll(/\b(?:ref(?:erence)?(?:\s+(?:id|no\.?|number))?|(?:transaction|txn|customer|mandate)\s+(?:id|no\.?|number)|iban)\s*[:#-]?\s*([A-Z0-9*._-]{1,40})/giu)].filter((match) => /\d/u.test(match[1])).map((match) => ({
+    start: match.index + match[0].length - match[1].length,
+    end: match.index + match[0].length,
+}));
+const explicitNonPosting = (source, includeLifecycle = true) => {
+    const text = source.normalize('NFKC').replace(/\s+/gu, ' ');
+    const unconditional = (pattern, excludeAdvice = false) => [...text.matchAll(new RegExp(pattern.source, pattern.flags + 'g'))]
+        .some((match) => {
+        const prefix = text.slice(Math.max(0, match.index - 160), match.index)
+            .split(/[.!?;](?=\s|$)/u).at(-1) ?? '';
+        return !/\b(?:if|unless|wenn|falls|als|indien|si|se|eğer)\b|अगर|यदि/iu.test(prefix) &&
+            !(excludeAdvice && /\b(?:never|avoid|do\s+not|don't)\b/iu.test(prefix));
+    });
+    if (unconditional(/\b(?:password|passcode)\s*[:=]\s*\d{4,8}\b/iu, true)) {
+        return { status: 'informational', family: 'authentication' };
+    }
+    if (/\bauthori[sz]ation\s+approved\s*:/iu.test(text) && /\btemporary\s+hold\b/iu.test(text)) {
+        return { status: 'informational' };
+    }
+    if (includeLifecycle && unconditional(/\b(?:transfer|payment|purchase)\s+request\s+(?:received|approved|accepted)\b/iu)) {
+        return { status: 'informational' };
+    }
+    if (/^\s*(?:(?:tu|su)\s+)?estado\s+de\s+cuenta\b/iu.test(text)) {
+        return { status: 'informational', family: 'statement' };
+    }
+    const declined = [
+        /(?:^|[.!?;؟])\s*تم\s+رفض\s+(?:عملية\s+)?السحب\s+النقدي(?=\s|[.!?;؟]|$)/u,
+        /(?:^|[.!?;])\s*(?:your\s+)?(?:card\s+)?(?:payment|transaction|purchase)\s+(?:(?:was|is|has\s+been)\s+)?(?:declined|failed|rejected|not\s+approved)(?=\s*(?:[.!?;]|$))/iu,
+        /\b(?:kartenzahlung|zahlung)\b[^!?]{0,180}\babgelehnt(?=\s*(?:[.!?]|$))/iu,
+        /\b(?:betaling|kaartbetaling)\b[^!?]{0,180}\bgeweigerd(?=\s*(?:op\b|[.!?]|$))/iu,
+        /\b(?:kart\s+)?ödemeniz\s+reddedildi(?=\s*(?:[.!?]|$))/iu,
+        /\bpago\b[^!?]{0,180}\brechazado(?=\s*(?:[.!?]|$))/iu,
+        /(?:^|[。.!?])\s*(?:カード決済|カード支払い|決済|支払い)(?:が|は)?拒否されました/u,
+    ];
+    if (declined.some((pattern) => unconditional(pattern)))
+        return { status: 'failed' };
+    if ((0, bank_alert_semantic_rules_1.isExpectedFutureMoneyNotice)(text)) {
+        return { status: 'future' };
+    }
+    if ((0, bank_alert_semantic_rules_1.isApplicationPurchaseOffer)(text))
+        return { status: 'informational' };
+    if (!includeLifecycle)
+        return null;
+    if (unconditional(/\boverboeking\b[^!?]{0,180}\baangevraagd\b/iu))
+        return { status: 'informational' };
+    if (unconditional(/\b(?:subscription|membership)\s+will\s+(?:renew|be\s+renewed)\b/iu) ||
+        unconditional(/\bsubscrição\b[^.!?]{0,100}\bserá\s+renovada\b/iu) ||
+        unconditional(/\bassinatura\b[^!?]{0,120}\bserá\s+cobrada\b/iu) ||
+        unconditional(/定期購読[^。]{0,100}更新予定/u))
+        return { status: 'future' };
+    if (/^\s*(?:votre\s+)?facture\b[^.!?]{0,100}/iu.test(text) &&
+        /\b(?:montant\s+à\s+payer|date\s+limite\s+de\s+paiement)\b/iu.test(text)) {
+        return { status: 'future', family: 'bill' };
+    }
+    if (/^\s*(?:la\s+)?bolletta\b/iu.test(text) && /\b(?:da\s+pagare|scadenza)\b/iu.test(text)) {
+        return { status: 'future', family: 'bill' };
+    }
+    if (/^\s*(?:आपका\s+)?बिजली\s+बिल/u.test(text) && /देय\s+राशि|भुगतान\s+की\s+अंतिम\s+तिथि/u.test(text)) {
+        return { status: 'future', family: 'bill' };
+    }
+    if (/電気料金[^。]{0,50}請求/u.test(text) && /未払い|支払期限/u.test(text)) {
+        return { status: 'future', family: 'bill' };
+    }
+    return null;
+};
+function inspectUniversalBankEvent(source, context = {}) {
+    if (typeof source !== 'string' || !source.trim())
+        return emptyEvent('empty-input');
+    if (source.length > 4096)
+        return emptyEvent('input-too-long');
+    const latam = (0, latam_alert_templates_1.matchLatamTemplate)(source, { market: context.market, sender: context.sender });
+    if (latam)
+        return (0, latam_alert_templates_1.latamTemplateEvent)(source, latam);
+    const draft = (0, universal_money_1.inspectUniversalMoneyDraft)(source, context);
+    const fields = (0, universal_fields_1.extractUniversalFields)(source, context, draft.candidates.map((candidate) => candidate.span));
+    const money = (0, universal_money_1.extractUniversalMoney)(source, context, fields.merchant.evidence === 'explicit' ? fields.merchant.spans : [], [...fields.instrument.spans, ...fields.transactionDate.spans, ...fields.dueDate.spans,
+        ...fields.statementDate.spans, ...referenceSpans(draft.normalizedText)]);
+    if (money.draft.reasons.includes('too-many-money-candidates'))
+        return emptyEvent('too-many-money-candidates');
+    const span = money.transactionSpan ?? { start: 0, end: source.length };
+    const roleUnresolved = money.amount.issues.includes('amount-role-unresolved');
+    let maskedSource = source;
+    if (fields.merchant.evidence === 'explicit') {
+        for (const merchant of fields.merchant.spans) {
+            const start = merchant.start, end = merchant.end;
+            const depositPredicate = /\byour\s+interac\s+e[ -]?transfer\s+of\b/iu.test(source.slice(span.start, start))
+                ? source.slice(start, end).search(/\b(?:was|has\s+been)\s+deposited\b(?=\s*(?:[.,;!?]|$)|\s+(?:on|into|in|at|by|and)\b)/iu) : -1;
+            const maskEnd = depositPredicate < 0 ? end : start + depositPredicate;
+            if (maskEnd > start)
+                maskedSource = maskedSource.slice(0, start) + ' '.repeat(maskEnd - start) + maskedSource.slice(maskEnd);
+        }
+    }
+    const semanticSource = maskedSource.slice(span.start, span.end);
+    const packs = context.market ? [context.market] : LANGUAGE_PACKS;
+    const scopedReadings = packs.map((market) => (0, alert_semantics_1.inspectMarketAlert)(semanticSource, market, { sender: context.sender }));
+    const wholeContext = maskedSource.replace(/[\n\r;!?]|\.(?!\d)/gu, ' ');
+    const wholeReadings = roleUnresolved
+        ? packs.map((market) => (0, alert_semantics_1.inspectMarketAlert)(wholeContext, market, { sender: context.sender })) : [];
+    const separateInfo = money.observations.some((observation) => ['balance', 'credit-limit', 'statement-total', 'minimum-due'].includes(observation.role));
+    const wholeNegative = wholeReadings.some((reading) => reading.status === 'failed' || reading.status === 'future' || reading.family === 'authentication');
+    const readings = roleUnresolved && (wholeNegative || !separateInfo) ? wholeReadings : scopedReadings;
+    let status = conservativeStatus(readings.map((reading) => reading.status));
+    const families = [...new Set(readings.map((reading) => reading.family).filter((family) => family !== 'unknown'))];
+    let family = families.length === 1 ? families[0] : 'unknown';
+    const firstPrincipal = money.amount.spans[0]?.start === draft.candidates[0]?.span.start;
+    const questionTail = maskedSource.slice(span.end).match(/^\s*[?？؟]/u)?.[0].length ?? 0;
+    const movement = completedMovement(maskedSource.slice(firstPrincipal ? 0 : span.start, span.end + questionTail));
+    const completion = !roleUnresolved || movement?.status !== 'posted' ? movement : null;
+    if (completion) {
+        if (completion.status !== 'posted' || status === 'unknown')
+            status = completion.status;
+        if (family === 'unknown' || (completion.direction === 'credit' && family === 'cash-withdrawal'))
+            family = completion.family;
+    }
+    const sourceControl = explicitNonPosting(source, false) ??
+        explicitNonPosting(status === 'posted' && !roleUnresolved ? maskedSource.slice(span.start, span.end) : maskedSource);
+    const challengeHeader = /\b(?:otp|verification\s+code|security\s+code)\s*(?:is\s*)?[:=-]?\s*\p{N}/iu.test(source.slice(0, span.start));
+    const challenge = sourceControl?.family === 'authentication' || challengeHeader || /\botp(?=\d)/iu.test(semanticSource) ||
+        (roleUnresolved && (draft.reasons.includes('authentication-or-otp') ||
+            /\botp(?=\d)/iu.test(draft.normalizedText)));
+    const controlText = roleUnresolved ? wholeContext : semanticSource;
+    const pending = /\b(?:pending|awaiting)\s+(?:authori[sz]ation|approval|confirmation|processing|clearance)\b/iu.test(controlText);
+    const explicitlyUnsuccessful = [...controlText.matchAll(/\bnot\s+(?:(?:yet|been|be|successfully)\s+){0,2}(?:successful|completed|processed|posted|approved|paid|debited|deducted|credited)\b/giu)].some((match) => !/\bif(?:\s+\w+){0,6}\s*$/iu.test(controlText.slice(Math.max(0, match.index - 65), match.index)));
+    if (challenge || pending)
+        status = 'informational';
+    if (explicitlyUnsuccessful)
+        status = 'failed';
+    if (!challenge && (0, bank_alert_semantic_rules_1.isTransactionVerificationChallenge)(wholeContext) && status === 'posted') {
+        status = 'unknown';
+    }
+    if (sourceControl) {
+        status = sourceControl.status;
+        if (sourceControl.family)
+            family = sourceControl.family;
+    }
+    if (challenge)
+        family = 'authentication';
+    if (roleUnresolved && (status === 'posted' || status === 'unknown')) {
+        status = 'unknown';
+        family = 'unknown';
+    }
+    const pendingAnywhere = /(?<!\p{L})(?:pending|pendente|pendiente|ausstehend|en\s+attente|in\s+attesa|in\s+behandeling|em\s+processamento|awaiting)(?!\p{L})|معلق/iu
+        .test(source);
+    if (pendingAnywhere && (status === 'posted' || status === 'unknown'))
+        status = 'informational';
+    const hasStatement = money.statementTotal.evidence !== 'missing' || money.minimumDue.evidence !== 'missing';
+    const hasBalance = money.balance.evidence !== 'missing' || money.creditLimit.evidence !== 'missing';
+    const hasAmount = money.amount.evidence !== 'missing';
+    const firstMoney = draft.candidates[0]?.span.start ?? source.length;
+    let header = source.slice(0, firstMoney);
+    if (fields.merchant.evidence === 'explicit') {
+        for (const merchant of fields.merchant.spans) {
+            const start = merchant.start, end = Math.min(firstMoney, merchant.end);
+            if (end > start)
+                header = header.slice(0, start) + ' '.repeat(end - start) + header.slice(end);
+        }
+    }
+    const cardBillingHeader = /^\s*cr\.\s*card\s+[x*•·]*\d{4}\s+billing\s+alert\s*:/iu.test(source);
+    const statementHeader = cardBillingHeader || sourceControl?.family === 'statement' ||
+        (0, alert_semantics_1.inspectMarketAlert)(header, context.market ?? 'US').family === 'statement';
+    if (statementHeader || (hasStatement && (!hasAmount || status !== 'posted'))) {
+        family = 'statement';
+        status = 'informational';
+    }
+    else if (!hasAmount && hasBalance) {
+        family = 'balance';
+        status = 'informational';
+    }
+    else if (money.observations.some((observation) => observation.role === 'bill-due') && status !== 'posted') {
+        family = 'bill';
+        status = 'future';
+    }
+    const cardSettlement = /\bpayment\b[\s\S]{0,100}\b(?:towards?|against)\s+(?:your\s+)?(?:[\p{L}&.-]+\s+){0,3}?(?:(?:credit|covered|charge)\s+)?card\b|\bpayment\b[\s\S]{0,100}\b(?:received|credited)\s+(?:to|on|for)\s+(?:your\s+)?(?:[\p{L}&.-]+\s+){0,3}?(?:credit|covered|charge)\s+card\b|\breceived\s+your\s+payment\b[\s\S]{0,100}\b(?:to|towards?|for|on)\s+(?:your\s+)?(?:[\p{L}&.-]+\s+){0,3}?(?:credit|covered|charge)\s+card\b/iu.test(semanticSource);
+    const cardPaymentReceipt = /^\s*your\s+payment\b[^\n]{0,96}\bagainst\s+(?:your\s+)?(?:credit|covered)\s+card\b[^\n]{0,96}\bwas\s+received\b/iu.test(source);
+    if (!statementHeader && (cardPaymentReceipt || (cardSettlement && status === 'posted'))) {
+        family = 'card-payment';
+        if (cardPaymentReceipt && status === 'unknown')
+            status = 'posted';
+    }
+    const multiplePostings = money.observations.filter((observation) => observation.role === 'transaction').length > 1;
+    if (multiplePostings && status !== 'failed' && family !== 'statement' && family !== 'balance') {
+        family = 'unknown';
+        status = 'informational';
+    }
+    const knownDirection = commonDirection(readings.map((reading) => reading.direction));
+    const accountDirection = (0, alert_semantics_1.accountMovementDirection)(semanticSource, firstPrincipal ? maskedSource.slice(0, span.start) : '');
+    const structured = source.normalize('NFKC');
+    const heading = structured.trimStart().split(/\r?\n/u, 1)[0].trim();
+    let headingDirection = 'unknown';
+    if (!roleUnresolved && money.amount.evidence !== 'missing') {
+        if (/^(?:debit|credit)\s*!?$/iu.test(heading) &&
+            /(?:^|\n)\s*(?:acct|acc|account|a\/?c)\s*:/iu.test(structured) &&
+            /(?:^|\n)\s*(?:amt|amount)\s*:/iu.test(structured)) {
+            headingDirection = /^credit/iu.test(heading) ? 'credit' : 'debit';
+        }
+        else if (/(?:^|\n)\s*مبلغ\s*:/u.test(structured)) {
+            if (/^حوالة\s+واردة(?=$|[\s:؛])/u.test(heading))
+                headingDirection = 'credit';
+            else if (/^(?:شراء|سحب\s*:\s*صراف\s+آلي|سداد\s+فاتورة|مدفوعات\s+وزارة\s+الداخلية)(?=$|[\s:؛])/u.test(heading))
+                headingDirection = 'debit';
+        }
+    }
+    if (family === 'unknown' && status === 'posted' && knownDirection === 'credit' && !roleUnresolved &&
+        /\b(?:credited|deposited)\s+(?:to|into|in)\s+(?:your\s+)?(?:\w+\s+){0,2}(?:a\/?c|acct|account)\b|\b(?:a\/?c|acct|account)\b[^.;\n]{0,30}?\b(?:has\s+been\s+|is\s+)?credited\s+(?:with|by)\b|\bdirect\s+deposit\b/iu.test(maskedSource)) {
+        family = 'transfer';
+    }
+    const afterClause = maskedSource.slice(span.end);
+    const sentenceTail = afterClause.search(/[;!?\n。।]|\.(?=\s|$)/u);
+    const nextMoneyStart = draft.candidates.find((candidate) => candidate.span.start >= span.end)?.span.start ?? source.length;
+    const directionEnd = Math.min(span.end + (sentenceTail < 0 ? afterClause.length : sentenceTail), nextMoneyStart);
+    const directionText = maskedSource.slice(span.start, directionEnd);
+    const explicitDebit = phrase(String.raw `debited|charged|débité|belastet|abgebucht|cargado|addebitato|afgeschreven`).test(directionText);
+    const explicitCredit = phrase(String.raw `credited|crédité|gutgeschrieben|abonado|accreditato|bijgeschreven`).test(directionText);
+    const directionConflict = (explicitDebit && (explicitCredit || completion?.direction === 'credit')) ||
+        (explicitCredit && completion?.direction === 'debit') ||
+        (headingDirection !== 'unknown' && knownDirection !== 'unknown' && headingDirection !== knownDirection) ||
+        new Set(readings.map((reading) => reading.direction).filter((value) => value === 'debit' || value === 'credit')).size > 1;
+    const counterpartyReceipt = /\b(?:received|credited|accepted)\s+(?:by|to|at|in(?:to)?)\s+(?:her|his|their|the\s+(?:recipient|payee|beneficiary|receiver)(?:['’]s)?)\s+(?:bank|account)\b/iu
+        .test(source);
+    const readDirection = status === 'posted' || status === 'unknown'
+        ? roleUnresolved || directionConflict ? 'unknown' : accountDirection !== null ? accountDirection : knownDirection === 'unknown'
+            ? completion?.direction ?? headingDirection : knownDirection : 'none';
+    const receivedYourTransfer = /\bhas\s+received\s+your\s+(?:bank\s+)?transfer\b/iu.test(source);
+    const personSubject = source.match(/^\s*([A-Z][A-Z'’-]+(?:[ \t]+[A-Z][A-Z'’-]+){1,3})[ \t]+has[ \t]+received[ \t]+your[ \t]+(?:bank[ \t]+)?transfer\b/u)?.[1] ?? null;
+    const personReceivedYourTransfer = personSubject !== null &&
+        !/\b(?:revolut|n26|paypal|wise|monzo|starling|bunq|venmo|cash\s*app|zelle|klarna|ltd|limited|inc|gmbh|plc|llc|bank|account|space|pocket|vault|savings|wallet|card)\b/iu.test(personSubject);
+    const direction = counterpartyReceipt && readDirection === 'credit' ? 'unknown'
+        : receivedYourTransfer && readDirection === 'credit' ? personReceivedYourTransfer ? 'debit' : 'unknown'
+            : readDirection;
+    const authentication = challenge || readings.some((reading) => reading.family === 'authentication');
+    const promotion = [...readings, ...wholeReadings].some((reading) => reading.draft.reasons.includes('promotion'));
+    const reviewable = hasAmount || hasStatement || hasBalance;
+    const decision = reviewable && status !== 'failed' && !authentication && !pending && !promotion ? 'review' : 'ignore';
+    const reviewOnlyIssuer = status === 'posted' && REVIEW_ONLY_ISSUER_HINT.test(`${source} ${context.sender ?? ''}`) &&
+        (0, latam_alert_templates_1.isReviewOnlyLatamInstitution)(source, context.sender, context.market);
+    if (reviewOnlyIssuer)
+        status = 'unknown';
+    const issues = [
+        ...money.amount.issues,
+        ...money.observations.flatMap((observation) => observation.field.issues),
+        ...Object.values(fields).flatMap((field) => field.issues),
+        ...(status === 'unknown' ? ['posting-status-unresolved'] : []),
+        ...(reviewOnlyIssuer ? ['institution-review-only'] : []),
+        ...(direction === 'unknown' ? ['direction-unresolved'] : []),
+        ...(directionConflict ? ['direction-conflict'] : []),
+        ...(multiplePostings ? ['multiple-event-adapter-required'] : []),
+        ...(fields.merchant.evidence === 'missing' ? ['merchant-unresolved'] : []),
+        ...(hasAmount && fields.transactionDate.evidence === 'missing' ? ['transaction-date-unresolved'] : []),
+        ...(family === 'statement' && money.statementTotal.evidence === 'missing' ? ['statement-total-unresolved'] : []),
+        ...(family === 'statement' && fields.dueDate.evidence === 'missing' ? ['due-date-unresolved'] : []),
+        ...(authentication ? ['authentication-not-posting'] : []),
+        ...(pending || pendingAnywhere ? ['pending-not-posting'] : []),
+        ...(cardSettlement ? ['settlement-adapter-required'] : []),
+        ...(status === 'failed' ? ['failed-not-posting'] : []),
+        ...(promotion ? ['promotion-not-posting'] : []),
+    ];
+    return {
+        version: 1, decision, family, status, direction,
+        amount: family === 'statement' || family === 'balance' ? (0, universal_types_1.missingUniversalField)() : money.amount,
+        statementTotal: money.statementTotal, minimumDue: money.minimumDue,
+        balance: money.balance, creditLimit: money.creditLimit,
+        ...fields, observations: money.observations, issues: [...new Set(issues)],
+    };
+}
+},
+"universal-types":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.missingUniversalField = void 0;
+const missingUniversalField = (issue) => ({
+    value: null, evidence: 'missing', spans: [], alternatives: [], issues: issue ? [issue] : [],
+});
+exports.missingUniversalField = missingUniversalField;
+},
+"unparsed-launch-alert":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.inspectUnparsedLaunchAlert = exports.inspectUnparsedLaunchSemantics = exports.hasAffirmativeSettledMovement = exports.normalizeUnparsedLaunchTemplate = exports.UNPARSED_LAUNCH_REVIEW_VERSION = void 0;
+const alert_draft_1 = require("@/lib/alert-draft");
+const markets_1 = require("@/lib/markets");
+const sms_parser_1 = require("@/lib/sms-parser");
+exports.UNPARSED_LAUNCH_REVIEW_VERSION = 1;
+const normalizeUnparsedLaunchTemplate = (source) => source
+    .normalize('NFKC')
+    .toLocaleLowerCase('en-US')
+    .replace(/https?:\/\/\S+|www\.\S+/giu, ' <url> ')
+    .replace(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/giu, ' <email> ')
+    .replace(/[+*x•·#\s-]*\d(?:[\d,.:\/\-*x•·#\s]*\d)?/giu, ' <n> ')
+    .replace(/[^\p{L}<>]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+exports.normalizeUnparsedLaunchTemplate = normalizeUnparsedLaunchTemplate;
+const AUTH_OR_FUTURE = /\b(?:otp|one[ -]?time|verification code|security code|approve|declined|failed|rejected|pending|processing|will be|scheduled|due(?:\s+on)?|statement|minimum due|offers?|cashbacks?|save\s+up\s+to|get\s+up\s+to|apply\s+(?:now|today)|eligible\s+for|(?:when|once|if)\s+(?:you\s+)?(?:are\s+)?(?:eligible|qualif(?:y|ied))|after\s+(?:(?:your\s+)?registration|you\s+(?:register|sign\s+up|open\s+(?:an?\s+)?account)|opening\s+(?:an?\s+)?account)|upon\s+(?:registration|sign[ -]?up|account\s+opening))\b|رمز (?:التحقق|التأكيد)|سيتم|مستحق|مرفوض|فشل|عرض/iu;
+const COMPACT_LEDGER_CREDIT = /\b(?:account|a\/?c|card|cc)\b(?:[^.\n]|\.(?=\d)){0,48}\bcr\b|\bcr\b(?:[^.\n]|\.(?=\d)){0,48}\b(?:account|a\/?c|card|cc)\b/iu;
+const COMPACT_LEDGER_DEBIT = /\b(?:account|a\/?c|card|cc)\b(?:[^.\n]|\.(?=\d)){0,48}\bdr\b|\bdr\b(?:[^.\n]|\.(?=\d)){0,48}\b(?:account|a\/?c|card|cc)\b/iu;
+const COMPACT_ACCOUNT_CREDIT = /\bcredited\s+(?:to\s+)?(?:your\s+)?(?:account|a\/?c)\b/iu;
+const COMPACT_LEDGER_POSTED = new RegExp(`${COMPACT_LEDGER_CREDIT.source}|${COMPACT_LEDGER_DEBIT.source}` +
+    String.raw `|\b(?:atm|cash)\s+wdl\b|\b(?:card\s+)?pur\b(?:[^.\n]|\.(?=\d)){0,80}\bcard\b` +
+    String.raw `|\b(?:ft|ibft)\b(?:[^.\n]|\.(?=\d)){0,96}\b(?:ben|beneficiary)\b(?:[^.\n]|\.(?=\d)){0,48}\b(?:success|successful|completed)\b`, 'iu');
+const AFFIRMATIVE_SETTLED_MOVEMENT = /\b(?:credited|deposited|received|debited|deducted|withdrawn|charged|purchased|paid|sent|transferred|moved|posted|completed|processed|successful|refunded|reversed|re-?credited)\b|\bpayment\s+applied\b|\b(?:has\s+been|was)\s+(?:applied|assessed)\b|تم (?:ايداع|استلام|ارسال|استقطاع|خصم|دفع|سداد|تحويل|تنفيذ|استرداد|رد|عكس|الخصم|الدفع|التحويل|التنفيذ)/iu;
+const hasAffirmativeSettledMovement = (source) => {
+    const bounded = (0, sms_parser_1.normalizeArabic)(source.slice(0, 4096).normalize('NFKC')).replace(/\s+/gu, ' ');
+    return AFFIRMATIVE_SETTLED_MOVEMENT.test(bounded) || COMPACT_LEDGER_POSTED.test(bounded);
+};
+exports.hasAffirmativeSettledMovement = hasAffirmativeSettledMovement;
+const POSTED_MOVEMENT = /\b(?:credit\s+alert|credited|deposited|received|debited|deducted|withdrawn|cash withdrawal|charged|purchase(?:d)?|paid|sent|transferred|moved|posted|completed|processed|successful|refunded|reversed|re-?credited)\b|\bpayment\s+applied\s+to\s+(?:your\s+)?(?:credit|covered)\s+card\b|\b(?:has\s+been|was)\s+(?:applied|assessed)\b|\batm\s+wdl\b|تم (?:ايداع|استلام|ارسال|استقطاع|خصم|دفع|سداد|تحويل|تنفيذ|استرداد|رد|عكس|الخصم|الدفع|التحويل|التنفيذ)|اودع|خصم|سحب|شراء|استرداد|سداد|تحويل[^\n]{0,96}تم بنجاح/iu;
+const CREDIT = /\bcredit\s+alert\b[^.\n]{0,96}\b(?:salary|payroll|wages?|wps|monthly\s+pay|net\s+pay|remuneration|emoluments?|pay[ -]?cheques?|paychecks?)\b|\b(?:account|a\/?c)\b[^.\n]{0,56}\b(?:has\s+been\s+|was\s+)?credited(?:\s+(?:with|by))?\b|\b(?:credited|deposited|received|salary|payroll|wages?|wps|inward remittance|transferred|paid|posted)\b[^.\n]{0,80}\b(?:to|into|in)\s+(?:(?:your|the)\s+)?(?:[\p{L}&-]+\s+){0,3}(?:bank\s+)?(?:account|a\/?c)|\b(?:salary|payroll|wages?|wps|monthly\s+pay|net\s+pay|remuneration|emoluments?|pay[ -]?cheques?|paychecks?)\b[^.\n]{0,80}\b(?:credit(?:ed)?|deposited|received|paid|transferred|posted)\b|\b(?:refund(?:ed)?|reversed|credited back|re-?credited)\b[^\n]{0,80}\b(?:to|into|on)\s+(?:your\s+)?(?:account|a\/?c|card)\b|\b(?:credit|covered)\s+card\s+payment\b[\s\S]{0,40}\b(?:received|credited|posted|applied)\b|\bpayment\b[\s\S]{0,72}\b(?:received|credited|posted|applied)\b[\s\S]{0,40}\b(?:for|towards?|to)\b[\s\S]{0,32}\b(?:your\s+)?(?:credit|covered)\s+card\b|\b(?:credit|covered)\s+card\b[^.\n]{0,48}\bcredited\s+with\s+(?:a\s+)?payment\b|تم ايداع|تم (?:استرداد|رد)[^\n]{0,80}(?:الي|الى) (?:حسابك|بطاقتك)|تم استلام[^\n]{0,64}سداد[^\n]{0,48}بطاق[هة]|حوال[هة] وارد[هة]?|راتب|مرتب/iu;
+const REFUND_CREDIT = /\b(?:refund|reversal|charge[ -]?back)\b[^\n]{0,96}\b(?:posted|credited|re-?credited|refunded|returned)?\s*(?:to|into|on)\s+(?:your\s+)?(?:account|a\/?c|card)\b|\b(?:cash withdrawal|utility payment|outgoing transfer|card purchase)\b[^\n]{0,96}\breversed\b[^\n]{0,64}\bcredited\s+(?:to|into)\s+(?:your\s+)?(?:account|a\/?c|card)\b|تم (?:استرداد|رد)[^\n]{0,80}(?:الي|الى) (?:حسابك|بطاقتك)|تم\s+عكس[^\n]{0,80}(?:تحويل|خصم|سحب)[^\n]{0,80}(?:اعاد[هة]|رد)[^\n]{0,40}(?:الي|الى)\s+حسابك/iu;
+const REFUND_FOR_REVERSED_MOVEMENT = /\b(?:refund|re-?credit(?:ed)?)\b[^.\n]{0,96}\b(?:for|of|against)\s+(?:a\s+)?reversed\s+(?:purchase|transaction|charge|payment)\b/iu;
+const DEBIT_FEE_REVERSAL_CREDIT = /\b(?:fee|commission|bank\s+charge|account\s+charge|card\s+charge)\b(?:[^.\n]|\.(?=\d)){0,96}\b(?:was\s+|has\s+been\s+)?reversed\b/iu;
+const SALARY_PROCESSED_TO_ACCOUNT_CREDIT = /\b(?:salary|payroll|wages|wps|monthly\s+pay|remuneration|emoluments?)\b(?:[^.\n]|\.(?=\d)){0,80}\bprocessed\s+(?:to|into)\s+(?:your\s+)?(?:account|a\/?c)\b/iu;
+const CREDIT_REVERSAL_DEBIT = /\b(?:salary|payroll|wages|wps|refund|credit(?:ed)?|deposit(?:ed)?|incoming (?:payment|transfer)|inward remittance)\b[^\n]{0,96}\b(?:was\s+|has\s+been\s+)?reversed\b|\brefund\b[^\n]{0,96}\breversed\b[^\n]{0,48}\bdebited\b|تم\s+عكس[^\n]{0,64}(?:راتب|مرتب|ايداع|استرداد)/iu;
+const COMPACT_CREDIT_REVERSAL_DEBIT = /\b(?:sal(?:ary)?\s+pay|payroll|wps)\b(?:[^.\n]|\.(?=\d)){0,96}\bcr\b(?:[^.\n]|\.(?=\d)){0,96}\breversed\b/iu;
+const COMPACT_DEBIT_REVERSAL_CREDIT = /\b(?:atm\s+wdl|cash\s+wdl|billpay|annual\s+fee|monthly\s+fee|maintenance\s+fee|commission|pos)\b(?:[^.\n]|\.(?=\d)){0,96}\bdr\b(?:[^.\n]|\.(?=\d)){0,96}\breversed\b/iu;
+const DEBIT = /\b(?:debited|deducted|withdrawn|charged|purchase|paid|sent|moved)\b[^.\n]{0,80}\b(?:of|from|out\s+of|using|with|at|to)\b|\b(?:own|self)\s+(?:account\s+)?transfer\b[^\n]{0,120}\bfrom\b|\bfrom\s+(?:your|my)\s+(?:account|a\/?c)\b[\s\S]{0,96}\bto\s+(?:(?:your|my)(?:\s+(?:own|other))?|another\s+of\s+(?:your|my)|another|own)\s+(?:accounts?|a\/?c)\b|\btransfer\b[\s\S]{0,96}\bto\s+(?:a\s+)?beneficiary\b|\btransferred\s+between\s+(?:your|my|own)\s+accounts\b|\bcash withdrawal\b[^\n]{0,80}\b(?:from|at)\b|\btransferred\b[^.\n]{0,80}\b(?:from|out\s+of)\s+(?:your\s+)?(?:account|a\/?c)\b|\b(?:card|account|a\/?c)\b[^.\n]{0,48}\b(?:debited|charged|used)\b|\b(?:credit|covered)\s+card\b[^\n]{0,64}\bpayment\b[^\n]{0,48}\b(?:processed|completed|successful)\b|\b(?:electricity|water|utility|telecom|internet|mobile|gas)\s+(?:bill|account|payment)\b[^\n]{0,96}\b(?:paid|processed|completed|successful)\b|\bpaid\b[^\n]{0,80}\bfor\s+(?:an?\s+)?(?:electricity|water|utility|telecom|internet|mobile|gas)\s+(?:bill|account)\b|(?:\b(?:sewa|dewa|etisalat|du)\b|\be&(?=\s|$))[^\n]{0,96}\b(?:payment|bill|account)\b[^\n]{0,80}\b(?:paid|processed|completed|successful)\b|تحويل\s+بين\s+حساباتك[^\n]{0,96}تم\s+بنجاح|تم (?:الخصم|الدفع|التحويل|استقطاع|ارسال|خصم|دفع|سداد)|تم تحويل[^\n]{0,96}من حسابك|خصم|سحب|شراء/iu;
+const EXPLICIT_OWN_DEBIT = /\bdebited\s+from\s+(?:your\s+)?(?:account|a\/?c)\b(?:[^.\n]|\.(?=\d)){0,112}\bcredited\s+to\s+(?:another\s+of\s+your|your\s+other|your\s+own)\s+(?:accounts?|a\/?c)\b/iu;
+const COMPACT_OWN_DEBIT = /\bown\s+(?:account|a\/?c)\s+(?:transfer|trf)\b(?:[^.\n]|\.(?=\d)){0,96}\bdr\b(?:[^.\n]|\.(?=\d)){0,64}\b(?:account|a\/?c)\b(?:[^.\n]|\.(?=\d)){0,96}\bcr\b(?:[^.\n]|\.(?=\d)){0,64}\b(?:account|a\/?c)\b|\bdr\b(?:[^.\n]|\.(?=\d)){0,48}\b(?:account|a\/?c)\b(?:[^.\n]|\.(?=\d)){0,96}\bown\s+(?:account|a\/?c)\s+(?:transfer|trf)\b(?:[^.\n]|\.(?=\d)){0,96}\bcr\b(?:[^.\n]|\.(?=\d)){0,48}\b(?:account|a\/?c)\b/iu;
+const EXPLICIT_EXTERNAL_DEBIT = /\bbeneficiary\b(?:[^.\n]|\.(?=\d)){0,96}\breceived\b(?:[^.\n]|\.(?=\d)){0,96}\bfrom\s+your\s+(?:account|a\/?c)\b|\bft\b(?:[^.\n]|\.(?=\d)){0,96}\bfrom\s+(?:your\s+)?(?:account|a\/?c)\b(?:[^.\n]|\.(?=\d)){0,96}\bto\s+(?:a\s+)?beneficiary\b/iu;
+const EXPLICIT_FEE_DEBIT = /\b(?:fee|commission|charge)\b(?:[^.\n]|\.(?=\d)){0,96}\b(?:has\s+been\s+applied|was\s+assessed)\b|\b(?:has\s+been\s+applied|was\s+assessed)\b(?:[^.\n]|\.(?=\d)){0,96}\b(?:fee|commission|charge)\b/iu;
+const EXPLICIT_ATM_DEBIT = /\batm\s+wdl\b(?:[^.\n]|\.(?=\d)){0,96}\b(?:db|debit(?:ed)?)\b(?:[^.\n]|\.(?=\d)){0,48}\bfrom\s+(?:your\s+)?(?:account|a\/?c)\b/iu;
+const EXPLICIT_FOR_DEBIT = /\b(?:debited|deducted)\b(?:[^.\n]|\.(?=\d)){0,80}\bfor\b/iu;
+const BALANCE_OR_DUE = /\b(?:available|current|remaining|closing)\s+(?:balance|limit)|\b(?:balance|credit limit|amount due|minimum due|statement total|outstanding)\b|الرصيد (?:الحالي|المتاح|المتوفر)|المتوفر في حسابك|الحد (?:المتاح|الائتماني)|المبلغ المستحق/iu;
+const MOVEMENT = /\b(?:credited|deposited|received|salary|payroll|wages|wps|monthly\s+pay|remuneration|emoluments?|posted|debited|deducted|withdrawn|cash withdrawal|charged|purchase|payment|paid|sent|transfer|transferred|moved|refund|refunded|re-?credited|reversed|bill payment|ft|atm\s+wdl|applied|assessed)\b|تم (?:ايداع|استلام|ارسال|استقطاع|خصم|دفع|سداد|تحويل|استرداد|رد|عكس|الخصم|الدفع|التحويل)|خصم|سحب|شراء|راتب|مرتب|سداد|استرداد|تحويل/iu;
+const slug = (value) => value
+    .normalize('NFKC')
+    .toLocaleLowerCase('en-US')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+const institutionFor = (sender) => {
+    const bounded = sender.slice(0, 256);
+    const hits = markets_1.MARKETS.flatMap((market) => market.banks
+        .filter((bank) => bank.re.test(bounded))
+        .map((bank) => ({ market: market.id, name: bank.name, id: slug(bank.name) })));
+    return hits.length === 1 ? hits[0] : null;
+};
+const candidateContext = (text, start, end) => text.slice(Math.max(0, start - 72), Math.min(text.length, end + 72));
+const primaryMoney = (source, market) => {
+    const localCurrency = market === 'AE' ? 'AED' : 'SAR';
+    const aliases = market === 'AE'
+        ? { Dhs: ['AED'], dirham: ['AED'], dirhams: ['AED'], 'درهم': ['AED'], 'دراهم': ['AED'] }
+        : { SR: ['SAR'], riyal: ['SAR'], riyals: ['SAR'], 'ريال': ['SAR'] };
+    const draft = (0, alert_draft_1.inspectAlertDraft)(source, { currencyAliases: aliases });
+    const eligible = draft.candidates.filter((candidate) => {
+        if (candidate.currency !== localCurrency || candidate.minorUnits === null ||
+            candidate.exponent === null || !/^[1-9]\d{0,39}$/.test(candidate.minorUnits))
+            return false;
+        const before = draft.normalizedText.slice(Math.max(0, candidate.span.start - 48), candidate.span.start);
+        const after = draft.normalizedText.slice(candidate.span.end, candidate.span.end + 36);
+        const instrumentLast4BeforeCurrency = /^\d{4}\s+(?:AED|SAR)$/iu.test(candidate.sourceText.trim()) &&
+            /(?:\b(?:account|card|cc)|a\/?c)\s*$/iu.test(before) &&
+            draft.candidates.some((other) => other !== candidate &&
+                other.currency === localCurrency && other.minorUnits !== null);
+        if (instrumentLast4BeforeCurrency)
+            return false;
+        if (BALANCE_OR_DUE.test(before) || /^\s*(?:available|current|remaining|closing)\s+(?:balance|limit)\b/iu.test(after)) {
+            return false;
+        }
+        const context = candidateContext(draft.normalizedText, candidate.span.start, candidate.span.end);
+        return MOVEMENT.test(context) || COMPACT_LEDGER_POSTED.test(context);
+    });
+    if (eligible.length !== 1)
+        return null;
+    const candidate = eligible[0];
+    return {
+        currency: localCurrency,
+        minorUnits: candidate.minorUnits,
+        exponent: candidate.exponent,
+    };
+};
+const instrumentFrom = (source) => {
+    const card = source.match(/(?:\b(?:card(?:\s+no)?|cc)\b|بطاق[هة])[^.\n]{0,32}?(?:x{2,}|\*{2,}|ending(?:\s+with)?|last\s*4)?\s*(\d{4})\b/iu);
+    if (card)
+        return { kind: 'card', last4: card[1] };
+    const account = source.match(/(?:\b(?:account|a\/?c)\b|حساب)[^.\n]{0,32}?(?:x{2,}|\*{2,}|ending(?:\s+with)?|last\s*4)?\s*(\d{4})\b/iu);
+    return account ? { kind: 'account', last4: account[1] } : null;
+};
+const familyFrom = (source, direction) => {
+    if (/\b(?:refund|reversal|reversed)\b|استرداد/iu.test(source))
+        return 'refund';
+    if (/\b(?:atm|cash withdrawal)\b|صراف|سحب نقدي/iu.test(source))
+        return 'cash-withdrawal';
+    if (/\b(?:fee|commission|service charge)\b|رسوم|عمول[هة]/iu.test(source))
+        return 'fee';
+    if (/\b(?:electricity|water|utility|telecom|mobile bill)\b|كهرباء|مياه|فاتور[هة]/iu.test(source))
+        return 'utility';
+    if (direction === 'credit')
+        return 'transfer';
+    if (/\b(?:transfer|remittance|moved?\s+(?:from|out\s+of|to|into))\b|تحويل|حوال[هة]/iu.test(source))
+        return 'transfer';
+    return 'purchase';
+};
+const inspectUnparsedLaunchSemantics = (source, market, allowFutureFooter = false) => {
+    const bounded = (0, sms_parser_1.normalizeArabic)(source.slice(0, 4096).normalize('NFKC')).replace(/\s+/gu, ' ');
+    const lined = source.slice(0, 4096).normalize('NFKC');
+    if (!bounded || (0, sms_parser_1.nonPostingReason)(bounded) || (0, sms_parser_1.nonPostingReason)(lined) || (0, sms_parser_1.isNonCashNotice)(lined) || (!allowFutureFooter && AUTH_OR_FUTURE.test(bounded)) ||
+        (!POSTED_MOVEMENT.test(bounded) && !COMPACT_LEDGER_POSTED.test(bounded))) {
+        return { outcome: 'refuse', reason: 'non-posting' };
+    }
+    const refundForReversedMovement = REFUND_FOR_REVERSED_MOVEMENT.test(bounded);
+    const creditReversalDebit = !refundForReversedMovement &&
+        (CREDIT_REVERSAL_DEBIT.test(bounded) || COMPACT_CREDIT_REVERSAL_DEBIT.test(bounded));
+    const refundCredit = !creditReversalDebit &&
+        (refundForReversedMovement || REFUND_CREDIT.test(bounded) ||
+            DEBIT_FEE_REVERSAL_CREDIT.test(bounded) || COMPACT_DEBIT_REVERSAL_CREDIT.test(bounded));
+    const ownDebit = !refundCredit && (EXPLICIT_OWN_DEBIT.test(bounded) ||
+        COMPACT_OWN_DEBIT.test(bounded) ||
+        /\bfrom\s+(?:your\s+)?(?:account|a\/?c)\b(?:[^.\n]|\.(?=\d)){0,96}\bto\s+(?:another\s+account\s+of\s+yours|another\s+of\s+your\s+accounts?)\b/iu.test(bounded));
+    const externalDebit = !refundCredit && (EXPLICIT_EXTERNAL_DEBIT.test(bounded) ||
+        /\b(?:ben|beneficiary)\b(?:[^.\n]|\.(?=\d)){0,96}\bcr\b(?:[^.\n]|\.(?=\d)){0,96}\bfrom\s+(?:your\s+)?(?:account|a\/?c)\b|\bibft\b(?:[^.\n]|\.(?=\d)){0,96}\bfrom\s+(?:your\s+)?(?:account|a\/?c)\b(?:[^.\n]|\.(?=\d)){0,96}\bto\s+(?:a\s+)?(?:ben|beneficiary)\b/iu.test(bounded));
+    const feeDebit = !refundCredit && EXPLICIT_FEE_DEBIT.test(bounded);
+    const atmDebit = !refundCredit && EXPLICIT_ATM_DEBIT.test(bounded);
+    const compactCashDebit = !refundCredit &&
+        /\b(?:atm|cash)\s+wdl\b(?:[^.\n]|\.(?=\d)){0,96}\bfrom\s+(?:your\s+)?(?:account|a\/?c)\b/iu.test(bounded);
+    const compactPurchaseDebit = !refundCredit &&
+        /\b(?:card\s+)?pur\b(?:[^.\n]|\.(?=\d)){0,80}\bcard\b/iu.test(bounded);
+    const forDebit = !refundCredit && EXPLICIT_FOR_DEBIT.test(bounded);
+    const forcedDebit = creditReversalDebit || ownDebit || externalDebit || feeDebit ||
+        atmDebit || compactCashDebit || compactPurchaseDebit || forDebit;
+    const credit = !forcedDebit && (refundCredit || CREDIT.test(bounded) ||
+        SALARY_PROCESSED_TO_ACCOUNT_CREDIT.test(bounded) || COMPACT_LEDGER_CREDIT.test(bounded) ||
+        COMPACT_ACCOUNT_CREDIT.test(bounded));
+    const debit = forcedDebit || (!refundCredit &&
+        (DEBIT.test(bounded) || COMPACT_LEDGER_DEBIT.test(bounded)));
+    if (credit === debit)
+        return { outcome: 'refuse', reason: 'unclear-direction' };
+    const amount = primaryMoney(bounded, market);
+    if (!amount)
+        return { outcome: 'refuse', reason: 'unclear-amount' };
+    const direction = credit ? 'credit' : 'debit';
+    return {
+        outcome: 'review',
+        review: {
+            amount,
+            direction,
+            family: familyFrom(bounded, direction),
+            rail: null,
+            instrument: instrumentFrom(bounded),
+        },
+    };
+};
+exports.inspectUnparsedLaunchSemantics = inspectUnparsedLaunchSemantics;
+const inspectUnparsedLaunchAlert = (source, sender) => {
+    const institution = institutionFor(sender);
+    if (!institution)
+        return { outcome: 'refuse', reason: 'unknown-institution' };
+    const semantic = (0, exports.inspectUnparsedLaunchSemantics)(source, institution.market);
+    if (semantic.outcome === 'refuse')
+        return semantic;
+    const grammar = {
+        id: `${institution.market.toLowerCase()}-${institution.id}-review-v1`,
+        version: exports.UNPARSED_LAUNCH_REVIEW_VERSION,
+        channel: 'bank-alert',
+        status: 'experimental',
+        provenance: 'launch-registry',
+    };
+    return {
+        outcome: 'review',
+        review: {
+            parserVersion: exports.UNPARSED_LAUNCH_REVIEW_VERSION,
+            market: institution.market,
+            institution: institution.id,
+            grammar,
+            ...semantic.review,
+        },
+    };
+};
+exports.inspectUnparsedLaunchAlert = inspectUnparsedLaunchAlert;
+}
+};
+const mappings={"alert-draft":{"@/lib/currency-metadata":"currency-metadata"},"alert-event-evidence":{},"alert-institution-grammars":{},"alert-market-detection":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-semantics":"alert-semantics","@/lib/markets":"markets"},"alert-market-packs":{"@/lib/alert-market-packs.india-me":"alert-market-packs.india-me","@/lib/alert-market-packs.us-eu":"alert-market-packs.us-eu","@/lib/alert-market-packs.world":"alert-market-packs.world"},"alert-market-packs.india-me":{},"alert-market-packs.us-eu":{},"alert-market-packs.world":{},"alert-semantics":{"@/lib/alert-draft":"alert-draft","@/lib/alert-event-evidence":"alert-event-evidence","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-market-packs":"alert-market-packs","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"alert-source-ownership":{"@/lib/alert-draft":"alert-draft"},"bank-alert-interpreter":{"@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules","@/lib/categories":"categories","@/lib/bank-alert-semantic-output":"bank-alert-semantic-output","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser","@/lib/unparsed-launch-alert":"unparsed-launch-alert"},"bank-alert-semantic-output":{},"bank-alert-semantic-rules":{"@/lib/sms-parser":"sms-parser"},"bank-amount-tokens":{},"best-effort-autopost":{"@/lib/currency-metadata":"currency-metadata","@/lib/capture-source-identity":"capture-source-identity","@/lib/fx-rates":"fx-rates","@/lib/sms-parser":"sms-parser"},"bnpl-providers":{},"brand-categories":{},"capture-source-identity":{},"categories":{"@/lib/i18n":"i18n"},"country":{"@/lib/country-names":"country-names"},"country-names":{},"currency-metadata":{},"fx":{"@/lib/currency-metadata":"currency-metadata","@/lib/ledger-money":"ledger-money"},"fx-rates":{"@/lib/fx":"fx"},"gulf-neighbour-alerts":{"@/lib/best-effort-autopost":"best-effort-autopost","@/lib/country":"country","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/gulf-neighbour-templates":"gulf-neighbour-templates","@/lib/sms-parser":"sms-parser","@/lib/universal-parser":"universal-parser"},"gulf-neighbour-templates":{"@/lib/best-effort-autopost":"best-effort-autopost"},"i18n":{},"ios-background-alert-parser":{"@/lib/currency-metadata":"currency-metadata","@/lib/country":"country","@/lib/markets":"markets","@/lib/launch-alert-parser":"launch-alert-parser","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/fx":"fx","@/lib/sms-parser":"sms-parser"},"latam-alert-templates":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/sms-parser":"sms-parser","@/lib/universal-types":"universal-types"},"launch-alert-parser":{"@/lib/alert-market-detection":"alert-market-detection","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/country":"country","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/bank-alert-interpreter":"bank-alert-interpreter","@/lib/markets":"markets","@/lib/bnpl-providers":"bnpl-providers","@/lib/sms-parser":"sms-parser","@/lib/currency-metadata":"currency-metadata","@/lib/gulf-neighbour-alerts":"gulf-neighbour-alerts","@/lib/universal-parser":"universal-parser","@/lib/alert-market-packs":"alert-market-packs","@/lib/alert-draft":"alert-draft","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/universal-categorization":"universal-categorization","@/lib/fx-rates":"fx-rates"},"ledger-money":{"@/lib/currency-metadata":"currency-metadata"},"markets":{"@/lib/country":"country"},"sms-parser":{"@/lib/categories":"categories","@/lib/markets":"markets","@/lib/bank-amount-tokens":"bank-amount-tokens","@/lib/fx":"fx","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/bnpl-providers":"bnpl-providers"},"universal-categorization":{"@/lib/brand-categories":"brand-categories","@/lib/categories":"categories","@/lib/sms-parser":"sms-parser"},"universal-dates":{"@/lib/alert-source-ownership":"alert-source-ownership","@/lib/universal-types":"universal-types"},"universal-fields":{"@/lib/universal-types":"universal-types","@/lib/alert-draft":"alert-draft","@/lib/universal-dates":"universal-dates"},"universal-money":{"@/lib/alert-draft":"alert-draft","@/lib/alert-market-packs":"alert-market-packs","@/lib/currency-metadata":"currency-metadata","@/lib/universal-fields":"universal-fields","@/lib/universal-types":"universal-types"},"universal-parser":{"@/lib/universal-types":"universal-types","@/lib/alert-semantics":"alert-semantics","@/lib/universal-fields":"universal-fields","@/lib/universal-money":"universal-money","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"universal-types":{},"unparsed-launch-alert":{"@/lib/alert-draft":"alert-draft","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser"}};
+const cache=Object.create(null);
+function load(id){
+if(Object.prototype.hasOwnProperty.call(cache,id))return cache[id].exports;
+if(!Object.prototype.hasOwnProperty.call(factories,id))throw new Error('Unknown bundled module');
+const module={exports:{}};cache[id]=module;
+factories[id](module,module.exports,function(specifier){
+if(!Object.prototype.hasOwnProperty.call(mappings[id],specifier))throw new Error('External dependency refused');
+return load(mappings[id][specifier]);});return module.exports;
+}
+const parse=load("ios-background-alert-parser").parseIosBackgroundAlert;
+if(typeof parse!=='function')throw new Error('Parser adapter export missing');
+globalThis.wafraNativeAlertParse=function(inputJson){return JSON.stringify(parse(JSON.parse(inputJson)));};
+})();

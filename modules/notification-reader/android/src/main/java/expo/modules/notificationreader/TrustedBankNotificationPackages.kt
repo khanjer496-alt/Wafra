@@ -31,7 +31,16 @@ object TrustedBankNotificationPackages {
 
   private val FINANCIAL_CONTEXT_RE = Regex(
     "\\b(?:debit(?:ed)?|credit(?:ed)?|purchase|payment|transaction|transfer|spent|withdraw(?:al|n)?|refund|card|account|balance|statement|merchant|pos|atm|iban|swift)\\b" +
-      "|بطاق[هة]|حساب|رصيد|معامل[هة]|عملي[هة]|شراء|دفع|تحويل|سحب|استرداد",
+      "|بطاق[هة]|حساب|رصيد|معامل[هة]|عملي[هة]|شراء|دفع|تحويل|سحب|استرداد" +
+      // Existing European parser packs must be able to see native candidates.
+      // These bounded words only admit to parsing; they confer no package trust.
+      "|(?<![\\p{L}\\p{N}])(?:" +
+      "lastschrift(?:en)?|kartenbelastung|kartenzahlung|gutschrift(?:en)?|gutgeschrieben|abgebucht|belastet|bezahlt|zahlung(?:en)?|[uü]berweisung(?:en)?|kontostand|konto|karte(?:n)?|abhebung(?:en)?|erstattet" +
+      "|d[eé]bit[eé]e?s?|cr[eé]dit[eé]e?s?|effectu[eé]e?|pay[eé]e?|paiements?|virements?|achats?|retraits?|remboursements?|cartes?|comptes?|solde|op[eé]rations?" +
+      "|d[eé]bitos?|cargos?|cargad[oa]|abonos?|abonad[oa]|pagos?|pagad[oa]|transferencias?|compras?|retiradas?|retiros?|reembolsos?|tarjetas?|cuentas?|saldo|transacci(?:[oó]n|ones)" +
+      "|addebito|addebitat[oa]|accredito|accreditat[oa]|pagament[oi]|pagat[oa]|bonific[oi]|acquist[oi]|preliev[oi]|rimbors[oi]|carta|carte|conto|transazion[ei]" +
+      "|afgeschreven|bijgeschreven|betaald|betaling(?:en)?|overboeking(?:en)?|overschrijving(?:en)?|kaart(?:betaling)?|rekening(?:en)?|geldopname|terugbetaling" +
+      ")(?![\\p{L}\\p{N}])",
     RegexOption.IGNORE_CASE,
   )
 

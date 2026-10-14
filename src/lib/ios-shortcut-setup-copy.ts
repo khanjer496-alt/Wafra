@@ -45,7 +45,7 @@ const copy = {
     guide: [
       { title: 'Open Shortcuts', body: 'Tap Automation, then +.', chips: ['Automation', '+'] },
       { title: 'Choose Message', body: 'Scroll the list and tap Message.', chips: ['Message'] },
-      { title: 'Type one space', body: 'In Message Contains, type a single space. Leave Sender empty.', chips: ['Message Contains', 'Space'] },
+      { title: 'Type one space', body: 'In Message Contains, type a single space. Leave Sender empty. Wafra reads the currency from each bank alert.', chips: ['Message Contains', 'Space'] },
       { title: 'Run Immediately', body: 'Pick Run Immediately, turn off Notify When Run if shown, then tap Next.', chips: ['Run Immediately', 'Next'] },
       { title: 'Pick the shortcut', body: 'Choose {shortcut}. Tap Done if it appears; otherwise it saves automatically.', chips: ['{shortcut}', 'Done (if shown)'] },
     ],
@@ -93,7 +93,7 @@ const copy = {
     guide: [
       { title: 'افتح الاختصارات', body: 'اضغط «الأتمتة»، ثم +.', chips: ['الأتمتة', '+'] },
       { title: 'اختر «رسالة»', body: 'مرّر القائمة واضغط «رسالة».', chips: ['رسالة'] },
-      { title: 'اكتب مسافة واحدة', body: 'في «تحتوي الرسالة على» اكتب مسافة واحدة، واترك «المرسل» فارغاً.', chips: ['تحتوي الرسالة على', 'مسافة'] },
+      { title: 'اكتب مسافة واحدة', body: 'في «تحتوي الرسالة على» اكتب مسافة واحدة، واترك «المرسل» فارغاً. يقرأ وفرة العملة من كل رسالة بنكية.', chips: ['تحتوي الرسالة على', 'مسافة'] },
       { title: 'تشغيل فوراً', body: 'اختر «تشغيل فوراً»، وأوقف «الإشعار عند التشغيل» إن ظهر، ثم اضغط «التالي».', chips: ['تشغيل فوراً', 'التالي'] },
       { title: 'اختر الاختصار', body: 'اختر {shortcut}. اضغط «تم» إن ظهر؛ وإلا فسيُحفظ تلقائياً.', chips: ['{shortcut}', 'تم إن ظهر'] },
     ],

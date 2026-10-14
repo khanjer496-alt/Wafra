@@ -24,6 +24,8 @@ import type { CategoryId } from '@/lib/types';
 import { CURRENCY_SYMBOL_CANDIDATES, currencyMinorUnits } from '@/lib/currency-metadata';
 import { decideGulfNeighbourPosting, gulfNeighbourReadSource, isGulfNeighbourMarket } from '@/lib/gulf-neighbour-alerts';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
+import { alertMarketPack } from '@/lib/alert-market-packs';
+import { normalizeAlertText } from '@/lib/alert-draft';
 import { isLatamOwnCardPayment, latamOwnTransferTitle, latamPolicySource, matchLatamTemplate } from '@/lib/latam-alert-templates';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { FxQuote } from '@/lib/fx';
@@ -46,6 +48,7 @@ const LAUNCH_MONEY_HINT = /(?:\b|(?<=\d))(?:AED|Dhs?\.?|SAR|SR)\b|د\.?[إا]\.?
 
 export const hasBankAlertMoneyHint = (source: string): boolean =>
   REVIEW_MONEY_HINT.test(source) || LAUNCH_MONEY_HINT.test(source) ||
+  /(?<![\p{L}\p{N}])TSh\s*\d/iu.test(source) ||
   [...source.matchAll(/(?<![A-Z])([A-Z]{3})(?![A-Z])/giu)]
     .some((match) => currencyMinorUnits(match[1]) !== null) ||
   // Case-insensitive only for multi-letter symbols ("Ksh" for KSh): a short
@@ -115,6 +118,18 @@ const MONEY_ARRIVED_CLAIM =
 const MONEY_CLAIM_EVIDENCE =
   /(?<!\p{L})(?:\p{L}*bank|banco|banque|wallet|carteira|billetera|account|acct|a\/c|conta|cuenta|compte|konto|rekening|balance|bal|avl|saldo|solde|ref(?:erence)?|txn|trx|tid|transaction|transfer|transferencia|transfer[êe]ncia|virement|[ée]-?transfer|pix|spei|aani|sarie|yape|plin|nequi|daviplata|m-?pesa|mpesa|upi|imps|neft|rtgs|zelle|interac|gcash|maya|paytm|jazzcash|easypaisa|momo|airtel\s+money)(?!\p{L})/iu;
 const TRANSACTION_CODE = /\b(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{8,12}\b/u;
+/** Explicit first-person chat cannot become an issuer alert through a money verb. */
+const PERSONAL_MESSAGE_PREFIX_RE = /^\s*(?:(?:hi|hey|hello)\b(?:[^\r\n.!?]{0,40}[,!:]|\s+)\s*)?(?:I(?:\s+(?:(?:have|just|already)\s+){0,2}|['’]ve\s+(?:(?:just|already)\s+)?)(?:spent|paid|bought|sent|deposited|transferred|refunded)\b|[اأ]نا\s+(?:(?:قد|لقد)\s+)?(?:صرفت|دفعت|اشتريت|حولت|حوّلت|أرسلت|ارسلت)(?=\s))/iu;
+export const hasPersonalMessagePrefix = (source: string): boolean => PERSONAL_MESSAGE_PREFIX_RE.test(source);
+
+// Only a leading principal-money claim is checked here. A posted purchase
+// must survive a separate negated fee, balance update or bank-security footer.
+const NEGATED_PRINCIPAL_MOVEMENT_RE = /^\s*(?:Dear\s+Customer[,!:]\s*)?((?:[A-Z]{3}|\p{Sc})\s*\d[\d,.]*)\s+(?:(?:has|have)\s+not\s+been|hasn['’]t\s+been|(?:was|were|is|are)\s+not|(?:was|were|is|are)n['’]t)\s+(?:transferred|debited|credited|deducted|charged|withdrawn|paid|deposited|refunded)\b/iu;
+const hasNegatedPrincipalMovement = (source: string): boolean => {
+  const match = NEGATED_PRINCIPAL_MOVEMENT_RE.exec(source);
+  return !!match && hasBankAlertMoneyHint(match[1]);
+};
+
 /**
  * First- and second-person chat: the writer says THEY sent it, or asks
  * whether it arrived. A bank never writes "from me" or "did you get it".
@@ -122,9 +137,34 @@ const TRANSACTION_CODE = /\b(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{8,12}\b/u;
 const PERSONAL_CHAT =
   /\b(?:from\s+me|i\s+(?:have\s+|'ve\s+|just\s+)?(?:sent|deposited|transferred|paid|refunded)|sent\s+it|did\s+(?:you|u)\s+(?:get|receive)|have\s+(?:you|u)\s+(?:got|received)|te\s+mandei|ukipata|nimekutumia)\b/iu;
 
-export const hasGenericBankAlertContext = (source: string, sender = ''): boolean =>
-  GENERIC_BANK_CONTEXT.test(source) || detectLaunchMarketFromSender(sender) !== null ||
-  hasUniversalInstitutionSender(sender);
+// South African bank layouts can use a bare rand symbol plus a masked account
+// field. This admits Review context only; the money reader still has to prove
+// the actual principal, and it never supplies the destination's ownership.
+const hasNativeCurrencyAccountContext = (source: string): boolean =>
+  getActiveCountry() === 'ZA' && ZA_RAND_HINT.test(source) &&
+  /\b(?:a\/c|acct?|account)\s*(?:ending(?:\s+in)?\s*|[.*x•·]{2,})\d{4,12}\b/iu.test(source) &&
+  /(?<![\p{L}\p{N}])R\s?\d[\d,.]{0,20}\s+(?:(?:has\s+been|was)\s+)?(?:paid|debited|credited|deposited|received)\b/iu.test(source) &&
+  !PERSONAL_CHAT.test(source) && !hasNonCompletedWording(source, null, '') &&
+  !hasLinkFromUnregisteredSender(source, '');
+
+export const hasGenericBankAlertContext = (source: string, sender = ''): boolean => {
+  // Normalize shaped Arabic letters with the same length-preserving contract
+  // as field extraction. This admits an alert to Review, not to posting.
+  const text = /[\uFB50-\uFDFF\uFE70-\uFEFF]/u.test(source) ? normalizeAlertText(source) : source;
+  if (GENERIC_BANK_CONTEXT.test(text) || detectLaunchMarketFromSender(sender) !== null ||
+      hasUniversalInstitutionSender(sender)) return true;
+  const accountFieldList = /^\s*(?:debit|credit)\s*!?\s*\r?\n/iu.test(text) &&
+    /(?:^|\n)\s*(?:acct|acc|account|a\/?c)\s*:/iu.test(text) &&
+    /(?:^|\n)\s*(?:amt|amount)\s*:/iu.test(text) && hasBankAlertMoneyHint(text);
+  // Public Tanzanian receipt layouts pair their literal unit with principal,
+  // balance and receipt identity. A bare wallet word or price is insufficient.
+  // Their settlement status is still decided by the universal status guards.
+  const walletReceipt = /(?<![\p{L}\p{N}])TSh\s*\d/iu.test(text) &&
+    /\b(?:balance|bal\s*:)/iu.test(text) &&
+    /\b(?:txn\s*id|transaction\s*id|receipt(?:\s*(?:no|number))?|ref(?:erence)?|id)\s*[:#]/iu.test(text) &&
+    /\b(?:amount|txn\s+amt|you\s+have\s+received|cash\s+out\s+of)\b/iu.test(text) && !PERSONAL_CHAT.test(text);
+  return accountFieldList || walletReceipt || hasNativeCurrencyAccountContext(text);
+};
 
 /**
  * Generic evidence augments misses in every country; it is always review-only.
@@ -135,7 +175,9 @@ export const inspectGenericBankEventForReview = (
   source: string,
   sender = '',
   market?: string | null,
+  sourceContext?: UniversalParseContext,
 ): UniversalBankEvent | null => {
+  if (hasPersonalMessagePrefix(source) || hasNegatedPrincipalMovement(source)) return null;
   // An exact LatAm bank template is bank-alert context in its own right.
   const noContext = !hasGenericBankAlertContext(source, sender) && !matchLatamTemplate(source, { sender });
   // A "money arrived" claim from a phone number, e-mail, generic header or
@@ -164,8 +206,13 @@ export const inspectGenericBankEventForReview = (
     ? inspectUniversalBankEvent(gulfNeighbourReadSource(source, market), {
         sender, market, dateOrder: dateOrderForCountry(market) ?? undefined,
       })
-    : inspectUniversalBankEvent(source, { sender, dateOrder: activeCountryDateOrder() });
+    : inspectUniversalBankEvent(source, sourceContext
+        ? { ...sourceContext, sender }
+        : universalSourceParseContext(hasUniversalInstitutionSender(sender)
+          ? inspectUniversalAlert({ source, sender }) : null, sender, getActiveCountry()));
   if (event.decision !== 'review') return null;
+  if (hasNativeCurrencyAccountContext(source) && !hasBankAlertMoneyHint(source) &&
+    (event.amount.evidence !== 'explicit' || event.amount.value?.currency !== 'ZAR')) return null;
   if (noContext && !((event.direction === 'credit' || (footerAdmitted && event.direction === 'debit')) &&
     event.status === 'posted' && event.amount.evidence !== 'missing')) return null;
   const hasGroundedMoney =
@@ -269,30 +316,57 @@ const ledgerMinorOf = (
   return Number.isSafeInteger(minor) ? minor : null;
 };
 
-// Credit-card brands that never write the words "credit card" count too.
+// Candidate payment context only; this never proves the paid card's kind.
 const CREDIT_CARD_WORDS = /\b(?:credit|charge|covered)\s+card\b|\bcredit\s*card\b|\bbarclaycard\b|\bamerican\s+express\b|\bamex\b|\bcapital\s+one\b|\bdiscover\s+card\b/iu;
 /** Not a card obligation at all: a loan/EMI statement that merely mentions a card. */
 const NOT_CARD_OBLIGATION = /\b(?:loan|emi|mortgage|finance|instal?ment\s+plan)\b/iu;
-/** A statement that owes nothing, or is not (yet / any more) an open bill. */
-const STATEMENT_NOT_OWED =
-  /\b\d[\d,]*(?:\.\d+)?\s*cr\b|\bcredit\s+balance\b|\bno\s+payment\s+(?:is\s+)?(?:due|required)\b|(?<![\p{L}\p{N}])-\s*[$£€₹]?\s*\d|\bpaid\s+in\s+full\b|\bhas\s+been\s+paid\b|\bwill\s+be\s+(?:generated|issued)\b|\bso\s+far\b|\bunbilled\b|\bwas\s+due\b|\boverdue\b/iu;
 
+/** The generic instrument field deliberately does not distinguish card kinds.
+ * Read kind only beside its validated tail span, in the payment clause or a
+ * standalone card heading. A debit/prepaid/gift number elsewhere cannot name
+ * an unnumbered credit-card payment, even when both cards share their tail.
+ */
+const sourceNamesPaidCreditCard = (source: string, event: UniversalBankEvent, last4: string): boolean => {
+  const template = matchLatamTemplate(source);
+  if (template?.status === 'posted' && template.ownTransfer === 'card-payment') return template.paidCard === last4;
+  const text = normalizeAlertText(source);
+  const kindPrefix = /\b(credit|charge|covered|debit|prepaid|gift)\s*card\s*(?:(?:ending(?:\s+(?:in|with))?|no\.?|number|last\s*4)\s*)?[:#-]?\s*[\dXx*•·-]*(?:[ \t]+[\dXx*•·-]{1,40})*\s*$/iu;
+  const boundary = /[!?;\n]|\.(?!\d)|(?<!\d)\./gu;
+  // Rs. belongs to its validated monetary token, not a new sentence. Keep
+  // indices unchanged so paid-card ownership still uses the original spans.
+  const sentenceText = text.replace(/\bRs\.(?=\s*\d)/giu, token => token.replace('.', ' '));
+  let paidCredit = false;
+  for (const span of event.instrument.spans) {
+    if (text.slice(span.start, span.end) !== last4) continue;
+    const before = text.slice(Math.max(0, span.start - 120), span.start);
+    const match = before.match(kindPrefix);
+    if (!match) continue;
+    if (/debit|prepaid|gift/i.test(match[1])) return false;
+    const kindStart = span.start - before.length + match.index!;
+    const prior = Array.from(sentenceText.slice(0, kindStart).matchAll(boundary)).at(-1);
+    const clauseStart = prior ? prior.index! + prior[0].length : 0;
+    const next = sentenceText.slice(span.end).search(boundary);
+    const clauseEnd = next < 0 ? text.length : span.end + next;
+    const clause = text.slice(clauseStart, clauseEnd);
+    const standalone = /^(?:your|the)?\s*$/iu.test(text.slice(clauseStart, kindStart).trim()) &&
+      text.slice(span.end, clauseEnd).trim() === '';
+    if (/\b(?:payment|repayment)\b/iu.test(clause) || standalone) paidCredit = true;
+  }
+  return paidCredit;
+};
 /**
- * WORLDWIDE CARD STATEMENTS AND CARD PAYMENTS.
+ * WORLDWIDE CARD PAYMENTS.
  *
- * The best-effort policy deliberately refuses these: a statement is an
- * obligation, not a movement, and a card payment is a settlement, not
- * spending or income. They used to stop in Review everywhere outside the
- * Gulf, so a US or Indian card never got its bill or its payment. They are
- * read here only when the alert proves the obligation on its own:
- *  - a statement needs a card (its last four, or credit-card wording), an
- *    explicit TOTAL and an explicit DUE DATE in the ledger currency; the
- *    minimum is kept only when it does not exceed the total;
+ * A card payment is a settlement, not spending or income. Read it only when
+ * the alert proves its own completed payment:
  *  - a payment must be a completed card-payment family alert that names the
  *    card's last four, in the ledger currency;
- *  - any refusal, code challenge, hold or pending wording stops both.
+ *  - any refusal, code challenge, hold or pending wording stops it.
+ * Unverified statements stay in typed Review: CardDue has no visible
+ * best-effort provenance or Undo. The universal field reader retains their
+ * total, minimum, deadline and instrument for that Review path.
  */
-const universalCardObligation = (
+const universalCardPayment = (
   source: string,
   event: UniversalBankEvent,
   ledgerCurrency: string,
@@ -300,7 +374,8 @@ const universalCardObligation = (
   country: string | null,
   observedAt?: number,
 ): Omit<ParsedSms, 'raw' | 'bestEffort'> | null => {
-  if (event.decision !== 'review' || nonPostingReason(source) || isNotAutoPostableMoney(source)) return null;
+  if (event.family !== 'card-payment' || event.decision !== 'review' ||
+    nonPostingReason(source) || isNotAutoPostableMoney(source)) return null;
   // An exact Latin American own card-bill template ("Pagaste ... en la tarjeta
   // de credito *4321 desde la cuenta *1234") names the paid card in Spanish.
   const latamCardPayment = event.family === 'card-payment' && isLatamOwnCardPayment(source);
@@ -310,34 +385,7 @@ const universalCardObligation = (
     issue === 'authentication-not-posting' || issue === 'pending-not-posting' || issue === 'failed-not-posting')) return null;
   const instrument = event.instrument.evidence === 'explicit' ? event.instrument.value : null;
   const last4 = instrument?.kind === 'card' && instrument.last4 && /^\d{4}$/.test(instrument.last4) ? instrument.last4 : null;
-  if (event.family === 'statement') {
-    if (STATEMENT_NOT_OWED.test(source)) return null;
-    // Some issuers call the statement total just "Balance" ("Your statement
-    // is ready. Balance £845.20, minimum payment £25.00 due by ..."). Only in
-    // a statement ANNOUNCEMENT that also states a minimum is that balance the
-    // amount owed; anywhere else "balance" is headroom or cash.
-    const announced = /\bstatement\b[^.\n]{0,40}\b(?:is\s+)?(?:ready|available|generated|issued)\b/iu.test(source);
-    const plainBalance = !/\b(?:available|avail|avl|remaining|current)\.?\s+(?:credit\s+)?(?:bal(?:ance)?|limit)\b/iu.test(source);
-    const total = ledgerMinorOf(event.statementTotal, country, ledgerCurrency, ledgerExponent) ??
-      (event.statementTotal.evidence === 'missing' && announced && plainBalance && event.minimumDue.evidence !== 'missing'
-        ? ledgerMinorOf(event.balance, country, ledgerCurrency, ledgerExponent) : null);
-    const due = event.dueDate.evidence === 'explicit' ? event.dueDate.value : null;
-    if (!total || !due || !/^\d{4}-\d{2}-\d{2}$/.test(due)) return null;
-    // A due date already behind the alert is a reminder about an old bill.
-    if (today && due < today) return null;
-    const minimum = ledgerMinorOf(event.minimumDue, country, ledgerCurrency, ledgerExponent);
-    const issued = event.statementDate.evidence === 'explicit' ? event.statementDate.value : null;
-    return {
-      kind: 'cardStatement', type: 'expense', amountFils: total, currency: ledgerCurrency,
-      merchant: last4 ? `Card •${last4}` : 'Card statement',
-      date: due, dueDay: Number(due.slice(8)),
-      minDueFils: minimum !== null && minimum <= total ? minimum : null,
-      card: last4 ? { last4, kind: 'credit' } : null,
-      ...(issued && /^\d{4}-\d{2}-\d{2}$/.test(issued) && issued < due ? { statementDate: issued } : {}),
-      reference: null, transferHint: false, snapshotFils: null, snapshotKind: null,
-      categoryGuess: 'other', categoryDeliberate: true,
-    };
-  }
+  if (!last4 || !sourceNamesPaidCreditCard(source, event, last4)) return null;
   if (event.family === 'card-payment' && event.status === 'posted' && last4 &&
     (event.direction === 'credit' || event.direction === 'debit')) {
     // The same completed-money guard every other worldwide posting passes:
@@ -494,6 +542,7 @@ interface UnprovenPostingContext {
   overrides?: Record<string, CategoryId>;
   /** The routed market's identified institution (Gulf-neighbour posting needs one). */
   institution?: { id: string; sender: boolean } | null;
+  inspection: UniversalAlertReview | null;
 }
 
 /** The identified institution of a single route, and whether the sender itself proved it. */
@@ -502,6 +551,55 @@ const routedInstitution = (inspection: UniversalAlertReview | null): { id: strin
   if (!review || review.decision !== 'identified' || !review.institution) return null;
   const candidate = review.candidates.find((item) => item.institution === review.institution);
   return { id: review.institution, sender: !!candidate?.evidence.includes('sender') };
+};
+
+/**
+ * A registered sender's single identified issuer scopes its money aliases.
+ * Its owned principal currency also supports the issuer's date convention;
+ * a multinational bank's foreign-currency alert keeps the country fallback.
+ * A bank name elsewhere in the body can be a merchant or beneficiary, so that
+ * route alone cannot supply aliases or override the person's chosen country.
+ * Conflicting issuers leave numeric dates unresolved even when country is set.
+ * Callers may share this context with Review; it grants no posting authority.
+ */
+export const universalSourceParseContext = (
+  inspection: UniversalAlertReview | null,
+  sender: string,
+  country: string | null,
+): UniversalParseContext => {
+  const route = inspection?.route;
+  const market = route?.decision === 'single' && route.market !== 'AE' && route.market !== 'SA' &&
+    routedInstitution(inspection)?.sender ? route.market : undefined;
+  const issuerConflict = route?.decision === 'ambiguous' && route.reasons.some(reason =>
+    reason === 'overlapping-sender' || reason === 'sender-institution-conflict' || reason === 'multiple-institutions');
+  const homeCurrencies: readonly string[] = market ? alertMarketPack(market).currencies : [];
+  // Informational balances, limits, fees and minimums cannot establish the
+  // principal's source convention. Use the common field-ownership reader,
+  // including its instrument/date/name exclusions, before selecting a token.
+  const sourceFields = market && inspection?.review
+    ? inspectUniversalBankEvent(inspection.review.draft.normalizedText, { sender, moneyMarket: market })
+    : null;
+  const principal = sourceFields?.amount.evidence === 'explicit' ? sourceFields.amount
+    : sourceFields?.family === 'statement' && sourceFields.statementTotal.evidence === 'explicit'
+      ? sourceFields.statementTotal : null;
+  const sourceOwnCurrency = !!market && !!inspection?.review?.draft.candidates.some(candidate => {
+    if (!principal?.spans.some(span => span.start === candidate.span.start && span.end === candidate.span.end) ||
+        candidate.evidence === 'ambiguous-symbol' || candidate.interpretations.length === 0 ||
+        !candidate.interpretations.every(value => homeCurrencies.includes(value.currency))) return false;
+    if (candidate.evidence === 'iso-code') return true;
+    // The routed draft can narrow a shared "$"/"Rs" alias. Re-read its exact
+    // monetary token without the route before treating it as country evidence.
+    // A pack-only literal unit (JD) has no global currency interpretation;
+    // an already unique global unit (£) retains its original interpretation.
+    const neutral = inspectUniversalBankEvent(candidate.sourceText);
+    const neutralCurrencies = neutral.observations.flatMap(row =>
+      row.field.value ? [row.field.value.currency] : row.field.alternatives.map(value => value.currency));
+    return neutralCurrencies.length === 0 || neutralCurrencies.every(currency => homeCurrencies.includes(currency));
+  });
+  const dateOrder = issuerConflict ? null : dateOrderForCountry(sourceOwnCurrency ? market : country);
+  const aliases = country ? COUNTRY_CURRENCY_ALIASES[country] : undefined;
+  return { sender, ...(market ? { moneyMarket: market } : {}), ...(dateOrder ? { dateOrder } : {}),
+    ...(aliases ? { currencyAliases: aliases } : {}) };
 };
 
 /**
@@ -537,17 +635,14 @@ const parseUniversalPostedEvent = (
   // unpinned ledger waits for Review (or a proven alert) to choose it.
   if (!pinnedCurrency) return null;
   const readSource = countryReadSource(source, context.country);
-  const aliases = context.country ? COUNTRY_CURRENCY_ALIASES[context.country] : undefined;
-  const event = inspectUniversalBankEvent(readSource, {
-    sender, dateOrder: activeCountryDateOrder(),
-    ...(aliases ? { currencyAliases: aliases } : {}),
-  });
+  const event = inspectUniversalBankEvent(readSource,
+    universalSourceParseContext(context.inspection, sender, context.country));
   // `$` resolves through the issuer's routed market first, as the policy does.
-  const obligation = universalCardObligation(readSource, event, pinnedCurrency, pinnedExponent,
+  const payment = universalCardPayment(readSource, event, pinnedCurrency, pinnedExponent,
     context.routedMarket ?? context.country, observedAt);
-  if (obligation) {
+  if (payment) {
     return {
-      ...obligation,
+      ...payment,
       bestEffort: { v: 1, format: `universal:${event.family}:${event.direction}`, market: context.routedMarket ?? context.country ?? 'ZZ' },
       raw: source.trim(),
     };
@@ -743,6 +838,7 @@ export const createLaunchAlertSession = ({
   let detected: 'AE' | 'SA' | null = null;
 
   const inspect = (source: string, sender: string): UniversalAlertReview | null => {
+    if (hasPersonalMessagePrefix(source) || hasNegatedPrincipalMovement(source)) return null;
     if (!REVIEW_MONEY_HINT.test(source)) return null;
     // A launch-tested issuer can quote any foreign transaction currency. Its
     // exact sender evidence already outranks that currency, and the universal
@@ -821,6 +917,7 @@ export const createLaunchAlertSession = ({
     forcedMarket?: string,
     observedAt?: number,
   ): ParsedSms | null => {
+    if (hasPersonalMessagePrefix(source) || hasNegatedPrincipalMovement(source)) return null;
     // A BNPL provider's restatement of a bank card charge (see
     // bnpl-providers.ts). The regional path already refuses it; the
     // worldwide fallback below must not resurrect it on an unpinned ledger.
@@ -890,6 +987,7 @@ export const createLaunchAlertSession = ({
       launchSenderMarket: null,
       overrides,
       institution: routedInstitution(inspection),
+      inspection,
     });
   };
 
@@ -899,6 +997,7 @@ export const createLaunchAlertSession = ({
     inspection: UniversalAlertReview | null = null,
     observedAt?: number,
   ): ParsedSms | null => {
+    if (hasPersonalMessagePrefix(source) || hasNegatedPrincipalMovement(source)) return null;
     if (!bestEffort.enabled) return null;
     // Same rule as parse(): an SMS from a BNPL provider's sender ID reaches
     // this path (it is no launch-bank sender) and must not post as an
@@ -928,6 +1027,7 @@ export const createLaunchAlertSession = ({
       launchSenderMarket,
       overrides,
       institution: routedInstitution(inspection),
+      inspection,
     });
   };
 

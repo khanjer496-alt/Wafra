@@ -406,6 +406,9 @@ function decodeStoredRelayConfig(raw: string, includeRevoked = false): RelayConf
  * Shortcut credential behind.
  */
 export async function getRelayConfigStrict(): Promise<RelayConfig | null> {
+  // Web cannot create this native SecureStore credential. Its local ledger
+  // can still be erased; native read/decoding failures below remain strict.
+  if (Platform.OS === 'web') return null;
   try {
     const raw = await SecureStore.getItemAsync(KEY);
     if (!raw) return null;

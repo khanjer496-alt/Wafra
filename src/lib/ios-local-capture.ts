@@ -5,6 +5,8 @@ import { isCaptureTimestamp } from '@/lib/ios-capture-health';
 import type { CaptureLedgerAdapter } from '@/lib/capture-executor';
 import { buildImportPlan, type ImportPlan } from '@/lib/import-plan';
 import { createLaunchAlertSession } from '@/lib/launch-alert-parser';
+import { createAiAlertReviewSession, type AiAlertReviewOptions } from '@/lib/ai-alert-reader';
+import { createPrivateAlertFormatSession, type PrivateAlertFormatSessionOptions } from '@/lib/private-alert-format-runtime';
 import {
   emptyAlertReviewTray,
   isUniversalReviewAlert,
@@ -19,6 +21,8 @@ import {
   currencyConflictFxNeed,
   currencyConflictReview,
   parseLocalMessageRecord,
+  parseLocalMessageRecordWithAi,
+  parseLocalMessageRecordWithPrivateFormat,
   parseLocalApplePayRecord,
   preflightLocalMessageRecord,
   type LocalMessageParseOutcome,
@@ -74,6 +78,9 @@ interface CoordinatorInput {
   retireShortcutCapture: () => Promise<'not-needed' | 'complete'>;
   /** Wall clock for record expiry checks; tests pin it to their fixture date. */
   now?: () => number;
+  /** Test/runtime injection; the source-grounded reader remains Review-only. */
+  aiReview?: AiAlertReviewOptions & { maxInferences?: number };
+  privateFormatReview?: PrivateAlertFormatSessionOptions;
   /**
    * Dated reference rate for a launch-market purchase on a ledger kept in
    * another currency. Resolves null when no rate is available (offline,
@@ -367,6 +374,15 @@ export function createIosLocalCaptureCoordinator(
       ? initialStatus.firstCapturedAt : null;
     if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
 
+    let aiGeneration = readLedgerGeneration(input.ledger);
+    const aiCancelled = (): boolean => {
+      if (captureOptedOut(input.ledger) || input.aiReview?.cancelled?.() || input.privateFormatReview?.cancelled?.()) return true;
+      try { return readLedgerGeneration(input.ledger) !== aiGeneration; } catch { return true; }
+    };
+    // Budget applies to the whole drain, including all its subsequent pages.
+    const aiReview = createAiAlertReviewSession({ ...input.aiReview, cancelled: aiCancelled });
+    const privateFormats = createPrivateAlertFormatSession({ ...input.privateFormatReview, cancelled: aiCancelled });
+
     // Older JS must never see a new source it would reject and acknowledge.
     // New binaries expose notification rows only through this opt-in API.
     // When held notification reviews fill a whole page, the Message-only
@@ -438,6 +454,7 @@ export function createIosLocalCaptureCoordinator(
         serializedPage[record.sourceIndex] = '';
       }
       const pageGeneration = readLedgerGeneration(input.ledger);
+      aiGeneration = pageGeneration;
 
       const outcomes: LocalMessageParseOutcome[] = [];
       const session = createLaunchAlertSession({
@@ -467,6 +484,14 @@ export function createIosLocalCaptureCoordinator(
             outcome = parseLocalApplePayRecord(serialized, now);
           } else if (record.preflight.valid) {
             outcome = parseLocalMessageRecord(serialized, now, record.preflight.market, session);
+            if (record.preflight.market === null) {
+              outcome = await parseLocalMessageRecordWithPrivateFormat(
+                serialized, now, null, session, privateFormats, aiCancelled, outcome,
+              );
+              outcome = await parseLocalMessageRecordWithAi(
+                serialized, now, null, session, aiReview, aiCancelled, outcome,
+              );
+            }
           }
         } finally {
           // Clear every JavaScript-owned copy before review/import durability
@@ -477,6 +502,8 @@ export function createIosLocalCaptureCoordinator(
         }
         outcomes.push(outcome);
       }
+      if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+      requireLedgerGeneration(input.ledger, pageGeneration);
 
       // Records whose OWN market conflicts with the stored ledger currency.
       // Converted before replay seeding, planning, and milestones: such a row
@@ -1033,6 +1060,8 @@ export function getSharedIosLocalCaptureCoordinator(
   const existing = sharedCoordinators.get(input.ledger.getState);
   if (existing && existing.input.native === input.native &&
     existing.input.retireShortcutCapture === input.retireShortcutCapture &&
+    existing.input.aiReview === input.aiReview &&
+    existing.input.privateFormatReview === input.privateFormatReview &&
     sameLedgerAdapter(existing.input.ledger, input.ledger)) {
     return existing.coordinator;
   }

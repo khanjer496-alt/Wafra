@@ -1,4 +1,5 @@
 import type { AppState, Transaction } from '@/lib/types';
+import { isValidPrivateAlertFormatStore } from '@/lib/private-alert-formats';
 import { isSpending } from '@/lib/ledger';
 import { isTransferEvidence, isTransferDecision, isTransferMatch } from '@/lib/transfer-reconciliation';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
@@ -240,6 +241,7 @@ export function isValidBackupState(value: unknown): value is Partial<Omit<AppSta
     if (new Set(categories).size !== categories.length) return false;
   }
   return optional(value, {
+    privateAlertFormats: isValidPrivateAlertFormatStore,
     merchantOverrides: dictionary(category), billAliases: dictionary(billAlias), accountHints: dictionary(id),
     statementCoverage: arrayOf(statementCoverageEntry),
     trustedNotificationPackages: arrayOf((v) => typeof v === 'string' && v.length <= 255 &&

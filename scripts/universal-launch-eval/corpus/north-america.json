@@ -1,0 +1,576 @@
+[
+  {
+    "id": "NA-US-CHASE-CC-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "24273",
+    "body": "Chase Freedom Unlimited: You made a $6.45 transaction with STARBUCKS STORE 08262 on Sep 3, 2026 at 7:42 AM ET.",
+    "expect": { "post": true, "amountMinor": 645, "type": "expense", "transfer": false, "merchant": "starbucks" },
+    "notes": "Chase credit card purchase alert ('<card name>: You made a $X transaction with MERCHANT on Mon D, YYYY at h:mm AM ET') from the 24273 short code; sent at purchase time and the only alert for it, so post",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-CHASE-CNP-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "24273",
+    "body": "Chase Sapphire Preferred: You made an online, phone, or mail transaction of $15.49 with NETFLIX.COM on Sep 5, 2026 at 11:02 PM ET.",
+    "expect": { "post": true, "amountMinor": 1549, "type": "expense", "transfer": false, "merchant": "netflix" },
+    "notes": "Chase card-not-present alert (online, phone, or mail transaction) for a subscription charge",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-CHASE-ATM-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "24273",
+    "body": "Chase: You made an ATM withdrawal of $200.00 on Sep 13, 2026 at 2:15 PM ET from your account ending in 4821.",
+    "expect": { "post": true, "amountMinor": 20000, "type": "expense", "transfer": false },
+    "notes": "Chase checking ATM withdrawal alert; cash out, no merchant",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-CHASE-ZELLE-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "24273",
+    "body": "Chase: You sent $45.00 to MARIA GARCIA with Zelle® on Sep 14, 2026. Ref# 7XK2P9QJ. If you didn't make this payment, call 1-877-242-7372.",
+    "expect": { "post": true, "amountMinor": 4500, "type": "expense", "transfer": true, "merchant": "maria garcia" },
+    "notes": "Chase Zelle sent confirmation with reference and call-back footer; P2P so transfer true",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-CHASE-DD-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "24273",
+    "body": "Chase: Your $2,345.67 direct deposit from ACME CORP PAYROLL posted to your account ending in 4821 on Sep 15, 2026.",
+    "expect": { "post": true, "amountMinor": 234567, "type": "income", "transfer": false, "merchant": "acme" },
+    "notes": "Chase ACH payroll direct deposit posted alert; employer payroll, not a person-to-person transfer, so transfer false",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-CHASE-BILLPAY-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "24273",
+    "body": "Chase: Your $142.80 payment to PG&E was sent on Sep 18, 2026 from your account ending in 4821. Confirmation #: 9KD4-71XZ.",
+    "expect": { "post": true, "amountMinor": 14280, "type": "expense", "transfer": false, "merchant": "pg&e" },
+    "notes": "Chase Online Bill Pay sent confirmation for a utility bill; completed bill payment",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-BOFA-DEBIT-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "73981",
+    "body": "BofA: Debit card purchase of $54.32 at WHOLE FOODS MARKET #10293 on 09/08/2026 for account ending in 4455. Not you? Call 800.432.1000.",
+    "expect": { "post": true, "amountMinor": 5432, "type": "expense", "transfer": false, "merchant": "whole foods" },
+    "notes": "Bank of America debit card purchase alert from 73981 with MM/DD/YYYY date and dotted helpline",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-BOFA-ZELLE-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "73981",
+    "body": "BofA: DAVID KIM sent you $300.00 with Zelle®. The money is in your account ending in 4455.",
+    "expect": { "post": true, "amountMinor": 30000, "type": "income", "transfer": true, "merchant": "david kim" },
+    "notes": "Bank of America Zelle received alert (sender name first); P2P in, transfer true",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-BOFA-REFUND-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "73981",
+    "body": "Bank of America: A credit of $29.99 from AMAZON.COM*RT4K2 was posted to your credit card ending in 7788 on 09/19/2026.",
+    "expect": { "post": true, "amountMinor": 2999, "type": "income", "transfer": false, "merchant": "amazon" },
+    "notes": "Bank of America merchant credit (refund) posted to a credit card; refund in is income",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-WF-CARD-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "93557",
+    "body": "Wells Fargo: Card ending in 1234 was used for a purchase of $27.45 at TRADER JOE'S #551 on 09/09/26. Reply STOP to cancel alerts.",
+    "expect": { "post": true, "amountMinor": 2745, "type": "expense", "transfer": false, "merchant": "trader joe" },
+    "notes": "Wells Fargo card purchase alert from 93557 with two-digit year and STOP footer",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-WF-DD-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "93557",
+    "body": "Wells Fargo: A direct deposit of $1,875.32 from GLOBEX INC PAYROLL was posted to your account XXXXXX5678 on 09/15/2026.",
+    "expect": { "post": true, "amountMinor": 187532, "type": "income", "transfer": false, "merchant": "globex" },
+    "notes": "Wells Fargo ACH payroll direct deposit alert with X-masked account",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-CITI-CC-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "692484",
+    "body": "Citi Alert: A $132.87 transaction was made at COSTCO WHSE #0148 on your Citi Double Cash card ending in 5678 on 09/10/2026. Didn't make this purchase? Call 1-800-950-5114.",
+    "expect": { "post": true, "amountMinor": 13287, "type": "expense", "transfer": false, "merchant": "costco" },
+    "notes": "Citi purchase alert ('Citi Alert: A $X transaction was made at ...') from the MYCITI short code; only alert for the purchase, so post",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-CAPONE-CC-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "227898",
+    "body": "Capital One: A purchase of $42.18 was charged to your Quicksilver card ending in 1234 at UBER EATS on Sep 11, 2026. Questions? Call 1-800-227-4825.",
+    "expect": { "post": true, "amountMinor": 4218, "type": "expense", "transfer": false, "merchant": "uber" },
+    "notes": "Capital One credit card purchase alert from 227898; food delivery, card not present",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-CAPONE-DEP-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "227898",
+    "body": "Capital One: A mobile deposit of $1,500.00 has posted to your 360 Checking account ending in 9012 on Sep 30, 2026.",
+    "expect": { "post": true, "amountMinor": 150000, "type": "income", "transfer": false },
+    "notes": "Capital One 360 mobile check deposit posted; money in, not a P2P transfer",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-AMEX-CC-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "26739",
+    "body": "American Express: A charge of $1,245.00 at DELTA AIR LINES was approved on your Card ending in 31005 on Sep 20, 2026. Not you? Call 1-800-528-4800.",
+    "expect": { "post": true, "amountMinor": 124500, "type": "expense", "transfer": false, "merchant": "delta" },
+    "notes": "Amex large-purchase approval text (5-digit card tail); the approval is the only alert the cardmember gets for the charge, so post",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-AMEX-PUSH-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "Amex",
+    "body": "Purchase Approved\n$58.12 at SHAKE SHACK on Card ending in 31005",
+    "expect": { "post": true, "amountMinor": 5812, "type": "expense", "transfer": false, "merchant": "shake shack" },
+    "notes": "Amex app push notification (title line plus amount-at-merchant line); approval-time alert treated as the spend",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-DISCOVER-CC-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "347268",
+    "body": "Discover: A transaction of $64.50 at TARGET 00012345 was made on your card ending in 4567 on 09/17/2026. Text STOP to end alerts.",
+    "expect": { "post": true, "amountMinor": 6450, "type": "expense", "transfer": false, "merchant": "target" },
+    "notes": "Discover card transaction alert with store number in the merchant descriptor",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-USBANK-DEBIT-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "872265",
+    "body": "U.S. Bank: Debit card purchase of $18.75 at CHIPOTLE 2345 on 09/21/26 from acct ending 4321. Not you? Call 800-872-2657.",
+    "expect": { "post": true, "amountMinor": 1875, "type": "expense", "transfer": false, "merchant": "chipotle" },
+    "notes": "U.S. Bank debit card purchase alert (acct abbreviation, two-digit year)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-PNC-FEE-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "96762",
+    "body": "PNC Alert: An overdraft fee of $36.00 was charged to your account ending in 7788 on 09/23/2026. Visit pnc.com for details.",
+    "expect": { "post": true, "amountMinor": 3600, "type": "expense", "transfer": false },
+    "notes": "PNC overdraft fee charged alert; a bank fee actually taken is spending",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-PNC-BILLPAY-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "96762",
+    "body": "PNC Alert: Your bill payment of $89.50 to COMCAST was paid from account ending in 7788 on 09/24/2026.",
+    "expect": { "post": true, "amountMinor": 8950, "type": "expense", "transfer": false, "merchant": "comcast" },
+    "notes": "PNC Online Bill Pay completed alert",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-TDUS-CARD-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "83393",
+    "body": "TD Bank: Your Visa Debit Card ending in 4455 was used for $72.40 at PUBLIX SUPER MARKETS on 09/25/2026.",
+    "expect": { "post": true, "amountMinor": 7240, "type": "expense", "transfer": false, "merchant": "publix" },
+    "notes": "TD Bank (US) debit card usage alert",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-VENMO-RCV-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "Venmo",
+    "body": "Mike Torres paid you $40.00 for \"pizza night 🍕\"",
+    "expect": { "post": true, "amountMinor": 4000, "type": "income", "transfer": true, "merchant": "mike torres" },
+    "notes": "Venmo app push 'X paid you $Y for <note>' with emoji note; P2P in, transfer true",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-VENMO-SENT-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "86753",
+    "body": "Venmo: You paid Sarah Lee $25.00 for \"concert tix\". Transaction ID 4128830917.",
+    "expect": { "post": true, "amountMinor": 2500, "type": "expense", "transfer": true, "merchant": "sarah lee" },
+    "notes": "Venmo SMS payment-sent confirmation from 86753 (payee before amount); P2P out",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-CASHAPP-CARD-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "Cash App",
+    "body": "You spent $12.50 at McDonald's with your Cash Card",
+    "expect": { "post": true, "amountMinor": 1250, "type": "expense", "transfer": false, "merchant": "mcdonald" },
+    "notes": "Cash App push for a Cash Card (debit) purchase; no account tail or date in the body",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-CHIME-DD-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "Chime",
+    "body": "Payday came early! 💸 Your direct deposit of $1,643.22 from INITECH LLC has been deposited into your Checking Account.",
+    "expect": { "post": true, "amountMinor": 164322, "type": "income", "transfer": false, "merchant": "initech" },
+    "notes": "Chime early direct deposit push with marketing-flavoured opener; payroll income",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-CA-RBC-CC-1",
+    "country": "CA",
+    "ledger": "CAD",
+    "sender": "722722",
+    "body": "RBC Royal Bank: A purchase of $54.21 was made at SOBEYS #4521 on your RBC Visa card ending in 1234 on Sep 12, 2026.",
+    "expect": { "post": true, "amountMinor": 5421, "type": "expense", "transfer": false, "merchant": "sobeys" },
+    "notes": "RBC credit card purchase alert; Canadian short code, dollar sign means CAD for a Canadian customer",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-CA-RBC-ETR-1",
+    "country": "CA",
+    "ledger": "CAD",
+    "sender": "722722",
+    "body": "RBC Royal Bank: An INTERAC e-Transfer of $150.00 from JOHN SMITH was automatically deposited to your account ending in 8899 on Sep 16, 2026.",
+    "expect": { "post": true, "amountMinor": 15000, "type": "income", "transfer": true, "merchant": "john smith" },
+    "notes": "RBC alert for an Interac e-Transfer auto-deposit (completed); P2P in",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-CA-TD-CC-1",
+    "country": "CA",
+    "ledger": "CAD",
+    "sender": "83373",
+    "body": "TD Alert: A purchase of $38.90 was made at TIM HORTONS #1234 using your TD Aeroplan Visa ending in 5678 on Sep 12.",
+    "expect": { "post": true, "amountMinor": 3890, "type": "expense", "transfer": false, "merchant": "tim hortons" },
+    "notes": "TD Canada Trust credit card purchase alert; date has no year",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-CA-TD-ATM-1",
+    "country": "CA",
+    "ledger": "CAD",
+    "sender": "83373",
+    "body": "TD Alert: A withdrawal of $100.00 was made from your TD chequing account ending in 2468 at an ATM on Sep 19.",
+    "expect": { "post": true, "amountMinor": 10000, "type": "expense", "transfer": false },
+    "notes": "TD Canada Trust ATM withdrawal from chequing (Canadian spelling)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-CA-TD-ETR-SENT-1",
+    "country": "CA",
+    "ledger": "CAD",
+    "sender": "83373",
+    "body": "TD Alert: Your INTERAC e-Transfer of $80.00 to PAUL MARTIN was deposited on Sep 28.",
+    "expect": { "post": true, "amountMinor": 8000, "type": "expense", "transfer": true, "merchant": "paul martin" },
+    "notes": "TD alert that a sent Interac e-Transfer was deposited by the recipient (completed); P2P out",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-CA-SCOTIA-CC-1",
+    "country": "CA",
+    "ledger": "CAD",
+    "sender": "72682",
+    "body": "Scotiabank InfoAlert: A purchase of $72.15 was made on your Scotia Momentum VISA card ending in 4321 at LOBLAWS 1023 on 2026-09-24.",
+    "expect": { "post": true, "amountMinor": 7215, "type": "expense", "transfer": false, "merchant": "loblaws" },
+    "notes": "Scotiabank InfoAlert credit card purchase with ISO date",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-CA-SCOTIA-PAY-1",
+    "country": "CA",
+    "ledger": "CAD",
+    "sender": "72682",
+    "body": "Scotiabank InfoAlert: A deposit of $2,345.00 (PAYROLL - MAPLE TECH INC) was made to your account ending in 4321 on 2026-09-30.",
+    "expect": { "post": true, "amountMinor": 234500, "type": "income", "transfer": false, "merchant": "maple tech" },
+    "notes": "Scotiabank InfoAlert payroll deposit with the payroll descriptor in parentheses",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-CA-BMO-CC-1",
+    "country": "CA",
+    "ledger": "CAD",
+    "sender": "26600",
+    "body": "BMO: A purchase of $120.00 was made at COSTCO WHOLESALE W548 with your BMO CashBack Mastercard ending in 8765 on Sep 25, 2026.",
+    "expect": { "post": true, "amountMinor": 12000, "type": "expense", "transfer": false, "merchant": "costco" },
+    "notes": "BMO credit card purchase alert",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-CA-BMO-BILL-1",
+    "country": "CA",
+    "ledger": "CAD",
+    "sender": "26600",
+    "body": "BMO: Your bill payment of $85.60 to HYDRO ONE was completed from your chequing account ending in 1122 on Oct 1, 2026.",
+    "expect": { "post": true, "amountMinor": 8560, "type": "expense", "transfer": false, "merchant": "hydro one" },
+    "notes": "BMO bill payment completed alert for a utility payee",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-CA-DESJ-ACHAT-1",
+    "country": "CA",
+    "ledger": "CAD",
+    "sender": "33774",
+    "body": "Desjardins : Achat de 42,35 $ chez METRO PLUS LAVAL avec votre carte Visa se terminant par 1234 le 2026-09-27 à 18 h 12.",
+    "expect": { "post": true, "amountMinor": 4235, "type": "expense", "transfer": false, "merchant": "metro" },
+    "notes": "Desjardins French purchase alert: decimal comma, trailing '$', 'se terminant par', Quebec 'à 18 h 12' time",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-CA-DESJ-PAIE-1",
+    "country": "CA",
+    "ledger": "CAD",
+    "sender": "33774",
+    "body": "Desjardins : Un dépôt de paie de 1 850,00 $ a été effectué dans votre compte 123456-EOP le 2026-09-30.",
+    "expect": { "post": true, "amountMinor": 185000, "type": "income", "transfer": false },
+    "notes": "Desjardins French payroll deposit ('dépôt de paie') with space thousands separator and decimal comma; EOP = Épargne avec opérations account",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-CA-INTERAC-RCV-1",
+    "country": "CA",
+    "ledger": "CAD",
+    "sender": "46837",
+    "body": "INTERAC e-Transfer: JANE DOE sent you $50.00 (CAD) and the money has been automatically deposited into your bank account at Tangerine.",
+    "expect": { "post": true, "amountMinor": 5000, "type": "income", "transfer": true, "merchant": "jane doe" },
+    "notes": "Interac e-Transfer notification for Autodeposit (money already deposited), with the (CAD) currency tag",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-CA-TANG-ETR-1",
+    "country": "CA",
+    "ledger": "CAD",
+    "sender": "Tangerine",
+    "body": "You've received an INTERAC e-Transfer of $75.00 from Mark Lee. It's been deposited into your Chequing Account.",
+    "expect": { "post": true, "amountMinor": 7500, "type": "income", "transfer": true, "merchant": "mark lee" },
+    "notes": "Tangerine app push for a received and deposited e-Transfer",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-CA-CIBC-DEBIT-1",
+    "country": "CA",
+    "ledger": "CAD",
+    "sender": "24242",
+    "body": "CIBC: A debit purchase of $15.60 at SHOPPERS DRUG MART #812 was made with your CIBC Debit Card ending in 4567 on Sep 26, 2026.",
+    "expect": { "post": true, "amountMinor": 1560, "type": "expense", "transfer": false, "merchant": "shoppers" },
+    "notes": "CIBC Interac debit purchase alert",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-CHASE-OTP-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "24273",
+    "body": "Chase: DON'T share this code with anyone. We'll NEVER call to ask for it. Code: 48201937. Need help? Call 1-800-935-9935.",
+    "expect": { "post": false, "why": "otp" },
+    "notes": "Chase one-time sign-in code",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-BOFA-OTP-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "73981",
+    "body": "BofA: Your code to approve a $500.00 Zelle® payment to KEVIN PARK is 621834. Do NOT share it. BofA will NEVER call you for it.",
+    "expect": { "post": false, "why": "otp" },
+    "notes": "Bank of America step-up code for a Zelle payment, naming amount and payee; nothing has moved yet",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-WF-DECL-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "93557",
+    "body": "Wells Fargo: A purchase of $89.00 at WALMART SUPERCENTER with card ending in 1234 was declined on 09/22/26 due to insufficient funds.",
+    "expect": { "post": false, "why": "declined" },
+    "notes": "Wells Fargo declined purchase (insufficient funds)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-CAPONE-HOLD-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "227898",
+    "body": "Capital One: A $175.00 pre-authorization from MARRIOTT HOTELS was placed on your Venture card ending in 1234. The final amount will post when the merchant completes the transaction.",
+    "expect": { "post": false, "why": "hold" },
+    "notes": "Hotel pre-authorization hold; the final charge posts later and may differ",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-VENMO-REQ-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "Venmo",
+    "body": "Sarah Lee requests $25.00 for \"concert tix\"",
+    "expect": { "post": false, "why": "request" },
+    "notes": "Venmo payment request push; nothing paid yet",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-CHASE-SCHED-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "24273",
+    "body": "Chase: Your $120.00 payment to CON EDISON is scheduled to be sent on Oct 15, 2026 from your account ending in 4821.",
+    "expect": { "post": false, "why": "scheduled" },
+    "notes": "Chase Bill Pay scheduled (future-dated) payment notice",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-DISCOVER-STMT-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "347268",
+    "body": "Discover: Your statement is ready. New balance: $1,234.56. Minimum payment due: $35.00 by 10/20/2026. Log in at discover.com/app.",
+    "expect": { "post": false, "why": "statement" },
+    "notes": "Discover statement-ready alert with new balance and minimum due",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-CITI-DUE-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "692484",
+    "body": "Citi Alert: Reminder - your payment of $35.00 for card ending in 5678 is due on 10/18/2026.",
+    "expect": { "post": false, "why": "reminder" },
+    "notes": "Citi payment due reminder",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-BOFA-BAL-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "73981",
+    "body": "BofA: The balance in your account ending in 4455 is $1,245.67 as of 09/28/2026.",
+    "expect": { "post": false, "why": "balance" },
+    "notes": "Bank of America daily balance alert; balance only",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-AMEX-OFFER-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "Amex",
+    "body": "Amex Offers: Spend $50 or more at Walmart+ and get $10 back, up to 1 time. Add to Card by 10/31/2026.",
+    "expect": { "post": false, "why": "offer" },
+    "notes": "Amex Offers push; merchant offer, no money moved",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-CASHAPP-PHISH-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "+1 (213) 555-0142",
+    "body": "Cash App: You have received $750.00 from a pending transfer. Claim your funds now at cashapp-claims.co/r/8KJ2 before it expires.",
+    "expect": { "post": false, "why": "phishing" },
+    "notes": "Smishing impersonating Cash App from a long-code number with a claim link",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-CHAT-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "+1 (415) 555-0187",
+    "body": "hey can u venmo me $20 for the pizza tonight? thx",
+    "expect": { "post": false, "why": "chat" },
+    "notes": "Personal text mentioning money",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-CHASE-CCPAY-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "24273",
+    "body": "Chase: We received your $500.00 payment to your Chase Sapphire Preferred card ending in 9876 on Sep 25, 2026. Thank you!",
+    "expect": { "post": false, "why": "other" },
+    "expectByPath": {
+      "android-sms": { "post": false, "why": "settlement, not spending", "acceptedObligation": { "kind": "cardPayment", "amountMinor": 50000, "currency": "USD", "card": { "last4": "9876", "kind": "credit" }, "cardPaymentSide": "receipt" } },
+      "ios-history": { "post": false, "why": "unverified settlement remains in Review" }
+    },
+    "notes": "Credit card bill payment received; a settlement of the card balance, not new spending or income",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-US-CHASE-FRAUD-1",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "24273",
+    "body": "Chase Fraud Alert: Did you attempt a $512.33 purchase at BEST BUY on card ending in 9876? Reply YES or NO. Msg&data rates may apply. To opt out reply STOP.",
+    "expect": { "post": false, "why": "security" },
+    "notes": "Chase fraud verification text; the purchase is on hold pending the reply",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-CA-INTERAC-REQ-1",
+    "country": "CA",
+    "ledger": "CAD",
+    "sender": "46837",
+    "body": "INTERAC e-Transfer: ALEX TREMBLAY has sent you a money request for $45.00 (CAD). Message: hockey pool. Go to your bank's website or app to fulfil this request.",
+    "expect": { "post": false, "why": "request" },
+    "notes": "Interac Request Money notification; nothing moved",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-CA-DESJ-OTP-1",
+    "country": "CA",
+    "ledger": "CAD",
+    "sender": "33774",
+    "body": "Desjardins : Votre code de sécurité est 482913. Ne le communiquez à personne. Desjardins ne vous le demandera jamais.",
+    "expect": { "post": false, "why": "otp" },
+    "notes": "Desjardins French one-time security code",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-CA-TD-DECL-1",
+    "country": "CA",
+    "ledger": "CAD",
+    "sender": "83373",
+    "body": "TD Alert: A purchase of $210.45 at BEST BUY #977 on your TD Visa ending in 5678 was declined on Sep 29. If this wasn't you, call 1-800-983-8472.",
+    "expect": { "post": false, "why": "declined" },
+    "notes": "TD Canada Trust declined card purchase",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "NA-CA-INTERAC-PHISH-1",
+    "country": "CA",
+    "ledger": "CAD",
+    "sender": "+1 (647) 555-0199",
+    "body": "INTERAC e-Transfer: You have received $415.00 (CAD) from Canada Revenue Agency. Deposit your funds: cra-refund-deposit.com/etransfer",
+    "expect": { "post": false, "why": "phishing" },
+    "notes": "Common CRA refund e-Transfer smishing from a long-code number with a lookalike link",
+    "provenance": "synthetic"
+  }
+]

@@ -12,7 +12,10 @@ test_dir="$(mktemp -d /tmp/wafra-native-live.XXXXXX)"
 trap 'rm -rf "$test_dir"' EXIT
 
 swiftc -D DEBUG \
+  modules/wafra-live-capture/ios/WafraNativeParserContext.swift \
   modules/wafra-live-capture/ios/WafraLiveCaptureStore.swift \
+  modules/wafra-live-capture/ios/WafraInstantAlertPatterns.generated.swift \
+  modules/wafra-live-capture/ios/WafraInstantAlertReader.swift \
   scripts/test/native-live-capture-store.swift \
   -o "$test_dir/native-live-capture-store-tests"
 
@@ -80,11 +83,13 @@ xcrun swiftc \
   -typecheck \
   -target arm64-apple-ios16.0-simulator \
   -sdk "$ios_simulator_sdk" \
+  modules/wafra-live-capture/ios/WafraNativeParserContext.swift \
   modules/wafra-live-capture/ios/WafraLiveCaptureStore.swift \
   modules/wafra-live-capture/ios/WafraLiveCaptureResources.swift \
   modules/wafra-live-capture/ios/WafraLiveCaptureNotice.swift \
   modules/wafra-live-capture/ios/WafraInstantAlertPatterns.generated.swift \
   modules/wafra-live-capture/ios/WafraInstantAlertReader.swift \
+  modules/wafra-live-capture/ios/WafraBackgroundAlertParser.swift \
   modules/wafra-live-capture/ios/WafraInstantAlert.swift
 echo "✓ capture-off notice and charge banner type-check against the iOS SDK"
 
@@ -96,6 +101,18 @@ swiftc \
   scripts/test/native-instant-alert.swift \
   -o "$test_dir/native-instant-alert-tests"
 "$test_dir/native-instant-alert-tests" "$test_dir/instant-alert.json"
+
+for mode in preview credential; do
+  node scripts/test/export-invalid-instant-alert-patterns.cjs "$test_dir" "$mode"
+  swiftc -parse-as-library \
+    modules/wafra-live-capture/ios/WafraNativeParserContext.swift \
+    modules/wafra-live-capture/ios/WafraLiveCaptureStore.swift \
+    "$test_dir/$mode-patterns.swift" \
+    modules/wafra-live-capture/ios/WafraInstantAlertReader.swift \
+    scripts/test/native-live-capture-admission.swift \
+    -o "$test_dir/admission-$mode"
+  "$test_dir/admission-$mode" "$mode"
+done
 
 swiftc \
   modules/wafra-live-capture/ios/WafraLiveCaptureResources.swift \

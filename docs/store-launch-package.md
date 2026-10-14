@@ -21,8 +21,11 @@ Wafra is a **global personal money tracker**, not a Gulf-only product.
   from AED, USD or another ledger/reference currency.
 - Automatic bank-alert posting is **not worldwide coverage**. UAE and Saudi
   market packs remain the launch-tested automatic packs. The worldwide parser
-  may surface other strongly grounded alerts for user review, but it does not
-  silently auto-post an unverified bank format.
+  can auto-add strongly grounded completed movements from unverified formats
+  on Android and through iPhone Messages History when the default best-effort
+  setting is enabled. These entries are marked **Auto-added — check** and can
+  be corrected or undone. Other eligible alerts wait in Review; unfamiliar
+  live iPhone alerts stay in Review. This does not certify any bank's coverage.
 - Localizations are added per market based on product/support readiness. Arabic
   remains supported in-app and may be published as an optional localization;
   it is not a prerequisite or the definition of the global launch.

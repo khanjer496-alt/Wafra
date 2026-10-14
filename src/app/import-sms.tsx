@@ -1,4 +1,5 @@
 import { useCategoryCatalog } from '@/hooks/use-category-catalog';
+import { privateAlertFormatCopy } from '@/lib/private-alert-format-copy';
 /**
  * Reading bank messages by hand.
  *
@@ -23,6 +24,7 @@ import { useCategoryCatalog } from '@/hooks/use-category-catalog';
  */
 import { ImportSteps } from '@/components/workflows/workflow-surfaces';
 import { Stack, useLocalSearchParams } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import { useRouter } from '@/hooks/use-app-router';
 import * as Crypto from 'expo-crypto';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -122,13 +124,15 @@ import { isProActive, requiresPro } from '@/lib/purchases';
 import { parsePastedBankAlerts } from '@/lib/launch-alert-parser';
 import { stageWalletNearMatches } from '@/lib/wallet-near-match';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
+import { createPrivateAlertFormatSession } from '@/lib/private-alert-format-runtime';
+import { canEnrichPrivateFormatReview, privateAlertFormatReviewEvent } from '@/lib/private-alert-format-review';
 import { activeCountryDateOrder } from '@/lib/country';
 import { prepareUniversalReviewAlert, type ReviewEntry } from '@/lib/alert-review-tray';
 import { isDeliberateOtherTitle, PARSER_VERSION } from '@/lib/sms-parser';
 import { collectLegacyReviewSourceKeys } from '@/lib/review-source-bindings';
 import { buildTrackedBillBatch, ImportMoneyError } from '@/lib/import-plan';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
-import { ledgerCurrencyCode } from '@/lib/markets';
+import { detectLaunchMarketFromAlert, ledgerCurrencyCode } from '@/lib/markets';
 import { pasteSampleForLedger } from '@/lib/paste-sample';
 import { useStore } from '@/lib/store';
 import { t, tf } from '@/lib/i18n';
@@ -139,6 +143,27 @@ interface PendingInboxResult {
   declined: DeclinedSms[];
   newestTs: number;
   parserRereadComplete: true;
+}
+
+interface PendingPasteSource {
+  blocks: string[];
+  parsed: ScannedSms[];
+  plan: ImportPlan | null;
+}
+
+/** Only newly built paste objects are retired here; stored ledger rows stay owned by the store. */
+function releasePendingPasteSource(pending: PendingPasteSource | null) {
+  if (!pending) return;
+  pending.blocks.fill(''); pending.blocks.length = 0;
+  for (const row of pending.parsed) delete row.raw;
+  pending.parsed.length = 0;
+  if (pending.plan) {
+    for (const row of pending.plan.batch.transactions) delete row.raw;
+    for (const row of pending.plan.batch.updates ?? []) delete row.raw;
+    for (const row of pending.plan.billDues) delete row.raw;
+    for (const near of pending.plan.walletNearMatches) { delete near.row.raw; delete near.transaction.raw; }
+    pending.plan = null;
+  }
 }
 
 const EASING = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
@@ -324,13 +349,21 @@ export default function ImportSmsScreen() {
   }, []);
   const usePagedHistory = Platform.OS === 'ios' && Number.parseInt(String(Platform.Version), 10) >= 26 &&
     pagedHistoryEnabled(bundledHistory);
-  const { state, getStateSnapshot, importBatch, ensureDurable, stageReviewAlerts } = useStore();
+  const { state, getStateSnapshot, getStateGeneration, importBatch, ensureDurable, stageReviewAlerts } = useStore();
+  const focused = useIsFocused();
 
   // The sheet reads the ordinary surface tokens; the band is the green flow band.
   const theme = useTheme();
 
   const [text, setText] = useState('');
   const pasteRunning = useRef(false);
+  const pasteOperation = useRef(0);
+  const pasteMounted = useRef(true);
+  const pasteFocused = useRef(focused);
+  pasteFocused.current = focused;
+  const pasteActive = useRef(RNAppState.currentState !== 'background' && RNAppState.currentState !== 'inactive');
+  const pastePreview = useRef(false);
+  const pendingPasteSource = useRef<PendingPasteSource | null>(null);
   // Kept only with the user's open paste form, never in ledger storage.
   const pasteIdentities = useRef({ input: '', ids: new Map<string, { nonce: string; observedAt: number }>() });
   const [pasteReviewIds, setPasteReviewIds] = useState<string[]>([]);
@@ -425,6 +458,31 @@ export default function ImportSmsScreen() {
   const [skippedCount, setSkippedCount] = useState(0);
   const [pasteVerdict, setPasteVerdict] = useState<PasteVerdict | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const clearPasteSource = useCallback(() => {
+    const wasRunning = pasteRunning.current;
+    const hadPreview = pastePreview.current;
+    pasteOperation.current++;
+    releasePendingPasteSource(pendingPasteSource.current);
+    pendingPasteSource.current = null;
+    pasteIdentities.current.input = '';
+    pasteIdentities.current.ids.clear();
+    pasteRunning.current = false; pastePreview.current = false;
+    if (!pasteMounted.current) return;
+    setText(''); setPasteVerdict(null); setPasteReviewIds([]);
+    if (hadPreview) setPlan(null);
+    if (wasRunning) setScanning(false);
+  }, []);
+  useEffect(() => {
+    pasteMounted.current = true;
+    const subscription = RNAppState.addEventListener('change', next => {
+      pasteActive.current = next === 'active';
+      if (!pasteActive.current) clearPasteSource();
+    });
+    return () => { pasteMounted.current = false; clearPasteSource(); subscription.remove(); };
+  }, [clearPasteSource]);
+  useEffect(() => { if (!focused) clearPasteSource(); }, [focused, clearPasteSource]);
+  const pasteStoreGeneration = getStateGeneration();
+  useEffect(() => { clearPasteSource(); }, [pasteStoreGeneration, state.hydrated, state.privateAlertFormats, state.privateMode, clearPasteSource]);
   const [historyLeaveSession, setHistoryLeaveSession] = useState<string | null>(null);
   const pendingHistoryLeave = useRef<string | null>(null);
   const activeHistoryReview = useRef<string | null | undefined>(history);
@@ -670,6 +728,7 @@ export default function ImportSmsScreen() {
       router.push('/pro');
       return;
     }
+    clearPasteSource();
     setScanning(true);
     setProgress(null);
     setPasteVerdict(null);
@@ -744,12 +803,22 @@ export default function ImportSmsScreen() {
    * is read it better than they would type it.
    */
   const runParse = async (input: string) => {
-    if (pasteRunning.current) return;
+    if (pasteRunning.current || !pasteMounted.current || !pasteFocused.current || !pasteActive.current) return;
     if (!state.hydrated) {
       setNotice({ title: t('importOneMoment'), body: t('dataStillLoading') });
       return;
     }
     pasteRunning.current = true;
+    pastePreview.current = true;
+    const run = ++pasteOperation.current;
+    const storeGeneration = getStateGeneration();
+    const formats = getStateSnapshot().privateAlertFormats;
+    const cancelled = () => !pasteMounted.current || !pasteFocused.current || !pasteActive.current ||
+      run !== pasteOperation.current || storeGeneration !== getStateGeneration() ||
+      !getStateSnapshot().hydrated || getStateSnapshot().privateAlertFormats !== formats;
+    const formatSession = createPrivateAlertFormatSession({ country: state.country ?? null,
+      dateOrder: activeCountryDateOrder(), cancelled });
+    const current = () => !cancelled() && formatSession.isCurrent();
     if (pasteIdentities.current.input !== input) pasteIdentities.current = { input, ids: new Map() };
     setScanning(true);
     setPlan(null);
@@ -768,6 +837,11 @@ export default function ImportSmsScreen() {
       // requiresPro('manual') is false on every platform by design.
       const refusedBlocks: string[] = [];
       const parsed: ScannedSms[] = parsePastedBankAlerts(input, state.merchantOverrides, (source) => refusedBlocks.push(source));
+      const pastedCount = messageBlocks(input);
+      // The form owns the only full input reference across secure IO. Its
+      // lifecycle cleanup can release the source without waiting for that IO.
+      input = '';
+      pendingPasteSource.current = { blocks: refusedBlocks, parsed, plan: null };
       let p: ImportPlan;
       try {
         p = buildImportPlan(parsed, state, state.lastScanTs);
@@ -779,15 +853,29 @@ export default function ImportSmsScreen() {
         setNotice({ title: t('importMoneyMismatchTitle'), body: t('importMoneyMismatchBody') });
         return;
       }
+      pendingPasteSource.current.plan = p;
       const reviews: ReviewEntry[] = [];
       const observedAt = Date.now();
-      for (const source of refusedBlocks) {
-        const event = inspectUniversalBankEvent(source, { dateOrder: activeCountryDateOrder() });
+      for (let index = 0; index < refusedBlocks.length; index++) {
+        if (!current()) { if (run === pasteOperation.current) clearPasteSource(); return; }
+        let event = inspectUniversalBankEvent(refusedBlocks[index], { dateOrder: activeCountryDateOrder() });
         if (event.decision !== 'review') continue;
         // Pasted text has no provider GUID. This opaque proposal identity is
         // deliberately not presented as a native Message identity.
-        const identity = pasteIdentities.current.ids.get(source) ?? { nonce: Crypto.randomUUID().replace(/-/g, ''), observedAt };
-        pasteIdentities.current.ids.set(source, identity);
+        const identity = pasteIdentities.current.ids.get(refusedBlocks[index]) ?? { nonce: Crypto.randomUUID().replace(/-/g, ''), observedAt };
+        pasteIdentities.current.ids.set(refusedBlocks[index], identity);
+        if (canEnrichPrivateFormatReview(event) && !['AE', 'SA'].includes(state.country ?? '') &&
+            !detectLaunchMarketFromAlert(refusedBlocks[index], '')) {
+          // This getter captures the block index and mutable form buffer,
+          // never a copy of the source while the device key is being read.
+          const match = await formatSession.readFromSource(() => {
+            const source = pendingPasteSource.current?.blocks[index];
+            return source && current() ? { source, sender: '', observedAt: identity.observedAt } : null;
+          });
+          if (!current()) { if (run === pasteOperation.current) clearPasteSource(); return; }
+          if (match) event = privateAlertFormatReviewEvent(refusedBlocks[index], '', identity.observedAt, match,
+            { country: state.country ?? null, dateOrder: activeCountryDateOrder() }) ?? event;
+        }
         const nonce = identity.nonce;
         const item = prepareUniversalReviewAlert({
           id: 'paste_review_id_' + nonce, sourceKey: 'paste_review_source_' + nonce,
@@ -795,9 +883,11 @@ export default function ImportSmsScreen() {
         });
         if (item) reviews.push(item);
       }
+      if (!current()) { if (run === pasteOperation.current) clearPasteSource(); return; }
       if (reviews.length > 0) {
         const receipt = stageReviewAlerts(reviews);
         await receipt.durable;
+        if (!current()) { if (run === pasteOperation.current) clearPasteSource(); return; }
         setPasteReviewIds(reviews.map((entry) => entry.id));
       }
       const txLike = parsed.filter((x) => x.kind === 'transaction' || x.kind === 'cardPayment');
@@ -818,18 +908,24 @@ export default function ImportSmsScreen() {
         setPasteVerdict(reviews.length > 0 ? null :
           skipped > 0
             ? { kind: 'filed', count: skipped }
-            : { kind: 'unreadable', count: messageBlocks(input) },
+            : { kind: 'unreadable', count: pastedCount },
         );
         return;
       }
       setPasteVerdict(null);
       setPlan(p);
     } catch {
+      if (!current()) { if (run === pasteOperation.current) clearPasteSource(); return; }
       setPlan(null);
       setNotice({ title: t('genericReviewTitle'), body: t('genericReviewSaveFailed') });
     } finally {
-      pasteRunning.current = false;
-      setScanning(false);
+      if (run === pasteOperation.current) {
+        pendingPasteSource.current?.blocks.fill('');
+        if (pendingPasteSource.current) pendingPasteSource.current.blocks.length = 0;
+        pendingPasteSource.current = null;
+        pasteRunning.current = false;
+        setScanning(false);
+      }
     }
   };
 
@@ -1550,6 +1646,10 @@ export default function ImportSmsScreen() {
       <View style={styles.sheet}>
         {!history && <>
           <ImportSteps current={applying ? 'save' : plan !== null && !scanning ? 'review' : 'source'} />
+          <EButton palette={band} variant="quiet" testID="import-teach-format"
+            label={privateAlertFormatCopy(state.language).teachABankFormat}
+            disabled={scanning || applying}
+            onPress={() => router.push('/teach-bank-format')} />
         </>}
         {showIosHistoryCard && (
           <Section index={0}>
@@ -1710,6 +1810,7 @@ export default function ImportSmsScreen() {
               // A verdict is about the text that produced it. Editing
               // the box makes it stale, so it goes when the text does.
               onChangeText={(value) => {
+                clearPasteSource();
                 setText(value);
                 setPasteVerdict(null);
                 setNotice(null);
@@ -1746,6 +1847,7 @@ export default function ImportSmsScreen() {
                   const sample = pasteSampleForLedger(
                     state.ledgerMoney ?? ledgerMoneySpec(ledgerCurrencyCode()),
                   );
+                  clearPasteSource();
                   setText(sample);
                   runParse(sample);
                 }}

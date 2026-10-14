@@ -13,6 +13,19 @@ const { createReader, corpusMessages } = require('./instant-alert-reader.cjs');
 
 // The traps instant-alert.test.js pins by name, so the iPhone sees them too.
 const TRAPS = [
+  // Synthetic leading-principal negation controls, shared with the pure API.
+  "AED 24.86 has not been debited from your account ending 4421.",
+  "USD 24.86 has not been credited to your account ending 4421.",
+  "Dear Customer, AED 24.86 wasn’t deducted from your account ending 4421.",
+  "AED 24.86 has not been transferred to your account ending 4421.",
+  "EUR 24.86 has not been refunded to your card ending 4421.",
+  "AED 24.86 hasn’t been deposited to your account ending 4421.",
+  // Synthetic personal-conversation negatives; these are not bank evidence.
+  'I spent AED 50.00 at Carrefour today.',
+  'Hi Ann, I have just spent USD 50.00 at Example Market.',
+  'Hello, I have already spent EUR 50.00 at Example Market.',
+  "Hey, I've just spent SAR 50.00 at Example Market.",
+  'أنا دفعت 50.00 درهم اليوم.',
   'Payment of AED 34.47 to Example Market with Credit Card ending 1234. Avl Cr. Limit is AED 18,764.51.',
   'Payment of AED 34.47 to Example Market with Credit Card ending 1234 was declined.',
   'Pending payment of AED 34.47 to Example Market with Credit Card ending 1234.',
@@ -35,6 +48,20 @@ const SENSITIVE = [
   ['Your OTP is 448122. Do not share it.', true],
   ['448122 is your verification code', true],
   ['رمز التحقق: 448122', true],
+  ['Your OTP for the transaction of AED 500.00 is 448122.', true],
+  ['Verification code: 123 456 for AED 25.00 purchase.', true],
+  ['OTP ١٢٣٤٥٦ for AED 25.00 purchase.', true],
+  ['Your OTP is １２３４５６ for USD 25.00 purchase.', true],
+  ['Sicherheitscode: 123 456 für EUR 25,00.', true],
+  ['Card ending 1234 was used for JOD 15.251. Never share your OTP.', false],
+  ['Transfer of USD 25.00 completed. Ref 123456. Never share your OTP.', false],
+  ['Card ending 1234 was used for JOD 15.251. Never share your OTP for any transaction. Your reference is 123456.', false],
+  ['Transfer USD 25.00 completed. Never share your verification code for payments. Transaction reference is 123456.', false],
+  ['Card ending 1234 was used for USD 25.00. Never share your OTP for transactions, your reference is 123456.', false],
+  ['Your OTP for the transaction of AED 5,000.00 is 448122.', true],
+  ['Your OTP for transaction reference TX123456 is 448122.', true],
+  ['Your security code for payment reference ABCD1234 is 448122.', true],
+  ['Your OTP for transaction ref 789012 is 448122.', true],
   ['Purchase of AED 150.00 with Debit Card ending 2518 at BISSAN MEDICAL CENTRE', false],
 ];
 
@@ -58,12 +85,14 @@ async function main() {
     BANK_WORD_RE: re('bankWord'),
   });
   const credential = re('credential');
+  const format = new RegExp(sources.credentialFormat, 'gu');
+  const sensitive = body => credential.test(body.normalize('NFKC').replace(format, ''));
 
   const messages = [...new Set([...corpusMessages(), ...TRAPS])];
   const fixture = {
     reads: messages.map((body) => ({ body, read: read(body) })),
     sensitive: SENSITIVE.map(([body, expected]) => {
-      if (credential.test(body) !== expected) throw new Error(`credential pattern disagrees: ${body}`);
+      if (sensitive(body) !== expected) throw new Error(`credential pattern disagrees: ${body}`);
       return { body, sensitive: expected };
     }),
   };

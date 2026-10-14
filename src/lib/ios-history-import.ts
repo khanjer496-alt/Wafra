@@ -1,7 +1,15 @@
 import type { CategoryId } from '@/lib/types';
-import { REVIEW_ALERT_CAP, isMoneyMovementReview, type ReviewEntry } from '@/lib/alert-review-tray';
+import { REVIEW_ALERT_CAP, REVIEW_ALERT_TTL_MS, appleMessageReviewIdentity, isUniversalReviewAlert,
+  isMoneyMovementReview, type ReviewEntry } from '@/lib/alert-review-tray';
 import { createLaunchAlertSession } from '@/lib/launch-alert-parser';
-import { MAX_HISTORICAL_RECORDS, parseHistoricalMessageRecords } from '@/lib/historical-import';
+import { MAX_HISTORICAL_RECORDS, parseHistoricalMessageRecords, type HistoricalMessageRecord } from '@/lib/historical-import';
+import { createAiAlertReviewSession, type AiAlertReviewOptions } from '@/lib/ai-alert-reader';
+import { createPrivateAlertFormatSession, type PrivateAlertFormatSessionOptions } from '@/lib/private-alert-format-runtime';
+import { canEnrichPrivateFormatReview, privateAlertFormatReviewEvent } from '@/lib/private-alert-format-review';
+import { activeCountryDateOrder, getActiveCountry } from '@/lib/country';
+import { detectLaunchMarketFromAlert, detectLaunchMarketFromSender } from '@/lib/markets';
+import { inspectSourceFreeRefusedAlert } from '@/lib/auto-import';
+import { prepareAiEnrichedLocalReview } from '@/lib/local-message-record';
 import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
 import type { CompletedHistorySession, WafraHistoryNativeModule } from '../../modules/wafra-message-history/src/WafraMessageHistory.types';
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{8,128}$/;
@@ -198,6 +206,9 @@ export async function loadIosHistorySession(input: {
   overrides: Record<string, CategoryId>;
   onProgress?: (value: { scanned: number; matched: number }) => void;
   now?: Date;
+  aiReview?: AiAlertReviewOptions & { maxInferences?: number };
+  privateFormatReview?: PrivateAlertFormatSessionOptions;
+  cancelled?: () => boolean;
 }): Promise<LoadedIosHistorySession> {
   validateSessionId(input.sessionId);
 
@@ -209,6 +220,11 @@ export async function loadIosHistorySession(input: {
     const now = input.now ?? new Date();
     const seen = new Set<string>();
     const launchSession = createLaunchAlertSession({ overrides: input.overrides });
+    const cancelled = (): boolean => input.cancelled?.() === true || input.aiReview?.cancelled?.() === true || input.privateFormatReview?.cancelled?.() === true;
+    const requireActive = (): void => { if (cancelled()) throw new IosHistoryImportError('cancelled'); };
+    requireActive();
+    const aiReview = createAiAlertReviewSession({ ...input.aiReview, cancelled });
+    const privateFormats = createPrivateAlertFormatSession({ ...input.privateFormatReview, cancelled });
     const parsed: ScannedSms[] = [];
     const reviewCandidates: ReviewEntry[] = [];
     const declined: DeclinedSms[] = [];
@@ -217,7 +233,9 @@ export async function loadIosHistorySession(input: {
 
     for (let offset = 0; offset < descriptor.chunkIndices.length; offset += 1) {
       const chunkIndex = descriptor.chunkIndices[offset];
+      requireActive();
       const records = await input.native.readChunk(input.sessionId, chunkIndex);
+      requireActive();
       if (!Array.isArray(records) || records.length > MAX_CHUNK_RECORDS) {
         throw new IosHistoryImportError('invalid-chunk');
       }
@@ -233,6 +251,57 @@ export async function loadIosHistorySession(input: {
       }
       if (part.invalidCount > 0) {
         throw new IosHistoryImportError('record-mismatch');
+      }
+      // Decode source only after the existing decoder has validated this
+      // entire chunk, including duplicate IDs. Never retain a raw-record map.
+      const completedIds = new Set([
+        ...part.parsed.flatMap(row => row.sourceEventId ?? []),
+        ...part.declined.flatMap(row => row.sourceEventId ?? []),
+      ]);
+      const reviewsBySource = new Map(part.reviewCandidates.map((item, index) => [item.sourceKey, index]));
+      for (let index = 0; index < records.length; index += 1) {
+        let record: HistoricalMessageRecord | null = null;
+        try {
+          record = JSON.parse(records[index]) as HistoricalMessageRecord;
+          if (completedIds.has(record.id)) continue;
+          const identity = appleMessageReviewIdentity(record.id);
+          if (!identity) continue;
+          const reviewIndex = reviewsBySource.get(identity.sourceKey);
+          const existing = reviewIndex === undefined ? undefined : part.reviewCandidates[reviewIndex];
+          if (existing && (!isUniversalReviewAlert(existing) || !canEnrichPrivateFormatReview(existing.event))) continue;
+          // Match the decoder's fail-open omission of unsafe optional sender
+          // metadata; such a sender never becomes a model routing hint.
+          const sender = typeof record.sender === 'string' && record.sender.length > 0 && record.sender.length <= 80 &&
+            !/[\u0000-\u001F\u007F-\u009F\u061C\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/u.test(record.sender)
+            ? record.sender.trim() : '';
+          const observedAt = Date.parse(record.receivedAt);
+          if (!existing) {
+            const refusal = inspectSourceFreeRefusedAlert({ source: record.text, sender,
+              observedAt, channel: 'inbox', session: launchSession });
+            if (refusal.kind !== 'ignored' || refusal.reason !== 'unrecognized') continue;
+          }
+          requireActive();
+          const formatContext = { country: getActiveCountry(), dateOrder: activeCountryDateOrder(),
+            routedMarket: detectLaunchMarketFromAlert(record.text, sender) ?? detectLaunchMarketFromSender(sender) };
+          const match = await privateFormats.read(record.text, sender, observedAt, formatContext);
+          requireActive();
+          const learned = match ? privateAlertFormatReviewEvent(record.text, sender, observedAt, match, formatContext) : null;
+          const aiStillEligible = !existing || (isUniversalReviewAlert(existing) && existing.event.family === 'unknown');
+          const event = learned ?? (aiStillEligible ? await aiReview.read(record.text, sender, observedAt) : null);
+          requireActive();
+          if (!event) continue;
+          const item = prepareAiEnrichedLocalReview({ ...identity, observedAt, channel: 'shortcut', event }, existing);
+          if (!item) continue;
+          if (reviewIndex !== undefined) part.reviewCandidates[reviewIndex] = item;
+          else {
+            part.reviewCandidates.push({ ...item, expiresAt: Math.max(item.expiresAt, now.getTime() + REVIEW_ALERT_TTL_MS) });
+            part.ignoredCount -= 1;
+          }
+        } finally {
+          if (record) { record.text = ''; record.sender = undefined; }
+          record = null;
+          records[index] = '';
+        }
       }
       readRecords += records.length;
       parsed.push(...part.parsed);

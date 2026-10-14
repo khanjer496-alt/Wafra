@@ -796,6 +796,8 @@ export interface StatementCoverageEntry {
 }
 
 export interface AppState {
+  /** Device-keyed source-free learned formats; only encrypted local state retains them. */
+  privateAlertFormats?: import('@/lib/private-alert-formats').PrivateAlertFormatStore;
   /** Private, ledger-local names; IDs contain no user text. */
   customCategories?: CustomCategory[];
   hydrated: boolean;

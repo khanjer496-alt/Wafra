@@ -25,8 +25,11 @@ The default story is universal:
 Never claim “every bank”, “all currencies”, “worldwide parsing”, guaranteed
 background capture, or direct iPhone Messages-inbox access. The money engine
 currently supports ISO currencies with 0, 2 or 3 minor-unit decimal places;
-automatic launch-tested posting packs remain AE/SA and unfamiliar formats are
-review/manual rather than guessed.
+automatic launch-tested posting packs remain AE/SA. Android and iPhone Messages
+History can auto-add strongly grounded completed movements from unverified
+formats, marked **Auto-added — check**, when the default best-effort setting is
+enabled. Other eligible alerts, including unfamiliar live iPhone alerts, wait
+in Review. Unsupported alerts may require manual entry.
 
 ## Android-sensitive permission copy
 

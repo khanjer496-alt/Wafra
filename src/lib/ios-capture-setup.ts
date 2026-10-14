@@ -213,12 +213,9 @@ export function iosMessageAutomationVerified(
     model.lastMessageReceivedAt > baseline;
 }
 
-// The guided automation. Apple's Sender picker lists Contacts only and bank
-// SMS IDs are not Contacts. iOS 26 refuses a Message automation with neither
-// filter (Next stays disabled, verified on the owner's iPhone on 25 August and
-// 19 September 2026), so the guide asks for a single space in "Message
-// Contains": every message with a space matches, and Wafra keeps only
-// supported bank alerts on-device.
+// Apple owns the trigger settings. The broad space filter is independent of
+// country and currency. The connection check cannot read or certify the user's
+// actual filter or whether Apple shows an automation notification.
 /** Shortcuts' own route to the New Automation trigger picker. */
 export const IOS_CREATE_AUTOMATION_URL = 'shortcuts://create-automation';
 const UNFILTERED_MESSAGE_TRIGGER = {
@@ -264,8 +261,9 @@ export function resolveIosSetupReadiness(
  * A Message automation Wafra can process. Zero selected senders is the guided
  * configuration (Apple cannot select bank SMS IDs); explicitly selected
  * Contacts are still accepted. "Message Contains" may be empty or the guided
- * whitespace-only filter, which every bank alert satisfies. A keyword filter
- * is not accepted: it would silently drop alerts without that keyword.
+ * whitespace-only filter. A keyword or currency filter can silently miss
+ * alerts, so it is not accepted as the broad guided configuration. This check
+ * cannot certify the user's actual automation settings.
  */
 export const isSupportedIosMessageAutomationTrigger = (
   trigger: IosMessageAutomationTrigger,

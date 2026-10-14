@@ -438,6 +438,8 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     'expo-crypto': { randomUUID: () => require('node:crypto').randomUUID() },
     '@/lib/founder-pro': require('./build/founder-pro'),
     '@/lib/custom-categories': require('./build/custom-categories'),
+    '@/lib/private-alert-formats': require('./build/private-alert-formats'),
+    '@/lib/private-alert-format-runtime': require('./build/private-alert-format-runtime'),
     'react/jsx-runtime': {
       // StoreContext.Provider is the innermost element; the wrappers around it
       // (money locale, private mode, the selector handle) pass through the

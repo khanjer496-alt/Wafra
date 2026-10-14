@@ -1,0 +1,556 @@
+[
+  {
+    "id": "IN-HDFC-UPI-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-HDFCBK-S",
+    "body": "Sent Rs.250.00\nFrom HDFC Bank A/C *1234\nTo SWIGGY LIMITED\nOn 05/09/26\nRef 625012345678\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808",
+    "expect": { "post": true, "amountMinor": 25000, "type": "expense", "transfer": false, "merchant": "swiggy" },
+    "notes": "HDFC 2024+ multi-line UPI debit template (Sent/From/To/On/Ref) with TRAI -S service suffix on the DLT header; payee is a merchant so transfer false",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-HDFC-UPI-2",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-HDFCBK",
+    "body": "Credit Alert!\nRs.1,500.00 credited to HDFC Bank A/c XX1234 on 06-09-26 from VPA rahul.k@okaxis (UPI 625198765432)",
+    "expect": { "post": true, "amountMinor": 150000, "type": "income", "transfer": true, "merchant": "rahul" },
+    "notes": "HDFC 'Credit Alert!' UPI credit from a person's VPA; P2P so transfer true",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-HDFC-CC-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "AX-HDFCBK-S",
+    "body": "Spent Rs.3,450.00 On HDFC Bank Card 9012 At DMART AVENUE SUPERMARTS On 2026-09-09:19:20:15 Not You? To Block+Reissue Call 18002586161/SMS BLOCK CC 9012 to 7308080808",
+    "expect": { "post": true, "amountMinor": 345000, "type": "expense", "transfer": false, "merchant": "dmart" },
+    "notes": "HDFC credit card spend template (Spent ... On HDFC Bank Card ... At ... On yyyy-mm-dd:hh:mm:ss) sent at transaction time; only alert the customer gets, so post",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-HDFC-NEFT-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-HDFCBK",
+    "body": "Update! INR 85,000.00 deposited in HDFC Bank A/c XX1234 on 30-SEP-26 for NEFT Cr-CITI0000002-ACME TECHNOLOGIES PVT LTD-SALARY SEP 2026-CITIN26123456789.Avl bal INR 1,02,345.00. Cheque deposits in A/C are subject to clearing",
+    "expect": { "post": true, "amountMinor": 8500000, "type": "income", "transfer": true, "merchant": "acme" },
+    "notes": "HDFC 'Update! ... deposited ... for NEFT Cr-IFSC-REMITTER-NARRATION-UTR' salary credit with lakh-grouped balance; salary arrives as a plain NEFT credit so transfer true (soft)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-HDFC-IMPS-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "JD-HDFCBK",
+    "body": "IMPS INR 5,000.00\nsent from HDFC Bank A/c XX1234 on 12-09-26\nTo A/c xxxx5566\nRef-625512345678\nNot you?\nCall 18002586161/SMS BLOCK OB to 7308080808",
+    "expect": { "post": true, "amountMinor": 500000, "type": "expense", "transfer": true },
+    "notes": "HDFC multi-line IMPS outward transfer to a masked beneficiary account; no payee name stated",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-HDFC-DC-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-HDFCBK-S",
+    "body": "Spent Rs.899 From HDFC Bank Card x1234 At RELIANCE TRENDS On 2026-09-08:18:42:11 Bal Rs.46102.50 Not You? Call 18002586161/SMS BLOCK DC 1234 to 7308080808",
+    "expect": { "post": true, "amountMinor": 89900, "type": "expense", "transfer": false, "merchant": "reliance" },
+    "notes": "HDFC debit card POS template with whole-rupee amount and ungrouped balance after it (amount is the first Rs value, not Bal)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-HDFC-SI-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-HDFCBK",
+    "body": "Dear Customer, Rs.649.00 has been debited from your HDFC Bank Credit Card ending 9012 towards NETFLIX.COM on 10-09-2026 as per your e-mandate (SI). Not you? Call 18002586161",
+    "expect": { "post": true, "amountMinor": 64900, "type": "expense", "transfer": false, "merchant": "netflix" },
+    "notes": "HDFC post-debit confirmation of an executed card e-mandate/standing instruction (completed autopay, not the pre-debit notice)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-ICICI-UPI-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "JD-ICICIT",
+    "body": "ICICI Bank Acct XX123 debited for Rs 1,180.00 on 11-Sep-26; ZOMATO LTD credited. UPI:625412345678. Call 18002662 for dispute. SMS BLOCK 123 to 9215676766.",
+    "expect": { "post": true, "amountMinor": 118000, "type": "expense", "transfer": false, "merchant": "zomato" },
+    "notes": "ICICI UPI debit template 'Acct XXnnn debited for Rs ... ; PAYEE credited. UPI:ref' with 3-digit account tail",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-ICICI-UPI-2",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-ICICIT-S",
+    "body": "Dear Customer, Acct XX123 is credited with Rs 2,000.00 on 13-Sep-26 from PRIYA SHARMA. UPI:625698765432-ICICI Bank.",
+    "expect": { "post": true, "amountMinor": 200000, "type": "income", "transfer": true, "merchant": "priya" },
+    "notes": "ICICI UPI credit from a named person; P2P transfer in",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-ICICI-CC-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "AX-ICICIB",
+    "body": "INR 1,249.00 spent using ICICI Bank Card XX5678 on 07-Sep-26 on AMAZON PAY IN. Avl Limit: INR 98,751.00. If not you, call 1800 2662/SMS BLOCK 5678 to 9215676766.",
+    "expect": { "post": true, "amountMinor": 124900, "type": "expense", "transfer": false, "merchant": "amazon" },
+    "notes": "ICICI credit card spend 'INR x spent using ICICI Bank Card XXnnnn on dd-Mon-yy on MERCHANT. Avl Limit' (limit must not be taken as amount)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-ICICI-NEFT-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "JD-ICICIT",
+    "body": "ICICI Bank Account XX123 credited:Rs. 42,500.00 on 01-Oct-26. Info NEFT-HDFCN52026100112345-GLOBEX SERVICES LLP. Available Balance is Rs. 1,58,920.40.",
+    "expect": { "post": true, "amountMinor": 4250000, "type": "income", "transfer": true, "merchant": "globex" },
+    "notes": "ICICI NEFT credit 'credited:Rs. x ... Info NEFT-UTR-REMITTER' with lakh-grouped available balance",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-ICICI-ATM-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-ICICIB",
+    "body": "Dear Customer, Acct XX123 is debited with INR 2,000.00 on 14-Sep-26. Info: ATM*CASH WDL*S1CNM123. Available Balance is INR 15,240.50.",
+    "expect": { "post": true, "amountMinor": 200000, "type": "expense", "transfer": false },
+    "notes": "ICICI ATM cash withdrawal expressed only through the 'Info: ATM*CASH WDL*terminal' narration",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-ICICI-CHG-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-ICICIB",
+    "body": "Dear Customer, Acct XX123 is debited with INR 17.70 on 30-Sep-26. Info: SMS CHGS JUL-SEP26. The Available Balance is INR 15,222.80.",
+    "expect": { "post": true, "amountMinor": 1770, "type": "expense", "transfer": false },
+    "notes": "ICICI quarterly SMS alert charge (incl. GST) debited; a bank fee the bookkeeper records",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-ICICI-REV-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "JD-ICICIT-S",
+    "body": "Dear Customer, Acct XX123 is credited with Rs 1,180.00 on 12-Sep-26 towards reversal of UPI:625412345678 (ZOMATO LTD). Available Balance is Rs 16,402.80 -ICICI Bank",
+    "expect": { "post": true, "amountMinor": 118000, "type": "income", "transfer": false, "merchant": "zomato" },
+    "notes": "ICICI UPI reversal credited back after a merchant failure; refund/reversal in is income, not a transfer",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-SBI-UPI-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "AD-SBIUPI",
+    "body": "Dear UPI user A/C X1234 debited by 250.0 on date 05Sep26 trf to SWIGGY Refno 625012345678. If not u? call 1800111109. -SBI",
+    "expect": { "post": true, "amountMinor": 25000, "type": "expense", "transfer": false, "merchant": "swiggy" },
+    "notes": "SBI UPI debit template with no currency marker at all ('debited by 250.0') and ddMonyy date",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-SBI-UPI-2",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-SBIUPI-S",
+    "body": "Dear SBI UPI User, ur A/cX1234 credited by Rs500 on 09Sep26 by  (Ref no 625212345678)",
+    "expect": { "post": true, "amountMinor": 50000, "type": "income", "transfer": true },
+    "notes": "SBI UPI credit template with the remitter field left blank (double space) and Rs glued to amount; transfer in",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-SBI-ATM-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "AD-ATMSBI",
+    "body": "Dear Customer, Rs.5000 withdrawn at SBI ATM S1BW000123001 from A/cX1234 on 15Sep26 Transaction Number 6258. Available Balance Rs.40123.45. If not withdrawn by you, forward this SMS to 7400165218/ call 1800111109/9449112211 to block your card. -SBI",
+    "expect": { "post": true, "amountMinor": 500000, "type": "expense", "transfer": false },
+    "notes": "SBI ATM withdrawal template from the ATMSBI header; balance and transaction number follow the amount",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-SBI-NEFT-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "BZ-CBSSBI",
+    "body": "Dear Customer, INR 72,000.00 credited to your A/c No XX1234 on 30/09/2026 through NEFT with UTR CITIN26987654321 by ACME TECHNOLOGIES PVT LTD, INFO: SAL SEP26-SBI",
+    "expect": { "post": true, "amountMinor": 7200000, "type": "income", "transfer": true, "merchant": "acme" },
+    "notes": "SBI NEFT credit 'through NEFT with UTR ... by REMITTER, INFO: narration' carrying a salary narration; plain NEFT so transfer true (soft)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-SBI-YONO-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-SBIINB",
+    "body": "Your A/C XXXXX1234 Debited INR 10,000.00 on 12/09/26 -Transferred to Mr. AMIT SHARMA. Avl Balance INR 30,123.45-SBI",
+    "expect": { "post": true, "amountMinor": 1000000, "type": "expense", "transfer": true, "merchant": "amit" },
+    "notes": "SBI internet/YONO fund transfer to a named beneficiary",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-SBICARD-CC-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-SBICRD-S",
+    "body": "Rs.2,345.00 spent on your SBI Credit Card ending 5678 at SMART BAZAAR on 16/09/26. Trxn. not done by you? Report at https://sbicard.com/Dispute",
+    "expect": { "post": true, "amountMinor": 234500, "type": "expense", "transfer": false, "merchant": "smart bazaar" },
+    "notes": "SBI Card spend alert with the issuer's own dispute link in the footer (legitimate link, not smishing)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-SBI-CHG-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "AD-CBSSBI",
+    "body": "Dear Customer, Rs.23.60 debited from A/c XX1234 on 01Oct26 towards ATM Txn Charges (Non-SBI ATM). Avl Bal Rs.30,099.85 -SBI",
+    "expect": { "post": true, "amountMinor": 2360, "type": "expense", "transfer": false },
+    "notes": "SBI other-bank ATM usage fee (Rs 20 + GST) debited; a completed bank charge",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-AXIS-UPI-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "AX-AXISBK",
+    "body": "INR 320.00 debited\nA/c no. XX1234\n17-09-26, 13:05:41\nUPI/P2M/625712345678/BLINKIT\nNot you? SMS BLOCKUPI Cust ID to 919951860002\nAxis Bank",
+    "expect": { "post": true, "amountMinor": 32000, "type": "expense", "transfer": false, "merchant": "blinkit" },
+    "notes": "Axis 2023+ multi-line UPI debit with UPI/P2M/ref/MERCHANT narration (P2M = person-to-merchant)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-AXIS-UPI-2",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-AXISBK-S",
+    "body": "INR 1500.00 credited\nA/c no. XX1234\n18-09-26, 18:05:33 IST\nUPI/P2A/625898765432/NEHA VERMA\nNot you? SMS BLOCKUPI Cust ID to 919951860002\nAxis Bank",
+    "expect": { "post": true, "amountMinor": 150000, "type": "income", "transfer": true, "merchant": "neha" },
+    "notes": "Axis multi-line UPI credit with UPI/P2A/ref/NAME narration (person-to-account)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-AXIS-CC-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "AX-AXISBK",
+    "body": "Spent\nCard no. XX5678\nINR 2,199\n19-09-26 20:14:02\nMYNTRA DESIG\nAvl Lmt INR 87,801\nSMS BLOCK 5678 to 919951860002, if not you - Axis Bank",
+    "expect": { "post": true, "amountMinor": 219900, "type": "expense", "transfer": false, "merchant": "myntra" },
+    "notes": "Axis credit card multi-line 'Spent / Card no. / INR x / date / MERCHANT / Avl Lmt' template with truncated merchant",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-AXIS-RTGS-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "JM-AXISBK",
+    "body": "INR 2,50,000.00 debited from A/c no. XX1234 on 20-09-26 at 11:22:10 IST. Info- RTGS/UTIBR52026092000123456/SHREE BUILDERS. Avl Bal- INR 1,12,345.60 - Axis Bank",
+    "expect": { "post": true, "amountMinor": 25000000, "type": "expense", "transfer": true, "merchant": "shree" },
+    "notes": "Axis RTGS outward with lakh grouping on both amount (2,50,000.00) and balance",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-KOTAK-UPI-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "BZ-KOTAKB",
+    "body": "Sent Rs.450.00 from Kotak Bank AC X1234 to paytmqr281005050101abcd@paytm on 21-09-26.UPI Ref 625912345678. Not you, https://kotak.com/KBANKT/Fraud",
+    "expect": { "post": true, "amountMinor": 45000, "type": "expense", "transfer": false },
+    "notes": "Kotak UPI sent template paying a Paytm QR merchant VPA (no readable name) with Kotak's own fraud-report link; scan-and-pay purchase so transfer false",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-KOTAK-UPI-2",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "BZ-KOTAKB-S",
+    "body": "Received Rs.2750.00 in your Kotak Bank AC X1234 from rohan.m@oksbi on 22-09-26.UPI Ref:626012345678.",
+    "expect": { "post": true, "amountMinor": 275000, "type": "income", "transfer": true, "merchant": "rohan" },
+    "notes": "Kotak UPI received template from a person's VPA",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-PNB-UPI-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VK-PNBSMS",
+    "body": "A/c XX1234 debited INR 640.00 Dt 24-09-26 10:05:12 thru UPI:626712345678.Bal INR 12,345.67 Not u?Fwd this SMS to 9264092640 to block UPI.Download PNB ONE-PNB",
+    "expect": { "post": true, "amountMinor": 64000, "type": "expense", "transfer": true },
+    "notes": "PNB terse UPI debit with no payee named; transfer judged true because the alert presents a bare UPI transfer (soft)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-PNB-HI-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VK-PNBSMS",
+    "body": "आपके खाता XX1234 में दिनांक 25-09-26 को रु 3,000.00 जमा किए गए (UPI:626898765432)। शेष राशि रु 15,345.67 -पीएनबी",
+    "expect": { "post": true, "amountMinor": 300000, "type": "income", "transfer": true },
+    "notes": "Hindi-language PNB UPI credit (customers can opt for Hindi alerts); 'jama kiye gaye' = credited, 'shesh rashi' = balance; wording approximated",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-BOB-UPI-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "AX-BOBTXN",
+    "body": "Rs.799.00 Dr. from A/C XXXXXX1234 and Cr. to bookmyshow@hdfcbank. Ref:626912345678. AvlBal:Rs12,345.67(2026:09:26 19:32:10). Not you? Call 18005700/5000-BOB",
+    "expect": { "post": true, "amountMinor": 79900, "type": "expense", "transfer": false, "merchant": "bookmyshow" },
+    "notes": "Bank of Baroda UPI 'Dr. from A/C ... and Cr. to VPA' template with colon-separated timestamp glued to the balance",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-BOB-CASH-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-BOBTXN-S",
+    "body": "Rs.10000 deposited in A/c XXXXXX1234 by Cash on 27-09-2026. Total Bal:Rs.22345.67CR. Avlbl Amt:Rs.22345.67 - Bank of Baroda",
+    "expect": { "post": true, "amountMinor": 1000000, "type": "income", "transfer": false },
+    "notes": "Bank of Baroda branch cash deposit with CR-suffixed balance; cash deposit is income, not a transfer",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-CANARA-UPI-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "AD-CANBNK",
+    "body": "Rs.180.00 paid thru A/C XX1234 on 28-09-26 14:32:10 to UBER INDIA SYSTEMS, UPI Ref 627112345678. If not done, SMS BLOCKUPI to 9901771222.-Canara Bank",
+    "expect": { "post": true, "amountMinor": 18000, "type": "expense", "transfer": false, "merchant": "uber" },
+    "notes": "Canara UPI 'paid thru A/C ... to PAYEE, UPI Ref' template",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-CANARA-IMPS-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-CANBNK-S",
+    "body": "An amount of INR 6,500.00 has been CREDITED to your account XXX1234 on 29/09/2026 towards IMPS/627298765432/SUNIL PATIL. Total Avail.bal INR 18,845.67. - Canara Bank",
+    "expect": { "post": true, "amountMinor": 650000, "type": "income", "transfer": true, "merchant": "sunil" },
+    "notes": "Canara 'An amount of INR x has been CREDITED ... towards IMPS/ref/NAME' template",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-INDUS-CC-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "AD-INDUSB",
+    "body": "Transaction of INR 4,560.00 made on IndusInd Bank Credit Card XX5678 at CROMA on 03-10-2026 16:40. Avl Lmt INR 1,45,440.00. Not you? Call 18602677777",
+    "expect": { "post": true, "amountMinor": 456000, "type": "expense", "transfer": false, "merchant": "croma" },
+    "notes": "IndusInd credit card transaction alert; 'Transaction of ... made on' is the completed-spend notice, lakh-grouped available limit",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-YES-REFUND-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-YESBNK",
+    "body": "INR 1,249.00 refunded to your YES BANK Credit Card XX5678 by AMAZON on 04-10-2026. Avl Lmt INR 98,751.00 - YES BANK",
+    "expect": { "post": true, "amountMinor": 124900, "type": "income", "transfer": false, "merchant": "amazon" },
+    "notes": "YES BANK credit card merchant refund credited back; refund is income, not a card bill payment",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-IDFC-UPI-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "AX-IDFCFB",
+    "body": "Your A/C XXXXXXX1234 is debited by INR 2,100.00 on 05/10/26 14:32 towards UPI/627812345678/BESCOM. New bal: INR 12,345.67. If not done by you, call 1800 10 888 - IDFC FIRST Bank",
+    "expect": { "post": true, "amountMinor": 210000, "type": "expense", "transfer": false, "merchant": "bescom" },
+    "notes": "IDFC FIRST UPI debit paying an electricity utility (bill payment made), 'New bal' footer",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-FED-UPI-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "JD-FEDBNK",
+    "body": "Rs 85.00 debited via UPI on 06-10-2026 08:15:42 to VPA chaipoint@ybl.Ref No 627912345678.Small txns?Use UPI Lite!-Federal Bank",
+    "expect": { "post": true, "amountMinor": 8500, "type": "expense", "transfer": false, "merchant": "chaipoint" },
+    "notes": "Federal Bank UPI debit with a marketing tail ('Small txns?Use UPI Lite!') glued to the reference; small merchant spend",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-PHONEPE-PUSH-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "PhonePe",
+    "body": "Payment of ₹349 to Domino's Pizza was successful\nDebited from HDFC Bank - 1234",
+    "expect": { "post": true, "amountMinor": 34900, "type": "expense", "transfer": false, "merchant": "domino" },
+    "notes": "PhonePe app push notification for a completed UPI merchant payment with rupee sign and no decimals",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-HDFC-OTP-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-HDFCBK-S",
+    "body": "482915 is OTP for txn of INR 2,499.00 at MYNTRA on HDFC Bank card ending 5678. Valid till 14:32:10. Do not share OTP for security reasons",
+    "expect": { "post": false, "why": "otp" },
+    "notes": "HDFC card OTP naming amount and merchant; nothing has moved yet",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-SBI-OTP-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "AD-SBIOTP",
+    "body": "OTP for online purchase of Rs. 3,999.00 at FLIPKART thru State Bank Debit Card ending 1234 is 736104. Do not share this with anyone.-SBI",
+    "expect": { "post": false, "why": "otp" },
+    "notes": "SBI debit card e-commerce OTP with amount and merchant",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-ICICI-DECL-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "AX-ICICIB",
+    "body": "Transaction of INR 3,999.00 on ICICI Bank Credit Card XX5678 at FLIPKART on 21-Sep-26 has been declined due to insufficient credit limit. Call 18002662 for details.",
+    "expect": { "post": false, "why": "declined" },
+    "notes": "ICICI credit card decline for insufficient limit",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-AXIS-FAIL-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "AX-AXISBK",
+    "body": "UPI transaction of INR 550.00 to ZEPTO from A/c no. XX1234 failed on 22-09-26. If amount is debited, it will be reversed within 3 working days - Axis Bank",
+    "expect": { "post": false, "why": "failed" },
+    "notes": "Axis failed UPI notice with conditional 'if debited, will be reversed' wording",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-HDFC-PEND-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "JD-HDFCBK",
+    "body": "Your IMPS transaction of Rs.5,000.00 to A/c xxxx5566 is under process. Ref No 625512345679. Status will be updated shortly - HDFC Bank",
+    "expect": { "post": false, "why": "pending" },
+    "notes": "HDFC IMPS in-process/deemed-pending notice; not yet completed",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-SBI-COLLECT-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "AD-SBIUPI",
+    "body": "Dear SBI UPI User, you have received a collect request of Rs.2000 from quickloans@ybl. Approve only if you want to PAY. Never approve requests to receive money -SBI",
+    "expect": { "post": false, "why": "request" },
+    "notes": "SBI UPI collect request; approval would debit, nothing has moved",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-HDFC-PREDEBIT-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-HDFCBK",
+    "body": "Dear Customer, Rs.649.00 will be debited from your HDFC Bank Credit Card ending 9012 on 10-10-26 towards NETFLIX.COM for e-mandate (ID: HDFC1A2B3C). To opt out, visit MyCards.",
+    "expect": { "post": false, "why": "scheduled" },
+    "notes": "RBI-mandated e-mandate pre-debit notification sent ahead of a recurring card charge",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-ICICI-MANDATE-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "JD-ICICIT",
+    "body": "Your AutoPay mandate for SPOTIFY of up to Rs 199.00 (Monthly) has been successfully created on ICICI Bank Acct XX123 via UPI on 02-Oct-26. Mandate Ref: 627412345678.",
+    "expect": { "post": false, "why": "mandate-setup" },
+    "notes": "ICICI UPI AutoPay mandate registration; 'successfully created' but no money moved",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-SBICARD-STMT-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-SBICRD",
+    "body": "Your SBI Credit Card ending 5678 statement dated 20/09/26: Total Amt Due Rs.12,345.00, Min Amt Due Rs.620.00, Payment Due Date 10/10/26. Pay via SBI Card app.",
+    "expect": { "post": false, "why": "statement" },
+    "notes": "SBI Card monthly statement with total and minimum due",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-AXIS-CCPAY-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "AX-AXISBK-S",
+    "body": "Payment of INR 12,345.00 has been received towards your Axis Bank Credit Card XX5678 on 08-10-26. Thank you - Axis Bank",
+    "expect": { "post": false, "why": "other" },
+    "expectByPath": {
+      "android-sms": { "post": false, "why": "settlement, not spending", "acceptedObligation": { "kind": "cardPayment", "amountMinor": 1234500, "currency": "INR", "card": { "last4": "5678", "kind": "credit" }, "cardPaymentSide": "receipt" } },
+      "ios-history": { "post": false, "why": "unverified settlement remains in Review" }
+    },
+    "notes": "Axis credit card bill payment acknowledgement; a settlement, not income (excluded as positive by rule)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-BOB-EMI-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "AX-BOBSMS",
+    "body": "Dear Customer, EMI of Rs.8,450 for your Loan A/c XXXX7890 is due on 05-10-2026. Kindly maintain sufficient balance in A/c XXXX1234 to avoid penal charges - Bank of Baroda",
+    "expect": { "post": false, "why": "reminder" },
+    "notes": "Bank of Baroda loan EMI due reminder",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-CANARA-BAL-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "AD-CANBNK",
+    "body": "Available balance in your A/c XXX1234 as on 10/10/2026 18:00 is INR 18,845.67. - Canara Bank",
+    "expect": { "post": false, "why": "balance" },
+    "notes": "Canara balance enquiry reply; balance-only",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-HDFC-PL-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-HDFCBK-P",
+    "body": "Pre-approved Personal Loan of Rs 5,00,000 is ready for you! Get funds credited to your HDFC Bank A/c XX1234 in 10 seconds. Apply on NetBanking. T&C apply",
+    "expect": { "post": false, "why": "offer" },
+    "notes": "HDFC pre-approved personal loan offer on a -P promotional header; mentions crediting an account but nothing moved",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-ICICI-PROMO-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-ICICIB-P",
+    "body": "Shop on Amazon with ICICI Bank Credit Card & get 10% instant discount up to Rs 1,500 on min spend of Rs 5,000. Offer valid till 11-Oct-26. T&C",
+    "expect": { "post": false, "why": "promotion" },
+    "notes": "ICICI festive-sale card discount promotion with amounts and a merchant",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-ICICI-SEC-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-ICICIT-S",
+    "body": "Dear Customer, your ICICI Bank Debit Card XX1234 has been blocked as requested on 02-Oct-26 11:20. If not done by you, call 18002662.",
+    "expect": { "post": false, "why": "security" },
+    "notes": "ICICI card-blocked security notice",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-PHISH-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "+919812345678",
+    "body": "Dear Customer, Rs.9,850.00 electricity refund has been credited to your A/c. Claim now before 11-10-2026 at http://bit.ly/bescom-refund-in else it will lapse.",
+    "expect": { "post": false, "why": "phishing" },
+    "notes": "Smishing from a personal mobile number: fake 'refund credited, click to claim' with a shortened link",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "IN-CHAT-1",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "+919876501234",
+    "body": "Bhai 1500 bhej diya GPay pe dinner ka, check kar le. Baaki 500 kal dunga",
+    "expect": { "post": false, "why": "chat" },
+    "notes": "Hinglish personal chat from a friend mentioning a GPay transfer; not a bank alert",
+    "provenance": "synthetic"
+  }
+]

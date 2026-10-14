@@ -1,63 +1,81 @@
-/**
- * Capture-side entry point for AI reading of unrecognised alerts.
- *
- * Called ONLY after every proven path refused an alert and the refusal
- * pipeline found nothing to review (auto-import.ts inspectRefused,
- * 'ignored/unrecognized'). Returns a grounded UniversalBankEvent that becomes
- * a Review item with suggested fields, or null. It never posts, never
- * downloads and never runs for a UAE/Saudi sender. With the model absent (the
- * default: nothing downloads until the person asks) it resolves null
- * immediately, so capture behaves exactly as before.
- */
-import { gateAiAlert } from '@/lib/ai-alert-extractor';
-import { AI_ALERT_AUTOPOST_ENABLED, AI_ALERT_PREFILL_ENABLED } from '@/lib/ai-alert-flags';
-import { aiAlertModelStatus, readAlertWithModel } from '@/lib/ai-alert-model';
-import { bestEffortAutoPostEnabled } from '@/lib/best-effort-autopost';
+/** Source-grounded advisory access to the phone's model. Never a ledger writer. */
+import { prepareAiSourceReview, applyAiSourceReview } from '@/lib/ai-alert-source-contract';
+import { AI_ALERT_PREFILL_ENABLED } from '@/lib/ai-alert-flags';
 import { activeCountryDateOrder, getActiveCountry } from '@/lib/country';
-import {
-  detectLaunchMarketFromAlert,
-  detectLaunchMarketFromSender,
-  ledgerCurrencyExponent,
-  pinnedLedgerCurrencyCode,
-} from '@/lib/markets';
-import type { UniversalBankEvent } from '@/lib/universal-types';
+import { detectLaunchMarketFromAlert, detectLaunchMarketFromSender } from '@/lib/markets';
+import { onDeviceAI, textLanguage, supportsOnDeviceLanguage, type OnDeviceAI } from '@/lib/on-device-ai';
+import type { UniversalBankEvent, UniversalParseContext } from '@/lib/universal-types';
+
+export interface AiAlertReviewOptions {
+  runtime?: OnDeviceAI;
+  enabled?: boolean;
+  country?: string | null;
+  dateOrder?: UniversalParseContext['dateOrder'];
+  cancelled?: () => boolean;
+  timeoutMs?: number;
+  /** Capture sessions bound actual inference, not ordinary parser calls. */
+  allowInference?: () => boolean;
+}
 
 export async function aiReviewEventForRefusedAlert(
   source: string,
   sender: string,
   observedAt: number,
+  options: AiAlertReviewOptions = {},
 ): Promise<UniversalBankEvent | null> {
+  const requestedTimeout = options.timeoutMs ?? 2_500;
+  const timeoutMs = Number.isFinite(requestedTimeout) ? Math.min(8_000, Math.max(500, requestedTimeout)) : 2_500;
+  let expired = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const deadline = new Promise<null>((resolve) => {
+    timer = setTimeout(() => { expired = true; resolve(null); }, timeoutMs);
+  });
+  const cancelled = () => expired || options.cancelled?.() === true;
   try {
-    if (!AI_ALERT_PREFILL_ENABLED) return null;
-    // Cheapest check first: with no downloaded model nothing else runs.
-    const { state } = aiAlertModelStatus();
-    if (state !== 'downloaded' && state !== 'ready') return null;
-    // Never for UAE/Saudi: not by sender, not by the alert's own AED/SAR
-    // routing, not for a user whose country is a launch market.
-    if (detectLaunchMarketFromSender(sender)) return null;
-    const routed = detectLaunchMarketFromAlert(source, sender);
-    if (routed) return null;
-    const country = getActiveCountry();
+    if (!(options.enabled ?? AI_ALERT_PREFILL_ENABLED) || cancelled()) return null;
+    if (detectLaunchMarketFromSender(sender) || detectLaunchMarketFromAlert(source, sender)) return null;
+    const country = options.country === undefined ? getActiveCountry() : options.country;
     if (country === 'AE' || country === 'SA') return null;
-    const prediction = await readAlertWithModel(source);
-    if (!prediction) return null;
-    const ledgerCurrency = pinnedLedgerCurrencyCode();
-    const result = gateAiAlert(source, prediction, {
-      sender,
-      country,
-      routedMarket: routed,
-      ledgerCurrency,
-      ledgerExponent: ledgerCurrency ? ledgerCurrencyExponent() : null,
-      observedAt,
-      dateOrder: activeCountryDateOrder(),
-      autoPostEnabled: AI_ALERT_AUTOPOST_ENABLED,
-      bestEffortEnabled: bestEffortAutoPostEnabled(),
+    const prepared = prepareAiSourceReview(source, {
+      sender, observedAt, dateOrder: options.dateOrder ?? activeCountryDateOrder(),
     });
-    // A 'post' outcome is not wired into the ledger in this build (every
-    // language gate is OFF); it is treated as a prefill like any other.
-    return result.outcome === 'refuse' ? null : result.event;
+    if (!prepared) return null;
+    // Reserve the session attempt before native availability/queueing: a hung
+    // native check cannot add one deadline for every message in a bulk scan.
+    if (options.allowInference && !options.allowInference()) return null;
+    const runtime = options.runtime ?? onDeviceAI;
+    const availability = await Promise.race([runtime.getAvailability(), deadline]);
+    const language = textLanguage(source, 'en');
+    if (!availability || !supportsOnDeviceLanguage(availability, language) || cancelled()) return null;
+    const result = await Promise.race([runtime.respond({
+      task: 'alert-review', ...prepared.request, language,
+      maxTokens: 256, timeoutMs, cancelled,
+    }), deadline]);
+    if (!result || result.kind !== 'ok' || cancelled()) return null;
+    return applyAiSourceReview(prepared, result.value);
   } catch {
-    // The AI reader must never abort a scan.
+    // Unavailable/old native binaries or hostile output cannot abort capture.
     return null;
+  } finally {
+    if (timer !== null) clearTimeout(timer);
   }
+}
+
+/** One inference per scan/drain/import session by default; no eager downloads. */
+export function createAiAlertReviewSession(options: AiAlertReviewOptions & { maxInferences?: number } = {}) {
+  const requested = options.maxInferences ?? 1;
+  let remaining = Number.isSafeInteger(requested) ? Math.min(4, Math.max(0, requested)) : 0;
+  return {
+    read(source: string, sender: string, observedAt: number): Promise<UniversalBankEvent | null> {
+      if (remaining <= 0) return Promise.resolve(null);
+      return aiReviewEventForRefusedAlert(source, sender, observedAt, {
+        ...options,
+        allowInference: () => {
+          if (remaining <= 0 || (options.allowInference && !options.allowInference())) return false;
+          remaining -= 1;
+          return true;
+        },
+      });
+    },
+  };
 }

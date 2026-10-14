@@ -1,0 +1,562 @@
+[
+  {
+    "id": "EU-DE-SPK-1",
+    "country": "DE",
+    "ledger": "EUR",
+    "sender": "Sparkasse",
+    "body": "Kontowecker: Neuer Umsatz auf Ihrem Girokonto ***4821\nBetrag: -45,67 EUR\nREWE SAGT DANKE 4412//Koeln/DE\nBuchungstag: 14.09.2026",
+    "expect": { "post": true, "amountMinor": 4567, "type": "expense", "transfer": false, "merchant": "rewe" },
+    "notes": "Sparkasse S-App Kontowecker push for a card turnover (signed amount, card-terminal merchant string with //city/country suffix, Buchungstag); completed booking",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-DE-SPK-2",
+    "country": "DE",
+    "ledger": "EUR",
+    "sender": "Sparkasse",
+    "body": "Ihre smsTAN für die Überweisung über 250,00 EUR an IBAN DE89 **** **** **** 3000 lautet: 482913. Geben Sie die TAN niemals telefonisch weiter. Ihre Sparkasse",
+    "expect": { "post": false, "why": "otp" },
+    "notes": "Sparkasse smsTAN for a transfer: states amount and payee IBAN but is a one-time code, not a booking",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-DE-SPK-3",
+    "country": "DE",
+    "ledger": "EUR",
+    "sender": "Sparkasse",
+    "body": "Kontowecker: Der Kontostand Ihres Girokontos ***4821 beträgt am 30.09.2026 um 06:00 Uhr 2.345,67 EUR.",
+    "expect": { "post": false, "why": "balance" },
+    "notes": "Sparkasse Kontowecker scheduled balance notification (Kontostand); balance only, no movement",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-DE-DB-1",
+    "country": "DE",
+    "ledger": "EUR",
+    "sender": "Deutsche Bank",
+    "body": "Deutsche Bank: Kartenzahlung über 34,90 EUR bei AMAZON EU S.A R.L. mit Ihrer Debitkarte ...7731 am 15.09.2026 um 21:14 Uhr.",
+    "expect": { "post": true, "amountMinor": 3490, "type": "expense", "transfer": false, "merchant": "amazon" },
+    "notes": "Deutsche Bank app push for a Visa Debit card payment (Kartenzahlung über X EUR bei MERCHANT); sent at purchase time and the only alert, so post",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-DE-CBK-1",
+    "country": "DE",
+    "ledger": "EUR",
+    "sender": "Commerzbank",
+    "body": "Commerzbank: Zahlungseingang auf Ihrem Konto ***5678: +2.450,00 EUR von MUSTERFIRMA GMBH\nVerwendungszweck: GEHALT 09/2026\nBuchung: 30.09.2026",
+    "expect": { "post": true, "amountMinor": 245000, "type": "income", "transfer": false, "merchant": "musterfirma" },
+    "notes": "Commerzbank Zahlungseingang push for salary (German thousands dot, decimal comma); labelled GEHALT so treated as payroll, transfer false (SEPA credit, arguable)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-DE-N26-1",
+    "country": "DE",
+    "ledger": "EUR",
+    "sender": "N26",
+    "body": "Du hast 12,40 € bei REWE Markt GmbH bezahlt. 🛒",
+    "expect": { "post": true, "amountMinor": 1240, "type": "expense", "transfer": false, "merchant": "rewe" },
+    "notes": "N26 real-time card payment push in German (amount with trailing euro sign, no date/card tail); authorisation-time push that is the only alert, so post",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-DE-N26-2",
+    "country": "DE",
+    "ledger": "EUR",
+    "sender": "N26",
+    "body": "Zahlung abgelehnt: 89,99 € bei ZALANDO SE. Grund: Nicht genügend Guthaben auf deinem Hauptkonto.",
+    "expect": { "post": false, "why": "declined" },
+    "notes": "N26 declined card payment push (insufficient funds); nothing moved",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-DE-INGDE-1",
+    "country": "DE",
+    "ledger": "EUR",
+    "sender": "ING",
+    "body": "Neue Buchung auf deinem Girokonto: Lastschrift -19,99 € Spotify AB",
+    "expect": { "post": true, "amountMinor": 1999, "type": "expense", "transfer": false, "merchant": "spotify" },
+    "notes": "ING Deutschland Banking-App push for a booked SEPA direct debit (Lastschrift, signed amount); completed debit",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-DE-INGDE-2",
+    "country": "DE",
+    "ledger": "EUR",
+    "sender": "ING",
+    "body": "Neue Buchung auf deinem Girokonto: Gutschrift +29,99 € AMAZON PAYMENTS EUROPE S.C.A. Rückerstattung Bestellnr. 302-4417",
+    "expect": { "post": true, "amountMinor": 2999, "type": "income", "transfer": false, "merchant": "amazon" },
+    "notes": "ING Deutschland push for a booked credit that is a merchant refund (Gutschrift ... Rückerstattung); refund in = income, not a transfer",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-DE-PHISH-1",
+    "country": "DE",
+    "ledger": "EUR",
+    "sender": "+49 1521 7783491",
+    "body": "Sparkasse: Ihr pushTAN-Verfahren läuft am 05.10.2026 ab. Bitte aktualisieren Sie es sofort, um eine Kontosperrung zu vermeiden: https://sparkasse-pushtan-aktualisierung.de/login",
+    "expect": { "post": false, "why": "phishing" },
+    "notes": "Widely reported German smishing pattern impersonating Sparkasse (pushTAN expiry, lookalike link) from a mobile number",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-FR-BNP-1",
+    "country": "FR",
+    "ledger": "EUR",
+    "sender": "BNPPARIBAS",
+    "body": "BNP Paribas : Paiement par carte de 42,30 EUR chez CARREFOUR CITY PARIS le 12/09/2026 sur votre compte ****1234.",
+    "expect": { "post": true, "amountMinor": 4230, "type": "expense", "transfer": false, "merchant": "carrefour" },
+    "notes": "BNP Paribas 'Mes alertes' card payment SMS (French spacing before colon, DD/MM/YYYY); completed card payment",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-FR-BNP-2",
+    "country": "FR",
+    "ledger": "EUR",
+    "sender": "BNPPARIBAS",
+    "body": "BNP Paribas : Bonne nouvelle ! Un prêt personnel jusqu'à 15 000 € vous est pré-accordé. Réponse immédiate dans l'appli Mes Comptes. Un crédit vous engage et doit être remboursé. STOP 36173",
+    "expect": { "post": false, "why": "offer" },
+    "notes": "French bank pre-approved personal loan marketing SMS with the mandatory credit warning and STOP short code",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-FR-SG-1",
+    "country": "FR",
+    "ledger": "EUR",
+    "sender": "SG",
+    "body": "SG : Prélèvement de 39,99 EUR ORANGE SA effectué le 05/09/2026 sur votre compte ***5521. Solde : 1 234,56 EUR",
+    "expect": { "post": true, "amountMinor": 3999, "type": "expense", "transfer": false, "merchant": "orange" },
+    "notes": "Société Générale alert SMS for a completed SEPA direct debit (Prélèvement ... effectué) with balance in French space-grouped format; amount is the debit, not the balance",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-FR-SG-2",
+    "country": "FR",
+    "ledger": "EUR",
+    "sender": "SG",
+    "body": "SG : Un nouvel appareil a été enregistré pour l'accès à votre Espace Client le 22/09/2026 à 21h14. Si vous n'êtes pas à l'origine de cette opération, appelez le 3933.",
+    "expect": { "post": false, "why": "security" },
+    "notes": "Société Générale new-device security alert with the 3933 helpline; no money moved",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-FR-CA-1",
+    "country": "FR",
+    "ledger": "EUR",
+    "sender": "CreditAgri",
+    "body": "Crédit Agricole : Retrait DAB de 60,00 € le 18/09/2026 à 11h32 sur le compte ***1234. Solde disponible : 512,08 €",
+    "expect": { "post": true, "amountMinor": 6000, "type": "expense", "transfer": false },
+    "notes": "Crédit Agricole ATM withdrawal (Retrait DAB) alert with French 11h32 time and available balance; cash out, no merchant",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-FR-BOURSO-1",
+    "country": "FR",
+    "ledger": "EUR",
+    "sender": "BoursoBank",
+    "body": "Virement reçu : 1 500,00 € de M. DUPONT JEAN\nLibellé : LOYER SEPTEMBRE",
+    "expect": { "post": true, "amountMinor": 150000, "type": "income", "transfer": true, "merchant": "dupont" },
+    "notes": "BoursoBank (Boursorama) app push for an incoming SEPA transfer; amount uses non-breaking-space thousands grouping as French apps render it",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-FR-LBP-1",
+    "country": "FR",
+    "ledger": "EUR",
+    "sender": "La Banque Postale",
+    "body": "La Banque Postale : Frais de tenue de compte de 3,50 EUR prélevés le 01/10/2026 sur votre CCP ***1234.",
+    "expect": { "post": true, "amountMinor": 350, "type": "expense", "transfer": false },
+    "notes": "La Banque Postale app notification for a monthly account-keeping fee taken from the CCP; bank fee is a completed expense",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-FR-LYDIA-1",
+    "country": "FR",
+    "ledger": "EUR",
+    "sender": "Lydia",
+    "body": "Marie Dupont vous a envoyé 15,00 € pour « Pizza 🍕 »",
+    "expect": { "post": true, "amountMinor": 1500, "type": "income", "transfer": true, "merchant": "marie dupont" },
+    "notes": "Lydia P2P received push with guillemet-quoted reason and emoji; money credited to the Lydia balance, P2P in",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-FR-LYDIA-2",
+    "country": "FR",
+    "ledger": "EUR",
+    "sender": "Lydia",
+    "body": "Thomas Martin vous demande 12,50 € pour « Ciné ». Ouvrez Lydia pour accepter ou refuser.",
+    "expect": { "post": false, "why": "request" },
+    "notes": "Lydia money request push (vous demande X pour ...); nothing paid yet",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-ES-CAIXA-1",
+    "country": "ES",
+    "ledger": "EUR",
+    "sender": "CaixaBank",
+    "body": "CaixaBank: Compra de 32,15 EUR con su tarjeta ...1234 en MERCADONA VALENCIA el 10/09/2026 a las 19:42.",
+    "expect": { "post": true, "amountMinor": 3215, "type": "expense", "transfer": false, "merchant": "mercadona" },
+    "notes": "CaixaBank card purchase SMS alert (Compra de X EUR con su tarjeta ... en MERCHANT el DD/MM/YYYY a las HH:MM); purchase-time alert, post",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-ES-CAIXA-2",
+    "country": "ES",
+    "ledger": "EUR",
+    "sender": "CaixaBank",
+    "body": "CaixaBank: El codigo para confirmar la compra de 59,99 EUR en AMAZON.ES con tu tarjeta ...1234 es 482913. No lo compartas con nadie.",
+    "expect": { "post": false, "why": "otp" },
+    "notes": "CaixaBank 3-D Secure confirmation code naming amount and merchant; OTP, not a completed purchase",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-ES-BBVA-1",
+    "country": "ES",
+    "ledger": "EUR",
+    "sender": "BBVA",
+    "body": "Has realizado una compra de 23,40 € en ZARA con tu tarjeta ·5678.",
+    "expect": { "post": true, "amountMinor": 2340, "type": "expense", "transfer": false, "merchant": "zara" },
+    "notes": "BBVA app push for a card purchase (informal tú form, middle-dot card tail); purchase-time push that is the only alert, post",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-ES-SANT-1",
+    "country": "ES",
+    "ledger": "EUR",
+    "sender": "Santander",
+    "body": "Santander: Retirada de efectivo de 50,00 EUR en cajero con su tarjeta ****4321 el 13/09/2026 a las 10:05.",
+    "expect": { "post": true, "amountMinor": 5000, "type": "expense", "transfer": false },
+    "notes": "Banco Santander ATM cash withdrawal alert (Retirada de efectivo ... en cajero); cash out",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-ES-SABAD-1",
+    "country": "ES",
+    "ledger": "EUR",
+    "sender": "SABADELL",
+    "body": "Banco Sabadell: Su tarjeta 5678 ha sido utilizada por 1.230,25 EUR en EL CORTE INGLES CASTELLANA el 20/09 a las 12:05. Si no reconoce la operacion llame al 963 085 000.",
+    "expect": { "post": true, "amountMinor": 123025, "type": "expense", "transfer": false, "merchant": "corte ingles" },
+    "notes": "Sabadell card-use alert ('Su tarjeta X ha sido utilizada por') with dotted thousands, DD/MM date without year and fraud call-back footer",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-ES-BIZUM-1",
+    "country": "ES",
+    "ledger": "EUR",
+    "sender": "CaixaBank",
+    "body": "Has recibido un Bizum de 25,00 € de LAURA GARCIA. Concepto: cena viernes",
+    "expect": { "post": true, "amountMinor": 2500, "type": "income", "transfer": true, "merchant": "laura" },
+    "notes": "Bizum received push delivered by the CaixaBank app (Bizum has no app of its own); instant P2P credit",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-ES-BIZUM-2",
+    "country": "ES",
+    "ledger": "EUR",
+    "sender": "Santander",
+    "body": "PABLO RUIZ te ha solicitado un Bizum de 15,00 €. Concepto: entradas concierto. Acéptalo o recházalo desde la app.",
+    "expect": { "post": false, "why": "request" },
+    "notes": "Bizum money request (te ha solicitado un Bizum) via the Santander app; nothing moved",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-IT-ISP-1",
+    "country": "IT",
+    "ledger": "EUR",
+    "sender": "IntesaSP",
+    "body": "Intesa Sanpaolo: pagamento di 35,00 EUR con carta *1234 presso ESSELUNGA MILANO il 12/09/26 alle 18:32.",
+    "expect": { "post": true, "amountMinor": 3500, "type": "expense", "transfer": false, "merchant": "esselunga" },
+    "notes": "Intesa Sanpaolo card payment SMS alert (pagamento di X EUR con carta ... presso MERCHANT il DD/MM/YY alle HH:MM)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-IT-ISP-2",
+    "country": "IT",
+    "ledger": "EUR",
+    "sender": "IntesaSP",
+    "body": "Intesa Sanpaolo: abbiamo rilevato un accesso anomalo sul tuo conto. Per evitare il blocco verifica la tua identità entro 24 ore: https://intesa-verifica-accesso.com/app",
+    "expect": { "post": false, "why": "phishing" },
+    "notes": "Common Italian smishing that spoofs the IntesaSP alphanumeric sender so it lands in the genuine thread; lookalike link, no money",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-IT-UCG-1",
+    "country": "IT",
+    "ledger": "EUR",
+    "sender": "UniCredit",
+    "body": "UniCredit: operazione con carta *5678 di EUR 120,00 presso AMAZON IT del 14/09/2026 alle 21:05.",
+    "expect": { "post": true, "amountMinor": 12000, "type": "expense", "transfer": false, "merchant": "amazon" },
+    "notes": "UniCredit card operation SMS with currency code before the amount (EUR 120,00); purchase-time alert, post",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-IT-UCG-2",
+    "country": "IT",
+    "ledger": "EUR",
+    "sender": "UniCredit",
+    "body": "UniCredit: ti ricordiamo che il 05/10/2026 sarà addebitata sul conto ***5678 la rata del finanziamento n. 4471 di 230,00 EUR. Verifica la disponibilità.",
+    "expect": { "post": false, "why": "reminder" },
+    "notes": "UniCredit loan instalment reminder (sarà addebitata = will be debited); future obligation, not a booking",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-IT-POSTE-1",
+    "country": "IT",
+    "ledger": "EUR",
+    "sender": "PosteInfo",
+    "body": "Postepay: pagamento di 9,99 EUR presso SPOTIFY con carta *4321 eseguito il 15/09/2026 alle 08:12.",
+    "expect": { "post": true, "amountMinor": 999, "type": "expense", "transfer": false, "merchant": "spotify" },
+    "notes": "Poste Italiane PosteInfo SMS for a Postepay card payment (eseguito = executed); completed",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-NL-INGNL-1",
+    "country": "NL",
+    "ledger": "EUR",
+    "sender": "ING",
+    "body": "Betaald: € 23,45 aan Albert Heijn 1403 Amsterdam",
+    "expect": { "post": true, "amountMinor": 2345, "type": "expense", "transfer": false, "merchant": "albert heijn" },
+    "notes": "ING Nederland app push for a debit card payment (euro sign before amount with a space, Dutch decimal comma); completed",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-NL-RABO-1",
+    "country": "NL",
+    "ledger": "EUR",
+    "sender": "Rabobank",
+    "body": "Er is € 2.750,00 bijgeschreven op je rekening NL** RABO **** **45 67 van WERKGEVER BV. Omschrijving: Salaris september 2026",
+    "expect": { "post": true, "amountMinor": 275000, "type": "income", "transfer": false, "merchant": "werkgever" },
+    "notes": "Rabobank app push for a credit (bijgeschreven) from an employer with masked IBAN; salary, transfer false",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-NL-CHAT-1",
+    "country": "NL",
+    "ledger": "EUR",
+    "sender": "+31 6 12345678",
+    "body": "Hé! Ik maak morgen die € 40 over voor de festivalkaartjes, oké? 👍",
+    "expect": { "post": false, "why": "chat" },
+    "notes": "Personal Dutch SMS promising to transfer money tomorrow; not a bank alert",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-BE-KBC-1",
+    "country": "BE",
+    "ledger": "EUR",
+    "sender": "KBC",
+    "body": "KBC: Betaling met bankkaart van EUR 42,10 bij DELHAIZE LEUVEN op 19/09/2026 om 17:48.",
+    "expect": { "post": true, "amountMinor": 4210, "type": "expense", "transfer": false, "merchant": "delhaize" },
+    "notes": "KBC Mobile push (Flemish Dutch, formal u-form house style) for a bank card payment; completed",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-BE-KBC-2",
+    "country": "BE",
+    "ledger": "EUR",
+    "sender": "KBC",
+    "body": "KBC: Uw domiciliëring van EUR 85,00 voor PROXIMUS wordt op 05/10/2026 uitgevoerd. Zorg voor voldoende saldo op rekening BE** **** **** 7781.",
+    "expect": { "post": false, "why": "scheduled" },
+    "notes": "KBC upcoming Belgian direct debit (domiciliëring) notice; future debit, not booked yet",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-PT-BCP-1",
+    "country": "PT",
+    "ledger": "EUR",
+    "sender": "Millennium",
+    "body": "Millennium bcp: Compra de 25,40 EUR no cartao ****1234 em PINGO DOCE LISBOA, 14/09 13:22. Saldo disp: 1.234,56 EUR",
+    "expect": { "post": true, "amountMinor": 2540, "type": "expense", "transfer": false, "merchant": "pingo doce" },
+    "notes": "Millennium bcp card purchase SMS (unaccented Portuguese, abbreviated Saldo disp); amount is the purchase, not the balance",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-PT-BCP-2",
+    "country": "PT",
+    "ledger": "EUR",
+    "sender": "Millennium",
+    "body": "Millennium bcp: O extrato do seu cartao de credito ****9876 ja esta disponivel. Montante a pagar: 412,30 EUR. Data limite de pagamento: 10/10/2026.",
+    "expect": { "post": false, "why": "statement" },
+    "notes": "Millennium bcp credit card statement-available SMS with amount due; statement, not a transaction",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-PT-MBWAY-1",
+    "country": "PT",
+    "ledger": "EUR",
+    "sender": "MB WAY",
+    "body": "MB WAY: Enviou 20,00 EUR para ANA COSTA (9** *** 456) em 21/09/2026 19:10.",
+    "expect": { "post": true, "amountMinor": 2000, "type": "expense", "transfer": true, "merchant": "ana costa" },
+    "notes": "MB WAY P2P send confirmation with masked Portuguese mobile number; transfer out",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-PL-MBANK-1",
+    "country": "PL",
+    "ledger": "PLN",
+    "sender": "mBank",
+    "body": "mBank: Przelew przych. z rach. 12...3456 na rach. 98...7654 kwota 3 500,00 PLN od FIRMA SP. Z O.O.; tyt: WYNAGRODZENIE 09/2026; Dost. 5 600,12 PLN",
+    "expect": { "post": true, "amountMinor": 350000, "type": "income", "transfer": false, "merchant": "firma" },
+    "notes": "mBank incoming-transfer SMS (Przelew przych., abbreviated rach./tyt./Dost., space-grouped PLN); title is salary so transfer false; amount is the credit, not Dost. balance",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-PL-MBANK-2",
+    "country": "PL",
+    "ledger": "PLN",
+    "sender": "mBank",
+    "body": "mBank: Operacja nr 1 z dn. 17.09.2026 Przelew z rach. ...7654 na rach. 12...9876 kwota 500,00 PLN. Haslo: 73916284 mBank",
+    "expect": { "post": false, "why": "otp" },
+    "notes": "mBank SMS authorisation code (Haslo) for a transfer the customer is setting up; OTP even though amount is stated",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-PL-PKO-1",
+    "country": "PL",
+    "ledger": "PLN",
+    "sender": "PKO BP",
+    "body": "PKO BP: Platnosc karta *4321 kwota 45,99 PLN BIEDRONKA 1234 POZNAN 12.09.2026 15:33. Dostepne: 2 345,67 PLN",
+    "expect": { "post": true, "amountMinor": 4599, "type": "expense", "transfer": false, "merchant": "biedronka" },
+    "notes": "PKO Bank Polski card payment SMS without Polish diacritics (SMS-safe), DD.MM.YYYY, available funds after; post the payment amount",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-PL-BLIK-1",
+    "country": "PL",
+    "ledger": "PLN",
+    "sender": "IKO",
+    "body": "Płatność BLIK na kwotę 129,00 zł w ALLEGRO.PL została zrealizowana.",
+    "expect": { "post": true, "amountMinor": 12900, "type": "expense", "transfer": false, "merchant": "allegro" },
+    "notes": "PKO BP IKO app push for a completed BLIK online payment, amount in 'zł' rather than PLN",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-CH-UBS-1",
+    "country": "CH",
+    "ledger": "CHF",
+    "sender": "UBS",
+    "body": "UBS Card: Transaktion CHF 45.90 bei MIGROS ZUERICH HB mit Karte xxxx1234 am 12.09.2026 um 18:21.",
+    "expect": { "post": true, "amountMinor": 4590, "type": "expense", "transfer": false, "merchant": "migros" },
+    "notes": "UBS card transaction push (Swiss German, currency first, decimal point as Swiss convention); purchase-time alert, post",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-CH-TWINT-1",
+    "country": "CH",
+    "ledger": "CHF",
+    "sender": "TWINT",
+    "body": "Du hast CHF 25.00 von Anna Müller erhalten. Nachricht: Danke fürs Znacht!",
+    "expect": { "post": true, "amountMinor": 2500, "type": "income", "transfer": true, "merchant": "anna" },
+    "notes": "TWINT P2P money received push in Swiss German; P2P in",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-CH-TWINT-2",
+    "country": "CH",
+    "ledger": "CHF",
+    "sender": "TWINT",
+    "body": "Marco Bernasconi möchte CHF 15.00 von dir. Grund: Kinoticket. Jetzt in der TWINT App bezahlen oder ablehnen.",
+    "expect": { "post": false, "why": "request" },
+    "notes": "TWINT money request (Geld anfordern) push; nothing paid",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-AT-GEORGE-1",
+    "country": "AT",
+    "ledger": "EUR",
+    "sender": "George",
+    "body": "Kartenzahlung -23,40 EUR\nBILLA DANKT 1234 WIEN\nDebitkarte ***9876, 21.09.2026",
+    "expect": { "post": true, "amountMinor": 2340, "type": "expense", "transfer": false, "merchant": "billa" },
+    "notes": "Erste Bank George app push (Austria) for a debit card payment with typical Austrian terminal text 'BILLA DANKT'; completed",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-AT-GEORGE-2",
+    "country": "AT",
+    "ledger": "EUR",
+    "sender": "George",
+    "body": "Reservierung über 150,00 EUR bei HERTZ AUTOVERMIETUNG auf Ihrer Debitkarte ***9876. Der Betrag wird erst bei der endgültigen Abrechnung gebucht.",
+    "expect": { "post": false, "why": "hold" },
+    "notes": "George card reservation (pre-authorisation hold) for a car rental; explicitly not yet booked",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-SE-SWED-1",
+    "country": "SE",
+    "ledger": "SEK",
+    "sender": "Swedbank",
+    "body": "Köp 245,00 kr ICA NARA SODERMALM, kort ****1234",
+    "expect": { "post": true, "amountMinor": 24500, "type": "expense", "transfer": false, "merchant": "ica" },
+    "notes": "Swedbank app push for a card purchase (Köp, amount in 'kr' after the number, uppercase terminal name); completed",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-SE-SWISH-1",
+    "country": "SE",
+    "ledger": "SEK",
+    "sender": "Swish",
+    "body": "Du har fått 150 kr från ERIK SVENSSON. Meddelande: middag",
+    "expect": { "post": true, "amountMinor": 15000, "type": "income", "transfer": true, "merchant": "erik" },
+    "notes": "Swish received push, whole-krona amount without decimals; P2P in",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-SE-SWISH-2",
+    "country": "SE",
+    "ledger": "SEK",
+    "sender": "Swish",
+    "body": "Betalningen på 350,00 kr till ANNA LINDQVIST kunde inte genomföras. Försök igen senare.",
+    "expect": { "post": false, "why": "failed" },
+    "notes": "Swish failed payment notice (kunde inte genomföras = could not be completed)",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-DK-MOBILEPAY-1",
+    "country": "DK",
+    "ledger": "DKK",
+    "sender": "MobilePay",
+    "body": "Du har betalt 45,00 kr. til Café Norden",
+    "expect": { "post": true, "amountMinor": 4500, "type": "expense", "transfer": false, "merchant": "norden" },
+    "notes": "MobilePay payment-to-shop push in Danish ('kr.' with trailing dot); completed wallet payment",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-DK-MOBILEPAY-2",
+    "country": "DK",
+    "ledger": "DKK",
+    "sender": "MobilePay",
+    "body": "Mette Hansen har sendt dig 1.250,00 kr.\nBesked: Husleje oktober",
+    "expect": { "post": true, "amountMinor": 125000, "type": "income", "transfer": true, "merchant": "mette" },
+    "notes": "MobilePay P2P received push with Danish dotted thousands and a message line; P2P in",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-NO-VIPPS-1",
+    "country": "NO",
+    "ledger": "NOK",
+    "sender": "Vipps",
+    "body": "Du betalte 129 kr til Peppes Pizza Grünerløkka.",
+    "expect": { "post": true, "amountMinor": 12900, "type": "expense", "transfer": false, "merchant": "peppes" },
+    "notes": "Vipps merchant payment push in Norwegian, whole kroner without decimals; completed",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-CZ-CS-1",
+    "country": "CZ",
+    "ledger": "CZK",
+    "sender": "George",
+    "body": "Platba kartou 459,00 Kč\nALBERT HYPERMARKET PRAHA\nkarta *1234, 03.10.2026",
+    "expect": { "post": true, "amountMinor": 45900, "type": "expense", "transfer": false, "merchant": "albert" },
+    "notes": "Česká spořitelna George (CZ) push for a card payment with 'Kč' symbol; completed",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "EU-CZ-CS-2",
+    "country": "CZ",
+    "ledger": "CZK",
+    "sender": "CSAS",
+    "body": "Česká spořitelna: Příchozí platba 35 000,00 CZK na účet ***1234 od ZAMESTNAVATEL S.R.O. Zpráva pro příjemce: mzda 09/2026",
+    "expect": { "post": true, "amountMinor": 3500000, "type": "income", "transfer": false, "merchant": "zamestnavatel" },
+    "notes": "Česká spořitelna incoming payment alert (Příchozí platba) with space-grouped CZK; message says mzda (salary), so transfer false",
+    "provenance": "synthetic"
+  }
+]

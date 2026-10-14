@@ -35,5 +35,15 @@
 "live.alert.title_named" = "%1$@ · %2$@";
 "live.alert.title_credit" = "%@ received";
 "live.alert.title_credit_named" = "%1$@ received · %2$@";
+"live.alert.title_sent" = "%@ sent";
+"live.alert.title_sent_named" = "%1$@ sent · %2$@";
+"live.alert.title_review" = "Bank alert to review: %@";
+"live.alert.title_review_named" = "Bank alert to review: %1$@ · %2$@";
+"live.alert.title_refund" = "%@ refunded";
+"live.alert.title_refund_named" = "%1$@ refunded · %2$@";
+"live.alert.title_withdrawal" = "%@ withdrawn";
+"live.alert.title_withdrawal_named" = "%1$@ withdrawn · %2$@";
+"live.alert.title_paid" = "%@ paid";
+"live.alert.title_paid_named" = "%1$@ paid · %2$@";
 "live.alert.card" = "··%@";
 "live.alert.fallback" = "Tap to open Wafra";

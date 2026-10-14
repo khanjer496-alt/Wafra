@@ -77,6 +77,9 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       // Pure production policies used by capture and backup validation.
       if (name === '@/lib/alert-review-tray') return require('../build/alert-review-tray.js');
       if (name === '@/lib/capture-source-identity') return require('../build/capture-source-identity.js');
+      // Parser preference mirroring is pure; capture hooks and erase flows
+      // exercise the actual ordered writer against their native boundary.
+      if (name === '@/lib/ios-native-parser-context') return require('../build/ios-native-parser-context.js');
       if (name === '@/lib/statement-import-flow') return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/statement-import-flow.ts'));
       // The pure "Open in Wafra" URL rules and one-time token store.
       if (name === '@/lib/incoming-statement-file') return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/incoming-statement-file.ts'));
@@ -243,12 +246,18 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       if (name === '@/lib/universal-template-certification') {
         return require('../build/universal-template-certification.js');
       }
-      // Gulf-neighbour (QA/KW/BH/OM) posting decision: pure, and inert for any
-      // alert the router did not send to one of those four markets.
+      // Review routing uses the shipping length-preserving normalizer only.
+      if (name === '@/lib/alert-draft') {
+        return { normalizeAlertText: require('../build/alert-draft.js').normalizeAlertText };
+      }
+      // Source convention lookup uses the current pure market catalog.
+      if (name === '@/lib/alert-market-packs') {
+        return require('../build/alert-market-packs.js');
+      }
+      // Pure country adapters used by the shared capture path.
       if (name === '@/lib/gulf-neighbour-alerts') {
         return require('../build/gulf-neighbour-alerts.js');
       }
-      // Exact LatAm bank templates are pure grammar, read by the capture path.
       if (name === '@/lib/latam-alert-templates') {
         return require('../build/latam-alert-templates.js');
       }
@@ -338,8 +347,21 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
         });
       }
       if (name === '@/lib/ai-alert-reader') {
-        // Default install: no downloaded alert model, so the AI reader is inert.
-        return { aiReviewEventForRefusedAlert: async () => null };
+        // Node has no eligible phone model; explicit harness overrides win.
+        return { aiReviewEventForRefusedAlert: async () => null,
+          createAiAlertReviewSession: () => ({ read: async () => null }) };
+      }
+      if (name === '@/lib/private-alert-format-runtime' || name === '@/lib/private-alert-format-review' || name === '@/lib/private-alert-formats' || name === '@/lib/private-alert-teaching' || name === '@/lib/markets') {
+        // The real compiled modules start unready without a hydrated local
+        // format store. Existing capture journeys therefore need no native key
+        // adapter; explicit teaching-runtime harness overrides above still win.
+        return require('../build/' + name.slice('@/lib/'.length) + '.js');
+      }
+      if (name === '@/lib/private-alert-format-copy') {
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/private-alert-format-copy.ts'));
+      }
+      if (name === '@/lib/auto-import' || name === '@/lib/local-message-record') {
+        return require('../build/' + name.slice('@/lib/'.length) + '.js');
       }
       if (name === '@/lib/local-semantic-runtime') {
         return {

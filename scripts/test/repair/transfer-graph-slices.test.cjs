@@ -10,6 +10,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { transferHeavyLedger } = require('../fixtures/transfer-heavy-ledger.cjs');
+const load = require('./load-typescript.cjs');
 
 const BUILD = process.env.WAFRA_HOT_PATH_BUILD ?? path.resolve(__dirname, '../build');
 const lib = (name) => require(path.join(BUILD, name));
@@ -28,6 +29,44 @@ function stored(count = 15000, candidates = 3000) {
 }
 const settled = (state) => new Promise((resolve) => ledger.transferReconciliationForStateInSlices(state, resolve));
 
+/** Exercise actual source with only the elapsed clock and foreground yield controlled. */
+function controlledSlices(clockTickMs) {
+  let clockReads = 0;
+  class SliceClock extends Date {
+    static now() { return clockReads++ * clockTickMs; }
+  }
+  const source = (name) => path.resolve(__dirname, '../../../src/lib', `${name}.ts`);
+  const sourceTr = load(source('transfer-reconciliation'), {
+    '@noble/hashes/sha2.js': require('@noble/hashes/sha2.js'),
+    '@noble/hashes/utils.js': require('@noble/hashes/utils.js'),
+    '@/lib/markets': markets,
+    '@/lib/currency-metadata': lib('currency-metadata'),
+  }, { Date: SliceClock });
+  const budgets = [];
+  const yields = [];
+  const sourceLedger = load(source('ledger'), {
+    '@/lib/markets': markets,
+    '@/lib/history-import': lib('history-import'),
+    '@/lib/transfer-reconciliation': {
+      ...sourceTr,
+      beginTransferReconciliation(...args) {
+        const build = sourceTr.beginTransferReconciliation(...args);
+        return { step(budget) { budgets.push(budget); return build.step(budget); } };
+      },
+    },
+    '@/lib/foreground-history-priority': {
+      waitForForegroundHistoryIdle(ms) {
+        assert.equal(ms, 8, 'the production yield remains eight milliseconds');
+        return new Promise((resolve) => yields.push(resolve));
+      },
+    },
+  }, { Date: SliceClock });
+  return { ledger: sourceLedger, tr: sourceTr, budgets, yields, clockReads: () => clockReads };
+}
+
+const graphSnapshot = (result) => JSON.stringify(result, (_key, value) =>
+  value instanceof Map || value instanceof Set ? [...value] : value);
+
 test('a large ledger answers later, with the synchronous answer, and fills the receipt cache', async () => {
   const state = stored();
   let answered = false;
@@ -45,16 +84,58 @@ test('a large ledger answers later, with the synchronous answer, and fills the r
   assert.deepEqual([...fresh.pendingIds], [...result.pendingIds]);
 });
 
-test('a cached receipt and a small ledger answer synchronously', () => {
+test('a cached receipt answers synchronously', () => {
   const state = stored();
   const cached = ledger.transferReconciliationForState(state);
   let value;
   ledger.transferReconciliationForStateInSlices(state, (result) => { value = result; });
   assert.equal(value, cached);
+});
+
+test('a small ledger that stays within the slice budget answers synchronously', () => {
+  const subject = controlledSlices(0);
   const small = stored(300, 60);
-  let smallValue;
-  ledger.transferReconciliationForStateInSlices(small, (result) => { smallValue = result; });
-  assert.ok(smallValue && smallValue.byId.size > 0, 'a small ledger finishes inside its first slice');
+  let value;
+  subject.ledger.transferReconciliationForStateInSlices(small, (result) => { value = result; });
+  assert.ok(value && value.byId.size > 0, 'the graph finishes inside its first slice');
+  assert.ok(subject.clockReads() > 0, 'the source consulted the controlled elapsed clock');
+  assert.deepEqual(subject.budgets, [6], 'the production slice budget remains six milliseconds');
+  assert.equal(subject.yields.length, 0, 'an in-budget graph schedules no continuation');
+  const fresh = subject.tr.reconcileTransfers(JSON.parse(JSON.stringify(small.transactions)), small.accounts);
+  assert.equal(graphSnapshot(value), graphSnapshot(fresh), 'every graph field matches a fresh synchronous build');
+  assert.equal(subject.ledger.cachedTransferReconciliationForState(small), value);
+});
+
+test('a small ledger that exceeds the slice budget yields, then caches the exact synchronous graph', async () => {
+  const subject = controlledSlices(6);
+  const small = stored(300, 60);
+  let value;
+  subject.ledger.transferReconciliationForStateInSlices(small, (result) => { value = result; });
+  assert.equal(value, undefined, 'a small ledger may exceed the first slice on a busy host');
+  assert.equal(subject.ledger.cachedTransferReconciliationForState(small), null, 'a partial graph is never cached');
+  assert.deepEqual(subject.budgets, [6]);
+  assert.equal(subject.yields.length, 1, 'the over-budget slice schedules a continuation');
+  let continuations = 0;
+  while (!value && continuations < 512) {
+    assert.equal(subject.yields.length, 1, 'one continuation is pending between slices');
+    subject.yields.shift()();
+    continuations += 1;
+    await Promise.resolve();
+  }
+  assert.ok(value && value.byId.size > 0, 'the deferred graph eventually finishes');
+  assert.ok(continuations > 0 && subject.budgets.length > 1);
+  assert.ok(subject.budgets.every((budget) => budget === 6), 'every slice keeps the production budget');
+  assert.equal(subject.yields.length, 0, 'completion leaves no scheduled continuation');
+  const fresh = subject.tr.reconcileTransfers(JSON.parse(JSON.stringify(small.transactions)), small.accounts);
+  assert.equal(graphSnapshot(value), graphSnapshot(fresh), 'every graph field matches a fresh synchronous build');
+  assert.equal(subject.ledger.cachedTransferReconciliationForState(small), value);
+  assert.equal(subject.ledger.transferReconciliationForState(small), value);
+  const slices = subject.budgets.length;
+  let cached;
+  subject.ledger.transferReconciliationForStateInSlices(small, (result) => { cached = result; });
+  assert.equal(cached, value, 'the next sliced request answers synchronously with the same cached object');
+  assert.equal(subject.budgets.length, slices, 'the cached request runs no graph slice');
+  assert.equal(subject.yields.length, 0);
 });
 
 test('a provisional history receipt answers null, as the synchronous call does', () => {
@@ -114,11 +195,12 @@ test('a build that throws answers every caller through failed, reports, and the 
   const { reported } = await quietly(async () => {
     // Small: throws inside the first, synchronous slice; the call itself does not throw.
     const small = poisoned(300, 60);
+    const immediate = controlledSlices(0).ledger;
     const failures = [];
-    ledger.transferReconciliationForStateInSlices(small, () => assert.fail('no answer from a failed build'),
+    immediate.transferReconciliationForStateInSlices(small, () => assert.fail('no answer from a failed build'),
       (error) => failures.push(error.message));
     assert.deepEqual(failures, ['unreadable synthetic row']);
-    ledger.transferReconciliationForStateInSlices(small, () => assert.fail('no answer'), (error) => failures.push(error.message));
+    immediate.transferReconciliationForStateInSlices(small, () => assert.fail('no answer'), (error) => failures.push(error.message));
     assert.equal(failures.length, 2, 'a second request runs again rather than joining the dead build');
     // Large: throws in a later slice; a caller arriving afterwards is not left waiting.
     const big = poisoned(15000, 3000);

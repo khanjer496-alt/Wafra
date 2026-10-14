@@ -56,8 +56,17 @@ const merchantFields = (text: string, moneySpans: readonly SourceSpan[]): Univer
   // WITH, which is otherwise a payment-method word ("with your card"); so does
   // "an online, phone, or mail transaction of $30.00 with EXXON".
   const transactionWith = /(?:^|[^\p{L}\p{N}])transaction(?:\s+of\s+(?:[A-Z]{3}\s?)?[$€£]?\d[\d.,]{0,15})?\s+with\s+(?!(?:your|the|an?)\b)/giu;
-  for (const pattern of [MERCHANT_LABEL, MERCHANT_PREPOSITION, refundFrom, symbolicAt, billSupplier, transactionWith]) {
+  // Saudi field layouts name a seller/remitter/biller on its own labelled
+  // line. "من:" is not a generic merchant preposition: the financial heading
+  // and amount label must qualify it, and recipient/account labels stay out.
+  const arabicStructuredLabel = /(?:^|\n)\s*(?:لدى|من|جهة|الجهة)\s*[:：]\s*/gu;
+  const arabicFinancialDocument = /^\s*(?:شراء|حوالة\s+واردة|سداد\s+فاتورة|مدفوعات\s+وزارة\s+الداخلية)(?=$|[\s:؛])/u.test(text) &&
+    /(?:^|\n)\s*مبلغ\s*:/u.test(text);
+  const refundFor = /\brefund\s+(?:processed|credited|received|completed|posted)\s+for\s+/giu;
+  for (const pattern of [MERCHANT_LABEL, MERCHANT_PREPOSITION, refundFrom, symbolicAt, billSupplier, transactionWith,
+    arabicStructuredLabel, refundFor]) {
     for (const match of text.matchAll(pattern)) {
+      if (pattern === arabicStructuredLabel && !arabicFinancialDocument) continue;
       // "From HSBC:" is an issuer header; "contact us at ..." is support.
       // A bare preposition requires movement evidence in its own clause.
       if ((pattern === MERCHANT_PREPOSITION || pattern === symbolicAt || pattern === transactionWith) && !ownsMovement(text, match.index!, moneySpans)) continue;

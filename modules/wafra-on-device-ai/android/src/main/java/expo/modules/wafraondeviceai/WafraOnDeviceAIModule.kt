@@ -59,7 +59,7 @@ class WafraOnDeviceAIModule : Module() {
       schemaJson: String, maxTokens: Int, timeoutMs: Int ->
       val engine = engine() ?: throw failure("ERR_ON_DEVICE_AI_UNAVAILABLE")
       val schema = ClosedSchema.parse(schemaJson)
-      if (schema == null || (task != "ask-plan" && task != "categorize") || requestId.isEmpty() ||
+      if (schema == null || (task != "ask-plan" && task != "categorize" && task != "alert-review") || requestId.isEmpty() ||
         requestId.length > 64 || prompt.isEmpty() || prompt.length > MAX_PROMPT_CHARACTERS ||
         instructions.length > MAX_PROMPT_CHARACTERS || maxTokens !in 16..1024 || timeoutMs !in 500..60_000) {
         throw failure("ERR_ON_DEVICE_AI_INVALID_REQUEST")

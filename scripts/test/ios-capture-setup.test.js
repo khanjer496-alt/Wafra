@@ -297,6 +297,7 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
         verifiedAtMs: number,
       ): Promise<boolean>;
       setCaptureEnabled(enabled: boolean): Promise<void>;
+      setNativeParserContext?(serialized: string | null): Promise<void>;
       getInstantAlertsEnabled?(): Promise<boolean>;
       setInstantAlertsEnabled?(enabled: boolean): Promise<void>;
       listPendingRecords(limit: number): Promise<string[]>;
@@ -356,6 +357,7 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       'setLocalCaptureEntitlementLease',
       'setStoreCaptureEntitlementLease',
       'setCaptureEnabled',
+      'setNativeParserContext',
       'listPendingRecords',
       'listPendingRecordsIncludingNotifications',
       'listPendingApplePayRecords',
@@ -471,6 +473,16 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       'live.alert.title_named',
       'live.alert.title_credit',
       'live.alert.title_credit_named',
+      'live.alert.title_sent',
+      'live.alert.title_sent_named',
+      'live.alert.title_review',
+      'live.alert.title_review_named',
+      'live.alert.title_refund',
+      'live.alert.title_refund_named',
+      'live.alert.title_withdrawal',
+      'live.alert.title_withdrawal_named',
+      'live.alert.title_paid',
+      'live.alert.title_paid_named',
       'live.alert.card',
       'live.alert.fallback',
     ];
@@ -587,15 +599,20 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       generatedIntent);
     const alertSource = fs.readFileSync(
       path.join(ROOT, 'modules/wafra-live-capture/ios/WafraInstantAlert.swift'), 'utf8');
-    ok('the charge banner uses the closed alert keys, checks credentials, preference and permission first',
+    ok('the charge banner uses the closed alert keys and shared parser, checks current preferences and permission',
       expectedLocalizationKeys.filter((key) => key.startsWith('live.alert.'))
-        .every((key) => alertSource.includes(`"${key}"`)) &&
-        /guard !WafraInstantAlertReader\.isSensitive\(body\),\s*let read = WafraInstantAlertReader\.read\(body\),\s*\(try\? WafraLiveCaptureStore\.shared\.instantAlertsEnabled\(\)\) == true/.test(alertSource) &&
+        .every((key) => alertSource.includes(`"${key.replace(/_named$/, '')}"`)) &&
+        /guard !WafraInstantAlertReader\.isSensitive\(body\),\s*let context = try\? store\.nativeParserContextSnapshot\(\)/.test(alertSource) &&
+        /await WafraBackgroundAlertParser\.read\(/.test(alertSource) &&
+        (alertSource.match(/store\.mayEmitParserPreview\(context: context\)/g) || []).length === 2 &&
+        alertSource.lastIndexOf('store.mayEmitParserPreview') > alertSource.indexOf('await WafraBackgroundAlertParser.read') &&
+        alertSource.indexOf('await center.notificationSettings()') < alertSource.indexOf('await WafraBackgroundAlertParser.read') &&
+        !/WafraInstantAlertReader\.read\(/.test(alertSource) &&
         /case \.authorized, \.provisional, \.ephemeral:/.test(alertSource) &&
         !/listPendingRecords|StoredRecord|contentsOf|userInfo/.test(alertSource),
       alertSource);
     eq('every automation that queues text posts the charge banner only after acceptance', [
-      generatedIntent.match(/case \.accepted:\s*if let body \{ await WafraInstantAlert\.postIfReadable\(sender: sender, body: body\) \}/g)?.length || 0,
+      generatedIntent.match(/case \.accepted:\s*if let body \{ await WafraInstantAlert\.postIfReadable\(sender: sender, body: body, observedAt: observedAt \?\? Date\(\)\) \}/g)?.length || 0,
       generatedIntent.match(/case \.accepted:\s*await WafraInstantAlert\.postIfReadable\(body: body\)/g)?.length || 0,
       generatedIntent.match(/case \.accepted:\s*await WafraInstantAlert\.postIfReadable\(body: text\)/g)?.length || 0,
       generatedIntent.match(/postIfReadable/g)?.length || 0,
@@ -4835,18 +4852,22 @@ struct WafraBankSenderRegistryTests {
       messageContains: null,
     }), true);
   // iOS 26 keeps Next disabled with both filters empty; the guided filter is a
-  // single space, which every bank alert contains.
+  // single space; it does not select a country or currency.
   eq('setup trigger guard: the guided single-space filter is supported',
     setupModule.isSupportedIosMessageAutomationTrigger({
       selectedSenderCount: 0,
       messageContains: ' ',
     }), true);
+  for (const phrase of ['AED', 'SAR', 'JD', 'درهم', 'your account']) {
+    eq(`broad setup guard rejects an incomplete keyword/currency filter ${phrase}`,
+      setupModule.isSupportedIosMessageAutomationTrigger({ selectedSenderCount: 0, messageContains: phrase }), false);
+  }
   for (const [name, trigger] of [
     ['non-numeric sender count', { selectedSenderCount: 'any', messageContains: null }],
     ['negative sender count', { selectedSenderCount: -1, messageContains: null }],
     ['empty-string filter', { selectedSenderCount: 0, messageContains: '' }],
-    ['AED keyword trigger', { selectedSenderCount: 0, messageContains: 'AED' }],
-    ['SAR keyword trigger', { selectedSenderCount: 0, messageContains: 'SAR' }],
+    ['control-character filter', { selectedSenderCount: 0, messageContains: 'AED\u0000' }],
+    ['oversized filter', { selectedSenderCount: 0, messageContains: 'A'.repeat(81) }],
   ]) {
     eq(`setup trigger guard: rejects ${name}`,
       setupModule.isSupportedIosMessageAutomationTrigger(trigger), false);

@@ -602,8 +602,13 @@ export interface ParsedCard {
  * "Cr.transaction" saved as an expense). As 64 says, rows the parser now
  * refuses (codes, limit notices, redemptions) are kept, not deleted. If #151's
  * grammar changes ever ship apart from 50, they need their own bump.
+ *
+ * 67: source-backed statement totals/minimums and labelled account-side
+ * repayments. Native worldwide fields preserve money roles and source spans;
+ * uncertain ownership, ambiguous currency and non-completed events remain
+ * unresolved. No additional full-history repair is requested.
  */
-export const PARSER_VERSION = 66;
+export const PARSER_VERSION = 67;
 /**
  * Historical-repair contract for already-saved data.
  *
@@ -1227,10 +1232,13 @@ const CARD_PAYMENT_DEBIT_LEG_RE =
   /payment\s+instructions?|(?:debited|deducted)\b[\s\S]*towards?\s+(?:the\s+)?(?:payment|settlement|repayment)|\bpayment\b[\s\S]{0,100}?\b(?:card|covered\s+card|credit\s+card|charge\s+card)\b[\s\S]{0,80}?\b(?:was|has\s+been|is)\s+(?:debited|deducted)\s+from\s+your\s+(?:account|a\/?c)\b/i;
 const CARD_PAYMENT_RECEIPT_LEG_RE =
   /(?:payment|amount)\b[\s\S]*(?:received|credited)|received\s+(?:your\s+)?payment|has\s+been\s+paid|thank you for (?:your )?payment/i;
+/** A completed account-side field list; it names no destination card suffix. */
+const CARD_PAYMENT_ACCOUNT_FIELD_RE =
+  /^\s*payment\s+towards?\s+(?:your\s+)?(?:credit|covered|charge)\s+card\s+from\s+(?:your\s+)?(?:account|a\/?c)\b/i;
 
 /** Undefined means the message named neither leg — never a guess. */
 function cardPaymentLeg(raw: string): 'debit' | 'receipt' | undefined {
-  if (CARD_PAYMENT_DEBIT_LEG_RE.test(raw)) return 'debit';
+  if (CARD_PAYMENT_DEBIT_LEG_RE.test(raw) || CARD_PAYMENT_ACCOUNT_FIELD_RE.test(raw)) return 'debit';
   if (CARD_PAYMENT_RECEIPT_LEG_RE.test(raw)) return 'receipt';
   return undefined;
 }
@@ -2225,6 +2233,9 @@ let AED_SUFFIX_RE = /x^/g;
 let MIN_DUE_RE = /x^/;
 let TOTAL_DUE_RE = /x^/;
 let CARD_PAYMENT_DUE_TOTAL_RE = /x^/;
+let GENERATED_CARD_TOTAL_RE = /x^/;
+let TOTAL_OF_MINIMUM_DUE_RE = /x^/;
+let CARD_PAYMENT_ACCOUNT_POSTING_RE = /x^/;
 /** TOTAL_DUE_RE's LABEL without its figure — see statementTotalFils. */
 let TOTAL_DUE_LABEL_RE = /x^/;
 let AR_MIN_DUE_RE = /x^/;
@@ -2415,7 +2426,7 @@ function ensureCurrencyPatterns(): void {
   // only the minimum. Keep the pay verb and dot so neither bare "min" nor
   // the later late-fee amount can supply it; the total remains independent.
   MIN_DUE_RE = new RegExp(
-    `(?:min(?:imum)?\\s+(?:(?:amount\\s+)?due(?:\\s+amount)?|payment(?:\\s+(?:of|due))?|amt(?:\\s+due)?)|\\bpay\\s+min\\.)\\s*(?:of|:|is|[-\u2013](?=\\s))?\\s*(?:${PREFIX})\\s*(${FIGURE})`, 'i');
+    `(?:min(?:imum)?(?:\\s+|\\.\\s*)(?:(?:amount\\s+)?due(?:\\s+amount)?|payment(?:\\s+(?:of|due))?|amt(?:\\s+due)?)|\\bpay\\s+min\\.)\\s*(?:of|:|is|[-\u2013](?=\\s))?\\s*(?:${PREFIX})\\s*(${FIGURE})`, 'i');
   // "Closing balance" and "statement balance" are what a statement calls its
   // total. Without them the branch fell through to first-amount extraction and
   // recorded the MINIMUM as the statement total — AED 425 owed on a AED 8,500
@@ -2451,7 +2462,21 @@ function ensureCurrencyPatterns(): void {
     `|total\\s+amt(?=\\s*[-\u2013]\\s)` +
     `|(?<!\\bmin\\s)(?<!\\bmin\\.\\s)(?<!\\bminimum\\s)amount\\s+due)`;
   TOTAL_DUE_RE = new RegExp(
-    `${TOTAL_DUE_LABEL}\\s*(?:is|:|[-\u2013](?=\\s))?\\s*(?:${PREFIX})\\s*(${FIGURE})`, 'i');
+    `${TOTAL_DUE_LABEL}\\s*(?:of|is|:|[-\u2013](?=\\s))?\\s*(?:${PREFIX})\\s*(${FIGURE})`, 'i');
+  // This generated-statement sentence states the full amount immediately
+  // after its credit-card identity, without a separate "total due" label.
+  // Keep both the statement subject and issued tense; a payment, purchase,
+  // headroom or minimum elsewhere cannot supply the debt.
+  GENERATED_CARD_TOTAL_RE = new RegExp(
+    `\\bstatement\\s+for\\s+(?:your\\s+)?(?:[A-Za-z]+\\s+){0,3}(?:credit|covered|charge)\\s+card\\s+[Xx*\u00b7\u2022\\d-]{4,24}\\s+of\\s+(?:${PREFIX})\\s*(${FIGURE})\\s+has\\s+been\\s+(?:generated|issued)\\b`, 'i');
+  // "Total of X, minimum of Y is due by ..." names the two obligations
+  // together. Bare "total of" can describe rewards and is never enough.
+  TOTAL_OF_MINIMUM_DUE_RE = new RegExp(
+    `\\btotal\\s+of\\s+(?:${PREFIX})\\s*(${FIGURE})\\s*(?:,|and|&)\\s*minimum\\s+of\\s+(?:${PREFIX})\\s*(${FIGURE})\\s+(?:is|are)\\s+due\\s+(?:by|on)\\b`, 'i');
+  // Bind the funding identity, primary Amount and its Date in one field list.
+  // A separate fee Amount/Date cannot repair an unreadable primary field.
+  CARD_PAYMENT_ACCOUNT_POSTING_RE = new RegExp(
+    `${CARD_PAYMENT_ACCOUNT_FIELD_RE.source}\\s*(?:no\\.?|number)?\\s*:?\\s*[Xx*\u00b7\u2022\\d-]{1,64}(?:\\s+[Xx*\u00b7\u2022\\d-]{1,64})?\\s+amount\\s*:\\s*(?:${PREFIX})\\s*(${FIGURE})\\s*(?:[,;]\\s*)?date\\s*:\\s*(\\d{1,2})[/.-](\\d{1,2})[/.-](\\d{2,4})(?=\\s|$|[.,;](?!\\d))`, 'i');
   CARD_PAYMENT_DUE_TOTAL_RE = new RegExp(
     `\\bcard\\b[^.\\n]{0,96}?\\bpayment\\s+is\\s+due\\s+on\\s+` +
     `\\d{1,2}[-\\s]+[A-Za-z]{3,9}(?:[-\\s]+\\d{2,4})?\\s+is\\s+` +
@@ -4840,8 +4865,52 @@ const extractTtPaymentAmount = (raw: string): TtPaymentAmount | null => {
  * minimum, last payment or headroom into total debt can falsely settle a card.
  */
 function statementTotalFils(raw: string): number | null {
-  const totalMatch = raw.match(TOTAL_DUE_RE) ?? raw.match(CARD_PAYMENT_DUE_TOTAL_RE) ?? raw.match(AR_TOTAL_DUE_RE);
-  return totalMatch ? Math.round(Number(totalMatch[1].replace(/,/g, '')) * 100) : null;
+  const totalMatch = raw.match(TOTAL_DUE_RE);
+  if (totalMatch) return Math.round(Number(totalMatch[1].replace(/,/g, '')) * 100);
+  const paired = raw.match(TOTAL_OF_MINIMUM_DUE_RE);
+  if (paired) {
+    // The pair states debt but does not itself name its owner. First-card
+    // extraction cannot decide between different instruments in the body.
+    if (!statementHasSingleCardOwner(raw)) return null;
+    return Math.round(Number(paired[1].replace(/,/g, '')) * 100);
+  }
+  const legacyTotal = raw.match(CARD_PAYMENT_DUE_TOTAL_RE) ?? raw.match(AR_TOTAL_DUE_RE);
+  if (legacyTotal) return Math.round(Number(legacyTotal[1].replace(/,/g, '')) * 100);
+  const generated = raw.match(GENERATED_CARD_TOTAL_RE);
+  if (!generated) return null;
+  // The amount belongs to the card named in this generated-statement clause.
+  // An earlier/later card cannot receive it through first-card extraction.
+  const ownCard = extractCard(generated[0]);
+  if (!ownCard || !statementHasSingleCardOwner(raw, ownCard.last4)) return null;
+  return Math.round(Number(generated[1].replace(/,/g, '')) * 100);
+}
+
+/** Ownership guard for the two new statement-total grammars only. A cardless
+ * summary remains cardless; an account tail or competing card never supplies
+ * its identity. Legacy total-due labels retain their established behavior.
+ */
+function statementHasSingleCardOwner(raw: string, expectedTail?: string): boolean {
+  if (ACCOUNT_RE.test(raw) || MASKED_ACCOUNT_RE.test(raw) || AR_ACCOUNT_RE.test(raw)) return false;
+  const finalCard = extractCard(raw);
+  if (finalCard?.kind === 'account' || finalCard?.kind === 'debit') return false;
+  const maskedPan = new RegExp(MASKED_PAN_RE.source, 'g');
+  const identities = new Set<string>();
+  for (const match of raw.matchAll(maskedPan)) {
+    if (saysDebit(transactionWindow(raw, endOf(match)))) return false;
+    identities.add(match[1]);
+  }
+  const withoutPans = raw.replace(maskedPan, (match) => ' '.repeat(match.length));
+  for (const match of withoutPans.matchAll(new RegExp(CARD_RE.source, 'gi'))) {
+    if (/debit|prepaid/i.test(match[1] ?? '')) return false;
+    identities.add(match[2] ?? match[3]);
+  }
+  for (const match of withoutPans.matchAll(new RegExp(AR_CARD_RE.source, 'g'))) {
+    if ((match[1] ?? '').includes('الخصم')) return false;
+    identities.add(match[2]);
+  }
+  if (!finalCard) return expectedTail === undefined && identities.size === 0;
+  const ownerTail = expectedTail ?? finalCard.last4;
+  return finalCard.last4 === ownerTail && identities.size === 1 && identities.has(ownerTail);
 }
 
 /** A contradictory minimum cannot become a payment obligation. Keep the
@@ -4850,8 +4919,9 @@ function statementTotalFils(raw: string): number | null {
  */
 function statementMinimumFils(raw: string, totalFils: number): number | null {
   const match = raw.match(MIN_DUE_RE) ?? raw.match(AR_MIN_DUE_RE);
-  if (!match) return null;
-  const minimum = Math.round(Number(match[1].replace(/,/g, '')) * 100);
+  const figure = match?.[1] ?? raw.match(TOTAL_OF_MINIMUM_DUE_RE)?.[2];
+  if (!figure) return null;
+  const minimum = Math.round(Number(figure.replace(/,/g, '')) * 100);
   return Number.isSafeInteger(minimum) && minimum >= 0 && minimum <= totalFils ? minimum : null;
 }
 
@@ -6539,6 +6609,29 @@ function parseSmsInner(
         raw: source,
       };
     }
+  }
+
+  // This labelled account-side payment is a settlement even when the bank
+  // omits the target card. Its account digits and balance describe funding,
+  // so neither may become destination-card identity or headroom.
+  const accountPaymentField = CARD_PAYMENT_ACCOUNT_FIELD_RE.test(raw);
+  if (accountPaymentField && !REFUND_RE.test(raw) && !REVERSAL_RE.test(raw)) {
+    const posting = raw.match(CARD_PAYMENT_ACCOUNT_POSTING_RE);
+    if (!posting || Array.from(raw.matchAll(/\bamount\s*:/gi)).length !== 1 ||
+        Array.from(raw.matchAll(/\bdate\s*:/gi)).length !== 1) return null;
+    const accountPaymentDay = numericDate(posting[2], posting[3], posting[4]);
+    if (!accountPaymentDay) return null;
+    const observedDay = localIsoDay(options?.observedAt);
+    if (observedDay && accountPaymentDay > observedDay) return null;
+    const amountFils = Math.round(Number(posting[1].replace(/,/g, '')) * 100);
+    if (!Number.isSafeInteger(amountFils) || amountFils <= 0 || amountFils > MAX_PLAUSIBLE_AMOUNT_FILS) return null;
+    return {
+      kind: 'cardPayment', type: 'expense', amountFils, merchant: 'Card payment',
+      date: accountPaymentDay, dueDay: null, minDueFils: null, card: null,
+      cardPaymentSide: 'debit', transferHint: true,
+      snapshotFils: null, snapshotKind: null,
+      categoryGuess: 'other', categoryDeliberate: true, currency, reference, raw: source,
+    };
   }
 
   // Card payment received (transfer into the card) — before debit detection,

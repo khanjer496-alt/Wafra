@@ -482,6 +482,44 @@ function tokenise(source: string, aliases: CurrencyAliasMap): Tokenised {
   return { normalized, tokens, overlap, moneyAmbiguous };
 }
 
+/**
+ * Ephemeral adapter for the private keyed format store. It returns source
+ * literals and typed coordinates for this call only; callers must never
+ * persist this snapshot. The existing learning/matching behavior is unchanged.
+ */
+export function inspectLearnedSourceForPrivateMatching(
+  source: string,
+  currency: string,
+  aliases: Record<string, string>,
+  dateOrder: LearnedDateOrder | null,
+): {
+  literals: string[];
+  dates: (string | null)[];
+  variableNumbers: { start: number; end: number; literal: string }[];
+} | null {
+  if (typeof source !== 'string' || !source.trim() || source.length > MAX_SOURCE) return null;
+  const aliasMap = aliasesForConfirmation(currency, undefined);
+  for (const [token, code] of Object.entries(aliases)) aliasMap[token] = [code as CurrencyCode];
+  const snapshot = tokenise(source, aliasMap);
+  if (snapshot.overlap || snapshot.moneyAmbiguous || snapshot.tokens.length > MAX_TOKENS) return null;
+  return {
+    literals: snapshot.tokens.flatMap((token) => token.k === 'WORD' || token.k === 'PUNCT' ? [token.v] : []),
+    dates: snapshot.tokens.flatMap((token) => token.k === 'DATE' ? [token.date.parse(dateOrder)] : []),
+    variableNumbers: snapshot.tokens.flatMap((token) =>
+      token.k === 'NUM' || token.k === 'MASK' || token.k === 'ALNUM' ? [{ start: token.start, end: token.end, literal: snapshot.normalized.slice(token.start, token.end) }] : []),
+  };
+}
+
+/** Public currency metadata only, never aliases supplied by an SMS or person. */
+export function publicLearnedCurrencyCandidates(spelling: string): string[] {
+  const normalized = fold(spelling);
+  const found = [...Object.entries(CURRENCY_SYMBOL_CANDIDATES), ...Object.entries(LOCAL_ALIASES)]
+    .filter(([token]) => fold(token) === normalized).flatMap(([, codes]) => codes);
+  const iso = spelling.toUpperCase();
+  if (/^[A-Z]{3}$/.test(iso) && currencyMinorUnits(iso) !== null) found.push(iso as CurrencyCode);
+  return [...new Set(found)];
+}
+
 /** Unique minor units for `iso` in a money token, or null when absent/ambiguous. */
 const uniqueMinor = (candidate: MoneyCandidate, iso: string, exponent: number): string | null => {
   if (candidate.currencyCandidates.length !== 1 || candidate.currencyCandidates[0] !== iso) return null;
@@ -729,7 +767,7 @@ export function recordLearnedConfirmation(
   input: LearnInput,
 ): { ok: true; store: LearnedFormatStore; template: LearnedTemplate } | { ok: false; reason: LearnRefusal; store: LearnedFormatStore } {
   const learned = learnFromConfirmation(input);
-  if (!learned.ok) return { ok: false, reason: learned.reason, store };
+  if (learned.ok === false) return { ok: false, reason: learned.reason, store };
   const next = addOrUpdateLearnedTemplate(store, learned.template, input.now);
   return { ok: true, store: next, template: next.templates.find((row) => row.id === learned.template.id) ?? learned.template };
 }
@@ -760,7 +798,7 @@ const spacedMoneyAllowed = (money: MoneyCandidate, previous: TemplateToken | und
 
 interface Parse { amount: string; merchant?: [number, number]; date?: string; card?: string; dateOk: boolean }
 
-function matchTemplate(template: LearnedTemplate, tok: Tokenised): Parse[] {
+function matchTemplate(template: LearnedTemplate, tok: Tokenised, privateNumericGuard?: (index: number, literal: string) => boolean): Parse[] {
   const tt = template.tokens;
   const mt = tok.tokens;
   const results: Parse[] = [];
@@ -828,7 +866,8 @@ function matchTemplate(template: LearnedTemplate, tok: Tokenised): Parse[] {
       case 'CARD':
         // Same digit count; the masking prefix (XX / XXXX) may vary.
         if ((token.k === 'NUM' || token.k === 'MASK') && /^[^/.,:'-]*$/.test(token.exact) &&
-          token.digits.length === slot.f.replace(/[^#]/g, '').length) {
+          token.digits.length === slot.f.replace(/[^#]/g, '').length &&
+          (!privateNumericGuard || privateNumericGuard(ti, tok.normalized.slice(token.start, token.end)))) {
           const previous = state.card;
           state.card = state.card ?? token.digits.slice(-4);
           walk(ti + 1, mi + 1);
@@ -836,10 +875,12 @@ function matchTemplate(template: LearnedTemplate, tok: Tokenised): Parse[] {
         }
         return;
       case 'NUM':
-        if ((token.k === 'NUM' || token.k === 'MASK') && token.loose === slot.f) walk(ti + 1, mi + 1);
+        if ((token.k === 'NUM' || token.k === 'MASK') && token.loose === slot.f &&
+          (!privateNumericGuard || privateNumericGuard(ti, tok.normalized.slice(token.start, token.end)))) walk(ti + 1, mi + 1);
         return;
       case 'ALNUM':
-        if (token.k === 'ALNUM' && token.n === slot.n) walk(ti + 1, mi + 1);
+        if (token.k === 'ALNUM' && token.n === slot.n &&
+          (!privateNumericGuard || privateNumericGuard(ti, tok.normalized.slice(token.start, token.end)))) walk(ti + 1, mi + 1);
         return;
     }
   };
@@ -856,6 +897,8 @@ export function matchLearnedFormat(
   sender: string | null | undefined,
   store: LearnedFormatStore | null | undefined,
   options: MatchOptions = {},
+  /** Private adapter only: constrain numeric tokens whose values were not explicitly labelled variable fields. */
+  privateNumericGuard?: (index: number, literal: string) => boolean,
 ): LearnedMatch {
   const none: LearnedMatch = { kind: 'none' };
   if (!store || !Array.isArray(store.templates) || !store.templates.length) return none;
@@ -892,7 +935,7 @@ export function matchLearnedFormat(
       tokenCache.set(aliasKey, tok);
     }
     if (tok.overlap) continue;
-    const parses = matchTemplate(template, tok);
+    const parses = matchTemplate(template, tok, privateNumericGuard);
     if (parses.length !== 1) continue;
     if (template.blocked) { blockedHit = true; continue; }
     hits.push({ template, parse: parses[0] });

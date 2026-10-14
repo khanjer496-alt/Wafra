@@ -137,6 +137,10 @@ public class WafraLiveCaptureModule: Module {
       try WafraLiveCaptureStore.shared.setCaptureEnabled(enabled)
     }
 
+    AsyncFunction("setNativeParserContext") { (serialized: String?) in
+      try WafraLiveCaptureStore.shared.setNativeParserContext(serialized)
+    }
+
     AsyncFunction("getInstantAlertsEnabled") { () -> Bool in
       try WafraLiveCaptureStore.shared.instantAlertsEnabled()
     }

@@ -1115,7 +1115,10 @@ eq('balance-coverage copy resolves every placeholder',
     importSource.indexOf('setPlan(null)', emptyBranch) > emptyBranch);
   ok('and distinguishes "already filed" from "we cannot read this"',
     /kind: 'filed', count: skipped/.test(importSource) &&
-      /kind: 'unreadable', count: messageBlocks\(input\)/.test(importSource));
+      /kind: 'unreadable', count: pastedCount/.test(importSource) &&
+      /const pastedCount = messageBlocks\(input\)/.test(importSource) &&
+      importSource.indexOf('const pastedCount = messageBlocks(input)', importSource.indexOf('const runParse')) <
+      importSource.indexOf("input = '';", importSource.indexOf('const runParse')));
   // The alternative routes stay gated on `plan === null`, which is exactly why
   // clearing the plan is the fix: they come back at the moment they are needed.
   ok('the alternate import routes are visible on an unreadable paste',

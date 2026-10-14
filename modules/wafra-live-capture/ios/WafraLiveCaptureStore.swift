@@ -181,6 +181,8 @@ public final class WafraLiveCaptureStore {
     var captureOffNoticeReason: WafraCaptureOffNotice?
     /// The per-charge banner preference. Absent means on, as on Android.
     var instantAlertsOff: Bool = false
+    /// Advisory settings only; absent/malformed snapshots never invalidate receipts.
+    var nativeParserContext: WafraNativeParserContext?
 
     private enum CodingKeys: String, CodingKey {
       case v, enabled, records, acknowledged, dropped, corrupt, warningId
@@ -192,6 +194,7 @@ public final class WafraLiveCaptureStore {
       case lastApplePayIncompleteAt, applePaySetupProofAt, firstApplePayReceivedAt, lastApplePayReceivedAt
       case applePayCardObservations
       case captureOffNoticeAt, captureOffNoticeReason, instantAlertsOff
+      case nativeParserContext
     }
 
     init() {}
@@ -276,6 +279,7 @@ public final class WafraLiveCaptureStore {
         forKey: .captureOffNoticeReason
       )
       instantAlertsOff = (try? values.decodeIfPresent(Bool.self, forKey: .instantAlertsOff)) ?? false
+      nativeParserContext = try? values.decodeIfPresent(WafraNativeParserContext.self, forKey: .nativeParserContext)
     }
 
     var recordBytes: Int {
@@ -331,6 +335,14 @@ public final class WafraLiveCaptureStore {
     source: WafraLiveCaptureSource = .message,
     applePayCardOrPass: String? = nil
   ) throws -> WafraLiveStageResult {
+    // The broad Message automation can deliver security credentials too.
+    // Refuse those before any disk access or capture-off notice. Do not use
+    // the preview's currency vocabulary as an admission filter: unfamiliar
+    // bank alerts still need the full parser or Review when Wafra drains them.
+    if body.lengthOfBytes(using: .utf8) <= Self.maxBodyBytes,
+       WafraInstantAlertReader.isSensitive(body) {
+      return .ignored
+    }
     var newlyQueued = false
     let result: WafraLiveStageResult = try withExclusiveLock { root in
       var manifest = try loadManifest(in: root)
@@ -606,6 +618,35 @@ public final class WafraLiveCaptureStore {
     try withExclusiveLock { root in
       let manifest = try loadManifest(in: root)
       return !manifest.instantAlertsOff
+    }
+  }
+
+  /// Invalid settings clear advisory preview context, never queue data or consent.
+  public func setNativeParserContext(_ serialized: String?) throws {
+    let context = serialized.flatMap { WafraNativeParserContext(validatingJSON: $0) }
+    try withExclusiveLock { root in
+      var manifest = try loadManifest(in: root)
+      guard manifest.nativeParserContext != context else { return }
+      manifest.nativeParserContext = context
+      try writeManifest(manifest, in: root)
+    }
+  }
+
+  public func nativeParserContextSnapshot() throws -> WafraNativeParserContext? {
+    try withExclusiveLock { root in
+      let manifest = try loadManifest(in: root)
+      guard manifest.enabled, isEntitled(manifest, at: clock()), !manifest.instantAlertsOff,
+        let context = manifest.nativeParserContext, context.isValidBasic else { return nil }
+      return context
+    }
+  }
+
+  /// Recheck all stored gates and the exact snapshot after asynchronous parsing.
+  public func mayEmitParserPreview(context: WafraNativeParserContext) throws -> Bool {
+    try withExclusiveLock { root in
+      let manifest = try loadManifest(in: root)
+      return context.isValidBasic && manifest.enabled && isEntitled(manifest, at: clock()) &&
+        !manifest.instantAlertsOff && manifest.nativeParserContext == context
     }
   }
 

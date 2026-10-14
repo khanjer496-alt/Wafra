@@ -74,6 +74,7 @@ public final class WafraLiveCaptureStore {
     firstCapturedDates = []
     localLeaseCalls = []
     storeLeaseCalls = []
+    nativeParserContextInputs = []
   }
 
   public func setLocalEntitlementLease(expiresAt: Date?, lifetime: Bool) throws -> Bool {
@@ -90,6 +91,12 @@ public final class WafraLiveCaptureStore {
     calls.append("setStoreEntitlementLease")
     storeLeaseCalls.append((expiresAt, lifetime, verifiedAt))
     return true
+  }
+
+  public var nativeParserContextInputs: [String?] = []
+
+  public func setNativeParserContext(_ serialized: String?) throws {
+    nativeParserContextInputs.append(serialized)
   }
 
   public func setCaptureEnabled(_ enabled: Bool) throws {

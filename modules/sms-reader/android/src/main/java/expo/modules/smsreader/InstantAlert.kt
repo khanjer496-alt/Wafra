@@ -293,6 +293,10 @@ object InstantAlert {
   )
 
   private val UNSAFE_TRANSACTION_RE = Regex(
+    // A leading principal that did not move must not announce its quoted amount.
+    "^\\s*(?:Dear\\s+Customer[,!:]\\s*)?(?:[A-Z]{3}|[$€£¥₹])\\s*\\d[\\d,.]*\\s+(?:(?:has|have)\\s+not\\s+been|hasn['’]t\\s+been|(?:was|were|is|are)\\s+not|(?:was|were|is|are)n['’]t)\\s+(?:transferred|debited|credited|deducted|charged|withdrawn|paid|deposited|refunded)\\b|" +
+    // Explicit personal conversation cannot be a bank movement preview.
+    "^\\s*(?:(?:hi|hey|hello)\\b(?:[^\\r\\n.!?]{0,40}[,!:]|\\s+)\\s*)?(?:I(?:\\s+(?:(?:have|just|already)\\s+){0,2}|['’]ve\\s+(?:(?:just|already)\\s+)?)(?:spent|paid|bought|sent|deposited|transferred|refunded)\\b|[اأ]نا\\s+(?:(?:قد|لقد)\\s+)?(?:صرفت|دفعت|اشتريت|حولت|حوّلت|أرسلت|ارسلت)(?=\\s))|" +
     "\\botp\\b|one[- ]time (?:password|pin)|do not share|verification code|declin|unsuccessful|insufficient|" +
       "could not be (?:processed|completed)|\\bfailed\\b|\\breversed\\b|pre[- ]?auth|blocked|" +
       "\\bpending\\b|\\bcancell?ed\\b|not (?:completed|processed|successful|debited)|" +
@@ -306,6 +310,7 @@ object InstantAlert {
   )
 
   private val CREDIT_RE = Regex(
+    "^\\s*(?:Dear\\s+Customer,\\s*)?(?:$CUR)\\s*[0-9][0-9,.]*\\s+has\\s+been\\s+transferred\\s+to\\s+your\\s+(?:account|a/c)\\s*[0-9Xx*•·-]*(?=\\s*(?:[.;\\r\\n]|$))|" +
     "\\bcredited\\b|\\brefunded\\b|\\bdeposited\\b|\\bsalary\\b|" +
       "إيداع|ايداع|استرداد|استرجاع|راتب",
     RegexOption.IGNORE_CASE,

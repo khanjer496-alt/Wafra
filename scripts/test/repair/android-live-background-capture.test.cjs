@@ -118,6 +118,7 @@ test('cold bundle entry registers live capture before Router without rendering a
       '@/lib/android-capture-sources': {}, '@/lib/auto-import': {},
       '@/lib/capture-executor': {}, '@/lib/capture': {}, '@/lib/i18n': {},
       '@/lib/ledger-import': {}, '@/lib/ledger-money': {}, '@/lib/markets': {},
+      '@/lib/private-alert-format-runtime': { activatePrivateAlertFormats() {}, invalidatePrivateAlertFormats() {} },
       '@/lib/ledger-persistence': { createLedgerPersistence: () => ({}) },
       '@/lib/country': {}, '@/lib/best-effort-autopost': {}, '@/lib/purchases': {},
       '@/lib/notifications': {}, '@/lib/reminders': {}, '@/lib/state-storage': {},

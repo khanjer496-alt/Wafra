@@ -258,7 +258,7 @@ struct StageWafraLiveMessageIntent: AppIntent {
       )
       switch result {
       case .accepted:
-        if let body { await WafraInstantAlert.postIfReadable(sender: sender, body: body) }
+        if let body { await WafraInstantAlert.postIfReadable(sender: sender, body: body, observedAt: observedAt ?? Date()) }
         return .result(value: result.rawValue)
       case .ignored:
         return .result(value: result.rawValue)

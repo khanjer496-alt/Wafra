@@ -1,0 +1,563 @@
+[
+  {
+    "id": "SAM-PK-HBL-1",
+    "country": "PK",
+    "ledger": "PKR",
+    "sender": "HBL",
+    "body": "Dear Customer, your HBL Debit Card ending with 1234 has been charged PKR 2,350.00 at FOODPANDA PK on 12-SEP-2026 14:22:10. Not you? Call 111-111-425",
+    "expect": { "post": true, "amountMinor": 235000, "type": "expense", "transfer": false, "merchant": "foodpanda" },
+    "notes": "HBL debit card e-commerce/POS charge alert, English, UAN footer.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-PK-HBL-2",
+    "country": "PK",
+    "ledger": "PKR",
+    "sender": "HBL",
+    "body": "Dear Customer, PKR 15,000.00 has been credited to your HBL A/C xxxxxxx1234 on 15-Sep-26 via IBFT from MUHAMMAD USMAN (MCB). Avl Bal: PKR 62,410.75. HBL",
+    "expect": { "post": true, "amountMinor": 1500000, "type": "income", "transfer": true, "merchant": "usman" },
+    "notes": "HBL inward IBFT (interbank funds transfer) credit naming the remitter and remitting bank; balance must not be taken as the amount.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-PK-MCB-1",
+    "country": "PK",
+    "ledger": "PKR",
+    "sender": "MCB",
+    "body": "MCB: Rs.5,000.00 withdrawn from ATM using card ending 4521 on 03-Sep-26 at 18:42. Avl Bal Rs.45,231.18. Call 111-000-622 if not done by you.",
+    "expect": { "post": true, "amountMinor": 500000, "type": "expense", "transfer": false },
+    "notes": "MCB ATM cash withdrawal; amount written as Rs.5,000.00 with no space (common Pakistani style).",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-PK-MEEZAN-1",
+    "country": "PK",
+    "ledger": "PKR",
+    "sender": "MeezanBank",
+    "body": "Dear Customer, PKR 3,500.00 has been debited from your A/C 0101XXXX4567 on 12-09-2026 via Raast to ALI HAMZA (UBL). TranID: RA1234567. Avail Bal: PKR 56,789.00\nMeezan Bank",
+    "expect": { "post": true, "amountMinor": 350000, "type": "expense", "transfer": true, "merchant": "ali hamza" },
+    "notes": "Meezan Bank outward Raast (Pakistan instant payment) P2P debit with beneficiary and beneficiary bank; signature on its own line.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-PK-UBL-1",
+    "country": "PK",
+    "ledger": "PKR",
+    "sender": "UBL",
+    "body": "UBL: Your A/C ...6789 has been credited with PKR 145,000.00 on 30-Sep-2026. Narration: SALARY SEP-2026 ACME PVT LTD. Avl Bal PKR 152,310.25. UBL Helpline 111-825-888",
+    "expect": { "post": true, "amountMinor": 14500000, "type": "income", "transfer": false },
+    "notes": "UBL salary credit with Narration field; payroll labelled transfer false.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-PK-JAZZCASH-1",
+    "country": "PK",
+    "ledger": "PKR",
+    "sender": "8558",
+    "body": "Rs 1,000.00 sent to 03001234567 ALI KHAN on 15-Sep-2026 12:30 PM. TID: 01234567890. Fee: Rs 0.00. Your new JazzCash balance is Rs 2,345.67.",
+    "expect": { "post": true, "amountMinor": 100000, "type": "expense", "transfer": true, "merchant": "ali khan" },
+    "notes": "JazzCash mobile-wallet money transfer to a mobile account from short code 8558; fee and balance lines present.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-PK-EASYPAISA-1",
+    "country": "PK",
+    "ledger": "PKR",
+    "sender": "3737",
+    "body": "Aap ke Easypaisa account mein USMAN ALI (0345XXXX123) se Rs. 2,500.00 wusool huay hain. Trx ID 41234567890. Aap ka naya balance Rs. 3,120.50 hai.",
+    "expect": { "post": true, "amountMinor": 250000, "type": "income", "transfer": true, "merchant": "usman ali" },
+    "notes": "Roman-Urdu Easypaisa money-received variant from short code 3737; no date in body (SMS timestamp is the date).",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-BD-BKASH-1",
+    "country": "BD",
+    "ledger": "BDT",
+    "sender": "bKash",
+    "body": "You have received Tk 1,500.00 from 01712345678. Ref Rent. Fee Tk 0.00. Balance Tk 2,345.67. TrxID 9IJ8K7L6M5 at 14/09/2026 18:32",
+    "expect": { "post": true, "amountMinor": 150000, "type": "income", "transfer": true },
+    "notes": "bKash English Received Money template (amount, sender wallet, Ref, Fee, Balance, TrxID, at dd/mm/yyyy).",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-BD-BKASH-2",
+    "country": "BD",
+    "ledger": "BDT",
+    "sender": "bKash",
+    "body": "Cash Out Tk 3,000.00 to 01912345678 successful. Fee Tk 55.50. Balance Tk 1,124.75. TrxID ABC1D2EF3G at 15/09/2026 10:15",
+    "expect": { "post": true, "amountMinor": 300000, "type": "expense", "transfer": false },
+    "notes": "bKash agent Cash Out (cash withdrawal at agent); amount excludes the separately stated fee.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-BD-BKASH-3",
+    "country": "BD",
+    "ledger": "BDT",
+    "sender": "bKash",
+    "body": "Payment Tk 650.00 to Daraz Bangladesh Ltd successful. Balance Tk 474.75. TrxID BCD2E3F4G5 at 16/09/2026 21:05",
+    "expect": { "post": true, "amountMinor": 65000, "type": "expense", "transfer": false, "merchant": "daraz" },
+    "notes": "bKash merchant Payment template naming the merchant.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-BD-NAGAD-1",
+    "country": "BD",
+    "ledger": "BDT",
+    "sender": "NAGAD",
+    "body": "Send Money Successful.\nAmount: Tk 800.00\nReceiver: 01712345678\nRef: N/A\nTxnID: 71A2B3C4\nBalance: Tk 712.40\n20/09/2026 11:23",
+    "expect": { "post": true, "amountMinor": 80000, "type": "expense", "transfer": true },
+    "notes": "Nagad multi-line labelled Send Money confirmation (Amount/Receiver/Ref/TxnID/Balance lines).",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-BD-DBBL-1",
+    "country": "BD",
+    "ledger": "BDT",
+    "sender": "DBBL",
+    "body": "Dear Customer, BDT 10,000.00 has been withdrawn from your DBBL A/C 123***4567 at ATM DBBL GULSHAN-1 on 18-SEP-26 13:22. Available Balance BDT 35,240.50",
+    "expect": { "post": true, "amountMinor": 1000000, "type": "expense", "transfer": false },
+    "notes": "Dutch-Bangla Bank ATM cash withdrawal with masked dotted account and DD-MON-YY date.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-LK-COMBANK-1",
+    "country": "LK",
+    "ledger": "LKR",
+    "sender": "COMBANK",
+    "body": "Dear Customer, Your ComBank Debit Card ending 1234 was used for LKR 4,560.00 at KEELLS SUPER NAWALA on 12/09/2026 18:24. For inquiries call 0112353353",
+    "expect": { "post": true, "amountMinor": 456000, "type": "expense", "transfer": false, "merchant": "keells" },
+    "notes": "Commercial Bank of Ceylon debit card POS alert, English.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-LK-SAMPATH-1",
+    "country": "LK",
+    "ledger": "LKR",
+    "sender": "SAMPATH",
+    "body": "Sampath Bank: Your A/C 1029XXXX5678 has been CREDITED with LKR 185,000.00 on 30/09/2026. Desc: SALARY SEP 2026. Avl Bal LKR 201,340.00",
+    "expect": { "post": true, "amountMinor": 18500000, "type": "income", "transfer": false },
+    "notes": "Sampath Bank salary credit with Desc field; uppercase CREDITED as Sampath alerts use.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-LK-HNB-1",
+    "country": "LK",
+    "ledger": "LKR",
+    "sender": "HNB",
+    "body": "HNB Alert: LKR 12,000.00 debited from A/C XXXX1234 on 21/09/2026 for CEFT transfer to N PERERA. Ref 260921123456. Avl Bal LKR 89,340.00",
+    "expect": { "post": true, "amountMinor": 1200000, "type": "expense", "transfer": true, "merchant": "perera" },
+    "notes": "HNB outward CEFT (LankaPay common electronic fund transfer) debit to a named person.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-NP-NABIL-1",
+    "country": "NP",
+    "ledger": "NPR",
+    "sender": "NABIL",
+    "body": "Dear Customer, Your A/C ###1234 has been debited by NPR 5,000.00 on 12-Sep-2026 for ATM Cash Withdrawal. Avl Bal: NPR 45,231.50 -Nabil Bank",
+    "expect": { "post": true, "amountMinor": 500000, "type": "expense", "transfer": false },
+    "notes": "Nabil Bank ATM withdrawal debit alert with -Nabil Bank signature.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-NP-NICASIA-1",
+    "country": "NP",
+    "ledger": "NPR",
+    "sender": "NICASIA",
+    "body": "Dear Customer, A/C ##4567 debited by NPR 850.00 on 18/09/2026. Remarks: Fonepay QR Payment to BHAT BHATENI SUPERSTORE. Avl Bal NPR 12,345.00 -NIC ASIA",
+    "expect": { "post": true, "amountMinor": 85000, "type": "expense", "transfer": false, "merchant": "bhat bhateni" },
+    "notes": "NIC Asia debit for a Fonepay QR merchant payment, merchant inside Remarks.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-NP-ESEWA-1",
+    "country": "NP",
+    "ledger": "NPR",
+    "sender": "eSewa",
+    "body": "eSewa\nYou have received NPR 2,500.00 from Sita Sharma (98XXXXXX45). Remarks: lunch. Transaction Code: 0A1B2C3.",
+    "expect": { "post": true, "amountMinor": 250000, "type": "income", "transfer": true, "merchant": "sita" },
+    "notes": "eSewa wallet push notification for a received P2P transfer (title line + body).",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-EG-NBE-1",
+    "country": "EG",
+    "ledger": "EGP",
+    "sender": "NBE",
+    "body": "تم خصم مبلغ 1,250.00 جنيه من بطاقتكم المنتهية بـ 1234 لدى CARREFOUR MAADI بتاريخ 14/09/2026 الساعة 19:30. الرصيد المتاح 12,345.67 جنيه. البنك الأهلي المصري",
+    "expect": { "post": true, "amountMinor": 125000, "type": "expense", "transfer": false, "merchant": "carrefour" },
+    "notes": "National Bank of Egypt Arabic card purchase debit (tam khasm ... ladā MERCHANT), currency word جنيه.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-EG-CIB-1",
+    "country": "EG",
+    "ledger": "EGP",
+    "sender": "CIB",
+    "body": "Your CIB Credit Card ending with 5678 was charged for EGP 899.00 at AMAZON EG on 16/09/2026 at 20:11. Available Limit: EGP 24,101.00",
+    "expect": { "post": true, "amountMinor": 89900, "type": "expense", "transfer": false, "merchant": "amazon" },
+    "notes": "CIB credit card purchase alert in English with available limit; a purchase, not a card bill.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-EG-BANQUEMISR-1",
+    "country": "EG",
+    "ledger": "EGP",
+    "sender": "BanqueMisr",
+    "body": "بنك مصر: تم سحب مبلغ 3,000.00 جم من ماكينة الصراف الآلي باستخدام بطاقتك المنتهية بـ 4321 بتاريخ 17/09/2026. الرصيد المتاح 8,750.25 جم",
+    "expect": { "post": true, "amountMinor": 300000, "type": "expense", "transfer": false },
+    "notes": "Banque Misr Arabic ATM cash withdrawal, currency abbreviated جم.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-EG-INSTAPAY-1",
+    "country": "EG",
+    "ledger": "EGP",
+    "sender": "InstaPay",
+    "body": "InstaPay\nYou have successfully transferred EGP 750.00 to mohamed.ali@instapay. Reference number: 202609181234",
+    "expect": { "post": true, "amountMinor": 75000, "type": "expense", "transfer": true, "merchant": "mohamed.ali" },
+    "notes": "InstaPay Egypt app push for an IPA (instant payment address) transfer sent; no date in body.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-EG-VFCASH-1",
+    "country": "EG",
+    "ledger": "EGP",
+    "sender": "VF-Cash",
+    "body": "تم استلام مبلغ 500.00 جنيه من رقم 01098765432 بنجاح، رصيدك الحالي 1,345.50 جنيه. رقم العملية 012345678901",
+    "expect": { "post": true, "amountMinor": 50000, "type": "income", "transfer": true },
+    "notes": "Vodafone Cash Arabic money-received SMS with balance and operation number.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-JO-ARABBANK-1",
+    "country": "JO",
+    "ledger": "JOD",
+    "sender": "ArabBank",
+    "body": "Arab Bank: Purchase of JOD 23.450 at CARREFOUR CITY MALL using card ending 1234 on 14/09/2026 20:15. Available balance JOD 512.300",
+    "expect": { "post": true, "amountMinor": 23450, "type": "expense", "transfer": false, "merchant": "carrefour" },
+    "notes": "Arab Bank Jordan card purchase; JOD has 3 decimals (23.450 = 23450 fils).",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-JO-CLIQ-1",
+    "country": "JO",
+    "ledger": "JOD",
+    "sender": "HBTF",
+    "body": "بنك الإسكان: تم إيداع حوالة CliQ بمبلغ 75.000 دينار من AHMAD KHALED في حسابكم رقم ****1234 بتاريخ 20/09/2026. الرصيد المتوفر 587.300 دينار",
+    "expect": { "post": true, "amountMinor": 75000, "type": "income", "transfer": true, "merchant": "ahmad" },
+    "notes": "Housing Bank (HBTF) Arabic alert for an inward CliQ instant transfer; 3-decimal dinar.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-JO-ARABBANK-2",
+    "country": "JO",
+    "ledger": "JOD",
+    "sender": "ArabBank",
+    "body": "Arab Bank: JOD 1.000 has been deducted from your account ****1234 as SMS service fee for September 2026. Available balance JOD 511.300",
+    "expect": { "post": true, "amountMinor": 1000, "type": "expense", "transfer": false },
+    "notes": "Bank fee actually taken (monthly SMS service fee) - a completed charge.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-LB-BLOM-1",
+    "country": "LB",
+    "ledger": "USD",
+    "sender": "BLOM BANK",
+    "body": "BLOM Bank: Your card ending 1234 was used for USD 42.50 at SPINNEYS DBAYEH on 14/09/2026 18:40. Avl. Bal. USD 1,215.30",
+    "expect": { "post": true, "amountMinor": 4250, "type": "expense", "transfer": false, "merchant": "spinneys" },
+    "notes": "BLOM Bank fresh-USD card purchase; Lebanese user keeps a USD ledger.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-IQ-ZAINCASH-1",
+    "country": "IQ",
+    "ledger": "IQD",
+    "sender": "ZainCash",
+    "body": "تم تحويل مبلغ 50,000 دينار عراقي الى الرقم 07801234567 بنجاح. رصيدك الحالي 125,000 دينار. رقم العملية 12345678",
+    "expect": { "post": true, "amountMinor": 50000000, "type": "expense", "transfer": true },
+    "notes": "Zain Cash Iraq Arabic wallet transfer sent; IQD has ISO exponent 3 so 50,000 dinar = 50000000.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-IQ-RAFIDAIN-1",
+    "country": "IQ",
+    "ledger": "IQD",
+    "sender": "Rafidain",
+    "body": "مصرف الرافدين: تم ايداع مبلغ 1,250,000 دينار في حسابكم المرقم ****5678 راتب شهر ايلول 2026 بتاريخ 2026/09/28",
+    "expect": { "post": true, "amountMinor": 1250000000, "type": "income", "transfer": false },
+    "notes": "Rafidain Bank Arabic salary deposit (Iraqi month name ايلول = September), yyyy/mm/dd date.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-QA-QNB-1",
+    "country": "QA",
+    "ledger": "QAR",
+    "sender": "QNB",
+    "body": "QNB: Your Debit Card ending 1234 has been used for QAR 245.50 at LULU HYPERMARKET DOHA on 15-Sep-2026 19:22. Avl. Bal. QAR 8,120.40",
+    "expect": { "post": true, "amountMinor": 24550, "type": "expense", "transfer": false, "merchant": "lulu" },
+    "notes": "QNB Qatar debit card purchase, English.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-QA-CBQ-1",
+    "country": "QA",
+    "ledger": "QAR",
+    "sender": "CBQ",
+    "body": "CBQ: Purchase transaction of QAR 89.00 at TALABAT QATAR on your card ending 5678 has been approved on 16/09/2026 21:04.",
+    "expect": { "post": true, "amountMinor": 8900, "type": "expense", "transfer": false, "merchant": "talabat" },
+    "notes": "Commercial Bank of Qatar purchase-approved alert; it is the only alert the customer gets for the purchase, so a bookkeeper records it.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-QA-ALRAYAN-1",
+    "country": "QA",
+    "ledger": "QAR",
+    "sender": "AlRayan",
+    "body": "مصرف الريان: تم سحب مبلغ 2,000.00 ر.ق من حسابكم رقم ****1234 عبر جهاز الصراف الآلي بتاريخ 22/09/2026. الرصيد المتاح 6,120.40 ر.ق",
+    "expect": { "post": true, "amountMinor": 200000, "type": "expense", "transfer": false },
+    "notes": "Masraf Al Rayan Arabic ATM withdrawal; currency as ر.ق (Qatari riyal abbreviation).",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-KW-NBK-1",
+    "country": "KW",
+    "ledger": "KWD",
+    "sender": "NBK",
+    "body": "NBK: Purchase of KWD 12.500 at THE SULTAN CENTER using card ending 1234 on 15/09/2026 19:22. Available balance KWD 523.150",
+    "expect": { "post": true, "amountMinor": 12500, "type": "expense", "transfer": false, "merchant": "sultan" },
+    "notes": "National Bank of Kuwait card purchase; KWD 3 decimals.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-KW-KFH-1",
+    "country": "KW",
+    "ledger": "KWD",
+    "sender": "KFH",
+    "body": "بيتك: تم إرجاع مبلغ 7.250 د.ك إلى حسابكم رقم ****1234 من TALABAT KUWAIT بتاريخ 17/09/2026 (استرداد عملية شراء)",
+    "expect": { "post": true, "amountMinor": 7250, "type": "income", "transfer": false, "merchant": "talabat" },
+    "notes": "KFH (Baitak) Arabic purchase refund credited back to the account; refund = income.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-BH-NBB-1",
+    "country": "BH",
+    "ledger": "BHD",
+    "sender": "NBB",
+    "body": "NBB: Your Debit Card ending 1234 was used for BHD 8.450 at AL JAZIRA SUPERMARKET on 17-09-2026 18:20. Avl Bal BHD 410.275",
+    "expect": { "post": true, "amountMinor": 8450, "type": "expense", "transfer": false, "merchant": "jazira" },
+    "notes": "National Bank of Bahrain debit card purchase; BHD 3 decimals.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-BH-BENEFITPAY-1",
+    "country": "BH",
+    "ledger": "BHD",
+    "sender": "BenefitPay",
+    "body": "BenefitPay\nYou have received BD 20.000 from MOHAMED ALI. Ref: 260918123456",
+    "expect": { "post": true, "amountMinor": 20000, "type": "income", "transfer": true, "merchant": "mohamed" },
+    "notes": "BenefitPay push for a P2P receipt using the local BD prefix for Bahraini dinar.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-OM-BANKMUSCAT-1",
+    "country": "OM",
+    "ledger": "OMR",
+    "sender": "BankMuscat",
+    "body": "Your Debit Card XXXX1234 has been used for OMR 4.200 at LULU HYPERMARKET BOWSHER on 14/09/2026 20:11. Avl Bal OMR 230.500\nتم استخدام بطاقتكم XXXX1234 بمبلغ 4.200 ر.ع لدى LULU HYPERMARKET BOWSHER بتاريخ 14/09/2026. الرصيد المتاح 230.500 ر.ع",
+    "expect": { "post": true, "amountMinor": 4200, "type": "expense", "transfer": false, "merchant": "lulu" },
+    "notes": "Bank Muscat bilingual (English then Arabic) card purchase; same amount stated twice must count once.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-OM-BANKDHOFAR-1",
+    "country": "OM",
+    "ledger": "OMR",
+    "sender": "BankDhofar",
+    "body": "Dear Customer, Your A/C xxxx1234 has been credited with RO 650.000 on 28/09/2026 (SALARY). Avl Bal RO 812.345. Bank Dhofar",
+    "expect": { "post": true, "amountMinor": 650000, "type": "income", "transfer": false },
+    "notes": "Bank Dhofar salary credit using the local RO prefix for Omani rial; 3 decimals.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-PK-HBL-3",
+    "country": "PK",
+    "ledger": "PKR",
+    "sender": "HBL",
+    "body": "Your One Time Password (OTP) for transaction of PKR 5,499.00 at DARAZ.PK on HBL card ending 1234 is 482913. Valid for 5 mins. Never share your OTP with anyone. HBL",
+    "expect": { "post": false, "why": "otp" },
+    "notes": "HBL 3-D Secure OTP carrying amount and merchant; nothing has moved yet.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-PK-MEEZAN-2",
+    "country": "PK",
+    "ledger": "PKR",
+    "sender": "MeezanBank",
+    "body": "Dear Customer, your transaction of PKR 18,000.00 at ALFATAH ELECTRONICS on Meezan Debit Card ending 4567 has been declined due to insufficient balance. Meezan Bank",
+    "expect": { "post": false, "why": "declined" },
+    "notes": "Meezan card decline for insufficient balance.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-PK-JAZZCASH-2",
+    "country": "PK",
+    "ledger": "PKR",
+    "sender": "JazzCash",
+    "body": "Khushkhabri! Ab JazzCash App se bijli ka bill pay karein aur payen Rs. 100 cashback. Offer 30 Sep 2026 tak. Abhi *786# dial karein. T&C apply",
+    "expect": { "post": false, "why": "promotion" },
+    "notes": "Roman-Urdu JazzCash cashback promotion with an amount.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-BD-BKASH-4",
+    "country": "BD",
+    "ledger": "BDT",
+    "sender": "+8801812345678",
+    "body": "You have received Tk 5,000.00 from 01712345678. Fee Tk 0.00. Balance Tk 5,120.00. TrxID 8XY7Z6W5V4 at 19/09/2026 21:14",
+    "expect": { "post": false, "why": "phishing" },
+    "paths": ["android-sms"],
+    "notes": "Common Bangladesh 'wrong send' scam: a copied bKash received template sent from a personal mobile number, followed by a call asking for the money back. Only judgeable with the sender, so restricted to android-sms.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-BD-NAGAD-2",
+    "country": "BD",
+    "ledger": "BDT",
+    "sender": "NAGAD",
+    "body": "নগদ-এ বিদ্যুৎ বিল পরিশোধ করলেই পাচ্ছেন ১০% ক্যাশব্যাক, সর্বোচ্চ ৫০ টাকা! অফার চলবে ৩০ সেপ্টেম্বর ২০২৬ পর্যন্ত। ডায়াল *167#",
+    "expect": { "post": false, "why": "promotion" },
+    "notes": "Nagad Bangla cashback promotion with Bangla digits.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-LK-COMBANK-2",
+    "country": "LK",
+    "ledger": "LKR",
+    "sender": "COMBANK",
+    "body": "Your OTP for the online transaction of LKR 12,500.00 at DARAZ.LK with ComBank card ending 1234 is 739201. Do not disclose this OTP to anyone.",
+    "expect": { "post": false, "why": "otp" },
+    "notes": "ComBank e-commerce OTP with amount and merchant.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-NP-NABIL-2",
+    "country": "NP",
+    "ledger": "NPR",
+    "sender": "NABIL",
+    "body": "Nabil Bank: Get Personal Loan up to NPR 15,00,000 with quick approval through Nabil SmartBank. Apply now! T&C apply.",
+    "expect": { "post": false, "why": "offer" },
+    "notes": "Loan offer using Nepali lakh grouping (15,00,000).",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-EG-NBE-2",
+    "country": "EG",
+    "ledger": "EGP",
+    "sender": "NBE",
+    "body": "رمز التحقق لعملية شراء بمبلغ 2,350.00 جنيه لدى JUMIA هو 581204. لا تشارك هذا الرمز مع أي شخص. البنك الأهلي المصري",
+    "expect": { "post": false, "why": "otp" },
+    "notes": "NBE Arabic purchase verification code with amount and merchant.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-EG-CIB-2",
+    "country": "EG",
+    "ledger": "EGP",
+    "sender": "CIB",
+    "body": "Your CIB Debit Card ending 5678 transaction of EGP 3,200.00 at NOON EGYPT was declined due to insufficient funds on 22/09/2026.",
+    "expect": { "post": false, "why": "declined" },
+    "notes": "CIB card decline.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-EG-VFCASH-2",
+    "country": "EG",
+    "ledger": "EGP",
+    "sender": "01287654321",
+    "body": "مبروك! تم إضافة 5,000 جنيه لمحفظة فودافون كاش الخاصة بك كجائزة من مسابقة العملاء. لاستلام المبلغ ادخل على الرابط http://vfcash-gift.top/claim خلال 24 ساعة",
+    "expect": { "post": false, "why": "phishing" },
+    "notes": "Vodafone Cash prize smishing from a personal number with a claim link.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-JO-ARABBANK-3",
+    "country": "JO",
+    "ledger": "JOD",
+    "sender": "ArabBank",
+    "body": "Arab Bank: AHMAD KHALED has sent you a CliQ request to pay JOD 35.000. Open Arabi Mobile to accept or reject the request.",
+    "expect": { "post": false, "why": "request" },
+    "notes": "CliQ request-to-pay; no money moved.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-IQ-ZAINCASH-2",
+    "country": "IQ",
+    "ledger": "IQD",
+    "sender": "ZainCash",
+    "body": "رمز التحقق لتأكيد تحويل مبلغ 100,000 دينار هو 4821. لا تشارك الرمز مع اي شخص. زين كاش",
+    "expect": { "post": false, "why": "otp" },
+    "notes": "Zain Cash Arabic transfer-confirmation OTP with an amount.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-QA-QNB-2",
+    "country": "QA",
+    "ledger": "QAR",
+    "sender": "QNB",
+    "body": "QNB: A pre-authorization of QAR 500.00 has been placed on your card ending 1234 at HILTON DOHA on 23/09/2026. The final amount will be charged on settlement.",
+    "expect": { "post": false, "why": "hold" },
+    "notes": "Hotel pre-authorization hold; final charge comes later.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-QA-CBQ-2",
+    "country": "QA",
+    "ledger": "QAR",
+    "sender": "CBQ",
+    "body": "CBQ: Your credit card statement for card ending 5678 is ready. Total due QAR 3,245.00, Minimum due QAR 162.25. Payment due date 05/10/2026.",
+    "expect": { "post": false, "why": "statement" },
+    "notes": "Credit card statement with total and minimum due.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-KW-NBK-2",
+    "country": "KW",
+    "ledger": "KWD",
+    "sender": "NBK",
+    "body": "NBK: Your Debit Card ending 1234 has been temporarily blocked due to multiple incorrect PIN attempts. For assistance call 1801801.",
+    "expect": { "post": false, "why": "security" },
+    "notes": "Card-blocked security notice.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-KW-GULFBANK-1",
+    "country": "KW",
+    "ledger": "KWD",
+    "sender": "GulfBank",
+    "body": "Gulf Bank: Your standing order of KWD 150.000 to account xxxx9876 is scheduled to be executed on 01/10/2026. Please ensure sufficient balance.",
+    "expect": { "post": false, "why": "scheduled" },
+    "notes": "Upcoming standing-order notice, not yet executed.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-BH-BENEFITPAY-2",
+    "country": "BH",
+    "ledger": "BHD",
+    "sender": "BenefitPay",
+    "body": "BenefitPay\nAli Hasan has requested BD 12.500 from you. Open BenefitPay to pay or decline.",
+    "expect": { "post": false, "why": "request" },
+    "notes": "BenefitPay P2P payment request.",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "SAM-OM-BANKMUSCAT-2",
+    "country": "OM",
+    "ledger": "OMR",
+    "sender": "BankMuscat",
+    "body": "Bank Muscat: The available balance in your account XXXX1234 as on 30/09/2026 is OMR 1,245.750.",
+    "expect": { "post": false, "why": "balance" },
+    "notes": "Balance-only notice.",
+    "provenance": "synthetic"
+  }
+]
