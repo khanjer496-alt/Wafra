@@ -8,7 +8,7 @@
 const copy = {
   en: {
     add: 'Add the shortcut', check: 'Test it', automate: 'Turn on the automation',
-    bundled: 'Pick Shortcuts in the share sheet, then tap Add Shortcut.',
+    bundled: 'Pick Shortcuts in the share sheet, then tap Add Shortcut. If it says you already have it, tap Cancel: yours is ready.',
     bundledChips: ['Shortcuts', 'Add Shortcut'],
     checkBody: 'Tap Run test. If Shortcuts asks, tap Allow.',
     failed: 'Test failed: the shortcut did not reach Wafra.',
@@ -16,6 +16,12 @@ const copy = {
     repair: 'Add the shortcut again',
     repairBody: 'Add the shortcut again, then run the test.',
     retry: 'Run test again',
+    // Shortcuts answers a run-by-name it cannot resolve with NSCocoaErrorDomain 4,
+    // both when the shortcut is missing and when two share its name. On iOS 26.6
+    // Shortcuts' Replace (and Keep Both) left two same-named copies on device.
+    notFound: 'Test failed: Shortcuts could not find exactly one {shortcut}.',
+    notFoundBody: 'Open Shortcuts and keep one {shortcut}. Delete any extra copy, then run the test again.',
+    openShortcuts: 'Open Shortcuts',
     automationOpenFailed: 'Wafra could not open Shortcuts.',
     automationOpenManually: 'Open Shortcuts from your Home Screen, then follow the steps here.',
     automationOpenRetry: 'Try opening Shortcuts again',
@@ -60,7 +66,7 @@ const copy = {
   },
   ar: {
     add: 'أضف الاختصار', check: 'اختبره', automate: 'فعّل الأتمتة',
-    bundled: 'اختر «الاختصارات» من قائمة المشاركة، ثم اضغط «إضافة اختصار».',
+    bundled: 'اختر «الاختصارات» من قائمة المشاركة، ثم اضغط «إضافة اختصار». إذا ظهر أنه موجود لديك، اضغط «إلغاء»: اختصارك جاهز.',
     bundledChips: ['الاختصارات', 'إضافة اختصار'],
     checkBody: 'اضغط «تشغيل الاختبار». إذا طلبت الاختصارات إذناً، اضغط «سماح».',
     failed: 'فشل الاختبار: لم يصل الاختصار إلى وفرة.',
@@ -68,6 +74,9 @@ const copy = {
     repair: 'أضف الاختصار مجدداً',
     repairBody: 'أضف الاختصار مجدداً، ثم شغّل الاختبار.',
     retry: 'أعد تشغيل الاختبار',
+    notFound: 'فشل الاختبار: لم تجد الاختصارات نسخة واحدة فقط من {shortcut}.',
+    notFoundBody: 'افتح الاختصارات واحتفظ بنسخة واحدة من {shortcut}. احذف أي نسخة إضافية، ثم أعد تشغيل الاختبار.',
+    openShortcuts: 'افتح الاختصارات',
     automationOpenFailed: 'تعذّر على وفرة فتح الاختصارات.',
     automationOpenManually: 'افتح الاختصارات من الشاشة الرئيسية، ثم اتبع الخطوات هنا.',
     automationOpenRetry: 'حاول فتح الاختصارات مجدداً',

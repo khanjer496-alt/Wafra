@@ -323,6 +323,25 @@ ok('iOS local setup: readiness and failures are announced to VoiceOver',
 ok('iOS local setup: no unguarded entrance animation can hide the instructions',
   !/FadeIn|entering=/.test(screen));
 
+{
+  // Shortcuts answers a run-by-name it cannot resolve (missing, or two copies
+  // with one name, which Replace and Keep Both leave on iOS 26.6) with
+  // NSCocoaErrorDomain 4. Re-adding would make a duplicate worse.
+  const copy = execute('src/lib/ios-shortcut-setup-copy.ts');
+  const en = copy.iosShortcutSetupCopy('en');
+  const ar = copy.iosShortcutSetupCopy('ar');
+  ok('iOS local setup: a not-found Shortcuts error offers Open Shortcuts and keeps re-adding secondary',
+    /params\.errorDomain === 'NSCocoaErrorDomain' && params\.errorCode === '4'/.test(screen) &&
+      /testID="ios-shortcut-check-not-found"[\s\S]{0,200}shortcutCopy\.openShortcuts[\s\S]{0,120}openURL\('shortcuts:\/\/'\)/.test(screen) &&
+      /ios-shortcut-check-not-found[\s\S]{0,700}shortcutCopy\.repair\} variant="quiet"/.test(screen) &&
+      /errorDomain: undefined, errorCode: undefined/.test(screen));
+  ok('iOS local setup: not-found copy exists in English and Arabic and names the shortcut',
+    [en, ar].every((c) => c.notFound.includes('{shortcut}') && c.notFoundBody.includes('{shortcut}') && c.openShortcuts.length > 0));
+  ok('iOS local setup: an existing shortcut is kept with Cancel, never replaced',
+    /tap Cancel/.test(en.bundled) && !/Replace/.test(en.bundled) && /«إلغاء»/.test(ar.bundled) && !/استبدال/.test(ar.bundled));
+  ok('iOS local setup: confirming the Messages automation records that the bank texts this phone',
+    /future-automation-confirmed', source: 'message'[\s\S]{0,400}profile\.alerts !== 'sms'\) setOnboardingProfile\(\{ \.\.\.profile, alerts: 'sms' \}\)/.test(screen));
+}
 ok('iOS local setup: callbacks and foreground transitions refresh native and saved status',
   /send\(\{ type: 'shortcut-callback', result, attemptId \}\)/.test(screen) &&
     /RNAppState\.addEventListener\('change'/.test(screen) &&

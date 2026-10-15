@@ -145,6 +145,8 @@ export default function IosSetupScreen() {
     fromOnboarding?: string;
     shortcutResult?: string;
     shortcutAttempt?: string;
+    errorDomain?: string;
+    errorCode?: string;
     notificationReturn?: string;
     applePayReturn?: string;
     section?: string;
@@ -220,6 +222,9 @@ export default function IosSetupScreen() {
   const [shortcutsMissing, setShortcutsMissing] = useState(false);
   const [showAutomationGuide, setShowAutomationGuide] = useState(false);
   const [checkStopped, setCheckStopped] = useState(false);
+  // Shortcuts' x-error for a run-by-name it cannot resolve: the shortcut is
+  // missing or two share its name. Re-adding makes a duplicate worse.
+  const [shortcutNotFound, setShortcutNotFound] = useState(false);
   const autoCheck = useRef<{ armedAt: number; wentBackground: boolean } | null>(null);
   const autoCheckAction = useRef<(() => void) | null>(null);
   const [resetHistoryVisible, setResetHistoryVisible] = useState(false);
@@ -458,13 +463,14 @@ export default function IosSetupScreen() {
     if (result !== 'success' && result !== 'cancel' && result !== 'error') return;
     const attemptId = params.shortcutAttempt;
     if (!isIosCaptureAttemptId(attemptId)) {
-      router.setParams({ shortcutResult: undefined, shortcutAttempt: undefined });
+      router.setParams({ shortcutResult: undefined, shortcutAttempt: undefined, errorDomain: undefined, errorCode: undefined });
       return;
     }
     const callbackKey = `${result}:${attemptId}`;
     if (consumedShortcutCallback.current === callbackKey) return;
     consumedShortcutCallback.current = callbackKey;
     const controller = controllerRef.current;
+    const notFound = result === 'error' && params.errorDomain === 'NSCocoaErrorDomain' && params.errorCode === '4';
     void (async () => {
       await send({ type: 'shortcut-callback', result, attemptId });
       const accepted = () => controller !== null && controllerRef.current === controller &&
@@ -472,6 +478,7 @@ export default function IosSetupScreen() {
         controller.getModel().shortcutCallback?.result === result;
       if (!accepted() || !screenActive.current) return;
       if (result === 'cancel') setCheckStopped(true);
+      setShortcutNotFound(notFound);
       await refreshSetup();
       if (result === 'error' && screenActive.current && accepted() &&
         controller?.getModel().failure !== 'load') {
@@ -480,8 +487,9 @@ export default function IosSetupScreen() {
         setLocalError((current) => current ?? t('iosLocalShortcutRunFailed'));
       }
     })();
-    router.setParams({ shortcutResult: undefined, shortcutAttempt: undefined });
-  }, [params.shortcutAttempt, params.shortcutResult, refreshSetup, router, send, setup.loading]);
+    router.setParams({ shortcutResult: undefined, shortcutAttempt: undefined, errorDomain: undefined, errorCode: undefined });
+  }, [params.errorCode, params.errorDomain, params.shortcutAttempt, params.shortcutResult, refreshSetup, router, send,
+    setup.loading]);
 
   useEffect(() => {
     if (setup.loading || !progressLoaded) return;
@@ -546,6 +554,7 @@ export default function IosSetupScreen() {
   const installFutureShortcut = useCallback(() => {
     void runOperation(async () => {
       setCheckStopped(false);
+      setShortcutNotFound(false);
       if (setup.shortcutVersion === 3) {
         // A reinstall is a new attempt: older native proof no longer counts
         // in setup, while the confirmed automation (and Home) stay as they are.
@@ -578,6 +587,7 @@ export default function IosSetupScreen() {
     void runOperation(async () => {
       autoCheck.current = null;
       setCheckStopped(false);
+      setShortcutNotFound(false);
       await setCaptureOptOut(false);
       // Only proof recorded after this moment answers this check.
       await updateProgress({ type: 'future-check-started', source: 'message', at: Date.now() });
@@ -615,11 +625,16 @@ export default function IosSetupScreen() {
     void runOperation(async () => {
       await setCaptureOptOut(false);
       await updateProgress({ type: 'future-automation-confirmed', source: 'message', at: Date.now() });
+      // Setup finished after onboarding (e.g. from Settings) must not leave the
+      // earlier "add by hand" answer saying nothing reaches Wafra.
+      // Same answer as alertsAnswerForIosSetup(false, 'message').
+      const profile = state.onboardingProfile;
+      if (profile && profile.alerts !== 'sms') setOnboardingProfile({ ...profile, alerts: 'sms' });
       await send({ type: 'automation-added' });
       setShowAutomationGuide(false);
       setViewSource(null);
     }, t('capturePreferenceFailed'));
-  }, [runOperation, send, setCaptureOptOut, updateProgress]);
+  }, [runOperation, send, setCaptureOptOut, setOnboardingProfile, state.onboardingProfile, updateProgress]);
 
   const openHistoryInstall = useCallback(() => {
     if (!historyInstallUrl) return;
@@ -1296,10 +1311,21 @@ export default function IosSetupScreen() {
                 </>
               ) : futureStep === 'prove-shortcut' ? (
                 <SetupStep palette={band} testID="ios-shortcut-check-step" badge="2" title={shortcutCopy.check} body={shortcutCopy.checkBody}
-                  result={shortcutCheckFailed
+                  result={shortcutCheckFailed && shortcutNotFound
+                    ? { tone: 'fail', title: shortcutCopy.notFound.replace('{shortcut}', shortcutName),
+                      body: shortcutCopy.notFoundBody.split('{shortcut}').join(shortcutName) }
+                    : shortcutCheckFailed
                     ? { tone: 'fail', title: shortcutCopy.failed, body: shortcutCopy.repairBody }
                     : checkStopped ? { tone: 'info', title: shortcutCopy.stopped } : null}>
-                  {shortcutCheckFailed ? (
+                  {shortcutCheckFailed && shortcutNotFound ? (
+                    <View testID="ios-shortcut-check-not-found" style={styles.actions}>
+                      <EButton palette={band} label={shortcutCopy.openShortcuts}
+                        onPress={() => { void Linking.openURL('shortcuts://').catch(() => undefined); }} disabled={busy} />
+                      <EButton palette={band} label={shortcutCopy.retry} variant="secondary" onPress={checkFutureShortcut} disabled={busy} />
+                      <EButton palette={band} label={shortcutCopy.repair} variant="quiet" onPress={installFutureShortcut}
+                        disabled={busy || !setup.shortcutAvailable} />
+                    </View>
+                  ) : shortcutCheckFailed ? (
                     <View testID="ios-shortcut-check-recovery" style={styles.actions}>
                       <EButton palette={band} label={shortcutCopy.repair} onPress={installFutureShortcut}
                         disabled={busy || !setup.shortcutAvailable} />
