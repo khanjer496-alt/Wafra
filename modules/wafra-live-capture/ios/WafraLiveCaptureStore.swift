@@ -459,6 +459,40 @@ public final class WafraLiveCaptureStore {
   /// shared parser falls back to the one bank the body names (the same contract
   /// the plain-text automation fallback already uses).
   public static let automationSender = "Wafra Automation"
+
+  /// Messages hands contact names and phone numbers to the automation with
+  /// invisible direction marks (and group chats as long participant lists),
+  /// which `validSender` refuses. Keep the visible sender: drop control and
+  /// direction scalars, collapse whitespace and cap the length on a character
+  /// boundary. Nil when nothing visible remains.
+  static func automationSenderName(_ sender: String?) -> String? {
+    guard let sender else { return nil }
+    var visible = String.UnicodeScalarView()
+    var pendingSpace = false
+    for scalar in sender.unicodeScalars {
+      switch scalar.value {
+      case 0x0000...0x001F, 0x007F...0x009F, 0x061C, 0x200B...0x200F,
+           0x202A...0x202E, 0x2066...0x2069, 0xFEFF, 0xD800...0xDFFF:
+        if CharacterSet.whitespacesAndNewlines.contains(scalar) { pendingSpace = true }
+        continue
+      default:
+        break
+      }
+      if CharacterSet.whitespacesAndNewlines.contains(scalar) {
+        pendingSpace = true
+        continue
+      }
+      if pendingSpace && !visible.isEmpty { visible.append(" ") }
+      pendingSpace = false
+      visible.append(scalar)
+    }
+    var bounded = ""
+    for character in String(visible) {
+      guard bounded.utf16.count + character.utf16.count <= maxSenderCharacters else { break }
+      bounded.append(character)
+    }
+    return bounded.isEmpty ? nil : bounded
+  }
   /// SHA-256 of the empty string: what hashing an absent Message GUID produces.
   public static let missingMessageIdentifier =
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -494,12 +528,9 @@ public final class WafraLiveCaptureStore {
       let age = clock().timeIntervalSince1970 - observedAt.timeIntervalSince1970
       if age.isFinite, age > Self.recordTTL { return .ignored }
     }
-    let resolvedSender: String
-    if let sender, !sender.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-      resolvedSender = sender
-    } else {
-      resolvedSender = Self.automationSender
-    }
+    // A long personal text cannot be a bank alert; ignore it rather than fail.
+    guard body.lengthOfBytes(using: .utf8) <= Self.maxBodyBytes else { return .ignored }
+    let resolvedSender = Self.automationSenderName(sender) ?? Self.automationSender
     if let eventId, !eventId.isEmpty, eventId != Self.missingMessageIdentifier, let observedAt {
       return try stage(sender: resolvedSender, body: body, eventId: eventId, observedAt: observedAt)
     }

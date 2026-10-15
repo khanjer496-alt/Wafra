@@ -265,15 +265,16 @@ struct StageWafraLiveMessageIntent: AppIntent {
       case .disabled:
         await WafraLiveCaptureNotice.postIfDue()
         return .result(value: result.rawValue)
-      case .invalid:
-        throw WafraLiveCaptureIntentError.invalidMessage
-      case .capacityReached:
-        throw WafraLiveCaptureIntentError.captureCapacityReached
+      case .invalid, .capacityReached:
+        // The Message automation runs on every matching text. An error here
+        // makes Shortcuts show an error banner for an ordinary message, so an
+        // inadmissible text is ignored quietly; capacity drops are already
+        // counted for Wafra's capture status.
+        return .result(value: WafraLiveStageResult.ignored.rawValue)
       }
-    } catch let error as WafraLiveCaptureIntentError {
-      throw error
     } catch {
-      throw WafraLiveCaptureIntentError.stageFailed
+      // Storage unavailable (e.g. before the first unlock after a restart).
+      return .result(value: "failed")
     }
   }
 }
@@ -324,15 +325,16 @@ struct StageWafraLiveTextIntent: AppIntent {
       case .disabled:
         await WafraLiveCaptureNotice.postIfDue()
         return .result(value: result.rawValue)
-      case .invalid:
-        throw WafraLiveCaptureIntentError.invalidMessage
-      case .capacityReached:
-        throw WafraLiveCaptureIntentError.captureCapacityReached
+      case .invalid, .capacityReached:
+        // The Message automation runs on every matching text. An error here
+        // makes Shortcuts show an error banner for an ordinary message, so an
+        // inadmissible text is ignored quietly; capacity drops are already
+        // counted for Wafra's capture status.
+        return .result(value: WafraLiveStageResult.ignored.rawValue)
       }
-    } catch let error as WafraLiveCaptureIntentError {
-      throw error
     } catch {
-      throw WafraLiveCaptureIntentError.stageFailed
+      // Storage unavailable (e.g. before the first unlock after a restart).
+      return .result(value: "failed")
     }
   }
 }

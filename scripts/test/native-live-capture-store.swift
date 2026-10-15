@@ -259,6 +259,23 @@ struct NativeLiveCaptureStoreTests {
     check("a differing replay of an acknowledged GUID is still refused",
       try queue.stageAutomationMessage(sender: nil, body: messageBody,
         eventId: guidHash, observedAt: messageDate) == .invalid && pending().isEmpty)
+    let markedSender = "\u{2068}\u{200F}Bank\u{200E} \u{202A}Alert\u{202C}\u{2069}"
+    check("invisible direction marks in a Messages sender are dropped, not refused",
+      try queue.stageAutomationMessage(sender: markedSender, body: messageBody + " marked",
+        eventId: nil, observedAt: nil) == .accepted
+      && pending().contains { $0["sender"] as? String == "Bank Alert" })
+    let groupSender = String(repeating: "Participant name, ", count: 8)
+    check("a long group-chat sender is capped instead of failing the automation",
+      try queue.stageAutomationMessage(sender: groupSender, body: messageBody + " group",
+        eventId: nil, observedAt: nil) == .accepted
+      && pending().contains { ($0["sender"] as? String).map { $0.utf16.count <= WafraLiveCaptureStore.maxSenderCharacters && $0.hasPrefix("Participant name,") } == true })
+    check("an invisible-only sender falls back to the automation placeholder",
+      try queue.stageAutomationMessage(sender: "\u{200E}\u{2066}", body: messageBody + " blank",
+        eventId: nil, observedAt: nil) == .accepted
+      && pending().contains { $0["sender"] as? String == WafraLiveCaptureStore.automationSender })
+    check("an over-long personal text is ignored quietly",
+      try queue.stageAutomationMessage(sender: knownSender,
+        body: String(repeating: "x ", count: WafraLiveCaptureStore.maxBodyBytes), eventId: nil, observedAt: nil) == .ignored)
 
     for (label, eventId, observedAt, expectedDate) in [
       ("GUID absent, date absent", nil as String?, nil as Date?, receiptText),
@@ -328,9 +345,10 @@ struct NativeLiveCaptureStoreTests {
     check("a malformed hash is still refused visibly",
       try queue.stageAutomationMessage(sender: knownSender, body: messageBody,
         eventId: "not-a-hash", observedAt: messageDate) == .invalid)
-    check("an unsafe supplied sender is still refused",
-      try queue.stageAutomationMessage(sender: "BANK\u{202E}", body: messageBody,
-        eventId: nil, observedAt: nil) == .invalid)
+    check("a direction override in a supplied sender is removed, never stored",
+      try queue.stageAutomationMessage(sender: "BANK\u{202E}", body: messageBody + " override",
+        eventId: nil, observedAt: nil) == .accepted
+      && !pending().contains { ($0["sender"] as? String)?.unicodeScalars.contains { $0.value == 0x202E } == true })
     check("the strict stage entry point still refuses an empty sender",
       try queue.stage(sender: "", body: messageBody, eventId: eventId(91_000),
         observedAt: fixedClock) == .invalid)

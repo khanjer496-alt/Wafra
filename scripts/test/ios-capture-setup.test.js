@@ -548,7 +548,7 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       /#if DEBUG\s*public static let automationInputProbePayload[\s\S]*?#endif/.test(swiftStore) &&
         /#if DEBUG\s*public func recordAutomationInputProbe[\s\S]*?#endif/.test(swiftStore),
       swiftStore);
-    ok('stage intent keeps its exact four parameters, posts only the Wafra notice while capture is off and fails visibly for rejected capture', (() => {
+    ok('stage intent keeps its exact four parameters, posts only the Wafra notice while capture is off and never fails the Message automation', (() => {
       const match = generatedIntent.match(
         /struct StageWafraLiveMessageIntent:\s*AppIntent\s*\{([\s\S]*?)\n\}\n\n@available\(iOS 26\.0, \*\)\s*extension StageWafraLiveMessageIntent/,
       );
@@ -557,8 +557,8 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
         /var eventId:\s*String/.test(match[1]) && /var observedAt:\s*Date/.test(match[1]) &&
         /case \.disabled:\s*await WafraLiveCaptureNotice\.postIfDue\(\)\s*return \.result\(value: result\.rawValue\)/.test(match[1]) &&
         !/captureDisabled/.test(match[1]) &&
-        /case \.invalid:[\s\S]*invalidMessage/.test(match[1]) &&
-        /case \.capacityReached:[\s\S]*captureCapacityReached/.test(match[1]);
+        /case \.invalid, \.capacityReached:[\s\S]*?return \.result\(value: WafraLiveStageResult\.ignored\.rawValue\)/.test(match[1]) &&
+        !/\bthrow\b/.test(match[1].slice(match[1].indexOf('func perform')));
     })(), generatedIntent);
     ok('plain-text fallback auto-connects one String and uses the protected local queue', (() => {
       const match = generatedIntent.match(
@@ -571,7 +571,8 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
         /eventId:\s*UUID\(\)\.uuidString/.test(match[1]) &&
         /observedAt:\s*Date\(\)/.test(match[1]) &&
         /case \.disabled:\s*await WafraLiveCaptureNotice\.postIfDue\(\)\s*return \.result\(value: result\.rawValue\)/.test(match[1]) &&
-        !/captureDisabled/.test(match[1]);
+        !/captureDisabled/.test(match[1]) &&
+        !/\bthrow\b/.test(match[1].slice(match[1].indexOf('func perform')));
     })(), generatedIntent);
     ok('notification action accepts one required auto-connected String through the protected queue', (() => {
       const match = generatedIntent.match(
