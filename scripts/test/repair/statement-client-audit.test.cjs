@@ -80,6 +80,7 @@ function finishHarness(results) {
   setSummary:f=>summary=f(summary), rememberCoverage:async v=>events.push(['coverage',v]),
   ensureDurable:async()=>events.push(['durable']),batchSummary:ctx=> {events.push(['batch',ctx]);return 'complete';},
   committed:()=>events.push(['committed']),failed:()=>events.push(['failed']),syncFailureReason:()=> 'failed',
+  alreadyInWafra: load(path.join(root, 'src/lib/statement-batch.ts')).alreadyInWafra,
  };
  vm.runInNewContext(ts.transpileModule(body+'\nglobalThis.finish = finishQueuedImport;', {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText, context);
  return {context,events,get summary(){return summary},finish:context.finish,replace(){generation++}};
@@ -117,6 +118,33 @@ test('new unlocked-file completion retains a previous pending batch range and sk
  assert.equal(h.events.find(e=>e[0]==='coverage')[1].length,2);
  const report=h.events.find(e=>e[0]==='batch')[1];
  assert.equal(report.files,2);assert.equal(report.accepted,3);assert.equal(report.rejected,3);
+});
+test('rows read but not added are reported as already in Wafra, never folded into skipped', async () => {
+ // 41 rows read, 40 new, one matched an alert already in the ledger.
+ const h=finishHarness([{complete:true,imported:40,review:0}]);
+ assert.equal(await h.finish(1,41,0,2,0,[coverage],1),true);
+ assert.equal(h.summary.added,40);assert.equal(h.summary.already,1);assert.equal(h.summary.skipped,0);
+ assert.equal(h.events.find(e=>e[0]==='batch')[1].already,1);
+});
+test('already-in-Wafra is not claimed while filing is still pending, and survives the retry', async () => {
+ const h=finishHarness([{complete:false,reason:'review',imported:30,review:2},{complete:true,imported:5,review:0}]);
+ await h.finish(1,41,3,2,0,[coverage],1);
+ assert.equal(h.summary.already,undefined);
+ const c=h.context.queuedRetryContextRef.current;
+ await h.finish(c.files,c.accepted,c.rejected,c.pages,c.alreadyProcessed,c.ranges,c.generation,c.reportedImported,c.totalRejected,true,c.reportedOther);
+ // 41 read = 35 added + 2 for review + 4 already there; the 3 unreadable rows are separate.
+ assert.equal(h.summary.added,35);assert.equal(h.summary.review,2);assert.equal(h.summary.already,4);assert.equal(h.summary.skipped,3);
+});
+test('the already-in-Wafra count never goes negative and leaves out new dues and bills', () => {
+ const {alreadyInWafra}=load(path.join(root,'src/lib/statement-batch.ts'));
+ assert.equal(alreadyInWafra(41,40,0),1);
+ assert.equal(alreadyInWafra(71,70,0,1),0);
+ assert.equal(alreadyInWafra(3,5,0),0);
+ assert.equal(alreadyInWafra(10,4,2,1),3);
+});
+test('the drain reports new dues and bills filed alongside transactions', async () => {
+ const result=await flow().drainStatementQueue(async()=>page({transactions:70,dues:1,bills:0,moreQueued:false}));
+ assert.equal(result.imported,70);assert.equal(result.filedOther,1);
 });
 test('protected retry checks current privacy before uploading bytes and current currency when allowed', async () => {
  const ts=require('typescript'),vm=require('node:vm');

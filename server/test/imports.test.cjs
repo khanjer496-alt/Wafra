@@ -2019,6 +2019,66 @@ function pagedPdf(pages) {
     yen?.amountFils === 4980 && yen.originalCurrency === 'JPY' && yen.originalMinorUnits === 2000 && yen.originalExponent === 0,
     JSON.stringify(yen));
 
+  /* ─────── wrapped direct-debit rows (flattened text, no layout) ─────── */
+  {
+    const { wrappedStatementText, WRAPPED_STATEMENT_EXPECTED } = require('./wrapped-statement-fixture.cjs');
+    const readRows = (result) => result.rows.filter((row) => row.kind === 'transaction')
+      .map((row) => [row.date, row.type, row.amountFils]);
+    for (const trailingMinus of [false, true]) {
+      const label = trailingMinus ? ' (trailing-minus balance)' : '';
+      const text = parseStatementLines(wrappedStatementText({ trailingMinus }), 'AED', { card: null }, 'day-first');
+      const read = readRows(text);
+      const want = WRAPPED_STATEMENT_EXPECTED.slice(1);
+      ok(`a wrapped row's figures line joins its date line and every row after the first reads by its balance step${label}`,
+        JSON.stringify(read) === JSON.stringify(want), JSON.stringify(read));
+      // The first row has no balance before it and flattened text cannot say
+      // which column its figure sat in: it is counted, never guessed.
+      ok(`only the first row, with nothing to measure it against, is left unread${label}`,
+        text.rejectedRows === 1 && text.totalRows === WRAPPED_STATEMENT_EXPECTED.length,
+        `${text.rejectedRows}/${text.totalRows}`);
+      ok(`a money-shaped reference continuation (00012345678.00) is not read as an amount${label}`,
+        !text.rows.some((row) => row.amountFils === 1234567800));
+    }
+    const lone = parseStatementLines([
+      'Date Value Date Description Debit Credit Balance',
+      '02-Jul-2026 02-Jul-2026 Opening entry 10.00 100.00',
+      '03-Jul-2026 03-Jul-2026 Transfer-MOB 20.00 80.00',
+      '25.00 1,977.18',
+    ].join('\n'), 'AED', { card: null }, 'day-first');
+    ok('a line of bare figures is not counted as a yearless date row',
+      lone.totalRows === 2, `${lone.rejectedRows}/${lone.totalRows}`);
+    const slashed = parseStatementLines([
+      'Date Value Date Description Debit Credit Balance',
+      '02-Jul-2026 02-Jul-2026 Opening entry 10.00 100.00',
+      '12/09 004512 250.00 1,000.00',
+    ].join('\n'), 'AED', { card: null }, 'day-first');
+    ok('a slashed yearless row with no words is still counted, not dropped',
+      slashed.totalRows === 2 && slashed.rejectedRows >= 1, `${slashed.rejectedRows}/${slashed.totalRows}`);
+    const closingRows = (lines) => parseStatementLines([
+      'Date Value Date Description Debit Credit Balance',
+      '01-Sep-2026 01-Sep-2026 Opening Balance 500.00',
+      ...lines,
+    ].join('\n'), 'AED', { card: null }, 'day-first').rows;
+    const chain = [
+      '02-Sep-2026 02-Sep-2026 Grocery store 20.00 480.00',
+      '03-Sep-2026 03-Sep-2026 Salary transfer 1,000.00 1,480.00',
+      '04-Sep-2026 04-Sep-2026 Pharmacy 30.00 1,450.00',
+      '05-Sep-2026 05-Sep-2026 Fuel station 50.00 1,400.00',
+    ];
+    const closed = closingRows(chain);
+    ok('a text statement read through its balance chain sends its closing balance on the last row only',
+      closed.length === 4 && closed.at(-1).snapshotFils === 140000 && closed.at(-1).snapshotKind === 'balance' &&
+        closed.slice(0, -1).every((row) => row.snapshotFils === null),
+      JSON.stringify(closed.map((row) => row.snapshotFils)));
+    const overdrawn = closingRows([...chain, '06-Sep-2026 06-Sep-2026 Rent transfer 1,500.00 -100.00']);
+    ok('an overdrawn closing balance is not sent as a snapshot the app would refuse',
+      overdrawn.length === 5 && overdrawn.every((row) => row.snapshotFils === null && row.snapshotKind === null),
+      JSON.stringify(overdrawn.map((row) => row.snapshotFils)));
+    const newestFirst = closingRows([...chain].reverse());
+    ok('a statement not in date order sends no closing balance',
+      newestFirst.every((row) => row.snapshotFils === null));
+  }
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

@@ -1,7 +1,7 @@
 /** In-memory normalization for forwarded bank email and text-based statements. */
 import PostalMime from 'postal-mime';
 import { parse as parseCsvRecords } from 'csv-parse/sync';
-import { extractText, getDocumentProxy } from 'unpdf';
+import { getDocumentProxy } from 'unpdf';
 
 import { classifyMerchantDescription, type ParsedSms } from '@/lib/sms-parser';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
@@ -1142,12 +1142,20 @@ const TEXT_FIGURE = new RegExp(`\\d[\\d.,${GROUP_MARKS}]*\\d`, 'g');
  * likely a column boundary — but a no-break space is.
  */
 function normalizeStatementFigures(text: string, currency: StatementCurrency): string {
+  return applyFigureConvention(text, statementFigureConvention(text, currency));
+}
+
+/** The one decimal convention a flattened statement's figures are read with. */
+function statementFigureConvention(text: string, currency: StatementCurrency): DecimalConvention {
   // `RUE 12 345,00` is either 12 345,00 or a 12 beside 345,00. No row of a
   // file that prints such a figure can be read with confidence, so the whole
   // file keeps the decimal-point reading and its comma figures are refused
   // (and counted) rather than half-read.
   const spaceGrouped = /(?<![\d.,])\d{1,3}(?: \d{3})+,\d{1,3}(?!\d)/.test(text);
-  const convention = spaceGrouped ? 'point' : inferDecimalConvention(text.match(TEXT_FIGURE) ?? [], currency);
+  return spaceGrouped ? 'point' : inferDecimalConvention(text.match(TEXT_FIGURE) ?? [], currency);
+}
+
+function applyFigureConvention(text: string, convention: DecimalConvention): string {
   if (convention === 'point') {
     return text.replace(
       new RegExp(`(?<![\\d.,'’])\\d{1,3}(?:(['’])\\d{3})(?:\\1\\d{3})*(?=\\.\\d|(?![\\d.,'’]))`, 'g'),
@@ -2141,6 +2149,9 @@ function classifyMoneyToken(token: string, currency: StatementCurrency): MoneyTo
   // ledgers (JPY/KRW/etc.) necessarily use whole-unit money and are the exception.
   const numericSurface = token.replace(/[()\sA-Za-z+\-]/g, '');
   if (spec.exponent > 0 && !numericSurface.includes('.')) return null;
+  // `00012345678.00` is a zero-padded reference a wrapped description carries
+  // onto its own line, not money: no amount is printed with leading zeros.
+  if (/^0\d/.test(numericSurface)) return null;
   const unsigned = amountMinor(token, currency, false);
   if (unsigned !== null) return { kind: 'unsigned', minor: unsigned };
   const signed = amountMinor(token, currency, true);
@@ -2722,6 +2733,138 @@ function labelledBalanceConvention(
   return transactionAgrees ? 'transaction' : 'balance';
 }
 
+/**
+ * Which table column a money figure was drawn in, read from the PDF's own
+ * geometry (see pdfTextAndLayout). `debit`/`credit` say the row's direction
+ * outright; flattened text loses that the moment a blank cell becomes a space.
+ */
+export type StatementColumn = 'debit' | 'credit' | 'balance';
+export interface StatementLayoutCell { text: string; column: StatementColumn }
+/** Money cells by line index in `text.split(/\n+/)` of the text they came with. */
+export type StatementLayout = ReadonlyMap<number, readonly StatementLayoutCell[]>;
+
+/** The last figure on a line, past any trailing DR/CR label, if it is money. */
+function endsWithMoneyFigure(text: string, currency: StatementCurrency): boolean {
+  const words = text.trim().split(' ');
+  if (/^(?:DR|CR|DEBIT|CREDIT)$/i.test(words.at(-1) ?? '')) words.pop();
+  const token = classifyMoneyToken(words.at(-1) ?? '', currency);
+  return token !== null && token.kind !== 'placeholder';
+}
+
+/**
+ * Rejoin a row whose description wrapped onto further lines.
+ *
+ * A PDF table row is one baseline for its date and figures, but a long
+ * description wraps below it. pdf.js emits the wrapped lines in drawing
+ * order, which for many statements is: the date line ("28-Jul UADDS Cr"),
+ * the wrapped reference, and only then the figures ("1,234.56 5,615.44").
+ * Read line by line, the date line had no money and the figures line had no
+ * date, so the row was lost and the next row's balance step lost with it.
+ *
+ * Only a date line that carries description text and no money of its own is
+ * joined, only with up to three following lines that are not date-led, and
+ * only when one of them ends in a figure. A block followed by more bare
+ * money lines (a date heading over several undated rows) is left alone: one
+ * row read out of many would look like a complete import.
+ *
+ * Absorbed lines become empty strings so line indices — which the PDF
+ * layout cells are keyed by — still line up; `sources` lists, per joined row,
+ * every original line it now holds.
+ */
+function joinWrappedRows(
+  lines: string[], currency: StatementCurrency,
+): { lines: string[]; sources: Map<number, number[]> } {
+  const joined = [...lines];
+  const sources = new Map<number, number[]>();
+  const dateLed = (line: string) => ROW_DATE_PREFIX.test(line) || DATE_LED_LINE.test(line);
+  for (let i = 0; i < joined.length; i += 1) {
+    const prefixed = ROW_DATE_PREFIX.exec(joined[i]);
+    if (!prefixed || SUMMARY_DESCRIPTION.test(prefixed[2]) || !/\p{L}/u.test(prefixed[2])) continue;
+    if (endsWithMoneyFigure(prefixed[2], currency)) continue;
+    let end = -1;
+    for (let j = i + 1; j < joined.length && j <= i + 3; j += 1) {
+      const next = joined[j];
+      if (!next) continue;
+      if (dateLed(next) || next.length > 120) break;
+      if (endsWithMoneyFigure(next, currency)) { end = j; break; }
+    }
+    if (end < 0) continue;
+    let after = end + 1;
+    while (after < joined.length && !joined[after]) after += 1;
+    if (after < joined.length && !dateLed(joined[after]) && endsWithMoneyFigure(joined[after], currency)) continue;
+    const held = [];
+    for (let k = i; k <= end; k += 1) if (joined[k]) held.push(k);
+    joined[i] = held.map((k) => joined[k]).join(' ');
+    for (let k = i + 1; k <= end; k += 1) joined[k] = '';
+    sources.set(i, held);
+    i = end;
+  }
+  return { lines: joined, sources };
+}
+
+/** The description of a row with its trailing money columns taken off. */
+function descriptionBeforeFigures(rest: string, currency: StatementCurrency): string {
+  const words = rest.trim().split(' ');
+  let cut = words.length;
+  while (cut > 0) {
+    const word = words[cut - 1];
+    if (/^(?:DR|CR|DEBIT|CREDIT)$/i.test(word) || statementCurrency(word) !== null || classifyMoneyToken(word, currency)) {
+      cut -= 1;
+      continue;
+    }
+    break;
+  }
+  return words.slice(0, cut).join(' ').trim();
+}
+
+/** The one figure a row's cells put in the Balance column, or null. */
+function layoutBalance(
+  cells: readonly StatementLayoutCell[],
+  readFigure: (text: string) => MoneyToken | null,
+): number | null {
+  const balances = cells.flatMap((cell) => {
+    if (cell.column !== 'balance') return [];
+    const token = readFigure(cell.text);
+    if (!token || token.kind === 'placeholder') return [];
+    return [token.kind === 'signed' && token.type === 'expense' ? -token.minor : token.minor];
+  });
+  return balances.length === 1 ? balances[0] : null;
+}
+
+interface LayoutRowDirection {
+  type: 'expense' | 'income';
+  amountMinor: number;
+  /** The figure in the balance column, when exactly one was drawn there. */
+  balanceMinor: number | null;
+}
+
+/**
+ * The direction a row's own geometry states: exactly one non-empty figure in
+ * the Debit or the Credit column. Two (both columns populated), none, or a
+ * sign that contradicts its column answer nothing.
+ */
+function layoutRowDirection(
+  cells: readonly StatementLayoutCell[],
+  readFigure: (text: string) => MoneyToken | null,
+): LayoutRowDirection | null {
+  const money: { column: 'debit' | 'credit'; token: Exclude<MoneyToken, { kind: 'placeholder' }> }[] = [];
+  const balances: number[] = [];
+  for (const cell of cells) {
+    const token = readFigure(cell.text);
+    if (!token || token.kind === 'placeholder') continue;
+    if (cell.column === 'balance') {
+      balances.push(token.kind === 'signed' && token.type === 'expense' ? -token.minor : token.minor);
+      continue;
+    }
+    money.push({ column: cell.column, token });
+  }
+  if (money.length !== 1) return null;
+  const [{ column, token }] = money;
+  const type = column === 'debit' ? 'expense' : 'income';
+  if (token.kind === 'signed' && token.type !== type) return null;
+  return { type, amountMinor: token.minor, balanceMinor: balances.length === 1 ? balances[0] : null };
+}
+
 export interface StatementTextResult {
   rows: StatementParsedRow[];
   /** Every date-led money row this parser accounted for, accepted or rejected. */
@@ -2752,11 +2895,28 @@ export function parseStatementLines(
   currency: StatementCurrency,
   identity: { card: ParsedSms['card']; bankHint?: string } = { card: null },
   dateHint: StatementDateHint = legacyStatementDateHint(currency),
+  layout: StatementLayout | null = null,
 ): StatementTextResult {
   if (!ledgerMoneySpec(currency)) throw new Error('unsupported_statement_currency');
-  text = normalizeStatementFigures(normalizeDigits(text).normalize('NFC'), currency);
+  const unifiedText = normalizeDigits(text).normalize('NFC');
+  const figureConvention = statementFigureConvention(unifiedText, currency);
+  text = applyFigureConvention(unifiedText, figureConvention);
   assertStatementCurrency(text, currency);
+  // A layout cell is read with the same figure convention as its line.
+  const readLayoutFigure = (cellText: string): MoneyToken | null => {
+    const words = applyFigureConvention(normalizeDigits(cellText).normalize('NFC'), figureConvention)
+      .replace(/\s+/g, ' ').trim().split(' ')
+      .filter((word) => !/^(?:DR|CR|DEBIT|CREDIT)$/i.test(word) && statementCurrency(word) !== currency);
+    return words.length === 1 ? classifyMoneyToken(words[0], currency) : null;
+  };
   const rows: StatementParsedRow[] = [];
+  // The running balance each accepted row stated, when one was read (same
+  // index as rows). Only the closing one is ever used; see below the loop.
+  const rowBalances: (number | null)[] = [];
+  // The line each accepted row came from (same index as rows), and the last
+  // date-led row line of the document, for the closing-balance check.
+  const rowLines: number[] = [];
+  let lastDatedLine = -1;
   let rejectedRows = 0;
   // A flattened document has no safe table-to-account mapping. Repeated page
   // headers are fine; distinct labelled statement accounts must be split before
@@ -2819,8 +2979,15 @@ export function parseStatementLines(
   // strongly identified Total Amount table: the FIRST date is the
   // transaction's, and the posting date is dropped rather than left at the
   // front of the merchant ("04/09/2026 CARREFOUR CITY CENTRE").
-  const lines = (cardTotalAmountTable ? coalesceCardTotalAmountRows(rawLines, currency) : rawLines)
+  const flattened = (cardTotalAmountTable ? coalesceCardTotalAmountRows(rawLines, currency) : rawLines)
     .map((line) => cardTotalAmountTable ? line : line.replace(POSTING_DATE_AFTER_DATE, '$1 '));
+  // The card Total Amount table has its own row coalescing, and its lines no
+  // longer match the text's line indices, so the PDF layout is not used there.
+  const wrapped = cardTotalAmountTable ? null : joinWrappedRows(flattened, currency);
+  const lines = wrapped ? wrapped.lines : flattened;
+  const rowLayout = layout && wrapped
+    ? (index: number): StatementLayoutCell[] => (wrapped.sources.get(index) ?? [index]).flatMap((k) => layout.get(k) ?? [])
+    : null;
   const dateOrder = inferDateOrder(lines.map((line) => ROW_DATE_PREFIX.exec(line)?.[1] ?? ''), dateHint);
   let ambiguousDateRows = 0;
   const columnOrder = statementColumnOrder(text);
@@ -2841,18 +3008,26 @@ export function parseStatementLines(
   const balanceTrailing = !cardEvidence && (balanceLabels === 'balance' || trailingBalanceRuns(lines, currency));
   let previousBalance: number | null = null;
   let previousTailBalance: number | null = null;
+  // The last date-led row's running balance as either reading saw it (the
+  // proven text chain or the PDF's Balance column), proof or not: only used
+  // to refuse a column reading the balance contradicts.
+  let previousStatedBalance: number | null = null;
   // Rows read through the debit/credit column order, and whether any row's
   // own balance disproved that order (see below the loop).
   const columnRowIndices: number[] = [];
   let columnOrderContradictions = 0;
   let columnOrderAgreements = 0;
+  let lineIndex = 0;
   const push = (
     date: string,
     description: string,
     amountFils: number,
     type: 'expense' | 'income',
     line: string,
+    balance: number | null = null,
   ) => {
+    rowBalances.push(balance);
+    rowLines.push(lineIndex);
     // A card row's foreign original rides in its description; lift it into
     // the FX fields and keep the ledger-currency figure as the amount.
     const foreign = cardEvidence ? foreignOriginalTail(description, currency) : null;
@@ -2891,9 +3066,11 @@ export function parseStatementLines(
       raw: line,
     });
   };
-  for (const line of lines) {
+  for (lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
     if (!line) continue;
     const prefixed = ROW_DATE_PREFIX.exec(line);
+    if (prefixed && !SUMMARY_DESCRIPTION.test(prefixed[2])) lastDatedLine = lineIndex;
     // The column branch's running balance is only valid from the row just
     // before: any other date-led row (labelled, summary, skipped) breaks it.
     const tailBefore: number | null = previousTailBalance;
@@ -2909,9 +3086,17 @@ export function parseStatementLines(
     if (prefixed && SUMMARY_DESCRIPTION.test(prefixed[2])) continue;
     // Date-like rows with unsupported yearless/year-first spellings are still
     // missing transactions, not evidence of complete coverage.
-    if (!prefixed && /^\d{1,4}[/.\-]\d{1,2}(?:[/.\-]\d{1,4})?\s/.test(line) &&
-        LOOKS_LIKE_MONEY_LINE.test(line)) {
-      rejectedRows += 1;
+    // A line of bare figures (`25.00 1,977.18`) is a row's money columns
+    // printed below its description, not a yearless date, and no date has a
+    // zero day or month (`0.00 AED 15,000.00` is a summary box). A dotted
+    // pair with no words after it is read as figures; a slashed or dashed
+    // one (`12/09 004512 250.00`) is still a dated row. Either breaks the chain.
+    const yearless = !prefixed ? /^(\d{1,4})([/.\-])(\d{1,2})(?:[/.\-]\d{1,4})?\s/.exec(line) : null;
+    if (yearless && LOOKS_LIKE_MONEY_LINE.test(line)) {
+      const [first, second] = [Number(yearless[1]), Number(yearless[3])];
+      const dayMonth = first > 0 && second > 0 && ((first <= 31 && second <= 12) || (first <= 12 && second <= 31) ||
+        yearless[1].length === 4);
+      if (dayMonth && (yearless[2] !== '.' || /\p{L}/u.test(line))) rejectedRows += 1;
       previousBalance = null;
       continue;
     }
@@ -2938,6 +3123,11 @@ export function parseStatementLines(
     // a delta measured across a row that was skipped could carry the wrong
     // sign and file a credit as a debit.
     if (prefixed && !SUMMARY_DESCRIPTION.test(prefixed[2])) previousBalance = figures?.balanceMinor ?? null;
+    const cells = rowLayout && prefixed ? rowLayout(lineIndex) : null;
+    const statedBefore = previousStatedBalance;
+    if (prefixed && !SUMMARY_DESCRIPTION.test(prefixed[2])) {
+      previousStatedBalance = figures?.balanceMinor ?? (cells ? layoutBalance(cells, readLayoutFigure) : null);
+    }
     const cardTableCandidate = cardTotalAmountTable && prefixed
       ? cardTotalAmountRowPrefix(line, dateOrder)
       : false;
@@ -3018,11 +3208,11 @@ export function parseStatementLines(
         const amountToken = classifyMoneyToken(descriptionWords.at(-1) ?? '', currency);
         const signDisagrees = amountToken?.kind === 'signed' && amountToken.type !== (credit ? 'income' : 'expense');
         if (balanceLabels === 'transaction' && !signDisagrees) {
-          push(date, figures.merchant, figures.amountMinor, credit ? 'income' : 'expense', line);
+          push(date, figures.merchant, figures.amountMinor, credit ? 'income' : 'expense', line, figures.balanceMinor);
         } else if (balanceLabels === 'balance' && priorBalance !== null) {
           const delta = figures.balanceMinor - priorBalance;
           if (delta !== 0 && Math.abs(delta) === figures.amountMinor) {
-            push(date, figures.merchant, figures.amountMinor, delta < 0 ? 'expense' : 'income', line);
+            push(date, figures.merchant, figures.amountMinor, delta < 0 ? 'expense' : 'income', line, figures.balanceMinor);
           }
         }
       }
@@ -3045,18 +3235,47 @@ export function parseStatementLines(
       const balanceContradicts = balanceChecks && (tailBalance! > priorTail! ? 'income' : 'expense') !== column!.type;
       if (balanceContradicts) columnOrderContradictions += 1;
       else if (balanceChecks) columnOrderAgreements += 1;
+      // The column the PDF drew this row's figure in, when its geometry is
+      // known (pdfTextAndLayout). Positive evidence of its own, and a check
+      // on every other reading: a row whose readings disagree is not filed.
+      const placed = cells && date ? layoutRowDirection(cells, readLayoutFigure) : null;
+      const delta = figures && priorBalance !== null ? figures.balanceMinor - priorBalance : null;
+      const balanceStep = delta !== null && delta !== 0 && Math.abs(delta) === figures!.amountMinor
+        ? (delta < 0 ? 'expense' : 'income') : null;
       if (date && column && !balanceContradicts) {
-        // Only a three-figure `debit credit balance` row depends on the order.
-        if (tailBalance !== null) columnRowIndices.push(rows.length);
-        push(date, column.merchant, column.amountFils, column.type, line);
+        if (!placed || placed.type === column.type) {
+          // Only a three-figure `debit credit balance` row depends on the order.
+          if (tailBalance !== null) columnRowIndices.push(rows.length);
+          push(date, column.merchant, column.amountFils, column.type, line, tailBalance);
+        }
       }
-      else if (date && figures && priorBalance !== null) {
+      else if (date && figures && balanceStep) {
         // No label and no placeholder to say which column is populated: the
         // step in the balance says it instead, and only when it matches this
         // row's other figure exactly.
-        const delta = figures.balanceMinor - priorBalance;
-        if (delta !== 0 && Math.abs(delta) === figures.amountMinor) {
-          push(date, figures.merchant, figures.amountMinor, delta < 0 ? 'expense' : 'income', line);
+        if (!placed || placed.type === balanceStep) {
+          push(date, figures.merchant, figures.amountMinor, balanceStep, line, figures.balanceMinor);
+        }
+      }
+      else if (date && placed && prefixed) {
+        // Nothing before it to measure a step from — the first row of a
+        // statement that prints no opening balance, or the row after one
+        // that could not be read — but the figure sits in the Debit or the
+        // Credit column, which is the direction the bank itself printed.
+        // The amount must be a figure this row's own text carries, and a
+        // balance step that exists must not point the other way.
+        const merchant = descriptionBeforeFigures(prefixed[2], currency);
+        const carried = prefixed[2].split(' ').some((word) => {
+          const token = classifyMoneyToken(word, currency);
+          return token !== null && token.kind !== 'placeholder' && token.minor === placed.amountMinor;
+        });
+        const ownBalance = placed.balanceMinor ?? figures?.balanceMinor ?? null;
+        const step = ownBalance !== null && statedBefore !== null ? ownBalance - statedBefore : null;
+        const stepDisagrees = step !== null && step !== 0 && Math.abs(step) === placed.amountMinor &&
+          (step < 0 ? 'expense' : 'income') !== placed.type;
+        if (carried && !stepDisagrees && merchant.length >= 2 && merchant.length <= 180) {
+          push(date, merchant, placed.amountMinor, placed.type, line,
+            placed.balanceMinor ?? figures?.balanceMinor ?? null);
         }
       }
     }
@@ -3073,8 +3292,34 @@ export function parseStatementLines(
   if (columnOrderContradictions >= 1 && columnOrderAgreements === 0) {
     for (const index of columnRowIndices.reverse()) {
       rows.splice(index, 1);
+      rowBalances.splice(index, 1);
+      rowLines.splice(index, 1);
       rejectedRows += 1;
     }
+  }
+  // The statement's closing running balance is the account's balance on its
+  // last date, which may be newer than any alert the phone has seen. It
+  // travels as a balance snapshot on the closing row only (the planner keeps
+  // the newest-timed snapshot per account, and every earlier row of the same
+  // day would otherwise compete with it). Only on an account statement read
+  // completely and in date order — at least two dates, oldest first, so a
+  // newest-first table whose rows share a date cannot pass — and only from
+  // the document's last dated row, whose balance was read.
+  const closingIndex = rows.length - 1;
+  const closing = rows[closingIndex];
+  const ascending = rows.every((row, index) => index === 0 || (rows[index - 1].date ?? '') <= (row.date ?? ''));
+  const distinctDates = new Set(rows.map((row) => row.date)).size;
+  const closingBalance = rowBalances[closingIndex];
+  if (
+    !cardEvidence && closing?.kind === 'transaction' && closing.card?.kind !== 'credit' &&
+    rejectedRows === 0 && distinctDates >= 2 && rowLines[closingIndex] === lastDatedLine &&
+    ascending && closingBalance !== null && closingBalance !== undefined &&
+    // An overdrawn close is not sent: the app's row contract carries balance
+    // snapshots as non-negative figures and drops the WHOLE row otherwise.
+    Number.isSafeInteger(closingBalance) && closingBalance >= 0
+  ) {
+    closing.snapshotFils = closingBalance;
+    closing.snapshotKind = 'balance';
   }
   // Only beside transactions this parser could read: a summary alone is what
   // a scanned statement's text layer looks like, not a statement imported.
@@ -3124,6 +3369,174 @@ export function parseStatementText(
   return parseStatementLines(text, currency, identity, dateHint).rows;
 }
 
+/** One text run pdf.js reports, as much of it as layout reading needs. */
+interface PdfTextRun {
+  str: string;
+  x: number;
+  y: number;
+  width: number;
+  hasEOL: boolean;
+}
+
+const DEBIT_HEADER = /^(?:debits?|debit\s+amount|withdrawals?|withdrawal\s+amount|paid\s+out|money\s+out|مدين|سحب|المدين)$/iu;
+const CREDIT_HEADER = /^(?:credits?|credit\s+amount|deposits?|deposit\s+amount|paid\s+in|money\s+in|دائن|إيداع|ايداع|الدائن)$/iu;
+const BALANCE_HEADER_CELL = /^(?:balance|running\s+balance|balance\s+amount|الرصيد|رصيد)$/iu;
+/** A run that is one money figure and nothing else (currency code and DR/CR allowed). */
+const MONEY_RUN = /^(?:[A-Z]{3}\s*)?[-+(]?\s*\d[\d.,'’\u00a0\u202f]*\)?-?(?:\s*(?:[A-Z]{3}|CR|DR))?$/i;
+
+interface HeaderColumn { column: StatementColumn; x: number; right: number }
+const TABLE_HEADER_LABEL = /^(?:(?:transaction|value|posting|txn|trans\.?)\s+)?date$|^(?:description|details|particulars|narration|narrative|transaction\s+details)$|تاريخ|البيان|التفاصيل|الوصف/iu;
+
+/**
+ * The money columns a page's transaction table header names: a Debit run and
+ * a Credit run (and a Balance run if printed), each its own run, on one
+ * baseline that also carries a Date or Description label — so a summary box
+ * above the table ("Credits | Debits | Balance") is not taken for it. Two
+ * such headers on a page that disagree on positions answer nothing.
+ */
+function pageHeaderColumns(runs: readonly PdfTextRun[]): { y: number; columns: HeaderColumn[] } | null {
+  const candidates = runs.flatMap((run) => {
+    const label = run.str.replace(/\s+/g, ' ').trim();
+    const column: StatementColumn | null = DEBIT_HEADER.test(label) ? 'debit'
+      : CREDIT_HEADER.test(label) ? 'credit'
+      : BALANCE_HEADER_CELL.test(label) ? 'balance' : null;
+    return column ? [{ column, x: run.x, right: run.x + run.width, y: run.y }] : [];
+  });
+  const headers: { y: number; columns: HeaderColumn[] }[] = [];
+  for (const debit of candidates.filter((c) => c.column === 'debit')) {
+    const row = candidates.filter((c) => Math.abs(c.y - debit.y) <= 2);
+    const count = (column: StatementColumn) => row.filter((c) => c.column === column).length;
+    if (count('debit') !== 1 || count('credit') !== 1 || count('balance') > 1) continue;
+    const labelled = runs.some((run) => Math.abs(run.y - debit.y) <= 2 &&
+      TABLE_HEADER_LABEL.test(run.str.replace(/\s+/g, ' ').trim()));
+    if (!labelled) continue;
+    const columns = row.map(({ column, x, right }) => ({ column, x, right })).sort((a, b) => a.x - b.x);
+    // Overlapping or touching labels cannot be told apart by position.
+    if (columns.some((c, i) => i > 0 && c.x <= columns[i - 1].right)) continue;
+    headers.push({ y: debit.y, columns });
+  }
+  if (headers.length === 0) return null;
+  const same = (a: HeaderColumn[], b: HeaderColumn[]) => a.length === b.length &&
+    a.every((c, i) => c.column === b[i].column && Math.abs(c.x - b[i].x) <= 2 && Math.abs(c.right - b[i].right) <= 2);
+  if (headers.some((header) => !same(header.columns, headers[0].columns))) return null;
+  // The lowest (last drawn above the rows) of identical repeated headers.
+  return headers.reduce((low, header) => header.y < low.y ? header : low);
+}
+
+type FigureAlignment = 'right' | 'left';
+
+/** How many distinct positions `edges` take, two within 1.5pt counting as one. */
+function edgeClusters(edges: readonly number[]): number {
+  const sorted = [...edges].sort((a, b) => a - b);
+  let clusters = 0;
+  let last = -Infinity;
+  for (const edge of sorted) {
+    if (edge - last > 1.5) clusters += 1;
+    last = edge;
+  }
+  return clusters;
+}
+
+/**
+ * Whether a page's money figures are right- or left-aligned, from the
+ * figures themselves: an aligned edge takes one position per column, the
+ * other edge moves with each figure's width. Null when neither is clearly
+ * the case (centred figures, too few to tell): no column is then read.
+ */
+function figureAlignment(figures: readonly { x: number; right: number }[], columns: number): FigureAlignment | null {
+  if (figures.length < 2) return null;
+  const right = edgeClusters(figures.map((figure) => figure.right));
+  const left = edgeClusters(figures.map((figure) => figure.x));
+  if (right <= columns && left > right) return 'right';
+  if (left <= columns && right > left) return 'left';
+  return null;
+}
+
+/**
+ * The header column a figure was drawn under, or null.
+ *
+ * Header labels are printed left, centred or right over their column, so the
+ * figure's ALIGNED edge is compared with header edges, not centres. A
+ * right-aligned figure in column k ends after header k starts and before
+ * header k+1 ends; a left-aligned one starts after header k-1 starts (or no
+ * more than one column-width left of the first header) and before header k
+ * ends. Neighbouring windows overlap only across one header's width; a
+ * figure whose edge lands there could belong to either column and gets none,
+ * as does one outside every window (a reference in the description).
+ */
+function columnAt(
+  figure: { x: number; right: number }, columns: readonly HeaderColumn[], alignment: FigureAlignment,
+): StatementColumn | null {
+  const firstLeft = columns[0].x - (columns.length > 1 ? columns[1].x - columns[0].x : 0);
+  const candidates = columns.filter((column, i) => alignment === 'right'
+    ? figure.right > column.x && figure.right < (i + 1 < columns.length ? columns[i + 1].right : Infinity)
+    : figure.x > (i > 0 ? columns[i - 1].x : firstLeft) && figure.x < column.right);
+  return candidates.length === 1 ? candidates[0].column : null;
+}
+
+/**
+ * The document's text exactly as `unpdf`'s extractText builds it (each run's
+ * string, a newline after a run pdf.js marks end-of-line), plus the table
+ * column each money figure was drawn under, keyed by the figure's line in
+ * `text.join('\n').split(/\n+/)`. A page with no table header of its own
+ * uses the last header seen, as a statement's continuation pages do; each
+ * page's figure alignment is judged on that page's own figures.
+ */
+async function pdfTextAndLayout(document: Awaited<ReturnType<typeof getDocumentProxy>>): Promise<{
+  totalPages: number; text: string[]; layout: StatementLayout;
+}> {
+  const pageRuns: PdfTextRun[][] = [];
+  for (let page = 1; page <= document.numPages; page += 1) {
+    const content = await (await document.getPage(page)).getTextContent();
+    pageRuns.push(content.items.flatMap((item) => {
+      if (!('str' in item) || item.str == null) return [];
+      return [{ str: item.str, x: item.transform[4], y: item.transform[5], width: item.width, hasEOL: item.hasEOL }];
+    }));
+  }
+  const text = pageRuns.map((runs) => runs.map((run) => run.str + (run.hasEOL ? '\n' : '')).join(''));
+  const layout = new Map<number, StatementLayoutCell[]>();
+  let lineIndex = 0;
+  let inBreak = false;
+  let header: { y: number; columns: HeaderColumn[] } | null = null;
+  pageRuns.forEach((runs, page) => {
+    if (page > 0) inBreak = true;
+    const own = pageHeaderColumns(runs);
+    if (own) header = own;
+    const active = header;
+    const figures: { line: number; text: string; x: number; right: number }[] = [];
+    for (const run of runs) {
+      let startLine: number | null = null;
+      for (const ch of run.str) {
+        if (ch === '\n') { inBreak = true; continue; }
+        if (inBreak) { lineIndex += 1; inBreak = false; }
+        startLine ??= lineIndex;
+      }
+      if (run.hasEOL) inBreak = true;
+      if (!active || startLine === null) continue;
+      // Above the page's own header is the preamble, not the table.
+      if (own && run.y > own.y + 1) continue;
+      const figure = normalizeDigits(run.str).replace(/\s+/g, ' ').trim();
+      if (!MONEY_RUN.test(figure)) continue;
+      figures.push({ line: startLine, text: figure, x: run.x, right: run.x + run.width });
+    }
+    if (!active) return;
+    const { columns } = active;
+    // Only figures right of where the money columns could begin say how
+    // the money is aligned; a reference number in the description does not.
+    const firstLeft = columns[0].x - (columns.length > 1 ? columns[1].x - columns[0].x : 0);
+    const alignment = figureAlignment(figures.filter((figure) => figure.right > firstLeft), columns.length);
+    if (!alignment) return;
+    for (const figure of figures) {
+      const column = columnAt(figure, columns, alignment);
+      if (!column) continue;
+      const cells = layout.get(figure.line) ?? [];
+      cells.push({ text: figure.text, column });
+      layout.set(figure.line, cells);
+    }
+  });
+  return { totalPages: document.numPages, text, layout };
+}
+
 export async function extractPdfStatementRows(
   bytes: Uint8Array,
   currency: StatementCurrency,
@@ -3164,12 +3577,12 @@ export async function extractPdfStatementRows(
     document = await getDocumentProxy(retryBytes, { password: utf8Password });
   }
   try {
-    const extracted = await extractText(document, { mergePages: false });
+    const extracted = await pdfTextAndLayout(document);
     const text = extracted.text.join('\n');
     // Its own code, not the generic unreadable one: a long text statement is
     // not a scan, and telling the user it is sends them the wrong way.
     if (text.length > MAX_NORMALIZED_CHARS) throw new Error('pdf_too_long');
-    const parsed = parseStatementLines(text, currency, { card: null }, dateHint);
+    const parsed = parseStatementLines(text, currency, { card: null }, dateHint, extracted.layout);
     return {
       pages: extracted.totalPages,
       rows: parsed.rows,
