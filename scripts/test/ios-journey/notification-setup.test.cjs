@@ -100,8 +100,8 @@ test('Wallet readiness is independent of message and notification proof and requ
   assert.equal(setup.resolveIosApplePayReadiness({ ...status, firstApplePayReceivedAt: Date.now() }), 'shortcut-proven');
   assert.equal(setup.resolveIosApplePayReadiness({ ...status, applePaySetupProofAt: Date.now(), entitled: false }), 'not-added');
   assert.equal(setup.resolveIosSelectedReadiness('apple-pay', { readiness: 'first-alert-captured', shortcutVersion: 3 }), 'not-added');
-  for (const version of [17, '16.6', '26.6.2', '27oops', NaN]) assert.equal(setup.iosSupportsApplePayAutomation(version), false);
-  for (const version of [27, '27.0', '28.0']) assert.equal(setup.iosSupportsApplePayAutomation(version), true);
+  for (const version of [16, '16.6', '15.0', '27oops', NaN]) assert.equal(setup.iosSupportsApplePayAutomation(version), false);
+  for (const version of [17, '17.0', '26.6.2', 27, '27.0', '28.0']) assert.equal(setup.iosSupportsApplePayAutomation(version), true);
 });
 
 test('a started install or check only accepts Message proof recorded after it', () => {

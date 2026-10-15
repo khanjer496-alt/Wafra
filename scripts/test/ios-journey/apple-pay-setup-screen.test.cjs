@@ -194,21 +194,26 @@ test('the ink band shows the plain title, one line and an example marked as one;
 });
 
 
-test('Apple Pay setup versions validate the whole value and require Wafra iOS27 setup', () => {
-  for (const version of [17, 26, '26.6.2', '27oops', '27.0-beta', ' 27', '27.', '27..1', '', NaN, Infinity, null, {}, true, '999999999999999999999999']) {
+test('Apple Pay setup versions validate the whole value and require iOS 17 Wallet automations', () => {
+  for (const version of [16, '16.7.2', '15', '27oops', '27.0-beta', ' 27', '27.', '27..1', '', NaN, Infinity, null, {}, true, '999999999999999999999999']) {
     assert.equal(helper.iosSupportsApplePayAutomation(version), false, String(version));
   }
-  for (const version of [27, 27.1, '27', '27.0.1', '28.0']) assert.equal(helper.iosSupportsApplePayAutomation(version), true);
+  for (const version of [17, '17.0', 26, '26.6.2', 27, 27.1, '27', '27.0.1', '28.0']) {
+    assert.equal(helper.iosSupportsApplePayAutomation(version), true, String(version));
+  }
   for (const language of ['en', 'ar']) {
     const copy = helper.iosApplePayCopy(language);
-    assert.match(copy.subtitle, /27/); assert.doesNotMatch(copy.unsupported, /17/);
+    assert.match(copy.subtitle, /17/); assert.doesNotMatch(copy.subtitle, /27/);
+    assert.match(copy.unsupported, /17/);
+    // Shortcuts' Replace leaves two same-named copies; never advise it.
+    assert.doesNotMatch(copy.addHelp, /Replace|استبدل/);
   }
 });
 
 test('older and invalid iOS deep links redirect to SMS setup without native actions or progress loss', async () => {
   const saved = { version: 1, futureCaptureSource: 'apple-pay', futureShortcutConfirmed: true,
     futureAutomationConfirmed: true, futureStatus: 'complete', returnToOnboarding: true };
-  for (const version of ['17.0', '26.6', '27oops']) {
+  for (const version of ['16.7', '15.0', '27oops']) {
     const h = await screen({ version, saved, enabled: true, proof: Date.now(), received: Date.now() });
     assert.equal(h.tree().type, 'Redirect');
     assert.equal(h.tree().props.href.pathname, '/ios-setup');
@@ -217,7 +222,7 @@ test('older and invalid iOS deep links redirect to SMS setup without native acti
     assert.deepEqual(h.events, []); assert.deepEqual(h.urls, []); assert.deepEqual(h.shares, []);
     assert.equal(h.saved(), saved);
   }
-  const settings = await screen({ version: '26.1', fromOnboarding: '0', onboarded: true });
+  const settings = await screen({ version: '16.1', fromOnboarding: '0', onboarded: true });
   assert.equal(settings.tree().props.href.params.fromOnboarding, undefined);
 });
 
@@ -243,6 +248,12 @@ test('Apple Pay video appears only with supported native capture and the matchin
   assert.match(steps, /Shortcuts editor.*Automation section.*Transaction trigger/);
   assert.match(steps, /Amount and Merchant bound to Shortcut Input/);
   assert.doesNotMatch(steps, /Add Run Shortcut|Automation → \+/);
+  // iOS 17–26: a personal Transaction automation that runs the bundled Shortcut.
+  const legacy = helper.iosApplePayCopy('en').automationStepsLegacy.join(' ');
+  assert.match(legacy, /Automation, then \+\. Choose Transaction/);
+  assert.match(legacy, /Run Immediately/);
+  assert.match(legacy, /Wafra Apple Pay v1/);
+  assert.equal(helper.iosApplePayCopy('ar').automationStepsLegacy.length, 3);
 });
 
 test('recent Wallet Card or Pass values are listed newest first, on device only, with absent values named', async () => {

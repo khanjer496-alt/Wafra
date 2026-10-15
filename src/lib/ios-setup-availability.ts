@@ -1,10 +1,14 @@
-/** Product exposure only: older captured Apple Pay records remain valid. */
+/**
+ * Product exposure only: older captured Apple Pay records remain valid.
+ * Wallet Transaction automations arrived in iOS 17; before iOS 27 the owner
+ * builds a personal automation that runs the bundled Shortcut.
+ */
 export function iosSupportsApplePayAutomation(version: unknown): boolean {
   if (typeof version !== 'string' && typeof version !== 'number') return false;
   const value = String(version);
   if (!/^\d+(?:\.\d+)*$/.test(value)) return false;
   const parts = value.split('.').map(Number);
-  return parts.every(Number.isSafeInteger) && parts[0] >= 27;
+  return parts.every(Number.isSafeInteger) && parts[0] >= 17;
 }
 
 /** A view choice, never a mutation of the owner's saved source or receipts. */
@@ -13,4 +17,11 @@ export function visibleIosSetupSource(source: unknown, available: { applePay: bo
   if (source === 'apple-pay' && available.applePay) return 'apple-pay';
   if (source === 'notification' && available.notification) return 'notification';
   return 'message';
+}
+
+/** iOS 27 shortcuts carry their own automations; earlier versions use a personal automation. */
+export function iosShortcutsCarryAutomations(version: unknown): boolean {
+  if (typeof version !== 'string' && typeof version !== 'number') return false;
+  const major = Number(String(version).split('.')[0]);
+  return Number.isSafeInteger(major) && major >= 27;
 }

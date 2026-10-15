@@ -988,7 +988,8 @@ test('Apple Pay onboarding requires its own proof and manual automation confirma
 
 
 test('older iOS hides Apple Pay options and views saved Apple Pay progress as SMS without rewriting it', async t => {
-  for (const version of ['17.0', '26.6', '27oops']) {
+  // iOS 16 still has Messages setup but no Wallet Transaction automation.
+  for (const version of ['16.7', '16.0', '27oops']) {
     const s = await screen(t, { version, applePayCaptureSupported: true, bundled: true,
       params: { fromOnboarding: '0', applePayReturn: '1' },
       nativeStatus: { enabled: true, setupProofVersion: 3, setupProofAt: Date.now() - 1000, applePaySetupProofAt: Date.now() },
@@ -1017,8 +1018,8 @@ test('iOS27 saved Apple Pay setup shows only the matching bundled video, without
   }
 });
 
-test('supported iOS27 onboarding offers Apple Pay beside the regular SMS guide without switching saved source', async t => {
-  for (const [version, applePayCaptureSupported, offered] of [['27.0', true, true], ['26.6', true, false], ['27.0', false, false]]) {
+test('supported iOS 17+ onboarding offers Apple Pay beside the regular SMS guide without switching saved source', async t => {
+  for (const [version, applePayCaptureSupported, offered] of [['27.0', true, true], ['26.6', true, true], ['17.0', true, true], ['16.7', true, false], ['27.0', false, false]]) {
     const s = await screen(t, { version, applePayCaptureSupported, bundled: true,
       params: { fromOnboarding: '1' }, progress: { futureStatus: 'in-progress' } });
     assert.ok(s.all().some(node => node.props?.testID === 'ios-message-setup-guide'));

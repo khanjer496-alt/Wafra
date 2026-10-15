@@ -22,6 +22,7 @@ import {
   isBundledApplePayShortcutUri, parseApplePayCardObservations, resolveApplePaySetupState,
   type ApplePayCardObservation,
 } from '@/lib/ios-apple-pay-setup';
+import { iosShortcutsCarryAutomations } from '@/lib/ios-setup-availability';
 import { useStore } from '@/lib/store';
 
 /**
@@ -225,7 +226,8 @@ function ApplePaySetupScreen() {
     scrollProps={{ showsVerticalScrollIndicator: false }}>
     <Stack.Screen options={{ gestureEnabled: !busy }} />
     <View style={styles.sheet}>
-      {ready && bundled && <IosSetupVideoCard kind="apple-pay" language={language} compact disabled={busy} />}
+      {ready && bundled && iosShortcutsCarryAutomations(Platform.Version) &&
+        <IosSetupVideoCard kind="apple-pay" language={language} compact disabled={busy} />}
       {!supported ? <ThemedText style={{ color: band.text }}>{w.unsupported}</ThemedText> : !available ?
         <ThemedText accessibilityLiveRegion="polite" style={{ color: band.text }}>{loading ? w.checking : error ?? w.update}</ThemedText> : <>
         {/* What turning it on covers, read before the button that turns it on. */}
@@ -256,7 +258,7 @@ function ApplePaySetupScreen() {
           <Step index={2} title={d.step2} body={d.step2Body} done={flow.confirmed} palette={band}
             spoken={words.step(2, flow.confirmed)} last>
             <View testID="apple-pay-step-automation" style={styles.stepBody}>
-              {(!manual && bundled) && w.automationSteps.map(step => <ThemedText key={step} type="small" style={{ color: band.text }}>{step}</ThemedText>)}
+              {(!manual && bundled) && (iosShortcutsCarryAutomations(Platform.Version) ? w.automationSteps : w.automationStepsLegacy).map(step => <ThemedText key={step} type="small" style={{ color: band.text }}>{step}</ThemedText>)}
               <EButton palette={band} variant="secondary" label={w.open} onPress={open} disabled={busy} />
               {flow.confirmed && <ThemedText type="small" style={{ color: band.statusOk }}>{w.confirmed}</ThemedText>}
               <EButton testID="apple-pay-confirm" palette={band} label={w.confirm} onPress={confirmAutomation} disabled={busy || !flow.canConfirm} />

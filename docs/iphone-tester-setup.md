@@ -22,7 +22,10 @@ with English or Arabic captions. Populated History import and live incoming SMS
 still need physical-phone verification. Statements remain the faster history
 import option.
 
-Apple Pay setup is offered only on eligible iOS 27+ devices with native support.
-It currently has written instructions; no iOS 27 recording or device proof is
-claimed. The simulator's strict History file-protection failure was not bypassed
+Apple Pay setup is offered on iOS 17+ (when Wallet Transaction automations
+arrived) for banks that send no SMS. On iOS 17–26 the owner creates a personal
+Transaction automation that runs the bundled Wafra Apple Pay v1 Shortcut; on
+iOS 27 the guide adds the trigger inside the Shortcut, with its recording. Each
+captured purchase goes to Review. No real Apple Pay purchase has been verified
+on a device yet. The simulator's strict History file-protection failure was not bypassed
 and does not qualify History behavior on an iPhone.
