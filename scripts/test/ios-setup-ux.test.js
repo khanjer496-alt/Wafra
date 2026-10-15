@@ -53,7 +53,8 @@ const execute = (relative, dependencies = {}) => {
     output,
   )(
     (request) => dependencies[request] ??
-      (request === './ios-capture-health' ? execute('src/lib/ios-capture-health.ts') :
+      (request === 'expo-crypto' ? { randomUUID: () => 'ui-capture-attempt-1' } :
+        request === './ios-capture-health' ? execute('src/lib/ios-capture-health.ts') :
         request === './ios-setup-availability' || request === '@/lib/ios-setup-availability'
           ? execute('src/lib/ios-setup-availability.ts') : {}),
     loaded,
@@ -323,7 +324,7 @@ ok('iOS local setup: no unguarded entrance animation can hide the instructions',
   !/FadeIn|entering=/.test(screen));
 
 ok('iOS local setup: callbacks and foreground transitions refresh native and saved status',
-  /send\(\{ type: 'shortcut-callback', result \}\)/.test(screen) &&
+  /send\(\{ type: 'shortcut-callback', result, attemptId \}\)/.test(screen) &&
     /RNAppState\.addEventListener\('change'/.test(screen) &&
     /next !== 'active'[\s\S]{0,300}refreshSetup/.test(screen));
 ok('iOS local setup: permission check and automation confirmation use the controller enable paths',

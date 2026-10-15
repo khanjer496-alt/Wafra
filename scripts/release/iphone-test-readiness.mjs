@@ -36,8 +36,13 @@ export function parseDevicectlJson(raw, commandType) {
 
 function iphone15Model(device) {
   const hardware = device?.hardwareProperties;
-  if (!record(hardware) || hardware.platform !== 'iOS' || hardware.reality !== 'physical') return null;
+  if (!record(hardware) || hardware.platform !== 'iOS') return null;
   const productModel = MODELS.get(hardware.productType);
+  // Unpaired CoreDevice records may omit reality and marketingName. An exact
+  // supported hardware type identifies the family; connection checks still
+  // require a paired, connected device before any app lookup.
+  const sparsePhysicalModel = hardware.reality === undefined && hardware.deviceType === 'iPhone' && productModel;
+  if (hardware.reality !== 'physical' && !sparsePhysicalModel) return null;
   const name = hardware.marketingName;
   const namedModel = typeof name === 'string' && /^iPhone 15(?: Plus| Pro| Pro Max)?$/.test(name) ? name : null;
   // A conflicting product/name pair must not silently select another phone.

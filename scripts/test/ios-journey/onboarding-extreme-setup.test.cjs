@@ -112,7 +112,9 @@ async function screen(t, options = {}) {
     '@react-native-async-storage/async-storage': storage, './ios-history-setup': history, './ios-setup-journey': journey,
   });
   const protocol = source('src/lib/ios-local-capture-protocol.ts');
+  let checkNumber = 0;
   const capture = source('src/lib/ios-capture-setup.ts', {
+    'expo-crypto': { randomUUID: () => `journey-capture-attempt-${++checkNumber}` },
     'expo-sharing': { isAvailableAsync: async () => true, shareAsync: async url => urls.push(url) },
     'react-native': platform, '@/lib/ios-local-capture-protocol': protocol,
     './ios-capture-health': source('src/lib/ios-capture-health.ts'),
@@ -239,7 +241,13 @@ async function screen(t, options = {}) {
     async foreground(count = 1) { for (let n = 0; n < count; n++) for (const fn of listeners) fn('active'); await flush(); },
     /** Wafra really left (e.g. to Shortcuts) and came back. */
     async leaveAndReturn() { for (const fn of [...listeners]) fn('background'); for (const fn of [...listeners]) fn('active'); await flush(); },
-    async callback(result) { params.shortcutResult = result; await flush(); },
+    async callback(result, attemptId) {
+      const lastCheck = [...urls].reverse().find(url => url.includes('x-callback-url/run-shortcut'));
+      const currentAttempt = lastCheck && new URL(new URL(lastCheck).searchParams.get('x-error')).searchParams.get('shortcutAttempt');
+      params.shortcutResult = result;
+      params.shortcutAttempt = attemptId === undefined ? currentAttempt : attemptId;
+      await flush();
+    },
     async returnWith(patch) { Object.assign(params, patch); await flush(); },
     /**
      * Past SMS import is reached only as Settings → Advanced does it: the
@@ -514,6 +522,7 @@ test('proof callback success cannot fabricate first SMS and error callback gets 
   assert.equal(s.saved().futureStatus, 'in-progress');
   assert.equal(s.nativeStatus.firstCapturedAt, null);
   assert.ok(s.button('iosMessageRunPermissionCheck'));
+  await s.press('iosMessageRunPermissionCheck');
   await s.callback('error');
   assert.ok(s.text().includes(iosEn.failed),
     'Apple x-error return must explain that the Shortcut failed instead of silently showing the same guide.');
@@ -766,7 +775,7 @@ test('replacing v2 requires v3 installation, a fresh v3 check and re-pointing th
   assert.equal(new URL(s.urls[1]).searchParams.get('name'), 'Wafra Capture v3');
   await s.callback('success');
   assert.ok(s.button('iosMessageRunPermissionCheck'), 'old v2 receipt cannot prove the v3 run');
-  s.nativeStatus.setupProofVersion = 3; s.nativeStatus.setupProofAt = Date.now() + 1; await s.callback('success');
+  s.nativeStatus.setupProofVersion = 3; s.nativeStatus.setupProofAt = Date.now() + 1; await s.foreground();
   // Proven, but the old automation still runs the old Shortcut: point it at v3.
   assert.ok(labelled(s, iosEn.editExisting));
   assert.deepEqual(videos(), ['capture'], 're-pointing the automation keeps its video');
@@ -793,7 +802,7 @@ test('reinstalling keeps the confirmed automation; a stopped check cannot reuse 
   assert.ok(s.button('iosMessageRunPermissionCheck'), 'the older proof is not the result of this attempt');
   assert.equal(s.button('iosMessageContinue'), undefined);
   assert.equal(s.saved().futureAutomationConfirmed, true);
-  s.nativeStatus.setupProofAt = Date.now() + 1; await s.callback('success');
+  s.nativeStatus.setupProofAt = Date.now() + 1; await s.foreground();
   assert.ok(s.button('iosMessageContinue'), 'a new successful check restores the finished setup without re-confirming');
 });
 
@@ -845,6 +854,75 @@ test('automation guide is one Apple screen per step, leads with Open Shortcuts, 
   // An Apple Pay receipt on the shared queue clock is not Message evidence.
   s.nativeStatus.lastApplePayReceivedAt = s.nativeStatus.lastReceivedAt; await s.foreground();
   assert.deepEqual([done().result.title, done().result.body], [iosEn.testPassed, iosEn.waitingAutomation]);
+});
+
+test('automation handoff failure stays on Step 3 with proof, manual navigation and retry in both languages', async t => {
+  for (const language of ['en', 'ar']) {
+    const words = load(path.join(root, 'src/lib/ios-shortcut-setup-copy.ts')).iosShortcutSetupCopy(language);
+    const proofAt = Date.now() - 1000;
+    const s = await screen(t, { language, bundled: true,
+      progress: { futureShortcutConfirmed: true, futureShortcutVersion: 3 },
+      nativeStatus: { enabled: true, setupProofVersion: 3, setupProofAt: proofAt },
+      controls: { beforeOpen: async () => { throw Error('private OS description'); } } });
+    await s.press('iosLocalOpenAutomation');
+    assert.equal(s.all().find(n => n.type === 'StepProgress').props.current, 3);
+    assert.equal(step(s, 'ios-shortcut-check-step'), undefined, 'opening Apple UI cannot fail a passed local test');
+    assert.ok(s.text().includes(words.automationOpenFailed));
+    assert.ok(s.text().includes(words.automationOpenManually));
+    assert.ok(labelled(s, words.automationOpenRetry));
+    assert.equal(s.nativeStatus.setupProofAt, proofAt);
+    assert.equal(s.saved().futureAutomationConfirmed, false);
+    assert.equal(s.button('iosMessageContinue'), undefined);
+    await s.foreground(2);
+    assert.ok(s.text().includes(words.automationOpenFailed), 'manual guidance survives a native status refresh');
+    // Reading the next Apple screen is manual navigation, not capture evidence.
+    labelled(s, words.next).onPress(); await s.flush();
+    assert.equal(step(s, 'ios-automation-guide-step').title, words.guide[1].title);
+    assert.equal(s.saved().futureAutomationConfirmed, false);
+    s.controls.beforeOpen = undefined;
+    labelled(s, words.automationOpenRetry).onPress(); await s.flush();
+    assert.equal(s.text().includes(words.automationOpenFailed), false);
+    assert.equal(s.nativeStatus.setupProofAt, proofAt);
+  }
+});
+
+test('automation fallback success advances the guide and a later test failure still owns Step 2', async t => {
+  const s = await screen(t, { bundled: true,
+    progress: { futureShortcutConfirmed: true, futureShortcutVersion: 3 },
+    nativeStatus: { enabled: true, setupProofVersion: 3, setupProofAt: Date.now() - 1000 },
+    controls: { beforeOpen: async url => { if (url.includes('create-automation')) throw Error('unavailable'); } } });
+  await s.press('iosLocalOpenAutomation');
+  assert.equal(step(s, 'ios-automation-guide-step').title, iosEn.guide[1].title);
+  assert.equal(s.text().includes(iosEn.automationOpenFailed), false);
+  await s.help('iosMessageRunPermissionCheck');
+  await s.callback('error');
+  assert.ok(step(s, 'ios-shortcut-check-step'));
+  assert.ok(s.text().includes(iosEn.failed));
+  assert.equal(step(s, 'ios-automation-guide-step'), undefined);
+});
+
+test('old and unsolicited callbacks cannot stop or fail the new check, and remount keeps native proof', async t => {
+  const proof = { enabled: true, setupProofVersion: 3, setupProofAt: Date.now() - 1000 };
+  const progress = { futureShortcutConfirmed: true, futureShortcutVersion: 3 };
+  const s = await screen(t, { bundled: true, progress, nativeStatus: proof });
+  await s.callback('error', 'unsolicited-capture-attempt');
+  assert.ok(step(s, 'ios-automation-guide-step'));
+  assert.equal(s.text().includes(iosEn.failed), false);
+  await s.help('iosMessageRunPermissionCheck');
+  const firstUrl = new URL(s.urls.at(-1));
+  const first = new URL(firstUrl.searchParams.get('x-error')).searchParams.get('shortcutAttempt');
+  await s.press('iosMessageRunPermissionCheck');
+  for (const result of ['error', 'cancel']) {
+    await s.callback(result, first);
+    assert.equal(s.text().includes(iosEn.failed), false);
+    assert.equal(s.text().includes(iosEn.stopped), false);
+  }
+  await s.callback('error');
+  assert.ok(s.text().includes(iosEn.failed), 'the matching current callback is still actionable');
+  const remounted = await screen(t, { bundled: true, progress, nativeStatus: proof,
+    params: { shortcutResult: 'error', shortcutAttempt: first } });
+  assert.ok(step(remounted, 'ios-automation-guide-step'));
+  assert.equal(remounted.text().includes(iosEn.failed), false);
 });
 
 test('the automation video waits for step 3, after the shortcut is added and tested', async t => {

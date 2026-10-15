@@ -125,11 +125,11 @@ const en = {
   // 8 · Paywall
   paywallTitle: 'Keep it running on its own.',
   paywallBody: (category: string | null, reminders: boolean) => {
-    const what = category && reminders ? `Your ${category} limit and your reminders only stay true`
-      : category ? `Your ${category} limit only stays true`
-        : reminders ? 'Your reminders only stay true'
-          : 'Wafra only stays complete';
-    return `${what} if every bank message arrives. Pro adds each one by itself.`;
+    const what = category && reminders ? `your ${category} limit and reminders`
+      : category ? `your ${category} limit`
+        : reminders ? 'your reminders'
+          : 'your ledger';
+    return `Pro captures supported bank alerts to help keep ${what} up to date. You can review uncertain alerts.`;
   },
   trialToday: 'Today',
   trialTodayBody: 'Automatic capture is on. No card needed.',
@@ -232,11 +232,11 @@ const ar: OnboardingECopy = {
   openWafra: 'افتح وفرة',
   paywallTitle: 'دعه يعمل من تلقاء نفسه.',
   paywallBody: (category: string | null, reminders: boolean) => {
-    const what = category && reminders ? `يبقى حد ${category} وتذكيراتك دقيقين`
-      : category ? `يبقى حد ${category} دقيقاً`
-        : reminders ? 'تبقى تذكيراتك دقيقة'
-          : 'يبقى وفرة مكتملاً';
-    return `${what} فقط إذا وصل كل تنبيه من البنك. يضيف Pro كل تنبيه تلقائياً.`;
+    const what = category && reminders ? `حد ${category} وتذكيراتك`
+      : category ? `حد ${category}`
+        : reminders ? 'تذكيراتك'
+          : 'سجلك';
+    return `يلتقط Pro التنبيهات البنكية المدعومة للمساعدة في تحديث ${what}. يمكنك مراجعة التنبيهات غير المؤكدة.`;
   },
   trialToday: 'اليوم',
   trialTodayBody: 'الالتقاط التلقائي يعمل. دون بطاقة.',

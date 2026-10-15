@@ -1,4 +1,5 @@
 import { Linking, Platform } from 'react-native';
+import { randomUUID } from 'expo-crypto';
 import { iosSupportsApplePayAutomation } from './ios-setup-availability';
 
 import type {
@@ -13,6 +14,7 @@ import {
   IOS_LOCAL_CAPTURE_SHORTCUT_URL,
   IOS_BUNDLED_CAPTURE_SHORTCUT_NAME,
   iosLocalCaptureTestUrl,
+  isIosCaptureAttemptId,
   normalizeIosLocalCaptureShortcutUrl,
 } from '@/lib/ios-local-capture-protocol';
 
@@ -36,6 +38,7 @@ export type IosSetupFailure =
   | 'load'
   | 'shortcut-install'
   | 'shortcut-run'
+  | 'automation-open'
   | 'shortcuts-missing'
   | null;
 export type IosShortcutCallbackResult = 'success' | 'cancel' | 'error';
@@ -84,6 +87,8 @@ export interface IosSetupModel {
   setupProofAt?: number | null;
   /** Latest queue receipt that did not come from Apple Pay or notification input. */
   lastMessageReceivedAt?: number | null;
+  /** Ephemeral acknowledgment; never persisted or accepted as native capture proof. */
+  shortcutCallback?: { result: IosShortcutCallbackResult; attemptId: string } | null;
 }
 
 export type IosSetupIntent =
@@ -94,7 +99,7 @@ export type IosSetupIntent =
   | { type: 'check-shortcut' }
   | { type: 'open-automation'; existing?: boolean }
   | { type: 'automation-added' }
-  | { type: 'shortcut-callback'; result: IosShortcutCallbackResult }
+  | { type: 'shortcut-callback'; result: IosShortcutCallbackResult; attemptId?: unknown }
   | { type: 'go-to-stage'; stage: IosSetupStage }
   | { type: 'manual-only' }
   | { type: 'open-shortcuts-store' }
@@ -117,6 +122,7 @@ export interface IosSetupDependencies {
   canOpenUrl(url: string): Promise<boolean>;
   openUrl(url: string): Promise<void>;
   shareShortcut(url: string): Promise<void>;
+  createAttemptId(): string;
   subscribeCaptureStatus?(listener: () => void): () => void;
 }
 
@@ -237,6 +243,7 @@ const defaultDependencies = (): IosSetupDependencies => ({
     await sharing.shareAsync(url, { UTI: 'com.apple.shortcut' });
   },
   subscribeCaptureStatus: subscribeIosCaptureStatusRefresh,
+  createAttemptId: randomUUID,
 });
 
 /** The shared receipt clock covers every source; attribute it only when no other source owns it. */
@@ -385,6 +392,7 @@ export function createIosCaptureSetup({
   let statusRefreshPending = false;
   let openingInFlight: Promise<void> | null = null;
   let manualOnlyInFlight: Promise<void> | null = null;
+  let pendingShortcutCheck: { generation: number; attemptId: string } | null = null;
 
   const publish = (patch: Partial<IosSetupModel>): void => {
     if (disposed) return;
@@ -463,7 +471,9 @@ export function createIosCaptureSetup({
           readiness !== 'not-added' || (!initial && model.stage === 'automation')
             ? 'automation'
             : model.stage,
-        failure: null,
+        // Opening Apple's UI and the native check are different phases. A
+        // healthy status read cannot erase the manual-navigation recovery.
+        failure: model.failure === 'automation-open' ? 'automation-open' : null,
       });
     } catch {
       publish({
@@ -516,7 +526,8 @@ export function createIosCaptureSetup({
     if (manualOnlyInFlight) return manualOnlyInFlight;
     if (openingInFlight) return openingInFlight;
     const generation = ++operationGeneration;
-    publish({ opening: true, failure: null });
+    pendingShortcutCheck = null;
+    publish({ opening: true, failure: null, shortcutCallback: null });
 
     openingInFlight = operation(generation).finally(() => {
       if (!disposed && generation === operationGeneration) {
@@ -577,11 +588,12 @@ export function createIosCaptureSetup({
     try {
       await dependencies.openUrl(existing ? 'shortcuts://' : IOS_CREATE_AUTOMATION_URL);
     } catch {
+      if (disposed || generation !== operationGeneration) return;
       try {
         await dependencies.openUrl('shortcuts://');
       } catch {
         if (!disposed && generation === operationGeneration) {
-          publish({ failure: 'shortcut-run' });
+          publish({ failure: 'automation-open' });
         }
       }
     }
@@ -612,11 +624,15 @@ export function createIosCaptureSetup({
     }
 
     try {
+      const attemptId = dependencies.createAttemptId();
+      if (!isIosCaptureAttemptId(attemptId)) throw new Error('invalid_capture_attempt');
       await native.setCaptureEnabled(true);
       if (disposed || generation !== operationGeneration) return;
-      await dependencies.openUrl(iosLocalCaptureTestUrl(fromOnboarding, !!native.getMessageShortcutURL));
+      pendingShortcutCheck = { generation, attemptId };
+      await dependencies.openUrl(iosLocalCaptureTestUrl(fromOnboarding, !!native.getMessageShortcutURL, attemptId));
     } catch {
       if (!disposed && generation === operationGeneration) {
+        pendingShortcutCheck = null;
         publish({ failure: 'shortcut-run' });
       }
     }
@@ -636,7 +652,8 @@ export function createIosCaptureSetup({
     if (manualOnlyInFlight) return manualOnlyInFlight;
     const openingToSettle = openingInFlight;
     const generation = ++operationGeneration;
-    publish({ opening: true, failure: null });
+    pendingShortcutCheck = null;
+    publish({ opening: true, failure: null, shortcutCallback: null });
 
     manualOnlyInFlight = (async () => {
       if (openingToSettle) {
@@ -701,15 +718,26 @@ export function createIosCaptureSetup({
         case 'automation-added':
           await checkShortcut(true);
           return;
-        case 'shortcut-callback':
+        case 'shortcut-callback': {
+          // x-callback URLs can be delayed, replayed or open a new app route.
+          // Only the one pending check owns an error/cancel. Matching success
+          // still derives readiness solely from protected native proof.
+          const check = pendingShortcutCheck;
+          if (!check || !isIosCaptureAttemptId(intent.attemptId) ||
+            check.attemptId !== intent.attemptId || check.generation !== operationGeneration) return;
+          pendingShortcutCheck = null;
           await refreshStatus(false);
+          if (disposed || check.generation !== operationGeneration) return;
+          publish({ shortcutCallback: { result: intent.result, attemptId: check.attemptId } });
           if (intent.result === 'error' && model.failure !== 'load') {
             publish({ failure: 'shortcut-run' });
           }
           return;
+        }
         case 'go-to-stage':
           ++operationGeneration;
-          publish({ stage: intent.stage, opening: false, failure: null });
+          pendingShortcutCheck = null;
+          publish({ stage: intent.stage, opening: false, failure: null, shortcutCallback: null });
           return;
         case 'manual-only':
           await disableForManualOnly();
@@ -726,6 +754,7 @@ export function createIosCaptureSetup({
       if (disposed) return;
       disposed = true;
       operationGeneration += 1;
+      pendingShortcutCheck = null;
       statusRefreshPending = false;
       listeners.clear();
       unsubscribeStatus();

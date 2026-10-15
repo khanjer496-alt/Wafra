@@ -28,6 +28,73 @@ test('selects the only paired connected physical iPhone 15', async () => {
   assert.equal(selected.device.identifier, id);
 });
 
+test('recognizes exact iPhone 15 product types when CoreDevice omits rich hardware metadata', async () => {
+  const { selectIphone15, inspectIphoneReadiness } = await load();
+  for (const [productType, model] of [
+    ['iPhone15,4', 'iPhone 15'], ['iPhone15,5', 'iPhone 15 Plus'],
+    ['iPhone16,1', 'iPhone 15 Pro'], ['iPhone16,2', 'iPhone 15 Pro Max'],
+  ]) {
+    const data = inventory([device({ hardwareProperties: { deviceType: 'iPhone', productType, platform: 'iOS' } })]);
+    assert.equal(selectIphone15(data).state, 'selected');
+    const { report } = await inspectIphoneReadiness({}, { readCommand: async (args) => args[0] === 'list' ? data : apps() });
+    assert.equal(report.device.model, model);
+    assert.equal(report.proof.physicalTests, 'unverified');
+    assert.equal(report.launchReady, false);
+  }
+});
+
+test('the observed unpaired iPhone 15 inventory shape identifies the family without bypassing connection gates', async () => {
+  const { selectIphone15, inspectIphoneReadiness } = await load();
+  const data = inventory([device({
+    hardwareProperties: { deviceType: 'iPhone', productType: 'iPhone15,4', platform: 'iOS' },
+    deviceProperties: { osVersionNumber: '26.6.2' },
+    connectionProperties: { pairingState: 'unpaired', tunnelState: 'disconnected', transportType: 'wired' },
+  })]);
+  assert.equal(selectIphone15(data, { deviceId: id }).state, 'device_unavailable');
+  let calls = 0;
+  const { report, exitCode } = await inspectIphoneReadiness({ deviceId: id }, { readCommand: async () => { calls++; return data; } });
+  assert.equal(exitCode, 2);
+  assert.equal(calls, 1);
+  assert.deepEqual(report.device, { model: 'iPhone 15', osVersion: '26.6.2', developerMode: 'unknown', pairing: 'not_paired', tunnel: 'disconnected', transport: 'wired' });
+  assert.equal(report.installedWafra, null);
+  assert.equal(report.proof.appMetadata, 'unverified');
+  assert.equal(report.proof.physicalTests, 'unverified');
+});
+
+test('sparse hardware metadata rejects iPhone 14 Pro and iPhone 16 product types', async () => {
+  const { selectIphone15 } = await load();
+  for (const productType of ['iPhone15,2', 'iPhone15,3', 'iPhone17,1', 'iPhone17,2', 'iPhone17,3', 'iPhone17,4']) {
+    const data = inventory([device({ hardwareProperties: { deviceType: 'iPhone', productType, platform: 'iOS' } })]);
+    assert.equal(selectIphone15(data).state, 'no_iphone15');
+    assert.equal(selectIphone15(data, { deviceId: id }).state, 'wrong_device_family');
+  }
+});
+
+test('sparse hardware recognition rejects explicit simulated or conflicting physical metadata', async () => {
+  const { selectIphone15 } = await load();
+  for (const hardwareProperties of [
+    { deviceType: 'iPhone', productType: 'iPhone15,4', platform: 'iOS', reality: 'simulated' },
+    { deviceType: 'iPhone', productType: 'iPhone15,4', platform: 'iOS', reality: null },
+    { deviceType: 'iPad', productType: 'iPhone15,4', platform: 'iOS' },
+    { productType: 'iPhone15,4', platform: 'iOS' },
+    { deviceType: 'iPhone', productType: 'iPhone15,4', platform: 'iOS', marketingName: 'iPhone 15 Plus' },
+    { deviceType: 'iPhone', productType: 'iPhone15,2', platform: 'iOS', marketingName: 'iPhone 15' },
+  ]) {
+    assert.equal(selectIphone15(inventory([device({ hardwareProperties })])).state, 'no_iphone15');
+  }
+});
+
+test('sparse hardware recognition still requires pairing and exact disambiguation', async () => {
+  const { selectIphone15 } = await load();
+  const hardwareProperties = { deviceType: 'iPhone', productType: 'iPhone15,4', platform: 'iOS' };
+  const unpaired = device({ hardwareProperties, connectionProperties: { pairingState: 'unpaired', tunnelState: 'connected' } });
+  assert.equal(selectIphone15(inventory([unpaired]), { deviceId: id }).state, 'device_unavailable');
+  const data = inventory([device({ hardwareProperties }), device({ hardwareProperties, identifier: secondId })]);
+  assert.equal(selectIphone15(data).state, 'ambiguous_device');
+  assert.equal(selectIphone15(data, { deviceId: secondId }).device.identifier, secondId);
+  assert.equal(selectIphone15(inventory([unpaired, device({ identifier: secondId })]), { deviceId: id }).state, 'device_unavailable');
+});
+
 test('never falls back to a different iPhone family or simulator', async () => {
   const { selectIphone15 } = await load();
   for (const hardwareProperties of [
@@ -139,7 +206,7 @@ test('raw inventory, personal names, identifiers, serials and command errors are
 
 test('disabled developer mode or incomplete OS metadata prevents app probing', async () => {
   const { inspectIphoneReadiness } = await load();
-  for (const deviceProperties of [{ osVersionNumber: '26.2', developerModeStatus: 'disabled' }, { developerModeStatus: 'enabled' }]) {
+  for (const deviceProperties of [{ osVersionNumber: '26.2', developerModeStatus: 'disabled' }, { developerModeStatus: 'enabled' }, { osVersionNumber: '26.6.2' }]) {
     let calls = 0;
     const result = await inspectIphoneReadiness({}, { readCommand: async () => { calls++; return inventory([device({ deviceProperties })]); } });
     assert.equal(calls, 1);

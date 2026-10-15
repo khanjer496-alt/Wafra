@@ -607,8 +607,13 @@ export interface ParsedCard {
  * repayments. Native worldwide fields preserve money roles and source spans;
  * uncertain ownership, ambiguous currency and non-completed events remain
  * unresolved. No additional full-history repair is requested.
+ *
+ * 68: retain explicit senderless own-card purchases in Review and distinguish
+ * the labelled Cr.Limit footer from the purchase principal in native previews.
+ * Future capture and the bounded recent reread use these corrected roles;
+ * no automatic posting policy or additional full-history backfill is added.
  */
-export const PARSER_VERSION = 67;
+export const PARSER_VERSION = 68;
 /**
  * Historical-repair contract for already-saved data.
  *

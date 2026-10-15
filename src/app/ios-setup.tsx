@@ -24,8 +24,8 @@ import { useBand } from '@/hooks/use-band';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Fonts, Spacing } from '@/constants/theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { t, tf, type StringKey } from '@/lib/i18n';
-import { IOS_LOCAL_CAPTURE_SHORTCUT_NAME } from '@/lib/ios-local-capture-protocol';
+import { getLanguage, t, tf, type StringKey } from '@/lib/i18n';
+import { isIosCaptureAttemptId, IOS_LOCAL_CAPTURE_SHORTCUT_NAME } from '@/lib/ios-local-capture-protocol';
 import { iosShortcutSetupCopy } from '@/lib/ios-shortcut-setup-copy';
 import {
   completeIosMessageOnboardingAttempt,
@@ -127,6 +127,8 @@ const failureCopy = (failure: Exclude<IosSetupFailure, null>): string => {
       return t('iosLocalShortcutInstallFailed');
     case 'shortcut-run':
       return t('iosLocalShortcutRunFailed');
+    case 'automation-open':
+      return iosShortcutSetupCopy(getLanguage()).automationOpenFailed;
     case 'shortcuts-missing':
       return t('iosShortcutsMissing');
     case 'load':
@@ -142,6 +144,7 @@ export default function IosSetupScreen() {
   const params = useLocalSearchParams<{
     fromOnboarding?: string;
     shortcutResult?: string;
+    shortcutAttempt?: string;
     notificationReturn?: string;
     applePayReturn?: string;
     section?: string;
@@ -453,21 +456,32 @@ export default function IosSetupScreen() {
       return;
     }
     if (result !== 'success' && result !== 'cancel' && result !== 'error') return;
-    if (consumedShortcutCallback.current === result) return;
-    consumedShortcutCallback.current = result;
-    if (result === 'cancel') setCheckStopped(true);
+    const attemptId = params.shortcutAttempt;
+    if (!isIosCaptureAttemptId(attemptId)) {
+      router.setParams({ shortcutResult: undefined, shortcutAttempt: undefined });
+      return;
+    }
+    const callbackKey = `${result}:${attemptId}`;
+    if (consumedShortcutCallback.current === callbackKey) return;
+    consumedShortcutCallback.current = callbackKey;
+    const controller = controllerRef.current;
     void (async () => {
-      await send({ type: 'shortcut-callback', result });
+      await send({ type: 'shortcut-callback', result, attemptId });
+      const accepted = () => controller !== null && controllerRef.current === controller &&
+        controller.getModel().shortcutCallback?.attemptId === attemptId &&
+        controller.getModel().shortcutCallback?.result === result;
+      if (!accepted() || !screenActive.current) return;
+      if (result === 'cancel') setCheckStopped(true);
       await refreshSetup();
-      if (result === 'error' && screenActive.current &&
-        controllerRef.current?.getModel().failure !== 'load') {
+      if (result === 'error' && screenActive.current && accepted() &&
+        controller?.getModel().failure !== 'load') {
         // Foreground receipt refreshes can succeed even when the Shortcut
         // failed. Keep the error visible until the owner takes a retry action.
         setLocalError((current) => current ?? t('iosLocalShortcutRunFailed'));
       }
     })();
-    router.setParams({ shortcutResult: undefined });
-  }, [params.shortcutResult, refreshSetup, router, send, setup.loading]);
+    router.setParams({ shortcutResult: undefined, shortcutAttempt: undefined });
+  }, [params.shortcutAttempt, params.shortcutResult, refreshSetup, router, send, setup.loading]);
 
   useEffect(() => {
     if (setup.loading || !progressLoaded) return;
@@ -575,8 +589,9 @@ export default function IosSetupScreen() {
     void runOperation(async () => {
       if (shownSource === recordedSource) await updateProgress({ type: 'future-status-changed', status: 'in-progress' });
       await send({ type: 'open-automation' });
+      if (screenActive.current && controllerRef.current?.getModel().failure === null) setGuideScreen(1);
     });
-  }, [recordedSource, runOperation, send, shownSource, updateProgress]);
+  }, [recordedSource, runOperation, send, setGuideScreen, shownSource, updateProgress]);
 
   // Looking at another source's setup changes nothing that is saved: the
   // recorded source switches only when that source's automation is confirmed.
@@ -950,6 +965,7 @@ export default function IosSetupScreen() {
     ?? (activeSection === 'history' && historyRefreshFailed ? t('iosHistoryRefreshFailed') : null)
     ?? (setup.failure ? failureCopy(setup.failure) : null);
   const shortcutCheckFailed = activeSection === 'future' && failedMessageCheck;
+  const automationOpenFailed = messageMode && setup.failure === 'automation-open';
   const shortcutName = setup.shortcutName ?? IOS_LOCAL_CAPTURE_SHORTCUT_NAME;
   const historyConfirmed = progress.historyShortcutConfirmed || historySetup.installed;
   const historyRunning = historySetup.handoffStartedAt !== null;
@@ -1225,7 +1241,9 @@ export default function IosSetupScreen() {
                 <>
                   {setup.shortcutVersion === 3 && <IosSetupVideoCard kind="capture" language={language} compact disabled={busy} />}
                   <SetupStep palette={band} badge="3" title={shortcutCopy.relinkTitle}
-                    body={shortcutCopy.relinkBody.replace('{shortcut}', shortcutName)}>
+                    body={shortcutCopy.relinkBody.replace('{shortcut}', shortcutName)}
+                    result={automationOpenFailed ? { tone: 'fail', title: shortcutCopy.automationOpenFailed,
+                      body: shortcutCopy.automationOpenManually } : null}>
                     <EButton palette={band} label={shortcutCopy.editExisting} onPress={openExistingAutomation} disabled={busy} />
                     <EButton palette={band} label={shortcutCopy.relinkConfirm} variant="secondary" onPress={confirmAutomation}
                       disabled={busy} />
@@ -1241,14 +1259,16 @@ export default function IosSetupScreen() {
                       .replace('{total}', String(shortcutCopy.guide.length))}
                     title={guide.title}
                     body={fillShortcut(guide.body)} chips={guide.chips.map(fillShortcut)}
-                    chipsPrefix={shortcutCopy.inShortcuts}>
+                    chipsPrefix={shortcutCopy.inShortcuts}
+                    result={automationOpenFailed ? { tone: 'fail', title: shortcutCopy.automationOpenFailed,
+                      body: shortcutCopy.automationOpenManually } : null}>
+                    {automationOpenFailed && <EButton palette={band} label={shortcutCopy.automationOpenRetry}
+                      onPress={openAutomation} disabled={busy} />}
                     {guideShown === 0 ? (
                       <>
                         {/* Opening Shortcuts is the next step; the confirmation comes last. */}
-                        <EButton palette={band} label={t('iosLocalOpenAutomation')} onPress={() => {
-                          nextGuideScreen();
-                          openAutomation();
-                        }} disabled={busy} />
+                        {!automationOpenFailed && <EButton palette={band} label={t('iosLocalOpenAutomation')}
+                          onPress={openAutomation} disabled={busy} />}
                         <EButton palette={band} label={shortcutCopy.next} variant="quiet" onPress={nextGuideScreen} disabled={busy} />
                       </>
                     ) : guideShown < shortcutCopy.guide.length - 1 ? (
@@ -1341,7 +1361,7 @@ export default function IosSetupScreen() {
               )}
             </View>
           )}
-          {error && !shortcutCheckFailed && (
+          {error && !shortcutCheckFailed && !(automationOpenFailed && showingAutomation) && (
             <View accessibilityLiveRegion="polite">
               <View style={[styles.error, { backgroundColor: band.statusOverSoft, borderColor: band.statusOver }]}>
                 <ThemedText type="small" style={{ color: band.text }} selectable>{error}</ThemedText>

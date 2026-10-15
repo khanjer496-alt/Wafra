@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 653dd30cbfe3088f0fcde2a90ab55bbddb032a898db13cf544f96222b7b6a1d8
+// Generated from normal shipping TypeScript. Source SHA-256: 9a828b99c784171a69af08e4ed096adb08b8006ff03210c8fd819f31088b90ef
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -9407,6 +9407,7 @@ const hasGenericBankAlertContext = (source, sender = '') => {
     return accountFieldList || walletReceipt || hasNativeCurrencyAccountContext(text);
 };
 exports.hasGenericBankAlertContext = hasGenericBankAlertContext;
+const SENDERLESS_USED_CARD_HINT = /^\s*your\s+(?:cr\.\s*)?card\s+(?:[*xX•·]{1,24}\s*)?(\d{4})(?![\p{L}\p{N}]|[ \t-]+\d)[ \t]+(?:was|has[ \t]+been)[ \t]+used[ \t]+for\b/iu;
 const inspectGenericBankEventForReview = (source, sender = '', market, sourceContext) => {
     if ((0, exports.hasPersonalMessagePrefix)(source) || hasNegatedPrincipalMovement(source))
         return null;
@@ -9416,7 +9417,11 @@ const inspectGenericBankEventForReview = (source, sender = '', market, sourceCon
         !(0, best_effort_autopost_1.hasNonCompletedWording)(source, null, sender) && !(0, best_effort_autopost_1.hasLinkFromUnregisteredSender)(source, sender);
     const footerAdmitted = noContext && !claimAdmitted && (0, best_effort_autopost_1.isRegisteredAlertSender)(sender) &&
         (0, best_effort_autopost_1.refusedOnlyByShopOrPromoWording)(source, sender);
-    if (noContext && !claimAdmitted && !footerAdmitted)
+    const senderlessCard = noContext && !sender.trim() ? SENDERLESS_USED_CARD_HINT.exec(source) : null;
+    const cardAdmitted = !!senderlessCard && (0, best_effort_autopost_1.namesOwnInstrumentTail)(source, 'debit') &&
+        !(0, sms_parser_1.nonPostingReason)(source) && !(0, best_effort_autopost_1.isNotAutoPostableMoney)(source) &&
+        !(0, best_effort_autopost_1.hasNonCompletedWording)(source, null, '') && !(0, best_effort_autopost_1.hasLinkFromUnregisteredSender)(source, '');
+    if (noContext && !claimAdmitted && !footerAdmitted && !cardAdmitted)
         return null;
     const event = (0, gulf_neighbour_alerts_1.isGulfNeighbourMarket)(market)
         ? (0, universal_parser_1.inspectUniversalBankEvent)((0, gulf_neighbour_alerts_1.gulfNeighbourReadSource)(source, market), {
@@ -9428,10 +9433,18 @@ const inspectGenericBankEventForReview = (source, sender = '', market, sourceCon
                 ? (0, alert_market_detection_1.inspectUniversalAlert)({ source, sender }) : null, sender, (0, country_1.getActiveCountry)()));
     if (event.decision !== 'review')
         return null;
+    const hasOtherCardMoney = cardAdmitted && event.observations.some(observation => observation.role !== 'transaction' && observation.role !== 'credit-limit');
+    if (cardAdmitted && (event.family !== 'purchase' || event.status !== 'posted' || event.direction !== 'debit' ||
+        event.amount.evidence !== 'explicit' || !event.amount.value || event.amount.spans.length !== 1 ||
+        hasOtherCardMoney ||
+        event.observations.filter(observation => observation.role === 'transaction').length !== 1 ||
+        event.instrument.evidence !== 'explicit' || event.instrument.spans.length !== 1 ||
+        event.instrument.value?.kind !== 'card' || event.instrument.value.last4 !== senderlessCard?.[1]))
+        return null;
     if (hasNativeCurrencyAccountContext(source) && !(0, exports.hasBankAlertMoneyHint)(source) &&
         (event.amount.evidence !== 'explicit' || event.amount.value?.currency !== 'ZAR'))
         return null;
-    if (noContext && !((event.direction === 'credit' || (footerAdmitted && event.direction === 'debit')) &&
+    if (noContext && !((event.direction === 'credit' || ((footerAdmitted || cardAdmitted) && event.direction === 'debit')) &&
         event.status === 'posted' && event.amount.evidence !== 'missing'))
         return null;
     const hasGroundedMoney = event.amount.evidence !== 'missing' ||
@@ -10747,7 +10760,7 @@ function normalizeArabic(s) {
 }
 const ARABIC_RE = /[\u0600-\u06FF]/;
 const AR_LETTER = '\\u0621-\\u064A';
-exports.PARSER_VERSION = 67;
+exports.PARSER_VERSION = 68;
 exports.PARSER_BACKFILL_VERSION = 50;
 const BANK_PROFILES = {
     'Emirates NBD': { brand: /\benbd\b|emirates\s*nbd|\bliv\b/i, ownPot: /\b(?:liv\s+)?goals?\b|\bsavings?\s+pot\b/i },
@@ -14302,7 +14315,7 @@ const sourceCurrencyAliases = (context) => {
 const LABEL = new RegExp([
     String.raw `(?<minimum>\bpay\s+min\.|\bmin(?:imum)?(?:\s+|\.\s*)(?:(?:amount|amt|payment)\s+)?due\b|\bminimum\s+payment\b|\bpago\s+mínimo\b|(?<![\p{L}\p{M}\p{N}_])(?:paiement\s+minimum|न्यूनतम\s+देय\s+राशि)(?![\p{L}\p{M}\p{N}_])|الحد\s+(?:الادنى|الأدنى)\s+(?:المستحق|للدفع|للسداد))`,
     String.raw `(?<total>\b(?:statement\s+(?:total|balance|amount)|closing\s+balance|total\s+(?:(?:amount|amt)\s+)?due(?:\s+to\s+avoid\s+fin\.\s+charges)?|total\s+outstanding(?:\s+balance)?|new\s+balance|saldo\s+total\s+del\s+estado)\b|(?<![\p{L}\p{M}\p{N}_])(?:total\s+à\s+payer|कुल\s+देय\s+राशि)(?![\p{L}\p{M}\p{N}_])|(?:اجمالي|إجمالي)\s+(?:المبلغ\s+المستحق|مبلغ\s+الكشف))`,
-    String.raw `(?<limit>\b(?:(?:available|avl|avail)\.?\s+(?:credit|cr\.?)\s+limit|(?:available|credit|avl|avail)\.?\s+(?:limit|lmt)|available\s+credit|credit\s+available)\b|الحد\s+(?:المتاح|الائتماني))`,
+    String.raw `(?<limit>\b(?:(?:available|avl|avail)\.?\s+(?:credit\s+limit|cr(?:\.?\s+|\.)limit)|(?:available|credit|avl|avail)\.?\s+(?:limit|lmt)|available\s+credit|credit\s+available)\b|الحد\s+(?:المتاح|الائتماني))`,
     String.raw `(?<balance>\b(?:(?:available|current|avl|avail)\.?\s+)?bal(?:ance)?\b|\b(?:solde(?:\s+disponible)?|kontostand|saldo|(?:kullanılabilir\s+)?bakiye)\b|الرصيد(?:\s+(?:الحالي|المتاح))?|(?<![\p{L}\p{M}\p{N}_])رصيد\s+حسابك(?:\s+(?:الحالي|المتاح))?(?![\p{L}\p{M}\p{N}_])|(?:उपलब्ध\s+)?शेष\s+राशि|(?:利用可能)?残高|(?:可用)?余额)`,
     String.raw `(?<bill>\b(?:bill(?:\s+amount)?\s+(?:due|of)|amount\s+due|payment\s+due|bill\s+amount|bill\s+for|montant\s+à\s+payer|importo\s+da\s+pagare)\b|مبلغ\s+الفاتورة|المبلغ\s+المستحق|देय\s+राशि)`,
     String.raw `(?<fee>\b(?:total\s+charges|fee|fees|commission|service\s+charge)\b|رسوم|عمولة)`,

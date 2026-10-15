@@ -166,6 +166,13 @@ export const hasGenericBankAlertContext = (source: string, sender = ''): boolean
   return accountFieldList || walletReceipt || hasNativeCurrencyAccountContext(text);
 };
 
+// Real iPhone History loses the sender for the owner's "Your Cr.Card ... was
+// used for" alerts. The abbreviated card noun misses GENERIC_BANK_CONTEXT.
+// Admit only this completed own-card shape to the reader below, then require
+// explicit purchase facts. This is not bank, country or auto-post evidence.
+// A visible last-four may be masked or bare; a full/grouped card number fails.
+const SENDERLESS_USED_CARD_HINT = /^\s*your\s+(?:cr\.\s*)?card\s+(?:[*xX•·]{1,24}\s*)?(\d{4})(?![\p{L}\p{N}]|[ \t-]+\d)[ \t]+(?:was|has[ \t]+been)[ \t]+used[ \t]+for\b/iu;
+
 /**
  * Generic evidence augments misses in every country; it is always review-only.
  * `market` is passed only for an alert routed to a Gulf neighbour, so its own
@@ -201,7 +208,11 @@ export const inspectGenericBankEventForReview = (
   // waits in Review rather than being dropped.
   const footerAdmitted = noContext && !claimAdmitted && isRegisteredAlertSender(sender) &&
     refusedOnlyByShopOrPromoWording(source, sender);
-  if (noContext && !claimAdmitted && !footerAdmitted) return null;
+  const senderlessCard = noContext && !sender.trim() ? SENDERLESS_USED_CARD_HINT.exec(source) : null;
+  const cardAdmitted = !!senderlessCard && namesOwnInstrumentTail(source, 'debit') &&
+    !nonPostingReason(source) && !isNotAutoPostableMoney(source) &&
+    !hasNonCompletedWording(source, null, '') && !hasLinkFromUnregisteredSender(source, '');
+  if (noContext && !claimAdmitted && !footerAdmitted && !cardAdmitted) return null;
   const event = isGulfNeighbourMarket(market)
     ? inspectUniversalBankEvent(gulfNeighbourReadSource(source, market), {
         sender, market, dateOrder: dateOrderForCountry(market) ?? undefined,
@@ -211,9 +222,20 @@ export const inspectGenericBankEventForReview = (
         : universalSourceParseContext(hasUniversalInstitutionSender(sender)
           ? inspectUniversalAlert({ source, sender }) : null, sender, getActiveCountry()));
   if (event.decision !== 'review') return null;
+  // A source-labelled credit limit is not a second purchase. Every other
+  // extra figure remains refused: "used for X ... and Y ..." can otherwise
+  // look like one explicit principal plus one unknown amount.
+  const hasOtherCardMoney = cardAdmitted && event.observations.some(observation =>
+    observation.role !== 'transaction' && observation.role !== 'credit-limit');
+  if (cardAdmitted && (event.family !== 'purchase' || event.status !== 'posted' || event.direction !== 'debit' ||
+    event.amount.evidence !== 'explicit' || !event.amount.value || event.amount.spans.length !== 1 ||
+    hasOtherCardMoney ||
+    event.observations.filter(observation => observation.role === 'transaction').length !== 1 ||
+    event.instrument.evidence !== 'explicit' || event.instrument.spans.length !== 1 ||
+    event.instrument.value?.kind !== 'card' || event.instrument.value.last4 !== senderlessCard?.[1])) return null;
   if (hasNativeCurrencyAccountContext(source) && !hasBankAlertMoneyHint(source) &&
     (event.amount.evidence !== 'explicit' || event.amount.value?.currency !== 'ZAR')) return null;
-  if (noContext && !((event.direction === 'credit' || (footerAdmitted && event.direction === 'debit')) &&
+  if (noContext && !((event.direction === 'credit' || ((footerAdmitted || cardAdmitted) && event.direction === 'debit')) &&
     event.status === 'posted' && event.amount.evidence !== 'missing')) return null;
   const hasGroundedMoney =
     event.amount.evidence !== 'missing' ||

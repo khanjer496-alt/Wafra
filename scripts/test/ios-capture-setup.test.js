@@ -209,6 +209,7 @@ const protocolModule = execute('src/lib/ios-local-capture-protocol.ts', (id) => 
 });
 
 const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
+  if (id === 'expo-crypto') return { randomUUID: () => 'test-capture-attempt-1' };
   if (id === 'react-native') {
     return {
       Platform: { OS: 'ios', Version: '17.5' },
@@ -5081,7 +5082,7 @@ struct WafraBankSenderRegistryTests {
       events, [
         'can:shortcuts://',
         'enable:true',
-        `open:${protocolModule.iosLocalCaptureTestUrl()}`,
+        `open:${protocolModule.iosLocalCaptureTestUrl(false, false, 'test-capture-attempt-1')}`,
       ]);
     harness.controller.dispose();
   }
@@ -5138,7 +5139,8 @@ struct WafraBankSenderRegistryTests {
     ok('setup controller: a forged success callback cannot create proof',
       harness.controller.getModel().readiness === 'not-added');
     activeStatus = status({ enabled: true, setupProofVersion: 1, setupProofAt: 8 });
-    await harness.controller.send({ type: 'shortcut-callback', result: 'success' });
+    await harness.controller.send({ type: 'check-shortcut' });
+    await harness.controller.send({ type: 'shortcut-callback', result: 'success', attemptId: 'test-capture-attempt-1' });
     ok('setup controller: a callback reflects only proof read from native status',
       harness.controller.getModel().readiness === 'shortcut-proven');
     harness.controller.dispose();

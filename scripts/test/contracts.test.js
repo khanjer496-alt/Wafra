@@ -947,12 +947,15 @@ function ktSources(dir) {
   ok('callbacks and foreground returns refresh native status without forging proof',
     /AppState\.addEventListener\('change'/.test(setup) &&
       /next !== 'active'\) return;[\s\S]{0,160}send\(\{ type: 'refresh-status' \}\)/.test(setup) &&
-      shortcutCallback === `await refreshStatus(false);
-        if (intent.result === 'error' && model.failure !== 'load') {
-          publish({ failure: 'shortcut-run' });
-        }
-        return;`.replace(/\s+/g, ' ').trim() &&
-      !/setCaptureEnabled/.test(shortcutCallback));
+      /isIosCaptureAttemptId\(attemptId\)/.test(setup) &&
+      /send\(\{ type: 'shortcut-callback', result, attemptId \}\)/.test(setup) &&
+      /const check = pendingShortcutCheck; if \(!check \|\| !isIosCaptureAttemptId\(intent\.attemptId\) \|\| check\.attemptId !== intent\.attemptId \|\| check\.generation !== operationGeneration\) return; pendingShortcutCheck = null; await refreshStatus\(false\); if \(disposed \|\| check\.generation !== operationGeneration\) return;/.test(shortcutCallback) &&
+      /publish\(\{ shortcutCallback: \{ result: intent\.result, attemptId: check\.attemptId \} \}\)/.test(shortcutCallback) &&
+      /intent\.result === 'error' && model\.failure !== 'load'/.test(shortcutCallback) &&
+      /publish\(\{ failure: 'shortcut-run' \}\)/.test(shortcutCallback) &&
+      /const status = await native\.getCaptureStatus\(\);/.test(setupWorkflow) &&
+      /resolveIosSetupReadiness\(status, native\.getMessageShortcutURL \? 3 : 1\)/.test(setupWorkflow) &&
+      !/setCaptureEnabled|(?:readiness|setupProofVersion|setupProofAt|firstCapturedAt)\s*(?::|=(?!=))/.test(shortcutCallback));
   ok('local setup exposes no clipboard, setup-code, token, or credential clearing path',
     !/\b(?:Clipboard|setupCode|tokenPreview|sensitiveCopyPending|writeClipboard|credential)\b/.test(
       `${setup}\n${setupWorkflow}`));
