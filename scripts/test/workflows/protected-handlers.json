@@ -134,8 +134,8 @@
     {
       "file": "src/app/ios-setup.tsx",
       "name": "installFutureShortcut",
-      "sha256": "e23d6b367dc4954ab672b0d594406e8dccbb40ec7b1e8d0c4bd699834455b76a",
-      "reviewedChange": "2026-09-24: A bundled v3 install records a source-scoped install attempt with its start time (so setup only accepts proof recorded after it) and keeps the confirmed automation, so Home does not flip until a new check succeeds. It also arms a one-time setup check for the next return from Shortcuts. Legacy iCloud install path unchanged. Covered by onboarding-extreme-setup.test.cjs (reinstall, auto-check, v2 upgrade). 2026-09-24 (review F5): the legacy (v2) path writes the global in-progress status only when the viewed source is the recorded source, the same guard as openAutomation, so installing the SMS Shortcut while viewing it cannot rewrite a recorded notification setup. Covered by onboarding-extreme-setup.test.cjs (installing the SMS Shortcut while viewing it)."
+      "sha256": "abd220449b7a645b502bb8e1d7adc5d44eab704cda1dc826cea1096749dd7c82",
+      "reviewedChange": "2026-10-15: A new install also clears the not-found state (Shortcuts NSCocoaErrorDomain 4: missing or duplicated shortcut name), so the recovery screen cannot outlive a fresh attempt. Nothing else changed. Covered by ios-setup-ux.test.js. 2026-09-24: A bundled v3 install records a source-scoped install attempt with its start time (so setup only accepts proof recorded after it) and keeps the confirmed automation, so Home does not flip until a new check succeeds. It also arms a one-time setup check for the next return from Shortcuts. Legacy iCloud install path unchanged. Covered by onboarding-extreme-setup.test.cjs (reinstall, auto-check, v2 upgrade). 2026-09-24 (review F5): the legacy (v2) path writes the global in-progress status only when the viewed source is the recorded source, the same guard as openAutomation, so installing the SMS Shortcut while viewing it cannot rewrite a recorded notification setup. Covered by onboarding-extreme-setup.test.cjs (installing the SMS Shortcut while viewing it)."
     },
     {
       "file": "src/app/ios-setup.tsx",
@@ -146,14 +146,14 @@
     {
       "file": "src/app/ios-setup.tsx",
       "name": "openAutomation",
-      "sha256": "33ce2467deed07a10ca7a7820edde1821d4f8ac3d6533f6120ac09117ecb644c",
-      "reviewedChange": "2026-09-24: Only writes the in-progress status when the viewed source is the recorded source, so viewing SMS setup cannot rewrite another source's status. Open order unchanged. Covered by ios-setup-ux.test.js."
+      "sha256": "d16d16e7926741e72dc4aec090450fc6520f47d9a1fa43b4146dda03ef8381d4",
+      "reviewedChange": "2026-10-15 (commit 469ffb06): after Shortcuts opens without an automation-open failure, the guide moves to its first screen; a failed open keeps the manual-navigation recovery visible. Status write guard and open order unchanged. 2026-09-24: Only writes the in-progress status when the viewed source is the recorded source, so viewing SMS setup cannot rewrite another source's status. Open order unchanged. Covered by ios-setup-ux.test.js."
     },
     {
       "file": "src/app/ios-setup.tsx",
       "name": "confirmAutomation",
-      "sha256": "96b30b51ed4f52578f268773cf64bf9d28a1fe791f6c6361d535281684bf70ae",
-      "reviewedChange": "2026-09-24: Confirmation is Message-scoped and timestamped (used only to show a later message as verification). Confirming Message automation makes Message the recorded source, parking any other source's progress instead of erasing it. Covered by notification-setup.test.cjs and onboarding-extreme-setup.test.cjs."
+      "sha256": "ec5d6d08accc7c859b8c6ee775ba368634739292062f57dc324537dafc7d8503",
+      "reviewedChange": "2026-10-15: after confirming the Messages automation, the onboarding alert-delivery answer becomes sms (as alertsAnswerForIosSetup(false, message)), so setup finished after an earlier add-by-hand answer no longer leaves Settings saying nothing reaches Wafra. Opt-out, progress, controller call and order unchanged. Covered by ios-setup-ux.test.js. 2026-09-24: Confirmation is Message-scoped and timestamped (used only to show a later message as verification). Confirming Message automation makes Message the recorded source, parking any other source's progress instead of erasing it. Covered by notification-setup.test.cjs and onboarding-extreme-setup.test.cjs."
     },
     {
       "file": "src/app/ios-setup.tsx",
