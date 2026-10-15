@@ -1018,22 +1018,30 @@ test('iOS27 saved Apple Pay setup shows only the matching bundled video, without
   }
 });
 
-test('supported iOS 17+ onboarding offers Apple Pay beside the regular SMS guide without switching saved source', async t => {
+test('supported iOS 17+ onboarding asks Quiet or Complete first; both lead to their setup without switching saved source', async t => {
   for (const [version, applePayCaptureSupported, offered] of [['27.0', true, true], ['26.6', true, true], ['17.0', true, true], ['16.7', true, false], ['27.0', false, false]]) {
-    const s = await screen(t, { version, applePayCaptureSupported, bundled: true,
-      params: { fromOnboarding: '1' }, progress: { futureStatus: 'in-progress' } });
-    assert.ok(s.all().some(node => node.props?.testID === 'ios-message-setup-guide'));
-    assert.ok(s.button('iosLocalInstallShortcut'), 'regular setup remains available');
-    const action = s.all().find(node => node.type === 'Button' && node.props.label === 'Set up Apple Pay');
-    assert.equal(!!action, offered, `${version}/${applePayCaptureSupported}`);
-    if (action) {
-      action.props.onPress(); await s.flush();
-      assert.equal(s.routes.at(-1)[1].pathname, '/ios-apple-pay-setup');
-      assert.equal(s.routes.at(-1)[1].params.fromOnboarding, '1');
+    for (const pick of offered ? ['complete', 'quiet'] : ['none']) {
+      const s = await screen(t, { version, applePayCaptureSupported, bundled: true,
+        params: { fromOnboarding: '1' }, progress: { futureStatus: 'in-progress' } });
+      assert.ok(s.all().some(node => node.props?.testID === 'ios-message-setup-guide'));
+      const choice = s.all().some(node => node.props?.testID === 'ios-capture-choice');
+      assert.equal(choice, offered, `choice shown ${version}/${applePayCaptureSupported}`);
+      const button = (label) => s.all().find(node => node.type === 'Button' && node.props.label === label);
+      if (pick === 'none') {
+        assert.ok(s.button('iosLocalInstallShortcut'), 'regular setup starts directly without Apple Pay support');
+      } else if (pick === 'complete') {
+        assert.equal(s.button('iosLocalInstallShortcut'), undefined, 'the choice comes before the shortcut');
+        button('Complete: everything your bank texts').props.onPress(); await s.flush();
+        assert.ok(s.button('iosLocalInstallShortcut'), 'Complete continues with the regular shortcut setup');
+      } else {
+        button('Quiet: Apple Pay purchases').props.onPress(); await s.flush();
+        assert.equal(s.routes.at(-1)[1].pathname, '/ios-apple-pay-setup');
+        assert.equal(s.routes.at(-1)[1].params.fromOnboarding, '1');
+      }
+      assert.equal(s.saved().futureCaptureSource, undefined);
+      assert.equal(s.saved().futureAutomationConfirmed, false);
+      assert.equal(s.receipts.some(receipt => receipt[0] === 'enabled'), false);
     }
-    assert.equal(s.saved().futureCaptureSource, undefined);
-    assert.equal(s.saved().futureAutomationConfirmed, false);
-    assert.equal(s.receipts.some(receipt => receipt[0] === 'enabled'), false);
   }
 });
 

@@ -423,18 +423,24 @@ struct CaptureWafraApplePayIntent: AppIntent {
         cardOrPass: cardOrPass, eventId: UUID().uuidString, observedAt: Date()
       )
       switch result {
-      case .accepted: return .result(value: true)
+      case .accepted:
+        if let value = amount?.amount {
+          await WafraInstantAlert.postApplePay(amount: value, currency: amount?.currencyCode ?? "",
+            merchant: merchant, cardOrPass: cardOrPass)
+        }
+        return .result(value: true)
       case .ignored: return .result(value: false)
       case .disabled:
         await WafraLiveCaptureNotice.postIfDue()
         return .result(value: false)
-      case .invalid: throw WafraLiveCaptureIntentError.applePayInvalid
-      case .capacityReached: throw WafraLiveCaptureIntentError.captureCapacityReached
+      case .invalid, .capacityReached:
+        // A Wallet automation runs on every tap. An error here shows a
+        // Shortcuts failure banner after a purchase; capacity drops are
+        // already counted for Wafra's capture status.
+        return .result(value: false)
       }
-    } catch let error as WafraLiveCaptureIntentError {
-      throw error
     } catch {
-      throw WafraLiveCaptureIntentError.applePayFailed
+      return .result(value: false)
     }
   }
 }

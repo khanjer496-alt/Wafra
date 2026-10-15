@@ -486,6 +486,8 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       'live.alert.title_paid_named',
       'live.alert.card',
       'live.alert.fallback',
+      'live.apple_pay.alert.body_card',
+      'live.apple_pay.alert.body',
     ];
     const localizationKeys = (source) => [...source.matchAll(/^\s*"([^"]+)"\s*=/gm)]
       .map((match) => match[1]).sort();
@@ -606,7 +608,10 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
         .every((key) => alertSource.includes(`"${key.replace(/_named$/, '')}"`)) &&
         /guard !WafraInstantAlertReader\.isSensitive\(body\),\s*let context = try\? store\.nativeParserContextSnapshot\(\)/.test(alertSource) &&
         /await WafraBackgroundAlertParser\.read\(/.test(alertSource) &&
-        (alertSource.match(/store\.mayEmitParserPreview\(context: context\)/g) || []).length === 2 &&
+        // Two gates for the bank-text preview, one for the Apple Pay notice.
+        (alertSource.match(/store\.mayEmitParserPreview\(context: context\)/g) || []).length === 3 &&
+        /public static func postApplePay\([\s\S]*?mayEmitParserPreview\(context: context\)\) == true else \{ return \}[\s\S]*?case \.authorized, \.provisional, \.ephemeral:/.test(alertSource) &&
+        /"live\.apple_pay\.alert\.body_card"/.test(alertSource) && /"live\.apple_pay\.alert\.body"/.test(alertSource) &&
         alertSource.lastIndexOf('store.mayEmitParserPreview') > alertSource.indexOf('await WafraBackgroundAlertParser.read') &&
         alertSource.indexOf('await center.notificationSettings()') < alertSource.indexOf('await WafraBackgroundAlertParser.read') &&
         !/WafraInstantAlertReader\.read\(/.test(alertSource) &&
@@ -619,6 +624,14 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       generatedIntent.match(/case \.accepted:\s*await WafraInstantAlert\.postIfReadable\(body: text\)/g)?.length || 0,
       generatedIntent.match(/postIfReadable/g)?.length || 0,
     ], [1, 1, 1, 3]);
+    ok('Apple Pay posts Wafra\'s notice only after acceptance and never fails the Wallet automation', (() => {
+      const match = generatedIntent.match(/struct CaptureWafraApplePayIntent:\s*AppIntent\s*\{([\s\S]*?)\n\}\n/);
+      if (!match) return false;
+      const perform = match[1].slice(match[1].indexOf('func perform'));
+      return /case \.accepted:\s*if let value = amount\?\.amount \{\s*await WafraInstantAlert\.postApplePay\(/.test(perform) &&
+        /case \.invalid, \.capacityReached:[\s\S]*?return \.result\(value: false\)/.test(perform) &&
+        !/\bthrow\b/.test(perform);
+    })(), generatedIntent);
     ok('legacy bridge excludes notifications and the additive reader explicitly opts in',
       /AsyncFunction\("listPendingRecords"\)[\s\S]*?listPendingRecords\(limit: nativeLimit, includeNotifications: false\)/.test(swiftModule) &&
         /AsyncFunction\("listPendingRecordsIncludingNotifications"\)[\s\S]*?listPendingRecords\(limit: nativeLimit, includeNotifications: true\)/.test(swiftModule), swiftModule);
@@ -636,7 +649,7 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       generatedIntent.match(/bundle:\s*\.atURL/g)?.length || 0,
     ], [18, 0]);
     ok('every intent title, parameter, and source-free error uses the closed localization keys',
-      expectedLocalizationKeys.filter((key) => !/^live\.(?:notice|alert)\./.test(key))
+      expectedLocalizationKeys.filter((key) => !/^live\.(?:notice|alert|apple_pay\.alert)\./.test(key))
         .every((key) => generatedIntent.includes(`"${key}"`)) &&
         !/static let title[^\n]*=\s*"|@Parameter\(title:\s*"/.test(generatedIntent), generatedIntent);
     const noticeSource = fs.readFileSync(

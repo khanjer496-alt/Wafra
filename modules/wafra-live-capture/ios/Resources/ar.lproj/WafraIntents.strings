@@ -47,3 +47,5 @@
 "live.alert.title_paid_named" = "دُفع %1$@ · %2$@";
 "live.alert.card" = "··%@";
 "live.alert.fallback" = "افتح وفرة";
+"live.apple_pay.alert.body_card" = "Apple Pay · %@ · اضغط للإضافة";
+"live.apple_pay.alert.body" = "Apple Pay · اضغط للإضافة";

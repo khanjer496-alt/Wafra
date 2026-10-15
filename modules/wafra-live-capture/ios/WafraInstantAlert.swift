@@ -46,6 +46,70 @@ public enum WafraInstantAlert {
     try? await center.add(request)
   }
 
+  /// Wafra's own notice for an Apple Pay purchase the Wallet automation passed
+  /// in. Same gates as the bank-text preview. Wallet names the card but not the
+  /// Wafra account, so the purchase waits in Review and the notice says so.
+  public static func postApplePay(amount: Decimal, currency: String, merchant: String?, cardOrPass: String?,
+                                  observedAt: Date = Date()) async {
+    let store = WafraLiveCaptureStore.shared
+    guard let context = try? store.nativeParserContextSnapshot(),
+          (try? store.mayEmitParserPreview(context: context)) == true else { return }
+    let center = UNUserNotificationCenter.current()
+    let settings = await center.notificationSettings()
+    switch settings.authorizationStatus {
+    case .authorized, .provisional, .ephemeral:
+      break
+    default:
+      return
+    }
+    guard let content = applePayContent(amount: amount, currency: currency, merchant: merchant,
+            cardOrPass: cardOrPass), !Task.isCancelled else { return }
+    // One id per purchase minute: a repeated automation run replaces the notice.
+    let minute = Int(observedAt.timeIntervalSince1970 / 60)
+    let key = "\(currency)|\(amount)|\(merchant ?? "")|\(minute)"
+    try? await center.add(UNNotificationRequest(
+      identifier: "wafra-apple-pay-\(stableHash(key))", content: content, trigger: nil))
+  }
+
+  static func applePayContent(amount: Decimal, currency: String, merchant: String?, cardOrPass: String?,
+                              localize: (String) -> String? = WafraLiveCaptureResources.string) -> UNMutableNotificationContent? {
+    let code = currency.uppercased()
+    guard code.count == 3, code.allSatisfy({ $0.isASCII && $0.isLetter }), amount > 0 else { return nil }
+    let digits: Int = {
+      let probe = NumberFormatter()
+      probe.numberStyle = .currency
+      probe.currencyCode = code
+      return probe.maximumFractionDigits
+    }()
+    let number = NumberFormatter()
+    number.locale = Locale(identifier: "en_US_POSIX")
+    number.numberStyle = .decimal
+    number.usesGroupingSeparator = true
+    number.groupingSeparator = ","
+    number.minimumFractionDigits = digits
+    number.maximumFractionDigits = digits
+    guard let figure = number.string(from: amount as NSDecimalNumber) else { return nil }
+    let formatted = "\(code) \(figure)"
+    let shop = merchant?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let named = shop.map { !$0.isEmpty } ?? false
+    guard let titleFormat = localize(named ? "live.alert.title_named" : "live.alert.title") else { return nil }
+    let title = named ? String(format: titleFormat, formatted, String(shop!.prefix(40))) : String(format: titleFormat, formatted)
+    let card = cardOrPass?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let body: String?
+    if let card, !card.isEmpty, let format = localize("live.apple_pay.alert.body_card") {
+      body = String(format: format, String(card.prefix(40)))
+    } else {
+      body = localize("live.apple_pay.alert.body")
+    }
+    guard let body else { return nil }
+    let content = UNMutableNotificationContent()
+    content.title = title
+    content.body = body
+    content.sound = .default
+    content.threadIdentifier = "wafra-instant"
+    return content
+  }
+
   static func content(for read: WafraNativeAlertNotification, sender: String?,
                       localize: (String) -> String? = WafraLiveCaptureResources.string) -> UNMutableNotificationContent? {
     let baseKey: String

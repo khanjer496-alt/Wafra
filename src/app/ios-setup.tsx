@@ -225,6 +225,8 @@ export default function IosSetupScreen() {
   // Shortcuts' x-error for a run-by-name it cannot resolve: the shortcut is
   // missing or two share its name. Re-adding makes a duplicate worse.
   const [shortcutNotFound, setShortcutNotFound] = useState(false);
+  // Quiet (Apple Pay, no Shortcuts banner) or Complete (bank texts) for a fresh setup.
+  const [completeChosen, setCompleteChosen] = useState(false);
   const autoCheck = useRef<{ armedAt: number; wentBackground: boolean } | null>(null);
   const autoCheckAction = useRef<(() => void) | null>(null);
   const [resetHistoryVisible, setResetHistoryVisible] = useState(false);
@@ -1335,6 +1337,21 @@ export default function IosSetupScreen() {
                     <EButton palette={band} label={t('iosMessageRunPermissionCheck')} onPress={checkFutureShortcut} disabled={busy} />
                   )}
                 </SetupStep>
+              ) : futureStep === 'add-shortcut' && offersApplePay && messageMode && !completeChosen &&
+                !futureProgress.futureShortcutConfirmed ? (
+                <SetupStep palette={band} testID="ios-capture-choice" badge="1" title={shortcutCopy.chooseTitle}
+                  body={shortcutCopy.chooseBody}>
+                  <View style={styles.choice}>
+                    <EButton palette={band} label={shortcutCopy.completeTitle} onPress={() => setCompleteChosen(true)}
+                      disabled={busy} />
+                    <ThemedText type="meta" style={{ color: band.textSecondary }}>{shortcutCopy.completeBody}</ThemedText>
+                  </View>
+                  <View style={styles.choice}>
+                    <EButton palette={band} label={shortcutCopy.quietTitle} variant="secondary" onPress={openApplePaySetup}
+                      disabled={busy} />
+                    <ThemedText type="meta" style={{ color: band.textSecondary }}>{shortcutCopy.quietBody}</ThemedText>
+                  </View>
+                </SetupStep>
               ) : futureStep === 'add-shortcut' ? (
                 <SetupStep palette={band} testID="ios-add-shortcut-step" badge="1" title={shortcutCopy.add}
                   body={!setup.shortcutAvailable ? tf('iosLocalShortcutUnavailable', { shortcut: shortcutName })
@@ -1457,6 +1474,7 @@ export default function IosSetupScreen() {
 }
 
 const styles = StyleSheet.create({
+  choice: { gap: 6 },
   bandContent: { gap: 12, paddingTop: 4, paddingBottom: 8 },
   bandTitle: { fontFamily: Fonts.sansSemi, fontSize: 36, lineHeight: 42, letterSpacing: -1.2 },
   content: { gap: 14 },
