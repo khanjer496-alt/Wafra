@@ -1818,6 +1818,9 @@ function reduceState(state: AppState, action: Action): AppState {
       return {
         ...state,
         ...(bestEffortUndone ? { bestEffortUndone } : {}),
+        // A Wallet card linked to this account asks in Review again.
+        ...(state.applePayCardLinks?.some((link) => link.accountId === action.id)
+          ? { applePayCardLinks: state.applePayCardLinks.filter((link) => link.accountId !== action.id) } : {}),
         accounts: state.accounts.filter((a) => a.id !== action.id),
         transactions: state.transactions.filter((t) => t.accountId !== action.id),
         cardDues: state.cardDues.filter((d) => d.accountId !== action.id),
