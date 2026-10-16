@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: a0962f21d002df23153a951f57963bb5a2a571f6b8c4f38c64abec73e9e71e14
+// Generated from normal shipping TypeScript. Source SHA-256: 0fd81b2831ed5cf4e21bf005119262e1bcdb93c123d6ed0a38a1f80ae2fa3c13
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -6756,8 +6756,8 @@ const S = {
         ar: 'التقط العمليات الجديدة',
     },
     onboardLiveBody: {
-        en: 'A Shortcut sends new bank messages to Wafra on this iPhone.',
-        ar: 'يرسل اختصار رسائل بنكك الجديدة إلى وفرة على هذا الآيفون.',
+        en: 'Bank texts or Apple Pay taps reach Wafra on this iPhone.',
+        ar: 'تصل رسائل البنك أو مدفوعات Apple Pay إلى وفرة على هذا الآيفون.',
     },
     onboardLiveAction: {
         en: 'Set up',

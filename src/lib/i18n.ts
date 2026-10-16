@@ -2197,8 +2197,8 @@ const S = {
     ar: 'التقط العمليات الجديدة',
   },
   onboardLiveBody: {
-    en: 'A Shortcut sends new bank messages to Wafra on this iPhone.',
-    ar: 'يرسل اختصار رسائل بنكك الجديدة إلى وفرة على هذا الآيفون.',
+    en: 'Bank texts or Apple Pay taps reach Wafra on this iPhone.',
+    ar: 'تصل رسائل البنك أو مدفوعات Apple Pay إلى وفرة على هذا الآيفون.',
   },
   onboardLiveAction: {
     en: 'Set up',
