@@ -98,8 +98,8 @@ const COPY = {
     automationTitle: '3. Choose the card in Shortcuts',
     // iOS 17–26: a personal Transaction automation that runs the Shortcut.
     automationStepsLegacy: [
-      'In Shortcuts, tap Automation, then +. Choose Transaction.',
-      'Choose only the cards whose bank does not text you (bank texts already reach Wafra). Pick Run Immediately and keep Notify When Run off, then tap Next.',
+      'In Shortcuts, tap Automation, then +. Choose Wallet (called Transaction on some iOS versions).',
+      'Under When I tap, choose only the cards whose bank does not text you (bank texts already reach Wafra). Pick Run Immediately and keep Notify When Run off, then tap Next.',
       'Choose Wafra Apple Pay v1. Tap Done if it appears, then return here to confirm.',
     ],
     // iOS 27: shortcuts carry their own automations.
@@ -146,8 +146,8 @@ const COPY = {
     waitingCheck: 'لم يصل فحص أذونات Apple Pay بعد. شغّل الفحص ثم عد إلى هنا.',
     automationTitle: '٣. اختر البطاقة في الاختصارات',
     automationStepsLegacy: [
-      'في الاختصارات، اضغط «الأتمتة» ثم +. اختر «المعاملة».',
-      'اختر فقط البطاقات التي لا يرسل بنكها رسائل (رسائل البنك تصل وفرة أصلاً). اختر «تشغيل فوراً» وأبقِ «الإشعار عند التشغيل» متوقفاً، ثم «التالي».',
+      'في الاختصارات، اضغط «الأتمتة» ثم +. اختر «المحفظة» (تسمى «المعاملة» في بعض إصدارات iOS).',
+      'تحت «عندما أضغط»، اختر فقط البطاقات التي لا يرسل بنكها رسائل (رسائل البنك تصل وفرة أصلاً). اختر «تشغيل فوراً» وأبقِ «الإشعار عند التشغيل» متوقفاً، ثم «التالي».',
       'اختر Wafra Apple Pay v1. اضغط «تم» إن ظهر، ثم عد إلى هنا للتأكيد.',
     ],
     automationSteps: [

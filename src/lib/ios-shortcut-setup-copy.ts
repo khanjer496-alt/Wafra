@@ -20,7 +20,7 @@ const copy = {
     // both when the shortcut is missing and when two share its name. On iOS 26.6
     // Shortcuts' Replace (and Keep Both) left two same-named copies on device.
     notFound: 'Test failed: Shortcuts could not find exactly one {shortcut}.',
-    notFoundBody: 'Open Shortcuts and keep one {shortcut}. Delete any extra copy, then run the test again.',
+    notFoundBody: 'Open Shortcuts and keep one {shortcut}. Delete any extra copy, then run the test again. Deleting a copy can also remove the Message automation that used it, so Wafra will ask you to check it next.',
     openShortcuts: 'Open Shortcuts',
     // Capture choice (iOS 17-26). Message automations always show Apple's
     // banner; a Wallet Transaction automation can turn Notify When Run off.
@@ -37,8 +37,8 @@ const copy = {
     existing: 'Already have a Wafra automation? Edit it instead of adding a second one.',
     waitingAutomation: 'Your next bank message confirms the automation.',
     verifiedAutomation: 'Working: a bank message reached Wafra.',
-    relinkTitle: 'Point your automation at the new shortcut',
-    relinkBody: 'In your Message automation, swap the old Wafra shortcut for {shortcut}. Tap Done if it appears.',
+    relinkTitle: 'Check your Message automation',
+    relinkBody: 'Open your Message automation and make sure it runs {shortcut}. If it is missing, create it again: Automation, +, Message. Tap Done if it appears.',
     relinkConfirm: 'I updated the automation',
     upgradeTitle: 'Update to Wafra Capture v3',
     upgradeBody: 'Capture still works. Update the shortcut, then point your automation at it.',
@@ -83,7 +83,7 @@ const copy = {
     repairBody: 'أضف الاختصار مجدداً، ثم شغّل الاختبار.',
     retry: 'أعد تشغيل الاختبار',
     notFound: 'فشل الاختبار: لم تجد الاختصارات نسخة واحدة فقط من {shortcut}.',
-    notFoundBody: 'افتح الاختصارات واحتفظ بنسخة واحدة من {shortcut}. احذف أي نسخة إضافية، ثم أعد تشغيل الاختبار.',
+    notFoundBody: 'افتح الاختصارات واحتفظ بنسخة واحدة من {shortcut}. احذف أي نسخة إضافية، ثم أعد تشغيل الاختبار. قد يؤدي حذف نسخة إلى حذف أتمتة الرسائل التي تستخدمها، لذلك سيطلب منك وفرة التحقق منها بعد ذلك.',
     openShortcuts: 'افتح الاختصارات',
     chooseTitle: 'كيف تلتقط وفرة مشترياتك الجديدة؟',
     chooseBody: 'يمكنك إضافة الطريقة الأخرى لاحقاً. وكشوف الحساب تكمل ما يفوت.',
@@ -98,8 +98,8 @@ const copy = {
     existing: 'لديك أتمتة لوفرة؟ عدّلها بدلاً من إضافة أتمتة ثانية.',
     waitingAutomation: 'رسالتك البنكية التالية تؤكد عمل الأتمتة.',
     verifiedAutomation: 'يعمل: وصلت رسالة بنكية إلى وفرة.',
-    relinkTitle: 'وجّه الأتمتة إلى الاختصار الجديد',
-    relinkBody: 'في أتمتة الرسائل، استبدل اختصار وفرة القديم بـ {shortcut}. اضغط «تم» إن ظهر.',
+    relinkTitle: 'تحقق من أتمتة الرسائل',
+    relinkBody: 'افتح أتمتة الرسائل وتأكد أنها تشغّل {shortcut}. إن لم تجدها، أنشئها من جديد: الأتمتة، ثم +، ثم «رسالة». اضغط «تم» إن ظهر.',
     relinkConfirm: 'حدّثت الأتمتة',
     upgradeTitle: 'التحديث إلى Wafra Capture v3',
     upgradeBody: 'الالتقاط ما زال يعمل. حدّث الاختصار، ثم وجّه الأتمتة إليه.',

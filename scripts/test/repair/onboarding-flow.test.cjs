@@ -613,6 +613,12 @@ test('web: the Name field has no browser focus box; focus shows on its underline
   assert.equal(flat(ios.props.style).outlineWidth, undefined, 'native fields keep their own focus');
 });
 
+test('keyboard Done closes the keyboard and never skips the country and currency rows', () => {
+  const input = byID(nameStep(setup()).nodes, 'onboarding-name-input');
+  assert.equal(input.props.onSubmitEditing, undefined, 'Done must not continue past the hidden rows');
+  assert.equal(input.props.submitBehavior, 'blurAndSubmit');
+});
+
 /* ── device QA round: glitches seen on a real Android phone ─────────────── */
 
 const rootLayers = (h) => {

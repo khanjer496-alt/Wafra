@@ -196,6 +196,7 @@ export default function IosSetupScreen() {
   const applePayMode = shownSource === 'apple-pay';
   const messageMode = !notificationMode && !applePayMode;
   const applePayLabel = language === 'ar' ? 'إعداد Apple Pay' : 'Set up Apple Pay';
+  const applePayReviewLabel = language === 'ar' ? 'عرض إعداد Apple Pay' : 'View Apple Pay setup';
   const applePaySummary = language === 'ar' ? 'أرسل عمليات الدفع ببطاقتك عبر Apple Pay إلى المراجعة. لا يلزم اختيار بنك.' : 'Send Apple Pay card taps to Review. No bank selection needed.';
   const setup = { ...rawSetup, readiness: resolveIosSelectedReadiness(shownSource, rawSetup,
     futureProgress.futureShortcutVersion, futureProgress.futureAttemptStartedAt) };
@@ -481,6 +482,7 @@ export default function IosSetupScreen() {
       if (!accepted() || !screenActive.current) return;
       if (result === 'cancel') setCheckStopped(true);
       setShortcutNotFound(notFound);
+      if (notFound) await updateProgress({ type: 'future-shortcut-duplicate-found', source: 'message' });
       await refreshSetup();
       if (result === 'error' && screenActive.current && accepted() &&
         controller?.getModel().failure !== 'load') {
@@ -491,7 +493,7 @@ export default function IosSetupScreen() {
     })();
     router.setParams({ shortcutResult: undefined, shortcutAttempt: undefined, errorDomain: undefined, errorCode: undefined });
   }, [params.errorCode, params.errorDomain, params.shortcutAttempt, params.shortcutResult, refreshSetup, router, send,
-    setup.loading]);
+    setup.loading, updateProgress]);
 
   useEffect(() => {
     if (setup.loading || !progressLoaded) return;
@@ -1234,8 +1236,9 @@ export default function IosSetupScreen() {
               )}
               {applePayMode ? (
                 <SetupStep palette={band} badge="1" title={applePayLabel} body={applePaySummary}
-                  result={futureConfigured ? { tone: 'pass', title: journeyCopy.waiting } : null}>
-                  <EButton palette={band} label={applePayLabel} onPress={openApplePaySetup} disabled={busy} />
+                  result={futureConfigured ? { tone: 'pass', title: journeyCopy.applePayWaiting } : null}>
+                  <EButton palette={band} label={futureConfigured ? applePayReviewLabel : applePayLabel}
+                    variant={futureConfigured ? 'secondary' : undefined} onPress={openApplePaySetup} disabled={busy} />
                   <EButton palette={band} label={t('iosNotificationChooseSms')} variant="quiet" onPress={chooseMessageCapture} disabled={busy} />
                 </SetupStep>
               ) : notificationMode ? (

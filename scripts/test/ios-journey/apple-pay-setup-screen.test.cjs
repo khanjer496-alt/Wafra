@@ -250,7 +250,9 @@ test('Apple Pay video appears only with supported native capture and the matchin
   assert.doesNotMatch(steps, /Add Run Shortcut|Automation → \+/);
   // iOS 17–26: a personal Transaction automation that runs the bundled Shortcut.
   const legacy = helper.iosApplePayCopy('en').automationStepsLegacy.join(' ');
-  assert.match(legacy, /Automation, then \+\. Choose Transaction/);
+  // iOS 26 names the trigger Wallet; earlier builds call it Transaction.
+  assert.match(legacy, /Automation, then \+\. Choose Wallet \(called Transaction/);
+  assert.match(legacy, /Under When I tap/);
   assert.match(legacy, /Run Immediately/);
   assert.match(legacy, /Wafra Apple Pay v1/);
   assert.equal(helper.iosApplePayCopy('ar').automationStepsLegacy.length, 3);

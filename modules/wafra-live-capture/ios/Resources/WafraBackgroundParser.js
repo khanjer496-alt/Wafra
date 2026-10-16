@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 45410f7c7c31558419244081e5aaa1a7cf66cbf679a83cbce3c0456181ec9121
+// Generated from normal shipping TypeScript. Source SHA-256: a0962f21d002df23153a951f57963bb5a2a571f6b8c4f38c64abec73e9e71e14
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -5095,8 +5095,8 @@ const S = {
         ar: 'راجع التفاصيل الملتقطة قبل إضافة أي شيء إلى سجلك.',
     },
     reviewAlertsPrivacy: {
-        en: 'Only a structured summary is kept here. The bank message text is not stored.',
-        ar: 'يُحفظ هنا ملخص منظّم فقط. لا يُحفظ نص الرسالة البنكية.',
+        en: 'Only a structured summary is kept here. Message text is not stored.',
+        ar: 'يُحفظ هنا ملخص منظّم فقط. لا يُحفظ نص الرسالة.',
     },
     reviewAlertsEmptyTitle: { en: 'All clear', ar: 'تمت مراجعة كل شيء' },
     reviewAlertsEmptyBody: {
@@ -5115,6 +5115,7 @@ const S = {
     reviewAlertObservedDate: { en: 'Alert date', ar: 'تاريخ التنبيه' },
     applePayReviewTitle: { en: 'Apple Pay purchase', ar: 'عملية Apple Pay' },
     applePayReviewSource: { en: 'Apple Pay via Shortcuts', ar: 'Apple Pay عبر الاختصارات' },
+    applePayReviewHeader: { en: 'Check Apple Pay purchase', ar: 'تحقق من عملية Apple Pay' },
     applePayReviewObserved: { en: 'Apple Pay capture date', ar: 'تاريخ التقاط Apple Pay' },
     applePayReviewUseDate: { en: 'Use Apple Pay capture date', ar: 'استخدام تاريخ التقاط Apple Pay' },
     applePayReviewQuestion: { en: 'Is this purchase already recorded?', ar: 'هل هذه العملية مسجلة بالفعل؟' },

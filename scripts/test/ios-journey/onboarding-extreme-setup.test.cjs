@@ -806,6 +806,33 @@ test('reinstalling keeps the confirmed automation; a stopped check cannot reuse 
   assert.ok(s.button('iosMessageContinue'), 'a new successful check restores the finished setup without re-confirming');
 });
 
+test('a duplicate-copy failure asks for the automation to be checked again after the next good test', async t => {
+  // Shortcuts Replace/Keep Both leaves two same-named copies; run-by-name then
+  // fails with NSCocoaErrorDomain 4, and deleting the extra copy also deletes
+  // any automation that ran it.
+  const provenAt = Date.now() - 60_000;
+  const s = await screen(t, { bundled: true,
+    progress: { ...ready, futureShortcutVersion: 3, futureAutomationConfirmedAt: provenAt },
+    nativeStatus: { enabled: true, setupProofVersion: 3, setupProofAt: provenAt } });
+  await s.help('iosMessageAddAgain');
+  labelled(s, iosEn.addedCheck).onPress(); await s.flush();
+  await s.returnWith({ errorDomain: 'NSCocoaErrorDomain', errorCode: '4' });
+  await s.callback('error');
+  assert.ok(s.all().some(n => n.props?.testID === 'ios-shortcut-check-not-found'));
+  assert.ok(s.text().includes('remove the Message automation that used it'));
+  assert.equal(s.saved().futureAutomationRelink, true);
+  assert.equal(s.saved().futureAutomationConfirmed, true, 'Home keeps reporting until the owner acts');
+  // The owner deletes the extra copy in Shortcuts and runs the test again.
+  labelled(s, iosEn.retry).onPress(); await s.flush();
+  await s.callback('success');
+  s.nativeStatus.setupProofAt = Date.now() + 1; await s.foreground();
+  assert.equal(s.button('iosMessageContinue'), undefined, 'a passing test alone cannot prove the automation survived');
+  assert.ok(s.text().includes('Check your Message automation'), s.text());
+  labelled(s, 'I updated the automation').onPress(); await s.flush();
+  assert.equal(s.saved().futureAutomationRelink, undefined);
+  assert.ok(s.button('iosMessageContinue'));
+});
+
 test('returning from the Shortcuts share sheet runs the setup check once, without another tap', async t => {
   const s = await screen(t, { bundled: true });
   await s.press('iosLocalInstallShortcut');
