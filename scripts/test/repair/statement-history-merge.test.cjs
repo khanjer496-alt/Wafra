@@ -162,3 +162,47 @@ test('beside a bankless same-tail account, a next-day equal transfer is a separa
   state = apply([{ ...nextDay, date: '2026-09-09', smsTs: HISTORY_TS + 86_400_000, sourceEventId: 'd'.repeat(64) }], state);
   assert.equal(state.transactions.filter((t) => t.amountFils === 28000).length, 2);
 });
+
+// Real-device order: the live capture of the transfer, then the FAB statement
+// (whose transfer evidence re-titles the live row "Outgoing transfer"), then
+// the senderless History copy of the SAME Message ("Outward remittance", the
+// same running balance, 0.9 s later). One movement, not two.
+const LIVE_TS = STATEMENT_TS;
+const liveRow = () => {
+  const { sourceEventId: _id, ...rest } = realHistoryRow();
+  return { ...rest, smsTs: LIVE_TS, messageObservationId: '12345678-1234-4123-8123-123456789abc' };
+};
+const deviceEvidence = { version: 1, currency: 'AED', attribution: 'source', sourceKindAmbiguous: true,
+  counterparty: { last4: '9623', kind: 'unknown' }, statement: true };
+test('live capture, then the statement, then the senderless History copy: one movement', () => {
+  let state = apply([liveRow()]);
+  state = apply([statementRow({ statementRowIndex: 40, transferEvidence: deviceEvidence })], state);
+  assert.equal(state.transactions.filter((t) => t.amountFils === 28000).length, 1, 'premise: the statement claims the live row');
+  state = apply([realHistoryRow()], state);
+  const rows = state.transactions.filter((t) => t.amountFils === 28000);
+  assert.equal(rows.length, 1, JSON.stringify(rows.map((t) => [t.title, t.smsKey?.slice(0, 2), t.statedBalanceFils])));
+});
+test('the device pair in the other order (History, then statement) is one movement too', () => {
+  let state = apply([realHistoryRow()]);
+  state = apply([statementRow({ statementRowIndex: 40, transferEvidence: deviceEvidence })], state);
+  assert.equal(state.transactions.filter((t) => t.amountFils === 28000).length, 1);
+});
+test('a statement row and an alert with different transfer titles pair on the same running balance', () => {
+  // The statement's closing row carries its running balance (server: closing snapshot).
+  let state = apply([statementRow({ statementRowIndex: 40, merchant: 'Transfer-MOB-LOCAL FT', snapshotFils: 248448, snapshotKind: 'balance' })]);
+  state = apply([historyRow({ merchant: 'Funds sent' })], state);
+  assert.equal(state.transactions.filter((t) => t.amountFils === 28000).length, 1);
+});
+test('a different running balance keeps a renamed-title pair apart', () => {
+  let state = apply([statementRow({ statementRowIndex: 40, merchant: 'Transfer-MOB-LOCAL FT', snapshotFils: 248448, snapshotKind: 'balance' })]);
+  state = apply([historyRow({ merchant: 'Funds sent', snapshotFils: 199000 })], state);
+  assert.equal(state.transactions.filter((t) => t.amountFils === 28000).length, 2);
+});
+test('two equal same-day live transfers with different balances stay two after the statement and History', () => {
+  let state = apply([liveRow(), { ...liveRow(), smsTs: LIVE_TS + 3_600_000, snapshotFils: 220448,
+    messageObservationId: '22345678-1234-4123-8123-123456789abc' }]);
+  assert.equal(state.transactions.filter((t) => t.amountFils === 28000).length, 2);
+  state = apply([statementRow({ statementRowIndex: 40, transferEvidence: deviceEvidence })], state);
+  state = apply([realHistoryRow()], state);
+  assert.equal(state.transactions.filter((t) => t.amountFils === 28000).length, 2);
+});

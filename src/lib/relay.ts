@@ -1736,6 +1736,9 @@ export function isParsedRelayRow(
     typeof row.statementDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(row.statementDate) ||
     (row.date !== null && row.statementDate >= (row.date as string)))) return false;
 
+  // A card statement summary may state the card's credit limit; nothing else may.
+  if (row.creditLimitFils !== undefined && (row.kind !== 'cardStatement' ||
+    !Number.isSafeInteger(row.creditLimitFils) || (row.creditLimitFils as number) <= 0)) return false;
   if (!validNullableSafeFils(row.snapshotFils)) return false;
   if (
     row.snapshotKind !== null &&

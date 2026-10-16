@@ -137,7 +137,8 @@ const hasChanges = (plan: ImportPlan): boolean =>
   (plan.batch?.newBills?.length ?? 0) > 0 ||
   Object.keys(plan.batch?.snapshots ?? {}).length > 0 ||
   Object.keys(plan.batch?.bankNames ?? {}).length > 0 ||
-  Object.keys(plan.batch?.cardTypes ?? {}).length > 0;
+  Object.keys(plan.batch?.cardTypes ?? {}).length > 0 ||
+  Object.keys(plan.batch?.creditLimits ?? {}).length > 0;
 
 const stageNearMatches = (activeLedger: CaptureLedgerAdapter, plan: ImportPlan) =>
   stageWalletNearMatches(

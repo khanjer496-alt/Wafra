@@ -196,6 +196,9 @@ export function crossChannelKey(date: string, amountFils: number, type: string):
  * event, and the loser was deleted rather than shown — so the title is ignored
  * only when one side does not state one.
  */
+/** Words a bank prints for a transfer, in its alerts and statement descriptors. */
+const TRANSFER_WORDING = /(?<![\p{L}\p{N}])(?:transfers?|remittance|trf|ft|wire|ipp|iban|swift)(?![\p{L}\p{N}])|حوالة|تحويل/iu;
+
 const GENERIC_CAPTURE_TITLES = new Set([
   'card purchase',
   'card transaction',
@@ -417,6 +420,12 @@ interface SeenStatementPairEvent {
   amountFils: number;
   type: TransactionType;
   title: string;
+  /** The person renamed this ledger row: its title is theirs, not the bank's. */
+  renamed?: boolean;
+  /** A stored row the ledger treats as a transfer, or whose alert carried transfer evidence. */
+  transfer?: boolean;
+  /** The running balance the bank stated after this movement, when known. */
+  statedBalanceFils?: number;
   accountId?: string;
   captureInstrument?: CaptureInstrument;
   captureSource?: CaptureSource;
@@ -873,12 +882,12 @@ export function duplicateGuard(
   /** The same stored row can appear in title and cross-channel indexes. */
   const seenById = new Map<string, SeenOccurrence>();
   /** User-renamed, still-unbound live observations, for the title-free bind. */
-  const renamedLiveObservations: { amountFils: number; occurrence: SeenOccurrence }[] = [];
+  const renamedLiveObservations: { amountFils: number; occurrence: SeenOccurrence; renamed: boolean; balanceFils?: number }[] = [];
   const note = (
     key: string, ts: number | null, type: TransactionType, amountFils: number, smsKey?: string,
     id?: string, captureInstrument?: CaptureInstrument,
     flags: {
-      liveObservation?: boolean; renamed?: boolean; boundLiveCopy?: boolean;
+      liveObservation?: boolean; renamed?: boolean; boundLiveCopy?: boolean; liveBalanceFils?: number;
       statement?: Pick<DuplicateCandidate, 'captureSource' | 'statementImportId'>;
       push?: boolean; eventIdentity?: string; textClock?: number; statedBalanceFils?: number;
     } = {},
@@ -903,14 +912,19 @@ export function duplicateGuard(
     if (at) at.push(occurrence);
     else seen.set(key, [occurrence]);
     if (id) seenById.set(id, occurrence);
-    if (occurrence.liveObservation && flags.renamed === true) {
-      renamedLiveObservations.push({ amountFils, occurrence });
+    // A renamed live row, or one whose title a later statement re-worded
+    // (its stated balance still identifies the Message).
+    if (occurrence.liveObservation && (flags.renamed === true || flags.liveBalanceFils !== undefined)) {
+      renamedLiveObservations.push({ amountFils, occurrence, renamed: flags.renamed === true,
+        ...(flags.liveBalanceFils !== undefined ? { balanceFils: flags.liveBalanceFils } : {}) });
     }
   };
   /**
    * Bind one incoming History Message to one GUID-less live Message the user
-   * renamed. An unedited live row parses to the History copy's own title and
-   * pairs through the title rule; a renamed one cannot, and its s-key carries
+   * renamed, or whose title a statement claim re-worded ("Outward remittance"
+   * became the statement's "Outgoing transfer") when both state the same
+   * running balance. An unedited live row parses to the History copy's own
+   * title and pairs through the title rule; these cannot, and its s-key carries
    * the receipt time rather than the Message's own. Match by money,
    * direction, instrument and the same-event window, nearest first; the
    * occurrence is consumed so it explains exactly one History copy. Never the
@@ -920,9 +934,11 @@ export function duplicateGuard(
   const titleFreeObservationMatch = (c: DuplicateCandidate, mine: number | null): SeenOccurrence | undefined => {
     if (c.smsKey?.startsWith('h') !== true || mine === null) return undefined;
     let best: SeenOccurrence | undefined;
-    for (const { amountFils, occurrence } of renamedLiveObservations) {
+    for (const { amountFils, occurrence, renamed, balanceFils } of renamedLiveObservations) {
       if (occurrence.consumed || occurrence.ts === null || amountFils !== c.amountFils ||
         occurrence.type !== c.type) continue;
+      // Not renamed: the same stated balance must say it is the same Message.
+      if (!renamed && (!Number.isSafeInteger(c.statedBalanceFils) || balanceFils !== c.statedBalanceFils)) continue;
       if (!compatibleCaptureInstrument(occurrence.captureInstrument, c.captureInstrument)) continue;
       const distance = Math.abs(occurrence.ts - mine);
       if (distance > SAME_EVENT_MS) continue;
@@ -942,6 +958,7 @@ export function duplicateGuard(
       t.captureInstrument, {
         liveObservation: isLiveMessageObservationRow(t),
         renamed: t.userEdited === true || t.titleEdited === true,
+        ...(Number.isSafeInteger(t.statedBalanceFils) ? { liveBalanceFils: t.statedBalanceFils } : {}),
         boundLiveCopy: hasMessageObservationId(t),
         statement: t,
         push: t.source === 'sms' && t.viaPush === true,
@@ -1126,15 +1143,42 @@ export function duplicateGuard(
     // 1. Statement <-> live capture on the SAME resolved account. Provenance
     // permits bounded posting drift, never a contradiction in merchant identity.
     if (c.accountId && !unresolvedAccount(c.accountId)) {
-      const matches = open.filter((row) =>
+      const sameMoney = open.filter((row) =>
         !!row.accountId &&
         row.accountId === c.accountId &&
         compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument) &&
         isStatementCaptureSource(row.captureSource) !== incomingStatement &&
         Math.abs(row.amountFils - c.amountFils) <= 1 &&
         banksCompatible(bankOf(row), bankOf(c)) &&
-        statementDescriptorsAgree(row.title, c.title) &&
         withinPostingLag(lagOf(row)));
+      let matches = sameMoney.filter((row) => statementDescriptorsAgree(row.title, c.title));
+      if (!matches.length) {
+        // The descriptor is not the only identity. The same running balance
+        // after the movement is the bank stating it is the same movement
+        // (two equal same-day movements leave different balances), so it
+        // pairs whatever either side calls it.
+        const sameBalance = Number.isSafeInteger(c.statedBalanceFils)
+          ? sameMoney.filter((row) => row.amountFils === c.amountFils && row.statedBalanceFils === c.statedBalanceFils)
+          : [];
+        // Without a balance, two transfer wordings ("Outward remittance",
+        // "Transfer-MOB-LOCAL FT") name no party to disagree on — and a
+        // transfer the person renamed keeps no wording at all — but only for
+        // the ONE same-direction, exact same-amount row on this account inside
+        // the posting window. An ATM withdrawal and a shop never pair this
+        // way, and neither does a renamed purchase ("My lunch" is not "BOOK
+        // SHOP" just because the money and the day agree). A renamed salary
+        // credit still pairs with the bank's "Salary".
+        const transferWording = (title: string) => TRANSFER_WORDING.test(title.normalize('NFKC'));
+        if (sameBalance.length > 0) matches = sameBalance;
+        else if (sameMoney.length === 1 && sameMoney[0].amountFils === c.amountFils &&
+          !differentStatedBalance(sameMoney[0].statedBalanceFils, c.statedBalanceFils) &&
+          ((transferWording(c.title) &&
+            ((sameMoney[0].renamed === true && sameMoney[0].transfer === true) || transferWording(sameMoney[0].title))) ||
+          // A salary the person renamed, against the bank's "Salary".
+          (sameMoney[0].renamed === true && c.type === 'income' && structuralKindOf(c.title) === 'salary'))) {
+          matches = sameMoney;
+        }
+      }
       if (matches.length) {
         matches.sort((a, b) => {
           const score = (row: SeenStatementPairEvent) => lagScore(row) + Math.abs(row.amountFils - c.amountFils);
@@ -1277,6 +1321,15 @@ export function duplicateGuard(
         statementRowIndex: t.statementRowIndex,
         statementOccurrences: t.statementOccurrences,
         statementBank: t.statementBank,
+        // The person typed this title over a parsed row's (titleEdited on a row
+        // that kept its captured instrument). A category-only edit is not a
+        // rename, and a row confirmed from Review (reviewConfirmed, or promoted
+        // with no captured instrument) has no parsed title it replaced.
+        renamed: t.titleEdited === true && t.captureInstrument !== undefined && t.reviewConfirmed !== true,
+        // A transfer by the ledger's reading, or by the transfer evidence its
+        // alert carried (a renamed row keeps that, not its wording).
+        transfer: t.isTransfer === true || t.transferEvidence !== undefined,
+        ...(Number.isSafeInteger(t.statedBalanceFils) ? { statedBalanceFils: t.statedBalanceFils } : {}),
         id: t.id,
         consumed: false,
       });
@@ -1639,6 +1692,7 @@ export function duplicateGuard(
         statementRowIndex: c.statementRowIndex,
         statementOccurrences: c.statementOccurrences,
         statementBank: c.statementBank,
+        ...(Number.isSafeInteger(c.statedBalanceFils) ? { statedBalanceFils: c.statedBalanceFils } : {}),
         id: c.id,
         consumed: false,
       });

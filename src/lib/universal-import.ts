@@ -223,7 +223,7 @@ export function planConfirmedUniversalImport(
         ...(conversion ? conversion.fields : {}),
         category: confirmation.category, date: confirmation.date,
         ts: confirmation.observedAt, source: 'sms', smsKey: sourceKey,
-        userEdited: true, titleEdited: true,
+        userEdited: true, titleEdited: true, reviewConfirmed: true,
         ...(captureInstrument ? { captureInstrument } : {}),
         ...(confirmation.betweenOwnAccounts ? { isTransfer: true } : {}),
         ...(event.family === 'transfer' ? { transferDecision: {

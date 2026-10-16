@@ -2079,6 +2079,326 @@ function pagedPdf(pages) {
       newestFirst.every((row) => row.snapshotFils === null));
   }
 
+  /* ───── card statement summary printed as label blocks over values ───── */
+  {
+    // The layout of a Gulf bank's card statement PDF: each summary label on
+    // its own line(s), an Arabic translation, then the figure on a later
+    // line; three labels in one row with their three values on the next.
+    const blockSummary = [
+      'Credit Card Statement \u0643\u0634\u0641 \u062d\u0633\u0627\u0628',
+      'Statement Period: From 11 August 26 to 10 September 26',
+      'Total Outstanding', 'on', 'Statement Date (1 )', '\ufeb3\ufe8e\ufe91 \ufe97\ufe8e\ufead\ufef3\ufea6', 'AED 1,234.56',
+      'Amount Over', 'Credit Limit', '\ufe8e\ufefc\ufe8b', 'AED 0.00',
+      'Payment Due Date', '\ufe97\ufe8e\ufead\ufef3\ufea6 05 October 2026',
+      'Total Amount', 'payable for', 'this statement ( 2 )', 'AED 1,234.56',
+      'Minimum Payment', 'Due ( 3 )', '\ufe8e\ufefc', '\ufe8e\ufefc)\u0663(', 'AED 61.73',
+      'Overdue Payment Due Now: Statement Currency: Credit Limit:', '\ufe8e\ufefc\ufe8b:', '0.00 AED 20,000.00',
+      'Example Bank Middle East Limited',
+      'Credit Card Number \ufead\ufed7\ufee2',
+      '4000-1234-5678-9012',
+      'Transaction Date Posting Date Transaction Details Total Amount (AED)',
+      '09-Aug-26 11-Aug-26 Talabat Dubai AE 33.99',
+      '10-Aug-26 12-Aug-26 Grocery Store Dubai AE 120.00',
+      '26-Aug-26 26-Aug-26 PAYMENT RECEIVED THANK YOU 1,000.00 CR',
+    ].join('\n');
+    const read = parseStatementLines(blockSummary, 'AED', { card: null }, 'day-first');
+    const summary = read.rows.find((row) => row.kind === 'cardStatement');
+    ok('a card summary printed as label blocks over values is read: total, minimum, due date, statement date',
+      summary?.amountFils === 123456 && summary?.minDueFils === 6173 && summary?.date === '2026-10-05' &&
+        summary?.statementDate === '2026-09-10' && summary?.card?.last4 === '9012' && summary?.card?.kind === 'credit',
+      JSON.stringify(summary && { ...summary, raw: undefined }));
+    ok('the summary carries what the card owed on its issue date as an outstanding snapshot',
+      summary?.snapshotKind === 'outstanding' && summary?.snapshotFils === 123456);
+    const undated = parseStatementLines(blockSummary.replace('Statement Period: From 11 August 26 to 10 September 26', 'Statement Period: see overleaf'),
+      'AED', { card: null }, 'day-first').rows.find((row) => row.kind === 'cardStatement');
+    ok('without an issue date the summary sends no snapshot (it would be timed at its due date)',
+      undated && undated.snapshotFils === null && undated.snapshotKind === null && undated.statementDate === undefined,
+      JSON.stringify(undated && { ...undated, raw: undefined }));
+    ok('the credit limit is read from the three-labels-over-three-values row, not from "Amount Over Credit Limit"',
+      summary?.creditLimitFils === 2000000, String(summary?.creditLimitFils));
+    ok('the card rows themselves still read',
+      read.rows.filter((row) => row.kind !== 'cardStatement').length === 3 && read.rejectedRows === 0,
+      `${read.rows.length}/${read.rejectedRows}`);
+    const sameLine = parseStatementLines([
+      'Credit Card Statement', 'Card Number: 4567 XXXX XXXX 4321',
+      'Statement Date: 20/09/2026', 'Payment Due Date: 15/10/2026', 'Total Amount Due: AED 2,000.00',
+      'Minimum Amount Due: AED 100.00', 'Credit Limit: AED 30,000.00', 'Available Credit Limit: AED 28,000.00',
+      '05/09/2026 05/09/2026 CARREFOUR DUBAI 2,000.00',
+    ].join('\n'), 'AED', { card: null }, 'day-first').rows.find((row) => row.kind === 'cardStatement');
+    ok('a same-line Credit Limit is read, and Available Credit Limit is not taken for it',
+      sameLine?.creditLimitFils === 3000000 && sameLine?.amountFils === 200000, JSON.stringify(sameLine && { ...sameLine, raw: undefined }));
+  }
+
+  /* ───── statement identity: masked account, card and IBAN tails ───── */
+  {
+    const chain = ['Date Description Debit Credit Balance', '01/09/2026 Opening Balance 1,000.00',
+      '02/09/2026 GROCERY 20.00 980.00', '03/09/2026 SALARY 500.00 1,480.00', '04/09/2026 FUEL 30.00 1,450.00',
+      '05/09/2026 CAFE 10.00 1,440.00', '06/09/2026 RENT 400.00 1,040.00'];
+    const identity = (head) => parseStatementLines(`${head}\n${chain.join('\n')}`, 'AED', { card: null }, 'day-first').rows[0]?.card ?? null;
+    const cases = [
+      ['Account number: XXXX1234', { last4: '1234', kind: 'account' }],
+      ['Account No: ••1234', { last4: '1234', kind: 'account' }],
+      ['Account: ****1234', { last4: '1234', kind: 'account' }],
+      ['IBAN: AE07 0331 2345 6789 0123 456', { last4: '3456', kind: 'account' }],
+      ['IBAN: AE07 XXXX XXXX XXXX XXXX 1234', { last4: '1234', kind: 'account' }],
+      ['IBAN AE..1234', { last4: '1234', kind: 'account' }],
+      ['IBAN: DE89 **** **** **** **30 00', { last4: '3000', kind: 'account' }],
+      ['Card Number: 4567 XXXX XXXX 1234', { last4: '1234', kind: 'unknown' }],
+      // The first digits of a number are not its last four: nothing is invented.
+      ['Account number: 1234-XXXX', null],
+      ['Card No: 4567-XXXX-XXXX-XXXX', null],
+    ];
+    for (const [head, want] of cases) {
+      const got = identity(head);
+      ok(`statement identity from "${head}"`, JSON.stringify(got) === JSON.stringify(want), JSON.stringify(got));
+    }
+  }
+
+  /* ───── a card export's "Account Number" column is the card account ───── */
+  {
+    const rows = parseStatementCsv([
+      'CardHolder Name,Account Number,Transaction Date,Posting Date,Amount,Category,Payee,Type',
+      'EXAMPLE DESIGN LLC,1234,09/15/2026,09/15/2026,-50.00,Shopping,EXAMPLE PURCHASE,D',
+      'EXAMPLE DESIGN LLC,1234,09/16/2026,09/16/2026,-75.50,Travel,EXAMPLE AIRLINES,D',
+      'EXAMPLE DESIGN LLC,1234,09/18/2026,09/18/2026,200.00,Payment,PAYMENT - THANK YOU,C',
+    ].join('\n'), 'USD', 200, 'month-first').rows;
+    ok('a card export (cardholder column) attributes its rows to the card, not to a bank account',
+      rows.length > 0 && rows.every((row) => row.card && row.card.last4 === '1234' && row.card.kind !== 'account'),
+      JSON.stringify(rows.map((row) => row.card)));
+  }
+
+  /* ───── card exports whose sign means the opposite of an account's ───── */
+  {
+    const read = (csv, currency, hint) => parseStatementCsv(csv, currency, 200, hint).rows
+      .map((row) => [row.date, row.kind === 'cardPayment' ? `card-payment:${row.cardPaymentSide ?? ''}` : row.type, row.amountFils]);
+    // UK card export, newest first: charges plain, payments and refunds negative.
+    const aqua = read([
+      'Date,Description,Note,Amount(GBP)',
+      '21/09/2026,"PAYMENT RECEIVED - THANK YOU","",-42.34',
+      '05/09/2026,"Trainline","TRAINLINE.COM LONDON GBR",-8.5',
+      '03/09/2026,"Trainline","TRAINLINE.COM LONDON GBR",30',
+      '01/09/2026,"Tesco","TESCO STORES 3297 LONDON GBR",12.34',
+    ].join('\n'), 'GBP', 'day-first');
+    // Not proven a card's (no card header or preamble) and its minus rows are
+    // not all credits: neither reading is taken. Nothing is filed the wrong
+    // way; the rows are counted unread.
+    ok('a file with a negative "payment received" beside other minus rows never files it as spending',
+      !aqua.some(([date, type]) => (date === '2026-09-21' || date === '2026-09-05') && type === 'expense'),
+      JSON.stringify(aqua));
+    // German card export (cardholder column, decimal comma, payment negative).
+    const amexDe = read([
+      'Datum,Beschreibung,Karteninhaber,Konto #,Betrag,Land',
+      '03/03/2026,EXAMPLE MARKT 1234 MUENCHEN,MAX EXAMPLE,-71004,"12,34",GERMANY',
+      '05/03/2026,EXAMPLE ONLINE SHOP BERLIN,MAX EXAMPLE,-71004,"1.049,00",GERMANY',
+      '10/03/2026,ZAHLUNG/ÜBERWEISUNG ERHALTEN BESTEN DANK,MAX EXAMPLE,-71004,"-500,00",',
+    ].join('\n'), 'EUR', 'day-first');
+    ok('a German card export (Karteninhaber) files charges as spending and the payment as money in',
+      !amexDe.some(([date, type]) => date === '2026-03-10' && type === 'expense') &&
+        amexDe.some(([date, type, amount]) => date === '2026-03-05' && type === 'expense' && amount === 104900),
+      JSON.stringify(amexDe));
+    // A broker/neobank export with separate fee and tax columns: the amount
+    // column alone is not the cash movement, so such a row is not filed.
+    const broker = parseStatementCsv([
+      'date,type,name,amount,fee,tax,currency,description',
+      '2026-03-05,CARD_TRANSACTION,,-12.400000,,,EUR,Example Bakery',
+      '2026-03-06,BUY,Example Corp,-5.69,-1.00,,EUR,Buy trade EXAMPLE CORP',
+      '2026-04-01,INTEREST_PAYMENT,,4.770000,,-1.34,EUR,Interest payment',
+    ].join('\n'), 'EUR', 200, 'day-first');
+    ok('a row with its own fee or tax beside the amount is counted unread, never filed at the bare amount',
+      !broker.rows.some((row) => row.amountFils === 569 || row.amountFils === 477) && broker.rejectedRows >= 2,
+      JSON.stringify(broker.rows.map((row) => [row.type, row.amountFils])));
+    ok('an amount printed with extra zero decimals (-12.400000) is read exactly',
+      broker.rows.some((row) => row.type === 'expense' && row.amountFils === 1240), JSON.stringify(broker.rows.map((row) => row.amountFils)));
+  }
+
+  /* ───── worldwide headers: Polish, Nordic, Turkish, Swiss, Austrian, wallets ───── */
+  {
+    const read = (csv, currency, hint = 'day-first') => {
+      try {
+        return parseStatementCsv(csv, currency, 200, hint).rows.map((row) => [row.date, row.type, row.amountFils]);
+      } catch (error) { return error.message; }
+    };
+    const cases = [
+      ['Polish mBank', 'PLN', '#Data operacji;#Opis operacji;#Rachunek;#Kategoria;#Kwota;#Saldo po operacji;\n2026-09-02;BIEDRONKA WARSZAWA;eKonto;Żywność;-45,20 PLN;1 954,80 PLN;\n2026-09-03;WYNAGRODZENIE;eKonto;Wpływy;3 000,00 PLN;4 954,80 PLN;',
+        [['2026-09-02', 'expense', 4520], ['2026-09-03', 'income', 300000]]],
+      ['Swedish Nordea', 'SEK', 'Bokföringsdag;Belopp;Avsändare;Mottagare;Namn;Rubrik;Saldo;Valuta\n2026-09-02;-125,50;;;;ICA SUPERMARKET;9874,50;SEK\n2026-09-25;25000,00;;;;LÖN;34874,50;SEK',
+        [['2026-09-02', 'expense', 12550], ['2026-09-25', 'income', 2500000]]],
+      ['Danish Danske Bank', 'DKK', 'Dato;Kategori;Underkategori;Tekst;Beløb;Saldo;Status;Afstemt\n02.09.2026;Mad;Supermarked;NETTO;-89,95;10.910,05;Udført;Nej',
+        [['2026-09-02', 'expense', 8995]]],
+      ['Turkish upper-case headers', 'TRY', 'İŞLEM TARİHİ;AÇIKLAMA;İŞLEM TUTARI;BAKİYE\n02.09.2026;MARKET ALIŞVERİŞİ;-250,00;4.750,00\n05.09.2026;MAAŞ;15.000,00;19.750,00',
+        [['2026-09-02', 'expense', 25000], ['2026-09-05', 'income', 1500000]]],
+      ['Austrian Soll/Haben', 'EUR', 'IBAN;Text;Valutadatum;Währung;Soll;Haben\nAT611904300234573201;BILLA DANKT;02.09.2026;EUR;23,40;\nAT611904300234573201;GEHALT;30.09.2026;EUR;;2.500,00',
+        [['2026-09-02', 'expense', 2340], ['2026-09-30', 'income', 250000]]],
+      ['Swiss ZKB Belastung/Gutschrift', 'CHF', 'Datum;Buchungstext;Whg;Belastung CHF;Gutschrift CHF;Valuta;Saldo CHF\n02.09.2026;Einkauf Migros;CHF;45.60;;02.09.2026;5954.40\n25.09.2026;Lohn;CHF;;6500.00;25.09.2026;12454.40',
+        [['2026-09-02', 'expense', 4560], ['2026-09-25', 'income', 650000]]],
+      ['PayPal Net beside Fee (fee already inside Net)', 'USD', 'Date,Time,TimeZone,Name,Type,Status,Currency,Gross,Fee,Net\n09/02/2026,10:00:00,PDT,Example Seller,Express Checkout Payment,Completed,USD,-25.00,0.00,-25.00\n09/03/2026,11:00:00,PDT,Example Buyer,Website Payment,Completed,USD,100.00,-3.20,96.80',
+        [['2026-09-02', 'expense', 2500], ['2026-09-03', 'income', 9680]], 'month-first'],
+    ];
+    for (const [name, currency, csv, want, hint] of cases) {
+      const got = read(csv, currency, hint);
+      ok(`worldwide CSV: ${name}`, JSON.stringify(got) === JSON.stringify(want), JSON.stringify(got));
+    }
+  }
+
+  /* ───── yearless row dates take their year from the statement period ───── */
+  {
+    const chase = [
+      'CHECKING SUMMARY', 'Beginning Balance $1,000.00',
+      'September 01, 2026 through September 30, 2026', 'TRANSACTION DETAIL', 'DATE DESCRIPTION AMOUNT BALANCE',
+      'Beginning Balance $1,000.00',
+      '09/02 Card Purchase 09/01 Example Market Springfield IL Card 1234 -42.50 957.50',
+      '09/03 Example Corp Payroll PPD ID: 9999999999 +2,500.00 3,457.50',
+      '09/08 Check # 1042 -120.00 3,337.50',
+      'Ending Balance $3,337.50',
+    ].join('\n');
+    const read = parseStatementLines(chase, 'USD', { card: null }, 'month-first');
+    ok('US statement rows printed as MM/DD take the year of the statement period',
+      JSON.stringify(read.rows.map((row) => [row.date, row.type, row.amountFils])) ===
+        JSON.stringify([['2026-09-02', 'expense', 4250], ['2026-09-03', 'income', 250000], ['2026-09-08', 'expense', 12000]]),
+      JSON.stringify(read.rows.map((row) => [row.date, row.type, row.amountFils])));
+    const yearEnd = parseStatementLines([
+      'Statement period: 12/15/2026 - 01/14/2027', 'DATE DESCRIPTION AMOUNT BALANCE',
+      '12/20 Example Store -10.00 990.00', '01/05 Example Cafe -5.00 985.00',
+    ].join('\n'), 'USD', { card: null }, 'month-first');
+    ok('a period that crosses the new year dates December rows in the old year and January rows in the new one',
+      JSON.stringify(yearEnd.rows.map((row) => row.date)) === JSON.stringify(['2026-12-20', '2027-01-05']),
+      JSON.stringify(yearEnd.rows.map((row) => row.date)));
+    const unknownOrder = parseStatementLines(chase, 'USD', { card: null }, null);
+    ok('without a known day/month order a yearless row is counted, never guessed',
+      unknownOrder.rows.length === 0 && unknownOrder.rejectedRows === 3, `${unknownOrder.rows.length}/${unknownOrder.rejectedRows}`);
+  }
+
+  /* ───── a "payment received / thank you" is never filed as spending ───── */
+  {
+    const card = parseStatementLines([
+      'ACCOUNT SUMMARY', 'Account Number: XXXX XXXX XXXX 1234', 'Opening/Closing Date 08/24/26 - 09/23/26',
+      'Date of Transaction Merchant Name or Transaction Description $ Amount',
+      'PAYMENTS AND OTHER CREDITS', '09/06 Payment Thank You-Mobile -350.00',
+      'PURCHASE', '09/02 EXAMPLE MARKET SPRINGFIELD IL 71.94',
+    ].join('\n'), 'USD', { card: null }, 'month-first');
+    ok('a negative "Payment Thank You" on a statement not proven to be a card is left unread, not spending',
+      !card.rows.some((row) => row.amountFils === 35000 && row.type === 'expense'), JSON.stringify(card.rows.map((row) => [row.type, row.amountFils])));
+  }
+
+  /* ───── Hijri (Umm al-Qura) dates read as their Gregorian day ───── */
+  {
+    const hijri = parseStatementCsv([
+      'التاريخ,البيان,مدين,دائن', '23/03/1448,تحويل وارد,,150.00', '24/03/1448,نقاط البيع,250.00,', '1448/03/25,رسوم,12.50,',
+    ].join('\n'), 'SAR', 200, 'day-first');
+    ok('Hijri row dates are read as the Gregorian day they name (23/03/1448 = 2026-09-05)',
+      JSON.stringify(hijri.rows.map((row) => [row.date, row.type, row.amountFils])) ===
+        JSON.stringify([['2026-09-05', 'income', 15000], ['2026-09-06', 'expense', 25000], ['2026-09-07', 'expense', 1250]]),
+      JSON.stringify(hijri.rows.map((row) => [row.date, row.type, row.amountFils])));
+    const impossible = parseStatementCsv('Date,Description,Debit,Credit\n31/13/1448,Grocery,20.00,', 'SAR', 200, 'day-first');
+    ok('an impossible Hijri date is counted unread', impossible.rows.length === 0 && impossible.rejectedRows === 1);
+  }
+
+  /* ───── a Debit/Credit flag that every signed amount contradicts ───── */
+  {
+    const tesco = parseStatementCsv([
+      'Transaction Date,Posting Date,Billing Amount,Merchant,Merchant City,Reference Number,Debit/Credit Flag',
+      '14/09/2026,15/09/2026,-£20.00,DIRECT DEBIT PAYMENT - TH,ANK YOU,,Credit',
+      '05/09/2026,07/09/2026,-£5.00,EXAMPLE BOOKSHOP,YORK,70000009876543210987654,Credit',
+      '03/09/2026,04/09/2026,£12.34,EXAMPLE BOOKSHOP,YORK,70000009876543210987653,Debit',
+    ].join('\n'), 'GBP', 200, 'day-first').rows.map((row) => [row.date, row.type, row.amountFils]);
+    ok('a card export whose minus marks every credit follows its explicit Debit/Credit flag',
+      JSON.stringify(tesco) === JSON.stringify([['2026-09-14', 'income', 2000], ['2026-09-05', 'income', 500], ['2026-09-03', 'expense', 1234]]),
+      JSON.stringify(tesco));
+    const mixed = parseStatementCsv([
+      'Date,Description,Amount,Debit/Credit Flag',
+      '14/09/2026,Shop,-20.00,Credit', '15/09/2026,Shop,-5.00,Debit', '16/09/2026,Shop,7.00,Credit',
+    ].join('\n'), 'GBP', 200, 'day-first').rows.map((row) => [row.date, row.type, row.amountFils]);
+    ok('a flag that the signs only sometimes contradict is not trusted over them',
+      !mixed.some(([date]) => date === '2026-09-14'), JSON.stringify(mixed));
+  }
+
+  /* ───── review round 2: heuristics that must never invert or refuse a file ───── */
+  {
+    const rowsOf = (csv, currency, hint) => parseStatementCsv(csv, currency, 200, hint).rows;
+    const account = rowsOf('Date,Description,Amount\n09/02/2026,WALMART,-45.20\n09/03/2026,HOA DUES THANK YOU,-80.00\n09/04/2026,VENMO CASHOUT,400.00', 'USD', 'month-first');
+    ok('one "thank you" spending row does not turn an account file into a card file',
+      !account.some((row) => /WALMART|HOA/i.test(row.merchant) && row.type === 'income'), JSON.stringify(account.map((row) => [row.merchant, row.type])));
+    const german = rowsOf('Buchungstag;Verwendungszweck;Betrag\n02.09.2026;REWE SAGT DANKE;-45,20\n03.09.2026;MIETE BESTEN DANK;-800,00\n04.09.2026;GEHALT;2.000,00', 'EUR', 'day-first');
+    ok('…nor does "besten dank" in German',
+      !german.some((row) => /REWE|MIETE/i.test(row.merchant) && row.type === 'income'), JSON.stringify(german.map((row) => [row.merchant, row.type])));
+    const polarity = rowsOf('Date,Description,Amount,Balance,Dr/Cr\n01/09/2026,CARREFOUR,-100.00,900.00,Cr\n02/09/2026,LULU,-50.00,850.00,Cr\n03/09/2026,ENOC,-20.00,830.00,Cr', 'AED', 'day-first');
+    ok('a Dr/Cr column that states the balance polarity never overrides the amount sign',
+      !polarity.some((row) => row.type === 'income'), JSON.stringify(polarity.map((row) => [row.merchant, row.type])));
+    let competing;
+    try { competing = rowsOf('Date,Description,Transaction Amount,Billing Amount\n01/09/2026,SHOP,-10.00,-10.00\n02/09/2026,CAFE,-5.00,-5.00', 'AED', 'day-first'); }
+    catch (error) { competing = error.message; }
+    ok('a Billing Amount beside the Transaction Amount is a fallback, not a reason to refuse the file',
+      Array.isArray(competing) && competing.length === 2, JSON.stringify(competing));
+    const holder = rowsOf('Cardholder Name,Account Number,Date,Description,Debit,Credit\nEXAMPLE PERSON,12345678,01/09/2026,GROCERY,20.00,\nEXAMPLE PERSON,12345678,02/09/2026,SALARY,,500.00', 'AED', 'day-first');
+    ok('a cardholder column alone does not turn an account export into a credit card',
+      holder.length > 0 && holder.every((row) => row.card?.kind !== 'credit'), JSON.stringify(holder.map((row) => row.card)));
+    const memo = rowsOf('Date,Name,Memo,Amount\n01/09/2026,EXAMPLE PERSON,TESCO STORES 3297,-12.34', 'GBP', 'day-first');
+    ok('Memo outranks a Name column (the account holder) as the description',
+      /TESCO/i.test(memo[0]?.merchant ?? ''), JSON.stringify(memo.map((row) => row.merchant)));
+    const dotted = parseStatementLines([
+      'Statement period: 01/09/2026 - 30/09/2026', 'Date Description Debit Credit Balance',
+      '02/09/2026 GROCERY 20.00 980.00', '5.09 1,977.18', '03/09/2026 SALARY 500.00 1,480.00',
+    ].join('\n'), 'AED', { card: null }, 'day-first');
+    ok('a dotted figure pair with no words is not dated as a yearless row',
+      !dotted.rows.some((row) => row.date === '2026-09-05') && dotted.totalRows === 2, `${dotted.totalRows} ${JSON.stringify(dotted.rows.map((row) => row.date))}`);
+    const shifted = parseStatementLines([
+      'Credit Card Statement', 'Card Number: 4567 XXXX XXXX 4321', 'Statement Date: 20/09/2026',
+      'Payment Due Date: 15/10/2026', 'Total Amount Due: AED 2,000.00', 'Minimum Amount Due: AED 100.00',
+      'Credit Limit: Statement Currency: Available Credit:', '15,000.00 13,000.00 AED',
+      '05/09/2026 05/09/2026 CARREFOUR DUBAI 2,000.00',
+    ].join('\n'), 'AED', { card: null }, 'day-first').rows.find((row) => row.kind === 'cardStatement');
+    ok('a labelled value row whose values do not fit their labels gives no figure at all',
+      shifted && shifted.creditLimitFils === undefined, JSON.stringify(shifted && shifted.creditLimitFils));
+  }
+
+  /* ───── pipe-separated exports ───── */
+  {
+    const piped = parseStatementCsv('Date|Description|Debit|Credit\n02/09/2026|GROCERY|20.00|\n03/09/2026|SALARY||500.00', 'AED', 200, 'day-first');
+    ok('a pipe-separated export is read like a comma one',
+      JSON.stringify(piped.rows.map((row) => [row.type, row.amountFils])) === JSON.stringify([['expense', 2000], ['income', 50000]]),
+      JSON.stringify(piped.rows.map((row) => [row.type, row.amountFils])));
+    const commaWithPipe = parseStatementCsv('Date,Description,Debit,Credit\n02/09/2026,SHOP A|B,20.00,\n03/09/2026,SALARY,,500.00', 'AED', 200, 'day-first');
+    ok('a pipe inside a comma file\'s description does not change its separator', commaWithPipe.rows.length === 2);
+  }
+
+  /* ───── CSV/Excel closing balance (account statements, either row order) ───── */
+  {
+    const snap = (rows) => rows.filter((row) => row.snapshotFils !== null).map((row) => [row.date, row.snapshotKind, row.snapshotFils]);
+    const oldestFirst = parseStatementCsv([
+      'Date,Description,Debit,Credit,Balance',
+      '02/09/2026,GROCERY,20.00,,980.00', '03/09/2026,SALARY,,500.00,1480.00',
+      '04/09/2026,FUEL,30.00,,1450.00', '05/09/2026,CAFE,10.00,,1440.00',
+    ].join('\n'), 'AED', 200, 'day-first').rows;
+    ok('an oldest-first CSV with a balance column sends its closing balance on its last row',
+      JSON.stringify(snap(oldestFirst)) === JSON.stringify([['2026-09-05', 'balance', 144000]]), JSON.stringify(snap(oldestFirst)));
+    // Chase-style: newest first, signed amount, running balance.
+    const newestFirst = parseStatementCsv([
+      'Details,Posting Date,Description,Amount,Type,Balance,Check or Slip #',
+      'DEBIT,09/05/2026,CAFE,-10.00,DEBIT_CARD,1440.00,',
+      'DEBIT,09/04/2026,FUEL,-30.00,DEBIT_CARD,1450.00,',
+      'CREDIT,09/03/2026,SALARY,500.00,ACH_CREDIT,1480.00,',
+      'DEBIT,09/02/2026,GROCERY,-20.00,DEBIT_CARD,980.00,',
+    ].join('\n'), 'USD', 200, 'month-first').rows;
+    ok('a newest-first CSV whose balances prove that order sends its closing balance on its FIRST row',
+      JSON.stringify(snap(newestFirst)) === JSON.stringify([['2026-09-05', 'balance', 144000]]), JSON.stringify(snap(newestFirst)));
+    const broken = parseStatementCsv([
+      'Date,Description,Debit,Credit,Balance',
+      '02/09/2026,GROCERY,20.00,,980.00', '03/09/2026,SALARY,,500.00,1500.00', '04/09/2026,FUEL,30.00,,1450.00',
+    ].join('\n'), 'AED', 200, 'day-first').rows;
+    ok('balances that do not reconcile in either order send no closing balance', snap(broken).length === 0, JSON.stringify(snap(broken)));
+    const noBalance = parseStatementCsv([
+      'Date,Description,Debit,Credit', '02/09/2026,GROCERY,20.00,', '03/09/2026,SALARY,,500.00',
+    ].join('\n'), 'AED', 200, 'day-first').rows;
+    ok('a CSV without a balance column sends no closing balance', snap(noBalance).length === 0);
+    const card = parseStatementCsv([
+      'Card Number,4567XXXXXXXX1234', 'Credit Card Statement', 'Minimum Amount Due,AED 100.00',
+      'Date,Description,Debit,Credit,Balance',
+      '02/09/2026,GROCERY,20.00,,1020.00', '03/09/2026,PAYMENT RECEIVED,,500.00,520.00', '04/09/2026,FUEL,30.00,,550.00',
+    ].join('\n'), 'AED', 200, 'day-first').rows;
+    ok('a card CSV never sends its running figure as an account balance',
+      !card.some((row) => row.snapshotKind === 'balance'), JSON.stringify(snap(card)));
+  }
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

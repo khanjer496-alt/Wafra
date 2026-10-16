@@ -118,8 +118,8 @@ test('new relay error codes reach the client as themselves', () => {
     assert.equal(contract.pdfImportError(422, { error: code }).code, code);
   }
   assert.equal(contract.pdfImportError(422, { error: 'something_new' }).code, 'unexpected');
-  // Client-only: a relay cannot claim it.
-  assert.equal(contract.pdfImportError(422, { error: 'unsupported_file_type' }).code, 'unexpected');
+  // A relay that reads structured statements names a file it cannot read.
+  assert.equal(contract.pdfImportError(415, { error: 'unsupported_file_type' }).code, 'unsupported_file_type');
 });
 
 function supplementCopy() {
@@ -220,13 +220,13 @@ test('an older relay without Excel refuses .xlsx locally with a specific reason 
 test('the screen routes .xlsx to the CSV upload, names Excel only when advertised, and cleans .xlsx copies', () => {
   const screen = read('src/components/supplement-imports.tsx');
   const transportSource = read('src/lib/cloud-import.ts');
-  assert.match(screen, /const csv = \/\\\.\(\?:csv\|tsv\|xlsx\)\$\/i\.test\(asset\.name\)/);
+  assert.match(screen, /const csv = !\/\\\.pdf\$\/i\.test\(asset\.name\) && \(\/\\\.\(\?:csv\|tsv\|xlsx\|ofx\|qfx\|qif\|xml\|sta\|mt940\|940\)\$\/i\.test\(asset\.name\)/);
   assert.match(screen, /const excel = !!capabilities\?\.csv\.enabled && capabilities\.csv\.accepts\.includes\(XLSX_CONTENT_TYPE\)/);
   assert.match(screen, /const formats = excel \? copy\.formatsExcel : copy\.formats;/);
   assert.match(screen, /tables: excel \? copy\.tableFormatsExcel : copy\.tableFormats/);
   assert.match(screen, /type: \[\.\.\.capabilities\.pdf\.accepts, \.\.\.capabilities\.csv\.accepts\]/,
     'the picker offers exactly what the relay advertises');
-  assert.match(transportSource, /const STATEMENT_COPY = \/\\\.\(\?:pdf\|csv\|tsv\|xlsx\)\$\/i;/);
+  assert.match(transportSource, /const STATEMENT_COPY = \/\\\.\(\?:pdf\|csv\|tsv\|xlsx\|ofx\|qfx\|qif\|xml\|sta\|mt940\|940\)\$\/i;/);
   assert.match(transportSource, /new Directory\(Paths\.document, 'Inbox'\)/);
   const copy = supplementCopy();
   assert.equal(copy.en.formats, 'PDF, CSV or TSV');
@@ -599,7 +599,43 @@ test('capabilities and both statement uploads say which features this build unde
   await api.getImportCapabilities(cfg).catch(() => {});
   assert.deepEqual(requests.map((request) => [request.method, request.url.replace(cfg.baseUrl, '')]),
     [['POST', '/v1/import/pdf'], ['POST', '/v1/import/csv'], ['GET', '/v1/import/capabilities']]);
-  for (const request of requests) assert.equal(request.headers['x-wafra-import-features'], 'xlsx,pdf-error-detail');
+  for (const request of requests) assert.equal(request.headers['x-wafra-import-features'], 'xlsx,pdf-error-detail,structured');
+});
+
+test('a structured statement goes to the CSV endpoint under its own type, only when the relay lists it', async () => {
+  const types = { ofx: 'application/x-ofx', qfx: 'application/vnd.intu.qfx', qif: 'application/qif',
+    xml: 'application/xml', sta: 'application/x-mt940', mt940: 'application/x-mt940', 940: 'application/x-mt940' };
+  const listed = contract.parseImportCapabilities(caps({ csv: { accepts: ['text/csv', XLSX, ...new Set(Object.values(types))] } }));
+  for (const [extension, type] of Object.entries(types)) {
+    const { api, requests } = transport();
+    // The picker's octet-stream label never decides a structured file's type.
+    await api.uploadCsvStatement(cfg, { uri: 'blob:x', name: `statement.${extension}`, mimeType: 'application/octet-stream', file: blob() }, listed, money);
+    assert.equal(requests[0].headers['content-type'], type, extension);
+    assert.equal(requests[0].url.replace(cfg.baseUrl, ''), '/v1/import/csv');
+  }
+  const older = contract.parseImportCapabilities(caps({ csv: { accepts: ['text/csv', XLSX] } }));
+  const { api, requests } = transport();
+  await assert.rejects(api.uploadCsvStatement(cfg, { uri: 'blob:x', name: 'statement.ofx', file: blob() }, older, money),
+    (error) => error.code === 'unsupported_file_type');
+  assert.equal(requests.length, 0, 'nothing is uploaded to a relay that cannot read it');
+});
+
+test('the relay\'s structured-file error codes reach a specific message', () => {
+  assert.equal(contract.pdfImportError(400, { error: 'invalid_statement_file' }).code, 'invalid_statement_file');
+  assert.equal(contract.pdfImportError(415, { error: 'unsupported_file_type' }).code, 'unsupported_file_type');
+  const copy = supplementCopy();
+  assert.ok(copy.en.errStatementFile && copy.ar.errStatementFile);
+  const screen = read('src/components/supplement-imports.tsx');
+  assert.match(screen, /value\.code === 'invalid_statement_file'\) return copy\.errStatementFile/);
+});
+
+test('a .pdf is uploaded as a PDF even when the picker calls it octet-stream', () => {
+  const screen = read('src/components/supplement-imports.tsx');
+  const { CSV_ROUTE_FILE } = transport().api;
+  // The screen's routing list is the transport's.
+  assert.ok(screen.includes(`const csv = !/\\.pdf$/i.test(asset.name) && (${CSV_ROUTE_FILE.toString()}.test(asset.name)`));
+  for (const name of ['a.csv', 'b.TSV', 'c.xlsx', 'd.ofx', 'e.qfx', 'f.qif', 'g.xml', 'h.sta', 'i.mt940', 'j.940']) assert.ok(CSV_ROUTE_FILE.test(name), name);
+  for (const name of ['a.pdf', 'b.xls', 'c.txt', 'd.ofx.pdf']) assert.ok(!CSV_ROUTE_FILE.test(name), name);
 });
 
 /* ── Stop a running batch ────────────────────────────────────────────── */

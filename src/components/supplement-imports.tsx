@@ -47,7 +47,7 @@ import { SUPPLEMENT_COPY } from '@/lib/supplement-copy';
 import { displayRegion } from '@/lib/ledger-money';
 import { summarizeCoverage } from '@/lib/statement-coverage';
 import { alreadyInWafra, countPhrase, nextUploadDelay } from '@/lib/statement-batch';
-import { drainStatementQueue, newStatementRange } from '@/lib/statement-import-flow';
+import { drainStatementQueue, holdsStatementRows, newStatementRange } from '@/lib/statement-import-flow';
 import { t } from '@/lib/i18n';
 import { committed, failed } from '@/lib/haptics';
 
@@ -332,6 +332,7 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
     if (value.code === 'pdf_encryption_unsupported') return copy.errPdfEncryption;
     if (value.code === 'invalid_xlsx') return copy.errXlsx;
     if (value.code === 'unsupported_file_type') return copy.errFileType;
+    if (value.code === 'invalid_statement_file') return copy.errStatementFile;
     // A relay that reads the base64 header says when the typed password
     // itself cannot be used (too long, or a control character).
     if (value.code === 'pdf_password_invalid') return copy.errPasswordInvalid;
@@ -342,7 +343,13 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
     if (value.code === 'unsupported_statement_format') return copy.errFormat;
     if (value.code === 'ambiguous_card_signs') return copy.errCardSigns;
     if (value.code === 'ambiguous_dates') return copy.errDates;
-    if (value.code === 'statement_options_conflict') return copy.errOptionsConflict;
+    if (value.code === 'statement_options_conflict') {
+      const order = value.detail?.previousDateOrder;
+      if (value.detail?.reason === 'parser') return copy.errParserRead;
+      return order
+        ? interpolate(copy.errOptionsConflictOrder, { order: order === 'day-first' ? copy.dateDayFirst : copy.dateMonthFirst })
+        : copy.errOptionsConflict;
+    }
     if (value.code === 'statement_currency_mismatch') return copy.errCurrencyMismatch;
     if (value.code === 'multiple_statement_accounts') return copy.errMultipleAccounts;
     if (value.code === 'queue_full') return copy.errQueueFull;
@@ -654,6 +661,21 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
       };
       let recoveredImported = 0;
       let recoveredOther = 0;
+      // Whether this phone holds any row of an earlier read the relay names.
+      // Rows still waiting in the relay queue are filed first, so a file whose
+      // rows are on their way is never read a second time.
+      // Every id the relay knows for the file counts (its first read and any re-read).
+      const holdsAfterFiling = async (importIds: readonly string[]): Promise<boolean> => {
+        const holds = () => importIds.some((id) => holdsStatementRows(getStateSnapshot().transactions, id));
+        if (holds()) return true;
+        const progress = await recoverQueuedRows(generation);
+        if (!progress.progressStored) {
+          recoveredImported += progress.imported;
+          recoveredOther += progress.review + (progress.filedOther ?? 0);
+        }
+        // An unfinished drain cannot prove the rows are absent.
+        return !progress.complete || holds();
+      };
       let acceptedRows = 0;
       let rejectedRows = 0;
       let pages = 0;
@@ -686,9 +708,13 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
         const asset = picked.assets[index];
         const file = Platform.OS === 'web' ? null : new File(asset.uri);
         if (file) pickedFiles.push(file);
-        // Excel workbooks go to the CSV endpoint, like the text tables.
-        const csv = /\.(?:csv|tsv|xlsx)$/i.test(asset.name) ||
-          capabilities.csv.accepts.includes(asset.mimeType?.split(';', 1)[0].toLowerCase() ?? '');
+        // Excel workbooks and structured statements go to the CSV endpoint,
+        // like the text tables. A .pdf never does, whatever type the picker
+        // reported (Android may call it octet-stream, which the relay lists
+        // for structured files).
+        // (Same list as cloud-import.ts CSV_ROUTE_FILE.)
+        const csv = !/\.pdf$/i.test(asset.name) && (/\.(?:csv|tsv|xlsx|ofx|qfx|qif|xml|sta|mt940|940)$/i.test(asset.name) ||
+          capabilities.csv.accepts.includes(asset.mimeType?.split(';', 1)[0].toLowerCase() ?? ''));
         const format = csv ? 'csv' : 'pdf';
         if (limitReached || stopRequestedRef.current || !aliveRef.current ||
             getStateGeneration() !== generation || getStateSnapshot().privateMode) {
@@ -699,6 +725,9 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
         inFlightPickerUris.add(asset.uri);
         try {
           let accepted: Awaited<ReturnType<typeof uploadPdfStatement | typeof uploadCsvStatement>> | null = null;
+          // Read the file again under a fresh identity when the relay's record
+          // of an earlier read names rows this phone does not hold.
+          let reread = false;
           for (let attempt = 0; accepted === null; attempt += 1) {
             const delay = nextUploadDelay(starts[format], Date.now());
             if (delay > 0 && !(await waitFor(delay, index + 1))) {
@@ -713,9 +742,21 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
             starts[format].push(Date.now());
             try {
               accepted = csv
-                ? await uploadCsvStatement(cfg, asset, capabilities, ledgerMoney, dateOrder)
-                : await uploadPdfStatement(cfg, asset, capabilities, ledgerMoney, undefined, dateOrder);
+                ? await uploadCsvStatement(cfg, asset, capabilities, ledgerMoney, dateOrder, reread)
+                : await uploadPdfStatement(cfg, asset, capabilities, ledgerMoney, undefined, dateOrder, reread);
+              if (accepted.alreadyProcessed && !reread && accepted.statementImportId &&
+                  !(await holdsAfterFiling(accepted.statementImportIds ?? [accepted.statementImportId]))) {
+                reread = true;
+                accepted = null;
+                continue;
+              }
             } catch (uploadError) {
+              if (!reread && uploadError instanceof CloudImportError && uploadError.code === 'statement_options_conflict' &&
+                  uploadError.detail?.statementImportId &&
+                  !(await holdsAfterFiling(uploadError.detail.statementImportIds ?? [uploadError.detail.statementImportId]))) {
+                reread = true;
+                continue;
+              }
               // One patient retry: pacing keeps the minute limit, so a 429 here
               // is usually the hourly budget, and a second one ends the batch.
               if (attempt === 0 && uploadError instanceof CloudImportError && uploadError.code === 'rate_limited') {

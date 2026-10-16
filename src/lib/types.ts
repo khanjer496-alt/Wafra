@@ -80,9 +80,16 @@ export interface Account {
    * limit") but never the limit itself, and some redact the figure entirely
    * ("Avl Bal AED ····9235.93"), which we refuse to read because the leading
    * digits are gone. Knowing the limit recovers headroom for those cards:
-   * limit − outstanding, with no guessing.
+   * limit − outstanding, with no guessing. A card statement that prints the
+   * limit also sets it (see importedCreditLimit).
    */
   creditLimitFils?: number;
+  /**
+   * The limit a card statement last set, and its receipt clock. A newer
+   * statement may replace `creditLimitFils` only while it still equals this
+   * figure: once the person edits the limit, statements never overwrite it.
+   */
+  importedCreditLimit?: { fils: number; ts: number };
   /** Timestamp (ms) of the SMS the snapshot came from — newest wins. */
   snapshotTs?: number;
   /**
@@ -351,6 +358,12 @@ export interface Transaction {
    * absent, which is the correct answer for them — nobody retyped their title.
    */
   titleEdited?: boolean;
+  /**
+   * The title came from confirming a Review item (the person accepted what
+   * the alert said), not from typing over a parsed title. Duplicate matching
+   * then does not treat the row as renamed.
+   */
+  reviewConfirmed?: boolean;
   /**
    * Raw SMS body, kept ONLY when the parser wasn't confident (generic title
    * or fallback category) so the user can report unrecognized formats from
@@ -1075,6 +1088,11 @@ export interface ImportBatchInput {
    * fallback, while a later debit-worded purchase never downgrades it.
    */
   cardTypes?: Record<string, 'credit' | 'debit'>;
+  /**
+   * accountRef → the credit limit a card statement printed, and when (its
+   * receipt clock). Optional: older planners never send it.
+   */
+  creditLimits?: Record<string, { fils: number; ts: number }>;
   /** Supported local currency explicitly observed in this bank-alert batch. */
   /** ISO ledger currency proven by the imported rows, independent of parser country pack. */
   confirmedLedgerCurrency?: string;

@@ -190,6 +190,105 @@ test('a queue-full upload still drains accepted rows even when no file returned 
  await ctx.pick({}, {pdf:{accepts:['application/pdf']},csv:{accepts:['text/csv']}});
  assert.equal(drains,1);assert.equal(finishes,0);assert.equal(summary.added,2);assert.equal(summary.review,1);
 });
+function rereadHarness(responses, transactions = [], queued = []) {
+ const ts=require('typescript'),vm=require('node:vm');
+ const source=fs.readFileSync(path.join(root,'src/components/supplement-imports.tsx'),'utf8');
+ const body=source.slice(source.indexOf('  const recoverQueuedRows ='),source.indexOf('  /** What one successfully uploaded file')) + source.slice(source.indexOf('  const pickAndUpload ='),source.indexOf('  /** One tap:'));
+ const calls=[]; const results=[]; const money={currency:'AED',exponent:2}; const noop=()=>{};
+ const ctx={useCallback:f=>f,queuedRetryNeededRef:{current:false},pendingPdfs:[],state:{ledgerMoney:money},
+  getStateSnapshot:()=>({hydrated:true,privateMode:false,ledgerMoney:money,transactions}),
+  getStateGeneration:()=>1,aliveRef:{current:true},queuedRetryContextRef:{current:null},dateOrder:null,
+  setCurrencySheetVisible:noop,setError:noop,setStatus:noop,setFileResults:v=>results.push(...v),setSummary:noop,
+  setFilesOpen:noop,setBusy:noop,setLiveFiles:noop,setProgress:noop,setPendingPdfs:noop,setPdfPassword:noop,
+  DocumentPicker:{getDocumentAsync:async()=>({canceled:false,assets:[{uri:'blob:fixture',name:'a.csv',mimeType:'text/csv'}]})},
+  Platform:{OS:'web'},File:class{},inFlightPickerUris:new Set(),nextUploadDelay:()=>0,
+  uploadCsvStatement:async(...args)=>{calls.push(args[5]);const next=responses.shift();if(next instanceof Error||next instanceof contract.CloudImportError)throw next;return next;},
+  uploadPdfStatement:async()=>{throw Error('wrong type')},
+  // Filing the relay queue lands its rows in the ledger.
+  syncQueued:async()=>{const n=queued.length;transactions.push(...queued.splice(0));return {imported:n,review:0,complete:true};},
+  finishQueuedImport:async()=>{},rememberCoverage:async()=>{},newStatementRange:flow().newStatementRange,
+  holdsStatementRows:flow().holdsStatementRows,fileImportedDetail:()=> 'ok',
+  CloudImportError:contract.CloudImportError,copy:{fileFailed:'failed',fileLocked:'locked'},interpolate:s=>s,
+  errorText:(e)=>e.code,failed:noop,sleep:async()=>{},RATE_LIMIT_RETRY_MS:1,
+  stopRequestedRef:{current:false},stopWakeRef:{current:null},setStopping:noop,setPacing:noop,BatchStopped:class extends Error{},
+  statementBatches:{running:0,copies:new Set()},setSending:noop,
+ };
+ vm.runInNewContext(ts.transpileModule(body+'\nglobalThis.pick = pickAndUpload;', {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,ctx);
+ return {pick:()=>ctx.pick({}, {pdf:{accepts:['application/pdf']},csv:{accepts:['text/csv']}}),calls,results};
+}
+const ok202 = (id, alreadyProcessed=false) => ({acceptedRows:2,rejectedRows:0,totalRows:2,alreadyProcessed,statementImportId:id,coverage:null});
+test('a file already processed for an empty ledger (reinstall, erase, older backup) is read again, not left as a dead end', async () => {
+ const h=rereadHarness([ok202('a'.repeat(32),true), ok202('b'.repeat(32))]);
+ await h.pick();
+ assert.deepEqual(h.calls,[false,true]);
+});
+test('a file already processed whose rows this phone holds is not read again', async () => {
+ const h=rereadHarness([ok202('a'.repeat(32),true)],[{statementImportId:'a'.repeat(32)}]);
+ await h.pick();
+ assert.deepEqual(h.calls,[false]);
+});
+test('a different-settings refusal about rows this phone does not hold is read again', async () => {
+ const conflict=new contract.CloudImportError('statement_options_conflict',409,{statementImportId:'a'.repeat(32),previousDateOrder:'month-first'});
+ const h=rereadHarness([conflict, ok202('b'.repeat(32))]);
+ await h.pick();
+ assert.deepEqual(h.calls,[false,true], JSON.stringify(h.results));
+});
+test('a different-settings refusal about rows this phone holds names the earlier order instead', async () => {
+ const conflict=new contract.CloudImportError('statement_options_conflict',409,{statementImportId:'a'.repeat(32),previousDateOrder:'month-first'});
+ const h=rereadHarness([conflict],[{statementOccurrences:[{importId:'a'.repeat(32),rowIndex:3}]}]);
+ await h.pick();
+ assert.deepEqual(h.calls,[false]);
+ assert.equal(contract.pdfImportError(409,{error:'statement_options_conflict',statementImportId:'a'.repeat(32),previousDateOrder:'month-first'}).detail.previousDateOrder,'month-first');
+ const screen=fs.readFileSync(path.join(root,'src/components/supplement-imports.tsx'),'utf8');
+ assert.match(screen,/interpolate\(copy\.errOptionsConflictOrder, \{ order: order === 'day-first' \? copy\.dateDayFirst : copy\.dateMonthFirst \}\)/);
+});
+test('rows of the earlier read still waiting in the relay queue are filed first; the file is not read again', async () => {
+ const queued=[{statementImportId:'a'.repeat(32)}];
+ const h=rereadHarness([ok202('a'.repeat(32),true)],[],queued);
+ await h.pick();
+ assert.deepEqual(h.calls,[false]);
+});
+test('a parser-change refusal about rows this phone holds says so, and is not read again', async () => {
+ const conflict=new contract.CloudImportError('statement_options_conflict',409,{statementImportId:'a'.repeat(32),reason:'parser'});
+ const h=rereadHarness([conflict],[{statementImportId:'a'.repeat(32)}]);
+ await h.pick();
+ assert.deepEqual(h.calls,[false]);
+ assert.equal(contract.pdfImportError(409,{error:'statement_options_conflict',statementImportId:'a'.repeat(32),reason:'parser'}).detail.reason,'parser');
+ const screen=fs.readFileSync(path.join(root,'src/components/supplement-imports.tsx'),'utf8');
+ assert.match(screen,/value\.detail\?\.reason === 'parser'\) return copy\.errParserRead/);
+});
+test('a file is held when the ledger holds ANY id the relay names for it (first read or re-read)', async () => {
+ const response={...ok202('c'.repeat(32),true),statementImportIds:['a'.repeat(32),'c'.repeat(32)]};
+ const h=rereadHarness([response],[{statementImportId:'a'.repeat(32)}]);
+ await h.pick();
+ assert.deepEqual(h.calls,[false]);
+ const parsed=contract.parseCsvImportAccepted({acceptedRows:1,rejectedRows:0,totalRows:1,statementImportId:'c'.repeat(32),statementImportIds:['a'.repeat(32),'c'.repeat(32)]});
+ assert.deepEqual([...parsed.statementImportIds],['a'.repeat(32),'c'.repeat(32)]);
+ const conflict=contract.pdfImportError(409,{error:'statement_options_conflict',statementImportId:'c'.repeat(32),statementImportIds:['a'.repeat(32),'c'.repeat(32)],reason:'options'});
+ assert.deepEqual([...conflict.detail.statementImportIds],['a'.repeat(32),'c'.repeat(32)]);
+ assert.equal(contract.parseCsvImportAccepted({acceptedRows:1,rejectedRows:0,totalRows:1,statementImportIds:['nope']}).statementImportIds,undefined);
+});
+test('the upload asks for a re-read only when told to', async () => {
+ const headers=[];
+ const transport = load(path.join(root, 'src/lib/cloud-import.ts'), {
+  'expo/fetch': { fetch: async (_url, init) => { headers.push(init.headers); return { ok: true, status: 202, text: async () => JSON.stringify({acceptedRows:1,rejectedRows:0,totalRows:1,pages:1}) }; } },
+  'expo-file-system': { File: class { constructor() { throw new Error('native filesystem unavailable'); } } },
+  '@/lib/cloud-import-contract': contract,
+ }, { AbortController });
+ const caps={csv:{enabled:true,accepts:['text/csv'],maxBytes:1000}};
+ const file={uri:'blob:local',name:'s.csv',file:new Blob(['Date,Description,Debit\n2026-09-01,Cafe,25.00'],{type:'text/csv'})};
+ await transport.uploadCsvStatement({baseUrl:'https://example.invalid',adminToken:'t'},file,caps,{currency:'AED',exponent:2});
+ await transport.uploadCsvStatement({baseUrl:'https://example.invalid',adminToken:'t'},file,caps,{currency:'AED',exponent:2},null,true);
+ assert.equal(headers[0]['x-wafra-statement-reread'],undefined);
+ assert.equal(headers[1]['x-wafra-statement-reread'],'1');
+});
+test('holding a statement upload counts its own rows and its claims on matched rows', () => {
+ const {holdsStatementRows}=flow();
+ assert.equal(holdsStatementRows([],'a'.repeat(32)),false);
+ assert.equal(holdsStatementRows([{statementImportId:'a'.repeat(32)}],'a'.repeat(32)),true);
+ assert.equal(holdsStatementRows([{statementOccurrences:[{importId:'a'.repeat(32)}]}],'a'.repeat(32)),true);
+ assert.equal(holdsStatementRows([{statementImportId:'b'.repeat(32)}],'a'.repeat(32)),false);
+});
 test('replayed or legacy files cannot claim a newly interpreted activity range', () => {
  const {newStatementRange}=flow();
  const accepted={statementImportId:'a'.repeat(32),alreadyProcessed:false,coverage};

@@ -77,6 +77,20 @@ export async function drainStatementQueue(
   }
 }
 
+/**
+ * Whether the ledger holds any transaction of the statement upload `importId`
+ * names (as its own row, or as a claim on a row it matched). When it holds
+ * none — a reinstall, an erase, a restore from an older backup — a refusal
+ * about that earlier read is not a reason to stop: the file is read again.
+ */
+export function holdsStatementRows(
+  transactions: readonly { statementImportId?: string; statementOccurrences?: readonly { importId: string }[] }[],
+  importId: string,
+): boolean {
+  return transactions.some((row) => row.statementImportId === importId ||
+    row.statementOccurrences?.some((claim) => claim.importId === importId) === true);
+}
+
 /** A reupload cannot create a new range under changed interpretation settings. */
 export function newStatementRange(
   accepted: { statementImportId?: string; alreadyProcessed: boolean; coverage: StatementImportCoverage | null },

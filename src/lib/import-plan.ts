@@ -86,6 +86,8 @@ export type ScannedSms = Omit<ParsedSms, 'raw'> & {
   /** Relay-assigned opaque id of the statement upload a PDF/CSV row came from. */
   statementImportId?: string;
   statementRowIndex?: number;
+  /** A card statement summary's printed credit limit (relay statement rows only). */
+  creditLimitFils?: number;
   /**
    * Server-bound proof of the exact Shortcut branch and setup generation.
    * Only a marker for this receiving device's current generation may prove
@@ -1155,6 +1157,8 @@ function buildImportPlanInMarket(
   // Newest bank-quoted balance/limit per account — even from messages whose
   // transaction is already imported (rescans refresh the figures).
   const snapshots: ImportBatchInput['snapshots'] = {};
+  // Newest statement-printed credit limit per card (statement summaries only).
+  const creditLimits: NonNullable<ImportBatchInput['creditLimits']> = {};
   const hints: Record<string, string> = { ...state.accountHints };
   const newAccounts: Omit<Account, 'id'>[] = [];
   const newHints: Record<string, string> = {};
@@ -1739,6 +1743,11 @@ function buildImportPlanInMarket(
         : bankOnlyAccountId ?? '';
       if (!accountId) continue;
       noteSnapshot(accountId, p);
+      const statedLimit: unknown = p.creditLimitFils;
+      if (typeof statedLimit === 'number' && Number.isSafeInteger(statedLimit) && statedLimit > 0 &&
+          Number.isFinite(p.smsTs) && (!creditLimits[accountId] || p.smsTs! > creditLimits[accountId].ts)) {
+        creditLimits[accountId] = { fils: statedLimit, ts: p.smsTs! };
+      }
       const existingDue = matchingDues.find((due) => due.accountId === accountId);
       const improvesMinimum =
         existingDue !== undefined &&
@@ -2477,6 +2486,7 @@ function buildImportPlanInMarket(
       snapshots,
       bankNames,
       cardTypes,
+      ...(Object.keys(creditLimits).length > 0 ? { creditLimits } : {}),
       confirmedLedgerCurrency: confirmedLedgerCurrency(parsed),
       importMoney: importMoney ?? undefined,
       lastScanTs: newestTs,
