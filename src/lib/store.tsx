@@ -3155,7 +3155,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
     // Confirming a captured Apple Pay purchase on an account remembers that
     // Wallet card's account, so its later purchases post on their own.
-    const walletCard = plan.outcome === 'added' ? applePayCardOfReview(
+    const walletCard = plan.outcome === 'added' && plan.transaction.type === 'expense' &&
+      !input.betweenOwnAccounts ? applePayCardOfReview(
       authoritativeState.current.reviewTray.pending.find((item) => item.id === input.reviewId)) : null;
     const next = plan.outcome === 'duplicate'
       ? dispatch({ type: 'setReviewTray', reviewTray: plan.reviewTray,
@@ -3180,18 +3181,31 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   ) => {
     const current = authoritativeState.current;
     if (!current.hydrated || items.length === 0) return { posted: [], durable: ensureDurable() };
-    const plan = planLinkedApplePayPosts(current, items, Date.now(), () => makeId('tx'), options);
+    // Auto-posting is an optimisation over Review, never a gate: any refusal
+    // (planner or ledger invariant) leaves every item for Review instead of
+    // holding the Apple Pay queue on a purchase that can never post.
+    let plan: ReturnType<typeof planLinkedApplePayPosts>;
+    try {
+      plan = planLinkedApplePayPosts(current, items, Date.now(), () => makeId('tx'), options);
+    } catch {
+      return { posted: [], durable: ensureDurable() };
+    }
     if (plan.postedIds.length === 0 || !plan.ledgerMoney) return { posted: [], durable: ensureDurable() };
+    let next: AppState;
+    try {
+      next = dispatch({
+        type: 'postLinkedApplePay',
+        transactions: plan.transactions,
+        reviewTray: plan.reviewTray,
+        ledgerMoney: plan.ledgerMoney,
+      });
+    } catch {
+      return { posted: [], durable: ensureDurable() };
+    }
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
     }
-    const next = dispatch({
-      type: 'postLinkedApplePay',
-      transactions: plan.transactions,
-      reviewTray: plan.reviewTray,
-      ledgerMoney: plan.ledgerMoney,
-    });
     const durable = persist(next).then((written) => {
       if (!written) throw new Error('Encrypted Apple Pay write failed');
     });
