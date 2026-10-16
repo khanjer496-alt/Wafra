@@ -71,8 +71,10 @@ function ApplePaySetupScreen() {
   const largeText = useLargeTextLayout();
   const router = useRouter();
   const params = useLocalSearchParams<{ fromOnboarding?: string; shortcutResult?: string }>();
-  const { state, setCaptureOptOut, getStateGeneration } = useStore();
+  const { state, setCaptureOptOut, getStateGeneration, forgetApplePayCardLink } = useStore();
   const onboarding = params.fromOnboarding === '1' || (state.hydrated === true && !state.onboarded);
+  // Wallet card → account choices remembered on this iPhone (never in a backup).
+  const links = state.applePayCardLinks ?? [];
   const supported = Platform.OS === 'ios' && iosSupportsApplePayAutomation(Platform.Version);
   const [status, setStatus] = useState<WafraLiveCaptureStatus | null>(null);
   const [progress, setProgress] = useState<IosMessageSetupProgress | null>(null);
@@ -180,6 +182,10 @@ function ApplePaySetupScreen() {
     try { await Linking.openURL(iosApplePayCheckUrl(onboarding)); }
     catch { if (current()) setError(w.missing); }
   });
+  // The card's next purchase asks in Review again.
+  const forget = (cardOrPass: string) => void run(async () => {
+    await forgetApplePayCardLink(cardOrPass);
+  });
   const back = () => router.dismissTo({ pathname: '/ios-setup', params: {
     section: 'future', applePayReturn: String(Date.now()), ...(onboarding ? { fromOnboarding: '1' } : {}),
   } });
@@ -272,12 +278,26 @@ function ApplePaySetupScreen() {
           {flow.incomplete && <ThemedText accessibilityRole="alert" style={{ color: band.statusOver }}>{w.incomplete}</ThemedText>}
           {flow.pending > 0 && <ThemedText type="small" style={{ color: band.text }}>{w.pending}: {flow.pending}</ThemedText>}
           {flow.received && <ThemedText type="meta" style={muted}>{w.last}: {formatCaptureReceipt(status?.lastApplePayReceivedAt ?? null, language)}</ThemedText>}
-          {cards.length > 0 && <View testID="apple-pay-card-observations" style={styles.cards}>
+          {(cards.length > 0 || links.length > 0) && <View testID="apple-pay-card-observations" style={styles.cards}>
             <ThemedText type="smallBold" accessibilityRole="header" style={{ color: band.text }}>{w.cardTitle}</ThemedText>
             {cards.map((card, index) => <ThemedText key={`${card.receivedAt}-${index}`} type="small" style={{ color: band.text }}>
               {formatCaptureReceipt(card.receivedAt, language)} · {card.cardOrPass ?? w.cardMissing}
             </ThemedText>)}
             <ThemedText type="meta" style={muted}>{w.cardHelp}</ThemedText>
+            {links.length > 0 && <View testID="apple-pay-card-links" style={styles.cards}>
+              <ThemedText type="smallBold" accessibilityRole="header" style={{ color: band.text }}>{w.linksTitle}</ThemedText>
+              {links.map(link => {
+                const account = state.accounts.find(row => row.id === link.accountId);
+                const destination = link.ambiguous === true ? w.linkAmbiguous
+                  : account && account.archived !== true ? account.name : w.linkGone;
+                return <View key={link.cardOrPass} style={styles.linkRow}>
+                  <ThemedText type="small" style={[styles.linkText, { color: band.text }]}>{link.cardOrPass} · {destination}</ThemedText>
+                  <EButton testID="apple-pay-card-link-forget" palette={band} variant="quiet" label={w.forget}
+                    accessibilityLabel={`${w.forget}: ${link.cardOrPass}`} onPress={() => forget(link.cardOrPass)} disabled={busy} />
+                </View>;
+              })}
+              <ThemedText type="meta" style={muted}>{w.linksHelp}</ThemedText>
+            </View>}
           </View>}
           {onboarding ? <ThemedText type="small" style={muted}>{w.reviewOnboarding}</ThemedText> :
             <EButton palette={band} variant="secondary" label={w.review} onPress={() => router.push('/review-alerts')} disabled={busy} />}
@@ -308,4 +328,6 @@ const styles = StyleSheet.create({
   stepBody: { gap: 10 },
   delivery: { gap: 8, paddingTop: 6 },
   cards: { gap: 4, paddingTop: 4 },
+  linkRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  linkText: { flexShrink: 1, minWidth: 0 },
 });

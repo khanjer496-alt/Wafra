@@ -410,8 +410,9 @@ struct CaptureWafraApplePayIntent: AppIntent {
   var amount: IntentCurrencyAmount?
   @Parameter(title: LocalizedStringResource("live.apple_pay.merchant.parameter", table: "WafraIntents", bundle: .main))
   var merchant: String?
-  /// Optional Wallet "Card or Pass" text, stored for on-device observation
-  /// only. Graphs that do not bind it (Apple Pay v1 as first shipped) leave it
+  /// Optional Wallet "Card or Pass" text. Kept on this device in the queued
+  /// record so a card the user linked to an account once can post on its
+  /// own. Graphs that do not bind it (Apple Pay v1 as first shipped) leave it
   /// nil and record the payment exactly as before. Never logged.
   @Parameter(title: LocalizedStringResource("live.apple_pay.card_or_pass.parameter", table: "WafraIntents", bundle: .main))
   var cardOrPass: String?

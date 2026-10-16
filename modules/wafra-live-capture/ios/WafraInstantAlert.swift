@@ -47,8 +47,11 @@ public enum WafraInstantAlert {
   }
 
   /// Wafra's own notice for an Apple Pay purchase the Wallet automation passed
-  /// in. Same gates as the bank-text preview. Wallet names the card but not the
-  /// Wafra account, so the purchase waits in Review and the notice says so.
+  /// in. Same gates as the bank-text preview. The wording is neutral on
+  /// purpose ("Apple Pay · <card>"): whether the purchase posts on its own
+  /// (a card the user linked to an account) or waits in Review is decided by
+  /// the app when it drains the queue, against the live ledger, so this
+  /// extension never claims either outcome.
   public static func postApplePay(amount: Decimal, currency: String, merchant: String?, cardOrPass: String?,
                                   observedAt: Date = Date()) async {
     let store = WafraLiveCaptureStore.shared

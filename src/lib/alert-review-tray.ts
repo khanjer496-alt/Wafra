@@ -14,6 +14,23 @@ export const REVIEW_TOMBSTONE_CAP = 1000;
 export const REVIEW_TEMPLATE_RULE_CAP = 200;
 const APPLE_MESSAGE_ID_RE = /^[0-9a-f]{64}$/;
 
+/** Mirrors WafraLiveCaptureStore.maxApplePayCardOrPassCharacters (UTF-16 units). */
+export const MAX_WALLET_CARD_NAME_LENGTH = 80;
+const UNSAFE_WALLET_CARD_RE = /[\u0000-\u001F\u007F-\u009F\u061C\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/u;
+
+/**
+ * Wallet's "Card or Pass" text exactly as the native sanitizer emits it:
+ * non-empty, trimmed, single ASCII spaces, bounded, no unsafe or lone
+ * surrogate scalars. Anything else is not a card name this app trusts.
+ */
+export const usableWalletCardName = (value: unknown): value is string =>
+  typeof value === 'string' && value.length > 0 && value.length <= MAX_WALLET_CARD_NAME_LENGTH &&
+  value === value.replace(/\s+/gu, ' ').trim() && !UNSAFE_WALLET_CARD_RE.test(value) &&
+  Array.from(value).every((character) => {
+    const codePoint = character.codePointAt(0)!;
+    return codePoint < 0xd800 || codePoint > 0xdfff;
+  });
+
 /** One source-free review identity shared by local capture and history import. */
 export const appleMessageReviewIdentity = (
   messageId: string,
@@ -81,6 +98,11 @@ export interface UniversalReviewAlert {
   /** Android app provenance only; never notification text. */
   sourcePackage?: string;
   sourceClass?: 'trusted-bank' | 'play-finance' | 'financial-candidate';
+  /**
+   * iOS Apple Pay reviews only: Wallet's sanitized "Card or Pass" name. On
+   * device only; confirming the review remembers this card's account.
+   */
+  walletCardOrPass?: string;
 }
 
 export type ReviewEntry = ReviewAlert | UniversalReviewAlert;
@@ -755,7 +777,10 @@ const normalizeReviewEntry = (value: unknown, now: number): ReviewEntry | null =
     : {};
   const conflict = (common as UniversalReviewAlert).currencyConflict === true
     ? { currencyConflict: true as const } : {};
-  return { ...item, ...sourceMeta, ...attention, ...conflict, expiresAt: common.expiresAt };
+  const walletCard = (common as UniversalReviewAlert).walletCardOrPass;
+  const card = isIosApplePayReview(common) && usableWalletCardName(walletCard)
+    ? { walletCardOrPass: walletCard } : {};
+  return { ...item, ...sourceMeta, ...attention, ...conflict, ...card, expiresAt: common.expiresAt };
   }
   const item = value as ReviewAlert;
   const instrument = item?.instrument;

@@ -808,6 +808,19 @@ export interface StatementCoverageEntry {
   format: 'pdf' | 'csv';
 }
 
+/** One remembered Wallet card → account choice (see AppState.applePayCardLinks). */
+export interface ApplePayCardLink {
+  /** Wallet's sanitized "Card or Pass" name, exactly as captured. */
+  cardOrPass: string;
+  accountId: string;
+  linkedAt: number;
+  /**
+   * Confirmed on two different accounts: Wallet names are not unique, so this
+   * card's purchases always ask in Review until the person forgets it.
+   */
+  ambiguous?: true;
+}
+
 export interface AppState {
   /** Device-keyed source-free learned formats; only encrypted local state retains them. */
   privateAlertFormats?: import('@/lib/private-alert-formats').PrivateAlertFormatStore;
@@ -855,6 +868,12 @@ export interface AppState {
   accountHints: Record<string, string>;
   /** User-confirmed Google Play packages learned from notification Review. */
   trustedNotificationPackages: string[];
+  /**
+   * iPhone Apple Pay: Wallet "Card or Pass" name → the account the user chose
+   * when confirming that card's first captured purchase. On device only:
+   * never exported in a backup. Optional so older ledgers need no migration.
+   */
+  applePayCardLinks?: ApplePayCardLink[];
   /** Legacy provider or scoped service keys marked as NOT recurring. */
   notSubscriptions: string[];
   /**
