@@ -290,6 +290,11 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       if (name === '@/lib/wallet-near-match') {
         return require('../build/wallet-near-match.js');
       }
+      // The Wallet-row predicate the iOS drain uses to keep a bank alert from
+      // repeating an Apple Pay purchase; pure, so always the shipping module.
+      if (name === '@/lib/dedupe') {
+        return require('../build/dedupe.js');
+      }
       if (name === '@/lib/parsed-review-event') {
         return require('../build/parsed-review-event.js');
       }

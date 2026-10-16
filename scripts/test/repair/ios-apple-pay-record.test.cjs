@@ -74,8 +74,8 @@ test('strict structured payload rejects unknown keys and does not parse arbitrar
   for (const raw of ['not JSON', 'Your OTP is 123456 for AED 80.00.', '[]', 'null',
     JSON.stringify({ amount: '1', currency: 'AED' }),
     JSON.stringify({ amount: '1', currency: 'AED', merchant: '', cardName: 'Private Card' }),
-    // Card or Pass is observe-only native metadata and never part of a queued record.
-    JSON.stringify({ amount: '1', cardOrPass: 'Visa Gold 1234', currency: 'AED', merchant: '' }),
+    // Card or Pass is the one optional key; it never admits another one.
+    JSON.stringify({ amount: '1', cardOrPass: 'Visa Gold 1234', currency: 'AED', merchant: '', status: 'posted' }),
     JSON.stringify({ amount: '1', currency: 'AED', merchant: '', status: 'posted' }),
     JSON.stringify({ amount: '1', currency: 'AED', merchant: '', date: '2026-09-23' })]) {
     refused(parseIosApplePayRecord(raw, id, observedAt), 'invalid-payload');
@@ -104,4 +104,55 @@ test('stable opaque UUID identity survives exact queue retry without retained pa
   for (const candidate of [NaN, Infinity, -1, 1.5, 8640000000000000]) {
     refused(parseIosApplePayRecord(payload(), id, candidate), 'invalid-observed-at');
   }
+});
+
+const tray = require(path.join(build, 'alert-review-tray.js'));
+const withCard = (cardOrPass, extra = {}) => JSON.stringify({ amount: '25.00', cardOrPass, currency: 'AED', merchant: 'Test Shop', ...extra });
+
+test('payload decode with a Wallet card carries the sanitized name on the review only', () => {
+  const outcome = parseIosApplePayRecord(withCard('Apple Cash'), id, observedAt);
+  assert.equal(outcome.kind, 'review');
+  assert.equal(outcome.item.walletCardOrPass, 'Apple Cash');
+  assert.equal(JSON.stringify(outcome.item.event).includes('Apple Cash'), false, 'the card is never money or merchant evidence');
+  assert.equal(outcome.item.event.instrument.evidence, 'missing');
+  // Same receipt identity with or without the card: one purchase, one review id.
+  const plain = parseIosApplePayRecord(payload('25.00'), id, observedAt);
+  assert.equal(plain.kind, 'review');
+  assert.equal(Object.hasOwn(plain.item, 'walletCardOrPass'), false);
+  assert.equal(plain.item.id, outcome.item.id);
+  assert.equal(plain.item.sourceKey, outcome.item.sourceKey);
+  // The card survives the tray's persistence normalizer for an Apple Pay review only.
+  const admitted = tray.admitPreparedReviewAlert(tray.emptyAlertReviewTray(), outcome.item, observedAt + 1000);
+  assert.equal(admitted.outcome, 'admitted');
+  const reloaded = tray.normalizeAlertReviewTray(JSON.parse(JSON.stringify(admitted.state)), observedAt + 2000);
+  assert.equal(reloaded.pending[0].walletCardOrPass, 'Apple Cash');
+  const foreign = { ...outcome.item, id: 'notification_review_id_' + 'a'.repeat(16), sourceKey: 'local_review_source_' + 'b'.repeat(32) };
+  const other = tray.admitPreparedReviewAlert(tray.emptyAlertReviewTray(), foreign, observedAt + 1000);
+  assert.equal(other.outcome, 'admitted');
+  assert.equal(Object.hasOwn(other.state.pending[0], 'walletCardOrPass'), false, 'only Wallet reviews keep a card name');
+});
+
+test('payload decode refuses a card the native sanitizer could never write', () => {
+  for (const bad of ['', ' Apple Cash', 'Apple Cash ', 'Apple  Cash', 'Apple\nCash', 'a‮b', 'x'.repeat(81), 42, null, {}]) {
+    refused(parseIosApplePayRecord(withCard(bad), id, observedAt), 'invalid-card');
+  }
+  // The shared native table: every value the sanitizer emits decodes.
+  const table = JSON.parse(require('node:fs').readFileSync(path.join(root, 'scripts/test/fixtures/apple-pay-card-or-pass.json'), 'utf8'));
+  for (const { name, expected } of table.cases) {
+    if (expected === null) continue;
+    const outcome = parseIosApplePayRecord(withCard(expected), id, observedAt);
+    assert.equal(outcome.kind, 'review', name);
+    assert.equal(outcome.item.walletCardOrPass, expected, name);
+  }
+});
+
+test('old records without the card field still parse exactly as before', () => {
+  const outcome = parseIosApplePayRecord(JSON.stringify({ amount: '12.34', currency: 'AED', merchant: 'Test Shop' }), id, observedAt);
+  assert.equal(outcome.kind, 'review');
+  assert.deepEqual(Object.keys(outcome.item).sort(),
+    ['channel', 'event', 'expiresAt', 'id', 'kind', 'observedAt', 'parserVersion', 'sourceKey']);
+  // A tray persisted before this field existed reloads unchanged.
+  const legacy = tray.normalizeAlertReviewTray({ schemaVersion: 1, pending: [outcome.item], tombstones: [], templateRules: [] }, observedAt + 1000);
+  assert.equal(legacy.pending.length, 1);
+  assert.equal(Object.hasOwn(legacy.pending[0], 'walletCardOrPass'), false);
 });

@@ -25,7 +25,14 @@ import option.
 Apple Pay setup is offered on iOS 17+ (when Wallet Transaction automations
 arrived) for banks that send no SMS. On iOS 17–26 the owner creates a personal
 Transaction automation that runs the bundled Wafra Apple Pay v1 Shortcut; on
-iOS 27 the guide adds the trigger inside the Shortcut, with its recording. Each
-captured purchase goes to Review. No real Apple Pay purchase has been verified
-on a device yet. The simulator's strict History file-protection failure was not bypassed
+iOS 27 the guide adds the trigger inside the Shortcut, with its recording. The
+first captured purchase from each Wallet card goes to Review; confirming it on
+an account links that card (by Wallet's "Card or Pass" name, kept on the
+iPhone only) and its later purchases post on their own. A purchase without a
+card name, from an unlinked card, in another currency, on a deleted or hidden
+account, or that may already be in the ledger still goes to Review; a bank
+text for an Apple Pay purchase already in the ledger goes to Review as a
+possible duplicate. Links can be forgotten on the Apple Pay setup screen.
+Review-and-confirm was verified with a real tap on an iPhone 15 (iOS 26.6.2);
+automatic posting of a linked card is not yet device-verified. The simulator's strict History file-protection failure was not bypassed
 and does not qualify History behavior on an iPhone.

@@ -196,7 +196,9 @@ export default function IosSetupScreen() {
   const applePayMode = shownSource === 'apple-pay';
   const messageMode = !notificationMode && !applePayMode;
   const applePayLabel = language === 'ar' ? 'إعداد Apple Pay' : 'Set up Apple Pay';
-  const applePaySummary = language === 'ar' ? 'أرسل عمليات الدفع ببطاقتك عبر Apple Pay إلى المراجعة. لا يلزم اختيار بنك.' : 'Send Apple Pay card taps to Review. No bank selection needed.';
+  const applePaySummary = language === 'ar'
+    ? 'التقط عمليات الدفع ببطاقتك عبر Apple Pay. أول عملية من كل بطاقة تسألك عن حسابها، وتُضاف اللاحقة تلقائياً. لا يلزم اختيار بنك.'
+    : 'Catch Apple Pay card taps. The first purchase from each card asks which account it belongs to; later ones are added automatically. No bank selection needed.';
   const setup = { ...rawSetup, readiness: resolveIosSelectedReadiness(shownSource, rawSetup,
     futureProgress.futureShortcutVersion, futureProgress.futureAttemptStartedAt) };
   const legacyUpgrade = messageMode && !rawSetup.loading && isIosLegacyCaptureUpgrade(futureProgress, rawSetup);

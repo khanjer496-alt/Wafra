@@ -11,7 +11,7 @@ const progressApi = load(path.join(root, 'src/lib/ios-message-onboarding.ts'), {
   './ios-history-setup': { isIosHistoryShortcutInstalled: async () => false },
 });
 
-async function screen({ version = '27.0', nativePresent = true, capability = true, enabled = false, entitled = true, proof = null, received = null, bundled = true, installed = false, saved = null, fromOnboarding = '1', onboarded = false, cards } = {}) {
+async function screen({ version = '27.0', nativePresent = true, capability = true, enabled = false, entitled = true, proof = null, received = null, bundled = true, installed = false, saved = null, fromOnboarding = '1', onboarded = false, cards, links, accounts = [] } = {}) {
   const slots = [], effects = [], events = [], urls = [], shares = [], routes = [], listeners = [];
   let cursor = 0, generation = 1, holdNext;
   const generationFn = () => generation;
@@ -54,8 +54,10 @@ async function screen({ version = '27.0', nativePresent = true, capability = tru
     '@/lib/ios-capture-health': health, '@/lib/ios-apple-pay-setup': helper,
     '@/lib/details-copy': load(path.join(root, 'src/lib/details-copy.ts')),
     '@/lib/ios-message-onboarding': { dispatchIosMessageSetup: async event => { events.push(event); progress = progressApi.reduceIosMessageSetup(progress, event); }, loadIosMessageSetupProgress: async () => progress, progressForSource: progressApi.progressForSource },
-    '@/lib/store': { useStore: () => ({ state: { hydrated: true, onboarded }, getStateGeneration: generationFn,
-      setCaptureOptOut: async value => events.push(`opt-out:${value}`) }) },
+    '@/lib/store': { useStore: () => ({ state: { hydrated: true, onboarded, accounts, ...(links ? { applePayCardLinks: links } : {}) },
+      getStateGeneration: generationFn,
+      setCaptureOptOut: async value => events.push(`opt-out:${value}`),
+      forgetApplePayCardLink: async card => { events.push(`forget:${card}`); links = (links ?? []).filter(row => row.cardOrPass !== card); } }) },
   }).default;
   let tree;
   const render = () => { cursor = 0; tree = component(); for (const effect of effects.splice(0)) effect(); };
@@ -166,7 +168,8 @@ test('the ink band shows the plain title, one line and an example marked as one;
   assert.match(example.props.accessibilityLabel, /^Example only\..*waits in Review/);
   const bandText = band.filter(n => n.type === 'Text').map(n => n.props.children).join(' ');
   assert.match(bandText, /Apple Pay purchases/);
-  assert.match(bandText, /goes to Review/);
+  assert.match(bandText, /first purchase from each card asks which account it belongs to/);
+  assert.match(bandText, /added automatically/);
   assert.match(bandText, /Example/);
   assert.doesNotMatch(bandText, /•|\d{4}/, 'no card identity is shown');
   const sheet = walk(scaffold.props.children);
@@ -271,8 +274,50 @@ test('recent Wallet Card or Pass values are listed newest first, on device only,
   assert.equal(lines.length, 3);
   assert.match(lines[0], /· Apple Card$/); assert.match(lines[1], /· Visa Gold 1234$/); assert.match(lines[2], /· No card name sent \(optional\)$/);
   assert.match(h.text(), /Card or Pass from Wallet/);
-  assert.match(h.text(), /not used to choose an account/);
-  assert.match(h.text(), /Optional\./);
+  assert.match(h.text(), /first purchase from each card asks which account it belongs to; later ones from that card are added automatically/);
+  assert.match(h.text(), /card name stays on this iPhone/);
+  assert.equal(walk(block).some(n => n.props?.testID === 'apple-pay-card-links'), false, 'no linked-card list without links');
+});
+
+test('linked Wallet cards are listed with their account and can be forgotten', async () => {
+  const at = Date.parse('2026-10-11T09:00:00Z');
+  const h = await screen({ enabled: true, received: at, cards: [], accounts: [
+    { id: 'acc-liv', name: 'Liv', kind: 'bank' }, { id: 'acc-old', name: 'Old card', kind: 'card', archived: true },
+  ], links: [
+    { cardOrPass: 'Apple Cash', accountId: 'acc-liv', linkedAt: at - 1000 },
+    { cardOrPass: 'Liv Debit', accountId: 'acc-gone', linkedAt: at - 500 },
+    { cardOrPass: 'Old Visa', accountId: 'acc-old', linkedAt: at },
+  ] });
+  const block = walk(h.tree()).find(n => n.props?.testID === 'apple-pay-card-links');
+  assert.ok(block, 'links show even when Wallet sent no recent card rows');
+  const lines = walk(block).filter(n => n.type === 'Text' && n.props.type === 'small').map(n => [].concat(n.props.children).join(''));
+  assert.deepEqual(lines, ['Apple Cash · Liv', 'Liv Debit · account removed or hidden, so purchases ask again',
+    'Old Visa · account removed or hidden, so purchases ask again']);
+  const forgets = walk(block).filter(n => n.type === 'Button' && n.props.label === 'Forget');
+  assert.equal(forgets.length, 3);
+  assert.equal(forgets[0].props.accessibilityLabel, 'Forget: Apple Cash');
+  forgets[0].props.onPress();
+  await h.flush();
+  assert.ok(h.events.includes('forget:Apple Cash'));
+  const after = walk(walk(h.tree()).find(n => n.props?.testID === 'apple-pay-card-links'))
+    .filter(n => n.type === 'Text' && n.props.type === 'small').map(n => [].concat(n.props.children).join(''));
+  assert.equal(after.some(line => line.startsWith('Apple Cash')), false);
+  assert.match(h.text(), /Forget a card to choose its account again on its next purchase/);
+});
+
+test('Apple Pay setup copy says the first purchase per card asks and later ones post, in English and Arabic', () => {
+  const en = helper.iosApplePayCopy('en'), ar = helper.iosApplePayCopy('ar');
+  for (const key of ['intro', 'cardHelp']) {
+    assert.match(en[key], /first purchase from each card asks which account it belongs to/, key);
+    assert.match(en[key], /added automatically/, key);
+    assert.doesNotMatch(en[key], /Each supported purchase goes to Review|not used to choose an account/, key);
+    assert.match(ar[key], /أول عملية من كل بطاقة تسألك/, key);
+    assert.match(ar[key], /تلقائياً/, key);
+  }
+  for (const key of ['linksTitle', 'linksHelp', 'linkGone', 'forget']) {
+    assert.equal(typeof en[key], 'string', key); assert.equal(typeof ar[key], 'string', key);
+    assert.notEqual(en[key], ar[key], key);
+  }
 });
 
 test('no card block on older binaries, empty lists or a failed read; the rest of the screen still loads', async () => {
