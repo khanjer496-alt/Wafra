@@ -615,7 +615,14 @@ export function useAutoImport(
     setMarket,
     recordIosCaptureWarning,
     clearIosCaptureWarning,
+    postLinkedApplePay,
   } = useStoreActions();
+  // Linked Wallet cards post on their own; the title matches Review's default.
+  const postLinkedApplePayForCapture = useCallback(
+    (items: Parameters<typeof postLinkedApplePay>[0]) =>
+      postLinkedApplePay(items, { fallbackTitle: t('genericCardPayment') }),
+    [postLinkedApplePay],
+  );
   const reminderInputsObserved = useRef(false);
   const captureLedger = useMemo<CaptureLedgerAdapter>(() => ({
     getState: getStateSnapshot,
@@ -668,8 +675,9 @@ export function useAutoImport(
           ? Promise.resolve(cachedReferenceQuote(base, quote, date, current.transactions))
           : loadReferenceQuote(base, quote, date, { transactions: current.transactions });
       },
+      postLinkedApplePay: postLinkedApplePayForCapture,
     });
-  }, [captureLedger, getStateSnapshot, iosNative]);
+  }, [captureLedger, getStateSnapshot, iosNative, postLinkedApplePayForCapture]);
   const iosCycleDependencies = useMemo<IosLocalCaptureCycleDependencies | null>(() => {
     if (!iosNative || !iosCoordinator) return null;
     return {

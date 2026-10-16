@@ -12,7 +12,9 @@ import {
   isUniversalReviewAlert,
   partitionReviewsByCapacity,
   reviewCaptureBacklog,
+  type ReviewEntry,
 } from '@/lib/alert-review-tray';
+import { isApplePayWalletRow } from '@/lib/dedupe';
 import { migrateLegacyLedgerMoney } from '@/lib/ledger-money';
 import { settleWalletNearMatches, walletNearMatchesRetained } from '@/lib/wallet-near-match';
 import { createIosNotificationReplayGuard } from '@/lib/ios-notification-replay';
@@ -29,6 +31,7 @@ import {
   parseLocalMessageRecordWithPrivateFormat,
   parseLocalApplePayRecord,
   preflightLocalMessageRecord,
+  walletRepeatReview,
   type LocalMessageParseOutcome,
   type LocalApplePayParseOutcome,
 } from '@/lib/local-message-record';
@@ -97,6 +100,12 @@ interface CoordinatorInput {
   fxQuote?: (base: string, quote: string, date: string) => Promise<{
     base: string; quote: string; rate: number; date: string;
   } | null>;
+  /**
+   * Posts captured Apple Pay reviews whose Wallet card the user linked to an
+   * account (store.postLinkedApplePay). Returns the posted review ids; every
+   * other item is staged for Review as before. Absent: everything is Review.
+   */
+  postLinkedApplePay?: (items: ReviewEntry[]) => { posted: string[]; durable: Promise<void> };
 }
 
 /** Distinct pair/day rate lookups one page may make; the rest wait in Review. */
@@ -172,6 +181,82 @@ const earliestObservedAt = (
   });
   return timestamps.length > 0 ? Math.min(...timestamps) : null;
 };
+
+/** Same window the planner and Review use for a possible Apple Pay duplicate. */
+const WALLET_REPEAT_MS = 10 * 60_000;
+
+type ParsedOutcome = Extract<LocalMessageParseOutcome, { kind: 'parsed' }>;
+
+/** A purchase alert that could repeat a Wallet purchase (not a statement row). */
+const walletRepeatCandidate = (row: ParsedOutcome['row']): boolean =>
+  row.kind === 'transaction' && row.type === 'expense' && !row.transferHint &&
+  Number.isSafeInteger(row.smsTs) && Number.isSafeInteger(row.amountFils) &&
+  (row.captureSource === undefined || row.captureSource === 'shortcut');
+
+/** Apple Pay rows: unbound Wallet rows and rows already bound to one bank alert. */
+const isWalletPurchaseRow = (row: AppState['transactions'][number]): boolean =>
+  (isApplePayWalletRow(row) || row.walletBound === true) && row.type === 'expense' &&
+  Number.isFinite(row.ts);
+
+/** The closest Wallet purchase of the same amount within the window, if any. */
+function nearestWalletRow(
+  state: AppState,
+  row: ParsedOutcome['row'],
+): AppState['transactions'][number] | undefined {
+  if (!walletRepeatCandidate(row)) return undefined;
+  let best: AppState['transactions'][number] | undefined;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const transaction of state.transactions ?? []) {
+    if (!isWalletPurchaseRow(transaction) || transaction.amountFils !== row.amountFils) continue;
+    const distance = Math.abs(transaction.ts! - row.smsTs!);
+    if (distance <= WALLET_REPEAT_MS && distance < bestDistance) {
+      best = transaction;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
+/**
+ * Indexes of parsed purchase alerts the planner would post as a NEW row
+ * although an Apple Pay purchase of the same amount is already in the ledger
+ * within the window, on any account. Exact duplicates, strict Wallet
+ * bindings and the planner's own possible-duplicate reviews are left to the
+ * planner; only a would-be second row is diverted. Repeats until stable, so a
+ * same-page copy that deduped against a diverted alert is checked as well.
+ */
+function divertWalletRepeats(
+  outcomes: readonly LocalMessageParseOutcome[],
+  state: AppState,
+  now: Date,
+): number[] {
+  const candidates = outcomes.flatMap((outcome, index) =>
+    outcome.kind === 'parsed' && nearestWalletRow(state, outcome.row) ? [index] : []);
+  if (candidates.length === 0) return [];
+  const diverted = new Set<number>();
+  for (let round = 0; round <= candidates.length; round += 1) {
+    const remaining = outcomes.flatMap((outcome, index) =>
+      outcome.kind === 'parsed' && !diverted.has(index) ? [outcome.row] : []);
+    let plan: ImportPlan;
+    try {
+      plan = buildImportPlan(remaining, state, state.lastScanTs, now, []);
+    } catch {
+      // The real plan below surfaces the error; nothing is posted from here.
+      break;
+    }
+    const posted = plan.batch?.transactions ?? [];
+    const next = candidates.filter((index) => {
+      if (diverted.has(index)) return false;
+      const row = (outcomes[index] as ParsedOutcome).row;
+      return posted.some((transaction) => transaction.type === 'expense' &&
+        transaction.amountFils === row.amountFils && transaction.ts === row.smsTs &&
+        !isApplePayWalletRow(transaction));
+    });
+    if (next.length === 0) break;
+    for (const index of next) diverted.add(index);
+  }
+  return [...diverted].sort((left, right) => left - right);
+}
 
 const sourceFreePageError = (message: string): Error => {
   const error = new Error(message);
@@ -572,6 +657,7 @@ export function createIosLocalCaptureCoordinator(
       // is acknowledged as ignored with the visible count. A record without
       // its own market is never converted.
       const currencyConflictReviewIds = new Set<string>();
+      const walletRepeatReviewIds = new Set<string>();
       let convertedConflicts = 0;
       if (pageCurrencyConflict) {
         // A purchase with a dated reference rate is CONVERTED into the ledger
@@ -666,6 +752,20 @@ export function createIosLocalCaptureCoordinator(
         if (outcome.kind !== 'parsed' || outcome.row.channel === 'push') {
           outcomes[index] = reviewPossibleReplay(outcome, page[index].preflight.id);
         }
+      }
+      // A bank alert for an Apple Pay purchase already in the ledger (one the
+      // user confirmed or a linked card posted) never adds a second row. The
+      // planner flags a same-account repeat itself; this also covers a repeat
+      // it would post on another or a newly created account. Each diverted
+      // record is acknowledged only behind its retained Review item.
+      for (const index of divertWalletRepeats(outcomes, input.ledger.getState(), now)) {
+        const outcome = outcomes[index];
+        const walletRowId = outcome.kind === 'parsed'
+          ? nearestWalletRow(input.ledger.getState(), outcome.row)?.id : undefined;
+        const review = outcome.kind === 'parsed' && walletRowId
+          ? walletRepeatReview(outcome, page[index].preflight.id, walletRowId) : null;
+        outcomes[index] = review ?? { kind: 'held', market: null, milestone: 'none' };
+        if (review) walletRepeatReviewIds.add(page[index].preflight.id);
       }
 
       totals.scanned += outcomes.length;
@@ -946,10 +1046,12 @@ export function createIosLocalCaptureCoordinator(
         if (outcome.kind === 'held') return [page[index].preflight.id];
         if (capacityDeferredIds.has(page[index].preflight.id)) return [page[index].preflight.id];
         if (outcome.kind !== 'review') return [];
-        // Notification reviews and currency-conflict money rows are ACKed only
-        // behind their retained Review item (pending or a live tombstone).
+        // Notification reviews, currency-conflict money rows and possible
+        // Apple Pay repeats are ACKed only behind their retained Review item
+        // (pending or a live tombstone).
         if (outcome.item.channel !== 'push' &&
-          !currencyConflictReviewIds.has(page[index].preflight.id)) return [];
+          !currencyConflictReviewIds.has(page[index].preflight.id) &&
+          !walletRepeatReviewIds.has(page[index].preflight.id)) return [];
         const item = outcome.item;
         const retained = reviewTray?.pending?.some(entry => entry.sourceKey === item.sourceKey && entry.observedAt === item.observedAt) ||
           reviewTray?.tombstones?.some(entry => entry.sourceKey === item.sourceKey && entry.expiresAt > now.getTime());
@@ -1029,8 +1131,28 @@ export function createIosLocalCaptureCoordinator(
           if (!seenIds.has(id)) totals.scanned += 1;
           seenIds.add(id);
         }
-        const reviews = page.flatMap(record => record.outcome.kind === 'review' ? [record.outcome.item] : []);
+        const captured = page.flatMap(record => record.outcome.kind === 'review' ? [record.outcome.item] : []);
         if (!input.ledger.getState().hydrated) throw sourceFreePageError('Apple Pay ledger is not hydrated');
+        // A Wallet card the user linked to an account posts on its own; the
+        // store re-checks every guard against the authoritative ledger. Its
+        // receipts are acknowledged behind the 'added' resolution it records.
+        let posted = new Set<string>();
+        const linkable = captured.filter(item => isUniversalReviewAlert(item) && item.walletCardOrPass !== undefined);
+        if (input.postLinkedApplePay && linkable.length > 0) {
+          if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+          const receipt = input.postLinkedApplePay(linkable);
+          await receipt.durable;
+          if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+          requireLedgerGeneration(input.ledger, generation);
+          const linkableIds = new Set(linkable.map(item => item.id));
+          if (!Array.isArray(receipt.posted) || receipt.posted.some(id => !linkableIds.has(id)) ||
+            new Set(receipt.posted).size !== receipt.posted.length) {
+            throw sourceFreePageError('Apple Pay posting receipt was refused');
+          }
+          posted = new Set(receipt.posted);
+          totals.imported += posted.size;
+        }
+        const reviews = captured.filter(item => !posted.has(item.id));
         if (reviews.length > 0) {
           if (!input.ledger.stageReviewAlerts) throw sourceFreePageError('Apple Pay requires review staging');
           if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
@@ -1120,6 +1242,7 @@ export function getSharedIosLocalCaptureCoordinator(
     existing.input.retireShortcutCapture === input.retireShortcutCapture &&
     existing.input.aiReview === input.aiReview &&
     existing.input.privateFormatReview === input.privateFormatReview &&
+    existing.input.postLinkedApplePay === input.postLinkedApplePay &&
     sameLedgerAdapter(existing.input.ledger, input.ledger)) {
     return existing.coordinator;
   }

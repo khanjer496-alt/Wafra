@@ -519,6 +519,35 @@ export function currencyConflictReview(
   return item ? { kind: 'review', market: outcome.market, item, milestone: 'none' } : null;
 }
 
+/**
+ * A bank alert that would post a second row for an Apple Pay purchase already
+ * in the ledger becomes a Review item flagged as a possible Apple Pay
+ * duplicate, bound to that Wallet row ("Already recorded" / "Add as a
+ * separate purchase"). Source-free: built from the parsed row only.
+ */
+export function walletRepeatReview(
+  outcome: Extract<LocalMessageParseOutcome, { kind: 'parsed' }>,
+  recordId: string,
+  walletTransactionId: string,
+): Extract<LocalMessageParseOutcome, { kind: 'review' }> | null {
+  const { row } = outcome;
+  if (row.kind !== 'transaction' || row.type !== 'expense') return null;
+  if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(walletTransactionId)) return null;
+  const observedAt = row.smsTs;
+  if (observedAt === undefined || !Number.isSafeInteger(observedAt)) return null;
+  const candidate = parsedFinancialCandidateReview(row, observedAt);
+  if (!candidate || !('kind' in candidate) || candidate.kind !== 'universal') return null;
+  const item = identifySourceFreeReviewAlert(
+    { ...candidate, channel: row.channel === 'push' ? 'push' : 'inbox' },
+    localReviewIdentity(recordId),
+  );
+  if (!item || !isUniversalReviewAlert(item)) return null;
+  return {
+    kind: 'review', market: outcome.market, milestone: 'none',
+    item: { ...item, attentionReason: 'possible-apple-pay-duplicate', walletTransactionId },
+  };
+}
+
 function sanitizedRefusal(
   envelope: LocalMessageEnvelope,
   observedAt: number,

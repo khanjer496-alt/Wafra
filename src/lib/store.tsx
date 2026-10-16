@@ -115,6 +115,14 @@ import {
   type ReviewPromotionFailure,
 } from '@/lib/review-promotion';
 import {
+  applePayCardOfReview,
+  forgetApplePayCardLink,
+  normalizeApplePayCardLinks,
+  planLinkedApplePayPosts,
+  rememberApplePayCardLink,
+  type LinkedApplePayOptions,
+} from '@/lib/apple-pay-card-links';
+import {
   admitPreparedReviewAlerts,
   emptyAlertReviewTray,
   normalizeAlertReviewTray,
@@ -188,6 +196,7 @@ import {
   type Account,
   type AndroidCaptureSources,
   type AppState,
+  type ApplePayCardLink,
   type Bill,
   type BillAlias,
   type Budget,
@@ -469,6 +478,7 @@ export function migratePersistedState(
   );
   parsed.iosCaptureWarning = normalizeIosCaptureWarningState(parsed.iosCaptureWarning);
   parsed.knownBanks = sanitizeKnownBanks(parsed.knownBanks);
+  parsed.applePayCardLinks = normalizeApplePayCardLinks(parsed.applePayCardLinks);
   parsed.trustedNotificationPackages = Array.isArray(parsed.trustedNotificationPackages)
     ? [...new Set(parsed.trustedNotificationPackages.filter((value): value is string =>
         typeof value === 'string' && value.length <= 255 &&
@@ -998,7 +1008,17 @@ type Action =
       reviewTray: AppState['reviewTray'];
       ledgerMoney: NonNullable<AppState['ledgerMoney']>;
       learnedNotificationPackage?: string;
+      /** A confirmed Apple Pay review remembers its Wallet card's account. */
+      applePayCardLinks?: ApplePayCardLink[];
     }
+  | {
+      /** Linked-card Apple Pay purchases posted without Review (apple-pay-card-links.ts). */
+      type: 'postLinkedApplePay';
+      transactions: Transaction[];
+      reviewTray: AppState['reviewTray'];
+      ledgerMoney: NonNullable<AppState['ledgerMoney']>;
+    }
+  | { type: 'setApplePayCardLinks'; links: ApplePayCardLink[] }
   | { type: 'setOnboarded' }
   | { type: 'restore'; state: Partial<Omit<AppState, 'hydrated'>> }
   | { type: 'loadDemo'; state: Partial<Omit<AppState, 'hydrated'>> }
@@ -1184,6 +1204,7 @@ function assertCategoryAssignments(state: AppState, action: Action): void {
       transaction(action.transaction);
       if (action.type === 'promoteReviewAlert') reviewRules(action.reviewTray);
       break;
+    case 'postLinkedApplePay': action.transactions.forEach(transaction); break;
     case 'payCardDue': if (action.transaction) transaction(action.transaction); break;
     case 'editTransaction': {
       const prior = state.transactions.find((row) => row.id === action.id);
@@ -1605,6 +1626,20 @@ function reduceState(state: AppState, action: Action): AppState {
       return state.iosCaptureWarning?.nativeWarningId === action.expectedWarningId
         ? { ...state, iosCaptureWarning: null }
         : state;
+    case 'postLinkedApplePay':
+      if (action.transactions.length === 0) return state;
+      assertImportBatchMoney(state, {
+        importMoney: action.ledgerMoney, transactions: action.transactions,
+        newAccounts: [], newDues: [], newBills: [], snapshots: {}, updates: [],
+      });
+      return {
+        ...state,
+        ledgerMoney: action.ledgerMoney,
+        reviewTray: action.reviewTray,
+        transactions: sortTxs([...action.transactions, ...state.transactions]),
+      };
+    case 'setApplePayCardLinks':
+      return { ...state, applePayCardLinks: normalizeApplePayCardLinks(action.links) };
     case 'promoteReviewAlert':
       assertImportBatchMoney(state, {
         importMoney: action.ledgerMoney, transactions: [action.transaction],
@@ -1612,6 +1647,7 @@ function reduceState(state: AppState, action: Action): AppState {
       });
       return {
         ...state,
+        ...(action.applePayCardLinks ? { applePayCardLinks: normalizeApplePayCardLinks(action.applePayCardLinks) } : {}),
         ledgerMoney: action.ledgerMoney,
         reviewTray: action.reviewTray,
         trustedNotificationPackages: action.learnedNotificationPackage &&
@@ -2105,6 +2141,18 @@ interface StoreValue {
   ) => { admitted: number; qualificationIds: string[]; durable: Promise<void> };
   dismissReviewAlert: (id: string, outcome: ReviewResolutionOutcome) => Promise<void>;
   promoteReviewAlert: (input: PromoteReviewAlertInput) => Promise<'added' | 'duplicate'>;
+  /**
+   * iPhone Apple Pay: post the captured reviews whose Wallet card is linked
+   * to an account, planned against the authoritative ledger in this same
+   * synchronous turn. Everything not in `posted` belongs in Review as before.
+   * Await `durable` before acknowledging the native receipts.
+   */
+  postLinkedApplePay: (
+    items: readonly ReviewEntry[],
+    options?: LinkedApplePayOptions,
+  ) => { posted: string[]; durable: Promise<void> };
+  /** Forget one Wallet card's account; its next purchase asks in Review again. */
+  forgetApplePayCardLink: (cardOrPass: string) => Promise<void>;
   /**
    * Flush the current authoritative snapshot to SQLCipher. Relay callers use
    * this before acknowledging a row that deduped against in-memory state.
@@ -3102,6 +3150,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
     }
+    // Confirming a captured Apple Pay purchase on an account remembers that
+    // Wallet card's account, so its later purchases post on their own.
+    const walletCard = plan.outcome === 'added' ? applePayCardOfReview(
+      authoritativeState.current.reviewTray.pending.find((item) => item.id === input.reviewId)) : null;
     const next = plan.outcome === 'duplicate'
       ? dispatch({ type: 'setReviewTray', reviewTray: plan.reviewTray,
           learnedNotificationPackage: plan.learnedNotificationPackage })
@@ -3112,9 +3164,46 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           reviewTray: plan.reviewTray,
           ledgerMoney: plan.ledgerMoney,
           learnedNotificationPackage: plan.learnedNotificationPackage,
+          ...(walletCard ? { applePayCardLinks: rememberApplePayCardLink(
+            authoritativeState.current.applePayCardLinks, walletCard, plan.transaction.accountId, Date.now()) } : {}),
         });
     if (!await persist(next)) throw new Error('Encrypted review promotion write failed');
     return plan.outcome;
+  }, [dispatch, persist]);
+
+  const postLinkedApplePay = useCallback((
+    items: readonly ReviewEntry[],
+    options?: LinkedApplePayOptions,
+  ) => {
+    const current = authoritativeState.current;
+    if (!current.hydrated || items.length === 0) return { posted: [], durable: ensureDurable() };
+    const plan = planLinkedApplePayPosts(current, items, Date.now(), () => makeId('tx'), options);
+    if (plan.postedIds.length === 0 || !plan.ledgerMoney) return { posted: [], durable: ensureDurable() };
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const next = dispatch({
+      type: 'postLinkedApplePay',
+      transactions: plan.transactions,
+      reviewTray: plan.reviewTray,
+      ledgerMoney: plan.ledgerMoney,
+    });
+    const durable = persist(next).then((written) => {
+      if (!written) throw new Error('Encrypted Apple Pay write failed');
+    });
+    return { posted: plan.postedIds, durable };
+  }, [dispatch, ensureDurable, persist]);
+
+  const forgetApplePayCardLinkAction = useCallback(async (cardOrPass: string): Promise<void> => {
+    const links = forgetApplePayCardLink(authoritativeState.current.applePayCardLinks, cardOrPass);
+    if (links.length === (authoritativeState.current.applePayCardLinks ?? []).length) return;
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const next = dispatch({ type: 'setApplePayCardLinks', links });
+    if (!await persist(next)) throw new Error('Encrypted Apple Pay link write failed');
   }, [dispatch, persist]);
 
   const undoBatch = useCallback((ids: string[]) => {
@@ -3460,6 +3549,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       founderPro: _founderPro,
       trialStartTs: _trial,
       reviewTray: _reviewTray,
+      // Wallet card names stay on this device; a backup carries no card link.
+      applePayCardLinks: _applePayCardLinks,
       privateAlertFormats: _privateAlertFormats,
       hydrationReparseKey: _hydrationReparseKey,
       hydrationFinalizeVersion: _hydrationFinalizeVersion,
@@ -3489,6 +3580,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       wafraGoals: restored.wafraGoals ?? current.wafraGoals,
       localCaptureQualifications: current.localCaptureQualifications,
       iosCaptureWarning: current.iosCaptureWarning,
+      applePayCardLinks: current.applePayCardLinks ?? [],
     };
     try {
       dispatch({ type: 'restore', state: safeState });
@@ -3621,6 +3713,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       stageReviewAlerts,
       dismissReviewAlert,
       promoteReviewAlert,
+      postLinkedApplePay,
+      forgetApplePayCardLink: forgetApplePayCardLinkAction,
       ensureDurable,
       addPrivateAlertFormat,
       removePrivateAlertFormat: removePrivateAlertFormatAction,
@@ -3700,6 +3794,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       stageReviewAlerts,
       dismissReviewAlert,
       promoteReviewAlert,
+      postLinkedApplePay,
+      forgetApplePayCardLinkAction,
       ensureDurable,
       addPrivateAlertFormat,
       removePrivateAlertFormatAction,
