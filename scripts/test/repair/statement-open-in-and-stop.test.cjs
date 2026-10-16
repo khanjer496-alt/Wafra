@@ -338,15 +338,27 @@ test('Android registers no document types, so its links pass through even for fi
   assert.equal(redirect(`${INBOX}/statement.pdf`), `${INBOX}/statement.pdf`);
 });
 
-test('app.json registers PDF, CSV, TSV and Excel as an alternate viewer and asks iOS for an Inbox copy', () => {
+test('app.json registers PDF, CSV, TSV, Excel, OFX, QIF and MT940 as an alternate viewer and asks iOS for an Inbox copy', () => {
   const app = JSON.parse(read('app.json'));
   const info = app.expo.ios.infoPlist;
   const types = info.CFBundleDocumentTypes;
   assert.ok(Array.isArray(types));
   assert.deepEqual(types.flatMap((type) => type.LSItemContentTypes).sort(), [
+    'app.wafra.ios.mt940', 'app.wafra.ios.ofx', 'app.wafra.ios.qif',
     'com.adobe.pdf', 'org.openxmlformats.spreadsheetml.sheet', 'public.comma-separated-values-text',
     'public.tab-separated-values-text',
   ]);
+  // Wafra's own identifiers are declared as imported types so iOS can map
+  // the picker's MIME types and the file extensions to them. Generic XML is
+  // deliberately not registered.
+  const imported = info.UTImportedTypeDeclarations;
+  assert.deepEqual(imported.map((type) => type.UTTypeIdentifier).sort(),
+    ['app.wafra.ios.mt940', 'app.wafra.ios.ofx', 'app.wafra.ios.qif']);
+  for (const type of imported) {
+    assert.deepEqual(type.UTTypeConformsTo, ['public.data', 'public.text']);
+    assert.ok(type.UTTypeTagSpecification['public.filename-extension'].length > 0);
+  }
+  assert.ok(!types.some((type) => type.LSItemContentTypes.includes('public.xml')));
   for (const type of types) {
     assert.equal(type.CFBundleTypeRole, 'Viewer');
     assert.equal(type.LSHandlerRank, 'Alternate', 'Wafra never claims to be the default app for these files');
@@ -354,7 +366,8 @@ test('app.json registers PDF, CSV, TSV and Excel as an alternate viewer and asks
   }
   assert.equal(info.LSSupportsOpeningDocumentsInPlace, false);
   const incoming = load(path.join(root, 'src/lib/incoming-statement-file.ts'));
-  assert.deepEqual(plain(incoming.INCOMING_STATEMENT_EXTENSIONS), ['pdf', 'csv', 'tsv', 'xlsx']);
+  assert.deepEqual(plain(incoming.INCOMING_STATEMENT_EXTENSIONS),
+    ['pdf', 'csv', 'tsv', 'xlsx', 'ofx', 'qfx', 'qif', 'sta', 'mt940', '940']);
   // Existing keys are kept.
   assert.deepEqual(info.LSApplicationQueriesSchemes, ['shortcuts']);
   assert.equal(info.ITSAppUsesNonExemptEncryption, false);

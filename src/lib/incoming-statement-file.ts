@@ -15,9 +15,12 @@
  */
 
 /** The statement types Wafra registers for (app.json CFBundleDocumentTypes). */
-// Structured statements (ofx, qfx, qif, xml, sta, mt940, 940) are added here
-// together with their app.json document types; see the Open-in proposal.
-export const INCOMING_STATEMENT_EXTENSIONS: readonly string[] = ['pdf', 'csv', 'tsv', 'xlsx'];
+// Structured statements are registered with their own imported types. Generic
+// XML (camt) is left to the in-app picker so Wafra is not offered for every
+// .xml file on the phone.
+export const INCOMING_STATEMENT_EXTENSIONS: readonly string[] = [
+  'pdf', 'csv', 'tsv', 'xlsx', 'ofx', 'qfx', 'qif', 'sta', 'mt940', '940',
+];
 
 /** The statement import route's parameter that carries the one-time token. */
 export const INCOMING_STATEMENT_PARAM = 'incomingStatement';
