@@ -404,9 +404,13 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
     /resolveBestEffort\(transaction\.id, 'confirm'\)/.test(sheet) && /resolveBestEffort\(transaction\.id, 'undo'\)/.test(sheet));
   ok('Transactions can filter to auto-added rows', /bestEffortOnly: autoAddedActive/.test(read('src/app/transactions.tsx')));
   ok('Settings exposes the toggle', /autoAddedSettingTitle/.test(read('src/app/settings.tsx')));
-  ok('iOS live capture builds its sessions with the policy disabled',
-    /createLaunchAlertSession\(\{[\s\S]{0,300}?bestEffort: \{ enabled: false, country: null \}/.test(read('src/lib/ios-local-capture.ts')) &&
-      !/parseUnproven/.test(read('src/lib/ios-local-capture.ts')) && !/parseUnproven/.test(read('src/lib/local-message-record.ts')));
+  // The same Settings switch governs iPhone live capture (behaviour is pinned
+  // in repair/ios-best-effort-capture.test.cjs): the drain reads the setting,
+  // and only the one unproven path (parseUnproven) can post such a row.
+  ok('iOS live capture builds its sessions from the persisted setting',
+    /createLaunchAlertSession\(\{[\s\S]{0,600}?bestEffort: \{ enabled: bestEffortAutoPostEnabled\(\), country: getActiveCountry\(\) \}/.test(read('src/lib/ios-local-capture.ts')) &&
+      !/bestEffort: \{ enabled: (?:true|false)/.test(read('src/lib/ios-local-capture.ts')) &&
+      (read('src/lib/local-message-record.ts').match(/\.parseUnproven\(/g) ?? []).length === 1);
   ok('the killed-process Android wake mirrors the persisted setting before parsing',
     /function applyLedgerContext[\s\S]*?setBestEffortAutoPostEnabled\(state\.bestEffortAutoPost\)[\s\S]*?return true;/
       .test(read('src/lib/android-live-background.ts')));

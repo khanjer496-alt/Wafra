@@ -1470,6 +1470,12 @@ struct WafraBankSenderRegistryTests {
     }
     const AE_BODY = 'Purchase of AED 120.00 with Debit Card ending 1234 at CARREFOUR, DUBAI. Avl Balance is AED 5,000.00.';
     const SA_BODY = 'POS purchase of SAR 125.50 at JARIR BOOKSTORE using Mada Card ending 1234. Available balance SAR 2,500.00.';
+    // Distinct purchases have distinct running balances. Byte-identical bodies
+    // that share one balance figure within ten minutes are ONE SMS delivered
+    // twice, and the drain folds them exactly as Android's carrier fold does,
+    // so a filler queue of separate events must not reuse one balance.
+    const saBodyAt = (index) => SA_BODY.replace('2,500.00', `${2500 - index}.00`);
+    const balanceBodyAt = (index) => `Your available balance is AED ${5000 + index}.00.`;
     const REVIEW_BODY = 'AED 2,500.00 has been transferred to your FAB account from JOHN DOE';
     const DECLINE_BODY = 'Your transaction of AED 1,108.00 at NOON was declined due to insufficient funds.';
     let idSequence = 1;
@@ -1788,8 +1794,18 @@ struct WafraBankSenderRegistryTests {
     }
 
     {
+      // Android routes the launch grammar from the sender alone, so an
+      // unlisted real sender is never parsed as a Saudi bank; iPhone capture
+      // now refuses it the same way. A record with no sender (the store's
+      // placeholder) keeps the body route and matches a senderless History row.
+      const unlisted = localMessage.preflightLocalMessageRecord(
+        envelope({ id: '8'.repeat(64), sender: 'UNLISTED-SENDER', text: SA_BODY }),
+        new Date(NOW),
+      );
+      ok('an unlisted real sender routes no launch market, as on Android',
+        unlisted?.valid === true && unlisted.market === null, JSON.stringify(unlisted));
       const eventId = '7'.repeat(64);
-      const sender = 'UNLISTED-SENDER';
+      const sender = 'Wafra Automation';
       const preflight = localMessage.preflightLocalMessageRecord(
         envelope({ id: eventId, sender, text: SA_BODY }),
         new Date(NOW),
@@ -1811,11 +1827,10 @@ struct WafraBankSenderRegistryTests {
           v: 1,
           id: eventId,
           text: SA_BODY,
-          sender,
           receivedAt: '2026-08-25T11:00:00.000Z',
         }),
       ], {}, new Date(NOW));
-      ok('Android-equivalent all-Saudi unknown-sender semantics match history and local',
+      ok('all-Saudi senderless semantics match history and local',
         preflight?.market === 'SA' && local.kind === 'parsed' &&
           history.parsed.length === 1 &&
           JSON.stringify(parityFields(local.row)) ===
@@ -2093,7 +2108,7 @@ struct WafraBankSenderRegistryTests {
       const aeId = nextId();
       const native = nativeQueue([
         ...saIds.map((id, index) => envelope({
-          id, sender: 'ALRAJHI', text: SA_BODY, observedAt: recentIso(3_600_000 - index * 1000),
+          id, sender: 'ALRAJHI', text: saBodyAt(index), observedAt: recentIso(3_600_000 - index * 1000),
         })),
         envelope({ id: aeId, observedAt: recentIso(60_000) }),
       ]);
@@ -2344,7 +2359,7 @@ struct WafraBankSenderRegistryTests {
       const purchaseId = nextId();
       const native = nativeQueue([
         ...balanceIds.map((id, index) => envelope({
-          id, text: 'Your available balance is AED 5,000.00.', observedAt: recentIso(3_600_000 - index * 1000),
+          id, text: balanceBodyAt(index), observedAt: recentIso(3_600_000 - index * 1000),
         })),
         envelope({ id: purchaseId, observedAt: recentIso(60_000) }),
       ]);
@@ -2421,7 +2436,7 @@ struct WafraBankSenderRegistryTests {
       trayModule.reviewCaptureBacklog.reset();
       const seedIds = Array.from({ length: 50 }, () => nextId());
       const seedNative = nativeQueue(seedIds.map((id, index) => envelope({
-        id, sender: 'ALRAJHI', text: SA_BODY, observedAt: recentIso(7_200_000 - index * 1000),
+        id, sender: 'ALRAJHI', text: saBodyAt(index), observedAt: recentIso(7_200_000 - index * 1000),
       })));
       const ledger = admittingLedger([]);
       ledger.setState({ ...ledger.getState(), ledgerMoney: AED_MONEY });
@@ -2437,7 +2452,7 @@ struct WafraBankSenderRegistryTests {
       const aeReviewId = nextId();
       const native = nativeQueue([
         ...moreSa.map((id, index) => envelope({
-          id, sender: 'ALRAJHI', text: SA_BODY, observedAt: recentIso(3_600_000 - index * 1000),
+          id, sender: 'ALRAJHI', text: saBodyAt(50 + index), observedAt: recentIso(3_600_000 - index * 1000),
         })),
         envelope({ id: aeReviewId, text: REVIEW_BODY, sender: 'FAB', observedAt: recentIso(120_000) }),
         envelope({ id: aeId, observedAt: recentIso(60_000) }),
@@ -2550,8 +2565,10 @@ struct WafraBankSenderRegistryTests {
       const secondId = nextId();
       const firstAt = '2026-08-25T11:00:00.000Z';
       const secondAt = '2026-08-25T11:05:00.000Z';
+      // Two genuine purchases: the second leaves a lower balance. (Identical
+      // text with one balance five minutes apart is a carrier re-delivery.)
       const first = envelope({ id: firstId, observedAt: firstAt });
-      const second = envelope({ id: secondId, observedAt: secondAt });
+      const second = envelope({ id: secondId, observedAt: secondAt, text: AE_BODY.replace('5,000.00', '4,880.00') });
       const native = nativeQueue([first, second]);
       const ledger = ledgerAdapter();
       const outcome = await coordinator(native, ledger).drain();

@@ -59,7 +59,7 @@ for (const currency of ['USD', 'EUR', 'GBP', 'JOD']) {
     });
   }
 }
-for (const sender of ['EmiratesNBD', '+971501234567', 'Wafra Automation']) {
+for (const sender of ['EmiratesNBD', 'Wafra Automation']) {
   for (const [i, fixture] of transfers.entries()) test(`screenshot-derived transfer ${i} retains facts for ${sender}`, () => {
     const result = parse(fixture.body, sender);
     assert.equal(result.kind, 'parsed');
@@ -72,6 +72,15 @@ for (const sender of ['EmiratesNBD', '+971501234567', 'Wafra Automation']) {
     if (i !== 1) assert.equal(result.row.card, null, 'partial account mask cannot invent a last-four');
   });
 }
+// A phone number is a real sender that names no bank. Android never runs the
+// launch grammar for it (sender-only routing), so neither does iPhone capture:
+// the same transfer is never auto-posted from it, and no source is retained.
+for (const [i, fixture] of transfers.entries()) test(`screenshot-derived transfer ${i} is not auto-posted from a phone number`, () => {
+  const result = parse(fixture.body, '+971501234567');
+  assert.notEqual(result.kind, 'parsed');
+  assert.notEqual(result.kind, 'invalid');
+  assert.equal(JSON.stringify(result).includes(fixture.body), false);
+});
 // Existing real-derived corpus bodies intentionally lack generic context.
 // Preserve these successful legacy reads instead of blanket-gating unknown senders.
 const compactBankBodies = corpusMessages().filter(text =>

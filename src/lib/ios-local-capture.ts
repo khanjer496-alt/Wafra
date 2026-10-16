@@ -16,10 +16,14 @@ import {
 import { migrateLegacyLedgerMoney } from '@/lib/ledger-money';
 import { settleWalletNearMatches, walletNearMatchesRetained } from '@/lib/wallet-near-match';
 import { createIosNotificationReplayGuard } from '@/lib/ios-notification-replay';
+import { carrierRedeliveryIndexesOf } from '@/lib/auto-import';
+import { bestEffortAutoPostEnabled } from '@/lib/best-effort-autopost';
+import { getActiveCountry } from '@/lib/country';
 import {
   convertCurrencyConflictRow,
   currencyConflictFxNeed,
   currencyConflictReview,
+  localMessageCarrierFacts,
   parseLocalMessageRecord,
   parseLocalMessageRecordWithAi,
   parseLocalMessageRecordWithPrivateFormat,
@@ -38,6 +42,9 @@ import {
 } from '@/lib/types';
 
 const PAGE_SIZE = 50;
+/** Twice auto-import.ts CARRIER_DUPLICATE_MS: the fold window plus its balance trail. */
+const CARRIER_MEMORY_MS = 20 * 60_000;
+const CARRIER_MEMORY_CAP = 2000;
 const MAX_PAGES = 40;
 /** Native bound on held records one drain may page past (MAX_PAGES * PAGE_SIZE). */
 const MAX_EXCLUDED_RECORDS = 2000;
@@ -345,6 +352,17 @@ export function createIosLocalCaptureCoordinator(
     return pending;
   };
 
+  /**
+   * Carrier re-delivery fold facts (opaque keys, dates, stated balances) for
+   * the live app. Held in memory only — never persisted — for twice the fold
+   * window, and dropped when the ledger is replaced. A copy that arrives
+   * after the app process restarted can still post twice; Android's scan has
+   * the same per-scan boundary.
+   */
+  let carrierMemory: {
+    generation: number;
+    entries: { id: string; facts: NonNullable<ReturnType<typeof localMessageCarrierFacts>> }[];
+  } = { generation: Number.NaN, entries: [] };
   const performDrain = async (): Promise<IosLocalCaptureOutcome> => {
     const totals: Omit<IosLocalCaptureOutcome, 'firstCapturedAt' | 'retirement'> = {
       scanned: 0,
@@ -358,6 +376,14 @@ export function createIosLocalCaptureCoordinator(
     // counted once.
     const deferredReviewRecords = new Set<string>();
     const currencyConflictRecords = new Set<string>();
+    // Source-free carrier facts of recent Messages (see below), carried over
+    // from earlier drains of this ledger so a re-delivery folds against its
+    // first copy even when the two arrive in different drains.
+    const carrierGeneration = readLedgerGeneration(input.ledger);
+    if (carrierMemory.generation !== carrierGeneration) {
+      carrierMemory = { generation: carrierGeneration, entries: [] };
+    }
+    let carrierSeen = carrierMemory.entries;
     const stopped = (firstCapturedAt: number | null): IosLocalCaptureOutcome => ({
       ...totals,
       firstCapturedAt,
@@ -459,14 +485,44 @@ export function createIosLocalCaptureCoordinator(
       const outcomes: LocalMessageParseOutcome[] = [];
       const session = createLaunchAlertSession({
             overrides: input.ledger.getState().merchantOverrides ?? {},
-            // iOS live capture is review-only for unverified formats: nothing
-            // here may be auto-added by the best-effort policy.
-            bestEffort: { enabled: false, country: null },
+            // The persisted "Auto-add alerts from unverified bank formats"
+            // setting, as on Android: an unproven format posts only through
+            // the one best-effort policy, marked "Auto-added — check"
+            // (local-message-record.ts unprovenMessageRow). Off, it is Review.
+            bestEffort: { enabled: bestEffortAutoPostEnabled(), country: getActiveCountry() },
             ...(pageMarket ? {
               activeMarket: pageMarket,
               pinnedCurrency: pageMarket === 'AE' ? 'AED' : 'SAR',
             } : {}),
           });
+      // A carrier can deliver one SMS twice, minutes apart, and the native
+      // queue then holds two Messages. Android folds them with
+      // carrierRedeliveryIndexes; this is the same rule on the same facts
+      // (sender, byte-identical identity-bearing body, ten-minute window,
+      // balance not moved in between), the earliest copy kept. A folded copy
+      // is acknowledged as ignored and never parsed. The facts are opaque
+      // keys and numbers read before the text is cleared, held only for this
+      // drain, so the fold also spans its pages. A record re-listed under its
+      // own id is never compared with itself.
+      const pageIds = new Set(page.map((record) => record.preflight.id));
+      carrierSeen = carrierSeen.filter((entry) => !pageIds.has(entry.id));
+      const pageCarrier = page.flatMap((record, recordIndex) => {
+        if (!record.preflight.valid || record.preflight.source === 'apple-pay') return [];
+        const facts = localMessageCarrierFacts(record.serialized, now);
+        return facts ? [{ recordIndex, id: record.preflight.id, facts }] : [];
+      });
+      const carrierRows = [...carrierSeen, ...pageCarrier];
+      const carrierSkipped = carrierRedeliveryIndexesOf(carrierRows.map(({ facts }) => ({
+        ...facts, balance: () => facts.balance,
+      })));
+      const carrierCopies = new Set(pageCarrier.flatMap((entry, index) =>
+        carrierSkipped.has(carrierSeen.length + index) ? [entry.recordIndex] : []));
+      // Keep only what a later copy could still fold against: Messages within
+      // the window (plus its balance trail) of the newest one seen.
+      const newestCarrierDate = carrierRows.reduce((max, { facts }) => Math.max(max, facts.date), Number.NEGATIVE_INFINITY);
+      carrierSeen = carrierRows.filter(({ facts }) => facts.date >= newestCarrierDate - CARRIER_MEMORY_MS)
+        .map(({ id, facts }) => ({ id, facts })).slice(-CARRIER_MEMORY_CAP);
+      carrierMemory = { generation: carrierGeneration, entries: carrierSeen };
       const replayState = input.ledger.getState();
       const reviewPossibleReplay = createIosNotificationReplayGuard(replayState.transactions ?? [], [
         ...(replayState.reviewTray?.pending ?? []).map(item => item.sourceKey),
@@ -482,6 +538,8 @@ export function createIosLocalCaptureCoordinator(
             // Defensive handling if a native reader ever mixes lanes: an
             // unknown/refused Wallet payload must never become invalid-ACK.
             outcome = parseLocalApplePayRecord(serialized, now);
+          } else if (carrierCopies.has(recordIndex)) {
+            outcome = { kind: 'ignored', market: record.preflight.market, milestone: 'none' };
           } else if (record.preflight.valid) {
             outcome = parseLocalMessageRecord(serialized, now, record.preflight.market, session);
             if (record.preflight.market === null) {

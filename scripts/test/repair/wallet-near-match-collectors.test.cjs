@@ -48,6 +48,8 @@ function iosHarness({ retain = true } = {}) {
     '@/lib/ledger-money': require(path.join(build, 'ledger-money.js')),
     '@/lib/local-message-record': {
       preflightLocalMessageRecord: () => ({ id: 'event-id', valid: true, market: 'AE', observedAt }),
+      // No SMS text in these stubs, so no carrier re-delivery facts to fold.
+      localMessageCarrierFacts: () => null,
       parseLocalMessageRecord: () => ({ kind: 'parsed', market: 'AE', milestone: 'financial', row }),
     },
     '@/lib/types': { normalizeLocalCaptureQualifications: () => [], isLocalCaptureQualificationCandidate: () => true },

@@ -255,8 +255,26 @@ for (const currency of ['AED', 'USD', 'GEL']) {
     assert.deepEqual(result.notification.instrument, { kind: 'card', last4: '1234' });
     assert.doesNotMatch(JSON.stringify(result), /creditLimit|balance|raw|500000|5000\.00/);
   });
-  test(`the senderless ${currency} purchase earns only an unverified Review preview`, () => {
-    const result = parse(abbreviatedCardPurchase(currency), '', { ...context(), country: null });
+  test(`the senderless ${currency} purchase previews exactly as its spaced-currency twin`, () => {
+    // A glued "AED5000.00" is dirham evidence (markets.ts AED_GLUED_ALERT),
+    // so with no sender this shape routes as "AED 5000.00" always has. Before,
+    // the glued footer was invisible to routing and the identical alert fell
+    // to an unverified Review preview only because of its spacing.
+    const settings = { ...context(), country: null };
+    const glued = parse(abbreviatedCardPurchase(currency), '', settings);
+    const spaced = parse(abbreviatedCardPurchase(currency)
+      .replace(`${currency}42.10`, `${currency} 42.10`).replace('AED5000.00', 'AED 5000.00'), '', settings);
+    assert.equal(glued.route, spaced.route);
+    assert.equal(glued.provenance, spaced.provenance);
+    assert.equal(glued.notification.style, spaced.notification.style);
+    assert.deepEqual(glued.notification.amount, { currency, minorUnits: '4210', exponent: 2 });
+    assert.doesNotMatch(JSON.stringify(glued), /creditLimit|balance|raw|500000|5000\.00/);
+  });
+}
+for (const currency of ['USD', 'GEL']) {
+  test(`a senderless ${currency} purchase naming no dirham at all earns only an unverified Review preview`, () => {
+    const body = `Your Cr.Card XXX1234 was used for ${currency}42.10 on 12/10/2026 12:00:00 at SAMPLE MARKET, SAMPLE CITY.`;
+    const result = parse(body, '', { ...context(), country: null });
     assert.equal(result.route, 'review');
     assert.equal(result.provenance, 'unverified');
     assert.equal(result.notification.style, 'review');
@@ -275,4 +293,28 @@ for (const [name, body] of [
   ['similar word', abbreviatedCardPurchase().replace('Cr.Limit', 'Cr.Limitation')],
 ]) test(`Cr.Limit role alias cannot reopen ${name}`, () => {
   for (const sender of ['ADCB', '']) assert.equal(parse(body, sender).notification, null);
+});
+
+// The preview must never promise money the ledger will not post. The ledger
+// routes the launch grammar from a present sender alone (Android's rule), so
+// a person, a phone number, an e-mail handle or a name that is no bank's
+// sender gets no movement banner, and no banner at all unless it is a
+// bank-style sender ID. With no sender the body still routes, as in the ledger.
+for (const sender of ['Mom', '+971501234567', 'someone@example.com', 'My Bank', 'FABAlert']) {
+  test(`a non-bank sender "${sender}" gets no money-movement preview`, () => {
+    const result = parse(purchase, sender);
+    assert.notEqual(result.route, 'parsed');
+    assert.ok(result.notification === null || result.notification.style !== 'movement');
+  });
+}
+test('paired control: the bank sender and the senderless record keep the movement preview', () => {
+  for (const sender of ['ENBD', 'ADCB', '', 'Wafra Automation']) {
+    const result = parse(purchase, sender);
+    assert.equal(result.route, 'parsed', sender || 'empty');
+    assert.equal(result.notification.style, 'movement');
+  }
+});
+test('a recognised global bank sender off the launch markets previews Review at most', () => {
+  const result = parse(globalUsd, 'CHASE', context('USD', 'US'));
+  assert.notEqual(result.route, 'parsed');
 });

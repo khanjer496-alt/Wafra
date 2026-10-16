@@ -1256,6 +1256,100 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
       JSON.stringify({ parsed: scan.parsed, declined: scan.declined }));
   }
   {
+    // An OEM provider double insert (adjacent ids, half a second) of an
+    // identity-bearing alert is BOTH an exact-provider duplicate and a
+    // carrier re-delivery. The carrier fold keeps the earlier copy and skips
+    // the newer one; the exact-provider rule then compared the earlier copy
+    // with that skipped row and declined it too, so neither copy posted.
+    // Exactly one must survive: the exact-provider rule's choice (the newer
+    // provider row, which every ledger stored before the carrier fold
+    // existed), and the retirement names the copy that was dropped.
+    const { buildImportPlan } = require('./build/import-plan.js');
+    const pair = [
+      { id: 32_022, address: 'FAB', body: withBalance, date: NOW + 1_500_500 },
+      { id: 32_021, address: 'FAB', body: withBalance, date: NOW + 1_500_000 },
+    ];
+    const { scan, ids } = await carrierScan(pair);
+    ok('an adjacent sub-second provider duplicate of an identity-bearing alert posts exactly once',
+      scan.parsed.length === 1 && ids.has('a32022') &&
+        scan.declined.length === 1 && scan.declined[0].sourceEventId === 'a32021' &&
+        scan.declined[0].reason === 'exact-provider-duplicate',
+      JSON.stringify({ parsed: scan.parsed, declined: scan.declined }));
+    const fresh = buildImportPlan(scan.parsed, baseLedgerState(), NOW + 1_500_500, undefined, scan.declined);
+    ok('the provider duplicate imports one transaction into an empty ledger',
+      fresh.batch.transactions.length === 1 && !fresh.batch.updates.some((update) => update.remove),
+      JSON.stringify(fresh.batch));
+    // A ledger that stored both copies heals to one row.
+    const kept = scan.parsed[0];
+    const firstImport = buildImportPlan([
+      kept, { ...kept, sourceEventId: 'a32021', smsTs: NOW + 1_500_000 },
+    ], baseLedgerState(), NOW + 1_500_500);
+    const stored = { ...baseLedgerState(), transactions: firstImport.batch.transactions
+      .map((row, index) => ({ ...row, id: `stored-dup-${index}` })) };
+    const reread = buildImportPlan(scan.parsed, stored, NOW + 1_500_500, undefined, scan.declined);
+    const removed = reread.batch.updates.filter((update) => update.remove).map((update) => update.id);
+    ok('a ledger holding both provider copies keeps exactly one after a re-read',
+      stored.transactions.length === 2 && removed.length === 1 &&
+        stored.transactions.find((row) => row.id === removed[0])?.ts === NOW + 1_500_000 &&
+        reread.batch.transactions.length === 0,
+      JSON.stringify({ stored: stored.transactions.map((row) => [row.id, row.ts, row.smsKey]), updates: reread.batch.updates,
+        added: reread.batch.transactions.length }));
+    // A ledger from before the carrier fold stored the NEWER copy; the person
+    // edited it. A re-read must neither import the older copy beside it nor
+    // remove the edit.
+    const newerOnly = buildImportPlan([{ ...kept, sourceEventId: 'a32022', smsTs: NOW + 1_500_500 }],
+      baseLedgerState(), NOW + 1_500_500).batch.transactions[0];
+    const edited = { ...baseLedgerState(), transactions: [{ ...newerOnly, id: 'edited-copy',
+      userEdited: true, title: 'My renamed purchase' }] };
+    const again = buildImportPlan(scan.parsed, edited, NOW + 1_500_500, undefined, scan.declined);
+    ok('a user-edited stored provider copy stays the only row after a re-read',
+      again.batch.transactions.length === 0 && !again.batch.updates.some((update) => update.remove),
+      JSON.stringify({ added: again.batch.transactions.length, updates: again.batch.updates }));
+  }
+  {
+    // An adjacent provider pair PLUS an earlier carrier copy seconds before
+    // (a run of three copies with an unrelated message between): one row,
+    // the earliest — what iPhone keeps too.
+    const { scan } = await carrierScan([
+      { id: 32_043, address: 'FAB', body: withBalance, date: NOW + 1_650_000 },
+      { id: 32_042, address: 'FAB', body: withBalance, date: NOW + 1_649_970 },
+      { id: 32_041, address: 'FAB', body: other, date: NOW + 1_645_000 },
+      { id: 32_040, address: 'FAB', body: withBalance, date: NOW + 1_642_300 },
+    ]);
+    const kept = scan.parsed.filter((item) => item.amountFils === 1405).map((item) => item.sourceEventId);
+    ok('an exact provider pair beside an earlier carrier copy still posts once',
+      kept.length === 1 && kept[0] === 'a32040',
+      JSON.stringify({ kept, declined: scan.declined.map((item) => item.sourceEventId) }));
+  }
+  {
+    // A UAE advertising sender ("AD-" prefix, required on promotional SMS)
+    // is neither parsed nor offered in Review; the bank's alert sender is
+    // unaffected. Synthetic offer text.
+    const offer = 'Earn up to AED500 in talabat credit when you refer a friend to ADCB. Share your referral code today. T&Cs apply.';
+    const { scan } = await carrierScan([
+      { id: 32_050, address: 'AD-ADCB', body: offer, date: NOW + 1_700_000 },
+      { id: 32_049, address: 'AD-ADCB', body: 'Purchase of AED 14.05 at CARRIER CONTROL with Debit Card ending 1234', date: NOW + 1_699_000 },
+      { id: 32_048, address: 'ADCB', body: 'Purchase of AED 14.05 at OTHER CONTROL with Debit Card ending 1234', date: NOW + 1_698_000 },
+    ]);
+    ok('a UAE advertising sender is ignored on Android, never parsed or reviewed',
+      scan.parsed.length === 1 && scan.parsed[0].sourceEventId === 'a32048' &&
+        !scan.reviewCandidates.some((item) => JSON.stringify(item).includes('32050') || JSON.stringify(item).includes('32049')) &&
+        scan.reviewCandidates.length === 0,
+      JSON.stringify({ parsed: scan.parsed.map((p) => p.sourceEventId), reviews: scan.reviewCandidates.length }));
+    inboxRows = [];
+  }
+  {
+    // Three adjacent sub-second copies still leave exactly one.
+    const { scan } = await carrierScan([
+      { id: 32_033, address: 'FAB', body: withBalance, date: NOW + 1_600_900 },
+      { id: 32_032, address: 'FAB', body: withBalance, date: NOW + 1_600_400 },
+      { id: 32_031, address: 'FAB', body: withBalance, date: NOW + 1_600_000 },
+    ]);
+    ok('three adjacent provider copies of an identity-bearing alert post exactly once',
+      scan.parsed.length === 1 && scan.parsed[0].sourceEventId === 'a32033',
+      JSON.stringify({ parsed: scan.parsed, declined: scan.declined }));
+  }
+  {
     const { ids } = await carrierScan([
       { id: 31_990, address: 'FAB', body: withBalance, date: NOW + 1_260_000 },
       { id: 31_980, address: 'FAB', body: withBalance, date: NOW + 600_000 },

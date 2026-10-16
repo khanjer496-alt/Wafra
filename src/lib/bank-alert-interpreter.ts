@@ -109,7 +109,14 @@ const isCompletedCardPurchaseReturn = (source: string, legacy: ParsedSms): boole
   legacy.kind === 'transaction' && legacy.type === 'income' &&
   legacy.categoryGuess === 'other' && !legacy.transferHint &&
   legacy.card !== null && legacy.card.kind !== 'account' &&
-  /^(?:your\s+)?(?:card\s+|pos\s+)?purchase\s+of\b(?:[^.\n]|\.(?=\d)){0,160}?\b(?:with|using|on)\s+(?:your\s+)?(?:(?:credit|debit|covered)\s+)?card\s+(?:ending(?:\s+with)?\s+)?[x*\d -]{4,32}\s+(?:has\s+been|was)\s+(?:successfully\s+)?(?:reversed|refunded)\b/iu.test(source);
+  (/^(?:your\s+)?(?:card\s+|pos\s+)?purchase\s+of\b(?:[^.\n]|\.(?=\d)){0,160}?\b(?:with|using|on)\s+(?:your\s+)?(?:(?:credit|debit|covered)\s+)?card\s+(?:ending(?:\s+with)?\s+)?[x*\d -]{4,32}\s+(?:has\s+been|was)\s+(?:successfully\s+)?(?:reversed|refunded)\b/iu.test(source) ||
+    // The Liv/ENBD form names the purchase AMOUNT and its shop before the
+    // card: "Purchase amount of AED 120.50 at NOON on your Credit Card ending
+    // 1234 has been successfully refunded". Completed wording only.
+    /^purchase\s+(?:amount|amt)\s+of\b(?:[^.\n]|\.(?=\d)){0,160}?\bon\s+your\s+(?:(?:credit|debit|covered|prepaid)\s+)?card(?:\s+(?:ending(?:\s+with)?\s+)?[x*\d -]{4,32})?\s+has\s+been\s+(?:successfully\s+|fully\s+)?refunded\b/iu.test(source)) &&
+  !FUTURE_REFUND.test(source);
+/** "…and will be refunded", "will be credited back": a refund not yet made. */
+const FUTURE_REFUND = /\bwill\s+be\s+(?:refunded|reversed|credited)\b/iu;
 
 const mistookInstrumentLast4ForAmount = (
   source: string,
@@ -290,6 +297,18 @@ export const interpretBankAlert = ({
   const semanticText = normalizeArabic(source).replace(/\s+/gu, ' ');
   if (usableLegacy && isCompletedCardPurchaseReturn(semanticText, usableLegacy)) {
     return legacyResult(usableLegacy, 'refund');
+  }
+  // A purchase the bank says WILL be refunded or credited back has not moved
+  // money yet. Whatever parseSms read from it, the purchase words in the same
+  // sentence are not independent debit evidence: the semantic reader used to
+  // rebuild "has been reversed and will be refunded" as money OUT. Review at
+  // most, as for the Arabic refund notice below.
+  if (usableLegacy?.kind === 'transaction' && usableLegacy.type === 'income' &&
+    FUTURE_REFUND.test(semanticText) && /\b(?:purchase|refund|revers)/iu.test(semanticText)) {
+    const pending = inspectUnparsedLaunchAlert(source, sender);
+    return pending.outcome === 'review'
+      ? finalFallback(pending, null)
+      : { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
   }
   // A Saudi refund heading over a purchase field list. parseSms already proved
   // the completed refund (its forecast/request guards run first); the purchase

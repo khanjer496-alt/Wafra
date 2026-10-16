@@ -630,7 +630,16 @@ export interface DuplicateGuardOptions {
    * the debit-card alert for the same purchase, which lands on the card.
    */
   accountInstrument?: (accountId: string) => 'account' | 'debit' | 'credit' | 'card' | undefined;
+  /**
+   * A staging reference for an alert whose instrument tail matched more than
+   * one account. It names the tail the alert stated but attributes no
+   * account. Defaults to import-plan's unassignedCardRef holdings.
+   */
+  ambiguousAccount?: (accountId: string) => boolean;
 }
+
+/** import-plan.ts unassignedCardRef: `__unassigned-card__:<bank>:<kind>:<last4>`. */
+const UNASSIGNED_CARD_HOLDING = /^__unassigned-card__:[^:]*:[a-z]+:\d{2,6}$/;
 
 /**
  * Days a statement row may trail the live alert for the same event. Many
@@ -1169,6 +1178,34 @@ export function duplicateGuard(
         crossAccountPair = true;
         return claimable(matches[0]);
       }
+    }
+    // 1c. A live alert the planner could not attribute because its stated
+    // tail matched two accounts (a senderless iPhone History alert beside an
+    // older bankless "Account •0002") waits in a staging holding, so rule 1's
+    // same-account test can never meet the statement row that IS that
+    // movement — and a statement imported first was duplicated. Pair them
+    // only on the alert's own stated instrument tail, the exact amount,
+    // direction, the same posting day and agreeing descriptor, and only when
+    // exactly ONE row qualifies; the statement row keeps its account and any
+    // decision the person made. Either order.
+    const ambiguous = (accountId: string | undefined) => !!accountId &&
+      (options.ambiguousAccount ? options.ambiguousAccount(accountId) : UNASSIGNED_CARD_HOLDING.test(accountId));
+    const statedTail = (row: Pick<SeenStatementPairEvent, 'captureInstrument'>) => row.captureInstrument?.last4;
+    if (statedTail(c) && (incomingStatement ? !!c.accountId && !unresolvedAccount(c.accountId) && !ambiguous(c.accountId)
+      : ambiguous(c.accountId))) {
+      const matches = open.filter((row) => {
+        if (isStatementCaptureSource(row.captureSource) === incomingStatement || row.amountFils !== c.amountFils) return false;
+        const [statementSide, alertSide] = incomingStatement ? [c, row] : [row, c];
+        return ambiguous(alertSide.accountId) && !!statementSide.accountId &&
+          !unresolvedAccount(statementSide.accountId) && !ambiguous(statementSide.accountId) &&
+          statedTail(row) === statedTail(c) &&
+          compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument) &&
+          banksCompatible(bankOf(statementSide), alertSide.captureInstrument?.bankIdentity) &&
+          // The same posting day: with no account to anchor it, a statement
+          // row may not absorb an equal transfer the next day.
+          statementDescriptorsAgree(row.title, c.title) && row.date === c.date;
+      });
+      if (matches.length === 1) return claimable(matches[0]);
     }
     // 2. Statement <-> statement from ANOTHER upload: the same day, amount,
     // direction and account, whatever each file's row order put on the clock.

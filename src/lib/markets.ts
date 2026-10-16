@@ -398,6 +398,17 @@ const SAR_ALERT = /\b(?:SAR|SR)\b|ر\.?\s?س\.?|ريال/iu;
 // evidence — "Ref 5521SR" is a reference — so it counts only when nothing in
 // the body names the dirham.
 const SAR_GLUED_ALERT = /(?<=\d)(?:SAR|SR)\b/iu;
+// ADCB glues the code to the figure the other way round ("used for
+// AED29.05", "Avl. Cr.limit is AED4,000.00"), which AED_ALERT's word boundary
+// cannot see; with no sender that left the alert unrouted. Only a whole
+// amount counts — the figure may not run into letters ("AED4412B" is a
+// ticket, "AEDXTRA" a promo code) — and only as a word of its own: after a
+// space, "(" or ":" or at the start. A hyphen-joined field label
+// ("Fee-AED2.38 VAT-AED0.019", a parking confirmation charged to the phone
+// bill) is not a bank sentence. Like the glued riyal, it yields to a currency
+// the body states properly.
+const AED_GLUED_ALERT =
+  /(?<![^\s(:])AED(?=[0-9][0-9,]*(?:\.[0-9]+)?(?![0-9A-Za-z]))|(?<![^\s(:])[0-9][0-9,]*(?:\.[0-9]+)?AED\b/u;
 
 const launchMarketsFromSender = (sender?: string): MarketPack[] => {
   const senderText = sender?.trim() ?? '';
@@ -433,8 +444,9 @@ export function detectLaunchMarketFromAlert(
   const senderMarkets = launchMarketsFromSender(sender);
   if (senderMarkets.length === 1) return senderMarkets[0].id as 'AE' | 'SA';
   if (senderMarkets.length > 1) return null;
-  const aed = AED_ALERT.test(source);
-  const sar = SAR_ALERT.test(source) || (!aed && SAR_GLUED_ALERT.test(source));
+  const statedSar = SAR_ALERT.test(source);
+  const aed = AED_ALERT.test(source) || (!statedSar && AED_GLUED_ALERT.test(source));
+  const sar = statedSar || (!aed && SAR_GLUED_ALERT.test(source));
   if (aed === sar) return null;
   return aed ? 'AE' : 'SA';
 }
