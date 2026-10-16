@@ -295,6 +295,11 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       if (name === '@/lib/dedupe') {
         return require('../build/dedupe.js');
       }
+      // The pure "may this be the same purchase" rule shared by Apple Pay
+      // auto-posting and the drain's bank-repeat guard.
+      if (name === '@/lib/apple-pay-card-links') {
+        return require('../build/apple-pay-card-links.js');
+      }
       if (name === '@/lib/parsed-review-event') {
         return require('../build/parsed-review-event.js');
       }

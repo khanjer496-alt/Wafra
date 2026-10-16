@@ -331,6 +331,22 @@ export function parseLocalApplePayRecord(serialized: string, now: Date): LocalAp
     : held;
 }
 
+/**
+ * Review identity for a message whose canonical source key is `smsKey`: the
+ * same mapping as import-plan.ts walletNearMatchIdentity, so both paths give a
+ * message one identity and promotion writes back exactly that smsKey.
+ */
+function messageReviewIdentity(smsKey: string): { id: string; sourceKey: string } | null {
+  const apple = smsKey.match(/^h([a-f0-9]{64})$/);
+  if (apple) return appleMessageReviewIdentity(apple[1]);
+  const android = smsKey.match(/^h(a(?:0|[1-9]\d{0,39})t(?:0|[1-9]\d{0,15}))$/);
+  if (android) {
+    return { id: `android_wallet_review_id_${android[1]}`, sourceKey: `android_message_review_source_${android[1]}` };
+  }
+  if (/^s\d{10,16}-[1-9]\d{0,15}$/.test(smsKey)) return { id: `wallet_review_id_${smsKey}`, sourceKey: smsKey };
+  return null;
+}
+
 function localReviewIdentity(id: string): { id: string; sourceKey: string } {
   const appleMessage = appleMessageReviewIdentity(id);
   if (appleMessage) return appleMessage;
@@ -524,11 +540,19 @@ export function currencyConflictReview(
  * in the ledger becomes a Review item flagged as a possible Apple Pay
  * duplicate, bound to that Wallet row ("Already recorded" / "Add as a
  * separate purchase"). Source-free: built from the parsed row only.
+ *
+ * Its identity is the message's own source key (`smsKey`, as the planner
+ * keys the row it would have posted), mapped exactly as the planner maps its
+ * same-account possible duplicates. "Already recorded" can then bind the
+ * message to the Wallet row, and a later re-read of the same message (History
+ * import, rescan) finds it by identity. Only a key with no review mapping
+ * falls back to the queue record's own identity.
  */
 export function walletRepeatReview(
   outcome: Extract<LocalMessageParseOutcome, { kind: 'parsed' }>,
   recordId: string,
   walletTransactionId: string,
+  smsKey?: string,
 ): Extract<LocalMessageParseOutcome, { kind: 'review' }> | null {
   const { row } = outcome;
   if (row.kind !== 'transaction' || row.type !== 'expense') return null;
@@ -538,8 +562,8 @@ export function walletRepeatReview(
   const candidate = parsedFinancialCandidateReview(row, observedAt);
   if (!candidate || !('kind' in candidate) || candidate.kind !== 'universal') return null;
   const item = identifySourceFreeReviewAlert(
-    { ...candidate, channel: row.channel === 'push' ? 'push' : 'inbox' },
-    localReviewIdentity(recordId),
+    { ...candidate, channel: row.channel === 'push' ? 'push' : row.captureSource === 'shortcut' ? 'shortcut' : 'inbox' },
+    (smsKey ? messageReviewIdentity(smsKey) : null) ?? localReviewIdentity(recordId),
   );
   if (!item || !isUniversalReviewAlert(item)) return null;
   return {

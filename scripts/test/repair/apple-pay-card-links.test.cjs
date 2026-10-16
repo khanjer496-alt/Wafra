@@ -14,6 +14,7 @@ const records = require(path.join(build, 'local-message-record.js'));
 const { parseIosApplePayRecord } = require(path.join(build, 'ios-apple-pay-record.js'));
 const { buildImportPlan } = require(path.join(build, 'import-plan.js'));
 const { setActiveMarket, setLedgerCurrency } = require(path.join(build, 'markets.js'));
+const promotion = require(path.join(build, 'review-promotion.js'));
 const health = load(path.join(root, 'src/lib/ios-capture-health.ts'));
 setActiveMarket('AE'); setLedgerCurrency('AED', 2);
 
@@ -43,7 +44,7 @@ test('link state: one link per card, newest wins, malformed rows dropped, forget
   current = links.rememberApplePayCardLink(current, 'Apple Cash', 'adib-card', 30);
   assert.deepEqual(JSON.parse(JSON.stringify(current)), [
     { cardOrPass: 'Liv Debit', accountId: 'adib-card', linkedAt: 20 },
-    { cardOrPass: 'Apple Cash', accountId: 'adib-card', linkedAt: 30 },
+    { cardOrPass: 'Apple Cash', accountId: 'adib-card', linkedAt: 30, ambiguous: true },
   ]);
   assert.equal(links.rememberApplePayCardLink(current, ' bad ', 'acc-liv', 40).length, 2, 'an unsanitized name is never stored');
   assert.equal(links.normalizeApplePayCardLinks([...current, { cardOrPass: 'x', accountId: '', linkedAt: 1 }, null, 'x',
@@ -93,8 +94,12 @@ test('anything that may already be recorded asks first: bank row, pending review
     date: '2026-10-16', ts: item.observedAt - 4 * MIN, source: 'sms', smsKey: 'h' + 'c'.repeat(64), category: 'dining' };
   assert.deepEqual(plan(state({ transactions: [bank] }), [item]).postedIds, [],
     'a bank SMS that arrived first on another account keeps the Wallet purchase in Review');
-  assert.deepEqual(plan(state({ transactions: [{ ...bank, ts: item.observedAt - 11 * MIN }] }), [item]).postedIds, [item.id],
-    'outside the window it is a different purchase');
+  assert.deepEqual(plan(state({ transactions: [{ ...bank, ts: item.observedAt - 11 * MIN }] }), [item]).postedIds, [],
+    'past ten minutes the same shop still asks');
+  assert.deepEqual(plan(state({ transactions: [{ ...bank, ts: item.observedAt - 11 * MIN, title: 'CARREFOUR' }] }), [item]).postedIds,
+    [item.id], 'past ten minutes a clearly different shop is a different purchase');
+  assert.deepEqual(plan(state({ transactions: [{ ...bank, title: 'CARREFOUR' }] }), [item]).postedIds, [],
+    'inside ten minutes any shop asks');
   const pendingBank = { ...capture(2, { card: null }), id: 'notification_review_id_' + 'd'.repeat(16),
     sourceKey: 'local_review_source_' + 'e'.repeat(32), observedAt: item.observedAt + 2 * MIN };
   assert.deepEqual(plan(state({ reviewTray: { ...tray.emptyAlertReviewTray(), pending: [pendingBank] } }), [item]).postedIds, []);
@@ -110,7 +115,7 @@ test('only an Apple Pay review with a usable card is remembered on confirmation'
 });
 
 // ── The iOS drain, with the real planner ────────────────────────────────────
-function drainHarness({ initial, sms = [], wallet = [] }) {
+function drainHarness({ initial, sms = [], wallet = [], plan: planner = buildImportPlan, recordPatch = {} }) {
   const calls = [];
   const current = initial;
   let smsQueue = sms.map(entry => entry.id);
@@ -119,7 +124,7 @@ function drainHarness({ initial, sms = [], wallet = [] }) {
   const api = load(path.join(root, 'src/lib/ios-local-capture.ts'), {
     '@/lib/ios-capture-health': health,
     '@/lib/ios-notification-replay': { createIosNotificationReplayGuard: () => outcome => outcome },
-    '@/lib/import-plan': { buildImportPlan },
+    '@/lib/import-plan': { buildImportPlan: planner },
     '@/lib/launch-alert-parser': { createLaunchAlertSession: () => ({}) },
     '@/lib/alert-review-tray': tray,
     '@/lib/ledger-money': require(path.join(build, 'ledger-money.js')),
@@ -129,6 +134,7 @@ function drainHarness({ initial, sms = [], wallet = [] }) {
         : records.preflightLocalMessageRecord(value, now),
       localMessageCarrierFacts: () => null,
       parseLocalMessageRecord: value => ({ kind: 'parsed', market: 'AE', milestone: 'financial', row: parsedBy.get(value) }),
+      ...recordPatch,
     },
     '@/lib/types': { normalizeLocalCaptureQualifications: () => [], isLocalCaptureQualificationCandidate: () => true },
   }, { setTimeout });
@@ -217,6 +223,13 @@ test('drain: a linked capture followed by the bank SMS on ANOTHER account does n
   const flagged = bank.state.reviewTray.pending.find(item => item.attentionReason === 'possible-apple-pay-duplicate');
   assert.ok(flagged, 'the bank alert waits in Review as a possible Apple Pay duplicate');
   assert.equal(flagged.walletTransactionId, walletRow.id);
+  // The message's own identity, as the planner keys it: "Already recorded"
+  // binds the bank message to the Wallet row, and a re-read finds it.
+  assert.equal(flagged.sourceKey, 'apple_message_review_source_' + smsId);
+  const binding = promotion.walletDuplicateBinding(bank.state, flagged.id);
+  assert.ok(binding, 'Already recorded binds the message to the Wallet row');
+  assert.equal(binding.id, walletRow.id);
+  assert.equal(binding.smsKey, 'h' + smsId);
   assert.deepEqual(bank.queues().sms, [], 'acknowledged only once its Review item is retained');
   assert.ok(!bank.calls.some(call => call[0] === 'save' && call[1] > 0));
 });
@@ -270,4 +283,98 @@ test('drain: a bank SMS that arrived before the Apple Pay capture keeps the capt
   assert.equal(h.state.transactions.length, 1);
   assert.equal(h.state.reviewTray.pending.length, 1, 'the linked Wallet capture asks in Review instead of posting');
   assert.equal(h.state.reviewTray.pending[0].walletCardOrPass, 'Apple Cash');
+});
+
+test('a full protected Review lane never loses a review to auto-posting', () => {
+  const item = capture(1);
+  const filler = n => ({ ...capture(100 + n, { card: null, amount: `${n + 100}.00`, at: item.observedAt - (n + 1) * MIN }) });
+  const full = { ...tray.emptyAlertReviewTray(), pending: Array.from({ length: tray.REVIEW_ALERT_CAP }, (_, n) => filler(n)) };
+  assert.equal(full.pending.filter(tray.isProtectedIosCaptureReview).length, tray.REVIEW_ALERT_CAP);
+  const blocked = plan(state({ reviewTray: full }), [item]);
+  assert.deepEqual(blocked.postedIds, [], 'at the cap the purchase asks instead of posting');
+  assert.equal(blocked.transactions.length, 0);
+  const roomy = { ...full, pending: full.pending.slice(1) };
+  const posted = plan(state({ reviewTray: roomy }), [item]);
+  assert.deepEqual(posted.postedIds, [item.id]);
+  assert.deepEqual(posted.reviewTray.pending.map(entry => entry.id).sort(), roomy.pending.map(entry => entry.id).sort(),
+    'every review that was pending is still pending');
+  assert.ok(posted.reviewTray.tombstones.some(entry => entry.sourceKey === item.sourceKey && entry.outcome === 'added'));
+  // Two captures into a lane with one free slot: the first posts, the second asks.
+  const tight = { ...full, pending: full.pending.slice(1) };
+  const pair = plan(state({ reviewTray: tight }), [item, capture(2, { at: item.observedAt + 90 * MIN })]);
+  assert.equal(pair.postedIds.length, 2, 'a posted capture leaves the lane, so the next one has room too');
+});
+
+test('a card name confirmed on two accounts becomes ambiguous and always asks', () => {
+  let current = links.rememberApplePayCardLink([], 'Visa Debit', 'acc-liv', 10);
+  current = links.rememberApplePayCardLink(current, 'Visa Debit', 'acc-liv', 20);
+  assert.equal(current[0].ambiguous, undefined, 'confirming the same account again is not ambiguous');
+  current = links.rememberApplePayCardLink(current, 'Visa Debit', 'adib-card', 30);
+  assert.equal(current[0].ambiguous, true);
+  current = links.rememberApplePayCardLink(current, 'Visa Debit', 'adib-card', 40);
+  assert.equal(current[0].ambiguous, true, 'stays ambiguous until forgotten');
+  assert.equal(links.linkedApplePayAccount({ accounts, applePayCardLinks: current }, 'Visa Debit'), null);
+  assert.deepEqual(plan(state({ applePayCardLinks: current }), [capture(1, { card: 'Visa Debit' })]).postedIds, []);
+  assert.equal(links.normalizeApplePayCardLinks(JSON.parse(JSON.stringify(current)))[0].ambiguous, true, 'survives persistence');
+  const fresh = links.rememberApplePayCardLink(links.forgetApplePayCardLink(current, 'Visa Debit'), 'Visa Debit', 'adib-card', 50);
+  assert.equal(fresh[0].ambiguous, undefined, 'forgetting starts over');
+  assert.deepEqual(plan(state({ applePayCardLinks: fresh }), [capture(2, { card: 'Visa Debit' })]).postedIds.length, 1);
+});
+
+test('late bank rows ask unless the shop clearly differs; earlier Wallet taps do not block a habit', () => {
+  const item = capture(1);
+  const bank = (hours, title) => ({ id: `bank-${hours}`, type: 'expense', amountFils: 2500, accountId: 'adib-card', title,
+    date: '2026-10-16', ts: item.observedAt - hours * 60 * MIN, source: 'sms', smsKey: 's' + (item.observedAt - hours * 60 * MIN) + '-2500',
+    category: 'dining' });
+  assert.deepEqual(plan(state({ transactions: [bank(5, 'FIXTURE COFFEE DXB')] }), [item]).postedIds, [],
+    'a bank row hours earlier for the same shop asks');
+  assert.deepEqual(plan(state({ transactions: [bank(5, 'Card purchase')] }), [item]).postedIds, [],
+    'a bank row with no shop name asks');
+  assert.deepEqual(plan(state({ transactions: [bank(5, 'CARREFOUR MALL')] }), [item]).postedIds, [item.id],
+    'a clearly different shop is a different purchase');
+  assert.deepEqual(plan(state({ transactions: [bank(80, 'FIXTURE COFFEE DXB')] }), [item]).postedIds, [item.id],
+    'beyond three days it is a different purchase');
+  const yesterday = { ...bank(24, 'Fixture Coffee'), smsKey: 'apple_pay_review_source_' + '9'.repeat(32), viaPush: true };
+  assert.deepEqual(plan(state({ transactions: [yesterday] }), [item]).postedIds, [item.id],
+    'yesterday\'s Apple Pay coffee is its own receipt');
+  assert.equal(links.merchantsConflict('Fixture Coffee', 'FIXTURE COFFEE DXB'), false);
+  assert.equal(links.merchantsConflict('Fixture Coffee', 'POS PURCHASE'), false);
+  assert.equal(links.merchantsConflict('Fixture Coffee', 'CARREFOUR'), true);
+});
+
+test('drain: a late bank SMS hours after the Apple Pay row asks when the shop matches, posts when it clearly differs', async () => {
+  const h = drainHarness({ initial: state(), wallet: [envelope(1, { at: Date.now() - 5 * 60 * MIN })] });
+  await h.coordinator.drain();
+  assert.equal(h.state.transactions.length, 1);
+  const late = drainHarness({ initial: h.state, sms: [bankSms('7'.repeat(64), { smsTs: Date.now() - 2 * 60 * MIN })] });
+  assert.equal((await late.coordinator.drain()).imported, 0);
+  assert.equal(late.state.transactions.length, 1);
+  assert.equal(late.state.reviewTray.pending.filter(item => item.attentionReason === 'possible-apple-pay-duplicate').length, 1);
+  const other = drainHarness({ initial: late.state,
+    sms: [bankSms('8'.repeat(64), { smsTs: Date.now() - 60 * MIN, merchant: 'CARREFOUR MALL OF THE EMIRATES' })] });
+  assert.equal((await other.coordinator.drain()).imported, 1);
+  assert.equal(other.state.transactions.length, 2);
+});
+
+test('drain: an alert without a flagged form still asks as an ordinary review, never posts', async () => {
+  const h = drainHarness({ initial: state(), wallet: [envelope(1)] });
+  await h.coordinator.drain();
+  const bank = drainHarness({ initial: h.state, sms: [bankSms('9'.repeat(64))], recordPatch: { walletRepeatReview: () => null } });
+  const result = await bank.coordinator.drain();
+  assert.equal(result.imported, 0);
+  assert.equal(bank.state.transactions.length, 1);
+  assert.equal(bank.state.reviewTray.pending.length, 1, 'an ordinary review item asks');
+  assert.deepEqual(bank.queues().sms, [], 'acknowledged behind the retained review, not held to expiry');
+});
+
+test('drain: a dry run that cannot settle asks for every candidate rather than posting', async () => {
+  const h = drainHarness({ initial: state(), wallet: [envelope(1)] });
+  await h.coordinator.drain();
+  let calls = 0;
+  const flaky = (...args) => { calls += 1; if (calls === 1) throw new Error('dry run failed'); return buildImportPlan(...args); };
+  const bank = drainHarness({ initial: h.state, sms: [bankSms('6'.repeat(64))], plan: flaky });
+  const result = await bank.coordinator.drain();
+  assert.equal(result.imported, 0);
+  assert.equal(bank.state.transactions.length, 1);
+  assert.equal(bank.state.reviewTray.pending.filter(item => item.attentionReason === 'possible-apple-pay-duplicate').length, 1);
 });

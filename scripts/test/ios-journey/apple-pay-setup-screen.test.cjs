@@ -287,14 +287,16 @@ test('linked Wallet cards are listed with their account and can be forgotten', a
     { cardOrPass: 'Apple Cash', accountId: 'acc-liv', linkedAt: at - 1000 },
     { cardOrPass: 'Liv Debit', accountId: 'acc-gone', linkedAt: at - 500 },
     { cardOrPass: 'Old Visa', accountId: 'acc-old', linkedAt: at },
+    { cardOrPass: 'Visa Debit', accountId: 'acc-liv', linkedAt: at + 1, ambiguous: true },
   ] });
   const block = walk(h.tree()).find(n => n.props?.testID === 'apple-pay-card-links');
   assert.ok(block, 'links show even when Wallet sent no recent card rows');
   const lines = walk(block).filter(n => n.type === 'Text' && n.props.type === 'small').map(n => [].concat(n.props.children).join(''));
   assert.deepEqual(lines, ['Apple Cash · Liv', 'Liv Debit · account removed or hidden, so purchases ask again',
-    'Old Visa · account removed or hidden, so purchases ask again']);
+    'Old Visa · account removed or hidden, so purchases ask again',
+    'Visa Debit · confirmed on two accounts. More than one card may share this name, so its purchases always ask. Forget it to choose again']);
   const forgets = walk(block).filter(n => n.type === 'Button' && n.props.label === 'Forget');
-  assert.equal(forgets.length, 3);
+  assert.equal(forgets.length, 4);
   assert.equal(forgets[0].props.accessibilityLabel, 'Forget: Apple Cash');
   forgets[0].props.onPress();
   await h.flush();
@@ -314,7 +316,7 @@ test('Apple Pay setup copy says the first purchase per card asks and later ones 
     assert.match(ar[key], /أول عملية من كل بطاقة تسألك/, key);
     assert.match(ar[key], /تلقائياً/, key);
   }
-  for (const key of ['linksTitle', 'linksHelp', 'linkGone', 'forget']) {
+  for (const key of ['linksTitle', 'linksHelp', 'linkGone', 'linkAmbiguous', 'forget']) {
     assert.equal(typeof en[key], 'string', key); assert.equal(typeof ar[key], 'string', key);
     assert.notEqual(en[key], ar[key], key);
   }

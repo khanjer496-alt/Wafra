@@ -288,7 +288,8 @@ function ApplePaySetupScreen() {
               <ThemedText type="smallBold" accessibilityRole="header" style={{ color: band.text }}>{w.linksTitle}</ThemedText>
               {links.map(link => {
                 const account = state.accounts.find(row => row.id === link.accountId);
-                const destination = account && account.archived !== true ? account.name : w.linkGone;
+                const destination = link.ambiguous === true ? w.linkAmbiguous
+                  : account && account.archived !== true ? account.name : w.linkGone;
                 return <View key={link.cardOrPass} style={styles.linkRow}>
                   <ThemedText type="small" style={[styles.linkText, { color: band.text }]}>{link.cardOrPass} · {destination}</ThemedText>
                   <EButton testID="apple-pay-card-link-forget" palette={band} variant="quiet" label={w.forget}

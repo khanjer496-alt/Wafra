@@ -801,6 +801,11 @@ export interface ApplePayCardLink {
   cardOrPass: string;
   accountId: string;
   linkedAt: number;
+  /**
+   * Confirmed on two different accounts: Wallet names are not unique, so this
+   * card's purchases always ask in Review until the person forgets it.
+   */
+  ambiguous?: true;
 }
 
 export interface AppState {

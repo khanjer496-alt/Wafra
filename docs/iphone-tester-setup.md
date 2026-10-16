@@ -30,9 +30,20 @@ first captured purchase from each Wallet card goes to Review; confirming it on
 an account links that card (by Wallet's "Card or Pass" name, kept on the
 iPhone only) and its later purchases post on their own. A purchase without a
 card name, from an unlinked card, in another currency, on a deleted or hidden
-account, or that may already be in the ledger still goes to Review; a bank
-text for an Apple Pay purchase already in the ledger goes to Review as a
-possible duplicate. Links can be forgotten on the Apple Pay setup screen.
+account, while the Review lane is full, or that may already be in the ledger
+(same amount within ten minutes, or within three days unless the shop names
+clearly differ) still goes to Review. A card name confirmed on two different
+accounts is treated as ambiguous (Wallet names are not unique) and always
+asks until it is forgotten. A bank text for an Apple Pay purchase already in
+the ledger goes to Review as a possible duplicate under the same window.
+Links can be forgotten on the Apple Pay setup screen.
+
+Release note: native builds from this change write the card name into the
+queued Apple Pay record. An over-the-air JS bundle older than this change
+rejects those records, which then wait in the native queue and expire after
+30 days. The fingerprint runtime policy (app.json) already keeps bundles
+built for older native code off this runtime; do not republish or roll back
+an older JS bundle onto it by hand.
 Review-and-confirm was verified with a real tap on an iPhone 15 (iOS 26.6.2);
 automatic posting of a linked card is not yet device-verified. The simulator's strict History file-protection failure was not bypassed
 and does not qualify History behavior on an iPhone.
