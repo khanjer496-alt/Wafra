@@ -47,5 +47,5 @@
 "live.alert.title_paid_named" = "%1$@ paid · %2$@";
 "live.alert.card" = "··%@";
 "live.alert.fallback" = "Tap to open Wafra";
-"live.apple_pay.alert.body_card" = "Apple Pay · %@ · tap to add";
-"live.apple_pay.alert.body" = "Apple Pay · tap to add";
+"live.apple_pay.alert.body_card" = "Apple Pay · %@";
+"live.apple_pay.alert.body" = "Apple Pay";
