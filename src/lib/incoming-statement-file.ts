@@ -2,7 +2,10 @@
  * A statement handed to Wafra by iOS ("Open in Wafra" from the Share Sheet or
  * Files). With LSSupportsOpeningDocumentsInPlace false, iOS copies the file
  * into this app's Documents/Inbox and opens Wafra with its file:// URL, which
- * Expo Router passes to +native-intent's redirectSystemPath.
+ * Expo Router passes to +native-intent's redirectSystemPath. For an iCloud
+ * Drive item opened from Files, iOS skips the copy and hands over the
+ * original, security-scoped URL; modules/wafra-incoming-file copies that into
+ * the Inbox first (see incomingStatementRedirect).
  *
  * Pure and platform-free so the URL rules run in the Node test suite.
  *
@@ -91,6 +94,36 @@ export function parseIncomingStatementUrl(
   return { uri: value, name };
 }
 
+/**
+ * True when iOS handed Wafra a statement by its original location — Files or
+ * iCloud Drive with "Not copying to Inbox" — rather than an Inbox copy: a
+ * strict file:/// URL with no query, fragment or traversal, a statement
+ * extension, and outside this app's container (the parent of
+ * `documentDirectory`). Only such a URL is offered to the native adopter.
+ */
+export function isAdoptableExternalStatementUrl(
+  value: unknown,
+  documentDirectory: string | null | undefined,
+): value is string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > MAX_URL_LENGTH) return false;
+  if (typeof documentDirectory !== 'string' || documentDirectory.length === 0) return false;
+  const documents = fileSegments(documentDirectory, false);
+  const segments = fileSegments(value, true);
+  if (!documents || documents.length < 2 || !segments || segments.length < 2) return false;
+  const container = documents.slice(0, -1);
+  if (container.every((segment, index) => segments[index] === segment)) return false;
+  const name = segments[segments.length - 1];
+  if (name.length > MAX_NAME_LENGTH || name.startsWith('.')) return false;
+  const extension = /\.([A-Za-z0-9]+)$/.exec(name)?.[1].toLowerCase();
+  return !!extension && INCOMING_STATEMENT_EXTENSIONS.includes(extension);
+}
+
+/**
+ * Copies a handed-over external statement into `<documents>/Inbox` and
+ * returns the copy's file URL, or null (native, iOS only).
+ */
+export type ExternalStatementAdopter = (url: string) => string | null;
+
 let pending: { token: string; file: IncomingStatementFile } | null = null;
 let sequence = 0;
 /** Handed-over copies a newer file replaced before the screen claimed them. */
@@ -128,9 +161,27 @@ export function pendingIncomingStatementUri(): string | null {
 /**
  * The route for an incoming URL: the statement import screen with a token
  * when it is a statement file, otherwise null (stay where the app is).
+ *
+ * `adoptExternal` (iOS) handles a statement iOS did not copy into the Inbox:
+ * an adoptable external URL is copied there natively, and the copy must then
+ * pass the same strict Inbox rule, so the token, screen and delete-after-read
+ * are unchanged. Anything else is never passed to native code.
  */
-export function incomingStatementRedirect(url: unknown, documentDirectory: string | null | undefined): string | null {
-  const file = parseIncomingStatementUrl(url, documentDirectory);
+export function incomingStatementRedirect(
+  url: unknown,
+  documentDirectory: string | null | undefined,
+  adoptExternal?: ExternalStatementAdopter | null,
+): string | null {
+  let file = parseIncomingStatementUrl(url, documentDirectory);
+  if (!file && typeof adoptExternal === 'function' && isAdoptableExternalStatementUrl(url, documentDirectory)) {
+    let adopted: unknown = null;
+    try {
+      adopted = adoptExternal(url);
+    } catch {
+      adopted = null;
+    }
+    file = parseIncomingStatementUrl(adopted, documentDirectory);
+  }
   if (!file) return null;
   const token = registerIncomingStatement(file);
   return `/statement-import?${INCOMING_STATEMENT_PARAM}=${encodeURIComponent(token)}`;

@@ -74,6 +74,8 @@ if [ "$(uname -s)" = "Darwin" ]; then
   NATIVE_SUITES=$((NATIVE_SUITES + 3))
   bash native-live-queue-signal.sh
   NATIVE_SUITES=$((NATIVE_SUITES + 1))
+  bash native-incoming-file.sh
+  NATIVE_SUITES=$((NATIVE_SUITES + 1))
 fi
 
 # The Worker's own suites: the PDF/email statement parser and the encrypted push
