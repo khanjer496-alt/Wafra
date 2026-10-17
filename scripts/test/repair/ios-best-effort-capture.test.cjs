@@ -24,12 +24,12 @@ const uuid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const record = (text, sender, id = uuid(1)) =>
   JSON.stringify({ v: 1, id, text, sender, source: 'message', observedAt: OBSERVED });
 
-function useUsLedger() {
+function configureUsLedger() {
   markets.setActiveMarket('ZZ');
   markets.setLedgerCurrency('USD', 2);
   country.setActiveCountry('US');
 }
-useUsLedger();
+configureUsLedger();
 
 const PURCHASE = 'Chase Bank alert: Your card ending 4421 was charged USD 24.86 at NORTH STAR MARKET.';
 // [name, body, sender]. The lure names no own account or card: Android's
@@ -111,7 +111,7 @@ test('an AED ledger is unchanged: UAE formats stay proven, never best-effort', (
       assert.notEqual(outcome.kind, 'parsed', sender);
     }
   } finally {
-    useUsLedger();
+    configureUsLedger();
   }
 });
 
