@@ -24,7 +24,7 @@ try! fm.createDirectory(at: scratch, withIntermediateDirectories: true)
 
 let outside = scratch.appendingPathComponent("iCloud Drive/Downloads", isDirectory: true)
 let container = scratch.appendingPathComponent("Container", isDirectory: true)
-let inbox = container.appendingPathComponent("Documents/Inbox", isDirectory: true)
+let inbox = container.appendingPathComponent("Library/Caches/IncomingStatements", isDirectory: true)
 try! fm.createDirectory(at: outside, withIntermediateDirectories: true)
 try! fm.createDirectory(at: container.appendingPathComponent("Documents"), withIntermediateDirectories: true)
 let roots = [container]
@@ -104,7 +104,7 @@ let original = write("Card Sep 2026.pdf", bytes: 150_000)
 let first = copy(original)
 check(first != nil, "a regular statement is copied")
 if let first {
-  check(first.deletingLastPathComponent().standardizedFileURL.path == inbox.standardizedFileURL.path, "the copy is directly in Inbox")
+  check(first.deletingLastPathComponent().standardizedFileURL.path == inbox.standardizedFileURL.path, "the copy is directly in the adopter folder")
   check(first.lastPathComponent == "Card Sep 2026.pdf", "the copy keeps a readable name")
   check((try? Data(contentsOf: first)) == (try? Data(contentsOf: original)), "the bytes are identical")
   check(fm.fileExists(atPath: original.path), "the original is left where it was")
@@ -112,7 +112,7 @@ if let first {
   check(mode == 0o600, "the copy is owner-only")
   check((try? first.resourceValues(forKeys: [.isExcludedFromBackupKey]))?.isExcludedFromBackup == true,
         "the copy is excluded from backup")
-  check(first.absoluteString.hasPrefix("file:///") && first.absoluteString.hasSuffix("/Documents/Inbox/Card%20Sep%202026.pdf"),
+  check(first.absoluteString.hasPrefix("file:///") && first.absoluteString.hasSuffix("/Library/Caches/IncomingStatements/Card%20Sep%202026.pdf"),
         "the returned URL is a strict, percent-encoded file URL")
 }
 let second = copy(original)
@@ -149,6 +149,16 @@ let tunnel = outside.appendingPathComponent("tunnel", isDirectory: true)
 try! fm.createSymbolicLink(at: tunnel, withDestinationURL: container.appendingPathComponent("Documents"))
 check(copy(tunnel.appendingPathComponent("secret.pdf")) == nil, "a path that resolves into the app container is refused")
 check(copy(secret) == nil, "a file inside the app container is refused")
+// After open, the descriptor's real location is checked again (a parent
+// folder swapped for a symlink after the resolve check is still caught).
+let throughTunnel = open(tunnel.appendingPathComponent("secret.pdf").path, O_RDONLY | O_NOFOLLOW)
+check(throughTunnel >= 0, "fixture: open through the symlinked parent")
+if throughTunnel >= 0 {
+  let real = WafraIncomingFileAdopter.openedPath(throughTunnel)
+  check(real.map { WafraIncomingFileAdopter.isInside($0, roots: roots) } == true,
+        "F_GETPATH reports the container location behind a symlinked parent")
+  close(throughTunnel)
+}
 check(inboxNames() == before, "symlinks and container files leave nothing in Inbox")
 
 // Directories and FIFOs named like statements.

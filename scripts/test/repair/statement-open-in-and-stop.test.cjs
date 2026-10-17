@@ -356,23 +356,25 @@ test('Android registers no document types, so its links pass through even for fi
 
 // lsd logs "Not copying <file> to Inbox" and opens Wafra with this security-scoped URL.
 const ICLOUD = 'file:///private/var/mobile/Library/Mobile%20Documents/com~apple~CloudDocs/Downloads';
+// Where the native adopter puts its copy (iOS does not let an app write Documents/Inbox).
+const ADOPTED = `file://${CONTAINER}/Library/Caches/IncomingStatements`;
 
-test('a statement opened from iCloud Drive is adopted into the Inbox and routed like a Share Sheet copy', () => {
+test('a statement opened from iCloud Drive is adopted into Wafra\'s cache folder and routed like a Share Sheet copy', () => {
   for (const extension of ['pdf', 'csv', 'tsv', 'xlsx', 'ofx', 'qfx', 'qif', 'sta', 'mt940', '940', 'PDF', 'Ofx']) {
     const external = `${ICLOUD}/fab-files-test.${extension}`;
-    const copy = `file://${CONTAINER}/Documents/Inbox/fab-files-test.${extension.toLowerCase()}`;
+    const copy = `${ADOPTED}/fab-files-test.${extension.toLowerCase()}`;
     const { incoming, adoptCalls, redirect } = nativeIntent('ios', DOCUMENTS, () => copy);
     const route = redirect(external);
     const match = /^\/statement-import\?incomingStatement=([a-z0-9]+)$/.exec(route);
     assert.ok(match, `${extension} → ${route}`);
     assert.deepEqual(adoptCalls, [external], 'the exact handed-over URL goes to native, once');
     assert.doesNotMatch(route, /file|Inbox|Mobile|private/, 'no location in the route');
-    assert.equal(incoming.pendingIncomingStatementUri(), copy, 'the Inbox copy, not the original, is remembered');
+    assert.equal(incoming.pendingIncomingStatementUri(), copy, 'the adopted copy, not the original, is remembered');
     assert.deepEqual(plain(incoming.takeIncomingStatement(match[1])), { uri: copy, name: `fab-files-test.${extension.toLowerCase()}` });
   }
   // A Files location from a third-party provider is adopted the same way.
   const provider = 'file:///private/var/mobile/Containers/Shared/AppGroup/0F0F0F0F-0000-4000-8000-000000000009/File%20Provider%20Storage/Kashf%20%D9%83%D8%B4%D9%81.csv';
-  const copy = `${INBOX}/Kashf%20%D9%83%D8%B4%D9%81.csv`;
+  const copy = `${ADOPTED}/Kashf%20%D9%83%D8%B4%D9%81.csv`;
   const { incoming, adoptCalls, redirect } = nativeIntent('ios', DOCUMENTS, () => copy);
   assert.match(redirect(provider, false), /^\/statement-import\?incomingStatement=/, 'warm opens too');
   assert.deepEqual(adoptCalls, [provider]);
@@ -380,7 +382,7 @@ test('a statement opened from iCloud Drive is adopted into the Inbox and routed 
 });
 
 test('a disallowed, malformed or in-container URL is never passed to native code', () => {
-  const { incoming, adoptCalls, redirect } = nativeIntent('ios', DOCUMENTS, () => `${INBOX}/should-not-happen.pdf`);
+  const { incoming, adoptCalls, redirect } = nativeIntent('ios', DOCUMENTS, () => `${ADOPTED}/should-not-happen.pdf`);
   const refused = [
     `${ICLOUD}/statement.docx`, `${ICLOUD}/statement.xml`, `${ICLOUD}/statement.zip`, `${ICLOUD}/statement.pdf.exe`,
     `${ICLOUD}/statement`, `${ICLOUD}/.pdf`, `${ICLOUD}/.hidden.pdf`, `${ICLOUD}/statement.pdf?x=1`, `${ICLOUD}/statement.pdf#f`,
@@ -392,9 +394,12 @@ test('a disallowed, malformed or in-container URL is never passed to native code
     `file://${CONTAINER}/Documents/export.csv`, `file:///private${CONTAINER}/Documents/export.csv`,
     `file://${CONTAINER}/Documents/Inbox/sub/statement.pdf`, `file://${CONTAINER}/Library/Caches/statement.pdf`,
     `file://${CONTAINER}/tmp/statement.pdf`, `file://${CONTAINER}/statement.pdf`,
+    // The adopter's own folder is not an incoming location either.
+    `${ADOPTED}/statement.pdf`, `file:///private${CONTAINER}/Library/Caches/IncomingStatements/statement.pdf`,
   ];
   for (const url of refused) {
     assert.equal(incoming.isAdoptableExternalStatementUrl(url, DOCUMENTS), false, url);
+    assert.equal(incoming.parseIncomingStatementUrl(url, DOCUMENTS), null, url);
     assert.equal(redirect(url), null, url);
   }
   assert.deepEqual(adoptCalls, [], 'none of them reached native');
@@ -403,7 +408,7 @@ test('a disallowed, malformed or in-container URL is never passed to native code
     assert.equal(incoming.isAdoptableExternalStatementUrl(`${ICLOUD}/statement.pdf`, documents), false, String(documents));
   }
   // No readable documents directory: nothing to compare against, so nothing is adopted.
-  const broken = nativeIntent('ios', new Error('no native module'), () => `${INBOX}/x.pdf`);
+  const broken = nativeIntent('ios', new Error('no native module'), () => `${ADOPTED}/x.pdf`);
   assert.equal(broken.redirect(`${ICLOUD}/statement.pdf`), null);
   assert.deepEqual(broken.adoptCalls, []);
   // Web links never reach the file rules at all.
@@ -411,21 +416,36 @@ test('a disallowed, malformed or in-container URL is never passed to native code
   assert.deepEqual(adoptCalls, []);
 });
 
-test('a failed adoption routes nowhere, and the copy must still pass the strict Inbox rule', () => {
+test('a failed adoption routes nowhere, and the copy must pass the strict rule for the adopter\'s one folder', () => {
   const external = `${ICLOUD}/statement.pdf`;
   for (const [result, why] of [
     [null, 'native null'], [undefined, 'native undefined'], ['', 'empty string'], [42, 'not a string'],
     [external, 'the original URL echoed back'],
-    [`file://${CONTAINER}/Documents/statement.pdf`, 'outside the Inbox'],
-    [`file://${CONTAINER}/Documents/Inbox/sub/statement.pdf`, 'a subfolder of the Inbox'],
-    [`${INBOX}/statement.docx`, 'a disallowed extension'],
-    [`${INBOX}/../statement.pdf`, 'traversal'],
-    ['file:///var/mobile/Containers/Data/Application/FFFFFFFF-0000-4000-8000-000000000002/Documents/Inbox/statement.pdf', 'another app'],
+    [`file://${CONTAINER}/Documents/statement.pdf`, 'outside the adopter folder'],
+    [`${INBOX}/statement.pdf`, 'the Inbox, which the adopter never writes'],
+    [`file://${CONTAINER}/Library/Caches/statement.pdf`, 'the caches root'],
+    [`file://${CONTAINER}/Library/Caches/DocumentPicker/statement.pdf`, 'the picker cache'],
+    [`${ADOPTED}/sub/statement.pdf`, 'a subfolder'],
+    [`${ADOPTED}/statement.docx`, 'a disallowed extension'],
+    [`${ADOPTED}/.statement.pdf`, 'a hidden file'],
+    [`${ADOPTED}/../statement.pdf`, 'traversal'],
+    [`${ADOPTED}/statement.pdf?x=1`, 'a query'],
+    ['file:///var/mobile/Containers/Data/Application/FFFFFFFF-0000-4000-8000-000000000002/Library/Caches/IncomingStatements/statement.pdf', 'another app'],
   ]) {
     const { incoming, adoptCalls, redirect } = nativeIntent('ios', DOCUMENTS, () => result);
+    assert.equal(incoming.parseAdoptedStatementUrl(result, DOCUMENTS), null, why);
     assert.equal(redirect(external), null, why);
     assert.equal(adoptCalls.length, 1, why);
     assert.equal(incoming.pendingIncomingStatementUri(), null, why);
+  }
+  // The adopted rule needs a real documents directory ending in Documents.
+  const incomingRules = load(path.join(root, 'src/lib/incoming-statement-file.ts'));
+  for (const documents of [null, '', 'file:///', `file://${CONTAINER}/`, `file://${CONTAINER}/NotDocuments/`]) {
+    assert.equal(incomingRules.parseAdoptedStatementUrl(`${ADOPTED}/statement.pdf`, documents), null, String(documents));
+  }
+  for (const spelling of [DOCUMENTS, `file:${CONTAINER}/Documents`, `file:///private${CONTAINER}/Documents/`]) {
+    assert.equal(incomingRules.parseAdoptedStatementUrl(`file:///private${CONTAINER}/Library/Caches/IncomingStatements/a.pdf`, spelling).name,
+      'a.pdf', spelling);
   }
   const throwing = nativeIntent('ios', DOCUMENTS, () => { throw new Error('native failure'); });
   assert.equal(throwing.redirect(external), null, 'a native exception never crashes the launch');
@@ -436,7 +456,7 @@ test('a failed adoption routes nowhere, and the copy must still pass the strict 
 });
 
 test('an Inbox copy takes the existing route without calling native code', () => {
-  const { incoming, adoptCalls, redirect } = nativeIntent('ios', DOCUMENTS, () => `${INBOX}/other.pdf`);
+  const { incoming, adoptCalls, redirect } = nativeIntent('ios', DOCUMENTS, () => `${ADOPTED}/other.pdf`);
   const route = redirect(`${INBOX}/statement.pdf`);
   assert.match(route, /^\/statement-import\?incomingStatement=/);
   assert.equal(incoming.pendingIncomingStatementUri(), `${INBOX}/statement.pdf`);
@@ -445,20 +465,23 @@ test('an Inbox copy takes the existing route without calling native code', () =>
   assert.deepEqual(adoptCalls, []);
 });
 
-test('the adopted copy is cleaned up by the same Inbox rules as a Share Sheet copy', () => {
-  // clearStatementPickerCache sweeps <documents>/Inbox for STATEMENT_COPY extensions;
-  // every extension that can be adopted must be one it deletes.
+test('the adopted copy is cleaned up like a Share Sheet copy', () => {
+  // clearStatementPickerCache sweeps <cache>/IncomingStatements, as well as
+  // <documents>/Inbox, for STATEMENT_COPY extensions; every extension that
+  // can be adopted must be one it deletes.
   const transportSource = read('src/lib/cloud-import.ts');
+  assert.match(transportSource, /new Directory\(Paths\.cache, 'IncomingStatements'\)/);
   const pattern = /const STATEMENT_COPY = (\/.+\/i);/.exec(transportSource);
   assert.ok(pattern, 'STATEMENT_COPY is where the test expects it');
   const statementCopy = new Function(`return ${pattern[1]};`)();
   const incoming = load(path.join(root, 'src/lib/incoming-statement-file.ts'));
   for (const extension of incoming.INCOMING_STATEMENT_EXTENSIONS) {
-    assert.ok(statementCopy.test(`${INBOX}/adopted.${extension}`), extension);
+    assert.ok(statementCopy.test(`${ADOPTED}/adopted.${extension}`), extension);
   }
-  // The native copy lands in <Documents>/Inbox, the folder that cleanup lists.
+  // The native copy lands in <Library/Caches>/IncomingStatements, the folder that cleanup lists.
+  assert.equal(incoming.ADOPTED_STATEMENT_FOLDER, 'IncomingStatements');
   const native = read('modules/wafra-incoming-file/ios/WafraIncomingFileModule.swift');
-  assert.match(native, /urls\(for: \.documentDirectory, in: \.userDomainMask\)\.first\?\s*\.appendingPathComponent\("Inbox", isDirectory: true\)/);
+  assert.match(native, /urls\(for: \.cachesDirectory, in: \.userDomainMask\)\.first\?\s*\.appendingPathComponent\("IncomingStatements", isDirectory: true\)/);
   // Both allowlists agree.
   const adopter = read('modules/wafra-incoming-file/ios/WafraIncomingFileAdopter.swift');
   const swiftList = /statementExtensions: Set<String> = \[([^\]]+)\]/.exec(adopter)[1].match(/"([^"]+)"/g).map((value) => value.slice(1, -1));
@@ -466,7 +489,7 @@ test('the adopted copy is cleaned up by the same Inbox rules as a Share Sheet co
 });
 
 test('an adopted iCloud statement is asked about, uploaded once, or deleted on Cancel', async () => {
-  const copy = `${INBOX}/fab-files-test.pdf`;
+  const copy = `${ADOPTED}/fab-files-test.pdf`;
   for (const action of ['confirm', 'cancel']) {
     const h = incomingHarness();
     const route = h.incoming.incomingStatementRedirect(`${ICLOUD}/fab-files-test.pdf`, DOCUMENTS, () => copy);
@@ -500,6 +523,10 @@ test('the native adopter is an iOS-only local module that refuses, bounds and ne
   assert.doesNotMatch(subscriber, /return true/);
   assert.match(read('src/app/+native-intent.tsx'), /from '\.\.\/\.\.\/modules\/wafra-incoming-file'/);
   assert.match(read('scripts/test/run.sh'), /bash native-incoming-file\.sh/);
+  // The subscriber hears file opens through the UIApplicationDelegate open-URL
+  // callbacks, which a UIScene lifecycle would stop calling. Moving to scenes
+  // must add a scene hook here first.
+  assert.equal(Object.hasOwn(JSON.parse(read('app.json')).expo.ios.infoPlist, 'UIApplicationSceneManifest'), false);
 });
 
 test('app.json registers PDF, CSV, TSV, Excel, OFX, QIF and MT940 as an alternate viewer and asks iOS for an Inbox copy', () => {

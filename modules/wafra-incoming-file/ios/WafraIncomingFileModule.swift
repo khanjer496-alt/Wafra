@@ -16,11 +16,13 @@ func wafraIncomingFileForbiddenRoots() -> [URL] {
   return roots
 }
 
-/// `<Documents>/Inbox`, where iOS itself puts handed-over copies and where
-/// the statement import's cleanup already looks.
+/// `<Library/Caches>/IncomingStatements`: Wafra's own folder for adopted
+/// copies. Not `Documents/Inbox`, which iOS lets an app read and delete but
+/// not write. The statement import's cleanup sweeps this folder too
+/// (clearStatementPickerCache), and Caches is never backed up.
 func wafraIncomingFileInbox() -> URL? {
-  FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
-    .appendingPathComponent("Inbox", isDirectory: true)
+  FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+    .appendingPathComponent("IncomingStatements", isDirectory: true)
 }
 
 /// "Open in Wafra" for a statement iOS hands over by its original location
@@ -32,7 +34,8 @@ public class WafraIncomingFileModule: Module {
     // Synchronous so expo-router's redirectSystemPath can use the result at
     // launch. It runs on the JavaScript thread, never the main thread, and
     // waits at most WafraIncomingFilePolicy.timeout. Returns the new
-    // `<Documents>/Inbox/<name>` file URL, or null. Nothing is logged.
+    // `<Library/Caches>/IncomingStatements/<name>` file URL, or null.
+    // Nothing is logged.
     Function("adoptExternalDocument") { (value: String) -> String? in
       let policy = WafraIncomingFilePolicy()
       guard WafraIncomingFileAdopter.candidate(value, policy: policy) != nil,

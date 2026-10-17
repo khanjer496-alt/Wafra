@@ -31,7 +31,8 @@ function externalAdopter(): ExternalStatementAdopter | null {
  * stays in memory, see incoming-statement-file.ts); the screen asks before
  * anything is uploaded. A statement opened from Files in iCloud Drive
  * arrives instead as its original URL (iOS logs "Not copying to Inbox"); the
- * native adopter copies it into the Inbox, and the copy takes the same route.
+ * native adopter copies it into Wafra's own cache folder, and the copy takes
+ * the same route.
  * Any other file:// URL is dropped (null: stay where the app is) rather than
  * routed to "not found". Every other link is returned untouched. Android
  * registers no document intent filters, so this is iOS only.

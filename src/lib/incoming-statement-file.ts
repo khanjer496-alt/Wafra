@@ -5,7 +5,7 @@
  * Expo Router passes to +native-intent's redirectSystemPath. For an iCloud
  * Drive item opened from Files, iOS skips the copy and hands over the
  * original, security-scoped URL; modules/wafra-incoming-file copies that into
- * the Inbox first (see incomingStatementRedirect).
+ * Library/Caches/IncomingStatements first (see incomingStatementRedirect).
  *
  * Pure and platform-free so the URL rules run in the Node test suite.
  *
@@ -24,6 +24,13 @@
 export const INCOMING_STATEMENT_EXTENSIONS: readonly string[] = [
   'pdf', 'csv', 'tsv', 'xlsx', 'ofx', 'qfx', 'qif', 'sta', 'mt940', '940',
 ];
+
+/**
+ * Wafra's own folder (under Library/Caches) for a copy the native adopter
+ * makes of a Files / iCloud Drive statement. iOS lets an app read and delete
+ * Documents/Inbox but not write it, so the copy cannot go there.
+ */
+export const ADOPTED_STATEMENT_FOLDER = 'IncomingStatements';
 
 /** The statement import route's parameter that carries the one-time token. */
 export const INCOMING_STATEMENT_PARAM = 'incomingStatement';
@@ -69,6 +76,31 @@ function fileSegments(value: string, strict: boolean): string[] | null {
 }
 
 /**
+ * A statement file directly inside `<base>/<folder...>/` as a strict
+ * file:/// URL with no query, fragment or traversal, and a statement
+ * extension; otherwise null.
+ */
+function statementFileIn(value: unknown, base: string[], folder: readonly string[]): IncomingStatementFile | null {
+  if (typeof value !== 'string' || value.length === 0 || value.length > MAX_URL_LENGTH) return null;
+  const segments = fileSegments(value, true);
+  if (!segments || segments.length !== base.length + folder.length + 1) return null;
+  if (base.some((segment, index) => segments[index] !== segment)) return null;
+  if (folder.some((segment, index) => segments[base.length + index] !== segment)) return null;
+  const name = segments[segments.length - 1];
+  if (name.length > MAX_NAME_LENGTH || name.startsWith('.')) return null;
+  const extension = /\.([A-Za-z0-9]+)$/.exec(name)?.[1].toLowerCase();
+  if (!extension || !INCOMING_STATEMENT_EXTENSIONS.includes(extension)) return null;
+  return { uri: value, name };
+}
+
+/** The decoded documents directory, or null. */
+function documentSegments(documentDirectory: string | null | undefined): string[] | null {
+  if (typeof documentDirectory !== 'string' || documentDirectory.length === 0) return null;
+  const documents = fileSegments(documentDirectory, false);
+  return documents && documents.length > 0 ? documents : null;
+}
+
+/**
  * Accept only a statement file directly inside `<documents>/Inbox/` — where
  * iOS puts the copy it hands over — as a strict file:/// URL with no query,
  * fragment or traversal, and a statement extension. Anything else is null
@@ -79,19 +111,22 @@ export function parseIncomingStatementUrl(
   value: unknown,
   documentDirectory: string | null | undefined,
 ): IncomingStatementFile | null {
-  if (typeof value !== 'string' || value.length === 0 || value.length > MAX_URL_LENGTH) return null;
-  if (typeof documentDirectory !== 'string' || documentDirectory.length === 0) return null;
-  const documents = fileSegments(documentDirectory, false);
-  const segments = fileSegments(value, true);
-  if (!documents || documents.length === 0 || !segments) return null;
-  if (segments.length !== documents.length + 2) return null;
-  if (documents.some((segment, index) => segments[index] !== segment)) return null;
-  if (segments[documents.length] !== 'Inbox') return null;
-  const name = segments[segments.length - 1];
-  if (name.length > MAX_NAME_LENGTH || name.startsWith('.')) return null;
-  const extension = /\.([A-Za-z0-9]+)$/.exec(name)?.[1].toLowerCase();
-  if (!extension || !INCOMING_STATEMENT_EXTENSIONS.includes(extension)) return null;
-  return { uri: value, name };
+  const documents = documentSegments(documentDirectory);
+  return documents ? statementFileIn(value, documents, ['Inbox']) : null;
+}
+
+/**
+ * The native adopter's result: only a statement file directly inside
+ * `<container>/Library/Caches/IncomingStatements/`, by the same strict rule.
+ * Never applied to a URL iOS opened Wafra with.
+ */
+export function parseAdoptedStatementUrl(
+  value: unknown,
+  documentDirectory: string | null | undefined,
+): IncomingStatementFile | null {
+  const documents = documentSegments(documentDirectory);
+  if (!documents || documents.length < 2 || documents[documents.length - 1] !== 'Documents') return null;
+  return statementFileIn(value, documents.slice(0, -1), ['Library', 'Caches', ADOPTED_STATEMENT_FOLDER]);
 }
 
 /**
@@ -119,8 +154,9 @@ export function isAdoptableExternalStatementUrl(
 }
 
 /**
- * Copies a handed-over external statement into `<documents>/Inbox` and
- * returns the copy's file URL, or null (native, iOS only).
+ * Copies a handed-over external statement into
+ * `Library/Caches/IncomingStatements` and returns the copy's file URL, or
+ * null (native, iOS only).
  */
 export type ExternalStatementAdopter = (url: string) => string | null;
 
@@ -163,9 +199,10 @@ export function pendingIncomingStatementUri(): string | null {
  * when it is a statement file, otherwise null (stay where the app is).
  *
  * `adoptExternal` (iOS) handles a statement iOS did not copy into the Inbox:
- * an adoptable external URL is copied there natively, and the copy must then
- * pass the same strict Inbox rule, so the token, screen and delete-after-read
- * are unchanged. Anything else is never passed to native code.
+ * an adoptable external URL is copied natively into Wafra's own
+ * IncomingStatements folder, and the copy must pass the same strict rule for
+ * that one folder, so the token, screen and delete-after-read are unchanged.
+ * Anything else is never passed to native code.
  */
 export function incomingStatementRedirect(
   url: unknown,
@@ -180,7 +217,7 @@ export function incomingStatementRedirect(
     } catch {
       adopted = null;
     }
-    file = parseIncomingStatementUrl(adopted, documentDirectory);
+    file = parseAdoptedStatementUrl(adopted, documentDirectory);
   }
   if (!file) return null;
   const token = registerIncomingStatement(file);

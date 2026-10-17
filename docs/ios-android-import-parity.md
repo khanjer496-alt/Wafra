@@ -127,9 +127,12 @@ simulator checks are recorded in the [integration evidence](test-evidence/2026-1
 
 Share Sheet opens arrive as an iOS-made `Documents/Inbox` copy. A Files /
 iCloud Drive open arrives as the original security-scoped URL ("Not copying
-to Inbox"). `modules/wafra-incoming-file` copies that URL into the Inbox:
+to Inbox"). `modules/wafra-incoming-file` copies it into
+`Library/Caches/IncomingStatements` (iOS does not let an app write the Inbox):
 only a URL UIKit delivered, a statement extension, outside Wafra's containers,
 no symlink or directory, at most 10 MB, within an 8 s coordinated-read bound.
-The copy then takes the same strict Inbox route, token and delete-after-read.
-Host tests: `scripts/test/native-incoming-file.sh`. Device behaviour is not
-yet verified. Android registers no document types.
+The copy then gets the same token, confirmation card and delete-after-read
+and cache sweep. It relies on the UIApplicationDelegate open-URL callbacks, so
+a move to the UIScene lifecycle must add a scene hook. Host tests:
+`scripts/test/native-incoming-file.sh`. Device behaviour is not yet verified.
+Android registers no document types.

@@ -193,12 +193,14 @@ export async function revokeEmailForwardingAddress(cfg: RelayConfig): Promise<vo
 const STATEMENT_COPY = /\.(?:pdf|csv|tsv|xlsx|ofx|qfx|qif|xml|sta|mt940|940)$/i;
 
 /**
- * Delete statement copies left in the two places Wafra receives them.
+ * Delete statement copies left in the places Wafra receives them.
  *
  * `copyToCacheDirectory: true` writes each picked file to
  * `<cache>/DocumentPicker/<uuid>.<ext>` (both platforms, SDK 55), and a
  * statement opened in Wafra from the iOS Share Sheet or Files arrives as a
- * copy in `<documents>/Inbox` (LSSupportsOpeningDocumentsInPlace is false).
+ * copy in `<documents>/Inbox` (LSSupportsOpeningDocumentsInPlace is false),
+ * or — opened from Files in iCloud Drive — as the native adopter's copy in
+ * `<cache>/IncomingStatements`.
  * The import deletes its copies when it finishes, but a session that ends
  * mid-import — the app killed while a statement uploads, or a file opened
  * before setup finished — leaves a readable bank statement behind; the Inbox
@@ -218,7 +220,12 @@ export function clearStatementPickerCache(keep: ReadonlySet<string> = new Set())
     }
   };
   const kept = new Set([...keep].map(baseName));
-  for (const location of [() => new Directory(Paths.cache, 'DocumentPicker'), () => new Directory(Paths.document, 'Inbox')]) {
+  for (const location of [
+    () => new Directory(Paths.cache, 'DocumentPicker'),
+    () => new Directory(Paths.document, 'Inbox'),
+    // ADOPTED_STATEMENT_FOLDER in incoming-statement-file.ts (kept literal: this module stays dependency-light).
+    () => new Directory(Paths.cache, 'IncomingStatements'),
+  ]) {
     try {
       const directory = location();
       if (!directory.exists) continue;
