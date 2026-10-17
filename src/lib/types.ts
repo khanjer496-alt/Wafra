@@ -277,6 +277,13 @@ export interface Transaction {
   statementRowIndex?: number;
   /** Durable one-to-one overlaps with other statement file occurrences (max 64). */
   statementOccurrences?: StatementOccurrence[];
+  /**
+   * Canonical identities of other Messages this row already accounts for: the
+   * second alert of a transfer the bank texted twice (dedupe.ts
+   * transferAlerts), dropped at import. Technical identity only (max 8); a
+   * re-read of that Message stays dropped however the row is later edited.
+   */
+  absorbedSmsKeys?: string[];
   /** Canonical issuer stated by a PDF/CSV, retained even without account digits. */
   statementBank?: string;
   captureInstrument?: CaptureInstrument;
@@ -1019,6 +1026,8 @@ export interface AppState {
 export interface TxHealUpdate {
   /** Technical source claims; never replaces a user-facing financial field. */
   statementOccurrences?: StatementOccurrence[];
+  /** Technical, appended (see Transaction.absorbedSmsKeys); applies to edited rows too. */
+  absorbedSmsKeys?: string[];
   /** Exact original Message proof for the reproduced transposed receipt date. */
   sourceDateCorrection?: {
     from: string;
