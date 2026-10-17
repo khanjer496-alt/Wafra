@@ -27,6 +27,8 @@ export const INCOMING_STATEMENT_PARAM = 'incomingStatement';
 
 const MAX_URL_LENGTH = 2048;
 const MAX_NAME_LENGTH = 255;
+/** iOS's per-app copy folder under tmp/, named after the bundle identifier. */
+const TMP_INBOX_FOLDER = /^[A-Za-z0-9][A-Za-z0-9.-]{0,200}-Inbox$/;
 
 export interface IncomingStatementFile {
   /** The file:// URL exactly as iOS gave it. */
@@ -66,8 +68,24 @@ function fileSegments(value: string, strict: boolean): string[] | null {
 }
 
 /**
- * Accept only a statement file directly inside `<documents>/Inbox/` — where
- * iOS puts the copy it hands over — as a strict file:/// URL with no query,
+ * True when `segments` names a file directly inside one of the two folders iOS
+ * hands Wafra a copy in: `<documents>/Inbox/` (Safari, Mail, most share
+ * sheets) or `<container>/tmp/<bundle id>-Inbox/` (iOS 26, for a file shared
+ * from Files / iCloud Drive; verified on device). The container is the
+ * parent of the Documents directory.
+ */
+function inHandOverFolder(segments: readonly string[], documents: readonly string[]): boolean {
+  const under = (base: readonly string[]) => base.every((segment, index) => segments[index] === segment);
+  if (segments.length === documents.length + 2 && under(documents) && segments[documents.length] === 'Inbox') return true;
+  if (documents.length < 2 || documents[documents.length - 1] !== 'Documents') return false;
+  const container = documents.slice(0, -1);
+  return segments.length === container.length + 3 && under(container) &&
+    segments[container.length] === 'tmp' && TMP_INBOX_FOLDER.test(segments[container.length + 1]);
+}
+
+/**
+ * Accept only a statement file directly inside a hand-over folder (above) —
+ * where iOS puts the copy it gives Wafra — as a strict file:/// URL with no query,
  * fragment or traversal, and a statement extension. Anything else is null
  * (and is never touched). `documentDirectory` is expo-file-system's
  * Paths.document URI.
@@ -81,9 +99,7 @@ export function parseIncomingStatementUrl(
   const documents = fileSegments(documentDirectory, false);
   const segments = fileSegments(value, true);
   if (!documents || documents.length === 0 || !segments) return null;
-  if (segments.length !== documents.length + 2) return null;
-  if (documents.some((segment, index) => segments[index] !== segment)) return null;
-  if (segments[documents.length] !== 'Inbox') return null;
+  if (!inHandOverFolder(segments, documents)) return null;
   const name = segments[segments.length - 1];
   if (name.length > MAX_NAME_LENGTH || name.startsWith('.')) return null;
   const extension = /\.([A-Za-z0-9]+)$/.exec(name)?.[1].toLowerCase();

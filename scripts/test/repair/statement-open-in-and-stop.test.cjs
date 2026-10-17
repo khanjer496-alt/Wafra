@@ -301,6 +301,35 @@ test('the Inbox is matched against the real documents directory in all its spell
   assert.equal(broken.redirect(`${INBOX}/${name}`), null);
 });
 
+test('iOS 26 copies of files shared from Files / iCloud Drive (tmp/<bundle id>-Inbox) open the import screen too', () => {
+  // Verified on an iPhone 15 (iOS 26.6.2): a Files share opens Wafra with
+  // <container>/tmp/app.wafra.ios-Inbox/<name>, not Documents/Inbox.
+  const TMP_INBOX = `file:///private${CONTAINER}/tmp/app.wafra.ios-Inbox`;
+  const { incoming, redirect } = nativeIntent();
+  for (const [file, name] of [['fab-files-test.pdf', 'fab-files-test.pdf'], ['test-statement.ofx', 'test-statement.ofx'],
+    ['Card%20Sep.csv', 'Card Sep.csv']]) {
+    const url = `${TMP_INBOX}/${file}`;
+    assert.deepEqual(plain(incoming.parseIncomingStatementUrl(url, DOCUMENTS)), { uri: url, name }, url);
+    const route = redirect(url, false);
+    assert.match(route, /^\/statement-import\?incomingStatement=[a-z0-9]+$/, url);
+    assert.doesNotMatch(route, /file|Inbox|private|tmp/);
+  }
+  assert.deepEqual(plain(incoming.parseIncomingStatementUrl(`file://${CONTAINER}/tmp/app.wafra.ios-Inbox/s.pdf`, DOCUMENTS)),
+    { uri: `file://${CONTAINER}/tmp/app.wafra.ios-Inbox/s.pdf`, name: 's.pdf' });
+  const rejected = [
+    `file://${CONTAINER}/tmp/s.pdf`, `file://${CONTAINER}/tmp/Inbox/s.pdf`, `file://${CONTAINER}/tmp/-Inbox/s.pdf`,
+    `file://${CONTAINER}/tmp/app.wafra.ios-Inbox/sub/s.pdf`, `file://${CONTAINER}/tmp/app.wafra.ios-Outbox/s.pdf`,
+    `file://${CONTAINER}/tmp/app.wafra.ios-Inbox/s.docx`, `file://${CONTAINER}/tmp/app.wafra.ios-Inbox/.pdf`,
+    `file://${CONTAINER}/tmp/app.wafra.ios-Inbox/../s.pdf`, `file://${CONTAINER}/tmp/a%2F..%2F-Inbox/s.pdf`,
+    `file://${CONTAINER}/Library/app.wafra.ios-Inbox/s.pdf`, `file://${CONTAINER}/Documents/tmp/app.wafra.ios-Inbox/s.pdf`,
+    'file:///var/mobile/Containers/Data/Application/FFFFFFFF-0000-4000-8000-000000000002/tmp/app.wafra.ios-Inbox/s.pdf',
+    'file:///private/var/mobile/Library/Mobile%20Documents/com~apple~CloudDocs/Downloads/s.pdf',
+  ];
+  for (const url of rejected) assert.equal(incoming.parseIncomingStatementUrl(url, DOCUMENTS), null, url);
+  // The container is only derived from a Documents directory.
+  assert.equal(incoming.parseIncomingStatementUrl(`${TMP_INBOX}/s.pdf`, `file://${CONTAINER}/Library/`), null);
+});
+
 test('other links pass through untouched and unusable file URLs are dropped', () => {
   const { incoming, redirect } = nativeIntent();
   for (const link of ['https://wafra.app/statement.pdf', 'http://example.com/a.csv', 'wafra://statement-import?incomingStatement=x',

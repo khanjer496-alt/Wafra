@@ -122,3 +122,12 @@ on an affected physical phone. See the [current candidate evidence](test-evidenc
 The integration preserves nullable country/parser-pack/ledger preferences,
 exact receipt bytes and current consent/entitlement/alert gates. Host and
 simulator checks are recorded in the [integration evidence](test-evidence/2026-10-14-ios-native-parser-integration.md); signed app and physical iPhone execution remain separate gates.
+
+## Statements opened in Wafra (iOS)
+
+iOS hands Wafra a copy of a shared statement in one of two places, and the
+import accepts only a file directly inside them: `Documents/Inbox/` (Safari,
+Mail, bank apps) and, on iOS 26, `tmp/<bundle id>-Inbox/` for a file shared
+from the Files app or iCloud Drive. Both were verified on an iPhone 15
+(iOS 26.6.2, 17 Oct 2026): a PDF from Files and an OFX file each opened the
+import card and imported.
