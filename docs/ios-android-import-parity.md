@@ -122,14 +122,3 @@ on an affected physical phone. See the [current candidate evidence](test-evidenc
 The integration preserves nullable country/parser-pack/ledger preferences,
 exact receipt bytes and current consent/entitlement/alert gates. Host and
 simulator checks are recorded in the [integration evidence](test-evidence/2026-10-14-ios-native-parser-integration.md); signed app and physical iPhone execution remain separate gates.
-
-## Statement files opened in Wafra (iOS) — 17 October 2026
-
-Share Sheet opens arrive as an iOS-made `Documents/Inbox` copy. A Files /
-iCloud Drive open arrives as the original security-scoped URL ("Not copying
-to Inbox"). `modules/wafra-incoming-file` copies that URL into the Inbox:
-only a URL UIKit delivered, a statement extension, outside Wafra's containers,
-no symlink or directory, at most 10 MB, within an 8 s coordinated-read bound.
-The copy then takes the same strict Inbox route, token and delete-after-read.
-Host tests: `scripts/test/native-incoming-file.sh`. Device behaviour is not
-yet verified. Android registers no document types.
