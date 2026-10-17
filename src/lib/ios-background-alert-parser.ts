@@ -1,6 +1,7 @@
 import { currencyMinorUnits } from '@/lib/currency-metadata';
 import { normalizeCountryCode, setActiveCountry } from '@/lib/country';
-import { setActiveMarket, setLedgerCurrency } from '@/lib/markets';
+import { detectLaunchMarketFromSender, setActiveMarket, setLedgerCurrency } from '@/lib/markets';
+import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars';
 import { createLaunchAlertSession, inspectGenericBankEventForReview } from '@/lib/launch-alert-parser';
 import { hasNonCompletedWording, isNotAutoPostableMoney } from '@/lib/best-effort-autopost';
 import { originalMoneyOf } from '@/lib/fx';
@@ -240,8 +241,19 @@ export function parseIosBackgroundAlert(input: NativeParserInput): NativeParserR
     const session = createLaunchAlertSession({ overrides: {}, activeMarket: context.parserMarket,
       pinnedCurrency: context.ledgerMoney.currency, fxLookup: () => null,
       bestEffort: { enabled: false, country: context.country } });
+    // The same routing the ledger uses (local-message-record.ts
+    // localRecordMarket): a present sender routes the launch grammar by
+    // itself, as on Android; only a record with no sender reads the body.
+    // A sender that names no launch bank is never previewed as money that
+    // moved — the ledger sends it to Review at most — and gets no banner at
+    // all unless it is a bank-style sender ID (a known institution header or
+    // a carrier short code), never a person, number or e-mail handle.
+    const senderMarket = sender ? detectLaunchMarketFromSender(sender) : null;
+    const unbankedSender = sender !== '' && senderMarket === null;
+    if (unbankedSender && !hasUniversalInstitutionSender(sender) && !/^\d{3,6}$/.test(sender)) return ignore();
     const inspection = session.inspect(source, sender);
-    const parsed = session.parse(source, sender, inspection, undefined, input.observedAt);
+    const parsed = unbankedSender ? null
+      : session.parse(source, sender, inspection, senderMarket ?? undefined, input.observedAt);
     const event = inspectGenericBankEventForReview(source, sender);
     if (futureDate(event, input.observedAt, parsed ?? undefined)) return ignore();
     if (parsed && parsed.kind !== 'transaction') return ignore();

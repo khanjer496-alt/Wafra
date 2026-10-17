@@ -51,6 +51,8 @@ export interface MaterializedImportBatch {
   snapshots: ImportBatchInput['snapshots'];
   bankNames: Record<string, string>;
   cardTypes: NonNullable<ImportBatchInput['cardTypes']>;
+  /** Optional: batches materialized by older code, and most batches, carry none. */
+  creditLimits?: NonNullable<ImportBatchInput['creditLimits']>;
   confirmedLedgerCurrency?: string;
   parserRereadComplete: boolean;
   recentRereadParserVersion?: number;
@@ -110,6 +112,8 @@ export const materializeImportBatch = (
     snapshots: mapRefs(input.snapshots),
     bankNames: mapRefs(input.bankNames),
     cardTypes: mapRefs(input.cardTypes),
+    ...(input.creditLimits && Object.keys(input.creditLimits).length > 0
+      ? { creditLimits: mapRefs(input.creditLimits) } : {}),
     confirmedLedgerCurrency: input.confirmedLedgerCurrency,
     parserRereadComplete: input.parserRereadComplete === true,
     ...(recentReread(input.recentRereadParserVersion)
@@ -191,11 +195,13 @@ const canUseIncrementalCaptureFastPath = (
   batch.transactions.every(isTransferInertTransaction);
 
 type MoneyBearingImport = Pick<ImportBatchInput,
-  'importMoney' | 'transactions' | 'newAccounts' | 'newDues' | 'newBills' | 'snapshots' | 'updates'>;
+  'importMoney' | 'transactions' | 'newAccounts' | 'newDues' | 'newBills' | 'snapshots' | 'updates'> &
+  Partial<Pick<ImportBatchInput, 'creditLimits'>>;
 
 const changesImportMoney = (batch: MoneyBearingImport): boolean =>
   batch.transactions.length > 0 || batch.newDues.length > 0 ||
     (batch.newBills?.length ?? 0) > 0 || Object.keys(batch.snapshots).length > 0 ||
+    Object.keys(batch.creditLimits ?? {}).length > 0 ||
     (batch.updates?.length ?? 0) > 0 || batch.newAccounts.some((account) =>
       account.openingFils !== 0 || (account.snapshotFils ?? 0) !== 0 ||
       (account.creditLimitFils ?? 0) !== 0);
@@ -224,6 +230,7 @@ const isMetadataOnlyImportBatch = (batch: MaterializedImportBatch): boolean =>
   Object.keys(batch.snapshots).length === 0 &&
   Object.keys(batch.bankNames).length === 0 &&
   Object.keys(batch.cardTypes).length === 0 &&
+  Object.keys(batch.creditLimits ?? {}).length === 0 &&
   batch.updates.length === 0;
 
 /** Preserve immutable collection identity when an import learned no new facts. */
@@ -276,6 +283,16 @@ export const applyMaterializedImportBatch = (
     }
     if (learnedType === 'credit' && next.snapshotKind === 'balance') {
       next = { ...next, snapshotKind: 'limit' };
+    }
+    // A statement-printed limit fills an unknown limit, and replaces only a
+    // limit an OLDER statement set that the person has not since edited.
+    const limit = batch.creditLimits?.[account.id];
+    if (limit && Number.isSafeInteger(limit.fils) && limit.fils > 0 && Number.isFinite(limit.ts) && (
+      next.creditLimitFils === undefined ||
+      (next.importedCreditLimit !== undefined && next.creditLimitFils === next.importedCreditLimit.fils &&
+        limit.ts > next.importedCreditLimit.ts)
+    )) {
+      next = { ...next, creditLimitFils: limit.fils, importedCreditLimit: { fils: limit.fils, ts: limit.ts } };
     }
     return next;
   }));

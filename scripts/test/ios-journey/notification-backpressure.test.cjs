@@ -97,6 +97,8 @@ test('a full Review tray retains overflow in the native queue until space is ava
     '@/lib/ledger-money': compiled('ledger-money'),
     '@/lib/local-message-record': {
       preflightLocalMessageRecord: text => ({ id: text, valid: true, market: 'AE', observedAt: now }),
+      // No SMS text in these stubs, so no carrier re-delivery facts to fold.
+      localMessageCarrierFacts: () => null,
       parseLocalMessageRecord: text => ({ kind: 'review', item: entry(Number(text)), market: 'AE', milestone: 'none' }),
     },
     '@/lib/types': { normalizeLocalCaptureQualifications: () => [], isLocalCaptureQualificationCandidate: () => true },

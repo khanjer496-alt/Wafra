@@ -69,6 +69,7 @@ import {
   parseStatementCsv,
   parseStatementLines,
   parseStatementXlsx,
+  parseStructuredStatement,
   pdfOpenFailure,
   statementDateHintFrom,
   type StatementDateHint,
@@ -189,10 +190,30 @@ const CSV_CONTENT_TYPES = new Set([
  *  - `pdf-error-detail`: /v1/import/pdf may answer pdf_damaged,
  *    pdf_encryption_unsupported, and unreadable_pdf for a PDF with no text
  *    layer. Without it those collapse to the codes older builds know.
+ *  - `structured`: capabilities list the OFX/QFX, QIF, camt.05x (XML) and
+ *    MT940 types and /v1/import/csv reads those files (dispatched on their
+ *    bytes, never on the label), answering invalid_statement_file for a
+ *    malformed one. Without the token nothing changes.
  */
 const IMPORT_FEATURES_HEADER = 'x-wafra-import-features';
 const MAX_IMPORT_FEATURES_HEADER_CHARS = 200;
-type ImportFeature = 'xlsx' | 'pdf-error-detail';
+type ImportFeature = 'xlsx' | 'pdf-error-detail' | 'structured';
+/**
+ * Media types of the structured statement formats. Only labels: the reader
+ * decides from the bytes. MT940 has no registered type; the app labels
+ * `.sta/.mt940/.940` with this private one. Android reports most of these
+ * files as octet-stream.
+ */
+const STRUCTURED_CONTENT_TYPES = new Set([
+  'application/x-ofx',
+  'application/vnd.intu.qfx',
+  'application/qif',
+  'application/x-qif',
+  'application/xml',
+  'text/xml',
+  'application/x-mt940',
+  'application/octet-stream',
+]);
 
 function importFeatures(req: Request): ReadonlySet<ImportFeature> {
   const features = new Set<ImportFeature>();
@@ -200,14 +221,17 @@ function importFeatures(req: Request): ReadonlySet<ImportFeature> {
   if (raw === null || raw.length > MAX_IMPORT_FEATURES_HEADER_CHARS) return features;
   for (const token of raw.split(',')) {
     const name = token.trim().toLowerCase();
-    if (name === 'xlsx' || name === 'pdf-error-detail') features.add(name);
+    if (name === 'xlsx' || name === 'pdf-error-detail' || name === 'structured') features.add(name);
   }
   return features;
 }
 
 /** The statement-file media types this client may be offered and may upload. */
 function statementFileTypes(features: ReadonlySet<ImportFeature>): string[] {
-  return [...CSV_CONTENT_TYPES].filter((type) => type !== XLSX_CONTENT_TYPE || features.has('xlsx'));
+  return [
+    ...[...CSV_CONTENT_TYPES].filter((type) => type !== XLSX_CONTENT_TYPE || features.has('xlsx')),
+    ...(features.has('structured') ? STRUCTURED_CONTENT_TYPES : []),
+  ];
 }
 
 /** UTF-8 bytes of a PDF password sent in `x-wafra-pdf-password-b64`. */
@@ -1271,9 +1295,70 @@ function orderedInterpretation(value: unknown): unknown {
 
 async function bindStatementInterpretation(
   env: Env, device: Device, baseKey: string, rows: readonly NonNullable<ReturnType<typeof parseSms>>[], receiptTtlSeconds: number,
+  options?: string,
 ): Promise<'bound' | 'legacy' | 'conflict'> {
-  const digest = await keyedFingerprint(device.requestSecret,
+  return (await bindStatementRead(env, device, baseKey, rows, receiptTtlSeconds, options)).status;
+}
+
+/**
+ * The options a statement file was read with, stored beside its row digest so
+ * a later refusal can tell a parser update (same options, different rows)
+ * from a genuinely different reading (another day/month order or currency).
+ * Not secret: a date-order word and a currency code.
+ */
+function statementReadOptions(dateHint: StatementDateHint, currency: string): string {
+  return `d=${dateHint ?? 'auto'};c=${currency}`;
+}
+
+/** `x-wafra-statement-reread: 1` — the phone holds no transaction of an earlier read of this file. */
+function statementRereadRequested(req: Request): boolean {
+  return req.headers.get('x-wafra-statement-reread') === '1';
+}
+
+/** The refusal of a genuinely different reading, naming what the phone needs to decide. */
+function statementConflict(bound: {
+  statementImportId: string; statementImportIds: string[]; previousOptions: string | null;
+  reason?: 'options' | 'parser' | 'unknown';
+}, currentOptions: string): Response {
+  // The earlier day/month order is named only when it is NOT the one this
+  // upload used (another currency is the difference otherwise): naming the
+  // order already chosen would send the person round in a circle.
+  const order = bound.reason === 'options' ? previousDateOrder(bound.previousOptions) : null;
+  const named = order && order !== previousDateOrder(currentOptions) ? order : null;
+  return json({ error: 'statement_options_conflict', statementImportId: bound.statementImportId,
+    statementImportIds: bound.statementImportIds, reason: bound.reason ?? 'unknown',
+    ...(named ? { previousDateOrder: named } : {}) }, 409);
+}
+
+function previousDateOrder(options: string | null): 'day-first' | 'month-first' | null {
+  const order = options ? /(?:^|;)d=([a-z-]+)/.exec(options)?.[1] : undefined;
+  return order === 'day-first' || order === 'month-first' ? order : null;
+}
+
+async function statementRowsDigest(device: Device, rows: readonly NonNullable<ReturnType<typeof parseSms>>[]): Promise<string> {
+  return keyedFingerprint(device.requestSecret,
     `statement-interpretation-v1:${JSON.stringify(orderedInterpretation(rows.map(withoutRaw)))}`);
+}
+
+/**
+ * A stored binding: `digest` (older binds, email), `digest|options`, or
+ * `digest|options|alias=<key>` — the file's CURRENT reading lives under that
+ * other key, after a re-read.
+ */
+function parseBinding(stored: string): { rows: string; options: string | null; alias: string | null } {
+  const [rows, ...rest] = stored.split('|');
+  const alias = rest.find((part) => part.startsWith('alias='))?.slice('alias='.length) ?? null;
+  const options = rest.find((part) => !part.startsWith('alias=')) ?? null;
+  return { rows, options, alias };
+}
+
+async function bindStatementRead(
+  env: Env, device: Device, baseKey: string, rows: readonly NonNullable<ReturnType<typeof parseSms>>[], receiptTtlSeconds: number,
+  options?: string,
+): Promise<{ status: 'bound' | 'legacy' | 'conflict'; previousOptions: string | null }> {
+  const rowsDigest = await statementRowsDigest(device, rows);
+  // Stored as `digest` (older binds and email) or `digest|options`.
+  const digest = options ? `${rowsDigest}|${options}` : rowsDigest;
   const priorReceipts = `${baseKey}:*`;
   // SQLite serializes this conditional insert, so simultaneous requests with
   // different date/currency interpretations cannot both become authoritative.
@@ -1294,27 +1379,107 @@ async function bindStatementInterpretation(
     'SELECT interpretation_digest FROM statement_import_bindings WHERE device_id = ?1 AND source_key = ?2 AND expires_at > unixepoch()',
   ).bind(device.id, baseKey).first<{ interpretation_digest: string }>();
   if (binding) {
-    if (binding.interpretation_digest !== digest) return 'conflict';
+    const stored = parseBinding(binding.interpretation_digest);
+    if (stored.rows !== rowsDigest) return { status: 'conflict', previousOptions: stored.options };
     const renewed = await env.DB.prepare(
       `UPDATE statement_import_bindings SET expires_at = MAX(expires_at, unixepoch() + ?4)
         WHERE device_id = ?1 AND source_key = ?2 AND interpretation_digest = ?3 AND expires_at > unixepoch()
         RETURNING interpretation_digest`,
-    ).bind(device.id, baseKey, digest, receiptTtlSeconds).first<{ interpretation_digest: string }>();
-    return renewed ? 'bound' : 'conflict';
+    ).bind(device.id, baseKey, binding.interpretation_digest, receiptTtlSeconds).first<{ interpretation_digest: string }>();
+    return { status: renewed ? 'bound' : 'conflict', previousOptions: stored.options };
   }
   const legacy = await env.DB.prepare(
     'SELECT 1 AS present FROM ingest_receipts WHERE device_id = ?1 AND replay_key GLOB ?2 AND expires_at > unixepoch() LIMIT 1',
   ).bind(device.id, priorReceipts).first<{ present: number }>();
-  return legacy ? 'legacy' : 'conflict';
+  return { status: legacy ? 'legacy' : 'conflict', previousOptions: null };
+}
+
+const STATEMENT_BINDING_SECONDS = 72 * 60 * 60;
+
+/**
+ * Bind one statement upload to its reading. Conservative: a file whose rows
+ * the phone may hold is never filed a second time under a different reading.
+ *  - `reread` (the phone holds NO transaction of the earlier read: a
+ *    reinstall, an erase, a restore from an older backup) reads the file
+ *    under a fresh identity, so its rows are delivered again inside the
+ *    replay window — and the file's own key is repointed at that new read,
+ *    so every later upload of the file is judged against it (its id, its
+ *    date order), not against the read the phone no longer has;
+ *  - otherwise the upload is judged against the file's current read: the
+ *    same reading is bound (or already processed); a different one is
+ *    refused naming that read and why — `options` (another day/month order
+ *    or currency), `parser` (same options, a newer parser reads it
+ *    differently) or `unknown` (an older binding that did not record them).
+ */
+async function bindStatementUpload(
+  env: Env, device: Device, fileKey: string, rows: readonly NonNullable<ReturnType<typeof parseSms>>[],
+  options: string, reread: boolean,
+): Promise<{
+  status: 'bound' | 'legacy' | 'conflict'; baseKey: string; statementImportId: string; statementImportIds: string[];
+  previousOptions: string | null; reason?: 'options' | 'parser' | 'unknown';
+}> {
+  const rowsDigest = await statementRowsDigest(device, rows);
+  // The file key's binding as it stands now (expired or not): the pointer is
+  // only ever moved from exactly this value, so a concurrent upload cannot be
+  // rolled back by this one (compare-and-set).
+  const prior = await env.DB.prepare(
+    'SELECT interpretation_digest, expires_at > unixepoch() AS live FROM statement_import_bindings WHERE device_id = ?1 AND source_key = ?2',
+  ).bind(device.id, fileKey).first<{ interpretation_digest: string; live: number }>();
+  const moved = async (pointer: string): Promise<boolean> => {
+    const result = prior
+      ? await env.DB.prepare(
+        `UPDATE statement_import_bindings SET interpretation_digest = ?3, expires_at = unixepoch() + ?4
+          WHERE device_id = ?1 AND source_key = ?2 AND interpretation_digest = ?5`,
+      ).bind(device.id, fileKey, pointer, STATEMENT_BINDING_SECONDS, prior.interpretation_digest).run()
+      : await env.DB.prepare(
+        `INSERT INTO statement_import_bindings (device_id, source_key, interpretation_digest, created_at, expires_at)
+         SELECT ?1, ?2, ?3, unixepoch(), unixepoch() + ?4 WHERE EXISTS (SELECT 1 FROM devices WHERE id = ?1)
+         ON CONFLICT(device_id, source_key) DO NOTHING`,
+      ).bind(device.id, fileKey, pointer, STATEMENT_BINDING_SECONDS).run();
+    return (result.meta?.changes ?? 0) > 0;
+  };
+  const priorAlias = prior?.live ? parseBinding(prior.interpretation_digest).alias : null;
+  const ids = async (current: string): Promise<string[]> =>
+    [...new Set([await statementImportIdFor(fileKey), ...(priorAlias ? [await statementImportIdFor(priorAlias)] : []),
+      await statementImportIdFor(current)])];
+  if (reread) {
+    const key = await keyedFingerprint(device.requestSecret, `${fileKey}:reread:${crypto.randomUUID()}`);
+    const read = await bindStatementRead(env, device, key, rows, STATEMENT_BINDING_SECONDS, options);
+    // Lost the race to another upload of this file: that one's reading stands.
+    if (read.status === 'bound' && !(await moved(`${rowsDigest}|${options}|alias=${key}`))) {
+      return { status: 'conflict', baseKey: fileKey, statementImportId: await statementImportIdFor(fileKey),
+        statementImportIds: await ids(fileKey), previousOptions: null, reason: 'unknown' };
+    }
+    return { status: read.status, baseKey: key, statementImportId: await statementImportIdFor(key),
+      statementImportIds: await ids(key), previousOptions: null };
+  }
+  const key = priorAlias ?? fileKey;
+  const read = await bindStatementRead(env, device, key, rows, STATEMENT_BINDING_SECONDS, options);
+  // Keep the pointer alive as long as the read it names (same value only).
+  if (priorAlias && read.status === 'bound' && prior) await moved(prior.interpretation_digest);
+  return {
+    status: read.status, baseKey: key, statementImportId: await statementImportIdFor(key),
+    statementImportIds: await ids(key),
+    previousOptions: read.previousOptions,
+    ...(read.status === 'conflict'
+      ? { reason: read.previousOptions === null ? 'unknown' as const : read.previousOptions === options ? 'parser' as const : 'options' as const }
+      : {}),
+  };
 }
 
 const DAY_MS = 86_400_000;
 
-function rowReceiptTimes(rows: { date?: string | null }[], nowMs: number): string[] {
+function rowReceiptTimes(
+  rows: { date?: string | null; kind?: string; statementDate?: string }[], nowMs: number,
+): string[] {
   const used = new Set<number>();
   const todayStart = Math.floor(nowMs / DAY_MS) * DAY_MS;
   return rows.map((row, index) => {
-    const day = typeof row.date === 'string' ? Date.parse(`${row.date}T00:00:00.000Z`) : NaN;
+    // A card statement summary is dated by its DUE date, but it is a reading
+    // of the card as of its ISSUE date: timed there, its balance snapshot
+    // cannot outrank a newer alert, and it sorts beside that cycle's alerts.
+    const when = row.kind === 'cardStatement' && typeof row.statementDate === 'string' ? row.statementDate : row.date;
+    const day = typeof when === 'string' ? Date.parse(`${when}T00:00:00.000Z`) : NaN;
     // Clamped, not refused: a row dated today is ordinary and must keep its
     // place in the batch, it just may not carry a clock ahead of this relay's.
     let ms = Number.isFinite(day) ? (day < todayStart ? day + DAY_MS / 2 : todayStart) : nowMs - index;
@@ -2315,12 +2480,13 @@ export default {
           // per-type ceilings for builds that read them.
           maxBytes: MAX_CSV_BYTES,
           maxBytesByType: Object.fromEntries(fileTypes.map((type) =>
-            [type, type === XLSX_CONTENT_TYPE ? MAX_XLSX_BYTES : MAX_CSV_BYTES])),
+            [type, type === XLSX_CONTENT_TYPE || STRUCTURED_CONTENT_TYPES.has(type) ? MAX_XLSX_BYTES : MAX_CSV_BYTES])),
           maxRows: MAX_IMPORT_ROWS,
           parser: 'named-columns-explicit-direction-v1',
-          note: features.has('xlsx')
+          note: (features.has('xlsx')
             ? 'CSV, TSV, semicolon and Excel .xlsx (first worksheet) exports need date, description, and explicit debit/credit direction.'
-            : 'CSV, TSV, and semicolon exports need date, description, and explicit debit/credit direction.',
+            : 'CSV, TSV, and semicolon exports need date, description, and explicit debit/credit direction.') +
+            (features.has('structured') ? ' OFX/QFX, QIF, ISO 20022 camt.052/053/054 and MT940 files are read from their own fields.' : ''),
         },
       });
     }
@@ -2535,16 +2701,24 @@ export default {
         }, 422);
       }
       if (extracted.totalRows > MAX_IMPORT_ROWS) return json({ error: 'too_many_rows' }, 413);
-      const baseKey = await keyedFingerprint(device.requestSecret, `pdf:${digest}`);
+      const fileKey = await keyedFingerprint(device.requestSecret, `pdf:${digest}`);
       // Per ROW, not per batch — see rowReceiptTimes.
       const receivedAt = rowReceiptTimes(extracted.rows, Date.now());
-      const statementImportId = await statementImportIdFor(baseKey);
-      const targets = await supplementalQueueTargets(env, device);
+      const reread = statementRereadRequested(req);
+      // A re-read is for the phone that asked: the vault's other devices
+      // still hold the earlier read's rows, and must not be sent them twice.
+      const targets = (await supplementalQueueTargets(env, device)).filter((target) => !reread || target.id === device.id);
       if (!(await reserveSupplementalDeliveries(env, device.id, extracted.rows.length, targets.length))) {
         return json({ error: 'rate_limited' }, 429);
       }
-      const interpretation = await bindStatementInterpretation(env, device, baseKey, extracted.rows, 72 * 60 * 60);
-      if (interpretation === 'conflict') return json({ error: 'statement_options_conflict' }, 409);
+      const readOptions = statementReadOptions(requestedDates.hint, requestedMoney.currency);
+      const bound = await bindStatementUpload(env, device, fileKey, extracted.rows, readOptions, reread);
+      const interpretation = bound.status;
+      // statementImportIds: every id this file has had on this device (its
+      // first read, its current re-read); the phone holds it if it holds any.
+      const { baseKey, statementImportId, statementImportIds } = bound;
+      // A refusal is not an import: the statement budget unit goes back.
+      if (interpretation === 'conflict') { await budget.refund(); return statementConflict(bound, readOptions); }
       const delivery = await queueSupplementalRows(
         env, device,
         extracted.rows.map((_, index) => ({
@@ -2580,6 +2754,7 @@ export default {
         cardSignRowsSkipped: extracted.ambiguousCardSignRows,
         alreadyProcessed,
         statementImportId,
+        statementImportIds,
         ...(interpretation === 'legacy' ? { legacyInterpretation: true } : {}),
         // Only the observed transaction-date range, never proof of a complete
         // statement or month. Refused/unaccounted rows and unbound legacy
@@ -2607,8 +2782,12 @@ export default {
       // A build that did not ask for `xlsx` is refused exactly as before
       // .xlsx support existed (see IMPORT_FEATURES_HEADER).
       if (!statementFileTypes(importFeatures(req)).includes(contentType)) return json({ error: 'csv_required' }, 415);
+      const features = importFeatures(req);
       const workbook = contentType === XLSX_CONTENT_TYPE;
-      const incoming = workbook ? await readBytes(req, MAX_XLSX_BYTES) : await readBytes(req, MAX_CSV_BYTES);
+      const structuredClient = features.has('structured');
+      const structuredType = STRUCTURED_CONTENT_TYPES.has(contentType);
+      // OFX and camt are verbose: they get the workbook ceiling.
+      const incoming = workbook || structuredType ? await readBytes(req, MAX_XLSX_BYTES) : await readBytes(req, MAX_CSV_BYTES);
       if (incoming.tooLarge) return json({ error: 'too_large' }, 413);
       const unreadable = workbook ? 'invalid_xlsx' : 'invalid_csv';
       if (incoming.bytes.length === 0) return json({ error: unreadable }, 400);
@@ -2616,21 +2795,29 @@ export default {
       // Digest the bytes as uploaded, before any parsing touches them.
       const digest = b64encode(await crypto.subtle.digest('SHA-256', incoming.bytes));
       let parsed: ReturnType<typeof parseStatementCsv>;
+      let structured = false;
       try {
         // An .xlsx is unzipped to its first worksheet's rows and read by the
-        // SAME named-column rules (parseStatementRecords) as a CSV.
-        parsed = workbook
+        // SAME named-column rules (parseStatementRecords) as a CSV, and so is
+        // a structured file (OFX/QIF/camt/MT940) for a build that asked.
+        const structuredRead = !workbook && structuredClient
+          ? parseStructuredStatement(incoming.bytes, requestedMoney.currency, MAX_IMPORT_ROWS, requestedDates.hint)
+          : null;
+        if (!structuredRead && structuredType) return json({ error: 'unsupported_file_type' }, 415);
+        structured = structuredRead !== null;
+        parsed = structuredRead ?? (workbook
           ? await parseStatementXlsx(incoming.bytes, requestedMoney.currency, MAX_IMPORT_ROWS, requestedDates.hint)
           : parseStatementCsv(
             decodeCsv(incoming.bytes),
             requestedMoney.currency,
             MAX_IMPORT_ROWS,
             requestedDates.hint,
-          );
+          ));
       } catch (error) {
         const code = error instanceof Error ? error.message : unreadable;
-        if (code === 'too_many_rows') return json({ error: code }, 413);
+        if (code === 'too_many_rows' || code === 'too_large') return json({ error: code }, 413);
         if (code === 'unsupported_statement_format' || code === 'statement_currency_mismatch') return json({ error: code }, 422);
+        if (code === 'invalid_statement_file' && structuredClient) return json({ error: code }, 400);
         return json({ error: unreadable }, 400);
       }
       if (parsed.rows.length === 0) {
@@ -2647,15 +2834,23 @@ export default {
       }
 
       // The prefix only separates namespaces; different bytes already differ.
-      const baseKey = await keyedFingerprint(device.requestSecret, `${workbook ? 'xlsx' : 'csv'}:${digest}`);
+      const fileKey = await keyedFingerprint(device.requestSecret, `${workbook ? 'xlsx' : structured ? 'structured' : 'csv'}:${digest}`);
       const receivedAt = rowReceiptTimes(parsed.rows, Date.now());
-      const statementImportId = await statementImportIdFor(baseKey);
-      const targets = await supplementalQueueTargets(env, device);
+      const reread = statementRereadRequested(req);
+      // A re-read is for the phone that asked: the vault's other devices
+      // still hold the earlier read's rows, and must not be sent them twice.
+      const targets = (await supplementalQueueTargets(env, device)).filter((target) => !reread || target.id === device.id);
       if (!(await reserveSupplementalDeliveries(env, device.id, parsed.rows.length, targets.length))) {
         return json({ error: 'rate_limited' }, 429);
       }
-      const interpretation = await bindStatementInterpretation(env, device, baseKey, parsed.rows, 72 * 60 * 60);
-      if (interpretation === 'conflict') return json({ error: 'statement_options_conflict' }, 409);
+      const readOptions = statementReadOptions(requestedDates.hint, requestedMoney.currency);
+      const bound = await bindStatementUpload(env, device, fileKey, parsed.rows, readOptions, reread);
+      const interpretation = bound.status;
+      // statementImportIds: every id this file has had on this device (its
+      // first read, its current re-read); the phone holds it if it holds any.
+      const { baseKey, statementImportId, statementImportIds } = bound;
+      // A refusal is not an import: the statement budget unit goes back.
+      if (interpretation === 'conflict') { await budget.refund(); return statementConflict(bound, readOptions); }
       const delivery = await queueSupplementalRows(
         env, device,
         parsed.rows.map((row, index) => ({
@@ -2684,6 +2879,7 @@ export default {
         cardSignRowsSkipped: parsed.ambiguousCardSignRows,
         alreadyProcessed,
         statementImportId,
+        statementImportIds,
         ...(interpretation === 'legacy' ? { legacyInterpretation: true } : {}),
         coverage: interpretation !== 'legacy' && parsed.rejectedRows === 0 ? await statementCoverage(parsed.rows) : null,
       }, 202);

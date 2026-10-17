@@ -17,6 +17,7 @@ function harness() {
       IOS_LOCAL_CAPTURE_SHORTCUT_URL: 'https://www.icloud.com/shortcuts/822bcc1dd2964b9f887ef9b93601441d',
       normalizeIosLocalCaptureShortcutUrl: value => value,
       iosLocalCaptureTestUrl: () => 'shortcuts://run-shortcut?name=Wafra%20Capture%20v2&input=text&text=WAFRA_SETUP_CHECK_V1',
+      isIosCaptureAttemptId: value => typeof value === 'string' && value.length >= 16,
     },
     './ios-capture-health': health,
   });
@@ -43,10 +44,10 @@ test('preflight runs in the foreground, callback alone cannot prove capture, and
   assert.deepEqual(h.enabled, [true]);
   assert.equal(h.urls.length, 1);
   assert.match(h.urls[0], /WAFRA_SETUP_CHECK_V1/);
-  await h.controller.send({ type: 'shortcut-callback', result: 'success' });
+  await h.controller.send({ type: 'shortcut-callback', result: 'success', attemptId: 'test-statement-session' });
   assert.equal(h.controller.getModel().readiness, 'not-added');
   h.setStatus({ setupProofVersion: 1 });
-  await h.controller.send({ type: 'shortcut-callback', result: 'success' });
+  await h.controller.send({ type: 'refresh-status' });
   assert.equal(h.controller.getModel().readiness, 'shortcut-proven');
   await h.controller.send({ type: 'automation-added' });
   assert.equal(h.urls.length, 1, 'confirming the Apple automation must not repeat the permission run');

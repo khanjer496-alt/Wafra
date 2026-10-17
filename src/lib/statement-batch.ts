@@ -58,3 +58,18 @@ export function countPhrase(language: string, forms: PluralForms, n: number): st
   const form = forms[pluralCategory(language, n)] ?? forms.other;
   return form.replace(/\{n\}/g, String(n));
 }
+
+/**
+ * Rows a statement batch read that were neither added nor sent to Review:
+ * the phone matched them to something already in the ledger (an alert it
+ * captured earlier, or the same row from an earlier upload). Without this the
+ * summary said "32 added, 0 need review, 9 skipped" for a file whose tile said
+ * 33 rows read: one row was simply unaccounted for.
+ *
+ * `filedOther` is what the batch filed that is not a transaction (a card
+ * statement's new due, a bill), so those rows are not called duplicates.
+ * Never negative: the statement queue can also carry rows from elsewhere.
+ */
+export function alreadyInWafra(read: number, added: number, review: number, filedOther = 0): number {
+  return Math.max(0, read - added - review - filedOther);
+}

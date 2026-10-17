@@ -56,8 +56,8 @@ public struct WafraLiveCaptureStatus: Codable {
 }
 
 /// One newly queued Apple Pay receipt and the Wallet "Card or Pass" text the
-/// automation supplied with it, if any. Observation only: the value is never
-/// used for account attribution, dedupe or anything that changes the ledger.
+/// automation supplied with it, if any. A diagnostic list for the setup
+/// screen; the record body carries the same sanitized text to the app.
 public struct WafraApplePayCardObservation: Codable, Equatable {
   /// Wall-clock receipt (seconds), not the purchase time.
   public let receivedAt: TimeInterval
@@ -74,7 +74,7 @@ public final class WafraLiveCaptureStore {
 
   public static let maxApplePayMerchantCharacters = 96
   /// Wallet's "Card or Pass" text is a card or pass display name. It is
-  /// optional, observe-only, and bounded independently of the merchant.
+  /// optional and bounded independently of the merchant.
   public static let maxApplePayCardOrPassCharacters = 80
   /// Recent card observations kept for the on-device setup screen.
   public static let maxApplePayCardObservations = 5
@@ -125,6 +125,9 @@ public final class WafraLiveCaptureStore {
     let amount: String
     let currency: String
     let merchant: String
+    /// Sanitized Wallet "Card or Pass" text. Omitted (never null) when the
+    /// automation sent none, so a card-less body is byte-identical to v1.
+    let cardOrPass: String?
   }
 
   /// Controls, bidi overrides/isolates, zero-width and BOM: the same unsafe
@@ -424,7 +427,7 @@ public final class WafraLiveCaptureStore {
         let receivedAt = receiptTime.timeIntervalSince1970
         manifest.firstApplePayReceivedAt = manifest.firstApplePayReceivedAt ?? receivedAt
         manifest.lastApplePayReceivedAt = max(manifest.lastApplePayReceivedAt ?? 0, receivedAt)
-        // Observe-only, outside the record: nil means no usable card was sent.
+        // Diagnostic ring for the setup screen: nil means no usable card was sent.
         var observations = manifest.applePayCardObservations.filter {
           receivedAt - $0.receivedAt <= Self.recordTTL
         }
@@ -459,6 +462,40 @@ public final class WafraLiveCaptureStore {
   /// shared parser falls back to the one bank the body names (the same contract
   /// the plain-text automation fallback already uses).
   public static let automationSender = "Wafra Automation"
+
+  /// Messages hands contact names and phone numbers to the automation with
+  /// invisible direction marks (and group chats as long participant lists),
+  /// which `validSender` refuses. Keep the visible sender: drop control and
+  /// direction scalars, collapse whitespace and cap the length on a character
+  /// boundary. Nil when nothing visible remains.
+  static func automationSenderName(_ sender: String?) -> String? {
+    guard let sender else { return nil }
+    var visible = String.UnicodeScalarView()
+    var pendingSpace = false
+    for scalar in sender.unicodeScalars {
+      switch scalar.value {
+      case 0x0000...0x001F, 0x007F...0x009F, 0x061C, 0x200B...0x200F,
+           0x202A...0x202E, 0x2066...0x2069, 0xFEFF, 0xD800...0xDFFF:
+        if CharacterSet.whitespacesAndNewlines.contains(scalar) { pendingSpace = true }
+        continue
+      default:
+        break
+      }
+      if CharacterSet.whitespacesAndNewlines.contains(scalar) {
+        pendingSpace = true
+        continue
+      }
+      if pendingSpace && !visible.isEmpty { visible.append(" ") }
+      pendingSpace = false
+      visible.append(scalar)
+    }
+    var bounded = ""
+    for character in String(visible) {
+      guard bounded.utf16.count + character.utf16.count <= maxSenderCharacters else { break }
+      bounded.append(character)
+    }
+    return bounded.isEmpty ? nil : bounded
+  }
   /// SHA-256 of the empty string: what hashing an absent Message GUID produces.
   public static let missingMessageIdentifier =
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -494,12 +531,9 @@ public final class WafraLiveCaptureStore {
       let age = clock().timeIntervalSince1970 - observedAt.timeIntervalSince1970
       if age.isFinite, age > Self.recordTTL { return .ignored }
     }
-    let resolvedSender: String
-    if let sender, !sender.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-      resolvedSender = sender
-    } else {
-      resolvedSender = Self.automationSender
-    }
+    // A long personal text cannot be a bank alert; ignore it rather than fail.
+    guard body.lengthOfBytes(using: .utf8) <= Self.maxBodyBytes else { return .ignored }
+    let resolvedSender = Self.automationSenderName(sender) ?? Self.automationSender
     if let eventId, !eventId.isEmpty, eventId != Self.missingMessageIdentifier, let observedAt {
       return try stage(sender: resolvedSender, body: body, eventId: eventId, observedAt: observedAt)
     }
@@ -522,27 +556,30 @@ public final class WafraLiveCaptureStore {
   }
 
   /// Wallet exposes an amount and merchant, not card ownership, settlement or purchase date.
-  /// `cardOrPass` is Wallet's optional "Card or Pass" text, kept for
-  /// observation only. It is never part of the queued record: the record
-  /// bytes, validation, acknowledgement digest and replay comparison are the
-  /// same whether or not a card is sent, so it cannot change admission.
+  /// `cardOrPass` is Wallet's optional "Card or Pass" text. It is sanitized
+  /// and, when anything usable is left, written into the record body so the
+  /// app can offer a remembered account for that card. It never decides
+  /// admission: an unusable card is dropped and the purchase is queued
+  /// exactly as a card-less one. A replay under the same event id must carry
+  /// the same sanitized card, like every other field of the body.
   public func stageApplePay(
     amount: Decimal?, currency: String, merchant: String?, cardOrPass: String? = nil,
     eventId: String, observedAt: Date
   ) throws -> WafraLiveStageResult {
     guard var amount, !amount.isNaN, amount > 0 else { return try recordIncompleteApplePay() }
+    let card = Self.sanitizedApplePayCardOrPass(cardOrPass)
     let payload = ApplePayPayload(
       amount: NSDecimalString(&amount, Locale(identifier: "en_US_POSIX")),
       currency: currency,
-      merchant: (merchant ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+      merchant: (merchant ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
+      cardOrPass: card
     )
     guard validApplePayPayload(payload) else { return try recordIncompleteApplePay() }
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
     let body = String(decoding: try encoder.encode(payload), as: UTF8.self)
     return try stage(sender: "Wafra Apple Pay", body: body, eventId: eventId,
-      observedAt: observedAt, source: .applePay,
-      applePayCardOrPass: Self.sanitizedApplePayCardOrPass(cardOrPass))
+      observedAt: observedAt, source: .applePay, applePayCardOrPass: card)
   }
 
   /// Removes unsafe scalars, collapses whitespace, trims, and caps the text
@@ -1299,7 +1336,8 @@ public final class WafraLiveCaptureStore {
       guard UUID(uuidString: id) != nil, sender == "Wafra Apple Pay",
         let data = body.data(using: .utf8),
         let fields = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-        Set(fields.keys) == Set(["amount", "currency", "merchant"]),
+        Set(fields.keys) == Set(["amount", "currency", "merchant"]) ||
+          (Set(fields.keys) == Set(["amount", "currency", "merchant", "cardOrPass"]) && fields["cardOrPass"] is String),
         let payload = try? JSONDecoder().decode(ApplePayPayload.self, from: data)
       else { return false }
       return validApplePayPayload(payload)
@@ -1315,7 +1353,9 @@ public final class WafraLiveCaptureStore {
       payload.merchant.utf16.count <= Self.maxApplePayMerchantCharacters,
       payload.merchant.utf8.count <= 640,
       payload.merchant == payload.merchant.trimmingCharacters(in: .whitespacesAndNewlines),
-      payload.merchant.rangeOfCharacter(from: .controlCharacters) == nil
+      payload.merchant.rangeOfCharacter(from: .controlCharacters) == nil,
+      // Present only in its own sanitized form: never empty, unsafe or unbounded.
+      payload.cardOrPass.map({ Self.sanitizedApplePayCardOrPass($0) == $0 }) ?? true
     else { return false }
     var canonical = amount
     return NSDecimalString(&canonical, Locale(identifier: "en_US_POSIX")) == payload.amount

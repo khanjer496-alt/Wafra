@@ -90,6 +90,11 @@ const en = {
     iris: 'Iris lock',
     passcode: 'App lock',
   } satisfies Record<BiometricKind, string>,
+  /** Apple's own names; other kinds keep the shared Android-first line. */
+  lockDetail: {
+    'face-id': 'Face ID or your iPhone passcode',
+    'touch-id': 'Touch ID or your passcode',
+  } as Partial<Record<BiometricKind, string>>,
   unlockWith: {
     'face-id': 'Unlock with Face ID',
     'touch-id': 'Unlock with Touch ID',
@@ -183,6 +188,10 @@ const ar: SettingsCopy = {
     iris: 'قفل القزحية',
     passcode: 'قفل التطبيق',
   },
+  lockDetail: {
+    'face-id': 'Face ID أو رمز الآيفون',
+    'touch-id': 'Touch ID أو رمز الدخول',
+  } as Partial<Record<BiometricKind, string>>,
   unlockWith: {
     'face-id': 'افتح باستخدام Face ID',
     'touch-id': 'افتح باستخدام Touch ID',

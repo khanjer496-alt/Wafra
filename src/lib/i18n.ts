@@ -432,8 +432,8 @@ const S = {
     ar: 'راجع التفاصيل الملتقطة قبل إضافة أي شيء إلى سجلك.',
   },
   reviewAlertsPrivacy: {
-    en: 'Only a structured summary is kept here. The bank message text is not stored.',
-    ar: 'يُحفظ هنا ملخص منظّم فقط. لا يُحفظ نص الرسالة البنكية.',
+    en: 'Only a structured summary is kept here. Message text is not stored.',
+    ar: 'يُحفظ هنا ملخص منظّم فقط. لا يُحفظ نص الرسالة.',
   },
   reviewAlertsEmptyTitle: { en: 'All clear', ar: 'تمت مراجعة كل شيء' },
   reviewAlertsEmptyBody: {
@@ -452,6 +452,7 @@ const S = {
   reviewAlertObservedDate: { en: 'Alert date', ar: 'تاريخ التنبيه' },
   applePayReviewTitle: { en: 'Apple Pay purchase', ar: 'عملية Apple Pay' },
   applePayReviewSource: { en: 'Apple Pay via Shortcuts', ar: 'Apple Pay عبر الاختصارات' },
+  applePayReviewHeader: { en: 'Check Apple Pay purchase', ar: 'تحقق من عملية Apple Pay' },
   applePayReviewObserved: { en: 'Apple Pay capture date', ar: 'تاريخ التقاط Apple Pay' },
   applePayReviewUseDate: { en: 'Use Apple Pay capture date', ar: 'استخدام تاريخ التقاط Apple Pay' },
   applePayReviewQuestion: { en: 'Is this purchase already recorded?', ar: 'هل هذه العملية مسجلة بالفعل؟' },
@@ -2196,8 +2197,8 @@ const S = {
     ar: 'التقط العمليات الجديدة',
   },
   onboardLiveBody: {
-    en: 'A Shortcut sends new bank messages to Wafra on this iPhone.',
-    ar: 'يرسل اختصار رسائل بنكك الجديدة إلى وفرة على هذا الآيفون.',
+    en: 'Bank texts or Apple Pay taps reach Wafra on this iPhone.',
+    ar: 'تصل رسائل البنك أو مدفوعات Apple Pay إلى وفرة على هذا الآيفون.',
   },
   onboardLiveAction: {
     en: 'Set up',

@@ -46,8 +46,8 @@ import { useStore } from '@/lib/store';
 import { SUPPLEMENT_COPY } from '@/lib/supplement-copy';
 import { displayRegion } from '@/lib/ledger-money';
 import { summarizeCoverage } from '@/lib/statement-coverage';
-import { countPhrase, nextUploadDelay } from '@/lib/statement-batch';
-import { drainStatementQueue, newStatementRange } from '@/lib/statement-import-flow';
+import { alreadyInWafra, countPhrase, nextUploadDelay } from '@/lib/statement-batch';
+import { drainStatementQueue, holdsStatementRows, newStatementRange } from '@/lib/statement-import-flow';
 import { t } from '@/lib/i18n';
 import { committed, failed } from '@/lib/haptics';
 
@@ -60,11 +60,17 @@ type PendingProtectedPdf = {
   file: File | null;
 };
 
-/** What one import added, for the three-number result summary. */
+/** What one import did with every row it read, for the result summary. */
 type ImportSummary = {
   added: number;
   review: number;
+  /** Rows the import service could not read as transactions. */
   skipped: number;
+  /**
+   * Rows read but matched to something already in the ledger. Known only once
+   * filing finished, so absent while it is pending.
+   */
+  already?: number;
 };
 
 /** A handed-over statement claimed from its one-time token. */
@@ -238,6 +244,8 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
     generation: number;
     reportedImported: number;
     totalRejected: number;
+    /** Rows already filed for Review, or as a new due or bill, on earlier attempts. */
+    reportedOther?: number;
   } | null>(null);
   const [pdfPassword, setPdfPassword] = useState('');
   const [dateOrder, setDateOrder] = useState<StatementDateOrder>(null);
@@ -324,6 +332,7 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
     if (value.code === 'pdf_encryption_unsupported') return copy.errPdfEncryption;
     if (value.code === 'invalid_xlsx') return copy.errXlsx;
     if (value.code === 'unsupported_file_type') return copy.errFileType;
+    if (value.code === 'invalid_statement_file') return copy.errStatementFile;
     // A relay that reads the base64 header says when the typed password
     // itself cannot be used (too long, or a control character).
     if (value.code === 'pdf_password_invalid') return copy.errPasswordInvalid;
@@ -334,7 +343,13 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
     if (value.code === 'unsupported_statement_format') return copy.errFormat;
     if (value.code === 'ambiguous_card_signs') return copy.errCardSigns;
     if (value.code === 'ambiguous_dates') return copy.errDates;
-    if (value.code === 'statement_options_conflict') return copy.errOptionsConflict;
+    if (value.code === 'statement_options_conflict') {
+      const order = value.detail?.previousDateOrder;
+      if (value.detail?.reason === 'parser') return copy.errParserRead;
+      return order
+        ? interpolate(copy.errOptionsConflictOrder, { order: order === 'day-first' ? copy.dateDayFirst : copy.dateMonthFirst })
+        : copy.errOptionsConflict;
+    }
     if (value.code === 'statement_currency_mismatch') return copy.errCurrencyMismatch;
     if (value.code === 'multiple_statement_accounts') return copy.errMultipleAccounts;
     if (value.code === 'queue_full') return copy.errQueueFull;
@@ -455,7 +470,7 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
    * recent re-upload queued nothing, and say so instead.
    */
   const batchSummary = useCallback((
-    context: { files: number; accepted: number; rejected: number; alreadyProcessed: number },
+    context: { files: number; accepted: number; rejected: number; alreadyProcessed: number; already?: number },
     imported: number,
   ): string => {
     if (imported === 0 && context.alreadyProcessed === context.files) return copy.statementsAlreadyProcessed;
@@ -463,6 +478,7 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
       files: countPhrase(language, copy.filesCount, context.files),
       rows: countPhrase(language, copy.rowsRead, context.accepted),
       rejected: context.rejected,
+      already: context.already ?? 0,
       imported,
     });
   }, [copy, language]);
@@ -471,6 +487,7 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
     files: number, accepted: number, rejected: number, pages: number,
     alreadyProcessed = 0, ranges: readonly CoverageRange[] = [],
     generation = getStateGeneration(), reportedImported = 0, totalRejected = rejected, isRetry = false,
+    reportedOther = 0,
   ): Promise<boolean> => {
     const pending = queuedRetryContextRef.current;
     if (!isRetry && pending && pending.generation === generation) {
@@ -481,6 +498,7 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
       ranges = [...pending.ranges, ...ranges];
       reportedImported += pending.reportedImported;
       totalRejected += pending.totalRejected;
+      reportedOther += pending.reportedOther ?? 0;
     }
     queuedRetryContextRef.current = null;
     setStatus(accepted > 0 ? interpolate(copy.acceptedFiling, { accepted }) : copy.queueFiling);
@@ -490,12 +508,18 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
       queuedRetryContextRef.current = null;
       return false;
     }
+    const imported = reportedImported + result.imported;
+    const other = reportedOther + result.review + (result.filedOther ?? 0);
+    // Every row read is added, sent to Review, filed as a due or bill, or
+    // matched to something already in the ledger; the last is the remainder,
+    // and is only known once filing has finished.
+    const already = result.complete ? alreadyInWafra(accepted, imported, other) : undefined;
     setSummary(current => ({
       added: (current?.added ?? 0) + result.imported,
       review: (current?.review ?? 0) + result.review,
       skipped: (current?.skipped ?? 0) + rejected,
+      ...(already !== undefined ? { already } : {}),
     }));
-    const imported = reportedImported + result.imported;
     if (result.complete) {
       try {
         await rememberCoverage(ranges);
@@ -504,7 +528,7 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
         queuedRetryNeededRef.current = false;
         queuedRetryContextRef.current = null;
         setError(null);
-        setStatus(files > 0 ? batchSummary({ files, accepted, rejected: totalRejected, alreadyProcessed }, imported) : copy.queueFiled);
+        setStatus(files > 0 ? batchSummary({ files, accepted, rejected: totalRejected, alreadyProcessed, already }, imported) : copy.queueFiled);
         committed();
         return true;
       } catch (error) {
@@ -517,7 +541,7 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
     queuedRetryNeededRef.current = true;
     // Counts already shown are not added again on the next attempt.
     queuedRetryContextRef.current = { files, accepted, rejected: 0, pages,
-      alreadyProcessed, ranges, generation, reportedImported: imported, totalRejected };
+      alreadyProcessed, ranges, generation, reportedImported: imported, totalRejected, reportedOther: other };
     failed();
     return false;
   }, [batchSummary, copy, ensureDurable, getStateGeneration, rememberCoverage, syncFailureReason, syncQueued]);
@@ -531,7 +555,8 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
       queuedRetryInFlightRef.current = true;
       try {
         await finishQueuedImport(context.files, context.accepted, context.rejected, context.pages,
-          context.alreadyProcessed, context.ranges, context.generation, context.reportedImported, context.totalRejected, true);
+          context.alreadyProcessed, context.ranges, context.generation, context.reportedImported, context.totalRejected, true,
+          context.reportedOther ?? 0);
       } finally {
         queuedRetryInFlightRef.current = false;
       }
@@ -553,10 +578,12 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
     const progressStored = !!matching || !progress.complete;
     if (matching || !progress.complete) {
       queuedRetryNeededRef.current = true;
+      const progressOther = progress.review + (progress.filedOther ?? 0);
       queuedRetryContextRef.current = matching
-        ? { ...matching, reportedImported: matching.reportedImported + progress.imported }
+        ? { ...matching, reportedImported: matching.reportedImported + progress.imported,
+            reportedOther: (matching.reportedOther ?? 0) + progressOther }
         : { files: 0, accepted: 0, rejected: 0, pages: 0, alreadyProcessed: 0, ranges: [],
-            generation, reportedImported: progress.imported, totalRejected: 0 };
+            generation, reportedImported: progress.imported, totalRejected: 0, reportedOther: progressOther };
     }
     setStatus(progress.complete ? copy.queueFiled : copy.queuePending);
     return { ...progress, progressStored };
@@ -633,6 +660,22 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
         setLiveFiles((current) => current.map((item, i) => i === position ? { ...item, status, detail } : item));
       };
       let recoveredImported = 0;
+      let recoveredOther = 0;
+      // Whether this phone holds any row of an earlier read the relay names.
+      // Rows still waiting in the relay queue are filed first, so a file whose
+      // rows are on their way is never read a second time.
+      // Every id the relay knows for the file counts (its first read and any re-read).
+      const holdsAfterFiling = async (importIds: readonly string[]): Promise<boolean> => {
+        const holds = () => importIds.some((id) => holdsStatementRows(getStateSnapshot().transactions, id));
+        if (holds()) return true;
+        const progress = await recoverQueuedRows(generation);
+        if (!progress.progressStored) {
+          recoveredImported += progress.imported;
+          recoveredOther += progress.review + (progress.filedOther ?? 0);
+        }
+        // An unfinished drain cannot prove the rows are absent.
+        return !progress.complete || holds();
+      };
       let acceptedRows = 0;
       let rejectedRows = 0;
       let pages = 0;
@@ -665,9 +708,13 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
         const asset = picked.assets[index];
         const file = Platform.OS === 'web' ? null : new File(asset.uri);
         if (file) pickedFiles.push(file);
-        // Excel workbooks go to the CSV endpoint, like the text tables.
-        const csv = /\.(?:csv|tsv|xlsx)$/i.test(asset.name) ||
-          capabilities.csv.accepts.includes(asset.mimeType?.split(';', 1)[0].toLowerCase() ?? '');
+        // Excel workbooks and structured statements go to the CSV endpoint,
+        // like the text tables. A .pdf never does, whatever type the picker
+        // reported (Android may call it octet-stream, which the relay lists
+        // for structured files).
+        // (Same list as cloud-import.ts CSV_ROUTE_FILE.)
+        const csv = !/\.pdf$/i.test(asset.name) && (/\.(?:csv|tsv|xlsx|ofx|qfx|qif|xml|sta|mt940|940)$/i.test(asset.name) ||
+          capabilities.csv.accepts.includes(asset.mimeType?.split(';', 1)[0].toLowerCase() ?? ''));
         const format = csv ? 'csv' : 'pdf';
         if (limitReached || stopRequestedRef.current || !aliveRef.current ||
             getStateGeneration() !== generation || getStateSnapshot().privateMode) {
@@ -678,6 +725,9 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
         inFlightPickerUris.add(asset.uri);
         try {
           let accepted: Awaited<ReturnType<typeof uploadPdfStatement | typeof uploadCsvStatement>> | null = null;
+          // Read the file again under a fresh identity when the relay's record
+          // of an earlier read names rows this phone does not hold.
+          let reread = false;
           for (let attempt = 0; accepted === null; attempt += 1) {
             const delay = nextUploadDelay(starts[format], Date.now());
             if (delay > 0 && !(await waitFor(delay, index + 1))) {
@@ -692,9 +742,21 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
             starts[format].push(Date.now());
             try {
               accepted = csv
-                ? await uploadCsvStatement(cfg, asset, capabilities, ledgerMoney, dateOrder)
-                : await uploadPdfStatement(cfg, asset, capabilities, ledgerMoney, undefined, dateOrder);
+                ? await uploadCsvStatement(cfg, asset, capabilities, ledgerMoney, dateOrder, reread)
+                : await uploadPdfStatement(cfg, asset, capabilities, ledgerMoney, undefined, dateOrder, reread);
+              if (accepted.alreadyProcessed && !reread && accepted.statementImportId &&
+                  !(await holdsAfterFiling(accepted.statementImportIds ?? [accepted.statementImportId]))) {
+                reread = true;
+                accepted = null;
+                continue;
+              }
             } catch (uploadError) {
+              if (!reread && uploadError instanceof CloudImportError && uploadError.code === 'statement_options_conflict' &&
+                  uploadError.detail?.statementImportId &&
+                  !(await holdsAfterFiling(uploadError.detail.statementImportIds ?? [uploadError.detail.statementImportId]))) {
+                reread = true;
+                continue;
+              }
               // One patient retry: pacing keeps the minute limit, so a 429 here
               // is usually the hourly budget, and a second one ends the batch.
               if (attempt === 0 && uploadError instanceof CloudImportError && uploadError.code === 'rate_limited') {
@@ -742,7 +804,12 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
               // safely even when no file returned a success response, otherwise
               // this screen could never free its own full queue for a retry.
               const progress = await recoverQueuedRows(generation);
-              if (!progress.progressStored) recoveredImported += progress.imported;
+              if (!progress.progressStored) {
+                recoveredImported += progress.imported;
+                // Already counted as Needs review (or filed as a due or bill):
+                // not to be called "already in Wafra" at the end of the batch.
+                recoveredOther += progress.review + (progress.filedOther ?? 0);
+              }
             }
           }
           const failedDetail = interpolate(copy.fileFailed, {
@@ -767,7 +834,8 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
         setError(null);
       }
       if (uploadedFiles > 0) {
-        await finishQueuedImport(uploadedFiles, acceptedRows, rejectedRows, pages, alreadyProcessedFiles, coverage, generation, recoveredImported);
+        await finishQueuedImport(uploadedFiles, acceptedRows, rejectedRows, pages, alreadyProcessedFiles, coverage, generation,
+          recoveredImported, undefined, false, recoveredOther);
       } else {
         // A file that was tried and failed is reported as a failure even
         // when Stop ended the rest of the batch.
@@ -1030,6 +1098,8 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
   const numbers = summary
     ? [
         { key: 'added', value: summary.added, label: copy.resultAdded, tone: band.statusOk },
+        ...(summary.already !== undefined
+          ? [{ key: 'already', value: summary.already, label: copy.resultAlready, tone: band.text }] : []),
         { key: 'review', value: summary.review, label: copy.resultReview, tone: summary.review > 0 ? band.statusNear : band.text },
         { key: 'skipped', value: summary.skipped, label: copy.resultSkipped, tone: band.textSecondary },
       ]
@@ -1220,7 +1290,10 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
               accessible
               accessibilityRole="summary"
               accessibilityLiveRegion="polite"
-              accessibilityLabel={interpolate(copy.summaryLabel, summary)}
+              accessibilityLabel={summary.already !== undefined
+                ? interpolate(copy.summaryLabelWithAlready, {
+                  added: summary.added, already: summary.already, review: summary.review, skipped: summary.skipped })
+                : interpolate(copy.summaryLabel, { added: summary.added, review: summary.review, skipped: summary.skipped })}
               style={styles.summary}>
               {numbers.map((item) => (
                 <View key={item.key} style={styles.summaryCell}>

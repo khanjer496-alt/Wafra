@@ -1,6 +1,6 @@
 # Dedicated iPhone 15 acceptance — 15 October 2026
 
-Scheduled thread follow-up: **6 PM Dubai time**. The owner authorizes intensive Wafra testing and installation on the dedicated phone. Public App Store release, real-money bank actions, repository commits/pushes and changes to unrelated apps/data require separate authorization.
+The live session started before the planned **6 PM Dubai time** follow-up, so the redundant heartbeat was removed. The owner authorizes intensive Wafra testing and installation on the dedicated phone, reviewed main commits/pushes, signed builds and TestFlight upload/access. Public App Store release, real-money bank actions and changes to unrelated apps/data remain separate actions.
 
 ## Before connecting
 
@@ -54,7 +54,7 @@ Capture the actual iOS/build, profile, artifact/source hashes, lane, app lifecyc
 | 15. `settings` | Capture/charge alerts/OS permissions/entitlement/context/erase gates independently; no stale notification after disable. |
 | 16. `space_boundary` | Real no-space/non-Latin control: record trigger coverage separately from direct parser fixtures. |
 | 17. `history` | Actual small inbox, mixed banks, deferral/cancel/retry/relaunch; no false completion on empty/unsupported/large sets. |
-| 18. `history_diagnostics` | Only when needed: bundled Quick History Check/Messages Check with counts-only evidence. |
+| 18. `history_diagnostics` | Only when needed: separately generate/sign the counts-only Quick History Check/Messages Check tools. They are not bundled in build190. |
 | 19. `statements` | CSV/TSV/XLSX/PDF Files+Share sheet, mapping/password/cancel/network/reimport; explicit cloud consent, exact money/dates and dedupe. |
 | 20. `private_formats` | Two synthetic samples, relaunch/use/edit/delete, private mode; no raw samples in public evidence and no implied background private-format support. |
 | 21. `app_lock` | FaceID/cancel/retry/passcode/background/switcher/relaunch; ledger remains protected. |

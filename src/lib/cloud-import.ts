@@ -100,7 +100,26 @@ async function relayFetch(
  * unsupported protection) only to builds that send it; older builds keep
  * the answers they always had.
  */
-export const IMPORT_FEATURES_HEADER = { 'x-wafra-import-features': 'xlsx,pdf-error-detail' } as const;
+export const IMPORT_FEATURES_HEADER = { 'x-wafra-import-features': 'xlsx,pdf-error-detail,structured' } as const;
+
+/**
+ * Structured statement files (OFX/QFX, QIF, ISO 20022 camt XML, MT940) and the
+ * media type each is uploaded under. The relay reads them on the CSV endpoint
+ * only when it lists that type in `csv.accepts` (it does for builds that send
+ * the `structured` feature); it decides the format from the bytes, never the
+ * label. MT940 has no registered type: the relay knows this private one.
+ */
+const STRUCTURED_TYPES: Record<string, string> = {
+  ofx: 'application/x-ofx',
+  qfx: 'application/vnd.intu.qfx',
+  qif: 'application/qif',
+  xml: 'application/xml',
+  sta: 'application/x-mt940',
+  mt940: 'application/x-mt940',
+  '940': 'application/x-mt940',
+};
+/** Files the CSV endpoint takes (text tables, workbooks, structured statements). */
+export const CSV_ROUTE_FILE = /\.(?:csv|tsv|xlsx|ofx|qfx|qif|xml|sta|mt940|940)$/i;
 
 /**
  * How the user's country writes a bare numeric date (country.ts
@@ -109,6 +128,15 @@ export const IMPORT_FEATURES_HEADER = { 'x-wafra-import-features': 'xlsx,pdf-err
 export type StatementDateOrder = 'day-first' | 'month-first' | null;
 
 /** Omitted entirely when the caller did not say, so the relay applies its legacy rule. */
+/**
+ * Ask the relay to read a file again under a fresh identity: this phone holds
+ * no transaction of an earlier read of it (a reinstall, an erase, a restore
+ * from an older backup), so a replay refusal would be a dead end.
+ */
+function rereadHeader(reread: boolean): Record<string, string> {
+  return reread ? { 'x-wafra-statement-reread': '1' } : {};
+}
+
 function dateOrderHeader(dateOrder: StatementDateOrder | undefined): Record<string, string> {
   return dateOrder === undefined ? {} : { 'x-wafra-date-order': dateOrder ?? 'unknown' };
 }
@@ -162,7 +190,7 @@ export async function revokeEmailForwardingAddress(cfg: RelayConfig): Promise<vo
 }
 
 /** Statement file names the cleanup below may delete; nothing else is touched. */
-const STATEMENT_COPY = /\.(?:pdf|csv|tsv|xlsx)$/i;
+const STATEMENT_COPY = /\.(?:pdf|csv|tsv|xlsx|ofx|qfx|qif|xml|sta|mt940|940)$/i;
 
 /**
  * Delete statement copies left in the two places Wafra receives them.
@@ -220,6 +248,7 @@ export async function uploadPdfStatement(
   ledgerMoney: LedgerMoneySpec,
   password?: string,
   dateOrder?: StatementDateOrder,
+  reread = false,
 ): Promise<PdfImportAccepted> {
   if (!capabilities.pdf.enabled || !capabilities.pdf.accepts.includes('application/pdf')) {
     throw new CloudImportError('service');
@@ -240,6 +269,7 @@ export async function uploadPdfStatement(
       'x-wafra-ledger-currency': ledgerMoney.currency,
       'x-wafra-ledger-exponent': String(ledgerMoney.exponent),
       ...dateOrderHeader(dateOrder),
+      ...rereadHeader(reread),
       ...pdfPasswordHeaders(password, capabilities),
     },
     body: file,
@@ -261,6 +291,7 @@ export async function uploadCsvStatement(
   capabilities: ImportCapabilities,
   ledgerMoney: LedgerMoneySpec,
   dateOrder?: StatementDateOrder,
+  reread = false,
 ): Promise<CsvImportAccepted> {
   if (!capabilities.csv.enabled) throw new CloudImportError('service');
   const file = picked.file ?? new File(picked.uri);
@@ -268,24 +299,27 @@ export async function uploadCsvStatement(
   const size = file.size;
   if (!Number.isFinite(size) || size <= 0) throw new CloudImportError('invalid_csv');
 
-  const extension = /\.(csv|tsv|xlsx)$/i.exec(picked.name)?.[1].toLowerCase();
+  const extension = /\.(csv|tsv|xlsx|ofx|qfx|qif|xml|sta|mt940|940)$/i.exec(picked.name)?.[1].toLowerCase();
+  const structuredType = extension ? STRUCTURED_TYPES[extension] : undefined;
   const extensionType = extension === 'tsv'
     ? 'text/tab-separated-values'
     : extension === 'xlsx'
       ? XLSX_CONTENT_TYPE
-      : 'text/csv';
+      : structuredType ?? 'text/csv';
   const requestedType = picked.mimeType?.split(';', 1)[0].trim().toLowerCase();
   // A workbook is never sent as text, nor text as a workbook: a known
   // extension settles that pair; otherwise the picker's advertised type wins.
-  const contentType = extension === 'xlsx'
-    ? XLSX_CONTENT_TYPE
+  // A structured statement is always sent under its own type: the picker
+  // reports most of them as octet-stream or plain text.
+  const contentType = extension === 'xlsx' || structuredType
+    ? extensionType
     : requestedType && capabilities.csv.accepts.includes(requestedType) &&
         !(requestedType === XLSX_CONTENT_TYPE && extension !== undefined)
       ? requestedType
       : extensionType;
   if (!capabilities.csv.accepts.includes(contentType)) {
-    // An Excel file (opened from Files) on a relay that does not read them yet.
-    throw new CloudImportError(contentType === XLSX_CONTENT_TYPE ? 'unsupported_file_type' : 'service');
+    // An Excel or structured file (opened from Files) on a relay that does not read them yet.
+    throw new CloudImportError(contentType === XLSX_CONTENT_TYPE || structuredType ? 'unsupported_file_type' : 'service');
   }
   // A per-type ceiling when the relay advertises one, else the CSV limit.
   if (size > csvMaxBytes(capabilities, contentType)) throw new CloudImportError('too_large', 413);
@@ -298,6 +332,7 @@ export async function uploadCsvStatement(
       'x-wafra-ledger-currency': ledgerMoney.currency,
       'x-wafra-ledger-exponent': String(ledgerMoney.exponent),
       ...dateOrderHeader(dateOrder),
+      ...rereadHeader(reread),
     },
     body: file,
   }, uploadTimeoutMs(size));

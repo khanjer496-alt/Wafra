@@ -112,10 +112,10 @@ test('Capture status: green band, status and the handled time as the figure, rea
   assert.deepEqual(h.routes.slice(1), ['/ios-apple-pay-setup', '/statement-import']);
 });
 
-test('Capture status: Apple Pay requires iOS 27 and native support; statements remain usable', async () => {
+test('Capture status: Apple Pay requires iOS 17 Wallet automations and native support; statements remain usable', async () => {
   for (const [version, applePayCaptureSupported, nativeAvailable, visible] of [
-    ['27.0', true, true, true], ['28.1', true, true, true],
-    ['26.6', true, true, false], ['27.0', false, true, false],
+    ['27.0', true, true, true], ['28.1', true, true, true], ['26.6', true, true, true], ['17.0', true, true, true],
+    ['16.7', true, true, false], ['27.0', false, true, false],
     ['27.0', true, false, false], ['27oops', true, true, false],
   ]) {
     const h = captureHealth({ version, applePayCaptureSupported, status: nativeAvailable ? receipt() : null });

@@ -108,7 +108,7 @@ const transaction: Check = (value) => {
     paymentFlowSide: oneOf('funding', 'receipt'), billIdentity: text, billPayment,
     billerAccountTail: (v) => typeof v === 'string' && /^\d{4}$/.test(v),
     paymentInstrumentSource: oneOf('alert', 'user'), cashOutDate: isoDate,
-    cashOutAccountId: id, isTransfer: boolean, userEdited: boolean, titleEdited: boolean, raw: text,
+    cashOutAccountId: id, isTransfer: boolean, userEdited: boolean, titleEdited: boolean, reviewConfirmed: boolean, raw: text,
   })) return false;
   if (value.statementRowIndex !== undefined && (value.statementImportId === undefined ||
     (value.captureSource !== 'pdf' && value.captureSource !== 'csv'))) return false;

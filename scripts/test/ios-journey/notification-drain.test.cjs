@@ -21,6 +21,8 @@ function harness({ capable = true, modern = true, channel = 'push', optOut = fal
     '@/lib/ledger-money': require(path.join(root, 'scripts/test/build/ledger-money.js')),
     '@/lib/local-message-record': {
       preflightLocalMessageRecord: () => ({ id: 'event-id', valid: true, market: 'AE', observedAt: receipt }),
+      // No SMS text in these stubs, so no carrier re-delivery facts to fold.
+      localMessageCarrierFacts: () => null,
       parseLocalMessageRecord: () => ({ kind: 'parsed', market: 'AE', milestone: 'financial', row: { smsTs: receipt, channel } }),
     },
     '@/lib/types': { normalizeLocalCaptureQualifications: () => [], isLocalCaptureQualificationCandidate: () => true },

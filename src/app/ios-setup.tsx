@@ -24,8 +24,8 @@ import { useBand } from '@/hooks/use-band';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Fonts, Spacing } from '@/constants/theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { t, tf, type StringKey } from '@/lib/i18n';
-import { IOS_LOCAL_CAPTURE_SHORTCUT_NAME } from '@/lib/ios-local-capture-protocol';
+import { getLanguage, t, tf, type StringKey } from '@/lib/i18n';
+import { isIosCaptureAttemptId, IOS_LOCAL_CAPTURE_SHORTCUT_NAME } from '@/lib/ios-local-capture-protocol';
 import { iosShortcutSetupCopy } from '@/lib/ios-shortcut-setup-copy';
 import {
   completeIosMessageOnboardingAttempt,
@@ -127,6 +127,8 @@ const failureCopy = (failure: Exclude<IosSetupFailure, null>): string => {
       return t('iosLocalShortcutInstallFailed');
     case 'shortcut-run':
       return t('iosLocalShortcutRunFailed');
+    case 'automation-open':
+      return iosShortcutSetupCopy(getLanguage()).automationOpenFailed;
     case 'shortcuts-missing':
       return t('iosShortcutsMissing');
     case 'load':
@@ -142,6 +144,9 @@ export default function IosSetupScreen() {
   const params = useLocalSearchParams<{
     fromOnboarding?: string;
     shortcutResult?: string;
+    shortcutAttempt?: string;
+    errorDomain?: string;
+    errorCode?: string;
     notificationReturn?: string;
     applePayReturn?: string;
     section?: string;
@@ -191,7 +196,10 @@ export default function IosSetupScreen() {
   const applePayMode = shownSource === 'apple-pay';
   const messageMode = !notificationMode && !applePayMode;
   const applePayLabel = language === 'ar' ? 'إعداد Apple Pay' : 'Set up Apple Pay';
-  const applePaySummary = language === 'ar' ? 'أرسل عمليات الدفع ببطاقتك عبر Apple Pay إلى المراجعة. لا يلزم اختيار بنك.' : 'Send Apple Pay card taps to Review. No bank selection needed.';
+  const applePayReviewLabel = language === 'ar' ? 'عرض إعداد Apple Pay' : 'View Apple Pay setup';
+  const applePaySummary = language === 'ar'
+    ? 'التقط عمليات الدفع ببطاقتك عبر Apple Pay. أول عملية من كل بطاقة تسألك عن حسابها، وتُضاف اللاحقة تلقائياً. لا يلزم اختيار بنك.'
+    : 'Catch Apple Pay card taps. The first purchase from each card asks which account it belongs to; later ones are added automatically. No bank selection needed.';
   const setup = { ...rawSetup, readiness: resolveIosSelectedReadiness(shownSource, rawSetup,
     futureProgress.futureShortcutVersion, futureProgress.futureAttemptStartedAt) };
   const legacyUpgrade = messageMode && !rawSetup.loading && isIosLegacyCaptureUpgrade(futureProgress, rawSetup);
@@ -217,6 +225,11 @@ export default function IosSetupScreen() {
   const [shortcutsMissing, setShortcutsMissing] = useState(false);
   const [showAutomationGuide, setShowAutomationGuide] = useState(false);
   const [checkStopped, setCheckStopped] = useState(false);
+  // Shortcuts' x-error for a run-by-name it cannot resolve: the shortcut is
+  // missing or two share its name. Re-adding makes a duplicate worse.
+  const [shortcutNotFound, setShortcutNotFound] = useState(false);
+  // Quiet (Apple Pay, no Shortcuts banner) or Complete (bank texts) for a fresh setup.
+  const [completeChosen, setCompleteChosen] = useState(false);
   const autoCheck = useRef<{ armedAt: number; wentBackground: boolean } | null>(null);
   const autoCheckAction = useRef<(() => void) | null>(null);
   const [resetHistoryVisible, setResetHistoryVisible] = useState(false);
@@ -453,21 +466,36 @@ export default function IosSetupScreen() {
       return;
     }
     if (result !== 'success' && result !== 'cancel' && result !== 'error') return;
-    if (consumedShortcutCallback.current === result) return;
-    consumedShortcutCallback.current = result;
-    if (result === 'cancel') setCheckStopped(true);
+    const attemptId = params.shortcutAttempt;
+    if (!isIosCaptureAttemptId(attemptId)) {
+      router.setParams({ shortcutResult: undefined, shortcutAttempt: undefined, errorDomain: undefined, errorCode: undefined });
+      return;
+    }
+    const callbackKey = `${result}:${attemptId}`;
+    if (consumedShortcutCallback.current === callbackKey) return;
+    consumedShortcutCallback.current = callbackKey;
+    const controller = controllerRef.current;
+    const notFound = result === 'error' && params.errorDomain === 'NSCocoaErrorDomain' && params.errorCode === '4';
     void (async () => {
-      await send({ type: 'shortcut-callback', result });
+      await send({ type: 'shortcut-callback', result, attemptId });
+      const accepted = () => controller !== null && controllerRef.current === controller &&
+        controller.getModel().shortcutCallback?.attemptId === attemptId &&
+        controller.getModel().shortcutCallback?.result === result;
+      if (!accepted() || !screenActive.current) return;
+      if (result === 'cancel') setCheckStopped(true);
+      setShortcutNotFound(notFound);
+      if (notFound) await updateProgress({ type: 'future-shortcut-duplicate-found', source: 'message' });
       await refreshSetup();
-      if (result === 'error' && screenActive.current &&
-        controllerRef.current?.getModel().failure !== 'load') {
+      if (result === 'error' && screenActive.current && accepted() &&
+        controller?.getModel().failure !== 'load') {
         // Foreground receipt refreshes can succeed even when the Shortcut
         // failed. Keep the error visible until the owner takes a retry action.
         setLocalError((current) => current ?? t('iosLocalShortcutRunFailed'));
       }
     })();
-    router.setParams({ shortcutResult: undefined });
-  }, [params.shortcutResult, refreshSetup, router, send, setup.loading]);
+    router.setParams({ shortcutResult: undefined, shortcutAttempt: undefined, errorDomain: undefined, errorCode: undefined });
+  }, [params.errorCode, params.errorDomain, params.shortcutAttempt, params.shortcutResult, refreshSetup, router, send,
+    setup.loading, updateProgress]);
 
   useEffect(() => {
     if (setup.loading || !progressLoaded) return;
@@ -532,6 +560,7 @@ export default function IosSetupScreen() {
   const installFutureShortcut = useCallback(() => {
     void runOperation(async () => {
       setCheckStopped(false);
+      setShortcutNotFound(false);
       if (setup.shortcutVersion === 3) {
         // A reinstall is a new attempt: older native proof no longer counts
         // in setup, while the confirmed automation (and Home) stay as they are.
@@ -564,6 +593,7 @@ export default function IosSetupScreen() {
     void runOperation(async () => {
       autoCheck.current = null;
       setCheckStopped(false);
+      setShortcutNotFound(false);
       await setCaptureOptOut(false);
       // Only proof recorded after this moment answers this check.
       await updateProgress({ type: 'future-check-started', source: 'message', at: Date.now() });
@@ -575,8 +605,9 @@ export default function IosSetupScreen() {
     void runOperation(async () => {
       if (shownSource === recordedSource) await updateProgress({ type: 'future-status-changed', status: 'in-progress' });
       await send({ type: 'open-automation' });
+      if (screenActive.current && controllerRef.current?.getModel().failure === null) setGuideScreen(1);
     });
-  }, [recordedSource, runOperation, send, shownSource, updateProgress]);
+  }, [recordedSource, runOperation, send, setGuideScreen, shownSource, updateProgress]);
 
   // Looking at another source's setup changes nothing that is saved: the
   // recorded source switches only when that source's automation is confirmed.
@@ -600,11 +631,16 @@ export default function IosSetupScreen() {
     void runOperation(async () => {
       await setCaptureOptOut(false);
       await updateProgress({ type: 'future-automation-confirmed', source: 'message', at: Date.now() });
+      // Setup finished after onboarding (e.g. from Settings) must not leave the
+      // earlier "add by hand" answer saying nothing reaches Wafra.
+      // Same answer as alertsAnswerForIosSetup(false, 'message').
+      const profile = state.onboardingProfile;
+      if (profile && profile.alerts !== 'sms') setOnboardingProfile({ ...profile, alerts: 'sms' });
       await send({ type: 'automation-added' });
       setShowAutomationGuide(false);
       setViewSource(null);
     }, t('capturePreferenceFailed'));
-  }, [runOperation, send, setCaptureOptOut, updateProgress]);
+  }, [runOperation, send, setCaptureOptOut, setOnboardingProfile, state.onboardingProfile, updateProgress]);
 
   const openHistoryInstall = useCallback(() => {
     if (!historyInstallUrl) return;
@@ -950,6 +986,7 @@ export default function IosSetupScreen() {
     ?? (activeSection === 'history' && historyRefreshFailed ? t('iosHistoryRefreshFailed') : null)
     ?? (setup.failure ? failureCopy(setup.failure) : null);
   const shortcutCheckFailed = activeSection === 'future' && failedMessageCheck;
+  const automationOpenFailed = messageMode && setup.failure === 'automation-open';
   const shortcutName = setup.shortcutName ?? IOS_LOCAL_CAPTURE_SHORTCUT_NAME;
   const historyConfirmed = progress.historyShortcutConfirmed || historySetup.installed;
   const historyRunning = historySetup.handoffStartedAt !== null;
@@ -1201,8 +1238,9 @@ export default function IosSetupScreen() {
               )}
               {applePayMode ? (
                 <SetupStep palette={band} badge="1" title={applePayLabel} body={applePaySummary}
-                  result={futureConfigured ? { tone: 'pass', title: journeyCopy.waiting } : null}>
-                  <EButton palette={band} label={applePayLabel} onPress={openApplePaySetup} disabled={busy} />
+                  result={futureConfigured ? { tone: 'pass', title: journeyCopy.applePayWaiting } : null}>
+                  <EButton palette={band} label={futureConfigured ? applePayReviewLabel : applePayLabel}
+                    variant={futureConfigured ? 'secondary' : undefined} onPress={openApplePaySetup} disabled={busy} />
                   <EButton palette={band} label={t('iosNotificationChooseSms')} variant="quiet" onPress={chooseMessageCapture} disabled={busy} />
                 </SetupStep>
               ) : notificationMode ? (
@@ -1225,7 +1263,9 @@ export default function IosSetupScreen() {
                 <>
                   {setup.shortcutVersion === 3 && <IosSetupVideoCard kind="capture" language={language} compact disabled={busy} />}
                   <SetupStep palette={band} badge="3" title={shortcutCopy.relinkTitle}
-                    body={shortcutCopy.relinkBody.replace('{shortcut}', shortcutName)}>
+                    body={shortcutCopy.relinkBody.replace('{shortcut}', shortcutName)}
+                    result={automationOpenFailed ? { tone: 'fail', title: shortcutCopy.automationOpenFailed,
+                      body: shortcutCopy.automationOpenManually } : null}>
                     <EButton palette={band} label={shortcutCopy.editExisting} onPress={openExistingAutomation} disabled={busy} />
                     <EButton palette={band} label={shortcutCopy.relinkConfirm} variant="secondary" onPress={confirmAutomation}
                       disabled={busy} />
@@ -1241,14 +1281,16 @@ export default function IosSetupScreen() {
                       .replace('{total}', String(shortcutCopy.guide.length))}
                     title={guide.title}
                     body={fillShortcut(guide.body)} chips={guide.chips.map(fillShortcut)}
-                    chipsPrefix={shortcutCopy.inShortcuts}>
+                    chipsPrefix={shortcutCopy.inShortcuts}
+                    result={automationOpenFailed ? { tone: 'fail', title: shortcutCopy.automationOpenFailed,
+                      body: shortcutCopy.automationOpenManually } : null}>
+                    {automationOpenFailed && <EButton palette={band} label={shortcutCopy.automationOpenRetry}
+                      onPress={openAutomation} disabled={busy} />}
                     {guideShown === 0 ? (
                       <>
                         {/* Opening Shortcuts is the next step; the confirmation comes last. */}
-                        <EButton palette={band} label={t('iosLocalOpenAutomation')} onPress={() => {
-                          nextGuideScreen();
-                          openAutomation();
-                        }} disabled={busy} />
+                        {!automationOpenFailed && <EButton palette={band} label={t('iosLocalOpenAutomation')}
+                          onPress={openAutomation} disabled={busy} />}
                         <EButton palette={band} label={shortcutCopy.next} variant="quiet" onPress={nextGuideScreen} disabled={busy} />
                       </>
                     ) : guideShown < shortcutCopy.guide.length - 1 ? (
@@ -1276,10 +1318,21 @@ export default function IosSetupScreen() {
                 </>
               ) : futureStep === 'prove-shortcut' ? (
                 <SetupStep palette={band} testID="ios-shortcut-check-step" badge="2" title={shortcutCopy.check} body={shortcutCopy.checkBody}
-                  result={shortcutCheckFailed
+                  result={shortcutCheckFailed && shortcutNotFound
+                    ? { tone: 'fail', title: shortcutCopy.notFound.replace('{shortcut}', shortcutName),
+                      body: shortcutCopy.notFoundBody.split('{shortcut}').join(shortcutName) }
+                    : shortcutCheckFailed
                     ? { tone: 'fail', title: shortcutCopy.failed, body: shortcutCopy.repairBody }
                     : checkStopped ? { tone: 'info', title: shortcutCopy.stopped } : null}>
-                  {shortcutCheckFailed ? (
+                  {shortcutCheckFailed && shortcutNotFound ? (
+                    <View testID="ios-shortcut-check-not-found" style={styles.actions}>
+                      <EButton palette={band} label={shortcutCopy.openShortcuts}
+                        onPress={() => { void Linking.openURL('shortcuts://').catch(() => undefined); }} disabled={busy} />
+                      <EButton palette={band} label={shortcutCopy.retry} variant="secondary" onPress={checkFutureShortcut} disabled={busy} />
+                      <EButton palette={band} label={shortcutCopy.repair} variant="quiet" onPress={installFutureShortcut}
+                        disabled={busy || !setup.shortcutAvailable} />
+                    </View>
+                  ) : shortcutCheckFailed ? (
                     <View testID="ios-shortcut-check-recovery" style={styles.actions}>
                       <EButton palette={band} label={shortcutCopy.repair} onPress={installFutureShortcut}
                         disabled={busy || !setup.shortcutAvailable} />
@@ -1288,6 +1341,21 @@ export default function IosSetupScreen() {
                   ) : (
                     <EButton palette={band} label={t('iosMessageRunPermissionCheck')} onPress={checkFutureShortcut} disabled={busy} />
                   )}
+                </SetupStep>
+              ) : futureStep === 'add-shortcut' && offersApplePay && messageMode && !completeChosen &&
+                !futureProgress.futureShortcutConfirmed ? (
+                <SetupStep palette={band} testID="ios-capture-choice" badge="1" title={shortcutCopy.chooseTitle}
+                  body={shortcutCopy.chooseBody}>
+                  <View style={styles.choice}>
+                    <EButton palette={band} label={shortcutCopy.completeTitle} onPress={() => setCompleteChosen(true)}
+                      disabled={busy} />
+                    <ThemedText type="meta" style={{ color: band.textSecondary }}>{shortcutCopy.completeBody}</ThemedText>
+                  </View>
+                  <View style={styles.choice}>
+                    <EButton palette={band} label={shortcutCopy.quietTitle} variant="secondary" onPress={openApplePaySetup}
+                      disabled={busy} />
+                    <ThemedText type="meta" style={{ color: band.textSecondary }}>{shortcutCopy.quietBody}</ThemedText>
+                  </View>
                 </SetupStep>
               ) : futureStep === 'add-shortcut' ? (
                 <SetupStep palette={band} testID="ios-add-shortcut-step" badge="1" title={shortcutCopy.add}
@@ -1341,7 +1409,7 @@ export default function IosSetupScreen() {
               )}
             </View>
           )}
-          {error && !shortcutCheckFailed && (
+          {error && !shortcutCheckFailed && !(automationOpenFailed && showingAutomation) && (
             <View accessibilityLiveRegion="polite">
               <View style={[styles.error, { backgroundColor: band.statusOverSoft, borderColor: band.statusOver }]}>
                 <ThemedText type="small" style={{ color: band.text }} selectable>{error}</ThemedText>
@@ -1411,6 +1479,7 @@ export default function IosSetupScreen() {
 }
 
 const styles = StyleSheet.create({
+  choice: { gap: 6 },
   bandContent: { gap: 12, paddingTop: 4, paddingBottom: 8 },
   bandTitle: { fontFamily: Fonts.sansSemi, fontSize: 36, lineHeight: 42, letterSpacing: -1.2 },
   content: { gap: 14 },

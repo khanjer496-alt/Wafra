@@ -1,11 +1,12 @@
 import content from './ios-setup-video-content.json';
-import { iosSupportsApplePayAutomation } from './ios-setup-availability';
+import { iosShortcutsCarryAutomations, iosSupportsApplePayAutomation } from './ios-setup-availability';
 import { iosSetupRecordings } from './ios-setup-recordings';
 
 export type IosSetupVideoKind = 'capture' | 'history' | 'apple-pay';
 
 export const isIosSetupVideoSupported = (osVersion: unknown, kind: IosSetupVideoKind = 'capture'): boolean =>
-  kind === 'apple-pay' ? iosSupportsApplePayAutomation(osVersion)
+  // The Apple Pay guide shows iOS 27's in-editor automation; earlier versions get written steps.
+  kind === 'apple-pay' ? iosSupportsApplePayAutomation(osVersion) && iosShortcutsCarryAutomations(osVersion)
     : /^(?:26)(?:\.\d+)*$/.test(String(osVersion));
 
 export const getIosSetupVideo = (kind: IosSetupVideoKind, language: string) => {

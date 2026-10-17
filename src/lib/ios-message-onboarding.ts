@@ -67,6 +67,7 @@ export type IosMessageSetupEvent =
   | { type: 'active-section-changed'; section: IosMessageSetupSection }
   | { type: 'future-shortcut-install-started'; version?: 3; source?: IosCaptureSource; at?: number }
   | { type: 'future-check-started'; at: number; source?: IosCaptureSource }
+  | { type: 'future-shortcut-duplicate-found'; source?: IosCaptureSource }
   | { type: 'future-shortcut-confirmed'; version?: 3; source?: IosCaptureSource }
   | { type: 'future-automation-confirmed'; source?: IosCaptureSource; at?: number }
   | { type: 'future-status-changed'; status: IosMessageSetupStatus }
@@ -322,6 +323,12 @@ export function reduceIosMessageSetup(
       });
     case 'future-check-started':
       return updateSource(current, event.source, (value) => ({ ...value, attemptStartedAt: event.at }));
+    case 'future-shortcut-duplicate-found':
+      // Shortcuts found two same-named copies. Deleting the extra copy also
+      // deletes any automation that ran it, so a confirmed automation must
+      // be checked again after the next successful test.
+      return updateSource(current, event.source, (value) =>
+        value.automationConfirmed && !value.automationRelink ? { ...value, automationRelink: true } : value);
     case 'future-shortcut-confirmed':
       return updateSource(current, event.source, (value) => ({
         ...value,

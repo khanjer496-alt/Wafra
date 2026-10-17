@@ -165,7 +165,9 @@ export function NameStep({ nameDraft, onChangeName, onContinue, onSkip, onBack, 
         autoCorrect={false}
         enterKeyHint="done"
         returnKeyType="done"
-        onSubmitEditing={() => { if (trimmed) onContinue(); }}
+        // Done only closes the keyboard: it hides the country and currency
+        // rows below, which still need a look before Continue.
+        submitBehavior="blurAndSubmit"
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         style={[styles.input, Platform.OS === 'web' ? styles.inputWeb : null, {

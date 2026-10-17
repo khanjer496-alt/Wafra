@@ -258,4 +258,45 @@ function textPdf(lines, { userPassword, encrypt } = {}) {
   return new Uint8Array(Buffer.concat(chunks));
 }
 
-module.exports = { buildZip, buildXlsx, textPdf, columnName, STYLES };
+/**
+ * A multi-page text PDF whose cells sit at explicit positions, the way a bank
+ * draws a statement table: `pages` is an array of pages, each an array of
+ * `{ x, y, text }` cells drawn in the order given (content-stream order is
+ * what pdf.js extraction follows). Unencrypted. Used to reproduce table
+ * layouts whose debit/credit column is only knowable from a figure's x.
+ */
+function cellPdf(pages, { fontSize = 9 } = {}) {
+  const escape = (text) => text.replace(/([()\\])/g, '\\$1');
+  const pageCount = pages.length;
+  // 1 catalog, 2 pages, 3 font, then (page, content) pairs.
+  const kids = pages.map((_, i) => `${4 + i * 2} 0 R`).join(' ');
+  const objects = [
+    Buffer.from('<< /Type /Catalog /Pages 2 0 R >>'),
+    Buffer.from(`<< /Type /Pages /Kids [${kids}] /Count ${pageCount} >>`),
+    Buffer.from('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'),
+  ];
+  pages.forEach((cells, i) => {
+    const stream = cells.map(({ x, y, text }) =>
+      `BT /F1 ${fontSize} Tf 1 0 0 1 ${x} ${y} Tm (${escape(text)}) Tj ET`).join('\n');
+    const bytes = Buffer.from(stream, 'binary');
+    objects.push(Buffer.from(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${5 + i * 2} 0 R >>`));
+    objects.push(Buffer.concat([Buffer.from(`<< /Length ${bytes.length} >>\nstream\n`), bytes, Buffer.from('\nendstream')]));
+  });
+  const chunks = [Buffer.from('%PDF-1.4\n')];
+  let length = chunks[0].length;
+  const offsets = [];
+  objects.forEach((object, i) => {
+    offsets.push(length);
+    const chunk = Buffer.concat([Buffer.from(`${i + 1} 0 obj\n`), object, Buffer.from('\nendobj\n')]);
+    chunks.push(chunk);
+    length += chunk.length;
+  });
+  const xref = length;
+  let tail = `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets) tail += `${String(offset).padStart(10, '0')} 00000 n \n`;
+  tail += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  chunks.push(Buffer.from(tail));
+  return new Uint8Array(Buffer.concat(chunks));
+}
+
+module.exports = { buildZip, buildXlsx, textPdf, cellPdf, columnName, STYLES };

@@ -187,7 +187,7 @@ function UniversalAlertRow({ item, busy, onAdd, onDismiss, palette }: {
             <ThemedText testID="review-alert-reason" type="small" style={{ color: palette.textSecondary }}>{reasonSentence(reason, language)}</ThemedText>
           ) : null}
           {informational ? <ThemedText type="meta" style={{ color: palette.textSecondary }}>{words.informationHint}</ThemedText> : null}
-          <ThemedText type="meta" style={{ color: palette.textSecondary }}>{t('genericUnverifiedIssuer')} · {shortDate(toISODate(new Date(item.observedAt)))}</ThemedText>
+          <ThemedText type="meta" style={{ color: palette.textSecondary }}>{isIosApplePayReview(item) ? '' : `${t('genericUnverifiedIssuer')} · `}{shortDate(toISODate(new Date(item.observedAt)))}</ThemedText>
           <ExpiryNotice item={item} palette={palette} />
           <LocalAdvisory item={item} palette={palette} />
         </View>
@@ -325,7 +325,8 @@ function StepCard({ item, palette }: { item: ReviewEntry; palette: BandPalette }
   const instrument = instrumentLabel(universal ? item.event.instrument.value : item.instrument);
   const title = cardTitle(item);
   const date = shortDate(toISODate(new Date(item.observedAt)));
-  const meta = [sourceLabel(item), universal ? t('genericUnverifiedIssuer') : institutionLabel(item.institution), instrument, date]
+  // Apple Pay has no issuer text to verify; its source label says enough.
+  const meta = [sourceLabel(item), isIosApplePayReview(item) ? null : universal ? t('genericUnverifiedIssuer') : institutionLabel(item.institution), instrument, date]
     .filter(Boolean).join(' · ');
   const warned = reason === 'apple-pay-duplicate' || reason === 'notification-replay';
   return <View testID="review-step-card" style={[styles.stepCard, { backgroundColor: palette.sheet }]}>

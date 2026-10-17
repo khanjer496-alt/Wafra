@@ -53,6 +53,7 @@ import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { parsedObligationReviewEvent, parsedTransactionReviewEvent } from '@/lib/parsed-review-event';
 import {
+  MARKETS,
   detectLaunchMarketFromAlert,
   detectLaunchMarketFromSender,
   pinnedLedgerCurrencyCode,
@@ -169,6 +170,13 @@ const FOREGROUND_PARSE_YIELD_MS = 16;
 // Some Android providers insert one SMS twice. Collapse only byte-identical,
 // same-sender, consecutive inbox rows delivered less than one second apart.
 const EXACT_PROVIDER_DUPLICATE_MS = 1_000;
+/** [newer] is the provider row right after [older] (newest-first order). */
+const isExactProviderDuplicate = (newer: InboxSms, older: InboxSms): boolean =>
+  newer.id === older.id + 1 &&
+  newer.date >= older.date &&
+  newer.date - older.date <= EXACT_PROVIDER_DUPLICATE_MS &&
+  newer.address === older.address &&
+  newer.body === older.body;
 /**
  * A carrier can also deliver one SMS twice minutes apart — a retry after a
  * missed delivery report — and the provider stores both as ordinary rows with
@@ -207,6 +215,47 @@ export const hasCarrierDuplicateIdentity = (body: string): boolean =>
   CARRIER_DUPLICATE_DATETIME_RE.test(body) || CARRIER_DUPLICATE_BALANCE_RE.test(body);
 
 /**
+ * A UAE ADVERTISING SENDER. The UAE regulator requires promotional SMS to
+ * carry an "AD-" sender prefix ("AD-ADCB", "AD-noon"), and a transactional
+ * alert may not use one. In a real 30k-message UAE inbox none of 1,242 AD-
+ * messages was a movement, yet 212 offers ("earn up to AED 500 cashback...")
+ * reached Review. Such a message is ignored before parsing: no row, no
+ * Review. Elsewhere "AD-" is an operator/circle code on ordinary alerts
+ * (India's "AD-HDFCBK"), so the decision reads the SENDER, never the
+ * person's country: the name after the prefix must itself be a UAE launch
+ * bank or a UAE telco. Other advertisers keep their ordinary handling.
+ */
+const UAE_TELCO_SENDER = /^(?:e&(?:\s*money)?|etisalat|du|virgin\s*mobile(?:\s*uae)?)$/i;
+/** The launch bank sender patterns, anchored: the WHOLE name must be the bank's. */
+let uaeBankSenderNames: RegExp[] | null = null;
+export const isUaeAdvertisingSender = (sender: string | undefined): boolean => {
+  const raw = typeof sender === 'string' ? sender.trim() : '';
+  const named = /^AD-(.+)$/i.exec(raw)?.[1]?.trim();
+  if (!named) return false;
+  // Exact, never a prefix: "AD-HSBCIN" is HSBC India and "AD-ENBDIN" an
+  // Indian header, both real alerts; only "AD-HSBC", "AD-ENBD" are UAE.
+  uaeBankSenderNames ??= (MARKETS.find((market) => market.id === 'AE')?.banks ?? [])
+    .map((bank) => new RegExp(`^(?:${bank.re.source})$`, 'i'));
+  return uaeBankSenderNames.some((name) => name.test(named)) || UAE_TELCO_SENDER.test(named);
+};
+
+/**
+ * The facts the carrier fold decides on, one per delivered copy. The fold
+ * never needs the text itself, so the iPhone drain can supply these after its
+ * source has been cleared: `copyKey` is equal exactly for byte-identical
+ * bodies from one sender, and null when the body carries nothing two real
+ * charges could not share (hasCarrierDuplicateIdentity).
+ */
+export interface CarrierCopyFacts {
+  /** The sender, or an opaque key that is equal exactly when senders are. */
+  sender: string;
+  copyKey: string | null;
+  date: number;
+  /** The running balance the body states; read only when a cluster needs it. */
+  balance: () => number | undefined;
+}
+
+/**
  * Indexes of [rows] that are later carrier re-deliveries of an earlier row in
  * the same list: same sender, byte-identical identity-bearing body, within
  * CARRIER_DUPLICATE_MS of the copy that is kept. The EARLIEST copy of each
@@ -214,14 +263,12 @@ export const hasCarrierDuplicateIdentity = (body: string): boolean =>
  * the copy an earlier scan is most likely to have stored already; keeping the
  * later one would then import it beside the stored row.
  */
-export const carrierRedeliveryIndexes = (
-  rows: readonly { address: string; body: string; date: number }[],
-): Set<number> => {
+export const carrierRedeliveryIndexesOf = (rows: readonly CarrierCopyFacts[]): Set<number> => {
   const skipped = new Set<number>();
   const byKey = new Map<string, number[]>();
   rows.forEach((row, index) => {
-    if (typeof row.body !== 'string' || !hasCarrierDuplicateIdentity(row.body)) return;
-    const key = `${row.address}\u0000${row.body}`;
+    if (row.copyKey === null) return;
+    const key = `${row.sender}\u0000${row.copyKey}`;
     const bucket = byKey.get(key);
     if (bucket) bucket.push(index);
     else byKey.set(key, [index]);
@@ -231,19 +278,19 @@ export const carrierRedeliveryIndexes = (
   // that returned the balance to the same figure (credit 375 -> 1,275.93,
   // debit 375 -> 900.93, credit 375 -> 1,275.93 again), never a re-delivery.
   let balances: Map<string, { date: number; index: number; balance: number }[]> | null = null;
-  const balanceMovedBetween = (address: string, from: number, fromIndex: number, to: number, toIndex: number,
+  const balanceMovedBetween = (sender: string, from: number, fromIndex: number, to: number, toIndex: number,
     balance: number): boolean => {
     if (!balances) {
       balances = new Map();
       rows.forEach((row, index) => {
-        const stated = statedBalanceInText(row.body);
+        const stated = row.balance();
         if (stated === undefined) return;
-        const list = balances!.get(row.address) ?? [];
+        const list = balances!.get(row.sender) ?? [];
         list.push({ date: row.date, index, balance: stated });
-        balances!.set(row.address, list);
+        balances!.set(row.sender, list);
       });
     }
-    return (balances.get(address) ?? []).some((entry) =>
+    return (balances.get(sender) ?? []).some((entry) =>
       entry.balance !== balance &&
       (entry.date > from || (entry.date === from && entry.index > fromIndex)) &&
       (entry.date < to || (entry.date === to && entry.index < toIndex)));
@@ -252,16 +299,26 @@ export const carrierRedeliveryIndexes = (
     if (indexes.length < 2) continue;
     indexes.sort((a, b) => rows[a].date - rows[b].date || a - b);
     let kept = indexes[0];
-    const balance = statedBalanceInText(rows[kept].body);
+    const balance = rows[kept].balance();
     for (const index of indexes.slice(1)) {
       if (rows[index].date - rows[kept].date <= CARRIER_DUPLICATE_MS &&
-        !(balance !== undefined && balanceMovedBetween(rows[index].address, rows[kept].date, kept,
+        !(balance !== undefined && balanceMovedBetween(rows[index].sender, rows[kept].date, kept,
           rows[index].date, index, balance))) skipped.add(index);
       else kept = index;
     }
   }
   return skipped;
 };
+
+/** carrierRedeliveryIndexesOf over raw provider/receiver rows. */
+export const carrierRedeliveryIndexes = (
+  rows: readonly { address: string; body: string; date: number }[],
+): Set<number> => carrierRedeliveryIndexesOf(rows.map((row) => ({
+  sender: row.address,
+  copyKey: typeof row.body === 'string' && hasCarrierDuplicateIdentity(row.body) ? row.body : null,
+  date: row.date,
+  balance: () => statedBalanceInText(row.body),
+})));
 
 interface ParseYieldState {
   startedAt: number;
@@ -1281,7 +1338,24 @@ export async function scanInbox(
     inboxScannedCount += batch.length;
     scannedCount += batch.length;
     const pageYield = createParseYieldState();
-    const carrierCopies = carrierRedeliveryIndexes(batch);
+    // The two duplicate rules compose in one order. A run of adjacent
+    // sub-second provider copies is the exact-provider rule's: it keeps the
+    // run's NEWEST row (what every ledger stored before the carrier fold
+    // existed) and declines the rest below. The carrier fold then sees only
+    // those survivors and keeps the earliest of a re-delivery cluster.
+    // Folding first had skipped the newest copy while the exact rule declined
+    // the older one, so neither posted; re-admitting the newest beside an
+    // earlier carrier copy posted two.
+    const exactProviderCopies = new Set<number>();
+    for (let j = 1; j < batch.length; j++) {
+      if (isExactProviderDuplicate(batch[j - 1], batch[j])) exactProviderCopies.add(j);
+    }
+    if (previousInboxSms && batch.length > 0 && isExactProviderDuplicate(previousInboxSms, batch[0])) {
+      exactProviderCopies.add(0);
+    }
+    const carrierCandidates = batch.flatMap((row, index) => exactProviderCopies.has(index) ? [] : [index]);
+    const carrierCopies = new Set([...carrierRedeliveryIndexes(carrierCandidates.map((index) => batch[index]))]
+      .map((position) => carrierCandidates[position]));
     const pageStarted = tracing ? Date.now() : 0;
     let traceCheckpoint = pageStarted;
     for (let i = 0; i < batch.length; i++) {
@@ -1295,14 +1369,7 @@ export async function scanInbox(
       inboxBodies.add(bodyPrint(sms.body));
       const previous = previousInboxSms;
       previousInboxSms = sms;
-      if (
-        previous &&
-        previous.id === sms.id + 1 &&
-        previous.date >= sms.date &&
-        previous.date - sms.date <= EXACT_PROVIDER_DUPLICATE_MS &&
-        previous.address === sms.address &&
-        previous.body === sms.body
-      ) {
+      if (previous && isExactProviderDuplicate(previous, sms)) {
         declined.push({
           smsTs: sms.date,
           sender: sms.address,
@@ -1320,6 +1387,13 @@ export async function scanInbox(
       // and only here: no `declined` record, because that would ask the plan
       // to retire a stored row, and this fold must never remove one.
       if (carrierCopies.has(i)) {
+        if (parseYieldDue(pageYield, i + 1 < batch.length)) {
+          await yieldToUi();
+          resetParseYieldState(pageYield);
+        }
+        continue;
+      }
+      if (isUaeAdvertisingSender(sms.address)) {
         if (parseYieldDue(pageYield, i + 1 < batch.length)) {
           await yieldToUi();
           resetParseYieldState(pageYield);
@@ -1474,7 +1548,7 @@ export async function scanInbox(
         // carrier's, which differ by seconds — enough for the fingerprint
         // built from that timestamp to call them two different charges. The
         // body is the one thing both copies agree on exactly.
-        if (!inboxBodies.has(bodyPrint(sms.body))) {
+        if (!inboxBodies.has(bodyPrint(sms.body)) && !isUaeAdvertisingSender(sms.address)) {
           const worldwide = inspectWorldwide(sms.body, sms.address);
           const launchSenderMarket = detectLaunchMarketFromSender(sms.address);
           const p = launchSenderMarket

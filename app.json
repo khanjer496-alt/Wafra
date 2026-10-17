@@ -62,6 +62,82 @@
             "LSItemContentTypes": [
               "org.openxmlformats.spreadsheetml.sheet"
             ]
+          },
+          {
+            "CFBundleTypeName": "OFX statement",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "app.wafra.ios.ofx"
+            ]
+          },
+          {
+            "CFBundleTypeName": "QIF statement",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "app.wafra.ios.qif"
+            ]
+          },
+          {
+            "CFBundleTypeName": "MT940 statement",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "app.wafra.ios.mt940"
+            ]
+          }
+        ],
+        "UTImportedTypeDeclarations": [
+          {
+            "UTTypeIdentifier": "app.wafra.ios.ofx",
+            "UTTypeDescription": "OFX bank statement",
+            "UTTypeConformsTo": [
+              "public.data",
+              "public.text"
+            ],
+            "UTTypeTagSpecification": {
+              "public.filename-extension": [
+                "ofx",
+                "qfx"
+              ],
+              "public.mime-type": [
+                "application/x-ofx",
+                "application/vnd.intu.qfx"
+              ]
+            }
+          },
+          {
+            "UTTypeIdentifier": "app.wafra.ios.qif",
+            "UTTypeDescription": "QIF bank statement",
+            "UTTypeConformsTo": [
+              "public.data",
+              "public.text"
+            ],
+            "UTTypeTagSpecification": {
+              "public.filename-extension": [
+                "qif"
+              ],
+              "public.mime-type": [
+                "application/qif",
+                "application/x-qif"
+              ]
+            }
+          },
+          {
+            "UTTypeIdentifier": "app.wafra.ios.mt940",
+            "UTTypeDescription": "SWIFT MT940 statement",
+            "UTTypeConformsTo": [
+              "public.data",
+              "public.text"
+            ],
+            "UTTypeTagSpecification": {
+              "public.filename-extension": [
+                "sta",
+                "mt940",
+                "940"
+              ]
+            }
           }
         ],
         "LSSupportsOpeningDocumentsInPlace": false

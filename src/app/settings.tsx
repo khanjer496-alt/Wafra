@@ -1219,7 +1219,7 @@ export default function SettingsScreen() {
           <SettingsGroupTitle title={copy.privacyAndSecurity} palette={band} />
           <SettingsSwitchRow
             title={lockTitle}
-            subtitle={t('appLockDetail')}
+            subtitle={(biometricKind && copy.lockDetail[biometricKind]) || t('appLockDetail')}
             value={state.appLock}
             onChange={toggleAppLock}
             testID="settings-app-lock"

@@ -265,15 +265,16 @@ struct StageWafraLiveMessageIntent: AppIntent {
       case .disabled:
         await WafraLiveCaptureNotice.postIfDue()
         return .result(value: result.rawValue)
-      case .invalid:
-        throw WafraLiveCaptureIntentError.invalidMessage
-      case .capacityReached:
-        throw WafraLiveCaptureIntentError.captureCapacityReached
+      case .invalid, .capacityReached:
+        // The Message automation runs on every matching text. An error here
+        // makes Shortcuts show an error banner for an ordinary message, so an
+        // inadmissible text is ignored quietly; capacity drops are already
+        // counted for Wafra's capture status.
+        return .result(value: WafraLiveStageResult.ignored.rawValue)
       }
-    } catch let error as WafraLiveCaptureIntentError {
-      throw error
     } catch {
-      throw WafraLiveCaptureIntentError.stageFailed
+      // Storage unavailable (e.g. before the first unlock after a restart).
+      return .result(value: "failed")
     }
   }
 }
@@ -324,15 +325,16 @@ struct StageWafraLiveTextIntent: AppIntent {
       case .disabled:
         await WafraLiveCaptureNotice.postIfDue()
         return .result(value: result.rawValue)
-      case .invalid:
-        throw WafraLiveCaptureIntentError.invalidMessage
-      case .capacityReached:
-        throw WafraLiveCaptureIntentError.captureCapacityReached
+      case .invalid, .capacityReached:
+        // The Message automation runs on every matching text. An error here
+        // makes Shortcuts show an error banner for an ordinary message, so an
+        // inadmissible text is ignored quietly; capacity drops are already
+        // counted for Wafra's capture status.
+        return .result(value: WafraLiveStageResult.ignored.rawValue)
       }
-    } catch let error as WafraLiveCaptureIntentError {
-      throw error
     } catch {
-      throw WafraLiveCaptureIntentError.stageFailed
+      // Storage unavailable (e.g. before the first unlock after a restart).
+      return .result(value: "failed")
     }
   }
 }
@@ -408,8 +410,9 @@ struct CaptureWafraApplePayIntent: AppIntent {
   var amount: IntentCurrencyAmount?
   @Parameter(title: LocalizedStringResource("live.apple_pay.merchant.parameter", table: "WafraIntents", bundle: .main))
   var merchant: String?
-  /// Optional Wallet "Card or Pass" text, stored for on-device observation
-  /// only. Graphs that do not bind it (Apple Pay v1 as first shipped) leave it
+  /// Optional Wallet "Card or Pass" text. Kept on this device in the queued
+  /// record so a card the user linked to an account once can post on its
+  /// own. Graphs that do not bind it (Apple Pay v1 as first shipped) leave it
   /// nil and record the payment exactly as before. Never logged.
   @Parameter(title: LocalizedStringResource("live.apple_pay.card_or_pass.parameter", table: "WafraIntents", bundle: .main))
   var cardOrPass: String?
@@ -421,18 +424,24 @@ struct CaptureWafraApplePayIntent: AppIntent {
         cardOrPass: cardOrPass, eventId: UUID().uuidString, observedAt: Date()
       )
       switch result {
-      case .accepted: return .result(value: true)
+      case .accepted:
+        if let value = amount?.amount {
+          await WafraInstantAlert.postApplePay(amount: value, currency: amount?.currencyCode ?? "",
+            merchant: merchant, cardOrPass: cardOrPass)
+        }
+        return .result(value: true)
       case .ignored: return .result(value: false)
       case .disabled:
         await WafraLiveCaptureNotice.postIfDue()
         return .result(value: false)
-      case .invalid: throw WafraLiveCaptureIntentError.applePayInvalid
-      case .capacityReached: throw WafraLiveCaptureIntentError.captureCapacityReached
+      case .invalid, .capacityReached:
+        // A Wallet automation runs on every tap. An error here shows a
+        // Shortcuts failure banner after a purchase; capacity drops are
+        // already counted for Wafra's capture status.
+        return .result(value: false)
       }
-    } catch let error as WafraLiveCaptureIntentError {
-      throw error
     } catch {
-      throw WafraLiveCaptureIntentError.applePayFailed
+      return .result(value: false)
     }
   }
 }

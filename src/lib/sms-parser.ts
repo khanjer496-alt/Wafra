@@ -607,8 +607,30 @@ export interface ParsedCard {
  * repayments. Native worldwide fields preserve money roles and source spans;
  * uncertain ownership, ambiguous currency and non-completed events remain
  * unresolved. No additional full-history repair is requested.
+ *
+ * 68: retain explicit senderless own-card purchases in Review and distinguish
+ * the labelled Cr.Limit footer from the purchase principal in native previews.
+ * Future capture and the bounded recent reread use these corrected roles;
+ * no automatic posting policy or additional full-history backfill is added.
+ *
+ * 69: a dirham code glued to its figure ("used for AED29.05", ADCB) is market
+ * evidence for a record with no sender, as "AED 29.05" always was; a
+ * hyphen-joined field label ("Fee-AED2.38") is not. With a sender, iPhone capture now routes the launch grammar from the sender alone,
+ * as Android does (local-message-record.ts), and folds carrier re-deliveries
+ * (auto-import.ts carrierRedeliveryIndexesOf); Android keeps one copy of an
+ * adjacent provider duplicate that is also a carrier re-delivery. Also: a
+ * completed "Purchase amount of ... has been refunded" credit is deliberately
+ * "other", so it posts instead of waiting in income Review; a booking
+ * reference after a descriptor star ("AIRBNB * HMFFQR29BF") keeps the
+ * merchant; "CAREEM PAY TO <name>" is a person payment, not Transport; UAE
+ * "AD-" advertising senders are ignored on both platforms; and iPhone honours
+ * the unverified-format auto-add setting through Android's one policy. Future
+ * capture and the bounded recent reread only: PARSER_BACKFILL_VERSION stays
+ * 50: the Android loss (both of two adjacent copies) was three rows in a
+ * 30k-message inbox, too few to justify a full-history reread on every
+ * phone, and iPhone-captured rows keep no source text for a reread to reach.
  */
-export const PARSER_VERSION = 67;
+export const PARSER_VERSION = 69;
 /**
  * Historical-repair contract for already-saved data.
  *
@@ -1083,6 +1105,16 @@ const BILL_DUE_WORDS = /\bdue\s+(?:on|by|date)\b|\bdue\s+(?:\d{1,2}[/-]\d{1,2}[/
  */
 const HYPOTHETICAL_PAYMENT_RE =
   /\b(?:if|in\s+case)\b[^.\n]{0,48}?\balready\b[^.\n]{0,32}?\b(?:paid|settled|cleared|made|processed|deducted|debited)\b/gi;
+/**
+ * A LATER sentence that states no movement yet: a condition ("If cancelled,
+ * amount will be reversed") or a promise ("Any refund will be credited within
+ * 7 days", "Cashback of AED 2.50 will be credited to your account"). Its
+ * refund/credit words are not the direction of the purchase the first
+ * sentence completed. The leading sentence is never blanked, so "...has been
+ * reversed and will be refunded" keeps its own words.
+ */
+const FUTURE_FOOTER_SENTENCE_RE =
+  /(?<=[.!?][ \t]+)(?:if\b(?:[^.!?\n]|\.(?=\d))*|(?:[^.!?\n]|\.(?=\d))*\bwill\s+be\s+(?:refunded|reversed|credited)\b(?:[^.!?\n]|\.(?=\d))*)[.!?]?/gi;
 /** "To pay your bill, please visit ..." / "to settle the amount, call ..." */
 const PAYMENT_INSTRUCTION_RE =
   /\bto\s+(?:pay|settle|clear)\b[^.\n]{0,64}?(?:,\s*(?:please|kindly)\b|\bplease\b|\bkindly\b|\bvisit\b|\bcall\b|\blog\s*in\b|\bsms\b)[^.\n]{0,64}/gi;
@@ -3477,6 +3509,16 @@ function cleanDescriptor(name: string): string {
   // plain descriptor "THE VIOLE", so leaving the prefix on files one shop
   // under two names. Deliberately generic: the star is the separator every
   // acquirer uses, and listing gateways one at a time never caught up.
+  // ...unless what follows the star is the merchant's own BOOKING REFERENCE
+  // rather than a shop: "AIRBNB * HMFFQR29BF LONDON GBR" is Airbnb, and
+  // peeling it filed the stay as "HMFFQR29BF London" — a different title for
+  // every booking. A reference is one upper-case run of 6-12 letters and
+  // digits with at least two of each ("7ELEVEN" is a shop: one digit).
+  const starred = /^([A-Za-z][A-Za-z0-9.\-& ]{1,14}?)\s*\*\s*([A-Z0-9]{6,12})(?![A-Za-z0-9])/.exec(out);
+  if (starred && /\d[^\d]*\d/.test(starred[2]) && /[A-Z][^A-Z]*[A-Z]/.test(starred[2]) &&
+    (starred[1].match(/[A-Za-z]/g) ?? []).length >= 3) {
+    out = starred[1].trim();
+  }
   out = peelPrefix(out, /^[A-Za-z0-9][A-Za-z0-9.\-& ]{0,14}\*\s*/);
   // "SP ALL-CHARMS", "SP LUETTI 1980", "SP TODD SNYDER" — one acquirer's
   // literal prefix, UPPER-CASE only so a mixed-case name starting with "Sp"
@@ -6515,6 +6557,13 @@ function parseSmsInner(
   const purchaseRefund = raw.match(
     /\bpurchase(?:\s+(?:amount|amt))?\s+(?:of\s+)?(?:[A-Z]{3}|Dhs?)\s*[\d,.]+\s+at\s+(.+?)\s+on\s+your\s+(?:credit|debit|covered|prepaid)?\s*card\b[\s\S]{0,120}?\bhas\b[\s\S]{0,24}?\brefunded\b/i,
   );
+  // What the bank says HAPPENED to the purchase. "has not been refunded" is
+  // no movement, and a partial refund's money is not the purchase figure this
+  // branch reads; neither is a refund credit here (the refusal inspector may
+  // still offer it in Review). Only the clean completed form is understood.
+  const refundClause = purchaseRefund?.[0].match(/\bhas\b[\s\S]{0,24}?\brefunded\b$/i)?.[0] ?? '';
+  if (purchaseRefund && /\b(?:not|never|partial(?:ly)?)\b/i.test(refundClause)) return null;
+  const cleanRefund = /^has\s+been\s+(?:successfully\s+|fully\s+)?refunded$/i.test(refundClause.replace(/\s+/g, ' '));
   if (purchaseRefund) {
     const money = transactionMoney(raw);
     if (money) {
@@ -6532,7 +6581,11 @@ function parseSmsInner(
         snapshotFils,
         snapshotKind,
         categoryGuess: 'other',
-        categoryDeliberate: false,
+        // A completed refund is understood, not an unread credit — the same
+        // as every other refund grammar here. Left undeliberate, the
+        // income-review gate held every such Liv/ENBD refund in Review. Any
+        // other wording around "refunded" stays for Review, as before.
+        categoryDeliberate: cleanRefund,
         currency,
         reference,
         raw: source,
@@ -7379,7 +7432,7 @@ function parseSmsInner(
 
   // URLs carry misleading words ("sewapayment.tiny.us" is not a payment).
   // ...and a government-support deposit's usage note is not a movement.
-  const prose = blank(raw.replace(/https?:\/\/\S+/gi, ' '), AR_USAGE_NOTE_RE);
+  const prose = blank(blank(raw.replace(/https?:\/\/\S+/gi, ' '), AR_USAGE_NOTE_RE), FUTURE_FOOTER_SENTENCE_RE);
   // ...and so do the two clauses a reminder signs off with. See
   // HYPOTHETICAL_PAYMENT_RE: the direction WORDS read the body without them,
   // while every clause test below still reads `prose` in full.
@@ -7607,6 +7660,7 @@ function parseSmsInner(
   // but calling them "Card purchase" was wrong twice over, and a row that
   // reads "Transfer to Khalid Rashid" needs no category at all.
   let structuralMerchant = false;
+  let peerPaymentTitle = false;
   const channelTransfer = !isBillDue && type === 'expense' &&
     /\b(?:debited|deducted)\b/i.test(prose) &&
     /\b(?:for|towards)\s+(?:an?\s+)?(?:funds?\s+)?transfer\s+(?:through|via|using)\s+(?:(?:personal|business|corporate)\s+)?(?:internet|online|mobile|digital)\s+banking\b/i.test(prose) &&
@@ -7672,10 +7726,23 @@ function parseSmsInner(
     const named = raw.match(
       /\b(?:fastpay|instant|local|domestic|international|fund|mobile\s+banking)\s+transfer\s+to\s+([A-Za-z][A-Za-z .'\-]{2,40}?)\s*(?:[.,;]|\bif\b|$)/i,
     );
+    // Careem Pay sends money to a PERSON through the card: the descriptor
+    // "CAREEM PAY TO DHARAM" names the payee, and reading it as a Careem ride
+    // filed person-to-person payments as Transport. "CAREEM PAY SALIK" (a toll
+    // top-up, no "TO") is a purchase and stays one.
+    const careemPayPeer = raw.match(
+      /\bat\s+careem\s+pay\s+to\s+(?!careem\b)([A-Za-z][A-Za-z .'\-]{1,40}?)\s*\*?\s*(?:[.,;]|$|(?=\s+on\s+\d))/i,
+    );
     const namedPayee = completedNamed?.[1] ?? named?.[1];
     if (namedPayee) {
       merchant = `Transfer to ${namedPayee.trim().replace(/\s{2,}/g, ' ')}`;
       structuralMerchant = true;
+    } else if (careemPayPeer) {
+      merchant = `Transfer to ${titleCase(careemPayPeer[1].trim().replace(/\s{2,}/g, ' '))}`;
+      structuralMerchant = true;
+      // The category reads the title, not the body: "careem" in the body is
+      // the rail, and would file the payment as a ride.
+      peerPaymentTitle = true;
     } else if (/\btransfer\s+to\s+[A-Z]{2}[\dX·•]/i.test(raw)) {
       merchant = 'Bank transfer';
       structuralMerchant = true;
@@ -7808,7 +7875,7 @@ function parseSmsInner(
   // One event, three categories, decided by which street the machine stands
   // on. A withdrawal is cash leaving the account; what it is later spent on is
   // not in this message.
-  let titlePinned = false;
+  let titlePinned = peerPaymentTitle;
   // The structural own-account title decides the category, never the bank
   // and account words around it ("في بنك الانماء" read as a utility).
   if (arabicOwnAccountOutgoing) titlePinned = true;

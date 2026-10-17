@@ -290,6 +290,16 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       if (name === '@/lib/wallet-near-match') {
         return require('../build/wallet-near-match.js');
       }
+      // The Wallet-row predicate the iOS drain uses to keep a bank alert from
+      // repeating an Apple Pay purchase; pure, so always the shipping module.
+      if (name === '@/lib/dedupe') {
+        return require('../build/dedupe.js');
+      }
+      // The pure "may this be the same purchase" rule shared by Apple Pay
+      // auto-posting and the drain's bank-repeat guard.
+      if (name === '@/lib/apple-pay-card-links') {
+        return require('../build/apple-pay-card-links.js');
+      }
       if (name === '@/lib/parsed-review-event') {
         return require('../build/parsed-review-event.js');
       }
