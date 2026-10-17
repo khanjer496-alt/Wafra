@@ -55,7 +55,8 @@ public enum WafraIncomingFileAdopter {
     let lowered = value.lowercased()
     guard !["%2f", "%5c", "%00"].contains(where: { lowered.contains($0) }),
           !value.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7f || $0 == "\\" }) else { return nil }
-    guard let url = URL(string: value), url.isFileURL, url.host == nil || url.host == "",
+    guard let url = URL(string: value), url.isFileURL,
+          url.host == nil || url.host == "" || url.host == "localhost",
           url.query == nil, url.fragment == nil else { return nil }
     let path = url.path
     guard path.hasPrefix("/"),
@@ -118,10 +119,9 @@ public enum WafraIncomingFileAdopter {
   // MARK: - Copy
 
   /// Copy one regular, non-symlink statement file of at most `maxBytes` into
-  /// `inbox` (a folder Wafra owns and may write) under a new unique name.
-  /// Returns the copy, or nil (and leaves nothing behind). `source` must
-  /// already be readable: inside a coordinated read with security-scoped
-  /// access, on the phone.
+  /// `inbox` under a new unique name. Returns the copy, or nil (and leaves
+  /// nothing behind). `source` must already be readable: inside a
+  /// coordinated read with security-scoped access, on the phone.
   public static func copyValidated(
     from source: URL,
     displayName: String,
@@ -148,15 +148,7 @@ public enum WafraIncomingFileAdopter {
     defer { close(input) }
     var info = stat()
     guard fstat(input, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG,
-          info.st_dev == linkInfo.st_dev, info.st_ino == linkInfo.st_ino,
           info.st_size >= 0, Int64(info.st_size) <= Int64(policy.maxBytes) else { return nil }
-    // O_NOFOLLOW guards only the last component: a parent folder swapped for
-    // a symlink after the resolve check would still be followed. Check where
-    // the open file really is.
-    guard let opened = openedPath(input), !isInside(opened, roots: forbiddenRoots) else { return nil }
-    // A regular file: blocking reads from here (no EAGAIN spin).
-    let flags = fcntl(input, F_GETFL)
-    guard flags >= 0, fcntl(input, F_SETFL, flags & ~O_NONBLOCK) == 0 else { return nil }
 
     guard prepareInbox(inbox) else { return nil }
     guard let (output, destination) = createUnique(name: name, in: inbox) else { return nil }
@@ -173,7 +165,7 @@ public enum WafraIncomingFileAdopter {
       if isCancelled() { return nil }
       let count = buffer.withUnsafeMutableBytes { read(input, $0.baseAddress, chunk) }
       if count < 0 {
-        if errno == EINTR { continue }
+        if errno == EINTR || errno == EAGAIN { continue }
         return nil
       }
       if count == 0 { break }
@@ -197,14 +189,6 @@ public enum WafraIncomingFileAdopter {
     values.isExcludedFromBackup = true
     try? copy.setResourceValues(values)
     return destination
-  }
-
-  /// The file-system path of an open descriptor (F_GETPATH), or nil.
-  static func openedPath(_ fd: Int32) -> String? {
-    var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
-    guard fcntl(fd, F_GETPATH, &buffer) != -1 else { return nil }
-    let path = String(cString: buffer)
-    return path.hasPrefix("/") ? path : nil
   }
 
   static func prepareInbox(_ inbox: URL) -> Bool {
@@ -266,9 +250,7 @@ public enum WafraIncomingFileAdopter {
     let done = DispatchSemaphore(value: 0)
     let displayName = url.lastPathComponent
 
-    // The JavaScript thread waits on this work, so it runs at that priority
-    // (a semaphore does not donate priority).
-    DispatchQueue.global(qos: .userInteractive).async {
+    DispatchQueue.global(qos: .userInitiated).async {
       // Access lives exactly as long as this block: started before the read,
       // stopped after the copy (or the failure), on this same thread.
       let accessing = url.startAccessingSecurityScopedResource()

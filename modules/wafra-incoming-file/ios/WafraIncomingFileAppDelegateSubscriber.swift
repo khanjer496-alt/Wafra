@@ -8,25 +8,19 @@ import UIKit
 /// cannot regain it. Access is NOT started here: only the adoption the
 /// statement redirect asks for starts (and stops) it.
 public class WafraIncomingFileAppDelegateSubscriber: ExpoAppDelegateSubscriber {
-  /// Only a file outside Wafra's own containers (an Inbox copy is routed
-  /// without adoption) is kept, as one of the few most recent.
-  private func remember(_ url: URL) {
-    guard url.isFileURL,
-          !WafraIncomingFileAdopter.isInside(url.path, roots: wafraIncomingFileForbiddenRoots()) else { return }
-    WafraIncomingFileRegistry.shared.record(url)
-  }
-
   public func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
-    if let url = launchOptions?[UIApplication.LaunchOptionsKey.url] as? URL { remember(url) }
+    if let url = launchOptions?[UIApplication.LaunchOptionsKey.url] as? URL, url.isFileURL {
+      WafraIncomingFileRegistry.shared.record(url)
+    }
     // Ignored by ExpoAppDelegateSubscriberManager.
     return false
   }
 
   public func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
-    remember(url)
+    if url.isFileURL { WafraIncomingFileRegistry.shared.record(url) }
     // Never claim the URL: AppDelegate hands it to React Native's linking
     // (and so to redirectSystemPath) only when no subscriber returns true.
     return false
