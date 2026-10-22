@@ -1,11 +1,12 @@
-// Worldwide bank-alert coverage, measured through the shipping capture paths.
+// Synthetic worldwide bank-alert regression coverage at shipping boundaries.
 //
-// scripts/universal-launch-eval/evaluate.cjs drives LaunchAlertSession the way
-// Android SMS capture and the iPhone History import do, for alerts outside the
-// UAE/Saudi launch grammar. This suite turns its measurements into a gate:
+// Android measures the LaunchAlertSession seam, not its collector/planner;
+// iPhone History executes parseHistoricalMessageRecords with a v1 envelope.
+// No final ledger mutation, bank-wide coverage, or device delivery is proved.
+// This suite turns those accepted-record measurements into a gate:
 //
-//  - corpus/ and holdout/ rows may MISS (the alert waits in Review), but none
-//    may be booked when it should not be, and none may be booked with the
+//  - corpus/ and holdout/ rows may MISS, but none may be accepted when it
+//    should not be, and none may be accepted with the
 //    wrong amount, currency or direction. Recall may not fall below the
 //    recorded floor.
 //  - regressions/ rows pin individual fixes and their negative controls:
@@ -42,14 +43,20 @@ for (const set of ['corpus', 'holdout']) {
   const ids = rows.map((row) => row.id);
   ok(`${set}: row ids are unique`, new Set(ids).size === ids.length,
     ids.filter((id, i) => ids.indexOf(id) !== i));
+  ok(`${set}: every evaluation row is explicitly labelled synthetic`,
+    rows.every((row) => row.provenance === 'synthetic'),
+    rows.filter((row) => row.provenance !== 'synthetic').map((row) => row.id));
   const { results, tally } = evaluateRows(rows);
   // A ratchet, not an allowance: floors.json names the rows the parser still
   // books wrongly. Anything else that is unsafe fails, and a listed row that
   // has been fixed must leave the list so it can never silently come back.
   const known = new Set(floors.knownUnsafe?.[set] ?? []);
   const bad = unsafe(results);
-  const fresh = bad.filter((r) => !known.has(`${r.id}/${r.path}`));
-  ok(`${set}: no alert is booked when it must not be, or with the wrong amount, currency or direction`,
+  // The imported baseline's seven entries are wrong-value/type readings.
+  // A listed row becoming an unexpected acceptance or runtime error is a
+  // worsening, not an allowance inherited from its id.
+  const fresh = bad.filter((r) => !known.has(`${r.id}/${r.path}`) || r.verdict !== 'wrong');
+  ok(`${set}: no new unsafe acceptance, wrong money/direction, or runtime error`,
     fresh.length === 0, fresh.slice(0, 20).map(brief));
   const stillBad = new Set(bad.map((r) => `${r.id}/${r.path}`));
   const fixed = [...known].filter((key) => !stillBad.has(key));
@@ -58,8 +65,8 @@ for (const set of ['corpus', 'holdout']) {
   for (const [name, t] of Object.entries(tally)) {
     const recall = t.positives ? t.posted / t.positives : 1;
     const floor = floors[set]?.[name];
-    console.log(`  ${set}/${name}: posted ${t.posted}/${t.positives} (${(100 * recall).toFixed(1)}%), ` +
-      `held ${t.held}/${t.negatives}, soft ${t.soft}`);
+    console.log(`  ${set}/${name}: accepted positives ${t.posted}/${t.positives} (${(100 * recall).toFixed(1)}%), ` +
+      `no accepted record ${t.held}/${t.negatives}, exact optional obligations ${t.acceptedObligations}, soft ${t.soft}`);
     if (typeof floor === 'number') {
       ok(`${set}/${name}: recall ${(100 * recall).toFixed(1)}% stays at or above the ${(100 * floor).toFixed(1)}% floor`,
         recall + 1e-9 >= floor, { posted: t.posted, positives: t.positives });
@@ -76,8 +83,9 @@ for (const set of ['corpus', 'holdout']) {
   const { results } = evaluateRows(rows);
   for (const r of results) {
     const row = rows.find((x) => x.id === r.id);
-    const want = row.expect.post ? `books ${row.expect.amountMinor} ${row.ledger} ${row.expect.type ?? ''}`.trim() : 'is not booked';
-    ok(`${r.id} [${r.path}] ${want}`, r.verdict === 'pass' && !(row.expect.merchant && r.soft?.startsWith('merchant')),
+    const expect = row.expectByPath?.[r.path] ?? row.expect;
+    const want = expect.post ? `accepts ${expect.amountMinor} ${row.ledger} ${expect.type ?? ''}`.trim() : 'has no unexpected accepted record';
+    ok(`${r.id} [${r.path}] ${want}`, r.verdict === 'pass' && !(expect.merchant && r.soft?.startsWith('merchant')),
       brief(r));
   }
 }

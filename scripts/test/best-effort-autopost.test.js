@@ -13,6 +13,7 @@ const { createLaunchAlertSession } = require('./build/launch-alert-parser');
 const { inspectUniversalBankEvent } = require('./build/universal-parser');
 const { buildImportPlan } = require('./build/import-plan');
 const { parseHistoricalMessageRecords } = require('./build/historical-import');
+const { inspectSourceFreeRefusedAlert } = require('./build/auto-import');
 const { isValidBackupState } = require('./build/backup-validation');
 const markets = require('./build/markets');
 const i18n = require('./build/i18n');
@@ -403,9 +404,13 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
     /resolveBestEffort\(transaction\.id, 'confirm'\)/.test(sheet) && /resolveBestEffort\(transaction\.id, 'undo'\)/.test(sheet));
   ok('Transactions can filter to auto-added rows', /bestEffortOnly: autoAddedActive/.test(read('src/app/transactions.tsx')));
   ok('Settings exposes the toggle', /autoAddedSettingTitle/.test(read('src/app/settings.tsx')));
-  ok('iOS live capture builds its sessions with the policy disabled',
-    /createLaunchAlertSession\(\{[\s\S]{0,300}?bestEffort: \{ enabled: false, country: null \}/.test(read('src/lib/ios-local-capture.ts')) &&
-      !/parseUnproven/.test(read('src/lib/ios-local-capture.ts')) && !/parseUnproven/.test(read('src/lib/local-message-record.ts')));
+  // The same Settings switch governs iPhone live capture (behaviour is pinned
+  // in repair/ios-best-effort-capture.test.cjs): the drain reads the setting,
+  // and only the one unproven path (parseUnproven) can post such a row.
+  ok('iOS live capture builds its sessions from the persisted setting',
+    /createLaunchAlertSession\(\{[\s\S]{0,600}?bestEffort: \{ enabled: bestEffortAutoPostEnabled\(\), country: getActiveCountry\(\) \}/.test(read('src/lib/ios-local-capture.ts')) &&
+      !/bestEffort: \{ enabled: (?:true|false)/.test(read('src/lib/ios-local-capture.ts')) &&
+      (read('src/lib/local-message-record.ts').match(/\.parseUnproven\(/g) ?? []).length === 1);
   ok('the killed-process Android wake mirrors the persisted setting before parsing',
     /function applyLedgerContext[\s\S]*?setBestEffortAutoPostEnabled\(state\.bestEffortAutoPost\)[\s\S]*?return true;/
       .test(read('src/lib/android-live-background.ts')));
@@ -503,13 +508,21 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
     ok('a worldwide salary is income, never a transfer kept out of Income',
       salary?.type === 'income' && salary.categoryGuess === 'salary' && salary.transferHint === false, salary);
   }
-  // Worldwide card statements become the card's bill; card payments settle it.
+  // Unverified worldwide statements stay typed Review; marked card payments
+  // retain the separate settlement path.
   {
-    // A statement naming no card number is still a card statement; the import
-    // planner attaches it only to the one eligible card (as on the Gulf path).
-    const cardless = worldwide('USD', 'US', '24273', 'Chase: Your credit card statement is ready. Statement balance $1,234.56, minimum payment $35.00 due 10/25/2026.');
-    ok('a cardless credit-card statement is a statement, never spending',
-      cardless?.kind === 'cardStatement' && cardless.card === null && cardless.amountFils === 123456 && cardless.type === 'expense', cardless);
+    const body = 'Chase: Your credit card statement is ready. Statement balance $1,234.56, minimum payment $35.00 due 10/25/2026.';
+    const cardless = worldwide('USD', 'US', '24273', body);
+    const reader = session('USD', 'US');
+    const review = inspectSourceFreeRefusedAlert({ source: body, sender: '24273', session: reader,
+      existingInspection: reader.inspect(body, '24273'), observedAt: Date.parse('2026-10-02T12:00:00Z'), channel: 'inbox' });
+    const event = review.kind === 'review' && review.candidate.kind === 'universal' ? review.candidate.event : null;
+    ok('a cardless statement stays typed Review with its ambiguous money and known deadline',
+      cardless === null && event?.family === 'statement' && event.instrument.value === null &&
+        event.statementTotal.evidence === 'ambiguous' &&
+        event.statementTotal.alternatives.some(m => m.currency === 'USD' && m.minorUnits === '123456') &&
+        event.minimumDue.alternatives.some(m => m.currency === 'USD' && m.minorUnits === '3500') &&
+        event.dueDate.value === '2026-10-25', review);
   }
   for (const [currency, cc, sender, body, expect] of [
     ['USD', 'US', 'Chase', 'Chase: Your credit card ending 1005 statement is ready. Statement balance $1,234.56, minimum payment $35.00 due 10/25/2026.',
@@ -524,6 +537,22 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
       { kind: 'cardPayment', amountFils: 2345600, side: 'receipt', last4: '5678' }],
   ]) {
     const row = worldwide(currency, cc, sender, body);
+    if (expect.kind === 'cardStatement') {
+      const reader = session(currency, cc);
+      const review = inspectSourceFreeRefusedAlert({ source: body, sender, session: reader,
+        existingInspection: reader.inspect(body, sender), observedAt: Date.parse('2026-10-02T12:00:00Z'), channel: 'inbox' });
+      const event = review.kind === 'review' && review.candidate.kind === 'universal' ? review.candidate.event : null;
+      // Barclaycard labels this figure only as Balance. Preserve that role;
+      // Review must not silently promote it into an explicit statement total.
+      const figure = cc === 'GB' ? event?.balance : event?.statementTotal;
+      ok(`${cc}: unverified statement retains native facts in typed Review`,
+        row === null && event?.family === 'statement' &&
+          figure?.value?.minorUnits === String(expect.amountFils) && figure.value.currency === currency &&
+          event.minimumDue.value?.minorUnits === String(expect.minDueFils) &&
+          event.instrument.value?.kind === 'card' && event.instrument.value.last4 === expect.last4 &&
+          event.dueDate.value === expect.date && (cc !== 'GB' || event.statementTotal.value === null), review);
+      continue;
+    }
     ok(`${cc}: ${expect.kind} — ${body.slice(0, 52)}…`,
       row?.kind === expect.kind && row.amountFils === expect.amountFils && row.currency === currency &&
         row.card?.last4 === expect.last4 && row.card?.kind === 'credit' &&

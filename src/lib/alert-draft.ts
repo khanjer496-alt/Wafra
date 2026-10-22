@@ -80,6 +80,13 @@ export function normalizeAlertText(source: string): string {
     else if (character === '\u00a0' || character === '\u2007' || character === '\u202f') replaced = ' ';
     else if ((code >= 0x200e && code <= 0x200f) || (code >= 0x202a && code <= 0x202e) ||
       (code >= 0x2066 && code <= 0x2069)) replaced = ' ';
+    // Some bank alerts contain shaped Arabic letters. Fold only one-to-one
+    // compatibility forms: ligatures expanding to several letters must stay
+    // untouched so every evidence span still indexes the original source.
+    else if ((code >= 0xfb50 && code <= 0xfdff) || (code >= 0xfe70 && code <= 0xfeff)) {
+      const folded = character.normalize('NFKC');
+      if (folded.length === character.length) replaced = folded;
+    }
     out += replaced;
   }
   return out;

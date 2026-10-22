@@ -59,18 +59,24 @@ const hasSetupCheckBranch = IOS_LOCAL_CAPTURE_SHORTCUT_URL !== null &&
   IOS_LOCAL_CAPTURE_SHORTCUT_URL !== 'https://www.icloud.com/shortcuts/9a85d5f8b44d416181a76e68fcdf569d' &&
   process.env.EXPO_PUBLIC_WAFRA_SHORTCUT_SETUP_CHECK_VERSION === '1';
 
+/** Callback correlation only; native setup proof remains the source of readiness. */
+export const isIosCaptureAttemptId = (value: unknown): value is string =>
+  typeof value === 'string' && /^[A-Za-z0-9_-]{16,80}$/.test(value);
+
 /**
  * Bundled v3's no-input branch records only its versioned setup proof and stops.
  * Use that path: the marker/type-comparison path returned errors on iOS 26.1
  * even after permission was granted, while the no-input native proof worked.
  * Older published shares retain their existing marker opt-in contract.
  */
-export function iosLocalCaptureTestUrl(fromOnboarding = false, bundled = false): string {
+export function iosLocalCaptureTestUrl(fromOnboarding = false, bundled = false, attemptId?: string): string {
+  // Never append caller-supplied URL syntax to the return route.
+  if (attemptId !== undefined && !isIosCaptureAttemptId(attemptId)) throw new Error('invalid_capture_attempt');
   const callback = (result: 'success' | 'cancel' | 'error') =>
     encodeURIComponent(
       `wafra://ios-setup?shortcutResult=${result}${
         fromOnboarding ? '&fromOnboarding=1' : ''
-      }`,
+      }${attemptId ? `&shortcutAttempt=${attemptId}` : ''}`,
     );
 
   return `shortcuts://x-callback-url/run-shortcut?name=${encodeURIComponent(

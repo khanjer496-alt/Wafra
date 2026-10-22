@@ -52,6 +52,8 @@ export interface StatementImportCoverage {
 
 export interface PdfImportAccepted {
   statementImportId?: string;
+  /** Every id the relay knows for this file on this device (first read, current re-read). */
+  statementImportIds?: string[];
   acceptedRows: number;
   /** Date-led money lines the relay would not read; 0 from a relay that predates the field. */
   rejectedRows: number;
@@ -70,6 +72,8 @@ export interface PdfImportAccepted {
 
 export interface CsvImportAccepted {
   statementImportId?: string;
+  /** Every id the relay knows for this file on this device (first read, current re-read). */
+  statementImportIds?: string[];
   acceptedRows: number;
   rejectedRows: number;
   totalRows: number;
@@ -106,7 +110,9 @@ export type CloudImportErrorCode =
   | 'pdf_damaged'
   | 'pdf_encryption_unsupported'
   | 'invalid_xlsx'
-  /** Client-side only: the relay does not advertise this file's type. */
+  /** A structured statement file (OFX, QIF, camt, MT940) that is malformed. */
+  | 'invalid_statement_file'
+  /** The relay does not advertise or read this file's type. */
   | 'unsupported_file_type'
   | 'unsupported_statement_format'
   | 'ambiguous_card_signs'
@@ -120,10 +126,25 @@ export type CloudImportErrorCode =
   | 'service'
   | 'unexpected';
 
+/**
+ * What a refusal of a different reading names: the earlier read of the same
+ * file (so the phone can see whether it holds any of its rows) and the
+ * day/month order it was read with.
+ */
+export interface StatementConflictDetail {
+  statementImportId?: string;
+  /** Every id the relay knows for this file on this device. */
+  statementImportIds?: string[];
+  previousDateOrder?: 'day-first' | 'month-first';
+  /** Why the readings differ: another day/month order or currency, a newer parser, or not recorded. */
+  reason?: 'options' | 'parser' | 'unknown';
+}
+
 export class CloudImportError extends Error {
   constructor(
     readonly code: CloudImportErrorCode,
     readonly status?: number,
+    readonly detail?: StatementConflictDetail,
   ) {
     super(code);
     this.name = 'CloudImportError';
@@ -346,6 +367,12 @@ function parseStatementImportId(value: unknown): string | undefined | null {
   return value === undefined ? undefined : typeof value === 'string' && /^[a-f0-9]{32}$/.test(value) ? value : null;
 }
 
+/** Optional list of statement ids; malformed entries make the whole list absent. */
+function parseStatementImportIds(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 8) return undefined;
+  return value.every((id) => typeof id === 'string' && /^[a-f0-9]{32}$/.test(id)) ? [...value] as string[] : undefined;
+}
+
 export function parsePdfImportAccepted(value: unknown): PdfImportAccepted | null {
   const body = object(value);
   const statementImportId = parseStatementImportId(body?.statementImportId);
@@ -367,8 +394,10 @@ export function parsePdfImportAccepted(value: unknown): PdfImportAccepted | null
   const cardSignRowsSkipped = cardSignSkips(body.cardSignRowsSkipped, rejectedRows);
   const alreadyProcessed = optionalFlag(body.alreadyProcessed);
   if (cardSignRowsSkipped === null || alreadyProcessed === null) return null;
+  const statementImportIds = parseStatementImportIds(body.statementImportIds);
   return {
     ...(statementImportId ? { statementImportId } : {}),
+    ...(statementImportIds ? { statementImportIds } : {}),
     acceptedRows: body.acceptedRows, rejectedRows, totalRows, pages: body.pages, coverage, cardSignRowsSkipped,
     alreadyProcessed,
   };
@@ -401,8 +430,10 @@ export function parseCsvImportAccepted(value: unknown): CsvImportAccepted | null
   const cardSignRowsSkipped = cardSignSkips(body.cardSignRowsSkipped, body.rejectedRows);
   const alreadyProcessed = optionalFlag(body.alreadyProcessed);
   if (cardSignRowsSkipped === null || alreadyProcessed === null) return null;
+  const statementImportIds = parseStatementImportIds(body.statementImportIds);
   return {
     ...(statementImportId ? { statementImportId } : {}),
+    ...(statementImportIds ? { statementImportIds } : {}),
     acceptedRows: body.acceptedRows,
     rejectedRows: body.rejectedRows,
     totalRows: body.totalRows,
@@ -444,6 +475,8 @@ const KNOWN_ERRORS = new Set<CloudImportErrorCode>([
   'pdf_damaged',
   'pdf_encryption_unsupported',
   'invalid_xlsx',
+  'invalid_statement_file',
+  'unsupported_file_type',
   'unsupported_statement_format',
   'ambiguous_card_signs',
   'ambiguous_dates',
@@ -458,7 +491,21 @@ const KNOWN_ERRORS = new Set<CloudImportErrorCode>([
 /** Convert HTTP status + safe JSON error code into a finite UI state. */
 export function pdfImportError(status: number, value: unknown): CloudImportError {
   if (status === 401) return new CloudImportError('unauthorized', status);
-  const code = object(value)?.error;
+  const body = object(value);
+  const code = body?.error;
+  if (code === 'statement_options_conflict') {
+    const statementImportId = parseStatementImportId(body?.statementImportId);
+    const order = body?.previousDateOrder;
+    const reason = body?.reason;
+    const statementImportIds = parseStatementImportIds(body?.statementImportIds);
+    const detail: StatementConflictDetail = {
+      ...(typeof statementImportId === 'string' ? { statementImportId } : {}),
+      ...(statementImportIds ? { statementImportIds } : {}),
+      ...(order === 'day-first' || order === 'month-first' ? { previousDateOrder: order } : {}),
+      ...(reason === 'options' || reason === 'parser' || reason === 'unknown' ? { reason } : {}),
+    };
+    return new CloudImportError('statement_options_conflict', status, detail);
+  }
   if (typeof code === 'string' && KNOWN_ERRORS.has(code as CloudImportErrorCode)) {
     return new CloudImportError(code as CloudImportErrorCode, status);
   }

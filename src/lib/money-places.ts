@@ -27,8 +27,9 @@ export interface CardUsage {
 /**
  * How much of a credit card's limit is in use, or null when that is not known.
  *
- * Only ever drawn with a limit the USER entered — banks quote headroom, never
- * the limit (types.ts). "Used" then comes from a bank figure: the quoted
+ * Only ever drawn with a limit the person entered or a card statement printed
+ * — alerts quote headroom, never the limit (types.ts creditLimitFils,
+ * importedCreditLimit). "Used" then comes from a bank figure: the quoted
  * outstanding balance, or limit minus the quoted available credit. With
  * neither, there is no bar, rather than one built from captured spending.
  */

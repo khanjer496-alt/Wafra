@@ -80,9 +80,16 @@ export interface Account {
    * limit") but never the limit itself, and some redact the figure entirely
    * ("Avl Bal AED ····9235.93"), which we refuse to read because the leading
    * digits are gone. Knowing the limit recovers headroom for those cards:
-   * limit − outstanding, with no guessing.
+   * limit − outstanding, with no guessing. A card statement that prints the
+   * limit also sets it (see importedCreditLimit).
    */
   creditLimitFils?: number;
+  /**
+   * The limit a card statement last set, and its receipt clock. A newer
+   * statement may replace `creditLimitFils` only while it still equals this
+   * figure: once the person edits the limit, statements never overwrite it.
+   */
+  importedCreditLimit?: { fils: number; ts: number };
   /** Timestamp (ms) of the SMS the snapshot came from — newest wins. */
   snapshotTs?: number;
   /**
@@ -270,6 +277,13 @@ export interface Transaction {
   statementRowIndex?: number;
   /** Durable one-to-one overlaps with other statement file occurrences (max 64). */
   statementOccurrences?: StatementOccurrence[];
+  /**
+   * Canonical identities of other Messages this row already accounts for: the
+   * second alert of a transfer the bank texted twice (dedupe.ts
+   * transferAlerts), dropped at import. Technical identity only (max 8); a
+   * re-read of that Message stays dropped however the row is later edited.
+   */
+  absorbedSmsKeys?: string[];
   /** Canonical issuer stated by a PDF/CSV, retained even without account digits. */
   statementBank?: string;
   captureInstrument?: CaptureInstrument;
@@ -351,6 +365,12 @@ export interface Transaction {
    * absent, which is the correct answer for them — nobody retyped their title.
    */
   titleEdited?: boolean;
+  /**
+   * The title came from confirming a Review item (the person accepted what
+   * the alert said), not from typing over a parsed title. Duplicate matching
+   * then does not treat the row as renamed.
+   */
+  reviewConfirmed?: boolean;
   /**
    * Raw SMS body, kept ONLY when the parser wasn't confident (generic title
    * or fallback category) so the user can report unrecognized formats from
@@ -795,7 +815,22 @@ export interface StatementCoverageEntry {
   format: 'pdf' | 'csv';
 }
 
+/** One remembered Wallet card → account choice (see AppState.applePayCardLinks). */
+export interface ApplePayCardLink {
+  /** Wallet's sanitized "Card or Pass" name, exactly as captured. */
+  cardOrPass: string;
+  accountId: string;
+  linkedAt: number;
+  /**
+   * Confirmed on two different accounts: Wallet names are not unique, so this
+   * card's purchases always ask in Review until the person forgets it.
+   */
+  ambiguous?: true;
+}
+
 export interface AppState {
+  /** Device-keyed source-free learned formats; only encrypted local state retains them. */
+  privateAlertFormats?: import('@/lib/private-alert-formats').PrivateAlertFormatStore;
   /** Private, ledger-local names; IDs contain no user text. */
   customCategories?: CustomCategory[];
   hydrated: boolean;
@@ -840,6 +875,12 @@ export interface AppState {
   accountHints: Record<string, string>;
   /** User-confirmed Google Play packages learned from notification Review. */
   trustedNotificationPackages: string[];
+  /**
+   * iPhone Apple Pay: Wallet "Card or Pass" name → the account the user chose
+   * when confirming that card's first captured purchase. On device only:
+   * never exported in a backup. Optional so older ledgers need no migration.
+   */
+  applePayCardLinks?: ApplePayCardLink[];
   /** Legacy provider or scoped service keys marked as NOT recurring. */
   notSubscriptions: string[];
   /**
@@ -985,6 +1026,8 @@ export interface AppState {
 export interface TxHealUpdate {
   /** Technical source claims; never replaces a user-facing financial field. */
   statementOccurrences?: StatementOccurrence[];
+  /** Technical, appended (see Transaction.absorbedSmsKeys); applies to edited rows too. */
+  absorbedSmsKeys?: string[];
   /** Exact original Message proof for the reproduced transposed receipt date. */
   sourceDateCorrection?: {
     from: string;
@@ -1073,6 +1116,11 @@ export interface ImportBatchInput {
    * fallback, while a later debit-worded purchase never downgrades it.
    */
   cardTypes?: Record<string, 'credit' | 'debit'>;
+  /**
+   * accountRef → the credit limit a card statement printed, and when (its
+   * receipt clock). Optional: older planners never send it.
+   */
+  creditLimits?: Record<string, { fils: number; ts: number }>;
   /** Supported local currency explicitly observed in this bank-alert batch. */
   /** ISO ledger currency proven by the imported rows, independent of parser country pack. */
   confirmedLedgerCurrency?: string;

@@ -935,7 +935,7 @@ export default function AddTransactionScreen() {
       testID="add-transaction-screen"
       nav={{
         close: () => router.back(),
-        title: tUi(reviewItem ? 'genericReviewTitle' : 'newTransaction'),
+        title: tUi(applePayItem ? 'applePayReviewHeader' : reviewItem ? 'genericReviewTitle' : 'newTransaction'),
       }}
       scrollProps={{ keyboardShouldPersistTaps: 'handled' }}
       contentStyle={styles.content}

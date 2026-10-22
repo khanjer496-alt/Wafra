@@ -534,4 +534,50 @@ for (const [label, source, sender] of [
     result.parsed.type === 'expense', JSON.stringify(result));
 }
 
+// A purchase REFUND is money back, whatever adverb the bank adds. The
+// "successfully" wording sent the alert to the semantic reader, which took
+// the opening "Purchase" for a card purchase and booked an EXPENSE; a refund
+// that "will be refunded" is not money yet and must never post as spending.
+// Synthetic bodies in the Liv/ENBD purchase-refund shape; the clean form is the
+// paired control and every variant must agree with it on amount and card.
+{
+  const { shouldReviewParsedIncome } = require('./build/auto-import.js');
+  const P = 'Purchase amount of AED 120.50 at NOON ECOMMERCE on your Credit Card ending 1234 ';
+  const session = () => createLaunchAlertSession({ overrides: {}, pinnedCurrency: 'AED', activeMarket: 'AE' });
+  const posted = (source) => { const s = session(); return s.parse(source, 'Liv', s.inspect(source, 'Liv'), 'AE', Date.parse('2026-10-14T10:00:00Z')); };
+  const clean = posted(P + 'has been refunded to your card. Avl Limit is AED 9,880.00');
+  ok('control: the clean purchase refund posts as a refund credit',
+    clean?.type === 'income' && clean.amountFils === 12050 && !shouldReviewParsedIncome(clean), JSON.stringify(clean));
+  for (const tail of ['has been successfully refunded. Available limit is AED 9,880.00', 'has been successfully refunded.',
+    'has been fully refunded to your card. Avl Limit is AED 9,880.00']) {
+    const row = posted(P + tail);
+    ok(`"${tail.slice(0, 32)}" is the same refund credit, never an expense`,
+      row?.kind === 'transaction' && row.type === 'income' && row.amountFils === clean.amountFils &&
+        row.merchant === clean.merchant && row.card?.last4 === '1234' && !shouldReviewParsedIncome(row),
+      JSON.stringify(row));
+  }
+  for (const tail of ['has been reversed and will be refunded.', 'has been reversed and will be refunded within 5 working days.',
+    'has been successfully reversed and will be credited back to your card.']) {
+    const row = posted(P + tail);
+    ok(`"${tail.slice(0, 36)}" is never a posted expense, nor auto-posted income`,
+      row === null || (row.type === 'income' && shouldReviewParsedIncome(row)), JSON.stringify(row));
+  }
+  // A completed purchase with a conditional or future footer posts as the
+  // purchase it is (HEAD posted the first as an expense, the other two as
+  // income); the pending-refund rule above must not take it to Review.
+  for (const [body, amountFils] of [
+    ['Purchase of AED 120.50 at NOON with Credit Card ending 1234. If cancelled, amount will be reversed.', 12050],
+    ['AED 120.50 spent at NOON on your Credit Card ending 1234. Avl Limit AED 9,880.00. Any refund will be credited within 7 days.', 12050],
+    ['Purchase of AED 50.00 at TALABAT with Debit Card ending 1234. Avl Bal AED 1,000.00. Cashback of AED 2.50 will be credited to your account.', 5000],
+  ]) {
+    const row = posted(body);
+    ok(`a purchase with a footer posts as an expense: ${body.slice(50, 90)}`,
+      row?.type === 'expense' && row.amountFils === amountFils, JSON.stringify(row));
+  }
+  // Paired negative: a real card purchase that merely mentions refunds stays a purchase.
+  const purchase = posted('Purchase of AED 120.50 with Credit Card ending 1234 at NOON ECOMMERCE. Avl Limit is AED 9,880.00');
+  ok('control: an ordinary purchase is still an expense', purchase?.type === 'expense' && purchase.amountFils === 12050,
+    JSON.stringify(purchase));
+}
+
 console.log(`\nbank-alert-interpreter: ${pass} passed, 0 failed`);

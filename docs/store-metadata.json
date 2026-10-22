@@ -15,7 +15,7 @@
       "AE",
       "SA"
     ],
-    "reason": "Wafra's ledger and manual entry are global. A first manual entry requires an explicit supported ISO ledger currency. Automatic bank-alert posting remains limited to explicitly tested market/bank formats; unfamiliar global alerts are review-only or manual rather than guessed."
+    "reason": "Wafra's ledger and manual entry are global. A first manual entry requires an explicit supported ISO ledger currency. AE/SA remain the launch-tested automatic bank-alert packs. Android and iPhone Messages History can auto-add strongly grounded completed movements from unverified formats under the default best-effort setting, marked Auto-added — check. Other eligible alerts, including unfamiliar live iPhone alerts, wait in Review. This is not verified worldwide bank coverage."
   },
   "positioning": {
     "launch": "Private money tracking for people anywhere, with manual entry and optional supported imports. No bank login is required.",

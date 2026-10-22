@@ -53,7 +53,8 @@ const execute = (relative, dependencies = {}) => {
     output,
   )(
     (request) => dependencies[request] ??
-      (request === './ios-capture-health' ? execute('src/lib/ios-capture-health.ts') :
+      (request === 'expo-crypto' ? { randomUUID: () => 'ui-capture-attempt-1' } :
+        request === './ios-capture-health' ? execute('src/lib/ios-capture-health.ts') :
         request === './ios-setup-availability' || request === '@/lib/ios-setup-availability'
           ? execute('src/lib/ios-setup-availability.ts') : {}),
     loaded,
@@ -152,7 +153,7 @@ eq('iOS message setup: Future guide tells the user to leave Sender empty because
 ok('iOS message setup: the unfiltered trigger is explained as on-device filtering, never a fake contact or a skip',
   translated('iosMessageGuideNoFilter', 'en').includes('Message Contains') &&
     translated('iosMessageGuideNoFilter', 'en').includes('single space') &&
-    translated('iosMessageGuideNoFilter', 'en').includes('discards other messages on this iPhone') &&
+    translated('iosMessageGuideNoFilter', 'en').includes('regardless of currency') &&
     translated('iosMessageContinueManual', 'en') === 'Skip for now' &&
     !/skip this setup|fake contact|add .* to Contacts/i.test(translated('iosMessageGuideNoFilter', 'en')));
 ok('iOS message setup: obsolete universal-trigger instructions are absent',
@@ -180,8 +181,8 @@ ok('iOS message setup: completion copy never calls the automation verified',
   ));
 ok('iOS message setup: Help explains why no Contact is picked as Sender',
   /iosMessageSenderUnavailable/.test(detailsSheet) &&
-    translated('iosMessageSenderUnavailable', 'en')?.includes('Do not pick a Contact as Sender') &&
-    translated('iosMessageSenderUnavailable', 'en')?.includes('bank SMS IDs are not Contacts'));
+    /leave Sender empty/i.test(translated('iosMessageSenderUnavailable', 'en')) &&
+    translated('iosMessageSenderUnavailable', 'en')?.includes('Notify When Run'));
 
 eq('iOS message setup: Past row keeps only the compact inline disclosures', [
   translated('iosMessagePastDetail', 'en'),
@@ -322,8 +323,27 @@ ok('iOS local setup: readiness and failures are announced to VoiceOver',
 ok('iOS local setup: no unguarded entrance animation can hide the instructions',
   !/FadeIn|entering=/.test(screen));
 
+{
+  // Shortcuts answers a run-by-name it cannot resolve (missing, or two copies
+  // with one name, which Replace and Keep Both leave on iOS 26.6) with
+  // NSCocoaErrorDomain 4. Re-adding would make a duplicate worse.
+  const copy = execute('src/lib/ios-shortcut-setup-copy.ts');
+  const en = copy.iosShortcutSetupCopy('en');
+  const ar = copy.iosShortcutSetupCopy('ar');
+  ok('iOS local setup: a not-found Shortcuts error offers Open Shortcuts and keeps re-adding secondary',
+    /params\.errorDomain === 'NSCocoaErrorDomain' && params\.errorCode === '4'/.test(screen) &&
+      /testID="ios-shortcut-check-not-found"[\s\S]{0,200}shortcutCopy\.openShortcuts[\s\S]{0,120}openURL\('shortcuts:\/\/'\)/.test(screen) &&
+      /ios-shortcut-check-not-found[\s\S]{0,700}shortcutCopy\.repair\} variant="quiet"/.test(screen) &&
+      /errorDomain: undefined, errorCode: undefined/.test(screen));
+  ok('iOS local setup: not-found copy exists in English and Arabic and names the shortcut',
+    [en, ar].every((c) => c.notFound.includes('{shortcut}') && c.notFoundBody.includes('{shortcut}') && c.openShortcuts.length > 0));
+  ok('iOS local setup: an existing shortcut is kept with Cancel, never replaced',
+    /tap Cancel/.test(en.bundled) && !/Replace/.test(en.bundled) && /«إلغاء»/.test(ar.bundled) && !/استبدال/.test(ar.bundled));
+  ok('iOS local setup: confirming the Messages automation records that the bank texts this phone',
+    /future-automation-confirmed', source: 'message'[\s\S]{0,400}profile\.alerts !== 'sms'\) setOnboardingProfile\(\{ \.\.\.profile, alerts: 'sms' \}\)/.test(screen));
+}
 ok('iOS local setup: callbacks and foreground transitions refresh native and saved status',
-  /send\(\{ type: 'shortcut-callback', result \}\)/.test(screen) &&
+  /send\(\{ type: 'shortcut-callback', result, attemptId \}\)/.test(screen) &&
     /RNAppState\.addEventListener\('change'/.test(screen) &&
     /next !== 'active'[\s\S]{0,300}refreshSetup/.test(screen));
 ok('iOS local setup: permission check and automation confirmation use the controller enable paths',

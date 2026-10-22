@@ -476,6 +476,10 @@
     "sender": "AMEX",
     "body": "American Express: We've received your payment of £500.00 for your Card ending 31005 on 30 Sep 2026. Thank you.",
     "expect": { "post": false, "why": "other" },
+    "expectByPath": {
+      "android-sms": { "post": false, "why": "settlement, not spending", "acceptedObligation": { "kind": "cardPayment", "amountMinor": 50000, "currency": "GBP", "card": { "last4": "1005", "kind": "credit" }, "cardPaymentSide": "receipt" } },
+      "ios-history": { "post": false, "why": "unverified settlement remains in Review" }
+    },
     "notes": "Credit card bill payment received by Amex; a settlement of the card balance, not new income or spending",
     "provenance": "synthetic"
   },

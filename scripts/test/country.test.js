@@ -182,7 +182,7 @@ ok('the UAE and Saudi pickers are unchanged',
   ok('a routed foreign institution prints its own country\'s dates',
     /dateOrder: dateOrderForCountry\(globalMarket\)/.test(autoImport));
   const importSms = read('src/app/import-sms.tsx');
-  ok('pasted alerts use the user\'s country', /inspectUniversalBankEvent\(source, \{ dateOrder: activeCountryDateOrder\(\) \}\)/.test(importSms));
+  ok('pasted alerts use the user\'s country', /inspectUniversalBankEvent\(refusedBlocks\[index\], \{ dateOrder: activeCountryDateOrder\(\) \}\)/.test(importSms));
   const settings = read('src/app/settings.tsx');
   ok('Settings offers the country', /settingsCountryTitle/.test(settings) && /<CountryPickerSheet/.test(settings));
   const gate = read('src/components/onboarding-gate.tsx');

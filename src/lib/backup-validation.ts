@@ -1,4 +1,5 @@
 import type { AppState, Transaction } from '@/lib/types';
+import { isValidPrivateAlertFormatStore } from '@/lib/private-alert-formats';
 import { isSpending } from '@/lib/ledger';
 import { isTransferEvidence, isTransferDecision, isTransferMatch } from '@/lib/transfer-reconciliation';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
@@ -107,7 +108,7 @@ const transaction: Check = (value) => {
     paymentFlowSide: oneOf('funding', 'receipt'), billIdentity: text, billPayment,
     billerAccountTail: (v) => typeof v === 'string' && /^\d{4}$/.test(v),
     paymentInstrumentSource: oneOf('alert', 'user'), cashOutDate: isoDate,
-    cashOutAccountId: id, isTransfer: boolean, userEdited: boolean, titleEdited: boolean, raw: text,
+    cashOutAccountId: id, isTransfer: boolean, userEdited: boolean, titleEdited: boolean, reviewConfirmed: boolean, raw: text,
   })) return false;
   if (value.statementRowIndex !== undefined && (value.statementImportId === undefined ||
     (value.captureSource !== 'pdf' && value.captureSource !== 'csv'))) return false;
@@ -240,6 +241,7 @@ export function isValidBackupState(value: unknown): value is Partial<Omit<AppSta
     if (new Set(categories).size !== categories.length) return false;
   }
   return optional(value, {
+    privateAlertFormats: isValidPrivateAlertFormatStore,
     merchantOverrides: dictionary(category), billAliases: dictionary(billAlias), accountHints: dictionary(id),
     statementCoverage: arrayOf(statementCoverageEntry),
     trustedNotificationPackages: arrayOf((v) => typeof v === 'string' && v.length <= 255 &&

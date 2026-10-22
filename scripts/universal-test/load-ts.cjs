@@ -17,11 +17,15 @@ function createLoader() {
   };
   function load(request, parent = path.join(root, 'index.cjs')) {
     let file;
-    if (request.startsWith('@/')) file = path.join(root, 'src', request.slice(2));
+    if (request.startsWith('@/assets/')) file = path.join(root, request.slice(2));
+    else if (request.startsWith('@/')) file = path.join(root, 'src', request.slice(2));
     else if (native[request]) file = path.join(root, 'scripts/test/stubs', native[request]);
     else if (request.startsWith('.') || path.isAbsolute(request)) file = path.resolve(path.dirname(parent), request);
     else return Module.createRequire(parent)(request);
     if (!fs.existsSync(file) && fs.existsSync(file + '.ts')) file += '.ts';
+    else if (fs.existsSync(file) && fs.statSync(file).isDirectory() && fs.existsSync(path.join(file, 'index.ts'))) {
+      file = path.join(file, 'index.ts');
+    }
     if (cache.has(file)) return cache.get(file).exports;
     if (!file.endsWith('.ts') && !file.endsWith('.tsx')) return Module.createRequire(parent)(file);
     const module = { exports: {} };

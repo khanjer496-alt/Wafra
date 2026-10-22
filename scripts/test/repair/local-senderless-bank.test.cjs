@@ -1,7 +1,9 @@
 'use strict';
-// The iOS live-capture route: when the Shortcut hands over a sender that names
-// no bank (a phone number, a contact label, or nothing usable), the one bank
-// the body names supplies the bank hint, exactly as the history route does.
+// The iOS live-capture route: when the automation hands over no sender (the
+// native store then records "Wafra Automation"), the one bank the body names
+// supplies the bank hint, exactly as the history route does. A REAL sender
+// that names no bank (a phone number, a contact label) routes no launch
+// market at all, as on Android, so it never reaches this fallback.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -28,12 +30,15 @@ markets.setActiveMarket('AE'); markets.setLedgerCurrency('AED', 2);
 const { parseLocalMessageRecord } = current('local-message-record');
 const { createLaunchAlertSession } = current('launch-alert-parser');
 const adib = 'Dear Customer, your ADIB Covered Card ending with 4417 has been used for AED 250.00 at CARREFOUR MALL OF THE EMIRATES, DUBAI on 12/07/2026. Your available limit is AED 8,240.00.';
-const parse = (text, sender) =>
-  parseLocalMessageRecord(JSON.stringify({ v: 1, id: 'a'.repeat(64), text, sender, source: 'message', observedAt: '2026-07-12T10:30:00.000Z' }),
-    new Date('2026-07-12T12:00:00Z'), 'AE', createLaunchAlertSession({ overrides: {}, pinnedCurrency: 'AED', activeMarket: 'AE' }));
+const recordOf = (text, sender) =>
+  JSON.stringify({ v: 1, id: 'a'.repeat(64), text, sender, source: 'message', observedAt: '2026-07-12T10:30:00.000Z' });
+const parse = (text, sender, market = 'AE') =>
+  parseLocalMessageRecord(recordOf(text, sender),
+    new Date('2026-07-12T12:00:00Z'), market, createLaunchAlertSession({ overrides: {}, pinnedCurrency: 'AED', activeMarket: 'AE' }));
+const NO_SENDER = 'Wafra Automation';
 
-test('a sender that names no bank falls back to the one bank the body names', () => {
-  const outcome = parse(adib, '+971501234567');
+test('a record with no sender falls back to the one bank the body names', () => {
+  const outcome = parse(adib, NO_SENDER);
   assert.equal(outcome.kind, 'parsed');
   assert.equal(outcome.row.bankHint, 'ADIB');
 });
@@ -45,13 +50,22 @@ test('a recognised sender still outranks the bank named in the body', () => {
 });
 
 test("another bank's ATM in the body does not displace the claimed bank", () => {
-  const outcome = parse('AED 250.00 was spent on your ADIB Card ending 4417 at FAB ATM AL WAHDA MALL on 12/07/26. Available Balance: AED 8,240.00', '+971501234567');
+  const outcome = parse('AED 250.00 was spent on your ADIB Card ending 4417 at FAB ATM AL WAHDA MALL on 12/07/26. Available Balance: AED 8,240.00', NO_SENDER);
   assert.equal(outcome.kind, 'parsed');
   assert.equal(outcome.row.bankHint, 'ADIB');
 });
 
 test('a body that names only another bank yields no bank hint', () => {
-  const outcome = parse('AED 500.00 has been withdrawn from your Account XXX1234 at FAB ATM AL WAHDA MALL on 12/07/2026. Available Balance AED 2,900.00', '+971501234567');
+  const outcome = parse('AED 500.00 has been withdrawn from your Account XXX1234 at FAB ATM AL WAHDA MALL on 12/07/2026. Available Balance AED 2,900.00', NO_SENDER);
   assert.equal(outcome.kind, 'parsed');
   assert.equal(outcome.row.bankHint, undefined);
+});
+
+test('a phone-number sender is a sender: it names no bank and routes no market', () => {
+  const { preflightLocalMessageRecord } = current('local-message-record');
+  const now = new Date('2026-07-12T12:00:00Z');
+  assert.equal(preflightLocalMessageRecord(recordOf(adib, '+971501234567'), now).market, null);
+  assert.notEqual(parse(adib, '+971501234567', null).kind, 'parsed');
+  // Forcing the body's market past it is an inconsistent record, never a post.
+  assert.equal(parse(adib, '+971501234567', 'AE').kind, 'invalid');
 });

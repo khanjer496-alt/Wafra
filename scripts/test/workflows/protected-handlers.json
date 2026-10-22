@@ -74,13 +74,14 @@
     {
       "file": "src/app/import-sms.tsx",
       "name": "runScan",
-      "sha256": "b8e78f2839d73eed19753436619fdac4234ec1c468f698de3edf265d8126be07",
-      "reviewedChange": "2026-09-24: bank Messages that nearly match an already-recorded Apple Pay (Wallet) purchase are withheld by the planner and staged as source-bound possible-duplicate Review items (stageWalletNearMatches) before the scan commits, the history session is discarded, or the source is acknowledged; a full Review lane posts them instead of dropping them. Covered by repair/wallet-near-match*.test.cjs. 2026-09-25 (redesign W5): only the scan's progress callback changed. It forwards scanInbox's optional third argument (promotions counted, oldest page date, up to three just-parsed display facts; no message text) to a throttled screen reporter that also asks the native read-only inbox count; what is scanned, planned, staged, imported or committed is unchanged. Covered by repair/import-scan-progress.test.cjs."
+      "sha256": "d54ea742a5e23b18f943206acfb2ba1b27c3aa0b25fe343541b309dd46920cbf",
+      "reviewedChange": "2026-09-24: bank Messages that nearly match an already-recorded Apple Pay (Wallet) purchase are withheld by the planner and staged as source-bound possible-duplicate Review items (stageWalletNearMatches) before the scan commits, the history session is discarded, or the source is acknowledged; a full Review lane posts them instead of dropping them. Covered by repair/wallet-near-match*.test.cjs. 2026-09-25 (redesign W5): only the scan's progress callback changed. It forwards scanInbox's optional third argument (promotions counted, oldest page date, up to three just-parsed display facts; no message text) to a throttled screen reporter that also asks the native read-only inbox count; what is scanned, planned, staged, imported or committed is unchanged. Covered by repair/import-scan-progress.test.cjs. 2026-10-12: retiring canceled paste state before scanning preserves the existing permission, scan, durable Review, Wallet-near and commit flow. Independently reviewed exact action body; private-format paste/capture lifecycle tests cover source retirement."
     },
     {
       "file": "src/app/import-sms.tsx",
       "name": "runParse",
-      "sha256": "a72e92128319de49051516ecb03a2c6b0c0143d073d0f0cbb3e372c5ea0b1f8a"
+      "sha256": "5f9ba37a8d9c11e256dae5fb654417da67b2821607384c40089f86ab094d9489",
+      "reviewedChange": "2026-10-12: source getter runs after private key IO; generation, focus and lifecycle cancellation prevent stale previews or staged Review. Source-free staging retains existing hydration, free capture, opaque paste identity, known parsing and money mismatch behavior. Independently reviewed exact action body; private-format-paste and source convention tests cover cancel, retry and field ownership."
     },
     {
       "file": "src/app/import-sms.tsx",
@@ -133,8 +134,8 @@
     {
       "file": "src/app/ios-setup.tsx",
       "name": "installFutureShortcut",
-      "sha256": "e23d6b367dc4954ab672b0d594406e8dccbb40ec7b1e8d0c4bd699834455b76a",
-      "reviewedChange": "2026-09-24: A bundled v3 install records a source-scoped install attempt with its start time (so setup only accepts proof recorded after it) and keeps the confirmed automation, so Home does not flip until a new check succeeds. It also arms a one-time setup check for the next return from Shortcuts. Legacy iCloud install path unchanged. Covered by onboarding-extreme-setup.test.cjs (reinstall, auto-check, v2 upgrade). 2026-09-24 (review F5): the legacy (v2) path writes the global in-progress status only when the viewed source is the recorded source, the same guard as openAutomation, so installing the SMS Shortcut while viewing it cannot rewrite a recorded notification setup. Covered by onboarding-extreme-setup.test.cjs (installing the SMS Shortcut while viewing it)."
+      "sha256": "abd220449b7a645b502bb8e1d7adc5d44eab704cda1dc826cea1096749dd7c82",
+      "reviewedChange": "2026-10-15: A new install also clears the not-found state (Shortcuts NSCocoaErrorDomain 4: missing or duplicated shortcut name), so the recovery screen cannot outlive a fresh attempt. Nothing else changed. Covered by ios-setup-ux.test.js. 2026-09-24: A bundled v3 install records a source-scoped install attempt with its start time (so setup only accepts proof recorded after it) and keeps the confirmed automation, so Home does not flip until a new check succeeds. It also arms a one-time setup check for the next return from Shortcuts. Legacy iCloud install path unchanged. Covered by onboarding-extreme-setup.test.cjs (reinstall, auto-check, v2 upgrade). 2026-09-24 (review F5): the legacy (v2) path writes the global in-progress status only when the viewed source is the recorded source, the same guard as openAutomation, so installing the SMS Shortcut while viewing it cannot rewrite a recorded notification setup. Covered by onboarding-extreme-setup.test.cjs (installing the SMS Shortcut while viewing it)."
     },
     {
       "file": "src/app/ios-setup.tsx",
@@ -145,14 +146,14 @@
     {
       "file": "src/app/ios-setup.tsx",
       "name": "openAutomation",
-      "sha256": "33ce2467deed07a10ca7a7820edde1821d4f8ac3d6533f6120ac09117ecb644c",
-      "reviewedChange": "2026-09-24: Only writes the in-progress status when the viewed source is the recorded source, so viewing SMS setup cannot rewrite another source's status. Open order unchanged. Covered by ios-setup-ux.test.js."
+      "sha256": "d16d16e7926741e72dc4aec090450fc6520f47d9a1fa43b4146dda03ef8381d4",
+      "reviewedChange": "2026-10-15 (commit 469ffb06): after Shortcuts opens without an automation-open failure, the guide moves to its first screen; a failed open keeps the manual-navigation recovery visible. Status write guard and open order unchanged. 2026-09-24: Only writes the in-progress status when the viewed source is the recorded source, so viewing SMS setup cannot rewrite another source's status. Open order unchanged. Covered by ios-setup-ux.test.js."
     },
     {
       "file": "src/app/ios-setup.tsx",
       "name": "confirmAutomation",
-      "sha256": "96b30b51ed4f52578f268773cf64bf9d28a1fe791f6c6361d535281684bf70ae",
-      "reviewedChange": "2026-09-24: Confirmation is Message-scoped and timestamped (used only to show a later message as verification). Confirming Message automation makes Message the recorded source, parking any other source's progress instead of erasing it. Covered by notification-setup.test.cjs and onboarding-extreme-setup.test.cjs."
+      "sha256": "ec5d6d08accc7c859b8c6ee775ba368634739292062f57dc324537dafc7d8503",
+      "reviewedChange": "2026-10-15: after confirming the Messages automation, the onboarding alert-delivery answer becomes sms (as alertsAnswerForIosSetup(false, message)), so setup finished after an earlier add-by-hand answer no longer leaves Settings saying nothing reaches Wafra. Opt-out, progress, controller call and order unchanged. Covered by ios-setup-ux.test.js. 2026-09-24: Confirmation is Message-scoped and timestamped (used only to show a later message as verification). Confirming Message automation makes Message the recorded source, parking any other source's progress instead of erasing it. Covered by notification-setup.test.cjs and onboarding-extreme-setup.test.cjs."
     },
     {
       "file": "src/app/ios-setup.tsx",

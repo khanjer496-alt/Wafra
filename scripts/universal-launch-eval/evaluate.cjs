@@ -2,19 +2,18 @@
 /**
  * Worldwide bank-alert launch evaluation.
  *
- * Drives the SHIPPING parser through the same two entry points the app uses
- * for a bank alert outside the UAE/Saudi launch grammar:
+ * Evaluates accepted structured records at these SHIPPING code boundaries:
  *
- *  - android-sms: Android SMS inbox/delivery (auto-import.ts scanInbox). A
- *    UAE/Saudi sender takes `parse`, every other sender `parseUnproven`.
- *  - ios-history: the iPhone Messages History import (historical-import.ts).
- *    iOS 26 Find Messages exposes no sender, so the record is senderless.
+ *  - android-sms: the LaunchAlertSession parser seam used by Android SMS
+ *    inbox/delivery. This does not execute the collector or import planner.
+ *  - ios-history: actual parseHistoricalMessageRecords with a synthetic v1
+ *    envelope. iOS 26 Find Messages has no sender, so it stays senderless.
  *
- * Each row states what a correct app does with the alert: post it (with the
- * exact amount, ledger currency, income/expense and, optionally, a merchant)
- * or not post it (OTP, decline, promotion, pending hold, bill, balance...).
- * A miss is not a failure of safety: it means the alert waits in Review. A
- * false post IS a safety failure, and so is a wrong amount or direction.
+ * Each row states whether a structured record may be accepted, with exact
+ * native money and direction. A non-posting row forbids ANY accepted record,
+ * unless it explicitly permits an exact typed obligation. A miss is safe;
+ * only the real History path reports whether it reaches Review. Acceptance
+ * here is not proof of final ledger mutation, delivery, or device behavior.
  *
  * Usage:
  *   node scripts/universal-launch-eval/evaluate.cjs [corpus.json ...] [--json] [--failures] [--path android-sms|ios-history]
@@ -29,14 +28,15 @@
 
 const fs = require('fs');
 const path = require('path');
+const { createHash } = require('node:crypto');
 
-const BUILD = path.join(__dirname, '..', 'test', 'build');
+const BUILD = process.env.WAFRA_TEST_BUILD_DIR || path.join(__dirname, '..', 'test', 'build');
 const req = (name) => require(path.join(BUILD, name));
 
 const { createLaunchAlertSession } = req('launch-alert-parser');
 const { setActiveCountry } = req('country');
 const { setLedgerCurrency, setActiveMarket, detectLaunchMarketFromSender } = req('markets');
-const { hasUniversalInstitutionSender } = req('alert-institution-grammars');
+const { parseHistoricalMessageRecords } = req('historical-import');
 const { inspectUniversalBankEvent } = req('universal-parser');
 const policy = req('best-effort-autopost');
 const { currencyMinorUnits } = req('currency-metadata');
@@ -67,33 +67,44 @@ const androidSms = (row) => {
   const sender = row.sender ?? '';
   const worldwide = session.inspect(row.body, sender);
   const launch = detectLaunchMarketFromSender(sender);
-  return launch
+  const parsed = launch
     ? session.parse(row.body, sender, worldwide, launch, OBSERVED_AT)
     : session.parseUnproven(row.body, sender, worldwide, OBSERVED_AT);
+  const { raw: _raw, ...structured } = parsed ?? {};
+  return { boundary: 'launch-alert-session', accepted: parsed ? [structured] : [], review: null };
 };
 
 const iosHistory = (row) => {
   const session = configure(row);
-  const sender = '';
-  const inspection = session.inspect(row.body, sender);
-  const foreignIssuer = !detectLaunchMarketFromSender(sender) && hasUniversalInstitutionSender(sender);
-  const foreignRoute = inspection?.route.decision === 'single' &&
-    inspection.route.market !== 'AE' && inspection.route.market !== 'SA';
-  const result = foreignIssuer || foreignRoute
-    ? session.parseUnproven(row.body, sender, inspection, OBSERVED_AT)
-    : session.parse(row.body, sender, inspection, undefined, OBSERVED_AT);
-  if (!result) return null;
-  const bestEffortAccepted = !!result.bestEffort && result.kind === 'transaction' && result.currency === row.ledger;
-  if (!bestEffortAccepted && (result.bestEffort || (result.currency !== 'AED' && result.currency !== 'SAR'))) {
-    // historical-import.ts sends this to its refusal inspector (Review), except
-    // a card statement/payment in the ledger currency, which it keeps.
-    if (result.kind !== 'transaction' && result.currency === row.ledger) return result;
-    return null;
+  // A fictional Apple Message identity exercises the real envelope validation
+  // and import policy. A fresh seen set isolates rows; sender stays absent.
+  const serialized = JSON.stringify({
+    v: 1,
+    id: createHash('sha256').update(`synthetic-launch-evaluation:${row.id}`).digest('hex'),
+    text: row.body,
+    receivedAt: new Date(OBSERVED_AT).toISOString(),
+  });
+  const result = parseHistoricalMessageRecords([serialized], {}, new Date(OBSERVED_AT), new Set(), session);
+  if (result.invalidCount || result.parsed.length > 1) {
+    throw new Error(`Unexpected synthetic History envelope outcome: invalid=${result.invalidCount}, accepted=${result.parsed.length}`);
   }
-  return result;
+  return {
+    boundary: 'historical-import',
+    accepted: result.parsed,
+    review: result.reviewCandidates.map((item) => ({
+      family: item.kind === 'universal' ? item.event.family : item.family,
+      observedAt: item.observedAt,
+    })),
+    counts: { total: result.totalCount, invalid: result.invalidCount, ignored: result.ignoredCount,
+      declined: result.declined.length, duplicate: result.duplicateCount },
+  };
 };
 
 const PATHS = { 'android-sms': androidSms, 'ios-history': iosHistory };
+const runCapturePath = (row, name) => {
+  if (!Object.hasOwn(PATHS, name)) throw new Error(`Unknown capture path: ${name}`);
+  return PATHS[name](row);
+};
 
 /** Why the unproven seam refused, for triage only (never an import decision). */
 const diagnose = (row, sender) => {
@@ -121,25 +132,37 @@ const diagnose = (row, sender) => {
 
 const grade = (row, parsed) => {
   const expect = row.expect;
+  let want = expect;
   if (!expect.post) {
+    want = expect.acceptedObligation;
+    if (want && (!['cardStatement', 'cardPayment'].includes(want.kind) ||
+        !Number.isSafeInteger(want.amountMinor) || want.amountMinor < 0 ||
+        !/^[A-Z]{3}$/.test(want.currency ?? '') ||
+        want.card?.kind !== 'credit' || !/^\d{4}$/.test(want.card.last4) ||
+        (want.kind === 'cardPayment' && !['receipt', 'debit'].includes(want.cardPaymentSide)))) {
+      return { verdict: 'error', detail: 'An accepted obligation requires its exact kind, native money, credit-card kind and tail' };
+    }
     if (!parsed) return { verdict: 'pass' };
-    // A card statement or card-bill payment is an obligation/settlement row,
-    // never income or spending; a non-posting row may legitimately yield one.
-    if (parsed.kind !== 'transaction') return { verdict: 'pass', soft: `obligation ${parsed.kind}`, parsed: summarize(parsed) };
-    return { verdict: 'false-post', detail: summarize(parsed) };
+    if (!want) return { verdict: 'false-post', detail: summarize(parsed) };
   }
   if (!parsed) return { verdict: 'miss' };
-  const wantKind = expect.kind ?? 'transaction';
+  const wantKind = want.kind ?? 'transaction';
   if (parsed.kind !== wantKind) return { verdict: 'wrong', detail: `kind ${parsed.kind} != ${wantKind}`, parsed: summarize(parsed) };
-  if (parsed.currency !== (expect.currency ?? row.ledger)) return { verdict: 'wrong', detail: `currency ${parsed.currency}`, parsed: summarize(parsed) };
-  if (parsed.amountFils !== expect.amountMinor) return { verdict: 'wrong', detail: `amount ${parsed.amountFils} != ${expect.amountMinor}`, parsed: summarize(parsed) };
-  if (expect.type && parsed.type !== expect.type) return { verdict: 'wrong', detail: `type ${parsed.type} != ${expect.type}`, parsed: summarize(parsed) };
-  if (expect.transfer !== undefined && !!parsed.transferHint !== expect.transfer) {
-    return { verdict: 'pass', soft: `transferHint ${!!parsed.transferHint} != ${expect.transfer}`, parsed: summarize(parsed) };
+  if (parsed.currency !== (want.currency ?? row.ledger)) return { verdict: 'wrong', detail: `currency ${parsed.currency}`, parsed: summarize(parsed) };
+  if (parsed.amountFils !== want.amountMinor) return { verdict: 'wrong', detail: `amount ${parsed.amountFils} != ${want.amountMinor}`, parsed: summarize(parsed) };
+  if (want.type && parsed.type !== want.type) return { verdict: 'wrong', detail: `type ${parsed.type} != ${want.type}`, parsed: summarize(parsed) };
+  if (want.card && (parsed.card?.kind !== want.card.kind || parsed.card?.last4 !== want.card.last4)) {
+    return { verdict: 'wrong', detail: 'credit-card identity differs from the explicit expectation', parsed: summarize(parsed) };
   }
-  if (expect.merchant) {
-    const ok = String(parsed.merchant ?? '').toLowerCase().includes(String(expect.merchant).toLowerCase());
-    if (!ok) return { verdict: 'pass', soft: `merchant "${parsed.merchant}" lacks "${expect.merchant}"`, parsed: summarize(parsed) };
+  if (want.cardPaymentSide && parsed.cardPaymentSide !== want.cardPaymentSide) {
+    return { verdict: 'wrong', detail: `payment leg ${parsed.cardPaymentSide} != ${want.cardPaymentSide}`, parsed: summarize(parsed) };
+  }
+  if (want.transfer !== undefined && !!parsed.transferHint !== want.transfer) {
+    return { verdict: 'pass', soft: `transferHint ${!!parsed.transferHint} != ${want.transfer}`, parsed: summarize(parsed) };
+  }
+  if (want.merchant) {
+    const ok = String(parsed.merchant ?? '').toLowerCase().includes(String(want.merchant).toLowerCase());
+    if (!ok) return { verdict: 'pass', soft: `merchant "${parsed.merchant}" lacks "${want.merchant}"`, parsed: summarize(parsed) };
   }
   return { verdict: 'pass', parsed: summarize(parsed) };
 };
@@ -147,25 +170,31 @@ const grade = (row, parsed) => {
 const summarize = (p) => p && ({
   kind: p.kind, type: p.type, amount: p.amountFils, currency: p.currency, merchant: p.merchant,
   date: p.date, category: p.categoryGuess, transfer: !!p.transferHint, marker: p.bestEffort?.format ?? null,
+  card: p.card ?? null, cardPaymentSide: p.cardPaymentSide ?? null,
 });
 
 function evaluateRows(rows, { onlyPath = null } = {}) {
   const results = [];
   for (const row of rows) {
-    for (const [name, run] of Object.entries(PATHS)) {
+    for (const name of Object.keys(PATHS)) {
       if (onlyPath && name !== onlyPath) continue;
       // A row may restrict itself to one path (e.g. a sender-dependent rule).
       if (row.paths && !row.paths.includes(name)) continue;
+      let capture;
       let parsed;
       let error = null;
       try {
-        parsed = run(row);
+        capture = runCapturePath(row, name);
+        parsed = capture.accepted[0] ?? null;
       } catch (e) {
         parsed = null;
         error = String(e && e.stack || e);
       }
-      const g = error ? { verdict: 'error', detail: error } : grade(row, parsed);
-      const out = { id: row.id, file: row.file, path: name, country: row.country, expectPost: !!row.expect.post, ...g };
+      const pathRow = row.expectByPath?.[name] ? { ...row, expect: row.expectByPath[name] } : row;
+      const g = error ? { verdict: 'error', detail: error } : grade(pathRow, parsed);
+      const out = { id: row.id, file: row.file, path: name, country: row.country, expectPost: !!pathRow.expect.post,
+        boundary: capture?.boundary, acceptedCount: capture?.accepted.length ?? 0,
+        reviewCount: capture?.review?.length ?? null, reviewFamilies: capture?.review?.map((item) => item.family) ?? null, ...g };
       if (g.verdict === 'miss' || g.verdict === 'false-post' || g.verdict === 'wrong') {
         out.diagnosis = diagnose(row, name === 'ios-history' ? '' : row.sender ?? '');
       }
@@ -176,7 +205,7 @@ function evaluateRows(rows, { onlyPath = null } = {}) {
   const tally = {};
   for (const r of results) {
     const key = r.path;
-    tally[key] ??= { positives: 0, posted: 0, missed: 0, wrong: 0, negatives: 0, held: 0, falsePosts: 0, errors: 0, soft: 0 };
+    tally[key] ??= { positives: 0, posted: 0, missed: 0, wrong: 0, negatives: 0, held: 0, acceptedObligations: 0, falsePosts: 0, errors: 0, soft: 0 };
     const t = tally[key];
     if (r.verdict === 'error') t.errors += 1;
     if (r.expectPost) {
@@ -187,7 +216,9 @@ function evaluateRows(rows, { onlyPath = null } = {}) {
       if (r.soft) t.soft += 1;
     } else {
       t.negatives += 1;
-      if (r.verdict === 'pass') t.held += 1;
+      if (r.verdict === 'pass' && r.acceptedCount === 0) t.held += 1;
+      if (r.verdict === 'pass' && r.acceptedCount > 0) t.acceptedObligations += 1;
+      if (r.verdict === 'wrong') t.wrong += 1;
       if (r.verdict === 'false-post') t.falsePosts += 1;
     }
   }
@@ -197,7 +228,7 @@ function evaluateRows(rows, { onlyPath = null } = {}) {
     byCountry[r.country] ??= { pos: 0, ok: 0, neg: 0, fp: 0, wrong: 0 };
     const c = byCountry[r.country];
     if (r.expectPost) { c.pos += 1; if (r.verdict === 'pass') c.ok += 1; if (r.verdict === 'wrong') c.wrong += 1; }
-    else { c.neg += 1; if (r.verdict === 'false-post') c.fp += 1; }
+    else { c.neg += 1; if (r.verdict === 'false-post') c.fp += 1; if (r.verdict === 'wrong') c.wrong += 1; }
   }
 
   return { results, tally, byCountry };
@@ -209,7 +240,7 @@ const loadCorpus = (corpusFiles) => corpusFiles.flatMap((file) => {
   return list.map((row) => ({ ...row, file: path.basename(file) }));
 });
 
-module.exports = { evaluateRows, loadCorpus, OBSERVED_AT };
+module.exports = { evaluateRows, loadCorpus, runCapturePath, grade, OBSERVED_AT };
 
 if (require.main === module) {
   const args = process.argv.slice(2);
@@ -232,8 +263,8 @@ if (require.main === module) {
     const pct = (a, b) => (b ? `${((100 * a) / b).toFixed(1)}%` : 'n/a');
     console.log(`rows: ${rows.length} from ${corpusFiles.length} file(s)`);
     for (const [name, t] of Object.entries(tally)) {
-      console.log(`${name}: recall ${t.posted}/${t.positives} (${pct(t.posted, t.positives)}), ` +
-        `wrong ${t.wrong}, false posts ${t.falsePosts}/${t.negatives}, soft ${t.soft}, errors ${t.errors}`);
+      console.log(`${name}: accepted positive records ${t.posted}/${t.positives} (${pct(t.posted, t.positives)}), ` +
+        `wrong ${t.wrong}, unexpected accepted records ${t.falsePosts}/${t.negatives}, expected obligations ${t.acceptedObligations}, soft ${t.soft}, errors ${t.errors}`);
     }
     console.log('android-sms by country (posted/positives, false posts/negatives, wrong):');
     console.log(Object.entries(byCountry).sort().map(([c, v]) => `  ${c} ${v.ok}/${v.pos} fp ${v.fp}/${v.neg}${v.wrong ? ` wrong ${v.wrong}` : ''}`).join('\n'));

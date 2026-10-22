@@ -66,7 +66,7 @@ rewrite() {
 # `--module commonjs` cannot follow. They get the nodenext .cts pass below.
 for f in types routes format categories custom-categories ledger bill-alias capture-source-identity dedupe arabic-sms bank-amount-tokens bnpl-providers sms-parser import-plan bills \
          transfer-reconciliation-types transfer-reconciliation transfer-activity transfer-evidence transfer-review-copy \
-         insights seed subscriptions cards cash-flow payment-flow ledger-import launch-alert-parser analytics growth-funnel period purchases country-names country markets known-banks i18n system-language balances \
+         insights seed subscriptions cards cash-flow payment-flow ledger-import launch-alert-parser ios-background-alert-parser ios-background-parser-source.generated ios-native-parser-context analytics growth-funnel period purchases country-names country markets known-banks i18n system-language balances \
          brand-marks leaving-soon accounts heal bnpl-category-repair accuracy onboarding onboarding-bank-examples reminders reminder-schedule app-lock auto-import android-capture-sources \
          history-import foreground-history-priority diagnostic-export diagnostic-messages transaction-source transaction-presentation transaction-filter capture-trace \
          launch-performance launch-benchmark runtime-performance dashboard-projection \
@@ -75,8 +75,9 @@ for f in types routes format categories custom-categories ledger bill-alias capt
          background-relay-storage uncategorised currency-metadata alert-draft bank-alert-semantic-types \
          bank-alert-semantic-rules bank-alert-semantic-output bank-alert-interpreter \
          alert-event-evidence alert-institution-grammars alert-market-detection alert-review-tray generic-review-entry review-source-bindings unparsed-launch-alert \
-         universal-types universal-dates universal-fields universal-money universal-parser universal-confidence gulf-neighbour-templates gulf-neighbour-alerts universal-template-certification universal-import brand-categories universal-categorization ai-alert-words ai-alert-cues ai-alert-gates ai-alert-flags ai-alert-model-manifest ai-alert-model ai-alert-extractor ai-alert-reader \
-         ledger-money paste-sample backup-validation ledger-export parsed-review-event wallet-near-match review-promotion launch-review-rollout trusted-bank-notification-packages \
+         universal-types universal-dates universal-fields universal-money universal-parser universal-confidence gulf-neighbour-templates gulf-neighbour-alerts universal-template-certification universal-import brand-categories universal-categorization ai-alert-words ai-alert-cues ai-alert-gates ai-alert-flags ai-alert-model-manifest ai-alert-model ai-alert-extractor ai-alert-source-contract ai-alert-reader \
+         learned-alert-formats private-alert-formats private-alert-format-runtime private-alert-format-review private-alert-teaching alert-source-ownership \
+         ledger-money paste-sample backup-validation ledger-export parsed-review-event wallet-near-match review-promotion apple-pay-card-links launch-review-rollout trusted-bank-notification-packages \
          sms-corpus parser-research-contract parser-research founder-pro large-text-figure \
          alert-market-pack-types alert-market-packs.us-eu alert-market-packs.india-me alert-market-packs.world latam-alert-templates \
          alert-market-packs alert-semantics alert-rollout feedback-wire historical-import ios-history-import \

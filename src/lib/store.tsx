@@ -115,6 +115,14 @@ import {
   type ReviewPromotionFailure,
 } from '@/lib/review-promotion';
 import {
+  applePayCardOfReview,
+  forgetApplePayCardLink,
+  normalizeApplePayCardLinks,
+  planLinkedApplePayPosts,
+  rememberApplePayCardLink,
+  type LinkedApplePayOptions,
+} from '@/lib/apple-pay-card-links';
+import {
   admitPreparedReviewAlerts,
   emptyAlertReviewTray,
   normalizeAlertReviewTray,
@@ -135,6 +143,20 @@ import {
   type MaterializedImportBatch,
 } from '@/lib/ledger-import';
 import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
+import {
+  emptyPrivateAlertFormatStore,
+  isValidPrivateAlertFormatStore,
+  normalizePrivateAlertFormatStore,
+  removePrivateAlertFormat,
+  type PrivateAlertFormat,
+  type PrivateAlertFormatStore,
+} from '@/lib/private-alert-formats';
+import {
+  activatePrivateAlertFormats,
+  canSavePrivateAlertFormat,
+  erasePrivateAlertFormatKey,
+  invalidatePrivateAlertFormats,
+} from '@/lib/private-alert-format-runtime';
 import {
   setBestEffortAutoPostEnabled,
   tombstonesForRemoved,
@@ -174,6 +196,7 @@ import {
   type Account,
   type AndroidCaptureSources,
   type AppState,
+  type ApplePayCardLink,
   type Bill,
   type BillAlias,
   type Budget,
@@ -242,6 +265,7 @@ const STORAGE_KEY = 'wafra/state/v1';
 export const HYDRATION_FINALIZE_VERSION = 2;
 
 const EMPTY_STATE: AppState = {
+  privateAlertFormats: emptyPrivateAlertFormatStore(),
   customCategories: [],
   hydrated: false,
   ledgerMoney: null,
@@ -444,6 +468,8 @@ export function migratePersistedState(
   // return, which uses it to tell "these are still the stored rows" from
   // "these have been rewritten under a receipt that predates them".
   const loadedTransactions = parsed.transactions;
+  const privateFormats = normalizePrivateAlertFormatStore(parsed.privateAlertFormats);
+  parsed.privateAlertFormats = { ...privateFormats, templates: privateFormats.templates.filter(format => format.status === 'validated') };
   parsed.ledgerMoney = migrateLegacyLedgerMoney(parsed);
   parsed.reviewTray = normalizeAlertReviewTray(parsed.reviewTray, Date.now());
   parsed.localCaptureQualifications = normalizeLocalCaptureQualifications(
@@ -452,6 +478,7 @@ export function migratePersistedState(
   );
   parsed.iosCaptureWarning = normalizeIosCaptureWarningState(parsed.iosCaptureWarning);
   parsed.knownBanks = sanitizeKnownBanks(parsed.knownBanks);
+  parsed.applePayCardLinks = normalizeApplePayCardLinks(parsed.applePayCardLinks);
   parsed.trustedNotificationPackages = Array.isArray(parsed.trustedNotificationPackages)
     ? [...new Set(parsed.trustedNotificationPackages.filter((value): value is string =>
         typeof value === 'string' && value.length <= 255 &&
@@ -885,7 +912,10 @@ export function parseBackupForRestore(
     ) {
       return null;
     }
-    return migratePersistedState(parsed.data as Partial<Omit<AppState, 'hydrated'>>);
+    const incoming = parsed.data as Partial<Omit<AppState, 'hydrated'>>;
+    // Device keys are deliberately absent from portable backups. Even this
+    // phone's own old export cannot resurrect an erased local teaching rule.
+    return migratePersistedState({ ...incoming, privateAlertFormats: emptyPrivateAlertFormatStore() });
   } catch {
     return null;
   } finally {
@@ -894,6 +924,7 @@ export function parseBackupForRestore(
 }
 
 type Action =
+  | { type: 'setPrivateAlertFormats'; formats: PrivateAlertFormatStore }
   | { type: 'createCustomCategory'; category: CustomCategory }
   | { type: 'resolveTransfers'; request: TransferDecisionRequest }
   | { type: 'resolveTransferBatch'; request: TransferDecisionBatchRequest }
@@ -977,7 +1008,17 @@ type Action =
       reviewTray: AppState['reviewTray'];
       ledgerMoney: NonNullable<AppState['ledgerMoney']>;
       learnedNotificationPackage?: string;
+      /** A confirmed Apple Pay review remembers its Wallet card's account. */
+      applePayCardLinks?: ApplePayCardLink[];
     }
+  | {
+      /** Linked-card Apple Pay purchases posted without Review (apple-pay-card-links.ts). */
+      type: 'postLinkedApplePay';
+      transactions: Transaction[];
+      reviewTray: AppState['reviewTray'];
+      ledgerMoney: NonNullable<AppState['ledgerMoney']>;
+    }
+  | { type: 'setApplePayCardLinks'; links: ApplePayCardLink[] }
   | { type: 'setOnboarded' }
   | { type: 'restore'; state: Partial<Omit<AppState, 'hydrated'>> }
   | { type: 'loadDemo'; state: Partial<Omit<AppState, 'hydrated'>> }
@@ -1163,6 +1204,7 @@ function assertCategoryAssignments(state: AppState, action: Action): void {
       transaction(action.transaction);
       if (action.type === 'promoteReviewAlert') reviewRules(action.reviewTray);
       break;
+    case 'postLinkedApplePay': action.transactions.forEach(transaction); break;
     case 'payCardDue': if (action.transaction) transaction(action.transaction); break;
     case 'editTransaction': {
       const prior = state.transactions.find((row) => row.id === action.id);
@@ -1367,6 +1409,12 @@ function actionMayChangeTransferLinks(state: AppState, reduced: AppState, action
 
 function reduceState(state: AppState, action: Action): AppState {
   switch (action.type) {
+    case 'setPrivateAlertFormats':
+      if (!state.hydrated || !isValidPrivateAlertFormatStore(action.formats) ||
+          action.formats.templates.some(format => format.status !== 'validated')) {
+        throw new Error('Private bank format could not be saved');
+      }
+      return { ...state, privateAlertFormats: action.formats };
     case 'createCustomCategory': {
       if (!state.hydrated) return state;
       const result = prepareCustomCategory(action.category.name, action.category.type, state.customCategories ?? [], action.category.id);
@@ -1381,6 +1429,11 @@ function reduceState(state: AppState, action: Action): AppState {
     case 'restore': {
       // Merge over defaults so states saved by older app versions stay valid.
       const next = { ...EMPTY_STATE, ...action.state, hydrated: true };
+      next.privateAlertFormats = action.type === 'hydrate'
+        ? normalizePrivateAlertFormatStore(next.privateAlertFormats)
+        : emptyPrivateAlertFormatStore();
+      next.privateAlertFormats = { ...next.privateAlertFormats,
+        templates: next.privateAlertFormats.templates.filter(format => format.status === 'validated') };
       next.customCategories = sanitizeCustomCategoryCatalog(next.customCategories);
       // Orphan money keeps its opaque category for honest history. Orphan
       // automation rules cannot keep assigning an unregistered category.
@@ -1573,6 +1626,20 @@ function reduceState(state: AppState, action: Action): AppState {
       return state.iosCaptureWarning?.nativeWarningId === action.expectedWarningId
         ? { ...state, iosCaptureWarning: null }
         : state;
+    case 'postLinkedApplePay':
+      if (action.transactions.length === 0) return state;
+      assertImportBatchMoney(state, {
+        importMoney: action.ledgerMoney, transactions: action.transactions,
+        newAccounts: [], newDues: [], newBills: [], snapshots: {}, updates: [],
+      });
+      return {
+        ...state,
+        ledgerMoney: action.ledgerMoney,
+        reviewTray: action.reviewTray,
+        transactions: sortTxs([...action.transactions, ...state.transactions]),
+      };
+    case 'setApplePayCardLinks':
+      return { ...state, applePayCardLinks: normalizeApplePayCardLinks(action.links) };
     case 'promoteReviewAlert':
       assertImportBatchMoney(state, {
         importMoney: action.ledgerMoney, transactions: [action.transaction],
@@ -1580,6 +1647,7 @@ function reduceState(state: AppState, action: Action): AppState {
       });
       return {
         ...state,
+        ...(action.applePayCardLinks ? { applePayCardLinks: normalizeApplePayCardLinks(action.applePayCardLinks) } : {}),
         ledgerMoney: action.ledgerMoney,
         reviewTray: action.reviewTray,
         trustedNotificationPackages: action.learnedNotificationPackage &&
@@ -1750,6 +1818,9 @@ function reduceState(state: AppState, action: Action): AppState {
       return {
         ...state,
         ...(bestEffortUndone ? { bestEffortUndone } : {}),
+        // A Wallet card linked to this account asks in Review again.
+        ...(state.applePayCardLinks?.some((link) => link.accountId === action.id)
+          ? { applePayCardLinks: state.applePayCardLinks.filter((link) => link.accountId !== action.id) } : {}),
         accounts: state.accounts.filter((a) => a.id !== action.id),
         transactions: state.transactions.filter((t) => t.accountId !== action.id),
         cardDues: state.cardDues.filter((d) => d.accountId !== action.id),
@@ -2074,10 +2145,25 @@ interface StoreValue {
   dismissReviewAlert: (id: string, outcome: ReviewResolutionOutcome) => Promise<void>;
   promoteReviewAlert: (input: PromoteReviewAlertInput) => Promise<'added' | 'duplicate'>;
   /**
+   * iPhone Apple Pay: post the captured reviews whose Wallet card is linked
+   * to an account, planned against the authoritative ledger in this same
+   * synchronous turn. Everything not in `posted` belongs in Review as before.
+   * Await `durable` before acknowledging the native receipts.
+   */
+  postLinkedApplePay: (
+    items: readonly ReviewEntry[],
+    options?: LinkedApplePayOptions,
+  ) => { posted: string[]; durable: Promise<void> };
+  /** Forget one Wallet card's account; its next purchase asks in Review again. */
+  forgetApplePayCardLink: (cardOrPass: string) => Promise<void>;
+  /**
    * Flush the current authoritative snapshot to SQLCipher. Relay callers use
    * this before acknowledging a row that deduped against in-memory state.
    */
   ensureDurable: () => Promise<void>;
+  addPrivateAlertFormat: (template: PrivateAlertFormat) => Promise<void>;
+  removePrivateAlertFormat: (id: string) => Promise<void>;
+  clearPrivateAlertFormats: () => Promise<void>;
   undoBatch: (ids: string[]) => void;
   upsertBudget: (b: Budget) => void;
   deleteBudget: (category: Budget['category']) => void;
@@ -2404,6 +2490,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (replacesLedger) {
       stateGeneration.current += 1;
     }
+    if (replacesLedger || action.type === 'blockPersistence' || action.type === 'setPrivateAlertFormats' ||
+        action.type === 'setPrivateMode' || action.type === 'setCaptureOptOut') {
+      invalidatePrivateAlertFormats();
+      if (replacesLedger && action.type !== 'clearAll' && next.hydrated) {
+        activatePrivateAlertFormats(next.privateAlertFormats);
+      }
+      // Private Mode permits local parsing. Retire old sessions, then make
+      // source-free metadata available to fresh explicit teaching requests.
+      if ((action.type === 'setPrivateMode' || action.type === 'setCaptureOptOut') && next.hydrated) {
+        activatePrivateAlertFormats(next.privateAlertFormats);
+      }
+    }
     if (replacesLedger ||
         ((action.type === 'setPrivateMode' || action.type === 'setCaptureOptOut') && action.enabled)) {
       cancelLocalSemanticBackgroundWork();
@@ -2585,6 +2683,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     // cancelling it: the same mechanism a retry uses.
     return () => {
       hydrationRun.current += 1;
+      invalidatePrivateAlertFormats();
     };
   }, [hydrate]);
 
@@ -2866,6 +2965,73 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     };
   }, [dispatch, persist]);
 
+  const addPrivateAlertFormat = useCallback(async (template: PrivateAlertFormat) => {
+    const generation = stateGeneration.current;
+    if (!authoritativeState.current.hydrated || template?.status !== 'validated' ||
+        !(await canSavePrivateAlertFormat(template)) || generation !== stateGeneration.current) {
+      throw new Error('Private bank format could not be saved');
+    }
+    const current = authoritativeState.current.privateAlertFormats ?? emptyPrivateAlertFormatStore();
+    const formats: PrivateAlertFormatStore = {
+      version: 1,
+      templates: [...current.templates.filter(row => row.id !== template.id), template],
+    };
+    if (!isValidPrivateAlertFormatStore(formats)) throw new Error('Private bank format could not be saved');
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+    const next = dispatch({ type: 'setPrivateAlertFormats', formats });
+    if (!(await persist(next))) {
+      if (generation === stateGeneration.current && authoritativeState.current.privateAlertFormats === formats) {
+        const rolledBack = dispatch({ type: 'setPrivateAlertFormats', formats: current });
+        if (rolledBack.hydrated) activatePrivateAlertFormats(current);
+      }
+      throw new Error('Private bank format could not be saved');
+    }
+    // No pending capture may use an uncommitted teaching rule. A concurrent
+    // remove/clear/restore owns the runtime instead of this older writer.
+    if (generation === stateGeneration.current && authoritativeState.current.privateAlertFormats === formats &&
+        authoritativeState.current.hydrated) activatePrivateAlertFormats(formats);
+  }, [dispatch, persist]);
+
+  const removePrivateAlertFormatAction = useCallback(async (id: string) => {
+    const generation = stateGeneration.current;
+    if (!authoritativeState.current.hydrated) throw new Error('Private bank format could not be removed');
+    const current = authoritativeState.current.privateAlertFormats ?? emptyPrivateAlertFormatStore();
+    const formats = removePrivateAlertFormat(current, id);
+    if (!isValidPrivateAlertFormatStore(formats)) throw new Error('Private bank format could not be removed');
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+    const next = dispatch({ type: 'setPrivateAlertFormats', formats });
+    if (!(await persist(next))) {
+      if (generation === stateGeneration.current && authoritativeState.current.privateAlertFormats === formats) {
+        const rolledBack = dispatch({ type: 'setPrivateAlertFormats', formats: current });
+        if (rolledBack.hydrated) activatePrivateAlertFormats(current);
+      }
+      throw new Error('Private bank format could not be removed');
+    }
+    if (generation === stateGeneration.current && authoritativeState.current.privateAlertFormats === formats &&
+        authoritativeState.current.hydrated) activatePrivateAlertFormats(formats);
+  }, [dispatch, persist]);
+
+  const clearPrivateAlertFormats = useCallback(async () => {
+    const generation = stateGeneration.current;
+    if (!authoritativeState.current.hydrated) throw new Error('Private bank formats could not be cleared');
+    const current = authoritativeState.current.privateAlertFormats ?? emptyPrivateAlertFormatStore();
+    const formats = emptyPrivateAlertFormatStore();
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+    const next = dispatch({ type: 'setPrivateAlertFormats', formats });
+    if (!(await persist(next))) {
+      if (generation === stateGeneration.current && authoritativeState.current.privateAlertFormats === formats) {
+        const rolledBack = dispatch({ type: 'setPrivateAlertFormats', formats: current });
+        if (rolledBack.hydrated) activatePrivateAlertFormats(current);
+      }
+      throw new Error('Private bank formats could not be cleared');
+    }
+    if (generation === stateGeneration.current && authoritativeState.current.privateAlertFormats === formats) {
+      await erasePrivateAlertFormatKey();
+      if (generation === stateGeneration.current && authoritativeState.current.privateAlertFormats === formats &&
+          authoritativeState.current.hydrated) activatePrivateAlertFormats(formats);
+    }
+  }, [dispatch, persist]);
+
   const ensureDurable = useCallback(async () => {
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
@@ -2987,6 +3153,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
     }
+    // Confirming a captured Apple Pay purchase on an account remembers that
+    // Wallet card's account, so its later purchases post on their own.
+    const walletCard = plan.outcome === 'added' && plan.transaction.type === 'expense' &&
+      !input.betweenOwnAccounts ? applePayCardOfReview(
+      authoritativeState.current.reviewTray.pending.find((item) => item.id === input.reviewId)) : null;
     const next = plan.outcome === 'duplicate'
       ? dispatch({ type: 'setReviewTray', reviewTray: plan.reviewTray,
           learnedNotificationPackage: plan.learnedNotificationPackage })
@@ -2997,9 +3168,59 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           reviewTray: plan.reviewTray,
           ledgerMoney: plan.ledgerMoney,
           learnedNotificationPackage: plan.learnedNotificationPackage,
+          ...(walletCard ? { applePayCardLinks: rememberApplePayCardLink(
+            authoritativeState.current.applePayCardLinks, walletCard, plan.transaction.accountId, Date.now()) } : {}),
         });
     if (!await persist(next)) throw new Error('Encrypted review promotion write failed');
     return plan.outcome;
+  }, [dispatch, persist]);
+
+  const postLinkedApplePay = useCallback((
+    items: readonly ReviewEntry[],
+    options?: LinkedApplePayOptions,
+  ) => {
+    const current = authoritativeState.current;
+    if (!current.hydrated || items.length === 0) return { posted: [], durable: ensureDurable() };
+    // Auto-posting is an optimisation over Review, never a gate: any refusal
+    // (planner or ledger invariant) leaves every item for Review instead of
+    // holding the Apple Pay queue on a purchase that can never post.
+    let plan: ReturnType<typeof planLinkedApplePayPosts>;
+    try {
+      plan = planLinkedApplePayPosts(current, items, Date.now(), () => makeId('tx'), options);
+    } catch {
+      return { posted: [], durable: ensureDurable() };
+    }
+    if (plan.postedIds.length === 0 || !plan.ledgerMoney) return { posted: [], durable: ensureDurable() };
+    let next: AppState;
+    try {
+      next = dispatch({
+        type: 'postLinkedApplePay',
+        transactions: plan.transactions,
+        reviewTray: plan.reviewTray,
+        ledgerMoney: plan.ledgerMoney,
+      });
+    } catch {
+      return { posted: [], durable: ensureDurable() };
+    }
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const durable = persist(next).then((written) => {
+      if (!written) throw new Error('Encrypted Apple Pay write failed');
+    });
+    return { posted: plan.postedIds, durable };
+  }, [dispatch, ensureDurable, persist]);
+
+  const forgetApplePayCardLinkAction = useCallback(async (cardOrPass: string): Promise<void> => {
+    const links = forgetApplePayCardLink(authoritativeState.current.applePayCardLinks, cardOrPass);
+    if (links.length === (authoritativeState.current.applePayCardLinks ?? []).length) return;
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const next = dispatch({ type: 'setApplePayCardLinks', links });
+    if (!await persist(next)) throw new Error('Encrypted Apple Pay link write failed');
   }, [dispatch, persist]);
 
   const undoBatch = useCallback((ids: string[]) => {
@@ -3142,6 +3363,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [dispatch]);
 
   const setPrivateMode = useCallback(async (enabled: boolean) => {
+    const generation = stateGeneration.current;
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
@@ -3149,9 +3371,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const next = dispatch({ type: 'setPrivateMode', enabled });
     const written = await persist(next);
     if (!written) throw new Error('Private Mode could not be saved');
+    const current = authoritativeState.current;
+    if (generation === stateGeneration.current && current.hydrated && current.privateMode === enabled &&
+        current.privateAlertFormats === next.privateAlertFormats) activatePrivateAlertFormats(current.privateAlertFormats);
   }, [dispatch, persist]);
 
   const setCaptureOptOut = useCallback(async (enabled: boolean) => {
+    const generation = stateGeneration.current;
     if (enabled) {
       if (Platform.OS === 'android') {
         const { default: reader } = await import('../../modules/notification-reader');
@@ -3171,6 +3397,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const next = dispatch({ type: 'setCaptureOptOut', enabled });
     const written = await persist(next);
     if (!written) throw new Error('Capture preference could not be saved');
+    const current = authoritativeState.current;
+    if (generation === stateGeneration.current && current.hydrated && current.captureOptOut === enabled &&
+        current.privateAlertFormats === next.privateAlertFormats) activatePrivateAlertFormats(current.privateAlertFormats);
   }, [dispatch, persist]);
 
   const setAndroidCaptureSources = useCallback(async (sources: AndroidCaptureSources) => {
@@ -3337,6 +3566,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       founderPro: _founderPro,
       trialStartTs: _trial,
       reviewTray: _reviewTray,
+      // Wallet card names stay on this device; a backup carries no card link.
+      applePayCardLinks: _applePayCardLinks,
+      privateAlertFormats: _privateAlertFormats,
       hydrationReparseKey: _hydrationReparseKey,
       hydrationFinalizeVersion: _hydrationFinalizeVersion,
       bnplCategoryRepairVersion: _bnplCategoryRepairVersion,
@@ -3365,6 +3597,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       wafraGoals: restored.wafraGoals ?? current.wafraGoals,
       localCaptureQualifications: current.localCaptureQualifications,
       iosCaptureWarning: current.iosCaptureWarning,
+      applePayCardLinks: current.applePayCardLinks ?? [],
     };
     try {
       dispatch({ type: 'restore', state: safeState });
@@ -3389,6 +3622,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const clearAll = useCallback(async (captureCleanup?: () => Promise<void>) => {
     const afterErase = async () => {
+      await erasePrivateAlertFormatKey();
       await captureCleanup?.();
       await cleanupGeneratedExports({ eraseAll: true });
       // Widgets hold a copy of a few figures; erasing the ledger erases those too.
@@ -3496,7 +3730,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       stageReviewAlerts,
       dismissReviewAlert,
       promoteReviewAlert,
+      postLinkedApplePay,
+      forgetApplePayCardLink: forgetApplePayCardLinkAction,
       ensureDurable,
+      addPrivateAlertFormat,
+      removePrivateAlertFormat: removePrivateAlertFormatAction,
+      clearPrivateAlertFormats,
       undoBatch,
       upsertBudget,
       deleteBudget,
@@ -3572,7 +3811,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       stageReviewAlerts,
       dismissReviewAlert,
       promoteReviewAlert,
+      postLinkedApplePay,
+      forgetApplePayCardLinkAction,
       ensureDurable,
+      addPrivateAlertFormat,
+      removePrivateAlertFormatAction,
+      clearPrivateAlertFormats,
       undoBatch,
       upsertBudget,
       deleteBudget,

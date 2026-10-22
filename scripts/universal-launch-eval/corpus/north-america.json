@@ -516,6 +516,10 @@
     "sender": "24273",
     "body": "Chase: We received your $500.00 payment to your Chase Sapphire Preferred card ending in 9876 on Sep 25, 2026. Thank you!",
     "expect": { "post": false, "why": "other" },
+    "expectByPath": {
+      "android-sms": { "post": false, "why": "settlement, not spending", "acceptedObligation": { "kind": "cardPayment", "amountMinor": 50000, "currency": "USD", "card": { "last4": "9876", "kind": "credit" }, "cardPaymentSide": "receipt" } },
+      "ios-history": { "post": false, "why": "unverified settlement remains in Review" }
+    },
     "notes": "Credit card bill payment received; a settlement of the card balance, not new spending or income",
     "provenance": "synthetic"
   },

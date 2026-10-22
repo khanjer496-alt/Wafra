@@ -76,10 +76,12 @@ fixture file: non-posted transfer/recurring rows read family `unknown`, and a
 ## Gulf neighbours (Qatar, Kuwait, Bahrain, Oman)
 
 These four first-wave markets now have a posting rule of their own. Its
-evidence is thin and stated plainly: no Qatari, Kuwaiti or Bahraini alert text
-exists anywhere in our sources (the banks and regulators say only that alerts
-exist), and Oman has one Bank Muscat family whose structure comes from three
-community-collected alerts. None is a consented real alert, none counts toward
+initial evidence was thin: when these rules were introduced, the collected
+Qatar, Kuwait and Bahrain sources described alert services without supplying
+message text. Later source collection adds public specimens; those do not
+certify another automatic template. Oman has one Bank Muscat family whose
+structure comes from three community-collected alerts. Those are not consented
+real alerts and do not count toward
 the gates below, and nothing here claims "Gulf coverage".
 
 **Money.** A three-decimal figure written with one full stop and no comma
@@ -707,43 +709,47 @@ future-date and FX guardrails. What it declines stays in Review.
 
 ## AI reading of unrecognised alerts (optional on-device model)
 
-An optional on-device tagger (pruned multilingual-E5-small, int8 ONNX, ~32.7 MB
-download) can read an alert that **every** rule-based path refused. Contract:
+The removed E5/ONNX tagger is inert. The current reader uses the existing
+Apple Foundation Models/Gemini Nano bridge for **Review only**. Alert inference
+is **off by default for launch** while usefulness remains unqualified. The
+explicit experimental build flag `EXPO_PUBLIC_WAFRA_AI_ALERT_PREFILL=1` may
+enable it for evaluation; no capture-triggered download occurs:
 
-- **Where it runs:** only in `auto-import.ts` `inspectRefused`, after the launch
-  grammar, `parseUnproven`, the universal reader and the refusal pipeline all
-  left the alert `ignored/unrecognized`. Never for a UAE/Saudi sender or route
-  (`ai-alert-reader.ts`, re-checked by the gate).
-- **What it may do:** open a Review item whose universal event carries the
-  model's grounded amount/currency/merchant/direction/date as suggestions the
-  person confirms (`EXPO_PUBLIC_WAFRA_AI_ALERT_PREFILL`, on by default but inert
-  until the model is downloaded). It never adds a ledger row.
-- **The gate** (`gateAiAlert` in `src/lib/ai-alert-extractor.ts`) is
-  deterministic: the model's amount must overlap exactly one money token found
-  by the universal money reader; the currency must resolve to one ISO code
-  (shared symbols and local spellings such as درهم, Dhs, ريال, SR, TL, R, N only
-  through the user's own country); `hasNonCompletedWording` and the universal
-  parser's authentication/pending/promotion/failed/future readings veto.
-- **Automatic posting** from a model reading additionally needs the build flag
-  `EXPO_PUBLIC_WAFRA_AI_ALERT_AUTOPOST=1` (default off), the best-effort
-  setting, calibrated confidences at the manifest operating point, no
-  competing money figure, a direction cue in the text of the same polarity and
-  none of the opposite one (`ai-alert-cues.ts`), and the unchanged
-  `decideBestEffortAutoPost` policy (future dates, FX, launch markets). It is
-  also gated **per language** (`ai-alert-gates.ts`): a language may open only
-  after passing on at least 500 labelled **real** messages with ≤ 0.3 % false
-  posts and ≥ 98 % fully correct posted rows. Every language is off, and
-  capture does not wire the post outcome in this build.
-- **Model delivery:** never bundled. Downloaded only when the person asks,
-  Wi-Fi only unless they explicitly allow mobile data, from the pinned GitHub
-  release `parser-ai-tagger-v1` (overridable base URL, same hashes), verified
-  by exact size and SHA-256 before every first load, ceiling 45 MB, deletable.
-  Model absent → capture behaves exactly as before.
-- **Second opinion (verifier)** on rule-parsed rows (`ai-alert-verifier.ts`,
-  `EXPO_PUBLIC_WAFRA_AI_ALERT_VERIFIER`, off, not wired): measured to catch
-  injected errors but none of the real rule errors, so it stays off.
+- **Scope:** unfamiliar ignored/unrecognized alerts or unknown-family generic
+  Review, while source is still available in Android inbox/delivery/push,
+  iOS live capture or Messages History. Known parsed rows, AE/SA routes,
+  historical ledger repair, OTPs, statements, card payments, pending/failed/
+  future activity and deliberate nonposting refusals are not model inputs.
+- **Authority:** `ai-alert-source-contract.ts` enumerates deterministic source
+  money IDs. The model can select one allowed ID, propose a family and copy
+  short exact merchant/date quotes. It cannot output money values, currency,
+  direction, completion or instrument identity. Ambiguous principals and
+  calendars remain unresolved; balance/limit/fee decoys, due dates, issuer
+  headers, account-holder/lifecycle fields and support text are excluded.
+  Source ownership can correct a misread profile date/payee but cannot replace
+  a genuine known field. Every result requires confirmation in Review.
+- **Privacy and bounds:** no cloud inference, raw-source persistence or eager
+  model download. Stored Review contains source-free facts and only closed
+  provenance codes. One inference attempt per scan/drain/import, a 2.5-second
+  whole-request deadline and opt-out/stale/cancellation checks protect capture.
+  Missing, unsupported or invalid model output preserves deterministic handling.
+- **Posting:** the current reader never calls the legacy `gateAiAlert` posting
+  gate. Every legacy per-language automatic-posting gate stays off; toggling an
+  environment flag cannot make this reader post. The verifier remains off.
+- **Qualification:** local source tests and native source compilation pass,
+  but eligible-phone usefulness, memory/latency and language coverage need
+  real-device evidence. Apple host inference was unavailable and its reported
+  languages omitted Arabic. Portable Qwen0.6B and Qwen2.5-1.5B candidates failed
+  this mixed-provenance source usefulness evaluation. Neither is shipped. The
+  separate personal bank-format flow is now implemented using keyed,
+  authenticated structures and two distinct user-confirmed alerts. It fills
+  eligible missing Review fields without model inference or automatic posting;
+  it does not qualify a bank or change these model findings. See
+  [private bank-format evidence](test-evidence/2026-10-12-private-bank-formats.md).
 
-Evidence: `docs/test-evidence/2026-09-25-parser-ai-phase2.md`.
+Evidence: [12 October source/model evaluation](test-evidence/2026-10-12-ondevice-alert-ai.md).
+Older tagger results remain historical evidence in
+`docs/test-evidence/2026-09-25-parser-ai-phase2.md`.
 
 ## Automatic-import gates
 
@@ -774,3 +780,37 @@ not a subscription-accuracy claim. Subscription accuracy requires a separate
 held-out sequence benchmark through the history-based detector, including
 variable utilities, mandate lifecycle changes, cross-account fees and explicit
 user dismissals.
+
+## Source-backed extraction and history parity (parser 67)
+
+Public source grammar now covers Arabic labelled purchases, remitters and
+billers, one-to-one Arabic presentation forms, structured Debit/Credit account
+fields, Tanzanian `TSh` principal/fee/balance fields, and explicitly processed
+or posted withdrawals. A heading can state direction without proving completion.
+The source spans still index the original text. Contracted negations such as
+“haven’t processed” refuse the automatic path.
+
+Paired “total of / minimum of … due” and generated credit-card statement
+sentences retain native totals and minimums. Shared `Rs` remains ambiguous
+without documented routing; incomplete date years stay unresolved. Fees,
+rewards, other instruments and card prefixes cannot supply debt or target-card
+identity. Labelled funding-account repayments retain the debit settlement role
+without inventing the paid card or headroom.
+
+Generic Review admission now reaches the source-backed receipt and field-list
+layouts. It grants no institution certification. With the existing unverified
+import setting enabled, the Android provider-SMS repayment adapter may add a completed
+repayment when provider identity and its existing currency, amount, card-identity
+and wording guards pass. Weak notification and legacy delivery observations
+retain their parsed repayment facts in typed Review. The planner preserves the
+best-effort marker and instrument-scoped Undo replay tombstone;
+repayments remain settlements rather than ordinary spending. Unverified
+statements stay in typed Review globally until debt records have a visible
+provenance and Undo flow. Unverified History repayments also stay in typed
+Review, retaining payment facts without creating accounts or changing balances.
+Mature UAE/Saudi paths retain their existing behavior.
+
+The executable regressions use fictional values in public-source layouts.
+The private research corpus is not posting ground truth or a worldwide accuracy
+benchmark. See `docs/test-evidence/2026-10-11-universal-parser.md` for fresh local
+verification and limits.

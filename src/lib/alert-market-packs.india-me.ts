@@ -48,6 +48,7 @@ export const INDIA_ME_ALERT_MARKET_PACKS = {
   },
   JO: {
     market: 'JO', currencies: ['JOD'], currencyAliases: { JD: ['JOD'], 'د.أ': ['JOD'] },
+    dotDecimalCurrencies: ['JOD'],
     rails: ['cliq', 'efawateercom', 'jomopay', 'ach'], transferTerms: ['transfer', 'تحويل'],
     utilityTerms: ['electricity bill', 'water bill', 'telecom bill', 'فاتورة كهرباء', 'فاتورة مياه', 'فاتورة هاتف'], recurringTerms: ['recurring', 'متكرر', 'متكررة'],
   },

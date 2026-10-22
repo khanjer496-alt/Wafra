@@ -2,16 +2,14 @@ import Foundation
 import UserNotifications
 
 /**
- The banner an iPhone user sees when a capture automation hands Wafra a bank
- message, matching Android's InstantAlert.post(): "AED 45.00 · CARREFOUR" with
- the bank and card underneath. The automation itself finishes quietly, so this
- is the only notification Wafra adds for a capture.
+ A source-currency preview after a capture automation stages a bank message.
+ Financial decisions come from the bundled shared parser. This controls only
+ Wafra's notification; Apple independently controls the automation banner.
 
- It never stores anything and never blocks capture: the message is already in
- the protected queue before this runs, and any failure here only means no
- banner. It is skipped for credentials, for anything the reader does not
- plainly recognize as a completed movement, when the user turned charge
- alerts off, and when Wafra notifications are not allowed.
+ It never writes or acknowledges a receipt: the message is already in the
+ protected queue before this runs, and any failure here only means no
+ banner. Credentials, unavailable parser context/resources and disabled
+ capture, entitlement, alerts or OS permissions suppress only the preview.
  */
 @available(iOS 16.0, *)
 public enum WafraInstantAlert {
@@ -21,10 +19,11 @@ public enum WafraInstantAlert {
     WafraLiveCaptureStore.automationSender, "Wafra Notification",
   ]
 
-  public static func postIfReadable(sender: String? = nil, body: String) async {
+  public static func postIfReadable(sender: String? = nil, body: String, observedAt: Date = Date()) async {
+    let store = WafraLiveCaptureStore.shared
     guard !WafraInstantAlertReader.isSensitive(body),
-          let read = WafraInstantAlertReader.read(body),
-          (try? WafraLiveCaptureStore.shared.instantAlertsEnabled()) == true
+          let context = try? store.nativeParserContextSnapshot(),
+          (try? store.mayEmitParserPreview(context: context)) == true
     else { return }
 
     let center = UNUserNotificationCenter.current()
@@ -36,44 +35,108 @@ public enum WafraInstantAlert {
       return
     }
 
-    let amount = "\(read.currency) \(read.figure)"
-    let titleFormat: String?
-    let arguments: [CVarArg]
-    switch (read.merchant, read.credit) {
-    case let (merchant?, true):
-      titleFormat = WafraLiveCaptureResources.string("live.alert.title_credit_named")
-      arguments = [amount, merchant]
-    case let (merchant?, false):
-      titleFormat = WafraLiveCaptureResources.string("live.alert.title_named")
-      arguments = [amount, merchant]
-    case (nil, true):
-      titleFormat = WafraLiveCaptureResources.string("live.alert.title_credit")
-      arguments = [amount]
-    case (nil, false):
-      titleFormat = WafraLiveCaptureResources.string("live.alert.title")
-      arguments = [amount]
-    }
-    guard let titleFormat else { return }
-
-    // The second line names the bank and the card: the two facts that tell
-    // the user which card just moved.
-    let card = read.last4.flatMap { last4 in
-      WafraLiveCaptureResources.string("live.alert.card").map { String(format: $0, last4) }
-    }
-    let account = [bankName(sender), card].compactMap { $0 }.joined(separator: " ")
-
-    let content = UNMutableNotificationContent()
-    content.title = String(format: titleFormat, arguments: arguments)
-    content.body = account.isEmpty
-      ? (WafraLiveCaptureResources.string("live.alert.fallback") ?? "")
-      : account
-    content.sound = .default
-    content.threadIdentifier = "wafra-instant"
+    guard let read = await WafraBackgroundAlertParser.read(sender: sender, body: body,
+            observedAt: observedAt, context: context),
+          !Task.isCancelled, let content = content(for: read, sender: sender),
+          (try? store.mayEmitParserPreview(context: context)) == true else { return }
     // One id per message text: a carrier or automation delivering the same
     // alert twice replaces the banner instead of stacking a duplicate.
     let request = UNNotificationRequest(
       identifier: "wafra-instant-\(stableHash(body))", content: content, trigger: nil)
     try? await center.add(request)
+  }
+
+  /// Wafra's own notice for an Apple Pay purchase the Wallet automation passed
+  /// in. Same gates as the bank-text preview. The wording is neutral on
+  /// purpose ("Apple Pay · <card>"): whether the purchase posts on its own
+  /// (a card the user linked to an account) or waits in Review is decided by
+  /// the app when it drains the queue, against the live ledger, so this
+  /// extension never claims either outcome.
+  public static func postApplePay(amount: Decimal, currency: String, merchant: String?, cardOrPass: String?,
+                                  observedAt: Date = Date()) async {
+    let store = WafraLiveCaptureStore.shared
+    guard let context = try? store.nativeParserContextSnapshot(),
+          (try? store.mayEmitParserPreview(context: context)) == true else { return }
+    let center = UNUserNotificationCenter.current()
+    let settings = await center.notificationSettings()
+    switch settings.authorizationStatus {
+    case .authorized, .provisional, .ephemeral:
+      break
+    default:
+      return
+    }
+    guard let content = applePayContent(amount: amount, currency: currency, merchant: merchant,
+            cardOrPass: cardOrPass), !Task.isCancelled else { return }
+    // One id per purchase minute: a repeated automation run replaces the notice.
+    let minute = Int(observedAt.timeIntervalSince1970 / 60)
+    let key = "\(currency)|\(amount)|\(merchant ?? "")|\(minute)"
+    try? await center.add(UNNotificationRequest(
+      identifier: "wafra-apple-pay-\(stableHash(key))", content: content, trigger: nil))
+  }
+
+  static func applePayContent(amount: Decimal, currency: String, merchant: String?, cardOrPass: String?,
+                              localize: (String) -> String? = WafraLiveCaptureResources.string) -> UNMutableNotificationContent? {
+    let code = currency.uppercased()
+    guard code.count == 3, code.allSatisfy({ $0.isASCII && $0.isLetter }), amount > 0 else { return nil }
+    let digits: Int = {
+      let probe = NumberFormatter()
+      probe.numberStyle = .currency
+      probe.currencyCode = code
+      return probe.maximumFractionDigits
+    }()
+    let number = NumberFormatter()
+    number.locale = Locale(identifier: "en_US_POSIX")
+    number.numberStyle = .decimal
+    number.usesGroupingSeparator = true
+    number.groupingSeparator = ","
+    number.minimumFractionDigits = digits
+    number.maximumFractionDigits = digits
+    guard let figure = number.string(from: amount as NSDecimalNumber) else { return nil }
+    let formatted = "\(code) \(figure)"
+    let shop = merchant?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let named = shop.map { !$0.isEmpty } ?? false
+    guard let titleFormat = localize(named ? "live.alert.title_named" : "live.alert.title") else { return nil }
+    let title = named ? String(format: titleFormat, formatted, String(shop!.prefix(40))) : String(format: titleFormat, formatted)
+    let card = cardOrPass?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let body: String?
+    if let card, !card.isEmpty, let format = localize("live.apple_pay.alert.body_card") {
+      body = String(format: format, String(card.prefix(40)))
+    } else {
+      body = localize("live.apple_pay.alert.body")
+    }
+    guard let body else { return nil }
+    let content = UNMutableNotificationContent()
+    content.title = title
+    content.body = body
+    content.sound = .default
+    content.threadIdentifier = "wafra-instant"
+    return content
+  }
+
+  static func content(for read: WafraNativeAlertNotification, sender: String?,
+                      localize: (String) -> String? = WafraLiveCaptureResources.string) -> UNMutableNotificationContent? {
+    let baseKey: String
+    if read.style == "review" { baseKey = "live.alert.title_review" }
+    else if read.family == "transfer" {
+      baseKey = read.direction == "credit" ? "live.alert.title_credit" : "live.alert.title_sent"
+    } else if read.family == "refund" { baseKey = "live.alert.title_refund" }
+    else if read.family == "cash-withdrawal" { baseKey = "live.alert.title_withdrawal" }
+    else if read.direction == "credit" { baseKey = "live.alert.title_credit" }
+    else if ["fee", "utility", "recurring-payment"].contains(read.family) { baseKey = "live.alert.title_paid" }
+    else { baseKey = "live.alert.title" }
+    guard let titleFormat = localize(baseKey + (read.merchant == nil ? "" : "_named")) else { return nil }
+    var arguments: [CVarArg] = [read.formattedAmount]
+    if let merchant = read.merchant { arguments.append(merchant) }
+    let instrument = read.instrument?.last4.flatMap { last4 in
+      localize("live.alert.card").map { String(format: $0, last4) }
+    }
+    let account = [bankName(sender), instrument].compactMap { $0 }.joined(separator: " ")
+    let content = UNMutableNotificationContent()
+    content.title = String(format: titleFormat, arguments: arguments)
+    content.body = account.isEmpty ? (localize("live.alert.fallback") ?? "") : account
+    content.sound = .default
+    content.threadIdentifier = "wafra-instant"
+    return content
   }
 
   /// The sender id banks use is already their name: "ADCB", "FAB", "HSBC".

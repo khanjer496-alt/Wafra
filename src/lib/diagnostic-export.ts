@@ -25,6 +25,18 @@ export interface DiagnosticOptions {
 }
 type JsonRow = Record<string, unknown>;
 
+/** Wallet "Card or Pass" names stay on this iPhone, even in a user-shared report. */
+function withoutWalletCardNames(tray: ReturnType<typeof normalizeAlertReviewTray>): ReturnType<typeof normalizeAlertReviewTray> {
+  return {
+    ...tray,
+    pending: tray.pending.map((item) => {
+      if (!('walletCardOrPass' in item)) return item;
+      const { walletCardOrPass: _card, ...rest } = item;
+      return rest;
+    }),
+  };
+}
+
 // Allowlist scalar fields; unknown state properties and nested objects never
 // escape simply because they were added by a future SDK, restore or connector.
 function fields(value: object, names: string): JsonRow {
@@ -185,7 +197,7 @@ export async function buildDiagnosticExport(state: AppState, build: DiagnosticBu
     goals: state.goals.map(row => fields(row, 'id title emoji targetFils savedFils')),
     merchantOverrides: dictionary(state.merchantOverrides), accountHints: dictionary(state.accountHints),
     notSubscriptions: (state.notSubscriptions ?? []).filter(v => typeof v === 'string'),
-    reviewTray: normalizeAlertReviewTray(state.reviewTray, now),
+    reviewTray: withoutWalletCardNames(normalizeAlertReviewTray(state.reviewTray, now)),
     reviewCoverage: 'Validated current review entries; expired or malformed entries excluded by the normal privacy retention policy.',
     merchants: [...merchantMap.values()].map(item => ({ ...item, categories: [...item.categories] })),
     monthlyTotals: [...monthly.entries()].map(([month, values]) => ({ month, ...values, netMinor: values.incomeMinor - values.spendingMinor })),

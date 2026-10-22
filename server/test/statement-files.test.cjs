@@ -313,6 +313,138 @@ const JULY_1 = '46204';
     (await open(spaced, '  pass word  ')).result?.rows.length === 1 &&
       (await open(textPdf(statementLine, { userPassword: Buffer.from('  pass word  ') }), 'pass word')).error?.code === 2);
 
+  /* ──────────── column position decides a row's direction ──────────── */
+
+  {
+    const { cellPdf } = require('./fixtures.cjs');
+    const {
+      wrappedStatementPages, WRAPPED_STATEMENT_EXPECTED, WRAPPED_STATEMENT_CLOSING,
+    } = require('./wrapped-statement-fixture.cjs');
+    const extracted = await extractPdfStatementRows(cellPdf(wrappedStatementPages()), 'AED', undefined, 'day-first');
+    const transactions = extracted.rows.filter((row) => row.kind === 'transaction');
+    const read = transactions.map((row) => [row.date, row.type, row.amountFils]);
+    ok('every row of a two-page Debit | Credit | Balance PDF is read, wrapped direct-debit rows included',
+      JSON.stringify(read) === JSON.stringify(WRAPPED_STATEMENT_EXPECTED), JSON.stringify(read));
+    ok('the first row is read from the column its figure sits in, not refused for lack of an opening balance',
+      read[0]?.[1] === 'expense' && read[0]?.[2] === 15000);
+    ok('nothing in that statement is counted as unread',
+      extracted.rejectedRows === 0 && extracted.totalRows === WRAPPED_STATEMENT_EXPECTED.length,
+      `${extracted.rejectedRows}/${extracted.totalRows}`);
+    const last = transactions.at(-1);
+    ok('the closing row carries the statement\'s closing balance as an account balance snapshot',
+      last?.snapshotKind === 'balance' && last?.snapshotFils === WRAPPED_STATEMENT_CLOSING,
+      JSON.stringify({ kind: last?.snapshotKind, fils: last?.snapshotFils }));
+    ok('no other row carries a balance snapshot',
+      transactions.slice(0, -1).every((row) => row.snapshotFils === null && row.snapshotKind === null));
+  }
+
+  {
+    // Wide columns, headers printed at each column's LEFT edge and figures
+    // right-aligned at its right edge: a figure's centre sits nearer the NEXT
+    // header than its own, so position is read from header edges.
+    const { cellPdf } = require('./fixtures.cjs');
+    const width = (text) => [...text].reduce((sum, ch) => sum + (/[0-9]/.test(ch) ? 5.004 : /[.,]/.test(ch) ? 2.502 : 5), 0);
+    const right = (edge, text) => ({ x: Math.round((edge - width(text)) * 10) / 10, text });
+    const page = (rows) => {
+      const cells = [
+        { x: 40, y: 760, text: 'Example Bank account statement' },
+        { x: 40, y: 746, text: 'Account number: 0000111122223333' },
+        { x: 40, y: 700, text: 'Date' }, { x: 120, y: 700, text: 'Description' },
+        { x: 300, y: 700, text: 'Withdrawals' }, { x: 400, y: 700, text: 'Deposits' }, { x: 500, y: 700, text: 'Balance' },
+      ];
+      rows.forEach(([date, description, out, into, balance], i) => {
+        const y = 680 - i * 16;
+        cells.push({ x: 40, y, text: date }, { x: 120, y, text: description });
+        if (out) cells.push({ ...right(395, out), y });
+        if (into) cells.push({ ...right(495, into), y });
+        cells.push({ ...right(595, balance), y });
+      });
+      return cellPdf([cells]);
+    };
+    const wide = await extractPdfStatementRows(page([
+      ['01/09/2026', 'CARD PURCHASE GROCERY', '45.10', '', '954.90'],
+      ['02/09/2026', 'SALARY CREDIT', '', '3,000.00', '3,954.90'],
+      ['03/09/2026', 'RENT TRANSFER', '2,500.00', '', '1,454.90'],
+    ]), 'AED', undefined, 'day-first');
+    ok('left-aligned headers over right-aligned figures still place each figure in its own column',
+      JSON.stringify(wide.rows.map((row) => [row.type, row.amountFils])) ===
+        JSON.stringify([['expense', 4510], ['income', 300000], ['expense', 250000]]) && wide.rejectedRows === 0,
+      JSON.stringify(wide.rows.map((row) => [row.type, row.amountFils])));
+    // The figure sits in Deposits but the balance FELL by exactly that much:
+    // two readings disagree, so the row is counted, never filed either way.
+    const conflict = await extractPdfStatementRows(page([
+      ['01/09/2026', 'CARD PURCHASE GROCERY', '45.10', '', '954.90'],
+      ['02/09/2026', 'UNCLEAR ENTRY', '', '100.00', '854.90'],
+      ['03/09/2026', 'SALARY CREDIT', '', '3,000.00', '3,854.90'],
+    ]), 'AED', undefined, 'day-first');
+    ok('a column that contradicts the balance step leaves the row unread and counted',
+      !conflict.rows.some((row) => row.amountFils === 10000) && conflict.rejectedRows === 1 && conflict.totalRows === 3,
+      JSON.stringify({ rows: conflict.rows.map((row) => [row.type, row.amountFils]), rejected: conflict.rejectedRows }));
+  }
+
+  {
+    const { cellPdf } = require('./fixtures.cjs');
+    const width = (text) => [...text].reduce((sum, ch) => sum + (/[0-9]/.test(ch) ? 5.004 : /[.,]/.test(ch) ? 2.502 : 5), 0);
+    const header = (y, labels) => labels.map(([x, text]) => ({ x, y, text }));
+    // Centred headers over LEFT-aligned figures (HTML-to-PDF exports): a
+    // credit figure ends before its own header starts.
+    const leftCells = [
+      { x: 40, y: 760, text: 'Account number: 0000111122225555' },
+      ...header(700, [[40, 'Date'], [120, 'Description'], [305, 'Debit'], [385, 'Credit'], [465, 'Balance']]),
+    ];
+    [['01/09/2026', 'SALARY CREDIT', '', '5.00', '1,005.00'],
+      ['02/09/2026', 'GROCERY', '45.10', '', '959.90'],
+      ['03/09/2026', 'REFUND', '', '12.00', '971.90']].forEach(([date, description, out, into, balance], i) => {
+      const y = 680 - i * 16;
+      leftCells.push({ x: 40, y, text: date }, { x: 120, y, text: description });
+      if (out) leftCells.push({ x: 282, y, text: out });
+      if (into) leftCells.push({ x: 362, y, text: into });
+      leftCells.push({ x: 442, y, text: balance });
+    });
+    const left = await extractPdfStatementRows(cellPdf([leftCells]), 'AED', undefined, 'day-first');
+    ok('left-aligned figures under centred headers are read in their own column',
+      JSON.stringify(left.rows.map((row) => [row.type, row.amountFils])) ===
+        JSON.stringify([['income', 500], ['expense', 4510], ['income', 1200]]),
+      JSON.stringify(left.rows.map((row) => [row.type, row.amountFils])));
+    // A summary box above the table names Credits, Debits and Balance in its
+    // own positions; the table header is the row that also says Date.
+    const boxCells = [
+      ...header(740, [[330, 'Credits'], [410, 'Debits'], [490, 'Balance']]),
+      { x: 330, y: 726, text: '3,000.00' }, { x: 410, y: 726, text: '2,545.10' }, { x: 490, y: 726, text: '1,454.90' },
+      ...header(700, [[40, 'Date'], [120, 'Description'], [300, 'Debit'], [400, 'Credit'], [500, 'Balance']]),
+    ];
+    [['01/09/2026', 'SALARY CREDIT', '', '100.00', '1,100.00'],
+      ['02/09/2026', 'GROCERY', '45.10', '', '1,054.90'],
+      ['03/09/2026', 'RENT', '1,000.00', '', '54.90']].forEach(([date, description, out, into, balance], i) => {
+      const y = 680 - i * 16;
+      boxCells.push({ x: 40, y, text: date }, { x: 120, y, text: description });
+      if (out) boxCells.push({ x: Math.round((330 - width(out)) * 10) / 10, y, text: out });
+      if (into) boxCells.push({ x: Math.round((430 - width(into)) * 10) / 10, y, text: into });
+      boxCells.push({ x: Math.round((535 - width(balance)) * 10) / 10, y, text: balance });
+    });
+    const boxed = await extractPdfStatementRows(cellPdf([boxCells]), 'AED', undefined, 'day-first');
+    ok('a summary box above the table is not taken for the table header',
+      boxed.rows[0]?.type === 'income' && boxed.rows[0]?.amountFils === 10000 &&
+        !boxed.rows.some((row) => row.type === 'expense' && row.amountFils === 10000),
+      JSON.stringify(boxed.rows.map((row) => [row.type, row.amountFils])));
+    // Newest first, one date: the first printed balance is the close, and the
+    // statement's order cannot be proven, so no closing balance is sent.
+    const newestCells = [
+      ...header(700, [[40, 'Date'], [120, 'Description'], [300, 'Debit'], [400, 'Credit'], [500, 'Balance']]),
+    ];
+    [['02/09/2026', 'PHARMACY', '30.00', '450.00'], ['02/09/2026', 'GROCERY', '120.00', '480.00']]
+      .forEach(([date, description, out, balance], i) => {
+        const y = 680 - i * 16;
+        newestCells.push({ x: 40, y, text: date }, { x: 120, y, text: description },
+          { x: Math.round((330 - width(out)) * 10) / 10, y, text: out },
+          { x: Math.round((535 - width(balance)) * 10) / 10, y, text: balance });
+      });
+    const newest = await extractPdfStatementRows(cellPdf([newestCells]), 'AED', undefined, 'day-first');
+    ok('a one-date statement whose order is unproven sends no closing balance',
+      newest.rows.length === 2 && newest.rows.every((row) => row.snapshotFils === null),
+      JSON.stringify(newest.rows.map((row) => row.snapshotFils)));
+  }
+
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
 })().catch((error) => {

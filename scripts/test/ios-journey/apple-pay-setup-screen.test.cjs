@@ -11,7 +11,7 @@ const progressApi = load(path.join(root, 'src/lib/ios-message-onboarding.ts'), {
   './ios-history-setup': { isIosHistoryShortcutInstalled: async () => false },
 });
 
-async function screen({ version = '27.0', nativePresent = true, capability = true, enabled = false, entitled = true, proof = null, received = null, bundled = true, installed = false, saved = null, fromOnboarding = '1', onboarded = false, cards } = {}) {
+async function screen({ version = '27.0', nativePresent = true, capability = true, enabled = false, entitled = true, proof = null, received = null, bundled = true, installed = false, saved = null, fromOnboarding = '1', onboarded = false, cards, links, accounts = [] } = {}) {
   const slots = [], effects = [], events = [], urls = [], shares = [], routes = [], listeners = [];
   let cursor = 0, generation = 1, holdNext;
   const generationFn = () => generation;
@@ -54,8 +54,10 @@ async function screen({ version = '27.0', nativePresent = true, capability = tru
     '@/lib/ios-capture-health': health, '@/lib/ios-apple-pay-setup': helper,
     '@/lib/details-copy': load(path.join(root, 'src/lib/details-copy.ts')),
     '@/lib/ios-message-onboarding': { dispatchIosMessageSetup: async event => { events.push(event); progress = progressApi.reduceIosMessageSetup(progress, event); }, loadIosMessageSetupProgress: async () => progress, progressForSource: progressApi.progressForSource },
-    '@/lib/store': { useStore: () => ({ state: { hydrated: true, onboarded }, getStateGeneration: generationFn,
-      setCaptureOptOut: async value => events.push(`opt-out:${value}`) }) },
+    '@/lib/store': { useStore: () => ({ state: { hydrated: true, onboarded, accounts, ...(links ? { applePayCardLinks: links } : {}) },
+      getStateGeneration: generationFn,
+      setCaptureOptOut: async value => events.push(`opt-out:${value}`),
+      forgetApplePayCardLink: async card => { events.push(`forget:${card}`); links = (links ?? []).filter(row => row.cardOrPass !== card); } }) },
   }).default;
   let tree;
   const render = () => { cursor = 0; tree = component(); for (const effect of effects.splice(0)) effect(); };
@@ -166,7 +168,8 @@ test('the ink band shows the plain title, one line and an example marked as one;
   assert.match(example.props.accessibilityLabel, /^Example only\..*waits in Review/);
   const bandText = band.filter(n => n.type === 'Text').map(n => n.props.children).join(' ');
   assert.match(bandText, /Apple Pay purchases/);
-  assert.match(bandText, /goes to Review/);
+  assert.match(bandText, /first purchase from each card asks which account it belongs to/);
+  assert.match(bandText, /added automatically/);
   assert.match(bandText, /Example/);
   assert.doesNotMatch(bandText, /•|\d{4}/, 'no card identity is shown');
   const sheet = walk(scaffold.props.children);
@@ -194,21 +197,26 @@ test('the ink band shows the plain title, one line and an example marked as one;
 });
 
 
-test('Apple Pay setup versions validate the whole value and require Wafra iOS27 setup', () => {
-  for (const version of [17, 26, '26.6.2', '27oops', '27.0-beta', ' 27', '27.', '27..1', '', NaN, Infinity, null, {}, true, '999999999999999999999999']) {
+test('Apple Pay setup versions validate the whole value and require iOS 17 Wallet automations', () => {
+  for (const version of [16, '16.7.2', '15', '27oops', '27.0-beta', ' 27', '27.', '27..1', '', NaN, Infinity, null, {}, true, '999999999999999999999999']) {
     assert.equal(helper.iosSupportsApplePayAutomation(version), false, String(version));
   }
-  for (const version of [27, 27.1, '27', '27.0.1', '28.0']) assert.equal(helper.iosSupportsApplePayAutomation(version), true);
+  for (const version of [17, '17.0', 26, '26.6.2', 27, 27.1, '27', '27.0.1', '28.0']) {
+    assert.equal(helper.iosSupportsApplePayAutomation(version), true, String(version));
+  }
   for (const language of ['en', 'ar']) {
     const copy = helper.iosApplePayCopy(language);
-    assert.match(copy.subtitle, /27/); assert.doesNotMatch(copy.unsupported, /17/);
+    assert.match(copy.subtitle, /17/); assert.doesNotMatch(copy.subtitle, /27/);
+    assert.match(copy.unsupported, /17/);
+    // Shortcuts' Replace leaves two same-named copies; never advise it.
+    assert.doesNotMatch(copy.addHelp, /Replace|استبدل/);
   }
 });
 
 test('older and invalid iOS deep links redirect to SMS setup without native actions or progress loss', async () => {
   const saved = { version: 1, futureCaptureSource: 'apple-pay', futureShortcutConfirmed: true,
     futureAutomationConfirmed: true, futureStatus: 'complete', returnToOnboarding: true };
-  for (const version of ['17.0', '26.6', '27oops']) {
+  for (const version of ['16.7', '15.0', '27oops']) {
     const h = await screen({ version, saved, enabled: true, proof: Date.now(), received: Date.now() });
     assert.equal(h.tree().type, 'Redirect');
     assert.equal(h.tree().props.href.pathname, '/ios-setup');
@@ -217,7 +225,7 @@ test('older and invalid iOS deep links redirect to SMS setup without native acti
     assert.deepEqual(h.events, []); assert.deepEqual(h.urls, []); assert.deepEqual(h.shares, []);
     assert.equal(h.saved(), saved);
   }
-  const settings = await screen({ version: '26.1', fromOnboarding: '0', onboarded: true });
+  const settings = await screen({ version: '16.1', fromOnboarding: '0', onboarded: true });
   assert.equal(settings.tree().props.href.params.fromOnboarding, undefined);
 });
 
@@ -243,6 +251,14 @@ test('Apple Pay video appears only with supported native capture and the matchin
   assert.match(steps, /Shortcuts editor.*Automation section.*Transaction trigger/);
   assert.match(steps, /Amount and Merchant bound to Shortcut Input/);
   assert.doesNotMatch(steps, /Add Run Shortcut|Automation → \+/);
+  // iOS 17–26: a personal Transaction automation that runs the bundled Shortcut.
+  const legacy = helper.iosApplePayCopy('en').automationStepsLegacy.join(' ');
+  // iOS 26 names the trigger Wallet; earlier builds call it Transaction.
+  assert.match(legacy, /Automation, then \+\. Choose Wallet \(called Transaction/);
+  assert.match(legacy, /Under When I tap/);
+  assert.match(legacy, /Run Immediately/);
+  assert.match(legacy, /Wafra Apple Pay v1/);
+  assert.equal(helper.iosApplePayCopy('ar').automationStepsLegacy.length, 3);
 });
 
 test('recent Wallet Card or Pass values are listed newest first, on device only, with absent values named', async () => {
@@ -260,8 +276,52 @@ test('recent Wallet Card or Pass values are listed newest first, on device only,
   assert.equal(lines.length, 3);
   assert.match(lines[0], /· Apple Card$/); assert.match(lines[1], /· Visa Gold 1234$/); assert.match(lines[2], /· No card name sent \(optional\)$/);
   assert.match(h.text(), /Card or Pass from Wallet/);
-  assert.match(h.text(), /not used to choose an account/);
-  assert.match(h.text(), /Optional\./);
+  assert.match(h.text(), /first purchase from each card asks which account it belongs to; later ones from that card are added automatically/);
+  assert.match(h.text(), /card name stays on this iPhone/);
+  assert.equal(walk(block).some(n => n.props?.testID === 'apple-pay-card-links'), false, 'no linked-card list without links');
+});
+
+test('linked Wallet cards are listed with their account and can be forgotten', async () => {
+  const at = Date.parse('2026-10-11T09:00:00Z');
+  const h = await screen({ enabled: true, received: at, cards: [], accounts: [
+    { id: 'acc-liv', name: 'Liv', kind: 'bank' }, { id: 'acc-old', name: 'Old card', kind: 'card', archived: true },
+  ], links: [
+    { cardOrPass: 'Apple Cash', accountId: 'acc-liv', linkedAt: at - 1000 },
+    { cardOrPass: 'Liv Debit', accountId: 'acc-gone', linkedAt: at - 500 },
+    { cardOrPass: 'Old Visa', accountId: 'acc-old', linkedAt: at },
+    { cardOrPass: 'Visa Debit', accountId: 'acc-liv', linkedAt: at + 1, ambiguous: true },
+  ] });
+  const block = walk(h.tree()).find(n => n.props?.testID === 'apple-pay-card-links');
+  assert.ok(block, 'links show even when Wallet sent no recent card rows');
+  const lines = walk(block).filter(n => n.type === 'Text' && n.props.type === 'small').map(n => [].concat(n.props.children).join(''));
+  assert.deepEqual(lines, ['Apple Cash · Liv', 'Liv Debit · account removed or hidden, so purchases ask again',
+    'Old Visa · account removed or hidden, so purchases ask again',
+    'Visa Debit · confirmed on two accounts. More than one card may share this name, so its purchases always ask. Forget it to choose again']);
+  const forgets = walk(block).filter(n => n.type === 'Button' && n.props.label === 'Forget');
+  assert.equal(forgets.length, 4);
+  assert.equal(forgets[0].props.accessibilityLabel, 'Forget: Apple Cash');
+  forgets[0].props.onPress();
+  await h.flush();
+  assert.ok(h.events.includes('forget:Apple Cash'));
+  const after = walk(walk(h.tree()).find(n => n.props?.testID === 'apple-pay-card-links'))
+    .filter(n => n.type === 'Text' && n.props.type === 'small').map(n => [].concat(n.props.children).join(''));
+  assert.equal(after.some(line => line.startsWith('Apple Cash')), false);
+  assert.match(h.text(), /Forget a card to choose its account again on its next purchase/);
+});
+
+test('Apple Pay setup copy says the first purchase per card asks and later ones post, in English and Arabic', () => {
+  const en = helper.iosApplePayCopy('en'), ar = helper.iosApplePayCopy('ar');
+  for (const key of ['intro', 'cardHelp']) {
+    assert.match(en[key], /first purchase from each card asks which account it belongs to/, key);
+    assert.match(en[key], /added automatically/, key);
+    assert.doesNotMatch(en[key], /Each supported purchase goes to Review|not used to choose an account/, key);
+    assert.match(ar[key], /أول عملية من كل بطاقة تسألك/, key);
+    assert.match(ar[key], /تلقائياً/, key);
+  }
+  for (const key of ['linksTitle', 'linksHelp', 'linkGone', 'linkAmbiguous', 'forget']) {
+    assert.equal(typeof en[key], 'string', key); assert.equal(typeof ar[key], 'string', key);
+    assert.notEqual(en[key], ar[key], key);
+  }
 });
 
 test('no card block on older binaries, empty lists or a failed read; the rest of the screen still loads', async () => {

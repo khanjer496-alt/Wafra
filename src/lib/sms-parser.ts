@@ -602,8 +602,35 @@ export interface ParsedCard {
  * "Cr.transaction" saved as an expense). As 64 says, rows the parser now
  * refuses (codes, limit notices, redemptions) are kept, not deleted. If #151's
  * grammar changes ever ship apart from 50, they need their own bump.
+ *
+ * 67: source-backed statement totals/minimums and labelled account-side
+ * repayments. Native worldwide fields preserve money roles and source spans;
+ * uncertain ownership, ambiguous currency and non-completed events remain
+ * unresolved. No additional full-history repair is requested.
+ *
+ * 68: retain explicit senderless own-card purchases in Review and distinguish
+ * the labelled Cr.Limit footer from the purchase principal in native previews.
+ * Future capture and the bounded recent reread use these corrected roles;
+ * no automatic posting policy or additional full-history backfill is added.
+ *
+ * 69: a dirham code glued to its figure ("used for AED29.05", ADCB) is market
+ * evidence for a record with no sender, as "AED 29.05" always was; a
+ * hyphen-joined field label ("Fee-AED2.38") is not. With a sender, iPhone capture now routes the launch grammar from the sender alone,
+ * as Android does (local-message-record.ts), and folds carrier re-deliveries
+ * (auto-import.ts carrierRedeliveryIndexesOf); Android keeps one copy of an
+ * adjacent provider duplicate that is also a carrier re-delivery. Also: a
+ * completed "Purchase amount of ... has been refunded" credit is deliberately
+ * "other", so it posts instead of waiting in income Review; a booking
+ * reference after a descriptor star ("AIRBNB * HMFFQR29BF") keeps the
+ * merchant; "CAREEM PAY TO <name>" is a person payment, not Transport; UAE
+ * "AD-" advertising senders are ignored on both platforms; and iPhone honours
+ * the unverified-format auto-add setting through Android's one policy. Future
+ * capture and the bounded recent reread only: PARSER_BACKFILL_VERSION stays
+ * 50: the Android loss (both of two adjacent copies) was three rows in a
+ * 30k-message inbox, too few to justify a full-history reread on every
+ * phone, and iPhone-captured rows keep no source text for a reread to reach.
  */
-export const PARSER_VERSION = 66;
+export const PARSER_VERSION = 69;
 /**
  * Historical-repair contract for already-saved data.
  *
@@ -1078,6 +1105,16 @@ const BILL_DUE_WORDS = /\bdue\s+(?:on|by|date)\b|\bdue\s+(?:\d{1,2}[/-]\d{1,2}[/
  */
 const HYPOTHETICAL_PAYMENT_RE =
   /\b(?:if|in\s+case)\b[^.\n]{0,48}?\balready\b[^.\n]{0,32}?\b(?:paid|settled|cleared|made|processed|deducted|debited)\b/gi;
+/**
+ * A LATER sentence that states no movement yet: a condition ("If cancelled,
+ * amount will be reversed") or a promise ("Any refund will be credited within
+ * 7 days", "Cashback of AED 2.50 will be credited to your account"). Its
+ * refund/credit words are not the direction of the purchase the first
+ * sentence completed. The leading sentence is never blanked, so "...has been
+ * reversed and will be refunded" keeps its own words.
+ */
+const FUTURE_FOOTER_SENTENCE_RE =
+  /(?<=[.!?][ \t]+)(?:if\b(?:[^.!?\n]|\.(?=\d))*|(?:[^.!?\n]|\.(?=\d))*\bwill\s+be\s+(?:refunded|reversed|credited)\b(?:[^.!?\n]|\.(?=\d))*)[.!?]?/gi;
 /** "To pay your bill, please visit ..." / "to settle the amount, call ..." */
 const PAYMENT_INSTRUCTION_RE =
   /\bto\s+(?:pay|settle|clear)\b[^.\n]{0,64}?(?:,\s*(?:please|kindly)\b|\bplease\b|\bkindly\b|\bvisit\b|\bcall\b|\blog\s*in\b|\bsms\b)[^.\n]{0,64}/gi;
@@ -1227,10 +1264,13 @@ const CARD_PAYMENT_DEBIT_LEG_RE =
   /payment\s+instructions?|(?:debited|deducted)\b[\s\S]*towards?\s+(?:the\s+)?(?:payment|settlement|repayment)|\bpayment\b[\s\S]{0,100}?\b(?:card|covered\s+card|credit\s+card|charge\s+card)\b[\s\S]{0,80}?\b(?:was|has\s+been|is)\s+(?:debited|deducted)\s+from\s+your\s+(?:account|a\/?c)\b/i;
 const CARD_PAYMENT_RECEIPT_LEG_RE =
   /(?:payment|amount)\b[\s\S]*(?:received|credited)|received\s+(?:your\s+)?payment|has\s+been\s+paid|thank you for (?:your )?payment/i;
+/** A completed account-side field list; it names no destination card suffix. */
+const CARD_PAYMENT_ACCOUNT_FIELD_RE =
+  /^\s*payment\s+towards?\s+(?:your\s+)?(?:credit|covered|charge)\s+card\s+from\s+(?:your\s+)?(?:account|a\/?c)\b/i;
 
 /** Undefined means the message named neither leg — never a guess. */
 function cardPaymentLeg(raw: string): 'debit' | 'receipt' | undefined {
-  if (CARD_PAYMENT_DEBIT_LEG_RE.test(raw)) return 'debit';
+  if (CARD_PAYMENT_DEBIT_LEG_RE.test(raw) || CARD_PAYMENT_ACCOUNT_FIELD_RE.test(raw)) return 'debit';
   if (CARD_PAYMENT_RECEIPT_LEG_RE.test(raw)) return 'receipt';
   return undefined;
 }
@@ -2225,6 +2265,9 @@ let AED_SUFFIX_RE = /x^/g;
 let MIN_DUE_RE = /x^/;
 let TOTAL_DUE_RE = /x^/;
 let CARD_PAYMENT_DUE_TOTAL_RE = /x^/;
+let GENERATED_CARD_TOTAL_RE = /x^/;
+let TOTAL_OF_MINIMUM_DUE_RE = /x^/;
+let CARD_PAYMENT_ACCOUNT_POSTING_RE = /x^/;
 /** TOTAL_DUE_RE's LABEL without its figure — see statementTotalFils. */
 let TOTAL_DUE_LABEL_RE = /x^/;
 let AR_MIN_DUE_RE = /x^/;
@@ -2415,7 +2458,7 @@ function ensureCurrencyPatterns(): void {
   // only the minimum. Keep the pay verb and dot so neither bare "min" nor
   // the later late-fee amount can supply it; the total remains independent.
   MIN_DUE_RE = new RegExp(
-    `(?:min(?:imum)?\\s+(?:(?:amount\\s+)?due(?:\\s+amount)?|payment(?:\\s+(?:of|due))?|amt(?:\\s+due)?)|\\bpay\\s+min\\.)\\s*(?:of|:|is|[-\u2013](?=\\s))?\\s*(?:${PREFIX})\\s*(${FIGURE})`, 'i');
+    `(?:min(?:imum)?(?:\\s+|\\.\\s*)(?:(?:amount\\s+)?due(?:\\s+amount)?|payment(?:\\s+(?:of|due))?|amt(?:\\s+due)?)|\\bpay\\s+min\\.)\\s*(?:of|:|is|[-\u2013](?=\\s))?\\s*(?:${PREFIX})\\s*(${FIGURE})`, 'i');
   // "Closing balance" and "statement balance" are what a statement calls its
   // total. Without them the branch fell through to first-amount extraction and
   // recorded the MINIMUM as the statement total — AED 425 owed on a AED 8,500
@@ -2451,7 +2494,21 @@ function ensureCurrencyPatterns(): void {
     `|total\\s+amt(?=\\s*[-\u2013]\\s)` +
     `|(?<!\\bmin\\s)(?<!\\bmin\\.\\s)(?<!\\bminimum\\s)amount\\s+due)`;
   TOTAL_DUE_RE = new RegExp(
-    `${TOTAL_DUE_LABEL}\\s*(?:is|:|[-\u2013](?=\\s))?\\s*(?:${PREFIX})\\s*(${FIGURE})`, 'i');
+    `${TOTAL_DUE_LABEL}\\s*(?:of|is|:|[-\u2013](?=\\s))?\\s*(?:${PREFIX})\\s*(${FIGURE})`, 'i');
+  // This generated-statement sentence states the full amount immediately
+  // after its credit-card identity, without a separate "total due" label.
+  // Keep both the statement subject and issued tense; a payment, purchase,
+  // headroom or minimum elsewhere cannot supply the debt.
+  GENERATED_CARD_TOTAL_RE = new RegExp(
+    `\\bstatement\\s+for\\s+(?:your\\s+)?(?:[A-Za-z]+\\s+){0,3}(?:credit|covered|charge)\\s+card\\s+[Xx*\u00b7\u2022\\d-]{4,24}\\s+of\\s+(?:${PREFIX})\\s*(${FIGURE})\\s+has\\s+been\\s+(?:generated|issued)\\b`, 'i');
+  // "Total of X, minimum of Y is due by ..." names the two obligations
+  // together. Bare "total of" can describe rewards and is never enough.
+  TOTAL_OF_MINIMUM_DUE_RE = new RegExp(
+    `\\btotal\\s+of\\s+(?:${PREFIX})\\s*(${FIGURE})\\s*(?:,|and|&)\\s*minimum\\s+of\\s+(?:${PREFIX})\\s*(${FIGURE})\\s+(?:is|are)\\s+due\\s+(?:by|on)\\b`, 'i');
+  // Bind the funding identity, primary Amount and its Date in one field list.
+  // A separate fee Amount/Date cannot repair an unreadable primary field.
+  CARD_PAYMENT_ACCOUNT_POSTING_RE = new RegExp(
+    `${CARD_PAYMENT_ACCOUNT_FIELD_RE.source}\\s*(?:no\\.?|number)?\\s*:?\\s*[Xx*\u00b7\u2022\\d-]{1,64}(?:\\s+[Xx*\u00b7\u2022\\d-]{1,64})?\\s+amount\\s*:\\s*(?:${PREFIX})\\s*(${FIGURE})\\s*(?:[,;]\\s*)?date\\s*:\\s*(\\d{1,2})[/.-](\\d{1,2})[/.-](\\d{2,4})(?=\\s|$|[.,;](?!\\d))`, 'i');
   CARD_PAYMENT_DUE_TOTAL_RE = new RegExp(
     `\\bcard\\b[^.\\n]{0,96}?\\bpayment\\s+is\\s+due\\s+on\\s+` +
     `\\d{1,2}[-\\s]+[A-Za-z]{3,9}(?:[-\\s]+\\d{2,4})?\\s+is\\s+` +
@@ -3452,6 +3509,16 @@ function cleanDescriptor(name: string): string {
   // plain descriptor "THE VIOLE", so leaving the prefix on files one shop
   // under two names. Deliberately generic: the star is the separator every
   // acquirer uses, and listing gateways one at a time never caught up.
+  // ...unless what follows the star is the merchant's own BOOKING REFERENCE
+  // rather than a shop: "AIRBNB * HMFFQR29BF LONDON GBR" is Airbnb, and
+  // peeling it filed the stay as "HMFFQR29BF London" — a different title for
+  // every booking. A reference is one upper-case run of 6-12 letters and
+  // digits with at least two of each ("7ELEVEN" is a shop: one digit).
+  const starred = /^([A-Za-z][A-Za-z0-9.\-& ]{1,14}?)\s*\*\s*([A-Z0-9]{6,12})(?![A-Za-z0-9])/.exec(out);
+  if (starred && /\d[^\d]*\d/.test(starred[2]) && /[A-Z][^A-Z]*[A-Z]/.test(starred[2]) &&
+    (starred[1].match(/[A-Za-z]/g) ?? []).length >= 3) {
+    out = starred[1].trim();
+  }
   out = peelPrefix(out, /^[A-Za-z0-9][A-Za-z0-9.\-& ]{0,14}\*\s*/);
   // "SP ALL-CHARMS", "SP LUETTI 1980", "SP TODD SNYDER" — one acquirer's
   // literal prefix, UPPER-CASE only so a mixed-case name starting with "Sp"
@@ -4840,8 +4907,52 @@ const extractTtPaymentAmount = (raw: string): TtPaymentAmount | null => {
  * minimum, last payment or headroom into total debt can falsely settle a card.
  */
 function statementTotalFils(raw: string): number | null {
-  const totalMatch = raw.match(TOTAL_DUE_RE) ?? raw.match(CARD_PAYMENT_DUE_TOTAL_RE) ?? raw.match(AR_TOTAL_DUE_RE);
-  return totalMatch ? Math.round(Number(totalMatch[1].replace(/,/g, '')) * 100) : null;
+  const totalMatch = raw.match(TOTAL_DUE_RE);
+  if (totalMatch) return Math.round(Number(totalMatch[1].replace(/,/g, '')) * 100);
+  const paired = raw.match(TOTAL_OF_MINIMUM_DUE_RE);
+  if (paired) {
+    // The pair states debt but does not itself name its owner. First-card
+    // extraction cannot decide between different instruments in the body.
+    if (!statementHasSingleCardOwner(raw)) return null;
+    return Math.round(Number(paired[1].replace(/,/g, '')) * 100);
+  }
+  const legacyTotal = raw.match(CARD_PAYMENT_DUE_TOTAL_RE) ?? raw.match(AR_TOTAL_DUE_RE);
+  if (legacyTotal) return Math.round(Number(legacyTotal[1].replace(/,/g, '')) * 100);
+  const generated = raw.match(GENERATED_CARD_TOTAL_RE);
+  if (!generated) return null;
+  // The amount belongs to the card named in this generated-statement clause.
+  // An earlier/later card cannot receive it through first-card extraction.
+  const ownCard = extractCard(generated[0]);
+  if (!ownCard || !statementHasSingleCardOwner(raw, ownCard.last4)) return null;
+  return Math.round(Number(generated[1].replace(/,/g, '')) * 100);
+}
+
+/** Ownership guard for the two new statement-total grammars only. A cardless
+ * summary remains cardless; an account tail or competing card never supplies
+ * its identity. Legacy total-due labels retain their established behavior.
+ */
+function statementHasSingleCardOwner(raw: string, expectedTail?: string): boolean {
+  if (ACCOUNT_RE.test(raw) || MASKED_ACCOUNT_RE.test(raw) || AR_ACCOUNT_RE.test(raw)) return false;
+  const finalCard = extractCard(raw);
+  if (finalCard?.kind === 'account' || finalCard?.kind === 'debit') return false;
+  const maskedPan = new RegExp(MASKED_PAN_RE.source, 'g');
+  const identities = new Set<string>();
+  for (const match of raw.matchAll(maskedPan)) {
+    if (saysDebit(transactionWindow(raw, endOf(match)))) return false;
+    identities.add(match[1]);
+  }
+  const withoutPans = raw.replace(maskedPan, (match) => ' '.repeat(match.length));
+  for (const match of withoutPans.matchAll(new RegExp(CARD_RE.source, 'gi'))) {
+    if (/debit|prepaid/i.test(match[1] ?? '')) return false;
+    identities.add(match[2] ?? match[3]);
+  }
+  for (const match of withoutPans.matchAll(new RegExp(AR_CARD_RE.source, 'g'))) {
+    if ((match[1] ?? '').includes('الخصم')) return false;
+    identities.add(match[2]);
+  }
+  if (!finalCard) return expectedTail === undefined && identities.size === 0;
+  const ownerTail = expectedTail ?? finalCard.last4;
+  return finalCard.last4 === ownerTail && identities.size === 1 && identities.has(ownerTail);
 }
 
 /** A contradictory minimum cannot become a payment obligation. Keep the
@@ -4850,8 +4961,9 @@ function statementTotalFils(raw: string): number | null {
  */
 function statementMinimumFils(raw: string, totalFils: number): number | null {
   const match = raw.match(MIN_DUE_RE) ?? raw.match(AR_MIN_DUE_RE);
-  if (!match) return null;
-  const minimum = Math.round(Number(match[1].replace(/,/g, '')) * 100);
+  const figure = match?.[1] ?? raw.match(TOTAL_OF_MINIMUM_DUE_RE)?.[2];
+  if (!figure) return null;
+  const minimum = Math.round(Number(figure.replace(/,/g, '')) * 100);
   return Number.isSafeInteger(minimum) && minimum >= 0 && minimum <= totalFils ? minimum : null;
 }
 
@@ -6445,6 +6557,13 @@ function parseSmsInner(
   const purchaseRefund = raw.match(
     /\bpurchase(?:\s+(?:amount|amt))?\s+(?:of\s+)?(?:[A-Z]{3}|Dhs?)\s*[\d,.]+\s+at\s+(.+?)\s+on\s+your\s+(?:credit|debit|covered|prepaid)?\s*card\b[\s\S]{0,120}?\bhas\b[\s\S]{0,24}?\brefunded\b/i,
   );
+  // What the bank says HAPPENED to the purchase. "has not been refunded" is
+  // no movement, and a partial refund's money is not the purchase figure this
+  // branch reads; neither is a refund credit here (the refusal inspector may
+  // still offer it in Review). Only the clean completed form is understood.
+  const refundClause = purchaseRefund?.[0].match(/\bhas\b[\s\S]{0,24}?\brefunded\b$/i)?.[0] ?? '';
+  if (purchaseRefund && /\b(?:not|never|partial(?:ly)?)\b/i.test(refundClause)) return null;
+  const cleanRefund = /^has\s+been\s+(?:successfully\s+|fully\s+)?refunded$/i.test(refundClause.replace(/\s+/g, ' '));
   if (purchaseRefund) {
     const money = transactionMoney(raw);
     if (money) {
@@ -6462,7 +6581,11 @@ function parseSmsInner(
         snapshotFils,
         snapshotKind,
         categoryGuess: 'other',
-        categoryDeliberate: false,
+        // A completed refund is understood, not an unread credit — the same
+        // as every other refund grammar here. Left undeliberate, the
+        // income-review gate held every such Liv/ENBD refund in Review. Any
+        // other wording around "refunded" stays for Review, as before.
+        categoryDeliberate: cleanRefund,
         currency,
         reference,
         raw: source,
@@ -6539,6 +6662,29 @@ function parseSmsInner(
         raw: source,
       };
     }
+  }
+
+  // This labelled account-side payment is a settlement even when the bank
+  // omits the target card. Its account digits and balance describe funding,
+  // so neither may become destination-card identity or headroom.
+  const accountPaymentField = CARD_PAYMENT_ACCOUNT_FIELD_RE.test(raw);
+  if (accountPaymentField && !REFUND_RE.test(raw) && !REVERSAL_RE.test(raw)) {
+    const posting = raw.match(CARD_PAYMENT_ACCOUNT_POSTING_RE);
+    if (!posting || Array.from(raw.matchAll(/\bamount\s*:/gi)).length !== 1 ||
+        Array.from(raw.matchAll(/\bdate\s*:/gi)).length !== 1) return null;
+    const accountPaymentDay = numericDate(posting[2], posting[3], posting[4]);
+    if (!accountPaymentDay) return null;
+    const observedDay = localIsoDay(options?.observedAt);
+    if (observedDay && accountPaymentDay > observedDay) return null;
+    const amountFils = Math.round(Number(posting[1].replace(/,/g, '')) * 100);
+    if (!Number.isSafeInteger(amountFils) || amountFils <= 0 || amountFils > MAX_PLAUSIBLE_AMOUNT_FILS) return null;
+    return {
+      kind: 'cardPayment', type: 'expense', amountFils, merchant: 'Card payment',
+      date: accountPaymentDay, dueDay: null, minDueFils: null, card: null,
+      cardPaymentSide: 'debit', transferHint: true,
+      snapshotFils: null, snapshotKind: null,
+      categoryGuess: 'other', categoryDeliberate: true, currency, reference, raw: source,
+    };
   }
 
   // Card payment received (transfer into the card) — before debit detection,
@@ -7286,7 +7432,7 @@ function parseSmsInner(
 
   // URLs carry misleading words ("sewapayment.tiny.us" is not a payment).
   // ...and a government-support deposit's usage note is not a movement.
-  const prose = blank(raw.replace(/https?:\/\/\S+/gi, ' '), AR_USAGE_NOTE_RE);
+  const prose = blank(blank(raw.replace(/https?:\/\/\S+/gi, ' '), AR_USAGE_NOTE_RE), FUTURE_FOOTER_SENTENCE_RE);
   // ...and so do the two clauses a reminder signs off with. See
   // HYPOTHETICAL_PAYMENT_RE: the direction WORDS read the body without them,
   // while every clause test below still reads `prose` in full.
@@ -7514,6 +7660,7 @@ function parseSmsInner(
   // but calling them "Card purchase" was wrong twice over, and a row that
   // reads "Transfer to Khalid Rashid" needs no category at all.
   let structuralMerchant = false;
+  let peerPaymentTitle = false;
   const channelTransfer = !isBillDue && type === 'expense' &&
     /\b(?:debited|deducted)\b/i.test(prose) &&
     /\b(?:for|towards)\s+(?:an?\s+)?(?:funds?\s+)?transfer\s+(?:through|via|using)\s+(?:(?:personal|business|corporate)\s+)?(?:internet|online|mobile|digital)\s+banking\b/i.test(prose) &&
@@ -7579,10 +7726,23 @@ function parseSmsInner(
     const named = raw.match(
       /\b(?:fastpay|instant|local|domestic|international|fund|mobile\s+banking)\s+transfer\s+to\s+([A-Za-z][A-Za-z .'\-]{2,40}?)\s*(?:[.,;]|\bif\b|$)/i,
     );
+    // Careem Pay sends money to a PERSON through the card: the descriptor
+    // "CAREEM PAY TO DHARAM" names the payee, and reading it as a Careem ride
+    // filed person-to-person payments as Transport. "CAREEM PAY SALIK" (a toll
+    // top-up, no "TO") is a purchase and stays one.
+    const careemPayPeer = raw.match(
+      /\bat\s+careem\s+pay\s+to\s+(?!careem\b)([A-Za-z][A-Za-z .'\-]{1,40}?)\s*\*?\s*(?:[.,;]|$|(?=\s+on\s+\d))/i,
+    );
     const namedPayee = completedNamed?.[1] ?? named?.[1];
     if (namedPayee) {
       merchant = `Transfer to ${namedPayee.trim().replace(/\s{2,}/g, ' ')}`;
       structuralMerchant = true;
+    } else if (careemPayPeer) {
+      merchant = `Transfer to ${titleCase(careemPayPeer[1].trim().replace(/\s{2,}/g, ' '))}`;
+      structuralMerchant = true;
+      // The category reads the title, not the body: "careem" in the body is
+      // the rail, and would file the payment as a ride.
+      peerPaymentTitle = true;
     } else if (/\btransfer\s+to\s+[A-Z]{2}[\dX·•]/i.test(raw)) {
       merchant = 'Bank transfer';
       structuralMerchant = true;
@@ -7715,7 +7875,7 @@ function parseSmsInner(
   // One event, three categories, decided by which street the machine stands
   // on. A withdrawal is cash leaving the account; what it is later spent on is
   // not in this message.
-  let titlePinned = false;
+  let titlePinned = peerPaymentTitle;
   // The structural own-account title decides the category, never the bank
   // and account words around it ("في بنك الانماء" read as a utility).
   if (arabicOwnAccountOutgoing) titlePinned = true;

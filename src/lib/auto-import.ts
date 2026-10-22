@@ -1,4 +1,6 @@
-import { aiReviewEventForRefusedAlert } from '@/lib/ai-alert-reader';
+import { createAiAlertReviewSession } from '@/lib/ai-alert-reader';
+import { createPrivateAlertFormatSession, type PrivateAlertFormatSessionOptions } from '@/lib/private-alert-format-runtime';
+import { canEnrichPrivateFormatReview, privateAlertFormatReviewEvent } from '@/lib/private-alert-format-review';
 import { AppState as RNAppState, Linking, PermissionsAndroid, Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
@@ -51,6 +53,7 @@ import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { parsedObligationReviewEvent, parsedTransactionReviewEvent } from '@/lib/parsed-review-event';
 import {
+  MARKETS,
   detectLaunchMarketFromAlert,
   detectLaunchMarketFromSender,
   pinnedLedgerCurrencyCode,
@@ -70,7 +73,7 @@ import { measureRuntimeOperation } from '@/lib/runtime-performance';
 import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
 import { canCollectLocalSemanticShadow, queueLocalSemanticParserShadow, buildLocalParserSemanticWindow } from '@/lib/local-semantic-shadow';
 import { eligibleLocalReviewEvent, localReviewAdvisor } from '@/lib/local-semantic-review';
-import { sanitizeUniversalReviewEvent } from '@/lib/generic-review-entry';
+import { mergeAiReviewEvent, sanitizeUniversalReviewEvent } from '@/lib/generic-review-entry';
 
 const DEFAULT_PAGE_SIZE = 1_000;
 const MAX_PAGE_SIZE = 2_000;
@@ -167,6 +170,13 @@ const FOREGROUND_PARSE_YIELD_MS = 16;
 // Some Android providers insert one SMS twice. Collapse only byte-identical,
 // same-sender, consecutive inbox rows delivered less than one second apart.
 const EXACT_PROVIDER_DUPLICATE_MS = 1_000;
+/** [newer] is the provider row right after [older] (newest-first order). */
+const isExactProviderDuplicate = (newer: InboxSms, older: InboxSms): boolean =>
+  newer.id === older.id + 1 &&
+  newer.date >= older.date &&
+  newer.date - older.date <= EXACT_PROVIDER_DUPLICATE_MS &&
+  newer.address === older.address &&
+  newer.body === older.body;
 /**
  * A carrier can also deliver one SMS twice minutes apart — a retry after a
  * missed delivery report — and the provider stores both as ordinary rows with
@@ -205,6 +215,47 @@ export const hasCarrierDuplicateIdentity = (body: string): boolean =>
   CARRIER_DUPLICATE_DATETIME_RE.test(body) || CARRIER_DUPLICATE_BALANCE_RE.test(body);
 
 /**
+ * A UAE ADVERTISING SENDER. The UAE regulator requires promotional SMS to
+ * carry an "AD-" sender prefix ("AD-ADCB", "AD-noon"), and a transactional
+ * alert may not use one. In a real 30k-message UAE inbox none of 1,242 AD-
+ * messages was a movement, yet 212 offers ("earn up to AED 500 cashback...")
+ * reached Review. Such a message is ignored before parsing: no row, no
+ * Review. Elsewhere "AD-" is an operator/circle code on ordinary alerts
+ * (India's "AD-HDFCBK"), so the decision reads the SENDER, never the
+ * person's country: the name after the prefix must itself be a UAE launch
+ * bank or a UAE telco. Other advertisers keep their ordinary handling.
+ */
+const UAE_TELCO_SENDER = /^(?:e&(?:\s*money)?|etisalat|du|virgin\s*mobile(?:\s*uae)?)$/i;
+/** The launch bank sender patterns, anchored: the WHOLE name must be the bank's. */
+let uaeBankSenderNames: RegExp[] | null = null;
+export const isUaeAdvertisingSender = (sender: string | undefined): boolean => {
+  const raw = typeof sender === 'string' ? sender.trim() : '';
+  const named = /^AD-(.+)$/i.exec(raw)?.[1]?.trim();
+  if (!named) return false;
+  // Exact, never a prefix: "AD-HSBCIN" is HSBC India and "AD-ENBDIN" an
+  // Indian header, both real alerts; only "AD-HSBC", "AD-ENBD" are UAE.
+  uaeBankSenderNames ??= (MARKETS.find((market) => market.id === 'AE')?.banks ?? [])
+    .map((bank) => new RegExp(`^(?:${bank.re.source})$`, 'i'));
+  return uaeBankSenderNames.some((name) => name.test(named)) || UAE_TELCO_SENDER.test(named);
+};
+
+/**
+ * The facts the carrier fold decides on, one per delivered copy. The fold
+ * never needs the text itself, so the iPhone drain can supply these after its
+ * source has been cleared: `copyKey` is equal exactly for byte-identical
+ * bodies from one sender, and null when the body carries nothing two real
+ * charges could not share (hasCarrierDuplicateIdentity).
+ */
+export interface CarrierCopyFacts {
+  /** The sender, or an opaque key that is equal exactly when senders are. */
+  sender: string;
+  copyKey: string | null;
+  date: number;
+  /** The running balance the body states; read only when a cluster needs it. */
+  balance: () => number | undefined;
+}
+
+/**
  * Indexes of [rows] that are later carrier re-deliveries of an earlier row in
  * the same list: same sender, byte-identical identity-bearing body, within
  * CARRIER_DUPLICATE_MS of the copy that is kept. The EARLIEST copy of each
@@ -212,14 +263,12 @@ export const hasCarrierDuplicateIdentity = (body: string): boolean =>
  * the copy an earlier scan is most likely to have stored already; keeping the
  * later one would then import it beside the stored row.
  */
-export const carrierRedeliveryIndexes = (
-  rows: readonly { address: string; body: string; date: number }[],
-): Set<number> => {
+export const carrierRedeliveryIndexesOf = (rows: readonly CarrierCopyFacts[]): Set<number> => {
   const skipped = new Set<number>();
   const byKey = new Map<string, number[]>();
   rows.forEach((row, index) => {
-    if (typeof row.body !== 'string' || !hasCarrierDuplicateIdentity(row.body)) return;
-    const key = `${row.address}\u0000${row.body}`;
+    if (row.copyKey === null) return;
+    const key = `${row.sender}\u0000${row.copyKey}`;
     const bucket = byKey.get(key);
     if (bucket) bucket.push(index);
     else byKey.set(key, [index]);
@@ -229,19 +278,19 @@ export const carrierRedeliveryIndexes = (
   // that returned the balance to the same figure (credit 375 -> 1,275.93,
   // debit 375 -> 900.93, credit 375 -> 1,275.93 again), never a re-delivery.
   let balances: Map<string, { date: number; index: number; balance: number }[]> | null = null;
-  const balanceMovedBetween = (address: string, from: number, fromIndex: number, to: number, toIndex: number,
+  const balanceMovedBetween = (sender: string, from: number, fromIndex: number, to: number, toIndex: number,
     balance: number): boolean => {
     if (!balances) {
       balances = new Map();
       rows.forEach((row, index) => {
-        const stated = statedBalanceInText(row.body);
+        const stated = row.balance();
         if (stated === undefined) return;
-        const list = balances!.get(row.address) ?? [];
+        const list = balances!.get(row.sender) ?? [];
         list.push({ date: row.date, index, balance: stated });
-        balances!.set(row.address, list);
+        balances!.set(row.sender, list);
       });
     }
-    return (balances.get(address) ?? []).some((entry) =>
+    return (balances.get(sender) ?? []).some((entry) =>
       entry.balance !== balance &&
       (entry.date > from || (entry.date === from && entry.index > fromIndex)) &&
       (entry.date < to || (entry.date === to && entry.index < toIndex)));
@@ -250,16 +299,26 @@ export const carrierRedeliveryIndexes = (
     if (indexes.length < 2) continue;
     indexes.sort((a, b) => rows[a].date - rows[b].date || a - b);
     let kept = indexes[0];
-    const balance = statedBalanceInText(rows[kept].body);
+    const balance = rows[kept].balance();
     for (const index of indexes.slice(1)) {
       if (rows[index].date - rows[kept].date <= CARRIER_DUPLICATE_MS &&
-        !(balance !== undefined && balanceMovedBetween(rows[index].address, rows[kept].date, kept,
+        !(balance !== undefined && balanceMovedBetween(rows[index].sender, rows[kept].date, kept,
           rows[index].date, index, balance))) skipped.add(index);
       else kept = index;
     }
   }
   return skipped;
 };
+
+/** carrierRedeliveryIndexesOf over raw provider/receiver rows. */
+export const carrierRedeliveryIndexes = (
+  rows: readonly { address: string; body: string; date: number }[],
+): Set<number> => carrierRedeliveryIndexesOf(rows.map((row) => ({
+  sender: row.address,
+  copyKey: typeof row.body === 'string' && hasCarrierDuplicateIdentity(row.body) ? row.body : null,
+  date: row.date,
+  balance: () => statedBalanceInText(row.body),
+})));
 
 interface ParseYieldState {
   startedAt: number;
@@ -395,6 +454,8 @@ export interface InboxScanCursor {
 }
 
 export interface ScanInboxOptions {
+  /** Ready local formats advise Review only; parser-version repair always disables them. */
+  privateFormatReview?: PrivateAlertFormatSessionOptions;
   /** Read the bank-app queue without requiring or advancing the SMS inbox. */
   notificationOnly?: boolean;
   /** Packages explicitly learned after the user confirmed a review candidate. */
@@ -1025,6 +1086,8 @@ export async function scanInbox(
     sourceEventId?: string;
   })[] = [];
   const reviewCandidates: ReviewEntry[] = [];
+  const aiReviewSession = createAiAlertReviewSession(options.historyRepair ? { enabled: false } : {});
+  const privateFormatSession = createPrivateAlertFormatSession({ ...options.privateFormatReview, historyRepair: options.historyRepair });
   let deferredInboxReviews = false;
   const reviewSourceBindings: ReviewSourceBinding[] = [];
   const requestedLegacySources = new Set((options.legacyReviewSourceKeys ?? [])
@@ -1114,6 +1177,8 @@ export async function scanInbox(
     /** Only for alerts NO parser read (`!p`); never for a parsed row under review. */
     aiEligible = false,
     notificationId?: string,
+    /** The parser read an obligation that this transport may only review. */
+    preferParsedFallback = false,
   ): Promise<SourceFreeRefusedAlertDecision> => {
     let decision = inspectSourceFreeRefusedAlert({
       source: body,
@@ -1124,19 +1189,37 @@ export async function scanInbox(
       existingInspection,
       skipUniversalFallback,
     });
+    if (preferParsedFallback && parsedFallback && decision.kind === 'review') {
+      decision = { kind: 'review', candidate: parsedFallback };
+    }
     if (decision.kind === 'ignored' && decision.reason === 'unrecognized' && parsedFallback) {
       decision = { kind: 'review', candidate: parsedFallback };
     }
-    // AI reading (ai-alert-reader.ts): only for an alert every proven path and
-    // the refusal pipeline left unrecognised, only when the person downloaded
-    // the model, never for AE/SA senders. It can only add a Review item with
-    // suggested fields; with no model it resolves null and nothing changes.
-    if (aiEligible && !parsedFallback && !skipUniversalFallback &&
-      decision.kind === 'ignored' && decision.reason === 'unrecognized') {
-      const aiEvent = await aiReviewEventForRefusedAlert(body, sender, ts);
+    // Enrich unfamiliar generic Review while source is still available. The
+    // shared session bounds actual inference to one attempt per whole scan.
+    const eligibleUniversalFallback = parsedFallback && 'kind' in parsedFallback &&
+      parsedFallback.kind === 'universal' && canEnrichPrivateFormatReview(parsedFallback.event);
+    if (aiEligible && (!parsedFallback || eligibleUniversalFallback) && !skipUniversalFallback &&
+      ((decision.kind === 'ignored' && decision.reason === 'unrecognized') ||
+        (decision.kind === 'review' && 'kind' in decision.candidate &&
+          decision.candidate.kind === 'universal' && canEnrichPrivateFormatReview(decision.candidate.event)))) {
+      const country = getActiveCountry();
+      const formatContext = { country, dateOrder: dateOrderForCountry(country) ?? undefined,
+        routedMarket: detectLaunchMarketFromAlert(body, sender) ?? detectLaunchMarketFromSender(sender) };
+      const learned = await privateFormatSession.read(body, sender, ts, formatContext);
+      const learnedEvent = learned ? privateAlertFormatReviewEvent(body, sender, ts, learned, formatContext) : null;
+      const aiStillEligible = decision.kind === 'ignored' || (decision.kind === 'review' && 'kind' in decision.candidate &&
+        decision.candidate.kind === 'universal' && decision.candidate.event.family === 'unknown');
+      const aiEvent = learnedEvent ?? (aiStillEligible ? await aiReviewSession.read(body, sender, ts) : null);
       let aiCandidate: SourceFreeReviewCandidate | null = null;
       try { aiCandidate = aiEvent ? universalEventReviewCandidate(aiEvent, ts, channel) : null; } catch { aiCandidate = null; }
-      if (aiCandidate) decision = { kind: 'review', candidate: aiCandidate };
+      if (aiCandidate) {
+        if (decision.kind === 'review' && 'kind' in decision.candidate &&
+            decision.candidate.kind === 'universal' && 'kind' in aiCandidate && aiCandidate.kind === 'universal') {
+          decision = { kind: 'review', candidate: { ...decision.candidate,
+            event: mergeAiReviewEvent(decision.candidate.event, aiCandidate.event) } };
+        } else decision = { kind: 'review', candidate: aiCandidate };
+      }
     }
     // Counted, not classified: a text already set aside that reads as an
     // offer (the same wording test the bank-app path uses to skip them) and
@@ -1255,7 +1338,24 @@ export async function scanInbox(
     inboxScannedCount += batch.length;
     scannedCount += batch.length;
     const pageYield = createParseYieldState();
-    const carrierCopies = carrierRedeliveryIndexes(batch);
+    // The two duplicate rules compose in one order. A run of adjacent
+    // sub-second provider copies is the exact-provider rule's: it keeps the
+    // run's NEWEST row (what every ledger stored before the carrier fold
+    // existed) and declines the rest below. The carrier fold then sees only
+    // those survivors and keeps the earliest of a re-delivery cluster.
+    // Folding first had skipped the newest copy while the exact rule declined
+    // the older one, so neither posted; re-admitting the newest beside an
+    // earlier carrier copy posted two.
+    const exactProviderCopies = new Set<number>();
+    for (let j = 1; j < batch.length; j++) {
+      if (isExactProviderDuplicate(batch[j - 1], batch[j])) exactProviderCopies.add(j);
+    }
+    if (previousInboxSms && batch.length > 0 && isExactProviderDuplicate(previousInboxSms, batch[0])) {
+      exactProviderCopies.add(0);
+    }
+    const carrierCandidates = batch.flatMap((row, index) => exactProviderCopies.has(index) ? [] : [index]);
+    const carrierCopies = new Set([...carrierRedeliveryIndexes(carrierCandidates.map((index) => batch[index]))]
+      .map((position) => carrierCandidates[position]));
     const pageStarted = tracing ? Date.now() : 0;
     let traceCheckpoint = pageStarted;
     for (let i = 0; i < batch.length; i++) {
@@ -1269,14 +1369,7 @@ export async function scanInbox(
       inboxBodies.add(bodyPrint(sms.body));
       const previous = previousInboxSms;
       previousInboxSms = sms;
-      if (
-        previous &&
-        previous.id === sms.id + 1 &&
-        previous.date >= sms.date &&
-        previous.date - sms.date <= EXACT_PROVIDER_DUPLICATE_MS &&
-        previous.address === sms.address &&
-        previous.body === sms.body
-      ) {
+      if (previous && isExactProviderDuplicate(previous, sms)) {
         declined.push({
           smsTs: sms.date,
           sender: sms.address,
@@ -1294,6 +1387,13 @@ export async function scanInbox(
       // and only here: no `declined` record, because that would ask the plan
       // to retire a stored row, and this fold must never remove one.
       if (carrierCopies.has(i)) {
+        if (parseYieldDue(pageYield, i + 1 < batch.length)) {
+          await yieldToUi();
+          resetParseYieldState(pageYield);
+        }
+        continue;
+      }
+      if (isUaeAdvertisingSender(sms.address)) {
         if (parseYieldDue(pageYield, i + 1 < batch.length)) {
           await yieldToUi();
           resetParseYieldState(pageYield);
@@ -1448,17 +1548,23 @@ export async function scanInbox(
         // carrier's, which differ by seconds — enough for the fingerprint
         // built from that timestamp to call them two different charges. The
         // body is the one thing both copies agree on exactly.
-        if (!inboxBodies.has(bodyPrint(sms.body))) {
+        if (!inboxBodies.has(bodyPrint(sms.body)) && !isUaeAdvertisingSender(sms.address)) {
           const worldwide = inspectWorldwide(sms.body, sms.address);
           const launchSenderMarket = detectLaunchMarketFromSender(sms.address);
           const p = launchSenderMarket
             ? parseLaunchAlert(sms.body, sms.address, worldwide, launchSenderMarket, sms.date)
             : launchSession.parseUnproven(sms.body, sms.address, worldwide, sms.date);
-          const reviewDecision = p && shouldReviewParsedIncome(p)
-            ? await inspectRefused(sms.body, sms.date, sms.address, 'delivery', worldwide)
+          // Retired delivery buffers carry no provider identity. Preserve an
+          // unverified repayment's parsed facts in Review, as with bank pushes.
+          const heldPayment = p?.kind === 'cardPayment' && p.bestEffort ? p : null;
+          const obligation = heldPayment ? parsedFinancialCandidateReview(heldPayment, sms.date) : null;
+          const deliveryFallback = obligation ? { ...obligation, channel: 'delivery' as const } : null;
+          const reviewDecision = p && (heldPayment || shouldReviewParsedIncome(p))
+            ? await inspectRefused(sms.body, sms.date, sms.address, 'delivery', worldwide,
+                undefined, undefined, deliveryFallback, false, false, undefined, !!heldPayment)
             : null;
           const reviewed = reviewDecision?.kind === 'review';
-          if (p && !reviewed) {
+          if (p && !reviewed && !heldPayment) {
             parsed.push({
               ...p,
               date: p.kind === 'cardStatement' ? p.date : p.date ?? toISODate(new Date(sms.date)),
@@ -1717,13 +1823,18 @@ export async function scanInbox(
         const parsedCurrencies = new Set(parsed.map((row) => row.currency));
         const batchCurrency = parsedCurrencies.size === 1 ? [...parsedCurrencies][0] : null;
         const requiredCurrency = pinnedLedgerCurrencyCode() ?? batchCurrency;
+        // A bank-app notification has no exact Message/provider identity.
+        // Unverified settlements stay typed Review; its weak observation
+        // cannot safely support payment Undo or settlement replay matching.
+        const heldPayment = launchParsed?.kind === 'cardPayment' && launchParsed.bestEffort
+          ? launchParsed : null;
         // A certified template is a PROVEN format: the universal reading of
         // the same alert is not "best effort" and must not carry the marker.
         const launchCandidate = launchParsed?.bestEffort && certification?.decision === 'automatic' &&
           !gulfNeighbourOwned
           ? (({ bestEffort: _marker, ...proven }) => proven)(launchParsed)
           : launchParsed;
-        const parsedCandidate = launchCandidate ?? universalParsed;
+        const parsedCandidate = heldPayment ? null : launchCandidate ?? universalParsed;
         // Parser success is not admission to the ledger. A trusted bank-app
         // package may auto-post globally, but only in the ledger's established
         // currency (or the single currency already established by this batch).
@@ -1735,9 +1846,9 @@ export async function scanInbox(
         // A messaging row carries no package identity into Review, so
         // confirming it can never teach Wafra to trust the Messages app.
         const pushSource = messagingRow ? undefined : { packageName: n.pkg, sourceClass } as const;
-        const parsedCandidateFallback = p && !autoAuthorized
-          ? parsedFinancialCandidateReview(p, n.ts)
-          : null;
+        const parsedCandidateFallback = heldPayment
+          ? parsedFinancialCandidateReview(heldPayment, n.ts)
+          : p && !autoAuthorized ? parsedFinancialCandidateReview(p, n.ts) : null;
         const universalCandidateFallback = !p && universalEvent
           ? universalEventReviewCandidate(universalEvent, n.ts)
           : null;
@@ -1772,8 +1883,9 @@ export async function scanInbox(
             pushSource,
             reviewFallback,
             skipKnownLaunchUniversal,
-            true,
+            !heldPayment,
             n.id,
+            !!heldPayment,
           );
         }
         if (refusal?.kind === 'review') {

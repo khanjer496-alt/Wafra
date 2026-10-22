@@ -476,6 +476,10 @@
     "sender": "AX-AXISBK-S",
     "body": "Payment of INR 12,345.00 has been received towards your Axis Bank Credit Card XX5678 on 08-10-26. Thank you - Axis Bank",
     "expect": { "post": false, "why": "other" },
+    "expectByPath": {
+      "android-sms": { "post": false, "why": "settlement, not spending", "acceptedObligation": { "kind": "cardPayment", "amountMinor": 1234500, "currency": "INR", "card": { "last4": "5678", "kind": "credit" }, "cardPaymentSide": "receipt" } },
+      "ios-history": { "post": false, "why": "unverified settlement remains in Review" }
+    },
     "notes": "Axis credit card bill payment acknowledgement; a settlement, not income (excluded as positive by rule)",
     "provenance": "synthetic"
   },

@@ -25,7 +25,10 @@ markets.setActiveMarket('AE'); markets.setLedgerCurrency('AED', 2);
 const { parseLocalMessageRecord } = current('local-message-record');
 const { createLaunchAlertSession } = current('launch-alert-parser');
 const receipt = date => `Dear Customer, your payment of AED 42.10 on ${date} for card ending with **1234 has been credited. Thank you.`;
-const parse = (text, observedAt, sender = 'Unknown Sender', importedAt = '2026-09-19T12:00:00Z') =>
+// The default is what the native store records for a Message staged without a
+// sender. A real sender that names no bank routes no launch market (Android's
+// sender-only rule), so it would never reach the receipt grammar under test.
+const parse = (text, observedAt, sender = 'Wafra Automation', importedAt = '2026-09-19T12:00:00Z') =>
   parseLocalMessageRecord(JSON.stringify({ v: 1, id: 'a'.repeat(64), text, sender, source: 'message', observedAt }),
     new Date(importedAt), 'AE', createLaunchAlertSession({ overrides: {}, pinnedCurrency: 'AED', activeMarket: 'AE' }));
 

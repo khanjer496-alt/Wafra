@@ -425,6 +425,153 @@ const passwordB64 = (text) => b64(Buffer.from(text, 'utf8'));
     ok('legacy .xls is not accepted', legacyXls.status === 415 && (await legacyXls.json()).error === 'csv_required');
   }
 
+  /* ───────────── a statement re-read is never a dead end ───────────── */
+  {
+    const env = { DB: makeDb() };
+    const me = await pair(env);
+    const csv = 'Date,Description,Debit,Credit\n03/04/2026,ALPHA,100.00,\n05/04/2026,BETA,,200.00\n';
+    const post = (order, extra = {}) => call(env, 'POST', '/v1/import/csv', {
+      token: me.adminToken, headers: { 'content-type': 'text/csv', 'x-wafra-date-order': order, ...extra }, body: csv,
+    });
+    const first = await (await post('month-first')).json();
+    await syncedRows(env, me);
+    const again = await (await post('month-first')).json();
+    ok('re-reading the same file inside the replay window says it was already processed',
+      again.alreadyProcessed === true && again.statementImportId === first.statementImportId);
+    // A reinstalled app (empty ledger) asks for a fresh read.
+    const fresh = await post('month-first', { 'x-wafra-statement-reread': '1' });
+    const freshBody = await fresh.json();
+    const freshRows = await syncedRows(env, me);
+    ok('a phone that holds none of the earlier rows gets the file read again, under a new identity',
+      fresh.status === 202 && freshBody.alreadyProcessed === false && freshBody.statementImportId !== first.statementImportId &&
+        freshRows.filter((row) => row.statementImportId === freshBody.statementImportId).length === 2,
+      JSON.stringify({ status: fresh.status, body: freshBody, rows: freshRows.length }));
+    const repeat = await (await post('month-first')).json();
+    ok('after a re-read, the same file is judged against the NEW read (already processed under its id)',
+      repeat.alreadyProcessed === true && repeat.statementImportId === freshBody.statementImportId, JSON.stringify(repeat));
+    const before = usage(env, me.deviceId, 'statement_requests');
+    const changed = await post('day-first');
+    const changedBody = await changed.json();
+    ok('another day/month order after a re-read is refused naming the read the phone holds, and its order',
+      changed.status === 409 && changedBody.error === 'statement_options_conflict' && changedBody.reason === 'options' &&
+        changedBody.statementImportId === freshBody.statementImportId && changedBody.previousDateOrder === 'month-first',
+      JSON.stringify(changedBody));
+    ok('a refusal does not spend the statement budget', usage(env, me.deviceId, 'statement_requests') === before,
+      `${before} → ${usage(env, me.deviceId, 'statement_requests')}`);
+    const chosen = await post('day-first', { 'x-wafra-statement-reread': '1' });
+    ok('…and read with the new order only when the phone says it holds none of its rows', chosen.status === 202);
+
+    // A parser update: same file, same options, different rows — refused
+    // (rows the phone holds are never filed twice), named as a parser change.
+    const env2 = { DB: makeDb() };
+    const me2 = await pair(env2);
+    const send = (extra = {}) => call(env2, 'POST', '/v1/import/csv', {
+      token: me2.adminToken, headers: { 'content-type': 'text/csv', 'x-wafra-date-order': 'month-first', ...extra }, body: csv,
+    });
+    const earlier = await (await send()).json();
+    await syncedRows(env2, me2);
+    env2.DB.handle.prepare("UPDATE statement_import_bindings SET interpretation_digest = 'older-parser' || substr(interpretation_digest, instr(interpretation_digest, '|'))").run();
+    const upgraded = await send();
+    const upgradedBody = await upgraded.json();
+    ok('the same file read differently by a newer parser is refused as a parser change, naming the earlier read',
+      upgraded.status === 409 && upgradedBody.reason === 'parser' && upgradedBody.statementImportId === earlier.statementImportId &&
+        upgradedBody.previousDateOrder === undefined, JSON.stringify(upgradedBody));
+    const reread = await send({ 'x-wafra-statement-reread': '1' });
+    ok('…and read again when the phone holds none of its rows', reread.status === 202);
+    // An older binding that recorded no options is an unknown reason, never a parser claim.
+    const env3 = { DB: makeDb() };
+    const me3 = await pair(env3);
+    const send3 = () => call(env3, 'POST', '/v1/import/csv', {
+      token: me3.adminToken, headers: { 'content-type': 'text/csv', 'x-wafra-date-order': 'month-first' }, body: csv,
+    });
+    await send3();
+    env3.DB.handle.prepare("UPDATE statement_import_bindings SET interpretation_digest = 'older-format'").run();
+    const legacyBody = await (await send3()).json();
+    ok('an older binding without options gives reason unknown', legacyBody.reason === 'unknown', JSON.stringify(legacyBody));
+  }
+
+  /* ───── re-read: only to the asking phone, every id named, order only when it differs ───── */
+  {
+    const env = { DB: makeDb() };
+    const me = await pair(env);
+    const peer = await pair(env);
+    const vault = env.DB.handle.prepare('SELECT vault_id FROM devices WHERE id = ?').get(me.deviceId).vault_id;
+    env.DB.handle.prepare('UPDATE devices SET vault_id = ? WHERE id = ?').run(vault, peer.deviceId);
+    const csv = 'Date,Description,Debit,Credit\n03/04/2026,ALPHA,100.00,\n05/04/2026,BETA,,200.00\n';
+    const queued = (deviceId) => env.DB.handle.prepare('SELECT COUNT(*) AS n FROM queue WHERE device_id = ?').get(deviceId).n;
+    const post = (order, extra = {}, currency = 'AED') => call(env, 'POST', '/v1/import/csv', {
+      token: me.adminToken, headers: { 'content-type': 'text/csv', 'x-wafra-date-order': order,
+        'x-wafra-ledger-currency': currency, 'x-wafra-ledger-exponent': '2', ...extra }, body: csv,
+    });
+    const first = await (await post('month-first')).json();
+    ok('a first read is delivered to every phone of the vault', queued(me.deviceId) === 2 && queued(peer.deviceId) === 2);
+    const reread = await (await post('month-first', { 'x-wafra-statement-reread': '1' })).json();
+    ok('a re-read is delivered only to the phone that asked (the others hold the earlier read)',
+      queued(me.deviceId) === 4 && queued(peer.deviceId) === 2, `${queued(me.deviceId)}/${queued(peer.deviceId)}`);
+    ok('the re-read names every id this file has had: its first read and its current read',
+      Array.isArray(reread.statementImportIds) && reread.statementImportIds.includes(first.statementImportId) &&
+        reread.statementImportIds.includes(reread.statementImportId), JSON.stringify(reread.statementImportIds));
+    const sameOrder = await (await post('month-first', {}, 'USD')).json();
+    ok('a refusal for another currency does not name the day/month order the person already chose',
+      sameOrder.error === 'statement_options_conflict' && sameOrder.reason === 'options' && sameOrder.previousDateOrder === undefined &&
+        sameOrder.statementImportIds.includes(first.statementImportId), JSON.stringify(sameOrder));
+    // Compare-and-set: a re-read whose pointer move loses to a concurrent change never rolls it back.
+    const before = env.DB.handle.prepare('SELECT interpretation_digest FROM statement_import_bindings WHERE device_id = ? AND source_key NOT LIKE ?').all(me.deviceId, '%');
+    env.DB.hooks.after = async (sql) => {
+      if (/INSERT INTO statement_import_bindings/.test(sql) && !/alias=/.test(sql)) {
+        env.DB.hooks.after = null;
+        env.DB.handle.prepare("UPDATE statement_import_bindings SET interpretation_digest = interpretation_digest || '-moved' WHERE device_id = ? AND interpretation_digest LIKE '%alias=%'").run(me.deviceId);
+      }
+    };
+    const raced = await post('month-first', { 'x-wafra-statement-reread': '1' });
+    const racedBody = await raced.json();
+    const pointer = env.DB.handle.prepare("SELECT interpretation_digest FROM statement_import_bindings WHERE device_id = ? AND interpretation_digest LIKE '%-moved'").get(me.deviceId);
+    ok('a re-read that loses the pointer race is refused and leaves the other upload\'s pointer in place',
+      raced.status === 409 && !!pointer, JSON.stringify({ status: raced.status, body: racedBody, before: before.length }));
+  }
+
+  /* ───────────── structured statements (OFX/QIF/camt/MT940) ───────────── */
+  {
+    const env = { DB: makeDb() };
+    const me = await pair(env);
+    const STRUCTURED = { 'x-wafra-import-features': 'xlsx,pdf-error-detail,structured' };
+    const post = (contentType, body, headers = STRUCTURED) => call(env, 'POST', '/v1/import/csv', {
+      token: me.adminToken, headers: { 'content-type': contentType, 'x-wafra-ledger-currency': 'USD', 'x-wafra-ledger-exponent': '2',
+        'x-wafra-date-order': 'month-first', ...headers }, body,
+    });
+    const ofx = [
+      'OFXHEADER:100', 'DATA:OFXSGML', 'VERSION:102', 'SECURITY:NONE', 'ENCODING:USASCII', 'CHARSET:1252',
+      'COMPRESSION:NONE', 'OLDFILEUID:NONE', 'NEWFILEUID:NONE', '',
+      '<OFX><BANKMSGSRSV1><STMTTRNRS><TRNUID>1<STMTRS><CURDEF>USD',
+      '<BANKACCTFROM><BANKID>000000000<ACCTID>000012345678<ACCTTYPE>CHECKING</BANKACCTFROM>',
+      '<BANKTRANLIST><DTSTART>20260901<DTEND>20260930',
+      '<STMTTRN><TRNTYPE>DEBIT<DTPOSTED>20260902<TRNAMT>-42.10<FITID>A1<NAME>GROCERY STORE</STMTTRN>',
+      '<STMTTRN><TRNTYPE>CREDIT<DTPOSTED>20260905<TRNAMT>1500.00<FITID>A2<NAME>PAYROLL EXAMPLE CO</STMTTRN>',
+      '</BANKTRANLIST><LEDGERBAL><BALAMT>2457.90<DTASOF>20260930</LEDGERBAL></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>',
+    ].join('\r\n');
+    const res = await post('application/x-ofx', ofx);
+    const body = await res.json();
+    ok('an OFX bank statement is read through /v1/import/csv for a build that asked for structured files',
+      res.status === 202 && body.acceptedRows === 2 && body.rejectedRows === 0, JSON.stringify(body));
+    const rows = (await syncedRows(env, me)).sort((a, b) => a.date.localeCompare(b.date));
+    ok('…its rows reach the phone with direction from the file and the account tail it states',
+      rows.length === 2 && rows[0].type === 'expense' && rows[0].amountFils === 4210 && rows[1].type === 'income' &&
+        rows.every((row) => row.card?.last4 === '5678' && row.card?.kind === 'account'),
+      JSON.stringify(rows.map((row) => [row.type, row.amountFils, row.card])));
+    ok('…and its stated closing balance arrives on the newest row',
+      rows[1]?.snapshotKind === 'balance' && rows[1]?.snapshotFils === 245790, JSON.stringify(rows.map((row) => row.snapshotFils)));
+    const shipped = await post('application/x-ofx', ofx, { 'x-wafra-import-features': 'xlsx,pdf-error-detail' });
+    ok('a build that did not ask for structured files is refused exactly as before',
+      shipped.status === 415 && (await shipped.json()).error === 'csv_required');
+    const csvBody = await post('application/octet-stream', 'Date,Description,Debit,Credit\n09/01/2026,Taxi,20.00,');
+    ok('an octet-stream that is not a structured file is 415 unsupported_file_type',
+      csvBody.status === 415 && (await csvBody.json()).error === 'unsupported_file_type');
+    const broken = await post('application/x-ofx', 'OFXHEADER:100\r\nDATA:OFXSGML\r\n\r\n<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><BANKTRANLIST><STMTTRN><TRNAMT>abc');
+    const brokenBody = await broken.json();
+    ok('a malformed structured file is 400 invalid_statement_file (or 422 when it holds no readable rows)',
+      (broken.status === 400 && brokenBody.error === 'invalid_statement_file') || broken.status === 422, JSON.stringify(brokenBody));
+  }
+
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
 })().catch((error) => {

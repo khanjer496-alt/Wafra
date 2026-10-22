@@ -35,5 +35,17 @@
 "live.alert.title_named" = "%1$@ · %2$@";
 "live.alert.title_credit" = "وصل %@";
 "live.alert.title_credit_named" = "وصل %1$@ · %2$@";
+"live.alert.title_sent" = "أُرسل %@";
+"live.alert.title_sent_named" = "أُرسل %1$@ · %2$@";
+"live.alert.title_review" = "تنبيه بنكي للمراجعة: %@";
+"live.alert.title_review_named" = "تنبيه بنكي للمراجعة: %1$@ · %2$@";
+"live.alert.title_refund" = "استُردّ %@";
+"live.alert.title_refund_named" = "استُردّ %1$@ · %2$@";
+"live.alert.title_withdrawal" = "سُحب %@";
+"live.alert.title_withdrawal_named" = "سُحب %1$@ · %2$@";
+"live.alert.title_paid" = "دُفع %@";
+"live.alert.title_paid_named" = "دُفع %1$@ · %2$@";
 "live.alert.card" = "··%@";
 "live.alert.fallback" = "افتح وفرة";
+"live.apple_pay.alert.body_card" = "Apple Pay · %@";
+"live.apple_pay.alert.body" = "Apple Pay";

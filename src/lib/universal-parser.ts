@@ -1,5 +1,5 @@
 import { missingUniversalField, type UniversalBankEvent, type UniversalParseContext } from '@/lib/universal-types';
-import { inspectMarketAlert } from '@/lib/alert-semantics';
+import { accountMovementDirection, inspectMarketAlert } from '@/lib/alert-semantics';
 import type { MoneyDirection, PostingStatus, UniversalMarket } from '@/lib/alert-market-pack-types';
 import { extractUniversalFields } from '@/lib/universal-fields';
 import { extractUniversalMoney, inspectUniversalMoneyDraft } from '@/lib/universal-money';
@@ -119,7 +119,7 @@ const completedMovement = (source: string): { status: PostingStatus; direction: 
   // Completed person-to-person transfers in other languages and wallets. Each
   // is a finished verb, never a heading: "Pix enviado", "Você recebeu um Pix",
   // "Virement reçu", "havale gelmiştir" (has arrived), "You have sent/received".
-  const transferOutWords = /(?<!\p{L})(?:pix\s+enviado|você\s+enviou\s+um\s+pix|you\s+have\s+(?:successfully\s+)?sent|^\s*sent\s+(?:rs\.?|inr|₹)|has\s+enviado\s+un\s+bizum)(?!\p{L})/iu;
+  const transferOutWords = /(?<!\p{L})(?:pix\s+enviado|você\s+enviou\s+um\s+pix|you\s+have\s+(?:successfully\s+)?sent|money\s+sent\s+successfully\s+to|^\s*sent\s+(?:rs\.?|inr|₹)|has\s+enviado\s+un\s+bizum)(?!\p{L})/iu;
   const transferInWords = /(?<!\p{L})(?:virement\s+reçu|você\s+recebeu\s+um\s+pix|pix\s+recebido|havale\s+gelmiştir|eft\s+gelmiştir|you\s+have\s+(?:successfully\s+)?received|has\s+recibido\s+un\s+bizum|bizum\s+recibido)(?!\p{L})/iu;
   const statuses: PostingStatus[] = [];
   const matches = (pattern: RegExp): boolean => {
@@ -133,7 +133,7 @@ const completedMovement = (source: string): { status: PostingStatus; direction: 
         /^\s*(?:か|吗|嗎|m[ıiuü])(?=\s|[?,，]|$)/u.test(suffix) || /[?؟]/u.test(suffix);
       const future = phrase(String.raw`will|scheduled|upcoming|sera|será|wird`).test(prefix) ||
         phrase(String.raw`will|sera|será|wird`).test(match[0]);
-      const negative = phrase(String.raw`no|not|never|pas|aucun|aucune|nessun|nessuna|geen|niet|nicht|kein(?:e[nmrs]?)?|não|nao|لم|لن|ليس|لا`).test(prefix) ||
+      const negative = phrase(String.raw`no|not|never|cannot|(?:have|has|had|did|was|were|is|are|do|does|could|would|should|must|need|ought)n['’]t|can['’]t|won['’]t|pas|aucun|aucune|nessun|nessuna|geen|niet|nicht|kein(?:e[nmrs]?)?|não|nao|لم|لن|ليس|لا`).test(prefix) ||
         phrase(String.raw`non|pas|jamais|niet|nicht|não|geen`).test(match[0]) ||
         /\bno\s+(?:(?:está|ha\s+sido)\s+)?(?:pagad[oa]|realizad[oa]|completad[oa]|recibid[oa])\b/iu.test(match[0]) ||
         /\bremboursement\s+non\s+reçu\b/iu.test(match[0]) ||
@@ -147,6 +147,11 @@ const completedMovement = (source: string): { status: PostingStatus; direction: 
   const deposit = matches(depositPattern);
   const transferOut = matches(arabicTransferOut) || matches(transferOutWords);
   const transferIn = matches(arabicTransferIn) || matches(transferInWords);
+  const cashWithdrawal = matches(phrase(String.raw`cash\s+out\s+of[\s\S]{0,140}?is\s+successful|processed\s+(?:a\s+)?debit\s+card\s+withdrawal\s*:|a\s+debit\s+transaction\s+from\s+withdrawal[\s\S]{0,140}?was\s+posted`));
+  if (cashWithdrawal && !refund && !deposit && !transferIn) {
+    const status = conservativeStatus(statuses);
+    return { status, direction: 'debit', family: status === 'posted' ? 'cash-withdrawal' : 'unknown' };
+  }
   if (transferOut !== transferIn && !debit && !refund && !deposit) {
     const status = conservativeStatus(statuses);
     return { status, direction: transferOut ? 'debit' : 'credit', family: status === 'posted' ? 'transfer' : 'unknown' };
@@ -265,7 +270,13 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
   if (fields.merchant.evidence === 'explicit') {
     for (const merchant of fields.merchant.spans) {
       const start = merchant.start, end = merchant.end;
-      if (end > start) maskedSource = maskedSource.slice(0, start) + ' '.repeat(end - start) + maskedSource.slice(end);
+      // A generic "to NAME" extractor can include the recipient's terminal
+      // deposit predicate. Preserve that predicate for an own INTERAC
+      // transfer; its recipient name remains masked like every other name.
+      const depositPredicate = /\byour\s+interac\s+e[ -]?transfer\s+of\b/iu.test(source.slice(span.start, start))
+        ? source.slice(start, end).search(/\b(?:was|has\s+been)\s+deposited\b(?=\s*(?:[.,;!?]|$)|\s+(?:on|into|in|at|by|and)\b)/iu) : -1;
+      const maskEnd = depositPredicate < 0 ? end : start + depositPredicate;
+      if (maskEnd > start) maskedSource = maskedSource.slice(0, start) + ' '.repeat(maskEnd - start) + maskedSource.slice(maskEnd);
     }
   }
   const semanticSource = maskedSource.slice(span.start, span.end);
@@ -399,6 +410,28 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
     status = 'informational';
   }
   const knownDirection = commonDirection(readings.map((reading) => reading.direction));
+  // Monetary ownership may start after a lead-in comma ("For example,").
+  // For the first principal only, keep that prefix for negative qualification.
+  // Positive ownership remains scoped to its own selected monetary clause.
+  const accountDirection = accountMovementDirection(
+    semanticSource,
+    firstPrincipal ? maskedSource.slice(0, span.start) : '',
+  );
+  // A structured heading declares a movement's direction, not its settlement.
+  // Keep noun-only layouts at unknown status; no country/sender trust is added.
+  const structured = source.normalize('NFKC');
+  const heading = structured.trimStart().split(/\r?\n/u, 1)[0].trim();
+  let headingDirection: MoneyDirection = 'unknown';
+  if (!roleUnresolved && money.amount.evidence !== 'missing') {
+    if (/^(?:debit|credit)\s*!?$/iu.test(heading) &&
+      /(?:^|\n)\s*(?:acct|acc|account|a\/?c)\s*:/iu.test(structured) &&
+      /(?:^|\n)\s*(?:amt|amount)\s*:/iu.test(structured)) {
+      headingDirection = /^credit/iu.test(heading) ? 'credit' : 'debit';
+    } else if (/(?:^|\n)\s*مبلغ\s*:/u.test(structured)) {
+      if (/^حوالة\s+واردة(?=$|[\s:؛])/u.test(heading)) headingDirection = 'credit';
+      else if (/^(?:شراء|سحب\s*:\s*صراف\s+آلي|سداد\s+فاتورة|مدفوعات\s+وزارة\s+الداخلية)(?=$|[\s:؛])/u.test(heading)) headingDirection = 'debit';
+    }
+  }
   // Money stated as CREDITED INTO the user's own account, with no purchase,
   // refund or fee wording, is an incoming transfer ("£2,450.00 has been
   // credited to your account ending 5678. Ref: SALARY OCT"). Left familyless
@@ -419,6 +452,7 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
   const explicitCredit = phrase(String.raw`credited|crédité|gutgeschrieben|abonado|accreditato|bijgeschreven`).test(directionText);
   const directionConflict = (explicitDebit && (explicitCredit || completion?.direction === 'credit')) ||
     (explicitCredit && completion?.direction === 'debit') ||
+    (headingDirection !== 'unknown' && knownDirection !== 'unknown' && headingDirection !== knownDirection) ||
     new Set(readings.map((reading) => reading.direction).filter((value) => value === 'debit' || value === 'credit')).size > 1;
   // "Your payment to Jane was received by her bank" is the RECIPIENT's
   // receipt: never money arriving here. Without an explicit outgoing verb the
@@ -426,7 +460,8 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
   const counterpartyReceipt = /\b(?:received|credited|accepted)\s+(?:by|to|at|in(?:to)?)\s+(?:her|his|their|the\s+(?:recipient|payee|beneficiary|receiver)(?:['’]s)?)\s+(?:bank|account)\b/iu
     .test(source);
   const readDirection = status === 'posted' || status === 'unknown'
-    ? roleUnresolved || directionConflict ? 'unknown' : knownDirection === 'unknown' && completion ? completion.direction : knownDirection : 'none';
+    ? roleUnresolved || directionConflict ? 'unknown' : accountDirection !== null ? accountDirection : knownDirection === 'unknown'
+      ? completion?.direction ?? headingDirection : knownDirection : 'none';
   // "JAMIE ROE has received your bank transfer of €75" (N26) is the named
   // recipient acknowledging money that LEFT this account. Only a personal name
   // in capitals (2-4 words opening the message, no fintech or account noun)

@@ -8,7 +8,7 @@ public enum WafraLiveCaptureResources {
   private static let tableName = "WafraIntents"
   private static let missingValue = "__WAFRA_MISSING_INTENT_LOCALIZATION__"
 
-  public static func bundle() -> Bundle {
+  public static func optionalBundle() -> Bundle? {
     let frameworkBundle = Bundle(for: ResourceAnchor.self)
     let bundleURLs = [
       frameworkBundle.url(forResource: bundleName, withExtension: "bundle"),
@@ -20,13 +20,21 @@ public enum WafraLiveCaptureResources {
         return resourceBundle
       }
     }
-    preconditionFailure("Wafra intent resources are unavailable.")
+    return nil
+  }
+
+  public static func bundle() -> Bundle {
+    guard let resourceBundle = optionalBundle() else {
+      preconditionFailure("Wafra intent resources are unavailable.")
+    }
+    return resourceBundle
   }
 
   /// Resolved text for content iOS displays outside App Intents, such as a
   /// local notification. Returns nil rather than crashing when a key is absent.
   public static func string(_ key: String) -> String? {
-    let resolved = bundle().localizedString(forKey: key, value: missingValue, table: tableName)
+    guard let resourceBundle = optionalBundle() else { return nil }
+    let resolved = resourceBundle.localizedString(forKey: key, value: missingValue, table: tableName)
     return resolved == missingValue ? nil : resolved
   }
 

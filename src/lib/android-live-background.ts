@@ -40,6 +40,7 @@ import { setBestEffortAutoPostEnabled } from '@/lib/best-effort-autopost';
 import { isProActive } from '@/lib/purchases';
 import { syncDailySummary, syncPaymentReminders } from '@/lib/notifications';
 import { reminderScheduleInputsChanged } from '@/lib/reminders';
+import { activatePrivateAlertFormats, invalidatePrivateAlertFormats } from '@/lib/private-alert-format-runtime';
 import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
 import type { AppState, ImportBatchInput, Transaction } from '@/lib/types';
 
@@ -280,10 +281,18 @@ async function processBackgroundCapture(source: BackgroundSource, observedAt: nu
     }
   }
   let adapter = liveLedgerAdapter;
+  let ownsPrivateFormats = false;
   if (!adapter) {
     const loaded = usablePersistedState(await diskPersistence.load());
-    if (!loaded || !applyLedgerContext(loaded) || !isProActive(loaded)) return;
+    // A mounted owner may appear while encrypted IO is pending. It owns its
+    // parser/runtime view; leave this source for that owner's next drain.
+    if (liveLedgerAdapter || !loaded || !isProActive(loaded)) return;
     if (source === 'sms' ? !androidSmsCaptureEnabled(loaded) : !androidNotificationCaptureEnabled(loaded)) return;
+    if (!applyLedgerContext(loaded)) return;
+    // Hydrate metadata only after all headless admission gates. Matching lazily
+    // reads an existing device key and can never create one from this wake.
+    activatePrivateAlertFormats(loaded.privateAlertFormats);
+    ownsPrivateFormats = true;
     const holder: MutableLedger = { current: loaded };
     adapter = diskLedgerAdapter(holder);
   } else {
@@ -293,36 +302,42 @@ async function processBackgroundCapture(source: BackgroundSource, observedAt: nu
     if (source === 'sms' ? !androidSmsCaptureEnabled(state) : !androidNotificationCaptureEnabled(state)) return;
   }
 
-  const executor = createCaptureExecutor({
-    ledger: adapter,
-    dependencies: {
-      collectRoutine: (state) => boundedCollector(state, source, observedAt),
-    },
-  });
-  const before = adapter.getState();
-  const outcome = await executor.execute(source === 'push' ? 'notification-only' : 'routine');
-  // execute resolves only after the ledger is durable. A closed-app statement
-  // must earn a due reminder now, and a receipt must cancel one now. Keep this
-  // wake bounded: recurrence discovery belongs to foreground maintenance.
-  // Refresh the dated summary too: otherwise a closed-app spending day has no
-  // 9 pm notification, or still reports the snapshot from the last app open.
-  const after = adapter.getState();
-  if (reminderScheduleInputsChanged(before, after)) {
-    try {
-      await syncPaymentReminders(after, new Date(), { obligationsOnly: true });
-    } catch {
-      // Notification delivery cannot roll back or fail a durable bank capture.
+  try {
+    const executor = createCaptureExecutor({
+      ledger: adapter,
+      dependencies: {
+        collectRoutine: (state) => boundedCollector(state, source, observedAt),
+      },
+    });
+    const before = adapter.getState();
+    const outcome = await executor.execute(source === 'push' ? 'notification-only' : 'routine');
+    // execute resolves only after the ledger is durable. A closed-app statement
+    // must earn a due reminder now, and a receipt must cancel one now. Keep this
+    // wake bounded: recurrence discovery belongs to foreground maintenance.
+    // Refresh the dated summary too: otherwise a closed-app spending day has no
+    // 9 pm notification, or still reports the snapshot from the last app open.
+    const after = adapter.getState();
+    if (reminderScheduleInputsChanged(before, after)) {
+      try {
+        await syncPaymentReminders(after, new Date(), { obligationsOnly: true });
+      } catch {
+        // Notification delivery cannot roll back or fail a durable bank capture.
+      }
     }
-  }
-  if (after.dailySummary && before.transactions !== after.transactions) {
-    try {
-      await syncDailySummary(after);
-    } catch {
-      // Independent of payment scheduling: either notification can fail alone.
+    if (after.dailySummary && before.transactions !== after.transactions) {
+      try {
+        await syncDailySummary(after);
+      } catch {
+        // Independent of payment scheduling: either notification can fail alone.
+      }
     }
-  }
-  if (source === 'push' && outcome.kind === 'imported') {
-    postImportedPushNotice(adapter, outcome.transactionIds);
+    if (source === 'push' && outcome.kind === 'imported') {
+      postImportedPushNotice(adapter, outcome.transactionIds);
+    }
+  } finally {
+    // Normal foreground hydration waits for backgroundTail. The extra mounted
+    // owner check also protects an adapter installed during a native await.
+    if (ownsPrivateFormats && !liveLedgerAdapter) invalidatePrivateAlertFormats();
   }
 }
 

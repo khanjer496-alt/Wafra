@@ -406,6 +406,9 @@ function decodeStoredRelayConfig(raw: string, includeRevoked = false): RelayConf
  * Shortcut credential behind.
  */
 export async function getRelayConfigStrict(): Promise<RelayConfig | null> {
+  // Web cannot create this native SecureStore credential. Its local ledger
+  // can still be erased; native read/decoding failures below remain strict.
+  if (Platform.OS === 'web') return null;
   try {
     const raw = await SecureStore.getItemAsync(KEY);
     if (!raw) return null;
@@ -1733,6 +1736,9 @@ export function isParsedRelayRow(
     typeof row.statementDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(row.statementDate) ||
     (row.date !== null && row.statementDate >= (row.date as string)))) return false;
 
+  // A card statement summary may state the card's credit limit; nothing else may.
+  if (row.creditLimitFils !== undefined && (row.kind !== 'cardStatement' ||
+    !Number.isSafeInteger(row.creditLimitFils) || (row.creditLimitFils as number) <= 0)) return false;
   if (!validNullableSafeFils(row.snapshotFils)) return false;
   if (
     row.snapshotKind !== null &&

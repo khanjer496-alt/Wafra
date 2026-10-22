@@ -29,7 +29,7 @@ public class WafraOnDeviceAIModule: Module {
       maxTokens: Int,
       timeoutMs: Int
     ) async throws -> String in
-      guard task == "ask-plan" || task == "categorize" else {
+      guard task == "ask-plan" || task == "categorize" || task == "alert-review" else {
         throw bridgeException(WafraOnDeviceAIFailure.invalidRequest)
       }
       do {

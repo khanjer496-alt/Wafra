@@ -438,6 +438,8 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     'expo-crypto': { randomUUID: () => require('node:crypto').randomUUID() },
     '@/lib/founder-pro': require('./build/founder-pro'),
     '@/lib/custom-categories': require('./build/custom-categories'),
+    '@/lib/private-alert-formats': require('./build/private-alert-formats'),
+    '@/lib/private-alert-format-runtime': require('./build/private-alert-format-runtime'),
     'react/jsx-runtime': {
       // StoreContext.Provider is the innermost element; the wrappers around it
       // (money locale, private mode, the selector handle) pass through the
@@ -526,6 +528,8 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     '@/lib/alert-review-tray': require('./build/alert-review-tray'),
     '@/lib/types': require('./build/types'),
     '@/lib/review-promotion': require('./build/review-promotion'),
+    // Linked Wallet card planning (pure); the store owns only its write path.
+    '@/lib/apple-pay-card-links': require('./build/apple-pay-card-links'),
     // Real quote cache; the store only reaches its network loader when a
     // foreign review is promoted, which this harness does not do.
     '@/lib/fx-rates': require('./build/fx-rates'),
@@ -3001,6 +3005,110 @@ asyncSuites.push((async () => {
     JSON.stringify({ ...repaired, smsKey: legacyKey }) === JSON.stringify(old) &&
     saved.at(-1).transactions[0].smsKey === 'ha17t' + now);
 })().catch((error) => ok('generic store integration completes', false, String(error))));
+
+// iPhone Apple Pay through the real StoreProvider write path: the first
+// confirmation per Wallet card remembers its account, later purchases from
+// that card post once, and every fallback keeps today's Review behaviour.
+asyncSuites.push((async () => {
+  const saved = [];
+  const runtime = loadHydrationExports({
+    '@/lib/ledger-persistence': {
+      createLedgerPersistence: () => ({ load: async () => null,
+        save: async (snapshot) => { saved.push(JSON.parse(JSON.stringify(snapshot))); return true; },
+        block() {}, reset: async () => {}, destroy: async () => {} }),
+      LedgerResetError: class LedgerResetError extends Error {},
+    },
+  }, true);
+  const ledger = runtime.StoreProvider({ children: null });
+  const money = { schemaVersion: 2, currency: 'AED', exponent: 2 };
+  const liv = { id: 'acc-liv', name: 'Liv', kind: 'bank', last4: '1234', openingFils: 0, color: '#246A54' };
+  const spare = { id: 'acc-spare', name: 'Spare', kind: 'bank', last4: '5678', openingFils: 0, color: '#123456' };
+  ok('Apple Pay link fixture restores an AED ledger', ledger.restoreBackup(JSON.stringify({
+    app: 'wafra', version: 1, data: { accounts: [liv, spare], transactions: [], ledgerMoney: money },
+  })));
+  const { parseIosApplePayRecord } = require('./build/ios-apple-pay-record.js');
+  const base = Date.now() - 6 * 60 * 60_000;
+  const capture = (n, card = 'Apple Cash', amount = '25.00') => parseIosApplePayRecord(JSON.stringify({
+    amount, ...(card === null ? {} : { cardOrPass: card }), currency: 'AED', merchant: 'Fixture Coffee',
+  }), `aabbccdd-1234-4567-89ab-${String(n).padStart(12, '0')}`, base + n * 20 * 60_000).item;
+
+  const first = capture(1);
+  const unlinked = ledger.postLinkedApplePay([first]);
+  await unlinked.durable;
+  ok('an unlinked card posts nothing', unlinked.posted.length === 0 &&
+    ledger.getStateSnapshot().transactions.length === 0);
+  await ledger.stageReviewAlerts([first]).durable;
+  ok('its purchase waits in Review with the card name kept on the item',
+    ledger.getStateSnapshot().reviewTray.pending.some((item) => item.id === first.id && item.walletCardOrPass === 'Apple Cash'));
+  const confirm = (item, accountId) => ledger.promoteReviewAlert({ reviewId: item.id, type: 'expense', title: 'Fixture Coffee',
+    category: 'dining', accountId, date: '2026-10-16', betweenOwnAccounts: false,
+    universal: { confirmed: true, postingStatus: 'posted', amount: item.event.amount.value,
+      expectedSourceKey: item.sourceKey, expectedObservedAt: item.observedAt } });
+  ok('first confirmation adds the purchase', await confirm(first, liv.id) === 'added');
+  const linked = ledger.getStateSnapshot().applePayCardLinks;
+  ok('first confirmation stores the link from the Wallet card to the chosen account',
+    linked.length === 1 && linked[0].cardOrPass === 'Apple Cash' && linked[0].accountId === liv.id &&
+    saved.at(-1).applePayCardLinks.length === 1 && saved.at(-1).applePayCardLinks[0].accountId === liv.id);
+
+  const second = capture(2);
+  const receipt = ledger.postLinkedApplePay([second], { fallbackTitle: 'Card payment' });
+  await receipt.durable;
+  const afterPost = ledger.getStateSnapshot();
+  const row = afterPost.transactions.find((transaction) => transaction.smsKey === second.sourceKey);
+  ok('a linked capture posts straight into the ledger on the linked account',
+    receipt.posted.length === 1 && receipt.posted[0] === second.id && afterPost.transactions.length === 2 &&
+    !!row && row.accountId === liv.id && row.amountFils === 2500 && row.type === 'expense' &&
+    row.title === 'Fixture Coffee' && row.viaPush === true && row.ts === second.observedAt &&
+    saved.at(-1).transactions.length === 2);
+  ok('the posted capture never waits in Review and leaves its replay barrier',
+    !afterPost.reviewTray.pending.some((item) => item.id === second.id) &&
+    afterPost.reviewTray.tombstones.some((entry) => entry.sourceKey === second.sourceKey && entry.outcome === 'added'));
+  const replay = ledger.postLinkedApplePay([second]);
+  await replay.durable;
+  const restaged = ledger.stageReviewAlerts([second]);
+  await restaged.durable;
+  ok('a linked capture posts once: a replayed receipt adds no row and no review',
+    replay.posted.length === 0 && restaged.admitted === 0 && ledger.getStateSnapshot().transactions.length === 2);
+
+  const other = ledger.postLinkedApplePay([capture(3, 'Liv Debit'), capture(4, null)]);
+  await other.durable;
+  ok('an unlinked card and a missing card name still go to Review', other.posted.length === 0 &&
+    ledger.getStateSnapshot().transactions.length === 2);
+
+  ledger.editAccount(liv.id, { archived: true });
+  const archived = ledger.postLinkedApplePay([capture(5)]);
+  await archived.durable;
+  ok('a linked account that is now hidden falls back to Review', archived.posted.length === 0);
+  ledger.editAccount(liv.id, { archived: false });
+  const unhidden = ledger.postLinkedApplePay([capture(5)]);
+  await unhidden.durable;
+  ok('the same capture posts once the account is shown again', unhidden.posted.length === 1 &&
+    ledger.getStateSnapshot().transactions.length === 3);
+
+  ledger.deleteAccount(liv.id);
+  const deleted = ledger.postLinkedApplePay([capture(6)]);
+  await deleted.durable;
+  ok('a deleted linked account falls back to Review and drops its link',
+    deleted.posted.length === 0 && (ledger.getStateSnapshot().applePayCardLinks ?? []).length === 0);
+
+  // Link again on the spare account, then forget it.
+  const relink = capture(7);
+  await ledger.stageReviewAlerts([relink]).durable;
+  await confirm(relink, spare.id);
+  ok('a later confirmation links the card to the newly chosen account',
+    ledger.getStateSnapshot().applePayCardLinks[0].accountId === spare.id);
+  const exported = JSON.parse(ledger.exportBackup());
+  ok('a backup file never carries Wallet card names', !Object.hasOwn(exported.data, 'applePayCardLinks') &&
+    !JSON.stringify(exported).includes('Apple Cash'));
+  ok('restoring a backup keeps this iPhone\'s card links', ledger.restoreBackup(JSON.stringify(exported)) &&
+    ledger.getStateSnapshot().applePayCardLinks.length === 1);
+  await ledger.forgetApplePayCardLink('Apple Cash');
+  ok('forget-link removes the link durably', ledger.getStateSnapshot().applePayCardLinks.length === 0 &&
+    saved.at(-1).applePayCardLinks.length === 0);
+  const forgotten = ledger.postLinkedApplePay([capture(8)]);
+  await forgotten.durable;
+  ok('after forgetting, the next purchase from that card asks in Review again', forgotten.posted.length === 0);
+})().catch((error) => ok('Apple Pay card link store integration completes', false, String(error))));
 
 // Gap B: relay, History and Android staging cannot hold their source back, so
 // the Message lane still evicts at fifty. An evicted money review must leave a

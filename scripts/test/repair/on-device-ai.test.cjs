@@ -62,6 +62,28 @@ test('no native module (web, Expo Go, older binary) is simply unavailable', asyn
   same(await ai.respond(request()), { kind: 'unavailable' });
 });
 
+test('source-grounded alert Review uses the existing bounded platform bridge', async () => {
+  const { native, calls } = scripted({ reply: JSON.stringify({ tool: 'none', merchant: 'CEDAR' }) });
+  const { createOnDeviceAI } = loadProvider(native);
+  const ai = createOnDeviceAI(native);
+  const result = await ai.respond(request({ task: 'alert-review' }));
+  assert.equal(result.kind, 'ok');
+  assert.equal(calls.respond.length, 1);
+  assert.equal(calls.respond[0][1], 'alert-review');
+  assert.equal((await ai.respond(request({ task: 'arbitrary-money-writer' }))).kind, 'invalid-request');
+});
+
+test('alert Review preserves literal source quotes while other tasks normalize display labels', async () => {
+  const quoteSchema = { name: 'Quote', fields: [{ name: 'merchantQuote', maxLength: 40 }] };
+  const { native } = scripted({ reply: JSON.stringify({ merchantQuote: 'ＦＩＮＥ ﺑﻧك' }) });
+  const { createOnDeviceAI } = loadProvider(native);
+  const ai = createOnDeviceAI(native);
+  const literal = await ai.respond(request({ task: 'alert-review', schema: quoteSchema }));
+  const label = await ai.respond(request({ task: 'categorize', schema: quoteSchema }));
+  assert.equal(literal.value?.merchantQuote, 'ＦＩＮＥ ﺑﻧك');
+  assert.equal(label.value?.merchantQuote, 'ＦＩＮＥ ﺑﻧك'.normalize('NFKC'));
+});
+
 test('availability is normalised: unknown or provider-less "available" is not trusted', async () => {
   const { createOnDeviceAI } = loadProvider(null);
   const cases = [

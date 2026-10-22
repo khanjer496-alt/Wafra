@@ -14,7 +14,9 @@ public enum WafraLiveCaptureNotice {
 
 @available(iOS 16.0, *)
 public enum WafraInstantAlert {
-  public static func postIfReadable(sender: String? = nil, body: String) async {}
+  public static func postIfReadable(sender: String? = nil, body: String, observedAt: Date = Date()) async {}
+  public static func postApplePay(amount: Decimal, currency: String, merchant: String?, cardOrPass: String?,
+                                  observedAt: Date = Date()) async {}
 }
 
 public enum WafraLiveStageResult: String {

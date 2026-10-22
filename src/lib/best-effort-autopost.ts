@@ -1,8 +1,9 @@
 import { currencyMinorUnits } from '@/lib/currency-metadata';
+import { isUnboundAndroidSourceKey, isUsableCaptureSourceIdentity } from '@/lib/capture-source-identity';
 import type { FxQuote } from '@/lib/fx';
 import { convertForeignConfirmation, quoteFitsDay, type ReferenceConversion } from '@/lib/fx-rates';
 import { nonPostingReason } from '@/lib/sms-parser';
-import type { BestEffortMarker } from '@/lib/types';
+import type { BestEffortMarker, CaptureInstrument } from '@/lib/types';
 import type { UniversalBankEvent, UniversalMoney } from '@/lib/universal-types';
 
 /**
@@ -211,7 +212,7 @@ const NON_COMPLETED_WORDING: readonly RegExp[] = [
   // offers phrased as an amount off a future purchase
   /\bflash\s+sale\b|\boff\s+(?:your|on\s+(?:your|the|all))\s+(?:next\s+|first\s+)?(?:purchase|order|bill|booking|ride|meal|trip)s?\b/iu,
   // future / scheduled / mandates
-  /\bwill\s+(?:be|have\s+been)\s+(?:debited|charged|deducted|paid|processed|collected|credited)\b|\bscheduled\b|\bupcoming\b|\bstanding\s+(?:instruction|order)\b|\bmandate\b|\bpre-?debit\b|\bauto-?pay\s+(?:set|scheduled|registered)\b|\bsera\s+(?:d[ée]bit[ée]|pr[ée]lev[ée])|\bwird\s+(?:abgebucht|belastet)\b|\bser[áa]\s+(?:cargad[oa]|debitad[oa])\b|\bsar[àa]\s+addebitat[oa]\b|\bwordt\s+afgeschreven\b|سيتم/iu,
+  /\bwill\s+(?:be|have\s+been)\s+(?:debited|charged|deducted|paid|processed|collected|credited|received)\b|\bscheduled\b|\bupcoming\b|\bstanding\s+(?:instruction|order)\b|\bmandate\b|\bpre-?debit\b|\bauto-?pay\s+(?:set|scheduled|registered)\b|\bsera\s+(?:d[ée]bit[ée]|pr[ée]lev[ée])|\bwird\s+(?:abgebucht|belastet)\b|\bser[áa]\s+(?:cargad[oa]|debitad[oa])\b|\bsar[àa]\s+addebitat[oa]\b|\bwordt\s+afgeschreven\b|سيتم/iu,
   // A sentence after a debit that takes it back, stops it or leaves it open
   // (Gulf-neighbour review): cancelled/unsuccessful/incomplete, card
   // suspended, the amount returned, awaiting confirmation, under review, a
@@ -1074,13 +1075,57 @@ export const bestEffortObservationKey = (
     ? `t${ts}:${currency}${amountFils}`
     : null;
 
-/** Every identity a rescan of the same alert could plan the row under. */
+interface BestEffortUndoRow {
+  smsKey?: string;
+  ts?: number;
+  amountFils: number;
+  bestEffort?: unknown;
+  captureInstrument?: CaptureInstrument;
+  cardPaymentSide?: 'debit' | 'receipt';
+}
+
+/** A weak settlement observation needs the same card, issuer and leg. A
+ * timestamp/amount alone can describe payments to several different cards.
+ * Missing scope proves nothing and never creates a generic payment key.
+ */
+export const bestEffortCardPaymentObservationKey = (
+  row: BestEffortUndoRow,
+  ledgerCurrency: string | null | undefined,
+): string | null => {
+  const observed = bestEffortObservationKey(row.ts, ledgerCurrency, row.amountFils);
+  const instrument = row.captureInstrument;
+  const bank = instrument?.bankIdentity;
+  if (!observed || instrument?.kind !== 'credit' || !/^\d{4}$/.test(instrument.last4) ||
+      typeof bank !== 'string' || !bank || bank !== bank.trim() || bank.length > 120 || /\p{C}/u.test(bank) ||
+      (row.cardPaymentSide !== 'receipt' && row.cardPaymentSide !== 'debit')) return null;
+  const key = `p${observed.slice(1)}:${encodeURIComponent(bank)}:credit:${instrument.last4}:${row.cardPaymentSide}`;
+  return key.length <= 256 ? key : null;
+};
+
+const isCardPaymentUndoRow = (row: BestEffortUndoRow): boolean => {
+  const marker = row.bestEffort;
+  const format = marker && typeof marker === 'object' && 'format' in marker ? marker.format : undefined;
+  return row.cardPaymentSide !== undefined ||
+    (typeof format === 'string' && /(?:^|:)card-payment(?:$|:)/.test(format));
+};
+
+/** Exact native identity takes precedence; weak card settlements additionally
+ * use their card/issuer/leg scope. Ordinary movement keys remain unchanged.
+ */
 export const bestEffortUndoKeys = (
-  row: { smsKey?: string; ts?: number; amountFils: number },
+  row: BestEffortUndoRow,
   ledgerCurrency: string | null | undefined,
 ): string[] => {
   const keys = new Set<string>();
-  if (typeof row.smsKey === 'string' && row.smsKey) keys.add(row.smsKey);
+  const cardPayment = isCardPaymentUndoRow(row);
+  if (typeof row.smsKey === 'string' && row.smsKey && (!cardPayment ||
+      (row.smsKey.startsWith('h') && isUsableCaptureSourceIdentity(row.smsKey, row.ts) &&
+        !isUnboundAndroidSourceKey(row.smsKey)))) keys.add(row.smsKey);
+  if (cardPayment) {
+    const scoped = bestEffortCardPaymentObservationKey(row, ledgerCurrency);
+    if (scoped) keys.add(scoped);
+    return [...keys];
+  }
   const observed = bestEffortObservationKey(row.ts, ledgerCurrency, row.amountFils);
   if (observed) keys.add(observed);
   return [...keys];
@@ -1089,7 +1134,7 @@ export const bestEffortUndoKeys = (
 /** Tombstones for every marked row among `removed` (undo, delete, batch undo, account delete). */
 export const tombstonesForRemoved = (
   existing: readonly string[] | undefined,
-  removed: readonly { bestEffort?: unknown; smsKey?: string; ts?: number; amountFils: number }[],
+  removed: readonly BestEffortUndoRow[],
   ledgerCurrency: string | null | undefined,
 ): string[] | undefined => {
   const keys = removed.filter((row) => row.bestEffort).flatMap((row) => bestEffortUndoKeys(row, ledgerCurrency));

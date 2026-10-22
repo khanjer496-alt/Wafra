@@ -23,6 +23,9 @@ import {
   statementRowKey,
   statementDescriptorsAgree,
   statedBalanceInText,
+  absorbableSourceKey,
+  MAX_ABSORBED_SOURCE_KEYS,
+  validAbsorbedSourceKeys,
   type CaptureChannel,
   type DuplicateCandidate,
 } from '@/lib/dedupe';
@@ -53,7 +56,7 @@ import {
   type NonPostingReason,
   type ParsedSms,
 } from '@/lib/sms-parser';
-import { bestEffortObservationKey } from '@/lib/best-effort-autopost';
+import { bestEffortCardPaymentObservationKey, bestEffortObservationKey } from '@/lib/best-effort-autopost';
 import type { Account, AppState, Bill, CaptureInstrument, CaptureSource, CardDue, ImportBatchInput, Transaction, TxHealUpdate } from '@/lib/types';
 
 
@@ -86,6 +89,8 @@ export type ScannedSms = Omit<ParsedSms, 'raw'> & {
   /** Relay-assigned opaque id of the statement upload a PDF/CSV row came from. */
   statementImportId?: string;
   statementRowIndex?: number;
+  /** A card statement summary's printed credit limit (relay statement rows only). */
+  creditLimitFils?: number;
   /**
    * Server-bound proof of the exact Shortcut branch and setup generation.
    * Only a marker for this receiving device's current generation may prove
@@ -988,6 +993,45 @@ function buildImportPlanInMarket(
     return candidates.length === 1 ? candidates[0] : undefined;
   };
   const updates: TxHealUpdate[] = [];
+  /** Facts dedupe needs to pair FAB's two alerts of one transfer (ambiguousTransferPairs). */
+  const transferPairFactsOf = (p: ScannedSms): Pick<DuplicateCandidate, 'transferSourceAmbiguous' | 'transferCounterparty'> => {
+    if (!p.card || isStatementCaptureSource(p.captureSource) || (!p.transferHint && p.transferEvidence === undefined)) return {};
+    const evidence = buildTransferEvidence(p, false);
+    if (!evidence) return {};
+    return {
+      ...(evidence.sourceKindAmbiguous === true ? { transferSourceAmbiguous: true } : {}),
+      transferCounterparty: { last4: evidence.counterparty?.last4, name: evidence.counterpartyName },
+    };
+  };
+  /** The row each new capture candidate became, for absorbed identities. */
+  const postingByCandidate = new Map<DuplicateCandidate, Omit<Transaction, 'id'>>();
+  /**
+   * FAB's second alert of a transfer was dropped into the row its first alert
+   * (or the statement row) is. Keep its identity there, so a re-read of it is
+   * the same Message, whatever the person has since done to that row.
+   */
+  const noteAbsorbed = (
+    absorbed: ReturnType<ReturnType<typeof duplicateGuard>['takeAbsorbed']>,
+    candidate: Pick<DuplicateCandidate, 'smsKey' | 'ts'>,
+  ): void => {
+    const key = absorbed ? absorbableSourceKey(candidate.smsKey, candidate.ts) : undefined;
+    if (!absorbed || !key) return;
+    if (absorbed.targetId) {
+      const prior = priorById().get(absorbed.targetId);
+      if (!prior) return;
+      const known = new Set(validAbsorbedSourceKeys(prior.absorbedSmsKeys));
+      for (const patch of updates) {
+        if (patch.id === absorbed.targetId) for (const pending of patch.absorbedSmsKeys ?? []) known.add(pending);
+      }
+      if (known.has(key) || known.size >= MAX_ABSORBED_SOURCE_KEYS) return;
+      updates.push({ id: absorbed.targetId, absorbedSmsKeys: [key] });
+      return;
+    }
+    const posting = absorbed.candidate ? postingByCandidate.get(absorbed.candidate) : undefined;
+    if (!posting) return;
+    const keys = posting.absorbedSmsKeys ?? [];
+    if (!keys.includes(key) && keys.length < MAX_ABSORBED_SOURCE_KEYS) posting.absorbedSmsKeys = [...keys, key];
+  };
   const claimStatementOccurrence = (prior: Transaction, p: ScannedSms): void => {
     const key = statementRowKey(p);
     if (!key || statementRowKey(prior) === key) return;
@@ -1155,6 +1199,8 @@ function buildImportPlanInMarket(
   // Newest bank-quoted balance/limit per account — even from messages whose
   // transaction is already imported (rescans refresh the figures).
   const snapshots: ImportBatchInput['snapshots'] = {};
+  // Newest statement-printed credit limit per card (statement summaries only).
+  const creditLimits: NonNullable<ImportBatchInput['creditLimits']> = {};
   const hints: Record<string, string> = { ...state.accountHints };
   const newAccounts: Omit<Account, 'id'>[] = [];
   const newHints: Record<string, string> = {};
@@ -1245,6 +1291,55 @@ function buildImportPlanInMarket(
       ...prefixes.flatMap((prefix) => suffixes.map((suffix) => `${prefix} ${suffix}`)),
     ].includes(account.name.trim());
   };
+  /** The source clause said "account/card" for this alert's own tail (transfer-evidence.ts). */
+  const ambiguousSourceTail = (p: ScannedSms): boolean => {
+    if (p.card?.kind !== 'unknown') return false;
+    const parties = p.raw ? extractOutgoingTransferParties(p.raw) : null;
+    return (parties?.sourceKindAmbiguous === true && parties.source?.last4 === p.card.last4) ||
+      (p.raw === undefined && buildTransferEvidence(p, false)?.sourceKindAmbiguous === true);
+  };
+  /**
+   * Anything suggesting a real card carries this tail at this bank: a typed
+   * or batch-minted card among the candidates, a card candidate holding a row
+   * that is not such an ambiguous confirmation (or none at all), a stored row
+   * on a card instrument with this tail, or any card alert for it in this
+   * batch, including untyped ones. An unknown bank is not a different bank.
+   */
+  const realCardEvidenceMemo = new Map<string, boolean>();
+  const realCardEvidence = (
+    last4: string,
+    bankIdentity: string,
+    candidates: Array<{ ref: string; account: Pick<Account, 'kind' | 'cardType' | 'last4' | 'bankName' | 'name'> }>,
+  ): boolean => {
+    const cards = candidates.filter(({ account }) => account.kind === 'card');
+    const memoKey = `${bankIdentity}|${last4}|${cards.map(({ ref }) => ref).join(',')}`;
+    const memo = realCardEvidenceMemo.get(memoKey);
+    if (memo !== undefined) return memo;
+    const sameBank = (other: string | undefined) => !other || other === bankIdentity;
+    const ambiguousRow = (row: Transaction) => row.transferEvidence?.sourceKindAmbiguous === true &&
+      row.captureInstrument?.kind === 'unknown';
+    const cardIds = new Set(cards.map(({ ref }) => ref));
+    const rowsOnCards = new Map<string, number>();
+    let evidence = cards.some(({ ref, account }) => !existingAccountById.has(ref) || effectiveCardType(ref, account) !== undefined);
+    for (const row of evidence ? [] : state.transactions) {
+      if (cardIds.has(row.accountId)) {
+        rowsOnCards.set(row.accountId, (rowsOnCards.get(row.accountId) ?? 0) + 1);
+        if (!ambiguousRow(row)) { evidence = true; break; }
+      }
+      const instrument = row.captureInstrument;
+      if (instrument?.last4 === last4 && instrument.kind !== 'account' && sameBank(instrument.bankIdentity) &&
+        !ambiguousRow(row)) { evidence = true; break; }
+    }
+    evidence ||= cards.some(({ ref }) => !rowsOnCards.has(ref));
+    evidence ||= parsed.some((row) => row.card?.last4 === last4 && row.card.kind !== 'account' &&
+      !isStatementCaptureSource(row.captureSource) && !ambiguousSourceTail(row) && sameBank(bankIdentityOfRow(row)));
+    realCardEvidenceMemo.set(memoKey, evidence);
+    return evidence;
+  };
+  const bankIdentityOfRow = (p: ScannedSms): string | undefined => {
+    const bank = bankFromHint(p) ?? bankFromSender(p.sender);
+    return bank ? bankIdentityForName(bank.name) : undefined;
+  };
   const resolveAccount = (
     p: ScannedSms,
     ambiguousFallbackAccountId?: string,
@@ -1321,10 +1416,7 @@ function buildImportPlanInMarket(
     // Mada. Reinterpreting its structured result from English-only raw-text
     // heuristics silently downgraded explicit Arabic debit cards to unknown.
     const kind = p.card.kind as ResolvedCardKind;
-    const transferParties = kind === 'unknown' && p.raw ? extractOutgoingTransferParties(p.raw) : null;
-    const sourceKindAmbiguous = (transferParties?.sourceKindAmbiguous === true &&
-      transferParties.source?.last4 === last4) || (p.raw === undefined && kind === 'unknown' &&
-      buildTransferEvidence(p, false)?.sourceKindAmbiguous === true);
+    const sourceKindAmbiguous = ambiguousSourceTail(p);
     // A message that spells out its issuer ("Emirates NBD Credit Card Mini
     // Stmt for Card ending 8575") is STATING the bank; a sender ID only
     // suggests one. That distinction is the only thing that can separate two
@@ -1393,6 +1485,18 @@ function buildImportPlanInMarket(
         ? compatible.filter(({ ref, account }) => effectiveCardType(ref, account) === kind)
         : [];
     const eligible = typedCompatible.length > 0 ? typedCompatible : compatible;
+    // FAB's "from your account/card XXXX0002" names the account when the
+    // ledger already holds that bank's account with that tail and nothing
+    // shows a real card there (see realCardEvidence). Otherwise unchanged.
+    // New alerts only: a re-read of a stored row keeps the account it is on.
+    const ambiguousBank = sourceKindAmbiguous && bank && ambiguousFallbackAccountId === undefined
+      ? bankIdentityForName(bank.name) : undefined;
+    if (ambiguousBank && eligible.length > 1) {
+      const bankIdentity = ambiguousBank;
+      const accounts = eligible.filter(({ ref, account }) => existingAccountById.has(ref) && account.kind === 'bank' &&
+        !!account.bankName && bankIdentityForName(account.bankName) === bankIdentity);
+      if (accounts.length === 1 && !realCardEvidence(last4, bankIdentity, eligible)) return resolved(accounts[0].ref);
+    }
     // A legacy last4-only hint cannot distinguish two real same-bank cards.
     // Every hint, including a scoped one, is accepted only when it names the
     // sole compatible account in current state plus this batch.
@@ -1633,6 +1737,19 @@ function buildImportPlanInMarket(
       if ((undoKey && undoneBestEffort.has(undoKey)) ||
         (p.bestEffort && undoneBestEffort.has(bestEffortObservationKey(p.smsTs, p.currency, p.amountFils) ?? ''))) continue;
     }
+    if (undoneBestEffort.size > 0 && p.kind === 'cardPayment') {
+      // Distinct provider/GUID identities are distinct payments even when
+      // their card, amount and clock match. Generic t/s keys may belong to
+      // ordinary spending and are never settlement identity.
+      if (p.sourceEventId) {
+        const exact = smsKeyOf(p);
+        if (exact && undoneBestEffort.has(exact)) continue;
+      } else if (p.bestEffort) {
+        const scoped = bestEffortCardPaymentObservationKey({ ts: p.smsTs, amountFils: p.amountFils,
+          captureInstrument: captureInstrumentOf(p), cardPaymentSide: p.cardPaymentSide }, p.currency);
+        if (scoped && undoneBestEffort.has(scoped)) continue;
+      }
+    }
     const date = p.date ?? toISODate(new Date());
     if (p.kind === 'billDue') {
       // Same stale-misread sweep the cardStatement branch does below, and it
@@ -1726,6 +1843,11 @@ function buildImportPlanInMarket(
         : bankOnlyAccountId ?? '';
       if (!accountId) continue;
       noteSnapshot(accountId, p);
+      const statedLimit: unknown = p.creditLimitFils;
+      if (typeof statedLimit === 'number' && Number.isSafeInteger(statedLimit) && statedLimit > 0 &&
+          Number.isFinite(p.smsTs) && (!creditLimits[accountId] || p.smsTs! > creditLimits[accountId].ts)) {
+        creditLimits[accountId] = { fils: statedLimit, ts: p.smsTs! };
+      }
       const existingDue = matchingDues.find((due) => due.accountId === accountId);
       const improvesMinimum =
         existingDue !== undefined &&
@@ -1900,6 +2022,7 @@ function buildImportPlanInMarket(
         smsKey,
         captureSource: p.captureSource,
         ...statementFactsOf(p),
+        ...(p.bestEffort ? { bestEffort: p.bestEffort } : {}),
         cardPaymentSide,
         isTransfer: true,
         captureInstrument: captureInstrumentOf(p),
@@ -1934,6 +2057,7 @@ function buildImportPlanInMarket(
       ...(eventIdentity ? { eventIdentity } : {}),
       // Differing stated balances prove two movements (see dedupe.ts).
       ...statedBalanceOf(p),
+      ...transferPairFactsOf(p),
     };
     const protectedEditedPush = exactPrior ? undefined : protectedEditedPushFor(p, date);
     if (protectedEditedPush && smsKey) {
@@ -2045,6 +2169,7 @@ function buildImportPlanInMarket(
     }
     const candidate = { ...captureCandidate, accountId };
     if (duplicate.has(candidate)) {
+      noteAbsorbed(duplicate.takeAbsorbed(), candidate);
       const matchedId = duplicate.takeMatchedId();
       const matchedPrior = matchedId ? priorById().get(matchedId) : undefined;
       if (statementRowKey(p) && matchedPrior) {
@@ -2207,6 +2332,7 @@ function buildImportPlanInMarket(
       // structured fields are all the person needs to check it.
       raw: lowConfidence && !p.bestEffort ? p.raw?.slice(0, 300) : undefined,
     };
+    postingByCandidate.set(candidate, posting);
     // Never post a possible second copy of a Wallet purchase silently. The
     // candidate stays in the duplicate guard above, so a same-scan push copy
     // of this alert is not posted either; a distinct alert still is compared
@@ -2463,6 +2589,7 @@ function buildImportPlanInMarket(
       snapshots,
       bankNames,
       cardTypes,
+      ...(Object.keys(creditLimits).length > 0 ? { creditLimits } : {}),
       confirmedLedgerCurrency: confirmedLedgerCurrency(parsed),
       importMoney: importMoney ?? undefined,
       lastScanTs: newestTs,

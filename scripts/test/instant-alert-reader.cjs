@@ -49,7 +49,7 @@ function createReader(re) {
   return { read, merchantOf };
 }
 
-/** Every redacted real bank message in the fixtures. */
+/** Real-derived fixtures plus labelled synthetic transfer regressions. */
 function corpusMessages() {
   const out = [];
   for (const name of ['uae-accuracy-report.txt', 'uae-accuracy-report-2.txt']) {
@@ -74,7 +74,8 @@ function corpusMessages() {
     flush();
   }
   const namedBankFormats = require('./fixtures/uae-bank-formats');
-  return [...out, ...namedBankFormats.map((row) => row.body)];
+  return [...out, ...namedBankFormats.map((row) => row.body),
+    ...require('./fixtures/enbd-transfer-capture.js').map(row => row.body)];
 }
 
 module.exports = { createReader, corpusMessages };

@@ -69,7 +69,9 @@ if [ "$(uname -s)" = "Darwin" ]; then
   bash native-history-store.sh
   NATIVE_SUITES=$((NATIVE_SUITES + 1))
   bash native-live-capture-store.sh
-  NATIVE_SUITES=$((NATIVE_SUITES + 1))
+  bash native-parser-context.sh
+  bash native-background-alert-parser.sh
+  NATIVE_SUITES=$((NATIVE_SUITES + 3))
   bash native-live-queue-signal.sh
   NATIVE_SUITES=$((NATIVE_SUITES + 1))
 fi

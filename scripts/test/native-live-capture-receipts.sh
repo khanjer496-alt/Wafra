@@ -34,7 +34,10 @@ xcrun simctl boot "$device"
 xcrun simctl bootstatus "$device" -b
 sdk=$(xcrun --sdk iphonesimulator --show-sdk-path)
 xcrun swiftc -D DEBUG -target arm64-apple-ios18.0-simulator -sdk "$sdk" \
+  modules/wafra-live-capture/ios/WafraNativeParserContext.swift \
   modules/wafra-live-capture/ios/WafraLiveCaptureStore.swift \
+  modules/wafra-live-capture/ios/WafraInstantAlertPatterns.generated.swift \
+  modules/wafra-live-capture/ios/WafraInstantAlertReader.swift \
   scripts/test/native-live-capture-receipts.swift -o "$scratch/native-receipt-tests"
 codesign --force --sign - "$scratch/native-receipt-tests"
 printf '%s\n' "runtime=$runtime; synthetic queue persistence only; not real SMS or locked-device protection"

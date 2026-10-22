@@ -432,8 +432,8 @@ const S = {
     ar: 'راجع التفاصيل الملتقطة قبل إضافة أي شيء إلى سجلك.',
   },
   reviewAlertsPrivacy: {
-    en: 'Only a structured summary is kept here. The bank message text is not stored.',
-    ar: 'يُحفظ هنا ملخص منظّم فقط. لا يُحفظ نص الرسالة البنكية.',
+    en: 'Only a structured summary is kept here. Message text is not stored.',
+    ar: 'يُحفظ هنا ملخص منظّم فقط. لا يُحفظ نص الرسالة.',
   },
   reviewAlertsEmptyTitle: { en: 'All clear', ar: 'تمت مراجعة كل شيء' },
   reviewAlertsEmptyBody: {
@@ -452,6 +452,7 @@ const S = {
   reviewAlertObservedDate: { en: 'Alert date', ar: 'تاريخ التنبيه' },
   applePayReviewTitle: { en: 'Apple Pay purchase', ar: 'عملية Apple Pay' },
   applePayReviewSource: { en: 'Apple Pay via Shortcuts', ar: 'Apple Pay عبر الاختصارات' },
+  applePayReviewHeader: { en: 'Check Apple Pay purchase', ar: 'تحقق من عملية Apple Pay' },
   applePayReviewObserved: { en: 'Apple Pay capture date', ar: 'تاريخ التقاط Apple Pay' },
   applePayReviewUseDate: { en: 'Use Apple Pay capture date', ar: 'استخدام تاريخ التقاط Apple Pay' },
   applePayReviewQuestion: { en: 'Is this purchase already recorded?', ar: 'هل هذه العملية مسجلة بالفعل؟' },
@@ -1285,12 +1286,12 @@ const S = {
     ar: '{country} · استيراد تلقائي بعملة {currency}؛ يستطيع أندرويد اكتشاف تنسيقات مدعومة أخرى للمراجعة',
   },
   globalParserPackDetail: {
-    en: 'Android worldwide review · {currency} ledger; iPhone capture remains UAE/Saudi',
-    ar: 'مراجعة عالمية على أندرويد · سجل بعملة {currency}؛ يبقى التقاط الآيفون للإمارات والسعودية',
+    en: '{currency} ledger · other bank formats may need Review; automatic coverage varies',
+    ar: 'سجل بعملة {currency} · قد تحتاج تنسيقات البنوك الأخرى إلى المراجعة؛ تختلف تغطية الاستيراد التلقائي',
   },
   parserPackPickerBody: {
-    en: 'Choose the launch-tested UAE or Saudi automatic-import pack. Android detects other supported countries per alert and keeps them review-first; iPhone does not yet.',
-    ar: 'اختر حزمة الاستيراد التلقائي المختبرة للإمارات أو السعودية. يكتشف أندرويد الدول المدعومة الأخرى لكل تنبيه ويعرضها للمراجعة أولاً؛ الآيفون لا يدعم ذلك بعد.',
+    en: 'UAE and Saudi packs have tested automatic formats. Android and iPhone History may auto-add other completed movements marked Auto-added — check. Unfamiliar live iPhone alerts wait in Review.',
+    ar: 'تضم حزمتا الإمارات والسعودية تنسيقات مختبرة للاستيراد التلقائي. قد يضيف أندرويد وسجل رسائل الآيفون حركات مكتملة أخرى بعلامة أُضيف تلقائياً — تحقّق. تنتظر تنبيهات الآيفون المباشرة غير المألوفة في المراجعة.',
   },
   /**
    * Why a differently-denominated pack is greyed out.
@@ -2196,8 +2197,8 @@ const S = {
     ar: 'التقط العمليات الجديدة',
   },
   onboardLiveBody: {
-    en: 'A Shortcut sends new bank messages to Wafra on this iPhone.',
-    ar: 'يرسل اختصار رسائل بنكك الجديدة إلى وفرة على هذا الآيفون.',
+    en: 'Bank texts or Apple Pay taps reach Wafra on this iPhone.',
+    ar: 'تصل رسائل البنك أو مدفوعات Apple Pay إلى وفرة على هذا الآيفون.',
   },
   onboardLiveAction: {
     en: 'Set up',
@@ -3014,8 +3015,14 @@ const S = {
   iosMessageRetrySetup: { en: 'Try again', ar: 'حاول مجدداً' },
   iosMessageHistoryKeepOpen: { en: 'Keep Shortcuts open and iPhone unlocked.', ar: 'أبقِ الاختصارات مفتوحاً والآيفون دون قفل.' },
   iosMessageHistoryCoverage: { en: 'Imports saved Messages in smaller batches.', ar: 'يستورد الرسائل المحفوظة على دفعات أصغر.' },
-  iosMessageGuideSender: { en: 'Sender: leave empty · Message Contains: one space', ar: 'المرسل: اتركه فارغاً · تحتوي الرسالة على: مسافة واحدة' },
-  iosMessageGuideNoFilter: { en: 'Type a single space in “Message Contains” so Next turns on. Messages containing a space run the Shortcut. Wafra keeps bank messages and discards other messages on this iPhone.', ar: 'اكتب مسافة واحدة في «تحتوي الرسالة على» لتفعيل «التالي». تشغّل الرسائل التي تحتوي على مسافة الاختصار، ويصفّيها وفرة على هذا الآيفون.' },
+  iosMessageGuideSender: {
+    en: "Sender: leave empty · Message Contains: one space",
+    ar: "المرسل: اتركه فارغاً · تحتوي الرسالة على: مسافة واحدة",
+  },
+  iosMessageGuideNoFilter: {
+    en: "Type a single space in “Message Contains” so Next turns on. Messages containing a space reach Wafra regardless of currency. Wafra checks them on this iPhone; this does not turn off Apple’s automation notifications.",
+    ar: "اكتب مسافة واحدة في «تحتوي الرسالة على» لتفعيل «التالي». تصل الرسائل التي تحتوي على مسافة إلى وفرة بغض النظر عن العملة، ويفحصها وفرة على هذا الآيفون. هذا لا يوقف إشعارات أتمتة Apple.",
+  },
   iosMessageFutureInstallHelp: {
     en: 'Tap Add Shortcut, then add {shortcut} in Shortcuts.',
     ar: 'اضغط «إضافة الاختصار»، ثم أضف {shortcut} في الاختصارات.',
@@ -3083,7 +3090,10 @@ const S = {
     en: 'Past alerts',
     ar: 'التنبيهات السابقة',
   },
-  iosMessageSenderUnavailable: { en: 'Do not pick a Contact as Sender. Apple lists Contacts only, and bank SMS IDs are not Contacts; an empty Sender with a single space in “Message Contains” runs for every new message.', ar: 'لا تختر جهة اتصال كمرسل. تعرض Apple جهات الاتصال فقط، ومعرّفات رسائل البنوك ليست جهات اتصال؛ المرسل الفارغ يشغّل الأتمتة لكل رسالة جديدة.' },
+  iosMessageSenderUnavailable: {
+    en: "Leave Sender empty for alphanumeric bank SMS IDs. Use one space in Message Contains to avoid filtering by currency. Choose Run Immediately and turn off Notify When Run if shown. Wafra cannot change Apple’s notification settings.",
+    ar: "اترك المرسل فارغاً لمعرّفات البنك النصية. استخدم مسافة واحدة في «تحتوي الرسالة على» لتجنب التصفية حسب العملة. اختر «تشغيل فوراً» وأوقف «الإشعار عند التشغيل» إن ظهر. لا يستطيع وفرة تغيير إعدادات إشعارات Apple.",
+  },
   iosStepConnect: { en: 'Connect', ar: 'الربط' },
   iosStepBanks: { en: 'Banks', ar: 'البنوك' },
   iosStepShortcut: { en: 'Add Wafra Capture', ar: 'أضف «Wafra Capture»' },
@@ -3134,8 +3144,8 @@ const S = {
     ar: 'فعّل الالتقاط التلقائي',
   },
   iosLocalAutomationBody: {
-    en: 'Apple’s Sender picker shows Contacts only, so leave Sender empty and type a single space in “Message Contains” so Next turns on. The automation then passes each new message to Wafra, which keeps bank messages and discards the rest on this iPhone.',
-    ar: 'تعرض قائمة المرسلين لدى Apple جهات الاتصال فقط، لذلك اترك المرسل فارغاً واكتب مسافة واحدة في «تحتوي الرسالة على» حتى يُفعَّل زر التالي. تمرّر الأتمتة عندها كل رسالة جديدة إلى وفرة، الذي يحتفظ برسائل البنك ويتجاهل البقية على هذا الآيفون.',
+    en: "Leave Sender empty and type one space in Message Contains. Messages containing a space reach Wafra in any currency. Choose Run Immediately and turn off Notify When Run if shown. Edit your existing Wafra automation instead of adding another.",
+    ar: "اترك المرسل فارغاً واكتب مسافة واحدة في «تحتوي الرسالة على». تصل الرسائل التي تحتوي على مسافة إلى وفرة بأي عملة. اختر «تشغيل فوراً» وأوقف «الإشعار عند التشغيل» إن ظهر. عدّل أتمتة وفرة الحالية بدلاً من إضافة أتمتة أخرى.",
   },
   iosMessageContinueManual: {
     en: 'Skip for now',

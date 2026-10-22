@@ -43,6 +43,8 @@ export interface WafraLiveCaptureNativeModule {
     verifiedAtMs: number,
   ): Promise<boolean>;
   setCaptureEnabled(enabled: boolean): Promise<void>;
+  /** Advisory parser preferences only. Missing on older binaries. */
+  setNativeParserContext?(serialized: string | null): Promise<void>;
   /** Per-charge banner preference for capture automations. Absent on older binaries. */
   getInstantAlertsEnabled?(): Promise<boolean>;
   setInstantAlertsEnabled?(enabled: boolean): Promise<void>;

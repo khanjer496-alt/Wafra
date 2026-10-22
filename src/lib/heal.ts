@@ -6,6 +6,7 @@ import {
 import type { Transaction, TxHealUpdate } from '@/lib/types';
 import { isCompletedCashbackCredit } from '@/lib/bank-alert-semantic-rules';
 import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
+import { MAX_ABSORBED_SOURCE_KEYS, validAbsorbedSourceKeys } from '@/lib/dedupe';
 
 /** Recheck source-owned facts at application time; a date alone is not proof. */
 export function canApplySourceDateCorrection(
@@ -282,13 +283,21 @@ export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transactio
     ...(tx.statementOccurrences ?? []), ...patch.statementOccurrences,
   ].map((claim) => [`${claim.importId}:${claim.rowIndex}`, claim])).values()] : tx.statementOccurrences;
   if (claims && claims.length > 64) throw new Error('Statement occurrence claim capacity exceeded');
+  // Absorbed Message identities only ever accumulate, bounded and validated.
+  const absorbed = patch.absorbedSmsKeys
+    ? [...new Set([...validAbsorbedSourceKeys(tx.absorbedSmsKeys), ...validAbsorbedSourceKeys(patch.absorbedSmsKeys)])]
+      .slice(0, MAX_ABSORBED_SOURCE_KEYS)
+    : undefined;
+  const absorbedChanged = absorbed !== undefined && JSON.stringify(absorbed) !== JSON.stringify(tx.absorbedSmsKeys ?? []);
 
   // This evidence class admits exactly one field. Never smuggle unrelated
   // account, ownership, source identity or classification edits with it.
   if (patch.sourceDateCorrection) {
+    // Absorbed identities merged into this patch are technical and still land.
+    const identified = absorbedChanged ? { ...tx, absorbedSmsKeys: absorbed } : tx;
     return patch.id === tx.id && canApplySourceDateCorrection(tx, patch.sourceDateCorrection)
-      ? { ...tx, date: patch.sourceDateCorrection.to }
-      : tx;
+      ? { ...identified, date: patch.sourceDateCorrection.to }
+      : identified;
   }
   // Planning and applying are separated by inbox/relay I/O. A user can edit
   // the row in that gap, so the apply boundary must enforce the pin again
@@ -307,12 +316,14 @@ export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transactio
         JSON.stringify(patch.captureInstrument) === JSON.stringify(tx.captureInstrument)) &&
       nextViaPush === tx.viaPush &&
       (patch.walletBound === undefined || tx.walletBound === true) &&
-      JSON.stringify(claims) === JSON.stringify(tx.statementOccurrences)
+      JSON.stringify(claims) === JSON.stringify(tx.statementOccurrences) &&
+      !absorbedChanged
     ) {
       return tx;
     }
     const identified: Transaction = { ...tx };
     if (claims) identified.statementOccurrences = claims;
+    if (absorbedChanged) identified.absorbedSmsKeys = absorbed;
     if (patch.walletBound === true) identified.walletBound = true;
     if (patch.ts !== undefined) identified.ts = patch.ts;
     if (patch.textClock !== undefined) identified.textClock = patch.textClock;
@@ -348,6 +359,7 @@ export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transactio
   if (patch.transferEvidence !== undefined) next.transferEvidence = patch.transferEvidence;
   if (patch.clearTransferEvidence) delete next.transferEvidence;
   if (claims) next.statementOccurrences = claims;
+  if (absorbedChanged) next.absorbedSmsKeys = absorbed;
   if (patch.clearBestEffort) delete next.bestEffort;
   if (patch.raw !== undefined) {
     if (patch.raw === null) delete next.raw;
@@ -370,11 +382,20 @@ export function applyHealUpdates(
   for (const update of updates) {
     const prior = patches.get(update.id);
     const claims = [...(prior?.statementOccurrences ?? []), ...(update.statementOccurrences ?? [])];
-    const claimOnly = update.statementOccurrences !== undefined &&
-      Object.keys(update).every((key) => key === 'id' || key === 'statementOccurrences');
+    const absorbed = [...(prior?.absorbedSmsKeys ?? []), ...(update.absorbedSmsKeys ?? [])];
+    // materializeImportBatch writes `accountId: undefined` on every patch; an
+    // undefined field is absent, or a claim-only patch replaced the real heal.
+    const claimOnly = (update.statementOccurrences !== undefined || update.absorbedSmsKeys !== undefined) &&
+      Object.entries(update).every(([key, value]) => value === undefined || key === 'id' ||
+        key === 'statementOccurrences' || key === 'absorbedSmsKeys');
     patches.set(update.id, {
-      ...(claimOnly && prior ? prior : {}), ...update,
+      // A claim-only patch adds its claims to the earlier patch; its undefined
+      // fields must not blank that patch's real ones (an account move).
+      ...(claimOnly && prior
+        ? { ...prior, id: update.id }
+        : update),
       ...(claims.length ? { statementOccurrences: claims } : {}),
+      ...(absorbed.length ? { absorbedSmsKeys: absorbed } : {}),
     });
   }
   const correctedSources = new Map<string, number>();

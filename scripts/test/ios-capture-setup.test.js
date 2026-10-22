@@ -209,6 +209,7 @@ const protocolModule = execute('src/lib/ios-local-capture-protocol.ts', (id) => 
 });
 
 const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
+  if (id === 'expo-crypto') return { randomUUID: () => 'test-capture-attempt-1' };
   if (id === 'react-native') {
     return {
       Platform: { OS: 'ios', Version: '17.5' },
@@ -297,6 +298,7 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
         verifiedAtMs: number,
       ): Promise<boolean>;
       setCaptureEnabled(enabled: boolean): Promise<void>;
+      setNativeParserContext?(serialized: string | null): Promise<void>;
       getInstantAlertsEnabled?(): Promise<boolean>;
       setInstantAlertsEnabled?(enabled: boolean): Promise<void>;
       listPendingRecords(limit: number): Promise<string[]>;
@@ -356,6 +358,7 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       'setLocalCaptureEntitlementLease',
       'setStoreCaptureEntitlementLease',
       'setCaptureEnabled',
+      'setNativeParserContext',
       'listPendingRecords',
       'listPendingRecordsIncludingNotifications',
       'listPendingApplePayRecords',
@@ -471,8 +474,20 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       'live.alert.title_named',
       'live.alert.title_credit',
       'live.alert.title_credit_named',
+      'live.alert.title_sent',
+      'live.alert.title_sent_named',
+      'live.alert.title_review',
+      'live.alert.title_review_named',
+      'live.alert.title_refund',
+      'live.alert.title_refund_named',
+      'live.alert.title_withdrawal',
+      'live.alert.title_withdrawal_named',
+      'live.alert.title_paid',
+      'live.alert.title_paid_named',
       'live.alert.card',
       'live.alert.fallback',
+      'live.apple_pay.alert.body_card',
+      'live.apple_pay.alert.body',
     ];
     const localizationKeys = (source) => [...source.matchAll(/^\s*"([^"]+)"\s*=/gm)]
       .map((match) => match[1]).sort();
@@ -535,7 +550,7 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       /#if DEBUG\s*public static let automationInputProbePayload[\s\S]*?#endif/.test(swiftStore) &&
         /#if DEBUG\s*public func recordAutomationInputProbe[\s\S]*?#endif/.test(swiftStore),
       swiftStore);
-    ok('stage intent keeps its exact four parameters, posts only the Wafra notice while capture is off and fails visibly for rejected capture', (() => {
+    ok('stage intent keeps its exact four parameters, posts only the Wafra notice while capture is off and never fails the Message automation', (() => {
       const match = generatedIntent.match(
         /struct StageWafraLiveMessageIntent:\s*AppIntent\s*\{([\s\S]*?)\n\}\n\n@available\(iOS 26\.0, \*\)\s*extension StageWafraLiveMessageIntent/,
       );
@@ -544,8 +559,8 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
         /var eventId:\s*String/.test(match[1]) && /var observedAt:\s*Date/.test(match[1]) &&
         /case \.disabled:\s*await WafraLiveCaptureNotice\.postIfDue\(\)\s*return \.result\(value: result\.rawValue\)/.test(match[1]) &&
         !/captureDisabled/.test(match[1]) &&
-        /case \.invalid:[\s\S]*invalidMessage/.test(match[1]) &&
-        /case \.capacityReached:[\s\S]*captureCapacityReached/.test(match[1]);
+        /case \.invalid, \.capacityReached:[\s\S]*?return \.result\(value: WafraLiveStageResult\.ignored\.rawValue\)/.test(match[1]) &&
+        !/\bthrow\b/.test(match[1].slice(match[1].indexOf('func perform')));
     })(), generatedIntent);
     ok('plain-text fallback auto-connects one String and uses the protected local queue', (() => {
       const match = generatedIntent.match(
@@ -558,7 +573,8 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
         /eventId:\s*UUID\(\)\.uuidString/.test(match[1]) &&
         /observedAt:\s*Date\(\)/.test(match[1]) &&
         /case \.disabled:\s*await WafraLiveCaptureNotice\.postIfDue\(\)\s*return \.result\(value: result\.rawValue\)/.test(match[1]) &&
-        !/captureDisabled/.test(match[1]);
+        !/captureDisabled/.test(match[1]) &&
+        !/\bthrow\b/.test(match[1].slice(match[1].indexOf('func perform')));
     })(), generatedIntent);
     ok('notification action accepts one required auto-connected String through the protected queue', (() => {
       const match = generatedIntent.match(
@@ -587,19 +603,35 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       generatedIntent);
     const alertSource = fs.readFileSync(
       path.join(ROOT, 'modules/wafra-live-capture/ios/WafraInstantAlert.swift'), 'utf8');
-    ok('the charge banner uses the closed alert keys, checks credentials, preference and permission first',
+    ok('the charge banner uses the closed alert keys and shared parser, checks current preferences and permission',
       expectedLocalizationKeys.filter((key) => key.startsWith('live.alert.'))
-        .every((key) => alertSource.includes(`"${key}"`)) &&
-        /guard !WafraInstantAlertReader\.isSensitive\(body\),\s*let read = WafraInstantAlertReader\.read\(body\),\s*\(try\? WafraLiveCaptureStore\.shared\.instantAlertsEnabled\(\)\) == true/.test(alertSource) &&
+        .every((key) => alertSource.includes(`"${key.replace(/_named$/, '')}"`)) &&
+        /guard !WafraInstantAlertReader\.isSensitive\(body\),\s*let context = try\? store\.nativeParserContextSnapshot\(\)/.test(alertSource) &&
+        /await WafraBackgroundAlertParser\.read\(/.test(alertSource) &&
+        // Two gates for the bank-text preview, one for the Apple Pay notice.
+        (alertSource.match(/store\.mayEmitParserPreview\(context: context\)/g) || []).length === 3 &&
+        /public static func postApplePay\([\s\S]*?mayEmitParserPreview\(context: context\)\) == true else \{ return \}[\s\S]*?case \.authorized, \.provisional, \.ephemeral:/.test(alertSource) &&
+        /"live\.apple_pay\.alert\.body_card"/.test(alertSource) && /"live\.apple_pay\.alert\.body"/.test(alertSource) &&
+        alertSource.lastIndexOf('store.mayEmitParserPreview') > alertSource.indexOf('await WafraBackgroundAlertParser.read') &&
+        alertSource.indexOf('await center.notificationSettings()') < alertSource.indexOf('await WafraBackgroundAlertParser.read') &&
+        !/WafraInstantAlertReader\.read\(/.test(alertSource) &&
         /case \.authorized, \.provisional, \.ephemeral:/.test(alertSource) &&
         !/listPendingRecords|StoredRecord|contentsOf|userInfo/.test(alertSource),
       alertSource);
     eq('every automation that queues text posts the charge banner only after acceptance', [
-      generatedIntent.match(/case \.accepted:\s*if let body \{ await WafraInstantAlert\.postIfReadable\(sender: sender, body: body\) \}/g)?.length || 0,
+      generatedIntent.match(/case \.accepted:\s*if let body \{ await WafraInstantAlert\.postIfReadable\(sender: sender, body: body, observedAt: observedAt \?\? Date\(\)\) \}/g)?.length || 0,
       generatedIntent.match(/case \.accepted:\s*await WafraInstantAlert\.postIfReadable\(body: body\)/g)?.length || 0,
       generatedIntent.match(/case \.accepted:\s*await WafraInstantAlert\.postIfReadable\(body: text\)/g)?.length || 0,
       generatedIntent.match(/postIfReadable/g)?.length || 0,
     ], [1, 1, 1, 3]);
+    ok('Apple Pay posts Wafra\'s notice only after acceptance and never fails the Wallet automation', (() => {
+      const match = generatedIntent.match(/struct CaptureWafraApplePayIntent:\s*AppIntent\s*\{([\s\S]*?)\n\}\n/);
+      if (!match) return false;
+      const perform = match[1].slice(match[1].indexOf('func perform'));
+      return /case \.accepted:\s*if let value = amount\?\.amount \{\s*await WafraInstantAlert\.postApplePay\(/.test(perform) &&
+        /case \.invalid, \.capacityReached:[\s\S]*?return \.result\(value: false\)/.test(perform) &&
+        !/\bthrow\b/.test(perform);
+    })(), generatedIntent);
     ok('legacy bridge excludes notifications and the additive reader explicitly opts in',
       /AsyncFunction\("listPendingRecords"\)[\s\S]*?listPendingRecords\(limit: nativeLimit, includeNotifications: false\)/.test(swiftModule) &&
         /AsyncFunction\("listPendingRecordsIncludingNotifications"\)[\s\S]*?listPendingRecords\(limit: nativeLimit, includeNotifications: true\)/.test(swiftModule), swiftModule);
@@ -617,7 +649,7 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       generatedIntent.match(/bundle:\s*\.atURL/g)?.length || 0,
     ], [18, 0]);
     ok('every intent title, parameter, and source-free error uses the closed localization keys',
-      expectedLocalizationKeys.filter((key) => !/^live\.(?:notice|alert)\./.test(key))
+      expectedLocalizationKeys.filter((key) => !/^live\.(?:notice|alert|apple_pay\.alert)\./.test(key))
         .every((key) => generatedIntent.includes(`"${key}"`)) &&
         !/static let title[^\n]*=\s*"|@Parameter\(title:\s*"/.test(generatedIntent), generatedIntent);
     const noticeSource = fs.readFileSync(
@@ -1438,6 +1470,12 @@ struct WafraBankSenderRegistryTests {
     }
     const AE_BODY = 'Purchase of AED 120.00 with Debit Card ending 1234 at CARREFOUR, DUBAI. Avl Balance is AED 5,000.00.';
     const SA_BODY = 'POS purchase of SAR 125.50 at JARIR BOOKSTORE using Mada Card ending 1234. Available balance SAR 2,500.00.';
+    // Distinct purchases have distinct running balances. Byte-identical bodies
+    // that share one balance figure within ten minutes are ONE SMS delivered
+    // twice, and the drain folds them exactly as Android's carrier fold does,
+    // so a filler queue of separate events must not reuse one balance.
+    const saBodyAt = (index) => SA_BODY.replace('2,500.00', `${2500 - index}.00`);
+    const balanceBodyAt = (index) => `Your available balance is AED ${5000 + index}.00.`;
     const REVIEW_BODY = 'AED 2,500.00 has been transferred to your FAB account from JOHN DOE';
     const DECLINE_BODY = 'Your transaction of AED 1,108.00 at NOON was declined due to insufficient funds.';
     let idSequence = 1;
@@ -1756,8 +1794,18 @@ struct WafraBankSenderRegistryTests {
     }
 
     {
+      // Android routes the launch grammar from the sender alone, so an
+      // unlisted real sender is never parsed as a Saudi bank; iPhone capture
+      // now refuses it the same way. A record with no sender (the store's
+      // placeholder) keeps the body route and matches a senderless History row.
+      const unlisted = localMessage.preflightLocalMessageRecord(
+        envelope({ id: '8'.repeat(64), sender: 'UNLISTED-SENDER', text: SA_BODY }),
+        new Date(NOW),
+      );
+      ok('an unlisted real sender routes no launch market, as on Android',
+        unlisted?.valid === true && unlisted.market === null, JSON.stringify(unlisted));
       const eventId = '7'.repeat(64);
-      const sender = 'UNLISTED-SENDER';
+      const sender = 'Wafra Automation';
       const preflight = localMessage.preflightLocalMessageRecord(
         envelope({ id: eventId, sender, text: SA_BODY }),
         new Date(NOW),
@@ -1779,11 +1827,10 @@ struct WafraBankSenderRegistryTests {
           v: 1,
           id: eventId,
           text: SA_BODY,
-          sender,
           receivedAt: '2026-08-25T11:00:00.000Z',
         }),
       ], {}, new Date(NOW));
-      ok('Android-equivalent all-Saudi unknown-sender semantics match history and local',
+      ok('all-Saudi senderless semantics match history and local',
         preflight?.market === 'SA' && local.kind === 'parsed' &&
           history.parsed.length === 1 &&
           JSON.stringify(parityFields(local.row)) ===
@@ -2061,7 +2108,7 @@ struct WafraBankSenderRegistryTests {
       const aeId = nextId();
       const native = nativeQueue([
         ...saIds.map((id, index) => envelope({
-          id, sender: 'ALRAJHI', text: SA_BODY, observedAt: recentIso(3_600_000 - index * 1000),
+          id, sender: 'ALRAJHI', text: saBodyAt(index), observedAt: recentIso(3_600_000 - index * 1000),
         })),
         envelope({ id: aeId, observedAt: recentIso(60_000) }),
       ]);
@@ -2312,7 +2359,7 @@ struct WafraBankSenderRegistryTests {
       const purchaseId = nextId();
       const native = nativeQueue([
         ...balanceIds.map((id, index) => envelope({
-          id, text: 'Your available balance is AED 5,000.00.', observedAt: recentIso(3_600_000 - index * 1000),
+          id, text: balanceBodyAt(index), observedAt: recentIso(3_600_000 - index * 1000),
         })),
         envelope({ id: purchaseId, observedAt: recentIso(60_000) }),
       ]);
@@ -2389,7 +2436,7 @@ struct WafraBankSenderRegistryTests {
       trayModule.reviewCaptureBacklog.reset();
       const seedIds = Array.from({ length: 50 }, () => nextId());
       const seedNative = nativeQueue(seedIds.map((id, index) => envelope({
-        id, sender: 'ALRAJHI', text: SA_BODY, observedAt: recentIso(7_200_000 - index * 1000),
+        id, sender: 'ALRAJHI', text: saBodyAt(index), observedAt: recentIso(7_200_000 - index * 1000),
       })));
       const ledger = admittingLedger([]);
       ledger.setState({ ...ledger.getState(), ledgerMoney: AED_MONEY });
@@ -2405,7 +2452,7 @@ struct WafraBankSenderRegistryTests {
       const aeReviewId = nextId();
       const native = nativeQueue([
         ...moreSa.map((id, index) => envelope({
-          id, sender: 'ALRAJHI', text: SA_BODY, observedAt: recentIso(3_600_000 - index * 1000),
+          id, sender: 'ALRAJHI', text: saBodyAt(50 + index), observedAt: recentIso(3_600_000 - index * 1000),
         })),
         envelope({ id: aeReviewId, text: REVIEW_BODY, sender: 'FAB', observedAt: recentIso(120_000) }),
         envelope({ id: aeId, observedAt: recentIso(60_000) }),
@@ -2518,8 +2565,10 @@ struct WafraBankSenderRegistryTests {
       const secondId = nextId();
       const firstAt = '2026-08-25T11:00:00.000Z';
       const secondAt = '2026-08-25T11:05:00.000Z';
+      // Two genuine purchases: the second leaves a lower balance. (Identical
+      // text with one balance five minutes apart is a carrier re-delivery.)
       const first = envelope({ id: firstId, observedAt: firstAt });
-      const second = envelope({ id: secondId, observedAt: secondAt });
+      const second = envelope({ id: secondId, observedAt: secondAt, text: AE_BODY.replace('5,000.00', '4,880.00') });
       const native = nativeQueue([first, second]);
       const ledger = ledgerAdapter();
       const outcome = await coordinator(native, ledger).drain();
@@ -4835,18 +4884,22 @@ struct WafraBankSenderRegistryTests {
       messageContains: null,
     }), true);
   // iOS 26 keeps Next disabled with both filters empty; the guided filter is a
-  // single space, which every bank alert contains.
+  // single space; it does not select a country or currency.
   eq('setup trigger guard: the guided single-space filter is supported',
     setupModule.isSupportedIosMessageAutomationTrigger({
       selectedSenderCount: 0,
       messageContains: ' ',
     }), true);
+  for (const phrase of ['AED', 'SAR', 'JD', 'درهم', 'your account']) {
+    eq(`broad setup guard rejects an incomplete keyword/currency filter ${phrase}`,
+      setupModule.isSupportedIosMessageAutomationTrigger({ selectedSenderCount: 0, messageContains: phrase }), false);
+  }
   for (const [name, trigger] of [
     ['non-numeric sender count', { selectedSenderCount: 'any', messageContains: null }],
     ['negative sender count', { selectedSenderCount: -1, messageContains: null }],
     ['empty-string filter', { selectedSenderCount: 0, messageContains: '' }],
-    ['AED keyword trigger', { selectedSenderCount: 0, messageContains: 'AED' }],
-    ['SAR keyword trigger', { selectedSenderCount: 0, messageContains: 'SAR' }],
+    ['control-character filter', { selectedSenderCount: 0, messageContains: 'AED\u0000' }],
+    ['oversized filter', { selectedSenderCount: 0, messageContains: 'A'.repeat(81) }],
   ]) {
     eq(`setup trigger guard: rejects ${name}`,
       setupModule.isSupportedIosMessageAutomationTrigger(trigger), false);
@@ -5060,7 +5113,7 @@ struct WafraBankSenderRegistryTests {
       events, [
         'can:shortcuts://',
         'enable:true',
-        `open:${protocolModule.iosLocalCaptureTestUrl()}`,
+        `open:${protocolModule.iosLocalCaptureTestUrl(false, false, 'test-capture-attempt-1')}`,
       ]);
     harness.controller.dispose();
   }
@@ -5117,7 +5170,8 @@ struct WafraBankSenderRegistryTests {
     ok('setup controller: a forged success callback cannot create proof',
       harness.controller.getModel().readiness === 'not-added');
     activeStatus = status({ enabled: true, setupProofVersion: 1, setupProofAt: 8 });
-    await harness.controller.send({ type: 'shortcut-callback', result: 'success' });
+    await harness.controller.send({ type: 'check-shortcut' });
+    await harness.controller.send({ type: 'shortcut-callback', result: 'success', attemptId: 'test-capture-attempt-1' });
     ok('setup controller: a callback reflects only proof read from native status',
       harness.controller.getModel().readiness === 'shortcut-proven');
     harness.controller.dispose();

@@ -48,6 +48,7 @@ import {
 } from '@/lib/capture';
 import { createCaptureExecutor, type CaptureLedgerAdapter } from '@/lib/capture-executor';
 import { installAndroidLiveCaptureLedger } from '@/lib/android-live-background';
+import { syncIosNativeParserContext } from '@/lib/ios-native-parser-context';
 import {
   androidNotificationCaptureEnabled,
   androidSmsCaptureEnabled,
@@ -599,8 +600,10 @@ export function useAutoImport(
     cancelledSubscriptions: watchForeground ? s.cancelledSubscriptions : undefined,
     monthStartDay: watchForeground ? s.monthStartDay : undefined,
     language: watchForeground ? s.language : undefined,
-    marketId: watchForeground ? s.marketId : undefined,
-    ledgerMoney: watchForeground ? s.ledgerMoney : undefined,
+    // Small preferences are also needed by the background native preview.
+    country: s.country,
+    marketId: s.marketId,
+    ledgerMoney: s.ledgerMoney,
   }));
   const {
     getStateSnapshot,
@@ -612,7 +615,14 @@ export function useAutoImport(
     setMarket,
     recordIosCaptureWarning,
     clearIosCaptureWarning,
+    postLinkedApplePay,
   } = useStoreActions();
+  // Linked Wallet cards post on their own; the title matches Review's default.
+  const postLinkedApplePayForCapture = useCallback(
+    (items: Parameters<typeof postLinkedApplePay>[0]) =>
+      postLinkedApplePay(items, { fallbackTitle: t('genericCardPayment') }),
+    [postLinkedApplePay],
+  );
   const reminderInputsObserved = useRef(false);
   const captureLedger = useMemo<CaptureLedgerAdapter>(() => ({
     getState: getStateSnapshot,
@@ -643,6 +653,13 @@ export function useAutoImport(
     return installAndroidLiveCaptureLedger(captureLedger);
   }, [captureLedger, watchForeground]);
   const iosNative = useMemo(() => getIosCaptureNativeModule(), []);
+  useEffect(() => {
+    if (Platform.OS !== 'ios' || !iosNative?.setNativeParserContext) return;
+    // The helper shares one ordered writer across hook instances. Cold locked
+    // startup cannot hydrate the ledger and keeps prior validated preferences.
+    void syncIosNativeParserContext(iosNative, getStateSnapshot()).catch(() => {});
+  }, [getStateSnapshot, iosNative, state.hydrated, state.onboarded, state.country,
+    state.marketId, state.ledgerMoney]);
   const statusReadInProgress = useRef(false);
   const ignoreOwnWarningSignal = useRef(false);
   const iosCoordinator = useMemo(() => {
@@ -658,8 +675,9 @@ export function useAutoImport(
           ? Promise.resolve(cachedReferenceQuote(base, quote, date, current.transactions))
           : loadReferenceQuote(base, quote, date, { transactions: current.transactions });
       },
+      postLinkedApplePay: postLinkedApplePayForCapture,
     });
-  }, [captureLedger, getStateSnapshot, iosNative]);
+  }, [captureLedger, getStateSnapshot, iosNative, postLinkedApplePayForCapture]);
   const iosCycleDependencies = useMemo<IosLocalCaptureCycleDependencies | null>(() => {
     if (!iosNative || !iosCoordinator) return null;
     return {

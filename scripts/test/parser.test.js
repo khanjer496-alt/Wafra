@@ -223,6 +223,92 @@ t('foreign purchase refund with a quoted local amount preserves the bank rate',
   ok('purchase refund does not invent FX metadata from a merchant currency-code collision',
     collision.amountFils === 49500 && collision.originalCurrency === undefined && collision.fxSource === undefined);
 }
+// A completed purchase refund is understood money, not an unread credit: like
+// every other refund grammar it is deliberately "other", so the income-review
+// gate (auto-import.ts shouldReviewParsedIncome) lets it post on both
+// platforms. Shape of a reported Liv credit-card refund, values replaced; the
+// "Avl Limit" figure is a labelled snapshot, never a second amount.
+{
+  const LIV_REFUND = 'Purchase amount of AED 106.00 at CAREEM on your Credit Card ending 1234 has been refunded to your card. Avl Limit is AED 22,475.82.';
+  t('a purchase refund to a credit card posts as a refund credit to that card', LIV_REFUND,
+    { kind: 'transaction', type: 'income', amountFils: 10600, merchant: 'Careem',
+      card: { last4: '1234', kind: 'credit' }, snapshotFils: 2247582, snapshotKind: 'limit' }, { sender: 'Liv' });
+  const { shouldReviewParsedIncome } = require('./build/auto-import');
+  for (const body of [LIV_REFUND, foreignPurchaseRefund]) {
+    const refund = parseSms(body, undefined, { sender: 'Liv' });
+    ok(`a completed purchase refund is deliberately other and not held for income review: ${body.slice(0, 40)}`,
+      refund?.categoryDeliberate === true && shouldReviewParsedIncome(refund) === false,
+      JSON.stringify(refund && [refund.categoryGuess, refund.categoryDeliberate]));
+  }
+  // Paired: a refund still being processed is not money yet.
+  t('a purchase refund that will be credited later is not posted',
+    LIV_REFUND.replace('has been refunded to your card', 'will be refunded to your card within 5 working days'), null, { sender: 'Liv' });
+  // Only the clean completed form is understood money. A negated refund is
+  // no movement, and a partial refund's figure is not the purchase amount.
+  t('a purchase that has NOT been refunded is not a refund credit',
+    LIV_REFUND.replace('has been refunded to your card', 'has not been refunded'), null, { sender: 'Liv' });
+  t('a partially refunded purchase is not booked at the full purchase amount',
+    LIV_REFUND.replace('has been refunded to your card.', 'has been partially refunded. Refund amount AED 20.00.'), null, { sender: 'Liv' });
+  const successful = parseSms(LIV_REFUND.replace('has been refunded to your card', 'has been successfully refunded'), undefined, { sender: 'Liv' });
+  ok('a successfully refunded purchase is the same understood refund',
+    successful?.type === 'income' && successful.amountFils === 10600 && successful.categoryDeliberate === true,
+    JSON.stringify(successful && [successful.type, successful.amountFils, successful.categoryDeliberate]));
+}
+// A booking reference after the star is not the shop. Shape of a reported
+// FAB card alert, values replaced; paired with processor-prefix controls
+// whose part after the star IS the shop and must still be kept.
+{
+  const fab = (amount, descriptor) => `Credit Card Purchase\nCard No XXXX1234\n${amount}\n${descriptor}\n14/10/26 10:30\nAvailable Balance AED 9,000.00`;
+  const at = { sender: 'FAB', observedAt: Date.parse('2026-10-14T07:00:00Z') };
+  t('a merchant followed by a booking reference after the star keeps the merchant',
+    fab('AED 174.00', 'AIRBNB * HMFFQR29BF LONDON GBR'), { type: 'expense', amountFils: 17400, merchant: 'Airbnb' }, at);
+  t('a processor prefix before the star is still peeled to the shop',
+    fab('USD 7.20', 'WEB*DOMAIN.COM BURLINGTON USA'), { type: 'expense', merchant: 'Domain.com' }, at);
+  t('a shop name with a single digit after the star is a shop, not a reference',
+    fab('AED 12.00', 'SQ *7ELEVEN DUBAI ARE'), { type: 'expense', merchant: '7eleven' }, at);
+}
+// Careem Pay to a PERSON is a person payment, not a ride. Liv shapes from a
+// real inbox, payee names and values replaced; paired with Careem's own
+// purchases (a ride, a Salik top-up through Careem Pay) staying Transport.
+{
+  const liv = { sender: 'Liv' };
+  t('a Careem Pay transfer to a person is a person payment, not Transport',
+    'Funds Transfer of AED 50.00 has been made using your Debit Card ending 1234 at CAREEM PAY TO SAMPLE NAME. Your current balance is AED 1,000.00',
+    { type: 'expense', amountFils: 5000, merchant: 'Transfer to Sample Name', category: 'other', transfer: false }, liv);
+  t('a card purchase worded Careem Pay to a person is a person payment too',
+    'Purchase of AED 50.00 with Debit Card ending 1234 at CAREEM PAY TO SAMPLE *, Abu Dhabi. Avl Balance is AED 1,000.00',
+    { type: 'expense', amountFils: 5000, merchant: 'Transfer to Sample', category: 'other' }, liv);
+  t('a Salik top-up through Careem Pay stays Transport',
+    'Purchase of AED 50.00 with Debit Card ending 1234 at CAREEM PAY SALIK, Abu Dhabi. Avl Balance is AED 1,000.00',
+    { type: 'expense', category: 'transport' }, liv);
+  t('ADCB\'s "at CAREEM PAY TO <name> on <date>" form is a person payment too',
+    'Your Credit Card XXX1234 was used for AED50.00 at CAREEM PAY TO SAMPLE on 14/10/2026. Avl. Cr.limit is AED4,000.00',
+    { type: 'expense', amountFils: 5000, merchant: 'Transfer to Sample', category: 'other' }, { sender: 'ADCB' });
+  t('Careem Pay to a Careem service is a Careem purchase, not a person',
+    'Purchase of AED 50.00 with Debit Card ending 1234 at CAREEM PAY TO CAREEM FOOD, Dubai. Avl Balance is AED 1,000.00',
+    { type: 'expense', category: 'dining' }, liv);
+  t('a Careem ride stays Transport',
+    'Purchase of AED 50.00 with Debit Card ending 1234 at CAREEM, Dubai. Avl Balance is AED 1,000.00',
+    { type: 'expense', merchant: 'Careem', category: 'transport' }, liv);
+}
+// A completed purchase whose LATER sentence is a condition or a promise
+// ("If cancelled, amount will be reversed", "Any refund will be credited",
+// "Cashback … will be credited") is still a purchase: the footer states no
+// movement yet, so its refund/credit words may not turn the purchase into
+// income. Synthetic bodies; the real refund forms are the paired controls.
+for (const [label, body, amountFils] of [
+  ['an "If cancelled" reversal footer', 'Purchase of AED 120.50 at NOON with Credit Card ending 1234. If cancelled, amount will be reversed.', 12050],
+  ['an "Any refund will be credited" footer', 'AED 120.50 spent at NOON on your Credit Card ending 1234. Avl Limit AED 9,880.00. Any refund will be credited within 7 days.', 12050],
+  ['a cashback-will-be-credited footer', 'Purchase of AED 50.00 at TALABAT with Debit Card ending 1234. Avl Bal AED 1,000.00. Cashback of AED 2.50 will be credited to your account.', 5000],
+]) {
+  t(`a purchase with ${label} is still an expense`, body, { kind: 'transaction', type: 'expense', amountFils }, { sender: 'Liv' });
+}
+t('control: a completed purchase refund is still a refund credit',
+  'Purchase amount of AED 120.50 at NOON ECOMMERCE on your Credit Card ending 1234 has been refunded to your card. Avl Limit is AED 9,880.00',
+  { type: 'income', amountFils: 12050 }, { sender: 'Liv' });
+t('control: a refund stated in the first sentence is still a refund credit',
+  'AED 120.50 has been refunded to your Credit Card ending 1234 by NOON. Avl Limit is AED 9,880.00',
+  { type: 'income', amountFils: 12050 }, { sender: 'Liv' });
 t('approved return credit is a refund even without the word refund',
   'Return: SAMPLE123456 is approved. AED 176.00 is now in your account.',
   { type: 'income', amountFils: 17600, merchant: 'Refund' });

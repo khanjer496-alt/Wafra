@@ -1,3 +1,5 @@
+> Historical relay Capture v2 verification only. This is not the current local iOS setup route. Use the bundled **Wafra Capture v3** and **Wafra History v8** from Wafra, and the [current iPhone acceptance runbook](ios-iphone15-acceptance.md). Do not introduce setup tokens, HTTP forwarding or bank/currency sender filters into the current local automation.
+
 # Wafra Capture v2 — designated iPhone verifier
 
 You are the only verifier for this Shortcut version. Do not send anyone your

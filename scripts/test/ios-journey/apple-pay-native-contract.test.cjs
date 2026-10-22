@@ -35,9 +35,14 @@ test('Wallet source remains protected from both older JS readers', () => {
   assert.match(store, /includeApplePay: Bool = false/);
   assert.match(store, /case \.applePay: if !includeApplePay \{ continue \}/);
   assert.match(store, /NSDecimalString\(&amount, Locale\(identifier: "en_US_POSIX"\)\)/);
-  // The card value is bounded and kept outside the record: never an admission gate.
-  assert.match(store, /applePayCardOrPass: Self\.sanitizedApplePayCardOrPass\(cardOrPass\)\)/);
-  assert.match(store, /private struct ApplePayPayload: Codable \{\s*let amount: String\s*let currency: String\s*let merchant: String\s*\}/);
-  assert.match(store, /Set\(fields\.keys\) == Set\(\["amount", "currency", "merchant"\]\)/);
+  // The card value is sanitized before use and is never an admission gate: an
+  // unusable card is dropped, and the body carries it only in sanitized form.
+  assert.match(store, /let card = Self\.sanitizedApplePayCardOrPass\(cardOrPass\)/);
+  assert.match(store, /cardOrPass: card\s*\)/);
+  assert.match(store, /applePayCardOrPass: card\)/);
+  assert.match(store, /private struct ApplePayPayload: Codable \{\s*let amount: String\s*let currency: String\s*let merchant: String\s*(?:\/\/\/[^\n]*\n\s*)*let cardOrPass: String\?\s*\}/);
+  // Older three-key bodies stay valid; the fourth key must be a real string.
+  assert.match(store, /Set\(fields\.keys\) == Set\(\["amount", "currency", "merchant"\]\) \|\|\s*\(Set\(fields\.keys\) == Set\(\["amount", "currency", "merchant", "cardOrPass"\]\) && fields\["cardOrPass"\] is String\)/);
+  assert.match(store, /payload\.cardOrPass\.map\(\{ Self\.sanitizedApplePayCardOrPass\(\$0\) == \$0 \}\) \?\? true/);
   assert.doesNotMatch(store, /print\(|NSLog|os_log|debugPrint/);
 });

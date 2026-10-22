@@ -5,22 +5,34 @@ import { isCaptureTimestamp } from '@/lib/ios-capture-health';
 import type { CaptureLedgerAdapter } from '@/lib/capture-executor';
 import { buildImportPlan, type ImportPlan } from '@/lib/import-plan';
 import { createLaunchAlertSession } from '@/lib/launch-alert-parser';
+import { createAiAlertReviewSession, type AiAlertReviewOptions } from '@/lib/ai-alert-reader';
+import { createPrivateAlertFormatSession, type PrivateAlertFormatSessionOptions } from '@/lib/private-alert-format-runtime';
 import {
   emptyAlertReviewTray,
   isUniversalReviewAlert,
   partitionReviewsByCapacity,
   reviewCaptureBacklog,
+  type ReviewEntry,
 } from '@/lib/alert-review-tray';
+import { mayBeSamePurchase } from '@/lib/apple-pay-card-links';
+import { isApplePayWalletRow } from '@/lib/dedupe';
 import { migrateLegacyLedgerMoney } from '@/lib/ledger-money';
 import { settleWalletNearMatches, walletNearMatchesRetained } from '@/lib/wallet-near-match';
 import { createIosNotificationReplayGuard } from '@/lib/ios-notification-replay';
+import { carrierRedeliveryIndexesOf } from '@/lib/auto-import';
+import { bestEffortAutoPostEnabled } from '@/lib/best-effort-autopost';
+import { getActiveCountry } from '@/lib/country';
 import {
   convertCurrencyConflictRow,
   currencyConflictFxNeed,
   currencyConflictReview,
+  localMessageCarrierFacts,
   parseLocalMessageRecord,
+  parseLocalMessageRecordWithAi,
+  parseLocalMessageRecordWithPrivateFormat,
   parseLocalApplePayRecord,
   preflightLocalMessageRecord,
+  walletRepeatReview,
   type LocalMessageParseOutcome,
   type LocalApplePayParseOutcome,
 } from '@/lib/local-message-record';
@@ -34,6 +46,9 @@ import {
 } from '@/lib/types';
 
 const PAGE_SIZE = 50;
+/** Twice auto-import.ts CARRIER_DUPLICATE_MS: the fold window plus its balance trail. */
+const CARRIER_MEMORY_MS = 20 * 60_000;
+const CARRIER_MEMORY_CAP = 2000;
 const MAX_PAGES = 40;
 /** Native bound on held records one drain may page past (MAX_PAGES * PAGE_SIZE). */
 const MAX_EXCLUDED_RECORDS = 2000;
@@ -74,6 +89,9 @@ interface CoordinatorInput {
   retireShortcutCapture: () => Promise<'not-needed' | 'complete'>;
   /** Wall clock for record expiry checks; tests pin it to their fixture date. */
   now?: () => number;
+  /** Test/runtime injection; the source-grounded reader remains Review-only. */
+  aiReview?: AiAlertReviewOptions & { maxInferences?: number };
+  privateFormatReview?: PrivateAlertFormatSessionOptions;
   /**
    * Dated reference rate for a launch-market purchase on a ledger kept in
    * another currency. Resolves null when no rate is available (offline,
@@ -83,6 +101,12 @@ interface CoordinatorInput {
   fxQuote?: (base: string, quote: string, date: string) => Promise<{
     base: string; quote: string; rate: number; date: string;
   } | null>;
+  /**
+   * Posts captured Apple Pay reviews whose Wallet card the user linked to an
+   * account (store.postLinkedApplePay). Returns the posted review ids; every
+   * other item is staged for Review as before. Absent: everything is Review.
+   */
+  postLinkedApplePay?: (items: ReviewEntry[]) => { posted: string[]; durable: Promise<void> };
 }
 
 /** Distinct pair/day rate lookups one page may make; the rest wait in Review. */
@@ -158,6 +182,98 @@ const earliestObservedAt = (
   });
   return timestamps.length > 0 ? Math.min(...timestamps) : null;
 };
+
+type ParsedOutcome = Extract<LocalMessageParseOutcome, { kind: 'parsed' }>;
+
+/** A purchase alert that could repeat a Wallet purchase (not a statement row). */
+const walletRepeatCandidate = (row: ParsedOutcome['row']): boolean =>
+  row.kind === 'transaction' && row.type === 'expense' && !row.transferHint &&
+  Number.isSafeInteger(row.smsTs) && Number.isSafeInteger(row.amountFils) &&
+  (row.captureSource === undefined || row.captureSource === 'shortcut');
+
+/** Apple Pay rows: unbound Wallet rows and rows already bound to one bank alert. */
+const isWalletPurchaseRow = (row: AppState['transactions'][number]): boolean =>
+  (isApplePayWalletRow(row) || row.walletBound === true) && row.type === 'expense' &&
+  Number.isFinite(row.ts);
+
+/**
+ * The closest Wallet purchase of the same amount this alert may describe: any
+ * merchant within ten minutes, or a merchant that does not clearly differ
+ * within three days (bank alerts can arrive late; a question is cheap).
+ */
+function nearestWalletRow(
+  state: AppState,
+  row: ParsedOutcome['row'],
+): AppState['transactions'][number] | undefined {
+  if (!walletRepeatCandidate(row)) return undefined;
+  let best: AppState['transactions'][number] | undefined;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const transaction of state.transactions ?? []) {
+    if (!isWalletPurchaseRow(transaction) || transaction.amountFils !== row.amountFils) continue;
+    const distance = Math.abs(transaction.ts! - row.smsTs!);
+    if (distance < bestDistance && mayBeSamePurchase(distance, transaction.title, row.merchant)) {
+      best = transaction;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
+/** Dry-run plans one page may spend looking for would-be second rows. */
+const MAX_WALLET_REPEAT_PLANS = 3;
+
+/**
+ * Parsed purchase alerts the planner would post as a NEW row although an
+ * Apple Pay purchase they may describe is already in the ledger, on any
+ * account. Exact duplicates, strict Wallet bindings and the planner's own
+ * possible-duplicate reviews are left to the planner; only a would-be second
+ * row is diverted, with the source key the planner gave it. A same-page copy
+ * that deduped against a diverted alert is checked by the next dry run.
+ * Bounded: if the dry runs fail or do not settle, every remaining candidate
+ * asks rather than risk a second row.
+ */
+function divertWalletRepeats(
+  outcomes: readonly LocalMessageParseOutcome[],
+  state: AppState,
+  now: Date,
+): { index: number; walletRowId: string; smsKey?: string }[] {
+  const candidates = new Map<number, string>();
+  outcomes.forEach((outcome, index) => {
+    const wallet = outcome.kind === 'parsed' ? nearestWalletRow(state, outcome.row) : undefined;
+    if (wallet) candidates.set(index, wallet.id);
+  });
+  if (candidates.size === 0) return [];
+  const diverted = new Map<number, string | undefined>();
+  let settled = false;
+  for (let round = 0; round < MAX_WALLET_REPEAT_PLANS; round += 1) {
+    const remaining = outcomes.flatMap((outcome, index) =>
+      outcome.kind === 'parsed' && !diverted.has(index) ? [outcome.row] : []);
+    let plan: ImportPlan;
+    try {
+      plan = buildImportPlan(remaining, state, state.lastScanTs, now, []);
+    } catch {
+      break;
+    }
+    const posted = plan.batch?.transactions ?? [];
+    let found = false;
+    for (const index of candidates.keys()) {
+      if (diverted.has(index)) continue;
+      const row = (outcomes[index] as ParsedOutcome).row;
+      const posting = posted.find((transaction) => transaction.type === 'expense' &&
+        transaction.amountFils === row.amountFils && transaction.ts === row.smsTs &&
+        !isApplePayWalletRow(transaction));
+      if (!posting) continue;
+      diverted.set(index, posting.smsKey);
+      found = true;
+    }
+    if (!found) { settled = true; break; }
+  }
+  if (!settled) {
+    for (const index of candidates.keys()) if (!diverted.has(index)) diverted.set(index, undefined);
+  }
+  return [...diverted.entries()].sort(([left], [right]) => left - right)
+    .map(([index, smsKey]) => ({ index, walletRowId: candidates.get(index)!, ...(smsKey ? { smsKey } : {}) }));
+}
 
 const sourceFreePageError = (message: string): Error => {
   const error = new Error(message);
@@ -338,6 +454,17 @@ export function createIosLocalCaptureCoordinator(
     return pending;
   };
 
+  /**
+   * Carrier re-delivery fold facts (opaque keys, dates, stated balances) for
+   * the live app. Held in memory only — never persisted — for twice the fold
+   * window, and dropped when the ledger is replaced. A copy that arrives
+   * after the app process restarted can still post twice; Android's scan has
+   * the same per-scan boundary.
+   */
+  let carrierMemory: {
+    generation: number;
+    entries: { id: string; facts: NonNullable<ReturnType<typeof localMessageCarrierFacts>> }[];
+  } = { generation: Number.NaN, entries: [] };
   const performDrain = async (): Promise<IosLocalCaptureOutcome> => {
     const totals: Omit<IosLocalCaptureOutcome, 'firstCapturedAt' | 'retirement'> = {
       scanned: 0,
@@ -351,6 +478,14 @@ export function createIosLocalCaptureCoordinator(
     // counted once.
     const deferredReviewRecords = new Set<string>();
     const currencyConflictRecords = new Set<string>();
+    // Source-free carrier facts of recent Messages (see below), carried over
+    // from earlier drains of this ledger so a re-delivery folds against its
+    // first copy even when the two arrive in different drains.
+    const carrierGeneration = readLedgerGeneration(input.ledger);
+    if (carrierMemory.generation !== carrierGeneration) {
+      carrierMemory = { generation: carrierGeneration, entries: [] };
+    }
+    let carrierSeen = carrierMemory.entries;
     const stopped = (firstCapturedAt: number | null): IosLocalCaptureOutcome => ({
       ...totals,
       firstCapturedAt,
@@ -366,6 +501,15 @@ export function createIosLocalCaptureCoordinator(
     let firstCapturedAt = isCaptureTimestamp(initialStatus.firstCapturedAt)
       ? initialStatus.firstCapturedAt : null;
     if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+
+    let aiGeneration = readLedgerGeneration(input.ledger);
+    const aiCancelled = (): boolean => {
+      if (captureOptedOut(input.ledger) || input.aiReview?.cancelled?.() || input.privateFormatReview?.cancelled?.()) return true;
+      try { return readLedgerGeneration(input.ledger) !== aiGeneration; } catch { return true; }
+    };
+    // Budget applies to the whole drain, including all its subsequent pages.
+    const aiReview = createAiAlertReviewSession({ ...input.aiReview, cancelled: aiCancelled });
+    const privateFormats = createPrivateAlertFormatSession({ ...input.privateFormatReview, cancelled: aiCancelled });
 
     // Older JS must never see a new source it would reject and acknowledge.
     // New binaries expose notification rows only through this opt-in API.
@@ -438,18 +582,49 @@ export function createIosLocalCaptureCoordinator(
         serializedPage[record.sourceIndex] = '';
       }
       const pageGeneration = readLedgerGeneration(input.ledger);
+      aiGeneration = pageGeneration;
 
       const outcomes: LocalMessageParseOutcome[] = [];
       const session = createLaunchAlertSession({
             overrides: input.ledger.getState().merchantOverrides ?? {},
-            // iOS live capture is review-only for unverified formats: nothing
-            // here may be auto-added by the best-effort policy.
-            bestEffort: { enabled: false, country: null },
+            // The persisted "Auto-add alerts from unverified bank formats"
+            // setting, as on Android: an unproven format posts only through
+            // the one best-effort policy, marked "Auto-added — check"
+            // (local-message-record.ts unprovenMessageRow). Off, it is Review.
+            bestEffort: { enabled: bestEffortAutoPostEnabled(), country: getActiveCountry() },
             ...(pageMarket ? {
               activeMarket: pageMarket,
               pinnedCurrency: pageMarket === 'AE' ? 'AED' : 'SAR',
             } : {}),
           });
+      // A carrier can deliver one SMS twice, minutes apart, and the native
+      // queue then holds two Messages. Android folds them with
+      // carrierRedeliveryIndexes; this is the same rule on the same facts
+      // (sender, byte-identical identity-bearing body, ten-minute window,
+      // balance not moved in between), the earliest copy kept. A folded copy
+      // is acknowledged as ignored and never parsed. The facts are opaque
+      // keys and numbers read before the text is cleared, held only for this
+      // drain, so the fold also spans its pages. A record re-listed under its
+      // own id is never compared with itself.
+      const pageIds = new Set(page.map((record) => record.preflight.id));
+      carrierSeen = carrierSeen.filter((entry) => !pageIds.has(entry.id));
+      const pageCarrier = page.flatMap((record, recordIndex) => {
+        if (!record.preflight.valid || record.preflight.source === 'apple-pay') return [];
+        const facts = localMessageCarrierFacts(record.serialized, now);
+        return facts ? [{ recordIndex, id: record.preflight.id, facts }] : [];
+      });
+      const carrierRows = [...carrierSeen, ...pageCarrier];
+      const carrierSkipped = carrierRedeliveryIndexesOf(carrierRows.map(({ facts }) => ({
+        ...facts, balance: () => facts.balance,
+      })));
+      const carrierCopies = new Set(pageCarrier.flatMap((entry, index) =>
+        carrierSkipped.has(carrierSeen.length + index) ? [entry.recordIndex] : []));
+      // Keep only what a later copy could still fold against: Messages within
+      // the window (plus its balance trail) of the newest one seen.
+      const newestCarrierDate = carrierRows.reduce((max, { facts }) => Math.max(max, facts.date), Number.NEGATIVE_INFINITY);
+      carrierSeen = carrierRows.filter(({ facts }) => facts.date >= newestCarrierDate - CARRIER_MEMORY_MS)
+        .map(({ id, facts }) => ({ id, facts })).slice(-CARRIER_MEMORY_CAP);
+      carrierMemory = { generation: carrierGeneration, entries: carrierSeen };
       const replayState = input.ledger.getState();
       const reviewPossibleReplay = createIosNotificationReplayGuard(replayState.transactions ?? [], [
         ...(replayState.reviewTray?.pending ?? []).map(item => item.sourceKey),
@@ -465,8 +640,18 @@ export function createIosLocalCaptureCoordinator(
             // Defensive handling if a native reader ever mixes lanes: an
             // unknown/refused Wallet payload must never become invalid-ACK.
             outcome = parseLocalApplePayRecord(serialized, now);
+          } else if (carrierCopies.has(recordIndex)) {
+            outcome = { kind: 'ignored', market: record.preflight.market, milestone: 'none' };
           } else if (record.preflight.valid) {
             outcome = parseLocalMessageRecord(serialized, now, record.preflight.market, session);
+            if (record.preflight.market === null) {
+              outcome = await parseLocalMessageRecordWithPrivateFormat(
+                serialized, now, null, session, privateFormats, aiCancelled, outcome,
+              );
+              outcome = await parseLocalMessageRecordWithAi(
+                serialized, now, null, session, aiReview, aiCancelled, outcome,
+              );
+            }
           }
         } finally {
           // Clear every JavaScript-owned copy before review/import durability
@@ -477,6 +662,8 @@ export function createIosLocalCaptureCoordinator(
         }
         outcomes.push(outcome);
       }
+      if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+      requireLedgerGeneration(input.ledger, pageGeneration);
 
       // Records whose OWN market conflicts with the stored ledger currency.
       // Converted before replay seeding, planning, and milestones: such a row
@@ -487,6 +674,7 @@ export function createIosLocalCaptureCoordinator(
       // is acknowledged as ignored with the visible count. A record without
       // its own market is never converted.
       const currencyConflictReviewIds = new Set<string>();
+      const walletRepeatReviewIds = new Set<string>();
       let convertedConflicts = 0;
       if (pageCurrencyConflict) {
         // A purchase with a dated reference rate is CONVERTED into the ledger
@@ -582,11 +770,10 @@ export function createIosLocalCaptureCoordinator(
           outcomes[index] = reviewPossibleReplay(outcome, page[index].preflight.id);
         }
       }
-
       totals.scanned += outcomes.length;
       totals.invalid += outcomes.filter((outcome) => outcome.kind === 'invalid').length;
       totals.ignored += outcomes.filter((outcome) => outcome.kind === 'ignored').length;
-      const parsed = outcomes.flatMap((outcome) =>
+      let parsed = outcomes.flatMap((outcome) =>
         outcome.kind === 'parsed' ? [outcome.row] : []);
       // A reviewable fact is not permission to select a ledger currency.
       // Align only an actual automatic-import page, after source text is gone.
@@ -607,6 +794,36 @@ export function createIosLocalCaptureCoordinator(
           }
           requireLedgerGeneration(input.ledger, pageGeneration);
           restoreMarket = current.marketId === 'AE' || current.marketId === 'SA' ? current.marketId : null;
+        }
+      }
+      // A bank alert for an Apple Pay purchase already in the ledger (one the
+      // user confirmed or a linked card posted) never adds a second row. The
+      // planner flags a same-account repeat within ten minutes itself; this
+      // also covers a repeat it would post on another or a newly created
+      // account, or one that arrives late. Planned against the aligned
+      // ledger. Each diverted record is acknowledged only behind its retained
+      // Review item; one that cannot be described for Review stays queued.
+      const repeats = divertWalletRepeats(outcomes, input.ledger.getState(), now);
+      for (const { index, walletRowId, smsKey } of repeats) {
+        const outcome = outcomes[index];
+        if (outcome.kind !== 'parsed') continue;
+        const recordId = page[index].preflight.id;
+        const flagged = walletRepeatReview(outcome, recordId, walletRowId, smsKey);
+        // No flagged form: an ordinary Review item still asks; never post.
+        const review = flagged ?? currencyConflictReview(outcome, recordId);
+        outcomes[index] = review ?? { kind: 'held', market: null, milestone: 'none' };
+        if (review) walletRepeatReviewIds.add(recordId);
+      }
+      if (repeats.length > 0) {
+        parsed = outcomes.flatMap((outcome) => outcome.kind === 'parsed' ? [outcome.row] : []);
+        // Every money row on the page became a question: the parser pack the
+        // page selected for posting is not needed.
+        if (parsed.length === 0 && restoreMarket && input.ledger.setMarket &&
+          input.ledger.getState().marketId === pageMarket) {
+          if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+          input.ledger.setMarket(restoreMarket);
+          requireLedgerGeneration(input.ledger, pageGeneration);
+          restoreMarket = null;
         }
       }
       const declineCandidates = outcomes.flatMap((outcome, index) =>
@@ -861,10 +1078,12 @@ export function createIosLocalCaptureCoordinator(
         if (outcome.kind === 'held') return [page[index].preflight.id];
         if (capacityDeferredIds.has(page[index].preflight.id)) return [page[index].preflight.id];
         if (outcome.kind !== 'review') return [];
-        // Notification reviews and currency-conflict money rows are ACKed only
-        // behind their retained Review item (pending or a live tombstone).
+        // Notification reviews, currency-conflict money rows and possible
+        // Apple Pay repeats are ACKed only behind their retained Review item
+        // (pending or a live tombstone).
         if (outcome.item.channel !== 'push' &&
-          !currencyConflictReviewIds.has(page[index].preflight.id)) return [];
+          !currencyConflictReviewIds.has(page[index].preflight.id) &&
+          !walletRepeatReviewIds.has(page[index].preflight.id)) return [];
         const item = outcome.item;
         const retained = reviewTray?.pending?.some(entry => entry.sourceKey === item.sourceKey && entry.observedAt === item.observedAt) ||
           reviewTray?.tombstones?.some(entry => entry.sourceKey === item.sourceKey && entry.expiresAt > now.getTime());
@@ -944,8 +1163,28 @@ export function createIosLocalCaptureCoordinator(
           if (!seenIds.has(id)) totals.scanned += 1;
           seenIds.add(id);
         }
-        const reviews = page.flatMap(record => record.outcome.kind === 'review' ? [record.outcome.item] : []);
+        const captured = page.flatMap(record => record.outcome.kind === 'review' ? [record.outcome.item] : []);
         if (!input.ledger.getState().hydrated) throw sourceFreePageError('Apple Pay ledger is not hydrated');
+        // A Wallet card the user linked to an account posts on its own; the
+        // store re-checks every guard against the authoritative ledger. Its
+        // receipts are acknowledged behind the 'added' resolution it records.
+        let posted = new Set<string>();
+        const linkable = captured.filter(item => isUniversalReviewAlert(item) && item.walletCardOrPass !== undefined);
+        if (input.postLinkedApplePay && linkable.length > 0) {
+          if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+          const receipt = input.postLinkedApplePay(linkable);
+          await receipt.durable;
+          if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+          requireLedgerGeneration(input.ledger, generation);
+          const linkableIds = new Set(linkable.map(item => item.id));
+          if (!Array.isArray(receipt.posted) || receipt.posted.some(id => !linkableIds.has(id)) ||
+            new Set(receipt.posted).size !== receipt.posted.length) {
+            throw sourceFreePageError('Apple Pay posting receipt was refused');
+          }
+          posted = new Set(receipt.posted);
+          totals.imported += posted.size;
+        }
+        const reviews = captured.filter(item => !posted.has(item.id));
         if (reviews.length > 0) {
           if (!input.ledger.stageReviewAlerts) throw sourceFreePageError('Apple Pay requires review staging');
           if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
@@ -1033,6 +1272,9 @@ export function getSharedIosLocalCaptureCoordinator(
   const existing = sharedCoordinators.get(input.ledger.getState);
   if (existing && existing.input.native === input.native &&
     existing.input.retireShortcutCapture === input.retireShortcutCapture &&
+    existing.input.aiReview === input.aiReview &&
+    existing.input.privateFormatReview === input.privateFormatReview &&
+    existing.input.postLinkedApplePay === input.postLinkedApplePay &&
     sameLedgerAdapter(existing.input.ledger, input.ledger)) {
     return existing.coordinator;
   }

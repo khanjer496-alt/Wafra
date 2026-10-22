@@ -1,6 +1,6 @@
 # iOS beta builds and SMS acceptance
 
-Use `/Users/naserkhanjar/Documents/Wafra`, branch `main`, and the normal
+Use `/Users/naserkhanjar/Wafra`, branch `main`, and the normal
 `.github/workflows/ios-testflight.yml` workflow. Dated release workflows and
 the older checkout are historical records.
 
@@ -113,3 +113,13 @@ handoff reopens Shortcuts without launching another run; a run started manually
 inside Shortcuts before that handoff cannot be identified during preparation.
 Future-first ordering and optionality do not improve extraction throughput.
 Fast first useful real transactions remain a physical-device acceptance target.
+
+
+## Dedicated iPhone 15 run — 15 October 2026
+
+Use the [current physical acceptance runbook](ios-iphone15-acceptance.md) and
+`scripts/release/iphone-test-readiness.mjs`. Match the intended phone and
+verified build explicitly. Preserve the received iOS version for the original
+banner reproduction before upgrading. Use production-candidate for actual
+purchase/restore checks; history-beta founder grants can mask entitlement faults.
+A device inventory check does not prove the installed parser or SMS delivery.

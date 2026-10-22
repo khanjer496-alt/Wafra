@@ -62,7 +62,17 @@ jobs:
               - '.github/workflows/ci.yml'
               - 'modules/wafra-message-history/**'
               - 'modules/wafra-live-capture/**'
+              # The native parser closure is resolved from these shipping
+              # modules; new pure dependencies must also trigger native checks.
+              - 'src/lib/**'
+              - 'scripts/generate-ios-background-parser.cjs'
+              - 'scripts/check-update-config.mjs'
+              - 'fingerprint.config.js'
+              - 'scripts/test/repair/ios-background-parser-generator.test.cjs'
+              - '.github/workflows/ios-testflight.yml'
               - 'scripts/test/native-live-capture-store.*'
+              - 'scripts/test/native-parser-context.*'
+              - 'scripts/test/native-background-alert-parser.*'
               - 'modules/sms-reader/android/src/main/java/expo/modules/smsreader/InstantAlert.kt'
               - 'modules/sms-reader/android/src/main/java/expo/modules/smsreader/SensitiveMessageFilter.kt'
               - 'scripts/generate-ios-instant-alert.mjs'
@@ -112,6 +122,11 @@ jobs:
 
       - name: Install the SQLite CLI required by schema tests
         run: sudo apt-get update && sudo apt-get install -y sqlite3
+
+      - name: Generate and check the shipping iOS background parser
+        run: |
+          node scripts/generate-ios-background-parser.cjs
+          node scripts/generate-ios-background-parser.cjs --check
 
       - name: Typecheck
         run: npm run typecheck
@@ -187,6 +202,16 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Generate and check the shipping iOS background parser
+        run: |
+          node scripts/generate-ios-background-parser.cjs
+          node scripts/generate-ios-background-parser.cjs --check
+
+      - name: Verify protected parser context and the actual JavaScriptCore runtime
+        run: |
+          bash scripts/test/native-parser-context.sh
+          bash scripts/test/native-background-alert-parser.sh
 
       - name: Generate the native iOS project
         run: npx expo prebuild --platform ios --no-install

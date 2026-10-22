@@ -26,7 +26,7 @@ export type OnDeviceAIStatus =
   | 'model-not-ready'
   | 'unavailable';
 export type OnDeviceAIProvider = 'apple-foundation-models' | 'gemini-nano';
-export type OnDeviceAITask = 'ask-plan' | 'categorize';
+export type OnDeviceAITask = 'ask-plan' | 'categorize' | 'alert-review';
 export type OnDeviceAILanguage = 'en' | 'ar';
 
 export interface OnDeviceAIAvailability {
@@ -75,7 +75,7 @@ export type OnDeviceAIResult =
 const STATUSES: readonly OnDeviceAIStatus[] = ['available', 'unsupported-os', 'device-not-eligible',
   'not-enabled', 'model-not-ready', 'unavailable'];
 const PROVIDERS: readonly OnDeviceAIProvider[] = ['apple-foundation-models', 'gemini-nano'];
-const TASKS: readonly OnDeviceAITask[] = ['ask-plan', 'categorize'];
+const TASKS: readonly OnDeviceAITask[] = ['ask-plan', 'categorize', 'alert-review'];
 const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
 const MAX_PROMPT = 6_000;
 const MAX_OUTPUT = 4_096;
@@ -118,7 +118,11 @@ const UNSAFE_TEXT = /[\u0000-\u001F\u007F-\u009F\u061C\u200B-\u200F\u2028\u2029\
  * surrounding Markdown code fence is tolerated because Gemini Nano (which has
  * no constrained decoding in the pinned Prompt API) sometimes adds one.
  */
-export function parseClosedOutput(text: unknown, schema: OnDeviceClosedSchema): Readonly<Record<string, string>> | null {
+export function parseClosedOutput(
+  text: unknown,
+  schema: OnDeviceClosedSchema,
+  options: { preserveSourceQuotes?: boolean } = {},
+): Readonly<Record<string, string>> | null {
   if (typeof text !== 'string' || text.length === 0 || text.length > MAX_OUTPUT) return null;
   let body = text.trim();
   const fenced = /^```(?:json)?\s*\n?([\s\S]*?)\n?```$/u.exec(body);
@@ -145,7 +149,9 @@ export function parseClosedOutput(text: unknown, schema: OnDeviceClosedSchema): 
       if (!field.choices.includes(value)) return null;
       out[field.name] = value;
     } else {
-      const clean = value.normalize('NFKC').trim();
+      // Alert quotes are evidence in the original source, not display labels.
+      // Normalizing or trimming them could change their literal coordinates.
+      const clean = options.preserveSourceQuotes ? value : value.normalize('NFKC').trim();
       if (clean.length > field.maxLength || UNSAFE_TEXT.test(clean)) return null;
       out[field.name] = clean;
     }
@@ -257,7 +263,7 @@ export function createOnDeviceAI(
     const answered = native.respond(requestId, request.task, request.instructions, request.prompt,
       JSON.stringify(request.schema), maxTokens, timeoutMs)
       .then((text): OnDeviceAIResult => {
-        const value = parseClosedOutput(text, request.schema);
+        const value = parseClosedOutput(text, request.schema, { preserveSourceQuotes: request.task === 'alert-review' });
         return value ? { kind: 'ok', value, provider } : { kind: 'invalid-output' };
       }, (error: unknown): OnDeviceAIResult => {
         const kind = failureKind(error);

@@ -101,10 +101,10 @@ const en = {
   captureTitle: 'Your first payment',
   captureBodyAndroid: 'Let Wafra read your bank’s alerts on this phone, and each payment adds itself.',
   captureBodyWeb: 'Add entries yourself here. Automatic capture needs the Android or iPhone app.',
-  waitingTitle: 'Waiting for your first bank message',
-  waitingBody: 'New bank messages appear here as they arrive.',
+  waitingTitle: 'Waiting for your first payment',
+  waitingBody: 'New payments appear here as they arrive, from bank alerts or Apple Pay.',
   workingTitle: (name: string | null) => name ? `${name}, it’s working.` : 'It’s working.',
-  addedByItself: 'Added by itself, from your bank’s alert.',
+  addedByItself: 'Added by itself as it happened.',
   ofLimit: (spent: string, limit: string) => `${spent} of ${limit}`,
   importStatements: 'Import statements',
   importStatementsBody: 'PDF or CSV from your bank, for the months before today',
@@ -125,11 +125,11 @@ const en = {
   // 8 · Paywall
   paywallTitle: 'Keep it running on its own.',
   paywallBody: (category: string | null, reminders: boolean) => {
-    const what = category && reminders ? `Your ${category} limit and your reminders only stay true`
-      : category ? `Your ${category} limit only stays true`
-        : reminders ? 'Your reminders only stay true'
-          : 'Wafra only stays complete';
-    return `${what} if every bank message arrives. Pro adds each one by itself.`;
+    const what = category && reminders ? `your ${category} limit and reminders`
+      : category ? `your ${category} limit`
+        : reminders ? 'your reminders'
+          : 'your ledger';
+    return `Pro captures supported bank alerts to help keep ${what} up to date. You can review uncertain alerts.`;
   },
   trialToday: 'Today',
   trialTodayBody: 'Automatic capture is on. No card needed.',
@@ -211,10 +211,10 @@ const ar: OnboardingECopy = {
   captureTitle: 'أول دفعة لك',
   captureBodyAndroid: 'اسمح لوفرة بقراءة رسائل بنكك على هذا الهاتف، وستُضاف كل دفعة تلقائياً.',
   captureBodyWeb: 'أضف العمليات بنفسك هنا. يتطلب الالتقاط التلقائي تطبيق أندرويد أو آيفون.',
-  waitingTitle: 'بانتظار أول تنبيه من بنكك',
-  waitingBody: 'تظهر رسائل البنك الجديدة هنا فور وصولها.',
+  waitingTitle: 'بانتظار أول دفعة لك',
+  waitingBody: 'تظهر الدفعات الجديدة هنا فور حدوثها، من تنبيهات البنك أو Apple Pay.',
   workingTitle: (name: string | null) => name ? `${name}، كل شيء يعمل.` : 'كل شيء يعمل.',
-  addedByItself: 'أُضيفت تلقائياً من رسالة بنكك.',
+  addedByItself: 'أُضيفت تلقائياً فور حدوثها.',
   ofLimit: (spent: string, limit: string) => `${spent} من ${limit}`,
   importStatements: 'استيراد كشوف الحساب',
   importStatementsBody: 'ملف PDF أو CSV من بنكك، للأشهر التي سبقت اليوم',
@@ -232,11 +232,11 @@ const ar: OnboardingECopy = {
   openWafra: 'افتح وفرة',
   paywallTitle: 'دعه يعمل من تلقاء نفسه.',
   paywallBody: (category: string | null, reminders: boolean) => {
-    const what = category && reminders ? `يبقى حد ${category} وتذكيراتك دقيقين`
-      : category ? `يبقى حد ${category} دقيقاً`
-        : reminders ? 'تبقى تذكيراتك دقيقة'
-          : 'يبقى وفرة مكتملاً';
-    return `${what} فقط إذا وصل كل تنبيه من البنك. يضيف Pro كل تنبيه تلقائياً.`;
+    const what = category && reminders ? `حد ${category} وتذكيراتك`
+      : category ? `حد ${category}`
+        : reminders ? 'تذكيراتك'
+          : 'سجلك';
+    return `يلتقط Pro التنبيهات البنكية المدعومة للمساعدة في تحديث ${what}. يمكنك مراجعة التنبيهات غير المؤكدة.`;
   },
   trialToday: 'اليوم',
   trialTodayBody: 'الالتقاط التلقائي يعمل. دون بطاقة.',

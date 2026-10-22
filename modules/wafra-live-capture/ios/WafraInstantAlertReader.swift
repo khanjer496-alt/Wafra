@@ -4,11 +4,12 @@ import Foundation
  The iPhone counterpart of InstantAlert.read() on Android: decide whether a
  bank message plainly says money moved, and pull out what the banner shows.
 
- It exists for the same reason the Kotlin one does. A Shortcuts automation
- runs Wafra's App Intent with no JavaScript engine, so the real parser is not
- available when the message lands. NOTHING HERE IS EVER STORED: the ledger row
- is always the TypeScript parser's, produced later from the same queued text.
- This is a preview, and its failure is deliberately one-sided: unless the
+ Production financial previews use WafraBackgroundAlertParser and the shared
+ TypeScript parser in an isolated JavaScriptCore context. This legacy reader
+ remains the Android parity fixture and native pre-storage credential boundary.
+ NOTHING HERE IS EVER STORED: the ledger row is produced by the foreground
+ parser from the queued text. Its legacy preview is deliberately one-sided:
+ unless the
  message plainly states a completed movement, it returns nil and no banner is
  shown. The patterns are generated from InstantAlert.kt and
  SensitiveMessageFilter.kt (WafraInstantAlertPatterns.generated.swift); only
@@ -36,7 +37,6 @@ public enum WafraInstantAlertReader {
     let merchant: NSRegularExpression
     let paymentMerchant: NSRegularExpression
     let bankWord: NSRegularExpression
-    let credential: NSRegularExpression
   }
 
   // A pattern that fails to compile disables the banner entirely rather than
@@ -57,17 +57,28 @@ public enum WafraInstantAlertReader {
       last4: re(P.last4),
       merchant: re(P.merchant),
       paymentMerchant: re(P.paymentMerchant),
-      bankWord: re(P.bankWord),
-      credential: re(P.credential)
+      bankWord: re(P.bankWord)
     )
   }()
 
   public static var isAvailable: Bool { compiled != nil }
 
-  /// SensitiveMessageFilter.shouldReject: credentials never reach a banner.
+  // Queue privacy depends only on the credential pattern. A broken preview
+  // amount/merchant pattern must not discard otherwise safe bank messages.
+  private static let credential: (pattern: NSRegularExpression, format: NSRegularExpression)? = {
+    func re(_ pattern: String) throws -> NSRegularExpression {
+      try NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
+    }
+    return try? (re(WafraInstantAlertPatterns.credential), re(WafraInstantAlertPatterns.credentialFormat))
+  }()
+
+  /// SensitiveMessageFilter.shouldReject: credentials never reach storage or a banner.
   public static func isSensitive(_ body: String) -> Bool {
-    guard let compiled else { return true }
-    return contains(compiled.credential, body)
+    guard let credential else { return true }
+    let normalized = body.precomposedStringWithCompatibilityMapping
+    let text = credential.format.stringByReplacingMatches(
+      in: normalized, range: NSRange(normalized.startIndex..., in: normalized), withTemplate: "")
+    return contains(credential.pattern, text)
   }
 
   /// Nil when the message is not plainly a completed transaction.

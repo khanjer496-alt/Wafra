@@ -208,7 +208,34 @@ struct NativeLiveCaptureStoreTests {
 
     check("disabled automation Message stays out of the queue", try queue.stageAutomationMessage(
       sender: knownSender, body: messageBody, eventId: guidHash, observedAt: messageDate) == .disabled)
+    check("credentials are ignored even before capture is enabled", try queue.stageAutomationMessage(
+      sender: knownSender, body: "Your OTP is 448122. Do not share it.",
+      eventId: guidHash, observedAt: messageDate) == .ignored && pending().isEmpty)
     try grantLifetimeAndEnable(queue)
+    for body in [
+      "Your OTP is 448122. Do not share it.",
+      "448122 is your verification code",
+      "رمز التحقق: 448122",
+      "Confirm this transaction of JOD 15.250 using OTP 448122",
+      "Your OTP for the transaction of AED 500.00 is 448122. Do not share it with anyone.",
+      "Verification code: 123 456 for AED 25.00 purchase.",
+      "OTP ١٢٣٤٥٦ for AED 25.00 purchase.",
+      "Your OTP is １２３４５６ for USD 25.00 purchase.",
+      "Sicherheitscode: 123 456 für EUR 25,00.",
+      "رمز التحقق: ١٢٣ ٤٥٦ لعملية بقيمة 25.000 دينار.",
+    ] {
+      check("credentials never enter the enabled protected queue", try queue.stageAutomationMessage(
+        sender: knownSender, body: body, eventId: UUID().uuidString,
+        observedAt: messageDate) == .ignored && pending().isEmpty)
+    }
+
+    // Advice plus a receipt reference is safe financial text, not an OTP.
+    let adviceId = UUID().uuidString
+    check("credential advice cannot turn a receipt reference into a code", try queue.stageAutomationMessage(
+      sender: knownSender,
+      body: "Card ending 1234 was used for JOD 15.251. Never share your OTP for any transaction. Your reference is 123456.",
+      eventId: adviceId, observedAt: messageDate) == .accepted && pending().count == 1)
+    try queue.acknowledgeRecords(ids: [adviceId])
 
     check("GUID and date present stage under SHA-256(GUID) with the Message date",
       try queue.stageAutomationMessage(sender: knownSender, body: messageBody,
@@ -232,6 +259,23 @@ struct NativeLiveCaptureStoreTests {
     check("a differing replay of an acknowledged GUID is still refused",
       try queue.stageAutomationMessage(sender: nil, body: messageBody,
         eventId: guidHash, observedAt: messageDate) == .invalid && pending().isEmpty)
+    let markedSender = "\u{2068}\u{200F}Bank\u{200E} \u{202A}Alert\u{202C}\u{2069}"
+    check("invisible direction marks in a Messages sender are dropped, not refused",
+      try queue.stageAutomationMessage(sender: markedSender, body: messageBody + " marked",
+        eventId: nil, observedAt: nil) == .accepted
+      && pending().contains { $0["sender"] as? String == "Bank Alert" })
+    let groupSender = String(repeating: "Participant name, ", count: 8)
+    check("a long group-chat sender is capped instead of failing the automation",
+      try queue.stageAutomationMessage(sender: groupSender, body: messageBody + " group",
+        eventId: nil, observedAt: nil) == .accepted
+      && pending().contains { ($0["sender"] as? String).map { $0.utf16.count <= WafraLiveCaptureStore.maxSenderCharacters && $0.hasPrefix("Participant name,") } == true })
+    check("an invisible-only sender falls back to the automation placeholder",
+      try queue.stageAutomationMessage(sender: "\u{200E}\u{2066}", body: messageBody + " blank",
+        eventId: nil, observedAt: nil) == .accepted
+      && pending().contains { $0["sender"] as? String == WafraLiveCaptureStore.automationSender })
+    check("an over-long personal text is ignored quietly",
+      try queue.stageAutomationMessage(sender: knownSender,
+        body: String(repeating: "x ", count: WafraLiveCaptureStore.maxBodyBytes), eventId: nil, observedAt: nil) == .ignored)
 
     for (label, eventId, observedAt, expectedDate) in [
       ("GUID absent, date absent", nil as String?, nil as Date?, receiptText),
@@ -301,9 +345,10 @@ struct NativeLiveCaptureStoreTests {
     check("a malformed hash is still refused visibly",
       try queue.stageAutomationMessage(sender: knownSender, body: messageBody,
         eventId: "not-a-hash", observedAt: messageDate) == .invalid)
-    check("an unsafe supplied sender is still refused",
-      try queue.stageAutomationMessage(sender: "BANK\u{202E}", body: messageBody,
-        eventId: nil, observedAt: nil) == .invalid)
+    check("a direction override in a supplied sender is removed, never stored",
+      try queue.stageAutomationMessage(sender: "BANK\u{202E}", body: messageBody + " override",
+        eventId: nil, observedAt: nil) == .accepted
+      && !pending().contains { ($0["sender"] as? String)?.unicodeScalars.contains { $0.value == 0x202E } == true })
     check("the strict stage entry point still refuses an empty sender",
       try queue.stage(sender: "", body: messageBody, eventId: eventId(91_000),
         observedAt: fixedClock) == .invalid)
@@ -563,8 +608,9 @@ struct NativeLiveCaptureStoreTests {
     check("erase clears Wallet receipts and setup proof", try reopened.status().firstApplePayReceivedAt == nil && reopened.status().lastApplePayReceivedAt == nil && reopened.status().applePaySetupProofAt == nil && reopened.status().lastApplePayIncompleteAt == nil && reopened.status().applePayPending == 0)
   }
 
-  /// Wallet "Card or Pass" is optional and observe-only: it is never part of
-  /// the queued record, so it cannot change whether or how a payment is queued.
+  /// Wallet "Card or Pass" is optional. Its sanitized form travels in the
+  /// record body so the app can post a linked card on its own; it can never
+  /// decide whether a payment is queued, and a card-less body stays v1.
   private static func testApplePayCardOrPass() throws {
     let queueRoot = root("apple-pay-card")
     let plainRoot = root("apple-pay-card-plain")
@@ -587,21 +633,26 @@ struct NativeLiveCaptureStoreTests {
       check("Card or Pass table: \(row["name"] as! String)", once == expected && WafraLiveCaptureStore.sanitizedApplePayCardOrPass(once) == once && (once?.utf16.count ?? 0) <= WafraLiveCaptureStore.maxApplePayCardOrPassCharacters)
     }
 
-    // Same payment with and without a card: identical record bytes, digest and replay.
+    // Same payment with and without a card: the card is in the body only when
+    // something usable survives sanitizing; otherwise the bytes are identical.
     let cards: [String?] = [nil, "Visa Gold 1234", "", "a\u{202E}b", String(repeating: "a", count: 500), "\u{0000}"]
     for (index, card) in cards.enumerated() {
       let id = eventId(97_000 + index)
+      let sanitized = WafraLiveCaptureStore.sanitizedApplePayCardOrPass(card)
       check("payment with card case \(index + 1) is accepted", try queue.stageApplePay(amount: Decimal(string: "12.5")!, currency: "AED", merchant: "Shop", cardOrPass: card, eventId: id, observedAt: fixedClock) == .accepted)
       check("payment without card case \(index + 1) is accepted", try plain.stageApplePay(amount: Decimal(string: "12.5")!, currency: "AED", merchant: "Shop", eventId: id, observedAt: fixedClock) == .accepted)
-      check("record bytes never depend on card case \(index + 1)", recordBytes(queueRoot, id) != nil && recordBytes(queueRoot, id) == recordBytes(plainRoot, id))
-      check("replay with a different card is still the same record, case \(index + 1)", try queue.stageApplePay(amount: Decimal(string: "12.5")!, currency: "AED", merchant: "Shop", cardOrPass: "Other Card", eventId: id, observedAt: fixedClock) == .accepted)
+      check("record bytes differ only by a usable card, case \(index + 1)", recordBytes(queueRoot, id) != nil && (recordBytes(queueRoot, id) == recordBytes(plainRoot, id)) == (sanitized == nil))
+      check("replay with the same card is the same record, case \(index + 1)", try queue.stageApplePay(amount: Decimal(string: "12.5")!, currency: "AED", merchant: "Shop", cardOrPass: card, eventId: id, observedAt: fixedClock) == .accepted)
+      check("replay with a different card is refused, case \(index + 1)", try queue.stageApplePay(amount: Decimal(string: "12.5")!, currency: "AED", merchant: "Shop", cardOrPass: "Other Card", eventId: id, observedAt: fixedClock) == .invalid)
     }
-    let body = try decoded(queue.listPendingApplePayRecords(limit: 1)[0])?["text"] as? String
-    check("queued Apple Pay body is exactly the v1 body", body == #"{"amount":"12.5","currency":"AED","merchant":"Shop"}"#)
-    check("no queued record contains card text", try queue.listPendingApplePayRecords(limit: 50).allSatisfy { !$0.contains("Visa") && !$0.contains("Other Card") })
+    let pendingBodies = try queue.listPendingApplePayRecords(limit: 50).compactMap { decoded($0)?["text"] as? String }
+    check("a card-less Apple Pay body is exactly the v1 body", pendingBodies.first == #"{"amount":"12.5","currency":"AED","merchant":"Shop"}"#)
+    check("a card body carries only the sanitized card, keys sorted", pendingBodies.contains(#"{"amount":"12.5","cardOrPass":"Visa Gold 1234","currency":"AED","merchant":"Shop"}"#) && pendingBodies.contains(#"{"amount":"12.5","cardOrPass":"ab","currency":"AED","merchant":"Shop"}"#))
+    check("unusable card text never reaches a body", pendingBodies.filter { $0.contains("cardOrPass") }.count == 3 && !pendingBodies.contains { $0.contains("\u{202E}") || $0.contains("Other Card") || $0.contains(#""cardOrPass":"""#) })
     try queue.acknowledgeRecords(ids: [eventId(97_001)])
     try plain.acknowledgeRecords(ids: [eventId(97_001)])
-    check("acknowledged replay with a new card is still accepted (digest has no card)", try queue.stageApplePay(amount: Decimal(string: "12.5")!, currency: "AED", merchant: "Shop", cardOrPass: "Amex", eventId: eventId(97_001), observedAt: fixedClock) == .accepted)
+    check("acknowledged replay with the same card is accepted", try queue.stageApplePay(amount: Decimal(string: "12.5")!, currency: "AED", merchant: "Shop", cardOrPass: "Visa Gold 1234", eventId: eventId(97_001), observedAt: fixedClock) == .accepted)
+    check("acknowledged replay with a new card is refused (digest covers the card)", try queue.stageApplePay(amount: Decimal(string: "12.5")!, currency: "AED", merchant: "Shop", cardOrPass: "Amex", eventId: eventId(97_001), observedAt: fixedClock) == .invalid)
     check("Card or Pass does not loosen merchant validation", try queue.stageApplePay(amount: Decimal(5), currency: "AED", merchant: "Shop\u{0000}", cardOrPass: "Visa", eventId: eventId(97_030), observedAt: now) == .ignored)
     check("Card or Pass cannot rescue a missing amount", try queue.stageApplePay(amount: nil, currency: "AED", merchant: "Shop", cardOrPass: "Visa", eventId: eventId(97_031), observedAt: now) == .ignored)
 
@@ -638,6 +689,19 @@ struct NativeLiveCaptureStoreTests {
     _ = try queue.stageApplePay(amount: Decimal(9), currency: "AED", merchant: "Shop", cardOrPass: "Visa", eventId: eventId(97_060), observedAt: now)
     try queue.eraseAll()
     check("erase clears card observations", try queue.recentApplePayCardObservations().isEmpty)
+
+    // A stored body whose card is not in its own sanitized form is not served.
+    let tamperRoot = root("apple-pay-card-tamper")
+    defer { remove([tamperRoot]) }
+    let tamperQueue = store(root: tamperRoot, now: { now })
+    try grantLifetimeAndEnable(tamperQueue)
+    check("tamper fixture stages", try tamperQueue.stageApplePay(amount: Decimal(3), currency: "AED", merchant: "Shop", cardOrPass: "ab", eventId: eventId(97_070), observedAt: now) == .accepted)
+    let tamperedURL = tamperRoot.appendingPathComponent("records/\(eventId(97_070)).json")
+    let original = try String(contentsOf: tamperedURL, encoding: .utf8)
+    let tampered = original.replacingOccurrences(of: #"\"cardOrPass\":\"ab\""#, with: #"\"cardOrPass\":\"a \""#)
+    check("tamper fixture keeps the record length", tampered != original && tampered.utf8.count == original.utf8.count)
+    try tampered.write(to: tamperedURL, atomically: true, encoding: .utf8)
+    check("an unsanitized stored card is never served", try tamperQueue.listPendingApplePayRecords(limit: 50).isEmpty)
   }
 
   static func main() throws {

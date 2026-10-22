@@ -97,6 +97,45 @@ const peerPaidYou = (text: string): boolean => [...text.matchAll(PAID_YOU)].some
   const sentence = text.slice(match.index!, match.index! + sentenceEnd);
   return subject.length > 0 && subject.length <= 60 && !NOT_A_PAYER.test(subject) && !sentence.includes('?');
 });
+
+/**
+ * Resolve the account owner in an already selected principal-money clause.
+ * Bare "paid" and the recipient's "deposited" describe opposite sides of
+ * the same transfer. They cannot override the possessive account evidence.
+ * Null leaves unrelated grammars alone; unknown explicitly withholds direction.
+ */
+export const accountMovementDirection = (text: string, qualificationPrefix = ''): MoneyDirection | null => {
+  const paidIntoOwnAccount = /\b(?:has\s+been|have\s+been|was|were)\s+paid\s+into\s+your\s+(?:[\p{L}-]+\s+){0,3}?(?:account|acct|a\/?c)\b/iu.exec(text);
+  const ownTransferDeposited = /\byour\s+interac\s+e[ -]?transfer\s+of\b(?:[^;!?\n]|\.(?=\d)){0,120}?\bto\s+(?:[^;!?\n]|\.(?=\d)){1,80}?\b(?:was|has\s+been)\s+deposited\b(?=\s*(?:[.,;!?]|$)|\s+(?:on|into|in|at|by|and)\b)/iu.exec(text);
+  const paidToUnownedAccount = /\bpaid\b(?:[^;!?\n]|\.(?=\d)){0,60}?\b(?:to|into)\s+(?!your\b)(?:[\p{L}-]+\s+){0,3}?(?:account|acct|a\/?c)\b/iu.exec(text);
+  if (!paidIntoOwnAccount && !ownTransferDeposited && !paidToUnownedAccount) return null;
+  const explicitDebit = /\b(?:debited|charged|deducted|withdrawn)\b|\byou\s+(?:have\s+)?sent\b/iu.test(text);
+  const explicitCredit = /\b(?:credited|received|refunded)\b/iu.test(text);
+  const movement = paidIntoOwnAccount ?? ownTransferDeposited ?? paidToUnownedAccount!;
+  // A lead-in such as "Please notify us if ..." qualifies the movement just
+  // as a leading "If" does. Advice after its completed predicate does not.
+  const leadIn = (qualificationPrefix + text.slice(0, movement.index + movement[0].length))
+    .split(/[;!?\n]|\.(?=\s|$)/u).at(-1) ?? '';
+  const conditional = /\b(?:if|when|once|unless|whether|suppose|imagine)\b|\b(?:for\s+(?:example|instance)|as\s+an?\s+example|sample\s+(?:alert|message|transaction|transfer))\b|(?:^|:\s*)example\s*:/iu.test(leadIn);
+  if (conditional || text.includes('?') || (paidIntoOwnAccount && ownTransferDeposited)) return 'unknown';
+  if (paidIntoOwnAccount) {
+    const nonDepositAccount = /\bpaid\s+into\s+your\s+(?:(?:credit|covered|charge)\s+card|loan|mortgage|merchant|trading|investment)\b/iu.test(text);
+    return explicitDebit || nonDepositAccount ? 'unknown' : 'credit';
+  }
+  if (ownTransferDeposited) {
+    // A deposit into an own account/internal pocket does not prove a distinct
+    // counterparty outflow; another explicit credit clause is conflicting.
+    const ownDestination = /\bto\s+your\b/iu.test(text);
+    return explicitCredit || ownDestination ? 'unknown' : 'debit';
+  }
+  // Masking a payee must not turn an explicit own funding account into the
+  // recipient. Its source role proves outflow, while a credit conflict waits.
+  const ownFunding = /\bfrom\s+your\s+(?:[\p{L}-]+\s+){0,3}?(?:account|acct|a\/?c)\b/iu.test(text);
+  if (ownFunding) return explicitCredit ? 'unknown' : 'debit';
+  // "paid to Cheq a/c..123456" doesn't say whose account received it.
+  // Retain an independent explicit posting verb, otherwise ask the person.
+  return explicitDebit || explicitCredit ? null : 'unknown';
+};
 const NEAR_BALANCE = /(?:available|current|closing|remaining)\s+balance|avl\s+bal|solde(?: disponible)?|kontostand|الرصيد (?:الحالي|المتاح)/i;
 const NEAR_LIMIT = /(?:available|credit)\s+limit|\bavl\.?\s*lmt\b|الحد (?:المتاح|الائتماني)/i;
 const NEAR_DUE = /(?:minimum (?:amount )?due|amount due|payment due|statement total|outstanding balance)|الحد الأدنى المستحق|المبلغ المستحق/i;
@@ -209,6 +248,8 @@ const moneyDirection = (
   debitTerms: readonly string[] = [],
   creditTerms: readonly string[] = [],
 ): MoneyDirection => {
+  const accountMovement = accountMovementDirection(text);
+  if (accountMovement !== null) return accountMovement;
   const accountCredit = /\bcredited to (?:your|the) (?:bank )?account\b/i.test(text);
   const accountDebit = /\bdebited from (?:your|the) (?:bank )?account\b/i.test(text);
   if (accountCredit !== accountDebit) return accountCredit ? 'credit' : 'debit';
@@ -287,6 +328,7 @@ export const inspectMarketAlert = (
   else if (status === 'posted' && utility) family = 'utility';
   else if (status === 'posted' && recurring) family = 'recurring-payment';
   else if (status === 'posted' && transfer) family = 'transfer';
+  else if (status === 'posted' && accountMovementDirection(classificationText) !== null) family = 'transfer';
   // "NAME paid you $X" is a person-to-person transfer in, not a purchase.
   else if (status === 'posted' && peerPaidYou(classificationText)) family = 'transfer';
   else if (PURCHASE.test(classificationText) || findTerm(classificationText, pack.purchaseTerms ?? [])) family = 'purchase';

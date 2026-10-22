@@ -118,8 +118,8 @@ test('new relay error codes reach the client as themselves', () => {
     assert.equal(contract.pdfImportError(422, { error: code }).code, code);
   }
   assert.equal(contract.pdfImportError(422, { error: 'something_new' }).code, 'unexpected');
-  // Client-only: a relay cannot claim it.
-  assert.equal(contract.pdfImportError(422, { error: 'unsupported_file_type' }).code, 'unexpected');
+  // A relay that reads structured statements names a file it cannot read.
+  assert.equal(contract.pdfImportError(415, { error: 'unsupported_file_type' }).code, 'unsupported_file_type');
 });
 
 function supplementCopy() {
@@ -220,13 +220,13 @@ test('an older relay without Excel refuses .xlsx locally with a specific reason 
 test('the screen routes .xlsx to the CSV upload, names Excel only when advertised, and cleans .xlsx copies', () => {
   const screen = read('src/components/supplement-imports.tsx');
   const transportSource = read('src/lib/cloud-import.ts');
-  assert.match(screen, /const csv = \/\\\.\(\?:csv\|tsv\|xlsx\)\$\/i\.test\(asset\.name\)/);
+  assert.match(screen, /const csv = !\/\\\.pdf\$\/i\.test\(asset\.name\) && \(\/\\\.\(\?:csv\|tsv\|xlsx\|ofx\|qfx\|qif\|xml\|sta\|mt940\|940\)\$\/i\.test\(asset\.name\)/);
   assert.match(screen, /const excel = !!capabilities\?\.csv\.enabled && capabilities\.csv\.accepts\.includes\(XLSX_CONTENT_TYPE\)/);
   assert.match(screen, /const formats = excel \? copy\.formatsExcel : copy\.formats;/);
   assert.match(screen, /tables: excel \? copy\.tableFormatsExcel : copy\.tableFormats/);
   assert.match(screen, /type: \[\.\.\.capabilities\.pdf\.accepts, \.\.\.capabilities\.csv\.accepts\]/,
     'the picker offers exactly what the relay advertises');
-  assert.match(transportSource, /const STATEMENT_COPY = \/\\\.\(\?:pdf\|csv\|tsv\|xlsx\)\$\/i;/);
+  assert.match(transportSource, /const STATEMENT_COPY = \/\\\.\(\?:pdf\|csv\|tsv\|xlsx\|ofx\|qfx\|qif\|xml\|sta\|mt940\|940\)\$\/i;/);
   assert.match(transportSource, /new Directory\(Paths\.document, 'Inbox'\)/);
   const copy = supplementCopy();
   assert.equal(copy.en.formats, 'PDF, CSV or TSV');
@@ -301,6 +301,35 @@ test('the Inbox is matched against the real documents directory in all its spell
   assert.equal(broken.redirect(`${INBOX}/${name}`), null);
 });
 
+test('iOS 26 copies of files shared from Files / iCloud Drive (tmp/<bundle id>-Inbox) open the import screen too', () => {
+  // Verified on an iPhone 15 (iOS 26.6.2): a Files share opens Wafra with
+  // <container>/tmp/app.wafra.ios-Inbox/<name>, not Documents/Inbox.
+  const TMP_INBOX = `file:///private${CONTAINER}/tmp/app.wafra.ios-Inbox`;
+  const { incoming, redirect } = nativeIntent();
+  for (const [file, name] of [['fab-files-test.pdf', 'fab-files-test.pdf'], ['test-statement.ofx', 'test-statement.ofx'],
+    ['Card%20Sep.csv', 'Card Sep.csv']]) {
+    const url = `${TMP_INBOX}/${file}`;
+    assert.deepEqual(plain(incoming.parseIncomingStatementUrl(url, DOCUMENTS)), { uri: url, name }, url);
+    const route = redirect(url, false);
+    assert.match(route, /^\/statement-import\?incomingStatement=[a-z0-9]+$/, url);
+    assert.doesNotMatch(route, /file|Inbox|private|tmp/);
+  }
+  assert.deepEqual(plain(incoming.parseIncomingStatementUrl(`file://${CONTAINER}/tmp/app.wafra.ios-Inbox/s.pdf`, DOCUMENTS)),
+    { uri: `file://${CONTAINER}/tmp/app.wafra.ios-Inbox/s.pdf`, name: 's.pdf' });
+  const rejected = [
+    `file://${CONTAINER}/tmp/s.pdf`, `file://${CONTAINER}/tmp/Inbox/s.pdf`, `file://${CONTAINER}/tmp/-Inbox/s.pdf`,
+    `file://${CONTAINER}/tmp/app.wafra.ios-Inbox/sub/s.pdf`, `file://${CONTAINER}/tmp/app.wafra.ios-Outbox/s.pdf`,
+    `file://${CONTAINER}/tmp/app.wafra.ios-Inbox/s.docx`, `file://${CONTAINER}/tmp/app.wafra.ios-Inbox/.pdf`,
+    `file://${CONTAINER}/tmp/app.wafra.ios-Inbox/../s.pdf`, `file://${CONTAINER}/tmp/a%2F..%2F-Inbox/s.pdf`,
+    `file://${CONTAINER}/Library/app.wafra.ios-Inbox/s.pdf`, `file://${CONTAINER}/Documents/tmp/app.wafra.ios-Inbox/s.pdf`,
+    'file:///var/mobile/Containers/Data/Application/FFFFFFFF-0000-4000-8000-000000000002/tmp/app.wafra.ios-Inbox/s.pdf',
+    'file:///private/var/mobile/Library/Mobile%20Documents/com~apple~CloudDocs/Downloads/s.pdf',
+  ];
+  for (const url of rejected) assert.equal(incoming.parseIncomingStatementUrl(url, DOCUMENTS), null, url);
+  // The container is only derived from a Documents directory.
+  assert.equal(incoming.parseIncomingStatementUrl(`${TMP_INBOX}/s.pdf`, `file://${CONTAINER}/Library/`), null);
+});
+
 test('other links pass through untouched and unusable file URLs are dropped', () => {
   const { incoming, redirect } = nativeIntent();
   for (const link of ['https://wafra.app/statement.pdf', 'http://example.com/a.csv', 'wafra://statement-import?incomingStatement=x',
@@ -338,15 +367,27 @@ test('Android registers no document types, so its links pass through even for fi
   assert.equal(redirect(`${INBOX}/statement.pdf`), `${INBOX}/statement.pdf`);
 });
 
-test('app.json registers PDF, CSV, TSV and Excel as an alternate viewer and asks iOS for an Inbox copy', () => {
+test('app.json registers PDF, CSV, TSV, Excel, OFX, QIF and MT940 as an alternate viewer and asks iOS for an Inbox copy', () => {
   const app = JSON.parse(read('app.json'));
   const info = app.expo.ios.infoPlist;
   const types = info.CFBundleDocumentTypes;
   assert.ok(Array.isArray(types));
   assert.deepEqual(types.flatMap((type) => type.LSItemContentTypes).sort(), [
+    'app.wafra.ios.mt940', 'app.wafra.ios.ofx', 'app.wafra.ios.qif',
     'com.adobe.pdf', 'org.openxmlformats.spreadsheetml.sheet', 'public.comma-separated-values-text',
     'public.tab-separated-values-text',
   ]);
+  // Wafra's own identifiers are declared as imported types so iOS can map
+  // the picker's MIME types and the file extensions to them. Generic XML is
+  // deliberately not registered.
+  const imported = info.UTImportedTypeDeclarations;
+  assert.deepEqual(imported.map((type) => type.UTTypeIdentifier).sort(),
+    ['app.wafra.ios.mt940', 'app.wafra.ios.ofx', 'app.wafra.ios.qif']);
+  for (const type of imported) {
+    assert.deepEqual(type.UTTypeConformsTo, ['public.data', 'public.text']);
+    assert.ok(type.UTTypeTagSpecification['public.filename-extension'].length > 0);
+  }
+  assert.ok(!types.some((type) => type.LSItemContentTypes.includes('public.xml')));
   for (const type of types) {
     assert.equal(type.CFBundleTypeRole, 'Viewer');
     assert.equal(type.LSHandlerRank, 'Alternate', 'Wafra never claims to be the default app for these files');
@@ -354,7 +395,8 @@ test('app.json registers PDF, CSV, TSV and Excel as an alternate viewer and asks
   }
   assert.equal(info.LSSupportsOpeningDocumentsInPlace, false);
   const incoming = load(path.join(root, 'src/lib/incoming-statement-file.ts'));
-  assert.deepEqual(plain(incoming.INCOMING_STATEMENT_EXTENSIONS), ['pdf', 'csv', 'tsv', 'xlsx']);
+  assert.deepEqual(plain(incoming.INCOMING_STATEMENT_EXTENSIONS),
+    ['pdf', 'csv', 'tsv', 'xlsx', 'ofx', 'qfx', 'qif', 'sta', 'mt940', '940']);
   // Existing keys are kept.
   assert.deepEqual(info.LSApplicationQueriesSchemes, ['shortcuts']);
   assert.equal(info.ITSAppUsesNonExemptEncryption, false);
@@ -599,7 +641,43 @@ test('capabilities and both statement uploads say which features this build unde
   await api.getImportCapabilities(cfg).catch(() => {});
   assert.deepEqual(requests.map((request) => [request.method, request.url.replace(cfg.baseUrl, '')]),
     [['POST', '/v1/import/pdf'], ['POST', '/v1/import/csv'], ['GET', '/v1/import/capabilities']]);
-  for (const request of requests) assert.equal(request.headers['x-wafra-import-features'], 'xlsx,pdf-error-detail');
+  for (const request of requests) assert.equal(request.headers['x-wafra-import-features'], 'xlsx,pdf-error-detail,structured');
+});
+
+test('a structured statement goes to the CSV endpoint under its own type, only when the relay lists it', async () => {
+  const types = { ofx: 'application/x-ofx', qfx: 'application/vnd.intu.qfx', qif: 'application/qif',
+    xml: 'application/xml', sta: 'application/x-mt940', mt940: 'application/x-mt940', 940: 'application/x-mt940' };
+  const listed = contract.parseImportCapabilities(caps({ csv: { accepts: ['text/csv', XLSX, ...new Set(Object.values(types))] } }));
+  for (const [extension, type] of Object.entries(types)) {
+    const { api, requests } = transport();
+    // The picker's octet-stream label never decides a structured file's type.
+    await api.uploadCsvStatement(cfg, { uri: 'blob:x', name: `statement.${extension}`, mimeType: 'application/octet-stream', file: blob() }, listed, money);
+    assert.equal(requests[0].headers['content-type'], type, extension);
+    assert.equal(requests[0].url.replace(cfg.baseUrl, ''), '/v1/import/csv');
+  }
+  const older = contract.parseImportCapabilities(caps({ csv: { accepts: ['text/csv', XLSX] } }));
+  const { api, requests } = transport();
+  await assert.rejects(api.uploadCsvStatement(cfg, { uri: 'blob:x', name: 'statement.ofx', file: blob() }, older, money),
+    (error) => error.code === 'unsupported_file_type');
+  assert.equal(requests.length, 0, 'nothing is uploaded to a relay that cannot read it');
+});
+
+test('the relay\'s structured-file error codes reach a specific message', () => {
+  assert.equal(contract.pdfImportError(400, { error: 'invalid_statement_file' }).code, 'invalid_statement_file');
+  assert.equal(contract.pdfImportError(415, { error: 'unsupported_file_type' }).code, 'unsupported_file_type');
+  const copy = supplementCopy();
+  assert.ok(copy.en.errStatementFile && copy.ar.errStatementFile);
+  const screen = read('src/components/supplement-imports.tsx');
+  assert.match(screen, /value\.code === 'invalid_statement_file'\) return copy\.errStatementFile/);
+});
+
+test('a .pdf is uploaded as a PDF even when the picker calls it octet-stream', () => {
+  const screen = read('src/components/supplement-imports.tsx');
+  const { CSV_ROUTE_FILE } = transport().api;
+  // The screen's routing list is the transport's.
+  assert.ok(screen.includes(`const csv = !/\\.pdf$/i.test(asset.name) && (${CSV_ROUTE_FILE.toString()}.test(asset.name)`));
+  for (const name of ['a.csv', 'b.TSV', 'c.xlsx', 'd.ofx', 'e.qfx', 'f.qif', 'g.xml', 'h.sta', 'i.mt940', 'j.940']) assert.ok(CSV_ROUTE_FILE.test(name), name);
+  for (const name of ['a.pdf', 'b.xls', 'c.txt', 'd.ofx.pdf']) assert.ok(!CSV_ROUTE_FILE.test(name), name);
 });
 
 /* ── Stop a running batch ────────────────────────────────────────────── */

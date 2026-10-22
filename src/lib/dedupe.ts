@@ -196,6 +196,11 @@ export function crossChannelKey(date: string, amountFils: number, type: string):
  * event, and the loser was deleted rather than shown — so the title is ignored
  * only when one side does not state one.
  */
+/** Words a bank prints for a transfer, in its alerts and statement descriptors. */
+/** FAB's two alerts of one transfer arrive about a second apart. */
+const TRANSFER_ALERT_PAIR_MS = 10_000;
+const TRANSFER_WORDING = /(?<![\p{L}\p{N}])(?:transfers?|remittance|trf|ft|wire|ipp|iban|swift)(?![\p{L}\p{N}])|حوالة|تحويل/iu;
+
 const GENERIC_CAPTURE_TITLES = new Set([
   'card purchase',
   'card transaction',
@@ -314,7 +319,31 @@ export interface DuplicateCandidate {
    * 161,447.88", then "… 156,447.88" a minute later), never one re-delivery.
    */
   statedBalanceFils?: number;
+  /**
+   * Transfer facts for pairing FAB's two alerts of one transfer (see
+   * ambiguousTransferPairs): the source said "account/card"
+   * (sourceKindAmbiguous), and the counterparty the alert named, if any.
+   */
+  transferSourceAmbiguous?: boolean;
+  transferCounterparty?: { last4?: string; name?: string };
 }
+
+/**
+ * A message identity a stored row absorbed (Transaction.absorbedSmsKeys):
+ * canonical, and only a form that is an identity with no clock beside it.
+ */
+// `[t]` (not `t(`) keeps the import-time translation contract's scanner quiet.
+const ABSORBED_SOURCE_KEY = /^h(?:[a-f0-9]{64}|a(?:0|[1-9]\d{0,39})[t](?:0|[1-9]\d{0,15}))$/;
+export const MAX_ABSORBED_SOURCE_KEYS = 8;
+export function absorbableSourceKey(smsKey: string | undefined, ts: number | undefined): string | undefined {
+  if (!smsKey || !isUsableCaptureSourceIdentity(smsKey, ts)) return undefined;
+  const key = canonicalCaptureSourceKey(smsKey, ts);
+  return ABSORBED_SOURCE_KEY.test(key) ? key : undefined;
+}
+export const validAbsorbedSourceKeys = (keys: unknown): string[] =>
+  Array.isArray(keys)
+    ? keys.slice(0, MAX_ABSORBED_SOURCE_KEYS).filter((key): key is string => typeof key === 'string' && ABSORBED_SOURCE_KEY.test(key))
+    : [];
 
 export interface DuplicateGuard {
   /** True when the ledger already has this, by any of the three tests. */
@@ -326,6 +355,13 @@ export interface DuplicateGuard {
    * identity before the reducer can preserve later, distinct history rows.
    */
   takeMatchedId(): string | null;
+  /**
+   * After a `has` that dropped FAB's second alert of one transfer (see
+   * ambiguousTransferPairs): the row the first alert is, as a stored id or the
+   * in-batch candidate that becomes it. Reading clears the value. The planner
+   * keeps the dropped alert's identity on that row (absorbedSmsKeys).
+   */
+  takeAbsorbed(): { targetId: string | null; candidate: DuplicateCandidate | null } | null;
   /**
    * The id of an existing PUSH row this SMS is the better version of, if any.
    *
@@ -417,6 +453,12 @@ interface SeenStatementPairEvent {
   amountFils: number;
   type: TransactionType;
   title: string;
+  /** The person renamed this ledger row: its title is theirs, not the bank's. */
+  renamed?: boolean;
+  /** A stored row the ledger treats as a transfer, or whose alert carried transfer evidence. */
+  transfer?: boolean;
+  /** The running balance the bank stated after this movement, when known. */
+  statedBalanceFils?: number;
   accountId?: string;
   captureInstrument?: CaptureInstrument;
   captureSource?: CaptureSource;
@@ -630,7 +672,16 @@ export interface DuplicateGuardOptions {
    * the debit-card alert for the same purchase, which lands on the card.
    */
   accountInstrument?: (accountId: string) => 'account' | 'debit' | 'credit' | 'card' | undefined;
+  /**
+   * A staging reference for an alert whose instrument tail matched more than
+   * one account. It names the tail the alert stated but attributes no
+   * account. Defaults to import-plan's unassignedCardRef holdings.
+   */
+  ambiguousAccount?: (accountId: string) => boolean;
 }
+
+/** import-plan.ts unassignedCardRef: `__unassigned-card__:<bank>:<kind>:<last4>`. */
+const UNASSIGNED_CARD_HOLDING = /^__unassigned-card__:[^:]*:[a-z]+:\d{2,6}$/;
 
 /**
  * Days a statement row may trail the live alert for the same event. Many
@@ -864,12 +915,12 @@ export function duplicateGuard(
   /** The same stored row can appear in title and cross-channel indexes. */
   const seenById = new Map<string, SeenOccurrence>();
   /** User-renamed, still-unbound live observations, for the title-free bind. */
-  const renamedLiveObservations: { amountFils: number; occurrence: SeenOccurrence }[] = [];
+  const renamedLiveObservations: { amountFils: number; occurrence: SeenOccurrence; renamed: boolean; balanceFils?: number }[] = [];
   const note = (
     key: string, ts: number | null, type: TransactionType, amountFils: number, smsKey?: string,
     id?: string, captureInstrument?: CaptureInstrument,
     flags: {
-      liveObservation?: boolean; renamed?: boolean; boundLiveCopy?: boolean;
+      liveObservation?: boolean; renamed?: boolean; boundLiveCopy?: boolean; liveBalanceFils?: number;
       statement?: Pick<DuplicateCandidate, 'captureSource' | 'statementImportId'>;
       push?: boolean; eventIdentity?: string; textClock?: number; statedBalanceFils?: number;
     } = {},
@@ -894,14 +945,19 @@ export function duplicateGuard(
     if (at) at.push(occurrence);
     else seen.set(key, [occurrence]);
     if (id) seenById.set(id, occurrence);
-    if (occurrence.liveObservation && flags.renamed === true) {
-      renamedLiveObservations.push({ amountFils, occurrence });
+    // A renamed live row, or one whose title a later statement re-worded
+    // (its stated balance still identifies the Message).
+    if (occurrence.liveObservation && (flags.renamed === true || flags.liveBalanceFils !== undefined)) {
+      renamedLiveObservations.push({ amountFils, occurrence, renamed: flags.renamed === true,
+        ...(flags.liveBalanceFils !== undefined ? { balanceFils: flags.liveBalanceFils } : {}) });
     }
   };
   /**
    * Bind one incoming History Message to one GUID-less live Message the user
-   * renamed. An unedited live row parses to the History copy's own title and
-   * pairs through the title rule; a renamed one cannot, and its s-key carries
+   * renamed, or whose title a statement claim re-worded ("Outward remittance"
+   * became the statement's "Outgoing transfer") when both state the same
+   * running balance. An unedited live row parses to the History copy's own
+   * title and pairs through the title rule; these cannot, and its s-key carries
    * the receipt time rather than the Message's own. Match by money,
    * direction, instrument and the same-event window, nearest first; the
    * occurrence is consumed so it explains exactly one History copy. Never the
@@ -911,9 +967,11 @@ export function duplicateGuard(
   const titleFreeObservationMatch = (c: DuplicateCandidate, mine: number | null): SeenOccurrence | undefined => {
     if (c.smsKey?.startsWith('h') !== true || mine === null) return undefined;
     let best: SeenOccurrence | undefined;
-    for (const { amountFils, occurrence } of renamedLiveObservations) {
+    for (const { amountFils, occurrence, renamed, balanceFils } of renamedLiveObservations) {
       if (occurrence.consumed || occurrence.ts === null || amountFils !== c.amountFils ||
         occurrence.type !== c.type) continue;
+      // Not renamed: the same stated balance must say it is the same Message.
+      if (!renamed && (!Number.isSafeInteger(c.statedBalanceFils) || balanceFils !== c.statedBalanceFils)) continue;
       if (!compatibleCaptureInstrument(occurrence.captureInstrument, c.captureInstrument)) continue;
       const distance = Math.abs(occurrence.ts - mine);
       if (distance > SAME_EVENT_MS) continue;
@@ -933,6 +991,7 @@ export function duplicateGuard(
       t.captureInstrument, {
         liveObservation: isLiveMessageObservationRow(t),
         renamed: t.userEdited === true || t.titleEdited === true,
+        ...(Number.isSafeInteger(t.statedBalanceFils) ? { liveBalanceFils: t.statedBalanceFils } : {}),
         boundLiveCopy: hasMessageObservationId(t),
         statement: t,
         push: t.source === 'sms' && t.viaPush === true,
@@ -964,6 +1023,12 @@ export function duplicateGuard(
     exactRows.set(key, rows);
   };
   for (const t of existing) noteExact(t);
+  /** Canonical absorbed message identity → the stored row that absorbed it. */
+  const absorbedBy = new Map<string, string>();
+  for (const t of existing) {
+    if (t.absorbedSmsKeys === undefined) continue;
+    for (const key of validAbsorbedSourceKeys(t.absorbedSmsKeys)) if (!absorbedBy.has(key)) absorbedBy.set(key, t.id);
+  }
   /** Rows of THIS import batch in exactRows (see balanceVeto). */
   const batchExactRows = new WeakSet<object>();
   /**
@@ -1040,6 +1105,85 @@ export function duplicateGuard(
   // by day and a candidate reads only the nearby buckets instead of every SMS
   // row in the ledger. `seq` restores insertion order across buckets, so the
   // first/best match is the one a full scan would have picked.
+  /**
+   * FAB texts one transfer twice, a second apart: the request confirmation
+   * ("…processed successfully from your account/card XXXX0002", no balance)
+   * and the debit alert ("Outward Remittance Debit Account XXXX0002 …
+   * Balance …"). The statement prints ONE row. Before this, a History import
+   * after the statement healed the statement row with one alert and added
+   * the other as a second movement.
+   *
+   * Deliberately narrow: exactly one side is that ambiguous "account/card"
+   * confirmation without a balance, the other names the account; the same
+   * account, KNOWN bank and tail, amount and direction, at most 10 s apart,
+   * and no two different counterparties. Two transfers to
+   * different people, or any pair from another bank's grammar, never pair
+   * here. Bucketed by account, bank, tail, amount and direction, so a lookup
+   * reads only its own bucket.
+   */
+  interface AmbiguousTransferAlert {
+    ambiguous: boolean;
+    ts: number;
+    counterparty: { last4?: string; name?: string };
+    targetId: string | null;
+    candidate: DuplicateCandidate | null;
+    paired: boolean;
+  }
+  const ambiguousTransferPairs = new Map<string, AmbiguousTransferAlert[]>();
+  const ambiguousTransferById = new Map<string, AmbiguousTransferAlert[]>();
+  const ambiguousTransferAlertOf = (row: {
+    accountId?: string; amountFils: number; type: TransactionType; captureSource?: CaptureSource;
+    captureInstrument?: CaptureInstrument; statedBalanceFils?: number;
+    transferSourceAmbiguous?: boolean; transferCounterparty?: { last4?: string; name?: string };
+  }, ts: number | null, targetId: string | null, candidate: DuplicateCandidate | null):
+    { key: string; entry: AmbiguousTransferAlert } | null => {
+    const instrument = row.captureInstrument;
+    // Both sides carry the bank's own transfer form (transfer evidence, which
+    // only generic transfer titles get); a "Transfer to <name>" never pairs.
+    if (ts === null || !Number.isFinite(ts) || isStatementCaptureSource(row.captureSource) || !instrument ||
+      !row.accountId || !/^\d{4}$/.test(instrument.last4) || row.transferCounterparty === undefined) return null;
+    const ambiguous = row.transferSourceAmbiguous === true && instrument.kind === 'unknown';
+    if (ambiguous ? Number.isSafeInteger(row.statedBalanceFils) : instrument.kind !== 'account') return null;
+    const bank = instrument.bankIdentity ?? options.accountBankIdentity?.(row.accountId);
+    if (!bank) return null;
+    return {
+      // Both alerts on the same account: a legacy "Card •0002" never absorbs
+      // the bank account's debit (that stays a known duplicate, on the account).
+      key: `${row.accountId}|${bank}|${instrument.last4}|${row.amountFils}|${row.type}`,
+      entry: { ambiguous, ts, counterparty: row.transferCounterparty, targetId, candidate, paired: false },
+    };
+  };
+  const noteAmbiguousTransferAlert = (alert: ReturnType<typeof ambiguousTransferAlertOf>) => {
+    if (!alert) return;
+    const bucket = ambiguousTransferPairs.get(alert.key);
+    if (bucket) bucket.push(alert.entry);
+    else ambiguousTransferPairs.set(alert.key, [alert.entry]);
+    if (alert.entry.targetId) {
+      const byId = ambiguousTransferById.get(alert.entry.targetId);
+      if (byId) byId.push(alert.entry);
+      else ambiguousTransferById.set(alert.entry.targetId, [alert.entry]);
+    }
+  };
+  const differentParty = (a?: string, b?: string) => a !== undefined && b !== undefined && a.toLowerCase() !== b.toLowerCase();
+  const ambiguousTransferPartner = (c: DuplicateCandidate): AmbiguousTransferAlert | undefined => {
+    const mine = ambiguousTransferAlertOf(c, candidateTime(c), null, null);
+    if (!mine) return undefined;
+    let best: AmbiguousTransferAlert | undefined;
+    for (const other of ambiguousTransferPairs.get(mine.key) ?? []) {
+      if (other.paired || other.ambiguous === mine.entry.ambiguous ||
+        Math.abs(other.ts - mine.entry.ts) > TRANSFER_ALERT_PAIR_MS ||
+        differentParty(other.counterparty.last4, mine.entry.counterparty.last4) ||
+        differentParty(other.counterparty.name, mine.entry.counterparty.name)) continue;
+      if (!best || Math.abs(other.ts - mine.entry.ts) < Math.abs(best.ts - mine.entry.ts)) best = other;
+    }
+    return best;
+  };
+  const retireAmbiguousTransferAlerts = (targetId: string) => {
+    for (const entry of ambiguousTransferById.get(targetId) ?? []) entry.paired = true;
+  };
+  /** Set by `consume`; the `add` right after it is that row's replacement. */
+  let replacingId: string | null = null;
+  let lastAbsorbed: { targetId: string | null; candidate: DuplicateCandidate | null } | null = null;
   const statementPairByDay = new Map<string | number, SeenStatementPairEvent[]>();
   const statementPairSeq = new Map<SeenStatementPairEvent, number>();
   const statementPairById = new Map<string, SeenStatementPairEvent>();
@@ -1117,15 +1261,42 @@ export function duplicateGuard(
     // 1. Statement <-> live capture on the SAME resolved account. Provenance
     // permits bounded posting drift, never a contradiction in merchant identity.
     if (c.accountId && !unresolvedAccount(c.accountId)) {
-      const matches = open.filter((row) =>
+      const sameMoney = open.filter((row) =>
         !!row.accountId &&
         row.accountId === c.accountId &&
         compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument) &&
         isStatementCaptureSource(row.captureSource) !== incomingStatement &&
         Math.abs(row.amountFils - c.amountFils) <= 1 &&
         banksCompatible(bankOf(row), bankOf(c)) &&
-        statementDescriptorsAgree(row.title, c.title) &&
         withinPostingLag(lagOf(row)));
+      let matches = sameMoney.filter((row) => statementDescriptorsAgree(row.title, c.title));
+      if (!matches.length) {
+        // The descriptor is not the only identity. The same running balance
+        // after the movement is the bank stating it is the same movement
+        // (two equal same-day movements leave different balances), so it
+        // pairs whatever either side calls it.
+        const sameBalance = Number.isSafeInteger(c.statedBalanceFils)
+          ? sameMoney.filter((row) => row.amountFils === c.amountFils && row.statedBalanceFils === c.statedBalanceFils)
+          : [];
+        // Without a balance, two transfer wordings ("Outward remittance",
+        // "Transfer-MOB-LOCAL FT") name no party to disagree on — and a
+        // transfer the person renamed keeps no wording at all — but only for
+        // the ONE same-direction, exact same-amount row on this account inside
+        // the posting window. An ATM withdrawal and a shop never pair this
+        // way, and neither does a renamed purchase ("My lunch" is not "BOOK
+        // SHOP" just because the money and the day agree). A renamed salary
+        // credit still pairs with the bank's "Salary".
+        const transferWording = (title: string) => TRANSFER_WORDING.test(title.normalize('NFKC'));
+        if (sameBalance.length > 0) matches = sameBalance;
+        else if (sameMoney.length === 1 && sameMoney[0].amountFils === c.amountFils &&
+          !differentStatedBalance(sameMoney[0].statedBalanceFils, c.statedBalanceFils) &&
+          ((transferWording(c.title) &&
+            ((sameMoney[0].renamed === true && sameMoney[0].transfer === true) || transferWording(sameMoney[0].title))) ||
+          // A salary the person renamed, against the bank's "Salary".
+          (sameMoney[0].renamed === true && c.type === 'income' && structuralKindOf(c.title) === 'salary'))) {
+          matches = sameMoney;
+        }
+      }
       if (matches.length) {
         matches.sort((a, b) => {
           const score = (row: SeenStatementPairEvent) => lagScore(row) + Math.abs(row.amountFils - c.amountFils);
@@ -1169,6 +1340,34 @@ export function duplicateGuard(
         crossAccountPair = true;
         return claimable(matches[0]);
       }
+    }
+    // 1c. A live alert the planner could not attribute because its stated
+    // tail matched two accounts (a senderless iPhone History alert beside an
+    // older bankless "Account •0002") waits in a staging holding, so rule 1's
+    // same-account test can never meet the statement row that IS that
+    // movement — and a statement imported first was duplicated. Pair them
+    // only on the alert's own stated instrument tail, the exact amount,
+    // direction, the same posting day and agreeing descriptor, and only when
+    // exactly ONE row qualifies; the statement row keeps its account and any
+    // decision the person made. Either order.
+    const ambiguous = (accountId: string | undefined) => !!accountId &&
+      (options.ambiguousAccount ? options.ambiguousAccount(accountId) : UNASSIGNED_CARD_HOLDING.test(accountId));
+    const statedTail = (row: Pick<SeenStatementPairEvent, 'captureInstrument'>) => row.captureInstrument?.last4;
+    if (statedTail(c) && (incomingStatement ? !!c.accountId && !unresolvedAccount(c.accountId) && !ambiguous(c.accountId)
+      : ambiguous(c.accountId))) {
+      const matches = open.filter((row) => {
+        if (isStatementCaptureSource(row.captureSource) === incomingStatement || row.amountFils !== c.amountFils) return false;
+        const [statementSide, alertSide] = incomingStatement ? [c, row] : [row, c];
+        return ambiguous(alertSide.accountId) && !!statementSide.accountId &&
+          !unresolvedAccount(statementSide.accountId) && !ambiguous(statementSide.accountId) &&
+          statedTail(row) === statedTail(c) &&
+          compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument) &&
+          banksCompatible(bankOf(statementSide), alertSide.captureInstrument?.bankIdentity) &&
+          // The same posting day: with no account to anchor it, a statement
+          // row may not absorb an equal transfer the next day.
+          statementDescriptorsAgree(row.title, c.title) && row.date === c.date;
+      });
+      if (matches.length === 1) return claimable(matches[0]);
     }
     // 2. Statement <-> statement from ANOTHER upload: the same day, amount,
     // direction and account, whatever each file's row order put on the clock.
@@ -1223,6 +1422,15 @@ export function duplicateGuard(
           eventIdentity: t.captureEventIdentity, ts: cross.ts, push: t.viaPush === true, id: t.id, cross,
         });
       }
+      // Rows keep their transfer evidence through any edit; a retitle must not
+      // turn the stored half of a FAB pair back into a missing partner.
+      if (t.transferEvidence !== undefined && t.captureInstrument !== undefined) {
+        noteAmbiguousTransferAlert(ambiguousTransferAlertOf({
+          ...t,
+          transferSourceAmbiguous: t.transferEvidence.sourceKindAmbiguous === true,
+          transferCounterparty: { last4: t.transferEvidence.counterparty?.last4, name: t.transferEvidence.counterpartyName },
+        }, cross.ts, t.id, null));
+      }
     }
     // Statement provenance is persisted on parser-owned rows, but older live
     // SMS rows legitimately have no captureSource at all. Index both groups;
@@ -1240,6 +1448,15 @@ export function duplicateGuard(
         statementRowIndex: t.statementRowIndex,
         statementOccurrences: t.statementOccurrences,
         statementBank: t.statementBank,
+        // The person typed this title over a parsed row's (titleEdited on a row
+        // that kept its captured instrument). A category-only edit is not a
+        // rename, and a row confirmed from Review (reviewConfirmed, or promoted
+        // with no captured instrument) has no parsed title it replaced.
+        renamed: t.titleEdited === true && t.captureInstrument !== undefined && t.reviewConfirmed !== true,
+        // A transfer by the ledger's reading, or by the transfer evidence its
+        // alert carried (a renamed row keeps that, not its wording).
+        transfer: t.isTransfer === true || t.transferEvidence !== undefined,
+        ...(Number.isSafeInteger(t.statedBalanceFils) ? { statedBalanceFils: t.statedBalanceFils } : {}),
         id: t.id,
         consumed: false,
       });
@@ -1283,6 +1500,8 @@ export function duplicateGuard(
 
   return {
     has(c) {
+      replacingId = null;
+      lastAbsorbed = null;
       if (!isUsableCaptureSourceIdentity(c.smsKey, c.ts)) { lastMatchedId = null; return false; }
       lastMatchedId = null;
       const statementKey = statementRowKey(c);
@@ -1309,6 +1528,15 @@ export function duplicateGuard(
           if (paired) paired.consumed = true;
         }
         lastMatchedId = exact.id ?? null;
+        return true;
+      }
+      // FAB's second alert of a transfer, absorbed into a row on an earlier
+      // import (ambiguousTransferPairs): the same Message again, whatever has
+      // since happened to that row. Dropped as it was then, never a heal.
+      const absorbingId = absorbedBy.size > 0 && !isStatementCaptureSource(c.captureSource)
+        ? absorbedBy.get(absorbableSourceKey(c.smsKey, c.ts) ?? '') : undefined;
+      if (absorbingId) {
+        retireAmbiguousTransferAlerts(absorbingId);
         return true;
       }
       // The live Shortcut/Android identity predates history GUID hashing, but
@@ -1466,9 +1694,22 @@ export function duplicateGuard(
           return true;
         }
       }
+      // The other alert of a transfer FAB texted twice (ambiguousTransferPairs).
+      const sibling = ambiguousTransferPairs.size > 0 ? ambiguousTransferPartner(c) : undefined;
+      if (sibling) {
+        sibling.paired = true;
+        // Not a heal: the row keeps what the first alert (or its statement
+        // row) gave it. This alert's stated balance has already reached the
+        // account as its snapshot.
+        lastAbsorbed = { targetId: sibling.targetId, candidate: sibling.candidate };
+        return true;
+      }
       const statementMatch = statementPairMatch(c);
       if (statementMatch) {
         statementMatch.consumed = true;
+        // This alert is now that statement row: FAB's other alert of the same
+        // transfer pairs with it there, so the pair stays one movement.
+        if (!crossAccountPair) noteAmbiguousTransferAlert(ambiguousTransferAlertOf(c, mine, statementMatch.id ?? null, null));
         // Never let a later statement descriptor overwrite a richer live row.
         // In the reverse direction the live capture may heal the stored row,
         // which keeps its persisted statement provenance for future reimports.
@@ -1511,6 +1752,11 @@ export function duplicateGuard(
       lastMatchedId = null;
       return id;
     },
+    takeAbsorbed() {
+      const absorbed = lastAbsorbed;
+      lastAbsorbed = null;
+      return absorbed;
+    },
     supersedes(c) {
       if (!isUsableCaptureSourceIdentity(c.smsKey, c.ts)) return null;
       if (c.channel === 'push' || isStatementCaptureSource(c.captureSource)) return null;
@@ -1544,6 +1790,7 @@ export function duplicateGuard(
       return best?.id ?? null;
     },
     consume(id) {
+      replacingId = id;
       const row = crossById.get(id);
       if (row) row.consumed = true;
       const occurrence = seenById.get(id);
@@ -1568,6 +1815,12 @@ export function duplicateGuard(
     add(c) {
       if (!isUsableCaptureSourceIdentity(c.smsKey, c.ts)) return;
       const ts = candidateTime(c);
+      // consume(id) then add(c): c replaces that stored row (a supersede, a
+      // protected push, a source correction). One movement, one pair entry.
+      const replaced = replacingId;
+      replacingId = null;
+      if (replaced) retireAmbiguousTransferAlerts(replaced);
+      noteAmbiguousTransferAlert(ambiguousTransferAlertOf(c, ts, c.id ?? replaced ?? null, c.id || replaced ? null : c));
       note(dedupeKey(c.date, c.amountFils, c.title), ts, c.type, c.amountFils, c.smsKey, c.id,
         c.captureInstrument, {
           liveObservation: c.liveObservation === true, statement: c,
@@ -1602,6 +1855,7 @@ export function duplicateGuard(
         statementRowIndex: c.statementRowIndex,
         statementOccurrences: c.statementOccurrences,
         statementBank: c.statementBank,
+        ...(Number.isSafeInteger(c.statedBalanceFils) ? { statedBalanceFils: c.statedBalanceFils } : {}),
         id: c.id,
         consumed: false,
       });

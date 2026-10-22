@@ -46,7 +46,7 @@ private struct WafraLiveCaptureBridgeBehaviorTests {
     check("bridge advertises notification text intake capability", TestEventRegistry.constants["notificationCaptureSupported"] as? Bool == true)
     check("bridge registers the exact native module name",
       TestAsyncFunctionRegistry.moduleName == "WafraLiveCapture")
-    check("bridge registers exactly the twenty-one public functions",
+    check("bridge registers the exact public functions",
       TestAsyncFunctionRegistry.functions.keys.sorted() == [
         "acknowledgeCaptureWarning",
         "acknowledgeRecords",
@@ -68,6 +68,7 @@ private struct WafraLiveCaptureBridgeBehaviorTests {
         "setCaptureEnabled",
         "setInstantAlertsEnabled",
         "setLocalCaptureEntitlementLease",
+        "setNativeParserContext",
         "setStoreCaptureEntitlementLease",
       ])
 
@@ -149,6 +150,20 @@ private struct WafraLiveCaptureBridgeBehaviorTests {
     _ = try TestAsyncFunctionRegistry.invoke("setCaptureEnabled", [true])
     check("setCaptureEnabled reaches the store with its argument",
       WafraLiveCaptureStore.shared.calls.last == "setCaptureEnabled:true")
+
+    let parserContext = "{\"v\":1}"
+    let beforeContextCalls = WafraLiveCaptureStore.shared.calls
+    _ = try TestAsyncFunctionRegistry.invoke("setNativeParserContext", [parserContext])
+    check("parser context crosses the bridge without changing its JSON",
+      WafraLiveCaptureStore.shared.nativeParserContextInputs == [parserContext])
+    _ = try TestAsyncFunctionRegistry.invoke("setNativeParserContext", [Optional<String>.none as Any])
+    check("parser context accepts an explicit nullable clear",
+      WafraLiveCaptureStore.shared.nativeParserContextInputs.count == 2 &&
+        WafraLiveCaptureStore.shared.nativeParserContextInputs[1] == nil)
+    check("parser context mirroring cannot call consent, lease or queue methods",
+      WafraLiveCaptureStore.shared.calls == beforeContextCalls)
+    check("parser context rejects a non-string native boundary argument",
+      rejects("setNativeParserContext", [1.0]))
 
     _ = try TestAsyncFunctionRegistry.invoke("setInstantAlertsEnabled", [false])
     check("setInstantAlertsEnabled reaches the store with its argument",
