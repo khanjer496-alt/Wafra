@@ -679,6 +679,22 @@ const refusal = (run) => { try { run(); return 'accepted'; } catch (error) { ret
   ok('the same figure twice is never sent as a balance snapshot',
     sameTwice.rows.length === 2 && sameTwice.rows.every((row) => row.snapshotFils === null),
     JSON.stringify(sameTwice.rows.map((row) => [row.amountFils, row.snapshotFils])));
+  // A file whose rows carry full dates is read as before: a yearless-led line
+  // in it is a wrapped description's continuation, never a row to date.
+  const fullDated = (continuation) => parseStatementLines([
+    'Statement of Account', 'Statement Period: 01/09/2026 to 30/09/2026', 'Date Description Debit Credit Balance',
+    'Opening Balance 1,000.00', '01/09/2026 GROCERY 20.00 980.00', '02/09/2026 FUEL 30.00 950.00',
+    '03/09/2026 NETFLIX SUBSCRIPTION', continuation, '04/09/2026 SALARY 500.00 1,440.01', '05/09/2026 CAFE 10.00 1,430.01',
+    'Closing Balance 1,430.01',
+  ].join('\n'), 'GBP', { card: null }, 'day-first');
+  for (const continuation of ['01 Sep - 30 Sep 9.99 940.01', '12/09 004512 9.99 940.01']) {
+    const read = fullDated(continuation);
+    ok(`in a full-dated statement "${continuation}" is the wrapped row's continuation, not a yearless row`,
+      read.rows.length === 5 && read.rejectedRows === 0 && read.yearlessDateRows === 0 &&
+        read.rows[2].date === '2026-09-03' && read.rows[2].type === 'expense' && read.rows[2].amountFils === 999 &&
+        !read.rows.some((row) => row.date === '2026-09-12') && read.reconciliation.verdict === 'proven',
+      JSON.stringify([brief(read.rows), read.reconciliation]));
+  }
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

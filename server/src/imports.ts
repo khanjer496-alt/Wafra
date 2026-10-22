@@ -2510,6 +2510,13 @@ interface YearlessFill {
   order: DateOrder;
   /** The one statement period the file states, when it states exactly one. */
   period: { start: string; end: string } | null;
+  /**
+   * Whether the file prints its rows without a year: it has yearless money
+   * lines and no full-dated one. Only then are yearless lines rows (dated,
+   * counted, never another row's continuation); in a file whose rows carry
+   * full dates they are read exactly as before (see fillYearlessRowDates).
+   */
+  rows: boolean;
 }
 
 /**
@@ -2524,6 +2531,11 @@ interface YearlessFill {
  * as unambiguous. Any other yearless row is left as it was, and the row loop
  * counts it as rejected: `dates_without_year` when no period settles it,
  * `ambiguous_dates` when only the day/month order is missing.
+ *
+ * Only in a file that prints no full-dated money row. A statement prints its
+ * rows one way; in a full-dated one, a yearless-led money line (`1 Sep - 30 Sep
+ * 9.99`, `12/09 004512 250.00`) is a wrapped description's continuation or a
+ * side table, and dating it would make a row of it.
  */
 function fillYearlessRowDates(text: string, dateHint: StatementDateHint): YearlessFill {
   const lines = text.split('\n');
@@ -2532,11 +2544,17 @@ function fillYearlessRowDates(text: string, dateHint: StatementDateHint): Yearle
   // them: a yearless heading or note is left as printed.
   const rowLead = (line: string): YearlessDate | null => LOOKS_LIKE_MONEY_LINE.test(line) ? yearlessLead(line) : null;
   // Most statements print full dates: nothing below runs for them.
-  if (!flat.some((line) => rowLead(line))) return { text, order: 'unknown', period: null };
+  const none: YearlessFill = { text, order: 'unknown', period: null, rows: false };
+  if (!flat.some((line) => rowLead(line))) return none;
   const periodLines = flat.map((line) => line.length <= 120 ? STATEMENT_PERIOD_LINE.exec(line) : null);
   // `1 Sep - 30 Sep 2026` leads with a yearless date too, and is the period.
   const leads = flat.map((line, index) => periodLines[index] ? null : rowLead(line));
-  if (!leads.some(Boolean)) return { text, order: 'unknown', period: null };
+  if (!leads.some(Boolean)) return none;
+  const fullDatedRow = flat.some((line, index) => {
+    const prefixed = periodLines[index] ? null : ROW_DATE_PREFIX.exec(line);
+    return prefixed !== null && !SUMMARY_DESCRIPTION.test(prefixed[2]) && LOOKS_LIKE_MONEY_LINE.test(line);
+  });
+  if (fullDatedRow) return none;
   const periodMatches = periodLines.filter((match): match is RegExpExecArray => match !== null);
   // The order is the file's: its full row dates, its period, its yearless
   // rows (as stand-ins carrying only their two fields), then the country.
@@ -2568,11 +2586,11 @@ function fillYearlessRowDates(text: string, dateHint: StatementDateHint): Yearle
     periods.add(start ? `${start}|${end}` : 'unreadable');
   }
   const stated = periods.size === 1 ? [...periods][0] : null;
-  if (!stated || stated === 'unreadable') return { text, order, period: null };
+  if (!stated || stated === 'unreadable') return { text, order, period: null, rows: true };
   const [start, end] = stated.split('|');
   // Forward, and twelve months at most: a longer range can hold the same
   // month and day twice.
-  if (start > end || end > `${Number(start.slice(0, 4)) + 1}${start.slice(4)}`) return { text, order, period: null };
+  if (start > end || end > `${Number(start.slice(0, 4)) + 1}${start.slice(4)}`) return { text, order, period: null, rows: true };
   const period = { start, end };
   const yearFor = (lead: YearlessDate): string | null => {
     const monthDay = yearlessMonthDay(lead, order);
@@ -2600,7 +2618,7 @@ function fillYearlessRowDates(text: string, dateHint: StatementDateHint): Yearle
     }
     return `${first} ${rest}`;
   });
-  return { text: filled.join('\n'), order, period };
+  return { text: filled.join('\n'), order, period, rows: true };
 }
 
 type ColumnOrder = 'debit-first' | 'credit-first' | 'unknown';
@@ -3336,6 +3354,7 @@ function statementLines(
   text: string,
   currency: StatementCurrency,
   cardTotalAmountTable: boolean,
+  yearlessRows = false,
 ): { lines: string[]; wrapped: ReturnType<typeof joinWrappedRows> | null } {
   const raw = rawStatementLines(text);
   // Two-date layouts (transaction date, then posting date) outside the
@@ -3346,7 +3365,7 @@ function statementLines(
     .map((line) => cardTotalAmountTable ? line : line.replace(POSTING_DATE_AFTER_DATE, '$1 '));
   // A description wrapped onto further lines is rejoined (joinWrappedRows),
   // except in the Total Amount table, which coalesces its own rows.
-  const wrapped = cardTotalAmountTable ? null : joinWrappedRows(flattened, currency);
+  const wrapped = cardTotalAmountTable ? null : joinWrappedRows(flattened, currency, yearlessRows);
   return { lines: wrapped ? wrapped.lines : flattened, wrapped };
 }
 
@@ -3921,7 +3940,7 @@ function endsWithMoneyFigure(text: string, currency: StatementCurrency): boolean
  * every original line it now holds.
  */
 function joinWrappedRows(
-  lines: string[], currency: StatementCurrency,
+  lines: string[], currency: StatementCurrency, yearlessRows = false,
 ): { lines: string[]; sources: Map<number, number[]> } {
   const joined = [...lines];
   const sources = new Map<number, number[]>();
@@ -3937,9 +3956,10 @@ function joinWrappedRows(
     for (let j = i + 1; j < joined.length && j <= i + 3; j += 1) {
       const next = joined[j];
       if (!next) continue;
-      // A yearless row the period did not date (`08/31 EARLY 5.00 DR`) is a
-      // row of its own, counted unread, never another row's continuation.
-      if (dateLed(next) || yearlessLead(next) !== null || next.length > 120) break;
+      // In a file that prints its rows without a year, a yearless row the
+      // period did not date (`08/31 EARLY 5.00 DR`) is a row of its own,
+      // counted unread, never another row's continuation.
+      if (dateLed(next) || (yearlessRows && yearlessLead(next) !== null) || next.length > 120) break;
       if (endsWithMoneyFigure(next, currency)) { end = j; break; }
     }
     if (end < 0) continue;
@@ -4175,7 +4195,7 @@ export function parseStatementLines(
   // and the layout fingerprint (see statementLines). The card Total Amount
   // table has its own row coalescing, and its lines no longer match the
   // text's line indices, so the PDF layout is not used there.
-  const { lines, wrapped } = statementLines(text, currency, cardTotalAmountTable);
+  const { lines, wrapped } = statementLines(text, currency, cardTotalAmountTable, yearlessFill.rows);
   const rowLayout = layout && wrapped
     ? (index: number): StatementLayoutCell[] => (wrapped.sources.get(index) ?? [index]).flatMap((k) => layout.get(k) ?? [])
     : null;
@@ -4311,7 +4331,9 @@ export function parseStatementLines(
     // A yearless row the statement period did not settle (fillYearlessRowDates
     // left it as printed). With a period and only the day/month order
     // missing it is an ambiguous date; otherwise its year is missing.
-    const yearlessRow = prefixed ? null : yearlessLead(line);
+    // Only in a file whose rows are yearless (see fillYearlessRowDates);
+    // elsewhere such a line is counted below exactly as before.
+    const yearlessRow = prefixed || !yearlessFill.rows ? null : yearlessLead(line);
     if (yearlessRow && LOOKS_LIKE_MONEY_LINE.test(line) && !STATEMENT_PERIOD_LINE.test(line)) {
       rejectedRows += 1;
       if (yearlessFill.period && yearlessMonthDay(yearlessRow, yearlessFill.order) === 'ambiguous') ambiguousDateRows += 1;
