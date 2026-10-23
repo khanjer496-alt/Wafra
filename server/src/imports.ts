@@ -1475,6 +1475,18 @@ function legendPatterns(words: string): RegExp[] {
 }
 const MINUS_CREDIT_LEGEND = legendPatterns(CREDIT_WORDS);
 const MINUS_DEBIT_LEGEND = legendPatterns(DEBIT_WORDS);
+/**
+ * The sentence the row legends above leave out on purpose, read for the stated
+ * balances alone: a card statement saying its MINUS balance is a credit
+ * balance (`A negative New Balance indicates a credit balance`, `Credit
+ * balances are shown as negative`). Without it a card's minus balance has no
+ * direction (see signedBalance).
+ */
+const BALANCE_WORDS = String.raw`(?:(?:new|previous|statement|closing|opening|account|card)\s+)?balances?`;
+const MINUS_BALANCE_CREDIT_LEGEND = [
+  new RegExp(String.raw`\b(?:minus|negative)(?:\s+sign)?\s+${BALANCE_WORDS}\s+(?:${SIGN_VERB}|is|are)\s+(?:a\s+|an\s+)?credit(?:\s+balances?)?\b`, 'i'),
+  new RegExp(String.raw`\bcredit\s+balances?\s+(?:is\s+)?${SHOWN_AS}`, 'i'),
+];
 
 /** The sign legend a card statement prints, when it prints exactly one. */
 function cardSignLegend(text: string): 'minus-credit' | 'minus-debit' | null {
@@ -2739,6 +2751,9 @@ function singleStatementSummary(text: string): boolean {
   return minimums.size <= 1;
 }
 
+/** A statement's own top-level card label, not a cardholder section's `Card No :`. */
+const TOP_LEVEL_CARD_LABEL = /\b(?:credit\s+)?card\s+number\b|\bnumber\s+card\s+credit\b|رقم\s+البطاقة/iu;
+
 /**
  * The one card a card statement belongs to: exactly one distinct top-level
  * "Card Number" / "Credit Card Number" in the whole file, and the same card is
@@ -2746,11 +2761,10 @@ function singleStatementSummary(text: string): boolean {
  * are not top-level labels. Null whenever that is not proven.
  */
 function soleStatementCard(text: string): StatementInstrument | null {
-  const topLevel = /\b(?:credit\s+)?card\s+number\b|\bnumber\s+card\s+credit\b|رقم\s+البطاقة/iu;
   const tails = new Set<string>();
   let card: StatementInstrument | null = null;
   for (const line of normalizeDigits(text).split(/\n+/)) {
-    if (!topLevel.test(line)) continue;
+    if (!TOP_LEVEL_CARD_LABEL.test(line)) continue;
     const instrument = statementInstrument(line, { iban: false });
     if (!instrument || instrument.kind === 'account') continue;
     tails.add(instrument.last4);
@@ -3489,11 +3503,16 @@ function columnHeaderLabels(text: string): string[] {
  * The opening labels are the ones the balance chain reads (OPENING_BALANCE),
  * and the closing ones their counterparts (`Ending Balance` beside a US
  * `Beginning Balance`, `End balance` beside a UK `Start balance`).
+ *
+ * `Current Balance` is not a closing label. An account statement downloaded
+ * for a past period prints it in its header as the balance on the day it was
+ * printed, which is not the period's closing balance, so taking it as one
+ * refused a correct read of every such statement whose account has moved since.
  */
 const OPENING_BALANCE_LABEL =
   /\b(?:opening|previous|prev|beginning|starting|start)\s+balance\b|\bopening\s+bal\b|\bbalance\s+b\/?f\b|(?:^|\s)b\/f(?=\s|$)|\bbrought\s+forward\b|الرصيد\s+(?:الافتتاحي|السابق)/iu;
 const CLOSING_BALANCE_LABEL =
-  /\b(?:closing|new|current|ending|end)\s+balance\b|\bclosing\s+bal\b|\btotal\s+outstanding\b|\bbalance\s+c\/?f\b|\bcarried\s+forward\b|\bstatement\s+balance\b|الرصيد\s+الختامي/iu;
+  /\b(?:closing|new|ending|end)\s+balance\b|\bclosing\s+bal\b|\btotal\s+outstanding\b|\bbalance\s+c\/?f\b|\bcarried\s+forward\b|\bstatement\s+balance\b|الرصيد\s+الختامي/iu;
 /** A label line is a label, not prose. */
 const MAX_BALANCE_LABEL_CHARS = 48;
 /** How far past a label its own figure may sit in a stacked bilingual box. */
@@ -3514,12 +3533,21 @@ const MAX_BALANCE_VALUE_LOOKAHEAD = 8;
  * word: `Total Outstanding 1,100.00 DR` ends in a direction, and leaving it
  * there makes the whole line unreadable, so the lookahead runs on and takes the
  * minimum-payment figure underneath as the closing balance.
+ *
+ * `'ambiguous'` when the figure is there but its direction is not known: a
+ * CARD balance whose only direction is a sign. US issuers print an overpaid
+ * card as `-$50.00`, a credit balance, so reading the minus as money owed
+ * accused a right read of an overpaid card of not adding up. Only the
+ * statement's own legend for its balance (`minusIsCredit`, see
+ * MINUS_BALANCE_CREDIT_LEGEND) gives a card's minus a direction. An account's
+ * minus is an overdraft and is read as one.
  */
 function signedBalance(
   line: string,
   currency: StatementCurrency,
   owed: boolean,
-): number | null {
+  minusIsCredit = false,
+): number | 'ambiguous' | null {
   const words = line.split(' ');
   let trailing = /^(?:DR|CR|DEBIT|CREDIT)$/i.exec(words.at(-1) ?? '')?.[0];
   if (trailing) words.pop();
@@ -3536,12 +3564,46 @@ function signedBalance(
   if (!figure) return null;
   trailing = trailing ?? split.marker;
   if (!trailing && figure.kind === 'signed') {
-    trailing = figure.type === 'income' ? 'CR' : 'DR';
+    if (owed && !minusIsCredit) return 'ambiguous';
+    // A card's legend says its minus balance is a credit, so a minus is CR and
+    // a plus what is owed. An account's minus is a debit: overdrawn.
+    trailing = owed
+      ? (figure.type === 'expense' ? 'CR' : 'DR')
+      : (figure.type === 'income' ? 'CR' : 'DR');
   }
   const credit = trailing ? /^(?:CR|CREDIT)$/i.test(trailing) : null;
   if (credit === null) return figure.minor;
   // Owed: a credit is money the card does NOT owe. Held: a debit is overdrawn.
   return owed === credit ? -figure.minor : figure.minor;
+}
+
+/**
+ * How many figures a line carries: money tokens, a stated zero included (it
+ * is a real balance), an empty-cell dash not. DR/CR words, currency codes and
+ * words that are not money are not figures.
+ */
+function balanceFigureCount(line: string, currency: StatementCurrency): number {
+  let figures = 0;
+  for (const word of line.split(' ')) {
+    if (/^(?:DR|CR|DEBIT|CREDIT)$/i.test(word) || statementCurrency(word) !== null) continue;
+    const { figure } = splitDirectionSuffix(word);
+    const token = classifyMoneyToken(figure, currency);
+    if (token && (token.kind !== 'placeholder' || /^0(?:\.0{1,3})?$/.test(figure))) figures += 1;
+  }
+  return figures;
+}
+
+/**
+ * What may stand between a balance label and its value in a stacked bilingual
+ * box: the label's Arabic twin, a stray bracket, a currency code. A line with
+ * any other word on it is another label, and the value below it is that
+ * label's, not this one's.
+ */
+function balanceLabelGap(line: string): boolean {
+  return line.replace(/[\p{Script=Arabic}\u200e\u200f]+/gu, ' ')
+    .split(/[\s()[\]{}:;.,/|*\u2013\u2014-]+/)
+    .filter(Boolean)
+    .every((word) => statementCurrency(word) !== null);
 }
 
 function statedBalance(
@@ -3550,6 +3612,7 @@ function statedBalance(
   other: RegExp,
   currency: StatementCurrency,
   owed: boolean,
+  minusIsCredit: boolean,
 ): number | null {
   // Every stated reading, not the first: a statement prints its balances more
   // than once (a summary box, a page header, a payment slip), and they must
@@ -3557,13 +3620,32 @@ function statedBalance(
   // forward` and open the next with `Brought forward`, each a different
   // running balance; taking page one's as THE closing balance accused a
   // correct read of every later page. Disagreement is no anchor at all.
+  //
+  // A reading comes only from a line holding exactly ONE figure, so its label
+  // is that figure's. A summary laid out as columns (`Opening Balance Debits
+  // Credits Closing Balance` over `10,000.00 1,200.00 300.00 9,100.00`) pairs
+  // no figure with a label by position; taking the last one gave the opening
+  // balance the closing figure, and every statement with any movement was
+  // then refused as not reconciling. The same summary stacked down the page
+  // (each label on its own line, then each value) pairs them by position just
+  // the same. A label line this cannot read for certain is no anchor at all.
   const readings = new Set<number>();
+  const readOne = (line: string): number | 'ambiguous' | null =>
+    balanceFigureCount(line, currency) === 1 ? signedBalance(line, currency, owed, minusIsCredit) : 'ambiguous';
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
     if (!line || line.length > MAX_BALANCE_LABEL_CHARS || !label.test(line)) continue;
-    // On the label's own line, the last figure on it is the balance.
-    const own = signedBalance(line, currency, owed);
-    if (own !== null) {
+    // A line naming BOTH balances (`Opening Balance Closing Balance`,
+    // `Opening Bal 5,000.00 Closing Bal 4,100.00`, `الرصيد الافتتاحي الرصيد
+    // الختامي`) anchors neither, and its values, on it or under it, are never
+    // read: the lookahead from any other label line stops at it.
+    if (other.test(line)) continue;
+    if (balanceFigureCount(line, currency) > 0) {
+      // On the label's own line its one figure is the balance, and it has to
+      // end the line (a DR/CR after it aside). A figure there is never a
+      // reason to look further down for another one.
+      const own = readOne(line);
+      if (own === null || own === 'ambiguous') return null;
       readings.add(own);
       continue;
     }
@@ -3575,8 +3657,17 @@ function statedBalance(
       // would run straight into the other balance's figure and report the
       // opening one as the closing one - a difference of the whole statement.
       if (label.test(next) || other.test(next) || ROW_DATE_PREFIX.test(next)) break;
-      if (!isMoneyOnlyLine(next, currency)) continue;
-      const figure = signedBalance(next, currency, owed);
+      if (!isMoneyOnlyLine(next, currency)) {
+        if (balanceLabelGap(next)) continue;
+        break;
+      }
+      // A value with another bare value straight under it is one of a column
+      // of values printed under a stack of labels, and which label it belongs
+      // to is a guess.
+      const after = lines.slice(ahead + 1).find(Boolean);
+      if (after !== undefined && isMoneyOnlyLine(after, currency)) return null;
+      const figure = readOne(next);
+      if (figure === 'ambiguous') return null;
       if (figure !== null) readings.add(figure);
       break;
     }
@@ -3630,9 +3721,12 @@ function unaccountedDateLedLines(lines: string[], currency: StatementCurrency): 
  * that costs nothing to run.
  *
  * A card statement's balance is what is OWED, so a purchase raises it and a
- * payment lowers it; an account statement runs the other way. `isCardStatement`
- * already decides which, and getting it backwards is itself caught, because the
- * sum then misses by twice the traffic rather than closing.
+ * payment lowers it; an account statement runs the other way. Which one is
+ * the parser's own decision (`cardEvidence`), the one its rows were read
+ * under, never a second opinion: checking a right read with the other sign
+ * misses by twice the traffic and refuses it. Where that decision rests on
+ * evidence that disagrees with itself the verdict is `unknown` (see
+ * StatementKindEvidence).
  *
  * Only money movements are summed: the card summary row (`cardStatement`, the
  * due) is not one, and a payment received onto a card (`cardPayment`, filed as
@@ -3649,10 +3743,53 @@ export type StatementReconciliation =
   | { verdict: 'proven'; openingMinor: number; closingMinor: number }
   | { verdict: 'contradicted'; openingMinor: number; closingMinor: number; differenceMinor: number };
 
+/**
+ * What the parser decided a statement is, and the evidence against it.
+ *
+ * `card` is the parser's own decision (cardEvidence: two header markers, or a
+ * number the statement labels `Credit Card Number`), the one its rows were
+ * read under, so the check runs the same arithmetic. It is set aside, and the
+ * verdict is `unknown`, only where the statement's own wording says the other
+ * thing too: two card markers are printed by account statements as well
+ * (`Statement Date` beside a `Debit Card Number`, `Statement Period` beside an
+ * overdraft's `Credit Limit`), and an account statement can carry a single
+ * card marker (`Credit Limit`) that a one-marker card statement carries too.
+ */
+interface StatementKindEvidence {
+  /** The rows were read as a card's (cardEvidence). */
+  card: boolean;
+  /**
+   * That card decision stands on the statement's header: two card markers,
+   * or a `Credit Card Number` above its first row. A credit card number named
+   * only inside a row (`PAYMENT TO CREDIT CARD NUMBER 4111…` on a current
+   * account) says what was paid, not what the statement is.
+   */
+  cardInHeader: boolean;
+  /** Wording only a credit card's statement prints: a minimum payment due, "credit card statement". */
+  creditOnly: boolean;
+  /** Any single card marker in the header (CARD_STATEMENT_MARKER). */
+  cardMarker: boolean;
+  /**
+   * The header names an account: an account-labelled number or IBAN, a debit
+   * or mada card, an overdraft.
+   */
+  accountSide: boolean;
+  /** The statement says a minus balance is a credit balance. */
+  minusBalanceCredit: boolean;
+}
+
+/** Card or account arithmetic, or null when the statement says both. */
+function reconciliationOwed(kind: StatementKindEvidence): boolean | null {
+  // US issuers label a card's own number "Account Number", so an account
+  // label weighs against a card only where nothing credit-only stands with it.
+  if (kind.card) return !kind.cardInHeader || (kind.accountSide && !kind.creditOnly) ? null : true;
+  return kind.cardMarker ? null : false;
+}
+
 function reconcileStatement(
   rows: StatementParsedRow[],
   lines: string[],
-  text: string,
+  kind: StatementKindEvidence,
   currency: StatementCurrency,
   rejectedRows: number,
 ): StatementReconciliation {
@@ -3663,9 +3800,11 @@ function reconcileStatement(
   // missing those cannot close, and reporting it `contradicted` would accuse a
   // correct reading of being wrong, which is what this is documented never to do.
   if (unaccountedDateLedLines(lines, currency) > 0) return { verdict: 'unknown' };
-  const owed = isCardStatement(text);
-  const openingMinor = statedBalance(lines, OPENING_BALANCE_LABEL, CLOSING_BALANCE_LABEL, currency, owed);
-  const closingMinor = statedBalance(lines, CLOSING_BALANCE_LABEL, OPENING_BALANCE_LABEL, currency, owed);
+  const owed = reconciliationOwed(kind);
+  if (owed === null) return { verdict: 'unknown' };
+  const minusIsCredit = owed && kind.minusBalanceCredit;
+  const openingMinor = statedBalance(lines, OPENING_BALANCE_LABEL, CLOSING_BALANCE_LABEL, currency, owed, minusIsCredit);
+  const closingMinor = statedBalance(lines, CLOSING_BALANCE_LABEL, OPENING_BALANCE_LABEL, currency, owed, minusIsCredit);
   if (openingMinor === null || closingMinor === null) return { verdict: 'unknown' };
   let debits = 0;
   let credits = 0;
@@ -4133,27 +4272,66 @@ export function parseStatementLines(
     ? soleStatementCard(accountText)
     : null;
   const sectionInstruments = new Set<string>();
-  for (const line of accountText.split(/\n+/)) {
+  const accountLines = accountText.split(/\n+/).map((line) => line.replace(/\s+/g, ' ').trim());
+  // Lines of the single card account's own card numbers (its header and its
+  // cardholder sections), and of an account number beside it that is not the
+  // card's last four.
+  const cardLines = new Set<number>();
+  const otherAccountLines: number[] = [];
+  accountLines.forEach((line, index) => {
     if (!/^\s*(?:credit\s+card|card|account|a\/c)\s+(?:number|no\.?|ending)\b/i.test(line) &&
         !/^\s*(?:account|acct|a\/c|iban|card)\s*[:#-]?\s*[*xX•·\d]/i.test(line) &&
-        !/^\s*number\s+card\s+credit\b/i.test(line)) continue;
+        !/^\s*number\s+card\s+credit\b/i.test(line)) return;
     // `Card 123456789` under a card-payment row (Bank AlJazira) names the
     // card that was paid, not a statement section: an unmasked run of fewer
     // than 12 digits after a bare `Card` is not a card number at all.
-    if (/^\s*card\s*[:#-]?\s*\d{1,11}\s*$/i.test(normalizeDigits(line))) continue;
+    if (/^\s*card\s*[:#-]?\s*\d{1,11}\s*$/i.test(normalizeDigits(line))) return;
     const instrument = statementInstrument(line, { iban: false }) ?? statementHeaderInstrument(line);
-    if (!instrument) continue;
-    if (instrument.kind !== 'account' && singleCardAccount) continue;
+    if (!instrument) return;
+    if (instrument.kind !== 'account' && singleCardAccount) {
+      cardLines.add(index);
+      return;
+    }
     sectionInstruments.add(`${instrument.kind === 'account' ? 'account' : 'card'}:${instrument.last4}`);
-  }
+    if (singleCardAccount && instrument.kind === 'account' && instrument.last4 !== singleCardAccount.last4) {
+      otherAccountLines.push(index);
+    }
+  });
   if (sectionInstruments.size > 1) throw new Error('multiple_statement_accounts');
-  // Beside a single card account the one account-labelled number that may
-  // stand is the card's own (`Account Number XXXXXXXXXXXX2280`). Any other, on
-  // a page that holds rows, is a second account whose rows would be filed to
-  // the card. The bank's own pay-to account on an information page is not
-  // here at all (accountText).
-  if (singleCardAccount && [...sectionInstruments].some((key) => key !== `account:${singleCardAccount.last4}`)) {
-    throw new Error('multiple_statement_accounts');
+  // Beside a single card account one account-labelled number may stand, as
+  // `main` always allowed: the card's own last four, or the card ACCOUNT's
+  // number in the statement header (ADCB prints `Account Number
+  // 0101234567890` beside `Card Number XXXXXXXXXXXX2280`), whatever page or
+  // file type it comes in. It refuses only where it is a second section: it
+  // heads rows of its own, which would be filed to the card. That is an
+  // account number printed after the first row, with rows under it before any
+  // card section, and not a page header repeated beside the statement's own
+  // top-level card number. One that heads no rows (printed after the last of
+  // them) names nothing that could be misfiled. The bank's own pay-to account
+  // on an information page is not here at all (accountText).
+  if (otherAccountLines.length > 0) {
+    // A line the row reader would take for a transaction: led by a date, with
+    // money or a description under it. A statement-period line is neither.
+    const rowLine = (line: string): boolean =>
+      (DATE_LED_LINE.test(line) || yearlessLead(line) !== null) && !STATEMENT_PERIOD_LINE.test(line) &&
+      (LOOKS_LIKE_MONEY_LINE.test(line) || hasDescriptionUnderDate(line, currency));
+    const firstRow = accountLines.findIndex(rowLine);
+    const headsRows = (index: number): boolean => {
+      if (firstRow < 0 || index < firstRow) return false;
+      let below = index + 1;
+      for (; below < accountLines.length && !rowLine(accountLines[below]); below += 1) {
+        // The rows under it belong to the card section printed between.
+        if (cardLines.has(below)) return false;
+      }
+      if (below >= accountLines.length) return false;
+      let above = index;
+      while (above > 0 && !rowLine(accountLines[above - 1])) above -= 1;
+      for (let line = above; line < below; line += 1) {
+        if (cardLines.has(line) && TOP_LEVEL_CARD_LABEL.test(accountLines[line])) return false;
+      }
+      return true;
+    };
+    if (otherAccountLines.some(headsRows)) throw new Error('multiple_statement_accounts');
   }
   // Every row of a single card account goes to the statement's own card, never
   // to whichever cardholder section happens to come first.
@@ -4179,6 +4357,14 @@ export function parseStatementLines(
   // `Payment Thank You -500.00` was filed as 500.00 spent.
   const cardOnlyMarker = /\bcredit\s+card\s+statement\b|\bminimum\s+(?:amount|payment)\s+due\b/i
     .test(rawLines.slice(0, 60).join('\n'));
+  // What an ACCOUNT statement that happens to print two card markers says
+  // about itself in its header: an account number or IBAN, a debit or mada
+  // card, an overdraft. Only weighs against a card reading, and only in the
+  // reconciliation below.
+  const accountSide = statedInstrument?.kind === 'account' || statedInstrument?.kind === 'debit' ||
+    accountLines.slice(0, 60).some((line) =>
+      /\b(?:debit|mada)\s+card\b|\boverdraft\b|\biban\b|بطاقة\s+(?:ال)?(?:خصم|صراف|مدى)/iu.test(line) ||
+      statementInstrument(line, { iban: false })?.kind === 'account');
   const signEvidence = cardEvidence || (statedInstrument?.kind !== 'account' && creditMarker) || cardOnlyMarker;
   // A proven card statement that also carries a credit-only marker (a credit
   // limit, a minimum due, "credit card statement") is a CREDIT card's, even
@@ -4243,6 +4429,10 @@ export function parseStatementLines(
   // line, or the row just before it in the same shape (see
   // markedAmountBeforeBalance). Any other date-led row breaks it.
   let markedBalance: number | null = null;
+  // The nearest table header above names an original (foreign) amount column
+  // and no balance column: a row's two marked figures there are its original
+  // and charged amounts, never an amount and a balance.
+  let twoAmountColumns = false;
   // Rows read through the debit/credit column order, and whether any row's
   // own balance disproved that order (see below the loop).
   const columnRowIndices: number[] = [];
@@ -4305,7 +4495,12 @@ export function parseStatementLines(
   for (lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
     const line = lines[lineIndex];
     if (!line) continue;
-    const header = cardStatement ? tableHeader(line) : null;
+    const anyHeader = tableHeader(line);
+    if (anyHeader !== null) {
+      twoAmountColumns = /\b(?:original|foreign)\s+(?:currency\s+)?amount\b|\boriginal\s+currency\b/i.test(anyHeader) &&
+        !/\bbalance\b/i.test(anyHeader);
+    }
+    const header = cardStatement ? anyHeader : null;
     if (header !== null) ledgerAmountColumn = ledgerOnlyHeader(header);
     const prefixed = ROW_DATE_PREFIX.exec(line);
     if (prefixed && !SUMMARY_DESCRIPTION.test(prefixed[2])) lastDatedLine = lineIndex;
@@ -4389,9 +4584,27 @@ export function parseStatementLines(
     }
     // Same rule for the marked chain: carried forward whether or not this
     // row is accepted, broken by any date-led row of another shape.
+    // Not on a card statement: a card table prints no running balance (the
+    // balance chains above are off there too), and its two marked figures are
+    // the original and the charged amount (`SPOTIFY 20.00 DR 73.60 DR`),
+    // which the last-figure reader below files at the charge, as before. Nor
+    // under a table header that names those two columns.
     const priorMarked = markedBalance;
-    const marked = prefixed ? markedAmountBeforeBalance(prefixed[2], currency) : null;
-    if (prefixed) markedBalance = marked && marked !== 'unreadable' ? marked.balanceMinor : null;
+    const markedRead = prefixed && !cardEvidence && !twoAmountColumns
+      ? markedAmountBeforeBalance(prefixed[2], currency)
+      : null;
+    const marked = markedRead === 'unreadable' ? null : markedRead;
+    const markedSigned = marked ? (marked.credit ? marked.amountMinor : -marked.amountMinor) : 0;
+    // The same figure under the same label twice is the one amount either way,
+    // but nothing about it shows its second figure to be a balance: two
+    // amount columns print exactly that. It is never a step and never seeds
+    // one, even from a stated zero, or a later row whose charge happened to
+    // equal the running total of the others would step by coincidence and be
+    // filed at its original figure.
+    const markedSameFigure = marked !== null && marked.balanceMinor === markedSigned;
+    const markedStepped = marked !== null && !markedSameFigure && priorMarked !== null &&
+      priorMarked + markedSigned === marked.balanceMinor;
+    if (prefixed) markedBalance = marked && !markedSameFigure ? marked.balanceMinor : null;
     const cardTableCandidate = cardTotalAmountTable && prefixed
       ? cardTotalAmountRowPrefix(line, dateOrder)
       : false;
@@ -4405,27 +4618,21 @@ export function parseStatementLines(
       if (countable && rows.length === accepted) rejectedRows += 1;
       continue;
     }
-    const match = marked ? null : ROW_END_DIRECTION.exec(line) ?? ROW_MIDDLE_DIRECTION.exec(line);
-    if (marked) {
+    const match = markedRead ? null : ROW_END_DIRECTION.exec(line) ?? ROW_MIDDLE_DIRECTION.exec(line);
+    if (markedRead) {
       // `CARREFOUR DUBAI 120.00 DR 4,880.00 CR`: the inner figure is the
       // amount with its own label, the outer one the running balance. Filed
       // only when the statement proves that reading: the balance moved from
       // the one before it by exactly this amount, in this label's direction.
-      // The same figure under the same label twice (`101.75 CR 101.75 CR`, a
-      // card's original and charged amounts) is the one amount either way.
-      // Anything else, the first row with no opening balance included, is
-      // counted as rejected rather than guessed.
+      // The same figure under the same label twice (`101.75 CR 101.75 CR`)
+      // is the one amount either way. Anything else, the first row with no
+      // opening balance included, is counted as rejected rather than guessed.
       const date = prefixed ? isoDate(prefixed[1], dateOrder) : null;
-      if (marked !== 'unreadable' && date) {
-        const signed = marked.credit ? marked.amountMinor : -marked.amountMinor;
-        const stepped = priorMarked !== null && priorMarked + signed === marked.balanceMinor;
-        if (stepped || marked.balanceMinor === signed) {
-          // Only a balance the chain proved is this row's running balance
-          // (for the closing snapshot below); the same figure twice may be
-          // two amount columns.
-          push(date, marked.merchant, marked.amountMinor, marked.credit ? 'income' : 'expense', line,
-            stepped ? marked.balanceMinor : null);
-        }
+      if (marked && date && (markedStepped || markedSameFigure)) {
+        // Only a balance the chain proved is this row's running balance
+        // (for the closing snapshot below).
+        push(date, marked.merchant, marked.amountMinor, marked.credit ? 'income' : 'expense', line,
+          markedStepped ? marked.balanceMinor : null);
       }
     } else if (match) {
       // Only treat the three-letter token before an amount as currency when
@@ -4624,7 +4831,15 @@ export function parseStatementLines(
     ambiguousCardSignRows,
     ambiguousDateRows,
     yearlessDateRows,
-    reconciliation: reconcileStatement(rows, lines, text, currency, rejectedRows),
+    reconciliation: reconcileStatement(rows, lines, {
+      card: cardEvidence,
+      cardInHeader: cardStatement ||
+        statementInstrument(documentHeader(accountText), { iban: false })?.kind === 'credit',
+      creditOnly: cardOnlyMarker,
+      cardMarker: creditMarker,
+      accountSide,
+      minusBalanceCredit: MINUS_BALANCE_CREDIT_LEGEND.some((legend) => legend.test(text.replace(/\s+/g, ' '))),
+    }, currency, rejectedRows),
   };
 }
 

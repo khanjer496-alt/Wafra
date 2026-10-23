@@ -15,13 +15,13 @@ fictional.
 
 | Change | Before | Now |
 | --- | --- | --- |
-| A row printing a marked amount and a marked running balance (`01/09/2026 CARREFOUR 120.00 DR 4,880.00 CR`) | The balance was imported as the amount (a CR balance as income), and the merchant kept `120.00 DR`. | The inner figure is the amount, with its own label, only when the running balance moved from the one before it (an opening-balance line or the previous row in this shape) by exactly that amount in that direction. The same figure under the same label twice (`101.75 CR 101.75 CR`) is that one amount. Any other row in this shape, including the first one when there is no opening balance, is refused and counted. |
-| Rows that do not add up to the statement's own balances | Imported. | A PDF upload whose rows provably miss its stated closing balance is refused with `statement_does_not_reconcile` (see below). The check runs only on a complete read with both an opening and a closing balance stated on short label lines (`Opening`, `Previous`, `Beginning` or `Start balance`, `Brought forward`, `الرصيد الافتتاحي`; `Closing`, `New`, `Ending` or `End balance`, `Total Outstanding`, `Carried forward`, `الرصيد الختامي`), and every reading of each label agreeing (per-page carried-forward balances do not); otherwise the verdict is `unknown` and the import goes ahead as before. Ported by hand from PR #94, with two fixes: the card summary (due) row is not summed, and a payment received onto a card (`cardPayment`) lowers what is owed. |
+| A row printing a marked amount and a marked running balance (`01/09/2026 CARREFOUR 120.00 DR 4,880.00 CR`) | The balance was imported as the amount (a CR balance as income), and the merchant kept `120.00 DR`. | The inner figure is the amount, with its own label, only when the running balance moved from the one before it (an opening-balance line or the previous row in this shape) by exactly that amount in that direction. The same figure under the same label twice (`101.75 CR 101.75 CR`) is that one amount, but never a step and never the start of one, even from a stated zero. Any other row in this shape, including the first one when there is no opening balance, is refused and counted. Not on a card statement, and not under a table header naming an original or foreign amount column without a balance column: there the two marked figures are the original and the charged amount (`SPOTIFY 20.00 DR 73.60 DR`), read at the charge exactly as `main` reads them. |
+| Rows that do not add up to the statement's own balances | Imported. | A PDF upload whose rows provably miss its stated closing balance is refused with `statement_does_not_reconcile` (see below). The check runs only on a complete read with both an opening and a closing balance stated on short label lines (`Opening`, `Previous`, `Beginning` or `Start balance`, `Brought forward`, `الرصيد الافتتاحي`; `Closing`, `New`, `Ending` or `End balance`, `Total Outstanding`, `Carried forward`, `الرصيد الختامي`), and every reading of each label agreeing (per-page carried-forward balances do not); otherwise the verdict is `unknown` and the import goes ahead as before. A value is read only from a line holding exactly one figure: a line naming both balances (`Opening Balance Closing Balance`, `Previous Balance Payments Purchases New Balance`, `Opening Bal 5,000.00 Closing Bal 4,100.00`, `الرصيد الافتتاحي الرصيد الختامي`) anchors neither, and in a stacked box a value counts only under its own label, with nothing but the label's Arabic twin, a bracket or a currency code between them, and not when another bare value sits straight under it. `Current Balance` is not a closing label (an account statement prints it as the balance on the day it was printed). Card or account arithmetic is the parser's own card decision; it is `unknown` where that decision does not rest on the header (a credit card number named only inside a row) or where the header names an account (an account number or IBAN, a debit or mada card, an overdraft) with no minimum payment due or "credit card statement" beside it, and a statement read as an account that prints a card marker (`Credit Limit`, `Minimum Payment Due`) is `unknown` too. On a card, a balance whose only direction is a minus sign (`New Balance -$50.00`) is no anchor unless the statement says a negative balance is a credit balance. Ported by hand from PR #94, with two fixes: the card summary (due) row is not summed, and a payment received onto a card (`cardPayment`) lowers what is owed. |
 | A PDF that reads no rows | `unsupported_statement_format` only. | The same code, plus a `layout` fingerprint: row shapes as token classes (`DATE WORD+ MONEY MONEY`) and column labels from a fixed list. No merchant, amount, name or number from the file is ever in it. |
 | Row dates printed without a year (US `09/01`, UK `1 Sep`, `Sep 1`) | Refused (`unsupported_statement_format`), and `1 Sep` rows were not even counted. | The year is taken only from one explicit statement-period line in the same file (`September 01, 2026 through September 30, 2026`, `1 September 2026 - 30 September 2026`, `1 Sep - 30 Sep 2026`, `Opening/Closing Date 08/28/26 - 09/27/26`, `Statement period: …`), when the period runs forward for at most 12 months and exactly one year puts the row inside it. A December-to-January period gives each side its own year. Otherwise the row is refused and counted: `ambiguous_dates` when only the day/month order is missing, `dates_without_year` when no period settles it. |
 | Opening-balance labels for the balance chain | `Opening/Previous/Beginning/Starting balance`, `Balance B/F`, `Brought forward`, `الرصيد الافتتاحي`. | Also `Start balance`, `Opening Bal`, a bare `B/F` and `الرصيد السابق`, and an opening balance of exactly `0.00`. The first row of a split debit/credit table is no longer dropped under those labels. |
-| A card statement with a how-to-pay page naming the bank's own account number or IBAN | Refused as `multiple_statement_accounts`. | Pages after the last page carrying a transaction date are left out of the account checks and the statement identity. They hold no rows. Without page boundaries (one text blob) the refusal stands. |
-| A second account number on a page that holds rows of a single-card statement | Accepted when it was the only account number, and its rows were filed to the card. | Refused. Only the card's own last four may appear under an account label. |
+| A card statement with a how-to-pay page naming the bank's own account number or IBAN | Refused as `multiple_statement_accounts`. | Pages after the last page carrying a transaction date are left out of the account checks and the statement identity. They hold no rows. Without page boundaries (one text blob) such a page cannot be set apart: two or more different account numbers on it still refuse, while a single account number printed after the last row heads no rows and is allowed, as in the next row. |
+| One account number beside a single card account (one top-level card number, one summary) | Accepted whenever it was the only account number, including when rows under it belonged to another account and were filed to the card. | Accepted, as on `main`, in text, email and single-page or multi-page PDFs, when it is the card's own last four, the card account's number in the statement header (ADCB: `Account Number 0101234567890` beside `Card Number XXXXXXXXXXXX2280`), that header repeated over a later page beside the card number, or a number printed after the last row (it heads no rows). Refused (`multiple_statement_accounts`) only where it heads rows of its own: printed after the first row, with rows under it before any card section, and not beside the statement's own top-level card number. Two different account numbers still refuse. |
 | A foreign original inside an `Amount in AED` card table (`www*MobileRecharge.com ATLANTA USA 10.14 USD 38.79`) | Refused. | Read as the AED charge, with USD 10.14 carried as the bank-stated original. Only under a table header whose single amount column is the ledger's, and only when the original has exactly its currency's decimals. A figure on both sides of a currency code is refused. |
 | A bare minus on a statement that says `Minimum Payment Due` or `Credit Card Statement` but labels the card number `Account Number` (US issuers) | Read under the account convention: a `Payment Thank You -500.00` row became 500.00 spent. | Refused as an ambiguous card sign, as on any other card statement that does not say what its signs mean. |
 | A card CSV row typed `Payment` (Chase: Sale / Payment / Return) | A settlement only when its description used payment wording; otherwise plain income. | Always the card settlement on a card export: the `cardPayment` kind when the export names its card, otherwise the transfer-flagged `Card payment` row the app already files outside Income and Spending. Fee, interest and refund wording keeps its own meaning. |
@@ -70,6 +70,22 @@ App copy (English and Arabic, `src/lib/supplement-copy.ts`):
   (`Statement period 09/01/2026 - 09/30/2026 Page 1 of 2`) is not a period
   line, so its yearless rows are refused (`dates_without_year`).
 - A Hijri statement period dates no yearless row.
+- On a card statement a row printing an amount and a marked running balance
+  (`AMAZON 50.00 DR 1,050.00 DR`) is read as `main` reads it, at its last
+  figure, because a card table's two marked figures are far more often the
+  original and the charged amount. Its stated balances then refuse that read
+  (`statement_does_not_reconcile`); a card statement that states no balances
+  imports it as `main` does.
+- On an account statement whose two marked figures are an original and a
+  charged amount but whose header does not say so, a row is refused and
+  counted wherever the chain cannot prove its second figure a balance.
+- Beside a single card account, an account number repeated over a later page
+  WITHOUT the card number beside it, with rows under it, refuses as
+  `multiple_statement_accounts`.
+- The reconciliation is `unknown`, not proven, for summaries that pair labels
+  and values by position, `Current Balance` headers, card minus balances with
+  no legend, and statements whose header names both a card and an account.
+  It never refuses those; it proves less.
 - Verified with the server suites and fictional PDFs built in the tests. Not
   verified against real customer statements, the live relay or a device.
 
@@ -98,3 +114,39 @@ row the broken balance chain had dropped (each now 4 of 4); the US card PDF
 whose payment carries a bare minus under "Minimum Payment Due" is refused as
 `ambiguous_card_signs` rather than `unsupported_statement_format`. No CSV or
 Excel sample changed.
+
+### Review fixes — 23 October 2026
+
+An independent review of the port against `main` found five places where it
+refused, or misread, a statement `main` reads correctly. Each is fixed and has
+its own fictional tests (section 8 of `server/test/statement-checks.test.cjs`):
+
+1. A short line naming both an opening and a closing label anchored both to
+   its last figure, so every such statement with any movement was refused as
+   not reconciling. It now anchors neither (see the reconciliation row
+   above), and the stacked-down-the-page form of the same summary is held to
+   the same rule. For the same reason a header `Current Balance` (the balance
+   on the day the statement was printed) is no longer a closing label.
+2. The card-or-account arithmetic was a second opinion (`isCardStatement`)
+   that could disagree with how the rows were read: a card proven by its
+   `Credit Card Number` alone was checked as an account, and an account with
+   a `Debit Card Number` beside a `Statement Date` (or an overdraft `Credit
+   Limit` beside a `Statement Period`) as a card. It is now the parser's own
+   decision, `unknown` where the statement says both, and `unknown` for a
+   statement read as an account that prints a single card marker.
+3. A card's minus balance (`New Balance -$50.00`, an overpaid card) was read
+   as money owed. It is no anchor unless the statement's own legend says a
+   negative balance is a credit balance.
+4. A single card account with the card account's number in its header was
+   refused as `multiple_statement_accounts`, in text, email and single-page
+   PDFs. It imports as on `main`; only an account number heading rows of its
+   own refuses (see the table above).
+5. On card tables printing a marked original and a marked charged amount, the
+   marked-balance reader refused every FX or VAT row, and a same-figure row
+   could start a chain that filed a later charge at its original figure
+   (Spotify 20.00 instead of 73.60). That reader is now off on card
+   statements and under a header naming an original amount column, and a
+   same-figure row never starts or continues a chain.
+
+The scout's sample set gives the same result with these fixes as with the port
+before them (all 138 file and date-order runs unchanged).

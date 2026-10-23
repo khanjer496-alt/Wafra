@@ -524,8 +524,16 @@ const refusal = (run) => { try { run(); return 'accepted'; } catch (error) { ret
   ok('still refuses: without page evidence another labelled account in the text',
     refusal(() => parseStatementLines([...adcbPage1, ...adcbPage2, ...adcbPage3].join('\n'), 'AED', { card: null }, 'day-first'))
       === 'multiple_statement_accounts');
-  ok('still refuses: an account number on a page that holds transactions',
-    refusal(() => adcbParse([adcbPage1, [...adcbPage2, 'Account Number 12345678901234']])) === 'multiple_statement_accounts');
+  ok('still refuses: an account number on a page that holds transactions, with rows under it',
+    refusal(() => adcbParse([adcbPage1, [...adcbPage2.slice(0, -2), 'Account Number 12345678901234',
+      '06/08/2026 TRANSFER RECEIVED 2,000.00 CR', ...adcbPage2.slice(-2)]])) === 'multiple_statement_accounts');
+  // Printed after the last row it heads no rows, so none can be filed to the
+  // card under it: imported, as `main` imported it (review, 23 October).
+  const afterLastRow = adcbParse([adcbPage1, [...adcbPage2, 'Account Number 12345678901234']]);
+  ok('an account number after the last row of a page holding transactions heads no rows: imported to the card',
+    purchases(afterLastRow).length === 6 && afterLastRow.rejectedRows === 0 &&
+      afterLastRow.rows.every((row) => row.card?.last4 === '2280'),
+    brief(afterLastRow.rows));
   ok('still refuses: a bank account section with its own rows on a single-card statement',
     refusal(() => adcbParse([adcbPage1, [...adcbPage2.slice(0, -2), 'Account Number XXXXXXXX9031',
       '06/08/2026 SALARY TRANSFER 9,000.00 CR', ...adcbPage2.slice(-2)]])) === 'multiple_statement_accounts');
@@ -695,6 +703,222 @@ const refusal = (run) => { try { run(); return 'accepted'; } catch (error) { ret
         !read.rows.some((row) => row.date === '2026-09-12') && read.reconciliation.verdict === 'proven',
       JSON.stringify([brief(read.rows), read.reconciliation]));
   }
+
+  /* ── 8. Review of the port (23 October 2026) ────────────────────────── */
+  // A check that can only refuse never refuses what `main` reads right:
+  // where it cannot be certain its verdict is `unknown` and the rows import
+  // exactly as `main` reads them. A reader never imports a wrong amount: in
+  // doubt the row is refused and counted.
+  const movementsOf = (result) => result.rows.filter((row) => row.kind === 'transaction' || row.kind === 'cardPayment')
+    .map((row) => `${row.kind}:${row.type}:${row.amountFils}`).join(' ');
+  const accountHead = ['Statement of Account', 'Account Number 1012345678901'];
+  const accountRows = ['Date Description Amount', '02/09/2026 CARREFOUR DUBAI 1,200.00 DR', '05/09/2026 SALARY ACME 300.00 CR'];
+  const readsLikeMain = (result) => result.rejectedRows === 0 &&
+    movementsOf(result) === 'transaction:expense:120000 transaction:income:30000';
+  const verdictOf = (result) => JSON.stringify([brief(result.rows), result.rejectedRows, result.reconciliation]);
+  const cardHead = ['Credit Card Statement', 'Card Number 4111 XXXX XXXX 1234', 'Minimum Payment Due 100.00',
+    'Payment Due Date 25/10/2026'];
+
+  // 8.1 A line naming both balances anchors neither, and a value is taken
+  // only from a line holding exactly one figure.
+  for (const [name, summary, currency] of [
+    ['Opening Balance Debits Credits Closing Balance over its four values',
+      ['Opening Balance Debits Credits Closing Balance', '10,000.00 1,200.00 300.00 9,100.00'], 'AED'],
+    ['Opening Balance Closing Balance over its two values', ['Opening Balance Closing Balance', '5,000.00 4,100.00'], 'AED'],
+    ['الرصيد الافتتاحي الرصيد الختامي over its two values', ['الرصيد الافتتاحي الرصيد الختامي', '5,000.00 4,100.00'], 'AED'],
+    ['Opening Bal 5,000.00 Closing Bal 4,100.00 on one line', ['Opening Bal 5,000.00 Closing Bal 4,100.00'], 'AED'],
+    ['SAR-coded values under both labels', ['Opening Balance Closing Balance', 'SAR 5,000.00 SAR 4,100.00'], 'SAR'],
+  ]) {
+    const read = parseStatementLines([...accountHead, ...summary, ...accountRows].join('\n'), currency, { card: null }, 'day-first');
+    ok(`two balance labels on one line anchor neither, and the rows import as on main: ${name}`,
+      readsLikeMain(read) && read.reconciliation.verdict === 'unknown', verdictOf(read));
+  }
+  const cardColumns = parseStatementLines([...cardHead,
+    'Previous Balance Payments Purchases New Balance', '1,000.00 500.00 200.00 700.00',
+    'Transaction Date Description Amount', '02/09/2026 CARREFOUR DUBAI 200.00',
+    '05/09/2026 PAYMENT RECEIVED THANK YOU 500.00 CR',
+  ].join('\n'), 'AED', { card: null }, 'day-first');
+  ok('a card summary "Previous Balance Payments Purchases New Balance" anchors neither balance',
+    movementsOf(cardColumns) === 'transaction:expense:20000 cardPayment:expense:50000' &&
+      cardColumns.reconciliation.verdict === 'unknown', verdictOf(cardColumns));
+  for (const [name, summary] of [
+    ['four labels over four values', ['Opening Balance Debits Credits Closing Balance', '10,000.00 1,200.00 300.00 9,100.00']],
+    ['two labels over two values', ['Opening Balance Closing Balance', '5,000.00 4,100.00']],
+  ]) {
+    const read = await extractPdfStatementRows(pagedPdf([[...accountHead, ...summary, ...accountRows]]), 'AED', undefined, 'day-first');
+    ok(`an actual PDF whose summary names both balances on one line imports, never contradicted: ${name}`,
+      readsLikeMain(read) && read.reconciliation.verdict === 'unknown', verdictOf(read));
+  }
+  const stackedColumn = parseStatementLines([...cardHead,
+    'Previous Balance', 'Payments', 'Purchases', 'New Balance', '1,000.00', '500.00', '200.00', '700.00',
+    'Transaction Date Description Amount', 'Previous Balance 1,000.00', '02/09/2026 CARREFOUR DUBAI 200.00',
+    '05/09/2026 PAYMENT RECEIVED THANK YOU 500.00 CR',
+  ].join('\n'), 'AED', { card: null }, 'day-first');
+  ok('labels stacked over a column of values pair none of them by position',
+    movementsOf(stackedColumn) === 'transaction:expense:20000 cardPayment:expense:50000' &&
+      stackedColumn.reconciliation.verdict === 'unknown', verdictOf(stackedColumn));
+  const otherLabelBetween = parseStatementLines([...accountHead, 'Opening Balance 5,000.00',
+    'Closing Balance', 'Available Balance', '3,000.00', ...accountRows].join('\n'), 'AED', { card: null }, 'day-first');
+  ok('a value under another label is not this label\'s',
+    readsLikeMain(otherLabelBetween) && otherLabelBetween.reconciliation.verdict === 'unknown', verdictOf(otherLabelBetween));
+  const currentBalance = parseStatementLines([...accountHead, 'Current Balance 3,000.00', 'Opening Balance 5,000.00',
+    ...accountRows].join('\n'), 'AED', { card: null }, 'day-first');
+  ok('a header "Current Balance" (the balance on the day printed) is no closing anchor',
+    readsLikeMain(currentBalance) && currentBalance.reconciliation.verdict === 'unknown', verdictOf(currentBalance));
+  const bilingualBox = parseStatementLines(['Credit Card Statement', 'Credit Limit 50,000.00', 'Minimum Amount Due 500.00',
+    'Opening Balance 1,000.00', 'Date Description Amount', '09/08/2026 SHOP ONE DUBAI AE 100.00',
+    'Total Outstanding', 'إجمالي المبلغ القائم', '(', 'AED 1,100.00',
+  ].join('\n'), 'AED', { card: null }, 'day-first');
+  ok('a stacked bilingual box (label, Arabic twin, bracket, value) still proves',
+    bilingualBox.reconciliation.verdict === 'proven' && bilingualBox.reconciliation.closingMinor === 110000,
+    verdictOf(bilingualBox));
+
+  // 8.2 The arithmetic follows the parser's own card decision, and is
+  // `unknown` where the statement's wording says both.
+  const creditCardLabelOnly = parseStatementLines(['Northbank', 'Credit Card Number 4111 XXXX XXXX 1234',
+    'Payment Due Date 25/10/2026', 'Total Amount Due 700.00', 'Previous Balance 1,000.00', 'Date Description Amount',
+    '02/09/2026 CARREFOUR DUBAI 200.00 DR', '05/09/2026 PAYMENT RECEIVED THANK YOU 500.00 CR', 'New Balance 700.00',
+  ].join('\n'), 'AED', { card: null }, 'day-first');
+  ok('a card proven only by its "Credit Card Number" is checked as the card its rows were read as',
+    movementsOf(creditCardLabelOnly) === 'transaction:expense:20000 cardPayment:expense:50000' &&
+      creditCardLabelOnly.reconciliation.verdict === 'proven' && creditCardLabelOnly.reconciliation.openingMinor === 100000 &&
+      creditCardLabelOnly.reconciliation.closingMinor === 70000, verdictOf(creditCardLabelOnly));
+  const balances = ['Opening Balance 5,000.00', ...accountRows, 'Closing Balance 4,100.00'];
+  const debitCardAccount = await extractPdfStatementRows(pagedPdf([[...accountHead,
+    'Debit Card Number XXXX XXXX XXXX 5521', 'Statement Date 30/09/2026', ...balances]]), 'AED', undefined, 'day-first');
+  ok('an account statement naming its debit card beside a statement date is never checked as a card',
+    readsLikeMain(debitCardAccount) && debitCardAccount.reconciliation.verdict === 'unknown', verdictOf(debitCardAccount));
+  const overdraftLines = [...accountHead, 'Statement Period 01/09/2026 to 30/09/2026', 'Overdraft Credit Limit 10,000.00', ...balances];
+  const overdraft = parseStatementLines(overdraftLines.join('\n'), 'AED', { card: null }, 'day-first');
+  const overdraftPdf = await extractPdfStatementRows(pagedPdf([overdraftLines]), 'AED', undefined, 'day-first');
+  ok('an account with an overdraft credit limit and a statement period is never checked as a card (text and PDF)',
+    readsLikeMain(overdraft) && overdraft.reconciliation.verdict === 'unknown' &&
+      readsLikeMain(overdraftPdf) && overdraftPdf.reconciliation.verdict === 'unknown',
+    `${verdictOf(overdraft)} ${verdictOf(overdraftPdf)}`);
+  const oneMarker = parseStatementLines(['Northbank', 'Credit Limit 50,000.00', 'Previous Balance 1,000.00',
+    'Date Description Amount', '02/09/2026 CARREFOUR DUBAI 200.00 DR', '05/09/2026 REFUND NOON 500.00 CR', 'New Balance 700.00',
+  ].join('\n'), 'AED', { card: null }, 'day-first');
+  ok('a statement read as an account that carries a card marker is unknown, not checked as an account',
+    oneMarker.rows.length === 2 && oneMarker.reconciliation.verdict === 'unknown', verdictOf(oneMarker));
+  for (const head of [['Statement of Account', 'MR SAMPLE'], accountHead]) {
+    const paidCard = parseStatementLines([...head, 'Opening Balance 5,000.00', 'Date Description Amount',
+      '02/09/2026 PAYMENT TO CREDIT CARD NUMBER 4111 XXXX XXXX 1234 1,200.00 DR', '05/09/2026 SALARY ACME 300.00 CR',
+      'Closing Balance 4,100.00'].join('\n'), 'AED', { card: null }, 'day-first');
+    ok(`a credit card number named only inside a row never makes the check treat an account as a card (${head[1]})`,
+      paidCard.rows.length === 2 && paidCard.rejectedRows === 0 && paidCard.reconciliation.verdict !== 'contradicted',
+      verdictOf(paidCard));
+  }
+
+  // 8.3 On a card, a balance whose only direction is a sign is no anchor,
+  // unless the statement's own legend says what a minus balance means.
+  const overpaidClose = parseStatementLines([...cardHead.slice(0, 2), 'Minimum Payment Due 0.00', 'Payment Due Date 25/10/2026',
+    'Previous Balance 100.00', 'New Balance -50.00', 'Transaction Date Description Amount',
+    '05/09/2026 PAYMENT RECEIVED THANK YOU 150.00 CR',
+  ].join('\n'), 'AED', { card: null }, 'day-first');
+  ok('an overpaid card printing "New Balance -50.00" is unknown, never read as 50.00 owed',
+    movementsOf(overpaidClose) === 'cardPayment:expense:15000' && overpaidClose.reconciliation.verdict === 'unknown',
+    verdictOf(overpaidClose));
+  const overpaidOpen = parseStatementLines([...cardHead.slice(0, 2), 'Minimum Payment Due 10.00', 'Payment Due Date 25/10/2026',
+    'Previous Balance -50.00', 'New Balance 150.00', 'Transaction Date Description Amount', '05/09/2026 CARREFOUR DUBAI 200.00 DR',
+  ].join('\n'), 'AED', { card: null }, 'day-first');
+  ok('a card opening at "Previous Balance -50.00" is unknown, never read as 50.00 owed',
+    movementsOf(overpaidOpen) === 'transaction:expense:20000' && overpaidOpen.reconciliation.verdict === 'unknown',
+    verdictOf(overpaidOpen));
+  const overpaidPdf = await extractPdfStatementRows(pagedPdf([['Credit Card Statement', 'Card Number XXXX XXXX XXXX 1234',
+    'Minimum Payment Due 0.00', 'Payment Due Date 10/25/2026', 'Previous Balance 100.00', 'New Balance -50.00',
+    'Date Description Amount', '09/05/2026 PAYMENT THANK YOU 150.00 CR']]), 'USD', undefined, 'month-first');
+  ok('…and through an actual PDF',
+    movementsOf(overpaidPdf) === 'cardPayment:expense:15000' && overpaidPdf.reconciliation.verdict === 'unknown',
+    verdictOf(overpaidPdf));
+  const usOverpaid = (legend) => extractPdfStatementRows(pagedPdf([['ACCOUNT SUMMARY',
+    'Account Number: XXXX XXXX XXXX 4321', 'Statement Date 09/27/2026', 'Previous Balance $100.00', 'New Balance -$50.00',
+    'Minimum Payment Due $0.00', 'Credit Limit $5,000.00', ...legend, 'Date Description Amount',
+    '09/05/2026 STARBUCKS STORE 12345 5.00', '09/10/2026 Payment Thank You-Mobile -155.00']]), 'USD', undefined, 'month-first');
+  const withLegend = await usOverpaid(['Payments and credits are shown as negative.',
+    'A negative New Balance indicates a credit balance.']);
+  ok('a card whose legend says a negative balance is a credit balance reads -$50.00 as 50.00 in credit, and proves',
+    withLegend.rows.length === 2 && withLegend.reconciliation.verdict === 'proven' &&
+      withLegend.reconciliation.openingMinor === 10000 && withLegend.reconciliation.closingMinor === -5000,
+    verdictOf(withLegend));
+  const rowLegendOnly = await usOverpaid(['Payments and credits are shown as negative.']);
+  ok('a legend for the rows alone says nothing about the balance: unknown',
+    rowLegendOnly.rows.length === 2 && rowLegendOnly.reconciliation.verdict === 'unknown', verdictOf(rowLegendOnly));
+  const overdrawnOpening = parseStatementLines([...accountHead, 'Opening Balance -100.00', 'Date Description Amount',
+    '05/09/2026 SALARY ACME 300.00 CR', 'Closing Balance 200.00'].join('\n'), 'AED', { card: null }, 'day-first');
+  ok('an account\'s minus balance is an overdraft, and proves',
+    overdrawnOpening.reconciliation.verdict === 'proven' && overdrawnOpening.reconciliation.openingMinor === -10000,
+    verdictOf(overdrawnOpening));
+
+  // 8.4 A single card account with the card ACCOUNT's number in its header
+  // (ADCB style): imported, as `main` imported it, in any file type.
+  const cardAccountPage = [
+    'Credit Card Statement', 'Card Number XXXXXXXXXXXX2280', 'Account Number 0101234567890',
+    'Statement Date 05/08/26', 'Payment Due Date 30/08/26', 'Minimum Payment Due 189.16', 'Total Outstanding 1,440.00',
+    'Transaction Date Transaction Description Amount in AED',
+    'Card No : XXXXXXXXXXXX2280 - CARDHOLDER NAME',
+    '26/07/2026 DING MIDDLE EAST DUBAI ARE 30.00',
+    '27/07/2026 EMIRATES.CO 2213836991 DUBAI ARE 1410.00',
+  ];
+  const onCard = (result, count) => purchases(result).length === count && result.rejectedRows === 0 &&
+    result.rows.every((row) => row.card?.last4 === '2280');
+  const headerAccountText = parseStatementLines(cardAccountPage.join('\n'), 'AED', { card: null }, 'day-first');
+  const headerAccountPdf = await extractPdfStatementRows(pagedPdf([cardAccountPage]), 'AED', undefined, 'day-first');
+  ok('a single card with its card account\'s number in the header imports to the card (text and single-page PDF)',
+    onCard(headerAccountText, 2) && onCard(headerAccountPdf, 2) &&
+      headerAccountText.rows.some((row) => row.kind === 'cardStatement' && row.amountFils === 144000),
+    `${brief(headerAccountText.rows)} ${brief(headerAccountPdf.rows)}`);
+  const noSection = parseStatementLines(cardAccountPage.filter((line) => !line.startsWith('Card No')).join('\n'),
+    'AED', { card: null }, 'day-first');
+  ok('…and without a cardholder section line above the rows', onCard(noSection, 2), brief(noSection.rows));
+  const repeatedHeader = parseStatementLines([...cardAccountPage, 'Page 1 of 2',
+    'Card Number XXXXXXXXXXXX2280', 'Account Number 0101234567890', 'Transaction Date Transaction Description Amount in AED',
+    '28/07/2026 CARREFOUR ABU DHABI ARE 50.00', 'Page 2 of 2'].join('\n'), 'AED', { card: null }, 'day-first');
+  ok('…and with that header repeated over a later page of rows', onCard(repeatedHeader, 3), brief(repeatedHeader.rows));
+  ok('still refuses: an account number heading rows of its own among a single card\'s rows (no page evidence)',
+    refusal(() => parseStatementLines([...cardAccountPage.filter((line) => !line.startsWith('Account Number')),
+      'Account Number 12345678901234', '29/07/2026 SALARY TRANSFER 9,000.00 CR'].join('\n'), 'AED', { card: null }, 'day-first'))
+      === 'multiple_statement_accounts');
+  ok('still refuses: an account section printed right under a cardholder section line',
+    refusal(() => parseStatementLines([...cardAccountPage.filter((line) => !line.startsWith('Account Number')),
+      'Card No : XXXXXXXXXXXX2280 - SUPPLEMENTARY NAME', 'Account Number 12345678901234',
+      '29/07/2026 SALARY TRANSFER 9,000.00 CR'].join('\n'), 'AED', { card: null }, 'day-first')) === 'multiple_statement_accounts');
+  ok('still refuses: the header\'s own account number heading rows of its own later',
+    refusal(() => parseStatementLines([...cardAccountPage, 'Account Number 0101234567890',
+      '29/07/2026 SALARY TRANSFER 9,000.00 CR'].join('\n'), 'AED', { card: null }, 'day-first')) === 'multiple_statement_accounts');
+
+  // 8.5 A card table's two marked figures are its original and charged
+  // amounts; it prints no running balance. Read at the charge, as on main.
+  const fxCard = (extra) => parseStatementLines(['Credit Card Statement', 'Card Number XXXXXXXXXXXX4821',
+    'Minimum Payment Due 50.00', 'Payment Due Date 25/10/2026', ...extra].join('\n'), 'AED', { card: null }, 'day-first');
+  const fxNoBalances = fxCard(['Transaction Date Description Original Amount Amount',
+    '01/09/2026 SHOP ONE 40.00 DR 40.00 DR', '02/09/2026 SPOTIFY STOCKHOLM 20.00 DR 73.60 DR',
+    '03/09/2026 HOTEL PARIS 100.00 DR 395.10 DR', '04/09/2026 GYM DUBAI 100.00 DR 105.00 DR',
+    '05/09/2026 REFUND SHOP 101.75 CR 101.75 CR']);
+  ok('a two-marked-column card table files every FX and VAT row at its charge, none refused',
+    movementsOf(fxNoBalances) === 'transaction:expense:4000 transaction:expense:7360 transaction:expense:39510 ' +
+      'transaction:expense:10500 transaction:income:10175' && fxNoBalances.rejectedRows === 0, verdictOf(fxNoBalances));
+  const coincidence = ['01/09/2026 SHOP ONE 53.60 DR 53.60 DR', '02/09/2026 SPOTIFY STOCKHOLM 20.00 DR 73.60 DR'];
+  const fxWithBalances = fxCard(['Previous Balance 0.00', ...coincidence, 'Total Outstanding 127.20']);
+  ok('a charge equal to the running total of the rows before it is still filed at the charge, and proves',
+    movementsOf(fxWithBalances) === 'transaction:expense:5360 transaction:expense:7360' &&
+      fxWithBalances.reconciliation.verdict === 'proven', verdictOf(fxWithBalances));
+  const fxBare = fxCard(coincidence);
+  ok('…and with no stated balance to catch it, never at its original figure',
+    movementsOf(fxBare) === 'transaction:expense:5360 transaction:expense:7360', verdictOf(fxBare));
+  const accountCoincidence = parseStatementLines([...accountHead, 'Opening Balance 0.00', ...coincidence].join('\n'),
+    'AED', { card: null }, 'day-first');
+  ok('on an account the same figure twice seeds no step, even from a stated zero: the next row is refused, never 20.00',
+    accountCoincidence.rows.length === 1 && accountCoincidence.rows[0].amountFils === 5360 &&
+      accountCoincidence.rejectedRows === 1, verdictOf(accountCoincidence));
+  const accountOriginalColumns = parseStatementLines([...accountHead, 'Opening Balance 0.00',
+    'Date Description Original Amount Amount', ...coincidence].join('\n'), 'AED', { card: null }, 'day-first');
+  ok('under a header naming an original amount column the two figures are two amounts, read at the charge',
+    movementsOf(accountOriginalColumns) === 'transaction:expense:5360 transaction:expense:7360' &&
+      accountOriginalColumns.rejectedRows === 0, verdictOf(accountOriginalColumns));
+  const cardRunningBalance = fxCard(['Previous Balance 1,000.00 DR', '01/09/2026 AMAZON 50.00 DR 1,050.00 DR',
+    '05/09/2026 PAYMENT RECEIVED THANK YOU 500.00 CR 550.00 DR', 'New Balance 550.00 DR']);
+  ok('a card printing a marked owed balance beside each amount is read as main reads it, and its own balances refuse that read',
+    cardRunningBalance.reconciliation.verdict === 'contradicted', verdictOf(cardRunningBalance));
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
