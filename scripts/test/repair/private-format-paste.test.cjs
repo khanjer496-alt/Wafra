@@ -61,6 +61,7 @@ async function harness(options = {}) {
   const f = await fixture(options);
   const h = createWorkflowHarness({ platform: options.platform ?? 'android', params: { manual: '1' }, empty: true,
     state: { language: 'en', country: options.country ?? 'GB', marketId: options.market ?? 'ZZ', privateMode: true,
+      ...(options.onboarded === undefined ? {} : { onboarded: options.onboarded }),
       ledgerMoney: { schemaVersion: 2, currency: options.currency ?? 'GBP', exponent: 2 }, merchantOverrides: {}, billAliases: {},
       lastScanTs: 0, privateAlertFormats: f.formats, statementCoverage: [], accountHints: {}, localCaptureQualifications: [] } });
   const d = h.deps;
@@ -293,4 +294,24 @@ test('mixed paste cancellation clears the pending parsed row and preview copies 
   assert.ok(plan.batch.transactions.every(row => row.raw === undefined));
   assert.equal(h.store.state.transactions[0].raw, 'Stored source remains owned by the ledger');
   h.keyGate.resolve(); await pending; assert.equal(h.stages.length, 0); assert.equal(h.imports.length, 0);
+});
+
+// iOS 15 first run opens this form from setup (no automatic capture there).
+// The onboarding gate steps aside for /import-sms only, so links onward wait
+// until onboarding is finished; the pasted Review itself is still staged.
+test('first run keeps the paste form from linking past the onboarding gate', async () => {
+  const words = d => ({ teach: d['@/lib/private-alert-format-copy'].privateAlertFormatCopy('en').teachABankFormat });
+  const reviewButton = (h, tree) => walk(tree).find(node => node.type === 'Button' && typeof node.props.label === 'string' &&
+    node.props.label === h.deps['@/lib/i18n'].tf('genericReviewCount', { count: 1, s: '' }));
+  for (const onboarded of [false, true]) {
+    const h = await harness({ platform: 'ios', onboarded });
+    const teach = walk(h.render()).find(node => node.props?.testID === 'import-teach-format');
+    assert.equal(Boolean(teach), onboarded, `teach a format ${onboarded ? 'shown' : 'hidden'}`);
+    if (teach) assert.equal(teach.props.label, words(h.deps).teach);
+    h.type(NEXT); await h.parse();
+    const tree = await h.settle();
+    assert.equal(h.stages.length, 1, 'the pasted Review is staged either way');
+    assert.equal(Boolean(reviewButton(h, tree)), onboarded, `review link ${onboarded ? 'shown' : 'hidden'}`);
+    assert.deepEqual(h.routes ?? [], []);
+  }
 });

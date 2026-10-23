@@ -26,6 +26,7 @@ import { Fonts, Spacing } from '@/constants/theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { getLanguage, t, tf, type StringKey } from '@/lib/i18n';
 import { isIosCaptureAttemptId, IOS_LOCAL_CAPTURE_SHORTCUT_NAME } from '@/lib/ios-local-capture-protocol';
+import { beginIosStatementHandoff } from '@/lib/ios-statement-handoff';
 import { iosShortcutSetupCopy } from '@/lib/ios-shortcut-setup-copy';
 import {
   completeIosMessageOnboardingAttempt,
@@ -625,6 +626,16 @@ export default function IosSetupScreen() {
   const chooseMessageCapture = () => {
     setShowAutomationGuide(false);
     setViewSource('message');
+  };
+  // iOS 15 cannot run App Intents, so statements and pasted messages are the
+  // way in. First run authorises the importer with a one-time handoff token,
+  // as the paging screen does; /import-sms is already a setup route.
+  const openStatementImport = () => {
+    router.push({ pathname: '/statement-import', params: fromOnboarding
+      ? { fromOnboarding: '1', statementSession: beginIosStatementHandoff() } : {} });
+  };
+  const openPasteImport = () => {
+    router.push({ pathname: '/import-sms', params: { manual: '1' } });
   };
 
   const confirmAutomation = useCallback(() => {
@@ -1250,7 +1261,12 @@ export default function IosSetupScreen() {
                   <EButton palette={band} label={t('iosNotificationChooseSms')} variant="quiet" onPress={chooseMessageCapture} disabled={busy} />
                 </SetupStep>
               ) : !setup.supported ? (
-                <SetupResult palette={band} tone="info" title={t('iosLocalUnsupported')} />
+                <View testID="ios-capture-unsupported" style={styles.actions}>
+                  <SetupResult palette={band} tone="info" title={t('iosLocalUnsupported')} body={t('iosLocalUnsupportedBody')} />
+                  <EButton palette={band} label={t('iosLocalUnsupportedStatement')} onPress={openStatementImport} disabled={busy} />
+                  <EButton palette={band} label={t('iosLocalUnsupportedPaste')} variant="secondary" onPress={openPasteImport}
+                    disabled={busy} />
+                </View>
               ) : setup.failure === 'load' ? (
                 <SetupResult palette={band} tone="fail" title={t('iosLocalUpdateRequired')} />
               ) : legacyUpgrade && !showAutomationGuide ? (

@@ -730,7 +730,8 @@ ok(
 ok(
   'web preview offers manual tracking without a nonfunctional automatic choice',
   /\{Platform\.OS === 'android' \? <>/.test(gateSource) &&
-    /\{Platform\.OS !== 'web' && !previewMode \? <SourceRow palette=\{stepBand\} icon="upload"/.test(gateSource) &&
+    // On iOS 15 the statements row is step 5's primary action until one is in.
+    /\{Platform\.OS !== 'web' && !previewMode && \(!iosCaptureUnsupported \|\| iosImported\) \? <SourceRow palette=\{stepBand\} icon="upload"/.test(gateSource) &&
     /<SourceRow palette=\{stepBand\} icon="plus" title=\{words\.addByHand\}[\s\S]{0,160}runSetupAction\(continueManually\)/.test(gateSource) &&
     /Platform\.OS === 'android' \? words\.captureBodyAndroid : words\.captureBodyWeb/.test(gateSource),
 );

@@ -121,6 +121,10 @@ async function screen(t, options = {}) {
     '@/lib/capture': { getIosCaptureNativeModule: () => controls.nativeAvailable ? native : null,
       subscribeIosCaptureStatusRefresh: () => () => {} },
   });
+  // The real one-time token the onboarding gate checks before stepping aside.
+  const statementHandoff = source('src/lib/ios-statement-handoff.ts', {
+    'expo-crypto': { randomUUID: () => 'setup-statement-handoff' },
+  });
   const router = {
     push: value => routes.push(['push', value]), replace: value => routes.push(['replace', value]),
     navigate: value => routes.push(['navigate', value]),
@@ -176,6 +180,7 @@ async function screen(t, options = {}) {
     '@/lib/ios-history-setup': history, '@/lib/ios-message-onboarding': progress,
     '@/lib/ios-shortcut-setup-copy': source('src/lib/ios-shortcut-setup-copy.ts'),
     '@/lib/ios-setup-journey': journey, '@/lib/ios-paged-setup': source('src/lib/ios-paged-setup.ts'),
+    '@/lib/ios-statement-handoff': statementHandoff,
     '@/lib/growth-funnel': { GROWTH_PLACEMENTS: { onboarding: 'onboarding_main' }, trackGrowthEvent: (...args) => growth.push(args) },
     // Real module, with only the two surfaces this harness pins overridden —
     // a hand-listed stub silently drops functions setup later starts calling.
@@ -227,7 +232,7 @@ async function screen(t, options = {}) {
   t.after(dispose);
   await flush();
   return {
-    all, button, press, flush, values, controls, nativeStatus, receipts, routes, urls, discards, storageEvents,
+    all, button, press, flush, values, controls, nativeStatus, receipts, routes, urls, discards, storageEvents, statementHandoff,
     get dismissals() { return dismissals; },
     growth, announcements, store, copy, dispose, history, progress,
     saved: () => JSON.parse(values.get(PROGRESS)),
@@ -276,6 +281,10 @@ async function screen(t, options = {}) {
   };
 }
 
+module.exports = { screen };
+
+// Run as its own suite; other journeys reuse the harness above (ios15-capture-fallback).
+if (require.main === module) {
 const ready = { futureShortcutConfirmed: true, futureAutomationConfirmed: true,
   futureStatus: 'complete', historyStatus: 'skipped', historySkippedForNow: true };
 const proven = { enabled: true, setupProofVersion: 1 };
@@ -1135,3 +1144,4 @@ test('successful refreshes do not erase a real onboarding progress-write failure
   assert.ok(s.text().includes(s.copy.t('iosMessageFinishFailed')), 'reading progress cannot prove a failed write committed');
   assert.equal(s.onboarded, false);
 });
+}

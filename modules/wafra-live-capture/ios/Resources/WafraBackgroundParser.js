@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 0fd81b2831ed5cf4e21bf005119262e1bcdb93c123d6ed0a38a1f80ae2fa3c13
+// Generated from normal shipping TypeScript. Source SHA-256: bd3f30215058cb56bd2a0122d453bfe42a50881f5dc591f5dac7abdfba87d355
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -6763,6 +6763,27 @@ const S = {
         en: 'Set up',
         ar: 'إعداد',
     },
+    onboardLiveUnsupportedTitle: {
+        en: 'Start with your statements',
+        ar: 'ابدأ بكشوف حسابك',
+    },
+    onboardLiveUnsupportedBody: {
+        en: 'Automatic capture needs iOS 16 or later. Import a bank statement to bring in your transactions, or paste bank messages as they arrive.',
+        ar: 'يتطلب الالتقاط التلقائي iOS 16 أو أحدث. استورد كشف حساب بنكي لإضافة عملياتك، أو الصق رسائل البنك عند وصولها.',
+    },
+    onboardPasteMessagesBody: {
+        en: 'Paste a bank text into Wafra. No setup needed.',
+        ar: 'الصق رسالة البنك في وفرة. لا يلزم أي إعداد.',
+    },
+    onboardManualIosUnsupportedBody: {
+        en: 'Add entries yourself. Statements and pasting stay available.',
+        ar: 'أضف العمليات بنفسك. يبقى استيراد الكشوف واللصق متاحاً.',
+    },
+    onboardIosImportedTitle: { en: 'Your transactions are in.', ar: 'وصلت عملياتك إلى وفرة.' },
+    onboardIosImportedBody: {
+        en: 'Add more any time from Accounts: import another statement, or paste bank messages.',
+        ar: 'أضف المزيد متى شئت من الحسابات: استورد كشف حساب آخر، أو الصق رسائل البنك.',
+    },
     onboardNotNow: {
         en: 'Not now',
         ar: 'ليس الآن',
@@ -7620,7 +7641,13 @@ const S = {
         en: 'This build can’t add the shortcut. Update Wafra.',
         ar: 'لا يمكن لهذا الإصدار إضافة الاختصار. حدّث وفرة.',
     },
-    iosLocalUnsupported: { en: 'Requires iOS 16 or later.', ar: 'يتطلب iOS 16 أو أحدث.' },
+    iosLocalUnsupported: { en: 'Automatic capture needs iOS 16 or later', ar: 'يتطلب الالتقاط التلقائي iOS 16 أو أحدث' },
+    iosLocalUnsupportedBody: {
+        en: 'You can still bring in your transactions on this iPhone: import a bank statement, or paste bank messages as they arrive.',
+        ar: 'لا يزال بإمكانك إضافة عملياتك على هذا الآيفون: استورد كشف حساب بنكي، أو الصق رسائل البنك عند وصولها.',
+    },
+    iosLocalUnsupportedStatement: { en: 'Import a statement', ar: 'استيراد كشف حساب' },
+    iosLocalUnsupportedPaste: { en: 'Paste bank messages', ar: 'لصق رسائل البنك' },
     iosLocalUpdateRequired: {
         en: 'This version can’t capture messages. Update Wafra.',
         ar: 'هذا الإصدار لا يلتقط الرسائل. حدّث وفرة.',
