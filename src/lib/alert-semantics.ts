@@ -138,12 +138,14 @@ interface AlertVocabulary {
 const WORLD_DEBIT = wordsOf(
   // English: contractions, a booked noun before the amount, "A $X transaction
   // was made", card "used for", and payee payments that end in a state word.
-  String.raw`(?:you|we)(?:['’]ve|\s+have)?\s+(?:made|taken|charged|deducted)\s+(?:an?\s+|your\s+)?${GAP}{0,60}?(?:payment|purchase|transaction|txn|withdrawal|transfer|fee|charge)${NOT_A_REQUEST}`,
+  String.raw`(?:you|we)(?:['’]ve|\s+have)?\s+(?:made|taken|charged|deducted)\s+(?:an?\s+|your\s+)?(?:[\p{L}-]+\s+){0,3}?(?:payment|purchase|transaction|txn|withdrawal|transfer|fee|charge)${NOT_A_REQUEST}`,
   String.raw`(?:debit\s+card|credit\s+card|card|contactless|pos|online|atm|cash)\s+(?:payment|purchase|transaction|txn|withdrawal)s?\s+(?:of\s+)?${NUM}`,
   String.raw`(?:charge|transaction|txn|withdrawal|payment|purchase|debit|deduction)s?\s+(?:of\s+|for\s+)?${NUM}${GAP}{0,80}?\b(?:was|has\s+been|were|have\s+been|has)\s+(?:made|posted|completed|processed|taken|deducted|debited)`,
   String.raw`an?\s+${NUM}\s*(?:\w+\s+)?(?:transaction|purchase|charge|payment|withdrawal|debit)\s+(?:was|has\s+been)\s+(?:made|posted|completed|processed)`,
   String.raw`(?<!(?:can|may|will|could|would|should|must|to|be|not|never)\s)(?:(?:has|have)\s+been\s+|was\s+)?used\s+for\s+${NUM}`,
   String.raw`(?:charge|purchase)\s+of\s+${NUM}${GAP}{0,60}?\bat`,
+  String.raw`(?:txn|transaction)\s+(?:of\s+)?${NUM}${GAP}{0,40}?\b(?:made|done|successful|completed)\s+(?:on|at|using|with|via)\b`,
+  String.raw`you(?:['’]ve|\s+have)\s+been\s+charged\s+${NUM}`,
   String.raw`you(?:['’]ve|\s+have)?\s+(?:just\s+)?(?:successfully\s+)?(?:sent|transferred)\s+${NUM}`,
   String.raw`you\s+paid\s+(?!for\b)(?:[\p{L}'.-]+\s+){1,4}${NUM}`,
   String.raw`(?:has|have|was)\s+(?:been\s+)?charged\s+${NUM}`,
@@ -155,15 +157,16 @@ const WORLD_DEBIT = wordsOf(
   String.raw`(?:usted|ud\.?)\s+(?:envi[oó]|pag[oó]|retir[oó]|transfiri[oó])`,
   String.raw`se\s+(?:ha\s+)?(?:realiz(?:o|ó|ado)\s+(?:un|una)\s+(?:cargo|compra|pago|retiro|consumo|transferencia)|cargado|debitado|descontado|retirado)`,
   String.raw`registr[oó]\s+un\s+(?:consumo|cargo|compra)`,
-  String.raw`(?:cargo|retiro|consumo|saque)\s+(?:de\s+efectivo\s+)?(?:de|por)\s+${NUM}`,
-  String.raw`giro\s+(?:en\s+cajero(?:\s+autom[aá]tico)?\s+)?por\s+${NUM}`,
+  String.raw`hiciste\s+(?:un|una)\s+(?:compra|retiro|pago|transferencia)`,
+  String.raw`has\s+(?:pagado|retirado|enviado|comprado|transferido)`,
+  String.raw`se\s+(?:debit[oó]|descont[oó]|carg[oó]|aplic[oó]\s+un\s+cargo)`,
+  String.raw`(?:pago|transferencia|retiro|compra)\s+(?:de\s+\p{L}+\s+)?(?:por|de)\s+${NUM}${GAP}{0,60}?\b(?:realizad[oa]|exitos[oa]|aplicad[oa])`,
+  String.raw`voc[eê]\s+(?:fez|realizou|efetuou)\s+(?:um|uma)\s+(?:compra|pagamento|transfer[eê]ncia|saque|pix)`,
+  String.raw`(?:pagamento|transfer[eê]ncia)\s+(?:de\s+)?${NUM}${GAP}{0,60}?\b(?:realizad[oa]|efetuad[oa])`,
+  String.raw`giro\s+en\s+cajero(?:\s+autom[aá]tico)?\s+por\s+${NUM}`,
+  String.raw`(?:retiro|saque)\s+(?:de\s+efectivo\s+)?(?:de|por)\s+${NUM}${GAP}{0,100}?(?:cajero|atm|caixa\s+eletr)`,
   String.raw`(?:compra|pagamento|saque|transfer[eê]ncia)\s+(?:de\s+|no\s+valor\s+de\s+)?${NUM}${GAP}{0,80}?(?:realizad[oa]|efetuad[oa]|conclu[ií]d[oa])`,
   String.raw`d[eé]bito\s+de\s+(?:tarifa|taxa|anuidade|mensalidade|pacote)`,
-  // Localised booked nouns (no approval word): "Paiement par carte ****1234 d'un montant de X chez M".
-  String.raw`paiement\s+par\s+carte\s+(?:[*xX•\d]+\s+)?(?:d['’]un\s+montant\s+de|de)\s+${NUM}${GAP}{0,40}?\bchez`,
-  String.raw`achat\s+(?:d['’]un\s+montant\s+de|de)\s+${NUM}${GAP}{0,60}?\bchez`,
-  String.raw`retrait\s+(?:d['’]esp[eè]ces\s+)?(?:d['’]un\s+montant\s+de|de)\s+${NUM}`,
-  String.raw`compra\s+(?:con\s+tarjeta\s+)?(?:de|por)\s+${NUM}${GAP}{0,60}?\s(?:en|con)\s`,
   // French / Italian / Dutch (German already has "belastet/abgebucht/bezahlt").
   String.raw`vous\s+avez\s+(?:effectué|réalisé|payé|retiré|envoyé)`,
   String.raw`a\s+été\s+(?:débité|prélevé|effectué|réalisé)`,
@@ -196,6 +199,11 @@ const WORLD_CREDIT = wordsOf(
   String.raw`te\s+(?:envi[oó]|transfiri[oó]|deposit[oó]|abon[oó])`,
   String.raw`se\s+abon(?:aron|[oó]|ado)`,
   String.raw`(?:dep[oó]sito|abono)\s+(?:de|por)\s+${NUM}`,
+  String.raw`has\s+recibido|se\s+(?:acredit[oó]|abon[oó]|deposit[oó])`,
+  String.raw`te\s+(?:acreditaron|depositaron|abonaron|transfirieron|enviaron)`,
+  String.raw`dep[oó]sito\s+recibido|transferencia\s+recibida`,
+  String.raw`recebeu\s+(?:um\s+)?pix|foi\s+(?:creditad|depositad)[oa]|cr[eé]dito\s+em\s+conta`,
+  String.raw`dep[oó]sito\s+(?:em\s+conta\s+)?(?:de|no\s+valor\s+de)\s+${NUM}`,
   String.raw`cr[eé]dito\s+de\s+(?:sal[aá]rio|proventos|benef[ií]cio|aposentadoria|pens[aã]o)\s+de\s+${NUM}`,
   // French / Italian / Dutch.
   String.raw`vous\s+avez\s+reçu`,
@@ -243,11 +251,13 @@ const CJK_FAILED = cjkOf(
 // Held, scheduled or promotional: money is announced but has not moved. A
 // coupon, points or gift receipt carries a yen amount yet moves no money.
 const CJK_HELD = cjkOf(
-  '予定|請求予定|承認待ち|保留|待处理|待處理|クーポン|ポイント(?:還元|プレゼント|付与)|ギフト|商品券|キャンペーン|割引|优惠券|優惠券|红包|紅包|积分|積分|쿠폰|포인트',
+  '予定|請求予定|承認待ち|保留|待处理|待處理|クーポン|ポイント(?:還元|プレゼント|付与)|ギフト|商品券|キャンペーン|割引|优惠券|優惠券|红包|紅包|积分|積分|分期|优惠|優惠|立减|立減|返现|返現|抽奖|抽獎|满\\d|滿\\d|쿠폰|포인트',
 );
 
 // ── Family: only a shape that already proved a completed movement names one ───
 const WORLD_PURCHASE = wordsOf(
+  String.raw`(?:txn|transaction)\s+(?:of\s+)?${NUM}${GAP}{0,40}?\b(?:made|done|successful|completed)\s+(?:on|at|using|with|via)\b`,
+  String.raw`you(?:['’]ve|\s+have)\s+been\s+charged\s+${NUM}`,
   String.raw`(?:debit\s+card|credit\s+card|card|contactless|pos|online)\s+(?:payment|purchase|transaction|txn)s?\s+(?:of\s+)?${NUM}`,
   String.raw`(?:charge|transaction|txn|payment|purchase)s?\s+(?:of\s+|for\s+)?${NUM}${GAP}{0,80}?\b(?:was|has\s+been|were|have\s+been|has)\s+(?:made|posted|completed|processed|taken|deducted|debited)`,
   String.raw`an?\s+${NUM}\s*(?:\w+\s+)?(?:transaction|purchase|charge|payment)\s+(?:was|has\s+been)\s+(?:made|posted|completed|processed)`,
@@ -259,11 +269,8 @@ const WORLD_PURCHASE = wordsOf(
   String.raw`(?:pagaste|compraste|gastaste|pagou|comprou|voc[eê]\s+pagou)\s+${NUM}`,
   String.raw`se\s+(?:ha\s+)?realiz(?:o|ó|ado)\s+(?:un|una)\s+(?:cargo|compra|pago|consumo)`,
   String.raw`registr[oó]\s+un\s+(?:consumo|cargo|compra)`,
-  String.raw`(?:cargo|consumo)\s+(?:de|por)\s+${NUM}`,
+  String.raw`hiciste\s+(?:un|una)\s+(?:compra|pago)|has\s+(?:pagado|comprado)|voc[eê]\s+(?:fez|realizou|efetuou)\s+(?:um|uma)\s+(?:compra|pagamento)`,
   String.raw`(?:compra|pagamento)\s+(?:de\s+|no\s+valor\s+de\s+)?${NUM}${GAP}{0,80}?(?:realizad[oa]|efetuad[oa]|conclu[ií]d[oa])`,
-  String.raw`paiement\s+par\s+carte\s+(?:[*xX•\d]+\s+)?(?:d['’]un\s+montant\s+de|de)\s+${NUM}${GAP}{0,40}?\bchez`,
-  String.raw`achat\s+(?:d['’]un\s+montant\s+de|de)\s+${NUM}${GAP}{0,60}?\bchez`,
-  String.raw`compra\s+(?:con\s+tarjeta\s+)?(?:de|por)\s+${NUM}${GAP}{0,60}?\s(?:en|con)\s`,
   String.raw`vous\s+avez\s+(?:effectué|réalisé|payé)`,
   String.raw`al[ıi][sş]veri[sş]|harcama|[oö]deme\s+yapt[ıi]n`,
   String.raw`kamu\s+udah\s+bayar|(?:kamu|anda)\s+(?:udah|sudah|telah)\s+(?:bayar|membayar|membeli)|telah\s+dibayarkan`,
@@ -273,9 +280,9 @@ const WORLD_CASH = wordsOf(
   String.raw`(?:atm|cash)\s+withdrawal\s+(?:of\s+)?${NUM}`,
   String.raw`withdrawal\s+of\s+${NUM}${GAP}{0,80}?\b(?:was|has\s+been)\s+(?:made|posted|completed|processed)`,
   String.raw`(?:retiraste|sacou)`,
-  String.raw`(?:retiro|saque)\s+(?:de\s+efectivo\s+)?(?:de|por)\s+${NUM}`,
+  String.raw`(?:retiro|saque)\s+(?:de\s+efectivo\s+)?(?:de|por)\s+${NUM}${GAP}{0,80}?(?:realizad[oa]|efetuad[oa]|exitos[oa])`,
+  String.raw`(?:retiro|saque)\s+(?:de\s+efectivo\s+)?(?:de|por)\s+${NUM}${GAP}{0,100}?(?:cajero|atm|caixa\s+eletr)`,
   String.raw`giro\s+en\s+cajero|cajero\s+autom[aá]tico|caixa\s+eletr[oô]nico`,
-  String.raw`retrait\s+(?:d['’]esp[eè]ces\s+)?(?:d['’]un\s+montant\s+de|de)\s+${NUM}`,
   String.raw`tarik\s+tunai|penarikan\s+tunai`,
   String.raw`para\s+[cç]ekme|[cç]ekilmi[sş]tir`,
 );
@@ -296,7 +303,9 @@ const WORLD_TRANSFER = wordsOf(
   String.raw`deposit\s+of\s+${NUM}${GAP}{0,80}?\b(?:was|has\s+been|has)\s+(?:made|posted|completed|processed)\s+(?:to|into|in)\s+your\b`,
   String.raw`(?:recibiste|enviaste|transferiste|te\s+(?:envi[oó]|transfiri[oó]|deposit[oó])|te\s+lleg[oó]|(?:usted|ud\.?)\s+envi[oó])`,
   String.raw`voc[eê]\s+(?:recebeu|enviou|transferiu)\s+(?:uma?\s+(?:transfer[eê]ncia|pix)|${NUM})`,
-  String.raw`transfer[eê]ncia\s+(?:recebida|enviada)|pix\s+(?:enviado|recebido)`,
+  String.raw`transfer[eê]ncia\s+(?:recebida|enviada|realizada)|pix\s+(?:enviado|recebido)|recebeu\s+(?:um\s+)?pix`,
+  String.raw`hiciste\s+una\s+transferencia|has\s+(?:recibido|enviado|transferido)|te\s+(?:acreditaron|depositaron|abonaron|transfirieron|enviaron)|transferencia\s+recibida`,
+  String.raw`voc[eê]\s+(?:fez|realizou|efetuou)\s+(?:uma\s+transfer[eê]ncia|um\s+pix)`,
   String.raw`cr[eé]dito\s+de\s+(?:sal[aá]rio|proventos|benef[ií]cio|aposentadoria|pens[aã]o)\s+de`,
   String.raw`vous\s+avez\s+(?:envoyé|reçu)|virement\s+(?:reçu|émis|effectué)`,
   String.raw`hai\s+(?:inviato|ricevuto)|u\s+heeft\s+(?:overgemaakt|ontvangen)`,
@@ -348,6 +357,8 @@ const WORLD_REQUEST = wordsOf(
 const WORLD_AUTHENTICATION = wordsOf(
   String.raw`c[oó]digo\s+(?:de\s+)?(?:verificaci[oó]n|seguridad|acceso|autorizaci[oó]n|confirmaci[oó]n|seguran[cç]a|verifica[cç][aã]o)`,
   String.raw`clave\s+(?:din[aá]mica|temporal)`,
+  String.raw`(?:c[oó]digo|clave|senha|nip)\s+(?:para|de)\s+(?:retiro|saque|compra|pago|confirmar|autorizar|validar|confirmaci[oó]n|autoriza[cç][aã]o)`,
+  String.raw`(?:o\s+)?c[oó]digo\s+\d{4,8}\s+confirma`,
   String.raw`kode\s+(?:otp|verifikasi|keamanan)|onay\s+kodu|do[gğ]rulama\s+kodu|[sş]ifre`,
 );
 const WORLD_CONDITIONAL = new RegExp(

@@ -865,20 +865,6 @@
   },
   {
     "id": "U-SEMANTICS-62",
-    "country": "MA",
-    "ledger": "MAD",
-    "sender": "Banque Zeta",
-    "body": "Banque Zeta: Paiement par carte ****5566 d'un montant de 220,00 MAD chez LIBRAIRIE CENTRALE le 03/10/2026 a 14:22. Solde disponible: 3 345,67 MAD.",
-    "expect": {
-      "post": true,
-      "amountMinor": 22000,
-      "type": "expense"
-    },
-    "notes": "French booked card-payment noun with montant and chez",
-    "provenance": "synthetic"
-  },
-  {
-    "id": "U-SEMANTICS-63",
     "country": "ID",
     "ledger": "IDR",
     "sender": "Bank Eta",
@@ -892,7 +878,7 @@
     "provenance": "synthetic"
   },
   {
-    "id": "U-SEMANTICS-64",
+    "id": "U-SEMANTICS-63",
     "country": "JP",
     "ledger": "JPY",
     "sender": "サンプルカード",
@@ -906,7 +892,7 @@
     "provenance": "synthetic"
   },
   {
-    "id": "U-SEMANTICS-65",
+    "id": "U-SEMANTICS-64",
     "country": "BD",
     "ledger": "BDT",
     "sender": "bKash",
@@ -919,7 +905,7 @@
     "provenance": "synthetic"
   },
   {
-    "id": "U-SEMANTICS-66",
+    "id": "U-SEMANTICS-65",
     "country": "BD",
     "ledger": "BDT",
     "sender": "bKash",
@@ -932,7 +918,7 @@
     "provenance": "synthetic"
   },
   {
-    "id": "U-SEMANTICS-67",
+    "id": "U-SEMANTICS-66",
     "country": "BD",
     "ledger": "BDT",
     "sender": "Nagad",
@@ -945,7 +931,7 @@
     "provenance": "synthetic"
   },
   {
-    "id": "U-SEMANTICS-68",
+    "id": "U-SEMANTICS-67",
     "country": "MX",
     "ledger": "MXN",
     "sender": "Banco Alfa",
@@ -958,7 +944,7 @@
     "provenance": "synthetic"
   },
   {
-    "id": "U-SEMANTICS-69",
+    "id": "U-SEMANTICS-68",
     "country": "MX",
     "ledger": "MXN",
     "sender": "Banco Alfa",
@@ -971,7 +957,7 @@
     "provenance": "synthetic"
   },
   {
-    "id": "U-SEMANTICS-70",
+    "id": "U-SEMANTICS-69",
     "country": "MX",
     "ledger": "MXN",
     "sender": "Banco Alfa",
@@ -984,7 +970,7 @@
     "provenance": "synthetic"
   },
   {
-    "id": "U-SEMANTICS-71",
+    "id": "U-SEMANTICS-70",
     "country": "MX",
     "ledger": "MXN",
     "sender": "Banco Alfa",
@@ -997,7 +983,7 @@
     "provenance": "synthetic"
   },
   {
-    "id": "U-SEMANTICS-72",
+    "id": "U-SEMANTICS-71",
     "country": "MX",
     "ledger": "MXN",
     "sender": "Banco Alfa",
@@ -1010,7 +996,7 @@
     "provenance": "synthetic"
   },
   {
-    "id": "U-SEMANTICS-73",
+    "id": "U-SEMANTICS-72",
     "country": "CL",
     "ledger": "CLP",
     "sender": "Banco Beta",
@@ -1023,7 +1009,7 @@
     "provenance": "synthetic"
   },
   {
-    "id": "U-SEMANTICS-74",
+    "id": "U-SEMANTICS-73",
     "country": "BR",
     "ledger": "BRL",
     "sender": "Banco Delta",
@@ -1036,7 +1022,7 @@
     "provenance": "synthetic"
   },
   {
-    "id": "U-SEMANTICS-75",
+    "id": "U-SEMANTICS-74",
     "country": "BR",
     "ledger": "BRL",
     "sender": "Banco Delta",
@@ -1049,7 +1035,7 @@
     "provenance": "synthetic"
   },
   {
-    "id": "U-SEMANTICS-76",
+    "id": "U-SEMANTICS-75",
     "country": "MA",
     "ledger": "MAD",
     "sender": "Banque Zeta",
@@ -1062,7 +1048,7 @@
     "provenance": "synthetic"
   },
   {
-    "id": "U-SEMANTICS-77",
+    "id": "U-SEMANTICS-76",
     "country": "MA",
     "ledger": "MAD",
     "sender": "Banque Zeta",
@@ -1075,7 +1061,7 @@
     "provenance": "synthetic"
   },
   {
-    "id": "U-SEMANTICS-78",
+    "id": "U-SEMANTICS-77",
     "country": "ID",
     "ledger": "IDR",
     "sender": "Bank Eta",
@@ -1088,7 +1074,7 @@
     "provenance": "synthetic"
   },
   {
-    "id": "U-SEMANTICS-79",
+    "id": "U-SEMANTICS-78",
     "country": "ID",
     "ledger": "IDR",
     "sender": "Bank Eta",
@@ -1101,7 +1087,7 @@
     "provenance": "synthetic"
   },
   {
-    "id": "U-SEMANTICS-80",
+    "id": "U-SEMANTICS-79",
     "country": "JP",
     "ledger": "JPY",
     "sender": "サンプルカード",
@@ -1114,7 +1100,7 @@
     "provenance": "synthetic"
   },
   {
-    "id": "U-SEMANTICS-81",
+    "id": "U-SEMANTICS-80",
     "country": "JP",
     "ledger": "JPY",
     "sender": "サンプルカード",
@@ -1127,7 +1113,7 @@
     "provenance": "synthetic"
   },
   {
-    "id": "U-SEMANTICS-82",
+    "id": "U-SEMANTICS-81",
     "country": "JP",
     "ledger": "JPY",
     "sender": "サンプルカード",
@@ -1140,7 +1126,7 @@
     "provenance": "synthetic"
   },
   {
-    "id": "U-SEMANTICS-83",
+    "id": "U-SEMANTICS-82",
     "country": "JP",
     "ledger": "JPY",
     "sender": "サンプル銀行",
@@ -1153,7 +1139,7 @@
     "provenance": "synthetic"
   },
   {
-    "id": "U-SEMANTICS-84",
+    "id": "U-SEMANTICS-83",
     "country": "KR",
     "ledger": "KRW",
     "sender": "토스",

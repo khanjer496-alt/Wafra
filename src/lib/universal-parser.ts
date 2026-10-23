@@ -105,6 +105,8 @@ const completedMovement = (source: string): { status: PostingStatus; direction: 
     // Japanese card-usage notices put the fields on later lines of the same message.
     /(?:カード)?ご?利用のお知らせ[\s\S]{0,300}?ご?利用金額/u,
     /(?:カード利用|購入)が完了しました/u,
+    // A receipt heading line that states completion for the fields below it.
+    /(?:^|[\s。])(?:付款完成|支付完成|付款成功|支付成功|支払い?完了|決済完了|送金完了|송금\s*완료)(?!后|後|时|時|する|され)/u,
     /(?:消费|支付|付款)(?:成功|已完成)/u,
   ];
   const refundPatterns = [
