@@ -38,6 +38,15 @@ const sourceCurrencyAliases = (context: UniversalParseContext): CurrencyAliasMap
     ...context.currencyAliases };
 };
 
+// ASCII \b does not treat accented or Vietnamese letters as word characters, so
+// "crédité" or "débité" never matched a \b(...)\b label. These edges are
+// Latin-script aware yet leave CJK/Hangul neighbours alone (an English word
+// glued to Chinese text is still a word).
+const LB = String.raw`(?<![A-Za-z\u00C0-\u024F\u1E00-\u1EFF\p{N}_])`;
+const RB = String.raw`(?![A-Za-z\u00C0-\u024F\u1E00-\u1EFF\p{N}_])`;
+// Suffix-inflected languages (Turkish, Indonesian, Swahili) glue endings on.
+const RS = String.raw`[A-Za-z\u00C0-\u024F\u1E00-\u1EFF]*${RB}`;
+
 // Long labels consume their component words: "minimum payment due" must not
 // leave a second, stronger-looking "payment" or "amount due" match behind.
 // The real "Avl. Cr.Limit" footer uses its abbreviation's dot as the word
@@ -45,11 +54,22 @@ const sourceCurrencyAliases = (context: UniversalParseContext): CurrencyAliasMap
 const LABEL = new RegExp([
   String.raw`(?<minimum>\bpay\s+min\.|\bmin(?:imum)?(?:\s+|\.\s*)(?:(?:amount|amt|payment)\s+)?due\b|\bminimum\s+payment\b|\bpago\s+mínimo\b|(?<![\p{L}\p{M}\p{N}_])(?:paiement\s+minimum|न्यूनतम\s+देय\s+राशि)(?![\p{L}\p{M}\p{N}_])|الحد\s+(?:الادنى|الأدنى)\s+(?:المستحق|للدفع|للسداد))`,
   String.raw`(?<total>\b(?:statement\s+(?:total|balance|amount)|closing\s+balance|total\s+(?:(?:amount|amt)\s+)?due(?:\s+to\s+avoid\s+fin\.\s+charges)?|total\s+outstanding(?:\s+balance)?|new\s+balance|saldo\s+total\s+del\s+estado)\b|(?<![\p{L}\p{M}\p{N}_])(?:total\s+à\s+payer|कुल\s+देय\s+राशि)(?![\p{L}\p{M}\p{N}_])|(?:اجمالي|إجمالي)\s+(?:المبلغ\s+المستحق|مبلغ\s+الكشف))`,
-  String.raw`(?<limit>\b(?:(?:available|avl|avail)\.?\s+(?:credit\s+limit|cr(?:\.?\s+|\.)limit)|(?:available|credit|avl|avail)\.?\s+(?:limit|lmt)|available\s+credit|credit\s+available)\b|الحد\s+(?:المتاح|الائتماني))`,
-  String.raw`(?<balance>\b(?:(?:available|current|avl|avail)\.?\s+)?bal(?:ance)?\b|\b(?:solde(?:\s+disponible)?|kontostand|saldo|(?:kullanılabilir\s+)?bakiye)\b|الرصيد(?:\s+(?:الحالي|المتاح))?|(?<![\p{L}\p{M}\p{N}_])رصيد\s+حسابك(?:\s+(?:الحالي|المتاح))?(?![\p{L}\p{M}\p{N}_])|(?:उपलब्ध\s+)?शेष\s+राशि|(?:利用可能)?残高|(?:可用)?余额)`,
+  String.raw`(?<limit>\b(?:(?:available|avl|avail)\.?\s+(?:credit\s+limit|cr(?:\.?\s+|\.)limit)|(?:available|credit|avl|avail)\.?\s+(?:limit|lmt)|available\s+credit|credit\s+available)\b|${LB}(?:avail\.?\s+credit|kalan\s+limit|kullan[ıi]labilir\s+limit\p{L}*|limite\s+dispon[ií]vel|cupo\s+disponible|cr[eé]dito\s+disponible)${RB}|الحد\s+(?:المتاح|الائتماني))`,
+  // Abbreviated and local balance labels ("AvlBal:", "Avlbl Amt:", "Bakiyeniz",
+  // "Salio", "잔액", "คงเหลือ", "Số dư"). A balance is never the principal.
+  String.raw`(?<balance>\b(?:(?:available|current|avl|avail)\.?\s+)?bal(?:ance)?\b|${LB}(?:(?:avl|avail)\.?\s*bal(?:ance)?|avlbl\.?\s*(?:amt|bal(?:ance)?)|avail(?:able)?\.?\s*amt|salio|s[ốo]\s+d[ưư]|sd(?=\s*:)|bakiye\p{L}*)${RB}|\b(?:solde(?:\s+disponible)?|kontostand|saldo|(?:kullanılabilir\s+)?bakiye)\b|잔액|[余餘]額|คงเหลือ|ยอดคงเหลือ|الرصيد(?:\s+(?:الحالي|المتاح))?|(?<![\p{L}\p{M}\p{N}_])رصيد\s+حسابك(?:\s+(?:الحالي|المتاح))?(?![\p{L}\p{M}\p{N}_])|(?:उपलब्ध\s+)?शेष\s+राशि|(?:利用可能)?残高|(?:可用)?余额)`,
   String.raw`(?<bill>\b(?:bill(?:\s+amount)?\s+(?:due|of)|amount\s+due|payment\s+due|bill\s+amount|bill\s+for|montant\s+à\s+payer|importo\s+da\s+pagare)\b|مبلغ\s+الفاتورة|المبلغ\s+المستحق|देय\s+राशि)`,
-  String.raw`(?<fee>\b(?:total\s+charges|fee|fees|commission|service\s+charge)\b|رسوم|عمولة)`,
-  String.raw`(?<transaction>\b(?:virement(?:\s+reçu)?|pix(?:\s+(?:enviado|recebido))?|transaksi|havale|bizum|cargo\s+de|consumo\s+de|na\s+kwot[eę]|lastschrift(?:\s+über)?|payment\s+made\s+for|you\s+have\s+(?:sent|received)|(?:you\s+)?made\s+an?|charge\s+(?:of|made)|transaction(?!\s+(?:id|no|number|ref|reference|date|time|alert)\b)|used\s+for|charged\s+for|withdrew|purchase|purchased|spend|spent|paid|charged|debited|credited|received|sent|withdrawn|withdrawal|cash\s+out|deposited|deposit|refund|reversal|transfer(?:red)?|payment|amount|amt|amnt|paiement|débité|crédité|remboursement|kartenzahlung|abonnementzahlung|belastet|gutgeschrieben|compra|reembolso|abonado|pagamento|pinbetaling|pasbetaling|kaartbetaling|betaling)\b|(?<![\p{L}\p{N}])(?:alışveriş(?:iniz)?|ödemeniz|tutarında|مبلغ)(?![\p{L}\p{N}])|شراء|خصم|إيداع|ايداع|تحويل|استرداد|دفع|भुगतान|रिफंड\s+राशि|(?<![\p{L}\p{M}\p{N}_])(?:überweisung|overboeking|acquisto|rimborso|accreditato|cargados?|debitados?|रिफंड)(?![\p{L}\p{M}\p{N}_])|(?:利用)?金額|金额|退回|退款|引き落とされました|扣款|승인|डेबिट|क्रेडिट)`,
+  // Wallet receipts print their charges as separate fields ("Transaction cost,
+  // Ksh23.00", "Fee charged: GHS 0.85", "Tax was UGX 250"). They are fees, never
+  // the principal; the words that follow a fee noun ("charged") must not turn
+  // it into a transaction label. Bare cost/tax/VAT/levy count only when they
+  // open their own clause, so "purchase cost $5" or "tax $300 debited" keep
+  // their ordinary owner.
+  String.raw`(?<fee>\b(?:transaction\s+(?:cost|fees?|charges?)|(?:service\s+)?(?:fees?|tax(?:es)?|vat|excise(?:\s+duty)?|levy)\s+(?:charged|was|applied)|total\s+charges|fee|fees|commission|service\s+charge)\b|(?<![\p{L}\p{M}\p{N}_])(?:ada\s+ya\s+muamala|frais|geb[üu]hr(?:en)?|entgelt|comisi[óo]n|comiss[ãa]o|commissione|tarifa)(?![\p{L}\p{M}\p{N}_])|رسوم|عمولة)`,
+  // A bare cost/tax word opening a clause is a field name, but it gives way to a
+  // movement word that follows its figure ("Tax $300.00 debited").
+  String.raw`(?<feeweak>(?=(?:cost|tax|vat|levy|excise))(?<=(?:^|[.;,!?\n:])\s*)(?:cost|tax(?:es)?|vat|levy|excise\s+duty)(?![\p{L}\p{N}]))`,
+  String.raw`(?<transaction>(?=withdraw)(?<=\d\s*[AP]M)withdraw|${LB}(?:virement(?:\s+reçu)?|pix(?:\s+(?:enviado|recebido))?|transaksi|havale|bizum|cargo\s+de|consumo\s+de|na\s+kwot[eę]|lastschrift(?:\s+über)?|payment\s+made\s+for|you\s+have\s+(?:sent|received)|(?:you\s+)?made\s+an?|charge\s+(?:of|made)|transaction(?!\s+(?:id|no|number|ref|reference|date|time|alert)\b)|used\s+for|charged\s+for|withdrew|purchase|purchased|spend|spent|paid|charged|debited|credited|received|sent|withdrawn|withdrawal|cash\s+out|deposited|deposit|refund(?:ed|s)?|reversal|transfer(?:red)?|payment|amount|amt|amnt|paiement|débité|crédité|remboursement|kartenzahlung|abonnementzahlung|belastet|gutgeschrieben|compra|reembolso|abonado|pagamento|pinbetaling|pasbetaling|kaartbetaling|betaling|txn|deduct(?:ed|ion)|credit\s+of|debit\s+of|withdraw(?:s|ing)?|utilizad[ao]\s+por|realizaste|pagaste|compraste|recibiste|enviaste|retiraste|depositaste|transferiste|pagou|recebeu|enviou|comprou|sacou|usted\s+envi[oó]|te\s+envi[oó]|te\s+transfiri[oó]|te\s+deposit[oó]|se\s+abon(?:aron|[oó])|abon[oó]|retiro|retirada|saque|giro|valor|importe|monto|cargos?|pagos?|devoluci[oó]n|devolu[cç][aã]o|d[eé]bito\s+de|cr[eé]dito\s+de|achat|retrait|d[eé]p[oô]t|pr[eé]l[eè]vement|pr[eé]lev[eé]s?|montant|vous\s+a\s+envoy[eé]|umetuma|umepokea|umelipa|umetoa|umeweka|kimetolewa|kimewekwa|imetumwa|kiasi|malipo|sebesar|jumlah|nominal|membayar|bayar|dibayar(?:kan)?|ditransfer|didebet|didebit|dikredit|dikirim|ditarik|diterima|menerima|mengirim(?:kan)?|tarik\s+tunai)${RB}|${LB}(?:al[ıi][sş]veri[sş]|harcama|g[öo]nderil|gelmi[sş]|yat[ıi]r[ıi]l|tahsil)${RS}|(?<![\p{L}\p{N}])(?:alışveriş(?:iniz)?|ödemeniz|tutarında|مبلغ)(?![\p{L}\p{N}])|شراء|خصم|إيداع|ايداع|تحويل|استرداد|دفع|भुगतान|रिफंड\s+राशि|(?<![\p{L}\p{M}\p{N}_])(?:überweisung|overboeking|acquisto|rimborso|accreditato|cargados?|debitados?|रिफंड)(?![\p{L}\p{M}\p{N}_])|(?:利用)?金額|金额|退回|退款|引き落とされました|扣款|승인|डेबिट|क्रेडिट|支出|收入|消费|消費|支付(?!宝)|付款|转账|轉帳|轉入|转入|薪資|薪资|入账|入帳|簽賬|签账|刷卡|入金|出金|お?引(?:き)?出し|입금|출금|금액|결제|(?<![\p{L}\p{M}\p{N}_])(?:जमा|निकासी)(?![\p{L}\p{M}\p{N}_]))`,
 ].join('|'), 'giu');
 
 interface OwnedCandidate {
@@ -64,7 +84,7 @@ interface OwnedCandidate {
 // you've spent ...". The latter is a period/category statistic, never another
 // posting or a fallback principal. Keep the observed value for inspection.
 // "Spent today: €40.00" (Revolut) is the day's running total, never a posting.
-const AGGREGATE_PREFIX = /\b(?:(?:so far(?:\s+(?:this|the)\s+(?:day|week|month|year))?|(?:this|last)\s+(?:week|month|year)|(?:month|year|week)[ -]to[ -]date|(?:monthly|weekly|yearly|annual|cumulative|category)\s+(?:spend(?:ing)?|spends|expenditure)(?:\s+total)?)\b|spent\s+today\s*:)[^.!?;\n]*$/iu;
+const AGGREGATE_PREFIX = /(?:(?<![\p{L}\p{N}_])(?:누적|累计|累計|(?:world)?puan\s*:|포인트)|\b(?:(?:so far(?:\s+(?:this|the)\s+(?:day|week|month|year))?|(?:this|last)\s+(?:week|month|year)|(?:month|year|week)[ -]to[ -]date|(?:monthly|weekly|yearly|annual|cumulative|category)\s+(?:spend(?:ing)?|spends|expenditure)(?:\s+total)?)\b|spent\s+today\s*:))[^.!?;\n]*$/iu;
 
 /**
  * The alert threshold the person set: "… is greater than your $5.00 limit in
@@ -91,14 +111,16 @@ function aggregateAmount(prefix: string, suffix: string, label: { role: Universa
 
 const LABEL_ROLES: Record<string, UniversalMoneyRole> = {
   minimum: 'minimum-due', total: 'statement-total', limit: 'credit-limit',
-  balance: 'balance', bill: 'bill-due', fee: 'fee', transaction: 'transaction',
+  balance: 'balance', bill: 'bill-due', fee: 'fee', feeweak: 'fee', transaction: 'transaction',
 };
 
-function labels(text: string, marketLabels: RegExp | null = null): { role: UniversalMoneyRole; start: number; text: string }[] {
-  const found = [...text.matchAll(LABEL)].map((match) => ({
-    role: LABEL_ROLES[Object.keys(match.groups ?? {}).find((key) => match.groups?.[key] !== undefined)!],
-    start: match.index!, text: match[0],
-  }));
+type RoleLabel = { role: UniversalMoneyRole; start: number; text: string; weak?: boolean };
+
+function labels(text: string, marketLabels: RegExp | null = null): RoleLabel[] {
+  const found: RoleLabel[] = [...text.matchAll(LABEL)].map((match) => {
+    const group = Object.keys(match.groups ?? {}).find((key) => match.groups?.[key] !== undefined)!;
+    return { role: LABEL_ROLES[group], start: match.index!, text: match[0], weak: group === 'feeweak' };
+  });
   if (!marketLabels) return found;
   for (const match of text.matchAll(marketLabels)) {
     found.push({ role: 'transaction', start: match.index! + match[1].length, text: match[2] });
@@ -135,9 +157,12 @@ const NON_SEPARATING_COMMAS = /\bonline,\s+(?:by\s+)?phone,?\s+or\s+(?:by\s+)?ma
 function separators(text: string): number[] {
   const listed = [...text.matchAll(NON_SEPARATING_COMMAS)]
     .map((match) => ({ start: match.index!, end: match.index! + match[0].length }));
-  return [...text.matchAll(/[;\n!?。।]|[.,](?=\s|$)/g)]
+  return [...text.matchAll(/[;\n!?。।，、；]|[.,](?=\s|$)/g)]
     .filter((match) => match[0] !== ',' || !listed.some((range) => match.index! > range.start && match.index! < range.end))
     .filter((match) => match[0] !== '.' || !/\b(?:min|avl|avail|cr|dr|amt|bal)$/i.test(text.slice(0, match.index)))
+    // "Transaction cost, Ksh23.00": a comma right after a field label is the
+    // label's own punctuation, not the end of the field.
+    .filter((match) => match[0] !== ',' || !/\b(?:cost|fees?|charges?|balance|bal|amt|amount)$/i.test(text.slice(0, match.index)))
     // The observed ADCB total label includes an abbreviation, not a clause
     // boundary. Its qualifier must stay attached to its own total only.
     .filter((match) => match[0] !== '.' ||
@@ -233,13 +258,20 @@ function ownCandidates(
     const after = text.slice(candidate.span.end, nextStart);
     const suffixEnd = candidate.span.end + (separators(after)[0] ?? after.length);
     const following = labels(roleText.slice(candidate.span.end, suffixEnd), marketLabels)[0];
-    const label = preceding ?? following;
+    // A weak label (bare "Tax") yields to a movement word after its figure.
+    const label = preceding?.weak && following?.role === 'transaction' ? following : preceding ?? following;
     let role = label?.role ?? 'unknown';
     // In a statement, an explicitly labelled "amount due" is the total;
     // a bare amount or a minimum is never promoted to a statement total.
     if (role === 'bill-due' && label && !/\bbill\b|فاتورة/iu.test(label.text) &&
         /\b(?:statement|mini\s+stmt)\b/iu.test(roleText.slice(0, candidate.span.start))) {
       role = 'statement-total';
+    }
+    // "Your new balance: UGX 120,500" closing a wallet receipt is the account
+    // balance. It is a statement total only beside statement, minimum or due words.
+    if (role === 'statement-total' && label && /^new\s+balance$/iu.test(label.text) &&
+        !/\b(?:statement|stmt|minimum|min\.?\s*(?:due|payment)|due|credit\s+card|autopay)\b/iu.test(roleText)) {
+      role = 'balance';
     }
     if (!label && owned.at(-1)?.role === 'transaction' && /^\s*(?:and|plus|,|&)?\s*$/i.test(before)) {
       role = 'transaction';
@@ -289,7 +321,12 @@ function completeNumericToken(candidate: MoneyCandidate, text: string): boolean 
   // arbitrary CJK letter or a reference such as "AB金额58.00元".
   const labelledYuan = text.slice(end, candidate.span.end).trim() === '元' &&
     /(?:^|[,，;；。！？\n])\s*金额\s*[:：]?\s*$/u.test(text.slice(0, start));
-  if (start === candidate.span.start && /[\p{L}\p{N}_]/u.test(before) && !labelledYuan) return false;
+  // CJK text has no spaces: "余额3,245.67元", "출금200,000원" and "支出45.80元" put a
+  // label word directly against the figure. Only those money labels are tolerated
+  // there; any other letter or digit still marks an identifier.
+  // 金额 is excluded on purpose: it is a field name that must follow a boundary (above).
+  const cjkNeighbour = /(?:余额|餘額|支出|收入|消费|消費|支付|付款|转账|轉帳|入账|入帳|出金|入金|引出し|人民[币幣]|잔액|출금|입금|누적|결제)$/u.test(text.slice(0, start));
+  if (start === candidate.span.start && /[\p{L}\p{N}_]/u.test(before) && !labelledYuan && !cjkNeighbour) return false;
   if (/[xX*•·/\\]/.test(before) || /[xX*•·/\\]/.test(after)) return false;
   // A suffix match must not recover the visible tail of a masked or malformed token.
   if (start === candidate.span.start && /[.,٫'’+\-]/.test(before)) return false;
@@ -390,6 +427,11 @@ export function extractUniversalMoney(
     // not monetary tokens. Keep the same leading boundary as global symbols.
     !(/(?:ksh|tsh)$/i.test(candidate.sourceText) && candidate.span.start > 0 &&
       /[\p{L}\p{N}]/u.test(draft.normalizedText[candidate.span.start - 1])) &&
+    // Malaysian carriers prefix a bank's SMS with the free-message marker
+    // "RM0 ". It opens the message, is followed by the sender's name and is
+    // never money: left in, it competes with the real amount.
+    !(/^RM\s?0$/i.test(candidate.sourceText) && /^\s*$/.test(draft.normalizedText.slice(0, candidate.span.start)) &&
+      /^\s+[\p{L}]/u.test(draft.normalizedText.slice(candidate.span.end))) &&
     !excludedMoneySpans.some((span) =>
     Number.isInteger(span.start) && Number.isInteger(span.end) &&
     span.start >= 0 && span.end > span.start && span.end <= draft.normalizedText.length &&
