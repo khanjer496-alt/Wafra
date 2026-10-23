@@ -197,3 +197,46 @@ for (const token of ['2026-05/04', '04/05-2026']) test(`mixed date separators st
   const field = extractUniversalFields(`Transaction date: ${token}`).transactionDate;
   assert.equal(field.value, null); assert.ok(field.issues.includes('invalid-date'));
 });
+
+// --- roles-fields lane: seller spans stop before the verb, instrument phrases
+// and balance labels; cash machines and account abbreviations are not sellers.
+const { inspectUniversalMoneyDraft } = createLoader()('@/lib/universal-money');
+// The pipeline passes the draft's money spans; they are how a clause with a bare
+// preposition is proven to describe a movement.
+const merchantOf = (source) => extractUniversalFields(source, {},
+  inspectUniversalMoneyDraft(source).candidates.map((candidate) => candidate.span)).merchant;
+for (const [source, merchant] of [
+  ['Du hast 12,40 € bei REWE Markt GmbH bezahlt.', 'REWE Markt GmbH'],
+  ['Contactless payment of €4.80 at INSOMNIA COFFEE CO made with your debit card ending 3390.', 'INSOMNIA COFFEE CO'],
+  ['Payment Tk 650.00 to Daraz Bangladesh Ltd successful. Balance Tk 474.75.', 'Daraz Bangladesh Ltd'],
+  ['Pagaste $ 18.750,00 en COTO SUC 45 con tu Visa Débito terminada en 6612.', 'COTO SUC 45'],
+  ['Achat de 42,35 $ chez METRO PLUS LAVAL avec votre carte Visa se terminant par 1234.', 'METRO PLUS LAVAL'],
+  ['Purchase Approved\n$58.12 at SHAKE SHACK on Card ending in 31005', 'SHAKE SHACK'],
+  ['Purchase of £145.00 was made at JOHN LEWIS on your Card ending 31005.', 'JOHN LEWIS'],
+  ['pagamento di 9,99 EUR presso SPOTIFY con carta *4321 eseguito il 15/09.', 'SPOTIFY'],
+  ['Debit order of R350.00 paid to VODACOM from acc ..4410 on 01/10/2026.', 'VODACOM'],
+  ['Payment received for GHS 600.00 from ABENA OWUSU Current Balance: GHS 940.20.', 'ABENA OWUSU'],
+  ['Spent Rs.3,450.00 On HDFC Bank Card 9012 At DMART AVENUE SUPERMARTS On 2026-09-09', 'DMART AVENUE SUPERMARTS'],
+  ['Spent Rs.899 From HDFC Bank Card x1234 At RELIANCE TRENDS On 2026-09-08', 'RELIANCE TRENDS'],
+  ['INR 1,249.00 spent using ICICI Bank Card XX5678 on 07-Sep-26 on AMAZON PAY IN. Avl Limit: INR 98,751.00.', 'AMAZON PAY IN'],
+  ['You have paid ETB 230.00 for goods purchased from 512345 - Shoa Supermarket on 30/09/2026.', 'Shoa Supermarket'],
+  ['Debited INR 10,000.00 on 12/09/26 -Transferred to Mr. AMIT SHARMA. Avl Balance INR 30,123.45', 'Mr. AMIT SHARMA'],
+]) test(`merchant stops at the clause boundary: ${merchant}`, () => {
+  explicit(merchantOf(source), merchant);
+});
+test('a cash machine, account abbreviation or instalment marker is not a seller', () => {
+  for (const source of [
+    '$200.00 was withdrawn at an ATM using your card ending 2211',
+    'BDT 10,000.00 has been withdrawn at ATM DBBL GULSHAN-1 on 18-SEP-26',
+    'Cuenta debitada con $300.000 en CAJ EXITO ENVIGADO',
+    'Paid R50.00 to acct ending 4321',
+    '15,000원 일시불 09/15 13:22',
+  ]) assert.notEqual(merchantOf(source).evidence, 'explicit', source);
+});
+test('shortening the seller keeps names that merely contain a status or ATM word intact', () => {
+  explicit(merchantOf('Payment of $5.00 at ATMOSPHERE CAFE on 09/10/2026'), 'ATMOSPHERE CAFE');
+  explicit(merchantOf('Purchase of $5.00 at THE MADE SHOP on 09/10/2026'), 'THE MADE SHOP');
+  explicit(merchantOf('Purchase of $5.00 at DECLINED CAFE on 09/10/2026'), 'DECLINED CAFE');
+  // A payer is never exposed as the seller: masking "Mike Torres" would leave "paid you" reading as a debit.
+  assert.notEqual(merchantOf('Mike Torres paid you $40.00 for pizza').evidence, 'explicit');
+});

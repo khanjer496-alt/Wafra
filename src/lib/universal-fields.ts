@@ -17,7 +17,8 @@ const resolve = <T>(items: Observation<T>[]): UniversalField<T> => {
 
 const MERCHANT_LABEL = /(?:^|[^\p{L}\p{N}])(?:desc(?:ription)?|narration|merchant|payee|beneficiary|seller|commerçant|bénéficiaire|händler|empfänger|comercio|beneficiario|esercente|begunstigde|利用先|التاجر|المستفيد)\s*[:：=-]\s*/giu;
 const MERCHANT_PREPOSITION = /(?:^|[^\p{L}\p{N}])(?:at|to|trf\s+to|from|chez|bei|von|en|em|an|presso|bij|لدى|عند|لصالح)\s+/giu;
-const MERCHANT_TAIL = /\s+(?:(?:avl|avail(?:able)?)\.?\s*(?:bal(?:ance)?|lmt|limit)\b|(?:on|le|am|el|il|op|em)\s+\d|on\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d|from\s+(?:your\s+)?(?:account|a\/?c|card|checking|savings)\b|posted\b|(?:with|using|via|über)\b|to\s+(?:(?:your|the)\s+)?(?:card|account)\b|\d{1,2}:\d{2}\b|(?:ref(?:erence)?(?:\s*no)?|refno|txn|transaction\s+(?:id|date))\b|(?:was|has|have|is|were|will|wurde|wurden|ist|wird)\b|con\s+(?:tu|su)\s+tarjeta\b|com\s+o\s+cart[aã]o\b|بتاريخ|رقم\s+(?:المرجع|العملية))/iu;
+const MERCHANT_TAIL = /\s+(?:(?:avl|avail(?:able)?)\.?\s*(?:bal(?:ance)?|lmt|limit)\b|(?:on|le|am|el|il|op|em)\s+\d|on\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d|from\s+(?:your\s+)?(?:account|acct?|a\/?c|card|checking|savings)\b|posted\b|(?:with|using|via|über)\b|to\s+(?:(?:your|the)\s+)?(?:card|account)\b|\d{1,2}:\d{2}\b|(?:ref(?:erence)?(?:\s*no)?|refno|txn|transaction\s+(?:id|date))\b|(?:was|has|have|is|were|will|wurde|wurden|ist|wird)\b|con\s+(?:tu|su)\s+tarjeta\b|com\s+o\s+cart[aã]o\b|بتاريخ|رقم\s+(?:المرجع|العملية)|con\s+(?:tu|su|la|el)\s+(?:\p{L}+\s+){0,2}(?:tarjeta|carta|visa|mastercard|d[eé]bito|cr[eé]dito)(?![\p{L}\p{N}])|con\s+carta(?![\p{L}\p{N}])|avec\s+(?:votre|ta)\s+carte(?![\p{L}\p{N}])|mit\s+(?:ihrer\s+|deiner\s+)?(?:\p{L}*karte)(?![\p{L}\p{N}])|para\s+o\s+cart[aã]o(?![\p{L}\p{N}])|on\s+(?:your\s+)?(?:\p{L}+\s+){0,3}card(?![\p{L}\p{N}])|(?:del|alle)\s+\d|(?:current|available|remaining|closing)\s+(?:credit\s+)?(?:balance|limit)(?![\p{L}\p{N}]))/iu;
+const MERCHANT_TRAILING_VERB = /\s+(?:made|bezahlt|erhalten|eseguit[oa]|effettuat[oa]|successful(?:ly)?|completed|erfolgreich)$/iu;
 const BALANCE_FIELD_TAIL = /\s+(?:(?:available|current|remaining|closing)\s+(?:credit\s+)?(?:balance|limit)|(?:avl|avail)\.?\s*(?:bal(?:ance)?|limit)|balance|credit\s+limit|الرصيد(?:\s+(?:المتاح|الحالي))?)\s*[:=-]?\s*$/iu;
 const BALANCE_FIELD_BEFORE_MONEY = new RegExp(
   BALANCE_FIELD_TAIL.source.replace(/\$$/u, '') + String.raw`(?=(?:[A-Z]{3}\s*[+-]?\d|[+-]?\d[\d.,]*\s*[A-Z]{3}\b))`, 'iu');
@@ -29,7 +30,7 @@ const MERCHANT_STATUS_TAIL = /\s+(?:(?:abgelehnt|geweigerd|rechazado)(?=\s*(?:$|
 // Portuguese/Spanish lifecycle words above follow the same rule as English:
 // a trailing status word is not part of the merchant name, so it cannot be
 // masked away as merchant text and let a pending/declined alert post.
-const NOT_MERCHANT = /^(?:未払い|今回|本次交易)$|^(?:ihr(?:e|er|em|en)?|tu|su|sus|votre|vos|sua|seu)\s+(?:karte|konto|tarjeta|cuenta|carte|compte|cart[aã]o|conta)\b|^(?:cheq(?:ue)?|current|savings?|checking|credit|debit)\s+(?:a\/?c|acc(?:oun)?t)\b|^(?:su|tu|sua)\s+(?:cuenta|conta)\b|^(?:(?:your|the|an?)\s+)?(?:account|a\/?c|card|credit\s+card|debit\s+card|bank\s+account|statement|USD|AED|SAR|EUR|GBP|INR)\b|^(?:view|avoid|contact|call|visit|check|download|log\s*in|pay|confirm|verify|report)\b|^(?:حساب|بطاق|كشف\s+الحساب)/iu;
+const NOT_MERCHANT = /^(?:未払い|今回|本次交易)$|^(?:ihr(?:e|er|em|en)?|tu|su|sus|votre|vos|sua|seu)\s+(?:karte|konto|tarjeta|cuenta|carte|compte|cart[aã]o|conta)\b|^(?:cheq(?:ue)?|current|savings?|checking|credit|debit)\s+(?:a\/?c|acc(?:oun)?t)\b|^(?:su|tu|sua)\s+(?:cuenta|conta)\b|^(?:(?:your|the|an?)\s+)?(?:account|a\/?c|card|credit\s+card|debit\s+card|bank\s+account|statement|USD|AED|SAR|EUR|GBP|INR)\b|^(?:view|avoid|contact|call|visit|check|download|log\s*in|pay|confirm|verify|report)\b|^(?:حساب|بطاق|كشف\s+الحساب)|^(?:(?:an?|the)\s+)?(?:atm|cajero|caj)(?![\p{L}\p{N}])|^(?:acct|acc)(?![\p{L}\p{N}])|^(?:일시불|할부)|^pesos(?![\p{L}\p{N}])/iu;
 const MOVEMENT_CONTEXT = /\b(?:made\s+an?|withdrew|used\s+for|purchase|charged|paid|debited|credited|received|sent|transfer(?:red)?|spent|payment|paiement|débité|crédité|kartenzahlung|abgebucht|belastet|compra|pagado|pagamento|acquisto|addebitato|pinbetaling|betaling|kaartbetaling|betaald|afgeschreven|abonnementzahlung|remboursement|reembolso)\b|شراء|خصم|دفع|تحويل|استلام/iu;
 
 const ownsMovement = (text: string, at: number, moneySpans: readonly SourceSpan[]): boolean => {
@@ -37,7 +38,10 @@ const ownsMovement = (text: string, at: number, moneySpans: readonly SourceSpan[
   while (start > 0 && at - start < 160) {
     const index = start - 1, character = text[index];
     // A run of mask dots ("a/c..1234") is masking, not a sentence end.
-    if (/[\n;!?。।]/u.test(character) || (character === '.' && !/\bno\.$/iu.test(text.slice(Math.max(0, index - 3), index + 1)) &&
+    // "Rs.3,450.00" / "Tk.50": a short currency abbreviation glued to its figure
+    // by a dot is part of the amount, not the end of the sentence.
+    const glued = character === '.' && /\d/u.test(text[index + 1] ?? '') && /(?:^|[^\p{L}])[\p{L}]{1,4}$/u.test(text.slice(Math.max(0, index - 4), index));
+    if (/[\n;!?。।]/u.test(character) || (character === '.' && !glued && !/\bno\.$/iu.test(text.slice(Math.max(0, index - 3), index + 1)) &&
         text[index - 1] !== '.' && text[index + 1] !== '.' &&
         (!/\d/u.test(text[index - 1] ?? '') || !/\d/u.test(text[index + 1] ?? '')))) break;
     start -= 1;
@@ -73,11 +77,13 @@ const merchantFields = (text: string, moneySpans: readonly SourceSpan[]): Univer
       if (pattern === billSupplier && /\b(?:call|contact|visit|log\s*in|for\s+help)\b/iu.test(
         text.slice(Math.max(0, match.index! - 160), match.index!).split(/[.!?;。।\n]/u).at(-1) ?? '',
       )) continue;
-      const labelEnd = match.index! + match[0].length;
+      let labelEnd = match.index! + match[0].length;
+      // "purchased from 512345 - Shoa Supermarket": the till/agent number is not the seller.
+      if (pattern === MERCHANT_PREPOSITION) labelEnd += text.slice(labelEnd).match(/^\d{4,8}\s+[-–]\s+(?=\p{L})/u)?.[0].length ?? 0;
       // A chain may open with digits: "7-ELEVEN", "24 SEVEN" — but only when letters follow.
       const candidate = text.slice(labelEnd, labelEnd + 97).match(/^(?:[\p{L}%]|\d{1,3}[- ]?(?=\p{L}))[\p{L}\p{M}\p{N}% &'’*/+()._-]{0,95}/u)?.[0];
       if (!candidate) continue;
-      let value = candidate.split(/\.(?=\s|$)/u)[0];
+      let value = candidate.split(/(?<!(?:^|[^\p{L}])(?:mr|mrs|ms|miss|dr|shri|smt|sri))\.(?=\s|$)/iu)[0];
       // A labelled description opens with the channel, not the seller:
       // "Desc: POS PURCHASE SHOPRITE LEKKI". The channel words stay outside the
       // merchant span so the posting evidence they carry is still read.
@@ -102,9 +108,14 @@ const merchantFields = (text: string, moneySpans: readonly SourceSpan[]): Univer
       }
       if (tails.length) value = value.slice(0, Math.min(...tails));
       value = value.trim().replace(/\s+(?:for|of)$/iu, '').replace(/[.*_-]+$/u, '').trim();
+      // The posting verb often trails the name ("REWE Markt GmbH bezahlt", "Daraz Ltd successful"):
+      // keep it outside the span so the status reader still sees it.
+      value = value.replace(MERCHANT_TRAILING_VERB, '').trim();
       const end = start + value.length;
       if ((value.match(/\p{L}/gu) ?? []).length < 2 || NOT_MERCHANT.test(value) ||
-          /\b(?:your|yours|please)\b/iu.test(value) || /^[A-Z]{2}\d[A-Z\d ]{6,}$/iu.test(value)) continue;
+          /\b(?:your|yours|please)\b/iu.test(value) || /^[A-Z]{2}\d[A-Z\d ]{6,}$/iu.test(value) ||
+          // "From HDFC Bank Card x1234 At SHOP": an instrument phrase, not a seller.
+          /\b(?:card|a\/?c|acc(?:ount|t)?)\s+(?:no\.?\s*)?[xX*•.]*\d/iu.test(value)) continue;
       // Reaching the bounded read limit is not proof that the name ended.
       if (end >= start + 96 && /[\p{L}\p{N}]/u.test(text[end] ?? '')) continue;
       if (moneySpans.some((span) => start < span.end && end > span.start)) continue;
@@ -114,6 +125,8 @@ const merchantFields = (text: string, moneySpans: readonly SourceSpan[]): Univer
   // These bounded, source-evidenced forms place the seller before a local
   // payment marker. Do not expose a broad reverse-word scan as merchant proof.
   const localForms = [
+    // "spent using card XX5678 on 07-Sep-26 on AMAZON PAY IN": a second "on" after the date names the seller.
+    /((?:\d{1,2}[-/ ][A-Za-z]{3,9}[-/ ]\d{2,4}|\d{4}-\d{2}-\d{2})\s+on\s+)([\p{L}][\p{L}\p{M}\p{N} &'’*/+()._-]{1,95}?)(?=\s*(?:\.\s|\.?$))/giu,
     // Portuguese "efetuada no PINGO DOCE com o cartão", Polish "w BIEDRONKA
     // zostala", Korean "12,000원 GS25 강남점 10/02", Hindi "BIGBASKET को भुगतान".
     /(efetuad[ao]\s+(?:no|na|em)\s+)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+(?=com\b)/giu,

@@ -1,0 +1,921 @@
+[
+ {
+  "id": "U-POLICY-1",
+  "country": "CA",
+  "ledger": "CAD",
+  "sender": "26600",
+  "body": "TD: A purchase of $73.25 was made at CANADIAN TIRE 118 with your TD Cash Back Visa ending in 4410 on Oct 3, 2026.",
+  "expect": {
+   "post": true,
+   "amountMinor": 7325,
+   "type": "expense",
+   "transfer": false
+  },
+  "notes": "card PRODUCT name containing Cash Back is not a cashback promo",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-2",
+  "country": "CA",
+  "ledger": "CAD",
+  "sender": "26600",
+  "body": "TD: Get 5% cashback on your next purchase of $100.00 with your TD Cash Back Visa ending in 4410. Offer ends Oct 31, 2026.",
+  "expect": {
+   "post": false,
+   "why": "promotion"
+  },
+  "notes": "cashback PROMO naming the card product still held",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-3",
+  "country": "IN",
+  "ledger": "INR",
+  "sender": "VM-AXISBK",
+  "body": "Axis Bank: A/c no. XX5501 is credited with INR 2,350.00 on 05-10-26 towards reversal of Txn UPI/629123456789/MYNTRA. Avl Bal INR 11,420.55",
+  "expect": {
+   "post": true,
+   "amountMinor": 235000,
+   "type": "income",
+   "transfer": false
+  },
+  "notes": "reversal explicitly credited back to the account",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-4",
+  "country": "IN",
+  "ledger": "INR",
+  "sender": "VM-AXISBK",
+  "body": "Axis Bank: Reversal of INR 2,350.00 for Txn UPI/629123456789/MYNTRA initiated. Amount will be credited to your account in 5-7 working days.",
+  "expect": {
+   "post": false,
+   "why": "pending"
+  },
+  "notes": "reversal only initiated: nothing moved",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-5",
+  "country": "IN",
+  "ledger": "INR",
+  "sender": "VM-AXISBK",
+  "body": "Axis Bank: Reversal request received for Txn UPI/629123456789 of INR 2,350.00. We will update you shortly.",
+  "expect": {
+   "post": false,
+   "why": "request"
+  },
+  "notes": "reversal request",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-6",
+  "country": "KE",
+  "ledger": "KES",
+  "sender": "MPESA",
+  "body": "QJ72LK9PQ1 Confirmed. Your refund of Ksh2,300.00 to ALPHA TRADERS has been reversed and Ksh2,300.00 is debited from your M-PESA account on 3/10/26 at 9:15 AM. New M-PESA balance is Ksh1,880.00.",
+  "expect": {
+   "post": false,
+   "why": "other"
+  },
+  "notes": "a reversal that DEBITS the reader is not income (and stays held)",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-8",
+  "country": "IN",
+  "ledger": "INR",
+  "sender": "VM-SBICRD",
+  "body": "Dear Customer, Rs.299.00 has been debited from your SBI Credit Card ending 4455 for purchase at HOTSTAR on 03-10-2026 as per your e-mandate (SI). Not you? Call 1800123456",
+  "expect": {
+   "post": true,
+   "amountMinor": 29900,
+   "type": "expense",
+   "transfer": false
+  },
+  "notes": "executed standing-instruction debit (e-mandate) on a card",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-9",
+  "country": "IN",
+  "ledger": "INR",
+  "sender": "VM-SBICRD",
+  "body": "Dear Customer, Rs.299.00 will be debited from your SBI Credit Card ending 4455 for HOTSTAR on 10-10-2026 as per your e-mandate (SI).",
+  "expect": {
+   "post": false,
+   "why": "scheduled"
+  },
+  "notes": "future e-mandate debit",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-10",
+  "country": "IN",
+  "ledger": "INR",
+  "sender": "VM-SBICRD",
+  "body": "Dear Customer, e-mandate registered on your SBI Credit Card ending 4455 for HOTSTAR for Rs.299.00 monthly. Reply STOP to cancel.",
+  "expect": {
+   "post": false,
+   "why": "mandate-setup"
+  },
+  "notes": "mandate setup",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-11",
+  "country": "GB",
+  "ledger": "GBP",
+  "sender": "Barclays",
+  "body": "Barclays: Debit card purchase of £23.40 at GREGGS 0412 on 04/10/2026 from your account ending 7781. Don't recognise it? Call 0800 000 1234.",
+  "expect": {
+   "post": true,
+   "amountMinor": 2340,
+   "type": "expense",
+   "transfer": false
+  },
+  "notes": "UK callback footer on a completed card purchase",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-12",
+  "country": "GB",
+  "ledger": "GBP",
+  "sender": "Barclays",
+  "body": "Barclays: Debit card purchase of £23.40 at GREGGS 0412 on 04/10/2026 from your account ending 7781. Don't recognise it? Click https://barclays-secure.example/dispute",
+  "expect": {
+   "post": false,
+   "why": "phishing"
+  },
+  "notes": "footer pointing to a link stays bait",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-13",
+  "country": "GB",
+  "ledger": "GBP",
+  "sender": "Barclays",
+  "body": "Barclays: Do you recognise this £23.40 payment at GREGGS 0412? Reply Y or N.",
+  "expect": {
+   "post": false,
+   "why": "request"
+  },
+  "notes": "question about the payment",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-15",
+  "country": "AU",
+  "ledger": "AUD",
+  "sender": "Westpac",
+  "body": "Westpac: Your code 45678 for BPAY payment of $92.15 to ORIGIN ENERGY. Do not share this code.",
+  "expect": {
+   "post": false,
+   "why": "otp"
+  },
+  "notes": "OTP quoting a BPAY amount",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-17",
+  "country": "ES",
+  "ledger": "EUR",
+  "sender": "BBVA",
+  "body": "BBVA: Pago con tarjeta de 54,30 EUR en ZARA SERRANO el 03/10/2026. Si no reconoce la operacion responda NO a este mensaje.",
+  "expect": {
+   "post": false,
+   "why": "request"
+  },
+  "notes": "Spanish reply-to-confirm prompt stays held",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-18",
+  "country": "MX",
+  "ledger": "MXN",
+  "sender": "BBVA",
+  "body": "BBVA: ¿Reconoces esta compra de $1,250.00 en LIVERPOOL con tu tarjeta *4417? Responde SI o NO.",
+  "expect": {
+   "post": false,
+   "why": "request"
+  },
+  "notes": "LatAm two-step confirmation question",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-19",
+  "country": "NZ",
+  "ledger": "NZD",
+  "sender": "",
+  "body": "ASB: A refund of $34.50 from MITRE 10 has been credited to your Visa Debit Mastercard ending 5521 on 05/10/2026.",
+  "expect": {
+   "post": true,
+   "amountMinor": 3450,
+   "type": "income",
+   "transfer": false
+  },
+  "notes": "senderless credit: product name between your and the tail",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-20",
+  "country": "NZ",
+  "ledger": "NZD",
+  "sender": "",
+  "body": "You have received $34.50 from your friend's Visa ending 5521 on 05/10/2026. Ref 7781",
+  "expect": {
+   "post": false,
+   "why": "phishing"
+  },
+  "notes": "senderless: payer card via a possessive is not the reader's",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-21",
+  "country": "IN",
+  "ledger": "INR",
+  "sender": "VM-KOTAKB",
+  "body": "Sent Rs.1,260.00 from Kotak Bank AC X7788 to zomato@icici on 03-10-26.UPI Ref 628811223344. Not you, https://kotak.com/KBANKT/Fraud",
+  "expect": {
+   "post": true,
+   "amountMinor": 126000,
+   "type": "expense",
+   "transfer": true
+  },
+  "notes": "Kotak AC abbreviation names the reader's own account; bank footer link",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-22",
+  "country": "IN",
+  "ledger": "INR",
+  "sender": "",
+  "body": "You have received Rs.1,260.00 from Ref AC X7788 of RAHUL SHARMA on 03-10-26. UPI Ref 628811223344.",
+  "expect": {
+   "post": false,
+   "why": "phishing"
+  },
+  "notes": "senderless credit: AC after a payer word is the payer",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-23",
+  "country": "IN",
+  "ledger": "INR",
+  "sender": "",
+  "body": "Sent Rs.1,260.00 from Kotak Bank AC X7788 to zomato@icici on 03-10-26. Not you? Verify https://kotak-secure.example/dispute",
+  "expect": {
+   "post": false,
+   "why": "phishing"
+  },
+  "notes": "senderless: link with a verify call-to-action stays refused",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-30",
+  "country": "ID",
+  "ledger": "IDR",
+  "sender": "BNI",
+  "body": "Kode OTP 482913 untuk transaksi Rp 50.000 di TOKO MAJU. Jangan berikan kode ini ke siapapun.",
+  "expect": {
+   "post": false,
+   "why": "otp"
+  },
+  "notes": "held wording in the language: otp",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-31",
+  "country": "ID",
+  "ledger": "IDR",
+  "sender": "BNI",
+  "body": "BNI: Transaksi kartu kredit Rp 275.000 di TOKOPEDIA gagal. Saldo tidak terpotong.",
+  "expect": {
+   "post": false,
+   "why": "declined"
+  },
+  "notes": "held wording in the language: declined",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-32",
+  "country": "ID",
+  "ledger": "IDR",
+  "sender": "BCA",
+  "body": "BCA: Rp 150.000 akan didebet dari rekening Anda tanggal 12/10/26 untuk tagihan listrik.",
+  "expect": {
+   "post": false,
+   "why": "scheduled"
+  },
+  "notes": "held wording in the language: scheduled",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-33",
+  "country": "TR",
+  "ledger": "TRY",
+  "sender": "AKBANK",
+  "body": "Promo: Maximum kartinizla 100 TL harcama yapin, 25 TL indirim kazanin! Kampanya 31.10.2026 tarihine kadar.",
+  "expect": {
+   "post": false,
+   "why": "promotion"
+  },
+  "notes": "held wording in the language: promotion",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-34",
+  "country": "TR",
+  "ledger": "TRY",
+  "sender": "GARANTI",
+  "body": "Garanti BBVA: 17.10.2026 tarihinde 890,00 TL tutarindaki harcamaniz reddedildi. Yetersiz bakiye.",
+  "expect": {
+   "post": false,
+   "why": "declined"
+  },
+  "notes": "held wording in the language: declined",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-35",
+  "country": "TR",
+  "ledger": "TRY",
+  "sender": "AKBANK",
+  "body": "Akbank: 450,00 TL islem icin dogrulama kodu 583921. Kodu kimseyle paylasmayin.",
+  "expect": {
+   "post": false,
+   "why": "otp"
+  },
+  "notes": "held wording in the language: otp",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-36",
+  "country": "SE",
+  "ledger": "SEK",
+  "sender": "Swish",
+  "body": "Swish: Erik Berg har skickat en betalningsförfrågan på 250 kr. Godkänn i appen.",
+  "expect": {
+   "post": false,
+   "why": "request"
+  },
+  "notes": "held wording in the language: request",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-37",
+  "country": "SE",
+  "ledger": "SEK",
+  "sender": "Swedbank",
+  "body": "Swedbank: Köp 1 299,00 kr hos ELGIGANTEN nekades. Kortet är spärrat.",
+  "expect": {
+   "post": false,
+   "why": "declined"
+  },
+  "notes": "held wording in the language: declined",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-38",
+  "country": "DK",
+  "ledger": "DKK",
+  "sender": "MobilePay",
+  "body": "MobilePay: Din betaling på 75,00 kr til Café Nord blev afvist.",
+  "expect": {
+   "post": false,
+   "why": "declined"
+  },
+  "notes": "held wording in the language: declined",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-39",
+  "country": "NO",
+  "ledger": "NOK",
+  "sender": "Vipps",
+  "body": "Vipps: Betalingen på 320 kr til Peppes er reservert og ikke gjennomført.",
+  "expect": {
+   "post": false,
+   "why": "pending"
+  },
+  "notes": "held wording in the language: pending",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-40",
+  "country": "CZ",
+  "ledger": "CZK",
+  "sender": "CS",
+  "body": "Česká spořitelna: Platba kartou 459,00 Kč byla zamítnuta. Karta *1234.",
+  "expect": {
+   "post": false,
+   "why": "declined"
+  },
+  "notes": "held wording in the language: declined",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-41",
+  "country": "CZ",
+  "ledger": "CZK",
+  "sender": "KB",
+  "body": "Komerční banka: Ověřovací kód 551203 pro platbu 1 200,00 CZK. Nikomu ho nesdělujte.",
+  "expect": {
+   "post": false,
+   "why": "otp"
+  },
+  "notes": "held wording in the language: otp",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-42",
+  "country": "PL",
+  "ledger": "PLN",
+  "sender": "mBank",
+  "body": "mBank: Transakcja kartą na 89,90 PLN została odrzucona.",
+  "expect": {
+   "post": false,
+   "why": "declined"
+  },
+  "notes": "held wording in the language: declined",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-43",
+  "country": "PL",
+  "ledger": "PLN",
+  "sender": "PKO",
+  "body": "PKO BP: Promocja! Zapłać kartą min. 100 PLN i odbierz 20 PLN rabatu.",
+  "expect": {
+   "post": false,
+   "why": "promotion"
+  },
+  "notes": "held wording in the language: promotion",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-44",
+  "country": "BR",
+  "ledger": "BRL",
+  "sender": "Itau",
+  "body": "Itaú: Compra aprovada no cartão final 7302 valor R$ 120,00 em LOJA CENTRAL. A loja cancelou a compra.",
+  "expect": {
+   "post": false,
+   "why": "declined"
+  },
+  "notes": "held wording in the language: declined",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-45",
+  "country": "BR",
+  "ledger": "BRL",
+  "sender": "Nubank",
+  "body": "Nubank: Pagamento de R$ 89,90 negado. Cartão final 4821.",
+  "expect": {
+   "post": false,
+   "why": "declined"
+  },
+  "notes": "held wording in the language: declined",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-46",
+  "country": "ES",
+  "ledger": "EUR",
+  "sender": "BBVA",
+  "body": "BBVA: Compra por 340,00 EUR en TIENDA NORTE denegada. Tarjeta *4417.",
+  "expect": {
+   "post": false,
+   "why": "declined"
+  },
+  "notes": "held wording in the language: declined",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-47",
+  "country": "IT",
+  "ledger": "EUR",
+  "sender": "Intesa",
+  "body": "Intesa Sanpaolo: Pagamento di 45,00 EUR con carta *1234 non autorizzato.",
+  "expect": {
+   "post": false,
+   "why": "declined"
+  },
+  "notes": "held wording in the language: declined",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-48",
+  "country": "DE",
+  "ledger": "EUR",
+  "sender": "Sparkasse",
+  "body": "Sparkasse: Zahlungsanforderung über 85,00 EUR von Max Beispiel. Bitte bestätigen Sie in der App.",
+  "expect": {
+   "post": false,
+   "why": "request"
+  },
+  "notes": "held wording in the language: request",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-49",
+  "country": "DE",
+  "ledger": "EUR",
+  "sender": "DeutscheBank",
+  "body": "Deutsche Bank: Ihre pushTAN 482 913 für die Überweisung von 1.500,00 EUR.",
+  "expect": {
+   "post": false,
+   "why": "otp"
+  },
+  "notes": "held wording in the language: otp",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-50",
+  "country": "NL",
+  "ledger": "EUR",
+  "sender": "ING",
+  "body": "ING: Betaalverzoek van Piet de Vries voor EUR 25,00. Open de app om te betalen.",
+  "expect": {
+   "post": false,
+   "why": "request"
+  },
+  "notes": "held wording in the language: request",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-51",
+  "country": "TH",
+  "ledger": "THB",
+  "sender": "KBank",
+  "body": "KBank: รายการใช้จ่าย 890.00 บาท ไม่สำเร็จ บัตรลงท้าย 5678",
+  "expect": {
+   "post": false,
+   "why": "declined"
+  },
+  "notes": "held wording in the language: declined",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-52",
+  "country": "TH",
+  "ledger": "THB",
+  "sender": "SCB",
+  "body": "SCB: รหัส OTP 482913 สำหรับรายการ 1,500.00 บาท ห้ามแจ้งรหัสนี้แก่ผู้อื่น",
+  "expect": {
+   "post": false,
+   "why": "otp"
+  },
+  "notes": "held wording in the language: otp",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-53",
+  "country": "VN",
+  "ledger": "VND",
+  "sender": "VCB",
+  "body": "VCB: Giao dich thanh toan 250.000 VND khong thanh cong. So du khong thay doi.",
+  "expect": {
+   "post": false,
+   "why": "declined"
+  },
+  "notes": "held wording in the language: declined",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-54",
+  "country": "VN",
+  "ledger": "VND",
+  "sender": "MB",
+  "body": "MB: Ma OTP 482913 cho giao dich 500.000VND. Khong chia se ma nay.",
+  "expect": {
+   "post": false,
+   "why": "otp"
+  },
+  "notes": "held wording in the language: otp",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-55",
+  "country": "TZ",
+  "ledger": "TZS",
+  "sender": "CRDB",
+  "body": "CRDB: Muamala wa TZS 150,000.00 imeshindwa. Hakuna kiasi kilichokatwa.",
+  "expect": {
+   "post": false,
+   "why": "declined"
+  },
+  "notes": "held wording in the language: declined",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-56",
+  "country": "JP",
+  "ledger": "JPY",
+  "sender": "SMBC",
+  "body": "三井住友カード：ご利用金額 3,200円は仮売上です。確定時にお知らせします。",
+  "expect": {
+   "post": false,
+   "why": "pending"
+  },
+  "notes": "held wording in the language: pending",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-57",
+  "country": "JP",
+  "ledger": "JPY",
+  "sender": "Rakuten",
+  "body": "楽天カード：認証コード 482913 を入力してください。お支払い金額 5,400円",
+  "expect": {
+   "post": false,
+   "why": "otp"
+  },
+  "notes": "held wording in the language: otp",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-58",
+  "country": "CN",
+  "ledger": "CNY",
+  "sender": "ICBC",
+  "body": "工商银行：您尾号1234卡的消费 128.00元 交易失败。",
+  "expect": {
+   "post": false,
+   "why": "declined"
+  },
+  "notes": "held wording in the language: declined",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-59",
+  "country": "TW",
+  "ledger": "TWD",
+  "sender": "ESUN",
+  "body": "玉山銀行：您的驗證碼 482913，消費 NT$890 請勿告知他人。",
+  "expect": {
+   "post": false,
+   "why": "otp"
+  },
+  "notes": "held wording in the language: otp",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-60",
+  "country": "KR",
+  "ledger": "KRW",
+  "sender": "Shinhan",
+  "body": "[Web발신] 신한카드 인증번호 482913 결제금액 45,000원",
+  "expect": {
+   "post": false,
+   "why": "otp"
+  },
+  "notes": "held wording in the language: otp",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-61",
+  "country": "KR",
+  "ledger": "KRW",
+  "sender": "KBCard",
+  "body": "[Web발신] [KB국민카드] 결제 예정 금액 125,000원 (10/25 출금 예정)",
+  "expect": {
+   "post": false,
+   "why": "scheduled"
+  },
+  "notes": "held wording in the language: scheduled",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-62",
+  "country": "IN",
+  "ledger": "INR",
+  "sender": "VM-SBIUPI",
+  "body": "SBI: आपके लेनदेन रु 1,500.00 के लिए ओटीपी 482913 है।",
+  "expect": {
+   "post": false,
+   "why": "otp"
+  },
+  "notes": "held wording in the language: otp",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-63",
+  "country": "IN",
+  "ledger": "INR",
+  "sender": "VM-HDFCBK",
+  "body": "HDFC: आपका रु 2,000.00 का भुगतान विफल रहा।",
+  "expect": {
+   "post": false,
+   "why": "declined"
+  },
+  "notes": "held wording in the language: declined",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-70",
+  "country": "CL",
+  "ledger": "CLP",
+  "sender": "BancoChile",
+  "body": "Banco de Chile: Purchase of $23.450 made with your card ending 7731 at SODIMAC on 06/10/2026.",
+  "expect": {
+   "post": true,
+   "amountMinor": 23450,
+   "type": "expense",
+   "transfer": false
+  },
+  "notes": "dot-grouped Chilean pesos resolve (CLP has one reading)",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-71",
+  "country": "CO",
+  "ledger": "COP",
+  "sender": "Bancolombia",
+  "body": "Bancolombia: Purchase of $48.000 made with your debit card ending 4521 at EXITO on 06/10/2026.",
+  "expect": {
+   "post": true,
+   "amountMinor": 4800000,
+   "type": "expense",
+   "transfer": false
+  },
+  "notes": "dot-grouped Colombian pesos resolve (COP has one reading)",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-72",
+  "country": "US",
+  "ledger": "USD",
+  "sender": "CHASE",
+  "body": "Chase: Purchase of $23.450 made with your card ending 7731 at SODIMAC on 06/10/2026.",
+  "expect": {
+   "post": false,
+   "why": "other"
+  },
+  "notes": "US dollars read the same figure two ways: stays unclear",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-73",
+  "country": "MX",
+  "ledger": "MXN",
+  "sender": "BBVA",
+  "body": "BBVA: Purchase of $45.000 made with your card ending 4417 at OXXO on 06/10/2026.",
+  "expect": {
+   "post": false,
+   "why": "other"
+  },
+  "notes": "MXN reads 45.000 two ways and the Mexican shape rule holds",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-74",
+  "country": "CO",
+  "ledger": "COP",
+  "sender": "Bancolombia",
+  "body": "Bancolombia: Purchase of $45 made with your debit card ending 4521 at EXITO on 06/10/2026.",
+  "expect": {
+   "post": false,
+   "why": "other"
+  },
+  "notes": "a Colombian purchase under COP 50 is a mangled figure",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-75",
+  "country": "PH",
+  "ledger": "PHP",
+  "sender": "BDO",
+  "body": "BDO: Your BDO Debit Card ending 8821 was used for P1,245.50 at MERCURY DRUG on 10/06/2026 09:41 AM.",
+  "expect": {
+   "post": true,
+   "amountMinor": 124550,
+   "type": "expense",
+   "transfer": false
+  },
+  "notes": "bare P before a two-decimal figure is the Philippine peso",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-76",
+  "country": "PH",
+  "ledger": "PHP",
+  "sender": "BDO",
+  "body": "BDO: Use promo code P2 for 20% off at Pier 39. Spend P500.00 more to win!",
+  "expect": {
+   "post": false,
+   "why": "promotion"
+  },
+  "notes": "P-prefixed promo text",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-77",
+  "country": "PH",
+  "ledger": "PHP",
+  "sender": "BDO",
+  "body": "BDO: OTP 482913 for your P1,500.00 online payment. Do not share this code.",
+  "expect": {
+   "post": false,
+   "why": "otp"
+  },
+  "notes": "OTP quoting a peso amount",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-78",
+  "country": "PH",
+  "ledger": "PHP",
+  "sender": "BDO",
+  "body": "BDO: Your BDO Debit Card ending 8821 will be charged P1,245.50 at MERCURY DRUG on 10/08/2026.",
+  "expect": {
+   "post": false,
+   "why": "scheduled"
+  },
+  "notes": "future peso charge",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-79",
+  "country": "PH",
+  "ledger": "PHP",
+  "sender": "BDO",
+  "body": "BDO: Your BDO Debit Card ending 8821 was used for P1245 at MERCURY DRUG on 10/06/2026 09:41 AM.",
+  "expect": {
+   "post": false,
+   "why": "other"
+  },
+  "notes": "bare P integer is not money",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-80",
+  "country": "HK",
+  "ledger": "HKD",
+  "sender": "#HSBC",
+  "body": "HSBC: You have received HKD 1,250.00 from LEE KA MING via FPS to your account ending 421 on 02 Oct 2026 14:05. Ref: FRN20261002PAYC0912345",
+  "expect": {
+   "post": true,
+   "amountMinor": 125000,
+   "type": "income",
+   "transfer": true
+  },
+  "notes": "HSBC name is shared with the UAE; an HKD alert on an HKD ledger is not UAE evidence",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-81",
+  "country": "HK",
+  "ledger": "HKD",
+  "sender": "#HSBC",
+  "body": "HSBC: Your one-time password is 482913 for the HKD 500.00 transfer. Do not share this code.",
+  "expect": {
+   "post": false,
+   "why": "otp"
+  },
+  "notes": "OTP from the shared bank name",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-82",
+  "country": "HK",
+  "ledger": "HKD",
+  "sender": "#HSBC",
+  "body": "HSBC: Your FPS payment of HKD 500.00 to CHAN SIU MING was declined.",
+  "expect": {
+   "post": false,
+   "why": "declined"
+  },
+  "notes": "declined from the shared bank name",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-83",
+  "country": "HK",
+  "ledger": "HKD",
+  "sender": "#HSBC",
+  "body": "HSBC: FPS payment request of HKD 500.00 from LEE KA MING. Approve it in the HSBC HK app.",
+  "expect": {
+   "post": false,
+   "why": "request"
+  },
+  "notes": "payment request from the shared bank name",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-POLICY-84",
+  "country": "AE",
+  "ledger": "AED",
+  "sender": "HSBC",
+  "body": "HSBC: Your card ending 7766 was used for AED 85.00 at SPINNEYS DUBAI on 02-Oct-2026.",
+  "expect": {
+   "post": true,
+   "amountMinor": 8500,
+   "type": "expense",
+   "transfer": false
+  },
+  "notes": "UAE ledger keeps the launch path for the same bank name",
+  "provenance": "synthetic"
+ }
+]
