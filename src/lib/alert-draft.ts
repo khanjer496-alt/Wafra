@@ -1,5 +1,8 @@
 import {
   CURRENCY_SYMBOL_CANDIDATES,
+  SUFFIX_ONLY_CURRENCY_TOKENS,
+  UNSPACED_CURRENCY_TOKEN,
+  UNSPACED_SCRIPT_CHAR,
   currencyMinorUnits,
   type CurrencyCode,
 } from '@/lib/currency-metadata';
@@ -103,7 +106,9 @@ interface ParsedNumber {
  * group thousands with a dot ("Rp 125.000"): the dot-three-digit reading is
  * not ambiguous for them.
  */
-const DOT_GROUPING_CURRENCIES = new Set(['IDR', 'COP']);
+// Argentine banks and wallets print the peso the same way ("$ 6.430",
+// "$ 9.500") and never a three-digit fraction.
+const DOT_GROUPING_CURRENCIES = new Set(['IDR', 'COP', 'ARS']);
 
 function parseNumber(source: string, exponent: number, currency = '', dotDecimal = false): ParsedNumber | null {
   let value = source.trim().replace(/[+]/g, '');
@@ -295,12 +300,27 @@ function collectRaw(normalized: string, aliases: CurrencyAliasMap = {}): RawCand
       // a CJK label is not ("金额58.00元", "금액12,000원").
       if (!prefix && (match.index as number) > 0 &&
         /[\p{L}\p{N}]/u.test(normalized[(match.index as number) - 1]) &&
-        !/[\p{Script=Han}\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(normalized[(match.index as number) - 1])) continue;
+        !UNSPACED_SCRIPT_CHAR.test(normalized[(match.index as number) - 1])) continue;
       const matchEnd = (match.index as number) + match[0].length;
-      if (matchEnd < normalized.length && /[\p{L}\p{N}]/u.test(normalized[matchEnd])) continue;
       const token = prefix ? match[1] : match[2];
       const currencies = CURRENCY_SYMBOL_CANDIDATES[token];
       if (!currencies) continue;
+      // A symbol written without spaces (CJK, Thai) is followed by its
+      // particle or the next word ("1,500円を", "52.00元的"); only a glued
+      // Latin letter or digit makes it part of an identifier there.
+      if (matchEnd < normalized.length) {
+        const next = normalized[matchEnd];
+        if (/\p{N}/u.test(next) ||
+          (/\p{L}/u.test(next) && !(UNSPACED_CURRENCY_TOKEN.test(token) && UNSPACED_SCRIPT_CHAR.test(next)))) continue;
+      }
+      // Tokens like "đ" or "Ft" mean money only after a figure.
+      if (prefix && SUFFIX_ONLY_CURRENCY_TOKENS.has(token)) continue;
+      // A letter-led prefix symbol glued to a word or a path is part of an
+      // identifier: "IMPS/627298765432" holds the sol sign S/ and a 12-digit
+      // reference, "NEFTRs500X" an Rs. Only an unattached symbol is money.
+      // A slash also blocks the sol sign only: "UPI/Rs.500" is a real narration.
+      if (prefix && /^[A-Za-z]/.test(token) && (match.index as number) > 0 &&
+        (token === 'S/' ? /[\p{L}\p{N}/_]/u : /[\p{L}\p{N}_]/u).test(normalized[(match.index as number) - 1])) continue;
       // A dollar sign glued to a Latin letter is some OTHER qualified dollar
       // ("RD$", or "S$" inside an unknown prefix): never the bare "$".
       if (prefix && token.endsWith('$') && (match.index as number) > 0 &&
@@ -329,17 +349,32 @@ function collectRaw(normalized: string, aliases: CurrencyAliasMap = {}): RawCand
   const clock = (item: RawCandidate): boolean =>
     (normalized[item.end] === ':' && /\d/.test(normalized[item.end + 1] ?? '')) ||
     (normalized[item.start - 1] === ':' && /\d/.test(normalized[item.start - 2] ?? ''));
+  // Malaysian bank SMS open with a zero-charge marker ("RM0 Maybank: ..."):
+  // a zero with no decimals, at the very start, directly before a sender word.
+  // It is the carrier's tag, never an amount, and read as one it became a
+  // second money field on every alert. A zero anywhere else stays (a real
+  // "Fee RM0.00" is a fee), and a zero movement is still refused downstream.
+  const leading = normalized.length - normalized.trimStart().length;
+  const zeroMarker = (item: RawCandidate): boolean =>
+    item.start === leading && /^[+-]?0$/.test(item.amount) && /^\s+\p{L}/u.test(normalized.slice(item.end));
   const sorted = found
-    .filter((item) => !clock(item))
+    .filter((item) => !clock(item) && !zeroMarker(item))
     .sort((a, b) => a.start - b.start || b.end - a.end)
     .filter((item, index, all) => !all.slice(0, index).some((prior) => prior.start === item.start && prior.end === item.end));
   // "$350.00 MXN" is ONE amount written with both a symbol and its ISO code.
   // A symbol reading that overlaps an ISO reading of the same figure is that
   // same figure, never a second movement.
-  return sorted.filter((item) => item.evidence === 'iso-code' || !sorted.some((other) =>
+  const digitsOf = (item: RawCandidate): string => item.amount.replace(/[^\d]/g, '');
+  // "新台幣1,280元" names the currency in front and repeats the generic 元
+  // behind the same figure: one amount, and the qualified name decides it.
+  const GENERIC_SUFFIX = new Set(['元', '円', '원']);
+  return sorted.filter((item) => (item.evidence === 'iso-code' || !sorted.some((other) =>
     other.evidence === 'iso-code' && other.start < item.end && item.start < other.end &&
-    other.amount.replace(/[^\d]/g, '') === item.amount.replace(/[^\d]/g, '') &&
-    item.currencies.includes(other.currencies[0])));
+    digitsOf(other) === digitsOf(item) &&
+    item.currencies.includes(other.currencies[0]))) &&
+    !(GENERIC_SUFFIX.has(item.token) && sorted.some((other) =>
+      other !== item && other.token !== item.token && other.currencies.length === 1 &&
+      other.start < item.end && item.start < other.end && digitsOf(other) === digitsOf(item))));
 }
 
 const HARD_NEGATIVES: readonly [string, RegExp][] = [

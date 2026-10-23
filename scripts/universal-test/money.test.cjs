@@ -325,8 +325,13 @@ test('an identifier or another currency\'s yuan-unit text is not recovered besid
   assert.notEqual(extractUniversalMoney('参考号AB金额58.00元').amount.evidence, 'explicit');
   assert.notEqual(extractUniversalMoney('参考编号金额58.00元').amount.evidence, 'explicit');
   // 新台幣…元 is Taiwan dollars; reading its figure as CNY would book the wrong currency.
-  assert.notEqual(extractUniversalMoney('消費新台幣1,280元').amount.evidence, 'explicit');
-  assert.notEqual(extractUniversalMoney('港幣50元').amount.evidence, 'explicit');
+  // The qualified name decides it: the figure is TWD (and 港幣 HKD), never CNY.
+  const currencyOf = (text) => extractUniversalMoney(text).amount.value?.currency ?? null;
+  assert.notEqual(currencyOf('消費新台幣1,280元'), 'CNY');
+  assert.notEqual(currencyOf('港幣50元'), 'CNY');
+  assert.equal(currencyOf('消費新台幣1,280元'), 'TWD');
+  assert.equal(currencyOf('港幣50元'), 'HKD');
+  assert.equal(currencyOf('消费58.00元'), 'CNY');
 });
 test('the Malaysian free-SMS marker RM0 is not money; a real zero amount still is', () => {
   const alert = extractUniversalMoney('RM0 Maybank: Your card ending 1234 has been charged RM59.90 at SHOPEE');

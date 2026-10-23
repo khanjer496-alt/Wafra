@@ -1573,8 +1573,14 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
     at('USD', 'US', 'Your card ending 1234 was charged $12.990 at STORE.') === null);
   ok('MX: "$45.000" stays unclear',
     at('MXN', 'MX', 'Your card ending 1234 was charged $45.000 at OXXO.') === null);
-  ok('AR: "$ 6.430" stays unclear (two ARS readings)',
-    at('ARS', 'AR', 'Your card ending 1234 was charged $ 6.430 at PEDIDOSYA.') === null);
+  // Argentine banks and wallets group thousands with a dot and never print a
+  // three-digit fraction, so ARS has exactly one reading of "$ 6.430" (as COP
+  // does); the person's own country then settles the shared symbol.
+  const ar = at('ARS', 'AR', 'Your card ending 1234 was charged $ 6.430 at PEDIDOSYA.');
+  ok('AR: "$ 6.430" is 6,430.00 pesos (one ARS reading)',
+    ar?.amountFils === 643000 && ar.currency === 'ARS', ar);
+  ok('AR: a US ledger still keeps "$ 6.430" unclear',
+    at('USD', 'US', 'Your card ending 1234 was charged $ 6.430 at PEDIDOSYA.') === null);
   ok('CO: a purchase under 50 pesos stays refused',
     at('COP', 'CO', 'Your card ending 1234 was charged $45 at EXITO.') === null);
   const ph = at('PHP', 'PH', 'Your card ending 5678 was used for P3,200.00 at SHELL C5.');

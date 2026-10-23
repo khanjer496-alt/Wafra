@@ -194,5 +194,103 @@ for (const [label, source, reason] of [
     kwd.candidates[0].interpretations.some((i) => i.minorUnits === '12345'), kwd);
 }
 
+// Local currency spellings a bank prints instead of the ISO code. Each is one
+// amount in one (or, for the krone family, a named set of) currency.
+{
+  const read = (text) => inspectAlertDraft(text).candidates
+    .map((c) => `${c.currencyCandidates.join('/')}:${[...new Set(c.interpretations.map((i) => i.minorUnits))].join(',')}`);
+  const cases = [
+    ['Köp 245,00 kr ICA NARA, kort 1234', 'SEK/NOK/DKK/ISK:24500'],
+    ['Betaling kr 1.250,00 hos REMA', 'SEK/NOK/DKK/ISK:125000'],
+    ['Platba kartou 459,00 Kč ALBERT', 'CZK:45900'],
+    ['Platba kartou 459,00 Kc ALBERT', 'CZK:45900'],
+    ['Płatność BLIK 129,00 zł ALLEGRO', 'PLN:12900'],
+    ['Platnosc BLIK 129,00 zl ALLEGRO', 'PLN:12900'],
+    ['₺145,00 tutarında ödeme', 'TRY:14500'],
+    ['ยอด 1,250.00 บาท ที่ TOPS', 'THB:125000'],
+    ['ชำระ ฿1,250.00 ที่ TOPS', 'THB:125000'],
+    ['Thanh toan 450.000đ tai HIGHLANDS', 'VND:450000'],
+    ['Thanh toan ₫450.000 tai HIGHLANDS', 'VND:450000'],
+    ['Sent Tsh 25,000 to JOHN', 'TZS:2500000'],
+    ['Sent TSh 25,000 to JOHN', 'TZS:2500000'],
+    ['Charged USh 85,000 at SHOPRITE', 'UGX:85000'],
+    ['Charged GH₵ 120.50 at MELCOM', 'GHS:12050'],
+    ['Charged Ksh 17,500.00 at NAIVAS', 'KES:1750000'],
+    ['Charged ₱640.00 at SM', 'PHP:64000'],
+    ['Rp. 125.000 di INDOMARET', 'IDR:12500000'],
+    ['Ft 1500 and 1 500 Ft', 'HUF:150000'],
+    ['تم سحب 3,000.00 جم من الصراف', 'EGP:300000'],
+    ['山田さんから1,500円を受け取りました', 'JPY:1500'],
+    ['30,000원을 결제하였습니다', 'KRW:30000'],
+    ['恒生銀行簽賬港幣52.00。', 'HKD:5200'],
+    ['消費港元52.00', 'HKD:5200'],
+    ['消費新台幣1,280元，如有疑問', 'TWD:128000'],
+    ['消費新台币1,280元', 'TWD:128000'],
+    ['消费人民币58.00元', 'CNY:5800'],
+    ['消费58.00元', 'CNY:5800'],
+  ];
+  for (const [text, want] of cases) {
+    const got = read(text);
+    ok(`local spelling: ${text}`, got.length === 1 && (got[0] === want || (want.startsWith('HUF') && got[0].startsWith('HUF'))), got);
+  }
+  // A qualified name decides the currency; the generic 元 behind the same figure is not a second amount.
+  const nt = inspectAlertDraft('消費新台幣1,280元');
+  ok('a qualified currency name absorbs the generic 元 for the same figure',
+    nt.candidates.length === 1 && nt.candidates[0].currency === 'TWD', nt.candidates);
+  // Negatives: the same letters in ordinary text are not money.
+  for (const text of ['Krone is the currency', 'Ukraine 5 sites', 'đ 5 em', 'Ftw 5', '5 Ftw', 'He said kr',
+    'zl 5x6', 'Kc 5 kcal', 'a 5 krona coin', 'ref IMPS/627298765432/SUNIL', 'NEFTRs500X ref', 'go.example/s/9Kx']) {
+    const draft = inspectAlertDraft(text);
+    ok(`not money: ${text}`, draft.candidates.length === 0, draft.candidates.map((c) => c.sourceText));
+  }
+}
+
+// An alphabetic prefix symbol glued to a word, digit or path is part of an
+// identifier; an unattached one still reads (these must keep working).
+{
+  const first = (text) => inspectAlertDraft(text).candidates.map((c) => c.sourceText.trim());
+  ok('Rs. before a figure still reads', first('Rs.1,250.00 spent on HDFC Bank Card')[0] === 'Rs.1,250.00');
+  ok('(Rs500) still reads', first('Paid (Rs500) today')[0] === 'Rs500');
+  ok('Amt:Rs.799 still reads', first('Amt:Rs.799 debited')[0] === 'Rs.799');
+  ok('R$ 58,40 still reads', first('Compra R$ 58,40 aprovada')[0] === 'R$ 58,40');
+  ok('S/ 30 still reads', first('Te yapeó S/ 30')[0] === 'S/ 30');
+  ok('an IMPS reference is not soles', first('towards IMPS/627298765432/SUNIL PATIL').length === 0);
+  ok('an Rs glued to a word is not rupees', first('NEFTRs500X').length === 0);
+  ok('a short link path is not soles', first('go.example/s/9Kx').length === 0);
+}
+
+// A zero-charge marker opens many Malaysian bank SMS ("RM0 Maybank: ...").
+{
+  const maybank = inspectAlertDraft('RM0 Maybank: Your card ending 1234 has been charged RM59.90 at SHOPEE on 07 Sep 2026.');
+  ok('the RM0 marker is not a second amount',
+    maybank.candidates.length === 1 && maybank.candidates[0].minorUnits === '5990', maybank.candidates);
+  const lead = inspectAlertDraft('  RM0 CIMB: txn RM128.40 at AEON');
+  ok('leading whitespace before the marker does not hide it',
+    lead.candidates.length === 1 && lead.candidates[0].minorUnits === '12840', lead.candidates);
+  const iso = inspectAlertDraft('MYR0 Hong Leong: txn MYR45.60 at JAYA');
+  ok('the marker may be an ISO code too', iso.candidates.length === 1 && iso.candidates[0].minorUnits === '4560', iso.candidates);
+  ok('control: a zero with decimals at the start is a real figure',
+    inspectAlertDraft('RM0.00 charged at SHOP').candidates.length === 1);
+  ok('control: a zero fee inside the text stays',
+    inspectAlertDraft('Charged RM12.00 at SHOP. Annual fee RM0 waived').candidates.length === 2);
+  ok('control: a zero balance stays',
+    inspectAlertDraft('Your balance is RM0').candidates.length === 1);
+  ok('control: a figure after the marker is not dropped when the marker is followed by a digit',
+    inspectAlertDraft('RM0 5 items').candidates.length === 1);
+}
+
+// Argentine pesos print dot thousands and no decimals; that is one reading
+// for ARS, while the same text on a US-style dollar stays ambiguous.
+{
+  const draft = inspectAlertDraft('Pagaste $ 6.430 en PEDIDOSYA');
+  const ars = draft.candidates[0].interpretations.filter((i) => i.currency === 'ARS');
+  ok('ARS reads $ 6.430 as 6,430.00 only', ars.length === 1 && ars[0].minorUnits === '643000', ars);
+  const usd = draft.candidates[0].interpretations.filter((i) => i.currency === 'USD').map((i) => i.minorUnits).sort();
+  ok('control: USD still keeps both readings of $ 6.430', usd.join() === '643,643000', usd);
+  const comma = inspectAlertDraft('Pagaste $ 6,43 en PEDIDOSYA');
+  ok('control: an ARS $ 6,43 still reads 6.43',
+    comma.candidates[0].interpretations.some((i) => i.currency === 'ARS' && i.minorUnits === '643'), comma.candidates);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
