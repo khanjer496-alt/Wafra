@@ -3296,7 +3296,11 @@ export default {
       if (!shape) return json({ error: 'invalid_shape' }, 400);
       const voter = await sharedFormatsVaultHash(env, device.vault_id);
       if (await overFormatSubmissionLimit(env, voter)) return json({ error: 'rate_limited' }, 429);
-      const status = await recordFormatSubmission(env, shape, await sharedShapeHash(shape), voter);
+      const vault = await env.DB.prepare('SELECT created_at FROM vaults WHERE id = ?1')
+        .bind(device.vault_id)
+        .first<{ created_at: number }>();
+      if (!vault) return json({ error: 'unauthorized' }, 401);
+      const status = await recordFormatSubmission(env, shape, await sharedShapeHash(shape), voter, vault.created_at);
       return json({ status });
     }
 
@@ -3308,7 +3312,7 @@ export default {
         'cache-control': 'public, max-age=3600',
         'x-content-type-options': 'nosniff',
       };
-      if ((req.headers.get('if-none-match') ?? '').split(',').some((tag) => tag.trim() === etag)) {
+      if ((req.headers.get('if-none-match') ?? '').split(',').some((tag) => tag.trim().replace(/^W\//, '') === etag)) {
         return new Response(null, { status: 304, headers: cacheHeaders });
       }
       return new Response(JSON.stringify({ formats }), {

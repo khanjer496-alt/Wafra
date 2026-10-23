@@ -14,10 +14,12 @@ variable part replaced by a slot kind. A shape contains:
   time, card, balance and other numbers, recording only their *format*,
 - a boolean for security-advisory boilerplate.
 
-It never contains amounts, merchant or personal names, card digits, balances,
-dates, times, account numbers, links, or the message text itself. The app
-refuses to build a shape whose literal wording contains a digit, `@`, or a URL,
-and the relay re-validates every field strictly; unknown fields are rejected.
+It never contains amounts, card digits, balances, dates, times, account
+numbers, links, or the message text itself. The app refuses to build a shape
+whose literal wording contains a digit, `@`, or a URL, or a word the learner
+flags as a possible name that is not common banking boilerplate. That name
+check is a heuristic, so k-anonymity (below) is the backstop, and unpublished
+shapes are deleted after 30 days. The relay re-validates every field strictly; unknown fields are rejected.
 Shapes larger than 8 KB are rejected. The relay never logs shape content.
 
 The relay stores each vote against a keyed pseudonym (HMAC-SHA256 of the vault

@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 552c96c3753ef0e5ca6fae94e57421bd85621cb9bf0ede54c1998af0459ff06d
+// Generated from normal shipping TypeScript. Source SHA-256: 4f2852c1d94c5ec01136d14159d4f54a1c40f914a79097266d582529afd5c5b7
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -4935,8 +4935,8 @@ const S = {
         ar: 'ساعد مستخدمي وفرة الآخرين مع هذا البنك',
     },
     shareFormatsSettingBody: {
-        en: 'When you teach a bank format, only its shape is shared — never amounts, names, card numbers, dates or message text. A format is used only after 3 different people teach the same one.',
-        ar: 'عند تعليم وفرة صيغة بنك، تُشارك بنية الصيغة فقط — لا المبالغ ولا الأسماء ولا أرقام البطاقات ولا التواريخ ولا نص الرسالة. لا تُستخدم الصيغة إلا بعد أن يعلّم ثلاثة أشخاص مختلفين الصيغة نفسها.',
+        en: 'When you teach a bank format, only the bank\'s wording is shared, with amounts, card numbers, dates and words that look like names removed — never the message itself. A format is used only after 3 different people teach the identical one.',
+        ar: 'عند تعليم وفرة صيغة بنك، تُشارك صياغة البنك فقط، بعد حذف المبالغ وأرقام البطاقات والتواريخ والكلمات التي تشبه الأسماء — ولا تُشارك الرسالة نفسها أبداً. لا تُستخدم الصيغة إلا بعد أن يعلّم ثلاثة أشخاص مختلفين الصيغة نفسها تماماً.',
     },
     shareFormatsSaveFailed: {
         en: 'The sharing choice could not be saved. Try again.',

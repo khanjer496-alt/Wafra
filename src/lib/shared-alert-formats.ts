@@ -23,10 +23,11 @@ import { inspectUniversalBankEvent } from '@/lib/universal-parser';
  * code, the direction, the currency and the typed token sequence. Literal
  * anchors are boilerplate words; every variable part (amount, balance,
  * merchant, date, time, card digits, references) is a typed SLOT with no
- * value. No message text, amount, name or digit run is ever in a shape.
- * Whether a literal is boilerplate or a personal name is not decidable on the
- * phone; the relay only publishes a shape that several unrelated vaults
- * submitted identically (k-anonymity), which a name never satisfies.
+ * value. No message text, amount or digit run is ever in a shape. A word the
+ * learner flags as a possible name refuses the shape unless it is common
+ * banking boilerplate. That heuristic cannot catch every name, so the relay
+ * also publishes only a shape that several unrelated vaults submitted
+ * identically (k-anonymity), and drops unpublished shapes after 30 days.
  *
  * `shapeHash` identifies a shape (sha256 over canonical sorted-key JSON).
  * `validateSharedAlertShape` is the single strict gate, used by the sanitizer,
@@ -34,7 +35,8 @@ import { inspectUniversalBankEvent } from '@/lib/universal-parser';
  *
  * `matchSharedAlertShape` reuses `matchLearnedFormat` (whole-message match,
  * AE/SA never overridden, non-completed wording, future dates) by converting a
- * shape to a LearnedTemplate in memory. A match is only `prefill` by default:
+ * shape to a LearnedTemplate in memory. With no sender (pasted text) only a
+ * single unambiguous shape may prefill, never post. A match is only `prefill` by default:
  * it is `post` solely when independent deterministic evidence
  * (inspectUniversalBankEvent) agrees on direction and amount, and the
  * best-effort-autopost guards stay silent. Contradicting direction evidence
@@ -65,6 +67,7 @@ export type SharedShapeRefusal =
   | 'blocked'
   | 'no-amount'
   | 'unsafe-literal'
+  | 'possible-name'
   | 'too-large'
   | 'invalid-shape';
 
@@ -123,6 +126,28 @@ const canonicalBytes = (shape: SharedAlertShape): number => utf8ToBytes(canonica
 const unsafeLiteral = (text: string): boolean =>
   /\d/.test(text) || text.includes('@') || /http|www\./i.test(text) ||
   text.split(/\s+/).some((word) => word.length >= 24);
+
+/**
+ * Words the learner flags as possibly a name (m: 1) never leave the phone.
+ * Bank SMS often shout their boilerplate in capitals, which the name heuristic
+ * also flags, so common banking words stay shareable; anything else flagged
+ * refuses the whole shape rather than upload a word that may be a person.
+ */
+const SHAREABLE_FLAGGED = new Set([
+  'account', 'accounts', 'acct', 'alert', 'amount', 'atm', 'available', 'avail', 'avl', 'balance',
+  'bank', 'banking', 'card', 'cards', 'cash', 'charge', 'charged', 'cheque', 'clear', 'cleared',
+  'credit', 'credited', 'customer', 'debit', 'debited', 'deposit', 'deposited', 'dear', 'limit',
+  'merchant', 'mobile', 'online', 'paid', 'payment', 'pos', 'purchase', 'received', 'refund',
+  'refunded', 'reversal', 'reversed', 'salary', 'sent', 'spent', 'thank', 'thanks', 'total',
+  'transaction', 'transfer', 'transferred', 'upi', 'used', 'wallet', 'withdrawal', 'withdrawn',
+  'your', 'from', 'with', 'info', 'details', 'ending', 'debitcard', 'creditcard', 'neft', 'imps', 'rtgs',
+  'bal', 'ac', 'acc', 'txn', 'amt', 'avbl', 'ref', 'dr', 'cr', 'vpa', 'ltd', 'sms', 'call', 'block',
+  'not', 'you', 'please', 'pls', 'is', 'has', 'been', 'was', 'on', 'at', 'to', 'by', 'for', 'of', 'the',
+  'and', 'in', 'a', 'an', 'if', 'or', 'via', 'new', 'now', 'helpline', 'support', 'service',
+]);
+const flaggedName = (token: TemplateToken): boolean =>
+  token.k === 'L' && token.m === 1 &&
+  token.v.split(/[^\p{L}]+/u).some((word) => word !== '' && !SHAREABLE_FLAGGED.has(word.toLowerCase()));
 
 const phoneLike = (sender: string): boolean => (sender.match(/\d/g) ?? []).length >= 7;
 
@@ -224,6 +249,7 @@ export function toSharedAlertShape(template: LearnedTemplate): SharedShapeResult
   if (template.blocked) return refuse('blocked');
   if (!template.tokens.some((token) => token.k === 'AMT')) return refuse('no-amount');
   if (template.tokens.some((token) => token.k === 'L' && unsafeLiteral(token.v))) return refuse('unsafe-literal');
+  if (template.tokens.some(flaggedName)) return refuse('possible-name');
   const candidate = {
     v: 1, sender, direction: template.direction, currency: template.currency,
     aliases: template.aliases, dateOrder: template.dateOrder, tokens: template.tokens, advisory: template.advisory,
@@ -257,6 +283,17 @@ const templateForShape = (format: SharedAlertFormat): LearnedTemplate => ({
   updatedAt: 0,
 });
 
+/** Lists are validated once per array; the store replaces the array on every download. */
+const validatedLists = new WeakMap<object, SharedAlertFormat[]>();
+const validatedList = (formats: readonly SharedAlertFormat[]): SharedAlertFormat[] => {
+  let valid = validatedLists.get(formats);
+  if (!valid) {
+    valid = validateSharedAlertFormatList(formats as unknown[]) ?? [];
+    validatedLists.set(formats, valid);
+  }
+  return valid;
+};
+
 /**
  * Match `source` against downloaded shared shapes. Formats are re-validated
  * here, so a store edited on disk cannot widen what matches.
@@ -269,14 +306,31 @@ export function matchSharedAlertShape(
 ): SharedAlertMatch {
   const none: SharedAlertMatch = { kind: 'none' };
   if (!formats?.length || typeof source !== 'string' || !source.trim()) return none;
+  const valid = validatedList(formats);
+  if (!valid.length) return none;
+  const matchOptions = { postThreshold: 2, now: opts.now, routedMarket: opts.routedMarket, launchRoute: opts.launchRoute };
   const normSender = normalizeLearnedSender(sender);
-  if (!normSender || !isLearnableSender(sender)) return none;
-  const valid = validateSharedAlertFormatList(formats as unknown[]);
-  if (!valid?.length) return none;
+  if (!normSender) {
+    // Pasted text carries no sender. Try every shape under its own sender and
+    // accept only a single unambiguous layout, and only as a prefill: without
+    // the sender nothing ties the message to the bank that taught the shape.
+    let found: { fields: LearnedFields; hash: string } | null = null;
+    for (const format of valid) {
+      const hit = matchLearnedFormat(source, format.shape.sender,
+        { version: 1, templates: [templateForShape(format)] }, matchOptions);
+      if (hit.kind === 'none') continue;
+      if (found) return none;
+      found = { fields: hit.fields, hash: format.hash };
+    }
+    if (!found) return none;
+    const event = inspectUniversalBankEvent(source, opts.dateOrder ? { dateOrder: opts.dateOrder } : {});
+    if ((event.direction === 'debit' || event.direction === 'credit') && event.direction !== found.fields.direction) return none;
+    return { kind: 'prefill', ...found };
+  }
+  if (!isLearnableSender(sender)) return none;
   const templates = valid.filter((format) => format.shape.sender === normSender).map(templateForShape);
   if (!templates.length) return none;
-  const hit = matchLearnedFormat(source, sender, { version: 1, templates },
-    { postThreshold: 2, now: opts.now, routedMarket: opts.routedMarket, launchRoute: opts.launchRoute });
+  const hit = matchLearnedFormat(source, sender, { version: 1, templates }, matchOptions);
   if (hit.kind === 'none') return none;
   const hash = hit.templateId.slice(3);
   const direction = templates.find((row) => row.id === hit.templateId)?.direction ?? hit.fields.direction;

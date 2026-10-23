@@ -295,9 +295,12 @@ store biometric templates.
   lets Wafra send the layout's *shape* to Wafra's relay. The shape is the bank's
   sender code, whether money left or entered the account, the currency code and
   an ordered list of generic words and empty placeholders (amount, merchant,
-  date, card digits). It never contains amounts, names, card or account numbers,
-  dates or any message text, and anything containing digits, an address or a
-  link is refused on the phone before sending. Sending needs a paired relay (the
+  date, card digits). It never contains amounts, card or account numbers, dates
+  or the message text. Anything containing digits, an address or a link is
+  refused on the phone before sending, and so is a layout with a word that
+  looks like a name, unless it is a common banking word. That check cannot
+  recognise every name, which is why publication also needs 3 vaults (below);
+  a shape that is not published within 30 days is deleted from the relay. Sending needs a paired relay (the
   same device pairing used for iPhone automatic capture); without one nothing is
   sent. The relay sees the request's network address and counts one vote per
   paired vault. A shape is published only after 3 different vaults sent the

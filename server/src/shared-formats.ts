@@ -51,7 +51,27 @@ function onlyKeys(value: Record<string, unknown>, required: string[], optional: 
 
 const countDigits = (text: string): number => (text.match(/[0-9]/g) ?? []).length;
 const ISO = /^[A-Z]{3}$/;
-const SENDER = /^[A-Za-z0-9 ._-]+$/;
+// The same rules as the app's validator, so the relay never stores a vote no
+// phone could use.
+const SENDER = /^[A-Z0-9][A-Z0-9 ._&-]*$/;
+const MAX_LITERAL = 64;
+/** Kept equal to SHAREABLE_FLAGGED in src/lib/shared-alert-formats.ts. */
+const SHAREABLE_FLAGGED = new Set([
+  'account', 'accounts', 'acct', 'alert', 'amount', 'atm', 'available', 'avail', 'avl', 'balance',
+  'bank', 'banking', 'card', 'cards', 'cash', 'charge', 'charged', 'cheque', 'clear', 'cleared',
+  'credit', 'credited', 'customer', 'debit', 'debited', 'deposit', 'deposited', 'dear', 'limit',
+  'merchant', 'mobile', 'online', 'paid', 'payment', 'pos', 'purchase', 'received', 'refund',
+  'refunded', 'reversal', 'reversed', 'salary', 'sent', 'spent', 'thank', 'thanks', 'total',
+  'transaction', 'transfer', 'transferred', 'upi', 'used', 'wallet', 'withdrawal', 'withdrawn',
+  'your', 'from', 'with', 'info', 'details', 'ending', 'debitcard', 'creditcard', 'neft', 'imps', 'rtgs',
+  'bal', 'ac', 'acc', 'txn', 'amt', 'avbl', 'ref', 'dr', 'cr', 'vpa', 'ltd', 'sms', 'call', 'block',
+  'not', 'you', 'please', 'pls', 'is', 'has', 'been', 'was', 'on', 'at', 'to', 'by', 'for', 'of', 'the',
+  'and', 'in', 'a', 'an', 'if', 'or', 'via', 'new', 'now', 'helpline', 'support', 'service',
+]);
+export const PENDING_TTL_SECONDS = 30 * 86400;
+export const VAULT_MIN_AGE_SECONDS = 86400;
+/** The published list stays well under the 8M-character download cap in the app. */
+export const MAX_PUBLISHED_BYTES = 4 * 1024 * 1024;
 
 function validToken(token: unknown): boolean {
   if (!isObject(token) || typeof token.k !== 'string') return false;
@@ -63,10 +83,13 @@ function validToken(token: unknown): boolean {
       return (
         typeof v === 'string' &&
         v.length >= 1 &&
-        v.length <= 200 &&
+        v.length <= MAX_LITERAL &&
         !/[0-9]/.test(v) &&
         !v.includes('@') &&
-        !/(?:https?:|www\.)/i.test(v)
+        !/(?:http|www\.)/i.test(v) &&
+        v.split(/\s+/).every((word) => word.length < 24) &&
+        (token.m !== 1 ||
+          v.split(/[^\p{L}]+/u).every((word) => word === '' || SHAREABLE_FLAGGED.has(word.toLowerCase())))
       );
     }
     case 'AMT':
@@ -185,7 +208,18 @@ export async function recordSubmission(
   shape: SharedShape,
   hash: string,
   vaultHashValue: string,
+  vaultCreatedAt: number,
 ): Promise<SharedFormatStatus> {
+  // Unpublished shapes expire: a layout nobody else taught in 30 days (most
+  // likely one carrying something personal) does not stay on the relay.
+  await env.DB.batch([
+    env.DB.prepare(
+      `DELETE FROM shared_format_votes WHERE shape_hash IN
+         (SELECT shape_hash FROM shared_format_shapes WHERE status = 'pending' AND first_seen < unixepoch() - ?1)`,
+    ).bind(PENDING_TTL_SECONDS),
+    env.DB.prepare(`DELETE FROM shared_format_shapes WHERE status = 'pending' AND first_seen < unixepoch() - ?1`)
+      .bind(PENDING_TTL_SECONDS),
+  ]);
   await env.DB.prepare(
     `INSERT OR IGNORE INTO shared_format_shapes (shape_hash, shape_json, bank_sender, first_seen)
      VALUES (?1, ?2, ?3, unixepoch())`,
@@ -193,13 +227,14 @@ export async function recordSubmission(
     .bind(hash, canonicalJson(shape), shape.sender)
     .run();
   await env.DB.prepare(
-    'INSERT OR IGNORE INTO shared_format_votes (shape_hash, vault_hash, created_at) VALUES (?1, ?2, unixepoch())',
+    `INSERT OR IGNORE INTO shared_format_votes (shape_hash, vault_hash, created_at, counts_after)
+     VALUES (?1, ?2, unixepoch(), ?3)`,
   )
-    .bind(hash, vaultHashValue)
+    .bind(hash, vaultHashValue, vaultCreatedAt + VAULT_MIN_AGE_SECONDS)
     .run();
   await env.DB.prepare(
     `UPDATE shared_format_shapes
-        SET vault_count = (SELECT COUNT(*) FROM shared_format_votes WHERE shape_hash = ?1)
+        SET vault_count = (SELECT COUNT(*) FROM shared_format_votes WHERE shape_hash = ?1 AND counts_after <= unixepoch())
       WHERE shape_hash = ?1`,
   )
     .bind(hash)
@@ -226,7 +261,10 @@ export async function listPublished(env: Env): Promise<Array<{ hash: string; sha
     .bind(MAX_PUBLISHED)
     .all<{ shape_hash: string; shape_json: string }>();
   const out: Array<{ hash: string; shape: unknown }> = [];
+  let bytes = 0;
   for (const row of results) {
+    bytes += row.shape_json.length + 80;
+    if (bytes > MAX_PUBLISHED_BYTES) break;
     try {
       out.push({ hash: row.shape_hash, shape: JSON.parse(row.shape_json) as unknown });
     } catch {

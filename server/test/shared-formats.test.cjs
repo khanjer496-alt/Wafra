@@ -80,9 +80,17 @@ async function publicKey() {
   const keys = await webcrypto.subtle.generateKey({ name: 'X25519' }, true, ['deriveBits']);
   return b64(await webcrypto.subtle.exportKey('raw', keys.publicKey));
 }
-async function pair(env) {
+// Votes count only from vaults at least a day old; most cases want an
+// established vault, so pairing back-dates it unless `fresh` is asked for.
+async function pair(env, { fresh = false } = {}) {
   const res = await call(env, 'POST', '/v1/pair', { body: { publicKey: await publicKey() } });
-  return res.json();
+  const device = await res.json();
+  if (!fresh) {
+    env.DB.handle.prepare(
+      'UPDATE vaults SET created_at = created_at - 172800 WHERE id = (SELECT vault_id FROM devices WHERE id = ?)',
+    ).run(device.deviceId);
+  }
+  return device;
 }
 async function joinSameVault(env, owner) {
   const invite = await (await call(env, 'POST', '/v1/device-invites', { token: owner.adminToken })).json();
@@ -255,6 +263,51 @@ const rows = (env, sql, ...params) => ({ results: env.DB.handle.prepare(sql).all
     ok('another vault is unaffected', (await submit(env, other, { shape: shape({ sender: 'BANKZ' }) })).status === 200);
     env.DB.handle.prepare('UPDATE shared_format_votes SET created_at = created_at - 90000').run();
     ok('the window slides after a day', (await submit(env, me, { shape: shape({ sender: 'BANKY' }) })).status === 200);
+  }
+
+  /* ─────────────── review fixes: vault age, names, expiry, weak ETag, sender ─────────────── */
+  {
+    const env = { DB: makeDb() };
+    const fresh = [await pair(env, { fresh: true }), await pair(env, { fresh: true }), await pair(env, { fresh: true })];
+    for (const who of fresh) await submit(env, who, { shape: shape() });
+    ok('three vaults paired today cannot publish a shape',
+      rows(env, 'SELECT status, vault_count FROM shared_format_shapes').results
+        .every((r) => r.status === 'pending' && r.vault_count === 0));
+    env.DB.handle.prepare('UPDATE shared_format_votes SET counts_after = counts_after - 172800').run();
+    const late = await pair(env);
+    ok('their votes count once the vaults are a day old',
+      (await (await submit(env, late, { shape: shape() })).json()).status === 'published');
+
+    const name = await submit(env, late, {
+      shape: shape({ tokens: [{ k: 'L', v: 'Dear ' }, { k: 'L', v: 'naser', m: 1 }, { k: 'L', v: ' spent ' }, { k: 'AMT' }] }),
+    });
+    ok('a flagged word that is not banking boilerplate is refused', name.status === 400);
+    const boiler = await submit(env, late, {
+      shape: shape({ tokens: [{ k: 'L', v: 'debited', m: 1 }, { k: 'L', v: ' ' }, { k: 'AMT' }] }),
+    });
+    ok('a flagged banking word is accepted', boiler.status === 200);
+    const amp = await submit(env, late, { shape: shape({ sender: 'AT&T' }) });
+    ok('a sender with & is accepted, as the app allows', amp.status === 200);
+    const lower = await submit(env, late, { shape: shape({ sender: 'acmebank' }) });
+    ok('a lower-case sender is refused, as the app normalises to upper case', lower.status === 400);
+    const longWord = await submit(env, late, {
+      shape: shape({ tokens: [{ k: 'L', v: 'x'.repeat(30) }, { k: 'AMT' }] }),
+    });
+    ok('a 24+ character word is refused', longWord.status === 400);
+
+    env.DB.handle.prepare("UPDATE shared_format_shapes SET first_seen = first_seen - 31 * 86400 WHERE status = 'pending'").run();
+    await submit(env, late, { shape: shape({ sender: 'NEWBANK' }) });
+    const left = rows(env, 'SELECT bank_sender, status FROM shared_format_shapes').results;
+    ok('pending shapes older than 30 days are deleted, published ones kept',
+      left.every((r) => r.status === 'published' || r.bank_sender === 'NEWBANK') &&
+        left.some((r) => r.status === 'published'));
+    ok('their votes go with them',
+      rows(env, 'SELECT COUNT(*) AS n FROM shared_format_votes WHERE shape_hash NOT IN (SELECT shape_hash FROM shared_format_shapes)').results[0].n === 0);
+
+    const list = await call(env, 'GET', '/v1/formats/published');
+    const etag = list.headers.get('etag');
+    const weak = await call(env, 'GET', '/v1/formats/published', { headers: { 'if-none-match': `W/${etag}` } });
+    ok('a weakened ETag from the CDN still gets 304', weak.status === 304);
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);

@@ -78,13 +78,37 @@ test('missing, phone-like and e-mail senders refuse', () => {
   assert.equal(S.toSharedAlertShape({ ...t, tokens: t.tokens.filter((x) => x.k !== 'AMT') }).reason, 'no-amount');
 });
 
-test('literals: a personal name still shares, digits, links and long tokens refuse', () => {
+test('literals: unflagged words share; digits, links and long tokens refuse', () => {
   const t = taupe();
   const withLiteral = (v) => ({ ...t, tokens: [{ k: 'L', v }, ...t.tokens] });
   assert.equal(S.toSharedAlertShape(withLiteral('dear priya')).ok, true);
   for (const v of ['ref 1234', 'mail me@x.co', 'visit http://x.co', 'go www.bank.in', 'a'.repeat(24)]) {
     assert.equal(S.toSharedAlertShape(withLiteral(v)).reason, 'unsafe-literal', v);
   }
+});
+
+test('a word flagged as a possible name refuses the shape unless it is banking boilerplate', () => {
+  const t = taupe();
+  const named = learn('Dear Customer, Rs 450.00 debited from A/c XX1234 by Naser Khanjar on 03-09-2026. Avl Bal Rs 9,550.00.',
+    'TAUPEB', inr(45000, { date: '2026-09-03' }), { country: 'IN' });
+  assert.ok(named.tokens.some((x) => x.k === 'L' && x.m === 1 && /naser/i.test(x.v)), 'the learner flags the name');
+  assert.equal(S.toSharedAlertShape(named).reason, 'possible-name');
+  const flaggedBoilerplate = { ...t, tokens: [{ k: 'L', v: 'debited', m: 1 }, ...t.tokens] };
+  assert.equal(S.toSharedAlertShape(flaggedBoilerplate).ok, true);
+});
+
+test('without a sender only one unambiguous shape may prefill, never post', () => {
+  const format = shared();
+  const text = 'Taupe Bank: Rs 1,299.50 debited from A/c XX9876 on 14-09-2026 at AMAZON PAY INDIA. Avl Bal Rs 100.00.';
+  for (const sender of ['', null, undefined]) {
+    const hit = S.matchSharedAlertShape(text, sender, [format], { now: NOW });
+    assert.equal(hit.kind, 'prefill', String(sender));
+    assert.equal(hit.fields.amountMinor, 129950);
+  }
+  const twin = { ...format.shape, sender: 'OTHERBK' };
+  const both = [format, { hash: S.sharedAlertShapeHash(twin), shape: twin }];
+  assert.equal(S.matchSharedAlertShape(text, '', both, { now: NOW }).kind, 'none', 'two banks claim the layout');
+  assert.equal(S.matchSharedAlertShape(text, '', [format], { now: NOW, routedMarket: 'SA' }).kind, 'none');
 });
 
 test('oversized templates refuse', () => {

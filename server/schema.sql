@@ -235,6 +235,9 @@ CREATE TABLE IF NOT EXISTS shared_format_votes (
   shape_hash TEXT NOT NULL,
   vault_hash TEXT NOT NULL,
   created_at INTEGER NOT NULL,
+  -- A vote counts only once its vault is a day old, so minting vaults on the
+  -- spot cannot publish a shape.
+  counts_after INTEGER NOT NULL,
   PRIMARY KEY (shape_hash, vault_hash)
 );
 CREATE INDEX IF NOT EXISTS shared_format_shapes_by_status ON shared_format_shapes (status, published_at);
