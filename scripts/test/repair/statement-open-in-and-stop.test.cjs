@@ -641,7 +641,9 @@ test('capabilities and both statement uploads say which features this build unde
   await api.getImportCapabilities(cfg).catch(() => {});
   assert.deepEqual(requests.map((request) => [request.method, request.url.replace(cfg.baseUrl, '')]),
     [['POST', '/v1/import/pdf'], ['POST', '/v1/import/csv'], ['GET', '/v1/import/capabilities']]);
-  for (const request of requests) assert.equal(request.headers['x-wafra-import-features'], 'xlsx,pdf-error-detail,structured');
+  for (const request of requests) {
+    assert.equal(request.headers['x-wafra-import-features'], 'xlsx,pdf-error-detail,structured,statement-checks');
+  }
 });
 
 test('a structured statement goes to the CSV endpoint under its own type, only when the relay lists it', async () => {

@@ -350,6 +350,66 @@ const passwordB64 = (text) => b64(Buffer.from(text, 'utf8'));
       (await code(textPdf([]), { 'x-wafra-import-features': 'xlsx' })) === '422 unsupported_statement_format');
   }
 
+  /* ───────────────────── statement checks on /pdf ───────────────────── */
+  {
+    let env = { DB: makeDb() };
+    let me = await pair(env);
+    const CHECKS = { 'x-wafra-import-features': 'xlsx,pdf-error-detail,statement-checks' };
+    const send = async (lines, headers) => {
+      const res = await uploadPdf(env, me, textPdf(lines), { 'x-wafra-date-order': 'day-first', ...headers });
+      return { status: res.status, body: await res.json() };
+    };
+    const marked = (closing) => [
+      'Statement of Account', 'Opening Balance 5,000.00 CR', 'Date Description Amount Balance',
+      '01/09/2026 CARREFOUR DUBAI 120.00 DR 4,880.00 CR', '03/09/2026 SALARY ACME LLC 8,000.00 CR 12,880.00 CR',
+      `Closing Balance ${closing}`,
+    ];
+    // Reconciliation is report-only: a statement whose rows miss its stated
+    // balances is imported exactly as it is read, never refused. It records no
+    // coverage, since its date range is not vouched for.
+    const contradicted = await send(marked('99,999.00 CR'), CHECKS);
+    const contradictedQueued = await syncedRows(env, me);
+    ok('a statement whose rows contradict its stated balances still imports (report-only), with no coverage',
+      contradicted.status === 202 && contradicted.body.acceptedRows === 2 && contradicted.body.coverage === null &&
+        contradictedQueued.map((row) => `${row.type}:${row.amountFils}`).sort().join(',') === 'expense:12000,income:800000',
+      JSON.stringify([contradicted, contradictedQueued.map((row) => [row.type, row.amountFils])]));
+    const older = await send(marked('99,999.00 CR'), FEATURES);
+    ok('…and a build without statement-checks gets the same import', older.status === 202 && older.body.acceptedRows === 2,
+      JSON.stringify(older));
+    // The proven statement below is read on a device of its own, so what it
+    // queued is not mixed with the contradicted one's.
+    env.DB = makeDb();
+    me = await pair(env);
+    const proven = await send(marked('12,880.00 CR'), CHECKS);
+    const queued = await syncedRows(env, me);
+    ok('a statement whose rows reach its closing balance imports the amounts, never the balances',
+      proven.status === 202 && proven.body.acceptedRows === 2 &&
+        queued.map((row) => `${row.type}:${row.amountFils}`).sort().join(',') === 'expense:12000,income:800000',
+      JSON.stringify([proven, queued.map((row) => [row.type, row.amountFils])]));
+
+    const yearless = ['CHECKING SUMMARY', '09/01 STARBUCKS 5.75 DR', '09/14 SHOP 1.00 DR'];
+    const noYear = await send(yearless, { ...CHECKS, 'x-wafra-date-order': 'month-first' });
+    ok('rows with no year and no statement period are 422 dates_without_year',
+      noYear.status === 422 && noYear.body.error === 'dates_without_year', JSON.stringify(noYear));
+    const noYearOld = await send(yearless, { ...FEATURES, 'x-wafra-date-order': 'month-first' });
+    ok('…and unsupported_statement_format for a build without statement-checks',
+      noYearOld.status === 422 && noYearOld.body.error === 'unsupported_statement_format', JSON.stringify(noYearOld));
+    const withPeriod = await send(['CHECKING SUMMARY', 'September 01, 2026 through September 30, 2026', ...yearless.slice(1)],
+      { ...CHECKS, 'x-wafra-date-order': 'month-first' });
+    ok('…while the same rows under a stated period import with that year',
+      withPeriod.status === 202 && withPeriod.body.acceptedRows === 2 &&
+        withPeriod.body.coverage?.startDate === '2026-09-01' && withPeriod.body.coverage?.endDate === '2026-09-14',
+      JSON.stringify(withPeriod));
+
+    const unreadable = await send(['MS SAMPLE CARDHOLDER', 'ACME PAYMENTS', 'Opening Balance 1,500.00',
+      'Date Description Amount', '01/07/2026 SHOP 12.00 15.00'], CHECKS);
+    ok('an unreadable layout is reported as shapes, with no cardholder text or amounts',
+      unreadable.status === 422 && unreadable.body.error === 'unsupported_statement_format' &&
+        unreadable.body.layout?.shapes?.[0]?.shape === 'DATE WORD MONEY MONEY' &&
+        !/SAMPLE|CARDHOLDER|ACME|SHOP|1,500|12\.00/i.test(JSON.stringify(unreadable.body.layout)),
+      JSON.stringify(unreadable.body));
+  }
+
   /* ─────────────────────────── .xlsx on /csv ─────────────────────────── */
   {
     const csv = [
