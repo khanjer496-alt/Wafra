@@ -831,6 +831,10 @@ export interface ApplePayCardLink {
 export interface AppState {
   /** Device-keyed source-free learned formats; only encrypted local state retains them. */
   privateAlertFormats?: import('@/lib/private-alert-formats').PrivateAlertFormatStore;
+  /** Opt-in: share the SHAPE (never values) of formats this person teaches. Undefined = off. */
+  shareAlertFormats?: boolean;
+  /** Public bank-format shapes downloaded from the relay (re-validated on load; not backed up). */
+  sharedAlertFormats?: import('@/lib/shared-alert-format-sync').SharedAlertFormatState;
   /** Private, ledger-local names; IDs contain no user text. */
   customCategories?: CustomCategory[];
   hydrated: boolean;

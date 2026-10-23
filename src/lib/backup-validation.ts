@@ -253,7 +253,7 @@ export function isValidBackupState(value: unknown): value is Partial<Omit<AppSta
     transferNormalizationVersion: nonnegative, transferInternalIds: arrayOf(id),
     onboarded: boolean, userName: text, appLock: boolean, pro: boolean, founderPro: boolean,
     privateMode: boolean, captureOptOut: boolean, dailySummary: boolean, trialStartTs: nonnegative,
-    bestEffortAutoPost: boolean,
+    bestEffortAutoPost: boolean, shareAlertFormats: boolean,
     // What the person asked Wafra to do: short code ids, never text or money.
     // Ids a newer build added are accepted here and dropped by the restore's
     // sanitizer, so a newer backup still restores on this build.

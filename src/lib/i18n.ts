@@ -54,6 +54,27 @@ const S = {
     en: 'On: completed payments in these formats are added, marked “Auto-added — check”. Off: they wait in Review.',
     ar: 'التشغيل: تُضاف الدفعات المكتملة من هذه الصيغ بعلامة «أُضيفت تلقائيًا — راجِعها». الإيقاف: تبقى للمراجعة.',
   },
+  shareFormatsSettingTitle: {
+    en: 'Help other Wafra users with this bank',
+    ar: 'ساعد مستخدمي وفرة الآخرين مع هذا البنك',
+  },
+  shareFormatsSettingBody: {
+    en: 'When you teach a bank format, only its shape is shared — never amounts, names, card numbers, dates or message text. A format is used only after 3 different people teach the same one.',
+    ar: 'عند تعليم وفرة صيغة بنك، تُشارك بنية الصيغة فقط — لا المبالغ ولا الأسماء ولا أرقام البطاقات ولا التواريخ ولا نص الرسالة. لا تُستخدم الصيغة إلا بعد أن يعلّم ثلاثة أشخاص مختلفين الصيغة نفسها.',
+  },
+  shareFormatsSaveFailed: {
+    en: 'The sharing choice could not be saved. Try again.',
+    ar: 'تعذّر حفظ خيار المشاركة. حاول مرة أخرى.',
+  },
+  sharedFormatsCount: {
+    en: 'Formats shared by other users: {count}',
+    ar: 'الصيغ المشاركة من مستخدمين آخرين: {count}',
+  },
+  sharedFormatsCountBody: {
+    en: 'Public bank shapes downloaded to this phone. Clearing them is safe; they can be downloaded again.',
+    ar: 'صيغ بنوك عامة نُزّلت إلى هذا الهاتف. يمكن مسحها بأمان، ويمكن تنزيلها مرة أخرى.',
+  },
+  sharedFormatsClear: { en: 'Clear', ar: 'مسح' },
   rememberThisBill: { en: 'Remember this bill?', ar: 'تذكّر هذه الفاتورة؟' },
   billAliasAlso: {
     en: 'Use {title} · {category} for {n} matching past payment{s} and future payments from this biller.',

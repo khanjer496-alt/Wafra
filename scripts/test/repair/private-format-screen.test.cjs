@@ -37,6 +37,10 @@ function harness({ language = 'en', country = 'US', platform = 'ios', privateMod
   core.validatePrivateAlertFormat = (...args) => { coreCalls.validate++; return validate(...args); };
   const teaching = real('@/lib/private-alert-teaching');
   h.deps['@/lib/private-alert-format-copy'] = real('@/lib/private-alert-format-copy');
+  // Sharing a taught shape is opt-in and silent; the real pure modules run, the relay stays unpaired.
+  h.deps['@/lib/learned-alert-formats'] = real('@/lib/learned-alert-formats');
+  h.deps['@/lib/shared-alert-formats'] = real('@/lib/shared-alert-formats');
+  h.deps['@/lib/shared-alert-format-sync'] = real('@/lib/shared-alert-format-sync');
   const runtimeModule = real('@/lib/private-alert-format-runtime');
   const nativeCalls = [];
   let secret = null;

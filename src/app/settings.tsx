@@ -155,6 +155,8 @@ export default function SettingsScreen() {
     setPrivateMode,
     setCaptureOptOut,
     setBestEffortAutoPost,
+    setShareAlertFormats,
+    clearSharedAlertFormats,
     setAndroidCaptureSources,
     beginHistoryImport,
     setLedgerMoney,
@@ -1077,6 +1079,31 @@ export default function SettingsScreen() {
             },
             false,
             'check',
+          )}
+          {switchRow(
+            t('shareFormatsSettingTitle'),
+            t('shareFormatsSettingBody'),
+            state.shareAlertFormats === true,
+            (next) => {
+              setShareAlertFormats(next).catch(() => Alert.alert(t('shareFormatsSettingTitle'), t('shareFormatsSaveFailed')));
+            },
+            false,
+            'bank',
+          )}
+          {(state.sharedAlertFormats?.formats.length ?? 0) > 0 && linkRow(
+            tf('sharedFormatsCount', { count: state.sharedAlertFormats?.formats.length ?? 0 }),
+            t('sharedFormatsCountBody'),
+            () => {
+              Alert.alert(
+                tf('sharedFormatsCount', { count: state.sharedAlertFormats?.formats.length ?? 0 }),
+                t('sharedFormatsCountBody'),
+                [
+                  { text: t('cancel'), style: 'cancel' },
+                  { text: t('sharedFormatsClear'), style: 'destructive', onPress: () => clearSharedAlertFormats() },
+                ],
+              );
+            },
+            { icon: 'trash', value: t('sharedFormatsClear'), testID: 'settings-clear-shared-formats' },
           )}
           {linkRow(
             t('settingsAlertDeliveryTitle'),

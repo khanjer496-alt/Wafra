@@ -13,14 +13,18 @@ import {
   preparePrivateAlertFormatFromInput, validatePrivateAlertFormatFromSample,
 } from '@/lib/private-alert-format-runtime';
 import type { PrivateAlertFormat } from '@/lib/private-alert-formats';
-import type { LearnedFields, LearnInput } from '@/lib/learned-alert-formats';
+import { learnFromConfirmation, type LearnedFields, type LearnInput } from '@/lib/learned-alert-formats';
+import { SettingsSwitchRow } from '@/components/settings-rows';
+import { getRelayConfig } from '@/lib/relay';
+import { submitSharedAlertShape } from '@/lib/shared-alert-format-sync';
+import { toSharedAlertShape, type SharedAlertShape } from '@/lib/shared-alert-formats';
 import {
-  buildPrivateTeachingInput, privateTeachingChoices, teachingMoneyLabel,
+  buildPrivateTeachingInput, privateAlertSourceDateContext, privateTeachingChoices, teachingMoneyLabel,
 } from '@/lib/private-alert-teaching';
 
 /** Source and draft capsules live only in this screen's temporary state. */
 export default function TeachBankFormatScreen() {
-  const { state, addPrivateAlertFormat, removePrivateAlertFormat } = useStore();
+  const { state, addPrivateAlertFormat, removePrivateAlertFormat, setShareAlertFormats } = useStore();
   const router = useRouter();
   const band = useBand('flow');
   const focused = useIsFocused();
@@ -44,6 +48,9 @@ export default function TeachBankFormatScreen() {
   const saving = useRef(false);
   const pendingInput = useRef<LearnInput | null>(null);
   const pendingSample = useRef<{ source: string; sender: string | null } | null>(null);
+  // Only the value-free SHAPE of the taught format (typed slots, boilerplate words).
+  // It holds no message text, amount, name or date, and is released with the form.
+  const pendingShape = useRef<SharedAlertShape | null>(null);
   const readPendingInput = useCallback(() => pendingInput.current, []);
   const readPendingSample = useCallback(() => pendingSample.current, []);
   const choices = useMemo(() => privateTeachingChoices(source, state.country ?? null, sender), [source, state.country, sender]);
@@ -62,7 +69,7 @@ export default function TeachBankFormatScreen() {
       pendingInput.current.confirmed.amountMinor = 0;
     }
     if (pendingSample.current) { pendingSample.current.source = ''; pendingSample.current.sender = null; }
-    pendingInput.current = null; pendingSample.current = null;
+    pendingInput.current = null; pendingSample.current = null; pendingShape.current = null;
     setSource(''); setSender(''); setChoiceId(''); setDirection('');
     setMerchant(''); setDate(''); setDraft(null); setVerified(null);
     setSelection({ start: 0, end: 0 }); setError(''); setBusy(false);
@@ -89,6 +96,17 @@ export default function TeachBankFormatScreen() {
     };
     setError(explanations[reason] ?? words.thisAlertCouldNotBeSafely);
   };
+  /** The shareable shape for the learned layout, or null when it cannot be shared. */
+  const shapeOf = (input: LearnInput): SharedAlertShape | null => {
+    try {
+      const scoped = privateAlertSourceDateContext(input.source, input.sender, input.context);
+      const learned = learnFromConfirmation({ ...input,
+        context: { ...input.context, country: scoped.country, dateOrder: scoped.dateOrder } });
+      if (!learned.ok) return null;
+      const shape = toSharedAlertShape(learned.template);
+      return shape.ok ? shape.shape : null;
+    } catch { return null; }
+  };
   const prepare = async () => {
     const input = buildPrivateTeachingInput({ source, sender, choiceId, direction, merchant, date,
       country: state.country ?? null, now: Date.now() });
@@ -100,6 +118,7 @@ export default function TeachBankFormatScreen() {
         () => !mounted.current || run !== operation.current);
       if (!mounted.current || run !== operation.current) return;
       if (!result.ok) { fail(result.reason); return; }
+      pendingShape.current = shapeOf(input.input);
       setDraft(result.template); setSource(''); setChoiceId(''); setMerchant(''); setDate('');
       setSelection({ start: 0, end: 0 });
     } catch { if (mounted.current && run === operation.current) fail('device-key-unavailable'); }
@@ -135,6 +154,16 @@ export default function TeachBankFormatScreen() {
     const run = ++operation.current; saving.current = true; setBusy(true); setError('');
     try {
       await addPrivateAlertFormat(verified.template);
+      // Opt-in only, never in Private Mode, and never allowed to affect teaching.
+      const shape = state.shareAlertFormats === true && !privateMode ? pendingShape.current : null;
+      if (shape) {
+        void (async () => {
+          try {
+            const cfg = await getRelayConfig();
+            if (cfg) await submitSharedAlertShape(cfg, shape);
+          } catch { /* silent by design */ }
+        })();
+      }
       if (!mounted.current || run !== operation.current) return;
       clear(); setSaved(true);
     } catch { if (mounted.current && run === operation.current) setError(words.theFormatWasNotSavedYour); }
@@ -228,6 +257,11 @@ export default function TeachBankFormatScreen() {
         label={words.startOver} onPress={clear} />}
       {error && <ThemedText testID="format-error" type="small" themeColor="warning" accessibilityLiveRegion="polite">{error}</ThemedText>}
       <ThemedText type="meta" themeColor="textSecondary">{words.onlyThePrivateLayoutIsRemembered}</ThemedText>
+      <View style={{ borderRadius: 14, paddingHorizontal: 16, backgroundColor: band.card }}>
+        <SettingsSwitchRow testID="format-share-switch" title={words.shareWithOthersTitle}
+          subtitle={words.shareWithOthersBody} value={state.shareAlertFormats === true} last palette={band}
+          onChange={next => { setShareAlertFormats(next).catch(() => { if (mounted.current) setError(words.theFormatWasNotSavedYour); }); }} />
+      </View>
       {formats.length > 0 && <View style={{ gap: 12 }}>
         <ThemedText type="subtitle">{words.savedFormats}</ThemedText>
         {formats.map((format, index) => <View key={format.id} style={{ gap: 8, padding: 16, borderRadius: 14, backgroundColor: band.card }}>

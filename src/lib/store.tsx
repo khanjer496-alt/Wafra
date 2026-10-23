@@ -157,6 +157,12 @@ import {
   erasePrivateAlertFormatKey,
   invalidatePrivateAlertFormats,
 } from '@/lib/private-alert-format-runtime';
+import { activateSharedAlertFormats } from '@/lib/shared-alert-format-active';
+import {
+  emptySharedAlertFormatState,
+  normalizeSharedAlertFormatState,
+} from '@/lib/shared-alert-format-sync';
+import type { SharedAlertFormat } from '@/lib/shared-alert-formats';
 import {
   setBestEffortAutoPostEnabled,
   tombstonesForRemoved,
@@ -266,6 +272,8 @@ export const HYDRATION_FINALIZE_VERSION = 2;
 
 const EMPTY_STATE: AppState = {
   privateAlertFormats: emptyPrivateAlertFormatStore(),
+  shareAlertFormats: false,
+  sharedAlertFormats: emptySharedAlertFormatState(),
   customCategories: [],
   hydrated: false,
   ledgerMoney: null,
@@ -470,6 +478,9 @@ export function migratePersistedState(
   const loadedTransactions = parsed.transactions;
   const privateFormats = normalizePrivateAlertFormatStore(parsed.privateAlertFormats);
   parsed.privateAlertFormats = { ...privateFormats, templates: privateFormats.templates.filter(format => format.status === 'validated') };
+  // Consent is a strict boolean (anything else is off); the public list is re-validated.
+  parsed.shareAlertFormats = parsed.shareAlertFormats === true;
+  parsed.sharedAlertFormats = normalizeSharedAlertFormatState(parsed.sharedAlertFormats);
   parsed.ledgerMoney = migrateLegacyLedgerMoney(parsed);
   parsed.reviewTray = normalizeAlertReviewTray(parsed.reviewTray, Date.now());
   parsed.localCaptureQualifications = normalizeLocalCaptureQualifications(
@@ -934,6 +945,10 @@ type Action =
   | { type: 'deleteTransaction'; id: string }
   | { type: 'resolveBestEffort'; id: string; outcome: 'confirm' | 'undo' }
   | { type: 'setBestEffortAutoPost'; enabled: boolean }
+  | { type: 'setShareAlertFormats'; enabled: boolean }
+  | { type: 'setSharedAlertFormats'; etag: string | null; fetchedAt: number; formats: SharedAlertFormat[] }
+  | { type: 'touchSharedAlertFormats'; fetchedAt: number }
+  | { type: 'clearSharedAlertFormats' }
   | ({
       type: 'importBatch';
       localCaptureQualifications?: LocalCaptureQualificationReceipt[];
@@ -1377,6 +1392,10 @@ function actionMayChangeTransferLinks(state: AppState, reduced: AppState, action
     case 'resolveBestEffort':
       return action.outcome === 'undo';
     case 'setBestEffortAutoPost':
+    case 'setShareAlertFormats':
+    case 'setSharedAlertFormats':
+    case 'touchSharedAlertFormats':
+    case 'clearSharedAlertFormats':
     case 'setPrivateMode':
     case 'setMonthStartDay':
       return false;
@@ -1434,6 +1453,8 @@ function reduceState(state: AppState, action: Action): AppState {
         : emptyPrivateAlertFormatStore();
       next.privateAlertFormats = { ...next.privateAlertFormats,
         templates: next.privateAlertFormats.templates.filter(format => format.status === 'validated') };
+      next.shareAlertFormats = next.shareAlertFormats === true;
+      next.sharedAlertFormats = normalizeSharedAlertFormatState(next.sharedAlertFormats);
       next.customCategories = sanitizeCustomCategoryCatalog(next.customCategories);
       // Orphan money keeps its opaque category for honest history. Orphan
       // automation rules cannot keep assigning an unregistered category.
@@ -1756,6 +1777,15 @@ function reduceState(state: AppState, action: Action): AppState {
     case 'setBestEffortAutoPost':
       setBestEffortAutoPostEnabled(action.enabled);
       return { ...state, bestEffortAutoPost: action.enabled };
+    case 'setShareAlertFormats':
+      return { ...state, shareAlertFormats: action.enabled === true };
+    case 'setSharedAlertFormats':
+      return { ...state, sharedAlertFormats: normalizeSharedAlertFormatState(
+        { etag: action.etag, fetchedAt: action.fetchedAt, formats: action.formats }) };
+    case 'touchSharedAlertFormats':
+      return { ...state, sharedAlertFormats: { ...(state.sharedAlertFormats ?? emptySharedAlertFormatState()), fetchedAt: action.fetchedAt } };
+    case 'clearSharedAlertFormats':
+      return { ...state, sharedAlertFormats: emptySharedAlertFormatState() };
     case 'importBatch': {
       const imported = applyMaterializedImportBatch(state, action);
       return action.localCaptureQualifications
@@ -2063,6 +2093,7 @@ function reduceState(state: AppState, action: Action): AppState {
         trialStartTs: state.trialStartTs,
         // A capture preference, like the opt-out above; not ledger data.
         bestEffortAutoPost: state.bestEffortAutoPost,
+        shareAlertFormats: state.shareAlertFormats,
         accounts: [SEED_ACCOUNTS[2]],
       };
     case 'blockPersistence':
@@ -2129,6 +2160,13 @@ interface StoreValue {
   /** "Looks right" clears the Auto-added marker; "undo" removes the row for good. */
   resolveBestEffort: (id: string, outcome: 'confirm' | 'undo') => void;
   setBestEffortAutoPost: (enabled: boolean) => Promise<void>;
+  /** Opt in or out of sharing the shape of formats this person teaches. */
+  setShareAlertFormats: (enabled: boolean) => Promise<void>;
+  /** Replace the downloaded shared-shape list (re-validated). Persisted best-effort. */
+  replaceSharedAlertFormats: (etag: string | null, formats: SharedAlertFormat[]) => void;
+  /** A fetch found nothing new: only restart the 24h clock. */
+  touchSharedAlertFormats: () => void;
+  clearSharedAlertFormats: () => void;
   /**
    * Bulk import. `durable` resolves only after SQLCipher has committed the
    * rows; relay callers must await it before acknowledging the server queue.
@@ -2677,6 +2715,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
   }, [dispatch, persistence]);
 
+  // Downloaded public shapes feed the on-device matcher (prefill-only; see
+  // private-alert-format-runtime). Cleared while the store is not hydrated.
+  const downloadedShapes = state.sharedAlertFormats?.formats;
+  useEffect(() => {
+    activateSharedAlertFormats(state.hydrated ? downloadedShapes : undefined);
+  }, [state.hydrated, downloadedShapes]);
+
   useEffect(() => {
     void hydrate();
     // Bumping the run counter supersedes the in-flight read rather than
@@ -2899,6 +2944,36 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       throw new Error('Auto-add preference could not be saved');
     }
   }, [dispatch, persist]);
+
+  const setShareAlertFormats = useCallback(async (enabled: boolean) => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const previous = authoritativeState.current.shareAlertFormats === true;
+    const next = dispatch({ type: 'setShareAlertFormats', enabled });
+    const written = await persist(next);
+    if (!written) {
+      dispatch({ type: 'setShareAlertFormats', enabled: previous });
+      throw new Error('Format sharing preference could not be saved');
+    }
+  }, [dispatch, persist]);
+
+  const replaceSharedAlertFormats = useCallback((etag: string | null, formats: SharedAlertFormat[]) => {
+    if (!authoritativeState.current.hydrated) return;
+    dispatch({ type: 'setSharedAlertFormats', etag, fetchedAt: Date.now(), formats });
+  }, [dispatch]);
+
+  const touchSharedAlertFormats = useCallback(() => {
+    if (!authoritativeState.current.hydrated) return;
+    dispatch({ type: 'touchSharedAlertFormats', fetchedAt: Date.now() });
+  }, [dispatch]);
+
+  const clearSharedAlertFormats = useCallback(() => {
+    if (!authoritativeState.current.hydrated) return;
+    // fetchedAt is kept so the list is not re-downloaded the instant it is cleared.
+    dispatch({ type: 'setSharedAlertFormats', etag: null, fetchedAt: Date.now(), formats: [] });
+  }, [dispatch]);
 
   const importBatch = useCallback((
     input: ImportBatchInput,
@@ -3569,6 +3644,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       // Wallet card names stay on this device; a backup carries no card link.
       applePayCardLinks: _applePayCardLinks,
       privateAlertFormats: _privateAlertFormats,
+      // Re-downloadable public data; the consent boolean travels like the other parser prefs.
+      sharedAlertFormats: _sharedAlertFormats,
       hydrationReparseKey: _hydrationReparseKey,
       hydrationFinalizeVersion: _hydrationFinalizeVersion,
       bnplCategoryRepairVersion: _bnplCategoryRepairVersion,
@@ -3593,6 +3670,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       reviewTray: current.reviewTray,
       captureOptOut: current.captureOptOut,
       bestEffortAutoPost: current.bestEffortAutoPost,
+      // Consent belongs to this phone's owner, like the other capture prefs.
+      shareAlertFormats: current.shareAlertFormats,
+      sharedAlertFormats: current.sharedAlertFormats,
       // A backup written before goals existed keeps this phone's answers.
       wafraGoals: restored.wafraGoals ?? current.wafraGoals,
       localCaptureQualifications: current.localCaptureQualifications,
@@ -3726,6 +3806,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       deleteTransaction,
       resolveBestEffort,
       setBestEffortAutoPost,
+      setShareAlertFormats,
+      replaceSharedAlertFormats,
+      touchSharedAlertFormats,
+      clearSharedAlertFormats,
       importBatch,
       stageReviewAlerts,
       dismissReviewAlert,
@@ -3807,6 +3891,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       deleteTransaction,
       resolveBestEffort,
       setBestEffortAutoPost,
+      setShareAlertFormats,
+      replaceSharedAlertFormats,
+      touchSharedAlertFormats,
+      clearSharedAlertFormats,
       importBatch,
       stageReviewAlerts,
       dismissReviewAlert,

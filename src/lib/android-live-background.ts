@@ -36,6 +36,7 @@ import {
   setLedgerCurrency as setGlobalLedgerCurrency,
 } from '@/lib/markets';
 import { setActiveCountry } from '@/lib/country';
+import { activateSharedAlertFormats } from '@/lib/shared-alert-format-active';
 import { setBestEffortAutoPostEnabled } from '@/lib/best-effort-autopost';
 import { isProActive } from '@/lib/purchases';
 import { syncDailySummary, syncPaymentReminders } from '@/lib/notifications';
@@ -292,6 +293,7 @@ async function processBackgroundCapture(source: BackgroundSource, observedAt: nu
     // Hydrate metadata only after all headless admission gates. Matching lazily
     // reads an existing device key and can never create one from this wake.
     activatePrivateAlertFormats(loaded.privateAlertFormats);
+    activateSharedAlertFormats(loaded.sharedAlertFormats?.formats);
     ownsPrivateFormats = true;
     const holder: MutableLedger = { current: loaded };
     adapter = diskLedgerAdapter(holder);

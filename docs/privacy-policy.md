@@ -290,6 +290,26 @@ store biometric templates.
   in Review and nothing is posted. When the saved local-only preference is
   active, no rate request is made.
 
+- **Shared bank-format shapes (optional, off by default):** when you teach
+  Wafra a bank alert layout, the switch "Help other Wafra users with this bank"
+  lets Wafra send the layout's *shape* to Wafra's relay. The shape is the bank's
+  sender code, whether money left or entered the account, the currency code and
+  an ordered list of generic words and empty placeholders (amount, merchant,
+  date, card digits). It never contains amounts, names, card or account numbers,
+  dates or any message text, and anything containing digits, an address or a
+  link is refused on the phone before sending. Sending needs a paired relay (the
+  same device pairing used for iPhone automatic capture); without one nothing is
+  sent. The relay sees the request's network address and counts one vote per
+  paired vault. A shape is published only after 3 different vaults sent the
+  identical shape, so a layout containing anything personal, which nobody else
+  shares, is never published. Separately, every Wafra install downloads the
+  published list (public, no sign-in) at most once a day to recognise formats
+  on the phone; this download contains no information about you beyond the
+  network address, happens whether or not you opt in, and can be cleared in
+  Settings. Matching runs on the phone; a match only fills in fields for you to
+  confirm in Review. Turn the switch off at any time to stop future sharing;
+  shapes already sent cannot be withdrawn individually. Private Mode never sends or downloads shapes.
+
 - **On-device AI (platform models):** on iPhones with Apple Intelligence
   (iOS 26 or later) Wafra can use Apple's Foundation Models, and on supported
   Android phones it can use Google's Gemini Nano through ML Kit GenAI and
