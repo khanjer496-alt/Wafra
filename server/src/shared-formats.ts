@@ -10,7 +10,13 @@
  *
  * Nothing in this module logs. Shape content must never reach a log line.
  */
-import type { Env } from './index';
+/** The slice of the Worker's Env this module reads. Declared here rather than
+ * imported from './index' because the app test build renames index.ts. */
+interface Env {
+  DB: D1Database;
+  FORMATS_SALT?: string;
+  FORMATS_ADMIN_TOKEN?: string;
+}
 
 export const PUBLISH_THRESHOLD = 3;
 export const SUBMISSIONS_PER_DAY = 20;
