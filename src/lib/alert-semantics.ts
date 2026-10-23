@@ -275,19 +275,29 @@ const WORLD_CREDIT = wordsOf(
 // immediately followed by a currency/number ("消费满100元" promotions and
 // "消費税" tax lines do not match).
 const CJK_MONEY = String.raw`\s*(?:[(（][^)）]{0,30}[)）])?\s*(?:人民币|人民幣|新台[币幣]|港[币幣]|NT\$|HK\$|[¥￥$])?\s*\d`;
-const cjkOf = (...alternatives: string[]): RegExp => new RegExp(alternatives.join('|'), 'u');
+// Alert text is lower-cased before it is read, so currency prefixes (NT$, HK$) must match either case.
+const cjkOf = (...alternatives: string[]): RegExp => new RegExp(alternatives.join('|'), 'iu');
+// A named payment channel directly before the amount is a finished payment, not an offer:
+// "请使用快捷支付100元" (please use ...) and similar instructions are excluded.
+const CJK_CHANNEL = '(?<!请|請|可|需|须|須|将|將|应|應|使用|选择|選擇|通过|通過)(?:快捷|网上|網上|扫码|掃碼|云闪付|雲閃付|刷卡)支付';
 const CJK_DEBIT = cjkOf(
   'お引出し|お引き出し|支払い?完了|決済完了|送金(?:しました|完了)|支払いました',
   '송금\\s*완료|보냈어요|보냈습니다',
+  // Korean bank withdrawal lines ("출금200,000원", "출금 100,000"): the word is followed by the amount.
+  '출금(?!\\s*(?:예정|요청|한도|가능|불가|계좌|일|기한))',
+  // Chinese payment channel notices name the channel, then the amount ("快捷支付19.90元").
+  `${CJK_CHANNEL}(?:交易)?${CJK_MONEY}`,
   `(?:消费|消費|支出|簽賬|签账|转出|轉出|取款|取现|支取|付款)${CJK_MONEY}`,
   '付款成功|支付成功|消费成功|扣款成功|转账成功|轉帳成功|付款完成|支付完成|付款金额\\s*[:：]|支付金额\\s*[:：]',
 );
 const CJK_CREDIT = cjkOf(
   '受け取りました|入金(?:がありました|しました)',
+  '입금(?!\\s*(?:예정|요청|하세요|해\\s*주|안내|한도|계좌|기한|마감|바랍|부탁))',
   `(?:收入|转入|轉入|入账|入帳|到账|到帳|存入|薪資轉入|工资收入)${CJK_MONEY}`,
 );
-const CJK_TRANSFER = cjkOf('受け取りました|送金(?:しました|完了)|송금\\s*완료|보냈어요|보냈습니다|받았어요|받았습니다');
+const CJK_TRANSFER = cjkOf('출금|입금|受け取りました|送金(?:しました|完了)|송금\\s*완료|보냈어요|보냈습니다|받았어요|받았습니다|转账|轉帳|轉賬|汇款|匯款|工资|工資|薪资|薪資|代发|代發|급여');
 const CJK_PURCHASE = cjkOf(
+  `${CJK_CHANNEL}(?:交易)?${CJK_MONEY}`,
   `(?:消费|消費|簽賬|签账|付款)${CJK_MONEY}`,
   '付款成功|支付成功|消费成功|付款完成|支付完成|付款金额\\s*[:：]|支付金额\\s*[:：]|支払い?完了|決済完了',
 );

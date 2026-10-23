@@ -1150,5 +1150,182 @@
     },
     "notes": "",
     "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-84",
+    "country": "CN",
+    "ledger": "CNY",
+    "sender": "95555",
+    "body": "您账户1234于09月18日12:30在【财付通-微信支付-云岭咖啡】快捷支付19.90元，余额2,345.67【招商银行】",
+    "expect": {
+      "post": true,
+      "amountMinor": 1990,
+      "type": "expense"
+    },
+    "notes": "payment channel word before the amount",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-85",
+    "country": "CN",
+    "ledger": "CNY",
+    "sender": "95566",
+    "body": "您的借记卡账户4567，于09月17日网上快捷支付交易人民币88.00元，交易后余额1,234.56【中国银行】",
+    "expect": {
+      "post": true,
+      "amountMinor": 8800,
+      "type": "expense"
+    },
+    "notes": "channel + transaction",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-86",
+    "country": "CN",
+    "ledger": "CNY",
+    "sender": "95588",
+    "body": "您尾号1234卡9月25日10:02工资收入12,500.00元，余额15,745.67元。【工商银行】",
+    "expect": {
+      "post": true,
+      "amountMinor": 1250000,
+      "type": "income"
+    },
+    "notes": "salary income names a transfer family",
+    "provenance": "synthetic",
+    "paths": [
+      "android-sms"
+    ]
+  },
+  {
+    "id": "U-SEMANTICS-87",
+    "country": "CN",
+    "ledger": "CNY",
+    "sender": "95555",
+    "body": "【招商银行】您尾号1234的账户请使用快捷支付100元参与活动，详情见App。",
+    "expect": {
+      "post": false,
+      "why": "promotion"
+    },
+    "notes": "channel word in an invitation",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-88",
+    "country": "CN",
+    "ledger": "CNY",
+    "sender": "95555",
+    "body": "您账户1234于09月18日12:30快捷支付19.90元失败，请稍后重试。",
+    "expect": {
+      "post": false,
+      "why": "failed"
+    },
+    "notes": "failed channel payment",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-89",
+    "country": "CN",
+    "ledger": "CNY",
+    "sender": "95555",
+    "body": "您账户1234于09月18日12:30快捷支付19.90元，已撤销。",
+    "expect": {
+      "post": false,
+      "why": "failed"
+    },
+    "notes": "cancelled channel payment",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-90",
+    "country": "TW",
+    "ledger": "TWD",
+    "sender": "玉山銀行",
+    "body": "【玉山銀行】您的玉山卡末四碼9012於09/17 20:15消費NT$890，消費地點：誠品書店。如非本人交易請撥客服。",
+    "expect": {
+      "post": true,
+      "amountMinor": 89000,
+      "type": "expense"
+    },
+    "notes": "NT$ prefix is matched in lower case",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-91",
+    "country": "TW",
+    "ledger": "TWD",
+    "sender": "玉山銀行",
+    "body": "【玉山銀行】您的玉山卡末四碼9012於09/17 20:15消費NT$890已取消，退款將於數日內入帳。",
+    "expect": {
+      "post": false,
+      "why": "failed"
+    },
+    "notes": "cancelled card purchase",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-92",
+    "country": "KR",
+    "ledger": "KRW",
+    "sender": "15991111",
+    "body": "[Web발신]\n하나,09/22,18:40\n123-******-12345\n출금200,000원\n김민지\n잔액845,300원",
+    "expect": {
+      "post": true,
+      "amountMinor": 200000,
+      "type": "expense"
+    },
+    "notes": "withdrawal word before the amount",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-93",
+    "country": "KR",
+    "ledger": "KRW",
+    "sender": "15885000",
+    "body": "[Web발신]\n[우리은행]입금 취소 3,250,000원 1002***123456 잔액 4,180,220원",
+    "expect": {
+      "post": false,
+      "why": "failed"
+    },
+    "notes": "cancelled deposit",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-94",
+    "country": "KR",
+    "ledger": "KRW",
+    "sender": "15991111",
+    "body": "[Web발신]\n하나,12/25,09:00\n123-******-12345\n출금예정 200,000원\n잔액845,300원",
+    "expect": {
+      "post": false,
+      "why": "future"
+    },
+    "notes": "scheduled withdrawal",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-95",
+    "country": "KR",
+    "ledger": "KRW",
+    "sender": "15991111",
+    "body": "[Web발신]\n[하나은행] 아래 입금계좌로 200,000원을 입금하세요. 입금계좌 123-456789-01234",
+    "expect": {
+      "post": false,
+      "why": "request"
+    },
+    "notes": "deposit request lure",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-96",
+    "country": "KR",
+    "ledger": "KRW",
+    "sender": "15991111",
+    "body": "[Web발신]\n하나,09/22,18:40\n123-******-12345\n출금실패 200,000원\n잔액845,300원",
+    "expect": {
+      "post": false,
+      "why": "failed"
+    },
+    "notes": "failed withdrawal",
+    "provenance": "synthetic"
   }
 ]
