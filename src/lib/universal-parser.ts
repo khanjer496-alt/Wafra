@@ -426,6 +426,15 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
       if (verdict) { status = verdict; break; }
     }
   }
+  // A short verdict line ahead of the amount's clause ("Thanh toán không thành
+  // công" over "Bạn đã thanh toán 45.000đ ...") states that the movement below
+  // it did not complete. Only a failure verdict counts here; scheduling and
+  // pending words in a heading describe other things.
+  if (status === 'posted' && !roleUnresolved) {
+    for (const piece of source.slice(0, span.start).split(/(?<=[;!?\n。।])|(?<=\.)(?=\s|$)/u)) {
+      if (piece.trim().length > 0 && nonPostingTailVerdict(piece) === 'failed') { status = 'failed'; break; }
+    }
+  }
   const cjkVerdict = status === 'posted' ? cjkNonPostingVerdict(source) : null;
   if (cjkVerdict) status = cjkVerdict;
   // A bank ASKING whether you made a payment has not told you that you did.

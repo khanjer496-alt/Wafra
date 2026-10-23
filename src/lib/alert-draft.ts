@@ -320,6 +320,7 @@ function collectRaw(normalized: string, aliases: CurrencyAliasMap = {}): RawCand
       // reference, "NEFTRs500X" an Rs. Only an unattached symbol is money.
       // A slash also blocks the sol sign only: "UPI/Rs.500" is a real narration.
       if (prefix && /^[A-Za-z]/.test(token) && (match.index as number) > 0 &&
+        !UNSPACED_SCRIPT_CHAR.test(normalized[(match.index as number) - 1]) &&
         (token === 'S/' ? /[\p{L}\p{N}/_]/u : /[\p{L}\p{N}_]/u).test(normalized[(match.index as number) - 1])) continue;
       // A dollar sign glued to a Latin letter is some OTHER qualified dollar
       // ("RD$", or "S$" inside an unknown prefix): never the bare "$".

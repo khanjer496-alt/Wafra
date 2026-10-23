@@ -491,7 +491,8 @@ export const hasDeclinedWording = (text: string): boolean =>
 const TAIL_HELD = /(?<![\p{L}\p{N}])(?:scheduled|programad[oa]|agendad[oa]|agendamento|programm[ée]e?|geplant|gepland)(?![\p{L}\p{N}])/iu;
 export const nonPostingTailVerdict = (sentence: string): 'failed' | 'informational' | null => {
   // A verdict line is short; a long promotional or help sentence only mentions the words.
-  const words = sentence.trim().split(/\s+/u).length;
+  sentence = sentence.trim();
+  const words = sentence.split(/\s+/u).length;
   if (words > 8 || WORLD_VOCAB.conditional.test(sentence)) return null;
   if (hasDeclinedWording(sentence)) return 'failed';
   if (words > 6) return null;
