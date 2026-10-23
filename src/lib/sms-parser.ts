@@ -6015,7 +6015,6 @@ const NOTICE_UP_TO_LEAD_RE = new RegExp(
   String.raw`\bup\s+to\s*(?:${NOTICE_CURRENCY}\.?\s*)?$|(?<![${AR_LETTER}])حتي\s*(?:${NOTICE_CURRENCY}\.?\s*)?$`,
   'i',
 );
-const NOTICE_LIMIT_AR_RE = new RegExp(`(?<![${AR_LETTER}])(?:ال)?حد(?![${AR_LETTER}])`);
 /** A completed movement verb in the figure's clause: a limit notice has none. */
 const NOTICE_DONE_VERB_RE = new RegExp(
   String.raw`\b(?:was|were|has\s+been|have\s+been)\s+(?:successfully\s+)?(?:used|debited|charged|deducted|spent|withdrawn|made|paid|transferred|credited)\b|\b(?:spent|debited|deducted|withdrawn|purchased)\b` +

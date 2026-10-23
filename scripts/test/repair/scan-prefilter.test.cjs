@@ -28,6 +28,8 @@ function harness({ pinnedCurrency = 'AED', activeMarket = 'AE' } = {}) {
       ledgerCurrencyExponent: () => 2,
     },
     '@/lib/sms-parser': { parseSmsBatch: () => [] },
+    // The settled-movement check is pure wording; use the shipped one.
+    '@/lib/unparsed-launch-alert': require(path.join(root, 'scripts/test/build/unparsed-launch-alert.js')),
     '@/lib/currency-metadata': {
       CURRENCY_SYMBOL_CANDIDATES: { '$': ['USD'] },
       currencyMinorUnits: code => code === 'AED' || code === 'USD' ? 2 : null,

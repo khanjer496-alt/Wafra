@@ -21,7 +21,6 @@
  * `combo` applies 2-3 operators in sequence (structural first).
  */
 const { rngFor, splitOf, fnv1a } = require('./lib/prng.cjs');
-const { formatMoney } = require('./lib/money.cjs');
 const { formatDate } = require('./lib/dates.cjs');
 const G = require('./generate.cjs');
 const { gradePositive, summarize } = require('./lab-eval.cjs');

@@ -13,6 +13,7 @@ const historical = load(path.resolve(__dirname, '../../../src/lib/historical-imp
   '@/lib/markets': markets,
   '@/lib/alert-institution-grammars': require(path.join(build, 'alert-institution-grammars.js')),
   '@/lib/transfer-evidence': require(path.join(build, 'transfer-evidence.js')),
+  '@/lib/gulf-neighbour-templates': require(path.join(build, 'gulf-neighbour-templates.js')),
 });
 const history = load(path.resolve(__dirname, '../../../src/lib/ios-history-import.ts'), {
   '@/lib/alert-review-tray': require(path.join(build, 'alert-review-tray.js')),

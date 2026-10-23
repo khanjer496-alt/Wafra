@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 30b8642eec7c960ae8272e944c2a6eb91ce7f97f5968918f6bbdf34ca6f6f27b
+// Generated from normal shipping TypeScript. Source SHA-256: 582b5cf878e0c85bf9bcf190c3ae4d1a5ff360cd56998c0bcb368290b75ba69a
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -15194,7 +15194,6 @@ const NOTICE_EXAMPLE_BEFORE_RE = /(?:^|[\n.!|–])[ \t]{0,3}(?:for\s+example|exa
 const NOTICE_EXAMPLE_OF_RE = /\b(?:an?|the|our)\s+(?:sample|example)\s+of\s+(?:our|the|a|your)\s+(?:new\s+)?(?:alert|message|notification|sms)s?\b/i;
 const NOTICE_LIMIT_EN_RE = /\blimit\s+(?:reached|applies|exceeded|has\s+been\s+(?:reached|exceeded))\b|\b(?:daily|monthly|weekly|spending)\s+limit\b|\b(?:are|is)\s+available\s+with\b/i;
 const NOTICE_UP_TO_LEAD_RE = new RegExp(String.raw `\bup\s+to\s*(?:${NOTICE_CURRENCY}\.?\s*)?$|(?<![${AR_LETTER}])حتي\s*(?:${NOTICE_CURRENCY}\.?\s*)?$`, 'i');
-const NOTICE_LIMIT_AR_RE = new RegExp(`(?<![${AR_LETTER}])(?:ال)?حد(?![${AR_LETTER}])`);
 const NOTICE_DONE_VERB_RE = new RegExp(String.raw `\b(?:was|were|has\s+been|have\s+been)\s+(?:successfully\s+)?(?:used|debited|charged|deducted|spent|withdrawn|made|paid|transferred|credited)\b|\b(?:spent|debited|deducted|withdrawn|purchased)\b` +
     `|(?<![${AR_LETTER}])و?تم\\s+(?:ال)?(?:خصم|شراء|سحب|دفع|تحويل|سداد|استخدام)`, 'i');
 const NOTICE_HOLD_RE = new RegExp(String.raw `\b(?:requires?|needs?|awaiting|waiting\s+for)\s+(?:your\s+)?(?:approval|authori[sz]ation|confirmation)\b|\bmay\s+appear\s+on\s+your\s+(?:[\w&-]+\s+){0,3}?(?:card|account|a\/c|debit|credit)\b|\bfor\s+card\s+verification\b|\bsubject\s+to\s+final\s+settlement\b` +

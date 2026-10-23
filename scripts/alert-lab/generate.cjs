@@ -267,7 +267,6 @@ const titleCase = (s) => s.toLowerCase().replace(/(^|[\s/&*.'-])(\p{L})/gu, (m, 
 function composePositive({ market, family, split, rng, index }) {
   const leaks = [];
   const lang = rng.weighted(market.langs);
-  const L = LEX[lang];
   const bilingualOk = market.langs.some(([l]) => l === 'ar') && market.langs.some(([l]) => l === 'en');
   let layout = rng.weighted([['sentence', 5], ['headline', 2], ['fields', 2], ['push', 1.5], ['bilingual', bilingualOk ? 1 : 0]]);
   // A layout whose vocabulary has nothing in this split falls back to a

@@ -1191,7 +1191,7 @@ const EUROPEAN_LANGUAGE_MARKETS: readonly UniversalMarket[] = EUROPEAN_HEADING_M
 // (Linear in the text: each sentence's status words are found once.)
 const SENTENCE_END = /[.!?？\n]/gu;
 const blankFooters = (text: string): string => {
-  const blanks: Array<[number, number]> = [];
+  const blanks: [number, number][] = [];
   const statusBySentence = new Map<number, number[]>();
   for (const match of text.matchAll(EUROPEAN_FOOTER_STRIP)) {
     const start = match.index!, end = start + match[0].length;
