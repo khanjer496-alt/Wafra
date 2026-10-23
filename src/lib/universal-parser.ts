@@ -1,5 +1,5 @@
 import { missingUniversalField, type UniversalBankEvent, type UniversalParseContext } from '@/lib/universal-types';
-import { accountMovementDirection, inspectMarketAlert } from '@/lib/alert-semantics';
+import { accountMovementDirection, cjkNonPostingVerdict, hasDeclinedWording, inspectMarketAlert } from '@/lib/alert-semantics';
 import type { MoneyDirection, PostingStatus, UniversalMarket } from '@/lib/alert-market-pack-types';
 import { extractUniversalFields } from '@/lib/universal-fields';
 import { extractUniversalMoney, inspectUniversalMoneyDraft } from '@/lib/universal-money';
@@ -52,6 +52,9 @@ const phrase = (pattern: string): RegExp => {
   return compiled;
 };
 
+const MERCHANT_STATE_TAIL = /\s+(?:successful(?:ly)?|completed|processed|declined|failed|rejected|cancell?ed|pending|refus[ée]e?|rejet[ée]e?|annul[ée]e?|en\s+attente|rechazad[oa]|pendiente|recusad[oa]|pendente|abgelehnt|ausstehend|storniert|geweigerd|rifiutat[oa]|berhasil|gagal|ditolak|exitos[oa]|sucesso|r[eé]ussi[e]?|erfolgreich|reddedildi)[.!\s]*$/iu;
+const CASH_MACHINE_WORD = /(?<![\p{L}\p{N}])(?:atm|cash\s?machine|cashpoint|geldautomaat|geldautomat|bancomat|cajero(?:\s+autom[aá]tico)?|caixa\s+eletr[oô]nico)(?![\p{L}\p{N}])/iu;
+
 const REVIEW_ONLY_ISSUER_HINT = /plin|interbank|bbva|scotiabank|santander|banamex/iu;
 
 /** Completed movement predicates, independent of issuer/country selection. */
@@ -75,7 +78,7 @@ const completedMovement = (source: string): { status: PostingStatus; direction: 
     /भुगतान\s+सफल\s+हुआ/u,
     // Indonesian "transaksi ... berhasil" (transaction ... successful), a
     // card "charged to card ... at" shop, and Japan's card-usage notice.
-    phrase(String.raw`transaksi[\s\S]{0,100}berhasil`),
+    phrase(String.raw`transaksi[\s\S]{0,180}berhasil`),
     // Indian UPI account alerts: "A/C X1234 debited by 450.0 ... trf to ZOMATO".
     phrase(String.raw`debited\s+by[\s\S]{0,80}?\btrf\s+to`),
     // Spanish/Portuguese/Polish/Peruvian finished card charges, a Ghanaian
@@ -85,6 +88,8 @@ const completedMovement = (source: string): { status: PostingStatus; direction: 
     phrase(String.raw`transakcja[\s\S]{0,100}zrealizowana`),
     phrase(String.raw`realizaste\s+un\s+consumo`),
     phrase(String.raw`payment\s+made\s+for`),
+    // Wallet receipts ("Payment Tk 650.00 to SHOP successful"): a finished payee payment.
+    phrase(String.raw`(?:^|[.\n]\s*)(?:payment|bill\s+pay(?:ment)?|merchant\s+pay(?:ment)?|(?:mobile\s+)?recharge)\b(?:[^.;\n]|\.\d){0,80}?\bsuccessful(?:ly)?`),
     // A German direct debit that has been charged (a single one is not a
     // subscription by itself; recurrence is the subscription detector's call).
     phrase(String.raw`lastschrift[\s\S]{0,100}\b(?:belastet|abgebucht)`),
@@ -97,7 +102,8 @@ const completedMovement = (source: string): { status: PostingStatus; direction: 
     // capitals: "Prime Visa 1234: ALEX made a $19.99 transaction with CAFE".
     // Case-sensitive on purpose; "someone/SOMEONE made …" is a fraud prompt.
     /(?:^|:[ \t]*)(?!(?:SOMEONE|SOMEBODY|ANYONE|ANYBODY|UNKNOWN)\b)[A-Z][A-Z'.-]+(?:[ \t]+[A-Z][A-Z'.-]+){0,3}[ \t]+made[ \t]+an?[ \t]+(?!(?:[^.;\n?]|\.\d){0,40}?\b(?:return|refund|credit)\b)(?:[^.;\n?]|\.\d){0,40}?\btransaction[ \t]+with\b/u,
-    /カード利用のお知らせ[\s\S]{0,40}ご利用金額/u,
+    // Japanese card-usage notices put the fields on later lines of the same message.
+    /(?:カード)?ご?利用のお知らせ[\s\S]{0,300}?ご?利用金額/u,
     /(?:カード利用|購入)が完了しました/u,
     /(?:消费|支付|付款)(?:成功|已完成)/u,
   ];
@@ -119,7 +125,7 @@ const completedMovement = (source: string): { status: PostingStatus; direction: 
   // Completed person-to-person transfers in other languages and wallets. Each
   // is a finished verb, never a heading: "Pix enviado", "Você recebeu um Pix",
   // "Virement reçu", "havale gelmiştir" (has arrived), "You have sent/received".
-  const transferOutWords = /(?<!\p{L})(?:pix\s+enviado|você\s+enviou\s+um\s+pix|you\s+have\s+(?:successfully\s+)?sent|money\s+sent\s+successfully\s+to|^\s*sent\s+(?:rs\.?|inr|₹)|has\s+enviado\s+un\s+bizum)(?!\p{L})/iu;
+  const transferOutWords = /(?<!\p{L})(?:pix\s+enviado|você\s+enviou\s+um\s+pix|you\s+have\s+(?:successfully\s+)?sent|money\s+sent\s+successfully\s+to|^\s*sent\s+(?:rs\.?|inr|₹)|has\s+enviado\s+un\s+bizum|send\s+money\s+successful(?:ly)?)(?!\p{L})/iu;
   const transferInWords = /(?<!\p{L})(?:virement\s+reçu|você\s+recebeu\s+um\s+pix|pix\s+recebido|havale\s+gelmiştir|eft\s+gelmiştir|you\s+have\s+(?:successfully\s+)?received|has\s+recibido\s+un\s+bizum|bizum\s+recibido)(?!\p{L})/iu;
   const statuses: PostingStatus[] = [];
   const matches = (pattern: RegExp): boolean => {
@@ -144,10 +150,10 @@ const completedMovement = (source: string): { status: PostingStatus; direction: 
   };
   const debit = debitPatterns.map(matches).some(Boolean);
   const refund = refundPatterns.map(matches).some(Boolean);
-  const deposit = matches(depositPattern);
+  const deposit = [matches(depositPattern), matches(/入金のお知らせ|ご入金がありました/u)].some(Boolean);
   const transferOut = matches(arabicTransferOut) || matches(transferOutWords);
   const transferIn = matches(arabicTransferIn) || matches(transferInWords);
-  const cashWithdrawal = matches(phrase(String.raw`cash\s+out\s+of[\s\S]{0,140}?is\s+successful|processed\s+(?:a\s+)?debit\s+card\s+withdrawal\s*:|a\s+debit\s+transaction\s+from\s+withdrawal[\s\S]{0,140}?was\s+posted`));
+  const cashWithdrawal = matches(phrase(String.raw`cash\s*out\s+(?!of\b)(?:[^.;\n]|\.\d){0,80}?\bsuccessful(?:ly)?|cash\s+out\s+of[\s\S]{0,140}?is\s+successful|processed\s+(?:a\s+)?debit\s+card\s+withdrawal\s*:|a\s+debit\s+transaction\s+from\s+withdrawal[\s\S]{0,140}?was\s+posted`));
   if (cashWithdrawal && !refund && !deposit && !transferIn) {
     const status = conservativeStatus(statuses);
     return { status, direction: 'debit', family: status === 'posted' ? 'cash-withdrawal' : 'unknown' };
@@ -163,6 +169,45 @@ const completedMovement = (source: string): { status: PostingStatus; direction: 
   if (debit === (refund || deposit)) return null;
   return refund ? { status, direction: 'credit', family: 'refund' }
     : deposit ? { status, direction: 'credit', family: 'transfer' } : { status, direction: 'debit', family: 'purchase' };
+};
+
+/**
+ * A bank's own ledger wording ("Acct XX123 is debited with INR 2,000", "A/C
+ * ...6789 has been credited with PKR 145,000") proves money moved on the
+ * reader's account and its direction, but often no family: the "why" lives in
+ * a narration field or a payment-rail token. Fill ONLY an otherwise unknown
+ * family from that evidence; this never sets status, direction or amount.
+ * Without a narration a debit is generic spending and a credit an incoming
+ * transfer (the same default the own-account credit rule already uses).
+ */
+const LEDGER_VERB = /(?<![\p{L}\p{N}])(?:debited|credited|deducted|withdrawn|charged)(?![\p{L}\p{N}])/iu;
+// An account/card word followed by a masked or numbered tail ("A/c no. XX1234",
+// "Acct ***5678", "A/C ...6789", "A/cX1234"). A bare "from your account" is
+// deliberately not enough: a generic debit with no family stays in Review.
+const OWN_ACCOUNT = /(?<![\p{L}\p{N}])(?:a\/?c|acct?|account|card)\s*(?:no\.?|number|ending(?:\s+(?:in|with))?|#)?\s*:?\s*[xX*•#.-]*\d{3,}/iu;
+const LEDGER_RAIL = /(?<![\p{L}\p{N}])(?:debited|credited)\s+(?:via|thru|through|by|using)\s+(?:upi|imps|neft|rtgs|raast|ibft)(?![\p{L}\p{N}])/iu;
+const NARRATION = /(?<![\p{L}\p{N}])(?:info|narration|narr|desc(?:ription)?|des|remarks?|particulars|details?|nd|ket|keterangan)\s*[:-]\s*([^\n]{1,100})/iu;
+// The family fallback is the weakest evidence in this file, so it stands down
+// for anything that looks like a challenge, code, lure or link; the posting
+// policy still re-checks all of these independently.
+const FALLBACK_REFUSED = /(?<![\p{L}\p{N}])(?:otp|passcode|verification\s+code|security\s+code|one[\s-]?time|do\s+not\s+share|prize|reward|lottery|winner|won|click|claim|collect\s+request)(?![\p{L}\p{N}])|https?:\/\/|www\.|(?<![\p{L}\p{N}])(?:is|was)\s+this\s+(?:you|yours|your\s+(?:transaction|payment|purchase))|(?<![\p{L}\p{N}])reply\s+(?:y|yes|n|no)(?![\p{L}\p{N}])/iu;
+const ownAccountMovementFamily = (
+  source: string,
+  direction: 'debit' | 'credit',
+): UniversalBankEvent['family'] | null => {
+  const text = source.normalize('NFKC');
+  if (!LEDGER_VERB.test(text) || !(OWN_ACCOUNT.test(text) || LEDGER_RAIL.test(text)) || FALLBACK_REFUSED.test(text)) return null;
+  const narration = NARRATION.exec(text)?.[1] ?? '';
+  const scope = narration || text;
+  if (direction === 'debit') {
+    if (/(?<![\p{L}\p{N}])(?:atm|cash\s*w(?:dl|d|ithdrawal)|tarik\s+tunai)(?![\p{L}\p{N}])/iu.test(scope)) return 'cash-withdrawal';
+    if (narration && /(?<![\p{L}\p{N}])(?:chgs?|charges?|fees?|commission)(?![\p{L}\p{N}])/iu.test(narration)) return 'fee';
+  }
+  // Person-to-person or inter-bank rails and transfer words are transfers.
+  if (/(?<![\p{L}\p{N}])(?:p2a|neft|rtgs|imps|trf|transfer|salary|raast|ibft|instapay)(?![\p{L}\p{N}])/iu.test(text)) {
+    return 'transfer';
+  }
+  return direction === 'debit' ? 'purchase' : 'transfer';
 };
 
 /** References are identifiers even when immediately followed by a currency. */
@@ -275,19 +320,30 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
       // transfer; its recipient name remains masked like every other name.
       const depositPredicate = /\byour\s+interac\s+e[ -]?transfer\s+of\b/iu.test(source.slice(span.start, start))
         ? source.slice(start, end).search(/\b(?:was|has\s+been)\s+deposited\b(?=\s*(?:[.,;!?]|$)|\s+(?:on|into|in|at|by|and)\b)/iu) : -1;
-      const maskEnd = depositPredicate < 0 ? end : start + depositPredicate;
-      if (maskEnd > start) maskedSource = maskedSource.slice(0, start) + ' '.repeat(maskEnd - start) + maskedSource.slice(maskEnd);
+      let maskEnd = depositPredicate < 0 ? end : start + depositPredicate;
+      // An over-long merchant tail ("Daraz Ltd successful", "CAFE refusé") must
+      // not blank the lifecycle word that follows the name.
+      const stateTail = MERCHANT_STATE_TAIL.exec(source.slice(start, maskEnd));
+      if (stateTail) maskEnd = start + stateTail.index;
+      if (maskEnd > start) {
+        // "at an ATM" is extracted as a merchant, but the cash-machine word is
+        // movement evidence (cash withdrawal), not a name: keep just that word.
+        const atm = CASH_MACHINE_WORD.exec(source.slice(start, maskEnd));
+        const keep = atm ? { at: start + atm.index, text: atm[0] } : null;
+        maskedSource = maskedSource.slice(0, start) + ' '.repeat(maskEnd - start) + maskedSource.slice(maskEnd);
+        if (keep) maskedSource = maskedSource.slice(0, keep.at) + keep.text + maskedSource.slice(keep.at + keep.text.length);
+      }
     }
   }
   const semanticSource = maskedSource.slice(span.start, span.end);
   const packs = context.market ? [context.market] : LANGUAGE_PACKS;
-  const scopedReadings = packs.map((market) => inspectMarketAlert(semanticSource, market, { sender: context.sender }));
+  const scopedReadings = packs.map((market) => inspectMarketAlert(semanticSource, market, { sender: context.sender, world: true }));
   // An unowned number has not earned a posting clause. Preserve negative and
   // informational context across line/sentence boundaries; flattened text is
   // for classification only, never the source of amounts or source spans.
   const wholeContext = maskedSource.replace(/[\n\r;!?]|\.(?!\d)/gu, ' ');
   const wholeReadings = roleUnresolved
-    ? packs.map((market) => inspectMarketAlert(wholeContext, market, { sender: context.sender })) : [];
+    ? packs.map((market) => inspectMarketAlert(wholeContext, market, { sender: context.sender, world: true })) : [];
   const separateInfo = money.observations.some((observation) =>
     ['balance', 'credit-limit', 'statement-total', 'minimum-due'].includes(observation.role));
   const wholeNegative = wholeReadings.some((reading) =>
@@ -331,6 +387,14 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
   ));
   if (challenge || pending) status = 'informational';
   if (explicitlyUnsuccessful) status = 'failed';
+  // Commas split money clauses, so a verdict later in the SAME sentence
+  // ("... en TIENDA, pero fue rechazada") is outside the clause read above.
+  const afterSpan = maskedSource.slice(span.end);
+  const sentenceEnd = afterSpan.search(/[;!?\n。।]|\.(?=\s|$)/u);
+  const sameSentence = sentenceEnd < 0 ? afterSpan : afterSpan.slice(0, sentenceEnd);
+  if (status === 'posted' && hasDeclinedWording(sameSentence)) status = 'failed';
+  const cjkVerdict = status === 'posted' ? cjkNonPostingVerdict(source) : null;
+  if (cjkVerdict) status = cjkVerdict;
   // A bank ASKING whether you made a payment has not told you that you did.
   // "Did you attempt a USD 1,299.00 purchase at TECH OUTLET? Reply YES or NO."
   // read as a posted purchase because the disclaimer after it sits outside the
@@ -478,6 +542,12 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
   const direction = counterpartyReceipt && readDirection === 'credit' ? 'unknown'
     : receivedYourTransfer && readDirection === 'credit' ? personReceivedYourTransfer ? 'debit' : 'unknown'
       : readDirection;
+  if (family === 'unknown' && families.length === 0 && status === 'posted' && !roleUnresolved && !directionConflict &&
+    (direction === 'debit' || direction === 'credit') &&
+    // A separate fee line may or may not be inside the charge: leave it to the person.
+    !money.observations.some((observation) => observation.role === 'fee')) {
+    family = ownAccountMovementFamily(maskedSource, direction) ?? family;
+  }
   const authentication = challenge || readings.some((reading) => reading.family === 'authentication');
   const promotion = [...readings, ...wholeReadings].some((reading) => reading.draft.reasons.includes('promotion'));
   const reviewable = hasAmount || hasStatement || hasBalance;

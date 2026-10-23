@@ -207,5 +207,73 @@ for (const source of [
   });
 }
 
+
+// Worldwide completion shapes (semantics lane). Synthetic wording with fictional
+// values: each positive proves status, direction and family, never a bank claim.
+for (const [source, family, direction] of [
+  ["You've made a debit card payment of GBP 31.50 at BOOTS on 28/09/2026.", 'purchase', 'debit'],
+  ['Card ending 7711 used for EUR 27.80 at SUPERVALU on 04/10/2026.', 'purchase', 'debit'],
+  ['An ATM withdrawal of USD 80.00 was made from your account ending in 4471.', 'cash-withdrawal', 'debit'],
+  ['A USD 76.40 transaction was made at TARGET on your card ending in 1209.', 'purchase', 'debit'],
+  ["You've sent GBP 60.00 to ALEX MORGAN from your account ending 6201.", 'transfer', 'debit'],
+  ["You've received GBP 35.00 from DANA LEE into your account ending 4410.", 'transfer', 'credit'],
+  ['Payvia: You paid Priya Shah USD 90.00 for rent share.', 'transfer', 'debit'],
+  ['Payment of SGD 42.00 to KOPI HOUSE was successful.', 'purchase', 'debit'],
+  ['Realizaste una compra por MXN 124.90 en MERCADO LUZ con tu tarjeta *4417.', 'purchase', 'debit'],
+  ['Dear Customer, Acct XX456 is debited with INR 500.00 on 04-Oct-26. Info: ATM*CASH WDL*S1ABC456. Available Balance is INR 9,240.50.', 'cash-withdrawal', 'debit'],
+  ['Dear Customer, Acct XX456 is debited with INR 59.00 on 01-Oct-26. Info: ANNUAL CHGS. Available Balance is INR 9,181.50.', 'fee', 'debit'],
+  ['INR 210.00 debited\nA/c no. XX7788\n03-10-26, 11:05:41\nUPI/P2M/627711112222/CAFE COFFEE\nOrchid Bank', 'purchase', 'debit'],
+  ['INR 900.00 credited\nA/c no. XX7788\n04-10-26, 18:05:33 IST\nUPI/P2A/627722223333/RAVI KUMAR\nOrchid Bank', 'transfer', 'credit'],
+  ['Dear Customer, PKR 2,000.00 has been debited from your A/C 0202XXXX1199 on 03-10-2026 via Raast to SANA MALIK.', 'transfer', 'debit'],
+  ['Dear Customer, A/C ##8899 debited by NPR 450.00 on 04/10/2026. Remarks: Fonepay QR Payment to LOCAL MART.', 'purchase', 'debit'],
+]) {
+  check('worldwide completed shape: ' + source.slice(0, 48), () => {
+    const event = inspect(source);
+    assert.equal(event.status, 'posted');
+    assert.equal(event.family, family);
+    assert.equal(event.direction, direction);
+  });
+}
+// The same shapes with a decline, hold, schedule, request, condition, code or
+// lure must never read as posted (negative controls per class).
+for (const source of [
+  "You've made a debit card payment of GBP 31.50 at BOOTS but it was declined.",
+  'A pre-authorisation of USD 75.00 was made at GRAND HOTEL on your card ending in 1209.',
+  'A USD 52.00 transaction will be made on 11/05/2026 on your card ending in 1209.',
+  'Did you make a USD 120.00 transaction at EXAMPLE STORE? Reply YES or NO.',
+  'Your card can be used for purchases up to USD 500.00 abroad.',
+  "You've received a payment request of GBP 45.00 from DANA LEE.",
+  'You sent a request for GBP 30.00 to ALEX MORGAN.',
+  'Someone sent you GBP 50.00 - claim it here https://example.test/claim',
+  "You've sent GBP 45.00 to DANA LEE but the payment was returned.",
+  'If a deposit of USD 2,000.00 was made to your account, please verify it in the app.',
+  'Payment of SGD 42.00 to KOPI HOUSE failed. Please retry.',
+  'Realizaste una compra por MXN 124.90 en MERCADO LUZ, pero fue rechazada.',
+  'Pagaste ARS 1.875,00 en KIOSCO NORTE: pago pendiente de confirmación.',
+  'Solicitud: te pidió BRL 40,00 por Pix. Aprove no app.',
+  'Acct XX456 will be debited with INR 500.00 on 15-Oct-26. Info: NACH.',
+  'UPI txn of Rs 250.00 from Acct XX456 to VPA shop@bank failed. Info: UPI.',
+  'Acct XX456 credited with INR 3,000.00 on 05-Oct-26. Info: REVERSAL pending confirmation.',
+  'Acct XX456 debited Rs 600.00 on 04-Oct-26. Is this you? Reply Y or N.',
+  'Avl Bal INR 9,240.00 in Acct XX456 as on 04-Oct-26. Info: NEFT',
+]) {
+  check('worldwide negative control stays unposted: ' + source.slice(0, 48), () => {
+    const event = inspect(source);
+    const postable = event.status === 'posted' && event.decision === 'review' &&
+      ['purchase', 'cash-withdrawal', 'refund', 'fee', 'utility', 'recurring-payment', 'transfer'].includes(event.family) &&
+      (event.direction === 'debit' || event.direction === 'credit');
+    assert.equal(postable, false, JSON.stringify([event.status, event.family, event.direction, event.decision]));
+  });
+}
+check('a narration cannot turn an incoming credit into a cash withdrawal', () => {
+  const event = inspect('Dear Customer, Acct XX456 is credited with INR 300.00 on 05-Oct-26. Info: ATM deposit. Available Balance is INR 9,240.50.');
+  assert.equal(event.direction, 'credit');
+  assert.notEqual(event.family, 'cash-withdrawal');
+});
+check('a generic debit with no narration, rail or masked account tail keeps its family unresolved', () => {
+  const event = inspect('Chase Bank: USD 42.10 was debited from your account.');
+  assert.equal(event.family, 'unknown');
+});
+
 console.log(`universal parser: ${passed} passed, ${failed} failed`);
 if (failed) process.exitCode = 1;

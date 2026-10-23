@@ -1,0 +1,1168 @@
+[
+  {
+    "id": "U-SEMANTICS-1",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Nationwide",
+    "body": "Nationwide: You've made a debit card payment of £31.50 at BOOTS 0212 from your account ending 7781 on 05/10/2026.",
+    "expect": {
+      "post": true,
+      "amountMinor": 3150,
+      "type": "expense",
+      "merchant": "boots"
+    },
+    "notes": "contraction + booked card-payment noun",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-2",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Monzo",
+    "body": "Monzo: We've charged your annual fee of £12.00 from your account ending 5520 on 28/09/2026.",
+    "expect": {
+      "post": true,
+      "amountMinor": 1200,
+      "type": "expense"
+    },
+    "notes": "we have charged ... fee",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-3",
+    "country": "IE",
+    "ledger": "EUR",
+    "sender": "Bank of Ireland",
+    "body": "Bank of Ireland: Card ending 7711 used for EUR 27.80 at SUPERVALU CORK on 04/10/2026 18:22.",
+    "expect": {
+      "post": true,
+      "amountMinor": 2780,
+      "type": "expense",
+      "merchant": "supervalu"
+    },
+    "notes": "card ending N used for",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-4",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "Wells Fargo",
+    "body": "Wells Fargo: An ATM withdrawal of $80.00 was made from your account ending in 4471 on Oct 4, 2026.",
+    "expect": {
+      "post": true,
+      "amountMinor": 8000,
+      "type": "expense"
+    },
+    "notes": "ATM withdrawal noun",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-5",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "Fifth Harbor Bank",
+    "body": "Fifth Harbor Bank: A $76.40 transaction was made at TARGET T-1123 on your card ending in 1209 on 10/03/2026.",
+    "expect": {
+      "post": true,
+      "amountMinor": 7640,
+      "type": "expense"
+    },
+    "notes": "amount before noun, was made",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-6",
+    "country": "CA",
+    "ledger": "CAD",
+    "sender": "Northern CU",
+    "body": "Northern CU: A deposit of $1,420.00 (PAYROLL - NORTHERN SUPPLY INC) was made to your account ending in 3399 on 2026-10-02.",
+    "expect": {
+      "post": true,
+      "amountMinor": 142000,
+      "type": "income"
+    },
+    "notes": "deposit of X was made to your account",
+    "provenance": "synthetic",
+    "paths": [
+      "android-sms"
+    ]
+  },
+  {
+    "id": "U-SEMANTICS-7",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Revolut",
+    "body": "Revolut: You've sent £60.00 to ALEX MORGAN from your account ending 6201 on 05/10/2026.",
+    "expect": {
+      "post": true,
+      "amountMinor": 6000,
+      "type": "expense",
+      "transfer": true
+    },
+    "notes": "peer payment sent with contraction",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-8",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Lloyds",
+    "body": "Lloyds: You've received £35.00 from DANA LEE into your account ending 4410.",
+    "expect": {
+      "post": true,
+      "amountMinor": 3500,
+      "type": "income",
+      "transfer": true
+    },
+    "notes": "peer payment received with contraction",
+    "provenance": "synthetic",
+    "paths": [
+      "android-sms"
+    ]
+  },
+  {
+    "id": "U-SEMANTICS-9",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "Payvia",
+    "body": "Payvia: You paid Priya Shah $90.00 for rent share. Payment ID 7710022.",
+    "expect": {
+      "post": true,
+      "amountMinor": 9000,
+      "type": "expense",
+      "transfer": true
+    },
+    "notes": "You paid NAME $X",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-10",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "Wells Fargo",
+    "body": "Wells Fargo: Your $210.45 payment to CITY WATER was sent on Oct 2, 2026 from your account ending in 0812.",
+    "expect": {
+      "post": true,
+      "amountMinor": 21045,
+      "type": "expense"
+    },
+    "notes": "amount-first bill payment to a payee, was sent",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-11",
+    "country": "SG",
+    "ledger": "SGD",
+    "sender": "PayLah",
+    "body": "Payment of SGD 42.00 to KOPI HOUSE was successful.",
+    "expect": {
+      "post": true,
+      "amountMinor": 4200,
+      "type": "expense"
+    },
+    "notes": "payment of X to PAYEE was successful",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-12",
+    "country": "ZM",
+    "ledger": "ZMW",
+    "sender": "MobileMoney",
+    "body": "Payment received for ZMW 150.00 from CHANDA MWEWA. Reference: groceries. Transaction ID: 71002233.",
+    "expect": {
+      "post": true,
+      "amountMinor": 15000,
+      "type": "income",
+      "transfer": true
+    },
+    "notes": "wallet payment received for X from NAME",
+    "provenance": "synthetic",
+    "paths": [
+      "android-sms"
+    ]
+  },
+  {
+    "id": "U-SEMANTICS-13",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Nationwide",
+    "body": "Nationwide: You've made a debit card payment of £31.50 at BOOTS 0212 but it was declined.",
+    "expect": {
+      "post": false,
+      "why": "declined"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-14",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "Fifth Harbor Bank",
+    "body": "Fifth Harbor Bank: A pre-authorisation of $75.00 was made at GRAND HOTEL on your card ending in 1209.",
+    "expect": {
+      "post": false,
+      "why": "hold"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-15",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "Fifth Harbor Bank",
+    "body": "Fifth Harbor Bank: A $52.00 transaction will be made on 11/05/2026 on your card ending in 1209.",
+    "expect": {
+      "post": false,
+      "why": "scheduled"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-16",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "Fifth Harbor Bank",
+    "body": "Fifth Harbor Bank: Did you make a $120.00 transaction at EXAMPLE STORE? Reply YES or NO.",
+    "expect": {
+      "post": false,
+      "why": "challenge"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-17",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "Fifth Harbor Bank",
+    "body": "Fifth Harbor Bank: A $120.00 transaction was made at EXAMPLE STORE. Was this you? Reply Y or N.",
+    "expect": {
+      "post": false,
+      "why": "challenge"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-18",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "Fifth Harbor Bank",
+    "body": "Fifth Harbor Bank: Your card can be used for purchases up to $500.00 abroad.",
+    "expect": {
+      "post": false,
+      "why": "promo"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-19",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-NORTHB",
+    "body": "OTP for transaction of INR 2,500.00 at EXAMPLE SHOP is 482913. Do not share this code.",
+    "expect": {
+      "post": false,
+      "why": "otp"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-20",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Monzo",
+    "body": "Monzo: We will take your annual fee of £12.00 on 15/10/2026.",
+    "expect": {
+      "post": false,
+      "why": "scheduled"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-21",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "Fifth Harbor Bank",
+    "body": "Fifth Harbor Bank: A charge of $64.00 at EXAMPLE CAFE is pending on your card ending in 1209.",
+    "expect": {
+      "post": false,
+      "why": "pending"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-22",
+    "country": "IE",
+    "ledger": "EUR",
+    "sender": "PTSB",
+    "body": "PTSB: ATM withdrawal of €200.00 could not be completed. Please try again.",
+    "expect": {
+      "post": false,
+      "why": "failed"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-23",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Revolut",
+    "body": "Revolut: You've received a payment request of £45.00 from DANA LEE. Tap to pay.",
+    "expect": {
+      "post": false,
+      "why": "request"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-24",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Revolut",
+    "body": "Revolut: You sent a request for £30.00 to ALEX MORGAN.",
+    "expect": {
+      "post": false,
+      "why": "request"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-25",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "",
+    "body": "Someone sent you £50.00 - claim it here https://example.test/claim",
+    "expect": {
+      "post": false,
+      "why": "lure"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-26",
+    "country": "GB",
+    "ledger": "GBP",
+    "sender": "Revolut",
+    "body": "Revolut: You've sent £45.00 to DANA LEE but the payment was returned.",
+    "expect": {
+      "post": false,
+      "why": "failed"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-27",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "Wells Fargo",
+    "body": "Wells Fargo: Your bill payment of $85.00 to CITY WATER is due on 10/10/2026.",
+    "expect": {
+      "post": false,
+      "why": "bill"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-28",
+    "country": "SG",
+    "ledger": "SGD",
+    "sender": "PayLah",
+    "body": "Payment of SGD 42.00 to KOPI HOUSE failed. Please retry.",
+    "expect": {
+      "post": false,
+      "why": "failed"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-29",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "Fifth Harbor Bank",
+    "body": "Fifth Harbor Bank: A deposit of $500.00 will be made to your account on 12/10/2026.",
+    "expect": {
+      "post": false,
+      "why": "scheduled"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-30",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "Fifth Harbor Bank",
+    "body": "Fifth Harbor Bank: If a deposit of $2,000.00 was made to your account, please verify it in the app.",
+    "expect": {
+      "post": false,
+      "why": "conditional"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-31",
+    "country": "US",
+    "ledger": "USD",
+    "sender": "Fifth Harbor Bank",
+    "body": "Fifth Harbor Bank: Your available balance is $312.40 after a payment of $25.00 to ACME was scheduled.",
+    "expect": {
+      "post": false,
+      "why": "balance"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-32",
+    "country": "KE",
+    "ledger": "KES",
+    "sender": "Savannah Bank",
+    "body": "Savannah Bank: KES 640.00 has been debited from your account ****2210 on 02/10/2026 for DSTV MULTICHOICE via card ****8891. Bal: KES 5,402.10.",
+    "expect": {
+      "post": true,
+      "amountMinor": 64000,
+      "type": "expense",
+      "transfer": false
+    },
+    "notes": "debited from your account ... for MERCHANT via card",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-33",
+    "country": "NG",
+    "ledger": "NGN",
+    "sender": "Delta Trust",
+    "body": "Your Acct 201XXXX678 Has Been Debited with NGN2,500.00 On 03-Oct-2026 09:12 By AIRTIME/GLO/0805***1122. Bal: NGN12,100.00CR.",
+    "expect": {
+      "post": true,
+      "amountMinor": 250000,
+      "type": "expense",
+      "transfer": false
+    },
+    "notes": "Has Been Debited with ... By NARRATION",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-34",
+    "country": "GH",
+    "ledger": "GHS",
+    "sender": "Delta Trust",
+    "body": "Delta: Your Acct ***9012 has been debited with GHS75.00 on 04-OCT-26. Desc: POS PURCHASE PALACE MALL. Avail Bal GHS410.00.",
+    "expect": {
+      "post": true,
+      "amountMinor": 7500,
+      "type": "expense",
+      "transfer": false
+    },
+    "notes": "Desc: POS PURCHASE narration",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-35",
+    "country": "ZM",
+    "ledger": "ZMW",
+    "sender": "Delta Trust",
+    "body": "Delta: Acc ***7766 debited ZMW 120.00 on 04/10/2026 POS KABULONGA FOODS. Avail Bal ZMW 900.00",
+    "expect": {
+      "post": true,
+      "amountMinor": 12000,
+      "type": "expense",
+      "transfer": false
+    },
+    "notes": "terse debited ... POS",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-36",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-ORCHID",
+    "body": "Dear Customer, Acct XX456 is debited with INR 500.00 on 04-Oct-26. Info: ATM*CASH WDL*S1ABC456. Available Balance is INR 9,240.50.",
+    "expect": {
+      "post": true,
+      "amountMinor": 50000,
+      "type": "expense",
+      "transfer": false
+    },
+    "notes": "ATM narration after the amount",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-37",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-ORCHID",
+    "body": "Dear Customer, Acct XX456 is debited with INR 59.00 on 01-Oct-26. Info: DEBIT CARD ANNUAL CHGS. The Available Balance is INR 9,181.50.",
+    "expect": {
+      "post": true,
+      "amountMinor": 5900,
+      "type": "expense",
+      "transfer": false
+    },
+    "notes": "charges narration",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-38",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-ORCHID",
+    "body": "Orchid Bank Account XX456 credited:Rs. 18,000.00 on 02-Oct-26. Info NEFT-ORCH52026100298765-TRIDENT SERVICES LLP. Available Balance is Rs. 27,181.50.",
+    "expect": {
+      "post": true,
+      "amountMinor": 1800000,
+      "type": "income",
+      "transfer": true
+    },
+    "notes": "credited:Rs. with NEFT rail",
+    "provenance": "synthetic",
+    "paths": [
+      "android-sms"
+    ]
+  },
+  {
+    "id": "U-SEMANTICS-39",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-ORCHID",
+    "body": "INR 210.00 debited\nA/c no. XX7788\n03-10-26, 11:05:41\nUPI/P2M/627711112222/CAFE COFFEE\nNot you? SMS BLOCKUPI Cust ID to 919900000000\nOrchid Bank",
+    "expect": {
+      "post": true,
+      "amountMinor": 21000,
+      "type": "expense",
+      "transfer": false
+    },
+    "notes": "UPI P2M field-list",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-40",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-ORCHID",
+    "body": "INR 900.00 credited\nA/c no. XX7788\n04-10-26, 18:05:33 IST\nUPI/P2A/627722223333/RAVI KUMAR\nNot you? SMS BLOCKUPI Cust ID to 919900000000\nOrchid Bank",
+    "expect": {
+      "post": true,
+      "amountMinor": 90000,
+      "type": "income",
+      "transfer": true
+    },
+    "notes": "UPI P2A field-list",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-41",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-ORCHID",
+    "body": "Dear UPI User, ur A/cX7788 credited by Rs350 on 05Oct26 by  (Ref no 627733334444)",
+    "expect": {
+      "post": true,
+      "amountMinor": 35000,
+      "type": "income",
+      "transfer": true
+    },
+    "notes": "glued A/cX tail, credited by",
+    "provenance": "synthetic",
+    "paths": [
+      "android-sms"
+    ]
+  },
+  {
+    "id": "U-SEMANTICS-42",
+    "country": "PK",
+    "ledger": "PKR",
+    "sender": "Delta Bank",
+    "body": "Dear Customer, your Delta Debit Card ending with 4455 has been charged PKR 1,200.00 at DARAZ PK on 03-OCT-2026 10:15:00. Not you? Call 111-000-000",
+    "expect": {
+      "post": true,
+      "amountMinor": 120000,
+      "type": "expense",
+      "transfer": false
+    },
+    "notes": "has been charged PKR X at MERCHANT",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-43",
+    "country": "PK",
+    "ledger": "PKR",
+    "sender": "Alpha Bank",
+    "body": "Alpha Bank: Your A/C ...4455 has been credited with PKR 90,000.00 on 30-Sep-2026. Narration: SALARY SEP-2026 NORTHWIND PVT LTD. Avl Bal PKR 100,310.25.",
+    "expect": {
+      "post": true,
+      "amountMinor": 9000000,
+      "type": "income",
+      "transfer": false
+    },
+    "notes": "masked dotted tail, salary narration",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-44",
+    "country": "NP",
+    "ledger": "NPR",
+    "sender": "Delta Bank",
+    "body": "Dear Customer, A/C ##8899 debited by NPR 450.00 on 04/10/2026. Remarks: Fonepay QR Payment to LOCAL MART. Avl Bal NPR 8,345.00",
+    "expect": {
+      "post": true,
+      "amountMinor": 45000,
+      "type": "expense",
+      "transfer": false
+    },
+    "notes": "Remarks: QR payment narration",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-45",
+    "country": "PK",
+    "ledger": "PKR",
+    "sender": "Delta Bank",
+    "body": "Dear Customer, PKR 2,000.00 has been debited from your A/C 0202XXXX1199 on 03-10-2026 via Raast to SANA MALIK (ALPHA). TranID: RA7654321. Avail Bal: PKR 40,000.00",
+    "expect": {
+      "post": true,
+      "amountMinor": 200000,
+      "type": "expense",
+      "transfer": true
+    },
+    "notes": "Raast rail is a transfer",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-46",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-ORCHID",
+    "body": "Acct XX456 will be debited with INR 500.00 on 15-Oct-26. Info: NACH. Maintain sufficient balance.",
+    "expect": {
+      "post": false,
+      "why": "future"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-47",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-ORCHID",
+    "body": "UPI txn of Rs 250.00 from Acct XX456 to VPA shop@bank failed. Info: UPI. Amount not debited.",
+    "expect": {
+      "post": false,
+      "why": "failed"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-48",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-ORCHID",
+    "body": "Pre-debit notification: INR 800.00 will be debited from A/c XX456 on 14-Oct-26 for e-mandate OTT. Info: SI",
+    "expect": {
+      "post": false,
+      "why": "mandate"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-49",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-ORCHID",
+    "body": "Acct XX456 credited with INR 3,000.00 on 05-Oct-26. Info: REVERSAL pending confirmation.",
+    "expect": {
+      "post": false,
+      "why": "pending"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-50",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-ORCHID",
+    "body": "UPI collect request of Rs 400.00 from VPA shop@bank on Acct XX456. Approve in the app.",
+    "expect": {
+      "post": false,
+      "why": "request"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-51",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-ORCHID",
+    "body": "A/C XX456 credited with INR 25,000.00. Info: prize - click https://example.test/claim to claim your reward",
+    "expect": {
+      "post": false,
+      "why": "lure"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-52",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-ORCHID",
+    "body": "Acct XX456 debited Rs 600.00 on 04-Oct-26. Is this you? Reply Y or N.",
+    "expect": {
+      "post": false,
+      "why": "challenge"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-53",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-ORCHID",
+    "body": "Avl Bal INR 9,240.00 in Acct XX456 as on 04-Oct-26. Info: NEFT",
+    "expect": {
+      "post": false,
+      "why": "balance"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-54",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-ORCHID",
+    "body": "Acct XX456 debited INR 99.00. Info: OTP 482913 for UPI mandate. Do not share.",
+    "expect": {
+      "post": false,
+      "why": "otp"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-55",
+    "country": "PK",
+    "ledger": "PKR",
+    "sender": "Delta Bank",
+    "body": "Dear Customer, your Delta Debit Card ending with 4455 will be charged PKR 1,200.00 at DARAZ PK on 15-OCT-2026.",
+    "expect": {
+      "post": false,
+      "why": "scheduled"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-56",
+    "country": "PK",
+    "ledger": "PKR",
+    "sender": "Delta Bank",
+    "body": "Dear Customer, PKR 2,000.00 could not be debited from your A/C 0202XXXX1199 via Raast. Transaction failed.",
+    "expect": {
+      "post": false,
+      "why": "failed"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-57",
+    "country": "BD",
+    "ledger": "BDT",
+    "sender": "bKash",
+    "body": "Cash Out Tk 1,200.00 to 01811112222 successful. Fee Tk 22.20. Balance Tk 640.00. TrxID QWE1R2TY3U at 03/10/2026 10:15",
+    "expect": {
+      "post": true,
+      "amountMinor": 120000,
+      "type": "expense",
+      "transfer": false
+    },
+    "notes": "wallet heading + trailing successful, cash out",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-58",
+    "country": "BD",
+    "ledger": "BDT",
+    "sender": "bKash",
+    "body": "Payment Tk 330.00 to Lotus Mart Ltd successful. Balance Tk 310.00. TrxID ZXC4V5BN6M at 04/10/2026 21:05",
+    "expect": {
+      "post": true,
+      "amountMinor": 33000,
+      "type": "expense",
+      "transfer": false
+    },
+    "notes": "wallet Payment ... successful",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-59",
+    "country": "MX",
+    "ledger": "MXN",
+    "sender": "Banco Alfa",
+    "body": "Banco Alfa\nRealizaste una compra por MXN 245.00 en PAPELERIA SUR con tu tarjeta *7788.",
+    "expect": {
+      "post": true,
+      "amountMinor": 24500,
+      "type": "expense",
+      "transfer": false
+    },
+    "notes": "Spanish realizaste una compra",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-60",
+    "country": "MX",
+    "ledger": "MXN",
+    "sender": "Banco Alfa",
+    "body": "Banco Alfa: Se ha realizado un cargo de MXN 149.00 en tu Tarjeta terminacion 7788 en CINE NORTE el 03/OCT/2026.",
+    "expect": {
+      "post": true,
+      "amountMinor": 14900,
+      "type": "expense",
+      "transfer": false
+    },
+    "notes": "Spanish se ha realizado un cargo",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-61",
+    "country": "CL",
+    "ledger": "CLP",
+    "sender": "Banco Beta",
+    "body": "Banco Beta: Te informamos que se ha realizado una compra por CLP 8.990 con Tarjeta de Credito ****3344 en FERRETERIA SUR el 02/10/2026 12:44.",
+    "expect": {
+      "post": true,
+      "amountMinor": 8990,
+      "type": "expense",
+      "transfer": false
+    },
+    "notes": "Spanish se ha realizado una compra",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-62",
+    "country": "MA",
+    "ledger": "MAD",
+    "sender": "Banque Zeta",
+    "body": "Banque Zeta: Paiement par carte ****5566 d'un montant de 220,00 MAD chez LIBRAIRIE CENTRALE le 03/10/2026 a 14:22. Solde disponible: 3 345,67 MAD.",
+    "expect": {
+      "post": true,
+      "amountMinor": 22000,
+      "type": "expense"
+    },
+    "notes": "French booked card-payment noun with montant and chez",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-63",
+    "country": "ID",
+    "ledger": "IDR",
+    "sender": "Bank Eta",
+    "body": "Eta: Transaksi Kartu Kredit 4xxx-xxxx-xxxx-5566 sebesar Rp 450.000,00 di TOKO BUKU JAKARTA pada 03/10/2026 13:20 WIB telah berhasil. Info Halo Eta 150000",
+    "expect": {
+      "post": true,
+      "amountMinor": 45000000,
+      "type": "expense"
+    },
+    "notes": "Indonesian transaksi ... telah berhasil",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-64",
+    "country": "JP",
+    "ledger": "JPY",
+    "sender": "サンプルカード",
+    "body": "【ご利用のお知らせ】\nいつもサンプルカードをご利用頂きありがとうございます。\nご利用カード：サンプルカード\n◇利用日：2026/10/03 09:12\n◇利用先：サンプルストア\n◇利用金額：2,480円",
+    "expect": {
+      "post": true,
+      "amountMinor": 2480,
+      "type": "expense"
+    },
+    "notes": "Japanese card usage notice",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-65",
+    "country": "BD",
+    "ledger": "BDT",
+    "sender": "bKash",
+    "body": "Cash Out Tk 1,200.00 to 01811112222 failed. Insufficient balance. Balance Tk 640.00. TrxID QWE1R2TY3U",
+    "expect": {
+      "post": false,
+      "why": "failed"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-66",
+    "country": "BD",
+    "ledger": "BDT",
+    "sender": "bKash",
+    "body": "Payment Tk 330.00 to Lotus Mart Ltd unsuccessful. Balance Tk 310.00. TrxID ZXC4V5BN6M",
+    "expect": {
+      "post": false,
+      "why": "failed"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-67",
+    "country": "BD",
+    "ledger": "BDT",
+    "sender": "Nagad",
+    "body": "Send Money request of Tk 800.00 received. Approve in the app.",
+    "expect": {
+      "post": false,
+      "why": "request"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-68",
+    "country": "MX",
+    "ledger": "MXN",
+    "sender": "Banco Alfa",
+    "body": "Banco Alfa\nRealizaste una compra por MXN 245.00 en PAPELERIA SUR con tu tarjeta *7788, pero fue rechazada.",
+    "expect": {
+      "post": false,
+      "why": "declined"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-69",
+    "country": "MX",
+    "ledger": "MXN",
+    "sender": "Banco Alfa",
+    "body": "Banco Alfa: Solicitud de compra por MXN 245.00 en PAPELERIA SUR pendiente de autorizacion.",
+    "expect": {
+      "post": false,
+      "why": "pending"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-70",
+    "country": "MX",
+    "ledger": "MXN",
+    "sender": "Banco Alfa",
+    "body": "Banco Alfa: Se cargara un cargo por MXN 149.00 en tu Tarjeta terminacion 7788 el 15/OCT/2026.",
+    "expect": {
+      "post": false,
+      "why": "scheduled"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-71",
+    "country": "MX",
+    "ledger": "MXN",
+    "sender": "Banco Alfa",
+    "body": "Banco Alfa: Tu codigo de seguridad para la compra por MXN 245.00 es 482913. No lo compartas.",
+    "expect": {
+      "post": false,
+      "why": "otp"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-72",
+    "country": "MX",
+    "ledger": "MXN",
+    "sender": "Banco Alfa",
+    "body": "Banco Alfa: Compra de MXN 500.00 en PAPELERIA SUR y llevate un regalo, promocion valida hasta el 31/12/2026.",
+    "expect": {
+      "post": false,
+      "why": "promo"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-73",
+    "country": "CL",
+    "ledger": "CLP",
+    "sender": "Banco Beta",
+    "body": "Banco Beta: Giro en cajero automatico por CLP 40.000 no se pudo completar. Intenta nuevamente.",
+    "expect": {
+      "post": false,
+      "why": "failed"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-74",
+    "country": "BR",
+    "ledger": "BRL",
+    "sender": "Banco Delta",
+    "body": "Banco Delta: Saque de BRL 200,00 nao foi possivel. Tente novamente.",
+    "expect": {
+      "post": false,
+      "why": "failed"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-75",
+    "country": "BR",
+    "ledger": "BRL",
+    "sender": "Banco Delta",
+    "body": "Banco Delta: Voce solicitou um saque de BRL 200,00. Aguardando confirmacao.",
+    "expect": {
+      "post": false,
+      "why": "request"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-76",
+    "country": "MA",
+    "ledger": "MAD",
+    "sender": "Banque Zeta",
+    "body": "Banque Zeta: Paiement par carte ****5566 d'un montant de 220,00 MAD chez LIBRAIRIE CENTRALE refusé. Solde disponible: 3 345,67 MAD.",
+    "expect": {
+      "post": false,
+      "why": "declined"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-77",
+    "country": "MA",
+    "ledger": "MAD",
+    "sender": "Banque Zeta",
+    "body": "Banque Zeta: Paiement par carte ****5566 d'un montant de 220,00 MAD chez LIBRAIRIE CENTRALE en attente.",
+    "expect": {
+      "post": false,
+      "why": "pending"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-78",
+    "country": "ID",
+    "ledger": "IDR",
+    "sender": "Bank Eta",
+    "body": "Eta: Transaksi Kartu Kredit 4xxx-xxxx-xxxx-5566 sebesar Rp 450.000,00 di TOKO BUKU JAKARTA gagal.",
+    "expect": {
+      "post": false,
+      "why": "failed"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-79",
+    "country": "ID",
+    "ledger": "IDR",
+    "sender": "Bank Eta",
+    "body": "Eta: Transaksi sebesar Rp 450.000,00 akan didebet pada 20/10/2026 sesuai jadwal.",
+    "expect": {
+      "post": false,
+      "why": "scheduled"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-80",
+    "country": "JP",
+    "ledger": "JPY",
+    "sender": "サンプルカード",
+    "body": "【ご利用のお知らせ】\nご利用カード：サンプルカード\n◇利用日：2026/10/03 09:12\n◇利用金額：2,480円\nこの利用は取り消されました。",
+    "expect": {
+      "post": false,
+      "why": "cancelled"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-81",
+    "country": "JP",
+    "ledger": "JPY",
+    "sender": "サンプルカード",
+    "body": "【ご利用のお知らせ】（承認待ち）\n◇利用日：2026/10/03 09:12\n◇利用金額：2,480円",
+    "expect": {
+      "post": false,
+      "why": "pending"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-82",
+    "country": "JP",
+    "ledger": "JPY",
+    "sender": "サンプルカード",
+    "body": "【キャンペーン】カードのご利用で2,000円分のポイントを受け取りました。詳細はアプリで。",
+    "expect": {
+      "post": false,
+      "why": "promo"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-83",
+    "country": "JP",
+    "ledger": "JPY",
+    "sender": "サンプル銀行",
+    "body": "【サンプル銀行】入金予定のお知らせ\n入金日：2026年10月20日\n金額：180,000円",
+    "expect": {
+      "post": false,
+      "why": "scheduled"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-84",
+    "country": "KR",
+    "ledger": "KRW",
+    "sender": "토스",
+    "body": "송금 실패\n박서준님에게 12,000원을 보내지 못했어요.",
+    "expect": {
+      "post": false,
+      "why": "failed"
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  }
+]
