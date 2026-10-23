@@ -76,6 +76,19 @@ import {
 } from './imports';
 import { relaySender } from './ingest-row';
 import {
+  MAX_SUBMIT_BYTES as MAX_FORMAT_SUBMIT_BYTES,
+  adminAuthorized as formatsAdminAuthorized,
+  blockShape as blockSharedFormat,
+  listAllForAdmin as listSharedFormatsForAdmin,
+  listPublished as listPublishedFormats,
+  overSubmissionLimit as overFormatSubmissionLimit,
+  recordSubmission as recordFormatSubmission,
+  shapeHash as sharedShapeHash,
+  sha256Hex as sharedFormatsSha256,
+  validateSharedShape,
+  vaultHash as sharedFormatsVaultHash,
+} from './shared-formats';
+import {
   decryptPushToken,
   encryptPushToken,
   isExpoProjectId,
@@ -135,6 +148,17 @@ export interface Env extends PushEnv {
   IMPORTS_ENABLED?: string;
   /** Emergency kill switch for feedback -> GitHub coding-agent dispatch only. */
   FEEDBACK_AGENT_ENABLED?: string;
+  /**
+   * Secret keying the HMAC that turns a vault id into the pseudonymous
+   * vault_hash stored with shared-format votes. Production must set it; a fixed
+   * domain-separated constant is used when absent.
+   */
+  FORMATS_SALT?: string;
+  /**
+   * Bearer secret for GET /v1/admin/formats and POST /v1/admin/formats/block.
+   * Unset (or a wrong token) makes those routes answer 404.
+   */
+  FORMATS_ADMIN_TOKEN?: string;
 }
 
 /** Longer than any real bank SMS; anything bigger is abuse or a mistake. */
@@ -370,7 +394,7 @@ function publicRateLimitKey(req: Request, route: string): string {
 
 function authenticatedTrafficScope(method: string, pathname: string): string | null {
   if (!pathname.startsWith('/v1/')) return null;
-  if (['/v1/pair', '/v1/join', '/v1/feedback', '/v1/health'].includes(pathname)) return null;
+  if (['/v1/pair', '/v1/join', '/v1/feedback', '/v1/health', '/v1/formats/published'].includes(pathname)) return null;
   if (/^\/v1\/feedback\/[^/]+$/.test(pathname)) return `${method}:feedback-item`;
   if (/^\/v1\/devices\/[^/]+$/.test(pathname)) return `${method}:device-item`;
   return `${method}:${pathname}`;
@@ -1849,6 +1873,11 @@ export default {
       url.pathname === '/v1/health' &&
       await rateLimitExceeded(env.PUBLIC_RATE_LIMITER, publicRateLimitKey(req, url.pathname))
     ) return json({ error: 'rate_limited' }, 429);
+    if (
+      req.method === 'GET' &&
+      url.pathname === '/v1/formats/published' &&
+      await rateLimitExceeded(env.PUBLIC_RATE_LIMITER, publicRateLimitKey(req, url.pathname))
+    ) return json({ error: 'rate_limited' }, 429);
 
     const authTrafficScope = authenticatedTrafficScope(req.method, url.pathname);
     const presentedBearer = authTrafficScope ? bearerToken(req) : '';
@@ -3244,6 +3273,70 @@ export default {
         // user's words are the part that matters.
         diagnostic,
       });
+    }
+
+    // ── Opt-in shared bank-alert formats ──
+    // Value-free shapes only; see docs/shared-alert-formats.md. The shape is
+    // never logged and the vault id is stored only as a keyed HMAC.
+    if (req.method === 'POST' && url.pathname === '/v1/formats/submit') {
+      const device = await authenticate(req, env, 'sync');
+      if (!device) return json({ error: 'unauthorized' }, 401);
+      const incoming = await readBody(req, MAX_FORMAT_SUBMIT_BYTES);
+      if (incoming.tooLarge) return json({ error: 'too_large' }, 413);
+      const body = ((): unknown => {
+        try {
+          return JSON.parse(incoming.text) as unknown;
+        } catch {
+          return null;
+        }
+      })();
+      const shape = validateSharedShape(
+        typeof body === 'object' && body !== null ? (body as { shape?: unknown }).shape : undefined,
+      );
+      if (!shape) return json({ error: 'invalid_shape' }, 400);
+      const voter = await sharedFormatsVaultHash(env, device.vault_id);
+      if (await overFormatSubmissionLimit(env, voter)) return json({ error: 'rate_limited' }, 429);
+      const status = await recordFormatSubmission(env, shape, await sharedShapeHash(shape), voter);
+      return json({ status });
+    }
+
+    if (req.method === 'GET' && url.pathname === '/v1/formats/published') {
+      const formats = await listPublishedFormats(env);
+      const etag = `"${await sharedFormatsSha256(formats.map((format) => format.hash).join(','))}"`;
+      const cacheHeaders = {
+        etag,
+        'cache-control': 'public, max-age=3600',
+        'x-content-type-options': 'nosniff',
+      };
+      if ((req.headers.get('if-none-match') ?? '').split(',').some((tag) => tag.trim() === etag)) {
+        return new Response(null, { status: 304, headers: cacheHeaders });
+      }
+      return new Response(JSON.stringify({ formats }), {
+        status: 200,
+        headers: { ...cacheHeaders, 'content-type': 'application/json' },
+      });
+    }
+
+    if (url.pathname === '/v1/admin/formats' || url.pathname === '/v1/admin/formats/block') {
+      // 404 for everything unauthorised so the route's existence is not revealed.
+      if (!(await formatsAdminAuthorized(req, env))) return json({ error: 'not_found' }, 404);
+      if (req.method === 'GET' && url.pathname === '/v1/admin/formats') {
+        return json({ formats: await listSharedFormatsForAdmin(env) });
+      }
+      if (req.method === 'POST' && url.pathname === '/v1/admin/formats/block') {
+        const incoming = await readBody(req, 1024);
+        if (incoming.tooLarge) return json({ error: 'too_large' }, 413);
+        const hash = ((): unknown => {
+          try {
+            return (JSON.parse(incoming.text) as { hash?: unknown }).hash;
+          } catch {
+            return null;
+          }
+        })();
+        if (typeof hash !== 'string' || !/^[0-9a-f]{64}$/.test(hash)) return json({ error: 'bad_hash' }, 400);
+        if (!(await blockSharedFormat(env, hash))) return json({ error: 'not_found' }, 404);
+        return json({ status: 'blocked' });
+      }
     }
 
     // There is no list route on purpose. An id is a UUID the client is told
