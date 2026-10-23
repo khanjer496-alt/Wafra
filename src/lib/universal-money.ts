@@ -1,6 +1,6 @@
 import { inspectAlertDraft, type AlertDraft, type CurrencyAliasMap, type MoneyCandidate, type SourceSpan } from '@/lib/alert-draft';
 import { alertMarketPack } from '@/lib/alert-market-packs';
-import { CURRENCY_SYMBOL_CANDIDATES } from '@/lib/currency-metadata';
+import { CURRENCY_SYMBOL_CANDIDATES, type CurrencyCode } from '@/lib/currency-metadata';
 import { extractUniversalFields } from '@/lib/universal-fields';
 import {
   missingUniversalField,
@@ -43,13 +43,13 @@ const sourceCurrencyAliases = (context: UniversalParseContext): CurrencyAliasMap
 // The real "Avl. Cr.Limit" footer uses its abbreviation's dot as the word
 // separator. Keep bare "CrLimit"/"CreditLimit" outside that observed alias.
 const LABEL = new RegExp([
-  String.raw`(?<minimum>\bpay\s+min\.|\bmin(?:imum)?(?:\s+|\.\s*)(?:(?:amount|amt|payment)\s+)?due\b|\bminimum\s+payment\b|\bpago\s+mínimo\b|(?<![\p{L}\p{M}\p{N}_])(?:paiement\s+minimum|न्यूनतम\s+देय\s+राशि)(?![\p{L}\p{M}\p{N}_])|الحد\s+(?:الادنى|الأدنى)\s+(?:المستحق|للدفع|للسداد))`,
+  String.raw`(?<minimum>\bpay\s+min\.|\bmin(?:imum)?(?:\s+|\.\s*)(?:(?:amount|amt|payment)\s+)?due\b|\bminimum\s+payment\b|\bpago\s+mínimo\b|(?<![\p{L}\p{M}\p{N}_])(?:paiement\s+minimum|pagamento\s+m[ií]nimo|mindestbetrag|minimumbedrag|minimalna\s+kwota|lägsta\s+belopp|minimumsbeløb|minstebeløp|minimální\s+splátka|न्यूनतम\s+देय\s+राशि)(?![\p{L}\p{M}\p{N}_])|الحد\s+(?:الادنى|الأدنى)\s+(?:المستحق|للدفع|للسداد))`,
   String.raw`(?<total>\b(?:statement\s+(?:total|balance|amount)|closing\s+balance|total\s+(?:(?:amount|amt)\s+)?due(?:\s+to\s+avoid\s+fin\.\s+charges)?|total\s+outstanding(?:\s+balance)?|new\s+balance|saldo\s+total\s+del\s+estado)\b|(?<![\p{L}\p{M}\p{N}_])(?:total\s+à\s+payer|कुल\s+देय\s+राशि)(?![\p{L}\p{M}\p{N}_])|(?:اجمالي|إجمالي)\s+(?:المبلغ\s+المستحق|مبلغ\s+الكشف))`,
-  String.raw`(?<limit>\b(?:(?:available|avl|avail)\.?\s+(?:credit\s+limit|cr(?:\.?\s+|\.)limit)|(?:available|credit|avl|avail)\.?\s+(?:limit|lmt)|available\s+credit|credit\s+available)\b|الحد\s+(?:المتاح|الائتماني))`,
-  String.raw`(?<balance>\b(?:(?:available|current|avl|avail)\.?\s+)?bal(?:ance)?\b|\b(?:solde(?:\s+disponible)?|kontostand|saldo|(?:kullanılabilir\s+)?bakiye)\b|الرصيد(?:\s+(?:الحالي|المتاح))?|(?<![\p{L}\p{M}\p{N}_])رصيد\s+حسابك(?:\s+(?:الحالي|المتاح))?(?![\p{L}\p{M}\p{N}_])|(?:उपलब्ध\s+)?शेष\s+राशि|(?:利用可能)?残高|(?:可用)?余额)`,
+  String.raw`(?<limit>\b(?:(?:available|avl|avail)\.?\s+(?:credit\s+limit|cr(?:\.?\s+|\.)limit)|(?:available|credit|avl|avail)\.?\s+(?:limit|lmt)|available\s+credit|credit\s+available)\b|(?<![\p{L}\p{M}\p{N}_])(?:(?:verfügbarer\s+)?kreditrahmen|plafond(?:\s+(?:disponível|disponivel|de\s+paiement\s+restant))?|l[ií]mite\s+disponible|disponibilit[àa](?:\s+residua)?|tillgänglig\s+kredit|tilgjengelig\s+kreditt|dostępny\s+limit|volný\s+limit(?:\s+karty)?|beschikbare\s+limiet|rådighed(?:\s+på\s+kortet)?|disponibelt(?:\s+belopp)?|disponibilní\s+zůstatek|zůstatek)(?![\p{L}\p{M}\p{N}_])|الحد\s+(?:المتاح|الائتماني))`,
+  String.raw`(?<balance>\b(?:(?:available|current|avl|avail)\.?\s+)?bal(?:ance)?\b|\b(?:solde(?:\s+disponible)?|kontostand|guthaben|saldo|(?:kullanılabilir\s+)?bakiye)\b|(?<![\p{L}\p{M}\p{N}_])(?:disponib\p{L}*|beschikba\p{L}*|verf[üu]gbar\p{L}*|tillg[äa]ngl\p{L}*|tilgjengel\p{L}*)\s+\p{L}{4,10}(?=\s*:)|\bdost(?:\.|[eę]pne(?![\p{L}\p{M}\p{N}_]))|الرصيد(?:\s+(?:الحالي|المتاح|المتوفر|المتبقي))?|(?<![\p{L}\p{M}\p{N}_])(?:رصيد\s+حسابك|رصيدك)(?:\s+(?:الحالي|المتاح|المتوفر))?(?![\p{L}\p{M}\p{N}_])|(?<![\p{L}\p{M}\p{N}_])المتاح(?![\p{L}\p{M}\p{N}_])|(?:उपलब्ध\s+)?शेष\s+राशि|(?:利用可能)?残高|(?:可用)?余额)`,
   String.raw`(?<bill>\b(?:bill(?:\s+amount)?\s+(?:due|of)|amount\s+due|payment\s+due|bill\s+amount|bill\s+for|montant\s+à\s+payer|importo\s+da\s+pagare)\b|مبلغ\s+الفاتورة|المبلغ\s+المستحق|देय\s+राशि)`,
-  String.raw`(?<fee>\b(?:total\s+charges|fee|fees|commission|service\s+charge)\b|رسوم|عمولة)`,
-  String.raw`(?<transaction>\b(?:virement(?:\s+reçu)?|pix(?:\s+(?:enviado|recebido))?|transaksi|havale|bizum|cargo\s+de|consumo\s+de|na\s+kwot[eę]|lastschrift(?:\s+über)?|payment\s+made\s+for|you\s+have\s+(?:sent|received)|(?:you\s+)?made\s+an?|charge\s+(?:of|made)|transaction(?!\s+(?:id|no|number|ref|reference|date|time|alert)\b)|used\s+for|charged\s+for|withdrew|purchase|purchased|spend|spent|paid|charged|debited|credited|received|sent|withdrawn|withdrawal|cash\s+out|deposited|deposit|refund|reversal|transfer(?:red)?|payment|amount|amt|amnt|paiement|débité|crédité|remboursement|kartenzahlung|abonnementzahlung|belastet|gutgeschrieben|compra|reembolso|abonado|pagamento|pinbetaling|pasbetaling|kaartbetaling|betaling)\b|(?<![\p{L}\p{N}])(?:alışveriş(?:iniz)?|ödemeniz|tutarında|مبلغ)(?![\p{L}\p{N}])|شراء|خصم|إيداع|ايداع|تحويل|استرداد|دفع|भुगतान|रिफंड\s+राशि|(?<![\p{L}\p{M}\p{N}_])(?:überweisung|overboeking|acquisto|rimborso|accreditato|cargados?|debitados?|रिफंड)(?![\p{L}\p{M}\p{N}_])|(?:利用)?金額|金额|退回|退款|引き落とされました|扣款|승인|डेबिट|क्रेडिट)`,
+  String.raw`(?<fee>\b(?:total\s+charges|fee|fees|frais|commission|(?:service|late|finance|interest)\s+charge)\b|(?<![\p{L}\p{M}\p{N}_])(?:gebühr|entgelt|comisi[oó]n|commissione|comissão|comissao|kosten|opłata|avgift|gebyr|poplatek)(?![\p{L}\p{M}\p{N}_])|رسوم|عمولة)`,
+  String.raw`(?<transaction>\b(?:virement(?:\s+reçu)?|pix(?:\s+(?:enviado|recebido))?|transaksi|havale|bizum|cargo\s+de|cargo|adeudo|consumo\s+de|na\s+kwot[eę]|lastschrift(?:\s+über)?|payment\s+made\s+for|you\s+have\s+(?:sent|received)|(?:you\s+)?made\s+an?|charge(?:\s+(?:of|made))?|credit\s+of|transaction(?!\s+(?:id|no|number|ref|reference|date|time|alert)\b)|(?:was|been)\s+used|used\s+for|charged\s+for|deducted|deduction|refunded|withdrew|purchase|purchased|spend|spent|paid|charged|debited|credited|received|sent|withdrawn|withdrawal|cash\s+out|deposited|deposit|refund|reversal|transfer(?:red)?|payment|amount|amt|amnt|paiement|achat|retrait|dépôt|remboursement|kartenzahlung|abonnementzahlung|belastet|gutgeschrieben|gutschrift|zahlungseingang|betrag|bezahlt|transaktion|erhalten|compra|pagado|reembolso|abonado|retirada|utilizada\s+por|operazione|pagamento|enviou|pinbetaling|pasbetaling|kaartbetaling|betaling|betaald|bijgeschreven|afgeschreven|wydano|otrzymano|platba|(?:kort)?köp|fått|betalt|betalte|sendt)\b|(?<![\p{L}\p{N}])(?:alışveriş(?:iniz)?|ödemeniz|tutarında|(?:و?ب)?مبلغ|بقيمة)(?![\p{L}\p{N}])|شراء|خصم|إيداع|ايداع|تحويل|استرداد|دفع|भुगतान|रिफंड\s+राशि|(?<![\p{L}\p{M}\p{N}_])(?:gezahlt|zapłacono|zaplacono|handlet|opname|kortkjøp|køb|aankoop|internetaankoop|zaplatili\s+jste|accredito(?:\s+stipendio)?|rimborsat[oa]|devuelto|reçue?|einkauf|internetkauf|onlinekauf|bargeldabhebung|bargeld\s+abgehoben|abgehoben|erstattung|erstattet|gesendet|überwiesen|abgebucht|ausgeführt|montant|pay[ée]e?s?|retir[ée]|rembours[ée]e?|r[ée]gl[ée]e?|cobrad[oa]|enviado|recibido|cantidad|importe|devoluci[oó]n|importo(?:\s+operazione)?|pagato|prelevato|prelievo|inviato|ricevuto|storno|addebitat[oa]|bonifico|bedrag|betaalde|gestuurd|ontvangen|opgenomen|overgemaakt|bijschrijving|terugbetaling|incasso|geïncasseerd|montante|pagou|recebeu|levantamento|devolução|wypłata|wypłaciłeś|wypłaciłaś|przesłał|przesłała|przelew|zapłaciłeś|zapłaciłaś|pobrał|pobrała|zwrot|obciążenie|transakcja|kartenumsatz|gekregen|summa|belopp|drog|dragits|betalat|handlat\s+för|uttag|överföring|återbetal\p{L}*|beløb|hævet|købt|tilbagebetaling|opkrævet|overført|beløp|trukket|handlet\s+for|kjøp|mottatt|uttak|tatt\s+ut|částka(?:\s+transakce)?|stržena|odepsána|výběr|připsána|zaplaceno|odeslaná|refundace|vrátil|vrátila|überweisung|overboeking|acquisto|rimborso|accreditato|cargados?|debitados?|débitée?|créditée?|prélèvement|prélevée?s?|envoyée?|kwot[aęy]|रिफंड)(?![\p{L}\p{M}\p{N}_])|(?:利用)?金額|金额|退回|退款|引き落とされました|扣款|승인|डेबिट|क्रेडिट)`,
 ].join('|'), 'giu');
 
 interface OwnedCandidate {
@@ -88,6 +88,20 @@ function aggregateAmount(prefix: string, suffix: string, label: { role: Universa
   return !labels(suffix).some(row => row.role === 'transaction') &&
     /^\s*(?:on\s+[^.!?;\n]+?\s+)?(?:so far(?:\s+(?:this|the)\s+(?:day|week|month|year))?|(?:this|last)\s+(?:week|month|year)|(?:month|year|week)[ -]to[ -]date)\b/iu.test(suffix);
 }
+
+/**
+ * Participles that label only the figure BEFORE them: "-$123.45 was refunded
+ * to Amex". In "Purchase amount of THB 340.00 ... has been refunded AED 37.40
+ * to your card account" the AED figure after the verb is the card's own
+ * converted quote, not a second refund principal.
+ */
+const POSTFIX_ONLY_LABEL = /^refunded$/iu;
+const prefixLabel = (row: { text: string }): boolean => !POSTFIX_ONLY_LABEL.test(row.text);
+
+/** Words that list one figure beside another ("USD 5 and USD 7", "5 € und 7 €", "5 جم و 7 جم"). */
+const LIST_JOIN = /^\s*(?:and|plus|und|et|en|y|e|,|&|و)?\s*$/iu;
+
+const INFORMATIONAL_ROLES = new Set<UniversalMoneyRole>(['balance', 'credit-limit', 'statement-total', 'minimum-due']);
 
 const LABEL_ROLES: Record<string, UniversalMoneyRole> = {
   minimum: 'minimum-due', total: 'statement-total', limit: 'credit-limit',
@@ -137,7 +151,7 @@ function separators(text: string): number[] {
     .map((match) => ({ start: match.index!, end: match.index! + match[0].length }));
   return [...text.matchAll(/[;\n!?。।]|[.,](?=\s|$)/g)]
     .filter((match) => match[0] !== ',' || !listed.some((range) => match.index! > range.start && match.index! < range.end))
-    .filter((match) => match[0] !== '.' || !/\b(?:min|avl|avail|cr|dr|amt|bal)$/i.test(text.slice(0, match.index)))
+    .filter((match) => match[0] !== '.' || !/\b(?:min|avl|avail|cr|dr|amt|bal|dost)$/i.test(text.slice(0, match.index)))
     // The observed ADCB total label includes an abbreviation, not a clause
     // boundary. Its qualifier must stay attached to its own total only.
     .filter((match) => match[0] !== '.' ||
@@ -214,9 +228,9 @@ function ownCandidates(
     const nextStart = draft.candidates[index + 1]?.span.start ?? text.length;
     const before = text.slice(previousEnd, candidate.span.start);
     let prefixStart = previousEnd + ((separators(before).at(-1) ?? -1) + 1);
-    let preceding = labels(roleText.slice(prefixStart, candidate.span.start), marketLabels).at(-1);
+    let preceding = labels(roleText.slice(prefixStart, candidate.span.start), marketLabels).filter(prefixLabel).at(-1);
     if (!preceding) {
-      const prior = labels(roleText.slice(previousEnd, candidate.span.start), marketLabels).at(-1);
+      const prior = labels(roleText.slice(previousEnd, candidate.span.start), marketLabels).filter(prefixLabel).at(-1);
       if (prior) {
         const start = previousEnd + prior.start;
         const tail = roleText.slice(start + prior.text.length, candidate.span.start);
@@ -231,8 +245,23 @@ function ownCandidates(
       }
     }
     const after = text.slice(candidate.span.end, nextStart);
-    const suffixEnd = candidate.span.end + (separators(after)[0] ?? after.length);
-    const following = labels(roleText.slice(candidate.span.end, suffixEnd), marketLabels)[0];
+    // "508,63 kr. hos DSB": the point abbreviates the Nordic currency word.
+    const krPoint = /kr$/iu.test(candidate.sourceText) && /^\.\s+\p{Ll}/u.test(after) ? 1 : 0;
+    const suffixEnd = candidate.span.end + krPoint + (separators(after.slice(krPoint))[0] ?? after.length - krPoint);
+    // A label that introduces the NEXT amount is that amount's own label:
+    // "Salary credit of QAR 17,000.00 to your Current Account XX0015 Your new
+    // available balance is QAR 30,966.05" has no separator between the two
+    // figures; the balance label must not make the salary a second balance.
+    // This is the same preceding-label search the next candidate runs. Only
+    // an informational label is released: a posting verb between two bare
+    // amounts ("USD 24.90 debited USD 500.00 balance") stays claimed by both,
+    // so neither can quietly become the only principal.
+    const next = draft.candidates[index + 1];
+    const nextPrefixStart = candidate.span.end + ((separators(after).at(-1) ?? -1) + 1);
+    const nextLabel = next ? labels(roleText.slice(nextPrefixStart, next.span.start), marketLabels).filter(prefixLabel).at(-1) : undefined;
+    const nextLabelStart = nextLabel && INFORMATIONAL_ROLES.has(nextLabel.role) ? nextPrefixStart + nextLabel.start : Infinity;
+    const following = labels(roleText.slice(candidate.span.end, suffixEnd), marketLabels)
+      .find((row) => candidate.span.end + row.start < nextLabelStart);
     const label = preceding ?? following;
     let role = label?.role ?? 'unknown';
     // In a statement, an explicitly labelled "amount due" is the total;
@@ -241,7 +270,7 @@ function ownCandidates(
         /\b(?:statement|mini\s+stmt)\b/iu.test(roleText.slice(0, candidate.span.start))) {
       role = 'statement-total';
     }
-    if (!label && owned.at(-1)?.role === 'transaction' && /^\s*(?:and|plus|,|&)?\s*$/i.test(before)) {
+    if (!label && owned.at(-1)?.role === 'transaction' && LIST_JOIN.test(before)) {
       role = 'transaction';
     }
     let labelStart = preceding ? prefixStart + preceding.start : null;
@@ -260,6 +289,14 @@ function ownCandidates(
     owned.push({ candidate, role, labelStart, aggregate,
       span: { start: previousEnd > 0 ? labelStart ?? prefixStart : prefixStart, end: suffixEnd } });
   });
+  // A postfixed verb labels only the last figure of a list: in "38,87 € und
+  // 12,00 € bezahlt" both figures were paid, so the first is a transaction
+  // too and the pair stays a review question instead of one silent figure.
+  for (let index = owned.length - 2; index >= 0; index--) {
+    const item = owned[index], next = owned[index + 1];
+    if (item.role === 'unknown' && !item.aggregate && next.role === 'transaction' &&
+        LIST_JOIN.test(text.slice(item.candidate.span.end, next.candidate.span.start))) item.role = 'transaction';
+  }
   // A second labelled amount is an independent field even without punctuation.
   owned.forEach((item, index) => {
     const next = owned[index + 1];
@@ -309,11 +346,46 @@ function completeNumericToken(candidate: MoneyCandidate, text: string): boolean 
   return western.test(integer) || indian.test(integer);
 }
 
+/**
+ * Currencies whose own banks always write a decimal point and three-digit
+ * groups ("$1,234.56", "£4.50"). A figure written with a decimal comma
+ * ("$4,50", "£1.234,56") or lakh grouping ("$1,00,000.00") was not written by
+ * such a bank: which digits are the decimals is a guess, so the figure is
+ * never read in one of these currencies. (A "$" that may also be a peso
+ * written with a decimal comma keeps only that reading: "$4,50" is never
+ * USD 4.50, and is ARS 4.50 only where the person's country says so.)
+ * Canada is included because only a PREFIXED figure is judged: a
+ * French-Canadian bank writes "4,50 $", never "$4,50" or "C$4,50".
+ */
+const POINT_DECIMAL_CURRENCIES = new Set(['USD', 'GBP', 'AUD', 'NZD', 'SGD', 'HKD', 'CAD']);
+const LAKH_GROUPING = /^\d{1,2}(?:,\d{2})+,\d{3}(?:\.\d+)?$/;
+const figureOf = (candidate: MoneyCandidate, text: string): string =>
+  text.slice(candidate.span.start, candidate.span.end).match(/\d[\d.,]*\d|\d/)?.[0] ?? '';
+// (Only a currency written BEFORE the figure, as these banks print it — a
+// sign "$4,50", a code "USD 4,50" or a sign variant "US$4,50", "C$4,50": a
+// European bank's "Kartenzahlung 12,50 USD" or "4,50 $" is its own convention
+// for a foreign-currency amount, and its decimals are not in doubt.)
+function foreignNumberConvention(candidate: MoneyCandidate, text: string): boolean {
+  // (A leading sign is not the currency: "+12,50 USD" is a European bank's credit.)
+  if (!/^[+\-−]?\s*(?:[A-Z]{1,3}\$|[A-Z]{3}(?=[ \t]*\d)|[^\p{L}\p{N}\s+\-−])/u.test(text.slice(candidate.span.start, candidate.span.end).trim())) return false;
+  const numeric = figureOf(candidate, text);
+  return /,\d{1,2}$/.test(numeric) || LAKH_GROUPING.test(numeric);
+}
+
 function candidateField(candidate: MoneyCandidate, text: string): UniversalField<UniversalMoney> {
   if (!completeNumericToken(candidate, text)) {
     return { ...missingUniversalField<UniversalMoney>('malformed-money-token'), spans: [candidate.span] };
   }
-  const alternatives = candidate.interpretations.map(({ currency, minorUnits, exponent }) => ({ currency, minorUnits, exponent }));
+  let alternatives = candidate.interpretations.map(({ currency, minorUnits, exponent }) => ({ currency, minorUnits, exponent }));
+  if (foreignNumberConvention(candidate, text) && alternatives.some(({ currency }) => POINT_DECIMAL_CURRENCIES.has(currency))) {
+    alternatives = alternatives.filter(({ currency }) => !POINT_DECIMAL_CURRENCIES.has(currency));
+    // (Lakh grouping is no "$" or "£" currency's own: no reading survives.)
+    if (alternatives.length === 0 || LAKH_GROUPING.test(figureOf(candidate, text))) {
+      return { value: null, evidence: 'ambiguous', spans: [candidate.span], alternatives: [], issues: ['foreign-number-convention'] };
+    }
+    return { value: null, evidence: 'ambiguous', spans: [candidate.span], alternatives,
+      issues: [...new Set([...candidate.ambiguities, 'foreign-number-convention'])] };
+  }
   if (candidate.ambiguities.length > 0 || alternatives.length !== 1) {
     return { value: null, evidence: 'ambiguous', spans: [candidate.span], alternatives, issues: candidate.ambiguities };
   }
@@ -330,6 +402,61 @@ function selectFields(rows: UniversalMoneyObservation[]): UniversalField<Univers
   };
 }
 
+const moneyKey = (field: UniversalField<UniversalMoney>): string =>
+  [...(field.value ? [field.value] : []), ...field.alternatives]
+    .map((money) => `${money.currency}:${money.minorUnits}:${money.exponent}`).sort().join('|');
+const ARABIC = /\p{Script=Arabic}/u;
+const DEBIT_WORDS = /\b(?:used|purchase[ds]?|debited|spent|paid|withdrawn|withdrawal|sent|transferred)\b|خصم|شراء|استخدام|سحب|دفع|سداد|تحويل/iu;
+const CREDIT_WORDS = /\b(?:refund(?:ed)?|credited|received|deposit(?:ed)?|reversal|reversed|returned)\b|استرداد|إيداع|ايداع|استلام|إرجاع|ارجاع|إضافة|اضافة|وارد/iu;
+const directionClass = (text: string): 'debit' | 'credit' | null => {
+  const debit = DEBIT_WORDS.test(text), credit = CREDIT_WORDS.test(text);
+  return debit === credit ? null : debit ? 'debit' : 'credit';
+};
+
+/**
+ * Bilingual alerts state the whole message once per language: BankMuscat
+ * prints "used for OMR 4.200 at SHOP ... Avl Bal OMR 230.500 / تم استخدام
+ * ... بمبلغ 4.200 ر.ع لدى SHOP ... الرصيد المتاح 230.500 ر.ع". The second
+ * half is then a translation, not further movements, and its fields are
+ * dropped. It is a translation only when ALL of these hold:
+ *  - one delimiter (" / ", newline, "║", " | ") splits the text into a half
+ *    with no Arabic letter and a half with Arabic wording;
+ *  - both halves state the same figures in the same roles;
+ *  - every Latin name or number in the Arabic half also appears in the
+ *    English half (a different merchant or counterparty fails);
+ *  - both halves read as the same direction (a purchase beside an Arabic
+ *    refund of the same figure fails).
+ * Anything else keeps every figure: "Sent OMR 4.200 to A and sent OMR 4.200
+ * to B" is two payments, and stays a review question.
+ */
+function bilingualRepeats(text: string, owned: readonly OwnedCandidate[], observations: readonly UniversalMoneyObservation[]): Set<number> {
+  const none = new Set<number>();
+  if (owned.length < 2) return none;
+  const delimiters = [...text.matchAll(/[ \t]\/[ \t]|\n|║|[ \t]\|[ \t]/gu)];
+  for (const delimiter of delimiters) {
+    const at = delimiter.index!, after = at + delimiter[0].length;
+    const left = text.slice(0, at), right = text.slice(after);
+    const leftArabic = ARABIC.test(left), rightArabic = ARABIC.test(right);
+    if (leftArabic === rightArabic) continue;
+    const [latin, arabic] = leftArabic ? [right, left] : [left, right];
+    const side = (index: number) => owned[index].candidate.span.end <= at ? 'left'
+      : owned[index].candidate.span.start >= after ? 'right' : null;
+    const fields = (which: 'left' | 'right') => observations.flatMap((row, index) =>
+      side(index) === which ? [`${row.role}=${moneyKey(row.field)}`] : []).sort().join(';');
+    if (owned.some((_, index) => side(index) === null)) return none;
+    const leftFields = fields('left');
+    if (!leftFields || leftFields !== fields('right')) return none;
+    const latinWords = new Set((latin.match(/[A-Za-z0-9*]+/gu) ?? []).map((word) => word.toLowerCase()));
+    if ((arabic.match(/[A-Za-z0-9*]+/gu) ?? []).some((word) => !latinWords.has(word.toLowerCase()))) return none;
+    const direction = directionClass(latin);
+    if (!direction || direction !== directionClass(arabic)) return none;
+    const second = leftArabic ? 'left' : 'right';
+    // The English half keeps its fields, whichever side it was printed on.
+    return new Set(owned.flatMap((_, index) => side(index) === second ? [index] : []));
+  }
+  return none;
+}
+
 /** Same draft contract and source coordinates, with bounded evidenced tokens. */
 export function inspectUniversalMoneyDraft(source: string, context: UniversalParseContext = {}): AlertDraft {
   // Existing unique KSh metadata, matched case-insensitively by the alias path.
@@ -337,8 +464,27 @@ export function inspectUniversalMoneyDraft(source: string, context: UniversalPar
   // A routed market's own three-decimal currency (KW, BH, OM, JO) reads "12.345"
   // as a decimal; nothing changes for an unrouted alert or another currency.
   const moneyMarket = context.moneyMarket ?? context.market;
-  const dotDecimalCurrencies = moneyMarket ? alertMarketPack(moneyMarket).dotDecimalCurrencies : undefined;
-  const draft = inspectAlertDraft(source, { currencyAliases, dotDecimalCurrencies });
+  let dotDecimalCurrencies: readonly CurrencyCode[] | undefined = moneyMarket ? alertMarketPack(moneyMarket).dotDecimalCurrencies : undefined;
+  let draft = inspectAlertDraft(source, { currencyAliases, dotDecimalCurrencies });
+  // One message prints one number format. When another figure in the SAME
+  // three-decimal currency can only be read with a decimal full stop
+  // ("KWD 5.800 ... balance KWD 1,743.966", "JOD 2.750 ... JOD 1649.832"),
+  // the full stop in "5.800" is that decimal point too. Proof comes from an
+  // unambiguous token in this text only; commas and other currencies keep
+  // their ambiguity, and nothing is inferred from the person's ledger.
+  const proven: CurrencyCode[] = [...new Set(draft.candidates.flatMap((candidate): CurrencyCode[] => {
+    if (candidate.currency === null || candidate.ambiguities.length > 0 || candidate.exponent !== 3 ||
+      dotDecimalCurrencies?.includes(candidate.currency)) return [];
+    const figure = draft.normalizedText.slice(candidate.span.start, candidate.span.end).match(/\d[\d.,]*\d|\d/)?.[0] ?? '';
+    // Only a three-digit fraction proves the template: "IQD 250.00" beside
+    // "IQD 12.500" suggests the opposite, and IQD is whole dinars anyway.
+    return candidate.currency !== 'IQD' && /^\d{1,3}(?:,\d{3})+\.\d{3}$|^\d{4,}\.\d{3}$/.test(figure) ? [candidate.currency] : [];
+  }))];
+  if (proven.length && draft.candidates.some((candidate) => candidate.currency !== null &&
+    proven.includes(candidate.currency) && candidate.ambiguities.includes('decimal-or-grouping'))) {
+    dotDecimalCurrencies = [...(dotDecimalCurrencies ?? []), ...proven];
+    draft = inspectAlertDraft(source, { currencyAliases, dotDecimalCurrencies });
+  }
   if (source.length > 4096) return draft;
   const candidates = [...draft.candidates];
   // The frozen Japanese renewal places an ISO amount immediately before で.
@@ -394,12 +540,15 @@ export function extractUniversalMoney(
     Number.isInteger(span.start) && Number.isInteger(span.end) &&
     span.start >= 0 && span.end > span.start && span.end <= draft.normalizedText.length &&
     candidate.span.start < span.end && candidate.span.end > span.start));
-  const owned = ownCandidates({ ...draft, candidates }, excludedRoleSpans, marketLabelPattern(context.market));
-  const observations = owned.map(({ candidate, role, aggregate }) => {
+  const allOwned = ownCandidates({ ...draft, candidates }, excludedRoleSpans, marketLabelPattern(context.market));
+  const allObservations = allOwned.map(({ candidate, role, aggregate }) => {
     const field = candidateField(candidate, draft.normalizedText);
     if (aggregate) field.issues = [...field.issues, 'aggregate-money-field'];
     return { role, field };
   });
+  const repeated = bilingualRepeats(draft.normalizedText, allOwned, allObservations);
+  const owned = allOwned.filter((_, index) => !repeated.has(index));
+  const observations = allObservations.filter((_, index) => !repeated.has(index));
   const withRole = (role: UniversalMoneyRole) => observations.filter((row, index) => row.role === role && !owned[index].aggregate);
   const transactions = withRole('transaction');
   const fees = withRole('fee');

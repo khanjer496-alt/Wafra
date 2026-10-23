@@ -1,6 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const path = require('node:path');
 const load = require('./load-typescript.cjs');
 const root = path.resolve(__dirname, '../../..');
@@ -22,6 +23,7 @@ test('market vocabulary compiles once, keeps the exact result and never uses mes
     '@/lib/alert-institution-grammars': compiled('alert-institution-grammars'),
     '@/lib/alert-market-packs': compiled('alert-market-packs'),
     '@/lib/bank-alert-semantic-rules': compiled('bank-alert-semantic-rules'),
+    '@/lib/alert-status-lexicon': compiled('alert-status-lexicon'),
   });
   const markets = ['US','GB','FR','DE','ES','IT','NL','IN','QA','KW','BH','OM','EG','JO'];
   const source = 'Unknown event with PRIVATE_SOURCE_SENTINEL_9385. Account ending 1234 balance AED 12.50';
@@ -31,7 +33,17 @@ test('market vocabulary compiles once, keeps the exact result and never uses mes
   for (let i = 0; i < 10; i++) assert.deepEqual(markets.map(m => plain(h.api.inspectMarketAlert(source, m))), first);
   assert.equal(h.calls.length, cold, 'no new term expressions after warmup');
   assert.ok(h.calls.every(c => !c.pattern.includes('PRIVATE_SOURCE_SENTINEL_9385')));
-  assert.ok(h.calls.every(c => c.flags === 'iu'), 'cached term tests have no stateful matching cursor');
+  // Cached term tests are plain iu expressions. The only global expressions are
+  // module-level ones iterated with matchAll, which clones them per call, so no
+  // shared lastIndex can leak between messages.
+  const semantics = fs.readFileSync(path.join(root, 'src/lib/alert-semantics.ts'), 'utf8');
+  const globals = [...semantics.matchAll(/const (\w+) = new RegExp\([\s\S]*?, '([a-z]*)'\);/g)]
+    .filter((m) => m[2].includes('g') || m[2].includes('y')).map((m) => m[1]);
+  for (const name of globals) {
+    assert.doesNotMatch(semantics, new RegExp(`\\b${name}\\.(?:test|exec)\\(`),
+      `${name} is global; use matchAll, never test/exec`);
+  }
+  assert.ok(h.calls.every(c => !c.flags.includes('y')), 'no sticky matching cursor');
 });
 
 test('alias cache reuses only syntax, not currency values, money, offsets or cross-message results', () => {
@@ -79,6 +91,7 @@ test('universal fixed phrases retain negative and conditional controls without r
     '@/lib/universal-fields': compiled('universal-fields'),
     '@/lib/universal-money': compiled('universal-money'),
     '@/lib/bank-alert-semantic-rules': compiled('bank-alert-semantic-rules'),
+    '@/lib/alert-status-lexicon': compiled('alert-status-lexicon'),
   });
   const sources = [
     'Your account 1234 was debited USD 12.50 at TEST on 2026-09-09.',

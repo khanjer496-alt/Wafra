@@ -1,0 +1,105 @@
+'use strict';
+// Spanish phrasings (ES, and US Spanish-language alerts). See en.cjs for slots.
+module.exports = {
+  id: 'es',
+  months: ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'],
+  at24: 'a las',
+  sentence: {
+    purchase: [
+      'Compra de {AMT} en {MER}[ con tu {INS}][ el {DATE}].',
+      'Has pagado {AMT} en {MER}[ el {DATE}].',
+      'Se ha realizado un cargo de {AMT} en {MER}[ con su {INS}][ el {DATE}].',
+      'Tu {INS} ha sido utilizada para una compra de {AMT} en {MER}[ el {DATE}].',
+    ],
+    cnp: [
+      'Compra online de {AMT} en {MER}[ con tu {INS}][ el {DATE}].',
+      'Has realizado un pago por internet de {AMT} a {MER}[ el {DATE}].',
+      'Cargo de {AMT} por compra en comercio electrónico {MER}[ con su {INS}][ el {DATE}].',
+    ],
+    atm: [
+      'Retirada de efectivo de {AMT}[ en cajero {MER}][ con tu {INS}][ el {DATE}].',
+      'Has sacado {AMT} en un cajero[ el {DATE}].',
+      'Reintegro en cajero de {AMT} con su {INS}[ el {DATE}].',
+    ],
+    refund: [
+      'Devolución de {AMT} de {MER} abonada en tu {INS}[ el {DATE}].',
+      '{MER} te ha devuelto {AMT}[ el {DATE}].',
+      'Se ha abonado una devolución de {AMT} de {MER}[ el {DATE}].',
+    ],
+    fee: [
+      'Se ha cobrado una comisión de mantenimiento de {AMT} en su {INS}[ el {DATE}].',
+      'Comisión de {AMT} cargada[ en tu {INS}][ el {DATE}].',
+      'Te hemos cobrado {AMT} de comisión por retirada[ el {DATE}].',
+    ],
+    incoming: [
+      'Has recibido {AMT} de {CP}[ el {DATE}].',
+      'Transferencia recibida de {AMT} de {CP} en su {INS}[ el {DATE}].',
+      '{CP} te ha enviado {AMT} por Bizum[ el {DATE}].',
+      'Abono de nómina de {AMT} de {CP}[ el {DATE}].',
+    ],
+    outgoing: [
+      'Has enviado {AMT} a {CP}[ el {DATE}].',
+      'Su transferencia de {AMT} a {CP} se ha realizado[ el {DATE}].',
+      'Bizum enviado de {AMT} a {CP}[ el {DATE}].',
+    ],
+    bill: [
+      'Recibo de {MER} de {AMT} cargado en su {INS}[ el {DATE}].',
+      '{MER} te ha cobrado un recibo de {AMT}[ el {DATE}].',
+      'Se ha pagado el recibo de {AMT} de {MER}[ el {DATE}].',
+    ],
+  },
+  headline: {
+    purchase: ['Compra: {AMT} en {MER}[ · {DATE}]', 'Pago con tarjeta {AMT} - {MER}[ - {INS}]'],
+    cnp: ['Compra online: {AMT} en {MER}[ · {DATE}]'],
+    atm: ['Retirada en cajero: {AMT}[ · {MER}][ · {DATE}]'],
+    refund: ['Devolución: {AMT} de {MER}[ · {DATE}]'],
+    fee: ['Comisión: {AMT}[ · {DATE}]'],
+    incoming: ['Ingreso: {AMT} de {CP}[ · {DATE}]', 'Bizum recibido {AMT} - {CP}'],
+    outgoing: ['Transferencia enviada: {AMT} a {CP}[ · {DATE}]'],
+    bill: ['Recibo pagado: {AMT} - {MER}[ · {DATE}]'],
+  },
+  push: {
+    purchase: ['{EMO} Has pagado {AMT} en {MER}', '{EMO} {AMT} en {MER}'],
+    cnp: ['{EMO} Compra online de {AMT} en {MER}'],
+    atm: ['{EMO} Has sacado {AMT}'],
+    refund: ['{EMO} {MER} te ha devuelto {AMT}'],
+    fee: ['{EMO} Comisión de {AMT}'],
+    incoming: ['{EMO} {CP} te ha enviado {AMT}', '{EMO} Has recibido {AMT} de {CP}'],
+    outgoing: ['{EMO} Has enviado {AMT} a {CP}'],
+    bill: ['{EMO} Recibo de {MER}: {AMT} pagado'],
+  },
+  fields: {
+    title: {
+      purchase: ['Compra con tarjeta', 'Operación con tarjeta'], cnp: ['Compra online'], atm: ['Retirada de efectivo'], refund: ['Devolución'],
+      fee: ['Comisión'], incoming: ['Transferencia recibida', 'Ingreso'], outgoing: ['Transferencia emitida'], bill: ['Recibo domiciliado'],
+    },
+    amount: ['Importe', 'Cantidad'], merchant: ['Comercio', 'En'], place: ['Cajero'], payer: ['Ordenante', 'De'], payee: ['Beneficiario', 'A'], card: ['Tarjeta', 'Cuenta'], date: ['Fecha'],
+  },
+  ins: {
+    card: ['tarjeta terminada en {L4}', 'tarjeta *{L4}', 'tarjeta de débito ****{L4}', 'tarjeta Visa xxxx{L4}'],
+    account: ['cuenta terminada en {L4}', 'cuenta ****{L4}', 'cuenta ES..{L4}'],
+  },
+  trailer: {
+    balance: ['Saldo disponible: {BAL}.', 'Saldo {BAL}'],
+    limit: ['Crédito disponible: {BAL}'],
+    fraud: ['¿No has sido tú? Llama al {PHONE}.'],
+    threshold: ['Recibes este aviso porque el importe supera {THR}.'],
+    optout: ['Para darte de baja envía BAJA al {SHORT}.'],
+    link: ['Más info: https://{DOMAIN}/avisos'],
+  },
+  neg: {
+    declined: ['c|Tu compra de {AMT} en {MER} ha sido denegada.', 'x|Tu transferencia de {AMT} a {CP} no se ha podido realizar.'],
+    pending: ['c|Retención de {AMT} en {MER} en tu {INS}, pendiente de confirmar.', 'c|Tu compra de {AMT} en {MER} está pendiente.'],
+    future: ['x|El recibo de {AMT} de {MER} se cargará el {DUE}.', 'x|Tu transferencia programada de {AMT} a {CP} se enviará el {DUE}.'],
+    conditional: ["c|Si pagas más de {AMT} en {MER}, te enviaremos un aviso.", "c|Si {MER} te cobra {AMT} sin tu permiso, puedes reclamarlo en 60 días."],
+    question: ['c|¿Has realizado una compra de {AMT} en {MER}? Responde SI o NO.', 'x|¿Confirmas el envío de {AMT} a {CP}? Responde SI o NO.'],
+    negation: ['x|El recibo de {AMT} de {MER} no ha sido pagado.', 'c|No se ha cargado {AMT}; la compra en {MER} ha sido anulada.'],
+    otp: ['c|Tu código para la compra de {AMT} en {MER} es {OTP}. No lo compartas.', 'x|Clave {OTP} para firmar la transferencia de {AMT} a {CP}.'],
+    promo: ['c|¡Consigue un 5% de reembolso en compras desde {AMT} en {MER}!', 'a|Préstamo preconcedido de hasta {AMT}. Solicítalo ya.'],
+    request: ['x|{CP} te ha solicitado {AMT} por Bizum.', 'x|Solicitud de pago de {CP}: {AMT}.'],
+    statement: ['a|Tu extracto de tarjeta está disponible: saldo {AMT}, pago mínimo {MIN} antes del {DUE}.'],
+    balance: ['a|El saldo de tu {INS} es {AMT}.', 'a|Tu saldo actual es {AMT}.'],
+    chat: ['a|He pagado {AMT} en {MER} por la cena, ¿me pasas tu parte?', 'a|¿Me haces un Bizum de {AMT} para el alquiler?'],
+    scam: ['c|Se ha cargado {AMT} en {MER} con tu {INS}. Si no has sido tú, verifica en {URL}', 'a|Tu cuenta ha sido bloqueada por un pago de {AMT}. Desbloquéala en {URL}'],
+  },
+};

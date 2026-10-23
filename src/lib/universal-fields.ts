@@ -15,10 +15,12 @@ const resolve = <T>(items: Observation<T>[]): UniversalField<T> => {
   };
 };
 
-const MERCHANT_LABEL = /(?:^|[^\p{L}\p{N}])(?:desc(?:ription)?|narration|merchant|payee|beneficiary|seller|commerçant|bénéficiaire|händler|empfänger|comercio|beneficiario|esercente|begunstigde|利用先|التاجر|المستفيد)\s*[:：=-]\s*/giu;
-const MERCHANT_PREPOSITION = /(?:^|[^\p{L}\p{N}])(?:at|to|trf\s+to|from|chez|bei|von|en|em|an|presso|bij|لدى|عند|لصالح)\s+/giu;
+const MERCHANT_LABEL = /(?:^|[^\p{L}\p{N}])(?:desc(?:ription)?|narration|merchant|payee|beneficiary|seller|commerçant|bénéficiaire|händler|empfänger|comercio|comerciante|beneficiario|esercente|begunstigde|butik|butikk|forretning|sprzedawca|obchodník|利用先|التاجر|المستفيد)\s*[:：=-]\s*/giu;
+// "hos" is the Swedish, Danish and Norwegian "at" ("Köp 245,00 kr hos ICA").
+// It still needs movement evidence in its clause, like every preposition here.
+const MERCHANT_PREPOSITION = /(?:^|[^\p{L}\p{N}])(?:at|to|trf\s+to|from|chez|bei|von|en|em|an|presso|bij|hos|لدى|عند|لصالح)\s+/giu;
 const MERCHANT_TAIL = /\s+(?:(?:avl|avail(?:able)?)\.?\s*(?:bal(?:ance)?|lmt|limit)\b|(?:on|le|am|el|il|op|em)\s+\d|on\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d|from\s+(?:your\s+)?(?:account|a\/?c|card|checking|savings)\b|posted\b|(?:with|using|via|über)\b|to\s+(?:(?:your|the)\s+)?(?:card|account)\b|\d{1,2}:\d{2}\b|(?:ref(?:erence)?(?:\s*no)?|refno|txn|transaction\s+(?:id|date))\b|(?:was|has|have|is|were|will|wurde|wurden|ist|wird)\b|con\s+(?:tu|su)\s+tarjeta\b|com\s+o\s+cart[aã]o\b|بتاريخ|رقم\s+(?:المرجع|العملية))/iu;
-const BALANCE_FIELD_TAIL = /\s+(?:(?:available|current|remaining|closing)\s+(?:credit\s+)?(?:balance|limit)|(?:avl|avail)\.?\s*(?:bal(?:ance)?|limit)|balance|credit\s+limit|الرصيد(?:\s+(?:المتاح|الحالي))?)\s*[:=-]?\s*$/iu;
+const BALANCE_FIELD_TAIL = /\s+(?:(?:available|current|remaining|closing)\s+(?:credit\s+)?(?:balance|limit)|(?:avl|avail)\.?\s*(?:bal(?:ance)?|limit)|balance|credit\s+limit|saldo(?:\s+disp(?:onible|on[ií]vel)?)?|solde(?:\s+disponible)?|guthaben|kontostand|dost[eę]pne|الرصيد(?:\s+(?:المتاح|الحالي|المتوفر))?|رصيدك(?:\s+(?:الحالي|المتاح|المتوفر))?|المتاح)\s*[:=-]?\s*$/iu;
 const BALANCE_FIELD_BEFORE_MONEY = new RegExp(
   BALANCE_FIELD_TAIL.source.replace(/\$$/u, '') + String.raw`(?=(?:[A-Z]{3}\s*[+-]?\d|[+-]?\d[\d.,]*\s*[A-Z]{3}\b))`, 'iu');
 // These are clauses about the payment, not words in its seller's name. Keep
@@ -26,10 +28,35 @@ const BALANCE_FIELD_BEFORE_MONEY = new RegExp(
 // A bare status word only terminates at the end or before a reason: names such
 // as DECLINED CAFE and THE PENDING CAFE remain intact.
 const MERCHANT_STATUS_TAIL = /\s+(?:(?:abgelehnt|geweigerd|rechazado)(?=\s*(?:$|op\b|wegen\b|omdat\b))|requires?\s+(?:(?:an?|your)\s+)?(?:otp(?=\b|\d)|verification\s+code\b|security\s+code\b|one[ -]time\s+(?:code|password)\b)|(?:declined|failed|rejected|unsuccessful)(?=\s*(?:$|due\b|because\b|for\b))|pending(?:\s+(?:authori[sz]ation|processing|approval|confirmation|verification)\b|\s*$)|awaiting\s+(?:authori[sz]ation|approval|confirmation|verification)\b|scheduled\s+(?:for|on|to)\b|(?:pendente|pendiente|rechazad[oa]|recusad[oa]|negad[oa]|declinad[oa]|cancelad[oa]|(?:n[aã]o|no)\s+(?:aprovad[oa]|aprobad[oa]|autorizad[oa]))(?=\s*(?:$|de\b|por\b|pelo\b|pela\b))|(?:se\s+(?:cargar|abonar|aplicar|reflejar)[aá]|ser[aá]\s+(?:cargad|abonad|debitad|creditad|lan[cç]ad|processad)[oa]|retenid[oa]|bloquead[oa]|estornad[oa]|en\s+revisi[oó]n|no\s+procede|requiere|aguarda|on\s+hold|requires?\s+your)(?=$|[^\p{L}\p{N}])|(?:em\s+processamento|en\s+proceso|aguardando\s+(?:aprova[cç][aã]o|confirma[cç][aã]o|autoriza[cç][aã]o)|pendiente\s+de\s+(?:autorizaci[oó]n|aprobaci[oó]n))(?=$|[^\p{L}\p{N}]))/iu;
+// The European status that follows a merchant: an auxiliary that opens the
+// payment's own predicate ("en SHOP ha sido denegada", "chez SHOP a été
+// rejeté", "bei SHOP wurde abgelehnt", "em SHOP foi recusada", "hos SHOP er
+// ikke hævet"), the payment method ("presso SHOP con carta *4321 eseguito"),
+// or a bare trailing status word at the end of the name's clause or before
+// its reason ("en SHOP denegada por saldo", "bij SHOP afgewezen"). Masking
+// that text as part of the name would hide the decline from every status
+// check and let a heading such as "Compra de X en SHOP" post the payment.
+const EUROPEAN_STATUS_WORD = String.raw`(?:autorizzat[oa]|autorizad[oa]|autoris[ée]e?|genehmigt|godkän[dt]|godkendt|godkjent|geautoriseerd|goedgekeurd|autoryzowan[aey]|autorizován[aá]?|denegad[oa]|rechazad[oa]|no\s+(?:realizad|autorizad|aprobad)[oa]|anulad[oa]|cancelad[oa]|refus[ée]e?|rejet[ée]e?|annul[ée]e?|non\s+abouti(?:e)?|impay[ée]e?|en\s+attente|en\s+cours|vorgemerkt|reserviert|storniert|fehlgeschlagen|abgelehnt|nicht\s+(?:ausgeführt|durchgeführt|erfolgreich|gebucht)|zurückgewiesen|ausstehend|afgewezen|geweigerd|geannuleerd|mislukt|niet\s+(?:gelukt|uitgevoerd|betaald)|in\s+behandeling|gereserveerd|falhou|rejeitad[oa]|recusad[oa]|negad[oa]|pendente|negat[oa]|rifiutat[oa]|annullat[oa]|non\s+riuscit[oa]|non\s+eseguit[oa]|in\s+attesa|odrzucon[aey]|nieudan[aey]|anulowan[aey]|oczekując\p{L}*|nekad\p{L}*|avvisad\p{L}*|reserver\p{L}*|afvist|avvist|zamítnut\p{L}*|zamitnut\p{L}*|zrušen\p{L}*|neproběhl\p{L}*|neproveden\p{L}*)`;
+const MERCHANT_EUROPEAN_STATUS_TAIL = new RegExp(String.raw`\s+(?:` +
+  String.raw`(?:ha|han|había|habia)\s+sido(?![\p{L}\p{N}])|fue(?![\p{L}\p{N}])|(?:a|ont|avait)\s+été(?![\p{L}\p{N}])|n['’](?:a|ont|est)(?![\p{L}\p{N}])|est\s+(?:refus|rejet|annul|en\s+attente)|` +
+  String.raw`foi(?![\p{L}\p{N}])|foram(?![\p{L}\p{N}])|não\s+foi(?![\p{L}\p{N}])|nao\s+foi(?![\p{L}\p{N}])|è\s+stat[oa](?![\p{L}\p{N}])|e\s+stat[oa](?![\p{L}\p{N}])|non\s+è(?![\p{L}\p{N}])|werd(?![\p{L}\p{N}])|zijn(?![\p{L}\p{N}])|` +
+  String.raw`(?:er|blev|ble|har|är|var)\s+(?:ikke|inte|ej|blevet|blitt|blivit)(?![\p{L}\p{N}])|została(?![\p{L}\p{N}])|został(?![\p{L}\p{N}])|nie\s+zosta|byla(?![\p{L}\p{N}])|nebyla(?![\p{L}\p{N}])|` +
+  String.raw`con\s+(?:la\s+)?carta(?![\p{L}\p{N}])|avec\s+(?:votre|la)\s+carte(?![\p{L}\p{N}])|mit\s+(?:ihrer|deiner|der)(?![\p{L}\p{N}])|met\s+(?:je|uw|de)\s+(?:pas|kaart|bankkaart)(?![\p{L}\p{N}])|` +
+  // A completed predicate after the name ("bei ROSSMANN bezahlt", "an LUKAS
+  // überwiesen") and the balance or fraud footer that follows a glued name
+  // ("chez SHOP Solde disponible: …", "bei SHOP Unbekannte Zahlung?").
+  String.raw`(?:bezahlt|gezahlt|belastet|abgebucht|überwiesen|erstattet|gesendet|gutgeschrieben|betaald|betaalde|gestuurd|overgemaakt|pay[ée]e?s?|r[ée]gl[ée]e?s?|d[ée]bit[ée]e?|pagad[oa]|pagat[oa]|zapłacon[oay]|zaplacen[oa]|betalt|betalat|betalte|trukket|dragits|hævet)(?=\s*$|\s+(?:am|le|el|il|op|em|den|dne|dnia|on|\d))|` +
+  String.raw`(?:du|del|den|dne)\s+\d|${EUROPEAN_STATUS_WORD}(?=\s*(?:$|[,;:(]|(?:por|wegen|car|faute|op|omdat|par|mangels|pga|på\s+grund|z\s+powodu|kvůli)(?![\p{L}\p{N}])))` +
+  // Lower-case only, as banks write them mid-sentence: an upper-case name
+  // such as MANGO PAGADA or DECLINED CAFE stays whole.
+  String.raw`)`, 'u');
+// The balance or fraud footer glued after a name, in any case.
+const MERCHANT_EUROPEAN_FOOTER_TAIL = /\s+(?:(?:neuer\s+)?saldo(?![\p{L}\p{N}])|solde(?![\p{L}\p{N}])|kontostand|verfügbar\p{L}*|disponib\p{L}*|plafond|beschikba\p{L}*|tillgänglig|tilgjengelig|rådighed|dostępn\p{L}*|zůstatek|volný\s+limit|unbekannte\s+zahlung|niet\s+herkend|ce\s+n['’]est\s+pas\s+vous|op[ée]ration\s+inconnue|nie\s+rozpoznajesz|ikke\s+deg|kender\s+du\s+ikke|känner\s+du\s+inte|nebyli\s+jste|se\s+non\s+riconosci|si\s+no\s+reconoces|se\s+não\s+reconhece|mit\s+(?:ihrer|deiner)\s|avec\s+votre\s|con\s+(?:tu|su|la\s+tua|la\s+sua)\s|met\s+(?:je|uw)\s|med\s+(?:ditt|dit)\s|com\s+o\s+seu\s|kartą\s|z\s+vaší\s+karty)/iu;
 // Portuguese/Spanish lifecycle words above follow the same rule as English:
 // a trailing status word is not part of the merchant name, so it cannot be
 // masked away as merchant text and let a pending/declined alert post.
-const NOT_MERCHANT = /^(?:未払い|今回|本次交易)$|^(?:ihr(?:e|er|em|en)?|tu|su|sus|votre|vos|sua|seu)\s+(?:karte|konto|tarjeta|cuenta|carte|compte|cart[aã]o|conta)\b|^(?:cheq(?:ue)?|current|savings?|checking|credit|debit)\s+(?:a\/?c|acc(?:oun)?t)\b|^(?:su|tu|sua)\s+(?:cuenta|conta)\b|^(?:(?:your|the|an?)\s+)?(?:account|a\/?c|card|credit\s+card|debit\s+card|bank\s+account|statement|USD|AED|SAR|EUR|GBP|INR)\b|^(?:view|avoid|contact|call|visit|check|download|log\s*in|pay|confirm|verify|report)\b|^(?:حساب|بطاق|كشف\s+الحساب)/iu;
+// A pronoun after "an"/"à" is the reader, not a payee ("20,00 EUR an dich").
+const NOT_MERCHANT = /^(?:未払い|今回|本次交易)$|^(?:dich|dir|ihnen|mich|mir|uns|vous|toi|te|ti|je|jou|u|dig|deg|mig|meg|ciebie|tobie|tebe|vás|você|voce|si)$|^(?:ihr(?:e|er|em|en)?|tu|su|sus|votre|vos|sua|seu)\s+(?:karte|konto|tarjeta|cuenta|carte|compte|cart[aã]o|conta)\b|^(?:cheq(?:ue)?|current|savings?|checking|credit|debit)\s+(?:a\/?c|acc(?:oun)?t)\b|^(?:su|tu|sua)\s+(?:cuenta|conta)\b|^(?:(?:your|the|an?)\s+)?(?:account|a\/?c|card|credit\s+card|debit\s+card|bank\s+account|statement|USD|AED|SAR|EUR|GBP|INR)\b|^(?:view|avoid|contact|call|visit|check|download|log\s*in|pay|confirm|verify|report)\b|^(?:حساب|بطاق|كشف\s+الحساب)/iu;
 const MOVEMENT_CONTEXT = /\b(?:made\s+an?|withdrew|used\s+for|purchase|charged|paid|debited|credited|received|sent|transfer(?:red)?|spent|payment|paiement|débité|crédité|kartenzahlung|abgebucht|belastet|compra|pagado|pagamento|acquisto|addebitato|pinbetaling|betaling|kaartbetaling|betaald|afgeschreven|abonnementzahlung|remboursement|reembolso)\b|شراء|خصم|دفع|تحويل|استلام/iu;
 
 const ownsMovement = (text: string, at: number, moneySpans: readonly SourceSpan[]): boolean => {
@@ -59,9 +86,10 @@ const merchantFields = (text: string, moneySpans: readonly SourceSpan[]): Univer
   // Saudi field layouts name a seller/remitter/biller on its own labelled
   // line. "من:" is not a generic merchant preposition: the financial heading
   // and amount label must qualify it, and recipient/account labels stay out.
-  const arabicStructuredLabel = /(?:^|\n)\s*(?:لدى|من|جهة|الجهة)\s*[:：]\s*/gu;
+  // Same no-second-start rule as localForms below, on a run of newlines.
+  const arabicStructuredLabel = /(?:^|\n(?<!\n\s*?\s))\s*(?:لدى|من|جهة|الجهة)\s*[:：]\s*/gu;
   const arabicFinancialDocument = /^\s*(?:شراء|حوالة\s+واردة|سداد\s+فاتورة|مدفوعات\s+وزارة\s+الداخلية)(?=$|[\s:؛])/u.test(text) &&
-    /(?:^|\n)\s*مبلغ\s*:/u.test(text);
+    /(?:^|\n(?<!\n\s*?\s))\s*مبلغ\s*:/u.test(text);
   const refundFor = /\brefund\s+(?:processed|credited|received|completed|posted)\s+for\s+/giu;
   for (const pattern of [MERCHANT_LABEL, MERCHANT_PREPOSITION, refundFrom, symbolicAt, billSupplier, transactionWith,
     arabicStructuredLabel, refundFor]) {
@@ -87,7 +115,8 @@ const merchantFields = (text: string, moneySpans: readonly SourceSpan[]): Univer
         if (channel) { lead = channel[0].length; value = value.slice(lead); }
       }
       const start = labelEnd + lead;
-      const tails = [pattern === billSupplier ? value.search(/\s+(?:(?:no|não|será|está)\s+)?(?:pagada|paga)(?=\s*$)|\s+será\s+(?:cobrada|renovada)\b/iu) : -1, value.search(MERCHANT_TAIL), value.search(MERCHANT_STATUS_TAIL), value.search(BALANCE_FIELD_BEFORE_MONEY)]
+      const tails = [pattern === billSupplier ? value.search(/\s+(?:(?:no|não|será|está)\s+)?(?:pagada|paga)(?=\s*$)|\s+será\s+(?:cobrada|renovada)\b/iu) : -1, value.search(MERCHANT_TAIL), value.search(MERCHANT_STATUS_TAIL), value.search(MERCHANT_EUROPEAN_STATUS_TAIL), value.search(MERCHANT_EUROPEAN_FOOTER_TAIL),
+        value.search(BALANCE_FIELD_BEFORE_MONEY)]
         .filter((index) => index >= 0);
       const timeTail = text.slice(start, start + 97).search(/\s+\d{1,2}:\d{2}(?=\s|[.。।!?;]|$)/u);
       if (timeTail >= 0 && timeTail <= value.length) tails.push(timeTail);
@@ -102,6 +131,11 @@ const merchantFields = (text: string, moneySpans: readonly SourceSpan[]): Univer
       }
       if (tails.length) value = value.slice(0, Math.min(...tails));
       value = value.trim().replace(/\s+(?:for|of)$/iu, '').replace(/[.*_-]+$/u, '').trim();
+      // A figure the name read stopped inside ("bei REWE 1.234,56" read as
+      // "REWE 1.234") is a balance or amount after the name, never part of it.
+      // (A whole store number stays: "STORE 1234", "7-ELEVEN".)
+      const cutFigure = value.match(/\s+\d[\d.]*$/u);
+      if (cutFigure && /^[.,]\d/u.test(text.slice(start + value.length))) value = value.slice(0, cutFigure.index).trim();
       const end = start + value.length;
       if ((value.match(/\p{L}/gu) ?? []).length < 2 || NOT_MERCHANT.test(value) ||
           /\b(?:your|yours|please)\b/iu.test(value) || /^[A-Z]{2}\d[A-Z\d ]{6,}$/iu.test(value)) continue;
@@ -113,6 +147,10 @@ const merchantFields = (text: string, moneySpans: readonly SourceSpan[]): Univer
   }
   // These bounded, source-evidenced forms place the seller before a local
   // payment marker. Do not expose a broad reverse-word scan as merchant proof.
+  // A form that opens at a separator and its blanks never opens again at a
+  // newline those blanks already cover (`(?<![…]\s*?\s)`): the earlier start
+  // reads the same name, and without the check a long run of newlines made
+  // each one rescan the rest of the run. Same matches (launch-perf.test.cjs).
   const localForms = [
     // Portuguese "efetuada no PINGO DOCE com o cartão", Polish "w BIEDRONKA
     // zostala", Korean "12,000원 GS25 강남점 10/02", Hindi "BIGBASKET को भुगतान".
@@ -122,19 +160,19 @@ const merchantFields = (text: string, moneySpans: readonly SourceSpan[]): Univer
     /((?:^|[।,]\s*))([A-Za-z\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+को\s+(?=भुगतान)/gu,
     /(\d{4}-\d{2}-\d{2}\s+tarihinde\s+(?:\d{4}\s+ile\s+biten\s+kartınızla\s+)?)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+işyerinde(?:ki)?\s+(?=[A-Z]{3}\s*\d)/giu,
     /(कार्ड\s+\d{4}\s+से\s+)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+पर\s+(?=[A-Z]{3}\s*\d)/gu,
-    /((?:^|[।\n\]])\s*)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+से\s+(?=[A-Z]{3}\s*\d[\d.,]*\s+(?:की\s+रिफंड\s+राशि|का\s+रिफंड))/gu,
+    /((?:^|[।\n\]](?<![।\n\]]\s*?\s))\s*)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+से\s+(?=[A-Z]{3}\s*\d[\d.,]*\s+(?:की\s+रिफंड\s+राशि|का\s+रिफंड))/gu,
     /((?:银行卡(?:于\d{4}-\d{2}-\d{2})?|^|[。:：，,\s日])在)([\p{L}\p{M}\p{N} &'’.*_-]{2,96}?)消费(?:成功|失败|被拒绝)/gu,
     /(退款到账通知[:：]\s*)([\p{L}\p{M}\p{N} &'’.*_-]{2,96}?)退回(?=[A-Z]{3}\s*\d)/gu,
-    /((?:^|[.!?。।;\n\]])\s*)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+işyerindeki\s+(?=[A-Z]{3}\s*\d)/giu,
+    /((?:^|[.!?。।;\n\]](?<![.!?。।;\n\]]\s*?\s))\s*)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+işyerindeki\s+(?=[A-Z]{3}\s*\d)/giu,
     // Turkish banks date the receipt day-first and name the shop with the
     // ablative: "02.10.2026 tarihinde MIGROS işyerinden 456,75 TL".
     /(\d{2}[./]\d{2}[./]\d{4}\s+tarihinde\s+)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+işyerinden\s+(?=\d)/giu,
-    /((?:^|[.!?。।;\n\]])\s*)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+alışverişiniz\s+tamamlandı/giu,
+    /((?:^|[.!?。।;\n\]](?<![.!?。।;\n\]]\s*?\s))\s*)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+alışverişiniz\s+tamamlandı/giu,
     /(تم\s+سداد\s+فاتورة\s+)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+بنجاح(?=\s*[.。।;]|\s*$)/gu,
-    /((?:^|[.!?。।;\n\]])\s*)([\p{L}\p{M}\p{N} &'’.*_-]{2,96}?)での購入が完了しました/gu,
-    /((?:^|[.!?。।;\n\]])\s*)([\p{L}\p{M}\p{N} &'’.*_-]{2,96}?)の電気料金の請求です/gu,
-    /((?:^|[.!?。।;\n\]])\s*您在)([\p{L}\p{M}\p{N} &'’.*_-]{2,96}?)的消费已完成/gu,
-    /((?:^|[.!?。।;\n\]])\s*)([\p{L}\p{M}\p{N} &'’.*_-]{2,96}?)的退款(?=\s*(?:[A-Z]{3}\s*\d|[$€£¥]\s*\d)[\d.,]*\s*已到账)/gu,
+    /((?:^|[.!?。।;\n\]](?<![.!?。।;\n\]]\s*?\s))\s*)([\p{L}\p{M}\p{N} &'’.*_-]{2,96}?)での購入が完了しました/gu,
+    /((?:^|[.!?。।;\n\]](?<![.!?。।;\n\]]\s*?\s))\s*)([\p{L}\p{M}\p{N} &'’.*_-]{2,96}?)の電気料金の請求です/gu,
+    /((?:^|[.!?。।;\n\]](?<![.!?。।;\n\]]\s*?\s))\s*您在)([\p{L}\p{M}\p{N} &'’.*_-]{2,96}?)的消费已完成/gu,
+    /((?:^|[.!?。।;\n\]](?<![.!?。।;\n\]]\s*?\s))\s*)([\p{L}\p{M}\p{N} &'’.*_-]{2,96}?)的退款(?=\s*(?:[A-Z]{3}\s*\d|[$€£¥]\s*\d)[\d.,]*\s*已到账)/gu,
   ];
   for (const pattern of localForms) for (const match of text.matchAll(pattern)) {
     const value = match[2].trim();

@@ -412,7 +412,9 @@ const AED_GLUED_ALERT =
 
 const launchMarketsFromSender = (sender?: string): MarketPack[] => {
   const senderText = sender?.trim() ?? '';
-  if (!senderText) return [];
+  // An e-mail address is never an operator-registered bank SMS header:
+  // "alerts@hsbcuk-mail.com" names HSBC but anyone can register that domain.
+  if (!senderText || senderText.includes('@')) return [];
   return MARKETS.filter((market) => market.banks.some((bank) => bank.re.test(senderText)));
 };
 

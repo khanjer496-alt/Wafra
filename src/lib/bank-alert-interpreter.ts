@@ -25,6 +25,18 @@ import {
   hasArabicRefundHeading,
   hasMalformedBankAmount,
   isInformationOnlyAlert,
+  gluedSignContradicts,
+  unsupportedReading,
+  principalUnproven,
+  hedgedPrincipal,
+  isPurchaseRefundedNotice,
+  refundGovernsPrincipal,
+  amountIsOnlyABalance,
+  withoutReversalFooters,
+  reversalLeftUnproven,
+  isNotSpendingOrIncomeShape,
+  isUnregisteredCallBack,
+  moneyNoticeKind,
   normalizeArabic,
   parseSms,
   type ParsedSms,
@@ -245,7 +257,7 @@ const finalFallback = (
  * requires exact launch-institution sender evidence; sender-free semantics may
  * only correct a row the legacy parser already intended to import.
  */
-export const interpretBankAlert = ({
+const interpretBankAlertInner = ({
   source,
   sender,
   market,
@@ -261,6 +273,14 @@ export const interpretBankAlert = ({
   if (isInformationOnlyAlert(source)) {
     return { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
   }
+  // A figure inside a negated, questioned, requested, conditional or
+  // promotional clause, or a body whose only figures are balances, moved no
+  // money ("Did you make a AED 168.06 purchase at NOON? Reply YES or NO").
+  // parseSms refuses it; the semantic fallback must not rebuild the purchase
+  // from the same words for a trusted sender.
+  if (moneyNoticeKind(source) || isUnregisteredCallBack(source, sender)) {
+    return { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+  }
   // A refused legacy parse is not permission to reconstruct the same money
   // through semantic fallback. Every launch result is a two-decimal AED/SAR
   // amount, including results created without a legacy row.
@@ -274,6 +294,15 @@ export const interpretBankAlert = ({
   }
   const legacy = withMarketPackForParsing(market, () =>
     parseSms(source, overrides, { sender, observedAt }));
+  // A bill that arrived, or the payee confirming it received YOUR payment,
+  // that parseSms refused (sms-parser notSpendingOrIncome) is never rebuilt
+  // here as income or a purchase. Card-bill payments and own-account moves
+  // may still be read as a card settlement / own transfer: see the exported
+  // wrapper below.
+  const notSpending = isNotSpendingOrIncomeShape(source);
+  if (!legacy && (notSpending === 'bill-received' || notSpending === 'payee-receipt')) {
+    return { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+  }
   // Application/financing copy may be appended to a real purchase alert. The
   // mature regional parser gets first right of refusal: only a message that it
   // did NOT prove as a posting may be suppressed by this sales-offer shape.
@@ -298,6 +327,15 @@ export const interpretBankAlert = ({
   if (usableLegacy && isCompletedCardPurchaseReturn(semanticText, usableLegacy)) {
     return legacyResult(usableLegacy, 'refund');
   }
+  // "Your purchase of AED 50.00 at NOON has been refunded" / "… تم استردادها":
+  // parseSms read the completed refund; the purchase words are not debit evidence.
+  if (usableLegacy?.kind === 'transaction' && usableLegacy.type === 'income' && (isPurchaseRefundedNotice(source, usableLegacy.amountFils) ||
+    // (A refund naming the PURCHASE it refunds: the semantic reader would take
+    // that purchase word as the direction.)
+    (refundGovernsPrincipal(source, usableLegacy.amountFils) === 'completed' &&
+      /\bpurchase|(?<![\u0621-\u064A])(?:ال)?شراء/iu.test(semanticText)))) {
+    return legacyResult(usableLegacy, 'refund');
+  }
   // A purchase the bank says WILL be refunded or credited back has not moved
   // money yet. Whatever parseSms read from it, the purchase words in the same
   // sentence are not independent debit evidence: the semantic reader used to
@@ -317,6 +355,10 @@ export const interpretBankAlert = ({
     hasArabicRefundHeading(source)) {
     return legacyResult(usableLegacy, 'refund');
   }
+  // The same shapes with a legacy row (a payee receipt read as the outgoing
+  // payment it is, a transfer-flagged own move): semantics must not re-read
+  // the payee's name ("CONTOSO INC PAYROLL received your payment") as income.
+  if (usableLegacy && notSpending) return legacyResult(usableLegacy);
   if (usableLegacy && !SEMANTIC_CANDIDATE_LANGUAGE.test(semanticText)) {
     return legacyResult(usableLegacy);
   }
@@ -343,4 +385,53 @@ export const interpretBankAlert = ({
     if (semantic) return semantic;
   }
   return finalFallback(fallback, usableLegacy);
+};
+
+/**
+ * A card-bill payment or an own-account move (sms-parser
+ * isNotSpendingOrIncomeShape) is posted only as what it is: a card
+ * settlement, or a transfer-flagged own-account move. Any other reading of
+ * the same words (a utility payment, a purchase, income) waits in Review.
+ */
+/**
+ * A semantic reading whose amount is only a balance figure in the alert ("…
+ * الرصيد الائتماني المتاح SAR 610.92" read as a 610.92 purchase). The legacy
+ * parser's own figure is trusted: "Credit from BALANCE STUDIO: SAR 820.66
+ * refunded" names a merchant, not a balance.
+ */
+const fallbackReadABalance = (input: InterpretBankAlertInput, amountMinor: number): boolean => {
+  if (!amountIsOnlyABalance(input.source, amountMinor)) return false;
+  const legacy = withMarketPackForParsing(input.market, () =>
+    parseSms(input.source, input.overrides ?? {}, { sender: input.sender, observedAt: input.observedAt }));
+  return !legacy || legacy.amountFils !== amountMinor;
+};
+export const interpretBankAlert = (input: InterpretBankAlertInput): BankAlertInterpretation => {
+  // A reversal help/conditional footer never changes the movement it follows;
+  // see reversalLeftUnproven for the reversal wording left after it.
+  const withoutFooters = withoutReversalFooters(input.source);
+  if (withoutFooters !== input.source) return interpretBankAlert({ ...input, source: withoutFooters });
+  const result = interpretBankAlertInner(input);
+  if (result.outcome !== 'parsed') return result;
+  if (reversalLeftUnproven(input.source, result.parsed)) {
+    return { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+  }
+  // The bank's own sign on the figure ("163.39 SAR+") outranks a semantic
+  // re-reading of the same words, exactly as it outranks parseSms.
+  if (gluedSignContradicts(input.source, result.parsed) ||
+    unsupportedReading(input.source, result.parsed, input.sender) ||
+    (result.parsed.kind === 'transaction' && fallbackReadABalance(input, result.parsed.amountFils)) ||
+    // A semantic re-reading is held to the same two-figure proof as parseSms
+    // ("Purchase of USD 100.00 … AED 20,000.00 spending room left").
+    principalUnproven(input.source, result.parsed) || hedgedPrincipal(input.source, result.parsed)) {
+    return { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+  }
+  const shape = isNotSpendingOrIncomeShape(input.source);
+  if (shape === 'card-bill' && result.meaning !== 'card-settlement' && result.parsed.kind !== 'cardPayment' &&
+    !result.parsed.transferHint) {
+    return { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+  }
+  if (shape === 'own-move' && result.meaning !== 'own-account-transfer' && !result.parsed.transferHint) {
+    return { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+  }
+  return result;
 };

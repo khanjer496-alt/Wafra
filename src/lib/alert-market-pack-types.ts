@@ -5,7 +5,9 @@ export type UniversalMarket =
   | 'US' | 'GB' | 'FR' | 'DE' | 'ES' | 'IT' | 'NL'
   | 'IN' | 'QA' | 'KW' | 'BH' | 'OM' | 'EG' | 'JO'
   | 'CA' | 'AU' | 'BR' | 'MX' | 'SG'
-  | 'CO' | 'PE';
+  | 'CO' | 'PE'
+  | 'PT' | 'PL' | 'SE' | 'DK' | 'NO' | 'CZ'
+  | 'IQ' | 'LB';
 
 export type AlertFamily =
   | 'purchase'
@@ -52,6 +54,12 @@ export interface AlertMarketPack {
    * ownership is exactly the shared global vocabulary.
    */
   moneyLabels?: readonly string[];
+  /**
+   * Notification headings ("Kartenzahlung", "Compra de", "Pinbetaling") read
+   * only by the European heading reader (universal-parser.ts), never as
+   * posting evidence by the clause reader.
+   */
+  headingTerms?: readonly string[];
   /**
    * This market's own three-decimal currency, written with a full stop as
    * the decimal point ("KWD 12.345" = 12.345 KWD). Applied to money only after

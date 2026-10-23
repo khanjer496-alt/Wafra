@@ -7411,5 +7411,224 @@ t('control: a payment credited to a named biller account stays an expense',
   ok('fold review control: the spaced four-digit ADCB tail is •6383', adcb?.card?.last4 === '6383', adcb?.card);
 }
 
+// Wrong-post round 6 (synthetic text). Each SKIP or reading below was a
+// booking before: a credit limit or balance as the amount, a cancelled /
+// stopped / incomplete purchase as spending, an own-account move as spending,
+// a credit-card settlement as income or a purchase. Controls follow each.
+{
+  const { setActiveMarket } = require('./build/markets');
+  setActiveMarket('SA');
+  t('round 6: a credit limit stated first is not the purchase',
+    'حد ائتماني 20,000 ر.س. شراء 50 ر.س لدى نون بطاقة 1234', { type: 'expense', amountFils: 5000 });
+  t('round 6: the Al Rajhi limit field before the amount field is not the purchase',
+    'شراء\nالحد الائتماني: 20,000 ر.س\nمبلغ: 50 ر.س\nلدى: جرير', { type: 'expense', amountFils: 5000 });
+  t('round 6: a bare balance opening the message is not the debit',
+    'رصيد 2,000 ر.س. خصم 50 ر.س لدى نون', { type: 'expense', amountFils: 5000 });
+  t('round 6 control: the limit after a purchase stays a limit',
+    'شراء 50 ر.س لدى نون بطاقة 1234. الحد الائتماني المتاح 20,000 ر.س', { type: 'expense', amountFils: 5000 });
+  t('round 6: a cancelled purchase is not spending', 'تم إلغاء عملية شراء بمبلغ 50 ر.س لدى نون', null);
+  t('round 6: a cancelled purchase with its refund promise is not spending',
+    'تم إلغاء عملية شراء بمبلغ 50 ر.س لدى نون وسيتم إعادة المبلغ', null);
+  t('round 6: a stopped purchase is not spending', 'تم إيقاف عملية شراء بمبلغ 50 ر.س لدى نون', null);
+  t('round 6: a suspended purchase is not spending', 'تم تعليق عملية شراء بمبلغ 50 ر.س لدى نون', null);
+  t('round 6: an unsuccessful operation is not spending', 'عملية غير ناجحة: شراء بمبلغ 50 ر.س لدى نون', null);
+  t('round 6: an incomplete operation line is not spending', 'شراء\nمبلغ: 50 ر.س\nلدى: نون\nالعملية غير مكتملة', null);
+  ok('round 6: a cancelled purchase reads as a decline', nonPostingReason('تم إلغاء عملية شراء بمبلغ 50 ر.س لدى نون') === 'declined');
+  t('round 6 control: an offer to cancel does not withdraw the purchase',
+    'شراء بمبلغ 50 ر.س لدى نون. لإلغاء العملية اتصل 8001234567', { type: 'expense', amountFils: 5000 });
+  t('round 6 control: "cannot be cancelled" does not withdraw the purchase',
+    'شراء بمبلغ 50 ر.س لدى نون. لا يمكن إلغاء العملية بعد تنفيذها', { type: 'expense', amountFils: 5000 });
+  t('round 6 control: "you can cancel" does not withdraw the purchase',
+    'شراء بمبلغ 50 ر.س لدى نون. يمكنك إلغاء العملية من التطبيق', { type: 'expense', amountFils: 5000 });
+  setActiveMarket('AE');
+  t('round 6: an English available balance that leads with its figure is not the purchase',
+    'AED 2,000.00 is your available balance. AED 50.00 was spent at NOON on your card 1234.', null);
+  t('round 6 control: a purchase followed by "Available balance is" keeps its amount',
+    'AED 50.00 was spent at NOON on your card 1234. Available balance is AED 2,000.00.', { type: 'expense', amountFils: 5000 });
+  t('round 6: a new balance that leads with its figure is not the deposit',
+    'AED 2,100.00 is your new balance after a deposit of AED 100.00 to your account 1234.', { type: 'income', amountFils: 10000 });
+  t('round 6: an incomplete purchase is not spending', 'Purchase of AED 50.00 at NOON with card 1234 was incomplete.', null);
+  t('round 6 control: an incomplete PROFILE does not withdraw the purchase',
+    'Purchase of AED 50.00 at NOON with card 1234. Your profile is incomplete, update it in the app.', { type: 'expense', amountFils: 5000 });
+  t('round 6: a move to your own account is an own-account transfer',
+    'You have transferred AED 500.00 to your own account 5678.', { amountFils: 50000, transfer: true, merchant: 'Own account transfer' });
+  t('round 6: "Transfer … to own account … successful" is an own-account transfer',
+    'Transfer of AED 500.00 to own account 5678 successful.', { amountFils: 50000, transfer: true, merchant: 'Own account transfer' });
+  t('round 6 control: a transfer to another account stays spending',
+    'You have transferred AED 500.00 to account 5678.', { type: 'expense', amountFils: 50000, transfer: false });
+  t('round 6: a credit INTO a credit card is not income',
+    'Your credit card 1234 has been credited with AED 1,000.00. Available limit is AED 9,000.00.', null);
+  t('round 6: "credited to your credit card" is not income', 'AED 1,000.00 credited to your credit card 1234.', null);
+  t('round 6 control: a refund credited to a credit card stays income',
+    'Refund of AED 50.00 has been credited to your credit card 1234.', { type: 'income', amountFils: 5000 });
+  t('round 6: "Card 1234 payment of … has been received" is the card receipt',
+    'Card 1234 payment of AED 3,500.00 has been received. Thank you.', { kind: 'cardPayment', amountFils: 350000, side: 'receipt' });
+  t('round 6 control: a bill paid with the card is no card receipt',
+    'Card 1234 payment of AED 50.00 to DEWA has been received.', { kind: 'transaction', type: 'expense', amountFils: 5000 });
+  t('round 6 control: a salary credit stays income',
+    'Your salary of AED 10,000.00 has been credited to your account 1234.', { type: 'income', amountFils: 1000000 });
+}
+
+// Wrong-post round 7 (synthetic). The structural principal rule, the
+// clause-scoped movement status, and the Arabic card credit. Controls follow.
+{
+  const { setActiveMarket } = require('./build/markets');
+  setActiveMarket('SA');
+  for (const label of ['سقف البطاقة', 'حد البطاقة', 'الحد الائتماني المتبقي', 'الحد المتبقي', 'رصيدكم', 'رصيد الحساب', 'رصيد متاح', 'المبلغ المتوفر']) {
+    t(`round 7: "${label}" before a purchase is not the purchase`,
+      `${label} 20,000 ر.س. شراء 50 ر.س لدى نون بطاقة 1234`, { type: 'expense', amountFils: 5000 });
+  }
+  {
+    const p = parseSms('سعة البطاقة 20,000 ر.س. شراء 50 ر.س لدى نون بطاقة 1234');
+    ok('round 7: an UNSEEN headroom label never books the larger figure (Review)', !p || p.amountFils === 5000, p && p.amountFils);
+  }
+  t('round 7: "ألغيت عملية الشراء" is not spending', 'ألغيت عملية الشراء بمبلغ 50 ر.س لدى نون', null);
+  t('round 7: "تم إلغاء الحركة:" is not spending', 'تم إلغاء الحركة: شراء بمبلغ 50 ر.س لدى نون', null);
+  t('round 7: "عملية لم تكتمل:" is not spending', 'عملية لم تكتمل: شراء بمبلغ 50 ر.س لدى نون', null);
+  t('round 7: a deposit into a credit card is not income', 'تم إيداع 1,000 ر.س في بطاقتك الائتمانية 1234', null);
+  t('round 7 control: a deposit into the account stays income', 'تم إيداع 1,000 ر.س في حسابك 1234', { type: 'income', amountFils: 100000 });
+  for (const footer of ['يرجى إيقاف العملية', 'الرجاء إلغاء العملية', 'للإبلاغ أو إلغاء العملية اتصل 8001234567', 'أرسل 1 إلغاء العملية',
+    'ايقاف الشراء عبر الانترنت متاح', 'خدمة تعليق الشراء الدولي', 'سيتم إيقاف الشراء عبر الانترنت بعد 3 محاولات']) {
+    t(`round 7 control: the footer "${footer}" keeps the purchase`, `شراء بمبلغ 50 ر.س لدى نون. ${footer}`, { type: 'expense', amountFils: 5000 });
+  }
+  setActiveMarket('AE');
+  for (const body of [
+    'AED 2,000.00 available balance. AED 50.00 was spent at NOON on your card 1234.',
+    'AED 2,000.00 remains your available balance. AED 50.00 was spent at NOON on your card 1234.',
+    'AED 20,000.00 limit available. AED 50.00 was spent at NOON on your card 1234.',
+    'AED 20,000.00 headroom remains. AED 50.00 was spent at NOON on your card 1234.',
+  ]) {
+    const p = parseSms(body);
+    ok(`round 7: "${body.slice(0, 44)}" never books the larger figure`, !p || p.amountFils === 5000, p && p.amountFils);
+  }
+  t('round 7: "is your credit line" is not the purchase',
+    'AED 20,000.00 is your credit line. AED 50.00 was spent at NOON on your card 1234.', { type: 'expense', amountFils: 5000 });
+  t('round 7: "Credit line AED …" is not the purchase',
+    'Credit line AED 20,000.00. AED 50.00 was spent at NOON on your card 1234.', { type: 'expense', amountFils: 5000 });
+  t('round 7 control: a purchase label then "Available balance AED …" with no full stop keeps the purchase',
+    'Purchase AED 50.00 Available balance AED 2,000.00', { amountFils: 5000 });
+  t('round 7: "Incomplete purchase of" is not spending', 'Incomplete purchase of AED 50.00 at NOON with card 1234.', null);
+  t('round 7 control: an incomplete payment PROFILE keeps the payment',
+    'Payment of AED 50.00 at NOON with card 1234 successful. Your payment profile is incomplete.', { amountFils: 5000 });
+}
+
+// Wrong-post round 8 (synthetic): clause-own cancel status, aggregate and
+// foreign figures in the two-figure proof, a credit into a credit card.
+{
+  const { setActiveMarket } = require('./build/markets');
+  setActiveMarket('SA');
+  t('round 8: a leading "تم إلغاء العملية،" before an offer still refuses',
+    'تم إلغاء العملية، يرجى التواصل معنا. شراء 50 ر.س لدى نون بطاقة 1234', null);
+  t('round 8: a pending cancellation of this amount is not spending', 'سيتم إلغاء عملية الشراء بمبلغ 50 ر.س لدى نون وإعادة المبلغ', null);
+  t('round 8: "لم تكتمل، يرجى المحاولة" is not spending', 'عملية شراء بمبلغ 50 ر.س لدى نون لم تكتمل، يرجى المحاولة مرة أخرى', null);
+  t('round 8: a trailing "تم الإلغاء" line is not spending', 'شراء بمبلغ 50 ر.س لدى نون\nتم الإلغاء', null);
+  t('round 8: "تم إضافة … إلى بطاقتك الائتمانية" is not spending', 'تم إضافة 50 ر.س إلى بطاقتك الائتمانية 1234 من نون', null);
+  t('round 8: the amount left of the limit is not the purchase', '5000 ر.س المتبقي من الحد 50 ر.س شراء لدى نون', null);
+  t('round 8: a debit from the monthly limit is not the purchase', 'تم خصم مبلغ 2000 ر.س من حد الشراء الشهري. شراء 50 ر.س لدى نون', null);
+  t('round 8 control: SNB "بـ:" with "القيمة المتاحة" books the purchase',
+    'شراء عبر نقاط البيع\nبطاقة: 1234\nبـ:88.40 SAR\nلدى: SAMPLE\nالقيمة المتاحة:1204.10 SAR', { type: 'expense', amountFils: 8840 });
+  t('round 8 control: "يرجى إلغاء العملية إذا لم تقم بها" keeps the purchase',
+    'شراء بمبلغ 50 ر.س لدى نون. يرجى إلغاء العملية إذا لم تقم بها', { type: 'expense', amountFils: 5000 });
+  setActiveMarket('AE');
+  for (const body of [
+    'Total spent this month AED 2,000.00. Purchase of AED 50.00 at NOON with card 1234.',
+    'This month you have spent AED 2,000.00. Purchase of AED 50.00 at NOON with card 1234.',
+    'Purchases this cycle: AED 2,000.00; this purchase AED 50.00 at NOON with card 1234.',
+    'Spent so far AED 2,000.00 of your AED 5,000.00 budget. Purchase of AED 50.00 at NOON with card 1234.',
+    'Your daily withdrawal allowance is AED 5,000.00. Withdrawn AED 500.00 at ATM with card 1234.',
+    'Purchase of USD 100.00 at AMAZON US on card 1234. AED 20,000.00 spending room left.',
+    'Your purchase of AED 3,000.00 at NOON has been split into 12 payments of AED 250.00. First instalment of AED 250.00 charged to card 1234.',
+  ]) {
+    const p = parseSms(body);
+    ok(`round 8: "${body.slice(0, 44)}" never books an aggregate or unproven figure`,
+      !p || p.amountFils === 5000 || p.amountFils === 50000, p && p.amountFils);
+  }
+  t('round 8: "cancelled by merchant" is not spending', 'Purchase of AED 50.00 at NOON with card 1234 cancelled by merchant. Call 600 if you need help.', null);
+  t('round 8: a trailing "- VOID" is not spending', 'Purchase of AED 50.00 at NOON with card 1234 - VOID', null);
+  t('round 8: an authorisation that "will be cancelled" is not spending', 'Authorisation of AED 50.00 at NOON on card 1234 will be cancelled.', null);
+  t('round 8 control: a merchant called VOID STUDIO', 'Purchase of AED 50.00 at VOID STUDIO with card 1234.', { type: 'expense', amountFils: 5000 });
+  t('round 8 control: an FX purchase keeps its local equivalent',
+    'Purchase of USD 100.00 (AED 367.30) at AMAZON US with card 1234. Available balance AED 2,000.00', { type: 'expense', amountFils: 36730 });
+  t('round 8 control: a "to cancel … call" footer keeps the purchase',
+    'Purchase of AED 50.00 at NOON with card 1234. To cancel this transaction call 600 000000.', { type: 'expense', amountFils: 5000 });
+}
+
+// Wrong-post round 9 (synthetic): next-line labels, refunded purchases,
+// pronoun-suffixed cancels, hedged figures. Controls follow.
+{
+  const { setActiveMarket } = require('./build/markets');
+  const { parseRefusedForProof } = require('./build/sms-parser');
+  setActiveMarket('SA');
+  t('round 9: a next-line "المتاح من الحد" describes the next figure', 'شراء\nمبلغ: 50 SAR\nالمتاح من الحد: 9950 SAR', { type: 'expense', amountFils: 5000 });
+  t('round 9: a next-line "المتبقي من الحد اليومي" describes the next figure', 'شراء\nمبلغ: 50 SAR\nالمتبقي من الحد اليومي: 9950 SAR', { type: 'expense', amountFils: 5000 });
+  t('round 9: a next-line "المتاح للسحب اليومي" describes the next figure', 'سحب صراف\nمبلغ: 500 SAR\nالمتاح للسحب اليومي: 4500 SAR', { type: 'expense', amountFils: 50000 });
+  t('round 9: "عملية شراء … تم استردادها" is the refund', 'عملية شراء بمبلغ 50 ر.س لدى نون تم استردادها', { type: 'income', amountFils: 5000, merchant: 'نون' });
+  t('round 9: "، تم إلغاؤها" is not spending', 'عملية شراء بمبلغ 50 ر.س لدى نون، تم إلغاؤها', null);
+  t('round 9: "تم إلغائها" is not spending', 'عملية شراء بمبلغ 50 ر.س لدى نون تم إلغائها', null);
+  t('round 9: "شراء ملغى" is not spending', 'شراء ملغى بمبلغ 50 ر.س لدى نون', null);
+  ok('round 9: an unproven-amount refusal keeps its facts for Review',
+    !!parseRefusedForProof('5000 ر.س المتبقي من الحد 50 ر.س شراء لدى نون'));
+  ok('round 9: a genuine cancel keeps no facts for Review',
+    parseRefusedForProof('تم إلغاء عملية شراء بمبلغ 50 ر.س لدى نون') === null);
+  setActiveMarket('AE');
+  t('round 9: a next-line "Left to spend" describes the next figure', 'Purchase of AED 50.00\nLeft to spend AED 9,950.00', { type: 'expense', amountFils: 5000 });
+  t('round 9: a next-line "Available to withdraw today" describes the next figure', 'Withdrawal of AED 500.00\nAvailable to withdraw today AED 4,500.00', { type: 'expense', amountFils: 50000 });
+  t('round 9: "Refund of AED 20.00 for your purchase of AED 50.00" is the 20 refund',
+    'Refund of AED 20.00 for your purchase of AED 50.00 at NOON has been credited to your card 1234.', { type: 'income', amountFils: 2000 });
+  t('round 9: "can still be withdrawn today" is no rival', 'AED 2,000.00 withdrawn from your account 1234 at ATM. AED 3,000.00 can still be withdrawn today.', { amountFils: 200000 });
+  t('round 9: "spent … of your … limit" is no rival', 'Purchase of AED 50.00 at NOON with card 1234. You have spent AED 3,000.00 of your AED 5,000.00 limit.', { amountFils: 5000 });
+  t('round 9: "has been refunded" is the refund', 'Your purchase of AED 50.00 at NOON has been refunded. Card 1234', { type: 'income', amountFils: 5000, merchant: 'Noon' });
+  t('round 9: ", cancelled" is not spending', 'Purchase of AED 50.00 at NOON with card 1234, cancelled', null);
+  t('round 9: ": cancelled" is not spending', 'Purchase of AED 50.00 at NOON with card 1234: cancelled', null);
+  t('round 9: "(approx.)" is no exact amount', 'Purchase of AED 50.00 (approx.) at NOON with card 1234', null);
+  t('round 9: "FOR APPROX" is no exact amount', 'Your card 1234 was used FOR APPROX AED 50.00 at NOON', null);
+  t('round 9 control: CANCELLED CAFE is a shop', 'Purchase of AED 50.00 at CANCELLED CAFE with card 1234', { type: 'expense', amountFils: 5000 });
+}
+
+// Wrong-post round 10 (synthetic): a refund noun governs its figure; a
+// conditional/earlier refund never flips; card security footers never cancel.
+{
+  const { setActiveMarket } = require('./build/markets');
+  setActiveMarket('AE');
+  t('round 10: a refund "processed to your card" naming its purchase is income 20',
+    'A refund of AED 20.00 for your purchase of AED 50.00 at NOON has been processed to your card ending 1234.', { type: 'income', amountFils: 2000 });
+  t('round 10: a refund "initiated" posts nothing', 'A refund of AED 20.00 for your purchase of AED 50.00 at NOON has been initiated.', null);
+  t('round 10: a conditional refund footer keeps the purchase',
+    'Purchase of AED 50.00 with card 1234 at NOON. If your purchase is refunded, it will reflect in 5-7 days.', { type: 'expense', amountFils: 5000 });
+  t('round 10: an earlier transaction refunded keeps the purchase',
+    'Purchase of AED 50.00 with card 1234 at NOON, the earlier transaction was refunded', { type: 'expense', amountFils: 5000 });
+  t('round 10 control: a refund paid out keeps its debit', 'Refund of AED 50.00 to NOON debited from your card 1234.', { type: 'expense', amountFils: 5000 });
+  setActiveMarket('SA');
+  t('round 10: "تم إيداع مبلغ استرداد … لعملية الشراء بمبلغ" is income 20', 'تم إيداع مبلغ استرداد 20 ر.س لعملية الشراء بمبلغ 50 ر.س لدى نون', { type: 'income', amountFils: 2000 });
+  t('round 10: "استرداد مبلغ … قيد المعالجة" posts nothing', 'استرداد مبلغ 20 ر.س لعملية الشراء بمبلغ 50 ر.س لدى نون قيد المعالجة', null);
+  t('round 10: a previous purchase refunded keeps this purchase', 'شراء بمبلغ 50 ر.س لدى نون\nعملية شراء سابقة تم استردادها', { type: 'expense', amountFils: 5000 });
+  t('round 10: "بادر بإيقاف بطاقتك او تعليقها" keeps the purchase',
+    'شراء\nمبلغ: 50 ر.س\nلدى: نون\nفي حال عدم معرفتك بالعملية بادر بإيقاف بطاقتك او تعليقها', { type: 'expense', amountFils: 5000 });
+  t('round 10: "لإيقاف البطاقة او تعليقه اتصل" keeps the purchase',
+    'شراء\nمبلغ: 50 ر.س\nلدى: نون\nلإيقاف البطاقة او تعليقه اتصل 8001234567', { type: 'expense', amountFils: 5000 });
+  t('round 10 control: "تم إلغاؤها" after a purchase still cancels', 'عملية شراء بمبلغ 50 ر.س لدى نون تم إلغاؤها', null);
+}
+
+// Wrong-post round 11 (synthetic): refunds not yet arrived, chargeback debits.
+{
+  const { setActiveMarket } = require('./build/markets');
+  setActiveMarket('AE');
+  t('round 11: a refund "under process" posts nothing', 'Refund of AED 125.00 from NOON is under process.', null);
+  t('round 11: a refund "has been initiated to your card" posts nothing', 'Dear Customer, refund of AED 125.00 from NOON has been initiated to your card ending 1234', null);
+  t('round 11: a refund "approved … will reflect" posts nothing', 'Refund of AED 125.00 approved. It will reflect in 5-7 days.', null);
+  t('round 11: a cancelled refund posts nothing', 'Refund of AED 125.00 from NOON has been cancelled.', null);
+  {
+    const p = parseSms('Chargeback of AED 300.00 has been debited from your account 1234.');
+    ok('round 11: a chargeback debited from the account is never income', !p || p.type === 'expense', p && p.type);
+  }
+  t('round 11 control: a refund credited stays income', 'Refund of AED 125.00 from NOON has been credited to your card 1234.', { type: 'income', amountFils: 12500 });
+  t('round 11 control: a chargeback credited stays income', 'Chargeback of AED 300.00 has been credited to your account 1234.', { type: 'income', amountFils: 30000 });
+  t('round 11 control: a refund fee debit stays expense', 'Refund fee of AED 5.00 has been debited from your account 1234.', { type: 'expense', amountFils: 500 });
+  setActiveMarket('SA');
+  t('round 11: "استرداد مبلغ … قيد المعالجة" posts nothing', 'استرداد مبلغ 150.00 ريال قيد المعالجة لدى نون', null);
+  t('round 11: "طلب استرداد … قيد المعالجة" posts nothing', 'طلب استرداد مبلغ 150.00 ريال لدى نون قيد المعالجة', null);
+  t('round 11 control: "تم إيداع مبلغ استرداد" stays income', 'تم إيداع مبلغ استرداد 150.00 ريال لدى نون', { type: 'income', amountFils: 15000 });
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

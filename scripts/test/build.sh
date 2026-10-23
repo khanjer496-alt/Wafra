@@ -80,7 +80,7 @@ for f in types routes format categories custom-categories ledger bill-alias capt
          ledger-money paste-sample backup-validation ledger-export parsed-review-event wallet-near-match review-promotion apple-pay-card-links launch-review-rollout trusted-bank-notification-packages \
          sms-corpus parser-research-contract parser-research founder-pro large-text-figure \
          alert-market-pack-types alert-market-packs.us-eu alert-market-packs.india-me alert-market-packs.world latam-alert-templates \
-         alert-market-packs alert-semantics alert-rollout feedback-wire historical-import ios-history-import \
+         alert-market-packs alert-semantics alert-status-lexicon alert-rollout feedback-wire historical-import ios-history-import \
          ios-bank-senders.generated ios-bank-senders local-message-record ios-apple-pay-record ios-capture-health ios-local-capture ios-notification-replay \
          wafra-assistant wafra-assistant-ai assistant-spending-analysis assistant-patterns home-widget-preferences \
          home-hero home-needs-you home-tilt home-copy \

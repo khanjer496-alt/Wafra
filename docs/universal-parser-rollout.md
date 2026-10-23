@@ -814,3 +814,39 @@ The executable regressions use fictional values in public-source layouts.
 The private research corpus is not posting ground truth or a worldwide accuracy
 benchmark. See `docs/test-evidence/2026-10-11-universal-parser.md` for fresh local
 verification and limits.
+
+## Launch safety round (parser 70)
+
+Status words veto a posting only when they describe this movement. The status
+lexicon (`src/lib/alert-status-lexicon.ts`) covers declined, failed, pending,
+cancelled, reversed, recalled, clawed back, charged back and storno in English,
+French, German, Spanish, Italian, Portuguese, Dutch, the Nordic languages and
+Arabic. A status inside a merchant name, a footer, an offer or advice sentence
+(“to cancel, call…”, “في حال عدم معرفتك بالعملية بادر بإيقاف بطاقتك”, “payments
+can be undone within 30 minutes”) does not cancel a completed purchase.
+
+With two or more amounts the booked one must be proven by its own clause: a
+transaction verb or amount label directly in front of it, a field-list heading,
+or a movement verb after it. Balances, credit limits (`حد ائتماني`, `سقف البطاقة`,
+“credit line”), running totals, budgets, allowances and what is left never become
+the principal, across currencies. When the principal cannot be proven the alert
+goes to Review instead of being dropped; genuine declines, cancellations, OTP,
+promotions and balance-only messages stay silent.
+
+A credit the message says was recalled, reversed or taken back, an approximate
+amount (“about”, “approx.”, “est.”), and a decimal comma after a dot-decimal
+currency sign or code (`$4,50`, `USD 4,50`) go to Review. A refund that has not
+completed (initiated, under process, pending, `قيد المعالجة`) does not post; a
+completed refund of a purchase posts as income even when the purchase amount is
+quoted. Bare `دينار` posts only when the sender proves the market (KFH and NBK
+for Kuwait); other dinars and unproven senders go to Review.
+
+Evidence (local, 23 October 2026): the parser gate's 37 steps pass; synthetic
+launch evaluation books 174/345 Android and 147/345 iPhone History records with 0
+wrong and 0 unexpected; the alert lab reports 0 unsafe; the Gulf review probe set
+reports 0 violations (199 on parser 69). On the private real-format research
+corpus 525 of 1,199 alerts post (462 on parser 69), 295 reach Review and 379 are
+still dropped; this corpus is not posting ground truth or a worldwide accuracy
+claim. Eight independent read-only adversarial reviews were run; remaining
+known gaps are listed in the pull request. Already-saved rows are not repaired
+by this release (`PARSER_BACKFILL_VERSION` stays 50).

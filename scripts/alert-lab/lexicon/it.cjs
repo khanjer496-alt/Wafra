@@ -1,0 +1,100 @@
+'use strict';
+// Italian phrasings (IT/CH). See en.cjs for slots.
+module.exports = {
+  id: 'it',
+  months: ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic'],
+  at24: 'alle',
+  sentence: {
+    purchase: [
+      'Pagamento di {AMT} presso {MER}[ con la tua {INS}][ il {DATE}].',
+      'Hai pagato {AMT} da {MER}[ il {DATE}].',
+      'È stato addebitato un acquisto di {AMT} presso {MER}[ sulla sua {INS}][ il {DATE}].',
+    ],
+    cnp: [
+      'Acquisto online di {AMT} su {MER}[ con la tua {INS}][ il {DATE}].',
+      'Hai effettuato un pagamento online di {AMT} a {MER}[ il {DATE}].',
+      'La sua {INS} è stata usata per un acquisto e-commerce di {AMT} presso {MER}[ il {DATE}].',
+    ],
+    atm: [
+      'Prelievo di {AMT}[ presso ATM {MER}][ con la tua {INS}][ il {DATE}].',
+      'Hai prelevato {AMT} allo sportello[ il {DATE}].',
+      'Prelievo bancomat di {AMT} effettuato con la sua {INS}[ il {DATE}].',
+    ],
+    refund: [
+      'Rimborso di {AMT} da {MER} accreditato[ sulla tua {INS}][ il {DATE}].',
+      '{MER} ti ha rimborsato {AMT}[ il {DATE}].',
+      'Hai ricevuto uno storno di {AMT} da {MER}[ il {DATE}].',
+    ],
+    fee: [
+      'Canone mensile di {AMT} addebitato sul conto[ il {DATE}].',
+      'Commissione di {AMT} addebitata[ il {DATE}].',
+      'Ti abbiamo addebitato {AMT} di commissioni[ il {DATE}].',
+    ],
+    incoming: [
+      'Hai ricevuto {AMT} da {CP}[ il {DATE}].',
+      'Bonifico in entrata di {AMT} da {CP}[ il {DATE}].',
+      'Accredito stipendio di {AMT} da {CP}[ il {DATE}].',
+    ],
+    outgoing: [
+      'Hai inviato {AMT} a {CP}[ il {DATE}].',
+      'Il tuo bonifico di {AMT} a {CP} è stato eseguito[ il {DATE}].',
+      'Bonifico istantaneo di {AMT} a favore di {CP} eseguito[ il {DATE}].',
+    ],
+    bill: [
+      'Addebito diretto SDD di {AMT} da {MER}[ il {DATE}].',
+      'Pagata la bolletta {MER} di {AMT}[ il {DATE}].',
+      '{MER} ha addebitato {AMT} sul tuo conto[ il {DATE}].',
+    ],
+  },
+  headline: {
+    purchase: ['Pagamento: {AMT} presso {MER}[ · {DATE}]', 'Acquisto carta {AMT} - {MER}'],
+    cnp: ['Acquisto online: {AMT} su {MER}[ · {DATE}]'],
+    atm: ['Prelievo: {AMT}[ · {MER}][ · {DATE}]'],
+    refund: ['Rimborso: {AMT} da {MER}[ · {DATE}]'],
+    fee: ['Commissione: {AMT}[ · {DATE}]'],
+    incoming: ['Bonifico ricevuto: {AMT} da {CP}[ · {DATE}]'],
+    outgoing: ['Bonifico inviato: {AMT} a {CP}[ · {DATE}]'],
+    bill: ['Addebito diretto: {AMT} - {MER}[ · {DATE}]'],
+  },
+  push: {
+    purchase: ['{EMO} Hai pagato {AMT} da {MER}', '{EMO} {AMT} da {MER}'],
+    cnp: ['{EMO} Acquisto online di {AMT} su {MER}'],
+    atm: ['{EMO} Hai prelevato {AMT}'],
+    refund: ['{EMO} {MER} ti ha rimborsato {AMT}'],
+    fee: ['{EMO} Commissione di {AMT}'],
+    incoming: ['{EMO} {CP} ti ha inviato {AMT}', '{EMO} Hai ricevuto {AMT} da {CP}'],
+    outgoing: ['{EMO} Hai inviato {AMT} a {CP}'],
+    bill: ['{EMO} Bolletta {MER} pagata: {AMT}'],
+  },
+  fields: {
+    title: { purchase: ['Pagamento con carta'], cnp: ['Acquisto online'], atm: ['Prelievo'], refund: ['Rimborso'], fee: ['Commissione'], incoming: ['Bonifico in entrata'], outgoing: ['Bonifico in uscita'], bill: ['Addebito SDD'] },
+    amount: ['Importo'], merchant: ['Esercente', 'Presso'], place: ['Sportello'], payer: ['Ordinante', 'Da'], payee: ['Beneficiario', 'A'], card: ['Carta', 'Conto'], date: ['Data'],
+  },
+  ins: {
+    card: ['carta che termina con {L4}', 'carta ****{L4}', 'carta di debito *{L4}'],
+    account: ['conto che termina con {L4}', 'conto ****{L4}'],
+  },
+  trailer: {
+    balance: ['Saldo disponibile: {BAL}.', 'Saldo {BAL}'],
+    limit: ['Disponibilità residua: {BAL}'],
+    fraud: ['Non sei stato tu? Chiama il {PHONE}.'],
+    threshold: ['Ricevi questo avviso perché l\'importo supera la soglia di {THR}.'],
+    optout: ['Per disattivare gli avvisi invia STOP.'],
+    link: ['Dettagli: https://{DOMAIN}/avvisi'],
+  },
+  neg: {
+    declined: ['c|Il pagamento di {AMT} presso {MER} è stato rifiutato.', 'x|Il bonifico di {AMT} a {CP} non è andato a buon fine.'],
+    pending: ['c|Preautorizzazione di {AMT} presso {MER} sulla tua {INS}.', 'c|Il pagamento di {AMT} da {MER} è in attesa di contabilizzazione.'],
+    future: ['x|L\'addebito di {AMT} da {MER} avverrà il {DUE}.', 'x|Il bonifico programmato di {AMT} a {CP} sarà eseguito il {DUE}.'],
+    conditional: ["c|Se paghi più di {AMT} presso {MER}, ti invieremo un avviso.", "c|Se {MER} addebita {AMT} senza il tuo consenso, puoi contestarlo entro 60 giorni."],
+    question: ['c|Hai effettuato un pagamento di {AMT} presso {MER}? Rispondi SI o NO.', 'x|Confermi il bonifico di {AMT} a {CP}? Rispondi SI o NO.'],
+    negation: ['x|La bolletta {MER} di {AMT} non è stata pagata.', 'c|{AMT} non sono stati addebitati; il pagamento presso {MER} è stato annullato.'],
+    otp: ['c|Il codice per il pagamento di {AMT} presso {MER} è {OTP}. Non condividerlo.', 'x|Codice {OTP} per autorizzare il bonifico di {AMT} a {CP}.'],
+    promo: ['c|5% di cashback sugli acquisti da {AMT} presso {MER}!', 'a|Prestito personale fino a {AMT}. Richiedilo ora.'],
+    request: ['x|{CP} ti ha chiesto {AMT}.', 'x|Richiesta di pagamento da {CP}: {AMT}.'],
+    statement: ['a|Il tuo estratto conto carta è disponibile: saldo {AMT}, pagamento minimo {MIN} entro il {DUE}.'],
+    balance: ['a|Il saldo del tuo conto è {AMT}.', 'a|Saldo attuale: {AMT}.'],
+    chat: ['a|Ho pagato {AMT} da {MER} per la cena, mi mandi la tua parte?', 'a|Mi fai un bonifico di {AMT} per l\'affitto?'],
+    scam: ['c|Addebito di {AMT} presso {MER} sulla tua {INS}. Non sei tu? Verifica su {URL}', 'a|Il tuo conto è sospeso. Sblocca {AMT} su {URL}'],
+  },
+};

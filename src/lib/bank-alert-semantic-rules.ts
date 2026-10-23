@@ -146,6 +146,28 @@ const VERIFICATION_CHALLENGE =
   /\b(?:did|have)\s+you\s+(?:recently\s+)?(?:attempt|attempted|make|made|try|tried|authori[sz]e|authori[sz]ed|initiate|initiated|use|used)\b[^.?!\n]{0,60}?(?:\b(?:transaction|purchase|payment|charge|withdrawal|transfer)\b|\b[A-Z]{3}\s?\d|\d[\d,]*\.\d{2})|\bwas\s+(?:this|that|it)\s+(?:transaction\s+)?(?:you|yours)\b|\breply\s+(?:with\s+)?(?:"|')?(?:yes|y)(?:"|')?\s+if\s+(?:you\s+(?:made|did|authori[sz]ed|recogni[sz]e)|(?:it|this|that)\s+was\s+(?:you|yours))\b|\breply\s+(?:with\s+)?(?:"|')?(?:yes|y)(?:"|')?\s*(?:or|\/|,)\s*(?:"|')?(?:no|n)(?:"|')?\b(?=[^.?!\n]{0,80}?\b(?:if\s+you\s+(?:made|did|authori[sz]ed|recogni[sz]e)|to\s+confirm|confirm(?:ing)?\s+(?:this|the|it)|was\s+(?:this|it)\s+you|genuine|fraud)\b)|\b(?:to\s+confirm|confirm(?:ing)?\s+(?:this|the|it)|if\s+you\s+(?:made|did|authori[sz]ed|recogni[sz]e)|was\s+(?:this|it)\s+you|genuine|fraud)\b[^.?!\n]{0,80}?\breply\s+(?:with\s+)?(?:"|')?(?:yes|y)(?:"|')?\s*(?:or|\/|,)\s*(?:"|')?(?:no|n)(?:"|')?\b|(?:^|[^\p{L}\p{M}])هل\s+(?:قمت|أجريت|حاولت|استخدمت)(?=$|[^\p{L}\p{M}])/iu;
 
 /**
+ * A security footer phrased as a question and glued to the alert without a
+ * full stop: "… On 2026-09-09:19:20:15 Not You? To Block call …", "Don't
+ * recognise it?". Such a "?" does not question the movement before it.
+ */
+const FOOTER_QUESTION =
+  /\b(?:not\s+(?:you|u)|wasn['’]t\s+you|was\s+not\s+you|not\s+(?:done|made|authori[sz]ed)\s+by\s+you|(?:don['’]t|do\s+not|didn['’]t|did\s+not)\s+recogni[sz]e(?:\s+(?:it|this(?:\s+\w+)?))?|(?:didn['’]t|did\s+not)\s+make\s+(?:it|this(?:\s+\w+)?)|(?:any\s+)?questions|need\s+help)\s*$/iu;
+
+/**
+ * True when the text before a "?" ends with such a footer question that is its
+ * own clause: it starts with a capital ("… DMART Not You?") and is not joined
+ * to the movement by a comma, "or" or "really" ("…, didn't make this?", "… or
+ * was it not you?"), which questions the movement itself. Pass the text in
+ * its original case.
+ */
+export const endsWithFooterQuestion = (textBeforeQuestionMark: string): boolean => {
+  const match = FOOTER_QUESTION.exec(textBeforeQuestionMark);
+  if (!match) return false;
+  const before = textBeforeQuestionMark.slice(0, match.index);
+  return /^\p{Lu}/u.test(match[0]) && !/(?:[,;]|\b(?:or|and|really|it|this|that))\s*$/iu.test(before);
+};
+
+/**
  * True when the bank is ASKING whether the customer made a transaction.
  *
  * Both the market-pack path (`alert-semantics.ts`) and the market-agnostic one

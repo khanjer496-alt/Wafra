@@ -1,0 +1,5 @@
+{
+  "_comment": "Ratchet for scripts/test/repair/alert-lab.test.cjs: every WRONG/FALSE-POST/ERROR case the fixed alert-lab gate sample (scripts/alert-lab/gate.cjs) produced on clean origin/main 2705b987 (round 3: 36 negative kinds). Delete entries as the parser is fixed and lower KNOWN_UNSAFE_CEILING in the test with them; never add entries to make the gate pass. Bodies are generated synthetic text with fictional values.",
+  "sampleHash": "1c2c6a46fbc6c111",
+  "cases": []
+}

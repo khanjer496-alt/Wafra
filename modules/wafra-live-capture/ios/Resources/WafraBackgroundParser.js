@@ -1,14 +1,43 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 0fd81b2831ed5cf4e21bf005119262e1bcdb93c123d6ed0a38a1f80ae2fa3c13
+// Generated from normal shipping TypeScript. Source SHA-256: 582b5cf878e0c85bf9bcf190c3ae4d1a5ff360cd56998c0bcb368290b75ba69a
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ALERT_DRAFT_VERSION = void 0;
+exports.FOLD_UNSAFE = exports.rememberDuringInspection = exports.withAlertInspectionMemo = exports.ALERT_DRAFT_VERSION = void 0;
 exports.normalizeAlertText = normalizeAlertText;
 exports.inspectAlertDraft = inspectAlertDraft;
 const currency_metadata_1 = require("@/lib/currency-metadata");
 exports.ALERT_DRAFT_VERSION = 1;
+let inspectionMemo = null;
+let inspectionMemoDepth = 0;
+const withAlertInspectionMemo = (run) => {
+    if (inspectionMemoDepth === 0)
+        inspectionMemo = new Map();
+    inspectionMemoDepth += 1;
+    try {
+        return run();
+    }
+    finally {
+        inspectionMemoDepth -= 1;
+        if (inspectionMemoDepth === 0)
+            inspectionMemo = null;
+    }
+};
+exports.withAlertInspectionMemo = withAlertInspectionMemo;
+const rememberDuringInspection = (owner, key, compute) => {
+    if (!inspectionMemo)
+        return compute();
+    let table = inspectionMemo.get(owner);
+    if (!table)
+        inspectionMemo.set(owner, table = new Map());
+    if (table.has(key))
+        return table.get(key);
+    const value = compute();
+    table.set(key, value);
+    return value;
+};
+exports.rememberDuringInspection = rememberDuringInspection;
 const DIGIT_ZEROES = [0x0660, 0x06f0, 0x0966, 0x09e6, 0x0e50, 0x1040, 0xff10];
 function normalizeAlertText(source) {
     let out = '';
@@ -40,6 +69,7 @@ function normalizeAlertText(source) {
     return out;
 }
 const DOT_GROUPING_CURRENCIES = new Set(['IDR', 'COP']);
+const COMMA_GROUPING_CURRENCIES = new Set(['IQD']);
 function parseNumber(source, exponent, currency = '', dotDecimal = false) {
     let value = source.trim().replace(/[+]/g, '');
     const negative = value.startsWith('-');
@@ -93,9 +123,12 @@ function parseNumber(source, exponent, currency = '', dotDecimal = false) {
         const locations = [...value.matchAll(new RegExp(`\\${separator}`, 'g'))].map((m) => m.index);
         const last = locations[locations.length - 1];
         const tail = value.length - last - 1;
-        if (locations.length === 1 && exponent > 0 && tail > 0 && tail <= exponent) {
+        if (separator === ',' && COMMA_GROUPING_CURRENCIES.has(currency) && validGroupedInteger(value, separator)) {
+        }
+        else if (locations.length === 1 && exponent > 0 && tail > 0 && tail <= exponent) {
             decimalAt = last;
-            ambiguous = exponent === 3 && tail === 3 && !(dotDecimal && separator === '.');
+            const groupable = /^\d{1,3}$/.test(value.slice(0, last));
+            ambiguous = exponent === 3 && tail === 3 && groupable && !(dotDecimal && separator === '.');
         }
         else if (exponent === 3 && tail === 3 &&
             validGroupedInteger(value.slice(0, last), separator)) {
@@ -144,6 +177,8 @@ const escapeRe = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const SYMBOL_PATTERN = SYMBOLS.map(escapeRe).join('|');
 const SYMBOL_PREFIX = new RegExp(`(${SYMBOL_PATTERN})${TOKEN_GAP}(${NUMBER})`, 'g');
 const SYMBOL_SUFFIX = new RegExp(`(${NUMBER})${TOKEN_GAP}(${SYMBOL_PATTERN})`, 'g');
+const CAPITAL_UNITS = new Set(['KR', 'ZŁ', 'KČ']);
+const WORD_SYMBOLS = new Set(SYMBOLS.filter((token) => /^[\p{Script=Arabic}]/u.test(token) || ['kr', 'KR', 'zł', 'ZŁ', 'Kč', 'KČ'].includes(token)));
 const aliasPatterns = new Map();
 const aliasPatternPair = (pattern) => {
     const cached = aliasPatterns.get(pattern);
@@ -158,10 +193,17 @@ const aliasPatternPair = (pattern) => {
     aliasPatterns.set(pattern, pair);
     return pair;
 };
+exports.FOLD_UNSAFE = /[\u00b5\u017f\u0345\u0390\u03a3\u03b0\u03c2\u03d0\u03d1\u03d5\u03d6\u03f0\u03f1\u03f5\u1c80-\u1c88\u1e9b\u1fbe\u1fd3\u1fe3\ufb05\ufb06]/u;
+const lowerText = (text) => (0, exports.rememberDuringInspection)(lowerText, text, () => text.toLowerCase());
 const collectAliasRaw = (normalized, aliases) => {
     const tokens = Object.keys(aliases).sort((a, b) => b.length - a.length);
     if (!tokens.length)
         return [];
+    if (!exports.FOLD_UNSAFE.test(normalized) && !tokens.some((token) => exports.FOLD_UNSAFE.test(token))) {
+        const lower = lowerText(normalized);
+        if (!tokens.some((token) => lower.includes(token.toLowerCase())))
+            return [];
+    }
     const currenciesByToken = new Map(tokens.map((token) => [token.toLowerCase(), aliases[token]]));
     const pattern = tokens.map(escapeRe).join('|');
     const [prefix, suffix] = aliasPatternPair(pattern);
@@ -210,6 +252,8 @@ function collectRaw(normalized, aliases = {}) {
             });
         }
     };
+    const letters = normalized.match(/\p{L}/gu) ?? [];
+    const shouting = letters.length > 0 && letters.filter((letter) => /\p{Lu}/u.test(letter)).length / letters.length > 0.8;
     const scanSymbol = (re, prefix) => {
         re.lastIndex = 0;
         for (const match of normalized.matchAll(re)) {
@@ -227,7 +271,12 @@ function collectRaw(normalized, aliases = {}) {
             if (prefix && token.endsWith('$') && match.index > 0 &&
                 /[A-Za-z]/.test(normalized[match.index - 1]))
                 continue;
+            if (prefix && WORD_SYMBOLS.has(token) && match.index > 0 &&
+                /[\p{L}\p{M}\p{N}]/u.test(normalized[match.index - 1]))
+                continue;
             if (token === 'جنيه' && /^\s*[اإأ]?سترلين/u.test(normalized.slice(matchEnd)))
+                continue;
+            if (CAPITAL_UNITS.has(token) && !shouting)
                 continue;
             found.push({
                 start: match.index,
@@ -239,20 +288,38 @@ function collectRaw(normalized, aliases = {}) {
             });
         }
     };
-    scanIso(ISO_PREFIX, true);
-    scanIso(ISO_SUFFIX, false);
+    const [iso, symbols] = (0, exports.rememberDuringInspection)(collectRaw, normalized, () => {
+        scanIso(ISO_PREFIX, true);
+        scanIso(ISO_SUFFIX, false);
+        const isoFound = found.splice(0);
+        scanSymbol(SYMBOL_PREFIX, true);
+        scanSymbol(SYMBOL_SUFFIX, false);
+        return [isoFound, found.splice(0)];
+    });
+    found.push(...iso);
     found.push(...collectAliasRaw(normalized, aliases));
-    scanSymbol(SYMBOL_PREFIX, true);
-    scanSymbol(SYMBOL_SUFFIX, false);
+    found.push(...symbols);
     const clock = (item) => (normalized[item.end] === ':' && /\d/.test(normalized[item.end + 1] ?? '')) ||
         (normalized[item.start - 1] === ':' && /\d/.test(normalized[item.start - 2] ?? ''));
     const sorted = found
         .filter((item) => !clock(item))
         .sort((a, b) => a.start - b.start || b.end - a.end)
         .filter((item, index, all) => !all.slice(0, index).some((prior) => prior.start === item.start && prior.end === item.end));
-    return sorted.filter((item) => item.evidence === 'iso-code' || !sorted.some((other) => other.evidence === 'iso-code' && other.start < item.end && item.start < other.end &&
-        other.amount.replace(/[^\d]/g, '') === item.amount.replace(/[^\d]/g, '') &&
-        item.currencies.includes(other.currencies[0])));
+    const sameFigure = (a, b) => a.start < b.end && b.start < a.end && a.amount.replace(/[^\d]/g, '') === b.amount.replace(/[^\d]/g, '');
+    const kept = [];
+    for (const item of sorted) {
+        if (item.evidence !== 'iso-code' && sorted.some((other) => other.evidence === 'iso-code' && sameFigure(item, other) &&
+            item.currencies.includes(other.currencies[0])))
+            continue;
+        const twin = item.evidence === 'iso-code' ? undefined : kept.find((other) => other.evidence !== 'iso-code' &&
+            sameFigure(item, other) && other.currencies.join() === item.currencies.join());
+        if (twin) {
+            twin.end = Math.max(twin.end, item.end);
+            continue;
+        }
+        kept.push({ ...item });
+    }
+    return kept;
 }
 const HARD_NEGATIVES = [
     ['authentication-or-otp', /\b(?:otp|one[ -]?time password|verification code|authorization code|security code|do not share|pin)\b|رمز (?:التحقق|التأكيد)|كلمة المرور/i],
@@ -264,11 +331,12 @@ const HARD_NEGATIVES = [
 const MOVEMENT_WORDS = /\b(?:spent|purchase|purchased|paid|charged|debited|credited|received|sent|withdrawn|deposited|refund|reversal|transfer)\b|شراء|خصم|إيداع|تحويل|استرداد/i;
 const BALANCE_ONLY = /\b(?:available balance|current balance|available limit|credit limit|outstanding balance)\b|الرصيد (?:الحالي|المتاح)|الحد (?:المتاح|الائتماني)/i;
 function inspectAlertDraft(source, context = {}) {
-    const normalizedText = normalizeAlertText(source.slice(0, 4096));
-    const reasons = HARD_NEGATIVES.filter(([, pattern]) => pattern.test(normalizedText)).map(([reason]) => reason);
+    const head = source.slice(0, 4096);
+    const normalizedText = (0, exports.rememberDuringInspection)(normalizeAlertText, head, () => normalizeAlertText(head));
+    const reasons = [...(0, exports.rememberDuringInspection)(HARD_NEGATIVES, normalizedText, () => HARD_NEGATIVES.filter(([, pattern]) => pattern.test(normalizedText)).map(([reason]) => reason))];
     if (source.length > 4096)
         reasons.push('input-too-long');
-    if (BALANCE_ONLY.test(normalizedText) && !MOVEMENT_WORDS.test(normalizedText))
+    if ((0, exports.rememberDuringInspection)(BALANCE_ONLY, normalizedText, () => BALANCE_ONLY.test(normalizedText) && !MOVEMENT_WORDS.test(normalizedText)))
         reasons.push('balance-only');
     const candidates = [];
     const rawCandidates = collectRaw(normalizedText, context.currencyAliases);
@@ -656,7 +724,8 @@ const INSTITUTIONS = {
         { institution: 'nu-colombia', senders: ['nucolombia'], body: /\bnu\s+colombia\b/iu },
     ],
     PE: [
-        { institution: 'bcp', senders: ['bcp', 'viabcp'], bodyBoundSenders: ['19896'], body: /\bbcp\b|\bbanco\s+de\s+cr[eé]dito\s+del\s+per[uú](?=$|[^\p{L}\p{N}])/iu },
+        { institution: 'bcp', senders: ['bcp', 'viabcp'], bodyBoundSenders: ['19896'], body: /\bbcp\b|\bbanco\s+de\s+cr[eé]dito\s+del\s+per[uú](?=$|[^\p{L}\p{N}])/iu,
+            disqualifier: /\bmillennium\s*bcp\b/iu },
         { institution: 'yape', senders: ['yape'], body: /\byape\b/iu },
         { institution: 'interbank', senders: ['interbank'], body: /\binterbank\b(?=[\s\S]{0,240}(?:S\/\.?\s?\d|\bPEN\b|\bper[uú](?![\p{L}])))|(?:S\/\.?\s?\d|\bPEN\b|\bper[uú](?![\p{L}]))[\s\S]{0,240}\binterbank\b/iu },
         { institution: 'plin', senders: ['plin'], body: /\bplin\b/iu },
@@ -668,6 +737,14 @@ const INSTITUTIONS = {
         { institution: 'ocbc-singapore', senders: ['ocbc', 'ocbcsg'], body: /\bocbc(?: bank)?\b/iu },
         { institution: 'uob-singapore', senders: ['uob', 'uobsg'], body: /\buob(?: bank)?\b/iu },
     ],
+    PT: [],
+    PL: [],
+    SE: [],
+    DK: [],
+    NO: [],
+    CZ: [],
+    IQ: [],
+    LB: [],
 };
 const TEMPLATE_RULES = [
     { template: 'authentication', pattern: /\b(?:otp|one[ -]?time password|verification code|security code)\b|رمز (?:التحقق|التأكيد)/iu },
@@ -792,14 +869,16 @@ const alert_semantics_1 = require("@/lib/alert-semantics");
 const markets_1 = require("@/lib/markets");
 const UNIVERSAL_MARKETS = [
     'US', 'GB', 'FR', 'DE', 'ES', 'IT', 'NL', 'IN', 'QA', 'KW', 'BH', 'OM', 'EG', 'JO',
-    'CA', 'AU', 'BR', 'MX', 'SG', 'CO', 'PE',
+    'CA', 'AU', 'BR', 'MX', 'SG', 'CO', 'PE', 'PT', 'PL', 'SE', 'DK', 'NO', 'CZ',
+    'IQ', 'LB',
 ];
 const ALL_MARKETS = ['AE', 'SA', ...UNIVERSAL_MARKETS];
 const MARKET_CURRENCY = {
     AE: 'AED', SA: 'SAR', US: 'USD', GB: 'GBP', FR: 'EUR', DE: 'EUR', ES: 'EUR',
     IT: 'EUR', NL: 'EUR', IN: 'INR', QA: 'QAR', KW: 'KWD', BH: 'BHD', OM: 'OMR',
     EG: 'EGP', JO: 'JOD', CA: 'CAD', AU: 'AUD', BR: 'BRL', MX: 'MXN', SG: 'SGD',
-    CO: 'COP', PE: 'PEN',
+    CO: 'COP', PE: 'PEN', PT: 'EUR', PL: 'PLN', SE: 'SEK', DK: 'DKK', NO: 'NOK', CZ: 'CZK',
+    IQ: 'IQD', LB: 'LBP',
 };
 const GRAMMAR_MARKERS = {
     IN: /\b(?:upi|imps|neft|rtgs|aeps|nach)\b|₹|रु(?:पये)?/iu,
@@ -839,7 +918,7 @@ const regionMarket = (hint) => {
         : null;
 };
 const currencyMarkets = (source) => {
-    const codes = new Set(source.slice(0, 4096).toUpperCase().match(/\b(?:AED|SAR|USD|GBP|EUR|INR|QAR|KWD|BHD|OMR|EGP|JOD|CAD|AUD|BRL|MXN|SGD)\b|\b(?:COP|PEN)(?=\s?\d)|(?<=\d\s?)(?:COP|PEN)\b/g) ?? []);
+    const codes = new Set(source.slice(0, 4096).toUpperCase().match(/\b(?:AED|SAR|USD|GBP|EUR|INR|QAR|KWD|BHD|OMR|EGP|JOD|CAD|AUD|BRL|MXN|SGD|PLN|SEK|DKK|CZK|IQD|LBP)\b|\b(?:COP|PEN|NOK)(?=\s?\d)|(?<=\d\s?)(?:COP|PEN|NOK)\b/g) ?? []);
     const markets = new Set();
     for (const market of ALL_MARKETS) {
         if (codes.has(MARKET_CURRENCY[market]))
@@ -995,10 +1074,21 @@ exports.alertMarketPack = void 0;
 const alert_market_packs_india_me_1 = require("@/lib/alert-market-packs.india-me");
 const alert_market_packs_us_eu_1 = require("@/lib/alert-market-packs.us-eu");
 const alert_market_packs_world_1 = require("@/lib/alert-market-packs.world");
+const MENA_REGISTRY_PACKS = {
+    IQ: {
+        market: 'IQ', currencies: ['IQD'], currencyAliases: {},
+        rails: [], transferTerms: [], utilityTerms: [], recurringTerms: [],
+    },
+    LB: {
+        market: 'LB', currencies: ['LBP', 'USD'], currencyAliases: {},
+        rails: [], transferTerms: [], utilityTerms: [], recurringTerms: [],
+    },
+};
 const ALERT_MARKET_PACKS = {
     ...alert_market_packs_us_eu_1.US_EU_ALERT_MARKET_PACKS,
     ...alert_market_packs_india_me_1.INDIA_ME_ALERT_MARKET_PACKS,
     ...alert_market_packs_world_1.WORLD_ALERT_MARKET_PACKS,
+    ...MENA_REGISTRY_PACKS,
 };
 const alertMarketPack = (market) => ALERT_MARKET_PACKS[market];
 exports.alertMarketPack = alertMarketPack;
@@ -1007,6 +1097,47 @@ exports.alertMarketPack = alertMarketPack;
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.INDIA_ME_ALERT_MARKET_PACKS = void 0;
+const CARD_USED_FOR = {
+    postedTerms: ['has been used for'],
+    debitTerms: ['has been used for'],
+    purchaseTerms: ['has been used for', 'was used for'],
+};
+const OWN_ACCOUNT_MOVE = [
+    'حسابك الآخر', 'حسابك الاخر', 'حسابكم الآخر', 'حسابكم الاخر', 'بين حساباتك', 'بين حساباتكم', 'صادرة', 'صادره',
+];
+const NOT_YET_POSTED = [
+    'if your card', 'if your debit card', 'if your credit card', 'if your prepaid card', 'if your account',
+    'if your a/c', 'in case your card', 'in case your account', 'should your card', 'should your account',
+    'will be approved', 'will be used',
+    'إذا تم', 'اذا تم', 'وإذا تم', 'واذا تم', 'إذا ما تم', 'اذا ما تم', 'إذا تمت', 'اذا تمت', 'في حال تم',
+    'في حالة تم', 'في حاله تم', 'في حال تمت', 'لو تم', 'لو تمت', 'هل تم', 'هل تمت',
+];
+const NOT_A_POSTING = [
+    'على سبيل المثال', 'علي سبيل المثال', 'مثال:', 'for example', 'example:', 'sample alert',
+    'مثلاً:', 'مثلا:', 'نموذج:', 'يرجى تأكيد', 'يرجي تاكيد', 'بالرد بنعم', 'هل تؤكد', 'هل أنت من قام', 'هل انت من قام',
+    'ما تم خصم المبلغ', 'ما تم خصم مبلغ', 'لن يتم خصم المبلغ', 'لن يتم خصم مبلغ', 'تعذر خصم', 'قد يتم خصم المبلغ', 'قد يتم خصم مبلغ', 'يبدو أنه تم', 'يبدو انه تم', 'please verify', "couldn't be completed",
+    'مثلاً -', 'مثلاً –', 'مثلا -', 'مثلا –', 'مثال |', 'مثال\n', 'نموذج |', 'نموذج\n', 'sample alert.', 'example: a',
+    'verify at', 'secure your card:', 'قيد المعالجة',
+    'ربما تم', 'قد يكون تم', 'may have been', 'might have been',
+    'ألست أنت', 'الست انت', 'أم لم تكن أنت', 'ام لم تكن انت', 'or was it not you', 'or did you not make it',
+    'بانتظار موافقتك', 'requires approval', 'waiting for your approval', 'may appear on your', 'for card verification',
+    'خاضعة للتسوية', 'خاضعه للتسويه',
+    'تم بلوغ الحد', 'limit reached', 'limit applies', 'are available with your new card',
+    'charged nothing', 'nothing was charged', 'لم يتم خصم أي مبلغ', 'لم يتم خصم اي مبلغ',
+    'ارتدت', 'sent back to you', 'bounced back', 'reported as fraud', 'كعملية احتيال', 'returned to sender',
+    'enroll to receive', 'enrol to receive', 'accept within', 'هل تقبله',
+    'is being sent', 'has not arrived', 'جارٍ إرسال', 'جار إرسال', 'جاري إرسال', 'جار ارسال', 'جاري ارسال', 'لم تصل حوالتك', 'لم تصل الحوالة', 'لم يصل المبلغ',
+    'إذا قمت بعملية شراء بأكثر من', 'اذا قمت بعملية شراء باكثر من', 'إذا قمت بعملية شراء باكثر من',
+    'تحويل بين حساباتك', 'from your savings account into your',
+    'وصلتك فاتورة', 'new bill received', 'received a new bill',
+    'renews tomorrow', 'your subscription will renew on', 'will be renewed on', 'free trial ends', 'تنتهي الفترة التجريبية',
+    'تم خصم أكثر من', 'تم خصم اكثر من', 'عملية شراء بأكثر من', 'عملية شراء باكثر من', 'charged more than',
+    'purchase of more than', 'transactions above',
+    'visa card payment', 'mastercard card payment', 'credit card payment', 'mastercard abrechnung',
+    'to your isa', 'from your isa', 'من savings account',
+];
+const PAYEE_RECEIVED_YOURS = ['has received your', 'have received your', 'received your transfer'];
+const ME_NOT_POSTED = [...NOT_YET_POSTED, ...NOT_A_POSTING];
 exports.INDIA_ME_ALERT_MARKET_PACKS = {
     IN: {
         market: 'IN', currencies: ['INR'], currencyAliases: { 'Rs.': ['INR'], Rs: ['INR'] },
@@ -1022,40 +1153,70 @@ exports.INDIA_ME_ALERT_MARKET_PACKS = {
     QA: {
         market: 'QA', currencies: ['QAR'], currencyAliases: { 'ر.ق': ['QAR'], 'ريال قطري': ['QAR'], QR: ['QAR'] },
         rails: ['fawran', 'tahweel', 'qmp', 'naps', 'qpay'],
-        transferTerms: ['transfer', 'تحويل'],
+        transferTerms: ['transfer', 'تحويل', 'fawran'],
         utilityTerms: ['electricity bill', 'water bill', 'telecom bill', 'فاتورة كهرباء', 'فاتورة مياه', 'فاتورة هاتف'],
         recurringTerms: ['recurring', 'متكرر', 'متكررة'],
+        futureTerms: ME_NOT_POSTED,
+        ...CARD_USED_FOR,
+        debitTerms: [...CARD_USED_FOR.debitTerms, ...PAYEE_RECEIVED_YOURS],
     },
     KW: {
         market: 'KW', currencies: ['KWD'], currencyAliases: { KD: ['KWD'], 'د.ك': ['KWD'], 'دينار كويتي': ['KWD'] },
         dotDecimalCurrencies: ['KWD'],
-        rails: ['wamd', 'wamdh', 'knet'], transferTerms: ['transfer', 'تحويل'],
+        rails: ['wamd', 'wamdh', 'knet'], transferTerms: ['transfer', 'تحويل', 'wamd'],
         utilityTerms: ['electricity bill', 'water bill', 'telecom bill', 'فاتورة كهرباء', 'فاتورة مياه', 'فاتورة هاتف'], recurringTerms: ['recurring', 'متكرر', 'متكررة'],
+        refundTerms: ['تم إرجاع مبلغ', 'تم ارجاع مبلغ'],
+        futureTerms: ME_NOT_POSTED,
+        debitTerms: PAYEE_RECEIVED_YOURS,
     },
     BH: {
         market: 'BH', currencies: ['BHD'], currencyAliases: { BD: ['BHD'], 'د.ب': ['BHD'], 'دينار بحريني': ['BHD'] },
         dotDecimalCurrencies: ['BHD'],
         rails: ['fawri+', 'fawri', 'fawateer', 'benefitpay', 'efts'],
-        transferTerms: ['transfer', 'تحويل'],
+        transferTerms: ['transfer', 'تحويل', 'fawri'],
         utilityTerms: ['electricity bill', 'water bill', 'telecom bill', 'فاتورة كهرباء', 'فاتورة مياه', 'فاتورة هاتف'],
         recurringTerms: ['recurring', 'متكرر', 'متكررة'],
+        futureTerms: ME_NOT_POSTED,
+        debitTerms: PAYEE_RECEIVED_YOURS,
     },
     OM: {
         market: 'OM', currencies: ['OMR'], currencyAliases: { RO: ['OMR'], 'R.O.': ['OMR'], 'ر.ع': ['OMR'], 'ريال عماني': ['OMR'] },
         dotDecimalCurrencies: ['OMR'],
         rails: ['omannet', 'mp-clear', 'mpcss', 'ach'], transferTerms: ['transfer', 'تحويل'],
         utilityTerms: ['electricity bill', 'water bill', 'telecom bill', 'فاتورة كهرباء', 'فاتورة مياه', 'فاتورة هاتف'], recurringTerms: ['recurring', 'متكرر', 'متكررة'],
+        postedTerms: [...CARD_USED_FOR.postedTerms, 'تم استخدام بطاقتكم', 'تم استخدام بطاقتك'],
+        debitTerms: [...CARD_USED_FOR.debitTerms, 'تم استخدام بطاقتكم', 'تم استخدام بطاقتك', ...PAYEE_RECEIVED_YOURS],
+        purchaseTerms: [...CARD_USED_FOR.purchaseTerms, 'تم استخدام بطاقتكم', 'تم استخدام بطاقتك'],
+        futureTerms: ME_NOT_POSTED,
     },
     EG: {
         market: 'EG', currencies: ['EGP'], currencyAliases: { LE: ['EGP'], 'L.E.': ['EGP'], 'ج.م': ['EGP'] },
-        rails: ['instapay', 'ipn', 'meeza'], transferTerms: ['transfer', 'تحويل'],
+        rails: ['instapay', 'ipn', 'meeza'],
+        transferTerms: ['transfer', 'تحويل', 'successfully transferred'],
         utilityTerms: ['electricity bill', 'water bill', 'gas bill', 'mobile bill', 'فاتورة كهرباء', 'فاتورة مياه', 'فاتورة غاز', 'فاتورة هاتف'], recurringTerms: ['recurring', 'متكرر', 'متكررة'],
+        postedTerms: [
+            'successfully transferred', 'تم استلام مبلغ', 'تم تنفيذ تحويل', 'تم إضافة تحويل', 'تم اضافة تحويل',
+            'تم اضافه تحويل',
+        ],
+        futureTerms: [...ME_NOT_POSTED, 'to be transferred', 'سيتم تحويل'],
+        debitTerms: [
+            'you have successfully transferred', 'you have transferred', 'من حسابك', 'من حسابكم', ...OWN_ACCOUNT_MOVE,
+            'had a successful transaction of', ...PAYEE_RECEIVED_YOURS,
+        ],
+        creditTerms: [
+            'تم استلام مبلغ', 'إلى حسابك', 'الى حسابك', 'إلى حسابكم', 'الى حسابكم', 'تم إضافة تحويل', 'تم اضافة تحويل',
+            'تم اضافه تحويل', 'تم إيداع', 'تم ايداع', ...OWN_ACCOUNT_MOVE,
+        ],
+        cashTerms: ['الصراف الآلي', 'الصراف الالي'],
+        purchaseTerms: ['had a successful transaction of'],
     },
     JO: {
-        market: 'JO', currencies: ['JOD'], currencyAliases: { JD: ['JOD'], 'د.أ': ['JOD'] },
+        market: 'JO', currencies: ['JOD'], currencyAliases: { JD: ['JOD'], 'د.أ': ['JOD'], 'دينار': ['JOD'], 'دينار أردني': ['JOD'], 'دينار اردني': ['JOD'] },
         dotDecimalCurrencies: ['JOD'],
-        rails: ['cliq', 'efawateercom', 'jomopay', 'ach'], transferTerms: ['transfer', 'تحويل'],
+        rails: ['cliq', 'efawateercom', 'jomopay', 'ach'], transferTerms: ['transfer', 'تحويل', 'cliq'],
         utilityTerms: ['electricity bill', 'water bill', 'telecom bill', 'فاتورة كهرباء', 'فاتورة مياه', 'فاتورة هاتف'], recurringTerms: ['recurring', 'متكرر', 'متكررة'],
+        futureTerms: ME_NOT_POSTED,
+        debitTerms: PAYEE_RECEIVED_YOURS,
     },
 };
 },
@@ -1080,50 +1241,791 @@ exports.US_EU_ALERT_MARKET_PACKS = {
     },
     FR: {
         market: 'FR', currencies: ['EUR'], currencyAliases: {},
-        rails: ['sepa'], transferTerms: ['virement'],
+        rails: ['sepa'],
+        transferTerms: [
+            'virement', 'vous a envoyé', 'vous a versé', 'vous avez envoyé', 'virement émis', 'a été crédité',
+            'vous avez reçu',
+        ],
         utilityTerms: ['électricité', 'gaz', 'eau', 'téléphone'],
         recurringTerms: ['récurrent', 'abonnement'],
-        postedTerms: ['débité', 'crédité', 'effectué', 'payé', 'payée'],
-        failedTerms: ['refusé', 'rejeté', 'échoué', 'non payé', 'non payée', 'pas été payé', 'pas été payée'],
-        futureTerms: ['sera débité', 'sera crédité', 'à venir'],
-        debitTerms: ['débité', 'payé', 'payée'], creditTerms: ['crédité'],
+        postedTerms: ['a été prélevée de',
+            'débité', 'débitée', 'crédité', 'créditée', 'effectué', 'effectuée', 'payé', 'payée',
+            'a ete debite', 'a ete credite', 'prélevé', 'prélevée', 'prélevés', 'prélevées',
+            'reçu', 'reçue', 'vous a envoyé', 'vous a versé', 'a été traité', 'a été traitée',
+            'exécuté', 'exécutée', 'réalisation de votre virement',
+            'vous a remboursé', 'payés', 'payées', 'vous avez retiré', 'vous avez envoyé',
+            'ont été prélevés', 'a été effectué',
+            'a prélevé', 'a été payée', 'a été crédité',
+        ],
+        failedTerms: [
+            'refusé', 'refusée', 'rejeté', 'rejetée', 'échoué', 'échouée', 'non payé', 'non payée',
+            'pas été payé', 'pas été payée', 'non effectué', 'non effectuée', 'non abouti', 'non aboutie',
+            'annulé', 'annulée', 'impayé', 'impayée', 'provision insuffisante', 'solde insuffisant',
+            'non reçu', 'code de confirmation', 'code de validation', 'ne le communiquez',
+            "n'a pu", "n’a pu", "n'a pas pu", "n’a pas pu", "n'ont pu", "n'ont pas pu", "n'a pas été",
+            "n’a pas été", 'pas été effectué', 'pas été exécuté',
+            "n'a été", 'n’a été', 'aucun montant', 'aucune somme', 'aucun débit',
+            'plafond journalier atteint', 'plafond atteint', 'atteint',
+            'fraude', 'signalé comme', 'signalée comme', 'contesté', 'contestée',
+            'bloqué', 'bloquée',
+        ],
+        futureTerms: [
+            'sera débité', 'sera crédité', 'à venir', 'sera prélevé', 'sera prélevée', 'sera effectué',
+            'sera effectuée', 'sera versé', 'en attente', 'en cours', 'prévu', 'prévue', 'programmé',
+            'programmée', 'vous demande', 'demande de paiement', "demande d'argent", 'si vous',
+            'lorsque', 'dès que', 'avez-vous', 'est-ce vous', 'confirmez', 'veuillez confirmer',
+            'pré-autorisation', 'empreinte',
+            'prochain', 'prochaine', 'remise', 'profitez',
+            'par exemple', 'exemple :', 'exemple:', 'pour le recevoir', 'pour recevoir', 'créez votre compte',
+            'demande de remboursement', 'en cours de traitement',
+            'autorisé', 'autorisée', 'à votre carte de crédit', 'sur votre carte de crédit',
+            'peut-être', 'éventuellement', 'il est possible', 'notification exemple', "exemple d'alerte",
+            'exemple de notification',
+            "possible jusqu'à", 'par jour', 'nouvelle facture', 'à payer avant',
+            'seront', 'vont être', 'va être',
+            'autorisation', 'pré-autorisation', 'préautorisation', 'à valider', 'à confirmer',
+            'débit différé', 'à compter du',
+            'a reçu votre', 'ont reçu votre', 'vers votre livret', 'sur votre livret', 'le plus tôt possible',
+            'dès que possible',
+        ],
+        debitTerms: ['a été prélevée de',
+            'débité', 'débitée', 'a ete debite', 'payé', 'payée', 'prélevé', 'prélevée', 'prélevés',
+            'prélevées', 'prélèvement', 'paiement par carte', 'votre paiement', 'vous avez envoyé',
+            'virement émis', 'votre virement', 'retrait',
+            'achat', 'retrait', 'commission', 'frais', 'vous avez retiré', 'vous avez envoyé',
+            'a été débitée', 'a prélevé',
+        ],
+        creditTerms: [
+            'crédité', 'créditée', 'a ete credite', 'vous a envoyé', 'vous a versé', 'virement reçu',
+            'vous avez reçu', 'remboursé', 'remboursée',
+            'vous a remboursé', 'remboursement',
+            'à votre attention', 'pour vous',
+        ],
+        purchaseTerms: ['paiement chez', 'votre paiement de', 'prélèvement de',
+            'achat', 'paiement en ligne', 'paiement par carte', 'payés en ligne', 'payées en ligne',
+            'a été débitée', 'a été débité', 'a prélevé', 'a été payée', 'a été payé',
+        ],
+        refundTerms: ['remboursé', 'remboursée'],
+        cashTerms: ['retrait dab', 'au dab', 'distributeur',
+            "retrait d'espèces", 'vous avez retiré',
+        ],
+        headingTerms: [
+            'achat', 'achat internet', 'paiement par carte', 'paiement en ligne', 'retrait',
+            'retrait dab', 'virement émis', 'commission', 'frais', 'remboursement', 'virement reçu',
+            'paiement par carte de', 'retrait de', 'achat de',
+        ],
     },
     DE: {
         market: 'DE', currencies: ['EUR'], currencyAliases: {},
-        rails: ['sepa'], transferTerms: ['überweisung'],
+        rails: ['sepa'],
+        transferTerms: ['überweisung', 'echtzeit-überweisung', 'zahlungseingang', 'gutschrift',
+            '^gesendet', 'geld erhalten', 'überwiesen',
+        ],
         utilityTerms: ['strom', 'gas', 'wasser', 'telefon'],
         recurringTerms: ['dauerauftrag', 'abonnement'],
-        failedTerms: ['abgelehnt', 'fehlgeschlagen', 'nicht bezahlt', 'nicht abgebucht'],
-        futureTerms: ['wird abgebucht', 'wird morgen abgebucht', 'wird morgen gutgeschrieben', 'fällig'],
-        debitTerms: ['belastet', 'abgebucht', 'bezahlt'], creditTerms: ['gutgeschrieben'],
+        postedTerms: ['gezahlt',
+            'gezahlt', 'erhalten', 'eingegangen', 'zahlungseingang', 'neue buchung',
+            'neuer umsatz', 'umsatz soll', 'umsatz haben', 'abgehoben', 'ausgeführt', 'zahlung erfolgreich',
+            'erstattet', 'überwiesen',
+            'abgehoben',
+        ],
+        failedTerms: [
+            'abgelehnt', 'fehlgeschlagen', 'nicht bezahlt', 'nicht abgebucht', 'nicht ausgeführt',
+            'nicht durchgeführt', 'nicht erfolgreich', 'nicht erhalten', 'konnte nicht', 'zurückgewiesen',
+            'storniert', 'stornierung', 'nicht genügend', 'smstan', 'pushtan', 'mobiletan', 'chiptan',
+            'tan lautet', 'bestätigungscode', 'freigabecode',
+            'noch nicht', 'nicht eingegangen', 'nicht gezahlt', 'nicht gesendet', 'nicht überwiesen',
+            'nicht gutgeschrieben', 'nicht belastet', 'nicht abgehoben',
+            'wurden keine', 'wurde keine', 'wurde kein', 'es wurden keine', 'keine belastung',
+            'limit erreicht', 'tageslimit erreicht', 'limit überschritten',
+            'betrug', 'als betrug', 'reklamiert', 'widersprochen',
+            'nie überwiesen', 'nie abgebucht', 'nie belastet', 'nie gezahlt', 'nie erhalten', 'wurden nie',
+            'wurde nie',
+        ],
+        futureTerms: [
+            'wird abgebucht', 'wird morgen abgebucht', 'wird morgen gutgeschrieben', 'fällig',
+            'wird belastet', 'wird gutgeschrieben', 'wird ausgeführt', 'wird am', 'wird erst', 'werden am',
+            'vorgemerkt', 'vormerkung', 'reserviert', 'reservierung', 'ausstehend', 'geplant', 'angefragt',
+            'anfrage', 'möchte', 'fordert', 'zahlungsaufforderung', 'geldanforderung', 'sie erhalten',
+            'erhalten sie', 'du erhältst', 'erhältst du', 'hast du', 'haben sie', 'waren sie das',
+            'warst du das', 'bitte bestätigen', 'bestätigen sie', 'freigeben', 'wenn sie', 'wenn du',
+            'falls sie', 'falls du', 'sobald',
+            'in kürze', 'voraussichtlich', 'erwartete', 'erwarteter', 'erwartetes', 'wird gesendet',
+            'werden gesendet', 'wird überwiesen', 'wird gutgeschrieben',
+            'auftrag',
+            'nächste', 'nächsten', 'rabatt', 'gutschein', 'sparen sie',
+            'beantragt', 'in bearbeitung', 'in prüfung', 'wird geprüft', 'zum beispiel', 'beispiel:',
+            'um es zu erhalten', 'um das geld zu erhalten',
+            'genehmigt', 'vorbehaltlich', 'endgültigen abrechnung', 'an ihre kreditkarte',
+            'an deine kreditkarte', 'kreditkartenabrechnung',
+            'eventuell', 'möglicherweise', 'unter umständen', 'muster-benachrichtigung', 'musternachricht',
+            'muster:', 'beispielnachricht', 'beispiel-benachrichtigung',
+            'möglich', 'täglich', 'pro tag', 'höchstens', 'maximal', 'neue rechnung', 'zahlbar bis',
+            'werden belastet', 'werden abgebucht', 'werden morgen',
+            'vorankündigung', 'ankündigung', 'vorabinformation', 'gesperrt', 'blockiert', 'zurückgebucht',
+            'nicht erfolgt', 'nicht autorisiert', 'vorläufig', 'freigabe erforderlich', 'buchung folgt',
+            '^falls', '^wenn', 'hat ihre zahlung', 'hat deine zahlung', 'hat deine überweisung',
+            'hat ihre überweisung', 'auf sparkonto', 'auf ihr sparkonto',
+        ],
+        debitTerms: ['kartenumsatz',
+            'belastet', 'abgebucht', 'bezahlt', 'gezahlt', 'kartenzahlung', 'lastschrift', 'umsatz soll',
+            'abgehoben', 'abhebung', 'gesendet',
+            'deine zahlung', 'ihre zahlung', 'deine überweisung', 'ihre überweisung',
+            'einkauf', 'internetkauf', 'onlinekauf', 'online-umsatz', 'bargeldabhebung', 'bargeldauszahlung',
+            'bargeld abgehoben', 'überweisung ausgeführt', 'dauerauftrag ausgeführt', 'überwiesen', 'gebühr',
+            'entgelt', '^gesendet',
+        ],
+        creditTerms: [
+            'gutgeschrieben', 'zahlungseingang', 'eingegangen', 'erhalten', 'umsatz haben', 'rückerstattung',
+            'erstattet', 'hat dir', 'hat ihnen',
+            'erstattung', 'gutschrift', 'geld erhalten',
+            'an dich', 'für dich',
+        ],
+        purchaseTerms: ['lastschrift',
+            'einkauf', 'internetkauf', 'onlinekauf', 'online-umsatz',
+            'bezahlt',
+            'gezahlt',
+        ],
+        refundTerms: ['rückerstattung', 'erstattet'],
+        cashTerms: ['abhebung', 'abgehoben', 'bargeldauszahlung',
+            'bargeld abgehoben',
+        ],
+        feeTerms: ['kontoführungsgebühr', 'gebühren'],
+        headingTerms: ['kartenumsatz',
+            'einkauf', 'internetkauf', 'onlinekauf', 'online-umsatz', 'kartenzahlung', 'kartenumsatz',
+            'neuer umsatz', 'bargeldabhebung', 'bargeldauszahlung', 'bargeld abgehoben', 'lastschrift',
+            'überweisung ausgeführt', 'dauerauftrag ausgeführt', 'gebühr belastet', 'entgelt', 'gesendet',
+            'erstattung', 'gutschrift', 'geld erhalten', 'kartenzahlung über', 'bargeldabhebung über',
+            'gutschrift über', 'erstattung über',
+        ],
     },
     ES: {
         market: 'ES', currencies: ['EUR'], currencyAliases: {},
-        rails: ['sepa', 'bizum'], transferTerms: ['transferencia'],
+        rails: ['sepa', 'bizum'],
+        transferTerms: [
+            'transferencia', 'bizum', 'bizum recibido', 'bizum enviado', 'transferencia recibida',
+            'transferencia enviada', 'has recibido', 'has enviado',
+        ],
         utilityTerms: ['suministros', 'electricidad', 'agua', 'teléfono'],
         recurringTerms: ['recurrente', 'suscripción'],
-        failedTerms: ['rechazado', 'fallido', 'no pagado', 'no cargado'],
-        futureTerms: ['se cargará', 'será abonado', 'próximo'],
-        debitTerms: ['cargado', 'pagado'], creditTerms: ['abonado'],
+        postedTerms: [
+            'has pagado', 'has realizado', 'has recibido', 'has enviado', 'acabas de enviar',
+            'ha sido utilizada', 'ha sido utilizado', 'se ha cargado', 'se ha abonado', 'pago aceptado',
+            'aceptado el pago', 'compra aceptada', 'acreditado', 'acreditada', 'abonada',
+            'te ha cobrado',
+            'te hemos cobrado', 'ha sido utilizada para',
+            'te ha devuelto',
+        ],
+        failedTerms: [
+            'rechazado', 'fallido', 'no pagado', 'no cargado', 'rechazada', 'denegada', 'denegado',
+            'fallida', 'no autorizada', 'no autorizado', 'anulada', 'anulado', 'cancelada', 'cancelado',
+            'no realizada', 'no se ha podido', 'no ha podido', 'saldo insuficiente', 'código para confirmar',
+            'codigo para confirmar', 'código de confirmación', 'codigo de confirmacion', 'no lo compartas',
+            'no compartas',
+            'no se ha cargado', 'no se te ha cobrado', 'ningún cargo', 'ningun cargo',
+            'límite diario alcanzado', 'límite alcanzado', 'alcanzado',
+            'tu código', 'tu codigo', 'el código', 'el codigo', 'su código', 'código para la',
+            'codigo para la', 'o código', 'código para a', 'seu código',
+            'fraude', 'reportada como', 'reportado como', 'disputada',
+            'no completada', 'no completado', 'bloqueada', 'bloqueado',
+        ],
+        futureTerms: [
+            'se cargará', 'será abonado', 'próximo', 'se abonará', 'será cargado', 'se realizará',
+            'será acreditado', 'sera acreditado', 'se acreditará', 'se acreditara',
+            'programada', 'programado', 'te ha solicitado', 'ha solicitado', 'solicitud', 'si usted',
+            'si tú', 'si no', '¿has', '¿ha', '¿reconoces', '¿realizaste', '¿es', 'confirma tu',
+            'confirma la', 'confirmar la', 'para confirmar',
+            'próxima', 'proxima', 'descuento', 'obtén', 'obten',
+            'por ejemplo', 'para recibir', 'para cobrarlo', 'en trámite', 'solicitada',
+            'autorizada', 'autorizado', 'puede tardar', 'tardar', 'a tu tarjeta de crédito',
+            'a su tarjeta de crédito',
+            'posiblemente', 'es posible que', 'puede que', 'mensaje de ejemplo', 'notificación de ejemplo',
+            'ejemplo:',
+            'hasta', 'al día', 'por día', 'nueva factura', 'vence',
+            'aprueba', 'aprobar', 'aprove', 'aprovar', 'expira',
+            'aparecerá', 'aparecera', 'aparecería',
+            'se cargarán', 'serán cargados', 'van a ser',
+            'a partir de', 'preautorización',
+            'ha recibido tu', 'ha recibido su', 'a tu cuenta de ahorro',
+        ],
+        debitTerms: ['cargo', 'adeudo',
+            'cargado', 'pagado', 'has pagado', 'compra', 'retirada', 'has enviado', 'acabas de enviar',
+            'se ha cargado', 'cargo de', 'cargo en', 'adeudo', 'pago de', 'pago aceptado', 'aceptado el pago',
+            'recibo', 'utilizada por',
+            'tu pago', 'su pago',
+            'retirada', 'reintegro', 'comisión', 'bizum enviado', 'transferencia enviada', 'te ha cobrado',
+            'te hemos cobrado', 'pago por internet',
+            'tu transferencia', 'tu bizum', 'su transferencia',
+        ],
+        creditTerms: [
+            'abonado', 'abonada', 'has recibido', 'recibido', 'acreditado', 'acreditada', 'reembolso',
+            'devolución', 'ingreso', 'nómina',
+            'bizum recibido', 'transferencia recibida', 'abono por devolución',
+            'te ha devuelto',
+        ],
+        purchaseTerms: ['cargo',
+            'compra', 'has pagado', 'pago con tarjeta', 'pago aceptado', 'aceptado el pago', 'adeudo', 'recibo',
+            'pago por internet', 'compra online',
+        ],
+        cashTerms: ['retirada de efectivo', 'cajero', 'reintegro'],
+        refundTerms: [
+            'abono por devolución',
+            'te ha devuelto',
+        ],
+        headingTerms: ['cargo', 'cargo de', 'adeudo',
+            'compra online', 'pago por internet', 'retirada', 'reintegro', 'devolución',
+            'abono por devolución', 'comisión', 'bizum recibido', 'transferencia recibida',
+            'bizum enviado', 'transferencia enviada', 'compra:', 'compra de', 'compra online de',
+            'retirada de efectivo de', 'retirada de',
+        ],
     },
     IT: {
         market: 'IT', currencies: ['EUR'], currencyAliases: {},
-        rails: ['sepa'], transferTerms: ['bonifico'],
+        rails: ['sepa'],
+        transferTerms: [
+            'bonifico', 'hai inviato', 'bonifico ricevuto', 'bonifico in uscita', 'accredito stipendio',
+        ],
         utilityTerms: ['utenza', 'elettricità', 'acqua', 'telefono'],
         recurringTerms: ['ricorrente', 'abbonamento'],
-        postedTerms: ['pagato', 'pagata'],
-        failedTerms: ['rifiutato', 'fallito', 'non pagato', 'non addebitato'],
-        futureTerms: ['sarà addebitato', 'sarà accreditato', 'in scadenza'],
-        debitTerms: ['addebitato', 'pagato', 'pagata'], creditTerms: ['accreditato'],
+        postedTerms: [
+            'pagato', 'pagata', 'hai pagato', 'eseguito', 'eseguita', 'effettuato', 'effettuata',
+            'addebitata', 'accreditata', 'hai ricevuto', 'ricevuto',
+            'è stata usata per', 'hai prelevato', 'hai inviato',
+            'ha addebitato', 'bolletta pagata', 'ti ha rimborsato', 'accredito stipendio',
+        ],
+        failedTerms: [
+            'rifiutato', 'fallito', 'non pagato', 'non addebitato', 'rifiutata', 'fallita', 'negato',
+            'negata', 'non autorizzato', 'non autorizzata', 'annullato', 'annullata', 'non riuscito',
+            'non riuscita', 'non andato a buon fine', 'non andata a buon fine', 'non eseguito',
+            'non eseguita', 'fondi insufficienti', 'disponibilità insufficiente', 'non condividere',
+            'nessun addebito', 'nessun importo', 'non è stato addebitato', 'non è stata addebitata',
+            'limite raggiunto', 'raggiunto',
+            'frode', 'segnalato come', 'segnalata come', 'contestato', 'contestata',
+            'bloccato', 'bloccata', 'stornata', 'stornato',
+        ],
+        futureTerms: [
+            'sarà addebitato', 'sarà accreditato', 'in scadenza', 'sarà addebitata', 'sarà accreditata',
+            'verrà addebitato', 'verrà addebitata', 'verrà accreditato', 'verrà accreditata',
+            'ti ricordiamo', 'in attesa', 'in lavorazione', 'programmato', 'programmata', 'ti ha chiesto',
+            'ti chiede', 'richiesta', 'se hai', 'se non', 'qualora', 'hai effettuato tu', 'riconosci',
+            'confermi',
+            'prossimo', 'prossima', 'sconto',
+            'ad esempio', 'per esempio', 'per riceverlo', 'per ricevere',
+            'autorizzato', 'autorizzata', 'contabilizzazione', 'può richiedere', 'alla tua carta di credito',
+            'sulla tua carta di credito', 'alla carta di credito',
+            'potrebbe', 'forse', 'eventualmente', 'notifica di esempio', 'messaggio di esempio', 'esempio:',
+            'al giorno', 'fino a', 'nuova fattura', 'da pagare',
+            'saranno addebitati', 'verranno addebitati',
+            'in elaborazione', 'da confermare', 'preautorizzazione', 'a partire da',
+            'ha ricevuto il tuo', 'ha ricevuto la tua',
+        ],
+        debitTerms: [
+            'addebitato', 'pagato', 'pagata', 'addebitata', 'hai pagato', 'prelievo', 'hai inviato', 'acquisto',
+            'tuo pagamento', 'suo pagamento',
+            'pagamento', 'prelievo', 'hai prelevato', 'commissione', 'bonifico in uscita',
+            'è stata usata per',
+            'ha addebitato', 'bolletta pagata',
+            'il tuo bonifico', 'tuo bonifico', 'il suo bonifico',
+        ],
+        creditTerms: ['accreditato', 'accreditata', 'hai ricevuto', 'ricevuto', 'rimborso', 'stipendio',
+            'storno', 'bonifico ricevuto',
+            'ti ha rimborsato', 'accredito stipendio',
+        ],
+        purchaseTerms: ['hai pagato',
+            'pagamento', 'acquisto', 'è stata usata per',
+            'ha addebitato', 'bolletta pagata',
+        ],
+        refundTerms: [
+            'storno',
+            'ti ha rimborsato',
+        ],
+        cashTerms: [
+            'hai prelevato', 'prelievo bancomat',
+        ],
+        headingTerms: [
+            'pagamento', 'pagamento con carta', 'acquisto', 'acquisto online', 'prelievo',
+            'prelievo bancomat', 'storno', 'rimborso', 'commissione', 'commissione addebitata',
+            'bonifico ricevuto', 'bonifico in uscita', 'pagamento di', 'acquisto online di',
+            'prelievo di',
+        ],
     },
     NL: {
         market: 'NL', currencies: ['EUR'], currencyAliases: {},
-        rails: ['sepa', 'ideal'], transferTerms: ['overboeking'],
+        rails: ['sepa', 'ideal'],
+        transferTerms: ['gekregen', 'overboeking', 'bijgeschreven op je rekening', 'bijgeschreven op uw rekening',
+            'gestuurd', 'overgemaakt', 'bijschrijving',
+            'ontvangen',
+        ],
         utilityTerms: ['energie', 'water', 'telefoon'],
         recurringTerms: ['periodiek', 'abonnement'],
-        failedTerms: ['geweigerd', 'mislukt', 'niet betaald', 'niet afgeschreven'],
-        futureTerms: ['wordt afgeschreven', 'wordt morgen afgeschreven', 'wordt morgen bijgeschreven', 'aankomend'],
-        debitTerms: ['afgeschreven', 'betaald'], creditTerms: ['bijgeschreven'],
+        postedTerms: ['ontvangen', 'is uitgevoerd', 'opgenomen',
+            'je betaalde', 'gestuurd', 'overgemaakt', 'geïncasseerd',
+        ],
+        failedTerms: [
+            'geweigerd', 'mislukt', 'niet betaald', 'niet afgeschreven', 'afgewezen', 'geannuleerd',
+            'niet gelukt', 'niet uitgevoerd', 'onvoldoende saldo', 'mislukte', 'geweigerde',
+            'nog niet', 'niet ontvangen', 'niet bijgeschreven', 'niet overgemaakt', 'niet opgenomen',
+            'teruggestort', 'teruggeboekt', 'retour gestort',
+            'geen bedrag', 'niets afgeschreven', 'er is geen', 'limiet bereikt', 'bereikt',
+            'fraude', 'gemeld als', 'betwist',
+            'niet voltooid', 'geblokkeerd', 'gestorneerd',
+        ],
+        futureTerms: [
+            'wordt afgeschreven', 'wordt morgen afgeschreven', 'wordt morgen bijgeschreven', 'aankomend',
+            'wordt uitgevoerd', 'wordt op', 'zal worden', 'in behandeling', 'gepland', 'geplande',
+            'gereserveerd', 'reservering', 'binnenkort', 'betaalverzoek', 'verzoek', 'vraagt', 'als u',
+            'als je', 'indien', 'zodra', 'heb je', 'heeft u', 'herken je', 'herkent u', 'was jij dit',
+            'bevestig', 'zorg voor voldoende saldo',
+            'volgende', 'korting',
+            'bijvoorbeeld', 'om het te ontvangen', 'aangevraagd',
+            'geautoriseerd', 'goedgekeurd', 'aan je creditcard', 'aan uw creditcard',
+            'mogelijk', 'misschien', 'kan zijn', 'voorbeeldbericht', 'voorbeeldmelding', 'voorbeeld:',
+            'per dag', 'tot maximaal', 'nieuwe rekening', 'te betalen', 'aflossing', 'aflossing creditcard',
+            'ingepland', 'aangekondigd',
+            'vanaf januari', 'vanaf februari', 'vanaf maart', 'vanaf april', 'vanaf mei', 'vanaf juni',
+            'vanaf juli', 'vanaf augustus', 'vanaf september', 'vanaf oktober', 'vanaf november',
+            'vanaf december', 'vanaf volgende maand',
+            'naar spaarrekening', 'naar je spaarrekening', 'naar uw spaarrekening',
+        ],
+        debitTerms: [
+            'afgeschreven', 'betaald', 'betaling met bankkaart', 'betaling met kaart', 'opgenomen',
+            'je betaling', 'uw betaling',
+            'pinbetaling', 'online betaling', 'opname', 'kosten', 'incasso', 'je betaalde',
+            'geïncasseerd',
+            'internetaankoop', 'aankoop',
+            '^overboeking',
+            'gestuurd naar', 'overgemaakt naar', 'van je', 'van u',
+        ],
+        creditTerms: ['gekregen', 'bijgeschreven', 'ontvangen',
+            'bijschrijving', 'terugbetaling', 'naar je', 'aan je',
+            'heeft je', 'heeft u',
+        ],
+        purchaseTerms: ['betaling met bankkaart', 'betaling met kaart', 'betaald', 'incasso',
+            'online betaling', 'je betaalde',
+            'internetaankoop', 'aankoop',
+        ],
+        refundTerms: ['restitutie',
+            'terugbetaling',
+        ],
+        cashTerms: ['opname', 'geldautomaat',
+            'opgenomen',
+        ],
+        headingTerms: ['gekregen',
+            'pinbetaling', 'betaling', 'online betaling', 'opname', 'overboeking', 'kosten',
+            'kosten afgeschreven', 'incasso', 'automatische incasso', 'bijschrijving', 'terugbetaling',
+            'ontvangen', 'internetaankoop', 'aankoop', 'betaling met bankkaart van',
+            'online betaling van', 'bijschrijving van', 'terugbetaling van',
+        ],
+    },
+    PT: {
+        market: 'PT', currencies: ['EUR'], currencyAliases: {},
+        rails: ['mb way', 'multibanco', 'sepa'],
+        transferTerms: [
+            'transferência', 'transferencia', 'mb way', 'você enviou', 'voce enviou', 'você recebeu',
+            'voce recebeu', 'te enviou', 'enviou-lhe', '^enviou', '^recebeu',
+            'transferência recebida', 'mb way enviado',
+        ],
+        utilityTerms: ['eletricidade', 'conta da água', 'conta da agua', 'telecomunicações'],
+        recurringTerms: ['débito direto', 'debito direto', 'subscrição', 'subscricao'],
+        postedTerms: [
+            'você enviou', 'voce enviou', 'você recebeu', 'voce recebeu', 'te enviou', 'enviou-lhe',
+            '^enviou', '^recebeu', 'efetuada', 'efetuado', 'pagamento efetuado', 'compra efetuada',
+            'foi debitado', 'foi debitada', 'foi creditado', 'foi creditada', 'debitado', 'debitada',
+            'creditado', 'creditada',
+            '^pagou',
+        ],
+        failedTerms: [
+            'recusado', 'recusada', 'rejeitado', 'rejeitada', 'não autorizado', 'não autorizada',
+            'nao autorizado', 'nao autorizada', 'cancelado', 'cancelada', 'anulado', 'anulada',
+            'falhou', 'sem sucesso', 'saldo insuficiente', 'não foi', 'nao foi', 'não foram', 'nao foram',
+            'código de confirmação', 'codigo de confirmacao',
+            'não partilhe', 'nao partilhe', 'não compartilhe', 'nao compartilhe',
+            'nenhum valor', 'nenhum montante', 'limite atingido', 'atingido',
+            'o código', 'o codigo', 'código para a', 'codigo para a', 'seu código', 'seu codigo', 'tu código',
+            'código para la',
+            'fraude', 'reportada como', 'reportado como', 'contestada', 'contestado',
+            'não concluído', 'não concluída', 'nao concluido', 'bloqueado', 'bloqueada', 'falhado',
+        ],
+        futureTerms: [
+            'será debitado', 'sera debitado', 'será debitada', 'sera debitada', 'será creditado',
+            'sera creditado', 'agendado', 'agendada', 'a pagar', 'data limite', 'extrato', 'pediu',
+            'pedido de', 'solicitou', 'solicitação', 'solicitacao', 'se não', 'se nao', 'caso não',
+            'caso nao', 'foi você', 'foi voce',
+            'cobrança', 'cobranca', 'fatura', 'boleto', 'para pagamento',
+            'confirme', 'confirma a compra', 'confirmar a compra', 'para confirmar', 'em processamento',
+            'próxima', 'proxima', 'desconto', 'ganhe',
+            'por exemplo', 'para receber', 'ative o mb way', 'ative o seu', 'para o receber',
+            'autorizada', 'autorizado', 'pode demorar', 'ao seu cartão de crédito', 'ao cartão de crédito',
+            'possivelmente', 'pode ter sido', 'talvez', 'mensagem de exemplo', 'notificação de exemplo',
+            'exemplo:',
+            'por dia', 'até', 'nova fatura',
+            'aprove', 'aprovar', 'aprueba', 'expira',
+            'a partir de',
+            'recebeu o seu', 'recebeu a sua',
+        ],
+        debitTerms: [
+            'você enviou', 'voce enviou', '^enviou', 'você pagou', 'voce pagou', 'compra', 'debitado', 'debitada',
+            'levantamento',
+            'o seu pagamento', 'a sua transferência', 'a sua transferencia',
+            '^pagou', 'pagamento online', 'pagamento de serviços', 'levantamento', 'comissão',
+            'mb way enviado', 'débito na conta',
+        ],
+        creditTerms: [
+            'você recebeu', 'voce recebeu', '^recebeu', 'te enviou', 'enviou-lhe', 'te pagou', 'pagou-lhe',
+            'para você', 'para voce', 'para sua conta', 'para a sua conta', 'na sua conta', 'recebido',
+            'recebida', 'creditado', 'creditada', 'reembolso', 'estorno', 'devolução', 'devolucao',
+            'transferência recebida',
+        ],
+        purchaseTerms: ['compra', 'pagamento com cartão', 'pagamento com cartao',
+            '^pagou', 'pagamento online', 'compra online',
+        ],
+        refundTerms: ['reembolso', 'estorno', 'devolução', 'devolucao'],
+        cashTerms: ['levantamento'],
+        feeTerms: ['comissão', 'comissao', 'anuidade'],
+        moneyLabels: ['compra', 'levantamento', 'montante', 'valor'],
+        headingTerms: [
+            'compra online', 'pagamento de serviços', 'levantamento', 'comissão', 'comissão cobrada',
+            'mb way enviado', 'débito na conta', 'compra:', 'compra de', 'compra online de',
+            'levantamento de',
+        ],
+    },
+    PL: {
+        market: 'PL', currencies: ['PLN'], currencyAliases: { 'zł': ['PLN'] },
+        rails: ['blik', 'elixir', 'express elixir', 'sepa'],
+        transferTerms: ['przelew', 'przelew na telefon', 'blik na telefon',
+            'przesłał ci', 'przesłała ci', 'wpływ na rachunek', 'przelew przychodzący', 'przelew wychodzący',
+            'przelew wysłany',
+            'wysłałeś przelew', 'wysłałaś przelew',
+        ],
+        utilityTerms: ['rachunek za prąd', 'rachunek za gaz', 'rachunek za wodę', 'energia elektryczna'],
+        recurringTerms: ['polecenie zapłaty', 'zlecenie stałe', 'subskrypcja'],
+        postedTerms: [
+            'zrealizowana', 'zrealizowany', 'zrealizowano', 'została zrealizowana', 'zaksięgowano',
+            'zaksięgowana', 'wykonano', 'wydano', 'wydałeś', 'wydałaś', 'wydał', 'wydała',
+            'otrzymano', 'otrzymałeś', 'otrzymałaś', 'przelew przych', 'przelew wych',
+            'płatność kartą', 'platnosc karta', 'uznanie', 'obciążenie', 'obciazenie',
+            'wypłaciłeś', 'wypłaciłaś', 'przesłał ci', 'przesłała ci', 'zaksięgowany',
+            'zaksięgowana', 'pobrał', 'pobrała',
+            'wysłałeś', 'wysłałaś', 'zapłacono',
+        ],
+        failedTerms: [
+            'odrzucona', 'odrzucono', 'odrzucony', 'nieudana', 'nieudany', 'odmowa', 'odmówiona',
+            'anulowana', 'anulowano', 'nie została', 'nie zostala', 'nie został', 'nie zostało',
+            'nie zrealizowano', 'nie zaksięgowano', 'nie wykonano', 'nie otrzymano', 'brak środków',
+            'brak srodkow',
+            'hasło', 'haslo', 'kod blik', 'kod sms', 'nie podawaj',
+            'nie pobrano', 'nie obciążono', 'osiągnięty', 'przekroczono',
+            'oszustwo', 'zgłoszona jako', 'zgłoszony jako', 'reklamacja',
+            'zablokowana', 'zablokowany', 'nie powiodła się', 'zwrócona', 'zwrócony',
+        ],
+        futureTerms: [
+            'planowane', 'planowana', 'planowany', 'faktura', 'fakturę', 'fakture',
+            'oczekująca', 'oczekujaca', 'oczekujący', 'oczekuje', 'zostanie', 'zaplanowana',
+            'zaplanowany', 'blokada', 'zablokowano', 'prośba o', 'prosba o', 'prosi o', 'czy to ty',
+            'czy to pan', 'czy to pani', 'czy potwierdzasz', 'czy zlecałeś', 'czy zlecałaś',
+            'czy dokonałeś', 'czy dokonałaś', 'jeśli', 'jesli', 'jeżeli', 'jezeli', 'potwierdź', 'potwierdz',
+            'do zapłaty', 'termin płatności',
+            'następny', 'następna', 'następnym', 'zniżka', 'zniżki', 'kod rabatowy',
+            'na przykład', 'przykładowo', 'aby odebrać',
+            'autoryzowana', 'zautoryzowana', 'może potrwać', 'spłata karty', 'na kartę kredytową',
+            'możliwe', 'prawdopodobnie', 'mogło zostać', 'mogła zostać', 'przykładowe powiadomienie',
+            'przykład:',
+            'dziennie', 'do kwoty', 'nowa faktura',
+            'od stycznia', 'od lutego', 'od marca',
+        ],
+        debitTerms: ['transakcja internetowa',
+            'wydano', 'wydał', 'wydała', 'wydałeś', 'wydałaś', 'płatność', 'platnosc', 'obciążenie',
+            'obciazenie', 'przelew wych', 'wypłata', 'wyplata', 'zapłacono', 'zaplacono',
+            'twoją płatność', 'twoja płatność', 'twoja platnosc',
+            'transakcja kartą', 'płatność internetowa', 'płatność w internecie', 'wypłaciłeś', 'wypłaciłaś',
+            'przelew wychodzący', 'przelew wysłany', 'zakup online', 'polecenie zapłaty', 'pobrał', 'pobrała',
+            'opłata',
+            'wysłałeś', 'wysłałaś',
+            'twój przelew', 'twoj przelew', 'twoją płatność',
+        ],
+        creditTerms: [
+            'otrzymano', 'otrzymałeś', 'otrzymałaś', 'przelew przych', 'uznanie', 'wpływ', 'wplyw',
+            'wpłata', 'wplata', 'zwrot',
+            'przesłał ci', 'przesłała ci', 'wpływ na rachunek', 'przelew przychodzący', 'zwrot środków',
+        ],
+        purchaseTerms: ['transakcja internetowa',
+            'płatność kartą', 'platnosc karta', 'płatność blik', 'platnosc blik', 'zakup', 'wydano',
+            'transakcja kartą', 'płatność internetowa', 'płatność w internecie', 'zakup online',
+        ],
+        refundTerms: ['zwrot'],
+        cashTerms: ['wypłata z bankomatu', 'wyplata z bankomatu', 'wypłata gotówki', 'bankomat',
+            'wypłaciłeś', 'wypłaciłaś',
+        ],
+        feeTerms: ['opłata za', 'oplata za', 'prowizja',
+            'opłata', 'oplata',
+        ],
+        moneyLabels: ['kwota', 'kwotę', 'wydano', 'otrzymano', 'płatność', 'platnosc'],
+        headingTerms: ['transakcja internetowa',
+            'transakcja kartą', 'płatność internetowa', 'płatność w internecie', 'wypłata z bankomatu',
+            'wypłata gotówki', 'zwrot', 'zwrot środków', 'opłata', 'wpływ na rachunek',
+            'przelew przychodzący', 'przelew wychodzący', 'przelew wysłany', 'zakup online',
+            'polecenie zapłaty', 'płatność internetowa na kwotę', 'płatność kartą na kwotę',
+        ],
+    },
+    SE: {
+        market: 'SE', currencies: ['SEK'], currencyAliases: { kr: ['SEK'], 'kr.': ['SEK'] },
+        rails: ['swish', 'bankgiro', 'plusgiro', 'autogiro'],
+        transferTerms: ['swish', 'överföring', 'insättning',
+            '^överföring',
+            'du har fått', 'har fått',
+        ],
+        utilityTerms: ['elräkning', 'vattenräkning', 'telefonräkning'],
+        recurringTerms: ['autogiro', 'prenumeration', 'stående överföring'],
+        postedTerms: ['handlat för',
+            'du har fått', 'har fått', 'du har betalat', 'har betalat', 'betalat', 'har dragits',
+            'dragits', 'genomförd', 'genomfört', 'genomförts', 'kortköp', 'du har skickat',
+            'drog', 'vi drog', 'återbetalade', 'har återbetalat',
+        ],
+        failedTerms: [
+            'kunde inte', 'har inte', 'inte genomförd', 'inte genomförts', 'inte dragits',
+            'inte betalats', 'nekad', 'nekades', 'nekat', 'nekats', 'avvisad', 'avvisades',
+            'avbruten', 'avbröts', 'misslyckades', 'misslyckad', 'otillräckligt saldo', 'täckning saknas',
+            'engångskod', 'säkerhetskod', 'dela inte',
+            'inget belopp', 'nådd', 'överskriden',
+            'bedrägeri', 'bestriden', 'bestridd',
+            'spärrat', 'spärrad', 'avbrutet', 'makulerat', 'återkallat', 'återbetald',
+            'ej genomförd', 'ej genomfört', 'ej genomförts',
+        ],
+        futureTerms: [
+            'reserverad', 'reserverat', 'kommer att', 'väntande', 'väntar', 'schemalagd',
+            'planerad', 'förfrågan', 'betalningsförfrågan', 'vill ha', 'begär', 'om du', 'var det du',
+            'bekräfta', 'har du',
+            'nästa', 'rabatt',
+            'till exempel', 'exempel:', 'för att ta emot', 'kreditkortet', 'kortfakturan',
+            'kreditkortsfaktura',
+            'godkänt', 'godkänd', 'bokföring kan ta', 'kan ta',
+            'kan ha', 'eventuellt', 'möjligen', 'exempelavisering', 'exempelmeddelande',
+            'per dag', 'upp till', 'ny faktura', 'att betala', 'till ditt', 'till din',
+            'kreditkortsbetalning',
+            'under behandling', 'preliminär', 'preliminärt', 'väntar på', 'från januari',
+            'kanske',
+        ],
+        debitTerms: ['handlat för',
+            'du har betalat', 'betalat', 'har dragits', 'dragits', 'köp', 'kortköp', 'uttag',
+            'du har skickat',
+            'din betalning', 'från dig',
+            'onlineköp', 'avgift', 'överföring', 'räkning betald', 'drog',
+            'autogiro',
+            'fra deg', 'fra dig',
+        ],
+        creditTerms: ['du har fått', 'har fått', 'insättning', 'återbetalning', 'återbetalt', 'till dig',
+            'återbetalade', 'har återbetalat',
+        ],
+        purchaseTerms: ['handlat för', 'köp', 'kortköp', 'kortbetalning',
+            'onlineköp',
+            'du har betalat', 'betalat online',
+        ],
+        refundTerms: ['återbetalning', 'återbetalt',
+            'återbetalade', 'har återbetalat',
+        ],
+        cashTerms: ['uttag', 'kontantuttag', 'bankomat', 'uttagsautomat'],
+        feeTerms: ['avgift', 'årsavgift'],
+        moneyLabels: ['köp', 'kortköp', 'belopp', 'fått', 'betalat', 'uttag'],
+        headingTerms: [
+            'köp', 'onlineköp', 'uttag', 'avgift', 'avgift dragen', 'överföring', 'räkning betald',
+            'autogiro', 'köp med kort', 'köp på', 'kortköp på', 'onlineköp på',
+        ],
+    },
+    DK: {
+        market: 'DK', currencies: ['DKK'], currencyAliases: { kr: ['DKK'], 'kr.': ['DKK'] },
+        rails: ['mobilepay', 'betalingsservice', 'nemkonto'],
+        transferTerms: ['mobilepay', 'overførsel', 'har sendt dig',
+            'penge sendt', 'du har sendt',
+        ],
+        utilityTerms: ['elregning', 'vandregning'],
+        recurringTerms: ['betalingsservice', 'fast overførsel'],
+        postedTerms: ['handlet for',
+            'du har betalt', 'har betalt', 'betalt', 'har sendt dig', 'sendt dig', 'du har modtaget',
+            'modtaget', 'hævet', 'er hævet', 'indsat', 'gennemført',
+            'du har sendt', 'opkrævet', 'er trukket',
+            'er blevet trukket',
+        ],
+        failedTerms: [
+            'afvist', 'afvises', 'fejlede', 'fejlet', 'mislykkedes', 'kunne ikke gennemføres',
+            'ikke gennemført', 'ikke betalt', 'ikke modtaget', 'annulleret', 'ikke nok penge',
+            'utilstrækkelig dækning', 'engangskode', 'del ikke', 'ikke hævet', 'ikke trukket',
+            'ikke overført', 'ikke sendt', 'ikke indsat', 'blev ikke', 'har ikke',
+            'intet beløb', 'nået', 'overskredet',
+            'svindel', 'indsigelse',
+            'blokeret', 'tilbageført', 'kan ikke gennemføres', 'manglende dækning',
+        ],
+        futureTerms: [
+            'reserveret', 'vil blive', 'bliver hævet', 'bliver trukket', 'bliver overført',
+            'til betaling',
+            'planlagt', 'afventer', 'afventende', 'anmodning', 'anmoder', 'beder om', 'hvis',
+            'var det dig', 'har du', 'bekræft', 'forfalder',
+            'næste', 'rabatkode',
+            'ny regning', 'regning fra', 'for eksempel', 'eksempel:', 'for at modtage', 'kreditkortet',
+            'kreditkortregningen',
+            'godkendt', 'kan tage',
+            'kan være', 'muligvis', 'eventuelt', 'eksempelbesked', 'eksempelmeddelelse',
+            'pr. dag', 'op til', 'til dit kreditkort',
+            'foreløbig', 'fra januar',
+            'måske',
+        ],
+        debitTerms: ['handlet for',
+            'du har betalt', 'har betalt', 'betalt', 'hævet', 'køb', 'kortkøb', 'hævning', 'din betaling',
+            'fra dig', 'fra deg',
+            'onlinekøb', 'gebyr', 'regning betalt', 'penge sendt', 'du har sendt', 'opkrævet', 'er trukket',
+            'trukket', 'nethandel', 'kontanthævning',
+            'från dig',
+        ],
+        creditTerms: [
+            'har sendt dig', 'sendt dig', 'betalt dig', 'betalt deg', 'du har modtaget', 'modtaget',
+            'indsat', 'indbetaling', 'tilbagebetaling',
+            'refusion',
+        ],
+        purchaseTerms: ['handlet for', 'du har betalt', 'køb', 'kortkøb',
+            'onlinekøb', 'køb med kort',
+            'er blevet trukket', 'trukket',
+            'nethandel',
+        ],
+        refundTerms: ['tilbagebetaling', 'refundering', 'refusion',
+            'tilbagebetaling',
+        ],
+        cashTerms: ['hævning', 'kontanthævning', 'pengeautomat', 'hæveautomat',
+            'kontanthævning',
+        ],
+        feeTerms: ['gebyr'],
+        moneyLabels: ['beløb', 'betalt', 'modtaget', 'køb', 'hævet'],
+        headingTerms: [
+            'køb med kort', 'køb', 'onlinekøb', 'gebyr', 'regning betalt', 'penge sendt',
+            'tilbagebetaling', 'refusion', 'nethandel', 'kontanthævning', 'køb på', 'onlinekøb på',
+        ],
+    },
+    NO: {
+        market: 'NO', currencies: ['NOK'], currencyAliases: { kr: ['NOK'], 'kr.': ['NOK'] },
+        rails: ['vipps', 'avtalegiro', 'efaktura'],
+        transferTerms: ['vipps', 'overføring', 'har sendt deg',
+            'sendt til', 'penger mottatt', 'innbetaling',
+        ],
+        utilityTerms: ['strømregning'],
+        recurringTerms: ['avtalegiro', 'faste trekk'],
+        postedTerms: ['handlet for', 'penger fått',
+            'du betalte', 'betalte', 'du har betalt', 'har betalt', 'har sendt deg', 'sendt deg',
+            'du har mottatt', 'mottatt', 'trukket', 'er trukket', 'gjennomført',
+            'tatt ut', 'gebyr trukket',
+            'er brukt til', 'sendt til', 'er betalt',
+            'du har handlet', 'har handlet',
+        ],
+        failedTerms: [
+            'avvist', 'avvises', 'feilet', 'mislyktes', 'kunne ikke gjennomføres', 'ikke gjennomført',
+            'ikke betalt', 'avbrutt', 'ikke nok dekning', 'manglende dekning', 'engangskode', 'ikke del',
+            'ikke trukket', 'ikke belastet', 'ikke overført', 'ikke mottatt', 'ikke sendt', 'ble ikke',
+            'har ikke',
+            'ingen beløp', 'nådd', 'overskredet',
+            'svindel', 'reklamert',
+            'blokkert', 'kansellert', 'tilbakeført',
+        ],
+        futureTerms: [
+            'reservert', 'reservasjon', 'vil bli', 'blir trukket', 'blir belastet', 'planlagt', 'venter',
+            'faktura',
+            'ventende', 'forespørsel', 'ber om', 'hvis', 'var det deg', 'har du', 'bekreft', 'forfaller',
+            'neste kjøp', 'ditt neste', 'din neste', 'rabatt',
+            'ny regning', 'regning fra', 'for eksempel', 'eksempel:', 'for å motta', 'kredittkortet',
+            'kredittkortregningen', 'kredittkortet ditt',
+            'godkjent', 'kan ta',
+            'kan ha blitt', 'kan ha', 'muligens', 'eventuelt', 'eksempelvarsel', 'eksempelmelding',
+            'per dag', 'opptil',
+            'foreløpig', 'fra januar',
+            'kanskje',
+        ],
+        debitTerms: ['handlet for',
+            'du betalte', 'betalte', 'har betalt', 'trukket', 'kjøp', 'varekjøp', 'kortkjøp', 'uttak',
+            'din betaling', 'fra deg', 'fra dig',
+            'netthandel', 'kontantuttak', 'gebyr', 'avtalegiro', 'tatt ut', 'er brukt til', 'sendt til',
+            'du har handlet', 'har handlet',
+            'från dig',
+        ],
+        creditTerms: ['penger fått',
+            'har sendt deg', 'sendt deg', 'betalt deg', 'betalt dig', 'du har mottatt', 'mottatt',
+            'innbetaling', 'tilbakebetaling',
+            'innbetaling', 'penger mottatt', 'refusjon',
+        ],
+        purchaseTerms: ['handlet for', 'du betalte', 'kjøp', 'varekjøp', 'kortkjøp',
+            'netthandel', 'er brukt til', 'nettkjøp',
+            'betalt på nett', 'betalt',
+            'har handlet',
+        ],
+        refundTerms: ['tilbakebetaling', 'refusjon', 'refundert'],
+        cashTerms: ['uttak', 'kontantuttak', 'minibank',
+            'tatt ut',
+        ],
+        feeTerms: ['gebyr'],
+        moneyLabels: ['beløp', 'betalte', 'mottatt', 'kjøp', 'uttak'],
+        headingTerms: [
+            'kortkjøp', 'kjøp', 'netthandel', 'kontantuttak', 'uttak', 'gebyr', 'innbetaling',
+            'penger mottatt', 'refusjon', 'tilbakebetaling', 'avtalegiro', 'nettkjøp', 'kjøp på',
+        ],
+    },
+    CZ: {
+        market: 'CZ', currencies: ['CZK'], currencyAliases: { 'Kč': ['CZK'] },
+        rails: ['sepa', 'qr platba'],
+        transferTerms: ['převod', 'příchozí platba', 'odchozí platba',
+            'připsána platba', 'odeslaná platba',
+        ],
+        utilityTerms: ['elektřina', 'záloha na plyn'],
+        recurringTerms: ['inkaso', 'trvalý příkaz'],
+        postedTerms: ['byla odepsána', 'odepsána částka',
+            'platba kartou', 'příchozí platba', 'prichozi platba', 'odchozí platba', 'odchozi platba',
+            'byla provedena', 'proběhla', 'zaplaceno', 'připsáno', 'pripsano', 'odepsáno', 'strženo',
+            'byla stržena', 'vám vrátil', 'vám vrátila',
+            'provedeno',
+            'zaplatili jste', 'připsána refundace',
+        ],
+        failedTerms: [
+            'zamítnuta', 'zamítnuto', 'zamitnuta', 'odmítnuta', 'odmitnuta', 'neprovedena',
+            'nebyla provedena', 'nebyla', 'nebyl', 'nebylo', 'neproběhla', 'neprobehla', 'zrušena',
+            'zrusena', 'vrácena', 'vracena', 'nedostatek prostředků',
+            'neúspěšná', 'neuspesna', 'ověřovací kód', 'overovaci kod', 'nesdělujte',
+            'nebyla stržena', 'žádná částka', 'dosažen', 'překročen',
+            'podvod', 'reklamace', 'reklamována',
+            'vrácen',
+        ],
+        futureTerms: [
+            'čeká na', 'ceka na', 'čekající', 'cekajici', 'rezervace', 'blokace', 'bude odečtena',
+            'bude stržena', 'bude připsána', 'naplánovaná', 'naplanovana', 'žádost o platbu',
+            'zadost o platbu', 'žádá', 'pokud', 'jestliže', 'potvrďte', 'potvrdte', 'provedl jste',
+            'příští', 'sleva', 'slevu',
+            'například', 'příklad:', 'zpracovává', 'zpracování',
+            'autorizována', 'autorizovaná', 'může trvat', 'splátka kreditní karty',
+            'možná', 'pravděpodobně', 'mohla být', 'mohlo být', 'ukázková zpráva', 'ukázka:',
+            'vzorová zpráva',
+            'denně', 'až do', 'nová faktura',
+            'naplánována', 'naplánováno', 'od ledna',
+        ],
+        debitTerms: ['byla odepsána', 'odepsána částka',
+            'platba kartou', 'odchozí platba', 'odchozi platba', 'výběr', 'zaplaceno', 'odepsáno', 'strženo',
+            'nákup', 'online platba', 'internetová platba', 'výběr hotovosti', 'poplatek', 'odeslaná platba',
+            'trvalý příkaz', 'zaplaceno inkaso', 'byla stržena',
+            'zaplatili jste',
+            'vaši platbu', 'vaši platbu přijal',
+        ],
+        creditTerms: ['příchozí platba', 'prichozi platba', 'připsáno', 'pripsano', 'vrácení', 'vraceni',
+            'refundace', 'připsána platba', 'vám vrátil', 'vám vrátila',
+            'připsána refundace',
+        ],
+        purchaseTerms: ['byla odepsána', 'platba kartou', 'nákup',
+            'online platba', 'internetová platba', 'nákup na internetu', 'byla stržena',
+            'zaplatili jste',
+        ],
+        refundTerms: ['vrácení', 'vraceni', 'refundace',
+            'vám vrátil', 'vám vrátila',
+            'refundace',
+        ],
+        cashTerms: ['výběr z bankomatu', 'výběr hotovosti', 'bankomat'],
+        feeTerms: ['poplatek'],
+        moneyLabels: ['částka', 'platba kartou', 'příchozí platba', 'odchozí platba'],
+        headingTerms: [
+            'nákup', 'nákup na internetu', 'online platba', 'internetová platba', 'výběr hotovosti',
+            'výběr z bankomatu', 'poplatek', 'refundace', 'připsána platba', 'odeslaná platba',
+            'trvalý příkaz provedeno', 'zaplaceno inkaso',
+        ],
     },
 };
 },
@@ -1287,12 +2189,25 @@ exports.WORLD_ALERT_MARKET_PACKS = {
 "alert-semantics":function(module,exports,require){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.inspectMarketAlert = exports.accountMovementDirection = void 0;
+exports.worldStatusDoubt = exports.europeanMessageDoubt = exports.hasEuropeanPackWording = exports.hasEuropeanStatusWord = exports.europeanHeadingMovement = exports.namesReaderAsPayee = exports.inspectMarketAlert = exports.endsWithEuropeanFooterQuestion = exports.accountMovementDirection = exports.englishNoticeOpenerWithdrawn = exports.withAlertSemanticsMemo = void 0;
 const alert_draft_1 = require("@/lib/alert-draft");
 const alert_event_evidence_1 = require("@/lib/alert-event-evidence");
 const alert_institution_grammars_1 = require("@/lib/alert-institution-grammars");
 const alert_market_packs_1 = require("@/lib/alert-market-packs");
+const alert_status_lexicon_1 = require("@/lib/alert-status-lexicon");
 const bank_alert_semantic_rules_1 = require("@/lib/bank-alert-semantic-rules");
+exports.withAlertSemanticsMemo = alert_draft_1.withAlertInspectionMemo;
+const remember = alert_draft_1.rememberDuringInspection;
+const has = (pattern, text) => pattern.global || pattern.sticky ? pattern.test(text) : remember(pattern, text, () => pattern.test(text));
+const draftContextKeys = new WeakMap();
+const memoDraft = (source, context) => {
+    const aliases = context.currencyAliases ?? {};
+    let aliasKey = draftContextKeys.get(aliases);
+    if (aliasKey === undefined)
+        draftContextKeys.set(aliases, aliasKey = JSON.stringify(aliases));
+    const key = `${aliasKey}\u0000${JSON.stringify(context.dotDecimalCurrencies ?? null)}\u0000${source}`;
+    return remember(alert_draft_1.inspectAlertDraft, key, () => (0, alert_draft_1.inspectAlertDraft)(source, context));
+};
 const AUTHENTICATION = /\b(?:otp|one[ -]?time password|3d secure|3ds|verification code|security code|sicherheitscode|c[óo]digo de (?:seguridad|verifica[cç][aã]o|verificaci[oó]n)|codice di sicurezza|beveiligingscode|approve (?:this )?(?:payment|purchase)|fraud (?:check|alert)|did you (?:make|recogni[sz]e|authori[sz]e) (?:this|the) (?:\w+ ){0,3}(?:purchase|transaction|charge|payment)|reconoces (?:esta|este|la|el) (?:compra|cargo|transacci[oó]n|operaci[oó]n)|reconhece (?:esta|essa|a|o) (?:compra|transa[cç][aã]o|opera[cç][aã]o))\b|code de s[ée]curit[ée]|رمز (?:التحقق|التأكيد)|كلمة المرور/i;
 const FAILED = /\b(?:declined|failed|unsuccessful|rejected|not approved|insufficient funds|returned unpaid|recusad[oa]|rechazad[oa]|declinad[oa]|no aprobad[oa]|no autorizad[oa]|no procede|no aplicad[oa])\b|\bn[aã]o\s+(?:aprovad[oa]|autorizad[oa])\b|مرفوض(?:ة)?|فشل(?:ت)?|تعذر|असफल|अस्वीकृत/i;
 const NEGATED_POSTING = [
@@ -1303,33 +2218,120 @@ const NEGATED_POSTING = [
     /\bniet\s+(?:[\p{L}\p{M}'’-]+\s+){0,3}(?:betaald|afgeschreven|bijgeschreven|terugbetaald)(?=$|[^\p{L}\p{N}])/iu,
     /(?:^|[^\p{L}\p{N}])n[aã]o\s+(?:[\p{L}\p{M}'’-]+\s+){0,4}(?:pag[oa]|debitad[oa]|creditad[oa]|cobrad[oa]|reembolsad[oa]|conclu[ií]d[oa])(?=$|[^\p{L}\p{N}])/iu,
     /\b(?:not|never|hasn['’]t|haven['’]t|didn['’]t)\s+(?:(?:yet|been|be)\s+){0,2}(?:received|credited|debited|deducted|deposited|charged|paid)\b/iu,
+    /(?:^|[^\p{L}\p{N}])ne(?:proběh|probeh|proveden|provedl|připsán|pripsan|zaplacen|odepsán|odepsan|stržen|strzen|uskutečn|uskutecn|realizován|realizovan)\p{L}*/iu,
+    /\b(?:not|never|hasn['’]t|haven['’]t|didn['’]t|wasn['’]t|weren['’]t|couldn['’]t|can['’]t|cannot)\s+(?:(?:yet|been|be)\s+){0,2}(?:made|sent|used|approved|taken|withdrawn|posted|completed|processed)\b/i,
 ];
 const NEGATED_SETTLEMENT = /\b(?:nothing|no\s+(?:funds|amount|money|charges?|payment))\s+(?:(?:was|were|has|have)\s+)?(?:(?:yet|been)\s+){0,2}(?:debited|credited|charged|paid|transferred|deposited)\b/iu;
 const PENDING_OR_AUTHORIZED = /\b(?:pending(?:\s+(?:acceptance|review|authori[sz]ation|approval|processing|transaction|confirmation))?|awaiting\s+(?:acceptance|review|authori[sz]ation|approval|processing|confirmation)|authori[sz]ation\s+(?:only|hold|pending)|pre-?authori[sz]ation(?!\s+(?:debit|payment))|on\s+hold|being\s+(?:processed|authori[sz]ed|reviewed)|requires?\s+(?:your\s+)?(?:approval|authori[sz]ation|confirmation)|limit\s+(?:changed|set|updated|increased|reduced))\b|(?:^|[^\p{L}\p{N}])(?:pendente|pendiente|em\s+processamento|em\s+an[aá]lise|en\s+proceso|en\s+revisi[oó]n|aguardando\s+(?:aprova[cç][aã]o|confirma[cç][aã]o|autoriza[cç][aã]o)|aguarda\s+(?:aprova[cç][aã]o|confirma[cç][aã]o|autoriza[cç][aã]o)|pendiente\s+de\s+(?:autorizaci[oó]n|aprobaci[oó]n)|requiere\s+(?:tu\s+|su\s+)?(?:autorizaci[oó]n|aprobaci[oó]n|confirmaci[oó]n)|por\s+autorizar|retenid[oa]|bloquead[oa]|pr[eé]-?autoriza[cç][aã]o|preautorizaci[oó]n)(?=$|[^\p{L}\p{N}])/iu;
 const REQUEST_LIFECYCLE = /\b(?:(?:interac\s+e-?transfer|payto(?:\s+agreement)?|transfer|payment|purchase|money)\s+request)\b(?:[^.!?]|\.(?=\d)){0,140}\b(?:received|approved|accepted|created|sent|awaiting\s+approval|awaiting\s+confirmation)\b|(?:^|[^\p{L}\p{N}])(?:solicita[cç][aã]o\s+de\s+(?:pagamento|transfer[eê]ncia|pix)|pedido\s+de\s+(?:pagamento|pix)|solicitud\s+de\s+(?:pago|transferencia|cobro|dinero))(?=$|[^\p{L}\p{N}])/iu;
 const EXPLICIT_SETTLEMENT = /\b(?:was|has\s+been|have\s+been|were|successfully)\s+(?:debited|credited|charged|paid|transferred|deposited)\b|(?:^|[^\p{L}\p{N}])(?:foi\s+(?:debitad[oa]|creditad[oa]|pag[oa])|fue\s+(?:cargad[oa]|abonad[oa]|pagad[oa])|ha\s+sido\s+(?:cargad[oa]|abonad[oa]|pagad[oa]))(?=$|[^\p{L}\p{N}])/iu;
-const FUTURE = /\b(?:will (?:be|have been) (?:debited|credited|deposited|refunded|charged|deducted|collected)|will apply|pre[ -]?debit|collect request|payment request|scheduled|due on|payment due|upcoming|mandate (?:created|registered))\b|سيتم (?:خصم|سحب|تحصيل|إيداع|رد)|طلب تحصيل|مستحق|डेबिट किया जाएगा|क्रेडिट किया जाएगा|भुगतान देय/i;
+const FUTURE = /\b(?:will (?:be|have been) (?:debited|credited|deposited|refunded|charged|deducted|collected|posted|available|sent|taken|withdrawn|transferred)|will\s+(?:post|take)\b|will apply|pre[ -]?debit|collect request|payment request|scheduled|due on|payment due|upcoming|mandate (?:created|registered))\b|سيتم (?:خصم|سحب|تحصيل|إيداع|رد)|طلب تحصيل|مستحق|डेबिट किया जाएगा|क्रेडिट किया जाएगा|भुगतान देय/i;
 const STATEMENT = /\b(?:statement|credit card bill|card bill|minimum (?:amount )?due|amount due|payment due date|kontoauszug|extracto|estratto conto|rekeningoverzicht)\b|relev[ée]|كشف حساب|الحد الأدنى المستحق/i;
 const BALANCE = /\b(?:available balance|current balance|avl bal|available limit|credit limit|solde|kontostand|saldo)\b|الرصيد (?:الحالي|المتاح)|الحد (?:المتاح|الائتماني)/i;
 const POSTED = /(?:^|[:.]\s*)payment\s+(?:of\s+)?(?:[a-z]{3}|[$€£₹])\s*[\d.,]+\s+at\b|\byou\s+made\s+an?\b(?:[^.;\n]|\.\d){0,40}?\btransaction\b|\bcharge\s+made\s+(?:online|by\s+phone|in\s+store)\b|\b(?:was|has\s+been|were|have\s+been)\s+deducted\b|\b(?:charge|transaction)\s+(?:of|with)\b(?:[^.;\n]|\.\w){0,80}?\bwas\s+made\b|\bwas\s+used\s+for\b|\bwas\s+charged\s+for\b|\byou\s+withdrew\b|\byou\s+(?:have\s+)?sent\b|\bsent\s+you\b|\b(?:spent|purchase(?:d)?|paid|debited|credited|received|sent|withdrawn|deposited|refund(?:ed)?|revers(?:al|ed)|completed|successful|charged|posted|débité|crédité|effectué|belastet|abgebucht|gutgeschrieben|bezahlt|cargado|abonado|pagado|addebitato|accreditato|afgeschreven|bijgeschreven|betaald)\b|تم (?:الخصم|الإيداع|الدفع|التحويل)|سحب|شراء|دفع|استرداد|डेबिट किया गया|क्रेडिट किया गया|जमा किया गया|भुगतान किया गया/i;
 const CREDIT = /\bsent\s+you\b|\b(?:credited|received|deposit(?:ed)?|refund(?:ed)?|revers(?:al|ed)|credited back|crédité|gutschrift|gutgeschrieben|abonado|accredito|accreditato|bijgeschreven|terugbetaling)\b|تم (?:الإيداع|رد)|استرداد|क्रेडिट|जमा/i;
 const DEBIT = /(?:^|[:.]\s*)payment\s+(?:of\s+)?(?:[a-z]{3}|[$€£₹])\s*[\d.,]+\s+at\b|\byou\s+made\s+an?\b(?:[^.;\n]|\.\d){0,40}?\btransaction\b|\bcharge\s+made\s+(?:online|by\s+phone|in\s+store)\b|\b(?:was|has\s+been|were|have\s+been)\s+deducted\b|\b(?:charge|transaction)\s+(?:of|with)\b(?:[^.;\n]|\.\w){0,80}?\bwas\s+made\b|\bcharge\s+of\b|\bwas\s+used\s+for\b|\bwas\s+charged\s+for\b|\bwithdrew\b|\byou\s+(?:have\s+)?sent\b|\b(?:spent|purchase(?:d)?|paid|debited|withdrawn|charged|débité|belastet|abgebucht|cargado|pagado|addebitato|afgeschreven|betaald)\b|تم (?:الخصم|الدفع)|سحب|شراء|دفع|डेबिट|निकासी|भुगतान/i;
-const REFUND = /\b(?:refund(?:ed)?|revers(?:al|ed)|credited back|remboursement|avoir|erstattung|devolución|reembolso|rimborso|storno|terugbetaling|correctieboeking)\b|استرداد|تم رد|धनवापसी|रिफंड/i;
+const REFUND = /\b(?:refund(?:ed)?|revers(?:al|ed)|credited back|charged\s+back|charge-?backs?|remboursement|avoir|erstattung|devolución|reembolso|rimborso|storno|terugbetaling|correctieboeking)\b|استرداد|تم رد|धनवापसी|रिफंड/i;
 const CASH = /\byou\s+withdrew\b|\b(?:atm|cash machine|cash withdrawal|geldautomat|bargeldabhebung|retrait|retirada|prelievo|geldopname|aeps cash withdrawal)\b|صراف آلي|سحب نقدي|नकद निकासी|एटीएम निकासी/i;
 const FEE = /\b(?:bank fee|service charge|annual fee|annual card fee|monthly fee|monthly account maintenance fee|maintenance fee|commission|overdraft fee|nsf fee|frais|cotisation|gebühr|entgelt|comisión|commissione|canone|kosten)\b|رسوم|عمولة/i;
 const PURCHASE = /(?:^|[:.]\s*)payment\s+(?:of\s+)?(?:[a-z]{3}|[$€£₹])\s*[\d.,]+\s+at\b|\bcard(?:\s+(?:ending\s+|-\s*)?\d{2,4})?\s+charge\s+made\b|\btransaction\s+(?:with|at)\b|\b(?:charge|transaction)\s+of\b(?:[^.;\n]|\.\d){0,80}?\bat\b|\bwas\s+(?:used|charged)\s+for\b(?:[^.;\n]|\.\d){0,60}?\bat\b|\b(?:debited|charged)\s+from\s+your\s+(?:a\/?c|account|card)\b(?:[^.;\n]|\.\d){0,40}?\bat\b|\b(?:purchase|card charged?|card(?:\s+(?:ending\s+)?\d{2,4})?\s+(?:was\s+)?charged|card payment|card used|paid|spent|paiement par carte|achat|kartenzahlung|kartenumsatz|compra con tarjeta|pagamento con carta|acquisto|pinbetaling|pasbetaling)\b|شراء|دفع بالبطاقة|कार्ड खरीद|कार्ड भुगतान|खरीद/i;
-const PAID_YOU = /\bpaid\s+you\b/giu;
+const MONEY = String.raw `(?:(?:[a-z]{3}|[$€£₹¥])\s{0,2}\d[\d.,]{0,15}|(?<![\d.,])\d[\d.,]{0,15}\s{0,2}(?:[a-z]{3}\b|[$€£₹]))`;
+const WORD = String.raw `[a-z-]{1,20}`;
+const GAP = String.raw `(?:[^.;\n?]|\.\d)`;
+const ENGLISH_DEBIT_MOVEMENT = new RegExp([
+    String.raw `\byou(?:['’]ve|\s+have)?\s+made\s+an?\b${GAP}{0,40}?\b(?:transaction|purchase|payment|withdrawal)\b`,
+    String.raw `\b(?:transaction|charge|purchase|withdrawal)\s+(?:of|for)\s+${MONEY}${GAP}{0,80}?\b(?:was|has\s+been)\s+made\b(?!\s+available)`,
+    String.raw `${MONEY}\s+(?:${WORD}\s+){0,4}?(?:transaction|charge|purchase|withdrawal)\s+(?:was|has\s+been)\s+made\b(?!\s+available)`,
+    String.raw `\b(?:charge|transaction|purchase)\s+(?:of|for)\s+${MONEY}${GAP}{0,80}?\b(?:was|has\s+been)\s+approved\b(?!\s+for\b)`,
+    String.raw `\b(?:has\s+been|was)\s+used\s+(?:for\s+${MONEY}|at\b)`,
+    String.raw `\bcard\b${GAP}{0,30}?\bused\s+(?:for\s+${MONEY}|at\b)`,
+    String.raw `\bcard\b${GAP}{0,40}?\b(?:was|has\s+been)\s+charged\b(?!\s+back\b)`,
+    String.raw `(?<!\b(?:made|make|makes|making|first|next|any|every|each|minimum)\s+(?:an?\s+)?)${MONEY}\s+(?:(?:debit|credit)\s+card\s+|debit\s+|card\s+(?:not\s+present\s+)?|online\s+|contactless\s+|pos\s+|international\s+)?(?:transaction|charge|purchase)\s+(?:at|with|made)\b`,
+    String.raw `\bwe(?:['’]ve|\s+have)\s+(?:taken|deducted|debited|charged|collected)\b${GAP}{0,80}?\bfrom\s+your\b`,
+    String.raw `\bwe(?:['’]ve|\s+have)\s+charged\b(?!\s+(?:back|nothing)\b)${GAP}{0,80}?\b(?:to|on)\s+your\s+(?:${WORD}\s+){0,2}?(?:account|acct|card)\b`,
+    String.raw `\b(?:fee|charge|commission)\s+of\s+${MONEY}${GAP}{0,60}?\b(?:was|has\s+been)\s+(?:taken|deducted|debited|charged)\s+(?:from|to)\s+your\b`,
+    String.raw `\b(?:bill\s+)?payment\s+(?:of\s+${MONEY}\s+)?to\b${GAP}{1,60}?\b(?:was|has\s+been)\s+(?:sent|completed|made|processed|paid|successful)\b(?!\s+for\s+(?:approval|review|processing))`,
+    String.raw `\bbill\s+payment\b${GAP}{0,80}?\b(?:was|has\s+been)\s+(?:sent|completed|made|processed|deducted|debited|paid)\b(?!\s+for\s+(?:approval|review|processing))`,
+    String.raw `\byour\s+(?:recent\s+)?${MONEY}\s+(?:(?!(?:limit|threshold|alert)\b)${WORD}\s+){0,3}?(?:transaction|transfer|payment|pmt|withdrawal)\b(?!\s+(?:limit|threshold))${GAP}{0,120}?\b(?:was|is)\s+(?:more|greater|higher|larger)\s+than\s+(?:the|your)\b`,
+].join('|'), 'i');
+const ENGLISH_NOTICE_OPENER = new RegExp([
+    String.raw `(?:^|[:.]\s*)(?:an?\s+)?(?:(?:debit|credit)\s+card\s+|contactless\s+|card\s+|online\s+|pos\s+)?(?:payment|purchase|transaction|charge)\s+of\s+${MONEY}\s+(?:at|with)\b`,
+    String.raw `(?:^|[:.]\s*)(?:an?\s+)?(?:atm|cash)\s+withdrawal\s+of\s+${MONEY}`,
+].join('|'), 'gi');
+const NOTICE_FIELD_WORD = /^(?:at|on|from|in|via|using|with|by|made|your|the|my|a|an|of|debit|credit|card|account|acct|a\/c|current|checking|chequing|ending|no|number|contactless|online|today|yesterday|local|time|visa|mastercard|am|pm|et|est|edt|ct|cst|cdt|pt|pst|pdt|gmt|bst|utc|cet|cest|ist|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec|january|february|march|april|june|july|august|september|october|november|december|mon|tue|wed|thu|fri|sat|sun)$/i;
+const NOTICE_FIELD_NUMBER = /^[x*•·#]{0,16}\d[\d/:.-]{0,15}$/i;
+const isNoticeFieldTail = (tail) => tail.length <= 240 &&
+    tail.split(/[\s,/-]+/u).every((token) => !token || NOTICE_FIELD_WORD.test(token) || NOTICE_FIELD_NUMBER.test(token));
+const NOTICE_COMPLETED = /\b(?:(?:was|has\s+been|were)\s+(?:successfully\s+)?(?:made|approved|posted|charged|completed|processed|debited|deducted|paid)\b(?!\s+for\b)|(?:is|was)\s+(?:more|greater|higher|larger)\s+than\s+(?:the|your)\b)/i;
+const NOTICE_WITHDRAWN = /\b(?:fraud|dispute[ds]?|returned|reversed|refunded|declined|hold|pending|approval|example|sample|limit|renews?|appear|scheduled|tomorrow|soon|upcoming|coming|will|may|might|could|would|should|needs?|requires?|waiting|test|available|trial)\b/i;
+const clauseTailEnd = (text, from) => {
+    let end = from;
+    while (end < text.length && end - from < 240 && !/[\n;!?]/u.test(text[end]) &&
+        !(text[end] === '.' && !(/\d/u.test(text[end - 1] ?? '') && /\d/u.test(text[end + 1] ?? ''))))
+        end += 1;
+    return end;
+};
+const noticeOpenerPosted = (text) => {
+    for (const match of text.matchAll(ENGLISH_NOTICE_OPENER)) {
+        const from = match.index + match[0].length;
+        const tail = text.slice(from, clauseTailEnd(text, from));
+        if (isNoticeFieldTail(tail))
+            return true;
+        if (NOTICE_COMPLETED.test(tail) && !NOTICE_WITHDRAWN.test(tail))
+            return true;
+    }
+    return false;
+};
+const NOTICE_WITHDRAWN_LOWER = /\b(?:fraud|disputed?|returned|reversed|refunded|declined|hold|pending|approval|limit|renews?|renewal|appear|scheduled|tomorrow|soon|upcoming|coming|will|may|might|could|would|should|needs?|requires?|waiting|trial|available|example|sample|test)\b/u;
+const englishNoticeOpenerWithdrawn = (source) => {
+    const text = source.replace(/\s+/gu, ' ');
+    for (const match of text.matchAll(ENGLISH_NOTICE_OPENER)) {
+        const from = match.index + match[0].length;
+        const tail = text.slice(from, clauseTailEnd(text, from))
+            .replace(/\b(?:is|was)\s+(?:more|greater|higher|larger)\s+than\s+(?:the|your)\b.{0,40}?\bin\s+your\s+alerts?\s+settings\b/giu, ' ');
+        if (NOTICE_WITHDRAWN_LOWER.test(tail))
+            return true;
+    }
+    return false;
+};
+exports.englishNoticeOpenerWithdrawn = englishNoticeOpenerWithdrawn;
+const englishDebitMovement = (text) => remember(ENGLISH_DEBIT_MOVEMENT, text, () => ENGLISH_DEBIT_MOVEMENT.test(text) || noticeOpenerPosted(text));
+const ENGLISH_CREDIT_MOVEMENT = new RegExp([
+    String.raw `\bdeposit\s+of\s+${MONEY}${GAP}{0,80}?\b(?:was|has\s+been)\s+made\b(?!\s+available)`,
+    String.raw `\bdeposit\s+of\s+${MONEY}${GAP}{0,80}?\bis\s+(?:now\s+)?available(?=\s*(?:[.;,!]|$)|\s+(?:in|to|on)\s+your\b)`,
+    String.raw `\byour\s+(?:recent\s+)?${MONEY}\s+(?:${WORD}\s+){0,2}?deposit\b${GAP}{0,120}?\b(?:was|is)\s+(?:more|greater|higher|larger)\s+than\s+(?:the|your)\b`,
+].join('|'), 'i');
+const ENGLISH_CASH = /\b(?:atm|cash)\s+withdrawal\b|\bwithdrawal\b(?:[^.;\n?]|\.\d){0,80}?\bat\s+an?\s+atm\b/i;
+const DEPOSIT_WORD = /\bdeposit(?:ed|s)?\b/i;
+const ENGLISH_PEER_TRANSFER = new RegExp(String.raw `\byou(?:['’]ve|\s+have)?\s+(?:successfully\s+)?(?:sent|transferred)\s+${MONEY}\s+to\b(?!\s+(?:your|my)\b)|\byou(?:['’]ve|\s+have)?\s+(?:successfully\s+)?received\s+${MONEY}\s+(?:(?:from|into)\b(?!\s+(?:your|my)\b)|with\b|via\b)`, 'i');
+const ENGLISH_TRANSFER_OUT = new RegExp(String.raw `\byour\s+(?:recent\s+)?${MONEY}\s+(?:external\s+|outgoing\s+|wire\s+|online\s+)?transfer\s+to\b(?!\s+your\b)`, 'i');
+const CONDITIONAL_CLAUSE = /^\s*(?:[^:\n]{1,40}:\s*)?(?:note\s*[-:–]?\s*)?(?:if|unless|whether|in\s+case|should\s+you|suppose|imagine|once)\b/i;
+const NOT_A_MOVEMENT_CLAUSE = new RegExp([
+    String.raw `^\s*(?:[^:\n]{1,40}:\s*)?(?:make|spend|shop|buy|use|pay|get|earn|enjoy|try)\b`,
+    String.raw `\b(?:your|a|the)\s+(?:first|next)\s+(?:${MONEY}\s+)?(?:purchase|transaction|payment|order|spend)\b`,
+    String.raw `\bapproved\s+for\s+(?:instal{1,2}ments?|emi|financing|conversion|easy\s+payments?)\b|\bconverted\s+(?:to|into)\s+(?:an?\s+)?(?:instal|emi)`,
+    String.raw `\bapproved\s+for\s+(?:a\s+|your\s+)?refund\b|\brefund\s+(?:request\s+)?(?:has\s+been\s+|was\s+|is\s+)?approved\b`,
+    String.raw `\b(?:verification|card\s+check|account\s+check)\b`,
+    String.raw `^\s*(?:[^:\n]{1,40}:\s*)?(?:example|sample(?:\s+alert)?|e\.g\.)\s*[:.,]|\bfor\s+(?:example|instance)\b|\btest\s+charge\b`,
+    String.raw `\bnothing\s+(?:was|has\s+been|were)\s+(?:charged|taken|debited|deducted)\b`,
+    String.raw `\b(?:may|might|could)\s+have\s+been\b`,
+    String.raw `\b(?:charged|taken|debited|deducted)\s+nothing\b`,
+].join('|'), 'i');
+const PAID_YOU = /\bpaid\s+you\b|\bsent\s+you(?=\s+(?:[a-z]{3}\s?|[$€£₹¥])\d)/giu;
 const NOT_A_PAYER = /\b(?:someone|somebody|anyone|anybody|a\s+friend|if|whether|when|whenever|once|unless|after|every\s+time|earn|get|has|have|had|did|does|do|not|never|hasn['’]t|haven['’]t|didn['’]t|who|that)\b/iu;
-const peerPaidYou = (text) => [...text.matchAll(PAID_YOU)].some((match) => {
+const peerPaidYou = (text) => remember(PAID_YOU, text, () => [...text.matchAll(PAID_YOU)].some((match) => {
     const before = text.slice(0, match.index);
     const start = Math.max(before.search(/[^.!?:\n]*$/u), 0);
     const subject = before.slice(start).trim();
     const sentenceEnd = text.slice(match.index).search(/[.!\n](?!\d)|$/u);
     const sentence = text.slice(match.index, match.index + sentenceEnd);
-    return subject.length > 0 && subject.length <= 60 && !NOT_A_PAYER.test(subject) && !sentence.includes('?');
-});
-const accountMovementDirection = (text, qualificationPrefix = '') => {
-    const paidIntoOwnAccount = /\b(?:has\s+been|have\s+been|was|were)\s+paid\s+into\s+your\s+(?:[\p{L}-]+\s+){0,3}?(?:account|acct|a\/?c)\b/iu.exec(text);
+    return subject.length > 0 && subject.length <= 60 && !NOT_A_PAYER.test(subject) && !sentence.includes('?') &&
+        !/\brequest/iu.test(sentence);
+}));
+const accountMovementDirection = (text, qualificationPrefix = '') => remember(accountMovementDirectionUnmemoized, `${qualificationPrefix}\u0000${text}`, () => accountMovementDirectionUnmemoized(text, qualificationPrefix));
+exports.accountMovementDirection = accountMovementDirection;
+const accountMovementDirectionUnmemoized = (text, qualificationPrefix) => {
+    const paidIntoOwnAccount = /\b(?:has\s+been|have\s+been|was|were)\s+paid\s+into\s+your\s+(?:[\p{L}-]+\s+){0,3}?(?:account|acct|acc|a\/?c)(?![\p{L}])/iu.exec(text);
     const ownTransferDeposited = /\byour\s+interac\s+e[ -]?transfer\s+of\b(?:[^;!?\n]|\.(?=\d)){0,120}?\bto\s+(?:[^;!?\n]|\.(?=\d)){1,80}?\b(?:was|has\s+been)\s+deposited\b(?=\s*(?:[.,;!?]|$)|\s+(?:on|into|in|at|by|and)\b)/iu.exec(text);
     const paidToUnownedAccount = /\bpaid\b(?:[^;!?\n]|\.(?=\d)){0,60}?\b(?:to|into)\s+(?!your\b)(?:[\p{L}-]+\s+){0,3}?(?:account|acct|a\/?c)\b/iu.exec(text);
     if (!paidIntoOwnAccount && !ownTransferDeposited && !paidToUnownedAccount)
@@ -1355,35 +2357,62 @@ const accountMovementDirection = (text, qualificationPrefix = '') => {
         return explicitCredit ? 'unknown' : 'debit';
     return explicitDebit || explicitCredit ? null : 'unknown';
 };
-exports.accountMovementDirection = accountMovementDirection;
 const NEAR_BALANCE = /(?:available|current|closing|remaining)\s+balance|avl\s+bal|solde(?: disponible)?|kontostand|الرصيد (?:الحالي|المتاح)/i;
 const NEAR_LIMIT = /(?:available|credit)\s+limit|\bavl\.?\s*lmt\b|الحد (?:المتاح|الائتماني)/i;
 const NEAR_DUE = /(?:minimum (?:amount )?due|amount due|payment due|statement total|outstanding balance)|الحد الأدنى المستحق|المبلغ المستحق/i;
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const termPatterns = new Map();
-const termPattern = (term) => {
-    const cached = termPatterns.get(term);
+const termText = (text) => remember(termText, text, () => text.toLowerCase().replace(/\s+/gu, ' '));
+const termMatchers = new WeakMap();
+const termKey = (value) => value.trim().toLocaleLowerCase('en-US').split(/\s+/u).join(' ');
+const termAlternation = (keys) => [...keys].sort((a, b) => b.length - a.length)
+    .map((key) => key.split(' ').map(escapeRegExp).join('\\s+')).join('|');
+const termMatcher = (terms) => {
+    const cached = termMatchers.get(terms);
     if (cached)
         return cached;
-    const flexibleTerm = term.trim().split(/\s+/u).map(escapeRegExp).join('\\s+');
-    const pattern = new RegExp(`(^|[^\\p{L}\\p{N}])${flexibleTerm}(?=$|[^\\p{L}\\p{N}])`, 'iu');
-    if (termPatterns.size >= 1024)
-        termPatterns.clear();
-    termPatterns.set(term, pattern);
-    return pattern;
+    const byKey = new Map();
+    for (const term of terms)
+        if (!byKey.has(termKey(term)))
+            byKey.set(termKey(term), term);
+    const free = [...byKey.keys()].filter((key) => !key.startsWith('^'));
+    const anchored = [...byKey.keys()].filter((key) => key.startsWith('^')).map((key) => key.slice(1));
+    const arms = [
+        ...(free.length ? [`(?:^|[^\\p{L}\\p{N}])(${termAlternation(free)})`] : []),
+        ...(anchored.length ? [`(?:^|[:!]\\s*|\\.\\s+|\\s[-–]\\s+)[^\\p{L}\\p{N}]{0,4}?(${termAlternation(anchored)})`] : []),
+    ];
+    const pattern = new RegExp(`(?:${arms.join('|')})(?=$|[^\\p{L}\\p{N}])`, 'iu');
+    const needles = [...new Set([...free, ...anchored])];
+    const matcher = { pattern, byKey, needles: needles.some((needle) => alert_draft_1.FOLD_UNSAFE.test(needle)) ? null : needles };
+    termMatchers.set(terms, matcher);
+    return matcher;
 };
 const findTerm = (text, terms) => {
-    for (const term of terms) {
-        if (termPattern(term).test(text))
-            return term;
+    if (!terms.length)
+        return null;
+    return remember(terms, text, () => findTermUnmemoized(text, terms));
+};
+const findTermUnmemoized = (text, terms) => {
+    const { pattern, byKey, needles } = termMatcher(terms);
+    if (needles && !alert_draft_1.FOLD_UNSAFE.test(text)) {
+        const folded = termText(text);
+        if (!needles.some((needle) => folded.includes(needle)))
+            return null;
     }
-    return null;
+    const match = pattern.exec(text);
+    if (!match)
+        return null;
+    const freeText = match[1];
+    const key = freeText !== undefined && byKey.has(termKey(freeText)) ? termKey(freeText) : `^${termKey(match[2] ?? match[1] ?? '')}`;
+    return byKey.get(key) ?? terms[0];
 };
 const isClauseBoundary = (text, index) => {
     const character = text[index];
     if (character === '\n' || character === '\r' || character === ';')
         return true;
     if (character !== '.' && character !== '!' && character !== '?')
+        return false;
+    if (character === '.' && /(?:^|[^\p{L}])kr$/iu.test(text.slice(Math.max(0, index - 3), index)) &&
+        /^ \p{Ll}/u.test(text.slice(index + 1, index + 3)))
         return false;
     return !/\d/u.test(text[index - 1] ?? '') || !/\d/u.test(text[index + 1] ?? '');
 };
@@ -1398,18 +2427,37 @@ const semanticClause = (text, span) => {
         end += 1;
     return text.slice(start, end).trim() || text;
 };
+const EUROPEAN_FOOTER_QUESTION = /(?<!\p{L})(?:unbekannte\s+(?:zahlung|buchung|transaktion)|nicht\s+von\s+ihnen|ce\s+n['’]est\s+pas\s+vous|op[ée]ration\s+inconnue|vous\s+ne\s+reconnaissez\s+pas(?:\s+cette\s+op[ée]ration)?|niet\s+herkend|herkent\s+u\s+dit\s+niet|no\s+reconoces(?:\s+(?:esta|la)\s+operaci[oó]n)?|no\s+has\s+sido\s+t[uú]|non\s+riconosci(?:\s+l['’]operazione)?|n[aã]o\s+reconhece(?:\s+este\s+movimento)?|nie\s+rozpoznajesz(?:\s+transakcji)?|to\s+nie\s+ty|känner\s+du\s+inte\s+igen\s+(?:köpet|transaktionen|betalningen)|inte\s+du|kender\s+du\s+ikke\s+(?:købet|transaktionen|betalingen)|ikke\s+dig|ikke\s+deg|kjenner\s+du\s+ikke\s+igjen(?:\s+(?:kjøpet|transaksjonen))?|nebyli\s+jste\s+to\s+vy|nepoznáváte\s+platbu|abmelden|afmelden|afmeld)\s*$/iu;
+const endsWithEuropeanFooterQuestion = (textBeforeQuestionMark) => {
+    const match = EUROPEAN_FOOTER_QUESTION.exec(textBeforeQuestionMark);
+    if (!match)
+        return false;
+    const before = textBeforeQuestionMark.slice(0, match.index);
+    return /^\p{Lu}/u.test(match[0]) && !/[,;]\s*$/u.test(before);
+};
+exports.endsWithEuropeanFooterQuestion = endsWithEuropeanFooterQuestion;
+const clauseEndsInQuestion = (text, span, originalCase = text) => {
+    let end = Math.max(0, Math.min(span.end, text.length));
+    while (end < text.length && !isClauseBoundary(text, end))
+        end += 1;
+    return text[end] === '?' && !/ {3}$/u.test(text.slice(0, end)) &&
+        !(0, bank_alert_semantic_rules_1.endsWithFooterQuestion)(originalCase.slice(Math.max(0, end - 48), end)) &&
+        !(0, exports.endsWithEuropeanFooterQuestion)(originalCase.slice(Math.max(0, end - 64), end));
+};
 const moneyCandidateRole = (text, span, pack) => {
     const nearby = semanticClause(text, span).replace(/\s+/gu, ' ');
-    if (NEAR_LIMIT.test(nearby))
+    if (has(NEAR_LIMIT, nearby))
         return 'limit';
-    if (NEAR_DUE.test(nearby))
+    if (has(NEAR_DUE, nearby))
         return 'due';
-    if (NEAR_BALANCE.test(nearby))
+    if (has(NEAR_BALANCE, nearby))
         return 'balance';
-    if (FEE.test(nearby))
+    if (has(FEE, nearby))
         return 'fee';
-    if (DEBIT.test(nearby) || CREDIT.test(nearby) || PURCHASE.test(nearby) ||
-        CASH.test(nearby) || REFUND.test(nearby) ||
+    if (has(DEBIT, nearby) || has(CREDIT, nearby) || has(PURCHASE, nearby) ||
+        has(CASH, nearby) || has(REFUND, nearby) ||
+        englishDebitMovement(nearby) || has(ENGLISH_CREDIT_MOVEMENT, nearby) ||
+        has(ENGLISH_PEER_TRANSFER, nearby) ||
         findTerm(nearby, pack.purchaseTerms ?? []) ||
         findTerm(nearby, pack.refundTerms ?? []) ||
         findTerm(nearby, pack.cashTerms ?? []) ||
@@ -1430,22 +2478,25 @@ const primaryCandidate = (roles) => {
     return roles.length === 1 && roles[0] === 'unknown' ? 0 : null;
 };
 const postingStatus = (text, postedTerms = [], failedTerms = [], futureTerms = []) => {
-    if (AUTHENTICATION.test(text))
+    if (has(AUTHENTICATION, text))
         return 'informational';
-    if (FAILED.test(text) || NEGATED_POSTING.some((pattern) => pattern.test(text)) ||
+    if (has(FAILED, text) || NEGATED_POSTING.some((pattern) => has(pattern, text)) ||
         findTerm(text, failedTerms))
         return 'failed';
-    if (STATEMENT.test(text))
+    if (has(STATEMENT, text))
         return 'informational';
-    const hasTransactionEvidence = POSTED.test(text) || Boolean(findTerm(text, postedTerms));
-    if (FUTURE.test(text) || findTerm(text, futureTerms))
-        return 'future';
-    const settled = EXPLICIT_SETTLEMENT.test(text) && !NEGATED_SETTLEMENT.test(text);
-    if (REQUEST_LIFECYCLE.test(text) && !settled)
+    if (has(CONDITIONAL_CLAUSE, text) || has(NOT_A_MOVEMENT_CLAUSE, text))
         return 'informational';
-    if (PENDING_OR_AUTHORIZED.test(text) && !settled)
+    const hasTransactionEvidence = has(POSTED, text) || englishDebitMovement(text) ||
+        has(ENGLISH_CREDIT_MOVEMENT, text) || has(ENGLISH_PEER_TRANSFER, text) || Boolean(findTerm(text, postedTerms));
+    if (has(FUTURE, text) || findTerm(text, futureTerms))
         return 'future';
-    if (BALANCE.test(text) && !hasTransactionEvidence)
+    const settled = has(EXPLICIT_SETTLEMENT, text) && !has(NEGATED_SETTLEMENT, text);
+    if (has(REQUEST_LIFECYCLE, text) && !settled)
+        return 'informational';
+    if (has(PENDING_OR_AUTHORIZED, text) && !settled)
+        return 'future';
+    if (has(BALANCE, text) && !hasTransactionEvidence)
         return 'informational';
     return hasTransactionEvidence ? 'posted' : 'unknown';
 };
@@ -1459,8 +2510,10 @@ const moneyDirection = (text, debitTerms = [], creditTerms = []) => {
         return accountCredit ? 'credit' : 'debit';
     if (peerPaidYou(text))
         return 'credit';
-    const credit = CREDIT.test(text) || Boolean(findTerm(text, creditTerms));
-    const debit = DEBIT.test(text) || Boolean(findTerm(text, debitTerms));
+    const credit = has(CREDIT, text) || has(ENGLISH_CREDIT_MOVEMENT, text) || Boolean(findTerm(text, creditTerms));
+    const debit = has(DEBIT, text) || englishDebitMovement(text) || has(ENGLISH_CASH, text) ||
+        /\byou(?:['’]ve|\s+have)?\s+(?:successfully\s+)?(?:sent|transferred)\b/i.test(text) ||
+        Boolean(findTerm(text, debitTerms));
     if (credit === debit)
         return 'unknown';
     return credit ? 'credit' : 'debit';
@@ -1468,7 +2521,7 @@ const moneyDirection = (text, debitTerms = [], creditTerms = []) => {
 const inspectMarketAlert = (source, market, context = {}) => {
     const pack = (0, alert_market_packs_1.alertMarketPack)(market);
     const draftContext = { currencyAliases: pack.currencyAliases, dotDecimalCurrencies: pack.dotDecimalCurrencies };
-    const draft = (0, alert_draft_1.inspectAlertDraft)(source, draftContext);
+    const draft = memoDraft(source, draftContext);
     const text = draft.normalizedText.toLowerCase();
     const moneyRoles = draft.candidates.map((candidate) => moneyCandidateRole(text, candidate.span, pack));
     const primaryCandidateIndex = primaryCandidate(moneyRoles);
@@ -1476,40 +2529,42 @@ const inspectMarketAlert = (source, market, context = {}) => {
         ? null
         : draft.candidates[primaryCandidateIndex]?.span ?? null;
     const semanticText = semanticClause(text, primarySpan);
-    const semanticDraft = (0, alert_draft_1.inspectAlertDraft)(semanticText, draftContext);
+    const semanticDraft = memoDraft(semanticText, draftContext);
     const classificationText = semanticText.replace(/\s+/gu, ' ');
     const initialStatus = postingStatus(classificationText, pack.postedTerms, pack.failedTerms, pack.futureTerms);
     const rail = findTerm(classificationText, pack.rails);
     const transfer = findTerm(classificationText, pack.transferTerms);
     const utility = findTerm(classificationText, pack.utilityTerms);
     const recurring = findTerm(classificationText, pack.recurringTerms);
-    const eventEvidence = (0, alert_event_evidence_1.inspectAlertEventEvidence)(text, {
+    const eventEvidence = remember(alert_event_evidence_1.inspectAlertEventEvidence, `${JSON.stringify([recurring, utility, primaryCandidateIndex])}\u0000${text}`, () => (0, alert_event_evidence_1.inspectAlertEventEvidence)(text, {
         recurringTerm: recurring,
         utilityTerm: utility,
         primaryCandidateIndex,
-    });
+    }));
     const lifecycleOnly = eventEvidence.scheduledDebit && [
         'created', 'modified', 'paused', 'resumed', 'cancelled', 'funds-released',
     ].includes(eventEvidence.scheduledDebit.event);
     const ungroundedExecution = eventEvidence.scheduledDebit?.event === 'executed' &&
         initialStatus !== 'posted';
-    const challenged = initialStatus === 'posted' && (0, bank_alert_semantic_rules_1.isTransactionVerificationChallenge)(text);
+    const challenged = initialStatus === 'posted' && (remember(bank_alert_semantic_rules_1.isTransactionVerificationChallenge, text, () => (0, bank_alert_semantic_rules_1.isTransactionVerificationChallenge)(text)) ||
+        (primarySpan !== null && clauseEndsInQuestion(text, primarySpan, draft.normalizedText.length === text.length ? draft.normalizedText : text)));
     const status = lifecycleOnly || ungroundedExecution
         ? 'informational'
         : challenged ? 'unknown' : initialStatus;
     const institution = (0, alert_institution_grammars_1.inspectAlertInstitutionGrammar)(draft.normalizedText, market, context.sender);
     let family = 'unknown';
-    if (AUTHENTICATION.test(classificationText))
+    if (has(AUTHENTICATION, classificationText))
         family = 'authentication';
-    else if (status === 'informational' && STATEMENT.test(classificationText))
+    else if (status === 'informational' && has(STATEMENT, classificationText))
         family = 'statement';
-    else if (status === 'informational' && BALANCE.test(classificationText))
+    else if (status === 'informational' && has(BALANCE, classificationText))
         family = 'balance';
-    else if (REFUND.test(classificationText) || findTerm(classificationText, pack.refundTerms ?? []))
+    else if (has(REFUND, classificationText) || findTerm(classificationText, pack.refundTerms ?? []))
         family = 'refund';
-    else if (CASH.test(classificationText) || findTerm(classificationText, pack.cashTerms ?? []))
+    else if ((has(CASH, classificationText) || has(ENGLISH_CASH, classificationText) ||
+        findTerm(classificationText, pack.cashTerms ?? [])) && !has(DEPOSIT_WORD, classificationText))
         family = 'cash-withdrawal';
-    else if (FEE.test(classificationText) || eventEvidence.fee ||
+    else if (has(FEE, classificationText) || eventEvidence.fee ||
         findTerm(classificationText, pack.feeTerms ?? []))
         family = 'fee';
     else if (status === 'posted' && utility)
@@ -1522,7 +2577,11 @@ const inspectMarketAlert = (source, market, context = {}) => {
         family = 'transfer';
     else if (status === 'posted' && peerPaidYou(classificationText))
         family = 'transfer';
-    else if (PURCHASE.test(classificationText) || findTerm(classificationText, pack.purchaseTerms ?? []))
+    else if (status === 'posted' && (has(ENGLISH_PEER_TRANSFER, classificationText) ||
+        has(ENGLISH_TRANSFER_OUT, classificationText)))
+        family = 'transfer';
+    else if (has(PURCHASE, classificationText) || findTerm(classificationText, pack.purchaseTerms ?? []) ||
+        (englishDebitMovement(classificationText) && !/\bwithdraw/i.test(classificationText)))
         family = 'purchase';
     const reasons = [
         ...semanticDraft.reasons,
@@ -1560,6 +2619,478 @@ const inspectMarketAlert = (source, market, context = {}) => {
     };
 };
 exports.inspectMarketAlert = inspectMarketAlert;
+const EUROPEAN_HEADING_MARKETS = ['FR', 'DE', 'ES', 'IT', 'NL', 'PT', 'PL', 'SE', 'DK', 'NO', 'CZ'];
+const EUROPEAN_HEADING_CURRENCIES = new Set(['EUR', 'CHF', 'PLN', 'SEK', 'DKK', 'NOK', 'CZK', 'ISK']);
+const EUROPEAN_FIELD = /^(kto|rek|rach|cta|cpte|úč|c\/c|betrag|händler|haendler|datum|uhrzeit|konto|karte|kartennummer|ort|automat|geldautomat|auftraggeber|empfänger|an|von|verwendungszweck|buchung|buchungstag|valuta|referenz|montant|commerçant|commercant|carte|le|date|compte|de|à|bénéficiaire|beneficiaire|lieu|libellé|cantidad|importe|comercio|tarjeta|fecha(?:\s+(?:de\s+)?operaci[oó]n)?|cuenta|ubicaci[oó]n|beneficiario|concepto|importo(?:\s+operazione)?|esercente|carta|data(?:\s+(?:operazione|do\s+movimento|operacji))?|conto|da|a|causale|bedrag|bij|rekening|afzender|begunstigde|omschrijving|tegenrekening|montante|comerciante|conta|local|para|descritivo|kwota|sprzedawca|karta|od|do|tytuł|tytul|rachunek|summa|belopp|butik|till|från|bankomat|meddelande|beløb|forretning|bogført|pengeautomat|fra|til|tekst|beløp|butikk|bokført|minibank|částka(?:\s+transakce)?|obchodník|účet|pro|zpráva|místo)\.?\s*[:：]\s*\S/iu;
+const EUROPEAN_AMOUNT_FIELD = /^(?:betrag|montant|cantidad|importe|importo(?:\s+operazione)?|bedrag|montante|kwota|summa|belopp|beløb|beløp|částka(?:\s+transakce)?)$/iu;
+const EUROPEAN_FROM_FIELD = /^(?:von|auftraggeber|de|da|afzender|od|från|fra)$/iu;
+const EUROPEAN_TO_FIELD = /^(?:an|empfänger|à|a|bénéficiaire|beneficiaire|beneficiario|para|begunstigde|do|till|til|pro)$/iu;
+const EUROPEAN_BALANCE_LINE = /^(?:neuer\s+|nouveau\s+|new\s+)?(?:saldo|solde|kontostand|guthaben|verfügbar\p{L}*|disponib\p{L}*|plafond|l[ií]mite|limite|beschikba\p{L}*|tillgänglig|tilgjengelig|rådighed|dostępn\p{L}*|zůstatek|volný\s+limit)/iu;
+const EUROPEAN_FOOTER_LINE = /^(?:unbekannte\s+zahlung|sperr-notruf|abmelden|details|mehr\s+info|niet\s+herkend|afmelden|meer\s+info|ce\s+n['’]est\s+pas\s+vous|pour\s+ne\s+plus\s+recevoir|plus\s+d['’]infos|op[ée]ration\s+inconnue|si\s+no\s+reconoces|para\s+darte\s+de\s+baja|m[áa]s\s+info|se\s+non\s+riconosci|gestisci\s+gli\s+avvisi|maggiori\s+informazioni|se\s+n[ãa]o\s+reconhece|pode\s+desativar|mais\s+informa[çc][ãa]o|nie\s+rozpoznajesz|aby\s+zrezygnowa[ćc]|więcej|känner\s+du\s+inte\s+igen|ändra\s+aviseringar|detaljer|kender\s+du\s+ikke|afmeld|ikke\s+deg|avslutt|mer\s+info|nebyli\s+jste\s+to\s+vy|více|https?:\/\/)/iu;
+const EUROPEAN_HEADING_GLUE = new Set(`über bei am um uhr mit ihrer ihre ihr deiner deine der die dem den des karte debitkarte kreditkarte
+girocard geldautomaten geldautomat an von auf ihrem konto girokonto endend online im in zu de du des le la les à a au avec votre
+vos carte chez sur compte courant se terminant par en ligne dab espèces h del el las los con su tu tarjeta cajero terminada débito
+crédito di della il lo alle ore presso tua sua carta allo sportello che termina da van bij op om met je uw betaalpas creditcard
+eindigend aan naar do no na às as com o seu cartão cartao terminado final multibanco w kwotę kwote kartą karty nr dnia z od hos
+på kort ditt dit som slutar slutter kl med der u kartou dne v vaší`.split(/\s+/u));
+const EUROPEAN_NOTICE_PREFIX = /^(?:termin|dauerauftrag|entwurf|demo|retoure|vorabinformation|aankondiging|vooraankondiging|préavis|preaviso|avviso\s+di|zapowiedź|förhandsbesked|varsling|oznámení|erinnerung|hinweis|ankündigung|vorankündigung|aktion|angebot|monatsübersicht|übersicht|abrechnung|offre|promo|relevé|oferta|promoción|resumen|offerta|riepilogo|estratto|aanbieding|overzicht|promocja|zestawienie|erbjudande|översikt|tilbud|oversigt|oversikt|nabídka|akce|přehled|achtung|wichtig|info|information|beispiel|muster|rappel|avis|attention|exemple|recordatorio|aviso|importante|ejemplo|promemoria|avviso|esempio|herinnering|melding|let\s+op|voorbeeld|lembrete|exemplo|przypomnienie|uwaga|przykład|påminnelse|obs|exempel|påmindelse|eksempel|varsel|připomínka|upozornění|příklad)\b/iu;
+const EUROPEAN_OWN_CARD = /(?<!\p{L})(?:carte\s+de\s+cr[ée]dit|kreditkart\p{L}*|credit\s*card|creditcard|tarjeta\s+de\s+cr[ée]dito|carta\s+di\s+credito|cart[ãa]o\s+de\s+cr[ée]dito|kart\p{L}*\s+kredytow\p{L}*|kreditkort\p{L}*|kredittkort\p{L}*|kreditní\s+kart\p{L}*)(?!\p{L})/iu;
+const EUROPEAN_TO_READER = /(?<!\p{L})(?:an\s+dich|an\s+sie\b|für\s+dich|à\s+vous|à\s+votre\s+attention|pour\s+vous|para\s+ti|para\s+si|para\s+você|para\s+voce|te\s+ha\s+enviado|verso\s+di\s+te|a\s+te|per\s+te|naar\s+je|aan\s+je|naar\s+u|til\s+dig|til\s+deg|till\s+dig|dla\s+ciebie|pro\s+vás|pro\s+tebe)(?!\p{L})/iu;
+const namesReaderAsPayee = (text) => EUROPEAN_TO_READER.test(text);
+exports.namesReaderAsPayee = namesReaderAsPayee;
+const EUROPEAN_FROM_NAME = /(?<!\p{L})(?:[Vv]on|[Pp]ar|[Pp]or|[Dd]a|[Dd]e|[Vv]an|[Ff]ra|[Ff]rån|[Oo]d|de\s+la\s+part\s+de)\s+(?![A-Z]{3}\b)(?:\p{Lu}{2,}|\p{Lu}\p{Ll}+\s+\p{Lu})/u;
+const EUROPEAN_DOUBT = new RegExp(String.raw `(?<![\p{L}\p{N}])(?:` + [
+    'storn', 'ablehn', 'abgelehn', 'autoris', 'autoriz', 'rückbuch', 'rücklast', 'abbruch', 'abgebroch', 'abgewies',
+    'widerruf', 'verweiger', 'fehl', 'betrug', 'deckung', 'beispiel', 'muster', 'test', 'vorschau', 'versuch',
+    'morgen', 'nicht', 'kein', 'ausstehend', 'vorgemerkt', 'vormerk', 'reserv', 'prüf', 'offen', 'simul', 'geplant',
+    'demnächst', 'frage', 'sicherheit', 'warnung', 'umsätze', 'monatsumsatz', 'gesamt', 'summe', 'übersicht',
+    'kostenlos', 'gratis', 'bonus', 'prämie', 'aktion', 'angebot', 'rabatt', 'gesperrt', 'blockiert', 'vorläufig',
+    'annul', 'différ', 'differ', 'demain', 'exempl', 'prévi', 'previ', 'refus', 'rejet', 'bloqu', 'attente', 'offre',
+    'gratuit', 'relevé', 'contest', 'fraud', 'prochain', 'mañana', 'manana', 'fondos', 'cancel', 'rechaz', 'deneg',
+    'pendient', 'ejemplo', 'prueba', 'oferta', 'resumen', 'retenid', 'cativ', 'amanhã', 'amanha', 'recus',
+    'pendent', 'domani', 'sospes', 'rifiut', 'attesa', 'esempio', 'prova', 'offerta', 'bloccat', 'riepilogo',
+    'geweig', 'afgewez', 'geannul', 'geautoris', 'behandel', 'voorbeeld', 'aanbied', 'totaal', 'overzicht', 'geblokk',
+    'wstrzym', 'toku', 'jutro', 'anulow', 'odrzuc', 'autoryz', 'oczekuj', 'symul', 'przykład', 'darmow', 'zablok',
+    'imorgon', 'nekad', 'avbrut', 'preliminär', 'väntar', 'erbjud', 'totalt', 'spärr', 'afvist', 'avvist',
+    'foreløb', 'foreløp', 'venter', 'eksempel', 'tilbud', 'samlet', 'blokeret', 'blokkert', 'blokov', 'gesperr', 'spärr', 'zítra', 'zruš', 'zamít',
+    'čeká', 'rezerv', 'příklad', 'zdarma', 'nabíd', 'celkem', 'pending', 'declin', 'revers', 'sample', 'preview',
+    'payout', 'cashback', 'referral', 'tomorrow', 'statement', 'hold', 'possib', 'tôt', 'sobald', 'asap',
+].join('|') + String.raw `|(?:ej|inte|ikke|nie|non|not|niet|pas)(?![\p{L}\p{N}]))`, 'iu');
+const EUROPEAN_NAME_DOUBT = new RegExp(EUROPEAN_DOUBT.source.replace(/'?(?:beispiel|muster|exempl|ejemplo|esempio|voorbeeld|przykład|eksempel|příklad|sample)\|/gu, ''), 'iu');
+const europeanDoubt = (text) => EUROPEAN_DOUBT.test((0, alert_status_lexicon_1.withoutNeutralPhrases)(text)) || europeanStatus(text, true, [], true);
+const EUROPEAN_BACK = /(?<![\p{L}\p{N}])(?:erstatt|rückerstatt|gutschrift|zurück|rembours|terug|devol|devuel|rimbors|zwrot|zwróc|vrác|vrat|återbet|tilbage|tilbake|refund|estorn|reembols|stornat|storno|revers)/iu;
+const EUROPEAN_CARD_PURPOSE = /(?<![\p{L}\p{N}])(?:karten?abrechnung|kreditkart|carte|tarjeta|carta|cart[ãa]o|karta|kort|creditcard|credit\s*card|visa|mastercard|amex|nexi|cartasi)/iu;
+const EUROPEAN_DATE_FIELD = /^(?:datum|date|le|fecha(?:\s+(?:de\s+)?operaci[oó]n)?|data(?:\s+(?:operazione|do\s+movimento|operacji))?|bogført|bokført|buchung|buchungstag|valuta|uhrzeit)$/iu;
+const EUROPEAN_INSTRUMENT_FIELD = /^(?:kto|rek|rach|cta|cpte|úč|c\/c|konto|karte|kartennummer|carte|compte|tarjeta|cuenta|carta|conto|rekening|tegenrekening|conta|karta|rachunek|účet|referenz)$/iu;
+const EUROPEAN_PURPOSE_FIELD = /^(?:verwendungszweck|libellé|concepto|causale|omschrijving|descritivo|tytuł|tytul|meddelande|tekst|zpráva)$/iu;
+const EUROPEAN_DATE_VALUE = new RegExp(String.raw `^(?:[\d\s./:,h-]|kl\.?|uhr|um|à|a\s+las|alle(?:\s+ore)?|om|às|o|(?:${['jan', 'feb', 'mär', 'mar', 'apr', 'mai', 'may', 'jun', 'jul', 'aug', 'sep', 'okt', 'oct', 'nov', 'dez', 'dec', 'des', 'ene', 'gen', 'fév', 'fev', 'avr', 'juin', 'juil', 'août', 'ago', 'set', 'ott', 'dic', 'mei', 'maj', 'okt', 'lis', 'říj', 'zář', 'out', 'dez'].join('|')})\p{L}*\.?)+$`, 'iu');
+const EUROPEAN_FOOTER_GLUE = new Set(`sperr-notruf sperrnotruf bel ons op ring appelez le la llama al chiama il ligue zadzwoń volejte stuur stop
+stopp send envía envia baja répondez repondez wyślij wyslij an nach rufen sie uns call us at pour ne plus recevoir d'alertes alertes
+d alerts para darte de gestisci gli avvisi nell'app nell app pode desativar alertas na app aby zrezygnować ändra aviseringar i appen
+afmeld afmelden avslutt abmelden details mehr meer plus d'infos infos más mas info maggiori informazioni mais informação więcej více
+detaljer ce n'est n est pas vous si no reconoces esta operación operacion se non riconosci l'operazione operazione não nao reconhece
+este movimento nie rozpoznajesz transakcji känner du inte igen köpet kender ikke købet ikke deg nebyli jste to vy niet herkend
+unbekannte zahlung opération inconnue contactez-nous au`.split(/\s+/u));
+const EUROPEAN_BALANCE_GLUE = new Set(`neuer nouveau new saldo solde disponible kontostand guthaben verfügbarer verfügbar kreditrahmen
+disponibilità residua disponibile plafond de paiement restant disponível disponivel límite limite beschikbaar beschikbare limiet
+tillgänglig kredit disponibelt belopp disponibel rådighed på kortet tilgjengelig kreditt dostępne środki dostępny limit
+disponibilní zůstatek volný karty available balance disp`.split(/\s+/u));
+const oneSlip = (word, known) => {
+    if (Math.abs(word.length - known.length) > 1 || word === known)
+        return word === known;
+    let i = 0;
+    while (i < word.length && i < known.length && word[i] === known[i])
+        i += 1;
+    if (word.length === known.length) {
+        if (word.slice(i + 1) === known.slice(i + 1))
+            return true;
+        return word[i] === known[i + 1] && word[i + 1] === known[i] && word.slice(i + 2) === known.slice(i + 2);
+    }
+    return word.length > known.length ? word.slice(i + 1) === known.slice(i) : word.slice(i) === known.slice(i + 1);
+};
+const GLUE_WORDS = [...new Set([...EUROPEAN_FOOTER_GLUE, ...EUROPEAN_BALANCE_GLUE])].filter((word) => word.length >= 5);
+const glueWord = (lower) => EUROPEAN_FOOTER_GLUE.has(lower) || EUROPEAN_BALANCE_GLUE.has(lower) ||
+    (lower.length >= 5 && !europeanStatus(lower) && GLUE_WORDS.some((known) => oneSlip(lower, known)));
+const onlyFooterOrBalance = (text) => (text.replace(/https?:\/\/\S+|\S+\.example\/\S*/gu, ' ').match(/[\p{L}\p{M}'’-]+/gu) ?? []).every((word) => {
+    const lower = word.toLocaleLowerCase('de-DE');
+    return glueWord(lower) || /^(?:[A-Z]{3}|kr|zł|Kč|Fr|STOPP?|BAJA)$/u.test(word);
+});
+const EUROPEAN_REFERENCE = /(?<![\p{L}\p{N}])(?:ref(?:erenz|erence|erens|eranse)?\.?|rif\.?|réf\.?|kenmerk|beleg-?nr\.?|bilagsnr\.?|vs|id\s+transakcji|nr\s+ref\.?|n[º°]\.?\s*(?:de\s+)?operaci[oó]n|n\.?\s*º\s*opera[cç][ãa]o|cod\.?\s+operazione|n[º°]\.?\s*(?:d['’])?autori[sz]ation|code\s+d['’]autori[sz]ation|auth(?:ori[sz]ation)?\s+code|terminal\s+id)\s*[:#.]?\s*[A-Z]{0,3}-?\d[\d-]{2,19}(?![\p{L}\p{N}])/giu;
+const LEADING_DATE = /^\s*(?:\d{1,2}[./-]\d{1,2}[./-]\d{2,4}|\d{1,2}\.?\s+\p{L}{3,5}\.?)(?:\s+(?:à|a\s+las|às|om|kl\.?|um)?\s*\d{1,2}[:.h]\d{2})?\s*[-–:]?\s+(?=\p{L})/u;
+const TRAILING_BANK = /[ \t]+[-–][ \t]+\p{Lu}[\p{L}&.'’]*(?:[ \t]+[\p{Lu}\p{N}][\p{L}\p{N}&.'’]*){0,2}[ \t]*$/u;
+const LONE_MASK = /(?:^|(?<=\n))[ \t]*\(?(?:[x*•·]{2,}|\.{2,3}|\*)\d{2,6}\)?[ \t]*(?=\n|$)|[ \t]\((?:[x*•·]+|\.{2,3})\d{2,6}\)/giu;
+const blank = (match) => ' '.repeat(match.length);
+const blankReference = (match) => europeanDoubt(match.replace(/^\S+\s*/u, '')) || EUROPEAN_BACK.test(match) ? match : blank(match);
+const BANK_NAME = /(?<![\p{L}])(?:bank|banque|banca|banco|banka|sparkasse|kasse|kassa|spořitelna|raiffeisen|rabobank|nordea|belfius|intesa|sanpaolo|unicredit|crédit|credit\s+agricole|caixa|santander|bbva|ing|kbc|abn|commerzbank|postfinance|ubs|seb|dnb|swedbank|handelsbanken|danske|jyske|nykredit|millennium|novo\s+banco|cgd|pekao|pko|mbank|čsob|csob|erste|revolut|n26|bunq|vipps|mobilepay|swish|boursobank|lcl|bnp|société\s+générale|sparebank|nationale[-\s]nederlanden)(?![\p{L}])/iu;
+const DECORATIVE_TAIL = /[ \t]*(?:✅|💳|🙂|😊|🔔|🎉|👍|✨|📱|💰|☺️|🛒|💸)[ \t]*$/u;
+const normalizeEuropeanLayout = (source) => {
+    let text = source.replace(EUROPEAN_REFERENCE, blankReference).replace(LONE_MASK, blank).replace(LEADING_DATE, blank)
+        .replace(DECORATIVE_TAIL, blank);
+    text = text.replace(/(^|;[ \t]+|[ \t]\|[ \t]+)([ \t]*[^\p{L}\p{N}\n]*[\p{L}][\p{L}\p{N}&.'’ ]{0,30}?)[ \t]([-–])[ \t]/gmu, (match, lead, head) => EUROPEAN_FIELD.test(`${head.trim().replace(/^[^\p{L}]+/u, '')}: x`) || (lead === '' && BANK_NAME.test(head) &&
+        !head.trim().split(/\s+/u).some((word) => EUROPEAN_NOTICE_PREFIX.test(word)) && !europeanDoubt(head) && /^[ \t]*[^\p{L}\p{N}\n]*(?:[\p{Lu}\p{N}][\p{L}\p{N}&.'’-]*[ \t]*){1,4}$/u.test(head))
+        ? `${lead}${head}: ${' '.repeat(match.length - lead.length - head.length - 2)}` : match);
+    const signature = text.match(TRAILING_BANK);
+    if (signature && BANK_NAME.test(signature[0]) && !europeanDoubt(signature[0]) && !EUROPEAN_BACK.test(signature[0]) &&
+        !EUROPEAN_NOTICE_PREFIX.test(signature[0].replace(/^[ \t]*[-–][ \t]*/u, '')) &&
+        !(0, exports.hasEuropeanPackWording)(signature[0], EUROPEAN_HEADING_MARKETS))
+        text = text.slice(0, signature.index) + blank(signature[0]);
+    return text;
+};
+const EUROPEAN_TRAILER_START = new RegExp(String.raw `(?<![\p{L}\p{N}])(?:` + EUROPEAN_FOOTER_LINE.source.slice(4, -1) +
+    String.raw `|(?:neuer\s+|nouveau\s+)?(?:saldo|solde|kontostand|guthaben|verfügbar\p{L}*|disponib\p{L}*|plafond|l[ií]mite|beschikba\p{L}*|tillgänglig|tilgjengelig|rådighed|dostępn\p{L}*|zůstatek|volný\s+limit))`, 'iu');
+const headingPatterns = new Map();
+const headingPattern = (market) => {
+    if (headingPatterns.has(market))
+        return headingPatterns.get(market);
+    const terms = (0, alert_market_packs_1.alertMarketPack)(market).headingTerms ?? [];
+    const pattern = terms.length ? new RegExp(`^(${termAlternation(terms.map(termKey))})(?=$|[^\\p{L}\\p{N}])`, 'iu') : null;
+    headingPatterns.set(market, pattern);
+    return pattern;
+};
+const nameLike = (part) => {
+    const words = part.match(/[\p{L}\p{M}'’&*.]+/gu) ?? [];
+    if (!words.length || !words.every((word) => /^[\p{Lu}\p{N}*&]/u.test(word)))
+        return false;
+    return /\p{N}/u.test(part) || words.some((word) => /^[\p{Lu}&'’.*-]{2,}$/u.test(word)) || words.length >= 2 ||
+        (words.length === 1 && /^\p{Lu}\p{Ll}{2,}$/u.test(words[0]) && !EUROPEAN_HEADING_GLUE.has(words[0].toLocaleLowerCase('de-DE')));
+};
+const europeanHeadingMovement = (source, maskedSource, principal, moneySpans, packs, sender) => {
+    if (!EUROPEAN_HEADING_CURRENCIES.has(principal.currency) || source.length > 600)
+        return null;
+    source = normalizeEuropeanLayout(source);
+    maskedSource = normalizeEuropeanLayout(maskedSource);
+    const markets = EUROPEAN_HEADING_MARKETS.filter((market) => packs.includes(market));
+    if (!markets.length)
+        return null;
+    const lines = [];
+    let from = 0;
+    for (const match of source.matchAll(/\r?\n|\s+\|\s+|;\s+/gu)) {
+        const text = source.slice(from, match.index);
+        if (text.trim())
+            lines.push({ start: from, text });
+        from = match.index + match[0].length;
+    }
+    if (source.slice(from).trim())
+        lines.push({ start: from, text: source.slice(from) });
+    if (!lines.length || lines.length > 12)
+        return null;
+    let index = 0;
+    const clean = (text) => text.replace(/^[^\p{L}\p{N}]+/u, '');
+    let headingText = clean(lines[0].text);
+    let headingStart = lines[0].start + (lines[0].text.length - headingText.length);
+    let hit = null;
+    const find = (text) => {
+        for (const market of markets) {
+            const match = headingPattern(market)?.exec(text);
+            if (match)
+                return { market, term: match[1] };
+        }
+        return null;
+    };
+    hit = find(headingText);
+    if (!hit) {
+        const prefix = headingText.match(/^(?:[\p{Lu}\p{N}][\p{L}\p{N}&.'’-]*\s*){1,4}:\s*/u);
+        if (prefix && !EUROPEAN_NOTICE_PREFIX.test(prefix[0]) && !europeanDoubt(prefix[0]) &&
+            find(clean(headingText.slice(prefix[0].length)))) {
+            const rest = clean(headingText.slice(prefix[0].length));
+            headingStart += headingText.length - rest.length;
+            headingText = rest;
+            hit = find(rest);
+        }
+        else if (lines.length > 1 && /^(?:[\p{Lu}\p{N}][\p{L}\p{N}&.'’-]*\s*){1,3}$/u.test(lines[0].text.trim()) &&
+            !/\p{N}/u.test(lines[0].text) && !EUROPEAN_NOTICE_PREFIX.test(lines[0].text) && !europeanDoubt(lines[0].text)) {
+            index = 1;
+            headingText = clean(lines[1].text);
+            headingStart = lines[1].start + (lines[1].text.length - headingText.length);
+            hit = find(headingText);
+        }
+    }
+    if (!hit)
+        return null;
+    const headingLine = lines[index];
+    const headingEnd = headingLine.start + headingLine.text.length;
+    let amountOwned = principal.start >= headingStart && principal.end <= headingEnd;
+    let fromField = false, toField = false, sign = '', purpose = '';
+    for (const line of lines.slice(index + 1)) {
+        const text = clean(line.text).trim();
+        const field = EUROPEAN_FIELD.exec(text);
+        if (field) {
+            const label = field[1];
+            const value = text.slice(text.search(/[:：]/u) + 1).trim();
+            if (EUROPEAN_FROM_FIELD.test(label))
+                fromField = true;
+            if (EUROPEAN_TO_FIELD.test(label))
+                toField = true;
+            if (EUROPEAN_OWN_CARD.test(text))
+                return null;
+            const holdsPrincipal = principal.start >= line.start && principal.end <= line.start + line.text.length;
+            if (holdsPrincipal) {
+                if (!EUROPEAN_AMOUNT_FIELD.test(label))
+                    return null;
+                amountOwned = true;
+            }
+            if (EUROPEAN_AMOUNT_FIELD.test(label)) {
+                if (!holdsPrincipal || /\p{L}{4,}/u.test(value.replace(/\b[A-Z]{3}\b|kr\.?|zł|Kč|Fr\./gu, '')))
+                    return null;
+                sign = value.match(/^[+-]/u)?.[0] ?? sign;
+            }
+            else if (EUROPEAN_DATE_FIELD.test(label)) {
+                if (!EUROPEAN_DATE_VALUE.test(value))
+                    return null;
+            }
+            else if (EUROPEAN_INSTRUMENT_FIELD.test(label)) {
+                if (/\p{Ll}/u.test(value) || (/^referenz$/iu.test(label) && /\p{L}{4,}/u.test(value)))
+                    return null;
+            }
+            else if (EUROPEAN_PURPOSE_FIELD.test(label)) {
+                if (europeanDoubt(value))
+                    return null;
+                purpose += ` ${value}`;
+            }
+            else if (EUROPEAN_NAME_DOUBT.test(value) || EUROPEAN_STATUS.test(value) || /[()]/u.test(value) ||
+                (EUROPEAN_TO_FIELD.test(label) && EUROPEAN_CARD_PURPOSE.test(value)) ||
+                (value.match(/[\p{L}\p{M}'’]+/gu) ?? []).some((word) => /^\p{Ll}/u.test(word) && !EUROPEAN_HEADING_GLUE.has(word))) {
+                return null;
+            }
+            continue;
+        }
+        if (EUROPEAN_BALANCE_LINE.test(text) && !(principal.start >= line.start && principal.end <= line.start + line.text.length) &&
+            onlyFooterOrBalance(text))
+            continue;
+        if (EUROPEAN_FOOTER_LINE.test(text) && (text.match(/[?？]/gu) ?? []).length <= 1 &&
+            !moneySpans.some((span) => span.start >= line.start && span.end <= line.start + line.text.length) &&
+            onlyFooterOrBalance(text))
+            continue;
+        return null;
+    }
+    if (!amountOwned || EUROPEAN_OWN_CARD.test(source.slice(headingStart, headingEnd)))
+        return null;
+    let tailEnd = headingEnd;
+    const trailer = EUROPEAN_TRAILER_START.exec(source.slice(headingStart + hit.term.length, headingEnd));
+    if (trailer) {
+        tailEnd = headingStart + hit.term.length + trailer.index;
+        if (principal.end > tailEnd || (source.slice(tailEnd, headingEnd).match(/[?？]/gu) ?? []).length > 1 ||
+            !onlyFooterOrBalance(source.slice(tailEnd, headingEnd)))
+            return null;
+    }
+    let tail = source.slice(headingStart + hit.term.length, tailEnd);
+    for (const span of moneySpans) {
+        const a = Math.max(span.start, headingStart + hit.term.length), b = Math.min(span.end, tailEnd);
+        if (b > a)
+            tail = tail.slice(0, a - headingStart - hit.term.length) + ' '.repeat(b - a) + tail.slice(b - headingStart - hit.term.length);
+    }
+    tail = tail.replace(/https?:\/\/\S+/gu, ' ').replace(/(?<![\p{L}\p{N}])\p{L}+\p{N}[\p{L}\p{N}]*(?![\p{L}\p{N}])/gu, ' ')
+        .replace(/[\d][\d./:,'’-]*/gu, ' ').replace(/[*x•·]{2,}\S*/giu, ' ');
+    if (europeanDoubt(tail) || /[()=]/u.test(tail))
+        return null;
+    const parts = tail.split(/\s+[-–·]\s+|\s+·\s*/u);
+    let names = 0;
+    for (const [position, part] of parts.entries()) {
+        const words = part.match(/[\p{L}\p{M}'’]+/gu) ?? [];
+        if (words.every((word) => EUROPEAN_HEADING_GLUE.has(word.toLocaleLowerCase('de-DE'))))
+            continue;
+        if (position > 0) {
+            if (nameLike(part) && !(position === parts.length - 1 && words.length === 1 && /^\p{Lu}\p{Ll}+$/u.test(words[0]))) {
+                names += 1;
+                if (names > 1)
+                    return null;
+                continue;
+            }
+            return null;
+        }
+        if (words.every((word) => EUROPEAN_HEADING_GLUE.has(word.toLocaleLowerCase('de-DE')) || /^[\p{Lu}\p{N}]/u.test(word))) {
+            names += 1;
+            continue;
+        }
+        return null;
+    }
+    const flat = source.replace(/[\n\r;!?]|\.(?!\d)/gu, ' ');
+    for (const market of packs) {
+        const reading = (0, exports.inspectMarketAlert)(flat, market, { sender });
+        if (reading.status === 'failed' || reading.status === 'future' || reading.family === 'authentication' ||
+            reading.family === 'statement' || (reading.status === 'informational' && reading.family !== 'balance'))
+            return null;
+    }
+    const pack = (0, alert_market_packs_1.alertMarketPack)(hit.market);
+    const debit = Boolean(findTerm(hit.term, pack.debitTerms ?? []));
+    const credit = Boolean(findTerm(hit.term, pack.creditTerms ?? []));
+    const direction = debit === credit ? 'unknown' : debit ? 'debit' : 'credit';
+    if ((direction === 'debit' && fromField) || (direction === 'credit' && toField) || (fromField && toField))
+        return null;
+    const principalText = source.slice(Math.max(0, principal.start - 2), principal.end);
+    if (/\+/u.test(principalText) || sign === '+') {
+        if (direction !== 'credit')
+            return null;
+    }
+    if ((/-\s*\d/u.test(principalText) || sign === '-') && direction !== 'debit')
+        return null;
+    if (direction !== 'credit' && (EUROPEAN_BACK.test(source.slice(headingStart + hit.term.length)) || EUROPEAN_CARD_PURPOSE.test(purpose)))
+        return null;
+    if (direction !== 'credit' && (EUROPEAN_TO_READER.test(source) ||
+        EUROPEAN_FROM_NAME.test(source.slice(headingStart, headingEnd))))
+        return null;
+    const reading = (0, exports.inspectMarketAlert)(hit.term, hit.market, { sender });
+    const family = reading.family !== 'unknown' ? reading.family
+        : findTerm(hit.term, pack.transferTerms) ? 'transfer' : 'unknown';
+    return { direction, family };
+};
+exports.europeanHeadingMovement = europeanHeadingMovement;
+const EUROPEAN_STATUS_WORDS = [
+    'wird', 'werden', 'sera', 'seront', 'será', 'serán', 'seran', 'sarà', 'sara', 'saranno', 'verrà', 'verra',
+    'verranno', 'serao', 'serão', 'wordt', 'worden',
+    'zal', 'zullen', 'zostanie', 'zostaną', 'będzie', 'bude', 'budou', 'kommer', 'blir', 'bliver', 'vil',
+    'morgen', 'demain', 'mañana', 'manana', 'domani', 'amanhã', 'amanha', 'jutro', 'imorgon', 'zítra', 'zitra',
+    'geplant', 'programad*', 'programmat*', 'agendad*', 'zaplanowan*', 'planlagt', 'schemalagd', 'naplánov*',
+    'en cours', 'in corso', 'em curso', 'en curso', 'en proceso', 'em processamento', 'en trámite', 'en tramite',
+    'w toku', 'w trakcie', 'in elaborazione', 'in lavorazione',
+    'kan ha', 'kan vara', 'kan være', 'kan have', 'kan zijn', 'kann', 'könnte', 'möglicherweise', 'eventuell',
+    'vielleicht', 'pourrait', 'peut-être', 'podría', 'podria', 'puede que', 'potrebbe', 'poderá', 'podera',
+    'pode ter', 'mogelijk', 'misschien', 'może', 'mogł*', 'możliw*', 'možná', 'mozna', 'mohl*', 'pravděpodob*',
+    'muligvis', 'muligens', 'kanskje', 'måske', 'kanske', 'sannolik*', 'probabil*', 'éventuel*',
+    'for å motta', 'for at modtage', 'för att ta emot', 'odpovězte', 'odpovězte', 'odpowiedz', 'antworten', 'répondez', 'repondez', 'responda', 'responde',
+    'rispondi', 'antwoord', 'svar', 'svara', 'acceptez', 'accepter', 'akzeptieren', 'aceptar', 'acepta', 'aceite',
+    'aceitar', 'accettare', 'accetta', 'accepteer', 'accepteren', 'zaakceptuj', 'zaakceptować', 'přijmout',
+    'přijměte', 'godkänn', 'godkend', 'godta', 'acceptere', 'akseptere', 'acceptera', 'modtage', 'ta emot',
+    'ta imot', 'annehmen',
+];
+const EUROPEAN_NEGATION = String.raw `nicht|kein(?:e[nrs]?)?|n(?:e|['’])\s*\p{L}+(?:\s+\p{L}+)?\s+pas|pas\s+(?:encore\s+)?(?:été\s+)?(?:effectu|abouti|valid|autoris|accept|r[ée]alis|d[ée]bit|cr[ée]dit|pass[ée]|trait|ex[ée]cut)\p{L}*|aucune?|non(?!-)|n[ãa]o|nenhuma?|niet|geen|nie|inte|ej|icke|ikke|ingen|nessun[oa]?|nebyl[aoi]?|(?<=[:：][ \t]{0,3})ne|ne(?=[ \t]*[.!]?[ \t]*(?:\n|$))|no\s+(?:se\s+|ha\s+(?:sido\s+)?|han\s+(?:sido\s+)?|fue\s+|pudo\s+|est[áa]\s+|es\s+)?\p{L}+(?:ad|id)[oa]s?`;
+const stemSource = (stems) => stems.map((stem) => stem.replace(/\*$/u, '').split(' ').map(escapeRegExp).join('\\s+') + (stem.endsWith('*') ? '' : '(?![\\p{L}\\p{N}])')).join('|');
+const EUROPEAN_PHRASES = EUROPEAN_STATUS_WORDS.filter((word) => word.includes(' '));
+const EUROPEAN_SINGLES = EUROPEAN_STATUS_WORDS.filter((word) => !word.includes(' '));
+const EUROPEAN_STATUS_CORE = new RegExp(String.raw `(?<![\p{L}\p{N}])(?:pendient|pendent|${stemSource(EUROPEAN_PHRASES)})|(?<![\p{L}\p{N}'’])(?:${EUROPEAN_NEGATION})(?![\p{L}\p{N}])`, 'iu');
+const EUROPEAN_STATUS_SINGLE = new RegExp(String.raw `(?<![\p{L}\p{N}])(?:${stemSource(EUROPEAN_SINGLES)})`, 'giu');
+const EUROPEAN_STATUS_LOAN = /invalid|declin|pending|revers/iu;
+const NAME_LIKE_WORDS = new Set(['sara', 'sera', 'vil', 'zal', 'svar', 'kommer']);
+const STATUS_PICTOGRAPH = /[❌❎✖⚠⏳⌛🚫⛔🔄🔁↩↪🔙❗❓⏰🕒🛑]/u;
+const BALANCE_WARNING = /⚠\uFE0F?\s*(?=(?:saldo|balance|solde|kontostand|guthaben|available|disponible|beschikbaar)(?![\p{L}]))/giu;
+const europeanStatus = (text, loanWords = true, ignoreConcepts = [], nameRun = false) => {
+    if ((0, alert_status_lexicon_1.transactionStatusWords)(text, { nameRunWord: (match) => match.language === 'en' && !EUROPEAN_STATUS_LOAN.test(match.text) }).some((match) => match.concept === 'example' || match.concept === 'unreadable' ||
+        ((loanWords || match.language !== 'en') && !ignoreConcepts.includes(match.concept))))
+        return true;
+    if (EUROPEAN_STATUS_CORE.test(text) || (loanWords && EUROPEAN_STATUS_LOAN.test(text)) ||
+        STATUS_PICTOGRAPH.test(text.replace(BALANCE_WARNING, '')))
+        return true;
+    const letters = text.match(/\p{L}/gu) ?? [];
+    const shouting = letters.length > 0 && letters.filter((letter) => /\p{Lu}/u.test(letter)).length / letters.length > 0.8;
+    return [...text.matchAll(EUROPEAN_STATUS_SINGLE)].some((match) => {
+        const word = match[0];
+        const lower = word.toLocaleLowerCase('de-DE');
+        if (word === lower)
+            return true;
+        const from = Math.max(text.lastIndexOf('\n', match.index), ...['.', '?', '!'].map((stop) => text.lastIndexOf(stop, match.index)));
+        const nextStop = text.slice(match.index).search(/[\n.?!]/u);
+        const segment = text.slice(from + 1, nextStop < 0 ? text.length : match.index + nextStop);
+        if (word === word.toLocaleUpperCase('de-DE'))
+            return shouting || (!nameRun && !/\d/u.test(segment));
+        return !NAME_LIKE_WORDS.has(lower);
+    });
+};
+const EUROPEAN_STATUS = { test: (text) => europeanStatus(text) };
+const hasEuropeanStatusWord = (text) => europeanStatus(text);
+exports.hasEuropeanStatusWord = hasEuropeanStatusWord;
+const EUROPEAN_FOOTER_STRIP = new RegExp([
+    `(?:${EUROPEAN_FOOTER_QUESTION.source.slice('(?<!\\p{L})(?:'.length, -')\\s*$'.length)})(?:[ \\t]*[?？]|(?<=abmelden|afmelden|afmeld))`,
+    String.raw `(?:wenn|falls)\s+sie\s+(?:\p{L}+\s+){0,3}?nicht\s+(?:selbst\s+)?(?:getätigt|veranlasst|autorisiert|durchgeführt|vorgenommen|erkennen)`,
+    String.raw `si\s+vous\s+(?:n['’][êe]tes\s+pas\s+[àa]\s+l['’]origine|ne\s+reconnaissez\s+pas)`,
+    String.raw `si\s+no\s+(?:has|ha)\s+(?:realizado|sido\s+t[uú]|hecho)|si\s+no\s+reconoces?`,
+    String.raw `se\s+non\s+(?:hai|ha)\s+(?:effettuato|eseguito|autorizzato)|se\s+non\s+riconosci`,
+    String.raw `se\s+n[ãa]o\s+(?:reconhece|fez|efetuou|realizou)`,
+    String.raw `als\s+(?:u|je)\s+(?:dit|deze\s+\p{L}+)\s+niet\s+(?:herkent|heeft\s+gedaan|hebt\s+gedaan)`,
+    String.raw `je(?:śli|żeli|sli|zeli)\s+(?:to\s+nie\s+(?:ty|by[łl]e[śs])|nie\s+(?:dokona[łl]e[śs]|rozpoznajesz))`,
+    String.raw `om\s+(?:det\s+inte\s+var\s+du|du\s+inte\s+(?:känner\s+igen|har\s+gjort))`,
+    String.raw `hvis\s+(?:det\s+ikke\s+var\s+(?:dig|deg)|du\s+ikke\s+(?:kender|genkender|kjenner|gjenkjenner|har\s+(?:foretaget|gjort)))`,
+    String.raw `pokud\s+(?:jste\s+(?:platbu\s+|transakci\s+)?neprovedli|platbu\s+nepozn[áa]v[áa]te|jste\s+to\s+nebyli\s+vy)`,
+    String.raw `var\s+det\s+inte\s+du|var\s+det\s+ikke\s+(?:dig|deg)|waren\s+sie\s+das\s+nicht`,
+    String.raw `not\s+you\s*\?|wasn['’]?t\s+you\s*\?|didn['’]?t\s+make\s+(?:this|it)\s*\?|unrecogni[sz]ed\s*\?|if\s+you\s+(?:did\s+not|didn['’]t|have\s+not|haven['’]t)\s+(?:make|made|authori[sz]ed?|recogni[sz]e)\s+this`,
+    String.raw `(?:bitte\s+)?(?:nicht\s+antworten|antworten\s+sie\s+nicht)|ne\s+(?:pas\s+)?r[ée]pond(?:ez|re)(?:\s+pas)?|no\s+respond(?:as|a|er)|non\s+rispondere|n[ãa]o\s+respond(?:a|er)|niet\s+(?:beantwoorden|antwoorden)|nie\s+odpowiadaj|svara\s+inte|svar\s+ikke|ikke\s+svar|neodpov[íi]dejte`,
+    String.raw `sie\s+m[üu]ssen\s+nichts|vous\s+n['’]avez\s+rien|no\s+(?:tienes|tiene|necesitas)\s+que|non\s+(?:devi|deve)\s+fare|n[ãa]o\s+(?:precisa|tem\s+de)|u\s+hoeft\s+niets|je\s+hoeft\s+niets|nie\s+musisz|du\s+beh[öo]ver\s+inte|du\s+skal\s+ikke|du\s+trenger\s+ikke|nemus[íi]te`,
+    String.raw `pour\s+ne\s+plus\s+recevoir|para\s+(?:no|dejar\s+de)\s+recibir|per\s+non\s+ricevere|para\s+(?:n[ãa]o|deixar\s+de)\s+receber|(?:keine|nicht)\s+mehr\s+(?:erhalten|empfangen)|geen\s+\p{L}+\s+meer\s+ontvangen|svar(?:a)?\s+stopp?|send\s+stopp?|env[íi]a\s+baja|sms\s+stop`,
+].map((arm) => `(?:${arm})`).join('|').replace(/\\s/gu, '[ \\t\\u00a0]'), 'giu');
+const SECURITY_ADVICE = /(?<![\p{L}\p{N}])(?:pin|tan|passwort|kennwort|code|mot\s+de\s+passe|contraseña|clave|codice|senha|wachtwoord|hasło|haslo|lösenord|kode|adgangskode|passord|heslo)(?![\p{L}\p{N}])/iu;
+const SECURITY_NEVER = /(?<![\p{L}\p{N}])(?:niemals|nie|nicht|jamais|nunca|mai|nooit|nigdy|aldrig|aldri|nikdy|nikomu|never)(?![\p{L}\p{N}])/iu;
+const EUROPEAN_LANGUAGE_MARKETS = EUROPEAN_HEADING_MARKETS;
+const SENTENCE_END = /[.!?？\n]/gu;
+const blankFooters = (text) => {
+    const blanks = [];
+    const statusBySentence = new Map();
+    for (const match of text.matchAll(EUROPEAN_FOOTER_STRIP)) {
+        const start = match.index, end = start + match[0].length;
+        if (!match[0])
+            continue;
+        let stop = end;
+        if (!/[?？]\s*$/u.test(match[0])) {
+            SENTENCE_END.lastIndex = end;
+            const next = SENTENCE_END.exec(text);
+            stop = next ? next.index + 1 : text.length;
+            let starts = statusBySentence.get(stop);
+            if (!starts) {
+                const from = start;
+                starts = (0, alert_status_lexicon_1.findStatusWords)(text.slice(from, stop)).map((word) => from + word.index);
+                statusBySentence.set(stop, starts);
+            }
+            if (starts.some((at) => at >= end))
+                stop = end;
+        }
+        blanks.push([start, stop]);
+    }
+    if (blanks.length === 0)
+        return text;
+    let out = '';
+    let at = 0;
+    for (const [start, stop] of blanks) {
+        if (stop <= at)
+            continue;
+        const from = Math.max(start, at);
+        out += text.slice(at, from) + ' '.repeat(stop - from);
+        at = stop;
+    }
+    return out + text.slice(at);
+};
+const withoutEuropeanTemplates = (source) => blankFooters((0, alert_status_lexicon_1.withoutNeutralPhrases)(source)
+    .replace(EUROPEAN_REFERENCE, (reference) => ' '.repeat(reference.length))
+    .replace(/(?:https?:\/\/|www\.)\S+|(?<![\p{L}\p{N}@.-])[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,12}\/\S*/giu, (link) => ' '.repeat(link.length)))
+    .split(/(?<=[.!?\n])/u)
+    .map((sentence) => SECURITY_ADVICE.test(sentence) && SECURITY_NEVER.test(sentence) && !(0, alert_status_lexicon_1.hasStatusWord)(sentence)
+    ? ' '.repeat(sentence.length) : sentence)
+    .join('');
+const hasEuropeanPackWording = (text, packs) => packs.some((market) => {
+    if (!EUROPEAN_LANGUAGE_MARKETS.includes(market))
+        return false;
+    const pack = (0, alert_market_packs_1.alertMarketPack)(market);
+    return [pack.postedTerms, pack.failedTerms, pack.futureTerms, pack.debitTerms, pack.creditTerms,
+        pack.purchaseTerms, pack.refundTerms, pack.cashTerms, pack.feeTerms, pack.headingTerms, pack.transferTerms]
+        .some((terms) => terms && terms.length > 0 && findTerm(text, terms) !== null);
+});
+exports.hasEuropeanPackWording = hasEuropeanPackWording;
+const europeanMessageDoubt = (source, maskedSource, packs, sender, european = false, ignoreConcepts = [], principal = null) => {
+    if (source.length > 1000)
+        return 'unknown';
+    const text = withoutEuropeanTemplates(source);
+    const flat = withoutEuropeanTemplates(maskedSource.length === source.length ? maskedSource : source)
+        .replace(/[\n\r;!?]|\.(?!\d)/gu, ' ');
+    if (!european && !(0, exports.hasEuropeanPackWording)(flat, packs)) {
+        return europeanStatus(text, false, ignoreConcepts) || (0, exports.worldStatusDoubt)(source, ignoreConcepts, principal) ? 'unknown' : null;
+    }
+    const readings = packs.filter((market) => EUROPEAN_LANGUAGE_MARKETS.includes(market))
+        .map((market) => ({ market, reading: (0, exports.inspectMarketAlert)(flat, market, { sender }) }));
+    let doubt = null;
+    for (const { reading } of readings) {
+        if (reading.status === 'failed')
+            return 'failed';
+        if (reading.status === 'future')
+            doubt = 'future';
+        else if (!doubt && (reading.family === 'authentication' || reading.family === 'statement' ||
+            (reading.status === 'informational' && reading.family !== 'balance')))
+            doubt = 'unknown';
+    }
+    if (doubt)
+        return doubt;
+    if (/(?<![\p{L}])(?:kod|kód|kode|koden|koodi|código|codigo|codice|code|tan|passcode|clave|contraseña|senha|parola)\s*[:=]?\s*\d(?:[ -]?\d){3,7}(?![\d.,])/iu.test(text))
+        return 'unknown';
+    if (europeanStatus(text, true, ignoreConcepts))
+        return 'unknown';
+    const sentences = text.split(/(?<=[.!?])[ \t]+|(?=\n)/u).map((sentence) => sentence.replace(/^[ \t]+|[ \t]+$/gu, '')).filter((sentence) => sentence.trim());
+    if (sentences.some((sentence, index) => {
+        if (sentence.startsWith('\n'))
+            return false;
+        if (index === 0 || /(?:^|[\s(])(?:\p{Lu}|M{1,2}|Mme|Mlle|Mr|Mrs|Ms|Dr|Sr|Sra|Hr|Fr|Fa|Sig|St|Co|Ltd)\.$/u.test(sentences[index - 1].trim()))
+            return false;
+        const words = sentence.replace(/[.!?:;,]+$/u, '').split(/[ \t]+/u);
+        return words.length >= 1 && words.length <= 4 && words.every((word) => /^\p{Lu}[\p{Lu}\p{M}'’-]*$/u.test(word)) &&
+            words.join('').length >= 2 && !CAPS_SIGN_OFF.test(sentence) && !BANK_NAME.test(sentence);
+    }))
+        return 'unknown';
+    return null;
+};
+exports.europeanMessageDoubt = europeanMessageDoubt;
+const CAPS_SIGN_OFF = /(?<!\p{L})(?:BANK|BANCA|BANCO|BANQUE|BANKEN|SPARKASSE|VOLKSBANK|RAIFFEISEN|KASSE|DANKE|VIELEN|MERCI|GRACIAS|GRAZIE|OBRIGADO|BEDANKT|DANK|TACK|TAK|TAKK|DZIĘKUJEMY|DĚKUJEME|THANK|THANKS|IHRE|IHR|VOTRE|SU|TU|LA|IL|DIN|DIT|DITT|DEIN|DEINE|YOUR|TEAM|SERVICE|APP|ONLINE|INFO|SALDO|SOLDE|KONTO|COMPTE|CUENTA|CONTO|ACCOUNT|REWE|ICA|NETTO|CB|VISA|MASTERCARD|MAESTRO|GIROCARD|BLIK|SEPA|IBAN|SMS|EUR|SEK|DKK|NOK|PLN|CZK|CHF|KČ|KR|ZŁ)(?!\p{L})/u;
+const ENGLISH_FOOTER = /\bif[ \t]+(?:this[ \t]+(?:is|was)[ \t]+)?unauthori[sz]ed\b[^.!?\n]*|(?:not[ \t]+you|wasn['’]?t[ \t]+you|didn['’]?t[ \t]+make[ \t]+(?:this|it)|unrecogni[sz]ed[ \t]+(?:transaction|charge|payment))[ \t]*\?|\bif[ \t]+(?:you[ \t]+(?:did[ \t]+not|didn['’]t|have[ \t]+not|haven['’]t|do[ \t]+not|don['’]t)|this[ \t]+(?:was[ \t]+not|wasn['’]t|is[ \t]+not|isn['’]t))\b[^.!?\n]*|\breport[ \t]+(?:any[ \t]+)?(?:suspicious[ \t]+or[ \t]+)?unauthori[sz]ed[ \t]+(?:transactions?|activity|use|charges?)\b|\bto[ \t]+(?:cancel|stop|block|freeze|lock)\b[^.!?\n]*|\breply[ \t]+stop\b[^.!?\n]*|\b(?:lost|stolen)[ \t]+(?:or[ \t]+stolen[ \t]+)?card\b[^.!?\n]*|\bpending[ \t]+transactions?[ \t]+(?:are[ \t]+)?(?:not[ \t]+)?(?:included|shown)\b/giu;
+const worldStatusDoubt = (source, ignoreConcepts = [], principal = null) => {
+    const text = withoutEuropeanTemplates(source).replace(ENGLISH_FOOTER, (match) => ' '.repeat(match.length));
+    return (0, alert_status_lexicon_1.transactionStatusWords)(text, { principal }).some((match) => match.concept === 'example' || match.concept === 'unreadable' ||
+        !ignoreConcepts.includes(match.concept));
+};
+exports.worldStatusDoubt = worldStatusDoubt;
 },
 "alert-source-ownership":function(module,exports,require){
 "use strict";
@@ -1581,6 +3112,845 @@ function ownerProfilePrefixLength(clause) {
     const greeting = (0, alert_draft_1.normalizeAlertText)(clause).match(/^\s*dear\b[^,，،]*[,，،]\s*/iu);
     return greeting ? greeting[0].length : clause.length;
 }
+},
+"alert-status-lexicon":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.transactionStatusWords = exports.hasStatusWord = exports.findStatusWords = exports.withoutNeutralPhrases = exports.hasExampleLabel = exports.withPlainSpaces = exports.STATUS_FORMS = void 0;
+const ENDINGS = {
+    deAdj: ['', 'e', 'en', 'er', 'es', 'em'],
+    deNoun: ['', 'en', 's'],
+    fr: ['', 'e', 's', 'es'],
+    oa: ['o', 'a', 'os', 'as'],
+    it: ['o', 'a', 'i', 'e'],
+    pl: ['a', 'y', 'e', 'o', 'ych', 'ej', 'ą', 'ego', 'ym', 'i', 'ie'],
+    plNoun: ['a', 'e', 'y', 'u', 'ą', 'ę', 'em', 'ie', 'iem'],
+    cs: ['', 'a', 'o', 'y', 'é', 'á', 'ý', 'í', 'ou', 'ých', 'ém', 'ého', 'ému', 'ými'],
+    csNoun: ['a', 'y', 'u', 'ou', 'e', 'ách'],
+    e: ['', 'e'],
+    sv: ['', 'e', 'es', 't', 'de', 'des', 's'],
+    none: [''],
+};
+const s = (ending, ...stems) => stems.map((stem) => ({ stem, ending }));
+const infix = (...stems) => stems.map((stem) => ({ stem, ending: 'none', infix: true }));
+const phrase = (...phrases) => s('none', ...phrases);
+const compound = (...stems) => stems.map((stem) => ({ stem, ending: 'none', infix: true, compoundOnly: true }));
+const LEXICON = {
+    de: {
+        concepts: {
+            example: phrase('beispiel', 'muster', 'musternachricht', 'beispielnachricht'),
+            insufficient: s('deAdj', 'unzureichend'),
+            notice: infix('erinnerung', 'entwurf'),
+            declined: [...s('deAdj', 'abgelehnt', 'abgewiesen', 'verweigert', 'zurückgewiesen'), ...infix('ablehnung', 'abweisung', 'verweigerung')],
+            failed: [...s('deAdj', 'fehlgeschlagen', 'gescheitert', 'misslungen', 'erfolglos', 'ungültig', 'geplatzt', 'ungedeckt', 'unvollständig'), ...infix('fehlschlag'),
+                ...phrase('nicht möglich', 'nicht erfolgreich')],
+            cancelled: [...s('deAdj', 'storniert', 'annulliert', 'widerrufen', 'abgebrochen', 'unterbrochen', 'zurückgezogen'), ...infix('stornierung', 'annullierung', 'abbruch')],
+            refunded: s('deAdj', 'erstattet', 'rückerstattet'),
+            returned: [...s('deAdj', 'zurückgebucht', 'zurückgegeben', 'rückgängig', 'widersprochen'), ...infix('rückbuchung', 'rücklastschrift', 'rückgabe', 'rückläufer', 'retoure', 'widerspruch', 'widerruf', 'storno')],
+            expired: s('deAdj', 'abgelaufen', 'verfallen'),
+            blocked: [...s('deAdj', 'gesperrt', 'blockiert', 'ausgesetzt', 'eingefroren'), ...infix('sperrung', 'blockierung')],
+            held: [...s('deAdj', 'vorgemerkt', 'reserviert', 'vorautorisiert', 'vorläufig'),
+                ...infix('vormerkung', 'vormerkposten', 'reservierung', 'vorautorisierung', 'vorabautorisierung', 'autorisierung')],
+            pending: [...s('deAdj', 'ausstehend', 'offen'), ...phrase('möglicherweise', 'in bearbeitung', 'in der bearbeitung', 'bearbeitung läuft', 'in prüfung', 'wird geprüft', 'wird bearbeitet', 'wird verarbeitet', 'läuft noch')],
+            future: [...s('deAdj', 'geplant', 'terminiert'), ...phrase('wird gebucht', 'wird belastet', 'wird abgebucht', 'wird ausgeführt', 'werden gebucht', 'werden belastet', 'noch nicht', 'morgen', 'erst morgen', 'erfolgt am', 'erst später'), ...infix('fälligkeit')],
+            retry: phrase('erneut versuchen', 'nochmal versuchen', 'noch einmal versuchen', 'guthaben aufladen', 'aufladen'),
+            unauthorised: s('deAdj', 'unautorisiert'),
+        },
+        completed: s('deAdj', 'ausgeführt', 'durchgeführt', 'gebucht', 'autorisiert', 'bestätigt', 'erfolgt', 'abgeschlossen', 'genehmigt', 'bezahlt', 'belastet', 'erfolgreich'),
+        negators: ['nicht', 'nie', 'niemals', 'kein', 'keine'],
+    },
+    fr: {
+        concepts: {
+            example: phrase('exemple'),
+            insufficient: [...s('fr', 'insuffisant'), ...phrase('insuffisance', 'provision insuffisante')],
+            notice: phrase('rappel'),
+            declined: [...s('fr', 'refusé', 'rejeté', 'décliné'), ...phrase('refus', 'rejet', 'refus de paiement')],
+            failed: [...s('fr', 'échoué', 'impayé', 'erroné', 'invalide', 'non abouti'), ...phrase('échec')],
+            cancelled: [...s('fr', 'annulé', 'révoqué', 'interrompu'), ...phrase('annulation')],
+            refunded: s('fr', 'remboursé'),
+            returned: [...s('fr', 'retourné', 'renvoyé', 'contrepassé', 'rétrocédé', 'rappelé', 'extourné'), ...phrase('retour à l\'émetteur', 'extourne')],
+            expired: s('fr', 'expiré', 'périmé'),
+            blocked: [...s('fr', 'suspendu', 'bloqué', 'gelé'), ...phrase('en suspens', 'opposition')],
+            held: [...s('fr', 'provisoire', 'préautorisé', 'pré-autorisé', 'réservé'), ...phrase('autorisation', 'préautorisation', 'pré-autorisation', 'réservation', 'empreinte bancaire')],
+            pending: phrase('éventuellement', 'en attente', 'attente', 'en cours', 'en traitement', 'à valider', 'à confirmer', 'en vérification', 'en examen'),
+            future: [...s('fr', 'programmé', 'planifié', 'prévu', 'différé'), ...phrase('à venir', 'sera', 'seront', 'demain', 'prévu le', 'prévue le', 'programmé le')],
+            retry: phrase('réessayer', 'réessayez', 'recharger', 'rechargez', 'approvisionnez', 'alimentez votre compte'),
+            unauthorised: s('fr', 'non autorisé'),
+        },
+        completed: s('fr', 'effectué', 'abouti', 'autorisé', 'validé', 'exécuté', 'réalisé', 'accepté', 'débité', 'crédité'),
+        negators: ['non', 'jamais', 'pas', 'aucun', 'aucune'],
+    },
+    es: {
+        concepts: {
+            example: phrase('ejemplo'),
+            insufficient: [...s('oa', 'impagad'), ...phrase('insuficiente', 'insuficientes')],
+            notice: phrase('recordatorio'),
+            declined: [...s('oa', 'denegad', 'rechazad', 'declinad'), ...phrase('denegación', 'rechazo', 'rechazó', 'denegó', 'rechazamos')],
+            failed: [...s('oa', 'fallid', 'erróne', 'incorrect', 'inválid'), ...phrase('fallo', 'error', 'error en el pago', 'error en la operación', 'falló', 'no se pudo', 'no se ha podido', 'no pudo', 'no ha podido')],
+            cancelled: [...s('oa', 'anulad', 'cancelad', 'revocad', 'interrumpid'), ...phrase('anulación', 'cancelación', 'anuló', 'canceló')],
+            refunded: [...s('oa', 'devuelt', 'reembolsad'), ...phrase('devolución')],
+            returned: [...s('oa', 'retrocedid', 'revertid'), ...phrase('retrocesión')],
+            expired: s('oa', 'caducad', 'vencid', 'expirad'),
+            blocked: [...s('oa', 'suspendid', 'bloquead', 'congelad', 'retenid'), ...phrase('retención')],
+            held: [...s('oa', 'preautorizad', 'reservad'), ...phrase('preautorización', 'autorización', 'provisional', 'reserva')],
+            pending: phrase('posiblemente', 'pendiente', 'pendientes', 'en espera', 'en proceso', 'en trámite', 'en curso', 'procesando', 'en revisión', 'en verificación'),
+            future: [...s('oa', 'programad', 'previst'), ...phrase('se realizará', 'será', 'serán', 'mañana', 'próximo', 'próxima')],
+            retry: phrase('vuelve a intentarlo', 'inténtalo de nuevo', 'reintentar', 'reintenta', 'recarga', 'recargar', 'añade saldo'),
+            unauthorised: s('oa', 'no autorizad'),
+        },
+        completed: s('oa', 'realizad', 'procesad', 'completad', 'efectuad', 'aprobad', 'ejecutad', 'autorizad', 'abonad', 'cargad'),
+        negators: ['no', 'nunca', 'jamás'],
+    },
+    it: {
+        concepts: {
+            example: phrase('esempio'),
+            insufficient: phrase('insufficiente', 'insufficienti'),
+            notice: phrase('promemoria'),
+            declined: [...s('it', 'rifiutat', 'respint', 'negat', 'declinat'), ...phrase('rifiuto', 'diniego')],
+            failed: [...s('it', 'fallit', 'errat', 'invalid'), ...phrase('esito negativo', 'esito: negativo', 'non andato a buon fine', 'non andata a buon fine', 'non è andato a buon fine', 'non è andata a buon fine')],
+            cancelled: [...s('it', 'annullat', 'revocat', 'stornat', 'interrott'), ...phrase('annullamento')],
+            refunded: s('it', 'rimborsat', 'riaccreditat'),
+            returned: [...s('it', 'restituit', 'retrocess', 'richiamat'), ...phrase('storno')],
+            expired: s('it', 'scadut'),
+            blocked: s('it', 'sospes', 'bloccat', 'congelat', 'trattenut'),
+            held: [...s('it', 'preautorizzat', 'provvisori', 'riservat'), ...phrase('preautorizzazione', 'autorizzazione')],
+            pending: phrase('eventualmente', 'in attesa', 'attesa', 'in corso', 'in lavorazione', 'in elaborazione', 'in verifica', 'in sospeso'),
+            future: [...s('it', 'programmat', 'previst'), ...phrase('sarà', 'saranno', 'verrà', 'verranno', 'domani')],
+            retry: phrase('riprova', 'riprovare', 'ricarica', 'ricaricare'),
+            unauthorised: s('it', 'non autorizzat'),
+        },
+        completed: s('it', 'eseguit', 'autorizzat', 'riuscit', 'completat', 'effettuat', 'approvat', 'addebitat', 'accreditat'),
+        negators: ['non', 'mai'],
+    },
+    nl: {
+        concepts: {
+            example: phrase('voorbeeld'),
+            insufficient: phrase('onvoldoende'),
+            notice: infix('herinnering'),
+            declined: [...s('e', 'geweigerd', 'afgewezen', 'afgekeurd'), ...infix('weigering', 'afwijzing')],
+            failed: s('e', 'mislukt', 'ongeldig', 'onjuist'),
+            cancelled: [...s('e', 'geannuleerd', 'ingetrokken', 'afgebroken'), ...infix('annulering')],
+            refunded: s('e', 'terugbetaald', 'teruggestort'),
+            returned: [...s('e', 'teruggeboekt', 'gestorneerd', 'teruggedraaid'), ...infix('terugboeking', 'storno')],
+            expired: s('e', 'verlopen'),
+            blocked: s('e', 'geblokkeerd', 'opgeschort', 'bevroren', 'ingehouden'),
+            held: [...s('e', 'gereserveerd', 'voorlopig'), ...infix('reservering', 'autorisatie')],
+            pending: phrase('misschien', 'in behandeling', 'behandeling loopt', 'in afwachting', 'wordt verwerkt', 'in verwerking', 'in controle', 'loopt nog'),
+            future: [...s('e', 'gepland', 'ingepland'), ...phrase('wordt afgeschreven', 'wordt bijgeschreven', 'zal', 'zullen', 'morgen', 'binnenkort')],
+            retry: phrase('opnieuw proberen', 'probeer opnieuw', 'probeer het opnieuw', 'opwaarderen', 'waardeer op'),
+            unauthorised: s('e', 'ongeautoriseerd'),
+        },
+        completed: s('e', 'uitgevoerd', 'verwerkt', 'goedgekeurd', 'geautoriseerd', 'gelukt', 'voltooid', 'afgeschreven', 'bijgeschreven'),
+        negators: ['niet', 'nooit', 'geen'],
+    },
+    pt: {
+        concepts: {
+            example: phrase('exemplo'),
+            insufficient: phrase('insuficiente', 'insuficientes'),
+            notice: phrase('lembrete'),
+            declined: [...s('oa', 'recusad', 'rejeitad', 'negad', 'declinad'), ...phrase('recusa')],
+            failed: [...s('oa', 'falhad', 'inválid', 'errad', 'incorret'), ...phrase('falhou')],
+            cancelled: s('oa', 'cancelad', 'anulad', 'revogad', 'interrompid'),
+            refunded: [...s('oa', 'devolvid', 'reembolsad'), ...phrase('devolução')],
+            returned: [...s('oa', 'estornad', 'revertid'), ...phrase('estorno')],
+            expired: s('oa', 'expirad', 'caducad', 'vencid'),
+            blocked: s('oa', 'suspens', 'bloquead', 'congelad', 'retid', 'cativ'),
+            held: [...s('oa', 'pré-autorizad', 'preautorizad', 'provisóri', 'reservad'), ...phrase('pré-autorização', 'preautorização')],
+            pending: phrase('possivelmente', 'pendente', 'pendentes', 'em análise', 'em processamento', 'em curso', 'em espera', 'a aguardar', 'aguarda'),
+            future: [...s('oa', 'agendad', 'programad', 'previst'), ...phrase('será', 'serão', 'amanhã')],
+            retry: phrase('tente novamente', 'tentar novamente', 'carregue', 'carregar o cartão'),
+            unauthorised: s('oa', 'não autorizad'),
+        },
+        completed: s('oa', 'efetuad', 'autorizad', 'realizad', 'aprovad', 'concluíd', 'processad', 'debitad', 'creditad'),
+        negators: ['não', 'nunca'],
+    },
+    pl: {
+        concepts: {
+            example: phrase('przykład'),
+            insufficient: [...s('pl', 'niewystarczając'), ...phrase('brak środków')],
+            notice: s('plNoun', 'przypomnieni'),
+            declined: [...s('pl', 'odrzucon', 'odmówion'), ...s('plNoun', 'odmow', 'odrzuceni')],
+            failed: [...s('pl', 'nieudan', 'błędn', 'nieprawidłow'), ...s('plNoun', 'niepowodzeni'), ...phrase('błąd')],
+            cancelled: [...s('pl', 'anulowan', 'cofnięt', 'przerwan'), ...phrase('anulowanie')],
+            refunded: [...s('pl', 'zwrócon'), ...phrase('zwrot')],
+            expired: [...s('pl', 'przeterminowan'), ...phrase('wygasła', 'wygasło', 'wygasł')],
+            blocked: [...s('pl', 'zablokowan', 'wstrzyman', 'zawieszon', 'zamrożon'), ...s('plNoun', 'blokad')],
+            held: [...s('pl', 'zarezerwowan', 'tymczasow'), ...phrase('preautoryzacja', 'wstępnie autoryzowana', 'rezerwacja')],
+            pending: [...s('pl', 'oczekując', 'przetwarzan'), ...phrase('prawdopodobnie', 'w toku', 'w trakcie', 'w realizacji', 'w weryfikacji', 'oczekuje')],
+            future: [...s('pl', 'zaplanowan'), ...phrase('zostanie', 'zostaną', 'będzie', 'jutro')],
+            retry: phrase('spróbuj ponownie', 'ponów', 'doładuj', 'doładowanie'),
+            unauthorised: s('pl', 'nieautoryzowan'),
+        },
+        completed: s('pl', 'zrealizowan', 'wykonan', 'autoryzowan', 'zaakceptowan', 'przetworzon', 'zaksięgowan', 'udan'),
+        negators: ['nie', 'nigdy'],
+        negationPrefixes: ['nie'],
+    },
+    sv: {
+        concepts: {
+            example: phrase('exempel'),
+            insufficient: s('sv', 'otillräcklig'),
+            notice: infix('påminnelse'),
+            declined: [...s('sv', 'nekad', 'nekat', 'avvisad', 'avvisat', 'avböjd'), ...phrase('nekades', 'nekats', 'avvisats', 'avslag', 'avslagen', 'avslaget')],
+            failed: [...s('sv', 'misslyckad', 'misslyckat', 'ogiltig', 'felaktig'), ...phrase('misslyckades', 'gick inte igenom'),
+                ...['godkändes', 'genomfördes', 'slutfördes', 'bokfördes', 'drogs', 'utfördes'].flatMap((verb) => phrase(`${verb} inte`, `${verb} ej`))],
+            cancelled: [...s('sv', 'makulerad', 'annullerad', 'återkallad'), ...phrase('avbruten', 'avbrutet', 'avbrutna', 'avbrutits', 'avbröts', 'makulerats', 'annullerats'),
+                ...infix('annullering', 'makulering')],
+            refunded: s('sv', 'återbetald', 'återbetalat'),
+            returned: [...s('sv', 'återförd', 'återfört', 'returnerad'), ...phrase('återkallats', 'återförts')],
+            expired: phrase('utgången', 'utgånget'),
+            blocked: s('sv', 'spärrad', 'spärrat', 'blockerad', 'fryst'),
+            held: [...s('sv', 'reserverad', 'reserverat', 'preliminär', 'preliminärt'), ...compound('reservation')],
+            pending: [...s('sv', 'väntande'), ...phrase('eventuellt', 'möjligen', 'väntar', 'väntar på godkännande', 'väntar på', 'behandlas', 'under behandling', 'pågår', 'granskas', 'för att ta emot', 'godkänn i appen', 'för att godkänna')],
+            future: [...s('sv', 'planerad', 'schemalagd'), ...phrase('kommer att', 'i morgon', 'imorgon', 'förfaller')],
+            retry: phrase('försök igen', 'fyll på'),
+            unauthorised: s('sv', 'obehörig'),
+        },
+        completed: s('sv', 'genomförd', 'genomfört', 'godkänd', 'godkänt', 'slutförd', 'slutfört', 'bokförd', 'bokfört', 'dragen', 'draget'),
+        negators: ['inte', 'ej', 'icke', 'aldrig'],
+    },
+    da: {
+        concepts: {
+            example: phrase('eksempel'),
+            insufficient: s('e', 'utilstrækkelig'),
+            notice: infix('påmindelse'),
+            declined: [...s('e', 'afvist', 'nægtet'), ...phrase('afslag')],
+            failed: [...s('e', 'mislykket', 'ugyldig', 'forkert'), ...phrase('mislykkedes')],
+            cancelled: [...s('e', 'annulleret', 'afbrudt', 'tilbagekaldt'), ...infix('annullering')],
+            refunded: s('e', 'tilbagebetalt', 'refunderet'),
+            returned: s('e', 'tilbageført', 'returneret'),
+            expired: s('e', 'udløbet'),
+            blocked: s('e', 'spærret', 'blokeret', 'suspenderet'),
+            held: [...s('e', 'reserveret', 'foreløbig', 'forhåndsgodkendt'), ...compound('reservation')],
+            pending: [...s('e', 'afventende'), ...phrase('muligvis', 'afventer', 'behandles', 'under behandling', 'venter', 'for at modtage', 'tryk for at modtage', 'for at acceptere')],
+            future: [...s('e', 'planlagt'), ...phrase('vil blive', 'i morgen', 'forfalder')],
+            retry: phrase('prøv igen', 'fyld op'),
+            unauthorised: s('e', 'uautoriseret'),
+        },
+        completed: s('e', 'gennemført', 'godkendt', 'behandlet', 'bogført', 'trukket'),
+        negators: ['ikke', 'aldrig'],
+    },
+    nb: {
+        concepts: {
+            example: phrase('eksempel'),
+            insufficient: [...s('e', 'utilstrekkelig'), ...phrase('ikke nok dekning', 'manglende dekning', 'ikke dekning')],
+            notice: infix('påminnelse'),
+            declined: [...s('e', 'avvist', 'avslått', 'nektet'), ...phrase('avslag')],
+            failed: [...s('e', 'mislykket', 'ugyldig'), ...phrase('mislyktes', 'feil pinkode', 'feil pin')],
+            cancelled: [...s('e', 'kansellert', 'avbrutt', 'annullert', 'tilbakekalt'), ...infix('kansellering', 'annullering')],
+            refunded: s('e', 'tilbakebetalt', 'refundert'),
+            returned: s('e', 'tilbakeført', 'returnert'),
+            expired: s('e', 'utløpt'),
+            blocked: s('e', 'sperret', 'blokkert'),
+            held: [...s('e', 'reservert', 'foreløpig'), ...infix('reservasjon')],
+            pending: [...s('e', 'ventende'), ...phrase('muligens', 'venter', 'avventer', 'behandles', 'under behandling', 'for å motta', 'for å ta imot', 'vil du ta imot')],
+            future: [...s('e', 'planlagt'), ...phrase('vil bli', 'i morgen', 'forfaller')],
+            retry: phrase('prøv igjen', 'fyll på'),
+            unauthorised: s('e', 'uautorisert'),
+        },
+        completed: s('e', 'gjennomført', 'godkjent', 'behandlet', 'bokført', 'trukket'),
+        negators: ['ikke', 'aldri'],
+    },
+    cs: {
+        concepts: {
+            example: phrase('příklad', 'ukázka'),
+            insufficient: [...s('cs', 'nedostatečn'), ...phrase('nedostatek')],
+            notice: s('csNoun', 'upomínk', 'připomínk'),
+            declined: [...s('cs', 'zamítnut', 'odmítnut'), ...phrase('zamítnutí', 'odmítnutí')],
+            failed: [...s('cs', 'neúspěšn', 'chybn', 'neplatn'), ...phrase('selhala', 'selhalo', 'selhal', 'nezdařila', 'nezdařilo', 'nezdařil', 'neproběhla', 'neproběhlo', 'neproběhl')],
+            cancelled: [...s('cs', 'zrušen', 'stornován', 'přerušen'), ...phrase('storno')],
+            refunded: [...s('cs', 'vrácen'), ...phrase('vratka')],
+            expired: phrase('vypršela', 'vypršelo', 'propadla', 'propadlo'),
+            blocked: [...s('cs', 'zablokován', 'blokován', 'pozastaven'), ...phrase('blokace')],
+            held: [...s('cs', 'předautorizován', 'rezervován', 'předběžn', 'autorizován'), ...phrase('předautorizace', 'rezervace', 'autorizace')],
+            pending: [...s('cs', 'čekající'), ...phrase('pravděpodobně', 'čeká', 'čeká na', 'čeká na zpracování', 'čeká na schválení', 'zpracovává', 've zpracování', 'probíhá', 'k ověření')],
+            future: [...s('cs', 'naplánován'), ...phrase('bude', 'budou', 'zítra', 'proběhne')],
+            retry: phrase('zkuste znovu', 'opakujte', 'dobijte'),
+            unauthorised: s('cs', 'neautorizován'),
+        },
+        completed: s('cs', 'proveden', 'povolen', 'zaplacen', 'dokončen', 'zpracován', 'autorizován', 'schválen', 'uskutečněn'),
+        negators: ['ne', 'nebyla', 'nebyl', 'nebylo', 'nikdy'],
+        negationPrefixes: ['ne'],
+    },
+    en: {
+        concepts: {
+            example: phrase('example', 'sample', 'sample alert'),
+            insufficient: s('none', 'insufficient', 'not enough', 'nsf', 'non-sufficient funds', 'not sufficient'),
+            declined: [...s('none', 'declined', 'rejected', 'refused', 'denied', 'declnd', 'decl', 'dclnd'), ...phrase('decline', 'deny')],
+            failed: s('none', 'failed', 'unsuccessful', 'invalid', 'incomplete', 'did not go through', 'didn\'t go through', 'no charge was made', 'no charge', 'couldn\'t be completed', 'could not be completed', 'couldn\'t be processed', 'could not be processed'),
+            cancelled: s('none', 'cancelled', 'canceled', 'voided', 'void'),
+            returned: s('none', 'reversed', 'returned', 'bounced', 'sent back', 'recalled', 'clawed back', 'clawed-back', 'charged back', 'refunded to sender', 'refunded to the sender', 'refunded to the payer', 'withdrawn by sender', 'withdrawn by the sender', 'withdrawn by the payer', 'withdrawn by payer', 'undone', 'retracted', 'taken back', 'debited back'),
+            expired: s('none', 'expired'),
+            blocked: s('none', 'suspended', 'blocked', 'frozen', 'on hold', 'held', 'hold placed', 'placed on hold'),
+            held: s('none', 'reserved', 'pre-authorized', 'pre-authorised', 'preauthorized', 'preauthorised', 'pre-authorization', 'pre-authorisation', 'preauth', 'provisional', 'authorization hold', 'authorisation hold', 'temporary hold', 'authorization only', 'authorisation only', 'final amount may differ', 'may differ'),
+            pending: s('none', 'pending', 'processing', 'under review', 'under investigation', 'in review', 'being reviewed', 'being processed', 'awaiting', 'waiting for', 'needs to claim', 'needs to accept', 'must accept', 'must claim', 'to claim it', 'days to claim', 'not claimed', 'unclaimed', 'hasn\'t claimed', 'has not claimed', 'must enroll', 'must enrol', 'needs to enroll', 'needs to enrol', 'to receive it', 'to receive the money', 'to receive your money', 'to receive the payment', 'to receive this payment', 'enroll your email'),
+            future: s('none', 'scheduled', 'tomorrow', 'upcoming', 'not yet', 'to be credited', 'will post', 'will be posted', 'will be refunded', 'will be returned', 'will be reversed', 'will be reviewed', 'will be delivered', 'may take', 'possibly', 'may have been'),
+            retry: s('none', 'retry', 'try again', 'top up', 'top-up', 'retry payment', 'top up to complete', 'retry later'),
+            unauthorised: s('none', 'unauthorized', 'unauthorised'),
+        },
+        completed: s('none', 'completed', 'processed', 'executed', 'approved', 'authorized', 'authorised', 'successful', 'posted', 'paid', 'charged', 'accepted', 'claimed', 'received'),
+        negators: ['not', 'never'],
+    },
+    ar: {
+        concepts: {
+            example: phrase('مثال', 'مثلاً', 'مثلا', 'نموذج'),
+            declined: phrase('مرفوض', 'مرفوضة', 'رفض', 'رفضت', 'تم رفض'),
+            failed: phrase('فشل', 'فشلت', 'فاشلة', 'لم تتم', 'لم يتم', 'ما تم', 'لن يتم', 'تعذر', 'غير ناجحة'),
+            cancelled: phrase('ملغاة', 'ملغي', 'ملغاه', 'ألغيت', 'الغاء', 'إلغاء', 'تم إلغاء', 'تم الغاء'),
+            expired: phrase('منتهية الصلاحية'),
+            blocked: phrase('موقوف', 'موقوفة', 'مجمد', 'مجمدة', 'محظور'),
+            held: phrase('محجوز', 'محجوزة', 'حجز مؤقت'),
+            pending: phrase('معلق', 'معلقة', 'قيد المعالجة', 'قيد التنفيذ', 'قيد المراجعة', 'قيد الانتظار', 'يرجى تأكيد', 'هل تؤكد', 'بالرد بنعم', 'قد يتم'),
+            future: phrase('سيتم', 'غدا', 'غداً'),
+            retry: phrase('أعد المحاولة', 'اعد المحاولة', 'إعادة المحاولة', 'اعادة المحاولة'),
+            unauthorised: phrase('غير مصرح', 'غير مصرح بها'),
+            'not-completed': phrase('غير مكتمل', 'غير مكتملة'),
+        },
+        completed: [],
+        negators: [],
+    },
+};
+const EXTRA = {
+    de: { concepts: {
+            request: phrase('zahlungsanforderung', 'geldanforderung', 'zahlungsaufforderung', 'fordert von dir', 'fordert von ihnen'),
+            disputed: [...s('deAdj', 'strittig', 'beanstandet'), ...infix('klärung')],
+            blocked: s('deAdj', 'gestoppt', 'angehalten', 'pausiert'),
+            future: s('deAdj', 'verschoben', 'aufgeschoben'),
+            pending: phrase('registriere dich', 'registrieren sie sich'),
+            failed: [...s('deAdj', 'angefochten', 'überzogen', 'unverbucht'), ...infix('störung'), ...phrase('unter vorbehalt')],
+        } },
+    fr: { concepts: {
+            request: phrase('demande de paiement', 'demande d\'argent', 'vous demande', 'te demande'),
+            disputed: [...s('fr', 'contesté', 'litigieux'), ...phrase('litige', 'en litige', 'en contestation')],
+            blocked: s('fr', 'stoppé', 'arrêté'),
+            future: s('fr', 'reporté', 'ajourné'),
+            failed: [...s('fr', 'retenu'), ...phrase('incident', 'à régulariser', 'a regulariser')],
+            pending: phrase('inscrivez-vous', 'inscris-toi', 'en instance', 'créez un compte', 'pour les récupérer', 'pour le récupérer', 'pour la récupérer'),
+        }, completed: s('fr', 'payé', 'réglé') },
+    es: { concepts: {
+            request: phrase('petición de bizum', 'solicitud de bizum', 'petición de dinero', 'solicitud de pago', 'petición de pago', 'te ha solicitado', 'te solicita', 'te pide'),
+            disputed: [...s('oa', 'disputad', 'reclamad'), ...phrase('en disputa', 'disputa')],
+            declined: s('oa', 'rehusad'),
+            blocked: s('oa', 'detenid', 'paralizad', 'parad'),
+            future: s('oa', 'aplazad', 'pospuest'),
+            pending: phrase('regístrate', 'crea una cuenta', 'para recibirlo'),
+            failed: phrase('sin éxito', 'incidencia', 'en estudio', 'excede el límite', 'supera el límite'),
+        }, completed: s('oa', 'pagad') },
+    it: { concepts: {
+            request: phrase('richiesta di pagamento', 'richiesta di denaro', 'ti ha chiesto', 'ti chiede'),
+            disputed: [...s('it', 'contestat'), ...phrase('in contestazione')],
+            blocked: [...s('it', 'fermat'), ...phrase('sospensione', 'esito ko')],
+            future: s('it', 'rinviat', 'posticipat'),
+            pending: phrase('registrati'),
+        }, completed: s('it', 'pagat', 'saldat') },
+    nl: { concepts: {
+            request: phrase('een tikkie', 'betaalverzoek', 'verzoek om te betalen', 'vraagt je'),
+            disputed: s('e', 'betwist'),
+            blocked: s('e', 'tegengehouden', 'gestopt', 'gepauzeerd'),
+            future: s('e', 'uitgesteld'),
+            pending: phrase('registreer je', 'om het geld te ontvangen', 'in onderzoek', 'openstaand', 'openstaande', 'wachtend', 'wachtende', 'foutief', 'limiet overschreden'),
+        }, completed: s('e', 'betaald', 'voldaan') },
+    pt: { concepts: {
+            request: phrase('pedido de pagamento', 'pedido de dinheiro', 'pediu-lhe', 'pede-lhe'),
+            disputed: [...s('oa', 'contestad'), ...phrase('em disputa')],
+            blocked: s('oa', 'parad', 'interrompid'),
+            future: s('oa', 'adiad'),
+            pending: phrase('registe-se', 'registre-se'),
+        }, completed: s('oa', 'pag', 'liquidad') },
+    pl: { concepts: {
+            request: phrase('prośba o płatność', 'prośba o przelew', 'prośba o pieniądze', 'prosi o'),
+            disputed: [...s('pl', 'sporn', 'reklamowan', 'zakwestionowan'), ...phrase('do wyjaśnienia', 'przekroczony limit')],
+            cancelled: s('pl', 'odwołan'),
+            blocked: s('pl', 'zatrzyman'),
+            future: s('pl', 'odroczon', 'przełożon'),
+            pending: phrase('zarejestruj się', 'aby otrzymać', 'załóż konto', 'by je odebrać', 'aby je odebrać', 'aby odebrać'),
+        }, completed: s('pl', 'zatwierdzon', 'zapłacon', 'opłacon', 'rozliczon', 'przyjęt', 'obciążon') },
+    sv: { concepts: {
+            request: phrase('betalningsförfrågan', 'betalningsbegäran', 'begär'),
+            disputed: s('sv', 'bestridd', 'bestritt', 'reklamerad', 'reklamerat'),
+            blocked: s('sv', 'stoppad', 'stoppat', 'pausad', 'pausat'),
+            future: s('sv', 'uppskjuten', 'uppskjutet'),
+            pending: phrase('registrera dig', 'för att få pengarna', 'på vänt'),
+        }, completed: s('sv', 'bekräftad', 'bekräftat', 'betald'), negationPrefixes: ['o'] },
+    da: { concepts: {
+            request: phrase('anmodning om betaling', 'betalingsanmodning', 'anmoder dig'),
+            disputed: s('e', 'bestridt', 'indsigelse', 'omtvistet'),
+            blocked: s('e', 'stoppet', 'sat på pause'),
+            future: s('e', 'udskudt'),
+            pending: phrase('tilmeld dig', 'for at få pengene', 'overtrukket', 'mangler dækning'),
+        }, completed: s('e', 'bekræftet') },
+    nb: { concepts: {
+            request: phrase('betalingsforespørsel', 'forespørsel om betaling', 'ber deg om'),
+            disputed: s('e', 'bestridt', 'omtvistet'),
+            blocked: s('e', 'stoppet', 'satt på pause'),
+            future: s('e', 'utsatt'),
+            pending: phrase('registrer deg', 'for å få pengene', 'på vent', 'mangler dekning'),
+        }, completed: s('e', 'bekreftet') },
+    cs: { concepts: {
+            request: phrase('žádost o platbu', 'žádost o peníze', 'žádá o'),
+            disputed: s('cs', 'sporn', 'reklamován'),
+            failed: [...s('csNoun', 'chyb'), ...phrase('nepodařila', 'nepodařilo', 'nepodařil', 'se nepodařila')],
+            blocked: s('cs', 'pozdržen', 'zadržen'),
+            future: s('cs', 'odložen'),
+            pending: phrase('vyřizuje se', 'zaregistrujte se'),
+            held: phrase('nepovedla', 'nepovedlo', 'nepovedl'),
+        }, completed: s('cs', 'potvrzen', 'vyřízen', 'zaúčtován') },
+    en: { concepts: {
+            request: phrase('payment request', 'money request', 'request for payment', 'has requested', 'have requested', 'is requesting', 'requested money'),
+            disputed: phrase('disputed', 'in dispute', 'under dispute'),
+            failed: phrase('unpaid', 'dishonoured', 'dishonored', 'could not process', 'could not complete', 'couldn\'t process', 'couldn\'t complete', 'transaction error', 'payment error', 'processing error', 'not honored', 'not honoured'),
+            cancelled: phrase('reverted', 'revoked'),
+            blocked: phrase('halted', 'paused', 'stopped', 'on pause'),
+            pending: phrase('queued', 'unsettled', 'enrolls', 'days to enroll', 'days to enrol', 'to collect it', 'to get it', 'to get the money', 'to collect the money', 'register within', 'enroll with', 'enrol with', 'sign up in', 'sign up within', 'to collect', 'enroll to receive', 'join to collect'),
+            held: phrase('auth only'),
+        }, completed: s('none', 'settled', 'debited', 'credited') },
+};
+for (const [language, extra] of Object.entries(EXTRA)) {
+    const lexicon = LEXICON[language];
+    for (const [concept, stems] of Object.entries(extra.concepts ?? {})) {
+        lexicon.concepts[concept] = [...(lexicon.concepts[concept] ?? []), ...stems];
+    }
+    lexicon.completed = [...lexicon.completed, ...(extra.completed ?? [])];
+    if (extra.negationPrefixes)
+        lexicon.negationPrefixes = [...(lexicon.negationPrefixes ?? []), ...extra.negationPrefixes];
+}
+const stripAccents = (value) => value.normalize('NFD').replace(/\p{M}+/gu, '').normalize('NFC');
+const transliterateGerman = (value) => value.replace(/ä/gu, 'ae').replace(/ö/gu, 'oe').replace(/ü/gu, 'ue').replace(/ß/gu, 'ss');
+const ENGLISH_WORDS = new Set(['reservation', 'reserve', 'reserves', 'retire', 'retour']);
+const variants = (form, language) => {
+    const out = new Set([form]);
+    const plain = stripAccents(form);
+    if ((form.length >= 5 || form.includes(' ')) && !ENGLISH_WORDS.has(plain))
+        out.add(plain);
+    if (language === 'de')
+        out.add(transliterateGerman(form));
+    return [...out];
+};
+const inflect = ({ stem, ending }) => ENDINGS[ending].map((end) => stem + end);
+exports.STATUS_FORMS = (() => {
+    const forms = new Map();
+    const add = (form, concept, language, isInfix, compoundOnly = false) => {
+        for (const variant of variants(form.toLocaleLowerCase('de-DE'), language)) {
+            const key = `${variant}|${isInfix}|${compoundOnly}`;
+            if (!forms.has(key))
+                forms.set(key, { form: variant, concept, language, infix: isInfix, compoundOnly });
+        }
+    };
+    const languages = Object.entries(LEXICON)
+        .sort(([a], [b]) => (a === 'en' ? 0 : 1) - (b === 'en' ? 0 : 1));
+    for (const [language, lexicon] of languages) {
+        for (const [concept, stems] of Object.entries(lexicon.concepts)) {
+            for (const entry of stems)
+                for (const form of inflect(entry))
+                    add(form, concept, language, Boolean(entry.infix), Boolean(entry.compoundOnly));
+        }
+        for (const entry of lexicon.completed) {
+            for (const form of inflect(entry)) {
+                for (const negator of lexicon.negators)
+                    add(`${negator} ${form}`, 'not-completed', language, false);
+                for (const prefix of lexicon.negationPrefixes ?? [])
+                    add(`${prefix}${form}`, 'not-completed', language, false);
+            }
+        }
+    }
+    return [...forms.values()];
+})();
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const WORD_GAP = String.raw `[\s_\-‐]+`;
+const alternation = (forms) => [...new Set(forms.map((form) => form.form))]
+    .sort((a, b) => b.length - a.length)
+    .map((form) => form.split(' ').map(escapeRegExp).join(WORD_GAP))
+    .join('|');
+const withPlainSpaces = (text) => text.replace(/[\u00a0\u2000-\u200a\u202f\u205f\u3000]/gu, ' ')
+    .replace(/(?<![a-z0-9-])_|_(?![a-z0-9_-]{0,63}\.[a-z]{2,12}(?:[/?#]|(?![\p{L}\p{N}])))/giu, ' ');
+exports.withPlainSpaces = withPlainSpaces;
+const INVISIBLE = /[\u00ad\u200b-\u200d\u2060\ufeff]/u;
+const normalizeText = (input) => {
+    const spaced = input.replace(/[\u00a0\u2000-\u200a\u202f\u205f\u3000]/gu, ' ');
+    if (!INVISIBLE.test(spaced))
+        return { text: spaced, origin: (index) => index };
+    const kept = [];
+    let text = '';
+    for (let index = 0; index < spaced.length; index += 1) {
+        if (INVISIBLE.test(spaced[index]))
+            continue;
+        kept.push(index);
+        text += spaced[index];
+    }
+    return { text, origin: (index) => (index < kept.length ? kept[index] : spaced.length) };
+};
+const LABEL_ONLY = ['reservation', 'reservationen', 'reservasjon', 'hold', 'fejl', 'feil', 'errore', 'error', 'ko', 'fout', 'fel', 'erreur'];
+const TRAILING_ERROR = ['fejl', 'feil', 'errore', 'error', 'ko', 'fout', 'fel', 'erreur'];
+const EXAMPLE_WORDS = exports.STATUS_FORMS.filter((form) => form.concept === 'example');
+const EXAMPLE_WORD = new RegExp(`(?<![\\p{L}])(?:${[...new Set([...EXAMPLE_WORDS.map((form) => form.form), ...LABEL_ONLY])]
+    .sort((a, b) => b.length - a.length).map((form) => form.split(' ').map(escapeRegExp).join('\\s+')).join('|')})(?![\\p{L}\\p{N}])`, 'giu');
+const exampleLabels = (text) => [...text.matchAll(EXAMPLE_WORD)].filter((match) => {
+    let before = match.index - 1;
+    while (before >= 0 && (text[before] === ' ' || text[before] === '\t'))
+        before -= 1;
+    let after = match.index + match[0].length;
+    while (after < text.length && (text[after] === ' ' || text[after] === '\t'))
+        after += 1;
+    if (/[@.]/u.test(text[match.index - 1] ?? '') || /^\.[a-z]{2,12}(?![\p{L}])/iu.test(text.slice(match.index + match[0].length)))
+        return false;
+    if (text[after] === ':')
+        return true;
+    const ending = /^[\s.!]*$/u.test(text.slice(match.index + match[0].length));
+    const lower = match[0].toLowerCase();
+    const caseContrast = ending && LABEL_ONLY.includes(lower) && /\p{Lu}{2,}[ \t]*$/u.test(text.slice(0, match.index)) &&
+        (match[0] === lower || TRAILING_ERROR.includes(lower));
+    const beforeOk = before < 0 || text[before] === '\n' || /[^\p{L}\s]/u.test(text[before]) || caseContrast;
+    const afterOk = after >= text.length || /[^\p{L}\p{N} \t]/u.test(text[after]) || /^alert(?![\p{L}\p{N}])/iu.test(text.slice(after, after + 6));
+    return beforeOk && afterOk;
+});
+const hasExampleLabel = (text) => exampleLabels(normalizeText(text).text).length > 0;
+exports.hasExampleLabel = hasExampleLabel;
+const WORD_FORMS = exports.STATUS_FORMS.filter((form) => !form.infix && form.concept !== 'example');
+const INFIX_FORMS = exports.STATUS_FORMS.filter((form) => form.infix && !form.compoundOnly);
+const COMPOUND_FORMS = exports.STATUS_FORMS.filter((form) => form.compoundOnly);
+const FORM_INDEX = new Map();
+for (const form of exports.STATUS_FORMS)
+    if (form.language === 'en' && !FORM_INDEX.has(form.form))
+        FORM_INDEX.set(form.form, form);
+for (const form of exports.STATUS_FORMS)
+    if (!FORM_INDEX.has(form.form))
+        FORM_INDEX.set(form.form, form);
+const firstWord = (form) => form.match(/^[\p{L}\p{M}]+/u)?.[0] ?? form;
+const WORD_GROUP_FORMS = new Map();
+for (const form of WORD_FORMS) {
+    const key = firstWord(form.form);
+    const list = WORD_GROUP_FORMS.get(key);
+    if (list)
+        list.push(form);
+    else
+        WORD_GROUP_FORMS.set(key, [form]);
+}
+const WORD_GROUPS = new Map();
+const wordGroup = (key) => {
+    const cached = WORD_GROUPS.get(key);
+    if (cached)
+        return cached;
+    const forms = WORD_GROUP_FORMS.get(key);
+    if (!forms)
+        return undefined;
+    const pattern = new RegExp(`(?:${alternation(forms)})(?![\\p{L}\\p{N}])`, 'iuy');
+    WORD_GROUPS.set(key, pattern);
+    return pattern;
+};
+const TEXT_WORD = /[\p{L}\p{M}]+/gu;
+const GLUE_TOKEN = /[\p{L}\p{M}]+(?:['’][\p{L}\p{M}]+)*/gu;
+const NEGATION_FILLERS = new Set([
+    'yet', 'been', 'be', 'fully', 'successfully', 't', 'have', 'has', 'was', 'were', 'is', 'being',
+    'noch', 'erfolgreich', 'vollständig', 'wurde', 'worden', 'ganz', 'mehr',
+    'été', 'ete', 'encore', 'pu', 'être', 'etre', 'bien', 'correctement',
+    'ha', 'han', 'sido', 'se', 'aún', 'aun', 'todavía', 'todavia', 'fue', 'pudo', 'ser', 'correctamente',
+    'è', 'e', 'stato', 'stata', 'stati', 'state', 'ancora', 'sono', 'correttamente',
+    'nog', 'wordt', 'worden', 'zijn', 'succesvol', 'helemaal',
+    'foi', 'foram', 'ainda', 'é',
+    'została', 'został', 'zostało', 'zostały', 'jeszcze', 'jest', 'była', 'zostala', 'zostal', 'zostalo',
+    'har', 'ännu', 'annu', 'blivit', 'är', 'ar', 'kunnat',
+    'blevet', 'endnu', 'er', 'blev', 'blitt', 'ennå', 'enna', 'ble',
+    'ještě', 'jeste',
+]);
+const EXTRA_NEGATORS = {
+    en: ['couldn', 'didn', 'wasn', 'hasn', 'haven', 'isn', 'weren', 'won', 'cannot'],
+};
+const NEGATORS = new Map();
+const COMPLETED = new Map();
+const addTo = (map, key, language) => {
+    const set = map.get(key);
+    if (set)
+        set.add(language);
+    else
+        map.set(key, new Set([language]));
+};
+for (const [language, lexicon] of Object.entries(LEXICON)) {
+    for (const negator of [...lexicon.negators, ...(EXTRA_NEGATORS[language] ?? [])]) {
+        if (!negator.includes(' '))
+            addTo(NEGATORS, negator, language);
+    }
+    for (const entry of lexicon.completed) {
+        for (const form of inflect(entry)) {
+            for (const variant of variants(form.toLocaleLowerCase('de-DE'), language))
+                if (!variant.includes(' '))
+                    addTo(COMPLETED, variant, language);
+        }
+    }
+}
+const sameLanguage = (a, b) => [...a].some((language) => b.has(language));
+const GLUE_MIN = 7;
+const GLUE_SUFFIX_MIN = 5;
+const GLUE_HOSTS = ['spending', 'depending', 'impending', 'independ', 'preserv', 'unschedul', 'differen', 'ricaricabil',
+    'recargabl', 'reservation', 'remboursement', 'icativ', 'ucativ', 'pozostan', 'programm', 'unblock', 'unfrozen',
+    'offenb', 'offenburg', 'offens', 'morgenst', 'morgenp', 'zwrotn', 'negativz', 'errors', 'refusion', 'echecs',
+    'rappelez', 'rappeler', 'rappelon'];
+const GLUE_ONLY = {
+    en: ['reply yes', 'was this you', 'not you', 'you paid', 'you sent', 'you received', 'paid you', 'sent you', 'requested', 'enrolls',
+        'alerted'],
+    de: ['antworten sie ja', 'waren sie das'],
+    fr: ['répondez oui', 'c\'était vous'],
+    es: ['responde si', 'responde sí', 'has sido tú'],
+    it: ['rispondi si', 'rispondi sì', 'sei stato tu'],
+    nl: ['antwoord ja', 'was u dit'],
+    pt: ['responda sim', 'foi você'],
+    pl: ['odpowiedz tak', 'czy to ty'],
+    sv: ['svara ja', 'var det du'],
+    da: ['svar ja', 'var det dig', 'send mig'],
+    nb: ['svar ja', 'var det deg'],
+    cs: ['odpovězte ano', 'byli jste to vy'],
+};
+const GLUE_FORMS = new Map();
+const GLUE_ONLY_RETURNED = { de: ['erstattung', 'rückerstattung'] };
+for (const [table, concept] of [[GLUE_ONLY, 'pending'], [GLUE_ONLY_RETURNED, 'refunded']]) {
+    for (const [language, phrases] of Object.entries(table)) {
+        for (const phrase of phrases) {
+            for (const spelling of [phrase, stripAccents(phrase)]) {
+                GLUE_FORMS.set(spelling.replace(/[\s'’]+/gu, ''), { form: phrase, concept, language, infix: false });
+            }
+        }
+    }
+}
+for (const form of exports.STATUS_FORMS) {
+    if (form.concept === 'example' || form.compoundOnly || form.language === 'ar')
+        continue;
+    for (const spelling of [form.form, stripAccents(form.form)]) {
+        const glued = spelling.replace(/[\s\-‐'’]+/gu, '');
+        if (glued.length >= GLUE_SUFFIX_MIN && /^[\p{L}\p{M}]+$/u.test(glued) && !GLUE_FORMS.has(glued))
+            GLUE_FORMS.set(glued, form);
+    }
+}
+const GLUE_LENGTHS = [...new Set([...GLUE_FORMS.keys()].map((form) => form.length))].sort((a, b) => a - b);
+const gluedHost = (lower, at, length) => GLUE_HOSTS.some((host) => {
+    let from = lower.indexOf(host);
+    while (from >= 0) {
+        if (from < at + length && at < from + host.length)
+            return true;
+        from = lower.indexOf(host, from + 1);
+    }
+    return false;
+});
+const STATUS_LABEL = /(?<!\p{L})(?:status|statut|estado|stato|stav|tila|state|estat|esito|état|etat|situação|situacao|stan|tilstand|estatus)[ \t_]*[:=][ \t_]*([\p{L}\p{M}]+)/giu;
+const SETTLED_VALUES = new Set(['ok', 'okay', 'success', 'successo', 'sukces', 'succes', 'éxito', 'exito', 'sent', 'received', 'delivered',
+    'done', 'active', 'aktiv', 'settled', 'cleared', 'booked', 'gebucht', 'ausgeführt', 'erledigt', 'abgeschlossen', 'confirmed', 'live',
+    'enviado', 'enviada', 'recibido', 'recibida', 'envoyé', 'envoye', 'reçu', 'recu', 'inviato', 'ricevuto', 'verzonden', 'ontvangen',
+    'enviada', 'recebido', 'wysłany', 'wysłana', 'otrzymany', 'skickad', 'mottagen', 'sendt', 'modtaget', 'mottatt', 'odesláno', 'přijato']);
+const formFor = (matched) => {
+    const key = matched.toLocaleLowerCase('de-DE').replace(/[\s_]+/gu, ' ');
+    return FORM_INDEX.get(key) ?? FORM_INDEX.get(key.replace(/[-‐]+/gu, ' ')) ??
+        FORM_INDEX.get(stripAccents(key)) ?? FORM_INDEX.get(stripAccents(key.replace(/[-‐]+/gu, ' ')));
+};
+const LONGEST_WORD = 48;
+const NEUTRAL_PHRASES = new RegExp([
+    String.raw `n[°º]\s*(?:d['’])?autori[sz]ation`, String.raw `num[ée]ro\s+d['’]autorisation`, String.raw `code\s+(?:d['’])?autorisation`,
+    String.raw `autorisation\s*(?:n[°º]|:)`, String.raw `c[óo]digo\s+de\s+autori[zs]aci[óo]n`, String.raw `n[º°o]\.?\s*(?:de\s+)?autori[zs]aci[óo]n`,
+    String.raw `autori[zs]aci[óo]n\s*(?:n[º°o]|:)`, String.raw `codice\s+(?:di\s+)?autorizzazione`, String.raw `autorizzazione\s*(?:n[°º.]|:)`,
+    String.raw `c[óo]digo\s+de\s+autoriza[çc][ãa]o`, String.raw `autorisierungs(?:nummer|code)`, String.raw `autorisatie(?:code|nummer)`,
+    String.raw `autoriza[čc]n[íi]\s+k[óo]d`, String.raw `authori[sz]ation\s+(?:code|no\.?|number|#)`, String.raw `auth\.?\s+code`,
+    String.raw `(?:will|should|is\s+expected\s+to)\s+arrive\s+(?:by\s+)?tomorrow`, String.raw `arrives?\s+tomorrow`,
+    String.raw `frozen\s+(?:yogh?urt|custard|foods?|treats)`, String.raw `stornoway`,
+    String.raw `(?:can(?:no|['’])?t|can\s+not|could\s+not|couldn['’]t)\s+be\s+(?:undone|recalled|retracted|taken\s+back|clawed\s+back|charged\s+back)`,
+    String.raw `(?:payments|transfers|deposits|transactions|credits|an?\s+(?:payment|transfer|deposit|transaction))\s+(?:can|cannot|can['’]t|may|might|could|could\s+not|will\s+not|won['’]t)\s+(?:not\s+)?(?:only\s+)?be\s+(?:undone|recalled|reversed|retracted|reclaimed|taken\s+back|clawed\s+back|charged\s+back|pulled\s+back)`,
+    String.raw `(?:interest|cashback|cash\s+back|rewards?|points|bonus|dividends?|profit)\s+(?:[\p{L}-]+\s+){0,2}?to\s+be\s+credited(?:\s+(?:monthly|quarterly|annually|yearly|weekly|daily))?`,
+    String.raw `to\s+be\s+credited\s+(?:monthly|quarterly|annually|yearly|weekly|daily|each|every)`,
+].map((arm) => `(?<![\p{L}\p{N}])(?:${arm})(?![\p{L}])`).join('|'), 'giu');
+const withoutNeutralPhrases = (text) => text.replace(NEUTRAL_PHRASES, (phrase) => ' '.repeat(phrase.length));
+exports.withoutNeutralPhrases = withoutNeutralPhrases;
+const findStatusWords = (input) => {
+    const normalized = normalizeText(input);
+    const origin = normalized.origin;
+    const text = normalized.text.replace(NEUTRAL_PHRASES, (phrase) => ' '.repeat(phrase.length));
+    const out = [];
+    const push = (index, matched, form) => {
+        if (form)
+            out.push({ index, text: matched, concept: form.concept, language: form.language });
+    };
+    const words = [...text.matchAll(TEXT_WORD)];
+    for (let w = 0; w < words.length; w += 1) {
+        const word = words[w];
+        const index = word.index;
+        const lower = word[0].toLocaleLowerCase('de-DE');
+        const group = wordGroup(lower);
+        if (group) {
+            group.lastIndex = index;
+            const match = group.exec(text);
+            if (match)
+                push(index, match[0], formFor(match[0]));
+        }
+        for (const form of INFIX_FORMS) {
+            const at = lower.indexOf(form.form);
+            if (at >= 0)
+                push(index + at, word[0].slice(at, at + form.form.length), form);
+        }
+        for (const form of COMPOUND_FORMS) {
+            const at = lower.indexOf(form.form, 1);
+            if (at > 0)
+                push(index + at, word[0].slice(at, at + form.form.length), form);
+        }
+        const negatorLanguages = NEGATORS.get(lower);
+        if (negatorLanguages) {
+            let end = index + word[0].length;
+            for (let next = w + 1; next < words.length && next <= w + 3; next += 1) {
+                const gap = text.slice(end, words[next].index);
+                if (!/^[ \t'’ -]+$/u.test(gap))
+                    break;
+                const nextLower = words[next][0].toLocaleLowerCase('de-DE');
+                const completed = COMPLETED.get(nextLower);
+                if (completed && sameLanguage(completed, negatorLanguages)) {
+                    const language = [...completed].find((item) => negatorLanguages.has(item));
+                    out.push({ index, text: text.slice(index, words[next].index + words[next][0].length), concept: 'not-completed', language });
+                    break;
+                }
+                if (!NEGATION_FILLERS.has(nextLower))
+                    break;
+                end = words[next].index + words[next][0].length;
+            }
+        }
+    }
+    for (const token of text.matchAll(GLUE_TOKEN)) {
+        const index = token.index;
+        const glued = token[0].replace(/['’]/gu, '');
+        const lower = glued.toLocaleLowerCase('de-DE');
+        if (lower.length > LONGEST_WORD) {
+            out.push({ index, text: glued.slice(0, LONGEST_WORD), concept: 'unreadable', language: 'en' });
+        }
+        else if (lower.length >= GLUE_SUFFIX_MIN && GLUE_FORMS.has(lower) && GLUE_FORMS.get(lower).form.includes(' ')) {
+            push(index, glued, GLUE_FORMS.get(lower));
+        }
+        else if (lower.length >= GLUE_SUFFIX_MIN + 3) {
+            const plain = stripAccents(lower);
+            const spellings = plain.length === lower.length && plain !== lower ? [lower, plain] : [lower];
+            for (let at = 0; at + GLUE_SUFFIX_MIN <= lower.length; at += 1) {
+                for (const length of GLUE_LENGTHS) {
+                    if (at + length > lower.length)
+                        break;
+                    if (length < GLUE_MIN && !((at + length === lower.length && at >= 3) || (at === 0 && lower.length - length >= 3)))
+                        continue;
+                    for (const spelling of spellings) {
+                        const form = GLUE_FORMS.get(spelling.slice(at, at + length));
+                        if (form && !gluedHost(lower, at, length)) {
+                            push(index + at, glued.slice(at, at + length), form);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for (const match of text.matchAll(STATUS_LABEL)) {
+        const value = match[1].toLocaleLowerCase('de-DE');
+        if (SETTLED_VALUES.has(value) || COMPLETED.has(value))
+            continue;
+        out.push({ index: match.index, text: match[0], concept: 'pending', language: 'en' });
+    }
+    for (const match of exampleLabels(text))
+        out.push({ index: match.index, text: match[0], concept: 'example', language: 'en' });
+    return out.map((match) => ({ ...match, index: origin(match.index) }));
+};
+exports.findStatusWords = findStatusWords;
+const hasStatusWord = (text, options = {}) => (0, exports.findStatusWords)(text).some((match) => match.concept === 'example' || match.concept === 'unreadable' ||
+    (!(options.ignoreLanguages ?? []).includes(match.language) && !(options.ignoreConcepts ?? []).includes(match.concept)));
+exports.hasStatusWord = hasStatusWord;
+const CONDITIONAL_OPENER = new RegExp(String.raw `^(?:` + [
+    String.raw `if|in\s+case|should\s+you|should\s+(?:this|the|your)`,
+    String.raw `wenn|falls|sollten?|im\s+falle?`,
+    String.raw `si|s['’]il|s['’]ils|au\s+cas\s+o[uù]|en\s+cas\s+d['’e]`,
+    String.raw `en\s+caso\s+de`,
+    String.raw `se\s+(?:non|n[ãa]o|nao|hai|ha\s+domande|desideri|vuoi|tiver|quiser|precisar|voc[êe])|qualora|nel\s+caso|caso`,
+    String.raw `als|indien|mocht`,
+    String.raw `je[śs]li|je[żz]eli|gdy|w\s+przypadku`,
+    String.raw `om|ifall|hvis`,
+    String.raw `pokud|jestli|jestli[žz]e|v\s+p[řr][íi]pad[ěe]`,
+    String.raw `إذا|اذا|في\s+حال|في\s+حالة|لو`,
+].join('|') + String.raw `)(?![\p{L}\p{N}])`, 'iu');
+const isSentenceStop = (text, at) => {
+    const char = text[at];
+    return char === '\n' || char === '!' || char === '?' || char === '？' || (char === '.' && !/\d/u.test(text[at + 1] ?? ''));
+};
+const SENTENCE_REACH = 400;
+const sentenceBounds = (text, at) => {
+    let start = at;
+    while (start > 0 && at - start < SENTENCE_REACH && !isSentenceStop(text, start - 1))
+        start -= 1;
+    let end = at;
+    while (end < text.length && end - at < SENTENCE_REACH && !isSentenceStop(text, end))
+        end += 1;
+    return [start, end];
+};
+const inConditionalClause = (text, at) => {
+    const [start, end] = sentenceBounds(text, at);
+    const sentence = text.slice(start, end);
+    const lead = sentence.match(/^[^\p{L}\p{N}]*/u)[0].length;
+    if (!CONDITIONAL_OPENER.test(sentence.slice(lead)))
+        return false;
+    const comma = sentence.slice(lead).search(/[,،](?!\d)/u);
+    const clauseEnd = comma < 0 ? end : start + lead + comma;
+    return at < clauseEnd && !/\d/u.test(text.slice(start, clauseEnd));
+};
+const NAME_RUN_OPENER = /(?<![\p{L}\p{N}])(?:at|from|to|with|in|chez|bei|presso|bij|hos|en|em|no|na|u|w|v|da|de|von|van|fra|från|od|à|au|merchant|händler|commerçant|comercio|esercente|payee|beneficiary|bénéficiaire|empfänger)[ \t]*:?[ \t]+((?:[\p{Lu}\p{N}&'’.*#/-]+[ \t]+){0,5})$/iu;
+const RUN_FUNCTION_WORD = /^(?:WAS|IS|HAS|HAVE|HAD|WERE|WILL|BEEN|BE|TO|FOR|ON|AT|IN|OF|WITH|FROM|AND|OR|BY|DUE|VIA|AS|THE|YOUR|NO|NOT|PLEASE|FUNDS?|INSUFFICIENT|CALL|CONTACT|REPLY|TRY|REF|REFERENCE|TXN|TRANSACTION|PAYMENT|PURCHASE|CARD|ACCOUNT|ACCT|AVL|AVAILABLE|BAL|BALANCE|AMOUNT|AMT|DATE|TIME|WURDE|WIRD|IST|HAT|AM|AN|AUF|VON|FÜR|MIT|UND|WEGEN|BITTE|EST|A|À|AU|PAR|POUR|DE|ET|ES|FUE|HA|POR|PARA|EL|LA|È|E|DA|PER|IS|IN|ER|ÄR|BLEV|BLE|AV|AF|PÅ|FÖR|JE|BYLA|BYL|FOI|PELO|ZOSTAŁA|ZOSTAL|PRZEZ|DO)$/u;
+const insideNameRun = (text, match, shouting) => {
+    let from = match.index;
+    while (from > 0 && /[\p{L}\p{M}\p{N}'’-]/u.test(text[from - 1]))
+        from -= 1;
+    let to = match.index + match.text.length;
+    while (to < text.length && /[\p{L}\p{M}\p{N}'’-]/u.test(text[to]))
+        to += 1;
+    const token = text.slice(from, to);
+    if (!/\p{L}/u.test(token) || token !== token.toLocaleUpperCase('de-DE'))
+        return false;
+    if (shouting)
+        return false;
+    const [sentenceStart] = sentenceBounds(text, from);
+    const opener = text.slice(Math.max(sentenceStart, from - 80), from).match(NAME_RUN_OPENER);
+    if (!opener || (0, exports.findStatusWords)(opener[1]).length > 0)
+        return false;
+    const next = text.slice(to).match(/^[ \t]+([\p{Lu}\p{N}][\p{Lu}\p{N}&'’-]*)(?![\p{Ll}])/u)?.[1];
+    if (!next || RUN_FUNCTION_WORD.test(next))
+        return false;
+    return (0, exports.findStatusWords)(next).length === 0;
+};
+const THIS_MOVEMENT = /(?<![\p{L}])(?:(?:this|the|your)[ \t]+(?:payment|purchase|transaction|transfer|charge|deposit|withdrawal|money|funds|card[ \t]+payment)|it)(?![\p{L}])/iu;
+const OTHER_OBJECT = /(?<![\p{L}])(?:your|a|an|the|our|any)[ \t]+(?:[\p{L}-]+[ \t]+)?(balance|fees?|deposit|statement|limit|points|rewards?|cashback|interest|subscription)(?![\p{L}])/iu;
+const PROMOTION_OPENER = /^[^\p{L}]*(?:learn\s+more|find\s+out|discover|explore|download|did\s+you\s+know|set\s+up|enjoy|get\s+the\s+app)(?![\p{L}])/iu;
+const MONEY_FIGURE = /(?:(?<![\p{L}])[A-Z]{3}|[$€£¥₹])[ \t]?\d[\d.,'’]*|\d[\d.,'’]*[ \t]?(?:[$€£¥₹]|[A-Z]{3}(?![\p{L}]))/gu;
+const transactionStatusWords = (text, options = {}) => {
+    const matches = options.matches ?? (0, exports.findStatusWords)(text);
+    if (matches.length === 0)
+        return [];
+    const letters = text.match(/\p{L}/gu) ?? [];
+    const shouting = letters.length === 0 || letters.filter((letter) => /\p{Lu}/u.test(letter)).length / letters.length > 0.8;
+    return matches.filter((match) => {
+        if (match.concept === 'example' || match.concept === 'unreadable')
+            return true;
+        if (inConditionalClause(text, match.index))
+            return false;
+        if ((options.nameRunWord?.(match) ?? true) && insideNameRun(text, match, shouting))
+            return false;
+        if (match.concept === 'retry' && /^top[ \t_-]*up$/iu.test(match.text) &&
+            !/[\p{L}\p{N}*]/u.test(text[match.index - 1] ?? '') && !/[\p{L}\p{N}]/u.test(text[match.index + match.text.length] ?? '')) {
+            const [start] = sentenceBounds(text, match.index);
+            if (!/(?:^[^\p{L}\p{N}]*|(?<![\p{L}])(?:please|pls|to|and|then|or|now)[ \t]+|[,;:][ \t]*)$/iu.test(text.slice(start, match.index)))
+                return false;
+        }
+        const principal = options.principal;
+        if (!principal || match.language !== 'en')
+            return true;
+        const [start, end] = sentenceBounds(text, match.index);
+        if (principal.start < end && start < principal.end)
+            return true;
+        const sentence = text.slice(start, end);
+        if (THIS_MOVEMENT.test(sentence))
+            return true;
+        const digits = (value) => value.replace(/\D/gu, '');
+        const principalFigure = digits(text.slice(principal.start, principal.end));
+        const otherFigure = (sentence.match(MONEY_FIGURE) ?? []).some((figure) => digits(figure) !== principalFigure);
+        const [principalStart, principalEnd] = sentenceBounds(text, principal.start);
+        const object = sentence.match(OTHER_OBJECT)?.[1];
+        const otherObject = object !== undefined &&
+            !new RegExp(`(?<![\\p{L}])${object.replace(/s$/u, '')}`, 'iu').test(text.slice(principalStart, principalEnd));
+        return !(otherObject || otherFigure || PROMOTION_OPENER.test(sentence));
+    });
+};
+exports.transactionStatusWords = transactionStatusWords;
 },
 "bank-alert-interpreter":function(module,exports,require){
 "use strict";
@@ -1729,11 +4099,14 @@ const finalFallback = (fallback, legacy) => {
         evidence: [],
     };
 };
-const interpretBankAlert = ({ source, sender, market, overrides = {}, observedAt, }) => {
+const interpretBankAlertInner = ({ source, sender, market, overrides = {}, observedAt, }) => {
     if ((0, bank_alert_semantic_rules_1.isExpectedFutureMoneyNotice)(source)) {
         return { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
     }
     if ((0, sms_parser_1.isInformationOnlyAlert)(source)) {
+        return { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+    }
+    if ((0, sms_parser_1.moneyNoticeKind)(source) || (0, sms_parser_1.isUnregisteredCallBack)(source, sender)) {
         return { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
     }
     const pinnedCurrency = (0, markets_1.pinnedLedgerCurrencyCode)();
@@ -1745,6 +4118,10 @@ const interpretBankAlert = ({ source, sender, market, overrides = {}, observedAt
         return { outcome: 'refuse', meaning: 'unknown', reason: 'unclear-amount', evidence: [] };
     }
     const legacy = (0, markets_1.withMarketPackForParsing)(market, () => (0, sms_parser_1.parseSms)(source, overrides, { sender, observedAt }));
+    const notSpending = (0, sms_parser_1.isNotSpendingOrIncomeShape)(source);
+    if (!legacy && (notSpending === 'bill-received' || notSpending === 'payee-receipt')) {
+        return { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+    }
     if (!legacy && (0, bank_alert_semantic_rules_1.isApplicationPurchaseOffer)(source) && !(0, unparsed_launch_alert_1.hasAffirmativeSettledMovement)(source)) {
         return { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
     }
@@ -1760,6 +4137,11 @@ const interpretBankAlert = ({ source, sender, market, overrides = {}, observedAt
     if (usableLegacy && isCompletedCardPurchaseReturn(semanticText, usableLegacy)) {
         return legacyResult(usableLegacy, 'refund');
     }
+    if (usableLegacy?.kind === 'transaction' && usableLegacy.type === 'income' && ((0, sms_parser_1.isPurchaseRefundedNotice)(source, usableLegacy.amountFils) ||
+        ((0, sms_parser_1.refundGovernsPrincipal)(source, usableLegacy.amountFils) === 'completed' &&
+            /\bpurchase|(?<![\u0621-\u064A])(?:ال)?شراء/iu.test(semanticText)))) {
+        return legacyResult(usableLegacy, 'refund');
+    }
     if (usableLegacy?.kind === 'transaction' && usableLegacy.type === 'income' &&
         FUTURE_REFUND.test(semanticText) && /\b(?:purchase|refund|revers)/iu.test(semanticText)) {
         const pending = (0, unparsed_launch_alert_1.inspectUnparsedLaunchAlert)(source, sender);
@@ -1771,6 +4153,8 @@ const interpretBankAlert = ({ source, sender, market, overrides = {}, observedAt
         (0, sms_parser_1.hasArabicRefundHeading)(source)) {
         return legacyResult(usableLegacy, 'refund');
     }
+    if (usableLegacy && notSpending)
+        return legacyResult(usableLegacy);
     if (usableLegacy && !bank_alert_semantic_rules_1.SEMANTIC_CANDIDATE_LANGUAGE.test(semanticText)) {
         return legacyResult(usableLegacy);
     }
@@ -1791,6 +4175,38 @@ const interpretBankAlert = ({ source, sender, market, overrides = {}, observedAt
             return semantic;
     }
     return finalFallback(fallback, usableLegacy);
+};
+const fallbackReadABalance = (input, amountMinor) => {
+    if (!(0, sms_parser_1.amountIsOnlyABalance)(input.source, amountMinor))
+        return false;
+    const legacy = (0, markets_1.withMarketPackForParsing)(input.market, () => (0, sms_parser_1.parseSms)(input.source, input.overrides ?? {}, { sender: input.sender, observedAt: input.observedAt }));
+    return !legacy || legacy.amountFils !== amountMinor;
+};
+const interpretBankAlert = (input) => {
+    const withoutFooters = (0, sms_parser_1.withoutReversalFooters)(input.source);
+    if (withoutFooters !== input.source)
+        return (0, exports.interpretBankAlert)({ ...input, source: withoutFooters });
+    const result = interpretBankAlertInner(input);
+    if (result.outcome !== 'parsed')
+        return result;
+    if ((0, sms_parser_1.reversalLeftUnproven)(input.source, result.parsed)) {
+        return { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+    }
+    if ((0, sms_parser_1.gluedSignContradicts)(input.source, result.parsed) ||
+        (0, sms_parser_1.unsupportedReading)(input.source, result.parsed, input.sender) ||
+        (result.parsed.kind === 'transaction' && fallbackReadABalance(input, result.parsed.amountFils)) ||
+        (0, sms_parser_1.principalUnproven)(input.source, result.parsed) || (0, sms_parser_1.hedgedPrincipal)(input.source, result.parsed)) {
+        return { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+    }
+    const shape = (0, sms_parser_1.isNotSpendingOrIncomeShape)(input.source);
+    if (shape === 'card-bill' && result.meaning !== 'card-settlement' && result.parsed.kind !== 'cardPayment' &&
+        !result.parsed.transferHint) {
+        return { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+    }
+    if (shape === 'own-move' && result.meaning !== 'own-account-transfer' && !result.parsed.transferHint) {
+        return { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+    }
+    return result;
 };
 exports.interpretBankAlert = interpretBankAlert;
 },
@@ -2044,7 +4460,7 @@ exports.semanticParsed = semanticParsed;
 "bank-alert-semantic-rules":function(module,exports,require){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.isTransactionVerificationChallenge = exports.automaticMeaning = exports.SEMANTIC_CANDIDATE_LANGUAGE = exports.isApplicationPurchaseOffer = exports.isExpectedFutureMoneyNotice = exports.isCompletedCashbackCredit = void 0;
+exports.isTransactionVerificationChallenge = exports.endsWithFooterQuestion = exports.automaticMeaning = exports.SEMANTIC_CANDIDATE_LANGUAGE = exports.isApplicationPurchaseOffer = exports.isExpectedFutureMoneyNotice = exports.isCompletedCashbackCredit = void 0;
 const sms_parser_1 = require("@/lib/sms-parser");
 const SALARY_LANGUAGE = /\b(?:salar(?:y|ies)|payroll|wages?|wps)(?:\s+(?:payment|credit|transfer))?\b|\b(?:sal(?:ary)?\s+pay|monthly\s+pay|net\s+pay|remuneration|emoluments?|pay[ -]?cheques?|paychecks?)\b|راتب|الراتب|مرتب|رواتب|اجر شهري|اجور|مستحقات راتب/iu;
 const OWN_ACCOUNT_LANGUAGE = /\b(?:own|self)\s+(?:(?:account|a\/?c)\s+)?(?:transfer|trf)\b(?:[^.\n]|\.(?=\d)){0,96}\b(?:debited|credited|completed|processed|successful|dr|cr)\b|\bdr\b(?:[^.\n]|\.(?=\d)){0,48}\b(?:account|a\/?c)\b(?:[^.\n]|\.(?=\d)){0,96}\bown\s+(?:account|a\/?c)\s+(?:transfer|trf)\b(?:[^.\n]|\.(?=\d)){0,96}\bcr\b(?:[^.\n]|\.(?=\d)){0,48}\b(?:account|a\/?c)\b|\btransferred\s+between\s+(?:your|my|own)\s+accounts\b|\btransfer\s+between\s+(?:your|my|own)\s+accounts\b(?:[^.\n]|\.(?=\d)){0,96}\b(?:completed|processed|successful)\b|\bfrom\s+(?:your|my)\s+(?:account|a\/?c)\b[^.\n]{0,96}\bto\s+(?:(?:your|my)(?:\s+(?:own|other))?|another\s+of\s+(?:your|my)|another|own)\s+(?:accounts?|a\/?c)\b|\bfrom\s+(?:your\s+)?(?:account|a\/?c)\b(?:[^.\n]|\.(?=\d)){0,96}\bto\s+(?:another\s+account\s+of\s+yours|another\s+of\s+your\s+accounts?)\b|\bmoved?\s+from\s+(?:your|my)\s+(?:account|a\/?c)\b[^.\n]{0,96}\b(?:to|into)\s+(?:(?:your|my)(?:\s+(?:own|other))?|another\s+of\s+(?:your|my)|another|own)\s+(?:accounts?|a\/?c)\b|\bdebited\s+from\s+(?:your\s+)?(?:account|a\/?c)\b[^.\n]{0,112}\bcredited\s+to\s+(?:another\s+of\s+your|your\s+other|your\s+own)\s+(?:accounts?|a\/?c)\b|\b(?:account|a\/?c)\b(?:[^.\n]|\.(?=\d)){0,64}\bcredited\b(?:[^.\n]|\.(?=\d)){0,96}\bfrom\s+(?:your\s+)?(?:own|other)\s+(?:account|a\/?c)\b|\breceived\b(?:[^.\n]|\.(?=\d)){0,96}\bfrom\s+(?:your\s+)?(?:own|other)\s+(?:account|a\/?c)\b|تحويل\s+(?:بين\s+حساباتك|بين\s+حساباتي)[\s\S]{0,72}تم\s+بنجاح|تم\s+تحويل[\s\S]{0,80}من\s+حسابك[\s\S]{0,80}(?:الي|الى)\s+حسابك/iu;
@@ -2142,6 +4558,15 @@ const automaticMeaning = (source, review, legacy) => {
 };
 exports.automaticMeaning = automaticMeaning;
 const VERIFICATION_CHALLENGE = /\b(?:did|have)\s+you\s+(?:recently\s+)?(?:attempt|attempted|make|made|try|tried|authori[sz]e|authori[sz]ed|initiate|initiated|use|used)\b[^.?!\n]{0,60}?(?:\b(?:transaction|purchase|payment|charge|withdrawal|transfer)\b|\b[A-Z]{3}\s?\d|\d[\d,]*\.\d{2})|\bwas\s+(?:this|that|it)\s+(?:transaction\s+)?(?:you|yours)\b|\breply\s+(?:with\s+)?(?:"|')?(?:yes|y)(?:"|')?\s+if\s+(?:you\s+(?:made|did|authori[sz]ed|recogni[sz]e)|(?:it|this|that)\s+was\s+(?:you|yours))\b|\breply\s+(?:with\s+)?(?:"|')?(?:yes|y)(?:"|')?\s*(?:or|\/|,)\s*(?:"|')?(?:no|n)(?:"|')?\b(?=[^.?!\n]{0,80}?\b(?:if\s+you\s+(?:made|did|authori[sz]ed|recogni[sz]e)|to\s+confirm|confirm(?:ing)?\s+(?:this|the|it)|was\s+(?:this|it)\s+you|genuine|fraud)\b)|\b(?:to\s+confirm|confirm(?:ing)?\s+(?:this|the|it)|if\s+you\s+(?:made|did|authori[sz]ed|recogni[sz]e)|was\s+(?:this|it)\s+you|genuine|fraud)\b[^.?!\n]{0,80}?\breply\s+(?:with\s+)?(?:"|')?(?:yes|y)(?:"|')?\s*(?:or|\/|,)\s*(?:"|')?(?:no|n)(?:"|')?\b|(?:^|[^\p{L}\p{M}])هل\s+(?:قمت|أجريت|حاولت|استخدمت)(?=$|[^\p{L}\p{M}])/iu;
+const FOOTER_QUESTION = /\b(?:not\s+(?:you|u)|wasn['’]t\s+you|was\s+not\s+you|not\s+(?:done|made|authori[sz]ed)\s+by\s+you|(?:don['’]t|do\s+not|didn['’]t|did\s+not)\s+recogni[sz]e(?:\s+(?:it|this(?:\s+\w+)?))?|(?:didn['’]t|did\s+not)\s+make\s+(?:it|this(?:\s+\w+)?)|(?:any\s+)?questions|need\s+help)\s*$/iu;
+const endsWithFooterQuestion = (textBeforeQuestionMark) => {
+    const match = FOOTER_QUESTION.exec(textBeforeQuestionMark);
+    if (!match)
+        return false;
+    const before = textBeforeQuestionMark.slice(0, match.index);
+    return /^\p{Lu}/u.test(match[0]) && !/(?:[,;]|\b(?:or|and|really|it|this|that))\s*$/iu.test(before);
+};
+exports.endsWithFooterQuestion = endsWithFooterQuestion;
 const isTransactionVerificationChallenge = (source) => VERIFICATION_CHALLENGE.test(source);
 exports.isTransactionVerificationChallenge = isTransactionVerificationChallenge;
 },
@@ -2167,7 +4592,7 @@ function malformedLocalMoneyTokens(text, currencyAliases) {
         const number = String.raw `(?:\d[\d.,]*|\.\d[\d.,]*)(?:[ \u00a0\u2009\u202f]+${dateGroup}\d[\d.,]*)*(?:[eE][+-]?\d+)?`;
         scanner = {
             prefix: new RegExp(String.raw `(?<![\p{L}])${localMoneyPrefixPattern(currencyAliases)}(?![\p{L}])\s*(${number})`, 'giu'),
-            suffix: new RegExp(String.raw `(${number})\s*${currency}(?![\p{L}])`, 'giu'),
+            suffix: new RegExp(String.raw `(?<!\d[.,]?)(?:(?=\.)|(?=\d)(?<!(?<![eE][+-]?\d*)\d[.,]?[ \u00a0\u2009\u202f]+))(${number})\s*${currency}(?![\p{L}])`, 'giu'),
             localCode: new RegExp(`^${currency}$`, 'iu'),
         };
         scanners.set(key, scanner);
@@ -2203,11 +4628,12 @@ function malformedLocalMoneyTokens(text, currencyAliases) {
 "best-effort-autopost":function(module,exports,require){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.appendBestEffortUndo = exports.tombstonesForRemoved = exports.bestEffortUndoKeys = exports.bestEffortCardPaymentObservationKey = exports.bestEffortObservationKey = exports.BEST_EFFORT_UNDO_CAP = exports.refusedOnlyByShopOrPromoWording = exports.hasNonCompletedWording = exports.namesOwnInstrumentTail = exports.isRegisteredAlertSender = exports.isUnverifiedAlertSender = exports.hasLinkFromUnregisteredSender = exports.isNotAutoPostableMoney = exports.sharedSymbolCurrencyForCountry = void 0;
+exports.appendBestEffortUndo = exports.tombstonesForRemoved = exports.bestEffortUndoKeys = exports.bestEffortCardPaymentObservationKey = exports.bestEffortObservationKey = exports.BEST_EFFORT_UNDO_CAP = exports.refusedOnlyByShopOrPromoWording = exports.hasNonCompletedWording = exports.hasCallbackHook = exports.namesOwnInstrumentTail = exports.isRegisteredAlertSender = exports.isUnverifiedAlertSender = exports.hasLinkFromUnregisteredSender = exports.isNotAutoPostableMoney = exports.sharedSymbolCurrencyForCountry = void 0;
 exports.decideBestEffortAutoPost = decideBestEffortAutoPost;
 exports.setBestEffortAutoPostEnabled = setBestEffortAutoPostEnabled;
 exports.bestEffortAutoPostEnabled = bestEffortAutoPostEnabled;
 const currency_metadata_1 = require("@/lib/currency-metadata");
+const alert_status_lexicon_1 = require("@/lib/alert-status-lexicon");
 const capture_source_identity_1 = require("@/lib/capture-source-identity");
 const fx_rates_1 = require("@/lib/fx-rates");
 const sms_parser_1 = require("@/lib/sms-parser");
@@ -2217,6 +4643,8 @@ const SHARED_SYMBOL_COUNTRY_CURRENCY = {
     JP: 'JPY', CN: 'CNY',
     IN: 'INR', PK: 'PKR', LK: 'LKR', NP: 'NPR', MU: 'MUR', SC: 'SCR',
     EG: 'EGP', SD: 'SDG', SS: 'SSP',
+    SE: 'SEK', DK: 'DKK', FO: 'DKK', GL: 'DKK', NO: 'NOK', IS: 'ISK',
+    JO: 'JOD', IQ: 'IQD', KW: 'KWD', BH: 'BHD', LY: 'LYD', TN: 'TND', DZ: 'DZD',
 };
 const sharedSymbolCurrencyForCountry = (country) => (country && SHARED_SYMBOL_COUNTRY_CURRENCY[country.toUpperCase()]) || null;
 exports.sharedSymbolCurrencyForCountry = sharedSymbolCurrencyForCountry;
@@ -2224,6 +4652,14 @@ const THREE_DECIMAL_COUNTRY_CURRENCY = {
     KW: 'KWD', BH: 'BHD', OM: 'OMR', JO: 'JOD',
 };
 const LAUNCH_MARKETS = new Set(['AE', 'SA']);
+const NORDIC_MARKERS = [
+    ['DKNO', /(?<![\p{L}\p{N}])(?:betalt|handlet|handlede|\p{L}*[æøÆØ]\p{L}*)(?![\p{L}\p{N}])/iu],
+    ['SE', /(?<![\p{L}\p{N}])(?:\p{L}*[äöÄÖ]\p{L}*|från|fått|dragits|betalat|belopp|debiterats|skickat)(?![\p{L}\p{N}])/iu],
+    ['DK', /(?<![\p{L}\p{N}])(?:dit|købt?|købet|beløb|hævet|modtaget|opkrævet|gennemført|kender|sendt\s+dig|af)(?![\p{L}\p{N}])/iu],
+    ['NO', /(?<![\p{L}\p{N}])(?:deg|kjøp(?:et)?|beløp|mottatt|gjennomført|kjenner|kortet\s+ditt)(?![\p{L}\p{N}])/iu],
+];
+const nordicAlertLanguages = (text) => NORDIC_MARKERS.filter(([, marker]) => marker.test(text)).map(([market]) => market);
+const NORDIC_KRONE_MARKET = { SEK: 'SE', DKK: 'DK', NOK: 'NO' };
 const POSTABLE_FAMILIES = new Set([
     'purchase', 'cash-withdrawal', 'refund', 'fee', 'utility', 'recurring-payment', 'transfer',
 ]);
@@ -2238,6 +4674,7 @@ const BLOCKING_ISSUES = new Set([
     'pending-not-posting',
     'promotion-not-posting',
     'settlement-adapter-required',
+    'own-account-move',
     'failed-not-posting',
 ]);
 const NON_COMPLETED_WORDING = [
@@ -2245,10 +4682,11 @@ const NON_COMPLETED_WORDING = [
     /\bpending\b|\bon\s+hold\b|\bhold\s+(?:placed|of|on|for)\b|\bpre-?auth(?:ori[sz](?:ation|ed))?\b|\bauthori[sz]ation\s+(?:hold|request|only)\b|\bblocked\s+amount\b|\bamount\s+(?:blocked|reserved)\b|\breserved\b|\bprocessing\b|\bin\s+progress\b|\bawaiting\b/iu,
     /\ben\s+attente\b|\bausstehend\b|\bvorgemerkt\b|\breserviert\b|\bpendiente\b|\bretenid[oa]\b|\bin\s+attesa\b|\bin\s+behandeling\b|\bgereserveerd\b|\bpendente\b|\bem\s+processamento\b|معلق|قيد\s+(?:المعالجة|التنفيذ)|محجوز/iu,
     /\brequest(?:ed|s|ing)?\b|\bcollect\s+request\b|\bapprove\s+(?:this|the)\b|\bconfirm\s+(?:this|the|your)\s+(?:payment|transaction|purchase)\b|\bdemande\b|\banfrage\b|\bsolicitud\b|\brichiesta\b|\bverzoek\b|\bsolicita[çc][aã]o|طلب/iu,
-    /\bdeclin(?:e|ed|ing)\b|\bfail(?:ed|ure|s)?\b|\bunsuccessful\b|\bnot\s+(?:been\s+)?(?:processed|completed|successful|approved|authori[sz]ed)\b|\brejected\b|\binsufficient\b|\brefus(?:[ée]e?|ed)?(?!\p{L})|(?<!\p{L})[ée]chou[ée]|\babgelehnt\b|\bfehlgeschlagen\b|\brechazad[oa]\b|\brifiutat[oa]\b|\bnon\s+riuscit[oa]\b|\bgeweigerd\b|\bmislukt\b|\brecusad[oa]\b|\bnegad[oa]\b|مرفوض|رفض|فشل|لم\s+تتم/iu,
-    /\brevers(?:al|ed|e)\b|\bchargeback\b|\bcancel(?:l)?(?:ed|ation)\b|\bvoid(?:ed)?\b|\bannul[ée]|\bstorniert\b|\banulad[oa]\b|\bannullat[oa]\b|\bgeannuleerd\b|\bcancelad[oa]\b|عكس|إلغاء|الغاء|ملغ/iu,
+    /\bdeclin(?:e|ed|ing)\b|\bfail(?:ed|ure|s)?\b|\bunsuccessful\b|\bnot\s+(?:been\s+)?(?:processed|completed|successful|approved|authori[sz]ed)\b|(?:\bnot|\bcannot|\bcan['’]t|\bcouldn['’]t|\bwon['’]t)\s+be\s+(?:made|processed|completed)\b|\brejected\b|\binsufficient\b|\brefus(?:[ée]e?|ed)?(?!\p{L})|(?<!\p{L})[ée]chou[ée]|\babgelehnt\b|\bfehlgeschlagen\b|\brechazad[oa]\b|\brifiutat[oa]\b|\bnon\s+riuscit[oa]\b|\bgeweigerd\b|\bmislukt\b|\brecusad[oa]\b|\bnegad[oa]\b|مرفوض|رفض|فشل|لم\s+تتم/iu,
+    /(?<!\p{L})(?:[Nn]icht\s+(?:ausgeführt|durchgeführt)|[Nn]on\s+abouti(?:e)?|[Dd]enegad[oa]|[Aa]fgewezen|[Ff]alhou|[Rr]ejeitad[oa]|[Nn]egat[oa]|[Oo]drzucon[aey]|[Nn]ekad\p{Ll}*|[Aa]fvist|[Aa]vvist|[Zz]amítnut\p{Ll}*|[Vv]orbehaltlich)(?!\p{L})/u,
+    /\brevers(?:al|ed|e)\b|\bchargeback\b|\bcancel(?:l)?(?:ed|ation)\b|\bvoid(?:ed)?\b|\bannul[ée]|\bstorniert\b|\banulad[oa]\b|\bannullat[oa]\b|\bgeannuleerd\b|\bcancelad[oa]\b|(?<!\p{L})cancel(?:ou|ó|aram|aron)(?!\p{L})|عكس|إلغاء|الغاء|ملغ/iu,
     /\botp\b|\bone[-\s]?time\s+(?:pass(?:word|code)?|code|pin)\b|\bverification\s+code\b|\bsecurity\s+code\b|\bpasscode\b|\bdo\s+not\s+share\b|\bnever\s+share\b|\b2fa\b|\bverify\s+(?:this|the|your)\s+(?:transaction|payment|purchase)\b|\bcode\s+(?:de\s+)?(?:v[ée]rification|s[ée]curit[ée])|\bbest[äa]tigungscode\b|\bc[óo]digo\s+de\s+(?:verificaci[óo]n|seguran[çc]a|verifica[çc][aã]o)\b|\bcodice\s+(?:di\s+)?(?:verifica|sicurezza)\b|رمز\s+(?:التحقق|التفعيل)|كلمة\s+(?:المرور|السر)\s+لمرة/iu,
-    /\bcashback\b|\bcash\s+back\b|\bdiscount\b|\b\d{1,3}\s?%\s*off\b|\boffers?\b|\bpromo(?:tion|code)?\b|\bvoucher\b|\bcoupon\b|\bwin\b|\bgiveaway\b|\bredeem\b|\bangebot\b|\brabatt\b|\bpromoci[óo]n\b|\bdescuento\b|\bsconto\b|\bkorting\b|\bdesconto\b|\bpromo[çc][aã]o|عرض|تخفيض/iu,
+    /\bcash\s?back\b(?!\s+(?:(?:world|elite|plus|platinum|signature|infinite|preferred)\s+)?(?:mastercard|visa)\b)|\bwhen\s+you\s+sign[\s-]?up\b|\bsign[\s-]?up\s+(?:today|now|bonus)\b|\bdiscount\b|\b\d{1,3}\s?%\s*off\b|\boffers?\b|\bpromo(?:tion|code)?\b|\bvoucher\b|\bcoupon\b|\bwin\b|\bgiveaway\b|\bredeem\b|\bangebot\b|\brabatt\b|\bpromoci[óo]n\b|\bdescuento\b|\bsconto\b|\bkorting\b|\bdesconto\b|\bpromo[çc][aã]o|عرض|تخفيض/iu,
     /\bstatement\b|\bminimum\s+(?:amount\s+)?(?:due|payment)\b|\btotal\s+(?:amount\s+)?due\b|\bamount\s+due\b|\bdue\s+(?:date|on|by)\b|\bpayment\s+due\b|\bbill\s+(?:is\s+)?(?:due|generated|ready)\b|\breminder\b|\boverdue\b|\brelev[ée](?!\p{L})|\bkontoauszug\b|\bextracto\b|\bestratto\s+conto\b|\brekeningoverzicht\b|\bfatura\s+(?:fechada|vence)\b|كشف\s+(?:ال)?حساب|مستحق|تذكير|الحد\s+الأدنى/iu,
     /\bunder\s+review\b|\bunusual\b|\bsuspicious\s+(?:activity|transaction|purchase|attempt|login)\s+(?:was\s+|has\s+been\s+)?(?:detected|noticed|flagged|identified)\b|\b(?:detected|noticed|flagged)\s+(?:a\s+|some\s+)?suspicious\b|\battempt(?:ed|s)?\b|\bneed\s+to\s+(?:confirm|verify)\b|\bchecking\s+(?:(?:recent|some|your)\s+)*(?:activity|transactions?|purchases?)\b|\brestrictions?\s+(?:(?:was|were|has|have)\s+(?:been\s+)?)?(?:placed|applied|added)\b|\b(?:card|account)\s+(?:(?:has|have)\s+been\s+|is\s+(?:now\s+)?|was\s+)?(?:temporarily\s+)?(?:blocked|frozen|suspended|locked|restricted)\b|\bwas\s+(?:this|that|it)\s+(?:transaction\s+)?(?:you|yours)\b|\breply\s+(?:with\s+)?["']?(?:yes|y)["']?\s+(?:or|if)\b/iu,
     /\brefund\s+(?:has\s+been\s+|is\s+|was\s+)?initiated\b|\brefund\b[^.\n]{0,48}?\b(?:has\s+been|is|was)\s+initiated\b|\b(?:should|will)\s+reflect\s+(?:in|within)\s+\d|\binitiated\s+(?:a\s+|your\s+)?refund\b|\bupdate\s+(?:your\s+)?(?:bank|account|kyc|card|pan)\s+(?:details|information|info)\b|\bto\s+receive\s+(?:your|the)\s+refund\b/iu,
@@ -2257,10 +4695,13 @@ const NON_COMPLETED_WORDING = [
     /\bactivation\s+code\b|\bverification\s+code\b|\bauth(?:entication|ori[sz]ation)\s+code\b|\bshare\s+(?:this|the)\s+code\b/iu,
     /\bOTP\b|\bPIN\b/u,
     /\bflash\s+sale\b|\boff\s+(?:your|on\s+(?:your|the|all))\s+(?:next\s+|first\s+)?(?:purchase|order|bill|booking|ride|meal|trip)s?\b/iu,
-    /\bwill\s+(?:be|have\s+been)\s+(?:debited|charged|deducted|paid|processed|collected|credited|received)\b|\bscheduled\b|\bupcoming\b|\bstanding\s+(?:instruction|order)\b|\bmandate\b|\bpre-?debit\b|\bauto-?pay\s+(?:set|scheduled|registered)\b|\bsera\s+(?:d[ée]bit[ée]|pr[ée]lev[ée])|\bwird\s+(?:abgebucht|belastet)\b|\bser[áa]\s+(?:cargad[oa]|debitad[oa])\b|\bsar[àa]\s+addebitat[oa]\b|\bwordt\s+afgeschreven\b|سيتم/iu,
+    /\bnothing\s+(?:was|has\s+been)\s+(?:charged|debited|taken|deducted|paid)\b|\bno\s+(?:charge|money|payment)\s+(?:was|has\s+been)\s+(?:made|taken|charged)\b|\b(?:it\s+)?(?:looks|seems)\s+(?:like|as\s+if)\b(?:[^.\n]|\.(?=\S)){0,60}?\b(?:spent|charged|paid|debited|used|withdrawn|sent)\b|\bwas\s+(?:this|that|it)\s+not\s+(?:you|yours)\b|\b(?:enrol(?:l)?|register|sign\s+up)\s+(?:now\s+)?to\s+(?:receive|claim|accept|get|collect)\s+(?:it|them|this|the\s+(?:money|payment|funds|transfer|amount)|your\s+(?:money|payment|funds|transfer))\b|\breceived\s+(?:a\s+|an\s+)?(?:new\s+)?(?:e-?bill|bill|invoice)\b(?!\s+payments?)|,\s*due\s+(?:on\s+)?(?:\d{1,2}[\/.-]|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d|tomorrow|today)|^\s*(?:sample|example|test|demo)\s+(?:alert|message|notification|sms)\b/iu,
+    /\b[Nn]icht\s+(?:ausgeführt|durchgeführt)|(?<!\p{L})(?:[Nn]on\s+aboutie?|[Dd]enegad[oa]|[Aa]fgewezen|[Ff]alhou|[Rr]ejeitad[oa]|[Nn]egat[oaie]|[Oo]drzucon[aeyo]?|[Nn]eka(?:d|des|t)|[Aa]fvist|[Aa]vvist|[Zz]amítnut[aáéoý]?)(?!\p{L})|(?:[$€£₹]\s?\d[\d.,]*|\d[\d.,]*\s?(?:[A-Z]{2,3}\b|[$€£₹])|\b[A-Z]{2,3}\s?\d[\d.,]*)\s+(?:might|may|could)\s+(?:have\s+)?been\s+(?:charged|debited|deducted|paid|taken|spent|used|withdrawn|sent|transferred)\b|\b(?:[Mm]ight|[Mm]ay|[Cc]ould)\s+(?:have\s+)?been\s+(?:charged|debited|deducted|paid|taken)\s+(?:[$€£₹]\s?\d|\d|[A-Z]{2,3}\s?\d)/u,
+    /\b(?:if|when|whenever|once)\s+(?:you\s+)?(?:make|spend|pay|use|withdraw|send|transfer|receive|buy)\b(?:[^.\n]|\.(?=\S)){0,80}?(?:[$€£₹]\s?\d|\d[\d.,]*\s?(?:[A-Z]{2,3}\b|[$€£₹])|\b[A-Z]{2,3}\s?\d)(?:[^.\n]|\.(?=\S)){0,80}?\b(?:we(?:['’]ll|\s+will)|you(?:['’]ll|\s+will)|(?:an?\s+)?(?:alert|notification|text|sms)\s+will)\b|(?:إذا|اذا|عند|عندما)\s+(?:قمت|تمت|أجريت|اجريت)(?:[^.\n]|\.(?=\S)){0,80}?\d(?:[^.\n]|\.(?=\S)){0,80}?(?:فسنرسل|سنرسل|فسوف|ستتلقى|ستصلك)/iu,
+    /\bwill\s+(?:be|have\s+been)\s+(?:debited|charged|deducted|paid|processed|collected|credited|received)\b|\bscheduled\b|\bupcoming\b|\bstanding\s+(?:instruction|order)\b|\bmandate\b(?<!\b(?:has\s+been|was)\s+debited\b(?:[^.\n]|\.(?=\S)){0,120}?\bas\s+per\s+(?:your\s+|the\s+)?(?:e-)?mandate)|\bpre-?debit\b|\bauto-?pay\s+(?:set|scheduled|registered)\b|\b(?:sera|seront)\s+(?:d[ée]bit[ée]e?s?|pr[ée]lev[ée]e?s?)|\bvont\s+(?:[êe]tre\s+)?(?:d[ée]bit|pr[ée]lev)|\bnon\s+(?:d[ée]bit[ée]|pr[ée]lev[ée])|\b(?:wird|werden)\s+(?:\S+\s+){0,2}?(?:abgebucht|belastet)\b|\bser[áa]\s+(?:cargad[oa]|debitad[oa])\b|\bsar[àa]\s+addebitat[oa]\b|\bwordt\s+afgeschreven\b|سيتم/iu,
     /ألغيت|أُلغيت|لم\s+تنجح|غير\s+ناجحة?|غير\s+مكتملة?|(?:تعليق|إيقاف|ايقاف)\s+(?:ال)?بطاق|(?:استرجاع|استرداد|إرجاع|ارجاع|إعادة|اعادة)\s+المبلغ|بانتظار|قيد\s+المراجعة|لا\s+تشارك|\bamount\s+(?:has\s+been\s+|was\s+)?(?:refunded|returned)\b|\bto\s+be\s+(?:debited|charged|deducted|collected)\b|\bblocked\b|\bdispute\s+(?:raised|registered|logged|lodged|opened|filed|initiated)\b|\bdisputed\b/iu,
     /\byou(?:'re|\s+are)\s+due\s+(?:a|an|your)\b|\bwe\s+owe\s+you\b|\b(?:have|need)\s+to\s+refund\s+you\b|\b(?:i|we)\s+will\s+(?:refund|repay|return)\b|\bentitled\s+to\b|\bready\s+for\s+disbursement\b|\brefund\s+(?:payment\s+)?link\b|\b(?:click|tap|use|open|pay\s+(?:via|through|using|with))\s+(?:on\s+)?(?:the|this|our|a)\s+(?:payment\s+)?link\b|\bpayment\s*link\s+to\s+(?:receive|claim|get|collect|deposit|accept)\b|\beligible\s+to\s+(?:get|receive|claim)\b|\bdue\s+to\s+receive\b|\bsend\s+(?:it|the\s+(?:money|amount|funds))?\s*back\b|\bby\s+mistake\b|\b(?:sent|credited|transferred|deposited)\s+(?:to\s+(?:you|your\s+\w+)\s+)?in\s+error\b|\bwas\s+a\s+mistake\b|\bwrongly\s+(?:sent|credited|transferred)\b/iu,
-    /\b(?:to|and)\s+(?:deposit|accept|collect|release|receive|withdraw)\s+(?:your\s+|the\s+|this\s+)?(?:funds?|money|refund|payment|amount|deposit|cash)\b|\bwithdraw\s+it\s+now\b|\b(?:get|collect|claim)\s+your\s+(?:\S+\s+){0,2}refund\b|\bfollow\s+the\s+steps\b|\bcomplete\s+(?:your|the|this|a)\s+(?:\w+\s+){0,2}(?:form|return|application|verification|registration)\b|\bsubmit\s+(?:a|an|your|the)\s+(?:\w+\s+)?(?:application|form|claim)\b|\bprovide\s+(?:us\s+)?(?:with\s+)?your\s+(?:full\s+name|account|bank|card)\b/iu,
+    /\b(?:to|and)\s+(?:deposit|accept|collect|release|receive|withdraw)\s+(?:your\s+|the\s+|this\s+)?(?:funds?|money|refund|payment|amount|deposit|cash)\b|\baccept\s+(?:it\s+|them\s+|the\s+(?:money|payment|funds|transfer)\s+)?(?:within|by|before)\b|\bto\s+release\b(?!\s+(?:date|notes?)\b)|\bwithdraw\s+it\s+now\b|\b(?:get|collect|claim)\s+your\s+(?:\S+\s+){0,2}refund\b|\bfollow\s+the\s+steps\b|\bcomplete\s+(?:your|the|this|a)\s+(?:\w+\s+){0,2}(?:form|return|application|verification|registration)\b|\bsubmit\s+(?:a|an|your|the)\s+(?:\w+\s+)?(?:application|form|claim)\b|\bprovide\s+(?:us\s+)?(?:with\s+)?your\s+(?:full\s+name|account|bank|card)\b/iu,
     /\bnoticed\s+(?:a|an|the|some)\s+(?:\w+\s+)?(?:purchase|transaction|charge|payment|debit)\b|\bconfirm\s+(?:the\s+)?following\b|\bto\s+confirm,?\s+(?:please\s+)?(?:call|reply|click|visit)\b|\bcancel\s+(?:this|the)\s+(?:payment|transaction|transfer|order)\b|\bdormant\b|\bto\s+activate\s+(?:your|the|this)\s+(?:\w+\s+){0,2}(?:account|card)\b/iu,
     /\b(?:will|wil|wl)\s+be\s+(?:refunded|deposited)\b|\b(?:to|must)\s+be\s+paid\b|\bwhen\s+it\s+ships\b/iu,
     /\b(?:wl|wil)\s+be\s+(?:paid|debited|credited|charged)\b|\b(?:click|tap)\s+to\s+pay\b|\bto\s+deposit\b|\bsoit\s+(?:d[ée]bit[ée]|pr[ée]lev[ée])|\bmettre\s+[àa]\s+jour\s+vos?\b/iu,
@@ -2274,7 +4715,7 @@ const LATAM_CURRENCIES = new Set(['BRL', 'COP', 'MXN', 'PEN']);
 const LATAM_NON_COMPLETED_WORDING = [
     /(?<!\p{L})(?:c[óo]digo\s+(?:de\s+)?(?:seguridad|autorizaci[óo]n|autoriza[çc][ãa]o|confirmaci[óo]n|confirma[çc][ãa]o|acceso|acesso|compra|transacci[óo]n)|c[óo]d\.\s*de\s+seguridad|tu\s+c[óo]digo|es\s+tu\s+c[óo]digo|clave\s+din[áa]mica|token)(?!\p{L})/iu,
     /(?<!\p{L})(?:foi\s+voc[êe]|fuiste\s+t[úu]|reconoces|reconhece|responda|responde\s+(?:s[íi]|sim|no|n[ãa]o|cancelar)|confirma\s+(?:tu|su)\s+(?:pago|compra|transacci[óo]n|operaci[óo]n)|confirme)(?!\p{L})/iu,
-    /(?<!\p{L})(?:agendad[oa]|programad[oa]|se\s+(?:cargar|debitar)[áa]|en\s+proceso|em\s+processamento|em\s+an[áa]lise|en\s+an[áa]lisis|vence(?:\s+amanh[ãa])?|vencimento|pago\s+m[íi]nimo|tienes\s+un\s+pago|completa\s+tu\s+pago|fa[çc]a\s+o\s+pagamento|j[áa]\s+pode\s+agendar|novo\s+boleto|sua\s+fatura\s+(?:de\s+R\$\s?[\d.,]+\s+)?(?:est[áa]\s+dispon[íi]vel|fechou|vence)|a\s+fatura\s+do\s+cart[ãa]o\s+fechou)(?!\p{L})/iu,
+    /(?<!\p{L})(?:agendad[oa]|agendamentos?|programad[oa]|se\s+(?:cargar|debitar)[áa]|en\s+proceso|em\s+processamento|em\s+an[áa]lise|en\s+an[áa]lisis|vence(?:\s+amanh[ãa])?|vencimento|pago\s+m[íi]nimo|tienes\s+un\s+pago|completa\s+tu\s+pago|fa[çc]a\s+o\s+pagamento|j[áa]\s+pode\s+agendar|novo\s+boleto|sua\s+fatura\s+(?:de\s+R\$\s?[\d.,]+\s+)?(?:est[áa]\s+dispon[íi]vel|fechou|vence)|a\s+fatura\s+do\s+cart[ãa]o\s+fechou)(?!\p{L})/iu,
     /(?<!\p{L})(?:empr[ée]stimo\s+foi\s+aprovado|pr[ée]-?aprovad[oa]|pr[ée]-?aprobad[oa]|cr[ée]dito\s+(?:de\s+R?\$\s?[\d.,]+\s+)?dispon[íi]vel|simul(?:ar|e)|limite\s+subiu|cupo\s+disponible|ganhe|garanta|cupom|invista|meses\s+sin\s+intereses)(?!\p{L})/iu,
     /(?<!\p{L})(?:n[ãa]o\s+(?:conclu[íi]d[oa]|aprovad[oa]|autorizad[oa]|realizad[oa])|no\s+fue\s+posible|no\s+(?:aprobad[oa]|autorizad[oa]))(?!\p{L})/iu,
     /(?<!\p{L})(?:extornad[oa]|estornad[oa]|reversad[oa]|devuelt[oa]|devolvid[oa]|sin\s+[ée]xito|sem\s+sucesso|fallid[oa]|fall[óo]|procesando|processando|n[ãa]o\s+processad[oa]|en\s+tr[áa]mite|desfeit[oa]|contestad[oa]|suspendid[oa]|suspens[oa]|no\s+se\s+pudo)(?!\p{L})/iu,
@@ -2282,9 +4723,9 @@ const LATAM_NON_COMPLETED_WORDING = [
 const TEMPORARY_HOLD = /\btemporary\s+(?:authori[sz]ation|hold|charge|debit|block)\b|\bhold\s+amount\b/iu;
 const AUTHORISATION = /\bauthori[sz](?:ed|ation)\b/iu;
 const COMPLETED = /\b(?:completed|posted|settled)\b/iu;
-const LINK = String.raw `(?:https?:\/\/|www\.)([^\s/?#]+)[^\s]*|\b([a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.[a-z]{2,12})\/[^\s]*`;
+const LINK = String.raw `(?:https?:\/\/|www\.)([^\s/?#]+)[^\s]*|\b([a-z0-9][a-z0-9-]{0,62}(?:\.[a-z0-9-]{1,63}){0,5}\.[a-z]{2,12})\/[^\s]*`;
 const STRONG_ACTION = String.raw `dispute|verify|validate|confirm|cancel|claim|collect|unlock|unblock|reactivate|restore|redeem|reverse|accept`;
-const WEAK_ACTION = String.raw `update|log\s?in|sign\s?in|receive|get`;
+const WEAK_ACTION = String.raw `update|log\s?in|sign\s?in|receive|get|review`;
 const LINK_ACTION = `${STRONG_ACTION}|${WEAK_ACTION}`;
 const ACTION_THEN_LINK = new RegExp(String.raw `\b(${LINK_ACTION})\b([^.!?\n]{0,30}?)(?:${LINK})`, 'giu');
 const LINK_THEN_ACTION = new RegExp(String.raw `(?:${LINK})[^.!?\n]{0,12}?\bto\s+(?:${LINK_ACTION})\b`, 'giu');
@@ -2366,10 +4807,10 @@ const hasLinkCallToAction = (source) => {
 const NOT_A_SETTLED_FACT = [
     /\bfraud\s+alert\b|(?<!\b(?:if|in\s+case|should)\b[^.!?\n]{0,60})\b(?:suspicious\s+(?:activity|transaction|charge|payment|login|purchase)|unusual\s+activity)\b|\bif\s+it\s+was\s+you\b|\bwas\s+this\s+you\b|\bwe\s+(?:have\s+)?(?:blocked|stopped|declined|locked)\b|(?<!\b(?:if|in\s+case|should|can|could|may)\b[^.!?\n]{0,60})\blocked\b|\bunder\s+review\b/iu,
     /\bearn\s+(?:up\s+to\s+)?(?:[$€£₹]\s?\d|\d[\d.,]*\s*(?:%|[A-Z]{3}\b))(?:[^.!?\n]|\.\d){0,40}?\b(?:when|every\s+time|each\s+time|for\s+every)\b|\btap\s+to\s+accept\b/iu,
-    /\bdid\s+you\s+(?:authori[sz]e|make|attempt|use)\b|\breply\s+(?:y|yes|n|no|1|2)\b|(?<!\b(?:if|in\s+case|should)\b[^.!?\n]{0,40})\brecogni[sz]e\b|\bflagged\b|\bheld\b|\b(?:otp|one[-\s]time|verification|security)\s+code\b|(?<!\b(?:auth|authori[sz]ation|approval|merchant|branch|postal|zip|sort|mcc|promo|category|reference|ref)\s+)\bcode\s*:?\s*\d{4,}\b/iu,
+    /\bdid\s+you\s+(?:authori[sz]e|make|attempt|use)\b|\breply\s+(?:y|yes|n|no|1|2)\b|(?<!\b(?:if|in\s+case|should|don['’]t|do\s+not)\b[^.!?\n]{0,40})\brecogni[sz]e\b|\bflagged\b|\bheld\b|\b(?:otp|one[-\s]time|verification|security)\s+code\b|\bcode(?<!\b(?:auth|authori[sz]ation|approval|merchant|biller|branch|postal|zip|sort|mcc|promo|category|reference|ref)\s+code)\s*:?\s*\d{4,}\b/iu,
     /\b(?:someone|somebody|anyone|anybody|a\s+friend)\s+(?:has\s+)?(?:paid|sent)\s+you\b|\b(?:if|whether)\s+(?:they|he|she|you|[\p{L}]+)\s+(?:have\s+|has\s+)?(?:paid|sent)\s+you\b/iu,
-    /(?:^|[.!?\n:]\s*)(?:has|have|did|does|do|is|was|were)\s+(?:[^.!?\n]|\.\d){0,80}?\d(?:[^.!?\n]|\.\d){0,40}\?/iu,
-    /(?:^|[.!?\n:]\s*)(?:if|when|once|unless)\b(?:[^.!?\n]|\.\d){0,80}?\b(?:paid|made|sent|received|charged|spent|debited|credited)\b(?:[^.!?\n]|\.\d){0,40}?(?:[$€£₹]\s?\d|\b[A-Z]{3}\s?\d)/iu,
+    /(?:^|[.!?\n:](?<![.!?\n:]\s*?\s)\s*)(?:has|have|did|does|do|is|was|were)\s+(?:[^.!?\n]|\.\d){0,80}?\d(?:[^.!?\n]|\.\d){0,40}\?/iu,
+    /(?:^|[.!?\n:](?<![.!?\n:]\s*?\s)\s*)(?:if|when|once|unless)\b(?:[^.!?\n]|\.\d){0,80}?\b(?:paid|made|sent|received|charged|spent|debited|credited)\b(?:[^.!?\n]|\.\d){0,40}?(?:[$€£₹]\s?\d|\b[A-Z]{3}\s?\d)/iu,
 ];
 const NOT_A_NEW_MOVEMENT = [
     /\bconverted\s+(?:in)?to\s+(?:an?\s+)?(?:emi|instal(?:l)?ments?|instal(?:l)?ment\s+plan)\b/iu,
@@ -2378,8 +4819,35 @@ const NOT_A_NEW_MOVEMENT = [
 ];
 const MERCHANT_ORDER_RECEIPT = /\border\s*(?:#|no\.?|number|id)\s*[:.-]?\s*[A-Z0-9-]*\d[\s\S]{0,80}?\b(?:paid|payment)\b|\b(?:paid|payment)\b[\s\S]{0,40}?\border\s*(?:#|no\.?|number|id)\s*[:.-]?\s*[A-Z0-9-]*\d/iu;
 const OWN_BALANCE_STATED = /\b(?:updated|avl\.?|available|new|closing|current)\s+(?:wallet\s+|account\s+|a\/c\s+)?bal(?:ance)?\b|\bbal(?:ance)?\s*(?:is|:)\s*(?:[A-Z]{3}|Rs\.?|[$£€₹])/iu;
-const OWN_CARD_PAYMENT = /\b(?:[Yy]ou\s+)?paid\b(?:[^.\n]|\.\d){0,40}?\bto\s+your\s+(?:(?:[A-Z][\p{L}\p{N}&.'’-]*|credit|charge)\s+){0,4}?[Cc]ard\b/u;
-const isNotAutoPostableMoney = (source) => hasLinkCallToAction(source) || NOT_A_SETTLED_FACT.some((pattern) => pattern.test(source)) ||
+const OWN_CARD_PAYMENT = /\b(?:[Yy]ou\s+)?(?:paid|sent|transferred|moved)\b(?:[^.\n]|\.\d){0,40}?\bto\s+your\s+(?:(?:[A-Z][\p{L}\p{N}&.'’-]*|credit|charge)\s+){0,4}?[Cc]ard\b/u;
+const LOOKALIKE_LABEL = /verif|secur|sicher|s[äa]ker|sikker|veilig|seguro|segur|sicurezza|bezpiec|bezpe[čc]|login|signin|anmeld|support|hilfe|help|refund|claim|unlock|update|confirm|bestaetig|bestätig|validat|account|konto|compte|cuenta|conto|rekening|kunde|alert|service/iu;
+const BARE_HOST = /(?<![\p{L}\p{N}@._-])((?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?\.){1,4}[a-z]{2,12})(?![\p{L}\p{N}-])(\S*)/gu;
+const RISKY_TLD = /\.(?:app|xyz|top|info|online|site|link|click|live|support|help|icu|vip|shop|cc|ws|ru|tk|ml|ga|cf|gq)$/iu;
+const lookalikeHost = (host) => {
+    const bare = host.toLowerCase().replace(/^www\./u, '').replace(/[:.]+$/u, '');
+    const registrable = registrableDomain(bare).split('.')[0];
+    return spoofedHost(bare) || bare.split('.').slice(0, -1).some((label) => label.includes('-') && LOOKALIKE_LABEL.test(label)) ||
+        (LOOKALIKE_LABEL.test(registrable) && RISKY_TLD.test(bare));
+};
+const hasLookalikeLink = (source) => {
+    for (const match of source.matchAll(ANY_LINK)) {
+        const host = match[1] ?? match[2];
+        if (host && lookalikeHost(host))
+            return true;
+    }
+    for (const match of source.matchAll(BARE_HOST))
+        if (lookalikeHost(match[1]))
+            return true;
+    for (const match of source.toLowerCase().matchAll(BARE_HOST))
+        if (lookalikeHost(match[1]))
+            return true;
+    return false;
+};
+const hasBareLink = (source) => [...source.matchAll(BARE_HOST)].some((match) => /^[/?#]/u.test(match[2] ?? '') || lookalikeHost(match[1]) || RISKY_TLD.test(match[1]));
+const DISGUISED_LINK = /(?<![\p{L}\p{N}])(?:h(?:xx|xt|tx)ps?:?\/\/|https?\/\/)|[\p{L}\p{N}-][。．｡][a-z]{2,12}(?![\p{L}])|(?<![\p{L}\p{N}-])[a-z0-9-]{1,63}_[a-z0-9_-]{0,63}\.[a-z]{2,12}(?:\/|(?![\p{L}\p{N}]))|(?<=[\p{L}\p{N}])\s*[[(]\s*\.\s*[\])]\s*(?=[\p{L}\p{N}])|(?<![\p{L}\p{N}.-])[a-z0-9-]{2,63}[ \t]+\.[ \t]*[a-z]{2,12}\//iu;
+const LABELLED_HOST = /(?<!\p{L})(?:info|details?|link|mehr|more|plus|m[aá]s|pi[uù]|meer|mer|wi[eę]cej|v[ií]ce|pr[üu]fen|check|ver|voir|vedi|zie|se|zobacz|viz|web|online|url|site|portal)[ \t]*:[ \t]*(?:[a-z0-9][a-z0-9-]{0,62}\.){1,4}[a-z]{2,12}(?![\p{L}\p{N}-])/iu;
+const NON_ASCII_HOST = /(?<![\p{L}\p{N}.-])[\p{L}\p{N}-]{0,62}[^\x00-\x7f\s][\p{L}\p{N}-]{0,62}\.(?:[a-z]{2,12})\//iu;
+const isNotAutoPostableMoney = (source) => hasLinkCallToAction(source) || hasLookalikeLink(source) || DISGUISED_LINK.test(source) || NON_ASCII_HOST.test(source) || NOT_A_SETTLED_FACT.some((pattern) => pattern.test(source)) ||
     NOT_A_NEW_MOVEMENT.some((pattern) => pattern.test(source)) ||
     (MERCHANT_ORDER_RECEIPT.test(source) && !OWN_BALANCE_STATED.test(source));
 exports.isNotAutoPostableMoney = isNotAutoPostableMoney;
@@ -2396,10 +4864,12 @@ const registeredAlphaSender = (sender) => {
     const id = raw.replace(/^[A-Z]{2}-/, '').replace(/-[A-Z]$/, '');
     if (/^[A-Za-z]{2}$/.test(id))
         return true;
-    return /^[A-Za-z][A-Za-z0-9 ]{2,15}$/.test(id) && (id.match(/[A-Za-z]/g) ?? []).length >= 3 &&
-        !GENERIC_SENDER.test(id);
+    return /^[A-Za-z][A-Za-z0-9 ]*(?:[-_][A-Za-z0-9 ]+)*$/.test(id) && id.length >= 3 && id.length <= 16 &&
+        (id.match(/[A-Za-z]/g) ?? []).length >= 3 && !GENERIC_SENDER.test(id.replace(/[-_].*$/, ''));
 };
-const hasLinkFromUnregisteredSender = (source, sender) => LINK_RE.test(source) && !registeredAlphaSender(sender);
+const CAPITAL_LINK = /\bHTTPS?:\/\/|\b(?:BIT\.LY|TINYURL\.COM|T\.CO|GOO\.GL|CUTT\.LY|RB\.GY|IS\.GD|OW\.LY|T\.LY|SHORTURL\.AT)\//iu;
+const hasLinkFromUnregisteredSender = (source, sender) => (LINK_RE.test(source) || hasBareLink(source) || DISGUISED_LINK.test(source) || LABELLED_HOST.test(source) || CAPITAL_LINK.test(source)) &&
+    !registeredAlphaSender(sender);
 exports.hasLinkFromUnregisteredSender = hasLinkFromUnregisteredSender;
 const isUnverifiedAlertSender = (sender) => {
     const raw = typeof sender === 'string' ? sender.trim() : '';
@@ -2412,10 +4882,12 @@ const isUnverifiedAlertSender = (sender) => {
 exports.isUnverifiedAlertSender = isUnverifiedAlertSender;
 const isRegisteredAlertSender = (sender) => registeredAlphaSender(sender);
 exports.isRegisteredAlertSender = isRegisteredAlertSender;
-const OWN_INSTRUMENT_TAIL = /(?:\b(?:a\/c|acc(?:oun)?t|acct|card|ending|wallet(?:\s+(?:no\.?|number))?)\b|(?<!\p{L})(?:حساب|بطاق[ةه])(?:\s+رقم)?)\.?\s*(?:no\.?|number|#)?\s*:?\s*(?:ending\s+(?:in|with)\s+)?(?:(?:[*xX•·]{2,}[\d*xX•·]*-){1,3}[\d*xX•·]*\d{2,6}|(?:[A-Z]{2}\d{2}[A-Z]{0,4})?\d{0,6}[*xX•·…]+\s?-?\d{2,6}|\.{2,3}\s?\d{2,6}|\d{3,6})(?![\d#])/iu;
-const OWN_INSTRUMENT_TAIL_ALL = new RegExp(OWN_INSTRUMENT_TAIL.source, 'giu');
-const PAYER_BEFORE = /(?:\b(?:from|sender|by|of)|(?<!\p{L})من)[ \t]*:?[ \t]*(?:(?:the|a|an)[ \t]+)?$/iu;
-const OWNER_BEFORE = /(?:\b(?:your|to|in|into|on|with|using)|(?<!\p{L})(?:الى|إلى|الي|في|على))[ \t]*:?[ \t]*(?:[^\s.,;:!?]+[ \t]+){0,2}$/iu;
+const OWN_INSTRUMENT_TAIL = /(?:\b(?:a\/c|acc(?:oun)?t(?:-i)?|acct|card|ending|wallet(?:\s+(?:no\.?|number))?)\b|\ba\/c(?=[xX*•·]+\d)|(?<!\p{L})(?:حساب|بطاق[ةه])(?:\s+رقم)?)\.?\s*(?:(?:no\.?|number|#)\s*)?(?::\s*)?(?:ending\s+(?:in|with)\s+)?(?:(?:[*xX•·]{2,}[\d*xX•·]*-){1,3}[\d*xX•·]*\d{2,6}|(?:[A-Z]{2}\d{2}[A-Z]{0,4})?\d{0,6}[*xX•·…]+\s?-?\d{2,6}|\.{2,3}\s?\d{2,6}|\d{3,6})(?![\d#])/iu;
+const NETWORK_TAIL = /\b(?:visa|mastercard|amex|maestro|ac)\b\.?\s*(?:(?:no\.?|number)\s*(?::\s*)?)?(?:\d{0,6}[*xX•·…]+\s?-?\d{2,6}|\.{2,3}\s?\d{2,6}|\d{4}(?=\s+(?:for\s+(?:[$€£₹]\s?\d|[a-z]{2,3}\.?\s?\d|\d)|at\s|(?:was|has\s+been)\s+(?:used|charged|debited|credited)\b)))(?![\d#])/iu;
+const OWN_INSTRUMENT_TAIL_ALL = new RegExp(`${OWN_INSTRUMENT_TAIL.source}|${NETWORK_TAIL.source}`, 'giu');
+const PAYER_BEFORE = /(?:\b(?:from|sender|by|of|payer|remitter)|(?<!\p{L})من)[ \t]*:?[ \t]*(?:(?:the|a|an)[ \t]+)?$|\bfrom[ \t]+your[ \t]+(?:[^\s.,;:!?]+[ \t]+){0,3}$/iu;
+const PAYER_AFTER = /^[ \t]*(?:of|holder|belonging[ \t]+to)\b/iu;
+const OWNER_BEFORE = /\b(?:your|ur|yr)[ \t]+(?:[^\s.,;:!?]+[ \t]+){0,3}$|(?:\b(?:your|to|in|into|on|with|using)|(?<!\p{L})(?:الى|إلى|الي|في|على))[ \t]*:?[ \t]*(?:[^\s.,;:!?]+[ \t]+){0,2}$/iu;
 const CLAUSE_START_BEFORE = /(?:^|[\n.,;:!?(])[ \t]*(?:dear[ \t]+(?:customer|client|member)[ \t]*,?[ \t]*)?$/iu;
 const OWN_FIELD_TAIL = /(?:^|\n)[ \t]*(?:to|الى|إلى|الي|حساب)[ \t]*:[ \t]*[*xX•·]*\d{3,4}(?![\d#])/iu;
 const YOUR_INSTRUMENT_EARLIER = /\byour[ \t]+(?:[\p{L}]+[ \t]+){0,2}(?:card|account|a\/c|acct)\b/iu;
@@ -2429,7 +4901,7 @@ const ownInstrumentTailIn = (text, direction) => {
         const at = match.index ?? 0;
         const before = text.slice(0, at);
         const near = before.slice(-48);
-        if (credit && PAYER_BEFORE.test(near))
+        if (credit && (PAYER_BEFORE.test(near) || PAYER_AFTER.test(text.slice(at + match[0].length, at + match[0].length + 24))))
             continue;
         if (OWNER_BEFORE.test(near) || CLAUSE_START_BEFORE.test(before) || (!credit && DEBIT_ORIGIN_BEFORE.test(near)) ||
             YOUR_INSTRUMENT_EARLIER.test(before))
@@ -2442,18 +4914,82 @@ exports.namesOwnInstrumentTail = namesOwnInstrumentTail;
 const namesOwnInstrument = (source, event) => (event.direction !== 'credit' && event.instrument?.evidence === 'explicit' && !!event.instrument.value?.last4 &&
     /\d{2,}/.test(event.instrument.value.last4)) || ownInstrumentTailIn(source, event.direction === 'credit' || event.direction === 'debit' ? event.direction : undefined);
 const CALLBACK_HOOK = /\b(?:not\s+(?:you|u|correct)|not\s+(?:done|made|authori[sz]ed)\s+by\s+you|wasn'?t\s+you|if\s+(?:you\s+)?(?:did|do)\s+not|dispute|helpline|need\s+help)\b/iu;
+const CALLBACK_NUMBER = /\b(?:call|ring|phone|dial|contact)(?:\s+us)?(?:\s+(?:on|at))?\s*:?\s*\+?\d[\d\s().-]{6,16}\d(?![\p{L}\p{N}])/iu;
+const hasCallbackHook = (source) => CALLBACK_HOOK.test(source);
+exports.hasCallbackHook = hasCallbackHook;
+const CHAT_MARKER = /(?<![\p{L}\p{N}])(?:[Ll][Oo][Ll]|[Ll][Mm][Aa][Oo]|[Hh][Aa](?:[Hh][Aa])+|[Oo][Mm][Gg])(?![\p{L}\p{N}])|😂|🤣|😅|\bI(?:['’]ve|\s+(?:just|have|already))?\s+(?:spent|paid|bought|sent|transferred)\b|\b(?:send|pay|transfer)\s+me\s+(?:back\s+)?(?:your|my|the)\s+(?:half|share|part|cut)\b|حو[ّ]?ل\s*لي|نصيبك|ادفع\s*لي/u;
+const EUROPEAN_DENIAL_HOOK = /(?<!\p{L})(?:unbekannte\s+(?:zahlung|buchung)|nicht\s+von\s+ihnen|waren\s+sie\s+das\s+nicht|ce\s+n['’]est\s+pas\s+vous|op[ée]ration\s+inconnue|no\s+reconoces|no\s+has\s+sido\s+t[uú]|non\s+riconosci|n[ãa]o\s+reconhece|niet\s+herkend|herkent\s+u\s+dit\s+niet|nie\s+rozpoznajesz|to\s+nie\s+ty|k[äa]nner\s+du\s+inte\s+igen|var\s+det\s+inte\s+du|kender\s+du\s+ikke|kjenner\s+du\s+ikke|ikke\s+(?:dig|deg)|nebyli\s+jste\s+to\s+vy)(?!\p{L})/iu;
+const CALL_VERB_NUMBER = /(?<![\p{L}])(?:call|ring|phone|dial|contact|reach\s+us|rufen|anrufen|appelez|llam[ae]|chiam[ai]|ligue|bel|zadzwo[nń]|volejte|ring|اتصل|اتصلوا|اتصال)(?:[ \t]+[^\d\s]+){0,3}?[ \t]*:?[ \t]*\+?\d[\d \t().-]{2,18}\d(?![\p{N}])/iu;
+const personalSender = (sender) => typeof sender === 'string' && (sender.includes('@') || /^\+?[\d\s().-]{7,}$/u.test(sender.trim()));
+const PHONE_RUN = /(?<![\p{L}\p{N}*•·#.,])\+?\(?\d[\d \t().-]{5,20}\d(?![\p{N}]|[.,]\d)/gu;
+const hasCallbackPhone = (source, event) => {
+    const money = [...event.amount.spans, ...event.observations.flatMap((observation) => observation.field.spans)];
+    const text = source.replace(/(?<![\d.])(?:\d{4}-(?:0?[1-9]|1[0-2])-(?:0?[1-9]|[12]\d|3[01])|(?:0?[1-9]|[12]\d|3[01])[./-](?:0?[1-9]|1[0-2])[./-](?:\d{4}|\d{2}))(?![\d.]?\d)|(?<![\d.])(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?/gu, (date) => ' '.repeat(date.length));
+    for (const match of text.matchAll(PHONE_RUN)) {
+        const start = match.index, end = start + match[0].length;
+        const digits = match[0].replace(/\D/gu, '');
+        if (digits.length < 7 || digits.length > 15)
+            continue;
+        if (money.some((span) => span.start < end && span.end > start))
+            continue;
+        const run = match[0].trim();
+        const moneyShape = /^\d{1,3}(?:[ .,'’]\d{3})*[.,]\d{2}$/u.test(run) || (/^\d{1,3}(?:[ .,'’]\d{3})*[.,]\d{3}$/u.test(run) &&
+            (/(?:[A-Z]{3}|[$€£¥₹]|kr\.?|zł|Kč|\p{Script=Arabic}+)\s*$/u.test(source.slice(Math.max(0, start - 6), start)) ||
+                /^\s*(?:[A-Z]{3}|[$€£¥₹]|kr|zł|Kč|\p{Script=Arabic})/u.test(source.slice(end, end + 6))));
+        if (/^\d{1,4}[./-]\d{1,2}[./-]\d{2,4}$/u.test(run) || moneyShape)
+            continue;
+        return true;
+    }
+    return false;
+};
 const unverifiedMoneyClaim = (source, event, sender, exactTemplate) => {
     const blank = typeof sender === 'string' && sender.trim() === '';
     if (!(0, exports.isUnverifiedAlertSender)(sender) && !(blank && !exactTemplate))
         return false;
+    if (CHAT_MARKER.test(source))
+        return true;
+    if (!blank && event.direction === 'debit' && CALLBACK_HOOK.test(source) && CALLBACK_NUMBER.test(source))
+        return true;
+    if (!blank && personalSender(sender) && (hasCallbackPhone(source, event) || CALL_VERB_NUMBER.test(source)))
+        return true;
     if (namesOwnInstrument(source, event))
         return false;
     if (event.direction === 'credit')
         return true;
-    return event.direction === 'debit' && CALLBACK_HOOK.test(source);
+    return event.direction === 'debit' && (CALLBACK_HOOK.test(source) ||
+        (!registeredAlphaSender(sender) && EUROPEAN_DENIAL_HOOK.test(source) && hasCallbackPhone(source, event)));
 };
-const COMPLETED_MOVEMENT = /\b(?:spent|debited|credited|paid|posted|withdrawn|transferred|received|charged|deposited|purchased|refunded)\b|\bmade\s+an?\s+\S+\s+(?:purchase|transaction|payment)\b|\b(?:purchase|payment|transaction)\s+of\s+(?:[A-Z]{3}|Rs\.?|[$£€₹])\s?\d|\bused\s+(?:for|at)\b|\bavailable\s+in\s+(?:your\s+)?(?:account|a\/c|acct|card)\b/iu;
-const PROMO_FOOTER_SENTENCE = /(?:^|(?<=[.!;\n]))(?:[^.!;\n]|\.(?=\d))*?\b(?:apply\s+(?:now|here|today)|earn\s+(?:over|up\s*to|upto|extra)|get\s+paid|track\s+your\s+(?:order|parcel|package|shipment|spending)|to\s+deposit\b(?:[^.!;\n]|\.(?=\d))*?\buse|reward\s+points?\s+will\s+be\s+added)\b(?:[^.!;\n]|\.(?=\d))*[.!]?/giu;
+const COMPLETED_MOVEMENT = /\b(?:transaction|purchase|payment|charge)\b(?:[^.\n]|\.(?=\S)){0,60}?\b(?:was|has\s+been)\s+made\b|\b(?:spent|debited|credited|paid|posted|withdrawn|transferred|received|charged|deposited|purchased|refunded)\b|\bmade\s+an?\s+\S+\s+(?:purchase|transaction|payment)\b|\b(?:purchase|payment|transaction)\s+of\s+(?:[A-Z]{3}|Rs\.?|[$£€₹])\s?\d|\bused\s+(?:for|at)\b|\bavailable\s+in\s+(?:your\s+)?(?:account|a\/c|acct|card)\b/iu;
+const PROMO_KEYWORDS = /\b(?:apply\s+(?:now|here|today)|earn\s+(?:over|up\s*to|upto|extra)|get\s+paid|track\s+your\s+(?:order|parcel|package|shipment|spending)|to\s+deposit\b[^]*?\buse|reward\s+points?\s+will\s+be\s+added)\b/iu;
+const PROMO_FOOTER_SENTENCE = {
+    [Symbol.replace](source, replacement) {
+        let out = '';
+        let start = 0;
+        for (let index = 0; index <= source.length; index += 1) {
+            const char = source[index];
+            const boundary = index === source.length || char === '!' || char === ';' || char === '\n' ||
+                (char === '.' && !/\d/u.test(source[index + 1] ?? ''));
+            if (!boundary)
+                continue;
+            const sentence = source.slice(start, index);
+            if (PROMO_KEYWORDS.test(sentence)) {
+                out += replacement;
+                start = index + (char === '.' || char === '!' ? 1 : 0);
+                if (start > index)
+                    continue;
+            }
+            else {
+                out += sentence;
+                start = index;
+            }
+            if (index < source.length) {
+                out += char;
+                start = index + 1;
+            }
+        }
+        return out;
+    },
+};
 const MERCHANT_DESCRIPTOR = /((?:\b(?:at|to|from|with|on|in|by|via|for)|@|لدى:?)\s+(?:the\s+)?)(?!(?:APPLY|REGISTER|CLAIM|CLICK|TAP|REPLY|EARN|GET)\b)[A-Z][A-Z0-9&'’.-]*(?:\s+[A-Z0-9&][A-Z0-9&'’.-]*)*/gu;
 const maskMerchantDescriptors = (source) => source.replace(MERCHANT_DESCRIPTOR, '$1MERCHANT');
 const PROMO_AND_SHOP_WORDING = [
@@ -2501,6 +5037,28 @@ const latamScope = (input) => {
         ? { BRL: 'BR', COP: 'CO', MXN: 'MX', PEN: 'PE' }[currency]
         : null;
 };
+const MONTHS = { jan: 1, feb: 2, mar: 3, mär: 3, apr: 4, mai: 5, may: 5, maj: 5, jun: 6, jul: 7,
+    aug: 8, sep: 9, okt: 10, oct: 10, nov: 11, dez: 12, dec: 12, des: 12, ene: 1, gen: 1, fév: 2, fev: 2, avr: 4, ago: 8, set: 9, ott: 10, dic: 12,
+    mei: 5, out: 10 };
+const leadingDateDay = (source, observedDay) => {
+    const text = source.replace(/^[^\p{L}\p{N}]+/u, '');
+    const pad = (value) => String(value).padStart(2, '0');
+    let match = /^(\d{4})-(\d{1,2})-(\d{1,2})(?!\d)/u.exec(text);
+    if (match)
+        return `${match[1]}-${pad(+match[2])}-${pad(+match[3])}`;
+    match = /^(\d{1,2})[./-](\d{1,2})[./-](\d{4}|\d{2})(?!\d)/u.exec(text);
+    if (match) {
+        const year = match[3].length === 2 ? 2000 + +match[3] : +match[3];
+        if (+match[2] >= 1 && +match[2] <= 12 && +match[1] >= 1 && +match[1] <= 31)
+            return `${year}-${pad(+match[2])}-${pad(+match[1])}`;
+        return null;
+    }
+    match = /^(\d{1,2})\.?\s+(\p{L}{3,4})/u.exec(text);
+    const month = match ? MONTHS[match[2].toLocaleLowerCase('de-DE').slice(0, 3)] ?? MONTHS[match[2].toLocaleLowerCase('de-DE')] : undefined;
+    if (match && month && observedDay)
+        return `${observedDay.slice(0, 4)}-${pad(month)}-${pad(+match[1])}`;
+    return null;
+};
 const localIsoDay = (epochMs) => {
     if (epochMs === undefined || !Number.isFinite(epochMs))
         return null;
@@ -2520,7 +5078,7 @@ const directionMatchesFamily = (event) => {
 };
 const SENT_TO_ACCOUNT_REFERENCE = /\bsent\s+to\s+(?:your\s+)?(?:[A-Za-z][A-Za-z&]{1,2}\s+){0,3}(?:a\/c|acc(?:oun)?t)\.?\s*(?:no\.?\s*)?[*xX•·]+\d{2,6}\b/iu;
 const FROM_YOUR_ORIGIN = /\bfrom\s+your\b/iu;
-const PAYEE_RECEIVED_YOUR_TRANSFER = /\b(?:has|have)\s+(?:now\s+)?received\s+your\s+(?:\w+\s+){0,2}(?:transfer|payment|money|remittance)\b/iu;
+const PAYEE_RECEIVED_YOUR_TRANSFER = /\b(?:has|have)\s+(?:now\s+)?received\s+your\s+(?:\S+\s+){0,3}?(?:transfer|payment|money|remittance)\b/iu;
 const inboundSentToOwnAccount = (source) => SENT_TO_ACCOUNT_REFERENCE.test(source) && !FROM_YOUR_ORIGIN.test(source);
 const validMoney = (money) => {
     if (!money || typeof money.currency !== 'string' || !/^[A-Z]{3}$/.test(money.currency))
@@ -2532,7 +5090,8 @@ const validMoney = (money) => {
         return false;
     return Number.isSafeInteger(Number(money.minorUnits));
 };
-const resolvePrincipalMoney = (source, event, country, routedMarket) => {
+const DINAR_CURRENCIES = new Set(['JOD', 'IQD', 'KWD', 'BHD', 'LYD', 'TND', 'DZD']);
+const resolvePrincipalMoney = (source, event, country, routedMarket, senderMarket) => {
     const field = event.amount;
     if (field.evidence === 'explicit') {
         if (field.alternatives.length !== 0 || !validMoney(field.value))
@@ -2541,31 +5100,44 @@ const resolvePrincipalMoney = (source, event, country, routedMarket) => {
     }
     if (field.evidence !== 'ambiguous')
         return 'amount-unclear';
-    const localThreeDecimal = THREE_DECIMAL_COUNTRY_CURRENCY[(routedMarket ?? country ?? '').toUpperCase()];
-    const figure = field.spans.length === 1 ? source.slice(field.spans[0].start, field.spans[0].end) : '';
-    const [decimal, grouped] = [...field.alternatives].sort((a, b) => a.minorUnits.length - b.minorUnits.length);
-    if (localThreeDecimal && field.issues.length > 0 && field.issues.every((issue) => issue === 'decimal-or-grouping') &&
-        field.value === null && field.alternatives.length === 2 &&
-        /^[^,]*\d\.\d{3}(?!\d)[^,]*$/.test(figure) &&
-        validMoney(decimal) && decimal.currency === localThreeDecimal && grouped?.currency === localThreeDecimal &&
-        BigInt(grouped.minorUnits) === BigInt(decimal.minorUnits) * 1000n) {
-        return decimal;
-    }
-    const symbolOnly = field.issues.length > 0 &&
-        field.issues.every((issue) => issue === 'currency-symbol' || issue === 'currency-exponent');
-    if (!symbolOnly)
+    const allowed = new Set(['currency-symbol', 'currency-exponent', 'decimal-or-grouping']);
+    if (field.issues.length === 0 || !field.issues.every((issue) => allowed.has(issue)))
         return 'amount-unclear';
-    const wanted = routedMarket
-        ? (0, exports.sharedSymbolCurrencyForCountry)(routedMarket)
-        : (0, exports.sharedSymbolCurrencyForCountry)(country);
+    const symbolDoubt = field.issues.some((issue) => issue === 'currency-symbol' || issue === 'currency-exponent');
+    const figureDoubt = field.issues.includes('decimal-or-grouping');
+    const market = (routedMarket ?? country ?? '').toUpperCase();
+    const dinarWord = symbolDoubt && [field.value, ...field.alternatives]
+        .every((money) => !money || DINAR_CURRENCIES.has(money.currency));
+    const wanted = dinarWord && senderMarket !== undefined
+        ? (0, exports.sharedSymbolCurrencyForCountry)(senderMarket)
+        : symbolDoubt
+            ? (0, exports.sharedSymbolCurrencyForCountry)(routedMarket ?? country)
+            : THREE_DECIMAL_COUNTRY_CURRENCY[market] ?? null;
     if (!wanted)
-        return 'currency-unclear';
-    const options = [...(field.value ? [field.value] : []), ...field.alternatives]
-        .filter((money) => money && money.currency === wanted);
-    const distinct = new Set(options.map((money) => `${money.minorUnits}/${money.exponent}`));
-    if (distinct.size !== 1 || !validMoney(options[0]))
-        return 'currency-unclear';
-    return options[0];
+        return symbolDoubt ? 'currency-unclear' : 'amount-unclear';
+    const readings = new Map();
+    for (const money of [...(field.value ? [field.value] : []), ...field.alternatives]) {
+        if (money && money.currency === wanted)
+            readings.set(`${money.minorUnits}/${money.exponent}`, money);
+    }
+    const options = [...readings.values()];
+    if (options.length === 1) {
+        if (!validMoney(options[0]))
+            return symbolDoubt ? 'currency-unclear' : 'amount-unclear';
+        if (figureDoubt && options[0].exponent !== 0)
+            return 'amount-unclear';
+        return options[0];
+    }
+    const localThreeDecimal = THREE_DECIMAL_COUNTRY_CURRENCY[market];
+    const figure = field.spans.length === 1 ? source.slice(field.spans[0].start, field.spans[0].end) : '';
+    if (figureDoubt && options.length === 2 && localThreeDecimal === wanted &&
+        /^[^,]*\d\.\d{3}(?!\d)[^,]*$/.test(figure)) {
+        const [decimal, grouped] = [...options].sort((a, b) => a.minorUnits.length - b.minorUnits.length);
+        if (validMoney(decimal) && /^\d+$/.test(grouped.minorUnits) &&
+            BigInt(grouped.minorUnits) === BigInt(decimal.minorUnits) * 1000n)
+            return decimal;
+    }
+    return symbolDoubt && options.length === 0 ? 'currency-unclear' : 'amount-unclear';
 };
 const amountShapeConflict = (source, event, principal) => {
     const span = event.amount.spans.length === 1 ? event.amount.spans[0] : null;
@@ -2581,6 +5153,8 @@ const hasCompetingAmounts = (event, principal, ledgerCurrency) => {
     let principals = 0;
     for (const observation of event.observations) {
         const value = observation.field.value;
+        if (observation.field.issues.includes('aggregate-money-field'))
+            continue;
         if (observation.role === 'unknown') {
             if (statedLedger(value))
                 continue;
@@ -2596,7 +5170,8 @@ const hasCompetingAmounts = (event, principal, ledgerCurrency) => {
             .filter((money) => !(observation.field.issues.includes('decimal-or-grouping') &&
             money.currency === principal.currency && /^\d+$/.test(money.minorUnits) &&
             BigInt(money.minorUnits) === BigInt(principal.minorUnits) * 1000n))
-            .filter((money) => !statedLedger(money));
+            .filter((money) => !statedLedger(money))
+            .filter((money) => !(observation.field.issues.includes('currency-symbol') && money.currency !== principal.currency));
         if (others.some((money) => money.minorUnits !== principal.minorUnits &&
             (0, currency_metadata_1.currencyMinorUnits)(money.currency) === principal.exponent))
             return true;
@@ -2606,7 +5181,14 @@ const hasCompetingAmounts = (event, principal, ledgerCurrency) => {
 const LAUNCH_ROUTE = (market) => !!market && LAUNCH_MARKETS.has(market);
 const senderlessOwnAlertLink = (source, sender) => (sender === undefined || sender.trim() === '') && COMPLETED_MOVEMENT.test(source) &&
     ownInstrumentTailIn(source) && !hasLinkCallToAction(source);
-function decideBestEffortAutoPost(input) {
+const REFUND_NOT_YET = new RegExp(String.raw `\brefunds?\b(?:[^.\n]|\.\d){0,80}?\b(?:(?:has|have)\s+been\s+|was\s+|is\s+|are\s+)?(?:initiated|under\s+process(?:ing)?|in\s+process|in\s+progress|pending|requested|submitted|approved|being\s+processed)\b` +
+    String.raw `|\brefunds?\b(?:[^.\n]|\.\d){0,80}?\b(?:has\s+been|was|is)\s+(?:cancell?ed|declined|rejected)\b` +
+    String.raw `|\brefunds?\b[^\n]{0,160}?\bwill\s+(?:reflect|appear|be\s+(?:credited|processed|posted|reflected))\b` +
+    String.raw `|(?<![\u0621-\u064A])(?:استرداد|الاسترداد)(?:[^.\n]|\.\d){0,80}?(?:قيد\s+(?:ال)?(?:معالجة|معالجه|تنفيذ|مراجعة|مراجعه)|سيتم)`, 'iu');
+const REFUND_ARRIVED = /\b(?:credited|deposited|(?:processed|posted|returned|added)\s+(?:to|into|on)|received\s+(?:in|on|into))\b|(?<![\u0621-\u064A])تم\s+(?:إيداع|ايداع|إضافة|اضافة)/iu;
+function decideBestEffortAutoPost(rawInput) {
+    const input = typeof rawInput.source === 'string'
+        ? { ...rawInput, source: (0, alert_status_lexicon_1.withPlainSpaces)(rawInput.source) } : rawInput;
     const review = (reason) => ({ outcome: 'review', reason });
     const { event } = input;
     if (!input.enabled)
@@ -2619,6 +5201,9 @@ function decideBestEffortAutoPost(input) {
     }
     if (typeof input.source !== 'string' || (0, exports.hasNonCompletedWording)(input.source, latamScope(input), input.sender) ||
         (0, exports.isNotAutoPostableMoney)(input.source)) {
+        return review('non-posting-wording');
+    }
+    if (event.direction === 'credit' && REFUND_NOT_YET.test(input.source) && !REFUND_ARRIVED.test(input.source)) {
         return review('non-posting-wording');
     }
     if ((0, exports.hasLinkFromUnregisteredSender)(input.source, input.sender) && !senderlessOwnAlertLink(input.source, input.sender)) {
@@ -2637,14 +5222,29 @@ function decideBestEffortAutoPost(input) {
     if (event.issues.some((issue) => BLOCKING_ISSUES.has(issue))) {
         return review(event.issues.some((issue) => issue.startsWith('direction')) ? 'direction-unclear' : 'not-posted');
     }
-    const principal = resolvePrincipalMoney(input.source, event, input.country, input.routedMarket);
+    const principal = resolvePrincipalMoney(input.source, event, input.country, input.routedMarket, input.senderMarket);
     if (typeof principal === 'string')
         return review(principal);
+    if (event.amount.issues.includes('currency-symbol') && NORDIC_KRONE_MARKET[principal.currency]) {
+        const languages = nordicAlertLanguages(input.source);
+        const own = NORDIC_KRONE_MARKET[principal.currency];
+        if (languages.some((language) => language !== own && !(language === 'DKNO' && own !== 'SE')))
+            return review('currency-unclear');
+        if ((input.source.match(/(?<![\p{L}\p{N}])(?:SEK|DKK|NOK)(?![\p{L}\p{N}])/giu) ?? [])
+            .some((code) => code.toUpperCase() !== principal.currency))
+            return review('currency-unclear');
+    }
     if (amountShapeConflict(input.source, event, principal))
         return review('amount-unclear');
     if (hasCompetingAmounts(event, principal, input.ledgerCurrency))
         return review('competing-amounts');
     const observedDay = localIsoDay(input.observedAt);
+    const leadingDay = leadingDateDay(input.source, observedDay);
+    if (leadingDay && observedDay && leadingDay > observedDay)
+        return review('future-dated');
+    if (observedDay && [...input.source.matchAll(/(?<![\d.])(\d{1,2})\.(\d{1,2})\.(\d{4})(?![\d.]?\d)/gu)].some((match) => +match[2] >= 1 && +match[2] <= 12 && +match[1] >= 1 && +match[1] <= 31 &&
+        `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}` > observedDay))
+        return review('future-dated');
     const date = event.transactionDate.evidence === 'explicit' ? event.transactionDate.value : null;
     if (date !== null) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(date))
@@ -4018,6 +6618,19 @@ exports.CURRENCY_SYMBOL_CANDIDATES = {
     'S/': ['PEN'],
     'रू': ['INR', 'NPR'],
     'جنيه': ['EGP', 'SDG', 'SSP'],
+    'جم': ['EGP'],
+    'دينار': ['JOD', 'IQD', 'KWD', 'BHD', 'LYD', 'TND', 'DZD'],
+    'دينار عراقي': ['IQD'],
+    'دينار أردني': ['JOD'],
+    'دينار اردني': ['JOD'],
+    'دينار كويتي': ['KWD'],
+    'دينار بحريني': ['BHD'],
+    'zł': ['PLN'],
+    'Kč': ['CZK'],
+    'ZŁ': ['PLN'],
+    'KČ': ['CZK'],
+    kr: ['SEK', 'DKK', 'NOK', 'ISK'],
+    KR: ['SEK', 'DKK', 'NOK', 'ISK'],
 };
 },
 "fx":function(module,exports,require){
@@ -4461,7 +7074,7 @@ const applyEdits = (source, market, edits) => {
 };
 const gulfNeighbourReadSource = (source, market) => applyEdits(source, market, spellingEdits(source, market)).text;
 exports.gulfNeighbourReadSource = gulfNeighbourReadSource;
-const COMPLETION = /\b(?:purchase\s+of|(?:was|has\s+been)\s+used\s+(?:for|at)|debited|credited|deducted|withdrawn|deposited|paid|spent|refunded|transferred|received|charged|was\s+successful)\b|تمت?\s+(?:عملية\s+)?(?:ال)?(?:خصم|إيداع|ايداع|تحويل|سداد|سحب|شراء|استرداد|قيد|إضافة|اضافة|دفع)/iu;
+const COMPLETION = /\bpurchase\s+transaction\s+of\b(?:[^.\n]|\.(?=\d)){0,120}?\b(?:has\s+been|was)\s+(?:approved|successful|completed)\b|\b(?:purchase\s+of|(?:was|has\s+been)\s+used\s+(?:for|at)|debited|credited|deducted|withdrawn|deposited|paid|spent|refunded|transferred|received|charged|was\s+successful)\b|تمت?\s+(?:عملية\s+)?(?:ال)?(?:خصم|إيداع|ايداع|تحويل|سداد|سحب|شراء|استرداد|قيد|إضافة|اضافة|دفع|إرجاع|ارجاع|استخدام)/iu;
 const CARD_BILL_PAYMENT = /\bcard\b(?:[^.\n]|\.(?=\d)){0,40}\b(?:bill|dues?|outstanding|statement\s+balance)\b(?:[^.\n]|\.(?=\d)){0,60}\b(?:paid|settled|received)\b|\b(?:payment|repayment)\b(?:[^.\n]|\.(?=\d)){0,40}\b(?:towards|to|for)\s+(?:your\s+)?(?:credit\s+)?card\b|(?:سداد|تسديد|دفع)\s+(?:فاتورة\s+|مستحقات\s+)?(?:ال)?بطاق/iu;
 const LIMIT_CHANGE = /\blimit\b[^.\n]{0,40}\b(?:increased|decreased|reduced|changed|updated|revised|enhanced|raised)\b|\b(?:increase|decrease|reduction|change)\s+(?:of|in|to)\s+(?:your\s+)?(?:credit\s+|card\s+)?limit\b|(?:رفع|زيادة|تخفيض|تعديل|تغيير)\s+(?:ال)?حد/iu;
 const BLOCKING_ISSUES = new Set([
@@ -4562,6 +7175,10 @@ function decideGulfNeighbourPosting(input) {
     }
     const direction = directionOf(reading.type);
     if (event.direction !== direction && event.direction !== 'unknown')
+        return review('readers-disagree');
+    const familyType = event.family === 'refund' ? 'income'
+        : ['purchase', 'cash-withdrawal', 'fee', 'utility', 'recurring-payment'].includes(event.family) ? 'expense' : null;
+    if (familyType && reading.type !== familyType)
         return review('readers-disagree');
     if (template && (event.family !== 'purchase' || event.direction !== 'debit'))
         return review('readers-disagree');
@@ -9375,6 +11992,7 @@ const alert_market_packs_1 = require("@/lib/alert-market-packs");
 const alert_draft_1 = require("@/lib/alert-draft");
 const latam_alert_templates_1 = require("@/lib/latam-alert-templates");
 const universal_categorization_1 = require("@/lib/universal-categorization");
+const unparsed_launch_alert_1 = require("@/lib/unparsed-launch-alert");
 const fx_rates_1 = require("@/lib/fx-rates");
 exports.REVIEW_MONEY_HINT = /\b(?:USD|GBP|EUR|INR|QAR|KWD|BHD|OMR|EGP|JOD|CAD|AUD|BRL|MXN|SGD|Rs\.?|KD|BD|RO|R\.O\.|LE|L\.E\.|JD)\b|\bQR\s{0,3}\d{1,3}(?:,\d{3})*\.\d{2}(?!\d)|(?<![\d.,])\d{1,3}(?:,\d{3})*\.\d{2}\s{0,3}QR\b|\b(?:COP|PEN)\s?\d|(?<![\p{L}\p{N}/.])S\/\.?\s?\d|[$€£₹]|ر\.ق|د\.ك|د\.ب|ر\.ع|ج\.م|د\.[أا]|دينار\s+(?:كويتي|بحريني)|ريال\s+(?:قطري|عماني)/iu;
 const LAUNCH_MONEY_HINT = /(?:\b|(?<=\d))(?:AED|Dhs?\.?|SAR|SR)\b|د\.?[إا]\.?|دراهم|درهم|ر\.?\s?س\.?|ريال/iu;
@@ -9385,16 +12003,17 @@ const hasBankAlertMoneyHint = (source) => exports.REVIEW_MONEY_HINT.test(source)
     Object.keys(currency_metadata_1.CURRENCY_SYMBOL_CANDIDATES).some((symbol) => symbol.length >= 3
         ? source.toLowerCase().includes(symbol.toLowerCase()) : source.includes(symbol));
 exports.hasBankAlertMoneyHint = hasBankAlertMoneyHint;
-const UNIVERSAL_POSTED_EVENT_HINT = /(?<![\p{L}\p{N}])(?:purchase|purchased|debit(?:ed)?|credit(?:ed)?|charged|charge\s+(?:of|made)|deducted|spent|paid|payment|received|refund(?:ed)?|reversal|withdraw(?:n|al)?|withdrew|made\s+an?|was\s+made|used\s+for|deposit(?:ed)?|transferr(?:ed|ing)|sent|realizad[oa]|efetuad[oa]|zrealizowana|consumo|realizaste|lastschrift|paiement|gerçekleşmiştir|gelmiştir|alışveriş\w*|havale|virement|reçu|pix|enviado|enviou|recebeu|recebido|transaksi|berhasil|kaartbetaling|voltooid|cash\s+(?:withdrawal|advance)|used\s+(?:for|at|on)|transaction|completed|processed|successful|successfully|approved|authori[sz]ed|settled|posted|débité|crédité|effectué|payé|payée|belastet|abgebucht|bezahlt|gutgeschrieben|cargado|pagado|abonado|addebitato|pagata|accreditato|afgeschreven|betaald|bijgeschreven)(?![\p{L}\p{N}])|(?:خصم|دفع|شراء|سحب|تحويل|ايداع|إيداع|استرداد|استرجاع|تمت|تم|ご利用|利用金額|消费|支付|승인|डेबिट|क्रेडिट)/iu;
+const UNIVERSAL_POSTED_EVENT_HINT = /(?<![\p{L}\p{N}])(?:purchase|purchased|debit(?:ed)?|credit(?:ed)?|charged|charge\s+(?:of|made)|deducted|spent|paid|payment|received|refund(?:ed)?|reversal|withdraw(?:n|al)?|withdrew|made\s+an?|was\s+made|used\s+for|deposit(?:ed)?|transferr(?:ed|ing)|sent|realizad[oa]|efetuad[oa]|zrealizowana|consumo|realizaste|lastschrift|paiement|gerçekleşmiştir|gelmiştir|alışveriş\w*|havale|virement|reçu|pix|enviado|enviou|recebeu|recebido|transaksi|berhasil|kaartbetaling|voltooid|cash\s+(?:withdrawal|advance)|used\s+(?:for|at|on)|transaction|completed|processed|successful|successfully|approved|authori[sz]ed|settled|posted|débité|crédité|effectué|payé|payée|belastet|abgebucht|bezahlt|gutgeschrieben|cargado|pagado|abonado|addebitato|pagata|accreditato|afgeschreven|betaald|bijgeschreven|taken|kartenzahlung|zahlung|buchung|umsatz|gutschrift|zahlungseingang|compra|pago|retirada|pagamento|betaling|płatność|platnosc|przelew|köp|betalat|fått|betalt|betalte|mottatt|modtaget|platba|prélèvement|retrait|envoyé|transaktion|operazione|einkauf|internetkauf|onlinekauf|online-umsatz|bargeldabhebung|bargeldauszahlung|abgehoben|erstattung|erstattet|überwiesen|gesendet|entgelt|gebühr|achat|payés|payées|retiré|remboursé|remboursement|commission|frais|reintegro|devolución|abono|comisión|cobrado|bizum|transferencia|acquisto|prelievo|prelevato|storno|rimborso|commissione|bonifico|pinbetaling|opname|overboeking|kosten|incasso|bijschrijving|terugbetaling|ontvangen|gestuurd|overgemaakt|betaalde|geïncasseerd|levantamento|reembolso|devolução|comissão|transferência|pagou|transakcja|wypłata|wypłaciłeś|wypłaciłaś|zwrot|opłata|wpływ|przesłał|przesłała|zaksięgowany|pobrał|zakup|onlineköp|kortköp|uttag|avgift|överföring|drog|återbetalade|återbetalat|køb|onlinekøb|hævet|hævning|gebyr|sendt|opkrævet|trukket|refusion|tilbagebetaling|indsat|kjøp|kortkjøp|netthandel|uttak|kontantuttak|innbetaling|refusjon|tilbakebetaling|nákup|výběr|poplatek|refundace|připsána|stržena|vrátil|odeslaná|zaplaceno|provedena|dragits|autogiro|tatt\s+ut|handlet|wysłałeś|zapłacono|zaplatili)(?![\p{L}\p{N}])|(?:خصم|دفع|شراء|سحب|تحويل|ايداع|إيداع|استرداد|استرجاع|تمت|تم|ご利用|利用金額|消费|支付|승인|डेबिट|क्रेडिट)/iu;
 const UNIVERSAL_FIELD_LIST_HINT = /\bcards?\b[\s\S]{0,120}\bAED\b[^\d]{0,12}\d[\s\S]{0,120}\b(?:at|to)\b/iu;
 const shouldTryUniversalPosting = (source, sender) => (0, alert_institution_grammars_1.hasUniversalInstitutionSender)(sender) ||
     UNIVERSAL_POSTED_EVENT_HINT.test(source) ||
     (!!(0, markets_1.detectLaunchMarketFromSender)(sender) && UNIVERSAL_FIELD_LIST_HINT.test(source)) ||
     (0, latam_alert_templates_1.matchLatamTemplate)(source, { sender }) !== null;
 const GENERIC_BANK_CONTEXT = /\b(?:(?:credit|debit|covered|prepaid|charge)\s+card|card\s+(?:purchase|payment|ending|number|no\b)|(?:your|available|current)\s+(?:account|balance|credit)|bank\s+(?:alert|account|fee|transfer|statement|notification)|(?:minimum|total)\s+(?:amount\s+)?due|(?:account|a\/?c)\s+(?:ending|number|no\b)|(?:a\/c|acc(?:oun)?t)\.?\s*(?:no\.?\s*)?[*xX•·]{2,}\d{2,6}\s+(?:is\s+|has\s+been\s+|was\s+)?(?:credited|debited)|sent\s+to\s+(?:your\s+)?(?:[A-Za-z][A-Za-z&]{1,2}\s+){0,3}(?:a\/c|acc(?:oun)?t)\.?\s*(?:no\.?\s*)?[*xX•·]+\d{2,6}|iban|swift|sepa|upi|neft|imps|statement|paiement\s+par\s+carte|kartenzahlung|kontoauszug|compra\s+con\s+tarjeta|pagamento\s+con\s+carta|rekeningoverzicht)\b|بطاق[هة]|حساب|رصيد|كشف\s+حساب|فاتور[هة]/iu;
-const MONEY_ARRIVED_CLAIM = /(?<!\p{L})(?:you\s+have\s+received|you\s+received|received\s+(?:from|for)|(?:is|has\s+been|was)\s+credited|credited\s+(?:to|in|into|with)|deposited|refund(?:ed)?|recebeu|recebid[oa]|creditad[oa]|estorno|recibiste|recibid[oa]|te\s+(?:envi[óo]|ha\s+enviado)|yape[óo]|abonad[oa]|acreditad[oa]|reembolso|devoluci[óo]n|re[çc]u|cr[ée]dit[ée]e?|gutgeschrieben|diterima|dikreditkan)(?!\p{L})/iu;
-const MONEY_CLAIM_EVIDENCE = /(?<!\p{L})(?:\p{L}*bank|banco|banque|wallet|carteira|billetera|account|acct|a\/c|conta|cuenta|compte|konto|rekening|balance|bal|avl|saldo|solde|ref(?:erence)?|txn|trx|tid|transaction|transfer|transferencia|transfer[êe]ncia|virement|[ée]-?transfer|pix|spei|aani|sarie|yape|plin|nequi|daviplata|m-?pesa|mpesa|upi|imps|neft|rtgs|zelle|interac|gcash|maya|paytm|jazzcash|easypaisa|momo|airtel\s+money)(?!\p{L})/iu;
+const MONEY_ARRIVED_CLAIM = /(?<!\p{L})(?:you\s+have\s+(?:just\s+)?received|you['’]ve\s+(?:just\s+)?received|you\s+received|received\s+(?:from|for)|(?:is|has\s+been|was)\s+credited|credited\s+(?:to|in|into|with)|deposited|refund(?:ed)?|recebeu|recebid[oa]|creditad[oa]|estorno|recibiste|recibid[oa]|te\s+(?:envi[óo]|ha\s+enviado)|yape[óo]|abonad[oa]|acreditad[oa]|reembolso|devoluci[óo]n|re[çc]u|cr[ée]dit[ée]e?|gutgeschrieben|diterima|dikreditkan)(?!\p{L})/iu;
+const MONEY_CLAIM_EVIDENCE = /(?<!\p{L})(?:\p{L}*bank|banco|banque|wallet|carteira|billetera|account|acct|a\/c|conta|cuenta|compte|konto|rekening|balance|bal|avl|saldo|solde|ref(?:erence)?|txn|trx|tid|transaction|transfer|transferencia|transfer[êe]ncia|virement|[ée]-?transfer|pix|spei|aani|sarie|yape|plin|nequi|daviplata|m-?pesa|mpesa|upi|imps|neft|rtgs|zelle|interac|gcash|maya|paytm|jazzcash|easypaisa|momo|airtel\s+money|bizum|sepa|faster\s+payments?|osko|payid|blik|swish|vipps|mobilepay|twint|satispay|lydia|paylib|wero|venmo|paypal|cash\s?app|duitnow|fawran|fawri\+?|benefitpay|knet|instapay|cliq)(?!\p{L})/iu;
 const TRANSACTION_CODE = /\b(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{8,12}\b/u;
+const RECEIVED_NOT_MONEY = /\breceived\s+(?:a|an)\s+(?:new\s+)?(?:message|notification|request|text|e-?mail|invitation|invite|reminder)\b/iu;
 const PERSONAL_MESSAGE_PREFIX_RE = /^\s*(?:(?:hi|hey|hello)\b(?:[^\r\n.!?]{0,40}[,!:]|\s+)\s*)?(?:I(?:\s+(?:(?:have|just|already)\s+){0,2}|['’]ve\s+(?:(?:just|already)\s+)?)(?:spent|paid|bought|sent|deposited|transferred|refunded)\b|[اأ]نا\s+(?:(?:قد|لقد)\s+)?(?:صرفت|دفعت|اشتريت|حولت|حوّلت|أرسلت|ارسلت)(?=\s))/iu;
 const hasPersonalMessagePrefix = (source) => PERSONAL_MESSAGE_PREFIX_RE.test(source);
 exports.hasPersonalMessagePrefix = hasPersonalMessagePrefix;
@@ -9425,12 +12044,47 @@ const hasGenericBankAlertContext = (source, sender = '') => {
 };
 exports.hasGenericBankAlertContext = hasGenericBankAlertContext;
 const SENDERLESS_USED_CARD_HINT = /^\s*your\s+(?:cr\.\s*)?card\s+(?:[*xX•·]{1,24}\s*)?(\d{4})(?![\p{L}\p{N}]|[ \t-]+\d)[ \t]+(?:was|has[ \t]+been)[ \t]+used[ \t]+for\b/iu;
+const MOVEMENT_ALERT_EVIDENCE = /(?<!\p{L})(?:cards?|visa|mastercard|amex|debit|credit|deposit|withdrawal|atm|cash\s+(?:in|out)|alerts?)(?!\p{L})/iu;
+const movementAlertCandidate = (source, sender) => (0, exports.hasBankAlertMoneyHint)(source) && !PERSONAL_CHAT.test(source) &&
+    !(0, best_effort_autopost_1.hasNonCompletedWording)(source, null, sender) && !(0, best_effort_autopost_1.isNotAutoPostableMoney)(source);
+const movementAlertAdmitted = (source, sender, event) => {
+    if (!movementEventSettled(source, event))
+        return false;
+    if ((0, best_effort_autopost_1.hasLinkFromUnregisteredSender)(source, sender) ||
+        ((0, best_effort_autopost_1.isUnverifiedAlertSender)(sender) && (0, best_effort_autopost_1.hasCallbackHook)(source)))
+        return false;
+    const direction = event.direction === 'credit' || event.direction === 'debit' ? event.direction : undefined;
+    if ((0, best_effort_autopost_1.namesOwnInstrumentTail)(source, direction))
+        return true;
+    const paidFrom = event.instrument.evidence === 'explicit' ? event.instrument.value : null;
+    if (event.direction === 'debit' && /^\d{2,6}$/.test(paidFrom?.last4 ?? ''))
+        return true;
+    return (0, best_effort_autopost_1.isRegisteredAlertSender)(sender) && !(0, best_effort_autopost_1.hasLinkFromUnregisteredSender)(source, '') &&
+        (MONEY_CLAIM_EVIDENCE.test(source) || MOVEMENT_ALERT_EVIDENCE.test(source) || TRANSACTION_CODE.test(source));
+};
+const movementEventSettled = (source, event) => event.amount.evidence !== 'missing' &&
+    !['statement', 'balance', 'authentication', 'bill'].includes(event.family) &&
+    (event.status === 'posted' || (event.status === 'unknown' &&
+        ((0, unparsed_launch_alert_1.hasAffirmativeSettledMovement)(source) || REVIEW_SETTLED_USAGE.test(source))));
+const REVIEW_SETTLED_USAGE = /\b(?:was|has\s+been)\s+used\s+(?:at|for|on)\b|\bthank\s+you\s+for\s+using\s+your\s+(?:[\p{L}]+\s+){0,2}(?:card|visa|mastercard|debit|credit)\b|\b(?:pmt|payment|transfer|deposit|charge|purchase|transaction)\b(?:[^.\n]|\.(?=\d)){0,40}?(?<!\b(?:(?:to|will|shall|must|can|should|would)\s+be|not|never|can['’]?t|cannot|could\s*n(?:o|['’])t|couldn['’]t|wasn['’]t|was\s+not)\s+)\bmade\b/iu;
+const refusedOnlyForProof = (source, sender) => {
+    const market = (0, markets_1.detectLaunchMarketFromAlert)(source, sender) ?? (0, markets_1.getActiveMarket)().id;
+    if (market !== 'AE' && market !== 'SA')
+        return false;
+    try {
+        return (0, markets_1.withMarketPackForParsing)(market, () => (0, sms_parser_1.parseRefusedForProof)(source, undefined, { sender })) !== null;
+    }
+    catch {
+        return false;
+    }
+};
 const inspectGenericBankEventForReview = (source, sender = '', market, sourceContext) => {
     if ((0, exports.hasPersonalMessagePrefix)(source) || hasNegatedPrincipalMovement(source))
         return null;
     const noContext = !(0, exports.hasGenericBankAlertContext)(source, sender) && !(0, latam_alert_templates_1.matchLatamTemplate)(source, { sender });
     const claimAdmitted = noContext && (!sender.trim() || (0, best_effort_autopost_1.isUnverifiedAlertSender)(sender)) &&
-        MONEY_ARRIVED_CLAIM.test(source) && (MONEY_CLAIM_EVIDENCE.test(source) || TRANSACTION_CODE.test(source)) && !PERSONAL_CHAT.test(source) &&
+        MONEY_ARRIVED_CLAIM.test(source) && !RECEIVED_NOT_MONEY.test(source) &&
+        (MONEY_CLAIM_EVIDENCE.test(source) || TRANSACTION_CODE.test(source)) && !PERSONAL_CHAT.test(source) &&
         !(0, best_effort_autopost_1.hasNonCompletedWording)(source, null, sender) && !(0, best_effort_autopost_1.hasLinkFromUnregisteredSender)(source, sender);
     const footerAdmitted = noContext && !claimAdmitted && (0, best_effort_autopost_1.isRegisteredAlertSender)(sender) &&
         (0, best_effort_autopost_1.refusedOnlyByShopOrPromoWording)(source, sender);
@@ -9438,7 +12092,11 @@ const inspectGenericBankEventForReview = (source, sender = '', market, sourceCon
     const cardAdmitted = !!senderlessCard && (0, best_effort_autopost_1.namesOwnInstrumentTail)(source, 'debit') &&
         !(0, sms_parser_1.nonPostingReason)(source) && !(0, best_effort_autopost_1.isNotAutoPostableMoney)(source) &&
         !(0, best_effort_autopost_1.hasNonCompletedWording)(source, null, '') && !(0, best_effort_autopost_1.hasLinkFromUnregisteredSender)(source, '');
-    if (noContext && !claimAdmitted && !footerAdmitted && !cardAdmitted)
+    const proofAdmitted = noContext && !claimAdmitted && !footerAdmitted &&
+        refusedOnlyForProof(source, sender);
+    const movementCandidate = noContext && !claimAdmitted && !footerAdmitted && !cardAdmitted && !proofAdmitted &&
+        movementAlertCandidate(source, sender);
+    if (noContext && !claimAdmitted && !footerAdmitted && !cardAdmitted && !proofAdmitted && !movementCandidate)
         return null;
     const event = (0, gulf_neighbour_alerts_1.isGulfNeighbourMarket)(market)
         ? (0, universal_parser_1.inspectUniversalBankEvent)((0, gulf_neighbour_alerts_1.gulfNeighbourReadSource)(source, market), {
@@ -9451,7 +12109,7 @@ const inspectGenericBankEventForReview = (source, sender = '', market, sourceCon
     if (event.decision !== 'review')
         return null;
     const hasOtherCardMoney = cardAdmitted && event.observations.some(observation => observation.role !== 'transaction' && observation.role !== 'credit-limit');
-    if (cardAdmitted && (event.family !== 'purchase' || event.status !== 'posted' || event.direction !== 'debit' ||
+    if (cardAdmitted && !proofAdmitted && (event.family !== 'purchase' || event.status !== 'posted' || event.direction !== 'debit' ||
         event.amount.evidence !== 'explicit' || !event.amount.value || event.amount.spans.length !== 1 ||
         hasOtherCardMoney ||
         event.observations.filter(observation => observation.role === 'transaction').length !== 1 ||
@@ -9461,7 +12119,15 @@ const inspectGenericBankEventForReview = (source, sender = '', market, sourceCon
     if (hasNativeCurrencyAccountContext(source) && !(0, exports.hasBankAlertMoneyHint)(source) &&
         (event.amount.evidence !== 'explicit' || event.amount.value?.currency !== 'ZAR'))
         return null;
-    if (noContext && !((event.direction === 'credit' || ((footerAdmitted || cardAdmitted) && event.direction === 'debit')) &&
+    if (proofAdmitted) {
+        if (event.amount.evidence === 'missing' && !event.observations.some((o) => o.field.evidence !== 'missing'))
+            return null;
+    }
+    else if (movementCandidate) {
+        if (!movementAlertAdmitted(source, sender, event))
+            return null;
+    }
+    else if (noContext && !((event.direction === 'credit' || ((footerAdmitted || cardAdmitted) && event.direction === 'debit')) &&
         event.status === 'posted' && event.amount.evidence !== 'missing'))
         return null;
     const hasGroundedMoney = event.amount.evidence !== 'missing' ||
@@ -9469,9 +12135,29 @@ const inspectGenericBankEventForReview = (source, sender = '', market, sourceCon
     if (event.status === 'unknown' && event.family === 'unknown' &&
         event.instrument.evidence !== 'explicit' && !hasGroundedMoney)
         return null;
-    return event;
+    return withDistinctMoneyAlternatives(event);
 };
 exports.inspectGenericBankEventForReview = inspectGenericBankEventForReview;
+const distinctMoney = (field) => {
+    const seen = new Set();
+    const alternatives = field.alternatives.filter((money) => {
+        const key = `${money.currency}/${money.minorUnits}/${money.exponent}`;
+        if (seen.has(key))
+            return false;
+        seen.add(key);
+        return true;
+    });
+    return alternatives.length === field.alternatives.length ? field : { ...field, alternatives };
+};
+const withDistinctMoneyAlternatives = (event) => ({
+    ...event,
+    amount: distinctMoney(event.amount),
+    statementTotal: distinctMoney(event.statementTotal),
+    minimumDue: distinctMoney(event.minimumDue),
+    balance: distinctMoney(event.balance),
+    creditLimit: distinctMoney(event.creditLimit),
+    observations: event.observations.map((observation) => ({ ...observation, field: distinctMoney(observation.field) })),
+});
 const WORLD_SALARY_RE = /\b(?:salary|payroll|wages?|pay\s*cheque|paycheck|salaire|gehalt|lohn|salario|sueldo|n[óo]mina|sal[áa]rio|stipendio|salaris|maa[şs]|gaji)\b|راتب|رواتب|वेतन/iu;
 const universalRowCategory = (source, event, overrides, market) => {
     const explicit = event.merchant.evidence === 'explicit' ? event.merchant.value?.trim() ?? '' : '';
@@ -9692,6 +12378,45 @@ const parseUniversalLaunchStrict = (source, sender, pinnedCurrency, pinnedExpone
         raw: source.trim(),
     };
 };
+const KUWAITI_DINAR_SENDERS = new Set(['kfh', 'kfhonline', 'nbk', 'nbkbank']);
+const senderKeyOf = (sender) => sender.normalize('NFKC').toLocaleLowerCase('en-US').replace(/[^\p{L}\p{N}]+/gu, '');
+const DINAR_ADJECTIVE_MARKET = {
+    كويتي: 'KW', بحريني: 'BH', اردني: 'JO', أردني: 'JO', عراقي: 'IQ', ليبي: 'LY', تونسي: 'TN', جزائري: 'DZ',
+};
+const DINAR_FOLLOWERS = new Set(['في', 'لدى', 'لدي', 'الى', 'إلى', 'الي', 'على', 'علي', 'التي', 'الذي', 'من', 'عن', 'و', 'بتاريخ', 'رقم']);
+const dinarQualifiers = (source) => {
+    const out = new Set();
+    for (const m of source.matchAll(/دينار(?:ا|اً)?\s+([\u0621-\u064A]+)/gu)) {
+        const word = m[1];
+        if (DINAR_FOLLOWERS.has(word))
+            continue;
+        const market = DINAR_ADJECTIVE_MARKET[word];
+        if (market)
+            out.add(market);
+        else if (/[\u0621-\u064A]{2,}ي$/u.test(word))
+            out.add('other');
+    }
+    return out;
+};
+const senderProvenMarket = (source, sender) => {
+    if (!sender.trim() || !/دينار/u.test(source))
+        return null;
+    const qualifiers = dinarQualifiers(source);
+    const fits = (market) => market && [...qualifiers].every((q) => q === market) ? market : null;
+    try {
+        const route = (0, alert_market_detection_1.routeAlertMarket)({ source, sender });
+        if (route.decision === 'single' && route.market) {
+            return route.candidates.some((candidate) => candidate.market === route.market && candidate.evidence.includes('sender'))
+                ? fits(route.market) : null;
+        }
+        if (route.decision !== 'unknown')
+            return null;
+        return KUWAITI_DINAR_SENDERS.has(senderKeyOf(sender)) ? fits('KW') : null;
+    }
+    catch {
+        return null;
+    }
+};
 const routedInstitution = (inspection) => {
     const review = inspection?.route.decision === 'single' ? inspection.review?.institution : null;
     if (!review || review.decision !== 'identified' || !review.institution)
@@ -9733,6 +12458,9 @@ const parseUniversalPostedEvent = (source, sender, pinnedCurrency, pinnedExponen
         return null;
     if (!pinnedCurrency)
         return null;
+    if (context.inspection?.route.decision === 'ambiguous' && context.inspection.route.reasons.some((reason) => reason === 'sender-institution-conflict' || reason === 'multiple-institutions' || reason === 'conflicting-alert-markets') &&
+        new Set(context.inspection.route.candidates.map((candidate) => candidate.market)).size > 1)
+        return null;
     const readSource = countryReadSource(source, context.country);
     const event = (0, universal_parser_1.inspectUniversalBankEvent)(readSource, (0, exports.universalSourceParseContext)(context.inspection, sender, context.country));
     const payment = universalCardPayment(readSource, event, pinnedCurrency, pinnedExponent, context.routedMarket ?? context.country, observedAt);
@@ -9761,6 +12489,8 @@ const parseUniversalPostedEvent = (source, sender, pinnedCurrency, pinnedExponen
         country: context.country,
         routedMarket: context.routedMarket,
         launchSenderMarket: context.launchSenderMarket,
+        senderMarket: context.institution?.sender && context.routedMarket ? context.routedMarket
+            : senderProvenMarket(readSource, sender),
         ledgerCurrency: pinnedCurrency,
         ledgerExponent: pinnedExponent,
         observedAt,
@@ -10539,7 +13269,7 @@ const SAR_GLUED_ALERT = /(?<=\d)(?:SAR|SR)\b/iu;
 const AED_GLUED_ALERT = /(?<![^\s(:])AED(?=[0-9][0-9,]*(?:\.[0-9]+)?(?![0-9A-Za-z]))|(?<![^\s(:])[0-9][0-9,]*(?:\.[0-9]+)?AED\b/u;
 const launchMarketsFromSender = (sender) => {
     const senderText = sender?.trim() ?? '';
-    if (!senderText)
+    if (!senderText || senderText.includes('@'))
         return [];
     return exports.MARKETS.filter((market) => market.banks.some((bank) => bank.re.test(senderText)));
 };
@@ -10734,9 +13464,23 @@ exports.hasArabicRefundHeading = hasArabicRefundHeading;
 exports.isNonCashNotice = isNonCashNotice;
 exports.isInformationOnlyAlert = isInformationOnlyAlert;
 exports.isNonPostingMessage = isNonPostingMessage;
+exports.isUnregisteredCallBack = isUnregisteredCallBack;
+exports.moneyNoticeKind = moneyNoticeKind;
 exports.isDeclinedMessage = isDeclinedMessage;
 exports.extractOutgoingTransferParties = extractOutgoingTransferParties;
 exports.parseForeignAwaitingRate = parseForeignAwaitingRate;
+exports.hedgedPrincipal = hedgedPrincipal;
+exports.isPurchaseRefundedNotice = isPurchaseRefundedNotice;
+exports.refundGovernsPrincipal = refundGovernsPrincipal;
+exports.principalUnproven = principalUnproven;
+exports.amountIsOnlyABalance = amountIsOnlyABalance;
+exports.reversedIncomingCredit = reversedIncomingCredit;
+exports.withoutReversalFooters = withoutReversalFooters;
+exports.reversalLeftUnproven = reversalLeftUnproven;
+exports.unsupportedReading = unsupportedReading;
+exports.gluedSignContradicts = gluedSignContradicts;
+exports.isNotSpendingOrIncomeShape = isNotSpendingOrIncomeShape;
+exports.parseRefusedForProof = parseRefusedForProof;
 exports.parseSms = parseSms;
 exports.parseSmsBatch = parseSmsBatch;
 const categories_1 = require("@/lib/categories");
@@ -10779,7 +13523,7 @@ function normalizeArabic(s) {
 }
 const ARABIC_RE = /[\u0600-\u06FF]/;
 const AR_LETTER = '\\u0621-\\u064A';
-exports.PARSER_VERSION = 69;
+exports.PARSER_VERSION = 70;
 exports.PARSER_BACKFILL_VERSION = 50;
 const BANK_PROFILES = {
     'Emirates NBD': { brand: /\benbd\b|emirates\s*nbd|\bliv\b/i, ownPot: /\b(?:liv\s+)?goals?\b|\bsavings?\s+pot\b/i },
@@ -10821,7 +13565,7 @@ const PREPAID_CARD_LOAD_RE = /\bcard\b[^\n]{0,60}?\b(?:was|has\s+been|is)\s+(?:s
 const DEBITED_PASSIVE_RE = /\b(?:debited|deducted|charged|spent|withdrawn|paid\s+(?:to|at|for)|purchase[ds]?\b|used\s+(?:for|at))\b/i;
 const CREDIT_CLAUSE_RE = /(?:credited|deposited|paid|transferred|remitted|added)\s+(?:back\s+)?(?:in)?to\s+(?:your|the|a\/?c)|\b(?:transferred|remitted|sent)\s+from\s+(?!your\b|my\b|the\b)(?:(?!\b(?:account|a\/c|ac|acc|acct|card|ending|wallet)\b)[^\d.\n*•·]){2,60}?\s+(?:in)?to\s+your\s+(?:\w+\s+){0,2}(?:account|a\/?c)\b|credited\s+(?:with|back)\b|received\s+(?:from|(?:a\s+)?(?:payment|transfer|amount))|\bcash\s+deposit(?:ed)?\b|refunded\s+to\s+your|reversed\s+to\s+your|\binward\s+remittance\b|(?:الي|في)\s+حسابك|لحسابك/i;
 const DEBIT_CLAUSE_RE = /(?:debited|deducted|withdrawn|charged|paid|spent|transferred)\s+from\s+your|charged\s+to\s+your\s+(?:card|account)|من\s+حسابك|من\s+بطاقتك|من\s+رصيدك/i;
-const BILLER_SETTLED_RE = new RegExp(String.raw `\b(?:credited|received|posted|applied)(?:\s+[^\n]{0,24}?)?\s+(?:to|towards?|for|against)\s+(?:your|the)\s+([A-Za-z][A-Za-z0-9 &.'\-]{0,24}?)\s+(?:bill\s+|postpaid\s+|prepaid\s+)?(?:account|wallet|a\/c)\b` +
+const BILLER_SETTLED_RE = new RegExp(String.raw `\b(?:credited|received|posted|applied)(?:\s{1,4}[^\n]{0,24}?)?\s{1,4}(?:to|towards?|for|against)\s+(?:your|the)\s+([A-Za-z][A-Za-z0-9 &.'\-]{0,24}?)\s+(?:bill\s+|postpaid\s+|prepaid\s+)?(?:account|wallet|a\/c)\b` +
     String.raw `|\byour\s+([A-Za-z][A-Za-z0-9 &.'\-]{0,24}?)\s+(?:bill\s+|postpaid\s+|prepaid\s+)?(?:account|wallet|a\/c)\s+(?:has\s+been|have\s+been|was|is|been)\s+(?:credited|recharged|topped[\s-]?up|reloaded|replenished)\b`, 'i');
 const PAYMENT_SUBJECT_RE = /\b(?:your|the|a)\s+payment\b/i;
 const NOT_A_BILLER_RE = /^(?:credit|debit|covered|charge|prepaid|postpaid|bank|savings?|current|salary|joint|linked|registered|new|old|other|same|main|primary|personal|business)$/i;
@@ -10872,6 +13616,8 @@ const RECEIPT_BILLER_SENDER_RE = /^(?:eandinf|etisalat)$/i;
 const CARD_PAYMENT_DEBIT_LEG_RE = /payment\s+instructions?|(?:debited|deducted)\b[\s\S]*towards?\s+(?:the\s+)?(?:payment|settlement|repayment)|\bpayment\b[\s\S]{0,100}?\b(?:card|covered\s+card|credit\s+card|charge\s+card)\b[\s\S]{0,80}?\b(?:was|has\s+been|is)\s+(?:debited|deducted)\s+from\s+your\s+(?:account|a\/?c)\b/i;
 const CARD_PAYMENT_RECEIPT_LEG_RE = /(?:payment|amount)\b[\s\S]*(?:received|credited)|received\s+(?:your\s+)?payment|has\s+been\s+paid|thank you for (?:your )?payment/i;
 const CARD_PAYMENT_ACCOUNT_FIELD_RE = /^\s*payment\s+towards?\s+(?:your\s+)?(?:credit|covered|charge)\s+card\s+from\s+(?:your\s+)?(?:account|a\/?c)\b/i;
+const RAJHI_CARD_PAYMENT_FIELD_RE = /^\s*(?:al[ \t]*rajhi(?:[ \t]+bank)?[ \t]*\r?\n[ \t]*)?credit\s+card\s*:\s*payment[ \t]*\r?\n(?:[^\n]*\n)*?[ \t]*card\s*:\s*(?:visa|mastercard|master\s+card|amex|mada)?\s*[*x•]*(\d{4})[ \t]*(?:\r?\n|$)/i;
+const RAJHI_CARD_PAYMENT_LINE_RE = /^[ \t]*(?:al[ \t]*rajhi(?:[ \t]+bank)?|credit\s+card\s*:\s*payment|card\s*:[^\n]*|amount\s*:[^\n]*|(?:remaining|outstanding|due)(?:\s+(?:amount|balance))?\s*:[^\n]*|(?:date|time|on|في)\s*:[^\n]*|(?:available\s+)?(?:balance|limit|bal)\s*:[^\n]*|(?:ال)?(?:رصيد|متاح)[^\n]*:[^\n]*)?[ \t]*$/i;
 function cardPaymentLeg(raw) {
     if (CARD_PAYMENT_DEBIT_LEG_RE.test(raw) || CARD_PAYMENT_ACCOUNT_FIELD_RE.test(raw))
         return 'debit';
@@ -10879,7 +13625,7 @@ function cardPaymentLeg(raw) {
         return 'receipt';
     return undefined;
 }
-const OTP_CODE_WORD = String.raw `(?:\botp\b|one[\s-]?time\s+(?:password|pin|code|passcode)|(?:verification|validation|authentication|security|secure|access|confirmation)\s+code|3-?d\s*secure|\b3ds\b|رمز التحقق|رمز تحقق|كلمه المرور الموقته|كلمه السر لمره واحده)`;
+const OTP_CODE_WORD = String.raw `(?:\botp\b|one[\s-]?time\s+(?:password|pin|code|passcode)|(?:verification|validation|authentication|security|secure|access|confirmation)\s+code|3-?d\s*secure|\b3ds\b|رمز\s+التحقق|رمز\s+تحقق|كلمه\s+المرور\s+الموقته|كلمه\s+السر\s+لمره\s+واحده)`;
 const OTP_CODE_DIGITS = String.raw `(?<![\d.,])\d{4,8}\b(?![.,]\d)`;
 const OTP_RE = new RegExp(`${OTP_CODE_WORD}(?:\\s+(?:code|otp|password|pin|number))?\\s*(?:is|:|-|=|هو)?\\s*${OTP_CODE_DIGITS}` +
     `|${OTP_CODE_WORD}(?:[^.\\n]|\\.\\d|\\.(?=(?:com|ae|sa|net|org|io|co|in|me)\\b)){0,80}?(?:\\bis\\b|[:=]|هو)\\s*${OTP_CODE_DIGITS}` +
@@ -10910,15 +13656,19 @@ const AR_CODE_CHALLENGE_RE = new RegExp(String.raw `(?:^|\n)[ \t]*(?:ال)?رم�
     String.raw `|^[ \t]*(?:ال)?رمز[ \t]+(?:ال)?موقت(?![ء-ي])`);
 const PREAUTH_RE = /pre[\s-]?auth|auth(?:oris|oriz)ation\s+hold|\bauth\s+hold\b|amount\s+(?:has been\s+)?blocked|blocked on your(?:\s+\w+){0,2}\s+card|hold\s+(?:of|on|for|amount|placed)|\bon hold\b|temporary\s+(?:hold|charge|debit)|held on your (?:card|account)|earmark(?:ed)?|ring[\s-]?fenced|reserved on your card|has been (?:reserved|frozen)|provisional(?:ly)?\s+(?:debit|charge)|debited provisionally|pending\s+(?:transaction|authoris|authoriz)|not yet (?:posted|settled)|تم حجز|حجز مبلغ|مبلغ محجوز|تفويض مسبق/i;
 const VERIFICATION_HOLD_DESCRIPTOR_RE = /\bgoogle\s*\*?\s*temporary\s+hold\b/i;
-const HOLD_RELEASE_RE = /(?:(?:the|your|this|an?|earlier|previous|original)\s+)*(?:pre[\s-]?auth(?:oris|oriz)ation|auth(?:oris|oriz)ation|temporary|blocked)?\s*hold(?:[^.\n]|\.\d){0,60}?\b(?:released|reversed|removed|lifted|cleared|refunded)\b|\bpre[\s-]?auth(?:oris|oriz)ation\s+(?:(?:has\s+been|is|was)\s+)?(?:released|reversed|removed|lifted|cleared)\b|\bblocked\s+amount(?:[^.\n]|\.\d){0,40}?\b(?:released|reversed|removed)\b|تم الافراج عن المبلغ المحجوز/gi;
-const CONTACT_FOOTER_RE = /\(?\s*(?:\+?[\d·•X][\d·•X\s-]{4,})?\s*if\s+(?:calling|dialing|dialling)\s+from\s+(?:overseas|abroad|outside[^).\n]{0,20})\s*\)?/gi;
+const HOLD_RELEASE_RE = /(?!(?<=\s)\s)(?<!\b(?:the|your|this|an?|earlier|previous|original)\s)(?:(?:the|your|this|an?|earlier|previous|original)\s+)*(?:pre[\s-]?auth(?:oris|oriz)ation|auth(?:oris|oriz)ation|temporary|blocked)?\s*hold(?:[^.\n]|\.\d){0,60}?\b(?:released|reversed|removed|lifted|cleared|refunded)\b|\bpre[\s-]?auth(?:oris|oriz)ation\s+(?:(?:has\s+been|is|was)\s+)?(?:released|reversed|removed|lifted|cleared)\b|\bblocked\s+amount(?:[^.\n]|\.\d){0,40}?\b(?:released|reversed|removed)\b|تم الافراج عن المبلغ المحجوز/gi;
+const CONTACT_FOOTER_RE = /(?!(?<=\s)\s)\(?(?=(\s*))\1(?:\+?[\d·•X](?=([\d·•X\s-]{4,}))\2)?if\s+(?:calling|dialing|dialling)\s+from\s+(?:overseas|abroad|outside[^).\n]{0,20})\s*\)?/gi;
+const CONTACT_FOOTER_CUE_RE = /if\s+(?:calling|dialing|dialling)\s+from\s+(?:overseas|abroad|outside)/i;
 const FRAUD_FOOTER_RE = /\bif\s+(?:this|that|it|the\s+(?:above\s+)?(?:transaction|purchase|payment))\b[^.\n]{0,90}|\bif\s+you\s+(?:have\s*n[o']t|did\s*n[o']t|do\s*n[o']t|didn'?t|haven'?t|don'?t)\b[^.\n]{0,90}|\b(?:to\s+report|report|reporting)\s+(?:an?\s+|any\s+)?unauthoris\w*[^.\n]{0,60}|\b(?:to\s+report|report|reporting)\s+(?:an?\s+|any\s+)?unauthoriz\w*[^.\n]{0,60}|\bunauthoris\w*\s+(?:use|transactions?|access|activity)\b[^.\n]{0,40}|\bunauthoriz\w*\s+(?:use|transactions?|access|activity)\b[^.\n]{0,40}|\bin\s+case\s+of\s+(?:any\s+)?unauthoris\w*[^.\n]{0,60}|\bnot\s+(?:done|made|initiated|authoris\w*|authoriz\w*)\s+by\s+you\b|\bif\s+(?:unauthoris\w*|unauthoriz\w*|not\s+(?:you|recogni[sz]ed|authoris\w*|authoriz\w*))\b[^.\n]{0,90}/gi;
 const DECLINED_VERB_RE = /\b(?:declined|rejected|refused|denied|failed|unsuccessful|timed\s+out)\s+(?:due\s+to|because|owing\s+to|for\s+(?:insufficient|want\s+of))\b|\b(?:was|is|were|are|has\s+been|have\s+been|been)\s+(?:declined|rejected|refused|denied|unsuccessful|dishonou?red)\b|\b(?:declined|rejected|failed|unsuccessful|timed\s+out)\s*[.!:;]|\btransaction\s+(?:has\s+)?(?:declined|failed|rejected)\b|\b(?:returned|rejected)\s+(?:a\s+)?(?:direct\s+)?debit\s+(?:request|instruction)\b|\bplease\s+(?:retry|try\s+again)\b|\bcould\s+not\s+be\s+(?:processed|completed|authoris\w*|authoriz\w*|approved|honou?red)\b|^\W{0,3}(?:transaction|payment|purchase)\s+error\s*[:!.\-]|\b(?:encountered|experienced|ran\s+into)\s+(?:an?\s+)?(?:issue|error|problem)\s+(?:while\s+)?processing\b/im;
-const DECLINED_RE = /declin|reject(?:ed|ion)|refused|\bdenied\b|not\s+(?:approved|successful|authoris\w*|authoriz\w*|completed|processed|honou?red)|unapproved|disapproved|unauthoris|unauthoriz|unsuccessful|\binsufficient\s+(?:funds?|balance|credit)\b(?![^.\n]{0,24}\b(?:fee|charge|penalty)\b)|could not be (?:processed|completed|authoris\w*|authoriz\w*|approved|verified|honou?red)|unable to (?:process|complete|authoris\w*|authoriz\w*|approve)|has not been (?:processed|approved|completed)|did not (?:go through|succeed|complete)|\bfail(?:ed|ure|s)\b|was stopped|\baborted\b|\bterminated\b|\bvoided\b|\b(?:transaction|txn|purchase|payment|transfer|withdrawal|request)\b(?:[^.\n]|\.\d){0,40}?\s(?:was|is|has\s+been|been)\s+cancell?ed\b|exceeds\s+(?:your\s+)?(?:available\s+)?(?:limit|balance)|limit exceeded|do not honou?r|card\s+(?:has\s+)?expired|expired card|card is blocked|blocked for (?:online|international)|card restricted|invalid\s+(?:card|cvv|pin|otp|expiry|transaction)|\bis invalid\b|incorrect\s+(?:cvv|pin|otp|expiry)|wrong\s+(?:cvv|pin)|pin tries exceeded|no response from (?:the\s+)?issuer|\btimed\s+out\b|\b(?:transaction|txn|request|session|connection|response|network|terminal)\s+time-?\s?outs?\b|مرفوض|تم رفض|لم تتم|لم يتم تنفيذ|فشلت|رصيد غير كاف|غير كافي|عدم كفايه|معكوسه|(?<!(?:اذا|حال|لو)[^.\n]{0,24})(?:رصيد[ \t]+(?:ال)?(?:بطاقه|حساب)(?![ \t]+(?:ال)?نقاط)[^.\n]{0,40}لا\s+يكفي|رصيدك[^.\n]{0,24}لا\s+يكفي\s+(?:ل)?(?:اتمام|اكمال))/i;
-const REVERSAL_RE = /\brevers(?:ed|al)\b|charge-?\s?backs?\b|credited back|re-?credited|returned to your (?:card|account)/i;
+const DECLINED_RE = /declin|reject(?:ed|ion)|refused|\bdenied\b|not\s+(?:approved|successful|authoris\w*|authoriz\w*|completed|processed|honou?red)|unapproved|disapproved|unauthoris|unauthoriz|unsuccessful|\binsufficient\s+(?:funds?|balance|credit)\b(?![^.\n]{0,24}\b(?:fee|charge|penalty)\b)|could not be (?:processed|completed|authoris\w*|authoriz\w*|approved|verified|honou?red)|unable to (?:process|complete|authoris\w*|authoriz\w*|approve|debit|deduct|charge|collect)|has not been (?:processed|approved|completed)|did not (?:go through|succeed|complete)|\bfail(?:ed|ure|s)\b|was stopped|\baborted\b|\bterminated\b|\bvoided\b|\b(?:transaction|txn|purchase|payment|transfer|withdrawal|request)\b(?:[^.\n]|\.\d){0,40}?\s(?:was|is|has\s+been|been)\s+cancell?ed\b|exceeds\s+(?:your\s+)?(?:available\s+)?(?:limit|balance)|limit exceeded|do not honou?r|card\s+(?:has\s+)?expired|expired card|card is blocked|blocked for (?:online|international)|card restricted|invalid\s+(?:card|cvv|pin|otp|expiry|transaction)|\bis invalid\b|incorrect\s+(?:cvv|pin|otp|expiry)|wrong\s+(?:cvv|pin)|pin tries exceeded|no response from (?:the\s+)?issuer|\btimed\s+out\b|\b(?:transaction|txn|request|session|connection|response|network|terminal)\s+time-?\s?outs?\b|مرفوض|تم\s+رفض|لم\s+تتم|لم يتم تنفيذ|فشلت|رصيد غير كاف|غير كافي|عدم كفايه|معكوسه|(?<!(?:اذا|حال|لو)[^.\n]{0,24})(?:رصيد[ \t]+(?:ال)?(?:بطاقه|حساب)(?![ \t]+(?:ال)?نقاط)[^.\n]{0,40}لا\s+يكفي|رصيدك[^.\n]{0,24}لا\s+يكفي\s+(?:ل)?(?:اتمام|اكمال))/i;
+const REVERSAL_RE = /\brevers(?:ed|al)\b(?!\s+requests?\b)|charge-?\s?backs?\b|credited back|re-?credited|returned to your (?:card|account)|\breturned\s+[+\-−]?(?:[A-Z]{3}\s?|Dhs?\s?)?\d[\d,]*(?:\.\d{1,3})?\s?(?:[A-Z]{3}|Dhs?|SR)?\s+(?:back\s+)?to\s+your\s+(?:\w+\s+){0,2}(?:\w*card|account|a\/c)\b|\bcredit\s+from\b[^\n]{0,60}?\d[\d,]*(?:\.\d{1,3})?\s?(?:[A-Z]{3}|SR)?\s+returned\b/i;
 const INCOMING_CREDIT_REVERSAL_RE = /\b(?:salary|payroll|wages?|wps|incoming\s+(?:payment|transfer)|inward\s+remittance|deposit(?:ed)?|credit(?:ed)?)\b(?:[^.\n]|\.\d){0,120}?\b(?:was\s+|has\s+been\s+)?reversed\b(?:[^.\n]|\.\d){0,72}?\bfrom\s+(?:your|the)\s+(?:account|a\/?c|card)\b/i;
 const REFUND_RE = /\brefund(?:ed)?\b(?:[^.\n]|\.\d){0,40}?\b(?:to|into|onto|posted|processed|credited)\b|\b(?:has|have|had|been)\s+(?:been\s+)?refunded\b|^(?:(?:credit|debit|covered|prepaid|charge)\s+card\s+)?refund\b[ .\r]*$/im;
-const AR_PURCHASE_REFUND_HEADER_RE = /^(?:استرداد[ \t]+شراء(?:[ \t]+(?:ال)?انترنت|[ \t]+pos|[ \t]+(?:عبر[ \t]+)?نقاط[ \t]+البيع)?|حواله[ \t]+عكسيه)[ \t]*(?:\r?\n|$)/i;
+const AR_PURCHASE_REFUND_HEADER_RE = /^(?:استرداد[ \t]+شراء(?:[ \t]+(?:ال)?انترنت|[ \t]+pos|[ \t]+(?:عبر[ \t]+)?نقاط[ \t]+البيع)?|حواله[ \t]+عكسيه|عكس[ \t]+(?:عمليه[ \t]+)?(?:شراء|سحب|خصم|دفع))[ \t]*(?:\r?\n|$)/i;
+const AR_CASH_WITHDRAWAL_CORRECTION_ANY_RE = /^\s*تصحيح[ \t]+(?:عمليه[ \t]+)?سحب[ \t]+نقدي/;
+const AR_WITHDRAWAL_FIELD_RE = /(?<![ء-ي])(?:سحب|صراف)(?![ء-ي])|\b(?:atm|withdrawal)\b/i;
+const AR_CASH_WITHDRAWAL_CORRECTION_HEADER_RE = /^تصحيح[ \t]+(?:عمليه[ \t]+)?سحب[ \t]+نقدي[ \t]*:?[ \t]*(?:\r?\n|$)/;
 const AR_PURCHASE_REFUND_NOTICE_RE = new RegExp(String.raw `\b(?:refund\s+request|request\s+for\s+(?:a\s+)?refund)\b(?:[^.\n]|\.\d){0,64}?\b(?:received|submitted|created|awaiting|pending)\b|\b(?:received|submitted|created)\b(?:[^.\n]|\.\d){0,48}?\b(?:refund\s+request|request\s+for\s+(?:a\s+)?refund)\b|(?<![ء-ي])و?(?:سيتم\s+(?:ال)?(?:استرداد|استرجاع)|تم\s+استلام\s+طلب\s+(?:ال)?(?:استرداد|استرجاع))(?:[^.\n]|\.\d)*` +
     String.raw `|قيد\s+(?:ال)?(?:معالجه|مراجعه|تنفيذ|انتظار)` +
     String.raw `|(?:^|\n)[ \t]*(?:status|الحاله)[ \t]*:?[ \t]*(?:pending|in\s+progress|under\s+review|processing)\b[^\n]*` +
@@ -10931,6 +13681,27 @@ const AR_SHARE_TRADE_RE = /تم[ \t]+تنفيذ[ \t]+عمليه[ \t]+(?:شراء
 const AR_OWN_ACCOUNT_OUTGOING_RE = /^حواله[ \t]+(?:(?:محليه|داخليه)[ \t]+)?صادره[ \t]*:?[ \t]*(?:بين[ \t]+حساباتك|ل?حسابك)(?![ء-ي])/;
 const AR_USAGE_NOTE_RE = /(?:^|\n)[ \t]*يمكن[ \t]+استخدامه[ \t]+في[^\n]*/g;
 const AR_DESTINATION_FIELD_VALUE_RE = /(?<=(?:^|\n)[ \t]*الي[ \t]*:)[^\n]*/g;
+const MERCHANT_FIELD_VALUE_RE = /(?<=(?:^|[\n|;,])[ \t]*merchant(?:[ \t]+name)?[ \t]*:)[^\n|;,]*/gim;
+const AR_DEBIT_STATED_RE = new RegExp(`(?<![${AR_LETTER}])(?:ال)?خصم(?![${AR_LETTER}])`);
+const AR_RETURNED_TO_OWN_RE = new RegExp(`(?:(?<![${AR_LETTER}])و?تم\\s+(?:ارجاع|اعاده)\\s+(?:ال)?(?:مبلغ|[A-Z]{3}\\s*\\d|\\d)|(?<![${AR_LETTER}])اعاد\\s+(?:[^\\s]+\\s+){1,5}?(?:ال)?مبلغ(?![${AR_LETTER}]))(?:[^.\\n]|\\.(?=\\S)){0,80}?` +
+    `(?<![${AR_LETTER}])(?:الي|في)\\s+(?:بطاقتك|بطاقتكم|حسابك|حسابكم)(?![${AR_LETTER}])`);
+const RECEIVED_FROM_PAYER_RE = /^\W*(?:(?:\d{4}-\d{2}-\d{2}|\d{1,2}[-/.](?:\d{1,2}|[A-Za-z]{3})[-/.]\d{2,4})(?:[ T]{1,3}\d{1,2}:\d{2}(?::\d{2})?)?[ \t]{0,3}(?:[-–|][ \t]{0,3})?)?(?:(?![\w &.'-]*\bcard\b)[A-Za-z][\w&.'-]*(?:[ \t]+[A-Za-z][\w&.'-]*){0,2}(?::[ \t]*|[ \t]*\n\s*|[ \t]+))?(?:(?:payment|deposit|transfer|money|funds?)\s+received|(?:incoming|inward)\s+(?:transfer|payment|remittance))\b(?!(?:[^\n]*\n)?[^\n]*\b(?:for|towards?)\s+(?:(?:your|the|a|an)\s+)?(?:[\w&'-]+\s+){0,3}(?:card|account|a\/c|acct|bill|invoice|subscription|policy|loan|line|number)\b)(?!(?:[^\n]*\n)?[^\n]*\b(?:to|into|on)\s+(?:(?:your|the|a|an)\s+)?(?:[\w&'-]+\s+){0,3}card\b)(?![\s\S]*\b(?:credit|covered|charge)\s+card\b)(?:(?:[^\n]*\n)?[^\n]*?\bfrom\s+(?!(?:you|your|my|the|a\/?c|acc(?:oun)?t|card)\b)[^\s\d*x•·]|[\s\S]*?(?:^|\n|[|;])[ \t]*(?:from|sender|المرسل)[ \t]*(?::\s*|\n\s*)(?!(?:you|your|my)\b)[^\s\d*x•·])/i;
+const REFUND_HEAD_CONTRADICTION_RE = /\b(?:debited|deducted|charged|fees?|pending)\b|(?<![ء-ي])(?:خصم|رسوم|معلق)(?![ء-ي])/i;
+const AR_FUTURE_CREDIT_CLAUSE_RE = new RegExp(`(?<![${AR_LETTER}])و?سيتم\\s+(?:ال)?(?:اعاده|ارجاع|استرداد|ايداع|اضافه)(?![${AR_LETTER}])(?:[^.\\n,;]|\\.(?=\\S)){0,120}`, 'g');
+const AR_DEBIT_OR_PAYMENT_RE = new RegExp(`(?<![${AR_LETTER}])(?:ال)?(?:خصم|سحب|دفع|سداد)(?![${AR_LETTER}])`);
+const RECEIVED_PAYER_HEAD_RE = /^\W{0,4}(?:(?:[A-Z]{3}|Dhs?)\s?\d[\d,]{0,15}(?:\.\d{1,3})?\s+)?(?:(?![\w &.'-]{0,60}\bcard\b)[A-Za-z][\w&.'-]{0,20}(?:[ \t]{1,3}[A-Za-z][\w&.'-]{0,20}){0,2}(?::[ \t]{0,3}|[ \t]{0,3}\n[ \t]{0,3}|[ \t]{1,3}))?(?:payment|deposit|transfer|money|funds?)\s{1,3}received\b[\s\S]{0,200}?\bfrom\b/i;
+const TO_READER_ACCOUNT_RE = /\b(?:to|into|in)\s+(?:your\s+)?(?:(?!card\b|credit\b|loan\b|finance\b|financing\b|mortgage\b|instal\w*\b|mastercard\b|visa\b)\w+\s+)?(?:account|a\/?c)\b(?!\s+of\b)|\bvia\s+(?:aani|sarie|instant\s+transfer|ipi)\b(?![^.\n]{0,30}\bcard\b)|(?<![ء-ي])(?:الي|في)\s+حساب(?:ك|كم)(?![ء-ي])/i;
+const CARD_DESTINATION_RE = /\b(?:to|into|on|for|against|towards?)\s+(?:your\s+)?(?:\w+\s+)?(?:credit\s+card|card\s+account|card)\b|\bcard[ \t]{0,3}(?:(?:no\.?|number|#)[ \t]{0,3})?:|\b(?:visa|master\s*card|mastercard|amex|american\s+express|signature|infinite|titanium|platinum)\b(?!\s+(?:account|a\/?c|savings|current)\b)|\bavailable\s+(?:credit|limit)\b|\boutstanding\b|\bnew\s+limit\b|\b(?:total|min(?:imum)?\.?)\s+(?:amount\s+)?due\b/i;
+const CARD_CONTEXT_STRONG_RE = /\bcredit\s+card\b|\bcard\s+account\b|\b(?:visa|master\s*card|mastercard|amex|american\s+express|signature|infinite|titanium|platinum)\b(?!\s+(?:account|a\/?c|savings|current)\b)|\bavailable\s+(?:credit|limit)\b|\boutstanding\b|\bnew\s+limit\b|\b(?:total|min(?:imum)?\.?)\s+(?:amount\s+)?due\b/i;
+const CARD_DESTINATION_WORD_RE = /\b(?:to|into|on|for|against|towards?)\s+(?:your\s+)?(?:\w+\s+)?(?:credit\s+card|card\s+account|card)\b/i;
+const YOUR_ACCOUNT_RE = /\b(?:to|into|in)\s+your\s+(?:(?!card\b|credit\b|loan\b|finance\b|financing\b|mortgage\b|instal\w*\b|mastercard\b|visa\b)\w+\s+)?(?:account|a\/?c)\b(?!\s+of\b)|(?<![ء-ي])(?:الي|في)\s+حساب(?:ك|كم)(?![ء-ي])/i;
+function reachedReaderAccount(text) {
+    if (YOUR_ACCOUNT_RE.test(text))
+        return !CARD_DESTINATION_WORD_RE.test(text) && !CARD_CONTEXT_STRONG_RE.test(text);
+    return TO_READER_ACCOUNT_RE.test(text) && !CARD_DESTINATION_RE.test(text);
+}
+const RECEIVED_CARD_CONTEXT_RE = /\bcard[ \t]{0,3}(?:(?:no\.?|number|#)[ \t]{0,3})?:|\bto[ \t]{0,3}:[ \t]{0,3}(?:your\s+)?card\b|\b(?:on|to|for)\s+(?:your\s+)?card\s+(?:no\.?\s*)?[x*•·]*\d{3,4}\b|\bavailable\s+credit\b|\boutstanding\s+(?:balance|amount|due)\b|\bnew\s+limit\b|\btotal[ \t]+(?:amount[ \t]+)?due[ \t]{0,3}(?:(?:is|:)[ \t]{0,3})?(?:(?:[A-Z]{3}|Dhs?|SR)[ \t]{0,3})?\d|\bmin(?:imum|\.)?[ \t]+(?:(?:amount|payment)[ \t]+)?due[ \t]{0,3}(?:(?:is[ \t]+now|is|:)[ \t]{0,3})?(?:(?:[A-Z]{3}|Dhs?|SR)[ \t]{0,3})?\d|\bstatement\s+balance\b|\bloan\s+(?:account|repayment)\b|\b(?:loan\s+)?instal(?:l)?ment\b(?:[^.\n]|\.(?=\d)){0,30}?\b(?:is|has\s+been|was)\s+paid\b|\b(?:visa|master\s*card|mastercard|amex|american\s+express|platinum|signature|infinite|titanium|world\s+elite)\b(?!\s+(?:account|a\/?c|savings|current)\b)|\bcredit\s+card\b|\bcard\s+payment\b|\b(?:avl\.?|available|credit)\s+(?:cr\.?\s+)?limit\b|\blimit\s+(?:is|has\s+been)\s+updated\b|\b(?:to|towards|on|for)\s+(?:your\s+)?card\b|\bthank\s+you\s+for\s+(?:your\s+)?payment\b|\b(?:debited|deducted)\b/i;
+const REFUND_FIRST_FIELD_RE = /^\W*(?:[A-Za-z][\w&.'-]*(?:[ \t]+[A-Za-z][\w&.'-]*){0,2}:[ \t]*)?(?:(?:card|purchase|pos)[ \t]+)?refund[ \t]*(?:[|;]|\r?\n)/i;
 const AR_UNLABELLED_LOCAL_TRANSFER_OUT_RE = /^حواله[ \t]+محليه[ \t]*\r?\n(?=(?:[\s\S]*\n)?من[ \t]*:?[ \t]*[x*•]+\d{3,4}[ \t]*\r?\n)(?=(?:[\s\S]*\n)?الي[ \t]*:(?![ \t]*[x*•]+\d)[ \t]*[^\s\d])/i;
 const SA_TRANSFER_IN_HEADING_RE = /^(?:internal[ \t]+)?(?:incoming|inward)[ \t]+transfer(?:[ \t]*\(sarie\))?[ \t]*\r?\n/i;
 const SA_TRANSFER_OUT_HEADING_RE = /^(?:internal[ \t]+)?(?:outward|outgoing)[ \t]+transfer(?:[ \t]*\(sarie\))?[ \t]*\r?\n/i;
@@ -10997,7 +13768,7 @@ const AR_COMPLETED_RE = new RegExp(`(?<![${AR_LETTER}])و?تمت(?![${AR_LETTER}
 const STRONG_SENDERLESS_POSTING_RE = /\b(?:transaction|txn|payment|purchase|withdrawal|transfer|debit|credit)\b(?:[^.\n]|\.\d){0,120}?\b(?:amount\s+(?:of|is)|for|of)?\s*(?:[A-Z]{3}|Dhs?)\s*[\d,]+(?:\.\d{1,3})?(?:[^.\n]|\.\d){0,120}?\b(?:has\s+been|was|is)\s+(?:successfully\s+)?(?:paid|completed|processed|posted|debited|credited|charged|refunded|reversed|successful|succeeded)\b|\b(?:[A-Z]{3}|Dhs?)\s*[\d,]+(?:\.\d{1,3})?(?:[^.\n]|\.\d){0,96}?\b(?:has\s+been|was)\s+(?:successfully\s+)?(?:debited|deducted|credited|charged|paid|posted|processed|refunded|reversed|received|withdrawn|transferred)\b/i;
 const INFORMATION_ONLY_RE = /^\s*(?:help|faq|tip)\s*:|\b(?:refunds?|transfers?|payments?)\s+(?:are|is)\s+(?:usually\s+|normally\s+|typically\s+|generally\s+)?(?:processed|credited|completed|posted|reflected)\s+within\s+\d|(?:^|[^ء-ي])(?:معلومه|ملاحظه)\s*:[^\n]{0,24}?[\d.,]+\s*(?:[A-Za-z]{2,3}\.?\s*)?هو\s+(?:ال)?(?:حد|رصيد)\s+(?:ال)?متاح/i;
 const RETURNED_UNPAID_RE = /\b(?:cheque|check|chq)\b[^\n]{0,60}?\b(?:returned|bounced|dishonou?red|unpaid|not\s+honou?red)\b|\breturned\s+unpaid\b|\bcheque\s+return(?:ed)?\b|شيك مرتجع|شيك معاد/i;
-const PENDING_PROCESSING_RE = /\bquick\s+cash\b(?:[^.\n]|\.\d){0,160}?\bwill\s+be\s+processed\s+within\s+\d{1,3}\s+working\s+days?\b|\bhas\s+been\s+deposited\b(?:[^.\n]|\.\d){0,100}?\bsubject\s+to\s+(?:being\s+)?clear(?:ed|ance)\b|\b(?:cheque|check|chq)\b[^\n]{0,180}?\bsent\s+for\s+clearing\b|\b(?:cheque|check|chq)\b[\s\S]{0,220}?\bdeposit\s+will\s+be\s+confirmed\s+after\s+(?:successful\s+)?(?:cheque\s+)?clearing\b|\b(?:transaction|payment|transfer|purchase|withdrawal|fee|charge|debit|credit)\b(?:[^.\n]|\.\d){0,60}?\b(?:is|remains?)\s+(?:still\s+)?pending(?:\s+(?:processing|clearance|completion|debit|credit))?\b|\bpending\s+(?:debit|credit|posting|processing|clearance|completion)\b/i;
+const PENDING_PROCESSING_RE = /\bquick\s+cash\b(?:[^.\n]|\.\d){0,160}?\bwill\s+be\s+processed\s+within\s+\d{1,3}\s+working\s+days?\b|\bhas\s+been\s+deposited\b(?:[^.\n]|\.\d){0,100}?\bsubject\s+to\s+(?:being\s+)?clear(?:ed|ance)\b|\b(?:cheque|check|chq)\b[^\n]{0,180}?\bsent\s+for\s+clearing\b|\b(?:cheque|check|chq)\b[\s\S]{0,220}?\bdeposit\s+will\s+be\s+confirmed\s+after\s+(?:successful\s+)?(?:cheque\s+)?clearing\b|\b(?:transaction|payment|transfer|purchase|withdrawal|fee|charge|debit|credit)\b(?:[^.\n]|\.(?=\w)){0,60}?\b(?:is|remains?)\s+(?:still\s+)?pending(?:\s+(?:processing|clearance|completion|debit|credit))?\b|\bpending\s+(?:debit|credit|posting|processing|clearance|completion)\b/i;
 const AR_OTHER_SUBJECT = `(?:ال)?(?:طلب|طلبات|شحن|شحنه|توصيل|استرداد|ايداع|سداد|مفوتر|بنك)`;
 const AR_CLAUSE = `(?:(?!\\sو[${AR_LETTER}])(?!(?<![${AR_LETTER}])${AR_OTHER_SUBJECT})(?:[^.\\n,;]|[.,]\\d))`;
 const AR_TXN_NOUN = `(?<![${AR_LETTER}])(?:ال)?(?:عمليه|معامله|حركه|شراء|خصم)(?![${AR_LETTER}])`;
@@ -11075,7 +13846,7 @@ function ensureCurrencyPatterns() {
     FIELD_LIST_DATE_RE = new RegExp(`^(?:${PREFIX})\\s*${FIGURE}(?:[^\\S\\n]*\\n[^\\S\\n]*|[^\\S\\n]+)` +
         `(\\d{1,2})[/.-](\\d{1,2})[/.-](\\d{4}|\\d{2})(?!\\d)(?![/.-]\\d)` +
         `(?=[^\\S\\n]*(?:\\n|$)|[^\\S\\n]+(?:bal(?:ance)?|avl|avail(?:able)?)\\b)`, 'i');
-    AED_SUFFIX_RE = new RegExp(`(${FIGURE})\\s*(?:${CUR})(?![A-Za-z${AR_LETTER}])`, 'gi');
+    AED_SUFFIX_RE = new RegExp(`(?<![\\d,])(${FIGURE})\\s*(?:${CUR})(?![A-Za-z${AR_LETTER}])`, 'gi');
     MIN_DUE_RE = new RegExp(`(?:min(?:imum)?(?:\\s+|\\.\\s*)(?:(?:amount\\s+)?due(?:\\s+amount)?|payment(?:\\s+(?:of|due))?|amt(?:\\s+due)?)|\\bpay\\s+min\\.)\\s*(?:of|:|is|[-\u2013](?=\\s))?\\s*(?:${PREFIX})\\s*(${FIGURE})`, 'i');
     const TOTAL_DUE_LABEL = `(?:total\\s+(?:(?:amount|amt)\\s+due|due(?:\\s+to\\s+avoid\\s+fin\\.\\s+charges)?|billed\\s+am(?:oun)?t|outstanding(?:\\s+(?:amount|balance))?)` +
         `|(?:^|[.!?;\\n]\\s*)(?:your\\s+)?(?:credit|covered)\\s+card\\s+bill` +
@@ -11098,7 +13869,7 @@ function ensureCurrencyPatterns() {
     AR_TOTAL_DUE_RE = new RegExp(`${AR_TOTAL_DUE_LABEL}\\s*(?:هو|:)?\\s*(?:${PREFIX})?\\s*(${FIGURE})`, 'i');
     AR_TOTAL_DUE_LABEL_RE = new RegExp(AR_TOTAL_DUE_LABEL, 'i');
     OUTSTANDING_RE = new RegExp(`\\boutstanding(?:\\s+(?:amount|balance))?\\s*(?:is|:|of)?\\s*(?:${PREFIX})?\\s*(${FIGURE})`, 'i');
-    BARE_BALANCE_RE = new RegExp(`(?:^|[\\n.;])\\s*bal(?:ance)?\\s*(?:is|:)?\\s*(?:${PREFIX})\\s*(${FIGURE})`, 'i');
+    BARE_BALANCE_RE = new RegExp(`(?:^|[\\n.;](?<![\\n.;]\\s*?\\s))\\s*bal(?:ance)?\\s*(?:(?:is|:)\\s*)?(?:${PREFIX})\\s*(${FIGURE})`, 'i');
     const SNAPSHOT_FIGURE = BALANCE_REF_CLAUSE +
         `\\s*(?:is|:|\\.|-|,)?\\s*(?:now|currently)?\\s*` +
         `(?:(?:${PREFIX})\\s*(${FIGURE})|(${FIGURE})\\s*(?:${CUR})(?![A-Za-z${AR_LETTER}]))`;
@@ -11111,6 +13882,7 @@ function ensureCurrencyPatterns() {
         `|(?:your\\s+)?payment\\s+of\\s+(?:${CUR})\\s*[\\d,.]+(?:\\s+on\\s+\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4})?\\s+for\\s+(?:your\\s+)?${CARD_GAP}\\s*(?:no\\.?|number|ending(?:\\s+(?:in|with))?)?\\s*[\\dXx*•-]{0,20}\\s+(?:has\\s+been|was|is)\\s+credited\\b` +
         `|payment\\s+of\\s+(?:${CUR})\\s*[\\d,.]+(?:\\s+on\\s+\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4})?\\s+towards?\\s+(?:your\\s+)?${CARD_GAP}\\s*(?:no\\.?|number|ending(?:\\s+(?:in|with))?)?\\s*[\\dXx*•-]{0,20}(?:\\s+on\\s+\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4})?\\s+(?:has\\s+been|was|is)\\s+(?:received|credited)\\b` +
         `|received\\s+payment\\s+for\\s+your\\s+${CARD_GAP}` +
+        `|(?:^|[.!\\n]\\s*)(?:your\\s+)?(?:(?:credit|covered|charge)\\s+)?card\\s+(?:no\\.?\\s*|ending(?:\\s+(?:in|with))?\\s*)?[\\dXx*•]{4,20}\\s+payment\\s+of\\s+(?:${CUR})\\s*[\\d,.]+\\s+(?:has\\s+been|was|is)\\s+(?:received|credited)\\b` +
         `|thank\\s+you\\s+for\\s+(?:your\\s+)?payment[^\\n]{0,48}?(?:towards?|to|for|against)\\s+(?:your\\s+)?${CARD_GAP}` +
         `|card\\s+(?:no\\.?\\s*)?[\\dXx*•]*\\s*has\\s+been\\s+paid` +
         `|(?:${CUR})\\s*[\\d,.]+\\s+payment\\s+for\\s+(?:your\\s+)?${CARD_GAP}\\s+(?:was|has\\s+been|is)\\s+(?:debited|deducted)\\s+from\\s+your\\s+(?:account|a\\/?c)\\b` +
@@ -11125,10 +13897,10 @@ function ensureCurrencyPatterns() {
     const codes = Object.keys(UNITS_PER_USD).filter((c) => c !== m.currency.code).join('|');
     const FX_FIGURE = String.raw `(?:[\d,]+(?:\.\d{1,3})?|\.\d{1,3})`;
     FX_PREFIX_RE = new RegExp(`\\b(${codes})[^\\S\\r\\n]*(${FX_FIGURE})`, 'i');
-    FX_SUFFIX_RE = new RegExp(`(${FX_FIGURE})[^\\S\\r\\n]*(${codes})\\b`, 'i');
+    FX_SUFFIX_RE = new RegExp(`(?<![\\d,])(${FX_FIGURE})[^\\S\\r\\n]*(${codes})\\b`, 'i');
     const extended = extendedCurrencyCodes(m.currency.code).join('|');
     EXT_FX_PREFIX_RE = new RegExp(`\\b(${extended})[^\\S\\r\\n]*(${FX_FIGURE})`);
-    EXT_FX_SUFFIX_RE = new RegExp(`(${FX_FIGURE})[^\\S\\r\\n]*(${extended})\\b`);
+    EXT_FX_SUFFIX_RE = new RegExp(`(?<![\\d,])(${FX_FIGURE})[^\\S\\r\\n]*(${extended})\\b`);
 }
 const MASKED_PREFIX_RE = /(?:[·•*]|[Xx]{3,})[^\S\r\n]*$/;
 function isMaskedFigure(raw, index) {
@@ -11250,10 +14022,20 @@ function extractForeignAmountFils(raw) {
     return extractForeignAmount(raw)?.localFils ?? null;
 }
 const MAX_PLAUSIBLE_AMOUNT_FILS = 100000000;
-const BALANCE_PREFIX_RE = new RegExp(String.raw `(?:bal(?:ance)?|avl|avail(?:able)?|limit|outstanding|total|الرصيد المتاح|الرصيد الحالي|الحد المتاح|المتاح|الرصيد|رصيدك)` +
+const BALANCE_PREFIX_RE = new RegExp(String.raw `(?:bal(?:ance)?|avl|avail(?:able)?\s+(?:credit|cr\.?)(?:\s+limit)?|avail(?:able)?|limit|outstanding|total|الرصيد المتاح|الرصيد الحالي|رصيدك الحالي|رصيدك المتاح|الحد المتاح|المتاح|الرصيد|رصيدك)` +
     BALANCE_REF_CLAUSE +
     String.raw `\s*(?:is|:|\.|-|هو)?\s*(?:now|currently|الان)?\s*$` +
+    String.raw `|(?:ال)?حد\s+(?:ال)?ا[يئ]تماني(?:\s+(?:ال)?(?:متاح|متبقي))?\s*(?::|هو)?\s*$` +
+    String.raw `|(?:سقف|(?:ال)?حد)\s+(?:ال)?بطاق[هة](?:\s+(?:ال)?(?:متاح|متبقي)[هة]?)?\s*(?::|هو)?\s*$` +
+    String.raw `|(?:ال)?حد\s+(?:ال)?(?:متبقي|متاح)\s*(?::|هو)?\s*$` +
+    String.raw `|(?<![ء-ي])رصيدكم(?:\s+(?:ال)?(?:متاح|حالي|متوفر))?\s*(?::|هو)?\s*$` +
+    String.raw `|(?<![ء-ي])رصيد\s+(?:(?:ال)?حساب|(?:ال)?بطاق[هة]|متاح|متوفر)\s*(?::|هو)?\s*$` +
+    String.raw `|(?:ال)?مبلغ\s+(?:ال)?(?:متوفر|متاح|متبقي)\s*(?::|هو)?\s*$` +
+    String.raw `|\bcredit\s+line\s*(?::|is|-)?\s*(?:now\s+)?$` +
+    String.raw `|(?:^|[\n.!?;|])\s*رصيد\s*(?::|هو)?\s*$` +
     String.raw `|(?:الرصيد|رصيدك)\s+(?:المتوفر|المتاح)(?:\s+(?:في|ل)\s*حسابك)?(?:\s+رقم)?(?:\s+[\dXx*•\-]{3,24})?\s*(?:هو|:)?\s*$`, 'i');
+const BALANCE_SUFFIX_RE = new RegExp(String.raw `^[ \t]{0,3}(?:is|are|=|remains?)\s+(?:now\s+)?(?:your|the)\s+(?:(?:current|new|remaining|total|available|avl\.?|avail\.?)\s+){0,2}(?:(?:credit|card|account)\s+)?(?:balance|bal\b|limit|line)` +
+    String.raw `|^[ \t]{0,3}(?:(?:avl\.?|avail(?:able)?)\s+(?:credit\s+)?(?:bal(?:ance)?|limit|credit)|(?:credit\s+)?limit\s+available)\s*(?=[.,;!\n]|$)`, 'i');
 function sanitizeLocalMoney(raw) {
     ensureCurrencyPatterns();
     const invalid = (0, bank_amount_tokens_1.malformedLocalMoneyTokens)(raw, (0, markets_1.getActiveMarket)().currency.aliases.map(foldOrthography));
@@ -11287,11 +14069,11 @@ function hasMalformedBankAmount(message, sender) {
     return sanitizeLocalMoney(normalizeArabic(issuerDigitGrouping(message, sender))) === null;
 }
 const CARD_KIND_WORDS = /credit|covered|charge/i;
-const CARD_RE = /(credit|debit|covered|charge|prepaid)?\s*card(?:\s*(?:no\.?|number))?\s*:?\s*(?:ending(?:\s+(?:in|with))?)?\s*(?:(?:\.\.+|x+|\*+|[·•]+)(?:\s*(?=\d{4}\b)|(?=\d{3}\b))(\d{3,4})|(\d{4}))\b(?![.,]\d)/i;
-const ACCOUNT_RE = /a\/?c(?:count)?\s*(?:no\.?|number)?\s*:?\s*(?:(?:\.\.+|x+|\*+|[·•]+)(?:\s*(?=\d{4}\b)|(?=\d{3}\b))(\d{3,4})|(?:ending(?:\s+(?:in|with))?)?\s*(\d{4}))\b(?![.,]\d)/i;
-const MASKED_ACCOUNT_RE = /(?:a\/?c(?:count)?|acct?|account)\s*(?:no\.?|number)?\s+(?:\d{1,4}[- ]?)?(?:[Xx*·•]+\d*)+(?:[- ]+)?(\d{4})\b/i;
-const MASKED_PAN_RE = /\b\d{4,6}(?:[\s-]?[Xx*•]{2,}){1,3}[\s-]?(\d{4})\b/;
-const USED_CARD_TAIL_RE = /[Xx*•]{2,}(\d{4,6})\s+was\s+used\s+for\b/i;
+const CARD_RE = /(?!(?<=\s)\s)(credit|debit|covered|charge|prepaid)?\s*card\s*(?:(?:no\.?|number)\s*)?(?::\s*)?(?:ending(?:\s+(?:in|with))?\s*)?(?:(?:\.\.+|x+|\*+|[·•]+)(?:\s*(?=\d{4}\b)|(?=\d{3}\b))(\d{3,4})|(\d{4}))\b(?![.,]\d)/i;
+const ACCOUNT_RE = /a\/?c(?:count)?\s*(?:(?:no\.?|number)\s*)?(?::\s*)?(?:(?:\.\.+|x+|\*+|[·•]+)(?:\s*(?=\d{4}\b)|(?=\d{3}\b))(\d{3,4})|(?:ending(?:\s+(?:in|with))?\s*)?(\d{4}))\b(?![.,]\d)/i;
+const MASKED_ACCOUNT_RE = /(?:a\/?c(?:count)?|acct?|account)\s*(?:no\.?|number)?\s+(?:\d{1,4}[- ]?)?(?:[Xx*·•]+(?![Xx*·•])\d*)+(?:[- ]+)?(\d{4})\b/i;
+const MASKED_PAN_RE = /\b\d{4,6}(?:[\s-]?[Xx*•]{2,}(?![Xx*•])){1,3}[\s-]?(\d{4})\b/;
+const USED_CARD_TAIL_RE = /(?<![Xx*•])[Xx*•]{2,}(\d{4,6})\s+was\s+used\s+for\b/i;
 const AR_CARD_KIND = 'ايتمان';
 const AR_CARD_RE = new RegExp(`بطاق[${AR_LETTER}]{0,4}\\s*((?:ال)?${AR_CARD_KIND}[${AR_LETTER}]{0,3}|الخصم)?[^\\d\\n]{0,28}?(\\d{4})(?!\\d)`);
 const AR_ACCOUNT_RE = new RegExp(`حساب[${AR_LETTER}]{0,3}\\s*(?:رقم)?[^\\d\\n]{0,20}?(\\d{4})(?!\\d)`);
@@ -11341,7 +14123,8 @@ const MERCHANT_RE = new RegExp(String.raw `(?:\bat|\bto|\bfrom|@)\s+(` +
     MERCHANT_STOP, 'gi');
 const GATEWAY_URL_MERCHANT_RE = /\b(?:at|to)\s+(?:https?:\/\/)?(?:www\.)?[A-Za-z0-9-]{2,}(?:\.[A-Za-z0-9-]{2,})+\s*\*\s*([A-Za-z0-9][A-Za-z0-9 &'.\-]{1,40}?)(?=\s*[,;(]|\s*$)/i;
 const CHANNEL_BILL_MERCHANT_RE = /\b(?:at|to)\s+(?:[A-Z]{2,4}\s+)?(?:BILL|TRF|TFR|PMT|PYMT|POS|ATM|PUR|PAY|UTIL)\s+(?:DR|CR)\s*:\s*([A-Za-z0-9][A-Za-z0-9 &'.\-]{1,40}?)(?=\s*[,;(]|\s+on\s|\s*$)/;
-const AR_NOT_MERCHANT = 'حساب|الحساب|بطاق|البطاق|رصيد|الرصيد|جهاز|مبلغ|المبلغ|تاريخ|خلال|صراف|الصراف|رقم|خلال';
+const AR_NOT_MERCHANT = 'حساب|الحساب|بطاق|البطاق|رصيد|الرصيد|جهاز|مبلغ|المبلغ|تاريخ|خلال|صراف|الصراف|رقم|خلال|' +
+    'الرسايل|التنبيهات|الاشتراك';
 const AR_CONNECTOR = 'من|باستخدام|بواسطه|علي|عبر|عن طريق|بحسابك';
 const AR_MERCHANT_RE = new RegExp(`(?:^|[^${AR_LETTER}])(?:لدي|في|الي|عند|من|(?:ال)?مفوتر)\\s*:?\\s+(?!(?:${AR_NOT_MERCHANT}))` +
     `([${AR_LETTER}A-Za-z][${AR_LETTER}A-Za-z0-9 '\\-&.]{1,40}?)` +
@@ -11349,7 +14132,7 @@ const AR_MERCHANT_RE = new RegExp(`(?:^|[^${AR_LETTER}])(?:لدي|في|الي|ع
 const TERMINAL_ID_RE = /(?:[-\s]+[·•X]{2,}\d*|-\d{4,}|\s(?!(?:19|20)\d{2}$)\d{4,})$/i;
 const DATE_RE = /(?:\b(?:on|by|before|is)\b|\bdue\s+date\b|\bvalue\s+date\b|بتاريخ|تاريخ الاستحقاق|حتي تاريخ|بحلول)\s*:?\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})/i;
 const DATETIME_RE = /\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})\s+\d{1,2}:\d{2}(?!\d)/;
-const ARABIC_ISO_DATETIME_RE = /(?:^|\n)\s*في\s*:\s*(\d{4})[-/](\d{1,2})[-/](\d{1,2})\s+\d{1,2}:\d{2}(?!\d)/im;
+const ARABIC_ISO_DATETIME_RE = /في(?<=(?:^|\n)\s*في)\s*:\s*(\d{4})[-/](\d{1,2})[-/](\d{1,2})\s+\d{1,2}:\d{2}(?!\d)/im;
 const ISO_DATE_RE = /(?:\bdate\b|\bdue\b|تاريخ)[^\d\n]{0,24}(\d{4})-(\d{1,2})-(\d{1,2})(?!\d)/i;
 const HSBC_DATE_RE = /\bfrom\s+hsbc:\s*(\d{1,2})([A-Za-z]{3})(\d{2})\b/i;
 const ATM_RE = /\bcash\s+withdrawal\b[\s\S]{0,32}(?:\b(?:aed|sar|dhs?)\b|\d)|\bcash\s+advance\b[\s\S]{0,96}\bcredit\s+card\b[\s\S]{0,48}\batm\b|\bwithdraw(?:n|al)\b|\batm\b[^.\n]{0,40}\b(?:cash|withdraw)\w*\b|\b(?:cash|withdraw)\w*\b[^.\n]{0,40}\batm\b|(?:تم\s+)?سحب\s+نقدي[\s\S]{0,32}(?:\b(?:aed|sar)\b|\d)|سحب[\s\S]{0,32}(?:الصراف الالي|صراف الي|جهاز الصراف)/i;
@@ -11879,7 +14662,27 @@ function titleCase(s) {
 }
 const TOTAL_LINE_LABEL_RE = /^[ \t]*(?:total\b|اجمالي|المبلغ[ \t]+المستحق)[^\n\d]{0,40}$/i;
 const FEE_LINE_LABEL_RE = /^[ \t]*(?:fees?|vat|charges?|commission|رسوم|ضريبه)(?:[ \t&]+[^\n:\d]{0,24})?[ \t]*:?[ \t]*(?:[A-Z]{3}[ \t]*)?$/i;
-function extractAmountFils(raw) {
+const FEE_PRICE_LEAD_RE = /(?:^|[\n.!?;|]\s{0,3}|^\W{0,4}[^\s:][^:\n]{0,30}:\s{0,3})(?:vat|fees?|charges?|commission|service\s+charges?)\s{0,3}:?\s{0,3}$/i;
+const FEE_PRICE_TAIL_RE = /^\s{0,3}(?:[A-Z]{3}|Dhs?|SR)?\s{0,3}(?:(?:is|are)\s+)?(?:applicable|apply|applies|per\s+(?:transaction|transfer|withdrawal|month|request))\b/i;
+const AR_FEE_PRICE_LEAD_RE = /(?:^|[\n.!?؟;|،]\s{0,3}|^\W{0,4}[^\s:][^:\n]{0,30}:\s{0,3})(?:(?:ال)?رسوم(?:\s+(?:ال)?(?:خدم[هة]|تحويل|سحب|معامل[هة]))?|ضريب[هة]\s+(?:ال)?قيم[هة]\s+(?:ال)?مضاف[هة]|(?:ال)?عمول[هة])\s{0,3}:?\s{0,3}$/;
+const AR_FEE_CODE = String.raw `(?:ر\.س|ريال|درهم|دينار|ر\.ق|ر\.ع|د\.ك|د\.ب|د\.ا|جنيه|[A-Z]{3}|SR|Dhs?)`;
+const AR_FEE_PRICE_TAIL_RE = new RegExp(String.raw `^\s{0,3}${AR_FEE_CODE}?\s{0,3}\.?\s{0,3}(?:تطبق|مطبق[هة]|تنطبق|تستحق|تستوفي|لكل\s+(?:عملي[هة]|تحويل|سحب|معامل[هة]))`);
+const AR_FEE_THEN_DEBIT_RE = new RegExp(String.raw `^\s{0,3}${AR_FEE_CODE}?[^.\n؟!]{0,40}[.\n]\s{0,3}(?:تم\s+)?(?:خصم|سحب|تحويل|شراء|دفع|سداد)(?![ء-ي])[^\n]{0,40}?(?:${AR_FEE_CODE}\s{0,3}\d|\d[\d,]*(?:\.\d+)?\s{0,3}${AR_FEE_CODE})`);
+const AR_FEE_TAKEN_RE = /^[^.\n؟!]{0,48}?(?:خصمت|تم\s+خصم|خصم|استوفيت|اقتطعت)/;
+function feePriceFigure(raw, index) {
+    const before = raw.slice(Math.max(0, index - 48), index);
+    if (AR_FEE_PRICE_LEAD_RE.test(before)) {
+        const after = raw.slice(index, index + 80).replace(/^(?:[A-Z]{3}|Dhs?|SR)?\s{0,3}[\d,]{1,20}(?:\.\d{1,3})?/i, '');
+        if (AR_FEE_TAKEN_RE.test(after))
+            return false;
+        return AR_FEE_PRICE_TAIL_RE.test(after) || AR_FEE_THEN_DEBIT_RE.test(after);
+    }
+    if (!FEE_PRICE_LEAD_RE.test(before))
+        return false;
+    const after = raw.slice(index, index + 60).replace(/^(?:[A-Z]{3}|Dhs?|SR)?\s{0,3}[\d,]{1,20}(?:\.\d{1,3})?/i, '');
+    return FEE_PRICE_TAIL_RE.test(after) && !/^[^.\n;]{0,48}?\b(?:debited|deducted|charged|collected|taken|paid)\b/i.test(after);
+}
+function localMoneyTokens(raw) {
     const candidates = [];
     AED_AMOUNT_RE.lastIndex = 0;
     let match;
@@ -11887,19 +14690,27 @@ function extractAmountFils(raw) {
         const at = match.index + match[0].length - match[1].length;
         if (isMaskedFigure(raw, at))
             continue;
-        candidates.push({ index: match.index, value: Math.round(Number(match[1].replace(/,/g, '')) * 100) });
+        candidates.push({ index: match.index, end: match.index + match[0].length,
+            value: Math.round(Number(match[1].replace(/,/g, '')) * 100) });
     }
     AED_SUFFIX_RE.lastIndex = 0;
     while ((match = AED_SUFFIX_RE.exec(raw))) {
         const before = match.index > 0 ? raw[match.index - 1] : ' ';
         if (/[A-Za-z0-9*•·.\-/]/.test(before))
             continue;
+        if (before === ':' && /\d/.test(raw[match.index - 2] ?? ''))
+            continue;
         const identityPrefix = raw.slice(Math.max(0, match.index - 40), match.index);
         if (/(?:\bcard\s*(?:no\.?|number|ending(?:\s+with)?|#)\s*|\b(?:account|acct|a\/c)\s*(?:no\.?|number|ending(?:\s+with)?|#)?\s*)$/i.test(identityPrefix))
             continue;
-        candidates.push({ index: match.index, value: Math.round(Number(match[1].replace(/,/g, '')) * 100) });
+        candidates.push({ index: match.index, end: match.index + match[0].length,
+            value: Math.round(Number(match[1].replace(/,/g, '')) * 100) });
     }
     candidates.sort((a, b) => a.index - b.index);
+    return candidates;
+}
+function extractAmountFils(raw) {
+    const candidates = localMoneyTokens(raw);
     const lineBefore = (index) => raw.slice(raw.lastIndexOf('\n', index - 1) + 1, index);
     const feeLine = (index) => FEE_LINE_LABEL_RE.test(lineBefore(index));
     const totalLine = (index) => TOTAL_LINE_LABEL_RE.test(lineBefore(index));
@@ -11909,6 +14720,10 @@ function extractAmountFils(raw) {
             continue;
         const prefix = raw.slice(Math.max(0, c.index - 56), c.index);
         if (BALANCE_PREFIX_RE.test(prefix))
+            continue;
+        if (BALANCE_SUFFIX_RE.test(raw.slice(c.end, c.end + 48)))
+            continue;
+        if (feePriceFigure(raw, c.index))
             continue;
         if (yieldsFeeLine && feeLine(c.index) && candidates.slice(i + 1).some((later) => Number.isFinite(later.value) && later.value > 0 && later.index > c.index &&
             totalLine(later.index) &&
@@ -12112,8 +14927,48 @@ function maskMerchantNames(text) {
     }
     return out;
 }
+const MOVEMENT_STATUS_RE = new RegExp(String.raw `\bincomplete\s+(?:transaction|txn|purchase|payment|transfer|withdrawal)\b` +
+    String.raw `|\b(?:transaction|txn|purchase|payment|transfer|withdrawal)(?:\s+(?:of|for|at|to|from|with|on)\b(?:[^.\n]|\.\d){0,60}?)?\s+(?:was|is|remains?|has\s+been)\s+incomplete\b` +
+    String.raw `|\b(?:transaction|txn|purchase|payment|authori[sz]ation)\b(?:[^.\n]|\.\d){0,80}?\s(?:cancell?ed|voided)\s+by\s+(?:the\s+)?(?:merchant|bank|issuer|acquirer)\b` +
+    String.raw `|\b(?:transaction|txn|purchase|payment|authori[sz]ation)\b(?:[^.\n]|\.\d){0,80}?\s(?:will\s+be|is\s+being)\s+(?:cancell?ed|voided)\b` +
+    String.raw `|[ \t][-–—:|][ \t]*(?:void|voided|cancell?ed)[ \t]*(?=\n|$)` +
+    String.raw `|(?<![ء-ي])(?:تم\s+)?(?:الغاء|ايقاف|تعليق)\s+(?:ال)?(?:عمليه|شراء|دفع|تحويل|حواله|سحب|معامله|حركه)(?![ء-ي])` +
+    String.raw `|(?<![ء-ي])(?:الغيت|اوقفت|علقت)\s+(?:ال)?(?:عمليه|شراء|دفع|تحويل|حواله|سحب|معامله|حركه)(?![ء-ي])` +
+    String.raw `|(?<![ء-ي])تم\s+(?:ال)?(?:الغاء|ايقاف|تعليق)(?![ء-ي])(?!\s+(?:ال)?(?:بطاق|خدم|اشتراك|ربط|تفعيل|جهاز|عمليه|شراء|دفع|تحويل|حواله|سحب|معامله|حركه))` +
+    String.raw `|(?<![ء-ي])(?:ال)?(?:عمليه|معامله|شراء|دفع|تحويل|حواله|سحب|حركه)\s+(?:غير\s+(?:ناجح|مكتمل)ه?|لم\s+(?:تكتمل|يكتمل|تنجح))(?![ء-ي])` +
+    String.raw `|(?<![ء-ي])لم\s+(?:تكتمل|يكتمل|تنجح)(?![ء-ي])` +
+    String.raw `|(?<![ء-ي])(?:و?تم|قد\s+تم)\s+(?:الغاو|الغاي|ايقاف|تعليق)(?:ها|ه)(?![ء-ي])` +
+    String.raw `|(?<![ء-ي])(?:ال)?(?:عمليه|معامله|شراء|دفع|تحويل|حواله|سحب|حركه)\s+(?:ال)?(?:ملغي|ملغا|ملغاه|موقوف[هة]?)(?![ء-ي])` +
+    String.raw `|[ \t]*[,:(][ \t]*(?:cancell?ed|voided|void)[ \t]*\)?[ \t]*(?=[.\n]|$)`, 'gi');
+const STATUS_GOVERNOR_RE = /(?:(?<![ء-ي])(?:يرجي|الرجاء|رجاء|يمكنك|يمكنكم|يمكن|بامكانك|بامكانكم|اتصل|اتصلوا|ارسل|للابلاغ|ابلاغ|لطلب|طلب|خدمه|اذا|حال|عدم|تود|تودون|ترغب|رغبت|اردت|يتعين|عليك)(?![ء-ي])|\b(?:please|pls|to|can|may|if|unless|should)\b)(?:\s+(?:او|و|ب|في|علي|عن|من|or|and))?(?:\s+\d{1,4})?\s*$/i;
+const STATUS_SERVICE_OBJECT_RE = /^[^,.\n]{0,40}?(?:(?<![ء-ي])(?:عبر|طريق|الدولي|الالكتروني|متاح|متاحه|خدمه)(?![ء-ي]))/;
+const STATUS_FUTURE_RE = /(?<![ء-ي])و?(?:سيتم|سوف|ستتم)(?![ء-ي])[^,.\n]{0,12}$/;
+const CLAUSE_MONEY_RE = /\d[\d,]*(?:\.\d+)?\s*(?:[A-Z]{3}|ر\.?س|ريال|درهم|دينار|د\.[اكب]|ر\.[قع])|(?:[A-Z]{3}|SR|Dhs?)\s*\d/i;
+function movementStatusDeclined(body) {
+    MOVEMENT_STATUS_RE.lastIndex = 0;
+    let m;
+    while ((m = MOVEMENT_STATUS_RE.exec(body))) {
+        const at = m.index;
+        const end = at + m[0].length;
+        const [clauseStart, clauseEnd] = clauseBounds(body, at, end);
+        const clause = body.slice(clauseStart, clauseEnd);
+        const before = body.slice(clauseStart, at);
+        if (STATUS_GOVERNOR_RE.test(before))
+            continue;
+        if (/\b(?:if|unless|please|to\s+avoid)\b/i.test(before) && /[a-z]/i.test(m[0]))
+            continue;
+        if (STATUS_SERVICE_OBJECT_RE.test(body.slice(end)))
+            continue;
+        if (/(?:ها|ه)$/.test(m[0]) && /(?<![ء-ي])(?:ال)?بطاق(?:ه|ة|تك|تكم)(?![ء-ي])/.test(clause))
+            continue;
+        if (STATUS_FUTURE_RE.test(before) && !CLAUSE_MONEY_RE.test(clause))
+            continue;
+        return true;
+    }
+    return false;
+}
 function declinedInBody(body, suppressible) {
-    return DECLINED_RE.test(suppressible) || DECLINED_VERB_RE.test(body);
+    return DECLINED_RE.test(suppressible) || DECLINED_VERB_RE.test(body) || movementStatusDeclined(body);
 }
 const CARD_LIFECYCLE_NOTICE_RE = /(?:\b(?:credit|debit|covered|prepaid)?\s*card\b[^.\n]{0,120}\bexpir(?:y|e[sd]?|ing)\b|\bexpir(?:y|e[sd]?|ing)\b[^.\n]{0,120}\b(?:credit|debit|covered|prepaid)?\s*card\b)/i;
 const AR_PURCHASE_CONFIRMATION_CODE_RE = /(?:الرقم السري|الرمز السري|رمز|كلمه السر|كلمه المرور)\s+(?:ل|ال)?(?:تاكيد|اتمام)\s+(?:عمليه\s+)?(?:ال)?(?:شراء|دفع|عمليه)/;
@@ -12137,7 +14992,7 @@ function nonPostingReasonInBody(body, suppressible) {
     if (VERIFICATION_HOLD_DESCRIPTOR_RE.test(body))
         return 'preauthorisation';
     if (!settledRefund &&
-        PREAUTH_RE.test(blank(suppressible, HOLD_RELEASE_RE))) {
+        PREAUTH_RE.test(/hold|auth|blocked|المحجوز/i.test(suppressible) ? blank(suppressible, HOLD_RELEASE_RE) : suppressible)) {
         return 'preauthorisation';
     }
     if (RETURNED_UNPAID_RE.test(body))
@@ -12163,9 +15018,10 @@ function hasArabicRefundHeading(message) {
     return AR_PURCHASE_REFUND_HEADER_RE.test(normalizeArabic(message.trim()));
 }
 const INSTALMENT_CONVERSION_NOTICE_RE = /\b(?:has|have)\s+been\s+(?:successfully\s+)?converted\s+(?:in)?to\s+(?:an?\s+)?(?:\d+\s+)?(?:(?:easy\s+)?instal(?:l)?ments?|emi|easy\s+payment\s+plan|instal(?:l)?ment\s+plan|epp)\b|(?:^|\s)(?:لقد\s+)?تم\s+تقسيط\s+مبلغ/iu;
+const TELECOM_AIRTIME_CREDIT_RE = /\bsawa\s+recharge(?:\s+service)?\s+credit\b(?!\s+card)[\s\S]{0,200}?\byour\s+sawa\s+balance\b/i;
 function nonCashNoticeInBody(body) {
     return AR_CASHBACK_WALLET_CREDIT_RE.test(body) || AR_SHARE_TRADE_RE.test(body) ||
-        INSTALMENT_CONVERSION_NOTICE_RE.test(body);
+        INSTALMENT_CONVERSION_NOTICE_RE.test(body) || TELECOM_AIRTIME_CREDIT_RE.test(body);
 }
 function isNonCashNotice(message) {
     return nonCashNoticeInBody(normalizeArabic(message.trim()));
@@ -12175,6 +15031,307 @@ function isInformationOnlyAlert(message) {
 }
 function isNonPostingMessage(message) {
     return nonPostingReason(message) !== null;
+}
+const NOTICE_CURRENCY = String.raw `(?:[A-Z]{3}(?![A-Za-z])|(?:[Aa][Ee][Dd]|[Ss][Aa][Rr]|[Uu][Ss][Dd]|[Ee][Uu][Rr]|[Gg][Bb][Pp]|[Qq][Aa][Rr]|[Kk][Ww][Dd]|[Bb][Hh][Dd]|[Oo][Mm][Rr]|[Ee][Gg][Pp]|[Jj][Oo][Dd]|[Ii][Nn][Rr])(?![A-Za-z])|(?:Dhs?|DHS?|dhs?|SR|Sr|sr)(?![A-Za-z])|ر\.س|د\.ا|درهم|ريال|ر\.ق|د\.ك|د\.ب|ر\.ع|ج\.م|جنيه|دينار)`;
+const NOTICE_SHORT_CODE = String.raw `(?:QR|KD|BD|RO|JD|LE)`;
+const NOTICE_MONEY_RE = new RegExp(String.raw `(?<![A-Za-z])${NOTICE_CURRENCY}\.?\s{0,3}[+\-−]?\s{0,3}\d[\d,]{0,20}(?:\.\d+)?|(?<![\w.,])[+\-−]?\d[\d,]{0,20}(?:\.\d+)?\s{0,3}${NOTICE_CURRENCY}` +
+    String.raw `|(?<![A-Za-z])${NOTICE_SHORT_CODE}\.?\s?\d[\d,]{0,20}\.\d{2,3}(?!\d)|(?<![\w.,])\d[\d,]{0,20}\.\d{2,3}\s?${NOTICE_SHORT_CODE}(?![A-Za-z])`, 'g');
+const FUTURE_SUBJECT_MONEY_RE = new RegExp(`(?:${NOTICE_MONEY_RE.source})(?=\\s+(?:will|shall)\\s+(?:not\\s+)?(?:be\\s+)?(?:auto[\\s-]?)?(?:debited|deducted|credited|deposited|charged|paid|collected|taken|transferred|withdrawn|refunded|reversed)\\b)`, 'g');
+const SIGNED_AMOUNT_FIELD_RE = /(?:^|[\n|;,](?<![\n|;,]\s*?\s)\s*)(?:(?:transaction|txn|trx)\s+)?(?:amount|amt|المبلغ|مبلغ)\s*:(?:\s*([A-Z]{3}|Dhs?|SR|ر\.س|د\.ا)\s+|\s+)([+\-−])(\d[\d,]*(?:\.\d+)?)(?:\s*([A-Z]{3})(?![A-Za-z]))?|(?:^|[\n|;,](?<![\n|;,]\s*?\s)\s*)(?:(?:transaction|txn|trx)\s+)?(?:amount|amt|المبلغ|مبلغ)\s*:\s*([A-Z]{3}|Dhs?|SR|ر\.س|د\.ا)\s*([+\-−])(\d[\d,]*(?:\.\d+)?)/i;
+function signedAmountField(message) {
+    const m = SIGNED_AMOUNT_FIELD_RE.exec(foldOrthography(stripInvisible(message)));
+    if (!m)
+        return null;
+    const sign = m[2] ?? m[6];
+    const fils = Math.round(Number((m[3] ?? m[7]).replace(/,/g, '')) * 100);
+    const code = m[1] ?? m[4] ?? m[5] ?? null;
+    return Number.isFinite(fils) ? { fils, credit: sign === '+', code: code && /^[A-Z]{3}$/.test(code) ? code : null } : null;
+}
+const NOTICE_MONEY_TEST_RE = new RegExp(NOTICE_MONEY_RE.source);
+const NOTICE_IDENTITY_PREFIX_RE = /(?:\bcard|\baccount|\bacct|\ba\/c|\bending(?:\s+(?:in|with))?|\bno\.?|\bnumber|#|بطاقه|حساب|رقم)\s*[:.]?\s*[*xX•·.\-]*\s*$/i;
+const NOTICE_BALANCE_LEAD_RE = new RegExp(String.raw `(?:\b(?:bal(?:ance)?|avl|available\s+(?:credit|limit)|limit)\b|(?<![${AR_LETTER}])(?:ال)?رصيد(?:ك)?(?![${AR_LETTER}])|(?<![${AR_LETTER}])(?:ال)?حد\s+(?:ال)?متاح)` +
+    String.raw `[^\n]{0,64}?(?:\bis|:|هو|(?:ال)?متاح|(?:ال)?حالي)\s*(?:now\s*|currently\s*)?(?:${NOTICE_CURRENCY}\.?\s*)?$` +
+    String.raw `|(?<![${AR_LETTER}])(?:ال)?حد\s+(?:ال)?(?:يومي|شهري|اقصي|ايتماني)(?![${AR_LETTER}])[^\n\d]{0,40}(?:${NOTICE_CURRENCY}\.?\s*)?$`, 'i');
+const NOTICE_CLAUSE_END_RE = /\n|[|;!?؟？]|\.(?=\s|$)/g;
+const NOTICE_LINE_CONTINUES_RE = /^[ \t]*(?:[a-z]|[?？؟])/;
+const NOTICE_LINE_NEGATION_START_RE = /^[ \t]*(?:(?:was|were|is|are|has|have|had)(?:\s+not|n['’]t)\s+(?:yet\s+)?(?:been\s+)?(?:paid|debited|charged|processed|completed|sent|credited|deducted|approved|successful|transferred|withdrawn)\b|could(?:\s+not|n['’]?t)\s+be\s+(?:completed|processed|approved)\b)/i;
+const NOTICE_LINE_OPEN_END_RE = new RegExp(String.raw `(?:\b(?:if|in\s+case|did\s+you|was|were|has|have|had|not)|(?<![${AR_LETTER}])(?:لم\s+يتم|لن\s+يتم|ما\s+تم|لم|لن|تعذر|ربما|قد|اذا|هل|في\s+حال|لو|يحتمل|يبدو|عند))[ \t]*$`, 'i');
+function noticeLineJoins(body, at) {
+    const next = body.slice(at + 1, at + 48).replace(/^(?:[\r\n \t]|\\r)+/, '');
+    const prior = body.slice(Math.max(0, at - 60), at).replace(/(?:[\r\n \t]|\\r)+$/, '');
+    const previousLine = prior.slice(prior.lastIndexOf('\n') + 1);
+    return NOTICE_LINE_CONTINUES_RE.test(next.slice(0, 3)) || NOTICE_LINE_NEGATION_START_RE.test(next) ||
+        NOTICE_LINE_OPEN_END_RE.test(previousLine.slice(-40));
+}
+function principalMoneyClause(text) {
+    const body = text.slice(0, 4000);
+    const bounds = [];
+    NOTICE_CLAUSE_END_RE.lastIndex = 0;
+    let bm;
+    while ((bm = NOTICE_CLAUSE_END_RE.exec(body))) {
+        if (bm[0] === '\n' && noticeLineJoins(body, bm.index))
+            continue;
+        bounds.push({ index: bm.index, mark: bm[0] });
+    }
+    NOTICE_MONEY_RE.lastIndex = 0;
+    let sawMoney = false;
+    let sawFee = false;
+    let bi = 0;
+    let m;
+    while ((m = NOTICE_MONEY_RE.exec(body))) {
+        const at = m.index;
+        const end = at + m[0].length;
+        if (/^[+\-−]?\d/.test(m[0]) && NOTICE_IDENTITY_PREFIX_RE.test(body.slice(Math.max(0, at - 40), at))) {
+            NOTICE_MONEY_RE.lastIndex = at + (/^[+\-−]?\d[\d,]*(?:\.\d+)?/.exec(m[0])?.[0].length ?? 1);
+            continue;
+        }
+        sawMoney = true;
+        while (bi < bounds.length && bounds[bi].index < at)
+            bi++;
+        const start = bi > 0 ? bounds[bi - 1].index + 1 : 0;
+        let after = bi;
+        while (after < bounds.length && bounds[after].index < end)
+            after++;
+        const stop = after < bounds.length ? bounds[after].index : body.length;
+        const mark = after < bounds.length ? bounds[after].mark : '';
+        const lead = body.slice(start, at);
+        if (BALANCE_PREFIX_RE.test(body.slice(Math.max(0, at - 56), at)) || NOTICE_BALANCE_LEAD_RE.test(lead) ||
+            BALANCE_SUFFIX_RE.test(body.slice(end, end + 48)))
+            continue;
+        const feeClause = body.slice(start, stop);
+        if (feePriceFigure(body, at) &&
+            !NOTICE_DONE_VERB_RE.test(feeClause) && !NOTICE_NEGATED_EN_RE.test(feeClause) &&
+            !NOTICE_NEGATED_AR_RE.test(feeClause) && !NOTICE_NOTHING_CHARGED_RE.test(feeClause)) {
+            sawFee = true;
+            continue;
+        }
+        return { clause: body.slice(start, stop), lead, mark, before: body.slice(0, at), after: body.slice(stop), figure: m[0] };
+    }
+    return sawMoney && !sawFee ? 'balance-only' : null;
+}
+const NOTICE_MOVE_VERB = String.raw `(?:paid|debited|deducted|charged|transferred|credited|withdrawn|deposited|sent|received|refunded|posted|processed)`;
+const NOTICE_NEGATED_EN_RE = new RegExp(String.raw `\b(?:(?:was|were|is|are|has|have|had)\s+not|(?:was|were|is|are|has|have|had)n['’]t)\s+(?:yet\s+)?(?:been\s+)?${NOTICE_MOVE_VERB}\b` +
+    String.raw `|\b(?:could(?:\s+not|n['’]?t)|can(?:not|['’]t))\s+be\s+(?:completed|processed|approved|made|paid|authori[sz]ed|charged|debited)\b` +
+    String.raw `|\b(?:were|was|are|is)\s+unable\s+to\s+(?:debit|deduct|charge|collect|process|complete)\b|\bunable\s+to\s+(?:debit|deduct|charge|collect)\b`, 'i');
+const NOTICE_NEGATED_AR_RE = new RegExp(`(?<![${AR_LETTER}])(?<!(?:هو|هي|الذي|التي)\\s)و?(?:لم|لن|ما)\\s+(?:يتم|تتم|يجر|تجر|تم|تمت)\\s+(?:(?:ال)?عمليه\\s+)?(?:ال)?(?:خصم|سداد|دفع|تحويل|شراء|سحب|ايداع|قيد|اضافه|ارجاع|استرداد)(?:ه|ها|هم)?(?![${AR_LETTER}])(?!\\s+(?:اي\\s+)?(?:رسوم|عموله|عمولات))` +
+    `|(?<![${AR_LETTER}])(?:تعذر|يتعذر|استحال)(?:\\s+علينا)?\\s+(?:ال)?(?:خصم|سداد|دفع|تحويل|شراء|سحب|تنفيذ|اتمام)(?![${AR_LETTER}])` +
+    `|(?<![${AR_LETTER}])و?لم\\s+(?:يقم|تقم)\\s+(?:[^\\s]+\\s+){0,4}?ب(?:خصم|سحب|تحصيل|اقتطاع)(?![${AR_LETTER}])` +
+    `|(?<![${AR_LETTER}])و?لم\\s+(?:ي|ت)(?:خصم|سدد|دفع|حول|سحب|قيد)(?:ه|ها)?(?![${AR_LETTER}])`);
+const NOTICE_STATUS_FAILED_RE = new RegExp(String.raw `(?:^|\n|[.|;][ \t]*)[ \t]*(?:(?:ال)?حاله|status)[ \t]*:[ \t]*(?:لم\s+(?:يتم|تتم|تكتمل)|غير\s+ناجح(?:ه)?|failed|declined|unsuccessful|rejected|cancell?ed|not\s+(?:completed|processed|successful)|مرفوض|ملغي|ملغاه|فشل)`, 'i');
+const NOTICE_STATUS_PENDING_RE = new RegExp(String.raw `(?:^|\n|[.|;][ \t]*)[ \t]*(?:(?:ال)?حاله|status)[ \t]*:[ \t]*(?:pending|in\s+progress|processing|معلق|معلقه|قيد\s+(?:الانتظار|المعالجه|التنفيذ))`, 'i');
+const NOTICE_NOTHING_CHARGED_RE = /\b(?:charged|debited|deducted|taken|billed)\s+nothing\b|\bnothing\s+(?:was|has\s+been|is|will\s+be)\s+(?:charged|debited|deducted|taken|billed)\b|\bno\s+(?:amount|money|payment)\s+(?:was|has\s+been)\s+(?:charged|debited|deducted|taken)\b/i;
+const NOTICE_QUESTION_RE = new RegExp(String.raw `\b(?:did|do|have|were|are)\s+you\s+(?:just\s+)?(?:make|made|authori[sz]e|attempt|try|use|send|spend|initiate|perform|recogni[sz]e)\b` +
+    `|(?<![${AR_LETTER}])هل\\s+(?:قمت|اجريت|استخدمت|حولت|دفعت|ارسلت|اشتريت|سحبت)(?![${AR_LETTER}])`, 'i');
+const NOTICE_QUESTION_OPEN_RE = new RegExp(String.raw `^\W{0,4}(?:[^\s:][^:\n]{0,30}:\s*)?(?:fraud\s+alert\s*:?\s*)?(?:did|have|were|are)\s+you\s+(?:just\s+)?(?:make|made|authori[sz]e|attempt|try|use|send|spend|initiate|perform)\b` +
+    `|^\\W{0,4}(?:[^\\s:][^:\\n]{0,30}:\\s*)?هل\\s+(?:قمت|اجريت|استخدمت|حولت|دفعت|ارسلت|اشتريت|سحبت|تؤكد|توكد|تؤكدون|انت\\s+من\\s+(?:قام|اجري|قمت))(?![${AR_LETTER}])` +
+    `|^\\W{0,4}(?:[^\\s:][^:\\n]{0,30}:\\s*)?(?:يرجي|الرجاء|نرجو|فضلا)\\s+(?:ال)?تاكيد(?![${AR_LETTER}])` +
+    String.raw `|^\W{0,4}(?:[^\s:][^:\n]{0,30}:\s*)?please\s+(?:verify|confirm)\b`, 'i');
+const NOTICE_SAME_LINE_CHALLENGE_RE = /\b(?:was|is)\s+(?:this|it)\s+(?:you|yours)\s*[?？]\s*(?:[–—|-]\s*)?(?:please\s+)?reply\s+(?:with\s+)?["'“]?(?:y|yes|n|no|1|2)\b|^\W{0,4}reply\s+(?:y|yes|1)\b|\bdid\s+you\s+(?:make|authori[sz]e|do)\s+(?:this|the)\s+(?:transaction|purchase|payment|transfer)\s*[?？]\s*(?:[–—|-]\s*)?(?:please\s+)?reply\b/i;
+const NOTICE_CHALLENGE_LINE_RE = new RegExp(String.raw `^\W{0,4}(?:[^\s:][^:\n]{0,30}:\s*)?(?:was\s+this\s+(?:you|yours)|is\s+this\s+you|was\s+this\s+(?:transaction|purchase|payment)\s+(?:made\s+by\s+)?(?:you|yours))\s*[?？]` +
+    `|^\\W{0,4}(?:[^\\s:][^:\\n]{0,30}:\\s*)?هل\\s+(?:هذه\\s+(?:عمليتك|العمليه\\s+لك)|قمت\\s+بهذه\\s+العمليه)\\s*[?？؟]` +
+    String.raw `|(?:^|\n)[ \t]*(?:was\s+this\s+(?:you|yours)|did\s+you\s+make\s+this\s+(?:transaction|purchase|payment))\s*[?？][ \t]*$` +
+    `|(?:^|\\n)[ \\t]*هل\\s+(?:قمت|اجريت)\\s+بهذه\\s+العمليه\\s*[?？؟](?:[ \\t]*(?:ارسل|ارسال)\\s+(?:نعم|1)[^\\n]*)?(?:\\n[ \\t]*(?:رقم\\s+المرجع|ref)[^\\n]*)?[ \\t]*$`, 'i');
+const NOTICE_FOOTER_QUESTION_TAIL_RE = new RegExp(String.raw `(?:^|[\s,–-])(?:not\s+you|didn['’]t\s+make\s+(?:this|it)|wasn['’]t\s+(?:it|this)?\s*you|unrecogni[sz]ed|ليس\s+انت|لست\s+انت` +
+    String.raw `|not\s+(?:done|made|authori[sz]ed|initiated)\s+by\s+you|not\s+recogni[sz]ed|(?:looks?\s+)?suspicious|don['’]t\s+recogni[sz]e\s+(?:this|it))\s*$`, 'i');
+const NOTICE_REPLY_CHALLENGE_RE = new RegExp(String.raw `\breply\s+(?:with\s+)?["'“]?(?:yes|y|1)\b|\b(?:yes|y)\s*(?:or|/)\s*(?:no|n)\b` +
+    `|(?<![${AR_LETTER}])ارسل\\s+(?:نعم|1)(?![${AR_LETTER}])|(?<![${AR_LETTER}])للتاكيد\\s+ارسل(?![${AR_LETTER}])`, 'i');
+const NOTICE_REQUEST_RE = new RegExp(String.raw `\b(?:is|are)\s+(?:asking|requesting)\s+(?:you\s+)?(?:to\s+(?:pay|send|transfer)\b|for\b)` +
+    String.raw `|\b(?:payment|money|transfer)\s+request\s+(?:of|for)\b` +
+    String.raw `|\brequested\b(?:[^.\n]|\.\d){0,60}?\bfrom\s+you\b` +
+    String.raw `|\b(?:sent|send|transferred|forwarded)\s+you\s+(?:a\s+)?(?:payment\s+|money\s+)?request\b` +
+    String.raw `|(?:^|[:\n]\s*)(?:payment|money|transfer|pay)\s+request\s*[:\-]` +
+    `|(?<![${AR_LETTER}])طلب\\s+(?:[^\\s]+\\s+){1,4}منك(?![${AR_LETTER}])|(?<![${AR_LETTER}])يطلب\\s+منك(?![${AR_LETTER}])` +
+    `|(?<![${AR_LETTER}])طلب\\s+(?:دفع|تحويل|سداد|اموال)(?![${AR_LETTER}])`, 'i');
+const NOTICE_REQUEST_HEAD_RE = /^\W*(?:[^\s:][^:\n]{0,30}:\s*)?(?:incoming\s+|new\s+)?(?:payment|money|transfer)\s+request\b|\bmoney\s+received\s+request\b|\bthis\s+is\s+a\s+(?:payment|money)\s+request\b/i;
+const NOTICE_REQUEST_DONE_RE = new RegExp(String.raw `\b(?:was|were|has\s+been|have\s+been)\s+(?:successfully\s+)?(?:paid|sent|completed|accepted|approved|transferred|debited|deducted|charged|processed|executed)\b|\byou\s+(?:have\s+)?(?:paid|sent)\b` +
+    String.raw `|\b(?:is|was|has\s+been)\s+(?:now\s+)?(?:successfully\s+)?(?:completed|complete|successful|done)\b|\b(?:completed|executed|processed|paid|sent)\s+successfully\b` +
+    `|(?<![${AR_LETTER}])و?تم\\s+(?:ال)?(?:تنفيذ|قبول|سداد|دفع|تحويل|خصم)(?![${AR_LETTER}])`, 'i');
+const NOTICE_WHEN_LEAD_AR_RE = new RegExp(`^\\W*(?:[^\\s:][^:\\n]{0,30}:\\s*)?عند\\s+(?:ال)?(?:شراء|دفع|سحب|تحويل|استخدام)(?![${AR_LETTER}])`);
+const NOTICE_CONDITIONAL_LEAD_RE = new RegExp(String.raw `(?:^|[\s,:(])(?:if|in\s+case|should|unless|whenever)\s+(?:you|your|the|a|an|any|this|we|it)\b` +
+    String.raw `|(?:^|[\s,:(])(?:if|in\s+case|should|unless|whenever)\s+\w{2,6}\s+(?:card|account|a\/c)\s+(?:is|was|gets|has)\b` +
+    `|(?<![${AR_LETTER}])(?:اذا|لو|في\\s+حال|عند\\s+قيامك)(?![${AR_LETTER}])`, 'i');
+const NOTICE_LATER_CONDITION_RE = new RegExp(String.raw `(?:^|[\s,(])(?:if|in\s+case|should|unless)\b` +
+    `|(?<![${AR_LETTER}])(?:اذا|في\\s+حال|لو|ان\\s+لم)(?![${AR_LETTER}])`, 'i');
+const NOTICE_PROMO_SPEND_LEAD_RE = /^\s*(?:[^\s:][^:\n]{0,40}:\s*)?(?:spend|shop\s+for)\s+(?:(?:a\s+)?(?:minimum\s+of|over|more\s+than|at\s+least|only|just)\s+)?$/i;
+const NOTICE_REWARD_RE = /\b(?:earn|get|win|receive|enjoy|unlock|collect)\b/i;
+const NOTICE_PROMO_AR_VERB_RE = new RegExp(`(?<![${AR_LETTER}])(?:احصل|اكسب|اربح|استمتع|تمتع)(?![${AR_LETTER}])`);
+const NOTICE_THRESHOLD_LEAD_AR_RE = new RegExp(`(?:(?<![${AR_LETTER}])ب?(?:اكثر|اعلي)\\s+من|بما\\s+يزيد\\s+عن)\\s*(?:${NOTICE_CURRENCY}\\.?\\s*)?$`);
+const NOTICE_MOVEMENT_WORD_RE = new RegExp(String.raw `\b(?:spent|debited|deducted|credited|charged|withdrawn|withdrawal|transferred|transfer|paid|payment|purchased?|refund(?:ed)?|deposit(?:ed)?|received|sent|reversed|statement|due|minimum|overdue)\b` +
+    `|(?:خصم|شراء|سحب|ايداع|تحويل|حواله|استرداد|استرجاع|دفع|سداد|اضافه|ارجاع|مستحق|كشف|(?:ال)?حد\\s+(?:ال)?ادني)`, 'i');
+const NOTICE_STATUS_LINE_RE = new RegExp(String.raw `(?:\n|[.!][ \t]+)[ \t]*(?:PENDING|DECLINED|FAILED|CANCELL?ED|REJECTED|REVERSED|UNSUCCESSFUL|ON\s+HOLD|NOT\s+COMPLETED|PRE-AUTH)[ \t.!]*(?:[ \t][-–|][ \t][^\n]{1,30})?[^A-Za-z0-9؀-ۿ\n]{0,8}(?:\n[ \t]*[Xx*•·]{2,}\d{2,4}[ \t]*)?$|\n[ \t]*please\s+(?:verify|confirm)\s+this\s+(?:payment|transaction|purchase|transfer)\b[^\n]*$|\n[ \t]*status\s*:\s*(?:failed|declined|pending|rejected|cancell?ed)[ \t.!]*$|\n[ \t]*tap\s+to\s+accept\b` +
+    String.raw `|\n[ \t]*was\s+this\s+(?:you|yours)\s*[?？]\s*(?:reply\s+(?:with\s+)?["']?(?:yes|y)\b[^\n]*)?$` +
+    `|\\n[ \\t]*(?:مرفوضه|مرفوض|ملغاه|ملغي|معلقه|قيد\\s+(?:المعالجه|الانتظار)|(?:لم|ما)\\s+(?:تتم|يتم|تم)(?:\\s+(?:ال)?(?:عمليه|خصم))?(?:\\s+(?:ال)?مبلغ)?|غير\\s+ناجح(?:ه)?|فشلت?(?:\\s+(?:ال)?عمليه)?)[ \\t.!]*$` +
+    `|\\n[ \\t]*هل\\s+(?:قمت|اجريت)\\s+بهذه\\s+العمليه\\s*[?？؟]\\s*(?:ارسل\\s+(?:نعم|1)[^\\n]*)?$`, 'i');
+const NOTICE_STATUS_WORD_EN_RE = /\b(?:(?<!\d[ \t\u00a0]{0,3})REVERSED|DECLINED|FAILED|CANCELL?ED|REJECTED|ON\s+HOLD|NOT\s+COMPLETED|PRE-AUTH)(?=[ \t]*(?:$|[\n.,;·|])|[ \t]+(?:[oO][nN]|[wW][iI][tT][hH]|[uU][sS][iI][nN][gG]|[vV][iI][aA]|[wW][aA][sS]|[wW][eE][rR][eE]|[hH][aA][sS]|[hH][aA][vV][eE]|[iI][sS]|[pP][aA][iI][dD]|[pP][oO][sS][tT][eE][dD]|[cC][hH][aA][rR][gG][eE][dD]|[sS][eE][nN][tT]|[rR][eE][fF][uU][nN][dD][eE][dD]|[cC][rR][eE][dD][iI][tT][eE][dD]|[dD][eE][bB][iI][tT][eE][dD]|[aA][uU][tT][hH]|[rR][eE][fF]|[rR][eE][fF][eE][rR][eE][nN][cC][eE]|[aA][pP][pP][rR][oO][vV][aA][lL]|[mM][aA][dD][eE]|[aA][vV][aA][iI][lL][aA][bB][lL][eE]|[yY][oO][uU][rR]|[bB][aA][lL]|[bB][aA][lL][aA][nN][cC][eE]|[dD][eE][bB][iI][tT]|[cC][aA][rR][dD]|[aA][vV][lL])\b)/;
+const NOTICE_STATUS_WORD_TITLE_RE = /\b(?:(?<!\d[ \t\u00a0]{0,3})Reversed|Declined|Failed|Cancell?ed|Rejected|On\s+Hold|Not\s+Completed|Pre-[Aa]uth)(?=[ \t]*(?:$|[\n.,;·|])|[ \t]+[Oo][Nn][ \t]+\d)/;
+const NOTICE_STATUS_WORD_AR_RE = new RegExp(`(?<![${AR_LETTER}])(?:ملغاه|ملغيه|معلقه|مرفوضه)(?![${AR_LETTER}])`);
+const NOTICE_THRESHOLD_LEAD_RE = new RegExp(String.raw `\b(?:more\s+than|above|over|exceeding|in\s+excess\s+of)\s*(?:${NOTICE_CURRENCY}\.?\s*)?$` +
+    `|(?<![${AR_LETTER}])ب?(?:اكثر|اعلي)\\s+من\\s*(?:${NOTICE_CURRENCY}\\.?\\s*)?$`, 'i');
+const LOOKALIKE_DOMAIN = String.raw `(?:https?:\/\/)?(?:www\.)?(?:[\w]+(?:\.[\w]+)*-[\w-]*(?:\.[\w-]+)+|[\w-]+(?:\.[\w-]+)*\.(?:info|xyz|top|click|ru|biz|tk|zip)(?![\w.]))`;
+const NOTICE_LOOKALIKE_LURE_RE = new RegExp(String.raw `\b(?:verify|confirm|secure\s+your\s+(?:card|account))\b[^\n]{0,24}?(?:\bat\b|\bon\b|\bvia\b|:)\s*${LOOKALIKE_DOMAIN}` +
+    `|(?<![${AR_LETTER}])(?:للتحقق|للتاكيد|لتحديث\\s+بياناتك)\\s+(?:ادخل|اضغط|زر|توجه)\\s+(?:علي|الي)\\s+${LOOKALIKE_DOMAIN}`, 'i');
+const NOTICE_CALL_BACK_RE = new RegExp(String.raw `\b(?:call|ring|reach\s+us\s+at|contact)\b[^\n]{0,30}?\+?\d[\d\s.-]{6,}` +
+    `|(?<![${AR_LETTER}])اتصل[^\\n]{0,30}?\\+?\\d[\\d\\s.-]{6,}`, 'i');
+const UNREGISTERED_SENDER_RE = /^\s*\+?\d[\d\s-]{6,}\s*$|@/;
+function isUnregisteredCallBack(message, sender) {
+    return !!sender && UNREGISTERED_SENDER_RE.test(sender) &&
+        NOTICE_CALL_BACK_RE.test(foldOrthography(stripInvisible(message)));
+}
+const NOTICE_CHAT_RE = new RegExp(String.raw `^\s*(?:[^\s:][^:\n]{0,30}:\s*)?(?:lol|lmao|haha+|hehe+|omg|bro|dude)\b` +
+    `|(?<![${AR_LETTER}])(?:حول|حولي|ارسل|ارسلي|رجع)\\s+لي(?![${AR_LETTER}])|(?<![${AR_LETTER}])نصيبك(?![${AR_LETTER}])|(?<![${AR_LETTER}])وصلتك\\s*[؟?]`, 'i');
+const NOTICE_AR_REMINDER_RE = new RegExp(`^\\s*(?:[^\\n:]{0,30}:\\s*)?تذكير\\s*:[\\s\\S]*(?<![${AR_LETTER}])(?:ال)?(?:مستحق|مستحقه|تستحق|يستحق)(?![${AR_LETTER}])`);
+const NOTICE_HEDGE_RE = new RegExp(String.raw `\b(?:may|might|could)\s+(?:have\s+)?been\s+(?:used|charged|debited|deducted|spent|made|paid|taken|withdrawn)\b|\bappears?\s+to\s+have\s+been\b|\bit\s+(?:seems|appears|looks\s+like)\b|\bseems\s+like\b|\bpossibly\s+(?:been\s+)?(?:charged|debited|deducted|used|paid|spent)\b` +
+    `|(?<![${AR_LETTER}])(?:ربما|قد\\s+يكون|قد\\s+(?:يتم|تتم)\\s+(?:ال)?(?:خصم|سحب|تحويل|دفع|سداد|اقتطاع)|يحتمل(?:\\s+ان(?:ه|ها)?)?|من\\s+المحتمل\\s+ان(?:ه|ها)?|يبدو(?:\\s+ان(?:ه|ها)?)?)(?![${AR_LETTER}])`, 'i');
+const NOTICE_POSSIBLE_HEAD_RE = /^\W*(?:[^\s:][^:\n]{0,30}:\s*)?possible\s+(?:transaction|charge|purchase|payment|debit)\s*:/i;
+const NOTICE_GLUED_QUESTION_RE = new RegExp(String.raw `(?:,|-|–|\bor\b)\s*(?:was\s+(?:this|it)\s+(?:you|yours)|(?:you\s+)?didn['’]t\s+(?:you\s+)?make\s+(?:this|it)|did\s+you\s+not\s+make\s+(?:this|it)|was\s+(?:it|this)\s+not\s+you|wasn['’]t\s+(?:it|this)\s+you|really\s+not\s+you)\s*$` +
+    `|(?:,|(?<![${AR_LETTER}])ام)\\s*(?:الست\\s+انت|لم\\s+تكن\\s+انت|لم\\s+تقم\\s+بها)\\s*$`, 'i');
+const NOTICE_EXAMPLE_RE = new RegExp(String.raw `^\W*(?:[^\s:][^:\n]{0,30}:\s*|[^\s:][^:\n]{0,30}\n\s*)?(?:for\s+example|example|sample(?:\s+(?:alert|message|notification|sms))?)\s*(?:[:.,–|-]|\n|$)|^\W*e\.g\.` +
+    String.raw `|(?:^|[\n.!|–][ \t]{0,3})(?:[^\s:][^:\n]{0,30}:[ \t]{0,3})?sample\s+(?:alert|message|notification|sms)[ \t]{0,3}(?:[.:!]|\n|$)` +
+    String.raw `|^\W*(?:[^\s:][^:\n]{0,30}:\s*)?(?:for\s+instance|e\.?g\.?)\s*[:,]` +
+    `|^\\W*(?:[^\\s:][^:\\n]{0,30}:\\s*|[^\\s:][^:\\n]{0,30}\\n\\s*)?(?:(?:مثال|مثلا|نموذج)\\s*(?::|\\n|,|–|-|\\||$)|علي\\s+سبيل\\s+المثال)` +
+    `|^\\W*(?:[^\\s:][^:\\n]{0,30}:\\s*)?(?:شكل|نموذج)\\s+(?:ال)?رساله(?:\\s+(?:ال)?جديده)?\\s*:`, 'i');
+const NOTICE_EXAMPLE_BEFORE_RE = /(?:^|[\n.!|–])[ \t]{0,3}(?:for\s+example|example)[ \t]{0,3}:/i;
+const NOTICE_EXAMPLE_OF_RE = /\b(?:an?|the|our)\s+(?:sample|example)\s+of\s+(?:our|the|a|your)\s+(?:new\s+)?(?:alert|message|notification|sms)s?\b/i;
+const NOTICE_LIMIT_EN_RE = /\blimit\s+(?:reached|applies|exceeded|has\s+been\s+(?:reached|exceeded))\b|\b(?:daily|monthly|weekly|spending)\s+limit\b|\b(?:are|is)\s+available\s+with\b/i;
+const NOTICE_UP_TO_LEAD_RE = new RegExp(String.raw `\bup\s+to\s*(?:${NOTICE_CURRENCY}\.?\s*)?$|(?<![${AR_LETTER}])حتي\s*(?:${NOTICE_CURRENCY}\.?\s*)?$`, 'i');
+const NOTICE_DONE_VERB_RE = new RegExp(String.raw `\b(?:was|were|has\s+been|have\s+been)\s+(?:successfully\s+)?(?:used|debited|charged|deducted|spent|withdrawn|made|paid|transferred|credited)\b|\b(?:spent|debited|deducted|withdrawn|purchased)\b` +
+    `|(?<![${AR_LETTER}])و?تم\\s+(?:ال)?(?:خصم|شراء|سحب|دفع|تحويل|سداد|استخدام)`, 'i');
+const NOTICE_HOLD_RE = new RegExp(String.raw `\b(?:requires?|needs?|awaiting|waiting\s+for)\s+(?:your\s+)?(?:approval|authori[sz]ation|confirmation)\b|\bmay\s+appear\s+on\s+your\s+(?:[\w&-]+\s+){0,3}?(?:card|account|a\/c|debit|credit)\b|\bfor\s+card\s+verification\b|\bsubject\s+to\s+final\s+settlement\b` +
+    `|(?<![${AR_LETTER}])بانتظار\\s+(?:موافقتك|الموافقه|التاكيد|تاكيدك)|(?<![${AR_LETTER}])قيد\\s+الموافقه|(?<![${AR_LETTER}])خاضعه\\s+للتسويه`, 'i');
+const NOTICE_POSTS_LATER_RE = new RegExp(String.raw `\bfinal\s+amount\s+(?:will|may)\s+be\s+updated\b|\b(?:it|this(?:\s+(?:transaction|purchase|charge|payment))?)\s+(?:may|can|could)\s+take\s+(?:up\s+to\s+)?\d+(?:\s*-\s*\d+)?\s+(?:business\s+|working\s+)?days?\s+to\s+(?:post|reflect|appear)\b` +
+    `|(?<![${AR_LETTER}])يستغرق\\s+قيدها`, 'i');
+const NOTICE_APPROVED_RE = new RegExp(String.raw `\b(?:was|has\s+been)\s+approved\b|(?<![${AR_LETTER}])تمت\s+الموافقه`, 'i');
+const NOTICE_RETURNED_RE = new RegExp(String.raw `\b(?:was|has\s+been|were|have\s+been)\s+(?:returned|bounced(?:\s+back)?|sent\s+back)\b(?!\s+(?:back\s+)?(?:to|into|onto)\s+(?:your\s+)?(?:[\w&'-]+\s+){0,4}(?:card|account|a\/c|wallet))|\bbounced\s+back\b|\breported\s+as\s+(?:fraud|fraudulent)\b` +
+    `|(?<![${AR_LETTER}])ارتدت(?![${AR_LETTER}])|(?<![${AR_LETTER}])كعمليه\\s+احتيال|(?<![${AR_LETTER}])تم\\s+الابلاغ\\s+عن`, 'i');
+const NOTICE_REFUND_WORD_RE = new RegExp(String.raw `\b(?:refund(?:ed)?|credited|reversed|reversal)\b|(?<![${AR_LETTER}])(?:استرداد|مسترد|استرجاع)(?![${AR_LETTER}])`, 'i');
+const NOTICE_FOOTER_ACTION_RE = new RegExp(String.raw `^\s*(?:please\s+)?(?:call|contact|block|report|dial|visit)\b|^\s*(?:(?:ف|و)?اتصل|للابلاغ|يرجي\s+الاتصال)(?![${AR_LETTER}])`, 'i');
+const NOTICE_RETURNED_TO_SENDER_RE = /\breturned\s+to\s+(?:the\s+)?sender\b/i;
+const NOTICE_UNCLAIMED_RE = new RegExp(String.raw `\b(?:enrol+|register|sign\s+up|join)\s+(?:now\s+)?to\s+(?:receive|claim|accept|collect|get)\s+(?:it|them|this|the\s+(?:money|payment|transfer|funds|amount)|your\s+(?:money|payment|transfer|funds))\b|\baccept\s+(?:it|them|this|the\s+(?:money|payment|transfer))\s*\?|\baccept\s+(?:it\s+)?within\s+\d+\s+days?\b|\bwaiting\s+for\s+you\s+to\s+(?:enrol+|accept|register|sign\s+up)\b` +
+    `|(?<![${AR_LETTER}])هل\\s+تقبل(?:ه|ها)?(?![${AR_LETTER}])|(?<![${AR_LETTER}])لاستلام(?:ه|ها)(?![${AR_LETTER}])`, 'i');
+const NOTICE_P2P_IN_RE = new RegExp(String.raw `\b(?:you\s+(?:have\s+|['’]ve\s+)?received|(?:sent|transferred|paid)\s+you)\b|(?<![${AR_LETTER}])ارسل\s+(?:لك|لكم)(?![${AR_LETTER}])`, 'i');
+const NOTICE_RENEWAL_RE = /\brenews\s+(?:tomorrow|today|on)\b|\bwill\s+(?:be\s+)?renew(?:ed)?\b|\bfree\s+trial\s+ends\b|\bis\s+coming\s+up\b/i;
+const NOTICE_UNDER_PROCESS_RE = /\b(?:the\s+|this\s+|your\s+)?(?:transaction|payment|transfer|purchase)\s+is\s+(?:still\s+)?(?:under\s+process(?:ing)?|in\s+process|being\s+processed)\b/i;
+const NOTICE_NOT_YET_RE = new RegExp(String.raw `\bwill\s+be\s+(?:approved|authori[sz]ed|confirmed)\b|\b(?:refund|payment|transfer|transaction|credit)\s+pending\b|\b(?:is|are)\s+being\s+(?:sent|processed|transferred|paid)\b|\b(?:has|have)\s+not\s+(?:yet\s+)?(?:arrived|reached)\b|\bnot\s+(?:yet\s+)?arrived\b|\bwill\s+be\s+taken\b` +
+    `|(?<![${AR_LETTER}])جار(?:ي)?\\s+(?:ارسال|تحويل|تنفيذ|معالجه)(?![${AR_LETTER}])|(?<![${AR_LETTER}])لم\\s+(?:تصل|يصل)(?![${AR_LETTER}])`, 'i');
+const TRAILING_REVERSAL_MARK_RE = /(?<!\b(?:been|was|were|is|are|purchase|pos|atm|txn|transaction|payment|withdrawal|charge|debit|wdl|dr)\s{1,3})\breversed[\s.!]*$/i;
+const NOTICE_INCOMING_STATED_RE = new RegExp(String.raw `\byou\s+(?:have\s+|['’]ve\s+)?received\b|\bsent\s+you\b` +
+    String.raw `|\bincoming\s+(?:payment|transfer|remittance)\b|\bsalary\b|(?<![${AR_LETTER}])استلمت(?![${AR_LETTER}])`, 'i');
+const NOTICE_RETURNED_TO_USER_RE = /\brefund|\bcredited\s+back\b|\bre-?credited\b|\breturned\s+to\s+your\b|\breversed\s+(?:to|into)\s+your\b|\breversal\s+of\b/i;
+const NOTICE_PREFIX_CONNECTOR_RE = /^(\W{0,4}[^\s:\n][^:\n]{0,30}?)[ \t]+[–—|-][ \t]+/;
+const NOTICE_REVERSAL_REQUEST_RE = /\b(?:reversal|refund|dispute|chargeback)\s+request\b(?:[^.\n]|\.(?=\d)){0,80}?\b(?:has\s+been\s+|was\s+|is\s+)?(?:received|registered|logged|submitted|raised)\b/i;
+const NOTICE_TOP_UP_RE = /\btop\s+up\s+(?:your\s+)?\w+\s+to\s+complete\b|^\W{0,4}(?:[^\s:][^:\n]{0,30}:\s*)?pending\s*(?::|(?:purchase|transaction|payment|charge|transfer|debit|withdrawal)\b)/i;
+const NOTICE_STATUS_SEGMENT_RE = new RegExp(String.raw `(?:^|\n|\||\s[–—]\s|\s-{1,2}[ \t]*|[(\[]\s*)[ \t]*(?:` +
+    `(?:ما|لم|لن)\\s+(?:تم|تمت|يتم|تتم|تكتمل)(?:\\s+(?:ال)?(?:خصم|عمليه|تنفيذ|سداد|تحويل|دفع))?(?:\\s+(?:ال)?مبلغ)?` +
+    `|غير\\s+ناجح(?:ه)?|مرفوض(?:ه)?|ملغ(?:ي|اه)|فشلت?(?:\\s+(?:ال)?عمليه)?|قيد\\s+(?:ال)?(?:معالجه|انتظار|تنفيذ)` +
+    `|تعذر\\s+(?:ال)?(?:اتمام|تنفيذ|خصم)(?:\\s+(?:ال)?(?:عمليه|مبلغ))?|قد\\s+(?:يتم|تتم)\\s+(?:ال)?خصم(?:\\s+(?:ال)?مبلغ)?` +
+    `|هل\\s+(?:تؤكد|توكد)\\s+(?:هذه\\s+)?(?:ال)?عمليه\\s*[?？؟]?|(?:يرجي|الرجاء)\\s+(?:ال)?تاكيد\\s+(?:ال)?عمليه(?:\\s+بالرد\\s+بنعم)?` +
+    String.raw `|please\s+verify\s+this\s+(?:payment|transaction|purchase|transfer)|tap\s+to\s+accept(?:\s+this\s+(?:payment|transfer))?` +
+    String.raw `|(?:could(?:n['’]?t|\s+not)|can(?:not|['’]t))\s+be\s+(?:completed|processed|approved)` +
+    `|تم\\s+عكس(?:ها|ه)?(?:\\s+(?:ال)?(?:حواله|عمليه|مبلغ))?` +
+    String.raw `|pending(?:\s+(?:approval|authori[sz]ation|confirmation))?|declined|failed|cancell?ed|rejected|reversed|unsuccessful|not\s+completed|on\s+hold)` +
+    String.raw `[ \t.!]*(?:[ \t]+[-–][ \t]+[^\n|]{1,30}|[ \t]+(?:ref(?:erence)?|رقم\s+المرجع)(?:\s*(?:no\.?|number|#))?\s*[:.]?\s*[\w-]+)?[^A-Za-z0-9؀-ۿ\n|]{0,8}(?=\n|\||[)\]]|$)`, 'i');
+function moneyNoticeKindInBody(text) {
+    const body = text.replace(NOTICE_PREFIX_CONNECTOR_RE, '$1: ');
+    if (NOTICE_CHAT_RE.test(body))
+        return 'personal-chat';
+    if (NOTICE_TOP_UP_RE.test(body) || (NOTICE_REVERSAL_REQUEST_RE.test(body) &&
+        (!/\b(?:has\s+been|was|is)\s+(?:credited|refunded|deposited|returned)\b/i.test(body) ||
+            /\b(?:once|when|after|until|will|shall)\b/i.test(body))))
+        return 'not-yet';
+    if (TRAILING_REVERSAL_MARK_RE.test(body) && NOTICE_INCOMING_STATED_RE.test(body) &&
+        !NOTICE_RETURNED_TO_USER_RE.test(body))
+        return 'unproven-direction';
+    if (AR_CASH_WITHDRAWAL_CORRECTION_ANY_RE.test(body) && (!AR_CASH_WITHDRAWAL_CORRECTION_HEADER_RE.test(body) ||
+        AR_WITHDRAWAL_FIELD_RE.test(body.indexOf('\n') < 0 ? '' : body.slice(body.indexOf('\n') + 1))))
+        return 'unproven-direction';
+    if (AR_RETURNED_TO_OWN_RE.test(body) &&
+        (AR_DEBIT_OR_PAYMENT_RE.test(body) || /(?<![ء-ي])(?:ال)?رسوم(?![ء-ي])/.test(body)))
+        return 'unproven-direction';
+    if (NOTICE_AR_REMINDER_RE.test(body) && !SETTLED_MOVEMENT_RE.test(body) && !AR_SETTLED_VERB_RE.test(body)) {
+        return 'reminder';
+    }
+    const principal = principalMoneyClause(body);
+    if (principal === null)
+        return null;
+    if (principal === 'balance-only') {
+        return NOTICE_MOVEMENT_WORD_RE.test(body) ? null : 'balance-only';
+    }
+    const { clause, lead, mark } = principal;
+    if (!NOTICE_MOVEMENT_WORD_RE.test(body) && !/\b(?:after|txn|trx|transaction|using|used|spent)\b|(?<![ء-ي])(?:بعد|عمليه)(?![ء-ي])/i.test(body) &&
+        /\bavail\w*|\bavl\b|متاح/i.test(lead))
+        return 'balance-only';
+    const tail = clause.slice(lead.length);
+    const opener = NOTICE_LATER_CONDITION_RE.exec(tail);
+    const core = opener ? clause.slice(0, lead.length + opener.index) : clause;
+    if (NOTICE_NEGATED_EN_RE.test(core) || NOTICE_NEGATED_AR_RE.test(core) ||
+        NOTICE_NOTHING_CHARGED_RE.test(core) || NOTICE_STATUS_FAILED_RE.test(body))
+        return 'negated';
+    const statusWord = NOTICE_STATUS_WORD_EN_RE.exec(body) ?? NOTICE_STATUS_WORD_TITLE_RE.exec(body);
+    const statusWordCounts = !!statusWord && !(/^cancel/i.test(statusWord[0]) && /\brefund/i.test(body)) &&
+        !(/^reversed/i.test(statusWord[0]) && (/\brefund|\bcredited\s+(?:back\s+)?(?:to|into|in)\s+(?:your\s+)?(?:\w+\s+)?(?:card|account|a\/c)\b/i.test(body) ||
+            /^\W{0,4}(?:[^\s:][^:\n]{0,30}:\s*)?(?:pos\s+)?(?:purchase|transaction|txn|trx)\b/i.test(body)));
+    const segment = NOTICE_STATUS_SEGMENT_RE.exec(body);
+    const segmentCounts = !!segment && !(/revers/i.test(segment[0]) && !INCOMING_MONEY_STATED_RE.test(body) && !reversedIncomingCredit(body) &&
+        /\bcredited\s+(?:back\s+)?(?:to|into|in)\s+(?:your\s+)?(?:\w+\s+)?(?:card|account|a\/c)\b/i.test(body));
+    if (NOTICE_STATUS_LINE_RE.test(body) || segmentCounts || statusWordCounts ||
+        NOTICE_STATUS_WORD_AR_RE.test(body))
+        return 'status';
+    if (NOTICE_LOOKALIKE_LURE_RE.test(body))
+        return 'lure';
+    const asked = mark === '?' || mark === '؟' || mark === '？';
+    if (NOTICE_QUESTION_RE.test(lead) && (asked || NOTICE_REPLY_CHALLENGE_RE.test(body)))
+        return 'question';
+    if (NOTICE_QUESTION_OPEN_RE.test(lead) || NOTICE_CHALLENGE_LINE_RE.test(body) ||
+        NOTICE_SAME_LINE_CHALLENGE_RE.test(body))
+        return 'question';
+    if (asked && !NOTICE_FOOTER_QUESTION_TAIL_RE.test(tail) && !NOTICE_GLUED_QUESTION_RE.test(tail))
+        return 'question';
+    if (asked && NOTICE_GLUED_QUESTION_RE.test(tail) &&
+        (!NOTICE_FOOTER_ACTION_RE.test(principal.after.slice(1)) || /(?:الست|لم\s+تكن)\s+انت|لم\s+تقم\s+بها/.test(tail)))
+        return 'question';
+    if (NOTICE_EXAMPLE_RE.test(body) || NOTICE_EXAMPLE_RE.test(lead) || NOTICE_EXAMPLE_BEFORE_RE.test(principal.before) ||
+        NOTICE_EXAMPLE_OF_RE.test(principal.before))
+        return 'example';
+    if (NOTICE_HEDGE_RE.test(core) || NOTICE_POSSIBLE_HEAD_RE.test(body))
+        return 'hedged';
+    if (NOTICE_HOLD_RE.test(clause) ||
+        (NOTICE_APPROVED_RE.test(clause) && NOTICE_POSTS_LATER_RE.test(body)))
+        return 'hold';
+    if ((NOTICE_RETURNED_RE.test(core) || NOTICE_RETURNED_TO_SENDER_RE.test(body)) &&
+        !NOTICE_REFUND_WORD_RE.test(clause))
+        return 'returned';
+    if (NOTICE_P2P_IN_RE.test(clause) &&
+        NOTICE_UNCLAIMED_RE.test(principal.before.slice(-160) + ' ' + clause + ' ' + principal.after.slice(0, 160)))
+        return 'unclaimed';
+    if (NOTICE_NOT_YET_RE.test(core) || NOTICE_UNDER_PROCESS_RE.test(body) ||
+        NOTICE_STATUS_PENDING_RE.test(body))
+        return 'not-yet';
+    if (NOTICE_RENEWAL_RE.test(core) && !NOTICE_DONE_VERB_RE.test(clause))
+        return 'not-yet';
+    const afterFigure = tail.slice(principal.figure.length);
+    const limitTail = NOTICE_MONEY_TEST_RE.test(afterFigure) ? '' : afterFigure;
+    if (!NOTICE_DONE_VERB_RE.test(clause) &&
+        (NOTICE_LIMIT_EN_RE.test(lead) || NOTICE_LIMIT_EN_RE.test(limitTail) ||
+            NOTICE_UP_TO_LEAD_RE.test(lead) && /\bavailable\b|حد/i.test(clause) ||
+            /بلوغ\s+(?:ال)?حد|تجاوز\s+(?:ال)?حد/.test(limitTail)))
+        return 'limit';
+    if ((NOTICE_REQUEST_RE.test(clause) || NOTICE_REQUEST_HEAD_RE.test(body)) &&
+        !NOTICE_REQUEST_DONE_RE.test(clause))
+        return 'request';
+    if (NOTICE_CONDITIONAL_LEAD_RE.test(lead) || NOTICE_WHEN_LEAD_AR_RE.test(lead))
+        return 'conditional';
+    if (NOTICE_PROMO_SPEND_LEAD_RE.test(lead) && NOTICE_REWARD_RE.test(body))
+        return 'promotion';
+    if (NOTICE_THRESHOLD_LEAD_AR_RE.test(lead) && NOTICE_PROMO_AR_VERB_RE.test(clause))
+        return 'promotion';
+    if (NOTICE_PROMO_AR_VERB_RE.test(lead) && new RegExp(`(?<![${AR_LETTER}])عند(?![${AR_LETTER}])`).test(clause))
+        return 'promotion';
+    if (NOTICE_THRESHOLD_LEAD_RE.test(lead))
+        return 'threshold';
+    return null;
+}
+function moneyNoticeKind(message) {
+    return moneyNoticeKindInBody(foldOrthography(stripInvisible(message.trim())));
 }
 function isDeclinedMessage(message) {
     return nonPostingReason(message) === 'declined';
@@ -12390,7 +15547,7 @@ const ARABIC_MONTHS = {
 };
 const ARABIC_DUE_DATE_RE = new RegExp(`قبل\\s+تاريخ\\s+(\\d{1,2})\\s+(${Object.keys(ARABIC_MONTHS).join('|')})\\s+(\\d{4})`);
 const DUE_DATE_TOKEN = String.raw `(?:\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}|\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[-\s]?[A-Za-z]{3,9}[-\s]?\d{2,4}|[A-Za-z]{3,9}\.?\s+\d{1,2},?\s+\d{4})`;
-const DUE_DATE_FOOTER_RE = new RegExp(String.raw `\bdue\s*(?:date)?\s*(?:is|on|by|before|:)?\s*${DUE_DATE_TOKEN}` +
+const DUE_DATE_FOOTER_RE = new RegExp(String.raw `\bdue(?=(\s*))\1(?:date(?=(\s*))\2)?(?:(?:is|on|by|before|:)(?=(\s*))\3)?${DUE_DATE_TOKEN}` +
     String.raw `|\bemi\s+(?:on|due|by)\s+${DUE_DATE_TOKEN}` +
     String.raw `|\bpay\s+(?:\w+\s+){0,3}?(?:by|before|on)\s+${DUE_DATE_TOKEN}`, 'gi');
 const DUE_PHRASE_NUMERIC_RE = /\b(?:payment\s+)?due\s+date\b[^\n]{0,60}?\b(?:is|on|:)\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})/i;
@@ -12697,6 +15854,10 @@ function parseSmsInner(message, overrides, options) {
         return null;
     if (nonCashNoticeInBody(raw))
         return null;
+    if (moneyNoticeKindInBody(raw))
+        return null;
+    if (isUnregisteredCallBack(raw, options?.sender))
+        return null;
     const separate = SEPARATE_MOVEMENT_RE.exec(suppressible);
     if ((separate &&
         MONEY_FIGURE_RE.test(separate[0]) &&
@@ -12739,7 +15900,7 @@ function parseSmsInner(message, overrides, options) {
         return null;
     }
     {
-        const settled = blank(blank(raw, FUTURE_CLAUSE_RE), SCHEDULED_CLAUSE_RE);
+        const settled = blank(blank(blank(raw, FUTURE_SUBJECT_MONEY_RE), FUTURE_CLAUSE_RE), SCHEDULED_CLAUSE_RE);
         const refundSettled = purchaseRefundHeading
             ? blank(settled, AR_PURCHASE_REFUND_NOTICE_RE) : settled;
         if (purchaseRefundHeading && refundSettled !== raw) {
@@ -12926,7 +16087,7 @@ function parseSmsInner(message, overrides, options) {
             };
         }
     }
-    const purchaseRefund = raw.match(/\bpurchase(?:\s+(?:amount|amt))?\s+(?:of\s+)?(?:[A-Z]{3}|Dhs?)\s*[\d,.]+\s+at\s+(.+?)\s+on\s+your\s+(?:credit|debit|covered|prepaid)?\s*card\b[\s\S]{0,120}?\bhas\b[\s\S]{0,24}?\brefunded\b/i);
+    const purchaseRefund = raw.match(/\bpurchase(?:\s+(?:amount|amt))?\s+(?:of\s+)?(?:[A-Z]{3}|Dhs?)\s*[\d,.]+\s+at\s+(.{1,120}?)\s+on\s+your\s+(?:credit|debit|covered|prepaid)?\s*card\b[\s\S]{0,120}?\bhas\b[\s\S]{0,24}?\brefunded\b/i);
     const refundClause = purchaseRefund?.[0].match(/\bhas\b[\s\S]{0,24}?\brefunded\b$/i)?.[0] ?? '';
     if (purchaseRefund && /\b(?:not|never|partial(?:ly)?)\b/i.test(refundClause))
         return null;
@@ -13024,6 +16185,25 @@ function parseSmsInner(message, overrides, options) {
             kind: 'cardPayment', type: 'expense', amountFils, merchant: 'Card payment',
             date: accountPaymentDay, dueDay: null, minDueFils: null, card: null,
             cardPaymentSide: 'debit', transferHint: true,
+            snapshotFils: null, snapshotKind: null,
+            categoryGuess: 'other', categoryDeliberate: true, currency, reference, raw: source,
+        };
+    }
+    const rajhiCardPayment = RAJHI_CARD_PAYMENT_FIELD_RE.exec(raw);
+    if (rajhiCardPayment && !REFUND_RE.test(raw) && !REVERSAL_RE.test(raw) &&
+        raw.split(/\r?\n/).every((line) => RAJHI_CARD_PAYMENT_LINE_RE.test(line))) {
+        if (/\bpending\b|(?<![ء-ي])(?:معلق|معلقه)(?![ء-ي])|قيد\s+(?:الانتظار|المعالجه)/i.test(raw))
+            return null;
+        const today = localIsoDay(options?.observedAt);
+        if (date && today && date > today)
+            return null;
+        const amountFils = amountWithFx(raw);
+        if (!amountFils)
+            return null;
+        return {
+            kind: 'cardPayment', type: 'expense', amountFils, merchant: `Card •${rajhiCardPayment[1]} payment`,
+            date, dueDay: null, minDueFils: null, card: { last4: rajhiCardPayment[1], kind: 'credit' },
+            cardPaymentSide: cardPaymentLeg(raw), transferHint: true,
             snapshotFils: null, snapshotKind: null,
             categoryGuess: 'other', categoryDeliberate: true, currency, reference, raw: source,
         };
@@ -13413,8 +16593,8 @@ function parseSmsInner(message, overrides, options) {
         !SETTLED_MOVEMENT_RE.test(raw)) {
         return null;
     }
-    const prose = blank(blank(raw.replace(/https?:\/\/\S+/gi, ' '), AR_USAGE_NOTE_RE), FUTURE_FOOTER_SENTENCE_RE);
-    const stated = blank(blank(blank(maskMerchantNames(prose), HYPOTHETICAL_PAYMENT_RE), PAYMENT_INSTRUCTION_RE), AR_DESTINATION_FIELD_VALUE_RE);
+    const prose = blank(blank(blank(raw.replace(/https?:\/\/\S+/gi, ' '), AR_USAGE_NOTE_RE), AR_FUTURE_CREDIT_CLAUSE_RE), FUTURE_FOOTER_SENTENCE_RE);
+    const stated = blank(blank(blank(blank(maskMerchantNames(prose), HYPOTHETICAL_PAYMENT_RE), PAYMENT_INSTRUCTION_RE), AR_DESTINATION_FIELD_VALUE_RE), MERCHANT_FIELD_VALUE_RE);
     const creditTransactionOnly = CREDIT_TRANSACTION_RE.test(stated) && !CREDIT_TRANSACTION_PURCHASE_RE.test(prose) &&
         !DEBIT_WORDS.test(blank(stated, CREDIT_TRANSACTION_ALL_RE));
     const arabicOwnAccountOutgoing = AR_OWN_ACCOUNT_OUTGOING_RE.test(raw);
@@ -13428,9 +16608,18 @@ function parseSmsInner(message, overrides, options) {
     const carrierBilling = /app\s*store|google play|play store|itunes/i.test(raw);
     const isBillDue = BILL_DUE_WORDS.test(raw) && !hasDebit && !hasCredit && !carrierBilling;
     const isIncomingCreditReversal = INCOMING_CREDIT_REVERSAL_RE.test(prose);
+    if (REFUND_FIRST_FIELD_RE.test(prose) &&
+        REFUND_HEAD_CONTRADICTION_RE.test(blank(prose, MERCHANT_FIELD_VALUE_RE)))
+        return null;
+    if (AR_RETURNED_TO_OWN_RE.test(prose) && AR_DEBIT_OR_PAYMENT_RE.test(prose))
+        return null;
+    const cashWithdrawalCorrection = AR_CASH_WITHDRAWAL_CORRECTION_HEADER_RE.test(raw);
+    if (cashWithdrawalCorrection && /خصم|\b(?:debited|deducted)\b/i.test(raw))
+        return null;
     const isRefund = !isIncomingCreditReversal &&
         (REFUND_RE.test(prose) || REVERSAL_RE.test(prose) || arabicPurchaseRefundHeader ||
-            REFUND_HEADING_RE.test(prose));
+            REFUND_HEADING_RE.test(prose) || cashWithdrawalCorrection || (AR_RETURNED_TO_OWN_RE.test(prose) && !AR_DEBIT_STATED_RE.test(prose)) ||
+            REFUND_FIRST_FIELD_RE.test(prose));
     if (PROMO_RE.test(raw) && !TXN_EVIDENCE_RE.test(raw))
         return null;
     if (!hasDebit && !hasCredit && !isRefund && !isBillDue && !hasPostedEvidence(raw, card)) {
@@ -13440,7 +16629,11 @@ function parseSmsInner(message, overrides, options) {
     if (!money)
         return null;
     const billerPaid = billerSettlement(prose);
-    const creditClause = CREDIT_CLAUSE_RE.test(prose) && !billerPaid;
+    if (RECEIVED_PAYER_HEAD_RE.test(prose) && RECEIVED_CARD_CONTEXT_RE.test(prose) && !reachedReaderAccount(prose))
+        return null;
+    const receivedFromPayer = RECEIVED_FROM_PAYER_RE.test(prose) && !billerPaid;
+    const bankSender = bank !== null || (0, markets_1.detectLaunchMarketFromSender)(options?.sender) !== null;
+    const creditClause = (CREDIT_CLAUSE_RE.test(prose) || (receivedFromPayer && bankSender)) && !billerPaid;
     const debitClause = DEBIT_CLAUSE_RE.test(prose);
     const type = isBillDue || billerPaid || isIncomingCreditReversal ||
         arabicOwnAccountOutgoing
@@ -13450,6 +16643,8 @@ function parseSmsInner(message, overrides, options) {
             : debitClause || hasDebit || !hasCredit
                 ? 'expense'
                 : 'income';
+    if (receivedFromPayer && type === 'expense')
+        return null;
     if (type === 'expense' && !debitClause && !billerPaid && !isBillDue && !isIncomingCreditReversal &&
         CREDITED_PASSIVE_RE.test(stated) && !DEBITED_PASSIVE_RE.test(stated)) {
         return null;
@@ -13460,7 +16655,7 @@ function parseSmsInner(message, overrides, options) {
         return null;
     let merchant = '';
     let descriptor = '';
-    const contactFreeText = blank(blank(raw, CONTACT_FOOTER_RE), AR_USAGE_NOTE_RE);
+    const contactFreeText = blank(CONTACT_FOOTER_CUE_RE.test(raw) ? blank(raw, CONTACT_FOOTER_RE) : raw, AR_USAGE_NOTE_RE);
     const payeeText = PROMO_SENTENCE_TRIGGER_RE.test(contactFreeText)
         ? blank(contactFreeText, PROMO_SENTENCE_RE)
         : contactFreeText;
@@ -13607,7 +16802,8 @@ function parseSmsInner(message, overrides, options) {
                 ? /\bcash\s*back\b|\bcashback\b/i.test(raw) &&
                     /\b(?:credited|posted|received|applied)\b/i.test(raw)
                     ? 'Cashback'
-                    : /\brefund(?:ed)?\b/i.test(raw) || REVERSAL_RE.test(raw) || REFUND_HEADING_RE.test(raw)
+                    : /\brefund(?:ed)?\b/i.test(raw) || REVERSAL_RE.test(raw) || REFUND_HEADING_RE.test(raw) ||
+                        cashWithdrawalCorrection || (AR_RETURNED_TO_OWN_RE.test(raw) && !AR_DEBIT_STATED_RE.test(raw))
                         ? 'Refund'
                         : SALARY_RE.test(raw)
                             ? 'Salary'
@@ -13811,9 +17007,500 @@ function parseForeignAwaitingRate(message, overrides, options) {
     };
 }
 const FOREIGN_DOMESTIC_RAIL_RE = /\b(?:NEFT|IMPS|RTGS|UPI)\b/;
+const CARD_BILL_PAYMENT_RE = new RegExp(String.raw `\b(?:you\s+(?:have\s+|['’]ve\s+)?(?:sent|transferred|paid|moved)|(?<!\brefund\s)(?:bill\s+)?payment\s+of)\b(?:[^.\n]|\.(?=\d)){0,60}?\bto\s+your\s+(?:(?!(?:with|via|using|from|on|by|through|at)\b)[\w&-]+\s+){0,4}?(?:credit\s+card|card\s+(?:ending|no\.?|number|[x*•·]+\d))\b` +
+    String.raw `|(?<!\brefund\s)\b(?:bill\s+)?payment\s+(?:of\b(?:[^.\n]|\.(?=\d)){0,40}?\bto|to)\s+(?:american\s+express|amex|(?:(?!(?:with|via|using|from|on|by|through|at)\b)[\w&'-]+\s+){1,3}credit\s+card)\b` +
+    `|(?<![${AR_LETTER}])لسداد\\s+(?:مستحقات\\s+)?(?:ال)?بطاق` +
+    `|(?<![${AR_LETTER}])(?:سداد|دفع|تسديد|تحويل|استلام\\s+دفعه)\\s(?:[^.\\n]|\\.(?=\\S)){0,60}?(?:(?<![${AR_LETTER}])ل|(?<![${AR_LETTER}])الي\\s+)(?:بطاقت(?:ك|كم)\\s+(?:ال)?ايتماني|بطاقه\\s+(?:ال)?(?:ايتمان|فيزا|ماستركارد|ماستر\\s+كارد|امريكان\\s+اكسبريس))` +
+    String.raw `|(?<!\brefund\s)\b(?:(?:fund\s+)?transfer|payment)\s+of\b(?:[^.\n]|\.(?=\d)){0,40}?\bto\s+(?:your\s+)?(?:(?!(?:with|via|using|from|on|by|through|at)\b)[\w&'-]+\s+){0,3}?credit\s+card\b` +
+    String.raw `|\bfor\s+(?:the\s+)?payment\s+(?:to|towards)\s+(?:your\s+)?(?:credit\s+)?card\b(?!\s+(?:annual|replacement|renewal|issuance|joining|membership|late)\b)` +
+    String.raw `|\b(?:fund\s+)?transfer\s+to\s+(?:your\s+)?(?:(?!(?:with|via|using|from|on|by|through|at)\b)[\w&'-]+\s+){0,2}?credit\s+card\b` +
+    String.raw `|\b(?:transferred|sent|moved)\b(?:[^.\n]|\.(?=\d)){0,40}?\bto\s+(?:(?!(?:with|via|using|from|on|by|through|thru|at)\b)[\w&'-]+\s+){0,4}?credit\s+card\b`, 'i');
+const CREDIT_CARD_CREDITED_RE = new RegExp(String.raw `\b(?:credit|covered|charge)\s+card\b(?:[^.\n]|\.(?=\d)){0,40}?\b(?:has\s+been|was|is|got)\s+credited\b|\bcredited\s+(?:to|into|on)\s+(?:your\s+)?(?:(?!(?:via|from|using|with|by|through|thru)\b)[\w&-]+\s+){0,2}?(?:credit|covered|charge)\s+card\b` +
+    `|(?<![${AR_LETTER}])(?:ايداع|اضافه|قيد)\\s(?:[^.\\n]|\\.(?=\\S)){0,40}?(?:في|الي|ل)\\s*بطاقت(?:ك|كم)\\s+(?:ال)?ايتماني`, 'i');
+const CARD_CREDIT_REFUND_RE = /\b(?:refund(?:ed)?|revers(?:al|ed)|cash\s?-?back|charge-?\s?back|returned|merchant\s+credit|cancell?(?:ed|ation))\b|استرداد|استرجاع|عكس|ملغا/i;
+const OWN_ACCOUNT_MOVE_RE = new RegExp(String.raw `\byou\s+(?:have\s+|['’]ve\s+)?(?:transferred|sent|moved)\b(?:[^.\n]|\.(?=\d)){0,60}?\b(?:to|into)\s+your\s+(?:own\s+)?(?:\w+\s+){0,2}?(?:savings?|deposit|current|checking)\s+(?:(?:account|pot|space|a\/c)\b|acct\b\.?|acc\b\.?)` +
+    String.raw `|\byou\s+(?:have\s+|['’]ve\s+)?received\b(?:[^.\n]|\.(?=\d)){0,60}?\bfrom\s+your\s+(?:own\s+)?(?:\w+\s+){0,2}?(?:savings?|deposit|current|checking)\s+(?:account|pot|space|a\/c)\b` +
+    String.raw `|\bfrom\s+(?:your|y[ou]{2}r|my)\s+(?:own\s+)?(?:savings?|deposit|current|checking)\b[^.\n]{0,20}?\b(?:in)?to\s+(?:your|y[ou]{2}r|my)\s+(?:own\s+)?(?:savings?|deposit|current|checking)\b` +
+    String.raw `|\bbetween\s+your\s+(?:own\s+)?accounts\b|\bfrom\s+[^.\n()]{0,40}\(\s*your\s+(?:own\s+)?(?:\w+\s+)?(?:account|a\/c)\b[^)]{0,24}\)\s*(?:in)?to\s+(?:your\s+)?(?:\w+\s+)?(?:account|a\/c)\b` +
+    `|(?<![${AR_LETTER}])(?:تحويل|حواله|نقل)(?![${AR_LETTER}])(?:[^.\\n]|\\.(?=\\S)){0,60}?(?<![${AR_LETTER}])(?:الي|ل)\\s*(?:حساب(?:ك|كم)?\\s+(?:ال)?(?:توفير|ادخار)|حساب(?:ك|كم)\\s+(?:ال)?اخر)(?![${AR_LETTER}])` +
+    `|(?<![${AR_LETTER}])(?:تحويل|حواله|نقل)\\s+بين\\s+حسابات(?:ك|كم)(?![${AR_LETTER}])`, 'i');
+const OWN_ACCOUNT_BARE_MOVE_RE = /\b(?:transferred|transfer(?:\s+of)?|sent|moved)\b(?:[^.\n]|\.(?=\d)){0,60}?\b(?:to|into)\s+(?:your\s+)?own\s+(?:account|a\/c|acct)\b/i;
+const BILL_RECEIVED_HEAD_RE = /^\W{0,4}(?:[^\s:][^:\n]{0,30}:\s*)?(?:new\s+(?:e-?bill|bill|invoice)\s+received\b|فاتوره\s+جديده\s*:)/i;
+const BILL_RECEIVED_RE = new RegExp(String.raw `\breceived\s+(?:a\s+|an\s+|your\s+)?(?:new\s+)?(?:e-?bill|bill|invoice)\b(?!\s+payments?)|\bnew\s+(?:e-?bill|bill|invoice)\s+(?:received|from|is\s+ready)\b` +
+    `|(?<![${AR_LETTER}])وصلت(?:ك|كم)\\s+فاتوره(?![${AR_LETTER}])`, 'i');
+const PAYEE_RECEIPT_RE = new RegExp(String.raw `\b(?:has\s+|have\s+)?received\s+your\s+(?:\S+\s+){0,3}?(?:transfer|payment|remittance|money)\b` +
+    `|(?<![${AR_LETTER}])استلم\\s+[^.\\n]{1,40}?\\s+حوالت(?:ك|كم)(?![${AR_LETTER}])|(?<![${AR_LETTER}])تم\\s+استلام\\s+[^.\\n]{1,40}?\\s+منك(?![${AR_LETTER}])`, 'i');
+const SIGN_CURRENCY = String.raw `(?:(?:AED|SAR|USD|EUR|GBP|QAR|KWD|BHD|OMR|EGP|JOD|INR|CHF|CAD|AUD|Dhs?|DHS?|SR|Sr|(?:[Aa][Ee][Dd]|[Ss][Aa][Rr]|[Uu][Ss][Dd]|[Ee][Uu][Rr]|[Gg][Bb][Pp]|[Qq][Aa][Rr]|[Kk][Ww][Dd]|[Bb][Hh][Dd]|[Oo][Mm][Rr]|[Ee][Gg][Pp]|[Jj][Oo][Dd]|[Ii][Nn][Rr]))(?![A-Za-z])|ر\.س|د\.ا|درهم|ريال|ر\.ق|د\.ك|د\.ب|ر\.ع|ج\.م|جنيه|دينار)`;
+const SIGN_FIGURE = String.raw `(?:\d{1,3}(?:,\d{3})+|\d{1,7})(?:\.\d{1,3})?(?!\d)`;
+const GLUED_SIGN_RE = new RegExp(String.raw `(?:^|[\s(])([+\-−])(?:${SIGN_CURRENCY}\.?[ \t]{0,3}${SIGN_FIGURE}|${SIGN_FIGURE}[ \t]{0,3}${SIGN_CURRENCY})` +
+    String.raw `|(?:${SIGN_CURRENCY}\.?[ \t]{0,3}${SIGN_FIGURE}|${SIGN_FIGURE}[ \t]{0,3}${SIGN_CURRENCY})([+\-−])(?=[\s.,;·]|$)`, 'g');
+function signedMovementFigure(figure, parsed) {
+    if (!Number.isFinite(figure) || figure <= 0 || parsed.kind !== 'transaction')
+        return false;
+    const minor = (scale) => Math.round(figure * scale);
+    if (parsed.amountFils === minor(100) || parsed.amountFils === minor(1000))
+        return true;
+    const original = parsed.originalMinorUnits ?? parsed.originalAmountMinor;
+    return typeof original === 'number' && original === minor(10 ** (parsed.originalExponent ?? 2));
+}
+const OTHER_PARTY_DEST_RE = /\b[Bb]eneficiary\b(?!\s*:?\s*(?:[Ss]elf|SELF|[Oo]wn|OWN|[Yy]ou|YOU)\b)|\b(?:to|To|TO)\s+(?!(?:[Yy]our|YOUR|[Mm]y|MY|[Oo]wn|OWN|[Tt]he|THE|[Aa]nother|ANOTHER|[Cc]heck|[Kk]now|[Rr]eport|[Vv]iew|[Vv]isit|[Ll]og|[Ll]ogin|[Ll]earn|[Aa]void|[Ss]top|[Oo]pt|[Uu]nsubscribe|[Aa]ctivate|[Mm]anage|[Ee]njoy|[Gg]et|[Aa]pply|[Dd]ownload|[Cc]all|[Cc]ontact|[Rr]each|[Ss]ee|[Bb]lock|[Dd]ispute|[Ss]avings|SAVINGS|ISA|[Pp]ot|POT|[Ss]elf|SELF|[Oo]wn|OWN)\b)[A-Z][A-Za-z.'&-]+(?:\s+[A-Z][A-Za-z.'&-]+)+|\bto\s+the\s+account\s+of\b/;
+const OTHER_PARTY_DEST_AR_RE = new RegExp(`(?<![${AR_LETTER}])(?:ال)?خاص\\s+ب(?!(?:ك|كم)(?![${AR_LETTER}]))[${AR_LETTER}]|(?<![${AR_LETTER}])(?:ال|لل)مستفيد(?![${AR_LETTER}])`);
+const INCOMING_MONEY_STATED_RE = new RegExp(String.raw `\byou\s+(?:have\s+|['’]ve\s+)?received\b|\bsent\s+you\b|\b(?:transfer|payment|deposit|money|funds?|remittance)\s+received\b|\breceived\s+from\b` +
+    String.raw `|\b(?:incoming|inward)\s+(?:payment|transfer|remittance)\b|\bsalary\b(?!\s+(?:account|acct|a\/?c)\b)` +
+    `|(?<![${AR_LETTER}])(?:حواله\\s+وارده|ايداع\\s+راتب|راتب|استلمت)(?![${AR_LETTER}])`, 'i');
+const REVERSAL_WORD_RE = new RegExp(String.raw `\brevers(?:ed|al)\b|(?<![${AR_LETTER}])(?:تم\s+)?عكس(?:ه|ها)?(?![${AR_LETTER}])`, 'i');
+const RETURNED_TO_READER_RE = /\brefund|\bcredited\s+back\b|\bre-?credited\b|\breturned\s+to\s+your\b|\breversed\s+(?:to|into)\s+your\b|\breversal\s+of\b(?!\s+(?:your\s+)?(?:salary|incoming|inward|credit|deposit|transfer\s+received|cash\s+deposit))|\b(?:on|to|into)\s+your\s+(?:\w+\s+)?card\b|\bas\s+(?:an?\s+)?reversal\b|^\W{0,4}(?:payment|purchase|transaction|txn)\s+revers(?:ed|al)\b|\b(?:purchase|transaction|merchant|pos|card|payment)\s+reversal\b|\breversal\s+(?:credit|from)\b|\(\s*reversal\s*\)|\b(?:on|to)\s+(?:your\s+)?card\s+(?:no\.?\s*)?[x*•·]+\d|(?<![ء-ي])عكس\s+(?:عمليه\s+)?(?:شراء|سحب|خصم|دفع)(?![ء-ي])|^\W{0,4}(?:transaction\s+)?revers(?:al|ed)\s*:|\bcredited\s+(?:back\s+)?(?:to|into|in)\s+(?:your\s+)?(?:\w+\s+)?(?:account|acct|a\/?c|card)\b|\bcredited\s+(?:back\s+)?(?:to|into|in)\s+your\b|\breceived\b(?:[^.\n]|\.(?=\d)){0,40}?\b(?:back\s+)?(?:in|into|to)\s+your\s+(?:\w+\s+)?(?:account|acct|a\/?c|card)\b|\badded\s+(?:back\s+)?to\s+your\b|\breversed\s+(?:in|into|to)\s+your\b|(?<![ء-ي])(?:الي|ل)\s*(?:بطاقت|حساب)(?:ك|كم)(?![ء-ي])|^\W{0,4}(?:عكس\s+(?:عمليه\s+)?(?:شراء|سحب|خصم|دفع)|استرداد|استرجاع)(?![ء-ي])/i;
+const OUTGOING_TO_OTHER_RE = new RegExp(String.raw `\brefund(?:ed)?\b(?:[^.\n]|\.(?=\w)){0,40}?\bto\s+(?!your\b|you\b|(?:the\s+)?(?:card|account|a\/?c|acc(?:oun)?t|wallet)\b)(?:[^.\n]|\.(?=\w)){1,40}?\b(?:debited|deducted|charged)\s+from\s+your\b` +
+    String.raw `|\breceived\b(?:[^.\n]|\.(?=\d)){0,40}?\bfrom\s+you(?=\s*(?:[.!,;]|$))` +
+    String.raw `|\bcredited\s+to\s+(?!your\b|you\b|the\s+(?:account|card)\b(?!\s+of\b)|a\/?c\b|acc(?:oun)?t\b(?!\s+of\b)|card\b|(?:\w+\s+)?(?:savings?|current|checking|salary|deposit)\s+(?:account|acct|a\/?c)\b)(?:[^.\n]|\.(?=\d)){1,40}?\bfrom\s+your\s+(?:\w+\s+)?(?:account|a\/?c|card)\b` +
+    String.raw `|^\W{0,4}(?:[^\s:][^:\n]{0,30}:\s*)?(?!(?:you|your|we|i|our|dear)\b)(?!(?:transfer|interest|dividend|payment|money|funds?|salary|deposit|refund|profit|amount|credit|cash|remittance|reversal|cashback|bonus|top|topup|top-up|wallet|load)\b)(?:(?!(?:you|your|we|i|our|dear|account|savings?|current|checking|card|wallet|deposit|salary|a\/?c)\b)[A-Za-z][A-Za-z.'-]+\s+){1,4}(?:has\s+|have\s+)?received\b(?:[^.\n]|\.(?=\d)){0,40}?\bfrom\s+your\s+(?:account|a\/?c|card)\b`, 'i');
+const MONEY_TO_SOMEONE_ELSE_RE = new RegExp(`(?<![${AR_LETTER}])في\\s+حساب\\s+(?!(?:ك|كم)(?![${AR_LETTER}]))(?!(?:ال)?(?:توفير|جاري|ادخار|راتب)(?![${AR_LETTER}]))(?!ال(?!مستفيد))(?!رقم(?![${AR_LETTER}]))(?!(?:بطاقت|حضرت|سيادت|سعادت|جناب|محفظت|عميل)[${AR_LETTER}]*)(?![A-Z]{2}\\d{2})(?![\\d*xX•·#])[^\\s]`, 'i');
+const OUTGOING_FROM_READER_AR_RE = new RegExp(`(?<![${AR_LETTER}])من\\s+(?:حساب|بطاق)(?:ك|كم|تك|تكم)(?![${AR_LETTER}])`);
+const MASHREQ_SENDER_RE = /^mashreq/i;
+const MASHREQ_PAYMENT_RECEIVED_RE = /^\W{0,4}(?:[^\s:][^:\n]{0,30}:\s*)?payment\s+received\b/i;
+const READER_ACCOUNT_WORDING_RE = /\b(?:credited|deposited|added)\b|\b(?:to|into|in)\s+your\s+(?:\w+\s+)?(?:account|a\/c|wallet)\b/i;
+const GOVERN_LEAD_RE = new RegExp(String.raw `(?:\b(?:purchases?|purchased|spent|spend|debited|credited|deducted|charged|withdrawn|withdrawal|withdrew|paid|payments?|transfer(?:red)?|sent|received|deposited|deposit|refund(?:ed)?|used\s+for|amount|amt|txn|transaction|trx|pos|bought|remittance|reversal|reversed|fees?|charges?|commission|vat|instal{1,2}ments?|emi|bill)` +
+    String.raw `(?:\s+(?:of|for|with|by|worth|amounting\s+to))?\s*[:=\-]?` +
+    `|(?<![${AR_LETTER}])(?:شراء|خصم|بمبلغ|مبلغ|المبلغ|سحب|تحويل|حواله|دفع|سداد|ايداع|اضافه|استرداد|قيمه|بقيمه|القيمه|قيد|خصمت|سحبت|(?:ال)?رسوم|(?:ال)?عموله|(?:ال)?قسط|فاتوره|بـ|ب)(?![${AR_LETTER}])` +
+    String.raw `\s*[:\-]?\s*(?:(?:ب)?مبلغ|بقيمه|قدره)?` +
+    String.raw `)\s*[:\-]?\s*(?:(?:the|an?|your)\s+)?(?:[A-Z]{3}\.?\s*)?$`, 'i');
+const PRINCIPAL_TAIL_RE = new RegExp(String.raw `^\s*[A-Z]{0,3}\.?\s*(?:[^.\n;,]{0,12}?)\b(?:spent|debited|credited|deducted|charged|withdrawn|paid|transferred|sent|received|deposited|refunded|reversed|used)\b` +
+    `|^[^.\\n;,]{0,12}?(?<![${AR_LETTER}])(?:تم|خصم|خصمت|سحب|سحبت|اضيف|ايداع|اودع)(?![${AR_LETTER}])`, 'i');
+const ANCILLARY_LEAD_RE = new RegExp(String.raw `(?:\b(?:fees?|vat|tax|charges?|commission|total|cash\s?-?back|rewards?|points|min(?:imum)?|due|outstanding|remaining|left|limit|balance|bal|avl|available)\b` +
+    `|(?<![${AR_LETTER}])(?:(?:ال)?رسوم|ضريب[هة]|(?:ال)?عمول[هة]|اجمالي|(?:ال)?نقاط|(?:ال)?رصيد|رصيدك|رصيدكم|(?:ال)?حد|سقف|(?:ال)?متاح[هة]?|(?:ال)?متوفر[هة]?|(?:ال)?مستحق)(?![${AR_LETTER}]))[^\\d\\n.]{0,24}$`, 'i');
+const ANCILLARY_TAIL_RE = new RegExp(String.raw `^\s*(?:[A-Z]{3}\.?\s*)?(?:\b(?:fees?|charges?|vat|commission|tax|cash\s?-?back)\b` +
+    `|(?<![${AR_LETTER}])(?:(?:ال)?رسوم|(?:ال)?عموله|(?:ال)?متبقي|(?:ال)?متاح[هة]?|(?:ال)?متوفر[هة]?)(?![${AR_LETTER}]))`, 'i');
+const AGGREGATE_CLAUSE_RE = new RegExp(String.raw `\b(?:this\s+(?:month|cycle|week|year|period|statement)|so\s+far|to\s+date|month[-\s]to[-\s]date|budget|allowance|cumulative|spending\s+room|room\s+left)\b` +
+    String.raw `|\bof\s+(?:your|the)\s+(?:[A-Z]{3}\s*[\d,.]+\s+)?(?:(?:monthly|daily|weekly|card|spending|credit)\s+)?(?:limit|budget|allowance)\b` +
+    `|هذا\\s+الشهر|حتي\\s+الان|ميزاني[هة]|(?<![${AR_LETTER}])اجمالي(?![${AR_LETTER}])` +
+    `|(?<![${AR_LETTER}])(?:من\\s+)?(?:ال)?حد\\s+(?:ال)?(?:شراء|سحب|يومي|شهري|مسموح)`, 'i');
+const NOT_YET_CLAUSE_RE = new RegExp(String.raw `\b(?:apply|enjoy|discount|offers?|earn|win|save|next|and\s+above|or\s+more|min(?:imum)?\s+spend|will|would|can|could|may|still|if|unless|when\s+you)\b|%` +
+    `|(?<![${AR_LETTER}])و?(?:سيتم|سوف|اذا|احصل|استمتع|عرض|القادم[هة]?)(?![${AR_LETTER}])`, 'i');
+function clauseBounds(raw, at, end) {
+    const stop = (k) => /[\n;!?؟]/.test(raw[k]) || (raw[k] === '.' && /^(?:\s|$)/.test(raw[k + 1] ?? '')) ||
+        (raw[k] === ',' && !(/\d/.test(raw[k - 1] ?? '') && /\d/.test(raw[k + 1] ?? '')));
+    let start = at;
+    while (start > 0 && !stop(start - 1))
+        start--;
+    let e = end;
+    while (e < raw.length && !stop(e))
+        e++;
+    return [start, e];
+}
+function clauseAround(raw, at, end) {
+    const [start, e] = clauseBounds(raw, at, end);
+    return raw.slice(start, e);
+}
+const SAME_MONEY_GAP_RE = /^\s*(?:[(\[/=≈~]|equivalent(?:\s+to)?|equiv\.?|approx\.?|i\.?e\.?|بما\s+يعادل|ما\s+يعادل|يعادل)\s*$/i;
+const FOREIGN_TOKEN_RE = /(?<![A-Za-z])([A-Z]{3})\.?[ \t]?(\d[\d,]*(?:\.\d+)?)|(?<![\d.,])(\d[\d,]*(?:\.\d+)?)[ \t]?([A-Z]{3})(?![A-Za-z])/g;
+const REFERENCE_LEAD_RE = /\b(?:for|against|on|of)\s+(?:your|the)\s+(?:original\s+|earlier\s+|previous\s+)?(?:purchase|transaction|payment|charge|order)\s+(?:of|for)?\s*(?:[A-Z]{3}\.?\s*)?$|(?<![ء-ي])(?:لعمليه|عن\s+عمليه|من\s+عمليه)\s+(?:ال)?شراء\s+(?:بمبلغ|بقيمه)?\s*$/i;
+function clauseBefore(raw, at) {
+    let start = at;
+    while (start > 0 && at - start < 48 && !/[\n;|!?]/.test(raw[start - 1]) &&
+        !(raw[start - 1] === '.' && !/\d/.test(raw[start] ?? '')))
+        start--;
+    if (raw.slice(start, at).trim() === '' && start > 0 && raw[start - 1] === '\n') {
+        const prev = raw.lastIndexOf('\n', start - 2) + 1;
+        return raw.slice(Math.max(prev, start - 1 - 48), start - 1);
+    }
+    return raw.slice(start, at);
+}
+function sentenceAround(raw, at, end) {
+    let start = at;
+    while (start > 0 && !/[\n;!?]/.test(raw[start - 1]) && !(raw[start - 1] === '.' && /^(?:\s|$)/.test(raw[start] ?? '')))
+        start--;
+    let stop = end;
+    while (stop < raw.length && !/[\n;!?]/.test(raw[stop]) && !(raw[stop] === '.' && /^(?:\s|$)/.test(raw[stop + 1] ?? '')))
+        stop++;
+    return raw.slice(start, stop);
+}
+const PURCHASE_REFUNDED_RE = new RegExp(String.raw `\b(?:purchase|transaction|payment|charge)\b(?:[^.\n]|\.\d){0,80}?\b(?:has\s+been|was|is|have\s+been)\s+(?:fully\s+)?refunded\b` +
+    String.raw `|(?<![ء-ي])(?:عمليه\s+)?(?:ال)?شراء(?:[^.\n]|\.(?=\S)){0,80}?(?:،|,)?\s*(?:و?تم\s+)(?:استرداد|استرجاع|ارجاع)(?:ها|ه)(?![ء-ي])`, 'i');
+const HEDGE_BEFORE_RE = /(?:(?<![\p{L}\p{N}.*\/-])(?:about|approx(?:imately|\.)?|around|roughly|nearly|almost|up\s+to|estimated|est\.|circa|ca\.)|[~≈]|(?<![ء-ي])(?:حوالي|حوالى|تقريبا|تقريباً|ما\s+يقارب|نحو)(?![ء-ي]))[ \t]*(?:[A-Z]{3}\.?[ \t]*|Dhs?\.?[ \t]*|SR[ \t]*)?$/iu;
+const HEDGE_AFTER_RE = /^[ \t]*(?:[A-Z]{3}\.?[ \t]*)?(?:\([ \t]*(?:approx(?:imately|imate|\.)?|est(?:imated|imate|\.)?|about|roughly|circa|ca\.|~|تقريبا|تقريباً)[ \t]*\)|[~≈]|(?:approximately|approx\.?|roughly|or[ \t]+so|estimated|est\.)(?![\p{L}])|(?<![ء-ي])(?:تقريبا|تقريباً)(?![ء-ي]))/iu;
+function hedgedPrincipal(message, parsed) {
+    if (parsed.kind !== 'transaction')
+        return false;
+    ensureCurrencyPatterns();
+    const raw = sanitizeLocalMoney(normalizeArabic(message.slice(0, 4000)));
+    if (!raw)
+        return false;
+    const own = localMoneyTokens(raw).filter((t) => t.value === parsed.amountFils);
+    return own.length > 0 && own.every((t) => HEDGE_BEFORE_RE.test(raw.slice(Math.max(0, t.index - 32), t.index)) || HEDGE_AFTER_RE.test(raw.slice(t.end, t.end + 24)));
+}
+const REFUND_NOT_THIS_RE = /\b(?:if|when|unless|will|would|earlier|previous|prior|another|other|last)\b|(?<![ء-ي])(?:اذا|حال|سابق[هة]?|اخري|سيتم|سوف)(?![ء-ي])/i;
+function isPurchaseRefundedNotice(message, amountMinor) {
+    ensureCurrencyPatterns();
+    const body = foldOrthography(stripInvisible(message)).slice(0, 4000);
+    const re = new RegExp(PURCHASE_REFUNDED_RE.source, 'gi');
+    const tokens = amountMinor === undefined ? null : localMoneyTokens(body).filter((t) => t.value === amountMinor);
+    for (const m of body.matchAll(re)) {
+        const [start, end] = clauseBounds(body, m.index, m.index + m[0].length);
+        if (REFUND_NOT_THIS_RE.test(body.slice(start, end)))
+            continue;
+        if (!tokens || tokens.some((t) => t.index >= start && t.end <= end))
+            return true;
+    }
+    return false;
+}
+const REFUND_GOVERNS_LEAD_RE = /(?:\brefund(?:ed)?\s+(?:of|amount(?:\s+of)?|for)?|(?<![ء-ي])(?:(?:ال)?مبلغ\s+)?(?:ال)?استرداد(?:\s+(?:ال)?مبلغ)?(?:\s+بقيمه|\s+بمبلغ)?)[ \t]*[:\-]?[ \t]*(?:[A-Z]{3}\.?[ \t]*)?$/i;
+const REFUND_PENDING_RE = /\b(?:initiated|under\s+process(?:ing)?|in\s+process|in\s+progress|being\s+processed|will\s+(?:be|reflect|appear|show)|requested|pending|awaiting|submitted|approved|raised)\b|(?<![ء-ي])(?:قيد\s+(?:ال)?(?:معالج[هة]|تنفيذ|مراجع[هة]|انتظار)|سيتم|سوف|طلب|تمت\s+الموافق[هة])(?![ء-ي])/i;
+const REFUND_CANCELLED_RE = /\b(?:has\s+been|was|is|got)\s+(?:cancell?ed|declined|rejected|unsuccessful|voided)\b|\brefund\s+(?:has\s+)?failed\b|(?<![ء-ي])(?:تم\s+)?(?:الغاء|رفض)\s+(?:طلب\s+)?(?:ال)?استرداد|(?:ال)?استرداد\s+(?:ال)?(?:ملغي|ملغا|ملغاه|مرفوض)(?![ء-ي])/i;
+const REFUND_COMPLETED_RE = /\b(?:credited|issued|processed\s+(?:to|into|on)|posted\s+(?:to|into|on)|received\s+(?:on|in|into)|deposited|returned\s+to|added\s+to)\b|(?<![ء-ي])(?:تم\s+(?:ايداع|اضاف[هة]|استرداد|ارجاع|اعاد[هة])|اضيف|اعيد|اودع)(?![ء-ي])/i;
+const CHARGEBACK_DEBIT_RE = /\bcharge-?\s?backs?\b(?:[^.\n]|\.\d){0,80}?\b(?:has\s+been\s+|was\s+|is\s+)?debited\s+from\s+(?:your\s+)?(?:account|a\/c|card)\b|\bdebited\b(?:[^.\n]|\.\d){0,80}?\bas\s+(?:a\s+)?charge-?\s?back(?:\s+reversal)?\b/i;
+function refundGovernsPrincipal(message, amountMinor) {
+    ensureCurrencyPatterns();
+    const raw = normalizeArabic(message.slice(0, 4000));
+    const own = localMoneyTokens(raw).filter((t) => t.value === amountMinor);
+    const governed = own.find((t) => REFUND_GOVERNS_LEAD_RE.test(raw.slice(Math.max(0, t.index - 40), t.index)));
+    if (!governed)
+        return null;
+    const sentence = sentenceAround(raw, governed.index, governed.end);
+    if (/\b(?:debited|deducted|charged|withdrawn|sent|paid\s+to)\b|(?<![ء-ي])(?:تم\s+خصم|خصمت|خصم\s+من)(?![ء-ي])/i.test(sentence))
+        return null;
+    if (REFUND_CANCELLED_RE.test(sentence))
+        return 'cancelled';
+    if (REFUND_COMPLETED_RE.test(sentence))
+        return 'completed';
+    if (REFUND_PENDING_RE.test(raw))
+        return 'pending';
+    return 'completed';
+}
+function principalUnproven(message, parsed) {
+    if (parsed.kind !== 'transaction' || parsed.originalCurrency)
+        return false;
+    ensureCurrencyPatterns();
+    const raw = sanitizeLocalMoney(normalizeArabic(message.slice(0, 4000)));
+    if (!raw)
+        return false;
+    const local = (0, markets_1.getActiveMarket)().currency.code;
+    const tokens = localMoneyTokens(raw)
+        .filter((t) => Number.isFinite(t.value) && t.value > 0 && !/\n/.test(raw.slice(t.index, t.end)))
+        .map((t) => ({ ...t, key: `L:${t.value}`, local: true }));
+    FOREIGN_TOKEN_RE.lastIndex = 0;
+    let fm;
+    while ((fm = FOREIGN_TOKEN_RE.exec(raw))) {
+        const code = (fm[1] ?? fm[4]).toUpperCase();
+        if (code === local || !(code in currency_metadata_1.CURRENCY_MINOR_UNITS))
+            continue;
+        const value = Number((fm[2] ?? fm[3]).replace(/,/g, ''));
+        if (!(value > 0))
+            continue;
+        if (tokens.some((t) => t.local && fm.index < t.end && t.index < fm.index + fm[0].length))
+            continue;
+        tokens.push({ index: fm.index, end: fm.index + fm[0].length, key: `${code}:${value}`, local: false, value });
+    }
+    tokens.sort((a, b) => a.index - b.index);
+    if (new Set(tokens.map((t) => t.key)).size < 2)
+        return false;
+    const ownKey = `L:${parsed.amountFils}`;
+    if (!tokens.some((t) => t.key === ownKey))
+        return false;
+    const group = new Map();
+    tokens.forEach((t, n) => {
+        const prev = n > 0 ? tokens[n - 1] : null;
+        group.set(t, prev && SAME_MONEY_GAP_RE.test(raw.slice(prev.end, t.index)) ? group.get(prev) : n);
+    });
+    const balanceLike = (t) => BALANCE_PREFIX_RE.test(raw.slice(Math.max(0, t.index - 56), t.index)) ||
+        BALANCE_SUFFIX_RE.test(raw.slice(t.end, t.end + 48)) ||
+        NOTICE_BALANCE_LEAD_RE.test(raw.slice(raw.lastIndexOf('\n', t.index - 1) + 1, t.index));
+    const aggregate = (t) => AGGREGATE_CLAUSE_RE.test(sentenceAround(raw, t.index, t.end));
+    const ancillary = (t) => balanceLike(t) || aggregate(t) || feePriceFigure(raw, t.index) ||
+        ANCILLARY_LEAD_RE.test(clauseBefore(raw, t.index)) || ANCILLARY_TAIL_RE.test(raw.slice(t.end, t.end + 24)) ||
+        NOT_YET_CLAUSE_RE.test(clauseAround(raw, t.index, t.end)) || REFERENCE_LEAD_RE.test(clauseBefore(raw, t.index));
+    const governed = (t) => GOVERN_LEAD_RE.test(clauseBefore(raw, t.index)) || PRINCIPAL_TAIL_RE.test(raw.slice(t.end, t.end + 40));
+    const own = tokens.filter((t) => t.key === ownKey);
+    const ownGroups = new Set(own.map((t) => group.get(t)));
+    const leftover = (t) => /^[ \t]*(?:[A-Z]{3}\.?[ \t]*)?(?:(?<![ء-ي])(?:ال)?(?:متبقي|متاح[هة]?|متوفر[هة]?)(?![ء-ي])|\b(?:left|remaining|available)\b)(?!\s*(?:(?:credit\s+)?(?:balance|bal|limit|credit|amount)\b|(?:ال)?رصيد|(?:ال)?مبلغ)?\s*[:\-]?\s*(?:[A-Z]{3}\b|\d))/i.test(raw.slice(t.end, t.end + 48));
+    if (own.every((t) => balanceLike(t) || aggregate(t) || leftover(t)))
+        return true;
+    const ownProven = own.some((t) => governed(t));
+    const others = tokens.filter((t) => t.key !== ownKey && !ownGroups.has(group.get(t)));
+    if (!ownProven)
+        return others.some((t) => !ancillary(t));
+    const ownIsFee = own.some((t) => /\b(?:fees?|charges?|vat|commission)\b|(?:ال)?رسوم|(?:ال)?عموله/i.test(clauseBefore(raw, t.index)));
+    if (ownIsFee)
+        return false;
+    return others.some((t) => !ancillary(t) && governed(t));
+}
+function amountIsOnlyABalance(message, amountMinor) {
+    const body = foldOrthography(stripInvisible(message)).slice(0, 4000);
+    let balance = false;
+    NOTICE_MONEY_RE.lastIndex = 0;
+    let m;
+    while ((m = NOTICE_MONEY_RE.exec(body))) {
+        const digits = /\d[\d,]*(?:\.\d+)?/.exec(m[0])?.[0];
+        if (!digits)
+            continue;
+        const value = Number(digits.replace(/,/g, ''));
+        if (![100, 1000, 1].some((scale) => Math.round(value * scale) === amountMinor))
+            continue;
+        const lineStart = body.lastIndexOf('\n', m.index - 1) + 1;
+        const isBalance = BALANCE_PREFIX_RE.test(body.slice(Math.max(0, m.index - 56), m.index)) ||
+            NOTICE_BALANCE_LEAD_RE.test(body.slice(lineStart, m.index));
+        if (!isBalance)
+            return false;
+        balance = true;
+    }
+    return balance;
+}
+const AR_LEADING_FEE_PRICE_RE = /^\s*(?:ال)?رسوم[^\d\n]{0,25}[\d٠-٩][\d٠-٩,٬.٫]*\s*(?:ر\.س|ريال|درهم|د\.إ|د\.ا|ر\.ق|ر\.ع|د\.ك|د\.ب|جنيه|[A-Z]{3}|SR)?\s*\.?\s*(?:تطبق|مطبقة|مطبقه)?\s*[.\n]\s*/;
+function reversedIncomingCredit(message) {
+    const body = foldOrthography(stripInvisible(message)).slice(0, 4000);
+    const REVERSED_VERB = String.raw `\b(?:is|are|has\s+been|have\s+been|was|were)\s+reversed\b(?!\s+(?:to|into|in)\s+your\b)(?!\s+and\s+(?:the\s+amount\s+(?:is\s+|has\s+been\s+)?)?(?:credited|added|refunded|returned)\b)`;
+    const REVERSED_AFTER = String.raw `(?:[^.\n]|\.(?=\d)){0,140}?` + REVERSED_VERB;
+    const creditThenReversed = new RegExp(String.raw `\b(?:credited|deposited|added)\s+(?:to|into|in)\b` + REVERSED_AFTER +
+        String.raw `|\b(?:refund|cashback|cash\s+back|reward|salary|interest|profit|payroll|bonus|dividend)\b` + REVERSED_AFTER, 'i');
+    const incomingReversed = body.split(/[\n|]|\.(?!\d)/).some((sentence) => (creditThenReversed.test(sentence) ||
+        new RegExp(`(?:${INCOMING_MONEY_STATED_RE.source})` + REVERSED_AFTER, 'i').test(sentence)) &&
+        !/\bcredited\s+back\b/i.test(sentence));
+    if (incomingReversed)
+        return true;
+    if (INCOMING_MONEY_STATED_RE.test(body) &&
+        /(?:^|[.\n|]\s*)(?:the|this|your)\s+(?:transfer|payment|credit|deposit|amount|transaction|remittance)\s+(?:has\s+been|was|is)\s+reversed\b(?!\s+(?:to|into|in)\s+your\b)(?!\s+and\s+(?:credited|added|refunded))/i.test(body) &&
+        !/\bcredited\s+back\b/i.test(body))
+        return true;
+    if (INCOMING_MONEY_STATED_RE.test(body) && /(?:^|[\n|(\[]|\s[–—-]\s)[ \t]*reversed[ \t.!)\]]*(?=$|[\n|]|\s+ref\b)/i.test(body) &&
+        !/\brefund|\bcredited\s+back\b/i.test(body))
+        return true;
+    if (/\bcredited\s+(?:to|into|in)\b/i.test(body) && /(?:^|[\n|])[ \t]*(?:status[ \t]*:[ \t]*)?reversed[ \t.!]*(?=$|[\n|]|\s+ref\b)/i.test(body) &&
+        !/\brefund|\bcredited\s+back\b|\b(?:purchase|pos|atm|withdrawal|payment|fee|charge|txn|trx|transaction)\b/i.test(body))
+        return true;
+    if (RETURNED_TO_READER_RE.test(body))
+        return false;
+    const principal = principalMoneyClause(body);
+    if (!principal || principal === 'balance-only')
+        return false;
+    const before = principal.before.replace(/\s+$/, '');
+    const lineAbove = before.slice(before.lastIndexOf('\n', before.lastIndexOf('\n') - 1) + 1);
+    const firstLine = body.slice(0, Math.max(0, body.indexOf('\n')));
+    const scope = firstLine + '\n' + lineAbove + ' ' + principal.clause;
+    return INCOMING_MONEY_STATED_RE.test(body) && REVERSAL_WORD_RE.test(scope) &&
+        !/\b(?:for|any|request|requests)\s+(?:a\s+)?reversal\b|(?<![ء-ي])(?:طلب|لطلب)\s+عكس/i.test(scope);
+}
+const REVERSAL_MENTION_RE = new RegExp(String.raw `\brevers(?:ed|al|als)\b|\bcharge-?\s?backs?\b|(?<![${AR_LETTER}])(?:عكس(?:ه|ها)?|عكسيه|معكوس(?:ه)?)(?![${AR_LETTER}])`, 'i');
+const BALANCE_TRAILER_BODY = String.raw `\s*[.,]?\s*(?:your\s+)?(?:avl\.?|available)\s+(?:bal\.?|balance)\b[^\n]{0,40}|\s*[.,،]?\s*(?:ال)?رصيد(?:ك)?(?:\s+(?:ال)?متاح)?[^\n]{0,40}`;
+const REVERSAL_BALANCE_TRAILER = `(?:${BALANCE_TRAILER_BODY})?`;
+const CREDIT_REVERSAL_PROVEN_RE = new RegExp([
+    String.raw `\bCR\s+(?:A\/C|ACCT?)\s+[Xx*•·]*\d{3,6}\s+REVERSED[ \t.]*(?:\r?\n|$|(?:${BALANCE_TRAILER_BODY})\s*$)`,
+    String.raw `^\W{0,4}(?:your\s+)?(?:salary|payroll)\s+credit\s+(?:of\s+)?(?:[A-Z]{3}|Dhs?|SR)\s{0,3}\d[\d,]*(?:\.\d{1,3})?\s+(?:to\s+your\s+(?:\w+\s+)?(?:account|a\/c)\s+)?(?:was|has\s+been)\s+reversed(?:\s+from\s+your\s+(?:\w+\s+)?(?:account|a\/c)(?:\s+(?:ending|no\.?|number))?\s+[Xx*•·]*\d{3,6})?\s*\.?` + REVERSAL_BALANCE_TRAILER + String.raw `\s*$`,
+    String.raw `^\W{0,4}(?:your\s+)?refund\s+(?:of\s+)?(?:[A-Z]{3}|Dhs?|SR)\s{0,3}\d[\d,]*(?:\.\d{1,3})?\s+(?:to|on)\s+(?:your\s+)?(?:card|account|a\/c)\s+(?:(?:ending|no\.?)\s+)?[Xx*•·]*\d{3,6}\s+(?:was|has\s+been)\s+reversed\s+and\s+(?:debited|deducted)\s+from\s+your\s+(?:\w+\s+)?(?:account|a\/c|card)\s*\.?` + REVERSAL_BALANCE_TRAILER + String.raw `\s*$`,
+    String.raw `^\s*تم\s+عكس\s+(?:ال)?راتب\s+(?:[A-Z]{3}\s{0,3})?\d[\d,]*(?:\.\d{1,3})?(?:\s{0,3}(?:[A-Z]{3}|ريال|ر\.س))?\s+(?:ال)?مودع\s+(?:في|الي)\s+حساب(?:ك|كم)\s*\.?` + REVERSAL_BALANCE_TRAILER + String.raw `\s*$`,
+].join('|'), 'i');
+const REVERSAL_PROVEN_RE = new RegExp([
+    String.raw `\b(?:DR|CR)\s+(?:A\/C|ACCT?|CARD)\s+[Xx*•·]*\d{3,6}\s+REVERSED[ \t.]*(?:\r?\n|$|(?:${BALANCE_TRAILER_BODY})\s*$)`,
+    String.raw `^\W{0,4}(?:a\s+)?reversal\s+of\s+[^\n.]{0,24}?\d[\d,]*(?:\.\d+)?[^\n.]{0,8}?\s+has\s+been\s+credited\s+(?:to|into)\s+your\b`,
+    String.raw `^\W{0,4}[^\n.]{0,24}?\d[\d,]*(?:\.\d+)?[^\n.]{0,8}?\s+has\s+been\s+reversed\s+(?:to|into)\s+your\s+(?:\w+\s+){0,2}(?:card|account|a\/c)\b`,
+    CREDIT_REVERSAL_PROVEN_RE.source,
+    String.raw `^\s*(?:عكس[ \t]+(?:عمليه[ \t]+)?(?:شراء|سحب|خصم|دفع)|حواله[ \t]+عكسيه)[ \t]*\r?\n`,
+].join('|'), 'i');
+const REVERSAL_FOOTER_CUE_RE = new RegExp(String.raw `\b(?:call|contact|dispute|disputes|request|requests|if|in\s+case|takes?|up\s+to|will|may|can|within|automatic(?:ally)?|visit|helpline)\b` +
+    `|(?<![${AR_LETTER}])(?:اتصل|اتصال|تواصل|للاستفسار|استفسار|لطلب|طلب|لعكس|حال|سيتم|يمكن|يمكنك|خلال|تلقائيا)(?![${AR_LETTER}])`, 'i');
+const REVERSAL_DONE_RE = new RegExp(String.raw `\b(?:has|have)\s+been\s+reversed\b|\b(?:is|are|was|were)\s+reversed\b|\breversed\s+(?:to|into|on|in)\b` +
+    `|(?<![${AR_LETTER}])تم\\s+عكس`, 'i');
+const ANY_MONEY_RE = new RegExp(NOTICE_MONEY_RE.source);
+function withoutReversalFooters(message) {
+    if (!REVERSAL_MENTION_RE.test(normalizeArabic(message)))
+        return message;
+    const parts = message.split(/(\r?\n|[.!؟?](?!\d)|\|)/);
+    let seenMoney = false;
+    let changed = false;
+    for (let i = 0; i < parts.length; i += 2) {
+        const sentence = parts[i];
+        const folded = normalizeArabic(sentence);
+        if (seenMoney && REVERSAL_MENTION_RE.test(folded) && REVERSAL_FOOTER_CUE_RE.test(folded) &&
+            !REVERSAL_DONE_RE.test(folded) && !ANY_MONEY_RE.test(folded) && !/\d[\d,]*\.\d{2}\b/.test(folded)) {
+            parts[i] = '';
+            if (i + 1 < parts.length && !/\n/.test(parts[i + 1]))
+                parts[i + 1] = '';
+            changed = true;
+            continue;
+        }
+        if (ANY_MONEY_RE.test(folded) || /\d[\d,]*\.\d{2}\b/.test(folded))
+            seenMoney = true;
+    }
+    return changed ? parts.join('').replace(/[ \t]+$/gm, '').trimEnd() : message;
+}
+function reversalLeftUnproven(message, parsed) {
+    if (parsed.kind !== 'transaction')
+        return false;
+    const body = foldOrthography(stripInvisible(message)).slice(0, 4000);
+    if (!REVERSAL_MENTION_RE.test(body) || REVERSAL_PROVEN_RE.test(body))
+        return false;
+    return parsed.type !== 'income' || reversedIncomingCredit(message);
+}
+const OWN_ACCOUNT_HEADING_RE = /\bown[\s-]+account\s+transfer\b|\bbetween\s+(?:your|my)\s+(?:own\s+)?accounts\b|\bown\s+transfer\b/i;
+const OWN_PRODUCT_DEST_RE = /\b(?:to|To|TO)\s+(?:[A-Z][A-Za-z.'&-]*\s+){0,3}(?:[Aa]ccount|ACCOUNT|[Ss]avings?|SAVINGS?|[Cc]urrent|CURRENT|[Dd]eposit|DEPOSIT|[Gg]oal|GOAL|[Nn]eo|NEO|[Ww]allet|WALLET|[Vv]ault|VAULT)\b(?:\s+(?:[A-Z][A-Za-z'-]*|[Xx*•·]*\d{3,}))*/g;
+function withoutOwnProducts(clause) {
+    return OWN_ACCOUNT_HEADING_RE.test(clause) ? clause.replace(OWN_PRODUCT_DEST_RE, 'to your account') : clause;
+}
+function ownMoveToOtherParty(message) {
+    const body = foldOrthography(stripInvisible(message)).slice(0, 4000);
+    const principal = principalMoneyClause(body);
+    const moveClause = withoutOwnProducts(principal && principal !== 'balance-only' ? principal.clause : body);
+    return OTHER_PARTY_DEST_RE.test(moveClause) || OTHER_PARTY_DEST_AR_RE.test(moveClause);
+}
+function unsupportedReading(message, parsed, sender) {
+    if (parsed.kind !== 'transaction')
+        return false;
+    const body = foldOrthography(stripInvisible(message)).slice(0, 4000);
+    const principal = principalMoneyClause(body);
+    const moveClause = withoutOwnProducts(principal && principal !== 'balance-only' ? principal.clause : body);
+    if (parsed.merchant === 'Own account transfer' &&
+        (OTHER_PARTY_DEST_RE.test(moveClause) || OTHER_PARTY_DEST_AR_RE.test(moveClause)))
+        return true;
+    if (parsed.merchant === 'Savings transfer') {
+        const own = /\bto\s+(?:your|my)\b/i.exec(body);
+        if (own && OTHER_PARTY_DEST_RE.test(body.slice(own.index + own[0].length)))
+            return true;
+    }
+    if (parsed.type !== 'income')
+        return false;
+    if (reversedIncomingCredit(message))
+        return true;
+    if ((MONEY_TO_SOMEONE_ELSE_RE.test(body) || OUTGOING_TO_OTHER_RE.test(body)) && !OUTGOING_FROM_READER_AR_RE.test(body))
+        return true;
+    if (sender && MASHREQ_SENDER_RE.test(sender.trim()) && MASHREQ_PAYMENT_RECEIVED_RE.test(body) &&
+        !READER_ACCOUNT_WORDING_RE.test(body))
+        return true;
+    return false;
+}
+function gluedSignContradicts(message, parsed) {
+    if (parsed.kind !== 'transaction')
+        return false;
+    const body = foldOrthography(stripInvisible(message)).slice(0, 4000);
+    const signs = [];
+    GLUED_SIGN_RE.lastIndex = 0;
+    let m;
+    while ((m = GLUED_SIGN_RE.exec(body))) {
+        if (BALANCE_PREFIX_RE.test(body.slice(Math.max(0, m.index - 56), m.index + 1)))
+            continue;
+        const figure = Number((/\d[\d,]*(?:\.\d+)?/.exec(m[0])?.[0] ?? '').replace(/,/g, ''));
+        if (!signedMovementFigure(figure, parsed))
+            continue;
+        signs.push(m[1] ?? m[2]);
+    }
+    if (signs.length !== 1)
+        return false;
+    return (signs[0] === '+') !== (parsed.type === 'income');
+}
+const ISSUER_BRAND_PAYEE = String.raw `\s*(?::\s*)?(?:your\s+)?(?:(?:[A-Za-z][\w&]*\s+){0,2}(?:credit\s+card\s+payment|(?:visa|mastercard|master\s+card|amex)\s+(?:card\s+payment|abrechnung))\b|(?:american\s+express|amex|barclaycard|advanzia(?:\s+bank)?)(?:\s+(?:europe|services|card\s+payment|payment))?(?![\w&])(?=[ \t]*(?:$|[.,;:|\n!()·•–-]|[ء-ي])|[ \t]+(?:on|for|using|with|from|via|at|in|ref|reference|has|have|was|were|is|of|avl|avail|available|bal|balance|limit|cr)\b))`;
+const ISSUER_PAYEE_LOOSE_RE = new RegExp(String.raw `(?:\bwith(?!\s+your\b)|\s-|(?<![ء-ي])من)` + ISSUER_BRAND_PAYEE, 'i');
+const OTHER_MERCHANT_RE = /\b(?:at|@)\s+(?!your\b|the\s+(?:atm|branch)\b)(?!(?:american\s+express|amex|barclaycard)\b)[A-Za-z]|(?<![ء-ي])لدي\s+(?!(?:american|amex|barclaycard)\b)\S/i;
+const ISSUER_PAYEE_STRICT_RE = /(?:\bat|\bto|\bwhere\s*:|\bmerchant(?:\s+name)?\s*:|\bpayee\s*:|\bbeneficiary\s*:|(?<![ء-ي])(?:لدي|الي|فاتوره|لـ|ل(?=\s))|(?<![ء-ي])(?:ال)?(?:مستفيد|تاجر)\s*:)\s*(?::\s*)?(?:your\s+)?(?:(?:[A-Za-z][\w&]*\s+){0,2}(?:credit\s+card\s+payment|(?:visa|mastercard|master\s+card|amex)\s+(?:card\s+payment|abrechnung))\b|(?:american\s+express|amex|barclaycard|advanzia(?:\s+bank)?)(?:\s+(?:europe|services|card\s+payment|payment))?(?![\w&])(?=[ \t]*(?:$|[.,;:|\n!()·•–-]|[ء-ي])|[ \t]+(?:on|for|using|with|from|via|at|in|ref|reference|has|have|was|were|is|of|avl|avail|available|bal|balance|limit|cr)\b))/i;
+const UPPER_ISSUER_CARD = String.raw `[ \t]*(?::[ \t]*)?(?!YOUR\b)(?:(?!(?:ON|USING|WITH|BY|VIA|FROM|THROUGH|THRU|YOUR|THE|A|AN|AT|TO|FOR)\b)[A-Z][A-Z0-9&]*[ \t]+){1,2}CREDIT[ \t]+CARD\b(?![ \t]*(?:ENDING|[Ee]nding|NO\b|[Nn]o\.|NUMBER|[Nn]umber|ACCOUNT|LIMIT|STATEMENT|PURCHASE|[Pp]urchase|[*xX·•]|\d))`;
+const ISSUER_PAYEE_UPPER_RE = new RegExp(String.raw `(?:\bto|\b[Aa][Tt]|\b[Ww]here\s*:|\b[Pp]ayee\s*:|\b[Bb]eneficiary\s*:|\b[Mm]erchant\s*:|(?<![ء-ي])(?:لدي|الي|في|لـ)|(?<![ء-ي])(?:ال)?(?:مستفيد|تاجر)\s*:)` + UPPER_ISSUER_CARD);
+const ISSUER_SUBJECT_RE = /(?:^|\n)\W{0,4}(?:american\s+express|amex|barclaycard|advanzia(?:\s+bank)?)\s+(?:collected|charged|debited|took)\b/i;
+const ISSUER_PAYEE_UPPER_LOOSE_RE = new RegExp(String.raw `(?:(?<!\b(?:[Mm]ade|MADE|[Pp]aid|PAID|[Pp]urchased?|PURCHASED?|[Bb]ought|[Uu]sed|USED|[Cc]harged|CHARGED|[Dd]one|[Ss]pent|SPENT|[Cc]ompleted|[Pp]rocessed|[Ww]as|WAS|[Ii]s|IS)\s{1,3})\bwith|\s-)` + UPPER_ISSUER_CARD);
+function issuerIsPayee(body) {
+    if (ISSUER_PAYEE_STRICT_RE.test(body) || ISSUER_PAYEE_UPPER_RE.test(body) || ISSUER_SUBJECT_RE.test(body))
+        return true;
+    const principal = principalMoneyClause(body);
+    if (OTHER_MERCHANT_RE.test(principal && principal !== 'balance-only' ? principal.clause : body))
+        return false;
+    return ISSUER_PAYEE_LOOSE_RE.test(body) || ISSUER_PAYEE_UPPER_LOOSE_RE.test(body);
+}
+const UNNUMBERED = String.raw `(?!\s*(?:no\b|no\.|number|ending|#|رقم|[*xX•·]|\d))`;
+const OWN_SAVINGS_ALWAYS_RE = new RegExp(String.raw `\b(?:to|from|payee\s*:)\s*my\s+(?:savings|isa|pot)\b|\s-\s+your\s+(?:isa|savings?\s+(?:account|pot))\b|\bto\s+(?:the\s+)?savings\s+pot\b|\b(?:to|-)\s+own\s+account\s+transfer\b` +
+    `|(?<![${AR_LETTER}])(?:الي|ل|لفاتوره|فاتوره)\\s*:?\\s*حساب\\s+(?:ال)?(?:توفير|ادخار)(?![${AR_LETTER}])(?!\\s+(?:ال)?خاص\\s+ب(?!ك(?![${AR_LETTER}])|كم(?![${AR_LETTER}])))` +
+    String.raw `|\bto\s+حساب\s+(?:ال)?(?:توفير|ادخار)` +
+    String.raw `|\bfrom\s+(?:your\s+)?(?:own\s+)?(?:current|checking|savings?)\s+(?:a\/?c|account)\b[^.\n]{0,40}?\bto\s+your\s+(?:own\s+)?savings?\s+(?:a\/?c|account)\b` +
+    String.raw `|(?<![ء-ي])(?:من|الي|فاتوره)\s+savings\s+account\b` + UNNUMBERED, 'i');
+const OWN_SAVINGS_PAYEE_AR_RE = new RegExp(String.raw `(?:(?<![ء-ي])(?:من|الي|فاتوره)|\s-)\s+savings\s+account\b` + UNNUMBERED, 'i');
+const OWN_SAVINGS_TO_RE = new RegExp(String.raw `\b(?:payment\s+)?to\s+your\s+(?:own\s+)?(?:isa|savings?\s+(?:account|pot))\b` + UNNUMBERED, 'i');
+const OWN_SAVINGS_FROM_RE = new RegExp(String.raw `\bfrom\s+your\s+(?:own\s+)?(?:isa|savings?\s+(?:account|pot))\b` + UNNUMBERED, 'i');
+const INCOMING_FROM_PERSON_AR_RE = /(?<![ء-ي])حواله\s+وارده(?![ء-ي])|(?:^|\n)[ \t]*(?:من|المرسل)[ \t]*:[ \t]*(?!حساب)[^\n]/;
+const NOT_A_SAVINGS_MOVE_RE = /\b(?:purchase[ds]?|spent|salary|payroll|wages|refund(?:ed)?|cashback|reversal|profit|interest|dividend)\b|(?<![ء-ي])(?:ال)?(?:راتب|ارباح|عوائد|فوائد|استرداد)(?![ء-ي])/i;
+function ownSavingsMove(clause, fieldLines, body = '') {
+    if (NOT_A_SAVINGS_MOVE_RE.test(clause) || NOT_A_SAVINGS_MOVE_RE.test(body) || INCOMING_FROM_PERSON_AR_RE.test(body))
+        return false;
+    if (OWN_SAVINGS_ALWAYS_RE.test(clause) || OWN_SAVINGS_ALWAYS_RE.test(fieldLines) || OWN_SAVINGS_PAYEE_AR_RE.test(body))
+        return true;
+    if (OWN_SAVINGS_TO_RE.test(clause) && /\b(?:transfer(?:red)?|sent|moved|paid|payment|saved)\b/i.test(clause) &&
+        !/\b(?:credited|deposited|received)\b/i.test(clause))
+        return true;
+    return OWN_SAVINGS_FROM_RE.test(clause) && /\b(?:received|credited|deposited|transfer(?:red)?|moved|paid\s+in(?:to)?)\b/i.test(clause) &&
+        !/\b(?:debited|deducted|withdrawn|charged|spent)\b/i.test(clause);
+}
+const OWN_SAVINGS_FIELD_LINE_RE = /(?:^|[\n|;])[ \t]*(?:to|payee|beneficiary|recipient|from|الي|(?:ال)?مستفيد|من)[ \t]*:[^\n|;]*/gi;
+function savingsFieldLines(body) {
+    return (body.match(OWN_SAVINGS_FIELD_LINE_RE) ?? []).join('\n');
+}
+const OWN_CARD_TRANSFER_RE = /\b(?:transferred|moved)\b(?:[^.\n]|\.(?=\d)){0,80}?\bfrom\s+your\s+(?:\w+\s+){0,2}(?:account|a\/c)\b(?:[^.\n]|\.(?=\d)){0,40}?\bto\s+your\s+(?:own\s+)?(?:\w+\s+){0,2}credit\s+card\b/i;
+function payeeReceivedYours(clause) {
+    const m = PAYEE_RECEIPT_RE.exec(clause);
+    if (!m)
+        return false;
+    return !/(?:\b(?:you|we|i)|['’]ve|\b(?:account|a\/c|card|wallet)(?:\s+[\dXx*•·.\-]+)?)\s*$/i
+        .test(clause.slice(Math.max(0, m.index - 40), m.index));
+}
+function isNotSpendingOrIncomeShape(message) {
+    const folded = foldOrthography(stripInvisible(message.trim()));
+    if (RECEIVED_PAYER_HEAD_RE.test(folded) && RECEIVED_CARD_CONTEXT_RE.test(folded) && !reachedReaderAccount(folded))
+        return 'card-bill';
+    const principal = principalMoneyClause(folded);
+    if (!principal || principal === 'balance-only')
+        return null;
+    const { clause } = principal;
+    if (BILL_RECEIVED_RE.test(clause) || BILL_RECEIVED_HEAD_RE.test(folded))
+        return 'bill-received';
+    if (payeeReceivedYours(clause))
+        return 'payee-receipt';
+    const wholeBody = principal.before + clause + principal.after;
+    if (CARD_BILL_PAYMENT_RE.test(clause) || issuerIsPayee(wholeBody))
+        return 'card-bill';
+    if ((OWN_ACCOUNT_MOVE_RE.test(clause) || ownSavingsMove(clause, savingsFieldLines(wholeBody), wholeBody) || OWN_CARD_TRANSFER_RE.test(clause)) &&
+        !ownMoveToOtherParty(message))
+        return 'own-move';
+    return null;
+}
+function notSpendingOrIncome(message, parsed) {
+    if (parsed.kind !== 'transaction')
+        return false;
+    const principalBody = foldOrthography(stripInvisible(message));
+    const principal = principalMoneyClause(principalBody);
+    if (!principal || principal === 'balance-only')
+        return false;
+    const { clause } = principal;
+    if (issuerIsPayee(principalBody))
+        return true;
+    if (!parsed.transferHint && CARD_BILL_PAYMENT_RE.test(clause))
+        return true;
+    if (!parsed.transferHint && ownSavingsMove(clause, savingsFieldLines(principalBody), principalBody) && !ownMoveToOtherParty(message))
+        return 'own-move';
+    if (!parsed.transferHint && OWN_ACCOUNT_MOVE_RE.test(clause) && !ownMoveToOtherParty(message))
+        return 'own-move';
+    if (!parsed.transferHint && parsed.type === 'expense' && OWN_ACCOUNT_BARE_MOVE_RE.test(clause) &&
+        !ownMoveToOtherParty(message))
+        return 'own-move';
+    if (BILL_RECEIVED_RE.test(clause) || BILL_RECEIVED_HEAD_RE.test(principalBody))
+        return true;
+    if (parsed.type === 'income' && CREDIT_CARD_CREDITED_RE.test(clause) &&
+        !CARD_CREDIT_REFUND_RE.test(principalBody))
+        return 'card-credit';
+    if (parsed.type === 'expense' && !parsed.transferHint && CREDIT_CARD_CREDITED_RE.test(clause))
+        return 'card-credit';
+    return parsed.type === 'income' && payeeReceivedYours(clause);
+}
+let proofCapture = null;
+function parseRefusedForProof(message, overrides, options) {
+    if (proofCapture)
+        return null;
+    proofCapture = { hit: null };
+    try {
+        const posted = parseSms(message, overrides, options);
+        return posted ? null : proofCapture.hit;
+    }
+    finally {
+        proofCapture = null;
+    }
+}
 function parseSms(message, overrides, options) {
     if ((0, bnpl_providers_1.isBnplProviderSource)(options?.sender))
         return null;
+    const withoutFooters = withoutReversalFooters(message);
+    if (withoutFooters !== message)
+        return parseSms(withoutFooters, overrides, options);
     let parsed = parseSmsInner(message, overrides, options);
     if (!parsed) {
         ensureCurrencyPatterns();
@@ -13832,6 +17519,87 @@ function parseSms(message, overrides, options) {
         }
     }
     if (!parsed)
+        return null;
+    const notSpending = notSpendingOrIncome(message, parsed);
+    if (notSpending === 'own-move') {
+        parsed = { ...parsed, transferHint: true, merchant: 'Own account transfer', categoryGuess: 'other', categoryDeliberate: true };
+    }
+    else if (notSpending === 'card-credit') {
+        if (proofCapture)
+            proofCapture.hit = parsed;
+        return null;
+    }
+    else if (notSpending)
+        return null;
+    if (gluedSignContradicts(message, parsed))
+        return null;
+    if (reversalLeftUnproven(message, parsed))
+        return null;
+    if (parsed.kind === 'transaction' && parsed.type === 'income' &&
+        CREDIT_REVERSAL_PROVEN_RE.test(foldOrthography(stripInvisible(message)).slice(0, 4000))) {
+        parsed = { ...parsed, type: 'expense', merchant: 'Credit reversal', categoryGuess: 'other',
+            categoryDeliberate: true, transferHint: false };
+    }
+    if (parsed.kind === 'transaction' && parsed.type === 'income' && /salary/i.test(`${parsed.merchant} ${parsed.categoryGuess}`) &&
+        REVERSAL_RE.test(foldOrthography(message)) && !INCOMING_MONEY_STATED_RE.test(foldOrthography(message))) {
+        parsed = { ...parsed, merchant: 'Refund', categoryGuess: 'other', categoryDeliberate: true };
+    }
+    if (parsed.kind === 'transaction' && /^bank fee$/i.test(parsed.merchant ?? '')) {
+        const lead = AR_LEADING_FEE_PRICE_RE.exec(message);
+        const feeDigits = lead ? foldOrthography(lead[0]).match(/\d[\d,]*(?:\.\d+)?/)?.[0] : undefined;
+        const feeMinor = feeDigits ? Math.round(Number(feeDigits.replace(/,/g, '')) * 100) : NaN;
+        const rest = lead && feeMinor !== parsed.amountFils ? message.slice(lead[0].length) : '';
+        const again = rest && /\d/.test(rest) ? parseSmsInner(rest, overrides, options) : null;
+        if (again && again.kind === 'transaction' && again.amountFils === parsed.amountFils && again.type === parsed.type) {
+            parsed = { ...parsed, merchant: again.merchant, categoryGuess: again.categoryGuess,
+                categoryDeliberate: again.categoryDeliberate, transferHint: again.transferHint };
+        }
+    }
+    if (parsed.kind === 'transaction' && parsed.type === 'income' &&
+        OUTGOING_TO_OTHER_RE.test(foldOrthography(stripInvisible(message)).slice(0, 4000))) {
+        parsed = { ...parsed, type: 'expense', merchant: 'Outgoing transfer', categoryGuess: 'other', categoryDeliberate: true };
+    }
+    if (parsed.kind === 'transaction' && parsed.merchant === 'Own account transfer' && ownMoveToOtherParty(message)) {
+        parsed = { ...parsed, transferHint: false, merchant: 'Outgoing transfer', categoryGuess: 'other', categoryDeliberate: true };
+    }
+    if (unsupportedReading(message, parsed, options?.sender))
+        return null;
+    if (parsed.kind === 'transaction') {
+        const refund = refundGovernsPrincipal(message, parsed.amountFils);
+        if (refund === 'cancelled')
+            return null;
+        if (refund === 'pending') {
+            if (proofCapture)
+                proofCapture.hit = parsed;
+            return null;
+        }
+    }
+    if (parsed.kind === 'transaction' && parsed.type === 'income' &&
+        CHARGEBACK_DEBIT_RE.test(foldOrthography(stripInvisible(message)).slice(0, 4000))) {
+        parsed = { ...parsed, type: 'expense', merchant: 'Chargeback reversal', categoryGuess: 'other',
+            categoryDeliberate: true, transferHint: false };
+    }
+    if (parsed.kind === 'transaction' && parsed.type === 'expense') {
+        const refund = refundGovernsPrincipal(message, parsed.amountFils);
+        if (refund === 'completed') {
+            parsed = { ...parsed, type: 'income', transferHint: false,
+                merchant: (parsed.merchant ?? '').replace(/\s*قيد\s+المعالج[هة]\s*$/u, '').trim() || 'Refund' };
+        }
+    }
+    if (principalUnproven(message, parsed) || hedgedPrincipal(message, parsed)) {
+        if (proofCapture)
+            proofCapture.hit = parsed;
+        return null;
+    }
+    if (parsed.kind === 'transaction' && parsed.type === 'expense' && isPurchaseRefundedNotice(message, parsed.amountFils)) {
+        const merchant = (parsed.merchant ?? '').replace(/\s*(?:،|,)?\s*(?:و?تم\s+)?(?:استرداد|استرجاع|ارجاع)(?:ها|ه)\s*$/u, '').trim();
+        parsed = { ...parsed, type: 'income', merchant: merchant || 'Refund', transferHint: false };
+    }
+    const signed = signedAmountField(message);
+    const signedIsLedgerMoney = !!signed && !parsed.originalCurrency &&
+        (signed.code === null || signed.code === (0, markets_1.getActiveMarket)().currency.code);
+    if (signed && ((signedIsLedgerMoney && parsed.amountFils !== signed.fils) ||
+        (parsed.kind === 'transaction' && (parsed.type === 'income') !== signed.credit)))
         return null;
     if (parsed.originalCurrency && parsed.originalCurrency !== (0, markets_1.getActiveMarket)().currency.code &&
         parsed.fxSource !== 'bank' && FOREIGN_DOMESTIC_RAIL_RE.test(message)) {
@@ -14114,7 +17882,9 @@ const dateRole = (text, start, end) => {
         return 'statementDate';
     if (/(?:\b(?:transaction|purchase|payment|posting)\s+date|\bdate|\bdatum|利用日|日時|تاريخ\s+(?:العملية|العمليه|المعاملة|المعامله))\s*(?:(?:is|on)\s*)?[:：=-]?\s*$/iu.test(prefix))
         return 'transactionDate';
-    if (/(?:\b(?:on|dated|le|am|el|il|op|em)|بتاريخ)\s*$/iu.test(prefix))
+    if (/(?:\bbuchungs(?:tag|datum)|\bbuchung|\bwertstellung|\bvaluta|\bdate\s+d['’]op[ée]ration|\bfecha(?:\s+de\s+(?:la\s+)?operaci[oó]n)?|\bdato)\s*[:：=-]\s*$/iu.test(prefix))
+        return 'transactionDate';
+    if (/(?:\b(?:on|dated|le|am|el|il|op|em|du|del|den|dne)|\bdn\.|بتاريخ)\s*$/iu.test(prefix))
         return 'transactionDate';
     const suffix = text.slice(end, Math.min(text.length, end + 180));
     if (/^\s+tarihinde\s+/u.test(suffix) && /işyerinde(?:ki)?\s+[A-Z]{3}/u.test(suffix) &&
@@ -14183,13 +17953,23 @@ const resolve = (items) => {
         issues: values.length > 1 ? ['conflicting-field-values'] : [],
     };
 };
-const MERCHANT_LABEL = /(?:^|[^\p{L}\p{N}])(?:desc(?:ription)?|narration|merchant|payee|beneficiary|seller|commerçant|bénéficiaire|händler|empfänger|comercio|beneficiario|esercente|begunstigde|利用先|التاجر|المستفيد)\s*[:：=-]\s*/giu;
-const MERCHANT_PREPOSITION = /(?:^|[^\p{L}\p{N}])(?:at|to|trf\s+to|from|chez|bei|von|en|em|an|presso|bij|لدى|عند|لصالح)\s+/giu;
+const MERCHANT_LABEL = /(?:^|[^\p{L}\p{N}])(?:desc(?:ription)?|narration|merchant|payee|beneficiary|seller|commerçant|bénéficiaire|händler|empfänger|comercio|comerciante|beneficiario|esercente|begunstigde|butik|butikk|forretning|sprzedawca|obchodník|利用先|التاجر|المستفيد)\s*[:：=-]\s*/giu;
+const MERCHANT_PREPOSITION = /(?:^|[^\p{L}\p{N}])(?:at|to|trf\s+to|from|chez|bei|von|en|em|an|presso|bij|hos|لدى|عند|لصالح)\s+/giu;
 const MERCHANT_TAIL = /\s+(?:(?:avl|avail(?:able)?)\.?\s*(?:bal(?:ance)?|lmt|limit)\b|(?:on|le|am|el|il|op|em)\s+\d|on\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d|from\s+(?:your\s+)?(?:account|a\/?c|card|checking|savings)\b|posted\b|(?:with|using|via|über)\b|to\s+(?:(?:your|the)\s+)?(?:card|account)\b|\d{1,2}:\d{2}\b|(?:ref(?:erence)?(?:\s*no)?|refno|txn|transaction\s+(?:id|date))\b|(?:was|has|have|is|were|will|wurde|wurden|ist|wird)\b|con\s+(?:tu|su)\s+tarjeta\b|com\s+o\s+cart[aã]o\b|بتاريخ|رقم\s+(?:المرجع|العملية))/iu;
-const BALANCE_FIELD_TAIL = /\s+(?:(?:available|current|remaining|closing)\s+(?:credit\s+)?(?:balance|limit)|(?:avl|avail)\.?\s*(?:bal(?:ance)?|limit)|balance|credit\s+limit|الرصيد(?:\s+(?:المتاح|الحالي))?)\s*[:=-]?\s*$/iu;
+const BALANCE_FIELD_TAIL = /\s+(?:(?:available|current|remaining|closing)\s+(?:credit\s+)?(?:balance|limit)|(?:avl|avail)\.?\s*(?:bal(?:ance)?|limit)|balance|credit\s+limit|saldo(?:\s+disp(?:onible|on[ií]vel)?)?|solde(?:\s+disponible)?|guthaben|kontostand|dost[eę]pne|الرصيد(?:\s+(?:المتاح|الحالي|المتوفر))?|رصيدك(?:\s+(?:الحالي|المتاح|المتوفر))?|المتاح)\s*[:=-]?\s*$/iu;
 const BALANCE_FIELD_BEFORE_MONEY = new RegExp(BALANCE_FIELD_TAIL.source.replace(/\$$/u, '') + String.raw `(?=(?:[A-Z]{3}\s*[+-]?\d|[+-]?\d[\d.,]*\s*[A-Z]{3}\b))`, 'iu');
 const MERCHANT_STATUS_TAIL = /\s+(?:(?:abgelehnt|geweigerd|rechazado)(?=\s*(?:$|op\b|wegen\b|omdat\b))|requires?\s+(?:(?:an?|your)\s+)?(?:otp(?=\b|\d)|verification\s+code\b|security\s+code\b|one[ -]time\s+(?:code|password)\b)|(?:declined|failed|rejected|unsuccessful)(?=\s*(?:$|due\b|because\b|for\b))|pending(?:\s+(?:authori[sz]ation|processing|approval|confirmation|verification)\b|\s*$)|awaiting\s+(?:authori[sz]ation|approval|confirmation|verification)\b|scheduled\s+(?:for|on|to)\b|(?:pendente|pendiente|rechazad[oa]|recusad[oa]|negad[oa]|declinad[oa]|cancelad[oa]|(?:n[aã]o|no)\s+(?:aprovad[oa]|aprobad[oa]|autorizad[oa]))(?=\s*(?:$|de\b|por\b|pelo\b|pela\b))|(?:se\s+(?:cargar|abonar|aplicar|reflejar)[aá]|ser[aá]\s+(?:cargad|abonad|debitad|creditad|lan[cç]ad|processad)[oa]|retenid[oa]|bloquead[oa]|estornad[oa]|en\s+revisi[oó]n|no\s+procede|requiere|aguarda|on\s+hold|requires?\s+your)(?=$|[^\p{L}\p{N}])|(?:em\s+processamento|en\s+proceso|aguardando\s+(?:aprova[cç][aã]o|confirma[cç][aã]o|autoriza[cç][aã]o)|pendiente\s+de\s+(?:autorizaci[oó]n|aprobaci[oó]n))(?=$|[^\p{L}\p{N}]))/iu;
-const NOT_MERCHANT = /^(?:未払い|今回|本次交易)$|^(?:ihr(?:e|er|em|en)?|tu|su|sus|votre|vos|sua|seu)\s+(?:karte|konto|tarjeta|cuenta|carte|compte|cart[aã]o|conta)\b|^(?:cheq(?:ue)?|current|savings?|checking|credit|debit)\s+(?:a\/?c|acc(?:oun)?t)\b|^(?:su|tu|sua)\s+(?:cuenta|conta)\b|^(?:(?:your|the|an?)\s+)?(?:account|a\/?c|card|credit\s+card|debit\s+card|bank\s+account|statement|USD|AED|SAR|EUR|GBP|INR)\b|^(?:view|avoid|contact|call|visit|check|download|log\s*in|pay|confirm|verify|report)\b|^(?:حساب|بطاق|كشف\s+الحساب)/iu;
+const EUROPEAN_STATUS_WORD = String.raw `(?:autorizzat[oa]|autorizad[oa]|autoris[ée]e?|genehmigt|godkän[dt]|godkendt|godkjent|geautoriseerd|goedgekeurd|autoryzowan[aey]|autorizován[aá]?|denegad[oa]|rechazad[oa]|no\s+(?:realizad|autorizad|aprobad)[oa]|anulad[oa]|cancelad[oa]|refus[ée]e?|rejet[ée]e?|annul[ée]e?|non\s+abouti(?:e)?|impay[ée]e?|en\s+attente|en\s+cours|vorgemerkt|reserviert|storniert|fehlgeschlagen|abgelehnt|nicht\s+(?:ausgeführt|durchgeführt|erfolgreich|gebucht)|zurückgewiesen|ausstehend|afgewezen|geweigerd|geannuleerd|mislukt|niet\s+(?:gelukt|uitgevoerd|betaald)|in\s+behandeling|gereserveerd|falhou|rejeitad[oa]|recusad[oa]|negad[oa]|pendente|negat[oa]|rifiutat[oa]|annullat[oa]|non\s+riuscit[oa]|non\s+eseguit[oa]|in\s+attesa|odrzucon[aey]|nieudan[aey]|anulowan[aey]|oczekując\p{L}*|nekad\p{L}*|avvisad\p{L}*|reserver\p{L}*|afvist|avvist|zamítnut\p{L}*|zamitnut\p{L}*|zrušen\p{L}*|neproběhl\p{L}*|neproveden\p{L}*)`;
+const MERCHANT_EUROPEAN_STATUS_TAIL = new RegExp(String.raw `\s+(?:` +
+    String.raw `(?:ha|han|había|habia)\s+sido(?![\p{L}\p{N}])|fue(?![\p{L}\p{N}])|(?:a|ont|avait)\s+été(?![\p{L}\p{N}])|n['’](?:a|ont|est)(?![\p{L}\p{N}])|est\s+(?:refus|rejet|annul|en\s+attente)|` +
+    String.raw `foi(?![\p{L}\p{N}])|foram(?![\p{L}\p{N}])|não\s+foi(?![\p{L}\p{N}])|nao\s+foi(?![\p{L}\p{N}])|è\s+stat[oa](?![\p{L}\p{N}])|e\s+stat[oa](?![\p{L}\p{N}])|non\s+è(?![\p{L}\p{N}])|werd(?![\p{L}\p{N}])|zijn(?![\p{L}\p{N}])|` +
+    String.raw `(?:er|blev|ble|har|är|var)\s+(?:ikke|inte|ej|blevet|blitt|blivit)(?![\p{L}\p{N}])|została(?![\p{L}\p{N}])|został(?![\p{L}\p{N}])|nie\s+zosta|byla(?![\p{L}\p{N}])|nebyla(?![\p{L}\p{N}])|` +
+    String.raw `con\s+(?:la\s+)?carta(?![\p{L}\p{N}])|avec\s+(?:votre|la)\s+carte(?![\p{L}\p{N}])|mit\s+(?:ihrer|deiner|der)(?![\p{L}\p{N}])|met\s+(?:je|uw|de)\s+(?:pas|kaart|bankkaart)(?![\p{L}\p{N}])|` +
+    String.raw `(?:bezahlt|gezahlt|belastet|abgebucht|überwiesen|erstattet|gesendet|gutgeschrieben|betaald|betaalde|gestuurd|overgemaakt|pay[ée]e?s?|r[ée]gl[ée]e?s?|d[ée]bit[ée]e?|pagad[oa]|pagat[oa]|zapłacon[oay]|zaplacen[oa]|betalt|betalat|betalte|trukket|dragits|hævet)(?=\s*$|\s+(?:am|le|el|il|op|em|den|dne|dnia|on|\d))|` +
+    String.raw `(?:du|del|den|dne)\s+\d|${EUROPEAN_STATUS_WORD}(?=\s*(?:$|[,;:(]|(?:por|wegen|car|faute|op|omdat|par|mangels|pga|på\s+grund|z\s+powodu|kvůli)(?![\p{L}\p{N}])))` +
+    String.raw `)`, 'u');
+const MERCHANT_EUROPEAN_FOOTER_TAIL = /\s+(?:(?:neuer\s+)?saldo(?![\p{L}\p{N}])|solde(?![\p{L}\p{N}])|kontostand|verfügbar\p{L}*|disponib\p{L}*|plafond|beschikba\p{L}*|tillgänglig|tilgjengelig|rådighed|dostępn\p{L}*|zůstatek|volný\s+limit|unbekannte\s+zahlung|niet\s+herkend|ce\s+n['’]est\s+pas\s+vous|op[ée]ration\s+inconnue|nie\s+rozpoznajesz|ikke\s+deg|kender\s+du\s+ikke|känner\s+du\s+inte|nebyli\s+jste|se\s+non\s+riconosci|si\s+no\s+reconoces|se\s+não\s+reconhece|mit\s+(?:ihrer|deiner)\s|avec\s+votre\s|con\s+(?:tu|su|la\s+tua|la\s+sua)\s|met\s+(?:je|uw)\s|med\s+(?:ditt|dit)\s|com\s+o\s+seu\s|kartą\s|z\s+vaší\s+karty)/iu;
+const NOT_MERCHANT = /^(?:未払い|今回|本次交易)$|^(?:dich|dir|ihnen|mich|mir|uns|vous|toi|te|ti|je|jou|u|dig|deg|mig|meg|ciebie|tobie|tebe|vás|você|voce|si)$|^(?:ihr(?:e|er|em|en)?|tu|su|sus|votre|vos|sua|seu)\s+(?:karte|konto|tarjeta|cuenta|carte|compte|cart[aã]o|conta)\b|^(?:cheq(?:ue)?|current|savings?|checking|credit|debit)\s+(?:a\/?c|acc(?:oun)?t)\b|^(?:su|tu|sua)\s+(?:cuenta|conta)\b|^(?:(?:your|the|an?)\s+)?(?:account|a\/?c|card|credit\s+card|debit\s+card|bank\s+account|statement|USD|AED|SAR|EUR|GBP|INR)\b|^(?:view|avoid|contact|call|visit|check|download|log\s*in|pay|confirm|verify|report)\b|^(?:حساب|بطاق|كشف\s+الحساب)/iu;
 const MOVEMENT_CONTEXT = /\b(?:made\s+an?|withdrew|used\s+for|purchase|charged|paid|debited|credited|received|sent|transfer(?:red)?|spent|payment|paiement|débité|crédité|kartenzahlung|abgebucht|belastet|compra|pagado|pagamento|acquisto|addebitato|pinbetaling|betaling|kaartbetaling|betaald|afgeschreven|abonnementzahlung|remboursement|reembolso)\b|شراء|خصم|دفع|تحويل|استلام/iu;
 const ownsMovement = (text, at, moneySpans) => {
     let start = at;
@@ -14212,9 +17992,9 @@ const merchantFields = (text, moneySpans) => {
     const billSupplier = /(?:stromrechnung\s+von|factura\s+de\s+agua\s+de|assinatura\s+da|mensalidade\s+da)\s+/giu;
     const symbolicAt = /\s@\s+/gu;
     const transactionWith = /(?:^|[^\p{L}\p{N}])transaction(?:\s+of\s+(?:[A-Z]{3}\s?)?[$€£]?\d[\d.,]{0,15})?\s+with\s+(?!(?:your|the|an?)\b)/giu;
-    const arabicStructuredLabel = /(?:^|\n)\s*(?:لدى|من|جهة|الجهة)\s*[:：]\s*/gu;
+    const arabicStructuredLabel = /(?:^|\n(?<!\n\s*?\s))\s*(?:لدى|من|جهة|الجهة)\s*[:：]\s*/gu;
     const arabicFinancialDocument = /^\s*(?:شراء|حوالة\s+واردة|سداد\s+فاتورة|مدفوعات\s+وزارة\s+الداخلية)(?=$|[\s:؛])/u.test(text) &&
-        /(?:^|\n)\s*مبلغ\s*:/u.test(text);
+        /(?:^|\n(?<!\n\s*?\s))\s*مبلغ\s*:/u.test(text);
     const refundFor = /\brefund\s+(?:processed|credited|received|completed|posted)\s+for\s+/giu;
     for (const pattern of [MERCHANT_LABEL, MERCHANT_PREPOSITION, refundFrom, symbolicAt, billSupplier, transactionWith,
         arabicStructuredLabel, refundFor]) {
@@ -14239,7 +18019,8 @@ const merchantFields = (text, moneySpans) => {
                 }
             }
             const start = labelEnd + lead;
-            const tails = [pattern === billSupplier ? value.search(/\s+(?:(?:no|não|será|está)\s+)?(?:pagada|paga)(?=\s*$)|\s+será\s+(?:cobrada|renovada)\b/iu) : -1, value.search(MERCHANT_TAIL), value.search(MERCHANT_STATUS_TAIL), value.search(BALANCE_FIELD_BEFORE_MONEY)]
+            const tails = [pattern === billSupplier ? value.search(/\s+(?:(?:no|não|será|está)\s+)?(?:pagada|paga)(?=\s*$)|\s+será\s+(?:cobrada|renovada)\b/iu) : -1, value.search(MERCHANT_TAIL), value.search(MERCHANT_STATUS_TAIL), value.search(MERCHANT_EUROPEAN_STATUS_TAIL), value.search(MERCHANT_EUROPEAN_FOOTER_TAIL),
+                value.search(BALANCE_FIELD_BEFORE_MONEY)]
                 .filter((index) => index >= 0);
             const timeTail = text.slice(start, start + 97).search(/\s+\d{1,2}:\d{2}(?=\s|[.。।!?;]|$)/u);
             if (timeTail >= 0 && timeTail <= value.length)
@@ -14254,6 +18035,9 @@ const merchantFields = (text, moneySpans) => {
             if (tails.length)
                 value = value.slice(0, Math.min(...tails));
             value = value.trim().replace(/\s+(?:for|of)$/iu, '').replace(/[.*_-]+$/u, '').trim();
+            const cutFigure = value.match(/\s+\d[\d.]*$/u);
+            if (cutFigure && /^[.,]\d/u.test(text.slice(start + value.length)))
+                value = value.slice(0, cutFigure.index).trim();
             const end = start + value.length;
             if ((value.match(/\p{L}/gu) ?? []).length < 2 || NOT_MERCHANT.test(value) ||
                 /\b(?:your|yours|please)\b/iu.test(value) || /^[A-Z]{2}\d[A-Z\d ]{6,}$/iu.test(value))
@@ -14272,17 +18056,17 @@ const merchantFields = (text, moneySpans) => {
         /((?:^|[।,]\s*))([A-Za-z\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+को\s+(?=भुगतान)/gu,
         /(\d{4}-\d{2}-\d{2}\s+tarihinde\s+(?:\d{4}\s+ile\s+biten\s+kartınızla\s+)?)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+işyerinde(?:ki)?\s+(?=[A-Z]{3}\s*\d)/giu,
         /(कार्ड\s+\d{4}\s+से\s+)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+पर\s+(?=[A-Z]{3}\s*\d)/gu,
-        /((?:^|[।\n\]])\s*)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+से\s+(?=[A-Z]{3}\s*\d[\d.,]*\s+(?:की\s+रिफंड\s+राशि|का\s+रिफंड))/gu,
+        /((?:^|[।\n\]](?<![।\n\]]\s*?\s))\s*)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+से\s+(?=[A-Z]{3}\s*\d[\d.,]*\s+(?:की\s+रिफंड\s+राशि|का\s+रिफंड))/gu,
         /((?:银行卡(?:于\d{4}-\d{2}-\d{2})?|^|[。:：，,\s日])在)([\p{L}\p{M}\p{N} &'’.*_-]{2,96}?)消费(?:成功|失败|被拒绝)/gu,
         /(退款到账通知[:：]\s*)([\p{L}\p{M}\p{N} &'’.*_-]{2,96}?)退回(?=[A-Z]{3}\s*\d)/gu,
-        /((?:^|[.!?。।;\n\]])\s*)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+işyerindeki\s+(?=[A-Z]{3}\s*\d)/giu,
+        /((?:^|[.!?。।;\n\]](?<![.!?。।;\n\]]\s*?\s))\s*)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+işyerindeki\s+(?=[A-Z]{3}\s*\d)/giu,
         /(\d{2}[./]\d{2}[./]\d{4}\s+tarihinde\s+)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+işyerinden\s+(?=\d)/giu,
-        /((?:^|[.!?。।;\n\]])\s*)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+alışverişiniz\s+tamamlandı/giu,
+        /((?:^|[.!?。।;\n\]](?<![.!?。।;\n\]]\s*?\s))\s*)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+alışverişiniz\s+tamamlandı/giu,
         /(تم\s+سداد\s+فاتورة\s+)([\p{L}\p{M}][\p{L}\p{M}\p{N} &'’.*_-]{1,95}?)\s+بنجاح(?=\s*[.。।;]|\s*$)/gu,
-        /((?:^|[.!?。।;\n\]])\s*)([\p{L}\p{M}\p{N} &'’.*_-]{2,96}?)での購入が完了しました/gu,
-        /((?:^|[.!?。।;\n\]])\s*)([\p{L}\p{M}\p{N} &'’.*_-]{2,96}?)の電気料金の請求です/gu,
-        /((?:^|[.!?。।;\n\]])\s*您在)([\p{L}\p{M}\p{N} &'’.*_-]{2,96}?)的消费已完成/gu,
-        /((?:^|[.!?。।;\n\]])\s*)([\p{L}\p{M}\p{N} &'’.*_-]{2,96}?)的退款(?=\s*(?:[A-Z]{3}\s*\d|[$€£¥]\s*\d)[\d.,]*\s*已到账)/gu,
+        /((?:^|[.!?。।;\n\]](?<![.!?。।;\n\]]\s*?\s))\s*)([\p{L}\p{M}\p{N} &'’.*_-]{2,96}?)での購入が完了しました/gu,
+        /((?:^|[.!?。।;\n\]](?<![.!?。।;\n\]]\s*?\s))\s*)([\p{L}\p{M}\p{N} &'’.*_-]{2,96}?)の電気料金の請求です/gu,
+        /((?:^|[.!?。।;\n\]](?<![.!?。।;\n\]]\s*?\s))\s*您在)([\p{L}\p{M}\p{N} &'’.*_-]{2,96}?)的消费已完成/gu,
+        /((?:^|[.!?。।;\n\]](?<![.!?。।;\n\]]\s*?\s))\s*)([\p{L}\p{M}\p{N} &'’.*_-]{2,96}?)的退款(?=\s*(?:[A-Z]{3}\s*\d|[$€£¥]\s*\d)[\d.,]*\s*已到账)/gu,
     ];
     for (const pattern of localForms)
         for (const match of text.matchAll(pattern)) {
@@ -14349,13 +18133,13 @@ const sourceCurrencyAliases = (context) => {
         ...context.currencyAliases };
 };
 const LABEL = new RegExp([
-    String.raw `(?<minimum>\bpay\s+min\.|\bmin(?:imum)?(?:\s+|\.\s*)(?:(?:amount|amt|payment)\s+)?due\b|\bminimum\s+payment\b|\bpago\s+mínimo\b|(?<![\p{L}\p{M}\p{N}_])(?:paiement\s+minimum|न्यूनतम\s+देय\s+राशि)(?![\p{L}\p{M}\p{N}_])|الحد\s+(?:الادنى|الأدنى)\s+(?:المستحق|للدفع|للسداد))`,
+    String.raw `(?<minimum>\bpay\s+min\.|\bmin(?:imum)?(?:\s+|\.\s*)(?:(?:amount|amt|payment)\s+)?due\b|\bminimum\s+payment\b|\bpago\s+mínimo\b|(?<![\p{L}\p{M}\p{N}_])(?:paiement\s+minimum|pagamento\s+m[ií]nimo|mindestbetrag|minimumbedrag|minimalna\s+kwota|lägsta\s+belopp|minimumsbeløb|minstebeløp|minimální\s+splátka|न्यूनतम\s+देय\s+राशि)(?![\p{L}\p{M}\p{N}_])|الحد\s+(?:الادنى|الأدنى)\s+(?:المستحق|للدفع|للسداد))`,
     String.raw `(?<total>\b(?:statement\s+(?:total|balance|amount)|closing\s+balance|total\s+(?:(?:amount|amt)\s+)?due(?:\s+to\s+avoid\s+fin\.\s+charges)?|total\s+outstanding(?:\s+balance)?|new\s+balance|saldo\s+total\s+del\s+estado)\b|(?<![\p{L}\p{M}\p{N}_])(?:total\s+à\s+payer|कुल\s+देय\s+राशि)(?![\p{L}\p{M}\p{N}_])|(?:اجمالي|إجمالي)\s+(?:المبلغ\s+المستحق|مبلغ\s+الكشف))`,
-    String.raw `(?<limit>\b(?:(?:available|avl|avail)\.?\s+(?:credit\s+limit|cr(?:\.?\s+|\.)limit)|(?:available|credit|avl|avail)\.?\s+(?:limit|lmt)|available\s+credit|credit\s+available)\b|الحد\s+(?:المتاح|الائتماني))`,
-    String.raw `(?<balance>\b(?:(?:available|current|avl|avail)\.?\s+)?bal(?:ance)?\b|\b(?:solde(?:\s+disponible)?|kontostand|saldo|(?:kullanılabilir\s+)?bakiye)\b|الرصيد(?:\s+(?:الحالي|المتاح))?|(?<![\p{L}\p{M}\p{N}_])رصيد\s+حسابك(?:\s+(?:الحالي|المتاح))?(?![\p{L}\p{M}\p{N}_])|(?:उपलब्ध\s+)?शेष\s+राशि|(?:利用可能)?残高|(?:可用)?余额)`,
+    String.raw `(?<limit>\b(?:(?:available|avl|avail)\.?\s+(?:credit\s+limit|cr(?:\.?\s+|\.)limit)|(?:available|credit|avl|avail)\.?\s+(?:limit|lmt)|available\s+credit|credit\s+available)\b|(?<![\p{L}\p{M}\p{N}_])(?:(?:verfügbarer\s+)?kreditrahmen|plafond(?:\s+(?:disponível|disponivel|de\s+paiement\s+restant))?|l[ií]mite\s+disponible|disponibilit[àa](?:\s+residua)?|tillgänglig\s+kredit|tilgjengelig\s+kreditt|dostępny\s+limit|volný\s+limit(?:\s+karty)?|beschikbare\s+limiet|rådighed(?:\s+på\s+kortet)?|disponibelt(?:\s+belopp)?|disponibilní\s+zůstatek|zůstatek)(?![\p{L}\p{M}\p{N}_])|الحد\s+(?:المتاح|الائتماني))`,
+    String.raw `(?<balance>\b(?:(?:available|current|avl|avail)\.?\s+)?bal(?:ance)?\b|\b(?:solde(?:\s+disponible)?|kontostand|guthaben|saldo|(?:kullanılabilir\s+)?bakiye)\b|(?<![\p{L}\p{M}\p{N}_])(?:disponib\p{L}*|beschikba\p{L}*|verf[üu]gbar\p{L}*|tillg[äa]ngl\p{L}*|tilgjengel\p{L}*)\s+\p{L}{4,10}(?=\s*:)|\bdost(?:\.|[eę]pne(?![\p{L}\p{M}\p{N}_]))|الرصيد(?:\s+(?:الحالي|المتاح|المتوفر|المتبقي))?|(?<![\p{L}\p{M}\p{N}_])(?:رصيد\s+حسابك|رصيدك)(?:\s+(?:الحالي|المتاح|المتوفر))?(?![\p{L}\p{M}\p{N}_])|(?<![\p{L}\p{M}\p{N}_])المتاح(?![\p{L}\p{M}\p{N}_])|(?:उपलब्ध\s+)?शेष\s+राशि|(?:利用可能)?残高|(?:可用)?余额)`,
     String.raw `(?<bill>\b(?:bill(?:\s+amount)?\s+(?:due|of)|amount\s+due|payment\s+due|bill\s+amount|bill\s+for|montant\s+à\s+payer|importo\s+da\s+pagare)\b|مبلغ\s+الفاتورة|المبلغ\s+المستحق|देय\s+राशि)`,
-    String.raw `(?<fee>\b(?:total\s+charges|fee|fees|commission|service\s+charge)\b|رسوم|عمولة)`,
-    String.raw `(?<transaction>\b(?:virement(?:\s+reçu)?|pix(?:\s+(?:enviado|recebido))?|transaksi|havale|bizum|cargo\s+de|consumo\s+de|na\s+kwot[eę]|lastschrift(?:\s+über)?|payment\s+made\s+for|you\s+have\s+(?:sent|received)|(?:you\s+)?made\s+an?|charge\s+(?:of|made)|transaction(?!\s+(?:id|no|number|ref|reference|date|time|alert)\b)|used\s+for|charged\s+for|withdrew|purchase|purchased|spend|spent|paid|charged|debited|credited|received|sent|withdrawn|withdrawal|cash\s+out|deposited|deposit|refund|reversal|transfer(?:red)?|payment|amount|amt|amnt|paiement|débité|crédité|remboursement|kartenzahlung|abonnementzahlung|belastet|gutgeschrieben|compra|reembolso|abonado|pagamento|pinbetaling|pasbetaling|kaartbetaling|betaling)\b|(?<![\p{L}\p{N}])(?:alışveriş(?:iniz)?|ödemeniz|tutarında|مبلغ)(?![\p{L}\p{N}])|شراء|خصم|إيداع|ايداع|تحويل|استرداد|دفع|भुगतान|रिफंड\s+राशि|(?<![\p{L}\p{M}\p{N}_])(?:überweisung|overboeking|acquisto|rimborso|accreditato|cargados?|debitados?|रिफंड)(?![\p{L}\p{M}\p{N}_])|(?:利用)?金額|金额|退回|退款|引き落とされました|扣款|승인|डेबिट|क्रेडिट)`,
+    String.raw `(?<fee>\b(?:total\s+charges|fee|fees|frais|commission|(?:service|late|finance|interest)\s+charge)\b|(?<![\p{L}\p{M}\p{N}_])(?:gebühr|entgelt|comisi[oó]n|commissione|comissão|comissao|kosten|opłata|avgift|gebyr|poplatek)(?![\p{L}\p{M}\p{N}_])|رسوم|عمولة)`,
+    String.raw `(?<transaction>\b(?:virement(?:\s+reçu)?|pix(?:\s+(?:enviado|recebido))?|transaksi|havale|bizum|cargo\s+de|cargo|adeudo|consumo\s+de|na\s+kwot[eę]|lastschrift(?:\s+über)?|payment\s+made\s+for|you\s+have\s+(?:sent|received)|(?:you\s+)?made\s+an?|charge(?:\s+(?:of|made))?|credit\s+of|transaction(?!\s+(?:id|no|number|ref|reference|date|time|alert)\b)|(?:was|been)\s+used|used\s+for|charged\s+for|deducted|deduction|refunded|withdrew|purchase|purchased|spend|spent|paid|charged|debited|credited|received|sent|withdrawn|withdrawal|cash\s+out|deposited|deposit|refund|reversal|transfer(?:red)?|payment|amount|amt|amnt|paiement|achat|retrait|dépôt|remboursement|kartenzahlung|abonnementzahlung|belastet|gutgeschrieben|gutschrift|zahlungseingang|betrag|bezahlt|transaktion|erhalten|compra|pagado|reembolso|abonado|retirada|utilizada\s+por|operazione|pagamento|enviou|pinbetaling|pasbetaling|kaartbetaling|betaling|betaald|bijgeschreven|afgeschreven|wydano|otrzymano|platba|(?:kort)?köp|fått|betalt|betalte|sendt)\b|(?<![\p{L}\p{N}])(?:alışveriş(?:iniz)?|ödemeniz|tutarında|(?:و?ب)?مبلغ|بقيمة)(?![\p{L}\p{N}])|شراء|خصم|إيداع|ايداع|تحويل|استرداد|دفع|भुगतान|रिफंड\s+राशि|(?<![\p{L}\p{M}\p{N}_])(?:gezahlt|zapłacono|zaplacono|handlet|opname|kortkjøp|køb|aankoop|internetaankoop|zaplatili\s+jste|accredito(?:\s+stipendio)?|rimborsat[oa]|devuelto|reçue?|einkauf|internetkauf|onlinekauf|bargeldabhebung|bargeld\s+abgehoben|abgehoben|erstattung|erstattet|gesendet|überwiesen|abgebucht|ausgeführt|montant|pay[ée]e?s?|retir[ée]|rembours[ée]e?|r[ée]gl[ée]e?|cobrad[oa]|enviado|recibido|cantidad|importe|devoluci[oó]n|importo(?:\s+operazione)?|pagato|prelevato|prelievo|inviato|ricevuto|storno|addebitat[oa]|bonifico|bedrag|betaalde|gestuurd|ontvangen|opgenomen|overgemaakt|bijschrijving|terugbetaling|incasso|geïncasseerd|montante|pagou|recebeu|levantamento|devolução|wypłata|wypłaciłeś|wypłaciłaś|przesłał|przesłała|przelew|zapłaciłeś|zapłaciłaś|pobrał|pobrała|zwrot|obciążenie|transakcja|kartenumsatz|gekregen|summa|belopp|drog|dragits|betalat|handlat\s+för|uttag|överföring|återbetal\p{L}*|beløb|hævet|købt|tilbagebetaling|opkrævet|overført|beløp|trukket|handlet\s+for|kjøp|mottatt|uttak|tatt\s+ut|částka(?:\s+transakce)?|stržena|odepsána|výběr|připsána|zaplaceno|odeslaná|refundace|vrátil|vrátila|überweisung|overboeking|acquisto|rimborso|accreditato|cargados?|debitados?|débitée?|créditée?|prélèvement|prélevée?s?|envoyée?|kwot[aęy]|रिफंड)(?![\p{L}\p{M}\p{N}_])|(?:利用)?金額|金额|退回|退款|引き落とされました|扣款|승인|डेबिट|क्रेडिट)`,
 ].join('|'), 'giu');
 const AGGREGATE_PREFIX = /\b(?:(?:so far(?:\s+(?:this|the)\s+(?:day|week|month|year))?|(?:this|last)\s+(?:week|month|year)|(?:month|year|week)[ -]to[ -]date|(?:monthly|weekly|yearly|annual|cumulative|category)\s+(?:spend(?:ing)?|spends|expenditure)(?:\s+total)?)\b|spent\s+today\s*:)[^.!?;\n]*$/iu;
 const ALERT_THRESHOLD_PREFIX = /\b(?:is|was)\s+(?:greater|more|higher|larger)\s+than\s+(?:the|your)\s*$/iu;
@@ -14372,6 +18156,10 @@ function aggregateAmount(prefix, suffix, label) {
     return !labels(suffix).some(row => row.role === 'transaction') &&
         /^\s*(?:on\s+[^.!?;\n]+?\s+)?(?:so far(?:\s+(?:this|the)\s+(?:day|week|month|year))?|(?:this|last)\s+(?:week|month|year)|(?:month|year|week)[ -]to[ -]date)\b/iu.test(suffix);
 }
+const POSTFIX_ONLY_LABEL = /^refunded$/iu;
+const prefixLabel = (row) => !POSTFIX_ONLY_LABEL.test(row.text);
+const LIST_JOIN = /^\s*(?:and|plus|und|et|en|y|e|,|&|و)?\s*$/iu;
+const INFORMATIONAL_ROLES = new Set(['balance', 'credit-limit', 'statement-total', 'minimum-due']);
 const LABEL_ROLES = {
     minimum: 'minimum-due', total: 'statement-total', limit: 'credit-limit',
     balance: 'balance', bill: 'bill-due', fee: 'fee', transaction: 'transaction',
@@ -14409,7 +18197,7 @@ function separators(text) {
         .map((match) => ({ start: match.index, end: match.index + match[0].length }));
     return [...text.matchAll(/[;\n!?。।]|[.,](?=\s|$)/g)]
         .filter((match) => match[0] !== ',' || !listed.some((range) => match.index > range.start && match.index < range.end))
-        .filter((match) => match[0] !== '.' || !/\b(?:min|avl|avail|cr|dr|amt|bal)$/i.test(text.slice(0, match.index)))
+        .filter((match) => match[0] !== '.' || !/\b(?:min|avl|avail|cr|dr|amt|bal|dost)$/i.test(text.slice(0, match.index)))
         .filter((match) => match[0] !== '.' ||
         !(/\btotal\s+due\s+to\s+avoid\s+fin$/i.test(text.slice(0, match.index)) &&
             /^\.\s+charges\b/i.test(text.slice(match.index))))
@@ -14465,9 +18253,9 @@ function ownCandidates(draft, excludedRoleSpans, marketLabels = null) {
         const nextStart = draft.candidates[index + 1]?.span.start ?? text.length;
         const before = text.slice(previousEnd, candidate.span.start);
         let prefixStart = previousEnd + ((separators(before).at(-1) ?? -1) + 1);
-        let preceding = labels(roleText.slice(prefixStart, candidate.span.start), marketLabels).at(-1);
+        let preceding = labels(roleText.slice(prefixStart, candidate.span.start), marketLabels).filter(prefixLabel).at(-1);
         if (!preceding) {
-            const prior = labels(roleText.slice(previousEnd, candidate.span.start), marketLabels).at(-1);
+            const prior = labels(roleText.slice(previousEnd, candidate.span.start), marketLabels).filter(prefixLabel).at(-1);
             if (prior) {
                 const start = previousEnd + prior.start;
                 const tail = roleText.slice(start + prior.text.length, candidate.span.start);
@@ -14480,15 +18268,21 @@ function ownCandidates(draft, excludedRoleSpans, marketLabels = null) {
             }
         }
         const after = text.slice(candidate.span.end, nextStart);
-        const suffixEnd = candidate.span.end + (separators(after)[0] ?? after.length);
-        const following = labels(roleText.slice(candidate.span.end, suffixEnd), marketLabels)[0];
+        const krPoint = /kr$/iu.test(candidate.sourceText) && /^\.\s+\p{Ll}/u.test(after) ? 1 : 0;
+        const suffixEnd = candidate.span.end + krPoint + (separators(after.slice(krPoint))[0] ?? after.length - krPoint);
+        const next = draft.candidates[index + 1];
+        const nextPrefixStart = candidate.span.end + ((separators(after).at(-1) ?? -1) + 1);
+        const nextLabel = next ? labels(roleText.slice(nextPrefixStart, next.span.start), marketLabels).filter(prefixLabel).at(-1) : undefined;
+        const nextLabelStart = nextLabel && INFORMATIONAL_ROLES.has(nextLabel.role) ? nextPrefixStart + nextLabel.start : Infinity;
+        const following = labels(roleText.slice(candidate.span.end, suffixEnd), marketLabels)
+            .find((row) => candidate.span.end + row.start < nextLabelStart);
         const label = preceding ?? following;
         let role = label?.role ?? 'unknown';
         if (role === 'bill-due' && label && !/\bbill\b|فاتورة/iu.test(label.text) &&
             /\b(?:statement|mini\s+stmt)\b/iu.test(roleText.slice(0, candidate.span.start))) {
             role = 'statement-total';
         }
-        if (!label && owned.at(-1)?.role === 'transaction' && /^\s*(?:and|plus|,|&)?\s*$/i.test(before)) {
+        if (!label && owned.at(-1)?.role === 'transaction' && LIST_JOIN.test(before)) {
             role = 'transaction';
         }
         let labelStart = preceding ? prefixStart + preceding.start : null;
@@ -14507,6 +18301,12 @@ function ownCandidates(draft, excludedRoleSpans, marketLabels = null) {
         owned.push({ candidate, role, labelStart, aggregate,
             span: { start: previousEnd > 0 ? labelStart ?? prefixStart : prefixStart, end: suffixEnd } });
     });
+    for (let index = owned.length - 2; index >= 0; index--) {
+        const item = owned[index], next = owned[index + 1];
+        if (item.role === 'unknown' && !item.aggregate && next.role === 'transaction' &&
+            LIST_JOIN.test(text.slice(item.candidate.span.end, next.candidate.span.start)))
+            item.role = 'transaction';
+    }
     owned.forEach((item, index) => {
         const next = owned[index + 1];
         if (next)
@@ -14556,11 +18356,28 @@ function completeNumericToken(candidate, text) {
     const indian = new RegExp(`^\\d{1,2}(?:${separator}\\d{2})*${separator}\\d{3}$`);
     return western.test(integer) || indian.test(integer);
 }
+const POINT_DECIMAL_CURRENCIES = new Set(['USD', 'GBP', 'AUD', 'NZD', 'SGD', 'HKD', 'CAD']);
+const LAKH_GROUPING = /^\d{1,2}(?:,\d{2})+,\d{3}(?:\.\d+)?$/;
+const figureOf = (candidate, text) => text.slice(candidate.span.start, candidate.span.end).match(/\d[\d.,]*\d|\d/)?.[0] ?? '';
+function foreignNumberConvention(candidate, text) {
+    if (!/^[+\-−]?\s*(?:[A-Z]{1,3}\$|[A-Z]{3}(?=[ \t]*\d)|[^\p{L}\p{N}\s+\-−])/u.test(text.slice(candidate.span.start, candidate.span.end).trim()))
+        return false;
+    const numeric = figureOf(candidate, text);
+    return /,\d{1,2}$/.test(numeric) || LAKH_GROUPING.test(numeric);
+}
 function candidateField(candidate, text) {
     if (!completeNumericToken(candidate, text)) {
         return { ...(0, universal_types_1.missingUniversalField)('malformed-money-token'), spans: [candidate.span] };
     }
-    const alternatives = candidate.interpretations.map(({ currency, minorUnits, exponent }) => ({ currency, minorUnits, exponent }));
+    let alternatives = candidate.interpretations.map(({ currency, minorUnits, exponent }) => ({ currency, minorUnits, exponent }));
+    if (foreignNumberConvention(candidate, text) && alternatives.some(({ currency }) => POINT_DECIMAL_CURRENCIES.has(currency))) {
+        alternatives = alternatives.filter(({ currency }) => !POINT_DECIMAL_CURRENCIES.has(currency));
+        if (alternatives.length === 0 || LAKH_GROUPING.test(figureOf(candidate, text))) {
+            return { value: null, evidence: 'ambiguous', spans: [candidate.span], alternatives: [], issues: ['foreign-number-convention'] };
+        }
+        return { value: null, evidence: 'ambiguous', spans: [candidate.span], alternatives,
+            issues: [...new Set([...candidate.ambiguities, 'foreign-number-convention'])] };
+    }
     if (candidate.ambiguities.length > 0 || alternatives.length !== 1) {
         return { value: null, evidence: 'ambiguous', spans: [candidate.span], alternatives, issues: candidate.ambiguities };
     }
@@ -14577,11 +18394,63 @@ function selectFields(rows) {
         issues: [...new Set(['multiple-money-fields', ...rows.flatMap((row) => row.field.issues)])],
     };
 }
+const moneyKey = (field) => [...(field.value ? [field.value] : []), ...field.alternatives]
+    .map((money) => `${money.currency}:${money.minorUnits}:${money.exponent}`).sort().join('|');
+const ARABIC = /\p{Script=Arabic}/u;
+const DEBIT_WORDS = /\b(?:used|purchase[ds]?|debited|spent|paid|withdrawn|withdrawal|sent|transferred)\b|خصم|شراء|استخدام|سحب|دفع|سداد|تحويل/iu;
+const CREDIT_WORDS = /\b(?:refund(?:ed)?|credited|received|deposit(?:ed)?|reversal|reversed|returned)\b|استرداد|إيداع|ايداع|استلام|إرجاع|ارجاع|إضافة|اضافة|وارد/iu;
+const directionClass = (text) => {
+    const debit = DEBIT_WORDS.test(text), credit = CREDIT_WORDS.test(text);
+    return debit === credit ? null : debit ? 'debit' : 'credit';
+};
+function bilingualRepeats(text, owned, observations) {
+    const none = new Set();
+    if (owned.length < 2)
+        return none;
+    const delimiters = [...text.matchAll(/[ \t]\/[ \t]|\n|║|[ \t]\|[ \t]/gu)];
+    for (const delimiter of delimiters) {
+        const at = delimiter.index, after = at + delimiter[0].length;
+        const left = text.slice(0, at), right = text.slice(after);
+        const leftArabic = ARABIC.test(left), rightArabic = ARABIC.test(right);
+        if (leftArabic === rightArabic)
+            continue;
+        const [latin, arabic] = leftArabic ? [right, left] : [left, right];
+        const side = (index) => owned[index].candidate.span.end <= at ? 'left'
+            : owned[index].candidate.span.start >= after ? 'right' : null;
+        const fields = (which) => observations.flatMap((row, index) => side(index) === which ? [`${row.role}=${moneyKey(row.field)}`] : []).sort().join(';');
+        if (owned.some((_, index) => side(index) === null))
+            return none;
+        const leftFields = fields('left');
+        if (!leftFields || leftFields !== fields('right'))
+            return none;
+        const latinWords = new Set((latin.match(/[A-Za-z0-9*]+/gu) ?? []).map((word) => word.toLowerCase()));
+        if ((arabic.match(/[A-Za-z0-9*]+/gu) ?? []).some((word) => !latinWords.has(word.toLowerCase())))
+            return none;
+        const direction = directionClass(latin);
+        if (!direction || direction !== directionClass(arabic))
+            return none;
+        const second = leftArabic ? 'left' : 'right';
+        return new Set(owned.flatMap((_, index) => side(index) === second ? [index] : []));
+    }
+    return none;
+}
 function inspectUniversalMoneyDraft(source, context = {}) {
     const currencyAliases = sourceCurrencyAliases(context);
     const moneyMarket = context.moneyMarket ?? context.market;
-    const dotDecimalCurrencies = moneyMarket ? (0, alert_market_packs_1.alertMarketPack)(moneyMarket).dotDecimalCurrencies : undefined;
-    const draft = (0, alert_draft_1.inspectAlertDraft)(source, { currencyAliases, dotDecimalCurrencies });
+    let dotDecimalCurrencies = moneyMarket ? (0, alert_market_packs_1.alertMarketPack)(moneyMarket).dotDecimalCurrencies : undefined;
+    let draft = (0, alert_draft_1.inspectAlertDraft)(source, { currencyAliases, dotDecimalCurrencies });
+    const proven = [...new Set(draft.candidates.flatMap((candidate) => {
+            if (candidate.currency === null || candidate.ambiguities.length > 0 || candidate.exponent !== 3 ||
+                dotDecimalCurrencies?.includes(candidate.currency))
+                return [];
+            const figure = draft.normalizedText.slice(candidate.span.start, candidate.span.end).match(/\d[\d.,]*\d|\d/)?.[0] ?? '';
+            return candidate.currency !== 'IQD' && /^\d{1,3}(?:,\d{3})+\.\d{3}$|^\d{4,}\.\d{3}$/.test(figure) ? [candidate.currency] : [];
+        }))];
+    if (proven.length && draft.candidates.some((candidate) => candidate.currency !== null &&
+        proven.includes(candidate.currency) && candidate.ambiguities.includes('decimal-or-grouping'))) {
+        dotDecimalCurrencies = [...(dotDecimalCurrencies ?? []), ...proven];
+        draft = (0, alert_draft_1.inspectAlertDraft)(source, { currencyAliases, dotDecimalCurrencies });
+    }
     if (source.length > 4096)
         return draft;
     const candidates = [...draft.candidates];
@@ -14616,13 +18485,16 @@ function extractUniversalMoney(source, context = {}, excludedRoleSpans = [], exc
         !excludedMoneySpans.some((span) => Number.isInteger(span.start) && Number.isInteger(span.end) &&
             span.start >= 0 && span.end > span.start && span.end <= draft.normalizedText.length &&
             candidate.span.start < span.end && candidate.span.end > span.start));
-    const owned = ownCandidates({ ...draft, candidates }, excludedRoleSpans, marketLabelPattern(context.market));
-    const observations = owned.map(({ candidate, role, aggregate }) => {
+    const allOwned = ownCandidates({ ...draft, candidates }, excludedRoleSpans, marketLabelPattern(context.market));
+    const allObservations = allOwned.map(({ candidate, role, aggregate }) => {
         const field = candidateField(candidate, draft.normalizedText);
         if (aggregate)
             field.issues = [...field.issues, 'aggregate-money-field'];
         return { role, field };
     });
+    const repeated = bilingualRepeats(draft.normalizedText, allOwned, allObservations);
+    const owned = allOwned.filter((_, index) => !repeated.has(index));
+    const observations = allObservations.filter((_, index) => !repeated.has(index));
     const withRole = (role) => observations.filter((row, index) => row.role === role && !owned[index].aggregate);
     const transactions = withRole('transaction');
     const fees = withRole('fee');
@@ -14661,6 +18533,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.inspectUniversalBankEvent = inspectUniversalBankEvent;
 const universal_types_1 = require("@/lib/universal-types");
 const alert_semantics_1 = require("@/lib/alert-semantics");
+const alert_status_lexicon_1 = require("@/lib/alert-status-lexicon");
 const universal_fields_1 = require("@/lib/universal-fields");
 const universal_money_1 = require("@/lib/universal-money");
 const latam_alert_templates_1 = require("@/lib/latam-alert-templates");
@@ -14675,7 +18548,66 @@ const emptyEvent = (issue) => ({
 const LANGUAGE_PACKS = [
     'US', 'GB', 'FR', 'DE', 'ES', 'IT', 'NL',
     'IN', 'QA', 'KW', 'BH', 'OM', 'EG', 'JO',
+    'PT', 'PL', 'SE', 'DK', 'NO', 'CZ',
 ];
+const EUROPEAN_CURRENCY = /^(?:EUR|CHF|PLN|SEK|DKK|NOK|CZK|ISK)$/u;
+const CARD_ISSUER_PAYEE = new RegExp(String.raw `(?<![\p{L}\p{N}])(?:${[
+    String.raw `american\s+express|amex|barclaycard|barclays\s+bank\s+ireland|advanzia(?:\s+bank)?|hanseatic\s+bank|genialcard`,
+    String.raw `credit\s+one(?:\s+bank)?|comenity(?:\s+bank)?|(?:[\p{L}&.-]{1,40}\s+)?store\s+card|bank\s+card|crd\s+pmt|card\s+pmt|cc\s+pmt|redcard`,
+    String.raw `merrick\s+bank|mission\s+lane|petal\s+card|bread\s+financial|milestone\s+card|vanquis|aqua\s+card|resurs\s+bank|macy['’]?s\s+card`,
+    String.raw `dkb\s+visa|(?:mastercard|visa|kreditkarten?)[\s-]*abrechnung|kreditkartenabrechnung|international\s+card\s+services`,
+    String.raw `apple\s+card|gs\s+bank|goldman\s+sachs\s+bank|capital\s+one|synchrony(?:\s+bank)?|citi\s*cards?`,
+    String.raw `chase\s+(?:card|sapphire|freedom|slate)|entercard|bank\s+norwegian|re:member|nexi|cartasi|cofidis|tf\s+bank`,
+    String.raw `card\s+complete|paylife|cornercard|swisscard|viseca|cetelem|beobank|wizink|unibanco|agos|citi\s+handlowy`,
+    String.raw `forbrugsforeningen|mbna|avant\s+money|amex\s+bank|landesbank\s+berlin|deutsche\s+kreditbank|santander\s+consumer(?:\s+bank)?`,
+    String.raw `creditcards?|card\s+services|citi(?:bank)?|kreditkort\p{L}*|lbb|zinia|consors\s+finanz|dkb\s+ag|cap\s+one|syncb|td\s+bank\s+card|goldman\s+sachs`,
+    String.raw `wells\s+fargo\s+card|credit\s+crd(?:\s+autopay)?|crd\s+autopay|card\s+autopay`,
+].join('|')})(?![\p{L}\p{N}])`, 'giu');
+const CARD_PAYEE_WORDS = /(?<![\p{L}\p{N}])(?:card\s+payment|credit\s+card|kreditni\s+karta|karta\s+kredytowa|carte\s+de\s+cr[ée]dit|tarjeta\s+de\s+cr[ée]dito|carta\s+di\s+credito|cart[ãa]o\s+de\s+cr[ée]dito)(?![\p{L}\p{N}])/giu;
+const CARD_ISSUER_CODE = /(?<![\p{L}\p{N}])(?:ICS|BARCLAYS|DISCOVER(?:\s+CARD)?|Discover(?:\s+[Cc]ard)?|CARD\s+PAYMENT|CREDIT\s+CARD|KREDITKARTE|KREDITKORT|KREDITNI\s+KARTA|KARTA\s+KREDYTOWA|CARTE|CART[AÃ]O|CARTA|KORT|MASTERCARD|VISA)(?![\p{L}\p{N}])/gu;
+const INSTRUMENT_AFTER = /^[ \t]*(?:(?:debit|credit|card|karte|carte|kort|cart[ãa]o|tarjeta)\s*)?(?:(?:[x*•#]+|[·.]{2,})\s*\d|\d{4}(?!\d)|ending|endend|se\s+terminant|terminad|che\s+termina|eindigend|som\s+slut|ko[nń]c)/iu;
+const TO_OWN_CARD = /(?<![\p{L}])(?:to|an|auf|à|a|aan|naar|til|till|para|per|do|na)\s+(?:your|ur|ihre[rnms]?|deine[rnms]?|votre|vos|tu|su|tua|sua|seu|uw|je|jouw|din|ditt|dit|dine|tw[oó]j\p{L}*|va[šs]\p{L}*)\s+(?:\p{L}+\s+){0,1}$/iu;
+const CREDIT_CARD_TARGET = new RegExp(String.raw `(?<!\p{L})(?:betalat|betalt|betalte|bezahlt|überwiesen|ueberwiesen|gezahlt|payé|versé|viré|pagado|pagato|versato|ingresado|betaald|overgemaakt|pago|pagou|transferiu|zapłacono|zapłaciłeś|zapłaciłaś|przelano|zaplatili|zaplaceno|overført|överfört|indbetalt|innbetalt|einbezahlt|transférés?|transferido|trasferito)\s+` +
+    String.raw `(?:[^.!?\n]{0,60}?\s)?(?:till|an|auf|à|au|a|naar|aan|til|do|na|al|para|sur|pro|op|sul|sulla|en)\s+` +
+    String.raw `(?:(?!(?:with|using|mit|avec|par|con|med|met|com|z|s|kartą|kartou)(?!\p{L}))[^\s\d.!?]+\s+){0,3}` +
+    String.raw `(?:kreditkort\p{L}*|credit\s+card|kreditkarte\p{L}*|carte\s+(?:de\s+)?cr[ée]dit|tarjeta\s+de\s+cr[ée]dito|carta\s+di\s+credito|` +
+    String.raw `creditcard|karta\s+kredytow\p{L}*|kart[ęy]\s+kredytow\p{L}*|kreditn[íi]\s+kart\p{L}*|cart[ãa]o\s+de\s+cr[ée]dito)(?!\p{L})`, 'iu');
+const PAID_TO_CARD_OR_BANK = new RegExp(String.raw `(?<!\p{L})(?:paid|betalat|betalt|betalte|bezahlt|payé|pagado|pagato|betaald|pagou|zaplatili)\s+` +
+    String.raw `(?:(?:[^.!?\n]|\.\d){0,40}?\s)?(?:to|till|til|an|à|a|aan|para|na|do)\s+(?:(?!(?:with|using|by|via|from|your|at|mit|avec|con|med|met|com)(?!\p{L}))[\p{L}&.'’-]{1,30}\s+){1,3}` +
+    String.raw `(?:card|redcard|bank|financial|charge|cc\s+pmt|kort|karte|carte|tarjeta|carta|kreditkort)(?!\p{L})`, 'iu');
+const ONTO_CREDIT_CARD = new RegExp(String.raw `(?<!\p{L})(?:auf|an|op|naar|på|til|till|na)\s+(?:[\p{L}&.'’-]{1,30}\s+){0,3}` +
+    String.raw `(?:kreditkarte\p{L}*|creditcard|kreditkort\p{L}*|karta\s+kredytow\p{L}*|kart[ęy]\s+kredytow\p{L}*)\s+` +
+    String.raw `(?:\p{L}+\s+){0,2}(?:überwiesen|ueberwiesen|eingezahlt|gezahlt|bezahlt|overgemaakt|betaald|överfört|overført|innbetalt|indbetalt|przelane|wpłacone)(?!\p{L})|` +
+    String.raw `\bfor\s+(?:your\s+)?(?:[\p{L}&.'’-]{1,30}\s+){0,3}card\s+(?:payment|bill|pmt)\b`, 'iu');
+const CREDIT_LATER = /\barriv(?:e|es|ing)\s+(?:by\s+|on\s+)?(?:tomorrow|later|soon|in\b|within|next|\p{L}+day)|\bavailable\s+(?:on|from|by|after)\s+(?:\p{L}+day|the\s+next|next|tomorrow)|\bexpect\s+(?:it|them|the\s+(?:money|funds|payment))\b|\bdelivery\s+(?:by|on|within|expected)\b|\bwithin\s+\d+(?:\s*[-–]\s*\d+)?\s+(?:business\s+|working\s+|bank\s+)?days\b|\bnext\s+business\s+day\b/iu;
+const PAID_TO_READER = /\b(?:has\s+been|have\s+been|had\s+been|was|were|is|been)\s+(?:paid|sent|transferred|deposited|credited|added)\s+(?:in)?to\s+your\b/iu;
+const PAID_BY_OTHER = new RegExp(String.raw `(?<!\p{L})(?:betaald\s+door|bezahlt\s+von|beglichen\s+von|pay[ée]e?s?\s+par|pagad[oa]\s+por|pagat[oa]\s+da|pag[oa]\s+por|betalt\s+av|betalt\s+af|betald\s+av|betalad\s+av|zap[łl]acon[aeoy]?\s+przez|zaplacen[ao]?\s+od|paid\s+by)\s+` +
+    String.raw `(?!(?:your\s+|votre\s+|tu\s+|su\s+|la\s+|il\s+|de\s+)?(?:card|carte|cb|tarjeta|carta|kart|karte|kort|visa|master|maestro|debit|credit|apple|google|samsung|contactless|cheque|check|direct|ideal|bancontact|domiciliaci|addebito|bizum|swish|vipps|mobilepay|blik)(?!\p{L})|(?:your|votre)\s+(?:card|carte))`, 'iu');
+const NEXT_FUNCTION_WORD = /^(?:WAS|IS|HAS|HAVE|HAD|WERE|WILL|BEEN|TO|FOR|ON|AT|IN|OF|WITH|FROM|AND|OR|BY|DUE|VIA|WURDE|IST|HAT|AM|AN|AUF|VON|FÜR|MIT|UND|EST|A|À|DE|ET|ES|FUE|HA|È|E|IS|ER|ÄR|BLEV|BLE|JE|BYLA|BYL|FOI|ZOSTAŁA|ZOSTAL)$/u;
+const ISSUER_SUFFIX = /^(?:bank|banque|banca|banco|card|cards|carte|carta|cart[ãa]o|karta|kort|kredit\p{L}*|kreditkarte|creditcards?|credit|europe|ireland|canada|uk|us|usa|deutschland|danmark|norge|sverige|espa[ñn]a|france|carte-france|services?|payments?|visa|mastercard|ag|gmbh|plc|sa|nv|bv|ab|as|asa|spa|ltd|inc|n\.?a\.?|aecs|ducato|genialcard|abrechnung|finanz|e-?payments?|autopay|payment|pmt|bill|epay)$/iu;
+const PAYEE_PREPOSITION = /(?<![\p{L}])(?:to|at|an|à|a|bei|aan|naar|til|till|hos|do|pro|para|per|su|sur|presso|chez|en|em|no|na|u|w|dla|bij|with|from|von|de|da|van|fra|från|od|of|door|by|لدى|عند|من|في|إلى|الى)\s+(?:the\s+)?$/iu;
+const PAYEE_FIELD = /(?:(?<![\p{L}])(?:händler|haendler|empfänger|commerçant|commercant|bénéficiaire|beneficiaire|comercio|beneficiario|esercente|begunstigde|comerciante|sprzedawca|butik|butikk|forretning|obchodník|merchant|payee|beneficiary)\s*[:：]?\s*|(?<![\p{L}])(?:facture|factura|fatura|fattura|faktura|fakturu|regning|incasso|recibo|lastschrift|prélèvement|domiciliation|autogiro|avtalegiro|betalingsservice|لفاتورة|فاتورة)\s+(?:\p{L}+\s+){0,1}|[-–·]\s*)$/iu;
+const AFTER_AMOUNT = /(?:\d[\d.,']*\s*(?:[A-Z]{3}|(?:Eur|Usd|Gbp|Chf|Sek|Nok|Dkk|Pln|Czk|eur|usd|gbp|chf|sek|nok|dkk|pln|czk)|[$€£¥₹]|kr\.?|KR\.?|zł|ZŁ|Kč|KČ)|(?:[A-Z]{3}|[A-Z]{0,2}[$€£¥₹])\s?\d[\d.,']*)\s*[-–·:|]?\s*$/u;
+const LINE_SUBJECT = /(?:^|\n)\s*(?:[^\p{L}\p{N}\s]+\s*)?(?:[\p{L}][\p{L}\p{N} &'’.-]{0,30}:\s*)?$/u;
+const COLLECTING_VERB = /^\s+(?:a\s+pr[ée]lev[ée]|te\s+ha\s+cobrado|ha\s+cobrado|(?:has\s+)?charged|hat\s+(?:\S+\s+){0,6}?(?:abgebucht|eingezogen)|heeft\s+(?:\S+\s+){0,6}?afgeschreven|ha\s+addebitato|cobrou|pobra[łl]|har\s+(?:dragit|trukket|hævet))/iu;
+const OWN_BEFORE = /(?<![\p{L}\p{N}])(?:your|ur|ihre[rnms]?|deine[rnms]?|votre|vos|tua|sua|seu|uw|jouw|din|ditt|dit|dine|tw[oó]j\p{L}*|va[šs]\p{L}*)\s+(?:\p{L}+\s+){0,1}$/iu;
+const INSTRUMENT_BEFORE = /(?:(?<![\p{L}\p{N}])(?:ta|tu|su|je|with|using|via|by|on|mit|avec|con|com|met|med|par|por|z|s)\s+(?:\p{L}+\s+){0,1}|(?:card|karte|carte|tarjeta|carta|cart[ãa]o|kaart|karta|kort|kortet)\s*[:-]?\s*|بطاقت?ك?\s*)$/iu;
+const THRESHOLD_BEFORE = /(?:(?<![\p{L}\p{N}])(?:upwards\s+of|in\s+excess\s+of|(?:more|greater|higher|larger|less|lower)\s+than(?:\s+or\s+equal\s+to)?|at\s+or\s+above|ab|over|above|exceed(?:s|ed|ing)?|at\s+least|up\s+to|mehr\s+als|plus\s+de|m[áa]s\s+de|pi[uù]\s+di|mais\s+de|meer\s+dan|powy[żz]ej|mer\s+än|mere\s+end|mer\s+enn|v[íi]ce\s+ne[žz]|sup[ée]rieure?s?\s+[àa]|superiore\s+a|oltre|[öo]ver|ponad|superior\s+a|mayor\s+(?:de|que|a)|maior\s+(?:de|que)|acima\s+de|boven|groter\s+dan|st[öo]rre\s+[äa]n|st[øo]rre\s+end|h[øo]yere\s+enn|vy[šs][šs][íi]\s+ne[žz]|[أا]كثر\s+من|بأكثر\s+من|[أا]على\s+من|يتجاوز|تتجاوز)\s+|(?<![\p{L}\p{N}"'/=])(?:&gt;|[>≥])=?\s*)(?:the\s+|your\s+)?(?:\p{Lu}{1,3})?$/iu;
+const THRESHOLD_AFTER = /^\s*(?:\(?\s*(?:alert\s+)?(?:limit|threshold|limite|límite|limiet)\b|(?:or|and)\s+(?:more|above|over|higher|greater|up)\b|\(?\s*(?:above|over|exceeding)\s+(?:your|the)\b|oder\s+mehr\b|ou\s+plus\b|o\s+m[áa]s\b|o\s+pi[uù]\b|ou\s+mais\b|of\s+meer\b|eller\s+mer\b|eller\s+mere\b|lub\s+wi[eę]cej\b|nebo\s+v[íi]ce\b)/iu;
+const OWN_ACCOUNT_MOVE = new RegExp([
+    String.raw `\b(?:my|your|own)\s+(?:\p{L}+\s+){0,2}?(?:savings?|pot|vault|isa)\b|\byour\s+other\s+account\b|\bown\s+account\b|\bsavings\s+(?:account|pot|space|vault)\b`,
+    String.raw `(?<![\p{L}])(?:livret|compte\s+(?:d['’])?[ée]pargne|plan\s+d['’][ée]pargne|entre\s+vos\s+comptes)(?![\p{L}])`,
+    String.raw `(?<=\p{L})livret(?:\s*a)?(?![\p{L}])`,
+    String.raw `(?<![\p{L}])(?:tagesgeld\p{L}*|festgeld\p{L}*|sparkonto|sparbuch|unterkonto|(?:n26|revolut|bunq)\s+spaces?|eigenes?\s+konto|umbuchung|wertpapierdepot|(?:ins|auf\s+(?:dein|ihr))\s+depot|trade\s+republic|scalable\s+capital)(?![\p{L}])`,
+    String.raw `(?<![\p{L}])(?:cuenta\s+(?:de\s+)?ahorro|hucha|entre\s+(?:tus|sus)\s+cuentas|traspaso|conto\s+deposito|conto\s+risparmio|salvadanaio|giroconto|tra\s+i\s+tuoi\s+conti)(?![\p{L}])`,
+    String.raw `(?<![\p{L}])(?:spaarrekening|spaarpot|spaardoel|eigen\s+rekening|tussen\s+(?:je|uw)\s+rekeningen|conta\s+poupan[çc]a|poupan[çc]a|mealheiro|entre\s+contas)(?![\p{L}])`,
+    String.raw `(?<![\p{L}])(?:oszcz[eę]dno\p{L}*|skarbonk\p{L}*|przelew\s+w[łl]asny|mi[eę]dzy\s+(?:swoimi|w[łl]asnymi)|sparkonto|sparande|egna\s+konton|opsparing\p{L}*|egen\s+konto|sparekonto|spořicí\p{L}*|spoření|vlastní\s+účet|sporici\s+ucet|vlastni\s+ucet|eget\s+konto|moje\s+cele|savings|حساب\s+التوفير)(?![\p{L}])`,
+    String.raw `(?<![\p{L}])(?:chip(?![ \t]+\p{L})|moneybox|raisin|ally\s+bank|premium\s+bonds|ns&i)(?![\p{L}])`,
+].join('|'), 'giu');
+const OWN_ACCOUNT_ABBREVIATION = /(?<![\p{L}\p{N}])(?:LEP|PEL|LDDS|CEL|PEA|ISA)(?![\p{L}\p{N}])/gu;
+const OWN_ACCOUNT_LEAD = /(?<![\p{L}])(?:to|into|from|à|vers|sur|an|auf|aufs|ins|von|naar|van|til|till|fra|från|para|a|de|da|do|na|od|z|paid|sent|transferred|moved|fakturu|zaplatili|betalt|pagaste|enviou|enviaste|من|إلى|الى)\s+(?:[^\s\d]+\s+){0,3}$|\(\s*$/iu;
+const EUROPEAN_EXAMPLE_OR_BILL = /(?<!\p{L})(?:por\s+ejemplo|par\s+exemple|zum\s+beispiel|beispielsweise|muster-benachrichtigung|bijvoorbeeld|ad\s+esempio|per\s+esempio|por\s+exemplo|na\s+przykład|till\s+exempel|for\s+eksempel|například|nieuwe\s+rekening|nieuwe\s+factuur|nueva\s+factura|nouvelle\s+facture|neue\s+rechnung|nuova\s+fattura|nuova\s+bolletta|ny\s+r[äa]kning|nowy\s+rachunek|nova\s+fatura|nowa\s+faktura|ny\s+faktura|ny\s+regning|nová\s+faktura)(?!\p{L})/iu;
+const EUROPEAN_UNCLAIMED = /(?<!\p{L})(?:(?:accepteren|accepter|akzeptieren|annehmen|aceitar|aceptar|accettare|zaakceptuj|zaakceptować|godkänna|acceptere|akseptere|přijmout)\s*\?|vil\s+du\s+(?:ta\s+imot|modtage|tage\s+imod)|vill\s+du\s+ta\s+emot|ta\s+imot\s+(?:pengene|beløpet|betalingen)|créez\s+votre\s+compte|pour\s+(?:le|la|les)\s+recevoir|ative\s+o\s+mb\s+way|para\s+(?:o\s+)?receber|um\s+(?:es|das\s+geld|den\s+betrag)\s+zu\s+erhalten|para\s+(?:recibirlo|cobrarlo|aceptarlo)|per\s+riceverl[oi]|om\s+het\s+te\s+ontvangen|aby\s+(?:odebrać|odebrac|przyjąć)|chcete\s+(?:přijmout|prijmout))(?!\p{L})/iu;
 const commonDirection = (directions) => {
     const known = [...new Set(directions.filter((value) => value === 'debit' || value === 'credit'))];
     return known.length === 1 ? known[0] : 'unknown';
@@ -14744,6 +18676,7 @@ const completedMovement = (source) => {
     const depositPattern = phrase(String.raw `deposit\s*\/\s*transfer\s+to\s+your\s+account|überweisung\s+eingegangen`);
     const arabicTransferOut = /(?<!\p{L})تم\s+تحويل[\s\S]{0,80}?من\s+حسابك/u;
     const arabicTransferIn = /(?<!\p{L})تم\s+(?:تحويل|إيداع|ايداع)[\s\S]{0,80}?(?:إلى|الى|في)\s+حسابك/u;
+    const namedPayeeOut = /(?:^|[:.!]\s*)You\s+paid\s+(?!(?:The|A|An|Your|Our|To)\b)[A-Z][\p{L}'’.-]+(?:\s+[A-Z][\p{L}'’.-]+){0,3}\s+(?:[$€£]|[A-Z]{3}\s?)\d/u;
     const transferOutWords = /(?<!\p{L})(?:pix\s+enviado|você\s+enviou\s+um\s+pix|you\s+have\s+(?:successfully\s+)?sent|money\s+sent\s+successfully\s+to|^\s*sent\s+(?:rs\.?|inr|₹)|has\s+enviado\s+un\s+bizum)(?!\p{L})/iu;
     const transferInWords = /(?<!\p{L})(?:virement\s+reçu|você\s+recebeu\s+um\s+pix|pix\s+recebido|havale\s+gelmiştir|eft\s+gelmiştir|you\s+have\s+(?:successfully\s+)?received|has\s+recibido\s+un\s+bizum|bizum\s+recibido)(?!\p{L})/iu;
     const statuses = [];
@@ -14770,7 +18703,7 @@ const completedMovement = (source) => {
     const debit = debitPatterns.map(matches).some(Boolean);
     const refund = refundPatterns.map(matches).some(Boolean);
     const deposit = matches(depositPattern);
-    const transferOut = matches(arabicTransferOut) || matches(transferOutWords);
+    const transferOut = matches(arabicTransferOut) || matches(transferOutWords) || matches(namedPayeeOut);
     const transferIn = matches(arabicTransferIn) || matches(transferInWords);
     const cashWithdrawal = matches(phrase(String.raw `cash\s+out\s+of[\s\S]{0,140}?is\s+successful|processed\s+(?:a\s+)?debit\s+card\s+withdrawal\s*:|a\s+debit\s+transaction\s+from\s+withdrawal[\s\S]{0,140}?was\s+posted`));
     if (cashWithdrawal && !refund && !deposit && !transferIn) {
@@ -14789,6 +18722,56 @@ const completedMovement = (source) => {
     return refund ? { status, direction: 'credit', family: 'refund' }
         : deposit ? { status, direction: 'credit', family: 'transfer' } : { status, direction: 'debit', family: 'purchase' };
 };
+const PERSONAL_CHAT = /(?<![\p{L}\p{N}])(?:lol|lmao|rofl|haha+|hehe+|omg|btw|ngl|tbh)(?![\p{L}\p{N}])|[\u{1F602}\u{1F923}\u{1F62D}]|(?<![\p{L}\p{N}'’])[Ii][ \t]+(?:just[ \t]+)?(?:spent|paid|bought|sent|transferred|withdrew)(?![\p{L}\p{N}])/u;
+const FOREIGN_FIRST_PERSON_PAYER = new RegExp([
+    String.raw `(?<!\p{L})ik\s+(?:heb|had)(?!\p{L})(?:[^.!?\n]|\.\d){0,60}?(?<!\p{L})(?:betaald|overgemaakt|uitgegeven|voorgeschoten)(?!\p{L})`,
+    String.raw `(?<!\p{L})ik\s+(?:betaalde|maakte)(?!\p{L})`,
+    String.raw `(?<!\p{L})(?:ich\s+(?:habe|hab)|^\s*hab|^\s*habe)(?!\p{L})(?:[^.!?\n]|\.\d){0,60}?(?<!\p{L})(?:bezahlt|gezahlt|überwiesen|ausgegeben|ausgelegt|geschickt|gesendet)(?!\p{L})`,
+    String.raw `(?<!\p{L})j['’]ai\s+(?:payé|dépensé|envoyé|viré|réglé|avancé)(?!\p{L})`,
+    String.raw `(?<!\p{L})he\s+(?:pagado|gastado|enviado|transferido|adelantado)(?!\p{L})`,
+    String.raw `(?<!\p{L})ho\s+(?:pagato|speso|inviato|trasferito|anticipato)(?!\p{L})`,
+    String.raw `(?<!\p{L})(?:paguei|gastei|enviei|transferi|adiantei)(?!\p{L})`,
+    String.raw `(?<!\p{L})(?:zapłaciłem|zapłaciłam|zaplacilem|zaplacilam|wydałem|wydałam|przelałem|przelałam|wysłałem|wysłałam)(?!\p{L})`,
+    String.raw `(?<!\p{L})jeg\s+(?:har\s+)?(?:betalt|betalte|overført|overførte|sendt|sendte|brugt|brukt|lagt\s+ud|lagt\s+ut)(?!\p{L})`,
+    String.raw `(?<!\p{L})jag\s+(?:har\s+)?(?:betalat|betalade|swishat|swishade|skickat|skickade|överfört|lagt\s+ut)(?!\p{L})`,
+    String.raw `(?<!\p{L})(?:(?:zaplatil|zaplatila|poslal|poslala|utratil|utratila)\s+jsem|jsem\s+(?:zaplatil|zaplatila|poslal|poslala|utratil|utratila))(?!\p{L})`,
+    String.raw `(?<!\p{L})(?:schick\s+mir|deinen\s+anteil|stuur\s+(?:je\s+)?(?:me|mij)|jouw\s+deel|envoie-moi|ta\s+part|m[áa]ndame|me\s+pasas|tu\s+parte|mandami|la\s+tua\s+parte|manda-me|a\s+tua\s+parte|oddaj\s+mi|oddasz\s+mi|twoją\s+część|send\s+mig|swisha\s+mig|vippse?r?\s+(?:du\s+)?meg|din\s+del|pošli\s+mi|svůj\s+díl)(?!\p{L})`,
+].join('|'), 'imu');
+const CAPS_NAME_RUN = /(?<![\p{L}\p{N}])\p{Lu}[\p{Lu}\p{N}&'’.*-]*(?:[ \t]+[\p{Lu}\p{N}][\p{Lu}\p{N}&'’.*-]*)+(?![\p{L}\p{N}])/gu;
+const TITLE_NAME_RUN = /(?<=(?:^|\s)(?:[-–·]|hos|u|bei|at|chez|en|presso|bij|w|i|da|na)[ \t]+)\p{Lu}\p{Ll}*(?:[ \t]+\p{Lu}[\p{L}\p{N}&'’.*-]*)+/gu;
+const REFUND_WORD = /\b(?:refund(?:ed|s)?|reversal|reversed|storno|rimborso|remboursement|reembolso|erstattung|terugbetaling)\b/iu;
+const REFUND_LEAD_WORD = /\b(?:refund(?:ed|s)?|reversal|reversed|rimborso|remboursement|reembolso|erstattung|terugbetaling)\b/iu;
+const NAME_RUN_BEFORE = /(?<![\p{L}])(?:[Aa][Tt]|[Bb](?:ei|EI)|[Cc](?:hez|HEZ)|[Ee][Nn]|[Bb](?:ij|IJ)|[Pp](?:resso|RESSO)|[Hh](?:os|OS)|[Ff](?:rom|ROM)|[Tt][Oo]|@)[ \t]+((?:[\p{Lu}\p{N}&'’.*-]+[ \t]+)*)$/u;
+const NAME_RUN_BREAK = /^(?:FOR|OF|IS|WAS|WERE|ARE|TOTAL|AMOUNT|AMT|AT|ON|WITH|BY|TO|FROM|IN|AND|PURCHASE|PAYMENT|CHARGE|TRANSACTION|SPENT|PAID|DEBITED|CREDITED|USING|VIA|CARD|OVER|UNDER|VALUE|SUM)$/u;
+const APPROXIMATE_AFTER = /^[ \t]*(?:\([ \t]*(?:approx(?:imately|imate|\.)?|est(?:imated|imate|\.)?|about|roughly|circa|ca\.|~)[ \t]*\)|[~≈]|(?:approximately|approx\.?|roughly|or[ \t]+so|or[ \t]+thereabouts|estimated|est\.)(?![\p{L}]))/iu;
+const approximateAmount = (source, amountStart, amountEnd) => {
+    if (amountEnd > amountStart && APPROXIMATE_AFTER.test(source.slice(amountEnd, amountEnd + 40)))
+        return true;
+    const before = source.slice(Math.max(0, amountStart - 24), amountStart);
+    const hedge = before.match(APPROXIMATE_AMOUNT);
+    if (!hedge)
+        return false;
+    const word = hedge[0].match(/^[\p{L} \t.]+/u)?.[0].trim() ?? '';
+    const hedgeStart = amountStart - before.length + hedge.index;
+    const run = source.slice(Math.max(0, hedgeStart - 80), hedgeStart).match(NAME_RUN_BEFORE);
+    const nameWords = run ? run[1].trim().split(/[ \t]+/u).filter(Boolean) : [];
+    return !(word && word === word.toLocaleUpperCase('en-US') && /\p{Lu}/u.test(word) && run &&
+        !nameWords.some((name) => NAME_RUN_BREAK.test(name)));
+};
+const TAKE_BACK_MOVEMENT = String.raw `(?:payment|transfer|deposit|credit|money|funds|amount|transaction|remittance|zelle)`;
+const TAKE_BACK_PARTICIPLE = String.raw `(?:recalled|reclaimed|reversed|reverted|retracted|undone|(?:pulled|clawed|taken|charged|debited)\s+back|withdrawn\s+by\s+(?:the\s+)?(?:sender|payer|remitter|originator))`;
+const TAKE_BACK_ACTIVE = String.raw `(?:recall(?:s|ed|ing)|reclaim(?:s|ed|ing)|revers(?:es|ed|ing)|revert(?:s|ed|ing)|retract(?:s|ed|ing)|undo(?:es|ing)|undid|(?:pull(?:s|ed|ing)|claw(?:s|ed|ing)|tak(?:es|ing)|took|charg(?:es|ed|ing))\s+back)`;
+const TAKE_BACK_SENTENCE = new RegExp(String.raw `(?<![\p{L}])` + String.raw `(?:${TAKE_BACK_MOVEMENT}\s+(?:(?:has|have|had)\s+been\s+|(?:is|was|are|were)\s+(?:being\s+)?|will\s+be\s+|being\s+|got\s+)?${TAKE_BACK_PARTICIPLE}` +
+    String.raw `|${TAKE_BACK_ACTIVE}\s+(?:it|(?:this|the|that|your|their|his|her|its)\s+(?:[\p{L}-]+\s+)?${TAKE_BACK_MOVEMENT}))(?![\p{L}])`, 'iu');
+const TAKE_BACK_RULE = /(?<![\p{L}])(?:can|cannot|can['’]t|could|may|might|would|should|if|unless|whether)(?![\p{L}])/iu;
+const takesMovementBack = (source) => source.split(/[!?\n]+|\.(?=\s|$)/u)
+    .some((sentence) => TAKE_BACK_SENTENCE.test(sentence) && !TAKE_BACK_RULE.test(sentence));
+const APPROXIMATE_AMOUNT = /(?:(?<![\p{L}\p{N}.*/-])(?:about|approx(?:imately|\.)?|around|roughly|nearly|almost|up\s+to|estimated|est\.|circa|ca\.|environ|ungef[äa]e?hr|etwa|aproximadamente|aprox\.?|ongeveer|ungef[äa]r|cirka|omkring|oko[łl]o|p[řr]ibli[žz]n[ěe])|[~≈])[ \t]*(?:[A-Z]{3}[ \t]*|[$€£¥₹][ \t]*)?$/iu;
+const SETTLES_LATER = /\b(?:will|should)\s+be\s+(?:made\s+)?available\b|\bwe\s+will\s+(?:debit|charge|deduct|take|collect)\b|\bwill\s+(?:be\s+)?(?:withdrawn|deducted|debited|charged|taken|posted|updated|post|settle)\b|\bmay\s+take\b[^.!?\n]{0,40}\b(?:post|appear|settle|reflect|clear)\b|\bsubject\s+to\s+final\b|\bfinal\s+amount\b|\bstarting\s+next\b|\bavailable\s+for\s+scheduling\b|\brenews\s+(?:tomorrow|today|on|in|next|soon|automatically)\b|\bavailable\s+(?:in\s+your\s+(?:\w+\s+)?account\s+)?on\s+\d/iu;
+const ENGLISH_NOT_SETTLED = /\b(?:sent\s+back|bounced(?:\s+back)?|(?:was|been|were|is)\s+returned|returned\s+to\s+(?:the\s+)?(?:sender|you)|accept\s+(?:it|this|the\s+(?:payment|money|transfer)|within)|to\s+accept\b|waiting\s+for\s+you\s+to|enroll\s+to\s+(?:receive|accept|get)|on\s+(?:the|its)\s+way|(?:card|account)\s+verification\b(?!\s+code)|\bverification\s+(?:charge|hold|transaction|purchase|payment|amount)\b|\bfor\s+verification\b|\d\s+verification\b|not\s+enough\s+(?:funds|money|balance)|for\s+(?:example|instance)|\bnothing\s+(?:was|has\s+been|were)\s+(?:charged|taken|debited|deducted)\b|\bcharged\s+nothing\b|\brequires?\s+(?:your\s+)?(?:approval|authori[sz]ation|confirmation)\b|\bwaiting\s+for\s+(?:\p{L}+\s+){1,3}?to\s+(?:sign\s+up|join|enrol+|register|accept|claim)\b|\bwill\s+be\s+(?:approved|processed|completed|confirmed)\b|\b(?:approved|processed|completed)\s+shortly\b|\bunder\s+process(?:ing)?\b|\bbeing\s+processed\b|\bunclaimed\b|\b(?:has|have)(?:\s+not|n['’]?t)\s+(?:yet\s+)?(?:been\s+)?(?:accepted|claimed)\b|\bnot\s+(?:yet\s+)?(?:been\s+)?(?:accepted|claimed)\b|\b(?:will|may|might)\s+be\s+reviewed\b|\b(?:is|are)\s+being\s+reviewed\b|\bunder\s+review\b|\bdoes(?:\s+not|n['’]?t)\s+have\s+an?\s+\p{L}+\s+account\b|\baccept\s+(?:it\s+|this\s+|the\s+payment\s+)?now\b|\bis\s+how\s+(?:your\s+)?\p{L}+\s+(?:see|sees|will\s+see)\b)/iu;
+const WORLD_EXAMPLE_LEAD = /(?:^|[:/\n](?<![:/\n.!?]\s*?\s)\s*|[.!?]\s+)(?:exemple|beispiel|ejemplo|esempio|voorbeeld|exemplo|przyk[łl]ad|exempel|eksempel|p[řr][íi]klad|مثال)\s*[.:]/iu;
+const WORLD_NOT_SETTLED = /(?<![\p{L}\p{N}])(?:acceptez(?:-le|-la)?|accepter\s+(?:le|ce)\s+(?:paiement|virement)|akzeptieren\s+sie|annehmen\s+sie|acept(?:a(?:lo|la)?|e\s+(?:el|la)\s+(?:pago|transferencia))|accetta(?:lo|la)?|aceite(?:-o|-a)?|aceita(?:-o|-a)?|accepteer|zaakceptuj|godk[äa]nn|godkend|godta|p[řr]ijm[ěe]te|ربما|قد\s+يكون|من\s+المحتمل|يحتمل)(?![\p{L}\p{N}])/iu;
+const ENGLISH_EXAMPLE_LEAD = /(?:^|[:/\n](?<![:/\n.!?]\s*?\s)\s*|[.!?]\s+)(?:example|sample(?:\s+alert)?|tip|pro\s+tip|hint)\s*(?:[.:]|[-–—]\s|\n)/iu;
 const referenceSpans = (text) => [...text.matchAll(/\b(?:ref(?:erence)?(?:\s+(?:id|no\.?|number))?|(?:transaction|txn|customer|mandate)\s+(?:id|no\.?|number)|iban)\s*[:#-]?\s*([A-Z0-9*._-]{1,40})/giu)].filter((match) => /\d/u.test(match[1])).map((match) => ({
     start: match.index + match[0].length - match[1].length,
     end: match.index + match[0].length,
@@ -14855,8 +18838,12 @@ const explicitNonPosting = (source, includeLifecycle = true) => {
     return null;
 };
 function inspectUniversalBankEvent(source, context = {}) {
-    if (typeof source !== 'string' || !source.trim())
+    return (0, alert_semantics_1.withAlertSemanticsMemo)(() => inspectUniversalBankEventOnce(source, context));
+}
+function inspectUniversalBankEventOnce(input, context) {
+    if (typeof input !== 'string' || !input.trim())
         return emptyEvent('empty-input');
+    const source = (0, alert_status_lexicon_1.withPlainSpaces)(input);
     if (source.length > 4096)
         return emptyEvent('input-too-long');
     const latam = (0, latam_alert_templates_1.matchLatamTemplate)(source, { market: context.market, sender: context.sender });
@@ -14903,9 +18890,22 @@ function inspectUniversalBankEvent(source, context = {}) {
         if (family === 'unknown' || (completion.direction === 'credit' && family === 'cash-withdrawal'))
             family = completion.family;
     }
+    const principalMoney = money.amount.value ?? (money.amount.alternatives.length ? money.amount.alternatives[0] : null);
+    const principalCurrencies = new Set(money.amount.value ? [money.amount.value.currency]
+        : money.amount.alternatives.map((alternative) => alternative.currency));
+    const europeanHeading = status === 'unknown' && !roleUnresolved && firstPrincipal && !context.market &&
+        principalMoney && money.amount.spans.length === 1 &&
+        [...principalCurrencies].every((currency) => /^(?:EUR|CHF|PLN|SEK|DKK|NOK|CZK)$/u.test(currency))
+        ? (0, alert_semantics_1.europeanHeadingMovement)(source, maskedSource, { ...money.amount.spans[0], currency: principalMoney.currency }, draft.candidates.map((candidate) => candidate.span), packs, context.sender)
+        : null;
+    if (europeanHeading) {
+        status = 'posted';
+        if (family === 'unknown')
+            family = europeanHeading.family;
+    }
     const sourceControl = explicitNonPosting(source, false) ??
         explicitNonPosting(status === 'posted' && !roleUnresolved ? maskedSource.slice(span.start, span.end) : maskedSource);
-    const challengeHeader = /\b(?:otp|verification\s+code|security\s+code)\s*(?:is\s*)?[:=-]?\s*\p{N}/iu.test(source.slice(0, span.start));
+    const challengeHeader = /\b(?:otp|verification\s+code|security\s+code)\s*(?:is\s*)?(?:[:=-]\s*)?\p{N}/iu.test(source.slice(0, span.start));
     const challenge = sourceControl?.family === 'authentication' || challengeHeader || /\botp(?=\d)/iu.test(semanticSource) ||
         (roleUnresolved && (draft.reasons.includes('authentication-or-otp') ||
             /\botp(?=\d)/iu.test(draft.normalizedText)));
@@ -14916,7 +18916,10 @@ function inspectUniversalBankEvent(source, context = {}) {
         status = 'informational';
     if (explicitlyUnsuccessful)
         status = 'failed';
-    if (!challenge && (0, bank_alert_semantic_rules_1.isTransactionVerificationChallenge)(wholeContext) && status === 'posted') {
+    if (!challenge && ((0, bank_alert_semantic_rules_1.isTransactionVerificationChallenge)(wholeContext) ||
+        (questionTail > 0 && !(0, bank_alert_semantic_rules_1.endsWithFooterQuestion)(source.slice(Math.max(span.start, span.end - 48), span.end)) &&
+            !(0, alert_semantics_1.endsWithEuropeanFooterQuestion)(source.slice(Math.max(span.start, span.end - 64), span.end)))) &&
+        status === 'posted') {
         status = 'unknown';
     }
     if (sourceControl) {
@@ -14926,6 +18929,11 @@ function inspectUniversalBankEvent(source, context = {}) {
     }
     if (challenge)
         family = 'authentication';
+    const personalChat = PERSONAL_CHAT.test(source) || FOREIGN_FIRST_PERSON_PAYER.test(source);
+    if (personalChat) {
+        status = 'informational';
+        family = 'unknown';
+    }
     if (roleUnresolved && (status === 'posted' || status === 'unknown')) {
         status = 'unknown';
         family = 'unknown';
@@ -14934,6 +18942,50 @@ function inspectUniversalBankEvent(source, context = {}) {
         .test(source);
     if (pendingAnywhere && (status === 'posted' || status === 'unknown'))
         status = 'informational';
+    if ((EUROPEAN_UNCLAIMED.test(source) || EUROPEAN_EXAMPLE_OR_BILL.test(source)) &&
+        (status === 'posted' || status === 'unknown'))
+        status = 'informational';
+    const settlesLater = SETTLES_LATER.test(source);
+    const notSettled = ENGLISH_NOT_SETTLED.test(source) || ENGLISH_EXAMPLE_LEAD.test(source) ||
+        WORLD_NOT_SETTLED.test(source) || WORLD_EXAMPLE_LEAD.test(source) || takesMovementBack(source);
+    const questionFrom = money.amount.spans[0]?.end ?? span.end;
+    const sentenceRest = source.slice(questionFrom);
+    const sentenceStop = sentenceRest.search(/[!\n?？؟]|\.(?=\s|$)/u);
+    const questionedSentence = sentenceStop >= 0 && /[?？؟]/u.test(sentenceRest[sentenceStop]) &&
+        !(0, bank_alert_semantic_rules_1.endsWithFooterQuestion)(source.slice(Math.max(span.start, questionFrom + sentenceStop - 48), questionFrom + sentenceStop)) &&
+        !(0, alert_semantics_1.endsWithEuropeanFooterQuestion)(source.slice(Math.max(span.start, questionFrom + sentenceStop - 64), questionFrom + sentenceStop));
+    if ((settlesLater || notSettled || questionedSentence || (0, alert_semantics_1.englishNoticeOpenerWithdrawn)(source)) &&
+        status === 'posted')
+        status = 'unknown';
+    if (status === 'posted') {
+        const europeanCurrency = [...principalCurrencies].some((currency) => EUROPEAN_CURRENCY.test(currency));
+        const europeanWording = Boolean(europeanHeading) || (0, alert_semantics_1.hasEuropeanPackWording)(semanticSource, packs);
+        const amountStart = money.amount.spans[0]?.start ?? 0;
+        const amountEnd = money.amount.spans[0]?.end ?? 0;
+        const refundInClause = (0, alert_status_lexicon_1.findStatusWords)(source).filter((word) => word.concept === 'refunded')
+            .every((word) => word.index < amountStart || !/[\n\t|()[\]/:;–—]|\s-\s|-(?=\p{L})|\.\s/u.test(source.slice(amountEnd, word.index + 1)));
+        const refundWords = (0, alert_status_lexicon_1.findStatusWords)(source).filter((word) => word.concept === 'refunded');
+        const refundNounCredit = refundWords.length > 0 && commonDirection(readings.map((reading) => reading.direction)) === 'credit' &&
+            refundWords.every((word) => /^(?:r[üu]e?ck)?erstattung$/iu.test(word.text) ||
+                refundWords.some((other) => other !== word && /^(?:r[üu]e?ck)?erstattung$/iu.test(other.text) &&
+                    other.index <= word.index && word.index + word.text.length <= other.index + other.text.length));
+        const ignore = family !== 'refund' ? refundNounCredit ? ['refunded'] : []
+            : REFUND_LEAD_WORD.test(source.slice(0, amountStart)) ? ['refunded', 'returned'] : refundInClause ? ['refunded'] : [];
+        const doubt = europeanCurrency || europeanWording
+            ? (0, alert_semantics_1.europeanMessageDoubt)(source, maskedSource, packs, context.sender, europeanWording, ignore, money.amount.spans[0] ?? null)
+            : (0, alert_semantics_1.worldStatusDoubt)(source, ignore, money.amount.spans[0] ?? null) ? 'unknown' : null;
+        if (doubt)
+            status = doubt;
+        if (status === 'posted' && approximateAmount(source, amountStart, amountEnd))
+            status = 'unknown';
+    }
+    if (status === 'posted' && /\p{Script=Latin}[\u00ad\u200b\u200d\u2060\ufeff]+\p{Script=Latin}/u.test(source))
+        status = 'unknown';
+    if (/\b(?:received|got)\s+(?:a|an|your)\s+(?:new\s+)?(?:e-?bill|bill|invoice|statement)\b/iu.test(source) &&
+        (status === 'posted' || status === 'unknown')) {
+        status = 'future';
+        family = 'bill';
+    }
     const hasStatement = money.statementTotal.evidence !== 'missing' || money.minimumDue.evidence !== 'missing';
     const hasBalance = money.balance.evidence !== 'missing' || money.creditLimit.evidence !== 'missing';
     const hasAmount = money.amount.evidence !== 'missing';
@@ -14962,8 +19014,74 @@ function inspectUniversalBankEvent(source, context = {}) {
         status = 'future';
     }
     const cardSettlement = /\bpayment\b[\s\S]{0,100}\b(?:towards?|against)\s+(?:your\s+)?(?:[\p{L}&.-]+\s+){0,3}?(?:(?:credit|covered|charge)\s+)?card\b|\bpayment\b[\s\S]{0,100}\b(?:received|credited)\s+(?:to|on|for)\s+(?:your\s+)?(?:[\p{L}&.-]+\s+){0,3}?(?:credit|covered|charge)\s+card\b|\breceived\s+your\s+payment\b[\s\S]{0,100}\b(?:to|towards?|for|on)\s+(?:your\s+)?(?:[\p{L}&.-]+\s+){0,3}?(?:credit|covered|charge)\s+card\b/iu.test(semanticSource);
+    const ownedClause = source.slice(span.start, span.end);
+    const usCardSettlement = /\bpayment\b[\s\S]{0,60}\b(?:posted|received|applied)\b[\s\S]{0,40}\bfor\s+(?:your\s+)?(?:credit|covered|charge)\s+card\b|\b(?:payment|pmt)\b[\s\S]{0,60}?\bto\s+(?:(?!(?:with|using|by|on|via|from|your)\b)[\p{L}&.-]+\s+){0,2}card\s+(?:ending\s+(?:in\s+)?)?[x*•·.]*\d{4}\b|\bwe(?:['’]ve|\s+have)?\s+received\s+your\s+(?:[$€£]\s?[\d.,]+\s+)?payment\b/iu.test(ownedClause);
+    const payeeIsCard = /\b(?:payment|pmt|paid|sent|transferred)\b(?:[^.\n]|\.\d){0,60}?\bto\s+(?:your\s+)?(?:[\p{L}&.-]{1,20}\s+){0,3}?(?:credit\s+(?:card|crd)|card(?:\s+(?:ending|services|member|account))?\s*(?:[x*•·.]{0,8}\d{4})|american\s+express|amex|discover(?:\s+card)?|capital\s+one|citi(?:\s*cards?|bank\s+card)?|barclaycard|synchrony|card\s+services|visa|master\s?card|mbna)\b/iu.test(ownedClause) ||
+        /\bpagad[oa]\b(?:[^.\n]|\.\d){0,40}?\ba\s+(?:tu|su)\s+tarjeta\s+de\s+cr[ée]dito\b/iu.test(ownedClause) ||
+        /\b(?:payment|pmt|paid|sent|transferred)\b(?:[^.\n]|\.\d){0,60}?\bto\s+your\s+(?:[\p{L}&.-]{1,20}\s+){0,3}?(?:card|platinum|gold|visa|mastercard)\b/iu.test(ownedClause) ||
+        CREDIT_CARD_TARGET.test(ownedClause) ||
+        PAID_TO_CARD_OR_BANK.test(ownedClause) || ONTO_CREDIT_CARD.test(source);
+    const paidToOwnCard = payeeIsCard || /\b(?:[Pp]aid|[Pp]ayment|[Pp]mt)\b(?:[^.\n]|\.\d){0,60}?\bto\s+your\s+(?:(?:[A-Z][\p{L}\p{N}&.'’-]*|credit|charge|covered)\s+){0,4}?[Cc]ard\b/u.test(ownedClause) ||
+        /\b[Pp]ayment\b(?:[^.\n]|\.\d){0,100}?\b(?:posted|applied)\s+(?:to|on)\s+your\s+(?:(?:[A-Z][\p{L}\p{N}&.'’-]*|credit|charge|covered)\s+){0,4}?[Cc]ard\b/u.test(ownedClause);
     const cardPaymentReceipt = /^\s*your\s+payment\b[^\n]{0,96}\bagainst\s+(?:your\s+)?(?:credit|covered)\s+card\b[^\n]{0,96}\bwas\s+received\b/iu.test(source);
-    if (!statementHeader && (cardPaymentReceipt || (cardSettlement && status === 'posted'))) {
+    const payeePosition = (match) => {
+        const raw = codeSource.slice(Math.max(0, match.index - 60), match.index);
+        if (/(?<!\p{L})(?:charged|made|billed|debited|placed|authori[sz]ed|added|posted)\s+(?:on\s+|to\s+)(?:your\s+)?(?:[\p{L}&.'’-]+\s+){0,2}$/iu.test(raw))
+            return false;
+        const before = raw.replace(/(?:[\p{Lu}\p{N}&'’.-]+[ \t]+){0,4}$/u, '');
+        const after = codeSource.slice(match.index + match[0].length, match.index + match[0].length + 40);
+        let afterAmount = false;
+        for (let words = 0, rest = raw; words <= 4 && !afterAmount; words += 1) {
+            afterAmount = AFTER_AMOUNT.test(rest) || ((caseless || shoutingText) && PAYEE_PREPOSITION.test(rest));
+            rest = rest.replace(/[\p{Lu}\p{N}&'’.-]+[ \t]+$/u, '');
+        }
+        const verbAfter = after.replace(/^[ \t]*(?:[\p{Lu}\p{N}&'’.-]+[ \t]+){0,4}/u, ' ');
+        let titled = false;
+        for (let words = 0, rest = before; words <= 3 && !titled; words += 1) {
+            titled = PAYEE_PREPOSITION.test(rest) || PAYEE_FIELD.test(rest);
+            rest = rest.replace(/[\p{Lu}][\p{L}\p{N}&'’.-]*[ \t]+$/u, '');
+        }
+        return titled || PAYEE_PREPOSITION.test(before) || TO_OWN_CARD.test(before) || PAYEE_FIELD.test(raw) ||
+            [before, raw].some((text) => /(?<![\p{L}])(?:paid|pagaste|pagou|betalt|betalte|betalat|zaplacono|zaplatili\s+jste|zaplatil[ao]?|pagato|bezahlt|pay[ée])\s+$/iu.test(text)) ||
+            afterAmount || (LINE_SUBJECT.test(raw) && (COLLECTING_VERB.test(verbAfter) ||
+            /^[ \t]+(?:[A-Z]{3}[ \t]?|[$€£¥₹][ \t]?)?\d/u.test(verbAfter)));
+    };
+    const sourceLetters = source.match(/\p{L}/gu) ?? [];
+    const shoutingText = sourceLetters.length > 0 && sourceLetters.filter((letter) => /\p{Lu}/u.test(letter)).length / sourceLetters.length > 0.8;
+    const sourceWords = source.match(/\p{L}+/gu) ?? [];
+    const caseless = sourceLetters.length > 0 && (!/\p{Lu}/u.test(source) ||
+        (sourceWords.length >= 3 && sourceWords.filter((word) => /^\p{Lu}\p{Ll}*$/u.test(word)).length / sourceWords.length >= 0.9));
+    const codeSource = caseless
+        ? source.replace(/\p{Ll}/gu, (letter) => { const upper = letter.toUpperCase(); return upper.length === letter.length ? upper : letter; })
+        : source;
+    const shoutingSegment = (at) => {
+        const from = Math.max(source.lastIndexOf('\n', at), source.lastIndexOf('. ', at)) + 1;
+        const stops = [source.indexOf('\n', at), source.indexOf('. ', at)].filter((stop) => stop >= 0);
+        const letters = source.slice(from, stops.length ? Math.min(...stops) : source.length).match(/\p{L}/gu) ?? [];
+        return letters.length >= 8 && letters.filter((letter) => /\p{Lu}/u.test(letter)).length / letters.length > 0.8;
+    };
+    const ownCard = (match, generic) => {
+        const before = source.slice(Math.max(0, match.index - 24), match.index);
+        const next = source.slice(match.index + match[0].length).match(/^[ \t]+([\p{Lu}][\p{Lu}\p{N}&'’.-]*)(?![\p{Ll}])/u)?.[1]?.replace(/\.$/u, '');
+        const currencyNext = next !== undefined && /^[A-Z]{3}$/u.test(next) &&
+            /^[ \t]+[A-Z]{3}[ \t]?\d/u.test(source.slice(match.index + match[0].length));
+        if (!generic && next && !currencyNext && !ISSUER_SUFFIX.test(next) && !NEXT_FUNCTION_WORD.test(next) &&
+            !shoutingText && !shoutingSegment(match.index))
+            return true;
+        if (/^\.[a-z]/u.test(source.slice(match.index + match[0].length)) || /[./@]$/u.test(before))
+            return true;
+        if (TO_OWN_CARD.test(before))
+            return false;
+        if (/^bank\s+card$/iu.test(match[0]) &&
+            INSTRUMENT_AFTER.test(source.slice(match.index + match[0].length, match.index + match[0].length + 24)))
+            return true;
+        return OWN_BEFORE.test(before) || (generic && (INSTRUMENT_BEFORE.test(before) ||
+            INSTRUMENT_AFTER.test(source.slice(match.index + match[0].length, match.index + match[0].length + 24))));
+    };
+    const issuerPayee = status === 'posted' && family !== 'refund' && ([...source.matchAll(CARD_ISSUER_PAYEE)].some((match) => payeePosition(match) && !ownCard(match, false)) ||
+        [...codeSource.matchAll(CARD_ISSUER_CODE), ...source.matchAll(CARD_PAYEE_WORDS)]
+            .some((match) => payeePosition(match) && !ownCard(match, !/^(?:ICS|BARCLAYS|DISCOVER)/iu.test(match[0]))));
+    if (!statementHeader && (cardPaymentReceipt || ((cardSettlement || usCardSettlement || paidToOwnCard || issuerPayee) && status === 'posted'))) {
         family = 'card-payment';
         if (cardPaymentReceipt && status === 'unknown')
             status = 'posted';
@@ -14972,6 +19090,15 @@ function inspectUniversalBankEvent(source, context = {}) {
     if (multiplePostings && status !== 'failed' && family !== 'statement' && family !== 'balance') {
         family = 'unknown';
         status = 'informational';
+    }
+    let refundOnlyInName = false;
+    if (family === 'refund' && /\p{Ll}/u.test(semanticSource)) {
+        const blanked = semanticSource.replace(CAPS_NAME_RUN, (run) => REFUND_WORD.test(run) ? ' '.repeat(run.length) : run)
+            .replace(TITLE_NAME_RUN, (run) => REFUND_WORD.test(run) ? ' '.repeat(run.length) : run);
+        refundOnlyInName = blanked !== semanticSource &&
+            !packs.some((market) => (0, alert_semantics_1.inspectMarketAlert)(blanked, market, { sender: context.sender }).family === 'refund');
+        if (refundOnlyInName)
+            family = 'unknown';
     }
     const knownDirection = commonDirection(readings.map((reading) => reading.direction));
     const accountDirection = (0, alert_semantics_1.accountMovementDirection)(semanticSource, firstPrincipal ? maskedSource.slice(0, span.start) : '');
@@ -14984,16 +19111,23 @@ function inspectUniversalBankEvent(source, context = {}) {
             /(?:^|\n)\s*(?:amt|amount)\s*:/iu.test(structured)) {
             headingDirection = /^credit/iu.test(heading) ? 'credit' : 'debit';
         }
-        else if (/(?:^|\n)\s*مبلغ\s*:/u.test(structured)) {
+        else if (/(?:^|\n(?<!\n\s*?\s))\s*مبلغ\s*:/u.test(structured)) {
             if (/^حوالة\s+واردة(?=$|[\s:؛])/u.test(heading))
                 headingDirection = 'credit';
             else if (/^(?:شراء|سحب\s*:\s*صراف\s+آلي|سداد\s+فاتورة|مدفوعات\s+وزارة\s+الداخلية)(?=$|[\s:؛])/u.test(heading))
                 headingDirection = 'debit';
         }
     }
+    if (headingDirection === 'unknown' && europeanHeading)
+        headingDirection = europeanHeading.direction;
     if (family === 'unknown' && status === 'posted' && knownDirection === 'credit' && !roleUnresolved &&
-        /\b(?:credited|deposited)\s+(?:to|into|in)\s+(?:your\s+)?(?:\w+\s+){0,2}(?:a\/?c|acct|account)\b|\b(?:a\/?c|acct|account)\b[^.;\n]{0,30}?\b(?:has\s+been\s+|is\s+)?credited\s+(?:with|by)\b|\bdirect\s+deposit\b/iu.test(maskedSource)) {
+        (/\b(?:credited|deposited)\s+(?:to|into|in)\s+(?:your\s+)?(?:\w+\s+){0,2}(?:a\/?c|acct|account)\b|\b(?:a\/?c|acct|account)\b[^.;\n]{0,30}?\b(?:has\s+been\s+|is\s+)?credited\s+(?:with|by)\b|\bdirect\s+deposit\b/iu.test(maskedSource) ||
+            /\bdeposit\b(?:[^.;\n]|\.\d){0,100}?\b(?:to|into|in)\s+(?:your\s+(?:[\p{L}\p{N}-]+\s+){0,3}?(?:a\/?c|acct|account)\b|(?:a\/?c|acct|account)\s+(?:ending|no\b|number|[x*•#]))/iu.test(maskedSource))) {
         family = 'transfer';
+    }
+    if (family === 'unknown' && status === 'posted' && knownDirection === 'debit' && !roleUnresolved &&
+        /\bwithdraw(?:al|n)\b(?:[^.;\n?]|\.\d){0,100}?\bat\s+(?:an?\s+)?atm\b/iu.test(source.slice(span.start, span.end))) {
+        family = 'cash-withdrawal';
     }
     const afterClause = maskedSource.slice(span.end);
     const sentenceTail = afterClause.search(/[;!?\n。।]|\.(?=\s|$)/u);
@@ -15011,17 +19145,71 @@ function inspectUniversalBankEvent(source, context = {}) {
     const readDirection = status === 'posted' || status === 'unknown'
         ? roleUnresolved || directionConflict ? 'unknown' : accountDirection !== null ? accountDirection : knownDirection === 'unknown'
             ? completion?.direction ?? headingDirection : knownDirection : 'none';
-    const receivedYourTransfer = /\bhas\s+received\s+your\s+(?:bank\s+)?transfer\b/iu.test(source);
-    const personSubject = source.match(/^\s*([A-Z][A-Z'’-]+(?:[ \t]+[A-Z][A-Z'’-]+){1,3})[ \t]+has[ \t]+received[ \t]+your[ \t]+(?:bank[ \t]+)?transfer\b/u)?.[1] ?? null;
+    const receivedYourTransfer = /\bhas\s+received\s+your\s+(?:(?:(?:[A-Z]{1,2}\$|[$€£]|[A-Z]{3})\s?[\d.,]{1,16}|[\d.,]{1,16}\s?(?:[A-Z]{3}|[$€£]))\s+)?(?:bank\s+)?transfer\b/iu.test(source);
+    const personSubject = source.match(/^\s*([A-Z][A-Z'’-]+(?:[ \t]+[A-Z][A-Z'’-]+){1,3})[ \t]+has[ \t]+received[ \t]+your[ \t]+(?:(?:(?:[A-Z]{1,2}\$|[$€£]|[A-Z]{3})[ \t]?[\d.,]{1,16}|[\d.,]{1,16}[ \t]?(?:[A-Z]{3}|[$€£]))[ \t]+)?(?:bank[ \t]+)?transfer\b/u)?.[1] ?? null;
     const personReceivedYourTransfer = personSubject !== null &&
         !/\b(?:revolut|n26|paypal|wise|monzo|starling|bunq|venmo|cash\s*app|zelle|klarna|ltd|limited|inc|gmbh|plc|llc|bank|account|space|pocket|vault|savings|wallet|card)\b/iu.test(personSubject);
-    const direction = counterpartyReceipt && readDirection === 'credit' ? 'unknown'
-        : receivedYourTransfer && readDirection === 'credit' ? personReceivedYourTransfer ? 'debit' : 'unknown'
-            : readDirection;
+    const direction = refundOnlyInName ? 'unknown'
+        : counterpartyReceipt && readDirection === 'credit' ? 'unknown'
+            : receivedYourTransfer && readDirection === 'credit' ? personReceivedYourTransfer ? 'debit' : 'unknown'
+                : readDirection;
+    if (status === 'posted' && direction === 'debit' && (0, alert_semantics_1.namesReaderAsPayee)(source))
+        status = 'unknown';
+    if (status === 'posted' && direction === 'debit' && (PAID_TO_READER.test(source) || PAID_BY_OTHER.test(source)))
+        status = 'unknown';
+    if (status === 'posted' && direction === 'credit' && CREDIT_LATER.test(source))
+        status = 'unknown';
+    const principalSpan = money.amount.spans.length === 1 ? money.amount.spans[0] : null;
+    if (principalSpan && status === 'posted') {
+        const figure = source.slice(principalSpan.start, principalSpan.end);
+        const before = source.slice(Math.max(0, principalSpan.start - 12), principalSpan.start);
+        const after = source.slice(principalSpan.end, principalSpan.end + 12);
+        const leadingMinus = /^[-−–‑‒—﹣－]/u.test(figure) || /(?:^|[\s:(])[-−–‑‒—﹣－]$/u.test(before) ||
+            /(?:(?<![\p{L}])(?:of|von|de|di|van|av|af)|[:=(])[ \t]*[-−–‑‒—﹣－][ \t]+$/iu.test(before);
+        const bracketed = /\($/u.test(before) && /^\)/u.test(after);
+        const trailingMinus = /^\.?[-−–‑‒—﹣－](?!\d)/u.test(after) || bracketed;
+        const minus = leadingMinus || trailingMinus;
+        const plus = /^\+/u.test(figure) || /\+[ \t]?$/u.test(before) || /^\.?[ \t]?\+(?!\d)/u.test(after);
+        const lowerOnly = !/\p{Lu}/u.test(source);
+        const soll = /^[ \t]+(?:S|Soll|SOLL)(?![\p{L}\p{N}&.'’])/u.test(after) || /(?:^|[\s:])(?:S|Soll)[ \t]+$/u.test(before) ||
+            (lowerOnly && /^[ \t]+(?:s|soll)[ \t]*(?:\n|$)/u.test(after));
+        const haben = /^[ \t]+(?:H|Haben|HABEN)(?![\p{L}\p{N}&.'’])/u.test(after) || /(?:^|[\s:])(?:H|Haben)[ \t]+$/u.test(before) ||
+            (lowerOnly && /^[ \t]+(?:h|haben)[ \t]*(?:\n|$)/u.test(after)) ||
+            /^[ \t]*(?:[,;][ \t]*)?(?:[([]H[)\]]|\(Haben\)|\(HABEN\)|Cr\.?|CR)(?![\p{L}\p{N}])/u.test(after) ||
+            /^[ \t]*[,;][ \t]*(?:H|Haben|HABEN)(?![\p{L}\p{N}&.'’])/u.test(after);
+        const debitMarker = /^[ \t]*(?:[,;][ \t]*)?(?:[([]S[)\]]|\(Soll\)|\(SOLL\)|Dr\.?|DR)(?![\p{L}\p{N}])/u.test(after) ||
+            /^[ \t]*[,;][ \t]*(?:S|Soll|SOLL)(?![\p{L}\p{N}&.'’])/u.test(after);
+        const englishNegative = (leadingMinus || bracketed) && !(0, alert_semantics_1.hasEuropeanPackWording)(semanticSource, packs);
+        const signConflict = (direction === 'credit' && (minus || soll || debitMarker)) || (direction === 'debit' && (plus || haben)) ||
+            (plus && minus) || (soll && haben) || englishNegative;
+        const threshold = THRESHOLD_BEFORE.test(source.slice(Math.max(0, principalSpan.start - 40), principalSpan.start)) ||
+            THRESHOLD_AFTER.test(source.slice(principalSpan.end, principalSpan.end + 24));
+        const ambiguousThousands = /^\D*\d{1,3},\d{3}(?![\d.,])\D*$/u.test(figure) &&
+            [...principalCurrencies].some((currency) => /^(?:SEK|DKK|NOK|PLN|CZK|ISK)$/u.test(currency) ||
+                (currency === 'EUR' && (0, alert_semantics_1.hasEuropeanPackWording)(maskedSource, packs)));
+        if (signConflict || threshold || ambiguousThousands)
+            status = 'unknown';
+    }
+    const ownAccountMove = status === 'posted' && ([...source.matchAll(OWN_ACCOUNT_MOVE), ...codeSource.matchAll(OWN_ACCOUNT_ABBREVIATION)]
+        .some((match) => {
+        const tokenStart = source.slice(0, match.index).search(/\S*$/u);
+        const lead = source.slice(Math.max(0, tokenStart - 40), tokenStart);
+        const verbAfter = source.slice(match.index + match[0].length, match.index + match[0].length + 40)
+            .replace(/^[ \t]*(?:[\p{Lu}\p{N}&'’.-]+[ \t]+){0,4}/u, ' ');
+        const subject = lead.replace(/(?:[\p{Lu}\p{N}&'’.-]+[ \t]+){0,3}$/u, '');
+        const verbRaw = source.slice(match.index + match[0].length, match.index + match[0].length + 40);
+        return OWN_ACCOUNT_LEAD.test(lead) || PAYEE_FIELD.test(lead) ||
+            (LINE_SUBJECT.test(subject) && (COLLECTING_VERB.test(verbAfter) || COLLECTING_VERB.test(verbRaw)));
+    }) ||
+        /\b(?:you\s+)?transferred\s+(?:\S+\s+){0,2}?to\s+(?:your\s+)?(?:\p{L}+\s+)?account\s+(?:ending|[x*•#])/iu.test(source) ||
+        /(?:\byou\s+|\d\s+)(?:sent|transferred|moved)\s+(?:\S+\s+){0,2}?to\s+your\s+(?:[\p{L}&.'’-]+\s+){0,3}?(?:account|acct)\b/iu.test(source));
+    if (ownAccountMove)
+        status = 'unknown';
     const authentication = challenge || readings.some((reading) => reading.family === 'authentication');
     const promotion = [...readings, ...wholeReadings].some((reading) => reading.draft.reasons.includes('promotion'));
     const reviewable = hasAmount || hasStatement || hasBalance;
-    const decision = reviewable && status !== 'failed' && !authentication && !pending && !promotion ? 'review' : 'ignore';
+    const decision = reviewable && status !== 'failed' && !authentication && !pending && !promotion && !personalChat
+        ? 'review' : 'ignore';
     const reviewOnlyIssuer = status === 'posted' && REVIEW_ONLY_ISSUER_HINT.test(`${source} ${context.sender ?? ''}`) &&
         (0, latam_alert_templates_1.isReviewOnlyLatamInstitution)(source, context.sender, context.market);
     if (reviewOnlyIssuer)
@@ -15041,9 +19229,11 @@ function inspectUniversalBankEvent(source, context = {}) {
         ...(family === 'statement' && fields.dueDate.evidence === 'missing' ? ['due-date-unresolved'] : []),
         ...(authentication ? ['authentication-not-posting'] : []),
         ...(pending || pendingAnywhere ? ['pending-not-posting'] : []),
-        ...(cardSettlement ? ['settlement-adapter-required'] : []),
+        ...(cardSettlement || usCardSettlement || paidToOwnCard || issuerPayee ? ['settlement-adapter-required'] : []),
+        ...(ownAccountMove ? ['own-account-move'] : []),
         ...(status === 'failed' ? ['failed-not-posting'] : []),
         ...(promotion ? ['promotion-not-posting'] : []),
+        ...(personalChat ? ['personal-message-not-posting'] : []),
     ];
     return {
         version: 1, decision, family, status, direction,
@@ -15259,7 +19449,7 @@ const inspectUnparsedLaunchAlert = (source, sender) => {
 exports.inspectUnparsedLaunchAlert = inspectUnparsedLaunchAlert;
 }
 };
-const mappings={"alert-draft":{"@/lib/currency-metadata":"currency-metadata"},"alert-event-evidence":{},"alert-institution-grammars":{},"alert-market-detection":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-semantics":"alert-semantics","@/lib/markets":"markets"},"alert-market-packs":{"@/lib/alert-market-packs.india-me":"alert-market-packs.india-me","@/lib/alert-market-packs.us-eu":"alert-market-packs.us-eu","@/lib/alert-market-packs.world":"alert-market-packs.world"},"alert-market-packs.india-me":{},"alert-market-packs.us-eu":{},"alert-market-packs.world":{},"alert-semantics":{"@/lib/alert-draft":"alert-draft","@/lib/alert-event-evidence":"alert-event-evidence","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-market-packs":"alert-market-packs","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"alert-source-ownership":{"@/lib/alert-draft":"alert-draft"},"bank-alert-interpreter":{"@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules","@/lib/categories":"categories","@/lib/bank-alert-semantic-output":"bank-alert-semantic-output","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser","@/lib/unparsed-launch-alert":"unparsed-launch-alert"},"bank-alert-semantic-output":{},"bank-alert-semantic-rules":{"@/lib/sms-parser":"sms-parser"},"bank-amount-tokens":{},"best-effort-autopost":{"@/lib/currency-metadata":"currency-metadata","@/lib/capture-source-identity":"capture-source-identity","@/lib/fx-rates":"fx-rates","@/lib/sms-parser":"sms-parser"},"bnpl-providers":{},"brand-categories":{},"capture-source-identity":{},"categories":{"@/lib/i18n":"i18n"},"country":{"@/lib/country-names":"country-names"},"country-names":{},"currency-metadata":{},"fx":{"@/lib/currency-metadata":"currency-metadata","@/lib/ledger-money":"ledger-money"},"fx-rates":{"@/lib/fx":"fx"},"gulf-neighbour-alerts":{"@/lib/best-effort-autopost":"best-effort-autopost","@/lib/country":"country","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/gulf-neighbour-templates":"gulf-neighbour-templates","@/lib/sms-parser":"sms-parser","@/lib/universal-parser":"universal-parser"},"gulf-neighbour-templates":{"@/lib/best-effort-autopost":"best-effort-autopost"},"i18n":{},"ios-background-alert-parser":{"@/lib/currency-metadata":"currency-metadata","@/lib/country":"country","@/lib/markets":"markets","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/launch-alert-parser":"launch-alert-parser","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/fx":"fx","@/lib/sms-parser":"sms-parser"},"latam-alert-templates":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/sms-parser":"sms-parser","@/lib/universal-types":"universal-types"},"launch-alert-parser":{"@/lib/alert-market-detection":"alert-market-detection","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/country":"country","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/bank-alert-interpreter":"bank-alert-interpreter","@/lib/markets":"markets","@/lib/bnpl-providers":"bnpl-providers","@/lib/sms-parser":"sms-parser","@/lib/currency-metadata":"currency-metadata","@/lib/gulf-neighbour-alerts":"gulf-neighbour-alerts","@/lib/universal-parser":"universal-parser","@/lib/alert-market-packs":"alert-market-packs","@/lib/alert-draft":"alert-draft","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/universal-categorization":"universal-categorization","@/lib/fx-rates":"fx-rates"},"ledger-money":{"@/lib/currency-metadata":"currency-metadata"},"markets":{"@/lib/country":"country"},"sms-parser":{"@/lib/categories":"categories","@/lib/markets":"markets","@/lib/bank-amount-tokens":"bank-amount-tokens","@/lib/fx":"fx","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/bnpl-providers":"bnpl-providers"},"universal-categorization":{"@/lib/brand-categories":"brand-categories","@/lib/categories":"categories","@/lib/sms-parser":"sms-parser"},"universal-dates":{"@/lib/alert-source-ownership":"alert-source-ownership","@/lib/universal-types":"universal-types"},"universal-fields":{"@/lib/universal-types":"universal-types","@/lib/alert-draft":"alert-draft","@/lib/universal-dates":"universal-dates"},"universal-money":{"@/lib/alert-draft":"alert-draft","@/lib/alert-market-packs":"alert-market-packs","@/lib/currency-metadata":"currency-metadata","@/lib/universal-fields":"universal-fields","@/lib/universal-types":"universal-types"},"universal-parser":{"@/lib/universal-types":"universal-types","@/lib/alert-semantics":"alert-semantics","@/lib/universal-fields":"universal-fields","@/lib/universal-money":"universal-money","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"universal-types":{},"unparsed-launch-alert":{"@/lib/alert-draft":"alert-draft","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser"}};
+const mappings={"alert-draft":{"@/lib/currency-metadata":"currency-metadata"},"alert-event-evidence":{},"alert-institution-grammars":{},"alert-market-detection":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-semantics":"alert-semantics","@/lib/markets":"markets"},"alert-market-packs":{"@/lib/alert-market-packs.india-me":"alert-market-packs.india-me","@/lib/alert-market-packs.us-eu":"alert-market-packs.us-eu","@/lib/alert-market-packs.world":"alert-market-packs.world"},"alert-market-packs.india-me":{},"alert-market-packs.us-eu":{},"alert-market-packs.world":{},"alert-semantics":{"@/lib/alert-draft":"alert-draft","@/lib/alert-event-evidence":"alert-event-evidence","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-market-packs":"alert-market-packs","@/lib/alert-status-lexicon":"alert-status-lexicon","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"alert-source-ownership":{"@/lib/alert-draft":"alert-draft"},"alert-status-lexicon":{},"bank-alert-interpreter":{"@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules","@/lib/categories":"categories","@/lib/bank-alert-semantic-output":"bank-alert-semantic-output","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser","@/lib/unparsed-launch-alert":"unparsed-launch-alert"},"bank-alert-semantic-output":{},"bank-alert-semantic-rules":{"@/lib/sms-parser":"sms-parser"},"bank-amount-tokens":{},"best-effort-autopost":{"@/lib/currency-metadata":"currency-metadata","@/lib/alert-status-lexicon":"alert-status-lexicon","@/lib/capture-source-identity":"capture-source-identity","@/lib/fx-rates":"fx-rates","@/lib/sms-parser":"sms-parser"},"bnpl-providers":{},"brand-categories":{},"capture-source-identity":{},"categories":{"@/lib/i18n":"i18n"},"country":{"@/lib/country-names":"country-names"},"country-names":{},"currency-metadata":{},"fx":{"@/lib/currency-metadata":"currency-metadata","@/lib/ledger-money":"ledger-money"},"fx-rates":{"@/lib/fx":"fx"},"gulf-neighbour-alerts":{"@/lib/best-effort-autopost":"best-effort-autopost","@/lib/country":"country","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/gulf-neighbour-templates":"gulf-neighbour-templates","@/lib/sms-parser":"sms-parser","@/lib/universal-parser":"universal-parser"},"gulf-neighbour-templates":{"@/lib/best-effort-autopost":"best-effort-autopost"},"i18n":{},"ios-background-alert-parser":{"@/lib/currency-metadata":"currency-metadata","@/lib/country":"country","@/lib/markets":"markets","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/launch-alert-parser":"launch-alert-parser","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/fx":"fx","@/lib/sms-parser":"sms-parser"},"latam-alert-templates":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/sms-parser":"sms-parser","@/lib/universal-types":"universal-types"},"launch-alert-parser":{"@/lib/alert-market-detection":"alert-market-detection","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/country":"country","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/bank-alert-interpreter":"bank-alert-interpreter","@/lib/markets":"markets","@/lib/bnpl-providers":"bnpl-providers","@/lib/sms-parser":"sms-parser","@/lib/currency-metadata":"currency-metadata","@/lib/gulf-neighbour-alerts":"gulf-neighbour-alerts","@/lib/universal-parser":"universal-parser","@/lib/alert-market-packs":"alert-market-packs","@/lib/alert-draft":"alert-draft","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/universal-categorization":"universal-categorization","@/lib/unparsed-launch-alert":"unparsed-launch-alert","@/lib/fx-rates":"fx-rates"},"ledger-money":{"@/lib/currency-metadata":"currency-metadata"},"markets":{"@/lib/country":"country"},"sms-parser":{"@/lib/categories":"categories","@/lib/markets":"markets","@/lib/bank-amount-tokens":"bank-amount-tokens","@/lib/fx":"fx","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/bnpl-providers":"bnpl-providers"},"universal-categorization":{"@/lib/brand-categories":"brand-categories","@/lib/categories":"categories","@/lib/sms-parser":"sms-parser"},"universal-dates":{"@/lib/alert-source-ownership":"alert-source-ownership","@/lib/universal-types":"universal-types"},"universal-fields":{"@/lib/universal-types":"universal-types","@/lib/alert-draft":"alert-draft","@/lib/universal-dates":"universal-dates"},"universal-money":{"@/lib/alert-draft":"alert-draft","@/lib/alert-market-packs":"alert-market-packs","@/lib/currency-metadata":"currency-metadata","@/lib/universal-fields":"universal-fields","@/lib/universal-types":"universal-types"},"universal-parser":{"@/lib/universal-types":"universal-types","@/lib/alert-semantics":"alert-semantics","@/lib/alert-status-lexicon":"alert-status-lexicon","@/lib/universal-fields":"universal-fields","@/lib/universal-money":"universal-money","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"universal-types":{},"unparsed-launch-alert":{"@/lib/alert-draft":"alert-draft","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser"}};
 const cache=Object.create(null);
 function load(id){
 if(Object.prototype.hasOwnProperty.call(cache,id))return cache[id].exports;
