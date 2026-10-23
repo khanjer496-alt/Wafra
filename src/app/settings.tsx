@@ -1093,16 +1093,13 @@ export default function SettingsScreen() {
           {(state.sharedAlertFormats?.formats.length ?? 0) > 0 && linkRow(
             tf('sharedFormatsCount', { count: state.sharedAlertFormats?.formats.length ?? 0 }),
             t('sharedFormatsCountBody'),
-            () => {
-              Alert.alert(
-                tf('sharedFormatsCount', { count: state.sharedAlertFormats?.formats.length ?? 0 }),
-                t('sharedFormatsCountBody'),
-                [
-                  { text: t('cancel'), style: 'cancel' },
-                  { text: t('sharedFormatsClear'), style: 'destructive', onPress: () => clearSharedAlertFormats() },
-                ],
-              );
-            },
+            () => setConfirmation({
+              question: tf('sharedFormatsCount', { count: state.sharedAlertFormats?.formats.length ?? 0 }),
+              body: t('sharedFormatsCountBody'),
+              confirmLabel: t('sharedFormatsClear'),
+              destructive: true,
+              onConfirm: () => { void clearSharedAlertFormats(); },
+            }),
             { icon: 'trash', value: t('sharedFormatsClear'), testID: 'settings-clear-shared-formats' },
           )}
           {linkRow(
