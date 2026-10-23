@@ -383,6 +383,11 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
           purgeLocalSemanticArtifacts() {},
         };
       }
+      if (name === '@/hooks/use-font-scale') {
+        // ThemedText keys its node on the shared system text scale. Harnesses
+        // render at the default scale unless they stub this hook themselves.
+        return { useFontScale: () => 1, FontScaleProvider: ({ children }) => children };
+      }
       throw new Error(`Unstubbed runtime dependency ${name} in ${file}`);
     },
     console, setTimeout, clearTimeout,
