@@ -229,3 +229,115 @@ test('line-label inheritance cannot cross arbitrary prose or a merchant name', (
     assert.ok(result.amount.issues.includes('amount-role-unresolved'));
   }
 });
+
+// --- roles-fields lane: fee/cost/tax fields, local amount labels, balance and
+// limit vocabulary, CJK punctuation. Synthetic bodies with fictional values.
+const roles = (source, context) => extractUniversalMoney(source, context).observations.map((row) => row.role);
+for (const [source, expected] of [
+  // Wallet fee fields print after a comma or a "charged/was" verb and are never the principal.
+  ['Ksh800.00 sent to ANN. New M-PESA balance is Ksh1,950.00. Transaction cost, Ksh15.00.', ['transaction', 'balance', 'fee']],
+  ['You have sent Ksh 1,200.00 to ANN. Your balance is Ksh 340.00. Cost Ksh 10.00.', ['transaction', 'balance', 'fee']],
+  ['You have sent UGX 20,000 to ANN. Fee was UGX 500. Tax was UGX 100.', ['transaction', 'fee', 'fee']],
+  ['Payment made for GHS 40.00 to ESI. Fee charged: GHS 0.40 TAX charged: GHS 0.00.', ['transaction', 'fee', 'fee']],
+  ['Ksh2,000.00 paid. Transaction fee Ksh33.00 VAT Ksh5.00', ['transaction', 'fee', 'fee']],
+  // Swahili / French / Spanish / Portuguese fee nouns, Unicode-bounded.
+  ['Umetuma Tsh25,000.00 kwa ASHA. Ada ya muamala ni Tsh1,200.00.', ['transaction', 'fee']],
+  ['Virement de 100,00 EUR effectue. Frais 2,00 EUR', ['transaction', 'fee']],
+  ['Usted envio $60.000 al 3** *** 4512. Comision $500', ['transaction', 'fee']],
+]) test(`fee/cost fields keep their own role: ${expected.join('+')} in "${source.slice(0, 40)}"`, () => {
+  assert.deepEqual(roles(source), expected);
+});
+test('"purchase cost" and a tax verb inside a movement keep the movement label', () => {
+  assert.deepEqual(roles('Your purchase cost $50.00 at SHOP'), ['transaction']);
+  assert.deepEqual(roles('Tax $300.00 debited from your account'), ['transaction']);
+  assert.deepEqual(roles('The cost of airtime is Ksh20.00'), ['unknown']);
+});
+test('a fee is never promoted over an unlabelled principal', () => {
+  // PMWithdraw glued to the clock: the cost must not stand in for the cash movement.
+  const withdrawn = extractUniversalMoney('Confirmed.on 18/9/26 at 6:15 PMWithdraw Ksh3,000.00 from 123456 - AGENT. New M-PESA balance is Ksh1,220.00. Transaction cost, Ksh53.00.');
+  assert.deepEqual(withdrawn.observations.map((row) => row.role), ['transaction', 'balance', 'fee']);
+  assert.equal(withdrawn.amount.value.minorUnits, '300000');
+  const fee = extractUniversalMoney('Transaction cost, Ksh23.00. New M-PESA balance is Ksh1,100.00.');
+  assert.deepEqual(fee.observations.map((row) => row.role), ['fee', 'balance']);
+  const unlabelled = extractUniversalMoney('Notice Ksh3,000.00. Transaction cost, Ksh53.00.');
+  assert.equal(unlabelled.amount.evidence, 'ambiguous');
+});
+for (const [source, expected] of [
+  // Accent-final and local labels that ASCII \b never matched.
+  ['Votre compte a été crédité de 8 500,00 MAD le 28/09. Solde: 9 120,40 MAD', ['transaction', 'balance']],
+  ['Retrait DAB de 60,00 € le 18/09. Solde disponible : 512,08 €', ['transaction', 'balance']],
+  ['Achat de 42,35 $ chez METRO', ['transaction']],
+  ['Pagaste $ 6.430 en PEDIDOSYA con tu tarjeta', ['transaction']],
+  ['ANA te envió $5,300.00 por SPEI', ['transaction']],
+  ['Se abonaron $459.00 a tu tarjeta', ['transaction']],
+  ['Retiro de efectivo por S/ 400.00 en cajero', ['transaction']],
+  ['Giro en cajero automatico por $60.000 con tu Tarjeta', ['transaction']],
+  ['Pix enviado com sucesso. Valor R$ 75,00 para JOAO. Conta final 45-X.', ['transaction']],
+  ['Saque de R$ 400,00 realizado. Saldo disponivel: R$ 1.122,15', ['transaction', 'balance']],
+  ['Você pagou R$ 89,90 para Centauro usando seu saldo', ['transaction']],
+  ['INR 1,249.00 refunded to your card by AMAZON. Avl Lmt INR 98,751.00', ['transaction', 'credit-limit']],
+  ['A credit of $29.99 from AMAZON was posted', ['transaction']],
+  ['A GIRO deduction of SGD 156.40 was made', ['transaction']],
+  ['Rek Anda telah dikredit Rp 6.750.000,00. Saldo Rp 8.912.400,00', ['transaction', 'balance']],
+  ['Kamu udah bayar Rp28.000 ke Warung', ['transaction']],
+  ['Pembayaran QRIS Berhasil Rp45.000 telah dibayarkan ke KOPI', ['transaction']],
+  ['Kiasi cha TZS 150,000.00 kimetolewa. Salio: TZS 1,204,550.00', ['transaction', 'balance']],
+  ['Maximum kartiniz ile SHELL PETROL ISTANBUL\'dan 1.250,00 TL harcama yapildi. Kullanilabilir limitiniz 18.750,00 TL.', ['transaction', 'credit-limit']],
+  ['isyerinden 89,90 TL alisveris yapilmistir. Kalan limit: 14.210,10 TL', ['transaction', 'credit-limit']],
+  ['Enpara hesabinizdan MEHMET adli aliciya 3.000,00 TL EFT gonderilmistir.', ['transaction']],
+]) test(`local label vocabulary: ${source.slice(0, 48)}`, () => {
+  assert.deepEqual(roles(source), expected);
+});
+for (const [source, expected] of [
+  ['Avail.bal INR 5,000.00 Rs.250.00 debited', ['balance', 'transaction']],
+  ['Rs.10000 deposited. Avlbl Amt:Rs.22345.67', ['transaction', 'balance']],
+  ['Rs.799.00 debited. AvlBal:Rs12,345.67', ['transaction', 'balance']],
+  ['Purchase THB 1,250.00 at SHOP. Avail. credit THB 48,750.00.', ['transaction', 'credit-limit']],
+  ['Salio lako jipya ni Tsh63,400.00', ['balance']],
+  ['Bakiyeniz 1.230,45 TL', ['balance']],
+  ['Kalan limit 14.210 TL', ['credit-limit']],
+  ['잔액 845,300원', ['balance']],
+  ['可用餘額新台幣62,341元', ['balance']],
+  ['ยอดคงเหลือ THB 12,345.67', ['balance']],
+]) test(`balance and limit vocabulary stays informational: ${source.slice(0, 32)}`, () => {
+  const result = extractUniversalMoney(source);
+  assert.deepEqual(result.observations.map((row) => row.role), expected);
+  if (expected.every((role) => role === 'balance' || role === 'credit-limit')) assert.equal(result.amount.evidence, 'missing');
+});
+test('loyalty points and running totals are aggregates, never a second transaction', () => {
+  const points = extractUniversalMoney('649,99 TL tutarinda alisveris yapilmistir. Worldpuan: 3,25 TL.');
+  assert.equal(points.amount.value.minorUnits, '64999');
+  assert.ok(points.observations[1].field.issues.includes('aggregate-money-field'));
+  const running = extractUniversalMoney('15,000원 승인\n누적523,400원');
+  assert.ok(running.observations.at(-1).field.issues.includes('aggregate-money-field'));
+});
+test('fullwidth commas and Chinese punctuation separate monetary fields', () => {
+  const result = extractUniversalMoney('支出(财付通-美团)45.80元，余额3,245.67元。');
+  assert.deepEqual(result.observations.map((row) => row.role), ['transaction', 'balance']);
+  assert.equal(result.amount.value.minorUnits, '4580');
+  assert.equal(result.balance.value.minorUnits, '324567');
+  const korean = extractUniversalMoney('출금200,000원\n잔액845,300원');
+  assert.deepEqual(korean.observations.map((row) => row.role), ['transaction', 'balance']);
+  assert.equal(korean.amount.value.minorUnits, '200000');
+  assert.deepEqual(extractUniversalMoney('您尾号1234卡余额3,245.67元。').observations.map((row) => row.role), ['balance']);
+});
+test('an identifier or another currency\'s yuan-unit text is not recovered beside CJK words', () => {
+  assert.notEqual(extractUniversalMoney('参考号AB金额58.00元').amount.evidence, 'explicit');
+  assert.notEqual(extractUniversalMoney('参考编号金额58.00元').amount.evidence, 'explicit');
+  // 新台幣…元 is Taiwan dollars; reading its figure as CNY would book the wrong currency.
+  assert.notEqual(extractUniversalMoney('消費新台幣1,280元').amount.evidence, 'explicit');
+  assert.notEqual(extractUniversalMoney('港幣50元').amount.evidence, 'explicit');
+});
+test('the Malaysian free-SMS marker RM0 is not money; a real zero amount still is', () => {
+  const alert = extractUniversalMoney('RM0 Maybank: Your card ending 1234 has been charged RM59.90 at SHOPEE');
+  assert.deepEqual(alert.observations.map((row) => row.role), ['transaction']);
+  assert.equal(alert.amount.value.minorUnits, '5990');
+  assert.equal(extractUniversalMoney('RM0 Maybank: Baki akaun RM2,145.30').observations.length, 1);
+  // Only the opening marker is dropped: a later RM0 is an ordinary figure.
+  assert.equal(extractUniversalMoney('Maybank: charged RM0 and RM5.00').observations.length, 2);
+});
+test('"new balance" is the account balance in a wallet receipt and a statement total beside due words', () => {
+  assert.deepEqual(roles('You have sent UGX 50,000 to ANN. Your new balance: UGX 120,500.'), ['transaction', 'balance']);
+  assert.deepEqual(roles('Statement ready. New balance $845.20, minimum payment $25.00 due 10/28/2026.'), ['statement-total', 'minimum-due']);
+  assert.deepEqual(roles('Your new balance is $845.20. Pay by 10/28/2026 to avoid interest. Amount due $25.00'), ['statement-total', 'bill-due']);
+});
