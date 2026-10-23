@@ -488,12 +488,17 @@ export const hasDeclinedWording = (text: string): boolean =>
  * sentence ("Si no reconoce esta compra...") describes a hypothetical, not this
  * movement, so it never counts.
  */
+const TAIL_OTHER_SUBJECT = /^(?:your|the|a|an)\s+(?:[\p{L}-]+\s+){0,2}?(?:deposits?|balances?|fees?|limits?|points|rewards?|statements?|bills?|loans?|emis?|instal?lments?|subscriptions?|offers?)(?![\p{L}\p{N}])/iu;
 const TAIL_HELD = /(?<![\p{L}\p{N}])(?:scheduled|programad[oa]|agendad[oa]|agendamento|programm[ée]e?|geplant|gepland)(?![\p{L}\p{N}])/iu;
 export const nonPostingTailVerdict = (sentence: string): 'failed' | 'informational' | null => {
   // A verdict line is short; a long promotional or help sentence only mentions the words.
   sentence = sentence.trim();
   const words = sentence.split(/\s+/u).length;
   if (words > 8 || WORLD_VOCAB.conditional.test(sentence)) return null;
+  // A sentence about another thing ("Your planned deposit has not been
+  // credited yet", "Your card limit is not changed") is not this movement's
+  // verdict.
+  if (TAIL_OTHER_SUBJECT.test(sentence)) return null;
   if (hasDeclinedWording(sentence)) return 'failed';
   if (words > 6) return null;
   // Only scheduling, pending and refund words: a due-date or feature footer
