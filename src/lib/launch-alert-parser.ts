@@ -1,8 +1,8 @@
-import { inspectUniversalAlert, type UniversalAlertReview } from '@/lib/alert-market-detection';
+import { inspectUniversalAlert, routeAlertMarket, type UniversalAlertReview } from '@/lib/alert-market-detection';
 import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars';
 import { activeCountryDateOrder, dateOrderForCountry, getActiveCountry } from '@/lib/country';
 import {
-  bestEffortAutoPostEnabled, decideBestEffortAutoPost, hasLinkFromUnregisteredSender, hasNonCompletedWording,
+  bestEffortAutoPostEnabled, decideBestEffortAutoPost, hasCallbackHook, hasLinkFromUnregisteredSender, hasNonCompletedWording,
   isNotAutoPostableMoney, isRegisteredAlertSender, isUnverifiedAlertSender, namesOwnInstrumentTail,
   refusedOnlyByShopOrPromoWording,
   sharedSymbolCurrencyForCountry,
@@ -17,9 +17,10 @@ import {
   getActiveMarket,
   ledgerCurrencyExponent,
   pinnedLedgerCurrencyCode,
+  withMarketPackForParsing,
 } from '@/lib/markets';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
-import { nonPostingReason, parseSmsBatch, type ParsedSms } from '@/lib/sms-parser';
+import { nonPostingReason, parseRefusedForProof, parseSmsBatch, type ParsedSms } from '@/lib/sms-parser';
 import type { CategoryId } from '@/lib/types';
 import { CURRENCY_SYMBOL_CANDIDATES, currencyMinorUnits } from '@/lib/currency-metadata';
 import { decideGulfNeighbourPosting, gulfNeighbourReadSource, isGulfNeighbourMarket } from '@/lib/gulf-neighbour-alerts';
@@ -28,6 +29,7 @@ import { alertMarketPack } from '@/lib/alert-market-packs';
 import { normalizeAlertText } from '@/lib/alert-draft';
 import { isLatamOwnCardPayment, latamOwnTransferTitle, latamPolicySource, matchLatamTemplate } from '@/lib/latam-alert-templates';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
+import { hasAffirmativeSettledMovement } from '@/lib/unparsed-launch-alert';
 import type { FxQuote } from '@/lib/fx';
 import { cachedReferenceQuote, convertForeignConfirmation, quoteFitsDay } from '@/lib/fx-rates';
 import type { UniversalBankEvent, UniversalField, UniversalMoney, UniversalParseContext } from '@/lib/universal-types';
@@ -71,8 +73,11 @@ export const hasBankAlertMoneyHint = (source: string): boolean =>
  */
 // Unicode-aware boundaries: `\b` treats an accented letter as a non-letter,
 // so "effectué" and "payé" never matched and French alerts were dropped here.
+// The noun forms banks lead with ("Kartenzahlung", "Umsatz", "Compra",
+// "Przelew", "Köp", "Platba", "Retrait", "We've taken your fee") earn the
+// parser too; this gate only spends CPU, it never imports.
 const UNIVERSAL_POSTED_EVENT_HINT =
-  /(?<![\p{L}\p{N}])(?:purchase|purchased|debit(?:ed)?|credit(?:ed)?|charged|charge\s+(?:of|made)|deducted|spent|paid|payment|received|refund(?:ed)?|reversal|withdraw(?:n|al)?|withdrew|made\s+an?|was\s+made|used\s+for|deposit(?:ed)?|transferr(?:ed|ing)|sent|realizad[oa]|efetuad[oa]|zrealizowana|consumo|realizaste|lastschrift|paiement|gerçekleşmiştir|gelmiştir|alışveriş\w*|havale|virement|reçu|pix|enviado|enviou|recebeu|recebido|transaksi|berhasil|kaartbetaling|voltooid|cash\s+(?:withdrawal|advance)|used\s+(?:for|at|on)|transaction|completed|processed|successful|successfully|approved|authori[sz]ed|settled|posted|débité|crédité|effectué|payé|payée|belastet|abgebucht|bezahlt|gutgeschrieben|cargado|pagado|abonado|addebitato|pagata|accreditato|afgeschreven|betaald|bijgeschreven)(?![\p{L}\p{N}])|(?:خصم|دفع|شراء|سحب|تحويل|ايداع|إيداع|استرداد|استرجاع|تمت|تم|ご利用|利用金額|消费|支付|승인|डेबिट|क्रेडिट)/iu;
+  /(?<![\p{L}\p{N}])(?:purchase|purchased|debit(?:ed)?|credit(?:ed)?|charged|charge\s+(?:of|made)|deducted|spent|paid|payment|received|refund(?:ed)?|reversal|withdraw(?:n|al)?|withdrew|made\s+an?|was\s+made|used\s+for|deposit(?:ed)?|transferr(?:ed|ing)|sent|realizad[oa]|efetuad[oa]|zrealizowana|consumo|realizaste|lastschrift|paiement|gerçekleşmiştir|gelmiştir|alışveriş\w*|havale|virement|reçu|pix|enviado|enviou|recebeu|recebido|transaksi|berhasil|kaartbetaling|voltooid|cash\s+(?:withdrawal|advance)|used\s+(?:for|at|on)|transaction|completed|processed|successful|successfully|approved|authori[sz]ed|settled|posted|débité|crédité|effectué|payé|payée|belastet|abgebucht|bezahlt|gutgeschrieben|cargado|pagado|abonado|addebitato|pagata|accreditato|afgeschreven|betaald|bijgeschreven|taken|kartenzahlung|zahlung|buchung|umsatz|gutschrift|zahlungseingang|compra|pago|retirada|pagamento|betaling|płatność|platnosc|przelew|köp|betalat|fått|betalt|betalte|mottatt|modtaget|platba|prélèvement|retrait|envoyé|transaktion|operazione|einkauf|internetkauf|onlinekauf|online-umsatz|bargeldabhebung|bargeldauszahlung|abgehoben|erstattung|erstattet|überwiesen|gesendet|entgelt|gebühr|achat|payés|payées|retiré|remboursé|remboursement|commission|frais|reintegro|devolución|abono|comisión|cobrado|bizum|transferencia|acquisto|prelievo|prelevato|storno|rimborso|commissione|bonifico|pinbetaling|opname|overboeking|kosten|incasso|bijschrijving|terugbetaling|ontvangen|gestuurd|overgemaakt|betaalde|geïncasseerd|levantamento|reembolso|devolução|comissão|transferência|pagou|transakcja|wypłata|wypłaciłeś|wypłaciłaś|zwrot|opłata|wpływ|przesłał|przesłała|zaksięgowany|pobrał|zakup|onlineköp|kortköp|uttag|avgift|överföring|drog|återbetalade|återbetalat|køb|onlinekøb|hævet|hævning|gebyr|sendt|opkrævet|trukket|refusion|tilbagebetaling|indsat|kjøp|kortkjøp|netthandel|uttak|kontantuttak|innbetaling|refusjon|tilbakebetaling|nákup|výběr|poplatek|refundace|připsána|stržena|vrátil|odeslaná|zaplaceno|provedena|dragits|autogiro|tatt\s+ut|handlet|wysłałeś|zapłacono|zaplatili)(?![\p{L}\p{N}])|(?:خصم|دفع|شراء|سحب|تحويل|ايداع|إيداع|استرداد|استرجاع|تمت|تم|ご利用|利用金額|消费|支付|승인|डेबिट|क्रेडिट)/iu;
 
 // A small family of real bank field-list alerts has amount + instrument +
 // merchant but no verb at all. The 30k Jev benchmark found one such rescued FAB
@@ -106,18 +111,25 @@ const GENERIC_BANK_CONTEXT = /\b(?:(?:credit|debit|covered|prepaid|charge)\s+car
  * "recibiste", "te envió", "abonado"; French "reçu", "crédité"; German
  * "gutgeschrieben"; Malay/Indonesian "diterima", "dikreditkan".
  */
+// "You've (just) received" is the same claim contracted (Maybank DuitNow,
+// Revolut, Monzo); without it those credits were dropped instead of reviewed.
 const MONEY_ARRIVED_CLAIM =
-  /(?<!\p{L})(?:you\s+have\s+received|you\s+received|received\s+(?:from|for)|(?:is|has\s+been|was)\s+credited|credited\s+(?:to|in|into|with)|deposited|refund(?:ed)?|recebeu|recebid[oa]|creditad[oa]|estorno|recibiste|recibid[oa]|te\s+(?:envi[óo]|ha\s+enviado)|yape[óo]|abonad[oa]|acreditad[oa]|reembolso|devoluci[óo]n|re[çc]u|cr[ée]dit[ée]e?|gutgeschrieben|diterima|dikreditkan)(?!\p{L})/iu;
+  /(?<!\p{L})(?:you\s+have\s+(?:just\s+)?received|you['’]ve\s+(?:just\s+)?received|you\s+received|received\s+(?:from|for)|(?:is|has\s+been|was)\s+credited|credited\s+(?:to|in|into|with)|deposited|refund(?:ed)?|recebeu|recebid[oa]|creditad[oa]|estorno|recibiste|recibid[oa]|te\s+(?:envi[óo]|ha\s+enviado)|yape[óo]|abonad[oa]|acreditad[oa]|reembolso|devoluci[óo]n|re[çc]u|cr[ée]dit[ée]e?|gutgeschrieben|diterima|dikreditkan)(?!\p{L})/iu;
 /**
  * Something only a bank or wallet writes beside such a claim: a bank name
  * ("Swedbank", "Citibank"), a wallet,
  * account or rail word ("M-PESA", "Pix", "SPEI", "UPI", "Zelle", "Interac"),
  * a balance, a reference or transaction id, or an upper-case transaction code
  * ("QX81TR4KLM"). A chat ("you received Ksh 2,000 from me?") has none.
+ * The European, US and Gulf instant-payment rails count like Pix or UPI
+ * ("Has recibido un Bizum de 25,00 €", "… via Osko", "Fawran payment").
  */
 const MONEY_CLAIM_EVIDENCE =
-  /(?<!\p{L})(?:\p{L}*bank|banco|banque|wallet|carteira|billetera|account|acct|a\/c|conta|cuenta|compte|konto|rekening|balance|bal|avl|saldo|solde|ref(?:erence)?|txn|trx|tid|transaction|transfer|transferencia|transfer[êe]ncia|virement|[ée]-?transfer|pix|spei|aani|sarie|yape|plin|nequi|daviplata|m-?pesa|mpesa|upi|imps|neft|rtgs|zelle|interac|gcash|maya|paytm|jazzcash|easypaisa|momo|airtel\s+money)(?!\p{L})/iu;
+  /(?<!\p{L})(?:\p{L}*bank|banco|banque|wallet|carteira|billetera|account|acct|a\/c|conta|cuenta|compte|konto|rekening|balance|bal|avl|saldo|solde|ref(?:erence)?|txn|trx|tid|transaction|transfer|transferencia|transfer[êe]ncia|virement|[ée]-?transfer|pix|spei|aani|sarie|yape|plin|nequi|daviplata|m-?pesa|mpesa|upi|imps|neft|rtgs|zelle|interac|gcash|maya|paytm|jazzcash|easypaisa|momo|airtel\s+money|bizum|sepa|faster\s+payments?|osko|payid|blik|swish|vipps|mobilepay|twint|satispay|lydia|paylib|wero|venmo|paypal|cash\s?app|duitnow|fawran|fawri\+?|benefitpay|knet|instapay|cliq)(?!\p{L})/iu;
 const TRANSACTION_CODE = /\b(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{8,12}\b/u;
+/** "You've received a new message from Sam about the $50.00 Venmo": not money. */
+const RECEIVED_NOT_MONEY =
+  /\breceived\s+(?:a|an)\s+(?:new\s+)?(?:message|notification|request|text|e-?mail|invitation|invite|reminder)\b/iu;
 /** Explicit first-person chat cannot become an issuer alert through a money verb. */
 const PERSONAL_MESSAGE_PREFIX_RE = /^\s*(?:(?:hi|hey|hello)\b(?:[^\r\n.!?]{0,40}[,!:]|\s+)\s*)?(?:I(?:\s+(?:(?:have|just|already)\s+){0,2}|['’]ve\s+(?:(?:just|already)\s+)?)(?:spent|paid|bought|sent|deposited|transferred|refunded)\b|[اأ]نا\s+(?:(?:قد|لقد)\s+)?(?:صرفت|دفعت|اشتريت|حولت|حوّلت|أرسلت|ارسلت)(?=\s))/iu;
 export const hasPersonalMessagePrefix = (source: string): boolean => PERSONAL_MESSAGE_PREFIX_RE.test(source);
@@ -174,10 +186,113 @@ export const hasGenericBankAlertContext = (source: string, sender = ''): boolean
 const SENDERLESS_USED_CARD_HINT = /^\s*your\s+(?:cr\.\s*)?card\s+(?:[*xX•·]{1,24}\s*)?(\d{4})(?![\p{L}\p{N}]|[ \t-]+\d)[ \t]+(?:was|has[ \t]+been)[ \t]+used[ \t]+for\b/iu;
 
 /**
+ * What an issuer's own completed-movement alert carries that a merchant
+ * receipt, chat or advert from a registered header does not: an account,
+ * card, wallet, balance, reference or payment-rail word ("Spent €2.65 at
+ * Mercadona Balance: €17.82", "Capital One Alert: You paid $4,493.74 to your
+ * Venture X Card", "Cash Out Tk 1,000.00 … TrxID …").
+ */
+const MOVEMENT_ALERT_EVIDENCE =
+  /(?<!\p{L})(?:cards?|visa|mastercard|amex|debit|credit|deposit|withdrawal|atm|cash\s+(?:in|out)|alerts?)(?!\p{L})/iu;
+
+/**
+ * REVIEW ADMISSION FOR A COMPLETED MOVEMENT WITH NO GENERIC CONTEXT WORD.
+ *
+ * In the real-format check set, alerts such as "Bank of America: Check for
+ * $2,100.00 was deducted from account 8950", "Acct. 0465 has been debited
+ * with KWD 5.800 from ALSHAAB CO OP" and "You sent 65,23 PLN to P4 Sp. z o.o."
+ * carried none of GENERIC_BANK_CONTEXT's phrases, so after the posting policy
+ * refused them they were dropped and the person never saw them. Such an alert
+ * now waits in Review (never automatic import) when it answers for itself.
+ *
+ * First, nothing may withdraw or condition the money: no non-completed
+ * wording (pending, declined, OTP, promotion, statement/due, future, lure),
+ * no not-auto-postable money (link call-to-action, fraud prompt, order
+ * notice) and no chat. Only then is the universal reader run.
+ */
+const movementAlertCandidate = (source: string, sender: string): boolean =>
+  hasBankAlertMoneyHint(source) && !PERSONAL_CHAT.test(source) &&
+  !hasNonCompletedWording(source, null, sender) && !isNotAutoPostableMoney(source);
+
+/**
+ * Then the reading must prove posted money (movementEventSettled) and the
+ * alert must carry the issuer's own evidence:
+ *  - it names the reader's own account or card by its tail (the same
+ *    anti-scam rule the posting policy applies to senderless credits), or,
+ *    on a debit, the universal reader found the card or account it was paid
+ *    from ("con su tarjeta ...1234"); a credit's named account may be the
+ *    payer's, so only the own-tail wording counts there;
+ *  - or it comes from an operator-registered header, short code or app
+ *    package AND carries an issuer word (MONEY_CLAIM_EVIDENCE,
+ *    MOVEMENT_ALERT_EVIDENCE or a transaction code), which a merchant's
+ *    receipt or a chat from the same kind of header does not, and no link.
+ * A phone number, e-mail or blank sender (iPhone History) earns nothing
+ * without the tail, so a fake "You have received $500" still cannot enter.
+ */
+const movementAlertAdmitted = (source: string, sender: string, event: UniversalBankEvent): boolean => {
+  if (!movementEventSettled(source, event)) return false;
+  // A link from a blank, phone or e-mail sender, or a "Not you? call" hook
+  // from a phone or e-mail sender, is the lure and vishing shape: a tail
+  // copied into the text does not answer for it.
+  if (hasLinkFromUnregisteredSender(source, sender) ||
+    (isUnverifiedAlertSender(sender) && hasCallbackHook(source))) return false;
+  const direction = event.direction === 'credit' || event.direction === 'debit' ? event.direction : undefined;
+  if (namesOwnInstrumentTail(source, direction)) return true;
+  const paidFrom = event.instrument.evidence === 'explicit' ? event.instrument.value : null;
+  if (event.direction === 'debit' && /^\d{2,6}$/.test(paidFrom?.last4 ?? '')) return true;
+  // Without a tail, any link is enough to stay out: "Your wallet amount of
+  // Rs. 48,200 is credited to 98XXXXXX10. Sign up today: w4l.example/k2" is a
+  // lure even from a registered-looking header.
+  return isRegisteredAlertSender(sender) && !hasLinkFromUnregisteredSender(source, '') &&
+    (MONEY_CLAIM_EVIDENCE.test(source) || MOVEMENT_ALERT_EVIDENCE.test(source) || TRANSACTION_CODE.test(source));
+};
+
+/**
+ * Posted money: a grounded amount and status `posted`, or an unresolved
+ * status beside a completed movement verb ("was deducted", "has been
+ * successfully processed", "تم خصم"). Informational, future and failed
+ * readings, balance, statement, bill and code notices never qualify.
+ */
+const movementEventSettled = (source: string, event: UniversalBankEvent): boolean =>
+  event.amount.evidence !== 'missing' &&
+  !['statement', 'balance', 'authentication', 'bill'].includes(event.family) &&
+  (event.status === 'posted' || (event.status === 'unknown' &&
+    (hasAffirmativeSettledMovement(source) || REVIEW_SETTLED_USAGE.test(source))));
+
+/**
+ * Review-only completion wording the shared settled-movement test (which also
+ * steers the UAE/Saudi grammar, so it stays untouched) does not list: a card
+ * that "was used at/for", the Gulf "thank you for using your VISA 7490 for
+ * BHD 67.180 at …", and a payment or transaction "made" ("The $3,198.08 pmt
+ * made to CHASE CARD 8252", "A $625.48 debit transaction made on 3/9/26"),
+ * never one still "to be made" or one that "can't/could not be made".
+ */
+const REVIEW_SETTLED_USAGE =
+  /\b(?:was|has\s+been)\s+used\s+(?:at|for|on)\b|\bthank\s+you\s+for\s+using\s+your\s+(?:[\p{L}]+\s+){0,2}(?:card|visa|mastercard|debit|credit)\b|\b(?:pmt|payment|transfer|deposit|charge|purchase|transaction)\b(?:[^.\n]|\.(?=\d)){0,40}?(?<!\b(?:(?:to|will|shall|must|can|should|would)\s+be|not|never|can['’]?t|cannot|could\s*n(?:o|['’])t|couldn['’]t|wasn['’]t|was\s+not)\s+)\bmade\b/iu;
+
+/**
  * Generic evidence augments misses in every country; it is always review-only.
  * `market` is passed only for an alert routed to a Gulf neighbour, so its own
  * currency spellings (KD, ر.ع …) and three-decimal figures fill the amount.
  */
+/**
+ * The UAE/Saudi grammar read a completed movement but withheld it only because
+ * its amount or direction is unproven (sms-parser parseRefusedForProof): two
+ * figures with nothing proving which moved, a hedged figure, a credit into a
+ * credit card. That alert waits in Review, never vanishes, even without a
+ * generic context word or a sender (iPhone History).
+ */
+const refusedOnlyForProof = (source: string, sender: string): boolean => {
+  // (A senderless "ر.س" proves no market; the person's own launch market reads it.)
+  const market = detectLaunchMarketFromAlert(source, sender) ?? getActiveMarket().id;
+  if (market !== 'AE' && market !== 'SA') return false;
+  try {
+    return withMarketPackForParsing(market, () => parseRefusedForProof(source, undefined, { sender })) !== null;
+  } catch {
+    return false;
+  }
+};
+
 export const inspectGenericBankEventForReview = (
   source: string,
   sender = '',
@@ -200,7 +315,8 @@ export const inspectGenericBankEventForReview = (
   // link ("... is credited to 98XXXXXXXX Register now d5m.example/x") is not
   // admitted this way.
   const claimAdmitted = noContext && (!sender.trim() || isUnverifiedAlertSender(sender)) &&
-    MONEY_ARRIVED_CLAIM.test(source) && (MONEY_CLAIM_EVIDENCE.test(source) || TRANSACTION_CODE.test(source)) && !PERSONAL_CHAT.test(source) &&
+    MONEY_ARRIVED_CLAIM.test(source) && !RECEIVED_NOT_MONEY.test(source) &&
+    (MONEY_CLAIM_EVIDENCE.test(source) || TRANSACTION_CODE.test(source)) && !PERSONAL_CHAT.test(source) &&
     !hasNonCompletedWording(source, null, sender) && !hasLinkFromUnregisteredSender(source, sender);
   // A completed movement from a registered header that only advert, shop
   // notice or order-callback wording refused ("Rs.200 paid to Swiggy from
@@ -212,7 +328,14 @@ export const inspectGenericBankEventForReview = (
   const cardAdmitted = !!senderlessCard && namesOwnInstrumentTail(source, 'debit') &&
     !nonPostingReason(source) && !isNotAutoPostableMoney(source) &&
     !hasNonCompletedWording(source, null, '') && !hasLinkFromUnregisteredSender(source, '');
-  if (noContext && !claimAdmitted && !footerAdmitted && !cardAdmitted) return null;
+  // A completed movement that answers for itself (movementAlertAdmitted)
+  // waits in Review in either direction; this only stops a real alert
+  // vanishing for want of a context word.
+  const proofAdmitted = noContext && !claimAdmitted && !footerAdmitted &&
+    refusedOnlyForProof(source, sender);
+  const movementCandidate = noContext && !claimAdmitted && !footerAdmitted && !cardAdmitted && !proofAdmitted &&
+    movementAlertCandidate(source, sender);
+  if (noContext && !claimAdmitted && !footerAdmitted && !cardAdmitted && !proofAdmitted && !movementCandidate) return null;
   const event = isGulfNeighbourMarket(market)
     ? inspectUniversalBankEvent(gulfNeighbourReadSource(source, market), {
         sender, market, dateOrder: dateOrderForCountry(market) ?? undefined,
@@ -227,7 +350,7 @@ export const inspectGenericBankEventForReview = (
   // look like one explicit principal plus one unknown amount.
   const hasOtherCardMoney = cardAdmitted && event.observations.some(observation =>
     observation.role !== 'transaction' && observation.role !== 'credit-limit');
-  if (cardAdmitted && (event.family !== 'purchase' || event.status !== 'posted' || event.direction !== 'debit' ||
+  if (cardAdmitted && !proofAdmitted && (event.family !== 'purchase' || event.status !== 'posted' || event.direction !== 'debit' ||
     event.amount.evidence !== 'explicit' || !event.amount.value || event.amount.spans.length !== 1 ||
     hasOtherCardMoney ||
     event.observations.filter(observation => observation.role === 'transaction').length !== 1 ||
@@ -235,15 +358,46 @@ export const inspectGenericBankEventForReview = (
     event.instrument.value?.kind !== 'card' || event.instrument.value.last4 !== senderlessCard?.[1])) return null;
   if (hasNativeCurrencyAccountContext(source) && !hasBankAlertMoneyHint(source) &&
     (event.amount.evidence !== 'explicit' || event.amount.value?.currency !== 'ZAR')) return null;
-  if (noContext && !((event.direction === 'credit' || ((footerAdmitted || cardAdmitted) && event.direction === 'debit')) &&
+  if (proofAdmitted) {
+    if (event.amount.evidence === 'missing' && !event.observations.some((o) => o.field.evidence !== 'missing')) return null;
+  } else if (movementCandidate) {
+    if (!movementAlertAdmitted(source, sender, event)) return null;
+  } else if (noContext && !((event.direction === 'credit' || ((footerAdmitted || cardAdmitted) && event.direction === 'debit')) &&
     event.status === 'posted' && event.amount.evidence !== 'missing')) return null;
   const hasGroundedMoney =
     event.amount.evidence !== 'missing' ||
     event.observations.some((observation) => observation.field.evidence !== 'missing');
   if (event.status === 'unknown' && event.family === 'unknown' &&
     event.instrument.evidence !== 'explicit' && !hasGroundedMoney) return null;
-  return event;
+  return withDistinctMoneyAlternatives(event);
 };
+
+/**
+ * A bare symbol printed twice ("direct deposit of $123.45 … Amount $123.45")
+ * lists every `$` currency once per span: 18 alternatives for one figure. The
+ * Review sanitizer bounds a field at 16 and refused the whole event, so the
+ * alert was dropped. Identical readings are one reading; removing the repeats
+ * changes no fact and no ambiguity.
+ */
+const distinctMoney = (field: UniversalField<UniversalMoney>): UniversalField<UniversalMoney> => {
+  const seen = new Set<string>();
+  const alternatives = field.alternatives.filter((money) => {
+    const key = `${money.currency}/${money.minorUnits}/${money.exponent}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return alternatives.length === field.alternatives.length ? field : { ...field, alternatives };
+};
+const withDistinctMoneyAlternatives = (event: UniversalBankEvent): UniversalBankEvent => ({
+  ...event,
+  amount: distinctMoney(event.amount),
+  statementTotal: distinctMoney(event.statementTotal),
+  minimumDue: distinctMoney(event.minimumDue),
+  balance: distinctMoney(event.balance),
+  creditLimit: distinctMoney(event.creditLimit),
+  observations: event.observations.map((observation) => ({ ...observation, field: distinctMoney(observation.field) })),
+});
 
 /** Synchronous, network-free rate lookup used while parsing. */
 export type ParseFxLookup = (base: string, quote: string, date: string) => FxQuote | null;
@@ -567,6 +721,69 @@ interface UnprovenPostingContext {
   inspection: UniversalAlertReview | null;
 }
 
+/**
+ * Kuwait's two largest banks' sender IDs, for a bare "دينار" only. The
+ * institution registry keeps KFH and NBK behind a KWD-evidence qualifier
+ * because the short IDs are shared brands (NBK is also the National Bank of
+ * Kenya). That caution is about routing an ENGLISH or currency-less alert; a
+ * Kenyan bank never writes the Arabic word "دينار", and neither does any other
+ * NBK/KFH outside the dinar world, so Arabic dinar wording from these exact
+ * sender IDs is Kuwaiti. BBK is deliberately absent: it operates in Bahrain
+ * AND Kuwait, so its bare dinar stays in Review.
+ */
+const KUWAITI_DINAR_SENDERS = new Set(['kfh', 'kfhonline', 'nbk', 'nbkbank']);
+const senderKeyOf = (sender: string): string =>
+  sender.normalize('NFKC').toLocaleLowerCase('en-US').replace(/[^\p{L}\p{N}]+/gu, '');
+
+/**
+ * The market a registered sender ID itself proves, for a bare "دينار" only.
+ * The Review inspection is skipped for an alert whose only money is that word,
+ * so this routes the sender directly; a bank named only in the text, two
+ * conflicting markets, or a blank sender (iOS History) prove nothing.
+ */
+// Which country's dinar a following adjective names ("دينار كويتي", "دينار
+// ليبي"). Post-fold spelling: أردني is folded to اردني.
+const DINAR_ADJECTIVE_MARKET: Readonly<Record<string, string>> = {
+  كويتي: 'KW', بحريني: 'BH', اردني: 'JO', أردني: 'JO', عراقي: 'IQ', ليبي: 'LY', تونسي: 'TN', جزائري: 'DZ',
+};
+// Words that may follow a bare "دينار" without qualifying it.
+const DINAR_FOLLOWERS = new Set(['في', 'لدى', 'لدي', 'الى', 'إلى', 'الي', 'على', 'علي', 'التي', 'الذي', 'من', 'عن', 'و', 'بتاريخ', 'رقم']);
+/**
+ * The countries the word after each "دينار" names: a known adjective is its
+ * market, and any other adjective-shaped word ("دينار صربي", "دينار مقدوني")
+ * is 'other'. A bare dinar or a preposition after it names none.
+ */
+const dinarQualifiers = (source: string): Set<string> => {
+  const out = new Set<string>();
+  for (const m of source.matchAll(/دينار(?:ا|اً)?\s+([\u0621-\u064A]+)/gu)) {
+    const word = m[1];
+    if (DINAR_FOLLOWERS.has(word)) continue;
+    const market = DINAR_ADJECTIVE_MARKET[word];
+    if (market) out.add(market);
+    else if (/[\u0621-\u064A]{2,}ي$/u.test(word)) out.add('other');
+  }
+  return out;
+};
+const senderProvenMarket = (source: string, sender: string): string | null => {
+  if (!sender.trim() || !/دينار/u.test(source)) return null;
+  // "دينار ليبي" (or any qualifier but the proven market's own) is another
+  // country's money: never resolved through the sender.
+  const qualifiers = dinarQualifiers(source);
+  const fits = (market: string | null): string | null =>
+    market && [...qualifiers].every((q) => q === market) ? market : null;
+  try {
+    const route = routeAlertMarket({ source, sender });
+    if (route.decision === 'single' && route.market) {
+      return route.candidates.some((candidate) => candidate.market === route.market && candidate.evidence.includes('sender'))
+        ? fits(route.market) : null;
+    }
+    if (route.decision !== 'unknown') return null;
+    return KUWAITI_DINAR_SENDERS.has(senderKeyOf(sender)) ? fits('KW') : null;
+  } catch {
+    return null;
+  }
+};
+
 /** The identified institution of a single route, and whether the sender itself proved it. */
 const routedInstitution = (inspection: UniversalAlertReview | null): { id: string; sender: boolean } | null => {
   const review = inspection?.route.decision === 'single' ? inspection.review?.institution : null;
@@ -656,6 +873,13 @@ const parseUniversalPostedEvent = (
   // A best-effort row is only ever written in the pinned ledger currency; an
   // unpinned ledger waits for Review (or a proven alert) to choose it.
   if (!pinnedCurrency) return null;
+  // Two institutions of different markets named by the sender and the text
+  // ("RBC Royal Bank: … $45.00 … - Sparkasse") leave the alert's own market,
+  // and so what "$" or "kr" means, unknown: it waits in Review.
+  // (Only institutions of DIFFERENT markets: "Chase … to JOHN at Bank of America" is one market.)
+  if (context.inspection?.route.decision === 'ambiguous' && context.inspection.route.reasons.some((reason) =>
+    reason === 'sender-institution-conflict' || reason === 'multiple-institutions' || reason === 'conflicting-alert-markets') &&
+    new Set(context.inspection.route.candidates.map((candidate) => candidate.market)).size > 1) return null;
   const readSource = countryReadSource(source, context.country);
   const event = inspectUniversalBankEvent(readSource,
     universalSourceParseContext(context.inspection, sender, context.country));
@@ -690,6 +914,8 @@ const parseUniversalPostedEvent = (
     country: context.country,
     routedMarket: context.routedMarket,
     launchSenderMarket: context.launchSenderMarket,
+    senderMarket: context.institution?.sender && context.routedMarket ? context.routedMarket
+      : senderProvenMarket(readSource, sender),
     ledgerCurrency: pinnedCurrency,
     ledgerExponent: pinnedExponent,
     observedAt,

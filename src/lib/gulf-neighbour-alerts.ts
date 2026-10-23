@@ -113,9 +113,14 @@ export const gulfNeighbourReadSource = (source: string, market: GulfNeighbourMar
 /**
  * A completion verb, English or Arabic. "Purchase of" is the launch grammar's
  * own completed-purchase phrase; a bare heading ("POS", "Card transaction",
- * "شراء بطاقة") is not.
+ * "شراء بطاقة") is not. CBQ writes it "Purchase transaction of QAR 89.00 at
+ * … has been approved": that noun phrase counts only with its completed verb,
+ * never with "… will be approved". KFH returns a refund with "تم إرجاع مبلغ …"
+ * (an amount was returned); Bank Muscat's Arabic twin says "تم استخدام
+ * بطاقتكم" (your card was used). Each is a finished event, and the shared
+ * non-completed wording guard has already refused holds, requests and OTPs.
  */
-const COMPLETION = /\b(?:purchase\s+of|(?:was|has\s+been)\s+used\s+(?:for|at)|debited|credited|deducted|withdrawn|deposited|paid|spent|refunded|transferred|received|charged|was\s+successful)\b|تمت?\s+(?:عملية\s+)?(?:ال)?(?:خصم|إيداع|ايداع|تحويل|سداد|سحب|شراء|استرداد|قيد|إضافة|اضافة|دفع)/iu;
+const COMPLETION = /\bpurchase\s+transaction\s+of\b(?:[^.\n]|\.(?=\d)){0,120}?\b(?:has\s+been|was)\s+(?:approved|successful|completed)\b|\b(?:purchase\s+of|(?:was|has\s+been)\s+used\s+(?:for|at)|debited|credited|deducted|withdrawn|deposited|paid|spent|refunded|transferred|received|charged|was\s+successful)\b|تمت?\s+(?:عملية\s+)?(?:ال)?(?:خصم|إيداع|ايداع|تحويل|سداد|سحب|شراء|استرداد|قيد|إضافة|اضافة|دفع|إرجاع|ارجاع|استخدام)/iu;
 
 /**
  * Paying the card's own bill moves money between the person's accounts; it is
@@ -295,6 +300,13 @@ export function decideGulfNeighbourPosting(input: GulfNeighbourInput): GulfNeigh
   }
   const direction = directionOf(reading.type);
   if (event.direction !== direction && event.direction !== 'unknown') return review('readers-disagree');
+  // An unresolved universal direction is accepted only when the universal
+  // FAMILY agrees with the grammar's direction: a refund is money in, a
+  // purchase, withdrawal or fee money out. "تم إرجاع مبلغ … لعملية شراء لدى
+  // SHOP" is a refund whose purchase word the grammar can read as spending.
+  const familyType = event.family === 'refund' ? 'income'
+    : ['purchase', 'cash-withdrawal', 'fee', 'utility', 'recurring-payment'].includes(event.family) ? 'expense' : null;
+  if (familyType && reading.type !== familyType) return review('readers-disagree');
   if (template && (event.family !== 'purchase' || event.direction !== 'debit')) return review('readers-disagree');
 
   const stated = event.transactionDate.evidence === 'explicit' ? event.transactionDate.value : null;

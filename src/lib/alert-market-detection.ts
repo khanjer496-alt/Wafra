@@ -50,14 +50,16 @@ export interface CaptureMarketInference {
 
 const UNIVERSAL_MARKETS: readonly UniversalMarket[] = [
   'US', 'GB', 'FR', 'DE', 'ES', 'IT', 'NL', 'IN', 'QA', 'KW', 'BH', 'OM', 'EG', 'JO',
-  'CA', 'AU', 'BR', 'MX', 'SG', 'CO', 'PE',
+  'CA', 'AU', 'BR', 'MX', 'SG', 'CO', 'PE', 'PT', 'PL', 'SE', 'DK', 'NO', 'CZ',
+  'IQ', 'LB',
 ];
 const ALL_MARKETS: readonly DetectedMarket[] = ['AE', 'SA', ...UNIVERSAL_MARKETS];
 const MARKET_CURRENCY: Record<DetectedMarket, string> = {
   AE: 'AED', SA: 'SAR', US: 'USD', GB: 'GBP', FR: 'EUR', DE: 'EUR', ES: 'EUR',
   IT: 'EUR', NL: 'EUR', IN: 'INR', QA: 'QAR', KW: 'KWD', BH: 'BHD', OM: 'OMR',
   EG: 'EGP', JO: 'JOD', CA: 'CAD', AU: 'AUD', BR: 'BRL', MX: 'MXN', SG: 'SGD',
-  CO: 'COP', PE: 'PEN',
+  CO: 'COP', PE: 'PEN', PT: 'EUR', PL: 'PLN', SE: 'SEK', DK: 'DKK', NO: 'NOK', CZ: 'CZK',
+  IQ: 'IQD', LB: 'LBP',
 };
 const GRAMMAR_MARKERS: Partial<Record<DetectedMarket, RegExp>> = {
   IN: /\b(?:upi|imps|neft|rtgs|aeps|nach)\b|₹|रु(?:पये)?/iu,
@@ -110,9 +112,10 @@ const regionMarket = (hint?: string | null): DetectedMarket | null => {
 };
 
 const currencyMarkets = (source: string): Set<DetectedMarket> => {
-  // COP and PEN count only next to a figure: "pen" and "cop" are words.
+  // COP, PEN and NOK count only next to a figure: "pen", "cop" and the
+  // Norwegian/Danish "nok" (enough) are words.
   const codes = new Set(
-    source.slice(0, 4096).toUpperCase().match(/\b(?:AED|SAR|USD|GBP|EUR|INR|QAR|KWD|BHD|OMR|EGP|JOD|CAD|AUD|BRL|MXN|SGD)\b|\b(?:COP|PEN)(?=\s?\d)|(?<=\d\s?)(?:COP|PEN)\b/g) ?? [],
+    source.slice(0, 4096).toUpperCase().match(/\b(?:AED|SAR|USD|GBP|EUR|INR|QAR|KWD|BHD|OMR|EGP|JOD|CAD|AUD|BRL|MXN|SGD|PLN|SEK|DKK|CZK|IQD|LBP)\b|\b(?:COP|PEN|NOK)(?=\s?\d)|(?<=\d\s?)(?:COP|PEN|NOK)\b/g) ?? [],
   );
   const markets = new Set<DetectedMarket>();
   for (const market of ALL_MARKETS) {

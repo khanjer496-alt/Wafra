@@ -103,4 +103,25 @@ export const CURRENCY_SYMBOL_CANDIDATES: Readonly<Record<string, readonly Curren
   'रू': ['INR', 'NPR'],
   // The Arabic word for pound, as Egyptian banks write it ("1,500.00 جنيه").
   'جنيه': ['EGP', 'SDG', 'SSP'],
+  // The Egyptian pound's own abbreviation without its dots ("3,000.00 جم").
+  'جم': ['EGP'],
+  // "Dinar" alone is Jordan's, Iraq's, Kuwait's, Bahrain's, Libya's,
+  // Tunisia's or Algeria's: only the person's country may choose. The
+  // qualified spellings name one currency and win at the same position.
+  'دينار': ['JOD', 'IQD', 'KWD', 'BHD', 'LYD', 'TND', 'DZD'],
+  'دينار عراقي': ['IQD'],
+  'دينار أردني': ['JOD'],
+  'دينار اردني': ['JOD'],
+  'دينار كويتي': ['KWD'],
+  'دينار بحريني': ['BHD'],
+  // Central European units as their banks print them ("129,00 zł", "459,00 Kč").
+  'zł': ['PLN'],
+  'Kč': ['CZK'],
+  // The same units in an all-capitals SMS ("459,00 KČ", "297,82 ZŁ"; alert-draft.ts).
+  'ZŁ': ['PLN'],
+  'KČ': ['CZK'],
+  // Swedish, Danish, Norwegian and Icelandic krona/krone all print "kr"
+  // ("245,00 kr", "1.250,00 kr."). Never guess across countries.
+  kr: ['SEK', 'DKK', 'NOK', 'ISK'],
+  KR: ['SEK', 'DKK', 'NOK', 'ISK'],
 };

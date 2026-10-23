@@ -48,7 +48,11 @@ export function malformedLocalMoneyTokens(
     const number = String.raw`(?:\d[\d.,]*|\.\d[\d.,]*)(?:[ \u00a0\u2009\u202f]+${dateGroup}\d[\d.,]*)*(?:[eE][+-]?\d+)?`;
     scanner = {
       prefix: new RegExp(String.raw`(?<![\p{L}])${localMoneyPrefixPattern(currencyAliases)}(?![\p{L}])\s*(${number})`, 'giu'),
-      suffix: new RegExp(String.raw`(${number})\s*${currency}(?![\p{L}])`, 'giu'),
+      // The start guards never change a match: a figure that starts inside a
+      // digit run, or on a space-separated group an earlier figure already
+      // continues into (unless that earlier digit ends an exponent), is never
+      // the leftmost match. They keep long digit runs linear.
+      suffix: new RegExp(String.raw`(?<!\d[.,]?)(?:(?=\.)|(?=\d)(?<!(?<![eE][+-]?\d*)\d[.,]?[ \u00a0\u2009\u202f]+))(${number})\s*${currency}(?![\p{L}])`, 'giu'),
       localCode: new RegExp(`^${currency}$`, 'iu'),
     };
     scanners.set(key, scanner);

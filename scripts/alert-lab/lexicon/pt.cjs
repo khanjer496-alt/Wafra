@@ -1,0 +1,100 @@
+'use strict';
+// European Portuguese phrasings (PT). See en.cjs for slots.
+module.exports = {
+  id: 'pt',
+  months: ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'],
+  at24: 'às',
+  sentence: {
+    purchase: [
+      'Compra de {AMT} em {MER}[ com o seu {INS}][ em {DATE}].',
+      'Pagou {AMT} em {MER}[ em {DATE}].',
+      'Foi efetuado um pagamento de {AMT} em {MER}[ com o {INS}][ em {DATE}].',
+    ],
+    cnp: [
+      'Compra online de {AMT} em {MER}[ com o seu {INS}][ em {DATE}].',
+      'Pagamento na internet de {AMT} a {MER}[ em {DATE}].',
+      'O seu {INS} foi usado numa compra online de {AMT} em {MER}[ em {DATE}].',
+    ],
+    atm: [
+      'Levantamento de {AMT}[ no Multibanco {MER}][ com o seu {INS}][ em {DATE}].',
+      'Levantou {AMT} numa caixa automática[ em {DATE}].',
+      'Foi efetuado um levantamento de {AMT} com o seu {INS}[ em {DATE}].',
+    ],
+    refund: [
+      'Devolução de {AMT} de {MER} creditada no seu {INS}[ em {DATE}].',
+      '{MER} devolveu-lhe {AMT}[ em {DATE}].',
+      'Recebeu um reembolso de {AMT} de {MER}[ em {DATE}].',
+    ],
+    fee: [
+      'Comissão de manutenção de {AMT} debitada na sua conta[ em {DATE}].',
+      'Foi cobrada uma comissão de {AMT}[ em {DATE}].',
+      'Debitámos {AMT} de comissão[ na {INS}][ em {DATE}].',
+    ],
+    incoming: [
+      'Recebeu {AMT} de {CP}[ em {DATE}].',
+      'Transferência recebida de {AMT} de {CP}[ em {DATE}].',
+      '{CP} enviou-lhe {AMT} por MB WAY[ em {DATE}].',
+    ],
+    outgoing: [
+      'Enviou {AMT} a {CP}[ em {DATE}].',
+      'A sua transferência de {AMT} para {CP} foi concluída[ em {DATE}].',
+      'MB WAY: enviou {AMT} para {CP}[ em {DATE}].',
+    ],
+    bill: [
+      'Débito direto de {AMT} de {MER} na sua conta[ em {DATE}].',
+      'Pagamento de serviços de {AMT} a {MER} efetuado[ em {DATE}].',
+      '{MER} debitou {AMT} na sua conta[ em {DATE}].',
+    ],
+  },
+  headline: {
+    purchase: ['Compra: {AMT} em {MER}[ · {DATE}]', 'Pagamento com cartão {AMT} - {MER}'],
+    cnp: ['Compra online: {AMT} em {MER}[ · {DATE}]'],
+    atm: ['Levantamento: {AMT}[ · {MER}][ · {DATE}]'],
+    refund: ['Devolução: {AMT} de {MER}[ · {DATE}]'],
+    fee: ['Comissão: {AMT}[ · {DATE}]'],
+    incoming: ['Transferência recebida: {AMT} de {CP}[ · {DATE}]'],
+    outgoing: ['Transferência enviada: {AMT} para {CP}[ · {DATE}]'],
+    bill: ['Débito direto: {AMT} - {MER}[ · {DATE}]'],
+  },
+  push: {
+    purchase: ['{EMO} Pagou {AMT} em {MER}', '{EMO} {AMT} em {MER}'],
+    cnp: ['{EMO} Compra online de {AMT} em {MER}'],
+    atm: ['{EMO} Levantou {AMT}'],
+    refund: ['{EMO} {MER} devolveu-lhe {AMT}'],
+    fee: ['{EMO} Comissão de {AMT}'],
+    incoming: ['{EMO} {CP} enviou-lhe {AMT}', '{EMO} Recebeu {AMT} de {CP}'],
+    outgoing: ['{EMO} Enviou {AMT} a {CP}'],
+    bill: ['{EMO} Débito direto {MER}: {AMT}'],
+  },
+  fields: {
+    title: { purchase: ['Compra com cartão'], cnp: ['Compra online'], atm: ['Levantamento'], refund: ['Devolução'], fee: ['Comissão'], incoming: ['Transferência recebida'], outgoing: ['Transferência enviada'], bill: ['Débito direto'] },
+    amount: ['Montante', 'Valor'], merchant: ['Comerciante', 'Em'], place: ['Local'], payer: ['De', 'Ordenante'], payee: ['Para', 'Beneficiário'], card: ['Cartão', 'Conta'], date: ['Data'],
+  },
+  ins: {
+    card: ['cartão terminado em {L4}', 'cartão ****{L4}', 'cartão de débito ...{L4}'],
+    account: ['conta terminada em {L4}', 'conta ****{L4}'],
+  },
+  trailer: {
+    balance: ['Saldo disponível: {BAL}.', 'Saldo {BAL}'],
+    limit: ['Plafond disponível: {BAL}'],
+    fraud: ['Não reconhece? Ligue {PHONE}.'],
+    threshold: ['Recebe este alerta porque o montante excede {THR}.'],
+    optout: ['Para cancelar alertas envie STOP.'],
+    link: ['Detalhes: https://{DOMAIN}/alertas'],
+  },
+  neg: {
+    declined: ['c|A sua compra de {AMT} em {MER} foi recusada.', 'x|A transferência de {AMT} para {CP} falhou.'],
+    pending: ['c|Cativo de {AMT} em {MER} no seu {INS}.', 'c|A compra de {AMT} em {MER} está pendente.'],
+    future: ['x|O débito direto de {AMT} de {MER} será cobrado em {DUE}.', 'x|A transferência agendada de {AMT} para {CP} será executada em {DUE}.'],
+    conditional: ["c|Se pagar mais de {AMT} em {MER}, enviamos um alerta.", "c|Se {MER} debitar {AMT} sem autorização, pode contestar em 60 dias."],
+    question: ['c|Efetuou uma compra de {AMT} em {MER}? Responda SIM ou NAO.', 'x|Confirma o envio de {AMT} para {CP}? Responda SIM ou NAO.'],
+    negation: ['x|O débito de {AMT} de {MER} não foi pago.', 'c|{AMT} não foram debitados; a compra em {MER} foi anulada.'],
+    otp: ['c|O código para a compra de {AMT} em {MER} é {OTP}. Não o partilhe.', 'x|Código {OTP} para confirmar a transferência de {AMT} para {CP}.'],
+    promo: ['c|Ganhe 5% de cashback em compras acima de {AMT} em {MER}!', 'a|Crédito pessoal até {AMT}. Peça já.'],
+    request: ['x|{CP} pediu-lhe {AMT} por MB WAY.', 'x|Pedido de pagamento de {CP}: {AMT}.'],
+    statement: ['a|O extrato do seu cartão está disponível: saldo {AMT}, pagamento mínimo {MIN} até {DUE}.'],
+    balance: ['a|O saldo da sua conta é {AMT}.', 'a|Saldo atual: {AMT}.'],
+    chat: ['a|Paguei {AMT} no {MER} pelo jantar, mandas-me a tua parte?', 'a|Podes transferir-me {AMT} para a renda?'],
+    scam: ['c|Foi debitado {AMT} em {MER} no seu {INS}. Não foi você? Verifique em {URL}', 'a|A sua encomenda aguarda pagamento de {AMT}: {URL}'],
+  },
+};

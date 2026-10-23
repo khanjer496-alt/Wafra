@@ -16,6 +16,7 @@ import {
 import { bankFromSender, detectLaunchMarketFromSender, pinnedLedgerCurrencyCode, soleBankNamedInText, withMarketPackForParsing } from '@/lib/markets';
 import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars';
 import { buildTransferEvidence } from '@/lib/transfer-evidence';
+import { readBankMuscatCardPurchase } from '@/lib/gulf-neighbour-templates';
 import type { CategoryId } from '@/lib/types';
 import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
 
@@ -328,7 +329,20 @@ export function parseHistoricalMessageRecords(
     // keep unproven obligations in typed Review with their extracted facts.
     const bestEffortAccepted = !!result?.bestEffort && result.kind === 'transaction' &&
       result.currency === pinnedLedgerCurrencyCode();
-    if (!result || (!bestEffortAccepted && (result.bestEffort ||
+    // A certified Gulf-neighbour bank template (Bank Muscat's own card-purchase
+    // SMS from its own sender) is a proven format like the AE/SA grammar and
+    // posts without a best-effort marker, so the rule above sent every one to
+    // Review. Accept that unmarked row only when the text is exactly the
+    // template and its own reading equals the row: same currency, which is the
+    // ledger's, and the same minor units. Any other unmarked foreign row (an
+    // AE/SA alert converted onto a Gulf-neighbour ledger) keeps Review.
+    const certifiedTemplateAccepted = !!result && !result.bestEffort && result.kind === 'transaction' &&
+      result.currency === pinnedLedgerCurrencyCode() && (() => {
+        const template = readBankMuscatCardPurchase(record.text);
+        return !!template && template.currency === result.currency && template.minorUnits === result.amountFils &&
+          result.type === 'expense';
+      })();
+    if (!result || (!bestEffortAccepted && !certifiedTemplateAccepted && (result.bestEffort ||
       (result.currency !== 'AED' && result.currency !== 'SAR')))) {
       const refusal = inspectHistoricalRefusal({
         record,

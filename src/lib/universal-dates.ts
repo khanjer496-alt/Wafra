@@ -72,9 +72,15 @@ const dateRole = (text: string, start: number, end: number): DateRole | null => 
   if (/(?:\bdue(?:\s+date)?|\bpay(?:ment)?\s+(?:by|before)|\bdeadline|\bdate\s+limite(?:\s+de\s+paiement)?|\bfällig\s+am|支払期限|अंतिम\s+तिथि|\bfecha\s+límite\s+de\s+pago|\bscadenza|भुगतान\s+की\s+अंतिम\s+तिथि|تاريخ\s+استحقاق\s+الدفع|تاريخ\s+(?:الاستحقاق|الإستحقاق)|مستحق(?:ة)?\s*(?:بتاريخ)?|قبل\s+تاريخ)\s*(?:(?:is|on|by|before)\s*)?[:：=-]?\s*$/iu.test(prefix)) return 'dueDate';
   if (/(?:\bstatement\s+(?:date|dated|generated|issued)|\bgenerated|\bissued|تاريخ\s+(?:الكشف|كشف\s+الحساب|الإصدار|الاصدار))\s*(?:(?:is|on)\s*)?[:：=-]?\s*$/iu.test(prefix)) return 'statementDate';
   if (/(?:\b(?:transaction|purchase|payment|posting)\s+date|\bdate|\bdatum|利用日|日時|تاريخ\s+(?:العملية|العمليه|المعاملة|المعامله))\s*(?:(?:is|on)\s*)?[:：=-]?\s*$/iu.test(prefix)) return 'transactionDate';
+  // European booking-date field labels: German "Buchungstag:", "Buchung:",
+  // "Wertstellung:"; French "Date d'opération :"; Spanish "Fecha:"; Danish
+  // and Norwegian "Dato:". Only a label directly before the date counts.
+  if (/(?:\bbuchungs(?:tag|datum)|\bbuchung|\bwertstellung|\bvaluta|\bdate\s+d['’]op[ée]ration|\bfecha(?:\s+de\s+(?:la\s+)?operaci[oó]n)?|\bdato)\s*[:：=-]\s*$/iu.test(prefix)) return 'transactionDate';
   // These are the ordinary date-introducing words in the supplied language
-  // packs; require an actual date token immediately after them.
-  if (/(?:\b(?:on|dated|le|am|el|il|op|em)|بتاريخ)\s*$/iu.test(prefix)) return 'transactionDate';
+  // packs; require an actual date token immediately after them. "du"/"del"
+  // (French, Italian/Spanish "of"), "den" (Swedish/Danish), "dne" (Czech)
+  // and Polish "z dn." name the day of the movement they follow.
+  if (/(?:\b(?:on|dated|le|am|el|il|op|em|du|del|den|dne)|\bdn\.|بتاريخ)\s*$/iu.test(prefix)) return 'transactionDate';
   const suffix = text.slice(end, Math.min(text.length, end + 180));
   // New-language date contexts require the surrounding transaction predicate;
   // a reference number next to a date-like token is not a date field.

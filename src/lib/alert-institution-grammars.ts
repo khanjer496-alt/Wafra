@@ -12,7 +12,9 @@ export type InstitutionGrammarMarket =
   | 'US' | 'GB' | 'FR' | 'DE' | 'ES' | 'IT' | 'NL'
   | 'IN' | 'QA' | 'KW' | 'BH' | 'OM' | 'EG' | 'JO'
   | 'CA' | 'AU' | 'BR' | 'MX' | 'SG'
-  | 'CO' | 'PE';
+  | 'CO' | 'PE'
+  | 'PT' | 'PL' | 'SE' | 'DK' | 'NO' | 'CZ'
+  | 'IQ' | 'LB';
 
 export type InstitutionEvidenceKind = 'sender' | 'body';
 export type InstitutionGrammarStatus = 'experimental' | 'verified';
@@ -285,7 +287,9 @@ const INSTITUTIONS: Record<InstitutionGrammarMarket, readonly InstitutionGrammar
   // Peru. Plin is a wallet rail hosted by several banks; BBVA and Scotiabank
   // count only with "Perú" (or BBVA's former Continental brand).
   PE: [
-    { institution: 'bcp', senders: ['bcp', 'viabcp'], bodyBoundSenders: ['19896'], body: /\bbcp\b|\bbanco\s+de\s+cr[eé]dito\s+del\s+per[uú](?=$|[^\p{L}\p{N}])/iu },
+    // "Millennium bcp" is Portugal's Banco Comercial Português, not Peru's BCP.
+    { institution: 'bcp', senders: ['bcp', 'viabcp'], bodyBoundSenders: ['19896'], body: /\bbcp\b|\bbanco\s+de\s+cr[eé]dito\s+del\s+per[uú](?=$|[^\p{L}\p{N}])/iu,
+      disqualifier: /\bmillennium\s*bcp\b/iu },
     { institution: 'yape', senders: ['yape'], body: /\byape\b/iu },
     // "Interbank transfer" is ordinary banking English: the Peruvian bank's
     // name counts as body evidence only next to soles, PEN or Perú.
@@ -299,6 +303,17 @@ const INSTITUTIONS: Record<InstitutionGrammarMarket, readonly InstitutionGrammar
     { institution: 'ocbc-singapore', senders: ['ocbc', 'ocbcsg'], body: /\bocbc(?: bank)?\b/iu },
     { institution: 'uob-singapore', senders: ['uob', 'uobsg'], body: /\buob(?: bank)?\b/iu },
   ],
+  // European language markets carry vocabulary only, and Iraq and Lebanon
+  // are registry entries. No institution is registered for them yet, so none
+  // can be routed by name.
+  PT: [],
+  PL: [],
+  SE: [],
+  DK: [],
+  NO: [],
+  CZ: [],
+  IQ: [],
+  LB: [],
 };
 
 const TEMPLATE_RULES: readonly { template: AlertTemplateId; pattern: RegExp }[] = [

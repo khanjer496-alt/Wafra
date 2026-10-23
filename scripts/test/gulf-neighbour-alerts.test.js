@@ -184,9 +184,13 @@ for (const row of POSTING) {
     converted?.currency === 'AED' && converted.amountFils === 14752 && converted.originalCurrency === 'KWD' &&
       converted.originalMinorUnits === 12345 && converted.originalExponent === 3 && converted.fxSource === 'reference' &&
       !!converted.bestEffort, converted);
-  // Bank Muscat's template with no sender is not certified: no route at all.
-  ok('a Bank Muscat-shaped alert with no sender is not posted (no route)',
-    capture(bm.text, '', bm.market, bm.ledger) === null);
+  // Bank Muscat's template with no sender is not certified. The general
+  // best-effort path may still read it through the person's own country (OM),
+  // but only marked, and only with the exact three-decimal principal.
+  const senderless = capture(bm.text, '', bm.market, bm.ledger);
+  ok('a Bank Muscat-shaped alert with no sender is never certified',
+    senderless === null || (!!senderless.bestEffort && senderless.amountFils === 2375 && senderless.currency === 'OMR'),
+    senderless);
   // An extra sentence breaks the exact template; the grammar may still read it, marked.
   const tail = capture(`${bm.text} للاستفسار اتصل بنا`, bm.sender, bm.market, bm.ledger);
   ok('a Bank Muscat alert with extra text is never certified', !tail || !!tail.bestEffort, tail);

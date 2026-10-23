@@ -58,6 +58,40 @@ export interface AlertDraftContext {
   dotDecimalCurrencies?: readonly CurrencyCode[];
 }
 
+/**
+ * ONE INSPECTION'S MEMO, never a cache across messages.
+ *
+ * A single alert is read by every language pack (alert-semantics.ts) and the
+ * money, field and policy readers, and most of what they ask is the same
+ * question about the same text. Inside `withAlertInspectionMemo` a pure
+ * answer is computed once per text and reused; the memo is dropped when the
+ * outermost call returns or throws, so nothing of a message outlives its own
+ * inspection. Outside it, every call computes afresh.
+ */
+type InspectionMemo = Map<unknown, Map<string, unknown>>;
+let inspectionMemo: InspectionMemo | null = null;
+let inspectionMemoDepth = 0;
+export const withAlertInspectionMemo = <T>(run: () => T): T => {
+  if (inspectionMemoDepth === 0) inspectionMemo = new Map();
+  inspectionMemoDepth += 1;
+  try {
+    return run();
+  } finally {
+    inspectionMemoDepth -= 1;
+    if (inspectionMemoDepth === 0) inspectionMemo = null;
+  }
+};
+/** `compute()` once per (owner, key) inside the current inspection. */
+export const rememberDuringInspection = <V>(owner: unknown, key: string, compute: () => V): V => {
+  if (!inspectionMemo) return compute();
+  let table = inspectionMemo.get(owner);
+  if (!table) inspectionMemo.set(owner, table = new Map());
+  if (table.has(key)) return table.get(key) as V;
+  const value = compute();
+  table.set(key, value);
+  return value;
+};
+
 const DIGIT_ZEROES = [0x0660, 0x06f0, 0x0966, 0x09e6, 0x0e50, 0x1040, 0xff10] as const;
 
 /** Normalize common bank-alert digits/separators without changing string length. */
@@ -104,6 +138,15 @@ interface ParsedNumber {
  * not ambiguous for them.
  */
 const DOT_GROUPING_CURRENCIES = new Set(['IDR', 'COP']);
+
+/**
+ * The Iraqi dinar keeps an ISO exponent of 3, but fils have not circulated
+ * for decades and Iraqi banks and wallets print whole dinars grouped with
+ * commas ("50,000 دينار عراقي", "1,250,000 IQD"). A comma before exactly
+ * three digits is therefore a thousands separator for IQD only; a dot keeps
+ * its ordinary ambiguity, and every other three-decimal currency is unchanged.
+ */
+const COMMA_GROUPING_CURRENCIES = new Set(['IQD']);
 
 function parseNumber(source: string, exponent: number, currency = '', dotDecimal = false): ParsedNumber | null {
   let value = source.trim().replace(/[+]/g, '');
@@ -153,12 +196,18 @@ function parseNumber(source: string, exponent: number, currency = '', dotDecimal
     const locations = [...value.matchAll(new RegExp(`\\${separator}`, 'g'))].map((m) => m.index as number);
     const last = locations[locations.length - 1];
     const tail = value.length - last - 1;
-    if (locations.length === 1 && exponent > 0 && tail > 0 && tail <= exponent) {
+    if (separator === ',' && COMMA_GROUPING_CURRENCIES.has(currency) && validGroupedInteger(value, separator)) {
+      // Whole Iraqi dinars grouped with commas: no decimal point, no doubt.
+    } else if (locations.length === 1 && exponent > 0 && tail > 0 && tail <= exponent) {
       decimalAt = last;
       // A single three-digit suffix can also be a thousands group. Preserve
       // the candidate but force review rather than pretending certainty,
       // unless the routed market's own currency settles it (dotDecimal).
-      ambiguous = exponent === 3 && tail === 3 && !(dotDecimal && separator === '.');
+      // A thousands group needs a one-to-three digit lead: "1649.832" and
+      // "12016.714" cannot be grouped integers, so their only reading is the
+      // decimal one. (A leading-zero lead such as "0.650" stays in review.)
+      const groupable = /^\d{1,3}$/.test(value.slice(0, last));
+      ambiguous = exponent === 3 && tail === 3 && groupable && !(dotDecimal && separator === '.');
     } else if (exponent === 3 && tail === 3 &&
       validGroupedInteger(value.slice(0, last), separator)) {
       // Even repeated separators are kept ambiguous for three-decimal
@@ -212,6 +261,9 @@ const escapeRe = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g,
 const SYMBOL_PATTERN = SYMBOLS.map(escapeRe).join('|');
 const SYMBOL_PREFIX = new RegExp(`(${SYMBOL_PATTERN})${TOKEN_GAP}(${NUMBER})`, 'g');
 const SYMBOL_SUFFIX = new RegExp(`(${NUMBER})${TOKEN_GAP}(${SYMBOL_PATTERN})`, 'g');
+/** Symbols spelled with letters, which need a word boundary on both sides. */
+const CAPITAL_UNITS = new Set(['KR', 'ZŁ', 'KČ']);
+const WORD_SYMBOLS = new Set(SYMBOLS.filter((token) => /^[\p{Script=Arabic}]/u.test(token) || ['kr', 'KR', 'zł', 'ZŁ', 'Kč', 'KČ'].includes(token)));
 
 interface RawCandidate {
   start: number;
@@ -238,9 +290,27 @@ const aliasPatternPair = (pattern: string): readonly [RegExp, RegExp] => {
   return pair;
 };
 
+/**
+ * Characters whose lower case disagrees with their /iu case folding (micro
+ * sign, long s, capital and final sigma, Greek symbol variants and the two
+ * pairs of Greek dialytika-tonos letters, old Cyrillic forms, the ſt/st
+ * ligatures). A lower-cased substring test is an exact stand-in for "can this
+ * case-insensitive pattern's literal occur here?" everywhere else; text or
+ * vocabulary holding one of these always runs the full pattern.
+ */
+export const FOLD_UNSAFE = /[\u00b5\u017f\u0345\u0390\u03a3\u03b0\u03c2\u03d0\u03d1\u03d5\u03d6\u03f0\u03f1\u03f5\u1c80-\u1c88\u1e9b\u1fbe\u1fd3\u1fe3\ufb05\ufb06]/u;
+const lowerText = (text: string): string => rememberDuringInspection(lowerText, text, () => text.toLowerCase());
+
 const collectAliasRaw = (normalized: string, aliases: CurrencyAliasMap): RawCandidate[] => {
   const tokens = Object.keys(aliases).sort((a, b) => b.length - a.length);
   if (!tokens.length) return [];
+  // Both alias patterns need a token's own text. Most packs' tokens (kr, zł,
+  // KD, JD, ر.ع …) are absent from most alerts, and building and running two
+  // case-folded patterns per pack for nothing was the draft's largest cost.
+  if (!FOLD_UNSAFE.test(normalized) && !tokens.some((token) => FOLD_UNSAFE.test(token))) {
+    const lower = lowerText(normalized);
+    if (!tokens.some((token) => lower.includes(token.toLowerCase()))) return [];
+  }
   const currenciesByToken = new Map(
     tokens.map((token) => [token.toLowerCase(), aliases[token]] as const),
   );
@@ -288,6 +358,8 @@ function collectRaw(normalized: string, aliases: CurrencyAliasMap = {}): RawCand
       });
     }
   };
+  const letters = normalized.match(/\p{L}/gu) ?? [];
+  const shouting = letters.length > 0 && letters.filter((letter) => /\p{Lu}/u.test(letter)).length / letters.length > 0.8;
   const scanSymbol = (re: RegExp, prefix: boolean): void => {
     re.lastIndex = 0;
     for (const match of normalized.matchAll(re)) {
@@ -305,8 +377,14 @@ function collectRaw(normalized: string, aliases: CurrencyAliasMap = {}): RawCand
       // ("RD$", or "S$" inside an unknown prefix): never the bare "$".
       if (prefix && token.endsWith('$') && (match.index as number) > 0 &&
         /[A-Za-z]/.test(normalized[(match.index as number) - 1])) continue;
+      // Word-shaped units must start a word: "حجم 500" (size 500) ends with
+      // the letters of جم, and "Skr 5" is not kronor.
+      if (prefix && WORD_SYMBOLS.has(token) && (match.index as number) > 0 &&
+        /[\p{L}\p{M}\p{N}]/u.test(normalized[(match.index as number) - 1])) continue;
       // "جنيه استرليني" is pound STERLING, not the Egyptian pound.
       if (token === 'جنيه' && /^\s*[اإأ]?سترلين/u.test(normalized.slice(matchEnd))) continue;
+      // The capitalised units ("KR", "ZŁ", "KČ") only in an all-capitals SMS.
+      if (CAPITAL_UNITS.has(token) && !shouting) continue;
       found.push({
         start: match.index as number,
         end: (match.index as number) + match[0].length,
@@ -317,13 +395,22 @@ function collectRaw(normalized: string, aliases: CurrencyAliasMap = {}): RawCand
       });
     }
   };
-  scanIso(ISO_PREFIX, true);
-  scanIso(ISO_SUFFIX, false);
+  // The ISO and symbol readings do not depend on the market's aliases, so a
+  // pack-by-pack inspection reads them once (the items are never mutated:
+  // everything below filters into new arrays and copies what it keeps).
+  const [iso, symbols] = rememberDuringInspection(collectRaw, normalized, () => {
+    scanIso(ISO_PREFIX, true);
+    scanIso(ISO_SUFFIX, false);
+    const isoFound = found.splice(0);
+    scanSymbol(SYMBOL_PREFIX, true);
+    scanSymbol(SYMBOL_SUFFIX, false);
+    return [isoFound, found.splice(0)] as const;
+  });
+  found.push(...iso);
   // A market-scoped alias is stronger evidence than the same token's global
   // symbol ambiguity (for example Rs in India), but never outranks an ISO code.
   found.push(...collectAliasRaw(normalized, aliases));
-  scanSymbol(SYMBOL_PREFIX, true);
-  scanSymbol(SYMBOL_SUFFIX, false);
+  found.push(...symbols);
   // A clock is never money: in "38.15 KRW 9:45 HANA STORE" the "KRW 9" reading
   // is the hour of a time, and it was booked in place of the real figure.
   const clock = (item: RawCandidate): boolean =>
@@ -336,10 +423,22 @@ function collectRaw(normalized: string, aliases: CurrencyAliasMap = {}): RawCand
   // "$350.00 MXN" is ONE amount written with both a symbol and its ISO code.
   // A symbol reading that overlaps an ISO reading of the same figure is that
   // same figure, never a second movement.
-  return sorted.filter((item) => item.evidence === 'iso-code' || !sorted.some((other) =>
-    other.evidence === 'iso-code' && other.start < item.end && item.start < other.end &&
-    other.amount.replace(/[^\d]/g, '') === item.amount.replace(/[^\d]/g, '') &&
-    item.currencies.includes(other.currencies[0])));
+  const sameFigure = (a: RawCandidate, b: RawCandidate): boolean =>
+    a.start < b.end && b.start < a.end && a.amount.replace(/[^\d]/g, '') === b.amount.replace(/[^\d]/g, '');
+  const kept: RawCandidate[] = [];
+  for (const item of sorted) {
+    if (item.evidence !== 'iso-code' && sorted.some((other) => other.evidence === 'iso-code' && sameFigure(item, other) &&
+      item.currencies.includes(other.currencies[0]))) continue;
+    // "€ 38,87 €" prints one symbol on each side of one figure; the suffix
+    // reading of the same digits is that figure again, not a second amount.
+    // The kept reading spans both symbols, so a following "and € 12,00 €"
+    // still reads as a second listed figure.
+    const twin = item.evidence === 'iso-code' ? undefined : kept.find((other) => other.evidence !== 'iso-code' &&
+      sameFigure(item, other) && other.currencies.join() === item.currencies.join());
+    if (twin) { twin.end = Math.max(twin.end, item.end); continue; }
+    kept.push({ ...item });
+  }
+  return kept;
 }
 
 const HARD_NEGATIVES: readonly [string, RegExp][] = [
@@ -359,10 +458,13 @@ const BALANCE_ONLY = /\b(?:available balance|current balance|available limit|cre
  * write an unverified amount into the ledger.
  */
 export function inspectAlertDraft(source: string, context: AlertDraftContext = {}): AlertDraft {
-  const normalizedText = normalizeAlertText(source.slice(0, 4096));
-  const reasons = HARD_NEGATIVES.filter(([, pattern]) => pattern.test(normalizedText)).map(([reason]) => reason);
+  const head = source.slice(0, 4096);
+  const normalizedText = rememberDuringInspection(normalizeAlertText, head, () => normalizeAlertText(head));
+  const reasons = [...rememberDuringInspection(HARD_NEGATIVES, normalizedText, () =>
+    HARD_NEGATIVES.filter(([, pattern]) => pattern.test(normalizedText)).map(([reason]) => reason))];
   if (source.length > 4096) reasons.push('input-too-long');
-  if (BALANCE_ONLY.test(normalizedText) && !MOVEMENT_WORDS.test(normalizedText)) reasons.push('balance-only');
+  if (rememberDuringInspection(BALANCE_ONLY, normalizedText, () =>
+    BALANCE_ONLY.test(normalizedText) && !MOVEMENT_WORDS.test(normalizedText))) reasons.push('balance-only');
 
   const candidates: MoneyCandidate[] = [];
   const rawCandidates = collectRaw(normalizedText, context.currencyAliases);
