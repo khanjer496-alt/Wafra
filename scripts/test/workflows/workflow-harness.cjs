@@ -170,6 +170,8 @@ function createWorkflowHarness(options={}) {
    d['./capture-health']=h.local('@/components/ios-message-setup/capture-health');
    h.local('@/components/ios-message-setup/setup-journey');
    h.local('@/lib/ios-capture-setup','src/lib/ios-capture-setup.ts');
+   // iOS 15's statement action hands the importer the gate's one-time token.
+   h.local('@/lib/ios-statement-handoff','src/lib/ios-statement-handoff.ts');
    // The actual pure per-source progress projections; storage stays recorded.
    const progressModule=load(path.join(root,'src/lib/ios-message-onboarding.ts'),{'@react-native-async-storage/async-storage':{},
     './ios-setup-journey':load(path.join(root,'src/lib/ios-setup-journey.ts')),'./ios-history-setup':{isIosHistoryShortcutInstalled:async()=>false}});

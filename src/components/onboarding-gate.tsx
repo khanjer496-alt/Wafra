@@ -72,6 +72,7 @@ import { dispatchIosMessageSetup, loadIosMessageSetupProgress } from '@/lib/ios-
 import { getIosCaptureNativeModule } from '@/lib/capture';
 import { iosCaptureChecklist, type IosChecklistEvidence } from '@/lib/ios-capture-checklist';
 import { resolveIosSetupReadiness } from '@/lib/ios-capture-setup';
+import { iosSupportsLiveCapture } from '@/lib/ios-setup-availability';
 import { iosShortcutSetupCopy } from '@/lib/ios-shortcut-setup-copy';
 import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
@@ -1035,6 +1036,29 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     router.push(`/statement-import?fromOnboarding=1&statementSession=${session}`);
   };
 
+  /**
+   * iOS 15 has no automatic capture (App Intents need iOS 16), so step 5
+   * leads with statements. Preview imports nothing; it shows the result as
+   * "I'll add by hand" does.
+   */
+  const importStatementsInstead = () => {
+    if (previewMode) {
+      void runSetupAction(continueManually);
+      return;
+    }
+    openStatementImport();
+  };
+
+  /**
+   * "Paste bank messages": the paste form needs no automation, so it works on
+   * iOS 15. The gate steps aside on /import-sms and resumes this step after.
+   */
+  const openPasteImport = () => {
+    if (Platform.OS !== 'ios' || previewMode || !beginStepTransition()) return;
+    saveJourney('capture');
+    router.push({ pathname: '/import-sms', params: { manual: '1' } });
+  };
+
   // The iPhone checklist reads only recorded evidence: the owner's own
   // setup confirmations and the native queue's proof and first-capture time.
   // It refreshes whenever Wafra comes back from Shortcuts.
@@ -1411,6 +1435,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const backDisabled = setupBusy || finishing;
   const onClose = previewMode ? closePreview : undefined;
   const lang = language === 'ar' ? 'ar' : 'en';
+  // The rule /ios-setup's controller uses: below iOS 16 it could only say so.
+  const iosCaptureUnsupported = Platform.OS === 'ios' && !iosSupportsLiveCapture(Platform.Version);
 
   const captureStep = (
     <EStepFrame palette={stepBand} step={5} testID={Platform.OS === 'ios' ? 'onboarding-ios-live' : 'onboarding-capture'}
@@ -1422,7 +1448,10 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       onBack={smsExplainerVisible ? () => setSmsExplainerVisible(false) : goBack}
       onClose={onClose} backDisabled={backDisabled}
       footer={Platform.OS === 'android' && smsExplainerVisible ? null : <>
-        {Platform.OS === 'ios' ? <EButton palette={stepBand} color={bandButtonColor(stepBand)} label={t('onboardLiveAction')}
+        {iosCaptureUnsupported ? <EButton palette={stepBand} color={bandButtonColor(stepBand)}
+          label={t('iosLocalUnsupportedStatement')} onPress={importStatementsInstead} disabled={setupBusy}
+          testID="onboarding-live-statements" />
+          : Platform.OS === 'ios' ? <EButton palette={stepBand} color={bandButtonColor(stepBand)} label={t('onboardLiveAction')}
           onPress={() => void runSetupAction(beginCapture)} disabled={setupBusy} busy={setupBusy}
           testID="onboarding-live-action" /> : null}
         {Platform.OS === 'android' && (androidSmsReady || androidNotificationReady) ? <EButton palette={stepBand}
@@ -1430,7 +1459,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
           label={t(androidSmsReady && androidNotificationReady ? 'onboardCaptureContinueBoth' : 'onboardCaptureContinueOne')}
           onPress={() => void runSetupAction(finishAndroidCapture)} disabled={setupBusy}
           testID="onboarding-capture-continue" /> : null}
-        {Platform.OS !== 'web' ? <ETextAction palette={stepBand} label={t('onboardHowItWorks')}
+        {/* "How it works" explains the Messages automation iOS 15 cannot run. */}
+        {Platform.OS !== 'web' && !iosCaptureUnsupported ? <ETextAction palette={stepBand} label={t('onboardHowItWorks')}
           onPress={() => setLearnMoreVisible(true)} testID="onboarding-how-it-works" /> : null}
       </>}>
       {Platform.OS === 'android' && smsExplainerVisible ? (
@@ -1446,11 +1476,14 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
           currency={confirmedCurrency} country={confirmedCountry}
         />
       ) : <>
-        <EHeadline palette={stepBand} size={42}>{Platform.OS === 'ios' ? t('onboardLiveTitle') : words.captureTitle}</EHeadline>
+        <EHeadline palette={stepBand} size={42}>
+          {iosCaptureUnsupported ? t('onboardLiveUnsupportedTitle') : Platform.OS === 'ios' ? t('onboardLiveTitle') : words.captureTitle}
+        </EHeadline>
         <EBody palette={stepBand}>
-          {Platform.OS === 'ios' ? t('onboardLiveBody') : Platform.OS === 'android' ? words.captureBodyAndroid : words.captureBodyWeb}
+          {iosCaptureUnsupported ? t('onboardLiveUnsupportedBody') : Platform.OS === 'ios' ? t('onboardLiveBody')
+            : Platform.OS === 'android' ? words.captureBodyAndroid : words.captureBodyWeb}
         </EBody>
-        {Platform.OS === 'ios' ? <CaptureChecklist
+        {Platform.OS === 'ios' && !iosCaptureUnsupported ? <CaptureChecklist
           palette={stepBand}
           rows={iosCaptureChecklist(previewMode ? null : checklistEvidence)}
           titles={{
@@ -1481,14 +1514,22 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
               ready={androidNotificationReady} disabled={setupBusy}
               onPress={() => void runSetupAction(connectAndroidNotifications)} testID="onboarding-source-notifications" />
           </> : null}
-          {Platform.OS !== 'web' && !previewMode ? <SourceRow palette={stepBand} icon="upload" title={words.importStatements}
+          {/* On iOS 15 statements are the primary action above; pasting sits beside them. */}
+          {Platform.OS !== 'web' && !previewMode && !iosCaptureUnsupported ? <SourceRow palette={stepBand} icon="upload" title={words.importStatements}
             body={words.importStatementsBody} disabled={setupBusy} onPress={openStatementImport}
             testID="onboarding-source-statements" /> : null}
-          <SourceRow palette={stepBand} icon="plus" title={words.addByHand} body={words.addByHandBody}
+          {iosCaptureUnsupported && !previewMode ? <SourceRow palette={stepBand} icon="mail" title={t('iosLocalUnsupportedPaste')}
+            body={t('onboardPasteMessagesBody')} disabled={setupBusy} onPress={openPasteImport}
+            testID="onboarding-source-paste" /> : null}
+          <SourceRow palette={stepBand} icon="plus" title={words.addByHand}
+            body={iosCaptureUnsupported ? t('onboardManualIosUnsupportedBody') : words.addByHandBody}
             disabled={setupBusy} onPress={() => void runSetupAction(continueManually)}
             testID="onboarding-source-manual" />
         </View>
-        {Platform.OS !== 'web' ? <TrustLine palette={stepBand} items={[
+        {/* iOS 15 has no automatic capture to describe; only the no-login promise applies. */}
+        {Platform.OS !== 'web' ? <TrustLine palette={stepBand} items={iosCaptureUnsupported ? [
+          { icon: 'bank', title: t('onboardPrivacyNoLoginTitle'), body: t('onboardPrivacyNoLoginBody') },
+        ] : [
           { icon: 'lock', title: t('onboardCaptureLocalAutomaticTitle'), body: t('onboardCaptureLocalAutomaticBody') },
           { icon: 'bank', title: t('onboardPrivacyNoLoginTitle'), body: t('onboardPrivacyNoLoginBody') },
           { icon: 'repeat', title: t('onboardPrivacyChoiceTitle'), body: t('onboardPrivacyChoiceBody') },

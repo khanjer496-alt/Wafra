@@ -1497,6 +1497,10 @@ export default function ImportSmsScreen() {
   // both, and it has an Arabic value. Back asks before discarding an unsaved
   // history review (requestLeaveScreen).
   const importNav: BandNav = { back: requestLeaveScreen, title: t('importBankActivity') };
+  // iOS 15 first run pastes here instead of setting up capture. The onboarding
+  // gate steps aside for this route only, so links onward (teach a format,
+  // review, accuracy) wait until onboarding is finished; Home shows the tray.
+  const firstRun = !state.onboarded;
   const bandTile = statTileColors(band, 'band');
   const mintTile = statTileColors(band, 'accent');
 
@@ -1646,10 +1650,10 @@ export default function ImportSmsScreen() {
       <View style={styles.sheet}>
         {!history && <>
           <ImportSteps current={applying ? 'save' : plan !== null && !scanning ? 'review' : 'source'} />
-          <EButton palette={band} variant="quiet" testID="import-teach-format"
+          {!firstRun && <EButton palette={band} variant="quiet" testID="import-teach-format"
             label={privateAlertFormatCopy(state.language).teachABankFormat}
             disabled={scanning || applying}
-            onPress={() => router.push('/teach-bank-format')} />
+            onPress={() => router.push('/teach-bank-format')} />}
         </>}
         {showIosHistoryCard && (
           <Section index={0}>
@@ -1868,7 +1872,7 @@ export default function ImportSmsScreen() {
         {/* The answer to a tap that could not do what it offered. It sits
             above the plan because it is the reason the plan is empty, or the
             reason there is no plan at all. */}
-        {pasteReviewCount > 0 && !scanning ? (
+        {pasteReviewCount > 0 && !scanning && !firstRun ? (
           <Section index={1}>
             <Button label={tf('genericReviewCount', { count: pasteReviewCount, s: pasteReviewCount === 1 ? '' : 's' })}
               onPress={() => router.push('/review-alerts')} />
@@ -2108,7 +2112,7 @@ export default function ImportSmsScreen() {
 
             {unreadCount > 0 && (
               <Section index={4}>
-                <Block onPress={() => router.push('/accuracy')}>
+                <Block onPress={firstRun ? undefined : () => router.push('/accuracy')}>
                   <View style={styles.unreadRow}>
                     <Icon name="alert" size={17} color={theme.warning} />
                     <View style={styles.rowText}>
