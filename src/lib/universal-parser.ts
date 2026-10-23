@@ -110,6 +110,11 @@ const completedMovement = (source: string): { status: PostingStatus; direction: 
     // A receipt heading line that states completion for the fields below it.
     /(?:^|[\s。])(?:付款完成|支付完成|付款成功|支付成功|支払い?完了|決済完了|送金完了|송금\s*완료)(?!后|後|时|時|する|され)/u,
     /(?:消费|支付|付款)(?:成功|已完成)/u,
+    // Field-list ledger alerts: "Txn: Debit ... Amt: NGN25,000.00", "Amt: NGN7,850.00 DR",
+    // "Debit Alert! Amt: ...". The labelled fields, not a heading alone, state the movement.
+    phrase(String.raw`txn\s*(?:type)?\s*:\s*debit\s+(?:[^:]{1,60}:\s*[^:]{1,60}\s+)?(?:amt|amount)\s*:`),
+    phrase(String.raw`debit\s+alert!?\s+(?:amt|amount)\s*:`),
+    phrase(String.raw`(?:amt|amount)\s*:\s*(?:[A-Z]{3}\s?)?[\d.,]+\s+dr\b`),
   ];
   const refundPatterns = [
     phrase(String.raw`remboursement\s+(?:non\s+)?reçu`),
@@ -119,7 +124,7 @@ const completedMovement = (source: string): { status: PostingStatus; direction: 
     /(?:रिफंड|धनवापसी)[\s\S]{0,140}जमा\s+हो\s+(?:गई|गया)\s+है/u,
     /退款到账|退款到賬|退款[^。]{0,90}已到账/u,
   ];
-  const depositPattern = phrase(String.raw`deposit\s*\/\s*transfer\s+to\s+your\s+account|überweisung\s+eingegangen`);
+  const depositPattern = phrase(String.raw`deposit\s*\/\s*transfer\s+to\s+your\s+account|überweisung\s+eingegangen|txn\s*(?:type)?\s*:\s*credit\s+(?:[^:]{1,60}:\s*[^:]{1,60}\s+)?(?:amt|amount)\s*:|credit\s+alert!?\s+(?:amt|amount)\s*:|(?:amt|amount)\s*:\s*(?:[A-Z]{3}\s?)?[\d.,]+\s+cr\b`);
   // A completed transfer stated in Arabic names its source or destination
   // account: "تم تحويل مبلغ ... من حسابك ... إلى أحمد" leaves the account,
   // "... إلى حسابك" arrives in it. Only the possessive account decides.
@@ -154,7 +159,7 @@ const completedMovement = (source: string): { status: PostingStatus; direction: 
   };
   const debit = debitPatterns.map(matches).some(Boolean);
   const refund = refundPatterns.map(matches).some(Boolean);
-  const deposit = [matches(depositPattern), matches(/入金のお知らせ|ご入金がありました/u)].some(Boolean);
+  const deposit = [matches(depositPattern), matches(/入金のお知らせ|ご入金がありました/u), matches(/जमा\s+(?:किए|किये)\s+गए|खाते\s+में\s+जमा\s+हुए/u)].some(Boolean);
   const transferOut = matches(arabicTransferOut) || matches(transferOutWords);
   const transferIn = matches(arabicTransferIn) || matches(transferInWords);
   const cashWithdrawal = matches(phrase(String.raw`cash\s*out\s+(?!of\b)(?:[^.;\n]|\.\d){0,80}?\bsuccessful(?:ly)?|cash\s+out\s+of[\s\S]{0,140}?is\s+successful|processed\s+(?:a\s+)?debit\s+card\s+withdrawal\s*:|a\s+debit\s+transaction\s+from\s+withdrawal[\s\S]{0,140}?was\s+posted`));
@@ -184,17 +189,19 @@ const completedMovement = (source: string): { status: PostingStatus; direction: 
  * Without a narration a debit is generic spending and a credit an incoming
  * transfer (the same default the own-account credit rule already uses).
  */
-const LEDGER_VERB = /(?<![\p{L}\p{N}])(?:debited|credited|deducted|withdrawn|charged)(?![\p{L}\p{N}])/iu;
+const LEDGER_VERB = /(?<![\p{L}\p{N}])(?:debited|credited|deducted|deduction|withdrawn|charged)(?![\p{L}\p{N}])/iu;
 // An account/card word followed by a masked or numbered tail ("A/c no. XX1234",
 // "Acct ***5678", "A/C ...6789", "A/cX1234"). A bare "from your account" is
 // deliberately not enough: a generic debit with no family stays in Review.
-const OWN_ACCOUNT = /(?<![\p{L}\p{N}])(?:a\/?c|acct?|account|card)\s*(?:no\.?|number|ending(?:\s+(?:in|with))?|#)?\s*:?\s*[xX*•#.-]*\d{3,}/iu;
+const OWN_ACCOUNT = /(?<![\p{L}\p{N}])(?:a\/?c|acct?|account|card)\s*(?:no\.?|number|ending(?:\s+(?:in|with))?|#)?\s*:?\s*\d{0,4}[xX*•#.-]*\d{3,}/iu;
 const LEDGER_RAIL = /(?<![\p{L}\p{N}])(?:debited|credited)\s+(?:via|thru|through|by|using)\s+(?:upi|imps|neft|rtgs|raast|ibft)(?![\p{L}\p{N}])/iu;
 const NARRATION = /(?<![\p{L}\p{N}])(?:info|narration|narr|desc(?:ription)?|des|remarks?|particulars|details?|nd|ket|keterangan)\s*[:-]\s*([^\n]{1,100})/iu;
 // The family fallback is the weakest evidence in this file, so it stands down
 // for anything that looks like a challenge, code, lure or link; the posting
 // policy still re-checks all of these independently.
 const FALLBACK_REFUSED = /(?<![\p{L}\p{N}])(?:otp|passcode|verification\s+code|security\s+code|one[\s-]?time|do\s+not\s+share|prize|reward|lottery|winner|won|click|claim|collect\s+request)(?![\p{L}\p{N}])|https?:\/\/|www\.|(?<![\p{L}\p{N}])(?:is|was)\s+this\s+(?:you|yours|your\s+(?:transaction|payment|purchase))|(?<![\p{L}\p{N}])reply\s+(?:y|yes|n|no)(?![\p{L}\p{N}])/iu;
+// "votre compte a été crédité", "dans votre compte", "hesabınıza ... gelmiştir", "rek Anda ... dikredit".
+const OWN_ACCOUNT_CREDITED_WORLD = /(?<![\p{L}\p{N}])(?:(?:compte|konto|cuenta|conta)[^.;\n]{0,40}?(?:a\s+été\s+)?(?:crédité|gutgeschrieben|acreditad[oa]|creditad[oa])|(?:effectué|versé)e?\s+dans\s+votre\s+compte|hesab[ıi]n[ıi]za(?:[^.;\n]|\.\d){0,120}?(?:gelmi[sş]tir|geldi|yat[ıi]r[ıi]l\S*)|rek(?:ening)?\s+anda[^.;\n]{0,40}?(?:telah\s+)?dikredit)(?![\p{L}\p{N}])/iu;
 const ownAccountMovementFamily = (
   source: string,
   direction: 'debit' | 'credit',
@@ -368,7 +375,14 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
   const movement = completedMovement(maskedSource.slice(firstPrincipal ? 0 : span.start, span.end + questionTail));
   // Unknown amount ownership may not establish a posting, but it cannot erase
   // a directly negated, questioned or scheduled movement predicate either.
-  const completion = !roleUnresolved || movement?.status !== 'posted' ? movement : null;
+  // A labelled field list ("Txn: Debit / Acct / Amt / Bal") puts its verdict on a line before the
+  // amount's own, outside the clause above. The label pair is the whole statement.
+  const fieldList = !movement ? /(?:^|\n)\s*txn\s*(?:type)?\s*:\s*(debit|credit)\s*\n(?:[^\n]*\n)?\s*(?:amt|amount)\s*:/iu.exec(maskedSource) : null;
+  const listed = fieldList
+    ? { status: 'posted' as PostingStatus, direction: fieldList[1].toLowerCase() as 'debit' | 'credit',
+      family: fieldList[1].toLowerCase() === 'debit' ? 'purchase' as const : 'transfer' as const }
+    : null;
+  const completion = !roleUnresolved || (movement ?? listed)?.status !== 'posted' ? movement ?? listed : null;
   if (completion) {
     if (completion.status !== 'posted' || status === 'unknown') status = completion.status;
     if (family === 'unknown' || (completion.direction === 'credit' && family === 'cash-withdrawal')) family = completion.family;
@@ -521,6 +535,11 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
   // it could never post, so every salary outside the Gulf waited in Review.
   if (family === 'unknown' && status === 'posted' && knownDirection === 'credit' && !roleUnresolved &&
     /\b(?:credited|deposited)\s+(?:to|into|in)\s+(?:your\s+)?(?:\w+\s+){0,2}(?:a\/?c|acct|account)\b|\b(?:a\/?c|acct|account)\b[^.;\n]{0,30}?\b(?:has\s+been\s+|is\s+)?credited\s+(?:with|by)\b|\bdirect\s+deposit\b/iu.test(maskedSource)) {
+    family = 'transfer';
+  }
+  // The same fact in other languages: the reader's own account stated as credited.
+  if (family === 'unknown' && status === 'posted' && knownDirection === 'credit' && !roleUnresolved &&
+    OWN_ACCOUNT_CREDITED_WORLD.test(source) && !FALLBACK_REFUSED.test(source)) {
     family = 'transfer';
   }
   // Commas separate money fields, but a following opposite posting verb can

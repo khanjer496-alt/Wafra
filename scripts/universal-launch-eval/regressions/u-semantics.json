@@ -1327,5 +1327,115 @@
     },
     "notes": "failed withdrawal",
     "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-97",
+    "country": "NG",
+    "ledger": "NGN",
+    "sender": "AccessBank",
+    "body": "Txn: Debit\nAcct:089**456\nAmt:NGN12,500.00\nDes:MOB/UTO/TUNDE BELLO/Rent\nDate:16/09/2026 11:05\nBal:NGN81,240.00",
+    "expect": {
+      "post": true,
+      "amountMinor": 1250000,
+      "type": "expense"
+    },
+    "notes": "labelled debit field list",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-98",
+    "country": "NG",
+    "ledger": "NGN",
+    "sender": "AccessBank",
+    "body": "Txn: Debit\nAcct:089**456\nAmt:NGN12,500.00\nStatus: Failed\nDate:16/09/2026 11:05\nBal:NGN81,240.00",
+    "expect": {
+      "post": false,
+      "why": "failed"
+    },
+    "notes": "labelled debit field list that failed",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-99",
+    "country": "NG",
+    "ledger": "NGN",
+    "sender": "UBA",
+    "body": "Txn: Credit\nAc:21XXXXX456\nAmt:NGN 45,000.00\nDes:TRF FROM IBRAHIM MUSA/NIP/000013260918\nDate:18-Sep-2026 15:22\nBal:NGN 61,880.10",
+    "expect": {
+      "post": true,
+      "amountMinor": 4500000,
+      "type": "income"
+    },
+    "notes": "labelled credit field list",
+    "provenance": "synthetic",
+    "paths": [
+      "android-sms"
+    ]
+  },
+  {
+    "id": "U-SEMANTICS-100",
+    "country": "NG",
+    "ledger": "NGN",
+    "sender": "UBA",
+    "body": "Txn: Credit\nAc:21XXXXX456\nAmt:NGN 45,000.00 pending\nDes:TRF FROM IBRAHIM MUSA\nDate:18-Sep-2026 15:22\nBal:NGN 61,880.10",
+    "expect": {
+      "post": false,
+      "why": "pending"
+    },
+    "notes": "pending credit field list",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-101",
+    "country": "MY",
+    "ledger": "MYR",
+    "sender": "62003",
+    "body": "RM0 CIMB: Debit Card 5678 txn RM64.20 at JAYA GROCER BANGSAR on 14SEP26 18:05. Call 03-62047788 if unauthorised.",
+    "expect": {
+      "post": true,
+      "amountMinor": 6420,
+      "type": "expense"
+    },
+    "notes": "card txn ledger line",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-102",
+    "country": "MY",
+    "ledger": "MYR",
+    "sender": "62003",
+    "body": "RM0 CIMB: Debit Card 5678 txn RM64.20 at JAYA GROCER BANGSAR on 14SEP26 18:05 declined. Call 03-62047788.",
+    "expect": {
+      "post": false,
+      "why": "failed"
+    },
+    "notes": "declined card txn ledger line",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-103",
+    "country": "VN",
+    "ledger": "VND",
+    "sender": "MoMo",
+    "body": "Thanh toán không thành công\nBạn đã thanh toán 45.000đ cho Circle K. Số dư Ví MoMo: 1.255.000đ",
+    "expect": {
+      "post": false,
+      "why": "failed"
+    },
+    "notes": "Vietnamese failed wallet payment",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-104",
+    "country": "TH",
+    "ledger": "THB",
+    "sender": "Krungsri",
+    "body": "บัตรกรุงศรี xx5678 ใช้จ่าย 890.00 บาท ไม่สำเร็จ ที่ TOPS MARKET วันที่ 22/09/69 18:33 น.",
+    "expect": {
+      "post": false,
+      "why": "failed"
+    },
+    "notes": "Thai failed card spend",
+    "provenance": "synthetic"
   }
 ]

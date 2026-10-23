@@ -303,5 +303,40 @@ check('scripts without word spaces hold back cancelled, scheduled and promotiona
   }
 });
 
+
+// Scripts and field lists added in the world-semantics round. Each positive has
+// a negative control in the same language.
+for (const [label, source, status, direction] of [
+  ['Thai card spend', 'บัตรกรุงศรี xx5678 ใช้จ่าย 890.00 บาท ที่ TOPS MARKET SILOM วันที่ 22/09/69 18:33 น. สอบถาม 1572', 'posted', 'debit'],
+  ['Thai incoming transfer', '16/09/69 19:05 บชX123456X รับโอนจากX987654X 2,800.00 คงเหลือ 15,145.67บ', 'posted', 'credit'],
+  ['Thai cash withdrawal', 'Krungthai: 25/09/69 10:12 บช.X5678X ถอนเงินสด ATM 2,000.00 บ. คงเหลือ 8,450.25 บ.', 'posted', 'debit'],
+  ['Thai failed spend', 'บัตรกรุงศรี xx5678 ใช้จ่าย 890.00 บาท ไม่สำเร็จ วันที่ 22/09/69', 'failed', null],
+  ['Thai promotion', 'ใช้จ่าย 1,000 บาท ผ่านบัตรกรุงศรี รับเครดิตเงินคืน 100 บาท สมัครวันนี้', null, null],
+  ['Chinese channel payment', '您账户1234于09月18日12:30在【财付通-微信支付-云岭咖啡】快捷支付19.90元，余额2,345.67【招商银行】', 'posted', 'debit'],
+  ['Chinese channel invitation', '【招商银行】您尾号1234的账户请使用快捷支付100元参与活动，详情见App。', null, null],
+  ['Taiwan NT$ card spend', '【玉山銀行】您的玉山卡末四碼9012於09/17 20:15消費NT$890，消費地點：誠品書店。如非本人交易請撥客服。', 'posted', 'debit'],
+  ['Korean withdrawal', '[Web발신]\n하나,09/22,18:40\n123-******-12345\n출금200,000원\n김민지\n잔액845,300원', 'posted', 'debit'],
+  ['Korean scheduled withdrawal', '[Web발신]\n하나,12/25,09:00\n123-******-12345\n출금예정 200,000원\n잔액845,300원', null, null],
+  ['Vietnamese wallet payment', 'Thanh toán thành công\nBạn đã thanh toán 45.000đ cho Circle K. Số dư Ví MoMo: 1.255.000đ', 'posted', 'debit'],
+  ['Vietnamese failed payment', 'Thanh toán không thành công\nBạn đã thanh toán 45.000đ cho Circle K. Số dư Ví MoMo: 1.255.000đ', 'failed', null],
+  ['Nigerian debit field list', 'Txn: Debit\nAcct:089**456\nAmt:NGN25,000.00\nDes:MOB/UTO/CHIOMA NWOSU/Sept dues\nDate:16/09/2026 11:05\nBal:NGN81,240.00', 'posted', 'debit'],
+  ['Nigerian credit field list', 'Txn: Credit\nAc:21XXXXX456\nAmt:NGN 45,000.00\nDes:TRF FROM IBRAHIM MUSA\nDate:18-Sep-2026 15:22\nBal:NGN 61,880.10', 'posted', 'credit'],
+  ['Nigerian DR suffix', 'Acct: 012****789\nAmt: NGN7,850.00 DR\nDesc: POS PURCHASE @ SHOPRITE LEKKI\nAvail Bal: NGN145,320.55', 'posted', 'debit'],
+  ['Nigerian field-list heading with no labelled direction', 'Account update\nAcct:089**456\nAmt:NGN25,000.00\nBal:NGN81,240.00', null, null],
+  ['Malaysian card txn line', 'RM0 CIMB: Debit Card 5678 txn RM128.40 at AEON CO. (M) BHD MID VALLEY on 14SEP26 18:05. Call 03-62047788 if unauthorised.', 'posted', 'debit'],
+  ['Moroccan French card payment', "Attijariwafa bank: Paiement par carte ****1234 d'un montant de 450,00 MAD chez MARJANE CALIFORNIE le 15/09/2026 a 14:22. Solde disponible: 12 345,67 MAD.", 'posted', 'debit'],
+  ['French card payment awaiting approval', "Banque: Paiement par carte ****1234 d'un montant de 450,00 MAD chez MARJANE en attente d'autorisation le 15/09/2026.", null, null],
+  ['Canadian French purchase with card tail', 'Desjardins : Achat de 42,35 $ chez METRO PLUS LAVAL avec votre carte Visa se terminant par 1234 le 2026-09-27 à 18 h 12.', 'posted', 'debit'],
+  ['French purchase noun with no card tail', 'Achat de 42,35 $ chez METRO PLUS LAVAL aujourd’hui seulement, profitez de nos offres', null, null],
+  ['Turkish FAST credit', 'Sayın Müşterimiz, 4567 sonlu hesabınıza 18.09.2026 14:05 tarihinde AHMET YILMAZ tarafından FAST ile 2.500,00 TL gelmiştir. Açıklama: Kira payı', 'posted', 'credit'],
+]) {
+  check('world semantics: ' + label, () => {
+    const event = inspect(source, { sender: 'BANKX' });
+    if (status === null) { assert.notEqual(event.status, 'posted'); return; }
+    assert.equal(event.status, status);
+    if (direction) assert.equal(event.direction, direction);
+  });
+}
+
 console.log(`universal parser: ${passed} passed, ${failed} failed`);
 if (failed) process.exitCode = 1;

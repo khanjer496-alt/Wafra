@@ -166,7 +166,13 @@ interface AlertVocabulary {
 // many banks and currencies: it counts as completed only when the message also
 // names the payment rail that identifies where it was made.
 const P2P_RAIL = String.raw`(?=[^\n]{0,160}?(?<![\p{L}\p{N}])(?:spei|pix|nequi|daviplata|transfiya|bre-?b|bizum|yape|plin|sinpe|ted|transfer[eê]ncia|transferencia)(?![\p{L}\p{N}]))`;
+// A booked noun heading is only a completed charge when the same sentence also
+// names the reader's own card tail and carries no approval or hold wording.
+const CARD_TAIL = String.raw`(?:carte|tarjeta|cart[aã]o|card|t\.\s?(?:deb|cre)\p{L}*)\s*(?:[\p{L}]+\s+){0,3}?(?:(?:se\s+terminant\s+par|terminad[ao]\s+en|terminaci[oó]n|final|ending(?:\s+in)?|no\.?)\s*)?[*xX•]*\s*\d{4}(?!\d)`;
+const NOT_HELD = String.raw`(?![^;\n]*(?:aprob|autoriz|aprov|approuv|approv|pre-?auto|r[ée]serv|hold|solicit))`;
+const BOOKED_CARD_NOUN = String.raw`paiement\s+par\s+carte\s*[*xX•]*\d{3,4}\s+d['’]un\s+montant\s+de\s+${NUM}${NOT_HELD}|(?:achat|paiement|retrait|cargo|consumo|retiro)\s+(?:de|por|d['’]un\s+montant\s+de)\s+${NUM}${NOT_HELD}[^;\n]{1,120}?${CARD_TAIL}`;
 const WORLD_DEBIT = wordsOf(
+  BOOKED_CARD_NOUN,
   // English: contractions, a booked noun before the amount, "A $X transaction
   // was made", card "used for", and payee payments that end in a state word.
   String.raw`(?:you|we)(?:['’]ve|\s+have)?\s+(?:made|taken|charged|deducted)\s+(?:an?\s+|your\s+)?(?:[\p{L}-]+\s+){0,3}?(?:payment|purchase|transaction|txn|withdrawal|transfer|fee|charge)${NOT_A_REQUEST}`,
@@ -231,6 +237,11 @@ const WORLD_DEBIT = wordsOf(
   String.raw`(?:kamu|anda|saya)\s+(?:udah|sudah|telah)\s+(?:bayar|membayar|membeli|menarik|transfer|mentransfer)`,
   String.raw`tarik\s+tunai`,
   String.raw`(?:anda|kamu)\s+(?:telah\s+)?melakukan\s+(?:transfer|pembayaran|penarikan|pembelian|transaksi)`,
+  // Vietnamese: "Bạn đã thanh toán 45.000đ cho ...", "Thanh toán thành công".
+  String.raw`[dđ][aãạ]\s+thanh\s+to[aá]n\s+${NUM}`,
+  String.raw`thanh\s+to[aá]n\s+th[aà]nh\s+c[oô]ng`,
+  // Card ledger line: "Debit Card 5678 txn RM128.40 at AEON ...".
+  String.raw`card\s+(?:no\.?\s*)?[xX*•]*\d{3,}\s+(?:txn|transaction)\s+${NUM}${GAP}{0,50}?\bat\b`,
 );
 
 // ── Completed credits (money arrived in the account) ─────────────────────────
@@ -268,6 +279,9 @@ const WORLD_CREDIT = wordsOf(
   String.raw`(?:telah\s+)?(?:dikredit|dikreditkan)`,
   String.raw`(?:kamu|anda)\s+(?:menerima|telah\s+menerima)`,
   String.raw`transfer\s+masuk|(?:berhasil|telah)\s+ditransfer\s+ke\s+(?:rekening|akun)\s+(?:anda|kamu)`,
+  // Vietnamese "received"; Roman Urdu "wusool huay" (was received).
+  String.raw`[dđ][aãạ]\s+nh[aậ]n\s+${NUM}|nh[aậ]n\s+[dđ][uư][oơợ]\S*\s+${NUM}`,
+  String.raw`(?:wusool|wasool|mausool)\s+hu(?:ay|e|a)`,
 );
 
 // Scripts written without word spaces cannot use word boundaries. Each shape
@@ -280,7 +294,9 @@ const cjkOf = (...alternatives: string[]): RegExp => new RegExp(alternatives.joi
 // A named payment channel directly before the amount is a finished payment, not an offer:
 // "请使用快捷支付100元" (please use ...) and similar instructions are excluded.
 const CJK_CHANNEL = '(?<!请|請|可|需|须|須|将|將|应|應|使用|选择|選擇|通过|通過)(?:快捷|网上|網上|扫码|掃碼|云闪付|雲閃付|刷卡)支付';
+const THAI_MONEY = String.raw`\s*(?:฿|thb)?\s*\d`;
 const CJK_DEBIT = cjkOf(
+  `ถอน/โอนเงิน|ถอนเงิน(?:สด)?|โอนเงินออก|ใช้จ่าย${THAI_MONEY}|ชำระเงินสำเร็จ|ตัดบัญชี|หักบัญชี|ถอน${THAI_MONEY}`,
   'お引出し|お引き出し|支払い?完了|決済完了|送金(?:しました|完了)|支払いました',
   '송금\\s*완료|보냈어요|보냈습니다',
   // Korean bank withdrawal lines ("출금200,000원", "출금 100,000"): the word is followed by the amount.
@@ -291,28 +307,34 @@ const CJK_DEBIT = cjkOf(
   '付款成功|支付成功|消费成功|扣款成功|转账成功|轉帳成功|付款完成|支付完成|付款金额\\s*[:：]|支付金额\\s*[:：]',
 );
 const CJK_CREDIT = cjkOf(
+  'รับโอน|เงินเข้า|โอนเข้า|เข้า\\s*บ/?ช',
   '受け取りました|入金(?:がありました|しました)',
   '입금(?!\\s*(?:예정|요청|하세요|해\\s*주|안내|한도|계좌|기한|마감|바랍|부탁))',
   `(?:收入|转入|轉入|入账|入帳|到账|到帳|存入|薪資轉入|工资收入)${CJK_MONEY}`,
 );
-const CJK_TRANSFER = cjkOf('출금|입금|受け取りました|送金(?:しました|完了)|송금\\s*완료|보냈어요|보냈습니다|받았어요|받았습니다|转账|轉帳|轉賬|汇款|匯款|工资|工資|薪资|薪資|代发|代發|급여');
+const CJK_TRANSFER = cjkOf('รับโอน|โอนเงิน|ถอน/โอน|โอนเข้า|출금|입금|受け取りました|送金(?:しました|完了)|송금\\s*완료|보냈어요|보냈습니다|받았어요|받았습니다|转账|轉帳|轉賬|汇款|匯款|工资|工資|薪资|薪資|代发|代發|급여');
 const CJK_PURCHASE = cjkOf(
+  `ใช้จ่าย${THAI_MONEY}`,
   `${CJK_CHANNEL}(?:交易)?${CJK_MONEY}`,
   `(?:消费|消費|簽賬|签账|付款)${CJK_MONEY}`,
   '付款成功|支付成功|消费成功|付款完成|支付完成|付款金额\\s*[:：]|支付金额\\s*[:：]|支払い?完了|決済完了',
 );
-const CJK_CASH = cjkOf('お引出し|お引き出し', `(?:取款|取现|支取)${CJK_MONEY}`);
+const CJK_CASH = cjkOf('お引出し|お引き出し|ถอนเงินสด', `(?:取款|取现|支取)${CJK_MONEY}`);
 const CJK_FAILED = cjkOf(
-  '取り消|取消|キャンセル|失敗|失败|エラー|拒否|拒絕|拒绝|未完成|未成功|不成功|できません|ませんでした|无法|無法|未能|취소|실패|거절',
+  '取り消|取消|キャンセル|失敗|失败|エラー|拒否|拒絕|拒绝|未完成|未成功|不成功|できません|ませんでした|无法|無法|未能|취소|실패|거절|ไม่สำเร็จ|ล้มเหลว|ยกเลิก|ปฏิเสธ|ไม่อนุมัติ|ไม่เพียงพอ|ผิดพลาด',
 );
 // Held, scheduled or promotional: money is announced but has not moved. A
 // coupon, points or gift receipt carries a yen amount yet moves no money.
 const CJK_HELD = cjkOf(
-  '予定|請求予定|承認待ち|保留|待处理|待處理|本月|月度|账单|賬單|对账|對賬|累计|累計|合计|合計|汇总|匯總|明细|明細|ご利用明細|クーポン|ポイント(?:還元|プレゼント|付与)|ギフト|商品券|キャンペーン|割引|优惠券|優惠券|红包|紅包|积分|積分|分期|优惠|優惠|立减|立減|返现|返現|抽奖|抽獎|满\\d|滿\\d|쿠폰|포인트',
+  'รออนุมัติ|รอดำเนินการ|โปรโมชั่น|แคมเปญ|ส่วนลด|สิทธิพิเศษ|เครดิตเงินคืน|แต้ม|ครบ\\s*\\d|สมัคร|กำหนดชำระ|ยอดที่ต้องชำระ|ใบแจ้งหนี้|รอบบัญชี|ยอดรวม|予定|請求予定|承認待ち|保留|待处理|待處理|本月|月度|账单|賬單|对账|對賬|累计|累計|合计|合計|汇总|匯總|明细|明細|ご利用明細|クーポン|ポイント(?:還元|プレゼント|付与)|ギフト|商品券|キャンペーン|割引|优惠券|優惠券|红包|紅包|积分|積分|分期|优惠|優惠|立减|立減|返现|返現|抽奖|抽獎|满\\d|滿\\d|쿠폰|포인트',
 );
 
 // ── Family: only a shape that already proved a completed movement names one ───
 const WORLD_PURCHASE = wordsOf(
+  String.raw`paiement\s+par\s+carte\s*[*xX•]*\d{3,4}\s+d['’]un\s+montant\s+de\s+${NUM}${NOT_HELD}`,
+  String.raw`(?:achat|paiement|cargo|consumo)\s+(?:de|por|d['’]un\s+montant\s+de)\s+${NUM}${NOT_HELD}[^;\n]{1,120}?${CARD_TAIL}`,
+  String.raw`[dđ][aãạ]\s+thanh\s+to[aá]n\s+${NUM}|thanh\s+to[aá]n\s+th[aà]nh\s+c[oô]ng`,
+  String.raw`card\s+(?:no\.?\s*)?[xX*•]*\d{3,}\s+(?:txn|transaction)\s+${NUM}${GAP}{0,50}?\bat\b`,
   String.raw`(?:txn|transaction)\s+(?:of\s+)?${NUM}${GAP}{0,40}?\b(?:made|done|successful|completed)\s+(?:on|at|using|with|via)\b`,
   String.raw`you(?:['’]ve|\s+have)\s+been\s+charged\s+${NUM}`,
   String.raw`(?:debit\s+card|credit\s+card|card|contactless|pos|online)\s+(?:payment|purchase|transaction|txn)s?\s+(?:of\s+)?${NUM}`,
@@ -334,6 +356,7 @@ const WORLD_PURCHASE = wordsOf(
   String.raw`umelipa|umenunua`,
 );
 const WORLD_CASH = wordsOf(
+  String.raw`(?:retrait|retiro)\s+(?:de|por)\s+${NUM}${NOT_HELD}[^;\n]{1,120}?${CARD_TAIL}`,
   String.raw`${NUM}\s+(?:atm|cash)\s+withdrawal(?!\s+(?:request|limit|fee|available|up\s+to|allowed))`,
   String.raw`(?:atm|cash)\s+withdrawal\s+(?:of\s+)?${NUM}`,
   String.raw`withdrawal\s+of\s+${NUM}${GAP}{0,80}?\b(?:was|has\s+been)\s+(?:made|posted|completed|processed)`,
@@ -350,6 +373,8 @@ const WORLD_FEE = wordsOf(
 );
 const WORLD_REFUND = wordsOf(
   String.raw`devolu[cç][aã]o|estorno|reintegro|iade|pengembalian\s+dana|bayaran\s+balik`,
+  // A merchant credit posted to the reader's card: "A credit of $29.99 from AMAZON was posted to your credit card".
+  String.raw`credit\s+of\s+${NUM}\s+from\s+[^;\n]{1,60}?\b(?:was|has\s+been)\s+posted\s+to\s+your\s+(?:[\p{L}]+\s+){0,2}card\b`,
 );
 // A person-to-person movement: a named counterparty directly beside the money.
 const WORLD_TRANSFER = wordsOf(
@@ -394,6 +419,7 @@ const WORLD_FAILED = wordsOf(
   String.raw`imeshindwa|haikufanikiwa|imekataliwa|haijakamilika`,
   String.raw`yap[ıi]lamad[ıi]|ger[cç]ekle[sş]medi|reddedildi|iptal\s+(?:edildi|edilmi[sş])|ba[sş]ar[ıi]s[ıi]z`,
   String.raw`gagal|tidak\s+berhasil|tidak\s+berjaya|ditolak|dibatalkan|belum\s+berhasil`,
+  String.raw`kh[oô]ng\s+th[aà]nh\s+c[oô]ng|th[aấ]t\s+b[aạ]i|b[ịi]\s+t[ừu]\s+ch[ốo]i|[dđ][aãạ]\s+h[uủ]y`,
 );
 const WORLD_FUTURE = wordsOf(
   String.raw`ser[aá]\s+(?:cargad|debitad|abonad|descontad|cobrad|transferid)\w*|se\s+(?:cargar[aá]|debitar[aá]|descontar[aá]|abonar[aá])|programad[oa]|agendad[oa]|agendamento|vencimiento|vence`,
@@ -404,6 +430,7 @@ const WORLD_FUTURE = wordsOf(
   String.raw`itakatwa|itatolewa|itakuwa`,
   String.raw`[oö]denecek|yap[ıi]lacak|vadesi|son\s+[oö]deme`,
   String.raw`akan\s+(?:didebet|dikenakan|dibayar|dikredit)|jatuh\s+tempo|jadwal`,
+  String.raw`s[eẽ]\s+(?:được\s+)?(?:tr[uừ]|thanh\s+to[aá]n)|d[ựu]\s+ki[eế]n|l[eê]n\s+l[iị]ch`,
 );
 const WORLD_PENDING = wordsOf(
   String.raw`en\s+proceso|procesando|processando|por\s+confirmar|a\s+confirmar|aguardando|esperando`,
