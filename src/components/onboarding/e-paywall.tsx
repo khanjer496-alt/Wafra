@@ -456,7 +456,7 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, ca
           </ThemedText>
           {/* The copy asks the user to try again, so give them the control. */}
           {checkout.checkoutReady ? <Pressable accessibilityRole="button" hitSlop={8} style={styles.legalLink}
-            onPress={() => void checkout.loadOffers()} testID="onboarding-plans-retry">
+            onPress={() => void checkout.load()} testID="onboarding-plans-retry">
             <ThemedText type="smallBold" style={{ color: band.onBand }}>{t('retryPrices')}</ThemedText>
           </Pressable> : null}
         </View>}
