@@ -20,6 +20,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { constant, patternSource, rawPatternSource } = require('./kotlin-source');
+const { CURRENCY_MINOR_UNITS } = require('./build/currency-metadata.js');
 
 let pass = 0;
 let fail = 0;
@@ -119,6 +120,31 @@ const AMOUNT_CASES = [
  *     one minute carry identical text, and suppressing the second would
  *     delete a real charge. Seconds are the discriminator.
  */
+/**
+ * The native money gate on the JVM: which texts reach the JS parser at all.
+ * Admission only (the parser still decides), so the positives are every way a
+ * bank spells a currency and the negatives are text that merely looks like it.
+ */
+const MONEY_ADMIT = [
+  'Purchase of AED 120.00 at CARREFOUR', 'Amount:100SR', '250.00 AED debited', 'AED181.00 spent',
+  'تم خصم 150.00 درهم', 'تم سحب مبلغ 3,000.00 جم من ماكينة', 'د.ك 12.500 خصم',
+  'You paid £23.45 at TESCO', 'Spent €12,00 at LIDL', 'Debited ₹1,250.00 from A/c', 'Rs.1,250.00 spent on card',
+  'Amt:Rs 500 debited', 'Card charged RM59.90 at SHOPEE', 'Rp. 125.000 di INDOMARET', 'Rp125.000 di INDOMARET',
+  'You sent Ksh 17,500.00 to JOHN', 'Sent Tsh 25,000 to JOHN', 'Charged USh 85,000 at SHOPRITE', 'Charged GH₵ 120.50 at MELCOM',
+  '₺145,00 tutarında ödeme yaptın', '456,75 TL harcama', '1,250.00 บาท ที่ TOPS', 'ชำระ ฿1,250.00', '450.000đ tại HIGHLANDS', '₫450.000',
+  'Köp 245,00 kr ICA', 'kr 245,00 ICA', 'Platba 459,00 Kč ALBERT', 'Platba 459,00 Kc ALBERT', 'Płatność 129,00 zł ALLEGRO', 'Platnosc 129,00 zl ALLEGRO',
+  '山田さんから1,500円を受け取りました', '決済 ¥1,500', '30,000원을 결제', '恒生銀行簽賬港幣52.00', '消費新台幣1,280元', '消费58.00元',
+  'Paid $ 6.430 at COTO', 'Compra R$ 58,40 aprovada', 'Te yapeó S/ 20', 'Pago S/.30.00', 'You paid ₱640.00 at SM', 'Debited ₦5,000.00',
+  'Charged MYR 45.60', 'Debited ZAR 1,250.00', 'Paid CHF 12.50', 'Paid BRL 10,00', 'Paid 12.50 CHF', 'Paid ¥１５００',
+  'Paid RON 25.00', 'Paid VND 450000', 'Paid TZS 5000', 'Paid HUF 1500', '1 500 Ft kártyás vásárlás',
+];
+const MONEY_REJECT = [
+  'all 3 items left in your cart', 'top 10 deals today', 'pen 2 per box', 'cup 4 sizes', 'bob 1 is here', 'CALL 911 now',
+  'Your IMPS/627298765432 request', 'towards IMPS/627298765432/SUNIL PATIL', 'NEFTRs500X', 'users 5 hours 3',
+  '5 ALLOWED today', '12 krona', 'Your OTP is 481516', 'ending 1234 at 10:45', 'Order 12 of 40 shipped',
+  'go.example/s/9Kx', 'Sharma 5 items', 'Room 12 on floor 3',
+];
+
 const CLOCK_CASES = [
   // Verbatim shapes from the corpus (parser.test.js:816 is the ADCB dash one).
   ['AED300.00 debited from Acc/Cr.Card XXX7720 for Salik on 11-02-2025 09:03:37 through ADCB Mobile App.', true],
@@ -157,15 +183,37 @@ public class WafraRegexCheck {
     Pattern amount = null;
     Pattern credential = null;
     Pattern clock = null;
+    Pattern money = null;
 ${PATTERNS.map(
   ([name, body]) => `    try {
       Pattern p = Pattern.compile(${javaString(body)}, Pattern.CASE_INSENSITIVE);
       if ("AMOUNT_RE".equals(${javaString(name)})) amount = p;
       if ("SMS_CREDENTIAL_RE".equals(${javaString(name)})) credential = p;
       if ("CLOCK_RE".equals(${javaString(name)})) clock = p;
+      if ("MONEY_RE".equals(${javaString(name)})) money = p;
       System.out.println("COMPILES ${name}");
     } catch (Exception e) { bad++; System.out.println("BROKEN ${name} " + e.getMessage()); }`,
 ).join('\n')}
+${MONEY_ADMIT.map(
+  (body, index) => `    {
+      if (!money.matcher(${javaString(body)}).find()) { bad++; System.out.println("MONEY not admitted ${index}"); }
+      else System.out.println("MONEY admitted ${index}");
+    }`,
+).join('\n')}
+${MONEY_REJECT.map(
+  (body, index) => `    {
+      if (money.matcher(${javaString(body)}).find()) { bad++; System.out.println("MONEY wrongly admitted ${index}"); }
+      else System.out.println("MONEY rejected ${index}");
+    }`,
+).join('\n')}
+    // Every ISO 4217 code the JS parser knows must pass the native gate, before
+    // and after the figure, and upper case only: a code missing here is a bank
+    // app whose alerts are dropped before JS ever sees them.
+    for (String code : new String[] {${Object.keys(CURRENCY_MINOR_UNITS).map((c) => `"${c}"`).join(', ')}}) {
+      if (!money.matcher(code + " 12.50").find()) { bad++; System.out.println("MONEY ISO prefix missing " + code); }
+      if (!money.matcher("Paid 12.50 " + code + ".").find()) { bad++; System.out.println("MONEY ISO suffix missing " + code); }
+      if (!money.matcher("Paid " + code + "12.50").find()) { bad++; System.out.println("MONEY ISO glued missing " + code); }
+    }
 ${CLOCK_CASES.map(
   ([body, want], index) => `    {
       boolean got = clock.matcher(${javaString(body)}).find();
@@ -221,6 +269,15 @@ for (const [, want] of AMOUNT_CASES) {
   ok(`Java reads the amount as ${want}`, out.includes(`AMOUNT ok ${want}`),
     out.split('\n').filter((l) => l.startsWith('WRONG')));
 }
+
+ok('the native money gate admits every spelling in the table',
+  MONEY_ADMIT.every((_, index) => out.includes(`MONEY admitted ${index}\n`)),
+  out.split('\n').filter((line) => line.startsWith('MONEY not admitted')).map((line) => MONEY_ADMIT[Number(line.split(' ').pop())]));
+ok('the native money gate refuses text that only looks like money',
+  MONEY_REJECT.every((_, index) => out.includes(`MONEY rejected ${index}\n`)),
+  out.split('\n').filter((line) => line.startsWith('MONEY wrongly')).map((line) => MONEY_REJECT[Number(line.split(' ').pop())]));
+ok('the native money gate knows every ISO 4217 code, before, after and glued to the figure',
+  !out.includes('MONEY ISO'), out.split('\n').filter((line) => line.startsWith('MONEY ISO')).slice(0, 6));
 
 for (let index = 0; index < CLOCK_CASES.length; index++) {
   const [body, want] = CLOCK_CASES[index];
