@@ -1,6 +1,6 @@
 import { missingUniversalField, type UniversalBankEvent, type UniversalParseContext } from '@/lib/universal-types';
 import {
-  accountMovementDirection, cjkNonPostingVerdict, hasDeclinedWording, inspectMarketAlert, runWithClauseMemo,
+  accountMovementDirection, cjkNonPostingVerdict, hasDeclinedWording, inspectMarketAlert, nonPostingTailVerdict, runWithClauseMemo,
 } from '@/lib/alert-semantics';
 import type { MoneyDirection, PostingStatus, UniversalMarket } from '@/lib/alert-market-pack-types';
 import { extractUniversalFields } from '@/lib/universal-fields';
@@ -400,6 +400,18 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
   const sentenceEnd = afterSpan.search(/[;!?\n。।]|\.(?=\s|$)/u);
   const sameSentence = sentenceEnd < 0 ? afterSpan : afterSpan.slice(0, sentenceEnd);
   if (status === 'posted' && hasDeclinedWording(sameSentence)) status = 'failed';
+  // Later sentences with no money of their own may still state this movement's
+  // lifecycle ("Transferencia no realizada", "Agendamento via Pix", "Refunded").
+  if (status === 'posted' && !roleUnresolved) {
+    let from = 0;
+    for (const piece of afterSpan.split(/(?<=[;!?\n。।])|(?<=\.)(?=\s|$)/u)) {
+      const start = span.end + from;
+      from += piece.length;
+      if (draft.candidates.some((candidate) => candidate.span.start < start + piece.length && candidate.span.end > start)) continue;
+      const verdict = nonPostingTailVerdict(piece);
+      if (verdict) { status = verdict; break; }
+    }
+  }
   const cjkVerdict = status === 'posted' ? cjkNonPostingVerdict(source) : null;
   if (cjkVerdict) status = cjkVerdict;
   // A bank ASKING whether you made a payment has not told you that you did.

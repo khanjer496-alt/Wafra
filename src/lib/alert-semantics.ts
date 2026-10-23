@@ -162,6 +162,10 @@ interface AlertVocabulary {
 }
 
 // ── Completed debits (money left the account) ────────────────────────────────
+// A bare "$" send to a named person ("Enviaste $57.000 a NAME") is shared by
+// many banks and currencies: it counts as completed only when the message also
+// names the payment rail that identifies where it was made.
+const P2P_RAIL = String.raw`(?=[^\n]{0,160}?(?<![\p{L}\p{N}])(?:spei|pix|nequi|daviplata|transfiya|bre-?b|bizum|yape|plin|sinpe|ted|transfer[eê]ncia|transferencia)(?![\p{L}\p{N}]))`;
 const WORLD_DEBIT = wordsOf(
   // English: contractions, a booked noun before the amount, "A $X transaction
   // was made", card "used for", and payee payments that end in a state word.
@@ -185,10 +189,13 @@ const WORLD_DEBIT = wordsOf(
   String.raw`your\s+${NUM}\s+payment\s+to\s+(?:\S${GAP}{0,80}?\s+)?(?:was|has\s+been)\s+(?:successful|completed|sent|made|processed)`,
   // Spanish / Portuguese.
   String.raw`realizaste\s+(?:un|una|el)\s+(?:compra|cargo|pago|consumo|retiro|transferencia)`,
-  String.raw`(?:pagaste|enviaste|retiraste|transferiste|compraste|gastaste)`,
+  String.raw`(?:pagaste|retiraste|compraste|gastaste)`,
+  String.raw`(?:enviaste|transferiste)${P2P_RAIL}`,
   // Third-person Portuguese verbs name no subject ("MARIA enviou R$ 50 para você"): only "você" proves the reader.
-  String.raw`voc[eê]\s+(?:pagou|enviou|sacou|transferiu|comprou)`,
-  String.raw`(?<=(?:^|:)\s*)(?:pagou|enviou|sacou|transferiu|comprou)\s+${NUM}`,
+  String.raw`voc[eê]\s+(?:pagou|sacou|comprou)`,
+  String.raw`voc[eê]\s+(?:enviou|transferiu)${P2P_RAIL}`,
+  String.raw`(?<=(?:^|:)\s*)(?:pagou|sacou|comprou)\s+${NUM}`,
+  String.raw`(?<=(?:^|:)\s*)(?:enviou|transferiu)\s+${NUM}${P2P_RAIL}`,
   String.raw`(?:usted|ud\.?)\s+(?:envi[oó]|pag[oó]|retir[oó]|transfiri[oó])`,
   String.raw`se\s+(?:ha\s+)?(?:realiz(?:o|ó|ado)\s+(?:un|una)\s+(?:cargo|compra|pago|retiro|consumo|transferencia)|cargado|debitado|descontado|retirado)`,
   String.raw`registr[oó]\s+un\s+(?:consumo|cargo|compra)`,
@@ -286,7 +293,7 @@ const CJK_PURCHASE = cjkOf(
 );
 const CJK_CASH = cjkOf('お引出し|お引き出し', `(?:取款|取现|支取)${CJK_MONEY}`);
 const CJK_FAILED = cjkOf(
-  '取り消|取消|キャンセル|失敗|失败|エラー|拒否|拒絕|拒绝|未完成|未成功|不成功|취소|실패|거절',
+  '取り消|取消|キャンセル|失敗|失败|エラー|拒否|拒絕|拒绝|未完成|未成功|不成功|できません|ませんでした|无法|無法|未能|취소|실패|거절',
 );
 // Held, scheduled or promotional: money is announced but has not moved. A
 // coupon, points or gift receipt carries a yen amount yet moves no money.
@@ -344,8 +351,11 @@ const WORLD_TRANSFER = wordsOf(
   String.raw`payment\s+received\s+(?:for|of)\s+${NUM}`,
   String.raw`(?<=(?:^|:)\s*)(?!(?:someone|somebody|anyone|anybody|a\s+friend|your\s+friend)\b)(?:[\p{L}][\p{L}'.-]*\s+){1,4}sent\s+you\s+${NUM}`,
   String.raw`deposit\s+of\s+${NUM}${GAP}{0,80}?\b(?:was|has\s+been|has)\s+(?:made|posted|completed|processed)\s+(?:to|into|in)\s+your\b`,
-  String.raw`(?:recibiste|enviaste|transferiste|te\s+(?:envi[oó]|transfiri[oó]|deposit[oó])|te\s+lleg[oó]|(?:usted|ud\.?)\s+envi[oó])`,
-  String.raw`voc[eê]\s+(?:recebeu|enviou|transferiu)\s+(?:uma?\s+(?:transfer[eê]ncia|pix)|${NUM})`,
+  String.raw`(?:recibiste|te\s+(?:envi[oó]|transfiri[oó]|deposit[oó])|te\s+lleg[oó]|(?:usted|ud\.?)\s+envi[oó])`,
+  String.raw`(?:enviaste|transferiste)${P2P_RAIL}`,
+  String.raw`voc[eê]\s+(?:recebeu|enviou|transferiu)\s+uma?\s+(?:transfer[eê]ncia|pix)`,
+  String.raw`voc[eê]\s+recebeu\s+${NUM}`,
+  String.raw`voc[eê]\s+(?:enviou|transferiu)\s+${NUM}${P2P_RAIL}`,
   String.raw`transfer[eê]ncia\s+(?:recebida|enviada|realizada)|pix\s+(?:enviado|recebido)|voc[eê]\s+recebeu\s+(?:um\s+)?pix`,
   String.raw`hiciste\s+una\s+transferencia|has\s+(?:recibido|enviado|transferido)|te\s+(?:acreditaron|depositaron|abonaron|transfirieron|enviaron)|transferencia\s+recibida`,
   String.raw`voc[eê]\s+(?:fez|realizou|efetuou)\s+(?:uma\s+transfer[eê]ncia|um\s+pix)`,
@@ -376,7 +386,7 @@ const WORLD_FAILED = wordsOf(
   String.raw`gagal|tidak\s+berhasil|tidak\s+berjaya|ditolak|dibatalkan|belum\s+berhasil`,
 );
 const WORLD_FUTURE = wordsOf(
-  String.raw`ser[aá]\s+(?:cargad|debitad|abonad|descontad|cobrad|transferid)\w*|se\s+(?:cargar[aá]|debitar[aá]|descontar[aá]|abonar[aá])|programad[oa]|agendad[oa]|vencimiento|vence`,
+  String.raw`ser[aá]\s+(?:cargad|debitad|abonad|descontad|cobrad|transferid)\w*|se\s+(?:cargar[aá]|debitar[aá]|descontar[aá]|abonar[aá])|programad[oa]|agendad[oa]|agendamento|vencimiento|vence`,
   String.raw`sera\s+(?:débité|crédité|prélevé)|à\s+venir|échéance`,
   String.raw`wird\s+(?:abgebucht|belastet|gutgeschrieben)|geplant|f[aä]llig`,
   String.raw`sar[aà]\s+(?:addebitat|accreditat)\w*|in\s+scadenza`,
@@ -429,6 +439,26 @@ const WORLD_VOCAB: AlertVocabulary = {
  */
 export const hasDeclinedWording = (text: string): boolean =>
   WORLD_VOCAB.failed.test(text) || NEGATED_POSTING.some((pattern) => pattern.test(text));
+
+/**
+ * A later sentence that carries no money of its own but states the lifecycle of
+ * the movement above it ("Transferencia no realizada", "Agendamento via Pix",
+ * "Refunded"). It can only move a posting away from posted. A conditional
+ * sentence ("Si no reconoce esta compra...") describes a hypothetical, not this
+ * movement, so it never counts.
+ */
+const TAIL_HELD = /(?<![\p{L}\p{N}])(?:scheduled|programad[oa]|agendad[oa]|agendamento|programm[ée]e?|geplant|gepland)(?![\p{L}\p{N}])/iu;
+export const nonPostingTailVerdict = (sentence: string): 'failed' | 'informational' | null => {
+  // A verdict line is short; a long promotional or help sentence only mentions the words.
+  const words = sentence.trim().split(/\s+/u).length;
+  if (words > 8 || WORLD_VOCAB.conditional.test(sentence)) return null;
+  if (hasDeclinedWording(sentence)) return 'failed';
+  if (words > 6) return null;
+  // Only scheduling, pending and refund words: a due-date or feature footer
+  // ("Next payment due ...") talks about a different obligation.
+  return TAIL_HELD.test(sentence) || WORLD_VOCAB.pending.test(sentence) || WORLD_VOCAB.refund.test(sentence)
+    ? 'informational' : null;
+};
 
 /**
  * Scripts without word spaces cannot be scoped to one amount clause, so their
