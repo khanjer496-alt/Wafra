@@ -696,5 +696,35 @@ for (const [label, market, text, family] of [
   }
 }
 
+
+// Subject swaps must never invert direction: a posted reading may be unresolved
+// but is never the opposite of what the text says happened to the reader.
+{
+  const PACKS = ['US', 'GB', 'FR', 'DE', 'ES', 'IT', 'NL', 'IN', 'QA', 'KW', 'BH', 'OM', 'EG', 'JO'];
+  const read = (text) => {
+    const reviews = PACKS.map((market) => inspectMarketAlert(text, market, { world: true }));
+    const directions = [...new Set(reviews.map((r) => r.direction).filter((d) => d === 'debit' || d === 'credit'))];
+    return { posted: reviews.every((r) => r.status === 'posted'), direction: directions.length === 1 ? directions[0] : 'unknown' };
+  };
+  for (const [text, expected] of [
+    ['MARIA enviou R$ 50,00 para você', 'credit'], ['MARIA pagou R$ 50,00 para você', 'credit'],
+    ['JOAO recebeu R$ 50,00 de você', 'debit'], ['Você enviou R$ 50,00 para MARIA', 'debit'],
+    ['Você recebeu R$ 50,00 de MARIA', 'credit'], ['JUAN te envió $50.00 por SPEI', 'credit'],
+    ['Enviaste $50.00 a JUAN', 'debit'], ['JUAN recibió $50.00 de ti', 'debit'],
+    ['Se abonó $50.00 a la cuenta de JUAN', 'debit'], ['Se abonaron $50.00 a tu cuenta', 'credit'],
+    ['Hesabınıza 500,00 TL gönderilmiştir', 'credit'], ['Hesabınızdan 500,00 TL gönderilmiştir', 'debit'],
+    ['Rp 50.000 telah ditransfer ke rekening Anda', 'credit'], ['Rp 50.000 berhasil ditransfer ke BUDI', 'debit'],
+    ['You sent £50.00 to JOHN', 'debit'], ['JOHN sent you £50.00', 'credit'],
+    ['JOHN received £50.00 from you', 'debit'], ['£50.00 has been transferred from your account to JOHN', 'debit'],
+    ['£50.00 has been transferred to your account from JOHN', 'credit'], ['umetuma TZS 50,000 kwa ASHA', 'debit'],
+    ['umepokea TZS 50,000 kutoka kwa ASHA', 'credit'], ['山田さんから500円を受け取りました', 'credit'],
+    ['山田さんに500円を送金しました', 'debit'], ['收入500.00元', 'credit'], ['支出500.00元', 'debit'],
+  ]) {
+    const got = read(text);
+    ok(`direction is never inverted: ${text}`, !got.posted || got.direction === expected || got.direction === 'unknown',
+      JSON.stringify(got));
+  }
+}
+
 console.log(`\nalert-market-packs: ${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

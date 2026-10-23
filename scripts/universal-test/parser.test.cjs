@@ -275,5 +275,33 @@ check('a generic debit with no narration, rail or masked account tail keeps its 
   assert.equal(event.family, 'unknown');
 });
 
+check('an extracted "at an ATM" merchant keeps the cash-machine word as movement evidence', () => {
+  const event = inspect('AUD 200.00 was withdrawn at an ATM using your card ending 2211 on 28/09/2026.');
+  assert.equal(event.status, 'posted');
+  assert.equal(event.family, 'cash-withdrawal');
+  assert.equal(event.direction, 'debit');
+});
+for (const verdict of ['refusé', 'declined', 'rechazada', 'failed']) {
+  check('a lifecycle word at the end of an over-long merchant name still withdraws the posting: ' + verdict, () => {
+    const event = inspect(`Card payment of EUR 25.00 at LIBRAIRIE CENTRALE ${verdict}. Available balance EUR 300.00.`);
+    assert.notEqual(event.status, 'posted');
+  });
+}
+check('a wallet receipt keeps a trailing success word out of the merchant mask', () => {
+  const event = inspect('Payment Tk 330.00 to Lotus Mart Ltd successful. Balance Tk 310.00. TrxID ZXC4V5BN6M at 04/10/2026 21:05');
+  assert.equal(event.status, 'posted');
+  assert.equal(event.direction, 'debit');
+  assert.equal(event.family, 'purchase');
+});
+check('a family fallback stands down when a fee line sits beside the charge', () => {
+  const event = inspect('Fee JD 1.000; Your card ending 1234 was charged JD 12.345 at TESCO on 2026-04-03.', { market: 'JO', sender: 'ARABBANK' });
+  assert.equal(event.family, 'unknown');
+});
+check('scripts without word spaces hold back cancelled, scheduled and promotional notices', () => {
+  for (const source of ['【ご利用のお知らせ】\n◇利用金額：2,480円\nこの利用は取り消されました。', '【キャンペーン】ご利用で2,000円分のポイントを受け取りました。', '消费满100元立减20元']) {
+    assert.notEqual(inspect(source).status, 'posted', source);
+  }
+});
+
 console.log(`universal parser: ${passed} passed, ${failed} failed`);
 if (failed) process.exitCode = 1;

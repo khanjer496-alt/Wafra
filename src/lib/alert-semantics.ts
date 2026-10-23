@@ -123,7 +123,34 @@ const GAP = String.raw`(?:[^.;\n]|\.\d)`;
 const NOT_A_REQUEST = String.raw`(?!\s+(?:request|reminder|link|instructions?|plan|method|details?|limit|alert)\b)`;
 
 interface Tester { test(text: string): boolean }
-const anyOf = (...patterns: readonly Tester[]): Tester => ({ test: (text) => patterns.some((pattern) => pattern.test(text)) });
+// One message is read once per language pack (14 packs) and these tests do not
+// depend on the pack. While a universal reading runs, answers for the clauses
+// being read are remembered in tables that exist only for that synchronous
+// call: runWithClauseMemo clears every table on exit, so no message text or
+// result survives the call or reaches another message.
+const dirtyTables: Map<string, boolean>[] = [];
+let memoDepth = 0;
+export const runWithClauseMemo = <T,>(read: () => T): T => {
+  memoDepth += 1;
+  try { return read(); } finally {
+    memoDepth -= 1;
+    if (memoDepth === 0) { for (const table of dirtyTables) table.clear(); dirtyTables.length = 0; }
+  }
+};
+const anyOf = (...patterns: readonly Tester[]): Tester => {
+  const table = new Map<string, boolean>();
+  return {
+    test: (text) => {
+      if (memoDepth === 0) return patterns.some((pattern) => pattern.test(text));
+      const known = table.get(text);
+      if (known !== undefined) return known;
+      const result = patterns.some((pattern) => pattern.test(text));
+      if (table.size === 0) dirtyTables.push(table);
+      table.set(text, result);
+      return result;
+    },
+  };
+};
 const NEVER: Tester = { test: () => false };
 
 interface AlertVocabulary {
@@ -146,6 +173,11 @@ const WORLD_DEBIT = wordsOf(
   String.raw`(?:charge|purchase)\s+of\s+${NUM}${GAP}{0,60}?\bat`,
   String.raw`(?:txn|transaction)\s+(?:of\s+)?${NUM}${GAP}{0,40}?\b(?:made|done|successful|completed)\s+(?:on|at|using|with|via)\b`,
   String.raw`you(?:['’]ve|\s+have)\s+been\s+charged\s+${NUM}`,
+  // "JOHN received £50 from you": the counterparty received, so it left this account.
+  String.raw`received\s+${NUM}${GAP}{0,30}?\bfrom\s+you\b`,
+  String.raw`(?:recibi[oó]|recebeu)\s+${NUM}${GAP}{0,30}?\bde\s+(?:ti|voc[eê]|usted)\b`,
+  String.raw`${NUM}${GAP}{0,30}?\b(?:has|have|was|were)\s+(?:been\s+)?(?:successfully\s+)?(?:transferred|withdrawn)\s+from\s+your\b`,
+  String.raw`${NUM}\s+(?:atm|cash)\s+withdrawal(?!\s+(?:request|limit|fee|available|up\s+to|allowed))`,
   String.raw`you(?:['’]ve|\s+have)?\s+(?:just\s+)?(?:successfully\s+)?(?:sent|transferred)\s+${NUM}`,
   String.raw`you\s+paid\s+(?!for\b)(?:[\p{L}'.-]+\s+){1,4}${NUM}`,
   String.raw`(?:has|have|was)\s+(?:been\s+)?charged\s+${NUM}`,
@@ -153,7 +185,10 @@ const WORLD_DEBIT = wordsOf(
   String.raw`your\s+${NUM}\s+payment\s+to\s+(?:\S${GAP}{0,80}?\s+)?(?:was|has\s+been)\s+(?:successful|completed|sent|made|processed)`,
   // Spanish / Portuguese.
   String.raw`realizaste\s+(?:un|una|el)\s+(?:compra|cargo|pago|consumo|retiro|transferencia)`,
-  String.raw`(?:pagaste|enviaste|retiraste|transferiste|compraste|gastaste|pagou|sacou|transferiu|comprou|enviou)`,
+  String.raw`(?:pagaste|enviaste|retiraste|transferiste|compraste|gastaste)`,
+  // Third-person Portuguese verbs name no subject ("MARIA enviou R$ 50 para você"): only "você" proves the reader.
+  String.raw`voc[eê]\s+(?:pagou|enviou|sacou|transferiu|comprou)`,
+  String.raw`(?<=(?:^|:)\s*)(?:pagou|enviou|sacou|transferiu|comprou)\s+${NUM}`,
   String.raw`(?:usted|ud\.?)\s+(?:envi[oó]|pag[oó]|retir[oó]|transfiri[oó])`,
   String.raw`se\s+(?:ha\s+)?(?:realiz(?:o|ó|ado)\s+(?:un|una)\s+(?:cargo|compra|pago|retiro|consumo|transferencia)|cargado|debitado|descontado|retirado)`,
   String.raw`registr[oó]\s+un\s+(?:consumo|cargo|compra)`,
@@ -169,23 +204,26 @@ const WORLD_DEBIT = wordsOf(
   String.raw`d[eé]bito\s+de\s+(?:tarifa|taxa|anuidade|mensalidade|pacote)`,
   // French / Italian / Dutch (German already has "belastet/abgebucht/bezahlt").
   String.raw`vous\s+avez\s+(?:effectué|réalisé|payé|retiré|envoyé)`,
-  String.raw`a\s+été\s+(?:débité|prélevé|effectué|réalisé)`,
+  String.raw`a\s+été\s+(?:débité|prélevé)`,
   String.raw`hai\s+(?:pagato|inviato|prelevato)`,
-  String.raw`è\s+stat[oa]\s+(?:addebitat[oa]|effettuat[oa])`,
+  String.raw`è\s+stat[oa]\s+addebitat[oa]`,
   String.raw`u\s+heeft\s+(?:betaald|overgemaakt)`,
-  String.raw`is\s+(?:afgeschreven|overgemaakt)`,
+  String.raw`is\s+afgeschreven`,
   // Swahili.
   String.raw`(?:umetuma|umelipa|umetoa|umenunua|umekatwa|kimetolewa|imetolewa|kimekatwa)`,
   // Turkish (dotted and dotless i spelled both ways: SMS often drops the dots).
   String.raw`al[ıi][sş]veri[sş][^.;\n]{0,50}?(?:yap[ıi]lm[ıi][sş]t[ıi]r|yap[ıi]ld[ıi]|ger[cç]ekle[sş]mi[sş]tir|ger[cç]ekle[sş]ti)`,
   String.raw`harcama\s+yap[ıi](?:lm[ıi][sş]t[ıi]r|ld[ıi])`,
   String.raw`[oö]deme\s+(?:yapt[ıi]n(?:[ıi]z)?|yap[ıi]ld[ıi]|ger[cç]ekle[sş]tirildi)`,
-  String.raw`(?:g[oö]nderilmi[sş]tir|g[oö]nderildi|[cç]ekilmi[sş]tir|[cç]ekildi|tahsil\s+edildi)`,
+  // Turkish case suffix names the side: hesabınızdan = from your account, hesabınıza = to it.
+  String.raw`hesab[ıi]n[ıi]zdan${GAP}{0,80}?(?:g[oö]nderilmi[sş]tir|g[oö]nderildi|[cç]ekilmi[sş]tir|[cç]ekildi|tahsil\s+edildi)`,
+  String.raw`(?:[cç]ekilmi[sş]tir|[cç]ekildi|tahsil\s+edildi)`,
   // Indonesian / Malay.
   String.raw`(?:telah\s+)?(?:didebet|didebit|ditarik)`,
-  String.raw`(?:berhasil|telah)\s+(?:ditransfer|dibayarkan|dibayar)`,
+  String.raw`(?:berhasil|telah)\s+(?:ditransfer|dibayarkan|dibayar)\s+ke\s+(?!rekening\s+(?:anda|kamu)|akun\s+(?:anda|kamu))\p{L}+`,
   String.raw`(?:kamu|anda|saya)\s+(?:udah|sudah|telah)\s+(?:bayar|membayar|membeli|menarik|transfer|mentransfer)`,
   String.raw`tarik\s+tunai`,
+  String.raw`(?:anda|kamu)\s+(?:telah\s+)?melakukan\s+(?:transfer|pembayaran|penarikan|pembelian|transaksi)`,
 );
 
 // ── Completed credits (money arrived in the account) ─────────────────────────
@@ -193,16 +231,17 @@ const WORLD_CREDIT = wordsOf(
   String.raw`(?:deposit|credit)s?\s+(?:of\s+|for\s+)?${NUM}${GAP}{0,80}?\b(?:was|has\s+been|were|have\s+been|has)\s+(?:made|posted|completed|processed|credited)`,
   String.raw`you(?:['’]ve|\s+have)?\s+(?:just\s+)?(?:successfully\s+)?received\s+${NUM}`,
   String.raw`payment\s+received\s+(?:for|of)\s+${NUM}`,
+  String.raw`${NUM}${GAP}{0,30}?\b(?:has|have|was|were)\s+(?:been\s+)?(?:successfully\s+)?transferred\s+to\s+your\b`,
   String.raw`received\s+${NUM}${GAP}{0,40}?\b(?:in|into)\s+your\s+(?:[\p{L}&.-]+\s+){0,3}?(?:a\/?c|ac|acct|account)`,
   // Spanish / Portuguese. "Crédito" alone is a loan offer: only salary-type credits.
-  String.raw`(?:recibiste|recebeu|te\s+lleg[oó]|voc[eê]\s+recebeu)`,
+  String.raw`(?:recibiste|te\s+lleg[oó]|voc[eê]\s+recebeu)`,
   String.raw`te\s+(?:envi[oó]|transfiri[oó]|deposit[oó]|abon[oó])`,
-  String.raw`se\s+abon(?:aron|[oó]|ado)`,
+  String.raw`se\s+abon(?:aron|[oó]|ado)${GAP}{0,60}?\b(?:tu|su)\b`,
   String.raw`(?:dep[oó]sito|abono)\s+(?:de|por)\s+${NUM}`,
-  String.raw`has\s+recibido|se\s+(?:acredit[oó]|abon[oó]|deposit[oó])`,
+  String.raw`has\s+recibido|se\s+(?:acredit(?:aron|[oó])|abon(?:aron|[oó])|deposit(?:aron|[oó]))${GAP}{0,60}?\b(?:tu|su)\b`,
   String.raw`te\s+(?:acreditaron|depositaron|abonaron|transfirieron|enviaron)`,
   String.raw`dep[oó]sito\s+recibido|transferencia\s+recibida`,
-  String.raw`recebeu\s+(?:um\s+)?pix|foi\s+(?:creditad|depositad)[oa]|cr[eé]dito\s+em\s+conta`,
+  String.raw`voc[eê]\s+recebeu\s+(?:um\s+)?pix|foi\s+(?:creditad|depositad)[oa]|cr[eé]dito\s+em\s+conta`,
   String.raw`dep[oó]sito\s+(?:em\s+conta\s+)?(?:de|no\s+valor\s+de)\s+${NUM}`,
   String.raw`cr[eé]dito\s+de\s+(?:sal[aá]rio|proventos|benef[ií]cio|aposentadoria|pens[aã]o)\s+de\s+${NUM}`,
   // French / Italian / Dutch.
@@ -217,10 +256,11 @@ const WORLD_CREDIT = wordsOf(
   String.raw`(?:umepokea|imeingia|imewekwa|kimewekwa|umewekewa)`,
   // Turkish.
   String.raw`(?:gelmi[sş]tir|geldi|yat[ıi]r[ıi]lm[ıi][sş]t[ıi]r|yat[ıi]r[ıi]ld[ıi])`,
+  String.raw`hesab[ıi]n[ıi]za${GAP}{0,80}?(?:g[oö]nderilmi[sş]tir|g[oö]nderildi)`,
   // Indonesian / Malay.
   String.raw`(?:telah\s+)?(?:dikredit|dikreditkan)`,
   String.raw`(?:kamu|anda)\s+(?:menerima|telah\s+menerima)`,
-  String.raw`transfer\s+masuk`,
+  String.raw`transfer\s+masuk|(?:berhasil|telah)\s+ditransfer\s+ke\s+(?:rekening|akun)\s+(?:anda|kamu)`,
 );
 
 // Scripts written without word spaces cannot use word boundaries. Each shape
@@ -251,7 +291,7 @@ const CJK_FAILED = cjkOf(
 // Held, scheduled or promotional: money is announced but has not moved. A
 // coupon, points or gift receipt carries a yen amount yet moves no money.
 const CJK_HELD = cjkOf(
-  '予定|請求予定|承認待ち|保留|待处理|待處理|クーポン|ポイント(?:還元|プレゼント|付与)|ギフト|商品券|キャンペーン|割引|优惠券|優惠券|红包|紅包|积分|積分|分期|优惠|優惠|立减|立減|返现|返現|抽奖|抽獎|满\\d|滿\\d|쿠폰|포인트',
+  '予定|請求予定|承認待ち|保留|待处理|待處理|本月|月度|账单|賬單|对账|對賬|累计|累計|合计|合計|汇总|匯總|明细|明細|ご利用明細|クーポン|ポイント(?:還元|プレゼント|付与)|ギフト|商品券|キャンペーン|割引|优惠券|優惠券|红包|紅包|积分|積分|分期|优惠|優惠|立减|立減|返现|返現|抽奖|抽獎|满\\d|滿\\d|쿠폰|포인트',
 );
 
 // ── Family: only a shape that already proved a completed movement names one ───
@@ -266,7 +306,7 @@ const WORLD_PURCHASE = wordsOf(
   String.raw`(?:bill\s+|bpay\s+)?payment\s+(?:of\s+)?(?:${NUM}\s*)?to\s+(?:\S${GAP}{0,80}?\s+)?(?:was|has\s+been|is)\s+(?:successful|successfully\s+\w+|completed|sent|made|processed)`,
   String.raw`your\s+${NUM}\s+payment\s+to\s+(?:\S${GAP}{0,80}?\s+)?(?:was|has\s+been)\s+(?:successful|completed|sent|made|processed)`,
   String.raw`realizaste\s+(?:un|una)\s+(?:compra|consumo|pago)`,
-  String.raw`(?:pagaste|compraste|gastaste|pagou|comprou|voc[eê]\s+pagou)\s+${NUM}`,
+  String.raw`(?:pagaste|compraste|gastaste|voc[eê]\s+pagou|voc[eê]\s+comprou)\s+${NUM}`,
   String.raw`se\s+(?:ha\s+)?realiz(?:o|ó|ado)\s+(?:un|una)\s+(?:cargo|compra|pago|consumo)`,
   String.raw`registr[oó]\s+un\s+(?:consumo|cargo|compra)`,
   String.raw`hiciste\s+(?:un|una)\s+(?:compra|pago)|has\s+(?:pagado|comprado)|voc[eê]\s+(?:fez|realizou|efetuou)\s+(?:um|uma)\s+(?:compra|pagamento)`,
@@ -277,6 +317,7 @@ const WORLD_PURCHASE = wordsOf(
   String.raw`umelipa|umenunua`,
 );
 const WORLD_CASH = wordsOf(
+  String.raw`${NUM}\s+(?:atm|cash)\s+withdrawal(?!\s+(?:request|limit|fee|available|up\s+to|allowed))`,
   String.raw`(?:atm|cash)\s+withdrawal\s+(?:of\s+)?${NUM}`,
   String.raw`withdrawal\s+of\s+${NUM}${GAP}{0,80}?\b(?:was|has\s+been)\s+(?:made|posted|completed|processed)`,
   String.raw`(?:retiraste|sacou)`,
@@ -295,15 +336,17 @@ const WORLD_REFUND = wordsOf(
 );
 // A person-to-person movement: a named counterparty directly beside the money.
 const WORLD_TRANSFER = wordsOf(
+  String.raw`${NUM}${GAP}{0,30}?\b(?:has|have|was|were)\s+(?:been\s+)?(?:successfully\s+)?transferred\s+(?:from|to)\s+your\b`,
+  String.raw`(?:anda|kamu)\s+(?:telah\s+)?melakukan\s+transfer`,
   String.raw`received\s+${NUM}${GAP}{0,40}?\b(?:in|into)\s+your\s+(?:[\p{L}&.-]+\s+){0,3}?(?:a\/?c|ac|acct|account)`,
   String.raw`you(?:['’]ve|\s+have)?\s+(?:just\s+)?(?:successfully\s+)?(?:sent|transferred|received)\s+${NUM}`,
   String.raw`you\s+paid\s+(?!for\b)(?:[\p{L}'.-]+\s+){1,4}${NUM}`,
   String.raw`payment\s+received\s+(?:for|of)\s+${NUM}`,
-  String.raw`(?:^|:\s*)(?!(?:someone|somebody|anyone|anybody|a\s+friend|your\s+friend)\b)(?:[\p{L}][\p{L}'.-]*\s+){1,4}sent\s+you\s+${NUM}`,
+  String.raw`(?<=(?:^|:)\s*)(?!(?:someone|somebody|anyone|anybody|a\s+friend|your\s+friend)\b)(?:[\p{L}][\p{L}'.-]*\s+){1,4}sent\s+you\s+${NUM}`,
   String.raw`deposit\s+of\s+${NUM}${GAP}{0,80}?\b(?:was|has\s+been|has)\s+(?:made|posted|completed|processed)\s+(?:to|into|in)\s+your\b`,
   String.raw`(?:recibiste|enviaste|transferiste|te\s+(?:envi[oó]|transfiri[oó]|deposit[oó])|te\s+lleg[oó]|(?:usted|ud\.?)\s+envi[oó])`,
   String.raw`voc[eê]\s+(?:recebeu|enviou|transferiu)\s+(?:uma?\s+(?:transfer[eê]ncia|pix)|${NUM})`,
-  String.raw`transfer[eê]ncia\s+(?:recebida|enviada|realizada)|pix\s+(?:enviado|recebido)|recebeu\s+(?:um\s+)?pix`,
+  String.raw`transfer[eê]ncia\s+(?:recebida|enviada|realizada)|pix\s+(?:enviado|recebido)|voc[eê]\s+recebeu\s+(?:um\s+)?pix`,
   String.raw`hiciste\s+una\s+transferencia|has\s+(?:recibido|enviado|transferido)|te\s+(?:acreditaron|depositaron|abonaron|transfirieron|enviaron)|transferencia\s+recibida`,
   String.raw`voc[eê]\s+(?:fez|realizou|efetuou)\s+(?:uma\s+transfer[eê]ncia|um\s+pix)`,
   String.raw`cr[eé]dito\s+de\s+(?:sal[aá]rio|proventos|benef[ií]cio|aposentadoria|pens[aã]o)\s+de`,

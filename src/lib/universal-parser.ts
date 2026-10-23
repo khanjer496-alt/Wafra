@@ -1,5 +1,7 @@
 import { missingUniversalField, type UniversalBankEvent, type UniversalParseContext } from '@/lib/universal-types';
-import { accountMovementDirection, cjkNonPostingVerdict, hasDeclinedWording, inspectMarketAlert } from '@/lib/alert-semantics';
+import {
+  accountMovementDirection, cjkNonPostingVerdict, hasDeclinedWording, inspectMarketAlert, runWithClauseMemo,
+} from '@/lib/alert-semantics';
 import type { MoneyDirection, PostingStatus, UniversalMarket } from '@/lib/alert-market-pack-types';
 import { extractUniversalFields } from '@/lib/universal-fields';
 import { extractUniversalMoney, inspectUniversalMoneyDraft } from '@/lib/universal-money';
@@ -339,13 +341,16 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
   }
   const semanticSource = maskedSource.slice(span.start, span.end);
   const packs = context.market ? [context.market] : LANGUAGE_PACKS;
-  const scopedReadings = packs.map((market) => inspectMarketAlert(semanticSource, market, { sender: context.sender, world: true }));
+  // Pack-independent vocabulary tests are shared across the packs of this one message only.
+  const readPacks = (text: string) => runWithClauseMemo(() =>
+    packs.map((market) => inspectMarketAlert(text, market, { sender: context.sender, world: true })));
+  const scopedReadings = readPacks(semanticSource);
   // An unowned number has not earned a posting clause. Preserve negative and
   // informational context across line/sentence boundaries; flattened text is
   // for classification only, never the source of amounts or source spans.
   const wholeContext = maskedSource.replace(/[\n\r;!?]|\.(?!\d)/gu, ' ');
   const wholeReadings = roleUnresolved
-    ? packs.map((market) => inspectMarketAlert(wholeContext, market, { sender: context.sender, world: true })) : [];
+    ? readPacks(wholeContext) : [];
   const separateInfo = money.observations.some((observation) =>
     ['balance', 'credit-limit', 'statement-total', 'minimum-due'].includes(observation.role));
   const wholeNegative = wholeReadings.some((reading) =>
