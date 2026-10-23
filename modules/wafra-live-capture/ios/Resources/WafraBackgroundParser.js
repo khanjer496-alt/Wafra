@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: d66aec441e1f32804e93b1e555b1acf2584421f55bc84feb700079ee832726bb
+// Generated from normal shipping TypeScript. Source SHA-256: bd3f30215058cb56bd2a0122d453bfe42a50881f5dc591f5dac7abdfba87d355
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -6778,6 +6778,11 @@ const S = {
     onboardManualIosUnsupportedBody: {
         en: 'Add entries yourself. Statements and pasting stay available.',
         ar: 'أضف العمليات بنفسك. يبقى استيراد الكشوف واللصق متاحاً.',
+    },
+    onboardIosImportedTitle: { en: 'Your transactions are in.', ar: 'وصلت عملياتك إلى وفرة.' },
+    onboardIosImportedBody: {
+        en: 'Add more any time from Accounts: import another statement, or paste bank messages.',
+        ar: 'أضف المزيد متى شئت من الحسابات: استورد كشف حساب آخر، أو الصق رسائل البنك.',
     },
     onboardNotNow: {
         en: 'Not now',

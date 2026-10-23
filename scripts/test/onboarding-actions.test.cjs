@@ -157,6 +157,8 @@ function actions(options = {}) {
     words: { continue: 'continue', addByHand: 'addByHand', manualTitle: 'manualTitle', waitingTitle: 'waitingTitle',
       waitingBody: 'waitingBody', workingTitle: () => 'workingTitle' },
     preferredName: null, firstPayment: null, discoveredResult: null, readySummary: null, lang: 'en',
+    // iOS 15's imported-rows result wording; these journeys run on iOS 16+ and Android.
+    iosImportedResult: false,
     importsStillReading: false, showHistoryGapOffer: false, selectedAlerts: null, legacyFocus: null, legacyTracking: null,
     onboardingNoAutomaticCapture: () => false, showPattern() { record('showPattern'); }, openStatementImport() {},
     styles: new Proxy({}, { get: () => ({}) }), night: new Proxy({}, { get: () => 'color' }),

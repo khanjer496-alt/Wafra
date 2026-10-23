@@ -93,6 +93,39 @@ test('the Settings preview on iOS 15 imports nothing and moves on as adding by h
   assert.equal(calls(h, 'setCaptureOptOut').length, 0);
 });
 
+// A statement or a paste has brought rows in by the time the person is back on step 5.
+const imported = [{ id: 'statement-row-1', type: 'expense', amountFils: 1250, category: 'dining', accountId: '',
+  title: 'Cedar Bakery', date: '2026-10-01', source: 'pdf' }];
+
+for (const language of ['en', 'ar']) {
+  test(`onboarding on iOS 15 with imported rows leads with Continue and says what came in: ${language}`, async () => {
+    const h = await gate({ version: '15.8', language, profile: profile('capture', null), ledger: { transactions: imported } });
+    assert.ok(h.byTestID('onboarding-live-continue'), 'Continue leads once something is in');
+    assert.equal(h.byTestID('onboarding-live-statements'), undefined);
+    assert.ok(h.byTestID('onboarding-source-statements'), 'another statement is still a row away');
+    assert.ok(h.byTestID('onboarding-source-paste'));
+    assert.equal(h.byTestID('onboarding-source-manual'), undefined, 'Continue is that same finish');
+    await h.tap('onboarding-live-continue');
+    assert.deepEqual(calls(h, 'setCaptureOptOut').map(([, value]) => value), [true]);
+    assert.equal(h.state.onboardingProfile.alerts, 'neither', 'nothing reaches Wafra by itself on iOS 15');
+    assert.ok(h.text().includes(h.t('onboardIosImportedTitle')), h.text());
+    assert.ok(h.text().includes(h.t('onboardIosImportedBody')));
+    assert.ok(!h.text().includes(h.eWords.manualTitle));
+  });
+}
+
+for (const version of ['16.0', '17.5']) {
+  test(`onboarding on iOS ${version} with imported rows keeps Set up and adding by hand`, async () => {
+    const h = await gate({ version, profile: profile('capture', null), ledger: { transactions: imported } });
+    assert.ok(h.byTestID('onboarding-live-action'));
+    assert.ok(h.byTestID('onboarding-source-manual'));
+    assert.equal(h.byTestID('onboarding-live-continue'), undefined);
+    await h.tap('onboarding-source-manual');
+    assert.ok(h.text().includes(h.eWords.manualTitle), 'the by-hand result wording is unchanged');
+    assert.ok(!h.text().includes(h.t('onboardIosImportedTitle')));
+  });
+}
+
 for (const version of [...IOS_16, ...IOS_17_PLUS]) {
   test(`onboarding on iOS ${version} keeps automatic capture setup unchanged`, async () => {
     const h = await gate({ version, profile: profile('capture', null) });

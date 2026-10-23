@@ -2369,7 +2369,8 @@ async function messageOnboardingProgressTests() {
 for (const lang of ['en', 'ar']) {
   ok(`iOS 15 fallback copy is complete and distinct in ${lang}`,
     ['iosLocalUnsupported', 'iosLocalUnsupportedBody', 'iosLocalUnsupportedStatement', 'iosLocalUnsupportedPaste',
-      'onboardLiveUnsupportedTitle', 'onboardLiveUnsupportedBody', 'onboardPasteMessagesBody', 'onboardManualIosUnsupportedBody']
+      'onboardLiveUnsupportedTitle', 'onboardLiveUnsupportedBody', 'onboardPasteMessagesBody', 'onboardManualIosUnsupportedBody',
+      'onboardIosImportedTitle', 'onboardIosImportedBody']
       .every((key) => typeof translated(key, lang) === 'string' && translated(key, lang).length > 0 &&
         (lang === 'en' || translated(key, 'ar') !== translated(key, 'en'))) &&
     /iOS 16/.test(translated('iosLocalUnsupported', lang)) && /iOS 16/.test(translated('onboardLiveUnsupportedBody', lang)));

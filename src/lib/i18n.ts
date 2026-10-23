@@ -2222,6 +2222,12 @@ const S = {
     en: 'Add entries yourself. Statements and pasting stay available.',
     ar: 'أضف العمليات بنفسك. يبقى استيراد الكشوف واللصق متاحاً.',
   },
+  // The iOS 15 result once a statement or paste brought transactions in.
+  onboardIosImportedTitle: { en: 'Your transactions are in.', ar: 'وصلت عملياتك إلى وفرة.' },
+  onboardIosImportedBody: {
+    en: 'Add more any time from Accounts: import another statement, or paste bank messages.',
+    ar: 'أضف المزيد متى شئت من الحسابات: استورد كشف حساب آخر، أو الصق رسائل البنك.',
+  },
   onboardNotNow: {
     en: 'Not now',
     ar: 'ليس الآن',

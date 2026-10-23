@@ -1437,6 +1437,11 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const lang = language === 'ar' ? 'ar' : 'en';
   // The rule /ios-setup's controller uses: below iOS 16 it could only say so.
   const iosCaptureUnsupported = Platform.OS === 'ios' && !iosSupportsLiveCapture(Platform.Version);
+  // iOS 15: once a statement or pasted message is in the ledger, step 5 leads
+  // with Continue (the "by hand" finish) and a result that says so. The
+  // preview reads the real ledger, so it keeps the first-run shape.
+  const iosImported = iosCaptureUnsupported && !previewMode && state.transactions.length > 0;
+  const iosImportedResult = iosCaptureUnsupported && !previewMode && (discoveredResult?.tx ?? 0) > 0;
 
   const captureStep = (
     <EStepFrame palette={stepBand} step={5} testID={Platform.OS === 'ios' ? 'onboarding-ios-live' : 'onboarding-capture'}
@@ -1448,7 +1453,10 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       onBack={smsExplainerVisible ? () => setSmsExplainerVisible(false) : goBack}
       onClose={onClose} backDisabled={backDisabled}
       footer={Platform.OS === 'android' && smsExplainerVisible ? null : <>
-        {iosCaptureUnsupported ? <EButton palette={stepBand} color={bandButtonColor(stepBand)}
+        {iosImported ? <EButton palette={stepBand} color={bandButtonColor(stepBand)} label={words.continue}
+          onPress={() => void runSetupAction(continueManually)} disabled={setupBusy} busy={setupBusy}
+          testID="onboarding-live-continue" />
+          : iosCaptureUnsupported ? <EButton palette={stepBand} color={bandButtonColor(stepBand)}
           label={t('iosLocalUnsupportedStatement')} onPress={importStatementsInstead} disabled={setupBusy}
           testID="onboarding-live-statements" />
           : Platform.OS === 'ios' ? <EButton palette={stepBand} color={bandButtonColor(stepBand)} label={t('onboardLiveAction')}
@@ -1514,17 +1522,18 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
               ready={androidNotificationReady} disabled={setupBusy}
               onPress={() => void runSetupAction(connectAndroidNotifications)} testID="onboarding-source-notifications" />
           </> : null}
-          {/* On iOS 15 statements are the primary action above; pasting sits beside them. */}
-          {Platform.OS !== 'web' && !previewMode && !iosCaptureUnsupported ? <SourceRow palette={stepBand} icon="upload" title={words.importStatements}
+          {/* On iOS 15 statements are the primary action above until one is in; pasting sits beside them. */}
+          {Platform.OS !== 'web' && !previewMode && (!iosCaptureUnsupported || iosImported) ? <SourceRow palette={stepBand} icon="upload" title={words.importStatements}
             body={words.importStatementsBody} disabled={setupBusy} onPress={openStatementImport}
             testID="onboarding-source-statements" /> : null}
           {iosCaptureUnsupported && !previewMode ? <SourceRow palette={stepBand} icon="mail" title={t('iosLocalUnsupportedPaste')}
             body={t('onboardPasteMessagesBody')} disabled={setupBusy} onPress={openPasteImport}
             testID="onboarding-source-paste" /> : null}
-          <SourceRow palette={stepBand} icon="plus" title={words.addByHand}
+          {/* Continue above is this same finish once something is imported. */}
+          {!iosImported ? <SourceRow palette={stepBand} icon="plus" title={words.addByHand}
             body={iosCaptureUnsupported ? t('onboardManualIosUnsupportedBody') : words.addByHandBody}
             disabled={setupBusy} onPress={() => void runSetupAction(continueManually)}
-            testID="onboarding-source-manual" />
+            testID="onboarding-source-manual" /> : null}
         </View>
         {/* iOS 15 has no automatic capture to describe; only the no-login promise applies. */}
         {Platform.OS !== 'web' ? <TrustLine palette={stepBand} items={iosCaptureUnsupported ? [
@@ -1544,13 +1553,13 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const completeTitle = finishSaveFailed ? t('onboardFinishSaveFailedTitle')
     : failedCompletion ? t('onboardCompleteNeedsAttentionTitle')
       : smsDenied ? t('onboardPermissionChoiceTitle')
-        : !automaticCompletion ? words.manualTitle
+        : !automaticCompletion ? iosImportedResult ? t('onboardIosImportedTitle') : words.manualTitle
           : firstPayment ? words.workingTitle(preferredName)
             : words.waitingTitle;
   const completeBody = finishSaveFailed ? t('onboardFinishSaveFailedBody')
     : failedCompletion ? t('onboardCompleteNeedsAttentionBody')
       : smsDenied ? t('onboardPermissionChoiceBody')
-        : !automaticCompletion ? t('onboardCompleteManualBody')
+        : !automaticCompletion ? t(iosImportedResult ? 'onboardIosImportedBody' : 'onboardCompleteManualBody')
           : firstPayment ? null
             : words.waitingBody;
   // Nothing arrived by itself: the watched limit, still whole, as Home's stack.
