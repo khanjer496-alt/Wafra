@@ -234,7 +234,9 @@ jobs:
     runs-on: ubuntu-latest
     # The full screen sweep reaches onboarding after ~25 minutes on a cold runner.
     # Keep every scenario enabled and give the final journey time to complete.
-    timeout-minutes: 40
+    # The tests alone take ~33 minutes; a slow Ubuntu mirror has added 6-14
+    # minutes to the Playwright dependency install, so 40 was not enough.
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
 
