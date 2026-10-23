@@ -126,6 +126,8 @@ const SHARED_SYMBOL_COUNTRY_CURRENCY: Readonly<Record<string, string>> = {
   // `$`
   US: 'USD', PR: 'USD', GU: 'USD', VI: 'USD', AS: 'USD', MP: 'USD', EC: 'USD', SV: 'USD',
   CA: 'CAD', AU: 'AUD', NZ: 'NZD', SG: 'SGD', HK: 'HKD', MX: 'MXN', AR: 'ARS', CL: 'CLP', CO: 'COP',
+  // `kr` (krona/krone/króna share the abbreviation)
+  SE: 'SEK', NO: 'NOK', DK: 'DKK', IS: 'ISK',
   // `¥`
   JP: 'JPY', CN: 'CNY',
   // `Rs`
@@ -248,6 +250,34 @@ const NON_COMPLETED_WORDING: readonly RegExp[] = [
   // A security question that sends the reader to a link: "If this trx.
   // wasn't done by you, click ...".
   /\b(?:wasn'?t|was\s+not)\s+(?:done|made|initiated)\s+by\s+you\b[^\n]{0,30}?\b(?:click|tap|visit)\b/iu,
+  // THE SAME NET FOR THE OTHER LANGUAGES THE UNIVERSAL PARSER READS. Declines,
+  // holds, cancellations, one-time codes, requests, scheduled debits, bills
+  // and adverts, in words that the arms above do not know. Latin words carry
+  // Unicode boundaries (an accented letter is a letter); each stem is
+  // literal with an optional letter tail, so the scan stays linear.
+  // Portuguese/Spanish/Italian: cancelled, denied, in review, not authorised.
+  /(?<![\p{L}\p{N}])(?:cancelou|cancelamento|cancelaci[óo]n|anulaci[óo]n|negou|recusou|denegad[oa]|declinad[oa]|em\s+an[áa]lise|en\s+revisi[óo]n|n[ãa]o\s+(?:foi\s+)?(?:autoriz|aprov|conclu|process|efetu)\p{L}*|no\s+(?:fue\s+)?(?:autoriz|aprob|proces|complet)\p{L}*|annullat\p{L}*|in\s+elaborazione|non\s+(?:autorizzat|eseguit|riuscit)\p{L}*|negat[oa])(?![\p{L}\p{N}])/iu,
+  // Turkish (the bare word "iptal" appears in ordinary "reply RET to cancel"
+  // footers, so only the passive "iptal edil-" counts).
+  /(?<![\p{L}\p{N}])(?:reddedil\p{L}*|ba[sş]ar[ıi]s[ıi]z|beklemede|provizyon\p{L}*|iptal\s+edil\p{L}*|yetersiz|[sş]ifre\p{L}*|do[gğ]rulama\s+kodu|onay\s+kodu|tek\s+kullan[ıi]ml[ıi]k|talep\p{L}*|yap[ıi]lacak|edilecek|hat[ıi]rlat\p{L}*|son\s+[öo]deme|ekstre\p{L}*|kampanya\p{L}*|indirim\p{L}*)(?![\p{L}\p{N}])/iu,
+  // Indonesian/Malay.
+  /(?<![\p{L}\p{N}])(?:gagal|ditolak|tertunda|dibatalkan|pembatalan|menunggu|kode\s+(?:otp|verifikasi|rahasia)|kod\s+(?:tac|pengesahan)|jangan\s+(?:berikan|bagikan|kongsi)|akan\s+(?:didebe?t|dikenakan|dikredit)|permintaan|permohonan|promo\p{L}*|diskon|jatuh\s+tempo|tagihan\s+anda)(?![\p{L}\p{N}])/iu,
+  // Swedish/Danish/Norwegian.
+  /(?<![\p{L}\p{N}])(?:nekad\p{L}*|avvisad\p{L}*|avvist|afvist|afvis\p{L}*|reserver(?:at|et|t|ing)|reservasjon|f[öo]rfallo\p{L}*|forfald|forfalt|misslyckad\p{L}*|mislykket|mislyktes|avbruten|avbrutt|afbrudt|annulleret|kansellert|tilbud|bekr[äæa]ft[ae]\s+(?:din|ditt|dit|k[öo]pet|betalingen|betalningen))(?![\p{L}\p{N}])/iu,
+  // Scandinavian and German COMPOUNDS ("betalningsförfrågan", "Zahlungsanforderung"):
+  // the stem is the tail of a longer word, so no left boundary is possible.
+  /f[öo]rfr[åa]gan|foresp[øo]rsel|foresp[øo]rgsel|anmodning|rabatt|kampanj|erbjudande|engangskode|eng[åa]ngskod|verifierings?kod|sikkerhedskode|sikkerhetskode|anforderung|aufforderung/iu,
+  // Czech/Slovak/Polish.
+  /(?<![\p{L}\p{N}])(?:zam[ií]tnut\p{L}*|zamietnut\p{L}*|odm[ií]tnut\p{L}*|blokac\p{L}*|rezervac\p{L}*|ov[eě][řr]ovac[ií]\s+k[óo]d|jednor[áa]zov\p{L}*|nedokon[čc]en\p{L}*|selhal\p{L}*|splatn\p{L}*|upom[ií]nk\p{L}*|nab[ií]dk\p{L}*|odrzucon\p{L}*|nieudan\p{L}*|anulowan\p{L}*|zablokowan\p{L}*|rezerwac\p{L}*|kod\s+(?:sms|autoryzac\p{L}*|weryfikac\p{L}*)|has[łl]o\s+jednorazowe|promocj\p{L}*|zaplanowan\p{L}*|termin\s+p[łl]atno[śs]ci)(?![\p{L}\p{N}])/iu,
+  // Vietnamese and Swahili.
+  /(?<![\p{L}\p{N}])(?:kh[ôo]ng\s+th[àa]nh\s+c[ôo]ng|th[ấa]t\s+b[ạa]i|t[ạa]m\s+gi[ữu]|m[ãa]\s+(?:otp|x[áa]c\s+th[ựu]c)|b[ịi]\s+t[ừu]\s+ch[ốo]i|ch[ờo]\s+x[ửu]\s+l[ýy]|khuy[ếe]n\s+m[ãa]i|[ưu]u\s+[đd][ãa]i|nh[ắa]c\s+n[ợo]|imeshindwa|haikufanikiwa|inasubiri|imekataliwa|nambari\s+ya\s+siri|punguzo|imeghairiwa|kumbusho|itakatwa|utakatwa)(?![\p{L}\p{N}])/iu,
+  // German/Dutch requests, one-time codes and standing orders. Only the
+  // compound TAN apps are listed: a bare "TAN" is also a common surname.
+  /(?<![\p{L}\p{N}])(?:einmalpasswort|einmalcode|dauerauftrag|betaalverzoek|betaalverzoeken|eenmalige\s+code)(?![\p{L}\p{N}])/iu,
+  /(?<![\p{L}\p{N}])(?:pushTAN|photoTAN|smsTAN|chipTAN)(?![\p{L}\p{N}])/u,
+  // Scripts without word spaces (Thai, Japanese, Chinese, Korean, Hindi): no
+  // boundary is possible, so these are whole holds/codes/adverts.
+  /ไม่สำเร็จ|ถูกปฏิเสธ|รอดำเนินการ|รหัส\s*OTP|ยกเลิก|ระงับ|โปรโมชั่น|ส่วนลด|ครบกำหนด|ค้างชำระ|拒否|失敗|失败|拒绝|拒絕|保留|仮売上|認証コード|ワンタイム|キャンペーン|キャンセル|取り消し|引き落とし予定|請求予定|お支払い期限|验证码|驗證碼|校验码|动态密码|動態密碼|处理中|處理中|冻结|凍結|预约|預約|优惠|優惠|账单|帳單|还款日|還款日|逾期|인증\s*번호|인증\s*코드|결제\s*예정|출금\s*예정|청구\s*예정|연체|\(광고\)|ओटीपी|विफल|असफल|लंबित|अनुरोध|ऑफर|कैशबैक/u,
 ];
 
 /**
@@ -442,7 +472,7 @@ const NOT_A_SETTLED_FACT: readonly RegExp[] = [
   // Fraud and verification prompts beside the money sentence.
   // A security code, or a bare "Code 123456"; an auth/approval/merchant/MCC
   // code is a receipt field, not a challenge.
-  /\bdid\s+you\s+(?:authori[sz]e|make|attempt|use)\b|\breply\s+(?:y|yes|n|no|1|2)\b|(?<!\b(?:if|in\s+case|should)\b[^.!?\n]{0,40})\brecogni[sz]e\b|\bflagged\b|\bheld\b|\b(?:otp|one[-\s]time|verification|security)\s+code\b|(?<!\b(?:auth|authori[sz]ation|approval|merchant|branch|postal|zip|sort|mcc|promo|category|reference|ref)\s+)\bcode\s*:?\s*\d{4,}\b/iu,
+  /\bdid\s+you\s+(?:authori[sz]e|make|attempt|use)\b|\breply\s+(?:y|yes|n|no|1|2)\b|(?<!\b(?:if|in\s+case|should)\b[^.!?\n]{0,40})\brecogni[sz]e\b|\bflagged\b|\bheld\b|\b(?:otp|one[-\s]time|verification|security)\s+code\b|(?<!\b(?:auth|authori[sz]ation|approval|merchant|branch|postal|zip|sort|mcc|promo|category|reference|ref|biller|bsb)\s+)\bcode\s*:?\s*\d{4,}\b/iu,
   // An unnamed payer ("Somebody paid you $500!") or a question about it.
   /\b(?:someone|somebody|anyone|anybody|a\s+friend)\s+(?:has\s+)?(?:paid|sent)\s+you\b|\b(?:if|whether)\s+(?:they|he|she|you|[\p{L}]+)\s+(?:have\s+|has\s+)?(?:paid|sent)\s+you\b/iu,
   /(?:^|[.!?\n:]\s*)(?:has|have|did|does|do|is|was|were)\s+(?:[^.!?\n]|\.\d){0,80}?\d(?:[^.!?\n]|\.\d){0,40}\?/iu,
@@ -500,7 +530,7 @@ const OWN_CARD_PAYMENT = /\b(?:[Yy]ou\s+)?paid\b(?:[^.\n]|\.\d){0,40}?\bto\s+you
  * decision (on the iPhone History path most of these are simply not imported).
  */
 export const isNotAutoPostableMoney = (source: string): boolean =>
-  hasLinkCallToAction(source) || NOT_A_SETTLED_FACT.some((pattern) => pattern.test(source)) ||
+  hasLinkCallToAction(source) || NOT_A_SETTLED_FACT.some((pattern) => pattern.test(neutraliseBenignShapes(source))) ||
   NOT_A_NEW_MOVEMENT.some((pattern) => pattern.test(source)) ||
   (MERCHANT_ORDER_RECEIPT.test(source) && !OWN_BALANCE_STATED.test(source));
 
@@ -576,6 +606,11 @@ export const isRegisteredAlertSender = (sender: string | undefined): boolean => 
  */
 const OWN_INSTRUMENT_TAIL =
   /(?:\b(?:a\/c|acc(?:oun)?t|acct|card|ending|wallet(?:\s+(?:no\.?|number))?)\b|(?<!\p{L})(?:حساب|بطاق[ةه])(?:\s+رقم)?)\.?\s*(?:no\.?|number|#)?\s*:?\s*(?:ending\s+(?:in|with)\s+)?(?:(?:[*xX•·]{2,}[\d*xX•·]*-){1,3}[\d*xX•·]*\d{2,6}|(?:[A-Z]{2}\d{2}[A-Z]{0,4})?\d{0,6}[*xX•·…]+\s?-?\d{2,6}|\.{2,3}\s?\d{2,6}|\d{3,6})(?![\d#])/iu;
+// Kotak writes "AC X1234". The abbreviation is upper-case only: as a
+// case-insensitive word "ac" is an air conditioner, a "Ref AC 1234" label...
+// so it gets its own case-sensitive pattern with the same masked-figure tail.
+const OWN_AC_ABBREVIATION_TAIL =
+  /(?<![\p{L}\p{N}])AC\b\.?\s?:?\s?(?:(?:[*xX•·]{2,}[\d*xX•·]*-){1,3}[\d*xX•·]*\d{2,6}|\d{0,6}[*xX•·…]+\s?-?\d{2,6})(?![\d#])/gu;
 const OWN_INSTRUMENT_TAIL_ALL = new RegExp(OWN_INSTRUMENT_TAIL.source, 'giu');
 /**
  * The tail must be the READER's. A payer's account or card is named after a
@@ -587,7 +622,11 @@ const OWN_INSTRUMENT_TAIL_ALL = new RegExp(OWN_INSTRUMENT_TAIL.source, 'giu');
  */
 const PAYER_BEFORE = /(?:\b(?:from|sender|by|of)|(?<!\p{L})من)[ \t]*:?[ \t]*(?:(?:the|a|an)[ \t]+)?$/iu;
 const OWNER_BEFORE =
-  /(?:\b(?:your|to|in|into|on|with|using)|(?<!\p{L})(?:الى|إلى|الي|في|على))[ \t]*:?[ \t]*(?:[^\s.,;:!?]+[ \t]+){0,2}$/iu;
+  /(?:\b(?:your|to|in|into|on|with|using)|(?<!\p{L})(?:الى|إلى|الي|في|على))[ \t]*:?[ \t]*(?:[^\s.,;:!?'’]+[ \t]+){0,2}$/iu;
+// A product name may sit between "your" and the tail ("credited to your Flexi
+// Debit Visa ending 4321"). Three words, none possessive: "your friend's Visa"
+// names someone else's card.
+const OWNER_YOUR_BEFORE = /\byour[ \t]+(?:[^\s.,;:!?'’]+[ \t]+){0,3}$/iu;
 const CLAUSE_START_BEFORE = /(?:^|[\n.,;:!?(])[ \t]*(?:dear[ \t]+(?:customer|client|member)[ \t]*,?[ \t]*)?$/iu;
 /** A field label naming the destination account: "To: **1234", "الى: 1234", "حساب: XX1234". */
 const OWN_FIELD_TAIL = /(?:^|\n)[ \t]*(?:to|الى|إلى|الي|حساب)[ \t]*:[ \t]*[*xX•·]*\d{3,4}(?![\d#])/iu;
@@ -604,12 +643,12 @@ const CREDIT_CUE = /\b(?:credited|received|deposited|incoming|inward|refund(?:ed
 const ownInstrumentTailIn = (text: string, direction?: 'credit' | 'debit' | 'unknown'): boolean => {
   if (OWN_FIELD_TAIL.test(text)) return true;
   const credit = direction === 'credit' || ((direction === undefined || direction === 'unknown') && CREDIT_CUE.test(text));
-  for (const match of text.matchAll(OWN_INSTRUMENT_TAIL_ALL)) {
+  for (const match of [...text.matchAll(OWN_INSTRUMENT_TAIL_ALL), ...text.matchAll(OWN_AC_ABBREVIATION_TAIL)]) {
     const at = match.index ?? 0;
     const before = text.slice(0, at);
     const near = before.slice(-48);
     if (credit && PAYER_BEFORE.test(near)) continue;
-    if (OWNER_BEFORE.test(near) || CLAUSE_START_BEFORE.test(before) || (!credit && DEBIT_ORIGIN_BEFORE.test(near)) ||
+    if (OWNER_BEFORE.test(near) || OWNER_YOUR_BEFORE.test(near) || CLAUSE_START_BEFORE.test(before) || (!credit && DEBIT_ORIGIN_BEFORE.test(near)) ||
       YOUR_INSTRUMENT_EARLIER.test(before)) return true;
   }
   return false;
@@ -678,7 +717,7 @@ const unverifiedMoneyClaim = (
  * advert.
  */
 const COMPLETED_MOVEMENT =
-  /\b(?:spent|debited|credited|paid|posted|withdrawn|transferred|received|charged|deposited|purchased|refunded)\b|\bmade\s+an?\s+\S+\s+(?:purchase|transaction|payment)\b|\b(?:purchase|payment|transaction)\s+of\s+(?:[A-Z]{3}|Rs\.?|[$£€₹])\s?\d|\bused\s+(?:for|at)\b|\bavailable\s+in\s+(?:your\s+)?(?:account|a\/c|acct|card)\b/iu;
+  /\b(?:spent|debited|credited|paid|posted|withdrawn|transferred|received|charged|deposited|purchased|refunded)\b|\bmade\s+an?\s+\S+\s+(?:purchase|transaction|payment)\b|\b(?:purchase|payment|transaction)\s+of\s+(?:[A-Z]{3}|Rs\.?|[$£€₹])\s?\d|\bsent\s+(?:[A-Z]{3}|Rs\.?|[$£€₹])\s?\d|\bused\s+(?:for|at)\b|\bavailable\s+in\s+(?:your\s+)?(?:account|a\/c|acct|card)\b/iu;
 
 /**
  * Trailing promotional footers banks append to completed alerts: "Apply now
@@ -736,6 +775,43 @@ const softNonCompletedWording = (source: string, ownCompleted: boolean): boolean
     DISPUTE_DESK.test(source);
 };
 
+/**
+ * Words that LOOK like non-posting wording but, in these exact shapes, belong
+ * to a completed alert. Each is set aside before the guards read the text; the
+ * rest of the message is still tested in full, so a real promo, hold or
+ * request in the same alert still refuses it. Every shape is narrow:
+ *  - a card PRODUCT name ("your BMO CashBack Mastercard ending 8765") is not
+ *    a cashback promotion (the card tail proves it is the reader's card);
+ *  - an executed debit "has been debited ... as per your e-mandate (SI)" is
+ *    the standing instruction having run, not a mandate being set up;
+ *  - a reversal explicitly CREDITED back to the reader ("credited with Rs X
+ *    towards reversal of UPI:...", "has been reversed and Ksh X is credited
+ *    to your M-PESA account") is money that arrived; a reversal that is only
+ *    initiated, pending, requested or debited never matches;
+ *  - a bank's callback footer "Don't recognise it? Call 0800..." and its
+ *    Spanish/Portuguese forms ("Si no reconoce la operación llame al ...",
+ *    "Não reconhece? Ligue ..."). Unlike the English "did you authorise this?"
+ *    prompt these only point to a phone line; a link or a reply-yes/no
+ *    request still refuses through its own arm.
+ */
+const CARD_PRODUCT_NAME =
+  /\bCash\s?[Bb]ack\s+(?:(?:World|Elite|Rewards)\s+)*(?:Mastercard|MasterCard|Visa|Card|Credit\s+Card)(?=\s+(?:ending|number|no\b|[x*•.]{2,}\s?\d|\(?\d{4}\b))/gu;
+const EXECUTED_MANDATE_DEBIT =
+  /(\b(?:has\s+been|was)\s+(?:debited|charged|deducted)\b(?:[^.\n]|\.(?=\S)){0,120}?\bas\s+per\s+(?:your\s+)?)(?:e-?)?mandate(?:\s*\(\w{1,6}\))?/giu;
+const CREDITED_TOWARDS_REVERSAL =
+  /(\b(?:is|has\s+been|was)\s+(?:successfully\s+)?credited\s+with\b(?:[^.\n]|\.(?=\S)){0,80}?\btowards\s+)reversal\b/giu;
+const REVERSED_THEN_CREDITED_TO_YOU =
+  /\brevers(?:al|ed|e)\b(?:[^.\n]|\.(?=\S)){0,200}?\b(?:is|has\s+been|was)\s+(?:successfully\s+)?credited\s+to\s+your\b/giu;
+const RECOGNISE_CALLBACK_FOOTER =
+  /(?<!\p{L})(?:(?:don['’]t|do\s+not|didn['’]t)\s+recogni[sz]e\b[^.!?\n]{0,30}\?\s*(?=(?:call|contact|ring|phone)\b)|si\s+no\s+(?:lo\s+|la\s+)?reconoc(?:e|es)\b[^.!?\n]{0,60}?(?=\bllam(?:a|e|ar)\b)|n[ãa]o\s+reconhece\b[^.!?\n]{0,40}?\??\s*(?=(?:ligue|ligar)\b))/giu;
+const neutraliseBenignShapes = (source: string): string =>
+  source
+    .replace(CARD_PRODUCT_NAME, 'card')
+    .replace(EXECUTED_MANDATE_DEBIT, '$1instruction')
+    .replace(CREDITED_TOWARDS_REVERSAL, '$1refund')
+    .replace(REVERSED_THEN_CREDITED_TO_YOU, (span) => span.replace(/\brevers(?:al|ed|e)\b/giu, 'refunded'))
+    .replace(RECOGNISE_CALLBACK_FOOTER, ' ');
+
 /** The text the wording guard reads: promo footers set aside when the alert answers for itself. */
 const wordingGuardText = (source: string, sender: string | undefined): { text: string; ownCompleted: boolean } => {
   // The movement must be stated OUTSIDE the footer: "Get paid $400 a week"
@@ -747,7 +823,7 @@ const wordingGuardText = (source: string, sender: string | undefined): { text: s
   // message: "Rs.25,00,000 has been Credited to your account. To get this
   // message, apply now ... http://..." is an advert dressed as a credit.
   const footerExempt = completed && (ownCompleted || (registeredAlphaSender(sender) && !LINK_RE.test(source)));
-  return { text: footerExempt ? withoutFooters : source, ownCompleted };
+  return { text: neutraliseBenignShapes(footerExempt ? withoutFooters : source), ownCompleted };
 };
 
 /**
@@ -869,8 +945,14 @@ const resolvePrincipalMoney = (
   }
   // Otherwise only a currency-symbol ambiguity may be resolved. Any other
   // doubt (two numbers, a role question) stays with the person.
+  // A dot-grouped peso ("$12.990", "$ 6.430") also carries
+  // decimal-or-grouping, but only from the OTHER dollar currencies' readings:
+  // the shared-symbol filter below then keeps the person's own currency, and
+  // it resolves only when that currency has exactly ONE reading of the
+  // figure (so a US "$12.990" stays unclear: USD reads it two ways).
   const symbolOnly = field.issues.length > 0 &&
-    field.issues.every((issue) => issue === 'currency-symbol' || issue === 'currency-exponent');
+    field.issues.every((issue) => issue === 'currency-symbol' || issue === 'currency-exponent' ||
+      issue === 'decimal-or-grouping');
   if (!symbolOnly) return 'amount-unclear';
   const wanted = routedMarket
     ? sharedSymbolCurrencyForCountry(routedMarket)
@@ -933,7 +1015,13 @@ const hasCompetingAmounts = (
       .filter((money) => !(observation.field.issues.includes('decimal-or-grouping') &&
         money.currency === principal.currency && /^\d+$/.test(money.minorUnits) &&
         BigInt(money.minorUnits) === BigInt(principal.minorUnits) * 1000n))
-      .filter((money) => !statedLedger(money));
+      .filter((money) => !statedLedger(money))
+      // Once the person's country chose the currency of a shared symbol, the
+      // OTHER candidate currencies' readings of that figure ("$35.000" as
+      // USD 35.00) are not second amounts: they are the currencies the symbol
+      // was not.
+      .filter((money) => !(observation.field.issues.includes('currency-symbol') &&
+        money.currency !== principal.currency));
     // A symbol ambiguity lists every candidate currency for the same figure.
     if (others.some((money) => money.minorUnits !== principal.minorUnits &&
       currencyMinorUnits(money.currency) === principal.exponent)) return true;
