@@ -194,10 +194,15 @@ const CSV_CONTENT_TYPES = new Set([
  *    MT940 types and /v1/import/csv reads those files (dispatched on their
  *    bytes, never on the label), answering invalid_statement_file for a
  *    malformed one. Without the token nothing changes.
+ *  - `statement-checks`: /v1/import/pdf may answer dates_without_year (rows
+ *    print no year and no statement period settles it). Without it that is the
+ *    unsupported_statement_format older builds know. A statement is never
+ *    refused for missing its stated balances: the reconciliation verdict is
+ *    report-only.
  */
 const IMPORT_FEATURES_HEADER = 'x-wafra-import-features';
 const MAX_IMPORT_FEATURES_HEADER_CHARS = 200;
-type ImportFeature = 'xlsx' | 'pdf-error-detail' | 'structured';
+type ImportFeature = 'xlsx' | 'pdf-error-detail' | 'structured' | 'statement-checks';
 /**
  * Media types of the structured statement formats. Only labels: the reader
  * decides from the bytes. MT940 has no registered type; the app labels
@@ -221,7 +226,8 @@ function importFeatures(req: Request): ReadonlySet<ImportFeature> {
   if (raw === null || raw.length > MAX_IMPORT_FEATURES_HEADER_CHARS) return features;
   for (const token of raw.split(',')) {
     const name = token.trim().toLowerCase();
-    if (name === 'xlsx' || name === 'pdf-error-detail' || name === 'structured') features.add(name);
+    if (name === 'xlsx' || name === 'pdf-error-detail' || name === 'structured' ||
+        name === 'statement-checks') features.add(name);
   }
   return features;
 }
@@ -2695,12 +2701,28 @@ export default {
         if (extracted.ambiguousDateRows > 0) {
           return json({ error: 'ambiguous_dates' }, 422);
         }
+        // Rows printed without a year (US `09/01`, UK `1 Sep`) and no
+        // statement period to take it from: the CSV export carries full dates.
+        if (extracted.yearlessDateRows > 0 && importFeatures(req).has('statement-checks')) {
+          return json({ error: 'dates_without_year' }, 422);
+        }
+        // `layout` is the layout, never the contents. Every token that could
+        // carry a merchant, an amount, a balance, a card number or a name is
+        // reported as its class only, so a bank whose table defeats this parser
+        // can be diagnosed and fixed without anyone having to send in a
+        // statement. See statementLayoutFingerprint.
         return json({
           error: 'unsupported_statement_format',
           requirement: 'text_pdf_with_explicit_debit_credit_rows',
+          ...(extracted.layout ? { layout: extracted.layout } : {}),
         }, 422);
       }
       if (extracted.totalRows > MAX_IMPORT_ROWS) return json({ error: 'too_many_rows' }, 413);
+      // The reconciliation verdict (extracted.reconciliation) is report-only:
+      // a statement is never refused because its rows miss its stated
+      // balances, since a wrong refusal costs the user a statement that main
+      // imports right. The one thing a `contradicted` verdict does is keep the
+      // statement's date range out of the coverage record below.
       const fileKey = await keyedFingerprint(device.requestSecret, `pdf:${digest}`);
       // Per ROW, not per batch — see rowReceiptTimes.
       const receivedAt = rowReceiptTimes(extracted.rows, Date.now());
@@ -2759,7 +2781,8 @@ export default {
         // Only the observed transaction-date range, never proof of a complete
         // statement or month. Refused/unaccounted rows and unbound legacy
         // replays cannot even establish that range for this interpretation.
-        coverage: interpretation !== 'legacy' && extracted.completeRowAccounting && extracted.rejectedRows === 0
+        coverage: interpretation !== 'legacy' && extracted.completeRowAccounting && extracted.rejectedRows === 0 &&
+          extracted.reconciliation.verdict !== 'contradicted'
           ? await statementCoverage(extracted.rows)
           : null,
       }, 202);

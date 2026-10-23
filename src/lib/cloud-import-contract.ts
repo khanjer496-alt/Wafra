@@ -120,6 +120,8 @@ export type CloudImportErrorCode =
   | 'multiple_statement_accounts'
   | 'statement_currency_mismatch'
   | 'statement_options_conflict'
+  /** Rows print no year and no statement period in the file settles it. */
+  | 'dates_without_year'
   | 'rate_limited'
   | 'queue_full'
   | 'email_not_configured'
@@ -145,6 +147,13 @@ export class CloudImportError extends Error {
     readonly code: CloudImportErrorCode,
     readonly status?: number,
     readonly detail?: StatementConflictDetail,
+    /**
+     * The layout fingerprint a Worker returns with
+     * `unsupported_statement_format`: token CLASSES and known column labels
+     * only, never the statement's contents. Carried so a diagnostic report can
+     * include why a file read nothing; no screen renders it yet.
+     */
+    readonly layout?: unknown,
   ) {
     super(code);
     this.name = 'CloudImportError';
@@ -483,6 +492,7 @@ const KNOWN_ERRORS = new Set<CloudImportErrorCode>([
   'multiple_statement_accounts',
   'statement_currency_mismatch',
   'statement_options_conflict',
+  'dates_without_year',
   'rate_limited',
   'queue_full',
   'email_not_configured',
@@ -507,7 +517,7 @@ export function pdfImportError(status: number, value: unknown): CloudImportError
     return new CloudImportError('statement_options_conflict', status, detail);
   }
   if (typeof code === 'string' && KNOWN_ERRORS.has(code as CloudImportErrorCode)) {
-    return new CloudImportError(code as CloudImportErrorCode, status);
+    return new CloudImportError(code as CloudImportErrorCode, status, undefined, body?.layout);
   }
   if (status === 429) return new CloudImportError('rate_limited', status);
   if (status >= 500) return new CloudImportError('service', status);
