@@ -142,6 +142,13 @@ async function main() {
       shares[0][1]?.mimeType === 'application/json' && shares[0][1]?.UTI === 'public.json' &&
       plainTextShares === 0);
 
+  // iOS showed the transaction export as a "Text Document" because CSV was
+  // shared as public.plain-text, so spreadsheet apps were not offered.
+  await nativeModule.shareTextFile('wafra-export.csv', 'date,amount\n', { mimeType: 'text/csv' });
+  ok('native CSV export is offered to iOS as comma-separated values',
+    shares.length === 2 && shares[1][1]?.mimeType === 'text/csv' &&
+      shares[1][1]?.UTI === 'public.comma-separated-values-text');
+
   for (const cancellation of ['before-start', 'during-availability', 'during-directory', 'during-write']) {
     let allowed = cancellation !== 'before-start';
     const created = []; const deleted = []; const files = []; const delivered = [];

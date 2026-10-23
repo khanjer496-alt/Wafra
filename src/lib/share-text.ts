@@ -190,7 +190,8 @@ export async function shareTextFile(
     await Sharing.shareAsync(uri, {
       mimeType,
       dialogTitle: options.dialogTitle ?? filename,
-      UTI: mimeType === 'application/json' ? 'public.json' : 'public.plain-text',
+      UTI: mimeType === 'application/json' ? 'public.json'
+        : mimeType === 'text/csv' ? 'public.comma-separated-values-text' : 'public.plain-text',
     });
     completed = true;
   } catch (error) {
