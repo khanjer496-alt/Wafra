@@ -162,6 +162,14 @@ const themedText = source('src/components/themed-text.tsx');
 ok('ThemedText does not impose a global Dynamic Type ceiling',
   !/const MAX_SCALE/.test(themedText) &&
     !/maxFontSizeMultiplier=\{rest\.maxFontSizeMultiplier/.test(themedText));
+// A Larger Text change while the app stays in memory left every text node with
+// its old measured box (clipped headings on iPhone 15, iOS 26.6.2). Each text
+// node remounts on the shared scale; one root listener supplies it.
+ok('ThemedText remounts when the system text scale changes',
+  /const fontScale = useFontScale\(\)/.test(themedText) &&
+    /<Text\s+key=\{fontScale\}/.test(themedText) &&
+    /<FontScaleProvider>/.test(source('src/components/app-root-layout.tsx')) &&
+    /useWindowDimensions\(\)/.test(source('src/hooks/use-font-scale.tsx')));
 ok('the compatibility tab bar does not clip or cap localized tab labels',
   !/maxFontSizeMultiplier=\{1\.3\}/.test(tabBar) &&
     !/numberOfLines=\{1\}[\s\S]{0,120}styles\.tabLabel/.test(tabBar));
