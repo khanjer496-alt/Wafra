@@ -240,6 +240,8 @@ const WORLD_DEBIT = wordsOf(
   // Vietnamese: "Bạn đã thanh toán 45.000đ cho ...", "Thanh toán thành công".
   String.raw`[dđ][aãạ]\s+thanh\s+to[aá]n\s+${NUM}`,
   String.raw`thanh\s+to[aá]n\s+th[aà]nh\s+c[oô]ng`,
+  // Arabic wallet: "تم تحويل مبلغ 50,000 دينار الى الرقم 0780... بنجاح" (sent to a number, successfully).
+  String.raw`تم\s+(?:تحويل|إرسال|ارسال)\s+مبلغ${GAP}{0,60}?(?:إلى|الى)\s+(?:الرقم|رقم)\s*\d${GAP}{0,60}?بنجاح`,
   // Card ledger line: "Debit Card 5678 txn RM128.40 at AEON ...".
   String.raw`card\s+(?:no\.?\s*)?[xX*•]*\d{3,}\s+(?:txn|transaction)\s+${NUM}${GAP}{0,50}?\bat\b`,
 );
@@ -282,6 +284,8 @@ const WORLD_CREDIT = wordsOf(
   // Vietnamese "received"; Roman Urdu "wusool huay" (was received).
   String.raw`[dđ][aãạ]\s+nh[aậ]n\s+${NUM}|nh[aậ]n\s+[dđ][uư][oơợ]\S*\s+${NUM}`,
   String.raw`(?:wusool|wasool|mausool)\s+hu(?:ay|e|a)`,
+  // Arabic wallet: "تم استلام مبلغ 500.00 جنيه من رقم ... بنجاح" (received from a number, successfully).
+  String.raw`تم\s+(?:استلام|استقبال)\s+مبلغ${GAP}{0,60}?بنجاح`,
 );
 
 // Scripts written without word spaces cannot use word boundaries. Each shape

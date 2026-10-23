@@ -1437,5 +1437,31 @@
     },
     "notes": "Thai failed card spend",
     "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-105",
+    "country": "IQ",
+    "ledger": "IQD",
+    "sender": "ZainCash",
+    "body": "تم تحويل مبلغ 50,000 دينار عراقي الى الرقم 07801234567 لم ينجح. رصيدك الحالي 125,000 دينار.",
+    "expect": {
+      "post": false,
+      "why": "failed"
+    },
+    "notes": "Arabic wallet movement that did not complete",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-SEMANTICS-106",
+    "country": "EG",
+    "ledger": "EGP",
+    "sender": "VF-Cash",
+    "body": "لم يتم استلام مبلغ 500.00 جنيه من رقم 01098765432 بنجاح",
+    "expect": {
+      "post": false,
+      "why": "failed"
+    },
+    "notes": "Arabic wallet movement that did not complete",
+    "provenance": "synthetic"
   }
 ]

@@ -328,6 +328,10 @@ for (const [label, source, status, direction] of [
   ['French card payment awaiting approval', "Banque: Paiement par carte ****1234 d'un montant de 450,00 MAD chez MARJANE en attente d'autorisation le 15/09/2026.", null, null],
   ['Canadian French purchase with card tail', 'Desjardins : Achat de 42,35 $ chez METRO PLUS LAVAL avec votre carte Visa se terminant par 1234 le 2026-09-27 à 18 h 12.', 'posted', 'debit'],
   ['French purchase noun with no card tail', 'Achat de 42,35 $ chez METRO PLUS LAVAL aujourd’hui seulement, profitez de nos offres', null, null],
+  ['Arabic wallet send to a number', 'تم تحويل مبلغ 50,000 دينار عراقي الى الرقم 07801234567 بنجاح. رصيدك الحالي 125,000 دينار. رقم العملية 12345678', 'posted', 'debit'],
+  ['Arabic wallet receipt from a number', 'تم استلام مبلغ 500.00 جنيه من رقم 01098765432 بنجاح، رصيدك الحالي 1,345.50 جنيه. رقم العملية 012345678901', 'posted', 'credit'],
+  ['Arabic wallet send that did not succeed', 'تم تحويل مبلغ 50,000 دينار عراقي الى الرقم 07801234567 لم ينجح. رصيدك الحالي 125,000 دينار.', null, null],
+  ['Arabic wallet receipt that was not completed', 'لم يتم استلام مبلغ 500.00 جنيه من رقم 01098765432 بنجاح', null, null],
   ['Turkish FAST credit', 'Sayın Müşterimiz, 4567 sonlu hesabınıza 18.09.2026 14:05 tarihinde AHMET YILMAZ tarafından FAST ile 2.500,00 TL gelmiştir. Açıklama: Kira payı', 'posted', 'credit'],
 ]) {
   check('world semantics: ' + label, () => {
