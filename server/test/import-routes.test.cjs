@@ -352,8 +352,8 @@ const passwordB64 = (text) => b64(Buffer.from(text, 'utf8'));
 
   /* ───────────────────── statement checks on /pdf ───────────────────── */
   {
-    const env = { DB: makeDb() };
-    const me = await pair(env);
+    let env = { DB: makeDb() };
+    let me = await pair(env);
     const CHECKS = { 'x-wafra-import-features': 'xlsx,pdf-error-detail,statement-checks' };
     const send = async (lines, headers) => {
       const res = await uploadPdf(env, me, textPdf(lines), { 'x-wafra-date-order': 'day-first', ...headers });
@@ -364,16 +364,22 @@ const passwordB64 = (text) => b64(Buffer.from(text, 'utf8'));
       '01/09/2026 CARREFOUR DUBAI 120.00 DR 4,880.00 CR', '03/09/2026 SALARY ACME LLC 8,000.00 CR 12,880.00 CR',
       `Closing Balance ${closing}`,
     ];
+    // Reconciliation is report-only: a statement whose rows miss its stated
+    // balances is imported exactly as it is read, never refused. It records no
+    // coverage, since its date range is not vouched for.
     const contradicted = await send(marked('99,999.00 CR'), CHECKS);
-    ok('a statement whose rows contradict its stated balances is 422 statement_does_not_reconcile',
-      contradicted.status === 422 && contradicted.body.error === 'statement_does_not_reconcile' &&
-        contradicted.body.openingMinor === 500000 && contradicted.body.closingMinor === 9999900 &&
-        contradicted.body.differenceMinor === 1288000 - 9999900,
-      JSON.stringify(contradicted));
+    const contradictedQueued = await syncedRows(env, me);
+    ok('a statement whose rows contradict its stated balances still imports (report-only), with no coverage',
+      contradicted.status === 202 && contradicted.body.acceptedRows === 2 && contradicted.body.coverage === null &&
+        contradictedQueued.map((row) => `${row.type}:${row.amountFils}`).sort().join(',') === 'expense:12000,income:800000',
+      JSON.stringify([contradicted, contradictedQueued.map((row) => [row.type, row.amountFils])]));
     const older = await send(marked('99,999.00 CR'), FEATURES);
-    ok('…and a build without statement-checks is refused under the code it knows',
-      older.status === 422 && older.body.error === 'unsupported_statement_format', JSON.stringify(older));
-    ok('…and nothing is queued for either', (await syncedRows(env, me)).length === 0);
+    ok('…and a build without statement-checks gets the same import', older.status === 202 && older.body.acceptedRows === 2,
+      JSON.stringify(older));
+    // The proven statement below is read on a device of its own, so what it
+    // queued is not mixed with the contradicted one's.
+    env.DB = makeDb();
+    me = await pair(env);
     const proven = await send(marked('12,880.00 CR'), CHECKS);
     const queued = await syncedRows(env, me);
     ok('a statement whose rows reach its closing balance imports the amounts, never the balances',

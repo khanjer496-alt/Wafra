@@ -191,8 +191,12 @@ const refusal = (run) => { try { run(); return 'accepted'; } catch (error) { ret
     '01/07/2026 GROCERY 100.00 - 4,900.00', 'Balance carried forward 4,900.00',
     'Balance brought forward 4,900.00', '02/07/2026 REFUND - 250.00 5,150.00', 'Balance carried forward 5,150.00',
   ].join('\n'), 'AED');
-  ok('per-page brought/carried-forward balances that disagree are no anchor, never a contradiction',
-    pageBreaks.rows.length === 2 && pageBreaks.reconciliation.verdict === 'unknown',
+  // The page-break pair between the rows (4,900.00 twice) is never an anchor;
+  // the brought-forward above the first row and the carried-forward below the
+  // last are the period's own balances, and the rows reach one from the other.
+  ok('per-page brought/carried-forward balances between rows are no anchor, never a contradiction',
+    pageBreaks.rows.length === 2 && pageBreaks.reconciliation.verdict === 'proven' &&
+      pageBreaks.reconciliation.openingMinor === 500000 && pageBreaks.reconciliation.closingMinor === 515000,
     JSON.stringify([brief(pageBreaks.rows), pageBreaks.reconciliation]));
   const repeated = parseStatementLines([
     'Statement of Account', 'Opening Balance 5,000.00', 'Closing Balance 5,150.00', 'Date Description Debit Credit Balance',
@@ -394,9 +398,19 @@ const refusal = (run) => { try { run(); return 'accepted'; } catch (error) { ret
   const twoPeriods = usChecking('September 01, 2026 through September 30, 2026', [
     'Statement period: October 01, 2026 through October 31, 2026', '09/14 SHOP 1.00 DR',
   ]);
-  ok('two different periods settle no year', twoPeriods.rows.length === 0 && twoPeriods.yearlessDateRows === 1);
+  ok('two different periods fall back to the first range printed, as main reads it',
+    twoPeriods.rows.map((row) => row.date).join(',') === '2026-09-14' && twoPeriods.yearlessDateRows === 0, brief(twoPeriods.rows));
+  const twoPeriodsOutside = usChecking('September 01, 2026 through September 30, 2026', [
+    'Statement period: October 01, 2026 through October 31, 2026', '10/14 SHOP 1.00 DR',
+  ]);
+  ok('…and a row outside that first range stays refused and counted',
+    twoPeriodsOutside.rows.length === 0 && twoPeriodsOutside.yearlessDateRows === 1, brief(twoPeriodsOutside.rows));
   const tooLong = usChecking('January 01, 2026 through March 31, 2027', ['09/14 SHOP 1.00 DR']);
-  ok('a period longer than twelve months settles no year', tooLong.rows.length === 0 && tooLong.yearlessDateRows === 1);
+  ok('a period longer than twelve months dates a row only one year fits, as main reads it',
+    tooLong.rows.map((row) => row.date).join(',') === '2026-09-14' && tooLong.yearlessDateRows === 0, brief(tooLong.rows));
+  const tooLongTwice = usChecking('January 01, 2026 through March 31, 2027', ['02/14 SHOP 1.00 DR']);
+  ok('…and a row both years fit stays refused and counted, never given a guessed year',
+    tooLongTwice.rows.length === 0 && tooLongTwice.yearlessDateRows === 1, brief(tooLongTwice.rows));
   const ambiguous = usChecking('September 01, 2026 through September 30, 2026', ['09/01 SHOP 1.00 DR', '09/05 CAFE 2.00 DR']);
   ok('with a period but no day/month evidence the rows are ambiguous dates, not missing years',
     ambiguous.rows.length === 0 && ambiguous.ambiguousDateRows === 2 && ambiguous.yearlessDateRows === 0);
@@ -672,8 +686,13 @@ const refusal = (run) => { try { run(); return 'accepted'; } catch (error) { ret
   const embedded = parseStatementLines([
     'CHECKING SUMMARY', 'Statement period 09/01/2026 - 09/30/2026 Page 1 of 2', '09/14 SHOP 1.00 DR',
   ].join('\n'), 'USD', { card: null }, 'month-first');
-  ok('a range inside a longer line is not a statement period: the row is refused, not dated',
-    embedded.rows.length === 0 && embedded.yearlessDateRows === 1, brief(embedded.rows));
+  ok('a range inside a longer line is the statement period, as main reads it',
+    embedded.rows.map((row) => row.date).join(',') === '2026-09-14' && embedded.yearlessDateRows === 0, brief(embedded.rows));
+  const embeddedRowText = parseStatementLines([
+    'CHECKING SUMMARY', '09/14 SHOP 09/01/2026 - 09/30/2026 1.00 DR',
+  ].join('\n'), 'USD', { card: null }, 'month-first');
+  ok('a range inside a row\'s own text is never the period',
+    embeddedRowText.rows.length === 0, brief(embeddedRowText.rows));
   // main sends a fully read account statement's closing balance as the
   // account's balance on its last row; the marked chain proves that balance.
   const marked = parseStatementLines(sixRows.join('\n'), 'AED', { card: null }, 'day-first');
@@ -882,8 +901,16 @@ const refusal = (run) => { try { run(); return 'accepted'; } catch (error) { ret
     refusal(() => parseStatementLines([...cardAccountPage.filter((line) => !line.startsWith('Account Number')),
       'Card No : XXXXXXXXXXXX2280 - SUPPLEMENTARY NAME', 'Account Number 12345678901234',
       '29/07/2026 SALARY TRANSFER 9,000.00 CR'].join('\n'), 'AED', { card: null }, 'day-first')) === 'multiple_statement_accounts');
-  ok('still refuses: the header\'s own account number heading rows of its own later',
-    refusal(() => parseStatementLines([...cardAccountPage, 'Account Number 0101234567890',
+  // Re-review: the number the header prints above the first row is the card
+  // account itself, so printed again over later rows it is no second account,
+  // and the file imports as main imports it.
+  const headerOwnLater = parseStatementLines([...cardAccountPage, 'Account Number 0101234567890',
+    '29/07/2026 SALARY TRANSFER 9,000.00 CR'].join('\n'), 'AED', { card: null }, 'day-first');
+  ok('the header\'s own account number printed again over later rows imports to the card, as on main',
+    headerOwnLater.rows.filter((row) => row.kind === 'transaction').length === 3 && headerOwnLater.rejectedRows === 0 &&
+      headerOwnLater.rows.every((row) => row.card?.last4 === '2280'), brief(headerOwnLater.rows));
+  ok('still refuses: a different account number heading rows beside the header\'s own',
+    refusal(() => parseStatementLines([...cardAccountPage, 'Account Number 0109999999999',
       '29/07/2026 SALARY TRANSFER 9,000.00 CR'].join('\n'), 'AED', { card: null }, 'day-first')) === 'multiple_statement_accounts');
 
   // 8.5 A card table's two marked figures are its original and charged
@@ -917,8 +944,59 @@ const refusal = (run) => { try { run(); return 'accepted'; } catch (error) { ret
       accountOriginalColumns.rejectedRows === 0, verdictOf(accountOriginalColumns));
   const cardRunningBalance = fxCard(['Previous Balance 1,000.00 DR', '01/09/2026 AMAZON 50.00 DR 1,050.00 DR',
     '05/09/2026 PAYMENT RECEIVED THANK YOU 500.00 CR 550.00 DR', 'New Balance 550.00 DR']);
-  ok('a card printing a marked owed balance beside each amount is read as main reads it, and its own balances refuse that read',
+  ok('a card printing a marked owed balance beside each amount is read as main reads it, and its own balances contradict that read (a report, never a refusal)',
     cardRunningBalance.reconciliation.verdict === 'contradicted', verdictOf(cardRunningBalance));
+
+  // 8.6 Reconciliation is report-only, and the credit-card-only marker is a
+  // label, not a mention. An account's signed rows (-120.00 spent, +8,000.00
+  // received) stay an account's whatever the header says about a card.
+  const signedAccount = (note) => parseStatementLines(['Statement of Account', 'Account Number 1012345678901', note,
+    'Date Description Amount', '02/09/2026 CARREFOUR DUBAI -120.00', '05/09/2026 SALARY ACME +8,000.00'].join('\n'),
+  'AED', { card: null }, 'day-first');
+  const signedMovements = (note) => movementsOf(signedAccount(note));
+  const accountReading = 'transaction:expense:12000 transaction:income:800000';
+  ok('a sentence mentioning the credit card statement is not the card-only label',
+    signedMovements('Tip: view your credit card statement in the app') === accountReading,
+    verdictOf(signedAccount('Tip: view your credit card statement in the app')));
+  ok('a sentence mentioning a minimum payment due is not the card-only label',
+    signedMovements('If a minimum payment due is not paid your card may be suspended') === accountReading);
+  ok('a linked card\'s minimum payment due in the account relationship summary is not the card-only label',
+    signedMovements('Linked Credit Card 4111 XXXX XXXX 1234 Minimum Payment Due 300.00') === accountReading);
+  // The observable: a card-only label makes the parser read the statement under
+  // the card convention, where a bare sign on a row is ambiguous (counted in
+  // ambiguousCardSignRows); under the account convention it is not.
+  const cardOnly = (label) => parseStatementLines(['Statement', 'Account Number 1012345678901', label,
+    'Date Description Amount', '02/09/2026 CARREFOUR DUBAI 120.00', '05/09/2026 PAYMENT THANK YOU -500.00'].join('\n'),
+  'AED', { card: null }, 'day-first');
+  ok('a title line that is only "Credit Card Statement" is a card-only label',
+    cardOnly('Credit Card Statement').ambiguousCardSignRows === 1, verdictOf(cardOnly('Credit Card Statement')));
+  ok('"Minimum Payment Due" with its figure is a card-only label',
+    cardOnly('Minimum Payment Due 25.00').ambiguousCardSignRows === 1, verdictOf(cardOnly('Minimum Payment Due 25.00')));
+  ok('a sentence mentioning the credit card statement is not a card-only label',
+    cardOnly('Tip: view your credit card statement in the app').ambiguousCardSignRows === 0);
+  ok('a sentence mentioning a minimum payment due is not a card-only label',
+    cardOnly('If a minimum payment due is not paid your card may be suspended').ambiguousCardSignRows === 0);
+  ok('a linked card\'s minimum payment due is not a card-only label',
+    cardOnly('Linked Credit Card 4111 XXXX XXXX 1234 Minimum Payment Due 300.00').ambiguousCardSignRows === 0);
+
+  // 8.7 Only a full-dated line that looks like a transaction means the file
+  // prints its rows with full dates. A payment coupon's values under their
+  // labels (`10/25/26 $1,234.56 $35.00`) are money but no row.
+  const coupon = parseStatementLines([
+    'Opening/Closing Date 08/28/26 - 09/27/26', 'Credit Card Statement', 'Account Number: XXXX XXXX XXXX 1234',
+    'Payment Due Date New Balance Minimum Payment Due', '10/25/26 $1,234.56 $35.00',
+    'Date of Transaction Merchant Name or Transaction Description $ Amount',
+    '08/29 STARBUCKS STORE 12345 5.75', '09/12 AMAZON MKTPL 42.18',
+    'Payments, credits and adjustments are shown with a minus sign', '09/10 Payment Thank You - Web -500.00',
+  ].join('\n'), 'USD', { card: null }, 'month-first');
+  ok('a payment coupon\'s dated value line is no full-dated row: the yearless rows are still dated',
+    coupon.yearlessDateRows === 0 && coupon.rows.some((row) => row.date === '2026-08-29') &&
+      coupon.rows.some((row) => row.date === '2026-09-12'), verdictOf(coupon));
+  const fullDatedFile = parseStatementLines([
+    'CHECKING SUMMARY', 'Statement period 09/01/2026 - 09/30/2026', '09/02/2026 GROCERY 20.00 DR', '09/14 SHOP 1.00 DR',
+  ].join('\n'), 'USD', { card: null }, 'month-first');
+  ok('a file printing real full-dated rows never dates a yearless-led line',
+    fullDatedFile.rows.map((row) => row.date).join(',') === '2026-09-02', verdictOf(fullDatedFile));
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

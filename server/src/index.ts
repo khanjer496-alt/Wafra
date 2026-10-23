@@ -194,12 +194,11 @@ const CSV_CONTENT_TYPES = new Set([
  *    MT940 types and /v1/import/csv reads those files (dispatched on their
  *    bytes, never on the label), answering invalid_statement_file for a
  *    malformed one. Without the token nothing changes.
- *  - `statement-checks`: /v1/import/pdf may answer statement_does_not_reconcile
- *    (the rows read do not get from the statement's stated opening balance to
- *    its stated closing one) and dates_without_year (rows print no year and no
- *    statement period settles it). Without it both are the
- *    unsupported_statement_format older builds know; a statement that does
- *    not reconcile is refused either way, never imported.
+ *  - `statement-checks`: /v1/import/pdf may answer dates_without_year (rows
+ *    print no year and no statement period settles it). Without it that is the
+ *    unsupported_statement_format older builds know. A statement is never
+ *    refused for missing its stated balances: the reconciliation verdict is
+ *    report-only.
  */
 const IMPORT_FEATURES_HEADER = 'x-wafra-import-features';
 const MAX_IMPORT_FEATURES_HEADER_CHARS = 200;
@@ -1735,8 +1734,6 @@ async function queueEmailRows(
     : parseStatementLines(normalized, statementLocale!.currency, { card: null }, statementLocale!.hint);
   if (statement && statement.rows.length > 0 &&
       (statement.rejectedRows > 0 || !statement.completeRowAccounting)) throw new Error('incomplete_statement');
-  // The same reconciliation refusal as an uploaded PDF (see /v1/import/pdf).
-  if (statement && statement.reconciliation.verdict === 'contradicted') throw new Error('statement_does_not_reconcile');
   const parsedRows = alert ? [alert] : statement!.rows;
   if (parsedRows.length === 0) return { acceptedRows: 0, insertedRows: 0, remainingRows: 0,
     remainingDeliveries: 0, wake: new Set() };
@@ -2603,7 +2600,7 @@ export default {
         if (error instanceof Error && error.message === 'statement_options_conflict') {
           return json({ error: 'statement_options_conflict' }, 409);
         }
-        if (error instanceof Error && ['multiple_statement_accounts', 'statement_currency_mismatch', 'incomplete_statement', 'statement_does_not_reconcile'].includes(error.message)) {
+        if (error instanceof Error && ['multiple_statement_accounts', 'statement_currency_mismatch', 'incomplete_statement'].includes(error.message)) {
           return json({ error: error.message }, 422);
         }
         throw error;
@@ -2721,26 +2718,11 @@ export default {
         }, 422);
       }
       if (extracted.totalRows > MAX_IMPORT_ROWS) return json({ error: 'too_many_rows' }, 413);
-      // A parse that provably does not add up must not reach the ledger.
-      // `contradicted` means the rows this read produced cannot get from the
-      // statement's own stated opening balance to its own stated closing one,
-      // so at least one figure or one direction is wrong, and importing it would
-      // write money the statement does not contain. Every softer verdict
-      // (`proven`, `unknown`) imports exactly as before. Older builds get the
-      // refusal under the code they know (see IMPORT_FEATURES_HEADER).
-      if (extracted.reconciliation.verdict === 'contradicted') {
-        return importFeatures(req).has('statement-checks')
-          ? json({
-            error: 'statement_does_not_reconcile',
-            openingMinor: extracted.reconciliation.openingMinor,
-            closingMinor: extracted.reconciliation.closingMinor,
-            differenceMinor: extracted.reconciliation.differenceMinor,
-          }, 422)
-          : json({
-            error: 'unsupported_statement_format',
-            requirement: 'text_pdf_with_explicit_debit_credit_rows',
-          }, 422);
-      }
+      // The reconciliation verdict (extracted.reconciliation) is report-only:
+      // a statement is never refused because its rows miss its stated
+      // balances, since a wrong refusal costs the user a statement that main
+      // imports right. The one thing a `contradicted` verdict does is keep the
+      // statement's date range out of the coverage record below.
       const fileKey = await keyedFingerprint(device.requestSecret, `pdf:${digest}`);
       // Per ROW, not per batch — see rowReceiptTimes.
       const receivedAt = rowReceiptTimes(extracted.rows, Date.now());
@@ -2799,7 +2781,8 @@ export default {
         // Only the observed transaction-date range, never proof of a complete
         // statement or month. Refused/unaccounted rows and unbound legacy
         // replays cannot even establish that range for this interpretation.
-        coverage: interpretation !== 'legacy' && extracted.completeRowAccounting && extracted.rejectedRows === 0
+        coverage: interpretation !== 'legacy' && extracted.completeRowAccounting && extracted.rejectedRows === 0 &&
+          extracted.reconciliation.verdict !== 'contradicted'
           ? await statementCoverage(extracted.rows)
           : null,
       }, 202);
@@ -3361,9 +3344,7 @@ export default {
         ? 'The statement currency differs from your Wafra ledger. Check the forwarding currency before resending.'
         : error instanceof Error && error.message === 'multiple_statement_accounts'
           ? 'Wafra cannot safely import multiple statement accounts in one PDF. Split the accounts before resending.'
-          : error instanceof Error && error.message === 'statement_does_not_reconcile'
-            ? 'This statement\'s rows do not add up to the balances it states, so Wafra did not import it. Some rows may already be queued; use file import to review the result.'
-            : 'Wafra could not import every statement row or attachment. Some rows may already be queued; use file import to review the result.',
+          : 'Wafra could not import every statement row or attachment. Some rows may already be queued; use file import to review the result.',
     );
     let importedRows = 0;
     if (parsedEmail.pdfAttachments.length + parsedEmail.csvAttachments.length > MAX_EMAIL_ATTACHMENTS) {
@@ -3431,10 +3412,6 @@ export default {
         importedRows + extracted.rows.length > MAX_IMPORT_ROWS ||
         extracted.rejectedRows > 0 || !extracted.completeRowAccounting
       ) { rejectExtraction(); return; }
-      if (extracted.reconciliation.verdict === 'contradicted') {
-        rejectExtraction(new Error('statement_does_not_reconcile'));
-        return;
-      }
       if (!(await reserveSupplementalDeliveries(env, device.id, extracted.rows.length, targets.length))) {
         rejectImport('Wafra import limit reached; try again later.');
         return;

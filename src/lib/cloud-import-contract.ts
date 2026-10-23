@@ -120,8 +120,6 @@ export type CloudImportErrorCode =
   | 'multiple_statement_accounts'
   | 'statement_currency_mismatch'
   | 'statement_options_conflict'
-  /** The rows read do not add up to the balances the statement states. */
-  | 'statement_does_not_reconcile'
   /** Rows print no year and no statement period in the file settles it. */
   | 'dates_without_year'
   | 'rate_limited'
@@ -494,7 +492,6 @@ const KNOWN_ERRORS = new Set<CloudImportErrorCode>([
   'multiple_statement_accounts',
   'statement_currency_mismatch',
   'statement_options_conflict',
-  'statement_does_not_reconcile',
   'dates_without_year',
   'rate_limited',
   'queue_full',

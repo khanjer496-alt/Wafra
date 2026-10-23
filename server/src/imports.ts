@@ -2549,7 +2549,46 @@ interface YearlessFill {
  * 9.99`, `12/09 004512 250.00`) is a wrapped description's continuation or a
  * side table, and dating it would make a row of it.
  */
-function fillYearlessRowDates(text: string, dateHint: StatementDateHint): YearlessFill {
+/**
+ * The one period a set of stated date ranges settles: a forward range of at
+ * most twelve months (a longer one can hold the same month and day twice),
+ * and every range the same one. A Hijri range (`01/03/1448 - 30/03/1448`) is
+ * read as its Gregorian days, but a yearless row beside it names a Hijri day
+ * and month, which no Gregorian year fits: such a range settles nothing.
+ */
+function settledPeriod(ranges: readonly (readonly [string, string])[], order: DateOrder): { start: string; end: string } | null {
+  const periods = new Set<string>();
+  for (const [from, to] of ranges) {
+    const end = /\b(?:14\d\d|1500)\b/.test(`${from} ${to}`) ? null : isoDate(to, order);
+    if (!end) {
+      periods.add('unreadable');
+      continue;
+    }
+    let start = isoDate(from, order);
+    const yearless = start ? null : yearlessLead(`${from} -`);
+    if (!start && yearless && 'month' in yearless) {
+      // `1 Sep - 30 Sep 2026`: the start's year is the end's, or the one
+      // before when its month and day come later in the year.
+      const endYear = Number(end.slice(0, 4));
+      const monthDay = `${String(yearless.month).padStart(2, '0')}-${String(yearless.day).padStart(2, '0')}`;
+      const year = monthDay <= end.slice(5) ? endYear : endYear - 1;
+      start = dateWithinPeriod(year, yearless.month, yearless.day, { start: '0000-01-01', end });
+    }
+    periods.add(start ? `${start}|${end}` : 'unreadable');
+  }
+  const stated = periods.size === 1 ? [...periods][0] : null;
+  if (!stated || stated === 'unreadable') return null;
+  const [start, end] = stated.split('|');
+  if (start > end || end > `${Number(start.slice(0, 4)) + 1}${start.slice(4)}`) return null;
+  return { start, end };
+}
+
+/** A date range printed anywhere in a line, as `main` read the statement period. */
+const EMBEDDED_PERIOD_RANGE = new RegExp(String.raw`(${DATE_TOKEN})\s*(?:through|to|until|thru|-|–|—)\s*(${DATE_TOKEN})`, 'gi');
+/** Words a period's line carries around its range (`Statement Period: … Page 1 of 2`, `Total Checking for … to …`). */
+const PERIOD_WORD = /\b(?:period|statement|billing|cycle|for|from)\b/i;
+
+function fillYearlessRowDates(text: string, dateHint: StatementDateHint, currency: StatementCurrency): YearlessFill {
   const lines = text.split('\n');
   const flat = lines.map((line) => line.replace(/\s+/g, ' ').trim());
   // Only a line carrying money is a row to date, as the row loop counts
@@ -2562,48 +2601,59 @@ function fillYearlessRowDates(text: string, dateHint: StatementDateHint): Yearle
   // `1 Sep - 30 Sep 2026` leads with a yearless date too, and is the period.
   const leads = flat.map((line, index) => periodLines[index] ? null : rowLead(line));
   if (!leads.some(Boolean)) return none;
-  const fullDatedRow = flat.some((line, index) => {
-    const prefixed = periodLines[index] ? null : ROW_DATE_PREFIX.exec(line);
-    return prefixed !== null && !SUMMARY_DESCRIPTION.test(prefixed[2]) && LOOKS_LIKE_MONEY_LINE.test(line);
-  });
-  if (fullDatedRow) return none;
   const periodMatches = periodLines.filter((match): match is RegExpExecArray => match !== null);
+  // A file with no period line of its own is read the way `main` read every
+  // file: a range printed inside a longer line in its first 80 lines
+  // (`Statement Period: 09/01/2026 - 09/30/2026 Page 1 of 2`, `Total Checking
+  // for September 1, 2026 to September 30, 2026`). Never a row's own text, and
+  // only when the file states one such range, or one on a line that names a
+  // period, where `main` took whichever came first.
+  const embedded: { range: [string, string]; named: boolean }[] = [];
+  if (periodMatches.length === 0) {
+    flat.slice(0, 80).forEach((line, index) => {
+      if (line.length > 200 || leads[index] || (ROW_DATE_PREFIX.test(line) && LOOKS_LIKE_MONEY_LINE.test(line))) return;
+      for (const match of line.matchAll(EMBEDDED_PERIOD_RANGE)) {
+        embedded.push({ range: [match[1], match[2]], named: PERIOD_WORD.test(line) });
+      }
+    });
+  }
   // The order is the file's: its full row dates, its period, its yearless
   // rows (as stand-ins carrying only their two fields), then the country.
   const order = inferDateOrder([
     ...flat.map((line) => ROW_DATE_PREFIX.exec(line)?.[1] ?? ''),
     ...periodMatches.flatMap((match) => [match[1], match[2]]),
+    ...embedded.flatMap(({ range }) => range),
     ...leads.flatMap((lead) => lead && 'first' in lead ? [`${lead.first}/${lead.second}/2000`] : []),
   ], dateHint);
-  const periods = new Set<string>();
-  for (const match of periodMatches) {
-    // A Hijri period (`01/03/1448 - 30/03/1448`) is read as its Gregorian
-    // days, but a yearless row beside it names a Hijri day and month, which
-    // no Gregorian year fits: such a period settles nothing.
-    const end = /\b(?:14\d\d|1500)\b/.test(`${match[1]} ${match[2]}`) ? null : isoDate(match[2], order);
-    if (!end) {
-      periods.add('unreadable');
-      continue;
-    }
-    let start = isoDate(match[1], order);
-    const yearless = start ? null : yearlessLead(`${match[1]} -`);
-    if (!start && yearless && 'month' in yearless) {
-      // `1 Sep - 30 Sep 2026`: the start's year is the end's, or the one
-      // before when its month and day come later in the year.
-      const endYear = Number(end.slice(0, 4));
-      const monthDay = `${String(yearless.month).padStart(2, '0')}-${String(yearless.day).padStart(2, '0')}`;
-      const year = monthDay <= end.slice(5) ? endYear : endYear - 1;
-      start = dateWithinPeriod(year, yearless.month, yearless.day, { start: '0000-01-01', end });
-    }
-    periods.add(start ? `${start}|${end}` : 'unreadable');
-  }
-  const stated = periods.size === 1 ? [...periods][0] : null;
-  if (!stated || stated === 'unreadable') return { text, order, period: null, rows: true };
-  const [start, end] = stated.split('|');
-  // Forward, and twelve months at most: a longer range can hold the same
-  // month and day twice.
-  if (start > end || end > `${Number(start.slice(0, 4)) + 1}${start.slice(4)}`) return { text, order, period: null, rows: true };
-  const period = { start, end };
+  // Last resort, `main`'s own reading: the first range the file prints (its
+  // first period line, or the first range in its first 80 lines), forward, whatever its length. A row is dated only when
+  // exactly one year puts its month and day inside that range (yearFor), so a
+  // range longer than a year leaves its ambiguous rows undated, never misdated.
+  const firstRange = (): { start: string; end: string } | null => {
+    const first = periodMatches.length > 0 ? ([periodMatches[0][1], periodMatches[0][2]] as const) : embedded[0]?.range;
+    const end = first && !/\b(?:14\d\d|1500)\b/.test(first.join(' ')) ? isoDate(first[1], order) : null;
+    const start = first ? isoDate(first[0], order) : null;
+    return start && end && start <= end ? { start, end } : null;
+  };
+  const period = (periodMatches.length > 0
+    ? settledPeriod(periodMatches.map((match) => [match[1], match[2]] as const), order)
+    : settledPeriod(embedded.map(({ range }) => range), order) ??
+      settledPeriod(embedded.filter(({ named }) => named).map(({ range }) => range), order)) ?? firstRange();
+  // Only in a file that does not print its rows with full dates. A full-dated
+  // line counts as a row only when it looks like one: a description under its
+  // date and money on it (`10/25/26 $1,234.56 $35.00`, a payment coupon's
+  // values under their labels, is not), dated inside the statement's period
+  // when one is stated (a scheduled transfer after it is not this period's).
+  const fullDatedRow = flat.some((line, index) => {
+    const prefixed = periodLines[index] ? null : ROW_DATE_PREFIX.exec(line);
+    if (!prefixed || SUMMARY_DESCRIPTION.test(prefixed[2]) || !LOOKS_LIKE_MONEY_LINE.test(line) ||
+        !hasDescriptionUnderDate(line, currency)) return false;
+    const dated = period ? isoDate(prefixed[1], order) : null;
+    return !period || dated === null || (dated >= period.start && dated <= period.end);
+  });
+  if (fullDatedRow) return none;
+  if (!period) return { text, order, period: null, rows: true };
+  const { start, end } = period;
   const yearFor = (lead: YearlessDate): string | null => {
     const monthDay = yearlessMonthDay(lead, order);
     if (monthDay === 'ambiguous') return null;
@@ -3606,6 +3656,25 @@ function balanceLabelGap(line: string): boolean {
     .every((word) => statementCurrency(word) !== null);
 }
 
+/**
+ * Page-break running balances. `Balance carried forward` ends a page and
+ * `Brought forward` opens the next, so between two rows they state the
+ * balance at the break, never the period's. At the very top a brought-forward
+ * figure is the period's opening and at the very bottom a carried-forward one
+ * its closing; above the first row a carried-forward label is as likely the
+ * previous statement's balance carried into this one, so it anchors nothing.
+ */
+const CARRIED_FORWARD_LABEL = /\bbalance\s+c\/?f\b|(?:^|\s)c\/f(?=\s|$)|\bcarried\s+forward\b/i;
+
+/** Where the transaction rows that were read sit among the statement's lines. */
+interface StatementRowSpan {
+  /** The first and last line holding a row that was read. */
+  first: number;
+  last: number;
+  /** Every line holding a row that was read. */
+  lines: ReadonlySet<number>;
+}
+
 function statedBalance(
   lines: string[],
   label: RegExp,
@@ -3613,13 +3682,22 @@ function statedBalance(
   currency: StatementCurrency,
   owed: boolean,
   minusIsCredit: boolean,
+  rowSpan: StatementRowSpan,
+  closing: boolean,
 ): number | null {
   // Every stated reading, not the first: a statement prints its balances more
   // than once (a summary box, a page header, a payment slip), and they must
-  // all agree. Multi-page statements end each page with `Balance carried
-  // forward` and open the next with `Brought forward`, each a different
-  // running balance; taking page one's as THE closing balance accused a
-  // correct read of every later page. Disagreement is no anchor at all.
+  // all agree. Disagreement is no anchor at all.
+  //
+  // Only the period's own balances anchor, and where they stand says which
+  // they are. An opening balance stands above the first row that was read; a
+  // closing one above it (the header summary) or below the last row. A balance
+  // printed BETWEEN two rows is a page-break running balance (`Balance carried
+  // forward` at the foot of a page, `Brought forward` or a repeated summary at
+  // the head of the next): on a multi-page statement page one's carried-forward
+  // equals page two's brought-forward, so taking them as the anchors made both
+  // the same mid-statement balance and refused every correct read with any
+  // movement. Such a reading is never an anchor.
   //
   // A reading comes only from a line holding exactly ONE figure, so its label
   // is that figure's. A summary laid out as columns (`Opening Balance Debits
@@ -3637,9 +3715,17 @@ function statedBalance(
     if (!line || line.length > MAX_BALANCE_LABEL_CHARS || !label.test(line)) continue;
     // A line naming BOTH balances (`Opening Balance Closing Balance`,
     // `Opening Bal 5,000.00 Closing Bal 4,100.00`, `الرصيد الافتتاحي الرصيد
-    // الختامي`) anchors neither, and its values, on it or under it, are never
-    // read: the lookahead from any other label line stops at it.
-    if (other.test(line)) continue;
+    // الختامي`) is a summary this cannot pair, wherever it stands: neither
+    // balance is anchored, from it or from any other line. Skipping it and
+    // keeping the other readings left only the page-break ones, which agree
+    // with each other by construction.
+    if (other.test(line)) return null;
+    // A transaction row that was read is never a balance line.
+    if (rowSpan.lines.has(index)) continue;
+    const above = index < rowSpan.first;
+    const below = index > rowSpan.last;
+    if (!above && !below) continue;
+    if (closing ? above && CARRIED_FORWARD_LABEL.test(line) : !above) continue;
     if (balanceFigureCount(line, currency) > 0) {
       // On the label's own line its one figure is the balance, and it has to
       // end the line (a DR/CR after it aside). A figure there is never a
@@ -3656,7 +3742,9 @@ function statedBalance(
       // labels and then its values, so a lookahead that only knew its own label
       // would run straight into the other balance's figure and report the
       // opening one as the closing one - a difference of the whole statement.
-      if (label.test(next) || other.test(next) || ROW_DATE_PREFIX.test(next)) break;
+      // Stop at a row too: a value is on the label's own side of the rows.
+      if (label.test(next) || other.test(next) || ROW_DATE_PREFIX.test(next) ||
+          rowSpan.lines.has(ahead) || (above && ahead >= rowSpan.first)) break;
       if (!isMoneyOnlyLine(next, currency)) {
         if (balanceLabelGap(next)) continue;
         break;
@@ -3744,46 +3832,120 @@ export type StatementReconciliation =
   | { verdict: 'contradicted'; openingMinor: number; closingMinor: number; differenceMinor: number };
 
 /**
- * What the parser decided a statement is, and the evidence against it.
+ * Wording only a credit card's statement prints, as a LABEL of its own: a
+ * minimum payment due stated with its figure (`Minimum Payment Due 189.16`,
+ * `New Balance $91.13 Minimum Payment Due $25.00 …`, or the label alone with
+ * its value on the next line), or a title line that is nothing but `Credit Card
+ * Statement`. A sentence that mentions the words (`Tip: view your credit card
+ * statement in the app`) or a linked card's line in an account's relationship
+ * summary (`Linked Credit Card 4111 XXXX XXXX 1234 Minimum Payment Due 300.00`)
+ * says nothing about what THIS statement is. With `arabic`, the Arabic labels
+ * count too (`الحد الأدنى للدفع 100.00`, a title `كشف حساب البطاقة الائتمانية`).
+ * A credit limit is not among them: an overdraft prints one.
+ */
+const MINIMUM_DUE_LABEL = /\bminimum\s+(?:amount|payment)\s+due\b/i;
+const MINIMUM_DUE_LABEL_AR = /الحد\s+الأدنى\s+(?:للدفع|للدفعة|للسداد|المستحق|للمبلغ\s+المستحق)/u;
+const CREDIT_CARD_TITLE_AR = /^كشف\s+(?:ال)?(?:حساب\s+)?(?:البطاقة\s+الائتمانية|بطاقة\s+(?:ال)?ائتمان)$/u;
+/** A figure standing as a label's value. */
+const LABEL_VALUE = /^[-+(]?(?:[$£€]\s?)?\d[\d,.]*\)?(?:DR|CR)?$/i;
+
+function creditOnlyLabel(line: string, next: string | undefined, arabic: boolean): boolean {
+  if (!line || line.length > 120 || DATE_LED_LINE.test(line)) return false;
+  // Another card's number on the line: a linked or supplementary card's.
+  if (/[xX*•]{4}|\b\d{4}\s+\d{4}\b/.test(line)) return false;
+  const withoutArabic = (text: string): string =>
+    text.replace(/[\p{Script=Arabic}\u200e\u200f]+/gu, ' ').replace(/\s+/g, ' ').trim();
+  // What is left once the label is taken off: one figure (a currency code
+  // beside it aside), or nothing and the figure alone on the next line.
+  const labelValue = (rest: string): boolean => {
+    const words = rest.replace(/^[\s:|\u2013\u2014-]+/, '').split(' ').filter(Boolean)
+      .filter((word) => !/^[A-Z]{3}$/.test(word));
+    if (words.length > 0) return LABEL_VALUE.test(words[0]);
+    const below = next?.split(' ').filter(Boolean) ?? [];
+    return below.length > 0 && below.every((word) => LABEL_VALUE.test(word) || /^[A-Z]{3}$/.test(word)) &&
+      below.some((word) => LABEL_VALUE.test(word));
+  };
+  const latin = withoutArabic(line);
+  if (/^credit card statement$/i.test(latin.replace(/[^A-Za-z ]+/g, ' ').replace(/\s+/g, ' ').trim())) return true;
+  const english = MINIMUM_DUE_LABEL.exec(latin);
+  if (english && !/\b(?:card|linked|supplementary)\b/i.test(latin.slice(0, english.index)) &&
+      labelValue(latin.slice(english.index + english[0].length))) return true;
+  if (!arabic) return false;
+  if (CREDIT_CARD_TITLE_AR.test(line.replace(/[^\p{Script=Arabic}\s]+/gu, ' ').replace(/\s+/g, ' ').trim())) return true;
+  // An Arabic label's figure may come out of the PDF before it or after it,
+  // so the whole line with its Arabic taken off is the value.
+  return MINIMUM_DUE_LABEL_AR.test(line) && !/بطاقة/u.test(line) && !/[A-Za-z]{2,}/.test(latin.replace(/\b[A-Z]{3}\b/g, ' ')) &&
+    labelValue(latin);
+}
+
+/**
+ * What only a deposit account's statement says about itself: an IBAN, a
+ * debit or mada card, an overdraft, a current, savings or checking account,
+ * a `Statement of Account` title. A card statement printing any of these (a
+ * how-to-pay IBAN in its header) is set aside as `unknown`, never checked.
+ */
+const DEPOSIT_ACCOUNT_WORDING =
+  /\b(?:debit|mada)\s+card\b|\boverdraft\b|\biban\b|بطاقة\s+(?:ال)?(?:خصم|صراف|مدى)|\bstatement\s+of\s+account\b|(?<!\bcard\s)\baccount\s+statement\b|\b(?:current|savings?|cheque|chequing|deposit)\s+(?:account|a\/c)\b|\bchecking\b|حساب\s+(?:جار|جاري|الجاري|توفير|التوفير)/iu;
+
+/**
+ * A card named anywhere outside the rows: its number's label, the words
+ * credit card, cardholder, a prepaid card. A row (`PAYMENT TO CREDIT CARD
+ * 4111…`) says what was paid, not what the statement is.
+ */
+const CARD_LABEL =
+  /\bcard\s*(?:no\b\.?|number\b|num\b|#)|\bcredit\s+card\b|\bcard\s*(?:holder|member|statement|account|limit)\b|\bcardholder\b|\bcardmember\b|\bprepaid\b|رقم\s+البطاقة|البطاقة\s+الائتمانية|بطاقة\s+(?:ال)?ائتمان|بطاقة\s+ائتمانية|بطاقة\s+مسبقة/iu;
+
+/** A loan or finance account: what it states is owed, not held. */
+const LOAN_WORDING =
+  /\b(?:loan|mortgage|murabaha|ijara|ijarah|tawarruq|financing)\b|\b(?:auto|car|home|personal|vehicle)\s+finance\b|\bfinance\s+(?:account|agreement|contract)\b|قرض|تمويل/iu;
+
+/**
+ * What the statement says it is, for the reconciliation's arithmetic.
  *
- * `card` is the parser's own decision (cardEvidence: two header markers, or a
- * number the statement labels `Credit Card Number`), the one its rows were
- * read under, so the check runs the same arithmetic. It is set aside, and the
- * verdict is `unknown`, only where the statement's own wording says the other
- * thing too: two card markers are printed by account statements as well
- * (`Statement Date` beside a `Debit Card Number`, `Statement Period` beside an
- * overdraft's `Credit Limit`), and an account statement can carry a single
- * card marker (`Credit Limit`) that a one-marker card statement carries too.
+ * A card's balance is what is OWED and an account's what is HELD, and checking
+ * a right read with the wrong one misses by twice the traffic and refuses it.
+ * The check only ever refuses, so each arithmetic needs positive evidence of
+ * its own and anything less is `unknown`:
+ *
+ * - card arithmetic: a credit-only label in the header (`creditOnly`) or a
+ *   header number labelled credit card, and no deposit-account or loan wording
+ *   beside it. Two markers are not enough: a prepaid or travel card prints a
+ *   `Card Number` and a `Statement Period` and holds its balance.
+ * - account arithmetic: account-side evidence (an account number, IBAN, debit
+ *   card, overdraft, a deposit account's title), the rows read as an
+ *   account's, and no card anywhere in the file: no card marker in the header
+ *   and no card label on any line that is not a row. A card whose markers are
+ *   Arabic only, whose header text is printed after its table, or that
+ *   carries one English marker is read as an account, and its own `Card
+ *   Number` is what keeps it from being checked as one.
  */
 interface StatementKindEvidence {
   /** The rows were read as a card's (cardEvidence). */
   card: boolean;
-  /**
-   * That card decision stands on the statement's header: two card markers,
-   * or a `Credit Card Number` above its first row. A credit card number named
-   * only inside a row (`PAYMENT TO CREDIT CARD NUMBER 4111…` on a current
-   * account) says what was paid, not what the statement is.
-   */
-  cardInHeader: boolean;
-  /** Wording only a credit card's statement prints: a minimum payment due, "credit card statement". */
+  /** A number labelled credit card in the document header, above its first row. */
+  creditInHeader: boolean;
+  /** A credit-only label in the header, English or Arabic (creditOnlyLabel). */
   creditOnly: boolean;
   /** Any single card marker in the header (CARD_STATEMENT_MARKER). */
   cardMarker: boolean;
-  /**
-   * The header names an account: an account-labelled number or IBAN, a debit
-   * or mada card, an overdraft.
-   */
+  /** The header names an account: an account-labelled number, or deposit wording. */
   accountSide: boolean;
+  /** The header prints deposit-account wording (DEPOSIT_ACCOUNT_WORDING). */
+  depositAccount: boolean;
   /** The statement says a minus balance is a credit balance. */
   minusBalanceCredit: boolean;
 }
 
-/** Card or account arithmetic, or null when the statement says both. */
-function reconciliationOwed(kind: StatementKindEvidence): boolean | null {
-  // US issuers label a card's own number "Account Number", so an account
-  // label weighs against a card only where nothing credit-only stands with it.
-  if (kind.card) return !kind.cardInHeader || (kind.accountSide && !kind.creditOnly) ? null : true;
-  return kind.cardMarker ? null : false;
+/** Card or account arithmetic, or null when the statement does not say which for certain. */
+function reconciliationOwed(
+  kind: StatementKindEvidence,
+  outsideRows: readonly string[],
+): boolean | null {
+  const loan = outsideRows.some((line) => LOAN_WORDING.test(line));
+  if (kind.creditOnly || kind.creditInHeader) return kind.depositAccount || loan ? null : true;
+  if (kind.accountSide && !kind.card && !kind.cardMarker && !loan &&
+      !outsideRows.some((line) => CARD_LABEL.test(line))) return false;
+  return null;
 }
 
 function reconcileStatement(
@@ -3792,19 +3954,26 @@ function reconcileStatement(
   kind: StatementKindEvidence,
   currency: StatementCurrency,
   rejectedRows: number,
+  rowLines: readonly number[],
 ): StatementReconciliation {
-  if (rejectedRows > 0) return { verdict: 'unknown' };
+  if (rejectedRows > 0 || rowLines.length === 0) return { verdict: 'unknown' };
   // `rejectedRows === 0` is not the same as a complete read. A row the PDF
   // wrapped over more continuations than the coalescer spans stays a date-led
   // line carrying no money - never accepted, never counted, invisible. A parse
   // missing those cannot close, and reporting it `contradicted` would accuse a
   // correct reading of being wrong, which is what this is documented never to do.
   if (unaccountedDateLedLines(lines, currency) > 0) return { verdict: 'unknown' };
-  const owed = reconciliationOwed(kind);
+  const rowSpan: StatementRowSpan = {
+    first: rowLines.reduce((low, line) => Math.min(low, line)),
+    last: rowLines.reduce((high, line) => Math.max(high, line)),
+    lines: new Set(rowLines),
+  };
+  const outsideRows = lines.filter((line, index) => line && !rowSpan.lines.has(index) && !ROW_DATE_PREFIX.test(line));
+  const owed = reconciliationOwed(kind, outsideRows);
   if (owed === null) return { verdict: 'unknown' };
   const minusIsCredit = owed && kind.minusBalanceCredit;
-  const openingMinor = statedBalance(lines, OPENING_BALANCE_LABEL, CLOSING_BALANCE_LABEL, currency, owed, minusIsCredit);
-  const closingMinor = statedBalance(lines, CLOSING_BALANCE_LABEL, OPENING_BALANCE_LABEL, currency, owed, minusIsCredit);
+  const openingMinor = statedBalance(lines, OPENING_BALANCE_LABEL, CLOSING_BALANCE_LABEL, currency, owed, minusIsCredit, rowSpan, false);
+  const closingMinor = statedBalance(lines, CLOSING_BALANCE_LABEL, OPENING_BALANCE_LABEL, currency, owed, minusIsCredit, rowSpan, true);
   if (openingMinor === null || closingMinor === null) return { verdict: 'unknown' };
   let debits = 0;
   let credits = 0;
@@ -4236,7 +4405,7 @@ export function parseStatementLines(
   };
   // Yearless row dates take their year from the statement period, or stay
   // yearless and are counted below. Rewrites only the lines it fills.
-  const yearlessFill = fillYearlessRowDates(text, dateHint);
+  const yearlessFill = fillYearlessRowDates(text, dateHint, currency);
   text = yearlessFill.text;
   const rows: StatementParsedRow[] = [];
   // The running balance each accepted row stated, when one was read (same
@@ -4278,6 +4447,7 @@ export function parseStatementLines(
   // card's last four.
   const cardLines = new Set<number>();
   const otherAccountLines: number[] = [];
+  const otherAccountLast4 = new Map<number, string>();
   accountLines.forEach((line, index) => {
     if (!/^\s*(?:credit\s+card|card|account|a\/c)\s+(?:number|no\.?|ending)\b/i.test(line) &&
         !/^\s*(?:account|acct|a\/c|iban|card)\s*[:#-]?\s*[*xX•·\d]/i.test(line) &&
@@ -4295,6 +4465,7 @@ export function parseStatementLines(
     sectionInstruments.add(`${instrument.kind === 'account' ? 'account' : 'card'}:${instrument.last4}`);
     if (singleCardAccount && instrument.kind === 'account' && instrument.last4 !== singleCardAccount.last4) {
       otherAccountLines.push(index);
+      otherAccountLast4.set(index, instrument.last4);
     }
   });
   if (sectionInstruments.size > 1) throw new Error('multiple_statement_accounts');
@@ -4309,6 +4480,12 @@ export function parseStatementLines(
   // top-level card number. One that heads no rows (printed after the last of
   // them) names nothing that could be misfiled. The bank's own pay-to account
   // on an information page is not here at all (accountText).
+  //
+  // Never the number the statement's own header prints above its first row:
+  // that is the card account itself, so wherever it is printed again (a later
+  // page's header without the card number, a page footer `Account Number …
+  // Page 1 of 2`) the rows after it are still the card account's. Refusing
+  // there could only refuse a statement `main` reads right.
   if (otherAccountLines.length > 0) {
     // A line the row reader would take for a transaction: led by a date, with
     // money or a description under it. A statement-period line is neither.
@@ -4331,7 +4508,12 @@ export function parseStatementLines(
       }
       return true;
     };
-    if (otherAccountLines.some(headsRows)) throw new Error('multiple_statement_accounts');
+    const headerAccounts = new Set(otherAccountLines
+      .filter((index) => firstRow < 0 || index < firstRow)
+      .map((index) => otherAccountLast4.get(index)));
+    if (otherAccountLines.some((index) => !headerAccounts.has(otherAccountLast4.get(index)) && headsRows(index))) {
+      throw new Error('multiple_statement_accounts');
+    }
   }
   // Every row of a single card account goes to the statement's own card, never
   // to whichever cardholder section happens to come first.
@@ -4351,20 +4533,28 @@ export function parseStatementLines(
   // card statement.
   const cardEvidence = cardStatement || statedInstrument?.kind === 'credit';
   const creditMarker = CARD_STATEMENT_MARKER.test(rawLines.slice(0, 60).join('\n'));
-  // Except for the two markers no current account prints: a minimum payment
-  // due, or the words "credit card statement". US issuers label the card's own
-  // number "Account Number", and under the account convention a card's
-  // `Payment Thank You -500.00` was filed as 500.00 spent.
-  const cardOnlyMarker = /\bcredit\s+card\s+statement\b|\bminimum\s+(?:amount|payment)\s+due\b/i
-    .test(rawLines.slice(0, 60).join('\n'));
+  // Except for the two markers no current account prints as a label of its
+  // own: a minimum payment due stated with its figure, or a title line that is
+  // nothing but "Credit Card Statement" (see creditOnlyLabel). US issuers label
+  // the card's own number "Account Number", and under the account convention
+  // a card's `Payment Thank You -500.00` was filed as 500.00 spent. The same
+  // words in a sentence (`Tip: view your credit card statement in the app`) or
+  // on a linked card's line in an account's relationship summary are not this
+  // statement's label, and refused every signed row of an account `main`
+  // reads right.
+  const headerLines = rawLines.slice(0, 60);
+  const cardOnlyMarker = headerLines.some((line, index) => creditOnlyLabel(line, headerLines[index + 1], false));
+  // The same, in English or Arabic, for the reconciliation's card arithmetic.
+  const creditOnly = headerLines.some((line, index) => creditOnlyLabel(line, headerLines[index + 1], true));
   // What an ACCOUNT statement that happens to print two card markers says
   // about itself in its header: an account number or IBAN, a debit or mada
-  // card, an overdraft. Only weighs against a card reading, and only in the
-  // reconciliation below.
-  const accountSide = statedInstrument?.kind === 'account' || statedInstrument?.kind === 'debit' ||
-    accountLines.slice(0, 60).some((line) =>
-      /\b(?:debit|mada)\s+card\b|\boverdraft\b|\biban\b|بطاقة\s+(?:ال)?(?:خصم|صراف|مدى)/iu.test(line) ||
-      statementInstrument(line, { iban: false })?.kind === 'account');
+  // card, an overdraft, a deposit account's title. Only weighs against a card
+  // reading, and only in the reconciliation below.
+  const depositAccount = accountLines.slice(0, 60).some((line) => DEPOSIT_ACCOUNT_WORDING.test(line));
+  // An account-labelled number is account-side too, but it is not deposit
+  // wording: US issuers print a card's own number that way.
+  const accountSide = depositAccount || statedInstrument?.kind === 'account' || statedInstrument?.kind === 'debit' ||
+    accountLines.slice(0, 60).some((line) => statementInstrument(line, { iban: false })?.kind === 'account');
   const signEvidence = cardEvidence || (statedInstrument?.kind !== 'account' && creditMarker) || cardOnlyMarker;
   // A proven card statement that also carries a credit-only marker (a credit
   // limit, a minimum due, "credit card statement") is a CREDIT card's, even
@@ -4833,13 +5023,13 @@ export function parseStatementLines(
     yearlessDateRows,
     reconciliation: reconcileStatement(rows, lines, {
       card: cardEvidence,
-      cardInHeader: cardStatement ||
-        statementInstrument(documentHeader(accountText), { iban: false })?.kind === 'credit',
-      creditOnly: cardOnlyMarker,
+      creditInHeader: statementInstrument(documentHeader(accountText), { iban: false })?.kind === 'credit',
+      creditOnly,
       cardMarker: creditMarker,
       accountSide,
+      depositAccount,
       minusBalanceCredit: MINUS_BALANCE_CREDIT_LEGEND.some((legend) => legend.test(text.replace(/\s+/g, ' '))),
-    }, currency, rejectedRows),
+    }, currency, rejectedRows, rowLines),
   };
 }
 
