@@ -356,6 +356,16 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
           '@/lib/wafra-assistant': require('../build/wafra-assistant.js'),
         });
       }
+      if (name === '@/lib/shared-alert-format-share' || name === '@/lib/shared-alert-formats' ||
+          name === '@/lib/shared-alert-format-sync' || name === '@/lib/shared-alert-format-active') {
+        // Pure shared-format modules; harness consent is never hydrated, so
+        // nothing builds or submits unless a test opts in explicitly.
+        return require('../build/' + name.slice('@/lib/'.length) + '.js');
+      }
+      if (name === '@/lib/shared-alert-format-submit') {
+        // The network edge. Harnesses record nothing and send nothing.
+        return { submitShapeAnonymously: async () => false, eraseSharingCredential: async () => {} };
+      }
       if (name === '@/lib/ai-alert-reader') {
         // Node has no eligible phone model; explicit harness overrides win.
         return { aiReviewEventForRefusedAlert: async () => null,
