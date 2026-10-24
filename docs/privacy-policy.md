@@ -291,8 +291,9 @@ store biometric templates.
   active, no rate request is made.
 
 - **Shared bank-format shapes (on by default, can be turned off):** when you
-  teach Wafra a bank alert layout, the switch "Help other Wafra users with this
-  bank" is shown on the teaching screen, on unless you turn it off there or in
+  teach Wafra a bank alert layout, or confirm a Review item for an alert Wafra
+  did not recognise (only if you confirm Wafra's reading unchanged), the switch "Help other Wafra users with this
+  bank" is shown on the teaching screen and on the Review confirmation, on unless you turn it off there or in
   Settings, and lets Wafra send the layout's *shape* to Wafra's relay. The shape is the bank's
   sender code, whether money left or entered the account, the currency code and
   an ordered list of generic words and empty placeholders (amount, merchant,

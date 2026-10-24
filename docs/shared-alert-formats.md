@@ -11,11 +11,23 @@ turned off at any time.
 - The switch is shown, already on, at the moment of teaching a format on the
   teach screen, and can be turned off there or in Settings.
 - Private Mode never sends, whatever the switch says.
-- Scope today: taught formats. Sharing from Review confirmations of unrecognised
-  alerts needs the alert text at confirmation time, which the Review tray
-  deliberately never stores, so it is not wired yet. `shareConfirmedAlertFormat`
-  (src/lib/shared-alert-format-share.ts) is the tested hook for when the text is
-  available at that moment; the confirmation notice ships with it.
+- Scope: taught formats, and Review confirmations of alerts no proven parser
+  recognised (not UAE/Saudi launch alerts, never in Private Mode).
+- For Review items, the value-free shape is built when the item is created,
+  while the alert text is still in memory (`buildCandidateShareShape`, called
+  where an unrecognised alert becomes a generic Review item). Only
+  `shareShape`, `shareHash` and `shareBasis` are stored on the item; the text is
+  never stored. `shareBasis` (amount, currency, direction) stays on the phone,
+  is never uploaded, and is re-validated on load (invalid candidates are dropped).
+  Nothing is built when sharing is off or Private Mode is on at creation.
+- At confirmation the shape is submitted only if the person confirmed the
+  reading unchanged (same amount, currency and direction as `shareBasis`),
+  sharing is still on, and a relay pairing exists (`shouldSubmitConfirmedShape`).
+  A corrected reading is never shared. Submission is fire-and-forget and silent.
+- The Review confirm screen shows one line with a "Turn off" control while
+  sharing is on for that item.
+- Not covered yet: pasted text without a sender, and Review items created by the
+  private-format or on-device AI prefill paths, build no candidate.
 
 ## What is sent
 

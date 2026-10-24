@@ -413,6 +413,11 @@ const S = {
   genericOpenWallet: { en: 'Open wallet', ar: 'افتح المحفظة' },
   genericOpenBills: { en: 'Open bills', ar: 'افتح الفواتير' },
   genericConfirmAdd: { en: 'Confirm and add', ar: 'أكد وأضف' },
+  shareFormatNotice: {
+    en: 'Shares this bank\'s wording — no amounts, card numbers, dates or names — to help other Wafra users.',
+    ar: 'تُشارك صياغة هذا البنك — دون مبالغ أو أرقام بطاقات أو تواريخ أو أسماء — لمساعدة مستخدمي وفرة الآخرين.',
+  },
+  shareFormatTurnOff: { en: 'Turn off', ar: 'إيقاف' },
   genericCompleteFields: { en: 'Complete the missing detail before adding.', ar: 'أكمل المعلومة الناقصة قبل الإضافة.' },
   genericCurrencyMismatch: { en: 'Choose an amount in your ledger’s currency.', ar: 'اختر مبلغاً بعملة سجلك.' },
   foreignReviewConversionNote: {

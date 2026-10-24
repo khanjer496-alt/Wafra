@@ -158,6 +158,7 @@ import {
   invalidatePrivateAlertFormats,
 } from '@/lib/private-alert-format-runtime';
 import { activateSharedAlertFormats } from '@/lib/shared-alert-format-active';
+import { setAlertFormatSharingActive, sharesAlertFormats } from '@/lib/shared-alert-format-share';
 import {
   emptySharedAlertFormatState,
   normalizeSharedAlertFormatState,
@@ -2723,6 +2724,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     activateSharedAlertFormats(state.hydrated ? downloadedShapes : undefined);
   }, [state.hydrated, downloadedShapes]);
+
+  // Capture code reads the effective consent (never before hydration, never in Private Mode).
+  useEffect(() => {
+    setAlertFormatSharingActive(state.hydrated && sharesAlertFormats(state));
+  }, [state.hydrated, state.shareAlertFormats, state.privateMode]);
 
   useEffect(() => {
     void hydrate();

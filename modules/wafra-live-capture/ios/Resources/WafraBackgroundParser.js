@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 4f2852c1d94c5ec01136d14159d4f54a1c40f914a79097266d582529afd5c5b7
+// Generated from normal shipping TypeScript. Source SHA-256: 6feb54579eefb269bbb60a06210f0ff3592f701df54ab22150cfb92a14d6e53f
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -5277,6 +5277,11 @@ const S = {
     genericOpenWallet: { en: 'Open wallet', ar: 'افتح المحفظة' },
     genericOpenBills: { en: 'Open bills', ar: 'افتح الفواتير' },
     genericConfirmAdd: { en: 'Confirm and add', ar: 'أكد وأضف' },
+    shareFormatNotice: {
+        en: 'Shares this bank\'s wording — no amounts, card numbers, dates or names — to help other Wafra users.',
+        ar: 'تُشارك صياغة هذا البنك — دون مبالغ أو أرقام بطاقات أو تواريخ أو أسماء — لمساعدة مستخدمي وفرة الآخرين.',
+    },
+    shareFormatTurnOff: { en: 'Turn off', ar: 'إيقاف' },
     genericCompleteFields: { en: 'Complete the missing detail before adding.', ar: 'أكمل المعلومة الناقصة قبل الإضافة.' },
     genericCurrencyMismatch: { en: 'Choose an amount in your ledger’s currency.', ar: 'اختر مبلغاً بعملة سجلك.' },
     foreignReviewConversionNote: {

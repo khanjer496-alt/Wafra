@@ -8,6 +8,7 @@ import * as SecureStore from 'expo-secure-store';
 import NotificationReader from '../../modules/notification-reader';
 import SmsReader, { type InboxSms } from '../../modules/sms-reader';
 import type { UniversalAlertReview } from '@/lib/alert-market-detection';
+import { buildCandidateShareShape } from '@/lib/shared-alert-format-share';
 import {
   prepareLaunchReviewAlert,
   prepareReviewAlert,
@@ -1014,12 +1015,16 @@ export function inspectSourceFreeRefusedAlert(input: {
     // A Gulf-neighbour route reads its own currency spellings for the amount.
     const event = inspectGenericBankEventForReview(input.source, input.sender,
       inspection?.route.decision === 'single' ? inspection.route.market : null);
+    // The only place the text and the generic reading meet: keep a value-free
+    // shape (never the text) so confirming the reading unchanged can share it.
+    const share = event ? buildCandidateShareShape(input.source, input.sender, event) : null;
     const universal = event ? prepareUniversalReviewAlert({
       id: 'capture_probe_id_0001',
       sourceKey: 'capture_probe_key_001',
       observedAt: input.observedAt,
       channel: input.channel,
       event,
+      ...(share ?? {}),
     }) : null;
     if (!universal) return { kind: 'ignored', reason: 'unrecognized' };
     const { id: _id, sourceKey: _sourceKey, ...candidate } = universal;
