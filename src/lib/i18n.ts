@@ -59,8 +59,8 @@ const S = {
     ar: 'ساعد مستخدمي وفرة الآخرين مع هذا البنك',
   },
   shareFormatsSettingBody: {
-    en: 'When you teach a bank format, only the bank\'s wording is shared, with amounts, card numbers, dates and words that look like names removed — never the message itself. A format is used only after 3 different people teach the identical one.',
-    ar: 'عند تعليم وفرة صيغة بنك، تُشارك صياغة البنك فقط، بعد حذف المبالغ وأرقام البطاقات والتواريخ والكلمات التي تشبه الأسماء — ولا تُشارك الرسالة نفسها أبداً. لا تُستخدم الصيغة إلا بعد أن يعلّم ثلاثة أشخاص مختلفين الصيغة نفسها تماماً.',
+    en: 'When you teach a bank format, or confirm a Review item for an alert Wafra did not recognise, only the bank\'s wording is shared, never the message itself: amounts, card numbers and dates are removed and names are screened out. A format is used only after 3 different people send identical wording, and unpublished wording is deleted from the relay within 30 days.',
+    ar: 'عند تعليم صيغة بنك أو تأكيد عنصر مراجعة لتنبيه لم تتعرف عليه وفرة، تُشارك صياغة البنك فقط ولا تُشارك الرسالة نفسها أبداً: تُحذف المبالغ وأرقام البطاقات والتواريخ ويتم استبعاد الأسماء. لا تُستخدم الصيغة إلا بعد أن يرسل ثلاثة أشخاص مختلفين الصياغة نفسها تماماً، وتُحذف الصياغة غير المنشورة من الخادم خلال 30 يوماً.',
   },
   shareFormatsSaveFailed: {
     en: 'The sharing choice could not be saved. Try again.',
@@ -414,10 +414,11 @@ const S = {
   genericOpenBills: { en: 'Open bills', ar: 'افتح الفواتير' },
   genericConfirmAdd: { en: 'Confirm and add', ar: 'أكد وأضف' },
   shareFormatNotice: {
-    en: 'Shares this bank\'s wording — no amounts, card numbers, dates or names — to help other Wafra users.',
-    ar: 'تُشارك صياغة هذا البنك — دون مبالغ أو أرقام بطاقات أو تواريخ أو أسماء — لمساعدة مستخدمي وفرة الآخرين.',
+    en: 'If you confirm this reading unchanged, Wafra shares this bank\'s wording — names screened out — to help other users.',
+    ar: 'إذا أكدت هذه القراءة دون تغيير، تُشارك وفرة صياغة هذا البنك — مع استبعاد الأسماء — لمساعدة المستخدمين الآخرين.',
   },
-  shareFormatTurnOff: { en: 'Turn off', ar: 'إيقاف' },
+  shareFormatTurnOff: { en: 'Turn off sharing bank wording', ar: 'إيقاف مشاركة صياغة البنك' },
+  shareFormatTurnedOff: { en: 'Sharing turned off', ar: 'تم إيقاف المشاركة' },
   genericCompleteFields: { en: 'Complete the missing detail before adding.', ar: 'أكمل المعلومة الناقصة قبل الإضافة.' },
   genericCurrencyMismatch: { en: 'Choose an amount in your ledger’s currency.', ar: 'اختر مبلغاً بعملة سجلك.' },
   foreignReviewConversionNote: {

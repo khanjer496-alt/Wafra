@@ -245,6 +245,17 @@ export interface AlertReviewTrayState {
   templateRules: ReviewTemplateRule[];
 }
 
+/** Consent turned off: no item keeps a sharing candidate. Returns the same tray when nothing changes. */
+export const stripReviewShareCandidates = (tray: AlertReviewTrayState): AlertReviewTrayState => {
+  if (!tray.pending.some((item) => isUniversalReviewAlert(item) &&
+    (item.shareShape || item.shareHash || item.shareBasis))) return tray;
+  return { ...tray, pending: tray.pending.map((item) => {
+    if (!isUniversalReviewAlert(item)) return item;
+    const { shareShape: _shape, shareHash: _hash, shareBasis: _basis, ...rest } = item;
+    return rest;
+  }) };
+};
+
 export interface ReviewAdmissionInput {
   id: string;
   sourceKey: string;

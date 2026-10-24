@@ -121,3 +121,27 @@ test('creation hook: a refused generic alert carries a value-free candidate, nev
     } else assert.fail('expected a candidate shape: ' + JSON.stringify(on.candidate.event?.issues));
   } finally { BuiltShare.setAlertFormatSharingActive(false); }
 });
+
+test('candidate: no grounded merchant slot refuses (names would become literals), even in Arabic', () => {
+  const opts = { active: true, country: 'SA' };
+  const ar = 'بنك الأفق: تم شراء بقيمة 45.00 SAR لدى مطعم الأمل بتاريخ 03-09-2026';
+  const noMerchant = { ...ev(), merchant: { value: null, evidence: 'missing', spans: [], alternatives: [], issues: [] },
+    amount: { ...ev().amount, value: { currency: 'SAR', minorUnits: '4500', exponent: 2 } } };
+  assert.equal(Share.buildCandidateShareShape(ar, 'ALUFQ', noMerchant, opts), null, 'Arabic merchant as literals');
+  const lower = 'taupe bank: rs 450.00 debited at swiggy bangalore on 03-09-2026';
+  assert.equal(Share.buildCandidateShareShape(lower, 'TAUPEB', { ...ev(), merchant: { ...ev().merchant, value: null, evidence: 'missing' } },
+    { active: true, country: 'IN' }), null, 'lowercase merchant as literals');
+});
+
+test('candidate: unlisted non-Latin words refuse; listed Arabic banking boilerplate with a grounded merchant is fine', () => {
+  const opts = { active: true, country: 'IN' };
+  const body = 'Taupe Bank: Rs 450.00 debited at SWIGGY BANGALORE مطعم الأمل';
+  const e = { ...ev(), merchant: { ...ev().merchant, value: 'SWIGGY BANGALORE' }, transactionDate: { ...ev().transactionDate, value: null, evidence: 'missing' } };
+  assert.equal(Share.buildCandidateShareShape(body, 'TAUPEB', e, opts), null, 'unlisted Arabic words');
+  const ok = Share.buildCandidateShareShape('Taupe Bank: Rs 450.00 debited at SWIGGY BANGALORE تم خصم من رصيد', 'TAUPEB', e, opts);
+  assert.ok(ok, 'listed boilerplate only');
+});
+
+test('candidate: a normal grounded-merchant English alert still yields a candidate', () => {
+  assert.ok(Share.buildCandidateShareShape(TAUPE, 'TAUPEB', ev(), { active: true, country: 'IN' }));
+});

@@ -18,6 +18,28 @@ let sharingActive = false;
 export const setAlertFormatSharingActive = (active: boolean): void => { sharingActive = active === true; };
 export const isAlertFormatSharingActive = (): boolean => sharingActive;
 
+/**
+ * Non-Latin boilerplate that may stay as a literal. The name heuristic only
+ * understands Latin capitalisation, so any other-script word outside this short
+ * list refuses the shape (the relay's 3-person threshold is the second guard).
+ */
+const NON_LATIN_BOILERPLATE = new Set([
+  'تم', 'شراء', 'خصم', 'إيداع', 'ايداع', 'تحويل', 'مبلغ', 'رصيد', 'بطاقة', 'بطاقتك', 'حساب', 'حسابك',
+  'من', 'إلى', 'الى', 'في', 'بقيمة', 'لدى', 'عملية', 'الحالي', 'المتاح', 'على', 'عبر', 'بتاريخ',
+]);
+const NON_LATIN_LETTERS = /[\p{L}\p{M}]+/gu;
+const hasUnlistedNonLatinWord = (literal: string): boolean => {
+  for (const word of literal.match(NON_LATIN_LETTERS) ?? []) {
+    if (/^\p{Script=Latin}+$/u.test(word.replace(/\p{M}/gu, ''))) continue;
+    const plain = word.replace(/[\u064B-\u065F\u0670\u0640]/g, '');
+    if (!NON_LATIN_BOILERPLATE.has(plain) && !NON_LATIN_BOILERPLATE.has(word)) return true;
+  }
+  return false;
+};
+
+/** Every family but these names a counterparty, so it needs a grounded merchant slot. */
+const EXEMPT_FROM_MERCHANT_SLOT = new Set<string>(['cash-withdrawal', 'fee']);
+
 export interface CandidateShareContext {
   country?: string | null;
   /** Override for tests; defaults to the mirrored store consent. */
@@ -57,6 +79,10 @@ export function buildCandidateShareShape(
     if (learned.ok === false) return null;
     const made = toSharedAlertShape(learned.template);
     if (made.ok === false) return null;
+    // Counterparty words would otherwise survive as literals (the name check misses
+    // lowercase and non-Latin names): require an exactly-grounded merchant slot.
+    if (!EXEMPT_FROM_MERCHANT_SLOT.has(event.family) && !made.shape.tokens.some((token) => token.k === 'MER')) return null;
+    if (made.shape.tokens.some((token) => token.k === 'L' && hasUnlistedNonLatinWord(token.v))) return null;
     return { shareShape: made.shape, shareHash: made.hash,
       shareBasis: { amountMinor, currency: amount.currency, direction: event.direction } };
   } catch {

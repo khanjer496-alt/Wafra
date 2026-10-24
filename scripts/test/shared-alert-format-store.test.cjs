@@ -125,3 +125,16 @@ test('on-device matching: a published shape yields a trusted prefill (never a po
   runtime.setSharedMatcher(Active.sharedMatcherFor([bad]));
   assert.equal(await session.read(second, 'TAUPEB', NOW, { country: 'IN' }), null);
 });
+
+test('turning consent off or Private Mode on strips sharing candidates from Review items', () => {
+  const item = { kind: 'universal', id: 'i', sourceKey: 's', shareShape: format.shape, shareHash: format.hash,
+    shareBasis: { amountMinor: 1, currency: 'INR', direction: 'debit' }, event: {} };
+  const start = hydrate({});
+  const base = { ...start, reviewTray: { ...start.reviewTray, pending: [item] } };
+  for (const action of [{ type: 'setShareAlertFormats', enabled: false }, { type: 'setPrivateMode', enabled: true }]) {
+    const kept = reducer(base, action).reviewTray.pending[0];
+    assert.equal(kept.shareShape, undefined); assert.equal(kept.shareHash, undefined); assert.equal(kept.shareBasis, undefined);
+    assert.equal(kept.id, 'i');
+  }
+  assert.equal(reducer(base, { type: 'setShareAlertFormats', enabled: true }).reviewTray.pending[0].shareShape, format.shape);
+});

@@ -15,9 +15,8 @@ import {
 import type { PrivateAlertFormat } from '@/lib/private-alert-formats';
 import { learnFromConfirmation, type LearnedFields, type LearnInput } from '@/lib/learned-alert-formats';
 import { SettingsSwitchRow } from '@/components/settings-rows';
-import { getRelayConfig } from '@/lib/relay';
 import { sharesAlertFormats } from '@/lib/shared-alert-format-share';
-import { submitSharedAlertShape } from '@/lib/shared-alert-format-sync';
+import { submitShapeAnonymously } from '@/lib/shared-alert-format-submit';
 import { toSharedAlertShape, type SharedAlertShape } from '@/lib/shared-alert-formats';
 import {
   buildPrivateTeachingInput, privateAlertSourceDateContext, privateTeachingChoices, teachingMoneyLabel,
@@ -157,14 +156,7 @@ export default function TeachBankFormatScreen() {
       await addPrivateAlertFormat(verified.template);
       // On unless the person turned it off; never in Private Mode, and never allowed to affect teaching.
       const shape = sharesAlertFormats({ shareAlertFormats: state.shareAlertFormats, privateMode }) ? pendingShape.current : null;
-      if (shape) {
-        void (async () => {
-          try {
-            const cfg = await getRelayConfig();
-            if (cfg) await submitSharedAlertShape(cfg, shape);
-          } catch { /* silent by design */ }
-        })();
-      }
+      if (shape) void submitShapeAnonymously(shape, { shareAlertFormats: state.shareAlertFormats, privateMode });
       if (!mounted.current || run !== operation.current) return;
       clear(); setSaved(true);
     } catch { if (mounted.current && run === operation.current) setError(words.theFormatWasNotSavedYour); }

@@ -126,6 +126,7 @@ import {
   admitPreparedReviewAlerts,
   emptyAlertReviewTray,
   normalizeAlertReviewTray,
+  stripReviewShareCandidates,
   resolveReviewAlert as resolveAlertReviewItem,
   type ReviewEntry,
   isUniversalReviewAlert,
@@ -159,6 +160,7 @@ import {
 } from '@/lib/private-alert-format-runtime';
 import { activateSharedAlertFormats } from '@/lib/shared-alert-format-active';
 import { setAlertFormatSharingActive, sharesAlertFormats } from '@/lib/shared-alert-format-share';
+import { eraseSharingCredential } from '@/lib/shared-alert-format-submit';
 import {
   emptySharedAlertFormatState,
   normalizeSharedAlertFormatState,
@@ -485,6 +487,9 @@ export function migratePersistedState(
   parsed.sharedAlertFormats = normalizeSharedAlertFormatState(parsed.sharedAlertFormats);
   parsed.ledgerMoney = migrateLegacyLedgerMoney(parsed);
   parsed.reviewTray = normalizeAlertReviewTray(parsed.reviewTray, Date.now());
+  if (parsed.shareAlertFormats === false || parsed.privateMode === true) {
+    parsed.reviewTray = stripReviewShareCandidates(parsed.reviewTray);
+  }
   parsed.localCaptureQualifications = normalizeLocalCaptureQualifications(
     parsed.localCaptureQualifications,
     Date.now(),
@@ -1781,7 +1786,8 @@ function reduceState(state: AppState, action: Action): AppState {
       return { ...state, bestEffortAutoPost: action.enabled };
     case 'setShareAlertFormats':
       // undefined restores "never chose" (default on); only booleans are choices.
-      return { ...state, shareAlertFormats: typeof action.enabled === 'boolean' ? action.enabled : undefined };
+      return { ...state, shareAlertFormats: typeof action.enabled === 'boolean' ? action.enabled : undefined,
+        ...(action.enabled === false ? { reviewTray: stripReviewShareCandidates(state.reviewTray) } : {}) };
     case 'setSharedAlertFormats':
       return { ...state, sharedAlertFormats: normalizeSharedAlertFormatState(
         { etag: action.etag, fetchedAt: action.fetchedAt, formats: action.formats }) };
@@ -2039,6 +2045,7 @@ function reduceState(state: AppState, action: Action): AppState {
       return {
         ...state,
         privateMode: action.enabled,
+        ...(action.enabled ? { reviewTray: stripReviewShareCandidates(state.reviewTray) } : {}),
         // The change is immediate and retroactive: no low-confidence message
         // body survives after the switch says local-only.
         transactions: action.enabled
@@ -3711,6 +3718,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const clearAll = useCallback(async (captureCleanup?: () => Promise<void>) => {
     const afterErase = async () => {
       await erasePrivateAlertFormatKey();
+      await eraseSharingCredential();
       await captureCleanup?.();
       await cleanupGeneratedExports({ eraseAll: true });
       // Widgets hold a copy of a few figures; erasing the ledger erases those too.

@@ -300,11 +300,17 @@ store biometric templates.
   date, card digits). It never contains amounts, card or account numbers, dates
   or the message text. Anything containing digits, an address or a link is
   refused on the phone before sending, and so is a layout with a word that
-  looks like a name, unless it is a common banking word. That check cannot
-  recognise every name, which is why publication also needs 3 vaults (below);
-  a shape that is not published within 30 days is deleted from the relay. Sending needs a paired relay (the
-  same device pairing used for iPhone automatic capture); without one nothing is
-  sent. The relay sees the request's network address and counts one vote per
+  looks like a name, unless it is a common banking word; a merchant that Wafra
+  cannot match exactly, and words in other scripts that are not common banking
+  words, also stop the layout from being sent. Names are screened out this way,
+  but the check cannot recognise every name, which is why a format is only used
+  after 3 different people send identical wording (below); wording that is not
+  published within 30 days is deleted from the relay. A phone with the iPhone
+  capture pairing sends through it. Any other phone, such as an Android phone,
+  creates a separate anonymous sharing pairing the first time it shares: it
+  holds no email, name or ledger data, is used only for this sharing, is
+  never created when sharing is off or in Private Mode, and is deleted by Erase
+  all. The relay sees the request's network address and counts one vote per
   paired vault. A shape is published only after 3 different vaults sent the
   identical shape, so a layout containing anything personal, which nobody else
   shares, is never published. Separately, every Wafra install downloads the

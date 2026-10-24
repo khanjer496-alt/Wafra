@@ -57,6 +57,7 @@ function loadStore({ storePath = 'src/lib/store.tsx', counted = {} } = {}) {
       I18nManager: { isRTL: false, allowRTL() {}, forceRTL() {} },
       Platform: { OS: 'android' },
     },
+    '@/lib/shared-alert-format-submit': { eraseSharingCredential: async () => {} },
     '@/lib/share-text': { cleanupGeneratedExports: async () => {} },
     '../../modules/wafra-widgets': { setWidgetSnapshot() {}, clearWidgetSnapshot() {} },
     '@/lib/theme-preference': { getThemePreference: () => 'system', setThemePreference() {} },

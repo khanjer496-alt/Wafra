@@ -60,7 +60,7 @@ const en = {
   "moneyIn": "Money in",
   "forgetThisFormat": "Forget this format",
   "shareWithOthersTitle": "Help other Wafra users with this bank",
-  "shareWithOthersBody": "Only the bank's wording is shared, with amounts, card numbers, dates and words that look like names removed — never the message itself. A format is used only after 3 different people teach the identical one."
+  "shareWithOthersBody": "Only the bank's wording is shared, never the message itself: amounts, card numbers and dates are removed and names are screened out. A format is used only after 3 different people send identical wording, and unpublished wording is deleted from the relay within 30 days."
 };
 
 const ar: Record<keyof typeof en, string> = {
@@ -125,7 +125,7 @@ const ar: Record<keyof typeof en, string> = {
   "moneyIn": "مال داخل",
   "forgetThisFormat": "احذف هذا النموذج",
   "shareWithOthersTitle": "ساعد مستخدمي وفرة الآخرين مع هذا البنك",
-  "shareWithOthersBody": "تُشارك صياغة البنك فقط، بعد حذف المبالغ وأرقام البطاقات والتواريخ والكلمات التي تشبه الأسماء — ولا تُشارك الرسالة نفسها أبداً. لا تُستخدم الصيغة إلا بعد أن يعلّم ثلاثة أشخاص مختلفين الصيغة نفسها تماماً."
+  "shareWithOthersBody": "تُشارك صياغة البنك فقط، ولا تُشارك الرسالة نفسها أبداً: تُحذف المبالغ وأرقام البطاقات والتواريخ ويتم استبعاد الأسماء. لا تُستخدم الصيغة إلا بعد أن يرسل ثلاثة أشخاص مختلفين الصياغة نفسها تماماً، وتُحذف الصياغة غير المنشورة من الخادم خلال 30 يوماً."
 };
 
 export const privateAlertFormatCopy = (language: string) => language === 'ar' ? ar : en;

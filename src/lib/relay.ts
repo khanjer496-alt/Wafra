@@ -139,7 +139,7 @@ type RandomValuesCrypto = {
  * before the first X25519 operation. This is deliberately not a Math.random
  * fallback and does not pretend Hermes implements SubtleCrypto.
  */
-function installNativeRandomValuesBridge(): void {
+export function installNativeRandomValuesBridge(): void {
   const runtime = globalThis as unknown as { crypto?: Partial<RandomValuesCrypto> };
   if (typeof runtime.crypto?.getRandomValues === 'function') return;
 

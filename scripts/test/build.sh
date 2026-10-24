@@ -269,5 +269,6 @@ npx tsc build/*.ts --module commonjs --target es2022 --lib es2022,dom --outDir b
 # instead of on a user's phone.
 rewrite ../../src/lib/relay-crypto.ts build/relay-crypto.cts
 rewrite ../../src/lib/relay.ts build/relay.cts
-npx tsc build/relay.cts build/relay-crypto.cts --module nodenext --moduleResolution nodenext \
+rewrite ../../src/lib/shared-alert-format-identity.ts build/shared-alert-format-identity.cts
+npx tsc build/relay.cts build/relay-crypto.cts build/shared-alert-format-identity.cts --module nodenext --moduleResolution nodenext \
   --target es2022 --lib es2022,dom --skipLibCheck

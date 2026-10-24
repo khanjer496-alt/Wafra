@@ -7,7 +7,10 @@ turned off at any time.
 ## Consent
 
 - `shareAlertFormats` is absent until the person chooses; absent means on. Only
-  an explicit `false` (their choice, or a restored backup's) is off.
+  an explicit `false` is off. Restoring a backup keeps THIS phone's own choice.
+- Installs that stored the old default (`false`) before this version stay Off:
+  that value is indistinguishable from a deliberate choice, so it is respected.
+  They can turn sharing on in Settings.
 - The switch is shown, already on, at the moment of teaching a format on the
   teach screen, and can be turned off there or in Settings.
 - Private Mode never sends, whatever the switch says.
@@ -22,10 +25,29 @@ turned off at any time.
   Nothing is built when sharing is off or Private Mode is on at creation.
 - At confirmation the shape is submitted only if the person confirmed the
   reading unchanged (same amount, currency and direction as `shareBasis`),
-  sharing is still on, and a relay pairing exists (`shouldSubmitConfirmedShape`).
+  sharing is still on (`shouldSubmitConfirmedShape`).
   A corrected reading is never shared. Submission is fire-and-forget and silent.
-- The Review confirm screen shows one line with a "Turn off" control while
-  sharing is on for that item.
+- The Review confirm screen shows one line ("If you confirm this reading
+  unchanged, Wafra shares this bank's wording — names screened out — to help
+  other users.") with a "Turn off sharing bank wording" control while sharing is
+  on for that item. Turning sharing off, or switching Private Mode on, also
+  strips the stored candidates from every pending Review item.
+- Names are screened out, not guaranteed absent: a merchant must be an exactly
+  grounded slot (otherwise no shape is built), words in other scripts are
+  refused unless on a short banking-boilerplate allowlist, and a format is only
+  used after 3 different people send identical wording. Unpublished wording is
+  deleted from the relay within 30 days.
+
+## Sending credential
+
+A phone with the iPhone capture pairing uses it. Any other phone (Android, or an
+iPhone without capture set up) pairs once, on its first submission, through the
+same `/v1/pair` contract with a fresh keypair, and keeps only `{baseUrl,
+deviceId, syncToken}` under its own secure-store key
+(`src/lib/shared-alert-format-identity.ts`). That credential is used for nothing
+else, never changes capture or sync state, never pairs when sharing is off or in
+Private Mode, backs off 24 hours after a failed pairing, and is deleted by
+Erase all.
 - Not covered yet: pasted text without a sender, and Review items created by the
   private-format or on-device AI prefill paths, build no candidate.
 
