@@ -2,6 +2,7 @@ import { isValidElement, useMemo, type ReactNode } from 'react';
 import { StyleSheet, Text, type StyleProp, type TextProps, type TextStyle } from 'react-native';
 
 import { Fonts, ThemeColor } from '@/constants/theme';
+import { useFontScale } from '@/hooks/use-font-scale';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { E2E_FONT_SCALE, scaleTextStyleForE2E } from '@/lib/e2e-font-scale';
@@ -42,6 +43,8 @@ export function ThemedText({
 }: ThemedTextProps) {
   const theme = useTheme();
   const language = useLanguage();
+  // Remounts the node once per Larger Text change; see use-font-scale.
+  const fontScale = useFontScale();
   const color = themeColor ?? (type === 'linkPrimary' ? 'primary' : 'text');
   // This is the hottest render path in the app (every text node, every list
   // row). The regex walk over children only needs to run again when the
@@ -73,6 +76,7 @@ export function ThemedText({
 
   return (
     <Text
+      key={fontScale}
       allowFontScaling
       style={E2E_FONT_SCALE === null
         ? composed

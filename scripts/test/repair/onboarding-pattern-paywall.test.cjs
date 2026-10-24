@@ -479,3 +479,11 @@ test('the paywall\'s backdrop and corner drawing arrive and leave with the step\
   assert.ok(byID(still.nodes, 'onboarding-paywall-backdrop').props.style.flat(Infinity).every((part) => part === null || typeof part === 'object'));
   assert.match(read('src/components/onboarding/e-paywall.tsx'), /const phase = useStepPhase\(\);/);
 });
+
+test('when the store returns no plans, the paywall offers the retry its copy asks for', () => {
+  // Seen on iPhone 15: "try loading prices again" was shown with no control to do it.
+  const source = read('src/components/onboarding/e-paywall.tsx');
+  assert.match(source, /testID="onboarding-plans-retry"/);
+  assert.match(source, /onPress=\{\(\) => void checkout\.load\(\)\}/);
+  assert.match(source, /\{t\('retryPrices'\)\}/);
+});
