@@ -6,6 +6,33 @@ import type { AlertFamily, MoneyDirection } from '@/lib/alert-market-pack-types'
 import type { DetectedMarket, UniversalAlertReview } from '@/lib/alert-market-detection';
 import type { InstitutionGrammarMetadata } from '@/lib/alert-institution-grammars';
 import type { UnparsedLaunchAlertReview } from '@/lib/unparsed-launch-alert';
+import { sharedAlertShapeHash, validateSharedAlertShape, type SharedAlertShape } from '@/lib/shared-alert-formats';
+
+/**
+ * Value-free candidate for anonymous format sharing, built while the alert text
+ * was in memory. `shareShape` holds no values and no text; `shareBasis` is the
+ * reading the shape was built from, stays on the phone, and is never uploaded.
+ */
+export interface ReviewShareCandidate {
+  shareShape: SharedAlertShape;
+  shareHash: string;
+  shareBasis: { amountMinor: number; currency: string; direction: 'debit' | 'credit' };
+}
+
+/** Re-validate a stored candidate; anything off drops it (never the Review item). */
+export const validateReviewShareCandidate = (value: unknown): ReviewShareCandidate | null => {
+  if (!value || typeof value !== 'object') return null;
+  const v = value as Partial<ReviewShareCandidate>;
+  const shape = validateSharedAlertShape(v.shareShape);
+  const basis = v.shareBasis as ReviewShareCandidate['shareBasis'] | undefined;
+  if (!shape || typeof v.shareHash !== 'string' || v.shareHash !== sharedAlertShapeHash(shape) ||
+    !basis || typeof basis !== 'object' || !Number.isSafeInteger(basis.amountMinor) || basis.amountMinor <= 0 ||
+    typeof basis.currency !== 'string' || !/^[A-Z]{3}$/.test(basis.currency) ||
+    (basis.direction !== 'debit' && basis.direction !== 'credit') ||
+    basis.currency !== shape.currency || basis.direction !== shape.direction) return null;
+  return { shareShape: shape, shareHash: v.shareHash,
+    shareBasis: { amountMinor: basis.amountMinor, currency: basis.currency, direction: basis.direction } };
+};
 
 export const REVIEW_ALERT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const REVIEW_TOMBSTONE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
@@ -103,6 +130,10 @@ export interface UniversalReviewAlert {
    * device only; confirming the review remembers this card's account.
    */
   walletCardOrPass?: string;
+  /** Optional, value-free format-sharing candidate; see ReviewShareCandidate. */
+  shareShape?: ReviewShareCandidate['shareShape'];
+  shareHash?: ReviewShareCandidate['shareHash'];
+  shareBasis?: ReviewShareCandidate['shareBasis'];
 }
 
 export type ReviewEntry = ReviewAlert | UniversalReviewAlert;
@@ -133,6 +164,9 @@ export interface UniversalReviewAdmissionInput {
   channel: ReviewAlert['channel'] | 'paste';
   parserVersion?: number;
   event: UniversalBankEvent;
+  shareShape?: unknown;
+  shareHash?: unknown;
+  shareBasis?: unknown;
 }
 
 export const prepareUniversalReviewAlert = (
@@ -145,9 +179,10 @@ export const prepareUniversalReviewAlert = (
   if (!event || !Number.isSafeInteger(parserVersion) || parserVersion! < 1) return null;
   const expiresAt = input.observedAt + REVIEW_ALERT_TTL_MS;
   if (!validTimestamp(expiresAt)) return null;
+  const share = input.shareShape === undefined ? null : validateReviewShareCandidate(input);
   return { kind: 'universal', id: input.id, sourceKey: input.sourceKey,
     observedAt: input.observedAt, expiresAt, channel: input.channel,
-    parserVersion: parserVersion!, event };
+    parserVersion: parserVersion!, event, ...(share ? share : {}) };
 };
 
 export interface ReviewTemplateRule {
@@ -209,6 +244,17 @@ export interface AlertReviewTrayState {
   tombstones: ReviewTombstone[];
   templateRules: ReviewTemplateRule[];
 }
+
+/** Consent turned off: no item keeps a sharing candidate. Returns the same tray when nothing changes. */
+export const stripReviewShareCandidates = (tray: AlertReviewTrayState): AlertReviewTrayState => {
+  if (!tray.pending.some((item) => isUniversalReviewAlert(item) &&
+    (item.shareShape || item.shareHash || item.shareBasis))) return tray;
+  return { ...tray, pending: tray.pending.map((item) => {
+    if (!isUniversalReviewAlert(item)) return item;
+    const { shareShape: _shape, shareHash: _hash, shareBasis: _basis, ...rest } = item;
+    return rest;
+  }) };
+};
 
 export interface ReviewAdmissionInput {
   id: string;

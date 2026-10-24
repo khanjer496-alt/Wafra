@@ -2445,6 +2445,9 @@ ok('the spoken label matches the visible repayment exception and direction',
     // at its own currency's exponent (KWD/BHD/OMR three, QAR two).
     'gulf-neighbour-alerts.ts',
     'private-alert-formats.ts',
+    // Shared shapes only check a downloaded currency code has a known exponent;
+    // they carry no amount and never write the ledger.
+    'shared-alert-formats.ts',
   ]);
   ok('ISO metadata is confined to currency routing, exact money and transfer evidence validation',
     metadataConsumers.length === extraMetadataConsumers.size && metadataConsumers.every((file) => extraMetadataConsumers.has(path.basename(file))),

@@ -182,6 +182,7 @@ function backgroundHarness() {
     '@/lib/ledger-money': { isLedgerMoneySpec: () => true },
     '@/lib/markets': { setActiveMarket() {}, setLedgerCurrency() {} }, '@/lib/country': { setActiveCountry() {} },
     '@/lib/best-effort-autopost': { setBestEffortAutoPostEnabled() {} },
+    '@/lib/shared-alert-format-active': { activateSharedAlertFormats() {} },
     '@/lib/purchases': { isProActive: () => true }, '@/lib/state-storage': {},
     '@/lib/reminders': load(path.join(root, 'src/lib/reminders.ts'), {
       '@/lib/bills': {}, '@/lib/cards': {}, '@/lib/format': {}, '@/lib/i18n': {}, '@/lib/ledger': {}, '@/lib/subscriptions': {},

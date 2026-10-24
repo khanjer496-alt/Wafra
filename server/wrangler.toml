@@ -105,6 +105,20 @@ head_sampling_rate = 0.1
 #     Whoever owns the Cloudflare account sets both halves; they are the only
 #     person who can, since the Worker secret is write-only after it is set.
 #
+# Opt-in shared bank-alert formats (docs/shared-alert-formats.md) use two more
+# secrets. Both are needed in production; neither value is ever committed:
+#
+#   npx wrangler secret put FORMATS_SALT
+#     High-entropy string (`openssl rand -base64 32`). Keys the HMAC that turns
+#     a vault id into the pseudonymous vault_hash on shared-format votes. If
+#     unset a fixed fallback constant is used, which is NOT suitable for
+#     production. Rotating it resets vote counting (old votes stop matching).
+#
+#   npx wrangler secret put FORMATS_ADMIN_TOKEN
+#     High-entropy bearer for GET /v1/admin/formats and
+#     POST /v1/admin/formats/block (the weekly owner-run review). If unset, or
+#     if a wrong token is presented, those routes answer 404.
+#
 # EXPO_PROJECT_ID, EMAIL_DOMAIN and GITHUB_REPOSITORY are not secret — they
 # belong in the [vars] block at the end of this file, which is where the
 # Worker reads them from. An empty string is worse than an absent key for all

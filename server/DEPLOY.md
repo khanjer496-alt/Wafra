@@ -185,10 +185,11 @@ npx wrangler d1 execute wafra --remote --command \
   "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
 ```
 
-Expect these 13 application tables: `admin_deletion_receipts`,
+Expect these application tables: `admin_deletion_receipts`,
 `automation_generations`, `device_invites`, `devices`, `feedback`,
 `feedback_limits`, `ingest_limits`, `ingest_receipts`, `cost_limits`, `pair_limits`,
-`push_registrations`, `queue`, `vaults`. D1 keeps internal tables of its own
+`push_registrations`, `queue`, `shared_format_shapes`, `shared_format_votes`,
+`statement_import_bindings`, `vaults`. D1 keeps internal tables of its own
 (`_cf_KV` and similar) in the same catalogue, so extra names beginning with an
 underscore are normal. There is no messages table — that is the design, not a
 missed migration. `automation_generations` is the additive per-device setup
@@ -278,6 +279,19 @@ depend on your plan — check
 <https://developers.cloudflare.com/d1/reference/time-travel/> before relying on
 it. Nothing in a normal deploy needs either command; they are here so that the
 answer to "the migration was wrong" is not improvised.
+
+### Shared alert formats secrets
+
+The opt-in shared bank-format feature (`docs/shared-alert-formats.md`) reads two
+Worker secrets. Names only here; never commit values:
+
+```bash
+npx wrangler secret put FORMATS_SALT         # openssl rand -base64 32; keys the vault pseudonym HMAC
+npx wrangler secret put FORMATS_ADMIN_TOKEN  # openssl rand -base64 32; bearer for /v1/admin/formats*
+```
+
+Without `FORMATS_SALT` a fixed fallback constant is used (set it in production).
+Without `FORMATS_ADMIN_TOKEN` the admin routes answer 404.
 
 Secrets survive a rollback — they belong to the Worker, not to a version.
 Rotating one is `wrangler secret put` again; re-run `npm run deploy` afterwards

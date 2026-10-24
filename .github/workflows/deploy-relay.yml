@@ -652,6 +652,38 @@ jobs:
           printf '%s' "$REPORT_EMAIL" | npx --no-install wrangler secret put REPORT_EMAIL
           printf '%s' "$REPORT_FROM_EMAIL" | npx --no-install wrangler secret put REPORT_FROM_EMAIL
 
+      # Shared bank formats. FORMATS_SALT keys the vault pseudonyms that count
+      # votes, so it must stay the same across deploys: it is generated once,
+      # on the first deploy that lacks it, and never printed or re-set. Nobody
+      # needs to know its value. FORMATS_ADMIN_TOKEN is optional (the export
+      # route answers 404 without it); set it only from a repository secret.
+      - name: Set shared-format secrets
+        working-directory: server
+        env:
+          FORMATS_ADMIN_TOKEN: ${{ secrets.FORMATS_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          # A failed listing must not look like "no salt yet": replacing the
+          # salt would let every vault vote again.
+          if ! names=$(npx --no-install wrangler secret list --format json); then
+            echo "::error::Could not list Worker secrets; FORMATS_SALT left untouched."
+            exit 1
+          fi
+          if printf '%s' "$names" | grep -q '"name": *"FORMATS_SALT"'; then
+            echo "FORMATS_SALT already set; left unchanged."
+          else
+            node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))' \
+              | npx --no-install wrangler secret put FORMATS_SALT
+            echo "FORMATS_SALT generated and set."
+          fi
+          value=$(printf '%s' "${FORMATS_ADMIN_TOKEN:-}" | tr -d '[:space:]')
+          if [ -n "$value" ]; then
+            printf '%s' "$value" | npx --no-install wrangler secret put FORMATS_ADMIN_TOKEN
+            echo "FORMATS_ADMIN_TOKEN set from the repository secret."
+          else
+            echo "No FORMATS_ADMIN_TOKEN secret; the admin export route stays closed."
+          fi
+
       # ---- Verification. A deploy that is not checked is a rumour.
       - name: Health check
         id: health

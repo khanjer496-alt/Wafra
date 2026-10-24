@@ -43,6 +43,8 @@ import { committed, tapped } from '@/lib/haptics';
 import { t as tUi, tf as tfUi } from '@/lib/i18n';
 import { accountDisplayName } from '@/lib/ledger';
 import { useStore } from '@/lib/store';
+import { sharesAlertFormats, shouldSubmitConfirmedShape } from '@/lib/shared-alert-format-share';
+import { submitShapeAnonymously } from '@/lib/shared-alert-format-submit';
 import { cachedReferenceQuote, convertWithReferenceQuote, loadReferenceQuote, quoteFitsDay } from '@/lib/fx-rates';
 import { displayNumberConventions, formatMinorUnits, formatMinorUnitsForInput, ledgerMoneySpec } from '@/lib/ledger-money';
 import { motionAndroidCopy } from '@/lib/motion-android-copy';
@@ -122,7 +124,7 @@ export default function AddTransactionScreen() {
   const toast = useToast();
   const params = useLocalSearchParams<{ reviewId?: string | string[] }>();
   const reviewId = Array.isArray(params.reviewId) ? params.reviewId[0] : params.reviewId;
-  const { state, getStateSnapshot, getStateGeneration, addTransaction, setLedgerMoney, promoteReviewAlert, dismissReviewAlert } = useStore();
+  const { state, getStateSnapshot, getStateGeneration, addTransaction, setLedgerMoney, promoteReviewAlert, dismissReviewAlert, setShareAlertFormats } = useStore();
   const reviewItem = reviewId
     ? state.reviewTray.pending.find((item) => item.id === reviewId) ?? null
     : null;
@@ -517,7 +519,20 @@ export default function AddTransactionScreen() {
         } } : {}),
       };
       try {
-        await promoteReviewAlert(input);
+        const outcome = await promoteReviewAlert(input);
+        // Fire-and-forget: sharing never blocks or fails the save, and only a
+        // reading confirmed unchanged is shared. Nothing is logged.
+        if (outcome === 'added' && genericItem?.shareShape && selectedMoney) {
+          try {
+            const shape = genericItem.shareShape;
+            const confirmed = { amountMinor: Number(selectedMoney.minorUnits), currency: selectedMoney.currency,
+              direction: (type === 'income' ? 'credit' : 'debit') as 'credit' | 'debit' };
+            const consent = getStateSnapshot();
+            if (shouldSubmitConfirmedShape(genericItem, confirmed, consent)) {
+              void submitShapeAnonymously(shape, consent);
+            }
+          } catch { /* sharing never affects the save */ }
+        }
         dropCoin();
         toast.show(tUi('reviewAlertAdded'), { tone: 'success' });
         router.back();
@@ -942,6 +957,21 @@ export default function AddTransactionScreen() {
       bandContent={manualBand}
       footer={(
         <View>
+          {genericItem?.shareShape && sharesAlertFormats(state) ? (
+            <View testID="share-format-notice" style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center',
+              gap: 6, paddingBottom: Spacing.two }}>
+              <ThemedText type="meta" themeColor="textSecondary" style={{ flexShrink: 1 }}>{tUi('shareFormatNotice')}</ThemedText>
+              <Pressable testID="share-format-turn-off" accessibilityRole="button" accessibilityLabel={tUi('shareFormatTurnOff')}
+                disabled={saving} style={{ minHeight: 44, justifyContent: 'center' }}
+                onPress={() => {
+                  setShareAlertFormats(false)
+                    .then(() => AccessibilityInfo.announceForAccessibility(tUi('shareFormatTurnedOff')))
+                    .catch(() => toast.show(tUi('shareFormatsSaveFailed'), { tone: 'error' }));
+                }}>
+                <ThemedText type="meta" style={{ color: theme.primary }}>{tUi('shareFormatTurnOff')}</ThemedText>
+              </Pressable>
+            </View>
+          ) : null}
           <EButton
             palette={band}
             label={tUi(saving ? 'savingSecurely' : genericItem ? 'genericConfirmAdd' : reviewItem ? 'reviewAlertAdd' : 'saveTransaction')}

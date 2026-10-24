@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: f223bbd0b895d39a2fbf894054f7f927d871f99f6771287e9242b4c572cc7997
+// Generated from normal shipping TypeScript. Source SHA-256: 8a2a9a198b5c73757355e64dc55cd200b1b3e4365622299fe763fd2d8f4ad986
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -4930,6 +4930,27 @@ const S = {
         en: 'On: completed payments in these formats are added, marked “Auto-added — check”. Off: they wait in Review.',
         ar: 'التشغيل: تُضاف الدفعات المكتملة من هذه الصيغ بعلامة «أُضيفت تلقائيًا — راجِعها». الإيقاف: تبقى للمراجعة.',
     },
+    shareFormatsSettingTitle: {
+        en: 'Help other Wafra users with this bank',
+        ar: 'ساعد مستخدمي وفرة الآخرين مع هذا البنك',
+    },
+    shareFormatsSettingBody: {
+        en: 'When you teach a bank format, or confirm a Review item for an alert Wafra did not recognise, only the bank\'s wording is shared, never the message itself: amounts, card numbers and dates are removed and names are screened out. A format is used only after 3 different people send identical wording, and unpublished wording is deleted from the relay within 30 days.',
+        ar: 'عند تعليم صيغة بنك أو تأكيد عنصر مراجعة لتنبيه لم تتعرف عليه وفرة، تُشارك صياغة البنك فقط ولا تُشارك الرسالة نفسها أبداً: تُحذف المبالغ وأرقام البطاقات والتواريخ ويتم استبعاد الأسماء. لا تُستخدم الصيغة إلا بعد أن يرسل ثلاثة أشخاص مختلفين الصياغة نفسها تماماً، وتُحذف الصياغة غير المنشورة من الخادم خلال 30 يوماً.',
+    },
+    shareFormatsSaveFailed: {
+        en: 'The sharing choice could not be saved. Try again.',
+        ar: 'تعذّر حفظ خيار المشاركة. حاول مرة أخرى.',
+    },
+    sharedFormatsCount: {
+        en: 'Formats shared by other users: {count}',
+        ar: 'الصيغ المشاركة من مستخدمين آخرين: {count}',
+    },
+    sharedFormatsCountBody: {
+        en: 'Public bank shapes downloaded to this phone. Clearing them is safe; they can be downloaded again.',
+        ar: 'صيغ بنوك عامة نُزّلت إلى هذا الهاتف. يمكن مسحها بأمان، ويمكن تنزيلها مرة أخرى.',
+    },
+    sharedFormatsClear: { en: 'Clear', ar: 'مسح' },
     rememberThisBill: { en: 'Remember this bill?', ar: 'تذكّر هذه الفاتورة؟' },
     billAliasAlso: {
         en: 'Use {title} · {category} for {n} matching past payment{s} and future payments from this biller.',
@@ -5256,6 +5277,12 @@ const S = {
     genericOpenWallet: { en: 'Open wallet', ar: 'افتح المحفظة' },
     genericOpenBills: { en: 'Open bills', ar: 'افتح الفواتير' },
     genericConfirmAdd: { en: 'Confirm and add', ar: 'أكد وأضف' },
+    shareFormatNotice: {
+        en: 'If you confirm this reading unchanged, Wafra shares this bank\'s wording — names screened out — to help other users.',
+        ar: 'إذا أكدت هذه القراءة دون تغيير، تُشارك وفرة صياغة هذا البنك — مع استبعاد الأسماء — لمساعدة المستخدمين الآخرين.',
+    },
+    shareFormatTurnOff: { en: 'Turn off sharing bank wording', ar: 'إيقاف مشاركة صياغة البنك' },
+    shareFormatTurnedOff: { en: 'Sharing turned off', ar: 'تم إيقاف المشاركة' },
     genericCompleteFields: { en: 'Complete the missing detail before adding.', ar: 'أكمل المعلومة الناقصة قبل الإضافة.' },
     genericCurrencyMismatch: { en: 'Choose an amount in your ledger’s currency.', ar: 'اختر مبلغاً بعملة سجلك.' },
     foreignReviewConversionNote: {

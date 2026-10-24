@@ -10,11 +10,18 @@ import {
   type PrivateAlertMatchOptions,
 } from '@/lib/private-alert-formats';
 import type { LearnInput, LearnedFields } from '@/lib/learned-alert-formats';
+import type { SharedAlertMatch, SharedMatchOptions } from '@/lib/shared-alert-formats';
 import { privateAlertSourceDateContext } from '@/lib/private-alert-teaching';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
+
+/** Matches downloaded community shapes; installed by shared-alert-format-active.ts. */
+export type SharedMatcher = (source: string, sender: string | null | undefined, opts: SharedMatchOptions) => SharedAlertMatch;
+
+/** Shared-shape matches are bound to the process-local capability object, not to a secret. */
+const SHARED_MATCH_KEY = utf8ToBytes('wafra-shared-format-match-v1');
 
 /** An opaque device secret; it never travels through ledger state or backups. */
 const SECRET_NAME = 'wafra.private-alert-format.key.v1';
@@ -85,6 +92,7 @@ export function createPrivateAlertFormatRuntime(secrets: DeviceSecretAdapter = n
   let generation = 0;
   let ready = false;
   let formats: PrivateAlertFormatStore = emptyPrivateAlertFormatStore();
+  let sharedMatcher: SharedMatcher | null = null;
   let cachedKey: Uint8Array | null = null;
   let keyQueue: Promise<unknown> = Promise.resolve();
   const serialized = <T,>(work: () => Promise<T>): Promise<T> => {
@@ -105,6 +113,8 @@ export function createPrivateAlertFormatRuntime(secrets: DeviceSecretAdapter = n
     formats = normalizePrivateAlertFormatStore(value);
     ready = true;
   };
+  /** Public data, not secret: replaced wholesale; survives private invalidation. Null disables it. */
+  const setSharedMatcher = (matcher: SharedMatcher | null) => { sharedMatcher = matcher; };
   const keyFor = async (create: boolean, run: number): Promise<Uint8Array | null> => {
     if (!ready || run !== generation) return null;
     if (cachedKey) return cachedKey;
@@ -173,27 +183,48 @@ export function createPrivateAlertFormatRuntime(secrets: DeviceSecretAdapter = n
       return !!key && run === generation && authenticatePrivateAlertFormat(template, key) && template.status === 'validated';
     } catch { return false; }
   };
+  const issue = (match: { fields: LearnedFields; templateId: string }, key: Uint8Array, run: number,
+    source: string, sender: string | null | undefined, observedAt: number): PrivateFormatMatch => {
+    const issued: PrivateFormatMatch = Object.freeze({ kind: 'prefill' as const, fields: Object.freeze({ ...match.fields }),
+      templateId: match.templateId });
+    const signature = matchSignature(key, source, sender, observedAt);
+    issuedMatches.set(issued, (candidateSource, candidateSender, candidateTime) =>
+      ready && run === generation && signature === matchSignature(key, candidateSource, candidateSender, candidateTime));
+    return issued;
+  };
   /** Read transient source only after secure IO, so a cancelled form can release it. */
   const readFromSource = async (readSource: () => PrivateAlertFormatSource | null,
     context: PrivateAlertMatchOptions = {}, cancelled: () => boolean = () => false): Promise<PrivateFormatMatch | null> => {
     const run = generation;
-    if (cancelled() || !ready || formats.templates.length === 0 || context.launchRoute || context.routedMarket === 'AE' || context.routedMarket === 'SA') return null;
+    if (cancelled() || !ready || (formats.templates.length === 0 && !sharedMatcher) ||
+      context.launchRoute || context.routedMarket === 'AE' || context.routedMarket === 'SA') return null;
     try {
-      const key = await keyFor(false, run);
-      if (cancelled() || !key || !ready || run !== generation) return null;
+      // The device key only exists for private formats; shared shapes need none.
+      const key = formats.templates.length ? await keyFor(false, run) : null;
+      if (cancelled() || !ready || run !== generation) return null;
       const input = readSource();
       if (!input || cancelled() || run !== generation) return null;
       const { source, sender, observedAt } = input;
       const scoped = privateAlertSourceDateContext(source, sender, context);
-      const match = matchPrivateAlertFormat(source, sender, formats, key,
-        coreMatchOptions({ ...context, ...scoped }, observedAt));
-      if (match.kind !== 'prefill') return null;
-      if (scoped.issuerConflict && !unambiguousSourceDate(source, sender, match.fields.date)) return null;
-      const issued: PrivateFormatMatch = Object.freeze({ ...match, fields: Object.freeze({ ...match.fields }) });
-      const signature = matchSignature(key, source, sender, observedAt);
-      issuedMatches.set(issued, (candidateSource, candidateSender, candidateTime) =>
-        ready && run === generation && signature === matchSignature(key, candidateSource, candidateSender, candidateTime));
-      return issued;
+      if (key) {
+        const match = matchPrivateAlertFormat(source, sender, formats, key,
+          coreMatchOptions({ ...context, ...scoped }, observedAt));
+        if (match.kind === 'prefill') {
+          if (scoped.issuerConflict && !unambiguousSourceDate(source, sender, match.fields.date)) return null;
+          return issue(match, key, run, source, sender, observedAt);
+        }
+      }
+      // Private formats declined: community shapes that three unrelated people
+      // taught identically. Prefill only; a 'post' verdict is deliberately
+      // downgraded because a new source never posts without a person.
+      if (!sharedMatcher) return null;
+      const shared = sharedMatcher(source, sender, {
+        now: observedAt, routedMarket: context.routedMarket, launchRoute: context.launchRoute,
+        dateOrder: scoped.dateOrder ?? context.dateOrder ?? null,
+      });
+      if (shared.kind === 'none') return null;
+      if (scoped.issuerConflict && !unambiguousSourceDate(source, sender, shared.fields.date)) return null;
+      return issue({ fields: shared.fields, templateId: `sf_${shared.hash}` }, SHARED_MATCH_KEY, run, source, sender, observedAt);
     } catch { return null; }
   };
   const read = (source: string, sender: string | null | undefined, observedAt: number, context: PrivateAlertMatchOptions = {}) =>
@@ -216,11 +247,12 @@ export function createPrivateAlertFormatRuntime(secrets: DeviceSecretAdapter = n
       if (await secrets.isNative()) await secrets.removeSecret();
     });
   };
-  return { activate, invalidate, prepare, prepareFromInput, validate, validateFromSample, canSave, read, readFromSource, session, eraseKey };
+  return { activate, setSharedMatcher, invalidate, prepare, prepareFromInput, validate, validateFromSample, canSave, read, readFromSource, session, eraseKey };
 }
 
 const runtime = createPrivateAlertFormatRuntime();
 export const activatePrivateAlertFormats = runtime.activate;
+export const setSharedAlertFormatMatcher = runtime.setSharedMatcher;
 export const invalidatePrivateAlertFormats = runtime.invalidate;
 export const preparePrivateAlertFormat = runtime.prepare;
 export const validatePrivateAlertFormatSample = runtime.validate;

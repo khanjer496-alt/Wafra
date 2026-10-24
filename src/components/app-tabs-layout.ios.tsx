@@ -5,6 +5,7 @@ import { TabBarMetricsProvider } from '@/components/ui/tab-bar-metrics';
 import { BandPalettes } from '@/constants/theme';
 import { useBandScheme } from '@/hooks/use-band';
 import { useAutoImport } from '@/hooks/use-auto-import';
+import { useSharedAlertFormats } from '@/hooks/use-shared-alert-formats';
 import { useHistoryImport } from '@/hooks/use-history-import';
 import { useLanguage } from '@/hooks/use-language';
 import { prioritizeForegroundNavigation } from '@/lib/foreground-history-priority';
@@ -36,6 +37,7 @@ import { t } from '@/lib/i18n';
 function CaptureOwner() {
   useHistoryImport();
   useAutoImport(true, false);
+  useSharedAlertFormats();
   return null;
 }
 

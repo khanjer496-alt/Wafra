@@ -27,6 +27,7 @@ const tray = load(read('alert-review-tray.ts'), {
   '@/lib/capture-source-identity': identity,
   '@/lib/generic-review-entry': generic,
   '@/lib/universal-import': { canonicalUniversalSourceKey: identity.canonicalCaptureSourceKey },
+  '@/lib/shared-alert-formats': require('../build/shared-alert-formats.js'),
 });
 const source = read('review-source-bindings.ts');
 

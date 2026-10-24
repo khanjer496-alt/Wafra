@@ -187,6 +187,7 @@ test('Android freezes inactive tab rendering while capture remains outside the n
     '@/components/ui/tab-bar-metrics': { TabBarMetricsProvider: 'Metrics' },
     '@/hooks/use-auto-import': { useAutoImport: (...args) => calls.push(['auto', ...args]) },
     '@/hooks/use-history-import': { useHistoryImport: () => calls.push(['history']) },
+    '@/hooks/use-shared-alert-formats': { useSharedAlertFormats: () => calls.push(['shared-formats']) },
   }).default;
   const tree = Component();
   const [owner, navigator] = tree.props.children;
@@ -196,7 +197,7 @@ test('Android freezes inactive tab rendering while capture remains outside the n
   assert.equal(navigator.props.detachInactiveScreens, undefined);
   assert.equal(navigator.props.children.length, 4);
   owner.type();
-  assert.deepEqual(calls, [['history'], ['auto', true, false]], 'capture must not be inside the frozen tab');
+  assert.deepEqual(calls, [['history'], ['auto', true, false], ['shared-formats']], 'capture must not be inside the frozen tab');
   platform = 'ios';
   assert.notEqual(Component().props.children[1].props.screenOptions.freezeOnBlur, true);
   platform = 'web';

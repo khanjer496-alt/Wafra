@@ -555,6 +555,11 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     // The real unproven-format policy: the store mirrors its setting and
     // writes its undo tombstones on hydrate/undo/delete.
     '@/lib/best-effort-autopost': require('./build/best-effort-autopost'),
+    // Public community bank shapes: pure validation, plus the on-device matcher switch.
+    '@/lib/shared-alert-format-sync': require('./build/shared-alert-format-sync'),
+    '@/lib/shared-alert-format-active': require('./build/shared-alert-format-active'),
+    '@/lib/shared-alert-format-share': require('./build/shared-alert-format-share'),
+    '@/lib/shared-alert-format-submit': { submitShapeAnonymously: async () => false, eraseSharingCredential: async () => {} },
     // Provider plumbing only: the locale key for memoised money text.
     '@/hooks/use-ledger-money': { MoneyLocaleProvider: ({ children }) => children },
     // Native widget bridge: clearAll only asks it to drop the widget summary.

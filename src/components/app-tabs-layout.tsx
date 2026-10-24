@@ -5,6 +5,7 @@ import { Platform } from 'react-native';
 import { WafraTabBar } from '@/components/tab-bar';
 import { TabBarMetricsProvider } from '@/components/ui/tab-bar-metrics';
 import { useAutoImport } from '@/hooks/use-auto-import';
+import { useSharedAlertFormats } from '@/hooks/use-shared-alert-formats';
 import { useHistoryImport } from '@/hooks/use-history-import';
 
 /**
@@ -19,6 +20,7 @@ import { useHistoryImport } from '@/hooks/use-history-import';
 function CaptureOwner() {
   useHistoryImport();
   useAutoImport(true, false);
+  useSharedAlertFormats();
   return null;
 }
 
