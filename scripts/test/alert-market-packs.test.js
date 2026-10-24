@@ -648,5 +648,83 @@ for (const [label, market, text, family] of [
     !JSON.stringify(badReport).includes('real-'));
 }
 
+
+// Worldwide completion vocabulary (universal reader only). The shipped market
+// readers keep their exact behaviour; `world: true` adds predicate-form verbs
+// with Unicode-aware boundaries, and every verb family has negative controls.
+{
+  const world = (text, market = 'US') => inspectMarketAlert(text, market, { world: true });
+  const base = (text, market = 'US') => inspectMarketAlert(text, market);
+  ok('world vocabulary is off for the shipped market readers',
+    base("You've sent £45.00 to J SMITH").direction !== 'debit' && base('Pagaste $ 6.430 en PEDIDOSYA').status !== 'posted');
+  for (const [text, family, direction] of [
+    ["You've sent £45.00 to J SMITH from your account ending 1234", 'transfer', 'debit'],
+    ['Pagaste $ 6.430 en PEDIDOSYA con tu tarjeta', 'purchase', 'debit'],
+    ['Recibiste S/ 75.50 de ROSA HUAMAN por Plin', 'transfer', 'credit'],
+    ['Retiro de efectivo por S/ 400.00 en cajero BBVA con tu tarjeta *2290', 'cash-withdrawal', 'debit'],
+    ['Giro en cajero automatico por $60.000 con tu Tarjeta de Debito', 'cash-withdrawal', 'debit'],
+    ['Saque de R$ 400,00 realizado com o cartao final 2201', 'cash-withdrawal', 'debit'],
+    ['Você pagou R$ 89,90 para Centauro usando seu saldo no Mercado Pago', 'purchase', 'debit'],
+    ['Transferência recebida Você recebeu uma transferência de R$ 250,00 de Mariana', 'transfer', 'credit'],
+    ['Kamu udah bayar Rp28.000 ke Warung Bu Sri pakai GoPay', 'purchase', 'debit'],
+    ['Kamu menerima Rp 150.000 dari ANDI PRATAMA ke OVO Cash', 'transfer', 'credit'],
+    ['Umetuma Tsh25,000.00 kwa ASHA JUMA', 'transfer', 'debit'],
+    ["Garanti kartınızla 245,50 TL tutarında alışveriş yapılmıştır", 'purchase', 'debit'],
+    ['山田 太郎さんから1,500円を受け取りました', 'transfer', 'credit'],
+  ]) {
+    ok(`world reading: ${text.slice(0, 44)} -> ${family}/${direction}`, (() => {
+      const review = world(text);
+      return review.status === 'posted' && review.family === family && review.direction === direction;
+    })(), JSON.stringify(world(text), ['status', 'family', 'direction']));
+  }
+  for (const text of [
+    'Pagaste $ 6.430 en PEDIDOSYA, pago rechazado',
+    'Pagaste $ 6.430 en PEDIDOSYA: pendiente de confirmación',
+    'Recibiste S/ 75.50: solicitud de pago pendiente',
+    'Retiro de efectivo por S/ 400.00 no se pudo completar',
+    'Saque de R$ 400,00 nao foi possivel',
+    'Você pagou R$ 89,90 mas o pagamento falhou',
+    'Kamu udah bayar Rp28.000 tetapi gagal',
+    'Transfer masuk Rp 150.000 akan didebet pada 20/10/2026',
+    'Umetuma Tsh25,000.00 imeshindwa',
+    'Garanti kartınızla 245,50 TL tutarında alışveriş yapılamadı',
+    "You've sent £45.00 to J SMITH but the payment was returned",
+    'If you sent £45.00 to J SMITH, tap here',
+  ]) {
+    ok(`world negative control stays unposted: ${text.slice(0, 44)}`, world(text).status !== 'posted',
+      JSON.stringify(world(text), ['status', 'family', 'direction']));
+  }
+}
+
+
+// Subject swaps must never invert direction: a posted reading may be unresolved
+// but is never the opposite of what the text says happened to the reader.
+{
+  const PACKS = ['US', 'GB', 'FR', 'DE', 'ES', 'IT', 'NL', 'IN', 'QA', 'KW', 'BH', 'OM', 'EG', 'JO'];
+  const read = (text) => {
+    const reviews = PACKS.map((market) => inspectMarketAlert(text, market, { world: true }));
+    const directions = [...new Set(reviews.map((r) => r.direction).filter((d) => d === 'debit' || d === 'credit'))];
+    return { posted: reviews.every((r) => r.status === 'posted'), direction: directions.length === 1 ? directions[0] : 'unknown' };
+  };
+  for (const [text, expected] of [
+    ['MARIA enviou R$ 50,00 para você', 'credit'], ['MARIA pagou R$ 50,00 para você', 'credit'],
+    ['JOAO recebeu R$ 50,00 de você', 'debit'], ['Você enviou R$ 50,00 para MARIA', 'debit'],
+    ['Você recebeu R$ 50,00 de MARIA', 'credit'], ['JUAN te envió $50.00 por SPEI', 'credit'],
+    ['Enviaste $50.00 a JUAN', 'debit'], ['JUAN recibió $50.00 de ti', 'debit'],
+    ['Se abonó $50.00 a la cuenta de JUAN', 'debit'], ['Se abonaron $50.00 a tu cuenta', 'credit'],
+    ['Hesabınıza 500,00 TL gönderilmiştir', 'credit'], ['Hesabınızdan 500,00 TL gönderilmiştir', 'debit'],
+    ['Rp 50.000 telah ditransfer ke rekening Anda', 'credit'], ['Rp 50.000 berhasil ditransfer ke BUDI', 'debit'],
+    ['You sent £50.00 to JOHN', 'debit'], ['JOHN sent you £50.00', 'credit'],
+    ['JOHN received £50.00 from you', 'debit'], ['£50.00 has been transferred from your account to JOHN', 'debit'],
+    ['£50.00 has been transferred to your account from JOHN', 'credit'], ['umetuma TZS 50,000 kwa ASHA', 'debit'],
+    ['umepokea TZS 50,000 kutoka kwa ASHA', 'credit'], ['山田さんから500円を受け取りました', 'credit'],
+    ['山田さんに500円を送金しました', 'debit'], ['收入500.00元', 'credit'], ['支出500.00元', 'debit'],
+  ]) {
+    const got = read(text);
+    ok(`direction is never inverted: ${text}`, !got.posted || got.direction === expected || got.direction === 'unknown',
+      JSON.stringify(got));
+  }
+}
+
 console.log(`\nalert-market-packs: ${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

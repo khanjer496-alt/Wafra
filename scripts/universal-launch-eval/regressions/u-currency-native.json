@@ -1,0 +1,352 @@
+[
+  {
+    "id": "U-CURRENCY-1",
+    "country": "TR",
+    "ledger": "TRY",
+    "sender": "Garanti",
+    "body": "Your card ending 4412 was charged ₺86,50 at MIGROS ATASEHIR on 2026-10-10.",
+    "expect": {
+      "post": true,
+      "amountMinor": 8650,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "migros"
+    },
+    "notes": "lira sign prefix with comma decimal",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-CURRENCY-2",
+    "country": "TH",
+    "ledger": "THB",
+    "sender": "KBANK",
+    "body": "Card ending 7788 was charged 1,250.00 บาท at TOPS MARKET on 2026-10-09.",
+    "expect": {
+      "post": true,
+      "amountMinor": 125000,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "tops"
+    },
+    "notes": "Thai baht word after the figure",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-CURRENCY-3",
+    "country": "VN",
+    "ledger": "VND",
+    "sender": "MBBank",
+    "body": "Your card ending 0123 was charged 450.000đ at HIGHLANDS COFFEE on 2026-10-08.",
+    "expect": {
+      "post": true,
+      "amountMinor": 450000,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "highlands"
+    },
+    "notes": "dong sign glued after a dot-grouped figure",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-CURRENCY-4",
+    "country": "TZ",
+    "ledger": "TZS",
+    "sender": "CRDB",
+    "body": "You have sent Tsh 25,000 to JOHN MWANGA from your account.",
+    "expect": {
+      "post": true,
+      "amountMinor": 2500000,
+      "type": "expense",
+      "transfer": true
+    },
+    "notes": "Tanzanian shilling Tsh prefix",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-CURRENCY-5",
+    "country": "UG",
+    "ledger": "UGX",
+    "sender": "Stanbic",
+    "body": "Your card ending 3321 was charged USh 85,000 at SHOPRITE LUGOGO on 2026-10-07.",
+    "expect": {
+      "post": true,
+      "amountMinor": 85000,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "shoprite"
+    },
+    "notes": "Ugandan shilling USh prefix",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-CURRENCY-6",
+    "country": "GH",
+    "ledger": "GHS",
+    "sender": "GCB",
+    "body": "Your card ending 9012 was charged GH₵ 120.50 at MELCOM ACCRA on 2026-10-06.",
+    "expect": {
+      "post": true,
+      "amountMinor": 12050,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "melcom"
+    },
+    "notes": "cedi sign GH-cedi prefix",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-CURRENCY-7",
+    "country": "HK",
+    "ledger": "HKD",
+    "sender": "BOCHK",
+    "body": "Your credit card ending 5566 was charged 港幣88.00 at WELLCOME TAIKOO on 2026-10-05.",
+    "expect": {
+      "post": true,
+      "amountMinor": 8800,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "wellcome"
+    },
+    "notes": "Chinese HK dollar name glued before the figure",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-CURRENCY-8",
+    "country": "TW",
+    "ledger": "TWD",
+    "sender": "CathayBk",
+    "body": "Your card ending 6677 was charged 新台幣960元 at 7-ELEVEN TAIPEI on 2026-10-04.",
+    "expect": {
+      "post": true,
+      "amountMinor": 96000,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "7-eleven"
+    },
+    "notes": "qualified NT dollar name plus the generic yuan word for one figure",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-CURRENCY-9",
+    "country": "JP",
+    "ledger": "JPY",
+    "sender": "Rakuten",
+    "body": "Your card ending 8899 was charged 3,200円を at LAWSON SHIBUYA on 2026-10-03.",
+    "expect": {
+      "post": true,
+      "amountMinor": 3200,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "lawson"
+    },
+    "notes": "yen word followed by a Japanese particle",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-CURRENCY-10",
+    "country": "PH",
+    "ledger": "PHP",
+    "sender": "BPI",
+    "body": "Your card ending 1199 was charged ₱ 640.00 at SM SUPERMARKET on 2026-10-03.",
+    "expect": {
+      "post": true,
+      "amountMinor": 64000,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "sm"
+    },
+    "notes": "peso sign prefix",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-CURRENCY-11",
+    "country": "MY",
+    "ledger": "MYR",
+    "sender": "63888",
+    "body": "RM0 Hong Leong: Your card ending 2468 was charged RM45.60 at JAYA GROCER on 2026-10-02.",
+    "expect": {
+      "post": true,
+      "amountMinor": 4560,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "jaya"
+    },
+    "notes": "zero-charge marker before the bank name",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-CURRENCY-12",
+    "country": "ID",
+    "ledger": "IDR",
+    "sender": "BRI",
+    "body": "Your card ending 3579 was charged Rp. 125.000 at INDOMARET SUDIRMAN on 2026-10-01.",
+    "expect": {
+      "post": true,
+      "amountMinor": 12500000,
+      "type": "expense",
+      "transfer": false
+    },
+    "notes": "Indonesian rupiah with a full stop after Rp",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-CURRENCY-13",
+    "country": "EG",
+    "ledger": "EGP",
+    "sender": "CIB",
+    "body": "Your card ending 4680 was charged 450.00 جم at CARREFOUR MAADI on 2026-09-30.",
+    "expect": {
+      "post": true,
+      "amountMinor": 45000,
+      "type": "expense",
+      "transfer": false,
+      "merchant": "carrefour"
+    },
+    "notes": "Egyptian pound abbreviation after the figure",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-CURRENCY-N1",
+    "country": "TR",
+    "ledger": "TRY",
+    "sender": "Garanti",
+    "body": "Your card ending 4412: ₺86,50 charge at MIGROS was declined. Not charged.",
+    "expect": {
+      "post": false
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-CURRENCY-N2",
+    "country": "TH",
+    "ledger": "THB",
+    "sender": "KBANK",
+    "body": "Your OTP is 481516 to approve payment of 1,250.00 บาท at TOPS MARKET. Do not share.",
+    "expect": {
+      "post": false
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-CURRENCY-N3",
+    "country": "VN",
+    "ledger": "VND",
+    "sender": "MBBank",
+    "body": "Reminder: your card payment of 450.000đ is due on 2026-10-15.",
+    "expect": {
+      "post": false
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-CURRENCY-N4",
+    "country": "TZ",
+    "ledger": "TZS",
+    "sender": "CRDB",
+    "body": "Request: JOHN MWANGA is asking you to send Tsh 25,000. Reply to approve.",
+    "expect": {
+      "post": false
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-CURRENCY-N5",
+    "country": "UG",
+    "ledger": "UGX",
+    "sender": "Stanbic",
+    "body": "Offer: spend USh 85,000 at SHOPRITE and get 5% back. Terms apply.",
+    "expect": {
+      "post": false
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-CURRENCY-N6",
+    "country": "GH",
+    "ledger": "GHS",
+    "sender": "GCB",
+    "body": "Your available balance is GH₵ 1,120.50 as of 06/10/2026.",
+    "expect": {
+      "post": false
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-CURRENCY-N7",
+    "country": "HK",
+    "ledger": "HKD",
+    "sender": "BOCHK",
+    "body": "Your credit card payment of 港幣88.00 has been scheduled for 20/10/2026.",
+    "expect": {
+      "post": false
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-CURRENCY-N8",
+    "country": "TW",
+    "ledger": "TWD",
+    "sender": "CathayBk",
+    "body": "Your transfer of 新台幣960元 is pending and has not been completed.",
+    "expect": {
+      "post": false
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-CURRENCY-N9",
+    "country": "JP",
+    "ledger": "JPY",
+    "sender": "Rakuten",
+    "body": "Your statement for this month: 3,200円を will be withdrawn on 27th.",
+    "expect": {
+      "post": false
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-CURRENCY-N10",
+    "country": "MY",
+    "ledger": "MYR",
+    "sender": "63888",
+    "body": "RM0 Hong Leong: Your card ending 2468 balance is RM45.60.",
+    "expect": {
+      "post": false
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-CURRENCY-N11",
+    "country": "IN",
+    "ledger": "INR",
+    "sender": "VM-CANBNK",
+    "body": "Your IMPS/627298765432 request is under process. Do not share OTP.",
+    "expect": {
+      "post": false
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  },
+  {
+    "id": "U-CURRENCY-N12",
+    "country": "PE",
+    "ledger": "PEN",
+    "sender": "BCP",
+    "body": "Seguimiento de tu envio ref S/627298765432 listo para recoger.",
+    "expect": {
+      "post": false
+    },
+    "notes": "",
+    "provenance": "synthetic"
+  }
+]

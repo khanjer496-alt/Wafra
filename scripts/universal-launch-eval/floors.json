@@ -1,7 +1,7 @@
 {
   "corpus": {
-    "android-sms": 0.3130434782608696,
-    "ios-history": 0.2753623188405797
+    "android-sms": 0.733,
+    "ios-history": 0.611
   },
   "holdout": {},
   "knownUnsafe": {

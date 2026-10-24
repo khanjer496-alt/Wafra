@@ -81,9 +81,17 @@ const UNIVERSAL_POSTED_EVENT_HINT =
 const UNIVERSAL_FIELD_LIST_HINT =
   /\bcards?\b[\s\S]{0,120}\bAED\b[^\d]{0,12}\d[\s\S]{0,120}\b(?:at|to)\b/iu;
 
-const shouldTryUniversalPosting = (source: string, sender: string): boolean =>
+const UNIVERSAL_POSTED_STEM_HINT =
+  /(?<![\p{L}\p{N}])(?:realiz(?:aste|ó|o|ado|ada)|pag(?:aste|ó|o|ou|amento|amentos)|compra(?:ste)?|recib(?:iste|ido|ida)|recebeu|envi(?:aste|ó|o|ou)|transfiri(?:ó|o|ste)|abon(?:aron|ó|o)|retir(?:o|aste|ada|ado)|saque|giro|cargo|d[ée]bito|cr[ée]dito|tarifa|usted\s+envi|pr[ée]lev\p{L}*|retrait|achat|d[ée]p[ôo]t|envoy[ée]e?|erhalten|gutschrift|zahlungseingang|kartenzahlung|umsatz|buchung|transaktion|abbuchung|überweisung|ueberweisung|operazione|eseguit[oa]|bonifico|prelievo|versamento|accredito|betaling|k[öo]p|betal(?:t|te)|f[åa]tt|sendt|skickat|ins[äa]ttning|uttag|p[łl]atno[śs][ćc]|przelew\p{L}*|platba|p[řr][íi]choz[íi]|yap[ıi]l\p{L}*|harcama\p{L}*|g[öo]nderil\p{L}*|[öo]deme\p{L}*|gelmi[sş]\p{L}*|aktar[ıi]m\p{L}*|didebe?t\p{L}*|dikredit\p{L}*|dibayar\p{L}*|ditransfer|menerima|bayar|tarik\s+tunai|transfer\s+masuk|umetuma|kimetolewa|txn|amt|(?:credit|debit)\s+alert|thanh\s+to[áa]n|chuy[ểe]n\s+(?:kho[ảa]n|ti[ềe]n)|wusool)(?![\p{L}\p{N}])|(?:입금|출금|송금|보냈|결제|お引出し|入金|支払|受け取|利用|支出|收入|转账|轉入|轉帳|消費|消费|付款|簽賬|刷卡|薪資|工资|ถอน|โอน|ใช้จ่าย|เงินเข้า|รับโอน|जमा|استلام)/iu;
+// Statement field-list codes ("DR Amt:18,450", "CR 5,000.00"); upper-case only,
+// so the title "Dr." or the word "cr" never earns the parser.
+const UNIVERSAL_FIELD_CODE_HINT = /(?<![A-Za-z])(?:DR|CR)(?![A-Za-z])/u;
+
+export const shouldTryUniversalPosting = (source: string, sender: string): boolean =>
   hasUniversalInstitutionSender(sender) ||
   UNIVERSAL_POSTED_EVENT_HINT.test(source) ||
+  UNIVERSAL_POSTED_STEM_HINT.test(source) ||
+  UNIVERSAL_FIELD_CODE_HINT.test(source) ||
   (!!detectLaunchMarketFromSender(sender) && UNIVERSAL_FIELD_LIST_HINT.test(source)) ||
   // An exact Latin American bank template ("Te yapeó S/ 20", "DAVIVIENDA:
   // Compra . Aprobado(a)") carries none of the generic posting verbs.
@@ -302,8 +310,13 @@ const universalRowCategory = (
  */
 const COUNTRY_CURRENCY_ALIASES: Readonly<Record<string, CurrencyAliasMap>> = {
   ZA: { R: ['ZAR'] },
+  // Philippine banks print the peso as a bare "P" ("used for P3,200.00").
+  PH: { P: ['PHP'] },
 };
 const ZA_RAND_HINT = /(?<![\p{L}\p{N}])R\s?\d/u;
+// A lone "P" is a letter ("P2 promo", "Pier 39", "Level P3"): it is a peso only
+// beside a two-decimal figure ("P3,200.00"), never a bare integer.
+const PH_PESO_HINT = /(?<![\p{L}\p{N}])P\s?\d{1,3}(?:,\d{3})*\.\d{2}(?![\d.,])/u;
 const IN_IMPLICIT_RUPEE_RE = /\b(debited|credited)\s+(by|for|with)\s+(?=\d[\d,]*(?:\.\d{1,2})?\b)/i;
 const countryReadSource = (source: string, country: string | null): string => {
   if (country !== 'IN' || hasBankAlertMoneyHint(source)) return source;
@@ -311,7 +324,8 @@ const countryReadSource = (source: string, country: string | null): string => {
   return source.replace(IN_IMPLICIT_RUPEE_RE, '$1 $2 INR ');
 };
 const countryMoneyHint = (source: string, country: string | null): boolean =>
-  (country === 'ZA' && ZA_RAND_HINT.test(source)) || countryReadSource(source, country) !== source;
+  (country === 'ZA' && ZA_RAND_HINT.test(source)) || (country === 'PH' && PH_PESO_HINT.test(source)) ||
+  countryReadSource(source, country) !== source;
 
 /**
  * A money field in the ledger currency, or null. An explicit figure must
@@ -327,7 +341,10 @@ const ledgerMinorOf = (
   let money: UniversalMoney | null = null;
   if (field.evidence === 'explicit' && field.value && field.alternatives.length === 0) money = field.value;
   else if (field.evidence === 'ambiguous' && field.issues.length > 0 &&
-    field.issues.every((issue) => issue === 'currency-symbol' || issue === 'currency-exponent')) {
+    field.issues.every((issue) => issue === 'currency-symbol' || issue === 'currency-exponent' ||
+      issue === 'decimal-or-grouping')) {
+    // Same rule as resolvePrincipalMoney: a dot-grouped peso resolves only
+    // when the person's own currency has exactly one reading of it.
     const wanted = sharedSymbolCurrencyForCountry(country);
     const options = [...(field.value ? [field.value] : []), ...field.alternatives].filter((m) => m.currency === wanted);
     if (new Set(options.map((m) => `${m.minorUnits}/${m.exponent}`)).size === 1) money = options[0];
@@ -761,11 +778,21 @@ const sharedSenderOutsideGulf = (
   source: string,
   inspection: UniversalAlertReview | null,
   pinnedCurrency: string | null,
-): boolean =>
-  !!pinnedCurrency && pinnedCurrency !== 'AED' && pinnedCurrency !== 'SAR' &&
-  detectLaunchMarketFromAlert(source, '') === null &&
-  inspection?.route.decision === 'ambiguous' &&
-  inspection.route.candidates.some((candidate) => candidate.market !== 'AE' && candidate.market !== 'SA');
+  sender = '',
+): boolean => {
+  if (!pinnedCurrency || pinnedCurrency === 'AED' || pinnedCurrency === 'SAR' ||
+    detectLaunchMarketFromAlert(source, '') !== null) return false;
+  if (inspection?.route.decision === 'ambiguous') {
+    return inspection.route.candidates.some((candidate) => candidate.market !== 'AE' && candidate.market !== 'SA');
+  }
+  // Routing never ran (the review gate only knows ~20 ISO codes, so an HKD or
+  // THB alert returns no inspection): a worldwide institution's name plus ONE
+  // ISO code that is the pinned non-Gulf currency is still not UAE evidence.
+  if (inspection !== null || !hasUniversalInstitutionSender(sender)) return false;
+  const codes = new Set([...source.matchAll(/(?<![A-Za-z])([A-Z]{3})(?![A-Za-z])/gu)]
+    .map((match) => match[1]).filter((code) => currencyMinorUnits(code) !== null));
+  return codes.size === 1 && codes.has(pinnedCurrency);
+};
 
 /**
  * THE UAE/SAUDI GRAMMAR TRUSTS ITS SENDER. A blank sender (an iPhone History
@@ -984,7 +1011,7 @@ export const createLaunchAlertSession = ({
     // evidence for a non-Gulf alert on a non-Gulf ledger.
     const namedLaunchMarket = detectLaunchMarketFromSender(sender);
     const launchSenderMarket = namedLaunchMarket &&
-      !sharedSenderOutsideGulf(source, inspection, pinnedCurrency) ? namedLaunchMarket : null;
+      !sharedSenderOutsideGulf(source, inspection, pinnedCurrency, sender) ? namedLaunchMarket : null;
     // A single ordered capture/history session cannot change Gulf markets
     // through the broad universal fallback after regional evidence already
     // locked it. Without this guard, 50 UAE messages could establish AE and a
@@ -1034,7 +1061,7 @@ export const createLaunchAlertSession = ({
     // Same rule as parse(): see sharedSenderOutsideGulf.
     const namedLaunchMarket = detectLaunchMarketFromSender(sender);
     const launchSenderMarket = namedLaunchMarket &&
-      !sharedSenderOutsideGulf(source, inspection, pinnedCurrency) ? namedLaunchMarket : null;
+      !sharedSenderOutsideGulf(source, inspection, pinnedCurrency, sender) ? namedLaunchMarket : null;
     // AE/SA formats are PROVEN: when the mature grammar refused one, or the
     // alert is routed there, that refusal is the evidence. Never best-effort.
     if (launchSenderMarket || routedMarket === 'AE' || routedMarket === 'SA') return null;

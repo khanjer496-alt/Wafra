@@ -1456,5 +1456,145 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
     control?.type === 'income' && control.amountFils === 500000, control);
 }
 
+/* ── Universal round: benign shapes the wording guards used to refuse ───────
+ * Each exemption has a positive (a completed alert is no longer refused) and
+ * the matching negative (the held variant of the same words still is). */
+{
+  const held = (body, market) => policy.hasNonCompletedWording(body, market ?? null, '') || policy.isNotAutoPostableMoney(body);
+  for (const [name, body] of [
+    ['a card product named Cash Back', 'A purchase of $73.25 was made at CANADIAN TIRE with your TD Cash Back Visa ending in 4410.'],
+    ['an executed e-mandate debit', 'Rs.299.00 has been debited from your SBI Credit Card ending 4455 towards HOTSTAR.COM on 03-10-2026 as per your e-mandate (SI).'],
+    ['a reversal credited with', 'Acct XX908 is credited with Rs 742.00 on 04-Oct-26 towards reversal of UPI:629911223344 (SWIGGY).'],
+    ['a reversal credited to the reader', 'Txn QJ70AA1XYZ has been successfully reversed on 4/10/26 and Ksh2,300.00 is credited to your M-PESA account.'],
+    ['the UK callback footer', 'Debit card payment of £23.40 at GREGGS from your account ending 7781. Don\'t recognise it? Call 0800 000 1234.'],
+    ['the Spanish callback footer', 'Pago con tarjeta de 54,30 EUR en ZARA. Si no reconoce la operacion llame al 900 102 801.'],
+    ['the Portuguese callback footer', 'Compra de R$ 54,30 no cartão final 7302. Não reconhece? Ligue 4004 0000.'],
+    ['a BPAY biller code', 'Your BPAY payment of $92.15 to ORIGIN ENERGY (Biller code 4567) was successful on 05/10/2026.'],
+  ]) ok(`guard: ${name} is not refused as non-posting wording`, !held(body, 'MX'), body);
+  for (const [name, body] of [
+    ['cashback promotion', 'Get 5% cashback on your next purchase of $100.00 with your TD Cash Back Visa ending in 4410.'],
+    ['a cashback offer without a card tail', 'Enjoy Cash Back Visa offers: spend $100.00 and win.'],
+    ['a future e-mandate debit', 'Rs.299.00 will be debited from your SBI Credit Card ending 4455 on 10-10-2026 as per your e-mandate (SI).'],
+    ['e-mandate setup', 'e-mandate registered on your SBI Credit Card ending 4455 for HOTSTAR for Rs.299.00 monthly.'],
+    ['a reversal only initiated', 'Reversal of Rs 742.00 for UPI:629911223344 initiated. It will be credited to your account in 5 days.'],
+    ['a reversal that debits', 'Your refund of Ksh2,300.00 to ALPHA TRADERS has been reversed and Ksh2,300.00 is debited from your M-PESA account.'],
+    ['a reversal request', 'Reversal request received for Txn UPI/629123456789 of INR 2,350.00.'],
+    ['a recognise question', 'Do you recognise this £23.40 payment at GREGGS? Reply Y or N.'],
+    ['a recognise callback with a link', 'Debit card payment of £23.40 at GREGGS. Don\'t recognise it? Click https://secure-barclays.example/dispute'],
+    ['an OTP quoting a BPAY amount', 'Your code 45678 for BPAY payment of $92.15 to ORIGIN ENERGY. Do not share this code.'],
+    ['a Spanish reply-to-confirm prompt', 'Pago con tarjeta de 54,30 EUR en ZARA. Si no reconoce la operacion responda NO a este mensaje.'],
+    ['a LatAm recognise question', '¿Reconoces esta compra de $1,250.00 en LIVERPOOL con tu tarjeta *4417? Responde SI o NO.'],
+  ]) ok(`guard: ${name} is still refused`, held(body, 'MX'), body);
+}
+
+/* ── Universal round: the second net reads the other languages ───────────── */
+{
+  const net = (body) => policy.hasNonCompletedWording(body, null, '');
+  for (const [lang, body] of [
+    ['pt', 'Compra aprovada no cartão final 7302 valor R$ 120,00 em LOJA. A loja cancelou a compra.'],
+    ['tr', '17.10.2026 tarihinde 890,00 TL tutarındaki harcamanız reddedildi.'],
+    ['tr', 'Doğrulama kodu 583921 ile 450,00 TL işlemi onaylayın.'],
+    ['id', 'Transaksi kartu kredit Rp 275.000 di TOKOPEDIA gagal.'],
+    ['id', 'Rp 150.000 akan didebet dari rekening Anda tanggal 12/10/26.'],
+    ['sv', 'Swish: Erik har skickat en betalningsförfrågan på 250 kr.'],
+    ['da', 'Din betaling på 75,00 kr til Café Nord blev afvist.'],
+    ['cs', 'Platba kartou 459,00 Kč byla zamítnuta.'],
+    ['pl', 'Transakcja kartą na 89,90 PLN została odrzucona.'],
+    ['de', 'Zahlungsanforderung über 85,00 EUR von Max Beispiel.'],
+    ['th', 'รายการใช้จ่าย 890.00 บาท ไม่สำเร็จ'],
+    ['vi', 'Giao dich thanh toan 250.000 VND khong thanh cong.'],
+    ['sw', 'Muamala wa TZS 150,000.00 imeshindwa.'],
+    ['ja', 'ご利用金額 3,200円は仮売上です。'],
+    ['zh', '您尾号1234卡的消费 128.00元 交易失败。'],
+    ['ko', '[Web발신] 신한카드 인증번호 482913 결제금액 45,000원'],
+    ['hi', 'आपका रु 2,000.00 का भुगतान विफल रहा।'],
+  ]) ok(`net (${lang}): held wording is refused: ${body.slice(0, 32)}`, net(body), body);
+  // Completed alerts in the same languages are not caught by the new arms; the
+  // Turkish "iptal" footer is not a cancellation, and TAN is a surname.
+  for (const body of [
+    'Garanti: 17.10.2026 tarihinde SHELL\'den 890,00 TL harcama yapıldı. İptali için RET yazıp 4040\'a gönderin.',
+    'You have received SGD 120.00 in your a/c ending 5678 via PayNow from TAN WEI MING.',
+    'Köp 245,00 kr ICA NARA SODERMALM, kort ****1234',
+    'Kartenzahlung -23,40 EUR BILLA DANKT 1234 WIEN Debitkarte ***9876',
+    '您尾号1234卡9月25日10:02工资收入12,500.00元，余额15,745.67元。',
+  ]) ok(`net: a completed alert is not refused: ${body.slice(0, 32)}`, !net(body), body);
+}
+
+/* ── Universal round: own-instrument tails and shared-symbol currencies ──── */
+{
+  ok('a product name between "your" and the tail is the reader\'s own card',
+    policy.namesOwnInstrumentTail('A refund of $34.50 has been credited to your Flexi Debit Visa ending 4321', 'credit'));
+  ok('…but a possessive ("your friend\'s Visa") is someone else\'s',
+    !policy.namesOwnInstrumentTail('You have received $34.50 from your friend\'s Visa ending 4321', 'credit'));
+  ok('Kotak\'s upper-case "AC X1234" names the own account',
+    policy.namesOwnInstrumentTail('Sent Rs.450.00 from Kotak Bank AC X1234 to shop@upi', 'debit'));
+  ok('…but a reference label "Ref AC X1234" after a payer word does not',
+    !policy.namesOwnInstrumentTail('You have received Rs.450.00 from Ref AC X1234 of RAHUL SHARMA', 'credit'));
+  ok('…and a lower-case "ac x1234" is not the abbreviation',
+    !policy.namesOwnInstrumentTail('Your window ac x1234 unit was serviced', 'credit'));
+  ok('kr resolves for the Nordic countries only',
+    policy.sharedSymbolCurrencyForCountry('SE') === 'SEK' && policy.sharedSymbolCurrencyForCountry('NO') === 'NOK' &&
+    policy.sharedSymbolCurrencyForCountry('DK') === 'DKK' && policy.sharedSymbolCurrencyForCountry('IS') === 'ISK' &&
+    policy.sharedSymbolCurrencyForCountry('FI') === null);
+}
+
+/* ── Universal round: the admission gate (a gate only; it never posts) ───── */
+{
+  const { shouldTryUniversalPosting: admits } = require('./build/launch-alert-parser');
+  for (const body of [
+    'Realizaste una compra por $12.990 en LIDER', 'Pagou R$ 89,90 para Centauro', 'Kartenzahlung über 34,90 EUR',
+    'Retrait DAB de 60,00 €', 'Pagamento di 35,00 EUR presso ESSELUNGA', 'Köp 245,00 kr ICA', 'Du har fått 150 kr',
+    'Platba kartou 459,00 Kč', 'Przelew przych. 3 500,00 PLN', 'harcama yapildi 1.250,00 TL', 'didebet Rp 1.500.000',
+    'Umetuma Tsh25,000.00 kwa ASHA', '출금200,000원', '支払い完了 ¥580', '工资收入12,500.00元', 'ถอนเงินสด ATM 2,000.00 บ.',
+    'thanh toán 45.000đ', 'रु 3,000.00 जमा किए गए', 'Acct: 012***789\nAmt: NGN150,000.00 CR',
+  ]) ok(`gate: admits ${body.slice(0, 30)}`, admits(body, ''), body);
+  for (const body of ['Your parcel arrives tomorrow, see you at 5', 'Dr. Smith will see you at 3pm', 'Hello from the team', 'Meeting moved to 4 PM']) {
+    ok(`gate: ordinary prose is not admitted: ${body.slice(0, 30)}`, !admits(body, ''), body);
+  }
+  const started = Date.now();
+  admits('x'.repeat(100000) + ' pr'.repeat(30000), '');
+  ok('gate: stays linear on a hostile 190k-character text', Date.now() - started < 1500, Date.now() - started);
+}
+{
+  // The person's own country chooses the currency of a shared symbol, even for
+  // a dot-grouped figure, only when that currency has exactly one reading.
+  const { setActiveCountry } = require('./build/country');
+  const { currencyMinorUnits } = require('./build/currency-metadata');
+  const at = (currency, country, body) => {
+    setActiveCountry(country);
+    markets.setLedgerCurrency(currency, currencyMinorUnits(currency) === 0 ? 0 : 2);
+    return unproven(currency, country, 'BANKX', body, { regionHint: country });
+  };
+  const cl = at('CLP', 'CL', 'Your card ending 1234 was charged $12.990 at LIDER EXPRESS.');
+  ok('CL: "$12.990" is 12,990 pesos', cl?.amountFils === 12990 && cl.currency === 'CLP', cl);
+  const co = at('COP', 'CO', 'Your card ending 1234 was charged $35.000 at EXITO.');
+  ok('CO: "$35.000" is 35,000.00 pesos', co?.amountFils === 3500000 && co.currency === 'COP', co);
+  ok('US: "$12.990" stays unclear (two USD readings)',
+    at('USD', 'US', 'Your card ending 1234 was charged $12.990 at STORE.') === null);
+  ok('MX: "$45.000" stays unclear',
+    at('MXN', 'MX', 'Your card ending 1234 was charged $45.000 at OXXO.') === null);
+  // Argentine banks and wallets group thousands with a dot and never print a
+  // three-digit fraction, so ARS has exactly one reading of "$ 6.430" (as COP
+  // does); the person's own country then settles the shared symbol.
+  const ar = at('ARS', 'AR', 'Your card ending 1234 was charged $ 6.430 at PEDIDOSYA.');
+  ok('AR: "$ 6.430" is 6,430.00 pesos (one ARS reading)',
+    ar?.amountFils === 643000 && ar.currency === 'ARS', ar);
+  ok('AR: a US ledger still keeps "$ 6.430" unclear',
+    at('USD', 'US', 'Your card ending 1234 was charged $ 6.430 at PEDIDOSYA.') === null);
+  ok('CO: a purchase under 50 pesos stays refused',
+    at('COP', 'CO', 'Your card ending 1234 was charged $45 at EXITO.') === null);
+  const ph = at('PHP', 'PH', 'Your card ending 5678 was used for P3,200.00 at SHELL C5.');
+  ok('PH: "P3,200.00" is 3,200.00 pesos', ph?.amountFils === 320000 && ph.currency === 'PHP', ph);
+  ok('PH: a bare "P3200" and "Level P3" are not money',
+    at('PHP', 'PH', 'Your card ending 5678 was used for P3200 at SHELL C5.') === null &&
+    at('PHP', 'PH', 'Level P3 parking, spend 1000 more to win') === null);
+  ok('"P3,200.00" outside the Philippines is not pesos',
+    at('USD', 'US', 'Your card ending 5678 was used for P3,200.00 at SHELL C5.') === null);
+  // A shared bank name outside the Gulf (HSBC in Hong Kong) is not UAE evidence.
+  setActiveCountry('HK'); markets.setLedgerCurrency('HKD', 2);
+  const hk = unproven('HKD', 'HK', '#HSBC', 'HSBC: You have received HKD 1,250.00 from LEE KA MING via FPS to your account ending 421 on 02 Sep 2026 14:05.');
+  ok('HK: an HKD alert from HSBC on an HKD ledger posts through the worldwide path', hk?.amountFils === 125000 && hk.currency === 'HKD', hk);
+}
+
 console.log(`\nbest-effort-autopost: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

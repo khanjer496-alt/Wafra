@@ -103,4 +103,77 @@ export const CURRENCY_SYMBOL_CANDIDATES: Readonly<Record<string, readonly Curren
   'रू': ['INR', 'NPR'],
   // The Arabic word for pound, as Egyptian banks write it ("1,500.00 جنيه").
   'جنيه': ['EGP', 'SDG', 'SSP'],
+  // The abbreviation Egyptian bank SMS print after the figure ("3,000.00 جم").
+  'جم': ['EGP'],
+  // Spellings a local bank prints instead of the ISO code. Each names the
+  // currency of the country that writes it that way; "kr" is the one shared
+  // by four krone/krona currencies, so it stays ambiguous until a country or
+  // ledger currency settles it. The ASCII fallbacks (Kc, zl) exist because
+  // 7-bit SMS drops the diacritics.
+  kr: ['SEK', 'NOK', 'DKK', 'ISK'],
+  'kr.': ['SEK', 'NOK', 'DKK', 'ISK'],
+  Kr: ['SEK', 'NOK', 'DKK', 'ISK'],
+  'Kč': ['CZK'],
+  Kc: ['CZK'],
+  'zł': ['PLN'],
+  zl: ['PLN'],
+  Ft: ['HUF'],
+  '₺': ['TRY'],
+  '฿': ['THB'],
+  'บาท': ['THB'],
+  '₫': ['VND'],
+  'đ': ['VND'],
+  'đồng': ['VND'],
+  Ksh: ['KES'],
+  Tsh: ['TZS'],
+  TSh: ['TZS'],
+  USh: ['UGX'],
+  '₵': ['GHS'],
+  'GH₵': ['GHS'],
+  '₱': ['PHP'],
+  'Rp.': ['IDR'],
+  '₪': ['ILS'],
+  '₡': ['CRC'],
+  '₲': ['PYG'],
+  '₭': ['LAK'],
+  '₮': ['MNT'],
+  '₽': ['RUB'],
+  '₴': ['UAH'],
+  '₸': ['KZT'],
+  '₼': ['AZN'],
+  '₾': ['GEL'],
+  // Chinese-script currency NAMES. A name that qualifies the currency
+  // ("新台幣", "港幣") is stronger evidence than the generic 元, which the
+  // scanner drops when both read the same figure.
+  '港幣': ['HKD'],
+  '港币': ['HKD'],
+  '港元': ['HKD'],
+  '新台幣': ['TWD'],
+  '新台币': ['TWD'],
+  '台幣': ['TWD'],
+  '台币': ['TWD'],
+  '人民幣': ['CNY'],
+  '人民币': ['CNY'],
+  '日圓': ['JPY'],
+  '日元': ['JPY'],
 };
+
+/**
+ * Tokens printed only AFTER the figure. A prefix reading of these would take
+ * the first digit of whatever follows an ordinary word ("đ 5", "Ft 12",
+ * "Kc 5 kcal") as money. Czech and Polish banks print their symbol behind the
+ * figure only.
+ */
+export const SUFFIX_ONLY_CURRENCY_TOKENS: ReadonlySet<string> = new Set([
+  'đ', 'đồng', 'บาท', 'Ft', 'جم', 'Kč', 'Kc', 'zł', 'zl',
+]);
+
+/**
+ * Tokens written in a script that has no spaces between words (Han, Hangul,
+ * kana, Thai). The word-boundary test that protects Latin symbols would reject
+ * the particle or character that normally follows them ("1,500円を",
+ * "30,000원을", "500บาทผ่าน"); there only a glued Latin letter or digit makes
+ * the token part of an identifier.
+ */
+export const UNSPACED_SCRIPT_CHAR = /[\p{Script=Han}\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}]/u;
+export const UNSPACED_CURRENCY_TOKEN = /^[\p{Script=Han}\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}]+$/u;

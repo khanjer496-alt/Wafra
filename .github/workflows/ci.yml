@@ -94,7 +94,9 @@ jobs:
     runs-on: ubuntu-latest
     # Full financial, setup, and interaction suites exceed 15 minutes on a
     # cold runner. Keep every test enabled and allow the final workflow cases.
-    timeout-minutes: 25
+    # A slow ubuntu-latest runner took the Test step past 23 minutes on main
+    # (cd95a2ba, twice, still passing when cancelled) versus 14.5 on the PR.
+    timeout-minutes: 40
     env:
       # Chromium is pre-installed on the runner image used for the e2e job
       # below; npm postinstall must not re-fetch it.

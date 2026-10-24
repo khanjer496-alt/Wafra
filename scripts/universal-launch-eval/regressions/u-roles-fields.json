@@ -1,0 +1,744 @@
+[
+ {
+  "id": "U-ROLES-FIELDS-1",
+  "country": "KE",
+  "ledger": "KES",
+  "sender": "MPESA",
+  "body": "QWE9R2TY7U Confirmed. Ksh800.00 sent to PETER ODHIAMBO 0711***222 on 3/10/26 at 9:30 AM. New M-PESA balance is Ksh1,950.00. Transaction cost, Ksh15.00. Amount you can transact within the day is 499,200.00.",
+  "expect": {
+   "post": true,
+   "amountMinor": 80000,
+   "type": "expense"
+  },
+  "notes": "Wallet transfer: 'Transaction cost, KshN' is a fee field after a comma, balance and daily limit are separate roles",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-2",
+  "country": "KE",
+  "ledger": "KES",
+  "sender": "MPESA",
+  "body": "RT7YU3PL9Z Confirmed. Ksh275.50 paid to JAVA HOUSE ADLIFE. on 5/10/26 at 1:12 PM.New M-PESA balance is Ksh3,102.00. Transaction cost, Ksh0.00. Amount you can transact within the day is 499,724.50.",
+  "expect": {
+   "post": true,
+   "amountMinor": 27550,
+   "type": "expense"
+  },
+  "notes": "Till payment with a zero transaction-cost field",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-3",
+  "country": "UG",
+  "ledger": "UGX",
+  "sender": "MTN MoMo",
+  "body": "Y'ello. You have sent UGX 20,000 to MARY NAKAWUKI 256701***789 on 2026-10-03 11:05:09. Your new balance: UGX 45,000. Fee was UGX 500. Tax was UGX 100. TID: 31234567890.",
+  "expect": {
+   "post": true,
+   "amountMinor": 20000,
+   "type": "expense"
+  },
+  "notes": "Fee was / Tax was fields beside a 'new balance' line",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-4",
+  "country": "GH",
+  "ledger": "GHS",
+  "sender": "MobileMoney",
+  "body": "Payment made for GHS 40.00 to ESI MENSAH. Current Balance: GHS 120.30. Available Balance: GHS 120.30. Reference: tomatoes. Transaction ID: 62104412981. Fee charged: GHS 0.40 TAX charged: GHS 0.00.",
+  "expect": {
+   "post": true,
+   "amountMinor": 4000,
+   "type": "expense"
+  },
+  "notes": "'Fee charged:' and 'TAX charged:' keep their fee role although 'charged' alone is a transaction word",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-5",
+  "country": "KE",
+  "ledger": "KES",
+  "sender": "AirtelMoney",
+  "body": "TID:MP261004.0900.H11223. Confirmed. You have sent Ksh 1,200.00 to 0722***111 JANE ATIENO on 04/10/26 at 09:00. Your balance is Ksh 340.00. Cost Ksh 10.00. Airtel Money",
+  "expect": {
+   "post": true,
+   "amountMinor": 120000,
+   "type": "expense"
+  },
+  "notes": "A clause-opening 'Cost Ksh N' is the fee",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-6",
+  "country": "AU",
+  "ledger": "AUD",
+  "sender": "NAB",
+  "body": "NAB: $60.00 was withdrawn at an ATM using your card ending 9876 on 03/10/2026 at 4:40pm.",
+  "expect": {
+   "post": true,
+   "amountMinor": 6000,
+   "type": "expense"
+  },
+  "notes": "'an ATM' is the place; its word keeps the withdrawal family readable",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-7",
+  "country": "BD",
+  "ledger": "BDT",
+  "sender": "CITYBANK",
+  "body": "Dear Customer, BDT 5,000.00 has been withdrawn from your City Bank A/C 456***789 at ATM CITY BANK DHANMONDI on 02-OCT-26 10:05. Available Balance BDT 20,000.00",
+  "expect": {
+   "post": true,
+   "amountMinor": 500000,
+   "type": "expense"
+  },
+  "notes": "ATM terminal name must not hide the cash-withdrawal word",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-8",
+  "country": "ZA",
+  "ledger": "ZAR",
+  "sender": "STDBANK",
+  "body": "Standard Bank: Debit order of R210.00 paid to TELKOM from acc ..7788 on 02/10/2026. Avail bal R1,115.20. Queries 0860 123 000",
+  "expect": {
+   "post": true,
+   "amountMinor": 21000,
+   "type": "expense"
+  },
+  "notes": "'from acc ..NNNN' ends the payee instead of joining it",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-9",
+  "country": "BR",
+  "ledger": "BRL",
+  "sender": "29123",
+  "body": "BB: Pix enviado com sucesso. Valor R$ 42,10 para MARIA S LIMA em 02/10/2026 as 10:01. Conta final 12-3.",
+  "expect": {
+   "post": true,
+   "amountMinor": 4210,
+   "type": "expense",
+   "transfer": true
+  },
+  "notes": "Portuguese 'Valor' labels the amount",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-10",
+  "country": "IN",
+  "ledger": "INR",
+  "sender": "AX-AXISBK",
+  "body": "INR 799.00 refunded to your AXIS BANK Credit Card XX4321 by FLIPKART on 05-10-2026. Avl Lmt INR 60,201.00 - AXIS BANK",
+  "expect": {
+   "post": true,
+   "amountMinor": 79900,
+   "type": "income"
+  },
+  "notes": "'refunded' (inflected) labels the amount; 'Avl Lmt' stays a limit",
+  "provenance": "synthetic",
+  "paths": [
+   "android-sms"
+  ]
+ },
+ {
+  "id": "U-ROLES-FIELDS-20",
+  "country": "KE",
+  "ledger": "KES",
+  "sender": "MPESA",
+  "body": "QWE0A1B2C3 Confirmed. Transaction cost, Ksh23.00. New M-PESA balance is Ksh1,100.00. Amount you can transact within the day is 499,000.00.",
+  "expect": {
+   "post": false,
+   "why": "other"
+  },
+  "notes": "A cost field alone is not a movement",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-21",
+  "country": "GH",
+  "ledger": "GHS",
+  "sender": "MobileMoney",
+  "body": "Fee charged: GHS 0.85. TAX charged: GHS 0.00. Current Balance: GHS 340.20. Transaction ID: 52103894999.",
+  "expect": {
+   "post": false,
+   "why": "other"
+  },
+  "notes": "Fee and tax fields without a principal",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-22",
+  "country": "KE",
+  "ledger": "KES",
+  "sender": "MPESA",
+  "body": "QWE0D4E5F6 Failed. Insufficient funds to complete the transaction. Transaction cost Ksh0.00. Your M-PESA balance is Ksh12.00.",
+  "expect": {
+   "post": false,
+   "why": "failed"
+  },
+  "notes": "Failed wallet transfer lists a cost field",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-23",
+  "country": "UG",
+  "ledger": "UGX",
+  "sender": "MTN MoMo",
+  "body": "Y'ello. Your request to send UGX 80,000 to JOHN LUBEGA could not be completed. Fee was UGX 1,500. Your new balance: UGX 20,000.",
+  "expect": {
+   "post": false,
+   "why": "failed"
+  },
+  "notes": "MTN failure notice carries fee and new-balance fields",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-24",
+  "country": "US",
+  "ledger": "USD",
+  "sender": "CARDCO",
+  "body": "CARDCO: Statement ready. New balance $845.20, minimum payment $25.00 due 10/28/2026. Pay at cardco.example.",
+  "expect": {
+   "post": false,
+   "why": "statement"
+  },
+  "notes": "'New balance' stays a statement total with a minimum payment beside it",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-30",
+  "country": "AR",
+  "ledger": "ARS",
+  "sender": "BANCOX",
+  "body": "Tu codigo 482915 para confirmar el pago de $ 6.430 en PEDIDOSYA. No lo compartas con nadie.",
+  "expect": {
+   "post": false,
+   "why": "otp"
+  },
+  "notes": "Spanish OTP naming a payment amount",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-31",
+  "country": "AR",
+  "ledger": "ARS",
+  "sender": "BANCOX",
+  "body": "Rechazamos el pago de $ 6.430 en PEDIDOSYA con tu tarjeta terminada en 1234. Fondos insuficientes.",
+  "expect": {
+   "post": false,
+   "why": "declined"
+  },
+  "notes": "Spanish decline with 'pago' and an amount",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-32",
+  "country": "MX",
+  "ledger": "MXN",
+  "sender": "BANCOX",
+  "body": "Tu pago de $389.50 en OXXO esta pendiente de autorizacion. Te avisaremos cuando se aplique.",
+  "expect": {
+   "post": false,
+   "why": "pending"
+  },
+  "notes": "Spanish pending payment",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-33",
+  "country": "CO",
+  "ledger": "COP",
+  "sender": "BANCOX",
+  "body": "Promocion: acumula $50.000 en compras con tu tarjeta y recibe un bono. Importe minimo $200.000. Aplican terminos.",
+  "expect": {
+   "post": false,
+   "why": "promotion"
+  },
+  "notes": "Spanish promotion with importe/monto words",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-34",
+  "country": "PE",
+  "ledger": "PEN",
+  "sender": "BANCOX",
+  "body": "Plin: ROSA HUAMAN te pidio S/ 75.50. Aprueba o rechaza la solicitud en tu app.",
+  "expect": {
+   "post": false,
+   "why": "request"
+  },
+  "notes": "Spanish money request",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-35",
+  "country": "CL",
+  "ledger": "CLP",
+  "sender": "BANCOX",
+  "body": "Se cargara $60.000 a tu tarjeta terminada en 5520 el 30/10/2026 por tu suscripcion.",
+  "expect": {
+   "post": false,
+   "why": "scheduled"
+  },
+  "notes": "Spanish scheduled charge",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-36",
+  "country": "AR",
+  "ledger": "ARS",
+  "sender": "BANCOX",
+  "body": "Tu saldo disponible es $ 120.000,00 en tu Cuenta en pesos ****3381.",
+  "expect": {
+   "post": false,
+   "why": "balance"
+  },
+  "notes": "Spanish balance-only",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-37",
+  "country": "BR",
+  "ledger": "BRL",
+  "sender": "29123",
+  "body": "Codigo 481516 para confirmar saque de R$ 400,00 no caixa 24 horas. Nao compartilhe.",
+  "expect": {
+   "post": false,
+   "why": "otp"
+  },
+  "notes": "Portuguese OTP with saque",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-38",
+  "country": "BR",
+  "ledger": "BRL",
+  "sender": "29123",
+  "body": "Valor R$ 75,00 sera debitado da sua conta em 30/10/2026 referente ao seu boleto.",
+  "expect": {
+   "post": false,
+   "why": "scheduled"
+  },
+  "notes": "Portuguese scheduled debit with Valor label",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-39",
+  "country": "BR",
+  "ledger": "BRL",
+  "sender": "29123",
+  "body": "Seu pagamento de R$ 120,00 para LOJA EXEMPLO esta pendente de confirmacao.",
+  "expect": {
+   "post": false,
+   "why": "pending"
+  },
+  "notes": "Portuguese pending payment",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-40",
+  "country": "BR",
+  "ledger": "BRL",
+  "sender": "29123",
+  "body": "Pix recusado. Valor R$ 42,10 para MARIA S LIMA nao foi enviado por saldo insuficiente.",
+  "expect": {
+   "post": false,
+   "why": "declined"
+  },
+  "notes": "Portuguese declined Pix",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-41",
+  "country": "BR",
+  "ledger": "BRL",
+  "sender": "29123",
+  "body": "Saldo disponivel: R$ 1.122,15 na conta final 2201.",
+  "expect": {
+   "post": false,
+   "why": "balance"
+  },
+  "notes": "Portuguese balance-only",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-42",
+  "country": "MA",
+  "ledger": "MAD",
+  "sender": "BANKX",
+  "body": "Votre code 482915 pour confirmer le retrait de 600,00 MAD. Ne le communiquez a personne.",
+  "expect": {
+   "post": false,
+   "why": "otp"
+  },
+  "notes": "French OTP with retrait",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-43",
+  "country": "MA",
+  "ledger": "MAD",
+  "sender": "BANKX",
+  "body": "Prelevement de 399,00 MAD prevu le 05/11/2026 sur votre compte ***2210.",
+  "expect": {
+   "post": false,
+   "why": "scheduled"
+  },
+  "notes": "French scheduled prelevement",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-44",
+  "country": "MA",
+  "ledger": "MAD",
+  "sender": "BANKX",
+  "body": "Achat de 420,50 MAD chez EXEMPLE SARL refuse: provision insuffisante.",
+  "expect": {
+   "post": false,
+   "why": "declined"
+  },
+  "notes": "French declined achat",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-45",
+  "country": "MA",
+  "ledger": "MAD",
+  "sender": "BANKX",
+  "body": "Solde disponible : 9 120,40 MAD sur le compte ***2210.",
+  "expect": {
+   "post": false,
+   "why": "balance"
+  },
+  "notes": "French balance-only",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-46",
+  "country": "TR",
+  "ledger": "TRY",
+  "sender": "BANKX",
+  "body": "Kalan limit 14.210,10 TL. Kartiniz ile yapilan islemler icin bilgi: 0850 000 0 000",
+  "expect": {
+   "post": false,
+   "why": "balance"
+  },
+  "notes": "Turkish limit-only text",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-47",
+  "country": "TR",
+  "ledger": "TRY",
+  "sender": "BANKX",
+  "body": "Bakiyeniz 1.230,45 TL dir.",
+  "expect": {
+   "post": false,
+   "why": "balance"
+  },
+  "notes": "Turkish balance-only",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-48",
+  "country": "TR",
+  "ledger": "TRY",
+  "sender": "BANKX",
+  "body": "3.000,00 TL harcama onay kodunuz 481516. Kimseyle paylasmayin.",
+  "expect": {
+   "post": false,
+   "why": "otp"
+  },
+  "notes": "Turkish OTP naming harcama",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-49",
+  "country": "TR",
+  "ledger": "TRY",
+  "sender": "BANKX",
+  "body": "1.250,00 TL tutarindaki alisveris islemi reddedildi.",
+  "expect": {
+   "post": false,
+   "why": "declined"
+  },
+  "notes": "Turkish declined purchase",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-50",
+  "country": "ID",
+  "ledger": "IDR",
+  "sender": "BANKX",
+  "body": "Saldo Rp 3.245.110 per 02/10/2026.",
+  "expect": {
+   "post": false,
+   "why": "balance"
+  },
+  "notes": "Indonesian balance-only",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-51",
+  "country": "ID",
+  "ledger": "IDR",
+  "sender": "BANKX",
+  "body": "Kode OTP 481516 untuk transfer Rp 1.500.000 ke BUDI. Jangan berikan kode ini ke siapapun.",
+  "expect": {
+   "post": false,
+   "why": "otp"
+  },
+  "notes": "Indonesian OTP naming a transfer",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-52",
+  "country": "ID",
+  "ledger": "IDR",
+  "sender": "BANKX",
+  "body": "Transfer Rp 500.000 ke BUDI SANTOSO gagal. Dana tidak didebet.",
+  "expect": {
+   "post": false,
+   "why": "failed"
+  },
+  "notes": "Indonesian failed transfer",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-53",
+  "country": "ID",
+  "ledger": "IDR",
+  "sender": "BANKX",
+  "body": "Transaksi Rp 150.000 di TOKO CONTOH sedang diproses dan menunggu konfirmasi.",
+  "expect": {
+   "post": false,
+   "why": "pending"
+  },
+  "notes": "Indonesian pending transaction",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-54",
+  "country": "ID",
+  "ledger": "IDR",
+  "sender": "BANKX",
+  "body": "Promo cashback jumlah maksimal Rp 50.000 untuk transaksi pertama. Syarat berlaku.",
+  "expect": {
+   "post": false,
+   "why": "promotion"
+  },
+  "notes": "Indonesian promo with jumlah",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-55",
+  "country": "TZ",
+  "ledger": "TZS",
+  "sender": "BANKX",
+  "body": "Salio lako ni Tsh63,400.00. Piga *150*00# kwa huduma zaidi.",
+  "expect": {
+   "post": false,
+   "why": "balance"
+  },
+  "notes": "Swahili balance-only",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-56",
+  "country": "TZ",
+  "ledger": "TZS",
+  "sender": "BANKX",
+  "body": "Muamala umeshindwa. Kiasi cha Tsh5,000.00 hakijatumwa kwa sababu ya salio pungufu.",
+  "expect": {
+   "post": false,
+   "why": "failed"
+  },
+  "notes": "Swahili failed transfer",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-57",
+  "country": "CN",
+  "ledger": "CNY",
+  "sender": "BANKX",
+  "body": "【工商银行】您尾号1234卡余额3,245.67元。",
+  "expect": {
+   "post": false,
+   "why": "balance"
+  },
+  "notes": "Chinese balance-only",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-58",
+  "country": "CN",
+  "ledger": "CNY",
+  "sender": "BANKX",
+  "body": "【工商银行】您的验证码481516，用于支付45.80元，请勿泄露。",
+  "expect": {
+   "post": false,
+   "why": "otp"
+  },
+  "notes": "Chinese OTP naming a payment",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-59",
+  "country": "CN",
+  "ledger": "CNY",
+  "sender": "BANKX",
+  "body": "【招商银行】本期账单金额2,345.00元，最低还款额235.00元，到期还款日10月25日。",
+  "expect": {
+   "post": false,
+   "why": "statement"
+  },
+  "notes": "Chinese statement with minimum payment",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-60",
+  "country": "CN",
+  "ledger": "CNY",
+  "sender": "BANKX",
+  "body": "【建设银行】您尾号5678账户支付500.00元失败，余额不足。",
+  "expect": {
+   "post": false,
+   "why": "failed"
+  },
+  "notes": "Chinese failed payment",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-61",
+  "country": "KR",
+  "ledger": "KRW",
+  "sender": "BANKX",
+  "body": "[Web발신] 잔액 845,300원",
+  "expect": {
+   "post": false,
+   "why": "balance"
+  },
+  "notes": "Korean balance-only",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-62",
+  "country": "KR",
+  "ledger": "KRW",
+  "sender": "BANKX",
+  "body": "[Web발신] 인증번호 481516 출금 200,000원 요청 확인",
+  "expect": {
+   "post": false,
+   "why": "otp"
+  },
+  "notes": "Korean OTP with a withdrawal amount",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-63",
+  "country": "JP",
+  "ledger": "JPY",
+  "sender": "BANKX",
+  "body": "残高 182,345円",
+  "expect": {
+   "post": false,
+   "why": "balance"
+  },
+  "notes": "Japanese balance-only",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-64",
+  "country": "JP",
+  "ledger": "JPY",
+  "sender": "BANKX",
+  "body": "お引出し 30,000円 はカードの利用限度のため取引できませんでした。",
+  "expect": {
+   "post": false,
+   "why": "declined"
+  },
+  "notes": "Japanese refused withdrawal",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-65",
+  "country": "TH",
+  "ledger": "THB",
+  "sender": "BANKX",
+  "body": "ยอดคงเหลือ 12,345.67 บาท",
+  "expect": {
+   "post": false,
+   "why": "balance"
+  },
+  "notes": "Thai balance-only",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-66",
+  "country": "MY",
+  "ledger": "MYR",
+  "sender": "BANKX",
+  "body": "RM0 Maybank: Akaun anda baki RM2,145.30 pada 19/09/26.",
+  "expect": {
+   "post": false,
+   "why": "balance"
+  },
+  "notes": "Malaysian free-SMS prefix before a balance-only text",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-67",
+  "country": "MY",
+  "ledger": "MYR",
+  "sender": "BANKX",
+  "body": "RM0 CIMB: OTP 481516 untuk transaksi RM128.40 di AEON. Jangan kongsi.",
+  "expect": {
+   "post": false,
+   "why": "otp"
+  },
+  "notes": "Malaysian free-SMS prefix before an OTP",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-68",
+  "country": "US",
+  "ledger": "USD",
+  "sender": "CARDCO",
+  "body": "Dr. Alvarez office: balance due $150.00. Pay online by 10/30.",
+  "expect": {
+   "post": false,
+   "why": "reminder"
+  },
+  "notes": "A bare 'cost'-style bill without a posting verb",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-69",
+  "country": "KE",
+  "ledger": "KES",
+  "sender": "MPESA",
+  "body": "Cost of airtime bundle is Ksh20.00. Dial *544# to buy.",
+  "expect": {
+   "post": false,
+   "why": "offer"
+  },
+  "notes": "'Cost' mid-sentence is not a fee field and sells something",
+  "provenance": "synthetic"
+ },
+ {
+  "id": "U-ROLES-FIELDS-70",
+  "country": "US",
+  "ledger": "USD",
+  "sender": "CARDCO",
+  "body": "Tax refund of $300.00 expected in 5-7 business days. Check status at irs.example.",
+  "expect": {
+   "post": false,
+   "why": "other"
+  },
+  "notes": "Tax refund expectation is not a posted credit",
+  "provenance": "synthetic"
+ }
+]
