@@ -272,7 +272,7 @@ export const HYDRATION_FINALIZE_VERSION = 2;
 
 const EMPTY_STATE: AppState = {
   privateAlertFormats: emptyPrivateAlertFormatStore(),
-  shareAlertFormats: false,
+  // shareAlertFormats stays undefined: "never chose", which means ON (see sharesAlertFormats).
   sharedAlertFormats: emptySharedAlertFormatState(),
   customCategories: [],
   hydrated: false,
@@ -478,8 +478,9 @@ export function migratePersistedState(
   const loadedTransactions = parsed.transactions;
   const privateFormats = normalizePrivateAlertFormatStore(parsed.privateAlertFormats);
   parsed.privateAlertFormats = { ...privateFormats, templates: privateFormats.templates.filter(format => format.status === 'validated') };
-  // Consent is a strict boolean (anything else is off); the public list is re-validated.
-  parsed.shareAlertFormats = parsed.shareAlertFormats === true;
+  // Consent is an explicit boolean choice or absent ("never chose" = default on).
+  // Anything else is treated as never chosen, so a stored false always stays false.
+  if (typeof parsed.shareAlertFormats !== 'boolean') delete parsed.shareAlertFormats;
   parsed.sharedAlertFormats = normalizeSharedAlertFormatState(parsed.sharedAlertFormats);
   parsed.ledgerMoney = migrateLegacyLedgerMoney(parsed);
   parsed.reviewTray = normalizeAlertReviewTray(parsed.reviewTray, Date.now());
@@ -945,7 +946,7 @@ type Action =
   | { type: 'deleteTransaction'; id: string }
   | { type: 'resolveBestEffort'; id: string; outcome: 'confirm' | 'undo' }
   | { type: 'setBestEffortAutoPost'; enabled: boolean }
-  | { type: 'setShareAlertFormats'; enabled: boolean }
+  | { type: 'setShareAlertFormats'; enabled: boolean | undefined }
   | { type: 'setSharedAlertFormats'; etag: string | null; fetchedAt: number; formats: SharedAlertFormat[] }
   | { type: 'touchSharedAlertFormats'; fetchedAt: number }
   | { type: 'clearSharedAlertFormats' }
@@ -1453,7 +1454,7 @@ function reduceState(state: AppState, action: Action): AppState {
         : emptyPrivateAlertFormatStore();
       next.privateAlertFormats = { ...next.privateAlertFormats,
         templates: next.privateAlertFormats.templates.filter(format => format.status === 'validated') };
-      next.shareAlertFormats = next.shareAlertFormats === true;
+      if (typeof next.shareAlertFormats !== 'boolean') delete next.shareAlertFormats;
       next.sharedAlertFormats = normalizeSharedAlertFormatState(next.sharedAlertFormats);
       next.customCategories = sanitizeCustomCategoryCatalog(next.customCategories);
       // Orphan money keeps its opaque category for honest history. Orphan
@@ -1778,7 +1779,8 @@ function reduceState(state: AppState, action: Action): AppState {
       setBestEffortAutoPostEnabled(action.enabled);
       return { ...state, bestEffortAutoPost: action.enabled };
     case 'setShareAlertFormats':
-      return { ...state, shareAlertFormats: action.enabled === true };
+      // undefined restores "never chose" (default on); only booleans are choices.
+      return { ...state, shareAlertFormats: typeof action.enabled === 'boolean' ? action.enabled : undefined };
     case 'setSharedAlertFormats':
       return { ...state, sharedAlertFormats: normalizeSharedAlertFormatState(
         { etag: action.etag, fetchedAt: action.fetchedAt, formats: action.formats }) };
@@ -2950,7 +2952,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
     }
-    const previous = authoritativeState.current.shareAlertFormats === true;
+    const previous = authoritativeState.current.shareAlertFormats;
     const next = dispatch({ type: 'setShareAlertFormats', enabled });
     const written = await persist(next);
     if (!written) {

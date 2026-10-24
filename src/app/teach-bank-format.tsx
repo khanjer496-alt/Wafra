@@ -16,6 +16,7 @@ import type { PrivateAlertFormat } from '@/lib/private-alert-formats';
 import { learnFromConfirmation, type LearnedFields, type LearnInput } from '@/lib/learned-alert-formats';
 import { SettingsSwitchRow } from '@/components/settings-rows';
 import { getRelayConfig } from '@/lib/relay';
+import { sharesAlertFormats } from '@/lib/shared-alert-format-share';
 import { submitSharedAlertShape } from '@/lib/shared-alert-format-sync';
 import { toSharedAlertShape, type SharedAlertShape } from '@/lib/shared-alert-formats';
 import {
@@ -154,8 +155,8 @@ export default function TeachBankFormatScreen() {
     const run = ++operation.current; saving.current = true; setBusy(true); setError('');
     try {
       await addPrivateAlertFormat(verified.template);
-      // Opt-in only, never in Private Mode, and never allowed to affect teaching.
-      const shape = state.shareAlertFormats === true && !privateMode ? pendingShape.current : null;
+      // On unless the person turned it off; never in Private Mode, and never allowed to affect teaching.
+      const shape = sharesAlertFormats({ shareAlertFormats: state.shareAlertFormats, privateMode }) ? pendingShape.current : null;
       if (shape) {
         void (async () => {
           try {
@@ -259,7 +260,7 @@ export default function TeachBankFormatScreen() {
       <ThemedText type="meta" themeColor="textSecondary">{words.onlyThePrivateLayoutIsRemembered}</ThemedText>
       <View style={{ borderRadius: 14, paddingHorizontal: 16, backgroundColor: band.card }}>
         <SettingsSwitchRow testID="format-share-switch" title={words.shareWithOthersTitle}
-          subtitle={words.shareWithOthersBody} value={state.shareAlertFormats === true} last palette={band}
+          subtitle={words.shareWithOthersBody} value={state.shareAlertFormats !== false} last palette={band}
           onChange={next => { setShareAlertFormats(next).catch(() => { if (mounted.current) setError(words.theFormatWasNotSavedYour); }); }} />
       </View>
       {formats.length > 0 && <View style={{ gap: 12 }}>

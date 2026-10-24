@@ -290,9 +290,10 @@ store biometric templates.
   in Review and nothing is posted. When the saved local-only preference is
   active, no rate request is made.
 
-- **Shared bank-format shapes (optional, off by default):** when you teach
-  Wafra a bank alert layout, the switch "Help other Wafra users with this bank"
-  lets Wafra send the layout's *shape* to Wafra's relay. The shape is the bank's
+- **Shared bank-format shapes (on by default, can be turned off):** when you
+  teach Wafra a bank alert layout, the switch "Help other Wafra users with this
+  bank" is shown on the teaching screen, on unless you turn it off there or in
+  Settings, and lets Wafra send the layout's *shape* to Wafra's relay. The shape is the bank's
   sender code, whether money left or entered the account, the currency code and
   an ordered list of generic words and empty placeholders (amount, merchant,
   date, card digits). It never contains amounts, card or account numbers, dates
@@ -308,9 +309,10 @@ store biometric templates.
   shares, is never published. Separately, every Wafra install downloads the
   published list (public, no sign-in) at most once a day to recognise formats
   on the phone; this download contains no information about you beyond the
-  network address, happens whether or not you opt in, and can be cleared in
+  network address, happens whether or not sharing is on, and can be cleared in
   Settings. Matching runs on the phone; a match only fills in fields for you to
-  confirm in Review. Turn the switch off at any time to stop future sharing;
+  confirm in Review. Turn the switch off at any time, on the teaching screen or in Settings, to
+  stop future sharing;
   shapes already sent cannot be withdrawn individually. Private Mode never sends or downloads shapes.
 
 - **On-device AI (platform models):** on iPhones with Apple Intelligence

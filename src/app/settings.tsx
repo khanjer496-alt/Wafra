@@ -1083,7 +1083,7 @@ export default function SettingsScreen() {
           {switchRow(
             t('shareFormatsSettingTitle'),
             t('shareFormatsSettingBody'),
-            state.shareAlertFormats === true,
+            state.shareAlertFormats !== false,
             (next) => {
               setShareAlertFormats(next).catch(() => Alert.alert(t('shareFormatsSettingTitle'), t('shareFormatsSaveFailed')));
             },

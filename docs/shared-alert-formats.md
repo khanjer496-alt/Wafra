@@ -1,7 +1,21 @@
 # Shared alert formats
 
-An opt-in feature that lets Wafra users who teach the app an unrecognised bank
-alert help other users of the same bank. It is off by default.
+A feature that lets Wafra users who teach the app an unrecognised bank
+alert help other users of the same bank. It is **on by default** and can be
+turned off at any time.
+
+## Consent
+
+- `shareAlertFormats` is absent until the person chooses; absent means on. Only
+  an explicit `false` (their choice, or a restored backup's) is off.
+- The switch is shown, already on, at the moment of teaching a format on the
+  teach screen, and can be turned off there or in Settings.
+- Private Mode never sends, whatever the switch says.
+- Scope today: taught formats. Sharing from Review confirmations of unrecognised
+  alerts needs the alert text at confirmation time, which the Review tray
+  deliberately never stores, so it is not wired yet. `shareConfirmedAlertFormat`
+  (src/lib/shared-alert-format-share.ts) is the tested hook for when the text is
+  available at that moment; the confirmation notice ships with it.
 
 ## What is sent
 
