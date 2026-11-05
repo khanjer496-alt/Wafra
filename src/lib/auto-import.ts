@@ -1,7 +1,8 @@
 import { createAiAlertReviewSession } from '@/lib/ai-alert-reader';
 import { createPrivateAlertFormatSession, type PrivateAlertFormatSessionOptions } from '@/lib/private-alert-format-runtime';
 import { canEnrichPrivateFormatReview, privateAlertFormatReviewEvent } from '@/lib/private-alert-format-review';
-import { Alert, AppState as RNAppState, Linking, PermissionsAndroid, Platform } from 'react-native';
+import { requestConsent } from '@/lib/consent-prompt';
+import { AppState as RNAppState, Linking, PermissionsAndroid, Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 
@@ -445,11 +446,11 @@ export async function requestSmsDeliveryPermission(
   if (await hasSmsDeliveryPermission()) return stillEnabled();
   // A previous OS grant may have been revoked. Clear stale consent before any fresh choice.
   if (SmsReader.hasLiveSmsConsent?.() && !SmsReader.setLiveSmsConsent(false)) return false;
-  const accepted = await new Promise<boolean>((resolve) => {
-    Alert.alert(translate('instantSmsDisclosureTitle'), translate('instantSmsDisclosureBody'), [
-      { text: translate('cancel'), style: 'cancel', onPress: () => resolve(false) },
-      { text: translate('enableAction'), onPress: () => resolve(true) },
-    ], { cancelable: true, onDismiss: () => resolve(false) });
+  const accepted = await requestConsent({
+    question: translate('instantSmsDisclosureTitle'),
+    body: translate('instantSmsDisclosureBody'),
+    cancelLabel: translate('cancel'),
+    confirmLabel: translate('enableAction'),
   });
   if (!accepted || !stillEnabled()) return false;
   const permission = PermissionsAndroid.PERMISSIONS.RECEIVE_SMS;

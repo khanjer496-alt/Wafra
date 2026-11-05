@@ -356,6 +356,9 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
           '@/lib/wafra-assistant': require('../build/wafra-assistant.js'),
         });
       }
+      if (name === '@/lib/consent-prompt') {
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/consent-prompt.ts'), dependencies, globals);
+      }
       if (name === '@/lib/shared-alert-format-share' || name === '@/lib/shared-alert-formats' ||
           name === '@/lib/shared-alert-format-sync' || name === '@/lib/shared-alert-format-active') {
         // Pure shared-format modules; harness consent is never hydrated, so

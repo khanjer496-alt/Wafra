@@ -280,17 +280,17 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
   {
     const requestLive = (allowed) => require('./build/auto-import.js').requestSmsDeliveryPermission(require('./build/i18n.js').t, allowed);
     const { check, request } = reactNative.PermissionsAndroid;
-    const originalAlert = reactNative.Alert.alert;
+    const { registerConsentPresenter } = require('./build/consent-prompt.js');
     let consent = false, osGranted = true, grants = 0, allow = false;
     const events = [];
     smsReader.hasLiveSmsConsent = () => consent;
     smsReader.setLiveSmsConsent = value => { events.push('persist'); consent = value; return true; };
     reactNative.PermissionsAndroid.check = async () => osGranted;
     reactNative.PermissionsAndroid.request = async () => { events.push('android'); grants++; return 'granted'; };
-    reactNative.Alert.alert = (_title, body, buttons) => {
+    const unregisterConsent = registerConsentPresenter(async ({ body }) => {
       events.push(body.includes('closed') && body.includes('incoming SMS') ? 'disclosure' : 'incomplete');
-      buttons[allow ? 1 : 0].onPress();
-    };
+      return allow;
+    });
     ok('an existing Android grant cannot bypass a declined in-app live consent',
       !(await requestLive()) && !consent && grants === 0 && events.join(',') === 'disclosure');
     allow = true; osGranted = false; events.length = 0;
@@ -310,7 +310,7 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
       nativeDelivery.indexOf('if (!InstantAlert.hasLiveSmsConsent(context)) return') < input);
     reactNative.PermissionsAndroid.check = check;
     reactNative.PermissionsAndroid.request = request;
-    reactNative.Alert.alert = originalAlert;
+    unregisterConsent();
   }
   const first = await scanInbox(0, {}, undefined, 'fr-FR');
   ok('launch-tested UAE parsing and explicit salary produce ordinary import rows',

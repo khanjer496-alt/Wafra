@@ -1,4 +1,4 @@
-import { Alert } from 'react-native';
+import { requestConsent } from '@/lib/consent-prompt';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 import { fetch as expoFetch } from 'expo/fetch';
@@ -40,14 +40,15 @@ export async function submitShapeAnonymously(
       prompting = true;
       try {
         const ar = initial.language === 'ar';
-        const choice = await new Promise<boolean>((resolve) => {
-          Alert.alert(ar ? 'هل تريد مشاركة صياغة البنك؟' : 'Share bank wording?', ar
+        const choice = await requestConsent({
+          question: ar ? 'هل تريد مشاركة صياغة البنك؟' : 'Share bank wording?',
+          body: ar
             ? 'تم الحفظ على جهازك. إذا وافقت، سيرسل وفرة صياغة التنبيهات المؤهلة التي تعلّمها أو تؤكدها لاحقًا إلى خادمه لمساعدة مستخدمين آخرين. تتضمن الصيغة رمز مرسل البنك والعملة واتجاه الدفعة. تُزال المبالغ والتواريخ وأرقام البطاقات وتُفحص الأسماء. يمكنك إيقاف المشاركة في الإعدادات.'
-            : 'Your entry is saved on this phone. If you turn sharing on, Wafra sends this bank’s wording and future eligible formats you teach or confirm to its relay to help other users. Each format includes the bank sender code, currency and payment direction. Amounts, dates and card digits are removed and names are screened. You can turn sharing off in Settings.', [
-            { text: ar ? 'إبقاء الصياغة خاصة' : 'Keep private', style: 'cancel', onPress: () => resolve(false) },
-            { text: ar ? 'مشاركة صياغة البنك' : 'Share bank wording', onPress: () => resolve(true) },
-          ], { cancelable: false });
+            : 'Your entry is saved on this phone. If you turn sharing on, Wafra sends this bank’s wording and future eligible formats you teach or confirm to its relay to help other users. Each format includes the bank sender code, currency and payment direction. Amounts, dates and card digits are removed and names are screened. You can turn sharing off in Settings.',
+          cancelLabel: ar ? 'إبقاء الصياغة خاصة' : 'Keep private',
+          confirmLabel: ar ? 'مشاركة صياغة البنك' : 'Share bank wording',
         });
+        if (choice === null) return;
         const latest = current();
         if (!latest || !mayPrepareSharedFormat(latest) || latest.shareAlertFormatsV1 !== undefined) return;
         await setChoice(choice);

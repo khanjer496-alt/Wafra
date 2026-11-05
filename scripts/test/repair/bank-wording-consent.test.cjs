@@ -15,7 +15,7 @@ function harness(state = {}) {
   const calls = [];
   let dialog, configGate, identityGate;
   const impl = loadSource('shared-alert-format-submit', {
-    'react-native': { Alert: { alert: (_title, body, options) => { calls.push('dialog'); dialog = { body, options }; } } },
+    '@/lib/consent-prompt': { requestConsent: copy => new Promise(answer => { calls.push('dialog'); dialog = { ...copy, answer }; }) },
     'expo-crypto': {}, 'expo-secure-store': {}, 'expo/fetch': {},
     '@/lib/relay': { getRelayConfig: async () => { calls.push('lookup'); return configGate ? configGate : null; } },
     '@/lib/shared-alert-format-share': choiceRules,
@@ -27,7 +27,8 @@ function harness(state = {}) {
   return {
     calls, state,
     send: () => impl.submitShapeAnonymously({}, () => state, async choice => { calls.push('choice'); state.shareAlertFormatsV1 = choice; }),
-    choose: async label => { await until(() => dialog); assert.match(dialog.body, /future eligible formats/); dialog.options.find(b => b.text === label).onPress(); },
+    choose: async label => { await until(() => dialog); assert.match(dialog.body, /future eligible formats/); assert.ok([dialog.cancelLabel, dialog.confirmLabel].includes(label)); dialog.answer(label === dialog.confirmLabel); },
+    dismissWithoutAnswer: async () => { await until(() => dialog); dialog.answer(null); },
     delayConfig: (p) => { configGate = p; }, delayPair: (p) => { identityGate = p; },
   };
 }
@@ -36,6 +37,15 @@ test('default and legacy ON cannot pair or upload; Keep private persists and avo
   const first = h.send(); await h.choose('Keep private'); await first; await h.send();
   assert.deepEqual(h.calls, ['dialog','choice']);
 });
+test('losing the presenter never records a choice or transmits the wording', async () => {
+  const h = harness();
+  const pending = h.send();
+  await h.dismissWithoutAnswer();
+  await pending;
+  assert.deepEqual(h.calls, ['dialog']);
+  assert.equal(h.state.shareAlertFormatsV1, undefined);
+});
+
 test('the affirmative choice permits this contribution and subsequent eligible saves', async () => {
   const h = harness(); const first = h.send(); await h.choose('Share bank wording'); await first;
   await h.send();

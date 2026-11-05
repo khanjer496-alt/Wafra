@@ -9,6 +9,7 @@ import { AppState, Platform, StyleSheet, View } from 'react-native';
 import { LockGate } from '@/components/lock-gate';
 import { SuperwallBillingProvider } from '@/components/superwall-billing-provider';
 import { SuperwallOnboarding } from '@/components/superwall-onboarding';
+import { ConsentPromptHost } from '@/components/ui/consent-prompt-host';
 import { ToastProvider } from '@/components/ui/toast';
 import { Colors } from '@/constants/theme';
 import { LanguageProvider } from '@/hooks/use-language';
@@ -236,6 +237,7 @@ export default function RootLayout() {
       <ThemeProvider value={navTheme}>
         <StatusBar style={dark ? 'light' : 'dark'} />
         <LockGate>
+          <ConsentPromptHost />
           <SuperwallOnboarding>
           <ToastProvider>
           <Stack screenOptions={{ headerShown: false }}>

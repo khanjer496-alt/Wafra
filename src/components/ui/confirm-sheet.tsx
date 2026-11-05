@@ -11,6 +11,8 @@ import { t } from '@/lib/i18n';
 interface ConfirmSheetProps {
   visible: boolean;
   onClose: () => void;
+  /** Runs on cancellation or dismissal, but never on confirmation. */
+  onCancel?: () => void;
   /**
    * The question, verbatim — the string that used to be the alert's title.
    * Drawn as the sheet's own heading rather than in the caps header, because
@@ -53,6 +55,7 @@ interface ConfirmSheetProps {
 export function ConfirmSheet({
   visible,
   onClose,
+  onCancel,
   question,
   body,
   confirmLabel,
@@ -72,10 +75,15 @@ export function ConfirmSheet({
     onConfirm();
   };
 
+  const cancel = () => {
+    onClose();
+    onCancel?.();
+  };
+
   return (
     <BottomSheet
       visible={visible}
-      onClose={onClose}
+      onClose={cancel}
       title={title ?? confirmLabel}
       footer={
         <View style={styles.actions}>
@@ -83,7 +91,7 @@ export function ConfirmSheet({
             inline
             variant="outline"
             label={cancelLabel ?? t('cancel', language)}
-            onPress={onClose}
+            onPress={cancel}
           />
           <Button
             inline
