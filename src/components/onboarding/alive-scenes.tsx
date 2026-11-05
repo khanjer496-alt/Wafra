@@ -2,7 +2,7 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getLocales } from 'expo-localization';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
   Easing,
   FadeIn,
@@ -111,7 +111,8 @@ function BrandLogo({ name, domain, color, fallbackIcon, size = 36 }: {
 }) {
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const uri = domain ? verifiedLogoUrl(domain) : null;
+  // Match Android’s offline ledger artwork, including these fictional onboarding examples.
+  const uri = Platform.OS !== 'android' && domain ? verifiedLogoUrl(domain) : null;
   const showImage = !!uri && !failed;
   const radius = Math.round(size * 0.32);
   // No brand-coloured or white tile: the logo sits on the night surface. The

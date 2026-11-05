@@ -9,7 +9,7 @@ const turn = () => new Promise(resolve => setImmediate(resolve));
 
 // Executes the real component's state/effect lifecycle while replacing only
 // React/native rendering and the resolver boundary. No device data or network.
-function harness(kind, { privateMode = false, bundled = null, merchantCategory = 'groceries' } = {}) {
+function harness(kind, { platform = 'ios', privateMode = false, bundled = null, merchantCategory = 'groceries' } = {}) {
   const hooks = [];
   let cursor = 0;
   let effects = [];
@@ -38,7 +38,7 @@ function harness(kind, { privateMode = false, bundled = null, merchantCategory =
   const resolve = (...args) => { calls++; return resolveLogo(...args); };
   const deps = {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx },
-    'react-native': { View: 'View', Platform: { OS: 'android' }, StyleSheet: { create: v => v } },
+    'react-native': { View: 'View', Platform: { OS: platform }, StyleSheet: { create: v => v } },
     'expo-image': { Image: 'Image' }, '@/constants/theme': { Radius: {}, BandPalettes: { light: { accounts: { glyphGround: '#EEE', tint: '#2F6577', rule: '#DDD' } }, dark: { accounts: { glyphGround: '#222', tint: '#7FB4C4', rule: '#333' } } } },
     // Avatars subscribe to the narrow private-mode context, not the whole
     // store, so a ledger mutation cannot re-render every row's artwork.
@@ -105,4 +105,19 @@ test('merchant: uncategorised names can still use global logo enrichment', async
   h.render(); h.flush(); await turn();
   assert.equal(h.calls, 1, 'Other is a classification fallback, not a reason to disable brand lookup');
   assert.equal(remoteSources(h.render()).length, 1);
+});
+
+for (const kind of ['merchant', 'bank']) {
+  test(`Android ${kind} never schedules a financial-record lookup or renders a CDN image`, async () => {
+    const h = harness(kind, { platform: 'android' });
+    h.render(); h.flush(); await turn();
+    assert.equal(h.calls, 0);
+    assert.deepEqual(remoteSources(h.render()), []);
+  });
+}
+test('Android continues to render a bundled merchant logo offline', () => {
+  const h = harness('merchant', { platform: 'android', bundled: { id: 'fixture-local', source: 42 } });
+  const node = h.render(); h.flush();
+  assert.equal(node.props.source, 42);
+  assert.equal(h.calls, 0);
 });

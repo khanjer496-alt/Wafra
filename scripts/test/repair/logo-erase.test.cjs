@@ -51,6 +51,7 @@ function harness(platform) {
     async multiGet(keys) { return keys.map(key => [key, data.get(key) ?? null]); },
   };
   const dependencies = {
+    'react-native': { Platform: { OS: platform === 'native' ? 'ios' : platform } },
     '@react-native-async-storage/async-storage': { __esModule: true, default: storage },
     '@/lib/markets': { bankBrandForName() { return null; } },
     '@/lib/storage-diagnostics': { recordStorageFailure() {} },
@@ -84,7 +85,7 @@ function harness(platform) {
     }, { filename: file });
     return exports;
   }
-  const state = load(platform === 'native' ? '@/lib/state-storage.native' : '@/lib/state-storage').stateStorage;
+  const state = load(platform !== 'web' ? '@/lib/state-storage.native' : '@/lib/state-storage').stateStorage;
   return {
     data, storage, state, load,
     get databaseDeletes() { return databaseDeletes; },
@@ -211,3 +212,18 @@ for (const platform of ['web', 'native']) {
     assert.equal(h.fetchCalls, 1, 'the new generation performs one fresh search after its empty cache read');
   });
 }
+
+test('Android financial records skip prior cached CDN URLs, known bank domains and name searches', async () => {
+  const h = harness('android');
+  h.data.set(MERCHANT_KEY, MERCHANT_RECORD);
+  h.data.set(BANK_KEY, BANK_RECORD);
+  for (const [module, resolve, name] of [
+    ['merchant-logo-resolver', 'resolveRemoteMerchantLogo', 'Aseer Time'],
+    ['merchant-logo-resolver', 'resolveRemoteMerchantLogo', 'Starbucks'],
+    ['merchant-logo-resolver', 'resolveRemoteMerchantLogo', 'New Merchant'],
+    ['bank-logo-resolver', 'resolveBankLogo', 'Bank of America'],
+    ['bank-logo-resolver', 'resolveBankLogo', 'New Bank'],
+  ]) assert.equal(await h.load('@/lib/' + module)[resolve](name), null);
+  assert.equal(h.storageReads, 0);
+  assert.equal(h.fetchCalls, 0);
+});

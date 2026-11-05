@@ -14,7 +14,8 @@ function BankAvatarInner({ account, size = 36 }: { account: Account; size?: numb
   const theme = useTheme();
   const dark = useColorScheme() === 'dark';
   const privateMode = usePrivateMode();
-  const allowRemote = !privateMode; // Narrow context: unrelated ledger changes do not rerender every visible row.
+  // Android record names may come from bank SMS; even a cached CDN URL reveals the brand.
+  const allowRemote = Platform.OS !== 'android' && !privateMode;
   const [logo, setLogo] = useState<ResolvedBankLogo | null>(null);
   const [failed, setFailed] = useState(false);
   const [loadedLogo, setLoadedLogo] = useState<string | null>(null);
