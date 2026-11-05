@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { isDeepStrictEqual } = require('node:util');
 
 let pass = 0;
 let fail = 0;
@@ -70,8 +71,10 @@ const ok = (name, condition, detail = '') => {
       manifest.appStoreVersion === '1.0.0', manifest.appStoreVersion);
     ok('metadata-only preparation never implies screenshots were reviewed',
       manifest.assetsIncluded === false);
-    ok('generated manifest keeps live pricing approval blocked',
-      manifest.pricing.approvalStatus === 'pending-commercial-approval');
+    const sourcePricing = JSON.parse(fs.readFileSync(path.join(root, 'docs/store-pricing.json'), 'utf8'));
+    const packagedManifest = JSON.parse(fs.readFileSync(path.join(output, 'manifest.json'), 'utf8'));
+    ok('generated package manifest preserves the pricing decision and its storefront evidence',
+      isDeepStrictEqual(packagedManifest.pricing, sourcePricing));
 
     let rejectedUnsafeOutput = false;
     try {
