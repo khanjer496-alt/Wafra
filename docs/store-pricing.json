@@ -1,6 +1,7 @@
 {
   "schemaVersion": 2,
-  "approvalStatus": "pending-commercial-approval",
+  "approvalStatus": "publisher-approved-pending-store-readback",
+  "publisherApprovalDate": "2026-11-06",
   "distribution": "worldwide",
   "strategy": "storefront-native-price-points",
   "rules": {
@@ -16,14 +17,14 @@
       "productId": "wafra_pro_weekly",
       "googleBasePlanId": "weekly",
       "referencePrice": { "currency": "USD", "amount": "4.99" },
-      "approvedBasePrice": null,
+      "approvedBasePrice": { "currency": "USD", "amount": "4.99", "publisherApproved": true },
       "readBackEvidence": null
     },
     "yearly": {
       "productId": "wafra_pro_yearly",
       "googleBasePlanId": "yearly",
       "referencePrice": { "currency": "USD", "amount": "49.99" },
-      "approvedBasePrice": null,
+      "approvedBasePrice": { "currency": "USD", "amount": "49.99", "publisherApproved": true },
       "readBackEvidence": null
     }
   }

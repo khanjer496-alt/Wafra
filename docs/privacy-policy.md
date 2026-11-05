@@ -267,6 +267,8 @@ store biometric templates.
 
 ## Other network activity
 
+- **Android logo artwork:** On Android, Wafra displays merchant and bank artwork using bundled images or local fallback icons and initials. The updated Android release does not send merchant names, bank names, or their domains to Brandfetch for logo lookups or artwork downloads. Older test builds and other platforms can use the existing logo service described in the policy.
+
 - **Automatic logos:** 112 merchant logos are bundled with the app and supported
   launch-market banks are matched locally to fixed bank domains. For other
   merchant or bank identities, when online features are enabled, Wafra may use
@@ -350,6 +352,8 @@ store biometric templates.
   explicitly configured research builds. When it is enabled, the download
   carries no bank message, transaction, identifier or question, every file is
   checked against a fixed size and SHA-256 hash, and inference runs locally.
+
+- **Complimentary access codes:** When you enter a complimentary access code, Wafra sends the code over HTTPS to its dedicated access service on Cloudflare to verify access to Pro. The app stores the code in Android secure storage and checks it again on app use while enrolled. The service stores a hash of the publisher-issued code and returns a short-lived entitlement. It receives no ledger, SMS, transaction, account, or device identifiers from the app. Cloudflare handles the connection, including the network address, to deliver the service. Private Mode pauses verification. Removing the code or erasing the app’s data clears the local credential. No account or purchase is created.
 
 - **Purchases and paywalls:** when store billing is configured, Apple or Google
   processes payment and Superwall provides paywall/onboarding presentation,
