@@ -54,15 +54,20 @@ try {
         assert.equal(await page.getByRole('navigation').getByRole('link', { name, exact: true }).count(), 1);
       }
       if (route === 'privacy/') {
-        assert.match(await page.locator('main').innerText(), /Launch draft\./);
+        const privacy = await page.locator('main').innerText();
+        assert.match(privacy, /Nasida Apps LLC/);
+        assert.doesNotMatch(privacy, /Launch draft/);
         assert.equal(await page.locator('ol').count(), 1);
         assert.equal(await page.locator('ol > li').count(), 5);
         assert.match(await page.locator('ol > li').first().innerText(), /Any Sender.*trigger\./s);
       } else if (route === 'terms/') {
-        assert.match(await page.locator('aside.notice').innerText(), /Launch draft.*needs counsel review/s);
-        assert.match(await page.locator('main').innerText(), /\[\[GOVERNING LAW — PUBLISHER\/COUNSEL TO CONFIRM\]\]/);
+        assert.doesNotMatch(await page.locator('main').innerText(), /Launch draft/);
+        const terms = await page.locator('main').innerText();
+        assert.match(terms, /laws of the State of Wyoming/);
+        assert.match(terms, /mandatory consumer laws/);
+        assert.doesNotMatch(terms, /\[\[GOVERNING LAW/);
       } else if (route === 'support/') {
-        assert.equal(await page.getByRole('link', { name: 'support@nasidaapps.com' }).getAttribute('href'), 'mailto:support@nasidaapps.com');
+        assert.equal(await page.getByRole('link', { name: 'naser@nasidaapps.com' }).getAttribute('href'), 'mailto:naser@nasidaapps.com');
       } else {
         assert.equal(await page.locator('meta[name="robots"]').getAttribute('content'), 'noindex, nofollow, noarchive');
         assert.match(await page.locator('h1').innerText(), /That page is not here/);

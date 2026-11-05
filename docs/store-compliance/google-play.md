@@ -1,6 +1,6 @@
 # Google Play compliance package
 
-_Prepared 10 September 2026. Complete against the exact AAB uploaded to Play._
+_Prepared 6 November 2026. Complete against the exact AAB uploaded to Play._
 
 ## Financial features declaration
 
@@ -15,16 +15,16 @@ happened.
 Permitted-use category: **SMS-based money management / budgeting**, subject to
 Google Play review.
 
-- `READ_SMS`: requested only after the user chooses Android automatic tracking.
-  Wafra scans retained SMS locally for supported financial alerts so it can build
-  the user's private ledger. Non-financial messages are ignored and SMS text is
-  not uploaded to Wafra's relay.
-- `RECEIVE_SMS`: requested separately only when the user enables instant
-  transaction alerts. Wafra inspects a newly delivered SMS locally for supported
-  financial activity and can show the optional alert. It does not maintain a
-  second raw-SMS archive.
-- Both permissions are optional. Manual entry, pasted alerts and backup/restore
-  remain usable when either permission is declined.
+- `READ_SMS`: after an explanation and consent, Wafra reads retained SMS on
+  the device to find financial alerts for the user's ledger. It ignores
+  non-financial messages. Automatic scanning does not upload raw SMS bodies.
+- `RECEIVE_SMS`: if the user separately enables live SMS tracking, new
+  messages can trigger on-device processing in the background. Supported
+  activity can update the ledger; uncertain activity may enter Review.
+  Wafra can additionally show a transaction notification when enabled.
+- Inbox history works without live tracking. Manual entry works without
+  either SMS permission. Bank-app notification access excludes the default
+  SMS app and recognized messaging apps regardless of SMS permission.
 
 Reviewer evidence to attach: release-build screen recording showing the in-app
 prominent disclosure immediately before each Android permission prompt, a deny
@@ -38,6 +38,15 @@ and optional network features in the submitted AAB.
 
 - Android SMS/bank-notification content used for automatic tracking is processed
   on-device and is not uploaded to the relay.
+- On teaching a bank layout or confirming an unchanged reading of an unknown
+  format, the user can keep it private or explicitly enable sharing. Both
+  choices save locally. Outgoing sharing stays off without affirmative consent,
+  including for earlier default-on settings. While consent remains on, an
+  eligible save can send a screened layout (sender code, currency, direction,
+  generic words and field placeholders) to the relay and uses an anonymous
+  pairing for this purpose. The relay receives the network address. Published
+  layouts are downloaded separately. Check collection, purposes, retention
+  and deletion against the shared-format section of the Privacy Policy.
 - Main ledger records are stored in encrypted app storage on the device.
 - Superwall, when production billing is configured, processes purchase/
   subscription state plus paywall/onboarding interaction data according to its
@@ -48,7 +57,8 @@ and optional network features in the submitted AAB.
 - Optional statement/email/trusted-device features can send user-selected data
   to Wafra's relay as described in the Privacy Policy; raw statement/email data
   is processed transiently and structured results are device-sealed.
-- Wafra has no ads or third-party analytics in the current repository.
+- Wafra has no ads. Its Superwall and ML Kit integrations can process
+  diagnostic or analytics data as described above and below.
 - ML Kit GenAI Prompt API (`com.google.mlkit:genai-prompt`, Gemini Nano via
   AICore) runs inference on the device; Wafra sends it only an Ask question or
   an unclassified merchant name and makes no network request of its own for

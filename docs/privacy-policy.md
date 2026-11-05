@@ -1,12 +1,9 @@
 # Wafra Privacy Policy
 
-_Last updated: 8 October 2026_
+_Last updated: 6 November 2026_
 
 Wafra ("the app") is a personal money manager for Android and iOS published by
-**Nasidaapps LLC** ("Wafra", "we", "us").
-
-**Launch draft.** Have counsel review this before publishing. Any jurisdiction-specific transfer language required for the final distribution
-territories must still be confirmed before release.
+**Nasida Apps LLC** ("Wafra", "we", "us").
 
 ## The short version
 
@@ -35,14 +32,16 @@ territories must still be confirmed before release.
   also has a 24 MiB safety limit. Nothing from this history import is sent to
   Wafra's relay.
 - The ledger, accounts, budgets, bills, goals and settings live in encrypted
-  app storage on the device. Wafra has no advertising or third-party analytics.
-- **Zero message access is always available:** leave Android SMS permission off
-  or leave iPhone automatic capture unconfigured and use manual entry/imports.
+  app storage on the device. Wafra has no ads. When enabled, Superwall processes
+  paywall and onboarding events. Google's ML Kit SDK can collect diagnostic and
+  usage data. See the SDK disclosures below.
+- **Manual entry is always available:** turn off Android SMS tracking and
+  bank-app notification access, or leave iPhone automatic capture unconfigured.
 - Wafra cannot sign in to a bank, reply to a message, approve a transaction or
   move money. Automatic capture may hold raw Message content in the protected
   local queue described below until it is processed (at most 30 days); only
-  supported structured financial activity can enter the ledger, and no Message
-  content is uploaded.
+  supported structured financial activity can enter the ledger, and this local capture path does not upload raw message bodies. Separate optional
+  reporting and bank-format sharing are described below.
 
 ## Message-access choices
 
@@ -68,11 +67,19 @@ not promise an exact background cleanup time.
 
 ## Android bank-alert access
 
-**SMS (`READ_SMS`, `RECEIVE_SMS`).** If permission is granted, Wafra reads bank
-transaction alerts to extract an amount, merchant, date, card or account tail,
-direction and any quoted balance. Inbox scanning and parsing happen on the
-Android device. Wafra does not maintain a second raw-SMS delivery archive; the
-Android system inbox remains the source read during import.
+**Inbox history (`READ_SMS`).** When you choose a history scan, Wafra asks to
+read the Android inbox and identifies supported financial alerts on your phone.
+It can extract an amount, merchant, date, card or account tail, direction and
+quoted balance. The Android inbox holds the original messages. Automatically
+scanning the inbox does not send raw messages to the relay.
+
+**Live SMS tracking (`RECEIVE_SMS`).** This is a separate choice. If you enable
+it, Android can deliver a new SMS to Wafra while the app is in the background.
+Wafra checks it on the device for financial activity and can update the ledger
+or the Review list. If you've enabled Wafra's transaction notifications, it
+can also show an alert. Wafra does not keep a second raw-SMS delivery archive.
+You can use inbox history without live tracking and manual entry without either
+permission.
 
 Messages that do not look financial are ignored. When the parser cannot
 confidently understand a bank format, Android may keep a short local excerpt so
@@ -87,15 +94,16 @@ Wafra places candidate bank-app alerts in a bounded, short-lived queue encrypted
 with Android Keystore. The app deletes each queued alert after durable local
 classification. This is off until the user enables it.
 
-Android's notification access is device-wide, so Wafra sees each posted
-notification and classifies it in memory before storing anything.
-Notifications from chat apps such as WhatsApp, Telegram or Signal are never
-stored or used. Notifications from SMS apps, including the default SMS app,
-are ignored while Wafra has SMS permission, because the SMS path already reads
-the same messages. Without SMS permission, an SMS app's notification that looks
-financial may enter the encrypted queue and is shown only in Review. It is
-never imported automatically, and approving it does not make Wafra trust that
-app.
+Android grants notification access at the device level. Wafra checks the
+posting app before examining an alert for financial activity. It excludes the
+default SMS app and recognized messaging apps, including WhatsApp, Telegram
+and Signal, whether or not SMS access is enabled. Bank-app notification access
+does not provide an alternative way to import SMS. You can revoke notification
+access in Android settings.
+
+Earlier Android test builds could show a financial-looking SMS-app notification
+in Review when inbox access was off. On those builds, turning off notification
+access in Android settings also stops that behavior.
 
 ## iPhone automatic capture
 
@@ -290,37 +298,29 @@ store biometric templates.
   in Review and nothing is posted. When the saved local-only preference is
   active, no rate request is made.
 
-- **Shared bank-format shapes (on by default, can be turned off):** when you
-  teach Wafra a bank alert layout, or confirm a Review item for an alert Wafra
-  did not recognise (only if you confirm Wafra's reading unchanged), the switch "Help other Wafra users with this
-  bank" is shown on the teaching screen and on the Review confirmation, on unless you turn it off there or in
-  Settings, and lets Wafra send the layout's *shape* to Wafra's relay. The shape is the bank's
-  sender code, whether money left or entered the account, the currency code and
-  an ordered list of generic words and empty placeholders (amount, merchant,
-  date, card digits). It never contains amounts, card or account numbers, dates
-  or the message text. Anything containing digits, an address or a link is
-  refused on the phone before sending, and so is a layout with a word that
-  looks like a name, unless it is a common banking word; a merchant that Wafra
-  cannot match exactly, and words in other scripts that are not common banking
-  words, also stop the layout from being sent. Names are screened out this way,
-  but the check cannot recognise every name, which is why a format is only used
-  after 3 different people send identical wording (below); wording that is not
-  published within 30 days is deleted from the relay. A phone with the iPhone
-  capture pairing sends through it. Any other phone, such as an Android phone,
-  creates a separate anonymous sharing pairing the first time it shares: it
-  holds no email, name or ledger data, is used only for this sharing, is
-  never created when sharing is off or in Private Mode, and is deleted by Erase
-  all. The relay sees the request's network address and counts one vote per
-  paired vault. A shape is published only after 3 different vaults sent the
-  identical shape, so a layout containing anything personal, which nobody else
-  shares, is never published. Separately, every Wafra install downloads the
-  published list (public, no sign-in) at most once a day to recognise formats
-  on the phone; this download contains no information about you beyond the
-  network address, happens whether or not sharing is on, and can be cleared in
-  Settings. Matching runs on the phone; a match only fills in fields for you to
-  confirm in Review. Turn the switch off at any time, on the teaching screen or in Settings, to
-  stop future sharing;
-  shapes already sent cannot be withdrawn individually. Private Mode never sends or downloads shapes.
+- **Shared bank-format shapes (optional):** Wafra can learn an alert layout on
+  your phone when you teach it or confirm its unchanged reading of an unfamiliar
+  alert in Review. The first time a layout is eligible to share, you can choose
+  **Keep private** or **Share bank wording**. Either choice saves your work on
+  the phone. Choosing to share also permits future eligible layouts to be sent
+  until you turn sharing off in Settings. An older default-on setting by itself
+  does not grant this permission in the updated app. Earlier test versions
+  could contribute an eligible layout when it was saved with sharing switched on.
+  The shared layout contains the bank sender code, direction, currency code
+  and generic words with placeholders for details such as amounts, merchants
+  and dates. It excludes the original message and identified transaction values.
+  Wafra refuses layouts with digits, addresses, links or unusual words that may
+  identify someone. This screening cannot recognize every possible name.
+  The relay only publishes a layout after at least three different paired
+  vaults send an identical shape. Unpublished wording expires after 30 days.
+  An iPhone can use its existing capture pairing. Other phones create an
+  anonymous pairing when they first share. The relay sees the network address
+  and counts one vote per vault. **Erase all data** deletes the pairing.
+  Wording already sent cannot be withdrawn individually. Public layouts may
+  be downloaded at most once a day, independently of the sharing preference,
+  and can be cleared in Settings. Matching runs on the phone and can suggest
+  fields for you to confirm in Review. Private Mode prevents both contributions
+  and downloads.
 
 - **On-device AI (platform models):** on iPhones with Apple Intelligence
   (iOS 26 or later) Wafra can use Apple's Foundation Models, and on supported
@@ -393,21 +393,24 @@ store biometric templates.
   merges a change automatically. Raw message bodies are not uploaded. Reports
   contain no device, advertising, installation or push identifier.
 
-Wafra does not include advertising, third-party analytics or crash reporting.
+Wafra does not use financial records for advertising. Superwall and ML Kit
+processing is described above.
 
 ## Website
 
-Wafra's public website sets no cookies and runs no scripts in the browser. It is
-hosted on Cloudflare Pages. To learn whether the site helps people find Wafra,
-the server counts landing-page views and download-button clicks. Each count
-records only the time, the page or button, the visitor's country as determined by
-Cloudflare, the hostname of the referring website, a campaign tag if the link
-carried one (for example `utm_source`), and whether the request appears to come
-from an automated client. Wafra does not record IP addresses, browser or device
-identifiers, or full referring addresses, and does not combine these counts with
-app data. Cloudflare keeps the counts for three months. As the hosting provider,
-Cloudflare also processes connection data such as IP addresses to deliver the
-site.
+Wafra's public website is hosted on Cloudflare Pages. The server counts
+landing-page views and download-button clicks. It records the time, page or
+button, visitor country, referring hostname, campaign tag (if present) and
+whether the request appears automated. These aggregate counts are kept for
+three months and are separate from app data. Cloudflare also processes
+connection data, including the IP address, to deliver the site.
+
+The website also uses Minilytics, hosted in our Cloudflare account. Its
+browser script measures page visits, visit duration, location, browser and
+referring websites. It uses a first-party visitor cookie (up to one year) and
+a session cookie (30 minutes). Raw analytics events are retained for 90 days.
+[Opt this browser out of website analytics](https://wafra-app-azg.pages.dev/?ml_ignore=true). This tracking
+applies to the website. The sections above cover the Android and iPhone apps.
 
 ## Automated processing
 
@@ -439,18 +442,16 @@ archive exists.
 
 ## Processing location
 
-Nasidaapps LLC uses Cloudflare Workers and D1 for Wafra's optional relay-backed
+Nasida Apps LLC uses Cloudflare Workers and D1 for Wafra's optional relay-backed
 features. Internet routing and infrastructure may process data outside the
 user's country. The main Android and iPhone local-capture paths described above
-do not upload bank-message text to this relay. Where local law requires more
-specific international-transfer or data-location disclosure, that disclosure
-must be added for the affected storefront before distribution there.
+do not upload bank-message text to this relay.
 
 ## Your choices and deletion
 
 The user can:
 
-- decline Android SMS or notification access;
+- decline Android inbox access, live SMS tracking or bank-app notification access separately;
 - leave iPhone automatic capture (Messages, bank-app notifications and Apple
   Pay) unconfigured, or delete those automations in Shortcuts;
 - choose whether to install or run the iPhone history Shortcut, choose its date
@@ -480,4 +481,4 @@ will be surfaced in the app.
 
 ## Contact
 
-Email: [support@nasidaapps.com](mailto:support@nasidaapps.com)
+Email: [naser@nasidaapps.com](mailto:naser@nasidaapps.com)

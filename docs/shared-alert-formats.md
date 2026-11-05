@@ -1,19 +1,19 @@
 # Shared alert formats
 
 A feature that lets Wafra users who teach the app an unrecognised bank
-alert help other users of the same bank. It is **on by default** and can be
-turned off at any time.
+alert help other users of the same bank. Sending a layout requires an affirmative choice. Local
+learning and matching work without it.
 
 ## Consent
 
-- `shareAlertFormats` is absent until the person chooses; absent means on. Only
-  an explicit `false` is off. Restoring a backup keeps THIS phone's own choice.
-- Installs that stored the old default (`false`) before this version stay Off:
-  that value is indistinguishable from a deliberate choice, so it is respected.
-  They can turn sharing on in Settings.
-- The switch is shown, already on, at the moment of teaching a format on the
-  teach screen, and can be turned off there or in Settings.
-- Private Mode never sends, whatever the switch says.
+- A current `shareAlertFormatsV1` value of `true` permits submissions unless
+  Private Mode is on. An absent value, including an upgraded legacy
+  default-on setting, does not authorize transmission.
+- On the first eligible Teach or Review save, an undecided person can select
+  **Keep private** or **Share bank wording** after reading what is sent.
+  Either choice completes the local save. A saved choice persists until
+  changed. An explicit off setting and Private Mode suppress contributions
+  and automatic prompts. A person can also opt in explicitly in Teach or Settings.
 - Scope: taught formats, and Review confirmations of alerts no proven parser
   recognised (not UAE/Saudi launch alerts, never in Private Mode).
 - For Review items, the value-free shape is built when the item is created,
@@ -27,11 +27,10 @@ turned off at any time.
   reading unchanged (same amount, currency and direction as `shareBasis`),
   sharing is still on (`shouldSubmitConfirmedShape`).
   A corrected reading is never shared. Submission is fire-and-forget and silent.
-- The Review confirm screen shows one line ("If you confirm this reading
-  unchanged, Wafra shares this bank's wording — names screened out — to help
-  other users.") with a "Turn off sharing bank wording" control while sharing is
-  on for that item. Turning sharing off, or switching Private Mode on, also
-  strips the stored candidates from every pending Review item.
+- Review never uploads an unchanged reading solely because the user saved it.
+  Outgoing sharing requires the separate, current choice above. Turning sharing
+  off or enabling Private Mode also strips saved candidates from pending Review
+  items.
 - Names are screened out, not guaranteed absent: a merchant must be an exactly
   grounded slot (otherwise no shape is built), words in other scripts are
   refused unless on a short banking-boilerplate allowlist, and a format is only

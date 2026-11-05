@@ -171,14 +171,15 @@ try {
   ok('dates, code and source document links render as HTML',
     /<em>Last updated:/.test(privacy) && privacy.includes('<code>READ_SMS</code>') &&
     terms.includes('<a href="/privacy/">Privacy Policy</a>'));
-  ok('legal drafts and unresolved governing law remain visible',
-    privacy.includes('Launch draft.') && terms.includes('Launch draft') &&
-    terms.includes('[[GOVERNING LAW — PUBLISHER/COUNSEL TO CONFIRM]]'));
+  ok('publisher-adopted policies contain the entity, selected law and consumer protections',
+    privacy.includes('Nasida Apps LLC') && !privacy.includes('Launch draft') && !terms.includes('Launch draft') &&
+    terms.includes('laws of the State of Wyoming') && terms.includes('mandatory consumer') &&
+    !terms.includes('[[GOVERNING LAW'));
   ok('terms accurately describe local iPhone capture',
     terms.includes('No Message content is uploaded by this local capture path.') &&
     !terms.includes('the relay transiently receives the selected alert'));
   ok('support uses the existing contact and valid deletion and billing anchors',
-    support.includes('mailto:support@nasidaapps.com') &&
+    support.includes('mailto:naser@nasidaapps.com') &&
     support.includes('/privacy/#your-choices-and-deletion') && privacy.includes('id="your-choices-and-deletion"') &&
     support.includes('/terms/#wafra-pro-trial-and-billing') && terms.includes('id="wafra-pro-trial-and-billing"'));
   const notFound = read('404.html');
