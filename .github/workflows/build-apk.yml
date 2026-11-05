@@ -328,7 +328,7 @@ jobs:
       - name: Build Play Store bundle (AAB)
         if: github.event.inputs.bundle == 'true' && github.event.inputs.corpus != 'true'
         working-directory: android
-        run: ./gradlew bundleRelease --no-daemon
+        run: ./gradlew :wafra-complimentary-transport:testReleaseUnitTest bundleRelease --no-daemon
 
       - name: Verify update channel in the packaged Play bundle
         if: inputs.bundle && !inputs.corpus

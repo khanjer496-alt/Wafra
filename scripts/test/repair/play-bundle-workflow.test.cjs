@@ -49,9 +49,22 @@ test('Play manifest embeds the production channel and preserves unrelated reques
   const run = (mode) => spawnSync(process.execPath, [path.join(root, 'scripts/play-update-channel.cjs'), mode, file], { encoding: 'utf8' });
   assert.equal(run('verify').status, 1, 'a preview-channel release must fail the artifact check');
   for (let i = 0; i < 2; i++) assert.equal(run('configure').status, 0);
-  assert.equal(run('verify').status, 0);
+  // The generated manifest still contains a merger directive. A packaged permission
+  // with that name would be an actual request and must fail our release check.
+  assert.equal(run('verify').status, 1);
   const manifest = await AndroidConfig.Manifest.readAndroidManifestAsync(file);
   const entries = AndroidConfig.Manifest.getMainApplicationOrThrow(manifest)['meta-data'].filter((entry) => entry.$['android:name'] === key);
+  const permissions = manifest.manifest['uses-permission'];
+  const isOverlay = (entry) => entry.$['android:name'] === 'android.permission.SYSTEM_ALERT_WINDOW';
+  assert.equal(permissions.filter(isOverlay).length, 1);
+  assert.equal(permissions.find(isOverlay).$['tools:node'], 'remove');
+  // Model the merged output, both with the permission absent and accidentally reintroduced.
+  manifest.manifest['uses-permission'] = permissions.filter(p => !isOverlay(p));
+  await AndroidConfig.Manifest.writeAndroidManifestAsync(file, manifest);
+  assert.equal(run('verify').status, 0);
+  manifest.manifest['uses-permission-sdk-23'] = [{ $: { 'android:name': 'android.permission.SYSTEM_ALERT_WINDOW' } }];
+  await AndroidConfig.Manifest.writeAndroidManifestAsync(file, manifest);
+  assert.equal(run('verify').status, 1);
   assert.equal(entries.length, 1);
   assert.deepEqual(JSON.parse(entries[0].$['android:value']), { 'x-other': 'keep', 'expo-channel-name': 'production' });
 });
