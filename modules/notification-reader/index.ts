@@ -70,6 +70,10 @@ interface NotificationReaderModule {
   /** Persist the app's tracking choice; disabling also erases queued alerts. */
   setCaptureEnabled(enabled: boolean, expiresAtMs: number): Promise<boolean>;
   /** Shared entitlement lease + independently selected bank-notification source. */
+  anchorComplimentaryLease?(issued: number, budget: number): boolean;
+  complimentaryRemainingMs?(issued: number): number;
+  clearComplimentaryLease?(): boolean;
+  setSourceConfigurationWithGrant?(notificationEnabled: boolean, standardExpiresAtMs: number, grantIssuedAtMs: number): Promise<boolean>;
   setSourceConfiguration?(notificationEnabled: boolean, expiresAtMs: number): Promise<boolean>;
   /** Cheap foreground self-heal: request an Android listener rebind only when disconnected. */
   ensureListenerConnected?(): Promise<boolean>;

@@ -48,6 +48,7 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
         return { ...dependencies[name], useMoneyLocaleKey: () => '' };
       }
       if (Object.hasOwn(dependencies, name)) return dependencies[name];
+      if (name === '@/lib/complimentary-access' || name === '@/lib/complimentary-copy' || name === '@/lib/complimentary-clock') return loadTypescript(require('node:path').resolve(__dirname, '../../../src', name.slice(2) + '.ts'));
       // Route-level tests keep their existing navigation boundary. The real app
       // router and SDK stack identity policy have their own behavioral suite.
       if (name === '@/hooks/use-app-router' && dependencies['expo-router']?.useRouter) {

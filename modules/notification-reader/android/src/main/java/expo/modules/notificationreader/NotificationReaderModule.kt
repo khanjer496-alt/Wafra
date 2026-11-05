@@ -140,6 +140,32 @@ class NotificationReaderModule : Module() {
       true
     }
 
+    AsyncFunction("setSourceConfigurationWithGrant") { notificationEnabled: Boolean, expiresAtMs: Double, grantId: Double ->
+      if (!TrustedBankNotificationPackages.CAPTURE_ENABLED) return@AsyncFunction false
+      val context = appContext.reactContext ?: return@AsyncFunction false
+      val wasEnabled = NotificationCapturePolicy.isEnabled(context)
+      val expiresAt = if (expiresAtMs.isFinite() && expiresAtMs > 0.0) expiresAtMs.toLong() else 0L
+      NotificationCapturePolicy.setConfiguration(context, notificationEnabled, expiresAt, grantId.toLong())
+      val nowEnabled = NotificationCapturePolicy.isEnabled(context)
+      if (!wasEnabled && nowEnabled) BankNotificationListenerService.sweepConnected()
+      true
+    }
+
+    Function("anchorComplimentaryLease") { issued: Double, budget: Double ->
+      val context = appContext.reactContext ?: return@Function false
+      ComplimentaryClock.anchor(context, issued.toLong(), budget.toLong())
+    }
+    Function("complimentaryRemainingMs") { issued: Double ->
+      val context = appContext.reactContext ?: return@Function 0.0
+      ComplimentaryClock.remaining(context, issued.toLong()).toDouble()
+    }
+    Function("clearComplimentaryLease") {
+      val context = appContext.reactContext ?: return@Function false
+      ComplimentaryClock.clear(context)
+    }
+
+
+
     /**
      * Cheap foreground self-heal. Do nothing while Android's listener is
      * already connected; if an OEM killed it despite the permission still

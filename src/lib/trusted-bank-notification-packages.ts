@@ -43,7 +43,7 @@ const STORE_ENTITLEMENT_LEASE_MS = 25 * 60 * 60 * 1000;
  * forever after a subscription later expires.
  */
 export const bankNotificationAdmissionExpiresAt = (
-  state: { pro: boolean; founderPro?: boolean; trialStartTs: number },
+  state: { pro: boolean; founderPro?: boolean; complimentaryIssuedAt?: number; trialStartTs: number },
   nowMs: number = Date.now(),
 ): number => {
   if (state.founderPro === true) return Number.MAX_SAFE_INTEGER;

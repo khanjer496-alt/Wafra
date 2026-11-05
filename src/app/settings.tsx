@@ -1,3 +1,4 @@
+import { complimentaryCopy } from '@/lib/complimentary-copy';
 /**
  * Settings.
  *
@@ -79,7 +80,7 @@ import { APP_LOCK_AUTH_OPTIONS, deviceLockLevel, unlockOutcome } from '@/lib/app
 import { tapped } from '@/lib/haptics';
 import { resolvedAndroidCaptureSources } from '@/lib/android-capture-sources';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
-import { isProActive, trialDaysLeft } from '@/lib/purchases';
+import { hasNonTrialAccess, isProActive, trialDaysLeft } from '@/lib/purchases';
 // Deliberately this branch's relay client, not the other one's isRelaySupported/
 // unpairRelay/stopRelayWake trio: the two relay clients speak incompatible wire
 // contracts (four scoped tokens here vs one there), and mixing their entry
@@ -635,7 +636,9 @@ export default function SettingsScreen() {
     if (notifAvailable && selectedAndroidSources.notifications && !state.captureOptOut && proActive) {
       const reader = NotificationReader;
       const expiresAt = bankNotificationAdmissionExpiresAt(getStateSnapshot());
-      const configure = reader?.setSourceConfiguration
+      const configure = reader?.setSourceConfigurationWithGrant
+        ? reader.setSourceConfigurationWithGrant(true, expiresAt, getStateSnapshot().complimentaryIssuedAt ?? 0)
+        : reader?.setSourceConfiguration
         ? reader.setSourceConfiguration(true, expiresAt)
         : reader?.setCaptureEnabled(true, expiresAt);
       void configure?.then(refresh).catch(() => {});
@@ -886,13 +889,13 @@ export default function SettingsScreen() {
   const lockTitle = biometricKind ? copy.lockTitle[biometricKind] : t('appLockTitle');
   const proSubtitle = state.founderPro
     ? t('founderProActive')
-    : state.pro
+    : hasNonTrialAccess(state)
       ? t('activeOnThisDevice')
       : trial > 0
         ? copy.proTrialBody(trial)
         : t('trialEndedBanner');
-  const proTitle = !state.founderPro && !state.pro && trial > 0 ? copy.proTrialTitle : copy.proTitle;
-  const proActionLabel = state.founderPro || state.pro ? eWords.proDetails : eWords.seePlans;
+  const proTitle = !hasNonTrialAccess(state) && trial > 0 ? copy.proTrialTitle : copy.proTitle;
+  const proActionLabel = hasNonTrialAccess(state) ? eWords.proDetails : eWords.seePlans;
 
   return (
     <React.Fragment>
@@ -937,6 +940,10 @@ export default function SettingsScreen() {
             </Pressable>
           </View>
         )}>
+        {Platform.OS === 'android' && <View style={styles.settingsPanel}>
+          {linkRow(complimentaryCopy(state.language).title, null,
+            () => router.push('/complimentary-access'), { icon: 'lock', last: true, testID: 'settings-complimentary-access' })}
+        </View>}
         <View testID="settings-imports" onLayout={({ nativeEvent }) => {
           importsOffset.current = nativeEvent.layout.y;
           scrollToRequestedSection();

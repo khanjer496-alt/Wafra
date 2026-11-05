@@ -179,7 +179,7 @@ export default function ProScreen() {
       <View style={styles.actions}>
         {entitled ? (
           <>
-            {!state.founderPro && Platform.OS !== 'web' && (
+            {state.pro && !state.founderPro && Platform.OS !== 'web' && (
               <EButton
                 palette={band}
                 variant="secondary"

@@ -1,0 +1,12 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "wafra-access",
+  "main": "./src/index.js",
+  "compatibility_date": "2026-11-05",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": { "enabled": false },
+  "ratelimits": [
+    { "name": "ACCESS_RATE_LIMITER", "namespace_id": "26110641", "simple": { "limit": 60, "period": 60 } }
+  ]
+}

@@ -955,6 +955,8 @@ export interface AppState {
   monthStartDay: number;
   /** Cached Wafra Pro entitlement supplied by the platform stores via Superwall. */
   pro: boolean;
+  /** Start of a bounded server grant, local to this installation; never imported or exported. */
+  complimentaryIssuedAt?: number;
   /** Durable local founder grant, available only from explicitly enabled test builds. */
   founderPro: boolean;
   /**

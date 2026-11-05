@@ -1,3 +1,4 @@
+import { complimentaryAccessUntil } from '@/lib/complimentary-access';
 import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import { useLanguage } from '@/hooks/use-language';
 import { clearIosStatementHandoff, matchesIosStatementHandoff } from '@/lib/ios-statement-handoff';
@@ -98,7 +99,7 @@ import { onboardingECopy } from '@/lib/onboarding-e-copy';
 import { onboardingReadySummary } from '@/lib/onboarding-ready';
 import { buildPattern, patternInputFromState, type PatternInput } from '@/lib/pattern';
 import { currentMonthPeriod, inPeriod } from '@/lib/period';
-import { trialDaysLeft } from '@/lib/purchases';
+import { hasNonTrialAccess, trialDaysLeft } from '@/lib/purchases';
 import { readBackupPickerCopy } from '@/lib/share-text';
 import { detectSubscriptions } from '@/lib/subscriptions';
 import { disableRelayBackgroundSync } from '@/lib/background-relay';
@@ -908,17 +909,23 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     const expiresAt = bankNotificationAdmissionExpiresAt({
       pro: state.pro,
       founderPro: state.founderPro,
+      complimentaryIssuedAt: state.complimentaryIssuedAt,
       trialStartTs: state.trialStartTs,
     });
-    if (expiresAt <= Date.now()) return false;
+    const grantId = state.complimentaryIssuedAt ?? 0;
+    const grantReady = NotificationReader.setSourceConfigurationWithGrant && complimentaryAccessUntil(grantId) > 0;
+    if (expiresAt <= Date.now() && !grantReady) return false;
     try {
+      if (NotificationReader.setSourceConfigurationWithGrant) {
+        return await NotificationReader.setSourceConfigurationWithGrant(true, expiresAt, grantId);
+      }
       return NotificationReader.setSourceConfiguration
         ? await NotificationReader.setSourceConfiguration(true, expiresAt)
         : await NotificationReader.setCaptureEnabled(true, expiresAt);
     } catch {
       return false;
     }
-  }, [state.pro, state.founderPro, state.trialStartTs]);
+  }, [state.pro, state.founderPro, state.complimentaryIssuedAt, state.trialStartTs]);
 
   const connectAndroidNotifications = async () => {
     if (Platform.OS !== 'android') return;
@@ -1395,7 +1402,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
         }
       : null
   );
-  const entitled = state.pro || state.founderPro === true;
+  const entitled = hasNonTrialAccess(state);
   const showPaywall = previewMode || !entitled;
   const watchedLabel = (() => {
     const watched = patternInput.watched?.[0] ?? null;

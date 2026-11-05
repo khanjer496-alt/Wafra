@@ -66,7 +66,7 @@ rewrite() {
 # `--module commonjs` cannot follow. They get the nodenext .cts pass below.
 for f in types routes consent-prompt format categories custom-categories ledger bill-alias capture-source-identity dedupe arabic-sms bank-amount-tokens bnpl-providers sms-parser import-plan bills \
          transfer-reconciliation-types transfer-reconciliation transfer-activity transfer-evidence transfer-review-copy \
-         insights seed subscriptions cards cash-flow payment-flow ledger-import launch-alert-parser ios-background-alert-parser ios-background-parser-source.generated ios-native-parser-context analytics growth-funnel period purchases country-names country markets known-banks i18n system-language balances \
+         insights seed subscriptions cards cash-flow payment-flow ledger-import launch-alert-parser ios-background-alert-parser ios-background-parser-source.generated ios-native-parser-context analytics growth-funnel period complimentary-clock complimentary-access purchases country-names country markets known-banks i18n system-language balances \
          brand-marks leaving-soon accounts heal bnpl-category-repair accuracy onboarding onboarding-bank-examples reminders reminder-schedule app-lock auto-import android-capture-sources \
          history-import foreground-history-priority diagnostic-export diagnostic-messages transaction-source transaction-presentation transaction-filter capture-trace \
          launch-performance launch-benchmark runtime-performance dashboard-projection \

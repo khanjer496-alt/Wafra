@@ -1,3 +1,4 @@
+import { complimentaryAccessUntil } from '@/lib/complimentary-access';
 /**
  * Billing contracts for Wafra Pro, surfaced through Superwall.
  *
@@ -221,11 +222,18 @@ export function trialDaysLeft(
 }
 
 /** Pro features unlocked: purchased Pro, or still inside the trial. */
+export function hasNonTrialAccess(
+  state: { pro: boolean; founderPro?: boolean; complimentaryIssuedAt?: number },
+  nowMs = Date.now(),
+): boolean {
+  return state.pro || state.founderPro === true || complimentaryAccessUntil(state.complimentaryIssuedAt, nowMs) > 0;
+}
+
 export function isProActive(
-  state: { pro: boolean; founderPro?: boolean; trialStartTs: number },
+  state: { pro: boolean; founderPro?: boolean; complimentaryIssuedAt?: number; trialStartTs: number },
   nowMs: number = Date.now(),
 ): boolean {
-  return state.pro || state.founderPro === true || trialDaysLeft(state, nowMs) > 0;
+  return hasNonTrialAccess(state, nowMs) || trialDaysLeft(state, nowMs) > 0;
 }
 
 /* ─────────────────── What is free and what is paid ─────────────────── */

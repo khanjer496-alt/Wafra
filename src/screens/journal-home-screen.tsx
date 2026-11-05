@@ -262,7 +262,7 @@ let manualReminderTail: Promise<void> = Promise.resolve();
  */
 export const HOME_STATE_FIELDS = [
   'hydrated', 'onboarded', 'language', 'userName', 'privateMode', 'captureOptOut',
-  'pro', 'founderPro', 'trialStartTs', 'marketId', 'ledgerMoney',
+  'pro', 'founderPro', 'complimentaryIssuedAt', 'trialStartTs', 'marketId', 'ledgerMoney',
   'transactions', 'accounts', 'budgets', 'bills', 'cardDues', 'notSubscriptions', 'cancelledSubscriptions',
   'merchantOverrides', 'billAliases', 'transferInternalIds', 'transferNormalizationVersion',
   'historyImport', 'customCategories',

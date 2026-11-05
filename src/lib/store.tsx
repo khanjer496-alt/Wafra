@@ -1008,6 +1008,7 @@ type Action =
   | { type: 'setMonthStartDay'; day: number }
   | { type: 'setThemePreference'; preference: string }
   | { type: 'setPro'; pro: boolean }
+  | { type: 'setComplimentaryIssuedAt'; issuedAt?: number }
   | { type: 'unlockFounderPro' }
   | { type: 'setLedgerMoney'; ledgerMoney: LedgerMoneySpec }
   | { type: 'setMarket'; id: string }
@@ -1574,6 +1575,8 @@ function reduceState(state: AppState, action: Action): AppState {
       if (action.type === 'hydrate') markLaunchPhase('ledger-finalize-complete');
       return finalized;
     }
+    case 'setComplimentaryIssuedAt':
+      return state.complimentaryIssuedAt === action.issuedAt ? state : { ...state, complimentaryIssuedAt: action.issuedAt };
     case 'setPro':
       return { ...state, pro: action.pro };
     case 'unlockFounderPro':
@@ -2266,6 +2269,7 @@ interface StoreValue {
   setMonthStartDay: (day: number) => void;
   setThemePreference: (preference: string) => void;
   setPro: (pro: boolean) => void;
+  setComplimentaryIssuedAt: (issuedAt?: number) => Promise<void>;
   unlockFounderPro: () => Promise<void>;
   setLedgerMoney: (currency: string) => boolean;
   setMarket: (id: string) => boolean;
@@ -3517,7 +3521,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const expiresAt = anySource
         ? bankNotificationAdmissionExpiresAt(authoritativeState.current)
         : 0;
-      const configured = reader.setSourceConfiguration
+      const configured = reader.setSourceConfigurationWithGrant
+        ? await reader.setSourceConfigurationWithGrant(sources.notifications, expiresAt,
+          anySource ? authoritativeState.current.complimentaryIssuedAt ?? 0 : 0)
+        : reader.setSourceConfiguration
         ? await reader.setSourceConfiguration(sources.notifications, expiresAt)
         : await reader.setCaptureEnabled(sources.notifications, sources.notifications ? expiresAt : 0);
       if (!configured) throw new Error('Android capture sources could not be configured');
@@ -3614,6 +3621,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'setMonthStartDay', day });
   }, [dispatch]);
 
+  const setComplimentaryIssuedAt = useCallback(async (issuedAt?: number) => {
+    const before = authoritativeState.current;
+    if (!before.hydrated || before.complimentaryIssuedAt === issuedAt) return;
+    const next = dispatch({ type: 'setComplimentaryIssuedAt', issuedAt });
+    if (!(await persist(next).catch(() => false))) {
+      if (issuedAt && authoritativeState.current.complimentaryIssuedAt === issuedAt) {
+        dispatch({ type: 'setComplimentaryIssuedAt' });
+      }
+      throw new Error('Could not persist access state');
+    }
+  }, [dispatch, persist]);
+
   const setPro = useCallback((pro: boolean) => {
     dispatch({ type: 'setPro', pro });
   }, [dispatch]);
@@ -3667,6 +3686,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       hydrated: _h,
       pro: _pro,
       founderPro: _founderPro,
+      complimentaryIssuedAt: _complimentaryIssuedAt,
       trialStartTs: _trial,
       reviewTray: _reviewTray,
       // Wallet card names stay on this device; a backup carries no card link.
@@ -3694,6 +3714,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       ...restored,
       pro: current.pro,
       founderPro: current.founderPro,
+      complimentaryIssuedAt: current.complimentaryIssuedAt,
       trialStartTs: current.trialStartTs,
       reviewTray: current.reviewTray,
       captureOptOut: current.captureOptOut,
@@ -3723,6 +3744,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ...demoState(),
         pro: authoritativeState.current.pro,
         founderPro: authoritativeState.current.founderPro,
+        complimentaryIssuedAt: authoritativeState.current.complimentaryIssuedAt,
         trialStartTs: authoritativeState.current.trialStartTs,
       },
     });
@@ -3730,6 +3752,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const clearAll = useCallback(async (captureCleanup?: () => Promise<void>) => {
     const afterErase = async () => {
+      if (Platform.OS === 'android') {
+        const { complimentaryDevice } = await import('@/lib/complimentary-device');
+        await complimentaryDevice.clear();
+      }
       await erasePrivateAlertFormatKey();
       await eraseSharingCredential();
       await captureCleanup?.();
@@ -3892,6 +3918,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setMonthStartDay,
       setThemePreference,
       setPro,
+      setComplimentaryIssuedAt,
       unlockFounderPro,
       setLedgerMoney,
       setMarket,
@@ -3977,6 +4004,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setMonthStartDay,
       setThemePreference,
       setPro,
+      setComplimentaryIssuedAt,
       unlockFounderPro,
       setLedgerMoney,
       setMarket,
