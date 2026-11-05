@@ -434,7 +434,7 @@ ${cases.map(([expr], index) => `  println("CASE ${index} " + (${expr}).toString(
   try {
     execFileSync(kotlinc, [
       ...fs.readdirSync(harness).filter((f) => f.endsWith('.kt')).map((f) => path.join(harness, f)),
-      ...['NotificationCaptureStore.kt', 'NotificationRepostIdentity.kt', 'NotificationCapturePolicy.kt',
+      ...['NotificationCaptureStore.kt', 'NotificationRepostIdentity.kt', 'NotificationCapturePolicy.kt', 'ComplimentaryClock.kt',
         'SensitiveNotificationFilter.kt'].map((f) => path.join(nr, f)),
       '-include-runtime', '-d', path.join(sdir, 'store.jar'),
     ], { cwd: sdir, stdio: 'pipe' });

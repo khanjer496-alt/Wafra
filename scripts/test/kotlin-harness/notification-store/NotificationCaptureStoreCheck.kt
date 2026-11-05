@@ -33,6 +33,17 @@ fun main() {
   val alert = "Credit Card XX2518 was used for AED290.00 on 25/09/2026 17:38:39 at SOUTHERN FRIED CHICK, Sharjah-AE. Available limit AED58823.09"
   val t0 = System.currentTimeMillis() - 600_000L
   run {
+    val c = Context()
+    val issued = System.currentTimeMillis()
+    check("complimentary lease anchored", ComplimentaryClock.anchor(c, issued, 900_000L), true)
+    check("capture opted into a valid complimentary lease", NotificationCapturePolicy.setConfiguration(c, true, 0, issued), true)
+    check("valid complimentary lease admits a notification",
+      NotificationCaptureStore.append(c, pkg, "ADCBAlert", alert, issued), "appended")
+    android.os.SystemClock.now += 900_000L
+    check("expired elapsed-time lease closes capture even when the wall clock has not advanced",
+      NotificationCaptureStore.append(c, pkg, "ADCBAlert", alert, issued + 1L), "policy")
+  }
+  run {
     val c = enabledContext()
     c.getSharedPreferences("wafra_notification_capture", 0).edit().putString("queue", "legacy test body").commit()
     val legacy = c.prefs.getValue("wafra_notification_capture")
