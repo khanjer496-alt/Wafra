@@ -883,8 +883,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     // and Wafra's own notification permission here, while the user is
     // explicitly enabling automatic SMS tracking. Either refusal still keeps
     // catch-up import usable; the foreground repair prompt can retry later.
-    await requestSmsDeliveryPermission().catch(() => false);
-    await requestVisibleNotificationPermission().catch(() => false);
+    const live = await requestSmsDeliveryPermission(t).catch(() => false);
+    if (live) await requestVisibleNotificationPermission().catch(() => false);
     trackOnboardingEvent('capture_permission_granted', { focus: legacyFocus, tracking: legacyTracking, source: 'sms', outcome: 'automatic' });
     try {
       await setAndroidCaptureSources({

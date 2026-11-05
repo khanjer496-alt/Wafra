@@ -54,9 +54,7 @@ export interface CapturedNotification {
   ts: number;
   /**
    * Native source provenance. JS still requires issuer/parser evidence before
-   * auto-import. `messaging-review` is an SMS/chat app's notification: JS
-   * acknowledges it while Wafra can read SMS and otherwise sends an SMS app's
-   * row to Review only, with no learnable package identity.
+   * auto-import. Older native builds may return `messaging-review`; discard these rows.
    */
   sourceClass: 'trusted-bank' | 'play-finance' | 'financial-candidate' | 'messaging-review';
 }

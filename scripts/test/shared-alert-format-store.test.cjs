@@ -26,22 +26,26 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 const EMPTY = { hydrated: false, transactions: [], accounts: [] };
 const hydrate = (extra) => reducer({ ...EMPTY }, { type: 'hydrate', state: store.migratePersistedState({ ...clone(ledger(5)), ...extra }) });
 
-test('defaults: consent is never-chose (on) and the downloaded set is empty', () => {
+test('defaults: consent is never-chose (private) and the downloaded set is empty', () => {
   const migrated = store.migratePersistedState(clone(ledger(5)));
-  assert.equal(migrated.shareAlertFormats, undefined);
-  assert.equal(Share.sharesAlertFormats(migrated), true, 'never chose = on');
+  assert.equal(migrated.shareAlertFormatsV1, undefined);
+  assert.equal(Share.sharesAlertFormats(migrated), false, 'never chose = private');
   assert.deepEqual(migrated.sharedAlertFormats, { etag: null, fetchedAt: null, formats: [] });
   const state = hydrate({});
-  assert.equal(state.shareAlertFormats, undefined);
-  assert.equal(Share.sharesAlertFormats(state), true);
+  assert.equal(state.shareAlertFormatsV1, undefined);
+  assert.equal(Share.sharesAlertFormats(state), false);
   assert.equal(Share.sharesAlertFormats({ ...state, privateMode: true }), false, 'Private Mode never sends');
   assert.deepEqual(state.sharedAlertFormats, { etag: null, fetchedAt: null, formats: [] });
 });
 
 test('migration: only a boolean is a choice; explicit false stays false; the list is re-validated', () => {
-  assert.equal(store.migratePersistedState({ ...clone(ledger(5)), shareAlertFormats: 'yes' }).shareAlertFormats, undefined);
-  assert.equal(store.migratePersistedState({ ...clone(ledger(5)), shareAlertFormats: false }).shareAlertFormats, false);
-  assert.equal(store.migratePersistedState({ ...clone(ledger(5)), shareAlertFormats: true }).shareAlertFormats, true);
+  assert.equal(hydrate({ shareAlertFormats: false }).shareAlertFormatsV1, false);
+  assert.equal(hydrate({ shareAlertFormats: true }).shareAlertFormatsV1, undefined);
+  assert.equal(Share.sharesAlertFormats(hydrate({ shareAlertFormats: true })), false);
+  assert.equal(Share.sharesAlertFormats(hydrate({ shareAlertFormatsV1: true })), true);
+  assert.equal(store.migratePersistedState({ ...clone(ledger(5)), shareAlertFormatsV1: 'yes' }).shareAlertFormatsV1, undefined);
+  assert.equal(store.migratePersistedState({ ...clone(ledger(5)), shareAlertFormatsV1: false }).shareAlertFormatsV1, false);
+  assert.equal(store.migratePersistedState({ ...clone(ledger(5)), shareAlertFormatsV1: true }).shareAlertFormatsV1, true);
   const tampered = clone(format); tampered.shape.tokens.unshift({ k: 'L', v: 'Acct 99887766' });
   const migrated = store.migratePersistedState({ ...clone(ledger(5)),
     sharedAlertFormats: { etag: '"e"', fetchedAt: 42, formats: [format, tampered, { hash: 'x', shape: {} }] } });
@@ -51,28 +55,28 @@ test('migration: only a boolean is a choice; explicit false stays false; the lis
 test('hydrate: a hand-edited store cannot smuggle an invalid shape; junk consent means never chose; false stays false', () => {
   const bad = clone(format); bad.shape.sender = 'hacker@example.com';
   const state = reducer({ ...EMPTY }, { type: 'hydrate', state: {
-    ...store.migratePersistedState(clone(ledger(5))), shareAlertFormats: 1,
+    ...store.migratePersistedState(clone(ledger(5))), shareAlertFormatsV1: 1,
     sharedAlertFormats: { etag: null, fetchedAt: 1, formats: [bad, format] } } });
-  assert.equal(state.shareAlertFormats, undefined);
+  assert.equal(state.shareAlertFormatsV1, undefined);
   assert.deepEqual(state.sharedAlertFormats.formats, [format]);
-  assert.equal(hydrate({ shareAlertFormats: false }).shareAlertFormats, false);
-  assert.equal(Share.sharesAlertFormats(hydrate({ shareAlertFormats: false })), false);
+  assert.equal(hydrate({ shareAlertFormatsV1: false }).shareAlertFormatsV1, false);
+  assert.equal(Share.sharesAlertFormats(hydrate({ shareAlertFormatsV1: false })), false);
 });
 
 test('actions: consent, replace, touch and clear', () => {
   let state = hydrate({});
   state = reducer(state, { type: 'setShareAlertFormats', enabled: true });
-  assert.equal(state.shareAlertFormats, true);
-  assert.equal(reducer(state, { type: 'setShareAlertFormats', enabled: undefined }).shareAlertFormats, undefined);
+  assert.equal(state.shareAlertFormatsV1, true);
+  assert.equal(reducer(state, { type: 'setShareAlertFormats', enabled: undefined }).shareAlertFormatsV1, undefined);
   state = reducer(state, { type: 'setSharedAlertFormats', etag: '"e1"', fetchedAt: 100, formats: [format, { hash: 'bad', shape: format.shape }] });
   assert.deepEqual(state.sharedAlertFormats, { etag: '"e1"', fetchedAt: 100, formats: [format] });
   state = reducer(state, { type: 'touchSharedAlertFormats', fetchedAt: 200 });
   assert.deepEqual(state.sharedAlertFormats, { etag: '"e1"', fetchedAt: 200, formats: [format] });
   state = reducer(state, { type: 'clearSharedAlertFormats' });
   assert.deepEqual(state.sharedAlertFormats, { etag: null, fetchedAt: null, formats: [] });
-  assert.equal(state.shareAlertFormats, true, 'clearing the downloaded set keeps the consent choice');
+  assert.equal(state.shareAlertFormatsV1, true, 'clearing the downloaded set keeps the consent choice');
   state = reducer(state, { type: 'setShareAlertFormats', enabled: false });
-  assert.equal(state.shareAlertFormats, false);
+  assert.equal(state.shareAlertFormatsV1, false);
 });
 
 test('actions leave ledger rows and accounts untouched', () => {
@@ -85,12 +89,12 @@ test('actions leave ledger rows and accounts untouched', () => {
 test('restore normalizes whatever list it is handed', () => {
   const state = hydrate({});
   const restored = reducer(state, { type: 'restore', state: { ...store.migratePersistedState(clone(ledger(5))),
-    shareAlertFormats: true, sharedAlertFormats: { etag: 'x', fetchedAt: 1, formats: [format] } } });
+    shareAlertFormatsV1: true, sharedAlertFormats: { etag: 'x', fetchedAt: 1, formats: [format] } } });
   // restoreBackup() passes this phone's own consent and list; the reducer only normalizes.
-  assert.equal(restored.shareAlertFormats, true);
+  assert.equal(restored.shareAlertFormatsV1, true);
   assert.deepEqual(restored.sharedAlertFormats.formats, [format]);
-  const off = reducer(state, { type: 'restore', state: { ...store.migratePersistedState(clone(ledger(5))), shareAlertFormats: false } });
-  assert.equal(off.shareAlertFormats, false, 'an explicit off survives restore');
+  const off = reducer(state, { type: 'restore', state: { ...store.migratePersistedState(clone(ledger(5))), shareAlertFormatsV1: false } });
+  assert.equal(off.shareAlertFormatsV1, false, 'an explicit off survives restore');
 });
 
 test('on-device matching: a published shape yields a trusted prefill (never a post) after private formats decline', async () => {

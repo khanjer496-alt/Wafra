@@ -42,6 +42,16 @@ object InstantAlert {
   const val PREFS = "wafra_alert_prefs"
   const val KEY_ENABLED = "instant_alerts"
 
+  // Android can retain or auto-grant permissions in the SMS group. The receiver
+  // must also have Wafra's separate affirmative consent before it inspects any SMS.
+  private const val KEY_LIVE_SMS_CONSENT = "live_sms_consent_v1"
+  fun hasLiveSmsConsent(context: Context): Boolean =
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_LIVE_SMS_CONSENT, false)
+
+  fun setLiveSmsConsent(context: Context, enabled: Boolean): Boolean =
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+      .putBoolean(KEY_LIVE_SMS_CONSENT, enabled).commit()
+
   /** On by default; the OS notification permission still controls delivery. */
   fun isEnabled(context: Context): Boolean =
     context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ENABLED, true)
@@ -54,7 +64,7 @@ object InstantAlert {
   /** Erase is synchronous: no delivery broadcast may observe stale consent. */
   fun clear(context: Context): Boolean {
     val disabled = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-      .edit().putBoolean(KEY_ENABLED, false).commit()
+      .edit().putBoolean(KEY_ENABLED, false).remove(KEY_LIVE_SMS_CONSENT).commit()
     // Erase should also remove any bank banner already visible in the shade.
     try {
       (context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager)?.cancelAll()

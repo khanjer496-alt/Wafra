@@ -55,6 +55,8 @@ interface SmsReaderModule {
    */
   setInstantAlerts?(enabled: boolean): boolean;
   getInstantAlerts?(): boolean;
+  hasLiveSmsConsent?(): boolean;
+  setLiveSmsConsent?(enabled: boolean): boolean;
   /** Source-free: whether module-load cleanup failed and is still pending. */
   getStartupCleanupDiagnostics?(): SmsStartupCleanupDiagnostics;
 }

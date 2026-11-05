@@ -98,6 +98,8 @@ function harness({ language = 'en', country = 'US', platform = 'ios', privateMod
     lifecycle.add(callback); return { remove: () => lifecycle.delete(callback) };
   };
   const store = h.deps['@/lib/store'].useStore();
+  store.getStateGeneration ??= () => 1;
+  store.getStateSnapshot ??= () => store.state;
   h.deps['@/lib/store'].usePrivateMode = () => store.state.privateMode;
   const saves = [], forgets = [], persisted = [];
   const authoritativeState = { current: h.state }, stateGeneration = { current: 1 };

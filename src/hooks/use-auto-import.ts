@@ -883,7 +883,12 @@ export function useAutoImport(
         actions: [{
           label: t('enableAction'),
           onPress: () => void (async () => {
-            const delivery = await requestSmsDeliveryPermission().catch(() => false);
+            const stillEnabled = () => {
+              const latest = getStateSnapshot();
+              return latest.hydrated && latest.onboarded && !latest.captureOptOut &&
+                isProActive(latest) && androidSmsCaptureEnabled(latest);
+            };
+            const delivery = await requestSmsDeliveryPermission(t, stillEnabled).catch(() => false);
             if (!delivery) return;
             await requestNotificationPermission().catch(() => false);
           })(),

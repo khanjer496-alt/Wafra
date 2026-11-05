@@ -4,13 +4,20 @@ import type { ReviewShareCandidate } from '@/lib/alert-review-tray';
 import { toSharedAlertShape, type SharedAlertShape } from '@/lib/shared-alert-formats';
 import type { UniversalBankEvent } from '@/lib/universal-types';
 
-/**
- * Sharing consent. `undefined` means the person never chose, which is ON; only
- * an explicit `false` (their choice, or a restored backup's) is off. Private
- * Mode overrides everything and never sends.
- */
-export const sharesAlertFormats = (state: { shareAlertFormats?: boolean; privateMode?: boolean }): boolean =>
-  state.shareAlertFormats !== false && state.privateMode !== true;
+export interface FormatSharingChoice { shareAlertFormatsV1?: boolean; privateMode?: boolean }
+export const sharesAlertFormats = (state: FormatSharingChoice): boolean =>
+  state.shareAlertFormatsV1 === true && state.privateMode !== true;
+/** Local preparation lets a person review an eligible format before making a first sharing choice. */
+export const mayPrepareSharedFormat = (state: FormatSharingChoice): boolean =>
+  state.shareAlertFormatsV1 !== false && state.privateMode !== true;
+
+// A switch updates the UI optimistically; the network edge cannot use it until the write settles.
+let pendingChoices = 0;
+export const formatSharingChoicePending = () => pendingChoices > 0;
+export async function whileSavingFormatChoice(save: () => Promise<void>): Promise<void> {
+  pendingChoices++;
+  try { await save(); } finally { pendingChoices--; }
+}
 
 // Capture code runs outside React, so the store mirrors the effective consent
 // here (like the best-effort auto-post flag). Off until the store has hydrated.
@@ -95,13 +102,13 @@ export function buildCandidateShareShape(
  * confirmed exactly the reading the shape was built from (a corrected amount,
  * currency or direction means the slots may be wrong), and consent is on now.
  */
-export function shouldSubmitConfirmedShape(
+export function mayOfferConfirmedShape(
   item: { shareShape?: SharedAlertShape; shareBasis?: ReviewShareCandidate['shareBasis'] },
   confirmed: { amountMinor: number; currency: string; direction: 'debit' | 'credit' },
-  consent: { shareAlertFormats?: boolean; privateMode?: boolean },
+  consent: { shareAlertFormatsV1?: boolean; privateMode?: boolean },
 ): boolean {
   const basis = item.shareBasis;
-  return !!item.shareShape && !!basis && sharesAlertFormats(consent) &&
+  return !!item.shareShape && !!basis && mayPrepareSharedFormat(consent) &&
     basis.amountMinor === confirmed.amountMinor && basis.currency === confirmed.currency &&
     basis.direction === confirmed.direction;
 }

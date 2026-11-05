@@ -159,7 +159,7 @@ import {
   invalidatePrivateAlertFormats,
 } from '@/lib/private-alert-format-runtime';
 import { activateSharedAlertFormats } from '@/lib/shared-alert-format-active';
-import { setAlertFormatSharingActive, sharesAlertFormats } from '@/lib/shared-alert-format-share';
+import { setAlertFormatSharingActive, mayPrepareSharedFormat, whileSavingFormatChoice } from '@/lib/shared-alert-format-share';
 import { eraseSharingCredential } from '@/lib/shared-alert-format-submit';
 import {
   emptySharedAlertFormatState,
@@ -275,7 +275,7 @@ export const HYDRATION_FINALIZE_VERSION = 2;
 
 const EMPTY_STATE: AppState = {
   privateAlertFormats: emptyPrivateAlertFormatStore(),
-  // shareAlertFormats stays undefined: "never chose", which means ON (see sharesAlertFormats).
+  // Undefined means the user has never consented to contributing bank wording.
   sharedAlertFormats: emptySharedAlertFormatState(),
   customCategories: [],
   hydrated: false,
@@ -481,13 +481,15 @@ export function migratePersistedState(
   const loadedTransactions = parsed.transactions;
   const privateFormats = normalizePrivateAlertFormatStore(parsed.privateAlertFormats);
   parsed.privateAlertFormats = { ...privateFormats, templates: privateFormats.templates.filter(format => format.status === 'validated') };
-  // Consent is an explicit boolean choice or absent ("never chose" = default on).
-  // Anything else is treated as never chosen, so a stored false always stays false.
-  if (typeof parsed.shareAlertFormats !== 'boolean') delete parsed.shareAlertFormats;
+  if (typeof parsed.shareAlertFormatsV1 !== 'boolean') {
+    delete parsed.shareAlertFormatsV1;
+    if (parsed.shareAlertFormats === false) parsed.shareAlertFormatsV1 = false;
+  }
+  delete parsed.shareAlertFormats;
   parsed.sharedAlertFormats = normalizeSharedAlertFormatState(parsed.sharedAlertFormats);
   parsed.ledgerMoney = migrateLegacyLedgerMoney(parsed);
   parsed.reviewTray = normalizeAlertReviewTray(parsed.reviewTray, Date.now());
-  if (parsed.shareAlertFormats === false || parsed.privateMode === true) {
+  if (parsed.shareAlertFormatsV1 === false || parsed.privateMode === true) {
     parsed.reviewTray = stripReviewShareCandidates(parsed.reviewTray);
   }
   parsed.localCaptureQualifications = normalizeLocalCaptureQualifications(
@@ -1460,7 +1462,7 @@ function reduceState(state: AppState, action: Action): AppState {
         : emptyPrivateAlertFormatStore();
       next.privateAlertFormats = { ...next.privateAlertFormats,
         templates: next.privateAlertFormats.templates.filter(format => format.status === 'validated') };
-      if (typeof next.shareAlertFormats !== 'boolean') delete next.shareAlertFormats;
+      if (typeof next.shareAlertFormatsV1 !== 'boolean') delete next.shareAlertFormatsV1;
       next.sharedAlertFormats = normalizeSharedAlertFormatState(next.sharedAlertFormats);
       next.customCategories = sanitizeCustomCategoryCatalog(next.customCategories);
       // Orphan money keeps its opaque category for honest history. Orphan
@@ -1786,7 +1788,7 @@ function reduceState(state: AppState, action: Action): AppState {
       return { ...state, bestEffortAutoPost: action.enabled };
     case 'setShareAlertFormats':
       // undefined restores "never chose" (default on); only booleans are choices.
-      return { ...state, shareAlertFormats: typeof action.enabled === 'boolean' ? action.enabled : undefined,
+      return { ...state, shareAlertFormatsV1: typeof action.enabled === 'boolean' ? action.enabled : undefined,
         ...(action.enabled === false ? { reviewTray: stripReviewShareCandidates(state.reviewTray) } : {}) };
     case 'setSharedAlertFormats':
       return { ...state, sharedAlertFormats: normalizeSharedAlertFormatState(
@@ -2103,7 +2105,7 @@ function reduceState(state: AppState, action: Action): AppState {
         trialStartTs: state.trialStartTs,
         // A capture preference, like the opt-out above; not ledger data.
         bestEffortAutoPost: state.bestEffortAutoPost,
-        shareAlertFormats: state.shareAlertFormats,
+        shareAlertFormatsV1: state.shareAlertFormatsV1,
         accounts: [SEED_ACCOUNTS[2]],
       };
     case 'blockPersistence':
@@ -2734,8 +2736,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   // Capture code reads the effective consent (never before hydration, never in Private Mode).
   useEffect(() => {
-    setAlertFormatSharingActive(state.hydrated && sharesAlertFormats(state));
-  }, [state.hydrated, state.shareAlertFormats, state.privateMode]);
+    setAlertFormatSharingActive(state.hydrated && mayPrepareSharedFormat(state));
+  }, [state.hydrated, state.shareAlertFormatsV1, state.privateMode]);
 
   useEffect(() => {
     void hydrate();
@@ -2960,19 +2962,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
   }, [dispatch, persist]);
 
-  const setShareAlertFormats = useCallback(async (enabled: boolean) => {
+  const shareChoiceRevision = useRef(0);
+  const setShareAlertFormats = useCallback((enabled: boolean) => whileSavingFormatChoice(async () => {
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
     }
-    const previous = authoritativeState.current.shareAlertFormats;
+    const revision = ++shareChoiceRevision.current;
+    const generation = stateGeneration.current;
     const next = dispatch({ type: 'setShareAlertFormats', enabled });
-    const written = await persist(next);
-    if (!written) {
-      dispatch({ type: 'setShareAlertFormats', enabled: previous });
+    if (!(await persist(next).catch(() => false))) {
+      // A failed opt-out must keep blocking sends in this session. A failed opt-in
+      // also fails closed, without undoing a later setting or crossing an erase.
+      if (enabled && revision === shareChoiceRevision.current && generation === stateGeneration.current) {
+        dispatch({ type: 'setShareAlertFormats', enabled: false });
+      }
       throw new Error('Format sharing preference could not be saved');
     }
-  }, [dispatch, persist]);
+  }), [dispatch, persist]);
 
   const replaceSharedAlertFormats = useCallback((etag: string | null, formats: SharedAlertFormat[]) => {
     if (!authoritativeState.current.hydrated) return;
@@ -3470,6 +3477,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const generation = stateGeneration.current;
     if (enabled) {
       if (Platform.OS === 'android') {
+        const { default: sms } = await import('../../modules/sms-reader');
+        if (sms?.setLiveSmsConsent && !sms.setLiveSmsConsent(false)) throw new Error('Could not disable live SMS');
         const { default: reader } = await import('../../modules/notification-reader');
         if (reader?.isAvailable() === true &&
           !(await reader.setCaptureEnabled(false, 0))) {
@@ -3497,6 +3506,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
+    }
+    if (!sources.sms) {
+      const { default: sms } = await import('../../modules/sms-reader');
+      if (sms?.setLiveSmsConsent && !sms.setLiveSmsConsent(false)) throw new Error('Could not disable live SMS');
     }
     const { default: reader } = await import('../../modules/notification-reader');
     if (reader?.isAvailable() === true) {
@@ -3686,7 +3699,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       captureOptOut: current.captureOptOut,
       bestEffortAutoPost: current.bestEffortAutoPost,
       // Consent belongs to this phone's owner, like the other capture prefs.
-      shareAlertFormats: current.shareAlertFormats,
+      shareAlertFormatsV1: current.shareAlertFormatsV1,
       sharedAlertFormats: current.sharedAlertFormats,
       // A backup written before goals existed keeps this phone's answers.
       wafraGoals: restored.wafraGoals ?? current.wafraGoals,

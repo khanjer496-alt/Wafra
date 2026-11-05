@@ -15,7 +15,6 @@ import {
 import type { PrivateAlertFormat } from '@/lib/private-alert-formats';
 import { learnFromConfirmation, type LearnedFields, type LearnInput } from '@/lib/learned-alert-formats';
 import { SettingsSwitchRow } from '@/components/settings-rows';
-import { sharesAlertFormats } from '@/lib/shared-alert-format-share';
 import { submitShapeAnonymously } from '@/lib/shared-alert-format-submit';
 import { toSharedAlertShape, type SharedAlertShape } from '@/lib/shared-alert-formats';
 import {
@@ -24,7 +23,7 @@ import {
 
 /** Source and draft capsules live only in this screen's temporary state. */
 export default function TeachBankFormatScreen() {
-  const { state, addPrivateAlertFormat, removePrivateAlertFormat, setShareAlertFormats } = useStore();
+  const { state, getStateSnapshot, getStateGeneration, addPrivateAlertFormat, removePrivateAlertFormat, setShareAlertFormats } = useStore();
   const router = useRouter();
   const band = useBand('flow');
   const focused = useIsFocused();
@@ -151,13 +150,14 @@ export default function TeachBankFormatScreen() {
   };
   const save = async () => {
     if (!verified || busy) return;
+    const generation = getStateGeneration();
     const run = ++operation.current; saving.current = true; setBusy(true); setError('');
     try {
       await addPrivateAlertFormat(verified.template);
-      // On unless the person turned it off; never in Private Mode, and never allowed to affect teaching.
-      const shape = sharesAlertFormats({ shareAlertFormats: state.shareAlertFormats, privateMode }) ? pendingShape.current : null;
-      if (shape) void submitShapeAnonymously(shape, { shareAlertFormats: state.shareAlertFormats, privateMode });
       if (!mounted.current || run !== operation.current) return;
+      const shape = pendingShape.current;
+      if (shape) void submitShapeAnonymously(shape,
+        () => getStateGeneration() === generation ? getStateSnapshot() : null, setShareAlertFormats);
       clear(); setSaved(true);
     } catch { if (mounted.current && run === operation.current) setError(words.theFormatWasNotSavedYour); }
     finally { saving.current = false; if (mounted.current && run === operation.current) setBusy(false); }
@@ -252,7 +252,7 @@ export default function TeachBankFormatScreen() {
       <ThemedText type="meta" themeColor="textSecondary">{words.onlyThePrivateLayoutIsRemembered}</ThemedText>
       <View style={{ borderRadius: 14, paddingHorizontal: 16, backgroundColor: band.card }}>
         <SettingsSwitchRow testID="format-share-switch" title={words.shareWithOthersTitle}
-          subtitle={words.shareWithOthersBody} value={state.shareAlertFormats !== false} last palette={band}
+          subtitle={words.shareWithOthersBody} value={state.shareAlertFormatsV1 === true} last palette={band}
           onChange={next => { setShareAlertFormats(next).catch(() => { if (mounted.current) setError(words.theFormatWasNotSavedYour); }); }} />
       </View>
       {formats.length > 0 && <View style={{ gap: 12 }}>

@@ -163,14 +163,14 @@ test('non-owner consumers never schedule reactive reminders', async t => {
   assert.equal(h.calls.length, 0);
 });
 
-function backgroundHarness() {
+function backgroundHarness(liveSmsConsent = true) {
   let state = { ...baseState(), pro: true }, handler;
   let next = {}, durable = Promise.resolve(), failSync = false;
   const calls = [], summaries = [];
   const api = load(path.join(root, 'src/lib/android-live-background.ts'), {
     'react-native': { Platform: { OS: 'android' }, AppState: { currentState: 'background' }, AppRegistry: { registerHeadlessTask: (_name, factory) => { handler = factory(); } } },
     '../../modules/notification-reader': { __esModule: true, default: { isAdmissionActive: () => true } },
-    '../../modules/sms-reader': { __esModule: true, default: {} },
+    '../../modules/sms-reader': { __esModule: true, default: { hasLiveSmsConsent: () => liveSmsConsent } },
     '@/lib/android-capture-sources': { androidSmsCaptureEnabled: () => true, androidNotificationCaptureEnabled: () => true },
     '@/lib/auto-import': {},
     '@/lib/capture-executor': { createCaptureExecutor: () => ({ execute: async () => {
@@ -193,6 +193,14 @@ function backgroundHarness() {
   return { calls, summaries, uninstall, run: () => handler({ source: 'sms', observedAt: 1000 }),
     change: patch => { next = patch; }, setDurable: promise => { durable = promise; }, failSync: () => { failSync = true; } };
 }
+
+test('an already-scheduled SMS task stops if live SMS was disabled', async t => {
+  const h = backgroundHarness(false); t.after(h.uninstall);
+  h.change({ accounts: [account], cardDues: [due] });
+  await h.run();
+  assert.equal(h.calls.length, 0);
+  assert.equal(h.summaries.length, 0);
+});
 
 test('headless statement/payment changes sync bounded obligations only after durable capture', async t => {
   const h = backgroundHarness(); t.after(h.uninstall);

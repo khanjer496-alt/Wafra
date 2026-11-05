@@ -62,3 +62,15 @@ test('erase removes the credential', async () => {
   await t.id.erase();
   assert.equal(t.store.has(SHARING_CREDENTIAL_KEY), false);
 });
+
+test('erase waits for an issued credential write and blocks new pairing until removal', async () => {
+  let wrote, resume;
+  const entered = new Promise(resolve => { wrote = resolve; });
+  const waiting = new Promise(resolve => { resume = resolve; });
+  const t = make({ writeSecret: async (key,value) => { wrote(); await waiting; t.store.set(key,value); } });
+  const first = t.id.ensure(); await entered;
+  const erased = t.id.erase();
+  assert.equal(await t.id.ensure(),null);
+  resume(); assert.equal(await first,null); await erased;
+  assert.equal(t.store.has(SHARING_CREDENTIAL_KEY),false);
+});

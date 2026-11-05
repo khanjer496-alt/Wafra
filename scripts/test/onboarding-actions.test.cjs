@@ -308,6 +308,15 @@ test('iOS return-marker persistence failure prevents manual success', async () =
   assert.equal(h.ledger.onboarded, false);
 });
 
+test('declining live SMS keeps approved history and skips the notification prompt', async () => {
+  const h = actions({ requestSmsDeliveryPermission: async () => false });
+  await h.startScan();
+  before(h, 'requestSmsPermission', 'requestSmsDeliveryPermission');
+  assert.equal(calls(h, 'requestVisibleNotificationPermission').length, 0);
+  assert.equal(calls(h, 'beginHistoryImport').length, 1);
+  assert.equal(h.ui.androidSmsReady, true);
+});
+
 test('Android SMS source becomes ready durably, then the explicit Continue completes setup', async () => {
   const gate = deferred();
   const h = actions({ optOut: true, setCaptureOptOut: () => gate.promise });

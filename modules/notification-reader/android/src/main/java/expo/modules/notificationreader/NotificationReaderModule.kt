@@ -390,11 +390,14 @@ class NotificationReaderModule : Module() {
       // implementations even when JS ultimately had zero new rows to parse.
       // Listener connect and explicit sweepVisible() retain the recovery path
       // for visible notifications without putting it on every resume/read.
-      NotificationCaptureStore.read(context, sinceMs.toLong()).mapNotNull { row ->
-        val sourceClass = TrustedBankNotificationPackages.queuedSourceClass(
-          context,
-          row.pkg,
-          "${row.title} ${row.text}".trim(),
+      val (excluded, allowed) = NotificationCaptureStore.read(context, sinceMs.toLong()).partition {
+        TrustedBankNotificationPackages.isMessagingApp(context, it.pkg)
+      }
+      // Previously admitted messaging rows must not cross the bridge on upgrade.
+      if (excluded.isNotEmpty()) NotificationCaptureStore.acknowledge(context, excluded.map { it.id }.toSet())
+      allowed.mapNotNull { row ->
+        val sourceClass = TrustedBankNotificationPackages.sourceClass(
+          context, row.pkg, "${row.title} ${row.text}".trim(),
         ) ?: return@mapNotNull null
         mapOf(
           "id" to row.id,

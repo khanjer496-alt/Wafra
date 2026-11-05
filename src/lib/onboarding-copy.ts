@@ -29,7 +29,7 @@ const en = {
   restoreReadFailed: 'Couldn’t read that file. Choose the backup file again.',
   // Android SMS explainer, shown before the system prompt
   smsExplainerTitle: 'Read bank messages',
-  smsExplainerBody: 'Wafra reads bank SMS on this phone and ignores everything else.',
+  smsExplainerBody: 'Wafra checks the SMS inbox on this phone for bank alerts and uses supported payments to update your ledger or Review.',
   smsExplainerSystemName: 'Android calls this permission “send and view SMS messages”.',
   smsExplainerNever: 'Wafra never sends or replies to messages, and it skips one-time codes. Your SMS are not uploaded unless you choose to send a report.',
   smsExplainerContinue: 'Continue',
@@ -60,7 +60,7 @@ const ar: OnboardingCopy = {
   checklistToDo: 'لم يكتمل بعد',
   restoreReadFailed: 'تعذّرت قراءة هذا الملف. اختر ملف النسخة الاحتياطية مجددًا.',
   smsExplainerTitle: 'قراءة رسائل البنك',
-  smsExplainerBody: 'يقرأ وفرة رسائل البنك على هذا الهاتف ويتجاهل كل ما عداها.',
+  smsExplainerBody: 'يفحص وفرة صندوق الرسائل على هذا الهاتف بحثًا عن تنبيهات البنك، ويستخدم الدفعات المدعومة لتحديث سجلك أو عرضها للمراجعة.',
   smsExplainerSystemName: 'يسمّي أندرويد هذا الإذن «إرسال رسائل SMS وعرضها».',
   smsExplainerNever: 'لا يرسل وفرة أي رسالة ولا يرد عليها، ويتجاوز رموز التحقق. لا تُرفع رسائلك إلا إذا اخترت إرسال تقرير.',
   smsExplainerContinue: 'متابعة',

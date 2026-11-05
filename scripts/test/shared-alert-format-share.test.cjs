@@ -79,17 +79,17 @@ test('tray re-validates stored candidates and drops invalid ones without droppin
   assert.equal(Tray.validateReviewShareCandidate(c).shareHash, c.shareHash);
 });
 
-test('confirm: unchanged reading submits only while consent is on now', () => {
+test('confirm: unchanged reading can offer a choice unless the user opted out', () => {
   const c = Share.buildCandidateShareShape(TAUPE, 'TAUPEB', ev(), { active: true, country: 'IN' });
   const confirmed = { amountMinor: 45000, currency: 'INR', direction: 'debit' };
-  assert.equal(Share.shouldSubmitConfirmedShape(c, confirmed, {}), true);
-  assert.equal(Share.shouldSubmitConfirmedShape(c, confirmed, { shareAlertFormats: true }), true);
-  assert.equal(Share.shouldSubmitConfirmedShape(c, confirmed, { shareAlertFormats: false }), false, 'turned off since creation');
-  assert.equal(Share.shouldSubmitConfirmedShape(c, confirmed, { privateMode: true }), false);
-  assert.equal(Share.shouldSubmitConfirmedShape(c, { ...confirmed, amountMinor: 45001 }, {}), false, 'corrected amount');
-  assert.equal(Share.shouldSubmitConfirmedShape(c, { ...confirmed, currency: 'USD' }, {}), false);
-  assert.equal(Share.shouldSubmitConfirmedShape(c, { ...confirmed, direction: 'credit' }, {}), false, 'corrected direction');
-  assert.equal(Share.shouldSubmitConfirmedShape({}, confirmed, {}), false, 'no candidate');
+  assert.equal(Share.mayOfferConfirmedShape(c, confirmed, {}), true);
+  assert.equal(Share.mayOfferConfirmedShape(c, confirmed, { shareAlertFormatsV1: true }), true);
+  assert.equal(Share.mayOfferConfirmedShape(c, confirmed, { shareAlertFormatsV1: false }), false, 'turned off since creation');
+  assert.equal(Share.mayOfferConfirmedShape(c, confirmed, { privateMode: true }), false);
+  assert.equal(Share.mayOfferConfirmedShape(c, { ...confirmed, amountMinor: 45001 }, {}), false, 'corrected amount');
+  assert.equal(Share.mayOfferConfirmedShape(c, { ...confirmed, currency: 'USD' }, {}), false);
+  assert.equal(Share.mayOfferConfirmedShape(c, { ...confirmed, direction: 'credit' }, {}), false, 'corrected direction');
+  assert.equal(Share.mayOfferConfirmedShape({}, confirmed, {}), false, 'no candidate');
 });
 
 test('creation hook: a refused generic alert carries a value-free candidate, never text, only while active', () => {

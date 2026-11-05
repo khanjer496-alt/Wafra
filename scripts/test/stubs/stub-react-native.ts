@@ -36,3 +36,8 @@ export const PermissionsAndroid = {
     return Object.fromEntries(permissions.map((p) => [p, 'denied']));
   },
 };
+
+export const Alert = {
+  alert(_title: string, _body: string, _buttons: { text: string; style?: string; onPress: () => void }[],
+    options?: { cancelable: boolean; onDismiss: () => void }) { options?.onDismiss(); },
+};
