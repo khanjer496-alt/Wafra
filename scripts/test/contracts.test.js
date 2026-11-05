@@ -198,12 +198,12 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
       smsOnCreate.includes('return@OnCreate') &&
       /AsyncFunction\("getReceived"\)[\s\S]*?if \(!clearLegacyDeliveryBuffer\(context\)\) \{\s*throw/.test(nativeModule) &&
       code(read('src/lib/android-tester-diagnostics.ts')).includes('getStartupCleanupDiagnostics?.()'));
-  ok('incoming SMS permission is requested only for the optional instant banner',
+  ok('history and optional live SMS have separate permission requests',
     /requestSmsPermission\(\)[\s\S]*PermissionsAndroid\.request\(PermissionsAndroid\.PERMISSIONS\.READ_SMS\)/
       .test(scanner) &&
-      /requestSmsDeliveryPermission\(\)[\s\S]*PermissionsAndroid\.PERMISSIONS\.RECEIVE_SMS/
+      /requestSmsDeliveryPermission\([\s\S]*PermissionsAndroid\.PERMISSIONS\.RECEIVE_SMS/
         .test(scanner) &&
-      /toggleInstantAlerts[\s\S]*requestSmsDeliveryPermission\(\)/.test(settings));
+      /toggleInstantAlerts[\s\S]*requestSmsDeliveryPermission\(t, smsSelected\)/.test(settings));
   ok('restricted SMS access is an error, never a successful empty inbox',
     nativeModule.includes('checkSelfPermission(Manifest.permission.READ_SMS)') &&
       nativeModule.includes('SMS inbox query returned no cursor') &&

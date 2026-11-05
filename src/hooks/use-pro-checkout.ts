@@ -23,7 +23,7 @@ import {
 } from '@/components/superwall-billing-context';
 import { subscriptionManagementUrl } from '@/lib/billing';
 import { t } from '@/lib/i18n';
-import { billingStore, trialDaysLeft, yearlySavingPercent, type ProPlan } from '@/lib/purchases';
+import { billingStore, hasNonTrialAccess, trialDaysLeft, yearlySavingPercent, type ProPlan } from '@/lib/purchases';
 import { PLAN_ORDER } from '@/lib/pro-plans';
 import { configuredPublicUrl } from '@/lib/public-links';
 import { useStore } from '@/lib/store';
@@ -45,7 +45,7 @@ export function useProCheckout() {
   // first call, not on the next render.
   const actionLatch = useRef(false);
   const trial = trialDaysLeft(state);
-  const entitled = state.pro || state.founderPro;
+  const entitled = hasNonTrialAccess(state);
   const privacyPolicyUrl = configuredPublicUrl('privacyPolicyUrl');
   const termsOfUseUrl = configuredPublicUrl('termsOfUseUrl');
   const legalReady = privacyPolicyUrl !== null && termsOfUseUrl !== null;

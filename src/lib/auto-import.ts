@@ -1,6 +1,7 @@
 import { createAiAlertReviewSession } from '@/lib/ai-alert-reader';
 import { createPrivateAlertFormatSession, type PrivateAlertFormatSessionOptions } from '@/lib/private-alert-format-runtime';
 import { canEnrichPrivateFormatReview, privateAlertFormatReviewEvent } from '@/lib/private-alert-format-review';
+import { requestConsent } from '@/lib/consent-prompt';
 import { AppState as RNAppState, Linking, PermissionsAndroid, Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
@@ -409,15 +410,14 @@ export async function hasSmsPermission(): Promise<boolean> {
  */
 export async function hasSmsDeliveryPermission(): Promise<boolean> {
   if (!isSmsScanningAvailable()) return false;
-  return PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.RECEIVE_SMS);
+  return SmsReader?.hasLiveSmsConsent?.() === true &&
+    PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.RECEIVE_SMS);
 }
 
 export async function requestSmsPermission(): Promise<boolean> {
   if (!isSmsScanningAvailable()) return false;
   if (await hasSmsPermission()) return true;
-  // Automatic ledger import reads the Android system inbox. RECEIVE_SMS is a
-  // separate, optional capability used only by the instant-banner toggle and
-  // is requested at that point—not bundled into first-run tracking consent.
+  // Foreground history and live delivery have separate consent.
   const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_SMS);
   return result === PermissionsAndroid.RESULTS.GRANTED;
 }
@@ -437,11 +437,26 @@ export function isSmsInboxAccessError(error: unknown): boolean {
     );
 }
 
-export async function requestSmsDeliveryPermission(): Promise<boolean> {
-  if (!isSmsScanningAvailable()) return false;
+export async function requestSmsDeliveryPermission(
+  translate: (key: 'instantSmsDisclosureTitle' | 'instantSmsDisclosureBody' | 'cancel' | 'enableAction') => string,
+  stillEnabled: () => boolean = () => true,
+): Promise<boolean> {
+  if (!isSmsScanningAvailable() || !SmsReader?.setLiveSmsConsent) return false;
+  if (!stillEnabled()) return false;
+  if (await hasSmsDeliveryPermission()) return stillEnabled();
+  // A previous OS grant may have been revoked. Clear stale consent before any fresh choice.
+  if (SmsReader.hasLiveSmsConsent?.() && !SmsReader.setLiveSmsConsent(false)) return false;
+  const accepted = await requestConsent({
+    question: translate('instantSmsDisclosureTitle'),
+    body: translate('instantSmsDisclosureBody'),
+    cancelLabel: translate('cancel'),
+    confirmLabel: translate('enableAction'),
+  });
+  if (!accepted || !stillEnabled()) return false;
   const permission = PermissionsAndroid.PERMISSIONS.RECEIVE_SMS;
-  if (await hasSmsDeliveryPermission()) return true;
-  return (await PermissionsAndroid.request(permission)) === PermissionsAndroid.RESULTS.GRANTED;
+  const granted = await PermissionsAndroid.check(permission) ||
+    (await PermissionsAndroid.request(permission)) === PermissionsAndroid.RESULTS.GRANTED;
+  return granted && stillEnabled() && SmsReader.setLiveSmsConsent(true);
 }
 
 export type { CaptureChannel } from '@/lib/dedupe';
@@ -728,22 +743,7 @@ export type SourceFreeRefusedAlertDecision =
 const unresolvedNotificationIdsThisSession = new Set<string>();
 let unresolvedNotificationSessionKey = '';
 
-/**
- * Messaging apps are never a bank's own notification channel, and never a
- * financial candidate. The default SMS app re-announces every bank SMS the
- * SMS path already captures, so while Wafra can read SMS a Messages
- * notification is only a second copy — and approving one in Review would
- * teach Wafra to trust the Messages app, and anyone who can text the user.
- * Without READ_SMS it is the user's only route to their bank SMS, so an SMS
- * app's row then goes to Review only, with no learnable package identity.
- * Chat apps carry money-looking text from anyone and are always ignored.
- *
- * Native classifies these rows (including the device's default SMS app,
- * which only native can resolve) as `messaging-review`; these lists also
- * cover rows an older native build queued as financial candidates. Keep
- * aligned with TrustedBankNotificationPackages.smsAppPackages and
- * chatAppPackages; android-review-capture compares them.
- */
+/** Discard legacy messaging notifications before parsing, for every SMS permission state. */
 export const SMS_APP_PACKAGES: ReadonlySet<string> = new Set([
   'com.google.android.apps.messaging',
   'com.samsung.android.messaging',
@@ -1645,7 +1645,6 @@ export async function scanInbox(
         acknowledged: 0,
       };
       const notificationYield = createParseYieldState();
-      let smsRouteForMessagingRows: boolean | undefined;
       for (let i = 0; i < captured.length; i++) {
         const n = captured[i];
         if (typeof n.id !== 'string' || !/^[A-Za-z0-9-]{16,128}$/.test(n.id)) continue;
@@ -1656,19 +1655,8 @@ export async function scanInbox(
             nativeSourceClass !== 'financial-candidate' && nativeSourceClass !== 'messaging-review') continue;
         scannedCount += 1;
         if (n.ts > newestTs) newestTs = n.ts;
-        // Curated bank packages are never messaging apps. Any other messaging
-        // row is decided here, before the learned-package check below, so an
-        // earlier Review approval can never make it trusted: acknowledged as
-        // ignored while Wafra can read SMS (or for a chat app), otherwise an
-        // SMS app's row continues as Review-only evidence.
-        const messagingRow = nativeSourceClass === 'messaging-review' ||
-          (nativeSourceClass !== 'trusted-bank' && MESSAGING_APP_PACKAGES.has(n.pkg));
-        if (messagingRow && smsRouteForMessagingRows === undefined) {
-          // A failed check counts as readable, as natively: at worst a
-          // missed Review card, never a duplicate of a captured SMS.
-          smsRouteForMessagingRows = await hasSmsPermission().catch(() => true);
-        }
-        if (messagingRow && (CHAT_APP_PACKAGES.has(n.pkg) || smsRouteForMessagingRows)) {
+        // An older native module may return a queued messaging row. Never inspect its text.
+        if (nativeSourceClass === 'messaging-review' || MESSAGING_APP_PACKAGES.has(n.pkg)) {
           if (notificationImportStats) notificationImportStats.ignored += 1;
           notificationIds.add(n.id);
           if (parseYieldDue(notificationYield, i + 1 < captured.length)) {
@@ -1687,15 +1675,11 @@ export async function scanInbox(
         // establish issuer trust. It still cannot authorize money by itself:
         // worldwide automatic import additionally requires a certified template.
         // Truly ambiguous apps remain review-first.
-        const verifiedSender = nativeSourceClass === 'financial-candidate' && !messagingRow
+        const verifiedSender = nativeSourceClass === 'financial-candidate'
           ? verifiedFinancialAppSender(n.appLabel ?? '')
           : null;
-        const sourceClass = nativeSourceClass === 'messaging-review'
-          ? 'financial-candidate' as const
-          : nativeSourceClass === 'financial-candidate' && verifiedSender
-            ? 'play-finance' as const
-            : nativeSourceClass;
-        const learned = !messagingRow && sourceClass === 'financial-candidate' && learnedPackages.has(n.pkg);
+        const sourceClass = nativeSourceClass === 'financial-candidate' && verifiedSender ? 'play-finance' : nativeSourceClass;
+        const learned = sourceClass === 'financial-candidate' && learnedPackages.has(n.pkg);
         const autoAuthorized = sourceClass === 'trusted-bank' || sourceClass === 'play-finance' || learned;
         // Green semantic generalization needs independently verified installed-
         // app identity. A user-learned package may still use an exact Gold
@@ -1848,9 +1832,7 @@ export async function scanInbox(
         const p = parsedCandidate && (!requiredCurrency || parsedCandidate.currency === requiredCurrency)
           ? parsedCandidate
           : null;
-        // A messaging row carries no package identity into Review, so
-        // confirming it can never teach Wafra to trust the Messages app.
-        const pushSource = messagingRow ? undefined : { packageName: n.pkg, sourceClass } as const;
+        const pushSource = { packageName: n.pkg, sourceClass } as const;
         const parsedCandidateFallback = heldPayment
           ? parsedFinancialCandidateReview(heldPayment, n.ts)
           : p && !autoAuthorized ? parsedFinancialCandidateReview(p, n.ts) : null;

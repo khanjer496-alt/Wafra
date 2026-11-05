@@ -19,6 +19,7 @@ class SmsDeliveryReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent) {
     try {
       if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION) return
+      if (!InstantAlert.hasLiveSmsConsent(context)) return
       val parts = Telephony.Sms.Intents.getMessagesFromIntent(intent) ?: return
       if (parts.isEmpty()) return
 

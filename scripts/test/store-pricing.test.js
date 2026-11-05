@@ -43,7 +43,18 @@ const ok = (name, condition, detail = '') => {
     return validateStorePricing(value, metadata).some((error) => pattern.test(error));
   };
 
-  ok('canonical pending pricing is valid', validateStorePricing(pricing, metadata).length === 0);
+  ok('canonical pricing is valid', validateStorePricing(pricing, metadata).length === 0);
+  const publisherOnly = approvedPricing();
+  publisherOnly.approvalStatus = 'publisher-approved-pending-store-readback';
+  for (const product of Object.values(publisherOnly.products)) product.readBackEvidence = null;
+  ok('publisher approval can precede Play and Apple readback', validateStorePricing(publisherOnly, metadata).length === 0);
+  const wrongAmount = clone(publisherOnly);
+  wrongAmount.products.yearly.approvedBasePrice.amount = '74.99';
+  ok('an approved amount must match the configured reference price',
+    validateStorePricing(wrongAmount, metadata).some(error => error.includes('publisher-approved base price')));
+  publisherOnly.approvalStatus = 'approved';
+  ok('publisher approval alone cannot claim verified storefront prices',
+    validateStorePricing(publisherOnly, metadata).some(error => error.includes('read-back evidence')));
   ok('complete approved pricing is valid', validateStorePricing(approvedPricing(), metadata).length === 0);
   ok('approved pricing rejects an unapproved base price', rejects(
     (value) => { value.products.weekly.approvedBasePrice.publisherApproved = false; },

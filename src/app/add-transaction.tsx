@@ -43,7 +43,7 @@ import { committed, tapped } from '@/lib/haptics';
 import { t as tUi, tf as tfUi } from '@/lib/i18n';
 import { accountDisplayName } from '@/lib/ledger';
 import { useStore } from '@/lib/store';
-import { sharesAlertFormats, shouldSubmitConfirmedShape } from '@/lib/shared-alert-format-share';
+import { sharesAlertFormats, mayOfferConfirmedShape } from '@/lib/shared-alert-format-share';
 import { submitShapeAnonymously } from '@/lib/shared-alert-format-submit';
 import { cachedReferenceQuote, convertWithReferenceQuote, loadReferenceQuote, quoteFitsDay } from '@/lib/fx-rates';
 import { displayNumberConventions, formatMinorUnits, formatMinorUnitsForInput, ledgerMoneySpec } from '@/lib/ledger-money';
@@ -528,8 +528,9 @@ export default function AddTransactionScreen() {
             const confirmed = { amountMinor: Number(selectedMoney.minorUnits), currency: selectedMoney.currency,
               direction: (type === 'income' ? 'credit' : 'debit') as 'credit' | 'debit' };
             const consent = getStateSnapshot();
-            if (shouldSubmitConfirmedShape(genericItem, confirmed, consent)) {
-              void submitShapeAnonymously(shape, consent);
+            if (mayOfferConfirmedShape(genericItem, confirmed, consent)) {
+              void submitShapeAnonymously(shape,
+                () => getStateGeneration() === saveGeneration ? getStateSnapshot() : null, setShareAlertFormats);
             }
           } catch { /* sharing never affects the save */ }
         }

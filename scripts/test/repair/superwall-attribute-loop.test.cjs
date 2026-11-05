@@ -99,6 +99,7 @@ function harness(options = {}) {
   const placement = { state: { status: 'idle' }, registerPlacement: async () => {} };
   const setPro = value => { calls.pro.push(value); state.pro = value; };
   const deps = {
+    '@/components/complimentary-refresh': { ComplimentaryRefresh: () => null },
     'expo-superwall': { ...sdk, ...user, ...provider, usePlacement: () => placement },
     react, 'react/jsx-runtime': jsx, 'react-native': rn,
     '@/components/superwall-billing-context': { WafraBillingContext: { Provider: 'Billing' },

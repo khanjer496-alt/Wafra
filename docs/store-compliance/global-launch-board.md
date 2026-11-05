@@ -13,8 +13,8 @@ _Status snapshot: 10 September 2026._
 | Apple screenshots | NEEDS-REAL-DEVICE | Re-capture final release-like set if current AED demo framing is not accepted for global launch. |
 | Android SMS permission approval | BLOCKED-STORE | Submit declaration after AAB upload; Google decides eligibility. |
 | Superwall production billing | BLOCKED-STORE | Configure both public SDK keys, products, `pro` entitlement and `pro_upgrade` campaign; verify store-formatted prices and restore. |
-| Public Privacy/Terms/Support URLs | BLOCKED-USER | Publisher must choose monitored contact and publish HTTPS pages. |
-| Governing law / counsel approval | BLOCKED-USER | Do not infer from Wyoming formation or user residence. |
+| Public Privacy/Terms/Support URLs | PUBLISHER ADOPTED; HOSTED READBACK REQUIRED | On 6 November 2026 Nasida Apps LLC adopted the exact policy and Terms and selected worldwide distribution. The support contact is naser@nasidaapps.com. Confirm the version visible at each public URL after deployment. |
+| Governing law / counsel review | PUBLISHER ADOPTED; NO COUNSEL REVIEW RECORDED | The adopted Terms use Wyoming law and preserve mandatory local consumer protections. The publisher’s worldwide selection does not establish a jurisdiction-by-jurisdiction legal assessment. |
 | Apple export compliance | RECORDED (19 Sep 2026) | Build 155 application-specific exempt-use self-assessment retained in `apple-export-assessment-155.md`; reassess material cryptographic changes. |
 | Physical iOS capture/history proof | NEEDS-REAL-DEVICE | Test exact signed TestFlight build on a real iPhone. |
 | Physical Android capture/performance proof | NEEDS-REAL-DEVICE | Test exact Play/internal build, permissions, live alert capture and large-ledger responsiveness. |

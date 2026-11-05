@@ -276,7 +276,7 @@ async function processBackgroundCapture(source: BackgroundSource, observedAt: nu
   // forever after a storefront entitlement later expires.
   if (source === 'sms') {
     try {
-      if (NotificationReader?.isAdmissionActive?.() !== true) return;
+      if (SmsReader?.hasLiveSmsConsent?.() !== true || NotificationReader?.isAdmissionActive?.() !== true) return;
     } catch {
       return;
     }

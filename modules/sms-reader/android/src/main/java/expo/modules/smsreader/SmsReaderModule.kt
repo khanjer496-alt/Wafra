@@ -370,6 +370,16 @@ class SmsReaderModule : Module() {
       true
     }
 
+    Function("hasLiveSmsConsent") {
+      val context = appContext.reactContext ?: return@Function false
+      InstantAlert.hasLiveSmsConsent(context)
+    }
+
+    Function("setLiveSmsConsent") { enabled: Boolean ->
+      val context = appContext.reactContext ?: return@Function false
+      InstantAlert.setLiveSmsConsent(context, enabled)
+    }
+
     Function("getInstantAlerts") {
       val context = appContext.reactContext ?: return@Function false
       InstantAlert.isEnabled(context)

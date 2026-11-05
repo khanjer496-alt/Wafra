@@ -1,14 +1,9 @@
 # Wafra Terms of Use
 
-_Last updated: 19 September 2026_
-
-> **Launch draft — needs counsel review and one legal decision before publishing.**
-> The support contact has been supplied by the publisher. The governing-law
-> clause remains unresolved; it should not be guessed from where the company
-> was formed or where a user happens to live.
+_Last updated: 6 November 2026_
 
 These terms govern your use of **Wafra** ("the app"), a personal money manager
-for Android and iOS published by **Nasidaapps LLC** ("we", "us").
+for Android and iOS published by **Nasida Apps LLC** ("we", "us").
 
 By installing or using the app you accept these terms. If you do not accept
 them, do not use the app.
@@ -18,7 +13,7 @@ them, do not use the app.
 Wafra records your personal money movements — expenses, income, transfers,
 card statements, bills and subscriptions — and presents them as balances,
 budgets and reports. Android can parse supported bank alerts on the device. On
-iPhone, a personal Apple Message automation can pass selected bank alerts to
+iPhone, a personal Apple Message automation can pass matching Messages to
 Wafra's local App Intent on that iPhone. Optional email, statement and trusted-
 device features use Wafra's privacy-minimising relay only when you choose them.
 
@@ -55,7 +50,7 @@ attempt to defeat its licensing or subscription controls.
 ## Your data
 
 Your main ledger stays in encrypted storage on your device. If you enable
-iPhone automatic capture, selected bank alerts pass to Wafra on that iPhone
+iPhone automatic capture, Messages matching your automation pass to Wafra on that iPhone
 and stay in a protected local queue until local processing or expiry.
 No Message content is uploaded by this local capture path. Optional forwarded
 email, statement import and trusted-device sharing use the relay. What the
@@ -72,8 +67,8 @@ Some features require **Wafra Pro**. Every feature is free for the first
 subscription.
 
 Subscriptions are sold and processed by **Apple's App Store or Google Play**,
-depending on your device, in the plans offered in the app (currently a monthly
-and a yearly plan). We never see or handle your payment details.
+depending on your device. The app shows the available plans and their prices
+before you subscribe. We never see or handle your payment details.
 
 - Billing, renewal, price changes, cancellation and refunds are governed by
   the applicable store's terms and your store-account settings.
@@ -121,8 +116,11 @@ transactions.
 
 ## Governing law
 
-These terms are governed by the laws of `[[GOVERNING LAW — PUBLISHER/COUNSEL TO CONFIRM]]`.
+These terms are governed by the laws of the State of Wyoming, United States,
+without regard to its conflict-of-law rules. If you use Wafra as a consumer,
+this does not take away any protection you have under the mandatory consumer
+laws of the country where you live.
 
 ## Contact
 
-Email: [support@nasidaapps.com](mailto:support@nasidaapps.com)
+Email: [naser@nasidaapps.com](mailto:naser@nasidaapps.com)

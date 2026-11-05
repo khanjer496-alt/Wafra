@@ -256,9 +256,6 @@ const nativeReaderModule = fs.readFileSync(
   };
   const kotlinSms = kotlinSet('smsAppPackages');
   const kotlinChat = kotlinSet('chatAppPackages');
-  const capture = nativeTrustedPackages.slice(
-    nativeTrustedPackages.indexOf('fun sourceClass('),
-    nativeTrustedPackages.indexOf('fun queuedSourceClass('));
   ok('SMS and chat app lists match natively and in JS',
     kotlinSms.length >= 5 && kotlinChat.length >= 5 &&
       JSON.stringify(kotlinSms) === JSON.stringify([...SMS_APP_PACKAGES].sort()) &&
@@ -269,21 +266,9 @@ const nativeReaderModule = fs.readFileSync(
       kotlinSms.includes('com.samsung.android.messaging') &&
       kotlinChat.includes('com.whatsapp'),
     JSON.stringify({ kotlinSms, kotlinChat }));
-  ok('natively, a messaging app is never a financial candidate; only the SMS route, without READ_SMS, reaches Review',
-    nativeTrustedPackages.includes('Telephony.Sms.getDefaultSmsPackage(context)') &&
-      nativeTrustedPackages.includes('checkSelfPermission(Manifest.permission.READ_SMS)') &&
-      // Curated banks first, then messaging apps, and both before the Play
-      // gate and the money-word test that used to admit Messages.
-      capture.indexOf('if (isTrusted(context, packageName)) return SOURCE_TRUSTED_BANK') >= 0 &&
-      capture.indexOf('if (isTrusted(context, packageName)) return SOURCE_TRUSTED_BANK') <
-        capture.indexOf('if (isMessagingApp(context, packageName)) {') &&
-      capture.indexOf('if (isMessagingApp(context, packageName)) {') <
-        capture.indexOf('if (!playInstalled(context, packageName)) return null') &&
-      /isSmsApp\(context, packageName\) && !smsReadable\(context\)[\s\S]{0,120}SOURCE_MESSAGING_REVIEW else null/
-        .test(capture) &&
-      // Queued rows always reach JS so they can be acknowledged or reviewed.
-      nativeReaderModule.includes('TrustedBankNotificationPackages.queuedSourceClass('),
-    JSON.stringify({ capture: capture.length }));
+  ok('legacy SMS notification contents never cross the native bridge',
+    nativeReaderModule.includes('NotificationCaptureStore.acknowledge(context, excluded.map { it.id }.toSet())') &&
+    nativeReaderModule.includes('allowed.mapNotNull { row ->'));
 }
 
 const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
@@ -292,6 +277,41 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
   accountHints: {}, merchantOverrides: {}, lastScanTs: 0, parserVersion: 0 });
 
 (async () => {
+  {
+    const requestLive = (allowed) => require('./build/auto-import.js').requestSmsDeliveryPermission(require('./build/i18n.js').t, allowed);
+    const { check, request } = reactNative.PermissionsAndroid;
+    const { registerConsentPresenter } = require('./build/consent-prompt.js');
+    let consent = false, osGranted = true, grants = 0, allow = false;
+    const events = [];
+    smsReader.hasLiveSmsConsent = () => consent;
+    smsReader.setLiveSmsConsent = value => { events.push('persist'); consent = value; return true; };
+    reactNative.PermissionsAndroid.check = async () => osGranted;
+    reactNative.PermissionsAndroid.request = async () => { events.push('android'); grants++; return 'granted'; };
+    const unregisterConsent = registerConsentPresenter(async ({ body }) => {
+      events.push(body.includes('closed') && body.includes('incoming SMS') ? 'disclosure' : 'incomplete');
+      return allow;
+    });
+    ok('an existing Android grant cannot bypass a declined in-app live consent',
+      !(await requestLive()) && !consent && grants === 0 && events.join(',') === 'disclosure');
+    allow = true; osGranted = false; events.length = 0;
+    ok('affirmative live disclosure precedes OS permission and native activation',
+      (await requestLive()) && consent && grants === 1 && events.join(',') === 'disclosure,android,persist');
+    allow = false; osGranted = false; events.length = 0;
+    ok('revoked Android permission clears old native consent even when a new attempt is declined',
+      !(await requestLive()) && !consent && grants === 1 && events.join(',') === 'persist,disclosure');
+    allow = true; osGranted = false; events.length = 0;
+    let sourceOn = true;
+    reactNative.PermissionsAndroid.request = async () => { sourceOn = false; return 'granted'; };
+    ok('turning off the SMS source during an OS prompt prevents native SMS activation',
+      !(await requestLive(() => sourceOn)) && !consent);
+    const input = nativeDelivery.indexOf('getMessagesFromIntent(intent)');
+    ok('an upgraded receiver checks live consent before opening SMS payloads',
+      input > 0 && nativeDelivery.indexOf('if (!InstantAlert.hasLiveSmsConsent(context)) return') >= 0 &&
+      nativeDelivery.indexOf('if (!InstantAlert.hasLiveSmsConsent(context)) return') < input);
+    reactNative.PermissionsAndroid.check = check;
+    reactNative.PermissionsAndroid.request = request;
+    unregisterConsent();
+  }
   const first = await scanInbox(0, {}, undefined, 'fr-FR');
   ok('launch-tested UAE parsing and explicit salary produce ordinary import rows',
     first.parsed.length === 2 && first.parsed[0].currency === 'AED' &&
@@ -678,26 +698,19 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
         acknowledgedNotifications.slice(ackBeforeMessaging).includes('whatsapp-money-chat-0001'),
       JSON.stringify(acknowledgedNotifications.slice(ackBeforeMessaging)));
 
-    // Without READ_SMS the Messages notification is the user's only route
-    // to their bank SMS. It goes to Review — never straight to the ledger,
-    // never carrying a package identity Review could learn to trust — and a
-    // chat app still goes nowhere.
     reactNative.PermissionsAndroid.check = async () => false;
     notificationRows = messagingRows(smsAppClass);
     const withoutSms = await scanInbox(0, {}, undefined, 'en-AE', {
       notificationOnly: true,
       learnedNotificationPackages: ['com.google.android.apps.messaging'],
     });
-    const messagesReview = withoutSms.reviewCandidates.find((item) => item.observedAt === NOW + 5_300);
-    ok(`without READ_SMS, a Messages bank SMS (${smsAppClass}) reaches Review only, as an unlearnable source`,
-      withoutSms.parsed.length === 0 && !!messagesReview &&
-        messagesReview.channel === 'push' &&
-        messagesReview.sourcePackage === undefined && messagesReview.sourceClass === undefined &&
-        !withoutSms.reviewCandidates.some((item) => item.observedAt === NOW + 5_310),
-      JSON.stringify(withoutSms.reviewCandidates));
+    ok(`denying READ_SMS blocks messaging-app rows (${smsAppClass}) including learned packages`,
+      withoutSms.parsed.length === 0 && withoutSms.reviewCandidates.length === 1 &&
+      withoutSms.reviewCandidates[0].observedAt === NOW + 5_320 &&
+      getAndroidNotificationImportDiagnostics()?.ignored === 2);
     const ackBeforeReview = acknowledgedNotifications.length;
     await withoutSms.commit();
-    ok(`without READ_SMS, the reviewed Messages row (${smsAppClass}) and the chat row are acknowledged`,
+    ok(`without READ_SMS, the discarded Messages row (${smsAppClass}) and the chat row are acknowledged`,
       acknowledgedNotifications.slice(ackBeforeReview).includes('messages-app-bank-sms-0001') &&
         acknowledgedNotifications.slice(ackBeforeReview).includes('whatsapp-money-chat-0001'),
       JSON.stringify(acknowledgedNotifications.slice(ackBeforeReview)));

@@ -54,9 +54,7 @@ export interface CapturedNotification {
   ts: number;
   /**
    * Native source provenance. JS still requires issuer/parser evidence before
-   * auto-import. `messaging-review` is an SMS/chat app's notification: JS
-   * acknowledges it while Wafra can read SMS and otherwise sends an SMS app's
-   * row to Review only, with no learnable package identity.
+   * auto-import. Older native builds may return `messaging-review`; discard these rows.
    */
   sourceClass: 'trusted-bank' | 'play-finance' | 'financial-candidate' | 'messaging-review';
 }
@@ -72,6 +70,10 @@ interface NotificationReaderModule {
   /** Persist the app's tracking choice; disabling also erases queued alerts. */
   setCaptureEnabled(enabled: boolean, expiresAtMs: number): Promise<boolean>;
   /** Shared entitlement lease + independently selected bank-notification source. */
+  anchorComplimentaryLease?(issued: number, budget: number): boolean;
+  complimentaryRemainingMs?(issued: number): number;
+  clearComplimentaryLease?(): boolean;
+  setSourceConfigurationWithGrant?(notificationEnabled: boolean, standardExpiresAtMs: number, grantIssuedAtMs: number): Promise<boolean>;
   setSourceConfiguration?(notificationEnabled: boolean, expiresAtMs: number): Promise<boolean>;
   /** Cheap foreground self-heal: request an Android listener rebind only when disconnected. */
   ensureListenerConnected?(): Promise<boolean>;

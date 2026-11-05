@@ -67,6 +67,7 @@ class BankNotificationListenerService : NotificationListenerService() {
     try {
       if (sbn.packageName == packageName) return
       if (!NotificationCapturePolicy.isEnabled(this)) return
+      if (TrustedBankNotificationPackages.isMessagingApp(this, sbn.packageName)) return
       recordAdmission("active", adcb)
       // A group summary restates its children, each of which is posted (and
       // captured) on its own; reading it re-captured whichever older alert it

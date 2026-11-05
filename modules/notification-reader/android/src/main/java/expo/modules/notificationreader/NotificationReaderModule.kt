@@ -140,6 +140,32 @@ class NotificationReaderModule : Module() {
       true
     }
 
+    AsyncFunction("setSourceConfigurationWithGrant") { notificationEnabled: Boolean, expiresAtMs: Double, grantId: Double ->
+      if (!TrustedBankNotificationPackages.CAPTURE_ENABLED) return@AsyncFunction false
+      val context = appContext.reactContext ?: return@AsyncFunction false
+      val wasEnabled = NotificationCapturePolicy.isEnabled(context)
+      val expiresAt = if (expiresAtMs.isFinite() && expiresAtMs > 0.0) expiresAtMs.toLong() else 0L
+      NotificationCapturePolicy.setConfiguration(context, notificationEnabled, expiresAt, grantId.toLong())
+      val nowEnabled = NotificationCapturePolicy.isEnabled(context)
+      if (!wasEnabled && nowEnabled) BankNotificationListenerService.sweepConnected()
+      true
+    }
+
+    Function("anchorComplimentaryLease") { issued: Double, budget: Double ->
+      val context = appContext.reactContext ?: return@Function false
+      ComplimentaryClock.anchor(context, issued.toLong(), budget.toLong())
+    }
+    Function("complimentaryRemainingMs") { issued: Double ->
+      val context = appContext.reactContext ?: return@Function 0.0
+      ComplimentaryClock.remaining(context, issued.toLong()).toDouble()
+    }
+    Function("clearComplimentaryLease") {
+      val context = appContext.reactContext ?: return@Function false
+      ComplimentaryClock.clear(context)
+    }
+
+
+
     /**
      * Cheap foreground self-heal. Do nothing while Android's listener is
      * already connected; if an OEM killed it despite the permission still
@@ -390,11 +416,14 @@ class NotificationReaderModule : Module() {
       // implementations even when JS ultimately had zero new rows to parse.
       // Listener connect and explicit sweepVisible() retain the recovery path
       // for visible notifications without putting it on every resume/read.
-      NotificationCaptureStore.read(context, sinceMs.toLong()).mapNotNull { row ->
-        val sourceClass = TrustedBankNotificationPackages.queuedSourceClass(
-          context,
-          row.pkg,
-          "${row.title} ${row.text}".trim(),
+      val (excluded, allowed) = NotificationCaptureStore.read(context, sinceMs.toLong()).partition {
+        TrustedBankNotificationPackages.isMessagingApp(context, it.pkg)
+      }
+      // Previously admitted messaging rows must not cross the bridge on upgrade.
+      if (excluded.isNotEmpty()) NotificationCaptureStore.acknowledge(context, excluded.map { it.id }.toSet())
+      allowed.mapNotNull { row ->
+        val sourceClass = TrustedBankNotificationPackages.sourceClass(
+          context, row.pkg, "${row.title} ${row.text}".trim(),
         ) ?: return@mapNotNull null
         mapOf(
           "id" to row.id,

@@ -54,14 +54,18 @@ const parse = (raw: string | null): Stored | null => {
 
 export function createSharingIdentity(deps: SharingIdentityDeps) {
   let inflight: Promise<SharingCredential | null> | null = null;
+  let erasing: Promise<void> | null = null;
+  let generation = 0;
 
-  const pairOnce = async (): Promise<SharingCredential | null> => {
+  const pairOnce = async (allowed: () => boolean): Promise<SharingCredential | null> => {
     const base = deps.baseUrl?.replace(/\/+$/, '') ?? '';
-    if (!base) return null;
+    if (!base || !allowed()) return null;
     const stored = parse(await deps.readSecret(SHARING_CREDENTIAL_KEY).catch(() => null));
+    if (!allowed()) return null;
     if (stored?.syncToken) return stored.baseUrl === base ? stored : null;
     if (stored?.failedAt !== undefined && deps.now() - stored.failedAt < SHARING_BACKOFF_MS) return null;
     const fail = async (): Promise<null> => {
+      if (!allowed()) return null;
       await deps.writeSecret(SHARING_CREDENTIAL_KEY, JSON.stringify({ failedAt: deps.now() })).catch(() => {});
       return null;
     };
@@ -81,8 +85,9 @@ export function createSharingIdentity(deps: SharingIdentityDeps) {
       if (!body || typeof body.deviceId !== 'string' || !UUID.test(body.deviceId) ||
         typeof body.syncToken !== 'string' || !TOKEN.test(body.syncToken)) return await fail();
       const credential = { baseUrl: base, deviceId: body.deviceId, syncToken: body.syncToken };
+      if (!allowed()) return null;
       await deps.writeSecret(SHARING_CREDENTIAL_KEY, JSON.stringify(credential));
-      return credential;
+      return allowed() ? credential : null;
     } catch {
       return await fail();
     } finally {
@@ -92,13 +97,20 @@ export function createSharingIdentity(deps: SharingIdentityDeps) {
 
   return {
     /** The stored credential, pairing once if needed. Single-flight; null on any failure or backoff. */
-    ensure(): Promise<SharingCredential | null> {
-      inflight ??= pairOnce().catch(() => null).finally(() => { inflight = null; });
+    ensure(allowed: () => boolean = () => true): Promise<SharingCredential | null> {
+      if (erasing) return Promise.resolve(null);
+      const atStart = generation;
+      inflight ??= pairOnce(() => atStart === generation && allowed()).catch(() => null).finally(() => { inflight = null; });
       return inflight;
     },
     /** Erase-all: forget the credential (the relay vault holds no personal data). */
-    async erase(): Promise<void> {
-      try { await deps.removeSecret(SHARING_CREDENTIAL_KEY); } catch { /* silent */ }
+    erase(): Promise<void> {
+      if (erasing) return erasing;
+      generation++;
+      // A SecureStore write issued before erase must resolve before deletion.
+      erasing = Promise.resolve(inflight).then(() => deps.removeSecret(SHARING_CREDENTIAL_KEY))
+        .catch(() => {}).finally(() => { erasing = null; });
+      return erasing;
     },
   };
 }

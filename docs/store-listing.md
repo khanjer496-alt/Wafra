@@ -33,10 +33,11 @@ in Review. Unsupported alerts may require manual entry.
 
 ## Android-sensitive permission copy
 
-The Google Play default listing must explain that `READ_SMS` is optional and is
-used for a user-requested retained bank-alert scan processed on-device.
-`RECEIVE_SMS` is a separate optional permission requested only for delivery-time
-transaction alerts. Declining either permission leaves manual entry usable.
+The Play listing must describe both optional SMS permissions. `READ_SMS`
+lets Wafra scan retained messages on the device. If the user separately enables
+live SMS tracking, `RECEIVE_SMS` lets Wafra process a new financial message in
+the background and, when enabled, show a transaction notification. Declining
+live tracking leaves history available. Manual entry requires neither permission.
 
 Use `docs/store-compliance/google-play.md` for the Permissions Declaration,
 Financial Features and Data Safety preparation notes.
@@ -53,12 +54,16 @@ export-compliance preparation.
 
 ## Required publisher fields before public submission
 
-- **Contact/support:** [[PUBLIC SUPPORT CONTACT — required before publishing]]
-- **Privacy URL:** configured public HTTPS URL required
-- **Terms URL:** configured public HTTPS URL required
-- **Support URL:** configured public HTTPS URL required
-- **Governing law/counsel approval:** required; do not infer from company
-  formation state or a user's residence
+- **Publisher:** Nasida Apps LLC.
+- **Contact:** naser@nasidaapps.com.
+- **Privacy:** https://wafra-app-azg.pages.dev/privacy/
+- **Terms:** https://wafra-app-azg.pages.dev/terms/
+- **Support:** https://wafra-app-azg.pages.dev/support/
+
+On 6 November 2026 the publisher adopted the Privacy Policy and Terms and
+selected worldwide distribution. The Terms use Wyoming law and preserve
+mandatory local consumer protections. Confirm the adopted versions at the
+public URLs after deployment. Independent counsel review is not recorded.
 
 ## Assets
 

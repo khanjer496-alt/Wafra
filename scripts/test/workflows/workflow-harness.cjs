@@ -60,7 +60,7 @@ function createWorkflowHarness(options={}) {
  for(const name of ['dismissReviewAlert','setAppLock','setDailySummary','setPrivateMode','setTheme','setThemePreference','setLanguage','setMarket','ensureDurable','setOnboarded','setOnboardingPlan','setOnboardingProfile','setAndroidCaptureSources','importBackup','clearAll'])store[name]=record(name);
  Object.assign(h.state,{appLock:false,dailySummary:false,themePreference:'system',founderPro:false,pro:true,userName:'',storageFailure:null,marketId:'AE',knownBanks:['Emirates NBD'],...options.state});
  Object.assign(store,{storageFailure:null,storageRecoveryState:null,hydrationFailed:false});
- Object.assign(d['@/lib/purchases'],{trialDaysLeft:()=>0});
+ Object.assign(d['@/lib/purchases'],{trialDaysLeft:()=>0,hasNonTrialAccess:require('../build/purchases.js').hasNonTrialAccess});
  Object.assign(d['@/lib/markets'],{MARKETS:[{id:'AE',name:'United Arab Emirates',currency:{display:'AED',code:'AED'},banks:[{name:'Emirates NBD',domain:'emiratesnbd.com',color:'#2B4C9B'},{name:'FAB',domain:'bankfab.com',color:'#00A3E0'},{name:'ADCB',domain:'adcb.com',color:'#E4032E'}]}],canSelectMarket:()=>true});
  d['@/lib/uncategorised']={uncategorisedMerchants:()=>options.merchantSummary??{merchants:[],paymentPurposes:[],rowCount:0,totalFils:0},overrideAppliesTo:()=>false};
  d['@/lib/alert-review-tray']={isUniversalReviewAlert:item=>item.kind==='universal',

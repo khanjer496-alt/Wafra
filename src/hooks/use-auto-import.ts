@@ -586,7 +586,7 @@ export function useAutoImport(
   const state = useStoreSelector(({ state: s }) => ({
     hydrated: s.hydrated, onboarded: s.onboarded, captureOptOut: s.captureOptOut,
     androidCaptureSources: s.androidCaptureSources, historyImport: historyStatusOnly(s.historyImport),
-    pro: s.pro, founderPro: s.founderPro, trialStartTs: s.trialStartTs,
+    pro: s.pro, founderPro: s.founderPro, complimentaryIssuedAt: s.complimentaryIssuedAt, trialStartTs: s.trialStartTs,
     // Read only by the effects that return early unless watchForeground (a
     // constant per caller), so other callers do not follow every import page.
     lastScanTs: watchForeground ? s.lastScanTs : 0,
@@ -715,7 +715,10 @@ export function useAutoImport(
     const leaseEnabled = current.hydrated && current.onboarded &&
       (smsEnabled || notificationEnabled) && isProActive(current);
     const expiresAt = leaseEnabled ? bankNotificationAdmissionExpiresAt(current) : 0;
-    if (reader.setSourceConfiguration) {
+    if (reader.setSourceConfigurationWithGrant) {
+      await reader.setSourceConfigurationWithGrant(notificationEnabled && leaseEnabled, expiresAt,
+        leaseEnabled ? current.complimentaryIssuedAt ?? 0 : 0);
+    } else if (reader.setSourceConfiguration) {
       await reader.setSourceConfiguration(notificationEnabled && leaseEnabled, expiresAt);
     } else {
       // Older native builds cannot represent SMS-only as a separate lease.
@@ -838,7 +841,7 @@ export function useAutoImport(
   useEffect(() => {
     if (Platform.OS !== 'android' || !state.hydrated) return;
     void syncAndroidNotificationAdmission(getStateSnapshot()).catch(() => {});
-  }, [entitlementActive, getStateSnapshot, state.captureOptOut, state.hydrated,
+  }, [entitlementActive, getStateSnapshot, state.captureOptOut, state.complimentaryIssuedAt, state.hydrated,
     state.onboarded, syncAndroidNotificationAdmission]);
 
   useEffect(() => {
@@ -883,7 +886,12 @@ export function useAutoImport(
         actions: [{
           label: t('enableAction'),
           onPress: () => void (async () => {
-            const delivery = await requestSmsDeliveryPermission().catch(() => false);
+            const stillEnabled = () => {
+              const latest = getStateSnapshot();
+              return latest.hydrated && latest.onboarded && !latest.captureOptOut &&
+                isProActive(latest) && androidSmsCaptureEnabled(latest);
+            };
+            const delivery = await requestSmsDeliveryPermission(t, stillEnabled).catch(() => false);
             if (!delivery) return;
             await requestNotificationPermission().catch(() => false);
           })(),

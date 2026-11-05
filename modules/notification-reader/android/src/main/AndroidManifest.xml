@@ -1,4 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <queries>
+    <intent><action android:name="android.provider.Telephony.SMS_DELIVER" /></intent>
+  </queries>
   <application>
     <!-- User must enable this listener explicitly in system settings
          (Special app access → Notification access). -->

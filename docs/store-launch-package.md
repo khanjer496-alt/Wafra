@@ -63,11 +63,11 @@ Wafra uses the permissions separately:
   in-app disclosure, Wafra reads the Android inbox locally to find supported
   financial alerts. Non-financial messages are ignored; SMS text is not
   uploaded to Wafra's relay.
-- `RECEIVE_SMS` — requested later, separately, only if the user enables the
-  optional delivery-time transaction alert. A dedicated disclosure is shown
-  immediately before this runtime request. The receiver checks the delivered
-  SMS locally for financial activity and does not maintain a second raw-message
-  archive.
+- `RECEIVE_SMS` — if the user separately enables live SMS tracking, Wafra
+  checks newly delivered SMS on the device while the app is in the background.
+  Supported activity can update the ledger and uncertain activity can go to
+  Review. Wafra can also show an optional transaction notification. Retained-
+  inbox import works without live tracking.
 
 Both uses must be described in the Play listing and Permissions Declaration.
 Declining either permission must remain a real choice. Manual entry and explicit
@@ -91,7 +91,7 @@ automation that invokes Wafra's local App Intent on the same iPhone. Optional
 email/PDF/trusted-device features use the relay separately when chosen.
 
 App Store privacy answers must describe the union of Wafra and embedded SDK
-behavior, including RevenueCat when production billing is enabled. Apple
+behavior, including Superwall when production billing is enabled. Apple
 requires a public privacy-policy URL and disclosure of third-party SDK data
 practices:
 
@@ -106,7 +106,7 @@ Products remain:
 - `wafra_pro_weekly`
 - `wafra_pro_yearly`
 - `wafra_pro_monthly` (retired: no longer offered, still carries `pro`)
-- RevenueCat entitlement: `pro`
+- Superwall entitlement: `pro`
 
 The commercial price is **not approved yet**. Reference values in repository
 docs are planning values, not a promise to users.
@@ -152,13 +152,11 @@ promotes a local SMS story as the whole product.
 
 Publisher: **Nasida Apps LLC**.
 
-Still requires publisher/counsel input before public submission:
-
-- governing law in Terms;
-- monitored public support contact;
-- counsel review of Privacy Policy and Terms;
-- any country-specific privacy/data-transfer, consumer, financial-app, tax or
-  sanctions/export restrictions that affect worldwide availability.
+Nasida Apps LLC adopted the Privacy Policy and Terms on 6 November 2026
+and chose worldwide distribution. The public contact is naser@nasidaapps.com.
+The Terms use Wyoming law and keep mandatory local consumer protections.
+Verify the three live pages after deployment. Publisher adoption does not
+record an independent legal review or a clearance for every jurisdiction.
 
 The final support URL must lead to real contact information. Apple explicitly
 requires the Support URL to let users reach the publisher:

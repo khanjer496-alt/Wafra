@@ -31,7 +31,8 @@ const LOGO_PLATE = '#F7F4EE';
 function MerchantAvatarInner({ title, category, size = 34, plate = false }: MerchantAvatarProps) {
   const privateMode = usePrivateMode();
   const ground = useBand('home').glyphGround;
-  const allowRemote = !privateMode; // Narrow context: unrelated ledger changes do not rerender every visible row.
+  // Android record names may come from bank SMS; even a cached CDN URL reveals the brand.
+  const allowRemote = Platform.OS !== 'android' && !privateMode;
   const bundled = merchantLogoFor(title);
   const [remote, setRemote] = useState<RemoteMerchantLogo | null>(null);
 

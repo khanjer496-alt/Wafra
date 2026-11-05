@@ -64,14 +64,16 @@ export function validateStorePricing(pricing, metadata) {
     }
   }
 
-  if (pricing.approvalStatus === 'approved') {
+  const storeVerified = pricing.approvalStatus === 'approved';
+  if (storeVerified || pricing.approvalStatus === 'publisher-approved-pending-store-readback') {
     for (const [plan, product] of Object.entries(pricing.products ?? {})) {
       const approved = product.approvedBasePrice;
       if (!approved || typeof approved.currency !== 'string' || !/^[A-Z]{3}$/.test(approved.currency) ||
-          approved.currency !== product.referencePrice?.currency ||
+          approved.currency !== product.referencePrice?.currency || approved.amount !== product.referencePrice?.amount ||
           !MONEY.test(approved.amount ?? '') || approved.publisherApproved !== true) {
         errors.push(`approved ${plan} pricing needs one publisher-approved base price`);
       }
+      if (!storeVerified) continue;
       for (const currency of SAMPLE_CURRENCIES) {
         if (!validReadBack(product.readBackEvidence?.[currency])) {
           errors.push(`approved ${plan} pricing needs Apple and Google formatted-price read-back evidence for ${currency}`);
@@ -79,7 +81,7 @@ export function validateStorePricing(pricing, metadata) {
       }
     }
   } else if (pricing.approvalStatus !== 'pending-commercial-approval') {
-    errors.push('pricing approvalStatus must be pending-commercial-approval or approved');
+    errors.push('pricing approvalStatus must be pending-commercial-approval, publisher-approved-pending-store-readback or approved');
   }
 
   return errors;

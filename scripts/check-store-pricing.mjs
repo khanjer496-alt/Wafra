@@ -20,5 +20,7 @@ if (errors.length > 0) {
 
 const approval = pricing.approvalStatus === 'approved'
   ? 'approved storefront prices and read-back evidence are structurally complete'
-  : 'live pricing remains blocked pending commercial approval';
+  : pricing.approvalStatus === 'publisher-approved-pending-store-readback'
+    ? 'publisher approved base prices; storefront prices have not been verified'
+    : 'live pricing remains blocked pending commercial approval';
 console.log(`Store pricing rules and product identifiers are valid; ${approval}.`);

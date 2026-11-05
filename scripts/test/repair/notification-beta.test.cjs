@@ -189,7 +189,8 @@ test('native listener admission expires without an app foreground refresh', () =
   const policy = read(`${base}NotificationCapturePolicy.kt`);
   const module = read(`${base}NotificationReaderModule.kt`);
   assert.match(policy, /getLong\(EXPIRES_AT, 0L\)/);
-  assert.match(policy, /expiresAt > System\.currentTimeMillis\(\)/);
+  assert.match(policy, /isLeaseActiveAt\(context, System\.currentTimeMillis\(\)\)/);
+  assert.match(policy, /expiresAt > wallNow/);
   assert.match(module, /AsyncFunction\("setCaptureEnabled"\) \{ enabled: Boolean, expiresAtMs: Double/);
 });
 

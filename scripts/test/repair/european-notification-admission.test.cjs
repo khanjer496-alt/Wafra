@@ -98,12 +98,21 @@ open class Context {
   fun checkSelfPermission(permission: String): Int = smsPermission
 }
 `,
+  'Intent.kt': `package android.content
+class Intent(val action: String) {
+  var pkg = ""
+  fun setPackage(name: String): Intent { pkg = name; return this }
+}
+`,
   'PackageManager.kt': `package android.content.pm
 class ApplicationInfo
 class InstallSourceInfo(val installingPackageName: String?)
 class PackageManager {
   var installer: String? = "com.android.vending"
   var failInstaller = false
+  var smsHandlers = setOf<String>()
+  fun queryBroadcastReceivers(intent: android.content.Intent, flags: Int): List<String> =
+    if (intent.action == "android.provider.Telephony.SMS_DELIVER" && intent.pkg in smsHandlers) listOf(intent.pkg) else emptyList()
   fun getInstallSourceInfo(pkg: String): InstallSourceInfo { if(failInstaller) throw IllegalStateException("unavailable"); return InstallSourceInfo(installer) }
   fun getInstallerPackageName(pkg: String): String? { if(failInstaller) throw IllegalStateException("unavailable"); return installer }
   fun getApplicationInfo(pkg: String, flags: Int) = ApplicationInfo()
@@ -118,7 +127,7 @@ object Manifest { object permission { const val READ_SMS = "android.permission.R
 object Build { object VERSION { var SDK_INT = 35 }; object VERSION_CODES { const val R = 30 } }
 `,
   'Telephony.kt': `package android.provider
-object Telephony { object Sms { fun getDefaultSmsPackage(context: android.content.Context): String? = context.defaultSms } }
+object Telephony { object Sms { object Intents { const val SMS_DELIVER_ACTION = "android.provider.Telephony.SMS_DELIVER" }; fun getDefaultSmsPackage(context: android.content.Context): String? = context.defaultSms } }
 `,
   'BuildConfig.kt': `package expo.modules.notificationreader
 object BuildConfig { const val WAFRA_ANDROID_NOTIFICATION_CAPTURE_ENABLED = true }
@@ -161,11 +170,15 @@ ${credentials.map(([name, body]) => `  expect(${quote(name)}, SensitiveNotificat
   context.packageManager.installer = "com.android.vending"
   expect("readable sms avoids duplicate", TrustedBankNotificationPackages.sourceClass(context, "com.google.android.apps.messaging", "Paiement EUR 12,34"), null)
   context.smsPermission = 1
-  expect("unreadable sms review only", TrustedBankNotificationPackages.sourceClass(context, "com.google.android.apps.messaging", "Paiement EUR 12,34"), "messaging-review")
+  expect("SMS denied: never read Messages notifications", TrustedBankNotificationPackages.sourceClass(context, "com.google.android.apps.messaging", "Paiement EUR 12,34"), null)
   expect("unreadable chat excluded", TrustedBankNotificationPackages.sourceClass(context, "org.telegram.messenger", "Paiement EUR 12,34"), null)
   context.packageManager.installer = null
   context.defaultSms = "com.example.smsrole"
-  expect("default sms role review only", TrustedBankNotificationPackages.sourceClass(context, "com.example.smsrole", "Zahlung EUR 12,34"), "messaging-review")
+  expect("default SMS role excluded before installer", TrustedBankNotificationPackages.sourceClass(context, "com.example.smsrole", "Zahlung EUR 12,34"), null)
+  context.packageManager.installer = "com.android.vending"
+  context.packageManager.smsHandlers = setOf("com.oem.alternative")
+  expect("non-default OEM SMS handler excluded", TrustedBankNotificationPackages.sourceClass(context, "com.oem.alternative", "Paid EUR 12.34"), null)
+  context.packageManager.installer = null
   android.os.Build.VERSION.SDK_INT = 29
   expect("legacy unknown nonplay", TrustedBankNotificationPackages.sourceClass(context, unknown, "Zahlung EUR 12,34"), null)
   context.packageManager.installer = "com.android.vending"

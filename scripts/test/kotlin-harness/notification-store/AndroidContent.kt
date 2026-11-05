@@ -8,6 +8,7 @@ interface SharedPreferences {
   interface Editor {
     fun putString(k: String, v: String?): Editor
     fun putLong(k: String, v: Long): Editor
+    fun putInt(k: String, v: Int): Editor
     fun putBoolean(k: String, v: Boolean): Editor
     fun remove(k: String): Editor
     fun clear(): Editor
@@ -15,6 +16,7 @@ interface SharedPreferences {
   }
   fun getString(k: String, d: String?): String?
   fun getLong(k: String, d: Long): Long
+  fun getInt(k: String, d: Int): Int
   fun getBoolean(k: String, d: Boolean): Boolean
   fun contains(k: String): Boolean
   val all: Map<String, *>
@@ -29,6 +31,7 @@ class MemPrefs : SharedPreferences {
   var commitAttempts = 0
   override fun getString(k: String, d: String?) = map[k] as String? ?: d
   override fun getLong(k: String, d: Long) = map[k] as Long? ?: d
+  override fun getInt(k: String, d: Int) = map[k] as Int? ?: d
   override fun getBoolean(k: String, d: Boolean) = map[k] as Boolean? ?: d
   override fun contains(k: String) = map.containsKey(k)
   override val all: Map<String, *> get() = map
@@ -36,6 +39,7 @@ class MemPrefs : SharedPreferences {
     val ops = mutableListOf<() -> Unit>()
     override fun putString(k: String, v: String?) = apply { ops += { map[k] = v } }
     override fun putLong(k: String, v: Long) = apply { ops += { map[k] = v } }
+    override fun putInt(k: String, v: Int) = apply { ops += { map[k] = v } }
     override fun putBoolean(k: String, v: Boolean) = apply { ops += { map[k] = v } }
     override fun remove(k: String) = apply { ops += { map.remove(k) } }
     override fun clear() = apply { ops += { map.clear() } }
@@ -53,7 +57,10 @@ class MemPrefs : SharedPreferences {
   }
 }
 
+class ContentResolver
+
 open class Context {
+  val contentResolver = ContentResolver()
   val prefs = mutableMapOf<String, MemPrefs>()
   fun getSharedPreferences(name: String, mode: Int): SharedPreferences = prefs.getOrPut(name) { MemPrefs() }
   companion object { const val MODE_PRIVATE = 0 }

@@ -159,6 +159,10 @@ jobs:
       - name: Generate native Android project
         run: npx expo prebuild --platform android --no-install
 
+      - name: Configure Play bundle update channel
+        if: inputs.bundle && !inputs.corpus
+        run: node scripts/play-update-channel.cjs configure android/app/src/main/AndroidManifest.xml
+
       # Expo's generated 512 MiB metaspace cap exhausted during
       # :expo-updates:kspReleaseKotlin. Give class metadata room and fail
       # immediately on OOM instead of hanging until the job timeout.
@@ -218,12 +222,10 @@ jobs:
       #
       # Credentials reach Gradle as ORG_GRADLE_PROJECT_* properties, so they
       # are never written into build.gradle or any other file in the
-      # workspace. Without the keystore secret a throwaway key is generated
-      # with a random per-run password so builds stay green; those APKs
-      # cannot update a side-loaded install (uninstall/reinstall) and cannot
-      # be uploaded to Play.
+      # workspace. Only sideloaded test APKs may use a disposable key.
       - name: Configure release signing
         env:
+          PLAY_BUNDLE: ${{ inputs.bundle }}
           KEYSTORE_B64: ${{ secrets.WAFRA_KEYSTORE_B64 }}
           KEYSTORE_PASSWORD: ${{ secrets.WAFRA_KEYSTORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.WAFRA_KEY_PASSWORD }}
@@ -255,6 +257,9 @@ jobs:
             fp="$(keytool -list -v -keystore android/app/wafra-upload.jks -storepass "$store_password" -alias "$alias_name" 2>/dev/null | grep -i 'SHA256' | head -1 || true)"
             echo "### ✅ Signed with the upload key" >> "$GITHUB_STEP_SUMMARY"
             echo "Installs over the previous build. \`$fp\`" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$PLAY_BUNDLE" = "true" ]; then
+            echo "::error::A Play bundle requires the existing WAFRA_KEYSTORE_B64 upload key."
+            exit 1
           else
             store_password="$(openssl rand -base64 24)"
             key_password="$store_password"
@@ -323,7 +328,19 @@ jobs:
       - name: Build Play Store bundle (AAB)
         if: github.event.inputs.bundle == 'true' && github.event.inputs.corpus != 'true'
         working-directory: android
-        run: ./gradlew bundleRelease --no-daemon
+        run: ./gradlew :wafra-complimentary-transport:testReleaseUnitTest bundleRelease --no-daemon
+
+      - name: Verify update channel in the packaged Play bundle
+        if: inputs.bundle && !inputs.corpus
+        run: |
+          set -euo pipefail
+          tool="$RUNNER_TEMP/wafra-bundletool.jar"
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/google/bundletool/releases/download/1.18.3/bundletool-all-1.18.3.jar -o "$tool"
+          echo "a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29  $tool" | sha256sum --check
+          java -jar "$tool" dump manifest --module=base \
+            --bundle=android/app/build/outputs/bundle/release/app-release.aab > "$RUNNER_TEMP/wafra-play-manifest.xml"
+          node scripts/play-update-channel.cjs verify "$RUNNER_TEMP/wafra-play-manifest.xml"
 
       - name: Rename outputs
         run: |

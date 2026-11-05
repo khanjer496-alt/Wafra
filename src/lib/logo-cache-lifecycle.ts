@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 
 // These namespaces include old cache versions, even if a resolver has not
 // loaded this session. Do not clear unrelated AsyncStorage keys or image caches.
@@ -19,9 +20,9 @@ export function registerLogoCacheReset(reset: () => void): void {
   resetters.add(reset);
 }
 
-/** Null prevents new lookups while the complete ledger erase is running. */
+/** Android financial records may originate in SMS. Skip cache, search and CDN resolution entirely. */
 export function logoCacheGeneration(): number | null {
-  return erasesInProgress > 0 ? null : generation;
+  return Platform.OS === 'android' || erasesInProgress > 0 ? null : generation;
 }
 
 export function isLogoCacheGenerationCurrent(started: number): boolean {

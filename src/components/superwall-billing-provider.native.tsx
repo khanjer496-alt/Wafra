@@ -1,3 +1,4 @@
+import { ComplimentaryRefresh } from '@/components/complimentary-refresh';
 import {
   SuperwallProvider,
   usePlacement,
@@ -551,6 +552,7 @@ export function SuperwallBillingProvider({ children }: { children: React.ReactNo
   return (
     <>
       <LocalCaptureLeaseSync />
+      {Platform.OS === 'android' && <ComplimentaryRefresh />}
       {available && configure ? (
         <SuperwallProvider
           apiKeys={{ ios: IOS_API_KEY, android: ANDROID_API_KEY }}

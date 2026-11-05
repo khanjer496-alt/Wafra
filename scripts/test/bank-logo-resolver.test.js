@@ -13,6 +13,7 @@ function load({ fetchImpl = async () => ({ ok: false, json: async () => [] }), d
   };
   const modules = new Map();
   function requireModule(id) {
+    if (id === 'react-native') return { Platform: { OS: 'ios' } };
     if (id === '@react-native-async-storage/async-storage') return storage;
     if (modules.has(id)) return modules.get(id);
     assert.ok(id.startsWith('@/lib/'), id);
