@@ -62,15 +62,32 @@ class AppContext { val reactContext: android.content.Context? = null }
 open class Module { val appContext = AppContext(); open fun definition(): Any = Unit }
 class Definition {
   fun Name(name: String) {}
-  fun AsyncFunction(name: String): expo.modules.kotlin.functions.Async = expo.modules.kotlin.functions.Async()
+  fun AsyncFunction(name: String): expo.modules.kotlin.functions.AsyncFunctionBuilder = expo.modules.kotlin.functions.AsyncFunctionBuilder()
   fun OnDestroy(body: () -> Unit) {}
 }
 fun ModuleDefinition(body: Definition.() -> Unit): Any = Definition().apply(body)
 `);
     const functions = path.join(temp, 'ExpoCoroutineStub.kt');
+    // Keep the competing overloads from the installed, lockfile-pinned Expo
+    // implementation. A zero-argument-only stub incorrectly accepted an
+    // implicit-arity lambda that the real Android release compiler rejected.
+    const expoBuilder = fs.readFileSync(path.join(root,
+      'node_modules/expo-modules-core/android/src/main/java/expo/modules/kotlin/functions/AsyncFunctionBuilder.kt'), 'utf8');
+    const overloads = [
+      'inline infix fun <reified R> AsyncFunctionBuilder.Coroutine(crossinline block: suspend () -> R) = SuspendBody(block)',
+      'inline infix fun <reified R, reified P0> AsyncFunctionBuilder.Coroutine(crossinline block: suspend (P0) -> R) = SuspendBody(block)',
+    ];
+    if (overloads.some(overload => !expoBuilder.split(/\r?\n/).includes(overload))) {
+      throw Error('Expo Coroutine overload contract changed; review the native bridge ABI test.');
+    }
     fs.writeFileSync(functions, `package expo.modules.kotlin.functions
-class Async
-infix fun <R> Async.Coroutine(body: suspend () -> R) {}
+open class BaseAsyncFunctionComponent
+class SuspendFunctionComponent : BaseAsyncFunctionComponent()
+class AsyncFunctionBuilder {
+  inline fun <reified R> SuspendBody(crossinline block: suspend () -> R): BaseAsyncFunctionComponent = SuspendFunctionComponent()
+  inline fun <reified R, reified P0> SuspendBody(crossinline block: suspend (P0) -> R): SuspendFunctionComponent = SuspendFunctionComponent()
+}
+${overloads.join('\n')}
 `);
     // This checks the Kotlin bridge's Java/SAM/cancellation types. It does not
     // substitute for an integrated Expo/Gradle build or device verification.

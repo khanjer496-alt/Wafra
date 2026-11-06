@@ -18,7 +18,7 @@ class WafraPlayBillingModule : Module() {
 
   override fun definition() = ModuleDefinition {
     Name("WafraPlayBilling")
-    AsyncFunction("querySubscriptions") Coroutine {
+    AsyncFunction("querySubscriptions") Coroutine { ->
       withContext(Dispatchers.Main.immediate) {
         suspendCancellableCoroutine<Map<String, Any?>> { continuation ->
           val ticket = queries.query { result ->
