@@ -413,17 +413,17 @@ function SuperwallRuntime({ onValue }: {
    * simply absent rather than advertised at a price nobody will be charged.
    */
   const fetchProOffers = useCallback(async (): Promise<ProPlanOffer[]> => {
-    if (!isConfigured) return [];
     const generation = (offersGeneration.current += 1);
+    // A replacement lookup invalidates old prices immediately, including when
+    // the store becomes unavailable or the latest request fails.
+    purchasableProductIds.current = new Set();
+    if (!isConfigured) return [];
     try {
       const offers = proOffersFromProducts(await products(proProductIdsForPlatform()));
-      // Two fetches can be in flight when the Pro screen is left and reopened,
-      // and they can resolve out of order. Only the newest may set what is
-      // purchasable, or an older, thinner response would revoke a plan the
-      // screen is still showing. The caller discards the stale list itself.
-      if (generation === offersGeneration.current) {
-        purchasableProductIds.current = new Set(offers.map((offer) => offer.productId));
-      }
+      // A superseded response must neither republish an old list to its caller
+      // nor replace the product ids authorized by a newer successful response.
+      if (generation !== offersGeneration.current) return [];
+      purchasableProductIds.current = new Set(offers.map((offer) => offer.productId));
       return offers;
     } catch {
       return [];

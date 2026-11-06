@@ -58,7 +58,7 @@ function harness(options = {}) {
       return next;
     };
   };
-  const calls = { attributes: [], tracking: [], configure: 0, pro: [], snapshots: [], appListeners: new Set(), deferred: [] };
+  const calls = { attributes: [], tracking: [], configure: 0, pro: [], snapshots: [], appListeners: new Set(), deferred: [], productRequests: [], purchases: [] };
   const state = { hydrated: true, privateMode: false, language: 'en', marketId: 'AE',
     onboarded: true, captureOptOut: false, trialStartTs: 0, pro: false,
     transactions: [], ...options.state };
@@ -69,6 +69,8 @@ function harness(options = {}) {
     setUserAttributes: async attributes => { calls.attributes.push(attributes); },
     getUserAttributes: async () => ({ fixture: 'unchanged native attributes' }),
     setEventTrackingBehavior: async behavior => { calls.tracking.push(behavior); },
+    products: async ids => { calls.productRequests.push(ids); return options.products ? options.products(ids) : []; },
+    purchase: async id => { calls.purchases.push(id); return { type: 'cancelled' }; },
     addListener: () => ({ remove() {} }),
   };
   const sdk = load(sdkPath('useSuperwall.js'), {
@@ -98,6 +100,9 @@ function harness(options = {}) {
   });
   const placement = { state: { status: 'idle' }, registerPlacement: async () => {} };
   const setPro = value => { calls.pro.push(value); state.pro = value; };
+  const productContract = load(path.join(root, 'src/lib/purchases.ts'), {
+    'react-native': rn, '@/lib/complimentary-access': { complimentaryAccessUntil: () => 0 },
+  });
   const deps = {
     '@/components/complimentary-refresh': { ComplimentaryRefresh: () => null },
     'expo-superwall': { ...sdk, ...user, ...provider, usePlacement: () => placement },
@@ -109,7 +114,9 @@ function harness(options = {}) {
       syncStoreCaptureEntitlement: async snapshot => { calls.snapshots.push(snapshot); return true; },
     },
     '@/lib/capture': {},
-    '@/lib/purchases': { ENTITLEMENT_ID: 'pro', trialDaysLeft: current => current.trialStartTs ? 7 : 0 },
+    '@/lib/purchases': { ENTITLEMENT_ID: 'pro', trialDaysLeft: current => current.trialStartTs ? 7 : 0,
+      proOffersFromProducts: productContract.proOffersFromProducts,
+      proProductIdsForPlatform: productContract.proProductIdsForPlatform },
     '@/lib/store': { useStore: () => ({ state, setPro, ensureDurable: async () => {}, setOnboardingProfile() {} }) },
     // Configure waits for Home's first frames; here the frames are always past.
     '@/lib/after-first-frames': { runAfterFirstFrames: task => {
@@ -136,11 +143,14 @@ function harness(options = {}) {
     for (const effect of active.effects) effect();
     return result;
   };
+  let runtimeValue = null;
+  const receiveRuntime = value => { runtimeValue = value; };
   return {
     state, calls, sdk,
+    billing: () => runtimeValue,
     async renderRuntime(count = 1) {
       for (let i = 0; i < count; i++) {
-        render('runtime', () => module.exports.SuperwallRuntime({ children: null }));
+        render('runtime', () => module.exports.SuperwallRuntime({ onValue: receiveRuntime }));
         await tick();
       }
     },
@@ -305,4 +315,109 @@ test('a runtime that unmounts takes its billing value with it', async () => {
   const [rehydrated] = await h.renderProvider(1);
   assert.notEqual(billingOf(rehydrated), live, 'the old runtime\'s value is gone');
   assert.equal(typeof billingOf(rehydrated).configureNow, 'function', 'configuring until the new runtime answers');
+});
+
+// Run the actual provider and installed SDK wrapper. Control only native product
+// replies, so the allowlist is exercised through the same boundary as checkout.
+const planProduct = plan => ({
+  productIdentifier: `wafra_pro_${plan}`, fullIdentifier: `wafra_pro_${plan}:${plan}:sw-none`,
+  localizedPrice: plan === 'weekly' ? '$4.99' : '$49.99',
+  hasFreeTrial: false, subscriptionPeriod: { value: 1, unit: plan === 'weekly' ? 'week' : 'year' },
+});
+const productId = plan => planProduct(plan).fullIdentifier;
+function deferredProductReply() {
+  let resolve, reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
+test('a newer pending or failed price lookup cannot buy a previously returned offer', async () => {
+  const pending = deferredProductReply();
+  let responses = 0;
+  const h = harness({ products: () => ++responses === 1 ? [planProduct('weekly')] : pending.promise });
+  await h.renderRuntime();
+  const billing = h.billing();
+  assert.equal(await billing.purchasePro(productId('weekly')), 'unavailable');
+  assert.equal((await billing.fetchProOffers()).length, 1);
+  const latest = billing.fetchProOffers();
+  assert.equal(await billing.purchasePro(productId('weekly')), 'unavailable');
+  assert.equal(h.calls.purchases.length, 0);
+  pending.reject(new Error('simulated product lookup failed'));
+  assert.deepEqual(Array.from(await latest), []);
+  assert.equal(await billing.purchasePro(productId('weekly')), 'unavailable');
+  assert.equal(h.calls.purchases.length, 0);
+});
+
+test('a thrown latest lookup leaves no previously loaded product authorized', async () => {
+  let fail = false;
+  const h = harness({ products: async () => {
+    if (fail) throw new Error('simulated store failure');
+    return [planProduct('weekly')];
+  } });
+  await h.renderRuntime();
+  await h.billing().fetchProOffers();
+  fail = true;
+  assert.deepEqual(Array.from(await h.billing().fetchProOffers()), []);
+  assert.equal(await h.billing().purchasePro(productId('weekly')), 'unavailable');
+  assert.deepEqual(h.calls.purchases, []);
+});
+
+test('an older successful lookup returns no stale offers and cannot replace the latest allowlist', async () => {
+  const first = deferredProductReply(), second = deferredProductReply();
+  const replies = [first, second];
+  const h = harness({ products: () => replies.shift().promise });
+  await h.renderRuntime();
+  const older = h.billing().fetchProOffers(), latest = h.billing().fetchProOffers();
+  second.resolve([planProduct('yearly')]);
+  assert.equal((await latest)[0].productId, productId('yearly'));
+  first.resolve([planProduct('weekly')]);
+  assert.deepEqual(Array.from(await older), []);
+  assert.equal(await h.billing().purchasePro(productId('weekly')), 'unavailable');
+  assert.equal(await h.billing().purchasePro(productId('yearly')), 'cancelled');
+  assert.deepEqual(h.calls.purchases, [productId('yearly')]);
+});
+
+test('an older failure cannot revoke a successful newer price lookup', async () => {
+  const first = deferredProductReply(), second = deferredProductReply();
+  const replies = [first, second];
+  const h = harness({ products: () => replies.shift().promise });
+  await h.renderRuntime();
+  const older = h.billing().fetchProOffers(), latest = h.billing().fetchProOffers();
+  second.resolve([planProduct('yearly')]);
+  await latest;
+  first.reject(new Error('superseded store failure'));
+  assert.deepEqual(Array.from(await older), []);
+  assert.equal(await h.billing().purchasePro(productId('yearly')), 'cancelled');
+  assert.deepEqual(h.calls.purchases, [productId('yearly')]);
+});
+
+test('a latest empty catalog keeps an older pending response from authorizing a purchase', async () => {
+  const first = deferredProductReply(), second = deferredProductReply();
+  const replies = [first, second];
+  const h = harness({ products: () => replies.shift().promise });
+  await h.renderRuntime();
+  const older = h.billing().fetchProOffers(), latest = h.billing().fetchProOffers();
+  second.resolve([]);
+  assert.deepEqual(Array.from(await latest), []);
+  first.resolve([planProduct('weekly')]);
+  assert.deepEqual(Array.from(await older), []);
+  assert.equal(await h.billing().purchasePro(productId('weekly')), 'unavailable');
+  assert.deepEqual(h.calls.purchases, []);
+});
+
+test('an unconfigured replacement lookup invalidates in-flight and cached product authorization', async () => {
+  const pending = deferredProductReply();
+  const h = harness({ products: () => pending.promise });
+  await h.renderRuntime();
+  const oldFetch = h.billing().fetchProOffers();
+  await tick();
+  h.sdk.useSuperwallStore.setState({ isConfigured: false });
+  await h.renderRuntime();
+  assert.deepEqual(Array.from(await h.billing().fetchProOffers()), []);
+  pending.resolve([planProduct('weekly')]);
+  assert.deepEqual(Array.from(await oldFetch), []);
+  h.sdk.useSuperwallStore.setState({ isConfigured: true });
+  await h.renderRuntime();
+  assert.equal(await h.billing().purchasePro(productId('weekly')), 'unavailable');
+  assert.deepEqual(h.calls.purchases, []);
 });
