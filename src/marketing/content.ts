@@ -33,11 +33,13 @@ export const SITE_URL = getSiteUrl();
 // The website's download button links to this first-party path. The deployed
 // Pages Function counts the click and redirects to the destination in
 // site-events.mjs; the finalizer's _redirects file covers a static-only host.
-// There is no Android download while the source repository is private.
+// Add an Android store destination only after public Play availability is verified.
 export const DOWNLOAD_PATHS = { iphone: '/get/iphone' } as const;
 export const MARKETING_TITLE = 'Wafra — Private Budget & Expense Tracker';
 export const MARKETING_DESCRIPTION =
   'Track spending, budgets, bills and subscriptions anywhere without a bank login. Start manually or use optional supported imports.';
+const MESSAGE_ACCESS_ANSWER =
+  'Android message access is optional and used for supported financial alerts when enabled. Wafra cannot browse the iPhone Messages inbox. If you enable the current Shortcuts setup, every new Message that contains a space can enter a protected on-device queue, including personal conversations. Wafra keeps supported financial results and discards other content after local processing. This local path does not upload Message content.';
 
 export const PRODUCT_SCHEMA = {
   '@context': 'https://schema.org',
@@ -77,7 +79,7 @@ export const FAQ_SCHEMA = {
       name: 'Does Wafra read every message on my phone?',
       acceptedAnswer: {
         '@type': 'Answer',
-        text: 'No. Android message access is optional and used for supported financial alerts when enabled. iPhone does not give Wafra direct Messages inbox access; optional automatic capture runs only for bank senders the user selects, then processes supported bank alerts locally on the iPhone. This path does not upload Message text.',
+        text: MESSAGE_ACCESS_ANSWER,
       },
     },
     {
@@ -113,11 +115,11 @@ export const featureCards = [
 export const captureLanes = [
   {
     platform: 'iPhone',
-    note: 'Bank texts from senders you choose',
+    note: 'Optional Shortcuts automation',
     steps: [
-      { title: 'A bank text arrives', copy: 'Only from a bank sender you selected in Apple Shortcuts.' },
-      { title: 'Shortcuts hands it over', copy: 'A personal automation passes it to Wafra Local Capture on the same iPhone. There is no network step.' },
-      { title: 'Read on the iPhone', copy: 'The parser keeps the amount, merchant and date. Codes and promotions are dropped, and the raw text is deleted.' },
+      { title: 'A Message arrives', copy: 'The current setup matches every new Message that contains a space, including personal conversations.' },
+      { title: 'Shortcuts hands it over', copy: 'The automation puts matching Messages in a protected queue on the same iPhone. There is no network step.' },
+      { title: 'Read on the iPhone', copy: 'The local parser keeps supported financial results. Other content and processed raw text are deleted.' },
       { title: 'In your ledger', copy: 'When iOS next lets Wafra run, or as soon as you open it.' },
     ],
   },
@@ -164,8 +166,7 @@ export const faqItems = [
   },
   {
     question: 'Does Wafra read every message on my phone?',
-    answer:
-      'No. Android message access is optional and only used after you choose supported alert imports. iPhone does not expose the Messages inbox to Wafra; optional capture runs only for bank senders the user selects, then processes supported bank alerts locally on the iPhone. This path does not upload Message text.',
+    answer: MESSAGE_ACCESS_ANSWER,
   },
   {
     question: 'Can I use Wafra anywhere?',

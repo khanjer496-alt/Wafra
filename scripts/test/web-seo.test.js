@@ -2,6 +2,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const vm = require('node:vm');
+const { createHash } = require('node:crypto');
 
 let pass = 0;
 let fail = 0;
@@ -51,7 +53,7 @@ ok(
 ok(
   'the capture, categories and subscriptions demos exist and stay honest about scope',
   ['id="how-it-works"', 'id="categories"', 'id="subscriptions"'].every((id) => landing.includes(id)) &&
-    content.includes('Only from a bank sender you selected in Apple Shortcuts.') &&
+    content.includes('matches every new Message that contains a space, including personal conversations.') &&
     content.includes('There is no network step.') &&
     landing.includes('transfers between your own accounts stay out of spending') &&
     !/every bank|any bank|all banks/i.test(`${landing}\n${content}`),
@@ -70,15 +72,17 @@ ok(
 );
 
 ok(
-  'the landing page teaches iPhone capture only from selected bank senders',
-  /iPhone[\s\S]{0,500}bank senders (?:the user )?selects[\s\S]{0,500}locally/.test(landing) &&
-    !/Any Sender/.test(landing),
+  'the landing explains the protected queue and links to the adopted capture disclosure',
+  /<strong>iPhone<\/strong>[\s\S]{0,500}including personal conversations[\s\S]{0,500}after local processing/.test(landing) &&
+    landing.includes('href="/privacy/#iphone-automatic-capture"') &&
+    !/only for bank senders|only from a bank sender/i.test(landing),
 );
 ok(
-  'the visible and structured FAQ agree on local selected-bank-sender capture',
-  (content.match(/bank senders (?:the user )?selects/g) || []).length >= 2 &&
-    (content.match(/locally on (?:this |the )?iPhone/g) || []).length >= 2 &&
-    !/Any Sender/.test(content),
+  'the visible and structured FAQ share the same accurate message-access answer',
+  content.includes('text: MESSAGE_ACCESS_ANSWER') && content.includes('answer: MESSAGE_ACCESS_ANSWER') &&
+    content.includes('every new Message that contains a space can enter a protected on-device queue, including personal conversations.') &&
+    content.includes('discards other content after local processing') &&
+    !/only for bank senders|only from a bank sender/i.test(content),
 );
 ok(
   'the landing privacy list names capture opt-out as manual-only instead of Private Mode',
@@ -88,7 +92,8 @@ ok(
 ok(
   'download buttons use the counted first-party paths and keep a same-origin referrer',
   landing.includes('href={DOWNLOAD_PATHS.iphone}') && content.includes("iphone: '/get/iphone'") &&
-    // No Android download while the source repository is private.
+    landing.includes('Android: Google Play coming soon.') &&
+    // No Android download until public Play availability is verified.
     !landing.includes('DOWNLOAD_PATHS.android') && !content.includes('/get/android') &&
     !/testflight\.apple\.com|releases\/download/.test(`${landing}\n${content}`) &&
     !landing.includes('rel="noreferrer"'),
@@ -129,7 +134,7 @@ try {
   );
 
   const runtime = '<script src="/_expo/static/js/web/entry-fixture.js" defer></script>';
-  fs.writeFileSync(path.join(output, 'index.html'), `<html><body><h1>Wafra</h1>${runtime}</body></html>`);
+  fs.writeFileSync(path.join(output, 'index.html'), `<html><head></head><body><h1>Wafra</h1>${runtime}</body></html>`);
   fs.writeFileSync(path.join(output, 'robots.txt'), 'User-agent: *\nAllow: /\n');
   fs.writeFileSync(path.join(output, 'settings.html'), `<meta name="robots" content="noindex, nofollow, noarchive">${runtime}`);
   fs.mkdirSync(path.join(output, 'card'));
@@ -153,12 +158,14 @@ try {
   ok('a valid export finalizes successfully from another working directory', finalized.status === 0, finalized.stderr);
   const read = (file) => fs.existsSync(path.join(output, file)) ? fs.readFileSync(path.join(output, file), 'utf8') : '';
   const routes = ['privacy', 'terms', 'support'];
+  const analyticsTag = '<script defer src="/minilytics-init.js"></script>';
   for (const route of routes) {
     const html = read(`${route}/index.html`);
     ok(`${route} has a static accessible document and canonical URL`,
       html.includes('<html lang="en">') && (html.match(/<h1(?:\s|>)/g) || []).length === 1 &&
       html.includes(`<link rel="canonical" href="https://wafra-seo-fixture.dev/${route}/">`) &&
-      !/<script\b/i.test(html) && routes.every((target) => html.includes(`href="/${target}/"`)));
+      (html.match(/<script\b[^>]*>[\s\S]*?<\/script>/g) || []).join('') === analyticsTag &&
+      routes.every((target) => html.includes(`href="/${target}/"`)));
   }
   const privacy = read('privacy/index.html');
   const terms = read('terms/index.html');
@@ -204,6 +211,10 @@ try {
     !/404|settings/.test(sitemap));
   ok('repeated finalization keeps exactly one sitemap declaration',
     finalize().status === 0 && (read('robots.txt').match(/^Sitemap:/gm) || []).length === 1);
+  ok('repeated finalization preserves the existing analytics loader once per public page',
+    ['index.html', ...routes.map((route) => `${route}/index.html`)].every((file) =>
+      (read(file).match(/src="\/minilytics-init\.js"/g) || []).length === 1) &&
+      read('minilytics-init.js') === fs.readFileSync(path.join(root, 'public/minilytics-init.js'), 'utf8'));
 
   fs.mkdirSync(path.join(output, 'assets'));
   fs.writeFileSync(path.join(output, 'assets', 'kept.png'), 'png');
@@ -225,6 +236,31 @@ try {
 } finally {
   fs.rmSync(output, { recursive: true, force: true });
 }
+
+const analyticsLoader = fs.readFileSync(path.join(root, 'public/minilytics-init.js'), 'utf8');
+ok('the analytics loader is the exact already-deployed asset',
+  createHash('sha256').update(analyticsLoader).digest('hex') === '586ce5d7c5bd46929be1aac5f57af8a25eba90b86a67da77014cf0c44eb70349');
+const runAnalyticsLoader = (hostname, alreadyLoaded = false) => {
+  const appended = [];
+  const context = {
+    location: { hostname },
+    document: {
+      querySelector: () => alreadyLoaded ? {} : null,
+      createElement: () => ({ attributes: {}, setAttribute(key, value) { this.attributes[key] = value; } }),
+      head: { appendChild: (script) => appended.push(script) },
+    },
+  };
+  vm.runInNewContext(analyticsLoader, context);
+  return appended;
+};
+const wafraAnalytics = runAnalyticsLoader('wafra-app-azg.pages.dev');
+ok('existing Wafra analytics keeps its deployed provider and website identity',
+  wafraAnalytics.length === 1 && wafraAnalytics[0].src === 'https://minilytics.khanjer496.workers.dev/js/script.js' &&
+    wafraAnalytics[0].attributes['data-website-id'] === '34370c490w52174i' &&
+    wafraAnalytics[0].attributes['data-domain'] === 'wafra-app-azg.pages.dev');
+ok('analytics does not activate on an unknown preview host or inject a duplicate tracker',
+  runAnalyticsLoader('preview-fixture.invalid').length === 0 &&
+    runAnalyticsLoader('wafra-app-azg.pages.dev', true).length === 0);
 
 const siteEvents = spawnSync(process.execPath, ['--input-type=module', '-e', `
   import { downloadResponse, recordSiteEvent, DOWNLOAD_DESTINATIONS } from
@@ -273,7 +309,7 @@ ok('no IP address, city, user agent, email or referrer path is written',
   !/203\.0\.113|dubai|mozilla|iphone os|googlebot|a@b|secret-post|igsh/i.test(JSON.stringify(events.points ?? [])));
 ok('unknown and inherited platform names fall through to the 404 page',
   events.unknown === null && events.inherited === null);
-ok('Android has no download while the source repository is private',
+ok('Android has no download before public Play availability is verified',
   events.android === null);
 ok('a missing or failing analytics binding never breaks the download',
   events.unbound === 302 && events.brokenStatus === 302);
