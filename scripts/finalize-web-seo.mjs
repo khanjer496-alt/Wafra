@@ -56,10 +56,10 @@ if (!fs.existsSync(indexPath) || !fs.existsSync(robotsPath)) {
 // export checks above so an unrelated directory can never be modified.
 fs.rmSync(path.join(outputDir, '(tabs)'), { recursive: true, force: true });
 
-// The public page has no client-side behavior: anchor navigation and FAQ
+// The public page needs no client-side app behavior: anchor navigation and FAQ
 // disclosure are native HTML. Expo still injects its router/runtime scripts
 // into every static route, so remove those references from the root document.
-// The acquisition page ships as resilient HTML/CSS with zero JS.
+// The acquisition page keeps only the existing website analytics loader.
 const indexHtml = fs.readFileSync(indexPath, 'utf8');
 const staticIndexHtml = indexHtml
   .replace(
@@ -73,6 +73,19 @@ const staticIndexHtml = indexHtml
 fs.writeFileSync(indexPath, staticIndexHtml);
 
 writePublicPages(outputDir, siteUrl);
+
+// Preserve the already-deployed Minilytics integration across source deploys.
+// The checked-in loader is byte-identical to the public 2026-11-07 version;
+// its existing host allowlist, website IDs and provider remain unchanged.
+const analyticsTag = '<script defer src="/minilytics-init.js"></script>';
+fs.copyFileSync(new URL('../public/minilytics-init.js', import.meta.url), path.join(outputDir, 'minilytics-init.js'));
+for (const file of ['index.html', 'privacy/index.html', 'terms/index.html', 'support/index.html']) {
+  const filePath = path.join(outputDir, file);
+  const html = fs.readFileSync(filePath, 'utf8')
+    .replace(/<script\b[^>]*\bsrc="\/minilytics-init\.js"[^>]*><\/script>/g, '');
+  if (!html.includes('</head>')) throw new Error(`Missing head in public page: ${file}`);
+  fs.writeFileSync(filePath, html.replace('</head>', `${analyticsTag}</head>`));
+}
 
 // The website is not a web version of Wafra. Expo still exports every app
 // screen with its JavaScript, and on the web those screens would keep a ledger

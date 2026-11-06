@@ -37,5 +37,11 @@ module.exports = defineConfig([
     // contorting them around a config gap.
     files: ["scripts/**", "modules/**/plugin/**"],
     languageOptions: { globals: { ...globals.node } },
+  },
+  {
+    // Preserve the already-deployed analytics loader byte-for-byte. Its
+    // identity and behavior are checked by the web SEO regression suite.
+    files: ["public/minilytics-init.js"],
+    rules: { "no-var": "off" },
   }
 ]);

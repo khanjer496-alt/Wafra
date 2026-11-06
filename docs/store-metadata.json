@@ -265,8 +265,8 @@
       "story": {
         "en": [
           {
-            "headline": "Money left this month",
-            "altText": "Home view with income, spending and the amount left for the month."
+            "headline": "Spending at a glance",
+            "altText": "Home view with monthly spending, income, net and recent transactions."
           },
           {
             "headline": "Start manually",
@@ -285,22 +285,22 @@
             "altText": "Category limits showing current spending progress."
           },
           {
-            "headline": "Spending insights",
-            "altText": "Cash-flow trends and spending composition for the selected period."
+            "headline": "Spending by category",
+            "altText": "Monthly spending total and category shares for the selected period."
           },
           {
             "headline": "Accounts in one place",
             "altText": "Bank accounts, card balances and cash shown separately, with the card statement balance and its due date."
           },
           {
-            "headline": "Encrypted ledger and explained imports",
-            "altText": "Privacy settings for an encrypted ledger and optional import methods."
+            "headline": "Privacy and security",
+            "altText": "Settings for optional app lock, privacy and data controls, trusted devices and data tools."
           }
         ],
         "ar": [
           {
-            "headline": "المتبقي هذا الشهر",
-            "altText": "الشاشة الرئيسية تعرض الدخل والمصاريف والمتبقي للشهر."
+            "headline": "الإنفاق بنظرة واحدة",
+            "altText": "الشاشة الرئيسية تعرض مصاريف الشهر والدخل والصافي وأحدث العمليات."
           },
           {
             "headline": "ابدأ يدوياً",
@@ -319,16 +319,16 @@
             "altText": "حدود فئات الإنفاق مع التقدم الحالي."
           },
           {
-            "headline": "تحليلات الإنفاق",
-            "altText": "اتجاهات التدفق النقدي وتوزيع الإنفاق للفترة المختارة."
+            "headline": "الإنفاق حسب الفئة",
+            "altText": "إجمالي المصاريف وحصة كل فئة خلال الفترة المختارة."
           },
           {
             "headline": "حساباتك في مكان واحد",
             "altText": "الحسابات البنكية وأرصدة البطاقات والنقد كلٌّ على حدة، مع رصيد كشف البطاقة وتاريخ استحقاقه."
           },
           {
-            "headline": "سجل مشفر واستيراد موضح",
-            "altText": "إعدادات الخصوصية لسجل مشفر وطرق استيراد اختيارية."
+            "headline": "الخصوصية والأمان",
+            "altText": "إعدادات القفل الاختياري للتطبيق والخصوصية والأجهزة الموثوقة وأدوات البيانات."
           }
         ]
       }

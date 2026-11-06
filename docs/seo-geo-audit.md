@@ -37,7 +37,7 @@ open them and keep a ledger in unencrypted browser storage.
 | XML sitemap | Missing | Generated with the real deployment origin |
 | GEO / LLM context | Missing | Factual `llms.txt`, including limitations |
 | Repeatable QA | None | Static-export audit with production-origin checks |
-| Measurement | None | Server-side, cookie-free view and download counts |
+| Measurement | None | Server-side aggregate funnel counts plus the existing Minilytics website integration disclosed in the Privacy Policy |
 
 ## Product-claim guardrails
 
@@ -89,25 +89,35 @@ The SEO check verifies:
 
 The public page requires no client-side behavior. Its anchors and FAQ controls
 are native HTML, so the production finalizer removes Expo's runtime scripts
-from `index.html` and deletes the app bundles. The deployed site therefore
-ships zero JavaScript. Wafra's browser tests use a separate seeded export
+from `index.html` and deletes the app bundles. The only executable script on
+the four public pages is the already-deployed Minilytics loader. Page content,
+navigation and FAQs work without it. Wafra's browser tests use a separate seeded export
 (`EXPO_PUBLIC_WAFRA_E2E_DEMO=1`, see `scripts/e2e/run.sh`) and never deploy it.
 Production images and CSS remain measurable assets; set budgets for them and
 measure field Core Web Vitals on the production origin.
 
 ## Measuring visits and downloads
 
-The site cannot use a JavaScript analytics tag without breaking its zero-JS and
-no-third-party-analytics promises, so it counts on the server instead:
+The website has two existing, separate measurement paths. The checked-in
+`public/minilytics-init.js` preserves the live loader retrieved from
+`https://wafra-app-azg.pages.dev/minilytics-init.js` on 7 November 2026
+(SHA-256 `586ce5d7c5bd46929be1aac5f57af8a25eba90b86a67da77014cf0c44eb70349`).
+The finalizer copies it unchanged and includes it once on each of the four
+public pages. Its host allowlist, website IDs and Minilytics provider are
+unchanged; it does not activate on unknown preview hosts. Its cookies and
+retention remain described in the adopted Privacy Policy.
+
+The separate server-side funnel counts work as follows:
 
 - The download button links to first-party `/get/iphone`. There is no
-  Android download while the source repository is private; `/get/android`
-  returns the 404 page.
+  Android download until public Play availability is verified; `/get/android`
+  returns the 404 page instead of serving an obsolete APK. The homepage states
+  that the Google Play release is coming soon.
 - `functions/index.js` and `functions/get/[platform].js` are Cloudflare Pages
   Functions. They write one data point per landing view or download click to
   the Workers Analytics Engine dataset `wafra_site_events`, then serve the
-  static page or redirect to TestFlight or the APK
-  (`src/marketing/site-events.mjs` holds both destinations).
+  static page or redirect to TestFlight
+  (`src/marketing/site-events.mjs` holds the active destination).
 - Each data point holds only the event, target, Cloudflare country, referring
   hostname, campaign tag (`utm_source` or `ref`) and a browser/automated label.
   No IP address, user agent, cookie or full URL is stored. The privacy policy's

@@ -63,12 +63,20 @@ check('Twitter card metadata', /name="twitter:card" content="summary_large_image
 check('SoftwareApplication schema', /"@type":"SoftwareApplication"/.test(index));
 check('FAQPage schema', /"@type":"FAQPage"/.test(index));
 check('semantic FAQ content', (index.match(/<details>/g) ?? []).length === 3);
-const scriptTags = index.match(/<script\b[^>]*>[\s\S]*?<\/script>/g) ?? [];
 check(
-  'zero-JavaScript public page',
-  scriptTags.length === 2 &&
-  scriptTags.every((tag) => /<script\s+type="application\/ld\+json">/.test(tag)),
+  'visible and structured iPhone capture disclosures include non-bank Messages',
+  (index.match(/every new Message that contains a space can enter a protected on-device queue, including personal conversations\./g) ?? []).length === 2 &&
+    !/only for bank senders|only from a bank sender/i.test(index),
 );
+const scriptTags = index.match(/<script\b[^>]*>[\s\S]*?<\/script>/g) ?? [];
+const analyticsTag = '<script defer src="/minilytics-init.js"></script>';
+check(
+  'public page keeps only structured data and its existing analytics loader',
+  scriptTags.length === 3 && scriptTags.filter((tag) => tag === analyticsTag).length === 1 &&
+  scriptTags.every((tag) => tag === analyticsTag || /<script\s+type="application\/ld\+json">/.test(tag)),
+);
+check('existing analytics loader is preserved exactly', fs.existsSync(path.join(outputDir, 'minilytics-init.js')) &&
+  fs.readFileSync(path.join(outputDir, 'minilytics-init.js')).equals(fs.readFileSync(new URL('../public/minilytics-init.js', import.meta.url))));
 const imageCount = (index.match(/<img\b/g) ?? []).length;
 const accessibleImageCount = (index.match(/<img\b[^>]*\balt="[^"]+"/g) ?? []).length;
 check('three static product previews with alt text', imageCount === 3 && accessibleImageCount === 3);
@@ -78,12 +86,13 @@ const redirects = fs.existsSync(path.join(outputDir, '_redirects')) ? read('_red
 check(
   'public beta download links',
   index.includes('href="/get/iphone"') &&
+    index.includes('Android: Google Play coming soon.') &&
     /^\/get\/iphone https:\/\/testflight\.apple\.com\/join\/jbwzCgZ6 302$/m.test(redirects) &&
     !index.includes('/get/android') && !/^\/get\/android /m.test(redirects) &&
     !/\.apk"/.test(index) && !index.includes('Download APK'),
 );
 check(
-  'no downloads from the private source repository',
+  'no obsolete GitHub APK download path',
   !/github\.com\/khanjer496-alt\/Wafra|raw\.githubusercontent\.com\/khanjer496-alt\/Wafra/.test(`${index}\n${redirects}`),
 );
 check(
@@ -112,7 +121,8 @@ check(
   'public pages are static and cross-linked',
   publicPages.every((file) => {
     const html = readOptional(file);
-    return !/<script\b/i.test(html) && ['/privacy/', '/terms/', '/support/'].every((route) => html.includes(`href="${route}"`)) &&
+    const scripts = html.match(/<script\b[^>]*>[\s\S]*?<\/script>/g) ?? [];
+    return scripts.length === 1 && scripts[0] === analyticsTag && ['/privacy/', '/terms/', '/support/'].every((route) => html.includes(`href="${route}"`)) &&
       (html.match(/<h1(?:\s|>)/g) ?? []).length === 1;
   }),
 );
