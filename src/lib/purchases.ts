@@ -11,10 +11,11 @@ import { complimentaryAccessUntil } from '@/lib/complimentary-access';
  *
  * The three moving parts, and which of them is the truth:
  *
- *   Superwall   the storefront entitlement source. Asked at launch, so a lapsed,
- *               refunded or cancelled subscription actually locks again.
- *               A reinstall creates a new anonymous customer and still needs
- *               the user-visible Restore button to attach the store receipt.
+ *   Store       iOS uses Superwall's entitlement answer. Android also makes a
+ *               fresh, successful Play subscription query at launch/foreground
+ *               and after checkout/restore; a failed query preserves the cache.
+ *               A reinstall creates a new anonymous SDK customer. The visible
+ *               Restore action remains available to recheck store purchases.
  *   state.pro   a cache of that answer, so the app is not blank while the
  *               network is slow.
  *   the trial   local and independent of both. Three days from first launch,

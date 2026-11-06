@@ -58,7 +58,7 @@ function harness(options = {}) {
       return next;
     };
   };
-  const calls = { attributes: [], tracking: [], configure: 0, pro: [], snapshots: [], appListeners: new Set(), deferred: [], productRequests: [], purchases: [] };
+  const calls = { attributes: [], tracking: [], configure: 0, pro: [], snapshots: [], appListeners: new Set(), deferred: [], productRequests: [], purchases: [], playQueries: 0 };
   const state = { hydrated: true, privateMode: false, language: 'en', marketId: 'AE',
     onboarded: true, captureOptOut: false, trialStartTs: 0, pro: false,
     transactions: [], ...options.state };
@@ -70,7 +70,8 @@ function harness(options = {}) {
     getUserAttributes: async () => ({ fixture: 'unchanged native attributes' }),
     setEventTrackingBehavior: async behavior => { calls.tracking.push(behavior); },
     products: async ids => { calls.productRequests.push(ids); return options.products ? options.products(ids) : []; },
-    purchase: async id => { calls.purchases.push(id); return { type: 'cancelled' }; },
+    purchase: async id => { calls.purchases.push(id); return options.purchase ? options.purchase(id) : { type: 'cancelled' }; },
+    restorePurchases: async () => options.restore ? options.restore() : { result: 'restored' },
     addListener: () => ({ remove() {} }),
   };
   const sdk = load(sdkPath('useSuperwall.js'), {
@@ -88,7 +89,7 @@ function harness(options = {}) {
   if (options.configured !== false) sdk.useSuperwallStore.setState({ isConfigured: true });
   const user = load(sdkPath('useUser.js'), { './useSuperwall': sdk });
   const jsx = { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }), Fragment: 'Fragment' };
-  const rn = { Platform: { OS: 'android' }, AppState: { addEventListener: (_name, callback) => {
+  const rn = { Platform: { OS: options.platform ?? 'android' }, AppState: { addEventListener: (_name, callback) => {
     calls.appListeners.add(callback);
     return { remove: () => calls.appListeners.delete(callback) };
   } }, Linking: { getInitialURL: async () => null, addEventListener: () => ({ remove() {} }) } };
@@ -113,7 +114,14 @@ function harness(options = {}) {
       entitlementSnapshot: status => status.status === 'UNKNOWN' ? null : { active: status.status === 'ACTIVE' },
       syncStoreCaptureEntitlement: async snapshot => { calls.snapshots.push(snapshot); return true; },
     },
-    '@/lib/capture': {},
+    '@/lib/capture': { subscribeIosCaptureEntitlementReset: () => () => {} },
+    '@/lib/android-play-billing': {
+      isAndroidPlayBillingAvailable: () => options.playQueryAvailable !== false,
+      queryAndroidPlaySubscriptions: async () => {
+        calls.playQueries++;
+        return options.querySubscriptions ? options.querySubscriptions() : { status: 'inactive', activeProductIds: [], pendingProductIds: [], responseCode: 0 };
+      },
+    },
     '@/lib/purchases': { ENTITLEMENT_ID: 'pro', trialDaysLeft: current => current.trialStartTs ? 7 : 0,
       proOffersFromProducts: productContract.proOffersFromProducts,
       proProductIdsForPlatform: productContract.proProductIdsForPlatform },
@@ -148,6 +156,10 @@ function harness(options = {}) {
   return {
     state, calls, sdk,
     billing: () => runtimeValue,
+    unmountRuntime() {
+      for (const slot of contexts.get('runtime')?.slots ?? []) slot?.cleanup?.();
+      contexts.delete('runtime');
+    },
     async renderRuntime(count = 1) {
       for (let i = 0; i < count; i++) {
         render('runtime', () => module.exports.SuperwallRuntime({ onValue: receiveRuntime }));
@@ -189,8 +201,8 @@ test('unchanged app state settles after one attribute write despite real SDK use
   assert.equal(h.calls.appListeners.size, 1);
 });
 
-test('SDK user/customer/entitlement changes do not write attributes and entitlement synchronization still runs', async () => {
-  const h = harness();
+test('iOS SDK user/customer/entitlement changes do not write attributes and entitlement synchronization still runs', async () => {
+  const h = harness({ platform: 'ios' });
   await h.renderRuntime(3);
   for (let i = 0; i < 6; i++) {
     h.sdk.useSuperwallStore.setState({ user: { changed: i }, customerInfo: { revision: i },
@@ -421,3 +433,221 @@ test('an unconfigured replacement lookup invalidates in-flight and cached produc
   assert.equal(await h.billing().purchasePro(productId('weekly')), 'unavailable');
   assert.deepEqual(h.calls.purchases, []);
 });
+
+const ownedPlaySubscription = { status: 'active', activeProductIds: ['wafra_pro_yearly'], pendingProductIds: [], responseCode: 0 };
+const emptyPlaySubscriptions = { status: 'inactive', activeProductIds: [], pendingProductIds: [], responseCode: 0 };
+const unavailablePlaySubscriptions = { status: 'unknown', activeProductIds: [], pendingProductIds: [], responseCode: 2 };
+
+test('Android grants purchased access from a fresh successful Play query despite stale SDK inactive state', async () => {
+  const h = harness({ querySubscriptions: async () => ownedPlaySubscription });
+  await h.renderRuntime(3);
+  assert.equal(h.state.pro, true);
+  assert.deepEqual(h.calls.pro, [true]);
+});
+
+test('Android foreground success with no owned subscriptions revokes paid access and preserves Founder', async () => {
+  let reply = ownedPlaySubscription;
+  const h = harness({ state: { pro: true, founderPro: true, complimentaryIssuedAt: 123 }, querySubscriptions: async () => reply });
+  h.sdk.useSuperwallStore.setState({ subscriptionStatus: { status: 'ACTIVE', entitlements: [{ id: 'pro' }] } });
+  await h.renderRuntime(3);
+  reply = emptyPlaySubscriptions;
+  for (const listener of h.calls.appListeners) listener('active');
+  await tick();
+  assert.equal(h.state.pro, false);
+  assert.equal(h.state.founderPro, true);
+  assert.equal(h.state.complimentaryIssuedAt, 123);
+});
+
+test('Android query errors and SDK inactive callbacks cannot revoke the last confirmed paid access', async () => {
+  const h = harness({ state: { pro: true }, querySubscriptions: async () => unavailablePlaySubscriptions });
+  await h.renderRuntime(3);
+  h.sdk.useSuperwallStore.setState({ subscriptionStatus: { status: 'INACTIVE' }, customerInfo: { entitlements: [] } });
+  await h.renderRuntime(2);
+  await h.billing().refresh();
+  assert.equal(h.state.pro, true);
+  assert.deepEqual(h.calls.pro, []);
+});
+
+test('Android a superseded successful empty query cannot overwrite a newer active query', async () => {
+  const older = deferredProductReply();
+  let count = 0;
+  const h = harness({ querySubscriptions: () => ++count === 1 ? older.promise : Promise.resolve(ownedPlaySubscription) });
+  await h.renderRuntime();
+  await h.billing().refresh();
+  older.resolve(emptyPlaySubscriptions);
+  await tick();
+  assert.equal(h.state.pro, true);
+  assert.deepEqual(h.calls.pro, [true]);
+});
+
+test('Android purchase invalidates prior queries and verifies after checkout before applying ownership', async () => {
+  const older = deferredProductReply(), purchase = deferredProductReply();
+  let count = 0;
+  const h = harness({ products: async () => [planProduct('yearly')], purchase: () => purchase.promise,
+    querySubscriptions: () => ++count === 1 ? older.promise : Promise.resolve(ownedPlaySubscription) });
+  await h.renderRuntime();
+  await h.billing().fetchProOffers();
+  const buying = h.billing().purchasePro(productId('yearly'));
+  await tick();
+  for (const listener of h.calls.appListeners) listener('active');
+  await tick();
+  assert.equal(count, 1, 'returning from checkout must not query before the purchase action settles');
+  purchase.resolve({ type: 'purchased' });
+  assert.equal(await buying, 'purchased');
+  older.resolve(emptyPlaySubscriptions);
+  await tick();
+  assert.equal(h.state.pro, true);
+  assert.deepEqual(h.calls.pro, [true]);
+});
+
+test('Android restore resolves unknown without revoking access when both store seams fail', async () => {
+  const h = harness({ state: { pro: true }, querySubscriptions: async () => unavailablePlaySubscriptions,
+    restore: async () => { throw new Error('store disconnected'); } });
+  await h.renderRuntime();
+  assert.equal(await h.billing().restorePro(), null);
+  assert.equal(h.state.pro, true);
+});
+
+test('Android restore uses successful Play ownership even if SDK restore reports a transient failure', async () => {
+  let reply = emptyPlaySubscriptions;
+  const h = harness({ querySubscriptions: async () => reply, restore: async () => ({ result: 'failed' }) });
+  await h.renderRuntime();
+  reply = ownedPlaySubscription;
+  assert.equal(await h.billing().restorePro(), true);
+  assert.equal(h.state.pro, true);
+});
+
+test('Android a pending Play transaction never grants Pro even when the SDK labels checkout purchased', async () => {
+  let reply = emptyPlaySubscriptions;
+  const h = harness({ products: async () => [planProduct('yearly')], querySubscriptions: async () => reply,
+    purchase: async () => { reply = { ...emptyPlaySubscriptions, pendingProductIds: ['wafra_pro_yearly'] }; return { type: 'purchased' }; } });
+  await h.renderRuntime();
+  await h.billing().fetchProOffers();
+  assert.equal(await h.billing().purchasePro(productId('yearly')), 'pending');
+  assert.equal(h.state.pro, false);
+});
+
+test('Android query completion after runtime unmount cannot change purchased access', async () => {
+  const query = deferredProductReply();
+  const h = harness({ querySubscriptions: () => query.promise });
+  await h.renderRuntime();
+  h.unmountRuntime();
+  query.resolve(ownedPlaySubscription);
+  await tick();
+  assert.deepEqual(h.calls.pro, []);
+});
+
+test('an older Android binary without the safe query bridge cannot offer or charge a subscription', async () => {
+  const h = harness({ playQueryAvailable: false, state: { pro: true },
+    querySubscriptions: async () => unavailablePlaySubscriptions, products: async () => [planProduct('yearly')] });
+  await h.renderRuntime();
+  assert.equal(h.billing().configured, false);
+  assert.deepEqual(Array.from(await h.billing().fetchProOffers()), []);
+  assert.equal(await h.billing().purchasePro(productId('yearly')), 'unavailable');
+  assert.deepEqual(h.calls.purchases, []);
+  assert.equal(h.state.pro, true);
+});
+
+test('a Play response arriving after billing becomes unconfigured cannot change cached access', async () => {
+  const query = deferredProductReply();
+  const h = harness({ querySubscriptions: () => query.promise });
+  await h.renderRuntime();
+  h.sdk.useSuperwallStore.setState({ isConfigured: false });
+  await h.renderRuntime();
+  query.resolve(ownedPlaySubscription);
+  await tick();
+  assert.equal(h.state.pro, false);
+});
+
+test('overlapping Android money actions cannot open a second checkout or restore mid-purchase', async () => {
+  const purchase = deferredProductReply();
+  const h = harness({ products: async () => [planProduct('yearly')], purchase: () => purchase.promise });
+  await h.renderRuntime();
+  await h.billing().fetchProOffers();
+  const first = h.billing().purchasePro(productId('yearly'));
+  assert.equal(await h.billing().purchasePro(productId('yearly')), 'unavailable');
+  assert.equal(await h.billing().restorePro(), null);
+  purchase.resolve({ type: 'cancelled' });
+  assert.equal(await first, 'cancelled');
+  assert.deepEqual(h.calls.purchases, [productId('yearly')]);
+});
+
+test('Android SDK and foreground callbacks cannot supersede the purchase verification or allow another action', async () => {
+  const verification = deferredProductReply();
+  let count = 0;
+  const h = harness({ products: async () => [planProduct('yearly')], purchase: async () => ({ type: 'purchased' }),
+    querySubscriptions: () => ++count === 1 ? Promise.resolve(emptyPlaySubscriptions) : verification.promise });
+  await h.renderRuntime();
+  await h.billing().fetchProOffers();
+  const buying = h.billing().purchasePro(productId('yearly'));
+  await tick();
+  h.sdk.useSuperwallStore.setState({ subscriptionStatus: { status: 'ACTIVE', entitlements: [{ id: 'pro' }] }, customerInfo: { entitlements: [] } });
+  await h.renderRuntime();
+  for (const listener of h.calls.appListeners) listener('active');
+  await tick();
+  assert.equal(count, 2, 'only the action owns its post-purchase verification');
+  assert.equal(await h.billing().purchasePro(productId('yearly')), 'unavailable');
+  assert.equal(await h.billing().restorePro(), null);
+  verification.resolve(ownedPlaySubscription);
+  assert.equal(await buying, 'purchased');
+  assert.equal(h.state.pro, true);
+});
+
+test('Android SDK and foreground callbacks cannot turn a confirmed restore into unknown', async () => {
+  const verification = deferredProductReply();
+  let count = 0;
+  const h = harness({ querySubscriptions: () => ++count === 1 ? Promise.resolve(emptyPlaySubscriptions) : verification.promise });
+  await h.renderRuntime();
+  const restoring = h.billing().restorePro();
+  await tick();
+  h.sdk.useSuperwallStore.setState({ customerInfo: { entitlements: [{ id: 'pro' }] } });
+  await h.renderRuntime();
+  for (const listener of h.calls.appListeners) listener('active');
+  await tick();
+  assert.equal(count, 2);
+  verification.resolve(ownedPlaySubscription);
+  assert.equal(await restoring, true);
+});
+
+for (const action of ['purchase', 'restore']) {
+  test(`Android deconfiguration during ${action} cannot query or grant through the old action closure`, async () => {
+    const pendingAction = deferredProductReply();
+    const h = harness({ products: async () => [planProduct('yearly')], querySubscriptions: async () => emptyPlaySubscriptions,
+      purchase: () => pendingAction.promise, restore: () => pendingAction.promise });
+    await h.renderRuntime();
+    await h.billing().fetchProOffers();
+    const result = action === 'purchase'
+      ? h.billing().purchasePro(productId('yearly')) : h.billing().restorePro();
+    await tick();
+    h.sdk.useSuperwallStore.setState({ isConfigured: false });
+    await h.renderRuntime();
+    pendingAction.resolve(action === 'purchase' ? { type: 'purchased' } : { result: 'restored' });
+    assert.equal(await result, action === 'purchase' ? 'unconfirmed' : null);
+    assert.equal(h.calls.playQueries, 1);
+    assert.equal(h.state.pro, false);
+  });
+
+  test(`Android a false-to-true configuration cycle invalidates the old ${action} verification`, async () => {
+    const pendingAction = deferredProductReply(), newSessionQuery = deferredProductReply();
+    let queries = 0;
+    const h = harness({ products: async () => [planProduct('yearly')],
+      querySubscriptions: () => ++queries === 1 ? Promise.resolve(emptyPlaySubscriptions) : newSessionQuery.promise,
+      purchase: () => pendingAction.promise, restore: () => pendingAction.promise });
+    await h.renderRuntime();
+    await h.billing().fetchProOffers();
+    const result = action === 'purchase'
+      ? h.billing().purchasePro(productId('yearly')) : h.billing().restorePro();
+    await tick();
+    h.sdk.useSuperwallStore.setState({ isConfigured: false });
+    await h.renderRuntime();
+    h.sdk.useSuperwallStore.setState({ isConfigured: true });
+    await h.renderRuntime();
+    pendingAction.resolve(action === 'purchase' ? { type: 'purchased' } : { result: 'restored' });
+    assert.equal(await result, action === 'purchase' ? 'unconfirmed' : null);
+    assert.equal(h.state.pro, false, 'an old session cannot use the new ready flag as ownership proof');
+    assert.equal(queries, 2, 'the current session gets its own deferred refresh');
+    newSessionQuery.resolve(ownedPlaySubscription);
+    await tick();
+    assert.equal(h.state.pro, true, 'only the new session response can grant access');
+  });
+}

@@ -2,8 +2,9 @@
 
 Wafra uses Apple/Google for payment and **Superwall** as the storefront seam:
 it supplies the localized products, runs the platform checkout sheet, restores
-purchases, answers for the `pro` entitlement, and hosts the remote
-onboarding/value flow.
+purchases and hosts remote campaigns. iOS uses its `pro` entitlement answer;
+Android confirms ownership through an independent read-only Play query, as
+described below. Wafra's native onboarding owns first run.
 
 **The Pro purchase screen is Wafra's own native `/pro` screen.** It reads the
 plan prices from the device's storefront through Superwall's `products()` and
@@ -117,10 +118,31 @@ Store purchase/restore remains usable.
 
 ## Entitlement behavior
 
-`state.pro` is a local cache of the most recent confirmed store-backed Superwall
-answer. Superwall's `UNKNOWN` status is intentionally **not** treated as inactive:
-offline or temporarily unresolved billing must not revoke a previously confirmed
-subscriber. Confirmed `INACTIVE` revokes Pro; confirmed `ACTIVE` grants it.
+`state.pro` is a local cache of the most recent confirmed store ownership answer.
+On iOS, Superwall supplies that answer; its `UNKNOWN` status preserves the cache.
+
+On Android, `WafraPlayBilling.querySubscriptions()` performs a read-only Google
+Play Billing 8 subscription query when billing is configured, on foreground,
+after checkout/restore, and when SDK events signal a possible change. Only a
+successful response can grant or revoke purchased access. A successful empty
+result means inactive; setup failure, disconnect, timeout, an unsupported binary
+or malformed response means unknown and leaves prior access unchanged. Pending
+purchases do not grant access. The weekly, yearly and retired monthly product
+IDs share the same existing Pro contract. Founder and complimentary access stay
+independent.
+
+The Android SDK's cached subscription callbacks are refresh signals rather than
+ownership proof. Query generations prevent an older response from overwriting a
+newer one; purchase/restore invalidate prior requests and defer new checks until
+the action settles. This avoids the SDK's failed-query-as-empty behavior without
+adding a new offline grace cutoff. Google Play supplies the current ownership
+answer, including paid-through cancellation; no expiry is inferred from the
+SDK's nominal billing-period arithmetic. A new native build is required for this
+module. An older binary without it cannot start a new purchase from Wafra's UI.
+
+The module sends no data to a new service, does not launch purchases or consume
+or acknowledge them, and exports no receipt, order ID, purchase token or account
+identifier. Superwall continues to own product prices and the checkout flow.
 
 For iPhone automatic capture, a confirmed active subscription is mirrored into
 the native App Intent gate. When exact transaction expiration is not yet

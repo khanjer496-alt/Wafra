@@ -115,6 +115,19 @@ jobs:
             package-lock.json
             server/package-lock.json
 
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Ensure Android API used by native billing tests
+        run: |
+          test -n "${ANDROID_HOME:-}"
+          if [ ! -f "$ANDROID_HOME/platforms/android-36/android.jar" ]; then
+            sdkmanager --install "platforms;android-36"
+          fi
+          test -f "$ANDROID_HOME/platforms/android-36/android.jar"
+
       - name: Install dependencies
         run: npm ci
 
