@@ -20,6 +20,11 @@ import {
 } from '@/components/superwall-billing-context';
 import { runAfterFirstFrames } from '@/lib/after-first-frames';
 import {
+  isAndroidPlayBillingAvailable,
+  queryAndroidPlaySubscriptions,
+  type AndroidPlaySubscriptionSnapshot,
+} from '@/lib/android-play-billing';
+import {
   entitlementSnapshot,
   syncStoreCaptureEntitlement,
   type EntitlementSnapshot,
@@ -99,6 +104,12 @@ function hasPro(status: SubscriptionStatus): boolean {
 function statusLabel(status: SubscriptionStatus): SuperwallBillingStatus {
   if (status.status === 'UNKNOWN') return 'unknown';
   return hasPro(status) ? 'active' : 'inactive';
+}
+
+type AndroidMoneyAction = { session: number };
+
+function unresolvedPlayOwnership(): AndroidPlaySubscriptionSnapshot {
+  return { status: 'unknown', activeProductIds: [], pendingProductIds: [], responseCode: null };
 }
 
 const ONBOARDING_FOCUS = new Set<OnboardingFocus>(['spending', 'bills', 'cashflow', 'overview']);
@@ -185,7 +196,59 @@ function SuperwallRuntime({ onValue }: {
   const purchasableProductIds = useRef<Set<string>>(new Set());
   /** Counts offer fetches, so a superseded one cannot replace the ids above. */
   const offersGeneration = useRef(0);
+  const androidQueryGeneration = useRef(0);
+  const androidMoneyAction = useRef<AndroidMoneyAction | null>(null);
+  const androidSessionGeneration = useRef(0);
+  const androidRefreshDeferred = useRef(false);
+  const billingReady = useRef(state.hydrated && isConfigured);
+  const mounted = useRef(true);
+  const [androidSubscriptionStatus, setAndroidSubscriptionStatus] = useState<SuperwallBillingStatus>('unknown');
   currentPro.current = state.pro;
+  billingReady.current = state.hydrated && isConfigured;
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      androidQueryGeneration.current += 1;
+      androidSessionGeneration.current += 1;
+    };
+  }, []);
+
+  const refreshAndroid = useCallback(async (
+    action: AndroidMoneyAction | null = null,
+  ): Promise<AndroidPlaySubscriptionSnapshot> => {
+    const unresolved = unresolvedPlayOwnership();
+    if (!mounted.current || !billingReady.current ||
+        (action && action.session !== androidSessionGeneration.current)) return unresolved;
+    if (androidMoneyAction.current !== action) {
+      if (!action && androidMoneyAction.current) androidRefreshDeferred.current = true;
+      return unresolved;
+    }
+    const generation = ++androidQueryGeneration.current;
+    const snapshot = await queryAndroidPlaySubscriptions().catch(() => unresolved);
+    if (!mounted.current || !billingReady.current || generation !== androidQueryGeneration.current ||
+        androidMoneyAction.current !== action ||
+        (action && action.session !== androidSessionGeneration.current)) return unresolved;
+    setAndroidSubscriptionStatus(snapshot.status);
+    if (snapshot.status !== 'unknown') {
+      const active = snapshot.status === 'active';
+      if (active !== currentPro.current) {
+        currentPro.current = active;
+        setPro(active);
+      }
+    }
+    return snapshot;
+  }, [setPro]);
+
+  const finishAndroidAction = useCallback((action: AndroidMoneyAction) => {
+    if (androidMoneyAction.current !== action) return;
+    androidMoneyAction.current = null;
+    if (androidRefreshDeferred.current) {
+      androidRefreshDeferred.current = false;
+      void refreshAndroid();
+    }
+  }, [refreshAndroid]);
 
   const finishRemoteOnboarding = useCallback(async (
     callback: CustomCallback,
@@ -236,6 +299,8 @@ function SuperwallRuntime({ onValue }: {
     onCustomCallback: finishRemoteOnboarding,
   });
 
+  const storeQueryAvailable = Platform.OS !== 'android' || isAndroidPlayBillingAvailable();
+
   const applySnapshot = useCallback(async (snapshot: EntitlementSnapshot | null) => {
     if (!snapshot) return;
     const generation = ++applyGeneration.current;
@@ -255,7 +320,18 @@ function SuperwallRuntime({ onValue }: {
   }, [setPro]);
 
   useEffect(() => {
-    if (!state.hydrated || !isConfigured) return;
+    if (!state.hydrated || !isConfigured) {
+      androidQueryGeneration.current += 1;
+      androidSessionGeneration.current += 1;
+      setAndroidSubscriptionStatus('unknown');
+      return;
+    }
+    if (Platform.OS === 'android') {
+      // SDK callbacks are refresh signals, not a fresh Play ownership answer.
+      // In particular, a failed SDK query must not revoke a cached subscriber.
+      void refreshAndroid();
+      return;
+    }
     void applySnapshot(entitlementSnapshot(
       subscriptionStatus,
       customerInfo,
@@ -266,11 +342,16 @@ function SuperwallRuntime({ onValue }: {
     state.hydrated,
     customerInfo,
     isConfigured,
+    refreshAndroid,
     subscriptionStatus,
   ]);
 
   const refresh = useCallback(async () => {
     if (!isConfigured) return;
+    if (Platform.OS === 'android') {
+      await refreshAndroid();
+      return;
+    }
     try {
       await getUserAttributes();
       // `UNKNOWN` is a real state. Never synthesize INACTIVE from an empty or
@@ -279,7 +360,7 @@ function SuperwallRuntime({ onValue }: {
     } catch {
       // Unreachable store/configuration is UNKNOWN, not evidence of cancellation.
     }
-  }, [getCustomerInfo, getUserAttributes, isConfigured]);
+  }, [getCustomerInfo, getUserAttributes, isConfigured, refreshAndroid]);
 
   useEffect(() => {
     if (Platform.OS !== 'ios') return;
@@ -376,11 +457,11 @@ function SuperwallRuntime({ onValue }: {
   ]);
 
   /**
-   * Ask the store — not the checkout sheet — whether `pro` is really active.
+   * Verify iOS `pro` through the SDK after checkout or restore.
    *
    * A completed transaction is not an entitlement: a product that is not
    * attached to `pro` in Superwall charges successfully and grants nothing.
-   * Both restore and purchase resolve through this one verification so neither
+   * Both iOS actions resolve through this verification so neither
    * can unlock Pro on the strength of a receipt alone.
    */
   const verifyProEntitlement = useCallback(async (): Promise<boolean> => {
@@ -397,7 +478,24 @@ function SuperwallRuntime({ onValue }: {
   }, [applySnapshot, getCustomerInfo, getEntitlements]);
 
   const restorePro = useCallback(async (): Promise<boolean | null> => {
-    if (!isConfigured) return null;
+    if (!isConfigured || !storeQueryAvailable) return null;
+    if (Platform.OS === 'android') {
+      if (androidMoneyAction.current) return null;
+      const action = { session: androidSessionGeneration.current };
+      androidMoneyAction.current = action;
+      androidQueryGeneration.current += 1;
+      try {
+        try {
+          await restorePurchases();
+        } catch {
+          // The independent Play query can still recover an owned plan.
+        }
+        const snapshot = await refreshAndroid(action);
+        return snapshot.status === 'unknown' ? null : snapshot.status === 'active';
+      } finally {
+        finishAndroidAction(action);
+      }
+    }
     try {
       const restored = await restorePurchases();
       if (restored.result === 'failed') return null;
@@ -405,7 +503,7 @@ function SuperwallRuntime({ onValue }: {
     } catch {
       return null;
     }
-  }, [isConfigured, restorePurchases, verifyProEntitlement]);
+  }, [finishAndroidAction, isConfigured, refreshAndroid, restorePurchases, storeQueryAvailable, verifyProEntitlement]);
 
   /**
    * The prices Wafra's own Pro screen shows. Every figure comes from the
@@ -417,7 +515,7 @@ function SuperwallRuntime({ onValue }: {
     // A replacement lookup invalidates old prices immediately, including when
     // the store becomes unavailable or the latest request fails.
     purchasableProductIds.current = new Set();
-    if (!isConfigured) return [];
+    if (!isConfigured || !storeQueryAvailable) return [];
     try {
       const offers = proOffersFromProducts(await products(proProductIdsForPlatform()));
       // A superseded response must neither republish an old list to its caller
@@ -428,41 +526,61 @@ function SuperwallRuntime({ onValue }: {
     } catch {
       return [];
     }
-  }, [isConfigured, products]);
+  }, [isConfigured, products, storeQueryAvailable]);
 
   /** Native checkout: the store's own sheet, opened from Wafra's Pro screen. */
   const purchasePro = useCallback(async (
     productId: string,
   ): Promise<ProPurchaseOutcome> => {
-    if (!isConfigured) return 'unavailable';
+    if (!isConfigured || !storeQueryAvailable) return 'unavailable';
     // Only a product from the most recent offer fetch may be bought. A price
     // response that arrived late, or a plan the store has since stopped
     // returning, must not be able to authorize a charge against a figure the
     // screen is no longer showing.
     if (!purchasableProductIds.current.has(productId)) return 'unavailable';
-    let result: Awaited<ReturnType<typeof purchase>>;
-    try {
-      result = await purchase(productId);
-    } catch {
-      return 'failed';
+    const android = Platform.OS === 'android';
+    if (android && androidMoneyAction.current) return 'unavailable';
+    const action = android ? { session: androidSessionGeneration.current } : null;
+    if (action) {
+      androidMoneyAction.current = action;
+      // A query started before checkout cannot revoke the new purchase later.
+      androidQueryGeneration.current += 1;
     }
-    if (result.type === 'cancelled') return 'cancelled';
-    // Deferred approval (Ask to Buy, a pending Play payment). Nothing is
-    // entitled yet and nothing has failed; the store finishes it later.
-    if (result.type === 'pending') return 'pending';
-    if (result.type !== 'purchased') return 'failed';
     try {
-      return (await verifyProEntitlement()) ? 'purchased' : 'unconfirmed';
-    } catch {
-      return 'unconfirmed';
+      let result: Awaited<ReturnType<typeof purchase>> | null = null;
+      try {
+        result = await purchase(productId);
+      } catch {
+        // SDK failure is not an ownership answer. The Play query remains safe.
+      }
+      const playSnapshot = action ? await refreshAndroid(action) : null;
+      if (!result) return 'failed';
+      if (result.type === 'cancelled') return 'cancelled';
+      // Deferred approval (Ask to Buy, a pending Play payment). Nothing is
+      // entitled yet and nothing has failed; the store finishes it later.
+      if (result.type === 'pending') return 'pending';
+      if (result.type !== 'purchased') return 'failed';
+      if (playSnapshot) {
+        const sku = productId.split(':')[0];
+        if (playSnapshot.pendingProductIds.includes(sku)) return 'pending';
+        return playSnapshot.status === 'active' && playSnapshot.activeProductIds.includes(sku)
+          ? 'purchased' : 'unconfirmed';
+      }
+      try {
+        return (await verifyProEntitlement()) ? 'purchased' : 'unconfirmed';
+      } catch {
+        return 'unconfirmed';
+      }
+    } finally {
+      if (action) finishAndroidAction(action);
     }
-  }, [isConfigured, purchase, verifyProEntitlement]);
+  }, [finishAndroidAction, isConfigured, purchase, refreshAndroid, storeQueryAvailable, verifyProEntitlement]);
 
   const value = useMemo<WafraBillingValue>(() => ({
     available: true,
-    configured: isConfigured,
+    configured: isConfigured && storeQueryAvailable,
     configurationError: configurationError,
-    subscriptionStatus: statusLabel(subscriptionStatus),
+    subscriptionStatus: Platform.OS === 'android' ? androidSubscriptionStatus : statusLabel(subscriptionStatus),
     paywallStatus: proPlacement.state.status,
     onboardingFlowStatus: onboardingPlacement.state.status,
     fetchProOffers,
@@ -483,6 +601,8 @@ function SuperwallRuntime({ onValue }: {
     configurationError,
     isConfigured,
     subscriptionStatus,
+    androidSubscriptionStatus,
+    storeQueryAvailable,
   ]);
 
   useEffect(() => {
