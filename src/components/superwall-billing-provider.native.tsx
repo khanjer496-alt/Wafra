@@ -31,9 +31,9 @@ import {
 } from '@/lib/capture';
 import {
   ENTITLEMENT_ID,
-  PRO_SKUS,
   localCaptureEntitlementLease,
   proOffersFromProducts,
+  proProductIdsForPlatform,
   trialDaysLeft,
 } from '@/lib/purchases';
 import { useStore } from '@/lib/store';
@@ -181,6 +181,8 @@ function SuperwallRuntime({ onValue }: {
   const currentPro = useRef(state.pro);
   const latestSnapshot = useRef<EntitlementSnapshot | null>(null);
   const applyGeneration = useRef(0);
+  /** Product ids from the most recent offer fetch — the only ones purchasable. */
+  const purchasableProductIds = useRef<Set<string>>(new Set());
   currentPro.current = state.pro;
 
   const finishRemoteOnboarding = useCallback(async (
@@ -411,7 +413,9 @@ function SuperwallRuntime({ onValue }: {
   const fetchProOffers = useCallback(async (): Promise<ProPlanOffer[]> => {
     if (!isConfigured) return [];
     try {
-      return proOffersFromProducts(await products(Object.values(PRO_SKUS)));
+      const offers = proOffersFromProducts(await products(proProductIdsForPlatform()));
+      purchasableProductIds.current = new Set(offers.map((offer) => offer.productId));
+      return offers;
     } catch {
       return [];
     }
@@ -422,6 +426,11 @@ function SuperwallRuntime({ onValue }: {
     productId: string,
   ): Promise<ProPurchaseOutcome> => {
     if (!isConfigured) return 'unavailable';
+    // Only a product from the most recent offer fetch may be bought. A price
+    // response that arrived late, or a plan the store has since stopped
+    // returning, must not be able to authorize a charge against a figure the
+    // screen is no longer showing.
+    if (!purchasableProductIds.current.has(productId)) return 'unavailable';
     let result: Awaited<ReturnType<typeof purchase>>;
     try {
       result = await purchase(productId);
