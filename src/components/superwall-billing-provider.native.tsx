@@ -183,6 +183,8 @@ function SuperwallRuntime({ onValue }: {
   const applyGeneration = useRef(0);
   /** Product ids from the most recent offer fetch — the only ones purchasable. */
   const purchasableProductIds = useRef<Set<string>>(new Set());
+  /** Counts offer fetches, so a superseded one cannot replace the ids above. */
+  const offersGeneration = useRef(0);
   currentPro.current = state.pro;
 
   const finishRemoteOnboarding = useCallback(async (
@@ -412,9 +414,16 @@ function SuperwallRuntime({ onValue }: {
    */
   const fetchProOffers = useCallback(async (): Promise<ProPlanOffer[]> => {
     if (!isConfigured) return [];
+    const generation = (offersGeneration.current += 1);
     try {
       const offers = proOffersFromProducts(await products(proProductIdsForPlatform()));
-      purchasableProductIds.current = new Set(offers.map((offer) => offer.productId));
+      // Two fetches can be in flight when the Pro screen is left and reopened,
+      // and they can resolve out of order. Only the newest may set what is
+      // purchasable, or an older, thinner response would revoke a plan the
+      // screen is still showing. The caller discards the stale list itself.
+      if (generation === offersGeneration.current) {
+        purchasableProductIds.current = new Set(offers.map((offer) => offer.productId));
+      }
       return offers;
     } catch {
       return [];
