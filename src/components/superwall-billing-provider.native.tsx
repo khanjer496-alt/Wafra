@@ -31,9 +31,9 @@ import {
 } from '@/lib/capture';
 import {
   ENTITLEMENT_ID,
-  PRO_SKUS,
   localCaptureEntitlementLease,
   proOffersFromProducts,
+  proProductIdsForPlatform,
   trialDaysLeft,
 } from '@/lib/purchases';
 import { useStore } from '@/lib/store';
@@ -181,6 +181,10 @@ function SuperwallRuntime({ onValue }: {
   const currentPro = useRef(state.pro);
   const latestSnapshot = useRef<EntitlementSnapshot | null>(null);
   const applyGeneration = useRef(0);
+  /** Product ids from the most recent offer fetch — the only ones purchasable. */
+  const purchasableProductIds = useRef<Set<string>>(new Set());
+  /** Counts offer fetches, so a superseded one cannot replace the ids above. */
+  const offersGeneration = useRef(0);
   currentPro.current = state.pro;
 
   const finishRemoteOnboarding = useCallback(async (
@@ -409,9 +413,18 @@ function SuperwallRuntime({ onValue }: {
    * simply absent rather than advertised at a price nobody will be charged.
    */
   const fetchProOffers = useCallback(async (): Promise<ProPlanOffer[]> => {
+    const generation = (offersGeneration.current += 1);
+    // A replacement lookup invalidates old prices immediately, including when
+    // the store becomes unavailable or the latest request fails.
+    purchasableProductIds.current = new Set();
     if (!isConfigured) return [];
     try {
-      return proOffersFromProducts(await products(Object.values(PRO_SKUS)));
+      const offers = proOffersFromProducts(await products(proProductIdsForPlatform()));
+      // A superseded response must neither republish an old list to its caller
+      // nor replace the product ids authorized by a newer successful response.
+      if (generation !== offersGeneration.current) return [];
+      purchasableProductIds.current = new Set(offers.map((offer) => offer.productId));
+      return offers;
     } catch {
       return [];
     }
@@ -422,6 +435,11 @@ function SuperwallRuntime({ onValue }: {
     productId: string,
   ): Promise<ProPurchaseOutcome> => {
     if (!isConfigured) return 'unavailable';
+    // Only a product from the most recent offer fetch may be bought. A price
+    // response that arrived late, or a plan the store has since stopped
+    // returning, must not be able to authorize a charge against a figure the
+    // screen is no longer showing.
+    if (!purchasableProductIds.current.has(productId)) return 'unavailable';
     let result: Awaited<ReturnType<typeof purchase>>;
     try {
       result = await purchase(productId);

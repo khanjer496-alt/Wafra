@@ -92,6 +92,68 @@ export interface StoreProductLike {
   price?: number | null;
   currencyCode?: string | null;
   weeklyPrice?: string | null;
+  /** Play's full `<sku>:<base plan>:<offer>` identifier, which is what buys. */
+  fullIdentifier?: string;
+  subscriptionPeriod?: { value: number; unit: string } | null;
+  periodWeeks?: number;
+  periodMonths?: number;
+  periodYears?: number;
+  periodDays?: number;
+  hasFreeTrial?: boolean;
+  // The native iOS SDK can bridge its token object despite the JS declaration.
+  introOfferToken?: unknown;
+}
+
+/**
+ * Play's bare SKU selects its first base plan, and an omitted offer can select
+ * an introductory offer. Pin both explicitly; every plan uses the local trial.
+ */
+export function proProductIdsForPlatform(platform: string = Platform.OS): string[] {
+  return (Object.entries(PRO_SKUS) as [ProPlan, string][]).map(([plan, sku]) =>
+    platform === 'android' ? `${sku}:${plan}:sw-none` : sku);
+}
+
+const PLAN_PERIODS = {
+  weekly: { unit: 'week', weeks: 1, months: 0, years: 0, days: 7 },
+  yearly: { unit: 'year', weeks: 52, months: 12, years: 1, days: 365 },
+} as const satisfies Record<ProPlan, unknown>;
+
+/**
+ * Whether the store's own billing cadence agrees with the plan Wafra asked for.
+ *
+ * A mismatch means the storefront returned a different base plan than the one
+ * requested, and charging for it would bill a cadence the paywall did not show.
+ */
+function hasPlanPeriod(product: StoreProductLike, plan: ProPlan): boolean {
+  const expected = PLAN_PERIODS[plan];
+  const period = product.subscriptionPeriod;
+  if (period != null) {
+    const unit = typeof period.unit === 'string' ? period.unit.toLowerCase() : '';
+    const matches = (period.value === 1 && unit === expected.unit) ||
+      (plan === 'weekly' && period.value === 7 && unit === 'day') ||
+      (plan === 'yearly' && period.value === 12 && unit === 'month');
+    if (!matches) return false;
+  }
+  // expo-superwall's iOS product JSON has these counts but no structured
+  // subscriptionPeriod. Require the whole cadence, so ten days cannot be
+  // mistaken for one week merely because periodWeeks truncates to one.
+  const counts = [product.periodWeeks, product.periodMonths, product.periodYears, product.periodDays];
+  const cadences: readonly (readonly number[])[] = [
+    [expected.weeks, expected.months, expected.years, expected.days],
+    // iOS derives counts from the original StoreKit unit: 12 months is a
+    // year, but its display conversions use four weeks and 30 days per month.
+    ...(plan === 'yearly' ? [[48, 12, 1, 360] as const] : []),
+  ];
+  return cadences.some((cadence) => counts.every((actual, index) =>
+    actual === cadence[index] || (period != null && actual === undefined)));
+}
+
+/** A store offer carrying a free trial or intro offer would double the local
+ * three-day trial, so it is refused rather than shown. */
+function hasNoStoreIntroOffer(product: StoreProductLike): boolean {
+  return product.hasFreeTrial === false &&
+    (product.introOfferToken == null ||
+      (typeof product.introOfferToken === 'string' && !product.introOfferToken.trim()));
 }
 
 /**
@@ -102,13 +164,26 @@ export interface StoreProductLike {
  * identifier is compared on its first segment for that reason, and a product
  * without a localized price is dropped rather than shown priceless — a plan
  * button with no price is exactly the invented-price failure this avoids.
+ *
+ * An offer is only matched when it is unambiguous: on Android the full
+ * `<sku>:<base plan>:<offer>` identifier must be the one Wafra asked for, and
+ * that identifier — not the bare SKU — is what gets purchased. On both
+ * platforms the store's billing cadence must agree with the plan, and any
+ * product carrying a store trial or introductory offer is refused, because it
+ * would run alongside Wafra's own three-day trial.
  */
-export function proOffersFromProducts(products: readonly StoreProductLike[]): ProPlanOffer[] {
+export function proOffersFromProducts(
+  products: readonly StoreProductLike[],
+  platform: string = Platform.OS,
+): ProPlanOffer[] {
   const offers: ProPlanOffer[] = [];
   for (const [plan, sku] of Object.entries(PRO_SKUS) as [ProPlan, string][]) {
+    const pinned = platform === 'android' ? `${sku}:${plan}:sw-none` : sku;
     const match = products.find((product) => {
       const identifier = product.productIdentifier?.trim() ?? '';
-      return identifier === sku || identifier.split(':')[0] === sku;
+      if (!(identifier === sku || identifier.split(':')[0] === sku)) return false;
+      if (platform === 'android' && product.fullIdentifier !== pinned) return false;
+      return hasNoStoreIntroOffer(product) && hasPlanPeriod(product, plan);
     });
     const priceString = match?.localizedPrice?.trim() ?? '';
     if (!match || !priceString) continue;
@@ -119,7 +194,9 @@ export function proOffersFromProducts(products: readonly StoreProductLike[]): Pr
     // string carrying an amount is a per-week price.
     const weeklyText = match.weeklyPrice?.trim() ?? '';
     const weeklyPriceString = plan !== 'weekly' && /\d/.test(weeklyText) ? weeklyText : null;
-    offers.push({ plan, productId: match.productIdentifier, priceString, price, currencyCode, weeklyPriceString });
+    // Android buys the pinned base-plan identifier, not the bare SKU.
+    const productId = platform === 'android' ? pinned : match.productIdentifier;
+    offers.push({ plan, productId, priceString, price, currencyCode, weeklyPriceString });
   }
   return offers;
 }

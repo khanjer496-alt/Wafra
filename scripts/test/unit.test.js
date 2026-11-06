@@ -1081,43 +1081,104 @@ ok('trial: purchase beats an expired trial',
   purch.isProActive({ pro: true, trialStartTs: T0 }, T0 + 30 * DAY));
 
 // ── Pro plans: only what the storefront actually returned ──
+// The fixtures carry the fields each SDK really bridges, because the matcher
+// now checks them: expo-superwall's iOS StoreProduct+Json.swift sends
+// hasFreeTrial and the period counts, and its Android StoreProduct.kt sends
+// fullIdentifier, hasFreeTrial and a structured subscriptionPeriod.
+const IOS_PERIOD = {
+  weekly: { periodWeeks: 1, periodMonths: 0, periodYears: 0, periodDays: 7 },
+  yearly: { periodWeeks: 52, periodMonths: 12, periodYears: 1, periodDays: 365 },
+};
+const PLAY_PERIOD = {
+  weekly: { value: 1, unit: 'week' },
+  yearly: { value: 1, unit: 'year' },
+};
+const iosProduct = (plan, localizedPrice, extra = {}) => ({
+  productIdentifier: `wafra_pro_${plan}`,
+  localizedPrice,
+  hasFreeTrial: false,
+  ...IOS_PERIOD[plan],
+  ...extra,
+});
+const playProduct = (plan, localizedPrice, extra = {}) => ({
+  productIdentifier: `wafra_pro_${plan}`,
+  fullIdentifier: `wafra_pro_${plan}:${plan}:sw-none`,
+  localizedPrice,
+  hasFreeTrial: false,
+  subscriptionPeriod: PLAY_PERIOD[plan],
+  ...extra,
+});
+
 const playOffers = purch.proOffersFromProducts([
-  { productIdentifier: 'wafra_pro_weekly:p1w', localizedPrice: 'AED 18.99' },
-  { productIdentifier: 'wafra_pro_yearly:p1y', localizedPrice: 'AED 189.99' },
-]);
-ok('plans: a Play base-plan suffix still resolves to Wafra\'s two plans',
+  playProduct('weekly', 'AED 18.99'),
+  playProduct('yearly', 'AED 189.99'),
+], 'android');
+ok('plans: Play resolves to Wafra\'s two plans and buys the pinned base plan',
   playOffers.length === 2 &&
-    playOffers.every((offer) => offer.productId.includes(':')) &&
+    playOffers.every((offer) => offer.productId.endsWith(':sw-none')) &&
     playOffers.find((offer) => offer.plan === 'yearly').priceString === 'AED 189.99');
 ok('plans: the App Store identifiers resolve unchanged',
-  JSON.stringify(purch.proOffersFromProducts([
-    { productIdentifier: 'wafra_pro_weekly', localizedPrice: 'AED 18.99' },
-  ])) === JSON.stringify([
+  JSON.stringify(purch.proOffersFromProducts([iosProduct('weekly', 'AED 18.99')], 'ios')) ===
+  JSON.stringify([
     { plan: 'weekly', productId: 'wafra_pro_weekly', priceString: 'AED 18.99',
       price: null, currencyCode: null, weeklyPriceString: null },
   ]));
 ok('plans: a plan the store priced blank is dropped rather than shown priceless',
-  purch.proOffersFromProducts([
-    { productIdentifier: 'wafra_pro_yearly', localizedPrice: '  ' },
-  ]).length === 0);
+  purch.proOffersFromProducts([iosProduct('yearly', '  ')], 'ios').length === 0);
 ok('plans: a foreign product is never sold as a Wafra plan',
   purch.proOffersFromProducts([
-    { productIdentifier: 'wafra_pro_weekly_legacy', localizedPrice: 'AED 1.00' },
-    { productIdentifier: 'some_other_app_yearly', localizedPrice: 'AED 2.00' },
-  ]).length === 0);
+    { ...iosProduct('weekly', 'AED 1.00'), productIdentifier: 'wafra_pro_weekly_legacy' },
+    { ...iosProduct('yearly', 'AED 2.00'), productIdentifier: 'some_other_app_yearly' },
+  ], 'ios').length === 0);
 ok('plans: every sold product and the retired monthly one still carry Pro',
   Object.values(purch.PRO_SKUS).every((sku) => purch.PRO_ENTITLEMENT_PRODUCT_IDS.includes(sku)) &&
     purch.PRO_ENTITLEMENT_PRODUCT_IDS.includes('wafra_pro_monthly'));
 ok('plans: the retired monthly product is no longer offered',
   purch.proOffersFromProducts([
-    { productIdentifier: 'wafra_pro_monthly', localizedPrice: 'AED 36.99' },
-  ]).length === 0);
+    { ...iosProduct('weekly', 'AED 36.99'), productIdentifier: 'wafra_pro_monthly' },
+  ], 'ios').length === 0);
+
+// ── Pro plans: an ambiguous or trial-bearing offer is never sold ──
+ok('guard: Play asks for one base plan and refuses any other',
+  purch.proOffersFromProducts([
+    playProduct('weekly', 'AED 18.99', { fullIdentifier: 'wafra_pro_weekly:cheap:sw-none' }),
+  ], 'android').length === 0);
+ok('guard: a Play product with no full identifier is not purchasable',
+  purch.proOffersFromProducts([
+    playProduct('weekly', 'AED 18.99', { fullIdentifier: undefined }),
+  ], 'android').length === 0);
+ok('guard: a store free trial is refused rather than stacked on the local one',
+  purch.proOffersFromProducts([iosProduct('weekly', 'AED 18.99', { hasFreeTrial: true })], 'ios')
+    .length === 0 &&
+  purch.proOffersFromProducts([playProduct('yearly', 'AED 189.99', { hasFreeTrial: true })],
+    'android').length === 0);
+ok('guard: an introductory offer token is refused',
+  purch.proOffersFromProducts([
+    iosProduct('weekly', 'AED 18.99', { introOfferToken: 'intro-1' }),
+  ], 'ios').length === 0);
+ok('guard: a cadence that disagrees with the plan is refused',
+  purch.proOffersFromProducts([
+    playProduct('yearly', 'AED 189.99', { subscriptionPeriod: { value: 1, unit: 'month' } }),
+  ], 'android').length === 0 &&
+  purch.proOffersFromProducts([
+    iosProduct('weekly', 'AED 18.99', { periodDays: 10 }),
+  ], 'ios').length === 0);
+ok('guard: iOS yearly is accepted on its 48-week/360-day display conversion',
+  purch.proOffersFromProducts([
+    iosProduct('yearly', 'AED 189.99',
+      { periodWeeks: 48, periodMonths: 12, periodYears: 1, periodDays: 360 }),
+  ], 'ios').length === 1);
+ok('plans: the ids Wafra asks the store for are pinned per platform',
+  JSON.stringify(purch.proProductIdsForPlatform('android')) ===
+    JSON.stringify(['wafra_pro_weekly:weekly:sw-none', 'wafra_pro_yearly:yearly:sw-none']) &&
+  JSON.stringify(purch.proProductIdsForPlatform('ios')) ===
+    JSON.stringify(['wafra_pro_weekly', 'wafra_pro_yearly']));
 
 // ── Pro plans: the yearly saving and per-week figure come from the store ──
 const storeOffers = (weekly, yearly) => purch.proOffersFromProducts([
-  { productIdentifier: 'wafra_pro_weekly', localizedPrice: 'w', weeklyPrice: 'w/wk', ...weekly },
-  { productIdentifier: 'wafra_pro_yearly', localizedPrice: 'y', weeklyPrice: 'AED 3.65', ...yearly },
-]);
+  iosProduct('weekly', 'w', { weeklyPrice: 'w/wk', ...weekly }),
+  iosProduct('yearly', 'y', { weeklyPrice: 'AED 3.65', ...yearly }),
+], 'ios');
 ok('saving: AED 18.99 a week against AED 189.99 a year saves 80%, rounded down',
   // 1 - 189.99 / (18.99 × 52) = 80.76…% → 80, never 81.
   purch.yearlySavingPercent(storeOffers(
