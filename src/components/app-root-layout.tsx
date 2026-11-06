@@ -12,6 +12,7 @@ import { SuperwallOnboarding } from '@/components/superwall-onboarding';
 import { ConsentPromptHost } from '@/components/ui/consent-prompt-host';
 import { ToastProvider } from '@/components/ui/toast';
 import { Colors } from '@/constants/theme';
+import { FontScaleProvider } from '@/hooks/use-font-scale';
 import { LanguageProvider } from '@/hooks/use-language';
 import { LedgerMoneyProvider } from '@/hooks/use-ledger-money';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -121,6 +122,7 @@ function Direction({ children }: { children: React.ReactNode }) {
   const moneySpec = state.ledgerMoney ?? ledgerMoneySpec(marketCurrencyCode(state.marketId));
   return (
     <LanguageProvider language={language}>
+      <FontScaleProvider>
       <LedgerMoneyProvider moneySpec={moneySpec}>
       <View
         // Static translation lookups are legal throughout the existing app, but
@@ -134,6 +136,7 @@ function Direction({ children }: { children: React.ReactNode }) {
         {children}
       </View>
       </LedgerMoneyProvider>
+      </FontScaleProvider>
     </LanguageProvider>
   );
 }

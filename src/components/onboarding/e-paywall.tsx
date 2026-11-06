@@ -450,9 +450,16 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, ca
             {' '}
             {store === 'appStore' ? t('subscriptionRenewalTermsIos') : store === 'play' ? t('subscriptionRenewalTermsAndroid') : t('proStoreConfirmsPrice')}
           </ThemedText> : null}
-        </> : <ThemedText type="meta" style={{ color: band.onBandSecondary }} testID="onboarding-plans-unavailable">
-          {checkout.checkoutReady ? t('priceUnavailableBody') : t('playOnlyBody')}
-        </ThemedText>}
+        </> : <View testID="onboarding-plans-unavailable">
+          <ThemedText type="meta" style={{ color: band.onBandSecondary }}>
+            {checkout.checkoutReady ? t('priceUnavailableBody') : t('playOnlyBody')}
+          </ThemedText>
+          {/* The copy asks the user to try again, so give them the control. */}
+          {checkout.checkoutReady ? <Pressable accessibilityRole="button" hitSlop={8} style={styles.legalLink}
+            onPress={() => void checkout.load()} testID="onboarding-plans-retry">
+            <ThemedText type="smallBold" style={{ color: band.onBand }}>{t('retryPrices')}</ThemedText>
+          </Pressable> : null}
+        </View>}
       {checkout.notice ? <View accessibilityRole="alert" accessibilityLiveRegion="polite"
         style={[styles.notice, { backgroundColor: band.sheet }]} testID="onboarding-paywall-notice">
         <ThemedText type="smallBold" style={{ color: band.text }}>{checkout.notice.title}</ThemedText>
