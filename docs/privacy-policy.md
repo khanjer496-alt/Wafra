@@ -1,6 +1,6 @@
 # Wafra Privacy Policy
 
-_Last updated: 6 November 2026_
+_Last updated: 7 November 2026_
 
 Wafra ("the app") is a personal money manager for Android and iOS published by
 **Nasida Apps LLC** ("Wafra", "we", "us").
@@ -359,10 +359,14 @@ store biometric templates.
   processes payment and Superwall provides paywall/onboarding presentation,
   subscription entitlement state and related product-flow analytics. Wafra may
   send language, market and non-financial onboarding choices for targeting, but
-  does not send bank messages, ledger transactions, balances, transaction
+  does not send bank messages, ledger transactions, balances, bank-transaction
   amounts, account/card identifiers or the locally stored first name to
   Superwall. When the saved local-only preference is active, Wafra disables
   optional Superwall event tracking and withholds those targeting attributes.
+  For Wafra Pro, the configured Google Play integration supplies purchase,
+  renewal, cancellation and refund information to Superwall to maintain
+  subscription entitlement records and billing analytics. This store reporting
+  continues independently of optional in-app Superwall event tracking.
 - **Forwarded bank email:** if the user creates a private forwarding address,
   the relay parses the forwarded MIME, text, HTML and supported PDF, CSV, or TSV attachments
   in memory. Raw email and attachments are not stored. Only structured rows,
