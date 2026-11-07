@@ -115,6 +115,16 @@ const tapTab = async (page, label) => {
   await page.waitForTimeout(1400);
 };
 
+// This oracle runs inside the explicitly English-US browser fixture. The
+// bank pack and AED ledger do not determine its date presentation. Keep it
+// independent of Wafra's formatter and anchor the civil day in UTC.
+function expectedBrowserAgendaDate([year, month, day]) {
+  return new Intl.DateTimeFormat(undefined, {
+    day: 'numeric', month: 'short', calendar: 'gregory',
+    numberingSystem: 'latn', timeZone: 'UTC',
+  }).format(new Date(Date.UTC(year, month, day)));
+}
+
 /* ── Reading the screen, not just probing it ───────────────────────────
  *
  * Everything below exists because the bugs that reach users here are
@@ -197,7 +207,9 @@ const CHROMIUM = process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium';
 const browser = await chromium.launch(
   existsSync(CHROMIUM) ? { executablePath: CHROMIUM } : {},
 );
-const page = await browser.newPage({ viewport: { width: 412, height: 915 }, colorScheme: 'dark' });
+// Each suite launches its own browser/context; earlier Arabic cases cannot
+// leave a language or localStorage choice in this English smoke fixture.
+const page = await browser.newPage({ viewport: { width: 412, height: 915 }, colorScheme: 'dark', locale: 'en-US' });
 // Home v3 opens on Spent and the transactions; this suite also reconciles the
 // Due soon and Coming up sections against Bills, so it switches them on (a v3 layout).
 await page.addInitScript(layout => { if (!localStorage.getItem('wafra/ui/home-widgets/v1')) localStorage.setItem('wafra/ui/home-widgets/v1', layout); }, JSON.stringify({ version: 3,
@@ -418,7 +430,7 @@ for (const payment of homePayments) {
   const date = new Date(...payment.today);
   date.setDate(date.getDate() + offset);
   const agendaDate = offset === 0 ? 'Today' : offset === 1 ? 'Tomorrow'
-    : `${date.getDate()} ${date.toLocaleString('en', { month: 'short' })}`;
+    : await page.evaluate(expectedBrowserAgendaDate, [date.getFullYear(), date.getMonth(), date.getDate()]);
   const matching = rows.filter(row => row.label.startsWith(`${title}. ${agendaDate}. `));
   ok(`Home payment agrees with Bills date and exact amount (${title}, ${relativeDate}, ${paintedAmount})`,
     Number.isFinite(offset) && matching.length > 0 && matching.some(row => {
