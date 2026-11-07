@@ -57,19 +57,23 @@ test('the sheet has no purchase path of its own', () => {
   assert.doesNotMatch(sheet, /purchasePro|useWafraBilling|fetchProOffers|priceString\s*[:=]\s*['"`]|PRO_PRICES|PRO_REFERENCE_PRICE_STRINGS/);
 });
 
+// Synthetic formatter fixtures, not live regional prices.
 const OFFERS = [
   { plan: 'yearly', productId: 'fixture.yearly', priceString: 'STORE-Y 1' },
-  { plan: 'weekly', productId: 'fixture.weekly', priceString: 'STORE-W 2' },
+  { plan: 'weekly', productId: 'fixture.weekly', priceString: 'د.ك ٤٫٩٩٠' },
 ];
 
-function sheetHarness({ language = 'en', feature = 'capture', offers = OFFERS, legal = false, platform = 'ios', billingAction = null } = {}) {
+function sheetHarness({ language = 'en', feature = 'capture', offers = OFFERS, legal = false, platform = 'ios', billingAction = null,
+  selectedPlan = 'yearly', largeText = false, surface = 'sheet' } = {}) {
   // State slots: the sheet's previous feature (0) and open session (1), then
   // useProCheckout's billingAction (2), offers (3), offerState (4),
   // selectedPlan (5) and notice (6). An open sheet is rendered as the session
   // that opening started.
-  const states = { 2: billingAction, 3: offers, 4: offers.length ? 'ready' : 'unavailable' };
-  if (feature) Object.assign(states, { 0: feature, 1: { feature, id: 1 } });
-  const h = createWorkflowHarness({ language, platform, state: { pro: false, founderPro: false }, states });
+  const offset = surface === 'sheet' ? 2 : 0;
+  const states = { [offset]: billingAction, [offset + 1]: offers, [offset + 2]: offers.length ? 'ready' : 'unavailable',
+    [offset + 3]: selectedPlan };
+  if (surface === 'sheet' && feature) Object.assign(states, { 0: feature, 1: { feature, id: 1 } });
+  const h = createWorkflowHarness({ language, platform, largeText, state: { pro: false, founderPro: false }, states });
   const d = h.deps;
   const purchases = [];
   h.local('@/lib/purchases', 'src/lib/purchases.ts');
@@ -86,9 +90,10 @@ function sheetHarness({ language = 'en', feature = 'capture', offers = OFFERS, l
   h.local('@/lib/pro-plans', 'src/lib/pro-plans.ts');
   h.local('@/hooks/use-pro-checkout', 'src/hooks/use-pro-checkout.ts');
   h.local('@/components/pro/pro-plan-options');
-  const sheet = load(path.join(root, 'src/components/pro/pro-sheet.tsx'), d);
   const closes = [];
-  const tree = sheet.ProSheet({ feature, onClose: () => closes.push('close') });
+  const tree = surface === 'sheet'
+    ? load(path.join(root, 'src/components/pro/pro-sheet.tsx'), d).ProSheet({ feature, onClose: () => closes.push('close') })
+    : load(path.join(root, 'src/app/pro.tsx'), d).default();
   return { h, tree, purchases, closes, words: d['@/lib/settings-e-copy'].settingsECopy(language), t: d['@/lib/i18n'].t };
 }
 
@@ -113,32 +118,37 @@ for (const language of ['en', 'ar']) test(`the sheet names the tapped feature an
   assert.ok(buy.props.accessibilityLabel.includes('STORE-Y 1'), 'the button carries the store price of the chosen plan');
 });
 
-const PRICED = [
-  { plan: 'yearly', productId: 'fixture.yearly', priceString: 'STORE-Y 189.99', price: 189.99, currencyCode: 'AED', weeklyPriceString: 'STORE-PW 3.65' },
-  { plan: 'weekly', productId: 'fixture.weekly', priceString: 'STORE-W 18.99', price: 18.99, currencyCode: 'AED', weeklyPriceString: null },
-];
+for (const surface of ['sheet', 'screen']) for (const language of ['en', 'ar']) for (const platform of ['ios', 'android']) {
+  test(`weekly selection, store price and renewal terms on the Pro ${surface}: ${language}/${platform}`, async () => {
+    const prefix = surface === 'sheet' ? 'pro-sheet-plan' : 'pro-plan';
+    const ready = sheetHarness({ language, platform, legal: true, surface, largeText: true });
+    const weekly = walk(ready.tree).find((n) => n.props?.testID === `${prefix}-weekly`);
+    weekly.props.onPress();
+    assert.ok(ready.h.events.some((e) => e[0] === 'state' && e[2] === 'weekly'), 'weekly can be selected');
 
-for (const language of ['en', 'ar']) test(`the yearly row sells itself only with the store's own figures: ${language}`, () => {
-  const { tree, t, h } = sheetHarness({ language, offers: PRICED });
-  const byId = (id) => walk(tree).find((n) => n.props?.testID === id);
-  const tf = h.deps['@/lib/i18n'].tf;
-  assert.equal(text(byId('pro-sheet-plan-yearly-popular')), t('proMostPopular'));
-  // 1 - 189.99 / (18.99 × 52) = 80.76…%, shown rounded down.
-  assert.equal(text(byId('pro-sheet-plan-yearly-saving')), tf('proSavePercent', { percent: 80 }));
-  assert.equal(text(byId('pro-sheet-plan-yearly-per-week')), tf('proYearlyPerWeek', { price: 'STORE-PW 3.65' }));
-  const yearly = byId('pro-sheet-plan-yearly');
-  assert.ok(yearly.props.accessibilityLabel.includes('STORE-Y 189.99'), 'the billed amount is spoken');
-  assert.ok(yearly.props.accessibilityLabel.includes(tf('proSavePercent', { percent: 80 })), 'the saving is spoken');
-  assert.equal(byId('pro-sheet-plan-weekly-popular'), undefined, 'the weekly row carries no badge');
-});
+    const selected = sheetHarness({ language, platform, legal: true, surface, selectedPlan: 'weekly', largeText: true });
+    const selectedWeekly = walk(selected.tree).find((n) => n.props?.testID === `${prefix}-weekly`);
+    assert.equal(selectedWeekly.props.accessibilityState.checked, true);
+    assert.equal(selectedWeekly.props.accessibilityLabel, `${selected.t('weekly')} · ${OFFERS[1].priceString} ${selected.t('perWeek')}`);
+    const all = text(selected.tree);
+    assert.ok(all.includes(selected.h.deps['@/lib/i18n'].tf('proChargeTimingWeek', { price: OFFERS[1].priceString })));
+    assert.ok(!all.includes(selected.h.deps['@/lib/i18n'].tf('proChargeTimingYear', { price: OFFERS[1].priceString })));
+    const buy = walk(selected.tree).find((n) => n.props?.testID === (surface === 'sheet' ? 'pro-sheet-buy' : 'pro-buy'));
+    assert.ok(buy.props.accessibilityLabel.includes(selected.t('weekly')));
+    assert.ok(buy.props.accessibilityLabel.includes(OFFERS[1].priceString), 'exact store string including Arabic digits and three decimals');
+    buy.props.onPress();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(selected.purchases, ['fixture.weekly']);
+  });
+}
 
-test('without comparable store prices the yearly row makes no saving claim', () => {
-  const offers = [{ ...PRICED[0], price: null, weeklyPriceString: null }, PRICED[1]];
-  const { tree } = sheetHarness({ offers });
-  const byId = (id) => walk(tree).find((n) => n.props?.testID === id);
-  assert.equal(byId('pro-sheet-plan-yearly-saving'), undefined);
-  assert.equal(byId('pro-sheet-plan-yearly-per-week'), undefined);
-  assert.ok(byId('pro-sheet-plan-yearly-popular'), 'the plan is still the recommended one');
+for (const language of ['en', 'ar']) test(`a missing weekly plan is explicitly unavailable without a blank-price radio: ${language}`, () => {
+  const missing = sheetHarness({ language, offers: OFFERS.slice(0, 1) });
+  const all = text(missing.tree);
+  assert.ok(all.includes(missing.t('weekly')));
+  assert.ok(all.includes(missing.t('priceUnavailable')));
+  assert.ok(!walk(missing.tree).some((n) => n.props?.testID === 'pro-sheet-plan-weekly'));
+  assert.equal(walk(missing.tree).filter((n) => n.props?.accessibilityRole === 'radio').length, 1);
 });
 
 test('the notifications sheet explains the notification reader', () => {
@@ -215,4 +225,13 @@ test('a paused iPhone capture switch opens the sheet, not the Pro route', () => 
   assert.ok(h.events.some((e) => e[0] === 'state' && e[2] === 'capture'), 'the sheet opens on automatic capture');
   assert.ok(!h.events.some((e) => e[0] === 'route'), 'Settings stays where it is');
   assert.ok(!h.events.some((e) => e[0] === 'setCaptureOptOut'), 'nothing about capture is saved');
+});
+
+test('plan rows do not advertise a retired monthly product or savings claims', () => {
+  const { tree, t } = sheetHarness({ offers: [...OFFERS, { plan: 'monthly', productId: 'fixture.retired', priceString: 'RETIRED-MONTHLY' }] });
+  const all = text(tree);
+  assert.ok(!all.includes('RETIRED-MONTHLY'));
+  assert.ok(!all.includes(t('proMostPopular')));
+  assert.ok(!walk(tree).some(n => /yearly-(?:saving|popular|per-week)$/.test(n.props?.testID || '')));
+  assert.deepEqual(walk(tree).filter(n => n.props?.accessibilityRole === 'radio').map(n => n.props.testID), ['pro-sheet-plan-yearly', 'pro-sheet-plan-weekly']);
 });

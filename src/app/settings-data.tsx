@@ -34,10 +34,8 @@ import {
   View,
 } from 'react-native';
 
-import { DiagnosticExportControl } from '@/components/diagnostic-export-control';
 import { BandTitle } from '@/components/settings-band/band-title';
 import { SettingsGroupTitle, SettingsLinkRow } from '@/components/settings-rows';
-import { TesterDiagnosticsControl } from '@/components/tester-diagnostics-control';
 import { ThemedText } from '@/components/themed-text';
 import { EButton } from '@/components/ui/band/e-button';
 import { BandScaffold, type BandNav } from '@/components/ui/band-scaffold';
@@ -577,8 +575,7 @@ export default function SettingsDataScreen() {
           {linkRow(t('exportExpensePdf'), copy.exportPdfDetail, () => setReportScopeSheet(true), { icon: 'receipt' })}
           {linkRow(t('exportCsv'), copy.exportCsvDetail, exportCsv, { icon: 'download' })}
           {linkRow(copy.backupTitle, copy.backupDetail, backupJson, { icon: 'upload' })}
-          {/* The diagnosis export row always follows, so Restore keeps its rule. */}
-          {linkRow(copy.restoreTitle, copy.restoreDetail, restoreFromFile, { icon: 'repeat' })}
+          {linkRow(copy.restoreTitle, copy.restoreDetail, restoreFromFile, { icon: 'repeat', last: !isInternalLaunchDiagnosticsEnabled() })}
           {restoreError && <ThemedText type="small" accessibilityRole="alert"
             testID="settings-restore-error">{restoreError}</ThemedText>}
           {isSmsCorpusExportAvailable() && (
@@ -598,7 +595,6 @@ export default function SettingsDataScreen() {
               </ThemedText>
             </View>
           )}
-          <DiagnosticExportControl palette={band} last={!isInternalLaunchDiagnosticsEnabled()} />
           {isInternalLaunchDiagnosticsEnabled() &&
             linkRow(t('launchMetricsInternal'), t('launchMetricsDetail'), exportLaunchMetrics, { last: true, icon: 'code' })}
         </View>
@@ -673,7 +669,6 @@ export default function SettingsDataScreen() {
               <WafraMark size={34} />
             )}
           </View>
-          <TesterDiagnosticsControl />
         </View>
 
         {/* Last, under its own heading, and nothing routine beside it: Erase

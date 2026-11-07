@@ -233,6 +233,7 @@ export async function buildAndroidTesterDiagnostic(
   state: AppState,
   onProgress?: (checked: number, included: number) => void,
 ): Promise<Record<string, unknown>> {
+  if (typeof __DEV__ === 'undefined' || !__DEV__) throw new Error('tester_diagnostics_disabled');
   if (Platform.OS !== 'android') throw new Error('tester_diagnostic_android_only');
   const now = Date.now();
   // Snapshot responsiveness before diagnostic generation starts doing its own

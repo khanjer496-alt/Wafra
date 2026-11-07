@@ -128,6 +128,15 @@ test('an earlier paid-in sentence cannot give a separate principal an incoming d
   for (const transaction of ledger(row, imported.parsed).transactions) assert.equal(transaction.type, 'expense');
 });
 
+test('a literal FROM YOUR ACCOUNT merchant name never supplies a missing funding tail', () => {
+  const row = { id: 'merchant-funding-words', currency: 'INR', country: 'IN', sender: '',
+    body: 'Rs.640.00 paid to FROM YOUR ACCOUNT on 05/10/2026. History: https://m.walletbank.example/h' };
+  assert.equal(android(row), null);
+  const imported = history(row);
+  assert.deepEqual(imported.parsed, []);
+  assert.deepEqual(ledger(row, imported.parsed).transactions, []);
+});
+
 for (const [label, body] of [
   ['explicit debit conflict', 'Barclays: GBP 25.00 has been paid into your account ending 4821 and debited from your account on 2026-10-10.'],
   ['other incoming conflict', 'TD Alert: Your INTERAC e-Transfer of CAD 80.00 to PAUL MARTIN was deposited and credited into your account on 2026-10-10.'],

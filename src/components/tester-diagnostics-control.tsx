@@ -8,6 +8,11 @@ import { t, tf } from '@/lib/i18n';
 import { useStore } from '@/lib/store';
 
 export function TesterDiagnosticsControl() {
+  if (typeof __DEV__ === 'undefined' || !__DEV__) return null;
+  return <DeveloperTesterDiagnosticsControl />;
+}
+
+function DeveloperTesterDiagnosticsControl() {
   const { state, getStateSnapshot } = useStore();
   const language = state.language === 'ar' ? 'ar' : 'en';
   const [busy, setBusy] = useState(false);

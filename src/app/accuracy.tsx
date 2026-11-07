@@ -1,7 +1,7 @@
 import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import { useRouter } from '@/hooks/use-app-router';
 import React, { useMemo, useState } from 'react';
-import { Share, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { BandCount } from '@/components/capture/band-count';
 import { SheetSectionTitle } from '@/components/capture/sheet-link-row';
@@ -16,10 +16,9 @@ import { Money } from '@/components/ui/money';
 import { Spacing } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { cardDiagnostics, formatKey, newestRowOfFormat, noFormatsReason, parserCoverage, unreadFormats } from '@/lib/accuracy';
+import { formatKey, newestRowOfFormat, noFormatsReason, parserCoverage, unreadFormats } from '@/lib/accuracy';
 import { accuracyBandCopy } from '@/lib/accuracy-band-copy';
 import { isCaptureAvailable } from '@/lib/capture';
-import { shareText } from '@/lib/share-text';
 
 import { detailsWords } from '@/lib/details-copy';
 import { isRelayPlatform } from '@/lib/relay';
@@ -32,11 +31,6 @@ function maskDigits(s: string): string {
   return s.replace(/\d{5,}/g, (m) => `····${m.slice(-4)}`);
 }
 
-/**
- * Rows the parser wasn't confident about, with their raw SMS text. Sharing
- * the list is how new bank formats get fixed: every message here is one the
- * grammar couldn't fully read.
- */
 /**
  * Rows mounted per group before "Show more". Each row carries the masked raw
  * message, so a new market's first import (hundreds of unread formats) would
@@ -88,40 +82,6 @@ export default function AccuracyScreen() {
   );
   const misses =
     coverage.measured - coverage.named + (coverage.categoryMeasured - coverage.categorised);
-
-  // Only a format with no merchant leaves the phone from this screen. A named
-  // private alias is useful for the local Sort-shops flow, not evidence for a
-  // global grammar rule and not something the developer needs to receive.
-  const shareUnread = () => {
-    const section = (label: string, list: typeof rows) =>
-      list.length === 0
-        ? ''
-        : `\n\n${label} (${list.length}):\n\n` +
-          list
-            .map(
-              (r, i) =>
-                tf('accuracyShareRow', {
-                  index: i + 1,
-                  count: r.count,
-                  title: r.title,
-                  category: r.category,
-                  raw: maskDigits(r.raw),
-                }),
-            )
-            .join('\n\n');
-    Share.share({
-      message:
-        t('accuracyShareTitle') +
-        section(t('accuracyShareUnread'), unread),
-    }).catch(() => {});
-  };
-
-  const shareCards = () => {
-    // As a FILE. This one prints every card row with its raw bank message, and
-    // pushing that through the share sheet as an intent payload crossed
-    // Android's Binder limit and killed the app outright — see share-text.ts.
-    shareText('wafra-card-diagnostic.txt', cardDiagnostics(state)).catch(() => {});
-  };
 
   const accuracyNav: BandNav = { back: true };
   const words = accuracyBandCopy(state.language);
@@ -245,31 +205,6 @@ export default function AccuracyScreen() {
                 onPress={() => router.push('/categorise')}
               />
             )}
-            {unread.length > 0 && (
-              <EButton
-                testID="accuracy-share-unread"
-                palette={band}
-                variant="secondary"
-                label={`${t('shareUnrecognized')} · ${unread.length}`}
-                icon="upload"
-                onPress={shareUnread}
-              />
-            )}
-            {/* Always offered, even when nothing is unread: the card bugs this
-                answers — a payment counted twice, a statement filed against the
-                wrong account — happen to messages the parser read CONFIDENTLY,
-                so they never appear in the list above. */}
-            <EButton
-              testID="accuracy-share-cards"
-              palette={band}
-              variant="secondary"
-              label={t('shareCardDiagnostic')}
-              icon="upload"
-              onPress={shareCards}
-            />
-            <ThemedText type="meta" style={muted}>
-              {t('shareCardDiagnosticHint')}
-            </ThemedText>
           </View>
 
           {([

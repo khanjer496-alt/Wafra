@@ -548,6 +548,9 @@ export default function BillsScreen() {
           startTransition(() => setNativeRecurringResult({
             value, transactions, notSubscriptions, today: recurrenceToday, liveAccounts, internal,
           }));
+        }, () => {
+          // Failed prewarming establishes no answer. The focused path can
+          // retry, and no state is published if this hidden view was removed.
         });
       });
     }, IOS_HIDDEN_RECURRENCE_PREWARM_MS);
@@ -588,6 +591,9 @@ export default function BillsScreen() {
           startTransition(() => setNativeRecurringResult({
             value, transactions, notSubscriptions, today: recurrenceToday, liveAccounts, internal,
           }));
+        }, () => {
+          // Keep the last valid projection, or remain pending on first load.
+          // A later focus/input change retries; never turn failure into [].
         });
       }, { delayMs: 0 });
     };

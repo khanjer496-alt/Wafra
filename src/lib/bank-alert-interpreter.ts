@@ -24,6 +24,7 @@ import {
 import {
   hasArabicRefundHeading,
   hasMalformedBankAmount,
+  hasUnsettledPrincipal,
   isInformationOnlyAlert,
   normalizeArabic,
   parseSms,
@@ -340,7 +341,13 @@ export const interpretBankAlert = ({
   const decision = semanticDecision(source, market, fallback, usableLegacy);
   if (decision.outcome === 'review') {
     const semantic = parseSemanticReview(source, market, fallback, decision, usableLegacy);
-    if (semantic) return semantic;
+    if (semantic) {
+      if (semantic.outcome === 'parsed' && withMarketPackForParsing(market, () =>
+        hasUnsettledPrincipal(source, semantic.parsed))) {
+        return usableLegacy ? legacyResult(usableLegacy) : finalFallback(fallback, null);
+      }
+      return semantic;
+    }
   }
   return finalFallback(fallback, usableLegacy);
 };

@@ -397,6 +397,10 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
           purgeLocalSemanticArtifacts() {},
         };
       }
+      if (name === '@/hooks/use-font-scale') {
+        // Render at the default system scale unless the caller overrides it.
+        return { useFontScale: () => 1, FontScaleProvider: ({ children }) => children };
+      }
       throw new Error(`Unstubbed runtime dependency ${name} in ${file}`);
     },
     console, setTimeout, clearTimeout,

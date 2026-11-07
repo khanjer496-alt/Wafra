@@ -52,6 +52,7 @@ function pattern(name) {
 }
 
 const AMOUNT_RE = pattern('AMOUNT_RE');
+const UNSAFE_AMOUNT_PREFIX_RE = pattern('UNSAFE_AMOUNT_PREFIX_RE');
 const LAST4_RE = pattern('LAST4_RE');
 const MERCHANT_RE = pattern('MERCHANT_RE');
 const PAYMENT_MERCHANT_RE = pattern('PAYMENT_MERCHANT_RE');
@@ -71,9 +72,17 @@ ok('the Kotlin patterns can be read out of the source', CUR.includes('AED') && R
 
 const { createReader, corpusMessages } = require('./instant-alert-reader.cjs');
 const { read } = createReader({
-  AMOUNT_RE, LAST4_RE, MERCHANT_RE, PAYMENT_MERCHANT_RE, DEBIT_RE, CREDIT_RE,
+  AMOUNT_RE, UNSAFE_AMOUNT_PREFIX_RE, LAST4_RE, MERCHANT_RE, PAYMENT_MERCHANT_RE, DEBIT_RE, CREDIT_RE,
   REFUSE_RE, BANK_WORD_RE, PURCHASE_PREFIX_RE, PROMO_FOOTER_RE, UNSAFE_TRANSACTION_RE,
 });
+
+for (const [body, expected] of require('./fixtures/instant-alert-preview-safety.cjs')) {
+  const got = read(body);
+  ok(`preview amount is grounded: ${body}`,
+    expected === null ? got === null : got?.currency === expected.currency && got?.figure === expected.figure &&
+      got?.credit === (expected.credit ?? false),
+    JSON.stringify(got));
+}
 
 /* ── The corpus: every real bank message we have ─────────────────────── */
 

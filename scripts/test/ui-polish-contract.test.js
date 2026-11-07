@@ -475,11 +475,11 @@ for (const [route, header] of task8Routes) {
 
 const task8Accuracy = read('src/app/accuracy.tsx');
 for (const seam of [
-  'unreadFormats(', 'noFormatsReason({', 'maskDigits(', "section(t('accuracyShareUnread'), unread)",
-  'Share.share({', 'cardDiagnostics(state)', "shareText('wafra-card-diagnostic.txt'",
+  'unreadFormats(', 'noFormatsReason({', 'maskDigits(',
   "router.push('/categorise')",
 ]) assert.ok(task8Accuracy.includes(seam), `Accuracy lost ${seam}`);
 assert.doesNotMatch(task8Accuracy, /accuracyShareUncategorized/);
+assert.doesNotMatch(task8Accuracy, /Share\.share|shareUnread|shareCards|cardDiagnostics\(state\)/);
 
 const task8Categorise = read('src/app/categorise.tsx');
 // Every row is open with one suggestion; answers are staged and written

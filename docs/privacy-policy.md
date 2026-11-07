@@ -254,7 +254,7 @@ available only after the first unlock; neither contains the Shortcut ingest
 token or email-forwarding token.
 
 iOS Keychain items can survive an uninstall. To erase the relay registration
-and its local key deterministically, use **Settings → Erase all data** while
+and its local key deterministically, use **Settings → Data and help → Erase all data** while
 online before uninstalling. If the relay cannot be reached, Wafra keeps the key
 so the user can retry deleting the remote registration.
 

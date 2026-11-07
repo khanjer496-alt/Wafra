@@ -88,8 +88,15 @@ jobs:
       EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: ${{ (github.event.inputs.bundle != 'true' && github.event.inputs.founder_unlock != 'false') && '1' || '0' }}
       EXPO_PUBLIC_WAFRA_AUTO_FOUNDER_PRO: ${{ (github.event.inputs.auto_pro == 'true' && github.event.inputs.bundle != 'true' && github.event.inputs.founder_unlock != 'false') && '1' || '0' }}
       EXPO_PUBLIC_WAFRA_CAPTURE_TRACE: ${{ github.event.inputs.capture_trace == 'true' && '1' || '0' }}
+      EXPO_PUBLIC_WAFRA_INTERNAL_DIAGNOSTICS: '0'
     steps:
       - uses: actions/checkout@v4
+
+      - name: Refuse research exports in a Play bundle
+        if: inputs.bundle == true && inputs.corpus == true
+        run: |
+          echo '::error::Research corpus exports are internal APK-only tools and cannot enter a Play bundle.'
+          exit 1
 
       - name: Refuse conflicting automatic tester Pro inputs
         if: inputs.auto_pro == true && (inputs.bundle == true || inputs.founder_unlock == false)

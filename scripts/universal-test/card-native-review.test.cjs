@@ -383,6 +383,41 @@ test('a rupee abbreviation stays in the paid-credit clause without lending a deb
     assert.equal(reader.parseUnproven(bad, 'VM-HDFCBK', reader.inspect(bad, 'VM-HDFCBK'), 1791806400000), null);
   }
 });
+function hdfcReceiptLedger(source) {
+  const when = Date.parse('2026-10-03T08:00:00Z'), reader = session('INR', 'IN');
+  const parsed = reader.parseUnproven(source, 'VM-HDFCBK', reader.inspect(source, 'VM-HDFCBK'), when);
+  const due = { id: 'hdfc-due', accountId: 'hdfc-credit', totalDueFils: 3000000, minDueFils: 150000,
+    paidFils: 0, dueDate: '2026-10-20' };
+  const initial = { ...state(), accounts: [
+    { id: 'hdfc-credit', name: 'Credit card', kind: 'card', cardType: 'credit', last4: '5678', bankName: 'HDFC Bank', openingFils: 0, color: '#000' },
+    { id: 'hdfc-debit', name: 'Debit card', kind: 'card', cardType: 'debit', last4: '5678', bankName: 'HDFC Bank', openingFils: 0, color: '#000' },
+  ], cardDues: [due] };
+  const scanned = parsed ? [{ ...parsed, smsTs: when, sender: 'VM-HDFCBK', channel: 'inbox', sourceEventId: 'a88' }] : [];
+  const plan = buildImportPlan(scanned, initial, when, new Date(when));
+  const imported = applied(initial, plan);
+  return { parsed, plan, paid: duePaidFils(imported, due) };
+}
+test('Rs-dot inside the owned principal token does not separate payment from its paid credit card', () => {
+  for (const unit of ['Rs.', 'Rs. ']) {
+    const result = hdfcReceiptLedger(`Payment of ${unit}23,456.00 has been received towards your HDFC Bank Credit Card ending 5678 on 02-10-2026. Thank you.`);
+    assert.equal(result.parsed?.kind, 'cardPayment');
+    assert.equal(result.parsed.amountFils, 2345600);
+    assert.equal(result.parsed.card.last4, '5678');
+    assert.equal(result.plan.txCount, 1);
+    assert.equal(result.plan.batch.transactions[0].accountId, 'hdfc-credit');
+    assert.equal(result.paid, 2345600, 'the INR30000 debt has INR6544 remaining');
+  }
+});
+for (const prefix of [
+  'Your Debit Card ending 5678.',
+  'Your Credit Card ending 5678 statement is available.',
+  'Your Credit Card ending 5678 was issued on 2026-09-01.',
+]) test('currency-abbreviation handling cannot borrow a debit, statement or profile tail', () => {
+  const result = hdfcReceiptLedger(`${prefix} Payment of Rs.23,456.00 has been received towards your HDFC Bank Credit Card on 02-10-2026. Thank you.`);
+  assert.equal(result.parsed, null);
+  assert.equal(result.plan.txCount, 0);
+  assert.equal(result.paid, 0);
+});
 test('a debit-funded exact template pays its named credit card, never its funding account tail', () => {
   const source = 'Bancolombia: Pagaste COP 75,00 en la tarjeta de credito *1234 desde la cuenta *5678, el 12/10/2026 12:00.';
   const result = receiptLedger(source, 'COP', 'CO', 'Bancolombia');

@@ -18,8 +18,8 @@ import android.os.Build
  * That is only acceptable because of one rule, which the rest of this file
  * exists to keep: NOTHING HERE IS EVER STORED. The row that reaches the
  * ledger is always the TypeScript parser's, produced later from the same
- * message. This is a preview, so being approximate costs at worst a cosmetic
- * difference in a banner that is gone in ten seconds.
+ * message. Preview formatting may differ, but its amount must still name an
+ * unambiguous completed movement.
  *
  * What is NOT acceptable is announcing something that never happened. A
  * promo, an OTP, a declined card, a statement reminder — each names an amount
@@ -189,9 +189,15 @@ object InstantAlert {
     // refusing on them would drop the real alerts too. Requiring a completed
     // verb handles both cases without a second list to keep in step.
     val credit = CREDIT_RE.containsMatchIn(text)
-    if (!credit && !DEBIT_RE.containsMatchIn(text)) return null
+    val debit = DEBIT_RE.containsMatchIn(text)
+    // Multiple movement directions cannot qualify the first figure.
+    if (credit == debit) return null
 
     val amount = AMOUNT_RE.find(text) ?: return null
+    // The first figure may belong to a balance, limit, or fee before the
+    // actual transaction. Do not guess a later amount: skip this preview and
+    // let the authoritative parser import the message normally.
+    if (UNSAFE_AMOUNT_PREFIX_RE.containsMatchIn(text.substring(0, amount.range.first))) return null
     // Groups 1/2 are "AED 150.00", groups 3/4 are "150.00 درهم". Exactly one
     // pair is populated.
     val code = amount.groupValues[1].ifEmpty { amount.groupValues[4] }
@@ -267,6 +273,14 @@ object InstantAlert {
     RegexOption.IGNORE_CASE,
   )
 
+  private val UNSAFE_AMOUNT_PREFIX_RE = Regex(
+    "\\b(?:balance|bal|limit|fees?|interest|commission|tax|vat|outstanding|available|avl)\\b|" +
+      "رصيد|الرصيد|رسوم|عمولة|ضريبة|المتاح|مستحق|" +
+      "\\b(?:about|around|approx(?:imately)?\\.?|estimated?|nearly|almost|up\\s+to|" +
+      "at\\s+(?:least|most)|(?:more|less)\\s+than|over|under|between)\\s*$",
+    RegexOption.IGNORE_CASE,
+  )
+
   private val LAST4_RE = Regex(
     "(?:card|a/?c|acct?|account)\\D{0,24}?(\\d{4})\\b",
     RegexOption.IGNORE_CASE,
@@ -310,7 +324,17 @@ object InstantAlert {
     "\\botp\\b|one[- ]time (?:password|pin)|do not share|verification code|declin|unsuccessful|insufficient|" +
       "could not be (?:processed|completed)|\\bfailed\\b|\\breversed\\b|pre[- ]?auth|blocked|" +
       "\\bpending\\b|\\bcancell?ed\\b|not (?:completed|processed|successful|debited)|" +
-      "will be (?:charged|deducted)|تم رفض|مرفوض|غير ناجح|فشل|قيد الانتظار",
+      // Uncertain principal amounts/status are not a completed movement.
+      "\\b(?:approx(?:imately|imate)?|estimated?|about|around|roughly|nearly|almost)\\b|" +
+      "حوالي|حوالى|تقريبا|تقريباً|" +
+      "\\b(?:may|might|could|would)\\s+(?:be|have)\\b|" +
+      "\\b(?:not\\s+(?:yet\\s+)?(?:been\\s+)?|(?:hasn|haven|wasn|weren|isn|aren)['’]t\\s+(?:yet\\s+)?(?:been\\s+)?)" +
+      "(?:transferred|debited|credited|deducted|charged|withdrawn|paid|deposited|refunded|completed|processed|successful)\\b|" +
+      "\\b(?:processing|awaiting|unconfirmed|scheduled|reserved|initiated)\\b|\\bon hold\\b|\\bunder\\s+process\\b|" +
+      "\\bwill\\s+be\\s+(?:charged|deducted|credited|deposited|refunded|transferred|paid|received|processed|completed|posted)\\b|" +
+      "تم\\s+(?:[إا]لغاء|[إا]يقاف|تعليق)|العملية\\s+غير\\s+مكتمل|العمليه\\s+غير\\s+مكتمل|" +
+      "سيتم|سوف|قيد\\s+(?:المعالجة|المعالجه|التنفيذ)|" +
+      "تم رفض|مرفوض|غير ناجح|فشل|قيد الانتظار",
     RegexOption.IGNORE_CASE,
   )
 

@@ -3,11 +3,13 @@ const EXPECTED_PRODUCTS = {
   weekly: {
     productId: 'wafra_pro_weekly',
     googleBasePlanId: 'weekly',
+    billingPeriod: 'P1W',
     referenceAmount: '4.99',
   },
   yearly: {
     productId: 'wafra_pro_yearly',
     googleBasePlanId: 'yearly',
+    billingPeriod: 'P1Y',
     referenceAmount: '49.99',
   },
 };
@@ -58,9 +60,18 @@ export function validateStorePricing(pricing, metadata) {
     if (product.googleBasePlanId !== expected.googleBasePlanId) {
       errors.push(`pricing product ${plan} Google base plan must use ${expected.googleBasePlanId}`);
     }
+    if (product.billingPeriod !== expected.billingPeriod) {
+      errors.push(`pricing product ${plan} billing period must be ${expected.billingPeriod}`);
+    }
     if (product.referencePrice?.currency !== 'USD' ||
         product.referencePrice?.amount !== expected.referenceAmount) {
       errors.push(`pricing product ${plan} reference price must be USD ${expected.referenceAmount}`);
+    }
+    if (product.approvedBasePrice != null &&
+        (product.approvedBasePrice.currency !== 'USD' ||
+         product.approvedBasePrice.amount !== expected.referenceAmount ||
+         product.approvedBasePrice.publisherApproved !== true)) {
+      errors.push(`approved ${plan} pricing needs one publisher-approved base price`);
     }
   }
 

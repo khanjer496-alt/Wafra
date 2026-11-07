@@ -142,6 +142,29 @@ async function main() {
       shares[0][1]?.mimeType === 'application/json' && shares[0][1]?.UTI === 'public.json' &&
       plainTextShares === 0);
 
+  const iosShares = [];
+  const iosModule = load({
+    os: 'ios',
+    fileSystem: {
+      cacheDirectory: 'file:///cache/', EncodingType: { UTF8: 'utf8' },
+      writeAsStringAsync: async () => {},
+    },
+    sharing: {
+      isAvailableAsync: async () => true,
+      shareAsync: async (...args) => { iosShares.push(args); },
+    },
+  });
+  for (const [filename, mimeType, uti] of [
+    ['transactions.csv', 'text/csv', 'public.comma-separated-values-text'],
+    ['backup.json', 'application/json', 'public.json'],
+    ['notes.txt', 'text/plain', 'public.plain-text'],
+  ]) {
+    await iosModule.shareTextFile(filename, 'synthetic contents', { mimeType });
+    const [uri, options] = iosShares.at(-1);
+    ok(`iOS ${mimeType} advertises its matching document type`,
+      uri.endsWith(`/${filename}`) && options.mimeType === mimeType && options.UTI === uti);
+  }
+
   for (const cancellation of ['before-start', 'during-availability', 'during-directory', 'during-write']) {
     let allowed = cancellation !== 'before-start';
     const created = []; const deleted = []; const files = []; const delivered = [];

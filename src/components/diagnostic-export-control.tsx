@@ -22,6 +22,11 @@ import { diagnosticCopy as copy } from '@/lib/diagnostic-copy';
  * chevron (a sheet opens here).
  */
 export function DiagnosticExportControl({ palette, last = false }: { palette?: BandPalette; last?: boolean } = {}) {
+  if (typeof __DEV__ === 'undefined' || !__DEV__) return null;
+  return <DeveloperDiagnosticExportControl palette={palette} last={last} />;
+}
+
+function DeveloperDiagnosticExportControl({ palette, last }: { palette?: BandPalette; last: boolean }) {
   const { state, getStateSnapshot, getStateGeneration } = useStore();
   const ledgerGeneration = getStateGeneration();
   const w = copy[state.language === 'ar' ? 'ar' : 'en'];

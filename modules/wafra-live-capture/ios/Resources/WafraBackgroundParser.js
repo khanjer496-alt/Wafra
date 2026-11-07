@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 72b3042bd7342875c6467aceb733728fe8d7a2438f0b8da33f4061543f50784a
+// Generated from normal shipping TypeScript. Source SHA-256: 1c93e5d6318217ecfa1dd18d047639dcb876b472fafe326461ec6267c8b6114c
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -1912,8 +1912,12 @@ const interpretBankAlert = ({ source, sender, market, overrides = {}, observedAt
     const decision = semanticDecision(source, market, fallback, usableLegacy);
     if (decision.outcome === 'review') {
         const semantic = parseSemanticReview(source, market, fallback, decision, usableLegacy);
-        if (semantic)
+        if (semantic) {
+            if (semantic.outcome === 'parsed' && (0, markets_1.withMarketPackForParsing)(market, () => (0, sms_parser_1.hasUnsettledPrincipal)(source, semantic.parsed))) {
+                return usableLegacy ? legacyResult(usableLegacy) : finalFallback(fallback, null);
+            }
             return semantic;
+        }
     }
     return finalFallback(fallback, usableLegacy);
 };
@@ -5680,8 +5684,8 @@ const S = {
         ar: 'راجع تصنيفات المتاجر ودفعات البنك غير الواضحة',
     },
     improveAccuracyHint: {
-        en: 'Messages still needing attention. Share formats with no merchant so the parser can improve. For a named shop, sort it once on this phone and Wafra remembers your choice for past and future entries. Long account numbers are masked.',
-        ar: 'رسائل ما زالت تحتاج إلى مراجعة. شارك الصيغ التي بلا اسم متجر لتحسين القارئ. أما المتجر المعروف فصنّفه مرة واحدة على هذا الهاتف، وستتذكر وفرة اختيارك للعمليات السابقة والقادمة. الأرقام الطويلة مخفية.',
+        en: 'Messages still needing attention. Open an entry to review it. For a named shop, sort it once on this phone and Wafra remembers your choice for past and future entries. Long account numbers are masked.',
+        ar: 'رسائل ما زالت تحتاج إلى مراجعة. افتح العملية لمراجعتها. أما المتجر المعروف فصنّفه مرة واحدة على هذا الهاتف، وستتذكر وفرة اختيارك للعمليات السابقة والقادمة. الأرقام الطويلة مخفية.',
     },
     improveAccuracySettingsDetail: {
         en: 'Review bank-message formats Wafra could not read confidently',
@@ -5701,16 +5705,16 @@ const S = {
         ar: 'تقرير الدقة · لا يُحتفظ بنص الرسالة المعالَجة في السجل؛ وتنتهي صلاحية السجلات المعلّقة المحمية بعد ٣٠ يوماً وتُزال عند الوصول التالي إلى الصف',
     },
     formatsNotKeptRelay: {
-        en: 'Rows delivered by the old Wafra Capture relay never included Message text, so they cannot appear in this list and an empty list does not audit them. The card diagnostic below still works: it reports what the ledger did with every card row.',
-        ar: 'لم تتضمن العمليات التي سلّمها مُرحّل Wafra Capture القديم نص الرسالة، لذلك لا يمكن أن تظهر في هذه القائمة ولا يعني خلوّها أن تلك العمليات خضعت للتدقيق. أما تشخيص البطاقات بالأسفل فيعرض ما فعله السجل بكل عملية مرتبطة ببطاقة.',
+        en: 'Rows delivered by the old Wafra Capture relay never included Message text, so they cannot appear in this list and an empty list does not audit them.',
+        ar: 'لم تتضمن العمليات التي سلّمها مُرحّل Wafra Capture القديم نص الرسالة، لذلك لا يمكن أن تظهر في هذه القائمة ولا يعني خلوّها أن تلك العمليات خضعت للتدقيق.',
     },
     formatsNotKeptIosLocal: {
-        en: 'Local capture parses new bank messages on this iPhone. Successfully processed raw text is deleted before the ledger or accuracy report retains it; protected pending records expire after 30 days and are removed on the next queue access. Rows from the old Wafra Capture relay never included Message text, so this list cannot audit those legacy rows. The card diagnostic below still works for every card row.',
-        ar: 'يعالج الالتقاط المحلي رسائل البنك الجديدة على هذا الآيفون. يُحذف النص الخام بعد نجاح المعالجة قبل أن يحتفظ به السجل أو تقرير الدقة؛ وتنتهي صلاحية السجلات المعلّقة المحمية بعد ٣٠ يوماً وتُزال عند الوصول التالي إلى الصف. لم تتضمن عمليات مُرحّل Wafra Capture القديم نص الرسالة، لذلك لا تستطيع هذه القائمة تدقيق تلك العمليات القديمة. ويعمل تشخيص البطاقات بالأسفل لكل عملية مرتبطة ببطاقة.',
+        en: 'Local capture parses new bank messages on this iPhone. Successfully processed raw text is deleted before the ledger or accuracy report retains it; protected pending records expire after 30 days and are removed on the next queue access. Rows from the old Wafra Capture relay never included Message text, so this list cannot audit those legacy rows.',
+        ar: 'يعالج الالتقاط المحلي رسائل البنك الجديدة على هذا الآيفون. يُحذف النص الخام بعد نجاح المعالجة قبل أن يحتفظ به السجل أو تقرير الدقة؛ وتنتهي صلاحية السجلات المعلّقة المحمية بعد ٣٠ يوماً وتُزال عند الوصول التالي إلى الصف. لم تتضمن عمليات مُرحّل Wafra Capture القديم نص الرسالة، لذلك لا تستطيع هذه القائمة تدقيق تلك العمليات القديمة.',
     },
     formatsNotKeptPrivate: {
-        en: 'Private Mode removes diagnostic Message text from the ledger and prevents new ledger entries from retaining it, so this list cannot identify misread formats. Local capture still works; protected pending records expire after 30 days and are removed on the next queue access. The card diagnostic below still reports what the ledger did with every card row.',
-        ar: 'يحذف الوضع الخاص نص الرسالة التشخيصي من السجل ويمنع العمليات الجديدة من الاحتفاظ به، لذلك لا تستطيع هذه القائمة تحديد الصيغ التي أسيءت قراءتها. ويستمر الالتقاط المحلي؛ وتنتهي صلاحية السجلات المعلّقة المحمية بعد ٣٠ يوماً وتُزال عند الوصول التالي إلى الصف. أما تشخيص البطاقات بالأسفل فيعرض ما فعله السجل بكل عملية مرتبطة ببطاقة.',
+        en: 'Private Mode removes diagnostic Message text from the ledger and prevents new ledger entries from retaining it, so this list cannot identify misread formats. Local capture still works; protected pending records expire after 30 days and are removed on the next queue access.',
+        ar: 'يحذف الوضع الخاص نص الرسالة التشخيصي من السجل ويمنع العمليات الجديدة من الاحتفاظ به، لذلك لا تستطيع هذه القائمة تحديد الصيغ التي أسيءت قراءتها. ويستمر الالتقاط المحلي؛ وتنتهي صلاحية السجلات المعلّقة المحمية بعد ٣٠ يوماً وتُزال عند الوصول التالي إلى الصف.',
     },
     coverageHeading: {
         en: 'How much of your bank this reads',
@@ -6206,8 +6210,8 @@ const S = {
         ar: 'لا تحتفظ حالة الالتقاط والتنبيه في هذه الشاشة إلا بأعداد خالية من بيانات المصدر، ولا تحفظان نص الرسالة أو اسم المرسل. تبقى سجلات الرسائل المعلّقة في صف الالتقاط المحلي المحمي، وهو صف مشفّر قصير الأجل. وتنتهي صلاحيتها بعد ٣٠ يوماً وتُزال عند تشغيل الالتقاط أو فحص وفرة للصف في المرة التالية. ويستمر الالتقاط المحلي وفق تفضيلاتك المحفوظة.',
     },
     privacySecurityExact: {
-        en: 'Automatic capture is optional. Android SMS alerts are processed on this phone, and local iPhone capture never uploads SMS content. However, an old Wafra Shortcut automation can continue uploading the bank messages you selected until you remove it or Wafra confirms retirement. Wafra cannot sign in to a bank, directly access your Messages inbox, reply, approve a payment or move money. For separately connected email, PDF or CSV imports, the encrypted relay parses them, discards raw text immediately, and returns only structured rows.',
-        ar: 'الالتقاط التلقائي اختياري. تُعالج تنبيهات رسائل أندرويد على هذا الهاتف، ولا يرفع الالتقاط المحلي على الآيفون محتوى الرسائل. لكن أتمتة الاختصار القديمة «Wafra Capture» قد تستمر في رفع رسائل البنوك التي اخترتها إلى أن تحذفها أو تؤكد وفرة اكتمال إيقافها. لا تستطيع وفرة تسجيل الدخول إلى بنك أو الوصول مباشرةً إلى صندوق رسائلك أو الرد أو الموافقة على دفعة أو نقل الأموال. أما واردات البريد أو PDF أو CSV المربوطة منفصلةً، فيحللها المرحّل المشفّر ويحذف النص فوراً ويعيد عمليات منظّمة فقط.',
+        en: 'Automatic capture is optional. Android SMS alerts are processed on this phone, and local iPhone capture never uploads SMS content. However, an old Wafra Shortcut automation can continue uploading the bank messages you selected until you remove it or Wafra confirms retirement. On iPhone, Wafra cannot directly access the Messages inbox. Wafra cannot sign in to a bank, reply, approve a payment or move money. For separately connected email, PDF or CSV imports, the encrypted relay parses them, discards raw text immediately, and returns only structured rows.',
+        ar: 'الالتقاط التلقائي اختياري. تُعالج تنبيهات رسائل أندرويد على هذا الهاتف، ولا يرفع الالتقاط المحلي على الآيفون محتوى الرسائل. لكن أتمتة الاختصار القديمة «Wafra Capture» قد تستمر في رفع رسائل البنوك التي اخترتها إلى أن تحذفها أو تؤكد وفرة اكتمال إيقافها. على الآيفون، لا تستطيع وفرة الوصول مباشرةً إلى صندوق الرسائل. ولا تستطيع وفرة تسجيل الدخول إلى بنك أو الرد أو الموافقة على دفعة أو نقل الأموال. أما واردات البريد أو PDF أو CSV المربوطة منفصلةً، فيحللها المرحّل المشفّر ويحذف النص فوراً ويعيد عمليات منظّمة فقط.',
     },
     country: { en: 'Country', ar: 'الدولة' },
     language: { en: 'Language', ar: 'اللغة' },
@@ -10960,6 +10964,124 @@ function bankMonogram(name) {
         .toUpperCase();
 }
 },
+"principal-posting-guards":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.isIncompletePrincipal = isIncompletePrincipal;
+exports.isHedgedPrincipal = isHedgedPrincipal;
+exports.refundPrincipalStatus = refundPrincipalStatus;
+exports.isCompletedPrincipalRefund = isCompletedPrincipalRefund;
+const MOVEMENT_STATUS = /\bincomplete\s+(?:transaction|txn|purchase|payment|transfer|withdrawal)\b|\b(?:transaction|txn|purchase|payment|transfer|withdrawal)(?:\s+(?:of|for|at|to|from|with|on)\b(?:[^.\n]|\.\d){0,80}?)?\s+(?:was|is|remains?|has\s+been)\s+incomplete\b|\b(?:transaction|txn|purchase|payment|authori[sz]ation)\b(?:[^.\n]|\.\d){0,100}?\s(?:cancell?ed|voided)\s+by\s+(?:the\s+)?(?:merchant|bank|issuer|acquirer)\b|\b(?:transaction|txn|purchase|payment|authori[sz]ation)\b(?:[^.\n]|\.\d){0,100}?\s(?:will\s+be|is\s+being)\s+(?:cancell?ed|voided)\b|[ \t][-–—:|][ \t]*(?:void|voided|cancell?ed)[ \t]*(?=\n|$)|[ \t]*[,:(][ \t]*(?:cancell?ed|voided|void)[ \t]*\)?[ \t]*(?=[.\n]|$)|(?<![ء-ي])(?:تم\s+)?(?:الغاء|ايقاف|تعليق)\s+(?:ال)?(?:عمليه|شراء|دفع|تحويل|حواله|سحب|معامله|حركه)(?![ء-ي])|(?<![ء-ي])(?:الغيت|اوقفت|علقت)\s+(?:ال)?(?:عمليه|شراء|دفع|تحويل|حواله|سحب|معامله|حركه)(?![ء-ي])|(?<![ء-ي])(?:ال)?(?:عمليه|معامله|شراء|دفع|تحويل|حواله|سحب|حركه)\s+(?:غير\s+(?:ناجح|مكتمل)ه?|لم\s+(?:تكتمل|يكتمل|تنجح)|(?:ال)?(?:ملغي|ملغا|ملغاه|موقوف[هة]?))(?![ء-ي])|(?<![ء-ي])(?:و?تم|قد\s+تم)\s+(?:الغاو|الغاي|ايقاف|تعليق)(?:ها|ه)(?![ء-ي])|(?<![ء-ي])تم\s+(?:ال)?الغاء(?![ء-ي])|(?<![ء-ي])لم\s+(?:تكتمل|يكتمل|تنجح)(?![ء-ي])/gi;
+const CONDITIONAL_STATUS = /(?:\b(?:if|unless|please|pls|to|can|may|should)\b|(?<![ء-ي])(?:يرجي|الرجاء|رجاء|يمكنك|يمكنكم|يمكن|بامكانك|بامكانكم|اتصل|ارسل|للابلاغ|لطلب|طلب|خدمه|اذا|حال|تود|ترغب|عليك)(?![ء-ي]))(?:\s+(?:او|و|ب|في|علي|عن|من|كانت|كان|or|and))?(?:\s+\d{1,4})?\s*$/i;
+function isIncompletePrincipal(source, span) {
+    if (!span)
+        return false;
+    const boundary = (at) => /[;!?]/u.test(source[at]) ||
+        (source[at] === '.' && /^(?:\s|$)/u.test(source[at + 1] ?? ''));
+    let start = span.start, end = span.end;
+    while (start > 0 && !boundary(start - 1))
+        start--;
+    while (end < source.length && !boundary(end))
+        end++;
+    const blocks = [source.slice(start, end)];
+    const header = source.slice(0, start);
+    if (header && [...header.matchAll(MOVEMENT_STATUS)].some(match => match.index === header.length - header.trimStart().length)) {
+        blocks.unshift(header);
+    }
+    for (const block of blocks)
+        for (const match of block.matchAll(MOVEMENT_STATUS)) {
+            const before = block.slice(Math.max(0, match.index - 60), match.index);
+            const after = block.slice(match.index + match[0].length, match.index + match[0].length + 45);
+            if (CONDITIONAL_STATUS.test(before))
+                continue;
+            if (/^(?:\s+(?:ال)?(?:سابق[هة]?|قديم[هة]?))|\b(?:previous|earlier|prior)\b/i.test(after))
+                continue;
+            if (/(?:ها|ه)$/.test(match[0]) && /(?:ال)?بطاق(?:ه|تك|تكم)/.test(before.slice(-30)))
+                continue;
+            if (/incomplete/i.test(match[0]) && /\b(?:profile|registration|application|address)\b/i.test(match[0]))
+                continue;
+            return true;
+        }
+    return false;
+}
+const HEDGE_BEFORE = /(?:(?<![\p{L}\p{N}.*\/-])(?:about|approx(?:imately|\.)?|around|roughly|nearly|almost|up\s+to|estimated|est\.|circa|ca\.)|[~≈]|(?<![ء-ي])(?:حوالي|حوالى|تقريبا|تقريباً|ما\s+يقارب|نحو)(?![ء-ي]))[ \t]*$/iu;
+const HEDGE_AFTER = /^[ \t]*(?:\([ \t]*(?:approx(?:imately|imate|\.)?|est(?:imated|imate|\.)?|about|roughly|circa|ca\.|~|تقريبا|تقريباً)[ \t]*\)|[~≈]|(?:approximately|approx\.?|roughly|or[ \t]+so|estimated|est\.)(?![\p{L}])|(?<![ء-ي])(?:تقريبا|تقريباً)(?![ء-ي]))/iu;
+function isHedgedPrincipal(source, spans) {
+    return spans.length > 0 && spans.every(({ start, end }) => HEDGE_BEFORE.test(source.slice(Math.max(0, start - 40), start)) ||
+        HEDGE_AFTER.test(source.slice(end, end + 28)));
+}
+const REFUND_LEAD = /(?:\brefund(?:ed)?\s+(?:of|amount(?:\s+of)?|for)?|(?<![ء-ي])(?:(?:ال)?مبلغ\s+)?(?:ال)?استرداد(?:\s+(?:ال)?مبلغ)?(?:\s+بقيم[هة]|\s+بمبلغ)?)[ \t]*[:\-]?[ \t]*$/iu;
+const NOT_CURRENT_REFUND = /\b(?:if|when|unless|earlier|previous|prior|another|other|last)\b|(?<![ء-ي])(?:اذا|حال|سابق[هة]?|اخري)(?![ء-ي])/iu;
+const REFUND_PENDING = /\b(?:initiated|under\s+process(?:ing)?|in\s+process|in\s+progress|being\s+processed|will\s+(?:be|reflect|appear|show)|requested|pending|awaiting|submitted|approved|raised)\b|(?<![ء-ي])(?:قيد\s+(?:ال)?(?:معالج[هة]|تنفيذ|مراجع[هة]|انتظار)|سيتم|سوف|طلب|تمت\s+الموافق[هة])(?![ء-ي])/iu;
+const REFUND_CANCELLED = /\b(?:has\s+been|was|is|got)\s+(?:cancell?ed|declined|rejected|unsuccessful|voided)\b|\brefund\s+(?:has\s+)?failed\b|(?<![ء-ي])(?:تم\s+)?(?:الغاء|إلغاء|رفض)\s+(?:طلب\s+)?(?:ال)?استرداد|(?:ال)?استرداد\s+(?:ال)?(?:ملغي|ملغى|ملغا|ملغاه|مرفوض)(?![ء-ي])/iu;
+const REFUND_COMPLETED = /\b(?:credited|issued|processed\s+(?:to|into|on)|posted\s+(?:to|into|on)|received\s+(?:on|in|into)|deposited|returned\s+to|added\s+to)\b|(?<![ء-ي])(?:تم\s+(?:[إا]يداع|[إا]ضاف[هة]|استرداد|[إا]رجاع|[إا]عاد[هة])|اضيف|أضيف|اعيد|أعيد|اودع|أودع)(?![ء-ي])/giu;
+const UNSETTLED_PREDICATE = /\b(?:will|would|shall|not|never|hasn['’]t|wasn['’]t|isn['’]t)\b/iu;
+const REFUND_PAID_OUT = /\b(?:debited|deducted|charged|withdrawn|sent|paid\s+to)\b|(?<![ء-ي])(?:تم\s+خصم|خصمت|خصم\s+من)(?![ء-ي])/iu;
+function sentenceAround(source, span) {
+    let start = span.start, end = span.end;
+    const commaAt = (at) => source[at] === ',' && !(/\d/u.test(source[at - 1] ?? '') && /\d/u.test(source[at + 1] ?? ''));
+    while (start > 0 && !commaAt(start - 1) && !/[\n;!?]/u.test(source[start - 1]) &&
+        !(source[start - 1] === '.' && /\s/u.test(source[start] ?? '')))
+        start--;
+    while (end < source.length && !commaAt(end) && !/[\n;!?]/u.test(source[end]) &&
+        !(source[end] === '.' && /^(?:\s|$)/u.test(source[end + 1] ?? '')))
+        end++;
+    return { start, end, text: source.slice(start, end) };
+}
+const INDEPENDENT_MONEY_SUBJECT = /\b(?:and|but|while|whereas)\s+(?!(?:the|your|this)\s+refund\b)(?:a|an|the|your|another|separate|additional)\s+|\b(?:and|but|while|whereas)\s+(?:(?:processing|service|bank|administrative|new|separate|additional|related|applicable)\s+){0,3}(?:fees?|tax|charge|payment|transfer|withdrawal|deposit|purchase|refund|transaction|balance)\b(?=\s+(?:of|was|were|has|have|had|is|will|charged|debited|deducted|credited)\b)|(?<![ء-ي])و(?:تم\s+)?(?:خصم\s+)?(?:ال)?(?:رسوم|رسم|ضريب[هة]|عمول[هة])(?=\s)/giu;
+const SAME_MONEY_REFERENCE = /^\s*(?:[(\[/=≈~]|equivalent(?:\s+to)?|equiv\.?|approx\.?|i\.?e\.?|بما\s+يعادل|ما\s+يعادل|يعادل)\s*$/i;
+const ORIGINAL_MOVEMENT_REFERENCE = /\b(?:for|against|on|of)\s+(?:your|the)\s+(?:original\s+|earlier\s+|previous\s+)?(?:purchase|transaction|payment|charge|order)\s+(?:of|for)?\s*$|(?:لعمليه|عن\s+عمليه|من\s+عمليه)\s+(?:ال)?شراء\s+(?:بمبلغ|بقيمه)?\s*$/i;
+function refundScope(source, own, monetarySpans) {
+    const sentence = sentenceAround(source, own);
+    let end = sentence.end;
+    const tail = source.slice(own.end, end);
+    const independent = [...tail.matchAll(INDEPENDENT_MONEY_SUBJECT)][0];
+    if (independent)
+        end = own.end + independent.index;
+    for (const other of monetarySpans) {
+        if (other.start < own.end || other.start >= end)
+            continue;
+        const between = source.slice(own.end, other.start);
+        if (SAME_MONEY_REFERENCE.test(between) || ORIGINAL_MOVEMENT_REFERENCE.test(between))
+            continue;
+        const coordinators = [...between.matchAll(/\b(?:and|but|while|whereas)\b/giu)];
+        const coordinator = coordinators[coordinators.length - 1];
+        end = Math.min(end, coordinator ? own.end + coordinator.index : other.start);
+    }
+    return { start: sentence.start, end, text: source.slice(sentence.start, end) };
+}
+function refundPrincipalStatus(source, spans, monetarySpans = spans) {
+    const own = spans.find(({ start }) => REFUND_LEAD.test(source.slice(Math.max(0, start - 48), start)));
+    if (!own)
+        return null;
+    const scope = refundScope(source, own, monetarySpans);
+    const sentence = scope.text;
+    if (NOT_CURRENT_REFUND.test(source.slice(scope.start, own.start)))
+        return null;
+    if (REFUND_CANCELLED.test(sentence))
+        return 'cancelled';
+    if (REFUND_PAID_OUT.test(sentence))
+        return 'paid-out';
+    for (const match of sentence.matchAll(REFUND_COMPLETED)) {
+        if (!UNSETTLED_PREDICATE.test(sentence.slice(Math.max(0, match.index - 40), match.index)))
+            return 'completed';
+    }
+    if (REFUND_PENDING.test(sentence) || UNSETTLED_PREDICATE.test(sentence))
+        return 'pending';
+    const after = source.slice(scope.end, scope.end + 120);
+    if (/^[.!\s]*(?:it|(?:this|the|your)\s+refund)\s+(?:has\s+not|hasn['’]t|is\s+not|will\s+be|remains?\s+pending)/iu.test(after))
+        return 'pending';
+    return 'completed';
+}
+function isCompletedPrincipalRefund(source, span) {
+    if (!span)
+        return false;
+    const scope = sentenceAround(source, span);
+    if (NOT_CURRENT_REFUND.test(scope.text) || REFUND_PENDING.test(scope.text))
+        return false;
+    return /\b(?:purchase|transaction|payment|charge)\b(?:[^.\n]|\.\d){0,120}?\b(?:has\s+been|was|is|have\s+been)\s+(?:fully\s+)?refunded\b|(?<![ء-ي])(?:عمليه\s+)?(?:ال)?شراء(?:[^.\n]|\.(?=\S)){0,120}?\s+(?:و?تم\s+)(?:استرداد|استرجاع|ارجاع)(?:ها|ه)(?![ء-ي])/i.test(scope.text);
+}
+},
 "sms-parser":function(module,exports,require){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
@@ -10983,6 +11105,7 @@ exports.isNonPostingMessage = isNonPostingMessage;
 exports.isDeclinedMessage = isDeclinedMessage;
 exports.extractOutgoingTransferParties = extractOutgoingTransferParties;
 exports.parseForeignAwaitingRate = parseForeignAwaitingRate;
+exports.hasUnsettledPrincipal = hasUnsettledPrincipal;
 exports.parseSms = parseSms;
 exports.parseSmsBatch = parseSmsBatch;
 const categories_1 = require("@/lib/categories");
@@ -10993,6 +11116,8 @@ const currency_metadata_1 = require("@/lib/currency-metadata");
 const fx_rates_1 = require("@/lib/fx-rates");
 const bnpl_providers_1 = require("@/lib/bnpl-providers");
 Object.defineProperty(exports, "isBnplProviderSource", { enumerable: true, get: function () { return bnpl_providers_1.isBnplProviderSource; } });
+const principal_posting_guards_1 = require("@/lib/principal-posting-guards");
+const universal_money_1 = require("@/lib/universal-money");
 const INVISIBLE_RE = /[\u200B-\u200F\u061C\u202A-\u202E\u2066-\u2069\uFEFF\u0640\u064B-\u0655\u0670]/g;
 const NBSP_RE = /[\u00A0\u2007\u202F]/g;
 function stripInvisible(s) {
@@ -11025,7 +11150,7 @@ function normalizeArabic(s) {
 }
 const ARABIC_RE = /[\u0600-\u06FF]/;
 const AR_LETTER = '\\u0621-\\u064A';
-exports.PARSER_VERSION = 69;
+exports.PARSER_VERSION = 70;
 exports.PARSER_BACKFILL_VERSION = 50;
 const BANK_PROFILES = {
     'Emirates NBD': { brand: /\benbd\b|emirates\s*nbd|\bliv\b/i, ownPot: /\b(?:liv\s+)?goals?\b|\bsavings?\s+pot\b/i },
@@ -11496,10 +11621,19 @@ function extractForeignAmountFils(raw) {
     return extractForeignAmount(raw)?.localFils ?? null;
 }
 const MAX_PLAUSIBLE_AMOUNT_FILS = 100000000;
-const BALANCE_PREFIX_RE = new RegExp(String.raw `(?:bal(?:ance)?|avl|avail(?:able)?|limit|outstanding|total|الرصيد المتاح|الرصيد الحالي|الحد المتاح|المتاح|الرصيد|رصيدك)` +
+const BALANCE_PREFIX_RE = new RegExp(String.raw `(?:bal(?:ance)?|avl|avail(?:able)?|limit|outstanding|total|الرصيد المتاح|الرصيد الحالي|الحد المتاح|(?:ال)?حد\s+(?:ال)?ايتماني|المتاح|الرصيد|رصيدك)` +
     BALANCE_REF_CLAUSE +
     String.raw `\s*(?:is|:|\.|-|هو)?\s*(?:now|currently|الان)?\s*$` +
+    String.raw `|(?:ال)?حد\s+(?:ال)?ا[يئ]تماني(?:\s+(?:ال)?(?:متاح|متبقي))?\s*(?::|هو)?\s*$` +
+    String.raw `|(?:سقف|(?:ال)?حد)\s+(?:ال)?بطاق[هة](?:\s+(?:ال)?(?:متاح|متبقي)[هة]?)?\s*(?::|هو)?\s*$` +
+    String.raw `|(?:ال)?حد\s+(?:ال)?(?:متبقي|متاح)\s*(?::|هو)?\s*$` +
+    String.raw `|(?<![ء-ي])رصيدكم(?:\s+(?:ال)?(?:متاح|حالي|متوفر))?\s*(?::|هو)?\s*$` +
+    String.raw `|(?<![ء-ي])رصيد\s+(?:(?:ال)?حساب|(?:ال)?بطاق[هة]|متاح|متوفر)\s*(?::|هو)?\s*$` +
+    String.raw `|(?:ال)?مبلغ\s+(?:ال)?(?:متوفر|متاح|متبقي)\s*(?::|هو)?\s*$` +
+    String.raw `|\bcredit\s+line\s*(?::|is|-)?\s*(?:now\s+)?$` +
+    String.raw `|(?:^|[\n.!?;|])\s*رصيد\s*(?::|هو)?\s*$` +
     String.raw `|(?:الرصيد|رصيدك)\s+(?:المتوفر|المتاح)(?:\s+(?:في|ل)\s*حسابك)?(?:\s+رقم)?(?:\s+[\dXx*•\-]{3,24})?\s*(?:هو|:)?\s*$`, 'i');
+const BALANCE_SUFFIX_RE = /^[ \t]{0,3}(?:(?:is|are|=|remains?)\s+(?:now\s+)?(?:your|the)\s+(?:(?:current|new|remaining|total|available|avl\.?|avail\.?)\s+){0,2}(?:(?:credit|card|account)\s+)?(?:balance|bal\b|limit|line)|(?:(?:avl\.?|avail(?:able)?)\s+(?:credit\s+)?(?:bal(?:ance)?|limit|credit)|(?:credit\s+)?limit\s+available)\s*(?=[.,;!\n]|$))/i;
 function sanitizeLocalMoney(raw) {
     ensureCurrencyPatterns();
     const invalid = (0, bank_amount_tokens_1.malformedLocalMoneyTokens)(raw, (0, markets_1.getActiveMarket)().currency.aliases.map(foldOrthography));
@@ -12133,7 +12267,7 @@ function extractAmountFils(raw) {
         const at = match.index + match[0].length - match[1].length;
         if (isMaskedFigure(raw, at))
             continue;
-        candidates.push({ index: match.index, value: Math.round(Number(match[1].replace(/,/g, '')) * 100) });
+        candidates.push({ index: match.index, end: match.index + match[0].length, value: Math.round(Number(match[1].replace(/,/g, '')) * 100) });
     }
     AED_SUFFIX_RE.lastIndex = 0;
     while ((match = AED_SUFFIX_RE.exec(raw))) {
@@ -12143,7 +12277,7 @@ function extractAmountFils(raw) {
         const identityPrefix = raw.slice(Math.max(0, match.index - 40), match.index);
         if (/(?:\bcard\s*(?:no\.?|number|ending(?:\s+with)?|#)\s*|\b(?:account|acct|a\/c)\s*(?:no\.?|number|ending(?:\s+with)?|#)?\s*)$/i.test(identityPrefix))
             continue;
-        candidates.push({ index: match.index, value: Math.round(Number(match[1].replace(/,/g, '')) * 100) });
+        candidates.push({ index: match.index, end: match.index + match[0].length, value: Math.round(Number(match[1].replace(/,/g, '')) * 100) });
     }
     candidates.sort((a, b) => a.index - b.index);
     const lineBefore = (index) => raw.slice(raw.lastIndexOf('\n', index - 1) + 1, index);
@@ -12155,6 +12289,8 @@ function extractAmountFils(raw) {
             continue;
         const prefix = raw.slice(Math.max(0, c.index - 56), c.index);
         if (BALANCE_PREFIX_RE.test(prefix))
+            continue;
+        if (BALANCE_SUFFIX_RE.test(raw.slice(c.end, c.end + 72)))
             continue;
         if (yieldsFeeLine && feeLine(c.index) && candidates.slice(i + 1).some((later) => Number.isFinite(later.value) && later.value > 0 && later.index > c.index &&
             totalLine(later.index) &&
@@ -14057,6 +14193,165 @@ function parseForeignAwaitingRate(message, overrides, options) {
     };
 }
 const FOREIGN_DOMESTIC_RAIL_RE = /\b(?:NEFT|IMPS|RTGS|UPI)\b/;
+const CHARGEBACK_DEBIT_RE = /\bcharge-?\s?backs?\b(?:[^.\n]|\.\d){0,80}?\b(?:has\s+been\s+|was\s+|is\s+)?debited\s+from\s+(?:your\s+)?(?:account|a\/c|card)\b|\bdebited\b(?:[^.\n]|\.\d){0,80}?\bas\s+(?:a\s+)?charge-?\s?back(?:\s+reversal)?\b/i;
+function principalSpans(raw, parsed) {
+    const spans = [];
+    const code = parsed.originalCurrency;
+    const original = parsed.originalMinorUnits ?? parsed.originalAmountMinor;
+    const exponent = parsed.originalExponent ?? (code ? (0, fx_1.currencyExponent)(code) : null) ?? 2;
+    const foreign = code && original !== undefined && parsed.fxSource !== 'bank';
+    const patterns = foreign
+        ? [FX_PREFIX_RE, FX_SUFFIX_RE, EXT_FX_PREFIX_RE, EXT_FX_SUFFIX_RE]
+        : [AED_AMOUNT_RE, AED_SUFFIX_RE];
+    for (const pattern of patterns) {
+        for (const match of raw.matchAll(new RegExp(pattern.source, 'gi'))) {
+            const prefix = foreign && (pattern === FX_PREFIX_RE || pattern === EXT_FX_PREFIX_RE);
+            const matchedCode = foreign ? match[prefix ? 1 : 2]?.toUpperCase() : null;
+            if (foreign && matchedCode !== code)
+                continue;
+            if (BALANCE_PREFIX_RE.test(raw.slice(Math.max(0, match.index - 56), match.index)))
+                continue;
+            if (BALANCE_SUFFIX_RE.test(raw.slice(match.index + match[0].length, match.index + match[0].length + 72)))
+                continue;
+            if (Math.round(Number(match[foreign && prefix ? 2 : 1].replace(/,/g, '')) * 10 ** (foreign ? exponent : 2)) ===
+                (foreign ? original : parsed.amountFils)) {
+                spans.push({ start: match.index, end: match.index + match[0].length });
+            }
+        }
+    }
+    return spans.sort((a, b) => a.start - b.start).slice(0, 1);
+}
+function principalRefundStatus(raw, spans) {
+    if (!/refund|استرداد/iu.test(raw))
+        return null;
+    const monetarySpans = [AED_AMOUNT_RE, AED_SUFFIX_RE, FX_PREFIX_RE, FX_SUFFIX_RE, EXT_FX_PREFIX_RE, EXT_FX_SUFFIX_RE]
+        .flatMap(pattern => [...raw.matchAll(new RegExp(pattern.source, 'gi'))]
+        .map(match => ({ start: match.index, end: match.index + match[0].length })));
+    return (0, principal_posting_guards_1.refundPrincipalStatus)(raw, spans, monetarySpans);
+}
+function principalChargebackDebit(raw, span) {
+    if (!span)
+        return false;
+    const before = raw.slice(Math.max(0, span.start - 60), span.start);
+    const after = raw.slice(span.end, span.end + 120);
+    return (/\bcharge-?\s?back(?:\s+of)?\s*$/i.test(before) &&
+        /^\s*(?:(?:to\s+(?:your\s+)?account|on\s+(?:your\s+)?card)\s+[*xX\d]{2,20}\s+)?(?:has\s+been\s+|was\s+|is\s+)?debited\s+from\s+(?:your\s+)?(?:account|a\/c|card)\b/i.test(after)) ||
+        /^\s*(?:has\s+been\s+|was\s+|is\s+)?debited\s+from\b[^.\n;]{0,60}\bas\s+(?:a\s+)?charge-?\s?back/i.test(after);
+}
+function principalNeedsTransferReview(raw, span, parsed) {
+    if (!span || parsed.transferHint || parsed.cardPaymentSide)
+        return false;
+    const before = raw.slice(Math.max(0, span.start - 80), span.start);
+    const after = raw.slice(span.end, span.end + 100);
+    const destinationOnly = /\b(?:transferred|transfer\s+of)\s*$/i.test(before) &&
+        /^\s*(?:to\s+(?:your\s+)?own\s+(?:account|a\/c)\s+[*xX\d]{2,20})\b/i.test(after);
+    const cardReceipt = /\bcard\s+[*xX\d]{2,20}\s+payment\s+of\s*$/i.test(before) &&
+        /^\s*(?:has\s+been\s+|was\s+)?received\b/i.test(after);
+    return destinationOnly || cardReceipt;
+}
+function hasUnsupportedPrincipal(raw, parsed) {
+    const local = [...raw.matchAll(new RegExp(AED_AMOUNT_RE.source, 'gi')),
+        ...raw.matchAll(new RegExp(AED_SUFFIX_RE.source, 'gi'))];
+    if (local.length < 2 && !FX_PREFIX_RE.test(raw) && !FX_SUFFIX_RE.test(raw))
+        return false;
+    if (/^bank fee$/i.test(parsed.merchant))
+        return false;
+    const selected = principalSpans(raw, parsed)[0];
+    if (!selected)
+        return false;
+    const proof = (0, universal_money_1.extractUniversalMoney)(raw);
+    const key = (value) => value && `${value.currency}:${value.minorUnits}`;
+    const selectedKey = parsed.originalCurrency && parsed.fxSource !== 'bank'
+        ? `${parsed.originalCurrency}:${parsed.originalMinorUnits}` : `${parsed.currency}:${parsed.amountFils}`;
+    const clause = (span) => {
+        const stop = (at) => /[\n;!?،]/.test(raw[at]) ||
+            (raw[at] === '.' && /^(?:\s|$)/.test(raw[at + 1] ?? '')) ||
+            (raw[at] === ',' && !(/\d/.test(raw[at - 1] ?? '') && /\d/.test(raw[at + 1] ?? '')));
+        let start = span.start, end = span.end;
+        while (start > 0 && !stop(start - 1))
+            start--;
+        while (end < raw.length && !stop(end))
+            end++;
+        return { before: raw.slice(start, span.start), after: raw.slice(span.end, end), text: raw.slice(start, end) };
+    };
+    const aggregate = /\b(?:this\s+(?:month|cycle|week|year|period|statement)|so\s+far|to\s+date|budget|allowance|cumulative|spending\s+room|room\s+left|headroom|can\s+still\s+be\s+withdrawn)\b|\bof\s+(?:your|the)\s+(?:[A-Z]{3}\s*[\d,.]+\s+)?(?:(?:monthly|daily|weekly|card|spending|credit)\s+)?(?:limit|budget|allowance)\b|هذا\s+الشهر|حتي\s+الان|ميزاني[هة]|اجمالي|(?:من\s+)?(?:ال)?حد\s+(?:ال)?(?:شراء|سحب|يومي|شهري|مسموح)/i;
+    const governed = (span) => {
+        const own = clause(span);
+        if (aggregate.test(own.text))
+            return false;
+        const before = own.before.trim() || raw.slice(Math.max(0, span.start - 64), span.start).trim();
+        return /(?:\b(?:purchases?|purchased|spent|debited|credited|deducted|charged|withdrawn|withdrawal|withdrew|paid|payments?|transfer(?:red)?|sent|received|deposited|deposit|refund(?:ed)?|used\s+for|amount|amt|txn|transaction|pos|remittance|reversal|fees?)(?:\s+(?:of|for|with|by|worth|amounting\s+to))?(?:\s*\([^()]{1,16}\))?|(?<![ء-ي])(?:شراء|خصم|بمبلغ|مبلغ|المبلغ|سحب|تحويل|حواله|دفع|سداد|ايداع|اضافه|استرداد|قيمه|بقيمه|بـ|ب)(?![ء-ي]))\s*[:=\-]?\s*$/i.test(before) ||
+            /^\s*(?:has\s+been|was|were|is|successfully)?\s*(?:spent|debited|credited|deducted|charged|withdrawn|paid|transferred|sent|received|deposited|refunded|reversed|used)\b/i.test(own.after);
+    };
+    const own = clause(selected);
+    const selectedIsFee = proof.observations.some(observation => observation.role === 'fee' &&
+        observation.field.spans.some(span => span.start < selected.end && selected.start < span.end));
+    if (aggregate.test(own.text))
+        return true;
+    const selectedIsGoverned = governed(selected);
+    const others = proof.observations.filter(observation => key(observation.field.value) !== selectedKey &&
+        !observation.field.spans.some(span => span.start < selected.end && selected.start < span.end) &&
+        !['balance', 'credit-limit', 'statement-total', 'minimum-due', 'fee', 'tax'].includes(observation.role));
+    if (others.length === 0)
+        return false;
+    if (parsed.originalCurrency && parsed.fxSource === 'bank' && selectedIsGoverned)
+        return false;
+    return others.some(observation => {
+        const other = observation.field.spans[0];
+        if (!other)
+            return false;
+        if (parsed.fxSource === 'bank' && observation.field.value?.currency === parsed.originalCurrency) {
+            const gap = other.end <= selected.start ? raw.slice(other.end, selected.start) :
+                selected.end <= other.start ? raw.slice(selected.end, other.start) : '';
+            if (/^\s*(?:[(\[/=≈~]|equivalent(?:\s+to)?|equiv\.?|approx\.?|i\.?e\.?|بما\s+يعادل|ما\s+يعادل|يعادل)\s*$/i.test(gap))
+                return false;
+        }
+        const context = clause(other);
+        if (REWARD_RATE_RE.test(context.text) || PERCENT_PURCHASE_OFFER_RE.test(context.text) ||
+            FUTURE_PURCHASE_THRESHOLD_RE.test(context.text) || PURCHASE_THRESHOLD_OFFER_RE.test(context.text) ||
+            APPLICATION_PURCHASE_OFFER_RE.test(context.text) ||
+            new RegExp(FUTURE_CLAUSE_RE.source, 'i').test(context.text) ||
+            new RegExp(SCHEDULED_CLAUSE_RE.source, 'i').test(context.text))
+            return false;
+        if (aggregate.test(context.text) || BALANCE_PREFIX_RE.test(context.before) ||
+            BALANCE_SUFFIX_RE.test(context.after))
+            return false;
+        if (/\b(?:for|against|on|of)\s+(?:your|the)\s+(?:original\s+|earlier\s+|previous\s+)?(?:purchase|transaction|payment|charge|order)\s+(?:of|for)?\s*$|(?:لعمليه|عن\s+عمليه|من\s+عمليه)\s+(?:ال)?شراء\s+(?:بمبلغ|بقيمه)?\s*$/i.test(context.before))
+            return false;
+        if (selectedIsFee && /\b(?:for|on|against)\s+(?:your|the)\s+(?:transfer|withdrawal|payment|remittance)\s+(?:of|for)?\s*$|(?:علي|على)\s+(?:حواله|تحويل|سحب)\s+(?:بمبلغ|بقيمه)?\s*$/i.test(context.before))
+            return false;
+        if (['pending', 'cancelled'].includes(principalRefundStatus(raw, [other]) ?? ''))
+            return false;
+        if (/\b(?:previous|earlier|prior|original)\s+(?:purchase|refund|chargeback|transaction)\b/i.test(context.before))
+            return false;
+        return !selectedIsGoverned || governed(other);
+    });
+}
+function hasUnsettledPrincipal(message, parsed) {
+    if (parsed.kind !== 'transaction')
+        return false;
+    ensureCurrencyPatterns();
+    const raw = sanitizeLocalMoney(foldOrthography(stripInvisible(message.slice(0, 4000))));
+    if (!raw)
+        return false;
+    if (hasUnsupportedPrincipal(raw, parsed))
+        return true;
+    const spans = principalSpans(raw, parsed);
+    if (principalNeedsTransferReview(raw, spans[0], parsed))
+        return true;
+    if (parsed.type === 'expense' && spans[0] &&
+        /(?:تم\s+اضافه|تم\s+ايداع)\s*$/i.test(raw.slice(Math.max(0, spans[0].start - 50), spans[0].start)) &&
+        /^\s*(?:الي|في)\s+بطاقتك\s+(?:ال)?ا[يئ]تماني[هة]/i.test(raw.slice(spans[0].end, spans[0].end + 70)))
+        return true;
+    if (parsed.type === 'income' && principalChargebackDebit(raw, spans[0]))
+        return true;
+    if ((0, principal_posting_guards_1.isIncompletePrincipal)(raw, spans[0]))
+        return true;
+    const refund = principalRefundStatus(raw, spans);
+    return (0, principal_posting_guards_1.isHedgedPrincipal)(raw, spans) || refund === 'pending' || refund === 'cancelled' ||
+        (refund === 'paid-out' && parsed.type === 'income') ||
+        (parsed.type === 'expense' && (refund === 'completed' || (0, principal_posting_guards_1.isCompletedPrincipalRefund)(raw, spans[0])));
+}
 function parseSms(message, overrides, options) {
     if ((0, bnpl_providers_1.isBnplProviderSource)(options?.sender))
         return null;
@@ -14078,6 +14373,32 @@ function parseSms(message, overrides, options) {
         }
     }
     if (!parsed)
+        return null;
+    if (parsed.kind === 'transaction') {
+        const raw = sanitizeLocalMoney(foldOrthography(stripInvisible(message.slice(0, 4000))));
+        if (raw) {
+            const spans = principalSpans(raw, parsed);
+            const refund = principalRefundStatus(raw, spans);
+            if (refund === 'paid-out' && parsed.type === 'income') {
+                parsed = { ...parsed, type: 'expense', transferHint: false, categoryGuess: 'other', categoryDeliberate: true };
+            }
+            else if (parsed.type === 'expense' && (refund === 'completed' || (0, principal_posting_guards_1.isCompletedPrincipalRefund)(raw, spans[0]))) {
+                parsed = { ...parsed, type: 'income', transferHint: false, categoryGuess: 'other', categoryDeliberate: true,
+                    merchant: parsed.merchant.replace(/\s*(?:،|,)?\s*(?:و?تم\s+)?(?:استرداد|استرجاع|إرجاع|ارجاع)(?:ها|ه)\s*$/u, '').trim() || 'Refund' };
+            }
+        }
+    }
+    if (parsed.kind === 'transaction') {
+        const normalized = sanitizeLocalMoney(foldOrthography(stripInvisible(message.slice(0, 4000))));
+        if (normalized) {
+            const span = principalSpans(normalized, parsed)[0];
+            if (parsed.type === 'income' && principalChargebackDebit(normalized, span) && CHARGEBACK_DEBIT_RE.test(normalized)) {
+                parsed = { ...parsed, type: 'expense', merchant: 'Chargeback reversal',
+                    categoryGuess: 'other', categoryDeliberate: true, transferHint: false };
+            }
+        }
+    }
+    if (hasUnsettledPrincipal(message, parsed))
         return null;
     if (parsed.originalCurrency && parsed.originalCurrency !== (0, markets_1.getActiveMarket)().currency.code &&
         parsed.fxSource !== 'bank' && FOREIGN_DOMESTIC_RAIL_RE.test(message)) {
@@ -14928,6 +15249,7 @@ const universal_types_1 = require("@/lib/universal-types");
 const alert_semantics_1 = require("@/lib/alert-semantics");
 const universal_fields_1 = require("@/lib/universal-fields");
 const universal_money_1 = require("@/lib/universal-money");
+const principal_posting_guards_1 = require("@/lib/principal-posting-guards");
 const latam_alert_templates_1 = require("@/lib/latam-alert-templates");
 const bank_alert_semantic_rules_1 = require("@/lib/bank-alert-semantic-rules");
 const emptyEvent = (issue) => ({
@@ -15273,6 +15595,11 @@ function inspectUniversalBankEvent(source, context = {}) {
         .test(source);
     if (pendingAnywhere && (status === 'posted' || status === 'unknown'))
         status = 'informational';
+    const refundStatus = (0, principal_posting_guards_1.refundPrincipalStatus)(source, money.amount.spans, money.draft.candidates.map(candidate => candidate.span));
+    if (refundStatus === 'pending' || (0, principal_posting_guards_1.isHedgedPrincipal)(source, money.amount.spans))
+        status = 'informational';
+    if (refundStatus === 'cancelled')
+        status = 'failed';
     const hasStatement = money.statementTotal.evidence !== 'missing' || money.minimumDue.evidence !== 'missing';
     const hasBalance = money.balance.evidence !== 'missing' || money.creditLimit.evidence !== 'missing';
     const hasAmount = money.amount.evidence !== 'missing';
@@ -15607,7 +15934,7 @@ const inspectUnparsedLaunchAlert = (source, sender) => {
 exports.inspectUnparsedLaunchAlert = inspectUnparsedLaunchAlert;
 }
 };
-const mappings={"alert-draft":{"@/lib/currency-metadata":"currency-metadata"},"alert-event-evidence":{},"alert-institution-grammars":{},"alert-market-detection":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-semantics":"alert-semantics","@/lib/markets":"markets"},"alert-market-packs":{"@/lib/alert-market-packs.india-me":"alert-market-packs.india-me","@/lib/alert-market-packs.us-eu":"alert-market-packs.us-eu","@/lib/alert-market-packs.world":"alert-market-packs.world"},"alert-market-packs.india-me":{},"alert-market-packs.us-eu":{},"alert-market-packs.world":{},"alert-semantics":{"@/lib/alert-draft":"alert-draft","@/lib/alert-event-evidence":"alert-event-evidence","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-market-packs":"alert-market-packs","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"alert-source-ownership":{"@/lib/alert-draft":"alert-draft"},"bank-alert-interpreter":{"@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules","@/lib/categories":"categories","@/lib/bank-alert-semantic-output":"bank-alert-semantic-output","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser","@/lib/unparsed-launch-alert":"unparsed-launch-alert"},"bank-alert-semantic-output":{},"bank-alert-semantic-rules":{"@/lib/sms-parser":"sms-parser"},"bank-amount-tokens":{},"best-effort-autopost":{"@/lib/currency-metadata":"currency-metadata","@/lib/capture-source-identity":"capture-source-identity","@/lib/fx-rates":"fx-rates","@/lib/sms-parser":"sms-parser"},"bnpl-providers":{},"brand-categories":{},"capture-source-identity":{},"categories":{"@/lib/i18n":"i18n"},"country":{"@/lib/country-names":"country-names"},"country-names":{},"currency-metadata":{},"fx":{"@/lib/currency-metadata":"currency-metadata","@/lib/ledger-money":"ledger-money"},"fx-rates":{"@/lib/fx":"fx"},"gulf-neighbour-alerts":{"@/lib/best-effort-autopost":"best-effort-autopost","@/lib/country":"country","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/gulf-neighbour-templates":"gulf-neighbour-templates","@/lib/sms-parser":"sms-parser","@/lib/universal-parser":"universal-parser"},"gulf-neighbour-templates":{"@/lib/best-effort-autopost":"best-effort-autopost"},"i18n":{},"ios-background-alert-parser":{"@/lib/currency-metadata":"currency-metadata","@/lib/country":"country","@/lib/markets":"markets","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/launch-alert-parser":"launch-alert-parser","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/fx":"fx","@/lib/sms-parser":"sms-parser"},"latam-alert-templates":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/sms-parser":"sms-parser","@/lib/universal-types":"universal-types"},"launch-alert-parser":{"@/lib/alert-market-detection":"alert-market-detection","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/country":"country","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/bank-alert-interpreter":"bank-alert-interpreter","@/lib/markets":"markets","@/lib/bnpl-providers":"bnpl-providers","@/lib/sms-parser":"sms-parser","@/lib/currency-metadata":"currency-metadata","@/lib/gulf-neighbour-alerts":"gulf-neighbour-alerts","@/lib/universal-parser":"universal-parser","@/lib/alert-market-packs":"alert-market-packs","@/lib/alert-draft":"alert-draft","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/universal-categorization":"universal-categorization","@/lib/fx-rates":"fx-rates"},"ledger-money":{"@/lib/currency-metadata":"currency-metadata"},"markets":{"@/lib/country":"country"},"sms-parser":{"@/lib/categories":"categories","@/lib/markets":"markets","@/lib/bank-amount-tokens":"bank-amount-tokens","@/lib/fx":"fx","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/bnpl-providers":"bnpl-providers"},"universal-categorization":{"@/lib/brand-categories":"brand-categories","@/lib/categories":"categories","@/lib/sms-parser":"sms-parser"},"universal-dates":{"@/lib/alert-source-ownership":"alert-source-ownership","@/lib/universal-types":"universal-types"},"universal-fields":{"@/lib/universal-types":"universal-types","@/lib/alert-draft":"alert-draft","@/lib/universal-dates":"universal-dates"},"universal-money":{"@/lib/alert-draft":"alert-draft","@/lib/alert-market-packs":"alert-market-packs","@/lib/currency-metadata":"currency-metadata","@/lib/universal-fields":"universal-fields","@/lib/universal-types":"universal-types"},"universal-parser":{"@/lib/universal-types":"universal-types","@/lib/alert-semantics":"alert-semantics","@/lib/universal-fields":"universal-fields","@/lib/universal-money":"universal-money","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"universal-types":{},"unparsed-launch-alert":{"@/lib/alert-draft":"alert-draft","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser"}};
+const mappings={"alert-draft":{"@/lib/currency-metadata":"currency-metadata"},"alert-event-evidence":{},"alert-institution-grammars":{},"alert-market-detection":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-semantics":"alert-semantics","@/lib/markets":"markets"},"alert-market-packs":{"@/lib/alert-market-packs.india-me":"alert-market-packs.india-me","@/lib/alert-market-packs.us-eu":"alert-market-packs.us-eu","@/lib/alert-market-packs.world":"alert-market-packs.world"},"alert-market-packs.india-me":{},"alert-market-packs.us-eu":{},"alert-market-packs.world":{},"alert-semantics":{"@/lib/alert-draft":"alert-draft","@/lib/alert-event-evidence":"alert-event-evidence","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-market-packs":"alert-market-packs","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"alert-source-ownership":{"@/lib/alert-draft":"alert-draft"},"bank-alert-interpreter":{"@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules","@/lib/categories":"categories","@/lib/bank-alert-semantic-output":"bank-alert-semantic-output","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser","@/lib/unparsed-launch-alert":"unparsed-launch-alert"},"bank-alert-semantic-output":{},"bank-alert-semantic-rules":{"@/lib/sms-parser":"sms-parser"},"bank-amount-tokens":{},"best-effort-autopost":{"@/lib/currency-metadata":"currency-metadata","@/lib/capture-source-identity":"capture-source-identity","@/lib/fx-rates":"fx-rates","@/lib/sms-parser":"sms-parser"},"bnpl-providers":{},"brand-categories":{},"capture-source-identity":{},"categories":{"@/lib/i18n":"i18n"},"country":{"@/lib/country-names":"country-names"},"country-names":{},"currency-metadata":{},"fx":{"@/lib/currency-metadata":"currency-metadata","@/lib/ledger-money":"ledger-money"},"fx-rates":{"@/lib/fx":"fx"},"gulf-neighbour-alerts":{"@/lib/best-effort-autopost":"best-effort-autopost","@/lib/country":"country","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/gulf-neighbour-templates":"gulf-neighbour-templates","@/lib/sms-parser":"sms-parser","@/lib/universal-parser":"universal-parser"},"gulf-neighbour-templates":{"@/lib/best-effort-autopost":"best-effort-autopost"},"i18n":{},"ios-background-alert-parser":{"@/lib/currency-metadata":"currency-metadata","@/lib/country":"country","@/lib/markets":"markets","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/launch-alert-parser":"launch-alert-parser","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/fx":"fx","@/lib/sms-parser":"sms-parser"},"latam-alert-templates":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/sms-parser":"sms-parser","@/lib/universal-types":"universal-types"},"launch-alert-parser":{"@/lib/alert-market-detection":"alert-market-detection","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/country":"country","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/bank-alert-interpreter":"bank-alert-interpreter","@/lib/markets":"markets","@/lib/bnpl-providers":"bnpl-providers","@/lib/sms-parser":"sms-parser","@/lib/currency-metadata":"currency-metadata","@/lib/gulf-neighbour-alerts":"gulf-neighbour-alerts","@/lib/universal-parser":"universal-parser","@/lib/alert-market-packs":"alert-market-packs","@/lib/alert-draft":"alert-draft","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/universal-categorization":"universal-categorization","@/lib/fx-rates":"fx-rates"},"ledger-money":{"@/lib/currency-metadata":"currency-metadata"},"markets":{"@/lib/country":"country"},"principal-posting-guards":{},"sms-parser":{"@/lib/categories":"categories","@/lib/markets":"markets","@/lib/bank-amount-tokens":"bank-amount-tokens","@/lib/fx":"fx","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/bnpl-providers":"bnpl-providers","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/universal-money":"universal-money"},"universal-categorization":{"@/lib/brand-categories":"brand-categories","@/lib/categories":"categories","@/lib/sms-parser":"sms-parser"},"universal-dates":{"@/lib/alert-source-ownership":"alert-source-ownership","@/lib/universal-types":"universal-types"},"universal-fields":{"@/lib/universal-types":"universal-types","@/lib/alert-draft":"alert-draft","@/lib/universal-dates":"universal-dates"},"universal-money":{"@/lib/alert-draft":"alert-draft","@/lib/alert-market-packs":"alert-market-packs","@/lib/currency-metadata":"currency-metadata","@/lib/universal-fields":"universal-fields","@/lib/universal-types":"universal-types"},"universal-parser":{"@/lib/universal-types":"universal-types","@/lib/alert-semantics":"alert-semantics","@/lib/universal-fields":"universal-fields","@/lib/universal-money":"universal-money","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"universal-types":{},"unparsed-launch-alert":{"@/lib/alert-draft":"alert-draft","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser"}};
 const cache=Object.create(null);
 function load(id){
 if(Object.prototype.hasOwnProperty.call(cache,id))return cache[id].exports;

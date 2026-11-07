@@ -33,6 +33,7 @@ public enum WafraInstantAlertReader {
     let credit: NSRegularExpression
     let debit: NSRegularExpression
     let amount: NSRegularExpression
+    let unsafeAmountPrefix: NSRegularExpression
     let last4: NSRegularExpression
     let merchant: NSRegularExpression
     let paymentMerchant: NSRegularExpression
@@ -54,6 +55,7 @@ public enum WafraInstantAlertReader {
       credit: re(P.credit),
       debit: re(P.debit),
       amount: re(P.amount),
+      unsafeAmountPrefix: re(P.unsafeAmountPrefix),
       last4: re(P.last4),
       merchant: re(P.merchant),
       paymentMerchant: re(P.paymentMerchant),
@@ -92,10 +94,12 @@ public enum WafraInstantAlertReader {
     if contains(p.refuse, text) { return nil }
 
     let credit = contains(p.credit, text)
-    if !credit && !contains(p.debit, text) { return nil }
+    let debit = contains(p.debit, text)
+    if credit == debit { return nil }
 
     guard let amount = p.amount.firstMatch(in: text, range: NSRange(text.startIndex..., in: text))
     else { return nil }
+    if contains(p.unsafeAmountPrefix, (text as NSString).substring(to: amount.range.location)) { return nil }
     // Groups 1/2 are "AED 150.00", groups 3/4 are "150.00 درهم".
     let code = nonEmpty(group(amount, 1, in: text)) ?? group(amount, 4, in: text)
     let figure = nonEmpty(group(amount, 2, in: text)) ?? group(amount, 3, in: text)

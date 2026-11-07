@@ -16,6 +16,7 @@
     "weekly": {
       "productId": "wafra_pro_weekly",
       "googleBasePlanId": "weekly",
+      "billingPeriod": "P1W",
       "referencePrice": { "currency": "USD", "amount": "4.99" },
       "approvedBasePrice": { "currency": "USD", "amount": "4.99", "publisherApproved": true },
       "readBackEvidence": null
@@ -23,6 +24,7 @@
     "yearly": {
       "productId": "wafra_pro_yearly",
       "googleBasePlanId": "yearly",
+      "billingPeriod": "P1Y",
       "referencePrice": { "currency": "USD", "amount": "49.99" },
       "approvedBasePrice": { "currency": "USD", "amount": "49.99", "publisherApproved": true },
       "readBackEvidence": null

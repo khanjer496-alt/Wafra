@@ -1,7 +1,8 @@
 'use strict';
 
-// Backport the synchronous stale-freeze reset from upstream issue #4518.
-// No topology, native code, freeze policy, dependency or source-map changes.
+// Install-time compatibility shims for pinned release dependencies.
+// The screens backport resets stale freeze state; the URI shim preserves the
+// SDK55 query parser API with the maintained, patched ESM decoder.
 const fs = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
@@ -57,12 +58,41 @@ function patchReactNativeScreens(packageDirectory = path.resolve(__dirname, '../
   return { version: VERSION, changedFiles: planned.filter(target => target.changed).length };
 }
 
-module.exports = { patchReactNativeScreens };
+function patchQueryString(projectDirectory = path.resolve(__dirname, '..')) {
+  const modules = path.join(projectDirectory, 'node_modules');
+  if (fs.existsSync(modules) && fs.lstatSync(modules).isSymbolicLink()) {
+    throw new Error('Do not patch a shared node_modules symlink; install this checkout independently.');
+  }
+  const directory = path.join(modules, 'query-string');
+  if (!fs.existsSync(directory)) return { present: false, changed: false };
+  const manifest = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'), 'utf8'));
+  const decoder = JSON.parse(fs.readFileSync(path.join(modules, 'decode-uri-component/package.json'), 'utf8'));
+  if (manifest.version !== '7.1.3' || decoder.version !== '0.5.1') {
+    throw new Error('Review URI decoder compatibility before changing the pinned query-string/decoder versions.');
+  }
+  const file = path.join(directory, 'index.js');
+  const original = "const decodeComponent = require('decode-uri-component');";
+  const replacement = "const decodeComponentModule = require('decode-uri-component');\n" +
+    "const decodeComponent = typeof decodeComponentModule === 'function' ? decodeComponentModule : decodeComponentModule.default;";
+  const text = fs.readFileSync(file, 'utf8');
+  if (text.includes(replacement)) return { present: true, changed: false };
+  if (text.split(original).length !== 2) throw new Error('Unrecognized query-string decoder import; refusing a partial patch.');
+  fs.writeFileSync(file, text.replace(original, replacement));
+  return { present: true, changed: true };
+}
+
+module.exports = { patchReactNativeScreens, patchQueryString };
 
 if (require.main === module) {
   try {
+    const modules = path.resolve(__dirname, '../node_modules');
+    if (fs.existsSync(modules) && fs.lstatSync(modules).isSymbolicLink()) {
+      throw new Error('Refusing to modify another checkout through a shared dependency symlink.');
+    }
     const result = patchReactNativeScreens();
     console.log(`[Wafra] DelayedFreeze ${result.version} backport verified; ${result.changedFiles} files patched.`);
+    const decoder = patchQueryString();
+    console.log(`[Wafra] URI decoder compatibility ${decoder.present ? 'verified' : 'not needed in this dependency layer'}.`);
   } catch (error) {
     console.error(`[Wafra] DelayedFreeze backport refused: ${error.message}`);
     process.exitCode = 1;
