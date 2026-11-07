@@ -48,6 +48,12 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
         return { ...dependencies[name], useMoneyLocaleKey: () => '' };
       }
       if (Object.hasOwn(dependencies, name)) return dependencies[name];
+      // Date presentation is real shipping logic, not a formatter stub. Load
+      // its pure country data from current source too; explicit fixture
+      // overrides above still win and custom Intl globals follow the module.
+      if (name === '@/lib/date-time-locale' || name === '@/lib/country-names') {
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src', name.slice(2) + '.ts'), dependencies, globals);
+      }
       if (name === '@/lib/complimentary-access' || name === '@/lib/complimentary-copy' || name === '@/lib/complimentary-clock') return loadTypescript(require('node:path').resolve(__dirname, '../../../src', name.slice(2) + '.ts'));
       // Route-level tests keep their existing navigation boundary. The real app
       // router and SDK stack identity policy have their own behavioral suite.
@@ -214,9 +220,6 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       }
       if (name === '@/lib/country') {
         return require('../build/country.js');
-      }
-      if (name === '@/lib/country-names') {
-        return require('../build/country-names.js');
       }
       // BNPL provider identity is a pure sender/package registry consulted by
       // the parser, the launch session and the capture scanner. Harnesses that
