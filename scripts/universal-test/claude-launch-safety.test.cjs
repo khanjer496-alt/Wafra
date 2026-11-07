@@ -139,6 +139,141 @@ test('a chargeback debited from the account cannot be income', () => {
   }
 });
 
+test('a refund debit keeps its direction when the bank wraps the sentence', () => {
+  const body = 'Refund AED 47.99 to card 1234 was reversed and debited from your account.';
+  for (const wordsPerLine of [1, 2, 3, 5]) {
+    const wrapped = body.split(' ').map((word, index) =>
+      `${index ? (index % wordsPerLine ? ' ' : '\n') : ''}${word}`).join('');
+    for (const parsed of readers(wrapped)) {
+      assert.equal(parsed?.type, 'expense', `${wordsPerLine} words per line`);
+      assert.equal(parsed.amountFils, 4799);
+    }
+  }
+});
+
+test('a reversal notice never proves a new refund credit or an unfinished debit', () => {
+  for (const ending of [
+    'was reversed.', 'has been reversed.', 'is being reversed.',
+    'has not been reversed and debited from your account.',
+    'was not reversed and charged to your card.',
+    'has never been reversed and credited to your card.',
+    'is being reversed and credited to your card.',
+    'is being credited to your card.', 'was being debited from your account.',
+  ]) for (const parsed of readers(`Refund of AED 47.99 to card 1234 ${ending}`)) assert.equal(parsed, null, ending);
+  for (const [ending, type] of [
+    ['has not been reversed and was debited from your account.', 'expense'],
+    ['is being reversed and was credited to your card.', 'income'],
+  ]) for (const parsed of readers(`Refund of AED 47.99 to card 1234 ${ending}`)) {
+    assert.equal(parsed?.type, type, ending); assert.equal(parsed.amountFils, 4799);
+  }
+  for (const parsed of readers('Refund of AED 47.99 from BEING has been credited to your card.')) {
+    assert.equal(parsed?.type, 'income'); assert.equal(parsed.amountFils, 4799);
+  }
+});
+
+for (const body of [
+  'Refund of AED 125.00 from NOON has been initiated\nProcessing fee AED 5.00 was charged to your card.',
+  'Refund of AED 125.00 from NOON has been initiated\nProcessing fee was charged to your card.',
+  'Refund of AED 125.00 from NOON has been initiated\nProcessing fee: charged to your card.',
+  'Refund of AED 125.00 from NOON has been initiated\nService fee - charged to your card.',
+  'Refund of AED 125.00 from NOON has been initiated\nCommission was charged to your card.',
+  'Refund of AED 125.00 from NOON has been initiated\nA levy was deducted from your account.',
+  'Refund of AED 125.00 from NOON has not been credited yet\nCommission was charged to your card.',
+  'Refund of AED 125.00 from NOON has not been credited yet\nA levy was deducted from your account.',
+  'Refund of AED 125.00 from NOON has not been credited yet\nA processing fee was deducted from your account.',
+]) test(`a new fee line cannot settle a pending refund: ${body.slice(-45)}`, () => {
+  for (const parsed of readers(body)) assert.equal(parsed, null);
+});
+
+test('a new unquantified fee line cannot debit a completed refund', () => {
+  const body = 'Refund of AED 125.00 from NOON has been credited to your card\nProcessing fee was charged to your card.';
+  for (const parsed of readers(body)) assert.ok(!parsed || (parsed.type === 'income' && parsed.amountFils === 12500));
+});
+
+test('a repeated reference to the same refund can confirm its completion across wraps', () => {
+  const body = 'Refund of AED 125.00 from NOON has been initiated and the refund has now been credited to your card.';
+  for (const wordsPerLine of [1, 2, 3, 5]) {
+    const wrapped = body.split(' ').map((word, index) =>
+      `${index ? (index % wordsPerLine ? ' ' : '\n') : ''}${word}`).join('');
+    for (const parsed of readers(wrapped)) {
+      assert.equal(parsed?.type, 'income');
+      assert.equal(parsed.amountFils, 12500);
+    }
+  }
+});
+
+test('a later prepositional phrase cannot change an owned refund verdict', () => {
+  for (const verdict of ['has been initiated', 'has been credited to your card']) {
+    for (const tail of ['On your card a levy was deducted from your account.',
+      'For the transaction that was debited from your account.',
+      'On the other hand a levy was charged to your card.']) {
+      for (const parsed of readers(`Refund of AED 125.00 from NOON ${verdict}\n${tail}`)) {
+        if (verdict === 'has been initiated') assert.equal(parsed, null);
+        else assert.ok(!parsed || (parsed.type === 'income' && parsed.amountFils === 12500));
+      }
+    }
+  }
+});
+
+test('a pending refund cannot post when any part of its sentence is line-wrapped', () => {
+  const body = 'Refund of AED 125.00 from NOON has been initiated.';
+  for (let wordsPerLine = 1; wordsPerLine <= 8; wordsPerLine++) {
+    const wrapped = body.split(' ').map((word, index) =>
+      `${index ? (index % wordsPerLine ? ' ' : '\n') : ''}${word}`).join('');
+    for (const parsed of readers(wrapped)) assert.equal(parsed, null, `${wordsPerLine} words per line`);
+  }
+});
+
+test('a wrapped merchant cannot hide the following unrelated subject', () => {
+  for (const tail of ['Commission was charged to your card.', 'A levy was deducted from your account.']) {
+    for (const parsed of readers(`Refund of AED 125.00 from\nNOON\n${tail}`)) {
+      assert.ok(!parsed || (parsed.type === 'income' && parsed.amountFils === 12500));
+    }
+  }
+});
+
+test('an original transaction cannot donate its debit to a refund', () => {
+  for (const body of [
+    'Refund of AED 125.00 has been initiated for the transaction that was debited from your account.',
+    'Refund of AED 125.00 for your original transaction of AED 125.00 was debited from your account.',
+    'Refund of AED 125.00 for your original transaction of AED 250.00 was debited from your account.',
+    'Refund of AED 125.00 for your original transaction that was debited from your account.',
+  ]) for (const parsed of readers(body)) assert.equal(parsed, null);
+});
+
+test('negated or future debits cannot reverse a credited refund', () => {
+  for (const tail of ['and has not been debited from your account.',
+    'and will be debited from your account.', 'and the refund has not been debited from your account.']) {
+    for (const parsed of readers(`Refund of AED 125.00 has been credited to your card ${tail}`)) {
+      assert.ok(!parsed || (parsed.type === 'income' && parsed.amountFils === 12500));
+    }
+  }
+  for (const tail of ['has not been debited from your account.', 'will be debited from your account.']) {
+    for (const parsed of readers(`Refund of AED 125.00 ${tail}`)) assert.equal(parsed, null);
+  }
+});
+
+test('negation applies to coordinated refund verbs until an explicit new clause', () => {
+  for (const verb of ['debited from your account', 'charged to your card']) {
+    for (const parsed of readers(`Refund of AED 125.00 has not been credited and ${verb}.`)) assert.equal(parsed, null);
+  }
+  for (const body of ['Refund of AED 125.00 has not been debited and credited to your card.',
+    'Refund of AED 125.00 has never been credited and charged to your card.',
+    'Refund of AED 125.00 will be debited and credited to your card.']) {
+    for (const parsed of readers(body)) assert.equal(parsed, null);
+  }
+  for (const body of ['Refund of AED 125.00 has been initiated and credited to your card.',
+    'Refund of AED 125.00 has not been credited and the refund has now been credited to your card.']) {
+    for (const parsed of readers(body)) assert.equal(parsed?.type, 'income');
+  }
+  for (const auxiliary of ['was', 'has been']) {
+    for (const parsed of readers(`Refund of AED 125.00 has not been credited and ${auxiliary} debited from your account.`)) {
+      assert.equal(parsed?.type, 'expense');
+      assert.equal(parsed.amountFils, 12500);
+    }
+  }
+});
+
 for (const [body, country, type, amount] of [
   ['Purchase of AED 50.00 at NOON with card 1234 was successful.', 'AE', 'expense', 5000],
   ['شراء بمبلغ 50 ر.س لدى نون. لإلغاء العملية اتصل 8001234567', 'SA', 'expense', 5000],
@@ -267,4 +402,35 @@ test('unproved and foreign amounts still use fresh monetary proof on every invoc
     assert.equal(reader.parseSms(`Purchase of AED 50.00 at NOON with card 1234. Available balance AED 2,000.00. Payment of ${currency} 100.00 at SAMPLE STORE was made.`), null);
     assert.ok(reader.broadReads() > before, `${currency} still requires broad monetary proof`);
   }
+});
+
+test('documented Omani decimal conventions preserve an exact bilingual principal', () => {
+  const row = require('../universal-launch-eval/corpus/south-asia-mena.json').find(row => row.id === 'SAM-OM-BANKMUSCAT-1');
+  load('@/lib/best-effort-autopost').setBestEffortAutoPostEnabled(true);
+  setActiveCountry('OM'); setActiveMarket('ZZ'); setLedgerCurrency('OMR', 3);
+  const session = createLaunchAlertSession({ overrides: {}, pinnedCurrency: 'OMR', regionHint: 'OM',
+    fxLookup: () => null, bestEffort: { enabled: true, country: 'OM' } });
+  // Worldwide alerts use this boundary; interpretBankAlert is AED/SAR-only.
+  const parsed = session.parseUnproven(row.body, row.sender, session.inspect(row.body, row.sender), observedAt);
+  assert.equal(parsed?.type, 'expense'); assert.equal(parsed.amountFils, 4200); assert.equal(parsed.currency, 'OMR');
+  load('@/lib/best-effort-autopost').setBestEffortAutoPostEnabled(false);
+});
+
+test('a pinned three-decimal ledger never supplies missing source conventions or hides a competing amount', () => {
+  const row = require('../universal-launch-eval/corpus/south-asia-mena.json').find(row => row.id === 'SAM-OM-BANKMUSCAT-1');
+  load('@/lib/best-effort-autopost').setBestEffortAutoPostEnabled(true);
+  for (const [country, body] of [
+    ['US', row.body], [null, row.body],
+    ['OM', row.body.replace('بمبلغ 4.200', 'بمبلغ 5.200')],
+    ['OM', row.body.replace('بمبلغ 4.200', 'بمبلغ 4.201')],
+    ['OM', row.body.replace('OMR 4.200', 'OMR 4,200')],
+    ['OM', row.body.replaceAll('OMR', 'KWD').replaceAll('ر.ع', 'د.ك')],
+  ]) {
+    setActiveCountry(country); setActiveMarket('ZZ'); setLedgerCurrency('OMR', 3);
+    const session = createLaunchAlertSession({ overrides: {}, pinnedCurrency: 'OMR', regionHint: country,
+      fxLookup: () => null, bestEffort: { enabled: true, country } });
+    assert.equal(session.parseUnproven(body, row.sender, session.inspect(body, row.sender), observedAt), null);
+  }
+  load('@/lib/best-effort-autopost').setBestEffortAutoPostEnabled(false);
+  setActiveCountry('AE'); setActiveMarket('AE'); setLedgerCurrency('AED', 2);
 });

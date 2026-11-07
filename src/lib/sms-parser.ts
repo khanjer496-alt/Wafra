@@ -13,6 +13,7 @@ import { convertMinorUnits, currencyExponent, originalMoneyFields, type MinorExp
 import { CURRENCY_MINOR_UNITS } from '@/lib/currency-metadata';
 import { cachedReferenceQuote, quoteFitsDay } from '@/lib/fx-rates';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
+import { getActiveCountry } from '@/lib/country';
 import { isCompletedPrincipalRefund, isHedgedPrincipal, isIncompletePrincipal, refundPrincipalStatus, type PrincipalSpan } from '@/lib/principal-posting-guards';
 import { extractUniversalMoney } from '@/lib/universal-money';
 
@@ -8304,7 +8305,11 @@ function hasUnsupportedPrincipal(raw: string, parsed: ParsedSms, selected: Princ
   const own = clause(selected);
   if (aggregate.test(own.text)) return true;
   const selectedIsGoverned = governed(selected, own);
-  const proof = extractUniversalMoney(raw);
+  const country = getActiveCountry();
+  // Reuse documented source conventions from the explicit country setting.
+  // A pinned ledger currency alone never resolves a three-decimal token.
+  const moneyMarket = country === 'KW' || country === 'BH' || country === 'OM' || country === 'JO' ? country : undefined;
+  const proof = extractUniversalMoney(raw, { moneyMarket });
   const key = (value: { currency: string; minorUnits: string } | null) => value && `${value.currency}:${value.minorUnits}`;
   const selectedKey = parsed.originalCurrency && parsed.fxSource !== 'bank'
     ? `${parsed.originalCurrency}:${parsed.originalMinorUnits}` : `${parsed.currency}:${parsed.amountFils}`;
