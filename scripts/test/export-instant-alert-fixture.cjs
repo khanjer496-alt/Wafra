@@ -79,6 +79,7 @@ async function main() {
     CREDIT_RE: re('credit'),
     DEBIT_RE: re('debit'),
     AMOUNT_RE: re('amount'),
+    UNSAFE_AMOUNT_PREFIX_RE: re('unsafeAmountPrefix'),
     LAST4_RE: re('last4'),
     MERCHANT_RE: re('merchant'),
     PAYMENT_MERCHANT_RE: re('paymentMerchant'),
@@ -88,7 +89,15 @@ async function main() {
   const format = new RegExp(sources.credentialFormat, 'gu');
   const sensitive = body => credential.test(body.normalize('NFKC').replace(format, ''));
 
-  const messages = [...new Set([...corpusMessages(), ...TRAPS])];
+  const previewSafety = require('./fixtures/instant-alert-preview-safety.cjs');
+  for (const [body, expected] of previewSafety) {
+    const got = read(body);
+    if (expected === null ? got !== null : got?.currency !== expected.currency || got?.figure !== expected.figure ||
+        got?.credit !== (expected.credit ?? false)) {
+      throw new Error(`preview safety regression: ${body}`);
+    }
+  }
+  const messages = [...new Set([...corpusMessages(), ...TRAPS, ...previewSafety.map(([body]) => body)])];
   const fixture = {
     reads: messages.map((body) => ({ body, read: read(body) })),
     sensitive: SENSITIVE.map(([body, expected]) => {

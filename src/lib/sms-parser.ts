@@ -13,6 +13,9 @@ import { convertMinorUnits, currencyExponent, originalMoneyFields, type MinorExp
 import { CURRENCY_MINOR_UNITS } from '@/lib/currency-metadata';
 import { cachedReferenceQuote, quoteFitsDay } from '@/lib/fx-rates';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
+import { getActiveCountry } from '@/lib/country';
+import { isCompletedPrincipalRefund, isHedgedPrincipal, isIncompletePrincipal, refundPrincipalStatus, type PrincipalSpan } from '@/lib/principal-posting-guards';
+import { extractUniversalMoney } from '@/lib/universal-money';
 
 /* ────────────────────────── Arabic normalisation ──────────────────────────
  *
@@ -629,8 +632,15 @@ export interface ParsedCard {
  * 50: the Android loss (both of two adjacent copies) was three rows in a
  * 30k-message inbox, too few to justify a full-history reread on every
  * phone, and iPhone-captured rows keep no source text for a reread to reach.
+ *
+ * 70: selected-principal safety for capture and the bounded recent reread:
+ * limits/aggregates cannot supply movement amounts, indicative cancellations
+ * and estimated/pending refunds stay unposted, and explicit refund/chargeback
+ * direction cannot be overwritten by semantic fallback. Destination-only own
+ * transfers and unproved card receipts require Review. No full-history reparse
+ * is requested; the historical-repair version remains 50.
  */
-export const PARSER_VERSION = 69;
+export const PARSER_VERSION = 70;
 /**
  * Historical-repair contract for already-saved data.
  *
@@ -2939,15 +2949,26 @@ const MAX_PLAUSIBLE_AMOUNT_FILS = 100_000_000;
 // "Balance AED 5,000. Purchase of AED 250 at NOON" — the opposite failure, and
 // the one that silently deletes a purchase.
 const BALANCE_PREFIX_RE = new RegExp(
-  String.raw`(?:bal(?:ance)?|avl|avail(?:able)?|limit|outstanding|total|الرصيد المتاح|الرصيد الحالي|الحد المتاح|المتاح|الرصيد|رصيدك)` +
+  String.raw`(?:bal(?:ance)?|avl|avail(?:able)?|limit|outstanding|total|الرصيد المتاح|الرصيد الحالي|الحد المتاح|(?:ال)?حد\s+(?:ال)?ايتماني|المتاح|الرصيد|رصيدك)` +
     BALANCE_REF_CLAUSE +
     String.raw`\s*(?:is|:|\.|-|هو)?\s*(?:now|currently|الان)?\s*$` +
+    String.raw`|(?:ال)?حد\s+(?:ال)?ا[يئ]تماني(?:\s+(?:ال)?(?:متاح|متبقي))?\s*(?::|هو)?\s*$` +
+    String.raw`|(?:سقف|(?:ال)?حد)\s+(?:ال)?بطاق[هة](?:\s+(?:ال)?(?:متاح|متبقي)[هة]?)?\s*(?::|هو)?\s*$` +
+    String.raw`|(?:ال)?حد\s+(?:ال)?(?:متبقي|متاح)\s*(?::|هو)?\s*$` +
+    String.raw`|(?<![ء-ي])رصيدكم(?:\s+(?:ال)?(?:متاح|حالي|متوفر))?\s*(?::|هو)?\s*$` +
+    String.raw`|(?<![ء-ي])رصيد\s+(?:(?:ال)?حساب|(?:ال)?بطاق[هة]|متاح|متوفر)\s*(?::|هو)?\s*$` +
+    String.raw`|(?:ال)?مبلغ\s+(?:ال)?(?:متوفر|متاح|متبقي)\s*(?::|هو)?\s*$` +
+    String.raw`|\bcredit\s+line\s*(?::|is|-)?\s*(?:now\s+)?$` +
+    // Bare "balance" is a field heading; "شحن رصيد" is a mobile top-up.
+    String.raw`|(?:^|[\n.!?;|])\s*رصيد\s*(?::|هو)?\s*$` +
     // Emirates Islamic: "الرصيد المتوفر في حسابك رقم XXX-XXXXXX-0015 هو 1,000
     // درهم". The account clause above is English-only, so this balance was the
     // only figure left in a salary notice and was posted AS the salary.
     String.raw`|(?:الرصيد|رصيدك)\s+(?:المتوفر|المتاح)(?:\s+(?:في|ل)\s*حسابك)?(?:\s+رقم)?(?:\s+[\dXx*•\-]{3,24})?\s*(?:هو|:)?\s*$`,
   'i',
 );
+const BALANCE_SUFFIX_RE =
+  /^[ \t]{0,3}(?:(?:is|are|=|remains?)\s+(?:now\s+)?(?:your|the)\s+(?:(?:current|new|remaining|total|available|avl\.?|avail\.?)\s+){0,2}(?:(?:credit|card|account)\s+)?(?:balance|bal\b|limit|line)|(?:(?:avl\.?|avail(?:able)?)\s+(?:credit\s+)?(?:bal(?:ance)?|limit|credit)|(?:credit\s+)?limit\s+available)\s*(?=[.,;!\n]|$))/i;
 
 /** Keep bad balance tokens unknown; never truncate a transaction's own money. */
 function sanitizeLocalMoney(raw: string): string | null {
@@ -4698,13 +4719,13 @@ const FEE_LINE_LABEL_RE =
   /^[ \t]*(?:fees?|vat|charges?|commission|رسوم|ضريبه)(?:[ \t&]+[^\n:\d]{0,24})?[ \t]*:?[ \t]*(?:[A-Z]{3}[ \t]*)?$/i;
 function extractAmountFils(raw: string): number | null {
   // Gather candidates from both currency positions, in message order.
-  const candidates: { index: number; value: number }[] = [];
+  const candidates: { index: number; end: number; value: number }[] = [];
   AED_AMOUNT_RE.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = AED_AMOUNT_RE.exec(raw))) {
     const at = match.index + match[0].length - match[1].length;
     if (isMaskedFigure(raw, at)) continue;
-    candidates.push({ index: match.index, value: Math.round(Number(match[1].replace(/,/g, '')) * 100) });
+    candidates.push({ index: match.index, end: match.index + match[0].length, value: Math.round(Number(match[1].replace(/,/g, '')) * 100) });
   }
   AED_SUFFIX_RE.lastIndex = 0;
   while ((match = AED_SUFFIX_RE.exec(raw))) {
@@ -4720,7 +4741,7 @@ function extractAmountFils(raw: string): number | null {
     ) continue;
     // Skip if this is the number part of a prefix match ("AED 100" also ends before "AED"? no —
     // but "AED 100.00 AED"-style doubles resolve identically, so duplicates are harmless).
-    candidates.push({ index: match.index, value: Math.round(Number(match[1].replace(/,/g, '')) * 100) });
+    candidates.push({ index: match.index, end: match.index + match[0].length, value: Math.round(Number(match[1].replace(/,/g, '')) * 100) });
   }
   candidates.sort((a, b) => a.index - b.index);
 
@@ -4741,6 +4762,7 @@ function extractAmountFils(raw: string): number | null {
     // reference that can sit between it and the figure.
     const prefix = raw.slice(Math.max(0, c.index - 56), c.index);
     if (BALANCE_PREFIX_RE.test(prefix)) continue;
+    if (BALANCE_SUFFIX_RE.test(raw.slice(c.end, c.end + 72))) continue;
     if (yieldsFeeLine && feeLine(c.index) && candidates.slice(i + 1).some((later) =>
       Number.isFinite(later.value) && later.value > 0 && later.index > c.index &&
       totalLine(later.index) &&
@@ -8191,6 +8213,184 @@ export function parseForeignAwaitingRate(
 }
 
 const FOREIGN_DOMESTIC_RAIL_RE = /\b(?:NEFT|IMPS|RTGS|UPI)\b/;
+const CHARGEBACK_DEBIT_RE =
+  /\bcharge-?\s?backs?\b(?:[^.\n]|\.\d){0,80}?\b(?:has\s+been\s+|was\s+|is\s+)?debited\s+from\s+(?:your\s+)?(?:account|a\/c|card)\b|\bdebited\b(?:[^.\n]|\.\d){0,80}?\bas\s+(?:a\s+)?charge-?\s?back(?:\s+reversal)?\b/i;
+
+/** The local grammar's selected figure, not balances or another movement's money. */
+function principalSpans(raw: string, parsed: ParsedSms): PrincipalSpan[] {
+  const spans: PrincipalSpan[] = [];
+  const code = parsed.originalCurrency;
+  const original = parsed.originalMinorUnits ?? parsed.originalAmountMinor;
+  const exponent = parsed.originalExponent ?? (code ? currencyExponent(code) : null) ?? 2;
+  const foreign = code && original !== undefined && parsed.fxSource !== 'bank';
+  const patterns = foreign
+    ? [FX_PREFIX_RE, FX_SUFFIX_RE, EXT_FX_PREFIX_RE, EXT_FX_SUFFIX_RE]
+    : [AED_AMOUNT_RE, AED_SUFFIX_RE];
+  for (const pattern of patterns) {
+    for (const match of raw.matchAll(new RegExp(pattern.source, 'gi'))) {
+      const prefix = foreign && (pattern === FX_PREFIX_RE || pattern === EXT_FX_PREFIX_RE);
+      const matchedCode = foreign ? match[prefix ? 1 : 2]?.toUpperCase() : null;
+      if (foreign && matchedCode !== code) continue;
+      if (BALANCE_PREFIX_RE.test(raw.slice(Math.max(0, match.index! - 56), match.index))) continue;
+      if (BALANCE_SUFFIX_RE.test(raw.slice(match.index! + match[0].length, match.index! + match[0].length + 72))) continue;
+      if (Math.round(Number(match[foreign && prefix ? 2 : 1].replace(/,/g, '')) * 10 ** (foreign ? exponent : 2)) ===
+        (foreign ? original : parsed.amountFils)) {
+        spans.push({ start: match.index!, end: match.index! + match[0].length });
+      }
+    }
+  }
+  // The selected grammar amount is its first non-balance occurrence. A later,
+  // equal-valued balance, fee or independent refund is not a restatement of it.
+  return spans.sort((a, b) => a.start - b.start).slice(0, 1);
+}
+
+/** Lifecycle scope reuses actual local/foreign token spans, including other amounts. */
+function principalRefundStatus(raw: string, spans: readonly PrincipalSpan[]) {
+  if (!/refund|استرداد/iu.test(raw)) return null;
+  const monetarySpans = [AED_AMOUNT_RE, AED_SUFFIX_RE, FX_PREFIX_RE, FX_SUFFIX_RE, EXT_FX_PREFIX_RE, EXT_FX_SUFFIX_RE]
+    .flatMap(pattern => [...raw.matchAll(new RegExp(pattern.source, 'gi'))]
+      .map(match => ({ start: match.index!, end: match.index! + match[0].length })));
+  return refundPrincipalStatus(raw, spans, monetarySpans);
+}
+
+function principalChargebackDebit(raw: string, span: PrincipalSpan | undefined): boolean {
+  if (!span) return false;
+  const before = raw.slice(Math.max(0, span.start - 60), span.start);
+  const after = raw.slice(span.end, span.end + 120);
+  return (/\bcharge-?\s?back(?:\s+of)?\s*$/i.test(before) &&
+    /^\s*(?:(?:to\s+(?:your\s+)?account|on\s+(?:your\s+)?card)\s+[*xX\d]{2,20}\s+)?(?:has\s+been\s+|was\s+|is\s+)?debited\s+from\s+(?:your\s+)?(?:account|a\/c|card)\b/i.test(after)) ||
+    /^\s*(?:has\s+been\s+|was\s+|is\s+)?debited\s+from\b[^.\n;]{0,60}\bas\s+(?:a\s+)?charge-?\s?back/i.test(after);
+}
+
+function principalNeedsTransferReview(raw: string, span: PrincipalSpan | undefined, parsed: ParsedSms): boolean {
+  if (!span || parsed.transferHint || parsed.cardPaymentSide) return false;
+  const before = raw.slice(Math.max(0, span.start - 80), span.start);
+  const after = raw.slice(span.end, span.end + 100);
+  // A destination-only own-account transfer does not identify the debited
+  // source account. Do not create spending on the destination's last4.
+  const destinationOnly = /\b(?:transferred|transfer\s+of)\s*$/i.test(before) &&
+    /^\s*(?:to\s+(?:your\s+)?own\s+(?:account|a\/c)\s+[*xX\d]{2,20})\b/i.test(after);
+  // A card-side receipt with no proved credit-card kind stays for Review.
+  const cardReceipt = /\bcard\s+[*xX\d]{2,20}\s+payment\s+of\s*$/i.test(before) &&
+    /^\s*(?:has\s+been\s+|was\s+)?received\b/i.test(after);
+  return destinationOnly || cardReceipt;
+}
+
+/** Reuse the existing source-field reader when multiple monetary values compete.
+ * This may withhold a mature reading, but never chooses a replacement amount.
+ */
+function hasUnsupportedPrincipal(raw: string, parsed: ParsedSms, selected: PrincipalSpan | undefined): boolean {
+  const local = [...raw.matchAll(new RegExp(AED_AMOUNT_RE.source, 'gi')),
+    ...raw.matchAll(new RegExp(AED_SUFFIX_RE.source, 'gi'))];
+  const hasForeign = FX_PREFIX_RE.test(raw) || FX_SUFFIX_RE.test(raw);
+  if (local.length < 2 && !hasForeign) return false;
+  if (/^bank fee$/i.test(parsed.merchant)) return false;
+  if (!selected) return false;
+  const clause = (span: PrincipalSpan) => {
+    const stop = (at: number) => /[\n;!?،]/.test(raw[at]) ||
+      (raw[at] === '.' && /^(?:\s|$)/.test(raw[at + 1] ?? '')) ||
+      (raw[at] === ',' && !(/\d/.test(raw[at - 1] ?? '') && /\d/.test(raw[at + 1] ?? '')));
+    let start = span.start, end = span.end;
+    while (start > 0 && !stop(start - 1)) start--;
+    while (end < raw.length && !stop(end)) end++;
+    return { before: raw.slice(start, span.start), after: raw.slice(span.end, end), text: raw.slice(start, end) };
+  };
+  const aggregate = /\b(?:this\s+(?:month|cycle|week|year|period|statement)|so\s+far|to\s+date|budget|allowance|cumulative|spending\s+room|room\s+left|headroom|can\s+still\s+be\s+withdrawn)\b|\bof\s+(?:your|the)\s+(?:[A-Z]{3}\s*[\d,.]+\s+)?(?:(?:monthly|daily|weekly|card|spending|credit)\s+)?(?:limit|budget|allowance)\b|هذا\s+الشهر|حتي\s+الان|ميزاني[هة]|اجمالي|(?:من\s+)?(?:ال)?حد\s+(?:ال)?(?:شراء|سحب|يومي|شهري|مسموح)/i;
+  const governed = (span: PrincipalSpan, own = clause(span)) => {
+    if (aggregate.test(own.text)) return false;
+    const before = own.before.trim() || raw.slice(Math.max(0, span.start - 64), span.start).trim();
+    return /(?:\b(?:purchases?|purchased|spent|debited|credited|deducted|charged|withdrawn|withdrawal|withdrew|paid|payments?|transfer(?:red)?|sent|received|deposited|deposit|refund(?:ed)?|used\s+for|amount|amt|txn|transaction|pos|remittance|reversal|fees?)(?:\s+(?:of|for|with|by|worth|amounting\s+to))?(?:\s*\([^()]{1,16}\))?|(?<![ء-ي])(?:شراء|خصم|بمبلغ|مبلغ|المبلغ|سحب|تحويل|حواله|دفع|سداد|ايداع|اضافه|استرداد|قيمه|بقيمه|بـ|ب)(?![ء-ي]))\s*[:=\-]?\s*$/i.test(before) ||
+      /^\s*(?:has\s+been|was|were|is|successfully)?\s*(?:spent|debited|credited|deducted|charged|withdrawn|paid|transferred|sent|received|deposited|refunded|reversed|used)\b/i.test(own.after);
+  };
+  const own = clause(selected);
+  if (aggregate.test(own.text)) return true;
+  const selectedIsGoverned = governed(selected, own);
+  const country = getActiveCountry();
+  // Reuse documented source conventions from the explicit country setting.
+  // A pinned ledger currency alone never resolves a three-decimal token.
+  const moneyMarket = country === 'KW' || country === 'BH' || country === 'OM' || country === 'JO' ? country : undefined;
+  const proof = extractUniversalMoney(raw, { moneyMarket });
+  const key = (value: { currency: string; minorUnits: string } | null) => value && `${value.currency}:${value.minorUnits}`;
+  const selectedKey = parsed.originalCurrency && parsed.fxSource !== 'bank'
+    ? `${parsed.originalCurrency}:${parsed.originalMinorUnits}` : `${parsed.currency}:${parsed.amountFils}`;
+  const selectedIsFee = proof.observations.some(observation => observation.role === 'fee' &&
+    observation.field.spans.some(span => span.start < selected.end && selected.start < span.end));
+  const others = proof.observations.filter(observation => key(observation.field.value) !== selectedKey &&
+    !observation.field.spans.some(span => span.start < selected.end && selected.start < span.end) &&
+    !['balance', 'credit-limit', 'statement-total', 'minimum-due', 'fee', 'tax'].includes(observation.role));
+  if (others.length === 0) return false;
+  // An explicit original/charged pair is already established by the mature FX
+  // selector. Only an unowned local limit/aggregate is rejected above.
+  if (parsed.originalCurrency && parsed.fxSource === 'bank' && selectedIsGoverned) return false;
+  return others.some(observation => {
+    const other = observation.field.spans[0];
+    if (!other) return false;
+    const statedOriginal = [observation.field.value, ...observation.field.alternatives].some(value =>
+      value !== null && value.currency === parsed.originalCurrency && Number(value.minorUnits) === parsed.originalMinorUnits &&
+      value.exponent === parsed.originalExponent);
+    if (parsed.fxSource === 'bank' && statedOriginal) {
+      const gap = other.end <= selected.start ? raw.slice(other.end, selected.start) :
+        selected.end <= other.start ? raw.slice(selected.end, other.start) : '';
+      if (/^\s*(?:[(\[/=≈~]|equivalent(?:\s+to)?|equiv\.?|approx\.?|i\.?e\.?|بما\s+يعادل|ما\s+يعادل|يعادل)\s*$/i.test(gap)) return false;
+    }
+    const context = clause(other);
+    // These are the mature parser's existing non-posting qualifiers, applied
+    // only to the OTHER amount's clause. A promotional rate, threshold or
+    // promised future movement cannot compete with a settled principal.
+    if (REWARD_RATE_RE.test(context.text) || PERCENT_PURCHASE_OFFER_RE.test(context.text) ||
+      FUTURE_PURCHASE_THRESHOLD_RE.test(context.text) || PURCHASE_THRESHOLD_OFFER_RE.test(context.text) ||
+      APPLICATION_PURCHASE_OFFER_RE.test(context.text) ||
+      new RegExp(FUTURE_CLAUSE_RE.source, 'i').test(context.text) ||
+      new RegExp(SCHEDULED_CLAUSE_RE.source, 'i').test(context.text)) return false;
+    if (aggregate.test(context.text) || BALANCE_PREFIX_RE.test(context.before) ||
+      BALANCE_SUFFIX_RE.test(context.after)) return false;
+    if (/\b(?:for|against|on|of)\s+(?:your|the)\s+(?:original\s+|earlier\s+|previous\s+)?(?:purchase|transaction|payment|charge|order)\s+(?:of|for)?\s*$|(?:لعمليه|عن\s+عمليه|من\s+عمليه)\s+(?:ال)?شراء\s+(?:بمبلغ|بقيمه)?\s*$/i.test(context.before)) return false;
+    // A fee's source states the transfer it was charged ON, not a second
+    // movement to import. Keep the independently labelled fee authoritative.
+    if (selectedIsFee && /\b(?:for|on|against)\s+(?:your|the)\s+(?:transfer|withdrawal|payment|remittance)\s+(?:of|for)?\s*$|(?:علي|على)\s+(?:حواله|تحويل|سحب)\s+(?:بمبلغ|بقيمه)?\s*$/i.test(context.before)) return false;
+    if (['pending', 'cancelled'].includes(principalRefundStatus(raw, [other]) ?? '')) return false;
+    if (/\b(?:previous|earlier|prior|original)\s+(?:purchase|refund|chargeback|transaction)\b/i.test(context.before)) return false;
+    return !selectedIsGoverned || governed(other, context);
+  });
+}
+
+interface PrincipalContext {
+  raw: string;
+  spans: PrincipalSpan[];
+  refund: ReturnType<typeof principalRefundStatus>;
+}
+
+/** Per-call only: never memoized or retained after the current parse returns. */
+function readPrincipalContext(message: string, parsed: ParsedSms): PrincipalContext | null {
+  ensureCurrencyPatterns();
+  const raw = sanitizeLocalMoney(foldOrthography(stripInvisible(message.slice(0, 4000))));
+  if (!raw) return null;
+  const spans = principalSpans(raw, parsed);
+  return { raw, spans, refund: principalRefundStatus(raw, spans) };
+}
+
+function hasUnsettledPrincipalInContext(context: PrincipalContext, parsed: ParsedSms): boolean {
+  const { raw, spans, refund } = context;
+  if (hasUnsupportedPrincipal(raw, parsed, spans[0])) return true;
+  if (principalNeedsTransferReview(raw, spans[0], parsed)) return true;
+  if (parsed.type === 'expense' && spans[0] &&
+    /(?:تم\s+اضافه|تم\s+ايداع)\s*$/i.test(raw.slice(Math.max(0, spans[0].start - 50), spans[0].start)) &&
+    /^\s*(?:الي|في)\s+بطاقتك\s+(?:ال)?ا[يئ]تماني[هة]/i.test(raw.slice(spans[0].end, spans[0].end + 70))) return true;
+  if (parsed.type === 'income' && principalChargebackDebit(raw, spans[0])) return true;
+  // These are capture refusals, not deletion proof for already saved rows.
+  // A conditional or previous-movement footer cannot veto this principal.
+  if (isIncompletePrincipal(raw, spans[0])) return true;
+  return isHedgedPrincipal(raw, spans) || refund === 'pending' || refund === 'cancelled' ||
+    (refund === 'paid-out' && parsed.type === 'income') ||
+    (parsed.type === 'expense' && (refund === 'completed' || isCompletedPrincipalRefund(raw, spans[0])));
+}
+
+/** Shared by the semantic fallback so it cannot restore a deliberately refused principal. */
+export function hasUnsettledPrincipal(message: string, parsed: ParsedSms): boolean {
+  if (parsed.kind !== 'transaction') return false;
+  const context = readPrincipalContext(message, parsed);
+  return context ? hasUnsettledPrincipalInContext(context, parsed) : false;
+}
 
 export function parseSms(
   message: string,
@@ -8223,6 +8423,24 @@ export function parseSms(
     }
   }
   if (!parsed) return null;
+  if (parsed.kind === 'transaction') {
+    const context = readPrincipalContext(message, parsed);
+    if (context) {
+      const { raw, spans, refund } = context;
+      if (refund === 'paid-out' && parsed.type === 'income') {
+        parsed = { ...parsed, type: 'expense', transferHint: false, categoryGuess: 'other', categoryDeliberate: true };
+      } else if (parsed.type === 'expense' && (refund === 'completed' || isCompletedPrincipalRefund(raw, spans[0]))) {
+        parsed = { ...parsed, type: 'income', transferHint: false, categoryGuess: 'other', categoryDeliberate: true,
+          merchant: parsed.merchant.replace(/\s*(?:،|,)?\s*(?:و?تم\s+)?(?:استرداد|استرجاع|إرجاع|ارجاع)(?:ها|ه)\s*$/u, '').trim() || 'Refund' };
+      }
+      // A chargeback that explicitly left the account is not a refund credit.
+      if (parsed.type === 'income' && principalChargebackDebit(raw, spans[0]) && CHARGEBACK_DEBIT_RE.test(raw)) {
+        parsed = { ...parsed, type: 'expense', merchant: 'Chargeback reversal',
+          categoryGuess: 'other', categoryDeliberate: true, transferHint: false };
+      }
+      if (hasUnsettledPrincipalInContext(context, parsed)) return null;
+    }
+  }
   // An Indian domestic-rail (NEFT/IMPS/RTGS/UPI) movement in a foreign
   // currency is an account at a bank abroad: "HSBC" is a UAE sender too, and an
   // HSBC India credit of INR 3,200 was booked as AED income at the offline

@@ -67,12 +67,12 @@
     "@react-navigation/elements": "^2.9.10",
     "@react-navigation/native": "^7.1.33",
     "@scure/base": "^2.2.0",
-    "expo": "~55.0.31",
+    "expo": "~55.0.32",
     "expo-build-properties": "~55.0.18",
     "expo-clipboard": "~55.0.17",
     "expo-constants": "~55.0.16",
     "expo-crypto": "~55.0.19",
-    "expo-dev-client": "~55.0.40",
+    "expo-dev-client": "~55.0.41",
     "expo-device": "~55.0.21",
     "expo-document-picker": "~55.0.17",
     "expo-file-system": "~55.0.26",
@@ -88,7 +88,7 @@
     "expo-print": "~55.0.19",
     "expo-router": "~55.0.18",
     "expo-secure-store": "~55.0.18",
-    "expo-sharing": "~55.0.24",
+    "expo-sharing": "~55.0.25",
     "expo-splash-screen": "~55.0.25",
     "expo-sqlite": "~55.0.20",
     "expo-status-bar": "~55.0.6",
@@ -120,6 +120,9 @@
     "playwright": "^1.62.0",
     "pod-install": "1.1.0",
     "typescript": "~5.9.2"
+  },
+  "overrides": {
+    "decode-uri-component": "0.5.1"
   },
   "private": true,
   "expo": {

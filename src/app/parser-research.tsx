@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import { Redirect } from 'expo-router';
 import { useRouter } from '@/hooks/use-app-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -43,6 +44,11 @@ import { useStore } from '@/lib/store';
 const REPORT_PREVIEW_PAGE_CHARS = 2_000;
 
 export default function ParserResearchScreen() {
+  if (!isParserResearchBuild()) return <Redirect href="/settings-data" />;
+  return <InternalParserResearchScreen />;
+}
+
+function InternalParserResearchScreen() {
   const router = useRouter();
   const theme = useTheme();
   const { state } = useStore();

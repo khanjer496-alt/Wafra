@@ -92,10 +92,11 @@ test('where the message text is never kept there is no count to claim, only the 
   assert.equal(s.find('accuracy-title').props.body, null);
   assert.equal(s.find('accuracy-clean'), undefined, 'no green verdict without the text to check against');
   assert.ok(strings(s.find('accuracy-actions')).join(' ').includes(i18n.t('formatsNotKeptIosLocal')));
-  assert.ok(s.find('accuracy-share-cards'), 'the card diagnostic stays offered');
+  assert.equal(s.find('accuracy-share-cards'), undefined, 'customer screens never export card diagnostics');
+  assert.equal(s.find('accuracy-share-unread'), undefined);
 });
 
-test('every sheet action is kept and still goes where it went', () => {
+test('local correction stays available without diagnostic sharing actions', () => {
   const transactions = [
     row('a', 'Card purchase', 'other', 'Purchase of AED 10.00 at XYZ 123', { parseConfidence: 'low' }),
     row('c', 'Mystery Shop', 'other', 'AED 5.00 spent at MYSTERY SHOP', { parseConfidence: 'low' }),
@@ -106,7 +107,8 @@ test('every sheet action is kept and still goes where it went', () => {
   sort.props.onPress();
   assert.deepEqual(s.events, [['push', '/categorise']]);
   assert.ok(s.find('accuracy-coverage'));
-  assert.ok(s.find('accuracy-share-cards'));
+  assert.equal(s.find('accuracy-share-cards'), undefined);
+  assert.equal(s.find('accuracy-share-unread'), undefined);
 });
 
 test('coverage tiles stack at large text', () => {

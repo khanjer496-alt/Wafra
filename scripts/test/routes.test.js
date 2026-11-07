@@ -68,18 +68,13 @@ ok('Wallet opens cards by serializable account ID on a normal row press',
   ));
 
 {
-  // Improve Accuracy has two different jobs. A truly unread bank format is
-  // useful parser evidence and may be shared after masking. A private merchant
-  // nickname is not a global grammar rule: it stays on-device and belongs in
-  // the bulk categorisation flow. Mixing them produced reports full of names
-  // that the parser had already read correctly, including rows the owner had
-  // already categorised.
+  // Accuracy is a local review/correction flow in the public app. It never
+  // shares retained messages or card diagnostic reports.
   const accuracy = fs.readFileSync(path.join(APP, 'accuracy.tsx'), 'utf8');
   ok('Improve Accuracy sends named uncategorised shops to the local sorter',
     /uncategorized\.length > 0[\s\S]{0,300}router\.push\('\/categorise'\)/.test(accuracy));
-  ok('Improve Accuracy shares only genuinely unread formats',
-    /section\(t\('accuracyShareUnread'\), unread\)/.test(accuracy) &&
-      !/accuracyShareUncategorized/.test(accuracy));
+  ok('Improve Accuracy has no diagnostic sharing actions',
+    !/shareUnread|shareCards|Share\.share|shareText\(/.test(accuracy));
 
   const feedback = fs.readFileSync(path.join(APP, 'feedback.tsx'), 'utf8');
   ok('Parser Research remains gated to internal and test builds',
@@ -298,7 +293,7 @@ function sources(dir = SRC) {
   // was its immediate neighbour.
   ok('erase stands after everything else on the screen',
     at("t('eraseAll')") > at("publicLinkRow(t('supportWebsite')") &&
-      at("t('eraseAll')") > at('<TesterDiagnosticsControl />') &&
+      !settings.includes('<TesterDiagnosticsControl') &&
       at("t('eraseAll')") > at("t('sortShops')"));
 
   // Every gated() call site carries the lock, or a free user learns which

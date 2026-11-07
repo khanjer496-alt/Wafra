@@ -38,7 +38,7 @@ import { onboardingECopy } from '@/lib/onboarding-e-copy';
 import { compactPattern, patternSize, type PatternTile } from '@/lib/pattern';
 import { configuredPublicUrl } from '@/lib/public-links';
 import { PLAN_ORDER, planChargeTimingKey, planPeriod } from '@/lib/pro-plans';
-import { billingStore, yearlySavingPercent, type ProPlan } from '@/lib/purchases';
+import { billingStore, type ProPlan } from '@/lib/purchases';
 
 /** How strongly the pattern shows behind the paywall's words, per scheme. */
 const BACKDROP_LIGHT = 0.42;
@@ -80,7 +80,8 @@ function useOnboardingCheckout(enabled: boolean, onPurchased: () => void) {
     if (id !== request.current) return;
     setOffers(loaded);
     setState(loaded.length > 0 ? 'ready' : 'unavailable');
-    setPlan((current) => loaded.some((offer) => offer.plan === current) ? current : loaded[0]?.plan ?? current);
+    setPlan((current) => loaded.some((offer) => offer.plan === current) ? current
+      : PLAN_ORDER.find((candidate) => loaded.some((offer) => offer.plan === candidate)) ?? current);
   }, [checkoutReady, enabled]);
 
   useEffect(() => {
@@ -140,19 +141,12 @@ function useOnboardingCheckout(enabled: boolean, onPurchased: () => void) {
   return { checkoutReady, offers, state, plan, setPlan, selected, busy, notice, setNotice, purchase, restore, load };
 }
 
-/**
- * One plan. The yearly card adds "Most popular", the saving against a year of
- * weekly payments (from the store's own two prices, absent when it cannot be
- * compared) and the store SDK's per-week figure, all smaller than the billed
- * price, which stays the clearest number on the card.
- */
-function PlanCard({ offer, plan, selected, onPress, palette, savingPercent }: {
+function PlanCard({ offer, plan, selected, onPress, palette }: {
   offer: ProPlanOffer | null;
   plan: ProPlan;
   selected: boolean;
   onPress: () => void;
   palette: BandPalette;
-  savingPercent: number | null;
 }) {
   const words = onboardingECopy(useLanguage());
   const label = plan === 'yearly' ? words.planYearly : words.planWeekly;
@@ -164,13 +158,8 @@ function PlanCard({ offer, plan, selected, onPress, palette, savingPercent }: {
       <ThemedText type="meta" style={{ color: palette.onBandSecondary }}>{t('priceUnavailable')}</ThemedText>
     </View>;
   }
-  const yearly = plan === 'yearly';
-  const saving = yearly && savingPercent !== null ? tf('proSavePercent', { percent: savingPercent }) : null;
-  const perWeek = yearly && offer.weeklyPriceString ? tf('proYearlyPerWeek', { price: offer.weeklyPriceString }) : null;
-  const spoken = [label, yearly ? t('proMostPopular') : null, saving, `${offer.priceString} ${period}`, perWeek]
-    .filter(Boolean).join(' · ');
-  return <Pressable accessibilityRole="radio" accessibilityState={{ checked: selected }}
-    accessibilityLabel={spoken} testID={`onboarding-plan-${plan}`}
+  return <Pressable accessibilityRole="radio" accessibilityState={{ selected, checked: selected }}
+    accessibilityLabel={`${label} · ${offer.priceString} ${period}`} testID={`onboarding-plan-${plan}`}
     onPress={onPress}
     style={({ pressed }) => [styles.plan, {
       borderColor: selected ? palette.accent : palette.bandRule,
@@ -182,14 +171,8 @@ function PlanCard({ offer, plan, selected, onPress, palette, savingPercent }: {
       {selected ? <View style={[styles.radioDot, { backgroundColor: palette.accent }]} /> : null}
     </View>
     <ThemedText type="smallBold" style={{ color: palette.onBand }}>{label}</ThemedText>
-    {yearly ? <ThemedText type="meta" style={{ color: palette.accentOnBand }} testID="onboarding-plan-yearly-popular">
-      {saving ? `${t('proMostPopular')} · ${saving}` : t('proMostPopular')}
-    </ThemedText> : null}
     <ThemedText type="smallBold" tabular style={{ color: palette.onBand }}>{offer.priceString}</ThemedText>
     <ThemedText type="meta" style={{ color: palette.onBandSecondary }}>{period}</ThemedText>
-    {perWeek ? <ThemedText type="meta" tabular style={{ color: palette.onBandSecondary }} testID="onboarding-plan-yearly-per-week">
-      {perWeek}
-    </ThemedText> : null}
   </Pressable>;
 }
 
@@ -375,8 +358,6 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, ca
   const dim = paywallBackdropOpacity(band.scheme);
   const backdrop_ = useBackdropSettle(arrivedFrom === 'pattern', dim);
   const timeline = trialTimeline(trialDays);
-  // From the two prices this storefront returned; null leaves the saving out.
-  const savingPercent = checkout.state === 'ready' ? yearlySavingPercent(checkout.offers) : null;
   const store = billingStore();
   const privacyUrl = configuredPublicUrl('privacyPolicyUrl');
   const termsUrl = configuredPublicUrl('termsOfUseUrl');
@@ -439,10 +420,9 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, ca
       </View> : null}
       {checkout.state === 'loading' ? <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{t('priceLoading')}</ThemedText>
         : checkout.state === 'ready' ? <>
-          <View style={[styles.plans, largeText && styles.stacked]} accessibilityRole="radiogroup" testID="onboarding-plans">
+          <View style={styles.plans} accessibilityRole="radiogroup" testID="onboarding-plans">
             {PLAN_ORDER.map((plan) => <PlanCard key={plan} plan={plan} palette={band}
               offer={checkout.offers.find((offer) => offer.plan === plan) ?? null}
-              savingPercent={savingPercent}
               selected={checkout.plan === plan} onPress={() => checkout.setPlan(plan)} />)}
           </View>
           {checkout.selected ? <ThemedText type="meta" style={{ color: band.onBandSecondary }}>
@@ -450,9 +430,13 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, ca
             {' '}
             {store === 'appStore' ? t('subscriptionRenewalTermsIos') : store === 'play' ? t('subscriptionRenewalTermsAndroid') : t('proStoreConfirmsPrice')}
           </ThemedText> : null}
-        </> : <ThemedText type="meta" style={{ color: band.onBandSecondary }} testID="onboarding-plans-unavailable">
-          {checkout.checkoutReady ? t('priceUnavailableBody') : t('playOnlyBody')}
-        </ThemedText>}
+        </> : <View testID="onboarding-plans-unavailable">
+          <ThemedText type="meta" style={{ color: band.onBandSecondary }}>
+            {checkout.checkoutReady ? t('priceUnavailableBody') : t('playOnlyBody')}
+          </ThemedText>
+          {checkout.checkoutReady ? <ETextAction palette={band} label={t('retryPrices')}
+            onPress={() => void checkout.load()} disabled={busy || preview} testID="onboarding-plans-retry" /> : null}
+        </View>}
       {checkout.notice ? <View accessibilityRole="alert" accessibilityLiveRegion="polite"
         style={[styles.notice, { backgroundColor: band.sheet }]} testID="onboarding-paywall-notice">
         <ThemedText type="smallBold" style={{ color: band.text }}>{checkout.notice.title}</ThemedText>
@@ -487,8 +471,9 @@ const styles = StyleSheet.create({
   timeline: { flexDirection: 'row', gap: 8 },
   stacked: { flexDirection: 'column' },
   stage: { flex: 1, borderRadius: 16, padding: 12, gap: 4 },
-  plans: { flexDirection: 'row', gap: 8 },
-  plan: { flex: 1, minHeight: 112, borderRadius: 20, padding: 14, gap: 4, borderWidth: 1.5 },
+  // Full-width cards leave room for localized prices and accessibility text sizes.
+  plans: { flexDirection: 'column', gap: 8 },
+  plan: { width: '100%', minHeight: 112, borderRadius: 20, padding: 14, gap: 4, borderWidth: 1.5 },
   radio: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
   radioDot: { width: 10, height: 10, borderRadius: 5 },
   notice: { borderRadius: 16, padding: 14, gap: 4 },

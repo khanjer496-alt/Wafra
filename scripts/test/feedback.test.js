@@ -623,8 +623,27 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
    * through on purpose: after either, the report may or may not have arrived,
    * and "keep a copy" is the only honest thing to say.
    */
-  const transport = code(read('src/lib/feedback-transport.ts'));
-  const thrown = [...transport.matchAll(/new FeedbackSendError\([^,]+,\s*'([a-z_]+)'/g)].map((m) => m[1]);
+  const transport = ts.createSourceFile('feedback-transport.ts', read('src/lib/feedback-transport.ts'),
+    ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const causes = [];
+  const internalTransports = new Set(['submitParserResearchFeedback', 'submitTesterDiagnostics']);
+  const collectCauses = (node, owner = '<module>') => {
+    if (ts.isFunctionDeclaration(node) && node.name) owner = node.name.text;
+    if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) &&
+        node.expression.text === 'FeedbackSendError' && node.arguments?.[1] && ts.isStringLiteral(node.arguments[1])) {
+      causes.push({ code: node.arguments[1].text, owner });
+    }
+    ts.forEachChild(node, child => collectCauses(child, owner));
+  };
+  collectCauses(transport);
+  // Build-policy refusals belong to the two guarded internal entry points.
+  // A disabled refusal added to ordinary feedback must still fail coverage.
+  const disabled = causes.filter(cause => cause.code === 'disabled');
+  ok('disabled refusals are confined to the guarded internal transports',
+    disabled.length === internalTransports.size &&
+      [...internalTransports].every(owner => disabled.some(cause => cause.owner === owner)));
+  const thrown = causes.filter(cause => cause.code !== 'disabled' || !internalTransports.has(cause.owner))
+    .map(cause => cause.code);
   const fallThrough = new Set(['bad_response', 'no_id']);
   ok('the transport still names its causes', thrown.length >= 4, thrown.join(', '));
   const unanswered = thrown.filter(

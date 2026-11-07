@@ -44,6 +44,17 @@ const ok = (name, condition, detail = '') => {
   };
 
   ok('canonical pricing is valid', validateStorePricing(pricing, metadata).length === 0);
+  for (const [plan, period] of [['weekly', 'P1W'], ['yearly', 'P1Y']]) {
+    const wrongPeriod = clone(pricing);
+    wrongPeriod.products[plan].billingPeriod = 'P1M';
+    ok(`${plan} pricing rejects a monthly billing cadence`,
+      validateStorePricing(wrongPeriod, metadata).some(error => error.includes(`billing period must be ${period}`)));
+  }
+  const unapprovedDraft = clone(pricing);
+  unapprovedDraft.approvalStatus = 'pending-commercial-approval';
+  unapprovedDraft.products.weekly.approvedBasePrice.publisherApproved = false;
+  ok('a pending draft cannot assert a base price without publisher approval',
+    validateStorePricing(unapprovedDraft, metadata).some(error => error.includes('publisher-approved base price')));
   const publisherOnly = approvedPricing();
   publisherOnly.approvalStatus = 'publisher-approved-pending-store-readback';
   for (const product of Object.values(publisherOnly.products)) product.readBackEvidence = null;

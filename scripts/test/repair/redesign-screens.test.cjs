@@ -35,7 +35,7 @@ test('Pro copy is paired and sells only what Pro gates', () => {
   const { PRO_COPY } = load(path.join(root, 'src/lib/pro-copy.ts'));
   assertParity(PRO_COPY.en, PRO_COPY.ar);
   const pro = read('src/app/pro.tsx');
-  // The Pro screen itself names no saving: the plan rows own it.
+  // Straight billed-price copy: no popularity or savings claims.
   assert.doesNotMatch(pro, /proSavePercent|SAVE \d|save\s*\{/);
   // Insights and subscriptions are free, so they are not a Pro benefit.
   assert.doesNotMatch(pro, /featInsights/);
@@ -44,12 +44,10 @@ test('Pro copy is paired and sells only what Pro gates', () => {
   assert.match(pro, /autoCaptureMethod\(\) === 'inboxScan'[\s\S]{0,200}copy\.notificationsTitle[\s\S]{0,200}copy\.historyTitle/);
   assert.match(read('src/lib/purchases.ts'), /export function requiresPro\(method: CaptureMethod\): boolean \{\s*return method !== 'manual';/);
   // Design language E: the plan radios are shared with the in-context Pro
-  // sheet. The only saving either names is the one computed from the
-  // storefront's own two prices, on the yearly row.
+  // sheet. Both surfaces show the store's billed price and period plainly.
   const planOptions = read('src/components/pro/pro-plan-options.tsx');
   assert.match(planOptions, /accessibilityRole="radio"/);
-  assert.match(planOptions, /yearly && savingPercent !== null \? tf\('proSavePercent', \{ percent: savingPercent \}\)/);
-  assert.equal((planOptions.match(/proSavePercent/g) ?? []).length, 1);
+  assert.doesNotMatch(planOptions, /proSavePercent|proMostPopular|proYearlyPerWeek/);
   assert.doesNotMatch(read('src/components/pro/pro-sheet.tsx'), /proSavePercent|SAVE \d|save\s*\{/);
   assert.match(pro, /<ProPlanOptions checkout=\{checkout\}/);
   assert.match(pro, /t\('proOutcomeTitle'\)/);

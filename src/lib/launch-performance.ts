@@ -86,7 +86,8 @@ export function getLaunchMetrics(): LaunchMetric[] {
 }
 
 export function isInternalLaunchDiagnosticsEnabled(): boolean {
-  return process.env.EXPO_PUBLIC_WAFRA_INTERNAL_DIAGNOSTICS === '1';
+  return typeof __DEV__ !== 'undefined' && __DEV__ &&
+    process.env.EXPO_PUBLIC_WAFRA_INTERNAL_DIAGNOSTICS === '1';
 }
 
 export function serializeLaunchMetrics(): string {

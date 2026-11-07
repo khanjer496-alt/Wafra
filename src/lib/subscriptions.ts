@@ -1212,37 +1212,56 @@ export function detectSubscriptionsCooperatively(
   // One shared projection per immutable ledger snapshot. A tab losing focus no
   // longer aborts the underlying worker and makes the next visit start from row
   // zero; callers simply ignore the eventual value when their own view is gone.
-  const promise = new Promise<Subscription[] | null>((resolve) => {
+  let settled = false;
+  const release = () => {
+    settled = true;
+    subscriptionDetectionInFlight = subscriptionDetectionInFlight.filter((entry) => entry !== flight);
+  };
+  const promise = new Promise<Subscription[] | null>((resolve, reject) => {
+    const fail = (error: unknown) => {
+      if (settled) return;
+      release();
+      reject(error);
+    };
     const runSlice = () => {
-      if (flight.superseded && waiters.every((waiter) => waiter())) {
-        resolve(null);
-        return;
+      if (settled) return;
+      try {
+        if (flight.superseded && waiters.every((waiter) => waiter())) {
+          release();
+          resolve(null);
+          return;
+        }
+        const startedAt = Date.now();
+        let step = worker.next();
+        while (!step.done && Date.now() - startedAt < SUBSCRIPTION_DETECTION_SLICE_MS) {
+          step = worker.next();
+        }
+        if (step.done) {
+          const value = cacheSubscriptionDetection(
+            transactions,
+            notSubscriptions,
+            todayKey,
+            liveAccounts,
+            internalTransfers,
+            step.value,
+          );
+          release();
+          resolve(value);
+          return;
+        }
+        // A later slice runs outside the Promise constructor. Settle this
+        // owned job on either worker or scheduling failure so future callers
+        // can retry instead of joining a promise that can never complete.
+        void waitForForegroundHistoryIdle(SUBSCRIPTION_DETECTION_YIELD_MS).then(runSlice, fail);
+      } catch (error) {
+        fail(error);
       }
-      const startedAt = Date.now();
-      let step = worker.next();
-      while (!step.done && Date.now() - startedAt < SUBSCRIPTION_DETECTION_SLICE_MS) {
-        step = worker.next();
-      }
-      if (step.done) {
-        resolve(cacheSubscriptionDetection(
-          transactions,
-          notSubscriptions,
-          todayKey,
-          liveAccounts,
-          internalTransfers,
-          step.value,
-        ));
-        return;
-      }
-      void waitForForegroundHistoryIdle(SUBSCRIPTION_DETECTION_YIELD_MS).then(runSlice);
     };
     runSlice();
-  }).finally(() => {
-    subscriptionDetectionInFlight = subscriptionDetectionInFlight.filter((entry) => entry.promise !== promise);
   });
   flight.promise = promise;
 
-  subscriptionDetectionInFlight.push(flight);
+  if (!settled) subscriptionDetectionInFlight.push(flight);
   return promise.then((value) => value === null || cancelled() ? null : value);
 }
 

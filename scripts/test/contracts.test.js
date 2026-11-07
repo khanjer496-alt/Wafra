@@ -459,9 +459,11 @@ function ktSources(dir) {
   );
   ok('the paywall builds no English sentence inline', suspects.length === 0, suspects.slice(0, 3));
 
-  ok('the yearly saving is derived from the store prices, not written down',
-    /yearlySavingPercent\(offers\)/.test(read('src/hooks/use-pro-checkout.ts')) &&
-      /yearlySavingPercent\(checkout\.offers\)/.test(read('src/components/onboarding/e-paywall.tsx')));
+  ok('the plan rows show storefront prices without popularity or saving claims',
+    /offer\.priceString/.test(read('src/components/pro/pro-plan-options.tsx')) &&
+      /offer\.priceString/.test(read('src/components/onboarding/e-paywall.tsx')) &&
+      !/proMostPopular|proSavePercent|proYearlyPerWeek/.test(
+        read('src/components/pro/pro-plan-options.tsx') + read('src/components/onboarding/e-paywall.tsx')));
   ok('no hard-coded saving survives in the copy',
     !/\d+ months free|[Ss]ave \d+\s?%/.test(fs.readFileSync(path.join(ROOT, 'src/lib/i18n.ts'), 'utf8')));
 
@@ -1743,9 +1745,9 @@ for (const rel of ['src/app/cards.tsx']) {
   // Every call site that builds subscriptions or the export from a full
   // AppState has to derive both sets and thread them through, or the merchant
   // it drops is the one on this list, not the one under test above.
-  for (const [rel, callNeedle] of [
+  for (const [rel, callNeedle, owner = 'state'] of [
     // The expense report moved with the other exports to Settings → Data and help.
-    ['src/app/settings-data.tsx', 'reportExpenses(expenses,from,to,liveAccounts,internal)'],
+    ['src/app/settings-data.tsx', 'reportExpenses(expenses,from,to,liveAccounts,internal)', 'snapshot'],
     ["src/app/(tabs)/bills.tsx", 'detectSubscriptions(state.transactions,state.notSubscriptions,now,liveAccounts,internal)'],
     ['src/lib/leaving-soon.ts', 'detectSubscriptions(state.transactions,state.notSubscriptions,today,liveAccounts,internal)'],
     // The planning half of the reminder set moved out of notifications.ts into
@@ -1758,8 +1760,8 @@ for (const rel of ['src/app/cards.tsx']) {
     const text = read(rel);
     const flat = text.replace(/\s/g, '');
     ok(`${rel} derives the live-account and internal-transfer sets`,
-      /liveAccountIds\(state\.accounts\)/.test(text) &&
-        /internalTransferIdsForState\(state\)/.test(text));
+      flat.includes(`liveAccountIds(${owner}.accounts)`) &&
+        flat.includes(`internalTransferIdsForState(${owner})`));
     ok(`${rel} threads both sets into its subscription/export call`,
       flat.includes(callNeedle), rel);
   }

@@ -838,8 +838,8 @@ const S = {
     ar: 'راجع تصنيفات المتاجر ودفعات البنك غير الواضحة',
   },
   improveAccuracyHint: {
-    en: 'Messages still needing attention. Share formats with no merchant so the parser can improve. For a named shop, sort it once on this phone and Wafra remembers your choice for past and future entries. Long account numbers are masked.',
-    ar: 'رسائل ما زالت تحتاج إلى مراجعة. شارك الصيغ التي بلا اسم متجر لتحسين القارئ. أما المتجر المعروف فصنّفه مرة واحدة على هذا الهاتف، وستتذكر وفرة اختيارك للعمليات السابقة والقادمة. الأرقام الطويلة مخفية.',
+    en: 'Messages still needing attention. Open an entry to review it. For a named shop, sort it once on this phone and Wafra remembers your choice for past and future entries. Long account numbers are masked.',
+    ar: 'رسائل ما زالت تحتاج إلى مراجعة. افتح العملية لمراجعتها. أما المتجر المعروف فصنّفه مرة واحدة على هذا الهاتف، وستتذكر وفرة اختيارك للعمليات السابقة والقادمة. الأرقام الطويلة مخفية.',
   },
   improveAccuracySettingsDetail: {
     en: 'Review bank-message formats Wafra could not read confidently',
@@ -865,16 +865,16 @@ const S = {
     ar: 'تقرير الدقة · لا يُحتفظ بنص الرسالة المعالَجة في السجل؛ وتنتهي صلاحية السجلات المعلّقة المحمية بعد ٣٠ يوماً وتُزال عند الوصول التالي إلى الصف',
   },
   formatsNotKeptRelay: {
-    en: 'Rows delivered by the old Wafra Capture relay never included Message text, so they cannot appear in this list and an empty list does not audit them. The card diagnostic below still works: it reports what the ledger did with every card row.',
-    ar: 'لم تتضمن العمليات التي سلّمها مُرحّل Wafra Capture القديم نص الرسالة، لذلك لا يمكن أن تظهر في هذه القائمة ولا يعني خلوّها أن تلك العمليات خضعت للتدقيق. أما تشخيص البطاقات بالأسفل فيعرض ما فعله السجل بكل عملية مرتبطة ببطاقة.',
+    en: 'Rows delivered by the old Wafra Capture relay never included Message text, so they cannot appear in this list and an empty list does not audit them.',
+    ar: 'لم تتضمن العمليات التي سلّمها مُرحّل Wafra Capture القديم نص الرسالة، لذلك لا يمكن أن تظهر في هذه القائمة ولا يعني خلوّها أن تلك العمليات خضعت للتدقيق.',
   },
   formatsNotKeptIosLocal: {
-    en: 'Local capture parses new bank messages on this iPhone. Successfully processed raw text is deleted before the ledger or accuracy report retains it; protected pending records expire after 30 days and are removed on the next queue access. Rows from the old Wafra Capture relay never included Message text, so this list cannot audit those legacy rows. The card diagnostic below still works for every card row.',
-    ar: 'يعالج الالتقاط المحلي رسائل البنك الجديدة على هذا الآيفون. يُحذف النص الخام بعد نجاح المعالجة قبل أن يحتفظ به السجل أو تقرير الدقة؛ وتنتهي صلاحية السجلات المعلّقة المحمية بعد ٣٠ يوماً وتُزال عند الوصول التالي إلى الصف. لم تتضمن عمليات مُرحّل Wafra Capture القديم نص الرسالة، لذلك لا تستطيع هذه القائمة تدقيق تلك العمليات القديمة. ويعمل تشخيص البطاقات بالأسفل لكل عملية مرتبطة ببطاقة.',
+    en: 'Local capture parses new bank messages on this iPhone. Successfully processed raw text is deleted before the ledger or accuracy report retains it; protected pending records expire after 30 days and are removed on the next queue access. Rows from the old Wafra Capture relay never included Message text, so this list cannot audit those legacy rows.',
+    ar: 'يعالج الالتقاط المحلي رسائل البنك الجديدة على هذا الآيفون. يُحذف النص الخام بعد نجاح المعالجة قبل أن يحتفظ به السجل أو تقرير الدقة؛ وتنتهي صلاحية السجلات المعلّقة المحمية بعد ٣٠ يوماً وتُزال عند الوصول التالي إلى الصف. لم تتضمن عمليات مُرحّل Wafra Capture القديم نص الرسالة، لذلك لا تستطيع هذه القائمة تدقيق تلك العمليات القديمة.',
   },
   formatsNotKeptPrivate: {
-    en: 'Private Mode removes diagnostic Message text from the ledger and prevents new ledger entries from retaining it, so this list cannot identify misread formats. Local capture still works; protected pending records expire after 30 days and are removed on the next queue access. The card diagnostic below still reports what the ledger did with every card row.',
-    ar: 'يحذف الوضع الخاص نص الرسالة التشخيصي من السجل ويمنع العمليات الجديدة من الاحتفاظ به، لذلك لا تستطيع هذه القائمة تحديد الصيغ التي أسيءت قراءتها. ويستمر الالتقاط المحلي؛ وتنتهي صلاحية السجلات المعلّقة المحمية بعد ٣٠ يوماً وتُزال عند الوصول التالي إلى الصف. أما تشخيص البطاقات بالأسفل فيعرض ما فعله السجل بكل عملية مرتبطة ببطاقة.',
+    en: 'Private Mode removes diagnostic Message text from the ledger and prevents new ledger entries from retaining it, so this list cannot identify misread formats. Local capture still works; protected pending records expire after 30 days and are removed on the next queue access.',
+    ar: 'يحذف الوضع الخاص نص الرسالة التشخيصي من السجل ويمنع العمليات الجديدة من الاحتفاظ به، لذلك لا تستطيع هذه القائمة تحديد الصيغ التي أسيءت قراءتها. ويستمر الالتقاط المحلي؛ وتنتهي صلاحية السجلات المعلّقة المحمية بعد ٣٠ يوماً وتُزال عند الوصول التالي إلى الصف.',
   },
   // ── the phone measuring its own parser ──
   //
@@ -1415,8 +1415,8 @@ const S = {
     ar: 'لا تحتفظ حالة الالتقاط والتنبيه في هذه الشاشة إلا بأعداد خالية من بيانات المصدر، ولا تحفظان نص الرسالة أو اسم المرسل. تبقى سجلات الرسائل المعلّقة في صف الالتقاط المحلي المحمي، وهو صف مشفّر قصير الأجل. وتنتهي صلاحيتها بعد ٣٠ يوماً وتُزال عند تشغيل الالتقاط أو فحص وفرة للصف في المرة التالية. ويستمر الالتقاط المحلي وفق تفضيلاتك المحفوظة.',
   },
   privacySecurityExact: {
-    en: 'Automatic capture is optional. Android SMS alerts are processed on this phone, and local iPhone capture never uploads SMS content. However, an old Wafra Shortcut automation can continue uploading the bank messages you selected until you remove it or Wafra confirms retirement. Wafra cannot sign in to a bank, directly access your Messages inbox, reply, approve a payment or move money. For separately connected email, PDF or CSV imports, the encrypted relay parses them, discards raw text immediately, and returns only structured rows.',
-    ar: 'الالتقاط التلقائي اختياري. تُعالج تنبيهات رسائل أندرويد على هذا الهاتف، ولا يرفع الالتقاط المحلي على الآيفون محتوى الرسائل. لكن أتمتة الاختصار القديمة «Wafra Capture» قد تستمر في رفع رسائل البنوك التي اخترتها إلى أن تحذفها أو تؤكد وفرة اكتمال إيقافها. لا تستطيع وفرة تسجيل الدخول إلى بنك أو الوصول مباشرةً إلى صندوق رسائلك أو الرد أو الموافقة على دفعة أو نقل الأموال. أما واردات البريد أو PDF أو CSV المربوطة منفصلةً، فيحللها المرحّل المشفّر ويحذف النص فوراً ويعيد عمليات منظّمة فقط.',
+    en: 'Automatic capture is optional. Android SMS alerts are processed on this phone, and local iPhone capture never uploads SMS content. However, an old Wafra Shortcut automation can continue uploading the bank messages you selected until you remove it or Wafra confirms retirement. On iPhone, Wafra cannot directly access the Messages inbox. Wafra cannot sign in to a bank, reply, approve a payment or move money. For separately connected email, PDF or CSV imports, the encrypted relay parses them, discards raw text immediately, and returns only structured rows.',
+    ar: 'الالتقاط التلقائي اختياري. تُعالج تنبيهات رسائل أندرويد على هذا الهاتف، ولا يرفع الالتقاط المحلي على الآيفون محتوى الرسائل. لكن أتمتة الاختصار القديمة «Wafra Capture» قد تستمر في رفع رسائل البنوك التي اخترتها إلى أن تحذفها أو تؤكد وفرة اكتمال إيقافها. على الآيفون، لا تستطيع وفرة الوصول مباشرةً إلى صندوق الرسائل. ولا تستطيع وفرة تسجيل الدخول إلى بنك أو الرد أو الموافقة على دفعة أو نقل الأموال. أما واردات البريد أو PDF أو CSV المربوطة منفصلةً، فيحللها المرحّل المشفّر ويحذف النص فوراً ويعيد عمليات منظّمة فقط.',
   },
   country: { en: 'Country', ar: 'الدولة' },
   language: { en: 'Language', ar: 'اللغة' },

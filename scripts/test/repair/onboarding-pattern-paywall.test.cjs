@@ -13,8 +13,9 @@ const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 const plain = (value) => JSON.parse(JSON.stringify(value));
 const flat = (style) => Object.assign({}, ...[style].flat(Infinity).filter(Boolean));
 
-function setup({ language = 'en', theme = 'dark', motion = 'reduced', platform = 'ios', states, appState = 'active' } = {}) {
-  const h = createHarness({ platform, theme, language, states });
+function setup({ language = 'en', theme = 'dark', motion = 'reduced', platform = 'ios', states, appState = 'active',
+  largeText = false, width = 390, checkoutReady = true } = {}) {
+  const h = createHarness({ platform, theme, language, states, largeText, width });
   const effects = [];
   const started = [];
   const stopped = [];
@@ -57,10 +58,11 @@ function setup({ language = 'en', theme = 'dark', motion = 'reduced', platform =
   h.deps['@/components/onboarding/e-motion'] = { useStepPhase: () => ({ leaving: false, paint: stepFade }), STEP_ARRIVE_DELAY_MS: 120 };
   h.deps['@/lib/onboarding-e'] = { trialTimeline: (days) => days > 0 ? [{ key: 'today', day: 0 }, { key: 'end', day: days }] : [] };
   h.deps['@/lib/public-links'] = { configuredPublicUrl: (key) => `https://example.test/${key}` };
-  h.deps['@/lib/purchases'] = { ...h.deps['@/lib/purchases'], billingStore: () => 'appStore', yearlySavingPercent: () => null };
+  h.deps['@/lib/purchases'] = { ...h.deps['@/lib/purchases'], billingStore: () => platform === 'android' ? 'play' : 'appStore' };
   h.local('@/lib/pro-plans', 'src/lib/pro-plans.ts');
-  h.deps['@/components/superwall-billing-context'] = { useWafraBilling: () => ({ available: true, configured: true,
-    configurationError: null, fetchProOffers: async () => [], purchasePro: async () => 'cancelled', restorePro: async () => null }) };
+  h.deps['@/components/superwall-billing-context'] = { useWafraBilling: () => ({ available: true, configured: checkoutReady,
+    configurationError: null, fetchProOffers: async () => { h.events.push(['fetchProOffers']); return []; },
+    purchasePro: async () => 'cancelled', restorePro: async () => null }) };
   h.local('@/lib/pattern', 'src/lib/pattern.ts');
   h.local('@/lib/onboarding-e-copy', 'src/lib/onboarding-e-copy.ts');
   h.local('@/components/ui/pattern-mosaic');
@@ -260,6 +262,63 @@ function renderPaywall(s, input = answers.sam, props = {}) {
     trialDays: 3, captureOn: false, onFinish() {}, preview: false, finishing: false, ...props });
   return { tiles, tree, nodes: walk(tree) };
 }
+
+// Synthetic formatter fixtures, not live regional prices.
+const PRO_OFFERS = [
+  { plan: 'yearly', productId: 'fixture.yearly', priceString: '￥12,345' },
+  { plan: 'weekly', productId: 'fixture.weekly', priceString: 'د.ك ٤٫٩٩٠' },
+];
+
+for (const language of ['en', 'ar']) for (const platform of ['ios', 'android']) for (const largeText of [false, true]) {
+  test(`onboarding has two full-width plans and weekly store renewal copy: ${language}/${platform}/${largeText ? 'large' : 'normal'}`, () => {
+    const s = setup({ language, platform, largeText, width: 320, states: { 0: PRO_OFFERS, 1: 'ready', 2: 'weekly' } });
+    const { nodes, tree } = renderPaywall(s);
+    const group = byID(nodes, 'onboarding-plans');
+    assert.equal(flat(group.props.style).flexDirection, 'column', 'two plans use the full width, including on a narrow phone');
+    const radios = walk(group).filter((node) => node.props?.accessibilityRole === 'radio');
+    assert.deepEqual(radios.map((node) => node.props.testID), ['onboarding-plan-yearly', 'onboarding-plan-weekly']);
+    for (const radio of radios) {
+      const style = flat(radio.props.style({ pressed: false }));
+      assert.equal(style.width, '100%');
+      assert.ok(style.minHeight >= 44);
+      assert.ok(!walk(radio).some((node) => node.props?.numberOfLines || node.props?.adjustsFontSizeToFit), 'prices can grow and wrap');
+    }
+    const weekly = byID(radios, 'onboarding-plan-weekly');
+    assert.equal(weekly.props.accessibilityState.checked, true);
+    assert.equal(weekly.props.accessibilityState.selected, true);
+    assert.equal(weekly.props.accessibilityLabel, `${s.words.planWeekly} · ${PRO_OFFERS[1].priceString} ${s.deps['@/lib/i18n'].t('perWeek')}`);
+    weekly.props.onPress();
+    assert.ok(s.events.some((event) => event[0] === 'state' && event[1] === 2 && event[2] === 'weekly'));
+    for (const offer of PRO_OFFERS) assert.ok(text(tree).includes(offer.priceString), 'price strings are unchanged');
+    assert.ok(text(tree).includes(s.deps['@/lib/i18n'].tf('proChargeTimingWeek', { price: PRO_OFFERS[1].priceString })));
+    assert.ok(text(tree).includes(s.deps['@/lib/i18n'].t(platform === 'android' ? 'subscriptionRenewalTermsAndroid' : 'subscriptionRenewalTermsIos')));
+  });
+}
+
+test('unavailable onboarding prices can retry only with a configured store', async () => {
+  const s = setup({ platform: 'android', states: { 1: 'unavailable' } });
+  const retry = byID(renderPaywall(s).nodes, 'onboarding-plans-retry');
+  assert.ok(retry);
+  assert.equal(retry.props.disabled, false);
+  retry.props.onPress();
+  await Promise.resolve();
+  assert.equal(s.events.filter((event) => event[0] === 'fetchProOffers').length, 1);
+  assert.ok(s.events.some((event) => event[0] === 'state' && event[1] === 1 && event[2] === 'loading'));
+  assert.equal(byID(renderPaywall(setup({ checkoutReady: false, states: { 1: 'unavailable' } })).nodes, 'onboarding-plans-retry'), undefined);
+  assert.equal(byID(renderPaywall(setup({ states: { 1: 'unavailable', 3: 'restore' } })).nodes, 'onboarding-plans-retry').props.disabled, true);
+});
+
+test('onboarding shows a missing weekly plan as unavailable without selecting or pricing it', () => {
+  for (const language of ['en', 'ar']) {
+    const s = setup({ language, states: { 0: PRO_OFFERS.slice(0, 1), 1: 'ready' } });
+    const { nodes } = renderPaywall(s);
+    const unavailable = byID(nodes, 'onboarding-plan-weekly-unavailable');
+    assert.ok(unavailable);
+    assert.equal(unavailable.props.accessibilityLabel, `${s.words.planWeekly}. ${s.deps['@/lib/i18n'].t('priceUnavailable')}`);
+    assert.equal(unavailable.props.onPress, undefined);
+    assert.equal(byID(nodes, 'onboarding-plan-weekly'), undefined);
+  }
+});
 
 test('the paywall decoration is hidden from assistive tech, untouchable, and drawn from their watched tile', () => {
   const s = setup();

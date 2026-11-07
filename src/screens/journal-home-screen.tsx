@@ -556,7 +556,10 @@ export default function JournalHomeScreen() {
     const task = runAfterFirstFrames(() => {
       if (cancelled) return;
       void detectSubscriptionsCooperatively(transactions, notSubscriptions, today, liveAccounts, internal, () => cancelled)
-        .then(accept);
+        .then(accept, () => {
+          // No result was established. Keep the existing scope's state and
+          // let a later focus/input change retry; failure is never [] data.
+        });
     }, { idle: false, delayMs: 0 });
     return () => { cancelled = true; task.cancel(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps

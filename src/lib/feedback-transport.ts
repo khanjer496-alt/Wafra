@@ -168,6 +168,9 @@ async function postFeedback(payload: FeedbackPayload): Promise<FeedbackReceipt> 
 export async function submitParserResearchFeedback(
   wire: ParserResearchWirePayload,
 ): Promise<FeedbackReceipt> {
+  if (process.env.EXPO_PUBLIC_WAFRA_PARSER_RESEARCH !== '1') {
+    throw new FeedbackSendError('Parser research is unavailable in this build.', 'disabled');
+  }
   if (!DEFAULT_RELAY_URL) {
     throw new FeedbackSendError('This build has no relay URL configured.', 'no_relay_url');
   }
@@ -193,6 +196,9 @@ export async function submitParserResearchFeedback(
 export async function submitTesterDiagnostics(
   wire: TesterDiagnosticWirePayload,
 ): Promise<FeedbackReceipt> {
+  if (typeof __DEV__ === 'undefined' || !__DEV__) {
+    throw new FeedbackSendError('Tester diagnostics are unavailable in release builds.', 'disabled');
+  }
   if (!DEFAULT_RELAY_URL) {
     throw new FeedbackSendError('This build has no relay URL configured.', 'no_relay_url');
   }

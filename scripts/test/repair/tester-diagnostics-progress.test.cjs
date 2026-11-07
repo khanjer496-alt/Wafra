@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const load = require('./load-typescript.cjs');
 
-function harness() {
+function harness(development = true) {
   let scans = 0;
   let shadowScans = 0;
   let submitted;
@@ -49,10 +49,19 @@ function harness() {
     '@/lib/sms-parser': { PARSER_VERSION: 1, PARSER_BACKFILL_VERSION: 1 },
     '@/lib/storage-diagnostics': { getStorageFailures: () => [] },
     '@/lib/transfer-reconciliation': { isTransferCandidate: () => false, transferOwnership: () => 'unknown' },
-  }, { TextEncoder });
+  }, { TextEncoder, __DEV__: development });
   return { state, events, send: () => subject.sendAndroidTesterDiagnostic(state, event => events.push(event)),
     shadowScans: () => shadowScans, scans: () => scans, submitted: () => submitted, callback: () => callback };
 }
+
+test('release builds cannot inspect the ledger, scan messages or upload tester diagnostics', async () => {
+  const h = harness(false);
+  Object.defineProperty(h.state, 'transactions', { get() { throw Error('private ledger read'); } });
+  await assert.rejects(h.send(), /tester_diagnostics_disabled/);
+  assert.equal(h.scans(), 0);
+  assert.equal(h.submitted(), undefined);
+  assert.deepEqual(h.events, []);
+});
 
 test('bounded inbox counts reach the caller before upload without claiming completeness', async () => {
   const h = harness();

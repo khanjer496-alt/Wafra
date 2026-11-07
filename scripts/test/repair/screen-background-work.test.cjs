@@ -14,6 +14,7 @@ function screenProbe(file, platform = 'ios', options = {}) {
   let state = h.state;
   let focused = true;
   let cursor = 0;
+  let stateWrites = 0;
   const slots = [];
   const refs = [];
   const effects = [];
@@ -39,7 +40,7 @@ function screenProbe(file, platform = 'ios', options = {}) {
     useRef: initial => memo(() => { const ref = { current: initial }; refs.push(ref); return ref; }, []),
     useState: initial => {
       const cell = memo(() => ({ value: typeof initial === 'function' ? initial() : initial }), []);
-      return [cell.value, next => { cell.value = typeof next === 'function' ? next(cell.value) : next; }];
+      return [cell.value, next => { stateWrites++; cell.value = typeof next === 'function' ? next(cell.value) : next; }];
     },
     useEffect: effect, startTransition: work => work(),
   });
@@ -65,6 +66,7 @@ function screenProbe(file, platform = 'ios', options = {}) {
   let Component;
   return {
     deps: h.deps,
+    get stateWrites() { return stateWrites; },
     get state() { return state; },
     set state(next) { state = next; },
     set focused(next) { focused = next; },
@@ -93,6 +95,95 @@ function screenProbe(file, platform = 'ios', options = {}) {
     dispose() { for (const slot of slots) slot?.cleanup?.(); },
   };
 }
+
+// Controlled Promise boundary: record whether the real screen subscribes to
+// rejection, without causing an intentionally unhandled process rejection in
+// the red version of these regressions. Success/error callbacks run unchanged.
+function controlledProjection(jobs) {
+  return (...args) => {
+    const job = { args, resolve: null, failure: null,
+      reject() { if (!this.failure) return false; this.failure(new Error('synthetic projection failure')); return true; } };
+    jobs.push(job);
+    const chain = { catch(handler) { job.failure = handler; return chain; } };
+    return { then(success, failure) { job.resolve = success; job.failure = failure; return chain; } };
+  };
+}
+
+for (const platform of ['ios', 'android']) {
+  test(`${platform} Bills handles a failed first analysis without inventing a complete empty answer`, () => {
+    const p = screenProbe('src/app/(tabs)/bills.tsx', platform);
+    const jobs = [];
+    p.deps['@/lib/subscriptions'].detectSubscriptionsCooperatively = controlledProjection(jobs);
+    p.render(); p.timers(4_000); p.interactions(); p.frames();
+    assert.equal(jobs.length, 1);
+    const writes = p.stateWrites;
+    assert.equal(jobs[0].reject(), true, 'the query rejection must be consumed by the screen');
+    assert.equal(p.stateWrites, writes, 'failure must not publish fabricated recurrence data');
+    const nodes = walk(p.render()).flatMap(node => [node, ...(node.props?.bandContent ? walk(node.props.bandContent) : [])]);
+    assert.ok(nodes.some(node => node.props?.testID === 'bills-summary-pending'));
+    assert.equal(nodes.some(node => node.props?.testID === 'bills-summary'), false);
+    p.focused = false; p.render(); p.focused = true; p.render(); p.timers(4_000); p.interactions(); p.frames();
+    assert.equal(jobs.length, 2, 'a later focus can retry the failed projection');
+    p.dispose();
+    const afterUnmount = p.stateWrites;
+    assert.equal(jobs[1].reject(), true);
+    jobs[1].resolve([]);
+    assert.equal(p.stateWrites, afterUnmount, 'late completion or failure cannot update an unmounted screen');
+  });
+
+  test(`${platform} Bills retains a valid previous answer when refresh fails`, () => {
+    const p = screenProbe('src/app/(tabs)/bills.tsx', platform);
+    const s = p.deps['@/lib/subscriptions'];
+    const expected = s.detectSubscriptions(), original = p.state.transactions;
+    s.peekSubscriptionDetection = input => input === original ? expected : null;
+    const jobs = [];
+    s.detectSubscriptionsCooperatively = controlledProjection(jobs);
+    let visible;
+    s.trueSubscriptions = value => { visible = value; return value; };
+    p.render(); p.render();
+    p.state = { ...p.state, transactions: [...p.state.transactions] };
+    p.render(); p.interactions(); p.frames();
+    assert.equal(jobs.length, 1);
+    assert.equal(jobs[0].reject(), true);
+    p.render();
+    assert.equal(visible, expected);
+    p.dispose();
+  });
+}
+
+test('iOS hidden Bills prewarm consumes rejection and remains unanalysed', () => {
+  const p = screenProbe('src/app/(tabs)/bills.tsx', 'ios');
+  const jobs = [];
+  p.deps['@/lib/subscriptions'].detectSubscriptionsCooperatively = controlledProjection(jobs);
+  p.focused = false;
+  p.render(); p.timers(1_500); p.interactions(); p.frames();
+  assert.equal(jobs.length, 1);
+  const writes = p.stateWrites;
+  assert.equal(jobs[0].reject(), true);
+  assert.equal(p.stateWrites, writes);
+  p.dispose();
+});
+
+test('Home consumes projection failure, retries on refocus, and ignores late completion after unmount', () => {
+  const p = screenProbe('src/screens/journal-home-screen.tsx');
+  p.state = { ...p.state, privateMode: false };
+  const jobs = [];
+  const s = p.deps['@/lib/subscriptions'];
+  s.peekSubscriptionDetection = () => null;
+  s.detectSubscriptionsCooperatively = controlledProjection(jobs);
+  p.render(); p.interactions();
+  assert.equal(jobs.length, 1);
+  const writes = p.stateWrites;
+  assert.equal(jobs[0].reject(), true);
+  assert.equal(p.stateWrites, writes, 'failure does not replace unknown recurrence with []');
+  p.focused = false; p.render(); p.focused = true; p.render(); p.interactions();
+  assert.equal(jobs.length, 2);
+  p.dispose();
+  const afterUnmount = p.stateWrites;
+  assert.equal(jobs[1].reject(), true);
+  jobs[1].resolve(s.detectSubscriptions());
+  assert.equal(p.stateWrites, afterUnmount);
+});
 
 for (const platform of ['ios', 'android']) {
   test(`${platform} Bills paints before recurrence analysis and publishes cooperative results`, async () => {
@@ -262,9 +353,9 @@ test('Home paints a finished recurrence answer at once and starts the shared sca
 
   const source = require('node:fs').readFileSync(path.join(root, 'src/screens/journal-home-screen.tsx'), 'utf8');
   assert.match(source, /if \(cached\) \{ accept\(cached\); return/, 'a cached answer is read synchronously');
-  assert.match(source, /\.then\(accept\);\n    \}, \{ idle: false, delayMs: 0 \}\);/, 'the scan starts after the first frames; its own slices wait out the lease');
+  assert.match(source, /\.then\(accept, [\s\S]*?\n    \}, \{ idle: false, delayMs: 0 \}\);/, 'the scan starts after the first frames; its own slices wait out the lease');
   const subscriptions = require('node:fs').readFileSync(path.join(root, 'src/lib/subscriptions.ts'), 'utf8');
-  assert.match(subscriptions, /void waitForForegroundHistoryIdle\(SUBSCRIPTION_DETECTION_YIELD_MS\)\.then\(runSlice\)/,
+  assert.match(subscriptions, /void waitForForegroundHistoryIdle\(SUBSCRIPTION_DETECTION_YIELD_MS\)\.then\(runSlice, fail\)/,
     'every later slice of the scan yields to the entrance lease');
 });
 

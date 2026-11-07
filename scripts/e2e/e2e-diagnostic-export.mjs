@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright';
 
@@ -13,38 +13,34 @@ try {
     const context = await browser.newContext({ viewport: { width, height: 880 },
       locale: lang === 'ar' ? 'ar-AE' : 'en-AE', colorScheme: theme, reducedMotion: 'reduce', acceptDownloads: true });
     await context.route('**/*', route => route.request().url().startsWith(BASE + '/') ? route.continue() : route.abort());
-    const page = await context.newPage(); const errors = []; const downloads = [];
+    const page = await context.newPage(); const errors = []; const downloads = []; const uploads = [];
     page.on('pageerror', error => errors.push(String(error)));
     page.on('download', download => downloads.push(download));
+    page.on('request', request => {
+      if (['POST', 'PUT'].includes(request.method())) uploads.push(request.url());
+    });
     const name = `${lang}-${theme}-${width}`;
     try {
       await page.goto(`${BASE}/settings`, { waitUntil: 'networkidle' });
       await page.getByTestId('settings-data-and-help').click();
       await page.waitForURL('**/settings-data');
-      const label = lang === 'ar' ? 'تصدير البيانات للتشخيص' : 'Export data for diagnosis';
-      // The row reads its title, then its line, like every Data and help row.
-      await page.getByRole('button', { name: new RegExp(`^${label}`) }).click();
-      const sheet = page.getByTestId('diagnostic-export-sheet');
-      await sheet.waitFor({ state: 'visible' });
-      assert.equal(downloads.length, 0, 'opening Settings/consent never exports');
-      assert.match(await sheet.innerText(), lang === 'ar' ? /مبالغ|المبالغ/ : /private merchant names/);
-      await sheet.getByRole('button', { name: lang === 'ar' ? 'تحضير ملف التشخيص' : 'Prepare diagnostic file', exact: true }).click();
-      const share = sheet.getByRole('button', { name: lang === 'ar' ? 'مشاركة ملف التشخيص' : 'Share diagnostic file', exact: true });
-      await share.waitFor({ state: 'visible' });
-      assert.equal(downloads.length, 0, 'prepared data stays local until Share');
-      await page.screenshot({ path: path.join(out, `${name}-ready.png`) });
-      const ready = page.waitForEvent('download'); await share.click();
-      const download = await ready;
-      assert.equal(download.suggestedFilename(), 'wafra-diagnostics.json');
-      const data = JSON.parse(await readFile(await download.path(), 'utf8'));
-      assert.equal(data.schema, 'wafra-diagnostics-v1');
-      assert.equal(data.delivery.uploadedByWafra, false);
-      assert.ok(data.transactions.length > 10, 'all synthetic demo records included');
-      assert.equal(data.transactions.length, data.coverage.transactionCount);
-      assert.ok(data.transactions.every(row => row.raw === undefined));
-      assert.ok(data.transactions.some(row => row.diagnostic.logo.id));
-      assert.ok(data.monthlyTotals.length > 1, 'export is not restricted to displayed period');
-      assert.deepEqual(data.bankMessages, []);
+      await page.getByTestId('settings-data-your-data').waitFor({ state: 'visible' });
+      assert.equal(await page.getByTestId('diagnostic-export-row').count(), 0);
+      assert.equal(await page.getByTestId('diagnostic-export-sheet').count(), 0);
+      for (const label of [/Export data for diagnosis/, /Send test diagnostics/, /تصدير البيانات للتشخيص/, /إرسال تشخيص الاختبار/]) {
+        assert.equal(await page.getByRole('button', { name: label }).count(), 0);
+      }
+      await page.getByRole('button', { name: lang === 'ar' ? /^تصدير العمليات/ : /^Export transactions/ }).waitFor({ state: 'visible' });
+      await page.getByRole('button', { name: lang === 'ar' ? /^تقرير المصروفات/ : /^Expense report/ }).waitFor({ state: 'visible' });
+      await page.screenshot({ path: path.join(out, `${name}-customer-data.png`) });
+      await page.goto(`${BASE}/accuracy`, { waitUntil: 'networkidle' });
+      await page.getByTestId('accuracy-screen').waitFor({ state: 'visible' });
+      assert.equal(await page.getByTestId('accuracy-share-cards').count(), 0);
+      assert.equal(await page.getByTestId('accuracy-share-unread').count(), 0);
+      await page.goto(`${BASE}/parser-research`, { waitUntil: 'networkidle' });
+      await page.waitForURL('**/settings-data');
+      assert.equal(downloads.length, 0, 'customer navigation never creates a diagnostic file');
+      assert.deepEqual(uploads, [], 'customer navigation sends no reports');
       assert.deepEqual(errors, []);
       results.push({ name, passed: true }); console.log('PASS ' + name);
     } catch (error) {

@@ -57,6 +57,7 @@ const vars = { CUR, CUR_AR };
 
 const PATTERNS = [
   ['AMOUNT_RE', patternSource('InstantAlert', 'AMOUNT_RE', vars)],
+  ['UNSAFE_AMOUNT_PREFIX_RE', patternSource('InstantAlert', 'UNSAFE_AMOUNT_PREFIX_RE', vars)],
   ['LAST4_RE', patternSource('InstantAlert', 'LAST4_RE', vars)],
   ['MERCHANT_RE', patternSource('InstantAlert', 'MERCHANT_RE', vars)],
   ['DEBIT_RE', patternSource('InstantAlert', 'DEBIT_RE', vars)],
@@ -177,6 +178,7 @@ function javaString(s) {
 }
 
 const src = `import java.util.regex.*;
+import java.util.*;
 public class WafraRegexCheck {
   public static void main(String[] a) {
     int bad = 0;
@@ -184,9 +186,11 @@ public class WafraRegexCheck {
     Pattern credential = null;
     Pattern clock = null;
     Pattern money = null;
+    Map<String, Pattern> previewPatterns = new HashMap<>();
 ${PATTERNS.map(
   ([name, body]) => `    try {
       Pattern p = Pattern.compile(${javaString(body)}, Pattern.CASE_INSENSITIVE);
+      previewPatterns.put(${javaString(name)}, p);
       if ("AMOUNT_RE".equals(${javaString(name)})) amount = p;
       if ("SMS_CREDENTIAL_RE".equals(${javaString(name)})) credential = p;
       if ("CLOCK_RE".equals(${javaString(name)})) clock = p;
@@ -237,7 +241,34 @@ ${AMOUNT_CASES.map(
       else System.out.println("AMOUNT ok ${want}");
     }`,
 ).join('\n')}
+${require('./fixtures/instant-alert-preview-safety.cjs').map(
+  ([body, want], index) => `    {
+      String got = previewFigure(${javaString(body)}, previewPatterns);
+      if (!${javaString(want ? `${want.currency}:${want.figure}:${want.credit ?? false}` : '(none)')}.equals(got)) {
+        bad++; System.out.println("PREVIEW wrong ${index} " + got);
+      } else System.out.println("PREVIEW ok ${index}");
+    }`,
+).join('\n')}
     System.exit(bad == 0 ? 0 : 1);
+  }
+
+  // The banner's amount-selection control flow on Android's actual engine.
+  // Merchant/card formatting is covered by the shared JS and native fixtures.
+  static String previewFigure(String body, Map<String, Pattern> p) {
+    if (p.get("UNSAFE_TRANSACTION_RE").matcher(body).find()) return "(none)";
+    String text = p.get("PURCHASE_PREFIX_RE").matcher(body).find()
+      ? p.get("PROMO_FOOTER_RE").matcher(body).replaceAll("") : body;
+    if (p.get("REFUSE_RE").matcher(text).find()) return "(none)";
+    boolean credit = p.get("CREDIT_RE").matcher(text).find();
+    boolean debit = p.get("DEBIT_RE").matcher(text).find();
+    if (credit == debit) return "(none)";
+    Matcher amount = p.get("AMOUNT_RE").matcher(text);
+    if (!amount.find()) return "(none)";
+    if (p.get("UNSAFE_AMOUNT_PREFIX_RE").matcher(text.substring(0, amount.start())).find()) return "(none)";
+    String code = amount.group(1) != null ? amount.group(1) : amount.group(4);
+    String figure = amount.group(2) != null ? amount.group(2) : amount.group(3);
+    if (figure.matches(".*[·*Xx].*") || !figure.matches(".*[0-9].*")) return "(none)";
+    return code.toUpperCase(Locale.ROOT) + ":" + figure + ":" + credit;
   }
 }
 `;
@@ -268,6 +299,12 @@ for (const [name] of PATTERNS) {
 for (const [, want] of AMOUNT_CASES) {
   ok(`Java reads the amount as ${want}`, out.includes(`AMOUNT ok ${want}`),
     out.split('\n').filter((l) => l.startsWith('WRONG')));
+}
+
+for (const [index, [body]] of require('./fixtures/instant-alert-preview-safety.cjs').entries()) {
+  ok(`Java preview amount is grounded: ${body}`,
+    out.includes(`PREVIEW ok ${index}\n`),
+    out.split('\n').find((line) => line.startsWith(`PREVIEW wrong ${index} `)));
 }
 
 ok('the native money gate admits every spelling in the table',

@@ -47,13 +47,14 @@
     {
       "file": "src/app/settings-data.tsx",
       "name": "exportCsv",
-      "sha256": "9d69eccec0292cca042e8ed3e18ea2510cf2777aef445393ccce5dfb6e102b36",
-      "reviewedChange": "2026-09-30: Explicit CSV export passes the ledger-local custom category catalog so saved names replace opaque custom IDs. Money values, currency scale, account selection, sharing and cleanup are unchanged. Real CSV tests verify formula escaping and exact money; the report suite and independent consumer review pass."
+      "sha256": "ce13fc52979812fae355b93e7329c870a18c2b8744fc10cfad582a5bbe74e318",
+      "reviewedChange": "2026-11-07: Uses the current hydrated authoritative snapshot and a state-generation cancellation check through file sharing. The export/erase lifecycle passed 60 behavioral checks and 55 independent race/ownership checks; CSV columns and backup contents remain unchanged."
     },
     {
       "file": "src/app/settings-data.tsx",
       "name": "backupJson",
-      "sha256": "d3b0a8584e09575fc6b7458035438dbcb2798fff870bb4bae8a68cf59e0b0f37"
+      "sha256": "ab2e8b79075fb0276fdc7127f45729c0f774a7df9754ff3dbdb78d6b48ad9bd3",
+      "reviewedChange": "2026-11-07: Uses the current hydrated authoritative snapshot and a state-generation cancellation check through file sharing. The export/erase lifecycle passed 60 behavioral checks and 55 independent race/ownership checks; CSV columns and backup contents remain unchanged."
     },
     {
       "file": "src/app/settings-data.tsx",

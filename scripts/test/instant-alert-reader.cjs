@@ -29,9 +29,11 @@ function createReader(re) {
     }
     if (re.REFUSE_RE.test(body)) return null;
     const credit = re.CREDIT_RE.test(body);
-    if (!credit && !re.DEBIT_RE.test(body)) return null;
+    const debit = re.DEBIT_RE.test(body);
+    if (credit === debit) return null;
     const amount = re.AMOUNT_RE.exec(body);
     if (!amount) return null;
+    if (re.UNSAFE_AMOUNT_PREFIX_RE.test(body.slice(0, amount.index))) return null;
     // Groups 1/2 are "AED 150.00"; groups 3/4 are the Arabic order, "150.00 درهم".
     const currency = amount[1] || amount[4];
     const figure = amount[2] || amount[3];

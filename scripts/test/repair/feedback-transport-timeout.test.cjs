@@ -16,7 +16,8 @@ function harness(fetch) {
     },
     '@/lib/relay': { DEFAULT_RELAY_URL: 'https://relay.invalid' },
   }, {
-    fetch, TextEncoder, AbortController,
+    fetch, TextEncoder, AbortController, __DEV__: true,
+    process: { env: { EXPO_PUBLIC_WAFRA_PARSER_RESEARCH: '1' } },
     setTimeout: (fn, ms) => { const id = ++nextTimer; timers.set(id, { fn, ms }); return id; },
     clearTimeout: id => timers.delete(id),
   });

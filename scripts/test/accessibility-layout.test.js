@@ -159,6 +159,72 @@ ok('selected tabs have contrasting fills and labels; input boundaries retain con
   /transferChoice[\s\S]{0,100}theme\.controlBorder/.test(addTransaction));
 
 const themedText = source('src/components/themed-text.tsx');
+{
+  // Execute the real provider and text component with native boundary doubles.
+  // A scale change must change Text identity; a width change must not. This
+  // verifies the remount contract, not native glyph measurements on a phone.
+  const ts = require('typescript');
+  let dimensions = { width: 390, height: 844, scale: 3, fontScale: 1 };
+  const contexts = [];
+  const react = {
+    createContext: value => { const context = { value, Provider: 'FontScaleProvider' }; contexts.push(context); return context; },
+    useContext: context => context.value,
+    useMemo: fn => fn(),
+    isValidElement: value => !!value && typeof value === 'object' && 'props' in value,
+  };
+  const jsx = (type, props, key) => ({ type, props, key });
+  const native = {
+    Text: 'Text', useWindowDimensions: () => dimensions,
+    StyleSheet: { create: styles => styles, flatten: styles => Array.isArray(styles)
+      ? Object.assign({}, ...styles.filter(Boolean).map(style => native.StyleSheet.flatten(style))) : styles },
+  };
+  let fontScaleModule;
+  const compile = file => {
+    const output = ts.transpileModule(source(file), { compilerOptions: {
+      module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022,
+      jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true,
+    } }).outputText;
+    const module = { exports: {} };
+    const deps = {
+      react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
+      '@/constants/theme': { Fonts: new Proxy({}, { get: (_, key) => String(key) }) },
+      '@/hooks/use-font-scale': fontScaleModule,
+      '@/hooks/use-language': { useLanguage: () => 'en' },
+      '@/hooks/use-theme': { useTheme: () => ({ text: '#111', primary: '#090' }) },
+      '@/lib/e2e-font-scale': { E2E_FONT_SCALE: null },
+      '@/lib/i18n': { hasArabicScript: value => /[\u0600-\u06ff]/.test(value) },
+    };
+    Function('require', 'module', 'exports', output)(id => {
+      if (!(id in deps)) throw new Error(`unexpected text dependency ${id}`);
+      return deps[id];
+    }, module, module.exports);
+    return module.exports;
+  };
+  const providerPath = 'src/hooks/use-font-scale.tsx';
+  if (!fs.existsSync(path.join(__dirname, '../..', providerPath))) {
+    ok('live font scale has a shared provider', false);
+  } else {
+    fontScaleModule = compile(providerPath);
+    const { ThemedText } = compile('src/components/themed-text.tsx');
+    const render = () => {
+      const provider = fontScaleModule.FontScaleProvider({ children: 'child' });
+      contexts[0].value = provider.props.value;
+      return ThemedText({ type: 'title', children: 'A heading', accessibilityLabel: 'heading', maxFontSizeMultiplier: 2.5 });
+    };
+    const initial = render();
+    dimensions = { ...dimensions, width: 844, height: 390 };
+    const rotated = render();
+    dimensions = { ...dimensions, fontScale: 2 };
+    const enlarged = render();
+    ok('rotation retains Text identity while a system text-size change remounts it',
+      initial.key === rotated.key && enlarged.key !== initial.key && enlarged.key !== undefined);
+    ok('font-scale remount preserves content, accessibility and caller scaling limits',
+      enlarged.props.children === 'A heading' && enlarged.props.accessibilityLabel === 'heading' &&
+      enlarged.props.allowFontScaling === true && enlarged.props.maxFontSizeMultiplier === 2.5);
+    ok('the app root installs exactly one font-scale provider around the live app',
+      (source('src/components/app-root-layout.tsx').match(/<FontScaleProvider>/g) ?? []).length === 1);
+  }
+}
 ok('ThemedText does not impose a global Dynamic Type ceiling',
   !/const MAX_SCALE/.test(themedText) &&
     !/maxFontSizeMultiplier=\{rest\.maxFontSizeMultiplier/.test(themedText));
