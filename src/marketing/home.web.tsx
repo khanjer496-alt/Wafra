@@ -243,7 +243,7 @@ export default function MarketingHome() {
         <section className={styles.radar} id="subscriptions" aria-labelledby="radar-title">
           <div className={styles.radarIntro}>
             <p className={styles.kicker}>Subscriptions and bills</p>
-            <h2 id="radar-title">See every renewal before it lands.</h2>
+            <h2 id="radar-title">Keep renewals in view.</h2>
             <p>
               Wafra spots charges that repeat, learns their rhythm and shows when the next one is due. Price rises and
               services that have gone quiet are flagged.

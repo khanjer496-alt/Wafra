@@ -1,0 +1,108 @@
+[
+  {
+    "id": "01-home",
+    "source": "01-home.png",
+    "headline": [
+      "Money,",
+      "in clear view."
+    ],
+    "sub": "Spending, income and what comes next.",
+    "theme": "ink",
+    "kind": "full"
+  },
+  {
+    "id": "02-bank-alerts",
+    "source": "bank-alert-settings-382.png",
+    "headline": [
+      "Less typing.",
+      "More clarity."
+    ],
+    "sub": "Optional tracking for supported bank alerts.",
+    "theme": "indigo",
+    "kind": "focus",
+    "focus": [
+      30,
+      950,
+      1020,
+      650
+    ]
+  },
+  {
+    "id": "03-spending-insights",
+    "source": "06-spending-insights.png",
+    "headline": [
+      "See where",
+      "your money goes."
+    ],
+    "sub": "Category totals, with the detail behind them.",
+    "theme": "cream",
+    "kind": "full"
+  },
+  {
+    "id": "04-bills-and-card-dues",
+    "source": "04-bills-and-card-dues.png",
+    "headline": [
+      "Know what's",
+      "due next."
+    ],
+    "sub": "Bills and card dues, together.",
+    "theme": "ochre",
+    "kind": "focus",
+    "focus": [
+      30,
+      720,
+      1020,
+      780
+    ]
+  },
+  {
+    "id": "05-recurring-charges",
+    "source": "03-recurring-charges.png",
+    "headline": [
+      "Keep recurring",
+      "charges in view."
+    ],
+    "sub": "Spot patterns. Plan for the next payment.",
+    "theme": "ink",
+    "kind": "full"
+  },
+  {
+    "id": "06-category-budgets",
+    "source": "05-category-budgets.png",
+    "headline": [
+      "Give each",
+      "category a limit."
+    ],
+    "sub": "See your progress throughout the month.",
+    "theme": "cream",
+    "kind": "focus",
+    "focus": [
+      30,
+      600,
+      1020,
+      940
+    ]
+  },
+  {
+    "id": "07-accounts",
+    "source": "07-accounts.png",
+    "headline": [
+      "Your accounts,",
+      "kept distinct."
+    ],
+    "sub": "Cards, bank accounts and cash in one place.",
+    "theme": "slate",
+    "kind": "full"
+  },
+  {
+    "id": "08-privacy-settings",
+    "source": "08-privacy-settings.png",
+    "headline": [
+      "Privacy,",
+      "you control."
+    ],
+    "sub": "An encrypted ledger on your phone.",
+    "theme": "cream",
+    "kind": "privacy"
+  }
+]

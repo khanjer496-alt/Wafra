@@ -1,0 +1,97 @@
+{
+  "created": "2026-11-07",
+  "kind": "Store presentation layouts around unchanged real native captures",
+  "sourceCaptureVersions": [
+    380,
+    382
+  ],
+  "sampleData": true,
+  "new392NativeCaptureClaimed": false,
+  "notes": [
+    "Native source PNG bytes are preserved; no AI-redrawn app UI.",
+    "Marketing layouts may scale and show clearly framed detail crops.",
+    "Android system bars omitted from full-screen insets for presentation."
+  ],
+  "sources": [
+    {
+      "file": "01-home.png",
+      "sha256": "3d6ceb160dbd79f2d0c6a0ac6d67b050b9697ea5a921d0a0c5f86f559c437fd1"
+    },
+    {
+      "file": "02-manual-entry.png",
+      "sha256": "1f1c4bb185892ebf4074a1166842c7be2fd5b504d6df75635219451966fa61bf"
+    },
+    {
+      "file": "03-recurring-charges.png",
+      "sha256": "e31e0dd6c99764b824d55f01037106ad536b05cb8be1f4c8dca778f251d8dc32"
+    },
+    {
+      "file": "04-bills-and-card-dues.png",
+      "sha256": "0b4d2a2c41e6d7e68e18b7e5e9c0864f3b9147a8ff7196f73a996b6c03690fa0"
+    },
+    {
+      "file": "05-category-budgets.png",
+      "sha256": "6b6ed1873716e56ebbd583dfef319e00b2de02c6e1a0eed5e801439985f24956"
+    },
+    {
+      "file": "06-spending-insights.png",
+      "sha256": "16d431b1a8c855af18780a5ede225332237090b78326c2caafa13e38721a9599"
+    },
+    {
+      "file": "07-accounts.png",
+      "sha256": "9b1a45c38c5b444c8a75b2f75cca3e6caa6d5ce846dc55cc4e4b8169988cdc19"
+    },
+    {
+      "file": "08-privacy-settings.png",
+      "sha256": "842f89e4b985832de94ee502bdb8895399a0b9de5e1493d5882c816001e3836d"
+    },
+    {
+      "file": "bank-alert-settings-382.png",
+      "sha256": "385472ff98137abb93c45924bdf0a0774413e305c84bc9ef5fc68932b3e708ec"
+    }
+  ],
+  "renderMethod": "Local HTML/CSS at required dimensions; browser JPEG capture followed by format-only sips conversion to opaque RGB PNG.",
+  "outputs": [
+    {
+      "file": "../global-en/01-home.png",
+      "sha256": "4a519dc0308b3c539e7e0a3f7928488d69d44dcfdcd233293826f44152f8746e"
+    },
+    {
+      "file": "../global-en/02-bank-alerts.png",
+      "sha256": "86bd30efc249a7d9289004100641cd706bbb801e540fa9ab7915b73f01266a2e"
+    },
+    {
+      "file": "../global-en/03-spending-insights.png",
+      "sha256": "d036dc294ffaff9ffb69bb8c29a4a63c37a2df8c09c8988d11dec487fd19dab1"
+    },
+    {
+      "file": "../global-en/04-bills-and-card-dues.png",
+      "sha256": "146d8f76ab89456746e9acc4a8e358a1fa8bdc114caed70842664bb590dd0df0"
+    },
+    {
+      "file": "../global-en/05-recurring-charges.png",
+      "sha256": "79793b2e98bef48cbb0150bb79c75d4d98cb3470e993e7e08fe21c309b337e9c"
+    },
+    {
+      "file": "../global-en/06-category-budgets.png",
+      "sha256": "b6b1724e5710ac6b943b1dc788476f656c1fd2f9a44c86de551bd08347df35be"
+    },
+    {
+      "file": "../global-en/07-accounts.png",
+      "sha256": "1276809aa7cfeccc216a57255dd312206a05f1f781d2adbe6f56adfbb4dc36d3"
+    },
+    {
+      "file": "../global-en/08-privacy-settings.png",
+      "sha256": "310809e850d96fb1fb5907b8e9fc7045552e2e897fb05caaaab23be768bbfa14"
+    },
+    {
+      "file": "../global-en-feature-graphic.png",
+      "sha256": "353a85d3a2f39f4c1c6b5e7d167d6a56d7709c780113340cecda2ae84a0a0aab"
+    }
+  ],
+  "playAiDeclaration": {
+    "scope": "New feature graphic and all eight new phone artboards",
+    "reason": "AI-assisted marketing copy and HTML/CSS presentation; the embedded native app UI is unchanged.",
+    "existingIconChanged": false
+  }
+}
