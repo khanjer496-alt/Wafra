@@ -10,7 +10,7 @@ const rows = require('../fixtures/enbd-transfer-capture.js');
 const { constant, patternSource } = require('../kotlin-source.js');
 const { createReader } = require('../instant-alert-reader.cjs');
 const CUR_AR = constant('InstantAlert', 'CUR_AR'), CUR = constant('InstantAlert', 'CUR', { CUR_AR });
-const names = ['UNSAFE_TRANSACTION_RE', 'PURCHASE_PREFIX_RE', 'PROMO_FOOTER_RE', 'REFUSE_RE', 'CREDIT_RE', 'DEBIT_RE', 'AMOUNT_RE', 'LAST4_RE', 'MERCHANT_RE', 'PAYMENT_MERCHANT_RE', 'BANK_WORD_RE'];
+const names = ['UNSAFE_TRANSACTION_RE', 'PURCHASE_PREFIX_RE', 'PROMO_FOOTER_RE', 'REFUSE_RE', 'CREDIT_RE', 'DEBIT_RE', 'AMOUNT_RE', 'UNSAFE_AMOUNT_PREFIX_RE', 'LAST4_RE', 'MERCHANT_RE', 'PAYMENT_MERCHANT_RE', 'BANK_WORD_RE'];
 const native = createReader(Object.fromEntries(names.map(name => [name, new RegExp(patternSource('InstantAlert', name, { CUR, CUR_AR }), 'i')]))).read;
 for (const [index, row] of rows.entries()) test(`ENBD transfer ${index}: parser and native notification preserve principal/direction`, () => {
   const parsed = parseSms(row.body, {});

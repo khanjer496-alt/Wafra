@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 20eaa50f5cdea2983f4a7236cba0b3e2d4e8066997b0b578812d6c784b0f6150
+// Generated from normal shipping TypeScript. Source SHA-256: 33ff07672a1c72475d09d30afe0a1cb1bd2a9fb4ae6e41cd4fe05e90fba5c605
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -14249,20 +14249,16 @@ function principalNeedsTransferReview(raw, span, parsed) {
         /^\s*(?:has\s+been\s+|was\s+)?received\b/i.test(after);
     return destinationOnly || cardReceipt;
 }
-function hasUnsupportedPrincipal(raw, parsed) {
+function hasUnsupportedPrincipal(raw, parsed, selected) {
     const local = [...raw.matchAll(new RegExp(AED_AMOUNT_RE.source, 'gi')),
         ...raw.matchAll(new RegExp(AED_SUFFIX_RE.source, 'gi'))];
-    if (local.length < 2 && !FX_PREFIX_RE.test(raw) && !FX_SUFFIX_RE.test(raw))
+    const hasForeign = FX_PREFIX_RE.test(raw) || FX_SUFFIX_RE.test(raw);
+    if (local.length < 2 && !hasForeign)
         return false;
     if (/^bank fee$/i.test(parsed.merchant))
         return false;
-    const selected = principalSpans(raw, parsed)[0];
     if (!selected)
         return false;
-    const proof = (0, universal_money_1.extractUniversalMoney)(raw);
-    const key = (value) => value && `${value.currency}:${value.minorUnits}`;
-    const selectedKey = parsed.originalCurrency && parsed.fxSource !== 'bank'
-        ? `${parsed.originalCurrency}:${parsed.originalMinorUnits}` : `${parsed.currency}:${parsed.amountFils}`;
     const clause = (span) => {
         const stop = (at) => /[\n;!?،]/.test(raw[at]) ||
             (raw[at] === '.' && /^(?:\s|$)/.test(raw[at + 1] ?? '')) ||
@@ -14275,8 +14271,7 @@ function hasUnsupportedPrincipal(raw, parsed) {
         return { before: raw.slice(start, span.start), after: raw.slice(span.end, end), text: raw.slice(start, end) };
     };
     const aggregate = /\b(?:this\s+(?:month|cycle|week|year|period|statement)|so\s+far|to\s+date|budget|allowance|cumulative|spending\s+room|room\s+left|headroom|can\s+still\s+be\s+withdrawn)\b|\bof\s+(?:your|the)\s+(?:[A-Z]{3}\s*[\d,.]+\s+)?(?:(?:monthly|daily|weekly|card|spending|credit)\s+)?(?:limit|budget|allowance)\b|هذا\s+الشهر|حتي\s+الان|ميزاني[هة]|اجمالي|(?:من\s+)?(?:ال)?حد\s+(?:ال)?(?:شراء|سحب|يومي|شهري|مسموح)/i;
-    const governed = (span) => {
-        const own = clause(span);
+    const governed = (span, own = clause(span)) => {
         if (aggregate.test(own.text))
             return false;
         const before = own.before.trim() || raw.slice(Math.max(0, span.start - 64), span.start).trim();
@@ -14284,11 +14279,15 @@ function hasUnsupportedPrincipal(raw, parsed) {
             /^\s*(?:has\s+been|was|were|is|successfully)?\s*(?:spent|debited|credited|deducted|charged|withdrawn|paid|transferred|sent|received|deposited|refunded|reversed|used)\b/i.test(own.after);
     };
     const own = clause(selected);
-    const selectedIsFee = proof.observations.some(observation => observation.role === 'fee' &&
-        observation.field.spans.some(span => span.start < selected.end && selected.start < span.end));
     if (aggregate.test(own.text))
         return true;
-    const selectedIsGoverned = governed(selected);
+    const selectedIsGoverned = governed(selected, own);
+    const proof = (0, universal_money_1.extractUniversalMoney)(raw);
+    const key = (value) => value && `${value.currency}:${value.minorUnits}`;
+    const selectedKey = parsed.originalCurrency && parsed.fxSource !== 'bank'
+        ? `${parsed.originalCurrency}:${parsed.originalMinorUnits}` : `${parsed.currency}:${parsed.amountFils}`;
+    const selectedIsFee = proof.observations.some(observation => observation.role === 'fee' &&
+        observation.field.spans.some(span => span.start < selected.end && selected.start < span.end));
     const others = proof.observations.filter(observation => key(observation.field.value) !== selectedKey &&
         !observation.field.spans.some(span => span.start < selected.end && selected.start < span.end) &&
         !['balance', 'credit-limit', 'statement-total', 'minimum-due', 'fee', 'tax'].includes(observation.role));
@@ -14326,19 +14325,21 @@ function hasUnsupportedPrincipal(raw, parsed) {
             return false;
         if (/\b(?:previous|earlier|prior|original)\s+(?:purchase|refund|chargeback|transaction)\b/i.test(context.before))
             return false;
-        return !selectedIsGoverned || governed(other);
+        return !selectedIsGoverned || governed(other, context);
     });
 }
-function hasUnsettledPrincipal(message, parsed) {
-    if (parsed.kind !== 'transaction')
-        return false;
+function readPrincipalContext(message, parsed) {
     ensureCurrencyPatterns();
     const raw = sanitizeLocalMoney(foldOrthography(stripInvisible(message.slice(0, 4000))));
     if (!raw)
-        return false;
-    if (hasUnsupportedPrincipal(raw, parsed))
-        return true;
+        return null;
     const spans = principalSpans(raw, parsed);
+    return { raw, spans, refund: principalRefundStatus(raw, spans) };
+}
+function hasUnsettledPrincipalInContext(context, parsed) {
+    const { raw, spans, refund } = context;
+    if (hasUnsupportedPrincipal(raw, parsed, spans[0]))
+        return true;
     if (principalNeedsTransferReview(raw, spans[0], parsed))
         return true;
     if (parsed.type === 'expense' && spans[0] &&
@@ -14349,10 +14350,15 @@ function hasUnsettledPrincipal(message, parsed) {
         return true;
     if ((0, principal_posting_guards_1.isIncompletePrincipal)(raw, spans[0]))
         return true;
-    const refund = principalRefundStatus(raw, spans);
     return (0, principal_posting_guards_1.isHedgedPrincipal)(raw, spans) || refund === 'pending' || refund === 'cancelled' ||
         (refund === 'paid-out' && parsed.type === 'income') ||
         (parsed.type === 'expense' && (refund === 'completed' || (0, principal_posting_guards_1.isCompletedPrincipalRefund)(raw, spans[0])));
+}
+function hasUnsettledPrincipal(message, parsed) {
+    if (parsed.kind !== 'transaction')
+        return false;
+    const context = readPrincipalContext(message, parsed);
+    return context ? hasUnsettledPrincipalInContext(context, parsed) : false;
 }
 function parseSms(message, overrides, options) {
     if ((0, bnpl_providers_1.isBnplProviderSource)(options?.sender))
@@ -14377,10 +14383,9 @@ function parseSms(message, overrides, options) {
     if (!parsed)
         return null;
     if (parsed.kind === 'transaction') {
-        const raw = sanitizeLocalMoney(foldOrthography(stripInvisible(message.slice(0, 4000))));
-        if (raw) {
-            const spans = principalSpans(raw, parsed);
-            const refund = principalRefundStatus(raw, spans);
+        const context = readPrincipalContext(message, parsed);
+        if (context) {
+            const { raw, spans, refund } = context;
             if (refund === 'paid-out' && parsed.type === 'income') {
                 parsed = { ...parsed, type: 'expense', transferHint: false, categoryGuess: 'other', categoryDeliberate: true };
             }
@@ -14388,20 +14393,14 @@ function parseSms(message, overrides, options) {
                 parsed = { ...parsed, type: 'income', transferHint: false, categoryGuess: 'other', categoryDeliberate: true,
                     merchant: parsed.merchant.replace(/\s*(?:،|,)?\s*(?:و?تم\s+)?(?:استرداد|استرجاع|إرجاع|ارجاع)(?:ها|ه)\s*$/u, '').trim() || 'Refund' };
             }
-        }
-    }
-    if (parsed.kind === 'transaction') {
-        const normalized = sanitizeLocalMoney(foldOrthography(stripInvisible(message.slice(0, 4000))));
-        if (normalized) {
-            const span = principalSpans(normalized, parsed)[0];
-            if (parsed.type === 'income' && principalChargebackDebit(normalized, span) && CHARGEBACK_DEBIT_RE.test(normalized)) {
+            if (parsed.type === 'income' && principalChargebackDebit(raw, spans[0]) && CHARGEBACK_DEBIT_RE.test(raw)) {
                 parsed = { ...parsed, type: 'expense', merchant: 'Chargeback reversal',
                     categoryGuess: 'other', categoryDeliberate: true, transferHint: false };
             }
+            if (hasUnsettledPrincipalInContext(context, parsed))
+                return null;
         }
     }
-    if (hasUnsettledPrincipal(message, parsed))
-        return null;
     if (parsed.originalCurrency && parsed.originalCurrency !== (0, markets_1.getActiveMarket)().currency.code &&
         parsed.fxSource !== 'bank' && FOREIGN_DOMESTIC_RAIL_RE.test(message)) {
         return null;
@@ -14949,8 +14948,8 @@ function aggregateAmount(prefix, suffix, label) {
         return true;
     if (/^\s*on\s+your\s+card\s+today\b/iu.test(suffix))
         return true;
-    return !labels(suffix).some(row => row.role === 'transaction') &&
-        /^\s*(?:on\s+[^.!?;\n]+?\s+)?(?:so far(?:\s+(?:this|the)\s+(?:day|week|month|year))?|(?:this|last)\s+(?:week|month|year)|(?:month|year|week)[ -]to[ -]date)\b/iu.test(suffix);
+    return /^\s*(?:on\s+[^.!?;\n]+?\s+)?(?:so far(?:\s+(?:this|the)\s+(?:day|week|month|year))?|(?:this|last)\s+(?:week|month|year)|(?:month|year|week)[ -]to[ -]date)\b/iu.test(suffix) &&
+        !labels(suffix).some(row => row.role === 'transaction');
 }
 const LABEL_ROLES = {
     minimum: 'minimum-due', total: 'statement-total', limit: 'credit-limit',
@@ -15047,7 +15046,7 @@ function ownCandidates(draft, excludedRoleSpans, marketLabels = null) {
         const before = text.slice(previousEnd, candidate.span.start);
         let prefixStart = previousEnd + ((separators(before).at(-1) ?? -1) + 1);
         let preceding = labels(roleText.slice(prefixStart, candidate.span.start), marketLabels).at(-1);
-        if (!preceding) {
+        if (!preceding && prefixStart !== previousEnd) {
             const prior = labels(roleText.slice(previousEnd, candidate.span.start), marketLabels).at(-1);
             if (prior) {
                 const start = previousEnd + prior.start;
@@ -15062,7 +15061,8 @@ function ownCandidates(draft, excludedRoleSpans, marketLabels = null) {
         }
         const after = text.slice(candidate.span.end, nextStart);
         const suffixEnd = candidate.span.end + (separators(after)[0] ?? after.length);
-        const following = labels(roleText.slice(candidate.span.end, suffixEnd), marketLabels)[0];
+        const following = !preceding || preceding.weak
+            ? labels(roleText.slice(candidate.span.end, suffixEnd), marketLabels)[0] : undefined;
         const label = preceding?.weak && following?.role === 'transaction' ? following : preceding ?? following;
         let role = label?.role ?? 'unknown';
         if (role === 'bill-due' && label && !/\bbill\b|فاتورة/iu.test(label.text) &&

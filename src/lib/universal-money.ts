@@ -105,8 +105,8 @@ function aggregateAmount(prefix: string, suffix: string, label: { role: Universa
   // posting verb belongs to a separate field, so cannot qualify this amount.
   // "You've spent £67.64 on your card today" (Monzo) is the day's total.
   if (/^\s*on\s+your\s+card\s+today\b/iu.test(suffix)) return true;
-  return !labels(suffix).some(row => row.role === 'transaction') &&
-    /^\s*(?:on\s+[^.!?;\n]+?\s+)?(?:so far(?:\s+(?:this|the)\s+(?:day|week|month|year))?|(?:this|last)\s+(?:week|month|year)|(?:month|year|week)[ -]to[ -]date)\b/iu.test(suffix);
+  return /^\s*(?:on\s+[^.!?;\n]+?\s+)?(?:so far(?:\s+(?:this|the)\s+(?:day|week|month|year))?|(?:this|last)\s+(?:week|month|year)|(?:month|year|week)[ -]to[ -]date)\b/iu.test(suffix) &&
+    !labels(suffix).some(row => row.role === 'transaction');
 }
 
 const LABEL_ROLES: Record<string, UniversalMoneyRole> = {
@@ -240,7 +240,7 @@ function ownCandidates(
     const before = text.slice(previousEnd, candidate.span.start);
     let prefixStart = previousEnd + ((separators(before).at(-1) ?? -1) + 1);
     let preceding = labels(roleText.slice(prefixStart, candidate.span.start), marketLabels).at(-1);
-    if (!preceding) {
+    if (!preceding && prefixStart !== previousEnd) {
       const prior = labels(roleText.slice(previousEnd, candidate.span.start), marketLabels).at(-1);
       if (prior) {
         const start = previousEnd + prior.start;
@@ -257,7 +257,9 @@ function ownCandidates(
     }
     const after = text.slice(candidate.span.end, nextStart);
     const suffixEnd = candidate.span.end + (separators(after)[0] ?? after.length);
-    const following = labels(roleText.slice(candidate.span.end, suffixEnd), marketLabels)[0];
+    // Only a missing or weak preceding label can consume this suffix result.
+    const following = !preceding || preceding.weak
+      ? labels(roleText.slice(candidate.span.end, suffixEnd), marketLabels)[0] : undefined;
     // A weak label (bare "Tax") yields to a movement word after its figure.
     const label = preceding?.weak && following?.role === 'transaction' ? following : preceding ?? following;
     let role = label?.role ?? 'unknown';

@@ -79,6 +79,7 @@ test('universal fixed phrases retain negative and conditional controls without r
     '@/lib/universal-fields': compiled('universal-fields'),
     '@/lib/universal-money': compiled('universal-money'),
     '@/lib/bank-alert-semantic-rules': compiled('bank-alert-semantic-rules'),
+    '@/lib/principal-posting-guards': compiled('principal-posting-guards'),
   });
   const sources = [
     'Your account 1234 was debited USD 12.50 at TEST on 2026-09-09.',

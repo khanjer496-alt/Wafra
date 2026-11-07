@@ -13,6 +13,26 @@ const { setActiveCountry } = load('@/lib/country');
 const { setActiveMarket, setLedgerCurrency } = load('@/lib/markets');
 const observedAt = Date.parse('2026-10-12T12:00:00Z');
 
+function readerWithBroadMoneyCount() {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const ts = require('typescript');
+  const dependency = require('./load-ts.cjs').createLoader();
+  const money = dependency('@/lib/universal-money');
+  let broadReads = 0;
+  const file = path.resolve(__dirname, '../../src/lib/sms-parser.ts');
+  const code = ts.transpileModule(fs.readFileSync(file, 'utf8'), { fileName: file,
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText;
+  const module = { exports: {} };
+  new Function('require', 'module', 'exports', code)(request => {
+    if (request === '@/lib/universal-money') {
+      return { ...money, extractUniversalMoney(...args) { broadReads++; return money.extractUniversalMoney(...args); } };
+    }
+    return dependency(request);
+  }, module, module.exports);
+  return { parseSms: module.exports.parseSms, dependency, broadReads: () => broadReads };
+}
+
 // Synthetic regressions recovered from Claude's unmerged launch-safety work.
 // Exercise both the mature grammar and the actual Android launch seam.
 function readers(body, country = 'AE') {
@@ -209,5 +229,42 @@ for (const [body, currency, minor, exponent, charged] of [
 test('a distant limit cannot qualify as the bank quote for a three-decimal foreign purchase', () => {
   for (const parsed of readers('Purchase of KWD 12.345 at AVENUES MALL with card 1234. AED 20,000.00 spending room left.')) {
     assert.ok(!parsed || parsed.amountFils !== 2000000);
+  }
+});
+
+test('proved local balance footers retain the mature selected principal', () => {
+  const reader = readerWithBroadMoneyCount();
+  reader.dependency('@/lib/markets').setActiveMarket('AE');
+  for (const body of [
+    'Purchase of AED 50.00 at NOON with card 1234. Available balance AED 2,000.00.',
+    'Available balance AED 2,000.00. Purchase of AED 50.00 at NOON with card 1234.',
+    'Purchase of AED 50.00 at NOON with card 1234. Avl Cr. Limit AED 5,000.00.',
+  ]) assert.equal(reader.parseSms(body)?.amountFils, 5000);
+});
+
+for (const body of [
+  'Your total purchases this month AED 5000. Available balance AED 2000.',
+  'AED 500.00 spent so far. Available balance AED 2,000.00.',
+  'You have used your card for AED 500.00 this month. Available balance AED 2,000.00.',
+]) test(`an ancillary balance never proves a selected aggregate as a transaction: ${body.slice(0, 50)}`, () => {
+  for (const parsed of readers(body)) assert.equal(parsed, null);
+});
+
+test('unproved and foreign amounts still use fresh monetary proof on every invocation', () => {
+  const reader = readerWithBroadMoneyCount();
+  reader.dependency('@/lib/markets').setActiveMarket('AE');
+  const body = 'AED 20,000.00 xyzzy plugh. AED 50.00 was spent at NOON on your card 1234.';
+  assert.equal(reader.parseSms(body), null);
+  const first = reader.broadReads();
+  assert.ok(first > 0);
+  assert.equal(reader.parseSms(body), null);
+  assert.ok(reader.broadReads() > first, 'no raw-message memo or fixture cache');
+  const beforeFx = reader.broadReads();
+  assert.equal(reader.parseSms('Purchase of KWD 12.345 (AED 148.20) at AVENUES MALL with card 1234.')?.amountFils, 14820);
+  assert.ok(reader.broadReads() > beforeFx);
+  for (const currency of ['BAM', 'PEN', 'TOP']) {
+    const before = reader.broadReads();
+    assert.equal(reader.parseSms(`Purchase of AED 50.00 at NOON with card 1234. Available balance AED 2,000.00. Payment of ${currency} 100.00 at SAMPLE STORE was made.`), null);
+    assert.ok(reader.broadReads() > before, `${currency} still requires broad monetary proof`);
   }
 });
