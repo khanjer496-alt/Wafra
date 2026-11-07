@@ -3,6 +3,11 @@ const bills = require('./build/bills');
 const insights = require('./build/insights');
 const seed = require('./build/seed');
 const leaving = require('./build/leaving-soon');
+const { setDateTimeLocale } = require('./build/date-time-locale');
+
+// These presentation examples use British English. Device-specific date and
+// hour conventions have their own regional-date-time suite.
+setDateTimeLocale({ languageTag: 'en-GB', regionCode: 'GB', uses24hourClock: true });
 
 let pass = 0, fail = 0;
 function eq(name, actual, expected) {

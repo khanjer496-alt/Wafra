@@ -20,7 +20,7 @@ function load(name) {
   };
   if (name === 'i18n') return { getLanguage: () => language, t: (key) => key };
   if (cache.has(name)) return cache.get(name);
-  assert.ok(['format', 'ledger-money', 'currency-metadata', 'arabic-sms'].includes(name), name);
+  assert.ok(['format', 'date-time-locale', 'country-names', 'ledger-money', 'currency-metadata', 'arabic-sms'].includes(name), name);
   const filename = path.join(__dirname, '../../src/lib', `${name}.ts`);
   const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
