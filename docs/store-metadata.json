@@ -77,8 +77,8 @@
         "languageCode": "en-US",
         "status": "launch",
         "title": "Wafra: Budget & Money Tracker",
-        "shortDescription": "Track expenses, budgets & statements—privately.",
-        "fullDescription": "See what is left, where your money went, and what is due next—without connecting a bank account.\n\nWafra is a private expense tracker and budget planner for spending, income, card dues, bills, recurring charges and savings goals. Choose your ledger currency, start manually, paste an alert you choose, or use an optional supported import.\n\nKEY FEATURES\n• Clear monthly spending and income\n• Category budgets with useful limits\n• Bills, card dues and recurring charges in one place\n• Savings goals and account organization\n• Monthly spending by category\n• Backup and restore with a file you control\n• Optional app lock\n\nOPTIONAL ANDROID BANK-SMS TRACKING\nWhere a bank and message format are supported, Wafra can use READ_SMS after an in-app explanation and your permission to scan retained financial alerts on your phone and turn supported activity into ledger entries. Automatic SMS scanning runs on your device. It ignores non-financial messages and does not upload raw SMS bodies.\n\nIf you separately enable live SMS tracking, Wafra asks for RECEIVE_SMS so it can detect new financial messages on your phone while the app is in the background. It can also show optional instant transaction alerts. You can use inbox history without live tracking, or manual entry without either permission. Automatic tracking depends on the country, bank and exact message format.\n\nPRIVACY\nNo account registration. No ads. No bank login. Your main ledger is encrypted on your device. Optional relay-backed statement, email and trusted-device features are explained before use. If you teach Wafra a new bank layout, you can choose whether to share its screened wording to help other users recognize that format.\n\nAutomatic capture requires Wafra Pro after three included days from first launch; manual entry, pasted alerts and backup/restore remain free. No subscription or charge starts automatically. Wafra Pro is billed by Google Play in your local storefront currency. Manage or cancel your subscription through Google Play.\n\nPrivacy Policy: https://wafra-app-azg.pages.dev/privacy\nTerms of Use: https://wafra-app-azg.pages.dev/terms"
+        "shortDescription": "Spending, budgets and bills. Optional bank SMS tracking. No bank login.",
+        "fullDescription": "Know your spending. Plan what comes next.\n\nWafra brings expenses, income, budgets, bills, card dues and savings goals into one clear money tracker. Choose your ledger currency and start manually, paste a bank alert, or use a supported import. No bank login, account registration or ads.\n\nEveryday money, clearly\n• Track spending and income by month\n• Set category budgets and see how much you have used\n• Keep upcoming bills, card dues and expected recurring charges in view\n• Organize your accounts, cards and savings goals\n• Choose when your money month starts\n• Review spending by category and compare periods\n• Export your records, or back up and restore a file you control\n• Add an optional app lock\n\nBank alerts, with your permission\nSupported Android bank SMS and bank-app notifications can help keep your ledger up to date. Automatic SMS processing runs on your phone and does not upload raw SMS bodies. Support varies by country, bank and exact message format. Review imported entries and correct them when needed.\n\nIf you choose SMS history, READ_SMS lets Wafra scan retained messages on your phone to find supported financial alerts. If you separately enable live SMS tracking, RECEIVE_SMS lets it process new financial messages in the background. Transaction notifications and bank-app notification access are optional. You can use SMS history without live tracking, or track manually without either SMS permission.\n\nPrivacy and control\nYour main ledger is encrypted on your device. Backup and export files are not encrypted by Wafra, so choose where you save or share them. Optional online imports are explained before you choose a file or send data. If you teach Wafra a new bank layout, you can choose whether to share its screened wording.\n\nWafra Pro\nAutomatic capture is included for three days from first launch. After that, it requires Wafra Pro. Manual entry, pasted alerts and backup/restore remain free. These included days do not start a subscription or charge you.\n\nChoose a weekly or yearly plan. Your price and billing period are shown before purchase in your Google Play storefront currency. Subscriptions renew automatically unless cancelled through Google Play.\n\nPrivacy Policy: https://wafra-app-azg.pages.dev/privacy/\nTerms of Use: https://wafra-app-azg.pages.dev/terms/"
       },
       "global-ar": {
         "languageCode": "ar",
@@ -92,14 +92,14 @@
         "status": "market-specific-custom-listing",
         "title": "Wafra: Budget & Money Tracker",
         "shortDescription": "Track supported bank alerts, budgets, bills—privately.",
-        "fullDescription": "Turn supported UAE and Saudi bank alerts into a clearer money picture—without sharing bank credentials.\n\nOn Android, SMS access is optional. Leave permission off and use manual entry whenever you prefer. If you choose automatic tracking, Android processes supported bank alerts locally on your phone; other content is discarded before Wafra storage and is never uploaded. READ_SMS imports retained alerts after you choose automatic tracking. The separate RECEIVE_SMS permission is requested only if you enable optional instant bank-alert banners.\n\nTrack expenses, income, budgets, card dues, utility bills, recurring charges, subscriptions and savings goals. Support depends on the bank and exact message format; review the supported list in the app.\n\nNo registration. No ads. No bank login. Wafra cannot reply to messages, approve payments or move money. Your ledger is encrypted on your device. Automatic capture requires Wafra Pro after three included app days; manual entry, pasted alerts and backup/restore remain free. No subscription or charge starts automatically. Wafra Pro is billed by Google Play in your local storefront currency."
+        "fullDescription": "Turn supported UAE and Saudi bank alerts into a clearer money picture—without sharing bank credentials.\n\nOn Android, SMS access is optional. Leave permission off and use manual entry whenever you prefer. If you choose automatic tracking, Android processes supported bank alerts locally on your phone; other content is discarded before Wafra storage and is never uploaded. READ_SMS imports retained alerts after you choose automatic tracking. The separate RECEIVE_SMS permission is requested only if you enable live SMS tracking, so Wafra can process new financial messages in the background. Transaction notifications are optional.\n\nTrack expenses, income, budgets, card dues, utility bills, recurring charges, subscriptions and savings goals. Support depends on the bank and exact message format; review the supported list in the app.\n\nNo registration. No ads. No bank login. Wafra cannot reply to messages, approve payments or move money. Your ledger is encrypted on your device. Automatic capture requires Wafra Pro after three included app days; manual entry, pasted alerts and backup/restore remain free. No subscription or charge starts automatically. Wafra Pro is billed by Google Play in your local storefront currency."
       },
       "gulf-ar": {
         "languageCode": "ar",
         "status": "market-specific-custom-listing",
         "title": "وفرة: ميزانية ومصاريف",
         "shortDescription": "تابع تنبيهات البنوك المدعومة والميزانية والفواتير والاشتراكات بخصوصية.",
-        "fullDescription": "حوّل تنبيهات البنوك الإماراتية والسعودية المدعومة إلى صورة مالية أوضح، دون مشاركة بيانات الدخول البنكية.\n\nإذن الرسائل اختياري على أندرويد. يمكنك تركه مغلقاً واستخدام الإدخال اليدوي. عند اختيار المتابعة التلقائية، يعالج أندرويد تنبيهات البنوك المدعومة محلياً على هاتفك، ويتخلص من المحتوى الآخر قبل تخزينه في وفرة ولا يرفعه. يستورد إذن READ_SMS التنبيهات المحفوظة بعد اختيار المتابعة التلقائية. ولا يُطلب إذن RECEIVE_SMS المنفصل إلا إذا فعّلت تنبيهات البنك الفورية الاختيارية.\n\nتابع المصاريف والدخل والميزانيات ومستحقات البطاقات وفواتير الخدمات والرسوم المتكررة والاشتراكات وأهداف الادخار. يختلف الدعم حسب البنك وصيغة الرسالة الدقيقة؛ راجع القائمة المدعومة داخل التطبيق.\n\nلا تسجيل ولا إعلانات ولا ربط بالحساب البنكي. لا يستطيع وفرة الرد على الرسائل أو الموافقة على الدفعات أو نقل المال. سجلّك مشفّر على جهازك. يتطلب الالتقاط التلقائي اشتراك وفرة برو بعد ثلاثة أيام مضمنة في التطبيق؛ يبقى الإدخال اليدوي ولصق التنبيهات والنسخ الاحتياطي والاستعادة مجاناً. لا يبدأ أي اشتراك أو خصم تلقائياً. تُحصّل Google Play قيمة وفرة برو بعملة متجرك المحلية."
+        "fullDescription": "حوّل تنبيهات البنوك الإماراتية والسعودية المدعومة إلى صورة مالية أوضح، دون مشاركة بيانات الدخول البنكية.\n\nإذن الرسائل اختياري على أندرويد. يمكنك تركه مغلقاً واستخدام الإدخال اليدوي. عند اختيار المتابعة التلقائية، يعالج أندرويد تنبيهات البنوك المدعومة محلياً على هاتفك، ويتخلص من المحتوى الآخر قبل تخزينه في وفرة ولا يرفعه. يستورد إذن READ_SMS التنبيهات المحفوظة بعد اختيار المتابعة التلقائية. ولا يُطلب إذن RECEIVE_SMS المنفصل إلا إذا فعّلت المتابعة المباشرة لرسائل البنك، ليتمكن التطبيق من معالجة الرسائل المالية الجديدة في الخلفية. إشعارات المعاملات اختيارية.\n\nتابع المصاريف والدخل والميزانيات ومستحقات البطاقات وفواتير الخدمات والرسوم المتكررة والاشتراكات وأهداف الادخار. يختلف الدعم حسب البنك وصيغة الرسالة الدقيقة؛ راجع القائمة المدعومة داخل التطبيق.\n\nلا تسجيل ولا إعلانات ولا ربط بالحساب البنكي. لا يستطيع وفرة الرد على الرسائل أو الموافقة على الدفعات أو نقل المال. سجلّك مشفّر على جهازك. يتطلب الالتقاط التلقائي اشتراك وفرة برو بعد ثلاثة أيام مضمنة في التطبيق؛ يبقى الإدخال اليدوي ولصق التنبيهات والنسخ الاحتياطي والاستعادة مجاناً. لا يبدأ أي اشتراك أو خصم تلقائياً. تُحصّل Google Play قيمة وفرة برو بعملة متجرك المحلية."
       }
     },
     "launchDefaultListing": "global-en",
@@ -265,36 +265,36 @@
       "story": {
         "en": [
           {
-            "headline": "Spending at a glance",
-            "altText": "Home view with monthly spending, income, net and recent transactions."
+            "headline": "Money, in clear view.",
+            "altText": "Wafra Home showing monthly spending, income, net and recent transactions with sample data."
           },
           {
-            "headline": "Start manually",
-            "altText": "Manual transaction entry without connecting a bank account."
+            "headline": "Less typing. More clarity.",
+            "altText": "Actual Settings detail showing optional bank SMS, bank-app notification and statement capture controls."
           },
           {
-            "headline": "Recurring charges",
-            "altText": "Recurring payments grouped with expected dates and monthly totals."
+            "headline": "See where your money goes.",
+            "altText": "Spending insights with period totals and a category breakdown from sample ledger data."
           },
           {
-            "headline": "Bills and card dues",
-            "altText": "Upcoming bills and credit-card statement due dates in one view."
+            "headline": "Know what's due next.",
+            "altText": "Actual Bills detail showing upcoming bills and credit-card dues with dates and amounts."
           },
           {
-            "headline": "Category budgets",
-            "altText": "Category limits showing current spending progress."
+            "headline": "Keep recurring charges in view.",
+            "altText": "Recurring charges with expected dates and a monthly total from sample data."
           },
           {
-            "headline": "Spending by category",
-            "altText": "Monthly spending total and category shares for the selected period."
+            "headline": "Give each category a limit.",
+            "altText": "Actual category-budget detail showing limits and current spending progress."
           },
           {
-            "headline": "Accounts in one place",
-            "altText": "Bank accounts, card balances and cash shown separately, with the card statement balance and its due date."
+            "headline": "Your accounts, kept distinct.",
+            "altText": "Accounts, cards and cash organized in separate entries with sample balances."
           },
           {
-            "headline": "Privacy and security",
-            "altText": "Settings for optional app lock, privacy and data controls, trusted devices and data tools."
+            "headline": "Privacy, you control.",
+            "altText": "Two actual Settings details showing optional app lock and privacy controls."
           }
         ],
         "ar": [
@@ -414,7 +414,7 @@
     "featureGraphics": {
       "pixels": "1024x500",
       "global": {
-        "en": "Money clarity, without a bank login",
+        "en": "Know where it goes. Plan what comes next.",
         "ar": "وضوح مالي دون دخول بنكي"
       },
       "gulf": {

@@ -59,7 +59,9 @@ const ok = (name, condition, detail = '') => {
     ok('generated Apple metadata preserves the reviewed listing name',
       appleName === 'Wafra: Budget & Money Tracker', appleName);
     ok('generated Google metadata preserves the global English listing copy',
-      googleEnglish.includes('privately'), googleEnglish);
+      googleEnglish === JSON.parse(fs.readFileSync(
+        path.join(root, 'docs/store-metadata.json'), 'utf8',
+      )).googlePlay.listings['global-en'].shortDescription, googleEnglish);
     ok('generated asc app-info metadata preserves the reviewed listing identity',
       ascAppInfo.name === 'Wafra: Budget & Money Tracker' && Boolean(ascAppInfo.subtitle));
     ok('generated asc version metadata preserves the global English copy',
