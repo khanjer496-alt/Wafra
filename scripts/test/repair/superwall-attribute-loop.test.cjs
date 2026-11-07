@@ -58,12 +58,12 @@ function harness(options = {}) {
       return next;
     };
   };
-  const calls = { attributes: [], tracking: [], configure: 0, pro: [], snapshots: [], appListeners: new Set(), deferred: [], productRequests: [], purchases: [], playQueries: 0 };
+  const calls = { attributes: [], tracking: [], configure: 0, configureOptions: [], pro: [], snapshots: [], appListeners: new Set(), deferred: [], productRequests: [], purchases: [], playQueries: 0 };
   const state = { hydrated: true, privateMode: false, language: 'en', marketId: 'AE',
     onboarded: true, captureOptOut: false, trialStartTs: 0, pro: false,
     transactions: [], ...options.state };
   const native = {
-    configure: async () => { calls.configure++; },
+    configure: async (_key, config) => { calls.configure++; calls.configureOptions.push(config); },
     getSubscriptionStatus: async () => ({ status: 'INACTIVE' }),
     getCustomerInfo: async () => ({ entitlements: [] }),
     setUserAttributes: async attributes => { calls.attributes.push(attributes); },
@@ -107,6 +107,7 @@ function harness(options = {}) {
   const deps = {
     '@/components/complimentary-refresh': { ComplimentaryRefresh: () => null },
     'expo-superwall': { ...sdk, ...user, ...provider, usePlacement: () => placement },
+    'expo-localization': { useLocales: () => options.locales ?? [{ languageTag: 'en-AE', regionCode: 'AE' }] },
     react, 'react/jsx-runtime': jsx, 'react-native': rn,
     '@/components/superwall-billing-context': { WafraBillingContext: { Provider: 'Billing' },
       unavailableBilling: { available: false, configured: false, purchasePro: async () => 'unavailable' } },
@@ -114,6 +115,7 @@ function harness(options = {}) {
       entitlementSnapshot: status => status.status === 'UNKNOWN' ? null : { active: status.status === 'ACTIVE' },
       syncStoreCaptureEntitlement: async snapshot => { calls.snapshots.push(snapshot); return true; },
     },
+    '@/lib/billing-locale': load(path.join(root, 'src/lib/billing-locale.ts')),
     '@/lib/capture': { subscribeIosCaptureEntitlementReset: () => () => {} },
     '@/lib/android-play-billing': {
       isAndroidPlayBillingAvailable: () => options.playQueryAvailable !== false,
@@ -190,6 +192,23 @@ function harness(options = {}) {
     },
   };
 }
+
+test('billing config uses the device region independently of the selected bank market', async () => {
+  for (const fixture of [
+    { language: 'en', marketId: 'AE', device: 'JP', want: 'en_JP' },
+    { language: 'en', marketId: 'SA', device: 'US', want: 'en_US' },
+    { language: 'ar', marketId: 'AE', device: 'KW', want: 'ar_KW' },
+    { language: 'en', marketId: 'SA', device: 'SA', want: 'en_SA' },
+  ]) {
+    const h = harness({ configured: false,
+      state: { language: fixture.language, marketId: fixture.marketId },
+      locales: [{ languageTag: 'en-' + fixture.device, regionCode: fixture.device }],
+    });
+    await h.renderProvider(4);
+    assert.equal(h.calls.configureOptions[0]?.localeIdentifier, fixture.want);
+    assert.equal(h.calls.configure, 1, 'the locale fix must not reconfigure the SDK');
+  }
+});
 
 test('unchanged app state settles after one attribute write despite real SDK user snapshot replacement', async () => {
   const h = harness();

@@ -11,6 +11,7 @@ const OUT = path.resolve(process.env.ASSISTANT_EVIDENCE ?? 'artifacts/e2e-assist
 const FILTER = process.env.ASSISTANT_CASE_FILTER ? new RegExp(process.env.ASSISTANT_CASE_FILTER) : null;
 const STATE = 'wafra/state/v1';
 const NOW = '2026-09-12T12:00:00Z';
+const ENGLISH_LOCALE = 'en-US';
 const MERCHANT = 'Cedar "Express" \\ West';
 const CURRENT_TOTAL = 25302;
 const PREVIOUS_TOTAL = 8333;
@@ -21,6 +22,23 @@ const browser = await chromium.launch(process.env.ASSISTANT_BROWSER_CHANNEL
   ? { channel: process.env.ASSISTANT_BROWSER_CHANNEL } : {});
 
 const money = minor => `USD ${(minor / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// The oracle runs in Chromium with the fixture's explicit locale and civil
+// dates. It deliberately does not call Wafra's date/period formatters: Home
+// carries a month scope, while Spending and Merchant carry normalized ranges.
+function expectedPreviousPeriodLabels({ locale, from, to }) {
+  if (navigator.language !== locale) throw new Error(`Expected browser locale ${locale}, got ${navigator.language}`);
+  const civil = iso => {
+    const [year, month, day] = iso.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day, 12));
+  };
+  const presentation = { calendar: 'gregory', numberingSystem: 'latn', timeZone: 'UTC' };
+  const date = new Intl.DateTimeFormat(locale, { ...presentation, month: 'short', day: 'numeric' });
+  const month = new Intl.DateTimeFormat(locale, { ...presentation, month: 'short', year: 'numeric' });
+  return {
+    month: month.format(civil(from)),
+    range: `${date.format(civil(from))} – ${date.format(civil(to))}`,
+  };
+}
 const minor = text => {
   const match = String(text).match(/\d[\d,]*(?:\.\d{1,2})?/);
   assert.ok(match, `Missing amount: ${text}`);
@@ -142,7 +160,7 @@ async function closeSheet(sheet) { await sheet.getByRole('button', { name: 'Clos
 
 let meta;
 try {
-  const bootstrap = await browser.newContext({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  const bootstrap = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: ENGLISH_LOCALE, reducedMotion: 'reduce' });
   await intercept(bootstrap, 'bootstrap');
   const first = await bootstrap.newPage();
   await first.goto(BASE + '/', { waitUntil: 'networkidle' });
@@ -153,7 +171,7 @@ try {
   await bootstrap.close();
 
   async function contextFor(name, width = 390, mode = 'light', monthStartDay = 1, overrides = {}) {
-    const context = await browser.newContext({ viewport: { width, height: 844 }, locale: 'en-US',
+    const context = await browser.newContext({ viewport: { width, height: 844 }, locale: ENGLISH_LOCALE,
       colorScheme: mode, reducedMotion: 'reduce' });
     await intercept(context, name);
     await context.addInitScript(({ state, rows, key }) => {
@@ -574,7 +592,11 @@ try {
         await turns(page).first().waitFor({ state: 'visible' });
         await latestVisible(page);
         const answer = await turns(page).first().innerText();
-        assert.match(answer, /1 Aug(?:ust)?\s*[–-]\s*31 Aug(?:ust)?|Aug(?:ust)? 2026|2026-08/);
+        const expectedPeriod = await page.evaluate(expectedPreviousPeriodLabels, {
+          locale: ENGLISH_LOCALE, from: '2026-08-01', to: '2026-08-31',
+        });
+        const selectedScope = source === 'home' ? expectedPeriod.month : expectedPeriod.range;
+        assert.ok(answer.includes(selectedScope), `answer keeps the selected August period (${selectedScope}): ${answer}`);
         if (source === 'home' || source === 'flow') assert.ok(answer.includes(money(PREVIOUS_TOTAL)), answer);
         else {
           assert.ok((await screen(page).getByTestId('assistant-band-question').innerText()).includes(JSON.stringify(MERCHANT)), 'context prompt preserves the complete quoted name');

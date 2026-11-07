@@ -10,7 +10,7 @@ import React, {
   useState,
   useSyncExternalStore,
 } from 'react';
-import { getLocales, useLocales } from 'expo-localization';
+import { getLocales, useCalendars, useLocales } from 'expo-localization';
 import { randomUUID } from 'expo-crypto';
 import { isAutomaticFounderProBuild } from '@/lib/founder-pro';
 import { isScopedSubscriptionKey } from '@/lib/subscriptions';
@@ -49,6 +49,7 @@ import {
 } from '@/lib/transfer-reconciliation';
 import type { TransferDecisionRequest, TransferDecisionBatchRequest } from '@/lib/transfer-reconciliation-types';
 import { getMonthStartDay, monthStartISO, setMonthStartDay as applyMonthStartDay } from '@/lib/format';
+import { setDateTimeLocale } from '@/lib/date-time-locale';
 import { getThemePreference, setThemePreference as applyThemePreference } from '@/lib/theme-preference';
 import { detectLanguage, getLanguage, setLanguage } from '@/lib/i18n';
 import {
@@ -2517,9 +2518,20 @@ function applyDeviceMoneyLocale(locale: Parameters<typeof deviceMoneyLocale>[0])
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const locales = useLocales();
+  const calendars = useCalendars();
   // Published through MoneyLocaleProvider so compiled Money figures, which
   // are memoized on their props, re-format when the device settings change.
   const moneyLocaleKey = applyDeviceMoneyLocale(locales[0]);
+  // Apply presentation preferences before children format their first frame.
+  // Both Expo hooks update when OS preferences change; the setter invalidates
+  // its caches only when these inputs change. No ledger preference is written.
+  // Existing compiled date labels adopt this on their next render; changing
+  // OS format settings must not remount navigation or replace ledger state.
+  setDateTimeLocale({
+    languageTag: locales[0]?.languageTag,
+    regionCode: locales[0]?.regionCode,
+    uses24hourClock: calendars[0]?.uses24hourClock,
+  });
   const systemLanguage = resolveUiLanguage('system', locales);
   const persistenceRef = useRef<LedgerPersistence | null>(null);
   if (!persistenceRef.current) persistenceRef.current = createAppLedgerPersistence();

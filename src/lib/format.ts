@@ -21,22 +21,7 @@ import {
   ledgerCurrencyExponent,
 } from '@/lib/markets';
 import { getLanguage, t } from '@/lib/i18n';
-
-const MONTHS = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-];
-const MONTHS_SHORT = MONTHS.map((m) => m.slice(0, 3));
-const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const MONTHS_AR = [
-  'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
-  'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر',
-];
-const MONTHS_SHORT_AR = [
-  'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
-  'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر',
-];
-const DAYS_AR = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+import { regionalCivilDate, regionalClock, regionalMonth, regionalWeekday } from '@/lib/date-time-locale';
 
 /**
  * The spec the stored integers are denominated in.
@@ -250,13 +235,7 @@ export function monthEndISO(key: string): string {
 }
 
 export function monthLabel(key: string, short = false): string {
-  const [y, m] = key.split('-').map(Number);
-  const arabic = getLanguage() === 'ar';
-  const names = arabic
-    ? (short ? MONTHS_SHORT_AR : MONTHS_AR)
-    : (short ? MONTHS_SHORT : MONTHS);
-  const name = names[(m ?? 1) - 1];
-  return `${name} ${y}`;
+  return regionalMonth(key, getLanguage(), short);
 }
 
 /**
@@ -345,10 +324,7 @@ export function shiftISO(iso: string, days: number): string {
 
 /** "17 Jul" from an ISO date. */
 export function shortDate(iso: string): string {
-  const d = Number(iso.slice(8, 10));
-  const m = Number(iso.slice(5, 7));
-  const months = getLanguage() === 'ar' ? MONTHS_SHORT_AR : MONTHS_SHORT;
-  return `${d} ${months[m - 1] ?? ''}`;
+  return regionalCivilDate(iso, getLanguage(), { day: 'numeric', month: 'short' });
 }
 
 /**
@@ -358,39 +334,32 @@ export function shortDate(iso: string): string {
  */
 export function shortDateWithYear(iso: string, now: Date = new Date()): string {
   const year = iso.slice(0, 4);
-  return year === String(now.getFullYear()) ? shortDate(iso) : `${shortDate(iso)} ${year}`;
+  return year === String(now.getFullYear()) ? shortDate(iso)
+    : regionalCivilDate(iso, getLanguage(), { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 /** "Today", "Yesterday", or "Friday, 18 Jul". */
 export function friendlyDate(iso: string, todayISO: string): string {
   if (iso === todayISO) return t('today');
   if (daysBetweenISO(iso, todayISO) === 1) return t('yesterday');
-  const d = new Date(`${iso}T12:00:00`);
-  const arabic = getLanguage() === 'ar';
-  const days = arabic ? DAYS_AR : DAYS;
-  const months = arabic ? MONTHS_SHORT_AR : MONTHS_SHORT;
-  return `${days[d.getDay()]}, ${d.getDate()} ${months[d.getMonth()]}`;
+  return regionalCivilDate(iso, getLanguage(), { weekday: 'long', day: 'numeric', month: 'short' });
 }
 
 /**
  * Weekday names by index, Sunday-first — the order `dayOfWeekSpend` buckets
  * into and the order the UAE week runs in.
  *
- * These live here rather than in the screen that draws the weekday chart
- * because the translated arrays are already here, feeding `friendlyDate`. A
- * screen-local `const WEEKDAYS = ['Sun', ...]` is invisible to the Arabic
- * gate — it is an array of one-word strings, so nothing flags it — and the
- * chart under an otherwise fully-Arabic screen stays in English forever.
+ * Keep this beside friendlyDate rather than maintaining screen-local English
+ * arrays. Intl supplies names in the selected UI language; the index remains
+ * Sunday-first regardless of the region's first day of the week.
  */
 export function weekdayName(index: number): string {
-  const days = getLanguage() === 'ar' ? DAYS_AR : DAYS;
-  return days[index] ?? '';
+  return regionalWeekday(index, getLanguage(), false);
 }
 
-/** The same name, abbreviated for an axis label. Arabic is not abbreviated. */
+/** The locale's abbreviation for an axis label (Arabic often keeps the full name). */
 export function weekdayShort(index: number): string {
-  if (getLanguage() === 'ar') return DAYS_AR[index] ?? '';
-  return (DAYS[index] ?? '').slice(0, 3);
+  return regionalWeekday(index, getLanguage(), true);
 }
 
 /**
@@ -443,22 +412,20 @@ export function displayTransactionTime(tx: DisplayClock): Date | null {
 }
 
 export function fullDateTime(tx: { date: string } & DisplayClock): string {
-  const day = new Date(`${tx.date}T12:00:00`);
-  const stamp = day.toLocaleDateString(getLanguage() === 'ar' ? 'ar-AE' : 'en-GB', {
+  const stamp = regionalCivilDate(tx.date, getLanguage(), {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
   });
   const at = displayTransactionTime(tx);
   if (!at) return stamp;
-  const hh = String(at.getHours()).padStart(2, '0');
-  const mm = String(at.getMinutes()).padStart(2, '0');
-  return `${stamp}, ${hh}:${mm}`;
+  const clock = regionalClock(at, getLanguage());
+  return clock ? `${stamp}, ${clock}` : stamp;
 }
 
 /** "14:32", or empty when the row carries no clock. */
 export function clockTime(tx: DisplayClock): string {
   const at = displayTransactionTime(tx);
   if (!at) return '';
-  return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
+  return regionalClock(at, getLanguage());
 }

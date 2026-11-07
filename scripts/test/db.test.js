@@ -459,6 +459,7 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     'expo-localization': {
       useLocales: () => [{ languageCode: 'en' }],
       getLocales: () => [{ languageCode: 'en', regionCode: 'AE' }],
+      useCalendars: () => [{ uses24hourClock: true }],
     },
     'react-native': {
       AppState: { addEventListener: () => ({ remove() {} }) },
@@ -477,6 +478,7 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
       removeDeclinedTransactions: identityState,
     },
     '@/lib/format': { getMonthStartDay: () => 1, setMonthStartDay() {}, toISODate: () => '2026-08-03' },
+    '@/lib/date-time-locale': { setDateTimeLocale() {} },
     '@/lib/theme-preference': { getThemePreference: () => 'system', setThemePreference() {} },
     '@/lib/i18n': { getLanguage: () => 'en', detectLanguage: () => 'en', setLanguage() {} },
     '@/lib/system-language': require('./build/system-language'),
@@ -581,6 +583,38 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
 const hydration = loadHydrationExports();
 const { buildLaunchBenchmarkBackup } = require('./build/launch-benchmark.js');
 const ledgerPersistenceSource = stripComments(read('src/lib/ledger-persistence.ts'));
+
+{
+  const dateLocale = require('./repair/load-typescript.cjs')(path.join(ROOT, 'src/lib/date-time-locale.ts'), {
+    '@/lib/country-names': require('./build/country-names'),
+  });
+  let locales = [{ languageCode: 'en', languageTag: 'en-US', regionCode: 'GB' }];
+  let calendars = [{ uses24hourClock: true }];
+  const runtime = loadHydrationExports({
+    'expo-localization': { useLocales: () => locales, getLocales: () => locales, useCalendars: () => calendars },
+    '@/lib/date-time-locale': dateLocale,
+  }, true);
+  const at = new Date(2026, 10, 7, 14, 32);
+  const date = () => dateLocale.regionalCivilDate('2026-11-07', 'en', { month: 'short', day: 'numeric' });
+  const clock = () => dateLocale.regionalClock(at, 'en').replace(/[\u00a0\u202f]/g, ' ');
+  // Model cached presentation from an earlier device setting: the provider
+  // must install the current Region and hour cycle before any child formats.
+  dateLocale.setDateTimeLocale({ languageTag: 'en-US', regionCode: 'US', uses24hourClock: false });
+  runtime.StoreProvider({ children: null });
+  ok('StoreProvider applies the actual device Region and 24-hour preference on its first render',
+    date() === '7 Nov' && clock() === '14:32', JSON.stringify({ date: date(), clock: clock() }));
+
+  calendars = [{ uses24hourClock: false }];
+  runtime.StoreProvider({ children: null });
+  ok('StoreProvider adopts an OS hour-cycle change on the next render without changing UI language',
+    /^2:32 pm$/i.test(clock()), clock());
+
+  locales = [{ languageCode: 'en', languageTag: 'en-US', regionCode: 'JP' }];
+  runtime.StoreProvider({ children: null });
+  ok('StoreProvider adopts a changed device Region independently of an English language tag',
+    date() === '11-07', date());
+  dateLocale.setDateTimeLocale(null);
+}
 
 ok('ledger metadata and transaction chunks are read under one native storage lease',
   /withSnapshotRead: \(task\) => serialiseWrite\(task\)/.test(storage) &&

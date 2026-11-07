@@ -12,7 +12,7 @@ function load(name) {
   };
   if (name === 'i18n') return {getLanguage: () => 'en', t: k => k};
   if (cache.has(name)) return cache.get(name);
-  assert.ok(['format','ledger-money','currency-metadata','arabic-sms'].includes(name), name);
+  assert.ok(['format','date-time-locale','country-names','ledger-money','currency-metadata','arabic-sms'].includes(name), name);
   const file = path.resolve(__dirname,'../../src/lib',name+'.ts');
   const code = ts.transpileModule(fs.readFileSync(file,'utf8'),{
     fileName: file, compilerOptions: {module: ts.ModuleKind.CommonJS,target: ts.ScriptTarget.ES2022},

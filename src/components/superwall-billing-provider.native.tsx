@@ -7,6 +7,7 @@ import {
   type CustomCallbackResult,
   type SubscriptionStatus,
 } from 'expo-superwall';
+import { useLocales } from 'expo-localization';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 
@@ -29,6 +30,7 @@ import {
   syncStoreCaptureEntitlement,
   type EntitlementSnapshot,
 } from '@/lib/billing';
+import { billingLocaleIdentifier } from '@/lib/billing-locale';
 import {
   publishIosCaptureStatusRefresh,
   setIosLocalCaptureEntitlementLease,
@@ -57,12 +59,6 @@ function platformApiKey(): string {
   if (Platform.OS === 'ios') return IOS_API_KEY;
   if (Platform.OS === 'android') return ANDROID_API_KEY;
   return '';
-}
-
-function localeIdentifier(language: string, marketId: string): string {
-  const languageCode = language === 'ar' ? 'ar' : 'en';
-  const region = marketId === 'SA' ? 'SA' : 'AE';
-  return `${languageCode}_${region}`;
 }
 
 function LocalCaptureLeaseSync() {
@@ -645,6 +641,7 @@ export const SUPERWALL_CONFIGURE_DELAY_MS = 2_000;
  */
 export function SuperwallBillingProvider({ children }: { children: React.ReactNode }) {
   const { state } = useStore();
+  const deviceRegion = useLocales()[0]?.regionCode;
   const key = platformApiKey();
   const available = state.hydrated && key.length > 0;
   // First run configures at once (onboarding offers checkout); an onboarded
@@ -669,14 +666,17 @@ export function SuperwallBillingProvider({ children }: { children: React.ReactNo
     if (__DEV__) console.warn('[Superwall] configuration failed', error.message);
   }, []);
   const options = useMemo(() => ({
-    localeIdentifier: localeIdentifier(state.language, state.marketId),
+    // expo-superwall 1.4 configures once and has no runtime locale setter.
+    // Read the real region before that configuration; never remount the SDK
+    // to update locale. Wafra's own purchase UI follows the saved language.
+    localeIdentifier: billingLocaleIdentifier(state.language, deviceRegion),
     eventTrackingBehavior: state.privateMode ? 'none' as const : 'all' as const,
     shouldObservePurchases: true,
     paywalls: {
       shouldPreload: true,
       isHapticFeedbackEnabled: true,
     },
-  }), [state.language, state.marketId, state.privateMode]);
+  }), [state.language, deviceRegion, state.privateMode]);
 
   /*
     ONE tree shape for the app below, before and after hydration and before
