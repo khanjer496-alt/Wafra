@@ -17,7 +17,6 @@
 import Constants from 'expo-constants';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
 import { useFocusEffect } from 'expo-router';
 import { useRouter } from '@/hooks/use-app-router';
 import { runAfterFirstFrames } from '@/lib/after-first-frames';
@@ -91,7 +90,7 @@ import {
   reportExpenses,
 } from '@/lib/reimbursement-report';
 import { settingsCopy } from '@/lib/settings-copy';
-import { readBackupPickerCopy, shareText, shareTextFile } from '@/lib/share-text';
+import { readBackupPickerCopy, shareGeneratedPdf, shareTextFile, TextFileShareError } from '@/lib/share-text';
 import { openShortcutsApp, shortcutCleanupApplies } from '@/lib/shortcut-cleanup';
 import { isSmsCorpusExportAvailable, sharePersonalDataForReview } from '@/lib/sms-corpus-export';
 import { ClearAllError, useStore } from '@/lib/store';
@@ -238,16 +237,23 @@ export default function SettingsDataScreen() {
   /* ── Data ───────────────────────────────────────────────────────────── */
 
   const exportCsv = () => {
-    const csv = buildLedgerCsv(state.transactions, state.accounts, state.ledgerMoney, state.customCategories);
+    const generation = getStateGeneration();
+    const snapshot = getStateSnapshot();
+    if (!snapshot.hydrated) return;
+    const csv = buildLedgerCsv(snapshot.transactions, snapshot.accounts, snapshot.ledgerMoney, snapshot.customCategories);
     // A whole ledger is far past the intent-payload ceiling; share the file.
-    shareText('wafra-export.csv', csv, {
+    shareTextFile('wafra-export.csv', csv, {
       mimeType: 'text/csv',
+      shouldContinue: () => generation === getStateGeneration(),
     }).catch(() => {});
   };
 
   const backupJson = () => {
-    shareText('wafra-backup.json', exportBackup(), {
+    const generation = getStateGeneration();
+    if (!getStateSnapshot().hydrated) return;
+    shareTextFile('wafra-backup.json', exportBackup(), {
       mimeType: 'application/json',
+      shouldContinue: () => generation === getStateGeneration(),
     }).catch(() => {});
   };
 
@@ -302,15 +308,18 @@ export default function SettingsDataScreen() {
   };
 
   const createExpenseReport = async (scope: 'month' | 'all') => {
+    const generation = getStateGeneration();
+    const snapshot = getStateSnapshot();
+    if (!snapshot.hydrated) return;
     // Same rule every other total in the app applies: real spending, on an
     // account still in play, neither leg of a move between the user's own
     // accounts. Without it, a legacy own-account sweep (no transfer flag,
     // caught only by internalTransferIds' structural title match) could both
     // stretch an "all time" report back to its date and print on it as a
     // reimbursable expense.
-    const liveAccounts = liveAccountIds(state.accounts);
-    const internal = internalTransferIdsForState(state);
-    const expenses = state.transactions.filter((tx) => isSpending(tx, liveAccounts, internal));
+    const liveAccounts = liveAccountIds(snapshot.accounts);
+    const internal = internalTransferIdsForState(snapshot);
+    const expenses = snapshot.transactions.filter((tx) => isSpending(tx, liveAccounts, internal));
     const currentMonth = monthKey(new Date());
     const from =
       scope === 'month'
@@ -328,19 +337,19 @@ export default function SettingsDataScreen() {
 
     try {
       const html = buildExpenseReportHtml({
-        customCategories: state.customCategories,
-        transactions: state.transactions,
-        accounts: state.accounts,
-        currency: state.ledgerMoney?.currency ?? marketCurrencyCode(state.marketId),
-        currencyExponent: state.ledgerMoney?.exponent ?? 2,
-        language: state.language === 'ar' ? 'ar' : 'en',
+        customCategories: snapshot.customCategories,
+        transactions: snapshot.transactions,
+        accounts: snapshot.accounts,
+        currency: snapshot.ledgerMoney?.currency ?? marketCurrencyCode(snapshot.marketId),
+        currencyExponent: snapshot.ledgerMoney?.exponent ?? 2,
+        language: snapshot.language === 'ar' ? 'ar' : 'en',
         // The device Region, not the language: an English (US) phone in the
         // UAE keeps day-first UAE dates.
         region: displayRegion(),
         from,
         to,
       });
-      const { uri } = await Print.printToFileAsync({
+      const createFile = () => Print.printToFileAsync({
         html,
         width: 595,
         height: 842,
@@ -348,18 +357,17 @@ export default function SettingsDataScreen() {
       });
       // Expo Print opens the browser print dialog itself on web. Local URI
       // sharing is deliberately unsupported there.
-      if (Platform.OS === 'web') return;
-      if (!(await Sharing.isAvailableAsync())) {
-        Alert.alert(t('reportShareUnavailable'));
+      if (Platform.OS === 'web') {
+        await createFile();
         return;
       }
-      await Sharing.shareAsync(uri, {
+      await shareGeneratedPdf(createFile, {
         dialogTitle: t('exportExpensePdf'),
-        mimeType: 'application/pdf',
-        UTI: 'com.adobe.pdf',
+        shouldContinue: () => generation === getStateGeneration(),
       });
-    } catch {
-      Alert.alert(t('reportExportFailed'));
+    } catch (error) {
+      Alert.alert(t(error instanceof TextFileShareError && error.code === 'share_unavailable'
+        ? 'reportShareUnavailable' : 'reportExportFailed'));
     }
   };
 

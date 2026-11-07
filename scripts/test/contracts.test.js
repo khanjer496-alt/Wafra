@@ -1745,9 +1745,9 @@ for (const rel of ['src/app/cards.tsx']) {
   // Every call site that builds subscriptions or the export from a full
   // AppState has to derive both sets and thread them through, or the merchant
   // it drops is the one on this list, not the one under test above.
-  for (const [rel, callNeedle] of [
+  for (const [rel, callNeedle, owner = 'state'] of [
     // The expense report moved with the other exports to Settings → Data and help.
-    ['src/app/settings-data.tsx', 'reportExpenses(expenses,from,to,liveAccounts,internal)'],
+    ['src/app/settings-data.tsx', 'reportExpenses(expenses,from,to,liveAccounts,internal)', 'snapshot'],
     ["src/app/(tabs)/bills.tsx", 'detectSubscriptions(state.transactions,state.notSubscriptions,now,liveAccounts,internal)'],
     ['src/lib/leaving-soon.ts', 'detectSubscriptions(state.transactions,state.notSubscriptions,today,liveAccounts,internal)'],
     // The planning half of the reminder set moved out of notifications.ts into
@@ -1760,8 +1760,8 @@ for (const rel of ['src/app/cards.tsx']) {
     const text = read(rel);
     const flat = text.replace(/\s/g, '');
     ok(`${rel} derives the live-account and internal-transfer sets`,
-      /liveAccountIds\(state\.accounts\)/.test(text) &&
-        /internalTransferIdsForState\(state\)/.test(text));
+      flat.includes(`liveAccountIds(${owner}.accounts)`) &&
+        flat.includes(`internalTransferIdsForState(${owner})`));
     ok(`${rel} threads both sets into its subscription/export call`,
       flat.includes(callNeedle), rel);
   }
