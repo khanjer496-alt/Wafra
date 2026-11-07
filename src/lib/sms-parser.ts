@@ -8321,7 +8321,10 @@ function hasUnsupportedPrincipal(raw: string, parsed: ParsedSms): boolean {
   return others.some(observation => {
     const other = observation.field.spans[0];
     if (!other) return false;
-    if (parsed.fxSource === 'bank' && observation.field.value?.currency === parsed.originalCurrency) {
+    const statedOriginal = [observation.field.value, ...observation.field.alternatives].some(value =>
+      value !== null && value.currency === parsed.originalCurrency && Number(value.minorUnits) === parsed.originalMinorUnits &&
+      value.exponent === parsed.originalExponent);
+    if (parsed.fxSource === 'bank' && statedOriginal) {
       const gap = other.end <= selected.start ? raw.slice(other.end, selected.start) :
         selected.end <= other.start ? raw.slice(selected.end, other.start) : '';
       if (/^\s*(?:[(\[/=≈~]|equivalent(?:\s+to)?|equiv\.?|approx\.?|i\.?e\.?|بما\s+يعادل|ما\s+يعادل|يعادل)\s*$/i.test(gap)) return false;

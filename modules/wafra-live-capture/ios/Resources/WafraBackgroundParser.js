@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 1c93e5d6318217ecfa1dd18d047639dcb876b472fafe326461ec6267c8b6114c
+// Generated from normal shipping TypeScript. Source SHA-256: 20eaa50f5cdea2983f4a7236cba0b3e2d4e8066997b0b578812d6c784b0f6150
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -14300,7 +14300,9 @@ function hasUnsupportedPrincipal(raw, parsed) {
         const other = observation.field.spans[0];
         if (!other)
             return false;
-        if (parsed.fxSource === 'bank' && observation.field.value?.currency === parsed.originalCurrency) {
+        const statedOriginal = [observation.field.value, ...observation.field.alternatives].some(value => value !== null && value.currency === parsed.originalCurrency && Number(value.minorUnits) === parsed.originalMinorUnits &&
+            value.exponent === parsed.originalExponent);
+        if (parsed.fxSource === 'bank' && statedOriginal) {
             const gap = other.end <= selected.start ? raw.slice(other.end, selected.start) :
                 selected.end <= other.start ? raw.slice(selected.end, other.start) : '';
             if (/^\s*(?:[(\[/=≈~]|equivalent(?:\s+to)?|equiv\.?|approx\.?|i\.?e\.?|بما\s+يعادل|ما\s+يعادل|يعادل)\s*$/i.test(gap))

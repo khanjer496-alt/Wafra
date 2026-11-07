@@ -187,3 +187,27 @@ for (const [body, country, amount] of [
   assert.equal(legacy.type, 'expense');
   for (const parsed of capture) assert.ok(!parsed || (parsed.type === 'expense' && parsed.amountFils === amount));
 });
+
+for (const [body, currency, minor, exponent, charged] of [
+  ['Purchase of KWD 12.345 (AED 148.20) at AVENUES MALL with your Credit Card ending 1234 on 05/09/2026.', 'KWD', 12345, 3, 14820],
+  ['Purchase of AED 148.20 (KWD 12.345) at AVENUES MALL with your Credit Card ending 1234 on 05/09/2026.', 'KWD', 12345, 3, 14820],
+  ['Purchase of JPY 1,500 (AED 36.73) at LAWSON TOKYO with your Credit Card ending 1234 on 05/09/2026.', 'JPY', 1500, 0, 3673],
+  ['Purchase of USD 20.00 (AED 73.45) at OPENAI with your Credit Card ending 1234 on 05/09/2026.', 'USD', 2000, 2, 7345],
+]) test(`the mature explicit bank FX pair retains exact ${currency} exponent ${exponent}`, () => {
+  const [legacy, ...capture] = readers(body);
+  assert.equal(legacy?.amountFils, charged);
+  assert.equal(legacy.fxSource, 'bank');
+  assert.equal(legacy.originalCurrency, currency);
+  assert.equal(legacy.originalMinorUnits, minor);
+  assert.equal(legacy.originalExponent, exponent);
+  for (const parsed of capture) if (parsed) {
+    assert.equal(parsed.amountFils, charged);
+    assert.equal(parsed.originalMinorUnits, minor);
+  }
+});
+
+test('a distant limit cannot qualify as the bank quote for a three-decimal foreign purchase', () => {
+  for (const parsed of readers('Purchase of KWD 12.345 at AVENUES MALL with card 1234. AED 20,000.00 spending room left.')) {
+    assert.ok(!parsed || parsed.amountFils !== 2000000);
+  }
+});
