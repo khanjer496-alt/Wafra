@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 02ea39809c55a9d68f39d6ae7b83b231b31e5bcfb2fc6ebea7c7123d2d884b0c
+// Generated from normal shipping TypeScript. Source SHA-256: a229aeaf4e78069bb27252f51b2db7fd488df105163e671bfa242898bbed0a34
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -10110,7 +10110,7 @@ const isAbsentLaunchSender = (sender) => !sender.trim() || /^Wafra (?:Automation
 const isUnaccountableLaunchSender = (sender) => isAbsentLaunchSender(sender) || (0, best_effort_autopost_1.isUnverifiedAlertSender)(sender);
 exports.isUnaccountableLaunchSender = isUnaccountableLaunchSender;
 const isHeldLaunchCredit = (source, sender, parsed) => !!parsed && (0, exports.isUnaccountableLaunchSender)(sender) && parsed.kind === 'transaction' && parsed.type === 'income' &&
-    !(0, best_effort_autopost_1.isNotAutoPostableMoney)(source) && !(0, best_effort_autopost_1.namesOwnInstrumentTail)(source, 'credit');
+    !(0, best_effort_autopost_1.isNotAutoPostableMoney)(source) && ((0, best_effort_autopost_1.isUnverifiedAlertSender)(sender) || !(0, best_effort_autopost_1.namesOwnInstrumentTail)(source, 'credit'));
 exports.isHeldLaunchCredit = isHeldLaunchCredit;
 const launchSenderAnswersFor = (source, sender, parsed) => {
     if ((0, best_effort_autopost_1.isNotAutoPostableMoney)(source))

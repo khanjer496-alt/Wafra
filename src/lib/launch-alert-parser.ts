@@ -828,12 +828,12 @@ const isAbsentLaunchSender = (sender: string): boolean =>
 export const isUnaccountableLaunchSender = (sender: string): boolean =>
   isAbsentLaunchSender(sender) || isUnverifiedAlertSender(sender);
 /**
- * The credit the sender-trust rule held back (no own tail, no scam wording),
- * for the refusal path to offer in Review with its amount. Null otherwise.
+ * Credits held for an unverified sender, or an absent sender without an own
+ * tail, wait in Review with their amount. Scam wording remains refused.
  */
 export const isHeldLaunchCredit = (source: string, sender: string, parsed: ParsedSms | null): boolean =>
   !!parsed && isUnaccountableLaunchSender(sender) && parsed.kind === 'transaction' && parsed.type === 'income' &&
-  !isNotAutoPostableMoney(source) && !namesOwnInstrumentTail(source, 'credit');
+  !isNotAutoPostableMoney(source) && (isUnverifiedAlertSender(sender) || !namesOwnInstrumentTail(source, 'credit'));
 const launchSenderAnswersFor = (source: string, sender: string, parsed: ParsedSms): boolean => {
   // A familiar sender label cannot make a smishing call-to-action settled
   // money. Apply the same wording guard as the worldwide posting policy.

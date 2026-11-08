@@ -1554,7 +1554,8 @@ async function main() {
     // Re-review of the sender-trust rule. (A) a PAYER's account or card is
     // not the reader's own; (B) a credit the rule holds back waits in Review
     // with its amount, never silently dropped, and a field-labelled own tail
-    // ("To: **1234", "الى: 1234") counts. Registered bank headers unchanged.
+    // ("To: **1234", "الى: 1234") counts for absent senders. A present
+    // unverified sender still requires Review. Registered headers unchanged.
     const recordAt = '2026-10-10T08:00:00.000Z';
     let next = 0x40;
     const run = (market, text, sender) => {
@@ -1570,7 +1571,9 @@ async function main() {
       const r = run(market, text, sender);
       ok(`sender trust: ${label} waits in Review with its amount, never posted or dropped`,
         r.parsed.length === 0 && r.reviewCandidates.length === 1 && r.ignoredCount === 0 &&
-          JSON.stringify(r.reviewCandidates[0]).includes(String(minor)), r);
+          r.reviewCandidates[0].event?.amount.value?.minorUnits === String(minor) &&
+          r.reviewCandidates[0].event?.amount.value?.currency === (market === 'SA' ? 'SAR' : 'AED') &&
+          r.reviewCandidates[0].event?.direction === 'credit', r);
     };
     const posts = (label, market, text, sender, minor) => {
       const r = run(market, text, sender);
@@ -1582,7 +1585,7 @@ async function main() {
     posts('a blank-sender Al Rajhi incoming transfer to a labelled own account', 'SA', 'حوالة واردة\nالمبلغ: 500 ريال\nالى: 1234\nمن: احمد', undefined, 50000);
     held('the same Al Rajhi incoming transfer with no own account line', 'SA', 'حوالة واردة\nالمبلغ: 500 ريال\nمن: احمد', undefined, 50000);
     posts('a blank-sender "Incoming Transfer … To: **1234"', 'SA', 'Incoming Transfer\nAmount: 500 SAR\nTo: **1234\nFrom: AHMED', undefined, 50000);
-    posts('a phone-sender "Incoming Transfer … To: **1234"', 'SA', 'Incoming Transfer\nAmount: 500 SAR\nTo: **1234\nFrom: AHMED', '+966501234567', 50000);
+    held('a phone-sender "Incoming Transfer … To: **1234"', 'SA', 'Incoming Transfer\nAmount: 500 SAR\nTo: **1234\nFrom: AHMED', '+966501234567', 50000);
     held('a blank-sender "Incoming Transfer" with no To line', 'SA', 'Incoming Transfer\nAmount: 500 SAR\nFrom: AHMED', undefined, 50000);
     held('a phone-sender "Incoming Transfer" with no To line', 'SA', 'Incoming Transfer\nAmount: 500 SAR\nFrom: AHMED', '+966501234567', 50000);
     held('a blank-sender "credited. Ref No 1234"', 'AE', 'AED 5,000.00 credited. Ref No 1234', undefined, 500000);

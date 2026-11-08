@@ -966,9 +966,9 @@ export function inspectSourceFreeRefusedAlert(input: {
     if (candidate) return { kind: 'review', candidate: { ...candidate, channel: input.channel } };
   }
 
-  // A UAE/Saudi credit the sender-trust rule held back (blank, phone, e-mail
-  // or generic sender; no own account or card tail; no scam wording) waits in
-  // Review with its amount filled in. It is never dropped: a genuine incoming
+  // A UAE/Saudi credit held for a phone, e-mail or generic sender, or a blank
+  // sender without an own tail, waits in Review with its amount filled in.
+  // Scam wording is still refused. It is never dropped: a genuine incoming
   // transfer read from iPhone History has no sender at all.
   if (launchMarket && isUnaccountableLaunchSender(input.sender)) {
     const credit = withMarketPackForParsing(launchMarket, () => parseSms(input.source, undefined, {
