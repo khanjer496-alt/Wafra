@@ -24,5 +24,11 @@ module.exports = ({ config }) => {
     ? withPagedHistory
     : { ...withPagedHistory, plugins: [...withPagedPlugins, highRefreshPlugin] };
 
-  return withNativePerformance;
+  // apple-targets derives CURRENT_PROJECT_VERSION from ios.buildNumber.
+  // Supply EAS's resolved host version to every extension at prebuild time.
+  const buildNumber = process.env.EAS_BUILD_IOS_BUILD_NUMBER || config.ios?.buildNumber;
+  if (!buildNumber || !/^\d+(?:\.\d+){0,2}$/.test(buildNumber)) {
+    throw new Error('An explicit valid iOS host build number is required');
+  }
+  return { ...withNativePerformance, ios: { ...withNativePerformance.ios, buildNumber } };
 };
