@@ -1,0 +1,13 @@
+# RC1 encryption assessment — 9 November 2026
+
+Conclusion: the existing `ITSAppUsesNonExemptEncryption=false` is **not sufficiently substantiated for submission**. It cannot be justified as OS-only HTTPS. Keep submission blocked until the publisher completes Apple's current questionnaire and records the applicable exemption or required documentation. This review does not issue an export classification or change the declaration speculatively.
+
+Inventory: `app.json` enables expo-sqlite `useSQLCipher`; `src/lib/state-storage.native.ts` encrypts the local ledger using an on-device key held in SecureStore. `src/lib/relay-crypto.ts` uses third-party noble X25519 key agreement, HKDF-SHA256 derivation and AES-GCM decryption for sealed relay payloads. These are published standard algorithms implemented beyond OS TLS. OS Keychain/file protection and transport TLS are additional protections. P01/P02 add no new algorithm or cryptographic purpose.
+
+Apple's [export-compliance overview](https://developer.apple.com/help/app-store-connect/manage-app-information/overview-of-export-compliance) requires assessment including third-party libraries. Its [Info.plist key documentation](https://developer.apple.com/documentation/bundleresources/information-property-list/itsappusesnonexemptencryption) permits NO for no encryption or documented exempt encryption. Standard algorithms alone do not prove exemption. Local financial-data protection and sealed relay are candidates for an applicable exemption, not evidence that one has been established. Country availability, including France, matters to documentation requirements.
+
+Before submission, record the current binary/library inventory, countries of distribution, exact questionnaire answers, exemption basis and any Apple/BIS/French reporting or documentation obligation. If non-exempt, use YES and the reviewed documentation/code as applicable. No account questionnaire, legal classification, documentation upload or signing was performed here.
+
+# Widget signing gate
+
+`app.config.js` passes the resolved EAS host build number to apple-targets before native generation; local builds must specify ios.buildNumber. Verify generated host and widget CURRENT_PROJECT_VERSION, then run `python3 scripts/check-ios-product-versions.py <unsigned Wafra.app>` after Info.plist processing and **before signing**. Abort signing on any mismatch. Repeat on the eventual archive's Products/Applications/Wafra.app before upload. The gate is a required release procedure; it has not been exercised on a real unsigned product or archive in this task because native release builds are not authorized.
