@@ -12,7 +12,7 @@
     "postinstall": "node scripts/patch-react-native-screens.cjs",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "ship:ios": "npm run update:check && npx --yes eas-cli@22.4.0 env:exec production \"node scripts/check-update-config.mjs --environment production\" --non-interactive && npx --yes eas-cli@22.4.0 build -p ios --profile production --auto-submit --non-interactive",
+    "ship:ios": "npm run update:check && npx --yes eas-cli@22.4.0 env:exec production \"node scripts/check-update-config.mjs --environment production\" --non-interactive && npx --yes eas-cli@22.4.0 build -p ios --profile production --non-interactive",
     "ship:android": "npm run update:check && npx --yes eas-cli@22.4.0 env:exec production \"node scripts/check-update-config.mjs --environment production\" --non-interactive && npx --yes eas-cli@22.4.0 build -p android --profile production --auto-submit --non-interactive",
     "update:check": "node scripts/check-update-config.mjs",
     "update:candidate": "node scripts/publish-update.mjs candidate",

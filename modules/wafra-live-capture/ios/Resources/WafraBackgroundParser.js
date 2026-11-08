@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: b60739a99a657721ef15ce76b392257452eeab627898d27d3ba6c9c93908bfe7
+// Generated from normal shipping TypeScript. Source SHA-256: 02ea39809c55a9d68f39d6ae7b83b231b31e5bcfb2fc6ebea7c7123d2d884b0c
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -7878,8 +7878,8 @@ const S = {
     },
     iosLocalUnsupported: { en: 'Automatic capture needs iOS 16 or later', ar: 'يتطلب الالتقاط التلقائي iOS 16 أو أحدث' },
     iosLocalUnsupportedBody: {
-        en: 'You can still bring in your transactions on this iPhone: import a bank statement, or paste bank messages as they arrive.',
-        ar: 'لا يزال بإمكانك إضافة عملياتك على هذا الآيفون: استورد كشف حساب بنكي، أو الصق رسائل البنك عند وصولها.',
+        en: 'Pasted messages are read on this iPhone. Choosing a statement file connects this phone to Wafra’s import service. The file is read, then deleted.',
+        ar: 'تُقرأ الرسائل الملصقة على هذا الآيفون. اختيار ملف كشف حساب يربط هذا الهاتف بخدمة الاستيراد في وفرة. يُقرأ الملف ثم يُحذف.',
     },
     iosLocalUnsupportedStatement: { en: 'Import a statement', ar: 'استيراد كشف حساب' },
     iosLocalUnsupportedPaste: { en: 'Paste bank messages', ar: 'لصق رسائل البنك' },
@@ -11201,7 +11201,7 @@ function isCompletedPrincipalRefund(source, span) {
     return /\b(?:purchase|transaction|payment|charge)\b(?:[^.\n]|\.\d){0,120}?\b(?:has\s+been|was|is|have\s+been)\s+(?:fully\s+)?refunded\b|(?<![ء-ي])(?:عمليه\s+)?(?:ال)?شراء(?:[^.\n]|\.(?=\S)){0,120}?\s+(?:و?تم\s+)(?:استرداد|استرجاع|ارجاع)(?:ها|ه)(?![ء-ي])/i.test(scope.text);
 }
 const CARD_CREDIT_TARGET = /\bcredit\s+card\b|بطاق(?:تك|ه|ة)\s+(?:ال)?ا[يئ]تماني[هة]/iu;
-const CARD_CREDIT_MOVEMENT = /\bcredited(?:\s+with|\s+to)?\b|(?:تم\s+)?(?:إيداع|ايداع|إضافة|اضافه|اضافة)/iu;
+const CARD_CREDIT_MOVEMENT = /\bcredited(?:\s+with|\s+to)?\b|(?<![ء-ي])(?:تم\s+)?(?:إيداع|ايداع|إضافة|اضافه|اضافة)(?![ء-ي])/iu;
 function isUnqualifiedCardCredit(source, span) {
     if (!span || !CARD_CREDIT_TARGET.test(source) || !CARD_CREDIT_MOVEMENT.test(source))
         return false;
@@ -14481,7 +14481,7 @@ function hasUnsettledPrincipalInContext(context, parsed) {
     const { raw, spans, refund } = context;
     if (hasUnsupportedPrincipal(raw, parsed, spans[0]))
         return true;
-    if ((0, principal_posting_guards_1.isUnqualifiedCardCredit)(raw, spans[0]))
+    if (parsed.type === 'income' && (0, principal_posting_guards_1.isUnqualifiedCardCredit)(raw, spans[0]))
         return true;
     if (principalNeedsTransferReview(raw, spans[0], parsed))
         return true;
@@ -15779,8 +15779,6 @@ function inspectUniversalBankEvent(source, context = {}) {
         if (cardPaymentReceipt && status === 'unknown')
             status = 'posted';
     }
-    if (family !== 'card-payment' && (0, principal_posting_guards_1.isUnqualifiedCardCredit)(source, money.amount.spans[0]))
-        status = 'informational';
     const multiplePostings = money.observations.filter((observation) => observation.role === 'transaction').length > 1;
     if (multiplePostings && status !== 'failed' && family !== 'statement' && family !== 'balance') {
         family = 'unknown';
@@ -15832,9 +15830,13 @@ function inspectUniversalBankEvent(source, context = {}) {
     const personSubject = source.match(/^\s*([A-Z][A-Z'’-]+(?:[ \t]+[A-Z][A-Z'’-]+){1,3})[ \t]+has[ \t]+received[ \t]+your[ \t]+(?:bank[ \t]+)?transfer\b/u)?.[1] ?? null;
     const personReceivedYourTransfer = personSubject !== null &&
         !/\b(?:revolut|n26|paypal|wise|monzo|starling|bunq|venmo|cash\s*app|zelle|klarna|ltd|limited|inc|gmbh|plc|llc|bank|account|space|pocket|vault|savings|wallet|card)\b/iu.test(personSubject);
-    const direction = counterpartyReceipt && readDirection === 'credit' ? 'unknown'
+    let direction = counterpartyReceipt && readDirection === 'credit' ? 'unknown'
         : receivedYourTransfer && readDirection === 'credit' ? personReceivedYourTransfer ? 'debit' : 'unknown'
             : readDirection;
+    if (direction === 'credit' && family !== 'card-payment' && (0, principal_posting_guards_1.isUnqualifiedCardCredit)(source, money.amount.spans[0])) {
+        status = 'informational';
+        direction = 'none';
+    }
     if (family === 'unknown' && families.length === 0 && status === 'posted' && !roleUnresolved && !directionConflict &&
         (direction === 'debit' || direction === 'credit') &&
         !money.observations.some((observation) => observation.role === 'fee')) {

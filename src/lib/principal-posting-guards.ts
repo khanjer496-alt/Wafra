@@ -199,7 +199,7 @@ export function isCompletedPrincipalRefund(source: string, span: PrincipalSpan |
 }
 
 const CARD_CREDIT_TARGET = /\bcredit\s+card\b|بطاق(?:تك|ه|ة)\s+(?:ال)?ا[يئ]تماني[هة]/iu;
-const CARD_CREDIT_MOVEMENT = /\bcredited(?:\s+with|\s+to)?\b|(?:تم\s+)?(?:إيداع|ايداع|إضافة|اضافه|اضافة)/iu;
+const CARD_CREDIT_MOVEMENT = /\bcredited(?:\s+with|\s+to)?\b|(?<![ء-ي])(?:تم\s+)?(?:إيداع|ايداع|إضافة|اضافه|اضافة)(?![ء-ي])/iu;
 
 /** A credit to the credit-card balance may be a settlement, not new income.
  * Leave ambiguous credits in Review; explicit refunds retain their own rules.
