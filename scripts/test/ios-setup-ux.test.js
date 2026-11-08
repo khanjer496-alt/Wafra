@@ -2364,6 +2364,19 @@ async function messageOnboardingProgressTests() {
   );
 }
 
+// iOS 15 cannot run App Intents: the setup screen and onboarding say so in
+// both languages and name the two ways in that still work.
+for (const lang of ['en', 'ar']) {
+  ok(`iOS 15 fallback copy is complete and distinct in ${lang}`,
+    ['iosLocalUnsupported', 'iosLocalUnsupportedBody', 'iosLocalUnsupportedStatement', 'iosLocalUnsupportedPaste',
+      'onboardLiveUnsupportedTitle', 'onboardLiveUnsupportedBody', 'onboardPasteMessagesBody', 'onboardManualIosUnsupportedBody']
+      .every((key) => typeof translated(key, lang) === 'string' && translated(key, lang).length > 0 &&
+        (lang === 'en' || translated(key, 'ar') !== translated(key, 'en'))) &&
+    /iOS 16/.test(translated('iosLocalUnsupported', lang)) && /iOS 16/.test(translated('onboardLiveUnsupportedBody', lang)));
+}
+eq('iOS 15 fallback: the setup title names the requirement, not just a bare sentence',
+  translated('iosLocalUnsupported', 'en'), 'Automatic capture needs iOS 16 or later');
+
 async function main() {
   await messageOnboardingProgressTests();
   await historyCardTests();
