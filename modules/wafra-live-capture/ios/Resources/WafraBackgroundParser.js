@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 4d3c6f54c1a3b6d63eb4240a092dcd09b64e9e5c50f88de0d88770f786577398
+// Generated from normal shipping TypeScript. Source SHA-256: 82af02f054d3836b20f3ccbbb816dfbab240a8df44a7e5afa4d5c111756796e3
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -11184,8 +11184,10 @@ function isCompletedPrincipalRefund(source, span) {
         return false;
     return /\b(?:purchase|transaction|payment|charge)\b(?:[^.\n]|\.\d){0,120}?\b(?:has\s+been|was|is|have\s+been)\s+(?:fully\s+)?refunded\b|(?<![ء-ي])(?:عمليه\s+)?(?:ال)?شراء(?:[^.\n]|\.(?=\S)){0,120}?\s+(?:و?تم\s+)(?:استرداد|استرجاع|ارجاع)(?:ها|ه)(?![ء-ي])/i.test(scope.text);
 }
+const CARD_CREDIT_TARGET = /\bcredit\s+card\b|بطاق(?:تك|ه|ة)\s+(?:ال)?ا[يئ]تماني[هة]/iu;
+const CARD_CREDIT_MOVEMENT = /\bcredited(?:\s+with|\s+to)?\b|(?:تم\s+)?(?:إيداع|ايداع|إضافة|اضافه|اضافة)/iu;
 function isUnqualifiedCardCredit(source, span) {
-    if (!span)
+    if (!span || !CARD_CREDIT_TARGET.test(source) || !CARD_CREDIT_MOVEMENT.test(source))
         return false;
     const clause = sentenceAround(source, span).text;
     if (/\bcash\s*back\s+(?:amount\s+)?of\b/iu.test(clause))
@@ -11194,8 +11196,7 @@ function isUnqualifiedCardCredit(source, span) {
         return false;
     if (isCompletedPrincipalRefund(source, span) || /\brefund(?:ed)?\b|استرداد/iu.test(clause))
         return false;
-    return /\bcredit\s+card\b|بطاق(?:تك|ه|ة)\s+(?:ال)?ا[يئ]تماني[هة]/iu.test(clause) &&
-        /\bcredited(?:\s+with|\s+to)?\b|(?:تم\s+)?(?:إيداع|ايداع|إضافة|اضافه|اضافة)/iu.test(clause);
+    return CARD_CREDIT_TARGET.test(clause) && CARD_CREDIT_MOVEMENT.test(clause);
 }
 },
 "sms-parser":function(module,exports,require){
@@ -15719,7 +15720,7 @@ function inspectUniversalBankEvent(source, context = {}) {
     if (pendingAnywhere && (status === 'posted' || status === 'unknown'))
         status = 'informational';
     const refundStatus = (0, principal_posting_guards_1.refundPrincipalStatus)(source, money.amount.spans, money.draft.candidates.map(candidate => candidate.span));
-    if (refundStatus === 'pending' || (family !== 'card-payment' && (0, principal_posting_guards_1.isUnqualifiedCardCredit)(source, money.amount.spans[0])) || (0, principal_posting_guards_1.isHedgedPrincipal)(source, money.amount.spans))
+    if (refundStatus === 'pending' || (0, principal_posting_guards_1.isHedgedPrincipal)(source, money.amount.spans))
         status = 'informational';
     if (refundStatus === 'cancelled')
         status = 'failed';
@@ -15757,6 +15758,8 @@ function inspectUniversalBankEvent(source, context = {}) {
         if (cardPaymentReceipt && status === 'unknown')
             status = 'posted';
     }
+    if (family !== 'card-payment' && (0, principal_posting_guards_1.isUnqualifiedCardCredit)(source, money.amount.spans[0]))
+        status = 'informational';
     const multiplePostings = money.observations.filter((observation) => observation.role === 'transaction').length > 1;
     if (multiplePostings && status !== 'failed' && family !== 'statement' && family !== 'balance') {
         family = 'unknown';

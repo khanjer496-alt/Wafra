@@ -86,7 +86,7 @@ test('every iOS profile installs the bundled History Shortcut and retains the na
     EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: 'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v6-20260919/Wafra-History-v6.signed.shortcut',
   } } });
   assert.equal(retired.PAGED_HISTORY_INSTALL_URL, null);
-  const base = { name: 'Wafra', plugins: ['original'] };
+  const base = { name: 'Wafra', ios: { buildNumber: '1' }, plugins: ['original'] };
   const factory = require(path.join(root, 'app.config.js'));
   assert.deepEqual(factory({ config: base }).plugins,
     ['original', './modules/wafra-message-history/plugin/paged', './modules/wafra-high-refresh/plugin']);

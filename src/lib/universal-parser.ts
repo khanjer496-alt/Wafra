@@ -465,7 +465,7 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
   // A refund expected later and an approximate principal are not settled facts,
   // even if a broad language pack recognizes the purchase/refund noun.
   const refundStatus = refundPrincipalStatus(source, money.amount.spans, money.draft.candidates.map(candidate => candidate.span));
-  if (refundStatus === 'pending' || (family !== 'card-payment' && isUnqualifiedCardCredit(source, money.amount.spans[0])) || isHedgedPrincipal(source, money.amount.spans)) status = 'informational';
+  if (refundStatus === 'pending' || isHedgedPrincipal(source, money.amount.spans)) status = 'informational';
   if (refundStatus === 'cancelled') status = 'failed';
   const hasStatement = money.statementTotal.evidence !== 'missing' || money.minimumDue.evidence !== 'missing';
   const hasBalance = money.balance.evidence !== 'missing' || money.creditLimit.evidence !== 'missing';
@@ -512,6 +512,8 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
     family = 'card-payment';
     if (cardPaymentReceipt && status === 'unknown') status = 'posted';
   }
+  // Determine identified repayments before refusing ambiguous card credits.
+  if (family !== 'card-payment' && isUnqualifiedCardCredit(source, money.amount.spans[0])) status = 'informational';
   // Multiple independently owned principal amounts are distinct movements or
   // unresolved event attribution, not alternative spellings of one amount.
   // A single candidate with multiple currency/decimal interpretations remains
