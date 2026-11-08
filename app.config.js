@@ -24,5 +24,14 @@ module.exports = ({ config }) => {
     ? withPagedHistory
     : { ...withPagedHistory, plugins: [...withPagedPlugins, highRefreshPlugin] };
 
-  return withNativePerformance;
+  // EAS assigns the remote build number before prebuild. apple-targets reads
+  // ios.buildNumber when creating the widget, so give both targets that same
+  // number instead of letting the widget retain app.json's placeholder 1.
+  const buildNumber = process.env.EAS_BUILD_IOS_BUILD_NUMBER;
+  if (buildNumber && !/^\d+(?:\.\d+){0,2}$/.test(buildNumber)) {
+    throw new Error('Invalid EAS iOS build number');
+  }
+  return buildNumber
+    ? { ...withNativePerformance, ios: { ...withNativePerformance.ios, buildNumber } }
+    : withNativePerformance;
 };
