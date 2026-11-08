@@ -3170,11 +3170,11 @@ const S = {
     ar: 'لا يمكن لهذا الإصدار إضافة الاختصار. حدّث وفرة.',
   },
   // iOS 15: no App Intents, so no automatic capture. Statements and pasted
-  // messages still bring transactions in, and both work on this iPhone.
+  // messages remain available. Pasting is local; statement files use the import service.
   iosLocalUnsupported: { en: 'Automatic capture needs iOS 16 or later', ar: 'يتطلب الالتقاط التلقائي iOS 16 أو أحدث' },
   iosLocalUnsupportedBody: {
-    en: 'You can still bring in your transactions on this iPhone: import a bank statement, or paste bank messages as they arrive.',
-    ar: 'لا يزال بإمكانك إضافة عملياتك على هذا الآيفون: استورد كشف حساب بنكي، أو الصق رسائل البنك عند وصولها.',
+    en: 'Pasted messages are read on this iPhone. Choosing a statement file connects this phone to Wafra’s import service. The file is read, then deleted.',
+    ar: 'تُقرأ الرسائل الملصقة على هذا الآيفون. اختيار ملف كشف حساب يربط هذا الهاتف بخدمة الاستيراد في وفرة. يُقرأ الملف ثم يُحذف.',
   },
   iosLocalUnsupportedStatement: { en: 'Import a statement', ar: 'استيراد كشف حساب' },
   iosLocalUnsupportedPaste: { en: 'Paste bank messages', ar: 'لصق رسائل البنك' },

@@ -1,27 +1,40 @@
 #!/usr/bin/env python3
 """Fail closed before upload: python3 scripts/check-ios-product-versions.py path/to/Wafra.app."""
 import plistlib
+import re
 import sys
 from pathlib import Path
 
 
+VERSION_KEYS = ("CFBundleVersion", "CFBundleShortVersionString")
+
+
+def read_versions(product):
+    with (product / "Info.plist").open("rb") as f:
+        info = plistlib.load(f)
+    versions = {}
+    for key in VERSION_KEYS:
+        value = info.get(key)
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9]+(?:\.[0-9]+){0,2}", value):
+            raise ValueError(f"{product.name}: {key} must be a resolved numeric version, got {value!r}")
+        versions[key] = value
+    return versions
+
+
 def verify(app):
     app = Path(app)
-    with (app / "Info.plist").open("rb") as f:
-        host = plistlib.load(f)["CFBundleVersion"]
-    if not isinstance(host, str) or not host:
-        raise ValueError("Host CFBundleVersion is missing")
+    host = read_versions(app)
     extensions = sorted((app / "PlugIns").glob("*.appex"))
     if not extensions:
         raise ValueError("No extensions found; widget equality was not verified")
     for extension in extensions:
-        with (extension / "Info.plist").open("rb") as f:
-            version = plistlib.load(f).get("CFBundleVersion")
-        if version != host:
-            raise ValueError(f"{extension.name}: CFBundleVersion {version!r} differs from host {host!r}")
+        versions = read_versions(extension)
+        for key in VERSION_KEYS:
+            if versions[key] != host[key]:
+                raise ValueError(f"{extension.name}: {key} {versions[key]!r} differs from host {host[key]!r}")
     return host, len(extensions)
 
 
 if __name__ == "__main__":
     host, count = verify(sys.argv[1])
-    print(f"Verified host and {count} extension(s): CFBundleVersion={host}")
+    print(f"Verified host and {count} extension(s): " + ", ".join(f"{key}={host[key]}" for key in VERSION_KEYS))

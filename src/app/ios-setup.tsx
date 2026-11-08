@@ -628,7 +628,8 @@ export default function IosSetupScreen() {
     setViewSource('message');
   };
   // iOS 15 cannot run App Intents, so statements and pasted messages are the
-  // way in. First run authorises the importer with a one-time handoff token,
+  // way in. Pasted text is local; statement files are sent to the import service,
+  // read, then deleted. First run authorises the importer with a one-time handoff token,
   // as the paging screen does; /import-sms is already a setup route.
   const openStatementImport = () => {
     router.push({ pathname: '/statement-import', params: fromOnboarding
