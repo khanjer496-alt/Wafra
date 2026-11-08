@@ -463,6 +463,9 @@ const hasLinkCallToAction = (source: string): boolean => {
  * JORDAN LEE paid you $48.20, mark it received").
  */
 const NOT_A_SETTLED_FACT: readonly RegExp[] = [
+  // A leading cashback invitation quotes a reward to earn. The launch
+  // semantic fallback must not rebuild its purchase wording as a new debit.
+  /^\s*(?:Dear\s+Customer[,!:]\s*)?احصل\s+عل[ىي]\s+(?:استرداد|استرجاع)\s+نقدي/iu,
   // A conditional footer ("In case the transaction is suspicious, call …",
   // "If you notice unusual activity …") is advice, not a fraud prompt.
   /\bfraud\s+alert\b|(?<!\b(?:if|in\s+case|should)\b[^.!?\n]{0,60})\b(?:suspicious\s+(?:activity|transaction|charge|payment|login|purchase)|unusual\s+activity)\b|\bif\s+it\s+was\s+you\b|\bwas\s+this\s+you\b|\bwe\s+(?:have\s+)?(?:blocked|stopped|declined|locked)\b|(?<!\b(?:if|in\s+case|should|can|could|may)\b[^.!?\n]{0,60})\blocked\b|\bunder\s+review\b/iu,

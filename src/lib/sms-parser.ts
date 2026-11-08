@@ -639,8 +639,13 @@ export interface ParsedCard {
  * direction cannot be overwritten by semantic fallback. Destination-only own
  * transfers and unproved card receipts require Review. No full-history reparse
  * is requested; the historical-repair version remains 50.
+ *
+ * 71: capture safety rejects code-authorisation instructions, received refund
+ * requests, Arabic cashback offers and whitespace-obscured refusals. Launch
+ * posting also requires an accountable named sender and settled wording.
+ * Historical-repair version stays 50; this does not request a full inbox reread.
  */
-export const PARSER_VERSION = 70;
+export const PARSER_VERSION = 71;
 /**
  * Historical-repair contract for already-saved data.
  *
@@ -1349,7 +1354,7 @@ const OTP_RE = new RegExp(
     // reference number.
     `|${OTP_CODE_WORD}(?:[^.\\n]|\\.\\d|\\.(?=(?:com|ae|sa|net|org|io|co|in|me)\\b)){0,80}?(?:\\bis\\b|[:=]|هو)\\s*${OTP_CODE_DIGITS}` +
     `|\\b\\d{4,8}\\s+is\\s+(?:your|the)\\s+(?:[a-z]+[\\s-]?){0,2}(?:code|otp|pin|password|passcode)\\b` +
-    `|\\b(?:use|enter)\\s+\\d{4,8}\\s+to\\b` +
+    `|\\b(?:use|enter)\\s+(?:code\\s+)?\\d{4,8}\\s+to\\b` +
     `|(?:code|otp|password|pin)\\s+(?:for|to\\s+complete)\\s+(?:your\\s+)?3-?d\\s*secure`,
   'i',
 );
@@ -2059,7 +2064,7 @@ const ARABIC_OFFER_RE = /^\s*عرض(?:\s|$)/u;
  * debit/charge in the same message always wins.
  */
 const ARABIC_MARKETING_RE =
-  /عرض|عروض|هديه|لا\s+تفوت|تسوق\s+لدي|اشترك|للاشتراك|لعدم\s+استلام[^.\n]{0,40}الرسائل|قد\s+تربح|فرصه\s+(?:ربح|للفوز)|اربح|السحب\s+الكبير|اول\s+يوم\s+اشتراك\s+مجاني/i;
+  /عرض|عروض|هديه|احصل\s+علي\s+(?:استرداد|استرجاع)\s+نقدي|لا\s+تفوت|تسوق\s+لدي|اشترك|للاشتراك|لعدم\s+استلام[^.\n]{0,40}الرسائل|قد\s+تربح|فرصه\s+(?:ربح|للفوز)|اربح|السحب\s+الكبير|اول\s+يوم\s+اشتراك\s+مجاني/i;
 // A monthly bill can carry a marketing sentence underneath it. The bill is
 // still an obligation, so its explicit total/deadline structure outranks any
 // offer vocabulary in the footer.
@@ -2257,7 +2262,7 @@ const EXPECTED_FUTURE_MOVEMENT_RE =
 // A loyalty "Redemption Request registered successfully ... Amount Paid: AED
 // 240.00" is a request, not a posted cash movement.
 const REQUEST_RECEIVED_RE =
-  /\b(?:payment|transfer|purchase|redemption)\s+request\b(?:[^.]|\.\d){0,64}\b(?:received|submitted|created|awaiting|pending|registered)\b|\b(?:received|submitted|created)\b(?:[^.]|\.\d){0,48}\b(?:payment|transfer|purchase)\s+request\b|تم\s+استلام\s+طلب\s+(?:سداد|دفع|تحويل)/iu;
+  /\b(?:payment|transfer|purchase|redemption|refund)\s+request\b(?:[^.]|\.\d){0,64}\b(?:received|submitted|created|awaiting|pending|registered)\b|\b(?:received|submitted|created)\b(?:[^.]|\.\d){0,48}\b(?:payment|transfer|purchase|refund)\s+request\b|تم\s+استلام\s+طلب\s+(?:سداد|دفع|تحويل)/iu;
 const MANDATE_LIFECYCLE_RE =
   /\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b(?:[^.]|\.\d){0,96}\b(?:will\s+(?:start|begin|commence|activate)|has\s+been\s+(?:created|registered|set\s*up|activated)|is\s+(?:now\s+)?active)\b|\b(?:created|registered|set\s*up|activated)\b(?:[^.]|\.\d){0,64}\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b|تم\s+(?:تسجيل|انشاء|تفعيل)[^\n]{0,64}(?:امر\s+)?(?:خصم\s+(?:تلقايي|مباشر)|تعليمات\s+مستديمه)/iu;
 const CONDITIONAL_PAYOUT_RE =
@@ -5136,6 +5141,12 @@ function nonPostingReasonInBody(
   body: string,
   suppressible: string,
 ): NonPostingReason | null {
+  // Match safety phrases regardless of horizontal spacing. Keep line breaks
+  // intact: field-list headings and sentence-bounded code guards depend on them.
+  if (/[^\S\r\n ]| {2}/u.test(body)) {
+    body = body.replace(/[^\S\r\n]+/gu, ' ');
+    suppressible = suppressible.replace(/[^\S\r\n]+/gu, ' ');
+  }
   if (CARD_LIFECYCLE_NOTICE_RE.test(suppressible)) return 'card-lifecycle';
   if (declinedInBody(body, suppressible)) return 'declined';
   if (
