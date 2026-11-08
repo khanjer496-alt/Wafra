@@ -18,15 +18,23 @@ public class WafraWidgetsModule: Module {
   public func definition() -> ModuleDefinition {
     Name("WafraWidgets")
 
-    Function("setSnapshot") { (json: String) in
-      guard let defaults = UserDefaults(suiteName: WafraWidgetsModule.appGroup) else { return }
-      if json.utf8.count > WafraWidgetsModule.maxSnapshotBytes {
+    AsyncFunction("setAppPrivacy") { (enabled: Bool, hideAmounts: Bool) in
+      WafraPrivacyCover.shared.configure(enabled: enabled, hideAmounts: hideAmounts)
+    }.runOnQueue(.main)
+
+    Function("setSnapshot") { (json: String) -> Bool in
+      guard let defaults = UserDefaults(suiteName: WafraWidgetsModule.appGroup) else { return false }
+      if json.utf8.count > WafraWidgetsModule.maxSnapshotBytes ||
+          !WafraPrivacyCover.acceptsSnapshot(json) {
         // Never leave an older snapshot on screen in place of one we refused.
         defaults.removeObject(forKey: WafraWidgetsModule.snapshotKey)
+        WafraWidgetsModule.reloadWidgets()
+        return false
       } else {
         defaults.set(json, forKey: WafraWidgetsModule.snapshotKey)
       }
       WafraWidgetsModule.reloadWidgets()
+      return true
     }
 
     Function("clearSnapshot") {
@@ -35,7 +43,7 @@ public class WafraWidgetsModule: Module {
     }
   }
 
-  private static func reloadWidgets() {
+  static func reloadWidgets() {
     #if canImport(WidgetKit)
     if #available(iOS 14.0, *) {
       WidgetCenter.shared.reloadAllTimelines()

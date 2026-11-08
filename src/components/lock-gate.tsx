@@ -61,6 +61,7 @@ export function LockGate({ children }: { children: React.ReactNode }) {
   // Asked only while App Lock is on; the lock screen is the only reader here.
   const biometricKind = useBiometricKind(state.appLock);
   const [unlocked, setUnlocked] = useState(false);
+  const [inactive, setInactive] = useState(AppState.currentState !== 'active');
   const [attempted, setAttempted] = useState(false);
   const [biometric, setBiometric] = useState<BiometricState>('prompting');
   const unavailableRef = useRef(false);
@@ -71,7 +72,17 @@ export function LockGate({ children }: { children: React.ReactNode }) {
   // this a passcode typed slower than the re-lock grace would prompt again.
   const authenticatingRef = useRef(false);
 
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', next => setInactive(next !== 'active'));
+    setInactive(AppState.currentState !== 'active');
+    return () => sub.remove();
+  }, []);
+
   const lockRequired = state.hydrated && state.appLock && Platform.OS !== 'web' && !unlocked;
+  const backgroundCovered = state.appLock && Platform.OS !== 'web' && inactive;
+  const privacyHidden = lockRequired || backgroundCovered;
+
+
 
   const tryUnlock = useCallback(async () => {
     try {
@@ -174,15 +185,16 @@ export function LockGate({ children }: { children: React.ReactNode }) {
     (each platform has its own prop) and made untappable.
   */
   return (
-    <PrivacyGateContext.Provider value={!lockRequired}>
+    <PrivacyGateContext.Provider value={!privacyHidden}>
     <View style={styles.container}>
       <View
-        style={lockRequired ? styles.hidden : styles.container}
-        pointerEvents={lockRequired ? 'none' : 'auto'}
-        accessibilityElementsHidden={lockRequired}
-        importantForAccessibility={lockRequired ? 'no-hide-descendants' : 'auto'}>
+        style={privacyHidden ? styles.hidden : styles.container}
+        pointerEvents={privacyHidden ? 'none' : 'auto'}
+        accessibilityElementsHidden={privacyHidden}
+        importantForAccessibility={privacyHidden ? 'no-hide-descendants' : 'auto'}>
         {children}
       </View>
+      {backgroundCovered ? <View testID="app-privacy-cover" style={[StyleSheet.absoluteFillObject, { backgroundColor: '#000' }]} /> : null}
       {lockRequired ? (
       <View
         accessibilityViewIsModal

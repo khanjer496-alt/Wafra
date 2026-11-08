@@ -152,6 +152,7 @@ export default function SettingsScreen() {
   const {
     state,
     setAppLock,
+    setPrivacyPreferences,
     setDailySummary,
     setPrivateMode,
     setCaptureOptOut,
@@ -336,7 +337,7 @@ export default function SettingsScreen() {
 
   const toggleAppLock = async (enabled: boolean) => {
     if (!enabled) {
-      setAppLock(false);
+      await setAppLock(false).catch(() => Alert.alert(t('notAvailable'), t('privacyPreferenceFailed')));
       return;
     }
     if (Platform.OS === 'web') {
@@ -364,7 +365,7 @@ export default function SettingsScreen() {
       ...APP_LOCK_AUTH_OPTIONS,
     });
     const outcome = unlockOutcome(result);
-    if (outcome === 'unlocked') setAppLock(true);
+    if (outcome === 'unlocked') await setAppLock(true).catch(() => Alert.alert(t('notAvailable'), t('privacyPreferenceFailed')));
     else if (outcome === 'unavailable') Alert.alert(t('noScreenLock'), t('noScreenLockBody'));
   };
 
@@ -1243,6 +1244,22 @@ export default function SettingsScreen() {
             testID="settings-app-lock"
             palette={band}
             glyph={<BiometricGlyph kind={biometricKind} size={18} color={band.text} />}
+          />
+          <SettingsSwitchRow
+            title={t('onlineLogosTitle')}
+            subtitle={`${t('onlineLogosDetail')}${state.privateMode ? ` ${t('onlineLogosPaused')}` : ''}`}
+            value={state.onlineLogosEnabled === true}
+            onChange={(enabled) => { void setPrivacyPreferences({ onlineLogosEnabled: enabled }).catch(() => Alert.alert(t('notAvailable'), t('privacyPreferenceFailed'))); }}
+            testID="settings-online-logos"
+            palette={band}
+          />
+          <SettingsSwitchRow
+            title={t('hideLockedWidgetAmountsTitle')}
+            subtitle={t('hideLockedWidgetAmountsDetail')}
+            value={state.hideWidgetAmountsWhenLocked !== false}
+            onChange={(enabled) => { void setPrivacyPreferences({ hideWidgetAmountsWhenLocked: enabled }).catch(() => Alert.alert(t('notAvailable'), t('privacyPreferenceFailed'))); }}
+            testID="settings-hide-widget-amounts"
+            palette={band}
           />
           {Platform.OS !== 'web' && linkRow(
             copy.trustedRow,

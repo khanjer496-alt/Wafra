@@ -265,13 +265,20 @@ the enrolled face, fingerprint or device credential. The operating system
 performs that check and returns success or failure. Wafra does not receive or
 store biometric templates.
 
+With App Lock on, Wafra covers app content in the iOS app switcher. On Android,
+it protects recent-apps previews and also blocks screenshots and screen recordings.
+Home Screen widget amounts are hidden by default while App Lock is on, even
+when Wafra is unlocked; you can change this in Settings. Names, counts and dates
+can remain visible. The operating system controls when an existing widget image
+refreshes.
+
 ## Other network activity
 
-- **Android logo artwork:** On Android, Wafra displays merchant and bank artwork using bundled images or local fallback icons and initials. The updated Android release does not send merchant names, bank names, or their domains to Brandfetch for logo lookups or artwork downloads. Older test builds and other platforms can use the existing logo service described in the policy.
+- **Logo consent on iOS and Android:** Online logo lookups are off by default, including after upgrading a build without this preference. Bundled images and local fallback icons work without sharing names. You may opt in using Settings → Online merchant logos. Turning it off stops new name searches and artwork downloads; requests already sent cannot be recalled. Your saved local-only preference also blocks online logos.
 
-- **Automatic logos:** 112 merchant logos are bundled with the app and supported
+- **Optional online logos:** 112 merchant logos are bundled with the app and supported
   launch-market banks are matched locally to fixed bank domains. For other
-  merchant or bank identities, when online features are enabled, Wafra may use
+  merchant or bank identities, only after you opt in to Online merchant logos and local-only mode is off, Wafra may use
   Brandfetch's Brand Search API. Merchant lookup first removes payment prefixes,
   amounts, account/card tails, URLs and common terminal/location suffixes. Bank
   lookup uses the institution name and rejects labels containing account/card

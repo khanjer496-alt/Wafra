@@ -10,7 +10,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { resolveRemoteMerchantLogo, type RemoteMerchantLogo } from '@/lib/merchant-logo-resolver';
 import type { CategoryId } from '@/lib/types';
-import { usePrivateMode } from '@/lib/store';
+import { useOnlineLogosAllowed } from '@/lib/store';
 
 interface MerchantAvatarProps {
   title: string;
@@ -29,10 +29,9 @@ const LOGO_PLATE = '#F7F4EE';
 
 /** Bundled artwork first; only locally verified identities may use CDN artwork. */
 function MerchantAvatarInner({ title, category, size = 34, plate = false }: MerchantAvatarProps) {
-  const privateMode = usePrivateMode();
+  const allowRemote = useOnlineLogosAllowed();
   const ground = useBand('home').glyphGround;
-  // Android record names may come from bank SMS; even a cached CDN URL reveals the brand.
-  const allowRemote = Platform.OS !== 'android' && !privateMode;
+  // Consent covers both name searches and CDN image requests, including cache hits.
   const bundled = merchantLogoFor(title);
   const [remote, setRemote] = useState<RemoteMerchantLogo | null>(null);
 

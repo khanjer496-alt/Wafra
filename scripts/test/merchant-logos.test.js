@@ -122,7 +122,7 @@ function loadAvatar(identities) {
       case 'expo-image': return { Image: 'image' };
       case '@/components/ui/category-avatar': return { CategoryAvatar: 'category' };
       case '@/components/ui/merchant-logo-assets': return identities;
-      case '@/lib/store': return { useStore: () => ({ state: { privateMode: false } }), usePrivateMode: () => false };
+      case '@/lib/store': return { useStore: () => ({ state: { privateMode: false } }), useOnlineLogosAllowed: () => false };
       case '@/hooks/use-theme': return { useTheme: () => ({ text: themeText }) };
       case '@/hooks/use-color-scheme': return { useColorScheme: () => colorScheme };
       case '@/hooks/use-band': return { useBand: () => ({ glyphGround: '#2E2A23' }) };
