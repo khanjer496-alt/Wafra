@@ -159,7 +159,7 @@ export default function MarketingHome() {
             <p className={styles.betaNote}>Public iPhone beta on TestFlight. Android: Google Play coming soon.</p>
             <p className={styles.captureDisclosure}>Optional iPhone automation can queue matching Messages, including personal conversations. Manual-only mode is available. <a href="/privacy/#iphone-automatic-capture">How Message text is handled</a>.</p>
             <p className={styles.languageNote}>Available in English and Arabic.</p>
-            <p className={styles.languageNote}>Published by Nasida Apps LLC.</p>
+            <p className={styles.languageNote}>Published by Naser Khanjar.</p>
           </div>
 
           <CaptureStage />
@@ -362,7 +362,7 @@ export default function MarketingHome() {
         <footer className={styles.footer}>
           <div className={styles.footerBrand}><WafraMark size={30} color="#1F6B52" /><span>Wafra: Budget &amp; Money Tracker</span></div>
           <div>
-            <p>Published by Nasida Apps LLC. iPhone beta · Android coming soon.</p>
+            <p>Published by Naser Khanjar. iPhone beta · Android coming soon.</p>
             <p><a href="/privacy/">Privacy</a> · <a href="/terms/">Terms</a> · <a href="/support/">Support</a></p>
           </div>
           <p className={styles.footnote}>Automatic bank-alert support varies by bank, country and message format. Wafra is not a bank and does not provide financial advice.</p>
