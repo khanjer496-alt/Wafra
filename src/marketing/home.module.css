@@ -53,10 +53,10 @@
   color: var(--ink);
   -webkit-font-smoothing: antialiased;
   font-family: Geist, ui-sans-serif, system-ui, sans-serif;
-  height: 100vh;
-  height: 100dvh;
-  overflow-x: hidden;
-  overflow-y: auto;
+  min-height: 100vh;
+  min-height: 100dvh;
+  flex-shrink: 0;
+  overflow: visible;
   scroll-behavior: smooth;
   scroll-padding-top: 100px;
 }
@@ -419,7 +419,7 @@
 .renewals li { align-items: center; border-bottom: 1px solid var(--line); display: grid; gap: 6px 16px; grid-template-columns: minmax(0, 1fr) auto 92px; padding: 15px 0; }
 .renewals strong { display: block; font-family: Geist-Medium, sans-serif; font-size: 17px; font-weight: normal; }
 .renewals li div span { color: var(--muted); display: block; font-size: 14px; margin-top: 2px; }
-.renewalMuted { opacity: .6; }
+.renewalMuted { color: var(--muted); }
 .tag { border: 1px solid var(--control); border-radius: 99px; color: var(--muted); font-family: GeistMono, monospace; font-size: 11px; padding: 4px 9px; white-space: nowrap; }
 .tagAlert { border-color: var(--amber); color: var(--amber); }
 .renewalAmount { font-family: GeistMono, monospace; font-size: 15px; font-variant-numeric: tabular-nums; text-align: right; }
