@@ -51,6 +51,7 @@ app-example
 scripts/test/build/
 
 # Local build products and simulator/test captures
+__pycache__/
 /artifacts/
 /builds/
 /modules/*/android/build/

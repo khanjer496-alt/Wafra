@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 82af02f054d3836b20f3ccbbb816dfbab240a8df44a7e5afa4d5c111756796e3
+// Generated from normal shipping TypeScript. Source SHA-256: 3f5c6a59a42b72965eded2f4c6ef112dd90aa033f06269c215ac4871710ba1a5
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -11185,7 +11185,7 @@ function isCompletedPrincipalRefund(source, span) {
     return /\b(?:purchase|transaction|payment|charge)\b(?:[^.\n]|\.\d){0,120}?\b(?:has\s+been|was|is|have\s+been)\s+(?:fully\s+)?refunded\b|(?<![ء-ي])(?:عمليه\s+)?(?:ال)?شراء(?:[^.\n]|\.(?=\S)){0,120}?\s+(?:و?تم\s+)(?:استرداد|استرجاع|ارجاع)(?:ها|ه)(?![ء-ي])/i.test(scope.text);
 }
 const CARD_CREDIT_TARGET = /\bcredit\s+card\b|بطاق(?:تك|ه|ة)\s+(?:ال)?ا[يئ]تماني[هة]/iu;
-const CARD_CREDIT_MOVEMENT = /\bcredited(?:\s+with|\s+to)?\b|(?:تم\s+)?(?:إيداع|ايداع|إضافة|اضافه|اضافة)/iu;
+const CARD_CREDIT_MOVEMENT = /\bcredited(?:\s+with|\s+to)?\b|(?<![ء-ي])(?:تم\s+)?(?:إيداع|ايداع|إضافة|اضافه|اضافة)(?![ء-ي])/iu;
 function isUnqualifiedCardCredit(source, span) {
     if (!span || !CARD_CREDIT_TARGET.test(source) || !CARD_CREDIT_MOVEMENT.test(source))
         return false;
@@ -14460,7 +14460,7 @@ function hasUnsettledPrincipalInContext(context, parsed) {
     const { raw, spans, refund } = context;
     if (hasUnsupportedPrincipal(raw, parsed, spans[0]))
         return true;
-    if ((0, principal_posting_guards_1.isUnqualifiedCardCredit)(raw, spans[0]))
+    if (parsed.type === 'income' && (0, principal_posting_guards_1.isUnqualifiedCardCredit)(raw, spans[0]))
         return true;
     if (principalNeedsTransferReview(raw, spans[0], parsed))
         return true;
@@ -15758,8 +15758,6 @@ function inspectUniversalBankEvent(source, context = {}) {
         if (cardPaymentReceipt && status === 'unknown')
             status = 'posted';
     }
-    if (family !== 'card-payment' && (0, principal_posting_guards_1.isUnqualifiedCardCredit)(source, money.amount.spans[0]))
-        status = 'informational';
     const multiplePostings = money.observations.filter((observation) => observation.role === 'transaction').length > 1;
     if (multiplePostings && status !== 'failed' && family !== 'statement' && family !== 'balance') {
         family = 'unknown';
@@ -15811,9 +15809,13 @@ function inspectUniversalBankEvent(source, context = {}) {
     const personSubject = source.match(/^\s*([A-Z][A-Z'’-]+(?:[ \t]+[A-Z][A-Z'’-]+){1,3})[ \t]+has[ \t]+received[ \t]+your[ \t]+(?:bank[ \t]+)?transfer\b/u)?.[1] ?? null;
     const personReceivedYourTransfer = personSubject !== null &&
         !/\b(?:revolut|n26|paypal|wise|monzo|starling|bunq|venmo|cash\s*app|zelle|klarna|ltd|limited|inc|gmbh|plc|llc|bank|account|space|pocket|vault|savings|wallet|card)\b/iu.test(personSubject);
-    const direction = counterpartyReceipt && readDirection === 'credit' ? 'unknown'
+    let direction = counterpartyReceipt && readDirection === 'credit' ? 'unknown'
         : receivedYourTransfer && readDirection === 'credit' ? personReceivedYourTransfer ? 'debit' : 'unknown'
             : readDirection;
+    if (direction === 'credit' && family !== 'card-payment' && (0, principal_posting_guards_1.isUnqualifiedCardCredit)(source, money.amount.spans[0])) {
+        status = 'informational';
+        direction = 'none';
+    }
     if (family === 'unknown' && families.length === 0 && status === 'posted' && !roleUnresolved && !directionConflict &&
         (direction === 'debit' || direction === 'credit') &&
         !money.observations.some((observation) => observation.role === 'fee')) {

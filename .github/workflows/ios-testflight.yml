@@ -971,6 +971,7 @@ jobs:
           ditto -x -k "$RUNNER_TEMP/Wafra-local.ipa" "$RUNNER_TEMP/wafra-ipa-check"
           APP="$RUNNER_TEMP/wafra-ipa-check/Payload/Wafra.app"
           test -d "$APP"
+          python3 scripts/check-ios-product-versions.py "$APP"
           codesign --verify --deep --strict --verbose=2 "$APP"
           codesign -d --entitlements :- "$APP" > "$RUNNER_TEMP/wafra-entitlements.plist"
           security cms -D -i "$APP/embedded.mobileprovision" > "$RUNNER_TEMP/wafra-profile.plist"

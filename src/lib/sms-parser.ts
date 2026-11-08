@@ -8372,7 +8372,7 @@ function readPrincipalContext(message: string, parsed: ParsedSms): PrincipalCont
 function hasUnsettledPrincipalInContext(context: PrincipalContext, parsed: ParsedSms): boolean {
   const { raw, spans, refund } = context;
   if (hasUnsupportedPrincipal(raw, parsed, spans[0])) return true;
-  if (isUnqualifiedCardCredit(raw, spans[0])) return true;
+  if (parsed.type === 'income' && isUnqualifiedCardCredit(raw, spans[0])) return true;
   if (principalNeedsTransferReview(raw, spans[0], parsed)) return true;
   if (parsed.type === 'expense' && spans[0] &&
     /(?:تم\s+اضافه|تم\s+ايداع)\s*$/i.test(raw.slice(Math.max(0, spans[0].start - 50), spans[0].start)) &&

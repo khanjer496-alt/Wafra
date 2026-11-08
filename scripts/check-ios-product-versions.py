@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail closed before signing: python3 scripts/check-ios-product-versions.py path/to/Wafra.app."""
+"""Fail closed before upload: python3 scripts/check-ios-product-versions.py path/to/Wafra.app."""
 import plistlib
 import sys
 from pathlib import Path

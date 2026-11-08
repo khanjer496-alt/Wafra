@@ -48,6 +48,33 @@ function history(row) {
 const brief = (p) => p && { kind: p.kind, type: p.type, amount: p.amountFils, currency: p.currency, merchant: p.merchant,
   transfer: !!p.transferHint, side: p.cardPaymentSide };
 
+// Synthetic purchase controls: reward and fee footers are not card settlements.
+for (const row of [
+  { country: 'AE', sender: 'EmiratesNBD', body: 'Purchase of AED 50.00 at NOON with your credit card 1234, reward points have been credited.' },
+  { country: 'SA', sender: 'AlRajhiBank', body: 'شراء بمبلغ 50 ر.س لدى نون ببطاقتك الائتمانية 1234 بالإضافة إلى رسوم الخدمة' },
+  { country: 'SA', sender: 'AlRajhiBank', body: 'شراء بمبلغ 50 ر.س لدى نون ببطاقتك الائتمانية 1234 وتمت إضافة 5 نقاط' },
+]) {
+  test(`card credit purchase control: ${row.body}`, () => {
+    const parsed = android(row);
+    assert.equal(parsed?.type, 'expense', JSON.stringify(brief(parsed)));
+    assert.equal(parsed.amountFils, 5000);
+    for (const entry of history(row)) {
+      assert.equal(entry.type, 'expense', JSON.stringify(brief(entry)));
+      assert.equal(entry.amountFils, 5000);
+    }
+  });
+}
+test('card credit purchase control: prospective cashback does not override universal debit direction', () => {
+  const body = 'Purchase of AED 50.00 at NOON with your credit card 1234, 2% cashback will be credited.';
+  const event = load('@/lib/universal-parser').inspectUniversalBankEvent(body);
+  assert.equal(event.family, 'purchase');
+  assert.equal(event.direction, 'debit');
+  assert.equal(event.status, 'posted');
+  // The regional parser may independently refuse prospective promotional copy.
+  const parsed = android({ country: 'AE', sender: 'EmiratesNBD', body });
+  assert.ok(!parsed || parsed.type === 'expense', JSON.stringify(brief(parsed)));
+});
+
 // ── 1. A credit limit or balance is never the purchase amount ───────────────
 const limitRows = [
   { id: 'a credit limit stated before the purchase', country: 'SA', sender: 'AlRajhiBank',

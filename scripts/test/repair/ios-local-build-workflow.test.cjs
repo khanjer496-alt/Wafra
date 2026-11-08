@@ -51,6 +51,7 @@ test('source and signing are pinned, and only a verified exact-source build may 
   const submit = steps.findIndex(s => s.name === 'Submit the verified existing IPA to TestFlight');
   assert.ok(verify < preserve && preserve < gate && gate < submit);
   assert.match(steps[verify].run, /codesign --verify --deep --strict/);
+  assert.match(steps[verify].run, /python3 scripts\/check-ios-product-versions\.py "\$APP"/);
   assert.match(steps[verify].run, /--verify-app-intents-metadata/);
   assert.match(steps[verify].run, /--verify-history-resources/);
   assert.match(steps[verify].run, /ProbeWafraAutomationInputIntent.*not in/);
