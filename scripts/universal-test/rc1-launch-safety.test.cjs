@@ -75,6 +75,45 @@ test('card credit purchase control: prospective cashback does not override unive
   assert.ok(!parsed || parsed.type === 'expense', JSON.stringify(brief(parsed)));
 });
 
+// Exact synthetic review probes. The Arabic boundary and the direction guard
+// landed together in c4e3c3de; these spellings must stay covered after rebundling.
+for (const body of [
+  'تم خصم مبلغ 100.00 درهم من بطاقتك الائتمانية بالإضافة إلى رسوم الخدمة',
+  'AED 100.00 spent on credit card 1234 at NOON and 10 points credited',
+]) test(`card credit review probe retains the AED 100 debit: ${body}`, () => {
+  const row = { country: 'AE', sender: 'EmiratesNBD', body };
+  session('AE', 'AED');
+  const core = load('@/lib/sms-parser').parseSms(body, {}, { sender: row.sender });
+  const historyRows = history(row);
+  assert.equal(historyRows.length, 1, 'senderless History retains this purchase');
+  for (const parsed of [core, android(row), ...historyRows]) {
+    assert.equal(parsed?.kind, 'transaction');
+    assert.equal(parsed?.type, 'expense', JSON.stringify(brief(parsed)));
+    assert.equal(parsed.amountFils, 10000);
+    assert.equal(parsed.currency, 'AED');
+  }
+  const event = load('@/lib/universal-parser').inspectUniversalBankEvent(body);
+  assert.equal(event.direction, 'debit');
+  assert.equal(event.status, 'posted');
+});
+for (const verb of ['إضافة', 'ايداع']) test(`Arabic card-credit boundary still recognizes standalone ${verb}`, () => {
+  const body = `تم ${verb} مبلغ 100.00 درهم في بطاقتك الائتمانية`;
+  const start = body.indexOf('100.00');
+  assert.equal(load('@/lib/principal-posting-guards').isUnqualifiedCardCredit(body, { start, end: start + 6 }), true);
+  session('AE', 'AED');
+  assert.equal(load('@/lib/sms-parser').parseSms(body, {}, { sender: 'EmiratesNBD' }), null);
+  assert.equal(android({ country: 'AE', sender: 'EmiratesNBD', body }), null);
+});
+test('Arabic fee words do not claim Saudi currency; standalone riyal units still route', () => {
+  const detect = load('@/lib/markets').detectLaunchMarketFromAlert;
+  for (const word of ['رسوم الخدمة', 'رسائل', 'مرسوم']) assert.equal(detect(word), null, word);
+  assert.equal(detect('تم خصم مبلغ 100.00 درهم بالإضافة إلى رسوم الخدمة'), 'AE');
+  for (const text of ['خصم 100 ر.س', 'خصم 100ر.س', 'خصم ر.س100', 'خصم 100 رس', 'خصم 100 ريال']) {
+    assert.equal(detect(text), 'SA', text);
+  }
+  assert.equal(detect('خصم 100 درهم ورسوم 2 ر.س'), null, 'two explicit currencies remain ambiguous');
+});
+
 // ── 1. A credit limit or balance is never the purchase amount ───────────────
 const limitRows = [
   { id: 'a credit limit stated before the purchase', country: 'SA', sender: 'AlRajhiBank',

@@ -393,7 +393,8 @@ export function setActiveMarket(id: string): boolean {
 }
 
 const AED_ALERT = /\b(?:AED|Dhs?\.?)\b|د\.?[إا]\.?|دراهم|درهم/iu;
-const SAR_ALERT = /\b(?:SAR|SR)\b|ر\.?\s?س\.?|ريال/iu;
+// The riyal abbreviation is a unit, never the first letters of رسوم/رسائل.
+const SAR_ALERT = /\b(?:SAR|SR)\b|(?<![ء-ي])ر\.?\s?س\.?(?![ء-ي])|ريال/iu;
 // STC Bank glues the code to the figure ("Amount:100SR"). That form is weaker
 // evidence — "Ref 5521SR" is a reference — so it counts only when nothing in
 // the body names the dirham.
