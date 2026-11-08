@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 53df3f8f8b66098cea4343c701ba16925eecb522198adf57baa2e4244c3c2d42
+// Generated from normal shipping TypeScript. Source SHA-256: 4d3c6f54c1a3b6d63eb4240a092dcd09b64e9e5c50f88de0d88770f786577398
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -15719,7 +15719,7 @@ function inspectUniversalBankEvent(source, context = {}) {
     if (pendingAnywhere && (status === 'posted' || status === 'unknown'))
         status = 'informational';
     const refundStatus = (0, principal_posting_guards_1.refundPrincipalStatus)(source, money.amount.spans, money.draft.candidates.map(candidate => candidate.span));
-    if (refundStatus === 'pending' || (0, principal_posting_guards_1.isUnqualifiedCardCredit)(source, money.amount.spans[0]) || (0, principal_posting_guards_1.isHedgedPrincipal)(source, money.amount.spans))
+    if (refundStatus === 'pending' || (family !== 'card-payment' && (0, principal_posting_guards_1.isUnqualifiedCardCredit)(source, money.amount.spans[0])) || (0, principal_posting_guards_1.isHedgedPrincipal)(source, money.amount.spans))
         status = 'informational';
     if (refundStatus === 'cancelled')
         status = 'failed';

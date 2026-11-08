@@ -465,7 +465,7 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
   // A refund expected later and an approximate principal are not settled facts,
   // even if a broad language pack recognizes the purchase/refund noun.
   const refundStatus = refundPrincipalStatus(source, money.amount.spans, money.draft.candidates.map(candidate => candidate.span));
-  if (refundStatus === 'pending' || isUnqualifiedCardCredit(source, money.amount.spans[0]) || isHedgedPrincipal(source, money.amount.spans)) status = 'informational';
+  if (refundStatus === 'pending' || (family !== 'card-payment' && isUnqualifiedCardCredit(source, money.amount.spans[0])) || isHedgedPrincipal(source, money.amount.spans)) status = 'informational';
   if (refundStatus === 'cancelled') status = 'failed';
   const hasStatement = money.statementTotal.evidence !== 'missing' || money.minimumDue.evidence !== 'missing';
   const hasBalance = money.balance.evidence !== 'missing' || money.creditLimit.evidence !== 'missing';
