@@ -563,3 +563,17 @@
 @media (prefers-contrast: more) {
   .page { --muted: #16130F; --line: #8A8172; --control: #57524A; }
 }
+
+/* Keep the capture scope next to the beta action and examples clearly labelled. */
+.captureDisclosure { color: var(--muted); font-size: 14px; line-height: 1.65; max-width: 510px; }
+.captureDisclosure a { color: var(--green); text-underline-offset: 3px; }
+.sampleLabel { color: var(--green); display: block; font-family: Geist-Medium, sans-serif; font-size: 12px; line-height: 1.6; margin: 0 0 10px; }
+.captureDetails summary { color: var(--green); cursor: pointer; font-family: Geist-Medium, sans-serif; line-height: 1.5; padding: 14px 0; }
+.captureDetails summary:focus-visible { outline: 2px solid var(--green); outline-offset: 4px; }
+.captureDetails[open] summary { margin-bottom: 16px; }
+.footerBrand { align-items: start; display: flex; gap: 10px; }
+.footerBrand svg { flex-shrink: 0; }
+@media (max-width: 680px) {
+  .availability { max-width: 150px; text-align: right; }
+  .primaryAction { gap: 12px; padding-inline: 18px; }
+}

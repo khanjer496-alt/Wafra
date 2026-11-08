@@ -35,7 +35,7 @@ export const SITE_URL = getSiteUrl();
 // site-events.mjs; the finalizer's _redirects file covers a static-only host.
 // Add an Android store destination only after public Play availability is verified.
 export const DOWNLOAD_PATHS = { iphone: '/get/iphone' } as const;
-export const MARKETING_TITLE = 'Wafra — Private Budget & Expense Tracker';
+export const MARKETING_TITLE = 'Wafra: Budget & Money Tracker';
 export const MARKETING_DESCRIPTION =
   'Track spending, budgets, bills and subscriptions anywhere without a bank login. Start manually or use optional supported imports.';
 const MESSAGE_ACCESS_ANSWER =
@@ -44,7 +44,7 @@ const MESSAGE_ACCESS_ANSWER =
 export const PRODUCT_SCHEMA = {
   '@context': 'https://schema.org',
   '@type': 'SoftwareApplication',
-  name: 'Wafra',
+  name: 'Wafra: Budget & Money Tracker',
   alternateName: 'وفرة',
   applicationCategory: 'FinanceApplication',
   operatingSystem: 'iOS, Android',

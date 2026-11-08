@@ -47,7 +47,7 @@ ok(
 );
 ok(
   'the hero capture illustration discloses sample data and bank-format dependence',
-  landing.includes('Illustration · sample data · automatic capture depends on your bank’s alert format') &&
+  landing.includes('Illustration · Sample data · automatic capture depends on your bank’s alert format') &&
     /role="img"\s+aria-label="Illustration with sample data/.test(landing),
 );
 ok(
