@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 445f00a287762e929787ef23bf5b1f3a6a1d63a3f7a7a21db4d89c9b69c9a7af
+// Generated from normal shipping TypeScript. Source SHA-256: b60739a99a657721ef15ce76b392257452eeab627898d27d3ba6c9c93908bfe7
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -2504,7 +2504,7 @@ const hasLinkCallToAction = (source) => {
     return false;
 };
 const NOT_A_SETTLED_FACT = [
-    /^\s*(?:Dear\s+Customer[,!:]\s*)?احصل\s+عل[ىي]\s+(?:استرداد|استرجاع)\s+نقدي/iu,
+    /^\s*(?:Dear\s+Customer[,!:]\s*)?(?:[^\n.!?]{0,40}[،,!:]\s*)?احصل\s+عل[ىي]\s+(?:استرداد|استرجاع)\s+نقدي/iu,
     /\bfraud\s+alert\b|(?<!\b(?:if|in\s+case|should)\b[^.!?\n]{0,60})\b(?:suspicious\s+(?:activity|transaction|charge|payment|login|purchase)|unusual\s+activity)\b|\bif\s+it\s+was\s+you\b|\bwas\s+this\s+you\b|\bwe\s+(?:have\s+)?(?:blocked|stopped|declined|locked)\b|(?<!\b(?:if|in\s+case|should|can|could|may)\b[^.!?\n]{0,60})\blocked\b|\bunder\s+review\b/iu,
     /\bearn\s+(?:up\s+to\s+)?(?:[$€£₹]\s?\d|\d[\d.,]*\s*(?:%|[A-Z]{3}\b))(?:[^.!?\n]|\.\d){0,40}?\b(?:when|every\s+time|each\s+time|for\s+every)\b|\btap\s+to\s+accept\b/iu,
     /\bdid\s+you\s+(?:authori[sz]e|make|attempt|use)\b|\breply\s+(?:y|yes|n|no|1|2)\b|(?<!\b(?:if|in\s+case|should)\b[^.!?\n]{0,40})\brecogni[sz]e\b|\bflagged\b|\bheld\b|\b(?:otp|one[-\s]time|verification|security)\s+code\b|(?<!\b(?:auth|authori[sz]ation|approval|merchant|branch|postal|zip|sort|mcc|promo|category|reference|ref|biller|bsb)\s+)\bcode\s*:?\s*\d{4,}\b/iu,
@@ -2621,7 +2621,9 @@ const EXECUTED_MANDATE_DEBIT = /(\b(?:has\s+been|was)\s+(?:debited|charged|deduc
 const CREDITED_TOWARDS_REVERSAL = /(\b(?:is|has\s+been|was)\s+(?:successfully\s+)?credited\s+with\b(?:[^.\n]|\.(?=\S)){0,80}?\btowards\s+)reversal\b/giu;
 const REVERSED_THEN_CREDITED_TO_YOU = /\brevers(?:al|ed|e)\b(?:[^.\n]|\.(?=\S)){0,200}?\b(?:is|has\s+been|was)\s+(?:successfully\s+)?credited\s+to\s+your\b/giu;
 const RECOGNISE_CALLBACK_FOOTER = /(?<!\p{L})(?:(?:don['’]t|do\s+not|didn['’]t)\s+recogni[sz]e\b[^.!?\n]{0,30}\?\s*(?=(?:call|contact|ring|phone)\b)|si\s+no\s+(?:lo\s+|la\s+)?reconoc(?:e|es)\b[^.!?\n]{0,60}?(?=\bllam(?:a|e|ar)\b)|n[ãa]o\s+reconhece\b[^.!?\n]{0,40}?\??\s*(?=(?:ligue|ligar)\b))/giu;
+const NUMERIC_DISCOUNT_CODE = /\b(use\s+)code(\s+\d{4,8}\s+to\s+get\s+\d{1,3}\s?%\s+off\b)/giu;
 const neutraliseBenignShapes = (source) => source
+    .replace(NUMERIC_DISCOUNT_CODE, '$1promo code$2')
     .replace(CARD_PRODUCT_NAME, 'card')
     .replace(EXECUTED_MANDATE_DEBIT, '$1instruction')
     .replace(CREDITED_TOWARDS_REVERSAL, '$1refund')
@@ -9661,12 +9663,18 @@ const MONEY_ARRIVED_CLAIM = /(?<!\p{L})(?:you\s+have\s+received|you\s+received|r
 const MONEY_CLAIM_EVIDENCE = /(?<!\p{L})(?:\p{L}*bank|banco|banque|wallet|carteira|billetera|account|acct|a\/c|conta|cuenta|compte|konto|rekening|balance|bal|avl|saldo|solde|ref(?:erence)?|txn|trx|tid|transaction|transfer|transferencia|transfer[êe]ncia|virement|[ée]-?transfer|pix|spei|aani|sarie|yape|plin|nequi|daviplata|m-?pesa|mpesa|upi|imps|neft|rtgs|zelle|interac|gcash|maya|paytm|jazzcash|easypaisa|momo|airtel\s+money)(?!\p{L})/iu;
 const TRANSACTION_CODE = /\b(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{8,12}\b/u;
 const PERSONAL_MESSAGE_PREFIX_RE = /^\s*(?:(?:hi|hey|hello)\b(?:[^\r\n.!?]{0,40}[,!:]|\s+)\s*)?(?:I(?:\s+(?:(?:have|just|already)\s+){0,2}|['’]ve\s+(?:(?:just|already)\s+)?)(?:spent|paid|bought|sent|deposited|transferred|refunded)\b|[اأ]نا\s+(?:(?:قد|لقد)\s+)?(?:صرفت|دفعت|اشتريت|حولت|حوّلت|أرسلت|ارسلت)(?=\s))/iu;
-const hasPersonalMessagePrefix = (source) => {
+const hasPersonalMessagePrefix = (source, sender = '') => {
     const text = source.replace(/^\s*Dear\s+Customer[,!:]\s*/iu, '');
     if (PERSONAL_MESSAGE_PREFIX_RE.test(text) || /^\s*they\s+charged\s+me\b/iu.test(text))
         return true;
-    return /^\s*(?:paid|spent|received)\b/iu.test(text) &&
-        !GENERIC_BANK_CONTEXT.test(text) && !MONEY_CLAIM_EVIDENCE.test(text) && !TRANSACTION_CODE.test(text);
+    if (!/^\s*(?:(?:hi|hey|hello|lol|ok|just|so)\b[\s,!:]*)*(?:paid|spent|received)\b/iu.test(text))
+        return false;
+    if (/\b(?:my\s+(?:account|card)|from\s+(?:me|you)|thanks|lol|remind\s+me)\b/iu.test(text))
+        return true;
+    const lacksBankEvidence = !GENERIC_BANK_CONTEXT.test(text) &&
+        !MONEY_CLAIM_EVIDENCE.test(text) && !TRANSACTION_CODE.test(text);
+    return lacksBankEvidence && (/\bfor\s+(?:lunch|dinner|breakfast)\b/iu.test(text) ||
+        (0, exports.isUnaccountableLaunchSender)(sender));
 };
 exports.hasPersonalMessagePrefix = hasPersonalMessagePrefix;
 const NEGATED_PRINCIPAL_MOVEMENT_RE = /^\s*(?:Dear\s+Customer[,!:]\s*)?((?:[A-Z]{3}|\p{Sc})\s*\d[\d,.]*)\s+(?:(?:has|have)\s+not\s+been|hasn['’]t\s+been|(?:was|were|is|are)\s+not|(?:was|were|is|are)n['’]t)\s+(?:transferred|debited|credited|deducted|charged|withdrawn|paid|deposited|refunded)\b/iu;
@@ -9697,7 +9705,7 @@ const hasGenericBankAlertContext = (source, sender = '') => {
 exports.hasGenericBankAlertContext = hasGenericBankAlertContext;
 const SENDERLESS_USED_CARD_HINT = /^\s*your\s+(?:cr\.\s*)?card\s+(?:[*xX•·]{1,24}\s*)?(\d{4})(?![\p{L}\p{N}]|[ \t-]+\d)[ \t]+(?:was|has[ \t]+been)[ \t]+used[ \t]+for\b/iu;
 const inspectGenericBankEventForReview = (source, sender = '', market, sourceContext) => {
-    if ((0, exports.hasPersonalMessagePrefix)(source) || hasNegatedPrincipalMovement(source))
+    if ((0, exports.hasPersonalMessagePrefix)(source, sender) || hasNegatedPrincipalMovement(source))
         return null;
     const noContext = !(0, exports.hasGenericBankAlertContext)(source, sender) && !(0, latam_alert_templates_1.matchLatamTemplate)(source, { sender });
     const claimAdmitted = noContext && (!sender.trim() || (0, best_effort_autopost_1.isUnverifiedAlertSender)(sender)) &&
@@ -10108,7 +10116,7 @@ const launchSenderAnswersFor = (source, sender, parsed) => {
     if ((0, best_effort_autopost_1.isNotAutoPostableMoney)(source))
         return false;
     if (!isAbsentLaunchSender(sender))
-        return (0, best_effort_autopost_1.isRegisteredAlertSender)(sender);
+        return !(0, best_effort_autopost_1.isUnverifiedAlertSender)(sender);
     if (parsed.kind !== 'transaction')
         return true;
     return parsed.type !== 'income' || (0, best_effort_autopost_1.namesOwnInstrumentTail)(source, 'credit');
@@ -10123,7 +10131,7 @@ const createLaunchAlertSession = ({ overrides, regionHint = null, pinnedCurrency
     let sessionMarket = pinnedCurrency === 'AED' ? 'AE' : pinnedCurrency === 'SAR' ? 'SA' : null;
     let detected = null;
     const inspect = (source, sender) => {
-        if ((0, exports.hasPersonalMessagePrefix)(source) || hasNegatedPrincipalMovement(source))
+        if ((0, exports.hasPersonalMessagePrefix)(source, sender) || hasNegatedPrincipalMovement(source))
             return null;
         if (!exports.REVIEW_MONEY_HINT.test(source))
             return null;
@@ -10174,7 +10182,7 @@ const createLaunchAlertSession = ({ overrides, regionHint = null, pinnedCurrency
         return result;
     };
     const parse = (source, sender, inspection = null, forcedMarket, observedAt) => {
-        if ((0, exports.hasPersonalMessagePrefix)(source) || hasNegatedPrincipalMovement(source))
+        if ((0, exports.hasPersonalMessagePrefix)(source, sender) || hasNegatedPrincipalMovement(source))
             return null;
         if ((0, bnpl_providers_1.isBnplProviderSource)(sender))
             return null;
@@ -10215,7 +10223,7 @@ const createLaunchAlertSession = ({ overrides, regionHint = null, pinnedCurrency
         });
     };
     const parseUnproven = (source, sender, inspection = null, observedAt) => {
-        if ((0, exports.hasPersonalMessagePrefix)(source) || hasNegatedPrincipalMovement(source))
+        if ((0, exports.hasPersonalMessagePrefix)(source, sender) || hasNegatedPrincipalMovement(source))
             return null;
         if (!bestEffort.enabled)
             return null;
@@ -11381,7 +11389,8 @@ const OTP_CODE_DIGITS = String.raw `(?<![\d.,])\d{4,8}\b(?![.,]\d)`;
 const OTP_RE = new RegExp(`${OTP_CODE_WORD}(?:\\s+(?:code|otp|password|pin|number))?\\s*(?:is|:|-|=|هو)?\\s*${OTP_CODE_DIGITS}` +
     `|${OTP_CODE_WORD}(?:[^.\\n]|\\.\\d|\\.(?=(?:com|ae|sa|net|org|io|co|in|me)\\b)){0,80}?(?:\\bis\\b|[:=]|هو)\\s*${OTP_CODE_DIGITS}` +
     `|\\b\\d{4,8}\\s+is\\s+(?:your|the)\\s+(?:[a-z]+[\\s-]?){0,2}(?:code|otp|pin|password|passcode)\\b` +
-    `|\\b(?:use|enter)\\s+(?:code\\s+)?\\d{4,8}\\s+to\\b` +
+    `|\\b(?:use|enter)\\s+\\d{4,8}\\s+to\\b` +
+    `|\\b(?:use|enter)\\s+code\\s+\\d{4,8}\\s+to\\s+(?:authori[sz]e|authenticate|verify|confirm|approve|complete|make|pay|transfer|purchase|log\\s*in|sign\\s*in|reset|activate)\\b` +
     `|(?:code|otp|password|pin)\\s+(?:for|to\\s+complete)\\s+(?:your\\s+)?3-?d\\s*secure`, 'i');
 const OTP_FOOTER_RE = new RegExp(`do not (?:share|disclose|reveal|give)|never (?:share|disclose|reveal|ask)|will never ask|beware of fraud` +
     `|${OTP_CODE_WORD}` +

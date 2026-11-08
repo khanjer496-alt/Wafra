@@ -1354,7 +1354,9 @@ const OTP_RE = new RegExp(
     // reference number.
     `|${OTP_CODE_WORD}(?:[^.\\n]|\\.\\d|\\.(?=(?:com|ae|sa|net|org|io|co|in|me)\\b)){0,80}?(?:\\bis\\b|[:=]|هو)\\s*${OTP_CODE_DIGITS}` +
     `|\\b\\d{4,8}\\s+is\\s+(?:your|the)\\s+(?:[a-z]+[\\s-]?){0,2}(?:code|otp|pin|password|passcode)\\b` +
-    `|\\b(?:use|enter)\\s+(?:code\\s+)?\\d{4,8}\\s+to\\b` +
+    `|\\b(?:use|enter)\\s+\\d{4,8}\\s+to\\b` +
+    // A numeric discount code in a posted receipt is not a security code.
+    `|\\b(?:use|enter)\\s+code\\s+\\d{4,8}\\s+to\\s+(?:authori[sz]e|authenticate|verify|confirm|approve|complete|make|pay|transfer|purchase|log\\s*in|sign\\s*in|reset|activate)\\b` +
     `|(?:code|otp|password|pin)\\s+(?:for|to\\s+complete)\\s+(?:your\\s+)?3-?d\\s*secure`,
   'i',
 );

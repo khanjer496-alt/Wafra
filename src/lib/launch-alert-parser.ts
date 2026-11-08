@@ -128,13 +128,17 @@ const MONEY_CLAIM_EVIDENCE =
 const TRANSACTION_CODE = /\b(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{8,12}\b/u;
 /** Explicit first-person chat cannot become an issuer alert through a money verb. */
 const PERSONAL_MESSAGE_PREFIX_RE = /^\s*(?:(?:hi|hey|hello)\b(?:[^\r\n.!?]{0,40}[,!:]|\s+)\s*)?(?:I(?:\s+(?:(?:have|just|already)\s+){0,2}|['’]ve\s+(?:(?:just|already)\s+)?)(?:spent|paid|bought|sent|deposited|transferred|refunded)\b|[اأ]نا\s+(?:(?:قد|لقد)\s+)?(?:صرفت|دفعت|اشتريت|حولت|حوّلت|أرسلت|ارسلت)(?=\s))/iu;
-export const hasPersonalMessagePrefix = (source: string): boolean => {
+export const hasPersonalMessagePrefix = (source: string, sender = ''): boolean => {
   const text = source.replace(/^\s*Dear\s+Customer[,!:]\s*/iu, '');
   if (PERSONAL_MESSAGE_PREFIX_RE.test(text) || /^\s*they\s+charged\s+me\b/iu.test(text)) return true;
-  // Elliptical first-person chats omit "I": "Paid AED 85 for lunch".
-  // Bank receipts with an account, card, balance or reference keep their path.
-  return /^\s*(?:paid|spent|received)\b/iu.test(text) &&
-    !GENERIC_BANK_CONTEXT.test(text) && !MONEY_CLAIM_EVIDENCE.test(text) && !TRANSACTION_CODE.test(text);
+  // Elliptical chats omit "I" and may start with a casual filler. Explicit
+  // personal wording stays refused even if a sender label names a bank.
+  if (!/^\s*(?:(?:hi|hey|hello|lol|ok|just|so)\b[\s,!:]*)*(?:paid|spent|received)\b/iu.test(text)) return false;
+  if (/\b(?:my\s+(?:account|card)|from\s+(?:me|you)|thanks|lol|remind\s+me)\b/iu.test(text)) return true;
+  const lacksBankEvidence = !GENERIC_BANK_CONTEXT.test(text) &&
+    !MONEY_CLAIM_EVIDENCE.test(text) && !TRANSACTION_CODE.test(text);
+  return lacksBankEvidence && (/\bfor\s+(?:lunch|dinner|breakfast)\b/iu.test(text) ||
+    isUnaccountableLaunchSender(sender));
 };
 
 // Only a leading principal-money claim is checked here. A posted purchase
@@ -199,7 +203,7 @@ export const inspectGenericBankEventForReview = (
   market?: string | null,
   sourceContext?: UniversalParseContext,
 ): UniversalBankEvent | null => {
-  if (hasPersonalMessagePrefix(source) || hasNegatedPrincipalMovement(source)) return null;
+  if (hasPersonalMessagePrefix(source, sender) || hasNegatedPrincipalMovement(source)) return null;
   // An exact LatAm bank template is bank-alert context in its own right.
   const noContext = !hasGenericBankAlertContext(source, sender) && !matchLatamTemplate(source, { sender });
   // A "money arrived" claim from a phone number, e-mail, generic header or
@@ -805,7 +809,7 @@ const sharedSenderOutsideGulf = (
  * UAE/SAUDI sender and wording policy, after the regional grammar:
  *  - smishing, fraud prompts and not-a-new-movement wording never post,
  *    including when the sender label names a registered bank;
- *  - a present unregistered sender (phone, e-mail or generic header) waits
+ *  - a present unverified sender (phone, e-mail or generic header) waits
  *    in Review, even when the body looks exactly like a bank template;
  *  - a blank sender or Wafra transport placeholder retains the grammar, but
  *    a credit must name the person's OWN account or card by its tail
@@ -814,7 +818,7 @@ const sharedSenderOutsideGulf = (
  *    in Review with its amount (heldLaunchCreditForReview, auto-import.ts).
  * The parser's own card identity is NOT evidence: it reads a payer's
  * "from card 1234" as readily as the reader's.
- * A registered header keeps the grammar's decision after the wording guard.
+ * Other named headers keep the grammar's decision after the wording guard.
  */
 // These queue labels carry no issuer identity. Swift's notification adapter
 // makes the same normalization before invoking the shared parser bundle.
@@ -834,7 +838,7 @@ const launchSenderAnswersFor = (source: string, sender: string, parsed: ParsedSm
   // A familiar sender label cannot make a smishing call-to-action settled
   // money. Apply the same wording guard as the worldwide posting policy.
   if (isNotAutoPostableMoney(source)) return false;
-  if (!isAbsentLaunchSender(sender)) return isRegisteredAlertSender(sender);
+  if (!isAbsentLaunchSender(sender)) return !isUnverifiedAlertSender(sender);
   if (parsed.kind !== 'transaction') return true;
   return parsed.type !== 'income' || namesOwnInstrumentTail(source, 'credit');
 };
@@ -898,7 +902,7 @@ export const createLaunchAlertSession = ({
   let detected: 'AE' | 'SA' | null = null;
 
   const inspect = (source: string, sender: string): UniversalAlertReview | null => {
-    if (hasPersonalMessagePrefix(source) || hasNegatedPrincipalMovement(source)) return null;
+    if (hasPersonalMessagePrefix(source, sender) || hasNegatedPrincipalMovement(source)) return null;
     if (!REVIEW_MONEY_HINT.test(source)) return null;
     // A launch-tested issuer can quote any foreign transaction currency. Its
     // exact sender evidence already outranks that currency, and the universal
@@ -977,7 +981,7 @@ export const createLaunchAlertSession = ({
     forcedMarket?: string,
     observedAt?: number,
   ): ParsedSms | null => {
-    if (hasPersonalMessagePrefix(source) || hasNegatedPrincipalMovement(source)) return null;
+    if (hasPersonalMessagePrefix(source, sender) || hasNegatedPrincipalMovement(source)) return null;
     // A BNPL provider's restatement of a bank card charge (see
     // bnpl-providers.ts). The regional path already refuses it; the
     // worldwide fallback below must not resurrect it on an unpinned ledger.
@@ -1057,7 +1061,7 @@ export const createLaunchAlertSession = ({
     inspection: UniversalAlertReview | null = null,
     observedAt?: number,
   ): ParsedSms | null => {
-    if (hasPersonalMessagePrefix(source) || hasNegatedPrincipalMovement(source)) return null;
+    if (hasPersonalMessagePrefix(source, sender) || hasNegatedPrincipalMovement(source)) return null;
     if (!bestEffort.enabled) return null;
     // Same rule as parse(): an SMS from a BNPL provider's sender ID reaches
     // this path (it is no launch-bank sender) and must not post as an

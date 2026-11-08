@@ -465,7 +465,7 @@ const hasLinkCallToAction = (source: string): boolean => {
 const NOT_A_SETTLED_FACT: readonly RegExp[] = [
   // A leading cashback invitation quotes a reward to earn. The launch
   // semantic fallback must not rebuild its purchase wording as a new debit.
-  /^\s*(?:Dear\s+Customer[,!:]\s*)?احصل\s+عل[ىي]\s+(?:استرداد|استرجاع)\s+نقدي/iu,
+  /^\s*(?:Dear\s+Customer[,!:]\s*)?(?:[^\n.!?]{0,40}[،,!:]\s*)?احصل\s+عل[ىي]\s+(?:استرداد|استرجاع)\s+نقدي/iu,
   // A conditional footer ("In case the transaction is suspicious, call …",
   // "If you notice unusual activity …") is advice, not a fraud prompt.
   /\bfraud\s+alert\b|(?<!\b(?:if|in\s+case|should)\b[^.!?\n]{0,60})\b(?:suspicious\s+(?:activity|transaction|charge|payment|login|purchase)|unusual\s+activity)\b|\bif\s+it\s+was\s+you\b|\bwas\s+this\s+you\b|\bwe\s+(?:have\s+)?(?:blocked|stopped|declined|locked)\b|(?<!\b(?:if|in\s+case|should|can|could|may)\b[^.!?\n]{0,60})\blocked\b|\bunder\s+review\b/iu,
@@ -807,8 +807,11 @@ const REVERSED_THEN_CREDITED_TO_YOU =
   /\brevers(?:al|ed|e)\b(?:[^.\n]|\.(?=\S)){0,200}?\b(?:is|has\s+been|was)\s+(?:successfully\s+)?credited\s+to\s+your\b/giu;
 const RECOGNISE_CALLBACK_FOOTER =
   /(?<!\p{L})(?:(?:don['’]t|do\s+not|didn['’]t)\s+recogni[sz]e\b[^.!?\n]{0,30}\?\s*(?=(?:call|contact|ring|phone)\b)|si\s+no\s+(?:lo\s+|la\s+)?reconoc(?:e|es)\b[^.!?\n]{0,60}?(?=\bllam(?:a|e|ar)\b)|n[ãa]o\s+reconhece\b[^.!?\n]{0,40}?\??\s*(?=(?:ligue|ligar)\b))/giu;
+// This exact discount instruction names a promo code, not an OTP challenge.
+const NUMERIC_DISCOUNT_CODE = /\b(use\s+)code(\s+\d{4,8}\s+to\s+get\s+\d{1,3}\s?%\s+off\b)/giu;
 const neutraliseBenignShapes = (source: string): string =>
   source
+    .replace(NUMERIC_DISCOUNT_CODE, '$1promo code$2')
     .replace(CARD_PRODUCT_NAME, 'card')
     .replace(EXECUTED_MANDATE_DEBIT, '$1instruction')
     .replace(CREDITED_TOWARDS_REVERSAL, '$1refund')
