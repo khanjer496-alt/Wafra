@@ -204,6 +204,7 @@ export function isCompletedPrincipalRefund(source: string, span: PrincipalSpan |
 export function isUnqualifiedCardCredit(source: string, span: PrincipalSpan | undefined): boolean {
   if (!span) return false;
   const clause = sentenceAround(source, span).text;
+  if (/\bcash\s*back\s+(?:amount\s+)?of\b/iu.test(clause)) return false;
   if (/\bbooking\b[^.\n]{0,80}\bwas\s+cancell?ed\s+and\b/iu.test(clause)) return false;
   if (isCompletedPrincipalRefund(source, span) || /\brefund(?:ed)?\b|استرداد/iu.test(clause)) return false;
   return /\bcredit\s+card\b|بطاق(?:تك|ه|ة)\s+(?:ال)?ا[يئ]تماني[هة]/iu.test(clause) &&

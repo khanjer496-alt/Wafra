@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 3a8aac30e71219246ffdf3f0eab4e4038f62e52b107bfa940da74d46ef559de6
+// Generated from normal shipping TypeScript. Source SHA-256: 53df3f8f8b66098cea4343c701ba16925eecb522198adf57baa2e4244c3c2d42
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -11188,6 +11188,8 @@ function isUnqualifiedCardCredit(source, span) {
     if (!span)
         return false;
     const clause = sentenceAround(source, span).text;
+    if (/\bcash\s*back\s+(?:amount\s+)?of\b/iu.test(clause))
+        return false;
     if (/\bbooking\b[^.\n]{0,80}\bwas\s+cancell?ed\s+and\b/iu.test(clause))
         return false;
     if (isCompletedPrincipalRefund(source, span) || /\brefund(?:ed)?\b|استرداد/iu.test(clause))
