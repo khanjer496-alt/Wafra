@@ -14,7 +14,7 @@ import { CURRENCY_MINOR_UNITS } from '@/lib/currency-metadata';
 import { cachedReferenceQuote, quoteFitsDay } from '@/lib/fx-rates';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
 import { getActiveCountry } from '@/lib/country';
-import { isCompletedPrincipalRefund, isHedgedPrincipal, isIncompletePrincipal, refundPrincipalStatus, type PrincipalSpan } from '@/lib/principal-posting-guards';
+import { isUnqualifiedCardCredit, isCompletedPrincipalRefund, isHedgedPrincipal, isIncompletePrincipal, refundPrincipalStatus, type PrincipalSpan } from '@/lib/principal-posting-guards';
 import { extractUniversalMoney } from '@/lib/universal-money';
 
 /* ────────────────────────── Arabic normalisation ──────────────────────────
@@ -8372,6 +8372,7 @@ function readPrincipalContext(message: string, parsed: ParsedSms): PrincipalCont
 function hasUnsettledPrincipalInContext(context: PrincipalContext, parsed: ParsedSms): boolean {
   const { raw, spans, refund } = context;
   if (hasUnsupportedPrincipal(raw, parsed, spans[0])) return true;
+  if (isUnqualifiedCardCredit(raw, spans[0])) return true;
   if (principalNeedsTransferReview(raw, spans[0], parsed)) return true;
   if (parsed.type === 'expense' && spans[0] &&
     /(?:تم\s+اضافه|تم\s+ايداع)\s*$/i.test(raw.slice(Math.max(0, spans[0].start - 50), spans[0].start)) &&

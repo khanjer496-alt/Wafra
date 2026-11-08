@@ -197,3 +197,15 @@ export function isCompletedPrincipalRefund(source: string, span: PrincipalSpan |
   if (NOT_CURRENT_REFUND.test(scope.text) || REFUND_PENDING.test(scope.text)) return false;
   return /\b(?:purchase|transaction|payment|charge)\b(?:[^.\n]|\.\d){0,120}?\b(?:has\s+been|was|is|have\s+been)\s+(?:fully\s+)?refunded\b|(?<![ء-ي])(?:عمليه\s+)?(?:ال)?شراء(?:[^.\n]|\.(?=\S)){0,120}?\s+(?:و?تم\s+)(?:استرداد|استرجاع|ارجاع)(?:ها|ه)(?![ء-ي])/i.test(scope.text);
 }
+
+/** A credit to the credit-card balance may be a settlement, not new income.
+ * Leave ambiguous credits in Review; explicit refunds retain their own rules.
+ */
+export function isUnqualifiedCardCredit(source: string, span: PrincipalSpan | undefined): boolean {
+  if (!span) return false;
+  const clause = sentenceAround(source, span).text;
+  if (/\bbooking\b[^.\n]{0,80}\bwas\s+cancell?ed\s+and\b/iu.test(clause)) return false;
+  if (isCompletedPrincipalRefund(source, span) || /\brefund(?:ed)?\b|استرداد/iu.test(clause)) return false;
+  return /\bcredit\s+card\b|بطاق(?:تك|ه|ة)\s+(?:ال)?ا[يئ]تماني[هة]/iu.test(clause) &&
+    /\bcredited(?:\s+with|\s+to)?\b|(?:تم\s+)?(?:إيداع|ايداع|إضافة|اضافه|اضافة)/iu.test(clause);
+}

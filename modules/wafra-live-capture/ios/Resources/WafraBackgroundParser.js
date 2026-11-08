@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 1c52d1136a56bb115b63dd75985eb97695eb97dd1a1d9e932f78371e2a11aa08
+// Generated from normal shipping TypeScript. Source SHA-256: 3a8aac30e71219246ffdf3f0eab4e4038f62e52b107bfa940da74d46ef559de6
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -10998,6 +10998,7 @@ exports.isIncompletePrincipal = isIncompletePrincipal;
 exports.isHedgedPrincipal = isHedgedPrincipal;
 exports.refundPrincipalStatus = refundPrincipalStatus;
 exports.isCompletedPrincipalRefund = isCompletedPrincipalRefund;
+exports.isUnqualifiedCardCredit = isUnqualifiedCardCredit;
 const MOVEMENT_STATUS = /\bincomplete\s+(?:transaction|txn|purchase|payment|transfer|withdrawal)\b|\b(?:transaction|txn|purchase|payment|transfer|withdrawal)(?:\s+(?:of|for|at|to|from|with|on)\b(?:[^.\n]|\.\d){0,80}?)?\s+(?:was|is|remains?|has\s+been)\s+incomplete\b|\b(?:transaction|txn|purchase|payment|authori[sz]ation)\b(?:[^.\n]|\.\d){0,100}?\s(?:cancell?ed|voided)\s+by\s+(?:the\s+)?(?:merchant|bank|issuer|acquirer)\b|\b(?:transaction|txn|purchase|payment|authori[sz]ation)\b(?:[^.\n]|\.\d){0,100}?\s(?:will\s+be|is\s+being)\s+(?:cancell?ed|voided)\b|[ \t][-–—:|][ \t]*(?:void|voided|cancell?ed)[ \t]*(?=\n|$)|[ \t]*[,:(][ \t]*(?:cancell?ed|voided|void)[ \t]*\)?[ \t]*(?=[.\n]|$)|(?<![ء-ي])(?:تم\s+)?(?:الغاء|ايقاف|تعليق)\s+(?:ال)?(?:عمليه|شراء|دفع|تحويل|حواله|سحب|معامله|حركه)(?![ء-ي])|(?<![ء-ي])(?:الغيت|اوقفت|علقت)\s+(?:ال)?(?:عمليه|شراء|دفع|تحويل|حواله|سحب|معامله|حركه)(?![ء-ي])|(?<![ء-ي])(?:ال)?(?:عمليه|معامله|شراء|دفع|تحويل|حواله|سحب|حركه)\s+(?:غير\s+(?:ناجح|مكتمل)ه?|لم\s+(?:تكتمل|يكتمل|تنجح)|(?:ال)?(?:ملغي|ملغا|ملغاه|موقوف[هة]?))(?![ء-ي])|(?<![ء-ي])(?:و?تم|قد\s+تم)\s+(?:الغاو|الغاي|ايقاف|تعليق)(?:ها|ه)(?![ء-ي])|(?<![ء-ي])تم\s+(?:ال)?الغاء(?![ء-ي])|(?<![ء-ي])لم\s+(?:تكتمل|يكتمل|تنجح)(?![ء-ي])/gi;
 const CONDITIONAL_STATUS = /(?:\b(?:if|unless|please|pls|to|can|may|should)\b|(?<![ء-ي])(?:يرجي|الرجاء|رجاء|يمكنك|يمكنكم|يمكن|بامكانك|بامكانكم|اتصل|ارسل|للابلاغ|لطلب|طلب|خدمه|اذا|حال|تود|ترغب|عليك)(?![ء-ي]))(?:\s+(?:او|و|ب|في|علي|عن|من|كانت|كان|or|and))?(?:\s+\d{1,4})?\s*$/i;
 function isIncompletePrincipal(source, span) {
@@ -11182,6 +11183,17 @@ function isCompletedPrincipalRefund(source, span) {
     if (NOT_CURRENT_REFUND.test(scope.text) || REFUND_PENDING.test(scope.text))
         return false;
     return /\b(?:purchase|transaction|payment|charge)\b(?:[^.\n]|\.\d){0,120}?\b(?:has\s+been|was|is|have\s+been)\s+(?:fully\s+)?refunded\b|(?<![ء-ي])(?:عمليه\s+)?(?:ال)?شراء(?:[^.\n]|\.(?=\S)){0,120}?\s+(?:و?تم\s+)(?:استرداد|استرجاع|ارجاع)(?:ها|ه)(?![ء-ي])/i.test(scope.text);
+}
+function isUnqualifiedCardCredit(source, span) {
+    if (!span)
+        return false;
+    const clause = sentenceAround(source, span).text;
+    if (/\bbooking\b[^.\n]{0,80}\bwas\s+cancell?ed\s+and\b/iu.test(clause))
+        return false;
+    if (isCompletedPrincipalRefund(source, span) || /\brefund(?:ed)?\b|استرداد/iu.test(clause))
+        return false;
+    return /\bcredit\s+card\b|بطاق(?:تك|ه|ة)\s+(?:ال)?ا[يئ]تماني[هة]/iu.test(clause) &&
+        /\bcredited(?:\s+with|\s+to)?\b|(?:تم\s+)?(?:إيداع|ايداع|إضافة|اضافه|اضافة)/iu.test(clause);
 }
 },
 "sms-parser":function(module,exports,require){
@@ -14445,6 +14457,8 @@ function hasUnsettledPrincipalInContext(context, parsed) {
     const { raw, spans, refund } = context;
     if (hasUnsupportedPrincipal(raw, parsed, spans[0]))
         return true;
+    if ((0, principal_posting_guards_1.isUnqualifiedCardCredit)(raw, spans[0]))
+        return true;
     if (principalNeedsTransferReview(raw, spans[0], parsed))
         return true;
     if (parsed.type === 'expense' && spans[0] &&
@@ -15703,7 +15717,7 @@ function inspectUniversalBankEvent(source, context = {}) {
     if (pendingAnywhere && (status === 'posted' || status === 'unknown'))
         status = 'informational';
     const refundStatus = (0, principal_posting_guards_1.refundPrincipalStatus)(source, money.amount.spans, money.draft.candidates.map(candidate => candidate.span));
-    if (refundStatus === 'pending' || (0, principal_posting_guards_1.isHedgedPrincipal)(source, money.amount.spans))
+    if (refundStatus === 'pending' || (0, principal_posting_guards_1.isUnqualifiedCardCredit)(source, money.amount.spans[0]) || (0, principal_posting_guards_1.isHedgedPrincipal)(source, money.amount.spans))
         status = 'informational';
     if (refundStatus === 'cancelled')
         status = 'failed';

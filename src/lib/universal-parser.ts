@@ -5,7 +5,7 @@ import {
 import type { MoneyDirection, PostingStatus, UniversalMarket } from '@/lib/alert-market-pack-types';
 import { extractUniversalFields } from '@/lib/universal-fields';
 import { extractUniversalMoney, inspectUniversalMoneyDraft } from '@/lib/universal-money';
-import { isHedgedPrincipal, refundPrincipalStatus } from '@/lib/principal-posting-guards';
+import { isUnqualifiedCardCredit, isHedgedPrincipal, refundPrincipalStatus } from '@/lib/principal-posting-guards';
 import {
   isReviewOnlyLatamInstitution,
   latamTemplateEvent,
@@ -465,7 +465,7 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
   // A refund expected later and an approximate principal are not settled facts,
   // even if a broad language pack recognizes the purchase/refund noun.
   const refundStatus = refundPrincipalStatus(source, money.amount.spans, money.draft.candidates.map(candidate => candidate.span));
-  if (refundStatus === 'pending' || isHedgedPrincipal(source, money.amount.spans)) status = 'informational';
+  if (refundStatus === 'pending' || isUnqualifiedCardCredit(source, money.amount.spans[0]) || isHedgedPrincipal(source, money.amount.spans)) status = 'informational';
   if (refundStatus === 'cancelled') status = 'failed';
   const hasStatement = money.statementTotal.evidence !== 'missing' || money.minimumDue.evidence !== 'missing';
   const hasBalance = money.balance.evidence !== 'missing' || money.creditLimit.evidence !== 'missing';
