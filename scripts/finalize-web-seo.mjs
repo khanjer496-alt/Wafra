@@ -62,6 +62,10 @@ fs.rmSync(path.join(outputDir, '(tabs)'), { recursive: true, force: true });
 // The acquisition page keeps only the existing website analytics loader.
 const indexHtml = fs.readFileSync(indexPath, 'utf8');
 const staticIndexHtml = indexHtml
+  // The static homepage uses document scrolling, rather than Expo's app-only
+  // body lock. Native Page Down/Space and keyboard focus can then scroll it.
+  .replace(/<style id="wafra-document-scroll">[\s\S]*?<\/style>/g, '')
+  .replace('</head>', '<style id="wafra-document-scroll">html,body{overflow:visible}html{scroll-padding-top:100px}</style></head>')
   .replace(
     /<script\b[^>]*\bsrc="\/_expo\/static\/js\/web\/[^"]+\.js"[^>]*><\/script>/g,
     '',
