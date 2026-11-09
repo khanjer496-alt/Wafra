@@ -192,7 +192,7 @@ export const inspectGenericBankEventForReview = (
   market?: string | null,
   sourceContext?: UniversalParseContext,
 ): UniversalBankEvent | null => {
-  if (moneyNoticeKind(source) || hasPersonalMessagePrefix(source) || hasNegatedPrincipalMovement(source)) return null;
+  if (hasPersonalMessagePrefix(source) || hasNegatedPrincipalMovement(source)) return null;
   // An exact LatAm bank template is bank-alert context in its own right.
   const noContext = !hasGenericBankAlertContext(source, sender) && !matchLatamTemplate(source, { sender });
   // A "money arrived" claim from a phone number, e-mail, generic header or
@@ -887,7 +887,7 @@ export const createLaunchAlertSession = ({
   let detected: 'AE' | 'SA' | null = null;
 
   const inspect = (source: string, sender: string): UniversalAlertReview | null => {
-    if (moneyNoticeKind(source) || hasPersonalMessagePrefix(source) || hasNegatedPrincipalMovement(source)) return null;
+    if (hasPersonalMessagePrefix(source) || hasNegatedPrincipalMovement(source)) return null;
     if (!REVIEW_MONEY_HINT.test(source)) return null;
     // A launch-tested issuer can quote any foreign transaction currency. Its
     // exact sender evidence already outranks that currency, and the universal

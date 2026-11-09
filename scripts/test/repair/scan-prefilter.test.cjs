@@ -27,7 +27,7 @@ function harness({ pinnedCurrency = 'AED', activeMarket = 'AE' } = {}) {
       pinnedLedgerCurrencyCode: () => 'AED',
       ledgerCurrencyExponent: () => 2,
     },
-    '@/lib/sms-parser': { parseSmsBatch: () => [] },
+    '@/lib/sms-parser': { parseSmsBatch: () => [], moneyNoticeKind: () => null },
     '@/lib/currency-metadata': {
       CURRENCY_SYMBOL_CANDIDATES: { '$': ['USD'] },
       currencyMinorUnits: code => code === 'AED' || code === 'USD' ? 2 : null,
