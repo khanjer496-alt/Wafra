@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 7f0b5904e218dcdb2058cbd1b6414560825d1198ef639c0dbbffaf27b687fda7
+// Generated from normal shipping TypeScript. Source SHA-256: dbda4aa81a9ac510063e7b06a84171f25f7fc9eecf36c7971b6b1179c6019122
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -11274,20 +11274,25 @@ function isCompletedPrincipalRefund(source, span) {
 }
 const CARD_CREDIT_TARGET = /\bcredit\s+card\b|بطاق(?:تك|ه|ة)\s+(?:ال)?ا[يئ]تماني[هة]/iu;
 const CARD_CREDIT_MOVEMENT = /\bcredited(?:\s+with|\s+to)?\b|(?<![ء-ي])(?:تم\s+)?(?:إيداع|ايداع|إضافة|اضافه|اضافة)(?![ء-ي])/iu;
-const REPAYMENT_MONEY = String.raw `(?:[A-Z]{3}|Dhs?|SR|[$€£])\s*\p{Nd}+(?:[.,٫٬]\p{Nd}+)*`;
+const REPAYMENT_MONEY = String.raw `(?:[A-Z]{3}|Dhs?\.?|SR|[$€£])\s*\p{Nd}+(?:[.,٫٬]\p{Nd}+)*`;
 const REPAYMENT_CARD = String.raw `(?:(?!(?:bill|invoice|loan|finance|mortgage|account|utility|electricity|water|using|via|with|through|from|to|for|by|on|at|and|of)\b)[\p{L}\p{N}.'’-]+\s+){0,3}?card\b`;
 const UNQUALIFIED_REPAYMENT = new RegExp(String.raw `^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?(?:` +
     String.raw `payment\s+(?:received|credited)\s+${REPAYMENT_MONEY}\s+(?:on|to|towards?)\s+(?:your\s+)?${REPAYMENT_CARD}` +
     String.raw `|thank\s+you\s+for\s+(?:your\s+)?payment\s+of\s+${REPAYMENT_MONEY}\s+on\s+(?:your\s+)?${REPAYMENT_CARD}` +
     String.raw `|your\s+payment\s+of\s+${REPAYMENT_MONEY}\s+to\s+(?:your\s+)?(?:credit|charge|covered)\s+card\b(?:[^.\n]|\.\d){0,80}\bsuccessful\b)`, 'iu');
 const QUALIFIED_REPAYMENT_RECEIPT = new RegExp(String.raw `^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?(?:` +
-    String.raw `payment\s+received\s+${REPAYMENT_MONEY}` +
-    String.raw `|thank\s+you\s+for\s+(?:your\s+)?payment\s+of\s+${REPAYMENT_MONEY}` +
-    String.raw `)\s+on\s+your\s+${REPAYMENT_CARD}\s+(?:ending(?:\s+(?:in|with))?|number|no\.?)\s*(?:[*xX•·-]\s*)*\p{Nd}{4}(?!\p{Nd})` +
+    String.raw `payment\s+received|thank\s+you\s+for\s+(?:your\s+)?payment\s+of` +
+    String.raw `)\s+(${REPAYMENT_MONEY})\s+on\s+your\s+${REPAYMENT_CARD}\s+(?:ending(?:\s+(?:in|with))?|number|no\.?)\s*(?:[*xX•·-]\s*)*\p{Nd}{4}(?!\p{Nd})` +
     String.raw `(?=\s*(?:[.!?\n]|$|(?:thank|avl|available|balance|for\s+(?:queries|help|details|information))\b))`, 'iu');
-function isQualifiedCardRepaymentReceipt(source) {
+function isQualifiedCardRepaymentReceipt(source, expectedCurrency) {
     const match = QUALIFIED_REPAYMENT_RECEIPT.exec(source);
-    return !!match && !/\b(?:debit|prepaid)\s+card\b/iu.test(match[0]);
+    if (!match || /\b(?:debit|prepaid)\s+card\b/iu.test(match[0]))
+        return false;
+    if (expectedCurrency === undefined)
+        return true;
+    const token = match[1].match(/^[^\p{Nd}]+/u)?.[0].trim().replace(/\.$/u, '').toUpperCase();
+    const code = token === 'DH' || token === 'DHS' ? 'AED' : token === 'SR' ? 'SAR' : token;
+    return code === expectedCurrency;
 }
 function isUnqualifiedCardRepayment(source) {
     const text = /[\uFF01-\uFFEF]/u.test(source) ? source.normalize('NFKC') : source;
@@ -13642,6 +13647,8 @@ function parseSmsInner(message, overrides, options) {
         };
     }
     const qualifiedReceipt = card !== null && (0, principal_posting_guards_1.isQualifiedCardRepaymentReceipt)(raw);
+    if (qualifiedReceipt && !(0, principal_posting_guards_1.isQualifiedCardRepaymentReceipt)(raw, currency))
+        return null;
     if (card?.kind !== 'account' && card && (CARD_PAYMENT_RE.test(raw) || qualifiedReceipt)) {
         const amountFils = amountWithFx(raw);
         if (!amountFils)

@@ -9,15 +9,47 @@ const markets = load('@/lib/markets');
 const country = load('@/lib/country');
 const { parseSms, nonPostingReason } = load('@/lib/sms-parser');
 const { createLaunchAlertSession } = load('@/lib/launch-alert-parser');
+const { inspectSourceFreeRefusedAlert } = load('@/lib/auto-import');
 const at = Date.parse('2026-11-05T10:00:00Z');
 
-function session() {
-  country.setActiveCountry('AE');
-  markets.setActiveMarket('AE');
-  markets.setLedgerCurrency('AED', 2);
-  return createLaunchAlertSession({ overrides: {}, activeMarket: 'AE', pinnedCurrency: 'AED',
-    bestEffort: { enabled: true, country: 'AE' } });
+function session(market = 'AE') {
+  const currency = market === 'SA' ? 'SAR' : 'AED';
+  country.setActiveCountry(market);
+  markets.setActiveMarket(market);
+  markets.setLedgerCurrency(currency, 2);
+  return createLaunchAlertSession({ overrides: {}, activeMarket: market, pinnedCurrency: currency,
+    bestEffort: { enabled: true, country: market } });
 }
+
+for (const currency of ['USD', 'SAR', 'EUR']) {
+  test(`a new receipt in ${currency} cannot invent an AED settlement through fallback FX`, () => {
+    const body = `Thank you for your payment of ${currency} 500.00 on your Mashreq credit card ending 1234`;
+    const reader = session();
+    assert.equal(parseSms(body, {}, { sender: 'MASHREQ', observedAt: at }), null);
+    const inspection = reader.inspect(body, 'MASHREQ');
+    assert.equal(reader.parse(body, 'MASHREQ', inspection, undefined, at), null);
+    const held = inspectSourceFreeRefusedAlert({ source: body, sender: 'MASHREQ', observedAt: at,
+      channel: 'inbox', session: reader, existingInspection: inspection });
+    assert.equal(held.kind, 'review');
+    const money = held.candidate?.event?.amount.value ?? held.candidate?.amount;
+    assert.deepEqual(JSON.parse(JSON.stringify(money)), { currency, minorUnits: '50000', exponent: 2 });
+  });
+}
+
+for (const [market, sender, token, currency] of [
+  ['AE', 'MASHREQ', 'Dhs', 'AED'], ['AE', 'MASHREQ', 'Dhs.', 'AED'],
+  ['SA', 'AlRajhiBank', 'SAR', 'SAR'], ['SA', 'AlRajhiBank', 'SR', 'SAR'],
+]) test(`same-currency receipt aliases retain a transfer: ${market}/${token}`, () => {
+  const reader = session(market);
+  const body = `Thank you for your payment of ${token} 500.00 on your credit card ending 1234`;
+  for (const parsed of [parseSms(body, {}, { sender, observedAt: at }),
+    reader.parse(body, sender, reader.inspect(body, sender), undefined, at)]) {
+    assert.equal(parsed?.kind, 'cardPayment');
+    assert.equal(parsed.amountFils, 50000);
+    assert.equal(parsed.currency, currency);
+    assert.equal(parsed.cardPaymentSide, 'receipt');
+  }
+});
 
 // Synthetic messages reported from build 393 through Android's actual SMS
 // inbox. These are source regressions, not a claim that this candidate ran there.

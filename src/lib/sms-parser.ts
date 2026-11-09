@@ -6728,6 +6728,7 @@ function parseSmsInner(
   // since these messages also contain the word "payment". Only credit cards
   // receive payments, whatever the message called the card.
   const qualifiedReceipt = card !== null && isQualifiedCardRepaymentReceipt(raw);
+  if (qualifiedReceipt && !isQualifiedCardRepaymentReceipt(raw, currency)) return null;
   if (card?.kind !== 'account' && card && (CARD_PAYMENT_RE.test(raw) || qualifiedReceipt)) {
     const amountFils = amountWithFx(raw);
     if (!amountFils) return null;

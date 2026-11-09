@@ -218,7 +218,7 @@ export function isCompletedPrincipalRefund(source: string, span: PrincipalSpan |
 const CARD_CREDIT_TARGET = /\bcredit\s+card\b|بطاق(?:تك|ه|ة)\s+(?:ال)?ا[يئ]تماني[هة]/iu;
 const CARD_CREDIT_MOVEMENT = /\bcredited(?:\s+with|\s+to)?\b|(?<![ء-ي])(?:تم\s+)?(?:إيداع|ايداع|إضافة|اضافه|اضافة)(?![ء-ي])/iu;
 
-const REPAYMENT_MONEY = String.raw`(?:[A-Z]{3}|Dhs?|SR|[$€£])\s*\p{Nd}+(?:[.,٫٬]\p{Nd}+)*`;
+const REPAYMENT_MONEY = String.raw`(?:[A-Z]{3}|Dhs?\.?|SR|[$€£])\s*\p{Nd}+(?:[.,٫٬]\p{Nd}+)*`;
 // A card is the destination, never an instrument used to pay a merchant/bill.
 const REPAYMENT_CARD = String.raw`(?:(?!(?:bill|invoice|loan|finance|mortgage|account|utility|electricity|water|using|via|with|through|from|to|for|by|on|at|and|of)\b)[\p{L}\p{N}.'’-]+\s+){0,3}?card\b`;
 const UNQUALIFIED_REPAYMENT = new RegExp(
@@ -230,16 +230,21 @@ const UNQUALIFIED_REPAYMENT = new RegExp(
 );
 const QUALIFIED_REPAYMENT_RECEIPT = new RegExp(
   String.raw`^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?(?:` +
-  String.raw`payment\s+received\s+${REPAYMENT_MONEY}` +
-  String.raw`|thank\s+you\s+for\s+(?:your\s+)?payment\s+of\s+${REPAYMENT_MONEY}` +
-  String.raw`)\s+on\s+your\s+${REPAYMENT_CARD}\s+(?:ending(?:\s+(?:in|with))?|number|no\.?)\s*(?:[*xX•·-]\s*)*\p{Nd}{4}(?!\p{Nd})` +
+  String.raw`payment\s+received|thank\s+you\s+for\s+(?:your\s+)?payment\s+of` +
+  String.raw`)\s+(${REPAYMENT_MONEY})\s+on\s+your\s+${REPAYMENT_CARD}\s+(?:ending(?:\s+(?:in|with))?|number|no\.?)\s*(?:[*xX•·-]\s*)*\p{Nd}{4}(?!\p{Nd})` +
   String.raw`(?=\s*(?:[.!?\n]|$|(?:thank|avl|available|balance|for\s+(?:queries|help|details|information))\b))`,
   'iu',
 );
 /** A receipt names the person's destination card and tail, never a merchant instrument. */
-export function isQualifiedCardRepaymentReceipt(source: string): boolean {
+export function isQualifiedCardRepaymentReceipt(source: string, expectedCurrency?: string): boolean {
   const match = QUALIFIED_REPAYMENT_RECEIPT.exec(source);
-  return !!match && !/\b(?:debit|prepaid)\s+card\b/iu.test(match[0]);
+  if (!match || /\b(?:debit|prepaid)\s+card\b/iu.test(match[0])) return false;
+  if (expectedCurrency === undefined) return true;
+  const token = match[1].match(/^[^\p{Nd}]+/u)?.[0].trim().replace(/\.$/u, '').toUpperCase();
+  const code = token === 'DH' || token === 'DHS' ? 'AED' : token === 'SR' ? 'SAR' : token;
+  // This newly admitted family needs source-local currency proof; never price
+  // a foreign card settlement through the core parser's fallback FX table.
+  return code === expectedCurrency;
 }
 
 /** Weaker receipt claims cannot prove new spending/income. Keep them in Review. */
