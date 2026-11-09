@@ -52,6 +52,7 @@ function harness(result = {}, initial = {}, options = {}) {
         const batch = reviewApi.admitPreparedReviewAlerts(current.reviewTray ?? reviewApi.emptyAlertReviewTray(), items, Date.now());
         current = { ...current, reviewTray: batch.state };
         return { admitted: batch.outcomes.filter(value => value === 'admitted').length,
+          retention: () => reviewApi.reviewRetentionReceipts(batch.state, items, Date.now()),
           durable: Promise.resolve().then(() => { events.push('review-durable'); }) };
       },
       ensureDurable: async () => {
