@@ -1466,6 +1466,13 @@ function reduceState(state: AppState, action: Action): AppState {
     case 'restore': {
       // Merge over defaults so states saved by older app versions stay valid.
       const next = { ...EMPTY_STATE, ...action.state, hydrated: true };
+      // A file import is not consent to share names or expose widget amounts.
+      // Only local hydration may restore this device's explicit privacy choices.
+      if (action.type === 'restore') {
+        next.onlineLogosEnabled = state.onlineLogosEnabled === true;
+        next.hideWidgetAmountsWhenLocked = state.hideWidgetAmountsWhenLocked !== false;
+      }
+
       next.privateAlertFormats = action.type === 'hydrate'
         ? normalizePrivateAlertFormatStore(next.privateAlertFormats)
         : emptyPrivateAlertFormatStore();

@@ -274,7 +274,7 @@ refreshes.
 
 ## Other network activity
 
-- **Logo consent on iOS and Android:** Online logo lookups are off by default, including after upgrading a build without this preference. Bundled images and local fallback icons work without sharing names. You may opt in using Settings → Online merchant logos. Turning it off stops new name searches and artwork downloads; requests already sent cannot be recalled. Your saved local-only preference also blocks online logos.
+- **Logo consent on iOS and Android:** Online logo lookups are off by default, including after upgrading a build without this preference. Bundled images and local fallback icons work without sharing names. You may opt in using Settings → Online merchant logos. Turning it off stops new name searches and artwork downloads; requests already sent cannot be recalled. Your saved local-only preference also blocks online logos. Restoring a backup keeps this device’s logo-sharing and widget-amount privacy choices; the file cannot enable logo sharing or change that widget preference.
 
 - **Optional online logos:** 112 merchant logos are bundled with the app and supported
   launch-market banks are matched locally to fixed bank domains. For other

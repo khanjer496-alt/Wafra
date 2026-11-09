@@ -7,6 +7,9 @@ states without the preference. Settings explains name sharing with Brandfetch
 before opt-in, even while local-only mode is active. The local-only preference
 overrides consent. Revocation invalidates queued resolver/cache work and removes
 remote image sources; an already transmitted request cannot be recalled.
+External backup restores preserve this device's logo consent and widget-privacy
+choice. Local startup still hydrates the saved preferences, and malformed
+preference types are rejected by backup validation.
 
 App Lock installs an opaque iOS window cover on native resign-active/background
 callbacks. Android uses `FLAG_SECURE`. Enabling the setting awaits native
@@ -30,6 +33,10 @@ images refresh on the operating system's schedule.
 - App Lock suite: 22 passed. Store-selection/original Settings harness: 29 passed.
 - Merchant and bank resolver suites and bundled-logo integrity suite passed.
 - Store metadata checks and `git diff --check` passed.
+- Privacy restore, backup, transfer and private-format integration cases: 130
+  passed. The avatar performance contract remains a narrow context subscription;
+  its updated suite passed 108 checks. Store harnesses stub only the new native
+  and presentation boundaries, retaining the real monetary reducer modules.
 - Swift native sources passed syntax parsing. The privacy controller also passed
   real UIKit typechecking with only its Expo subscriber/bridge boundary stubbed:
   `bash scripts/test/native-app-privacy-typecheck.sh`.
@@ -52,3 +59,6 @@ App Store privacy remains a draft: Brandfetch collection is conditional on
 opt-in, while Superwall still contributes Purchase History and other categories.
 Dashboard, linkage and retention verification remain separate release gates.
 No account settings, published privacy labels or deployed policy were changed.
+
+CI is not cleared yet. Its generated native-parser resource check needs a
+coordinated refresh with the parser owner; that guard has not been disabled.

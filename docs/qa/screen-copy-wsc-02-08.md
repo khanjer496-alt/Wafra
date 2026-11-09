@@ -34,6 +34,9 @@ are not passed through this ledger formatter.
   English/Arabic owed grouping and inline/hero/rolling money consistency.
 - The 119-test copy/presentation gate passed; 43 affected cases also passed
   after the final unknown-balance preservation and onboarding price-emphasis changes.
+- The browser money assertions retain exact minor-unit checks while accepting
+  the approved Arabic suffix order and bidi isolates. The previous prefix-only
+  assertion rejected the correctly displayed Arabic figure in CI.
 - The current web export builds. Its validation used a temporary local Metro
   dependency-path override for the shared node_modules directory; it was restored.
 - At 320px, the English owed line fit. The final Arabic owed line had equal
