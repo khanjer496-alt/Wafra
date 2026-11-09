@@ -1,4 +1,5 @@
 import { countryDisplayName, dateOrderForCountry, isKnownCountry } from '@/lib/country';
+import { importProcessingDisclosure } from '@/lib/import-processing-disclosure';
 
 export const SUPPLEMENT_COPY = {
   en: {
@@ -66,7 +67,7 @@ export const SUPPLEMENT_COPY = {
     statementsAlreadyProcessed: 'These files were already processed in the last few days, so nothing new was sent.',
     filesCount: { one: '{n} statement', other: '{n} statements' },
     rowsRead: { one: '{n} row read', other: '{n} rows read' },
-    uploadDisclosure: 'Choosing a file connects this phone to Wafra’s import service. The file is read, then deleted.',
+    uploadDisclosure: importProcessingDisclosure('en', 'web'),
     uploadingProgress: 'Reading statement {index} of {total}…',
     waitingForLimit: 'Waiting {seconds}s to stay within the import limit (statement {index} of {total})…',
     resultsTitle: 'This import',
@@ -218,7 +219,7 @@ export const SUPPLEMENT_COPY = {
       zero: 'لم يُقرأ أي صف', one: 'قُرئ صف واحد', two: 'قُرئ صفان', few: 'قُرئ {n} صفوف', many: 'قُرئ {n} صفاً',
       other: 'قُرئ {n} صف',
     },
-    uploadDisclosure: 'اختيار ملف يربط هذا الهاتف بخدمة الاستيراد في وفرة. يُقرأ الملف ثم يُحذف.',
+    uploadDisclosure: importProcessingDisclosure('ar', 'web'),
     uploadingProgress: 'جارٍ قراءة الكشف {index} من {total}…',
     waitingForLimit: 'انتظار {seconds} ث للبقاء ضمن حد الاستيراد (الكشف {index} من {total})…',
     resultsTitle: 'هذا الاستيراد',

@@ -7,6 +7,7 @@ import { androidSmsCaptureEnabled } from '@/lib/android-capture-sources';
 import {
   buildImportPlan,
   isSmsInboxAccessError,
+  hasSmsPermission,
   scanInbox,
   type ScanResult,
 } from '@/lib/auto-import';
@@ -90,6 +91,9 @@ export function useHistoryImport(): void {
         await waitForForegroundHistoryIdle(FOREGROUND_HISTORY_PAGE_GAP_MS);
       } else {
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
+      if (!await hasSmsPermission()) {
+        throw Object.assign(new Error('SMS history access requires disclosure and permission'), { code: 'ERR_SMS_INBOX_ACCESS' });
       }
       const snapshot = getStateSnapshot();
       const generation = getStateGeneration();

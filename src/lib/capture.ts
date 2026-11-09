@@ -22,6 +22,7 @@
 import type { WafraLiveCaptureNativeModule } from '../../modules/wafra-live-capture';
 import {
   isSmsScanningAvailable,
+  hasSmsPermission,
   scanInbox,
   type DeclinedSms,
   type ScannedSms,
@@ -392,8 +393,8 @@ function relayLaunchMarket(
 }
 
 /**
- * Collect whatever has arrived since the last scan. Assumes any permission
- * the platform needs has already been granted — the caller owns prompting,
+ * Collect whatever has arrived since the last scan. Android rechecks app
+ * disclosure acceptance and OS access; the caller owns prompting,
  * because only it knows whether this is an interactive refresh or a silent
  * background sync.
  */
@@ -410,6 +411,7 @@ export async function collectNewMessages(
 
   if (isSmsScanningAvailable()) {
     const notificationOnly = options.notificationOnly === true;
+    if (!notificationOnly && !await hasSmsPermission()) return EMPTY;
     // The routine scan reads only what arrived since last time. That is right
     // for a normal refresh and wrong after a parser change: a message is
     // imported once and can never arrive again, so every improvement would
