@@ -2,12 +2,16 @@
 export interface PrincipalSpan { start: number; end: number }
 
 const CLICK_LINK_PROMPT = /(?:\b(?:click(?:ing)?|tap(?:ping)?|verify|confirm|update\s+(?:(?:your|the)\s+)?(?:details|information|credentials|account))\b[\s:：]+|(?<![ء-ي])(?:اضغط|إضغط|انقر)[\s:：]+)(?:[^.!?]|\.\d){0,120}?(?:(?:https?|hxxps?):\/\/|www\.|\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/|\b)|\b(?:here|below|link|url)\b|الرابط|هنا)/giu;
+const ISSUER_MERCHANT_DEBIT_CONFIRMATION = /^confirm\s+that\s+[A-Z]{3}\s+\d[\d,.]*\s+was\s+debited\s+from\s+your\s+account\s+ending\s+\d{4}\s+for\s+(?:a\s+)?purchase\s+at\s+(?:[a-z0-9-]+\.)+[a-z]{2,}$/iu;
 /** A link instruction is never settlement evidence, even with an issuer label. */
 export function hasClickLinkPrompt(source: string): boolean {
   for (const match of source.matchAll(CLICK_LINK_PROMPT)) {
     const before = source.slice(Math.max(0, match.index! - 60), match.index);
     // A warning against clicking, or a merchant named CLICK HERE, is not a prompt.
     if (/(?:\b(?:do\s+not|don['’]t|never|avoid|refrain\s+from)\s+(?:ever\s+)?|\b(?:at|from|merchant\s*:?)\s+|(?:لا|عدم)\s+)$/iu.test(before)) continue;
+    // A closed issuer debit declaration names a merchant, not a link to open.
+    // Skip only this match, so a later user-directed instruction is still refused.
+    if (/\bwe\s+$/iu.test(before) && ISSUER_MERCHANT_DEBIT_CONFIRMATION.test(match[0])) continue;
     return true;
   }
   return false;

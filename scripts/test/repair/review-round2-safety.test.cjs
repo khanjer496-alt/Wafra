@@ -157,6 +157,7 @@ for (const [index, source] of [
   'AED 4,999.00 debited from your card ending 3183. Reply YES to confirm or tap hxxp://enbd-verify.test',
   'Your account is suspended. AED 4,999.00 debited. Update details: enbd-secure.test/login',
   `${confirmedDebit} Please confirm at enbd-secure.test/login.`,
+  confirmedDebit.replace('We confirm', 'Please confirm'),
 ].entries()) for (const body of [source, source.replace(/ /g, '  ')]) {
   test(`issuer confirmation cannot hide a link instruction/${index}/${body === source ? 'original' : 'spacing'}`, () => {
     const session = reader('AE');
