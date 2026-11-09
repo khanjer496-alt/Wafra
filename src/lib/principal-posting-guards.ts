@@ -1,6 +1,23 @@
 /** Source-only qualifications of an already selected monetary value. */
 export interface PrincipalSpan { start: number; end: number }
 
+const CLICK_LINK_PROMPT = /(?:\b(?:click(?:ing)?|tap(?:ping)?)\s+|(?<![ء-ي])(?:اضغط|إضغط|انقر)\s+)(?:[^.!?\n]|\.\d){0,120}?(?:https?:\/\/|www\.|\b(?:here|link|url)\b|الرابط|هنا)/giu;
+/** A link instruction is never settlement evidence, even with an issuer label. */
+export function hasClickLinkPrompt(source: string): boolean {
+  for (const match of source.matchAll(CLICK_LINK_PROMPT)) {
+    const before = source.slice(Math.max(0, match.index! - 60), match.index);
+    // A warning against clicking, or a merchant named CLICK HERE, is not a prompt.
+    if (/(?:\b(?:do\s+not|don['’]t|never|avoid|refrain\s+from)\s+(?:ever\s+)?|\b(?:at|from|merchant\s*:?)\s+|(?:لا|عدم)\s+)$/iu.test(before)) continue;
+    return true;
+  }
+  return false;
+}
+
+/** A leading coupon invitation is an offer; the same wording may be a receipt footer. */
+export function isLeadingNumericDiscountOffer(source: string): boolean {
+  return /^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?(?:use|enter)\s+(?:code\s+)?\d{4,8}\s+to\s+get\s+\d{1,3}\s?%\s+off\b/iu.test(source);
+}
+
 const MOVEMENT_STATUS = /\bincomplete\s+(?:transaction|txn|purchase|payment|transfer|withdrawal)\b|\b(?:transaction|txn|purchase|payment|transfer|withdrawal)(?:\s+(?:of|for|at|to|from|with|on)\b(?:[^.\n]|\.\d){0,80}?)?\s+(?:was|is|remains?|has\s+been)\s+incomplete\b|\b(?:transaction|txn|purchase|payment|authori[sz]ation)\b(?:[^.\n]|\.\d){0,100}?\s(?:cancell?ed|voided)\s+by\s+(?:the\s+)?(?:merchant|bank|issuer|acquirer)\b|\b(?:transaction|txn|purchase|payment|authori[sz]ation)\b(?:[^.\n]|\.\d){0,100}?\s(?:will\s+be|is\s+being)\s+(?:cancell?ed|voided)\b|[ \t][-–—:|][ \t]*(?:void|voided|cancell?ed)[ \t]*(?=\n|$)|[ \t]*[,:(][ \t]*(?:cancell?ed|voided|void)[ \t]*\)?[ \t]*(?=[.\n]|$)|(?<![ء-ي])(?:تم\s+)?(?:الغاء|ايقاف|تعليق)\s+(?:ال)?(?:عمليه|شراء|دفع|تحويل|حواله|سحب|معامله|حركه)(?![ء-ي])|(?<![ء-ي])(?:الغيت|اوقفت|علقت)\s+(?:ال)?(?:عمليه|شراء|دفع|تحويل|حواله|سحب|معامله|حركه)(?![ء-ي])|(?<![ء-ي])(?:ال)?(?:عمليه|معامله|شراء|دفع|تحويل|حواله|سحب|حركه)\s+(?:غير\s+(?:ناجح|مكتمل)ه?|لم\s+(?:تكتمل|يكتمل|تنجح)|(?:ال)?(?:ملغي|ملغا|ملغاه|موقوف[هة]?))(?![ء-ي])|(?<![ء-ي])(?:و?تم|قد\s+تم)\s+(?:الغاو|الغاي|ايقاف|تعليق)(?:ها|ه)(?![ء-ي])|(?<![ء-ي])تم\s+(?:ال)?الغاء(?![ء-ي])|(?<![ء-ي])لم\s+(?:تكتمل|يكتمل|تنجح)(?![ء-ي])/gi;
 const CONDITIONAL_STATUS = /(?:\b(?:if|unless|please|pls|to|can|may|should)\b|(?<![ء-ي])(?:يرجي|الرجاء|رجاء|يمكنك|يمكنكم|يمكن|بامكانك|بامكانكم|اتصل|ارسل|للابلاغ|لطلب|طلب|خدمه|اذا|حال|تود|ترغب|عليك)(?![ء-ي]))(?:\s+(?:او|و|ب|في|علي|عن|من|كانت|كان|or|and))?(?:\s+\d{1,4})?\s*$/i;
 
@@ -211,10 +228,24 @@ const UNQUALIFIED_REPAYMENT = new RegExp(
   String.raw`|your\s+payment\s+of\s+${REPAYMENT_MONEY}\s+to\s+(?:your\s+)?(?:credit|charge|covered)\s+card\b(?:[^.\n]|\.\d){0,80}\bsuccessful\b)`,
   'iu',
 );
-/** These receipt claims cannot prove new spending/income. Keep them in Review. */
+const QUALIFIED_REPAYMENT_RECEIPT = new RegExp(
+  String.raw`^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?(?:` +
+  String.raw`payment\s+received\s+${REPAYMENT_MONEY}` +
+  String.raw`|thank\s+you\s+for\s+(?:your\s+)?payment\s+of\s+${REPAYMENT_MONEY}` +
+  String.raw`)\s+on\s+your\s+${REPAYMENT_CARD}\s+(?:ending(?:\s+(?:in|with))?|number|no\.?)\s*(?:[*xX•·-]\s*)*\p{Nd}{4}(?!\p{Nd})` +
+  String.raw`(?=\s*(?:[.!?\n]|$|(?:thank|avl|available|balance|for\s+(?:queries|help|details|information))\b))`,
+  'iu',
+);
+/** A receipt names the person's destination card and tail, never a merchant instrument. */
+export function isQualifiedCardRepaymentReceipt(source: string): boolean {
+  const match = QUALIFIED_REPAYMENT_RECEIPT.exec(source);
+  return !!match && !/\b(?:debit|prepaid)\s+card\b/iu.test(match[0]);
+}
+
+/** Weaker receipt claims cannot prove new spending/income. Keep them in Review. */
 export function isUnqualifiedCardRepayment(source: string): boolean {
   const text = /[\uFF01-\uFFEF]/u.test(source) ? source.normalize('NFKC') : source;
-  return UNQUALIFIED_REPAYMENT.test(text);
+  return UNQUALIFIED_REPAYMENT.test(text) && !isQualifiedCardRepaymentReceipt(text);
 }
 
 /** A credit to the credit-card balance may be a settlement, not new income.

@@ -14,7 +14,7 @@ import { CURRENCY_MINOR_UNITS } from '@/lib/currency-metadata';
 import { cachedReferenceQuote, quoteFitsDay } from '@/lib/fx-rates';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
 import { getActiveCountry } from '@/lib/country';
-import { isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isCompletedPrincipalRefund, isHedgedPrincipal, isIncompletePrincipal, refundPrincipalStatus, type PrincipalSpan } from '@/lib/principal-posting-guards';
+import { hasClickLinkPrompt, isLeadingNumericDiscountOffer, isQualifiedCardRepaymentReceipt, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isCompletedPrincipalRefund, isHedgedPrincipal, isIncompletePrincipal, refundPrincipalStatus, type PrincipalSpan } from '@/lib/principal-posting-guards';
 import { extractUniversalMoney } from '@/lib/universal-money';
 
 /* ────────────────────────── Arabic normalisation ──────────────────────────
@@ -1354,9 +1354,9 @@ const OTP_RE = new RegExp(
     // reference number.
     `|${OTP_CODE_WORD}(?:[^.\\n]|\\.\\d|\\.(?=(?:com|ae|sa|net|org|io|co|in|me)\\b)){0,80}?(?:\\bis\\b|[:=]|هو)\\s*${OTP_CODE_DIGITS}` +
     `|\\b\\d{4,8}\\s+is\\s+(?:your|the)\\s+(?:[a-z]+[\\s-]?){0,2}(?:code|otp|pin|password|passcode)\\b` +
-    `|\\b(?:use|enter)\\s+\\d{4,8}\\s+to\\b` +
-    // A numeric discount code in a posted receipt is not a security code.
-    `|\\b(?:use|enter)\\s+code\\s+\\d{4,8}\\s+to\\s+(?:authori[sz]e|authenticate|verify|confirm|approve|complete|make|pay|transfer|purchase|log\\s*in|sign\\s*in|reset|activate)\\b` +
+    // Every code instruction is a challenge except this exact discount shape;
+    // an allowlist of security verbs misses "proceed", "continue" and others.
+    `|\\b(?:use|enter)\\s+(?:code\\s+)?\\d{4,8}\\s+to\\b(?!\\s+get\\s+\\d{1,3}\\s?%\\s+off\\b)` +
     `|(?:code|otp|password|pin)\\s+(?:for|to\\s+complete)\\s+(?:your\\s+)?3-?d\\s*secure`,
   'i',
 );
@@ -5114,6 +5114,7 @@ function declinedInBody(body: string, suppressible: string): boolean {
 
 export type NonPostingReason =
   | 'declined'
+  | 'link-request'
   | 'security-challenge'
   | 'preauthorisation'
   | 'returned-unpaid'
@@ -5151,6 +5152,7 @@ function nonPostingReasonInBody(
   }
   if (CARD_LIFECYCLE_NOTICE_RE.test(suppressible)) return 'card-lifecycle';
   if (declinedInBody(body, suppressible)) return 'declined';
+  if (hasClickLinkPrompt(body)) return 'link-request';
   if (
     OTP_RE.test(body) ||
     GLUED_OTP_REQUEST_RE.test(body) ||
@@ -6725,10 +6727,11 @@ function parseSmsInner(
   // Card payment received (transfer into the card) — before debit detection,
   // since these messages also contain the word "payment". Only credit cards
   // receive payments, whatever the message called the card.
-  if (card?.kind !== 'account' && card && CARD_PAYMENT_RE.test(raw)) {
+  const qualifiedReceipt = card !== null && isQualifiedCardRepaymentReceipt(raw);
+  if (card?.kind !== 'account' && card && (CARD_PAYMENT_RE.test(raw) || qualifiedReceipt)) {
     const amountFils = amountWithFx(raw);
     if (!amountFils) return null;
-    const side = cardPaymentLeg(raw);
+    const side = qualifiedReceipt ? 'receipt' : cardPaymentLeg(raw);
     const correctedDate = side === 'receipt' ? sourceBackedReceiptDate(raw, date, options) : null;
     return {
       kind: 'cardPayment',
@@ -8385,7 +8388,7 @@ function readPrincipalContext(message: string, parsed: ParsedSms): PrincipalCont
 function hasUnsettledPrincipalInContext(context: PrincipalContext, parsed: ParsedSms): boolean {
   const { raw, spans, refund } = context;
   if (hasUnsupportedPrincipal(raw, parsed, spans[0])) return true;
-  if (parsed.kind === 'transaction' && isUnqualifiedCardRepayment(raw)) return true;
+  if (parsed.kind === 'transaction' && (isUnqualifiedCardRepayment(raw) || isQualifiedCardRepaymentReceipt(raw))) return true;
   if (parsed.type === 'income' && isUnqualifiedCardCredit(raw, spans[0])) return true;
   if (principalNeedsTransferReview(raw, spans[0], parsed)) return true;
   if (parsed.type === 'expense' && spans[0] &&
@@ -8412,6 +8415,8 @@ export function parseSms(
   overrides?: Record<string, CategoryId>,
   options?: ParseOptions,
 ): ParsedSms | null {
+  // A quoted future purchase in a leading coupon invitation is not a posting.
+  if (isLeadingNumericDiscountOffer(message)) return null;
   // A BNPL provider restating an instalment its bank already alerted on; see
   // bnpl-providers.ts. Every kind, both directions: the provider's refund
   // notice duplicates the bank's refund credit exactly as its charge does.

@@ -136,10 +136,15 @@ export const hasPersonalMessagePrefix = (source: string, sender = ''): boolean =
   // Elliptical chats omit "I" and may start with a casual filler. Explicit
   // personal wording stays refused even if a sender label names a bank.
   if (!/^\s*(?:(?:hi|hey|hello|lol|ok|just|so)\b[\s,!:]*)*(?:paid|spent|received)\b/iu.test(text)) return false;
-  if (/\b(?:my\s+(?:account|card)|from\s+(?:me|you)|thanks|lol|remind\s+me)\b/iu.test(text)) return true;
+  if (/\b(?:my\s+(?:account|card)|from\s+(?:me|you)|lol|remind\s+me)\b/iu.test(text)) return true;
+  // A named issuer's courtesy footer is not personal chat. Keep other uses of
+  // "thanks" personal, including on named senders, and keep absent senders strict.
+  const personalThanks = isUnaccountableLaunchSender(sender)
+    ? /\bthanks\b/iu : /\bthanks\b(?!\s+for\s+(?:banking|choosing)\b)/iu;
+  if (personalThanks.test(text)) return true;
   const lacksBankEvidence = !GENERIC_BANK_CONTEXT.test(text) &&
     !MONEY_CLAIM_EVIDENCE.test(text) && !TRANSACTION_CODE.test(text);
-  return lacksBankEvidence && (/\bfor\s+(?:lunch|dinner|breakfast)\b/iu.test(text) ||
+  return lacksBankEvidence && (/\b(?:for\s+(?:lunch|dinner|breakfast|the\s+taxi)|on\s+groceries\s+today)\b/iu.test(text) ||
     isUnaccountableLaunchSender(sender));
 };
 

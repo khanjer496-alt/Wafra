@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 67e9b6f6b792e29f8e3d9edec03f9b3450729206dd9d854c11c7aca104f2c542
+// Generated from normal shipping TypeScript. Source SHA-256: 7f0b5904e218dcdb2058cbd1b6414560825d1198ef639c0dbbffaf27b687fda7
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -2505,7 +2505,7 @@ const hasLinkCallToAction = (source) => {
     return false;
 };
 const NOT_A_SETTLED_FACT = [
-    /^\s*(?:Dear\s+Customer[,!:]\s*)?(?:[^\n.!?]{0,40}[،,!:]\s*)?احصل\s+عل[ىي]\s+(?:استرداد|استرجاع)\s+نقدي/iu,
+    /^\s*(?:Dear\s+Customer[,!:]\s*)?(?:[^\n.!?\p{N}]{0,40}?[،,!:\s]\s*)?احصل\s+عل[ىي]\s+(?:استرداد|استرجاع)\s+نقدي/iu,
     /\bfraud\s+alert\b|(?<!\b(?:if|in\s+case|should)\b[^.!?\n]{0,60})\b(?:suspicious\s+(?:activity|transaction|charge|payment|login|purchase)|unusual\s+activity)\b|\bif\s+it\s+was\s+you\b|\bwas\s+this\s+you\b|\bwe\s+(?:have\s+)?(?:blocked|stopped|declined|locked)\b|(?<!\b(?:if|in\s+case|should|can|could|may)\b[^.!?\n]{0,60})\blocked\b|\bunder\s+review\b/iu,
     /\bearn\s+(?:up\s+to\s+)?(?:[$€£₹]\s?\d|\d[\d.,]*\s*(?:%|[A-Z]{3}\b))(?:[^.!?\n]|\.\d){0,40}?\b(?:when|every\s+time|each\s+time|for\s+every)\b|\btap\s+to\s+accept\b/iu,
     /\bdid\s+you\s+(?:authori[sz]e|make|attempt|use)\b|\breply\s+(?:y|yes|n|no|1|2)\b|(?<!\b(?:if|in\s+case|should)\b[^.!?\n]{0,40})\brecogni[sz]e\b|\bflagged\b|\bheld\b|\b(?:otp|one[-\s]time|verification|security)\s+code\b|(?<!\b(?:auth|authori[sz]ation|approval|merchant|branch|postal|zip|sort|mcc|promo|category|reference|ref|biller|bsb)\s+)\bcode\s*:?\s*\d{4,}\b/iu,
@@ -2521,7 +2521,8 @@ const NOT_A_NEW_MOVEMENT = [
 const MERCHANT_ORDER_RECEIPT = /\border\s*(?:#|no\.?|number|id)\s*[:.-]?\s*[A-Z0-9-]*\d[\s\S]{0,80}?\b(?:paid|payment)\b|\b(?:paid|payment)\b[\s\S]{0,40}?\border\s*(?:#|no\.?|number|id)\s*[:.-]?\s*[A-Z0-9-]*\d/iu;
 const OWN_BALANCE_STATED = /\b(?:updated|avl\.?|available|new|closing|current)\s+(?:wallet\s+|account\s+|a\/c\s+)?bal(?:ance)?\b|\bbal(?:ance)?\s*(?:is|:)\s*(?:[A-Z]{3}|Rs\.?|[$£€₹])/iu;
 const OWN_CARD_PAYMENT = /\b(?:[Yy]ou\s+)?paid\b(?:[^.\n]|\.\d){0,40}?\bto\s+your\s+(?:(?:[A-Z][\p{L}\p{N}&.'’-]*|credit|charge)\s+){0,4}?[Cc]ard\b/u;
-const isNotAutoPostableMoney = (source) => (0, principal_posting_guards_1.isUnqualifiedCardRepayment)(source) || hasLinkCallToAction(source) || NOT_A_SETTLED_FACT.some((pattern) => pattern.test(neutraliseBenignShapes(source))) ||
+const isNotAutoPostableMoney = (source) => (0, principal_posting_guards_1.hasClickLinkPrompt)(source) || (0, principal_posting_guards_1.isLeadingNumericDiscountOffer)(source) || (0, principal_posting_guards_1.isUnqualifiedCardRepayment)(source) ||
+    hasLinkCallToAction(source) || NOT_A_SETTLED_FACT.some((pattern) => pattern.test(neutraliseBenignShapes(source))) ||
     NOT_A_NEW_MOVEMENT.some((pattern) => pattern.test(source)) ||
     (MERCHANT_ORDER_RECEIPT.test(source) && !OWN_BALANCE_STATED.test(source));
 exports.isNotAutoPostableMoney = isNotAutoPostableMoney;
@@ -2622,7 +2623,7 @@ const EXECUTED_MANDATE_DEBIT = /(\b(?:has\s+been|was)\s+(?:debited|charged|deduc
 const CREDITED_TOWARDS_REVERSAL = /(\b(?:is|has\s+been|was)\s+(?:successfully\s+)?credited\s+with\b(?:[^.\n]|\.(?=\S)){0,80}?\btowards\s+)reversal\b/giu;
 const REVERSED_THEN_CREDITED_TO_YOU = /\brevers(?:al|ed|e)\b(?:[^.\n]|\.(?=\S)){0,200}?\b(?:is|has\s+been|was)\s+(?:successfully\s+)?credited\s+to\s+your\b/giu;
 const RECOGNISE_CALLBACK_FOOTER = /(?<!\p{L})(?:(?:don['’]t|do\s+not|didn['’]t)\s+recogni[sz]e\b[^.!?\n]{0,30}\?\s*(?=(?:call|contact|ring|phone)\b)|si\s+no\s+(?:lo\s+|la\s+)?reconoc(?:e|es)\b[^.!?\n]{0,60}?(?=\bllam(?:a|e|ar)\b)|n[ãa]o\s+reconhece\b[^.!?\n]{0,40}?\??\s*(?=(?:ligue|ligar)\b))/giu;
-const NUMERIC_DISCOUNT_CODE = /\b(use\s+)code(\s+\d{4,8}\s+to\s+get\s+\d{1,3}\s?%\s+off\b)/giu;
+const NUMERIC_DISCOUNT_CODE = /\b((?:use|enter)\s+)code(\s+\d{4,8}\s+to\s+get\s+\d{1,3}\s?%\s+off\b)/giu;
 const neutraliseBenignShapes = (source) => source
     .replace(NUMERIC_DISCOUNT_CODE, '$1promo code$2')
     .replace(CARD_PRODUCT_NAME, 'card')
@@ -9709,11 +9710,15 @@ const hasPersonalMessagePrefix = (source, sender = '') => {
         return true;
     if (!/^\s*(?:(?:hi|hey|hello|lol|ok|just|so)\b[\s,!:]*)*(?:paid|spent|received)\b/iu.test(text))
         return false;
-    if (/\b(?:my\s+(?:account|card)|from\s+(?:me|you)|thanks|lol|remind\s+me)\b/iu.test(text))
+    if (/\b(?:my\s+(?:account|card)|from\s+(?:me|you)|lol|remind\s+me)\b/iu.test(text))
+        return true;
+    const personalThanks = (0, exports.isUnaccountableLaunchSender)(sender)
+        ? /\bthanks\b/iu : /\bthanks\b(?!\s+for\s+(?:banking|choosing)\b)/iu;
+    if (personalThanks.test(text))
         return true;
     const lacksBankEvidence = !GENERIC_BANK_CONTEXT.test(text) &&
         !MONEY_CLAIM_EVIDENCE.test(text) && !TRANSACTION_CODE.test(text);
-    return lacksBankEvidence && (/\bfor\s+(?:lunch|dinner|breakfast)\b/iu.test(text) ||
+    return lacksBankEvidence && (/\b(?:for\s+(?:lunch|dinner|breakfast|the\s+taxi)|on\s+groceries\s+today)\b/iu.test(text) ||
         (0, exports.isUnaccountableLaunchSender)(sender));
 };
 exports.hasPersonalMessagePrefix = hasPersonalMessagePrefix;
@@ -11060,12 +11065,28 @@ function bankMonogram(name) {
 "principal-posting-guards":function(module,exports,require){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.hasClickLinkPrompt = hasClickLinkPrompt;
+exports.isLeadingNumericDiscountOffer = isLeadingNumericDiscountOffer;
 exports.isIncompletePrincipal = isIncompletePrincipal;
 exports.isHedgedPrincipal = isHedgedPrincipal;
 exports.refundPrincipalStatus = refundPrincipalStatus;
 exports.isCompletedPrincipalRefund = isCompletedPrincipalRefund;
+exports.isQualifiedCardRepaymentReceipt = isQualifiedCardRepaymentReceipt;
 exports.isUnqualifiedCardRepayment = isUnqualifiedCardRepayment;
 exports.isUnqualifiedCardCredit = isUnqualifiedCardCredit;
+const CLICK_LINK_PROMPT = /(?:\b(?:click(?:ing)?|tap(?:ping)?)\s+|(?<![ء-ي])(?:اضغط|إضغط|انقر)\s+)(?:[^.!?\n]|\.\d){0,120}?(?:https?:\/\/|www\.|\b(?:here|link|url)\b|الرابط|هنا)/giu;
+function hasClickLinkPrompt(source) {
+    for (const match of source.matchAll(CLICK_LINK_PROMPT)) {
+        const before = source.slice(Math.max(0, match.index - 60), match.index);
+        if (/(?:\b(?:do\s+not|don['’]t|never|avoid|refrain\s+from)\s+(?:ever\s+)?|\b(?:at|from|merchant\s*:?)\s+|(?:لا|عدم)\s+)$/iu.test(before))
+            continue;
+        return true;
+    }
+    return false;
+}
+function isLeadingNumericDiscountOffer(source) {
+    return /^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?(?:use|enter)\s+(?:code\s+)?\d{4,8}\s+to\s+get\s+\d{1,3}\s?%\s+off\b/iu.test(source);
+}
 const MOVEMENT_STATUS = /\bincomplete\s+(?:transaction|txn|purchase|payment|transfer|withdrawal)\b|\b(?:transaction|txn|purchase|payment|transfer|withdrawal)(?:\s+(?:of|for|at|to|from|with|on)\b(?:[^.\n]|\.\d){0,80}?)?\s+(?:was|is|remains?|has\s+been)\s+incomplete\b|\b(?:transaction|txn|purchase|payment|authori[sz]ation)\b(?:[^.\n]|\.\d){0,100}?\s(?:cancell?ed|voided)\s+by\s+(?:the\s+)?(?:merchant|bank|issuer|acquirer)\b|\b(?:transaction|txn|purchase|payment|authori[sz]ation)\b(?:[^.\n]|\.\d){0,100}?\s(?:will\s+be|is\s+being)\s+(?:cancell?ed|voided)\b|[ \t][-–—:|][ \t]*(?:void|voided|cancell?ed)[ \t]*(?=\n|$)|[ \t]*[,:(][ \t]*(?:cancell?ed|voided|void)[ \t]*\)?[ \t]*(?=[.\n]|$)|(?<![ء-ي])(?:تم\s+)?(?:الغاء|ايقاف|تعليق)\s+(?:ال)?(?:عمليه|شراء|دفع|تحويل|حواله|سحب|معامله|حركه)(?![ء-ي])|(?<![ء-ي])(?:الغيت|اوقفت|علقت)\s+(?:ال)?(?:عمليه|شراء|دفع|تحويل|حواله|سحب|معامله|حركه)(?![ء-ي])|(?<![ء-ي])(?:ال)?(?:عمليه|معامله|شراء|دفع|تحويل|حواله|سحب|حركه)\s+(?:غير\s+(?:ناجح|مكتمل)ه?|لم\s+(?:تكتمل|يكتمل|تنجح)|(?:ال)?(?:ملغي|ملغا|ملغاه|موقوف[هة]?))(?![ء-ي])|(?<![ء-ي])(?:و?تم|قد\s+تم)\s+(?:الغاو|الغاي|ايقاف|تعليق)(?:ها|ه)(?![ء-ي])|(?<![ء-ي])تم\s+(?:ال)?الغاء(?![ء-ي])|(?<![ء-ي])لم\s+(?:تكتمل|يكتمل|تنجح)(?![ء-ي])/gi;
 const CONDITIONAL_STATUS = /(?:\b(?:if|unless|please|pls|to|can|may|should)\b|(?<![ء-ي])(?:يرجي|الرجاء|رجاء|يمكنك|يمكنكم|يمكن|بامكانك|بامكانكم|اتصل|ارسل|للابلاغ|لطلب|طلب|خدمه|اذا|حال|تود|ترغب|عليك)(?![ء-ي]))(?:\s+(?:او|و|ب|في|علي|عن|من|كانت|كان|or|and))?(?:\s+\d{1,4})?\s*$/i;
 function isIncompletePrincipal(source, span) {
@@ -11259,9 +11280,18 @@ const UNQUALIFIED_REPAYMENT = new RegExp(String.raw `^\s*(?:[A-Z][A-Z0-9 .&-]{1,
     String.raw `payment\s+(?:received|credited)\s+${REPAYMENT_MONEY}\s+(?:on|to|towards?)\s+(?:your\s+)?${REPAYMENT_CARD}` +
     String.raw `|thank\s+you\s+for\s+(?:your\s+)?payment\s+of\s+${REPAYMENT_MONEY}\s+on\s+(?:your\s+)?${REPAYMENT_CARD}` +
     String.raw `|your\s+payment\s+of\s+${REPAYMENT_MONEY}\s+to\s+(?:your\s+)?(?:credit|charge|covered)\s+card\b(?:[^.\n]|\.\d){0,80}\bsuccessful\b)`, 'iu');
+const QUALIFIED_REPAYMENT_RECEIPT = new RegExp(String.raw `^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?(?:` +
+    String.raw `payment\s+received\s+${REPAYMENT_MONEY}` +
+    String.raw `|thank\s+you\s+for\s+(?:your\s+)?payment\s+of\s+${REPAYMENT_MONEY}` +
+    String.raw `)\s+on\s+your\s+${REPAYMENT_CARD}\s+(?:ending(?:\s+(?:in|with))?|number|no\.?)\s*(?:[*xX•·-]\s*)*\p{Nd}{4}(?!\p{Nd})` +
+    String.raw `(?=\s*(?:[.!?\n]|$|(?:thank|avl|available|balance|for\s+(?:queries|help|details|information))\b))`, 'iu');
+function isQualifiedCardRepaymentReceipt(source) {
+    const match = QUALIFIED_REPAYMENT_RECEIPT.exec(source);
+    return !!match && !/\b(?:debit|prepaid)\s+card\b/iu.test(match[0]);
+}
 function isUnqualifiedCardRepayment(source) {
     const text = /[\uFF01-\uFFEF]/u.test(source) ? source.normalize('NFKC') : source;
-    return UNQUALIFIED_REPAYMENT.test(text);
+    return UNQUALIFIED_REPAYMENT.test(text) && !isQualifiedCardRepaymentReceipt(text);
 }
 function isUnqualifiedCardCredit(source, span) {
     if (!span || !CARD_CREDIT_TARGET.test(source) || !CARD_CREDIT_MOVEMENT.test(source))
@@ -11450,8 +11480,7 @@ const OTP_CODE_DIGITS = String.raw `(?<![\d.,])\d{4,8}\b(?![.,]\d)`;
 const OTP_RE = new RegExp(`${OTP_CODE_WORD}(?:\\s+(?:code|otp|password|pin|number))?\\s*(?:is|:|-|=|هو)?\\s*${OTP_CODE_DIGITS}` +
     `|${OTP_CODE_WORD}(?:[^.\\n]|\\.\\d|\\.(?=(?:com|ae|sa|net|org|io|co|in|me)\\b)){0,80}?(?:\\bis\\b|[:=]|هو)\\s*${OTP_CODE_DIGITS}` +
     `|\\b\\d{4,8}\\s+is\\s+(?:your|the)\\s+(?:[a-z]+[\\s-]?){0,2}(?:code|otp|pin|password|passcode)\\b` +
-    `|\\b(?:use|enter)\\s+\\d{4,8}\\s+to\\b` +
-    `|\\b(?:use|enter)\\s+code\\s+\\d{4,8}\\s+to\\s+(?:authori[sz]e|authenticate|verify|confirm|approve|complete|make|pay|transfer|purchase|log\\s*in|sign\\s*in|reset|activate)\\b` +
+    `|\\b(?:use|enter)\\s+(?:code\\s+)?\\d{4,8}\\s+to\\b(?!\\s+get\\s+\\d{1,3}\\s?%\\s+off\\b)` +
     `|(?:code|otp|password|pin)\\s+(?:for|to\\s+complete)\\s+(?:your\\s+)?3-?d\\s*secure`, 'i');
 const OTP_FOOTER_RE = new RegExp(`do not (?:share|disclose|reveal|give)|never (?:share|disclose|reveal|ask)|will never ask|beware of fraud` +
     `|${OTP_CODE_WORD}` +
@@ -12704,6 +12733,8 @@ function nonPostingReasonInBody(body, suppressible) {
         return 'card-lifecycle';
     if (declinedInBody(body, suppressible))
         return 'declined';
+    if ((0, principal_posting_guards_1.hasClickLinkPrompt)(body))
+        return 'link-request';
     if (OTP_RE.test(body) ||
         GLUED_OTP_REQUEST_RE.test(body) ||
         TRANSACTION_CODE_REQUEST_RE.test(body) ||
@@ -13610,11 +13641,12 @@ function parseSmsInner(message, overrides, options) {
             categoryGuess: 'other', categoryDeliberate: true, currency, reference, raw: source,
         };
     }
-    if (card?.kind !== 'account' && card && CARD_PAYMENT_RE.test(raw)) {
+    const qualifiedReceipt = card !== null && (0, principal_posting_guards_1.isQualifiedCardRepaymentReceipt)(raw);
+    if (card?.kind !== 'account' && card && (CARD_PAYMENT_RE.test(raw) || qualifiedReceipt)) {
         const amountFils = amountWithFx(raw);
         if (!amountFils)
             return null;
-        const side = cardPaymentLeg(raw);
+        const side = qualifiedReceipt ? 'receipt' : cardPaymentLeg(raw);
         const correctedDate = side === 'receipt' ? sourceBackedReceiptDate(raw, date, options) : null;
         return {
             kind: 'cardPayment',
@@ -14542,7 +14574,7 @@ function hasUnsettledPrincipalInContext(context, parsed) {
     const { raw, spans, refund } = context;
     if (hasUnsupportedPrincipal(raw, parsed, spans[0]))
         return true;
-    if (parsed.kind === 'transaction' && (0, principal_posting_guards_1.isUnqualifiedCardRepayment)(raw))
+    if (parsed.kind === 'transaction' && ((0, principal_posting_guards_1.isUnqualifiedCardRepayment)(raw) || (0, principal_posting_guards_1.isQualifiedCardRepaymentReceipt)(raw)))
         return true;
     if (parsed.type === 'income' && (0, principal_posting_guards_1.isUnqualifiedCardCredit)(raw, spans[0]))
         return true;
@@ -14567,6 +14599,8 @@ function hasUnsettledPrincipal(message, parsed) {
     return context ? hasUnsettledPrincipalInContext(context, parsed) : false;
 }
 function parseSms(message, overrides, options) {
+    if ((0, principal_posting_guards_1.isLeadingNumericDiscountOffer)(message))
+        return null;
     if ((0, bnpl_providers_1.isBnplProviderSource)(options?.sender))
         return null;
     let parsed = parseSmsInner(message, overrides, options);
