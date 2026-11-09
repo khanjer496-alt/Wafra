@@ -1,7 +1,7 @@
 /** Source-only qualifications of an already selected monetary value. */
 export interface PrincipalSpan { start: number; end: number }
 
-const CLICK_LINK_PROMPT = /(?:\b(?:click(?:ing)?|tap(?:ping)?)\s+|(?<![ء-ي])(?:اضغط|إضغط|انقر)\s+)(?:[^.!?\n]|\.\d){0,120}?(?:https?:\/\/|www\.|\b(?:here|link|url)\b|الرابط|هنا)/giu;
+const CLICK_LINK_PROMPT = /(?:\b(?:click(?:ing)?|tap(?:ping)?)\b[\s:：]+|(?<![ء-ي])(?:اضغط|إضغط|انقر)[\s:：]+)(?:[^.!?]|\.\d){0,120}?(?:https?:\/\/|www\.|\b(?:here|below|link|url)\b|الرابط|هنا)/giu;
 /** A link instruction is never settlement evidence, even with an issuer label. */
 export function hasClickLinkPrompt(source: string): boolean {
   for (const match of source.matchAll(CLICK_LINK_PROMPT)) {

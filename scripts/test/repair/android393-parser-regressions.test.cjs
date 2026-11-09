@@ -93,6 +93,8 @@ for (const sender of ['ENBD', 'ENBD-ALERT']) for (const literal of ['4,999.00', 
 
 for (const footer of [
   'Click https://www.enbd.example/statements for details.',
+  'Click:https://www.enbd.example/statements.',
+  'Click to view your statement:\nhttps://www.enbd.example/statements.',
   'Please click on the link https://www.enbd.example/statements.',
   'View the statement by clicking https://www.enbd.example/statements.',
   'Click here to view the statement.',
@@ -162,6 +164,8 @@ test('bundled iOS parser refuses the device non-movements and click prompts with
     ['ENBD', 'Dear customer, AED 4,999.00 debited from your account ending 3183. If not you, click http://bit.ly/abc123 immediately.'],
     ['ENBD-ALERT', 'Dear customer, AED 3,111.00 debited from your account ending 3183. If not you, click http://bit.ly/abc123 immediately.'],
     ['ENBD', `${purchase} Click https://www.enbd.example/statements for details.`],
+    ['ENBD', `${purchase} Click:https://www.enbd.example/statements.`],
+    ['ENBD', `${purchase} Click to view your statement:\nhttps://www.enbd.example/statements.`],
     ['ENBD', `${purchase} اضغط على الرابط https://www.enbd.example/statements.`],
   ]) assert.equal(parse(body, sender).route, 'ignore', `${sender}/${body}`);
 });

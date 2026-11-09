@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: dbda4aa81a9ac510063e7b06a84171f25f7fc9eecf36c7971b6b1179c6019122
+// Generated from normal shipping TypeScript. Source SHA-256: 7053110277a2d0a7f6eddbc3e6462601e24ba1bac9e7be5670215ba470468f79
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -11074,7 +11074,7 @@ exports.isCompletedPrincipalRefund = isCompletedPrincipalRefund;
 exports.isQualifiedCardRepaymentReceipt = isQualifiedCardRepaymentReceipt;
 exports.isUnqualifiedCardRepayment = isUnqualifiedCardRepayment;
 exports.isUnqualifiedCardCredit = isUnqualifiedCardCredit;
-const CLICK_LINK_PROMPT = /(?:\b(?:click(?:ing)?|tap(?:ping)?)\s+|(?<![ء-ي])(?:اضغط|إضغط|انقر)\s+)(?:[^.!?\n]|\.\d){0,120}?(?:https?:\/\/|www\.|\b(?:here|link|url)\b|الرابط|هنا)/giu;
+const CLICK_LINK_PROMPT = /(?:\b(?:click(?:ing)?|tap(?:ping)?)\b[\s:：]+|(?<![ء-ي])(?:اضغط|إضغط|انقر)[\s:：]+)(?:[^.!?]|\.\d){0,120}?(?:https?:\/\/|www\.|\b(?:here|below|link|url)\b|الرابط|هنا)/giu;
 function hasClickLinkPrompt(source) {
     for (const match of source.matchAll(CLICK_LINK_PROMPT)) {
         const before = source.slice(Math.max(0, match.index - 60), match.index);
