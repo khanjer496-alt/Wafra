@@ -58,7 +58,7 @@ function harness(options = {}) {
       return next;
     };
   };
-  const calls = { attributes: [], tracking: [], configure: 0, configureOptions: [], pro: [], snapshots: [], appListeners: new Set(), deferred: [], productRequests: [], purchases: [], playQueries: 0 };
+  const calls = { attributes: [], tracking: [], configure: 0, configureOptions: [], pro: [], snapshots: [], appListeners: new Set(), deferred: [], productRequests: [], purchases: [], playQueries: 0, placements: [] };
   const state = { hydrated: true, privateMode: false, language: 'en', marketId: 'AE',
     onboarded: true, captureOptOut: false, trialStartTs: 0, pro: false,
     transactions: [], ...options.state };
@@ -99,7 +99,7 @@ function harness(options = {}) {
     './SuperwallExpoModule': native, './useSuperwall': sdk,
     './useSuperwallEvents': { useSuperwallEvents() {} },
   });
-  const placement = { state: { status: 'idle' }, registerPlacement: async () => {} };
+  const placement = { state: { status: 'idle' }, registerPlacement: async request => { calls.placements.push(request); } };
   const setPro = value => { calls.pro.push(value); state.pro = value; };
   const productContract = load(path.join(root, 'src/lib/purchases.ts'), {
     'react-native': rn, '@/lib/complimentary-access': { complimentaryAccessUntil: () => 0 },
@@ -144,7 +144,7 @@ function harness(options = {}) {
   Function('require', 'module', 'exports', 'process', '__DEV__', compiled)(name => {
     assert.ok(Object.hasOwn(deps, name), `unexpected dependency ${name}`);
     return deps[name];
-  }, module, module.exports, { env: { EXPO_PUBLIC_SUPERWALL_ANDROID_API_KEY: 'fixture-public-key' } }, false);
+  }, module, module.exports, { env: { EXPO_PUBLIC_SUPERWALL_ANDROID_API_KEY: 'fixture-public-key', EXPO_PUBLIC_SUPERWALL_IOS_API_KEY: 'fixture-ios-public-key' } }, false);
   const render = (key, callback) => {
     active = contexts.get(key) ?? { cursor: 0, slots: [], effects: [] };
     contexts.set(key, active);
@@ -210,13 +210,11 @@ test('billing config uses the device region independently of the selected bank m
   }
 });
 
-test('unchanged app state settles after one attribute write despite real SDK user snapshot replacement', async () => {
+test('unchanged app state settles without optional metadata or event collection', async () => {
   const h = harness();
-  const before = h.sdk.useSuperwallStore.getState();
   await h.renderRuntime(20);
-  assert.notEqual(h.sdk.useSuperwallStore.getState(), before, 'the SDK really replaced its subscribed state');
-  assert.equal(h.calls.attributes.length, 1);
-  assert.deepEqual(h.calls.tracking, ['all']);
+  assert.equal(h.calls.attributes.length, 0);
+  assert.deepEqual(h.calls.tracking, ['none']);
   assert.equal(h.calls.appListeners.size, 1);
 });
 
@@ -228,44 +226,43 @@ test('iOS SDK user/customer/entitlement changes do not write attributes and enti
       subscriptionStatus: { status: 'ACTIVE', entitlements: [{ id: 'pro' }] } });
     await h.renderRuntime(2);
   }
-  assert.equal(h.calls.attributes.length, 1);
-  assert.deepEqual(h.calls.tracking, ['all']);
+  assert.equal(h.calls.attributes.length, 0);
+  assert.deepEqual(h.calls.tracking, ['none']);
   assert.deepEqual(h.calls.pro, [true]);
   assert.ok(h.calls.snapshots.length >= 6);
 });
 
-test('unrelated ledger edits are quiet and each targeting metadata change writes exactly once', async () => {
+test('ledger and onboarding changes never send targeting attributes', async () => {
   const h = harness();
   await h.renderRuntime(3);
   h.state.transactions = [{ id: 'fixture-row', amountFils: 100 }];
   h.state.userName = 'Fixture';
   await h.renderRuntime(3);
-  assert.equal(h.calls.attributes.length, 1);
+  assert.equal(h.calls.attributes.length, 0);
   for (const patch of [{ language: 'ar' }, { marketId: 'SA' }, { captureOptOut: true },
     { onboardingProfile: { focus: 'bills', tracking: 'none', intention: 'control' } }, { trialStartTs: 123 }]) {
     const before = h.calls.attributes.length;
     Object.assign(h.state, patch);
     await h.renderRuntime(3);
-    assert.equal(h.calls.attributes.length, before + 1);
+    assert.equal(h.calls.attributes.length, before);
   }
-  assert.equal(h.calls.attributes.at(-1).wafra_trial_days_left, 7);
   assert.ok(h.calls.attributes.every(attributes => !('transactions' in attributes) && !('userName' in attributes)));
 });
 
-test('private mode suppresses metadata writes and transitions tracking once per consent change', async () => {
+test('leaving Private Mode never re-enables optional Superwall collection', async () => {
   const h = harness({ state: { privateMode: true } });
   await h.renderRuntime(4);
   assert.equal(h.calls.attributes.length, 0);
   assert.deepEqual(h.calls.tracking, ['none']);
   h.state.privateMode = false;
   await h.renderRuntime(5);
-  assert.equal(h.calls.attributes.length, 1);
-  assert.deepEqual(h.calls.tracking, ['none', 'all']);
+  assert.equal(h.calls.attributes.length, 0);
+  assert.deepEqual(h.calls.tracking, ['none']);
   h.state.privateMode = true;
   h.state.language = 'ar';
   await h.renderRuntime(5);
-  assert.equal(h.calls.attributes.length, 1);
-  assert.deepEqual(h.calls.tracking, ['none', 'all', 'none']);
+  assert.equal(h.calls.attributes.length, 0);
+  assert.ok(h.calls.tracking.every(value => value === 'none'));
 });
 
 test('actual SDK provider configures once across unrelated app and SDK snapshots', async () => {
@@ -670,3 +667,22 @@ for (const action of ['purchase', 'restore']) {
     assert.equal(h.state.pro, true, 'only the new session response can grant access');
   });
 }
+
+for (const platform of ['ios', 'android']) test(`${platform}: SDK initializes with minimal collection options`, async () => {
+  const h = harness({ platform, configured: false });
+  await h.renderProvider(5);
+  const config = h.calls.configureOptions[0];
+  assert.equal(config.eventTrackingBehavior, 'none');
+  assert.equal(config.isExternalDataCollectionEnabled, false);
+  assert.equal(config.enableExperimentalDeviceVariables, false);
+  assert.equal(config.shouldObservePurchases, true, 'entitlement observation is preserved');
+});
+
+test('paywall and onboarding requests carry no custom targeting or caller attributes', async () => {
+  const h = harness({ platform: 'ios' });
+  await h.renderRuntime(3);
+  await h.billing().presentProPaywall({ source: 'fixture', merchant: 'private fixture' });
+  await h.billing().presentOnboardingFlow();
+  assert.equal(h.calls.placements.length, 2);
+  for (const request of h.calls.placements) assert.deepEqual(Object.keys(request), ['placement']);
+});
