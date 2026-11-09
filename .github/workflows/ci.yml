@@ -146,23 +146,6 @@ jobs:
           node scripts/generate-ios-background-parser.cjs
           node scripts/generate-ios-background-parser.cjs --check
 
-      # Temporary focused validation and exact-source resource handoff for PR176.
-      - name: Check issuer-confirmation boundaries for PR176
-        if: github.head_ref == 'fix/parser-false-postings' || github.ref_name == 'fix/parser-false-postings'
-        run: node --test --test-name-pattern='issuer confirmation' scripts/test/repair/review-round2-safety.test.cjs
-
-      - name: Return generated parser resources for PR176
-        if: github.head_ref == 'fix/parser-false-postings' || github.ref_name == 'fix/parser-false-postings'
-        uses: actions/upload-artifact@v4
-        with:
-          name: parser-resources-${{ github.event.pull_request.head.sha || github.sha }}
-          retention-days: 1
-          if-no-files-found: error
-          path: |
-            modules/wafra-live-capture/ios/Resources/WafraBackgroundParser.js
-            modules/wafra-live-capture/ios/Resources/WafraBackgroundParser.meta.json
-            src/lib/ios-background-parser-source.generated.ts
-
       - name: Typecheck
         run: npm run typecheck
 

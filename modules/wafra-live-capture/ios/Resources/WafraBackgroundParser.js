@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 864e8423bfb121257f61cf66cfefbe5c9f96fb4dda93d2cd53f17b592149e560
+// Generated from normal shipping TypeScript. Source SHA-256: 1020cf912b1ec45a557105ef8fd2ee46b8f8289b2c8abc21b02224c19c1f334d
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -11110,7 +11110,7 @@ exports.isUnpostedCardBalanceClaim = isUnpostedCardBalanceClaim;
 exports.isCompletedCardBalanceReceipt = isCompletedCardBalanceReceipt;
 exports.isCompletedCardRepaymentPrincipal = isCompletedCardRepaymentPrincipal;
 exports.isUnqualifiedCardCredit = isUnqualifiedCardCredit;
-const CLICK_LINK_PROMPT = /(?:\b(?:click(?:ing)?|tap(?:ping)?|verify|confirm|update\s+(?:(?:your|the)\s+)?(?:details|information|credentials|account))\b[\s:：]+|(?<![ء-ي])(?:اضغط|إضغط|انقر)[\s:：]+)(?:[^.!?]|\.\d){0,120}?(?:(?:https?|hxxps?):\/\/|\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/|\b)|www\.|\b(?:here|below|link|url)\b|الرابط|هنا)/giu;
+const CLICK_LINK_PROMPT = /(?:\b(?:click(?:ing)?|tap(?:ping)?|verify|confirm|update\s+(?:(?:your|the)\s+)?(?:details|information|credentials|account))\b[\s:：]+|(?<![ء-ي])(?:اضغط|إضغط|انقر)[\s:：]+)(?:[^.!?]|\.\d){0,120}?(?:(?:https?|hxxps?):\/\/|\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:[\/?#:]|\b)|www\.|\b(?:here|below|link|url)\b|الرابط|هنا)/giu;
 const ISSUER_MERCHANT_DEBIT_CONFIRMATION = /^confirm\s+that\s+[A-Z]{3}\s+\d[\d,.]*\s+was\s+debited\s+from\s+your\s+account\s+ending\s+\d{4}\s+for\s+(?:a\s+)?purchase\s+at\s+(?:[a-z0-9-]+\.)+[a-z]{2,}$/iu;
 function hasClickLinkPrompt(source) {
     for (const match of source.matchAll(CLICK_LINK_PROMPT)) {
@@ -11118,7 +11118,7 @@ function hasClickLinkPrompt(source) {
         if (/(?:\b(?:do\s+not|don['’]t|never|avoid|refrain\s+from)\s+(?:ever\s+)?|\b(?:at|from|merchant\s*:?)\s+|(?:لا|عدم)\s+)$/iu.test(before))
             continue;
         if (ISSUER_MERCHANT_DEBIT_CONFIRMATION.test(match[0]) &&
-            /(?:^|[.!?])\s*we\s+$/iu.test(source.slice(0, match.index)))
+            /(?:^|[.!?])\s*(?:Dear\s+Customer[,\s]+)?we\s+$/iu.test(source.slice(0, match.index)))
             continue;
         return true;
     }
