@@ -106,3 +106,45 @@ test('every dispatch refuses unverified submission routes before either build jo
   assert.doesNotMatch(oldIdRoute, /eas submit/);
   assert.match(oldIdRoute, /exit 1/);
 });
+
+test('artifact resubmission checks the downloaded product, including old self-consistent reports', () => {
+  const artifact = YAML.parse(fs.readFileSync(path.join(path.dirname(file), 'ios-submit-verified-artifact.yml'), 'utf8'));
+  const list = artifact.jobs.submit.steps;
+  const gate = list.findIndex(s => s.name === 'Verify downloaded product versions');
+  const downloadCheck = list.findIndex(s => s.name === 'Verify downloaded artifact');
+  const submit = list.findIndex(s => /eas submit/.test(s.run || ''));
+  assert.ok(gate > downloadCheck && gate < submit, 'downloaded IPA needs a product gate before submission');
+  assert.equal(list[gate].if, undefined, 'a failed product gate must stop submission');
+  assert.equal(list[submit].if, undefined, 'submission must retain implicit success()');
+  const os = require('node:os');
+  const python = process.platform === 'darwin' ? '/usr/bin/python3' : 'python3';
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wafra-artifact-version-test-'));
+  try {
+    for (const [host, widget, short, expected, appCount = 1] of [
+      ['192', '192', '1.0.0', true],
+      ['191', '1', '1.0.0', false],
+      ['192', '$(CURRENT_PROJECT_VERSION)', '1.0.0', false],
+      ['192', '192', '1.0', false],
+      ['192', '192', '1.0.0', false, 2],
+      ['192', '192', '1.0.0', false, 0],
+    ]) {
+      const ipa = path.join(dir, 'downloaded artifact.ipa');
+      const fixture = spawnSync(python, ['-c', `import plistlib,sys,zipfile
+with zipfile.ZipFile(sys.argv[1], 'w') as z:
+ z.writestr('Payload/readme.txt','synthetic test fixture')
+ for index in range(int(sys.argv[5])):
+  app='Wafra' if index == 0 else 'Other'
+  for name,build,short in [(f'Payload/{app}.app/Info.plist',sys.argv[2],'1.0.0'),(f'Payload/{app}.app/PlugIns/Widget.appex/Info.plist',sys.argv[3],sys.argv[4])]:
+   z.writestr(name,plistlib.dumps({'CFBundleVersion':build,'CFBundleShortVersionString':short}))
+`, ipa, host, widget, short, String(appCount)], {encoding: 'utf8'});
+      assert.equal(fixture.status, 0, fixture.stderr);
+      const result = spawnSync('bash', ['-eu', '-o', 'pipefail', '-c', list[gate].run], {
+        cwd: path.resolve(__dirname, '../../..'), encoding: 'utf8',
+        env: {...process.env, IPA_PATH: ipa, RUNNER_TEMP: dir,
+          PATH: process.platform === 'darwin' ? `/usr/bin:/bin:${process.env.PATH}` : process.env.PATH},
+      });
+      assert.equal(result.status === 0, expected, JSON.stringify({host,widget,short,appCount,stdout:result.stdout,stderr:result.stderr}));
+      assert.deepEqual(fs.readdirSync(dir), ['downloaded artifact.ipa'], 'extracted product is cleaned up');
+    }
+  } finally { fs.rmSync(dir, {recursive: true, force: true}); }
+});
