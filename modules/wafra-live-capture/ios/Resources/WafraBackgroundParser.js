@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 7053110277a2d0a7f6eddbc3e6462601e24ba1bac9e7be5670215ba470468f79
+// Generated from normal shipping TypeScript. Source SHA-256: 03a6d34d4e4fa6a9d6e5e9f41de6a261b8b7c879f012e1e6f62b2c729ea707cc
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -10881,7 +10881,7 @@ function setActiveMarket(id) {
     active = id === country_1.NEUTRAL_MARKET_ID ? NEUTRAL : exports.MARKETS.find((m) => m.id === id);
     return true;
 }
-const AED_ALERT = /\b(?:AED|Dhs?\.?)\b|د\.?[إا]\.?|دراهم|درهم/iu;
+const AED_ALERT = /\b(?:AED|Dhs?\.?)\b|(?<![ء-ي])د\.?[إا]\.?(?![ء-ي])|دراهم|درهم/iu;
 const SAR_ALERT = /\b(?:SAR|SR)\b|ر\.?\s?س\.?|ريال/iu;
 const SAR_GLUED_ALERT = /(?<=\d)(?:SAR|SR)\b/iu;
 const AED_GLUED_ALERT = /(?<![^\s(:])AED(?=[0-9][0-9,]*(?:\.[0-9]+)?(?![0-9A-Za-z]))|(?<![^\s(:])[0-9][0-9,]*(?:\.[0-9]+)?AED\b/u;
