@@ -82,3 +82,27 @@ test('all local workflow shell and embedded Python blocks parse before CI dispat
     }
   }
 });
+
+test('every dispatch refuses unverified submission routes before either build job starts', () => {
+  const validation = workflow.jobs['validate-request'];
+  assert.ok(validation, 'all routes need the shared submission guard');
+  assert.equal(workflow.jobs.build.needs, 'validate-request');
+  assert.equal(job.needs, 'validate-request');
+  const guard = validation.steps[0].run;
+  for (const host of ['eas', 'github-macos']) for (const submit of ['true', 'false']) {
+    for (const id of ['', '12345678-1234-1234-1234-123456789abc']) {
+      const r = spawnSync('bash', ['-eu', '-o', 'pipefail', '-c', guard], {
+        encoding: 'utf8', env: { ...process.env, BUILD_HOST: host, WANT_SUBMIT: submit, SUBMIT_BUILD_ID: id },
+      });
+      const allowed = id === '' && (submit !== 'true' || host === 'github-macos');
+      assert.equal(r.status === 0, allowed, JSON.stringify({host,submit,id,stderr:r.stderr}));
+    }
+  }
+  assert.notEqual(spawnSync('bash', ['-eu', '-c', guard], {env: {...process.env,
+    BUILD_HOST:'unknown', WANT_SUBMIT:'false', SUBMIT_BUILD_ID:''}}).status, 0);
+  const hostedBuild = workflow.jobs.build.steps.find(s => s.name === 'Start the iOS build').run;
+  assert.doesNotMatch(hostedBuild, /args\+=\(--auto-submit/);
+  const oldIdRoute = workflow.jobs.build.steps.find(s => s.id === 'submit_only').run;
+  assert.doesNotMatch(oldIdRoute, /eas submit/);
+  assert.match(oldIdRoute, /exit 1/);
+});
