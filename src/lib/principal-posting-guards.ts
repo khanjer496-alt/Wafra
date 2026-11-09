@@ -15,7 +15,26 @@ export function hasClickLinkPrompt(source: string): boolean {
 
 /** A leading coupon invitation is an offer; the same wording may be a receipt footer. */
 export function isLeadingNumericDiscountOffer(source: string): boolean {
-  return /^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?(?:use|enter)\s+(?:code\s+)?\d{4,8}\s+to\s+get\s+\d{1,3}\s?%\s+off\b/iu.test(source);
+  return /^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?(?:use|enter)\s+(?:code\s+)?\d{4,8}\s+to\s+get\s+\d{1,3}\s?%\s+off\b/iu.test(source) ||
+    (source.includes('خصم') && /^\s*(?:Dear\s+Customer[,!:]\s*)?(?:[^\n.!?\p{N}]{0,40}?[،,!:\s]\s*)?(?:استمتع\s+ب)?خصم\s*\p{Nd}{1,3}\s*[%٪]/iu.test(source));
+}
+
+/** A peer says they sent money TO the reader; this cannot prove an outgoing debit. */
+export const isUnqualifiedPeerTransferClaim = (source: string): boolean =>
+  /^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?transferred\b(?:[^.\n]|\.\d){0,96}?\bto\s+(?:you|u)\b/iu.test(source);
+
+const MOBILE_MONEY_CALLBACK = /\b(?:call|phone|ring|contact)\s+(?:(?:us|me|support|on|at)\s+){0,3}(?:\+|00)(?:971|966)[\s().-]*5(?:[\s().-]*\d){8}(?![\s().-]*\d)/giu;
+/** A private mobile callback needs Review; it does not prove a stored debit imaginary. */
+export function hasMobileMoneyCallback(source: string): boolean {
+  if (!/(?:\+|00)(?:971|966)/u.test(source)) return false;
+  for (const match of source.matchAll(MOBILE_MONEY_CALLBACK)) {
+    const before = source.slice(Math.max(0, match.index! - 60), match.index);
+    if (/\b(?:do\s+not|don['’]t|never|avoid)\s*$/iu.test(before)) continue;
+    const after = source.slice(match.index! + match[0].length, match.index! + match[0].length + 60);
+    if (/^\s*(?:to|for)\s+(?:cancel|verify|confirm|approve|authori[sz]e|secure|unblock|release)\b/iu.test(after) ||
+      /\bto\s+(?:cancel|verify|confirm|approve|authori[sz]e|secure|unblock|release)[^.!?\n]{0,30}$/iu.test(before)) return true;
+  }
+  return false;
 }
 
 const MOVEMENT_STATUS = /\bincomplete\s+(?:transaction|txn|purchase|payment|transfer|withdrawal)\b|\b(?:transaction|txn|purchase|payment|transfer|withdrawal)(?:\s+(?:of|for|at|to|from|with|on)\b(?:[^.\n]|\.\d){0,80}?)?\s+(?:was|is|remains?|has\s+been)\s+incomplete\b|\b(?:transaction|txn|purchase|payment|authori[sz]ation)\b(?:[^.\n]|\.\d){0,100}?\s(?:cancell?ed|voided)\s+by\s+(?:the\s+)?(?:merchant|bank|issuer|acquirer)\b|\b(?:transaction|txn|purchase|payment|authori[sz]ation)\b(?:[^.\n]|\.\d){0,100}?\s(?:will\s+be|is\s+being)\s+(?:cancell?ed|voided)\b|[ \t][-–—:|][ \t]*(?:void|voided|cancell?ed)[ \t]*(?=\n|$)|[ \t]*[,:(][ \t]*(?:cancell?ed|voided|void)[ \t]*\)?[ \t]*(?=[.\n]|$)|(?<![ء-ي])(?:تم\s+)?(?:الغاء|ايقاف|تعليق)\s+(?:ال)?(?:عمليه|شراء|دفع|تحويل|حواله|سحب|معامله|حركه)(?![ء-ي])|(?<![ء-ي])(?:الغيت|اوقفت|علقت)\s+(?:ال)?(?:عمليه|شراء|دفع|تحويل|حواله|سحب|معامله|حركه)(?![ء-ي])|(?<![ء-ي])(?:ال)?(?:عمليه|معامله|شراء|دفع|تحويل|حواله|سحب|حركه)\s+(?:غير\s+(?:ناجح|مكتمل)ه?|لم\s+(?:تكتمل|يكتمل|تنجح)|(?:ال)?(?:ملغي|ملغا|ملغاه|موقوف[هة]?))(?![ء-ي])|(?<![ء-ي])(?:و?تم|قد\s+تم)\s+(?:الغاو|الغاي|ايقاف|تعليق)(?:ها|ه)(?![ء-ي])|(?<![ء-ي])تم\s+(?:ال)?الغاء(?![ء-ي])|(?<![ء-ي])لم\s+(?:تكتمل|يكتمل|تنجح)(?![ء-ي])/gi;

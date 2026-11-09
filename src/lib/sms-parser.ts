@@ -14,7 +14,7 @@ import { CURRENCY_MINOR_UNITS } from '@/lib/currency-metadata';
 import { cachedReferenceQuote, quoteFitsDay } from '@/lib/fx-rates';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
 import { getActiveCountry } from '@/lib/country';
-import { hasClickLinkPrompt, isLeadingNumericDiscountOffer, isQualifiedCardRepaymentReceipt, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isCompletedPrincipalRefund, isHedgedPrincipal, isIncompletePrincipal, refundPrincipalStatus, type PrincipalSpan } from '@/lib/principal-posting-guards';
+import { hasClickLinkPrompt, hasMobileMoneyCallback, isLeadingNumericDiscountOffer, isUnqualifiedPeerTransferClaim, isQualifiedCardRepaymentReceipt, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isCompletedPrincipalRefund, isHedgedPrincipal, isIncompletePrincipal, refundPrincipalStatus, type PrincipalSpan } from '@/lib/principal-posting-guards';
 import { extractUniversalMoney } from '@/lib/universal-money';
 
 /* ────────────────────────── Arabic normalisation ──────────────────────────
@@ -1493,7 +1493,7 @@ const CODE_VALIDITY_WINDOW_RE = new RegExp(
  * ordinary posted/non-posted evidence checks.
  */
 const TRANSACTION_APPROVAL_REQUEST_RE =
-  /(?:^|[.!?]\s*)\s*(?:please\s+)?(?:tap\s+(?:here\s+)?to\s+)?(?:approve|confirm|authoris(?:e|z)e)\s+(?:this\s+|the\s+|your\s+)?(?:card\s+)?(?:purchase|payment|transaction|transfer)\b|\b(?:open|use)\s+(?:the\s+|your\s+)?(?:bank|mobile)?\s*app\s+to\s+(?:approve|confirm|authoris(?:e|z)e)\s+(?:this\s+|the\s+|your\s+)?(?:card\s+)?(?:purchase|payment|transaction|transfer)\b|^\s*(?:(?:يرجي|الرجاء)\s+(?:الموافقه|التاكيد)\s+علي|قم\s+ب?(?:الموافقه|تاكيد))\s+(?:عمليه\s+)?(?:شراء|دفع|تحويل)(?![\u0621-\u064A])/i;
+  /(?:^|[.!?:]\s*)\s*(?:please\s+)?(?:tap\s+(?:here\s+)?to\s+)?(?:approve|confirm|authori[sz]e)\s+(?:this\s+|the\s+|your\s+)?(?:(?:[A-Z]{3}|Dhs?\.?)\s*\d[\d,]*(?:\.\d{1,3})?\s+)?(?:card\s+)?(?:purchase|payment|transaction|transfer)\b|\b(?:open|use)\s+(?:the\s+|your\s+)?(?:bank|mobile)?\s*app\s+to\s+(?:approve|confirm|authori[sz]e)\s+(?:this\s+|the\s+|your\s+)?(?:(?:[A-Z]{3}|Dhs?\.?)\s*\d[\d,]*(?:\.\d{1,3})?\s+)?(?:card\s+)?(?:purchase|payment|transaction|transfer)\b|^\s*(?:(?:يرجي|الرجاء)\s+(?:الموافقه|التاكيد)\s+علي|قم\s+ب?(?:الموافقه|تاكيد))\s+(?:عمليه\s+)?(?:شراء|دفع|تحويل)(?![\u0621-\u064A])/i;
 
 /**
  * Explicit challenges may glue the code to OTP. Keep the request verb and
@@ -1520,8 +1520,8 @@ const GLUED_OTP_REQUEST_RE = new RegExp(
  * transaction noun keeps this on the pre-posting side of that boundary.
  */
 const TRANSACTION_CODE_REQUEST_RE = new RegExp(
-  String.raw`\b(?:code|pin|password|passcode)\s*[:=-]?\s*${OTP_CODE_DIGITS}\s+(?:to|for)\s+(?:complete|confirm|authoris(?:e|z)e|authenticate|initiate|make)\s+(?:the\s+|this\s+|your\s+)?(?:payment|purchase|transaction|transfer)\b` +
-    String.raw`|\b(?:use|enter)\s+(?:the\s+|your\s+)?(?:code|pin|password|passcode)\s*[:=-]?\s*${OTP_CODE_DIGITS}\s+(?:to|for)\s+(?:complete|confirm|authoris(?:e|z)e|authenticate|initiate|make)\s+(?:the\s+|this\s+|your\s+)?(?:payment|purchase|transaction|transfer)\b`,
+  String.raw`\b(?:code|pin|password|passcode)\s*[:=-]?\s*${OTP_CODE_DIGITS}\s+(?:to|for)\s+(?:complete|confirm|authori[sz]e|authenticate|initiate|make)\s+(?:the\s+|this\s+|your\s+)?(?:payment|purchase|transaction|transfer)\b` +
+    String.raw`|\b(?:use|enter)\s+(?:the\s+|your\s+)?(?:code|pin|password|passcode)\s*[:=-]?\s*${OTP_CODE_DIGITS}\s+(?:to|for)\s+(?:complete|confirm|authori[sz]e|authenticate|initiate|make)\s+(?:the\s+|this\s+|your\s+)?(?:payment|purchase|transaction|transfer)\b`,
   'i',
 );
 
@@ -2264,7 +2264,8 @@ const EXPECTED_FUTURE_MOVEMENT_RE =
 // A loyalty "Redemption Request registered successfully ... Amount Paid: AED
 // 240.00" is a request, not a posted cash movement.
 const REQUEST_RECEIVED_RE =
-  /\b(?:payment|transfer|purchase|redemption|refund)\s+request\b(?:[^.]|\.\d){0,64}\b(?:received|submitted|created|awaiting|pending|registered)\b|\b(?:received|submitted|created)\b(?:[^.]|\.\d){0,48}\b(?:payment|transfer|purchase|refund)\s+request\b|تم\s+استلام\s+طلب\s+(?:سداد|دفع|تحويل)/iu;
+  /\b(?:(?:payment|transfer|purchase|redemption|refund)\s+request|request\s+for\s+(?:a\s+)?refund)\b(?:[^.]|\.\d){0,64}\b(?:received|submitted|created|awaiting|pending|registered|being\s+processed|in\s+progress|under\s+(?:review|process(?:ing)?))\b|\b(?:received|submitted|created)\b(?:[^.]|\.\d){0,48}\b(?:(?:payment|transfer|purchase|refund)\s+request|request\s+for\s+(?:a\s+)?refund)\b|تم\s+استلام\s+طلب\s+(?:سداد|دفع|تحويل)/iu;
+const REQUEST_RECEIVED_BLANK_RE = new RegExp(REQUEST_RECEIVED_RE.source, 'giu');
 const MANDATE_LIFECYCLE_RE =
   /\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b(?:[^.]|\.\d){0,96}\b(?:will\s+(?:start|begin|commence|activate)|has\s+been\s+(?:created|registered|set\s*up|activated)|is\s+(?:now\s+)?active)\b|\b(?:created|registered|set\s*up|activated)\b(?:[^.]|\.\d){0,64}\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b|تم\s+(?:تسجيل|انشاء|تفعيل)[^\n]{0,64}(?:امر\s+)?(?:خصم\s+(?:تلقايي|مباشر)|تعليمات\s+مستديمه)/iu;
 const CONDITIONAL_PAYOUT_RE =
@@ -5109,7 +5110,14 @@ function maskMerchantNames(text: string): string {
  * maskMerchantNames walks a /g regex over the whole body.
  */
 function declinedInBody(body: string, suppressible: string): boolean {
-  return DECLINED_RE.test(suppressible) || DECLINED_VERB_RE.test(body);
+  if (DECLINED_RE.test(suppressible) || DECLINED_VERB_RE.test(body)) return true;
+  if (!body.includes('تعذر')) return false;
+  for (const match of body.matchAll(/(?<![ء-ي])تعذر(?:ت)?\s+(?:(?:اتمام|تنفيذ|اكمال)\s+)?(?:ال)?(?:عمليه(?:\s+(?:ال)?(?:شراء|دفع|تحويل|سحب))?|شراء|دفع|تحويل|معامله|حواله|سحب)(?![ء-ي])/gu)) {
+    const before = body.slice(Math.max(0, match.index! - 40), match.index);
+    if (/(?<![ء-ي])(?:اذا|لو|حال|حاله|عند|ان|لم|لن|لا)\s*$/u.test(before)) continue;
+    return true;
+  }
+  return false;
 }
 
 export type NonPostingReason =
@@ -5137,8 +5145,9 @@ const CARD_LIFECYCLE_NOTICE_RE =
  * message is a challenge even when the digits are redacted, and the amount it
  * quotes is an attempt, never a purchase.
  */
-const AR_PURCHASE_CONFIRMATION_CODE_RE =
-  /(?:الرقم السري|الرمز السري|رمز|كلمه السر|كلمه المرور)\s+(?:ل|ال)?(?:تاكيد|اتمام)\s+(?:عمليه\s+)?(?:ال)?(?:شراء|دفع|عمليه)/;
+const AR_PURCHASE_CONFIRMATION_CODE_RE = new RegExp(
+  String.raw`(?:الرقم السري|الرمز السري|(?:ال)?رمز|كلمه السر|كلمه المرور)(?:\s*[:=]\s*|\s+)(?:${OTP_CODE_DIGITS}\s+)?(?:ل|ال)?(?:تاكيد|اتمام)\s+(?:عمليه\s+)?(?:ال)?(?:شراء|دفع|عمليه)`,
+);
 
 function nonPostingReasonInBody(
   body: string,
@@ -5171,7 +5180,11 @@ function nonPostingReasonInBody(
   // hold is still non-posting on BOTH sides: counting its release as income
   // would create money that never existed. Other settled refunds may outrank
   // generic preauthorisation/pending vocabulary.
-  const settledRefund = REFUND_RE.test(body);
+  const requestReceived = REQUEST_RECEIVED_RE.test(body);
+  // A request being processed cannot prove its own refund settled. A separate
+  // current credit still can; remove request and future clauses before looking.
+  const settledRefund = REFUND_RE.test(body) && (!requestReceived ||
+    REFUND_RE.test(blank(blank(body, REQUEST_RECEIVED_BLANK_RE), FUTURE_CLAUSE_RE)));
   if (VERIFICATION_HOLD_DESCRIPTOR_RE.test(body)) return 'preauthorisation';
   if (
     !settledRefund &&
@@ -5183,7 +5196,7 @@ function nonPostingReasonInBody(
   if (!settledRefund && (PENDING_PROCESSING_RE.test(body) ||
     arabicPendingPosting(body) ||
     EXPECTED_FUTURE_MOVEMENT_RE.test(body) ||
-    REQUEST_RECEIVED_RE.test(body) || MANDATE_LIFECYCLE_RE.test(body) ||
+    requestReceived || MANDATE_LIFECYCLE_RE.test(body) ||
     CONDITIONAL_PAYOUT_RE.test(body) || CONDITIONAL_MOVEMENT_RE.test(body))) {
     return 'pending-processing';
   }
@@ -8417,7 +8430,8 @@ export function parseSms(
   options?: ParseOptions,
 ): ParsedSms | null {
   // A quoted future purchase in a leading coupon invitation is not a posting.
-  if (isLeadingNumericDiscountOffer(message)) return null;
+  if (isLeadingNumericDiscountOffer(message) || isUnqualifiedPeerTransferClaim(message) ||
+    hasMobileMoneyCallback(message)) return null;
   // A BNPL provider restating an instalment its bank already alerted on; see
   // bnpl-providers.ts. Every kind, both directions: the provider's refund
   // notice duplicates the bank's refund credit exactly as its charge does.
