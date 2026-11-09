@@ -320,6 +320,82 @@
       "minorUnits": 3700,
       "currency": "AED",
       "type": "expense"
+    },
+    {
+      "id": "notification title Transaction Alert",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "Transaction Alert Payment received AED 500.00 on your card ending 2517. Thank you",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null,
+      "notification": {
+        "title": "Transaction Alert",
+        "text": "Payment received AED 500.00 on your card ending 2517. Thank you"
+      }
+    },
+    {
+      "id": "notification title Mashreq",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "MASHREQ",
+      "body": "Mashreq Thank you for your payment of AED 500.00 on your Mashreq credit card ending 2554",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null,
+      "notification": {
+        "title": "Mashreq",
+        "text": "Thank you for your payment of AED 500.00 on your Mashreq credit card ending 2554"
+      }
+    },
+    {
+      "id": "suffix currency with thank-you",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "Payment received 500.00 AED on your card ending 1234. Thank you",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null
+    },
+    {
+      "id": "Dhs repayment retained",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "Payment received Dhs 500.00 on your card ending 1234. Thank you",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null
+    },
+    {
+      "id": "notification title merchant payment",
+      "expected": "post",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "Transaction Alert Thank you for your payment of AED 85.00 on your card ending 1234 at CARREFOUR",
+      "minorUnits": 8500,
+      "currency": "AED",
+      "type": "expense",
+      "notification": {
+        "title": "Transaction Alert",
+        "text": "Thank you for your payment of AED 85.00 on your card ending 1234 at CARREFOUR"
+      }
+    },
+    {
+      "id": "notification bank title merchant payment",
+      "expected": "post",
+      "market": "AE",
+      "sender": "MASHREQ",
+      "body": "Mashreq Thank you for your payment of AED 85.00 on your credit card ending 1234 at CARREFOUR",
+      "minorUnits": 8500,
+      "currency": "AED",
+      "type": "expense",
+      "notification": {
+        "title": "Mashreq",
+        "text": "Thank you for your payment of AED 85.00 on your credit card ending 1234 at CARREFOUR"
+      }
     }
   ]
 }

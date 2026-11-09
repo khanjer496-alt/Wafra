@@ -31,9 +31,11 @@ function reviewMoney(candidate, row) {
 }
 
 for (const row of fixture.cases) {
+  // Android's notification adapter joins the title and text with one space.
+  const source = row.notification ? `${row.notification.title} ${row.notification.text}`.trim() : row.body;
   for (const sender of row.expected === 'hold' ? [...new Set([row.sender, ''])] : [row.sender]) {
-    for (const body of [row.body, row.body.replace(/ /g, '  ')]) {
-      test(`QA001 near-variant ${row.id}/${sender || 'blank'}/${body === row.body}`, () => {
+    for (const body of [source, source.replace(/ /g, '  ')]) {
+      test(`QA001 near-variant ${row.id}/${sender || 'blank'}/${body === source}`, () => {
         const session = reader(row.market), inspection = session.inspect(body, sender);
         const core = parseSms(body, {}, { sender, observedAt: at });
         const captured = session.parse(body, sender, inspection, undefined, at);
