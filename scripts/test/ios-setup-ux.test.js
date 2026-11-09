@@ -54,6 +54,7 @@ const execute = (relative, dependencies = {}) => {
   )(
     (request) => dependencies[request] ??
       (request === 'expo-crypto' ? { randomUUID: () => 'ui-capture-attempt-1' } :
+        request === '@/lib/import-processing-disclosure' ? execute('src/lib/import-processing-disclosure.ts') :
         request === './ios-capture-health' ? execute('src/lib/ios-capture-health.ts') :
         request === './ios-setup-availability' || request === '@/lib/ios-setup-availability'
           ? execute('src/lib/ios-setup-availability.ts') : {}),
