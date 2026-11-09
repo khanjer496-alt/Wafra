@@ -11,6 +11,7 @@ const { parseSms, nonPostingReason } = load('@/lib/sms-parser');
 const { createLaunchAlertSession } = load('@/lib/launch-alert-parser');
 const { parseHistoricalMessageRecords } = load('@/lib/historical-import');
 const { inspectSourceFreeRefusedAlert } = load('@/lib/auto-import');
+const { hasClickLinkPrompt } = load('@/lib/principal-posting-guards');
 const at = Date.parse('2026-11-05T10:00:00Z');
 const root = path.resolve(__dirname, '../../..');
 const resources = path.join(root, 'modules/wafra-live-capture/ios/Resources');
@@ -119,3 +120,50 @@ for (const [body, type, amount] of [
     assert.equal(parsed.currency, 'AED');
   }
 });
+
+// Reviewer a86f70f2: issuer confirmation is a completed debit, not a link request.
+const confirmedDebit = 'We confirm that AED 85.00 was debited from your account ending 1234 for purchase at AMAZON.COM.';
+function confirmationNative(body) {
+  return JSON.parse(sandbox.wafraNativeAlertParse(JSON.stringify({ v: 1, body, sender: 'ENBD', observedAt: at,
+    context: { v: 1, country: 'AE', parserMarket: 'AE', ledgerMoney: { currency: 'AED', exponent: 2 },
+      sourceHash: meta.sourceHash } })));
+}
+for (const body of [confirmedDebit, confirmedDebit.replace(/ /g, '  ')]) {
+  test(`issuer confirmation retains completed debit/${body === confirmedDebit ? 'original' : 'spacing'}`, () => {
+    const session = reader('AE');
+    assert.equal(hasClickLinkPrompt(body), false, 'merchant hostname is not a navigation target');
+    assert.equal(nonPostingReason(body), null);
+    for (const parsed of [parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
+      session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
+      assert.equal(parsed?.kind, 'transaction');
+      assert.equal(parsed.type, 'expense');
+      assert.equal(parsed.amountFils, 8500);
+      assert.equal(parsed.currency, 'AED');
+    }
+    const history = parseHistoricalMessageRecords([JSON.stringify({ v: 1, id: '9'.repeat(64), text: body,
+      sender: 'ENBD', receivedAt: new Date(at).toISOString() })], {}, new Date(at), new Set(), session);
+    assert.equal(history.parsed.length, 1);
+    assert.equal(history.parsed[0].amountFils, 8500);
+    assert.equal(history.parsed[0].type, 'expense');
+    assert.equal(history.parsed[0].currency, 'AED');
+    const native = confirmationNative(body);
+    assert.equal(native.route, 'parsed');
+    assert.equal(native.notification.direction, 'debit');
+    assert.deepEqual(native.notification.amount, { currency: 'AED', minorUnits: '8500', exponent: 2 });
+  });
+}
+for (const [index, source] of [
+  'AED 4,999.00 debited from your account ending 3183. Verify at www.enbd-secure.test now',
+  'AED 4,999.00 debited from your card ending 3183. Reply YES to confirm or tap hxxp://enbd-verify.test',
+  'Your account is suspended. AED 4,999.00 debited. Update details: enbd-secure.test/login',
+  `${confirmedDebit} Please confirm at enbd-secure.test/login.`,
+].entries()) for (const body of [source, source.replace(/ /g, '  ')]) {
+  test(`issuer confirmation cannot hide a link instruction/${index}/${body === source ? 'original' : 'spacing'}`, () => {
+    const session = reader('AE');
+    assert.equal(hasClickLinkPrompt(body), true);
+    assert.equal(nonPostingReason(body), 'link-request');
+    assert.equal(parseSms(body, {}, { sender: 'ENBD', observedAt: at }), null);
+    assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
+    assert.equal(confirmationNative(body).route, 'ignore');
+  });
+}
