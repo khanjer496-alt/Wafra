@@ -115,6 +115,9 @@ interface KeypadAmountDisplayProps {
   /** One sentence for a screen reader: the currency and the whole amount. */
   spokenLabel: string;
   errorText?: string;
+  /** Available width for a complete, single-line amount when large text cannot fit. */
+  fitWidth?: number;
+  fontScale?: number;
   testID?: string;
   /**
    * Design language E: the figure is the band's one figure — light text in
@@ -146,6 +149,8 @@ export const KeypadAmountDisplay = forwardRef<KeypadAmountDisplayHandle, KeypadA
   invalid = false,
   spokenLabel,
   errorText,
+  fitWidth,
+  fontScale = 1,
   testID = 'amount-display',
   palette,
 }, ref) {
@@ -165,14 +170,27 @@ export const KeypadAmountDisplay = forwardRef<KeypadAmountDisplayHandle, KeypadA
     : text.length > 12 ? { fontSize: 32, lineHeight: 40 }
       : text.length > 8 ? { fontSize: 40, lineHeight: 50 } : null;
   const onBand = palette ? styles.figureOnBand : null;
+  // The fitted run uses the monospaced figure font for both ISO code and
+  // digits. Reserve a conservative glyph width, including separators; the
+  // full spoken amount is unchanged. Scaling is accounted for before paint.
+  const fullValue = `${currency} ${text}`;
+  const baseSize = size?.fontSize ?? 48;
+  const estimatedWidth = (Array.from(text).length * 0.7 * baseSize +
+    Array.from(currency).length * 0.7 * 18) * Math.max(fontScale, 1) + Spacing.two;
+  const fitSize = fitWidth === undefined ? null : Math.min(baseSize,
+    fitWidth / (Math.max(1, Array.from(fullValue).length) * 0.7 * Math.max(fontScale, 1)));
+  const fitted = fitWidth !== undefined && fitSize !== null && estimatedWidth > fitWidth;
   const head = empty ? text : text.slice(0, -1);
   const tail = empty ? '' : text.slice(-1);
   return (
     <View style={[styles.displayWrap, palette && styles.displayWrapOnBand]}>
       <View ref={figureRef} testID={testID} accessible accessibilityRole="text" accessibilityLabel={spokenLabel}
         accessibilityLiveRegion="polite"
-        style={[styles.display, palette && styles.displayOnBand,
+        style={[styles.display, palette && styles.displayOnBand, fitted && styles.fittedDisplay,
           { borderBottomColor: invalid ? (palette ? palette.onBand : theme.expense) : 'transparent' }]}>
+        {fitted ? <ThemedText testID={`${testID}-fitted-value`} tabular numberOfLines={1} maxFontSizeMultiplier={0}
+          style={[styles.figureText, { color, fontSize: fitSize, lineHeight: fitSize * 1.25, letterSpacing: 0,
+            writingDirection: 'ltr' }]}>{fullValue}</ThemedText> : <>
         <ThemedText type="smallBold" themeColor="textSecondary"
           style={[styles.displayCurrency, palette && { color: palette.onBandSecondary }]}>{currency}</ThemedText>
         <View style={styles.figure}>
@@ -184,6 +202,7 @@ export const KeypadAmountDisplay = forwardRef<KeypadAmountDisplayHandle, KeypadA
             </Animated.View>
           ) : null}
         </View>
+        </>}
       </View>
       {errorText ? (
         <ThemedText type="meta" themeColor="expense" accessibilityLiveRegion="polite"
@@ -222,6 +241,7 @@ const styles = StyleSheet.create({
     maxWidth: '100%',
   },
   displayCurrency: { fontSize: 18, lineHeight: 24 },
+  fittedDisplay: { width: '100%', alignSelf: 'stretch' },
   figure: { flexDirection: 'row', alignItems: 'baseline', flexShrink: 1 },
   figureText: { fontFamily: Fonts.monoSemi, fontSize: 48, lineHeight: 58, letterSpacing: -1 },
   displayError: { textAlign: 'center' },

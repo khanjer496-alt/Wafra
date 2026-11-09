@@ -14,6 +14,34 @@ const {
 const type = (keys, exponent, start = '') => keys.reduce((text, key) => applyKeypadKey(text, key, exponent), start);
 const digits = (value) => [...value].map((c) => (c === '.' ? 'decimal' : c));
 
+test('fitted amount display preserves the whole value and adapts to available width', () => {
+  const jsx = (type, props) => ({type, props: props ?? {}});
+  const walk = node => !node || typeof node !== 'object' ? [] : Array.isArray(node)
+    ? node.flatMap(walk) : [node, ...walk(node.props.children)];
+  const {KeypadAmountDisplay} = load(path.join(root, 'src/components/ui/amount-keypad.tsx'), {
+    react: {forwardRef: fn => props => fn(props, null), useRef: () => ({current: null}), useImperativeHandle() {}},
+    'react/jsx-runtime': {jsx, jsxs: jsx, Fragment: 'Fragment'},
+    'react-native': {View: 'View', Pressable: 'Pressable', StyleSheet: {create: value => value}, AccessibilityInfo: {}, findNodeHandle() {}},
+    'react-native-reanimated': {__esModule: true, default: {View: 'AnimatedView'}, FadeIn: {duration() {}}},
+    'react-native-svg': {__esModule: true, default: 'Svg', Path: 'Path'},
+    '@/components/themed-text': {ThemedText: 'Text'},
+    '@/constants/theme': {Fonts: {}, Motion: {}, Radius: {control: 10}, Spacing: {one: 4, two: 8}},
+    '@/hooks/use-theme': {useTheme: () => ({text: 'ink', textTertiary: 'grey', expense: 'red'})},
+    '@/lib/amount-keypad': {keypadHasDecimal}, '@/lib/haptics': {keyed() {}},
+  });
+  const render = width => {
+    const tree = KeypadAmountDisplay({currency: 'AED', text: '123,456,789,012.00', empty: false,
+      fadeKey: 0, animate: false, spokenLabel: 'complete amount', fitWidth: width, fontScale: 3.1});
+    const value = walk(tree).find(node => node.props.testID === 'amount-display-fitted-value');
+    assert.ok(value, 'a constrained long amount uses one fitted text run');
+    assert.equal(value.props.children, 'AED 123,456,789,012.00');
+    assert.ok(walk(tree).some(node => node.props.accessibilityLabel === 'complete amount'));
+    return Object.assign({}, ...value.props.style.flat(Infinity).filter(Boolean)).fontSize;
+  };
+  const narrow = render(280), wide = render(560);
+  assert.ok(narrow > 0 && wide > narrow, 'wider space makes the full value larger');
+});
+
 test('the decimal key exists only for currencies with minor units', () => {
   assert.equal(keypadHasDecimal(0), false, 'JPY-style whole units');
   assert.equal(keypadHasDecimal(2), true);
