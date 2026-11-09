@@ -3,6 +3,7 @@ import { isUnboundAndroidSourceKey, isUsableCaptureSourceIdentity } from '@/lib/
 import type { FxQuote } from '@/lib/fx';
 import { convertForeignConfirmation, quoteFitsDay, type ReferenceConversion } from '@/lib/fx-rates';
 import { nonPostingReason } from '@/lib/sms-parser';
+import { isUnqualifiedCardRepayment } from '@/lib/principal-posting-guards';
 import type { BestEffortMarker, CaptureInstrument } from '@/lib/types';
 import type { UniversalBankEvent, UniversalMoney } from '@/lib/universal-types';
 
@@ -533,7 +534,7 @@ const OWN_CARD_PAYMENT = /\b(?:[Yy]ou\s+)?paid\b(?:[^.\n]|\.\d){0,40}?\bto\s+you
  * decision (on the iPhone History path most of these are simply not imported).
  */
 export const isNotAutoPostableMoney = (source: string): boolean =>
-  hasLinkCallToAction(source) || NOT_A_SETTLED_FACT.some((pattern) => pattern.test(neutraliseBenignShapes(source))) ||
+  isUnqualifiedCardRepayment(source) || hasLinkCallToAction(source) || NOT_A_SETTLED_FACT.some((pattern) => pattern.test(neutraliseBenignShapes(source))) ||
   NOT_A_NEW_MOVEMENT.some((pattern) => pattern.test(source)) ||
   (MERCHANT_ORDER_RECEIPT.test(source) && !OWN_BALANCE_STATED.test(source));
 

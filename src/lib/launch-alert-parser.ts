@@ -26,6 +26,8 @@ import { decideGulfNeighbourPosting, gulfNeighbourReadSource, isGulfNeighbourMar
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { alertMarketPack } from '@/lib/alert-market-packs';
 import { normalizeAlertText } from '@/lib/alert-draft';
+import { isUnqualifiedCardCredit } from '@/lib/principal-posting-guards';
+import { unqualifiedCardCreditCurrencyAliases } from '@/lib/universal-money';
 import { isLatamOwnCardPayment, latamOwnTransferTitle, latamPolicySource, matchLatamTemplate } from '@/lib/latam-alert-templates';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { FxQuote } from '@/lib/fx';
@@ -231,15 +233,26 @@ export const inspectGenericBankEventForReview = (
   const cardAdmitted = !!senderlessCard && namesOwnInstrumentTail(source, 'debit') &&
     !nonPostingReason(source) && !isNotAutoPostableMoney(source) &&
     !hasNonCompletedWording(source, null, '') && !hasLinkFromUnregisteredSender(source, '');
-  if (noContext && !claimAdmitted && !footerAdmitted && !cardAdmitted) return null;
-  const event = isGulfNeighbourMarket(market)
-    ? inspectUniversalBankEvent(gulfNeighbourReadSource(source, market), {
-        sender, market, dateOrder: dateOrderForCountry(market) ?? undefined,
-      })
-    : inspectUniversalBankEvent(source, sourceContext
-        ? { ...sourceContext, sender }
-        : universalSourceParseContext(hasUniversalInstitutionSender(sender)
-          ? inspectUniversalAlert({ source, sender }) : null, sender, getActiveCountry()));
+  // A held Arabic credit-card receipt can lack the generic context spelling
+  // and global currency alias. Admit its exact regional money to Review only.
+  let cardCreditAliases: CurrencyAliasMap | undefined;
+  const creditSource = /[\uFB50-\uFDFF\uFE70-\uFEFF]/u.test(source) ? normalizeAlertText(source) : source;
+  if (noContext && isUnqualifiedCardCredit(creditSource, { start: 0, end: creditSource.length })) {
+    const active = getActiveMarket().id;
+    const launch = detectLaunchMarketFromSender(sender) ??
+      (isAbsentLaunchSender(sender) && (active === 'AE' || active === 'SA')
+        ? detectLaunchMarketFromAlert(source) : null);
+    if (launch) cardCreditAliases = unqualifiedCardCreditCurrencyAliases(source, launch, sourceContext?.currencyAliases);
+  }
+  if (noContext && !claimAdmitted && !footerAdmitted && !cardAdmitted && !cardCreditAliases) return null;
+  const context: UniversalParseContext = isGulfNeighbourMarket(market)
+    ? { sender, market, dateOrder: dateOrderForCountry(market) ?? undefined }
+    : sourceContext ? { ...sourceContext, sender }
+      : universalSourceParseContext(hasUniversalInstitutionSender(sender)
+        ? inspectUniversalAlert({ source, sender }) : null, sender, getActiveCountry());
+  const event = inspectUniversalBankEvent(isGulfNeighbourMarket(market)
+    ? gulfNeighbourReadSource(source, market) : source, cardCreditAliases
+      ? { ...context, currencyAliases: { ...cardCreditAliases, ...context.currencyAliases } } : context);
   if (event.decision !== 'review') return null;
   // A source-labelled credit limit is not a second purchase. Every other
   // extra figure remains refused: "used for X ... and Y ..." can otherwise
@@ -254,7 +267,7 @@ export const inspectGenericBankEventForReview = (
     event.instrument.value?.kind !== 'card' || event.instrument.value.last4 !== senderlessCard?.[1])) return null;
   if (hasNativeCurrencyAccountContext(source) && !hasBankAlertMoneyHint(source) &&
     (event.amount.evidence !== 'explicit' || event.amount.value?.currency !== 'ZAR')) return null;
-  if (noContext && !((event.direction === 'credit' || ((footerAdmitted || cardAdmitted) && event.direction === 'debit')) &&
+  if (noContext && !cardCreditAliases && !((event.direction === 'credit' || ((footerAdmitted || cardAdmitted) && event.direction === 'debit')) &&
     event.status === 'posted' && event.amount.evidence !== 'missing')) return null;
   const hasGroundedMoney =
     event.amount.evidence !== 'missing' ||

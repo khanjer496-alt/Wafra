@@ -2,6 +2,7 @@ import { inspectAlertDraft, type AlertDraft, type CurrencyAliasMap, type MoneyCa
 import { alertMarketPack } from '@/lib/alert-market-packs';
 import { CURRENCY_SYMBOL_CANDIDATES } from '@/lib/currency-metadata';
 import { extractUniversalFields } from '@/lib/universal-fields';
+import { isUnqualifiedCardCredit } from '@/lib/principal-posting-guards';
 import {
   missingUniversalField,
   type UniversalField,
@@ -37,6 +38,22 @@ const sourceCurrencyAliases = (context: UniversalParseContext): CurrencyAliasMap
   return { ...SOURCE_UNIT_ALIASES, ...(market ? alertMarketPack(market).currencyAliases : {}),
     ...context.currencyAliases };
 };
+
+/** Exact local money for a held card-credit Review, never posting authority. */
+export function unqualifiedCardCreditCurrencyAliases(
+  source: string,
+  market: 'AE' | 'SA',
+  existing?: CurrencyAliasMap,
+): CurrencyAliasMap | undefined {
+  const units: CurrencyAliasMap = market === 'AE'
+    ? { 'درهم': ['AED'], 'دراهم': ['AED'] } : { 'ريال': ['SAR'] };
+  const currencyAliases = { ...units, ...existing };
+  const draft = inspectAlertDraft(source, { currencyAliases });
+  const credits = draft.candidates.filter(candidate => candidate.currency === (market === 'AE' ? 'AED' : 'SAR') &&
+    candidate.minorUnits !== null && /^[1-9]\d*$/u.test(candidate.minorUnits) &&
+    isUnqualifiedCardCredit(draft.normalizedText, candidate.span));
+  return credits.length === 1 ? currencyAliases : undefined;
+}
 
 // ASCII \b does not treat accented or Vietnamese letters as word characters, so
 // "crédité" or "débité" never matched a \b(...)\b label. These edges are

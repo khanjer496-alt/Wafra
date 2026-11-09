@@ -14,7 +14,7 @@ import { CURRENCY_MINOR_UNITS } from '@/lib/currency-metadata';
 import { cachedReferenceQuote, quoteFitsDay } from '@/lib/fx-rates';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
 import { getActiveCountry } from '@/lib/country';
-import { isUnqualifiedCardCredit, isCompletedPrincipalRefund, isHedgedPrincipal, isIncompletePrincipal, refundPrincipalStatus, type PrincipalSpan } from '@/lib/principal-posting-guards';
+import { isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isCompletedPrincipalRefund, isHedgedPrincipal, isIncompletePrincipal, refundPrincipalStatus, type PrincipalSpan } from '@/lib/principal-posting-guards';
 import { extractUniversalMoney } from '@/lib/universal-money';
 
 /* ────────────────────────── Arabic normalisation ──────────────────────────
@@ -8385,6 +8385,7 @@ function readPrincipalContext(message: string, parsed: ParsedSms): PrincipalCont
 function hasUnsettledPrincipalInContext(context: PrincipalContext, parsed: ParsedSms): boolean {
   const { raw, spans, refund } = context;
   if (hasUnsupportedPrincipal(raw, parsed, spans[0])) return true;
+  if (parsed.kind === 'transaction' && isUnqualifiedCardRepayment(raw)) return true;
   if (parsed.type === 'income' && isUnqualifiedCardCredit(raw, spans[0])) return true;
   if (principalNeedsTransferReview(raw, spans[0], parsed)) return true;
   if (parsed.type === 'expense' && spans[0] &&

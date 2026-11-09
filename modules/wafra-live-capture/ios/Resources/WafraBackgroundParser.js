@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: a229aeaf4e78069bb27252f51b2db7fd488df105163e671bfa242898bbed0a34
+// Generated from normal shipping TypeScript. Source SHA-256: 36f8d0ee6a09b4231ae0a17098a3e4b9b9512e312f61f857a48737204b16eee7
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -2340,6 +2340,7 @@ const currency_metadata_1 = require("@/lib/currency-metadata");
 const capture_source_identity_1 = require("@/lib/capture-source-identity");
 const fx_rates_1 = require("@/lib/fx-rates");
 const sms_parser_1 = require("@/lib/sms-parser");
+const principal_posting_guards_1 = require("@/lib/principal-posting-guards");
 const SHARED_SYMBOL_COUNTRY_CURRENCY = {
     US: 'USD', PR: 'USD', GU: 'USD', VI: 'USD', AS: 'USD', MP: 'USD', EC: 'USD', SV: 'USD',
     CA: 'CAD', AU: 'AUD', NZ: 'NZD', SG: 'SGD', HK: 'HKD', MX: 'MXN', AR: 'ARS', CL: 'CLP', CO: 'COP',
@@ -2520,7 +2521,7 @@ const NOT_A_NEW_MOVEMENT = [
 const MERCHANT_ORDER_RECEIPT = /\border\s*(?:#|no\.?|number|id)\s*[:.-]?\s*[A-Z0-9-]*\d[\s\S]{0,80}?\b(?:paid|payment)\b|\b(?:paid|payment)\b[\s\S]{0,40}?\border\s*(?:#|no\.?|number|id)\s*[:.-]?\s*[A-Z0-9-]*\d/iu;
 const OWN_BALANCE_STATED = /\b(?:updated|avl\.?|available|new|closing|current)\s+(?:wallet\s+|account\s+|a\/c\s+)?bal(?:ance)?\b|\bbal(?:ance)?\s*(?:is|:)\s*(?:[A-Z]{3}|Rs\.?|[$£€₹])/iu;
 const OWN_CARD_PAYMENT = /\b(?:[Yy]ou\s+)?paid\b(?:[^.\n]|\.\d){0,40}?\bto\s+your\s+(?:(?:[A-Z][\p{L}\p{N}&.'’-]*|credit|charge)\s+){0,4}?[Cc]ard\b/u;
-const isNotAutoPostableMoney = (source) => hasLinkCallToAction(source) || NOT_A_SETTLED_FACT.some((pattern) => pattern.test(neutraliseBenignShapes(source))) ||
+const isNotAutoPostableMoney = (source) => (0, principal_posting_guards_1.isUnqualifiedCardRepayment)(source) || hasLinkCallToAction(source) || NOT_A_SETTLED_FACT.some((pattern) => pattern.test(neutraliseBenignShapes(source))) ||
     NOT_A_NEW_MOVEMENT.some((pattern) => pattern.test(source)) ||
     (MERCHANT_ORDER_RECEIPT.test(source) && !OWN_BALANCE_STATED.test(source));
 exports.isNotAutoPostableMoney = isNotAutoPostableMoney;
@@ -9635,6 +9636,8 @@ const gulf_neighbour_alerts_1 = require("@/lib/gulf-neighbour-alerts");
 const universal_parser_1 = require("@/lib/universal-parser");
 const alert_market_packs_1 = require("@/lib/alert-market-packs");
 const alert_draft_1 = require("@/lib/alert-draft");
+const principal_posting_guards_1 = require("@/lib/principal-posting-guards");
+const universal_money_1 = require("@/lib/universal-money");
 const latam_alert_templates_1 = require("@/lib/latam-alert-templates");
 const universal_categorization_1 = require("@/lib/universal-categorization");
 const fx_rates_1 = require("@/lib/fx-rates");
@@ -9717,16 +9720,26 @@ const inspectGenericBankEventForReview = (source, sender = '', market, sourceCon
     const cardAdmitted = !!senderlessCard && (0, best_effort_autopost_1.namesOwnInstrumentTail)(source, 'debit') &&
         !(0, sms_parser_1.nonPostingReason)(source) && !(0, best_effort_autopost_1.isNotAutoPostableMoney)(source) &&
         !(0, best_effort_autopost_1.hasNonCompletedWording)(source, null, '') && !(0, best_effort_autopost_1.hasLinkFromUnregisteredSender)(source, '');
-    if (noContext && !claimAdmitted && !footerAdmitted && !cardAdmitted)
+    let cardCreditAliases;
+    const creditSource = /[\uFB50-\uFDFF\uFE70-\uFEFF]/u.test(source) ? (0, alert_draft_1.normalizeAlertText)(source) : source;
+    if (noContext && (0, principal_posting_guards_1.isUnqualifiedCardCredit)(creditSource, { start: 0, end: creditSource.length })) {
+        const active = (0, markets_1.getActiveMarket)().id;
+        const launch = (0, markets_1.detectLaunchMarketFromSender)(sender) ??
+            (isAbsentLaunchSender(sender) && (active === 'AE' || active === 'SA')
+                ? (0, markets_1.detectLaunchMarketFromAlert)(source) : null);
+        if (launch)
+            cardCreditAliases = (0, universal_money_1.unqualifiedCardCreditCurrencyAliases)(source, launch, sourceContext?.currencyAliases);
+    }
+    if (noContext && !claimAdmitted && !footerAdmitted && !cardAdmitted && !cardCreditAliases)
         return null;
-    const event = (0, gulf_neighbour_alerts_1.isGulfNeighbourMarket)(market)
-        ? (0, universal_parser_1.inspectUniversalBankEvent)((0, gulf_neighbour_alerts_1.gulfNeighbourReadSource)(source, market), {
-            sender, market, dateOrder: (0, country_1.dateOrderForCountry)(market) ?? undefined,
-        })
-        : (0, universal_parser_1.inspectUniversalBankEvent)(source, sourceContext
-            ? { ...sourceContext, sender }
+    const context = (0, gulf_neighbour_alerts_1.isGulfNeighbourMarket)(market)
+        ? { sender, market, dateOrder: (0, country_1.dateOrderForCountry)(market) ?? undefined }
+        : sourceContext ? { ...sourceContext, sender }
             : (0, exports.universalSourceParseContext)((0, alert_institution_grammars_1.hasUniversalInstitutionSender)(sender)
-                ? (0, alert_market_detection_1.inspectUniversalAlert)({ source, sender }) : null, sender, (0, country_1.getActiveCountry)()));
+                ? (0, alert_market_detection_1.inspectUniversalAlert)({ source, sender }) : null, sender, (0, country_1.getActiveCountry)());
+    const event = (0, universal_parser_1.inspectUniversalBankEvent)((0, gulf_neighbour_alerts_1.isGulfNeighbourMarket)(market)
+        ? (0, gulf_neighbour_alerts_1.gulfNeighbourReadSource)(source, market) : source, cardCreditAliases
+        ? { ...context, currencyAliases: { ...cardCreditAliases, ...context.currencyAliases } } : context);
     if (event.decision !== 'review')
         return null;
     const hasOtherCardMoney = cardAdmitted && event.observations.some(observation => observation.role !== 'transaction' && observation.role !== 'credit-limit');
@@ -9740,7 +9753,7 @@ const inspectGenericBankEventForReview = (source, sender = '', market, sourceCon
     if (hasNativeCurrencyAccountContext(source) && !(0, exports.hasBankAlertMoneyHint)(source) &&
         (event.amount.evidence !== 'explicit' || event.amount.value?.currency !== 'ZAR'))
         return null;
-    if (noContext && !((event.direction === 'credit' || ((footerAdmitted || cardAdmitted) && event.direction === 'debit')) &&
+    if (noContext && !cardCreditAliases && !((event.direction === 'credit' || ((footerAdmitted || cardAdmitted) && event.direction === 'debit')) &&
         event.status === 'posted' && event.amount.evidence !== 'missing'))
         return null;
     const hasGroundedMoney = event.amount.evidence !== 'missing' ||
@@ -11014,6 +11027,7 @@ exports.isIncompletePrincipal = isIncompletePrincipal;
 exports.isHedgedPrincipal = isHedgedPrincipal;
 exports.refundPrincipalStatus = refundPrincipalStatus;
 exports.isCompletedPrincipalRefund = isCompletedPrincipalRefund;
+exports.isUnqualifiedCardRepayment = isUnqualifiedCardRepayment;
 exports.isUnqualifiedCardCredit = isUnqualifiedCardCredit;
 const MOVEMENT_STATUS = /\bincomplete\s+(?:transaction|txn|purchase|payment|transfer|withdrawal)\b|\b(?:transaction|txn|purchase|payment|transfer|withdrawal)(?:\s+(?:of|for|at|to|from|with|on)\b(?:[^.\n]|\.\d){0,80}?)?\s+(?:was|is|remains?|has\s+been)\s+incomplete\b|\b(?:transaction|txn|purchase|payment|authori[sz]ation)\b(?:[^.\n]|\.\d){0,100}?\s(?:cancell?ed|voided)\s+by\s+(?:the\s+)?(?:merchant|bank|issuer|acquirer)\b|\b(?:transaction|txn|purchase|payment|authori[sz]ation)\b(?:[^.\n]|\.\d){0,100}?\s(?:will\s+be|is\s+being)\s+(?:cancell?ed|voided)\b|[ \t][-–—:|][ \t]*(?:void|voided|cancell?ed)[ \t]*(?=\n|$)|[ \t]*[,:(][ \t]*(?:cancell?ed|voided|void)[ \t]*\)?[ \t]*(?=[.\n]|$)|(?<![ء-ي])(?:تم\s+)?(?:الغاء|ايقاف|تعليق)\s+(?:ال)?(?:عمليه|شراء|دفع|تحويل|حواله|سحب|معامله|حركه)(?![ء-ي])|(?<![ء-ي])(?:الغيت|اوقفت|علقت)\s+(?:ال)?(?:عمليه|شراء|دفع|تحويل|حواله|سحب|معامله|حركه)(?![ء-ي])|(?<![ء-ي])(?:ال)?(?:عمليه|معامله|شراء|دفع|تحويل|حواله|سحب|حركه)\s+(?:غير\s+(?:ناجح|مكتمل)ه?|لم\s+(?:تكتمل|يكتمل|تنجح)|(?:ال)?(?:ملغي|ملغا|ملغاه|موقوف[هة]?))(?![ء-ي])|(?<![ء-ي])(?:و?تم|قد\s+تم)\s+(?:الغاو|الغاي|ايقاف|تعليق)(?:ها|ه)(?![ء-ي])|(?<![ء-ي])تم\s+(?:ال)?الغاء(?![ء-ي])|(?<![ء-ي])لم\s+(?:تكتمل|يكتمل|تنجح)(?![ء-ي])/gi;
 const CONDITIONAL_STATUS = /(?:\b(?:if|unless|please|pls|to|can|may|should)\b|(?<![ء-ي])(?:يرجي|الرجاء|رجاء|يمكنك|يمكنكم|يمكن|بامكانك|بامكانكم|اتصل|ارسل|للابلاغ|لطلب|طلب|خدمه|اذا|حال|تود|ترغب|عليك)(?![ء-ي]))(?:\s+(?:او|و|ب|في|علي|عن|من|كانت|كان|or|and))?(?:\s+\d{1,4})?\s*$/i;
@@ -11202,6 +11216,16 @@ function isCompletedPrincipalRefund(source, span) {
 }
 const CARD_CREDIT_TARGET = /\bcredit\s+card\b|بطاق(?:تك|ه|ة)\s+(?:ال)?ا[يئ]تماني[هة]/iu;
 const CARD_CREDIT_MOVEMENT = /\bcredited(?:\s+with|\s+to)?\b|(?<![ء-ي])(?:تم\s+)?(?:إيداع|ايداع|إضافة|اضافه|اضافة)(?![ء-ي])/iu;
+const REPAYMENT_MONEY = String.raw `(?:[A-Z]{3}|Dhs?|SR|[$€£])\s*\p{Nd}+(?:[.,٫٬]\p{Nd}+)*`;
+const REPAYMENT_CARD = String.raw `(?:(?!(?:bill|invoice|loan|finance|mortgage|account|utility|electricity|water|using|via|with|through|from|to|for|by|on|at|and|of)\b)[\p{L}\p{N}.'’-]+\s+){0,3}?card\b`;
+const UNQUALIFIED_REPAYMENT = new RegExp(String.raw `^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?(?:` +
+    String.raw `payment\s+(?:received|credited)\s+${REPAYMENT_MONEY}\s+(?:on|to|towards?)\s+(?:your\s+)?${REPAYMENT_CARD}` +
+    String.raw `|thank\s+you\s+for\s+(?:your\s+)?payment\s+of\s+${REPAYMENT_MONEY}\s+on\s+(?:your\s+)?${REPAYMENT_CARD}` +
+    String.raw `|your\s+payment\s+of\s+${REPAYMENT_MONEY}\s+to\s+(?:your\s+)?(?:credit|charge|covered)\s+card\b(?:[^.\n]|\.\d){0,80}\bsuccessful\b)`, 'iu');
+function isUnqualifiedCardRepayment(source) {
+    const text = /[\uFF01-\uFFEF]/u.test(source) ? source.normalize('NFKC') : source;
+    return UNQUALIFIED_REPAYMENT.test(text);
+}
 function isUnqualifiedCardCredit(source, span) {
     if (!span || !CARD_CREDIT_TARGET.test(source) || !CARD_CREDIT_MOVEMENT.test(source))
         return false;
@@ -14481,6 +14505,8 @@ function hasUnsettledPrincipalInContext(context, parsed) {
     const { raw, spans, refund } = context;
     if (hasUnsupportedPrincipal(raw, parsed, spans[0]))
         return true;
+    if (parsed.kind === 'transaction' && (0, principal_posting_guards_1.isUnqualifiedCardRepayment)(raw))
+        return true;
     if (parsed.type === 'income' && (0, principal_posting_guards_1.isUnqualifiedCardCredit)(raw, spans[0]))
         return true;
     if (principalNeedsTransferReview(raw, spans[0], parsed))
@@ -15050,12 +15076,14 @@ function extractUniversalFields(source, context = {}, moneySpans = []) {
 "universal-money":function(module,exports,require){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.unqualifiedCardCreditCurrencyAliases = unqualifiedCardCreditCurrencyAliases;
 exports.inspectUniversalMoneyDraft = inspectUniversalMoneyDraft;
 exports.extractUniversalMoney = extractUniversalMoney;
 const alert_draft_1 = require("@/lib/alert-draft");
 const alert_market_packs_1 = require("@/lib/alert-market-packs");
 const currency_metadata_1 = require("@/lib/currency-metadata");
 const universal_fields_1 = require("@/lib/universal-fields");
+const principal_posting_guards_1 = require("@/lib/principal-posting-guards");
 const universal_types_1 = require("@/lib/universal-types");
 const SOURCE_UNIT_ALIASES = {
     KSh: currency_metadata_1.CURRENCY_SYMBOL_CANDIDATES.KSh,
@@ -15066,6 +15094,16 @@ const sourceCurrencyAliases = (context) => {
     return { ...SOURCE_UNIT_ALIASES, ...(market ? (0, alert_market_packs_1.alertMarketPack)(market).currencyAliases : {}),
         ...context.currencyAliases };
 };
+function unqualifiedCardCreditCurrencyAliases(source, market, existing) {
+    const units = market === 'AE'
+        ? { 'درهم': ['AED'], 'دراهم': ['AED'] } : { 'ريال': ['SAR'] };
+    const currencyAliases = { ...units, ...existing };
+    const draft = (0, alert_draft_1.inspectAlertDraft)(source, { currencyAliases });
+    const credits = draft.candidates.filter(candidate => candidate.currency === (market === 'AE' ? 'AED' : 'SAR') &&
+        candidate.minorUnits !== null && /^[1-9]\d*$/u.test(candidate.minorUnits) &&
+        (0, principal_posting_guards_1.isUnqualifiedCardCredit)(draft.normalizedText, candidate.span));
+    return credits.length === 1 ? currencyAliases : undefined;
+}
 const LB = String.raw `(?<![A-Za-z\u00C0-\u024F\u1E00-\u1EFF\p{N}_])`;
 const RB = String.raw `(?![A-Za-z\u00C0-\u024F\u1E00-\u1EFF\p{N}_])`;
 const RS = String.raw `[A-Za-z\u00C0-\u024F\u1E00-\u1EFF]*${RB}`;
@@ -16083,7 +16121,7 @@ const inspectUnparsedLaunchAlert = (source, sender) => {
 exports.inspectUnparsedLaunchAlert = inspectUnparsedLaunchAlert;
 }
 };
-const mappings={"alert-draft":{"@/lib/currency-metadata":"currency-metadata"},"alert-event-evidence":{},"alert-institution-grammars":{},"alert-market-detection":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-semantics":"alert-semantics","@/lib/markets":"markets"},"alert-market-packs":{"@/lib/alert-market-packs.india-me":"alert-market-packs.india-me","@/lib/alert-market-packs.us-eu":"alert-market-packs.us-eu","@/lib/alert-market-packs.world":"alert-market-packs.world"},"alert-market-packs.india-me":{},"alert-market-packs.us-eu":{},"alert-market-packs.world":{},"alert-semantics":{"@/lib/alert-draft":"alert-draft","@/lib/alert-event-evidence":"alert-event-evidence","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-market-packs":"alert-market-packs","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"alert-source-ownership":{"@/lib/alert-draft":"alert-draft"},"bank-alert-interpreter":{"@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules","@/lib/categories":"categories","@/lib/bank-alert-semantic-output":"bank-alert-semantic-output","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser","@/lib/unparsed-launch-alert":"unparsed-launch-alert"},"bank-alert-semantic-output":{},"bank-alert-semantic-rules":{"@/lib/sms-parser":"sms-parser"},"bank-amount-tokens":{},"best-effort-autopost":{"@/lib/currency-metadata":"currency-metadata","@/lib/capture-source-identity":"capture-source-identity","@/lib/fx-rates":"fx-rates","@/lib/sms-parser":"sms-parser"},"bnpl-providers":{},"brand-categories":{},"capture-source-identity":{},"categories":{"@/lib/i18n":"i18n"},"country":{"@/lib/country-names":"country-names"},"country-names":{},"currency-metadata":{},"fx":{"@/lib/currency-metadata":"currency-metadata","@/lib/ledger-money":"ledger-money"},"fx-rates":{"@/lib/fx":"fx"},"gulf-neighbour-alerts":{"@/lib/best-effort-autopost":"best-effort-autopost","@/lib/country":"country","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/gulf-neighbour-templates":"gulf-neighbour-templates","@/lib/sms-parser":"sms-parser","@/lib/universal-parser":"universal-parser"},"gulf-neighbour-templates":{"@/lib/best-effort-autopost":"best-effort-autopost"},"i18n":{},"ios-background-alert-parser":{"@/lib/currency-metadata":"currency-metadata","@/lib/country":"country","@/lib/markets":"markets","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/launch-alert-parser":"launch-alert-parser","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/fx":"fx","@/lib/sms-parser":"sms-parser"},"latam-alert-templates":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/sms-parser":"sms-parser","@/lib/universal-types":"universal-types"},"launch-alert-parser":{"@/lib/alert-market-detection":"alert-market-detection","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/country":"country","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/bank-alert-interpreter":"bank-alert-interpreter","@/lib/markets":"markets","@/lib/bnpl-providers":"bnpl-providers","@/lib/sms-parser":"sms-parser","@/lib/currency-metadata":"currency-metadata","@/lib/gulf-neighbour-alerts":"gulf-neighbour-alerts","@/lib/universal-parser":"universal-parser","@/lib/alert-market-packs":"alert-market-packs","@/lib/alert-draft":"alert-draft","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/universal-categorization":"universal-categorization","@/lib/fx-rates":"fx-rates"},"ledger-money":{"@/lib/currency-metadata":"currency-metadata"},"markets":{"@/lib/country":"country"},"principal-posting-guards":{},"sms-parser":{"@/lib/categories":"categories","@/lib/markets":"markets","@/lib/bank-amount-tokens":"bank-amount-tokens","@/lib/fx":"fx","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/bnpl-providers":"bnpl-providers","@/lib/country":"country","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/universal-money":"universal-money"},"universal-categorization":{"@/lib/brand-categories":"brand-categories","@/lib/categories":"categories","@/lib/sms-parser":"sms-parser"},"universal-dates":{"@/lib/alert-source-ownership":"alert-source-ownership","@/lib/universal-types":"universal-types"},"universal-fields":{"@/lib/universal-types":"universal-types","@/lib/alert-draft":"alert-draft","@/lib/universal-dates":"universal-dates"},"universal-money":{"@/lib/alert-draft":"alert-draft","@/lib/alert-market-packs":"alert-market-packs","@/lib/currency-metadata":"currency-metadata","@/lib/universal-fields":"universal-fields","@/lib/universal-types":"universal-types"},"universal-parser":{"@/lib/universal-types":"universal-types","@/lib/alert-semantics":"alert-semantics","@/lib/universal-fields":"universal-fields","@/lib/universal-money":"universal-money","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"universal-types":{},"unparsed-launch-alert":{"@/lib/alert-draft":"alert-draft","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser"}};
+const mappings={"alert-draft":{"@/lib/currency-metadata":"currency-metadata"},"alert-event-evidence":{},"alert-institution-grammars":{},"alert-market-detection":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-semantics":"alert-semantics","@/lib/markets":"markets"},"alert-market-packs":{"@/lib/alert-market-packs.india-me":"alert-market-packs.india-me","@/lib/alert-market-packs.us-eu":"alert-market-packs.us-eu","@/lib/alert-market-packs.world":"alert-market-packs.world"},"alert-market-packs.india-me":{},"alert-market-packs.us-eu":{},"alert-market-packs.world":{},"alert-semantics":{"@/lib/alert-draft":"alert-draft","@/lib/alert-event-evidence":"alert-event-evidence","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-market-packs":"alert-market-packs","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"alert-source-ownership":{"@/lib/alert-draft":"alert-draft"},"bank-alert-interpreter":{"@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules","@/lib/categories":"categories","@/lib/bank-alert-semantic-output":"bank-alert-semantic-output","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser","@/lib/unparsed-launch-alert":"unparsed-launch-alert"},"bank-alert-semantic-output":{},"bank-alert-semantic-rules":{"@/lib/sms-parser":"sms-parser"},"bank-amount-tokens":{},"best-effort-autopost":{"@/lib/currency-metadata":"currency-metadata","@/lib/capture-source-identity":"capture-source-identity","@/lib/fx-rates":"fx-rates","@/lib/sms-parser":"sms-parser","@/lib/principal-posting-guards":"principal-posting-guards"},"bnpl-providers":{},"brand-categories":{},"capture-source-identity":{},"categories":{"@/lib/i18n":"i18n"},"country":{"@/lib/country-names":"country-names"},"country-names":{},"currency-metadata":{},"fx":{"@/lib/currency-metadata":"currency-metadata","@/lib/ledger-money":"ledger-money"},"fx-rates":{"@/lib/fx":"fx"},"gulf-neighbour-alerts":{"@/lib/best-effort-autopost":"best-effort-autopost","@/lib/country":"country","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/gulf-neighbour-templates":"gulf-neighbour-templates","@/lib/sms-parser":"sms-parser","@/lib/universal-parser":"universal-parser"},"gulf-neighbour-templates":{"@/lib/best-effort-autopost":"best-effort-autopost"},"i18n":{},"ios-background-alert-parser":{"@/lib/currency-metadata":"currency-metadata","@/lib/country":"country","@/lib/markets":"markets","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/launch-alert-parser":"launch-alert-parser","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/fx":"fx","@/lib/sms-parser":"sms-parser"},"latam-alert-templates":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/sms-parser":"sms-parser","@/lib/universal-types":"universal-types"},"launch-alert-parser":{"@/lib/alert-market-detection":"alert-market-detection","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/country":"country","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/bank-alert-interpreter":"bank-alert-interpreter","@/lib/markets":"markets","@/lib/bnpl-providers":"bnpl-providers","@/lib/sms-parser":"sms-parser","@/lib/currency-metadata":"currency-metadata","@/lib/gulf-neighbour-alerts":"gulf-neighbour-alerts","@/lib/universal-parser":"universal-parser","@/lib/alert-market-packs":"alert-market-packs","@/lib/alert-draft":"alert-draft","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/universal-money":"universal-money","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/universal-categorization":"universal-categorization","@/lib/fx-rates":"fx-rates"},"ledger-money":{"@/lib/currency-metadata":"currency-metadata"},"markets":{"@/lib/country":"country"},"principal-posting-guards":{},"sms-parser":{"@/lib/categories":"categories","@/lib/markets":"markets","@/lib/bank-amount-tokens":"bank-amount-tokens","@/lib/fx":"fx","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/bnpl-providers":"bnpl-providers","@/lib/country":"country","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/universal-money":"universal-money"},"universal-categorization":{"@/lib/brand-categories":"brand-categories","@/lib/categories":"categories","@/lib/sms-parser":"sms-parser"},"universal-dates":{"@/lib/alert-source-ownership":"alert-source-ownership","@/lib/universal-types":"universal-types"},"universal-fields":{"@/lib/universal-types":"universal-types","@/lib/alert-draft":"alert-draft","@/lib/universal-dates":"universal-dates"},"universal-money":{"@/lib/alert-draft":"alert-draft","@/lib/alert-market-packs":"alert-market-packs","@/lib/currency-metadata":"currency-metadata","@/lib/universal-fields":"universal-fields","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/universal-types":"universal-types"},"universal-parser":{"@/lib/universal-types":"universal-types","@/lib/alert-semantics":"alert-semantics","@/lib/universal-fields":"universal-fields","@/lib/universal-money":"universal-money","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"universal-types":{},"unparsed-launch-alert":{"@/lib/alert-draft":"alert-draft","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser"}};
 const cache=Object.create(null);
 function load(id){
 if(Object.prototype.hasOwnProperty.call(cache,id))return cache[id].exports;

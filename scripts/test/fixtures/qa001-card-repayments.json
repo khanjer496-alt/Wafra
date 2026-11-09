@@ -1,0 +1,817 @@
+{
+  "version": 1,
+  "provenance": "App QA Lead QA-001; 90 invented card repayment variants from evidence/parser/fixhead-named/results.csv; no real user messages",
+  "evidenceSha256": "a0bb89366274f23a26ece29919b46560d4d349cc1cbf52013a7977eba8520e64",
+  "cases": [
+    {
+      "id": "A0427",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "orig",
+      "body": "AED 500.00 has been credited to your credit card ending 2443.",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0428",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "upper",
+      "body": "AED 500.00 HAS BEEN CREDITED TO YOUR CREDIT CARD ENDING 2443.",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0429",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "spacing",
+      "body": "  AED  500.00  has  been  credited  to  your  credit  card  ending  2443. ⏎ ",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0430",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "footer",
+      "body": "AED 500.00 has been credited to your credit card ending 2443. For queries call 600 500 000.",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0431",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "prefix",
+      "body": "Dear Customer, AED 500.00 has been credited to your credit card ending 2443.",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0432",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "orig",
+      "body": "AED 1,250.50 has been credited to your credit card ending 2534.",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0433",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "upper",
+      "body": "AED 1,250.50 HAS BEEN CREDITED TO YOUR CREDIT CARD ENDING 2534.",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0434",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "spacing",
+      "body": "  AED  1,250.50  has  been  credited  to  your  credit  card  ending  2534. ⏎ ",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0435",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "footer",
+      "body": "AED 1,250.50 has been credited to your credit card ending 2534. For queries call 600 500 000.",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0436",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "prefix",
+      "body": "Dear Customer, AED 1,250.50 has been credited to your credit card ending 2534.",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0437",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "no-thousands-comma",
+      "body": "AED 1250.50 has been credited to your credit card ending 2534.",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0438",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "orig",
+      "body": "Your credit card ending 2480 has been credited with AED 500.00. Thank you for your payment.",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0439",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "upper",
+      "body": "YOUR CREDIT CARD ENDING 2480 HAS BEEN CREDITED WITH AED 500.00. THANK YOU FOR YOUR PAYMENT.",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0440",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "spacing",
+      "body": "  Your  credit  card  ending  2480  has  been  credited  with  AED  500.00.  Thank  you  for  your  payment. ⏎ ",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0441",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "footer",
+      "body": "Your credit card ending 2480 has been credited with AED 500.00. Thank you for your payment. For queries call 600 500 000.",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0442",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "prefix",
+      "body": "Dear Customer, Your credit card ending 2480 has been credited with AED 500.00. Thank you for your payment.",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0443",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "orig",
+      "body": "Your credit card ending 2571 has been credited with AED 1,250.50. Thank you for your payment.",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0444",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "upper",
+      "body": "YOUR CREDIT CARD ENDING 2571 HAS BEEN CREDITED WITH AED 1,250.50. THANK YOU FOR YOUR PAYMENT.",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0445",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "spacing",
+      "body": "  Your  credit  card  ending  2571  has  been  credited  with  AED  1,250.50.  Thank  you  for  your  payment. ⏎ ",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0446",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "footer",
+      "body": "Your credit card ending 2571 has been credited with AED 1,250.50. Thank you for your payment. For queries call 600 500 000.",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0447",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "prefix",
+      "body": "Dear Customer, Your credit card ending 2571 has been credited with AED 1,250.50. Thank you for your payment.",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0448",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "no-thousands-comma",
+      "body": "Your credit card ending 2571 has been credited with AED 1250.50. Thank you for your payment.",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0449",
+      "market": "AE",
+      "sender": "ADCB",
+      "mutation": "orig",
+      "body": "Payment received AED 500.00 on your card ending 2517. Thank you",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0450",
+      "market": "AE",
+      "sender": "ADCB",
+      "mutation": "upper",
+      "body": "PAYMENT RECEIVED AED 500.00 ON YOUR CARD ENDING 2517. THANK YOU",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0451",
+      "market": "AE",
+      "sender": "ADCB",
+      "mutation": "spacing",
+      "body": "  Payment  received  AED  500.00  on  your  card  ending  2517.  Thank  you ⏎ ",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0452",
+      "market": "AE",
+      "sender": "ADCB",
+      "mutation": "footer",
+      "body": "Payment received AED 500.00 on your card ending 2517. Thank you For queries call 600 500 000.",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0453",
+      "market": "AE",
+      "sender": "ADCB",
+      "mutation": "prefix",
+      "body": "Dear Customer, Payment received AED 500.00 on your card ending 2517. Thank you",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0454",
+      "market": "AE",
+      "sender": "ADCB",
+      "mutation": "orig",
+      "body": "Payment received AED 1,250.50 on your card ending 2608. Thank you",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0455",
+      "market": "AE",
+      "sender": "ADCB",
+      "mutation": "upper",
+      "body": "PAYMENT RECEIVED AED 1,250.50 ON YOUR CARD ENDING 2608. THANK YOU",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0456",
+      "market": "AE",
+      "sender": "ADCB",
+      "mutation": "spacing",
+      "body": "  Payment  received  AED  1,250.50  on  your  card  ending  2608.  Thank  you ⏎ ",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0457",
+      "market": "AE",
+      "sender": "ADCB",
+      "mutation": "footer",
+      "body": "Payment received AED 1,250.50 on your card ending 2608. Thank you For queries call 600 500 000.",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0458",
+      "market": "AE",
+      "sender": "ADCB",
+      "mutation": "prefix",
+      "body": "Dear Customer, Payment received AED 1,250.50 on your card ending 2608. Thank you",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0459",
+      "market": "AE",
+      "sender": "ADCB",
+      "mutation": "no-thousands-comma",
+      "body": "Payment received AED 1250.50 on your card ending 2608. Thank you",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0460",
+      "market": "AE",
+      "sender": "MASHREQ",
+      "mutation": "orig",
+      "body": "Thank you for your payment of AED 500.00 on your Mashreq credit card ending 2554",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0461",
+      "market": "AE",
+      "sender": "MASHREQ",
+      "mutation": "upper",
+      "body": "THANK YOU FOR YOUR PAYMENT OF AED 500.00 ON YOUR MASHREQ CREDIT CARD ENDING 2554",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0462",
+      "market": "AE",
+      "sender": "MASHREQ",
+      "mutation": "spacing",
+      "body": "  Thank  you  for  your  payment  of  AED  500.00  on  your  Mashreq  credit  card  ending  2554 ⏎ ",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0463",
+      "market": "AE",
+      "sender": "MASHREQ",
+      "mutation": "footer",
+      "body": "Thank you for your payment of AED 500.00 on your Mashreq credit card ending 2554 For queries call 600 500 000.",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0464",
+      "market": "AE",
+      "sender": "MASHREQ",
+      "mutation": "prefix",
+      "body": "Dear Customer, Thank you for your payment of AED 500.00 on your Mashreq credit card ending 2554",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0465",
+      "market": "AE",
+      "sender": "MASHREQ",
+      "mutation": "orig",
+      "body": "Thank you for your payment of AED 1,250.50 on your Mashreq credit card ending 2645",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0466",
+      "market": "AE",
+      "sender": "MASHREQ",
+      "mutation": "upper",
+      "body": "THANK YOU FOR YOUR PAYMENT OF AED 1,250.50 ON YOUR MASHREQ CREDIT CARD ENDING 2645",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0467",
+      "market": "AE",
+      "sender": "MASHREQ",
+      "mutation": "spacing",
+      "body": "  Thank  you  for  your  payment  of  AED  1,250.50  on  your  Mashreq  credit  card  ending  2645 ⏎ ",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0468",
+      "market": "AE",
+      "sender": "MASHREQ",
+      "mutation": "footer",
+      "body": "Thank you for your payment of AED 1,250.50 on your Mashreq credit card ending 2645 For queries call 600 500 000.",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0469",
+      "market": "AE",
+      "sender": "MASHREQ",
+      "mutation": "prefix",
+      "body": "Dear Customer, Thank you for your payment of AED 1,250.50 on your Mashreq credit card ending 2645",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0470",
+      "market": "AE",
+      "sender": "MASHREQ",
+      "mutation": "no-thousands-comma",
+      "body": "Thank you for your payment of AED 1250.50 on your Mashreq credit card ending 2645",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0471",
+      "market": "AE",
+      "sender": "FAB",
+      "mutation": "orig",
+      "body": "Your payment of AED 500.00 to credit card ending 2591 was successful",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0472",
+      "market": "AE",
+      "sender": "FAB",
+      "mutation": "upper",
+      "body": "YOUR PAYMENT OF AED 500.00 TO CREDIT CARD ENDING 2591 WAS SUCCESSFUL",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0473",
+      "market": "AE",
+      "sender": "FAB",
+      "mutation": "spacing",
+      "body": "  Your  payment  of  AED  500.00  to  credit  card  ending  2591  was  successful ⏎ ",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0474",
+      "market": "AE",
+      "sender": "FAB",
+      "mutation": "footer",
+      "body": "Your payment of AED 500.00 to credit card ending 2591 was successful For queries call 600 500 000.",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0475",
+      "market": "AE",
+      "sender": "FAB",
+      "mutation": "prefix",
+      "body": "Dear Customer, Your payment of AED 500.00 to credit card ending 2591 was successful",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0476",
+      "market": "AE",
+      "sender": "FAB",
+      "mutation": "orig",
+      "body": "Your payment of AED 1,250.50 to credit card ending 2682 was successful",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0477",
+      "market": "AE",
+      "sender": "FAB",
+      "mutation": "upper",
+      "body": "YOUR PAYMENT OF AED 1,250.50 TO CREDIT CARD ENDING 2682 WAS SUCCESSFUL",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0478",
+      "market": "AE",
+      "sender": "FAB",
+      "mutation": "spacing",
+      "body": "  Your  payment  of  AED  1,250.50  to  credit  card  ending  2682  was  successful ⏎ ",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0479",
+      "market": "AE",
+      "sender": "FAB",
+      "mutation": "footer",
+      "body": "Your payment of AED 1,250.50 to credit card ending 2682 was successful For queries call 600 500 000.",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0480",
+      "market": "AE",
+      "sender": "FAB",
+      "mutation": "prefix",
+      "body": "Dear Customer, Your payment of AED 1,250.50 to credit card ending 2682 was successful",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0481",
+      "market": "AE",
+      "sender": "FAB",
+      "mutation": "no-thousands-comma",
+      "body": "Your payment of AED 1250.50 to credit card ending 2682 was successful",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0482",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "orig",
+      "body": "AED 500.00 credited to your credit card ending 2628 - payment received. Thank you",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0483",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "upper",
+      "body": "AED 500.00 CREDITED TO YOUR CREDIT CARD ENDING 2628 - PAYMENT RECEIVED. THANK YOU",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0484",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "spacing",
+      "body": "  AED  500.00  credited  to  your  credit  card  ending  2628  -  payment  received.  Thank  you ⏎ ",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0485",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "footer",
+      "body": "AED 500.00 credited to your credit card ending 2628 - payment received. Thank you For queries call 600 500 000.",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0486",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "prefix",
+      "body": "Dear Customer, AED 500.00 credited to your credit card ending 2628 - payment received. Thank you",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0487",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "orig",
+      "body": "AED 1,250.50 credited to your credit card ending 2719 - payment received. Thank you",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0488",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "upper",
+      "body": "AED 1,250.50 CREDITED TO YOUR CREDIT CARD ENDING 2719 - PAYMENT RECEIVED. THANK YOU",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0489",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "spacing",
+      "body": "  AED  1,250.50  credited  to  your  credit  card  ending  2719  -  payment  received.  Thank  you ⏎ ",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0490",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "footer",
+      "body": "AED 1,250.50 credited to your credit card ending 2719 - payment received. Thank you For queries call 600 500 000.",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0491",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "prefix",
+      "body": "Dear Customer, AED 1,250.50 credited to your credit card ending 2719 - payment received. Thank you",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0492",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "no-thousands-comma",
+      "body": "AED 1250.50 credited to your credit card ending 2719 - payment received. Thank you",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0493",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "orig",
+      "body": "تم إيداع مبلغ 500.00 درهم في بطاقتك الائتمانية المنتهية بـ 2665",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0494",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "upper",
+      "body": "تم إيداع مبلغ 500.00 درهم في بطاقتك الائتمانية المنتهية بـ 2665",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0495",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "spacing",
+      "body": "  تم  إيداع  مبلغ  500.00  درهم  في  بطاقتك  الائتمانية  المنتهية  بـ  2665 ⏎ ",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0496",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "footer",
+      "body": "تم إيداع مبلغ 500.00 درهم في بطاقتك الائتمانية المنتهية بـ 2665 For queries call 600 500 000.",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0497",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "prefix",
+      "body": "Dear Customer, تم إيداع مبلغ 500.00 درهم في بطاقتك الائتمانية المنتهية بـ 2665",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0498",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "arabic-digits",
+      "body": "تم إيداع مبلغ ٥٠٠٫٠٠ درهم في بطاقتك الائتمانية المنتهية بـ 2665",
+      "currency": "AED",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0499",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "orig",
+      "body": "تم إيداع مبلغ 1,250.50 درهم في بطاقتك الائتمانية المنتهية بـ 2756",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0500",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "upper",
+      "body": "تم إيداع مبلغ 1,250.50 درهم في بطاقتك الائتمانية المنتهية بـ 2756",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0501",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "spacing",
+      "body": "  تم  إيداع  مبلغ  1,250.50  درهم  في  بطاقتك  الائتمانية  المنتهية  بـ  2756 ⏎ ",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0502",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "footer",
+      "body": "تم إيداع مبلغ 1,250.50 درهم في بطاقتك الائتمانية المنتهية بـ 2756 For queries call 600 500 000.",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0503",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "prefix",
+      "body": "Dear Customer, تم إيداع مبلغ 1,250.50 درهم في بطاقتك الائتمانية المنتهية بـ 2756",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0504",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "arabic-digits",
+      "body": "تم إيداع مبلغ ١٬٢٥٠٫٥٠ درهم في بطاقتك الائتمانية المنتهية بـ 2756",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0505",
+      "market": "AE",
+      "sender": "ENBD",
+      "mutation": "no-thousands-comma",
+      "body": "تم إيداع مبلغ 1250.50 درهم في بطاقتك الائتمانية المنتهية بـ 2756",
+      "currency": "AED",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0506",
+      "market": "SA",
+      "sender": "SNB",
+      "mutation": "orig",
+      "body": "Payment of SAR 500.00 received on your credit card ending 2702. Thank you.",
+      "currency": "SAR",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0507",
+      "market": "SA",
+      "sender": "SNB",
+      "mutation": "upper",
+      "body": "PAYMENT OF SAR 500.00 RECEIVED ON YOUR CREDIT CARD ENDING 2702. THANK YOU.",
+      "currency": "SAR",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0508",
+      "market": "SA",
+      "sender": "SNB",
+      "mutation": "spacing",
+      "body": "  Payment  of  SAR  500.00  received  on  your  credit  card  ending  2702.  Thank  you. ⏎ ",
+      "currency": "SAR",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0509",
+      "market": "SA",
+      "sender": "SNB",
+      "mutation": "footer",
+      "body": "Payment of SAR 500.00 received on your credit card ending 2702. Thank you. For queries call 600 500 000.",
+      "currency": "SAR",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0510",
+      "market": "SA",
+      "sender": "SNB",
+      "mutation": "prefix",
+      "body": "Dear Customer, Payment of SAR 500.00 received on your credit card ending 2702. Thank you.",
+      "currency": "SAR",
+      "minorUnits": 50000
+    },
+    {
+      "id": "A0511",
+      "market": "SA",
+      "sender": "SNB",
+      "mutation": "orig",
+      "body": "Payment of SAR 1,250.50 received on your credit card ending 2793. Thank you.",
+      "currency": "SAR",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0512",
+      "market": "SA",
+      "sender": "SNB",
+      "mutation": "upper",
+      "body": "PAYMENT OF SAR 1,250.50 RECEIVED ON YOUR CREDIT CARD ENDING 2793. THANK YOU.",
+      "currency": "SAR",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0513",
+      "market": "SA",
+      "sender": "SNB",
+      "mutation": "spacing",
+      "body": "  Payment  of  SAR  1,250.50  received  on  your  credit  card  ending  2793.  Thank  you. ⏎ ",
+      "currency": "SAR",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0514",
+      "market": "SA",
+      "sender": "SNB",
+      "mutation": "footer",
+      "body": "Payment of SAR 1,250.50 received on your credit card ending 2793. Thank you. For queries call 600 500 000.",
+      "currency": "SAR",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0515",
+      "market": "SA",
+      "sender": "SNB",
+      "mutation": "prefix",
+      "body": "Dear Customer, Payment of SAR 1,250.50 received on your credit card ending 2793. Thank you.",
+      "currency": "SAR",
+      "minorUnits": 125050
+    },
+    {
+      "id": "A0516",
+      "market": "SA",
+      "sender": "SNB",
+      "mutation": "no-thousands-comma",
+      "body": "Payment of SAR 1250.50 received on your credit card ending 2793. Thank you.",
+      "currency": "SAR",
+      "minorUnits": 125050
+    }
+  ]
+}

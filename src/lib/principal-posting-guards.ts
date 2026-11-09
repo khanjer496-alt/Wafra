@@ -201,6 +201,22 @@ export function isCompletedPrincipalRefund(source: string, span: PrincipalSpan |
 const CARD_CREDIT_TARGET = /\bcredit\s+card\b|بطاق(?:تك|ه|ة)\s+(?:ال)?ا[يئ]تماني[هة]/iu;
 const CARD_CREDIT_MOVEMENT = /\bcredited(?:\s+with|\s+to)?\b|(?<![ء-ي])(?:تم\s+)?(?:إيداع|ايداع|إضافة|اضافه|اضافة)(?![ء-ي])/iu;
 
+const REPAYMENT_MONEY = String.raw`(?:[A-Z]{3}|Dhs?|SR|[$€£])\s*\p{Nd}+(?:[.,٫٬]\p{Nd}+)*`;
+// A card is the destination, never an instrument used to pay a merchant/bill.
+const REPAYMENT_CARD = String.raw`(?:(?!(?:bill|invoice|loan|finance|mortgage|account|utility|electricity|water|using|via|with|through|from|to|for|by|on|at|and|of)\b)[\p{L}\p{N}.'’-]+\s+){0,3}?card\b`;
+const UNQUALIFIED_REPAYMENT = new RegExp(
+  String.raw`^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?(?:` +
+  String.raw`payment\s+(?:received|credited)\s+${REPAYMENT_MONEY}\s+(?:on|to|towards?)\s+(?:your\s+)?${REPAYMENT_CARD}` +
+  String.raw`|thank\s+you\s+for\s+(?:your\s+)?payment\s+of\s+${REPAYMENT_MONEY}\s+on\s+(?:your\s+)?${REPAYMENT_CARD}` +
+  String.raw`|your\s+payment\s+of\s+${REPAYMENT_MONEY}\s+to\s+(?:your\s+)?(?:credit|charge|covered)\s+card\b(?:[^.\n]|\.\d){0,80}\bsuccessful\b)`,
+  'iu',
+);
+/** These receipt claims cannot prove new spending/income. Keep them in Review. */
+export function isUnqualifiedCardRepayment(source: string): boolean {
+  const text = /[\uFF01-\uFFEF]/u.test(source) ? source.normalize('NFKC') : source;
+  return UNQUALIFIED_REPAYMENT.test(text);
+}
+
 /** A credit to the credit-card balance may be a settlement, not new income.
  * Leave ambiguous credits in Review; explicit refunds retain their own rules.
  */
