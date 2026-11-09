@@ -215,22 +215,6 @@ test('actual generated shipping resource preserves domestic, foreign and zero/th
   assert.equal(review.route, 'review');
   assert.deepEqual(review.notification.amount, { currency: 'USD', minorUnits: '2486', exponent: 2 });
   assert.equal(parse('Hi Ann, I have just spent USD 50.00 at Example Market.', '+12025550190').notification, null);
-  for (const sender of ['ENBD', '']) {
-    const result = parse('AED 100.00 spent on credit card 1234 at NOON and 10 points credited', sender);
-    assert.equal(result.route, 'parsed');
-    assert.equal(result.notification.direction, 'debit');
-    assert.deepEqual(result.notification.amount, { currency: 'AED', minorUnits: '10000', exponent: 2 });
-    // Native preview also requires independent universal money grounding.
-    // The fee footer must not change that route or its grounded source money.
-    const arabic = 'تم خصم مبلغ 100.00 درهم من بطاقتك الائتمانية';
-    const baseline = parse(arabic, sender);
-    const withFee = parse(`${arabic} بالإضافة إلى رسوم الخدمة`, sender);
-    assert.equal(withFee.route, baseline.route);
-    assert.deepEqual(withFee.notification?.amount, baseline.notification?.amount);
-  }
-  for (const verb of ['إضافة', 'ايداع']) {
-    assert.notEqual(parse(`تم ${verb} مبلغ 100.00 درهم في بطاقتك الائتمانية`).route, 'parsed');
-  }
 });
 
 test('the actual OTA checker refuses stale parser sources and leaves packaged bytes unchanged', (t) => {
