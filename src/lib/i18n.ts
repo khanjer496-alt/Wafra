@@ -257,7 +257,7 @@ const S = {
     ar: 'كشوف طابقتها وفرة مع دفعة بطاقة.',
   },
   paidStatementDue: { en: 'Statement due {date} · paid', ar: 'كشف مستحق {date} · مدفوع' },
-  trialEndedBanner: { en: 'Trial ended · tracking paused', ar: 'انتهت التجربة · توقف التتبع' },
+  trialEndedBanner: { en: 'Free capture ended · automatic capture paused', ar: 'انتهى الالتقاط المجاني · الالتقاط التلقائي متوقف' },
   trialEndedBannerSub: { en: 'Subscribe to keep importing your bank SMS', ar: 'اشترك لمواصلة قراءة رسائل البنك' },
   turnOnTracking: { en: 'Turn on automatic tracking', ar: 'فعّل التتبع التلقائي' },
   trackingPrivacy: { en: 'Wafra reads bank SMS on this device only', ar: 'وفرة تقرأ رسائل البنك على هذا الجهاز فقط' },
@@ -1353,8 +1353,8 @@ const S = {
     ar: 'أعد مشاهدة تجربة البداية دون تغيير بياناتك أو إعداداتك',
   },
   settingsTrialDays: {
-    en: 'Free trial · {count} day{s} left',
-    ar: 'تجربة مجانية · متبقٍ {count} يوم',
+    en: 'Free automatic capture · {count} day{s} left',
+    ar: 'الالتقاط التلقائي المجاني · متبقٍ {count} يوم',
   },
   wafraPro: { en: 'Wafra Pro', ar: 'وفرة برو' },
   proActive: { en: 'Active', ar: 'مفعّل' },
@@ -1567,8 +1567,8 @@ const S = {
     ar: 'حافظ على تحديث سجلك تلقائياً.',
   },
   proTrialActiveBody: {
-    en: 'Automatic capture is included for {left} more day{s}.',
-    ar: 'الالتقاط التلقائي مشمول لمدة {left} يوم إضافي.',
+    en: 'Automatic capture is free during the first 3 app days.',
+    ar: 'الالتقاط التلقائي مجاني خلال أول 3 أيام من استخدام التطبيق.',
   },
   proTrialEndedBody: {
     en: 'Automatic bank-message capture is paused. Your ledger and manual entries still work.',
@@ -1602,8 +1602,8 @@ const S = {
     ar: 'وفرة برو مفعّل مجدداً على هذا الجهاز.',
   },
   proContinue: { en: 'Continue to Wafra', ar: 'متابعة إلى وفرة' },
-  trialEndedPaywall: { en: 'Your free trial has ended and tracking is paused. Subscribe to keep Wafra working — your data never leaves your phone either way.', ar: 'انتهت تجربتك المجانية وتوقف التتبع. اشترك لمواصلة استخدام وفرة — بياناتك لا تغادر هاتفك في كل الأحوال.' },
-  freeTrialActive: { en: 'FREE TRIAL ACTIVE', ar: 'التجربة المجانية مفعّلة' },
+  trialEndedPaywall: { en: 'Free automatic capture has ended. Automatic capture needs Pro; manual entry and imports stay free.', ar: 'انتهى الالتقاط التلقائي المجاني. يحتاج الالتقاط التلقائي إلى برو، ويبقى الإدخال اليدوي والاستيراد مجانياً.' },
+  freeTrialActive: { en: 'FREE AUTOMATIC CAPTURE', ar: 'الالتقاط التلقائي المجاني مفعّل' },
   getPro: { en: 'Get Wafra Pro', ar: 'اشترك في وفرة برو' },
   startPlanWithPrice: {
     en: 'Start {plan} — {price}',

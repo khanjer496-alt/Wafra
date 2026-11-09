@@ -18,7 +18,8 @@ function createHarness(options = {}) {
   const jsx = (type, props={}, key) => typeof type==='function' ? type(props) : ({type,props,key});
   const runtime={jsx,jsxs:jsx,Fragment:'Fragment'};
   const amount=(fils, opts={})=>(fils/100).toLocaleString(lang==='ar'?'ar-AE':'en-AE', {minimumFractionDigits:opts.decimals===false?0:2,maximumFractionDigits:opts.decimals===false?0:2});
-  const formatAED=(fils,opts)=>`${lang==='ar'?'د.إ':'AED'} ${amount(fils,opts)}`;
+  const { moneyCodeRun } = load(path.join(root, 'src/lib/money-code-run.ts'));
+  const formatAED=(fils,opts)=>moneyCodeRun(amount(fils,opts),lang==='ar'?'د.إ':'AED',lang);
   const i18n=load(path.join(root,'src/lib/i18n.ts'));i18n.setLanguage(lang);
   const assistantCopy=load(path.join(root,'src/lib/assistant-copy.ts'));
   const parseAmountWithMoneySpec=(value,spec)=>{
@@ -173,6 +174,7 @@ function createHarness(options = {}) {
   local('@/lib/transfer-people','src/lib/transfer-people.ts');
   local('@/lib/transfer-activity-copy','src/lib/transfer-activity-copy.ts');
   local('@/lib/transfer-review-copy','src/lib/transfer-review-copy.ts');
+  local('@/lib/ui-money-text','src/lib/ui-money-text.ts');
   local('@/lib/ledger','src/lib/ledger.ts');local('@/lib/splits','src/lib/splits.ts');local('@/lib/balances','src/lib/balances.ts');local('@/lib/categories','src/lib/categories.ts');
   // Accounts/Bills redesign: pure figures and their copy, real source.
   local('@/lib/money-places-copy','src/lib/money-places-copy.ts');local('@/lib/money-places','src/lib/money-places.ts');

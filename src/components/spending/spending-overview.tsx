@@ -1,3 +1,4 @@
+import { formatMoneyText } from '@/lib/ui-money-text';
 import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import { spendingCopy } from '@/lib/reference-copy';
 import React from 'react';
@@ -17,7 +18,6 @@ import { useLedgerMoney } from '@/hooks/use-ledger-money';
 import { everydayBandCopy } from '@/lib/everyday-band-copy';
 import { categoryColors } from '@/lib/category-colors';
 import { formatAED } from '@/lib/format';
-import { formatMinorUnits } from '@/lib/ledger-money';
 import { limitStatus } from '@/lib/limit-status';
 import { limitedCategorySummary, spendingShare, spendingShareLabel, type SpendingCategoryRow } from '@/lib/reference-presentation';
 import type { CategoryId } from '@/lib/types';
@@ -56,7 +56,7 @@ export function SpendingOverview(p: Props) {
   const language = useLanguage(); const large = useLargeTextLayout();
   const moneySpec = useLedgerMoney();
   const moneyLabel = (fils: number) => moneySpec
-    ? `${moneySpec.currency} ${formatMinorUnits(Math.round(fils), moneySpec)}` : formatAED(fils);
+    ? formatMoneyText(Math.round(fils), moneySpec) : formatAED(fils);
   const w = spendingCopy[language === 'ar' ? 'ar' : 'en'];
   const words = everydayBandCopy(language);
   const limited = limitedCategorySummary(p.rows);

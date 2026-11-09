@@ -218,6 +218,12 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       if (name === '@/lib/best-effort-autopost') {
         return require('../build/best-effort-autopost.js');
       }
+      if (name === '@/lib/ui-money-text') {
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/ui-money-text.ts'), dependencies, globals);
+      }
+      if (name === '@/lib/free-capture-copy' || name === '@/lib/money-code-run') {
+        return require('../build/' + name.slice('@/lib/'.length) + '.js');
+      }
       if (name === '@/lib/country') {
         return require('../build/country.js');
       }

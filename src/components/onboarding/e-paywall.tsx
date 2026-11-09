@@ -34,6 +34,7 @@ import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useMotionPreference } from '@/hooks/use-reduced-motion';
 import { t, tf } from '@/lib/i18n';
 import { trialTimeline } from '@/lib/onboarding-e';
+import { freeCaptureCopy } from '@/lib/free-capture-copy';
 import { onboardingECopy } from '@/lib/onboarding-e-copy';
 import { compactPattern, patternSize, type PatternTile } from '@/lib/pattern';
 import { configuredPublicUrl } from '@/lib/public-links';
@@ -316,7 +317,7 @@ function useBackdropSettle(fromPattern: boolean, dim: number) {
   }), [dim, settle, settling]);
 }
 
-export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, captureOn, onFinish, onBack, onClose, preview, finishing,
+export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, trialStartTs = 0, captureOn, onFinish, onBack, onClose, preview, finishing,
   arrivedFrom = null }: {
   tiles: readonly PatternTile[];
   /** The first watched category's name, if they set a limit. */
@@ -325,6 +326,7 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, ca
   remindersOn: boolean;
   /** Whole free days left (trialDaysLeft), 0 when the trial is over. */
   trialDays: number;
+  trialStartTs?: number;
   /** Whether automatic capture is actually on for this person right now. */
   captureOn: boolean;
   /** Leave onboarding: after a purchase, a restore, or the free days. */
@@ -342,7 +344,8 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, ca
    */
   arrivedFrom?: string | null;
 }) {
-  const words = onboardingECopy(useLanguage());
+  const language = useLanguage();
+  const words = onboardingECopy(language);
   const band = useBand('home');
   const largeText = useLargeTextLayout();
   const tile = fitPatternTile(useWindowDimensions().width, 52);
@@ -358,6 +361,7 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, ca
   const dim = paywallBackdropOpacity(band.scheme);
   const backdrop_ = useBackdropSettle(arrivedFrom === 'pattern', dim);
   const timeline = trialTimeline(trialDays);
+  const freePeriod = freeCaptureCopy(trialStartTs, language);
   const store = billingStore();
   const privacyUrl = configuredPublicUrl('privacyPolicyUrl');
   const termsUrl = configuredPublicUrl('termsOfUseUrl');
@@ -405,17 +409,17 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, ca
           onPress={() => void checkout.restore()} disabled={busy} testID="onboarding-paywall-restore" /> : null}
       </>}>
       <EHeadline palette={band} size={42}>{words.paywallTitle}</EHeadline>
-      <EBody palette={band}>{words.paywallBody(watchedCategory, remindersOn)}</EBody>
+      <EBody palette={band}>{`${words.paywallBody(watchedCategory, remindersOn)}\n${freePeriod.status}${timeline.length === 0 ? `\n${freePeriod.after}` : ''}`}</EBody>
       {timeline.length > 0 ? <View style={[styles.timeline, largeText && styles.stacked]} accessible
-        accessibilityLabel={`${words.trialTimelineLabel}. ${words.trialToday}: ${captureOn ? words.trialTodayBody : words.trialTodayBodyOff} ${words.trialEnd(timeline[1]!.day)}: ${words.trialEndBody}`}
+        accessibilityLabel={`${words.trialTimelineLabel}. ${words.trialToday}: ${captureOn ? words.trialTodayBody : words.trialTodayBodyOff} ${freePeriod.endLabel ?? words.trialEnd(timeline[1]!.day)}: ${freePeriod.after}`}
         testID="onboarding-trial-timeline">
         <View style={[styles.stage, { backgroundColor: band.tile }]}>
           <ThemedText type="smallBold" style={{ color: band.accentOnBand }}>{words.trialToday}</ThemedText>
           <ThemedText type="meta" style={{ color: band.onBand }}>{captureOn ? words.trialTodayBody : words.trialTodayBodyOff}</ThemedText>
         </View>
         <View style={[styles.stage, { backgroundColor: band.tile }]}>
-          <ThemedText type="smallBold" style={{ color: band.onBand }}>{words.trialEnd(timeline[1]!.day)}</ThemedText>
-          <ThemedText type="meta" style={{ color: band.onBand }}>{words.trialEndBody}</ThemedText>
+          <ThemedText type="smallBold" style={{ color: band.onBand }}>{freePeriod.endLabel ?? words.trialEnd(timeline[1]!.day)}</ThemedText>
+          <ThemedText type="meta" style={{ color: band.onBand }}>{freePeriod.after}</ThemedText>
         </View>
       </View> : null}
       {checkout.state === 'loading' ? <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{t('priceLoading')}</ThemedText>

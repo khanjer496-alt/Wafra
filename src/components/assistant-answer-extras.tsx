@@ -15,7 +15,8 @@ import { Spacing, type BandPalette } from '@/constants/theme';
 import { assistantScreenCopy } from '@/lib/assistant-screen-copy';
 
 import { structuralTitleLabel } from '@/lib/i18n';
-import { formatMinorUnits, formatMoneyText, type LedgerMoneySpec } from '@/lib/ledger-money';
+import { formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
+import { formatMoneyText } from '@/lib/ui-money-text';
 import type { AssistantMonthTotal, AssistantPaymentRow } from '@/lib/wafra-assistant';
 
 function shortDate(iso: string, language: 'en' | 'ar'): string {

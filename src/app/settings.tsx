@@ -111,6 +111,7 @@ import { settingsCopy } from '@/lib/settings-copy';
 import { settingsECopy } from '@/lib/settings-e-copy';
 import { settingsSectionScrollY } from '@/lib/settings-layout';
 import { widgetsCopy } from '@/lib/widgets-copy';
+import { freeCaptureCopy } from '@/lib/free-capture-copy';
 import {
   iosCaptureManageIntent,
   iosCaptureSwitchIntent,
@@ -888,13 +889,12 @@ export default function SettingsScreen() {
     [state.transactions],
   );
   const lockTitle = biometricKind ? copy.lockTitle[biometricKind] : t('appLockTitle');
+  const freePeriod = freeCaptureCopy(state.trialStartTs, language);
   const proSubtitle = state.founderPro
     ? t('founderProActive')
     : hasNonTrialAccess(state)
       ? t('activeOnThisDevice')
-      : trial > 0
-        ? copy.proTrialBody(trial)
-        : t('trialEndedBanner');
+      : `${freePeriod.status}\n${freePeriod.after}`;
   const proTitle = !hasNonTrialAccess(state) && trial > 0 ? copy.proTrialTitle : copy.proTitle;
   const proActionLabel = hasNonTrialAccess(state) ? eWords.proDetails : eWords.seePlans;
 

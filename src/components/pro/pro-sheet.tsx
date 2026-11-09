@@ -98,7 +98,7 @@ function ProSheetSession({ feature, visible, onClose }: {
                     price: selectedOffer.priceString,
                   })
                 : t('getPro')}
-            disabled={busy}
+            disabled={busy || !checkout.checkoutReady || checkout.offerState !== 'ready' || !selectedOffer || !privacyPolicyUrl || !termsOfUseUrl}
             busy={billingAction === 'purchase'}
             onPress={() => void buySelectedPlan()}
           />
