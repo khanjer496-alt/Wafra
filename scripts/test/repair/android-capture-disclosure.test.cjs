@@ -2,6 +2,35 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createLoader } = require('../../universal-test/load-ts.cjs');
+const repairLoad = require('./load-typescript.cjs');
+const path = require('node:path');
+const source = name => path.resolve(__dirname, '../../../src/lib', `${name}.ts`);
+const disclosureCaller = path.join(__dirname, 'fixtures/shared-android-disclosure.ts');
+
+test('repair loader runs the real shared disclosure and missing host fails closed', async () => {
+  const disclosure = repairLoad(disclosureCaller);
+  let actions = 0;
+  for (const kind of ['sms-history', 'sms-live', 'bank-notifications']) {
+    assert.equal(await disclosure.withAndroidCaptureConsent(kind, async () => { actions++; return true; }), false);
+  }
+  assert.equal(actions, 0);
+});
+
+test('repair loader preserves explicit consent presenter decline and acceptance', async () => {
+  const consent = repairLoad(source('consent-prompt'));
+  const disclosure = repairLoad(disclosureCaller, { '@/lib/consent-prompt': consent });
+  let actions = 0;
+  for (const choice of [null, false, true]) {
+    const unregister = consent.registerConsentPresenter(async prompt => {
+      assert.equal(prompt.androidCapture, 'sms-history');
+      assert.match(prompt.body, /SMS inbox on this phone/);
+      return choice;
+    });
+    assert.equal(await disclosure.withAndroidCaptureConsent('sms-history', async () => { actions++; return true; }), choice === true);
+    unregister();
+  }
+  assert.equal(actions, 1);
+});
 
 function harness({ readGranted = false, systemAccess = false, choice = null, platform = 'android' } = {}) {
   const load = createLoader(), events = [];

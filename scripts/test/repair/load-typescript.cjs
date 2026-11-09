@@ -360,6 +360,15 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
           '@/lib/wafra-assistant': require('../build/wafra-assistant.js'),
         });
       }
+      if (name === '@/lib/android-capture-disclosure') {
+        // Execute the shared consent policy, never an implicit affirmative
+        // stub. Without an explicitly registered presenter it fails closed.
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/android-capture-disclosure.ts'), {
+          '@/lib/i18n': require('../build/i18n.js'),
+          '@/lib/onboarding-copy': require('../build/onboarding-copy.js'),
+          ...dependencies,
+        }, globals);
+      }
       if (name === '@/lib/consent-prompt') {
         return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/consent-prompt.ts'), dependencies, globals);
       }

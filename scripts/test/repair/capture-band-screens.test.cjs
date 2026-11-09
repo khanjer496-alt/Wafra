@@ -193,7 +193,7 @@ test('Statement import: sand band with the title, the true privacy line above th
   assert.match(text(band), /Add bank statements/);
   const [privacy, choose] = idOrder(band, ['statement-privacy', 'statement-choose']);
   assert.ok(privacy >= 0 && choose > privacy, 'the upload disclosure is read before the control');
-  assert.match(text(byId(band, 'statement-privacy')), /Wafra’s import service\. The file is read, then deleted\./);
+  assert.match(text(byId(band, 'statement-privacy')), /Statements are sent to Wafra’s import service, read, then deleted\./);
   assert.doesNotMatch(text(tree), /read on this phone/i);
   const control = byId(band, 'statement-choose');
   assert.equal(control.props.accessibilityRole, 'button');
@@ -271,6 +271,7 @@ function importBand(name, input) {
     band: flow, bandTile: { fg: flow.onBand }, mintTile: { fg: flow.onAccent }, scanCopy,
     t: (key) => key, tf: (key, values) => `${key}:${JSON.stringify(values)}`,
     formatCount: (value) => value.toLocaleString('en-US'), reducedMotion: false, largeText: false,
+    Platform: { OS: 'android' },
     history: undefined, showManual: false, runScan() {}, setShowManual() {}, isSmsScanningAvailable: () => true,
     ...input,
   });
@@ -313,7 +314,9 @@ test('Past bank texts: the band leads with the true line and the read; paste-onl
   assert.match(text(android), /scanBankAlertsPrivacy/);
   assert.ok(byId(android, 'import-find-alerts'));
   assert.ok(byId(android, 'import-paste-toggle'));
-  const iphone = importBand('introBand', { isSmsScanningAvailable: () => false });
-  assert.match(text(iphone), /pasteHint[\s\S]*featPasteFreeText/);
+  const iphone = importBand('introBand', { Platform: { OS: 'ios' }, isSmsScanningAvailable: () => false });
+  assert.match(text(iphone), /pasteHintIos[\s\S]*featPasteFreeText/);
   assert.equal(byId(iphone, 'import-find-alerts'), undefined);
+  const web = importBand('introBand', { Platform: { OS: 'web' }, isSmsScanningAvailable: () => false });
+  assert.match(text(web), /pasteHintWeb[\s\S]*featPasteFreeText/);
 });

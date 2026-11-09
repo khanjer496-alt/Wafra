@@ -22,6 +22,9 @@ function harness(result = {}, initial = {}, options = {}) {
     getBackgroundRelayConfig: async () => null, syncRelay: async () => { throw Error('Unexpected relay'); } };
   const capture = load(source('capture'), {
     '@/lib/auto-import': { isSmsScanningAvailable: () => true,
+      // Cursor tests model an already-consented inbox unless access is
+      // explicitly absent; the negative case must not reach scanInbox.
+      hasSmsPermission: async () => options.smsPermission !== false,
       scanInbox: async (since, _overrides, _progress, _region, options) => {
         requested.push(since);
         modes.push(options?.notificationOnly === true);
@@ -76,6 +79,15 @@ test('ten empty incremental scans keep the original watermark and never schedule
   assert.deepEqual(h.requested, Array(10).fill(1001));
   assert.equal(h.batches.length, 0);
   assert.deepEqual(h.events, Array(10).fill('commit'));
+});
+
+test('missing effective SMS access never reads, writes a cursor, or acknowledges', async () => {
+  const h = harness({}, {}, { smsPermission: false });
+  await h.executor.execute('routine');
+  assert.equal(h.getState().lastScanTs, 1000);
+  assert.deepEqual(h.requested, []);
+  assert.deepEqual(h.batches, []);
+  assert.deepEqual(h.events, []);
 });
 
 test('a real ignored or declined message at the exact next millisecond still advances durably', async () => {
