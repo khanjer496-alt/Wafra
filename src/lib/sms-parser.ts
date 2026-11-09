@@ -14,7 +14,7 @@ import { CURRENCY_MINOR_UNITS } from '@/lib/currency-metadata';
 import { cachedReferenceQuote, quoteFitsDay } from '@/lib/fx-rates';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
 import { getActiveCountry } from '@/lib/country';
-import { hasClickLinkPrompt, hasMobileMoneyCallback, isLeadingNumericDiscountOffer, isUnqualifiedPeerTransferClaim, isUnpostedCardBalanceClaim, isQualifiedCardRepaymentReceipt, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isCompletedPrincipalRefund, isHedgedPrincipal, isIncompletePrincipal, refundPrincipalStatus, type PrincipalSpan } from '@/lib/principal-posting-guards';
+import { hasExplicitPersonalMoneyClaim, hasClickLinkPrompt, hasMobileMoneyCallback, isLeadingNumericDiscountOffer, isUnqualifiedPeerTransferClaim, isUnpostedCardBalanceClaim, isQualifiedCardRepaymentReceipt, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isCompletedPrincipalRefund, isHedgedPrincipal, isIncompletePrincipal, refundPrincipalStatus, type PrincipalSpan } from '@/lib/principal-posting-guards';
 import { extractUniversalMoney } from '@/lib/universal-money';
 
 /* ────────────────────────── Arabic normalisation ──────────────────────────
@@ -8431,7 +8431,8 @@ export function parseSms(
 ): ParsedSms | null {
   // A quoted future purchase in a leading coupon invitation is not a posting.
   if (isLeadingNumericDiscountOffer(message) || isUnqualifiedPeerTransferClaim(message) ||
-    hasMobileMoneyCallback(message) || isUnpostedCardBalanceClaim(message)) return null;
+    hasMobileMoneyCallback(message) || isUnpostedCardBalanceClaim(message) ||
+    hasExplicitPersonalMoneyClaim(message)) return null;
   // A BNPL provider restating an instalment its bank already alerted on; see
   // bnpl-providers.ts. Every kind, both directions: the provider's refund
   // notice duplicates the bank's refund credit exactly as its charge does.

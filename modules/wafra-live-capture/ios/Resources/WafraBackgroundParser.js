@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 34ab74ea3c50ad295dee694862aa926b206972303ccaa1458d915d147a9c5c10
+// Generated from normal shipping TypeScript. Source SHA-256: cd76490d684690ef3446ead627bcad330f34e85d75e722f9ba293d2988fde134
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -9715,10 +9715,9 @@ const GENERIC_BANK_CONTEXT = /\b(?:(?:credit|debit|covered|prepaid|charge)\s+car
 const MONEY_ARRIVED_CLAIM = /(?<!\p{L})(?:you\s+have\s+received|you\s+received|received\s+(?:from|for)|(?:is|has\s+been|was)\s+credited|credited\s+(?:to|in|into|with)|deposited|refund(?:ed)?|recebeu|recebid[oa]|creditad[oa]|estorno|recibiste|recibid[oa]|te\s+(?:envi[óo]|ha\s+enviado)|yape[óo]|abonad[oa]|acreditad[oa]|reembolso|devoluci[óo]n|re[çc]u|cr[ée]dit[ée]e?|gutgeschrieben|diterima|dikreditkan)(?!\p{L})/iu;
 const MONEY_CLAIM_EVIDENCE = /(?<!\p{L})(?:\p{L}*bank|banco|banque|wallet|carteira|billetera|account|acct|a\/c|conta|cuenta|compte|konto|rekening|balance|bal|avl|saldo|solde|ref(?:erence)?|txn|trx|tid|transaction|transfer|transferencia|transfer[êe]ncia|virement|[ée]-?transfer|pix|spei|aani|sarie|yape|plin|nequi|daviplata|m-?pesa|mpesa|upi|imps|neft|rtgs|zelle|interac|gcash|maya|paytm|jazzcash|easypaisa|momo|airtel\s+money)(?!\p{L})/iu;
 const TRANSACTION_CODE = /\b(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{8,12}\b/u;
-const PERSONAL_MESSAGE_PREFIX_RE = /^\s*(?:(?:hi|hey|hello)\b(?:[^\r\n.!?]{0,40}[,!:]|\s+)\s*)?(?:I(?:\s+(?:(?:have|just|already)\s+){0,2}|['’]ve\s+(?:(?:just|already)\s+)?)(?:spent|paid|bought|sent|deposited|transferred|refunded)\b|[اأ]نا\s+(?:(?:قد|لقد)\s+)?(?:صرفت|دفعت|اشتريت|حولت|حوّلت|أرسلت|ارسلت)(?=\s))/iu;
 const hasPersonalMessagePrefix = (source, sender = '') => {
     const text = source.replace(/^\s*Dear\s+Customer[,!:]\s*/iu, '');
-    if (PERSONAL_MESSAGE_PREFIX_RE.test(text) || /^\s*they\s+charged\s+me\b/iu.test(text))
+    if ((0, principal_posting_guards_1.hasExplicitPersonalMoneyClaim)(text))
         return true;
     if (!/^\s*(?:(?:hi|hey|hello|lol|ok|just|so)\b[\s,!:]*)*(?:paid|spent|received)\b/iu.test(text))
         return false;
@@ -11098,6 +11097,7 @@ function bankMonogram(name) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.isUnqualifiedPeerTransferClaim = void 0;
 exports.hasClickLinkPrompt = hasClickLinkPrompt;
+exports.hasExplicitPersonalMoneyClaim = hasExplicitPersonalMoneyClaim;
 exports.isLeadingNumericDiscountOffer = isLeadingNumericDiscountOffer;
 exports.hasMobileMoneyCallback = hasMobileMoneyCallback;
 exports.isIncompletePrincipal = isIncompletePrincipal;
@@ -11110,7 +11110,7 @@ exports.isUnpostedCardBalanceClaim = isUnpostedCardBalanceClaim;
 exports.isCompletedCardBalanceReceipt = isCompletedCardBalanceReceipt;
 exports.isCompletedCardRepaymentPrincipal = isCompletedCardRepaymentPrincipal;
 exports.isUnqualifiedCardCredit = isUnqualifiedCardCredit;
-const CLICK_LINK_PROMPT = /(?:\b(?:click(?:ing)?|tap(?:ping)?)\b[\s:：]+|(?<![ء-ي])(?:اضغط|إضغط|انقر)[\s:：]+)(?:[^.!?]|\.\d){0,120}?(?:https?:\/\/|www\.|\b(?:here|below|link|url)\b|الرابط|هنا)/giu;
+const CLICK_LINK_PROMPT = /(?:\b(?:click(?:ing)?|tap(?:ping)?|verify|confirm|update\s+(?:(?:your|the)\s+)?(?:details|information|credentials|account))\b[\s:：]+|(?<![ء-ي])(?:اضغط|إضغط|انقر)[\s:：]+)(?:[^.!?]|\.\d){0,120}?(?:(?:https?|hxxps?):\/\/|www\.|\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/|\b)|\b(?:here|below|link|url)\b|الرابط|هنا)/giu;
 function hasClickLinkPrompt(source) {
     for (const match of source.matchAll(CLICK_LINK_PROMPT)) {
         const before = source.slice(Math.max(0, match.index - 60), match.index);
@@ -11119,6 +11119,18 @@ function hasClickLinkPrompt(source) {
         return true;
     }
     return false;
+}
+const FIRST_PERSON_MONEY = /^\s*(?:(?:hi|hey|hello)\b(?:[^\r\n.!?]{0,40}[,!:]|\s+)\s*)?(?:I(?:\s+(?:(?:have|just|already)\s+){0,2}|['’]ve\s+(?:(?:just|already)\s+)?)(?:spent|paid|bought|sent|deposited|transferred|refunded)\b|[اأ]نا\s+(?:(?:قد|لقد)\s+)?(?:صرفت|دفعت|اشتريت|حولت|حوّلت|أرسلت|ارسلت)(?=\s))/iu;
+function hasExplicitPersonalMoneyClaim(source) {
+    const text = source.replace(/^\s*Dear\s+Customer[,!:]\s*/iu, '');
+    if (FIRST_PERSON_MONEY.test(text) || /^\s*they\s+charged\s+me\b/iu.test(text))
+        return true;
+    if (!/^\s*(?:(?:hi|hey|hello|lol|ok|just|so)\b[\s,!:]*)*(?:paid|spent|received)\b/iu.test(text))
+        return false;
+    if (/\b(?:card|account|acct?|a\/c|balance|bal|avl|reference|ref|transaction|txn)\b/iu.test(text))
+        return false;
+    return /^\s*lol\b/iu.test(text) ||
+        /\b(?:for\s+(?:lunch|dinner|breakfast|the\s+taxi)|on\s+groceries\s+today)\b/iu.test(text);
 }
 function isLeadingNumericDiscountOffer(source) {
     return /^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?(?:use|enter)\s+(?:code\s+)?\d{4,8}\s+to\s+get\s+\d{1,3}\s?%\s+off\b/iu.test(source) ||
@@ -11338,7 +11350,7 @@ const REPAYMENT_DESTINATION = String.raw `(?:on|to|towards?)\s+(?:your\s+)?${REP
 const REPAYMENT_GREETING = String.raw `(?:(?:Dear\s+[^\n.!?\p{N},:!]{1,40}|Hi|Hello)[,!:]\s*)?`;
 const AR_REPAYMENT_MONEY = String.raw `(?:${REPAYMENT_ANY_MONEY}|${REPAYMENT_NUMBER}\s*(?:درهم|دراهم|ريال)|(?:درهم|دراهم|ريال)\s*${REPAYMENT_NUMBER})`;
 const COMPLETED_CARD_BALANCE_RECEIPT = new RegExp(String.raw `^تم\s+(?:(?:[إا]يداع|[إا]ضاف[هة])\s+(?:مبلغ\s+)?|استلام\s+سداد\s+(?:بمبلغ|مبلغ)\s+)${AR_REPAYMENT_MONEY}`, 'iu');
-const UNQUALIFIED_REPAYMENT = new RegExp(String.raw `(?:^|[\n.!?]\s*)\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?${REPAYMENT_GREETING}(?:` +
+const UNQUALIFIED_REPAYMENT = new RegExp(String.raw `(?:^|[\n.!?]\s*)\s*(?:[A-Z][A-Z0-9 .&-]{1,32}(?::\s*|\s+))?${REPAYMENT_GREETING}(?:` +
     String.raw `payment\s+(?:received|credited)\s+${REPAYMENT_ANY_MONEY}\s+${REPAYMENT_DESTINATION}` +
     String.raw `|we\s+(?:have\s+)?received\s+(?:your\s+)?payment\s+(?:of\s+)?${REPAYMENT_ANY_MONEY}\s+${REPAYMENT_DESTINATION}` +
     String.raw `|payment\s+(?:of\s+)?${REPAYMENT_ANY_MONEY}\s+(?:was\s+)?received\s+${REPAYMENT_DESTINATION}` +
@@ -14727,7 +14739,8 @@ function hasUnsettledPrincipal(message, parsed) {
 }
 function parseSms(message, overrides, options) {
     if ((0, principal_posting_guards_1.isLeadingNumericDiscountOffer)(message) || (0, principal_posting_guards_1.isUnqualifiedPeerTransferClaim)(message) ||
-        (0, principal_posting_guards_1.hasMobileMoneyCallback)(message) || (0, principal_posting_guards_1.isUnpostedCardBalanceClaim)(message))
+        (0, principal_posting_guards_1.hasMobileMoneyCallback)(message) || (0, principal_posting_guards_1.isUnpostedCardBalanceClaim)(message) ||
+        (0, principal_posting_guards_1.hasExplicitPersonalMoneyClaim)(message))
         return null;
     if ((0, bnpl_providers_1.isBnplProviderSource)(options?.sender))
         return null;

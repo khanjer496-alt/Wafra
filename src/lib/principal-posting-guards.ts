@@ -1,7 +1,7 @@
 /** Source-only qualifications of an already selected monetary value. */
 export interface PrincipalSpan { start: number; end: number }
 
-const CLICK_LINK_PROMPT = /(?:\b(?:click(?:ing)?|tap(?:ping)?)\b[\s:：]+|(?<![ء-ي])(?:اضغط|إضغط|انقر)[\s:：]+)(?:[^.!?]|\.\d){0,120}?(?:https?:\/\/|www\.|\b(?:here|below|link|url)\b|الرابط|هنا)/giu;
+const CLICK_LINK_PROMPT = /(?:\b(?:click(?:ing)?|tap(?:ping)?|verify|confirm|update\s+(?:(?:your|the)\s+)?(?:details|information|credentials|account))\b[\s:：]+|(?<![ء-ي])(?:اضغط|إضغط|انقر)[\s:：]+)(?:[^.!?]|\.\d){0,120}?(?:(?:https?|hxxps?):\/\/|www\.|\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/|\b)|\b(?:here|below|link|url)\b|الرابط|هنا)/giu;
 /** A link instruction is never settlement evidence, even with an issuer label. */
 export function hasClickLinkPrompt(source: string): boolean {
   for (const match of source.matchAll(CLICK_LINK_PROMPT)) {
@@ -11,6 +11,19 @@ export function hasClickLinkPrompt(source: string): boolean {
     return true;
   }
   return false;
+}
+
+const FIRST_PERSON_MONEY = /^\s*(?:(?:hi|hey|hello)\b(?:[^\r\n.!?]{0,40}[,!:]|\s+)\s*)?(?:I(?:\s+(?:(?:have|just|already)\s+){0,2}|['’]ve\s+(?:(?:just|already)\s+)?)(?:spent|paid|bought|sent|deposited|transferred|refunded)\b|[اأ]نا\s+(?:(?:قد|لقد)\s+)?(?:صرفت|دفعت|اشتريت|حولت|حوّلت|أرسلت|ارسلت)(?=\s))/iu;
+/** Explicit personal money wording cannot become a bank event at either entry point. */
+export function hasExplicitPersonalMoneyClaim(source: string): boolean {
+  const text = source.replace(/^\s*Dear\s+Customer[,!:]\s*/iu, '');
+  if (FIRST_PERSON_MONEY.test(text) || /^\s*they\s+charged\s+me\b/iu.test(text)) return true;
+  if (!/^\s*(?:(?:hi|hey|hello|lol|ok|just|so)\b[\s,!:]*)*(?:paid|spent|received)\b/iu.test(text)) return false;
+  // A bank receipt may name lunch or a shop; an instrument, reference or
+  // balance keeps it eligible for the normal evidence-based parser.
+  if (/\b(?:card|account|acct?|a\/c|balance|bal|avl|reference|ref|transaction|txn)\b/iu.test(text)) return false;
+  return /^\s*lol\b/iu.test(text) ||
+    /\b(?:for\s+(?:lunch|dinner|breakfast|the\s+taxi)|on\s+groceries\s+today)\b/iu.test(text);
 }
 
 /** A leading coupon invitation is an offer; the same wording may be a receipt footer. */
@@ -251,7 +264,9 @@ const COMPLETED_CARD_BALANCE_RECEIPT = new RegExp(
   String.raw`^تم\s+(?:(?:[إا]يداع|[إا]ضاف[هة])\s+(?:مبلغ\s+)?|استلام\s+سداد\s+(?:بمبلغ|مبلغ)\s+)${AR_REPAYMENT_MONEY}`, 'iu',
 );
 const UNQUALIFIED_REPAYMENT = new RegExp(
-  String.raw`(?:^|[\n.!?]\s*)\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?${REPAYMENT_GREETING}(?:` +
+  // Android joins a short notification title and body with a space. This
+  // prefix only holds a repayment; it never qualifies a title as an issuer.
+  String.raw`(?:^|[\n.!?]\s*)\s*(?:[A-Z][A-Z0-9 .&-]{1,32}(?::\s*|\s+))?${REPAYMENT_GREETING}(?:` +
   String.raw`payment\s+(?:received|credited)\s+${REPAYMENT_ANY_MONEY}\s+${REPAYMENT_DESTINATION}` +
   String.raw`|we\s+(?:have\s+)?received\s+(?:your\s+)?payment\s+(?:of\s+)?${REPAYMENT_ANY_MONEY}\s+${REPAYMENT_DESTINATION}` +
   String.raw`|payment\s+(?:of\s+)?${REPAYMENT_ANY_MONEY}\s+(?:was\s+)?received\s+${REPAYMENT_DESTINATION}` +
