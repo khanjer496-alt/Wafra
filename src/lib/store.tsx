@@ -3520,12 +3520,34 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'setAppLock', enabled });
   }, [dispatch]);
 
-  const setPrivacyPreferences = useCallback(async (patch: Partial<Pick<AppState, 'onlineLogosEnabled' | 'hideWidgetAmountsWhenLocked'>>) => {
-    if (patch.hideWidgetAmountsWhenLocked !== undefined && Platform.OS !== 'web') {
-      await setAppPrivacy(authoritativeState.current.appLock, patch.hideWidgetAmountsWhenLocked !== false);
-    }
-    const next = dispatch({ type: 'setPrivacyPreferences', patch });
-    if (!(await persist(next))) throw new Error('Privacy preference could not be saved');
+  const privacyPreferenceWriteTail = useRef<Promise<void>>(Promise.resolve());
+  const setPrivacyPreferences = useCallback((patch: Partial<Pick<AppState, 'onlineLogosEnabled' | 'hideWidgetAmountsWhenLocked'>>) => {
+    // A failed older write must not revert a newer privacy choice.
+    const write = privacyPreferenceWriteTail.current.then(async () => {
+      const previous = authoritativeState.current;
+      const generation = stateGeneration.current;
+      const rollback: typeof patch = {};
+      if (patch.onlineLogosEnabled !== undefined) rollback.onlineLogosEnabled = previous.onlineLogosEnabled === true;
+      if (patch.hideWidgetAmountsWhenLocked !== undefined) rollback.hideWidgetAmountsWhenLocked = previous.hideWidgetAmountsWhenLocked !== false;
+      if (patch.hideWidgetAmountsWhenLocked !== undefined && Platform.OS !== 'web') {
+        await setAppPrivacy(previous.appLock, patch.hideWidgetAmountsWhenLocked !== false);
+      }
+      const next = dispatch({ type: 'setPrivacyPreferences', patch });
+      try {
+        if (!(await persist(next))) throw new Error('Privacy preference could not be saved');
+      } catch (error) {
+        if (generation === stateGeneration.current) {
+          // Revoke the logo generation immediately and preserve unrelated edits.
+          const restored = dispatch({ type: 'setPrivacyPreferences', patch: rollback });
+          if (patch.hideWidgetAmountsWhenLocked !== undefined && Platform.OS !== 'web') {
+            await setAppPrivacy(restored.appLock, restored.hideWidgetAmountsWhenLocked !== false);
+          }
+        }
+        throw error;
+      }
+    });
+    privacyPreferenceWriteTail.current = write.catch(() => {});
+    return write;
   }, [dispatch, persist]);
 
   const setDailySummary = useCallback((enabled: boolean) => {

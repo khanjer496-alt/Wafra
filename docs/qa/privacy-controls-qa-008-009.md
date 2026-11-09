@@ -10,6 +10,9 @@ remote image sources; an already transmitted request cannot be recalled.
 External backup restores preserve this device's logo consent and widget-privacy
 choice. Local startup still hydrates the saved preferences, and malformed
 preference types are rejected by backup validation.
+Privacy writes are serialized. A failed save restores the previous switches,
+revokes the logo request generation and restores native widget protection without
+replacing concurrent ledger edits. Already transmitted requests cannot be recalled.
 
 App Lock installs an opaque iOS window cover on native resign-active/background
 callbacks. Android uses `FLAG_SECURE`. Enabling the setting awaits native
@@ -51,6 +54,10 @@ JavaScript tests or the iOS controller typecheck.
 Retest fresh install and upgrade, consent on/off and local-only override, queued
 lookups, app switcher immediately after enabling App Lock, Face ID/passcode
 success/cancel/slow return, long background, process death and cold launch.
+The native cover also appears during Face ID, StoreKit sheets, system permission
+alerts and Control Center while iOS is inactive; verify it clears after returning.
+On upgrade, an old widget image can remain until the first hydrated launch and
+the operating system's next widget refresh.
 With Home Screen widgets already placed, enable App Lock, switch amount hiding
 off/on, restart, and confirm refresh never restores unredacted data under the
 enabled preference. Check English/Arabic and both color schemes.
