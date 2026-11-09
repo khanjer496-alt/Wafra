@@ -263,6 +263,18 @@ struct NativeBackgroundAlertParserTests {
     let runtime = WafraBackgroundAlertParserRuntime(scriptURL: script, metadataURL: metadata)
     let domestic = await read(runtime, body: "Purchase of AED 24.86 with Debit Card ending 1234 at SAMPLE STORE.", sender: "ADCB", context: context(hash: hash))
     check("shipping resource preserves domestic source amount", domestic?.formattedAmount == "AED 24.86")
+    let codeWarnings = ["Do not share your verification code.", "Do not share your verification code with anyone.",
+      "Please do not disclose your security code.", "Keep your one-time code confidential.",
+      "Never share your OTP.", "Do not share the code with anyone, including bank staff."]
+    for (index, warning) in codeWarnings.enumerated() {
+      for balance in ["", " Avl Bal AED 5,000.00."] {
+        let preview = await read(runtime,
+          body: "Your card ending 1354 was used for AED 37.00 at CARREFOUR.\(balance) \(warning)",
+          sender: "ENBD", context: context(hash: hash))
+        check("shipping warning footer \(index)/\(!balance.isEmpty) retains a purchase preview",
+          preview?.style == "movement" && preview?.direction == "debit" && preview?.formattedAmount == "AED 37.00")
+      }
+    }
     let submillisecond = observedAt.addingTimeInterval(0.00075)
     let fractionalDomestic = await read(runtime, body: "Purchase of AED 24.86 with Debit Card ending 1234 at SAMPLE STORE.", sender: "ADCB", context: context(hash: hash), observedDate: submillisecond)
     check("shipping parser reads normal submillisecond capture timestamp", fractionalDomestic?.formattedAmount == "AED 24.86")

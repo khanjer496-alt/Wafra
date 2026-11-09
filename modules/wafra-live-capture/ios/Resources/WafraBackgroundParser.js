@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 55ff8710f5c064359dab5fd58fe40ac9ee089e592ff68ddc47053e5d2ccd5d82
+// Generated from normal shipping TypeScript. Source SHA-256: 5a664cc3c746dd0662267a5167f637f33c82c5d06f6c63eda1d090e654ea1871
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -2521,11 +2521,15 @@ const NOT_A_NEW_MOVEMENT = [
 const MERCHANT_ORDER_RECEIPT = /\border\s*(?:#|no\.?|number|id)\s*[:.-]?\s*[A-Z0-9-]*\d[\s\S]{0,80}?\b(?:paid|payment)\b|\b(?:paid|payment)\b[\s\S]{0,40}?\border\s*(?:#|no\.?|number|id)\s*[:.-]?\s*[A-Z0-9-]*\d/iu;
 const OWN_BALANCE_STATED = /\b(?:updated|avl\.?|available|new|closing|current)\s+(?:wallet\s+|account\s+|a\/c\s+)?bal(?:ance)?\b|\bbal(?:ance)?\s*(?:is|:)\s*(?:[A-Z]{3}|Rs\.?|[$£€₹])/iu;
 const OWN_CARD_PAYMENT = /\b(?:[Yy]ou\s+)?paid\b(?:[^.\n]|\.\d){0,40}?\bto\s+your\s+(?:(?:[A-Z][\p{L}\p{N}&.'’-]*|credit|charge)\s+){0,4}?[Cc]ard\b/u;
-const isNotAutoPostableMoney = (source) => (0, principal_posting_guards_1.hasClickLinkPrompt)(source) || (0, principal_posting_guards_1.hasMobileMoneyCallback)(source) || (0, principal_posting_guards_1.isUnqualifiedPeerTransferClaim)(source) ||
-    (0, principal_posting_guards_1.isLeadingNumericDiscountOffer)(source) || (0, principal_posting_guards_1.isUnqualifiedCardRepayment)(source) ||
-    hasLinkCallToAction(source) || NOT_A_SETTLED_FACT.some((pattern) => pattern.test(neutraliseBenignShapes(source))) ||
-    NOT_A_NEW_MOVEMENT.some((pattern) => pattern.test(source)) ||
-    (MERCHANT_ORDER_RECEIPT.test(source) && !OWN_BALANCE_STATED.test(source));
+const isNotAutoPostableMoney = (source) => {
+    if ((0, principal_posting_guards_1.hasClickLinkPrompt)(source) || (0, principal_posting_guards_1.hasMobileMoneyCallback)(source) || (0, principal_posting_guards_1.isUnqualifiedPeerTransferClaim)(source) ||
+        (0, principal_posting_guards_1.isLeadingNumericDiscountOffer)(source) || (0, principal_posting_guards_1.isUnqualifiedCardRepayment)(source) || hasLinkCallToAction(source))
+        return true;
+    const wording = neutraliseBenignShapes(source);
+    return NOT_A_SETTLED_FACT.some((pattern) => pattern.test(wording)) ||
+        NOT_A_NEW_MOVEMENT.some((pattern) => pattern.test(source)) ||
+        (MERCHANT_ORDER_RECEIPT.test(source) && !OWN_BALANCE_STATED.test(source));
+};
 exports.isNotAutoPostableMoney = isNotAutoPostableMoney;
 const LINK_RE = /\bhttps?:\/\/|\bwww\.[a-z0-9-]|\b(?:bit\.ly|tinyurl\.com|t\.co|goo\.gl|cutt\.ly|rb\.gy|is\.gd|ow\.ly|shorturl\.at)\/|\b[a-z0-9][a-z0-9-]{0,62}\.[a-z]{2,24}\/[\w-]/u;
 const GENERIC_SENDER = /^(?:info|infos|alert|alerts|notice|notify|sms|msg|message|verify|secure|security|service|support|update|bank|banking)$/i;
@@ -2625,7 +2629,10 @@ const CREDITED_TOWARDS_REVERSAL = /(\b(?:is|has\s+been|was)\s+(?:successfully\s+
 const REVERSED_THEN_CREDITED_TO_YOU = /\brevers(?:al|ed|e)\b(?:[^.\n]|\.(?=\S)){0,200}?\b(?:is|has\s+been|was)\s+(?:successfully\s+)?credited\s+to\s+your\b/giu;
 const RECOGNISE_CALLBACK_FOOTER = /(?<!\p{L})(?:(?:don['’]t|do\s+not|didn['’]t)\s+recogni[sz]e\b[^.!?\n]{0,30}\?\s*(?=(?:call|contact|ring|phone)\b)|si\s+no\s+(?:lo\s+|la\s+)?reconoc(?:e|es)\b[^.!?\n]{0,60}?(?=\bllam(?:a|e|ar)\b)|n[ãa]o\s+reconhece\b[^.!?\n]{0,40}?\??\s*(?=(?:ligue|ligar)\b))/giu;
 const NUMERIC_DISCOUNT_CODE = /\b((?:use|enter)\s+)code(\s+\d{4,8}\s+to\s+get\s+\d{1,3}\s?%\s+off\b)/giu;
+const CODE_WARNING_NOUN = String.raw `(?:(?:(?:verification|security|authentication|one[-\s]?time)\s+)?codes?|otp(?:\s+code)?|pin|one[-\s]?time\s+password)`;
+const CODE_SAFETY_WARNING = new RegExp(String.raw `(^|[.!?;,\r\n:])\s*(?:please\s+)?(?:(?:do\s+not|don['’]t|never)\s+(?:share|disclose|reveal)\s+(?:(?:your|the|this)\s+)?${CODE_WARNING_NOUN}(?:\s+with\s+(?:anyone|anybody|others))?(?:,?\s+including\s+(?:bank\s+staff|bank\s+employees))?|keep\s+(?:(?:your|the|this)\s+)?${CODE_WARNING_NOUN}\s+confidential)(?=\s*(?:[.!?;\r\n]|$))`, 'giu');
 const neutraliseBenignShapes = (source) => source
+    .replace(CODE_SAFETY_WARNING, '$1 ')
     .replace(NUMERIC_DISCOUNT_CODE, '$1promo code$2')
     .replace(CARD_PRODUCT_NAME, 'card')
     .replace(EXECUTED_MANDATE_DEBIT, '$1instruction')

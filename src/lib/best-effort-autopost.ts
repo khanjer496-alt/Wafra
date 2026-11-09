@@ -533,12 +533,14 @@ const OWN_CARD_PAYMENT = /\b(?:[Yy]ou\s+)?paid\b(?:[^.\n]|\.\d){0,40}?\bto\s+you
  * auto-added; whether it then reaches Review is the refusal inspector's
  * decision (on the iPhone History path most of these are simply not imported).
  */
-export const isNotAutoPostableMoney = (source: string): boolean =>
-  hasClickLinkPrompt(source) || hasMobileMoneyCallback(source) || isUnqualifiedPeerTransferClaim(source) ||
-  isLeadingNumericDiscountOffer(source) || isUnqualifiedCardRepayment(source) ||
-  hasLinkCallToAction(source) || NOT_A_SETTLED_FACT.some((pattern) => pattern.test(neutraliseBenignShapes(source))) ||
-  NOT_A_NEW_MOVEMENT.some((pattern) => pattern.test(source)) ||
-  (MERCHANT_ORDER_RECEIPT.test(source) && !OWN_BALANCE_STATED.test(source));
+export const isNotAutoPostableMoney = (source: string): boolean => {
+  if (hasClickLinkPrompt(source) || hasMobileMoneyCallback(source) || isUnqualifiedPeerTransferClaim(source) ||
+    isLeadingNumericDiscountOffer(source) || isUnqualifiedCardRepayment(source) || hasLinkCallToAction(source)) return true;
+  const wording = neutraliseBenignShapes(source);
+  return NOT_A_SETTLED_FACT.some((pattern) => pattern.test(wording)) ||
+    NOT_A_NEW_MOVEMENT.some((pattern) => pattern.test(source)) ||
+    (MERCHANT_ORDER_RECEIPT.test(source) && !OWN_BALANCE_STATED.test(source));
+};
 
 /**
  * A link next to the money. Lures always carry one ("confirm your
@@ -812,8 +814,16 @@ const RECOGNISE_CALLBACK_FOOTER =
   /(?<!\p{L})(?:(?:don['’]t|do\s+not|didn['’]t)\s+recogni[sz]e\b[^.!?\n]{0,30}\?\s*(?=(?:call|contact|ring|phone)\b)|si\s+no\s+(?:lo\s+|la\s+)?reconoc(?:e|es)\b[^.!?\n]{0,60}?(?=\bllam(?:a|e|ar)\b)|n[ãa]o\s+reconhece\b[^.!?\n]{0,40}?\??\s*(?=(?:ligue|ligar)\b))/giu;
 // This exact discount instruction names a promo code, not an OTP challenge.
 const NUMERIC_DISCOUNT_CODE = /\b((?:use|enter)\s+)code(\s+\d{4,8}\s+to\s+get\s+\d{1,3}\s?%\s+off\b)/giu;
+// Only closed advice clauses with no quoted digits are benign. A numbered
+// challenge or a following enter/use/confirm instruction remains untouched.
+const CODE_WARNING_NOUN = String.raw`(?:(?:(?:verification|security|authentication|one[-\s]?time)\s+)?codes?|otp(?:\s+code)?|pin|one[-\s]?time\s+password)`;
+const CODE_SAFETY_WARNING = new RegExp(
+  String.raw`(^|[.!?;,\r\n:])\s*(?:please\s+)?(?:(?:do\s+not|don['’]t|never)\s+(?:share|disclose|reveal)\s+(?:(?:your|the|this)\s+)?${CODE_WARNING_NOUN}(?:\s+with\s+(?:anyone|anybody|others))?(?:,?\s+including\s+(?:bank\s+staff|bank\s+employees))?|keep\s+(?:(?:your|the|this)\s+)?${CODE_WARNING_NOUN}\s+confidential)(?=\s*(?:[.!?;\r\n]|$))`,
+  'giu',
+);
 const neutraliseBenignShapes = (source: string): string =>
   source
+    .replace(CODE_SAFETY_WARNING, '$1 ')
     .replace(NUMERIC_DISCOUNT_CODE, '$1promo code$2')
     .replace(CARD_PRODUCT_NAME, 'card')
     .replace(EXECUTED_MANDATE_DEBIT, '$1instruction')
