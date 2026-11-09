@@ -589,12 +589,17 @@ test('the settle lock stays 350ms with or without motion, and outlasts every lea
   assert.match(source, /from=\{underWipe\.length > 0 \? undefined : wipe\.from\}/);
 });
 
-test('Welcome and the SMS explainer get the confirmed currency and country, undefined when unknown', () => {
+test('Welcome gets confirmed money context while the shared host owns the SMS disclosure', () => {
   const source = read('src/components/onboarding-gate.tsx');
   assert.match(source, /const confirmedCurrency = \(previewMode \? currencyDraft : null\) \?\? state\.ledgerMoney\?\.currency \?\? undefined;/);
   assert.match(source, /const confirmedCountry = selectedCountry \?\? undefined;/);
   assert.match(source, /<WelcomeStep[\s\S]{0,600}currency=\{confirmedCurrency\} country=\{confirmedCountry\} \/>/);
-  assert.match(source, /<SmsPermissionExplainer[\s\S]{0,400}currency=\{confirmedCurrency\} country=\{confirmedCountry\}/);
+  assert.doesNotMatch(source, /<SmsPermissionExplainer/);
+  assert.match(source, /requestSmsPermission\(\{ onDisclosureDeclined:/);
+  const host = read('src/components/ui/consent-prompt-host.tsx');
+  assert.match(host, /open\.copy\.androidCapture === 'sms-history'/);
+  assert.match(host, /<SmsPermissionExplainer language=\{language\}/);
+  assert.match(host, /onContinue=\{\(\) => answer\(true\)\} onNotNow=\{\(\) => answer\(false\)\}/);
 });
 
 test('web: the Name field has no browser focus box; focus shows on its underline', () => {
