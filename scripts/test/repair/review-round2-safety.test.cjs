@@ -40,6 +40,8 @@ for (const status of ['being processed', 'in progress', 'under review', 'under p
   }
 }
 refused.push(['AE', 'FAB', 'Your refund request for AED 50.00 is being processed. The refund will be credited to your card.', 'pending-processing']);
+// Exact sender/body/context from the delayed f8 review; not only the FAB variant.
+refused.push(['AE', 'ENBD', 'Your refund request for AED 50.00 is being processed', 'pending-processing']);
 for (const body of [
   'استمتع بخصم 20% عند الشراء بمبلغ 500.00 ريال من STARBUCKS',
   'خصم 20% على مشترياتك من STARBUCKS عند الدفع بمبلغ 500.00 ريال',

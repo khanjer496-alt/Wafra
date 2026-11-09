@@ -396,6 +396,16 @@
         "title": "Mashreq",
         "text": "Thank you for your payment of AED 85.00 on your credit card ending 1234 at CARREFOUR"
       }
+    },
+    {
+      "id": "unpunctuated Dear Customer",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "Dear Customer Payment received AED 500.00 on your credit card ending 1234",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null
     }
   ]
 }
