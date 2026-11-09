@@ -633,7 +633,7 @@ if (errors.length) console.log(errors.slice(0, 3));
   if (OUT) await page.screenshot({ path: path.join(OUT, 'FAILED.png'), fullPage: true }).catch(() => {});
 } finally {
   if (OUT) writeFileSync(path.join(OUT, 'results.json'), JSON.stringify({
-    base: BASE, generatedAt: new Date().toISOString(), browser: browser.version(),
+    base: BASE, lastUrl: page.url(), generatedAt: new Date().toISOString(), browser: browser.version(),
     pass, fail, aborted, errors, results,
   }, null, 2));
   await browser.close();
