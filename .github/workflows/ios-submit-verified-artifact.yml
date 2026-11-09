@@ -64,8 +64,22 @@ jobs:
           PY
           echo "IPA_PATH=$IPA" >> "$GITHUB_ENV"
 
+      - name: Verify downloaded product versions
+        run: |
+          set -euo pipefail
+          PRODUCT_DIR=$(mktemp -d "$RUNNER_TEMP/wafra-product-versions.XXXXXX")
+          trap 'rm -rf "$PRODUCT_DIR"' EXIT
+          unzip -q "$IPA_PATH" -d "$PRODUCT_DIR"
+          set -- "$PRODUCT_DIR"/Payload/*.app
+          if [ "$#" -ne 1 ] || [ ! -d "$1" ]; then
+            echo 'IPA must contain exactly one Payload/*.app' >&2
+            exit 1
+          fi
+          python3 scripts/check-ios-product-versions.py "$1"
+
       - name: Submit exact verified IPA to TestFlight
         run: |
+          set -euo pipefail
           npm ci
           npm install -g eas-cli@22.4.0
           eas submit --platform ios --profile history-beta --path "$IPA_PATH" --non-interactive
