@@ -271,6 +271,27 @@ struct NativeBackgroundAlertParserTests {
     check("shipping parser accepts independently valid market and country", independent?.formattedAmount == "SAR 125.50")
     let foreign = await read(runtime, body: "Purchase of USD 24.86 with Debit Card ending 1234 at SAMPLE STORE.", sender: "ADCB", context: context(hash: hash))
     check("shipping resource preserves foreign source amount", foreign?.formattedAmount == "USD 24.86")
+    // The frozen corpus compared these source-currency notification previews
+    // against AED ledger expectations. Check every exact synthetic input in
+    // the real Swift/JavaScriptCore host, including senderless capture.
+    let corpusURL = URL(fileURLWithPath: "scripts/test/fixtures/ios-corpus-money.json")
+    let corpus = try JSONSerialization.jsonObject(with: Data(contentsOf: corpusURL)) as! [String: Any]
+    let moneyCases = corpus["cases"] as! [[String: Any]]
+    check("native money audit retains all ten frozen cases", moneyCases.count == 10)
+    for row in moneyCases {
+      let id = row["id"] as! String
+      let expected = row["expectedSource"] as! [String: Any]
+      for sender in ["ENBD", ""] {
+        let notification = await read(runtime, body: row["body"] as! String, sender: sender,
+          context: context(hash: hash), observedDate: Date(timeIntervalSince1970: 1_793_872_800))
+        check("\(id)/\(sender.isEmpty ? "blank" : "named") preserves exact source money",
+          notification?.style == "movement" && notification?.family == "purchase" &&
+          notification?.direction == "debit" && notification?.amount.currency == expected["currency"] as? String &&
+          notification?.amount.minorUnits == expected["minorUnits"] as? String &&
+          notification?.amount.exponent == expected["exponent"] as? Int &&
+          notification?.formattedAmount == row["expectedSourceFormatted"] as? String)
+      }
+    }
     let jod = await read(runtime, body: "Purchase of JOD 24.501 with Debit Card ending 1234 at SAMPLE STORE.", sender: "ENBD", context: context(hash: hash))
     check("shipping resource preserves three-decimal source units", jod?.formattedAmount == "JOD 24.501")
     let jpy = await read(runtime, body: "Purchase of JPY 2400 with Debit Card ending 1234 at SAMPLE STORE.", sender: "ENBD", context: context(hash: hash))

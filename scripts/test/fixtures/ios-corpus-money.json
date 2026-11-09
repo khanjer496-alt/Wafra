@@ -1,0 +1,226 @@
+{
+  "provenance": "Exact synthetic A0179-A0188 from frozen adversarial-v1.cjs; original harness unchanged. Native notification money is source ISO money, while launch-parser money is ledger money.",
+  "frozenHarnessSha256": "74bf16f91e92a44bccf6163603e89296b08f7a9e29ae832cde7d686a991912d8",
+  "cases": [
+    {
+      "id": "A0179",
+      "mutation": "orig",
+      "body": "Purchase of USD 12.00 with Credit Card ending 1592 at AMAZON.COM. Avl Cr. Limit AED 5,000.00",
+      "group": "purchase-fx",
+      "legacyClasses": "WRONG_CURRENCY",
+      "legacyExpected": {
+        "currency": "AED",
+        "minorUnits": "1200"
+      },
+      "expectedSource": {
+        "currency": "USD",
+        "minorUnits": "1200",
+        "exponent": 2
+      },
+      "expectedLedger": {
+        "currency": "AED",
+        "minorUnits": "4407",
+        "fxSource": "fallback"
+      },
+      "expectedSourceFormatted": "USD 12.00"
+    },
+    {
+      "id": "A0180",
+      "mutation": "upper",
+      "body": "PURCHASE OF USD 12.00 WITH CREDIT CARD ENDING 1592 AT AMAZON.COM. AVL CR. LIMIT AED 5,000.00",
+      "group": "purchase-fx",
+      "legacyClasses": "WRONG_CURRENCY",
+      "legacyExpected": {
+        "currency": "AED",
+        "minorUnits": "1200"
+      },
+      "expectedSource": {
+        "currency": "USD",
+        "minorUnits": "1200",
+        "exponent": 2
+      },
+      "expectedLedger": {
+        "currency": "AED",
+        "minorUnits": "4407",
+        "fxSource": "fallback"
+      },
+      "expectedSourceFormatted": "USD 12.00"
+    },
+    {
+      "id": "A0181",
+      "mutation": "spacing",
+      "body": "  Purchase  of  USD  12.00  with  Credit  Card  ending  1592  at  AMAZON.COM.  Avl  Cr.  Limit  AED  5,000.00\n",
+      "group": "purchase-fx",
+      "legacyClasses": "WRONG_CURRENCY",
+      "legacyExpected": {
+        "currency": "AED",
+        "minorUnits": "1200"
+      },
+      "expectedSource": {
+        "currency": "USD",
+        "minorUnits": "1200",
+        "exponent": 2
+      },
+      "expectedLedger": {
+        "currency": "AED",
+        "minorUnits": "4407",
+        "fxSource": "fallback"
+      },
+      "expectedSourceFormatted": "USD 12.00"
+    },
+    {
+      "id": "A0182",
+      "mutation": "footer",
+      "body": "Purchase of USD 12.00 with Credit Card ending 1592 at AMAZON.COM. Avl Cr. Limit AED 5,000.00 For queries call 600 500 000.",
+      "group": "purchase-fx",
+      "legacyClasses": "WRONG_CURRENCY",
+      "legacyExpected": {
+        "currency": "AED",
+        "minorUnits": "1200"
+      },
+      "expectedSource": {
+        "currency": "USD",
+        "minorUnits": "1200",
+        "exponent": 2
+      },
+      "expectedLedger": {
+        "currency": "AED",
+        "minorUnits": "4407",
+        "fxSource": "fallback"
+      },
+      "expectedSourceFormatted": "USD 12.00"
+    },
+    {
+      "id": "A0183",
+      "mutation": "prefix",
+      "body": "Dear Customer, Purchase of USD 12.00 with Credit Card ending 1592 at AMAZON.COM. Avl Cr. Limit AED 5,000.00",
+      "group": "purchase-fx",
+      "legacyClasses": "WRONG_CURRENCY",
+      "legacyExpected": {
+        "currency": "AED",
+        "minorUnits": "1200"
+      },
+      "expectedSource": {
+        "currency": "USD",
+        "minorUnits": "1200",
+        "exponent": 2
+      },
+      "expectedLedger": {
+        "currency": "AED",
+        "minorUnits": "4407",
+        "fxSource": "fallback"
+      },
+      "expectedSourceFormatted": "USD 12.00"
+    },
+    {
+      "id": "A0184",
+      "mutation": "orig",
+      "body": "Purchase of USD 20.00 (AED 37.00) with Credit Card ending 1629 at AMAZON.AE. Avl Cr. Limit AED 5,551.10",
+      "group": "purchase-fx-stated-local",
+      "legacyClasses": "WRONG_AMOUNT+WRONG_CURRENCY",
+      "legacyExpected": {
+        "currency": "AED",
+        "minorUnits": "3700"
+      },
+      "expectedSource": {
+        "currency": "USD",
+        "minorUnits": "2000",
+        "exponent": 2
+      },
+      "expectedLedger": {
+        "currency": "AED",
+        "minorUnits": "3700",
+        "fxSource": "bank"
+      },
+      "expectedSourceFormatted": "USD 20.00"
+    },
+    {
+      "id": "A0185",
+      "mutation": "upper",
+      "body": "PURCHASE OF USD 20.00 (AED 37.00) WITH CREDIT CARD ENDING 1629 AT AMAZON.AE. AVL CR. LIMIT AED 5,551.10",
+      "group": "purchase-fx-stated-local",
+      "legacyClasses": "WRONG_AMOUNT+WRONG_CURRENCY",
+      "legacyExpected": {
+        "currency": "AED",
+        "minorUnits": "3700"
+      },
+      "expectedSource": {
+        "currency": "USD",
+        "minorUnits": "2000",
+        "exponent": 2
+      },
+      "expectedLedger": {
+        "currency": "AED",
+        "minorUnits": "3700",
+        "fxSource": "bank"
+      },
+      "expectedSourceFormatted": "USD 20.00"
+    },
+    {
+      "id": "A0186",
+      "mutation": "spacing",
+      "body": "  Purchase  of  USD  20.00  (AED  37.00)  with  Credit  Card  ending  1629  at  AMAZON.AE.  Avl  Cr.  Limit  AED  5,551.10\n",
+      "group": "purchase-fx-stated-local",
+      "legacyClasses": "WRONG_AMOUNT+WRONG_CURRENCY",
+      "legacyExpected": {
+        "currency": "AED",
+        "minorUnits": "3700"
+      },
+      "expectedSource": {
+        "currency": "USD",
+        "minorUnits": "2000",
+        "exponent": 2
+      },
+      "expectedLedger": {
+        "currency": "AED",
+        "minorUnits": "3700",
+        "fxSource": "bank"
+      },
+      "expectedSourceFormatted": "USD 20.00"
+    },
+    {
+      "id": "A0187",
+      "mutation": "footer",
+      "body": "Purchase of USD 20.00 (AED 37.00) with Credit Card ending 1629 at AMAZON.AE. Avl Cr. Limit AED 5,551.10 For queries call 600 500 000.",
+      "group": "purchase-fx-stated-local",
+      "legacyClasses": "WRONG_AMOUNT+WRONG_CURRENCY",
+      "legacyExpected": {
+        "currency": "AED",
+        "minorUnits": "3700"
+      },
+      "expectedSource": {
+        "currency": "USD",
+        "minorUnits": "2000",
+        "exponent": 2
+      },
+      "expectedLedger": {
+        "currency": "AED",
+        "minorUnits": "3700",
+        "fxSource": "bank"
+      },
+      "expectedSourceFormatted": "USD 20.00"
+    },
+    {
+      "id": "A0188",
+      "mutation": "prefix",
+      "body": "Dear Customer, Purchase of USD 20.00 (AED 37.00) with Credit Card ending 1629 at AMAZON.AE. Avl Cr. Limit AED 5,551.10",
+      "group": "purchase-fx-stated-local",
+      "legacyClasses": "WRONG_AMOUNT+WRONG_CURRENCY",
+      "legacyExpected": {
+        "currency": "AED",
+        "minorUnits": "3700"
+      },
+      "expectedSource": {
+        "currency": "USD",
+        "minorUnits": "2000",
+        "exponent": 2
+      },
+      "expectedLedger": {
+        "currency": "AED",
+        "minorUnits": "3700",
+        "fxSource": "bank"
+      },
+      "expectedSourceFormatted": "USD 20.00"
+    }
+  ]
+}
