@@ -128,13 +128,25 @@ function confirmationNative(body) {
     context: { v: 1, country: 'AE', parserMarket: 'AE', ledgerMoney: { currency: 'AED', exponent: 2 },
       sourceHash: meta.sourceHash } })));
 }
-for (const [layout, body] of [
+for (const [layout, body, expectedMinor = 8500] of [
   ['original', confirmedDebit],
   ['spacing', confirmedDebit.replace(/ /g, '  ')],
   ['www-host', confirmedDebit.replace('AMAZON.COM', 'www.amazon.com')],
   ['www-host-spacing', confirmedDebit.replace('AMAZON.COM', 'www.amazon.com').replace(/ /g, '  ')],
   ['after-sentence', `Transaction alert. ${confirmedDebit}`],
   ['after-sentence-spacing', `Transaction alert. ${confirmedDebit}`.replace(/ /g, '  ')],
+  ['dear-newline', `Dear Customer\n${confirmedDebit}`],
+  ['dear-newline-spacing', `Dear Customer\n${confirmedDebit}`.replace(/ /g, '  ')],
+  ['dear-comma', `Dear Customer, ${confirmedDebit}`],
+  ['dear-comma-spacing', `Dear Customer, ${confirmedDebit}`.replace(/ /g, '  ')],
+  ['dear-unpunctuated', `Dear Customer ${confirmedDebit}`],
+  ['dear-unpunctuated-spacing', `Dear Customer ${confirmedDebit}`.replace(/ /g, '  ')],
+  ['after-question-sentence', `Did we? ${confirmedDebit}`],
+  ['after-question-sentence-spacing', `Did we? ${confirmedDebit}`.replace(/ /g, '  ')],
+  ['purchase-article', confirmedDebit.replace('for purchase', 'for a purchase')],
+  ['purchase-article-spacing', confirmedDebit.replace('for purchase', 'for a purchase').replace(/ /g, '  ')],
+  ['comma-amount', confirmedDebit.replace('AED 85.00', 'AED 4,999.00'), 499900],
+  ['comma-amount-spacing', confirmedDebit.replace('AED 85.00', 'AED 4,999.00').replace(/ /g, '  '), 499900],
 ]) {
   test(`issuer confirmation retains completed debit/${layout}`, () => {
     const session = reader('AE');
@@ -144,19 +156,19 @@ for (const [layout, body] of [
       session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
       assert.equal(parsed?.kind, 'transaction');
       assert.equal(parsed.type, 'expense');
-      assert.equal(parsed.amountFils, 8500);
+      assert.equal(parsed.amountFils, expectedMinor);
       assert.equal(parsed.currency, 'AED');
     }
     const history = parseHistoricalMessageRecords([JSON.stringify({ v: 1, id: '9'.repeat(64), text: body,
       sender: 'ENBD', receivedAt: new Date(at).toISOString() })], {}, new Date(at), new Set(), session);
     assert.equal(history.parsed.length, 1);
-    assert.equal(history.parsed[0].amountFils, 8500);
+    assert.equal(history.parsed[0].amountFils, expectedMinor);
     assert.equal(history.parsed[0].type, 'expense');
     assert.equal(history.parsed[0].currency, 'AED');
     const native = confirmationNative(body);
     assert.equal(native.route, 'parsed');
     assert.equal(native.notification.direction, 'debit');
-    assert.deepEqual(native.notification.amount, { currency: 'AED', minorUnits: '8500', exponent: 2 });
+    assert.deepEqual(native.notification.amount, { currency: 'AED', minorUnits: String(expectedMinor), exponent: 2 });
   });
 }
 for (const [index, source] of [
@@ -168,6 +180,15 @@ for (const [index, source] of [
   confirmedDebit.replace('We confirm', 'Can we confirm'),
   confirmedDebit.replace('We confirm', 'Did we confirm'),
   'Bank notice '.repeat(8) + confirmedDebit.replace('We confirm', 'Can we confirm'),
+  confirmedDebit.replace('AMAZON.COM', 'enbd-secure.test:443/login'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM?login=1'),
+  confirmedDebit.replace('AMAZON.COM', 'www.amazon.com?login=1'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM#login'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM:443'),
+  confirmedDebit.replace('AMAZON.COM', 'enbd-secure.test/login'),
+  confirmedDebit.replace('We confirm', 'Can\nwe confirm'),
+  confirmedDebit.replace('We confirm', 'Did,\nwe confirm'),
+  `Dear Customer,\n${confirmedDebit.replace('We confirm', 'Can we confirm')}`,
 ].entries()) for (const body of [source, source.replace(/ /g, '  ')]) {
   test(`issuer confirmation cannot hide a link instruction/${index}/${body === source ? 'original' : 'spacing'}`, () => {
     const session = reader('AE');
