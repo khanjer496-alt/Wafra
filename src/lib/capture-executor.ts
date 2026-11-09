@@ -25,7 +25,7 @@ import type {
   LocalCaptureDeclineQualificationMapping,
   LocalCaptureReviewQualificationCandidate,
 } from '@/lib/types';
-import { emptyAlertReviewTray, partitionReviewsByCapacity, settleReviewStage, requiresReviewRetention, type ReviewStageReceipt, type ReviewEntry } from '@/lib/alert-review-tray';
+import { emptyAlertReviewTray, partitionReviewsByCapacity, settleReviewStage, requiresReviewRetention, type ReviewEntry } from '@/lib/alert-review-tray';
 import { stageWalletNearMatches } from '@/lib/wallet-near-match';
 import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
 import { captureTrace, captureTraceEnabled } from '@/lib/capture-trace';
@@ -83,7 +83,8 @@ export interface CaptureLedgerAdapter {
     items: ReviewEntry[],
     qualifications?: readonly LocalCaptureReviewQualificationCandidate[],
     sourceBindings?: readonly ReviewSourceBinding[],
-  ) => ReviewStageReceipt & { qualificationIds?: string[] };
+  // This interface is extracted alone by the pure test compiler.
+  ) => import('./alert-review-tray').ReviewStageReceipt & { qualificationIds?: string[] };
 }
 
 export interface BackgroundCaptureAdapter {
