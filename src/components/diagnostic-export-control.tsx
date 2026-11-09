@@ -7,7 +7,7 @@ import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { Button, Toggle } from '@/components/ui/controls';
 import { merchantLogoDecision } from '@/components/ui/merchant-logo-assets';
 import type { BandPalette } from '@/constants/theme';
-import { hasSmsPermission, requestSmsPermission } from '@/lib/auto-import';
+import { requestSmsPermission } from '@/lib/auto-import';
 import { buildDiagnosticExport, serializeDiagnosticExport } from '@/lib/diagnostic-export';
 import { collectDiagnosticBankMessages } from '@/lib/diagnostic-messages';
 import { shareTextFile } from '@/lib/share-text';
@@ -70,7 +70,7 @@ function DeveloperDiagnosticExportControl({ palette, last }: { palette?: BandPal
       });
       let bankMessages: unknown[] = []; let bankMessageCoverage: unknown = { included: false, reason: 'not-requested' };
       if (include && Platform.OS === 'android' && SmsReader) {
-        if (!(await hasSmsPermission()) && !(await requestSmsPermission())) throw new Error('diagnostic_sms_permission');
+        if (!(await requestSmsPermission())) throw new Error('diagnostic_sms_permission');
         if (!active()) throw new Error('diagnostic_cancelled');
         const reader = SmsReader;
         const collected = await collectDiagnosticBankMessages((date, row, max) => reader.getInboxSms(0, date, row, max), {

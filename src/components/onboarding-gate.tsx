@@ -45,7 +45,6 @@ import { RemindersStep } from '@/components/onboarding/e-reminders';
 import { WatchStep } from '@/components/onboarding/e-watch';
 import { WelcomeStep } from '@/components/onboarding/e-welcome';
 import { ReadySummary } from '@/components/onboarding/ready-summary';
-import { SmsPermissionExplainer } from '@/components/onboarding/sms-explainer';
 import { suggestedLedgerCurrency } from '@/components/ledger-currency-sheet';
 import { useBand } from '@/hooks/use-band';
 import {
@@ -53,6 +52,7 @@ import {
   hasSmsPermission,
   isSmsScanningAvailable,
   openBankNotificationAccessSettings,
+  openSmsPermissionSettings,
   requestSmsDeliveryPermission,
   requestSmsPermission,
 } from '@/lib/auto-import';
@@ -220,8 +220,6 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const [pendingRestore, setPendingRestore] = useState<string | null>(null);
   /** Why the Welcome restore stopped: the file could not be read, or it was not a backup. */
   const [restoreFailed, setRestoreFailed] = useState<'read' | 'invalid' | null>(null);
-  /** Android: the explainer shown before the system SMS permission prompt. */
-  const [smsExplainerVisible, setSmsExplainerVisible] = useState(false);
   /** iPhone: recorded evidence behind the four-row capture checklist. */
   const [checklistEvidence, setChecklistEvidence] = useState<IosChecklistEvidence | null>(null);
   const startedEventSent = useRef(false);
@@ -642,18 +640,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     }
   };
 
-  /**
-   * Android SMS: explain what the permission means before Android asks.
-   * A phone that already granted it, and the preview, go straight on.
-   */
+  // The shared permission boundary presents the same explainer from every entry point.
   const openSmsSource = async () => {
-    if (previewMode || androidSmsReady) {
-      await runSetupAction(startScan);
-      return;
-    }
-    const granted = await hasSmsPermission().catch(() => false);
-    if (granted) await runSetupAction(startScan);
-    else setSmsExplainerVisible(true);
+    await runSetupAction(startScan);
   };
 
   /**
@@ -868,13 +857,15 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     }
     trackOnboardingEvent('capture_setup_started', { focus: legacyFocus, tracking: legacyTracking, source: 'sms' });
     let granted = false;
+    let disclosureDeclined = false;
     try {
-      granted = await requestSmsPermission();
+      granted = await requestSmsPermission({ onDisclosureDeclined: () => { disclosureDeclined = true; } });
     } catch {
       trackOnboardingEvent('capture_setup_failed', { focus: legacyFocus, tracking: legacyTracking, source: 'sms', outcome: 'failed' });
       setSmsDenied(true);
       return;
     }
+    if (disclosureDeclined) return;
     if (!granted) {
       trackOnboardingEvent('capture_permission_denied', { focus: legacyFocus, tracking: legacyTracking, source: 'sms', outcome: 'denied' });
       setSmsDenied(true);
@@ -936,27 +927,28 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       return;
     }
     trackOnboardingEvent('capture_setup_started', { focus: legacyFocus, tracking: legacyTracking, source: 'bank-notifications' });
-    await setAndroidCaptureSources({
-      sms: androidSmsReady || state.androidCaptureSources?.sms === true,
-      notifications: true,
+    const opened = await openBankNotificationAccessSettings({
+      skipSettingsIfGranted: true,
+      onAccepted: async () => {
+        await setAndroidCaptureSources({
+          sms: androidSmsReady || state.androidCaptureSources?.sms === true,
+          notifications: true,
+        });
+        await setCaptureOptOut(false);
+        if (!await enableAndroidNotificationAdmission()) {
+          trackOnboardingEvent('capture_setup_failed', { focus: legacyFocus, tracking: legacyTracking, source: 'bank-notifications' });
+          return false;
+        }
+        if (!androidSmsReady) {
+          recordCaptureChoice('notifications');
+          saveJourney('capture');
+        }
+        const granted = hasBankNotificationSystemAccess();
+        setAndroidNotificationReady(granted);
+        setAwaitingNotificationAccess(!granted);
+        return true;
+      },
     });
-    await setCaptureOptOut(false);
-    const admitted = await enableAndroidNotificationAdmission();
-    if (!admitted) {
-      trackOnboardingEvent('capture_setup_failed', { focus: legacyFocus, tracking: legacyTracking, source: 'bank-notifications' });
-      return;
-    }
-    if (!androidSmsReady) {
-      recordCaptureChoice('notifications');
-      saveJourney('capture');
-    }
-    if (hasBankNotificationSystemAccess()) {
-      setAndroidNotificationReady(true);
-      setAwaitingNotificationAccess(false);
-      return;
-    }
-    setAwaitingNotificationAccess(true);
-    const opened = await openBankNotificationAccessSettings();
     if (!opened) setAwaitingNotificationAccess(false);
   };
 
@@ -1455,11 +1447,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       // Pinned only with a primary action: Set up on iPhone, Continue once an
       // Android source is ready. "How it works" alone ends the scroll.
       pinActions={Platform.OS === 'ios' || (Platform.OS === 'android' && (androidSmsReady || androidNotificationReady))}
-      // Back from the SMS explainer returns to the source list on the same
-      // step; it never leaves the explainer flag set behind.
-      onBack={smsExplainerVisible ? () => setSmsExplainerVisible(false) : goBack}
+      onBack={goBack}
       onClose={onClose} backDisabled={backDisabled}
-      footer={Platform.OS === 'android' && smsExplainerVisible ? null : <>
+      footer={<>
         {iosImported ? <EButton palette={stepBand} color={bandButtonColor(stepBand)} label={words.continue}
           onPress={() => void runSetupAction(continueManually)} disabled={setupBusy} busy={setupBusy}
           testID="onboarding-live-continue" />
@@ -1478,19 +1468,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
         {Platform.OS !== 'web' && !iosCaptureUnsupported ? <ETextAction palette={stepBand} label={t('onboardHowItWorks')}
           onPress={() => setLearnMoreVisible(true)} testID="onboarding-how-it-works" /> : null}
       </>}>
-      {Platform.OS === 'android' && smsExplainerVisible ? (
-        <SmsPermissionExplainer
-          palette={stepBand}
-          language={lang}
-          disabled={setupBusy}
-          onContinue={() => {
-            setSmsExplainerVisible(false);
-            void runSetupAction(startScan);
-          }}
-          onNotNow={() => setSmsExplainerVisible(false)}
-          currency={confirmedCurrency} country={confirmedCountry}
-        />
-      ) : <>
+      <>
         <EHeadline palette={stepBand} size={42}>
           {iosCaptureUnsupported ? t('onboardLiveUnsupportedTitle') : Platform.OS === 'ios' ? t('onboardLiveTitle') : words.captureTitle}
         </EHeadline>
@@ -1553,7 +1531,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
         {/* Not on the capture step as it fades away after the choice: the result is already on its way. */}
         {setupBusy ? <ActiveStepOnly><ThemedText type="meta" accessibilityLiveRegion="polite"
           style={{ color: stepBand.onBandSecondary }}>{t('onboardSetupWorking')}</ThemedText></ActiveStepOnly> : null}
-      </>}
+      </>
     </EStepFrame>
   );
 
@@ -1594,7 +1572,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
         <EButton palette={stepBand} variant="secondary" label={t('retryHistoryRead')}
           onPress={() => void runSetupAction(startScan)} disabled={setupBusy} />
         <EButton palette={stepBand} variant="secondary" label={t('openPhoneSettings')}
-          onPress={() => void Linking.openSettings().catch(() => {})} />
+          onPress={() => void (Platform.OS === 'android' ? openSmsPermissionSettings() : Linking.openSettings()).catch(() => {})} />
       </View> : null}
       {automaticCompletion && firstPayment && !failedCompletion && !smsDenied && !finishSaveFailed
         ? <ArrivedCard palette={stepBand} transaction={firstPayment.arrived} money={state.ledgerMoney ?? null}

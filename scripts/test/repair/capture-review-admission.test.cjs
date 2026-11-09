@@ -48,7 +48,10 @@ function source(name, overrides = {}) {
 }
 source('statement-import-flow');
 source('parsed-review-event');
-const { scanInbox } = source('auto-import');
+const autoImport = source('auto-import');
+// These capture/planner cases model a previously consented reader; permission ordering has its own suite.
+autoImport.hasSmsPermission = async () => true;
+const { scanInbox } = autoImport;
 const local = source('local-message-record');
 const { createCaptureExecutor } = source('capture-executor');
 const now = Date.now();

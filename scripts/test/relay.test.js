@@ -1921,6 +1921,7 @@ async function queueItem(id, row, publicKey) {
         if (id === '@/lib/auto-import') {
           return {
             isSmsScanningAvailable: () => true,
+            hasSmsPermission: async () => true,
             scanInbox: async (since) => {
               requestedSince = since;
               return {

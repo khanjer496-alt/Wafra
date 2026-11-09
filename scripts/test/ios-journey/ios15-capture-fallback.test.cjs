@@ -151,7 +151,7 @@ for (const version of IOS_15) {
     assert.ok(s.text().includes(s.copy.t('iosLocalUnsupportedBody')));
     assert.match(s.copy.t('iosLocalUnsupportedBody'), /Pasted messages are read on this iPhone/);
     assert.match(s.copy.t('iosLocalUnsupportedBody'), /Wafra’s import service/);
-    assert.match(s.copy.t('iosLocalUnsupportedBody'), /The file is read, then deleted/);
+    assert.match(s.copy.t('iosLocalUnsupportedBody'), /Statements are sent.*read, then deleted/);
     assert.match(s.copy.t('iosLocalUnsupported'), /iOS 16 or later/);
     assert.ok(s.all().some(node => node.props?.testID === 'ios-capture-unsupported'));
     assert.equal(s.button('iosLocalInstallShortcut'), undefined, 'no Shortcut to add');
@@ -190,7 +190,7 @@ test('/ios-setup on iOS 15 in Arabic shows the Arabic explanation and actions', 
   assert.match(s.copy.t('iosLocalUnsupportedBody'), /[؀-ۿ]/);
   assert.match(s.copy.t('iosLocalUnsupportedBody'), /تُقرأ الرسائل الملصقة على هذا الآيفون/);
   assert.match(s.copy.t('iosLocalUnsupportedBody'), /خدمة الاستيراد في وفرة/);
-  assert.match(s.copy.t('iosLocalUnsupportedBody'), /يُقرأ الملف ثم يُحذف/);
+  assert.match(s.copy.t('iosLocalUnsupportedBody'), /تُقرأ ثم تُحذف/);
   assert.ok(s.button('iosLocalUnsupportedStatement'));
   assert.ok(s.button('iosLocalUnsupportedPaste'));
 });

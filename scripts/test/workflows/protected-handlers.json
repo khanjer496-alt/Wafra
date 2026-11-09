@@ -15,8 +15,8 @@
     {
       "file": "src/app/settings.tsx",
       "name": "toggleSms",
-      "sha256": "fba6c834c40ede8216b3d32a4532eb04b07e6974acd3d3f078b45f3b1e673c09",
-      "reviewedChange": "2026-09-17: Android SMS is now an independently persisted capture source. Turning it off no longer disables bank-app notifications; turning it on records the SMS source before clearing the global opt-out. OS permission revocation guidance remains unchanged."
+      "sha256": "0473a96f90a55bd6a1958db25be49a0b5d856e285f25f37feaf53acdeb02e647",
+      "reviewedChange": "2026-09-17: Android SMS is now an independently persisted capture source. Turning it off no longer disables bank-app notifications; turning it on records the SMS source before clearing the global opt-out. OS permission revocation guidance remains unchanged. 2026-11-09 QA-007: SMS enable uses shared consent; withdrawal uses ungated Settings. Reviewer and Security Reviewer cleared this exact action at HEAD 0d2a0313 plus the scoped tree; evidence: Shared/launch-review/reviewer-qa007-android-disclosure.md and wafra-qa007-security-review.md (Recheck sections)."
     },
     {
       "file": "src/app/settings.tsx",
@@ -285,8 +285,8 @@
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "connectAndroidNotifications",
-      "sha256": "389251782506987515e975bafd0f94c8d91147bf23e52b0b38af660db193f8cb",
-      "reviewedChange": "2026-09-26 (design language E): when SMS is not also on, choosing bank-app notifications records the alert answer \"notifications\" and saves the capture stage (no alert-delivery question any more), so the history-gap offer and Settings statement row stay true. Permission, persistence and readiness order unchanged. Covered by onboarding-e.test.cjs and onboarding-actions.test.cjs. 2026-09-17: Android bank-app notification setup is now an explicit onboarding source. It persists source choice before opening system Notification access and never claims ready until system access is observed."
+      "sha256": "9a8e0d4711bfaf62a6db04b0376e580f0e135d37ff3ece6fae7ee13ec70cf105",
+      "reviewedChange": "2026-09-26 (design language E): when SMS is not also on, choosing bank-app notifications records the alert answer \"notifications\" and saves the capture stage (no alert-delivery question any more), so the history-gap offer and Settings statement row stay true. Permission, persistence and readiness order unchanged. Covered by onboarding-e.test.cjs and onboarding-actions.test.cjs. 2026-09-17: Android bank-app notification setup is now an explicit onboarding source. It persists source choice before opening system Notification access and never claims ready until system access is observed. 2026-11-09 QA-007: Source and admission writes run only after consent; failure analytics and existing-access navigation remain. Reviewer and Security Reviewer cleared this exact action at HEAD 0d2a0313 plus the scoped tree; evidence: Shared/launch-review/reviewer-qa007-android-disclosure.md and wafra-qa007-security-review.md (Recheck sections)."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
@@ -297,8 +297,8 @@
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "startScan",
-      "sha256": "3f107af15a83ac77fe42696582f074e997eeb61fe6d32d2eb9cdf866b11c6758",
-      "reviewedChange": "2026-11-06: on live SMS refusal, continue history without a notification permission prompt. Covered by onboarding-actions and android-review-capture. 2026-09-26 (design language E): after the SMS source and history checkpoint are persisted, records the alert answer \"sms\" and saves the capture stage before the existing durable checkpoint. Funnel payloads carry the legacy focus/tracking (null for new users). Permission order unchanged. Covered by onboarding-e.test.cjs and onboarding-actions.test.cjs. 2026-09-18: SMS onboarding still persists the SMS source and history checkpoint, and now explicitly asks for RECEIVE_SMS plus visible notification permission so live purchase alerts work while Wafra is backgrounded. Either refusal keeps READ_SMS catch-up usable and is repaired later through an explicit Enable action."
+      "sha256": "c54f457ad436c581969dbcd0c52b016f12fe34a6c73c3fd63423e73bf97dafdc",
+      "reviewedChange": "2026-11-06: on live SMS refusal, continue history without a notification permission prompt. Covered by onboarding-actions and android-review-capture. 2026-09-26 (design language E): after the SMS source and history checkpoint are persisted, records the alert answer \"sms\" and saves the capture stage before the existing durable checkpoint. Funnel payloads carry the legacy focus/tracking (null for new users). Permission order unchanged. Covered by onboarding-e.test.cjs and onboarding-actions.test.cjs. 2026-09-18: SMS onboarding still persists the SMS source and history checkpoint, and now explicitly asks for RECEIVE_SMS plus visible notification permission so live purchase alerts work while Wafra is backgrounded. Either refusal keeps READ_SMS catch-up usable and is repaired later through an explicit Enable action. 2026-11-09 QA-007: In-app refusal returns before OS-denied state or analytics; actual OS denial remains distinct. Reviewer and Security Reviewer cleared this exact action at HEAD 0d2a0313 plus the scoped tree; evidence: Shared/launch-review/reviewer-qa007-android-disclosure.md and wafra-qa007-security-review.md (Recheck sections)."
     },
     {
       "file": "src/components/onboarding-gate.tsx",

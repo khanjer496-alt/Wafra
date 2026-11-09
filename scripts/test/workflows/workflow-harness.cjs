@@ -78,7 +78,7 @@ function createWorkflowHarness(options={}) {
  d['@/lib/accuracy']={unreadFormatCount:()=>0,noFormatsReason:()=>null};
  d['@/lib/background-relay']={clearBackgroundRelayRows:record('clearBackgroundRelayRows'),getChargeAlertPreference:async()=>false,setChargeAlertsEnabled:record('setChargeAlertsEnabled'),disableRelayBackgroundSync:record('disableRelayBackgroundSync')};
  Object.assign(d['@/lib/notifications'],{cancelDailySummary:record('cancelDailySummary'),requestNotificationPermission:async()=>false,syncDailySummary:record('syncDailySummary')});
- Object.assign(d['@/lib/auto-import'],{hasSmsPermission:async()=>false,requestSmsPermission:record('requestSmsPermission'),requestSmsDeliveryPermission:record('requestSmsDeliveryPermission'),hasBankNotificationSystemAccess:()=>false,openBankNotificationAccessSettings:async()=>true,isSmsScanningAvailable:()=>true});
+ Object.assign(d['@/lib/auto-import'],{hasSmsPermission:async()=>false,requestSmsPermission:record('requestSmsPermission'),requestSmsDeliveryPermission:record('requestSmsDeliveryPermission'),hasBankNotificationSystemAccess:()=>false,openBankNotificationAccessSettings:async flow=>flow?.onAccepted ? flow.onAccepted() : true,isSmsScanningAvailable:()=>true});
  d['@/lib/founder-pro']={EMPTY_FOUNDER_TAP_SEQUENCE:[],isFounderUnlockBuild:()=>false,recordFounderTap:()=>({})};
  d['@/lib/public-links']={configuredPublicUrl:()=>null};
  d['@/lib/relay']={getRelayConfig:async()=>null,getRelayConfigStrict:async()=>null,isLegacyShortcutCaptureActive:()=>false,isRelayPlatform:()=>false,RelayError:class extends Error{},unpairDevice:record('unpairDevice')};

@@ -7,6 +7,7 @@ import SmsReader from '../../modules/sms-reader';
 import {
   getAndroidNotificationImportDiagnostics,
   hasSmsDeliveryPermission,
+  hasSmsSystemPermission,
   hasSmsPermission,
 } from '@/lib/auto-import';
 import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
@@ -280,7 +281,8 @@ export async function buildAndroidTesterDiagnostic(
     processMemoryDiagnostics = null;
   }
 
-  const readSmsGranted = await hasSmsPermission().catch(() => false);
+  const readSmsGranted = await hasSmsSystemPermission().catch(() => false);
+  const smsHistoryAccess = await hasSmsPermission().catch(() => false);
   const receiveSmsGranted = await hasSmsDeliveryPermission().catch(() => false);
   const appNotificationGranted = await notificationDeliveryAllowed().catch(() => false);
   let instantAlertsPreference = false;
@@ -309,6 +311,7 @@ export async function buildAndroidTesterDiagnostic(
     samples: [] as SafeParserSample[],
     inbox: {
       readPermission: readSmsGranted,
+      readAccessApproved: smsHistoryAccess,
       scanPerformed: false,
       skippedReason: state.privateMode
         ? 'private-mode'
@@ -316,13 +319,12 @@ export async function buildAndroidTesterDiagnostic(
           ? 'capture-opt-out'
           : state.historyImport?.status === 'running'
             ? 'history-import-running'
-            : readSmsGranted
-              ? null
-              : 'read-sms-not-granted',
+            : !readSmsGranted ? 'read-sms-not-granted'
+              : smsHistoryAccess ? null : 'disclosure-not-accepted',
     },
   };
 
-  if (!state.privateMode && !state.captureOptOut && readSmsGranted &&
+  if (!state.privateMode && !state.captureOptOut && smsHistoryAccess &&
     state.historyImport?.status !== 'running' && smsReader?.getInboxSms) {
     try {
       const collected = await collectDiagnosticBankMessages(

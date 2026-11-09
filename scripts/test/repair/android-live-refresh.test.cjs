@@ -43,10 +43,10 @@ test('a failed refresh releases its single-flight gate for the next real change'
   owner.request(); await delay(20); owner.request(); await delay(20); assert.equal(calls, 2);
 });
 
-function captureProbe(page) {
+function captureProbe(page, approved = true) {
   let args;
   const module = load(path.join(root, 'src/lib/capture.ts'), {
-    '@/lib/auto-import': { isSmsScanningAvailable: () => true, scanInbox: async (...values) => { args = values; return page; } },
+    '@/lib/auto-import': { hasSmsPermission: async () => approved, isSmsScanningAvailable: () => true, scanInbox: async (...values) => { args = values; return page; } },
     '@/lib/background-relay-storage': {},
     '@/lib/relay': { isRelayPlatform: () => false },
     '@/lib/sms-parser': { PARSER_VERSION: 40, PARSER_BACKFILL_VERSION: 40 },
@@ -218,4 +218,13 @@ test('transfer reconciliation stays contextual instead of becoming Accounts or S
   }
   assert.doesNotMatch(fs.readFileSync(path.join(root, 'src/app/(tabs)/wallet.tsx'), 'utf8'), /router\.push\('\/review-transfers'\)/);
   assert.doesNotMatch(fs.readFileSync(path.join(root, 'src/app/settings.tsx'), 'utf8'), /router\.push\('\/review-transfers'\)/);
+});
+
+
+test('routine Android capture never reads an old OS grant without current app consent', async () => {
+  const h = captureProbe({}, false);
+  const result = await h.collect(state);
+  assert.equal(h.args(), undefined);
+  assert.equal(result.source, 'none');
+  assert.equal(state.lastScanTs, 100);
 });
