@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 3f5c6a59a42b72965eded2f4c6ef112dd90aa033f06269c215ac4871710ba1a5
+// Generated from normal shipping TypeScript. Source SHA-256: 00192f79b866eae49028b44785e0e570e9f4de40e82950e5719abc8c588270cd
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -7875,8 +7875,8 @@ const S = {
     },
     iosLocalUnsupported: { en: 'Automatic capture needs iOS 16 or later', ar: 'يتطلب الالتقاط التلقائي iOS 16 أو أحدث' },
     iosLocalUnsupportedBody: {
-        en: 'You can still bring in your transactions on this iPhone: import a bank statement, or paste bank messages as they arrive.',
-        ar: 'لا يزال بإمكانك إضافة عملياتك على هذا الآيفون: استورد كشف حساب بنكي، أو الصق رسائل البنك عند وصولها.',
+        en: 'Pasted messages are read on this iPhone. Choosing a statement file connects this phone to Wafra’s import service. The file is read, then deleted.',
+        ar: 'تُقرأ الرسائل الملصقة على هذا الآيفون. اختيار ملف كشف حساب يربط هذا الهاتف بخدمة الاستيراد في وفرة. يُقرأ الملف ثم يُحذف.',
     },
     iosLocalUnsupportedStatement: { en: 'Import a statement', ar: 'استيراد كشف حساب' },
     iosLocalUnsupportedPaste: { en: 'Paste bank messages', ar: 'لصق رسائل البنك' },

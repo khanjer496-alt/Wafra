@@ -62,7 +62,7 @@ on:
           - preview
         default: production
       submit:
-        description: 'Also send the finished store-signed build to TestFlight. Supported by production, production-candidate and history-beta; preview is ad-hoc only.'
+        description: 'Submit only a github-macos build after its signed IPA checks. Hosted EAS and existing-build submissions are refused.'
         type: boolean
         default: false
       wait:
@@ -78,7 +78,7 @@ on:
         type: boolean
         default: false
       submit_build_id:
-        description: 'Submit a build that ALREADY EXISTS instead of making a new one. Paste an EAS build id. Use this when a build succeeded but its submission did not — rebuilding to retry a submission wastes 20-40 minutes for a binary that is already sitting on EAS. Every other input is ignored.'
+        description: 'Disabled: existing build IDs cannot bypass signed-IPA verification. Use github-macos for a separately authorized checked upload.'
         type: string
         default: ''
 
@@ -98,7 +98,27 @@ defaults:
     shell: bash
 
 jobs:
+  validate-request:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse unchecked submission routes
+        env:
+          BUILD_HOST: ${{ inputs.build_host }}
+          WANT_SUBMIT: ${{ inputs.submit }}
+          SUBMIT_BUILD_ID: ${{ inputs.submit_build_id }}
+        run: |
+          case "$BUILD_HOST" in eas|github-macos) ;; *) echo 'Unknown build host.' >&2; exit 1 ;; esac
+          if [ -n "$SUBMIT_BUILD_ID" ]; then
+            echo 'submit_build_id is disabled: an existing IPA has not passed this workflow verification.' >&2
+            exit 1
+          fi
+          if [ "$WANT_SUBMIT" = "true" ] && [ "$BUILD_HOST" != "github-macos" ]; then
+            echo 'Submission requires build_host=github-macos and the signed IPA verification step.' >&2
+            exit 1
+          fi
+
   build:
+    needs: validate-request
     if: inputs.build_host != 'github-macos' || inputs.submit_build_id != ''
     runs-on: ubuntu-latest
     # Generous because `wait = true` sits through the EAS queue plus a ~20
@@ -462,53 +482,12 @@ jobs:
       #      which is Enterprise-only, so build 7 compiled and its submission
       #      was refused. The build id was in the log; there was nothing that
       #      could take it.
-      - name: Submit an existing build
+      - name: Refuse unchecked existing build submission
         id: submit_only
         if: inputs.submit_build_id != ''
-        env:
-          BUILD_ID: ${{ inputs.submit_build_id }}
         run: |
-          set -o pipefail
-          if ! printf '%s' "$BUILD_ID" | grep -qiE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'; then
-            {
-              echo "# Not started — \`submit_build_id\` is not an EAS build id"
-              echo
-              echo "It should be a UUID, e.g. \`0f7dcb34-5ac1-42a9-80f9-60cac2170905\`. It is the last"
-              echo "path segment of the build page URL, and it is printed as **Build ID** in the log of"
-              echo "the run that made it."
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-
-          set +e
-          eas submit --platform ios --profile production --id "$BUILD_ID" --non-interactive 2>&1 | tee submit.log
-          status=${PIPESTATUS[0]}
-          set -e
-
-          if [ "$status" = "0" ]; then
-            {
-              echo "# 🚀 Submitted to TestFlight"
-              echo
-              echo "Build \`$BUILD_ID\` was handed to App Store Connect. **No new build was made.**"
-              echo
-              echo "Apple processing takes 10-15 minutes. After that it is installable from the"
-              echo "TestFlight app for **internal** testers, with no Beta App Review."
-              echo
-              echo "Set the \"What to Test\" note by hand in App Store Connect → TestFlight — this"
-              echo "workflow cannot send one on a non-Enterprise plan."
-            } >> "$GITHUB_STEP_SUMMARY"
-          else
-            {
-              echo "# ❌ The submission failed"
-              echo
-              echo "The build itself is untouched and still on EAS. Nothing needs rebuilding."
-              echo
-              echo '```'
-              tail -20 submit.log
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
-          exit "$status"
+          echo 'Existing build submission is disabled; use the checked github-macos route.' >&2
+          exit 1
 
       - name: Start the iOS build
         id: build
@@ -527,8 +506,8 @@ jobs:
           if [ "$WAIT" = "true" ]; then args+=(--wait); else args+=(--no-wait); fi
 
           if [ "$WANT_SUBMIT" = "true" ]; then
-            args+=(--auto-submit-with-profile "$PROFILE")
-            if [ -n "$WHAT_TO_TEST" ]; then args+=(--what-to-test "$WHAT_TO_TEST"); fi
+            echo 'Hosted EAS submission is disabled; use the checked github-macos route.' >&2
+            exit 1
           fi
 
           args+=(--message "GitHub Actions run ${GITHUB_RUN_NUMBER} (${GITHUB_REF_NAME})")
@@ -705,9 +684,9 @@ jobs:
                 echo "→ TestFlight, which every plan can do."
                 echo
               fi
-              echo "## Send this build without rebuilding"
+              echo "## Upload remains gated"
               echo
-              echo "Run this workflow again with **submit_build_id** set to:"
+              echo "Existing-build submission is disabled. Record this Build ID for provenance:"
               echo
               if [ -n "$SUBMITTED_BUILD_ID" ]; then
                 echo '```'
@@ -717,7 +696,7 @@ jobs:
                 echo "the **Build ID** printed in the _Start the iOS build_ step above."
               fi
               echo
-              echo "Every other input is ignored in that mode, and no build minutes are spent."
+              echo "Use a separately authorized github-macos request; its IPA must pass verification before upload."
               echo
             } >> "$GITHUB_STEP_SUMMARY"
           elif [ "$EAS_STATUS" = "0" ]; then
@@ -857,6 +836,7 @@ jobs:
         run: rm -f "$RUNNER_TEMP/asc-api-key.p8"
 
   local-build:
+    needs: validate-request
     if: inputs.build_host == 'github-macos' && inputs.submit_build_id == ''
     runs-on: macos-26
     timeout-minutes: 90
