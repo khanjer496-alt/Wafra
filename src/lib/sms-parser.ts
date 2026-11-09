@@ -5551,7 +5551,7 @@ const NOTICE_CHALLENGE_LINE_RE = new RegExp(
 );
 /** The fraud footer phrase that may end a COMPLETED spend's clause before its "?" ("…, Not you? Call …"). */
 const NOTICE_FOOTER_QUESTION_TAIL_RE = new RegExp(
-  String.raw`(?:^|[\s,–-])(?:not\s+you|didn['’]t\s+make\s+(?:this|it)|wasn['’]t\s+(?:it|this)?\s*you|unrecogni[sz]ed|ليس\s+انت|لست\s+انت` +
+  String.raw`(?:^|[\s,–-])(?:not\s+(?:you|u)|didn['’]t\s+make\s+(?:this|it)|wasn['’]t\s+(?:it|this)?\s*you|unrecogni[sz]ed|ليس\s+انت|لست\s+انت` +
     String.raw`|not\s+(?:done|made|authori[sz]ed|initiated)\s+by\s+you|not\s+recogni[sz]ed|(?:looks?\s+)?suspicious|don['’]t\s+recogni[sz]e\s+(?:this|it))\s*$`,
   'i',
 );

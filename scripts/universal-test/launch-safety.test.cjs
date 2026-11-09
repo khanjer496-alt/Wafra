@@ -208,3 +208,7 @@ for (const body of [
   assert.equal(history(row).length, 0);
   assert.equal(history(row, '').length, 0);
 });
+
+test('a completed UPI debit keeps the abbreviated Not u fraud footer', () => {
+  assert.equal(moneyNoticeKind('A/c XX1234 debited INR 640.00 Dt 24-09-26 10:05:12 thru UPI:626712345678.Bal INR 12,345.67 Not u?Fwd this SMS to 9264092640 to block UPI.Download PNB ONE-PNB'), null);
+});

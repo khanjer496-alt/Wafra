@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: b7f3bf847097f246a87d3f57be4372845ddc4b3a6d37f2eee38648113431e19a
+// Generated from normal shipping TypeScript. Source SHA-256: 7b8b441e71c79e8caf341e04eb912a541468f2db2be2d7d471696370b0ace573
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -9690,7 +9690,7 @@ const hasGenericBankAlertContext = (source, sender = '') => {
 exports.hasGenericBankAlertContext = hasGenericBankAlertContext;
 const SENDERLESS_USED_CARD_HINT = /^\s*your\s+(?:cr\.\s*)?card\s+(?:[*xX•·]{1,24}\s*)?(\d{4})(?![\p{L}\p{N}]|[ \t-]+\d)[ \t]+(?:was|has[ \t]+been)[ \t]+used[ \t]+for\b/iu;
 const inspectGenericBankEventForReview = (source, sender = '', market, sourceContext) => {
-    if ((0, sms_parser_1.moneyNoticeKind)(source) || (0, exports.hasPersonalMessagePrefix)(source) || hasNegatedPrincipalMovement(source))
+    if ((0, exports.hasPersonalMessagePrefix)(source) || hasNegatedPrincipalMovement(source))
         return null;
     const noContext = !(0, exports.hasGenericBankAlertContext)(source, sender) && !(0, latam_alert_templates_1.matchLatamTemplate)(source, { sender });
     const claimAdmitted = noContext && (!sender.trim() || (0, best_effort_autopost_1.isUnverifiedAlertSender)(sender)) &&
@@ -10115,7 +10115,7 @@ const createLaunchAlertSession = ({ overrides, regionHint = null, pinnedCurrency
     let sessionMarket = pinnedCurrency === 'AED' ? 'AE' : pinnedCurrency === 'SAR' ? 'SA' : null;
     let detected = null;
     const inspect = (source, sender) => {
-        if ((0, sms_parser_1.moneyNoticeKind)(source) || (0, exports.hasPersonalMessagePrefix)(source) || hasNegatedPrincipalMovement(source))
+        if ((0, exports.hasPersonalMessagePrefix)(source) || hasNegatedPrincipalMovement(source))
             return null;
         if (!exports.REVIEW_MONEY_HINT.test(source))
             return null;
@@ -12816,7 +12816,7 @@ const NOTICE_CHALLENGE_LINE_RE = new RegExp(String.raw `^\W{0,4}(?:[^\s:][^:\n]{
     `|^\\W{0,4}(?:[^\\s:][^:\\n]{0,30}:\\s*)?هل\\s+(?:هذه\\s+(?:عمليتك|العمليه\\s+لك)|قمت\\s+بهذه\\s+العمليه)\\s*[?？؟]` +
     String.raw `|(?:^|\n)[ \t]*(?:was\s+this\s+(?:you|yours)|did\s+you\s+make\s+this\s+(?:transaction|purchase|payment))\s*[?？][ \t]*$` +
     `|(?:^|\\n)[ \\t]*هل\\s+(?:قمت|اجريت)\\s+بهذه\\s+العمليه\\s*[?？؟](?:[ \\t]*(?:ارسل|ارسال)\\s+(?:نعم|1)[^\\n]*)?(?:\\n[ \\t]*(?:رقم\\s+المرجع|ref)[^\\n]*)?[ \\t]*$`, 'i');
-const NOTICE_FOOTER_QUESTION_TAIL_RE = new RegExp(String.raw `(?:^|[\s,–-])(?:not\s+you|didn['’]t\s+make\s+(?:this|it)|wasn['’]t\s+(?:it|this)?\s*you|unrecogni[sz]ed|ليس\s+انت|لست\s+انت` +
+const NOTICE_FOOTER_QUESTION_TAIL_RE = new RegExp(String.raw `(?:^|[\s,–-])(?:not\s+(?:you|u)|didn['’]t\s+make\s+(?:this|it)|wasn['’]t\s+(?:it|this)?\s*you|unrecogni[sz]ed|ليس\s+انت|لست\s+انت` +
     String.raw `|not\s+(?:done|made|authori[sz]ed|initiated)\s+by\s+you|not\s+recogni[sz]ed|(?:looks?\s+)?suspicious|don['’]t\s+recogni[sz]e\s+(?:this|it))\s*$`, 'i');
 const NOTICE_REPLY_CHALLENGE_RE = new RegExp(String.raw `\breply\s+(?:with\s+)?["'“]?(?:yes|y|1)\b|\b(?:yes|y)\s*(?:or|/)\s*(?:no|n)\b` +
     `|(?<![${AR_LETTER}])ارسل\\s+(?:نعم|1)(?![${AR_LETTER}])|(?<![${AR_LETTER}])للتاكيد\\s+ارسل(?![${AR_LETTER}])`, 'i');
