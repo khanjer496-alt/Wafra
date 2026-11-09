@@ -83,6 +83,7 @@ import {
   discardIosHistorySession,
   loadIosHistorySession,
   persistIosHistoryReviewCandidates,
+  IosHistoryImportError,
   type LoadedIosHistorySession,
 } from '@/lib/ios-history-import';
 import {
@@ -505,6 +506,7 @@ export default function ImportSmsScreen() {
   const [pendingInboxResult, setPendingInboxResult] = useState<PendingInboxResult | null>(null);
   const [pendingScanCommit, setPendingScanCommit] = useState<(() => Promise<void>) | null>(null);
   const [historyAttempt, setHistoryAttempt] = useState(0);
+  const [historyCapacityWaiting, setHistoryCapacityWaiting] = useState(false);
   const [historyCommitState, setHistoryCommitState] = useState<
     | 'idle'
     | 'writing'
@@ -1114,7 +1116,10 @@ export default function ImportSmsScreen() {
           await receipt.durable;
           await nearMatchSettle();
         },
-        discard: discardHistorySession,
+        discard: async () => {
+          await historyResult?.verifyReviewRetention?.();
+          await discardHistorySession();
+        },
       });
       if (result === 'busy') {
         setApplying(false);
@@ -1232,7 +1237,10 @@ export default function ImportSmsScreen() {
     if (history) {
       const result = await historyOperationController.finalize({
         save: ensureDurable,
-        discard: discardHistorySession,
+        discard: async () => {
+          await historyResult?.verifyReviewRetention?.();
+          await discardHistorySession();
+        },
       });
       if (result === 'busy') {
         setApplying(false);
@@ -1306,6 +1314,7 @@ export default function ImportSmsScreen() {
     processedHistory.current = `${history}:${historyAttempt}`;
     let active = true;
     const load = async () => {
+      const historyGeneration = getStateGeneration();
       let coordinatorLoaded = false;
       setScanning(true);
       setProgress(null);
@@ -1313,6 +1322,7 @@ export default function ImportSmsScreen() {
       setPasteVerdict(null);
       setPlan(null);
       setHistoryResult(null);
+      setHistoryCapacityWaiting(false);
       setHistorySourceSummary(null);
       setShowManual(false);
       setHistoryCommitState('idle');
@@ -1331,6 +1341,8 @@ export default function ImportSmsScreen() {
           sessionId: history,
           native,
           overrides: state.merchantOverrides,
+          stageReviews: stageReviewAlerts,
+          cancelled: () => !active || getStateGeneration() !== historyGeneration,
           onProgress: ({ scanned, matched }) => {
             if (active) setProgress({ scanned, found: matched });
           },
@@ -1394,7 +1406,10 @@ export default function ImportSmsScreen() {
           });
           const finalizeResult = await historyOperationController.finalize({
             save: ensureDurable,
-            discard: () => discardIosHistorySession(native, history),
+            discard: async () => {
+              await result.verifyReviewRetention?.();
+              await discardIosHistorySession(native, history);
+            },
           });
           if (!active) return;
           if (finalizeResult === 'busy') return;
@@ -1421,6 +1436,13 @@ export default function ImportSmsScreen() {
           if (error instanceof ImportMoneyError) {
             setHistoryCommitState('source-retained');
             setNotice({ title: t('importMoneyMismatchTitle'), body: t('importMoneyMismatchBody') });
+          } else if (error instanceof IosHistoryImportError && error.code === 'review-capacity') {
+            setHistoryCommitState('source-retained');
+            setHistoryCapacityWaiting(true);
+            setNotice({ title: t('historyImportReviewReady'), body: t('historyReviewCapacityBody') });
+          } else if (error instanceof IosHistoryImportError && error.code === 'review-expired') {
+            setHistoryCommitState('source-retained');
+            setNotice({ title: t('historyImportFailed'), body: tf('reviewAlertsExpiredCount', { count: 1 }) });
           } else if (coordinatorLoaded) {
             setHistoryCommitState('source-retained');
             setNotice({ title: t('historyImportFailed'), body: t('historyImportFailedBody') });
@@ -1872,9 +1894,9 @@ export default function ImportSmsScreen() {
         {/* The answer to a tap that could not do what it offered. It sits
             above the plan because it is the reason the plan is empty, or the
             reason there is no plan at all. */}
-        {pasteReviewCount > 0 && !scanning && !firstRun ? (
+        {(pasteReviewCount > 0 || historyCapacityWaiting) && !scanning && !firstRun ? (
           <Section index={1}>
-            <Button label={tf('genericReviewCount', { count: pasteReviewCount, s: pasteReviewCount === 1 ? '' : 's' })}
+            <Button label={historyCapacityWaiting ? t('historyReviewAction') : tf('genericReviewCount', { count: pasteReviewCount, s: pasteReviewCount === 1 ? '' : 's' })}
               onPress={() => router.push('/review-alerts')} />
           </Section>
         ) : null}

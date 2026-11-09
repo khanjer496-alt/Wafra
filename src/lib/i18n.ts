@@ -3055,6 +3055,10 @@ const S = {
   reviewAlertPossibleNotificationReplay: { en: 'Possible repeat notification. Compare it with your saved transactions before adding.', ar: 'قد يكون هذا إشعاراً مكرراً. قارنه بمعاملاتك المحفوظة قبل إضافته.' },
   reviewAlertNotificationSource: { en: 'Notification capture', ar: 'التقاط الإشعارات' },
   reviewAlertPossibleApplePayDuplicate: { en: 'Possible Apple Pay duplicate. A matching Apple Pay purchase is already in your transactions.', ar: 'قد تكون عملية Apple Pay مكررة. توجد عملية Apple Pay مطابقة في معاملاتك بالفعل.' },
+  historyReviewCapacityBody: {
+    en: 'Review is full. Review or dismiss saved alerts, then retry History. Existing expiry limits still apply.',
+    ar: 'قائمة المراجعة ممتلئة. راجع التنبيهات المحفوظة أو تجاهلها، ثم أعد محاولة السجل. تبقى حدود انتهاء الصلاحية سارية.',
+  },
   reviewAlertsFullWaiting: { en: 'Review is full — {count} alerts waiting. Add or dismiss alerts here to make room; waiting alerts are kept on this iPhone until then.', ar: 'قائمة المراجعة ممتلئة — {count} من التنبيهات بالانتظار. أضف تنبيهات أو تجاهلها هنا لإفساح المجال، وستبقى التنبيهات المنتظرة على هذا الآيفون حتى ذلك الحين.' },
   reviewAlertsExpiredCount: { en: 'Expired before review in the last 30 days: {count}', ar: 'انتهت صلاحيتها قبل المراجعة خلال آخر 30 يوماً: {count}' },
   reviewAlertsEvictedCount: { en: 'Alerts that could not be kept for review because Review was full, in the last 30 days: {count}', ar: 'تنبيهات تعذّر الاحتفاظ بها للمراجعة لأن قائمة المراجعة كانت ممتلئة خلال آخر 30 يوماً: {count}' },

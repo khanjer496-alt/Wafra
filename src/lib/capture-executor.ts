@@ -25,7 +25,7 @@ import type {
   LocalCaptureDeclineQualificationMapping,
   LocalCaptureReviewQualificationCandidate,
 } from '@/lib/types';
-import { emptyAlertReviewTray, partitionReviewsByCapacity, type ReviewEntry } from '@/lib/alert-review-tray';
+import { emptyAlertReviewTray, partitionReviewsByCapacity, settleReviewStage, requiresReviewRetention, type ReviewStageReceipt, type ReviewEntry } from '@/lib/alert-review-tray';
 import { stageWalletNearMatches } from '@/lib/wallet-near-match';
 import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
 import { captureTrace, captureTraceEnabled } from '@/lib/capture-trace';
@@ -83,7 +83,7 @@ export interface CaptureLedgerAdapter {
     items: ReviewEntry[],
     qualifications?: readonly LocalCaptureReviewQualificationCandidate[],
     sourceBindings?: readonly ReviewSourceBinding[],
-  ) => { admitted: number; qualificationIds?: string[]; durable: Promise<void> };
+  ) => ReviewStageReceipt & { qualificationIds?: string[] };
 }
 
 export interface BackgroundCaptureAdapter {
@@ -342,7 +342,14 @@ export const createCaptureExecutor = ({
       captureTrace('reviews:start', reviewCandidates.length);
       const reviewReceipt = activeLedger.stageReviewAlerts(reviewCandidates, undefined, collected.reviewSourceBindings);
       reviewAlerts = reviewReceipt.admitted;
-      await reviewReceipt.durable;
+      const retention = await settleReviewStage(reviewCandidates, reviewReceipt);
+      for (const item of reviewCandidates) {
+        if (requiresReviewRetention(item) && !retention.some(entry => entry.sourceKey === canonicalCaptureSourceKey(item.sourceKey, item.observedAt) &&
+            (entry.outcome === 'pending' || entry.outcome === 'resolved'))) {
+          deferredReviewSourceKeys.push(item.sourceKey);
+          if (item.channel !== 'push') deferInbox = true;
+        }
+      }
       captureTrace('reviews:done', reviewAlerts, tracing ? Date.now() - reviewStarted : 0);
       if (routineStopped(collected.source)) {
         return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
@@ -555,6 +562,7 @@ export const createCaptureExecutor = ({
     const candidates = queued.reviewCandidates ?? [];
     const capacity = partitionReviewsByCapacity(state.reviewTray ?? emptyAlertReviewTray(), candidates, Date.now());
     const reviewCandidates = capacity.admit;
+    const unretainedReviewSources = new Set<string>();
     if (reviewCandidates.length > 0) {
       if (!activeLedger.stageReviewAlerts) {
         throw new Error('Capture executor requires review staging for review candidates');
@@ -562,7 +570,14 @@ export const createCaptureExecutor = ({
       if (supplementalStopped()) return stopped();
       const reviewReceipt = activeLedger.stageReviewAlerts(reviewCandidates);
       reviewAlerts = reviewReceipt.admitted;
-      await reviewReceipt.durable;
+      const retention = await settleReviewStage(reviewCandidates, reviewReceipt);
+      for (const item of reviewCandidates) {
+        if (requiresReviewRetention(item) && !retention.some(entry =>
+            entry.sourceKey === canonicalCaptureSourceKey(item.sourceKey, item.observedAt) &&
+            (entry.outcome === 'pending' || entry.outcome === 'resolved'))) {
+          unretainedReviewSources.add(canonicalCaptureSourceKey(item.sourceKey, item.observedAt));
+        }
+      }
       if (supplementalStopped()) return stopped();
       state = activeLedger.getState();
     }
@@ -635,6 +650,7 @@ export const createCaptureExecutor = ({
       if (supplementalStopped()) return stopped();
       const finalClaims = reviewSourceClaims(activeLedger.getState());
       const deferredReviewSources = [
+        ...unretainedReviewSources,
         ...capacity.deferred.map(item => canonicalCaptureSourceKey(item.sourceKey, item.observedAt)),
         ...candidates.map(item => canonicalCaptureSourceKey(item.sourceKey, item.observedAt)).filter(key => !finalClaims.has(key)),
       ];
@@ -715,10 +731,12 @@ export const createCaptureExecutor = ({
     const candidates = queued.reviewCandidates ?? [];
     const capacity = partitionReviewsByCapacity(activeLedger.getState().reviewTray ?? emptyAlertReviewTray(), candidates, Date.now());
     const reviewCandidates = capacity.admit;
+    const unretainedReviewSources = new Set<string>();
     const acknowledgeSetup = async () => {
       if (setupStopped()) return;
       const claims = reviewSourceClaims(activeLedger.getState());
       const deferred = [
+        ...unretainedReviewSources,
         ...capacity.deferred.map(item => canonicalCaptureSourceKey(item.sourceKey, item.observedAt)),
         ...candidates.map(item => canonicalCaptureSourceKey(item.sourceKey, item.observedAt)).filter(key => !claims.has(key)),
       ];
@@ -729,7 +747,15 @@ export const createCaptureExecutor = ({
       if (!activeLedger.stageReviewAlerts) {
         throw new Error('Capture executor requires review staging for review candidates');
       }
-      await activeLedger.stageReviewAlerts(reviewCandidates).durable;
+      const reviewReceipt = activeLedger.stageReviewAlerts(reviewCandidates);
+      const retention = await settleReviewStage(reviewCandidates, reviewReceipt);
+      for (const item of reviewCandidates) {
+        if (requiresReviewRetention(item) && !retention.some(entry =>
+            entry.sourceKey === canonicalCaptureSourceKey(item.sourceKey, item.observedAt) &&
+            (entry.outcome === 'pending' || entry.outcome === 'resolved'))) {
+          unretainedReviewSources.add(canonicalCaptureSourceKey(item.sourceKey, item.observedAt));
+        }
+      }
       if (setupStopped()) return { kind: 'setup-waiting' };
     }
 

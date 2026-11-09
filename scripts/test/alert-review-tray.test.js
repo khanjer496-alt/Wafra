@@ -96,7 +96,7 @@ ok('an already-expired historical candidate is not re-admitted',
     emptyAlertReviewTray(),
     stored,
     stored.expiresAt + 1,
-  ).outcome === 'refused');
+  ).outcome === 'expired');
 
 const malformed = normalizeAlertReviewTray({ schemaVersion: 1, pending: [{ raw: 'secret' }], tombstones: [] }, NOW);
 ok('hydration drops malformed or raw-only review records', malformed.pending.length === 0);
@@ -382,35 +382,29 @@ ok('hydration cannot relabel UAE review money as a foreign ledger amount',
   ok('legacy overflow evicts an informational review before an older money movement',
     mixed.pending.length === 50 && !mixed.pending.some((item) => item.id === informational(900).id) &&
       mixed.pending.some((item) => item.id === legacyFiller(0).id));
-  ok('a new informational review never waits, even behind fifty money movements',
-    tray.partitionReviewsByCapacity(fullLegacy, [informational(700)], NOW + 1000).deferred.length === 0);
+  ok('an informational review cannot displace fifty retained money movements',
+    tray.partitionReviewsByCapacity(fullLegacy, [informational(700)], NOW + 1000).deferred.length === 1);
   const infoFull = { ...emptyAlertReviewTray(),
     pending: Array.from({ length: 50 }, (_, index) => informational(index)) };
   const overInfo = tray.partitionReviewsByCapacity(infoFull, [incoming], NOW + 1000);
   ok('a money movement is admitted by evicting an informational review instead of waiting',
     overInfo.deferred.length === 0 && overInfo.admit[0] === incoming);
 
-  // Gap B: callers without backpressure (relay, History, Android) still evict
-  // at the legacy cap. A money movement may never vanish without a trace.
   const overflow = admitPreparedReviewAlert(fullLegacy, incoming, NOW + 1000);
-  const evictedTombstones = overflow.state.tombstones.filter((item) => item.outcome === 'evicted');
-  ok('evicting a money review from the Message lane records a durable evicted tombstone',
-    overflow.outcome === 'admitted' && overflow.state.pending.length === 50 &&
-      !overflow.state.pending.some((item) => item.id === legacyFiller(0).id) &&
-      evictedTombstones.length === 1 && evictedTombstones[0].sourceKey === legacyFiller(0).sourceKey &&
-      tray.recentlyLostReviewCount(overflow.state, NOW + 1000, 'evicted') === 1,
-    JSON.stringify(overflow.state.tombstones));
-  const reread = admitPreparedReviewAlert(overflow.state, legacyFiller(0), NOW + 2000);
-  ok('re-reading an evicted review into a still-full lane never counts it twice',
-    tray.recentlyLostReviewCount(reread.state, NOW + 2000, 'evicted') === 1 &&
-      tray.recentlyLostReviewCount(pruneAlertReviewTray(overflow.state, NOW + 3000), NOW + 3000, 'evicted') === 1,
-    JSON.stringify(reread.state.tombstones));
-  const roomAgain = resolveReviewAlert(overflow.state, legacyFiller(10).id, 'dismissed', NOW + 2000);
+  ok('normal admission defers at capacity without evicting acknowledged evidence',
+    overflow.outcome === 'deferred' && overflow.state.pending.length === 50 &&
+      overflow.state.pending.some(item => item.id === legacyFiller(0).id) &&
+      overflow.state.tombstones.length === 0);
+  // Pre-existing corrupt/over-cap hydration still discloses bounded loss.
+  const historicalLoss = pruneAlertReviewTray({ ...fullLegacy, pending: [...fullLegacy.pending, incoming] }, NOW + 1000);
+  const reread = admitPreparedReviewAlert(historicalLoss, legacyFiller(0), NOW + 2000);
+  ok('re-reading old lost evidence into a full lane defers and retains its loss record',
+    reread.outcome === 'deferred' && tray.recentlyLostReviewCount(reread.state, NOW + 2000, 'evicted') === 1);
+  const roomAgain = resolveReviewAlert(historicalLoss, legacyFiller(10).id, 'dismissed', NOW + 2000);
   const recovered = admitPreparedReviewAlert(roomAgain, legacyFiller(0), NOW + 2500);
-  ok('a re-read evicted review is recovered once Review has room and its loss record is retired',
-    recovered.outcome === 'admitted' && recovered.state.pending.some((item) => item.id === legacyFiller(0).id) &&
-      tray.recentlyLostReviewCount(recovered.state, NOW + 2500, 'evicted') === 0,
-    JSON.stringify(recovered.state.tombstones));
+  ok('re-reading old lost evidence recovers its exact payload once there is room',
+    recovered.outcome === 'admitted' && recovered.state.pending.some(item => item.id === legacyFiller(0).id) &&
+      tray.recentlyLostReviewCount(recovered.state, NOW + 2500, 'evicted') === 0);
   ok('callers cannot record a loss outcome as a user decision',
     JSON.stringify(resolveReviewAlert(fullLegacy, legacyFiller(1).id, 'evicted', NOW + 1000)) ===
       JSON.stringify(pruneAlertReviewTray(fullLegacy, NOW + 1000)));
@@ -472,12 +466,13 @@ ok('hydration cannot relabel UAE review money as a foreign ledger amount',
   const elapsed = Date.now() - started;
   ok('staging five thousand History money reviews is one bounded pass',
     elapsed < 2000 && staged.state.pending.length === 50 &&
-      staged.outcomes.every((outcome) => outcome === 'admitted') &&
+      staged.outcomes.filter(outcome => outcome === 'admitted').length === 50 &&
+      staged.outcomes.filter(outcome => outcome === 'deferred').length === 4950 &&
       staged.state.tombstones.filter((item) => item.outcome === 'dismissed').length === 900,
     JSON.stringify({ elapsed, pending: staged.state.pending.length }));
 
   // Gap A: foreign-currency money reviews can never be posted. They live in
-  // their own bounded lane, never occupy the Message lane and never wait.
+  // their own bounded lane and never occupy the Message lane. Capacity defers new evidence.
   const { inspectUniversalBankEvent } = require('./build/universal-parser.js');
   const sarEvent = inspectUniversalBankEvent('Card purchase SAR 125.50 at JARIR on 2026-09-05.');
   const currencyItem = (index) => ({
@@ -500,14 +495,15 @@ ok('hydration cannot relabel UAE review money as a foreign ledger amount',
   const moreForeign = Array.from({ length: 5 }, (_, index) => currencyItem(100 + index));
   const foreignPartition = tray.partitionReviewsByCapacity(currencyFull, moreForeign, NOW + 1000);
   ok('a foreign-currency review never waits for Review space',
-    foreignPartition.deferred.length === 0 && foreignPartition.admit.length === 5);
+    foreignPartition.deferred.length === 5 && foreignPartition.admit.length === 0);
   let foreignState = currencyFull;
   for (const item of moreForeign) foreignState = admitPreparedReviewAlert(foreignState, item, NOW + 1000).state;
   const currencyTombstones = foreignState.tombstones.filter((item) => item.outcome === 'currency-evicted');
-  ok('the currency lane keeps its newest fifty and tombstones each evicted foreign alert',
+  ok('the currency lane preserves its acknowledged fifty and defers new evidence',
     foreignState.pending.length === 50 && foreignState.pending.every(tray.isCurrencyConflictReview) &&
-      currencyTombstones.length === 5 &&
-      tray.recentlyLostReviewCount(foreignState, NOW + 1000, 'currency-evicted') === 5 &&
+      currencyTombstones.length === 0 &&
+      currencyFull.pending.every(item => foreignState.pending.some(kept => kept.id === item.id)) &&
+      tray.recentlyLostReviewCount(foreignState, NOW + 1000, 'currency-evicted') === 0 &&
       tray.recentlyLostReviewCount(foreignState, NOW + 1000, 'evicted') === 0,
     JSON.stringify(foreignState.tombstones));
   const mixedLanes = pruneAlertReviewTray({ ...emptyAlertReviewTray(),

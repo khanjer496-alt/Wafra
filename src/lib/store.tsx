@@ -125,6 +125,8 @@ import {
 } from '@/lib/apple-pay-card-links';
 import {
   admitPreparedReviewAlerts,
+  reviewRetentionReceipts,
+  type ReviewStageReceipt,
   emptyAlertReviewTray,
   normalizeAlertReviewTray,
   stripReviewShareCandidates,
@@ -2195,7 +2197,7 @@ interface StoreValue {
     items: ReviewEntry[],
     qualifications?: readonly LocalCaptureReviewQualificationCandidate[],
     sourceBindings?: readonly ReviewSourceBinding[],
-  ) => { admitted: number; qualificationIds: string[]; durable: Promise<void> };
+  ) => ReviewStageReceipt & { qualificationIds: string[] };
   dismissReviewAlert: (id: string, outcome: ReviewResolutionOutcome) => Promise<void>;
   promoteReviewAlert: (input: PromoteReviewAlertInput) => Promise<'added' | 'duplicate'>;
   /**
@@ -3159,8 +3161,27 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     qualifications?: readonly LocalCaptureReviewQualificationCandidate[],
     sourceBindings?: readonly ReviewSourceBinding[],
   ) => {
+    const generation = stateGeneration.current;
+    let persistedTray: typeof authoritativeState.current.reviewTray | null = null;
+    const retention = () => {
+      if (generation !== stateGeneration.current || !authoritativeState.current.hydrated || !persistedTray) {
+        return items.map(item => ({ sourceKey: item.sourceKey, outcome: 'deferred' as const }));
+      }
+      const now = Date.now();
+      const written = reviewRetentionReceipts(persistedTray, items, now);
+      const current = reviewRetentionReceipts(authoritativeState.current.reviewTray, items, now);
+      return written.map((entry, index) => {
+        const live = current[index];
+        if (entry.outcome === 'expired' || live.outcome === 'expired') return { ...entry, outcome: 'expired' as const };
+        // A newer optimistic write cannot qualify this receipt. Both its own
+        // persisted snapshot and the current generation must still carry a claim.
+        if ((entry.outcome === 'pending' || entry.outcome === 'resolved') &&
+            (live.outcome === 'pending' || live.outcome === 'resolved')) return entry;
+        return { ...entry, outcome: 'deferred' as const };
+      });
+    };
     if (!authoritativeState.current.hydrated || (items.length === 0 && !sourceBindings?.length)) {
-      return { admitted: 0, qualificationIds: [], durable: ensureDurable() };
+      return { admitted: 0, qualificationIds: [], durable: ensureDurable(), retention };
     }
     const qualificationByReviewId = reviewQualificationMap(items, qualifications);
     const now = Date.now();
@@ -3176,9 +3197,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const qualification = qualificationByReviewId.get(item.id);
       if (qualification) admittedQualifications.push(qualification);
     });
-    if (admitted === 0 && !rebound.changed) {
-      return { admitted, qualificationIds: [], durable: ensureDurable() };
-    }
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
@@ -3202,11 +3220,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     });
     const durable = persist(next).then((written) => {
       if (!written) throw new Error('Encrypted review-tray write failed');
+      persistedTray = next.reviewTray;
     });
     return {
       admitted,
       qualificationIds,
       durable,
+      retention,
     };
   }, [dispatch, ensureDurable, persist]);
 

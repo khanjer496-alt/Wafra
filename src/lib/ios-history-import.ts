@@ -1,6 +1,7 @@
+import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
 import type { CategoryId } from '@/lib/types';
 import { REVIEW_ALERT_CAP, REVIEW_ALERT_TTL_MS, appleMessageReviewIdentity, isUniversalReviewAlert,
-  isMoneyMovementReview, type ReviewEntry } from '@/lib/alert-review-tray';
+  requiresReviewRetention, settleReviewStage, type ReviewStageReceipt, type ReviewEntry } from '@/lib/alert-review-tray';
 import { createLaunchAlertSession } from '@/lib/launch-alert-parser';
 import { MAX_HISTORICAL_RECORDS, parseHistoricalMessageRecords, type HistoricalMessageRecord } from '@/lib/historical-import';
 import { createAiAlertReviewSession, type AiAlertReviewOptions } from '@/lib/ai-alert-reader';
@@ -28,7 +29,9 @@ export type IosHistoryImportErrorCode =
   | 'record-count-mismatch'
   | 'cancelled'
   | 'native-failure'
-  | 'cleanup-failed';
+  | 'cleanup-failed'
+  | 'review-capacity'
+  | 'review-expired';
 
 const ERROR_MESSAGES: Record<IosHistoryImportErrorCode, string> = {
   'invalid-session': 'The history session identifier is invalid.',
@@ -41,6 +44,8 @@ const ERROR_MESSAGES: Record<IosHistoryImportErrorCode, string> = {
   cancelled: 'The history import was cancelled.',
   'native-failure': 'The history session could not be loaded.',
   'cleanup-failed': 'The history session could not be discarded.',
+  'review-capacity': 'History is waiting for Review space. The source session is retained.',
+  'review-expired': 'Some Review evidence expired; History has not been completed.',
 };
 
 export class IosHistoryImportError extends Error {
@@ -71,12 +76,11 @@ export interface LoadedIosHistorySession {
   parsed: ScannedSms[];
   reviewCandidates: ReviewEntry[];
   declined: DeclinedSms[];
+  /** Re-read bounded chunks at the final discard barrier; no extra payload queue. */
+  verifyReviewRetention?: () => Promise<void>;
 }
 
-export interface IosHistoryReviewStageReceipt {
-  admitted: number;
-  durable: Promise<void>;
-}
+export type IosHistoryReviewStageReceipt = ReviewStageReceipt;
 
 /**
  * Bound a History import's review candidates (sorted oldest first) to the
@@ -91,7 +95,7 @@ export function boundHistoryReviewCandidates(candidates: readonly ReviewEntry[])
   const trimmed = new Set<ReviewEntry>();
   for (const item of candidates) {
     if (overflow <= 0) break;
-    if (!isMoneyMovementReview(item)) {
+    if (!requiresReviewRetention(item)) {
       trimmed.add(item);
       overflow -= 1;
     }
@@ -111,7 +115,15 @@ export async function persistIosHistoryReviewCandidates(
     !(receipt.durable instanceof Promise)) {
     throw new IosHistoryImportError('native-failure');
   }
-  await receipt.durable;
+  const outcomes = await settleReviewStage(items, receipt);
+  const required = items.filter(requiresReviewRetention);
+  for (const item of required) {
+    const result = outcomes.find(entry => entry.sourceKey === canonicalCaptureSourceKey(item.sourceKey, item.observedAt));
+    if (result?.outcome === 'expired') throw new IosHistoryImportError('review-expired');
+    if (!result || (result.outcome !== 'pending' && result.outcome !== 'resolved')) {
+      throw new IosHistoryImportError('review-capacity');
+    }
+  }
   return receipt.admitted;
 }
 
@@ -209,6 +221,10 @@ export async function loadIosHistorySession(input: {
   aiReview?: AiAlertReviewOptions & { maxInferences?: number };
   privateFormatReview?: PrivateAlertFormatSessionOptions;
   cancelled?: () => boolean;
+  /** Stage at most one native chunk at a time; a hold leaves the original session intact. */
+  stageReviews?: (items: ReviewEntry[]) => ReviewStageReceipt;
+  /** Internal final-barrier pass: do not duplicate parsed/declined projection arrays. */
+  reviewValidationOnly?: boolean;
 }): Promise<LoadedIosHistorySession> {
   validateSessionId(input.sessionId);
 
@@ -230,6 +246,7 @@ export async function loadIosHistorySession(input: {
     const declined: DeclinedSms[] = [];
     let readRecords = 0;
     let ignored = 0;
+    let stagedReviews = 0;
 
     for (let offset = 0; offset < descriptor.chunkIndices.length; offset += 1) {
       const chunkIndex = descriptor.chunkIndices[offset];
@@ -304,13 +321,25 @@ export async function loadIosHistorySession(input: {
         }
       }
       readRecords += records.length;
-      parsed.push(...part.parsed);
-      reviewCandidates.push(...part.reviewCandidates);
-      declined.push(...part.declined);
+      if (!input.reviewValidationOnly) parsed.push(...part.parsed);
+      if (input.stageReviews) {
+        stagedReviews += await persistIosHistoryReviewCandidates(part.reviewCandidates, input.stageReviews);
+        requireActive();
+      } else {
+        const bounded = boundHistoryReviewCandidates([...reviewCandidates, ...part.reviewCandidates]);
+        reviewCandidates.length = 0;
+        for (const item of bounded) reviewCandidates.push(item);
+        // Without a durable stage adapter, stop before collecting another page
+        // of required evidence. A caller must retry using the retained session.
+        if (reviewCandidates.filter(requiresReviewRetention).length > REVIEW_ALERT_CAP) {
+          throw new IosHistoryImportError('review-capacity');
+        }
+      }
+      if (!input.reviewValidationOnly) declined.push(...part.declined);
       ignored += part.ignoredCount;
       input.onProgress?.({
         scanned: readRecords,
-        matched: parsed.length + reviewCandidates.length,
+        matched: parsed.length + reviewCandidates.length + stagedReviews,
       });
       if (offset + 1 < descriptor.chunkIndices.length) await yieldToEventLoop();
     }
@@ -338,7 +367,7 @@ export async function loadIosHistorySession(input: {
         accepted: descriptor.accepted,
         skipped: descriptor.skipped,
         parsed: parsed.length,
-        reviewed: reviewCandidates.length,
+        reviewed: reviewCandidates.length + stagedReviews,
         declined: declined.length,
         ignored,
         duplicates: 0,
@@ -346,6 +375,13 @@ export async function loadIosHistorySession(input: {
       parsed,
       reviewCandidates,
       declined,
+      ...(input.stageReviews && !input.reviewValidationOnly ? {
+        verifyReviewRetention: async () => {
+          requireActive();
+          await loadIosHistorySession({ ...input, onProgress: undefined, reviewValidationOnly: true });
+          requireActive();
+        },
+      } : {}),
     };
   } catch (error) {
     const failure = coordinatorFailure(error);

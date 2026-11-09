@@ -566,7 +566,10 @@ async function coordinatorTests() {
     } else {
       const pending = persistIosHistoryReviewCandidates([review], (items) => {
         events.push(`stage:${items.length}`);
-        return { admitted: items.length, durable };
+        const tray = require('./build/alert-review-tray.js');
+        const batch = tray.admitPreparedReviewAlerts(tray.emptyAlertReviewTray(), items, NOW.getTime());
+        return { admitted: items.length, durable,
+          retention: () => tray.reviewRetentionReceipts(batch.state, items, NOW.getTime()) };
       }).then((admitted) => {
         events.push(`done:${admitted}`);
       });
@@ -709,26 +712,25 @@ async function coordinatorTests() {
         2: saRecords.slice(50),
       },
     });
-    const result = await loadIosHistorySession({ sessionId: SESSION_ID, native, overrides: {}, now: NOW });
-    ok('a History import keeps every money review candidate instead of trimming to fifty',
-      result.reviewCandidates.length === 60 && result.summary.reviewed === 60 &&
-        result.reviewCandidates.every((item) => item.market === 'SA'),
-      { reviewed: result.summary.reviewed, candidates: result.reviewCandidates.length });
     const tray = require('./build/alert-review-tray.js');
     let state = tray.emptyAlertReviewTray();
-    const admitted = await persistIosHistoryReviewCandidates(result.reviewCandidates, (items) => {
-      let count = 0;
-      for (const item of items) {
-        const next = tray.admitPreparedReviewAlert(state, item, NOW.getTime());
-        state = next.state;
-        if (next.outcome === 'admitted') count += 1;
-      }
-      return { admitted: count, durable: Promise.resolve() };
-    });
-    ok('History money reviews beyond the lane leave a durable, counted tombstone',
-      admitted === 60 && state.pending.length === 50 &&
-        tray.recentlyLostReviewCount(state, NOW.getTime(), 'evicted') === 10,
-      { admitted, pending: state.pending.length, tombstones: state.tombstones.length });
+    const stageReviews = items => {
+      const batch = tray.admitPreparedReviewAlerts(state, items, NOW.getTime()); state = batch.state;
+      return { admitted: batch.outcomes.filter(outcome => outcome === 'admitted').length, durable: Promise.resolve(),
+        retention: () => tray.reviewRetentionReceipts(state, items, NOW.getTime()) };
+    };
+    let held = false;
+    try { await loadIosHistorySession({ sessionId: SESSION_ID, native, overrides: {}, now: NOW, stageReviews }); }
+    catch (error) { held = error.code === 'review-capacity'; }
+    ok('History keeps fifty exact payloads and holds its native source at capacity',
+      held && state.pending.length === 50 && state.tombstones.length === 0,
+      { held, pending: state.pending.length });
+    for (const item of [...state.pending]) state = tray.resolveReviewAlert(state, item.id, 'dismissed', NOW.getTime());
+    const result = await loadIosHistorySession({ sessionId: SESSION_ID, native, overrides: {}, now: NOW, stageReviews });
+    ok('History resumes the remaining ten without another payload queue or inflated admissions',
+      result.reviewCandidates.length === 0 && result.summary.reviewed === 10 && state.pending.length === 10 &&
+        state.tombstones.filter(item => item.outcome === 'dismissed').length === 50);
+
   }
 
   {

@@ -150,7 +150,8 @@ function executorHarness(reviewTray = built('alert-review-tray').emptyAlertRevie
     stageReviewAlerts(items) {
       const batch = built('alert-review-tray').admitPreparedReviewAlerts(state.reviewTray, items, Date.now());
       state = { ...state, reviewTray: batch.state };
-      return { admitted: batch.outcomes.filter(value => value === 'admitted').length, durable };
+      return { admitted: batch.outcomes.filter(value => value === 'admitted').length, durable,
+        retention: () => built('alert-review-tray').reviewRetentionReceipts(state.reviewTray, items, Date.now()) };
     },
     importBatch(batch) {
       const api = built('ledger-import');

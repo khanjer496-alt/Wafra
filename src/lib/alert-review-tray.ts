@@ -266,7 +266,7 @@ export interface ReviewAdmissionInput {
 
 export interface ReviewAdmissionResult {
   state: AlertReviewTrayState;
-  outcome: 'admitted' | 'duplicate' | 'refused';
+  outcome: 'admitted' | 'duplicate' | 'refused' | 'deferred' | 'expired';
   reason?: string;
 }
 
@@ -358,11 +358,68 @@ export const isMoneyMovementReview = (item: ReviewEntry): boolean => {
     (event.status === 'posted' || event.status === 'unknown');
 };
 
+/** Retention is not posting eligibility. Exact repayment evidence stays informational. */
+export const requiresReviewRetention = (item: ReviewEntry): boolean => {
+  if (isMoneyMovementReview(item)) return true;
+  if (!isUniversalReviewAlert(item)) return false;
+  const event = sanitizeUniversalReviewEvent(item.event);
+  return event?.family === 'card-payment' && event.amount.evidence === 'explicit' &&
+    event.amount.value !== null && positiveMinorUnits(event.amount.value.minorUnits) &&
+    event.amount.alternatives.length === 0;
+};
+
+export interface ReviewSourceReceipt {
+  sourceKey: string;
+  outcome: 'pending' | 'resolved' | 'deferred' | 'expired' | 'refused';
+}
+export interface ReviewStageReceipt {
+  admitted: number;
+  durable: Promise<void>;
+  /** Read only AFTER durable; recomputed on current state, never a provisional insert count. */
+  retention?: () => ReviewSourceReceipt[];
+}
+
+export const reviewRetentionReceipts = (
+  tray: AlertReviewTrayState, inputs: readonly ReviewEntry[], now: number,
+): ReviewSourceReceipt[] => inputs.map((input) => {
+  const sourceKey = canonicalUniversalSourceKey(input.sourceKey, input.observedAt);
+  const item = normalizeReviewEntry(input, now);
+  if (!item) return { sourceKey, outcome: 'refused' };
+  const decision = tray.tombstones.find(entry => entry.expiresAt > now &&
+    canonicalUniversalSourceKey(entry.sourceKey) === sourceKey && isResolutionOutcome(entry.outcome));
+  if (decision) return { sourceKey, outcome: 'resolved' };
+  if (item.expiresAt <= now || tray.tombstones.some(entry => entry.expiresAt > now &&
+    canonicalUniversalSourceKey(entry.sourceKey) === sourceKey && entry.outcome === 'expired')) {
+    return { sourceKey, outcome: 'expired' };
+  }
+  const pending = tray.pending.find(entry => entry.expiresAt > now &&
+    canonicalUniversalSourceKey(entry.sourceKey, entry.observedAt) === sourceKey);
+  return { sourceKey, outcome: pending ? 'pending' : 'deferred' };
+});
+
+export const reviewClaimSourceKeys = (tray: AlertReviewTrayState, now: number): string[] => [
+  ...tray.pending.filter(item => item.expiresAt > now).map(item => canonicalUniversalSourceKey(item.sourceKey, item.observedAt)),
+  ...tray.tombstones.filter(item => item.expiresAt > now && isResolutionOutcome(item.outcome))
+    .map(item => canonicalUniversalSourceKey(item.sourceKey)),
+];
+
+/** Missing/old receipts cannot authorize disposal of retention-required source. */
+export const settleReviewStage = async (
+  inputs: readonly ReviewEntry[], receipt: ReviewStageReceipt,
+): Promise<ReviewSourceReceipt[]> => {
+  await receipt.durable;
+  if (!receipt.retention) {
+    return inputs.map(item => ({ sourceKey: canonicalUniversalSourceKey(item.sourceKey, item.observedAt),
+      outcome: 'deferred' as const }));
+  }
+  return receipt.retention();
+};
+
 /**
  * Keep the newest fifty legacy reviews, but when the lane overflows, evict
  * informational entries (oldest first) before any possible money movement.
  * Input is sorted oldest first. Returns the kept entries and the evicted
- * possible money movements; informational evictions stay silent.
+ * retention-required evidence; other informational evictions stay silent.
  */
 const trimLegacyLane = (legacy: ReviewEntry[]): { kept: ReviewEntry[]; lostMoney: ReviewEntry[] } => {
   let overflow = legacy.length - REVIEW_ALERT_CAP;
@@ -370,7 +427,7 @@ const trimLegacyLane = (legacy: ReviewEntry[]): { kept: ReviewEntry[]; lostMoney
   const evicted = new Set<ReviewEntry>();
   for (const item of legacy) {
     if (overflow === 0) break;
-    if (!isMoneyMovementReview(item)) { evicted.add(item); overflow -= 1; }
+    if (!requiresReviewRetention(item)) { evicted.add(item); overflow -= 1; }
   }
   const lostMoney: ReviewEntry[] = [];
   for (const item of legacy) {
@@ -543,102 +600,65 @@ export const admitReviewAlert = (
 
 /** Merge an already sanitized capture item through the same dedupe/retention policy. */
 export const admitPreparedReviewAlert = (
-  current: AlertReviewTrayState,
-  input: ReviewEntry,
-  now: number,
+  current: AlertReviewTrayState, input: ReviewEntry, now: number,
 ): ReviewAdmissionResult => {
-  const state = pruneAlertReviewTray(current, now);
-  const item = normalizeReviewEntry(input, now);
-  if (!item) return { state, outcome: 'refused', reason: 'unsafe-review-candidate' };
-  if (item.expiresAt <= now) {
-    return { state, outcome: 'refused', reason: 'expired-review-candidate' };
-  }
-  if (state.pending.some((entry) => entry.id === item.id &&
-    (entry.sourceKey !== item.sourceKey || entry.observedAt !== item.observedAt))) {
-    return { state, outcome: 'refused', reason: 'review-identity-conflict' };
-  }
-  const sourceKey = canonicalUniversalSourceKey(item.sourceKey, item.observedAt);
-  // A Message-lane eviction is a loss record, not a decision: a later re-read
-  // of the same alert (for example a repeated History import) recovers it and
-  // retires that loss record, so the Review count reflects only current losses.
-  const recovered = (entry: ReviewTombstone): boolean => entry.outcome === 'evicted' &&
-    canonicalUniversalSourceKey(entry.sourceKey) === sourceKey;
-  if (state.tombstones.some((entry) => !recovered(entry) &&
-    canonicalUniversalSourceKey(entry.sourceKey) === sourceKey) ||
-    state.pending.some((entry) => canonicalUniversalSourceKey(entry.sourceKey, entry.observedAt) === sourceKey)) {
-    return { state, outcome: 'duplicate' };
-  }
-  // This local notification caller withholds ACK on refusal. Other capture
-  // callers still use the legacy newest-fifty policy and cannot yet apply
-  // backpressure, so do not silently change their admission contract here.
-  // Foreign-currency reviews use their own evicting lane and never refuse.
-  if (reviewLane(item) === 'protected' &&
-    state.pending.filter((entry) => reviewLane(entry) === 'protected').length >= REVIEW_ALERT_CAP) {
-    return { state, outcome: 'refused', reason: 'review-capacity' };
-  }
-  return {
-    outcome: 'admitted',
-    state: pruneAlertReviewTray({ ...state, pending: [...state.pending, item],
-      tombstones: state.tombstones.filter((entry) => !recovered(entry)) }, now),
-  };
+  const result = admitPreparedReviewAlerts(current, [input], now);
+  return { state: result.state, outcome: result.outcomes[0],
+    ...(result.outcomes[0] === 'deferred' ? { reason: 'review-capacity' } : {}) };
 };
 
-/**
- * Admit a batch under the same dedupe, identity and lane rules as
- * admitPreparedReviewAlert, but prune once. A History import can stage
- * thousands of candidates; per-item pruning over a full tombstone list would
- * block the JS thread. Lane trimming runs once over the whole batch, so it
- * never evicts more possible money movements than item-by-item admission.
- */
+/** Bounded lanes; available subsets survive while remaining source must be retried. */
 export const admitPreparedReviewAlerts = (
-  current: AlertReviewTrayState,
-  inputs: readonly ReviewEntry[],
-  now: number,
+  current: AlertReviewTrayState, inputs: readonly ReviewEntry[], now: number,
 ): { state: AlertReviewTrayState; outcomes: ReviewAdmissionResult['outcome'][] } => {
   const state = pruneAlertReviewTray(current, now);
-  const blocked = new Set<string>();
-  const evictedKeys = new Set<string>();
-  for (const entry of state.tombstones) {
-    const key = canonicalUniversalSourceKey(entry.sourceKey);
-    if (entry.outcome === 'evicted') evictedKeys.add(key);
-    else blocked.add(key);
-  }
-  const pendingKeys = new Set(state.pending.map((entry) =>
-    canonicalUniversalSourceKey(entry.sourceKey, entry.observedAt)));
-  const pendingById = new Map(state.pending.map((entry) => [entry.id, entry]));
-  let protectedCount = state.pending.filter((entry) => reviewLane(entry) === 'protected').length;
-  const added: ReviewEntry[] = [];
+  const working = [...state.pending];
   const recoveredKeys = new Set<string>();
+  const expiredInputs: ReviewEntry[] = [];
   const outcomes: ReviewAdmissionResult['outcome'][] = [];
+  const keys: string[] = [];
+  const decisions = new Map(state.tombstones.map(entry =>
+    [canonicalUniversalSourceKey(entry.sourceKey), entry.outcome]));
+  const pendingKey = (entry: ReviewEntry) => canonicalUniversalSourceKey(entry.sourceKey, entry.observedAt);
   for (const input of inputs) {
+    const key = canonicalUniversalSourceKey(input.sourceKey, input.observedAt);
+    keys.push(key);
     const item = normalizeReviewEntry(input, now);
-    if (!item || item.expiresAt <= now) { outcomes.push('refused'); continue; }
-    const existing = pendingById.get(item.id);
+    if (!item) { outcomes.push('refused'); continue; }
+    const existing = working.find(entry => entry.id === item.id);
     if (existing && (existing.sourceKey !== item.sourceKey || existing.observedAt !== item.observedAt)) {
-      outcomes.push('refused');
-      continue;
+      outcomes.push('refused'); continue;
     }
-    const key = canonicalUniversalSourceKey(item.sourceKey, item.observedAt);
-    if (blocked.has(key) || pendingKeys.has(key)) { outcomes.push('duplicate'); continue; }
+    const decision = decisions.get(key);
+    if (decision && isResolutionOutcome(decision)) { outcomes.push('duplicate'); continue; }
+    if (item.expiresAt <= now || decision === 'expired') {
+      if (!decision) expiredInputs.push(item);
+      outcomes.push('expired'); continue;
+    }
+    if (working.some(entry => pendingKey(entry) === key)) { outcomes.push('duplicate'); continue; }
     const lane = reviewLane(item);
-    if (lane === 'protected' && protectedCount >= REVIEW_ALERT_CAP) { outcomes.push('refused'); continue; }
-    if (lane === 'protected') protectedCount += 1;
-    if (evictedKeys.has(key)) recoveredKeys.add(key);
-    pendingKeys.add(key);
-    pendingById.set(item.id, item);
-    added.push(item);
+    const occupants = working.filter(entry => reviewLane(entry) === lane);
+    if (occupants.length >= REVIEW_ALERT_CAP) {
+      // No caller may replace acknowledged evidence with a new observation.
+      const disposable = occupants.filter(entry => !requiresReviewRetention(entry))
+        .sort((a, b) => a.observedAt - b.observedAt)[0];
+      if (lane === 'protected' || !disposable ||
+          (!requiresReviewRetention(item) && item.observedAt <= disposable.observedAt)) {
+        outcomes.push('deferred'); continue;
+      }
+      working.splice(working.indexOf(disposable), 1);
+    }
+    working.push(item);
+    recoveredKeys.add(key);
     outcomes.push('admitted');
   }
-  if (added.length === 0) return { state, outcomes };
-  return {
-    outcomes,
-    state: pruneAlertReviewTray({
-      ...state,
-      pending: [...state.pending, ...added],
-      tombstones: state.tombstones.filter((entry) => !(entry.outcome === 'evicted' &&
-        recoveredKeys.has(canonicalUniversalSourceKey(entry.sourceKey)))),
-    }, now),
-  };
+  const next = pruneAlertReviewTray({ ...state, pending: [...working, ...expiredInputs],
+    tombstones: state.tombstones.filter(entry => !(
+      (entry.outcome === 'evicted' || entry.outcome === 'currency-evicted') &&
+      recoveredKeys.has(canonicalUniversalSourceKey(entry.sourceKey)))) }, now);
+  const retained = new Set(next.pending.map(pendingKey));
+  return { state: next, outcomes: outcomes.map((outcome, index) =>
+    outcome === 'admitted' && !retained.has(keys[index]) ? 'deferred' : outcome) };
 };
 
 /** Whole days left before a pending review expires, only inside its final week. */
@@ -686,12 +706,11 @@ export const reviewTrayCapacity = (
 
 /**
  * Backpressure for a caller that can leave its source queued. A full legacy
- * lane admits by evicting, informational entries first. A possible money
- * movement whose admission would evict another money movement (or itself) is
+ * lane may replace disposable informational entries first. Required evidence
+ * whose admission cannot preserve all acknowledged required payloads is
  * returned as `deferred` so its record stays queued. Informational reviews
- * never wait: they keep the evicting policy and cannot block capture.
- * Foreign-currency reviews never wait either: their own lane evicts its
- * oldest entry with a counted tombstone. Duplicates and refusals pass through
+ * may be deferred as well; they cannot evict retained exact-money evidence.
+ * Foreign-currency reviews use the same bounded admission contract. Duplicates and refusals pass through
  * with their existing acknowledgement semantics. Protected iOS reviews refuse
  * at capacity inside admission.
  */
@@ -710,10 +729,11 @@ export const partitionReviewsByCapacity = <T extends ReviewEntry>(
       continue;
     }
     const result = admitPreparedReviewAlert(state, item, now);
-    if (lane === 'legacy' && result.outcome === 'admitted' && isMoneyMovementReview(item)) {
+    if (result.outcome === 'deferred') { deferred.push(item); continue; }
+    if (lane === 'legacy' && result.outcome === 'admitted' && requiresReviewRetention(item)) {
       const kept = new Set(result.state.pending.map((entry) => entry.id));
       const losesMoneyMovement = !kept.has(item.id) || state.pending.some((entry) =>
-        reviewLane(entry) === 'legacy' && isMoneyMovementReview(entry) && !kept.has(entry.id));
+        reviewLane(entry) === 'legacy' && requiresReviewRetention(entry) && !kept.has(entry.id));
       if (losesMoneyMovement) {
         deferred.push(item);
         continue;
