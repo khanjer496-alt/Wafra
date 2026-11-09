@@ -275,6 +275,19 @@ struct NativeBackgroundAlertParserTests {
           preview?.style == "movement" && preview?.direction == "debit" && preview?.formattedAmount == "AED 37.00")
       }
     }
+    for (index, held) in [
+      "ADCB Alert\nPayment received AED 500.00 on your card ending 2517.",
+      "Hi, payment received AED 500.00 on your card ending 2517",
+      "Thanks for your payment of AED 500.00 on your credit card ending 2554",
+      "Your credit card payment of AED 500.00 was successful",
+      "تم استلام سداد بمبلغ 500.00 درهم على بطاقتك الائتمانية المنتهية بـ 2665",
+      "لم يتم إيداع مبلغ 500.00 درهم في بطاقتك الائتمانية المنتهية بـ 2665",
+      "سيتم إيداع مبلغ 500.00 درهم في بطاقتك الائتمانية المنتهية بـ 2665 خلال 3 أيام عمل",
+      "تم إيداع مبلغ 500.00 درهم في بطاقتك الائتمانية المنتهية بـ 2665 اضغط على الرابط http://bit.ly/abc123"
+    ].enumerated() {
+      check("held repayment/non-event \(index) cannot emit an ordinary movement",
+        await read(runtime, body: held, sender: "ADCB", context: context(hash: hash)) == nil)
+    }
     let submillisecond = observedAt.addingTimeInterval(0.00075)
     let fractionalDomestic = await read(runtime, body: "Purchase of AED 24.86 with Debit Card ending 1234 at SAMPLE STORE.", sender: "ADCB", context: context(hash: hash), observedDate: submillisecond)
     check("shipping parser reads normal submillisecond capture timestamp", fractionalDomestic?.formattedAmount == "AED 24.86")

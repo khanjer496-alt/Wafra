@@ -3,7 +3,7 @@ import { isUnboundAndroidSourceKey, isUsableCaptureSourceIdentity } from '@/lib/
 import type { FxQuote } from '@/lib/fx';
 import { convertForeignConfirmation, quoteFitsDay, type ReferenceConversion } from '@/lib/fx-rates';
 import { nonPostingReason } from '@/lib/sms-parser';
-import { hasClickLinkPrompt, hasMobileMoneyCallback, isLeadingNumericDiscountOffer, isUnqualifiedPeerTransferClaim, isUnqualifiedCardRepayment } from '@/lib/principal-posting-guards';
+import { hasClickLinkPrompt, hasMobileMoneyCallback, isLeadingNumericDiscountOffer, isUnqualifiedPeerTransferClaim, isUnqualifiedCardRepayment, isQualifiedCardRepaymentReceipt, isUnpostedCardBalanceClaim } from '@/lib/principal-posting-guards';
 import type { BestEffortMarker, CaptureInstrument } from '@/lib/types';
 import type { UniversalBankEvent, UniversalMoney } from '@/lib/universal-types';
 
@@ -533,14 +533,19 @@ const OWN_CARD_PAYMENT = /\b(?:[Yy]ou\s+)?paid\b(?:[^.\n]|\.\d){0,40}?\bto\s+you
  * auto-added; whether it then reaches Review is the refusal inspector's
  * decision (on the iPhone History path most of these are simply not imported).
  */
-export const isNotAutoPostableMoney = (source: string): boolean => {
+const notAutoPostableMoney = (source: string, repaymentReview: boolean): boolean => {
   if (hasClickLinkPrompt(source) || hasMobileMoneyCallback(source) || isUnqualifiedPeerTransferClaim(source) ||
-    isLeadingNumericDiscountOffer(source) || isUnqualifiedCardRepayment(source) || hasLinkCallToAction(source)) return true;
+    isUnpostedCardBalanceClaim(source) || isLeadingNumericDiscountOffer(source) ||
+    (!repaymentReview && isUnqualifiedCardRepayment(source)) || hasLinkCallToAction(source)) return true;
   const wording = neutraliseBenignShapes(source);
   return NOT_A_SETTLED_FACT.some((pattern) => pattern.test(wording)) ||
     NOT_A_NEW_MOVEMENT.some((pattern) => pattern.test(source)) ||
     (MERCHANT_ORDER_RECEIPT.test(source) && !OWN_BALANCE_STATED.test(source));
 };
+export const isNotAutoPostableMoney = (source: string): boolean => notAutoPostableMoney(source, false);
+/** Only the repayment hold itself is exempted; all other wording vetoes remain. */
+export const isSafeCardRepaymentReviewSource = (source: string): boolean =>
+  (isUnqualifiedCardRepayment(source) || isQualifiedCardRepaymentReceipt(source)) && !notAutoPostableMoney(source, true);
 
 /**
  * A link next to the money. Lures always carry one ("confirm your
@@ -771,7 +776,7 @@ const PROMO_AND_SHOP_WORDING: readonly RegExp[] = [
 const REFUND_AVAILABLE = /\brefund\b[^\n]{0,30}?\b(?:is|are)\s+(?:now\s+)?(?:available|ready)\b/iu;
 
 const hardNonCompletedWording = (source: string, market?: string | null): boolean =>
-  nonPostingReason(source) !== null || NON_COMPLETED_WORDING.some((pattern) => pattern.test(source)) ||
+  isUnpostedCardBalanceClaim(source) || nonPostingReason(source) !== null || NON_COMPLETED_WORDING.some((pattern) => pattern.test(source)) ||
   (!!market && LATAM_MARKETS.has(market) && LATAM_NON_COMPLETED_WORDING.some((pattern) => pattern.test(source))) ||
   TEMPORARY_HOLD.test(source) || (AUTHORISATION.test(source) && !COMPLETED.test(source));
 

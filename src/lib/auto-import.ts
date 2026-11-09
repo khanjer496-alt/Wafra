@@ -25,6 +25,7 @@ import { toISODate } from '@/lib/format';
 import { bodyPrint, statedBalanceInText, type CaptureChannel } from '@/lib/dedupe';
 import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
+import { isUnpostedCardBalanceClaim, isCompletedCardBalanceReceipt } from '@/lib/principal-posting-guards';
 import {
   nonPostingReason,
   parseForeignAwaitingRate,
@@ -64,7 +65,7 @@ import {
 } from '@/lib/markets';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { dateOrderForCountry, getActiveCountry } from '@/lib/country';
-import { bestEffortAutoPostEnabled, decideBestEffortAutoPost } from '@/lib/best-effort-autopost';
+import { bestEffortAutoPostEnabled, decideBestEffortAutoPost, isSafeCardRepaymentReviewSource, isNotAutoPostableMoney } from '@/lib/best-effort-autopost';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { UniversalBankEvent } from '@/lib/universal-types';
 import { certifyUniversalTemplate } from '@/lib/universal-template-certification';
@@ -980,6 +981,9 @@ export function inspectSourceFreeRefusedAlert(input: {
   // BNPL provider restatement (see bnpl-providers.ts): the bank's
   // card alert is the transaction, so this source never earns a Review card.
   if (isBnplProviderSource(input.sender)) return { kind: 'ignored', reason: 'non-financial' };
+  // An explicit non-credit/future balance claim must not acquire actionable
+  // money through an unparsed-template fallback. This is no ledger deletion.
+  if (isUnpostedCardBalanceClaim(input.source)) return { kind: 'ignored', reason: 'non-financial' };
   const reason = nonPostingReason(input.source);
   if (reason) return { kind: 'declined', reason };
   // A generic amount detector can read "Get AED 50 cashback on your next
@@ -1024,6 +1028,20 @@ export function inspectSourceFreeRefusedAlert(input: {
     }
   }
 
+  // Prefer typed settlement Review over a generic purchase/income draft. No
+  // amount, direction or card identity is invented; missing fields stay open.
+  if (isSafeCardRepaymentReviewSource(input.source) ||
+    (isCompletedCardBalanceReceipt(input.source) && !isNotAutoPostableMoney(input.source))) {
+    const event = inspectGenericBankEventForReview(input.source, input.sender);
+    const review = event?.family === 'card-payment' && (event.status === 'posted' || event.status === 'unknown') ? prepareUniversalReviewAlert({
+      id: 'capture_probe_id_0001', sourceKey: 'capture_probe_key_001',
+      observedAt: input.observedAt, channel: input.channel, event,
+    }) : null;
+    if (review) {
+      const { id: _id, sourceKey: _sourceKey, ...candidate } = review;
+      return { kind: 'review', candidate };
+    }
+  }
   const inspection = input.existingInspection ?? input.session.inspect(input.source, input.sender);
   const prepared = inspection
     ? prepareReviewAlert({

@@ -240,12 +240,26 @@ const CARD_CREDIT_MOVEMENT = /\bcredited(?:\s+with|\s+to)?\b|(?<![ء-ي])(?:تم
 const REPAYMENT_MONEY = String.raw`(?:[A-Z]{3}|Dhs?\.?|SR|[$€£])\s*\p{Nd}+(?:[.,٫٬]\p{Nd}+)*`;
 // A card is the destination, never an instrument used to pay a merchant/bill.
 const REPAYMENT_CARD = String.raw`(?:(?!(?:bill|invoice|loan|finance|mortgage|account|utility|electricity|water|using|via|with|through|from|to|for|by|on|at|and|of)\b)[\p{L}\p{N}.'’-]+\s+){0,3}?card\b`;
+const REPAYMENT_DESTINATION_CARD = String.raw`(?:(?!(?:bill|invoice|loan|finance|mortgage|account|utility|electricity|water|using|via|with|through|from|to|for|by|on|at|and)\b)[\p{L}\p{N}.'’-]+\s+){0,6}?card\b`;
+const REPAYMENT_NUMBER = String.raw`\p{Nd}+(?:[.,٫٬]\p{Nd}+)*`;
+const REPAYMENT_UNIT = String.raw`(?:[A-Z]{3}|Dhs?\.?|SR|[$€£])`;
+const REPAYMENT_ANY_MONEY = String.raw`(?:${REPAYMENT_UNIT}\s*${REPAYMENT_NUMBER}|${REPAYMENT_NUMBER}\s*${REPAYMENT_UNIT})`;
+const REPAYMENT_DESTINATION = String.raw`(?:on|to|towards?)\s+(?:your\s+)?${REPAYMENT_DESTINATION_CARD}`;
+const REPAYMENT_GREETING = String.raw`(?:(?:Dear\s+[^\n.!?\p{N},:!]{1,40}|Hi|Hello)[,!:]\s*)?`;
+const AR_REPAYMENT_MONEY = String.raw`(?:${REPAYMENT_ANY_MONEY}|${REPAYMENT_NUMBER}\s*(?:درهم|دراهم|ريال)|(?:درهم|دراهم|ريال)\s*${REPAYMENT_NUMBER})`;
+const COMPLETED_CARD_BALANCE_RECEIPT = new RegExp(
+  String.raw`^تم\s+(?:(?:[إا]يداع|[إا]ضاف[هة])\s+(?:مبلغ\s+)?|استلام\s+سداد\s+(?:بمبلغ|مبلغ)\s+)${AR_REPAYMENT_MONEY}`, 'iu',
+);
 const UNQUALIFIED_REPAYMENT = new RegExp(
-  String.raw`^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?(?:` +
-  String.raw`payment\s+(?:received|credited)\s+${REPAYMENT_MONEY}\s+(?:on|to|towards?)\s+(?:your\s+)?${REPAYMENT_CARD}` +
-  String.raw`|thank\s+you\s+for\s+(?:your\s+)?payment\s+of\s+${REPAYMENT_MONEY}\s+on\s+(?:your\s+)?${REPAYMENT_CARD}` +
-  String.raw`|your\s+payment\s+of\s+${REPAYMENT_MONEY}\s+to\s+(?:your\s+)?(?:credit|charge|covered)\s+card\b(?:[^.\n]|\.\d){0,80}\bsuccessful\b)`,
-  'iu',
+  String.raw`(?:^|[\n.!?]\s*)\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?${REPAYMENT_GREETING}(?:` +
+  String.raw`payment\s+(?:received|credited)\s+${REPAYMENT_ANY_MONEY}\s+${REPAYMENT_DESTINATION}` +
+  String.raw`|we\s+(?:have\s+)?received\s+(?:your\s+)?payment\s+(?:of\s+)?${REPAYMENT_ANY_MONEY}\s+${REPAYMENT_DESTINATION}` +
+  String.raw`|payment\s+(?:of\s+)?${REPAYMENT_ANY_MONEY}\s+(?:was\s+)?received\s+${REPAYMENT_DESTINATION}` +
+  String.raw`|(?:thank\s+you|thanks)\s+for\s+(?:your\s+)?payment\s+of\s+${REPAYMENT_ANY_MONEY}\s+${REPAYMENT_DESTINATION}` +
+  String.raw`|your\s+payment\s+of\s+${REPAYMENT_ANY_MONEY}\s+to\s+(?:your\s+)?${REPAYMENT_DESTINATION_CARD}(?:[^.\n]|\.\d){0,80}\bsuccessful\b` +
+  String.raw`|your\s+(?:(?:[\p{L}.'’-]+)\s+){0,4}?(?:credit|charge|covered)\s+card\s+payment\s+of\s+${REPAYMENT_ANY_MONEY}(?:[^.\n]|\.\d){0,60}\bsuccessful\b` +
+  String.raw`|تم\s+استلام\s+سداد\s+(?:بمبلغ|مبلغ)\s+${AR_REPAYMENT_MONEY}\s+(?:على|علي|إلى|الى|الي|في)\s+بطاق(?:تك|تكم|ه|ة)\s+(?:ال)?ا[يئ]تماني[هة])`,
+  'giu',
 );
 const QUALIFIED_REPAYMENT_RECEIPT = new RegExp(
   String.raw`^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?(?:` +
@@ -254,10 +268,17 @@ const QUALIFIED_REPAYMENT_RECEIPT = new RegExp(
   String.raw`(?=\s*(?:[.!?\n]|$|(?:thank|avl|available|balance|for\s+(?:queries|help|details|information))\b))`,
   'iu',
 );
+// Preserve the mature receipt grammar already used by settlement pairing.
+const QUALIFIED_MATURE_REPAYMENT_RECEIPT = new RegExp(
+  String.raw`^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?payment\s+of\s+(${REPAYMENT_MONEY})\s+(?:has\s+been\s+)?received\s+(?:towards?|on)\s+your\s+${REPAYMENT_CARD}\s+(?:ending(?:\s+(?:in|with))?|number|no\.?)\s*(?:[*xX•·-]\s*)*\p{Nd}{4}(?!\p{Nd})` +
+    String.raw`(?=\s*(?:[.!?\n]|$|(?:thank|avl|available|balance|for\s+(?:queries|help|details|information))\b))`,
+  'iu',
+);
 /** A receipt names the person's destination card and tail, never a merchant instrument. */
 export function isQualifiedCardRepaymentReceipt(source: string, expectedCurrency?: string): boolean {
-  const match = QUALIFIED_REPAYMENT_RECEIPT.exec(source);
-  if (!match || /\b(?:debit|prepaid)\s+card\b/iu.test(match[0])) return false;
+  const match = QUALIFIED_REPAYMENT_RECEIPT.exec(source) ?? QUALIFIED_MATURE_REPAYMENT_RECEIPT.exec(source);
+  if (!match || /\b(?:debit|prepaid)\b/iu.test(match[0])) return false;
+  if (/\bthank\s+you\b/iu.test(match[0]) && !/\b(?:credit|charge|covered)\b/iu.test(match[0])) return false;
   if (expectedCurrency === undefined) return true;
   const token = match[1].match(/^[^\p{Nd}]+/u)?.[0].trim().replace(/\.$/u, '').toUpperCase();
   const code = token === 'DH' || token === 'DHS' ? 'AED' : token === 'SR' ? 'SAR' : token;
@@ -268,8 +289,50 @@ export function isQualifiedCardRepaymentReceipt(source: string, expectedCurrency
 
 /** Weaker receipt claims cannot prove new spending/income. Keep them in Review. */
 export function isUnqualifiedCardRepayment(source: string): boolean {
-  const text = /[\uFF01-\uFFEF]/u.test(source) ? source.normalize('NFKC') : source;
-  return UNQUALIFIED_REPAYMENT.test(text) && !isQualifiedCardRepaymentReceipt(text);
+  if (!/\bpayment\b|سداد|[\u0640\u064B-\u065F\u0670\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFB50-\uFEFF\uFF01-\uFFEF]/iu.test(source)) return false;
+  const text = repaymentReadingText(source);
+  if (!/\bpayment\b|سداد/iu.test(text) || isQualifiedCardRepaymentReceipt(text)) return false;
+  for (const match of text.matchAll(UNQUALIFIED_REPAYMENT)) {
+    const after = text.slice(match.index! + match[0].length).split(/[\n!?;]|\.(?=\s|$)/u)[0];
+    const clause = match[0] + after;
+    // A shop receipt names the merchant; a bank/ATM/branch is a payment rail.
+    const merchantAt = /\bat\s+\p{L}/iu.test(clause) &&
+      !/\bat\s+(?:the\s+)?(?:atm\b|[\p{L}]*bank\b|(?:[\p{L}]+\s+){0,3}branch\b)/iu.test(clause);
+    if (merchantAt || /\b(?:from|using)\s+(?!your\b|the\s+(?:bank|account)\b)\p{L}/iu.test(clause)) continue;
+    return true;
+  }
+  return false;
+}
+
+function repaymentReadingText(source: string): string {
+  return (/[\uFB50-\uFEFF\uFF01-\uFFEF]/u.test(source) ? source.normalize('NFKC') : source)
+    .replace(/[\u0640\u064B-\u065F\u0670\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/gu, '');
+}
+
+function cardBalanceReceiptText(source: string): string {
+  return repaymentReadingText(source)
+    .replace(/^\s*[A-Z][A-Z .&'-]{1,32}(?:alert|bank|sms)\s*\r?\n\s*/iu, '')
+    .replace(/^\s*[A-Z][A-Z0-9 .&'-]{1,32}:\s*/iu, '')
+    .replace(/^\s*(?:Dear\s+[^\n.!?\p{N},:!]{1,40}|Hi|Hello)[,!:]\s*/iu, '').trim();
+}
+
+/** Explicit absence/future credit is not an actionable card-balance event. */
+export function isUnpostedCardBalanceClaim(source: string): boolean {
+  if (!/[إا]يداع|[إا]ضاف|سداد|[\u0640\u064B-\u065F\u0670\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFB50-\uFEFF\uFF01-\uFFEF]/u.test(source)) return false;
+  const text = cardBalanceReceiptText(source);
+  return CARD_CREDIT_TARGET.test(text) && /^(?:(?:(?:لم|لن)\s+يتم|سيتم|سوف\s+يتم|(?:[إا]ذا|لو|في\s+حال[هة]?)\s+تم)\s+(?:[إا]يداع|[إا]ضاف[هة]|استلام\s+سداد)|تم\s+استلام\s+طلب\s+(?:[إا]يداع|[إا]ضاف[هة]|سداد)|تم\s+(?:[إا]يداع|[إا]ضاف[هة])\s+طلب)(?![ء-ي])/u.test(text);
+}
+
+/** Regional past-tense proof may qualify Review, never automatic settlement. */
+export function isCompletedCardBalanceReceipt(source: string): boolean {
+  const text = cardBalanceReceiptText(source);
+  return CARD_CREDIT_TARGET.test(text) && COMPLETED_CARD_BALANCE_RECEIPT.test(text);
+}
+
+/** A balance in another clause cannot become the repayment principal. */
+export function isCompletedCardRepaymentPrincipal(source: string, span: PrincipalSpan): boolean {
+  const clause = sentenceAround(source, span).text;
+  return isCompletedCardBalanceReceipt(clause) && isUnqualifiedCardRepayment(clause);
 }
 
 /** A credit to the credit-card balance may be a settlement, not new income.

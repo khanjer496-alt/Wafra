@@ -2,7 +2,7 @@ import { inspectAlertDraft, type AlertDraft, type CurrencyAliasMap, type MoneyCa
 import { alertMarketPack } from '@/lib/alert-market-packs';
 import { CURRENCY_SYMBOL_CANDIDATES } from '@/lib/currency-metadata';
 import { extractUniversalFields } from '@/lib/universal-fields';
-import { isUnqualifiedCardCredit } from '@/lib/principal-posting-guards';
+import { isUnqualifiedCardCredit, isCompletedCardRepaymentPrincipal } from '@/lib/principal-posting-guards';
 import {
   missingUniversalField,
   type UniversalField,
@@ -51,7 +51,8 @@ export function unqualifiedCardCreditCurrencyAliases(
   const draft = inspectAlertDraft(source, { currencyAliases });
   const credits = draft.candidates.filter(candidate => candidate.currency === (market === 'AE' ? 'AED' : 'SAR') &&
     candidate.minorUnits !== null && /^[1-9]\d*$/u.test(candidate.minorUnits) &&
-    isUnqualifiedCardCredit(draft.normalizedText, candidate.span));
+    (isUnqualifiedCardCredit(draft.normalizedText, candidate.span) ||
+      isCompletedCardRepaymentPrincipal(draft.normalizedText, candidate.span)));
   return credits.length === 1 ? currencyAliases : undefined;
 }
 

@@ -3,7 +3,7 @@ import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars'
 import { activeCountryDateOrder, dateOrderForCountry, getActiveCountry } from '@/lib/country';
 import {
   bestEffortAutoPostEnabled, decideBestEffortAutoPost, hasLinkFromUnregisteredSender, hasNonCompletedWording,
-  isNotAutoPostableMoney, isRegisteredAlertSender, isUnverifiedAlertSender, namesOwnInstrumentTail,
+  isNotAutoPostableMoney, isSafeCardRepaymentReviewSource, isRegisteredAlertSender, isUnverifiedAlertSender, namesOwnInstrumentTail,
   refusedOnlyByShopOrPromoWording,
   sharedSymbolCurrencyForCountry,
 } from '@/lib/best-effort-autopost';
@@ -26,7 +26,7 @@ import { decideGulfNeighbourPosting, gulfNeighbourReadSource, isGulfNeighbourMar
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { alertMarketPack } from '@/lib/alert-market-packs';
 import { normalizeAlertText } from '@/lib/alert-draft';
-import { isUnqualifiedCardCredit } from '@/lib/principal-posting-guards';
+import { isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isQualifiedCardRepaymentReceipt, isUnpostedCardBalanceClaim, isCompletedCardBalanceReceipt } from '@/lib/principal-posting-guards';
 import { unqualifiedCardCreditCurrencyAliases } from '@/lib/universal-money';
 import { isLatamOwnCardPayment, latamOwnTransferTitle, latamPolicySource, matchLatamTemplate } from '@/lib/latam-alert-templates';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
@@ -210,7 +210,8 @@ export const inspectGenericBankEventForReview = (
   market?: string | null,
   sourceContext?: UniversalParseContext,
 ): UniversalBankEvent | null => {
-  if (hasPersonalMessagePrefix(source, sender) || hasNegatedPrincipalMovement(source)) return null;
+  if (hasPersonalMessagePrefix(source, sender) || hasNegatedPrincipalMovement(source) ||
+    isUnpostedCardBalanceClaim(source)) return null;
   // An exact LatAm bank template is bank-alert context in its own right.
   const noContext = !hasGenericBankAlertContext(source, sender) && !matchLatamTemplate(source, { sender });
   // A "money arrived" claim from a phone number, e-mail, generic header or
@@ -242,7 +243,13 @@ export const inspectGenericBankEventForReview = (
   // and global currency alias. Admit its exact regional money to Review only.
   let cardCreditAliases: CurrencyAliasMap | undefined;
   const creditSource = /[\uFB50-\uFDFF\uFE70-\uFEFF]/u.test(source) ? normalizeAlertText(source) : source;
-  if (noContext && isUnqualifiedCardCredit(creditSource, { start: 0, end: creditSource.length })) {
+  const heldRepayment = isUnqualifiedCardRepayment(creditSource) || isQualifiedCardRepaymentReceipt(creditSource);
+  const cardBalanceReceipt = isCompletedCardBalanceReceipt(creditSource);
+  const safeCardBalanceReview = !nonPostingReason(source) &&
+    !hasNonCompletedWording(source, null, sender) && !hasLinkFromUnregisteredSender(source, sender) &&
+    (heldRepayment ? isSafeCardRepaymentReviewSource(source) : !isNotAutoPostableMoney(source));
+  if (cardBalanceReceipt && safeCardBalanceReview && (heldRepayment ||
+    isUnqualifiedCardCredit(creditSource, { start: 0, end: creditSource.length }))) {
     const active = getActiveMarket().id;
     const launch = detectLaunchMarketFromSender(sender) ??
       (isAbsentLaunchSender(sender) && (active === 'AE' || active === 'SA')
@@ -255,10 +262,18 @@ export const inspectGenericBankEventForReview = (
     : sourceContext ? { ...sourceContext, sender }
       : universalSourceParseContext(hasUniversalInstitutionSender(sender)
         ? inspectUniversalAlert({ source, sender }) : null, sender, getActiveCountry());
-  const event = inspectUniversalBankEvent(isGulfNeighbourMarket(market)
+  let event = inspectUniversalBankEvent(isGulfNeighbourMarket(market)
     ? gulfNeighbourReadSource(source, market) : source, cardCreditAliases
       ? { ...context, currencyAliases: { ...cardCreditAliases, ...context.currencyAliases } } : context);
   if (event.decision !== 'review') return null;
+  if (cardCreditAliases) {
+    if (event.status !== 'posted' && event.status !== 'unknown') return null;
+    // The regional past-tense receipt supplies the completion proof missing
+    // from the generic reader. It authorises typed Review, never auto-add.
+    event = { ...event, status: 'posted', family: 'card-payment' };
+  } else if (heldRepayment && safeCardBalanceReview && (event.status === 'posted' || event.status === 'unknown')) {
+    event = { ...event, family: 'card-payment' };
+  }
   // A source-labelled credit limit is not a second purchase. Every other
   // extra figure remains refused: "used for X ... and Y ..." can otherwise
   // look like one explicit principal plus one unknown amount.
@@ -443,7 +458,7 @@ const universalCardPayment = (
   observedAt?: number,
 ): Omit<ParsedSms, 'raw' | 'bestEffort'> | null => {
   if (event.family !== 'card-payment' || event.decision !== 'review' ||
-    nonPostingReason(source) || isNotAutoPostableMoney(source)) return null;
+    nonPostingReason(source) || (isNotAutoPostableMoney(source) && !isSafeCardRepaymentReviewSource(source))) return null;
   // An exact Latin American own card-bill template ("Pagaste ... en la tarjeta
   // de credito *4321 desde la cuenta *1234") names the paid card in Spanish.
   const latamCardPayment = event.family === 'card-payment' && isLatamOwnCardPayment(source);
@@ -855,7 +870,11 @@ export const isHeldLaunchCredit = (source: string, sender: string, parsed: Parse
 const launchSenderAnswersFor = (source: string, sender: string, parsed: ParsedSms): boolean => {
   // A familiar sender label cannot make a smishing call-to-action settled
   // money. Apply the same wording guard as the worldwide posting policy.
-  if (isNotAutoPostableMoney(source)) return false;
+  const provedSettlement = parsed.kind === 'cardPayment' && parsed.transferHint === true &&
+    parsed.card?.kind === 'credit' && /^\d{4}$/u.test(parsed.card.last4) &&
+    parsed.currency === pinnedLedgerCurrencyCode() && parsed.fxSource !== 'fallback' &&
+    isSafeCardRepaymentReviewSource(source) && !hasNonCompletedWording(source, null, sender);
+  if (isNotAutoPostableMoney(source) && !provedSettlement) return false;
   if (!isAbsentLaunchSender(sender)) return !isUnverifiedAlertSender(sender);
   if (parsed.kind !== 'transaction') return true;
   return parsed.type !== 'income' || namesOwnInstrumentTail(source, 'credit');

@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 5a664cc3c746dd0662267a5167f637f33c82c5d06f6c63eda1d090e654ea1871
+// Generated from normal shipping TypeScript. Source SHA-256: 34ab74ea3c50ad295dee694862aa926b206972303ccaa1458d915d147a9c5c10
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -2332,7 +2332,7 @@ function malformedLocalMoneyTokens(text, currencyAliases) {
 "best-effort-autopost":function(module,exports,require){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.appendBestEffortUndo = exports.tombstonesForRemoved = exports.bestEffortUndoKeys = exports.bestEffortCardPaymentObservationKey = exports.bestEffortObservationKey = exports.BEST_EFFORT_UNDO_CAP = exports.refusedOnlyByShopOrPromoWording = exports.hasNonCompletedWording = exports.namesOwnInstrumentTail = exports.isRegisteredAlertSender = exports.isUnverifiedAlertSender = exports.hasLinkFromUnregisteredSender = exports.isNotAutoPostableMoney = exports.sharedSymbolCurrencyForCountry = void 0;
+exports.appendBestEffortUndo = exports.tombstonesForRemoved = exports.bestEffortUndoKeys = exports.bestEffortCardPaymentObservationKey = exports.bestEffortObservationKey = exports.BEST_EFFORT_UNDO_CAP = exports.refusedOnlyByShopOrPromoWording = exports.hasNonCompletedWording = exports.namesOwnInstrumentTail = exports.isRegisteredAlertSender = exports.isUnverifiedAlertSender = exports.hasLinkFromUnregisteredSender = exports.isSafeCardRepaymentReviewSource = exports.isNotAutoPostableMoney = exports.sharedSymbolCurrencyForCountry = void 0;
 exports.decideBestEffortAutoPost = decideBestEffortAutoPost;
 exports.setBestEffortAutoPostEnabled = setBestEffortAutoPostEnabled;
 exports.bestEffortAutoPostEnabled = bestEffortAutoPostEnabled;
@@ -2521,16 +2521,20 @@ const NOT_A_NEW_MOVEMENT = [
 const MERCHANT_ORDER_RECEIPT = /\border\s*(?:#|no\.?|number|id)\s*[:.-]?\s*[A-Z0-9-]*\d[\s\S]{0,80}?\b(?:paid|payment)\b|\b(?:paid|payment)\b[\s\S]{0,40}?\border\s*(?:#|no\.?|number|id)\s*[:.-]?\s*[A-Z0-9-]*\d/iu;
 const OWN_BALANCE_STATED = /\b(?:updated|avl\.?|available|new|closing|current)\s+(?:wallet\s+|account\s+|a\/c\s+)?bal(?:ance)?\b|\bbal(?:ance)?\s*(?:is|:)\s*(?:[A-Z]{3}|Rs\.?|[$£€₹])/iu;
 const OWN_CARD_PAYMENT = /\b(?:[Yy]ou\s+)?paid\b(?:[^.\n]|\.\d){0,40}?\bto\s+your\s+(?:(?:[A-Z][\p{L}\p{N}&.'’-]*|credit|charge)\s+){0,4}?[Cc]ard\b/u;
-const isNotAutoPostableMoney = (source) => {
+const notAutoPostableMoney = (source, repaymentReview) => {
     if ((0, principal_posting_guards_1.hasClickLinkPrompt)(source) || (0, principal_posting_guards_1.hasMobileMoneyCallback)(source) || (0, principal_posting_guards_1.isUnqualifiedPeerTransferClaim)(source) ||
-        (0, principal_posting_guards_1.isLeadingNumericDiscountOffer)(source) || (0, principal_posting_guards_1.isUnqualifiedCardRepayment)(source) || hasLinkCallToAction(source))
+        (0, principal_posting_guards_1.isUnpostedCardBalanceClaim)(source) || (0, principal_posting_guards_1.isLeadingNumericDiscountOffer)(source) ||
+        (!repaymentReview && (0, principal_posting_guards_1.isUnqualifiedCardRepayment)(source)) || hasLinkCallToAction(source))
         return true;
     const wording = neutraliseBenignShapes(source);
     return NOT_A_SETTLED_FACT.some((pattern) => pattern.test(wording)) ||
         NOT_A_NEW_MOVEMENT.some((pattern) => pattern.test(source)) ||
         (MERCHANT_ORDER_RECEIPT.test(source) && !OWN_BALANCE_STATED.test(source));
 };
+const isNotAutoPostableMoney = (source) => notAutoPostableMoney(source, false);
 exports.isNotAutoPostableMoney = isNotAutoPostableMoney;
+const isSafeCardRepaymentReviewSource = (source) => ((0, principal_posting_guards_1.isUnqualifiedCardRepayment)(source) || (0, principal_posting_guards_1.isQualifiedCardRepaymentReceipt)(source)) && !notAutoPostableMoney(source, true);
+exports.isSafeCardRepaymentReviewSource = isSafeCardRepaymentReviewSource;
 const LINK_RE = /\bhttps?:\/\/|\bwww\.[a-z0-9-]|\b(?:bit\.ly|tinyurl\.com|t\.co|goo\.gl|cutt\.ly|rb\.gy|is\.gd|ow\.ly|shorturl\.at)\/|\b[a-z0-9][a-z0-9-]{0,62}\.[a-z]{2,24}\/[\w-]/u;
 const GENERIC_SENDER = /^(?:info|infos|alert|alerts|notice|notify|sms|msg|message|verify|secure|security|service|support|update|bank|banking)$/i;
 const registeredAlphaSender = (sender) => {
@@ -2611,7 +2615,7 @@ const PROMO_AND_SHOP_WORDING = [
     /\bwill\s+be\s+(?:added|delivered|shipped|dispatched)\b|\btrack\s+your\s+(?:order|parcel|package|shipment)\b|\border\s+(?:update|confirmed)\b/iu,
 ];
 const REFUND_AVAILABLE = /\brefund\b[^\n]{0,30}?\b(?:is|are)\s+(?:now\s+)?(?:available|ready)\b/iu;
-const hardNonCompletedWording = (source, market) => (0, sms_parser_1.nonPostingReason)(source) !== null || NON_COMPLETED_WORDING.some((pattern) => pattern.test(source)) ||
+const hardNonCompletedWording = (source, market) => (0, principal_posting_guards_1.isUnpostedCardBalanceClaim)(source) || (0, sms_parser_1.nonPostingReason)(source) !== null || NON_COMPLETED_WORDING.some((pattern) => pattern.test(source)) ||
     (!!market && LATAM_MARKETS.has(market) && LATAM_NON_COMPLETED_WORDING.some((pattern) => pattern.test(source))) ||
     TEMPORARY_HOLD.test(source) || (AUTHORISATION.test(source) && !COMPLETED.test(source));
 const softNonCompletedWording = (source, ownCompleted) => {
@@ -9758,7 +9762,8 @@ const hasGenericBankAlertContext = (source, sender = '') => {
 exports.hasGenericBankAlertContext = hasGenericBankAlertContext;
 const SENDERLESS_USED_CARD_HINT = /^\s*your\s+(?:cr\.\s*)?card\s+(?:[*xX•·]{1,24}\s*)?(\d{4})(?![\p{L}\p{N}]|[ \t-]+\d)[ \t]+(?:was|has[ \t]+been)[ \t]+used[ \t]+for\b/iu;
 const inspectGenericBankEventForReview = (source, sender = '', market, sourceContext) => {
-    if ((0, exports.hasPersonalMessagePrefix)(source, sender) || hasNegatedPrincipalMovement(source))
+    if ((0, exports.hasPersonalMessagePrefix)(source, sender) || hasNegatedPrincipalMovement(source) ||
+        (0, principal_posting_guards_1.isUnpostedCardBalanceClaim)(source))
         return null;
     const noContext = !(0, exports.hasGenericBankAlertContext)(source, sender) && !(0, latam_alert_templates_1.matchLatamTemplate)(source, { sender });
     const claimAdmitted = noContext && (!sender.trim() || (0, best_effort_autopost_1.isUnverifiedAlertSender)(sender)) &&
@@ -9772,7 +9777,13 @@ const inspectGenericBankEventForReview = (source, sender = '', market, sourceCon
         !(0, best_effort_autopost_1.hasNonCompletedWording)(source, null, '') && !(0, best_effort_autopost_1.hasLinkFromUnregisteredSender)(source, '');
     let cardCreditAliases;
     const creditSource = /[\uFB50-\uFDFF\uFE70-\uFEFF]/u.test(source) ? (0, alert_draft_1.normalizeAlertText)(source) : source;
-    if (noContext && (0, principal_posting_guards_1.isUnqualifiedCardCredit)(creditSource, { start: 0, end: creditSource.length })) {
+    const heldRepayment = (0, principal_posting_guards_1.isUnqualifiedCardRepayment)(creditSource) || (0, principal_posting_guards_1.isQualifiedCardRepaymentReceipt)(creditSource);
+    const cardBalanceReceipt = (0, principal_posting_guards_1.isCompletedCardBalanceReceipt)(creditSource);
+    const safeCardBalanceReview = !(0, sms_parser_1.nonPostingReason)(source) &&
+        !(0, best_effort_autopost_1.hasNonCompletedWording)(source, null, sender) && !(0, best_effort_autopost_1.hasLinkFromUnregisteredSender)(source, sender) &&
+        (heldRepayment ? (0, best_effort_autopost_1.isSafeCardRepaymentReviewSource)(source) : !(0, best_effort_autopost_1.isNotAutoPostableMoney)(source));
+    if (cardBalanceReceipt && safeCardBalanceReview && (heldRepayment ||
+        (0, principal_posting_guards_1.isUnqualifiedCardCredit)(creditSource, { start: 0, end: creditSource.length }))) {
         const active = (0, markets_1.getActiveMarket)().id;
         const launch = (0, markets_1.detectLaunchMarketFromSender)(sender) ??
             (isAbsentLaunchSender(sender) && (active === 'AE' || active === 'SA')
@@ -9787,11 +9798,19 @@ const inspectGenericBankEventForReview = (source, sender = '', market, sourceCon
         : sourceContext ? { ...sourceContext, sender }
             : (0, exports.universalSourceParseContext)((0, alert_institution_grammars_1.hasUniversalInstitutionSender)(sender)
                 ? (0, alert_market_detection_1.inspectUniversalAlert)({ source, sender }) : null, sender, (0, country_1.getActiveCountry)());
-    const event = (0, universal_parser_1.inspectUniversalBankEvent)((0, gulf_neighbour_alerts_1.isGulfNeighbourMarket)(market)
+    let event = (0, universal_parser_1.inspectUniversalBankEvent)((0, gulf_neighbour_alerts_1.isGulfNeighbourMarket)(market)
         ? (0, gulf_neighbour_alerts_1.gulfNeighbourReadSource)(source, market) : source, cardCreditAliases
         ? { ...context, currencyAliases: { ...cardCreditAliases, ...context.currencyAliases } } : context);
     if (event.decision !== 'review')
         return null;
+    if (cardCreditAliases) {
+        if (event.status !== 'posted' && event.status !== 'unknown')
+            return null;
+        event = { ...event, status: 'posted', family: 'card-payment' };
+    }
+    else if (heldRepayment && safeCardBalanceReview && (event.status === 'posted' || event.status === 'unknown')) {
+        event = { ...event, family: 'card-payment' };
+    }
     const hasOtherCardMoney = cardAdmitted && event.observations.some(observation => observation.role !== 'transaction' && observation.role !== 'credit-limit');
     if (cardAdmitted && (event.family !== 'purchase' || event.status !== 'posted' || event.direction !== 'debit' ||
         event.amount.evidence !== 'explicit' || !event.amount.value || event.amount.spans.length !== 1 ||
@@ -9906,7 +9925,7 @@ const sourceNamesPaidCreditCard = (source, event, last4) => {
 };
 const universalCardPayment = (source, event, ledgerCurrency, ledgerExponent, country, observedAt) => {
     if (event.family !== 'card-payment' || event.decision !== 'review' ||
-        (0, sms_parser_1.nonPostingReason)(source) || (0, best_effort_autopost_1.isNotAutoPostableMoney)(source))
+        (0, sms_parser_1.nonPostingReason)(source) || ((0, best_effort_autopost_1.isNotAutoPostableMoney)(source) && !(0, best_effort_autopost_1.isSafeCardRepaymentReviewSource)(source)))
         return null;
     const latamCardPayment = event.family === 'card-payment' && (0, latam_alert_templates_1.isLatamOwnCardPayment)(source);
     if (NOT_CARD_OBLIGATION.test(source) || (!CREDIT_CARD_WORDS.test(source) && !latamCardPayment))
@@ -10176,7 +10195,11 @@ const isHeldLaunchCredit = (source, sender, parsed) => !!parsed && (0, exports.i
     !(0, best_effort_autopost_1.isNotAutoPostableMoney)(source) && ((0, best_effort_autopost_1.isUnverifiedAlertSender)(sender) || !(0, best_effort_autopost_1.namesOwnInstrumentTail)(source, 'credit'));
 exports.isHeldLaunchCredit = isHeldLaunchCredit;
 const launchSenderAnswersFor = (source, sender, parsed) => {
-    if ((0, best_effort_autopost_1.isNotAutoPostableMoney)(source))
+    const provedSettlement = parsed.kind === 'cardPayment' && parsed.transferHint === true &&
+        parsed.card?.kind === 'credit' && /^\d{4}$/u.test(parsed.card.last4) &&
+        parsed.currency === (0, markets_1.pinnedLedgerCurrencyCode)() && parsed.fxSource !== 'fallback' &&
+        (0, best_effort_autopost_1.isSafeCardRepaymentReviewSource)(source) && !(0, best_effort_autopost_1.hasNonCompletedWording)(source, null, sender);
+    if ((0, best_effort_autopost_1.isNotAutoPostableMoney)(source) && !provedSettlement)
         return false;
     if (!isAbsentLaunchSender(sender))
         return !(0, best_effort_autopost_1.isUnverifiedAlertSender)(sender);
@@ -11083,6 +11106,9 @@ exports.refundPrincipalStatus = refundPrincipalStatus;
 exports.isCompletedPrincipalRefund = isCompletedPrincipalRefund;
 exports.isQualifiedCardRepaymentReceipt = isQualifiedCardRepaymentReceipt;
 exports.isUnqualifiedCardRepayment = isUnqualifiedCardRepayment;
+exports.isUnpostedCardBalanceClaim = isUnpostedCardBalanceClaim;
+exports.isCompletedCardBalanceReceipt = isCompletedCardBalanceReceipt;
+exports.isCompletedCardRepaymentPrincipal = isCompletedCardRepaymentPrincipal;
 exports.isUnqualifiedCardCredit = isUnqualifiedCardCredit;
 const CLICK_LINK_PROMPT = /(?:\b(?:click(?:ing)?|tap(?:ping)?)\b[\s:：]+|(?<![ء-ي])(?:اضغط|إضغط|انقر)[\s:：]+)(?:[^.!?]|\.\d){0,120}?(?:https?:\/\/|www\.|\b(?:here|below|link|url)\b|الرابط|هنا)/giu;
 function hasClickLinkPrompt(source) {
@@ -11304,17 +11330,33 @@ const CARD_CREDIT_TARGET = /\bcredit\s+card\b|بطاق(?:تك|ه|ة)\s+(?:ال)?
 const CARD_CREDIT_MOVEMENT = /\bcredited(?:\s+with|\s+to)?\b|(?<![ء-ي])(?:تم\s+)?(?:إيداع|ايداع|إضافة|اضافه|اضافة)(?![ء-ي])/iu;
 const REPAYMENT_MONEY = String.raw `(?:[A-Z]{3}|Dhs?\.?|SR|[$€£])\s*\p{Nd}+(?:[.,٫٬]\p{Nd}+)*`;
 const REPAYMENT_CARD = String.raw `(?:(?!(?:bill|invoice|loan|finance|mortgage|account|utility|electricity|water|using|via|with|through|from|to|for|by|on|at|and|of)\b)[\p{L}\p{N}.'’-]+\s+){0,3}?card\b`;
-const UNQUALIFIED_REPAYMENT = new RegExp(String.raw `^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?(?:` +
-    String.raw `payment\s+(?:received|credited)\s+${REPAYMENT_MONEY}\s+(?:on|to|towards?)\s+(?:your\s+)?${REPAYMENT_CARD}` +
-    String.raw `|thank\s+you\s+for\s+(?:your\s+)?payment\s+of\s+${REPAYMENT_MONEY}\s+on\s+(?:your\s+)?${REPAYMENT_CARD}` +
-    String.raw `|your\s+payment\s+of\s+${REPAYMENT_MONEY}\s+to\s+(?:your\s+)?(?:credit|charge|covered)\s+card\b(?:[^.\n]|\.\d){0,80}\bsuccessful\b)`, 'iu');
+const REPAYMENT_DESTINATION_CARD = String.raw `(?:(?!(?:bill|invoice|loan|finance|mortgage|account|utility|electricity|water|using|via|with|through|from|to|for|by|on|at|and)\b)[\p{L}\p{N}.'’-]+\s+){0,6}?card\b`;
+const REPAYMENT_NUMBER = String.raw `\p{Nd}+(?:[.,٫٬]\p{Nd}+)*`;
+const REPAYMENT_UNIT = String.raw `(?:[A-Z]{3}|Dhs?\.?|SR|[$€£])`;
+const REPAYMENT_ANY_MONEY = String.raw `(?:${REPAYMENT_UNIT}\s*${REPAYMENT_NUMBER}|${REPAYMENT_NUMBER}\s*${REPAYMENT_UNIT})`;
+const REPAYMENT_DESTINATION = String.raw `(?:on|to|towards?)\s+(?:your\s+)?${REPAYMENT_DESTINATION_CARD}`;
+const REPAYMENT_GREETING = String.raw `(?:(?:Dear\s+[^\n.!?\p{N},:!]{1,40}|Hi|Hello)[,!:]\s*)?`;
+const AR_REPAYMENT_MONEY = String.raw `(?:${REPAYMENT_ANY_MONEY}|${REPAYMENT_NUMBER}\s*(?:درهم|دراهم|ريال)|(?:درهم|دراهم|ريال)\s*${REPAYMENT_NUMBER})`;
+const COMPLETED_CARD_BALANCE_RECEIPT = new RegExp(String.raw `^تم\s+(?:(?:[إا]يداع|[إا]ضاف[هة])\s+(?:مبلغ\s+)?|استلام\s+سداد\s+(?:بمبلغ|مبلغ)\s+)${AR_REPAYMENT_MONEY}`, 'iu');
+const UNQUALIFIED_REPAYMENT = new RegExp(String.raw `(?:^|[\n.!?]\s*)\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?${REPAYMENT_GREETING}(?:` +
+    String.raw `payment\s+(?:received|credited)\s+${REPAYMENT_ANY_MONEY}\s+${REPAYMENT_DESTINATION}` +
+    String.raw `|we\s+(?:have\s+)?received\s+(?:your\s+)?payment\s+(?:of\s+)?${REPAYMENT_ANY_MONEY}\s+${REPAYMENT_DESTINATION}` +
+    String.raw `|payment\s+(?:of\s+)?${REPAYMENT_ANY_MONEY}\s+(?:was\s+)?received\s+${REPAYMENT_DESTINATION}` +
+    String.raw `|(?:thank\s+you|thanks)\s+for\s+(?:your\s+)?payment\s+of\s+${REPAYMENT_ANY_MONEY}\s+${REPAYMENT_DESTINATION}` +
+    String.raw `|your\s+payment\s+of\s+${REPAYMENT_ANY_MONEY}\s+to\s+(?:your\s+)?${REPAYMENT_DESTINATION_CARD}(?:[^.\n]|\.\d){0,80}\bsuccessful\b` +
+    String.raw `|your\s+(?:(?:[\p{L}.'’-]+)\s+){0,4}?(?:credit|charge|covered)\s+card\s+payment\s+of\s+${REPAYMENT_ANY_MONEY}(?:[^.\n]|\.\d){0,60}\bsuccessful\b` +
+    String.raw `|تم\s+استلام\s+سداد\s+(?:بمبلغ|مبلغ)\s+${AR_REPAYMENT_MONEY}\s+(?:على|علي|إلى|الى|الي|في)\s+بطاق(?:تك|تكم|ه|ة)\s+(?:ال)?ا[يئ]تماني[هة])`, 'giu');
 const QUALIFIED_REPAYMENT_RECEIPT = new RegExp(String.raw `^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?(?:` +
     String.raw `payment\s+received|thank\s+you\s+for\s+(?:your\s+)?payment\s+of` +
     String.raw `)\s+(${REPAYMENT_MONEY})\s+on\s+your\s+${REPAYMENT_CARD}\s+(?:ending(?:\s+(?:in|with))?|number|no\.?)\s*(?:[*xX•·-]\s*)*\p{Nd}{4}(?!\p{Nd})` +
     String.raw `(?=\s*(?:[.!?\n]|$|(?:thank|avl|available|balance|for\s+(?:queries|help|details|information))\b))`, 'iu');
+const QUALIFIED_MATURE_REPAYMENT_RECEIPT = new RegExp(String.raw `^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?payment\s+of\s+(${REPAYMENT_MONEY})\s+(?:has\s+been\s+)?received\s+(?:towards?|on)\s+your\s+${REPAYMENT_CARD}\s+(?:ending(?:\s+(?:in|with))?|number|no\.?)\s*(?:[*xX•·-]\s*)*\p{Nd}{4}(?!\p{Nd})` +
+    String.raw `(?=\s*(?:[.!?\n]|$|(?:thank|avl|available|balance|for\s+(?:queries|help|details|information))\b))`, 'iu');
 function isQualifiedCardRepaymentReceipt(source, expectedCurrency) {
-    const match = QUALIFIED_REPAYMENT_RECEIPT.exec(source);
-    if (!match || /\b(?:debit|prepaid)\s+card\b/iu.test(match[0]))
+    const match = QUALIFIED_REPAYMENT_RECEIPT.exec(source) ?? QUALIFIED_MATURE_REPAYMENT_RECEIPT.exec(source);
+    if (!match || /\b(?:debit|prepaid)\b/iu.test(match[0]))
+        return false;
+    if (/\bthank\s+you\b/iu.test(match[0]) && !/\b(?:credit|charge|covered)\b/iu.test(match[0]))
         return false;
     if (expectedCurrency === undefined)
         return true;
@@ -11323,8 +11365,45 @@ function isQualifiedCardRepaymentReceipt(source, expectedCurrency) {
     return code === expectedCurrency;
 }
 function isUnqualifiedCardRepayment(source) {
-    const text = /[\uFF01-\uFFEF]/u.test(source) ? source.normalize('NFKC') : source;
-    return UNQUALIFIED_REPAYMENT.test(text) && !isQualifiedCardRepaymentReceipt(text);
+    if (!/\bpayment\b|سداد|[\u0640\u064B-\u065F\u0670\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFB50-\uFEFF\uFF01-\uFFEF]/iu.test(source))
+        return false;
+    const text = repaymentReadingText(source);
+    if (!/\bpayment\b|سداد/iu.test(text) || isQualifiedCardRepaymentReceipt(text))
+        return false;
+    for (const match of text.matchAll(UNQUALIFIED_REPAYMENT)) {
+        const after = text.slice(match.index + match[0].length).split(/[\n!?;]|\.(?=\s|$)/u)[0];
+        const clause = match[0] + after;
+        const merchantAt = /\bat\s+\p{L}/iu.test(clause) &&
+            !/\bat\s+(?:the\s+)?(?:atm\b|[\p{L}]*bank\b|(?:[\p{L}]+\s+){0,3}branch\b)/iu.test(clause);
+        if (merchantAt || /\b(?:from|using)\s+(?!your\b|the\s+(?:bank|account)\b)\p{L}/iu.test(clause))
+            continue;
+        return true;
+    }
+    return false;
+}
+function repaymentReadingText(source) {
+    return (/[\uFB50-\uFEFF\uFF01-\uFFEF]/u.test(source) ? source.normalize('NFKC') : source)
+        .replace(/[\u0640\u064B-\u065F\u0670\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/gu, '');
+}
+function cardBalanceReceiptText(source) {
+    return repaymentReadingText(source)
+        .replace(/^\s*[A-Z][A-Z .&'-]{1,32}(?:alert|bank|sms)\s*\r?\n\s*/iu, '')
+        .replace(/^\s*[A-Z][A-Z0-9 .&'-]{1,32}:\s*/iu, '')
+        .replace(/^\s*(?:Dear\s+[^\n.!?\p{N},:!]{1,40}|Hi|Hello)[,!:]\s*/iu, '').trim();
+}
+function isUnpostedCardBalanceClaim(source) {
+    if (!/[إا]يداع|[إا]ضاف|سداد|[\u0640\u064B-\u065F\u0670\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFB50-\uFEFF\uFF01-\uFFEF]/u.test(source))
+        return false;
+    const text = cardBalanceReceiptText(source);
+    return CARD_CREDIT_TARGET.test(text) && /^(?:(?:(?:لم|لن)\s+يتم|سيتم|سوف\s+يتم|(?:[إا]ذا|لو|في\s+حال[هة]?)\s+تم)\s+(?:[إا]يداع|[إا]ضاف[هة]|استلام\s+سداد)|تم\s+استلام\s+طلب\s+(?:[إا]يداع|[إا]ضاف[هة]|سداد)|تم\s+(?:[إا]يداع|[إا]ضاف[هة])\s+طلب)(?![ء-ي])/u.test(text);
+}
+function isCompletedCardBalanceReceipt(source) {
+    const text = cardBalanceReceiptText(source);
+    return CARD_CREDIT_TARGET.test(text) && COMPLETED_CARD_BALANCE_RECEIPT.test(text);
+}
+function isCompletedCardRepaymentPrincipal(source, span) {
+    const clause = sentenceAround(source, span).text;
+    return isCompletedCardBalanceReceipt(clause) && isUnqualifiedCardRepayment(clause);
 }
 function isUnqualifiedCardCredit(source, span) {
     if (!span || !CARD_CREDIT_TARGET.test(source) || !CARD_CREDIT_MOVEMENT.test(source))
@@ -11577,7 +11656,7 @@ const PROMO_SENTENCE_RE = new RegExp(`${PROMO_SENTENCE_CHAR}*(?:` +
     String.raw `|\bt&cs?\b|\bconditions\s+apply\b|\bterms\s+apply\b` +
     `)${PROMO_SENTENCE_CHAR}*`, 'gi');
 const PROMO_SENTENCE_TRIGGER_RE = /%|\bredeem\b|\b(?:pay|manage)\b|\bt&cs?\b|\bconditions\s+apply\b|\bterms\s+apply\b/i;
-const TXN_EVIDENCE_RE = /purchase (?:of|amount)|purchase\s+(?:aed|dhs?|sar)\b|\d{4}\s+purchase\b|was used for|\bused (?:for|at|on)\b|\bspent\b|\bdebited\b|\bdeducted\b|has been (?:debited|deducted|credited|received)|debited from|deducted from|credited to|withdraw|avl\.?\s*(?:bal|cr|limit)|available (?:balance|credit|limit)|(?:^|\n)\s*bal(?:ance)?\s+(?:aed|dhs?|sar)\b|bill amount|payment due|due (?:on|by|date)|pay by/i;
+const TXN_EVIDENCE_RE = /purchase (?:of|amount)|purchase\s+(?:aed|dhs?|sar)\b|\d{4}\s+purchase\b|was used for|\bused (?:for|at|on)\b|\bspent\b|\bdebited\b|\bdeducted\b|has\s+been\s+(?:debited|deducted|credited|received)|debited from|deducted from|credited to|withdraw|avl\.?\s*(?:bal|cr|limit)|available (?:balance|credit|limit)|(?:^|\n)\s*bal(?:ance)?\s+(?:aed|dhs?|sar)\b|bill amount|payment due|due (?:on|by|date)|pay by/i;
 const POSTED_CLAUSE_RE = /\b(?:purchase|transaction|payment|withdrawal|transfer|debit)\s+of\b|\b(?:has|have)\s+been\s+(?:successfully\s+)?(?:debited|deducted|credited|charged|paid|posted|processed|made|used|reversed|refunded)\b|\bwas\s+(?:successfully\s+)?(?:used|debited|deducted|charged|made|posted|processed|paid|spent)\b|\b(?:spent|debited|deducted|withdrawn|charged|paid|purchase)\s+(?:at|from|on|to|via|using|with)\b|\bavl\.?\s*(?:bal|balance|cr|limit)\b|\bavailable\s+(?:balance|limit|credit)\b|\b(?:refunded|reversed|credited|transferred|remitted|deposited)\s+(?:back\s+)?(?:to|from|into)\b|\b(?:transaction|txn|purchase|payment|card|debit|credit)\s+alerts?\b|\bnew\s+bal(?:ance)?\b|شراء بمبلغ|تم شراء|تم خصم|تم الخصم|تم سحب|تم دفع|تم الدفع|تم استرداد/i;
 function hasPostedEvidence(raw, card) {
     if (amountWithFx(raw) === null)
@@ -14648,7 +14727,7 @@ function hasUnsettledPrincipal(message, parsed) {
 }
 function parseSms(message, overrides, options) {
     if ((0, principal_posting_guards_1.isLeadingNumericDiscountOffer)(message) || (0, principal_posting_guards_1.isUnqualifiedPeerTransferClaim)(message) ||
-        (0, principal_posting_guards_1.hasMobileMoneyCallback)(message))
+        (0, principal_posting_guards_1.hasMobileMoneyCallback)(message) || (0, principal_posting_guards_1.isUnpostedCardBalanceClaim)(message))
         return null;
     if ((0, bnpl_providers_1.isBnplProviderSource)(options?.sender))
         return null;
@@ -15221,7 +15300,8 @@ function unqualifiedCardCreditCurrencyAliases(source, market, existing) {
     const draft = (0, alert_draft_1.inspectAlertDraft)(source, { currencyAliases });
     const credits = draft.candidates.filter(candidate => candidate.currency === (market === 'AE' ? 'AED' : 'SAR') &&
         candidate.minorUnits !== null && /^[1-9]\d*$/u.test(candidate.minorUnits) &&
-        (0, principal_posting_guards_1.isUnqualifiedCardCredit)(draft.normalizedText, candidate.span));
+        ((0, principal_posting_guards_1.isUnqualifiedCardCredit)(draft.normalizedText, candidate.span) ||
+            (0, principal_posting_guards_1.isCompletedCardRepaymentPrincipal)(draft.normalizedText, candidate.span)));
     return credits.length === 1 ? currencyAliases : undefined;
 }
 const LB = String.raw `(?<![A-Za-z\u00C0-\u024F\u1E00-\u1EFF\p{N}_])`;
