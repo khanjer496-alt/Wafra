@@ -257,7 +257,7 @@ const S = {
     ar: 'كشوف طابقتها وفرة مع دفعة بطاقة.',
   },
   paidStatementDue: { en: 'Statement due {date} · paid', ar: 'كشف مستحق {date} · مدفوع' },
-  trialEndedBanner: { en: 'Trial ended · tracking paused', ar: 'انتهت التجربة · توقف التتبع' },
+  trialEndedBanner: { en: 'Free period ended · automatic capture paused', ar: 'انتهت الفترة المجانية · توقف الالتقاط التلقائي' },
   trialEndedBannerSub: { en: 'Subscribe to keep importing your bank SMS', ar: 'اشترك لمواصلة قراءة رسائل البنك' },
   turnOnTracking: { en: 'Turn on automatic tracking', ar: 'فعّل التتبع التلقائي' },
   trackingPrivacy: { en: 'Wafra reads bank SMS on this device only', ar: 'وفرة تقرأ رسائل البنك على هذا الجهاز فقط' },
@@ -1353,8 +1353,8 @@ const S = {
     ar: 'أعد مشاهدة تجربة البداية دون تغيير بياناتك أو إعداداتك',
   },
   settingsTrialDays: {
-    en: 'Free trial · {count} day{s} left',
-    ar: 'تجربة مجانية · متبقٍ {count} يوم',
+    en: 'Free period · {count} day{s} left',
+    ar: 'فترة مجانية · متبقٍ {count} يوم',
   },
   wafraPro: { en: 'Wafra Pro', ar: 'وفرة برو' },
   proActive: { en: 'Active', ar: 'مفعّل' },
@@ -1597,8 +1597,8 @@ const S = {
     ar: 'وفرة برو مفعّل مجدداً على هذا الجهاز.',
   },
   proContinue: { en: 'Continue to Wafra', ar: 'متابعة إلى وفرة' },
-  trialEndedPaywall: { en: 'Your free trial has ended and tracking is paused. Subscribe to keep Wafra working — your data never leaves your phone either way.', ar: 'انتهت تجربتك المجانية وتوقف التتبع. اشترك لمواصلة استخدام وفرة — بياناتك لا تغادر هاتفك في كل الأحوال.' },
-  freeTrialActive: { en: 'FREE TRIAL ACTIVE', ar: 'التجربة المجانية مفعّلة' },
+  trialEndedPaywall: { en: 'Your free period in the app has ended. Automatic capture is paused; manual entries, paste, statements and backup stay free.', ar: 'انتهت الفترة المجانية في التطبيق. توقف الالتقاط التلقائي؛ يظل الإدخال اليدوي واللصق والكشوف والنسخ الاحتياطي مجانياً.' },
+  freeTrialActive: { en: 'FREE PERIOD ACTIVE', ar: 'الفترة المجانية مفعّلة' },
   getPro: { en: 'Get Wafra Pro', ar: 'اشترك في وفرة برو' },
   startPlanWithPrice: {
     en: 'Start {plan} — {price}',
@@ -2230,6 +2230,30 @@ const S = {
   onboardLiveAction: {
     en: 'Set up',
     ar: 'إعداد',
+  },
+  // The same step on iOS 15, where automatic capture cannot be set up.
+  onboardLiveUnsupportedTitle: {
+    en: 'Start with your statements',
+    ar: 'ابدأ بكشوف حسابك',
+  },
+  onboardLiveUnsupportedBody: {
+    en: 'Automatic capture needs iOS 16 or later. Import a bank statement to bring in your transactions, or paste bank messages as they arrive.',
+    ar: 'يتطلب الالتقاط التلقائي iOS 16 أو أحدث. استورد كشف حساب بنكي لإضافة عملياتك، أو الصق رسائل البنك عند وصولها.',
+  },
+  onboardPasteMessagesBody: {
+    en: 'Paste a bank text into Wafra. No setup needed.',
+    ar: 'الصق رسالة البنك في وفرة. لا يلزم أي إعداد.',
+  },
+  // "I'll add by hand" on iOS 15, where capture cannot be turned on later.
+  onboardManualIosUnsupportedBody: {
+    en: 'Add entries yourself. Statements and pasting stay available.',
+    ar: 'أضف العمليات بنفسك. يبقى استيراد الكشوف واللصق متاحاً.',
+  },
+  // The iOS 15 result once a statement or paste brought transactions in.
+  onboardIosImportedTitle: { en: 'Your transactions are in.', ar: 'وصلت عملياتك إلى وفرة.' },
+  onboardIosImportedBody: {
+    en: 'Add more any time from Accounts: import another statement, or paste bank messages.',
+    ar: 'أضف المزيد متى شئت من الحسابات: استورد كشف حساب آخر، أو الصق رسائل البنك.',
   },
   onboardNotNow: {
     en: 'Not now',
@@ -3145,7 +3169,15 @@ const S = {
     en: 'This build can’t add the shortcut. Update Wafra.',
     ar: 'لا يمكن لهذا الإصدار إضافة الاختصار. حدّث وفرة.',
   },
-  iosLocalUnsupported: { en: 'Requires iOS 16 or later.', ar: 'يتطلب iOS 16 أو أحدث.' },
+  // iOS 15: no App Intents, so no automatic capture. Statements and pasted
+  // messages still bring transactions in, and both work on this iPhone.
+  iosLocalUnsupported: { en: 'Automatic capture needs iOS 16 or later', ar: 'يتطلب الالتقاط التلقائي iOS 16 أو أحدث' },
+  iosLocalUnsupportedBody: {
+    en: 'You can still bring in your transactions on this iPhone: import a bank statement, or paste bank messages as they arrive.',
+    ar: 'لا يزال بإمكانك إضافة عملياتك على هذا الآيفون: استورد كشف حساب بنكي، أو الصق رسائل البنك عند وصولها.',
+  },
+  iosLocalUnsupportedStatement: { en: 'Import a statement', ar: 'استيراد كشف حساب' },
+  iosLocalUnsupportedPaste: { en: 'Paste bank messages', ar: 'لصق رسائل البنك' },
   iosLocalUpdateRequired: {
     en: 'This version can’t capture messages. Update Wafra.',
     ar: 'هذا الإصدار لا يلتقط الرسائل. حدّث وفرة.',

@@ -1,6 +1,6 @@
 import { Linking, Platform } from 'react-native';
 import { randomUUID } from 'expo-crypto';
-import { iosSupportsApplePayAutomation } from './ios-setup-availability';
+import { iosSupportsApplePayAutomation, iosSupportsLiveCapture } from './ios-setup-availability';
 
 import type {
   WafraLiveCaptureNativeModule,
@@ -147,13 +147,6 @@ export const INITIAL_IOS_SETUP_MODEL: IosSetupModel = {
         applePayReadiness: 'not-added',
 };
 
-const iosVersionMajor = (): number => {
-  const value = Platform.Version;
-  if (typeof value === 'number') return Math.trunc(value);
-  const parsed = Number.parseInt(String(value), 10);
-  return Number.isFinite(parsed) ? parsed : 0;
-};
-
 export function iosSupportsNotificationAutomation(version: unknown): boolean {
   const value = String(version);
   return /^\d+(?:\.\d+)*$/.test(value) && Number(value.split('.')[0]) >= 27;
@@ -230,7 +223,7 @@ const UNFILTERED_MESSAGE_TRIGGER = {
 } as const;
 
 const defaultDependencies = (): IosSetupDependencies => ({
-  isSupported: () => Platform.OS === 'ios' && iosVersionMajor() >= 16,
+  isSupported: () => Platform.OS === 'ios' && iosSupportsLiveCapture(Platform.Version),
   getNativeModule: getIosCaptureNativeModule,
   shortcutUrl: IOS_LOCAL_CAPTURE_SHORTCUT_URL,
   canOpenUrl: async (url) => Linking.canOpenURL(url),

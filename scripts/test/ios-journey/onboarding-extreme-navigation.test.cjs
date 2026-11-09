@@ -141,7 +141,7 @@ async function gate(options = {}) {
   const dependencies = {
     '@/lib/ios-statement-handoff': statementHandoff,
     react, 'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
-    'react-native': { Platform: { OS: options.platform ?? 'ios', Version: '26.6', select: values => values.ios ?? values.default }, I18nManager: { isRTL: language === 'ar' }, View: 'View', Text: 'Text', TextInput: 'TextInput', Pressable: 'Pressable',
+    'react-native': { Platform: { OS: options.platform ?? 'ios', Version: options.version ?? '26.6', select: values => values.ios ?? values.default }, I18nManager: { isRTL: language === 'ar' }, View: 'View', Text: 'Text', TextInput: 'TextInput', Pressable: 'Pressable',
       Switch: 'Switch', ActivityIndicator: 'ActivityIndicator', PanResponder: { create: () => ({ panHandlers: {} }) },
       useWindowDimensions: () => ({ width: 390, height: 844 }),
       AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) }, ScrollView: 'ScrollView', StyleSheet: { create: value => value, hairlineWidth: 1, absoluteFillObject: {} },

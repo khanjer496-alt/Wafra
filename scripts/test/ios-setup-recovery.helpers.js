@@ -4,7 +4,7 @@
 module.exports = async ({ execute, ok, eq, translated }) => {
   const guideCopy = execute('src/lib/ios-shortcut-setup-copy.ts').iosShortcutSetupCopy('en');
   const disposers = [];
-  const makeScreen = async ({ fresh = false, available = true, progress: restored = {}, historyAvailable = true, historyInFlight = false, captureOptOut = false, optInFails = false, skipSaveFails = false, knownBanks = ['Emirates NBD'], params = { fromOnboarding: '1' } } = {}) => {
+  const makeScreen = async ({ fresh = false, available = true, progress: restored = {}, historyAvailable = true, historyInFlight = false, captureOptOut = false, optInFails = false, skipSaveFails = false, knownBanks = ['Emirates NBD'], params = { fromOnboarding: '1' }, version = '26.6' } = {}) => {
     const slots = [];
     const effects = [];
     let cursor = 0;
@@ -77,7 +77,7 @@ module.exports = async ({ execute, ok, eq, translated }) => {
       async openURL(url) { urls.push(url); },
     };
     const platform = {
-      Platform: { OS: 'ios', Version: '26.6' }, Linking: linking,
+      Platform: { OS: 'ios', Version: version }, Linking: linking,
       AppState: { addEventListener(_name, listener) { foregroundListeners.push(listener); return { remove() {} }; } },
       AccessibilityInfo: { announceForAccessibility() {} },
       ScrollView: 'ScrollView', View: 'View', Pressable: 'Pressable',
@@ -126,6 +126,7 @@ module.exports = async ({ execute, ok, eq, translated }) => {
     const component = execute('src/app/ios-setup.tsx', {
       '@react-native-async-storage/async-storage': storage,
       '@/lib/ios-paged-setup': execute('src/lib/ios-paged-setup.ts'),
+      '@/lib/ios-statement-handoff': execute('src/lib/ios-statement-handoff.ts'),
       react, 'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
       'react-native': platform,
       'expo-router': { Stack: { Screen: 'StackScreen' }, useRouter: () => router, useLocalSearchParams: () => params },
@@ -708,6 +709,24 @@ module.exports = async ({ execute, ok, eq, translated }) => {
   eq('iOS setup: no bank is inferred or saved by entering setup', banks.bankSaves, []);
   await banks.press('iosLocalInstallShortcut');
   eq('iOS setup: bank-free setup can install the Shortcut', banks.urls.length, 1);
+
+  // App Intents need iOS 16; the app installs on 15.1. Each OS band renders:
+  // iOS 15 explains the limit and offers a statement or pasted messages.
+  for (const version of ['15.1', '15.8.3', '16.0', '16.7', '17.5', '26.6']) {
+    const band = await makeScreen({ fresh: true, version });
+    const legacy = version.startsWith('15.');
+    eq(`iOS setup on ${version}: ${legacy ? 'statement and paste instead of capture' : 'Shortcut setup unchanged'}`,
+      [band.all().some((node) => node.props?.testID === 'ios-capture-unsupported'),
+        Boolean(band.button('iosLocalUnsupportedStatement')), Boolean(band.button('iosLocalUnsupportedPaste')),
+        Boolean(band.button('iosLocalInstallShortcut'))],
+      [legacy, legacy, legacy, !legacy]);
+    if (!legacy) continue;
+    await band.press('iosLocalUnsupportedStatement');
+    await band.press('iosLocalUnsupportedPaste');
+    eq(`iOS setup on ${version}: both actions open their screens and leave capture alone`,
+      [JSON.parse(JSON.stringify(band.routes)).map((route) => route.pathname), band.urls, band.preferenceEvents, band.onboarded()],
+      [['/statement-import', '/import-sms'], [], [], false]);
+  }
 
   disposers.forEach((dispose) => dispose());
 
