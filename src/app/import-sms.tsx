@@ -1570,7 +1570,7 @@ export default function ImportSmsScreen() {
           ? t('historyReviewCompact')
           : isSmsScanningAvailable()
           ? t('scanBankAlertsPrivacy')
-          : t('pasteHint')}
+          : t(Platform.OS === 'ios' ? 'pasteHintIos' : Platform.OS === 'android' ? 'pasteHint' : 'pasteHintWeb')}
       </ThemedText>
       {/* THE PLATFORM-FAIR LINE. Pasting used to sit behind the
           paywall, which on a phone with no inbox scan meant an iPhone
@@ -2158,7 +2158,7 @@ export default function ImportSmsScreen() {
                   <ThemedText type="meta" themeColor="textTertiary">
                     {pasteVerdict.kind === 'filed'
                       ? `${pasteVerdict.count} ${t('alreadyFiledSkipped')}`
-                      : t('pasteHint')}
+                      : t(Platform.OS === 'ios' ? 'pasteHintIos' : Platform.OS === 'android' ? 'pasteHint' : 'pasteHintWeb')}
                   </ThemedText>
                 </View>
               </View>

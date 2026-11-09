@@ -107,13 +107,14 @@ test('first-run copy is paired and the SMS explainer is truthful', () => {
   assert.equal(ONBOARDING_COPY.ar.readyMonths(3), '3 أشهر');
   // The gate asks before Android's prompt and never restores without a confirmation.
   const gate = read('src/components/onboarding-gate.tsx');
-  assert.match(gate, /else setSmsExplainerVisible\(true\)/);
-  assert.match(gate, /onContinue=\{\(\) => \{\s*setSmsExplainerVisible\(false\);\s*void runSetupAction\(startScan\);/);
+  // Accept/decline ordering is exercised by android-capture-disclosure.test.cjs.
+  // Every entry point now reuses this actual explainer through the shared host.
+  const host = read('src/components/ui/consent-prompt-host.tsx');
+  assert.match(host, /<SmsPermissionExplainer/);
   assert.match(gate, /visible=\{pendingRestore !== null\}[\s\S]{0,900}const restored = restoreBackup\(content\);\s*setRestoreFailed\(restored \? null : 'invalid'\);/);
   // A file that could not be read is not called "not a Wafra backup".
   assert.match(gate, /restoreFailed === 'read' \? firstRunCopy\.restoreReadFailed : restoreFailed \? t\('notAWafraBackup'\) : null/);
-  // Back from the explainer closes it rather than leaving it set behind.
-  assert.match(gate, /onBack=\{smsExplainerVisible \? \(\) => setSmsExplainerVisible\(false\) : goBack\}/);
+  assert.match(host, /onClose=\{\(\) => answer\(false\)\}/);
   // The checklist reads the setup screen's readiness rule, latest refresh only.
   assert.match(gate, /resolveIosSetupReadiness\(status, native\.getMessageShortcutURL \? 3 : 1\)/);
   assert.match(gate, /if \(cancelled \|\| request !== latest\) return;/);

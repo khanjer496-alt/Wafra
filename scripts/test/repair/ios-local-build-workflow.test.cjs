@@ -82,3 +82,69 @@ test('all local workflow shell and embedded Python blocks parse before CI dispat
     }
   }
 });
+
+test('every dispatch refuses unverified submission routes before either build job starts', () => {
+  const validation = workflow.jobs['validate-request'];
+  assert.ok(validation, 'all routes need the shared submission guard');
+  assert.equal(workflow.jobs.build.needs, 'validate-request');
+  assert.equal(job.needs, 'validate-request');
+  const guard = validation.steps[0].run;
+  for (const host of ['eas', 'github-macos']) for (const submit of ['true', 'false']) {
+    for (const id of ['', '12345678-1234-1234-1234-123456789abc']) {
+      const r = spawnSync('bash', ['-eu', '-o', 'pipefail', '-c', guard], {
+        encoding: 'utf8', env: { ...process.env, BUILD_HOST: host, WANT_SUBMIT: submit, SUBMIT_BUILD_ID: id },
+      });
+      const allowed = id === '' && (submit !== 'true' || host === 'github-macos');
+      assert.equal(r.status === 0, allowed, JSON.stringify({host,submit,id,stderr:r.stderr}));
+    }
+  }
+  assert.notEqual(spawnSync('bash', ['-eu', '-c', guard], {env: {...process.env,
+    BUILD_HOST:'unknown', WANT_SUBMIT:'false', SUBMIT_BUILD_ID:''}}).status, 0);
+  const hostedBuild = workflow.jobs.build.steps.find(s => s.name === 'Start the iOS build').run;
+  assert.doesNotMatch(hostedBuild, /args\+=\(--auto-submit/);
+  const oldIdRoute = workflow.jobs.build.steps.find(s => s.id === 'submit_only').run;
+  assert.doesNotMatch(oldIdRoute, /eas submit/);
+  assert.match(oldIdRoute, /exit 1/);
+});
+
+test('artifact resubmission checks the downloaded product, including old self-consistent reports', () => {
+  const artifact = YAML.parse(fs.readFileSync(path.join(path.dirname(file), 'ios-submit-verified-artifact.yml'), 'utf8'));
+  const list = artifact.jobs.submit.steps;
+  const gate = list.findIndex(s => s.name === 'Verify downloaded product versions');
+  const downloadCheck = list.findIndex(s => s.name === 'Verify downloaded artifact');
+  const submit = list.findIndex(s => /eas submit/.test(s.run || ''));
+  assert.ok(gate > downloadCheck && gate < submit, 'downloaded IPA needs a product gate before submission');
+  assert.equal(list[gate].if, undefined, 'a failed product gate must stop submission');
+  assert.equal(list[submit].if, undefined, 'submission must retain implicit success()');
+  const os = require('node:os');
+  const python = process.platform === 'darwin' ? '/usr/bin/python3' : 'python3';
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wafra-artifact-version-test-'));
+  try {
+    for (const [host, widget, short, expected, appCount = 1] of [
+      ['192', '192', '1.0.0', true],
+      ['191', '1', '1.0.0', false],
+      ['192', '$(CURRENT_PROJECT_VERSION)', '1.0.0', false],
+      ['192', '192', '1.0', false],
+      ['192', '192', '1.0.0', false, 2],
+      ['192', '192', '1.0.0', false, 0],
+    ]) {
+      const ipa = path.join(dir, 'downloaded artifact.ipa');
+      const fixture = spawnSync(python, ['-c', `import plistlib,sys,zipfile
+with zipfile.ZipFile(sys.argv[1], 'w') as z:
+ z.writestr('Payload/readme.txt','synthetic test fixture')
+ for index in range(int(sys.argv[5])):
+  app='Wafra' if index == 0 else 'Other'
+  for name,build,short in [(f'Payload/{app}.app/Info.plist',sys.argv[2],'1.0.0'),(f'Payload/{app}.app/PlugIns/Widget.appex/Info.plist',sys.argv[3],sys.argv[4])]:
+   z.writestr(name,plistlib.dumps({'CFBundleVersion':build,'CFBundleShortVersionString':short}))
+`, ipa, host, widget, short, String(appCount)], {encoding: 'utf8'});
+      assert.equal(fixture.status, 0, fixture.stderr);
+      const result = spawnSync('bash', ['-eu', '-o', 'pipefail', '-c', list[gate].run], {
+        cwd: path.resolve(__dirname, '../../..'), encoding: 'utf8',
+        env: {...process.env, IPA_PATH: ipa, RUNNER_TEMP: dir,
+          PATH: process.platform === 'darwin' ? `/usr/bin:/bin:${process.env.PATH}` : process.env.PATH},
+      });
+      assert.equal(result.status === 0, expected, JSON.stringify({host,widget,short,appCount,stdout:result.stdout,stderr:result.stderr}));
+      assert.deepEqual(fs.readdirSync(dir), ['downloaded artifact.ipa'], 'extracted product is cleaned up');
+    }
+  } finally { fs.rmSync(dir, {recursive: true, force: true}); }
+});

@@ -37,7 +37,8 @@ function harness(options = {}) {
     '@/lib/review-source-bindings': { collectLegacyReviewSourceKeys: () => [],
       withoutRecordedReviews: require('../build/review-source-bindings.js').withoutRecordedReviews },
     '@/lib/auto-import': {
-      isSmsInboxAccessError: () => false, scanInbox: async () => page,
+      hasSmsPermission: async () => options.permission !== false,
+      isSmsInboxAccessError: () => false, scanInbox: async () => { events.push('scan'); return page; },
       buildImportPlan: () => { events.push('plan'); return { batch: { transactions: [] } }; },
     },
     '@/lib/android-capture-sources': {
@@ -63,7 +64,7 @@ function harness(options = {}) {
     inboxHistoryComplete: false, scannedCount: 1000,
     commit: async () => { events.push('ack'); },
   };
-  return { events, dependencies, page, next, commit: () => dependencies.commitPage(page, next, () => allowed),
+  return { events, dependencies, page, next, scan: () => dependencies.scanPage(null), commit: () => dependencies.commitPage(page, next, () => allowed),
     pause: () => { allowed = false; }, replace: (value) => { state = value; } };
 }
 
@@ -111,4 +112,11 @@ test('currency-market rejection cannot stage, write, or acknowledge', async () =
   const h = harness({ market: 'SA', marketAllowed: false });
   await assert.rejects(h.commit(), /market_mismatch/);
   assert.deepEqual(h.events, []);
+});
+
+
+test('resumed history refuses a missing app disclosure without reading or advancing the cursor', async () => {
+  const h = harness({ permission: false });
+  await assert.rejects(h.scan(), error => error.code === 'ERR_SMS_INBOX_ACCESS');
+  assert.deepEqual(h.events, ['yield']);
 });

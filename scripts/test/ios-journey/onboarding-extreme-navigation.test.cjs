@@ -184,7 +184,7 @@ async function gate(options = {}) {
     '@/components/ui/confirm-sheet': { ConfirmSheet: 'ConfirmSheet' }, '@/components/ui/controls': { Button: 'Button' },
     '@/components/ui/icon': { Icon: 'Icon' },
     '@/components/wafra-logo': { WafraMark: 'WafraMark' }, '@/constants/theme': theme,
-    '@/lib/auto-import': { isSmsScanningAvailable: () => true, requestSmsPermission: () => call('requestSmsPermission', undefined, true), hasSmsPermission: () => call('hasSmsPermission', undefined, false), hasBankNotificationSystemAccess: () => options.notificationAccess ?? false, openBankNotificationAccessSettings: () => call('openBankNotificationAccessSettings', undefined, true) },
+    '@/lib/auto-import': { isSmsScanningAvailable: () => true, requestSmsPermission: () => call('requestSmsPermission', undefined, true), hasSmsPermission: () => call('hasSmsPermission', undefined, false), hasBankNotificationSystemAccess: () => options.notificationAccess ?? false, openBankNotificationAccessSettings: async flow => { if (flow?.onAccepted && !await flow.onAccepted()) return false; return call('openBankNotificationAccessSettings', undefined, true); } },
     '@/lib/haptics': { committed: () => record('committed'), tapped() {} },
     '@/lib/notifications': { cancelDailySummary: () => call('cancelDailySummary'), syncDailySummary: () => call('syncDailySummary'),
       requestVisibleNotificationPermission: () => call('requestVisibleNotificationPermission', undefined, false) },

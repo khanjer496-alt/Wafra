@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: b81a60802e814afdd21e62c93376a5d7908e7b070a02c86231c179bec41e18e1
+// Generated from normal shipping TypeScript. Source SHA-256: 61f9ad06ecdfd097ce7480dc1f7d6d19c8ecaa51f11523a7f2f5269938329136
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -4892,6 +4892,7 @@ exports.t = t;
 exports.tf = tf;
 exports.hasArabicScript = hasArabicScript;
 exports.structuralTitleLabel = structuralTitleLabel;
+const import_processing_disclosure_1 = require("@/lib/import-processing-disclosure");
 const S = {
     transactionSearchLabel: { en: 'Search transactions', ar: 'البحث في العمليات' },
     transactionSearchPlaceholder: { en: 'Merchant or category', ar: 'التاجر أو الفئة' },
@@ -6522,7 +6523,18 @@ const S = {
     stillLoading: { en: 'Still loading your data — try again in a second.', ar: 'ما زال تحميل بياناتك جارياً — أعد المحاولة بعد لحظة.' },
     upToDateNoNew: { en: 'Up to date. No new bank messages.', ar: 'كل شيء محدّث. لا رسائل بنكية جديدة.' },
     rescanHint: { en: 'Rescans your whole inbox and shows what would be filed. Cards are matched automatically and nothing imports twice. You can also paste messages below.', ar: 'يعيد فحص كل رسائلك ويعرض ما سيُسجَّل. تُطابَق البطاقات تلقائياً ولا يُستورد شيء مرتين. يمكنك أيضاً لصق رسائل بالأسفل.' },
-    pasteHint: { en: 'Paste one or more bank messages below, separated by a blank line. Everything is read on this device.', ar: 'ألصق رسالة بنكية أو أكثر بالأسفل، بينها سطر فارغ. تُقرأ كلها على هذا الجهاز.' },
+    pasteHint: {
+        en: `Paste one or more bank messages below, separated by a blank line. ${import_processing_disclosure_1.IMPORT_PROCESSING_DISCLOSURE.en}`,
+        ar: `ألصق رسالة بنكية أو أكثر بالأسفل، بينها سطر فارغ. ${import_processing_disclosure_1.IMPORT_PROCESSING_DISCLOSURE.ar}`,
+    },
+    pasteHintIos: {
+        en: `Paste one or more bank messages below, separated by a blank line. ${(0, import_processing_disclosure_1.importProcessingDisclosure)('en', 'ios')}`,
+        ar: `ألصق رسالة بنكية أو أكثر بالأسفل، بينها سطر فارغ. ${(0, import_processing_disclosure_1.importProcessingDisclosure)('ar', 'ios')}`,
+    },
+    pasteHintWeb: {
+        en: `Paste one or more bank messages below, separated by a blank line. ${(0, import_processing_disclosure_1.importProcessingDisclosure)('en', 'web')}`,
+        ar: `ألصق رسالة بنكية أو أكثر بالأسفل، بينها سطر فارغ. ${(0, import_processing_disclosure_1.importProcessingDisclosure)('ar', 'web')}`,
+    },
     whereItWent: { en: 'Where it went', ar: 'أين ذهبت' },
     addedByHand: { en: 'Added by hand', ar: 'أُضيفت يدوياً' },
     appLockPhoneOnly: { en: 'App lock works on the phone app only.', ar: 'قفل التطبيق يعمل على تطبيق الهاتف فقط.' },
@@ -7880,8 +7892,8 @@ const S = {
     },
     iosLocalUnsupported: { en: 'Automatic capture needs iOS 16 or later', ar: 'يتطلب الالتقاط التلقائي iOS 16 أو أحدث' },
     iosLocalUnsupportedBody: {
-        en: 'Pasted messages are read on this iPhone. Choosing a statement file connects this phone to Wafra’s import service. The file is read, then deleted.',
-        ar: 'تُقرأ الرسائل الملصقة على هذا الآيفون. اختيار ملف كشف حساب يربط هذا الهاتف بخدمة الاستيراد في وفرة. يُقرأ الملف ثم يُحذف.',
+        en: (0, import_processing_disclosure_1.importProcessingDisclosure)('en', 'ios'),
+        ar: (0, import_processing_disclosure_1.importProcessingDisclosure)('ar', 'ios'),
     },
     iosLocalUnsupportedStatement: { en: 'Import a statement', ar: 'استيراد كشف حساب' },
     iosLocalUnsupportedPaste: { en: 'Paste bank messages', ar: 'لصق رسائل البنك' },
@@ -8920,6 +8932,31 @@ function structuralTitleLabel(title, override) {
         return title;
     const name = tf('cardWithDigits', { last4: card[1] }, override);
     return card[2] ? tf('accountPaymentTitle', { name }, override) : name;
+}
+},
+"import-processing-disclosure":function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.IMPORT_PROCESSING_DISCLOSURE = exports.STATEMENT_PROCESSING_DISCLOSURE = void 0;
+exports.importProcessingDisclosure = importProcessingDisclosure;
+exports.STATEMENT_PROCESSING_DISCLOSURE = {
+    en: 'Statements are sent to Wafra’s import service, read, then deleted.',
+    ar: 'تُرسل كشوف الحساب إلى خدمة الاستيراد في وفرة، وتُقرأ ثم تُحذف.',
+};
+exports.IMPORT_PROCESSING_DISCLOSURE = {
+    en: `Pasted messages and SMS are read on this device. ${exports.STATEMENT_PROCESSING_DISCLOSURE.en}`,
+    ar: `تُقرأ الرسائل الملصقة ورسائل SMS على هذا الجهاز. ${exports.STATEMENT_PROCESSING_DISCLOSURE.ar}`,
+};
+function importProcessingDisclosure(language, platform) {
+    if (platform === 'android')
+        return exports.IMPORT_PROCESSING_DISCLOSURE[language];
+    if (platform === 'ios')
+        return language === 'ar'
+            ? `تُقرأ الرسائل الملصقة على هذا الآيفون. إذا كنت تستخدم اختصاراً قديماً يعمل عبر الإنترنت، فإنه يرسل الرسائل الملتقطة إلى خادم وفرة لقراءتها. ${exports.STATEMENT_PROCESSING_DISCLOSURE.ar}`
+            : `Pasted messages are read on this iPhone. If you use an older online Shortcut, it sends captured messages to Wafra’s server for reading. ${exports.STATEMENT_PROCESSING_DISCLOSURE.en}`;
+    return language === 'ar'
+        ? `تُقرأ الرسائل الملصقة على هذا الجهاز. ${exports.STATEMENT_PROCESSING_DISCLOSURE.ar}`
+        : `Pasted messages are read on this device. ${exports.STATEMENT_PROCESSING_DISCLOSURE.en}`;
 }
 },
 "ios-background-alert-parser":function(module,exports,require){
@@ -16067,7 +16104,7 @@ const inspectUnparsedLaunchAlert = (source, sender) => {
 exports.inspectUnparsedLaunchAlert = inspectUnparsedLaunchAlert;
 }
 };
-const mappings={"alert-draft":{"@/lib/currency-metadata":"currency-metadata"},"alert-event-evidence":{},"alert-institution-grammars":{},"alert-market-detection":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-semantics":"alert-semantics","@/lib/markets":"markets"},"alert-market-packs":{"@/lib/alert-market-packs.india-me":"alert-market-packs.india-me","@/lib/alert-market-packs.us-eu":"alert-market-packs.us-eu","@/lib/alert-market-packs.world":"alert-market-packs.world"},"alert-market-packs.india-me":{},"alert-market-packs.us-eu":{},"alert-market-packs.world":{},"alert-semantics":{"@/lib/alert-draft":"alert-draft","@/lib/alert-event-evidence":"alert-event-evidence","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-market-packs":"alert-market-packs","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"alert-source-ownership":{"@/lib/alert-draft":"alert-draft"},"bank-alert-interpreter":{"@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules","@/lib/categories":"categories","@/lib/bank-alert-semantic-output":"bank-alert-semantic-output","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser","@/lib/unparsed-launch-alert":"unparsed-launch-alert"},"bank-alert-semantic-output":{},"bank-alert-semantic-rules":{"@/lib/sms-parser":"sms-parser"},"bank-amount-tokens":{},"best-effort-autopost":{"@/lib/currency-metadata":"currency-metadata","@/lib/capture-source-identity":"capture-source-identity","@/lib/fx-rates":"fx-rates","@/lib/sms-parser":"sms-parser"},"bnpl-providers":{},"brand-categories":{},"capture-source-identity":{},"categories":{"@/lib/i18n":"i18n"},"country":{"@/lib/country-names":"country-names"},"country-names":{},"currency-metadata":{},"fx":{"@/lib/currency-metadata":"currency-metadata","@/lib/ledger-money":"ledger-money"},"fx-rates":{"@/lib/fx":"fx"},"gulf-neighbour-alerts":{"@/lib/best-effort-autopost":"best-effort-autopost","@/lib/country":"country","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/gulf-neighbour-templates":"gulf-neighbour-templates","@/lib/sms-parser":"sms-parser","@/lib/universal-parser":"universal-parser"},"gulf-neighbour-templates":{"@/lib/best-effort-autopost":"best-effort-autopost"},"i18n":{},"ios-background-alert-parser":{"@/lib/currency-metadata":"currency-metadata","@/lib/country":"country","@/lib/markets":"markets","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/launch-alert-parser":"launch-alert-parser","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/fx":"fx","@/lib/sms-parser":"sms-parser"},"latam-alert-templates":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/sms-parser":"sms-parser","@/lib/universal-types":"universal-types"},"launch-alert-parser":{"@/lib/alert-market-detection":"alert-market-detection","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/country":"country","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/bank-alert-interpreter":"bank-alert-interpreter","@/lib/markets":"markets","@/lib/bnpl-providers":"bnpl-providers","@/lib/sms-parser":"sms-parser","@/lib/currency-metadata":"currency-metadata","@/lib/gulf-neighbour-alerts":"gulf-neighbour-alerts","@/lib/universal-parser":"universal-parser","@/lib/alert-market-packs":"alert-market-packs","@/lib/alert-draft":"alert-draft","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/universal-categorization":"universal-categorization","@/lib/fx-rates":"fx-rates"},"ledger-money":{"@/lib/currency-metadata":"currency-metadata"},"markets":{"@/lib/country":"country"},"principal-posting-guards":{},"sms-parser":{"@/lib/categories":"categories","@/lib/markets":"markets","@/lib/bank-amount-tokens":"bank-amount-tokens","@/lib/fx":"fx","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/bnpl-providers":"bnpl-providers","@/lib/country":"country","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/universal-money":"universal-money"},"universal-categorization":{"@/lib/brand-categories":"brand-categories","@/lib/categories":"categories","@/lib/sms-parser":"sms-parser"},"universal-dates":{"@/lib/alert-source-ownership":"alert-source-ownership","@/lib/universal-types":"universal-types"},"universal-fields":{"@/lib/universal-types":"universal-types","@/lib/alert-draft":"alert-draft","@/lib/universal-dates":"universal-dates"},"universal-money":{"@/lib/alert-draft":"alert-draft","@/lib/alert-market-packs":"alert-market-packs","@/lib/currency-metadata":"currency-metadata","@/lib/universal-fields":"universal-fields","@/lib/universal-types":"universal-types"},"universal-parser":{"@/lib/universal-types":"universal-types","@/lib/alert-semantics":"alert-semantics","@/lib/universal-fields":"universal-fields","@/lib/universal-money":"universal-money","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"universal-types":{},"unparsed-launch-alert":{"@/lib/alert-draft":"alert-draft","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser"}};
+const mappings={"alert-draft":{"@/lib/currency-metadata":"currency-metadata"},"alert-event-evidence":{},"alert-institution-grammars":{},"alert-market-detection":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-semantics":"alert-semantics","@/lib/markets":"markets"},"alert-market-packs":{"@/lib/alert-market-packs.india-me":"alert-market-packs.india-me","@/lib/alert-market-packs.us-eu":"alert-market-packs.us-eu","@/lib/alert-market-packs.world":"alert-market-packs.world"},"alert-market-packs.india-me":{},"alert-market-packs.us-eu":{},"alert-market-packs.world":{},"alert-semantics":{"@/lib/alert-draft":"alert-draft","@/lib/alert-event-evidence":"alert-event-evidence","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-market-packs":"alert-market-packs","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"alert-source-ownership":{"@/lib/alert-draft":"alert-draft"},"bank-alert-interpreter":{"@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules","@/lib/categories":"categories","@/lib/bank-alert-semantic-output":"bank-alert-semantic-output","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser","@/lib/unparsed-launch-alert":"unparsed-launch-alert"},"bank-alert-semantic-output":{},"bank-alert-semantic-rules":{"@/lib/sms-parser":"sms-parser"},"bank-amount-tokens":{},"best-effort-autopost":{"@/lib/currency-metadata":"currency-metadata","@/lib/capture-source-identity":"capture-source-identity","@/lib/fx-rates":"fx-rates","@/lib/sms-parser":"sms-parser"},"bnpl-providers":{},"brand-categories":{},"capture-source-identity":{},"categories":{"@/lib/i18n":"i18n"},"country":{"@/lib/country-names":"country-names"},"country-names":{},"currency-metadata":{},"fx":{"@/lib/currency-metadata":"currency-metadata","@/lib/ledger-money":"ledger-money"},"fx-rates":{"@/lib/fx":"fx"},"gulf-neighbour-alerts":{"@/lib/best-effort-autopost":"best-effort-autopost","@/lib/country":"country","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/gulf-neighbour-templates":"gulf-neighbour-templates","@/lib/sms-parser":"sms-parser","@/lib/universal-parser":"universal-parser"},"gulf-neighbour-templates":{"@/lib/best-effort-autopost":"best-effort-autopost"},"i18n":{"@/lib/import-processing-disclosure":"import-processing-disclosure"},"import-processing-disclosure":{},"ios-background-alert-parser":{"@/lib/currency-metadata":"currency-metadata","@/lib/country":"country","@/lib/markets":"markets","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/launch-alert-parser":"launch-alert-parser","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/fx":"fx","@/lib/sms-parser":"sms-parser"},"latam-alert-templates":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/sms-parser":"sms-parser","@/lib/universal-types":"universal-types"},"launch-alert-parser":{"@/lib/alert-market-detection":"alert-market-detection","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/country":"country","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/bank-alert-interpreter":"bank-alert-interpreter","@/lib/markets":"markets","@/lib/bnpl-providers":"bnpl-providers","@/lib/sms-parser":"sms-parser","@/lib/currency-metadata":"currency-metadata","@/lib/gulf-neighbour-alerts":"gulf-neighbour-alerts","@/lib/universal-parser":"universal-parser","@/lib/alert-market-packs":"alert-market-packs","@/lib/alert-draft":"alert-draft","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/universal-categorization":"universal-categorization","@/lib/fx-rates":"fx-rates"},"ledger-money":{"@/lib/currency-metadata":"currency-metadata"},"markets":{"@/lib/country":"country"},"principal-posting-guards":{},"sms-parser":{"@/lib/categories":"categories","@/lib/markets":"markets","@/lib/bank-amount-tokens":"bank-amount-tokens","@/lib/fx":"fx","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/bnpl-providers":"bnpl-providers","@/lib/country":"country","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/universal-money":"universal-money"},"universal-categorization":{"@/lib/brand-categories":"brand-categories","@/lib/categories":"categories","@/lib/sms-parser":"sms-parser"},"universal-dates":{"@/lib/alert-source-ownership":"alert-source-ownership","@/lib/universal-types":"universal-types"},"universal-fields":{"@/lib/universal-types":"universal-types","@/lib/alert-draft":"alert-draft","@/lib/universal-dates":"universal-dates"},"universal-money":{"@/lib/alert-draft":"alert-draft","@/lib/alert-market-packs":"alert-market-packs","@/lib/currency-metadata":"currency-metadata","@/lib/universal-fields":"universal-fields","@/lib/universal-types":"universal-types"},"universal-parser":{"@/lib/universal-types":"universal-types","@/lib/alert-semantics":"alert-semantics","@/lib/universal-fields":"universal-fields","@/lib/universal-money":"universal-money","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"universal-types":{},"unparsed-launch-alert":{"@/lib/alert-draft":"alert-draft","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser"}};
 const cache=Object.create(null);
 function load(id){
 if(Object.prototype.hasOwnProperty.call(cache,id))return cache[id].exports;

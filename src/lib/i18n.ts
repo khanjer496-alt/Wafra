@@ -8,6 +8,8 @@
  * follows the market pack, not this setting.
  */
 
+import { IMPORT_PROCESSING_DISCLOSURE, importProcessingDisclosure } from '@/lib/import-processing-disclosure';
+
 export type Lang = 'en' | 'ar';
 
 const S = {
@@ -1751,7 +1753,18 @@ const S = {
   stillLoading: { en: 'Still loading your data — try again in a second.', ar: 'ما زال تحميل بياناتك جارياً — أعد المحاولة بعد لحظة.' },
   upToDateNoNew: { en: 'Up to date. No new bank messages.', ar: 'كل شيء محدّث. لا رسائل بنكية جديدة.' },
   rescanHint: { en: 'Rescans your whole inbox and shows what would be filed. Cards are matched automatically and nothing imports twice. You can also paste messages below.', ar: 'يعيد فحص كل رسائلك ويعرض ما سيُسجَّل. تُطابَق البطاقات تلقائياً ولا يُستورد شيء مرتين. يمكنك أيضاً لصق رسائل بالأسفل.' },
-  pasteHint: { en: 'Paste one or more bank messages below, separated by a blank line. Everything is read on this device.', ar: 'ألصق رسالة بنكية أو أكثر بالأسفل، بينها سطر فارغ. تُقرأ كلها على هذا الجهاز.' },
+  pasteHint: {
+    en: `Paste one or more bank messages below, separated by a blank line. ${IMPORT_PROCESSING_DISCLOSURE.en}`,
+    ar: `ألصق رسالة بنكية أو أكثر بالأسفل، بينها سطر فارغ. ${IMPORT_PROCESSING_DISCLOSURE.ar}`,
+  },
+  pasteHintIos: {
+    en: `Paste one or more bank messages below, separated by a blank line. ${importProcessingDisclosure('en', 'ios')}`,
+    ar: `ألصق رسالة بنكية أو أكثر بالأسفل، بينها سطر فارغ. ${importProcessingDisclosure('ar', 'ios')}`,
+  },
+  pasteHintWeb: {
+    en: `Paste one or more bank messages below, separated by a blank line. ${importProcessingDisclosure('en', 'web')}`,
+    ar: `ألصق رسالة بنكية أو أكثر بالأسفل، بينها سطر فارغ. ${importProcessingDisclosure('ar', 'web')}`,
+  },
   whereItWent: { en: 'Where it went', ar: 'أين ذهبت' },
   addedByHand: { en: 'Added by hand', ar: 'أُضيفت يدوياً' },
   appLockPhoneOnly: { en: 'App lock works on the phone app only.', ar: 'قفل التطبيق يعمل على تطبيق الهاتف فقط.' },
@@ -3178,8 +3191,8 @@ const S = {
   // messages remain available. Pasting is local; statement files use the import service.
   iosLocalUnsupported: { en: 'Automatic capture needs iOS 16 or later', ar: 'يتطلب الالتقاط التلقائي iOS 16 أو أحدث' },
   iosLocalUnsupportedBody: {
-    en: 'Pasted messages are read on this iPhone. Choosing a statement file connects this phone to Wafra’s import service. The file is read, then deleted.',
-    ar: 'تُقرأ الرسائل الملصقة على هذا الآيفون. اختيار ملف كشف حساب يربط هذا الهاتف بخدمة الاستيراد في وفرة. يُقرأ الملف ثم يُحذف.',
+    en: importProcessingDisclosure('en', 'ios'),
+    ar: importProcessingDisclosure('ar', 'ios'),
   },
   iosLocalUnsupportedStatement: { en: 'Import a statement', ar: 'استيراد كشف حساب' },
   iosLocalUnsupportedPaste: { en: 'Paste bank messages', ar: 'لصق رسائل البنك' },

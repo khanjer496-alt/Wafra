@@ -21,7 +21,7 @@ import {
   androidNotificationCaptureEnabled,
   androidSmsCaptureEnabled,
 } from '@/lib/android-capture-sources';
-import { scanInbox } from '@/lib/auto-import';
+import { hasSmsPermission, scanInbox } from '@/lib/auto-import';
 import { createCaptureExecutor, type CaptureLedgerAdapter } from '@/lib/capture-executor';
 import type { CaptureResult } from '@/lib/capture';
 import { setLanguage, t, tf } from '@/lib/i18n';
@@ -270,6 +270,8 @@ function postImportedPushNotice(
 }
 
 async function processBackgroundCapture(source: BackgroundSource, observedAt: number): Promise<void> {
+  // An upgraded OS grant is not this installation's disclosure acceptance.
+  if (source === 'sms' && !await hasSmsPermission().catch(() => false)) return;
   // SMS_RECEIVED is independent of Notification access, but background
   // automatic capture is the same Pro feature. Reuse the native bounded lease
   // so a stale persisted `pro=true` cannot authorize killed-process imports

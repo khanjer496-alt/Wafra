@@ -27,7 +27,6 @@ import {
   Alert,
   AppState as RNAppState,
   I18nManager,
-  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -73,6 +72,8 @@ import {
   hasSmsPermission,
   isSmsScanningAvailable,
   openSmsPermissionSettings,
+  openSmsRevocationSettings,
+  openBankNotificationAccessSettings,
   requestSmsDeliveryPermission,
   requestSmsPermission,
 } from '@/lib/auto-import';
@@ -407,7 +408,8 @@ export default function SettingsScreen() {
         body: t('smsRevokeHint'),
         confirmLabel: t('openPhoneSettings'),
         onConfirm: () => {
-          void Linking.openSettings().catch(() => {});
+          // Withdrawing access must never depend on accepting a grant disclosure.
+          void openSmsRevocationSettings().catch(() => {});
         },
       });
       return;
@@ -686,20 +688,12 @@ export default function SettingsScreen() {
       Alert.alert(t('notAvailable'), t('notifsPhoneOnly'));
       return;
     }
-    setConfirmation({
-      question: t('bankAppNotifsTitle'),
-      body: t('notifAccessFull'),
-      confirmLabel: notifEnabled ? t('openSettings') : t('enableAction'),
-      onConfirm: () => {
-        try {
-          pendingNotificationConsent.current = true;
-          pendingNotificationConsent.current = reader.openSettings() === true;
-          if (!pendingNotificationConsent.current) Alert.alert(t('capturePreferenceFailed'));
-        } catch {
-          pendingNotificationConsent.current = false;
-          Alert.alert(t('capturePreferenceFailed'));
-        }
-      },
+    void (async () => {
+      pendingNotificationConsent.current = false;
+      pendingNotificationConsent.current = await openBankNotificationAccessSettings();
+    })().catch(() => {
+      pendingNotificationConsent.current = false;
+      Alert.alert(t('capturePreferenceFailed'));
     });
   };
 

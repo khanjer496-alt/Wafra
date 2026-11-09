@@ -19,7 +19,7 @@ function harness(development = true) {
     'react-native': { Platform: { OS: 'android', Version: 36 } },
     '../../modules/notification-reader': {}, '../../modules/sms-reader': { getInboxSms: async () => [] },
     '@/lib/auto-import': { getAndroidNotificationImportDiagnostics: () => null,
-      hasSmsPermission: async () => true, hasSmsDeliveryPermission: async () => true },
+      hasSmsSystemPermission: async () => true, hasSmsPermission: async () => true, hasSmsDeliveryPermission: async () => true },
     '@/lib/capture-source-identity': { canonicalCaptureSourceKey: value => value },
     '@/lib/local-semantic-inbox-shadow': { runLocalSemanticInboxShadow: async () => { shadowScans++; } },
     '@/lib/diagnostic-messages': { collectDiagnosticBankMessages: async (_read, options) => {

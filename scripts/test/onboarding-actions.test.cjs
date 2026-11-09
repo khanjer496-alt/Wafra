@@ -136,7 +136,7 @@ function actions(options = {}) {
     isSmsScanningAvailable: () => options.scanAvailable ?? true,
     hasSmsPermission: service('hasSmsPermission', false),
     hasBankNotificationSystemAccess: () => options.notificationAccess ?? false,
-    openBankNotificationAccessSettings: service('openBankNotificationAccessSettings', true),
+    openBankNotificationAccessSettings: async flow => { if (flow?.onAccepted && !await flow.onAccepted()) return false; return service('openBankNotificationAccessSettings', true)(); },
     bankNotificationAdmissionExpiresAt: () => 1_900_000_000_000,
     NotificationReader: { setCaptureEnabled: service('notificationSetCaptureEnabled', true) },
     enableAndroidNotificationAdmission: service('enableAndroidNotificationAdmission', true),
@@ -712,4 +712,14 @@ test('the sample amount follows the chosen ledger currency and never defaults to
   assert.equal(sample('ZZZ').text, '24.50', 'an unknown code is not printed as money');
   assert.ok(text(h.render({ currency: 'EUR' })).includes('EUR 24.50'));
   assert.ok(!text(h.render()).includes('AED'));
+});
+
+
+test('Not now on the shared SMS disclosure leaves onboarding usable without an OS-denied result', async () => {
+  const h = actions({ requestSmsPermission: async options => { options.onDisclosureDeclined(); return false; } });
+  await h.startScan();
+  assert.equal(h.ui.denied, false);
+  assert.equal(h.ui.androidSmsReady, false);
+  assert.equal(calls(h, 'requestSmsDeliveryPermission').length, 0);
+  assert.equal(calls(h, 'beginHistoryImport').length, 0);
 });

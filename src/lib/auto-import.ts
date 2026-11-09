@@ -2,6 +2,7 @@ import { createAiAlertReviewSession } from '@/lib/ai-alert-reader';
 import { createPrivateAlertFormatSession, type PrivateAlertFormatSessionOptions } from '@/lib/private-alert-format-runtime';
 import { canEnrichPrivateFormatReview, privateAlertFormatReviewEvent } from '@/lib/private-alert-format-review';
 import { requestConsent } from '@/lib/consent-prompt';
+import { withAndroidCaptureConsent } from '@/lib/android-capture-disclosure';
 import { AppState as RNAppState, Linking, PermissionsAndroid, Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
@@ -380,11 +381,19 @@ export function hasBankNotificationSystemAccess(): boolean {
 }
 
 /** Open Android's Notification access screen. The user must approve this system permission. */
-export async function openBankNotificationAccessSettings(): Promise<boolean> {
-  if (Platform.OS !== 'android' || !NotificationReader ||
-    !isBankNotificationCaptureAvailable(NotificationReader.isAvailable?.() === true)) return false;
+export async function openBankNotificationAccessSettings(options: {
+  onAccepted?: () => Promise<boolean>;
+  skipSettingsIfGranted?: boolean;
+} = {}): Promise<boolean> {
+  const reader = NotificationReader;
+  if (Platform.OS !== 'android' || !reader ||
+    !isBankNotificationCaptureAvailable(reader.isAvailable?.() === true)) return false;
   try {
-    return NotificationReader.openSettings?.() === true;
+    return await withAndroidCaptureConsent('bank-notifications', async () => {
+      if (options.onAccepted && !await options.onAccepted()) return false;
+      if (options.skipSettingsIfGranted && hasBankNotificationSystemAccess()) return true;
+      return reader.openSettings?.() === true;
+    });
   } catch {
     return false;
   }
@@ -397,9 +406,23 @@ export function subscribeInboxChanges(listener: () => void): () => void {
   return () => subscription?.remove();
 }
 
-export async function hasSmsPermission(): Promise<boolean> {
+const SMS_HISTORY_DISCLOSURE_KEY = 'wafra.android.sms-history-disclosure.v1';
+const SMS_HISTORY_DISCLOSURE_VERSION = '1';
+
+/** OS permission alone is not evidence that this installation saw the disclosure. */
+export async function hasSmsSystemPermission(): Promise<boolean> {
   if (!isSmsScanningAvailable()) return false;
   return PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS);
+}
+
+/** Effective app access requires both the OS grant and this disclosure version. */
+export async function hasSmsPermission(): Promise<boolean> {
+  if (!await hasSmsSystemPermission()) return false;
+  try {
+    return await SecureStore.getItemAsync(SMS_HISTORY_DISCLOSURE_KEY) === SMS_HISTORY_DISCLOSURE_VERSION;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -414,18 +437,36 @@ export async function hasSmsDeliveryPermission(): Promise<boolean> {
     PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.RECEIVE_SMS);
 }
 
-export async function requestSmsPermission(): Promise<boolean> {
+export async function requestSmsPermission(options: { onDisclosureDeclined?: () => void } = {}): Promise<boolean> {
   if (!isSmsScanningAvailable()) return false;
   if (await hasSmsPermission()) return true;
   // Foreground history and live delivery have separate consent.
-  const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_SMS);
-  return result === PermissionsAndroid.RESULTS.GRANTED;
+  let accepted = false;
+  const granted = await withAndroidCaptureConsent('sms-history', async () => {
+    accepted = true;
+    await SecureStore.setItemAsync(SMS_HISTORY_DISCLOSURE_KEY, SMS_HISTORY_DISCLOSURE_VERSION);
+    // Upgrades/manual system grants still need the disclosure, but no redundant OS prompt.
+    if (await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS)) return true;
+    const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_SMS);
+    return result === PermissionsAndroid.RESULTS.GRANTED;
+  });
+  if (!accepted) options.onDisclosureDeclined?.();
+  return granted;
 }
 
 /** Open Wafra's Android app-details page, including restricted-access controls. */
 export async function openSmsPermissionSettings(): Promise<void> {
   if (Platform.OS !== 'android') return;
-  await Linking.openSettings();
+  await withAndroidCaptureConsent('sms-history', async () => {
+    await SecureStore.setItemAsync(SMS_HISTORY_DISCLOSURE_KEY, SMS_HISTORY_DISCLOSURE_VERSION);
+    await Linking.openSettings();
+    return true;
+  });
+}
+
+/** Withdrawal never requires accepting a grant disclosure. This does not read SMS. */
+export async function openSmsRevocationSettings(): Promise<void> {
+  if (Platform.OS === 'android') await Linking.openSettings();
 }
 
 /** Stable native error boundary; never inspect or expose platform error text. */
@@ -447,6 +488,7 @@ export async function requestSmsDeliveryPermission(
   // A previous OS grant may have been revoked. Clear stale consent before any fresh choice.
   if (SmsReader.hasLiveSmsConsent?.() && !SmsReader.setLiveSmsConsent(false)) return false;
   const accepted = await requestConsent({
+    androidCapture: 'sms-live',
     question: translate('instantSmsDisclosureTitle'),
     body: translate('instantSmsDisclosureBody'),
     cancelLabel: translate('cancel'),
@@ -593,6 +635,7 @@ const NOOP_SCAN_COMMIT = async () => {};
 export async function countInboxMessages(sinceMs: number, atOrAfterMs = 0): Promise<number | null> {
   if (Platform.OS !== 'android' || typeof SmsReader?.getInboxCount !== 'function') return null;
   try {
+    if (!await hasSmsPermission()) return null;
     const count = await SmsReader.getInboxCount(sinceMs, atOrAfterMs);
     return Number.isSafeInteger(count) && count >= 0 ? count : null;
   } catch {
