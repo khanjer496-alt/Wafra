@@ -16,7 +16,9 @@
 const http = require('node:http');
 const net = require('node:net');
 
-const TOKEN = process.env.NATIVE_SIM_GATE_TOKEN || '';
+const TOKEN = process.env.NATIVE_SIM_GATE_TOKEN_FILE
+  ? require('./session-key.cjs').readPrivateToken(process.env.NATIVE_SIM_GATE_TOKEN_FILE)
+  : process.env.NATIVE_SIM_GATE_TOKEN || '';
 const TARGET_PORT = Number(process.env.NATIVE_SIM_TARGET_PORT || 3200);
 // 0 disables the agent-device route entirely, so a session started without
 // --agent exposes no extra surface at all.
@@ -27,7 +29,7 @@ const PORT = Number(process.env.NATIVE_SIM_GATE_PORT || 3199);
 const COOKIE = 'native_sim_k';
 
 if (!TOKEN) {
-  console.error('NATIVE_SIM_GATE_TOKEN is required — refusing to proxy an unauthenticated simulator');
+  console.error('A private session-key file or local legacy token is required — refusing to proxy an unauthenticated simulator');
   process.exit(1);
 }
 
@@ -77,8 +79,8 @@ const DENIED = `<!doctype html><meta charset=utf-8><title>native-sim</title>
 <style>body{font:14px/1.6 -apple-system,system-ui,sans-serif;margin:15vh auto;max-width:34rem;padding:0 1.5rem;color:#111}
 @media(prefers-color-scheme:dark){body{background:#111;color:#eee}}code{background:#8882;padding:.15em .4em;border-radius:4px}</style>
 <h1>🔒 native-sim</h1>
-<p>This simulator stream needs the access key from the link the CLI printed.</p>
-<p>Ask whoever started the session for the full URL — the one ending in <code>?k=…</code>.</p>`;
+<p>This simulator stream requires the private access key delivered to its operator.</p>
+<p>Use the approved private handoff. Never post an authenticated link.</p>`;
 
 const server = http.createServer((req, res) => {
   if (req.url.startsWith('/__native-sim/healthz')) {
