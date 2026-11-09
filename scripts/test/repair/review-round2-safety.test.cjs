@@ -128,8 +128,15 @@ function confirmationNative(body) {
     context: { v: 1, country: 'AE', parserMarket: 'AE', ledgerMoney: { currency: 'AED', exponent: 2 },
       sourceHash: meta.sourceHash } })));
 }
-for (const body of [confirmedDebit, confirmedDebit.replace(/ /g, '  ')]) {
-  test(`issuer confirmation retains completed debit/${body === confirmedDebit ? 'original' : 'spacing'}`, () => {
+for (const [layout, body] of [
+  ['original', confirmedDebit],
+  ['spacing', confirmedDebit.replace(/ /g, '  ')],
+  ['www-host', confirmedDebit.replace('AMAZON.COM', 'www.amazon.com')],
+  ['www-host-spacing', confirmedDebit.replace('AMAZON.COM', 'www.amazon.com').replace(/ /g, '  ')],
+  ['after-sentence', `Transaction alert. ${confirmedDebit}`],
+  ['after-sentence-spacing', `Transaction alert. ${confirmedDebit}`.replace(/ /g, '  ')],
+]) {
+  test(`issuer confirmation retains completed debit/${layout}`, () => {
     const session = reader('AE');
     assert.equal(hasClickLinkPrompt(body), false, 'merchant hostname is not a navigation target');
     assert.equal(nonPostingReason(body), null);
@@ -158,6 +165,9 @@ for (const [index, source] of [
   'Your account is suspended. AED 4,999.00 debited. Update details: enbd-secure.test/login',
   `${confirmedDebit} Please confirm at enbd-secure.test/login.`,
   confirmedDebit.replace('We confirm', 'Please confirm'),
+  confirmedDebit.replace('We confirm', 'Can we confirm'),
+  confirmedDebit.replace('We confirm', 'Did we confirm'),
+  'Bank notice '.repeat(8) + confirmedDebit.replace('We confirm', 'Can we confirm'),
 ].entries()) for (const body of [source, source.replace(/ /g, '  ')]) {
   test(`issuer confirmation cannot hide a link instruction/${index}/${body === source ? 'original' : 'spacing'}`, () => {
     const session = reader('AE');
