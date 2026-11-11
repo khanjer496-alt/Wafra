@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 168134e2b1bf1dd98ccd9f86be6dd9fedd5bc7437ce81b32c40b7263b1666658
+// Generated from normal shipping TypeScript. Source SHA-256: 5640bbcf638e42cad690d82331aad4888eb6beadf06312e0590faea5957fd1d0
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -11112,7 +11112,7 @@ exports.isCompletedCardRepaymentPrincipal = isCompletedCardRepaymentPrincipal;
 exports.isUnqualifiedCardCredit = isUnqualifiedCardCredit;
 const CLICK_LINK_PROMPT = /(?:\b(?:click(?:ing)?|tap(?:ping)?|verify|confirm|update\s+(?:(?:your|the)\s+)?(?:details|information|credentials|account))\b[\s:：]+|(?<![ء-ي])(?:اضغط|إضغط|انقر)[\s:：]+)(?:[^.!?]|\.\d){0,120}?(?:(?:https?|hxxps?):\/\/|\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:[\/?#:]|\b)|www\.|\b(?:here|below|link|url)\b|الرابط|هنا)/giu;
 const ISSUER_MERCHANT_DEBIT_CONFIRMATION = /^confirm\s+that\s+[A-Z]{3}\s+\d[\d,.]*\s+was\s+debited\s+from\s+your\s+account\s+ending\s+\d{4}\s+for\s+(?:a\s+)?purchase\s+at\s+(?:[a-z0-9-]+\.)+[a-z]{2,}$/iu;
-const ISSUER_MERCHANT_HOST_END = /^[.!?;,]*(?:\s|$)/u;
+const ISSUER_MERCHANT_HOST_END = /^(?:\*[A-Z0-9]{1,24})?["'”’»)\]]*[.!?;,。、،؛؟۔…]*(?:[^\S\uFEFF]|$)/iu;
 function hasClickLinkPrompt(source) {
     for (const match of source.matchAll(CLICK_LINK_PROMPT)) {
         const before = source.slice(Math.max(0, match.index - 60), match.index);
