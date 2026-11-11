@@ -13,6 +13,7 @@ import {
   partitionReviewsByCapacity,
   requiresReviewRetention,
   reviewCaptureBacklog,
+  reviewReceiptSettled,
   settleReviewStage,
   type ReviewEntry,
   type ReviewSourceReceipt,
@@ -441,7 +442,7 @@ function currentReviewRetention(stages: readonly ReviewStageRecord[]): ReviewRet
       : items.map(item => ({ sourceKey: reviewRetentionKey(item), outcome: 'deferred' as const }));
     for (const entry of settled) {
       const prior = target.get(entry.sourceKey);
-      if (prior === 'pending' || prior === 'resolved') continue;
+      if (reviewReceiptSettled(prior)) continue;
       target.set(entry.sourceKey, entry.outcome);
     }
   }
@@ -450,7 +451,7 @@ function currentReviewRetention(stages: readonly ReviewStageRecord[]): ReviewRet
 /** Only the item's own settled receipt can keep it; expired/evicted tombstones never do. */
 function reviewRetentionKept(map: ReviewRetentionMap, item: ReviewEntry): boolean {
   const outcome = map.get(reviewRetentionKey(item));
-  return outcome === 'pending' || outcome === 'resolved';
+  return reviewReceiptSettled(outcome);
 }
 
 /** Drain the native queue through one serialized, durable acknowledgement path. */

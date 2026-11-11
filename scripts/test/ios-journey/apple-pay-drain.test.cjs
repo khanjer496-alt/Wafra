@@ -170,7 +170,7 @@ const withReceipt = (h, outcome) => {
 const acked = h => h.calls.filter(x => Array.isArray(x) && x[0] === 'ack').flatMap(x => x.slice(1));
 
 test('Wallet ACK waits for its own pending/resolved receipt, not a live pending read', async () => {
-  for (const outcome of ['deferred', 'expired', 'refused']) {
+  for (const outcome of ['deferred', 'refused']) {
     const h = harness(); withReceipt(h, outcome);
     const result = await h.coordinator.drain();
     assert.equal(h.state.reviewTray.pending.length, 1, 'the live tray does carry the source');
@@ -181,6 +181,17 @@ test('Wallet ACK waits for its own pending/resolved receipt, not a live pending 
     const h = harness(); withReceipt(h, outcome); await h.coordinator.drain();
     assert.equal(h.queue().length, 0, `${outcome} receipt releases it`);
   }
+});
+
+test('an expired Wallet source is a terminal counted loss: ACKed exactly once, evicted-like stays held', async () => {
+  const h = harness(); withReceipt(h, 'expired');
+  await h.coordinator.drain();
+  assert.equal(h.queue().length, 0, 'expired releases the native record');
+  assert.equal(acked(h).filter(x => x === id(1)).length, 1, 'ACKed exactly once');
+  await h.coordinator.drain();
+  assert.equal(acked(h).filter(x => x === id(1)).length, 1, 'a later drain never re-ACKs or re-stages');
+  const held = harness(); withReceipt(held, 'deferred'); await held.coordinator.drain();
+  assert.equal(held.queue().length, 1, 'an evicted/deferred source stays queued');
 });
 
 test('a receipt-less stage never authorizes a Wallet ACK', async () => {

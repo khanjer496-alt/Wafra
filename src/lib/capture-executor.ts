@@ -25,7 +25,7 @@ import type {
   LocalCaptureDeclineQualificationMapping,
   LocalCaptureReviewQualificationCandidate,
 } from '@/lib/types';
-import { emptyAlertReviewTray, partitionReviewsByCapacity, settleReviewStage, requiresReviewRetention, type ReviewEntry } from '@/lib/alert-review-tray';
+import { emptyAlertReviewTray, partitionReviewsByCapacity, reviewReceiptSettled, settleReviewStage, requiresReviewRetention, type ReviewEntry } from '@/lib/alert-review-tray';
 import { stageWalletNearMatches } from '@/lib/wallet-near-match';
 import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
 import { captureTrace, captureTraceEnabled } from '@/lib/capture-trace';
@@ -193,7 +193,7 @@ const reviewSourceClaims = (state: AppState): Set<string> => {
   return new Set([
     ...(state.reviewTray?.pending ?? []).filter(item => item.expiresAt > now),
     ...(state.reviewTray?.tombstones ?? []).filter(item => item.expiresAt > now &&
-      (item.outcome === 'added' || item.outcome === 'dismissed' || item.outcome === 'duplicate')),
+      (item.outcome === 'added' || item.outcome === 'dismissed' || item.outcome === 'duplicate' || item.outcome === 'expired')),
   ].map(item => canonicalCaptureSourceKey(item.sourceKey, 'observedAt' in item ? item.observedAt : undefined)));
 };
 
@@ -346,7 +346,7 @@ export const createCaptureExecutor = ({
       const retention = await settleReviewStage(reviewCandidates, reviewReceipt);
       for (const item of reviewCandidates) {
         if (requiresReviewRetention(item) && !retention.some(entry => entry.sourceKey === canonicalCaptureSourceKey(item.sourceKey, item.observedAt) &&
-            (entry.outcome === 'pending' || entry.outcome === 'resolved'))) {
+            reviewReceiptSettled(entry.outcome))) {
           deferredReviewSourceKeys.push(item.sourceKey);
           if (item.channel !== 'push') deferInbox = true;
         }
@@ -575,7 +575,7 @@ export const createCaptureExecutor = ({
       for (const item of reviewCandidates) {
         if (requiresReviewRetention(item) && !retention.some(entry =>
             entry.sourceKey === canonicalCaptureSourceKey(item.sourceKey, item.observedAt) &&
-            (entry.outcome === 'pending' || entry.outcome === 'resolved'))) {
+            reviewReceiptSettled(entry.outcome))) {
           unretainedReviewSources.add(canonicalCaptureSourceKey(item.sourceKey, item.observedAt));
         }
       }
@@ -753,7 +753,7 @@ export const createCaptureExecutor = ({
       for (const item of reviewCandidates) {
         if (requiresReviewRetention(item) && !retention.some(entry =>
             entry.sourceKey === canonicalCaptureSourceKey(item.sourceKey, item.observedAt) &&
-            (entry.outcome === 'pending' || entry.outcome === 'resolved'))) {
+            reviewReceiptSettled(entry.outcome))) {
           unretainedReviewSources.add(canonicalCaptureSourceKey(item.sourceKey, item.observedAt));
         }
       }

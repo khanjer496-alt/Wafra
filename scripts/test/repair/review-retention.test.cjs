@@ -187,6 +187,38 @@ test('expiry is explicit, counted once, never resolved or renewed by replay', as
   assert.equal(replay.outcomes[0], 'expired'); assert.equal(replay.state.pending.length, 0);
   assert.equal(tray.reviewRetentionReceipts(replay.state, [freshReplay], now)[0].outcome, 'expired');
 });
+test('an expired source is a settled, counted-once loss that no re-read re-stages or posts', () => {
+  const item = payment(0);
+  let state = tray.admitPreparedReviewAlerts(tray.emptyAlertReviewTray(), [item], now).state;
+  assert.equal(state.pending.length, 1);
+  const later = now + tray.REVIEW_ALERT_TTL_MS + 1;
+  state = tray.pruneAlertReviewTray(state, later);
+  assert.equal(state.pending.length, 0);
+  assert.equal(state.tombstones.filter(x => x.outcome === 'expired').length, 1);
+  assert.equal(tray.reviewClaimSourceKeys(state, later).length, 1, 'the expired tombstone is a settled claim');
+  assert.equal(tray.reviewReceiptSettled('expired'), true);
+  for (const held of ['deferred', 'refused', undefined]) assert.equal(tray.reviewReceiptSettled(held), false);
+  for (let read = 0; read < 3; read++) {
+    const again = tray.admitPreparedReviewAlerts(state, [item], later);
+    assert.equal(again.outcomes[0], 'expired'); assert.equal(again.state.pending.length, 0);
+    assert.equal(again.state.tombstones.filter(x => x.outcome === 'expired').length, 1, 'repeated reads never double count');
+    state = again.state;
+  }
+  assert.equal(tray.reviewRetentionReceipts(state, [item], later)[0].outcome, 'expired');
+  // Tombstone trimmed away: the item's own expiry still blocks re-admission.
+  const trimmed = tray.admitPreparedReviewAlerts(tray.emptyAlertReviewTray(), [item], later);
+  assert.equal(trimmed.outcomes[0], 'expired'); assert.equal(trimmed.state.pending.length, 0);
+  assert.equal(trimmed.state.tombstones.filter(x => x.outcome === 'expired').length, 1);
+});
+test('iOS History passes an expired source and continues, but still stops on an evicted or deferred one', async () => {
+  const history = source('lib/ios-history-import'); const item = payment(0);
+  const key = tray.reviewRetentionReceipts(tray.emptyAlertReviewTray(), [item], now)[0].sourceKey;
+  const stage = outcome => () => ({ admitted: 0, durable: Promise.resolve(), retention: () => [{ sourceKey: key, outcome }] });
+  assert.equal(await history.persistIosHistoryReviewCandidates([item], stage('expired')), 0);
+  for (const held of ['deferred', 'refused']) {
+    await assert.rejects(history.persistIosHistoryReviewCandidates([item], stage(held)), error => error.code === 'review-capacity');
+  }
+});
 test('retention policy never grants ordinary card-payment expense or income confirmation', () => {
   const item = payment(0); assert.equal(tray.requiresReviewRetention(item), true);
   assert.equal(tray.isMoneyMovementReview(item), false);
@@ -210,8 +242,11 @@ test('iOS final discard barrier revalidates after expiry or ledger replacement w
       await assert.rejects(guardedLoaded.verifyReviewRetention(), error => error.code === 'cancelled');
       assert.equal(guarded.discards, 0);
     } else {
-      await assert.rejects(loaded.verifyReviewRetention(), error => error.code === 'review-expired');
-      assert.equal(h.discards, 0);
+      // Expiry is a terminal, counted loss: the barrier passes instead of freezing History.
+      await loaded.verifyReviewRetention();
+      assert.equal(h.discards, 0, 'the barrier itself never discards');
+      assert.equal(store.state.reviewTray.tombstones.filter(x => x.outcome === 'expired').length, 1,
+        'counted exactly once');
     }
   }
 });

@@ -372,6 +372,15 @@ export interface ReviewSourceReceipt {
   sourceKey: string;
   outcome: 'pending' | 'resolved' | 'deferred' | 'expired' | 'refused';
 }
+/**
+ * A source is settled when Review holds it (pending), the user decided it
+ * (resolved), or its 30-day payload expired. Expiry is a terminal, disclosed
+ * loss counted once through its tombstone: it is never posted or re-staged,
+ * and it must not freeze a cursor. 'evicted'/'currency-evicted', deferred and
+ * refused stay held because capacity can still free.
+ */
+export const reviewReceiptSettled = (outcome: ReviewSourceReceipt['outcome'] | undefined): boolean =>
+  outcome === 'pending' || outcome === 'resolved' || outcome === 'expired';
 export interface ReviewStageReceipt {
   admitted: number;
   durable: Promise<void>;
@@ -401,7 +410,7 @@ export const reviewRetentionReceipts = (
 
 export const reviewClaimSourceKeys = (tray: AlertReviewTrayState, now: number): string[] => [
   ...tray.pending.filter(item => item.expiresAt > now).map(item => canonicalUniversalSourceKey(item.sourceKey, item.observedAt)),
-  ...tray.tombstones.filter(item => item.expiresAt > now && isResolutionOutcome(item.outcome))
+  ...tray.tombstones.filter(item => item.expiresAt > now && (isResolutionOutcome(item.outcome) || item.outcome === 'expired'))
     .map(item => canonicalUniversalSourceKey(item.sourceKey)),
 ];
 

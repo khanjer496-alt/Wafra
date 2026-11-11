@@ -1,5 +1,5 @@
 import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
-import { reviewClaimSourceKeys, requiresReviewRetention, settleReviewStage, type ReviewStageReceipt } from '@/lib/alert-review-tray';
+import { reviewClaimSourceKeys, reviewReceiptSettled, requiresReviewRetention, settleReviewStage, type ReviewStageReceipt } from '@/lib/alert-review-tray';
 import { collectLegacyReviewSourceKeys } from '@/lib/review-source-bindings';
 import { AppState as RNAppState, Platform } from 'react-native';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
@@ -164,9 +164,9 @@ export function useHistoryImport(): void {
         if (!canCommit()) return false;
         const unresolved = page.reviewCandidates.filter(requiresReviewRetention).map(item =>
           outcomes.find(entry => entry.sourceKey === canonicalCaptureSourceKey(item.sourceKey, item.observedAt)))
-          .filter(entry => !entry || (entry.outcome !== 'pending' && entry.outcome !== 'resolved'));
-        if (unresolved.length) return { paused: unresolved.some(entry => entry?.outcome === 'expired')
-          ? 'review-expired' as const : 'review-capacity' as const };
+          .filter(entry => !entry || !reviewReceiptSettled(entry.outcome));
+        // An expired source is a terminal, disclosed loss: History continues.
+        if (unresolved.length) return { paused: 'review-capacity' as const };
       }
       // Cropped candidates still live in the provider; do not skip their cursor.
       if (page.deferredInboxReviews) return { paused: 'review-capacity' as const };
@@ -205,7 +205,7 @@ export function useHistoryImport(): void {
       if (!canCommit() || (page.skippedKnownInboxReviewSourceKeys ?? []).some(key => !claims.has(key)) ||
           page.reviewCandidates.some(item => requiresReviewRetention(item) && !finalReviews.some(entry =>
             entry.sourceKey === canonicalCaptureSourceKey(item.sourceKey, item.observedAt) &&
-            (entry.outcome === 'pending' || entry.outcome === 'resolved')))) return false;
+            reviewReceiptSettled(entry.outcome)))) return false;
       const receipt = importBatch({
           ...nearMatches.plan.batch,
           parserRereadComplete: page.inboxHistoryComplete,

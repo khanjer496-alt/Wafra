@@ -1,7 +1,7 @@
 import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
 import type { CategoryId } from '@/lib/types';
 import { REVIEW_ALERT_CAP, REVIEW_ALERT_TTL_MS, appleMessageReviewIdentity, isUniversalReviewAlert,
-  requiresReviewRetention, settleReviewStage, type ReviewStageReceipt, type ReviewEntry } from '@/lib/alert-review-tray';
+  requiresReviewRetention, reviewReceiptSettled, settleReviewStage, type ReviewStageReceipt, type ReviewEntry } from '@/lib/alert-review-tray';
 import { createLaunchAlertSession } from '@/lib/launch-alert-parser';
 import { MAX_HISTORICAL_RECORDS, parseHistoricalMessageRecords, type HistoricalMessageRecord } from '@/lib/historical-import';
 import { createAiAlertReviewSession, type AiAlertReviewOptions } from '@/lib/ai-alert-reader';
@@ -119,8 +119,8 @@ export async function persistIosHistoryReviewCandidates(
   const required = items.filter(requiresReviewRetention);
   for (const item of required) {
     const result = outcomes.find(entry => entry.sourceKey === canonicalCaptureSourceKey(item.sourceKey, item.observedAt));
-    if (result?.outcome === 'expired') throw new IosHistoryImportError('review-expired');
-    if (!result || (result.outcome !== 'pending' && result.outcome !== 'resolved')) {
+    // Expired is a terminal, counted loss (its tombstone); History continues.
+    if (!result || !reviewReceiptSettled(result.outcome)) {
       throw new IosHistoryImportError('review-capacity');
     }
   }

@@ -128,7 +128,7 @@ import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { createPrivateAlertFormatSession } from '@/lib/private-alert-format-runtime';
 import { canEnrichPrivateFormatReview, privateAlertFormatReviewEvent } from '@/lib/private-alert-format-review';
 import { activeCountryDateOrder } from '@/lib/country';
-import { prepareUniversalReviewAlert, requiresReviewRetention, reviewClaimSourceKeys, settleReviewStage, type ReviewEntry } from '@/lib/alert-review-tray';
+import { prepareUniversalReviewAlert, requiresReviewRetention, reviewClaimSourceKeys, reviewReceiptSettled, settleReviewStage, type ReviewEntry } from '@/lib/alert-review-tray';
 import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
 import { isDeliberateOtherTitle, PARSER_VERSION } from '@/lib/sms-parser';
 import { collectLegacyReviewSourceKeys } from '@/lib/review-source-bindings';
@@ -798,9 +798,7 @@ export default function ImportSmsScreen() {
         const outcomes = reviewReceipt.retention?.() ?? [];
         const unresolved = reviewCandidates.filter(requiresReviewRetention).map(item =>
           outcomes.find(entry => entry.sourceKey === canonicalCaptureSourceKey(item.sourceKey, item.observedAt)))
-          .filter(entry => !entry || (entry.outcome !== 'pending' && entry.outcome !== 'resolved'));
-        const expired = unresolved.filter(entry => entry?.outcome === 'expired').length;
-        if (expired) throw new ReviewImportHold('review-expired', expired);
+          .filter(entry => !entry || !reviewReceiptSettled(entry.outcome));
         const claims = new Set(reviewReceipt.retainedSourceKeys?.() ?? []);
         if (deferredInboxReviews || unresolved.length ||
             skippedKnownInboxReviewSourceKeys.some(key => !claims.has(canonicalCaptureSourceKey(key)))) {
