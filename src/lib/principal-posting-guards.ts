@@ -9,7 +9,7 @@ const ISSUER_MERCHANT_DEBIT_CONFIRMATION = /^confirm\s+that\s+[A-Z]{3}\s+\d[\d,.
  * (ASCII, ideographic, Arabic or ellipsis), then visible white space or the end. U+FEFF counts as
  * white space in JavaScript but is invisible, so it cannot hide a path behind the host.
  */
-const ISSUER_MERCHANT_HOST_END = /^(?:\*[A-Z0-9]{1,24})?["'”’»)\]]*[.!?;,。、،؛؟۔…]*(?:[^\S﻿]|$)/iu;
+const ISSUER_MERCHANT_HOST_END = /^(?:\*[A-Z0-9]{1,24})?["'”’»)\]]*[.!?;,。、،؛؟۔…]*(?:[^\S\uFEFF]|$)/iu;
 /** A link instruction is never settlement evidence, even with an issuer label. */
 export function hasClickLinkPrompt(source: string): boolean {
   for (const match of source.matchAll(CLICK_LINK_PROMPT)) {

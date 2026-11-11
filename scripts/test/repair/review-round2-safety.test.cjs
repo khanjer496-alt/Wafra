@@ -220,8 +220,8 @@ for (const [index, source] of [
   confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM]/login'),
   confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM"/login'),
   confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM。/login'),
-  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM​/login'),
-  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM﻿/login'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM\u200B/login'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM\uFEFF/login'),
 ].entries()) for (const body of [source, source.replace(/ /g, '  ')]) {
   test(`issuer confirmation cannot hide a link instruction/${index}/${body === source ? 'original' : 'spacing'}`, () => {
     const session = reader('AE');
