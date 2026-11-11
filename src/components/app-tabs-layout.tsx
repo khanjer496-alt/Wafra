@@ -1,12 +1,15 @@
+import { useIsFocused } from '@react-navigation/native';
 import { Tabs } from 'expo-router';
 import React from 'react';
 import { Platform } from 'react-native';
 
+import { FreezeWhenCovered } from '@/components/freeze-when-covered';
 import { WafraTabBar } from '@/components/tab-bar';
 import { TabBarMetricsProvider } from '@/components/ui/tab-bar-metrics';
 import { useAutoImport } from '@/hooks/use-auto-import';
 import { useSharedAlertFormats } from '@/hooks/use-shared-alert-formats';
 import { useHistoryImport } from '@/hooks/use-history-import';
+import { freezeCoveredScreens } from '@/lib/covered-screen-freeze';
 
 /**
  * Capture belongs to the signed-in tab shell, not to whichever tab happened
@@ -50,9 +53,16 @@ function CaptureOwner() {
  * honest.
  */
 export default function TabsLayout() {
+  // Focus of THIS route in the root stack: false while a pushed screen
+  // (Transactions, Settings, the add sheet) covers the whole tab shell. The tab
+  // navigator cannot see that by itself, so hidden tabs below a covering screen
+  // kept recomputing on every store change. CaptureOwner is a sibling of the
+  // freeze, never inside it: capture and History must keep running.
+  const covered = !useIsFocused();
   return (
     <TabBarMetricsProvider>
       <CaptureOwner />
+      <FreezeWhenCovered covered={covered} enabled={freezeCoveredScreens(Platform.OS)}>
       <Tabs
         // Detaching native views alone does not stop hidden React consumers
         // processing each import update. Keep their state, but suspend hidden
@@ -71,6 +81,7 @@ export default function TabsLayout() {
         <Tabs.Screen name="bills" />
         <Tabs.Screen name="wallet" />
       </Tabs>
+      </FreezeWhenCovered>
     </TabBarMetricsProvider>
   );
 }
