@@ -43,7 +43,8 @@ function liveHarness(records, ai, onStage, pageSize = 50) {
     importBatch() { writes++; throw Error('AI Review must never write money'); },
     stageReviewAlerts(items) { onStage?.(items, lastPage); let admitted = 0;
       for (const item of items) { const result = tray.admitPreparedReviewAlert(state.reviewTray, item, now.getTime()); state.reviewTray = result.state; admitted += result.outcome === 'admitted'; }
-      return { admitted, durable: Promise.resolve() }; } };
+      return { admitted, durable: Promise.resolve(),
+        retention: () => tray.reviewRetentionReceipts(state.reviewTray, items, now.getTime()) }; } };
   return { state, acknowledgements, writes: () => writes, replace: () => generation++, coordinator: createIosLocalCaptureCoordinator({ native, ledger, now: () => now.getTime(), aiReview: options(ai), retireShortcutCapture: async () => 'not-needed' }) };
 }
 test('live unknown-format AI Review preserves Message identity, capture date and existing source facts', async () => {

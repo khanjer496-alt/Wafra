@@ -1473,7 +1473,7 @@ export default function ImportSmsScreen() {
           const finalizeResult = await historyOperationController.finalize({
             save: ensureDurable,
             discard: async () => {
-              await result.verifyReviewRetention?.();
+              await requireHistoryRetentionBarrier(result);
               await discardIosHistorySession(native, history);
             },
           });

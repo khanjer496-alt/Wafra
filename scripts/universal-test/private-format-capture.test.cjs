@@ -172,7 +172,8 @@ function iosHarness(load, records, onStage, extra = {}) {
     importBatch() { writes++; throw Error('learned Review cannot post money'); },
     stageReviewAlerts(items) { onStage?.(items, lastPage); let admitted = 0;
       for (const item of items) { const result = tray.admitPreparedReviewAlert(state.reviewTray, item, now.getTime()); state.reviewTray = result.state; admitted += result.outcome === 'admitted'; }
-      return { admitted, durable: Promise.resolve() }; } };
+      return { admitted, durable: Promise.resolve(),
+        retention: () => tray.reviewRetentionReceipts(state.reviewTray, items, now.getTime()) }; } };
   const aiCalls = []; load('@/lib/ai-alert-reader').createAiAlertReviewSession = () => ({ async read(...args) { aiCalls.push(args); return null; } });
   return { state, acknowledgements, writes: () => writes, replace: () => generation++, aiCalls,
     coordinator: load('@/lib/ios-local-capture').createIosLocalCaptureCoordinator({ native, ledger, now: () => now.getTime(),
