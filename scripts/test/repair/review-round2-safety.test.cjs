@@ -11,6 +11,7 @@ const { parseSms, nonPostingReason } = load('@/lib/sms-parser');
 const { createLaunchAlertSession } = load('@/lib/launch-alert-parser');
 const { parseHistoricalMessageRecords } = load('@/lib/historical-import');
 const { inspectSourceFreeRefusedAlert } = load('@/lib/auto-import');
+const { hasClickLinkPrompt } = load('@/lib/principal-posting-guards');
 const at = Date.parse('2026-11-05T10:00:00Z');
 const root = path.resolve(__dirname, '../../..');
 const resources = path.join(root, 'modules/wafra-live-capture/ios/Resources');
@@ -40,6 +41,8 @@ for (const status of ['being processed', 'in progress', 'under review', 'under p
   }
 }
 refused.push(['AE', 'FAB', 'Your refund request for AED 50.00 is being processed. The refund will be credited to your card.', 'pending-processing']);
+// Exact sender/body/context from the delayed f8 review; not only the FAB variant.
+refused.push(['AE', 'ENBD', 'Your refund request for AED 50.00 is being processed', 'pending-processing']);
 for (const body of [
   'استمتع بخصم 20% عند الشراء بمبلغ 500.00 ريال من STARBUCKS',
   'خصم 20% على مشترياتك من STARBUCKS عند الدفع بمبلغ 500.00 ريال',
@@ -117,3 +120,115 @@ for (const [body, type, amount] of [
     assert.equal(parsed.currency, 'AED');
   }
 });
+
+// Reviewer a86f70f2: issuer confirmation is a completed debit, not a link request.
+const confirmedDebit = 'We confirm that AED 85.00 was debited from your account ending 1234 for purchase at AMAZON.COM.';
+function confirmationNative(body) {
+  return JSON.parse(sandbox.wafraNativeAlertParse(JSON.stringify({ v: 1, body, sender: 'ENBD', observedAt: at,
+    context: { v: 1, country: 'AE', parserMarket: 'AE', ledgerMoney: { currency: 'AED', exponent: 2 },
+      sourceHash: meta.sourceHash } })));
+}
+for (const [layout, body, expectedMinor = 8500] of [
+  ['original', confirmedDebit],
+  ['spacing', confirmedDebit.replace(/ /g, '  ')],
+  ['www-host', confirmedDebit.replace('AMAZON.COM', 'www.amazon.com')],
+  ['www-host-spacing', confirmedDebit.replace('AMAZON.COM', 'www.amazon.com').replace(/ /g, '  ')],
+  ['after-sentence', `Transaction alert. ${confirmedDebit}`],
+  ['after-sentence-spacing', `Transaction alert. ${confirmedDebit}`.replace(/ /g, '  ')],
+  ['dear-newline', `Dear Customer\n${confirmedDebit}`],
+  ['dear-newline-spacing', `Dear Customer\n${confirmedDebit}`.replace(/ /g, '  ')],
+  ['dear-comma', `Dear Customer, ${confirmedDebit}`],
+  ['dear-comma-spacing', `Dear Customer, ${confirmedDebit}`.replace(/ /g, '  ')],
+  ['dear-unpunctuated', `Dear Customer ${confirmedDebit}`],
+  ['dear-unpunctuated-spacing', `Dear Customer ${confirmedDebit}`.replace(/ /g, '  ')],
+  ['after-question-sentence', `Did we? ${confirmedDebit}`],
+  ['after-question-sentence-spacing', `Did we? ${confirmedDebit}`.replace(/ /g, '  ')],
+  ['purchase-article', confirmedDebit.replace('for purchase', 'for a purchase')],
+  ['purchase-article-spacing', confirmedDebit.replace('for purchase', 'for a purchase').replace(/ /g, '  ')],
+  ['comma-amount', confirmedDebit.replace('AED 85.00', 'AED 4,999.00'), 499900],
+  ['comma-amount-spacing', confirmedDebit.replace('AED 85.00', 'AED 4,999.00').replace(/ /g, '  '), 499900],
+  ['no-final-period', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM')],
+  ['no-final-period-spacing', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM').replace(/ /g, '  ')],
+  ['host-then-place', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM, Dubai.')],
+  ['host-then-place-spacing', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM, Dubai.').replace(/ /g, '  ')],
+  // Reviewer c2094537: card-descriptor and closing-punctuation tails are not URL continuations.
+  ['card-descriptor', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM*2K1AB3CD0.')],
+  ['card-descriptor-spacing', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM*2K1AB3CD0.').replace(/ /g, '  ')],
+  ['closing-bracket', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM).')],
+  ['closing-bracket-spacing', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM).').replace(/ /g, '  ')],
+  ['ideographic-stop', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM。')],
+  ['ideographic-stop-spacing', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM。').replace(/ /g, '  ')],
+  ['closing-quote', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM”.')],
+  ['closing-quote-spacing', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM”.').replace(/ /g, '  ')],
+  ['ellipsis', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM…')],
+  ['ellipsis-spacing', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM…').replace(/ /g, '  ')],
+]) {
+  test(`issuer confirmation retains completed debit/${layout}`, () => {
+    const session = reader('AE');
+    assert.equal(hasClickLinkPrompt(body), false, 'merchant hostname is not a navigation target');
+    assert.equal(nonPostingReason(body), null);
+    for (const parsed of [parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
+      session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
+      assert.equal(parsed?.kind, 'transaction');
+      assert.equal(parsed.type, 'expense');
+      assert.equal(parsed.amountFils, expectedMinor);
+      assert.equal(parsed.currency, 'AED');
+    }
+    const history = parseHistoricalMessageRecords([JSON.stringify({ v: 1, id: '9'.repeat(64), text: body,
+      sender: 'ENBD', receivedAt: new Date(at).toISOString() })], {}, new Date(at), new Set(), session);
+    assert.equal(history.parsed.length, 1);
+    assert.equal(history.parsed[0].amountFils, expectedMinor);
+    assert.equal(history.parsed[0].type, 'expense');
+    assert.equal(history.parsed[0].currency, 'AED');
+    const native = confirmationNative(body);
+    assert.equal(native.route, 'parsed');
+    assert.equal(native.notification.direction, 'debit');
+    assert.deepEqual(native.notification.amount, { currency: 'AED', minorUnits: String(expectedMinor), exponent: 2 });
+  });
+}
+for (const [index, source] of [
+  'AED 4,999.00 debited from your account ending 3183. Verify at www.enbd-secure.test now',
+  'AED 4,999.00 debited from your card ending 3183. Reply YES to confirm or tap hxxp://enbd-verify.test',
+  'Your account is suspended. AED 4,999.00 debited. Update details: enbd-secure.test/login',
+  `${confirmedDebit} Please confirm at enbd-secure.test/login.`,
+  confirmedDebit.replace('We confirm', 'Please confirm'),
+  confirmedDebit.replace('We confirm', 'Can we confirm'),
+  confirmedDebit.replace('We confirm', 'Did we confirm'),
+  'Bank notice '.repeat(8) + confirmedDebit.replace('We confirm', 'Can we confirm'),
+  confirmedDebit.replace('AMAZON.COM', 'enbd-secure.test:443/login'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM?login=1'),
+  confirmedDebit.replace('AMAZON.COM', 'www.amazon.com?login=1'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM#login'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM:443'),
+  confirmedDebit.replace('AMAZON.COM', 'enbd-secure.test/login'),
+  confirmedDebit.replace('We confirm', 'Can\nwe confirm'),
+  confirmedDebit.replace('We confirm', 'Did,\nwe confirm'),
+  `Dear Customer,\n${confirmedDebit.replace('We confirm', 'Can we confirm')}`,
+  // Reviewer 612e8db2: only a closed sentence end may follow the declared host.
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM：443/login'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM%2Flogin'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM%3Flogin=1'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM／login'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM\\login'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM@enbd-secure.test'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM./login'),
+  // Reviewer c2094537: widening the end rule must not reopen a URL continuation.
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM*X/login'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM*2K1AB3CD0@enbd-secure.test'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM*evil.test/login'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM)/login'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM]/login'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM"/login'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM。/login'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM\u200B/login'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM\uFEFF/login'),
+].entries()) for (const body of [source, source.replace(/ /g, '  ')]) {
+  test(`issuer confirmation cannot hide a link instruction/${index}/${body === source ? 'original' : 'spacing'}`, () => {
+    const session = reader('AE');
+    assert.equal(hasClickLinkPrompt(body), true);
+    assert.equal(nonPostingReason(body), 'link-request');
+    assert.equal(parseSms(body, {}, { sender: 'ENBD', observedAt: at }), null);
+    assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
+    assert.equal(confirmationNative(body).route, 'ignore');
+  });
+}

@@ -1,13 +1,29 @@
 /** Source-only qualifications of an already selected monetary value. */
 export interface PrincipalSpan { start: number; end: number }
 
-const CLICK_LINK_PROMPT = /(?:\b(?:click(?:ing)?|tap(?:ping)?|verify|confirm|update\s+(?:(?:your|the)\s+)?(?:details|information|credentials|account))\b[\s:：]+|(?<![ء-ي])(?:اضغط|إضغط|انقر)[\s:：]+)(?:[^.!?]|\.\d){0,120}?(?:(?:https?|hxxps?):\/\/|www\.|\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/|\b)|\b(?:here|below|link|url)\b|الرابط|هنا)/giu;
+const CLICK_LINK_PROMPT = /(?:\b(?:click(?:ing)?|tap(?:ping)?|verify|confirm|update\s+(?:(?:your|the)\s+)?(?:details|information|credentials|account))\b[\s:：]+|(?<![ء-ي])(?:اضغط|إضغط|انقر)[\s:：]+)(?:[^.!?]|\.\d){0,120}?(?:(?:https?|hxxps?):\/\/|\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:[\/?#:]|\b)|www\.|\b(?:here|below|link|url)\b|الرابط|هنا)/giu;
+const ISSUER_MERCHANT_DEBIT_CONFIRMATION = /^confirm\s+that\s+[A-Z]{3}\s+\d[\d,.]*\s+was\s+debited\s+from\s+your\s+account\s+ending\s+\d{4}\s+for\s+(?:a\s+)?purchase\s+at\s+(?:[a-z0-9-]+\.)+[a-z]{2,}$/iu;
+/**
+ * Only a closed sentence end may follow a declared merchant host; any other character may continue a URL.
+ * Closed means: an optional card descriptor (`*2K1AB3CD0`), closing brackets/quotes, sentence punctuation
+ * (ASCII, ideographic, Arabic or ellipsis), then visible white space or the end. U+FEFF counts as
+ * white space in JavaScript but is invisible, so it cannot hide a path behind the host.
+ */
+const ISSUER_MERCHANT_HOST_END = /^(?:\*[A-Z0-9]{1,24})?["'”’»)\]]*[.!?;,。、،؛؟۔…]*(?:[^\S\uFEFF]|$)/iu;
 /** A link instruction is never settlement evidence, even with an issuer label. */
 export function hasClickLinkPrompt(source: string): boolean {
   for (const match of source.matchAll(CLICK_LINK_PROMPT)) {
     const before = source.slice(Math.max(0, match.index! - 60), match.index);
     // A warning against clicking, or a merchant named CLICK HERE, is not a prompt.
     if (/(?:\b(?:do\s+not|don['’]t|never|avoid|refrain\s+from)\s+(?:ever\s+)?|\b(?:at|from|merchant\s*:?)\s+|(?:لا|عدم)\s+)$/iu.test(before)) continue;
+    // A closed issuer debit declaration names a merchant, not a link to open.
+    // Skip only this match, so a later user-directed instruction is still refused.
+    // Use the complete prefix: a cropped suffix can manufacture a statement start.
+    // Only a complete greeting may bridge comma/newline; not a wrapped "Can we".
+    // Check what follows the host too: ASCII, fullwidth or %-encoded suffixes cannot be enumerated.
+    if (ISSUER_MERCHANT_DEBIT_CONFIRMATION.test(match[0]) &&
+        ISSUER_MERCHANT_HOST_END.test(source.slice(match.index! + match[0].length)) &&
+        /(?:^|[.!?])\s*(?:Dear\s+Customer[,\s]+)?we\s+$/iu.test(source.slice(0, match.index!))) continue;
     return true;
   }
   return false;
