@@ -144,7 +144,7 @@ function harness(options = {}) {
   Function('require', 'module', 'exports', 'process', '__DEV__', compiled)(name => {
     assert.ok(Object.hasOwn(deps, name), `unexpected dependency ${name}`);
     return deps[name];
-  }, module, module.exports, { env: { EXPO_PUBLIC_SUPERWALL_ANDROID_API_KEY: 'fixture-public-key' } }, false);
+  }, module, module.exports, { env: { EXPO_PUBLIC_SUPERWALL_ANDROID_API_KEY: 'fixture-public-key', EXPO_PUBLIC_SUPERWALL_IOS_API_KEY: 'fixture-ios-public-key' } }, false);
   const render = (key, callback) => {
     active = contexts.get(key) ?? { cursor: 0, slots: [], effects: [] };
     contexts.set(key, active);
@@ -266,6 +266,41 @@ test('private mode suppresses metadata writes and transitions tracking once per 
   await h.renderRuntime(5);
   assert.equal(h.calls.attributes.length, 1);
   assert.deepEqual(h.calls.tracking, ['none', 'all', 'none']);
+});
+
+test('the SDK is configured without preloading paywall web views, on every platform and run', async () => {
+  for (const options of [
+    { platform: 'ios' },
+    { platform: 'android' },
+    { platform: 'ios', state: { onboarded: false } },
+  ]) {
+    const h = harness({ configured: false, ...options });
+    await h.renderProvider(4);
+    assert.equal(h.calls.configure, 1);
+    assert.equal(h.calls.configureOptions[0]?.paywalls?.shouldPreload, false,
+      'paywalls are not preloaded at launch (their web views are built on the main thread)');
+    assert.equal(h.calls.configureOptions[0]?.paywalls?.isHapticFeedbackEnabled, true, 'the other paywall options are unchanged');
+  }
+});
+
+test('iOS purchase and restore go straight to the store and need no preloaded paywall', async () => {
+  let restores = 0;
+  const h = harness({ platform: 'ios',
+    products: async () => [planProduct('yearly')],
+    purchase: async () => ({ type: 'purchased' }),
+    restore: async () => { restores += 1; return { result: 'restored' }; } });
+  await h.renderRuntime();
+  const billing = h.billing();
+  const offers = await billing.fetchProOffers();
+  assert.equal(offers.length, 1, 'the store price lookup works without any paywall');
+  // The fixture's entitlement stays inactive, so the honest answer after a completed
+  // checkout is "unconfirmed"; what matters here is that checkout ran at all.
+  assert.equal(await billing.purchasePro(offers[0].productId), 'unconfirmed');
+  assert.deepEqual(h.calls.purchases, [offers[0].productId], 'the purchase reaches the native store call with the chosen product');
+  await billing.restorePro();
+  assert.equal(restores, 1, 'restore reaches the native store call');
+  const source = fs.readFileSync(path.join(root, 'src/components/superwall-billing-provider.native.tsx'), 'utf8');
+  assert.doesNotMatch(source, /preloadAllPaywalls|preloadPaywalls/, 'nothing on the purchase path asks for a preload');
 });
 
 test('actual SDK provider configures once across unrelated app and SDK snapshots', async () => {
