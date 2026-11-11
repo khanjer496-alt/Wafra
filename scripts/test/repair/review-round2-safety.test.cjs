@@ -151,6 +151,17 @@ for (const [layout, body, expectedMinor = 8500] of [
   ['no-final-period-spacing', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM').replace(/ /g, '  ')],
   ['host-then-place', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM, Dubai.')],
   ['host-then-place-spacing', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM, Dubai.').replace(/ /g, '  ')],
+  // Reviewer c2094537: card-descriptor and closing-punctuation tails are not URL continuations.
+  ['card-descriptor', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM*2K1AB3CD0.')],
+  ['card-descriptor-spacing', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM*2K1AB3CD0.').replace(/ /g, '  ')],
+  ['closing-bracket', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM).')],
+  ['closing-bracket-spacing', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM).').replace(/ /g, '  ')],
+  ['ideographic-stop', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM。')],
+  ['ideographic-stop-spacing', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM。').replace(/ /g, '  ')],
+  ['closing-quote', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM”.')],
+  ['closing-quote-spacing', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM”.').replace(/ /g, '  ')],
+  ['ellipsis', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM…')],
+  ['ellipsis-spacing', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM…').replace(/ /g, '  ')],
 ]) {
   test(`issuer confirmation retains completed debit/${layout}`, () => {
     const session = reader('AE');
@@ -201,6 +212,16 @@ for (const [index, source] of [
   confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM\\login'),
   confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM@enbd-secure.test'),
   confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM./login'),
+  // Reviewer c2094537: widening the end rule must not reopen a URL continuation.
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM*X/login'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM*2K1AB3CD0@enbd-secure.test'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM*evil.test/login'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM)/login'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM]/login'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM"/login'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM。/login'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM​/login'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM﻿/login'),
 ].entries()) for (const body of [source, source.replace(/ /g, '  ')]) {
   test(`issuer confirmation cannot hide a link instruction/${index}/${body === source ? 'original' : 'spacing'}`, () => {
     const session = reader('AE');
