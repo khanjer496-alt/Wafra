@@ -328,8 +328,14 @@ ok('hydration cannot relabel UAE review money as a foreign ledger amount',
       stored.expiresAt + 1).tombstones.length === 1);
   ok('an expired review cannot be re-admitted after its tombstone',
     admitPreparedReviewAlert(aged, stored, stored.expiresAt - 1).outcome !== 'admitted');
-  ok('an item expired longer ago than the tombstone window leaves no tombstone',
-    pruneAlertReviewTray(admitted.state, stored.expiresAt + 91 * DAY).tombstones.length === 0);
+  const lateDiscovery = stored.expiresAt + 91 * DAY;
+  const lateOnce = pruneAlertReviewTray(admitted.state, lateDiscovery);
+  const lateAgain = pruneAlertReviewTray(lateOnce, lateDiscovery + 1000);
+  ok('an item expired longer ago than the tombstone window is still counted exactly once, dated at discovery',
+    lateOnce.tombstones.length === 1 && lateOnce.tombstones[0].outcome === 'expired' &&
+      lateOnce.tombstones[0].resolvedAt === lateDiscovery &&
+      tray.recentlyExpiredReviewCount(lateOnce, lateDiscovery) === 1 && lateAgain.tombstones.length === 1 &&
+      tray.recentlyExpiredReviewCount(lateAgain, lateDiscovery + 1000) === 1);
 
   ok('rows show days left only in the final week and never a zero or negative count',
     tray.reviewExpiresInDays({ expiresAt: NOW + 8 * DAY }, NOW) === null &&

@@ -337,11 +337,16 @@ const expiryTombstones = (
   for (const item of state.pending) {
     if (item.expiresAt > now) continue;
     const sourceKey = canonicalUniversalSourceKey(item.sourceKey, item.observedAt);
-    const expiresAt = item.expiresAt + REVIEW_TOMBSTONE_TTL_MS;
-    if (known.has(sourceKey) || !validTimestamp(item.expiresAt) || !validTimestamp(expiresAt) ||
-      expiresAt <= now) continue;
+    // An item that expired so long ago that its natural tombstone window has
+    // also lapsed is still a loss that must be counted exactly once: date the
+    // tombstone at discovery so the disclosure shows it and re-reads are blocked.
+    const lapsed = validTimestamp(item.expiresAt) && item.expiresAt + REVIEW_TOMBSTONE_TTL_MS <= now;
+    const resolvedAt = lapsed ? now : item.expiresAt;
+    const expiresAt = (lapsed ? now : item.expiresAt) + REVIEW_TOMBSTONE_TTL_MS;
+    if (known.has(sourceKey) || !validTimestamp(item.expiresAt) || !validTimestamp(resolvedAt) ||
+      !validTimestamp(expiresAt) || expiresAt <= now) continue;
     known.add(sourceKey);
-    added.push({ sourceKey, resolvedAt: item.expiresAt, expiresAt, outcome: 'expired' });
+    added.push({ sourceKey, resolvedAt, expiresAt, outcome: 'expired' });
   }
   return added.sort((a, b) => a.resolvedAt - b.resolvedAt);
 };

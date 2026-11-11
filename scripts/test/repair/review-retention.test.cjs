@@ -210,6 +210,24 @@ test('an expired source is a settled, counted-once loss that no re-read re-stage
   assert.equal(trimmed.outcomes[0], 'expired'); assert.equal(trimmed.state.pending.length, 0);
   assert.equal(trimmed.state.tombstones.filter(x => x.outcome === 'expired').length, 1);
 });
+test('a source expired more than 120 days ago is still counted exactly once and never re-staged', () => {
+  const DAY = 86_400_000; const item = payment(0);
+  const observedAt = now - 125 * DAY; const old = { ...item, observedAt, expiresAt: observedAt + tray.REVIEW_ALERT_TTL_MS };
+  assert.ok(old.expiresAt + 90 * DAY < now, 'its natural tombstone window has also lapsed');
+  const first = tray.admitPreparedReviewAlerts(tray.emptyAlertReviewTray(), [old], now);
+  assert.equal(first.outcomes[0], 'expired'); assert.equal(first.state.pending.length, 0);
+  assert.equal(first.state.tombstones.filter(x => x.outcome === 'expired').length, 1);
+  assert.equal(tray.recentlyExpiredReviewCount(first.state, now), 1, 'counted in the expired disclosure');
+  assert.equal(tray.reviewRetentionReceipts(first.state, [old], now)[0].outcome, 'expired');
+  let state = first.state;
+  for (let read = 0; read < 3; read++) {
+    const again = tray.admitPreparedReviewAlerts(state, [old], now + read * 1000);
+    assert.equal(again.outcomes[0], 'expired');
+    assert.equal(again.state.tombstones.filter(x => x.outcome === 'expired').length, 1, 'repeated reads never double count');
+    assert.equal(tray.recentlyExpiredReviewCount(again.state, now + read * 1000), 1);
+    state = again.state;
+  }
+});
 test('an expired tombstone is a dedupe barrier that eviction records cannot trim out of the cap', () => {
   const item = payment(0); const key = tray.reviewSourceKeyOf(item);
   const expired = { sourceKey: key, resolvedAt: now - 5, expiresAt: now + 86_400_000, outcome: 'expired' };
