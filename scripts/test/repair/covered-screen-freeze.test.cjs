@@ -66,7 +66,8 @@ function hookHarness() {
     ...React,
     useState: (initial) => { const i = cursor++; if (!(i in slots)) slots[i] = initial; return [slots[i], (v) => { slots[i] = typeof v === 'function' ? v(slots[i]) : v; }]; },
     useEffect: (fn, deps) => { effects.push({ fn, deps }); },
-    useRef: () => ({ current: {} }),
+    // Persistent like React's: one cell per call site across renders.
+    useRef: (initial) => { const i = cursor++; if (!(i in slots)) slots[i] = { current: initial }; return slots[i]; },
   };
   const setTimeoutStub = (fn, ms) => { timers.push({ fn, ms, cleared: false }); return timers.length - 1; };
   const clearTimeoutStub = (id) => { if (timers[id]) timers[id].cleared = true; };
@@ -106,12 +107,13 @@ test('freezing waits for the push animation; uncovering unfreezes in the same re
 });
 
 function tabsLayout(platform, focused) {
+  const navigation = { addListener: () => () => {}, name: 'tabs-route-in-root-stack' };
   const jsx = (type, props) => ({ type, props });
   const Tabs = Object.assign(() => null, { Screen: 'TabScreen' });
   const freeze = freezeModule();
   const mod = load(path.join(root, 'src/components/app-tabs-layout.tsx'), {
     react: React, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'expo-router': { Tabs },
-    '@react-navigation/native': { useIsFocused: () => focused },
+    '@react-navigation/native': { useIsFocused: () => focused, useNavigation: () => navigation },
     'react-native': { Platform: { get OS() { return platform; } } },
     '@/components/tab-bar': { WafraTabBar: 'TabBar' },
     '@/components/ui/tab-bar-metrics': { TabBarMetricsProvider: 'Metrics' },
@@ -121,17 +123,18 @@ function tabsLayout(platform, focused) {
     '@/components/freeze-when-covered': freeze,
     '@/lib/covered-screen-freeze': policy(),
   }).default;
-  return { tree: mod(), Tabs, FreezeWhenCovered: freeze.FreezeWhenCovered };
+  return { tree: mod(), Tabs, FreezeWhenCovered: freeze.FreezeWhenCovered, navigation };
 }
 
 test('tabs layout: only <Tabs> sits inside the freeze; CaptureOwner is its sibling', () => {
-  const { tree, Tabs, FreezeWhenCovered } = tabsLayout('android', false);
+  const { tree, Tabs, FreezeWhenCovered, navigation } = tabsLayout('android', false);
   const [owner, frozen] = tree.props.children;
   assert.equal(owner.type.name, 'CaptureOwner', 'capture host stays outside the freeze');
   assert.equal(frozen.type, FreezeWhenCovered);
   assert.equal(frozen.props.covered, true, 'the tab route is covered when the root stack focus is elsewhere');
   assert.equal(frozen.props.enabled, true);
   assert.equal(frozen.props.children.type, Tabs);
+  assert.equal(frozen.props.transitions, navigation, 'push/swipe timing comes from this route in the root stack');
   assert.equal(tabsLayout('android', true).tree.props.children[1].props.covered, false);
   // app-tabs-layout.tsx is not in the iOS bundle (Metro picks app-tabs-layout.ios.tsx); there the
   // tab content is paused per tab by ios-tab-gate.tsx instead.
@@ -183,7 +186,7 @@ test('capture keeps rendering while covered (Settings or Erase on top); the froz
   const p = policy();
   const Layout = load(path.join(root, 'src/components/app-tabs-layout.tsx'), {
     react: React, 'react/jsx-runtime': jsxRuntime, 'expo-router': { Tabs },
-    '@react-navigation/native': { useIsFocused: () => false },
+    '@react-navigation/native': { useIsFocused: () => false, useNavigation: () => ({ addListener: () => () => {} }) },
     'react-native': { Platform: { OS: 'android' } },
     '@/components/tab-bar': { WafraTabBar: () => null },
     '@/components/ui/tab-bar-metrics': { TabBarMetricsProvider: ({ children }) => React.createElement(React.Fragment, null, children) },

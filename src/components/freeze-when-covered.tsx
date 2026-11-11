@@ -28,30 +28,76 @@ export function FreezeSuspender({ freeze, children }: { freeze: boolean; childre
   return <>{children}</>;
 }
 
+/** The root stack's per-route transition events (a React Navigation `navigation` object). */
+export interface CoverTransitionSource {
+  addListener(
+    type: 'transitionStart' | 'transitionEnd',
+    listener: (event: { data?: { closing?: boolean } }) => void,
+  ): () => void;
+}
+
 /**
- * Pauses `children` while `covered` (another screen is on top). The freeze waits
- * `delayMs` so the screen stays painted for the push animation; uncovering
- * releases it in the same render, so the first frame back is current.
- * `enabled` false renders the children untouched (iOS and web today).
+ * Pauses `children` while `covered` (another screen is on top).
+ *
+ * With `transitions` (the covered route's navigation in the root stack), it
+ * freezes when the covering push has ENDED (`transitionEnd`, closing), so a
+ * slow push never blanks a screen that is still sliding; and it releases when
+ * the screen WILL appear (`transitionStart`, not closing), which is the start
+ * of an iOS swipe-back, so the screen is never blank during the gesture. A
+ * cancelled gesture re-freezes on its own `transitionEnd`.
+ *
+ * `delayMs` is only a fallback for covering that sends no stack transition
+ * (switching tabs), or a push whose events never arrive. A push that has
+ * started suppresses it until that push ends.
+ *
+ * Uncovering always releases in the same render, so the first frame back is
+ * current. `enabled` false renders the children untouched (web).
  */
 export function FreezeWhenCovered({
   covered,
   enabled,
   delayMs = COVER_FREEZE_DELAY_MS,
+  transitions,
   children,
 }: {
   covered: boolean;
   enabled: boolean;
   delayMs?: number;
+  transitions?: CoverTransitionSource | null;
   children: React.ReactNode;
 }) {
   const [frozen, setFrozen] = useState(false);
+  // A covering push has started and not ended yet: the fallback must wait.
+  const pushInProgress = useRef(false);
+  useEffect(() => {
+    if (!enabled || !transitions) return undefined;
+    const removeStart = transitions.addListener('transitionStart', (event) => {
+      if (event.data?.closing) {
+        pushInProgress.current = true;
+      } else {
+        pushInProgress.current = false;
+        setFrozen(false);
+      }
+    });
+    const removeEnd = transitions.addListener('transitionEnd', (event) => {
+      if (!event.data?.closing) return;
+      pushInProgress.current = false;
+      setFrozen(true);
+    });
+    return () => {
+      removeStart();
+      removeEnd();
+    };
+  }, [enabled, transitions]);
   useEffect(() => {
     if (!enabled || !covered) {
+      pushInProgress.current = false;
       setFrozen(false);
       return undefined;
     }
-    const timer = setTimeout(() => setFrozen(true), delayMs);
+    const timer = setTimeout(() => {
+      if (!pushInProgress.current) setFrozen(true);
+    }, delayMs);
     return () => clearTimeout(timer);
   }, [covered, enabled, delayMs]);
   if (!enabled) return <>{children}</>;

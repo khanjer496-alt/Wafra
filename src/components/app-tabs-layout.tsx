@@ -1,4 +1,4 @@
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { Tabs } from 'expo-router';
 import React from 'react';
 import { Platform } from 'react-native';
@@ -59,10 +59,13 @@ export default function TabsLayout() {
   // kept recomputing on every store change. CaptureOwner is a sibling of the
   // freeze, never inside it: capture and History must keep running.
   const covered = !useIsFocused();
+  // This route's own navigation in the root stack: its transition events say
+  // when a covering push has ended, and when a swipe-back starts to reveal it.
+  const navigation = useNavigation();
   return (
     <TabBarMetricsProvider>
       <CaptureOwner />
-      <FreezeWhenCovered covered={covered} enabled={freezeCoveredScreens(Platform.OS)}>
+      <FreezeWhenCovered covered={covered} enabled={freezeCoveredScreens(Platform.OS)} transitions={navigation}>
       <Tabs
         // Detaching native views alone does not stop hidden React consumers
         // processing each import update. Keep their state, but suspend hidden

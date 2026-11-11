@@ -182,7 +182,7 @@ test('Android freezes inactive tab rendering while capture remains outside the n
   const calls = [];
   const Component = load(path.join(root, 'src/components/app-tabs-layout.tsx'), {
     react: {}, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'expo-router': { Tabs },
-    '@react-navigation/native': { useIsFocused: () => true },
+    '@react-navigation/native': { useIsFocused: () => true, useNavigation: () => ({ addListener: () => () => {} }) },
     '@/components/freeze-when-covered': { FreezeWhenCovered: 'FreezeWhenCovered' },
     '@/lib/covered-screen-freeze': require('./load-typescript.cjs')(path.join(root, 'src/lib/covered-screen-freeze.ts'), {}),
     'react-native': { Platform: { get OS() { return platform; } } },
