@@ -224,17 +224,22 @@ const isResolutionOutcome = (outcome: ReviewTombstone['outcome']): outcome is Re
 /**
  * Keep at most REVIEW_TOMBSTONE_CAP tombstones. User/promotion resolutions
  * are dedupe barriers that stop a dismissed or posted alert from returning,
- * so they are kept ahead of loss records (expired/evicted), which only feed
- * the Review counts. Within each class the newest survive.
+ * so they are kept first. 'expired' is also a barrier (an expired source is a
+ * settled, counted-once loss that must never be staged again), so it ranks
+ * next. Eviction records (evicted/currency-evicted) only feed the Review
+ * counts and are trimmed first. Within each tier the newest survive.
  */
 const capTombstones = (tombstones: ReviewTombstone[]): ReviewTombstone[] => {
   if (tombstones.length <= REVIEW_TOMBSTONE_CAP) return tombstones;
   const resolutions = tombstones.filter((item) => isResolutionOutcome(item.outcome))
     .slice(-REVIEW_TOMBSTONE_CAP);
-  const room = REVIEW_TOMBSTONE_CAP - resolutions.length;
+  const expiredRoom = REVIEW_TOMBSTONE_CAP - resolutions.length;
+  const expired = expiredRoom > 0
+    ? tombstones.filter((item) => item.outcome === 'expired').slice(-expiredRoom) : [];
+  const room = expiredRoom - expired.length;
   const losses = room > 0
-    ? tombstones.filter((item) => !isResolutionOutcome(item.outcome)).slice(-room) : [];
-  const kept = new Set([...resolutions, ...losses]);
+    ? tombstones.filter((item) => !isResolutionOutcome(item.outcome) && item.outcome !== 'expired').slice(-room) : [];
+  const kept = new Set([...resolutions, ...expired, ...losses]);
   return tombstones.filter((item) => kept.has(item));
 };
 

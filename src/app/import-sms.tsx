@@ -1106,7 +1106,7 @@ export default function ImportSmsScreen() {
   // barrier must stop the discard instead of silently skipping the check.
   const requireHistoryRetentionBarrier = async (loaded: LoadedIosHistorySession | null) => {
     const barrier = loaded?.verifyReviewRetention;
-    if (!barrier) throw new Error('Review retention barrier is unavailable');
+    if (!barrier) throw new Error('review_retention_barrier_unavailable');
     await barrier();
   };
 

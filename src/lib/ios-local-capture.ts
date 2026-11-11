@@ -447,7 +447,7 @@ function currentReviewRetention(stages: readonly ReviewStageRecord[]): ReviewRet
   }
   return target;
 }
-/** Only the item's own settled receipt can keep it; expired/evicted tombstones never do. */
+/** Only the item's own settled receipt (pending, resolved or expired) releases it; evicted never does. */
 function reviewRetentionKept(map: ReviewRetentionMap, item: ReviewEntry): boolean {
   const outcome = map.get(reviewRetentionKey(item));
   return reviewReceiptSettled(outcome);
@@ -1122,9 +1122,10 @@ export function createIosLocalCaptureCoordinator(
         if (outcome.kind !== 'review') return [];
         // Notification reviews, currency-conflict money rows, possible Apple
         // Pay repeats and ANY review that carries recoverable money evidence
-        // are ACKed only behind their own settled receipt: pending, or an
-        // explicit user resolution. An expired or evicted loss tombstone, a
-        // later optimistic write or a missing receipt never qualifies.
+        // are ACKed only behind their own settled receipt: pending, an explicit
+        // user resolution, or an expired source (a terminal, counted loss). An
+        // evicted tombstone, a later optimistic write or a missing receipt
+        // never qualifies.
         const item = outcome.item;
         if (outcome.item.channel !== 'push' &&
           !currencyConflictReviewIds.has(page[index].preflight.id) &&
@@ -1254,7 +1255,7 @@ export function createIosLocalCaptureCoordinator(
           const item = record.outcome.kind === 'review' ? record.outcome.item : null;
           // A linked-card posting is acknowledged behind the store's own
           // durable posting receipt; everything else behind its own settled
-          // Review receipt (pending or an explicit resolution).
+          // Review receipt (pending, an explicit resolution or an expired source).
           const retained = item && (posted.has(item.id) || reviewRetentionKept(applePayRetention, item));
           if (retained) { ack.push(record.id); heldIds.delete(record.id); waitingReviewIds.delete(record.id); }
           else {

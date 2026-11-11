@@ -210,6 +210,17 @@ test('an expired source is a settled, counted-once loss that no re-read re-stage
   assert.equal(trimmed.outcomes[0], 'expired'); assert.equal(trimmed.state.pending.length, 0);
   assert.equal(trimmed.state.tombstones.filter(x => x.outcome === 'expired').length, 1);
 });
+test('an expired tombstone is a dedupe barrier that eviction records cannot trim out of the cap', () => {
+  const item = payment(0); const key = tray.reviewSourceKeyOf(item);
+  const expired = { sourceKey: key, resolvedAt: now - 5, expiresAt: now + 86_400_000, outcome: 'expired' };
+  const evictions = Array.from({ length: tray.REVIEW_TOMBSTONE_CAP }, (_, i) => ({
+    sourceKey: `evicted_source_${String(i).padStart(8, '0')}`, resolvedAt: now, expiresAt: now + 86_400_000, outcome: 'evicted' }));
+  const pruned = tray.pruneAlertReviewTray({ ...tray.emptyAlertReviewTray(), tombstones: [expired, ...evictions] }, now);
+  assert.equal(pruned.tombstones.length, tray.REVIEW_TOMBSTONE_CAP);
+  assert.ok(pruned.tombstones.some(x => x.sourceKey === key && x.outcome === 'expired'), 'the older expired barrier survives');
+  assert.equal(pruned.tombstones.filter(x => x.outcome === 'evicted').length, tray.REVIEW_TOMBSTONE_CAP - 1);
+  assert.equal(tray.admitPreparedReviewAlerts(pruned, [{ ...item, expiresAt: now + tray.REVIEW_ALERT_TTL_MS }], now).outcomes[0], 'expired');
+});
 test('iOS History passes an expired source and continues, but still stops on an evicted or deferred one', async () => {
   const history = source('lib/ios-history-import'); const item = payment(0);
   const key = tray.reviewRetentionReceipts(tray.emptyAlertReviewTray(), [item], now)[0].sourceKey;
