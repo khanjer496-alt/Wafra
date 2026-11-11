@@ -175,18 +175,16 @@ let corroboratingDisplayIdsCache: {
 } | null = null;
 
 /**
- * The ids themselves decide whether the Set may be reused, not which
- * transactions array they arrived with. Editing a row's category replaces the
- * transactions array but keeps the same receipt, and a `new Set(ids)` with the
- * SAME ids gave the Transactions list a new Set identity: its row actions, row
+ * The receipt array itself decides whether the Set may be reused, not which
+ * transactions array it arrived with. Editing a row's category replaces the
+ * transactions array but keeps the same receipt array (the store only replaces
+ * it when the transfer graph may have changed), and a `new Set(ids)` from the
+ * SAME array gave the Transactions list a new Set identity: its row actions, row
  * cache and every memoized TransactionRow then reset for ~100 mounted rows on
- * each edit. Identical arrays, or equal contents, keep the Set.
+ * each edit. A new receipt array, even with equal contents, stays a new answer.
  */
-function sameIds(a: readonly string[], b: readonly string[]): boolean {
-  if (a === b) return true;
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return false;
-  return true;
+function sameReceipt(a: readonly string[], b: readonly string[]): boolean {
+  return a === b;
 }
 
 /**
@@ -203,7 +201,7 @@ export function primeInternalTransferIds(
   // The store primes after EVERY dispatch, most of which (review tray, scan
   // clock, preferences) carry the same arrays forward. Reuse the Set so its
   // identity, and every UI memo keyed on it, survives those dispatches.
-  const reusable = persistedInternalIdsCache !== null && sameIds(persistedInternalIdsCache.ids, ids);
+  const reusable = persistedInternalIdsCache !== null && sameReceipt(persistedInternalIdsCache.ids, ids);
   const value = reusable ? persistedInternalIdsCache!.value : new Set(ids);
   persistedInternalIdsCache = { transactions, accounts, ids: ids as string[], value };
   internalIdsCache = { transactions, accounts, value, canonical };
@@ -277,7 +275,7 @@ export function internalTransferIdsForState(
   }
   // A category edit (or any change that keeps the transfer receipt) replaces
   // the transactions array but not the ids: keep the Set identity.
-  const value = persistedInternalIdsCache !== null && sameIds(persistedInternalIdsCache.ids, ids)
+  const value = persistedInternalIdsCache !== null && sameReceipt(persistedInternalIdsCache.ids, ids)
     ? persistedInternalIdsCache.value
     : new Set(ids);
   persistedInternalIdsCache = {

@@ -1,5 +1,5 @@
 'use strict';
-// A category edit replaces the transactions array but keeps the transfer receipt.
+// A category edit replaces the transactions array but keeps the transfer receipt array.
 // The internal-transfer id Set must keep its IDENTITY then: the Transactions
 // list keys its row actions, its row cache and every memoized TransactionRow on
 // it, and a fresh `new Set(ids)` with the same ids reset all of them (~100
@@ -27,11 +27,12 @@ test('an edit that keeps the transfer ids keeps the Set identity (state path)', 
   assert.deepEqual([...after].sort(), ['t1', 't2', 't3']);
 });
 
-test('a new but equal ids array keeps the Set too', () => {
+test('a new receipt array, even with equal contents, is a new answer', () => {
   const accounts = [];
   const first = ledger.internalTransferIdsForState(stateOf([row('a')], accounts, ['t1', 't2']));
   const second = ledger.internalTransferIdsForState(stateOf([row('a'), row('b')], accounts, ['t1', 't2']));
-  assert.equal(second, first);
+  assert.notEqual(second, first, 'the store replaces the receipt array when the transfer graph may have changed');
+  assert.deepEqual([...second].sort(), ['t1', 't2']);
 });
 
 test('changed ids (a real transfer change) produce a new Set with the new ids', () => {
