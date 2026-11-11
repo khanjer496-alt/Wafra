@@ -48,7 +48,9 @@ export interface CoverTransitionSource {
  *
  * `delayMs` is only a fallback for covering that sends no stack transition
  * (switching tabs), or a push whose events never arrive. A push that has
- * started suppresses it until that push ends.
+ * started suppresses it until that push ends. `fallback` false turns it off,
+ * for a screen that may stay visible while covered without any transition
+ * (behind an iOS page-sheet modal): it then freezes only on a real push end.
  *
  * Uncovering always releases in the same render, so the first frame back is
  * current. `enabled` false renders the children untouched (web).
@@ -58,12 +60,14 @@ export function FreezeWhenCovered({
   enabled,
   delayMs = COVER_FREEZE_DELAY_MS,
   transitions,
+  fallback = true,
   children,
 }: {
   covered: boolean;
   enabled: boolean;
   delayMs?: number;
   transitions?: CoverTransitionSource | null;
+  fallback?: boolean;
   children: React.ReactNode;
 }) {
   const [frozen, setFrozen] = useState(false);
@@ -95,11 +99,12 @@ export function FreezeWhenCovered({
       setFrozen(false);
       return undefined;
     }
+    if (!fallback) return undefined;
     const timer = setTimeout(() => {
       if (!pushInProgress.current) setFrozen(true);
     }, delayMs);
     return () => clearTimeout(timer);
-  }, [covered, enabled, delayMs]);
+  }, [covered, enabled, delayMs, fallback]);
   if (!enabled) return <>{children}</>;
   return (
     <Suspense fallback={null}>

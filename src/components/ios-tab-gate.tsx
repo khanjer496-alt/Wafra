@@ -1,4 +1,4 @@
-import { useIsFocused, useNavigation } from '@react-navigation/native';
+import { useIsFocused, useNavigation, useNavigationState, useRoute } from '@react-navigation/native';
 import React, { useState } from 'react';
 import { Platform } from 'react-native';
 
@@ -13,12 +13,23 @@ import { gateTabsUntilFocus } from '@/lib/covered-screen-freeze';
  */
 export function TabFocusGate({
   focused,
+  selected = focused,
   transitions,
+  delayMs,
   children,
 }: {
   focused: boolean;
+  /**
+   * This tab is the one the tab bar shows. It is then covered only when the
+   * whole shell is (a push, or a page sheet that keeps it visible), so it never
+   * freezes on the timer, only when a covering push has ended, and only it
+   * listens to the shell's transitions: a swipe-back must not wake the hidden
+   * sibling tabs. A tab left for a sibling has no transition and uses the timer.
+   */
+  selected?: boolean;
   /** The tab shell's route in the root stack, for push/swipe-back timing. */
   transitions?: CoverTransitionSource | null;
+  delayMs?: number;
   children: React.ReactNode;
 }) {
   const [visited, setVisited] = useState(focused);
@@ -27,7 +38,8 @@ export function TabFocusGate({
   if (focused && !visited) setVisited(true);
   if (!visited && !focused) return null;
   return (
-    <FreezeWhenCovered covered={!focused} enabled transitions={transitions}>
+    <FreezeWhenCovered covered={!focused} enabled delayMs={delayMs}
+      transitions={selected ? transitions : null} fallback={!selected}>
       {children}
     </FreezeWhenCovered>
   );
@@ -47,8 +59,11 @@ export function withIosTabGate<P extends object>(Screen: React.ComponentType<P>)
     // time the freeze under a push and release it as a swipe-back begins. A
     // switch between tabs sends none; the gate's fallback delay covers that.
     const shell = useNavigation().getParent();
+    // The tab bar's current tab, from the NativeTabs navigator state.
+    const ownKey = useRoute().key;
+    const selected = useNavigationState((state) => state.routes[state.index]?.key) === ownKey;
     return (
-      <TabFocusGate focused={focused} transitions={shell ?? null}>
+      <TabFocusGate focused={focused} selected={selected} transitions={shell ?? null}>
         <Screen {...props} />
       </TabFocusGate>
     );
