@@ -5,14 +5,16 @@
  * still re-renders on every store change, so one category edit recomputes the
  * dashboard, subscriptions and insights behind a screen nobody can see.
  *
- * One decision per platform, in one place. Android is on. iOS stays OFF until
- * App QA Lead's device pass: iOS uses its own native-tabs layout
- * (app-tabs-layout.ios.tsx) and its tabs are deliberately not frozen today.
+ * One decision per platform, in one place. Android and iOS freeze covered
+ * pushed screens on the root stack (nothing calls react-native-screens'
+ * enableFreeze, so it was never on). The exempt routes below stay live. On iOS
+ * the tab content is paused per tab by ios-tab-gate.tsx, because NativeTabs
+ * never freezes its tabs; app-tabs-layout.tsx is Android/web only.
  * Web is off: there is no native stack to cover anything.
  */
 export const FREEZE_COVERED_SCREENS: Readonly<Record<string, boolean>> = {
   android: true,
-  ios: false,
+  ios: true,
   web: false,
 };
 
