@@ -1,0 +1,52 @@
+name: Parser recognition probe
+
+# CI-only, read-only probe of three source trees on a few synthetic messages.
+# Ships nothing and changes no runtime code.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'bench/parser-probe-**'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BENCH_DIR: scripts/ci/parser-benchmark
+      CORPUS: scripts/ci/parser-benchmark/parser-corpus-2026-11-11.jsonl
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies (no scripts)
+        run: npm ci --ignore-scripts
+
+      - name: Probe the three source trees
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/bench-trees probe-results
+          for entry in build190=2705b987 rc-base=3ccd6bcd pr176=b9c636d3; do
+            label="${entry%%=*}"; sha="${entry##*=}"
+            git worktree add --detach "/tmp/bench-trees/$label" "$sha"
+            ln -s "$PWD/node_modules" "/tmp/bench-trees/$label/node_modules"
+            case "$(git -C "/tmp/bench-trees/$label" rev-parse HEAD)" in "$sha"*) ;; *) echo "wrong tree for $label"; exit 1;; esac
+            node "$BENCH_DIR/probe.cjs" --root "/tmp/bench-trees/$label" --label "$label" --corpus "$CORPUS" --out "probe-results/$label.json"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: parser-probe-${{ github.sha }}
+          retention-days: 14
+          if-no-files-found: error
+          path: probe-results
