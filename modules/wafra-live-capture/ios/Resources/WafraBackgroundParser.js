@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 11db986569430f78d959dfabe0649ca6ae3aa7ec5f64502d275fb2f28dac2a90
+// Generated from normal shipping TypeScript. Source SHA-256: 27d58c99aa4d911746208b68706736f081631c8d6d03c9bd2a2a7cb1a73bcd65
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -11231,6 +11231,10 @@ function continuesRefund(text) {
 const SAME_MONEY_REFERENCE = /^\s*(?:[(\[/=≈~]|equivalent(?:\s+to)?|equiv\.?|approx\.?|i\.?e\.?|بما\s+يعادل|ما\s+يعادل|يعادل)\s*$/i;
 const ORIGINAL_MOVEMENT_REFERENCE = /\b(?:for|against|on|of)\s+(?:your|the)\s+(?:original\s+|earlier\s+|previous\s+)?(?:purchase|transaction|payment|charge|order)\s+(?:of|for)?\s*$|(?:لعمليه|عن\s+عمليه|من\s+عمليه)\s+(?:ال)?شراء\s+(?:بمبلغ|بقيمه)?\s*$/i;
 const ORIGINAL_MOVEMENT_CLAUSE = /\b(?:for|against|on|of)\s+(?:your|the)\s+(?:original\s+|earlier\s+|previous\s+)?(?:purchase|transaction|payment|charge|order)\b|(?:لعمليه|عن\s+عمليه|من\s+عمليه)\s+(?:ال)?شراء(?=\s)/iu;
+const NAME_BEFORE_AND = /^\s*(?:from|at|to|with|via|by)\s+(?:\p{Lu}[\p{L}\p{N}&.'’-]*\s+)+$/u;
+const NAME_AFTER_AND = /^\p{Lu}[\p{L}\p{N}&.'’-]*(?=\s|$)/u;
+const CLAUSE_OPENER = /^(?:a|an|the|your|this|that|our|my|his|her|its|their|another|separate|additional|new|it|we|you|they|i)(?=\s|$)/iu;
+const isNameJoin = (coordinator, before, after) => /^and\s+$/iu.test(coordinator) && NAME_BEFORE_AND.test(before) && NAME_AFTER_AND.test(after) && !CLAUSE_OPENER.test(after);
 function refundScope(source, own, monetarySpans) {
     const sentence = sentenceAround(source, own, true);
     let end = sentence.end;
@@ -11247,6 +11251,8 @@ function refundScope(source, own, monetarySpans) {
             continue;
         const head = subject[1];
         if (continuesRefund(head) || OPEN_ARGUMENT.test(source.slice(own.end, at)))
+            continue;
+        if (isNameJoin(boundary[0], source.slice(own.end, at), source.slice(at + boundary[0].length, end)))
             continue;
         end = at;
         independentSubject = true;
