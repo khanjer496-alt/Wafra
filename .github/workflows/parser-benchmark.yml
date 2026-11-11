@@ -1,0 +1,117 @@
+name: Parser paired benchmark
+
+# CI-only. Compares the parseSms speed of three source trees on one fixed,
+# synthetic corpus, in ONE job on ONE runner, interleaved so slow drift hits
+# every label equally. Ships nothing and changes no runtime code.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'bench/parser-paired-**'
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      BENCH_DIR: scripts/ci/parser-benchmark
+      CORPUS: scripts/ci/parser-benchmark/parser-corpus-2026-11-11.jsonl
+      ROUNDS: '9'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies (no scripts)
+        run: npm ci --ignore-scripts
+
+      - name: Prepare the three source trees
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/bench-trees
+          : > trees.md
+          echo "| Label | Commit | Subject |" >> trees.md
+          echo "|---|---|---|" >> trees.md
+          for entry in build190=2705b987 rc-base=3ccd6bcd pr176=b9c636d3; do
+            label="${entry%%=*}"; sha="${entry##*=}"
+            git worktree add --detach "/tmp/bench-trees/$label" "$sha"
+            ln -s "$PWD/node_modules" "/tmp/bench-trees/$label/node_modules"
+            full="$(git -C "/tmp/bench-trees/$label" rev-parse HEAD)"
+            case "$full" in "$sha"*) ;; *) echo "tree $label is $full, expected $sha"; exit 1;; esac
+            subject="$(git -C "/tmp/bench-trees/$label" log -1 --format=%s)"
+            echo "| $label | $full | ${subject//|/\\|} |" >> trees.md
+          done
+          cat trees.md
+
+      - name: Runner facts
+        run: |
+          node -v
+          nproc
+          lscpu | grep -E 'Model name|Thread|MHz' || true
+          uptime
+
+      - name: Discard round (filesystem cache, not recorded)
+        run: |
+          set -euo pipefail
+          mkdir -p discard
+          for label in build190 rc-base pr176; do
+            node "$BENCH_DIR/benchmark.cjs" run --root "/tmp/bench-trees/$label" --label "$label" --corpus "$CORPUS" --out "discard/$label.json"
+          done
+
+      - name: Paired interleaved runs
+        run: |
+          set -euo pipefail
+          mkdir -p results
+          orders=("build190 rc-base pr176" "rc-base pr176 build190" "pr176 build190 rc-base")
+          for round in $(seq 1 "$ROUNDS"); do
+            order="${orders[$(( (round - 1) % 3 ))]}"
+            for label in $order; do
+              node "$BENCH_DIR/benchmark.cjs" run --root "/tmp/bench-trees/$label" --label "$label" --corpus "$CORPUS" \
+                --out "results/run-$(printf '%02d' "$round")-$label.json"
+            done
+            echo "round $round done: $order"
+          done
+
+      - name: CPU profile of one warm pass per label
+        run: |
+          set -euo pipefail
+          mkdir -p profiles
+          for label in build190 rc-base pr176; do
+            node "$BENCH_DIR/benchmark.cjs" profile --root "/tmp/bench-trees/$label" --label "$label" --corpus "$CORPUS" --out "profiles/$label.cpuprofile"
+          done
+
+      - name: Aggregate report
+        run: |
+          set -euo pipefail
+          node "$BENCH_DIR/benchmark.cjs" aggregate --dir results --corpus "$CORPUS" --baseline build190 --focus pr176 \
+            --profiles profiles --out report-body.md
+          {
+            echo "# Parser paired benchmark"
+            echo
+            echo "Workflow run ${GITHUB_RUN_ID}, ${ROUNDS} interleaved rounds per label after one discarded round."
+            echo
+            cat trees.md
+            echo
+            cat report-body.md
+          } > report.md
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: parser-benchmark-${{ github.sha }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            report.md
+            trees.md
+            results
+            profiles
