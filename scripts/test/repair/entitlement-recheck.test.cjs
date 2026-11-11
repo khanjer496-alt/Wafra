@@ -96,6 +96,10 @@ function harness(overrides = {}, options = {}) {
   };
   const hook = load(path.join(root, 'src/hooks/use-auto-import.ts'), {
     '@/lib/inbox-refresh-scheduler': load(path.join(root, 'src/lib/inbox-refresh-scheduler.ts')),
+    // iOS launch and `active` scans are deferred in production (runAfterFirstFrames); this harness
+    // tests the scan itself, so the deferral runs it at once, as it did before.
+    '@/lib/after-first-frames': { runAfterFirstFrames: (run) => { run(); return { cancel() {} }; } },
+    '@/lib/deferred-scan': load(path.join(root, 'src/lib/deferred-scan.ts')),
     '@/lib/ios-local-capture-protocol': load(
       path.join(root, 'src/lib/ios-local-capture-protocol.ts'), {}, { process: { env: {} } },
     ),
