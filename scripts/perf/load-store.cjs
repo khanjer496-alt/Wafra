@@ -68,7 +68,7 @@ function loadStore({ storePath = 'src/lib/store.tsx', counted = {} } = {}) {
     '@/lib/launch-performance': { markLaunchPhase() {} },
     '@/lib/state-storage': { migrateLegacyState: async () => null, stateStorage: {} },
     '@/lib/storage-diagnostics': { recordStorageFailure: () => ({ category: 'unknown' }) },
-    '@/lib/android-live-background': { waitForAndroidBackgroundCaptureIdle: async () => {} },
+    '@/lib/android-live-background-api': { waitForAndroidBackgroundCaptureIdle: async () => {} },
     '@/hooks/use-ledger-money': { MoneyLocaleProvider: ({ children }) => children },
     // Dependency-free selector helpers, not part of the shared test build.
     '@/lib/store-selection': execute('src/lib/store-selection.ts', (id) => {
