@@ -143,7 +143,7 @@ const en = {
   planWeekly: 'Weekly',
   startFree: (days: number) => days === 1 ? 'Start the free day' : `Start the free ${days} days`,
   continueFree: 'Continue without Pro',
-  trialTimelineLabel: 'What happens during the free days',
+  trialTimelineLabel: 'What happens during the free period',
 };
 
 type OnboardingECopy = typeof en;
@@ -251,7 +251,7 @@ const ar: OnboardingECopy = {
     : days === 2 ? 'ابدأ اليومين المجانيين'
       : `ابدأ ${arabicCount(days, { one: 'يوماً مجانياً', two: 'يومين مجانيين', few: 'أيام مجانية', many: 'يوماً مجانياً', hundreds: 'يوم مجاني' })}`,
   continueFree: 'المتابعة دون Pro',
-  trialTimelineLabel: 'ما يحدث خلال الأيام المجانية',
+  trialTimelineLabel: 'ما يحدث خلال الفترة المجانية',
 };
 
 export const ONBOARDING_E_COPY: Record<Lang, OnboardingECopy> = { en, ar };

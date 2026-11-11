@@ -340,7 +340,7 @@ test('the paywall decoration is hidden from assistive tech, untouchable, and dra
   const own = s.deps['@/components/ui/pattern-mosaic'].PatternMosaic({ tiles: [dining], tile: flat(drawn.props.style).width, compact: true, accessibilityLabel: '' });
   assert.equal(JSON.stringify(drawn.props.children), JSON.stringify(own.props.children), 'their category glyph');
   // The timeline's spoken label is unchanged.
-  assert.match(byID(nodes, 'onboarding-trial-timeline').props.accessibilityLabel, /^What happens during the free days\. Today: /);
+  assert.match(byID(nodes, 'onboarding-trial-timeline').props.accessibilityLabel, /^What happens during the free period\. Today: /);
   // No watched category: an example tile, never a figure.
   const generic = byID(renderPaywall(setup(), answers.skipped, { watchedCategory: null }).nodes, 'onboarding-paywall-keeps-going');
   assert.doesNotMatch(text(generic), /\d/);
