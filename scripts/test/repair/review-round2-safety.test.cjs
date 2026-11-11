@@ -147,6 +147,10 @@ for (const [layout, body, expectedMinor = 8500] of [
   ['purchase-article-spacing', confirmedDebit.replace('for purchase', 'for a purchase').replace(/ /g, '  ')],
   ['comma-amount', confirmedDebit.replace('AED 85.00', 'AED 4,999.00'), 499900],
   ['comma-amount-spacing', confirmedDebit.replace('AED 85.00', 'AED 4,999.00').replace(/ /g, '  '), 499900],
+  ['no-final-period', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM')],
+  ['no-final-period-spacing', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM').replace(/ /g, '  ')],
+  ['host-then-place', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM, Dubai.')],
+  ['host-then-place-spacing', confirmedDebit.replace('AMAZON.COM.', 'AMAZON.COM, Dubai.').replace(/ /g, '  ')],
 ]) {
   test(`issuer confirmation retains completed debit/${layout}`, () => {
     const session = reader('AE');
@@ -189,6 +193,14 @@ for (const [index, source] of [
   confirmedDebit.replace('We confirm', 'Can\nwe confirm'),
   confirmedDebit.replace('We confirm', 'Did,\nwe confirm'),
   `Dear Customer,\n${confirmedDebit.replace('We confirm', 'Can we confirm')}`,
+  // Reviewer 612e8db2: only a closed sentence end may follow the declared host.
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM：443/login'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM%2Flogin'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM%3Flogin=1'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM／login'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM\\login'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM@enbd-secure.test'),
+  confirmedDebit.replace('AMAZON.COM', 'AMAZON.COM./login'),
 ].entries()) for (const body of [source, source.replace(/ /g, '  ')]) {
   test(`issuer confirmation cannot hide a link instruction/${index}/${body === source ? 'original' : 'spacing'}`, () => {
     const session = reader('AE');
