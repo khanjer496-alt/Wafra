@@ -415,7 +415,7 @@ test('the free way on is the one button when there is no Pro button; prices and 
   const free = byID(nodes, 'onboarding-paywall-free');
   assert.equal(free.type, 'Pressable');
   assert.equal(free.props.accessibilityRole, 'button');
-  assert.equal(free.props.accessibilityLabel, 'Start the free 3 days');
+  assert.equal(free.props.accessibilityLabel, 'Start the 3-day free period');
   assert.ok(byID(nodes, 'onboarding-plans-unavailable'));
   // With the Pro button, the free way on stays a text action under it.
   const shown = renderPaywall(setup());
