@@ -3174,6 +3174,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return written.map((entry, index) => {
         const live = current[index];
         if (entry.outcome === 'expired' || live.outcome === 'expired') return { ...entry, outcome: 'expired' as const };
+        if (entry.outcome === 'refused') return entry;
         // A newer optimistic write cannot qualify this receipt. Both its own
         // persisted snapshot and the current generation must still carry a claim.
         if ((entry.outcome === 'pending' || entry.outcome === 'resolved') &&

@@ -413,7 +413,12 @@ export const reviewRetentionReceipts = (
   }
   const pending = tray.pending.find(entry => entry.expiresAt > now &&
     canonicalUniversalSourceKey(entry.sourceKey, entry.observedAt) === sourceKey);
-  return { sourceKey, outcome: pending ? 'pending' : 'deferred' };
+  if (pending) return { sourceKey, outcome: 'pending' };
+  // The same review id already holds a DIFFERENT source: admission refuses it,
+  // so the receipt says so instead of implying that waiting could retain it.
+  const collision = tray.pending.some(entry => entry.id === item.id &&
+    canonicalUniversalSourceKey(entry.sourceKey, entry.observedAt) !== sourceKey);
+  return { sourceKey, outcome: collision ? 'refused' : 'deferred' };
 });
 
 export const reviewClaimSourceKeys = (tray: AlertReviewTrayState, now: number): string[] => [
