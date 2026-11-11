@@ -19,6 +19,7 @@ const root = path.resolve(__dirname, '../../..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 const policy = () => load(path.join(root, 'src/lib/covered-screen-freeze.ts'), {});
 
+const shell = { addListener: () => () => {}, name: 'tabs-shell-in-root-stack' };
 function gateModule({ platform = 'ios', focused = () => true, react = React, globals } = {}) {
   const p = policy();
   const freeze = load(path.join(root, 'src/components/freeze-when-covered.tsx'), {
@@ -27,7 +28,7 @@ function gateModule({ platform = 'ios', focused = () => true, react = React, glo
   return load(path.join(root, 'src/components/ios-tab-gate.tsx'), {
     react, 'react/jsx-runtime': jsxRuntime,
     'react-native': { Platform: { OS: platform } },
-    '@react-navigation/native': { useIsFocused: () => focused() },
+    '@react-navigation/native': { useIsFocused: () => focused(), useNavigation: () => ({ getParent: () => shell }) },
     '@/components/freeze-when-covered': freeze,
     '@/lib/covered-screen-freeze': p,
   }, globals);
@@ -61,6 +62,14 @@ test('a hidden iOS tab does 0 projection calls before its first focus', () => {
     assert.equal(renderToStaticMarkup(React.createElement(Gated)), '');
   }
   assert.equal(calls.n, 0, 'NativeTabs mounts this tab at launch; nothing may run until it is opened');
+});
+
+test('the gate times its freeze from the tab shell route in the root stack', () => {
+  const { Tab } = projectionTab();
+  const Gated = gateModule({ focused: () => true }).withIosTabGate(Tab);
+  const tree = Gated({});
+  assert.equal(tree.props.focused, true);
+  assert.equal(tree.props.transitions, shell, 'the tab\'s parent navigation, whose events time push and swipe-back');
 });
 
 test('a focused iOS tab renders its content normally', () => {
