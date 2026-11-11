@@ -126,6 +126,7 @@ import {
 import {
   admitPreparedReviewAlerts,
   reviewRetentionReceipts,
+  reviewClaimSourceKeys,
   type ReviewStageReceipt,
   emptyAlertReviewTray,
   normalizeAlertReviewTray,
@@ -3180,8 +3181,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         return { ...entry, outcome: 'deferred' as const };
       });
     };
-    if (!authoritativeState.current.hydrated || (items.length === 0 && !sourceBindings?.length)) {
-      return { admitted: 0, qualificationIds: [], durable: ensureDurable(), retention };
+    const retainedSourceKeys = () => {
+      if (generation !== stateGeneration.current || !authoritativeState.current.hydrated || !persistedTray) return [];
+      const now = Date.now();
+      const live = new Set(reviewClaimSourceKeys(authoritativeState.current.reviewTray, now));
+      return reviewClaimSourceKeys(persistedTray, now).filter(key => live.has(key));
+    };
+    if (!authoritativeState.current.hydrated) {
+      return { admitted: 0, qualificationIds: [], durable: ensureDurable(), retention, retainedSourceKeys };
+    }
+    if (items.length === 0 && !sourceBindings?.length) {
+      // A scan may have skipped already-known Review identities. Its completion
+      // still needs its OWN persisted claims, not a later optimistic snapshot.
+      const snapshot = authoritativeState.current;
+      const durable = persist(snapshot).then(written => {
+        if (!written) throw new Error('Encrypted review-tray write failed');
+        persistedTray = snapshot.reviewTray;
+      });
+      return { admitted: 0, qualificationIds: [], durable, retention, retainedSourceKeys };
     }
     const qualificationByReviewId = reviewQualificationMap(items, qualifications);
     const now = Date.now();
@@ -3227,6 +3244,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       qualificationIds,
       durable,
       retention,
+      retainedSourceKeys,
     };
   }, [dispatch, ensureDurable, persist]);
 

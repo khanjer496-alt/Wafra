@@ -503,7 +503,8 @@ class FakeHistoryNative {
     try {
       await Promise.resolve();
       if (this.readErrorAt?.index === chunkIndex) throw this.readErrorAt.error;
-      return this.chunks[chunkIndex] ?? [];
+      // Native bridge returns a fresh JS array; zeroing it must not erase the protected queue.
+      return [...(this.chunks[chunkIndex] ?? [])];
     } finally {
       this.activeReads -= 1;
     }

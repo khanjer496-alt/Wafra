@@ -369,7 +369,15 @@ ok('hydration cannot relabel UAE review money as a foreign ledger amount',
     id: `info_review_id_${String(index).padStart(8, '0')}`,
     sourceKey: `info_review_source_${String(index).padStart(8, '0')}`,
     observedAt: NOW + index, expiresAt: NOW + index + REVIEW_ALERT_TTL_MS, channel: 'inbox',
-    parserVersion: 1, event: { family: 'balance', status: 'informational' } });
+    parserVersion: 1, event: (() => {
+      const missing = () => ({ value: null, evidence: 'missing', alternatives: [], spans: [], issues: [] });
+      const amount = { value: { currency: 'USD', minorUnits: '1000', exponent: 2 },
+        evidence: 'explicit', alternatives: [], spans: [], issues: [] };
+      return { version: 1, decision: 'review', family: 'balance', status: 'informational', direction: 'none',
+        amount, balance: amount, statementTotal: missing(), minimumDue: missing(), creditLimit: missing(),
+        merchant: missing(), instrument: missing(), transactionDate: missing(), dueDate: missing(), statementDate: missing(),
+        observations: [], issues: [] };
+    })() });
   ok('money movement is registered or an ordinary posted/unknown universal family',
     tray.isMoneyMovementReview(stored) &&
       !tray.isMoneyMovementReview(informational(1)) &&

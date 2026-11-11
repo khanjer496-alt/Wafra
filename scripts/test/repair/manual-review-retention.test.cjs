@@ -20,7 +20,7 @@ function harness(items, occupied = [], options = {}) {
   store.update({ merchantOverrides: {}, marketId: 'AE', captureOptOut: false });
   const result = { writes: [], commits: 0, notice: null, pending: null, commit: null, plan: null, capacity: false };
   const parsed = options.preview ? [{ kind: 'transaction' }] : [];
-  const bindings = { ...tray, state: store.state,
+  const bindings = { ...tray, canonicalCaptureSourceKey: source('lib/capture-source-identity').canonicalCaptureSourceKey, state: store.state,
     requiresPro: () => false, isProActive: () => true,
     router: { push() { throw new Error('unexpected route'); } },
     clearPasteSource() {}, setScanning() {}, setProgress() {}, setPasteVerdict() {}, reportScanProgress() {},
@@ -28,6 +28,7 @@ function harness(items, occupied = [], options = {}) {
     setPendingScanCommit: value => { result.commit = value ? value() : null; },
     setSkippedCount() {}, setPlan: value => { result.plan = value; }, setTrackedBills() {},
     setHistoryCapacityWaiting: value => { result.capacity = value; },
+    setHistoryCommitState() {},
     requestSmsPermission: async () => true,
     getStateSnapshot: () => store.state, getStateGeneration: () => store.generation,
     pasteMounted: { current: true },
@@ -80,6 +81,21 @@ test('actual manual preview commit refuses a replacement generation', { timeout:
   const h = harness([payment(0)], [], { preview: true });
   await h.run(); assert.equal(typeof h.result.commit, 'function');
   h.store.replace();
-  await assert.rejects(h.result.commit());
+  await assert.rejects(h.result.commit(), error => error.reason === 'review-changed');
   assert.equal(h.result.commits, 0);
+});
+test('actual manual scan retries timestamp-bound Android sources after nine durable dismissals', { timeout: 15000 }, async () => {
+  const items = Array.from({ length: 59 }, (_, i) => {
+    const item = payment(i);
+    return { ...item, channel: 'inbox', id: `ari1_${(i + 1).toString(16).padStart(64, '0')}`,
+      sourceKey: `android_message_review_source_a${i + 1}t${item.observedAt}` };
+  });
+  const h = harness(items);
+  await h.run(); assert.equal(h.result.commits, 0); assert.equal(h.store.state.reviewTray.pending.length, 50);
+  for (const item of items.slice(0, 9)) await h.store.dismissDurable(item);
+  await h.run();
+  assert.equal(h.result.commits, 1);
+  assert.equal(h.store.state.reviewTray.pending.length, 50);
+  assert.equal(h.store.state.reviewTray.tombstones.filter(x => x.outcome === 'dismissed').length, 9);
+  assert.ok(h.result.writes.some(batch => batch.parserRereadComplete));
 });

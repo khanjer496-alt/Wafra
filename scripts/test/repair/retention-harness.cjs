@@ -43,29 +43,41 @@ function payment(i) {
 // Extract the shipped action and reducer rather than maintaining a staging double.
 const storeText = fs.readFileSync(path.join(root, 'src/lib/store.tsx'), 'utf8');
 const storeAst = ts.createSourceFile('store.tsx', storeText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-let stageNode;
+let stageNode, dismissNode;
 function visit(node) {
   if (ts.isVariableDeclaration(node) && node.name.getText(storeAst) === 'stageReviewAlerts') stageNode = node.initializer.arguments[0];
+  if (ts.isVariableDeclaration(node) && node.name.getText(storeAst) === 'dismissReviewAlert') dismissNode = node.initializer.arguments[0];
   ts.forEachChild(node, visit);
 }
 visit(storeAst);
 const reduceNode = storeAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'reduceState');
-assert.ok(stageNode && reduceNode);
+assert.ok(stageNode && dismissNode && reduceNode);
 const reduceState = evaluate(reduceNode.getText(storeAst) + '\nexports.reduce = reduceState;', 'reducer.ts').reduce;
 function storeHarness(occupied = []) {
   const authoritativeState = { current: { hydrated: true, transactions: [], trustedNotificationPackages: [],
     reviewTray: tray.admitPreparedReviewAlerts(tray.emptyAlertReviewTray(), occupied, now).state } };
   const stateGeneration = { current: 0 };
   let write = async () => true;
+  let persisted = JSON.parse(JSON.stringify(authoritativeState.current));
+  const save = async snapshot => {
+    const written = await write(snapshot);
+    if (written) persisted = JSON.parse(JSON.stringify(snapshot));
+    return written;
+  };
   const callbacks = { ...tray, authoritativeState, stateGeneration, saveTimer: { current: null },
     reviewQualificationMap: () => new Map(),
     reconcileReviewSourceBindings: source('lib/review-source-bindings').reconcileReviewSourceBindings,
-    ensureDurable: async () => { if (!await write(authoritativeState.current)) throw new Error('write failed'); },
-    persist: state => write(state), persistedQualificationIds: () => [],
+    ensureDurable: async () => { if (!await save(authoritativeState.current)) throw new Error('write failed'); },
+    resolveAlertReviewItem: tray.resolveReviewAlert,
+    persist: save, persistedQualificationIds: () => [],
     dispatch: action => (authoritativeState.current = reduceState(authoritativeState.current, action)),
   };
   const stage = evaluate(`exports.stage = ${stageNode.getText(storeAst)};`, 'stage.ts', callbacks).stage;
-  return { stage, get state() { return authoritativeState.current; }, get generation() { return stateGeneration.current; },
+  const dismissDurable = evaluate(`exports.dismiss = ${dismissNode.getText(storeAst)};`, 'dismiss.ts', callbacks).dismiss;
+  return { stage, dismissDurable: item => dismissDurable(item.id, 'dismissed'),
+    get persisted() { return persisted; },
+    rehydrate() { stateGeneration.current++; authoritativeState.current = JSON.parse(JSON.stringify(persisted)); },
+    get state() { return authoritativeState.current; }, get generation() { return stateGeneration.current; },
     update(patch) { authoritativeState.current = { ...authoritativeState.current, ...patch }; },
     setWrite(fn) { write = fn; }, replace() { stateGeneration.current++; authoritativeState.current = { ...authoritativeState.current, reviewTray: tray.emptyAlertReviewTray() }; },
     dismiss(item) { authoritativeState.current = { ...authoritativeState.current,

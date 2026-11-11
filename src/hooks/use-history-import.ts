@@ -1,5 +1,5 @@
 import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
-import { reviewClaimSourceKeys, reviewRetentionReceipts, requiresReviewRetention, settleReviewStage } from '@/lib/alert-review-tray';
+import { reviewClaimSourceKeys, requiresReviewRetention, settleReviewStage, type ReviewStageReceipt } from '@/lib/alert-review-tray';
 import { collectLegacyReviewSourceKeys } from '@/lib/review-source-bindings';
 import { AppState as RNAppState, Platform } from 'react-native';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
@@ -156,8 +156,10 @@ export function useHistoryImport(): void {
       // Skip only the genuinely empty stage. Identity bindings still require
       // staging even when no candidate is present, and a real review must be
       // durable before planning against the resulting ledger snapshot.
-      if (page.reviewCandidates.length > 0 || (page.reviewSourceBindings?.length ?? 0) > 0) {
-        const reviewReceipt = stageReviewAlerts(page.reviewCandidates, undefined, page.reviewSourceBindings);
+      let reviewReceipt: ReviewStageReceipt | undefined;
+      if (page.reviewCandidates.length > 0 || (page.reviewSourceBindings?.length ?? 0) > 0 ||
+          (page.skippedKnownInboxReviewSourceKeys?.length ?? 0) > 0) {
+        reviewReceipt = stageReviewAlerts(page.reviewCandidates, undefined, page.reviewSourceBindings);
         const outcomes = await settleReviewStage(page.reviewCandidates, reviewReceipt);
         if (!canCommit()) return false;
         const unresolved = page.reviewCandidates.filter(requiresReviewRetention).map(item =>
@@ -198,8 +200,8 @@ export function useHistoryImport(): void {
       // a full Review lane posts the alert instead of dropping it.
       const nearMatches = stageWalletNearMatches(
         plan, () => getStateSnapshot().reviewTray, (items) => stageReviewAlerts(items));
-      const claims = new Set(reviewClaimSourceKeys(getStateSnapshot().reviewTray, Date.now()));
-      const finalReviews = reviewRetentionReceipts(getStateSnapshot().reviewTray, page.reviewCandidates, Date.now());
+      const claims = new Set(reviewReceipt?.retainedSourceKeys?.() ?? []);
+      const finalReviews = reviewReceipt?.retention?.() ?? [];
       if (!canCommit() || (page.skippedKnownInboxReviewSourceKeys ?? []).some(key => !claims.has(key)) ||
           page.reviewCandidates.some(item => requiresReviewRetention(item) && !finalReviews.some(entry =>
             entry.sourceKey === canonicalCaptureSourceKey(item.sourceKey, item.observedAt) &&

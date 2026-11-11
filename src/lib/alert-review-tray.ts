@@ -377,6 +377,8 @@ export interface ReviewStageReceipt {
   durable: Promise<void>;
   /** Read only AFTER durable; recomputed on current state, never a provisional insert count. */
   retention?: () => ReviewSourceReceipt[];
+  /** Positive canonical claims in this receipt's written snapshot AND current generation. */
+  retainedSourceKeys?: () => string[];
 }
 
 export const reviewRetentionReceipts = (
