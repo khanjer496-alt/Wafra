@@ -1185,13 +1185,7 @@ export default function SettingsScreen() {
             widgetWords.settingsTitle,
             widgetWords.settingsDetail(Platform.OS === 'ios' ? 'ios' : 'android'),
             () => router.push('/widgets'),
-            { icon: 'home', testID: 'settings-widgets' },
-          )}
-          {Platform.OS !== 'web' && linkRow(
-            t('settingsViewOnboarding'),
-            t('settingsViewOnboardingDetail'),
-            () => router.setParams({ onboarding: 'preview' }),
-            { icon: 'play', last: true },
+            { icon: 'home', testID: 'settings-widgets', last: true },
           )}
         </View>
 
