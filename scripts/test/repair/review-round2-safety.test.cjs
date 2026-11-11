@@ -302,3 +302,56 @@ for (const merchant of ['نون اي', 'مطعم الشام ال', 'مطعم ا�
     assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
   });
 }
+
+// CEO decision 3a8291ad: "and" inside a merchant name is not a second clause. Build 190 posted these
+// refunds; the RC base refused them because refundScope read "AND <words> has" as a new subject.
+const andMerchants = [['marks', 'MARKS AND SPENCER'], ['hm', 'H AND M'], ['barnes', 'BARNES AND NOBLE'],
+  ['mixed-case', 'Marks and Spencer'], ['four-words', 'TOM AND JERRYS CAFE']];
+for (const [label, merchant] of andMerchants) {
+  for (const [lead, withAck] of [['plain', ''], ['ack', 'Your refund request has been received. ']]) {
+    for (const [amountText, minor] of [['100.00', 10000], ['1,948.85', 194885]]) {
+      const body = `${withAck}Refund of AED ${amountText} from ${merchant} has been credited to your card ending 1234.`;
+      test(`refund credit from a merchant named with AND posts/${label}/${lead}/${amountText}`, () => {
+        const session = reader('AE');
+        assert.equal(nonPostingReason(body), null);
+        for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
+          session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
+          assert.equal(parsed?.kind, 'transaction');
+          assert.equal(parsed.type, 'income');
+          assert.equal(parsed.amountFils, minor);
+          assert.equal(parsed.currency, 'AED');
+        }
+      });
+    }
+  }
+}
+for (const [label, merchant] of andMerchants.slice(0, 3)) {
+  for (const [kind, make] of [
+    ['future', (m) => `Refund of AED 100.00 from ${m} will be credited to your card ending 1234 within 5 working days.`],
+    ['pending-approval', (m) => `Refund of AED 100.00 from ${m} is pending approval.`],
+    ['in-progress', (m) => `Your refund of AED 100.00 from ${m} is in progress.`],
+    ['ack-requested', (m) => `Your refund request has been received. Refund of AED 100.00 from ${m} has been requested and is pending approval.`],
+  ]) {
+    const body = make(merchant);
+    test(`refund from a merchant named with AND stays refused/${kind}/${label}`, () => {
+      const session = reader('AE');
+      assert.equal(parseSms(body), null);
+      assert.equal(parseSms(body, {}, { sender: 'ENBD', observedAt: at }), null);
+      assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
+      assert.equal(confirmationNative(body).route, 'ignore');
+    });
+  }
+}
+for (const [label, merchant] of [['spaced', 'ماركس و سبنسر'], ['glued', 'ماركس وسبنسر']]) {
+  test(`Arabic refund merchant with waw posts/${label}`, () => {
+    const body = `تم استرداد مبلغ 100.00 درهم إلى بطاقتك المنتهية بـ 1234 من ${merchant}.`;
+    const session = reader('AE');
+    for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
+      session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
+      assert.equal(parsed?.kind, 'transaction');
+      assert.equal(parsed.type, 'income');
+      assert.equal(parsed.amountFils, 10000);
+      assert.equal(parsed.currency, 'AED');
+    }
+  });
+}
