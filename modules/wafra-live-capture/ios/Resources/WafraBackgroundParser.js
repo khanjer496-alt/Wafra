@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 5640bbcf638e42cad690d82331aad4888eb6beadf06312e0590faea5957fd1d0
+// Generated from normal shipping TypeScript. Source SHA-256: 11db986569430f78d959dfabe0649ca6ae3aa7ec5f64502d275fb2f28dac2a90
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -11738,6 +11738,7 @@ function arabicPendingPosting(body) {
 const EXPECTED_FUTURE_MOVEMENT_RE = /\b(?:expected|anticipated)\b(?:[^.]|\.\d){0,80}\b(?:salary|payroll|wages|wps|payment|transfer|credit|deposit|refund|reversal|fee|charge|payout|settlement)\b|\b(?:salary|payroll|wages|wps|payment|transfer|credit|deposit|refund|reversal|fee|charge|payout|settlement)\b(?:[^.]|\.\d){0,80}\b(?:expected|anticipated)\b|(?:راتب|مرتب|دفع|تحويل|ايداع)[\s\S]{0,80}متوقع|سيصل[\s\S]{0,80}(?:راتب|مرتب|دفع|تحويل|ايداع)/iu;
 const REQUEST_RECEIVED_RE = /\b(?:(?:payment|transfer|purchase|redemption|refund)\s+request|request\s+for\s+(?:a\s+)?refund)\b(?:[^.]|\.\d){0,64}\b(?:received|submitted|created|awaiting|pending|registered|being\s+processed|in\s+progress|under\s+(?:review|process(?:ing)?))\b|\b(?:received|submitted|created)\b(?:[^.]|\.\d){0,48}\b(?:(?:payment|transfer|purchase|refund)\s+request|request\s+for\s+(?:a\s+)?refund)\b|تم\s+استلام\s+طلب\s+(?:سداد|دفع|تحويل)/iu;
 const REQUEST_RECEIVED_BLANK_RE = new RegExp(REQUEST_RECEIVED_RE.source, 'giu');
+const REFUND_COMPLETED_CREDIT_RE = /\brefund(?:ed)?\b(?:[^.\n]|\.(?=\S)){0,300}?\b(?:has|have|had|was|were)\s+(?:been\s+)?(?:successfully\s+)?(?:credited|refunded|posted)\s+(?:back\s+)?(?:to|into|onto)\s+(?:your|the)\b/i;
 const MANDATE_LIFECYCLE_RE = /\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b(?:[^.]|\.\d){0,96}\b(?:will\s+(?:start|begin|commence|activate)|has\s+been\s+(?:created|registered|set\s*up|activated)|is\s+(?:now\s+)?active)\b|\b(?:created|registered|set\s*up|activated)\b(?:[^.]|\.\d){0,64}\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b|تم\s+(?:تسجيل|انشاء|تفعيل)[^\n]{0,64}(?:امر\s+)?(?:خصم\s+(?:تلقايي|مباشر)|تعليمات\s+مستديمه)/iu;
 const CONDITIONAL_PAYOUT_RE = /\b(?:merchant|business|seller|vendor|restaurant|platform|marketplace|aggregator|acquirer|sales?|delivery|courier|rider|driver)\b(?:[^.]|\.\d){0,160}\b(?:when|once|if)\s+(?:you\s+)?(?:are\s+)?(?:eligible|qualif(?:y|ied))\b|\b(?:merchant|business|seller|vendor|restaurant|platform|marketplace|aggregator|acquirer|sales?|delivery|courier|rider|driver)\b(?:[^.]|\.\d){0,160}\b(?:after\s+(?:(?:your\s+)?registration|you\s+(?:register|sign\s+up|open\s+(?:an?\s+)?account)|opening\s+(?:an?\s+)?account)|upon\s+(?:registration|sign[ -]?up|account\s+opening))\b/iu;
 const CONDITIONAL_MOVEMENT_RE = /\b(?:salary|payroll|wages|wps|monthly\s+pay|remuneration|emoluments?|refund|payout|settlement|proceeds|earnings|disbursement)\b(?:[^.]|\.\d){0,144}\b(?:if|when|once|upon)\s+(?:it\s+is\s+|you\s+are\s+)?(?:approved|authori[sz]ed|verified)\b|\b(?:salary|payroll|wages|wps|monthly\s+pay|remuneration|emoluments?|refund|payout|settlement|proceeds|earnings|disbursement)\b(?:[^.]|\.\d){0,144}\bafter\s+(?:completing\s+)?(?:onboarding|registration|verification|account\s+opening)\b/iu;
@@ -12888,8 +12889,9 @@ function nonPostingReasonInBody(body, suppressible) {
         return 'security-challenge';
     }
     const requestReceived = REQUEST_RECEIVED_RE.test(body);
-    const settledRefund = REFUND_RE.test(body) && (!requestReceived ||
-        REFUND_RE.test(blank(blank(body, REQUEST_RECEIVED_BLANK_RE), FUTURE_CLAUSE_RE)));
+    const withoutRequest = requestReceived ? blank(blank(body, REQUEST_RECEIVED_BLANK_RE), FUTURE_CLAUSE_RE) : body;
+    const settledRefund = (REFUND_RE.test(body) && (!requestReceived || REFUND_RE.test(withoutRequest))) ||
+        (requestReceived && REFUND_COMPLETED_CREDIT_RE.test(withoutRequest));
     if (VERIFICATION_HOLD_DESCRIPTOR_RE.test(body))
         return 'preauthorisation';
     if (!settledRefund &&
