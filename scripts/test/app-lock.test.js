@@ -62,5 +62,37 @@ ok('turning App Lock on accepts a passcode-only phone',
   /getEnrolledLevelAsync\(\)/.test(toggle) && !/isEnrolledAsync\(\)/.test(toggle) &&
     /\.\.\.APP_LOCK_AUTH_OPTIONS/.test(toggle));
 
+// Changing the language remounts the navigator subtree, and the gate sits inside
+// it. The unlock flag therefore lives in a process-wide session, not only in
+// React state, or the user is asked for Face ID again after switching language.
+{
+  const fresh = lock.createUnlockSession();
+  eq('a new process starts locked', fresh.isUnlocked(), false);
+  fresh.setUnlocked(true);
+  // A remounted gate reads its starting value from the same session.
+  const remounted = { unlocked: fresh.isUnlocked() };
+  eq('a remounted gate (language change) stays unlocked', remounted.unlocked, true);
+  fresh.setUnlocked(false);
+  eq('a real re-lock still locks the next mount', { unlocked: fresh.isUnlocked() }.unlocked, false);
+  const other = lock.createUnlockSession();
+  eq('sessions are independent objects (no shared hidden state)', other.isUnlocked(), false);
+  eq('the process session starts locked', lock.appLockSession.isUnlocked(), false);
+  lock.appLockSession.setUnlocked(true);
+  eq('the process session is one object for every mount', lock.appLockSession.isUnlocked(), true);
+  lock.appLockSession.setUnlocked(false);
+}
+{
+  const unlockedDecl = gate.match(/const \[unlocked, setUnlocked\] = useState\(([^;]*)\);/);
+  ok('the gate starts from the process session, not from false',
+    !!unlockedDecl && /appLockSession\.isUnlocked\(\)/.test(unlockedDecl[1]) && !/^false$/.test(unlockedDecl[1].trim()));
+  ok('every unlock change is mirrored into the session through one setter',
+    /const markUnlocked = useCallback\(\(next: boolean\) => \{\s*appLockSession\.setUnlocked\(next\);\s*setUnlocked\(next\);/.test(gate) &&
+      (gate.match(/(?<![.\w])setUnlocked\(/g) ?? []).length === 1 &&
+      /markUnlocked\(true\)/.test(gate) && /markUnlocked\(false\)/.test(gate));
+  const layout = stripComments(read('src/components/app-root-layout.tsx'));
+  ok('a language change still remounts the subtree (compiled text is evaluated again)',
+    /key=\{language\}/.test(layout) && /<LockGate>/.test(layout));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

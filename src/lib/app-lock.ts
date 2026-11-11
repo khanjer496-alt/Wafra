@@ -57,3 +57,30 @@ export function unlockOutcome(result: { success: boolean; error?: string }): Unl
   if (result.error === 'not_enrolled' || result.error === 'passcode_not_set') return 'unavailable';
   return 'failed';
 }
+
+/**
+ * Whether this process has been unlocked, kept OUTSIDE React state.
+ *
+ * A language change deliberately remounts the whole navigator subtree
+ * (app-root-layout.tsx) so compiled text is evaluated again, and the gate sits
+ * inside that subtree: its `useState(false)` reset to locked and asked for Face
+ * ID again right after the user changed language in Settings. The gate now
+ * reads its starting value from here and writes every change back, so a remount
+ * keeps the unlock and only a real re-lock (the app leaving the foreground past
+ * the grace period) or a new process locks again.
+ *
+ * Memory only: nothing is persisted, so a cold start always begins locked.
+ */
+export function createUnlockSession(): {
+  isUnlocked(): boolean;
+  setUnlocked(unlocked: boolean): void;
+} {
+  let unlocked = false;
+  return {
+    isUnlocked: () => unlocked,
+    setUnlocked: (next) => { unlocked = next; },
+  };
+}
+
+/** The one session of this process, shared by every mount of the gate. */
+export const appLockSession = createUnlockSession();

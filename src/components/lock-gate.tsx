@@ -11,7 +11,7 @@ import { LockPattern } from '@/components/settings-band/lock-pattern';
 import { Fonts, ScreenPadding, Spacing } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { APP_LOCK_AUTH_OPTIONS, deviceLockLevel, unlockOutcome } from '@/lib/app-lock';
+import { APP_LOCK_AUTH_OPTIONS, appLockSession, deviceLockLevel, unlockOutcome } from '@/lib/app-lock';
 import { useStore } from '@/lib/store';
 import { t } from '@/lib/i18n';
 import { settingsCopy } from '@/lib/settings-copy';
@@ -60,7 +60,14 @@ export function LockGate({ children }: { children: React.ReactNode }) {
   const copy = settingsCopy(state.language);
   // Asked only while App Lock is on; the lock screen is the only reader here.
   const biometricKind = useBiometricKind(state.appLock);
-  const [unlocked, setUnlocked] = useState(false);
+  // Started from the process-wide session, not `false`: changing the language
+  // remounts this gate (see app-root-layout.tsx) and must not ask for the
+  // biometric again. Every change below is written back through markUnlocked.
+  const [unlocked, setUnlocked] = useState(() => appLockSession.isUnlocked());
+  const markUnlocked = useCallback((next: boolean) => {
+    appLockSession.setUnlocked(next);
+    setUnlocked(next);
+  }, []);
   const [attempted, setAttempted] = useState(false);
   const [biometric, setBiometric] = useState<BiometricState>('prompting');
   const unavailableRef = useRef(false);
@@ -102,14 +109,14 @@ export function LockGate({ children }: { children: React.ReactNode }) {
         authenticatingRef.current = false;
       }
       const outcome = unlockOutcome(result);
-      if (outcome === 'unlocked') setUnlocked(true);
+      if (outcome === 'unlocked') markUnlocked(true);
       else setBiometric(outcome);
     } catch {
       setBiometric('failed');
     } finally {
       setAttempted(true);
     }
-  }, []);
+  }, [markUnlocked]);
 
   useEffect(() => {
     if (lockRequired && !attempted) tryUnlock();
@@ -146,14 +153,14 @@ export function LockGate({ children }: { children: React.ReactNode }) {
         const away = Date.now() - leftAt;
         leftAt = 0;
         if (away > RELOCK_GRACE_MS) {
-          setUnlocked(false);
+          markUnlocked(false);
           setAttempted(false);
           setBiometric('prompting');
         }
       }
     });
     return () => sub.remove();
-  }, [state.appLock]);
+  }, [state.appLock, markUnlocked]);
 
   /*
     ONE tree shape whether locked or not. This used to return `children`
