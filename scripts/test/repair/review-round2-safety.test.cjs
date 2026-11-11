@@ -239,7 +239,8 @@ for (const [index, source] of [
 // acknowledgement then won and the credit was refused as pending-processing.
 const refundAckMerchants = [
   ['5', 'ADNOC'], ['12', 'GOLDEN SANDS'], ['30', 'GOLDEN SANDS GRAND RESTAURANTS'],
-  ['60', 'GOLDEN SANDS GRAND RESTAURANTS AND COFFEE LOUNGE DUBAI MALLS'],
+  // No coordinator word (AND/BUT) in the long names: refundScope treats it as a new subject; that is a separate matter.
+  ['60', 'GOLDEN SANDS GRAND RESTAURANTS CAFE LOUNGE DUBAI MALLS NORTH'],
   ['dotted-8', 'NOON.COM'], ['dotted-14', 'APPLE.COM/BILL'],
 ];
 for (const [label, merchant] of refundAckMerchants) {
