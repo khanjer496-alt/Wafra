@@ -633,24 +633,35 @@ function ktSources(dir) {
 
   const collectedData = config.ios?.privacyManifests?.NSPrivacyCollectedDataTypes ?? [];
   const collectedTypes = new Set(collectedData.map((entry) => entry.NSPrivacyCollectedDataType));
+  // Matches Shared/launch-review/wafra-data-flow-audit-2026-11-12.md: nine types,
+  // none linked or used for tracking. Crash Data and Other User Content are NOT
+  // collected (no crash SDK; SMS/email content is Emails or Text Messages).
   const expectedCollectedTypes = [
+    'NSPrivacyCollectedDataTypeEmailsOrTextMessages',
     'NSPrivacyCollectedDataTypeOtherFinancialInfo',
     'NSPrivacyCollectedDataTypePurchaseHistory',
-    'NSPrivacyCollectedDataTypeDeviceID',
     'NSPrivacyCollectedDataTypeCustomerSupport',
-    'NSPrivacyCollectedDataTypeOtherUserContent',
+    'NSPrivacyCollectedDataTypeUserID',
+    'NSPrivacyCollectedDataTypeDeviceID',
+    'NSPrivacyCollectedDataTypeProductInteraction',
+    'NSPrivacyCollectedDataTypeCoarseLocation',
+    'NSPrivacyCollectedDataTypeOtherDiagnosticData',
   ];
-  ok('the iOS config declares the data retained by Wafra services',
-    expectedCollectedTypes.every((type) => collectedTypes.has(type)) &&
+  ok('the iOS config declares exactly the data audited as collected, unlinked, untracked',
+    collectedData.length === expectedCollectedTypes.length &&
+      !collectedTypes.has('NSPrivacyCollectedDataTypeCrashData') &&
+      !collectedTypes.has('NSPrivacyCollectedDataTypeOtherUserContent') &&
+      config.ios?.privacyManifests?.NSPrivacyTracking === false &&
+      expectedCollectedTypes.every((type) => collectedTypes.has(type)) &&
       collectedData.every((entry) =>
-        typeof entry.NSPrivacyCollectedDataTypeLinked === 'boolean' &&
+        entry.NSPrivacyCollectedDataTypeLinked === false &&
         entry.NSPrivacyCollectedDataTypeTracking === false &&
         entry.NSPrivacyCollectedDataTypePurposes?.includes(
           'NSPrivacyCollectedDataTypePurposeAppFunctionality',
         )));
   const purchaseHistory = collectedData.find((entry) =>
     entry.NSPrivacyCollectedDataType === 'NSPrivacyCollectedDataTypePurchaseHistory');
-  ok('RevenueCat purchase history declares both entitlement and dashboard use',
+  ok('Superwall purchase history declares both entitlement and analytics use',
     purchaseHistory?.NSPrivacyCollectedDataTypePurposes?.includes(
       'NSPrivacyCollectedDataTypePurposeAnalytics',
     ));
