@@ -170,3 +170,47 @@ test('iOS keeps its own native-tabs layout untouched, and the freeze has no data
   assert.doesNotMatch(code, /@\/lib\/(store|ledger|dashboard-projection|insights|subscriptions)/,
     'freezing changes when screens render, never what any total is');
 });
+
+test('capture keeps rendering while covered (Settings or Erase on top); the frozen tabs do not', () => {
+  // Render-level proof with real React: CaptureOwner and the frozen <Tabs> are siblings, so a
+  // store change that re-renders the shell runs the capture hooks and none of the tab content.
+  // Effects are not executed by the server renderer; the next assertion covers the effect owner.
+  const calls = { history: 0, auto: 0, shared: 0, tabs: 0 };
+  const Tabs = Object.assign(() => { calls.tabs += 1; return null; }, { Screen: () => null });
+  const freeze = freezeModule();
+  const p = policy();
+  const Layout = load(path.join(root, 'src/components/app-tabs-layout.tsx'), {
+    react: React, 'react/jsx-runtime': jsxRuntime, 'expo-router': { Tabs },
+    '@react-navigation/native': { useIsFocused: () => false },
+    'react-native': { Platform: { OS: 'android' } },
+    '@/components/tab-bar': { WafraTabBar: () => null },
+    '@/components/ui/tab-bar-metrics': { TabBarMetricsProvider: ({ children }) => React.createElement(React.Fragment, null, children) },
+    '@/hooks/use-auto-import': { useAutoImport: () => { calls.auto += 1; } },
+    '@/hooks/use-history-import': { useHistoryImport: () => { calls.history += 1; } },
+    '@/hooks/use-shared-alert-formats': { useSharedAlertFormats: () => { calls.shared += 1; } },
+    '@/components/freeze-when-covered': {
+      // Already past the push delay: render the frozen state directly.
+      FreezeWhenCovered: ({ children }) => React.createElement(React.Suspense, { fallback: null },
+        React.createElement(freeze.FreezeSuspender, { freeze: true }, children)),
+    },
+    '@/lib/covered-screen-freeze': p,
+  }).default;
+  for (let storeChange = 1; storeChange <= 5; storeChange += 1) {
+    renderToStaticMarkup(React.createElement(Layout));
+    assert.deepEqual(calls, { history: storeChange, auto: storeChange, shared: storeChange, tabs: 0 });
+  }
+});
+
+test('the erase rebuild and foreground scans belong to the capture host, not to Home', () => {
+  // use-auto-import's erase-rebuild/initial-scan effect returns early unless watchForeground.
+  // Only CaptureOwner passes watchForeground=true; Home passes (false, true) for its status card.
+  const hook = read('src/hooks/use-auto-import.ts');
+  const anchor = hook.indexOf("is in this effect's deps, and both halves of that");
+  assert.ok(anchor > 0, 'the erase-rebuild effect comment must still exist');
+  const before = hook.slice(0, anchor);
+  assert.match(before.slice(before.lastIndexOf('useEffect(')), /if \(!watchForeground\) return;/);
+  assert.match(read('src/components/app-tabs-layout.tsx'), /function CaptureOwner\(\) \{[\s\S]{0,80}useAutoImport\(true, false\)/);
+  for (const home of ['src/screens/journal-home-screen.tsx', 'src/screens/ledger-home-screen.tsx']) {
+    assert.match(read(home), /useAutoImport\(false, true\)/, `${home} must not own foreground capture`);
+  }
+});
