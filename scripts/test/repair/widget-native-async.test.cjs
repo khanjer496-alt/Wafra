@@ -1,0 +1,59 @@
+'use strict';
+// The iOS widget write (App Group UserDefaults plus WidgetKit's reloadAllTimelines,
+// which re-renders every placed widget) used to be a synchronous Expo Function that
+// ran on the JS thread. It is an AsyncFunction now; the JS bridge accepts both the
+// async answer of current binaries and the synchronous answer of older ones and of
+// Android. Swift cannot run here, so its shape is checked against the source.
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const load = require('./load-typescript.cjs');
+const root = path.resolve(__dirname, '../../..');
+
+const bridgeWith = (setSnapshot, os = 'ios') => load(path.join(root, 'modules/wafra-widgets/index.ts'), {
+  'react-native': { Platform: { OS: os } },
+  'expo-modules-core': { requireOptionalNativeModule: () => ({ setSnapshot, clearSnapshot() {} }) },
+});
+
+test('an async native answer is awaited: nothing (iOS) and true count as stored, false and a rejection do not', async () => {
+  assert.equal(await bridgeWith(async () => undefined).setWidgetSnapshot('{}'), true, 'iOS resolves with nothing');
+  assert.equal(await bridgeWith(async () => true).setWidgetSnapshot('{}'), true);
+  assert.equal(await bridgeWith(async () => false).setWidgetSnapshot('{}'), false);
+  assert.equal(await bridgeWith(() => Promise.reject(new Error('fixture'))).setWidgetSnapshot('{}'), false);
+});
+
+test('the synchronous answers of Android and of older iOS binaries keep their meaning', () => {
+  assert.equal(bridgeWith(() => undefined).setWidgetSnapshot('{}'), true);
+  assert.equal(bridgeWith(() => true, 'android').setWidgetSnapshot('{}'), true);
+  assert.equal(bridgeWith(() => false, 'android').setWidgetSnapshot('{}'), false);
+  assert.equal(bridgeWith(() => { throw new Error('fixture'); }).setWidgetSnapshot('{}'), false);
+});
+
+test('without a native module the write is a silent success', () => {
+  const none = load(path.join(root, 'modules/wafra-widgets/index.ts'), {
+    'react-native': { Platform: { OS: 'web' } },
+    'expo-modules-core': { requireOptionalNativeModule: () => null },
+  });
+  assert.equal(none.setWidgetSnapshot('{}'), true);
+});
+
+test('the iOS module writes off the JS thread on one serial queue, and keeps its guards', () => {
+  const swift = fs.readFileSync(path.join(root, 'modules/wafra-widgets/ios/WafraWidgetsModule.swift'), 'utf8');
+  assert.match(swift, /AsyncFunction\("setSnapshot"\) \{ \(json: String\) in/);
+  assert.doesNotMatch(swift, /\bFunction\("setSnapshot"\)/, 'setSnapshot is no longer synchronous');
+  assert.match(swift, /private static let queue = DispatchQueue\(label: "app\.wafra\.widgets\.snapshot"\)/);
+  // Both write and erase go through the queue, so an erase cannot be overtaken by an older write.
+  assert.match(swift, /AsyncFunction\("setSnapshot"\)[\s\S]*?WafraWidgetsModule\.queue\.sync \{[\s\S]*?defaults\.set\(json, forKey: WafraWidgetsModule\.snapshotKey\)[\s\S]*?WafraWidgetsModule\.reloadWidgets\(\)/);
+  assert.match(swift, /Function\("clearSnapshot"\) \{\s*WafraWidgetsModule\.queue\.sync \{[\s\S]*?removeObject\(forKey: WafraWidgetsModule\.snapshotKey\)[\s\S]*?reloadWidgets\(\)/);
+  // The 64 KB guard still removes the older snapshot instead of leaving it on screen.
+  assert.match(swift, /json\.utf8\.count > WafraWidgetsModule\.maxSnapshotBytes \{[\s\S]*?defaults\.removeObject\(forKey: WafraWidgetsModule\.snapshotKey\)/);
+  assert.match(swift, /WidgetCenter\.shared\.reloadAllTimelines\(\)/);
+  assert.match(swift, /static let appGroup = "group\.app\.wafra\.ios"/);
+});
+
+test('the Android module and its synchronous answer are untouched', () => {
+  const kotlin = fs.readFileSync(path.join(root, 'modules/wafra-widgets/android/src/main/java/expo/modules/wafrawidgets/WafraWidgetsModule.kt'), 'utf8');
+  assert.match(kotlin, /Function\("setSnapshot"\)/);
+  assert.doesNotMatch(kotlin, /AsyncFunction\("setSnapshot"\)/);
+});

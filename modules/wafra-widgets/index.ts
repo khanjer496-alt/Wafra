@@ -11,8 +11,13 @@ import { requireOptionalNativeModule } from 'expo-modules-core';
  * are presentation, and a failed write must never affect the app.
  */
 type NativeWidgets = {
-  /** Android answers false when it could not store it; iOS answers nothing. */
-  setSnapshot(json: string): boolean | void;
+  /**
+   * Android answers false when it could not store it; iOS answers nothing. Current
+   * iOS binaries expose it as an async function (a Promise), so the App Group write
+   * and the WidgetKit reload never run on the JS thread; older binaries return the
+   * answer synchronously. Callers handle both.
+   */
+  setSnapshot(json: string): boolean | void | Promise<boolean | void>;
   clearSnapshot(): void;
   /** Android only, and absent from binaries built before it existed. */
   canPinWidgets?(): boolean;
@@ -29,8 +34,14 @@ const native = Platform.OS === 'web' ? null : requireOptionalNativeModule<Native
  * threw. iOS answers nothing and counts as stored. The sync uses the answer
  * to avoid skipping later writes of figures that never arrived.
  */
-export function setWidgetSnapshot(json: string): boolean {
-  try { return native?.setSnapshot(json) !== false; } catch { return false; /* presentation only */ }
+export function setWidgetSnapshot(json: string): boolean | Promise<boolean> {
+  try {
+    const answer = native?.setSnapshot(json);
+    if (answer && typeof (answer as Promise<boolean | void>).then === 'function') {
+      return (answer as Promise<boolean | void>).then((stored) => stored !== false, () => false);
+    }
+    return answer !== false;
+  } catch { return false; /* presentation only */ }
 }
 
 let clears = 0;
