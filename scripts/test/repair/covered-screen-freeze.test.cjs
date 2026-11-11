@@ -22,10 +22,11 @@ const freezeModule = (overrides = {}) => load(path.join(root, 'src/components/fr
   react: React, 'react/jsx-runtime': jsxRuntime, '@/lib/covered-screen-freeze': policy(), ...overrides,
 });
 
-test('one platform decision: Android on, iOS and web off; exemptions are pinned', () => {
+test('one platform decision: native stacks on (Android and iOS), web off; exemptions are pinned', () => {
   const p = policy();
   assert.equal(p.freezeCoveredScreens('android'), true);
-  assert.equal(p.freezeCoveredScreens('ios'), false, 'iOS stays OFF until App QA Lead\'s device pass');
+  assert.equal(p.freezeCoveredScreens('ios'), true,
+    'iOS root stack freezes covered pushed screens too (nothing calls enableFreeze, so it was never on)');
   assert.equal(p.freezeCoveredScreens('web'), false);
   assert.equal(p.freezeCoveredScreens('windows'), false);
   assert.deepEqual([...p.FREEZE_EXEMPT_ROUTES], ['(tabs)', 'import-sms', 'ios-setup', 'teach-bank-format']);
@@ -132,7 +133,8 @@ test('tabs layout: only <Tabs> sits inside the freeze; CaptureOwner is its sibli
   assert.equal(frozen.props.enabled, true);
   assert.equal(frozen.props.children.type, Tabs);
   assert.equal(tabsLayout('android', true).tree.props.children[1].props.covered, false);
-  assert.equal(tabsLayout('ios', false).tree.props.children[1].props.enabled, false, 'iOS OFF');
+  // app-tabs-layout.tsx is not in the iOS bundle (Metro picks app-tabs-layout.ios.tsx); there the
+  // tab content is paused per tab by ios-tab-gate.tsx instead.
   assert.equal(tabsLayout('web', false).tree.props.children[1].props.enabled, false, 'web OFF');
 });
 
