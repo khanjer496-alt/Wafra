@@ -31,5 +31,17 @@ module.exports = ({ config }) => {
   if (typeof buildNumber !== 'string' || !/^[0-9]+(?:\.[0-9]+){0,2}$/.test(buildNumber)) {
     throw new Error('An explicit valid iOS host build number is required');
   }
-  return { ...withNativePerformance, ios: { ...withNativePerformance.ios, buildNumber } };
+  const releaseMetadataPlugin = './modules/wafra-release-metadata/plugin';
+  const {isDevelopmentBuild} = require(releaseMetadataPlugin);
+  const nativePlugins = (withNativePerformance.plugins || []).filter(plugin =>
+    (Array.isArray(plugin) ? plugin[0] : plugin) !== releaseMetadataPlugin);
+  // Register the normally automatic launcher before our final metadata mod;
+  // its run-once history prevents the later legacy pass from reapplying it.
+  if (!nativePlugins.some(plugin => (Array.isArray(plugin) ? plugin[0] : plugin) === 'expo-dev-client')) {
+    nativePlugins.push('expo-dev-client');
+  }
+  nativePlugins.push([releaseMetadataPlugin, {
+    enabled: !isDevelopmentBuild(process.env.EAS_BUILD_PROFILE, process.env.NODE_ENV),
+  }]);
+  return { ...withNativePerformance, plugins: nativePlugins, ios: { ...withNativePerformance.ios, buildNumber } };
 };

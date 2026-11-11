@@ -12,6 +12,12 @@ VERSION_KEYS = ("CFBundleVersion", "CFBundleShortVersionString")
 def read_versions(product):
     with (product / "Info.plist").open("rb") as f:
         info = plistlib.load(f)
+    services = info.get("NSBonjourServices")
+    if isinstance(services, list) and "_expo._tcp" in services:
+        raise ValueError(f"{product.name}: Release product contains Expo discovery service _expo._tcp")
+    description = info.get("NSLocalNetworkUsageDescription")
+    if isinstance(description, str) and "Expo Dev Launcher" in description:
+        raise ValueError(f"{product.name}: Release product contains Expo Dev Launcher local-network wording")
     versions = {}
     for key in VERSION_KEYS:
         value = info.get(key)
