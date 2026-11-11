@@ -2266,6 +2266,14 @@ const EXPECTED_FUTURE_MOVEMENT_RE =
 const REQUEST_RECEIVED_RE =
   /\b(?:(?:payment|transfer|purchase|redemption|refund)\s+request|request\s+for\s+(?:a\s+)?refund)\b(?:[^.]|\.\d){0,64}\b(?:received|submitted|created|awaiting|pending|registered|being\s+processed|in\s+progress|under\s+(?:review|process(?:ing)?))\b|\b(?:received|submitted|created)\b(?:[^.]|\.\d){0,48}\b(?:(?:payment|transfer|purchase|refund)\s+request|request\s+for\s+(?:a\s+)?refund)\b|تم\s+استلام\s+طلب\s+(?:سداد|دفع|تحويل)/iu;
 const REQUEST_RECEIVED_BLANK_RE = new RegExp(REQUEST_RECEIVED_RE.source, 'giu');
+// A request acknowledgement beside a COMPLETED credit ("Your refund request has been received.
+// Refund of AED 100.00 from <merchant> has been credited to your card"). REFUND_RE's 40-character
+// window cannot span that clause once the merchant is long or contains a dot, and the acknowledgement
+// would then win and refuse a credit that already happened. This needs a completed auxiliary and an
+// owned destination, so a future, pending, requested or under-process refund is still not settled.
+// The clause continues only across a decimal point or a domain dot (a dot followed by a non-space).
+const REFUND_COMPLETED_CREDIT_RE =
+  /\brefund(?:ed)?\b(?:[^.\n]|\.(?=\S)){0,300}?\b(?:has|have|had|was|were)\s+(?:been\s+)?(?:successfully\s+)?(?:credited|refunded|posted)\s+(?:back\s+)?(?:to|into|onto)\s+(?:your|the)\b/i;
 const MANDATE_LIFECYCLE_RE =
   /\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b(?:[^.]|\.\d){0,96}\b(?:will\s+(?:start|begin|commence|activate)|has\s+been\s+(?:created|registered|set\s*up|activated)|is\s+(?:now\s+)?active)\b|\b(?:created|registered|set\s*up|activated)\b(?:[^.]|\.\d){0,64}\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b|تم\s+(?:تسجيل|انشاء|تفعيل)[^\n]{0,64}(?:امر\s+)?(?:خصم\s+(?:تلقايي|مباشر)|تعليمات\s+مستديمه)/iu;
 const CONDITIONAL_PAYOUT_RE =
@@ -5183,8 +5191,9 @@ function nonPostingReasonInBody(
   const requestReceived = REQUEST_RECEIVED_RE.test(body);
   // A request being processed cannot prove its own refund settled. A separate
   // current credit still can; remove request and future clauses before looking.
-  const settledRefund = REFUND_RE.test(body) && (!requestReceived ||
-    REFUND_RE.test(blank(blank(body, REQUEST_RECEIVED_BLANK_RE), FUTURE_CLAUSE_RE)));
+  const withoutRequest = requestReceived ? blank(blank(body, REQUEST_RECEIVED_BLANK_RE), FUTURE_CLAUSE_RE) : body;
+  const settledRefund = (REFUND_RE.test(body) && (!requestReceived || REFUND_RE.test(withoutRequest))) ||
+    (requestReceived && REFUND_COMPLETED_CREDIT_RE.test(withoutRequest));
   if (VERIFICATION_HOLD_DESCRIPTOR_RE.test(body)) return 'preauthorisation';
   if (
     !settledRefund &&
