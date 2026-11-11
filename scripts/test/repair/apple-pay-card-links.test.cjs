@@ -164,7 +164,8 @@ function drainHarness({ initial, sms = [], wallet = [], plan: planner = buildImp
       calls.push(['stage', items.map(item => item.id)]);
       const batch = tray.admitPreparedReviewAlerts(current.reviewTray, items, Date.now());
       current.reviewTray = batch.state;
-      return { admitted: batch.outcomes.filter(outcome => outcome === 'admitted').length, qualificationIds: [], durable: Promise.resolve() };
+      return { admitted: batch.outcomes.filter(outcome => outcome === 'admitted').length, qualificationIds: [], durable: Promise.resolve(),
+        retention: () => tray.reviewRetentionReceipts(current.reviewTray, items, Date.now()) };
     },
   };
   const postLinkedApplePay = items => {

@@ -21,7 +21,7 @@ const local = load('@/lib/local-message-record');
 const { createLaunchAlertSession } = load('@/lib/launch-alert-parser');
 const { createIosLocalCaptureCoordinator } = load('@/lib/ios-local-capture');
 const { materializeImportBatch, applyMaterializedImportBatch } = load('@/lib/ledger-import');
-const { admitPreparedReviewAlerts, emptyAlertReviewTray } = load('@/lib/alert-review-tray');
+const { admitPreparedReviewAlerts, emptyAlertReviewTray, reviewRetentionReceipts } = load('@/lib/alert-review-tray');
 markets.setActiveMarket('AE');
 markets.setLedgerCurrency('AED', 2);
 load('@/lib/country').setActiveCountry('AE');
@@ -185,7 +185,7 @@ async function drainAll(records) {
     stageReviewAlerts: (items) => {
       const batch = admitPreparedReviewAlerts(emptyAlertReviewTray(), items, NOW);
       return { admitted: batch.outcomes.filter((o) => o === 'admitted').length, qualificationIds: [],
-        durable: Promise.resolve() };
+        durable: Promise.resolve(), retention: () => reviewRetentionReceipts(batch.state, items, NOW) };
     },
   };
   const coordinator = createIosLocalCaptureCoordinator({ native, ledger, now: () => NOW,
@@ -347,8 +347,9 @@ function liveCoordinator() {
         state = applyMaterializedImportBatch(state, m);
         return { ids: m.transactions.map((t) => t.id), qualificationIds: [], durable: Promise.resolve() };
       },
-      stageReviewAlerts: (items) => ({ admitted: admitPreparedReviewAlerts(emptyAlertReviewTray(), items, NOW)
-        .outcomes.filter((o) => o === 'admitted').length, qualificationIds: [], durable: Promise.resolve() }),
+      stageReviewAlerts: (items) => { const batch = admitPreparedReviewAlerts(emptyAlertReviewTray(), items, NOW);
+        return { admitted: batch.outcomes.filter((o) => o === 'admitted').length, qualificationIds: [], durable: Promise.resolve(),
+          retention: () => reviewRetentionReceipts(batch.state, items, NOW) }; },
     },
     now: () => NOW,
     retireShortcutCapture: async () => 'complete',

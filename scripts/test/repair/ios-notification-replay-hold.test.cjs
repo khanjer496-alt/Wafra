@@ -100,7 +100,7 @@ function harness({ excluding }) {
         const result = tray.admitPreparedReviewAlert(state.reviewTray, item, now);
         state.reviewTray = result.state; admitted += result.outcome === 'admitted' ? 1 : 0;
       }
-      return { admitted, durable: Promise.resolve() };
+      return { admitted, durable: Promise.resolve(), retention: () => tray.reviewRetentionReceipts(state.reviewTray, items, now) };
     },
     importBatch: batch => {
       const materialized = materializeImportBatch(batch, state, prefix => prefix + (++sequence));

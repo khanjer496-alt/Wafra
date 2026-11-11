@@ -1928,6 +1928,8 @@ struct WafraBankSenderRegistryTests {
             admitted: admittedItems.length,
             qualificationIds: qualifications.map((candidate) => candidate.id),
             durable: Promise.resolve(),
+            retention: () => requireBuild('@/lib/alert-review-tray')
+              .reviewRetentionReceipts(state.reviewTray, items, Date.now()),
           };
         },
         importBatch(batch, qualificationMappings = []) {
@@ -2304,7 +2306,8 @@ struct WafraBankSenderRegistryTests {
             ledger.getState().localCaptureQualifications, qualifications, Date.now()) });
         return { admitted: admittedIds.size,
           qualificationIds: qualifications.map((candidate) => candidate.id),
-          durable: Promise.resolve() };
+          durable: Promise.resolve(),
+          retention: () => trayModule.reviewRetentionReceipts(ledger.getState().reviewTray, items, Date.now()) };
       };
       return ledger;
     };
@@ -2668,6 +2671,8 @@ struct WafraBankSenderRegistryTests {
       const lateState = seeded.getState();
       lateLedger.stageReviewAlerts = (items, qualifications = []) => ({
         admitted: items.length,
+        retention: () => requireBuild('@/lib/alert-review-tray')
+          .reviewRetentionReceipts(lateLedger.getState().reviewTray, items, Date.now()),
         qualificationIds: qualifications.map((candidate) => candidate.qualification.id),
         durable: Promise.resolve().then(() => {
           lateLedger.setState({

@@ -73,7 +73,8 @@ function iosHarness({ retain = true } = {}) {
         const result = tray.admitPreparedReviewAlert(state.reviewTray, item, Date.now());
         state.reviewTray = result.state; if (result.outcome === 'admitted') admitted += 1;
       }
-      return { admitted, qualificationIds: [], durable: new Promise(resolve => setTimeout(() => { calls.push(['staged']); resolve(); }, 5)) };
+      return { admitted, qualificationIds: [], durable: new Promise(resolve => setTimeout(() => { calls.push(['staged']); resolve(); }, 5)),
+        retention: () => tray.reviewRetentionReceipts(state.reviewTray, items, Date.now()) };
     },
   }, retireShortcutCapture: async () => 'complete' });
   return { calls, coordinator, state };

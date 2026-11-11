@@ -1104,6 +1104,14 @@ export default function ImportSmsScreen() {
     }
   };
 
+  // Fail closed: an iOS History session is staged with receipts, so a missing
+  // barrier must stop the discard instead of silently skipping the check.
+  const requireHistoryRetentionBarrier = async (loaded: LoadedIosHistorySession | null) => {
+    const barrier = loaded?.verifyReviewRetention;
+    if (!barrier) throw new Error('Review retention barrier is unavailable');
+    await barrier();
+  };
+
   const applyPlan = async () => {
     if (!plan || applying || (!history && historyOperationLocked.current)) return;
     if (!history) historyOperationLocked.current = true;
@@ -1174,7 +1182,7 @@ export default function ImportSmsScreen() {
           await nearMatchSettle();
         },
         discard: async () => {
-          await historyResult?.verifyReviewRetention?.();
+          await requireHistoryRetentionBarrier(historyResult);
           await discardHistorySession();
         },
       });
@@ -1297,7 +1305,7 @@ export default function ImportSmsScreen() {
       const result = await historyOperationController.finalize({
         save: ensureDurable,
         discard: async () => {
-          await historyResult?.verifyReviewRetention?.();
+          await requireHistoryRetentionBarrier(historyResult);
           await discardHistorySession();
         },
       });

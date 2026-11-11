@@ -283,7 +283,7 @@ test('actual coordinator handles both mixed page orders and failed ACK after use
         let admitted = 0;
         for (const item of items) { const result = tray.admitPreparedReviewAlert(state.reviewTray, item, now.getTime());
           state.reviewTray = result.state; admitted += result.outcome === 'admitted' ? 1 : 0; }
-        return { admitted, durable: Promise.resolve() };
+        return { admitted, durable: Promise.resolve(), retention: () => tray.reviewRetentionReceipts(state.reviewTray, items, now.getTime()) };
       },
       importBatch: batch => { const materialized = materializeImportBatch(batch, state, prefix => prefix + (++sequence));
         state = applyMaterializedImportBatch(state, materialized);
