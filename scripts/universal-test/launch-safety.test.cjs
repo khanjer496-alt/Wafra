@@ -41,6 +41,13 @@ function history(row, sender = row.sender) {
     receivedAt: new Date(observedAt).toISOString(), ...(sender ? { sender } : {}) };
   return parseHistoricalMessageRecords([JSON.stringify(record)], {}, new Date(observedAt), new Set(), reader).parsed;
 }
+// The whole History outcome: rows booked, items waiting in Review, declines.
+function historyOutcome(row, sender = row.sender) {
+  const reader = session(row.country);
+  const record = { v: 1, id: createHash('sha256').update(row.body + sender).digest('hex'), text: row.body,
+    receivedAt: new Date(observedAt).toISOString(), ...(sender ? { sender } : {}) };
+  return parseHistoricalMessageRecords([JSON.stringify(record)], {}, new Date(observedAt), new Set(), reader);
+}
 const legacy = (country, body, sender) => {
   session(country);
   return withMarketPackForParsing(country, () => parseSms(body, {}, { sender, observedAt, fxLookup: () => null }));
@@ -78,6 +85,100 @@ for (const row of posts) test(`posts: ${row.id}`, () => {
     assert.equal(parsed.type, row.type, path);
     assert.equal(parsed.amountFils, row.minor, path);
   }
+});
+
+// ── Wave 3: wordings the first guard dropped although money moved ───────────
+// The wave 2 review (finding 1) found completed spends the guard refused: a
+// fraud question with no full stop before it, a closing "Was this you?", a
+// transfer request that "is processed", and a spend "within your daily limit".
+// All bodies are synthetic. Each shape is a must-post control on Android and
+// both iPhone History paths, on one line and on two. `senderless: false` marks
+// a body the senderless History path never posts for a reason that is not a
+// guard (no bank context without a sender); it must then wait in Review.
+const guardShapes = [
+  { id: 'Didn\'t make this transaction? footer, no full stop', country: 'AE', sender: 'EmiratesNBD', type: 'expense', minor: 5000,
+    one: 'AED 50.00 spent on your card ending 1234 at TEST MART on 01/11/2026 Didn\'t make this transaction? Call 600540000',
+    two: 'AED 50.00 spent on your card ending 1234 at TEST MART on 01/11/2026\nDidn\'t make this transaction? Call 600540000' },
+  { id: 'Didn\'t make this purchase? footer, no full stop', country: 'AE', sender: 'EmiratesNBD', type: 'expense', minor: 5000,
+    one: 'AED 50.00 spent on your card ending 1234 at TEST MART on 01/11/2026 Didn\'t make this purchase? Call 600540000',
+    two: 'AED 50.00 spent on your card ending 1234 at TEST MART on 01/11/2026\nDidn\'t make this purchase? Call 600540000' },
+  { id: 'Didn\'t do this? footer, no full stop', country: 'AE', sender: 'EmiratesNBD', type: 'expense', minor: 5000,
+    one: 'AED 50.00 spent on your card ending 1234 at TEST MART on 01/11/2026 Didn\'t do this? Call 600540000',
+    two: 'AED 50.00 spent on your card ending 1234 at TEST MART on 01/11/2026\nDidn\'t do this? Call 600540000' },
+  { id: 'Unauthorised? footer, no full stop', country: 'AE', sender: 'Mashreq', type: 'expense', minor: 5000,
+    one: 'AED 50.00 spent on Mashreq card ending 1234 at TEST MART on 01-NOV-2026 Unauthorised? Call 04 4244444',
+    two: 'AED 50.00 spent on Mashreq card ending 1234 at TEST MART on 01-NOV-2026\nUnauthorised? Call 04 4244444' },
+  { id: 'Unauthorized? footer (US spelling)', country: 'AE', sender: 'Mashreq', type: 'expense', minor: 5000,
+    one: 'AED 50.00 spent on Mashreq card ending 1234 at TEST MART on 01-NOV-2026 Unauthorized? Call 04 4244444',
+    two: 'AED 50.00 spent on Mashreq card ending 1234 at TEST MART on 01-NOV-2026\nUnauthorized? Call 04 4244444' },
+  { id: 'a closing "Was this you?" line with no reply instruction', country: 'AE', sender: 'EmiratesNBD', type: 'expense', minor: 5000, senderless: false,
+    one: 'Purchase of AED 50.00 with Debit Card ending 1234 at TEST MART on 01/11/2026. Was this you?',
+    two: 'Purchase of AED 50.00 with Debit Card ending 1234 at TEST MART on 01/11/2026.\nWas this you?' },
+  { id: 'a closing "Was this you?" line under an available balance', country: 'AE', sender: 'EmiratesNBD', type: 'expense', minor: 5000, senderless: false,
+    one: 'Purchase of AED 50.00 with Debit Card ending 1234 at TEST MART on 01/11/2026. Avl Balance AED 1,000.00 Was this you?',
+    two: 'Purchase of AED 50.00 with Debit Card ending 1234 at TEST MART on 01/11/2026. Avl Balance AED 1,000.00\nWas this you?' },
+  // The two-line form of a prose transfer is not read by the amount grammar on
+  // Android, with or without this guard (same at 429d32f0): see the known-gap
+  // test below. The one-line form is the control.
+  { id: 'a transfer request that "is processed"', country: 'AE', sender: 'ADCB', type: 'expense', minor: 50000,
+    one: 'Your transfer request of AED 500.00 to TEST PERSON is processed.', two: null },
+  { id: 'a spend "within your daily limit"', country: 'AE', sender: 'EmiratesNBD', type: 'expense', minor: 5000,
+    one: 'Purchase of AED 50.00 at TEST MART on card ending 1234 within your daily limit',
+    two: 'Purchase of AED 50.00 at TEST MART on card ending 1234\nwithin your daily limit' },
+  { id: 'a spend "within your monthly spending limit"', country: 'AE', sender: 'EmiratesNBD', type: 'expense', minor: 5000,
+    one: 'Purchase of AED 50.00 at TEST MART on card ending 1234 within your monthly spending limit',
+    two: 'Purchase of AED 50.00 at TEST MART on card ending 1234\nwithin your monthly spending limit' },
+];
+for (const shape of guardShapes) for (const [lines, body] of [['1 line', shape.one], ['2 lines', shape.two]].filter(([, text]) => text)) {
+  test(`wave 3 posts (${lines}): ${shape.id}`, () => {
+    const row = { country: shape.country, sender: shape.sender, body };
+    const paths = [['android', android(row)], ['history with sender', history(row)[0]]];
+    if (shape.senderless !== false) paths.push(['history senderless', history(row, '')[0]]);
+    for (const [path, parsed] of paths) {
+      assert.ok(parsed, `${path}: the completed alert is booked`);
+      assert.equal(parsed.kind, 'transaction', path);
+      assert.equal(parsed.type, shape.type, path);
+      assert.equal(parsed.amountFils, shape.minor, path);
+    }
+    assert.equal(moneyNoticeKind(body), null, 'no notice guard names it');
+    assert.equal(nonPostingReason(body), null, 'no decline guard names it');
+    if (shape.senderless === false) {
+      // No sender, no bank context: not a guard refusal, and never lost.
+      const out = historyOutcome(row, '');
+      assert.equal(out.parsed.length, 0, 'senderless History does not auto-book without bank context');
+      assert.equal(out.reviewCandidates.length, 1, 'it waits in Review instead');
+    }
+  });
+}
+
+// KNOWN GAP (visible, not silent): the 2-line prose form of the "is processed"
+// transfer is read by no path, at rc1 and at 429d32f0 alike; the amount grammar
+// wants one clause. It is a grammar limit, not a guard refusal. node:test
+// reports it as a TODO until a parser change books it.
+test('wave 3 known gap: a 2-line prose transfer request that "is processed" is not booked on Android', { todo: 'multi-line prose transfers are unread at 429d32f0 and rc1' }, () => {
+  const row = { country: 'AE', sender: 'ADCB', body: 'Your transfer request of AED 500.00\nto TEST PERSON is processed.' };
+  assert.ok(android(row), 'Android books the completed transfer');
+});
+
+// The same wordings with the refusal that IS right must still book nothing.
+const guardSiblingsNever = [
+  ['AE', 'EmiratesNBD', 'Your transfer request of AED 500.00 to TEST PERSON will be processed tomorrow.', 'request'],
+  ['AE', 'EmiratesNBD', 'Your transfer request of AED 500.00 to TEST PERSON is being processed.', 'not-yet'],
+  ['AE', 'EmiratesNBD', 'Your transfer request of AED 500.00 to TEST PERSON was not processed.', 'negated'],
+  ['AE', 'EmiratesNBD', 'ATM withdrawal of AED 500.00 limit reached for today', 'limit'],
+  ['AE', 'EmiratesNBD', 'Was this you? Purchase of AED 50.00 at TEST MART on card ending 1234', 'question'],
+  ['AE', 'EmiratesNBD', 'Purchase of AED 50.00 at TEST MART on card ending 1234. Was this you? Reply YES or NO', 'question'],
+  ['AE', 'EmiratesNBD', 'Purchase of AED 50.00 at TEST MART on card ending 1234\nWas this you? Reply Y', 'status'],
+  ['AE', 'EmiratesNBD', 'Did you make a AED 50.00 purchase at TEST MART? Reply YES or NO', 'question'],
+  ['AE', 'EmiratesNBD', 'Purchase of AED 50.00 at TEST MART on card ending 1234 - Declined', 'status'],
+  ['AE', 'EmiratesNBD', 'Purchase of AED 50.00 at TEST MART on card ending 1234\nDid you make this transaction?', 'question'],
+];
+for (const [country, sender, body, kind] of guardSiblingsNever) test(`wave 3 still never posted: ${body.slice(0, 60).replace(/\n/g, ' / ')}`, () => {
+  const row = { country, sender, body };
+  assert.equal(android(row), null, 'Android seam books nothing');
+  assert.equal(history(row).length, 0, 'History (with sender) books nothing');
+  assert.equal(history(row, '').length, 0, 'senderless History books nothing');
+  if (kind) assert.equal(moneyNoticeKind(body), kind);
 });
 
 // ── Notices that quote money but never moved it ──────────────────────────────
@@ -192,6 +293,20 @@ const round4Never = [
   // A fee refund beside a withdrawal word: direction unproven.
   ['SA', 'SNB-AlAhli', 'تم إرجاع مبلغ 236.21 ر.س في حسابك عن رسوم سحب نقدي'],
 ];
+// KNOWN GAPS (visible, not silent): two compact "Refund |" bars that the #163
+// port wanted refused are booked as an expense at rc1 AND at 429d32f0 (not a
+// wave 2 regression). Until the parser reads them they are TODO tests, so each
+// run still prints them.
+const refundBarGaps = round4Never.filter(row => row[2].startsWith('Refund |'));
+for (const [country, sender, body] of refundBarGaps) test(`round 4 known gap (booked today, should wait in Review): ${body.slice(0, 60)}`, { todo: 'unchanged from 429d32f0; #163 port did not cover refund bars' }, () => {
+  const row = { country, sender, body };
+  assert.equal(android(row), null, 'Android seam books nothing');
+  assert.equal(history(row).length, 0, 'History (with sender) books nothing');
+  assert.equal(history(row, '').length, 0, 'senderless History books nothing');
+});
+test('round 4 known gaps: the Refund | bars are still exactly the two listed', () => {
+  assert.equal(refundBarGaps.length, 2);
+});
 for (const [country, sender, body] of round4Never.filter(row => !row[2].startsWith('Refund |'))) test(`round 4 never posted (${country}): ${body.slice(0, 60)}`, () => {
   const row = { country, sender, body };
   assert.equal(android(row), null, 'Android seam books nothing');
@@ -207,6 +322,40 @@ for (const body of [
   assert.equal(android(row), null);
   assert.equal(history(row).length, 0);
   assert.equal(history(row, '').length, 0);
+});
+
+// Option (b): a money-bearing alert the guards refuse is never posted and never
+// silently lost. From a launch-bank sender it waits in Review (Android inbox
+// capture and both iPhone paths share inspectSourceFreeRefusedAlert); a real
+// decline is recorded as declined. Only wording that moved no money (negated,
+// balance-only, chat, offers) is set aside.
+const { inspectSourceFreeRefusedAlert } = load('@/lib/auto-import');
+const reviewVisible = [
+  ['AE', 'EmiratesNBD', 'Did you make a AED168.06 purchase at SAMPLE SHOP? Reply YES or NO.'],
+  ['AE', 'EmiratesNBD', 'Purchase of AED 50.00 at TEST MART on card ending 1234 - was this you? Reply Y or N'],
+  ['AE', 'EmiratesNBD', 'Was this you? AED 168.06 purchase at SAMPLE SHOP on card ending 1234'],
+  ['AE', 'EmiratesNBD', 'Purchase of AED 50.00 at TEST MART on card ending 1234\nWas this you? Reply Y'],
+  ['AE', 'EmiratesNBD', 'Purchase of AED 50.00 with Debit Card ending 1234 at THE CANCELLED. Avl Balance AED 900.00'],
+  ['AE', 'ADCB', 'Your transfer request of AED 500.00 to TEST PERSON will be processed tomorrow.'],
+  ['AE', 'ADCB', 'Payment request: SAMPLE PERSON is asking you to pay 206.00 AED.'],
+  ['AE', 'EmiratesNBD', 'Your Debit Card ending 1234 has been used for AED 245.50 at SAMPLE MART, will be approved shortly.'],
+  ['SA', 'AlRajhiBank', 'شراء عبر نقاط البيع\nبطاقة: **1234\nلدى: SAMPLE SHOP\nمبلغ: 120.00 SAR\nهل قمت بهذه العملية؟'],
+  ['SA', 'AlRajhiBank', 'هل قمت بتحويل 500.00 ر.س إلى SAMPLE PERSON؟ للتأكيد أرسل 1 وللإلغاء أرسل 2.'],
+];
+for (const [country, sender, body] of reviewVisible) test(`refused money waits in Review, not posted, not lost: ${body.slice(0, 55).replace(/\n/g, ' / ')}`, () => {
+  const row = { country, sender, body };
+  assert.equal(android(row), null, 'not posted on Android');
+  assert.equal(history(row).length, 0, 'not posted from History');
+  for (const channel of ['inbox', 'push']) {
+    const decision = inspectSourceFreeRefusedAlert({ source: body, sender, observedAt, channel, session: session(country) });
+    assert.equal(decision.kind, 'review', `${channel}: waits in Review`);
+  }
+  assert.equal(historyOutcome(row).reviewCandidates.length, 1, 'History queues it for Review');
+});
+test('a refused trailing decline is recorded as declined, not reviewed as spending', () => {
+  const row = { country: 'AE', sender: 'EmiratesNBD', body: 'Purchase of AED 50.00 at TEST MART on card ending 1234 - Declined' };
+  assert.equal(android(row), null);
+  assert.equal(inspectSourceFreeRefusedAlert({ source: row.body, sender: row.sender, observedAt, channel: 'inbox', session: session('AE') }).kind, 'declined');
 });
 
 test('a completed UPI debit keeps the abbreviated Not u fraud footer', () => {

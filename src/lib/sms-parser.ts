@@ -639,8 +639,20 @@ export interface ParsedCard {
  * direction cannot be overwritten by semantic fallback. Destination-only own
  * transfers and unproved card receipts require Review. No full-history reparse
  * is requested; the historical-repair version remains 50.
+ *
+ * 71: launch-safety guards no longer refuse completed spends (wave 3). A fraud
+ * question glued to a completed alert without a full stop ("…Didn't make this
+ * transaction?", "Didn't do this?", "Unauthorised?"), a closing "Was this
+ * you?" line with no reply instruction, a transfer request that "is
+ * processed", and a spend "within your (daily) limit" post again. A payment
+ * stated as not paid ("…was not paid") still books nothing, and an alert the
+ * guards do refuse waits in Review. Future capture and the bounded recent
+ * re-read only (PARSER_RECOVERY_WINDOW_MS): the re-read adds only messages with
+ * no outcome yet, matches stored rows by source identity, and never removes a
+ * row that is not a proven decline, so it cannot duplicate or delete existing
+ * rows. PARSER_BACKFILL_VERSION stays 50.
  */
-export const PARSER_VERSION = 70;
+export const PARSER_VERSION = 71;
 /**
  * Historical-repair contract for already-saved data.
  *
@@ -1641,7 +1653,7 @@ const CONTACT_FOOTER_RE =
 // same footer in two words. Unblanked, "unauthorised" read as a refusal and a
 // completed purchase that carried it was deleted as declined.
 const FRAUD_FOOTER_RE =
-  /\bif\s+(?:this|that|it|the\s+(?:above\s+)?(?:transaction|purchase|payment))\b[^.\n]{0,90}|\bif\s+you\s+(?:have\s*n[o']t|did\s*n[o']t|do\s*n[o']t|didn'?t|haven'?t|don'?t)\b[^.\n]{0,90}|\b(?:to\s+report|report|reporting)\s+(?:an?\s+|any\s+)?unauthoris\w*[^.\n]{0,60}|\b(?:to\s+report|report|reporting)\s+(?:an?\s+|any\s+)?unauthoriz\w*[^.\n]{0,60}|\bunauthoris\w*\s+(?:use|transactions?|access|activity)\b[^.\n]{0,40}|\bunauthoriz\w*\s+(?:use|transactions?|access|activity)\b[^.\n]{0,40}|\bin\s+case\s+of\s+(?:any\s+)?unauthoris\w*[^.\n]{0,60}|\bnot\s+(?:done|made|initiated|authoris\w*|authoriz\w*)\s+by\s+you\b|\bif\s+(?:unauthoris\w*|unauthoriz\w*|not\s+(?:you|recogni[sz]ed|authoris\w*|authoriz\w*))\b[^.\n]{0,90}/gi;
+  /\bif\s+(?:this|that|it|the\s+(?:above\s+)?(?:transaction|purchase|payment))\b[^.\n]{0,90}|\bif\s+you\s+(?:have\s*n[o']t|did\s*n[o']t|do\s*n[o']t|didn'?t|haven'?t|don'?t)\b[^.\n]{0,90}|\b(?:to\s+report|report|reporting)\s+(?:an?\s+|any\s+)?unauthoris\w*[^.\n]{0,60}|\b(?:to\s+report|report|reporting)\s+(?:an?\s+|any\s+)?unauthoriz\w*[^.\n]{0,60}|\bunauthoris\w*\s+(?:use|transactions?|access|activity)\b[^.\n]{0,40}|\bunauthoriz\w*\s+(?:use|transactions?|access|activity)\b[^.\n]{0,40}|\bin\s+case\s+of\s+(?:any\s+)?unauthoris\w*[^.\n]{0,60}|\bunauthori[sz]ed\s*[?？](?=\s|$)|\bnot\s+(?:done|made|initiated|authoris\w*|authoriz\w*)\s+by\s+you\b|\bif\s+(?:unauthoris\w*|unauthoriz\w*|not\s+(?:you|recogni[sz]ed|authoris\w*|authoriz\w*))\b[^.\n]{0,90}/gi;
 /**
  * The refusal stated as something that happened TO the transaction.
  *
@@ -5545,13 +5557,16 @@ const NOTICE_SAME_LINE_CHALLENGE_RE =
 const NOTICE_CHALLENGE_LINE_RE = new RegExp(
   String.raw`^\W{0,4}(?:[^\s:][^:\n]{0,30}:\s*)?(?:was\s+this\s+(?:you|yours)|is\s+this\s+you|was\s+this\s+(?:transaction|purchase|payment)\s+(?:made\s+by\s+)?(?:you|yours))\s*[?？]` +
     `|^\\W{0,4}(?:[^\\s:][^:\\n]{0,30}:\\s*)?هل\\s+(?:هذه\\s+(?:عمليتك|العمليه\\s+لك)|قمت\\s+بهذه\\s+العمليه)\\s*[?？؟]` +
-    String.raw`|(?:^|\n)[ \t]*(?:was\s+this\s+(?:you|yours)|did\s+you\s+make\s+this\s+(?:transaction|purchase|payment))\s*[?？][ \t]*$` +
+    // A closing "Was this you?" with no reply instruction is the bank's fraud
+    // footer on a completed alert (wave 3: it must not refuse the posting). A
+    // closing "Did you make this transaction?" still asks and still refuses.
+    String.raw`|(?:^|\n)[ \t]*did\s+you\s+make\s+this\s+(?:transaction|purchase|payment)\s*[?？][ \t]*$` +
     `|(?:^|\\n)[ \\t]*هل\\s+(?:قمت|اجريت)\\s+بهذه\\s+العمليه\\s*[?？؟](?:[ \\t]*(?:ارسل|ارسال)\\s+(?:نعم|1)[^\\n]*)?(?:\\n[ \\t]*(?:رقم\\s+المرجع|ref)[^\\n]*)?[ \\t]*$`,
   'i',
 );
 /** The fraud footer phrase that may end a COMPLETED spend's clause before its "?" ("…, Not you? Call …"). */
 const NOTICE_FOOTER_QUESTION_TAIL_RE = new RegExp(
-  String.raw`(?:^|[\s,–-])(?:not\s+(?:you|u)|didn['’]t\s+make\s+(?:this|it)|wasn['’]t\s+(?:it|this)?\s*you|unrecogni[sz]ed|ليس\s+انت|لست\s+انت` +
+  String.raw`(?:^|[\s,–-])(?:not\s+(?:you|u)|didn['’]t\s+(?:make|do)\s+(?:this|it)(?:\s+(?:transaction|purchase|payment|transfer|one))?|wasn['’]t\s+(?:it|this)?\s*you|unrecogni[sz]ed|unauthori[sz]ed(?:\s+(?:transaction|purchase|payment|transfer|use))?|ليس\s+انت|لست\s+انت` +
     String.raw`|not\s+(?:done|made|authori[sz]ed|initiated)\s+by\s+you|not\s+recogni[sz]ed|(?:looks?\s+)?suspicious|don['’]t\s+recogni[sz]e\s+(?:this|it))\s*$`,
   'i',
 );
@@ -5576,7 +5591,7 @@ const NOTICE_REQUEST_HEAD_RE =
 /** A request that was then honoured is a completed movement, not a request. */
 const NOTICE_REQUEST_DONE_RE = new RegExp(
   String.raw`\b(?:was|were|has\s+been|have\s+been)\s+(?:successfully\s+)?(?:paid|sent|completed|accepted|approved|transferred|debited|deducted|charged|processed|executed)\b|\byou\s+(?:have\s+)?(?:paid|sent)\b` +
-    String.raw`|\b(?:is|was|has\s+been)\s+(?:now\s+)?(?:successfully\s+)?(?:completed|complete|successful|done)\b|\b(?:completed|executed|processed|paid|sent)\s+successfully\b` +
+    String.raw`|\b(?:is|was|has\s+been)\s+(?:now\s+)?(?:successfully\s+)?(?:completed|complete|successful|done)\b|\b(?:is|are)\s+(?:now\s+)?(?:successfully\s+)?(?:processed|executed)\b|\b(?:completed|executed|processed|paid|sent)\s+successfully\b` +
     `|(?<![${AR_LETTER}])و?تم\\s+(?:ال)?(?:تنفيذ|قبول|سداد|دفع|تحويل|خصم)(?![${AR_LETTER}])`,
   'i',
 );
@@ -5634,7 +5649,7 @@ const NOTICE_MOVEMENT_WORD_RE = new RegExp(
  */
 const NOTICE_STATUS_LINE_RE = new RegExp(
   String.raw`(?:\n|[.!][ \t]+)[ \t]*(?:PENDING|DECLINED|FAILED|CANCELL?ED|REJECTED|REVERSED|UNSUCCESSFUL|ON\s+HOLD|NOT\s+COMPLETED|PRE-AUTH)[ \t.!]*(?:[ \t][-–|][ \t][^\n]{1,30})?[^A-Za-z0-9؀-ۿ\n]{0,8}(?:\n[ \t]*[Xx*•·]{2,}\d{2,4}[ \t]*)?$|\n[ \t]*please\s+(?:verify|confirm)\s+this\s+(?:payment|transaction|purchase|transfer)\b[^\n]*$|\n[ \t]*status\s*:\s*(?:failed|declined|pending|rejected|cancell?ed)[ \t.!]*$|\n[ \t]*tap\s+to\s+accept\b` +
-    String.raw`|\n[ \t]*was\s+this\s+(?:you|yours)\s*[?？]\s*(?:reply\s+(?:with\s+)?["']?(?:yes|y)\b[^\n]*)?$` +
+    String.raw`|\n[ \t]*was\s+this\s+(?:you|yours)\s*[?？]\s*reply\s+(?:with\s+)?["']?(?:yes|y)\b[^\n]*$` +
     `|\\n[ \\t]*(?:مرفوضه|مرفوض|ملغاه|ملغي|معلقه|قيد\\s+(?:المعالجه|الانتظار)|(?:لم|ما)\\s+(?:تتم|يتم|تم)(?:\\s+(?:ال)?(?:عمليه|خصم))?(?:\\s+(?:ال)?مبلغ)?|غير\\s+ناجح(?:ه)?|فشلت?(?:\\s+(?:ال)?عمليه)?)[ \\t.!]*$` +
     `|\\n[ \\t]*هل\\s+(?:قمت|اجريت)\\s+بهذه\\s+العمليه\\s*[?？؟]\\s*(?:ارسل\\s+(?:نعم|1)[^\\n]*)?$`,
   'i',
@@ -5743,6 +5758,8 @@ const NOTICE_EXAMPLE_OF_RE =
   /\b(?:an?|the|our)\s+(?:sample|example)\s+of\s+(?:our|the|a|your)\s+(?:new\s+)?(?:alert|message|notification|sms)s?\b/i;
 const NOTICE_LIMIT_EN_RE =
   /\blimit\s+(?:reached|applies|exceeded|has\s+been\s+(?:reached|exceeded))\b|\b(?:daily|monthly|weekly|spending)\s+limit\b|\b(?:are|is)\s+available\s+with\b/i;
+/** "within your (daily) limit": inside the limit, not a limit notice. */
+const NOTICE_WITHIN_LIMIT_RE = /\bwithin\s+(?:your|the|ur)\s+(?:[\w-]+\s+){0,3}?limits?\b/gi;
 const NOTICE_UP_TO_LEAD_RE = new RegExp(
   String.raw`\bup\s+to\s*(?:${NOTICE_CURRENCY}\.?\s*)?$|(?<![${AR_LETTER}])حتي\s*(?:${NOTICE_CURRENCY}\.?\s*)?$`,
   'i',
@@ -5961,9 +5978,12 @@ function moneyNoticeKindInBody(text: string): MoneyNoticeKind | null {
   // A limit wording in the lead, or after the figure with no figure of its
   // own ("…, daily limit remaining AED 4,500.00" is a trailer, not this).
   const afterFigure = tail.slice(principal.figure.length);
-  const limitTail = NOTICE_MONEY_TEST_RE.test(afterFigure) ? '' : afterFigure;
+  // "…within your daily limit" says the spend sat inside the limit; it is not
+  // a limit notice (wave 3).
+  const outsideWithinLimit = (text: string): string => text.replace(NOTICE_WITHIN_LIMIT_RE, ' ');
+  const limitTail = NOTICE_MONEY_TEST_RE.test(afterFigure) ? '' : outsideWithinLimit(afterFigure);
   if (!NOTICE_DONE_VERB_RE.test(clause) &&
-    (NOTICE_LIMIT_EN_RE.test(lead) || NOTICE_LIMIT_EN_RE.test(limitTail) ||
+    (NOTICE_LIMIT_EN_RE.test(outsideWithinLimit(lead)) || NOTICE_LIMIT_EN_RE.test(limitTail) ||
       NOTICE_UP_TO_LEAD_RE.test(lead) && /\bavailable\b|حد/i.test(clause) ||
       /بلوغ\s+(?:ال)?حد|تجاوز\s+(?:ال)?حد/.test(limitTail))) return 'limit';
   if ((NOTICE_REQUEST_RE.test(clause) || NOTICE_REQUEST_HEAD_RE.test(body)) &&
