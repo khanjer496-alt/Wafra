@@ -20,7 +20,7 @@ const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 const policy = () => load(path.join(root, 'src/lib/covered-screen-freeze.ts'), {});
 
 const shell = { addListener: () => () => {}, name: 'tabs-shell-in-root-stack' };
-function gateModule({ platform = 'ios', focused = () => true, react = React, globals } = {}) {
+function gateModule({ platform = 'ios', focused = () => true, react = React, globals, selectedIndex = () => 1 } = {}) {
   const p = policy();
   const freeze = load(path.join(root, 'src/components/freeze-when-covered.tsx'), {
     react, 'react/jsx-runtime': jsxRuntime, '@/lib/covered-screen-freeze': p,
@@ -28,7 +28,8 @@ function gateModule({ platform = 'ios', focused = () => true, react = React, glo
   return load(path.join(root, 'src/components/ios-tab-gate.tsx'), {
     react, 'react/jsx-runtime': jsxRuntime,
     'react-native': { Platform: { OS: platform } },
-    '@react-navigation/native': { useIsFocused: () => focused(), useNavigation: () => ({ getParent: () => shell }) },
+    '@react-navigation/native': { useIsFocused: () => focused(), useNavigation: () => ({ getParent: () => shell }),
+      useRoute: () => ({ key: 'flow-key' }), useNavigationState: (select) => select({ index: selectedIndex(), routes: [{ key: 'home-key' }, { key: 'flow-key' }] }) },
     '@/components/freeze-when-covered': freeze,
     '@/lib/covered-screen-freeze': p,
   }, globals);
@@ -70,6 +71,14 @@ test('the gate times its freeze from the tab shell route in the root stack', () 
   const tree = Gated({});
   assert.equal(tree.props.focused, true);
   assert.equal(tree.props.transitions, shell, 'the tab\'s parent navigation, whose events time push and swipe-back');
+});
+
+test('the gate knows whether its tab is the selected one', () => {
+  const { Tab } = projectionTab();
+  const selectedHere = gateModule({ focused: () => false, selectedIndex: () => 1 }).withIosTabGate(Tab)({});
+  assert.equal(selectedHere.props.selected, true);
+  const elsewhere = gateModule({ focused: () => false, selectedIndex: () => 0 }).withIosTabGate(Tab)({});
+  assert.equal(elsewhere.props.selected, false);
 });
 
 test('a focused iOS tab renders its content normally', () => {

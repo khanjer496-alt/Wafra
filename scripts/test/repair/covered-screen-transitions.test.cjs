@@ -19,6 +19,9 @@ const load = require('./load-typescript.cjs');
 
 const root = path.resolve(__dirname, '../../..');
 const { act } = React;
+// Every renderer is unmounted after its test, so no freeze timer outlives it.
+const mounted = new Set();
+test.afterEach(() => { for (const r of mounted) act(() => { r.unmount(); }); mounted.clear(); });
 
 function freezeModule() {
   const policy = load(path.join(root, 'src/lib/covered-screen-freeze.ts'), {});
@@ -64,6 +67,7 @@ function harness({ delayMs = 10_000 } = {}) {
   const view = (covered) => React.createElement(FreezeWhenCovered,
     { covered, enabled: true, delayMs, transitions: source }, React.createElement(Projection));
   act(() => { renderer = TestRenderer.create(view(false)); });
+  mounted.add(renderer);
   const shown = () => {
     const nodes = renderer.root.findAll((node) => node.type === 'total');
     return nodes.length === 1 ? nodes[0].props.children : null;
@@ -142,5 +146,78 @@ test('listeners are removed on unmount and when disabled', () => {
   const h = harness();
   assert.equal(h.source.count(), 2);
   act(() => { h.renderer.unmount(); });
+  mounted.delete(h.renderer);
   assert.equal(h.source.count(), 0);
+});
+
+// ---------------------------------------------------------------------------
+// iOS tab gate with the real client renderer (Reviewer #191 Medium 3 and 2a).
+// ---------------------------------------------------------------------------
+function gateModule() {
+  const policy = load(path.join(root, 'src/lib/covered-screen-freeze.ts'), {});
+  const freeze = load(path.join(root, 'src/components/freeze-when-covered.tsx'), {
+    react: React, 'react/jsx-runtime': jsxRuntime, '@/lib/covered-screen-freeze': policy,
+  }, { setTimeout, clearTimeout });
+  return load(path.join(root, 'src/components/ios-tab-gate.tsx'), {
+    react: React, 'react/jsx-runtime': jsxRuntime,
+    'react-native': { Platform: { OS: 'ios' } },
+    '@react-navigation/native': {},
+    '@/components/freeze-when-covered': freeze,
+    '@/lib/covered-screen-freeze': policy,
+  }, { setTimeout, clearTimeout });
+}
+
+function twoTabs({ delayMs = 20 } = {}) {
+  const { TabFocusGate } = gateModule();
+  const shell = transitionSource();
+  const store = externalStore(1);
+  const renders = { home: 0, flow: 0 };
+  const tab = (name) => function Tab() {
+    React.useSyncExternalStore(store.subscribe, store.get);
+    renders[name] += 1;
+    return React.createElement('tab', { name });
+  };
+  const Home = tab('home'); const Flow = tab('flow');
+  // selected: which tab the shell shows; shellFocused: no pushed screen or sheet on top.
+  const view = ({ selected, shellFocused }) => React.createElement(React.Fragment, null,
+    React.createElement(TabFocusGate, { key: 'home', focused: shellFocused && selected === 'home', selected: selected === 'home',
+      shellFocused, transitions: shell, delayMs }, React.createElement(Home)),
+    React.createElement(TabFocusGate, { key: 'flow', focused: shellFocused && selected === 'flow', selected: selected === 'flow',
+      shellFocused, transitions: shell, delayMs }, React.createElement(Flow)));
+  let renderer;
+  act(() => { renderer = TestRenderer.create(view({ selected: 'flow', shellFocused: true })); });
+  mounted.add(renderer);
+  act(() => { renderer.update(view({ selected: 'home', shellFocused: true })); });   // Flow visited, then left
+  return { renderer, shell, store, renders, view };
+}
+const wait = (ms) => act(async () => { await new Promise((resolve) => setTimeout(resolve, ms)); });
+
+test('iOS: a swipe-back releases only the selected tab; hidden sibling tabs stay frozen', async () => {
+  const t = twoTabs();
+  await wait(60);                                                   // Flow freezes after the tab-switch fallback
+  act(() => { t.renderer.update(t.view({ selected: 'home', shellFocused: false })); }); // Settings pushed
+  act(() => { t.shell.emit('transitionStart', true); t.shell.emit('transitionEnd', true); });
+  act(() => { t.shell.emit('transitionStart', false); });        // swipe-back to the shell begins
+  const flowBefore = t.renders.flow; const homeBefore = t.renders.home;
+  for (let i = 2; i <= 11; i += 1) act(() => { t.store.set(i); });
+  assert.equal(t.renders.flow, flowBefore, 'the hidden Flow tab must not wake up on the swipe');
+  assert.ok(t.renders.home > homeBefore, 'the selected Home tab paints during the swipe');
+});
+
+test('iOS: no freeze from the timer while the whole shell is covered (page sheet sends no transitions)', async () => {
+  const t = twoTabs();
+  act(() => { t.renderer.update(t.view({ selected: 'home', shellFocused: false })); }); // add-transaction sheet
+  await wait(700);                                                  // past the default 600 ms fallback, no events
+  const homeBefore = t.renders.home;
+  act(() => { t.store.set(7); });
+  assert.equal(t.renders.home, homeBefore + 1, 'Home stays painted behind the page sheet');
+});
+
+test('iOS: with the shell covered by a push, the selected tab freezes when the push ends', () => {
+  const t = twoTabs({ delayMs: 10_000 });
+  act(() => { t.renderer.update(t.view({ selected: 'home', shellFocused: false })); });
+  act(() => { t.shell.emit('transitionStart', true); t.shell.emit('transitionEnd', true); });
+  const homeBefore = t.renders.home;
+  for (let i = 2; i <= 6; i += 1) act(() => { t.store.set(i); });
+  assert.equal(t.renders.home, homeBefore);
 });
