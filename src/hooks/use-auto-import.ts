@@ -47,7 +47,7 @@ import {
   subscribeIosCaptureStatusRefresh,
 } from '@/lib/capture';
 import { createCaptureExecutor, type CaptureLedgerAdapter } from '@/lib/capture-executor';
-import { installAndroidLiveCaptureLedger } from '@/lib/android-live-background';
+import { installAndroidLiveCaptureLedger } from '@/lib/android-live-background-api';
 import { syncIosNativeParserContext } from '@/lib/ios-native-parser-context';
 import {
   androidNotificationCaptureEnabled,

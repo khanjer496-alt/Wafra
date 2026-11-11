@@ -537,7 +537,7 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     '@/lib/fx-rates': require('./build/fx-rates'),
     '@/lib/state-storage': { migrateLegacyState: async () => null, stateStorage: {} },
     '@/lib/storage-diagnostics': { recordStorageFailure: () => ({ category: 'unknown' }) },
-    '@/lib/android-live-background': { waitForAndroidBackgroundCaptureIdle: async () => {} },
+    '@/lib/android-live-background-api': { waitForAndroidBackgroundCaptureIdle: async () => {} },
     '@/lib/trusted-bank-notification-packages': {
       bankNotificationAdmissionExpiresAt: () => Date.now() + 86_400_000,
     },
