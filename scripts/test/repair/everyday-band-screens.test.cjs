@@ -117,8 +117,12 @@ test('Add: green band with Expense/Income, the amount, the merchant; keypad and 
   const band = h.scaffold.props.bandContent;
   const tabs = walk(band).filter((node) => node.props?.accessibilityRole === 'tab');
   assert.deepEqual([...tabs.map((tab) => tab.props.accessibilityLabel)], ['Expense', 'Income']);
-  const display = walk(band).find((node) => node.type === 'KeypadAmountDisplay');
-  assert.equal(display.props.palette, h.deps['@/hooks/use-band'].useBand('flow'), 'the amount is the band\'s figure');
+  // 3ccd6bcd (keep manual amounts visible) moved the live amount from the band to
+  // the keypad section, beside its keys, so it stays on screen while keying; its own
+  // keypad tests (add-transaction-keypad.test.cjs) assert the same layout.
+  const entry = byId(h.scaffold.props.children, 'manual-amount-keypad');
+  assert.ok(entry, 'the amount and its keypad share one section on the sheet');
+  assert.ok(walk(entry).find((node) => node.type === 'KeypadAmountDisplay'), 'the amount is drawn beside the keypad');
   assert.ok(byId(band, 'add-merchant-field'), 'the merchant is typed on the band');
   assert.ok(byId(band, 'amount-mode-toggle'), 'the system keyboard stays one tap away');
   const keypad = walk(h.scaffold.props.children).find((node) => node.type === 'AmountKeypad');
@@ -126,5 +130,5 @@ test('Add: green band with Expense/Income, the amount, the merchant; keypad and 
   assert.equal(keypad.props.palette, h.deps['@/hooks/use-band'].useBand('flow'));
   assert.ok(byId(h.scaffold.props.children, 'add-detail-chips'));
   assert.equal(byId(h.scaffold.props.footer, 'add-save').props.accessibilityLabel, 'Save transaction');
-  assert.match(text(band), /Amount/);
+  assert.match(text(entry), /Amount/, 'the amount is labelled beside the keys');
 });
