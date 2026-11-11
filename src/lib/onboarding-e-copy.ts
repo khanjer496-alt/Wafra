@@ -141,7 +141,7 @@ const en = {
   continuePro: 'Continue with Pro',
   planYearly: 'Yearly',
   planWeekly: 'Weekly',
-  startFree: (days: number) => days === 1 ? 'Start the free day' : `Start the free ${days} days`,
+  startFree: (days: number) => `Start the ${days}-day free period`,
   continueFree: 'Continue without Pro',
   trialTimelineLabel: 'What happens during the free period',
 };
@@ -247,9 +247,7 @@ const ar: OnboardingECopy = {
   continuePro: 'المتابعة مع Pro',
   planYearly: 'سنوي',
   planWeekly: 'أسبوعي',
-  startFree: (days: number) => days === 1 ? 'ابدأ اليوم المجاني'
-    : days === 2 ? 'ابدأ اليومين المجانيين'
-      : `ابدأ ${arabicCount(days, { one: 'يوماً مجانياً', two: 'يومين مجانيين', few: 'أيام مجانية', many: 'يوماً مجانياً', hundreds: 'يوم مجاني' })}`,
+  startFree: (days: number) => `ابدأ الفترة المجانية: ${arabicCount(days, { one: 'يوم واحد', two: 'يومان', few: 'أيام', many: 'يوماً', hundreds: 'يوم' })}`,
   continueFree: 'المتابعة دون Pro',
   trialTimelineLabel: 'ما يحدث خلال الفترة المجانية',
 };
