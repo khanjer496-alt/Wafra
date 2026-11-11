@@ -16,8 +16,8 @@ on:
       session:
         description: Session id (used to correlate the run with the local CLI)
         required: true
-      gate_token:
-        description: Shared secret required to view the stream
+      recipient_public_key:
+        description: Base64 SPKI RSA public PEM (3072-4096 bits). Never a private key or session key.
         required: true
       minutes:
         description: How long to hold the stream open
@@ -308,10 +308,23 @@ jobs:
           curl -sS "http://127.0.0.1:$PREVIEW_PORT/healthz" || true
           exit 1
 
+      - name: Generate private session access key
+        env:
+          RECIPIENT_PUBLIC_KEY: ${{ inputs.recipient_public_key }}
+          NATIVE_SIM_SESSION: ${{ inputs.session }}
+        run: node .github/native-sim/session-key.cjs "$RUNNER_TEMP/native-sim-session-key.enc.json"
+
+      - name: Preserve encrypted session-key handoff
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-sim-key-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-sim-session-key.enc.json
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Start auth gate
         timeout-minutes: 5
         env:
-          NATIVE_SIM_GATE_TOKEN: ${{ inputs.gate_token }}
           # Empty disables the /agent-device route outright, so a session started
           # without --agent exposes no control surface beyond the stream.
           NATIVE_SIM_AGENT_PORT: ${{ inputs.agent_device == 'true' && '4310' || '' }}
@@ -333,8 +346,6 @@ jobs:
       - name: Open tunnel and publish URL
         timeout-minutes: 10
         id: tunnel
-        env:
-          GATE_TOKEN: ${{ inputs.gate_token }}
         run: |
           set -euo pipefail
           curl -fsSL -o cloudflared.tgz \
@@ -354,12 +365,11 @@ jobs:
           done
           [ -n "$TUNNEL" ] || { echo "cloudflared never reported a URL"; tail -50 cloudflared.log; exit 1; }
 
-          URL="$TUNNEL/?k=$GATE_TOKEN"
-          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "url=$TUNNEL" >> "$GITHUB_OUTPUT"
 
           # Commit statuses are world-readable on a public repo, so publish the
-          # bare tunnel URL only. The CLI generated the access key and appends it
-          # locally; putting it here would hand anyone a working link.
+          # bare tunnel URL only. The runner generated the key and encrypted it
+          # to the dispatch recipient; neither inputs nor outputs contain it.
 
           # A commit status is the one channel the local CLI can read live.
           gh api "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
@@ -368,14 +378,15 @@ jobs:
             -f "target_url=$TUNNEL" \
             -f "description=simulator live; app still building"
 
-          echo "::notice title=native-sim::$TUNNEL (append the access key the CLI printed)"
+          echo "::notice title=native-sim::$TUNNEL (access key is in the encrypted handoff artifact)"
           {
             echo "## 📱 native-sim"
             echo
             echo "Simulator live for ${{ inputs.minutes }} minutes at \`$TUNNEL\`."
             echo
-            echo "The access key is deliberately not published here — use the full"
-            echo "URL the CLI printed. Anyone holding it can drive the simulator."
+            echo "The access key was generated on this runner and is not published here."
+            echo "Decrypt artifact native-sim-key-${{ github.run_id }}-${{ github.run_attempt }} locally with the recipient private key."
+            echo "Never paste the plaintext key or an authenticated URL in a PR, status or message."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build app
@@ -573,7 +584,6 @@ jobs:
         if: inputs.agent_device == 'true'
         timeout-minutes: 15
         env:
-          GATE_TOKEN: ${{ inputs.gate_token }}
           # Both default to 300000ms, so the daemon and the XCTest runner are
           # reaped five minutes after the last command — measured here as a
           # session that was healthy at 13:32:36 and gone by 13:37:44, before
@@ -596,10 +606,12 @@ jobs:
           # `proxy` serves the daemon HTTP contract under /agent-device/*, which
           # is the base path `connect proxy` expects behind a shared origin — so
           # it rides the tunnel that is already open instead of needing its own.
-          # It reuses the gate token: one secret covers both stream and control.
+          # The key is runner-local; do not export it to build/cache environments.
+          SESSION_KEY=$(cat "$NATIVE_SIM_GATE_TOKEN_FILE") || { echo "::error::session key unavailable"; exit 1; }
           nohup agent-device proxy --host 127.0.0.1 --port "$AGENT_PORT" \
-            --daemon-auth-token "$GATE_TOKEN" > agent-device-proxy.log 2>&1 &
+            --daemon-auth-token "$SESSION_KEY" > agent-device-proxy.log 2>&1 &
           disown
+          unset SESSION_KEY
 
           for _ in $(seq 1 60); do
             curl -fsS -o /dev/null "http://127.0.0.1:$AGENT_PORT/health" && break
@@ -629,7 +641,6 @@ jobs:
       - name: Hold the stream open
         env:
           AGENT_ENABLED: ${{ inputs.agent_device }}
-          GATE_TOKEN: ${{ inputs.gate_token }}
           AGENT_DEVICE_DAEMON_IDLE_TIMEOUT_MS: "0"
           AGENT_DEVICE_IOS_RUNNER_IDLE_STOP_MS: "0"
           AGENT_DEVICE_LEASE_TTL_MS: "21600000"
@@ -668,9 +679,11 @@ jobs:
                 AGENT_LAST_RESTART=$NOW
                 pkill -f 'agent-device proxy' 2>/dev/null || true
                 agent-device daemon stop --clean >/dev/null 2>&1 || true
+                SESSION_KEY=$(cat "$NATIVE_SIM_GATE_TOKEN_FILE") || { echo "::error::session key unavailable"; exit 1; }
                 nohup agent-device proxy --host 127.0.0.1 --port "$AGENT_PORT" \
-                  --daemon-auth-token "$GATE_TOKEN" >> agent-device-proxy.log 2>&1 &
+                  --daemon-auth-token "$SESSION_KEY" >> agent-device-proxy.log 2>&1 &
                 disown
+                unset SESSION_KEY
               fi
             fi
             sleep 15
