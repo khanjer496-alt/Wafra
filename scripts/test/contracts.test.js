@@ -659,6 +659,23 @@ function ktSources(dir) {
         entry.NSPrivacyCollectedDataTypePurposes?.includes(
           'NSPrivacyCollectedDataTypePurposeAppFunctionality',
         )));
+  const AF = 'NSPrivacyCollectedDataTypePurposeAppFunctionality';
+  const AN = 'NSPrivacyCollectedDataTypePurposeAnalytics';
+  const expectedPurposes = {
+    NSPrivacyCollectedDataTypeEmailsOrTextMessages: [AF],
+    NSPrivacyCollectedDataTypeOtherFinancialInfo: [AF],
+    NSPrivacyCollectedDataTypePurchaseHistory: [AF, AN].sort(),
+    NSPrivacyCollectedDataTypeCustomerSupport: [AF],
+    NSPrivacyCollectedDataTypeUserID: [AF, AN].sort(),
+    NSPrivacyCollectedDataTypeDeviceID: [AF, AN].sort(),
+    NSPrivacyCollectedDataTypeProductInteraction: [AF, AN].sort(),
+    NSPrivacyCollectedDataTypeCoarseLocation: [AF, AN].sort(),
+    NSPrivacyCollectedDataTypeOtherDiagnosticData: [AF, AN].sort(),
+  };
+  ok('each declared data type carries exactly its audited purposes',
+    JSON.stringify(Object.fromEntries(collectedData.map((entry) =>
+      [entry.NSPrivacyCollectedDataType, [...entry.NSPrivacyCollectedDataTypePurposes].sort()]).sort(([a], [b]) => a.localeCompare(b)))) ===
+    JSON.stringify(Object.fromEntries(Object.entries(expectedPurposes).sort(([a], [b]) => a.localeCompare(b)))));
   const purchaseHistory = collectedData.find((entry) =>
     entry.NSPrivacyCollectedDataType === 'NSPrivacyCollectedDataTypePurchaseHistory');
   ok('Superwall purchase history declares both entitlement and analytics use',
