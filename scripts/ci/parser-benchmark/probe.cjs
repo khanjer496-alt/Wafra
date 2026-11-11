@@ -64,6 +64,18 @@ function variants() {
     out.push({ group: 'ar-refund-ack-pending', key: `${n} (${merchant.length} chars)`, text: `تم استلام طلب استرداد مبلغ 100.00 درهم من ${merchant}. سيتم استرداد المبلغ إلى بطاقتك خلال 5 أيام عمل.` });
     out.push({ group: 'ar-refund-completed-amount', key: `${n} (${merchant.length} chars)`, text: `تم استرداد مبلغ 100.00 درهم إلى بطاقتك المنتهية بـ 1234 من ${merchant}.` });
   }
+  // Pending / in-progress refunds without and with a request acknowledgement, short and long merchants.
+  for (const merchant of ['ADNOC', 'GOLDEN SANDS', 'GOLDEN SANDS GRAND RESTAURANTS AND COFFEE LOUNGE DUBAI MALLS']) {
+    const tag = String(merchant.length);
+    out.push({ group: 'pending-refund-bare', key: `being-processed ${tag}`, text: `Refund of AED 100.00 from ${merchant} is being processed.` });
+    out.push({ group: 'pending-refund-bare', key: `in-progress ${tag}`, text: `Your refund of AED 100.00 from ${merchant} is in progress.` });
+    out.push({ group: 'pending-refund-bare', key: `initiated ${tag}`, text: `Refund of AED 100.00 from ${merchant} has been initiated and is being processed.` });
+    out.push({ group: 'pending-refund-bare', key: `pending ${tag}`, text: `Refund of AED 100.00 from ${merchant} is pending.` });
+    out.push({ group: 'pending-refund-ack', key: `under-process ${tag}`, text: `Your refund request is under process. Refund of AED 100.00 from ${merchant} is being processed.` });
+    out.push({ group: 'pending-refund-ack', key: `future ${tag}`, text: `Your refund request has been received. Refund of AED 100.00 from ${merchant} will be credited to your card ending 1234 within 5 working days.` });
+    out.push({ group: 'pending-refund-ack', key: `requested ${tag}`, text: `Your refund request has been received. Refund of AED 100.00 from ${merchant} has been requested and is pending approval.` });
+    out.push({ group: 'pending-refund-ack', key: `awaiting ${tag}`, text: `Your refund request has been received. Refund of AED 100.00 from ${merchant} will be processed once the merchant confirms.` });
+  }
   const fx = (cur, f, a) => `Card ending 1234 was used for ${cur} ${f} at ORBIT BOOKSTORE on 19/10/2026. Amount charged AED ${a}.`;
   for (const [cur, f, plausible, implausible] of [['SAR', '350.70', '343.69', '29.72'], ['USD', '100', '367.30', '36.73'],
     ['EUR', '100', '400.00', '40.00'], ['INR', '530', '23.32', '235.97'], ['GBP', '100', '470.00', '47.00'], ['KWD', '10', '119.50', '11.95']]) {
