@@ -76,6 +76,12 @@ function variants() {
     out.push({ group: 'pending-refund-ack', key: `requested ${tag}`, text: `Your refund request has been received. Refund of AED 100.00 from ${merchant} has been requested and is pending approval.` });
     out.push({ group: 'pending-refund-ack', key: `awaiting ${tag}`, text: `Your refund request has been received. Refund of AED 100.00 from ${merchant} will be processed once the merchant confirms.` });
   }
+  // Merchant names that contain a coordinator word, with and without the request acknowledgement, plus an AND-free 60-character name.
+  for (const merchant of ['MARKS AND SPENCER', 'H AND M', 'BARNES AND NOBLE', 'TOM AND JERRYS CAFE', 'GOLDEN SANDS GRAND RESTAURANTS AND COFFEE LOUNGE DUBAI MALLS', 'GOLDEN SANDS GRAND RESTAURANTS CAFE LOUNGE DUBAI MALLS NORTH']) {
+    out.push({ group: 'refund-and-merchant-noack', key: merchant, text: `Refund of AED 100.00 from ${merchant} has been credited to your card ending 1234.` });
+    out.push({ group: 'refund-and-merchant-ack', key: merchant, text: `Your refund request has been received. Refund of AED 100.00 from ${merchant} has been credited to your card ending 1234.` });
+    out.push({ group: 'purchase-and-merchant', key: merchant, text: `Purchase of AED 100.00 with Debit Card ending 1234 at ${merchant}.` });
+  }
   const fx = (cur, f, a) => `Card ending 1234 was used for ${cur} ${f} at ORBIT BOOKSTORE on 19/10/2026. Amount charged AED ${a}.`;
   for (const [cur, f, plausible, implausible] of [['SAR', '350.70', '343.69', '29.72'], ['USD', '100', '367.30', '36.73'],
     ['EUR', '100', '400.00', '40.00'], ['INR', '530', '23.32', '235.97'], ['GBP', '100', '470.00', '47.00'], ['KWD', '10', '119.50', '11.95']]) {

@@ -36,7 +36,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/bench-trees probe-results
-          for entry in build190=2705b987 rc-base=3ccd6bcd pr176=b9c636d3; do
+          for entry in build190=2705b987 rc-base=3ccd6bcd pr176=b9c636d3 fix=1aabae91; do
             label="${entry%%=*}"; sha="${entry##*=}"
             git worktree add --detach "/tmp/bench-trees/$label" "$sha"
             ln -s "$PWD/node_modules" "/tmp/bench-trees/$label/node_modules"
