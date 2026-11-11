@@ -57,6 +57,13 @@ function variants() {
   out.push({ group: 'refund-known', key: 'IKEA', text: refund('IKEA') });
   out.push({ group: 'refund-known', key: 'GOLDEN SANDS RESTAURANT', text: refund('GOLDEN SANDS RESTAURANT') });
   out.push({ group: 'refund-known', key: 'no-ack-sentence', text: 'Refund of AED 100.00 from GOLDEN SANDS RESTAURANT has been credited to your card ending 1234.' });
+  // Arabic refund acknowledgement followed by a completed credit: is the result merchant-length dependent?
+  const arMerchants = { 5: 'نون اي', 12: 'مطعم الشام ال', 30: 'مطعم الشام للمأكولات والمشروبات', 60: 'مطعم الشام للمأكولات والمشروبات الشرقية والغربية في دبي مول فرع' };
+  for (const [n, merchant] of Object.entries(arMerchants)) {
+    out.push({ group: 'ar-refund-ack-completed', key: `${n} (${merchant.length} chars)`, text: `تم استلام طلب استرداد مبلغ 100.00 درهم من ${merchant}. تم استرداد المبلغ إلى بطاقتك المنتهية بـ 1234.` });
+    out.push({ group: 'ar-refund-ack-pending', key: `${n} (${merchant.length} chars)`, text: `تم استلام طلب استرداد مبلغ 100.00 درهم من ${merchant}. سيتم استرداد المبلغ إلى بطاقتك خلال 5 أيام عمل.` });
+    out.push({ group: 'ar-refund-completed-amount', key: `${n} (${merchant.length} chars)`, text: `تم استرداد مبلغ 100.00 درهم إلى بطاقتك المنتهية بـ 1234 من ${merchant}.` });
+  }
   const fx = (cur, f, a) => `Card ending 1234 was used for ${cur} ${f} at ORBIT BOOKSTORE on 19/10/2026. Amount charged AED ${a}.`;
   for (const [cur, f, plausible, implausible] of [['SAR', '350.70', '343.69', '29.72'], ['USD', '100', '367.30', '36.73'],
     ['EUR', '100', '400.00', '40.00'], ['INR', '530', '23.32', '235.97'], ['GBP', '100', '470.00', '47.00'], ['KWD', '10', '119.50', '11.95']]) {
