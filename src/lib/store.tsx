@@ -176,7 +176,7 @@ import {
   storageReadFailureMayRetry,
   type StorageFailure,
 } from '@/lib/storage-diagnostics';
-import { waitForAndroidBackgroundCaptureIdle } from '@/lib/android-live-background';
+import { waitForAndroidBackgroundCaptureIdle } from '@/lib/android-live-background-api';
 import { bankNotificationAdmissionExpiresAt } from '@/lib/trusted-bank-notification-packages';
 import { overrideAppliesTo } from '@/lib/uncategorised';
 import { applyBillAliasToTransactions, billAliasKey, validBillAlias } from '@/lib/bill-alias';
