@@ -56,7 +56,7 @@ import { detectCapturePause } from '@/lib/capture-pause';
 import { loadCapturePauseSnooze, saveCapturePauseSnooze } from '@/lib/capture-pause-state';
 import { isLiveCapture } from '@/lib/transaction-source';
 import { homeSummaryCopy, paymentAgendaCopy } from '@/lib/reference-copy';
-import { invalidateWidgetSnapshotSync, requestWidgetSnapshotSync } from '@/lib/widget-sync';
+import { invalidateWidgetSnapshotSync, requestWidgetSnapshotSync, WIDGET_SYNC_DEBOUNCE_MS } from '@/lib/widget-sync';
 import { allocationsOf } from '@/lib/splits';
 import { isFixedCommitment } from '@/lib/categories';
 import { moneyPictureProgress } from '@/lib/money-picture-progress';
@@ -675,12 +675,18 @@ export default function JournalHomeScreen() {
         && latest.customCategories === source.customCategories;
     };
     // After Home's first frames and entrance: preparing the snapshot walks the
-    // ledger and the native write re-renders every placed widget.
+    // ledger and the native write re-renders every placed widget. Then a quiet
+    // period (this effect re-runs on every ledger change, and each run cancels
+    // the previous one) so a burst of edits writes only the latest figures.
     const task = runAfterFirstFrames(() => {
       if (current()) request = requestWidgetSnapshotSync({ state: source, now: new Date(), moneySpec,
-        language: language === 'ar' ? 'ar' : 'en' }, current);
+        language: language === 'ar' ? 'ar' : 'en' }, current, { debounceMs: WIDGET_SYNC_DEBOUNCE_MS });
     });
-    return () => { cancelled = true; task.cancel(); request?.cancel(); };
+    // Leaving the foreground ends the quiet period so the last edit still reaches the widgets.
+    const leaving = AppState.addEventListener('change', (next) => {
+      if (next !== 'active') request?.flush?.();
+    });
+    return () => { cancelled = true; task.cancel(); leaving.remove(); request?.cancel(); };
     // Keyed on the day, not the resume clock: every reopen used to rebuild
     // the snapshot and rewrite the widgets with the same figures. A new day
     // still refreshes them (todayISO, the week, Coming up all move).
