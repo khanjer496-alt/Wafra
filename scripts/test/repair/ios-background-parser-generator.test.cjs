@@ -283,9 +283,18 @@ test('current workflows generate and check before native prebuild or build and v
     for (const name of jobs) {
       const steps = workflow.jobs[name].steps;
       const generate = steps.findIndex((step) => /node scripts\/generate-ios-background-parser\.cjs\n/.test(step.run || ''));
+      const checkOnly = steps.findIndex((step) => /^node scripts\/generate-ios-background-parser\.cjs --check\s*$/.test(step.run || ''));
       const build = steps.findIndex((step) => /expo prebuild|eas build --platform ios|args=\(build --platform ios/.test(step.run || ''));
-      assert.ok(generate >= 0 && build > generate, `${relative} ${name}: generate before native build`);
-      assert.match(steps[generate].run, /generate-ios-background-parser\.cjs --check/);
+      if (relative.endsWith('ci.yml')) {
+        // CI only verifies the committed bundle: it must never regenerate it first,
+        // or a stale bundle could not fail the job.
+        assert.equal(generate, -1, `${relative} ${name}: must not regenerate the parser before checking it`);
+        assert.ok(checkOnly >= 0, `${relative} ${name}: must run the read-only --check`);
+        if (build >= 0) assert.ok(build > checkOnly, `${relative} ${name}: check before native build`);
+      } else {
+        assert.ok(generate >= 0 && build > generate, `${relative} ${name}: generate before native build`);
+        assert.match(steps[generate].run, /generate-ios-background-parser\.cjs --check/);
+      }
     }
   }
   const ios = YAML.parse(fs.readFileSync(path.join(ROOT, '.github/workflows/ios-testflight.yml'), 'utf8'));
