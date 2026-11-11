@@ -14,12 +14,12 @@ import {
   requiresReviewRetention,
   reviewCaptureBacklog,
   reviewReceiptSettled,
+  reviewSourceKeyOf,
   settleReviewStage,
   type ReviewEntry,
   type ReviewSourceReceipt,
   type ReviewStageReceipt,
 } from '@/lib/alert-review-tray';
-import { canonicalUniversalSourceKey } from '@/lib/universal-import';
 import { mayBeSamePurchase } from '@/lib/apple-pay-card-links';
 import { isApplePayWalletRow } from '@/lib/dedupe';
 import { migrateLegacyLedgerMoney } from '@/lib/ledger-money';
@@ -425,8 +425,7 @@ const earliestQualification = (
 };
 
 type ReviewRetentionMap = Map<string, ReviewSourceReceipt['outcome']>;
-const reviewRetentionKey = (item: ReviewEntry): string =>
-  canonicalUniversalSourceKey(item.sourceKey, item.observedAt);
+const reviewRetentionKey = (item: ReviewEntry): string => reviewSourceKeyOf(item);
 interface ReviewStageRecord { items: readonly ReviewEntry[]; receipt: ReviewStageReceipt }
 /**
  * Re-read every stage call's OWN receipt. Call this synchronously right before

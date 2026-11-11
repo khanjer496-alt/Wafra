@@ -372,6 +372,9 @@ export interface ReviewSourceReceipt {
   sourceKey: string;
   outcome: 'pending' | 'resolved' | 'deferred' | 'expired' | 'refused';
 }
+/** The canonical identity a receipt, claim or tombstone uses for one review source. */
+export const reviewSourceKeyOf = (item: Pick<ReviewEntry, 'sourceKey' | 'observedAt'>): string =>
+  canonicalUniversalSourceKey(item.sourceKey, item.observedAt);
 /**
  * A source is settled when Review holds it (pending), the user decided it
  * (resolved), or its 30-day payload expired. Expiry is a terminal, disclosed
