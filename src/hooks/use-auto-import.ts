@@ -1664,9 +1664,10 @@ export function useAutoImport(
      *
      * Erasing resets the ledger to EMPTY_STATE, whose watermark is 0, and the
      * inbox is the source of truth — a reinstall rebuilds from it, so an
-     * erase has to as well. But nothing was making that rebuild happen. Home
-     * is a tab, so it stays mounted while the user is in Settings and never
-     * remounts; the effect's old deps (`hydrated`, `watchForeground`) do not
+     * erase has to as well. But nothing was making that rebuild happen. This
+     * effect runs only in the tab shell's CaptureOwner (watchForeground), which
+     * stays mounted and is never frozen while the user is in Settings, so it
+     * never remounts either; the effect's old deps (`hydrated`, `watchForeground`) do not
      * move when a ledger is wiped, so it never re-ran; and the one remaining
      * trigger, the resume listener, hit the 30s throttle that an erase does
      * not clear. The user came back to a permanently empty Home.
