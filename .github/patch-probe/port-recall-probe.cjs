@@ -8,6 +8,8 @@ const sms = load('@/lib/sms-parser');
 const { interpretBankAlert } = load('@/lib/bank-alert-interpreter');
 const { inspectUnparsedLaunchAlert } = load('@/lib/unparsed-launch-alert');
 const { createLaunchAlertSession } = load('@/lib/launch-alert-parser');
+const { parseHistoricalMessageRecords } = load('@/lib/historical-import');
+const { createHash } = require('node:crypto');
 country.setActiveCountry('AE'); markets.setLedgerCurrency('AED', 2); markets.setActiveMarket('AE');
 const session = createLaunchAlertSession({ overrides: {}, pinnedCurrency: 'AED', fxLookup: () => null,
   bestEffort: { enabled: true, country: 'AE' }, regionHint: 'AE' });
@@ -31,6 +33,15 @@ for (const [name, body] of [
   let unparsed = null;
   try { const u = inspectUnparsedLaunchAlert(body, sender); unparsed = `${u.outcome}${u.reason ? '/' + u.reason : ''}`; } catch (e) { unparsed = 'err ' + e.message; }
   const s = session.parse(body, sender, session.inspect(body, sender), 'AE', observedAt);
+  const hist = (snd) => {
+    const reader = createLaunchAlertSession({ overrides: {}, pinnedCurrency: 'AED', fxLookup: () => null,
+      bestEffort: { enabled: true, country: 'AE' }, regionHint: 'AE' });
+    const record = { v: 1, id: createHash('sha256').update(body + snd).digest('hex'), text: body,
+      receivedAt: new Date(observedAt).toISOString(), ...(snd ? { sender: snd } : {}) };
+    const out = parseHistoricalMessageRecords([JSON.stringify(record)], {}, new Date(observedAt), new Set(), reader);
+    return `parsed ${out.parsed.length}${out.parsed[0] ? ' ' + out.parsed[0].type + ' ' + out.parsed[0].amountFils : ''} review ${out.reviewCandidates.length}`;
+  };
   console.log(JSON.stringify({ name, nonPosting: sms.nonPostingReason(body), notice: sms.moneyNoticeKind(body),
-    legacy: legacy && `${legacy.type} ${legacy.amountFils}`, interp, unparsed, session: s && `${s.type} ${s.amountFils}` }));
+    legacy: legacy && `${legacy.type} ${legacy.amountFils}`, interp, unparsed, session: s && `${s.type} ${s.amountFils}`,
+    historySender: hist(sender), historySenderless: hist('') }));
 }
