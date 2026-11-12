@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 7a18a6b0c771d047d5897109651ab138be7e30a402d752a19105aa4ab35e12b4
+// Generated from normal shipping TypeScript. Source SHA-256: 46e8b13c83708a2b9f9bf57c818adb1ea9c227b87143882c891f1c842cf7d8da
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -11876,7 +11876,9 @@ function refundCreditNotActual(body, request) {
 }
 const REFUND_SIDE_NOTE_WORD_RE = /\brefund(?:ed)?\b/i;
 const REFUND_SIDE_NOTE_DEBIT_RE = /\b(?:debited|charged|deducted|spent)\b/i;
-const REFUND_SIDE_NOTE_SAME_MOVEMENT_RE = /^\s*(?:it|(?:this|the|that|your)\s+(?:amount|transaction|purchase|charge|payment|debit))\b/i;
+const REFUND_SIDE_NOTE_RETURNED_RE = /\b(?:reversed|refunded|returned)\b/i;
+const REFUND_SIDE_NOTE_SAME_MOVEMENT_RE = /^\s*(?:it|(?:this|the|that|your)\s+(?:amount|transaction|purchase|charge|payment|debit)|(?:the|this|that)\s+refund(?=\s+(?:has|have|had|was|were|is)\b)|a\s+refund\s+of\s+(?:the\s+same|this|that))\b/i;
+const REFUND_SIDE_NOTE_FUTURE_RE = /\bwill\b/i;
 function refundSideNotes(body) {
     if (!REFUND_SIDE_NOTE_WORD_RE.test(body))
         return { body, ambiguous: false };
@@ -11888,7 +11890,7 @@ function refundSideNotes(body) {
         start = Math.max(start, end);
     }
     const separateDebit = sentences.some(({ text }) => !REFUND_SIDE_NOTE_WORD_RE.test(text) &&
-        REFUND_SIDE_NOTE_DEBIT_RE.test(text) && refundAmounts(text).length > 0);
+        REFUND_SIDE_NOTE_DEBIT_RE.test(text) && !REFUND_SIDE_NOTE_RETURNED_RE.test(text) && refundAmounts(text).length > 0);
     let out = body;
     let ambiguous = false;
     for (const { start: at, text } of sentences) {
@@ -11897,7 +11899,7 @@ function refundSideNotes(body) {
             continue;
         const lead = text.slice(0, word.index);
         const negated = word[0].toLowerCase() === 'refunded' && REFUND_CREDIT_NEGATION_RE.test(lead);
-        const sameMovement = REFUND_SIDE_NOTE_SAME_MOVEMENT_RE.test(text);
+        const sameMovement = REFUND_SIDE_NOTE_SAME_MOVEMENT_RE.test(text) && !REFUND_SIDE_NOTE_FUTURE_RE.test(text);
         if ((negated && !sameMovement) || (separateDebit && governsRefundCredit(lead))) {
             out = out.slice(0, at) + ' '.repeat(text.length) + out.slice(at + text.length);
         }
