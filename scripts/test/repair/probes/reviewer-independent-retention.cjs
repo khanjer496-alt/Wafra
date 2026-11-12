@@ -2,6 +2,11 @@
 /*
  * Independent retention probe. Author: xAI Grok 4.7.
  * Written against Wafra head 954d238530506016ed9d8322b597d87cd9036254.
+ * Revised 2026-11-12 by Reviewer (Anthropic Claude Opus 5.5) for the CEO's
+ * opt-in admission mode (4a8b6cee, option B): this scenario models a caller
+ * that keeps its source (History cursor and iOS session), so every direct
+ * store stage call passes SOURCE_HOLDING ('hold-source'). Expectations are
+ * unchanged. The executor and iOS History handoffs pass the mode themselves.
  * This file is not a local execution result. Hosted execution is separate.
  *
  * One scenario, 59 distinct exact card-payment reviews (explicit positive
@@ -111,6 +116,8 @@ function payment(i) {
 function keyOf(item) {
   return identity.canonicalCaptureSourceKey(item.sourceKey, item.observedAt);
 }
+// The admission mode of a caller that keeps its source (store stageReviewAlerts' 4th argument).
+const SOURCE_HOLDING = 'hold-source';
 function storeHarness() {
   const storeText = fs.readFileSync(path.join(root, 'src/lib/store.tsx'), 'utf8');
   const storeAst = ts.createSourceFile('store.tsx', storeText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -166,9 +173,9 @@ test('59 exact repayments survive a failed save, hold an existing cursor and ses
 
   const store = storeHarness();
   store.setWrite(async () => false);
-  await assert.rejects(tray.settleReviewStage(items, store.stage(items)), /Encrypted review-tray write failed/);
+  await assert.rejects(tray.settleReviewStage(items, store.stage(items, undefined, undefined, SOURCE_HOLDING)), /Encrypted review-tray write failed/);
   store.setWrite(async () => true);
-  const retry = store.stage(items);
+  const retry = store.stage(items, undefined, undefined, SOURCE_HOLDING);
   assert.equal(retry.admitted, 0);
   const firstReceipts = await tray.settleReviewStage(items, retry);
   assert.deepEqual(asOuter(firstReceipts.map(entry => entry.outcome)), [...Array(50).fill('pending'), ...Array(9).fill('deferred')]);
@@ -180,7 +187,7 @@ test('59 exact repayments survive a failed save, hold an existing cursor and ses
   }
 
   const collided = { ...items[58], id: items[0].id };
-  const refused = store.stage([collided]);
+  const refused = store.stage([collided], undefined, undefined, SOURCE_HOLDING);
   assert.equal(refused.admitted, 0);
   assert.equal((await tray.settleReviewStage([collided], refused))[0].outcome, 'refused');
   assert.equal(store.state.reviewTray.pending.length, 50);
@@ -219,7 +226,7 @@ test('59 exact repayments survive a failed save, hold an existing cursor and ses
 
   for (let i = 0; i < 9; i += 1) store.dismiss(items[i]);
   assert.equal(store.state.reviewTray.pending.length, 41);
-  const opened = store.stage(items);
+  const opened = store.stage(items, undefined, undefined, SOURCE_HOLDING);
   assert.equal(opened.admitted, 9);
   const openedReceipts = await tray.settleReviewStage(items, opened);
   assert.deepEqual(asOuter(openedReceipts.slice(0, 9).map(entry => entry.outcome)), Array(9).fill('resolved'));
