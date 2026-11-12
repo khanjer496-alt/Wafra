@@ -355,3 +355,46 @@ for (const [label, merchant] of [['spaced', 'ماركس و سبنسر'], ['glued
     }
   });
 }
+
+// Review c1379af4 (High at 59d00136): the completed-credit rule must not turn a refusal into income.
+// A merchant past the old 40-character window makes the new rule the only thing that can settle the refund.
+const longRefundMerchant = 'CARREFOUR HYPERMARKET MALL OF THE EMIRATES';
+const refundAck = 'Your refund request has been received.';
+for (const [kind, body] of [
+  ['credited-to-merchant', `${refundAck} Refund of AED 100.00 from ${longRefundMerchant} has been credited to the merchant for approval.`],
+  ['credited-to-beneficiary', `${refundAck} Refund of AED 100.00 from ${longRefundMerchant} was credited to the beneficiary account.`],
+  ['posted-to-merchant-then-future', `${refundAck} Refund of AED 100.00 from ${longRefundMerchant} has been posted to the merchant, it will be credited to your card in 5 days.`],
+  ['if-conditional', `${refundAck} If the refund of AED 100.00 from ${longRefundMerchant} has been credited to your card, please ignore this message.`],
+  ['once-conditional', `${refundAck} Once the refund of AED 100.00 from ${longRefundMerchant} has been credited to your card, you will get an SMS.`],
+  ['will-be-notified-when', `${refundAck} You will be notified when the refund of AED 100.00 from ${longRefundMerchant} has been credited to your card.`],
+  ['credited-in-error-reversed', `${refundAck} Refund of AED 100.00 from ${longRefundMerchant} was credited to your card in error and has been reversed.`],
+  ['wrong-refund-amount', `Your refund request for AED 100.00 has been received. A previous refund from ${longRefundMerchant} of AED 20.00 has been credited to your card.`],
+]) {
+  test(`refund credit rule refuses/${kind}`, () => {
+    const session = reader('AE');
+    assert.equal(parseSms(body), null);
+    assert.equal(parseSms(body, {}, { sender: 'ENBD', observedAt: at }), null);
+    assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
+    assert.equal(confirmationNative(body).route, 'ignore');
+  });
+}
+for (const [kind, body, minor] of [
+  ['original-payment-method-dotted', `${refundAck} Refund of AED 100.00 from NOON.COM has been credited to the original payment method.`, 10000],
+  ['the-card', `${refundAck} Refund of AED 100.00 from ${longRefundMerchant} has been credited to the card.`, 10000],
+  ['successfully-refunded-dotted', `${refundAck} Refund of AED 100.00 from APPLE.COM/BILL has been successfully refunded to your card.`, 10000],
+  ['credited-back-to-the-account', `${refundAck} Refund of AED 100.00 from ${longRefundMerchant} has been credited back to the account.`, 10000],
+  ['order-placed-when-travelling', `${refundAck} Refund of AED 100.00 for the order you placed when travelling from ${longRefundMerchant} has been credited to your card.`, 10000],
+  ['request-states-the-same-amount', `Your refund request for AED 100.00 has been received. Refund of AED 100.00 from ${longRefundMerchant} has been credited to your card.`, 10000],
+]) {
+  test(`refund credit rule posts/${kind}`, () => {
+    const session = reader('AE');
+    assert.equal(nonPostingReason(body), null);
+    for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
+      session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
+      assert.equal(parsed?.kind, 'transaction');
+      assert.equal(parsed.type, 'income');
+      assert.equal(parsed.amountFils, minor);
+      assert.equal(parsed.currency, 'AED');
+    }
+  });
+}
