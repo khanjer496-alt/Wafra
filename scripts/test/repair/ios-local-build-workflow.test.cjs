@@ -41,7 +41,18 @@ test('source and signing are pinned, and only a verified exact-source build may 
   // still apply to whatever that resolves to.
   assert.equal(checkout.with.ref, "${{ inputs.source_commit || 'main' }}");
   assert.equal(checkout.with['fetch-depth'], 0);
-  assert.ok(steps.some(s => /merge-base --is-ancestor.*origin\/main/.test(s.run || '')));
+  // The source pin accepts exactly two reviewed lines, joined by one `||`.
+  // Any widening (a third branch, `|| true`, `set +e`, `;`) must fail here.
+  const pin = steps.find(s => s.name === 'Pin and verify reviewed-line build source').run;
+  const pinCode = pin.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+  assert.deepEqual(pinCode.slice(0, 3), [
+    'SHA=$(git rev-parse HEAD)',
+    'git merge-base --is-ancestor "$SHA" origin/main \\',
+    '|| git merge-base --is-ancestor "$SHA" origin/release/1.0.0-rc1-reconciled',
+  ]);
+  assert.equal((pin.match(/merge-base --is-ancestor/g) || []).length, 2);
+  assert.equal((pin.match(/\|\|/g) || []).length, 1);
+  assert.ok(!/\|\|\s*true|set \+e|\bexit 0\b/.test(pin));
   const build = steps.find(s => s.name === 'Build signed iOS archive on this macOS runner').run;
   assert.match(build, /--local --non-interactive/);
   assert.match(build, /--freeze-credentials/);
