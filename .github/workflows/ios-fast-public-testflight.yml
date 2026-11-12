@@ -96,6 +96,11 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm ci --no-audit --no-fund
 
+      # Read-only: this build uses the committed, reviewed parser bundle or fails.
+      # (The signed store build this workflow dispatches, ios-testflight.yml, checks it too.)
+      - name: Check the committed iOS background parser is fresh
+        run: node scripts/generate-ios-background-parser.cjs --check
+
       - name: Generate iOS project
         run: npx expo prebuild --platform ios --no-install
 

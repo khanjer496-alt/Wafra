@@ -37,10 +37,14 @@ final class WafraPrivacyCover {
     UserDefaults.standard.set(hideAmounts, forKey: Self.hideAmountsKey)
     updateCover()
     if Self.hidesWidgetAmounts {
-      let defaults = UserDefaults(suiteName: WafraWidgetsModule.appGroup)
-      if let raw = defaults?.string(forKey: WafraWidgetsModule.snapshotKey), !Self.acceptsSnapshot(raw) {
-        defaults?.removeObject(forKey: WafraWidgetsModule.snapshotKey)
-        WafraWidgetsModule.reloadWidgets()
+      // On the widgets' serial queue, so a snapshot write that passed the check
+      // before these flags changed cannot land after this purge.
+      WafraWidgetsModule.queue.sync {
+        let defaults = UserDefaults(suiteName: WafraWidgetsModule.appGroup)
+        if let raw = defaults?.string(forKey: WafraWidgetsModule.snapshotKey), !Self.acceptsSnapshot(raw) {
+          defaults?.removeObject(forKey: WafraWidgetsModule.snapshotKey)
+          WafraWidgetsModule.reloadWidgets()
+        }
       }
     }
   }

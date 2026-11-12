@@ -276,47 +276,96 @@ test('the actual iOS project fingerprint retains resource hashes when autolinkin
   }
 });
 
-test('current workflows only CHECK the committed parser bundle before a native build, and release builds still verify the packaged resources', () => {
-  for (const relative of ['.github/workflows/ci.yml', '.github/workflows/ios-testflight.yml']) {
-    const workflow = YAML.parse(fs.readFileSync(path.join(ROOT, relative), 'utf8'));
-    const jobs = relative.endsWith('ci.yml') ? ['check', 'native-ios'] : ['build', 'local-build'];
-    for (const name of jobs) {
-      const steps = workflow.jobs[name].steps;
-      // A build (or CI job) must never regenerate the bundle first: a stale committed bundle
-      // would be silently replaced and could never fail. Release builds ship exactly the
-      // committed, reviewed bundle.
-      const generate = steps.findIndex((step) => /node scripts\/generate-ios-background-parser\.cjs\n/.test(step.run || '') ||
-        /node scripts\/generate-ios-background-parser\.cjs\s*$/m.test(step.run || ''));
-      const checkOnly = steps.findIndex((step) => /^node scripts\/generate-ios-background-parser\.cjs --check\s*$/.test(step.run || ''));
-      const build = steps.findIndex((step) => /expo prebuild|eas build --platform ios|args=\(build --platform ios/.test(step.run || ''));
-      assert.equal(generate, -1, `${relative} ${name}: must not regenerate the parser before checking it`);
-      assert.ok(checkOnly >= 0, `${relative} ${name}: must run the read-only --check`);
-      if (build >= 0) assert.ok(build > checkOnly, `${relative} ${name}: check before native build`);
+// A command that runs the generator WITHOUT --check/--verify-resource-directory. Shell separators
+// (; & |) end a command, so `generate && generate --check` on ONE line is still a regeneration.
+const WRITE_MODE = /generate-ios-background-parser\.cjs(?![^\n;&|]*--(?:check|verify-resource-directory))/;
+const GENERATOR_MENTION = /generate-ios-background-parser\.cjs(?<rest>[^\n;&|]*)/g;
+const IOS_BUILD = /expo prebuild --platform ios|eas(?:-cli@[\w.]+)? build --platform ios|args=\(build --platform ios/;
+// A step that produces a signed store artifact. Every job with one must check the bundle first.
+const SIGNED_BUILD = /eas(?:-cli@[\w.]+)? build --platform ios|args=\(build --platform ios/;
+const CHECK_ONLY = /^node scripts\/generate-ios-background-parser\.cjs --check\s*$/;
+
+function writeModeLines(text) {
+  const offenders = [];
+  for (const line of text.split('\n')) {
+    if (/^\s*#/.test(line)) continue; // comments may name the command
+    if (/^\s*-\s*'?scripts\//.test(line)) continue; // `paths:` filters name the file, they do not run it
+    for (const match of line.matchAll(GENERATOR_MENTION)) {
+      if (!/--check|--verify-resource-directory/.test(match.groups.rest)) offenders.push(line.trim());
     }
   }
-  const ios = YAML.parse(fs.readFileSync(path.join(ROOT, '.github/workflows/ios-testflight.yml'), 'utf8'));
-  const verify = ios.jobs['local-build'].steps.find((step) => step.name === 'Verify the actual signed IPA and App Intent resources').run;
+  return offenders;
+}
+
+test('the write-mode detectors catch regenerate-then-check on one line and accept read-only commands', () => {
+  const generator = 'node scripts/generate-ios-background-parser.cjs';
+  for (const red of [
+    `${generator} && ${generator} --check`,
+    `${generator} ; ${generator} --check`,
+    `${generator}; ${generator} --check`,
+    `${generator} || ${generator} --check`,
+    `${generator} | tee out && ${generator} --check`,
+    `${generator}\n${generator} --check`,
+    `${generator}`,
+  ]) {
+    assert.match(red, WRITE_MODE, `must be flagged: ${JSON.stringify(red)}`);
+    assert.notDeepEqual(writeModeLines(red), [], `must be flagged by the line scan: ${JSON.stringify(red)}`);
+  }
+  for (const green of [
+    `${generator} --check`,
+    `${generator} --check && npm test`,
+    `${generator} --verify-resource-directory "$APP/WafraLiveCaptureResources.bundle"`,
+    `${generator} --check; echo done`,
+  ]) {
+    assert.doesNotMatch(green, WRITE_MODE, `must be accepted: ${JSON.stringify(green)}`);
+    assert.deepEqual(writeModeLines(green), [], `must be accepted by the line scan: ${JSON.stringify(green)}`);
+  }
+  // Comments and paths filters are not commands.
+  assert.deepEqual(writeModeLines(`# run ${generator}\n  - 'scripts/generate-ios-background-parser.cjs'`), []);
+});
+
+test('the workflow jobs that ship an iOS build only CHECK the committed parser bundle first, and release builds still verify the packaged resources', () => {
+  const workflowDir = path.join(ROOT, '.github/workflows');
+  const jobs = new Map();
+  for (const file of fs.readdirSync(workflowDir).filter((name) => /\.ya?ml$/.test(name))) {
+    const workflow = YAML.parse(fs.readFileSync(path.join(workflowDir, file), 'utf8'));
+    for (const [name, job] of Object.entries(workflow.jobs ?? {})) jobs.set(`${file}:${name}`, job.steps ?? []);
+  }
+  const mustCheckFirst = (id, steps) => {
+    const build = steps.findIndex((step) => IOS_BUILD.test(step.run || ''));
+    const checkOnly = steps.findIndex((step) => CHECK_ONLY.test(step.run || ''));
+    assert.ok(build >= 0, `${id} builds iOS`);
+    assert.ok(checkOnly >= 0 && checkOnly < build, `${id}: must run the read-only --check before it builds`);
+  };
+  // Never a regeneration, in any workflow job: a stale committed bundle would be replaced and could not fail.
+  for (const [id, steps] of jobs) {
+    assert.equal(steps.findIndex((step) => WRITE_MODE.test(step.run || '')), -1, `${id}: must not regenerate the parser`);
+  }
+  // Not vacuous: CI, the store-signed and local release builds, the fast public TestFlight simulator
+  // preflight, and the feature-beta candidate build are all named.
+  for (const id of ['ci.yml:native-ios', 'ios-testflight.yml:build', 'ios-testflight.yml:local-build',
+    'ios-fast-public-testflight.yml:mobai', 'ios-beta-candidate-build.yml:build']) {
+    assert.ok(jobs.has(id), `${id} exists`);
+    mustCheckFirst(id, jobs.get(id));
+  }
+  // ...and no other job may produce a signed iOS artifact without the check.
+  for (const [id, steps] of jobs) {
+    if (steps.some((step) => SIGNED_BUILD.test(step.run || ''))) mustCheckFirst(id, steps);
+  }
+  const ci = jobs.get('ci.yml:check');
+  assert.ok(ci.some((step) => CHECK_ONLY.test(step.run || '')), 'ci.yml check: read-only --check');
+  const verify = jobs.get('ios-testflight.yml:local-build').find((step) => step.name === 'Verify the actual signed IPA and App Intent resources').run;
   assert.match(verify, /generate-ios-background-parser\.cjs --verify-resource-directory/);
 });
 
 test('no workflow, package script or EAS config runs the parser generator in write mode', () => {
-  const generator = /generate-ios-background-parser\.cjs(?<rest>[^\n]*)/g;
   const offenders = [];
   const workflowDir = path.join(ROOT, '.github/workflows');
   const sources = fs.readdirSync(workflowDir).filter((file) => /\.ya?ml$/.test(file))
     .map((file) => [`.github/workflows/${file}`, fs.readFileSync(path.join(workflowDir, file), 'utf8')]);
   sources.push(['package.json', fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')]);
   sources.push(['eas.json', fs.readFileSync(path.join(ROOT, 'eas.json'), 'utf8')]);
-  for (const [file, text] of sources) {
-    for (const line of text.split('\n')) {
-      if (/^\s*#/.test(line)) continue; // comments may name the command
-      for (const match of line.matchAll(generator)) {
-        // Filename mentions in `paths:` filters are not commands.
-        if (/^\s*-\s*'?scripts\//.test(line)) continue;
-        if (!/--check|--verify-resource-directory/.test(match.groups.rest)) offenders.push(`${file}: ${line.trim()}`);
-      }
-    }
-  }
+  for (const [file, text] of sources) for (const line of writeModeLines(text)) offenders.push(`${file}: ${line}`);
   assert.deepEqual(offenders, [], 'only --check and --verify-resource-directory may run in automation');
   // EAS build hooks would run the generator inside the cloud build; none exist.
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));

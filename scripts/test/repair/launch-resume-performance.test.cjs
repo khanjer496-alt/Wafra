@@ -384,7 +384,9 @@ test('runAfterFirstFrames waits for two drawn frames, a settle and the foregroun
 test('Home defers through the helper and holds the lease for its entrance', () => {
   const home = read('src/screens/journal-home-screen.tsx').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
   assert.doesNotMatch(home, /InteractionManager/);
-  assert.ok((home.match(/runAfterFirstFrames\(/g) ?? []).length >= 6, 'insight, recap, recurrence, widgets, insight run, transfer queue');
+  assert.ok((home.match(/runAfterFirstFrames\(/g) ?? []).length >= 5, 'insight, recap, recurrence, insight run, transfer queue');
+  // The widget snapshot moved to the tab shell's owner, with the same deferral.
+  assert.match(read('src/hooks/use-widget-snapshot-sync.ts'), /runAfterFirstFrames\(/);
   assert.match(home, /prioritizeForegroundNavigation\(HOME_REVEAL_QUIET_MS\)/);
   assert.match(home, /const HOME_REVEAL_QUIET_MS = 1_500/);
   for (const file of ['src/app/(tabs)/bills.tsx', 'src/app/transactions.tsx', 'src/app/settings-data.tsx']) {
@@ -475,10 +477,11 @@ test('the native bridge reports a refused write; iOS (no answer) counts as store
   assert.equal(throwing.setWidgetSnapshot('{}'), false);
 });
 
-test('Home\'s widget sync follows custom category labels (the spending widget names them)', () => {
-  const home = read('src/screens/journal-home-screen.tsx');
-  const effect = home.slice(home.indexOf('requestWidgetSnapshotSync({'), home.indexOf('getStateGeneration, getStateSnapshot]);'));
-  assert.match(home, /latest\.customCategories === source\.customCategories/);
+test('the widget sync follows custom category labels (the spending widget names them)', () => {
+  // Moved from Home to the never-frozen owner (use-widget-snapshot-sync.ts).
+  const owner = read('src/hooks/use-widget-snapshot-sync.ts');
+  const effect = owner.slice(owner.indexOf('requestWidgetSnapshotSync({'), owner.indexOf('getStateGeneration, getStateSnapshot]);'));
+  assert.match(owner, /latest\.customCategories === source\.customCategories/);
   assert.match(effect, /state\.customCategories/);
 });
 
@@ -549,15 +552,17 @@ function homeProbe() {
   };
 }
 
-test('a resume on the same day rewrites no widgets, and unlocking repeats no transfer walk', () => {
+test('Home writes no widgets, and a resume or unlock repeats no transfer walk', () => {
   const p = homeProbe();
   p.render(); p.settle();
-  assert.equal(p.counts.widgets, 1, 'the first snapshot after launch');
+  // Home writes no widgets any more; CaptureOwner does (widget-snapshot-owner.test.cjs
+  // covers the same-day resume there), so Home can never double the request.
+  assert.equal(p.counts.widgets, 0, 'Home requests no widget snapshot');
   assert.equal(p.counts.walks, 1, 'the transfer queue, once');
   // Every reopen used to reset Home's clock and with it the widget sync.
   p.resume(); p.render(); p.settle();
   p.resume(); p.render(); p.settle();
-  assert.equal(p.counts.widgets, 1, 'the same day and ledger: no new snapshot, no native write');
+  assert.equal(p.counts.widgets, 0, 'still none from Home after resumes');
   // App Lock re-engages after a while away, then the person unlocks.
   p.gate = false; p.render(); p.settle();
   p.gate = true; p.render(); p.settle();

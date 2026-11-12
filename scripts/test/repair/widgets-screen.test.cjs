@@ -79,11 +79,14 @@ test('no snapshot is previewed when the app writes none (private mode, not onboa
   }
 });
 
-test('Home delegates widgets to the cooperative full-ledger producer, independent of its short payment list', () => {
+test('widgets come from the cooperative full-ledger producer, owned by the tab shell, not Home\'s short payment list', () => {
+  // The sync moved from Home to CaptureOwner's hook so a paused Home cannot leave widgets stale.
+  const owner = read('src/hooks/use-widget-snapshot-sync.ts');
+  assert.match(owner, /requestWidgetSnapshotSync\(/);
+  assert.match(owner, /invalidateWidgetSnapshotSync\(/);
   const home = read('src/screens/journal-home-screen.tsx');
-  assert.match(home, /requestWidgetSnapshotSync\(/);
-  assert.match(home, /invalidateWidgetSnapshotSync\(/);
   assert.doesNotMatch(home, /upcoming: widgetUpcomingInput\(payments\)/);
+  assert.doesNotMatch(home, /requestWidgetSnapshotSync\(/);
 });
 
 // ── Pure preview rules mirror the native widgets ───────────────────────────

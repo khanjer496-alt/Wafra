@@ -21,6 +21,7 @@ import Foundation
 class WafraWidgetsModule {
   static let appGroup = "group.app.wafra.ios"
   static let snapshotKey = "wafra.widget.snapshot"
+  static let queue = DispatchQueue(label: "app.wafra.widgets.snapshot")
   static func reloadWidgets() {}
 }
 SWIFT

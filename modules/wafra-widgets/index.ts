@@ -12,8 +12,14 @@ import { requireOptionalNativeModule } from 'expo-modules-core';
  */
 type NativeWidgets = {
   setAppPrivacy?(enabled: boolean, hideAmounts: boolean): Promise<void>;
-  /** False when storage or the native privacy gate rejected the snapshot. Older iOS binaries answer void. */
-  setSnapshot(json: string): boolean | void;
+  /**
+   * False when storage or the native privacy gate rejected the snapshot (older iOS
+   * binaries answer nothing, which counts as stored). Current
+   * iOS binaries expose it as an async function (a Promise), so the App Group write
+   * and the WidgetKit reload never run on the JS thread; older binaries return the
+   * answer synchronously. Callers handle both.
+   */
+  setSnapshot(json: string): boolean | void | Promise<boolean | void>;
   clearSnapshot(): void;
   /** Android only, and absent from binaries built before it existed. */
   canPinWidgets?(): boolean;
@@ -29,20 +35,43 @@ export async function setAppPrivacy(enabled: boolean, hideAmounts: boolean): Pro
   await native?.setAppPrivacy?.(enabled, hideAmounts);
 }
 
+let clears = 0;
+// Writes issued since the last erase. An async iOS write that was still queued behind
+// Expo's dispatcher when Erase Everything ran can land AFTER the (synchronous) erase;
+// see setWidgetSnapshot.
+let writesSinceClear = 0;
+
 /**
  * False only when the native side said it could not store the snapshot
  * (Android's module answers false, for example without a React context) or
  * threw. iOS answers nothing and counts as stored. The sync uses the answer
  * to avoid skipping later writes of figures that never arrived.
  */
-export function setWidgetSnapshot(json: string): boolean {
-  try { return native?.setSnapshot(json) !== false; } catch { return false; /* presentation only */ }
+export function setWidgetSnapshot(json: string): boolean | Promise<boolean> {
+  const clearsBefore = clears;
+  writesSinceClear += 1;
+  try {
+    const answer = native?.setSnapshot(json);
+    if (answer && typeof (answer as Promise<boolean | void>).then === 'function') {
+      return (answer as Promise<boolean | void>).then((stored) => {
+        // The erase is synchronous and the write is not: if Erase Everything ran while this
+        // write was in flight, the write may have landed after it and put the pre-erase
+        // figures back. Erase again, and report "not stored". A newer write issued after the
+        // erase (writesSinceClear > 0) is the answer the widgets should show, so leave it.
+        if (clears !== clearsBefore && writesSinceClear === 0) {
+          try { native?.clearSnapshot(); } catch { /* presentation only */ }
+          return false;
+        }
+        return stored !== false;
+      }, () => false);
+    }
+    return answer !== false;
+  } catch { return false; /* presentation only */ }
 }
-
-let clears = 0;
 
 export function clearWidgetSnapshot(): void {
   clears += 1;
+  writesSinceClear = 0;
   try { native?.clearSnapshot(); } catch { /* presentation only */ }
 }
 
