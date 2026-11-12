@@ -410,11 +410,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Generate and check the shipping iOS background parser
+      # Read-only on purpose: a release build ships exactly the committed, reviewed
+      # parser bundle and fails when it is stale. It never regenerates one. Fix a
+      # stale bundle with `node scripts/generate-ios-background-parser.cjs` on a
+      # branch, review and commit the result, then build.
+      - name: Check the committed iOS background parser is fresh
         if: inputs.submit_build_id == ''
-        run: |
-          node scripts/generate-ios-background-parser.cjs
-          node scripts/generate-ios-background-parser.cjs --check
+        run: node scripts/generate-ios-background-parser.cjs --check
 
       - name: Validate OTA-enabled store build configuration
         if: inputs.submit_build_id == '' && inputs.profile != 'preview'
@@ -899,10 +901,10 @@ jobs:
           fastlane --version
           pod --version
 
-      - name: Generate and check the shipping iOS background parser
-        run: |
-          node scripts/generate-ios-background-parser.cjs
-          node scripts/generate-ios-background-parser.cjs --check
+      # Read-only on purpose (see the check in the build job): the local build
+      # ships the committed bundle or fails; it never regenerates one.
+      - name: Check the committed iOS background parser is fresh
+        run: node scripts/generate-ios-background-parser.cjs --check
 
       - name: Prepare existing Apple credentials without printing them
         env:
