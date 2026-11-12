@@ -103,18 +103,19 @@ an OTA update cannot add the SDK to an older binary.
 
 ## Localization and privacy
 
-Publish English and Arabic variants in Superwall. Wafra passes its saved app
-language and market to each placement so the campaign can deterministically
-select EN/AR even after an in-session language change. Manually QA Arabic RTL.
+Publish English and Arabic variants in Superwall and let Superwall's built-in
+locale localization choose between them: Wafra configures the SDK with a
+`localeIdentifier` built from its saved app language and the device region, and
+passes NO placement parameters and NO user attributes. A campaign audience rule or
+paywall template that reads `language`, `market`, `source`, `focus` or `intention`
+will never match. Manually QA Arabic RTL.
 
-Wafra supplies only product/onboarding metadata: language, market, onboarding
-focus/tracking/intention, capture choice and local trial days remaining. It does
-**not** send ledger rows, balances, transaction amounts, SMS bodies, card/account
-identifiers or the locally stored first name to Superwall.
-
-When Wafra's saved local-only preference is active, optional Superwall event
-tracking is set to `none` and Wafra-supplied targeting attributes are withheld.
-Store purchase/restore remains usable.
+Wafra does **not** send ledger rows, balances, transaction amounts, SMS bodies,
+card/account identifiers or the locally stored first name to Superwall. Superwall
+event tracking is set to `none` and external data collection is off for everyone,
+not only in Private Mode. Store purchase/restore remains usable. The SDK still sends
+its own anonymous app-user alias, device fields and the request IP; App Privacy
+declares these.
 
 ## Entitlement behavior
 
