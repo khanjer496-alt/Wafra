@@ -38,15 +38,22 @@ const { createLaunchAlertSession } = load('@/lib/launch-alert-parser');
 const { buildOracleRows } = require('./refund-matrix-oracle.cjs');
 
 // Frozen ratchet. Each number is today's count of gap-file entries in that class on that path; it may only go down.
+// Predicate PR 1 lowered every class but droppedDebit, which rose 207 -> 208 only by its own new control row CTL-05422
+// ("processed … will reflect" beside a debit, oracle v2.2; refund-gaps-no-growth.cjs lists it as a new row).
 const CEILING = {
-  falseIncome: { parseSms: 903, session: 911, native: 90 },
+  falseIncome: { parseSms: 160, session: 180, native: 0 },
   wrongDirection: { parseSms: 42, session: 40, native: 0 },
   wrongAmount: { parseSms: 0, session: 0, native: 0 },
   lostIncome: { parseSms: 36, session: 36, native: 0 },
-  droppedDebit: { parseSms: 207, session: 207, native: 0 },
-  postedNotReview: { parseSms: 631, session: 652, native: 10 },
+  droppedDebit: { parseSms: 208, session: 208, native: 0 },
+  postedNotReview: { parseSms: 359, session: 372, native: 10 },
 };
 const NATIVE_IGNORED_INCOME_CEILING = 157;
+// Control rows added after #217 that native ignores today (oracle v2.1 C11, C12; v2.2 C16). They are pinned by id and kept
+// out of the count above, so that ceiling still covers #217's rows and a newly ignored row anywhere else fails. Delete an id
+// when native posts its row.
+const NATIVE_IGNORED_CONTROL_ROWS = new Set(['CTL-05402', 'CTL-05403', 'CTL-05404', 'CTL-05405', 'CTL-05406', 'CTL-05407',
+  'CTL-05416']);
 // Row count and sha256 of the oracle's "id<TAB>expected" lines, joined by newlines (Reviewer, #217 Low 1).
 const ORACLE_PIN = { rows: 5423, sha256: 'f9d9c0d929e7ebcd91ec183fa3a57bf5a24b43a6eb75623d4ab8294126910ae1' };
 
@@ -115,14 +122,19 @@ for (const row of rows) {
 }
 
 const current = {};
-const report = { total: rows.length, gaps: [], nativeIgnoredIncome: 0, incomeRows: 0, counts: {}, falseIncomeByLang: {} };
+const report = { total: rows.length, gaps: [], nativeIgnoredIncome: 0, nativeIgnoredPinned: 0, incomeRows: 0, counts: {},
+  falseIncomeByLang: {} };
 for (const [key, list] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
   test(`refund matrix ${key} (${list.length} cases)`, (t) => {
     const failures = [];
     let ignored = 0;
+    let pinned = 0;
     for (const row of list) {
       const verdict = judge(row);
-      if (verdict.nativeIgnoredIncome) ignored++;
+      if (NATIVE_IGNORED_CONTROL_ROWS.has(row.id)) {
+        if (verdict.nativeIgnoredIncome) pinned++;
+        else failures.push(`${row.id} STALE native ignore: native now ${verdict.got.native}; delete it from NATIVE_IGNORED_CONTROL_ROWS`);
+      } else if (verdict.nativeIgnoredIncome) ignored++;
       const listed = known[row.id] || {};
       if (listed.expected && listed.expected !== row.expected) failures.push(`${row.id} oracle now ${row.expected}, gap file says ${listed.expected}`);
       for (const name of PATHS) {
@@ -145,7 +157,8 @@ for (const [key, list] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
     if (isIncomeRow(list[0].expected)) {
       report.incomeRows += list.length;
       report.nativeIgnoredIncome += ignored;
-      t.diagnostic(`native ignored ${ignored} of ${list.length} income rows`);
+      report.nativeIgnoredPinned += pinned;
+      t.diagnostic(`native ignored ${ignored} of ${list.length} income rows${pinned ? ` (+${pinned} pinned control rows)` : ''}`);
     }
     assert.equal(failures.length, 0, `${failures.length} ratchet failures in ${list.length} rows:\n${failures.slice(0, 8).join('\n')}`);
   });
@@ -169,6 +182,9 @@ test('refund matrix gap file only lists oracle rows, in canonical form', () => {
     for (const name of paths) assert.ok(gapClass(entry.expected, name, entry[name]), `${id} ${name} ${entry[name]} is not a gap`);
   }
   assert.equal(knownText, formatGapFile(knownFile.about, known), 'gap file is not sorted one entry per line (write it with REFUND_MATRIX_WRITE_GAPS)');
+  for (const id of NATIVE_IGNORED_CONTROL_ROWS) {
+    assert.ok(id.startsWith('CTL-') && isIncomeRow(rowById.get(id)?.expected), `${id} in NATIVE_IGNORED_CONTROL_ROWS is not an income control row`);
+  }
 });
 
 test('refund matrix ratchet: no class grows above its frozen ceiling', () => {
@@ -194,7 +210,7 @@ test('refund matrix report', (t) => {
   report.counts = classCounts(current);
   const falseIncome = PATHS.map((name) => `${name} ${report.counts.falseIncome[name]}`).join(', ');
   t.diagnostic(`false income (store gate needs 0 on every path): ${falseIncome}; by language ${JSON.stringify(report.falseIncomeByLang)}`);
-  t.diagnostic(`native ignored ${report.nativeIgnoredIncome} of ${report.incomeRows} income rows`);
+  t.diagnostic(`native ignored ${report.nativeIgnoredIncome} of ${report.incomeRows} income rows, plus ${report.nativeIgnoredPinned} pinned control rows`);
   if (process.env.REFUND_MATRIX_REPORT) fs.writeFileSync(process.env.REFUND_MATRIX_REPORT, JSON.stringify(report, null, 1));
   if (process.env.REFUND_MATRIX_WRITE_GAPS) fs.writeFileSync(process.env.REFUND_MATRIX_WRITE_GAPS, formatGapFile(knownFile.about, current));
   assert.ok(report.total >= 500, 'at least 500 generated cases');
