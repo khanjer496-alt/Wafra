@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: d7958b86c50a8ed93057cbc8b5d80d5c867c2e856b6e8a424cc0520a6de3b2f6
+// Generated from normal shipping TypeScript. Source SHA-256: 908e122f43f4d0581608bbe95b1946ebf498e046a61a1123d3545aa828a372d0
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -7783,7 +7783,7 @@ const S = {
     },
     historyReviewCapacityBodyIos: {
         en: 'Review is full. Wafra keeps the messages this history run read for about 1 hour. Review or dismiss saved alerts and retry within that hour; after that, run the history Shortcut again. Existing expiry limits still apply.',
-        ar: 'قائمة المراجعة ممتلئة. يحتفظ وفرة بالرسائل التي قرأها تشغيل السجل هذا لمدة ساعة تقريباً. راجع التنبيهات المحفوظة أو تجاهلها ثم أعد محاولة استيراد السجل خلال هذه الساعة، وبعدها شغّل اختصار السجل مرة أخرى. تبقى حدود انتهاء الصلاحية سارية.',
+        ar: 'قائمة المراجعة ممتلئة. تحتفظ وفرة بالرسائل التي قرأها تشغيل السجل هذا لمدة ساعة تقريباً. راجع التنبيهات المحفوظة أو تجاهلها ثم أعد محاولة استيراد السجل خلال هذه الساعة، وبعدها شغّل اختصار السجل مرة أخرى. تبقى حدود انتهاء الصلاحية سارية.',
     },
     reviewAlertsFullWaiting: { en: 'Review is full — {count} alerts waiting. Add or dismiss alerts here to make room. Waiting alerts stay on this iPhone for up to 30 days; after that they are counted as expired.', ar: 'قائمة المراجعة ممتلئة — {count} من التنبيهات بالانتظار. أضف تنبيهات أو تجاهلها هنا لإفساح المجال. تبقى التنبيهات المنتظرة على هذا الآيفون لمدة تصل إلى 30 يوماً، وبعد ذلك تُحتسب كمنتهية الصلاحية.' },
     reviewAlertsExpiredCount: { en: 'Expired before review in the last 30 days: {count}', ar: 'انتهت صلاحيتها قبل المراجعة خلال آخر 30 يوماً: {count}' },
@@ -11753,22 +11753,39 @@ const EXPECTED_FUTURE_MOVEMENT_RE = /\b(?:expected|anticipated)\b(?:[^.]|\.\d){0
 const REQUEST_RECEIVED_RE = /\b(?:(?:payment|transfer|purchase|redemption|refund)\s+request|request\s+for\s+(?:a\s+)?refund)\b(?:[^.]|\.\d){0,64}\b(?:received|submitted|created|awaiting|pending|registered|being\s+processed|in\s+progress|under\s+(?:review|process(?:ing)?))\b|\b(?:received|submitted|created)\b(?:[^.]|\.\d){0,48}\b(?:(?:payment|transfer|purchase|refund)\s+request|request\s+for\s+(?:a\s+)?refund)\b|تم\s+استلام\s+طلب\s+(?:سداد|دفع|تحويل)/iu;
 const REQUEST_RECEIVED_BLANK_RE = new RegExp(REQUEST_RECEIVED_RE.source, 'giu');
 const REFUND_COMPLETED_CREDIT_RE = /(\brefund(?:ed)?\b(?:[^.\n]|\.(?=\S)){0,300}?)\b(?:has|have|had|was|were)\s+(?:been\s+)?(?:successfully\s+)?(?:credited|refunded|posted)\s+(?:back\s+)?(?:to|into|onto)\s+(?:your\b|the\s+(?:original\s+|same\s+)?(?:card|account|payment\s+(?:method|source))\b)/gi;
-const REFUND_CREDIT_CONDITIONAL_LEAD_RE = /\b(?:if|once|when|whenever|after|until|unless|whether|as\s+soon\s+as)\b/i;
+const REFUND_CREDIT_CONDITIONAL_LEAD_RE = /\b(?:if|once|when|whenever|after|until|unless|whether|as\s+soon\s+as)\b/gi;
+const governsRefundCredit = (lead) => {
+    const leaders = [...lead.matchAll(REFUND_CREDIT_CONDITIONAL_LEAD_RE)];
+    const last = leaders[leaders.length - 1];
+    return last !== undefined && !lead.slice(last.index + last[0].length).includes(',');
+};
 const REFUND_CREDIT_CONDITIONAL_INSIDE_RE = /\b(?:if|once|when|whenever|after|until|unless|whether)\b|\bas\s+soon\s+as\b/;
-const REFUND_CREDIT_REVERSED_TAIL_RE = /\b(?:in\s+error|reversed|will\s+be\s+(?:credited|refunded|reversed|debited|deducted|returned|posted))\b/i;
+const REFUND_CREDIT_REVERSED_RE = /\b(?:in\s+error|reversed)\b/i;
+const REFUND_CREDIT_LATER_RE = /\b(?:will\s+be\s+(?:credited|refunded|reversed|debited|deducted|returned|posted)|subject\s+to\s+(?:\w+\s+){0,2}(?:approval|review|confirmation|verification)|for\s+review|pending\s+(?:approval|review))\b/i;
 const REFUND_AMOUNT_RE = /(?:\b[A-Z]{3}\b|\bDhs?\.?|\bSR\b|[$€£])\s*(\d[\d,]*(?:\.\d+)?)/g;
 const REFUND_SENTENCE_BREAK_RE = /[.!?](?=\s|$)|\n/g;
-const refundAmounts = (text) => [...text.matchAll(REFUND_AMOUNT_RE)].map((match) => Number(match[1].replace(/,/g, '')));
+const REFUND_AMOUNT_AFTER_RE = /(\d[\d,]*(?:\.\d+)?)\s*(?:AED|SAR|USD|EUR|GBP|QAR|KWD|BHD|OMR|EGP|INR|PKR|JOD|Dhs?\b|SR\b)/g;
+const refundAmounts = (text) => [...text.matchAll(REFUND_AMOUNT_RE), ...text.matchAll(REFUND_AMOUNT_AFTER_RE)].map((match) => Number(match[1].replace(/,/g, '')));
+function refundRequestSentences(body) {
+    const parts = [];
+    for (const request of body.matchAll(REQUEST_RECEIVED_BLANK_RE)) {
+        const earlier = [...body.slice(0, request.index).matchAll(REFUND_SENTENCE_BREAK_RE)].pop();
+        const end = request.index + request[0].length;
+        const next = body.slice(end).search(REFUND_SENTENCE_BREAK_RE);
+        parts.push(body.slice(earlier ? earlier.index + 1 : 0, next < 0 ? body.length : end + next));
+    }
+    return parts.join(' ');
+}
 function hasCompletedRefundCredit(rest, request) {
     const requested = refundAmounts(request);
     for (const match of rest.matchAll(REFUND_COMPLETED_CREDIT_RE)) {
         const at = match.index;
         const breaks = [...rest.slice(0, at).matchAll(REFUND_SENTENCE_BREAK_RE)];
         const lead = rest.slice(breaks.length ? breaks[breaks.length - 1].index + 1 : 0, at);
-        if (REFUND_CREDIT_CONDITIONAL_LEAD_RE.test(lead) || REFUND_CREDIT_CONDITIONAL_INSIDE_RE.test(match[1]))
+        if (governsRefundCredit(lead) || REFUND_CREDIT_CONDITIONAL_INSIDE_RE.test(match[1]))
             continue;
-        const tail = rest.slice(at + match[0].length).split(REFUND_SENTENCE_BREAK_RE)[0];
-        if (REFUND_CREDIT_REVERSED_TAIL_RE.test(tail))
+        const remainder = rest.slice(at + match[0].length);
+        if (REFUND_CREDIT_REVERSED_RE.test(remainder) || REFUND_CREDIT_LATER_RE.test(remainder.split(REFUND_SENTENCE_BREAK_RE)[0]))
             continue;
         const credited = refundAmounts(match[0]);
         if (requested.some((amount) => !credited.includes(amount)))
@@ -12929,7 +12946,7 @@ function nonPostingReasonInBody(body, suppressible) {
     const requestReceived = REQUEST_RECEIVED_RE.test(body);
     const withoutRequest = requestReceived ? blank(blank(body, REQUEST_RECEIVED_BLANK_RE), FUTURE_CLAUSE_RE) : body;
     const settledRefund = (REFUND_RE.test(body) && (!requestReceived || REFUND_RE.test(withoutRequest))) ||
-        (requestReceived && hasCompletedRefundCredit(withoutRequest, [...body.matchAll(REQUEST_RECEIVED_BLANK_RE)].map((request) => request[0]).join(' ')));
+        (requestReceived && hasCompletedRefundCredit(withoutRequest, refundRequestSentences(body)));
     if (VERIFICATION_HOLD_DESCRIPTOR_RE.test(body))
         return 'preauthorisation';
     if (!settledRefund &&
