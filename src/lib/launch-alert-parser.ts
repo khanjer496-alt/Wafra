@@ -19,7 +19,7 @@ import {
   pinnedLedgerCurrencyCode,
 } from '@/lib/markets';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
-import { moneyNoticeKind, nonPostingReason, parseSmsBatch, type ParsedSms } from '@/lib/sms-parser';
+import { nonPostingReason, parseSmsBatch, type ParsedSms } from '@/lib/sms-parser';
 import type { CategoryId } from '@/lib/types';
 import { CURRENCY_SYMBOL_CANDIDATES, currencyMinorUnits } from '@/lib/currency-metadata';
 import { decideGulfNeighbourPosting, gulfNeighbourReadSource, isGulfNeighbourMarket } from '@/lib/gulf-neighbour-alerts';
@@ -218,7 +218,7 @@ export const inspectGenericBankEventForReview = (
     refusedOnlyByShopOrPromoWording(source, sender);
   const senderlessCard = noContext && !sender.trim() ? SENDERLESS_USED_CARD_HINT.exec(source) : null;
   const cardAdmitted = !!senderlessCard && namesOwnInstrumentTail(source, 'debit') &&
-    !moneyNoticeKind(source) && !nonPostingReason(source) && !isNotAutoPostableMoney(source) &&
+    !nonPostingReason(source) && !isNotAutoPostableMoney(source) &&
     !hasNonCompletedWording(source, null, '') && !hasLinkFromUnregisteredSender(source, '');
   if (noContext && !claimAdmitted && !footerAdmitted && !cardAdmitted) return null;
   const event = isGulfNeighbourMarket(market)
@@ -414,7 +414,7 @@ const universalCardPayment = (
   observedAt?: number,
 ): Omit<ParsedSms, 'raw' | 'bestEffort'> | null => {
   if (event.family !== 'card-payment' || event.decision !== 'review' ||
-    moneyNoticeKind(source) || nonPostingReason(source) || isNotAutoPostableMoney(source)) return null;
+    nonPostingReason(source) || isNotAutoPostableMoney(source)) return null;
   // An exact Latin American own card-bill template ("Pagaste ... en la tarjeta
   // de credito *4321 desde la cuenta *1234") names the paid card in Spanish.
   const latamCardPayment = event.family === 'card-payment' && isLatamOwnCardPayment(source);
@@ -966,7 +966,7 @@ export const createLaunchAlertSession = ({
     forcedMarket?: string,
     observedAt?: number,
   ): ParsedSms | null => {
-    if (moneyNoticeKind(source) || hasPersonalMessagePrefix(source) || hasNegatedPrincipalMovement(source)) return null;
+    if (hasPersonalMessagePrefix(source) || hasNegatedPrincipalMovement(source)) return null;
     // A BNPL provider's restatement of a bank card charge (see
     // bnpl-providers.ts). The regional path already refuses it; the
     // worldwide fallback below must not resurrect it on an unpinned ledger.
@@ -1046,7 +1046,7 @@ export const createLaunchAlertSession = ({
     inspection: UniversalAlertReview | null = null,
     observedAt?: number,
   ): ParsedSms | null => {
-    if (moneyNoticeKind(source) || hasPersonalMessagePrefix(source) || hasNegatedPrincipalMovement(source)) return null;
+    if (hasPersonalMessagePrefix(source) || hasNegatedPrincipalMovement(source)) return null;
     if (!bestEffort.enabled) return null;
     // Same rule as parse(): an SMS from a BNPL provider's sender ID reaches
     // this path (it is no launch-bank sender) and must not post as an

@@ -261,9 +261,7 @@ struct NativeBackgroundAlertParserTests {
     let object = try JSONSerialization.jsonObject(with: Data(contentsOf: metadata)) as! [String: Any]
     let hash = object["sourceHash"] as! String
     let runtime = WafraBackgroundAlertParserRuntime(scriptURL: script, metadataURL: metadata)
-    let domesticStarted = ProcessInfo.processInfo.systemUptime
     let domestic = await read(runtime, body: "Purchase of AED 24.86 with Debit Card ending 1234 at SAMPLE STORE.", sender: "ADCB", context: context(hash: hash))
-    print("Shipping domestic cold-read seconds: \(ProcessInfo.processInfo.systemUptime - domesticStarted); preview: \(domestic == nil ? "nil" : "present")")
     check("shipping resource preserves domestic source amount", domestic?.formattedAmount == "AED 24.86")
     let submillisecond = observedAt.addingTimeInterval(0.00075)
     let fractionalDomestic = await read(runtime, body: "Purchase of AED 24.86 with Debit Card ending 1234 at SAMPLE STORE.", sender: "ADCB", context: context(hash: hash), observedDate: submillisecond)
