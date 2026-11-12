@@ -3,12 +3,15 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const load = require('./load-typescript.cjs');
+const loadPure = require('../../universal-test/load-ts.cjs').createLoader();
 const root = path.resolve(__dirname, '../../..');
 
 function harness({ pinnedCurrency = 'AED', activeMarket = 'AE' } = {}) {
   let interpreterCalls = 0;
   let universalCalls = 0;
   const module = load(path.join(root, 'src/lib/launch-alert-parser.ts'), {
+    '@/lib/principal-posting-guards': loadPure('@/lib/principal-posting-guards'),
+    '@/lib/universal-money': loadPure('@/lib/universal-money'),
     '@/lib/alert-market-detection': { inspectUniversalAlert: () => null },
     '@/lib/alert-institution-grammars': {
       hasUniversalInstitutionSender: sender => sender === 'CHASE',

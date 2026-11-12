@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: bf187606ca0b173c36731bbcf233ff0377cc62704591cb79f688f796af77206d
+// Generated from normal shipping TypeScript. Source SHA-256: ffd3807e667d9d1aecd0e99dbf1d3e21790e73cb94c280d35721d3a5ff1dab19
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -1763,9 +1763,9 @@ const isCompactCardCreditReturn = (source) => /\bcr\b/iu.test(source) && /\bcard
     /\b(?:pos|(?:card\s+)?pur)\b/iu.test(source);
 const isCompletedCardPurchaseReturn = (source, legacy) => legacy.kind === 'transaction' && legacy.type === 'income' &&
     legacy.categoryGuess === 'other' && !legacy.transferHint &&
-    legacy.card !== null && legacy.card.kind !== 'account' &&
-    (/^(?:your\s+)?(?:card\s+|pos\s+)?purchase\s+of\b(?:[^.\n]|\.(?=\d)){0,160}?\b(?:with|using|on)\s+(?:your\s+)?(?:(?:credit|debit|covered)\s+)?card\s+(?:ending(?:\s+with)?\s+)?[x*\d -]{4,32}\s+(?:has\s+been|was)\s+(?:successfully\s+)?(?:reversed|refunded)\b/iu.test(source) ||
-        /^purchase\s+(?:amount|amt)\s+of\b(?:[^.\n]|\.(?=\d)){0,160}?\bon\s+your\s+(?:(?:credit|debit|covered|prepaid)\s+)?card(?:\s+(?:ending(?:\s+with)?\s+)?[x*\d -]{4,32})?\s+has\s+been\s+(?:successfully\s+|fully\s+)?refunded\b/iu.test(source)) &&
+    ((legacy.card !== null && legacy.card.kind !== 'account' &&
+        /^(?:your\s+)?(?:card\s+|pos\s+)?purchase\s+of\b(?:[^.\n]|\.(?=\S)){0,160}?\b(?:with|using|on)\s+(?:your\s+)?(?:(?:credit|debit|covered)\s+)?card\s+(?:ending(?:\s+with)?\s+)?[x*\d -]{4,32}(?:\s+at\s+(?:[^.\n]|\.(?=\S)){1,80}?)?\s+(?:has\s+been|was)\s+(?:successfully\s+)?(?:reversed|refunded)\b/iu.test(source)) ||
+        /^purchase\s+(?:amount|amt)\s+of\b(?:[^.\n]|\.(?=\S)){0,160}?\bon\s+your\s+(?:(?:(?:credit|debit|covered|prepaid)\s+)?card|account)(?:\s+(?:ending(?:\s+with)?\s+)?[x*\d -]{4,32})?\s+has\s+been\s+(?:successfully\s+|fully\s+)?refunded\b/iu.test(source)) &&
     !FUTURE_REFUND.test(source);
 const FUTURE_REFUND = /\bwill\s+be\s+(?:refunded|reversed|credited)\b/iu;
 const mistookInstrumentLast4ForAmount = (source, market, legacy) => {
@@ -1881,6 +1881,14 @@ const interpretBankAlert = ({ source, sender, market, overrides = {}, observedAt
                 categoryGuess: cashbackCategory, categoryDeliberate: true, categoryPinned: true,
             } : {}) }
         : capturedLegacy;
+    if ((0, sms_parser_1.refundSideNoteVerdict)(source) !== 'none') {
+        if (usableLegacy)
+            return legacyResult(usableLegacy);
+        const pending = (0, unparsed_launch_alert_1.inspectUnparsedLaunchAlert)(source, sender);
+        return pending.outcome === 'review'
+            ? finalFallback(pending, null)
+            : { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+    }
     const semanticText = (0, sms_parser_1.normalizeArabic)(source).replace(/\s+/gu, ' ');
     if (usableLegacy && isCompletedCardPurchaseReturn(semanticText, usableLegacy)) {
         return legacyResult(usableLegacy, 'refund');
@@ -2332,7 +2340,7 @@ function malformedLocalMoneyTokens(text, currencyAliases) {
 "best-effort-autopost":function(module,exports,require){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.appendBestEffortUndo = exports.tombstonesForRemoved = exports.bestEffortUndoKeys = exports.bestEffortCardPaymentObservationKey = exports.bestEffortObservationKey = exports.BEST_EFFORT_UNDO_CAP = exports.refusedOnlyByShopOrPromoWording = exports.hasNonCompletedWording = exports.namesOwnInstrumentTail = exports.isRegisteredAlertSender = exports.isUnverifiedAlertSender = exports.hasLinkFromUnregisteredSender = exports.isNotAutoPostableMoney = exports.sharedSymbolCurrencyForCountry = void 0;
+exports.appendBestEffortUndo = exports.tombstonesForRemoved = exports.bestEffortUndoKeys = exports.bestEffortCardPaymentObservationKey = exports.bestEffortObservationKey = exports.BEST_EFFORT_UNDO_CAP = exports.refusedOnlyByShopOrPromoWording = exports.hasNonCompletedWording = exports.namesOwnInstrumentTail = exports.isRegisteredAlertSender = exports.isUnverifiedAlertSender = exports.hasLinkFromUnregisteredSender = exports.isSafeCardRepaymentReviewSource = exports.isNotAutoPostableMoney = exports.sharedSymbolCurrencyForCountry = void 0;
 exports.decideBestEffortAutoPost = decideBestEffortAutoPost;
 exports.setBestEffortAutoPostEnabled = setBestEffortAutoPostEnabled;
 exports.bestEffortAutoPostEnabled = bestEffortAutoPostEnabled;
@@ -2340,6 +2348,7 @@ const currency_metadata_1 = require("@/lib/currency-metadata");
 const capture_source_identity_1 = require("@/lib/capture-source-identity");
 const fx_rates_1 = require("@/lib/fx-rates");
 const sms_parser_1 = require("@/lib/sms-parser");
+const principal_posting_guards_1 = require("@/lib/principal-posting-guards");
 const SHARED_SYMBOL_COUNTRY_CURRENCY = {
     US: 'USD', PR: 'USD', GU: 'USD', VI: 'USD', AS: 'USD', MP: 'USD', EC: 'USD', SV: 'USD',
     CA: 'CAD', AU: 'AUD', NZ: 'NZD', SG: 'SGD', HK: 'HKD', MX: 'MXN', AR: 'ARS', CL: 'CLP', CO: 'COP',
@@ -2504,6 +2513,7 @@ const hasLinkCallToAction = (source) => {
     return false;
 };
 const NOT_A_SETTLED_FACT = [
+    /^\s*(?:Dear\s+Customer[,!:]\s*)?(?:[^\n.!?\p{N}]{0,40}?[،,!:\s]\s*)?احصل\s+عل[ىي]\s+(?:استرداد|استرجاع)\s+نقدي/iu,
     /\bfraud\s+alert\b|(?<!\b(?:if|in\s+case|should)\b[^.!?\n]{0,60})\b(?:suspicious\s+(?:activity|transaction|charge|payment|login|purchase)|unusual\s+activity)\b|\bif\s+it\s+was\s+you\b|\bwas\s+this\s+you\b|\bwe\s+(?:have\s+)?(?:blocked|stopped|declined|locked)\b|(?<!\b(?:if|in\s+case|should|can|could|may)\b[^.!?\n]{0,60})\blocked\b|\bunder\s+review\b/iu,
     /\bearn\s+(?:up\s+to\s+)?(?:[$€£₹]\s?\d|\d[\d.,]*\s*(?:%|[A-Z]{3}\b))(?:[^.!?\n]|\.\d){0,40}?\b(?:when|every\s+time|each\s+time|for\s+every)\b|\btap\s+to\s+accept\b/iu,
     /\bdid\s+you\s+(?:authori[sz]e|make|attempt|use)\b|\breply\s+(?:y|yes|n|no|1|2)\b|(?<!\b(?:if|in\s+case|should)\b[^.!?\n]{0,40})\brecogni[sz]e\b|\bflagged\b|\bheld\b|\b(?:otp|one[-\s]time|verification|security)\s+code\b|(?<!\b(?:auth|authori[sz]ation|approval|merchant|branch|postal|zip|sort|mcc|promo|category|reference|ref|biller|bsb)\s+)\bcode\s*:?\s*\d{4,}\b/iu,
@@ -2519,10 +2529,20 @@ const NOT_A_NEW_MOVEMENT = [
 const MERCHANT_ORDER_RECEIPT = /\border\s*(?:#|no\.?|number|id)\s*[:.-]?\s*[A-Z0-9-]*\d[\s\S]{0,80}?\b(?:paid|payment)\b|\b(?:paid|payment)\b[\s\S]{0,40}?\border\s*(?:#|no\.?|number|id)\s*[:.-]?\s*[A-Z0-9-]*\d/iu;
 const OWN_BALANCE_STATED = /\b(?:updated|avl\.?|available|new|closing|current)\s+(?:wallet\s+|account\s+|a\/c\s+)?bal(?:ance)?\b|\bbal(?:ance)?\s*(?:is|:)\s*(?:[A-Z]{3}|Rs\.?|[$£€₹])/iu;
 const OWN_CARD_PAYMENT = /\b(?:[Yy]ou\s+)?paid\b(?:[^.\n]|\.\d){0,40}?\bto\s+your\s+(?:(?:[A-Z][\p{L}\p{N}&.'’-]*|credit|charge)\s+){0,4}?[Cc]ard\b/u;
-const isNotAutoPostableMoney = (source) => hasLinkCallToAction(source) || NOT_A_SETTLED_FACT.some((pattern) => pattern.test(neutraliseBenignShapes(source))) ||
-    NOT_A_NEW_MOVEMENT.some((pattern) => pattern.test(source)) ||
-    (MERCHANT_ORDER_RECEIPT.test(source) && !OWN_BALANCE_STATED.test(source));
+const notAutoPostableMoney = (source, repaymentReview) => {
+    if ((0, principal_posting_guards_1.hasClickLinkPrompt)(source) || (0, principal_posting_guards_1.hasMobileMoneyCallback)(source) || (0, principal_posting_guards_1.isUnqualifiedPeerTransferClaim)(source) ||
+        (0, principal_posting_guards_1.isUnpostedCardBalanceClaim)(source) || (0, principal_posting_guards_1.isLeadingNumericDiscountOffer)(source) ||
+        (!repaymentReview && (0, principal_posting_guards_1.isUnqualifiedCardRepayment)(source)) || hasLinkCallToAction(source))
+        return true;
+    const wording = neutraliseBenignShapes(source);
+    return NOT_A_SETTLED_FACT.some((pattern) => pattern.test(wording)) ||
+        NOT_A_NEW_MOVEMENT.some((pattern) => pattern.test(source)) ||
+        (MERCHANT_ORDER_RECEIPT.test(source) && !OWN_BALANCE_STATED.test(source));
+};
+const isNotAutoPostableMoney = (source) => notAutoPostableMoney(source, false);
 exports.isNotAutoPostableMoney = isNotAutoPostableMoney;
+const isSafeCardRepaymentReviewSource = (source) => ((0, principal_posting_guards_1.isUnqualifiedCardRepayment)(source) || (0, principal_posting_guards_1.isQualifiedCardRepaymentReceipt)(source)) && !notAutoPostableMoney(source, true);
+exports.isSafeCardRepaymentReviewSource = isSafeCardRepaymentReviewSource;
 const LINK_RE = /\bhttps?:\/\/|\bwww\.[a-z0-9-]|\b(?:bit\.ly|tinyurl\.com|t\.co|goo\.gl|cutt\.ly|rb\.gy|is\.gd|ow\.ly|shorturl\.at)\/|\b[a-z0-9][a-z0-9-]{0,62}\.[a-z]{2,24}\/[\w-]/u;
 const GENERIC_SENDER = /^(?:info|infos|alert|alerts|notice|notify|sms|msg|message|verify|secure|security|service|support|update|bank|banking)$/i;
 const registeredAlphaSender = (sender) => {
@@ -2603,7 +2623,7 @@ const PROMO_AND_SHOP_WORDING = [
     /\bwill\s+be\s+(?:added|delivered|shipped|dispatched)\b|\btrack\s+your\s+(?:order|parcel|package|shipment)\b|\border\s+(?:update|confirmed)\b/iu,
 ];
 const REFUND_AVAILABLE = /\brefund\b[^\n]{0,30}?\b(?:is|are)\s+(?:now\s+)?(?:available|ready)\b/iu;
-const hardNonCompletedWording = (source, market) => (0, sms_parser_1.nonPostingReason)(source) !== null || NON_COMPLETED_WORDING.some((pattern) => pattern.test(source)) ||
+const hardNonCompletedWording = (source, market) => (0, principal_posting_guards_1.isUnpostedCardBalanceClaim)(source) || (0, sms_parser_1.nonPostingReason)(source) !== null || NON_COMPLETED_WORDING.some((pattern) => pattern.test(source)) ||
     (!!market && LATAM_MARKETS.has(market) && LATAM_NON_COMPLETED_WORDING.some((pattern) => pattern.test(source))) ||
     TEMPORARY_HOLD.test(source) || (AUTHORISATION.test(source) && !COMPLETED.test(source));
 const softNonCompletedWording = (source, ownCompleted) => {
@@ -2620,7 +2640,12 @@ const EXECUTED_MANDATE_DEBIT = /(\b(?:has\s+been|was)\s+(?:debited|charged|deduc
 const CREDITED_TOWARDS_REVERSAL = /(\b(?:is|has\s+been|was)\s+(?:successfully\s+)?credited\s+with\b(?:[^.\n]|\.(?=\S)){0,80}?\btowards\s+)reversal\b/giu;
 const REVERSED_THEN_CREDITED_TO_YOU = /\brevers(?:al|ed|e)\b(?:[^.\n]|\.(?=\S)){0,200}?\b(?:is|has\s+been|was)\s+(?:successfully\s+)?credited\s+to\s+your\b/giu;
 const RECOGNISE_CALLBACK_FOOTER = /(?<!\p{L})(?:(?:don['’]t|do\s+not|didn['’]t)\s+recogni[sz]e\b[^.!?\n]{0,30}\?\s*(?=(?:call|contact|ring|phone)\b)|si\s+no\s+(?:lo\s+|la\s+)?reconoc(?:e|es)\b[^.!?\n]{0,60}?(?=\bllam(?:a|e|ar)\b)|n[ãa]o\s+reconhece\b[^.!?\n]{0,40}?\??\s*(?=(?:ligue|ligar)\b))/giu;
+const NUMERIC_DISCOUNT_CODE = /\b((?:use|enter)\s+)code(\s+\d{4,8}\s+to\s+get\s+\d{1,3}\s?%\s+off\b)/giu;
+const CODE_WARNING_NOUN = String.raw `(?:(?:(?:verification|security|authentication|one[-\s]?time)\s+)?codes?|otp(?:\s+code)?|pin|one[-\s]?time\s+password)`;
+const CODE_SAFETY_WARNING = new RegExp(String.raw `(^|[.!?;,\r\n:])\s*(?:please\s+)?(?:(?:do\s+not|don['’]t|never)\s+(?:share|disclose|reveal)\s+(?:(?:your|the|this)\s+)?${CODE_WARNING_NOUN}(?:\s+with\s+(?:anyone|anybody|others))?(?:,?\s+including\s+(?:bank\s+staff|bank\s+employees))?|keep\s+(?:(?:your|the|this)\s+)?${CODE_WARNING_NOUN}\s+confidential)(?=\s*(?:[.!?;\r\n]|$))`, 'giu');
 const neutraliseBenignShapes = (source) => source
+    .replace(CODE_SAFETY_WARNING, '$1 ')
+    .replace(NUMERIC_DISCOUNT_CODE, '$1promo code$2')
     .replace(CARD_PRODUCT_NAME, 'card')
     .replace(EXECUTED_MANDATE_DEBIT, '$1instruction')
     .replace(CREDITED_TOWARDS_REVERSAL, '$1refund')
@@ -7760,7 +7785,15 @@ const S = {
     reviewAlertPossibleNotificationReplay: { en: 'Possible repeat notification. Compare it with your saved transactions before adding.', ar: 'قد يكون هذا إشعاراً مكرراً. قارنه بمعاملاتك المحفوظة قبل إضافته.' },
     reviewAlertNotificationSource: { en: 'Notification capture', ar: 'التقاط الإشعارات' },
     reviewAlertPossibleApplePayDuplicate: { en: 'Possible Apple Pay duplicate. A matching Apple Pay purchase is already in your transactions.', ar: 'قد تكون عملية Apple Pay مكررة. توجد عملية Apple Pay مطابقة في معاملاتك بالفعل.' },
-    reviewAlertsFullWaiting: { en: 'Review is full — {count} alerts waiting. Add or dismiss alerts here to make room; waiting alerts are kept on this iPhone until then.', ar: 'قائمة المراجعة ممتلئة — {count} من التنبيهات بالانتظار. أضف تنبيهات أو تجاهلها هنا لإفساح المجال، وستبقى التنبيهات المنتظرة على هذا الآيفون حتى ذلك الحين.' },
+    historyReviewCapacityBody: {
+        en: 'Review is full. Review or dismiss saved alerts, then retry History. Existing expiry limits still apply.',
+        ar: 'قائمة المراجعة ممتلئة. راجع التنبيهات المحفوظة أو تجاهلها، ثم أعد محاولة السجل. تبقى حدود انتهاء الصلاحية سارية.',
+    },
+    historyReviewCapacityBodyIos: {
+        en: 'Review is full. Wafra keeps the messages this history run read for about 1 hour. Review or dismiss saved alerts and retry within that hour; after that, run the history Shortcut again. Existing expiry limits still apply.',
+        ar: 'قائمة المراجعة ممتلئة. تحتفظ وفرة بالرسائل التي قرأها تشغيل السجل هذا لمدة ساعة تقريباً. راجع التنبيهات المحفوظة أو تجاهلها ثم أعد محاولة استيراد السجل خلال هذه الساعة، وبعدها شغّل اختصار السجل مرة أخرى. تبقى حدود انتهاء الصلاحية سارية.',
+    },
+    reviewAlertsFullWaiting: { en: 'Review is full — {count} alerts waiting. Add or dismiss alerts here to make room. Waiting alerts stay on this iPhone for up to 30 days; after that they are counted as expired.', ar: 'قائمة المراجعة ممتلئة — {count} من التنبيهات بالانتظار. أضف تنبيهات أو تجاهلها هنا لإفساح المجال. تبقى التنبيهات المنتظرة على هذا الآيفون لمدة تصل إلى 30 يوماً، وبعد ذلك تُحتسب كمنتهية الصلاحية.' },
     reviewAlertsExpiredCount: { en: 'Expired before review in the last 30 days: {count}', ar: 'انتهت صلاحيتها قبل المراجعة خلال آخر 30 يوماً: {count}' },
     reviewAlertsEvictedCount: { en: 'Alerts that could not be kept for review because Review was full, in the last 30 days: {count}', ar: 'تنبيهات تعذّر الاحتفاظ بها للمراجعة لأن قائمة المراجعة كانت ممتلئة خلال آخر 30 يوماً: {count}' },
     reviewAlertsCurrencyEvictedCount: { en: 'Other-currency alerts not kept for review in the last 30 days: {count}. Review keeps the newest 50 waiting for an exchange rate.', ar: 'تنبيهات بعملة أخرى لم يُحتفظ بها للمراجعة خلال آخر 30 يوماً: {count}. تحتفظ المراجعة بأحدث 50 تنبيهاً بانتظار سعر الصرف.' },
@@ -9669,6 +9702,8 @@ const gulf_neighbour_alerts_1 = require("@/lib/gulf-neighbour-alerts");
 const universal_parser_1 = require("@/lib/universal-parser");
 const alert_market_packs_1 = require("@/lib/alert-market-packs");
 const alert_draft_1 = require("@/lib/alert-draft");
+const principal_posting_guards_1 = require("@/lib/principal-posting-guards");
+const universal_money_1 = require("@/lib/universal-money");
 const latam_alert_templates_1 = require("@/lib/latam-alert-templates");
 const universal_categorization_1 = require("@/lib/universal-categorization");
 const fx_rates_1 = require("@/lib/fx-rates");
@@ -9696,8 +9731,23 @@ const GENERIC_BANK_CONTEXT = /\b(?:(?:credit|debit|covered|prepaid|charge)\s+car
 const MONEY_ARRIVED_CLAIM = /(?<!\p{L})(?:you\s+have\s+received|you\s+received|received\s+(?:from|for)|(?:is|has\s+been|was)\s+credited|credited\s+(?:to|in|into|with)|deposited|refund(?:ed)?|recebeu|recebid[oa]|creditad[oa]|estorno|recibiste|recibid[oa]|te\s+(?:envi[óo]|ha\s+enviado)|yape[óo]|abonad[oa]|acreditad[oa]|reembolso|devoluci[óo]n|re[çc]u|cr[ée]dit[ée]e?|gutgeschrieben|diterima|dikreditkan)(?!\p{L})/iu;
 const MONEY_CLAIM_EVIDENCE = /(?<!\p{L})(?:\p{L}*bank|banco|banque|wallet|carteira|billetera|account|acct|a\/c|conta|cuenta|compte|konto|rekening|balance|bal|avl|saldo|solde|ref(?:erence)?|txn|trx|tid|transaction|transfer|transferencia|transfer[êe]ncia|virement|[ée]-?transfer|pix|spei|aani|sarie|yape|plin|nequi|daviplata|m-?pesa|mpesa|upi|imps|neft|rtgs|zelle|interac|gcash|maya|paytm|jazzcash|easypaisa|momo|airtel\s+money)(?!\p{L})/iu;
 const TRANSACTION_CODE = /\b(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{8,12}\b/u;
-const PERSONAL_MESSAGE_PREFIX_RE = /^\s*(?:(?:hi|hey|hello)\b(?:[^\r\n.!?]{0,40}[,!:]|\s+)\s*)?(?:I(?:\s+(?:(?:have|just|already)\s+){0,2}|['’]ve\s+(?:(?:just|already)\s+)?)(?:spent|paid|bought|sent|deposited|transferred|refunded)\b|[اأ]نا\s+(?:(?:قد|لقد)\s+)?(?:صرفت|دفعت|اشتريت|حولت|حوّلت|أرسلت|ارسلت)(?=\s))/iu;
-const hasPersonalMessagePrefix = (source) => PERSONAL_MESSAGE_PREFIX_RE.test(source);
+const hasPersonalMessagePrefix = (source, sender = '') => {
+    const text = source.replace(/^\s*Dear\s+Customer[,!:]\s*/iu, '');
+    if ((0, principal_posting_guards_1.hasExplicitPersonalMoneyClaim)(text))
+        return true;
+    if (!/^\s*(?:(?:hi|hey|hello|lol|ok|just|so)\b[\s,!:]*)*(?:paid|spent|received)\b/iu.test(text))
+        return false;
+    if (/\b(?:my\s+(?:account|card)|from\s+(?:me|you)|lol|remind\s+me)\b/iu.test(text))
+        return true;
+    const personalThanks = (0, exports.isUnaccountableLaunchSender)(sender)
+        ? /\bthanks\b/iu : /\bthanks\b(?!\s+for\s+(?:banking|choosing)\b)/iu;
+    if (personalThanks.test(text))
+        return true;
+    const lacksBankEvidence = !GENERIC_BANK_CONTEXT.test(text) &&
+        !MONEY_CLAIM_EVIDENCE.test(text) && !TRANSACTION_CODE.test(text);
+    return lacksBankEvidence && (/\b(?:for\s+(?:lunch|dinner|breakfast|the\s+taxi)|on\s+groceries\s+today)\b/iu.test(text) ||
+        (0, exports.isUnaccountableLaunchSender)(sender));
+};
 exports.hasPersonalMessagePrefix = hasPersonalMessagePrefix;
 const NEGATED_PRINCIPAL_MOVEMENT_RE = /^\s*(?:Dear\s+Customer[,!:]\s*)?((?:[A-Z]{3}|\p{Sc})\s*\d[\d,.]*)\s+(?:(?:has|have)\s+not\s+been|hasn['’]t\s+been|(?:was|were|is|are)\s+not|(?:was|were|is|are)n['’]t)\s+(?:transferred|debited|credited|deducted|charged|withdrawn|paid|deposited|refunded)\b/iu;
 const hasNegatedPrincipalMovement = (source) => {
@@ -9727,7 +9777,8 @@ const hasGenericBankAlertContext = (source, sender = '') => {
 exports.hasGenericBankAlertContext = hasGenericBankAlertContext;
 const SENDERLESS_USED_CARD_HINT = /^\s*your\s+(?:cr\.\s*)?card\s+(?:[*xX•·]{1,24}\s*)?(\d{4})(?![\p{L}\p{N}]|[ \t-]+\d)[ \t]+(?:was|has[ \t]+been)[ \t]+used[ \t]+for\b/iu;
 const inspectGenericBankEventForReview = (source, sender = '', market, sourceContext) => {
-    if ((0, exports.hasPersonalMessagePrefix)(source) || hasNegatedPrincipalMovement(source))
+    if ((0, exports.hasPersonalMessagePrefix)(source, sender) || hasNegatedPrincipalMovement(source) ||
+        (0, principal_posting_guards_1.isUnpostedCardBalanceClaim)(source))
         return null;
     const noContext = !(0, exports.hasGenericBankAlertContext)(source, sender) && !(0, latam_alert_templates_1.matchLatamTemplate)(source, { sender });
     const claimAdmitted = noContext && (!sender.trim() || (0, best_effort_autopost_1.isUnverifiedAlertSender)(sender)) &&
@@ -9739,18 +9790,42 @@ const inspectGenericBankEventForReview = (source, sender = '', market, sourceCon
     const cardAdmitted = !!senderlessCard && (0, best_effort_autopost_1.namesOwnInstrumentTail)(source, 'debit') &&
         !(0, sms_parser_1.nonPostingReason)(source) && !(0, best_effort_autopost_1.isNotAutoPostableMoney)(source) &&
         !(0, best_effort_autopost_1.hasNonCompletedWording)(source, null, '') && !(0, best_effort_autopost_1.hasLinkFromUnregisteredSender)(source, '');
-    if (noContext && !claimAdmitted && !footerAdmitted && !cardAdmitted)
+    let cardCreditAliases;
+    const creditSource = /[\uFB50-\uFDFF\uFE70-\uFEFF]/u.test(source) ? (0, alert_draft_1.normalizeAlertText)(source) : source;
+    const heldRepayment = (0, principal_posting_guards_1.isUnqualifiedCardRepayment)(creditSource) || (0, principal_posting_guards_1.isQualifiedCardRepaymentReceipt)(creditSource);
+    const cardBalanceReceipt = (0, principal_posting_guards_1.isCompletedCardBalanceReceipt)(creditSource);
+    const safeCardBalanceReview = !(0, sms_parser_1.nonPostingReason)(source) &&
+        !(0, best_effort_autopost_1.hasNonCompletedWording)(source, null, sender) && !(0, best_effort_autopost_1.hasLinkFromUnregisteredSender)(source, sender) &&
+        (heldRepayment ? (0, best_effort_autopost_1.isSafeCardRepaymentReviewSource)(source) : !(0, best_effort_autopost_1.isNotAutoPostableMoney)(source));
+    if (cardBalanceReceipt && safeCardBalanceReview && (heldRepayment ||
+        (0, principal_posting_guards_1.isUnqualifiedCardCredit)(creditSource, { start: 0, end: creditSource.length }))) {
+        const active = (0, markets_1.getActiveMarket)().id;
+        const launch = (0, markets_1.detectLaunchMarketFromSender)(sender) ??
+            (isAbsentLaunchSender(sender) && (active === 'AE' || active === 'SA')
+                ? (0, markets_1.detectLaunchMarketFromAlert)(source) : null);
+        if (launch)
+            cardCreditAliases = (0, universal_money_1.unqualifiedCardCreditCurrencyAliases)(source, launch, sourceContext?.currencyAliases);
+    }
+    if (noContext && !claimAdmitted && !footerAdmitted && !cardAdmitted && !cardCreditAliases)
         return null;
-    const event = (0, gulf_neighbour_alerts_1.isGulfNeighbourMarket)(market)
-        ? (0, universal_parser_1.inspectUniversalBankEvent)((0, gulf_neighbour_alerts_1.gulfNeighbourReadSource)(source, market), {
-            sender, market, dateOrder: (0, country_1.dateOrderForCountry)(market) ?? undefined,
-        })
-        : (0, universal_parser_1.inspectUniversalBankEvent)(source, sourceContext
-            ? { ...sourceContext, sender }
+    const context = (0, gulf_neighbour_alerts_1.isGulfNeighbourMarket)(market)
+        ? { sender, market, dateOrder: (0, country_1.dateOrderForCountry)(market) ?? undefined }
+        : sourceContext ? { ...sourceContext, sender }
             : (0, exports.universalSourceParseContext)((0, alert_institution_grammars_1.hasUniversalInstitutionSender)(sender)
-                ? (0, alert_market_detection_1.inspectUniversalAlert)({ source, sender }) : null, sender, (0, country_1.getActiveCountry)()));
+                ? (0, alert_market_detection_1.inspectUniversalAlert)({ source, sender }) : null, sender, (0, country_1.getActiveCountry)());
+    let event = (0, universal_parser_1.inspectUniversalBankEvent)((0, gulf_neighbour_alerts_1.isGulfNeighbourMarket)(market)
+        ? (0, gulf_neighbour_alerts_1.gulfNeighbourReadSource)(source, market) : source, cardCreditAliases
+        ? { ...context, currencyAliases: { ...cardCreditAliases, ...context.currencyAliases } } : context);
     if (event.decision !== 'review')
         return null;
+    if (cardCreditAliases) {
+        if (event.status !== 'posted' && event.status !== 'unknown')
+            return null;
+        event = { ...event, status: 'posted', family: 'card-payment' };
+    }
+    else if (heldRepayment && safeCardBalanceReview && (event.status === 'posted' || event.status === 'unknown')) {
+        event = { ...event, family: 'card-payment' };
+    }
     const hasOtherCardMoney = cardAdmitted && event.observations.some(observation => observation.role !== 'transaction' && observation.role !== 'credit-limit');
     if (cardAdmitted && (event.family !== 'purchase' || event.status !== 'posted' || event.direction !== 'debit' ||
         event.amount.evidence !== 'explicit' || !event.amount.value || event.amount.spans.length !== 1 ||
@@ -9762,7 +9837,7 @@ const inspectGenericBankEventForReview = (source, sender = '', market, sourceCon
     if (hasNativeCurrencyAccountContext(source) && !(0, exports.hasBankAlertMoneyHint)(source) &&
         (event.amount.evidence !== 'explicit' || event.amount.value?.currency !== 'ZAR'))
         return null;
-    if (noContext && !((event.direction === 'credit' || ((footerAdmitted || cardAdmitted) && event.direction === 'debit')) &&
+    if (noContext && !cardCreditAliases && !((event.direction === 'credit' || ((footerAdmitted || cardAdmitted) && event.direction === 'debit')) &&
         event.status === 'posted' && event.amount.evidence !== 'missing'))
         return null;
     const hasGroundedMoney = event.amount.evidence !== 'missing' ||
@@ -9865,7 +9940,7 @@ const sourceNamesPaidCreditCard = (source, event, last4) => {
 };
 const universalCardPayment = (source, event, ledgerCurrency, ledgerExponent, country, observedAt) => {
     if (event.family !== 'card-payment' || event.decision !== 'review' ||
-        (0, sms_parser_1.nonPostingReason)(source) || (0, best_effort_autopost_1.isNotAutoPostableMoney)(source))
+        (0, sms_parser_1.nonPostingReason)(source) || ((0, best_effort_autopost_1.isNotAutoPostableMoney)(source) && !(0, best_effort_autopost_1.isSafeCardRepaymentReviewSource)(source)))
         return null;
     const latamCardPayment = event.family === 'card-payment' && (0, latam_alert_templates_1.isLatamOwnCardPayment)(source);
     if (NOT_CARD_OBLIGATION.test(source) || (!CREDIT_CARD_WORDS.test(source) && !latamCardPayment))
@@ -10128,18 +10203,23 @@ const sharedSenderOutsideGulf = (source, inspection, pinnedCurrency, sender = ''
         .map((match) => match[1]).filter((code) => (0, currency_metadata_1.currencyMinorUnits)(code) !== null));
     return codes.size === 1 && codes.has(pinnedCurrency);
 };
-const isUnaccountableLaunchSender = (sender) => !sender.trim() || (0, best_effort_autopost_1.isUnverifiedAlertSender)(sender);
+const isAbsentLaunchSender = (sender) => !sender.trim() || /^Wafra (?:Automation|Notification)$/.test(sender.trim());
+const isUnaccountableLaunchSender = (sender) => isAbsentLaunchSender(sender) || (0, best_effort_autopost_1.isUnverifiedAlertSender)(sender);
 exports.isUnaccountableLaunchSender = isUnaccountableLaunchSender;
 const isHeldLaunchCredit = (source, sender, parsed) => !!parsed && (0, exports.isUnaccountableLaunchSender)(sender) && parsed.kind === 'transaction' && parsed.type === 'income' &&
-    !(0, best_effort_autopost_1.isNotAutoPostableMoney)(source) && !(0, best_effort_autopost_1.namesOwnInstrumentTail)(source, 'credit');
+    !(0, best_effort_autopost_1.isNotAutoPostableMoney)(source) && ((0, best_effort_autopost_1.isUnverifiedAlertSender)(sender) || !(0, best_effort_autopost_1.namesOwnInstrumentTail)(source, 'credit'));
 exports.isHeldLaunchCredit = isHeldLaunchCredit;
 const launchSenderAnswersFor = (source, sender, parsed) => {
-    if (sender.trim() && !(0, best_effort_autopost_1.isUnverifiedAlertSender)(sender))
-        return true;
+    const provedSettlement = parsed.kind === 'cardPayment' && parsed.transferHint === true &&
+        parsed.card?.kind === 'credit' && /^\d{4}$/u.test(parsed.card.last4) &&
+        parsed.currency === (0, markets_1.pinnedLedgerCurrencyCode)() && parsed.fxSource !== 'fallback' &&
+        (0, best_effort_autopost_1.isSafeCardRepaymentReviewSource)(source) && !(0, best_effort_autopost_1.hasNonCompletedWording)(source, null, sender);
+    if ((0, best_effort_autopost_1.isNotAutoPostableMoney)(source) && !provedSettlement)
+        return false;
+    if (!isAbsentLaunchSender(sender))
+        return !(0, best_effort_autopost_1.isUnverifiedAlertSender)(sender);
     if (parsed.kind !== 'transaction')
         return true;
-    if ((0, best_effort_autopost_1.isNotAutoPostableMoney)(source))
-        return false;
     return parsed.type !== 'income' || (0, best_effort_autopost_1.namesOwnInstrumentTail)(source, 'credit');
 };
 const createLaunchAlertSession = ({ overrides, regionHint = null, pinnedCurrency = (0, markets_1.pinnedLedgerCurrencyCode)(), activeMarket = (0, markets_1.getActiveMarket)().id, fxLookup = (base, quote, date) => (0, fx_rates_1.cachedReferenceQuote)(base, quote, date), bestEffort = { enabled: (0, best_effort_autopost_1.bestEffortAutoPostEnabled)(), country: (0, country_1.getActiveCountry)() }, }) => {
@@ -10152,7 +10232,7 @@ const createLaunchAlertSession = ({ overrides, regionHint = null, pinnedCurrency
     let sessionMarket = pinnedCurrency === 'AED' ? 'AE' : pinnedCurrency === 'SAR' ? 'SA' : null;
     let detected = null;
     const inspect = (source, sender) => {
-        if ((0, exports.hasPersonalMessagePrefix)(source) || hasNegatedPrincipalMovement(source))
+        if ((0, exports.hasPersonalMessagePrefix)(source, sender) || hasNegatedPrincipalMovement(source))
             return null;
         if (!exports.REVIEW_MONEY_HINT.test(source))
             return null;
@@ -10203,7 +10283,7 @@ const createLaunchAlertSession = ({ overrides, regionHint = null, pinnedCurrency
         return result;
     };
     const parse = (source, sender, inspection = null, forcedMarket, observedAt) => {
-        if ((0, exports.hasPersonalMessagePrefix)(source) || hasNegatedPrincipalMovement(source))
+        if ((0, exports.hasPersonalMessagePrefix)(source, sender) || hasNegatedPrincipalMovement(source))
             return null;
         if ((0, bnpl_providers_1.isBnplProviderSource)(sender))
             return null;
@@ -10244,7 +10324,7 @@ const createLaunchAlertSession = ({ overrides, regionHint = null, pinnedCurrency
         });
     };
     const parseUnproven = (source, sender, inspection = null, observedAt) => {
-        if ((0, exports.hasPersonalMessagePrefix)(source) || hasNegatedPrincipalMovement(source))
+        if ((0, exports.hasPersonalMessagePrefix)(source, sender) || hasNegatedPrincipalMovement(source))
             return null;
         if (!bestEffort.enabled)
             return null;
@@ -10847,7 +10927,7 @@ function setActiveMarket(id) {
     active = id === country_1.NEUTRAL_MARKET_ID ? NEUTRAL : exports.MARKETS.find((m) => m.id === id);
     return true;
 }
-const AED_ALERT = /\b(?:AED|Dhs?\.?)\b|د\.?[إا]\.?|دراهم|درهم/iu;
+const AED_ALERT = /\b(?:AED|Dhs?\.?)\b|(?<![ء-ي])د\.?[إا]\.?(?![ء-ي])|دراهم|درهم/iu;
 const SAR_ALERT = /\b(?:SAR|SR)\b|ر\.?\s?س\.?|ريال/iu;
 const SAR_GLUED_ALERT = /(?<=\d)(?:SAR|SR)\b/iu;
 const AED_GLUED_ALERT = /(?<![^\s(:])AED(?=[0-9][0-9,]*(?:\.[0-9]+)?(?![0-9A-Za-z]))|(?<![^\s(:])[0-9][0-9,]*(?:\.[0-9]+)?AED\b/u;
@@ -11031,11 +11111,92 @@ function bankMonogram(name) {
 "principal-posting-guards":function(module,exports,require){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.isUnqualifiedPeerTransferClaim = void 0;
+exports.hasClickLinkPrompt = hasClickLinkPrompt;
+exports.hasOnlyWordLinkPrompts = hasOnlyWordLinkPrompts;
+exports.blankWordLinkPrompts = blankWordLinkPrompts;
+exports.hasExplicitPersonalMoneyClaim = hasExplicitPersonalMoneyClaim;
+exports.isLeadingNumericDiscountOffer = isLeadingNumericDiscountOffer;
+exports.hasMobileMoneyCallback = hasMobileMoneyCallback;
 exports.isIncompletePrincipal = isIncompletePrincipal;
 exports.isHedgedPrincipal = isHedgedPrincipal;
 exports.refundPrincipalStatus = refundPrincipalStatus;
 exports.isCompletedPrincipalRefund = isCompletedPrincipalRefund;
+exports.isQualifiedCardRepaymentReceipt = isQualifiedCardRepaymentReceipt;
+exports.isUnqualifiedCardRepayment = isUnqualifiedCardRepayment;
+exports.isUnpostedCardBalanceClaim = isUnpostedCardBalanceClaim;
+exports.isCompletedCardBalanceReceipt = isCompletedCardBalanceReceipt;
+exports.isCompletedCardRepaymentPrincipal = isCompletedCardRepaymentPrincipal;
 exports.isUnqualifiedCardCredit = isUnqualifiedCardCredit;
+const CLICK_LINK_PROMPT = /(?:\b(?:click(?:ing)?|tap(?:ping)?|verify|confirm|update\s+(?:(?:your|the)\s+)?(?:details|information|credentials|account))\b[\s:：]+|(?<![ء-ي])(?:اضغط|إضغط|انقر)[\s:：]+)(?:[^.!?]|\.\d){0,120}?(?:(?:https?|hxxps?):\/\/|\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:[\/?#:]|\b)|www\.|\b(?:here|below|link|url)\b|الرابط|هنا)/giu;
+const ISSUER_MERCHANT_DEBIT_CONFIRMATION = /^confirm\s+that\s+[A-Z]{3}\s+\d[\d,.]*\s+was\s+debited\s+from\s+your\s+account\s+ending\s+\d{4}\s+for\s+(?:a\s+)?purchase\s+at\s+(?:[a-z0-9-]+\.)+[a-z]{2,}$/iu;
+const ISSUER_MERCHANT_HOST_END = /^(?:\*[A-Z0-9]{1,24})?["'”’»)\]]*[.!?;,。、،؛؟۔…]*(?:[^\S\uFEFF]|$)/iu;
+function countsAsLinkPrompt(source, match) {
+    const before = source.slice(Math.max(0, match.index - 60), match.index);
+    if (/(?:\b(?:do\s+not|don['’]t|never|avoid|refrain\s+from)\s+(?:ever\s+)?|\b(?:at|from|merchant\s*:?)\s+|(?:لا|عدم)\s+)$/iu.test(before))
+        return false;
+    return !(ISSUER_MERCHANT_DEBIT_CONFIRMATION.test(match[0]) &&
+        ISSUER_MERCHANT_HOST_END.test(source.slice(match.index + match[0].length)) &&
+        /(?:^|[.!?])\s*(?:Dear\s+Customer[,\s]+)?we\s+$/iu.test(source.slice(0, match.index)));
+}
+function hasClickLinkPrompt(source) {
+    for (const match of source.matchAll(CLICK_LINK_PROMPT))
+        if (countsAsLinkPrompt(source, match))
+            return true;
+    return false;
+}
+const WORD_ONLY_LINK_TARGET = /(?:\b(?:here|below|link|url)|الرابط|هنا)$/iu;
+const MESSAGE_NAMES_AN_ADDRESS = /(?:https?|hxxps?):\/\/|\bwww\.|\b(?:[a-z0-9-]+\.)+[a-z]{2,}\/\S/iu;
+function hasOnlyWordLinkPrompts(source) {
+    if (MESSAGE_NAMES_AN_ADDRESS.test(source))
+        return false;
+    const counted = [...source.matchAll(CLICK_LINK_PROMPT)].filter((match) => countsAsLinkPrompt(source, match));
+    return counted.length > 0 && counted.every((match) => WORD_ONLY_LINK_TARGET.test(match[0]));
+}
+function blankWordLinkPrompts(source) {
+    if (!hasOnlyWordLinkPrompts(source))
+        return source;
+    let out = source;
+    for (const match of source.matchAll(CLICK_LINK_PROMPT)) {
+        if (!countsAsLinkPrompt(source, match))
+            continue;
+        out = out.slice(0, match.index) + ' '.repeat(match[0].length) + out.slice(match.index + match[0].length);
+    }
+    return out;
+}
+const FIRST_PERSON_MONEY = /^\s*(?:(?:hi|hey|hello)\b(?:[^\r\n.!?]{0,40}[,!:]|\s+)\s*)?(?:I(?:\s+(?:(?:have|just|already)\s+){0,2}|['’]ve\s+(?:(?:just|already)\s+)?)(?:spent|paid|bought|sent|deposited|transferred|refunded)\b|[اأ]نا\s+(?:(?:قد|لقد)\s+)?(?:صرفت|دفعت|اشتريت|حولت|حوّلت|أرسلت|ارسلت)(?=\s))/iu;
+function hasExplicitPersonalMoneyClaim(source) {
+    const text = source.replace(/^\s*Dear\s+Customer[,!:]\s*/iu, '');
+    if (FIRST_PERSON_MONEY.test(text) || /^\s*they\s+charged\s+me\b/iu.test(text))
+        return true;
+    if (!/^\s*(?:(?:hi|hey|hello|lol|ok|just|so)\b[\s,!:]*)*(?:paid|spent|received)\b/iu.test(text))
+        return false;
+    if (/\b(?:card|account|acct?|a\/c|balance|bal|avl|reference|ref|transaction|txn)\b/iu.test(text))
+        return false;
+    return /^\s*lol\b/iu.test(text) ||
+        /\b(?:for\s+(?:lunch|dinner|breakfast|the\s+taxi)|on\s+groceries\s+today)\b/iu.test(text);
+}
+function isLeadingNumericDiscountOffer(source) {
+    return /^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?(?:use|enter)\s+(?:code\s+)?\d{4,8}\s+to\s+get\s+\d{1,3}\s?%\s+off\b/iu.test(source) ||
+        (source.includes('خصم') && /^\s*(?:Dear\s+Customer[,!:]\s*)?(?:[^\n.!?\p{N}]{0,40}?[،,!:\s]\s*)?(?:استمتع\s+ب)?خصم\s*\p{Nd}{1,3}\s*[%٪]/iu.test(source));
+}
+const isUnqualifiedPeerTransferClaim = (source) => /^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?transferred\b(?:[^.\n]|\.\d){0,96}?\bto\s+(?:you|u)\b/iu.test(source);
+exports.isUnqualifiedPeerTransferClaim = isUnqualifiedPeerTransferClaim;
+const MOBILE_MONEY_CALLBACK = /\b(?:call|phone|ring|contact)\s+(?:(?:us|me|support|on|at)\s+){0,3}(?:\+|00)(?:971|966)[\s().-]*5(?:[\s().-]*\d){8}(?![\s().-]*\d)/giu;
+function hasMobileMoneyCallback(source) {
+    if (!/(?:\+|00)(?:971|966)/u.test(source))
+        return false;
+    for (const match of source.matchAll(MOBILE_MONEY_CALLBACK)) {
+        const before = source.slice(Math.max(0, match.index - 60), match.index);
+        if (/\b(?:do\s+not|don['’]t|never|avoid)\s*$/iu.test(before))
+            continue;
+        const after = source.slice(match.index + match[0].length, match.index + match[0].length + 60);
+        if (/^\s*(?:to|for)\s+(?:cancel|verify|confirm|approve|authori[sz]e|secure|unblock|release)\b/iu.test(after) ||
+            /\bto\s+(?:cancel|verify|confirm|approve|authori[sz]e|secure|unblock|release)[^.!?\n]{0,30}$/iu.test(before))
+            return true;
+    }
+    return false;
+}
 const MOVEMENT_STATUS = /\bincomplete\s+(?:transaction|txn|purchase|payment|transfer|withdrawal)\b|\b(?:transaction|txn|purchase|payment|transfer|withdrawal)(?:\s+(?:of|for|at|to|from|with|on)\b(?:[^.\n]|\.\d){0,80}?)?\s+(?:was|is|remains?|has\s+been)\s+incomplete\b|\b(?:transaction|txn|purchase|payment|authori[sz]ation)\b(?:[^.\n]|\.\d){0,100}?\s(?:cancell?ed|voided)\s+by\s+(?:the\s+)?(?:merchant|bank|issuer|acquirer)\b|\b(?:transaction|txn|purchase|payment|authori[sz]ation)\b(?:[^.\n]|\.\d){0,100}?\s(?:will\s+be|is\s+being)\s+(?:cancell?ed|voided)\b|[ \t][-–—:|][ \t]*(?:void|voided|cancell?ed)[ \t]*(?=\n|$)|[ \t]*[,:(][ \t]*(?:cancell?ed|voided|void)[ \t]*\)?[ \t]*(?=[.\n]|$)|(?<![ء-ي])(?:تم\s+)?(?:الغاء|ايقاف|تعليق)\s+(?:ال)?(?:عمليه|شراء|دفع|تحويل|حواله|سحب|معامله|حركه)(?![ء-ي])|(?<![ء-ي])(?:الغيت|اوقفت|علقت)\s+(?:ال)?(?:عمليه|شراء|دفع|تحويل|حواله|سحب|معامله|حركه)(?![ء-ي])|(?<![ء-ي])(?:ال)?(?:عمليه|معامله|شراء|دفع|تحويل|حواله|سحب|حركه)\s+(?:غير\s+(?:ناجح|مكتمل)ه?|لم\s+(?:تكتمل|يكتمل|تنجح)|(?:ال)?(?:ملغي|ملغا|ملغاه|موقوف[هة]?))(?![ء-ي])|(?<![ء-ي])(?:و?تم|قد\s+تم)\s+(?:الغاو|الغاي|ايقاف|تعليق)(?:ها|ه)(?![ء-ي])|(?<![ء-ي])تم\s+(?:ال)?الغاء(?![ء-ي])|(?<![ء-ي])لم\s+(?:تكتمل|يكتمل|تنجح)(?![ء-ي])/gi;
 const CONDITIONAL_STATUS = /(?:\b(?:if|unless|please|pls|to|can|may|should)\b|(?<![ء-ي])(?:يرجي|الرجاء|رجاء|يمكنك|يمكنكم|يمكن|بامكانك|بامكانكم|اتصل|ارسل|للابلاغ|لطلب|طلب|خدمه|اذا|حال|تود|ترغب|عليك)(?![ء-ي]))(?:\s+(?:او|و|ب|في|علي|عن|من|كانت|كان|or|and))?(?:\s+\d{1,4})?\s*$/i;
 function isIncompletePrincipal(source, span) {
@@ -11108,6 +11269,10 @@ function continuesRefund(text) {
 const SAME_MONEY_REFERENCE = /^\s*(?:[(\[/=≈~]|equivalent(?:\s+to)?|equiv\.?|approx\.?|i\.?e\.?|بما\s+يعادل|ما\s+يعادل|يعادل)\s*$/i;
 const ORIGINAL_MOVEMENT_REFERENCE = /\b(?:for|against|on|of)\s+(?:your|the)\s+(?:original\s+|earlier\s+|previous\s+)?(?:purchase|transaction|payment|charge|order)\s+(?:of|for)?\s*$|(?:لعمليه|عن\s+عمليه|من\s+عمليه)\s+(?:ال)?شراء\s+(?:بمبلغ|بقيمه)?\s*$/i;
 const ORIGINAL_MOVEMENT_CLAUSE = /\b(?:for|against|on|of)\s+(?:your|the)\s+(?:original\s+|earlier\s+|previous\s+)?(?:purchase|transaction|payment|charge|order)\b|(?:لعمليه|عن\s+عمليه|من\s+عمليه)\s+(?:ال)?شراء(?=\s)/iu;
+const NAME_BEFORE_AND = /^\s*(?:from|at|to|with|via|by)\s+(?:\p{Lu}[\p{L}\p{N}&.'’-]*\s+)+$/u;
+const NAME_AFTER_AND = /^\p{Lu}[\p{L}\p{N}&.'’-]*(?=\s|$)/u;
+const CLAUSE_OPENER = /^(?:a|an|the|your|this|that|our|my|his|her|its|their|another|separate|additional|new|it|we|you|they|i)(?=\s|$)/iu;
+const isNameJoin = (coordinator, before, after) => /^and\s+$/iu.test(coordinator) && NAME_BEFORE_AND.test(before) && NAME_AFTER_AND.test(after) && !CLAUSE_OPENER.test(after);
 function refundScope(source, own, monetarySpans) {
     const sentence = sentenceAround(source, own, true);
     let end = sentence.end;
@@ -11124,6 +11289,8 @@ function refundScope(source, own, monetarySpans) {
             continue;
         const head = subject[1];
         if (continuesRefund(head) || OPEN_ARGUMENT.test(source.slice(own.end, at)))
+            continue;
+        if (isNameJoin(boundary[0], source.slice(own.end, at), source.slice(at + boundary[0].length, end)))
             continue;
         end = at;
         independentSubject = true;
@@ -11223,6 +11390,83 @@ function isCompletedPrincipalRefund(source, span) {
 }
 const CARD_CREDIT_TARGET = /\bcredit\s+card\b|بطاق(?:تك|ه|ة)\s+(?:ال)?ا[يئ]تماني[هة]/iu;
 const CARD_CREDIT_MOVEMENT = /\bcredited(?:\s+with|\s+to)?\b|(?<![ء-ي])(?:تم\s+)?(?:إيداع|ايداع|إضافة|اضافه|اضافة)(?![ء-ي])/iu;
+const REPAYMENT_MONEY = String.raw `(?:[A-Z]{3}|Dhs?\.?|SR|[$€£])\s*\p{Nd}+(?:[.,٫٬]\p{Nd}+)*`;
+const REPAYMENT_CARD = String.raw `(?:(?!(?:bill|invoice|loan|finance|mortgage|account|utility|electricity|water|using|via|with|through|from|to|for|by|on|at|and|of)\b)[\p{L}\p{N}.'’-]+\s+){0,3}?card\b`;
+const REPAYMENT_DESTINATION_CARD = String.raw `(?:(?!(?:bill|invoice|loan|finance|mortgage|account|utility|electricity|water|using|via|with|through|from|to|for|by|on|at|and)\b)[\p{L}\p{N}.'’-]+\s+){0,6}?card\b`;
+const REPAYMENT_NUMBER = String.raw `\p{Nd}+(?:[.,٫٬]\p{Nd}+)*`;
+const REPAYMENT_UNIT = String.raw `(?:[A-Z]{3}|Dhs?\.?|SR|[$€£])`;
+const REPAYMENT_ANY_MONEY = String.raw `(?:${REPAYMENT_UNIT}\s*${REPAYMENT_NUMBER}|${REPAYMENT_NUMBER}\s*${REPAYMENT_UNIT})`;
+const REPAYMENT_DESTINATION = String.raw `(?:on|to|towards?)\s+(?:your\s+)?${REPAYMENT_DESTINATION_CARD}`;
+const REPAYMENT_GREETING = String.raw `(?:(?:Dear\s+[^\n.!?\p{N},:!]{1,40}|Hi|Hello)[,!:]\s*)?`;
+const AR_REPAYMENT_MONEY = String.raw `(?:${REPAYMENT_ANY_MONEY}|${REPAYMENT_NUMBER}\s*(?:درهم|دراهم|ريال)|(?:درهم|دراهم|ريال)\s*${REPAYMENT_NUMBER})`;
+const COMPLETED_CARD_BALANCE_RECEIPT = new RegExp(String.raw `^تم\s+(?:(?:[إا]يداع|[إا]ضاف[هة])\s+(?:مبلغ\s+)?|استلام\s+سداد\s+(?:بمبلغ|مبلغ)\s+)${AR_REPAYMENT_MONEY}`, 'iu');
+const UNQUALIFIED_REPAYMENT = new RegExp(String.raw `(?:^|[\n.!?]\s*)\s*(?:[A-Z][A-Z0-9 .&-]{1,32}(?::\s*|\s+))?${REPAYMENT_GREETING}(?:` +
+    String.raw `payment\s+(?:received|credited)\s+${REPAYMENT_ANY_MONEY}\s+${REPAYMENT_DESTINATION}` +
+    String.raw `|we\s+(?:have\s+)?received\s+(?:your\s+)?payment\s+(?:of\s+)?${REPAYMENT_ANY_MONEY}\s+${REPAYMENT_DESTINATION}` +
+    String.raw `|payment\s+(?:of\s+)?${REPAYMENT_ANY_MONEY}\s+(?:was\s+)?received\s+${REPAYMENT_DESTINATION}` +
+    String.raw `|(?:thank\s+you|thanks)\s+for\s+(?:your\s+)?payment\s+of\s+${REPAYMENT_ANY_MONEY}\s+${REPAYMENT_DESTINATION}` +
+    String.raw `|your\s+payment\s+of\s+${REPAYMENT_ANY_MONEY}\s+to\s+(?:your\s+)?${REPAYMENT_DESTINATION_CARD}(?:[^.\n]|\.\d){0,80}\bsuccessful\b` +
+    String.raw `|your\s+(?:(?:[\p{L}.'’-]+)\s+){0,4}?(?:credit|charge|covered)\s+card\s+payment\s+of\s+${REPAYMENT_ANY_MONEY}(?:[^.\n]|\.\d){0,60}\bsuccessful\b` +
+    String.raw `|تم\s+استلام\s+سداد\s+(?:بمبلغ|مبلغ)\s+${AR_REPAYMENT_MONEY}\s+(?:على|علي|إلى|الى|الي|في)\s+بطاق(?:تك|تكم|ه|ة)\s+(?:ال)?ا[يئ]تماني[هة])`, 'giu');
+const QUALIFIED_REPAYMENT_RECEIPT = new RegExp(String.raw `^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?(?:` +
+    String.raw `payment\s+received|thank\s+you\s+for\s+(?:your\s+)?payment\s+of` +
+    String.raw `)\s+(${REPAYMENT_MONEY})\s+on\s+your\s+${REPAYMENT_CARD}\s+(?:ending(?:\s+(?:in|with))?|number|no\.?)\s*(?:[*xX•·-]\s*)*\p{Nd}{4}(?!\p{Nd})` +
+    String.raw `(?=\s*(?:[.!?\n]|$|(?:thank|avl|available|balance|for\s+(?:queries|help|details|information))\b))`, 'iu');
+const QUALIFIED_MATURE_REPAYMENT_RECEIPT = new RegExp(String.raw `^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?payment\s+of\s+(${REPAYMENT_MONEY})\s+(?:has\s+been\s+)?received\s+(?:towards?|on)\s+your\s+${REPAYMENT_CARD}\s+(?:ending(?:\s+(?:in|with))?|number|no\.?)\s*(?:[*xX•·-]\s*)*\p{Nd}{4}(?!\p{Nd})` +
+    String.raw `(?=\s*(?:[.!?\n]|$|(?:thank|avl|available|balance|for\s+(?:queries|help|details|information))\b))`, 'iu');
+function isQualifiedCardRepaymentReceipt(source, expectedCurrency) {
+    const match = QUALIFIED_REPAYMENT_RECEIPT.exec(source) ?? QUALIFIED_MATURE_REPAYMENT_RECEIPT.exec(source);
+    if (!match || /\b(?:debit|prepaid)\b/iu.test(match[0]))
+        return false;
+    if (/\bthank\s+you\b/iu.test(match[0]) && !/\b(?:credit|charge|covered)\b/iu.test(match[0]))
+        return false;
+    if (expectedCurrency === undefined)
+        return true;
+    const token = match[1].match(/^[^\p{Nd}]+/u)?.[0].trim().replace(/\.$/u, '').toUpperCase();
+    const code = token === 'DH' || token === 'DHS' ? 'AED' : token === 'SR' ? 'SAR' : token;
+    return code === expectedCurrency;
+}
+function isUnqualifiedCardRepayment(source) {
+    if (!/\bpayment\b|سداد|[\u0640\u064B-\u065F\u0670\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFB50-\uFEFF\uFF01-\uFFEF]/iu.test(source))
+        return false;
+    const text = repaymentReadingText(source);
+    if (!/\bpayment\b|سداد/iu.test(text) || isQualifiedCardRepaymentReceipt(text))
+        return false;
+    for (const match of text.matchAll(UNQUALIFIED_REPAYMENT)) {
+        const after = text.slice(match.index + match[0].length).split(/[\n!?;]|\.(?=\s|$)/u)[0];
+        const clause = match[0] + after;
+        const merchantAt = /\bat\s+\p{L}/iu.test(clause) &&
+            !/\bat\s+(?:the\s+)?(?:atm\b|[\p{L}]*bank\b|(?:[\p{L}]+\s+){0,3}branch\b)/iu.test(clause);
+        if (merchantAt || /\b(?:from|using)\s+(?!your\b|the\s+(?:bank|account)\b)\p{L}/iu.test(clause))
+            continue;
+        return true;
+    }
+    return false;
+}
+function repaymentReadingText(source) {
+    return (/[\uFB50-\uFEFF\uFF01-\uFFEF]/u.test(source) ? source.normalize('NFKC') : source)
+        .replace(/[\u0640\u064B-\u065F\u0670\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/gu, '');
+}
+function cardBalanceReceiptText(source) {
+    return repaymentReadingText(source)
+        .replace(/^\s*[A-Z][A-Z .&'-]{1,32}(?:alert|bank|sms)\s*\r?\n\s*/iu, '')
+        .replace(/^\s*[A-Z][A-Z0-9 .&'-]{1,32}:\s*/iu, '')
+        .replace(/^\s*(?:Dear\s+[^\n.!?\p{N},:!]{1,40}|Hi|Hello)[,!:]\s*/iu, '').trim();
+}
+function isUnpostedCardBalanceClaim(source) {
+    if (!/[إا]يداع|[إا]ضاف|سداد|[\u0640\u064B-\u065F\u0670\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFB50-\uFEFF\uFF01-\uFFEF]/u.test(source))
+        return false;
+    const text = cardBalanceReceiptText(source);
+    return CARD_CREDIT_TARGET.test(text) && /^(?:(?:(?:لم|لن)\s+يتم|سيتم|سوف\s+يتم|(?:[إا]ذا|لو|في\s+حال[هة]?)\s+تم)\s+(?:[إا]يداع|[إا]ضاف[هة]|استلام\s+سداد)|تم\s+استلام\s+طلب\s+(?:[إا]يداع|[إا]ضاف[هة]|سداد)|تم\s+(?:[إا]يداع|[إا]ضاف[هة])\s+طلب)(?![ء-ي])/u.test(text);
+}
+function isCompletedCardBalanceReceipt(source) {
+    const text = cardBalanceReceiptText(source);
+    return CARD_CREDIT_TARGET.test(text) && COMPLETED_CARD_BALANCE_RECEIPT.test(text);
+}
+function isCompletedCardRepaymentPrincipal(source, span) {
+    const clause = sentenceAround(source, span).text;
+    return isCompletedCardBalanceReceipt(clause) && isUnqualifiedCardRepayment(clause);
+}
 function isUnqualifiedCardCredit(source, span) {
     if (!span || !CARD_CREDIT_TARGET.test(source) || !CARD_CREDIT_MOVEMENT.test(source))
         return false;
@@ -11244,6 +11488,7 @@ exports.stripInvisible = stripInvisible;
 exports.foldOrthography = foldOrthography;
 exports.normalizeArabic = normalizeArabic;
 exports.bankProfileForSender = bankProfileForSender;
+exports.refundSideNoteVerdict = refundSideNoteVerdict;
 exports.hasMalformedBankAmount = hasMalformedBankAmount;
 exports.isBnplPayee = isBnplPayee;
 exports.overrideFitsDirection = overrideFitsDirection;
@@ -11305,7 +11550,7 @@ function normalizeArabic(s) {
 }
 const ARABIC_RE = /[\u0600-\u06FF]/;
 const AR_LETTER = '\\u0621-\\u064A';
-exports.PARSER_VERSION = 70;
+exports.PARSER_VERSION = 71;
 exports.PARSER_BACKFILL_VERSION = 50;
 const BANK_PROFILES = {
     'Emirates NBD': { brand: /\benbd\b|emirates\s*nbd|\bliv\b/i, ownPot: /\b(?:liv\s+)?goals?\b|\bsavings?\s+pot\b/i },
@@ -11410,7 +11655,7 @@ const OTP_CODE_DIGITS = String.raw `(?<![\d.,])\d{4,8}\b(?![.,]\d)`;
 const OTP_RE = new RegExp(`${OTP_CODE_WORD}(?:\\s+(?:code|otp|password|pin|number))?\\s*(?:is|:|-|=|هو)?\\s*${OTP_CODE_DIGITS}` +
     `|${OTP_CODE_WORD}(?:[^.\\n]|\\.\\d|\\.(?=(?:com|ae|sa|net|org|io|co|in|me)\\b)){0,80}?(?:\\bis\\b|[:=]|هو)\\s*${OTP_CODE_DIGITS}` +
     `|\\b\\d{4,8}\\s+is\\s+(?:your|the)\\s+(?:[a-z]+[\\s-]?){0,2}(?:code|otp|pin|password|passcode)\\b` +
-    `|\\b(?:use|enter)\\s+\\d{4,8}\\s+to\\b` +
+    `|\\b(?:use|enter)\\s+(?:code\\s+)?\\d{4,8}\\s+to\\b(?!\\s+get\\s+\\d{1,3}\\s?%\\s+off\\b)` +
     `|(?:code|otp|password|pin)\\s+(?:for|to\\s+complete)\\s+(?:your\\s+)?3-?d\\s*secure`, 'i');
 const OTP_FOOTER_RE = new RegExp(`do not (?:share|disclose|reveal|give)|never (?:share|disclose|reveal|ask)|will never ask|beware of fraud` +
     `|${OTP_CODE_WORD}` +
@@ -11425,10 +11670,10 @@ const CODE_VALIDITY_WINDOW_RE = new RegExp(String.raw `\b(?:use|enter|submit)\b(
     String.raw `|\b(?:use|enter|submit)\s+(?:it\s+|this\s+(?:\w+\s+){0,2})?in\s+\d{1,3}\s*(?:sec|min|hour|hr)` +
     String.raw `|${CODE_SUBJECT}\bexpires?\s+(?:in|after|within)\s+(?:the\s+next\s+)?\d{1,3}\s*(?:sec|min|hour|hr)` +
     String.raw `|${CODE_SUBJECT}\b(?:is\s+)?valid\s+(?:for|till|until|upto|up\s+to)\s+(?:the\s+next\s+)?\d{1,3}\s*(?:sec|min|hour|hr)`, 'i');
-const TRANSACTION_APPROVAL_REQUEST_RE = /(?:^|[.!?]\s*)\s*(?:please\s+)?(?:tap\s+(?:here\s+)?to\s+)?(?:approve|confirm|authoris(?:e|z)e)\s+(?:this\s+|the\s+|your\s+)?(?:card\s+)?(?:purchase|payment|transaction|transfer)\b|\b(?:open|use)\s+(?:the\s+|your\s+)?(?:bank|mobile)?\s*app\s+to\s+(?:approve|confirm|authoris(?:e|z)e)\s+(?:this\s+|the\s+|your\s+)?(?:card\s+)?(?:purchase|payment|transaction|transfer)\b|^\s*(?:(?:يرجي|الرجاء)\s+(?:الموافقه|التاكيد)\s+علي|قم\s+ب?(?:الموافقه|تاكيد))\s+(?:عمليه\s+)?(?:شراء|دفع|تحويل)(?![\u0621-\u064A])/i;
+const TRANSACTION_APPROVAL_REQUEST_RE = /(?:^|[.!?:]\s*)\s*(?:please\s+)?(?:tap\s+(?:here\s+)?to\s+)?(?:approve|confirm|authori[sz]e)\s+(?:this\s+|the\s+|your\s+)?(?:(?:[A-Z]{3}|Dhs?\.?)\s*\d[\d,]*(?:\.\d{1,3})?\s+)?(?:card\s+)?(?:purchase|payment|transaction|transfer)\b|\b(?:open|use)\s+(?:the\s+|your\s+)?(?:bank|mobile)?\s*app\s+to\s+(?:approve|confirm|authori[sz]e)\s+(?:this\s+|the\s+|your\s+)?(?:(?:[A-Z]{3}|Dhs?\.?)\s*\d[\d,]*(?:\.\d{1,3})?\s+)?(?:card\s+)?(?:purchase|payment|transaction|transfer)\b|^\s*(?:(?:يرجي|الرجاء)\s+(?:الموافقه|التاكيد)\s+علي|قم\s+ب?(?:الموافقه|تاكيد))\s+(?:عمليه\s+)?(?:شراء|دفع|تحويل)(?![\u0621-\u064A])/i;
 const GLUED_OTP_REQUEST_RE = new RegExp(String.raw `\b(?:requires?|enter|use)\s+(?:your\s+)?otp${OTP_CODE_DIGITS}(?=\s*(?:[.!?;]|$|\b(?:to|for|within|before)\b))`, 'i');
-const TRANSACTION_CODE_REQUEST_RE = new RegExp(String.raw `\b(?:code|pin|password|passcode)\s*[:=-]?\s*${OTP_CODE_DIGITS}\s+(?:to|for)\s+(?:complete|confirm|authoris(?:e|z)e|authenticate|initiate|make)\s+(?:the\s+|this\s+|your\s+)?(?:payment|purchase|transaction|transfer)\b` +
-    String.raw `|\b(?:use|enter)\s+(?:the\s+|your\s+)?(?:code|pin|password|passcode)\s*[:=-]?\s*${OTP_CODE_DIGITS}\s+(?:to|for)\s+(?:complete|confirm|authoris(?:e|z)e|authenticate|initiate|make)\s+(?:the\s+|this\s+|your\s+)?(?:payment|purchase|transaction|transfer)\b`, 'i');
+const TRANSACTION_CODE_REQUEST_RE = new RegExp(String.raw `\b(?:code|pin|password|passcode)\s*[:=-]?\s*${OTP_CODE_DIGITS}\s+(?:to|for)\s+(?:complete|confirm|authori[sz]e|authenticate|initiate|make)\s+(?:the\s+|this\s+|your\s+)?(?:payment|purchase|transaction|transfer)\b` +
+    String.raw `|\b(?:use|enter)\s+(?:the\s+|your\s+)?(?:code|pin|password|passcode)\s*[:=-]?\s*${OTP_CODE_DIGITS}\s+(?:to|for)\s+(?:complete|confirm|authori[sz]e|authenticate|initiate|make)\s+(?:the\s+|this\s+|your\s+)?(?:payment|purchase|transaction|transfer)\b`, 'i');
 const PIN_TRANSACTION_CHALLENGE_RE = new RegExp(String.raw `^\s*pin\b(?:[^.\n]|\.\d){0,180}?\b(?:transaction|payment|purchase|transfer)\b(?:[^.\n]|\.\d){0,180}?\b(?:is|:)\s*${OTP_CODE_DIGITS}`, 'i');
 const AR_CODE_CHALLENGE_RE = new RegExp(String.raw `(?:^|\n)[ \t]*(?:ال)?رمز[ \t]*:[ \t]*${OTP_CODE_DIGITS}[ \t]*(?:\r?\n|$)` +
     String.raw `|رمز[ \t]+(?:ال)?تفعيل[ \t]*:?[ \t]*${OTP_CODE_DIGITS}` +
@@ -11474,7 +11719,7 @@ const PROMO_SENTENCE_RE = new RegExp(`${PROMO_SENTENCE_CHAR}*(?:` +
     String.raw `|\bt&cs?\b|\bconditions\s+apply\b|\bterms\s+apply\b` +
     `)${PROMO_SENTENCE_CHAR}*`, 'gi');
 const PROMO_SENTENCE_TRIGGER_RE = /%|\bredeem\b|\b(?:pay|manage)\b|\bt&cs?\b|\bconditions\s+apply\b|\bterms\s+apply\b/i;
-const TXN_EVIDENCE_RE = /purchase (?:of|amount)|purchase\s+(?:aed|dhs?|sar)\b|\d{4}\s+purchase\b|was used for|\bused (?:for|at|on)\b|\bspent\b|\bdebited\b|\bdeducted\b|has been (?:debited|deducted|credited|received)|debited from|deducted from|credited to|withdraw|avl\.?\s*(?:bal|cr|limit)|available (?:balance|credit|limit)|(?:^|\n)\s*bal(?:ance)?\s+(?:aed|dhs?|sar)\b|bill amount|payment due|due (?:on|by|date)|pay by/i;
+const TXN_EVIDENCE_RE = /purchase (?:of|amount)|purchase\s+(?:aed|dhs?|sar)\b|\d{4}\s+purchase\b|was used for|\bused (?:for|at|on)\b|\bspent\b|\bdebited\b|\bdeducted\b|has\s+been\s+(?:debited|deducted|credited|received)|debited from|deducted from|credited to|withdraw|avl\.?\s*(?:bal|cr|limit)|available (?:balance|credit|limit)|(?:^|\n)\s*bal(?:ance)?\s+(?:aed|dhs?|sar)\b|bill amount|payment due|due (?:on|by|date)|pay by/i;
 const POSTED_CLAUSE_RE = /\b(?:purchase|transaction|payment|withdrawal|transfer|debit)\s+of\b|\b(?:has|have)\s+been\s+(?:successfully\s+)?(?:debited|deducted|credited|charged|paid|posted|processed|made|used|reversed|refunded)\b|\bwas\s+(?:successfully\s+)?(?:used|debited|deducted|charged|made|posted|processed|paid|spent)\b|\b(?:spent|debited|deducted|withdrawn|charged|paid|purchase)\s+(?:at|from|on|to|via|using|with)\b|\bavl\.?\s*(?:bal|balance|cr|limit)\b|\bavailable\s+(?:balance|limit|credit)\b|\b(?:refunded|reversed|credited|transferred|remitted|deposited)\s+(?:back\s+)?(?:to|from|into)\b|\b(?:transaction|txn|purchase|payment|card|debit|credit)\s+alerts?\b|\bnew\s+bal(?:ance)?\b|شراء بمبلغ|تم شراء|تم خصم|تم الخصم|تم سحب|تم دفع|تم الدفع|تم استرداد/i;
 function hasPostedEvidence(raw, card) {
     if (amountWithFx(raw) === null)
@@ -11499,7 +11744,7 @@ const SPEND_SUMMARY_RE = new RegExp(String.raw `\bspent\b(?:[^.\n]|\.\d){0,60}?\
     String.raw `|\bso\s+far\s+this\s+(?:month|week|year)\b|\b(?:total|monthly|weekly|yearly)\s+spend(?:ing|s)?\b|\bspend(?:ing)?\s+(?:summary|breakdown|report|insights?|analysis)\b|\byour\s+(?:month|week)\s+in\s+review\b|انفقت خلال هذا الشهر|ملخص الانفاق`, 'i');
 const OFFER_RE = /^\s*(?:(?:offer|promo(?:tion)?|deal)\s*[:!-]|عرض\b)|\bpurchases?\s+(?:above|over|worth|starting\s+(?:at|from))\s+(?:aed|dhs|sar)\b|\bat\s+any\s+(?:store|shop|merchant|outlet|retailer|branch)\b|\bon\s+purchases\s+(?:above|over)\b|\boff\s+your\s+(?:next|first)\b|\b(?:aed|dhs|sar)\s*[\d,]+(?:\.\d{1,2})?\s+off\b|\bup\s+to\s+(?:aed|dhs|sar)\s*[\d,]+(?:\.\d{1,2})?\s+(?:off|cashback|back)\b|\b(?:for|on|per)\s+(?:every|each)\s+(?:aed|dhs|sar)\s*[\d,]+(?:\.\d{1,2})?\b|\b(?:on|for)\s+(?:aed|dhs|sar)\s*[\d,]+(?:\.\d{1,2})?\s+spent\b|\bup\s+to\s+\d{1,3}\s*x\b|\beach\s+of\s+[\d,]+(?:\.\d{1,2})?\s*(?:aed|dhs|sar)\b/i;
 const ARABIC_OFFER_RE = /^\s*عرض(?:\s|$)/u;
-const ARABIC_MARKETING_RE = /عرض|عروض|هديه|لا\s+تفوت|تسوق\s+لدي|اشترك|للاشتراك|لعدم\s+استلام[^.\n]{0,40}الرسائل|قد\s+تربح|فرصه\s+(?:ربح|للفوز)|اربح|السحب\s+الكبير|اول\s+يوم\s+اشتراك\s+مجاني/i;
+const ARABIC_MARKETING_RE = /عرض|عروض|هديه|احصل\s+علي\s+(?:استرداد|استرجاع)\s+نقدي|لا\s+تفوت|تسوق\s+لدي|اشترك|للاشتراك|لعدم\s+استلام[^.\n]{0,40}الرسائل|قد\s+تربح|فرصه\s+(?:ربح|للفوز)|اربح|السحب\s+الكبير|اول\s+يوم\s+اشتراك\s+مجاني/i;
 const ARABIC_MONTHLY_BILL_RE = /فاتورتك\s+لشهر[\s\S]{0,220}?اجمالي\s+المبلغ\s+المستحق\s+دفعه\s+قبل\s+تاريخ/i;
 const REWARD_RATE_RE = /\b(?:earn|get)\b[^.\n]{0,40}?\b(?:points?|touchpoints?|rewards?|miles?|tps?)\b[^.\n]{0,48}?\b(?:for|per)\s+(?:every\s+|each\s+)?(?:(?:aed|dhs?|sar)\s*[\d,.]+|[\d,.]+\s*(?:aed|dhs?|sar)\b)(?:\s+spent\b)?/i;
 const PERCENT_PURCHASE_OFFER_RE = /\b(?:get|enjoy|save|avail|grab|extra|flat|up\s+to)\b[^.\n]{0,32}?\b\d{1,3}\s*%[^.\n]{0,64}?\bon\b[^.\n]{0,28}?\bpurchases?\b[^.\n]{0,28}?\b(?:aed|dhs?|sar)\b/i;
@@ -11536,7 +11781,145 @@ function arabicPendingPosting(body) {
     return (AR_PENDING_IDIOM_RE.test(body) && !AR_COMPLETED_RE.test(body)) || AR_NOT_YET_RE.test(body);
 }
 const EXPECTED_FUTURE_MOVEMENT_RE = /\b(?:expected|anticipated)\b(?:[^.]|\.\d){0,80}\b(?:salary|payroll|wages|wps|payment|transfer|credit|deposit|refund|reversal|fee|charge|payout|settlement)\b|\b(?:salary|payroll|wages|wps|payment|transfer|credit|deposit|refund|reversal|fee|charge|payout|settlement)\b(?:[^.]|\.\d){0,80}\b(?:expected|anticipated)\b|(?:راتب|مرتب|دفع|تحويل|ايداع)[\s\S]{0,80}متوقع|سيصل[\s\S]{0,80}(?:راتب|مرتب|دفع|تحويل|ايداع)/iu;
-const REQUEST_RECEIVED_RE = /\b(?:payment|transfer|purchase|redemption)\s+request\b(?:[^.]|\.\d){0,64}\b(?:received|submitted|created|awaiting|pending|registered)\b|\b(?:received|submitted|created)\b(?:[^.]|\.\d){0,48}\b(?:payment|transfer|purchase)\s+request\b|تم\s+استلام\s+طلب\s+(?:سداد|دفع|تحويل)/iu;
+const REQUEST_RECEIVED_RE = /\b(?:(?:payment|transfer|purchase|redemption|refund)\s+request|request\s+for\s+(?:a\s+)?refund)\b(?:[^.]|\.(?=\S)){0,64}\b(?:received|submitted|created|awaiting|pending|registered|being\s+processed|in\s+progress|under\s+(?:review|process(?:ing)?))\b|\b(?:received|submitted|created)\b(?:[^.]|\.(?=\S)){0,48}\b(?:(?:payment|transfer|purchase|refund)\s+request|request\s+for\s+(?:a\s+)?refund)\b|تم\s+استلام\s+طلب\s+(?:سداد|دفع|تحويل)/iu;
+const REQUEST_RECEIVED_BLANK_RE = new RegExp(REQUEST_RECEIVED_RE.source, 'giu');
+const REFUND_OWNED_DESTINATION = String.raw `(?:your\b(?:\s+\S+){0,3}?\s+(?:card|account|wallet|balance|payment\s+(?:method|source))\b|the\s+(?:original\s+|same\s+)?(?:card|account|payment\s+(?:method|source))\b)`;
+const REFUND_COMPLETED_CREDIT_RE = new RegExp(String.raw `(\brefund(?:ed)?\b(?:[^.\n]|\.(?=\S)){0,300}?)\b(?:has|have|had|was|were)\s+(?:been\s+)?(?:successfully\s+)?(?:credited|refunded|posted)\s+(?:back\s+)?(?:to|into|onto)\s+` +
+    REFUND_OWNED_DESTINATION, 'gi');
+const REFUND_CREDIT_CONDITIONAL_LEAD_RE = /\b(?:if|once|when|whenever|after|until|unless|whether|as\s+soon\s+as)\b/gi;
+const governsRefundCredit = (lead) => {
+    const leaders = [...lead.matchAll(REFUND_CREDIT_CONDITIONAL_LEAD_RE)];
+    const last = leaders[leaders.length - 1];
+    return last !== undefined && !lead.slice(last.index + last[0].length).includes(',');
+};
+const REFUND_CREDIT_CONDITIONAL_INSIDE_RE = /\b(?:if|once|when|whenever|after|until|unless|whether)\b|\bas\s+soon\s+as\b/;
+const REFUND_CREDIT_REVERSED_RE = /\b(?:in\s+error|reversed)\b|\b(?:and|but)\s+(?:(?:later|then|subsequently)\s+)?(?:was|were|has\s+been|had\s+been|is)\s+(?:\w+\s+)?(?:cancell?ed|withdrawn|revoked)\b/i;
+const REFUND_CREDIT_LATER_RE = /\b(?:will\s+be\s+(?:credited|refunded|reversed|debited|deducted|returned|posted)|subject\s+to\s+(?:\w+\s+){0,2}(?:approval|review|confirmation|verification)|for\s+review|pending\s+(?:approval|review|investigation|verification|confirmation|clearance|settlement|release)|on\s+hold|under\s+(?:review|investigation)|provisional(?:ly)?|temporar(?:y|ily))\b/i;
+const REFUND_CREDIT_TAKEN_BACK_RE = /\b(?:(?:this|the|that)\s+(?:credit|refund|amount)|it)\s+(?:\w+\s+){0,2}?(?:has\s+been|had\s+been|was|is|remains|will\s+be)\s+(?:\w+\s+){0,2}?(?:reversed|cancell?ed|withdrawn|revoked|in\s+error|on\s+hold|temporary|provisional|under\s+(?:review|investigation))\b/i;
+const REFUND_HEDGED_SENTENCE_RE = /^\s*(?:if|in\s+case|should|unless)\b|\b(?:may|can|might|could|unless)\b/i;
+function refundCreditNotFinal(remainder) {
+    const sentences = remainder.split(REFUND_SENTENCE_BREAK_RE);
+    if (REFUND_CREDIT_REVERSED_RE.test(sentences[0]) || REFUND_CREDIT_LATER_RE.test(sentences[0]))
+        return true;
+    return sentences.slice(1).some((sentence) => !REFUND_HEDGED_SENTENCE_RE.test(sentence) && REFUND_CREDIT_TAKEN_BACK_RE.test(sentence));
+}
+const REFUND_AMOUNT_RE = new RegExp(String.raw `(?:\b(?:${Object.keys(currency_metadata_1.CURRENCY_MINOR_UNITS).join('|')})|\bDhs?\.?|\bSR\b|[$€£])\s*(\d[\d,]*(?:\.\d+)?)`, 'g');
+const REFUND_SENTENCE_BREAK_RE = /[.!?](?=\s|$)|\n/g;
+const REFUND_AMOUNT_AFTER_RE = /(\d[\d,]*(?:\.\d+)?)\s*(?:AED|SAR|USD|EUR|GBP|QAR|KWD|BHD|OMR|EGP|INR|PKR|JOD|Dhs?\b|SR\b)/g;
+const refundAmounts = (text) => [...text.matchAll(REFUND_AMOUNT_RE), ...text.matchAll(REFUND_AMOUNT_AFTER_RE)].map((match) => Number(match[1].replace(/,/g, '')));
+function refundRequestSentences(body) {
+    const parts = [];
+    for (const request of body.matchAll(REQUEST_RECEIVED_BLANK_RE)) {
+        const earlier = [...body.slice(0, request.index).matchAll(REFUND_SENTENCE_BREAK_RE)].pop();
+        const end = request.index + request[0].length;
+        const next = body.slice(end).search(REFUND_SENTENCE_BREAK_RE);
+        parts.push(body.slice(earlier ? earlier.index + 1 : 0, next < 0 ? body.length : end + next));
+    }
+    return parts.join(' ');
+}
+function hasCompletedRefundCredit(rest, request) {
+    const requested = refundAmounts(request);
+    for (const match of rest.matchAll(REFUND_COMPLETED_CREDIT_RE)) {
+        const at = match.index;
+        const breaks = [...rest.slice(0, at).matchAll(REFUND_SENTENCE_BREAK_RE)];
+        const lead = rest.slice(breaks.length ? breaks[breaks.length - 1].index + 1 : 0, at);
+        if (governsRefundCredit(lead) || REFUND_CREDIT_CONDITIONAL_INSIDE_RE.test(match[1]))
+            continue;
+        const remainder = rest.slice(at + match[0].length);
+        if (refundCreditNotFinal(remainder))
+            continue;
+        const credited = refundAmounts(lead + match[0] + remainder.split(REFUND_SENTENCE_BREAK_RE)[0]);
+        if (requested.some((amount) => !credited.includes(amount)))
+            continue;
+        return true;
+    }
+    return false;
+}
+const REFUND_CREDIT_SCAN_RE = /(?:(\brefund(?:ed)?\b(?:[^.\n]|\.(?=\S)){0,300}?)\b(?:credited|refunded|posted|returned)\b|\brefunded\b)(\s+(?:back\s+)?(?:to|into|onto)\s+[^.\n,;]{0,60})?/gi;
+const REFUND_CREDIT_NEGATION_RE = /\b(?:(?:has|have|had|was|were|is|are)\s+(?:not|never)|(?:hasn|haven|wasn|weren|isn|aren)['’]t|yet\s+to\s+be)\s+(?:(?:yet|been|successfully)\s+){0,3}$/;
+const REFUND_THIRD_PARTY_DESTINATION_RE = /^\s*(?:back\s+)?(?:to|into|onto)\s+(?:(?:the|a|an|your|his|her|their|its)\s+)?(?:\w+\s+){0,2}?(?:merchant|beneficiary|seller|vendor|recipient|payee|retailer|supplier|store|shop|restaurant|platform|marketplace)\b/i;
+const REFUND_COMPLETED_AUXILIARY_RE = /\b(?:has|have|had|was|were)\s+(?:\w+\s+){0,2}$/;
+const REFUND_NEGATED_THEN_DEBIT_RE = /^\s*(?:,\s*)?(?:and|but)\s+(?:was|were|has\s+been|have\s+been|had\s+been)\s+(?:\w+\s+){0,2}?(?:debited|charged|deducted)\b/i;
+function refundCreditNotActual(body, request) {
+    const requested = refundAmounts(request);
+    let negatedEnd = -1;
+    for (const match of body.matchAll(REFUND_CREDIT_SCAN_RE)) {
+        const at = match.index;
+        const breaks = [...body.slice(0, at).matchAll(REFUND_SENTENCE_BREAK_RE)];
+        const lead = body.slice(breaks.length ? breaks[breaks.length - 1].index + 1 : 0, at);
+        if (match[1] === undefined) {
+            const sentence = lead + match[0] + body.slice(at + match[0].length).split(REFUND_SENTENCE_BREAK_RE)[0];
+            if (REFUND_CREDIT_NEGATION_RE.test(lead)) {
+                if (refundAmounts(sentence).length > 0)
+                    negatedEnd = at + match[0].length;
+                continue;
+            }
+            if (refundCreditNotFinal(body.slice(at + match[0].length - (match[2]?.length ?? 0))))
+                return true;
+            continue;
+        }
+        if (governsRefundCredit(lead) || REFUND_CREDIT_CONDITIONAL_INSIDE_RE.test(match[1]))
+            return true;
+        if (REFUND_CREDIT_NEGATION_RE.test(match[1])) {
+            negatedEnd = at + match[0].length;
+            continue;
+        }
+        if (match[2] && REFUND_THIRD_PARTY_DESTINATION_RE.test(match[2]))
+            return true;
+        const remainder = body.slice(at + match[0].length - (match[2]?.length ?? 0));
+        if (refundCreditNotFinal(remainder))
+            return true;
+        if (requested.length > 0) {
+            const credited = refundAmounts(lead + match[0] + remainder.split(REFUND_SENTENCE_BREAK_RE)[0]);
+            if (requested.some((amount) => !credited.includes(amount)))
+                return true;
+        }
+        if (negatedEnd >= 0 && REFUND_COMPLETED_AUXILIARY_RE.test(match[1]) && body.slice(negatedEnd, at).search(REFUND_SENTENCE_BREAK_RE) < 0)
+            negatedEnd = -1;
+    }
+    return negatedEnd >= 0 && !REFUND_NEGATED_THEN_DEBIT_RE.test(body.slice(negatedEnd));
+}
+const REFUND_SIDE_NOTE_WORD_RE = /\brefund(?:ed)?\b/i;
+const REFUND_SIDE_NOTE_DEBIT_RE = /\b(?:debited|charged|deducted|spent)\b/i;
+const REFUND_SIDE_NOTE_RETURNED_RE = /\b(?:has\s+been|have\s+been|was|were|is\s+now)\s+(?:successfully\s+)?(?:reversed|refunded|returned)\b/i;
+const REFUND_SIDE_NOTE_SAME_MOVEMENT_RE = /^\s*(?:it|(?:this|the|that|your)\s+(?:amount|transaction|purchase|charge|payment|debit)|(?:the|this|that)\s+refund(?=\s+(?:has|have|had|was|were|is)\b)|a\s+refund\s+of\s+(?:the\s+same|this|that))\b/i;
+const REFUND_SIDE_NOTE_FUTURE_RE = /\bwill\b/i;
+const REFUND_SIDE_NOTE_COMPLETED_RE = /\b(?:has|have|had|was|were)\s+(?:been\s+)?(?:(?:successfully|fully|now)\s+)?(?:credited|refunded|reversed|returned|posted)\b/i;
+function refundSideNotes(body) {
+    if (!REFUND_SIDE_NOTE_WORD_RE.test(body))
+        return { body, ambiguous: false };
+    const sentences = [];
+    let start = 0;
+    for (const end of [...[...body.matchAll(REFUND_SENTENCE_BREAK_RE)].map((match) => match.index + match[0].length), body.length]) {
+        if (end > start)
+            sentences.push({ start, text: body.slice(start, end) });
+        start = Math.max(start, end);
+    }
+    const separateDebit = sentences.some(({ text }) => !REFUND_SIDE_NOTE_WORD_RE.test(text) &&
+        REFUND_SIDE_NOTE_DEBIT_RE.test(text) && !REFUND_SIDE_NOTE_RETURNED_RE.test(text) && refundAmounts(text).length > 0);
+    let out = body;
+    let ambiguous = false;
+    for (const { start: at, text } of sentences) {
+        const word = REFUND_SIDE_NOTE_WORD_RE.exec(text);
+        if (!word || refundAmounts(text).length > 0)
+            continue;
+        const lead = text.slice(0, word.index);
+        const negated = word[0].toLowerCase() === 'refunded' && REFUND_CREDIT_NEGATION_RE.test(lead);
+        const sameMovement = REFUND_SIDE_NOTE_SAME_MOVEMENT_RE.test(text) && !REFUND_SIDE_NOTE_FUTURE_RE.test(text);
+        const completedRefund = sameMovement && REFUND_SIDE_NOTE_COMPLETED_RE.test(text);
+        if ((negated && !sameMovement) || (separateDebit && governsRefundCredit(lead))) {
+            out = out.slice(0, at) + ' '.repeat(text.length) + out.slice(at + text.length);
+        }
+        else if (separateDebit && (negated || (REFUND_RE.test(text) && !completedRefund))) {
+            ambiguous = true;
+        }
+    }
+    return { body: out, ambiguous };
+}
+function refundSideNoteVerdict(source) {
+    const notes = refundSideNotes(source);
+    return notes.ambiguous ? 'ambiguous' : notes.body !== source ? 'side-note' : 'none';
+}
 const MANDATE_LIFECYCLE_RE = /\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b(?:[^.]|\.\d){0,96}\b(?:will\s+(?:start|begin|commence|activate)|has\s+been\s+(?:created|registered|set\s*up|activated)|is\s+(?:now\s+)?active)\b|\b(?:created|registered|set\s*up|activated)\b(?:[^.]|\.\d){0,64}\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b|تم\s+(?:تسجيل|انشاء|تفعيل)[^\n]{0,64}(?:امر\s+)?(?:خصم\s+(?:تلقايي|مباشر)|تعليمات\s+مستديمه)/iu;
 const CONDITIONAL_PAYOUT_RE = /\b(?:merchant|business|seller|vendor|restaurant|platform|marketplace|aggregator|acquirer|sales?|delivery|courier|rider|driver)\b(?:[^.]|\.\d){0,160}\b(?:when|once|if)\s+(?:you\s+)?(?:are\s+)?(?:eligible|qualif(?:y|ied))\b|\b(?:merchant|business|seller|vendor|restaurant|platform|marketplace|aggregator|acquirer|sales?|delivery|courier|rider|driver)\b(?:[^.]|\.\d){0,160}\b(?:after\s+(?:(?:your\s+)?registration|you\s+(?:register|sign\s+up|open\s+(?:an?\s+)?account)|opening\s+(?:an?\s+)?account)|upon\s+(?:registration|sign[ -]?up|account\s+opening))\b/iu;
 const CONDITIONAL_MOVEMENT_RE = /\b(?:salary|payroll|wages|wps|monthly\s+pay|remuneration|emoluments?|refund|payout|settlement|proceeds|earnings|disbursement)\b(?:[^.]|\.\d){0,144}\b(?:if|when|once|upon)\s+(?:it\s+is\s+|you\s+are\s+)?(?:approved|authori[sz]ed|verified)\b|\b(?:salary|payroll|wages|wps|monthly\s+pay|remuneration|emoluments?|refund|payout|settlement|proceeds|earnings|disbursement)\b(?:[^.]|\.\d){0,144}\bafter\s+(?:completing\s+)?(?:onboarding|registration|verification|account\s+opening)\b/iu;
@@ -12650,15 +13033,31 @@ function maskMerchantNames(text) {
     return out;
 }
 function declinedInBody(body, suppressible) {
-    return DECLINED_RE.test(suppressible) || DECLINED_VERB_RE.test(body);
+    if (DECLINED_RE.test(suppressible) || DECLINED_VERB_RE.test(body))
+        return true;
+    if (!body.includes('تعذر'))
+        return false;
+    for (const match of body.matchAll(/(?<![ء-ي])تعذر(?:ت)?\s+(?:(?:اتمام|تنفيذ|اكمال)\s+)?(?:ال)?(?:عمليه(?:\s+(?:ال)?(?:شراء|دفع|تحويل|سحب))?|شراء|دفع|تحويل|معامله|حواله|سحب)(?![ء-ي])/gu)) {
+        const before = body.slice(Math.max(0, match.index - 40), match.index);
+        if (/(?<![ء-ي])(?:اذا|لو|حال|حاله|عند|ان|لم|لن|لا)\s*$/u.test(before))
+            continue;
+        return true;
+    }
+    return false;
 }
 const CARD_LIFECYCLE_NOTICE_RE = /(?:\b(?:credit|debit|covered|prepaid)?\s*card\b[^.\n]{0,120}\bexpir(?:y|e[sd]?|ing)\b|\bexpir(?:y|e[sd]?|ing)\b[^.\n]{0,120}\b(?:credit|debit|covered|prepaid)?\s*card\b)/i;
-const AR_PURCHASE_CONFIRMATION_CODE_RE = /(?:الرقم السري|الرمز السري|رمز|كلمه السر|كلمه المرور)\s+(?:ل|ال)?(?:تاكيد|اتمام)\s+(?:عمليه\s+)?(?:ال)?(?:شراء|دفع|عمليه)/;
+const AR_PURCHASE_CONFIRMATION_CODE_RE = new RegExp(String.raw `(?:الرقم السري|الرمز السري|(?:ال)?رمز|كلمه السر|كلمه المرور)(?:\s*[:=]\s*|\s+)(?:${OTP_CODE_DIGITS}\s+)?(?:ل|ال)?(?:تاكيد|اتمام)\s+(?:عمليه\s+)?(?:ال)?(?:شراء|دفع|عمليه)`);
 function nonPostingReasonInBody(body, suppressible) {
+    if (/[^\S\r\n ]| {2}/u.test(body)) {
+        body = body.replace(/[^\S\r\n]+/gu, ' ');
+        suppressible = suppressible.replace(/[^\S\r\n]+/gu, ' ');
+    }
     if (CARD_LIFECYCLE_NOTICE_RE.test(suppressible))
         return 'card-lifecycle';
     if (declinedInBody(body, suppressible))
         return 'declined';
+    if ((0, principal_posting_guards_1.hasClickLinkPrompt)(body))
+        return 'link-request';
     if (OTP_RE.test(body) ||
         GLUED_OTP_REQUEST_RE.test(body) ||
         TRANSACTION_CODE_REQUEST_RE.test(body) ||
@@ -12670,7 +13069,13 @@ function nonPostingReasonInBody(body, suppressible) {
             CODE_VALIDITY_WINDOW_RE.test(body))) {
         return 'security-challenge';
     }
-    const settledRefund = REFUND_RE.test(body);
+    const requestReceived = REQUEST_RECEIVED_RE.test(body);
+    const refundBody = refundSideNotes(body).body;
+    const withoutRequest = requestReceived ? blank(blank(refundBody, REQUEST_RECEIVED_BLANK_RE), FUTURE_CLAUSE_RE) : refundBody;
+    const settledRefund = (REFUND_RE.test(refundBody) && (!requestReceived || REFUND_RE.test(withoutRequest))) ||
+        (requestReceived && hasCompletedRefundCredit(withoutRequest, refundRequestSentences(body)));
+    if (refundCreditNotActual(refundBody, refundRequestSentences(body)))
+        return 'pending-processing';
     if (VERIFICATION_HOLD_DESCRIPTOR_RE.test(body))
         return 'preauthorisation';
     if (!settledRefund &&
@@ -12682,7 +13087,7 @@ function nonPostingReasonInBody(body, suppressible) {
     if (!settledRefund && (PENDING_PROCESSING_RE.test(body) ||
         arabicPendingPosting(body) ||
         EXPECTED_FUTURE_MOVEMENT_RE.test(body) ||
-        REQUEST_RECEIVED_RE.test(body) || MANDATE_LIFECYCLE_RE.test(body) ||
+        requestReceived || MANDATE_LIFECYCLE_RE.test(body) ||
         CONDITIONAL_PAYOUT_RE.test(body) || CONDITIONAL_MOVEMENT_RE.test(body))) {
         return 'pending-processing';
     }
@@ -13565,11 +13970,14 @@ function parseSmsInner(message, overrides, options) {
             categoryGuess: 'other', categoryDeliberate: true, currency, reference, raw: source,
         };
     }
-    if (card?.kind !== 'account' && card && CARD_PAYMENT_RE.test(raw)) {
+    const qualifiedReceipt = card !== null && (0, principal_posting_guards_1.isQualifiedCardRepaymentReceipt)(raw);
+    if (qualifiedReceipt && !(0, principal_posting_guards_1.isQualifiedCardRepaymentReceipt)(raw, currency))
+        return null;
+    if (card?.kind !== 'account' && card && (CARD_PAYMENT_RE.test(raw) || qualifiedReceipt)) {
         const amountFils = amountWithFx(raw);
         if (!amountFils)
             return null;
-        const side = cardPaymentLeg(raw);
+        const side = qualifiedReceipt ? 'receipt' : cardPaymentLeg(raw);
         const correctedDate = side === 'receipt' ? sourceBackedReceiptDate(raw, date, options) : null;
         return {
             kind: 'cardPayment',
@@ -13964,9 +14372,12 @@ function parseSmsInner(message, overrides, options) {
     const hasCredit = statedCredit || (saudiHeadings && SA_TRANSFER_IN_HEADING_RE.test(raw));
     const carrierBilling = /app\s*store|google play|play store|itunes/i.test(raw);
     const isBillDue = BILL_DUE_WORDS.test(raw) && !hasDebit && !hasCredit && !carrierBilling;
+    const refundNotes = refundSideNotes(prose);
+    if (refundNotes.ambiguous)
+        return null;
     const isIncomingCreditReversal = INCOMING_CREDIT_REVERSAL_RE.test(prose);
     const isRefund = !isIncomingCreditReversal &&
-        (REFUND_RE.test(prose) || REVERSAL_RE.test(prose) || arabicPurchaseRefundHeader ||
+        (REFUND_RE.test(refundNotes.body) || REVERSAL_RE.test(prose) || arabicPurchaseRefundHeader ||
             REFUND_HEADING_RE.test(prose));
     if (PROMO_RE.test(raw) && !TXN_EVIDENCE_RE.test(raw))
         return null;
@@ -13977,7 +14388,7 @@ function parseSmsInner(message, overrides, options) {
     if (!money)
         return null;
     const billerPaid = billerSettlement(prose);
-    const creditClause = CREDIT_CLAUSE_RE.test(prose) && !billerPaid;
+    const creditClause = CREDIT_CLAUSE_RE.test(refundNotes.body) && !billerPaid;
     const debitClause = DEBIT_CLAUSE_RE.test(prose);
     const type = isBillDue || billerPaid || isIncomingCreditReversal ||
         arabicOwnAccountOutgoing
@@ -14497,6 +14908,8 @@ function hasUnsettledPrincipalInContext(context, parsed) {
     const { raw, spans, refund } = context;
     if (hasUnsupportedPrincipal(raw, parsed, spans[0]))
         return true;
+    if (parsed.kind === 'transaction' && ((0, principal_posting_guards_1.isUnqualifiedCardRepayment)(raw) || (0, principal_posting_guards_1.isQualifiedCardRepaymentReceipt)(raw)))
+        return true;
     if (parsed.type === 'income' && (0, principal_posting_guards_1.isUnqualifiedCardCredit)(raw, spans[0]))
         return true;
     if (principalNeedsTransferReview(raw, spans[0], parsed))
@@ -14520,6 +14933,10 @@ function hasUnsettledPrincipal(message, parsed) {
     return context ? hasUnsettledPrincipalInContext(context, parsed) : false;
 }
 function parseSms(message, overrides, options) {
+    if ((0, principal_posting_guards_1.isLeadingNumericDiscountOffer)(message) || (0, principal_posting_guards_1.isUnqualifiedPeerTransferClaim)(message) ||
+        (0, principal_posting_guards_1.hasMobileMoneyCallback)(message) || (0, principal_posting_guards_1.isUnpostedCardBalanceClaim)(message) ||
+        (0, principal_posting_guards_1.hasExplicitPersonalMoneyClaim)(message))
+        return null;
     if ((0, bnpl_providers_1.isBnplProviderSource)(options?.sender))
         return null;
     let parsed = parseSmsInner(message, overrides, options);
@@ -14912,7 +15329,7 @@ const resolve = (items) => {
 };
 const MERCHANT_LABEL = /(?:^|[^\p{L}\p{N}])(?:desc(?:ription)?|narration|merchant|payee|beneficiary|seller|commerçant|bénéficiaire|händler|empfänger|comercio|beneficiario|esercente|begunstigde|利用先|التاجر|المستفيد)\s*[:：=-]\s*/giu;
 const MERCHANT_PREPOSITION = /(?:^|[^\p{L}\p{N}])(?:at|to|trf\s+to|from|chez|bei|von|en|em|an|presso|bij|لدى|عند|لصالح)\s+/giu;
-const MERCHANT_TAIL = /\s+(?:(?:avl|avail(?:able)?)\.?\s*(?:bal(?:ance)?|lmt|limit)\b|(?:on|le|am|el|il|op|em)\s+\d|on\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d|from\s+(?:your\s+)?(?:account|acct?|a\/?c|card|checking|savings)\b|posted\b|(?:with|using|via|über)\b|to\s+(?:(?:your|the)\s+)?(?:card|account)\b|\d{1,2}:\d{2}\b|(?:ref(?:erence)?(?:\s*no)?|refno|txn|transaction\s+(?:id|date))\b|(?:was|has|have|is|were|will|wurde|wurden|ist|wird)\b|con\s+(?:tu|su)\s+tarjeta\b|com\s+o\s+cart[aã]o\b|بتاريخ|رقم\s+(?:المرجع|العملية)|con\s+(?:tu|su|la|el)\s+(?:\p{L}+\s+){0,2}(?:tarjeta|carta|visa|mastercard|d[eé]bito|cr[eé]dito)(?![\p{L}\p{N}])|con\s+carta(?![\p{L}\p{N}])|avec\s+(?:votre|ta)\s+carte(?![\p{L}\p{N}])|mit\s+(?:ihrer\s+|deiner\s+)?(?:\p{L}*karte)(?![\p{L}\p{N}])|para\s+o\s+cart[aã]o(?![\p{L}\p{N}])|on\s+(?:your\s+)?(?:\p{L}+\s+){0,3}card(?![\p{L}\p{N}])|(?:del|alle)\s+\d|(?:current|available|remaining|closing)\s+(?:credit\s+)?(?:balance|limit)(?![\p{L}\p{N}]))/iu;
+const MERCHANT_TAIL = /\s+(?:(?:avl|avail(?:able)?)\.?\s*(?:bal(?:ance)?|lmt|limit)\b|(?:on|le|am|el|il|op|em)\s+\d|on\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d|from\s+(?:your\s+)?(?:account|acct?|a\/?c|card|checking|savings)\b|posted\b|(?:with|using|via|über)\b|to\s+(?:(?:your|the)\s+)?(?:card|account)\b|\d{1,2}:\d{2}\b|(?:ref(?:erence)?(?:\s*no)?|refno|txn|transaction\s+(?:id|date))\b|(?:was|has|have|is|were|will|wurde|wurden|ist|wird)\b|con\s+(?:tu|su)\s+tarjeta\b|com\s+o\s+cart[aã]o\b|بتاريخ|رقم\s+(?:المرجع|العملية)|con\s+(?:tu|su|la|el)\s+(?:\p{L}+\s+){0,2}(?:tarjeta|carta|visa|mastercard|d[eé]bito|cr[eé]dito)(?![\p{L}\p{N}])|con\s+carta(?![\p{L}\p{N}])|avec\s+(?:votre|ta)\s+carte(?![\p{L}\p{N}])|mit\s+(?:ihrer\s+|deiner\s+)?(?:\p{L}*karte)(?![\p{L}\p{N}])|para\s+o\s+cart[aã]o(?![\p{L}\p{N}])|on\s+(?:your\s+)?(?:\p{L}+\s+){0,3}card(?![\p{L}\p{N}])|on\s+(?:your\s+)?(?:\p{L}+\s+){0,2}account(?![\p{L}\p{N}])|(?:del|alle)\s+\d|(?:current|available|remaining|closing)\s+(?:credit\s+)?(?:balance|limit)(?![\p{L}\p{N}]))/iu;
 const MERCHANT_TRAILING_VERB = /\s+(?:made|bezahlt|erhalten|eseguit[oa]|effettuat[oa]|successful(?:ly)?|completed|erfolgreich)$/iu;
 const BALANCE_FIELD_TAIL = /\s+(?:(?:available|current|remaining|closing)\s+(?:credit\s+)?(?:balance|limit)|(?:avl|avail)\.?\s*(?:bal(?:ance)?|limit)|balance|credit\s+limit|الرصيد(?:\s+(?:المتاح|الحالي))?)\s*[:=-]?\s*$/iu;
 const BALANCE_FIELD_BEFORE_MONEY = new RegExp(BALANCE_FIELD_TAIL.source.replace(/\$$/u, '') + String.raw `(?=(?:[A-Z]{3}\s*[+-]?\d|[+-]?\d[\d.,]*\s*[A-Z]{3}\b))`, 'iu');
@@ -15066,12 +15483,14 @@ function extractUniversalFields(source, context = {}, moneySpans = []) {
 "universal-money":function(module,exports,require){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.unqualifiedCardCreditCurrencyAliases = unqualifiedCardCreditCurrencyAliases;
 exports.inspectUniversalMoneyDraft = inspectUniversalMoneyDraft;
 exports.extractUniversalMoney = extractUniversalMoney;
 const alert_draft_1 = require("@/lib/alert-draft");
 const alert_market_packs_1 = require("@/lib/alert-market-packs");
 const currency_metadata_1 = require("@/lib/currency-metadata");
 const universal_fields_1 = require("@/lib/universal-fields");
+const principal_posting_guards_1 = require("@/lib/principal-posting-guards");
 const universal_types_1 = require("@/lib/universal-types");
 const SOURCE_UNIT_ALIASES = {
     KSh: currency_metadata_1.CURRENCY_SYMBOL_CANDIDATES.KSh,
@@ -15082,6 +15501,17 @@ const sourceCurrencyAliases = (context) => {
     return { ...SOURCE_UNIT_ALIASES, ...(market ? (0, alert_market_packs_1.alertMarketPack)(market).currencyAliases : {}),
         ...context.currencyAliases };
 };
+function unqualifiedCardCreditCurrencyAliases(source, market, existing) {
+    const units = market === 'AE'
+        ? { 'درهم': ['AED'], 'دراهم': ['AED'] } : { 'ريال': ['SAR'] };
+    const currencyAliases = { ...units, ...existing };
+    const draft = (0, alert_draft_1.inspectAlertDraft)(source, { currencyAliases });
+    const credits = draft.candidates.filter(candidate => candidate.currency === (market === 'AE' ? 'AED' : 'SAR') &&
+        candidate.minorUnits !== null && /^[1-9]\d*$/u.test(candidate.minorUnits) &&
+        ((0, principal_posting_guards_1.isUnqualifiedCardCredit)(draft.normalizedText, candidate.span) ||
+            (0, principal_posting_guards_1.isCompletedCardRepaymentPrincipal)(draft.normalizedText, candidate.span)));
+    return credits.length === 1 ? currencyAliases : undefined;
+}
 const LB = String.raw `(?<![A-Za-z\u00C0-\u024F\u1E00-\u1EFF\p{N}_])`;
 const RB = String.raw `(?![A-Za-z\u00C0-\u024F\u1E00-\u1EFF\p{N}_])`;
 const RS = String.raw `[A-Za-z\u00C0-\u024F\u1E00-\u1EFF]*${RB}`;
@@ -16099,7 +16529,7 @@ const inspectUnparsedLaunchAlert = (source, sender) => {
 exports.inspectUnparsedLaunchAlert = inspectUnparsedLaunchAlert;
 }
 };
-const mappings={"alert-draft":{"@/lib/currency-metadata":"currency-metadata"},"alert-event-evidence":{},"alert-institution-grammars":{},"alert-market-detection":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-semantics":"alert-semantics","@/lib/markets":"markets"},"alert-market-packs":{"@/lib/alert-market-packs.india-me":"alert-market-packs.india-me","@/lib/alert-market-packs.us-eu":"alert-market-packs.us-eu","@/lib/alert-market-packs.world":"alert-market-packs.world"},"alert-market-packs.india-me":{},"alert-market-packs.us-eu":{},"alert-market-packs.world":{},"alert-semantics":{"@/lib/alert-draft":"alert-draft","@/lib/alert-event-evidence":"alert-event-evidence","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-market-packs":"alert-market-packs","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"alert-source-ownership":{"@/lib/alert-draft":"alert-draft"},"bank-alert-interpreter":{"@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules","@/lib/categories":"categories","@/lib/bank-alert-semantic-output":"bank-alert-semantic-output","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser","@/lib/unparsed-launch-alert":"unparsed-launch-alert"},"bank-alert-semantic-output":{},"bank-alert-semantic-rules":{"@/lib/sms-parser":"sms-parser"},"bank-amount-tokens":{},"best-effort-autopost":{"@/lib/currency-metadata":"currency-metadata","@/lib/capture-source-identity":"capture-source-identity","@/lib/fx-rates":"fx-rates","@/lib/sms-parser":"sms-parser"},"bnpl-providers":{},"brand-categories":{},"capture-source-identity":{},"categories":{"@/lib/i18n":"i18n"},"country":{"@/lib/country-names":"country-names"},"country-names":{},"currency-metadata":{},"fx":{"@/lib/currency-metadata":"currency-metadata","@/lib/ledger-money":"ledger-money"},"fx-rates":{"@/lib/fx":"fx"},"gulf-neighbour-alerts":{"@/lib/best-effort-autopost":"best-effort-autopost","@/lib/country":"country","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/gulf-neighbour-templates":"gulf-neighbour-templates","@/lib/sms-parser":"sms-parser","@/lib/universal-parser":"universal-parser"},"gulf-neighbour-templates":{"@/lib/best-effort-autopost":"best-effort-autopost"},"i18n":{"@/lib/import-processing-disclosure":"import-processing-disclosure"},"import-processing-disclosure":{},"ios-background-alert-parser":{"@/lib/currency-metadata":"currency-metadata","@/lib/country":"country","@/lib/markets":"markets","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/launch-alert-parser":"launch-alert-parser","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/fx":"fx","@/lib/sms-parser":"sms-parser"},"latam-alert-templates":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/sms-parser":"sms-parser","@/lib/universal-types":"universal-types"},"launch-alert-parser":{"@/lib/alert-market-detection":"alert-market-detection","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/country":"country","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/bank-alert-interpreter":"bank-alert-interpreter","@/lib/markets":"markets","@/lib/bnpl-providers":"bnpl-providers","@/lib/sms-parser":"sms-parser","@/lib/currency-metadata":"currency-metadata","@/lib/gulf-neighbour-alerts":"gulf-neighbour-alerts","@/lib/universal-parser":"universal-parser","@/lib/alert-market-packs":"alert-market-packs","@/lib/alert-draft":"alert-draft","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/universal-categorization":"universal-categorization","@/lib/fx-rates":"fx-rates"},"ledger-money":{"@/lib/currency-metadata":"currency-metadata"},"markets":{"@/lib/country":"country"},"principal-posting-guards":{},"sms-parser":{"@/lib/categories":"categories","@/lib/markets":"markets","@/lib/bank-amount-tokens":"bank-amount-tokens","@/lib/fx":"fx","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/bnpl-providers":"bnpl-providers","@/lib/country":"country","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/universal-money":"universal-money"},"universal-categorization":{"@/lib/brand-categories":"brand-categories","@/lib/categories":"categories","@/lib/sms-parser":"sms-parser"},"universal-dates":{"@/lib/alert-source-ownership":"alert-source-ownership","@/lib/universal-types":"universal-types"},"universal-fields":{"@/lib/universal-types":"universal-types","@/lib/alert-draft":"alert-draft","@/lib/universal-dates":"universal-dates"},"universal-money":{"@/lib/alert-draft":"alert-draft","@/lib/alert-market-packs":"alert-market-packs","@/lib/currency-metadata":"currency-metadata","@/lib/universal-fields":"universal-fields","@/lib/universal-types":"universal-types"},"universal-parser":{"@/lib/universal-types":"universal-types","@/lib/alert-semantics":"alert-semantics","@/lib/universal-fields":"universal-fields","@/lib/universal-money":"universal-money","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"universal-types":{},"unparsed-launch-alert":{"@/lib/alert-draft":"alert-draft","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser"}};
+const mappings={"alert-draft":{"@/lib/currency-metadata":"currency-metadata"},"alert-event-evidence":{},"alert-institution-grammars":{},"alert-market-detection":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-semantics":"alert-semantics","@/lib/markets":"markets"},"alert-market-packs":{"@/lib/alert-market-packs.india-me":"alert-market-packs.india-me","@/lib/alert-market-packs.us-eu":"alert-market-packs.us-eu","@/lib/alert-market-packs.world":"alert-market-packs.world"},"alert-market-packs.india-me":{},"alert-market-packs.us-eu":{},"alert-market-packs.world":{},"alert-semantics":{"@/lib/alert-draft":"alert-draft","@/lib/alert-event-evidence":"alert-event-evidence","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-market-packs":"alert-market-packs","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"alert-source-ownership":{"@/lib/alert-draft":"alert-draft"},"bank-alert-interpreter":{"@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules","@/lib/categories":"categories","@/lib/bank-alert-semantic-output":"bank-alert-semantic-output","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser","@/lib/unparsed-launch-alert":"unparsed-launch-alert"},"bank-alert-semantic-output":{},"bank-alert-semantic-rules":{"@/lib/sms-parser":"sms-parser"},"bank-amount-tokens":{},"best-effort-autopost":{"@/lib/currency-metadata":"currency-metadata","@/lib/capture-source-identity":"capture-source-identity","@/lib/fx-rates":"fx-rates","@/lib/sms-parser":"sms-parser","@/lib/principal-posting-guards":"principal-posting-guards"},"bnpl-providers":{},"brand-categories":{},"capture-source-identity":{},"categories":{"@/lib/i18n":"i18n"},"country":{"@/lib/country-names":"country-names"},"country-names":{},"currency-metadata":{},"fx":{"@/lib/currency-metadata":"currency-metadata","@/lib/ledger-money":"ledger-money"},"fx-rates":{"@/lib/fx":"fx"},"gulf-neighbour-alerts":{"@/lib/best-effort-autopost":"best-effort-autopost","@/lib/country":"country","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/gulf-neighbour-templates":"gulf-neighbour-templates","@/lib/sms-parser":"sms-parser","@/lib/universal-parser":"universal-parser"},"gulf-neighbour-templates":{"@/lib/best-effort-autopost":"best-effort-autopost"},"i18n":{"@/lib/import-processing-disclosure":"import-processing-disclosure"},"import-processing-disclosure":{},"ios-background-alert-parser":{"@/lib/currency-metadata":"currency-metadata","@/lib/country":"country","@/lib/markets":"markets","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/launch-alert-parser":"launch-alert-parser","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/fx":"fx","@/lib/sms-parser":"sms-parser"},"latam-alert-templates":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/sms-parser":"sms-parser","@/lib/universal-types":"universal-types"},"launch-alert-parser":{"@/lib/alert-market-detection":"alert-market-detection","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/country":"country","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/bank-alert-interpreter":"bank-alert-interpreter","@/lib/markets":"markets","@/lib/bnpl-providers":"bnpl-providers","@/lib/sms-parser":"sms-parser","@/lib/currency-metadata":"currency-metadata","@/lib/gulf-neighbour-alerts":"gulf-neighbour-alerts","@/lib/universal-parser":"universal-parser","@/lib/alert-market-packs":"alert-market-packs","@/lib/alert-draft":"alert-draft","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/universal-money":"universal-money","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/universal-categorization":"universal-categorization","@/lib/fx-rates":"fx-rates"},"ledger-money":{"@/lib/currency-metadata":"currency-metadata"},"markets":{"@/lib/country":"country"},"principal-posting-guards":{},"sms-parser":{"@/lib/categories":"categories","@/lib/markets":"markets","@/lib/bank-amount-tokens":"bank-amount-tokens","@/lib/fx":"fx","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/bnpl-providers":"bnpl-providers","@/lib/country":"country","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/universal-money":"universal-money"},"universal-categorization":{"@/lib/brand-categories":"brand-categories","@/lib/categories":"categories","@/lib/sms-parser":"sms-parser"},"universal-dates":{"@/lib/alert-source-ownership":"alert-source-ownership","@/lib/universal-types":"universal-types"},"universal-fields":{"@/lib/universal-types":"universal-types","@/lib/alert-draft":"alert-draft","@/lib/universal-dates":"universal-dates"},"universal-money":{"@/lib/alert-draft":"alert-draft","@/lib/alert-market-packs":"alert-market-packs","@/lib/currency-metadata":"currency-metadata","@/lib/universal-fields":"universal-fields","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/universal-types":"universal-types"},"universal-parser":{"@/lib/universal-types":"universal-types","@/lib/alert-semantics":"alert-semantics","@/lib/universal-fields":"universal-fields","@/lib/universal-money":"universal-money","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"universal-types":{},"unparsed-launch-alert":{"@/lib/alert-draft":"alert-draft","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser"}};
 const cache=Object.create(null);
 function load(id){
 if(Object.prototype.hasOwnProperty.call(cache,id))return cache[id].exports;

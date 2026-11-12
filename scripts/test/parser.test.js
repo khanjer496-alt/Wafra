@@ -1321,8 +1321,11 @@ t('parenthetical descriptor drops (noon Food)',
   'Purchase of AED 46.80 with Debit Card ending 4744 at noon Food(Noon ECommerce), 5558888. Avl Balance is AED 5,304.17.',
   { merchant: 'Noon Food', category: 'dining' });
 
-t('SEWA bill notice is a due reminder, not an expense',
+t('SEWA bill notice with a click instruction is not imported',
   'Dear Customer, Bill amount for your account 5557118 is AED 785.4, billed on 07-Jan-22.Please pay by 22-Jan-22. Click here to view bill  https://sewapayment.tiny.us/359aezc3',
+  null);
+t('SEWA bill notice without a click instruction keeps its due reminder',
+  'Dear Customer, Bill amount for your account 5557118 is AED 785.4, billed on 07-Jan-22.Please pay by 22-Jan-22. Bill reference: https://sewapayment.tiny.us/359aezc3',
   { kind: 'billDue', merchant: 'SEWA', category: 'utilities', date: '2022-01-22', dueDay: 22,
     billIdentity: 'account:7118' });
 
@@ -1341,10 +1344,15 @@ t('e& due-date notice is a reminder, not a charge',
 // genuinely split across subsystems and one biller can reach a ledger twice.
 // These five pin the behaviour as it ships; which name wins is a product
 // decision, not something to settle by editing a green test.
-t('Arabic e& monthly statement creates one telecom reminder',
+t('Arabic e& monthly statement with a click instruction is not imported',
   'عزيزي العميل،\nفاتورتك لشهر يوليو للحساب رقم 123456789 متاحة الآن.\n' +
   'إجمالي المبلغ المستحق دفعه قبل تاريخ 15 أغسطس 2026 هو: 450.45 درهماً (يشمل ضريبة القيمة المضافة).\n' +
   'اضغط هنا لدفع فاتورتك عبر تطبيق e& UAE\nhttps://www.eand.ae/smsebill',
+  null);
+t('Arabic e& monthly statement without a click instruction keeps its telecom reminder',
+  'عزيزي العميل،\nفاتورتك لشهر يوليو للحساب رقم 123456789 متاحة الآن.\n' +
+  'إجمالي المبلغ المستحق دفعه قبل تاريخ 15 أغسطس 2026 هو: 450.45 درهماً (يشمل ضريبة القيمة المضافة).\n' +
+  'خدمة e& UAE\nhttps://www.eand.ae/smsebill',
   { kind: 'billDue', merchant: 'E&', amountFils: 45045, date: '2026-08-15', dueDay: 15,
     category: 'telecom', billIdentity: 'account:6789', deliberate: true });
 
@@ -2011,8 +2019,9 @@ t('a masked PAN in the same processed-payment voice is still a card payment',
     'Mode of Payment : Credit/Debit Card\n' +
     'Transaction #: MOBILEAPP2470000000006212\n' +
     'Reference #: 300000000000';
-  const SMILES_TAIL =
-    "\n\nYou've earned Smiles points on this payment. Redeem them for savings on food, groceries, shopping, travel, e& add-ons, home services, and more. Check your balance and start redeeming: https://smilesuae.go.link/xxxx" +
+  const SMILES_REWARDS =
+    "\n\nYou've earned Smiles points on this payment. Redeem them for savings on food, groceries, shopping, travel, e& add-ons, home services, and more. Check your balance and start redeeming: https://smilesuae.go.link/xxxx";
+  const SMILES_TAIL = SMILES_REWARDS +
     '\n\nTo Know your Payment Status through WhatsApp Click on https://api.whatsapp.com/send?phone=971000000000';
   const EXPECT = {
     kind: 'transaction', type: 'expense', amountFils: 31395, currency: 'AED',
@@ -2020,19 +2029,30 @@ t('a masked PAN in the same processed-payment voice is still a card payment',
     paymentFlowSide: 'receipt', billIdentity: 'account:0000',
     card: null, transfer: false, snapshotFils: null, snapshotKind: null, date: '2026-10-03',
   };
-  t('the real e& amount-first receipt is the biller-receipt family',
-    EAND_RECEIPT + SMILES_TAIL, EXPECT, { sender: 'eandINF' });
+  // The explicit no-click policy holds the entire source, even a genuine
+  // biller receipt. No-click controls retain all existing receipt assertions.
+  t('the e& receipt with a WhatsApp click instruction is not imported',
+    EAND_RECEIPT + SMILES_TAIL, null, { sender: 'eandINF' });
+  t('the e& receipt with only its rewards paragraph keeps the biller-receipt family',
+    EAND_RECEIPT + SMILES_REWARDS, EXPECT, { sender: 'eandINF' });
   t('...and so is the same receipt without its Smiles paragraph',
     EAND_RECEIPT, EXPECT, { sender: 'eandINF' });
-  t('...and with no sender at all, which is how the paste path reads it',
-    EAND_RECEIPT + SMILES_TAIL, EXPECT);
-  t('...and in the "Dear Customer, Your payment" voice the older family uses',
+  t('the click-instruction receipt is also held without a sender',
+    EAND_RECEIPT + SMILES_TAIL, null);
+  t('the no-click rewards receipt still works without a sender',
+    EAND_RECEIPT + SMILES_REWARDS, EXPECT);
+  t('the older processed voice also refuses the click instruction',
     EAND_RECEIPT.replace('Hello, your payment', 'Dear Customer, Your payment') + SMILES_TAIL,
+    null, { sender: 'eandINF' });
+  t('the older processed voice keeps the no-click rewards receipt',
+    EAND_RECEIPT.replace('Hello, your payment', 'Dear Customer, Your payment') + SMILES_REWARDS,
     EXPECT, { sender: 'eandINF' });
   // A capture that loses its blank lines still keeps the advert out of the
   // category: the Smiles lead-in ends the receipt block on its own.
-  t('...and with its paragraphs flattened',
-    (EAND_RECEIPT + SMILES_TAIL).replace(/\n\n/g, '\n'), EXPECT, { sender: 'eandINF' });
+  t('flattening paragraphs does not exempt a click instruction',
+    (EAND_RECEIPT + SMILES_TAIL).replace(/\n\n/g, '\n'), null, { sender: 'eandINF' });
+  t('flattening the no-click rewards receipt preserves its fields',
+    (EAND_RECEIPT + SMILES_REWARDS).replace(/\n\n/g, '\n'), EXPECT, { sender: 'eandINF' });
 
   // The amount-first opening alone is ordinary bank wording. Without a biller
   // in the channel line, or with card / minimum / outstanding vocabulary, it is
@@ -2080,7 +2100,7 @@ t('a masked PAN in the same processed-payment voice is still a card payment',
   // The e& account number is the BILLER's. It must not become a card, a bank
   // account, a transfer party or a balance on anything the user owns.
   {
-    const row = parseSms(EAND_RECEIPT + SMILES_TAIL, undefined, { sender: 'eandINF' });
+    const row = parseSms(EAND_RECEIPT + SMILES_REWARDS, undefined, { sender: 'eandINF' });
     ok('the e& account number is not read as a transfer party',
       extractOutgoingTransferParties(EAND_RECEIPT + SMILES_TAIL) === null);
     const { buildImportPlan } = require('./build/import-plan');
@@ -2100,7 +2120,7 @@ t('a masked PAN in the same processed-payment voice is still a card payment',
   // receipts have not been seen carrying the Smiles paragraph; the paragraph is
   // the real one above, appended to the real receipt pinned earlier in this file.
   t('a Smiles paragraph cannot re-file a processed-voice e& receipt either',
-    'Dear Customer, Your payment to the account number ····2543 has been processed.\nAmount Due: AED 408.45 \nAmount Paid: AED 408.45 \nPayment Channel: Etisalat Mobile App' + SMILES_TAIL,
+    'Dear Customer, Your payment to the account number ····2543 has been processed.\nAmount Due: AED 408.45 \nAmount Paid: AED 408.45 \nPayment Channel: Etisalat Mobile App' + SMILES_REWARDS,
     { merchant: 'Etisalat', category: 'telecom', paymentFlowSide: 'receipt', billIdentity: 'account:2543' });
 }
 

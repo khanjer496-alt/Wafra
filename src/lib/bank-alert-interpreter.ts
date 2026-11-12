@@ -28,6 +28,7 @@ import {
   isInformationOnlyAlert,
   normalizeArabic,
   parseSms,
+  refundSideNoteVerdict,
   type ParsedSms,
 } from '@/lib/sms-parser';
 import {
@@ -105,16 +106,21 @@ const isCompactCardCreditReturn = (source: string): boolean =>
 /** Preserve an already-proven return of the purchase, not a reversed credit.
  * The card must directly precede the completed-return verb in the opening
  * purchase clause. "Credit Card" is an instrument, not money taken back.
- * parseSms still owns the amount, date, source and non-posting safeguards. */
+ * parseSms still owns the amount, date, source and non-posting safeguards.
+ * FIX4 (CEO 676bbe7a): a dot inside the shop name ("NOON.COM") no longer ends the clause, and the shop may follow the card
+ * ("with Debit Card ending 1234 at NOON.COM has been refunded"), and the Liv/ENBD "Purchase amount ... on your Debit Card"
+ * form may omit the card digits. CEO 1014684b: that form also names the user's own account ("on your account ending 1234
+ * has been refunded"), a refund to the user like "to your card"; the "Purchase of" form still needs a card. Without this the
+ * semantic reader booked the completed refund as a purchase on the launch session and native paths. */
 const isCompletedCardPurchaseReturn = (source: string, legacy: ParsedSms): boolean =>
   legacy.kind === 'transaction' && legacy.type === 'income' &&
   legacy.categoryGuess === 'other' && !legacy.transferHint &&
-  legacy.card !== null && legacy.card.kind !== 'account' &&
-  (/^(?:your\s+)?(?:card\s+|pos\s+)?purchase\s+of\b(?:[^.\n]|\.(?=\d)){0,160}?\b(?:with|using|on)\s+(?:your\s+)?(?:(?:credit|debit|covered)\s+)?card\s+(?:ending(?:\s+with)?\s+)?[x*\d -]{4,32}\s+(?:has\s+been|was)\s+(?:successfully\s+)?(?:reversed|refunded)\b/iu.test(source) ||
+  ((legacy.card !== null && legacy.card.kind !== 'account' &&
+    /^(?:your\s+)?(?:card\s+|pos\s+)?purchase\s+of\b(?:[^.\n]|\.(?=\S)){0,160}?\b(?:with|using|on)\s+(?:your\s+)?(?:(?:credit|debit|covered)\s+)?card\s+(?:ending(?:\s+with)?\s+)?[x*\d -]{4,32}(?:\s+at\s+(?:[^.\n]|\.(?=\S)){1,80}?)?\s+(?:has\s+been|was)\s+(?:successfully\s+)?(?:reversed|refunded)\b/iu.test(source)) ||
     // The Liv/ENBD form names the purchase AMOUNT and its shop before the
     // card: "Purchase amount of AED 120.50 at NOON on your Credit Card ending
     // 1234 has been successfully refunded". Completed wording only.
-    /^purchase\s+(?:amount|amt)\s+of\b(?:[^.\n]|\.(?=\d)){0,160}?\bon\s+your\s+(?:(?:credit|debit|covered|prepaid)\s+)?card(?:\s+(?:ending(?:\s+with)?\s+)?[x*\d -]{4,32})?\s+has\s+been\s+(?:successfully\s+|fully\s+)?refunded\b/iu.test(source)) &&
+    /^purchase\s+(?:amount|amt)\s+of\b(?:[^.\n]|\.(?=\S)){0,160}?\bon\s+your\s+(?:(?:(?:credit|debit|covered|prepaid)\s+)?card|account)(?:\s+(?:ending(?:\s+with)?\s+)?[x*\d -]{4,32})?\s+has\s+been\s+(?:successfully\s+|fully\s+)?refunded\b/iu.test(source)) &&
   !FUTURE_REFUND.test(source);
 /** "…and will be refunded", "will be credited back": a refund not yet made. */
 const FUTURE_REFUND = /\bwill\s+be\s+(?:refunded|reversed|credited)\b/iu;
@@ -295,6 +301,16 @@ export const interpretBankAlert = ({
         categoryGuess: cashbackCategory, categoryDeliberate: true, categoryPinned: true as const,
       } : {}) }
     : capturedLegacy;
+  // Review 1e2ad89f: a refund sentence with no amount beside the alert's own movement is not a refund credit, so the
+  // semantic reader must not re-read the alert as one (it booked "AED 250.00 was debited ... When a refund is credited to
+  // your card ..." as income). parseSms has already judged such a note: its row stands, and without one Review at most.
+  if (refundSideNoteVerdict(source) !== 'none') {
+    if (usableLegacy) return legacyResult(usableLegacy);
+    const pending = inspectUnparsedLaunchAlert(source, sender);
+    return pending.outcome === 'review'
+      ? finalFallback(pending, null)
+      : { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+  }
   const semanticText = normalizeArabic(source).replace(/\s+/gu, ' ');
   if (usableLegacy && isCompletedCardPurchaseReturn(semanticText, usableLegacy)) {
     return legacyResult(usableLegacy, 'refund');

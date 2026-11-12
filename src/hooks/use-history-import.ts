@@ -1,3 +1,5 @@
+import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
+import { reviewClaimSourceKeys, reviewReceiptSettled, requiresReviewRetention, settleReviewStage, type ReviewStageReceipt } from '@/lib/alert-review-tray';
 import { collectLegacyReviewSourceKeys } from '@/lib/review-source-bindings';
 import { AppState as RNAppState, Platform } from 'react-native';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
@@ -127,6 +129,7 @@ export function useHistoryImport(): void {
           pageSize: foreground ? FOREGROUND_HISTORY_PAGE_SIZE : BACKGROUND_HISTORY_PAGE_SIZE,
           legacyReviewSourceKeys: requestedLegacyReviewKeys,
           historyRepair: true,
+          knownReviewSourceKeys: reviewClaimSourceKeys(snapshot.reviewTray, Date.now()),
           includeNotificationQueue: false,
         },
       );
@@ -134,7 +137,7 @@ export function useHistoryImport(): void {
       return {
         ...page,
         scanned: page.scannedCount,
-        found: page.parsed.length + page.reviewCandidates.length,
+        found: page.parsed.length + page.reviewCandidates.length + (page.skippedKnownInboxReviewSourceKeys?.length ?? 0),
         complete: page.inboxHistoryComplete,
       };
     },
@@ -153,10 +156,20 @@ export function useHistoryImport(): void {
       // Skip only the genuinely empty stage. Identity bindings still require
       // staging even when no candidate is present, and a real review must be
       // durable before planning against the resulting ledger snapshot.
-      if (page.reviewCandidates.length > 0 || (page.reviewSourceBindings?.length ?? 0) > 0) {
-        const reviewReceipt = stageReviewAlerts(page.reviewCandidates, undefined, page.reviewSourceBindings);
-        await reviewReceipt.durable;
+      let reviewReceipt: ReviewStageReceipt | undefined;
+      if (page.reviewCandidates.length > 0 || (page.reviewSourceBindings?.length ?? 0) > 0 ||
+          (page.skippedKnownInboxReviewSourceKeys?.length ?? 0) > 0) {
+        reviewReceipt = stageReviewAlerts(page.reviewCandidates, undefined, page.reviewSourceBindings, 'hold-source');
+        const outcomes = await settleReviewStage(page.reviewCandidates, reviewReceipt);
+        if (!canCommit()) return false;
+        const unresolved = page.reviewCandidates.filter(requiresReviewRetention).map(item =>
+          outcomes.find(entry => entry.sourceKey === canonicalCaptureSourceKey(item.sourceKey, item.observedAt)))
+          .filter(entry => !entry || !reviewReceiptSettled(entry.outcome));
+        // An expired source is a terminal, disclosed loss: History continues.
+        if (unresolved.length) return { paused: 'review-capacity' as const };
       }
+      // Cropped candidates still live in the provider; do not skip their cursor.
+      if (page.deferredInboxReviews) return { paused: 'review-capacity' as const };
 
       // Parsing already yields, but planning + reducer reconciliation below are
       // synchronous JS too. Starting that work in the same turn as a user's tap
@@ -186,7 +199,13 @@ export function useHistoryImport(): void {
       // Review items in this same turn so the page write below carries them;
       // a full Review lane posts the alert instead of dropping it.
       const nearMatches = stageWalletNearMatches(
-        plan, () => getStateSnapshot().reviewTray, (items) => stageReviewAlerts(items));
+        plan, () => getStateSnapshot().reviewTray, (items) => stageReviewAlerts(items, undefined, undefined, 'hold-source'));
+      const claims = new Set(reviewReceipt?.retainedSourceKeys?.() ?? []);
+      const finalReviews = reviewReceipt?.retention?.() ?? [];
+      if (!canCommit() || (page.skippedKnownInboxReviewSourceKeys ?? []).some(key => !claims.has(key)) ||
+          page.reviewCandidates.some(item => requiresReviewRetention(item) && !finalReviews.some(entry =>
+            entry.sourceKey === canonicalCaptureSourceKey(item.sourceKey, item.observedAt) &&
+            reviewReceiptSettled(entry.outcome)))) return false;
       const receipt = importBatch({
           ...nearMatches.plan.batch,
           parserRereadComplete: page.inboxHistoryComplete,

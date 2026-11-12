@@ -16,7 +16,7 @@ const local = load('@/lib/local-message-record');
 const { createLaunchAlertSession } = load('@/lib/launch-alert-parser');
 const { createIosLocalCaptureCoordinator } = load('@/lib/ios-local-capture');
 const { materializeImportBatch, applyMaterializedImportBatch } = load('@/lib/ledger-import');
-const { admitPreparedReviewAlerts, emptyAlertReviewTray } = load('@/lib/alert-review-tray');
+const { admitPreparedReviewAlerts, emptyAlertReviewTray, reviewRetentionReceipts } = load('@/lib/alert-review-tray');
 
 const NOW = Date.parse('2026-10-14T12:00:00.000Z');
 const OBSERVED = '2026-10-14T11:00:00.000Z';
@@ -145,11 +145,11 @@ async function drain(text, sender, enabled) {
         state = applyMaterializedImportBatch(state, m);
         return { ids: m.transactions.map((t) => t.id), qualificationIds: [], durable: Promise.resolve() };
       },
-      stageReviewAlerts: (items) => {
-        const batch = admitPreparedReviewAlerts(emptyAlertReviewTray(), items, NOW);
+      stageReviewAlerts: (items, _qualifications, _bindings, mode) => {
+        const batch = admitPreparedReviewAlerts(emptyAlertReviewTray(), items, NOW, mode);
         const admitted = batch.outcomes.filter((o) => o === 'admitted').length;
         reviews += admitted;
-        return { admitted, qualificationIds: [], durable: Promise.resolve() };
+        return { admitted, qualificationIds: [], durable: Promise.resolve(), retention: () => reviewRetentionReceipts(batch.state, items, NOW) };
       },
     },
     now: () => NOW,
