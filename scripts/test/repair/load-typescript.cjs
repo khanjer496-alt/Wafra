@@ -127,6 +127,15 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       if (name === '@/lib/store-selection') {
         return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/store-selection.ts'));
       }
+      // The store's pause-boundary factory and pass-through rule (store.tsx and
+      // ios-tab-gate import it). A .tsx, so never in build/; always the real
+      // source, with the harness's own React when it supplies one.
+      if (name === '@/lib/store-pause') {
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/store-pause.tsx'), {
+          react: dependencies.react ?? require('react'),
+          'react/jsx-runtime': dependencies['react/jsx-runtime'] ?? require('react/jsx-runtime'),
+        }, globals);
+      }
       // The shared per-snapshot row index (entry sheet, Transfers); pure.
       if (name === '@/lib/rows-by-id') {
         return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/rows-by-id.ts'));
@@ -220,6 +229,12 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       // The real unproven-format policy (pure; the setting mirror defaults on).
       if (name === '@/lib/best-effort-autopost') {
         return require('../build/best-effort-autopost.js');
+      }
+      if (name === '@/lib/ui-money-text') {
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/ui-money-text.ts'), dependencies, globals);
+      }
+      if (name === '@/lib/free-capture-copy' || name === '@/lib/money-code-run') {
+        return require('../build/' + name.slice('@/lib/'.length) + '.js');
       }
       if (name === '@/lib/country') {
         return require('../build/country.js');

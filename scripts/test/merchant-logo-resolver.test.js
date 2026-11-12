@@ -30,6 +30,7 @@ function load({ fetchImpl = async () => ({ ok: false, json: async () => [] }), d
     }, { filename });
     return exports;
   }
+  requireModule('@/lib/logo-cache-lifecycle').setLogoLookupsAllowed(true);
   return requireModule('@/lib/merchant-logo-resolver');
 }
 

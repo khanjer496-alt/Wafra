@@ -13,6 +13,9 @@ function harness() {
   const i18n = local('i18n');
   const markets = local('markets');
   const money = local('ledger-money', { '@/lib/currency-metadata': local('currency-metadata') });
+  const moneyCode = local('money-code-run');
+  const uiMoney = local('ui-money-text', { '@/lib/ledger-money': money,
+    '@/lib/i18n': i18n, '@/lib/money-code-run': moneyCode });
   const format = local('format', { '@/lib/arabic-sms': local('arabic-sms'), '@/lib/i18n': i18n,
     '@/lib/ledger-money': money, '@/lib/markets': markets });
   const caches = new Map();
@@ -88,6 +91,7 @@ function harness() {
     '@/lib/reference-presentation': local('reference-presentation'),
     '@/lib/runtime-performance': { measureRuntimeOperation: (_tag, work) => work() },
     '@/lib/format': format, '@/lib/markets': markets, '@/lib/ledger-money': money,
+    '@/lib/i18n': i18n, '@/lib/money-code-run': moneyCode, '@/lib/ui-money-text': uiMoney,
   };
   const denomination = load(path.join(root, 'src/hooks/use-ledger-money.tsx'), deps);
   deps['@/hooks/use-category-catalog'] = load(path.join(root, 'src/hooks/use-category-catalog.ts'), deps);
@@ -232,8 +236,9 @@ test('compiled implicit Money and amount prefixes follow context with identical 
   for (const [currency, expected, language] of [['AED', '8.28', 'en'], ['USD', '8.28', 'en'], ['KWD', '0.828', 'ar'], ['JPY', '828', 'en']]) {
     h.i18n.setLanguage(language); h.setDenomination(h.money.ledgerMoneySpec(currency));
     const tree = h.renderMoney(props);
-    assert.equal(tree.props.accessibilityLabel, `${currency} ${expected}`);
-    assert.equal(strings(tree), `${currency} ${expected}`);
+    assert.equal(tree.props.accessibilityLabel, language === 'ar'
+      ? `\u2066${expected}\u00a0${currency}\u2069` : `${currency} ${expected}`);
+    assert.equal(strings(tree), language === 'ar' ? `${expected} ${currency}` : `${currency} ${expected}`);
     const fieldTree = h.renderAmountField(input);
     assert.match(strings(fieldTree), new RegExp(currency));
     assert.equal(nodes(fieldTree).find(node => node.type === 'TextInput').props.value, '8.28');
@@ -257,9 +262,15 @@ test('retained Spending, Trends and Bills keep visible and accessible money in t
     h.i18n.setLanguage(language); h.setDenomination(h.money.ledgerMoneySpec(currency));
     for (const [name, props] of Object.entries(surfaces)) {
       const before = JSON.stringify(props); const tree = h.renderSurface(name, props);
-      assert.ok(strings(tree).includes(`${currency} ${expected}`), `${name}: visible ${currency}`);
+      const visible = language === 'ar' ? `${expected} ${currency}` : `${currency} ${expected}`;
+      const spoken = language === 'ar' ? `\u2066${expected}\u00a0${currency}\u2069` : `${currency} ${expected}`;
+      assert.ok(strings(tree).includes(visible), `${name}: visible ${currency}`);
+      assert.ok(nodes(tree).some(node => node.props?.accessibilityRole === 'text' && node.props.accessibilityLabel === spoken),
+        `${name}: exact Money denomination, order and isolates`);
       const labels = nodes(tree).filter(node => node.type === 'Pressable').map(node => node.props.accessibilityLabel ?? '');
-      assert.ok(labels.some(label => label.includes(`${currency} ${expected}`)), `${name}: accessible ${currency}`);
+      // The row's parent label and its real Money child follow the same Arabic
+      // run policy (isolated figure, NBSP, ISO code), PaymentAgenda included.
+      assert.ok(labels.some(label => label.includes(spoken)), `${name}: accessible ${currency}`);
       if (currency !== 'AED') assert.ok(!labels.some(label => label.includes('AED')), `${name}: no stale accessible currency`);
       assert.equal(JSON.stringify(props), before);
     }

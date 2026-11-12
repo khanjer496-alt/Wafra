@@ -14,7 +14,7 @@ const walk = (node, out = []) => {
 const text = (node) => (Array.isArray(node) ? node.map(text).join('')
   : node && typeof node === 'object' ? text(node.props?.children) : node == null || node === false ? '' : String(node));
 
-function mount({ reducedMotion, platform = 'ios' }) {
+function mount({ reducedMotion, platform = 'ios', language = 'en' }) {
   let states = []; let index = 0;
   const react = {
     useState: (initial) => {
@@ -35,6 +35,7 @@ function mount({ reducedMotion, platform = 'ios' }) {
     '@/components/themed-text': { ThemedText: 'Text' },
     '@/constants/theme': { EASE: [0.2, 0.8, 0.2, 1], Fonts: {}, Motion: { digitStagger: 60, change: 240 }, Spacing: { two: 8 } },
     '@/hooks/use-ledger-money': { useLedgerMoney: () => null, useMoneyLocaleKey: () => '' },
+    '@/hooks/use-language': { useLanguage: () => language },
     '@/hooks/use-reduced-motion': { useReducedMotion: () => reducedMotion },
     '@/lib/format': { formatAmount: () => { throw new Error('ledger spec is always passed here'); } },
     '@/lib/ledger-money': ledgerMoney,
@@ -92,4 +93,11 @@ test('Android stays static unless a measured opt-in asks for motion', () => {
   const optedIn = mount({ reducedMotion: false, platform: 'android' });
   optedIn({ fils: 4562, motionOnAndroid: true });
   assert.ok(glyphs(optedIn({ fils: 5237, motionOnAndroid: true })).length > 0);
+});
+
+test('Arabic rolling figures keep the number then ISO code as one accessible group', () => {
+  const render = mount({ reducedMotion: true, language: 'ar' });
+  const tree = render({ fils: 12345 });
+  assert.equal(text(tree), '123.45USD');
+  assert.equal(tree.props.accessibilityLabel, '\u2066123.45\u00a0USD\u2069');
 });

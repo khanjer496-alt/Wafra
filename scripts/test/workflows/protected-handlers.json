@@ -4,7 +4,8 @@
     {
       "file": "src/app/settings.tsx",
       "name": "toggleAppLock",
-      "sha256": "b288f08d17b3021cdaebed59c5c706c8354fb0607d0d9bceef4e8c11e29a7a21"
+      "sha256": "8476140d9323c5df55c3f0c7fa684099e2cd3139a38161771fb79fbb9103617e",
+      "reviewedChange": "2026-11-09 QA-009: await native-backed App Lock changes and display the localized privacy-preference failure on enable/disable rejection, preserving authentication, passcode fallback, cancellation and web guards. This exact AST hash matches independently reviewed heads 9b8d47bd, b5e635f9 and bf9c6344; evidence: Shared/launch-review/reviewer-qa008-009-privacy.md. The single-record refresh is covered by seven actual-handler cases in repair/app-lock-preference-handler.test.cjs; no action source changed."
     },
     {
       "file": "src/app/settings.tsx",

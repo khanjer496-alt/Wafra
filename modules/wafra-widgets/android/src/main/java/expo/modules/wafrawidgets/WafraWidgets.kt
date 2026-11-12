@@ -130,6 +130,17 @@ internal object WafraWidgets {
 
   fun isRefreshAction(action: String?): Boolean = action != null && action in REFRESH_ACTIONS
 
+  /**
+   * Remove the stored snapshot only when it is not already redacted (or unreadable). A redacted
+   * snapshot stays, so launching with App Lock on does not empty the widgets, matching iOS.
+   */
+  fun purgeUnredactedSnapshot(context: Context) {
+    val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    val raw = prefs.getString(KEY, null) ?: return
+    val hidden = try { org.json.JSONObject(raw).optBoolean("hidden", false) } catch (error: Exception) { false }
+    if (!hidden) store(context, null)
+  }
+
   fun store(context: Context, json: String?) {
     val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     if (json == null) {

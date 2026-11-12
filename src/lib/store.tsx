@@ -16,6 +16,7 @@ import { isAutomaticFounderProBuild } from '@/lib/founder-pro';
 import { isScopedSubscriptionKey } from '@/lib/subscriptions';
 
 import { MoneyLocaleProvider } from '@/hooks/use-ledger-money';
+import { appStoreMustBeLive, createStorePauseBoundary } from '@/lib/store-pause';
 import {
   createSelection,
   createStoreHandle,
@@ -232,7 +233,9 @@ import {
   type TransactionType,
   type StatementCoverageEntry,
 } from '@/lib/types';
-import { clearWidgetSnapshot } from '../../modules/wafra-widgets';
+import { clearWidgetSnapshot, setAppPrivacy } from '../../modules/wafra-widgets';
+import { setLogoLookupsAllowed } from '@/lib/logo-cache-lifecycle';
+import { invalidateWidgetSnapshotSync, requestWidgetSnapshotSync } from '@/lib/widget-sync';
 
 export type { ImportBatchInput } from '@/lib/types';
 
@@ -309,6 +312,8 @@ const EMPTY_STATE: AppState = {
   onboarded: false,
   userName: 'there',
   appLock: false,
+  onlineLogosEnabled: false,
+  hideWidgetAmountsWhenLocked: true,
   monthStartDay: 1,
   themePreference: 'system',
   pro: false,
@@ -1031,6 +1036,7 @@ type Action =
       goals: Goal[];
     }
   | { type: 'setAppLock'; enabled: boolean }
+  | { type: 'setPrivacyPreferences'; patch: Partial<Pick<AppState, 'onlineLogosEnabled' | 'hideWidgetAmountsWhenLocked'>> }
   | { type: 'setPrivateMode'; enabled: boolean }
   | { type: 'setCaptureOptOut'; enabled: boolean }
   | { type: 'setAndroidCaptureSources'; sources: AndroidCaptureSources }
@@ -1442,6 +1448,8 @@ function actionMayChangeTransferLinks(state: AppState, reduced: AppState, action
     case 'touchSharedAlertFormats':
     case 'clearSharedAlertFormats':
     case 'setPrivateMode':
+    case 'setPrivacyPreferences':
+    case 'setAppLock':
     case 'setMonthStartDay':
       return false;
     default: {
@@ -1493,6 +1501,13 @@ function reduceState(state: AppState, action: Action): AppState {
     case 'restore': {
       // Merge over defaults so states saved by older app versions stay valid.
       const next = { ...EMPTY_STATE, ...action.state, hydrated: true };
+      // A file import is not consent to share names or expose widget amounts.
+      // Only local hydration may restore this device's explicit privacy choices.
+      if (action.type === 'restore') {
+        next.onlineLogosEnabled = state.onlineLogosEnabled === true;
+        next.hideWidgetAmountsWhenLocked = state.hideWidgetAmountsWhenLocked !== false;
+      }
+
       next.privateAlertFormats = action.type === 'hydrate'
         ? normalizePrivateAlertFormatStore(next.privateAlertFormats)
         : emptyPrivateAlertFormatStore();
@@ -2079,6 +2094,8 @@ function reduceState(state: AppState, action: Action): AppState {
     }
     case 'setAppLock':
       return { ...state, appLock: action.enabled };
+    case 'setPrivacyPreferences':
+      return { ...state, ...action.patch };
     case 'setDailySummary':
       return { ...state, dailySummary: action.enabled };
     case 'setPrivateMode':
@@ -2289,7 +2306,8 @@ interface StoreValue {
   setOnboardingPlan: (plan: OnboardingPlanPreferences) => void;
   setOnboardingProfile: (profile: OnboardingProfile) => void;
   setUserName: (name: string) => void;
-  setAppLock: (enabled: boolean) => void;
+  setAppLock: (enabled: boolean) => Promise<void>;
+  setPrivacyPreferences: (patch: Partial<Pick<AppState, 'onlineLogosEnabled' | 'hideWidgetAmountsWhenLocked'>>) => Promise<void>;
   setPrivateMode: (enabled: boolean) => Promise<void>;
   setCaptureOptOut: (enabled: boolean) => Promise<void>;
   setAndroidCaptureSources: (sources: AndroidCaptureSources) => Promise<void>;
@@ -2325,6 +2343,7 @@ const StoreContext = createContext<StoreValue | null>(null);
 /** Stable for the provider's lifetime: consumers subscribe instead of re-rendering on every value. */
 const StoreHandleContext = createContext<StoreHandle<StoreValue> | null>(null);
 const PrivateModeContext = createContext(false);
+const OnlineLogosContext = createContext(false);
 
 export interface ImportReceipt {
   ids: string[];
@@ -2608,6 +2627,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ((action.type === 'setPrivateMode' || action.type === 'setCaptureOptOut') && action.enabled)) {
       cancelLocalSemanticBackgroundWork();
     }
+    // Revoke queued logo work before subscribers can schedule another request.
+    setLogoLookupsAllowed(Platform.OS !== 'android' && next.hydrated && next.onlineLogosEnabled === true && !next.privateMode);
+    if ((next.appLock && next.hideWidgetAmountsWhenLocked !== false) !==
+        (authoritativeState.current.appLock && authoritativeState.current.hideWidgetAmountsWhenLocked !== false) || replacesLedger) {
+      void invalidateWidgetSnapshotSync();
+    }
     authoritativeState.current = next;
     if (Array.isArray(next.transferInternalIds) && (
       next.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION ||
@@ -2631,6 +2656,36 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return next;
   }, []);
   const getStateSnapshot = useCallback(() => authoritativeState.current, []);
+
+  // The effective widget guard last applied by THIS process; null until the first run.
+  const appliedWidgetGuard = useRef<boolean | null>(null);
+  useLayoutEffect(() => {
+    if (!state.hydrated || Platform.OS === 'web') return;
+    let cancelled = false;
+    const guard = state.appLock && state.hideWidgetAmountsWhenLocked !== false;
+    // Apply the native guard before republishing widget amounts. A queued
+    // snapshot under the old native preference must not be cached as written.
+    void setAppPrivacy(state.appLock, state.hideWidgetAmountsWhenLocked !== false).then(async () => {
+      if (cancelled) return;
+      // Drop the native copy only when the effective guard really changed. On every
+      // other launch the native module has already purged any unredacted snapshot
+      // while configuring the guard, and clearing here would leave widgets empty
+      // until the next publish (and after an unfinished history import, for good).
+      const changed = appliedWidgetGuard.current !== null && appliedWidgetGuard.current !== guard;
+      appliedWidgetGuard.current = guard;
+      if (changed) await invalidateWidgetSnapshotSync();
+      if (cancelled) return;
+      const current = authoritativeState.current;
+      const moneySpec = current.ledgerMoney ?? ledgerMoneySpec(marketCurrencyCode(current.marketId));
+      if (!moneySpec) return;
+      void requestWidgetSnapshotSync({
+        state: current, now: new Date(), language: current.language === 'ar' ? 'ar' : 'en',
+        moneySpec,
+      }, () => authoritativeState.current === current).done;
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [state.hydrated, state.appLock, state.hideWidgetAmountsWhenLocked, state.privateMode]);
+
   const getStateGeneration = useCallback(() => stateGeneration.current, []);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [storageFailure, setStorageFailure] = useState<StorageFailure | null>(null);
@@ -3540,9 +3595,43 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'setOnboardingProfile', profile });
   }, [dispatch]);
 
-  const setAppLock = useCallback((enabled: boolean) => {
+  const setAppLock = useCallback(async (enabled: boolean) => {
+    // Do not show App Lock as enabled before native recents protection exists.
+    if (Platform.OS !== 'web') {
+      await setAppPrivacy(enabled, authoritativeState.current.hideWidgetAmountsWhenLocked !== false);
+    }
     dispatch({ type: 'setAppLock', enabled });
   }, [dispatch]);
+
+  const privacyPreferenceWriteTail = useRef<Promise<void>>(Promise.resolve());
+  const setPrivacyPreferences = useCallback((patch: Partial<Pick<AppState, 'onlineLogosEnabled' | 'hideWidgetAmountsWhenLocked'>>) => {
+    // A failed older write must not revert a newer privacy choice.
+    const write = privacyPreferenceWriteTail.current.then(async () => {
+      const previous = authoritativeState.current;
+      const generation = stateGeneration.current;
+      const rollback: typeof patch = {};
+      if (patch.onlineLogosEnabled !== undefined) rollback.onlineLogosEnabled = previous.onlineLogosEnabled === true;
+      if (patch.hideWidgetAmountsWhenLocked !== undefined) rollback.hideWidgetAmountsWhenLocked = previous.hideWidgetAmountsWhenLocked !== false;
+      if (patch.hideWidgetAmountsWhenLocked !== undefined && Platform.OS !== 'web') {
+        await setAppPrivacy(previous.appLock, patch.hideWidgetAmountsWhenLocked !== false);
+      }
+      const next = dispatch({ type: 'setPrivacyPreferences', patch });
+      try {
+        if (!(await persist(next))) throw new Error('Privacy preference could not be saved');
+      } catch (error) {
+        if (generation === stateGeneration.current) {
+          // Revoke the logo generation immediately and preserve unrelated edits.
+          const restored = dispatch({ type: 'setPrivacyPreferences', patch: rollback });
+          if (patch.hideWidgetAmountsWhenLocked !== undefined && Platform.OS !== 'web') {
+            await setAppPrivacy(restored.appLock, restored.hideWidgetAmountsWhenLocked !== false);
+          }
+        }
+        throw error;
+      }
+    });
+    privacyPreferenceWriteTail.current = write.catch(() => {});
+    return write;
+  }, [dispatch, persist]);
 
   const setDailySummary = useCallback((enabled: boolean) => {
     dispatch({ type: 'setDailySummary', enabled });
@@ -3989,6 +4078,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setOnboardingProfile,
       setUserName,
       setAppLock,
+      setPrivacyPreferences,
       setDailySummary,
       setPrivateMode,
       setCaptureOptOut,
@@ -4075,6 +4165,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setOnboardingProfile,
       setUserName,
       setAppLock,
+      setPrivacyPreferences,
       setDailySummary,
       setPrivateMode,
       setCaptureOptOut,
@@ -4117,11 +4208,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <MoneyLocaleProvider localeKey={moneyLocaleKey}>
+      <OnlineLogosContext.Provider value={Platform.OS !== 'android' && state.hydrated && state.onlineLogosEnabled === true && !state.privateMode}>
       <PrivateModeContext.Provider value={state.privateMode}>
         <StoreHandleContext.Provider value={handle}>
           <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
         </StoreHandleContext.Provider>
       </PrivateModeContext.Provider>
+      </OnlineLogosContext.Provider>
     </MoneyLocaleProvider>
   );
 }
@@ -4160,6 +4253,18 @@ export function useStoreSelector<T>(
   return useSyncExternalStore(handle.subscribe, snapshot, snapshot);
 }
 
+/**
+ * Pauses everything below it on the store while `paused` (store-pause.tsx).
+ * Private Mode, onboarding, hydration and an erased ledger always pass straight
+ * through (appStoreMustBeLive), so a held frame never shows amounts the user
+ * just hid or data that was just erased.
+ */
+export const StorePauseBoundary = createStorePauseBoundary<StoreValue>(
+  StoreContext,
+  StoreHandleContext,
+  appStoreMustBeLive,
+);
+
 type StoreFunctionKeys = {
   [K in keyof StoreValue]: StoreValue[K] extends (...args: never[]) => unknown ? K : never;
 }[keyof StoreValue];
@@ -4191,6 +4296,10 @@ export function useStoreActions(): StoreActions {
 }
 
 /** Narrow subscription for list-row artwork; unrelated ledger updates do not rerender every avatar. */
+export function useOnlineLogosAllowed(): boolean {
+  return useContext(OnlineLogosContext);
+}
+
 export function usePrivateMode(): boolean {
   return useContext(PrivateModeContext);
 }

@@ -17,7 +17,7 @@ const en = {
   historyTitle: 'Past SMS on this phone',
   historyText: 'Bank texts already in your inbox fill in earlier months.',
   freeTitle: 'Always free',
-  freeText: 'Your ledger, manual entries, pasted bank messages, statement imports and backup never need Pro. The first 3 days are a free period in the app and never start billing automatically.',
+  freeText: 'Your ledger, manual entries, pasted bank messages, statement imports and backup never need Pro. The first 3 days include free automatic capture, and billing never starts automatically.',
   selected: 'Selected',
   // After a retry the store still returned no plan (the panel's own text says why; this says the retry ran).
   pricesStillUnavailable: 'Still no prices from the store',
@@ -32,7 +32,7 @@ const ar: ProCopy = {
   historyTitle: 'الرسائل السابقة على هذا الهاتف',
   historyText: 'رسائل البنك الموجودة في صندوق الوارد تملأ الأشهر السابقة.',
   freeTitle: 'مجاني دائمًا',
-  freeText: 'سجلك والإدخال اليدوي ولصق رسائل البنك واستيراد الكشوف والنسخ الاحتياطي لا تحتاج برو أبدًا. أول ٣ أيام فترة مجانية في التطبيق ولا تبدأ الفوترة تلقائياً.',
+  freeText: 'سجلك والإدخال اليدوي ولصق رسائل البنك واستيراد الكشوف والنسخ الاحتياطي لا تحتاج برو أبدًا. أول ٣ أيام تشمل الالتقاط التلقائي المجاني، ولا تبدأ الفوترة تلقائياً.',
   selected: 'محدد',
   pricesStillUnavailable: 'ما زالت الأسعار غير متاحة من المتجر',
   pricesStillUnavailableBody: 'لم يرسل المتجر خطط وفرة، لذا لا يمكن الشراء الآن. تحقّق من الاتصال ومن تسجيل دخول هذا الهاتف إلى المتجر ثم حاول مجدداً.',

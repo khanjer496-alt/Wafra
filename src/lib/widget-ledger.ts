@@ -154,7 +154,7 @@ export function widgetSnapshotForLedger(input: WidgetLedgerInput, detectedSubscr
   return buildWidgetSnapshot({
     today, currency: input.moneySpec.currency, exponent: input.moneySpec.exponent, now,
     upcoming: widgetUpcomingForLedger(state, now, detectedSubscriptions),
-    hideAmounts: false, language: input.language,
+    hideAmounts: state.appLock === true && state.hideWidgetAmountsWhenLocked !== false, language: input.language,
     spending: widgetMonthSpending({ state, now, liveAccounts, internalIds, language: input.language }),
   });
 }

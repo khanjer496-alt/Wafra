@@ -153,17 +153,29 @@ test('listeners are removed on unmount and when disabled', () => {
 // ---------------------------------------------------------------------------
 // iOS tab gate with the real client renderer (Reviewer #191 Medium 3 and 2a).
 // ---------------------------------------------------------------------------
+// The tabs read the store the way the app's screens do: through the store's
+// value and handle contexts, under the real StorePauseBoundary (store-pause.tsx).
+const ValueContext = React.createContext(null);
+const HandleContext = React.createContext(null);
 function gateModule() {
   const policy = load(path.join(root, 'src/lib/covered-screen-freeze.ts'), {});
   const freeze = load(path.join(root, 'src/components/freeze-when-covered.tsx'), {
     react: React, 'react/jsx-runtime': jsxRuntime, '@/lib/covered-screen-freeze': policy,
   }, { setTimeout, clearTimeout });
+  const selection = load(path.join(root, 'src/lib/store-selection.ts'), {});
+  const pause = load(path.join(root, 'src/lib/store-pause.tsx'), {
+    react: React, 'react/jsx-runtime': jsxRuntime, '@/lib/store-selection': selection,
+  });
   return load(path.join(root, 'src/components/ios-tab-gate.tsx'), {
     react: React, 'react/jsx-runtime': jsxRuntime,
     'react-native': { Platform: { OS: 'ios' } },
     '@react-navigation/native': {},
     '@/components/freeze-when-covered': freeze,
     '@/lib/covered-screen-freeze': policy,
+    // After the first frames: the next macrotask here.
+    '@/lib/after-first-frames': { runAfterFirstFrames: (task) => { const id = setTimeout(task, 0); return { cancel: () => clearTimeout(id) }; } },
+    '@/lib/store': { StorePauseBoundary: pause.createStorePauseBoundary(ValueContext, HandleContext) },
+    '@/lib/tab-prewarm': { scheduleTabPrewarm: () => ({ cancel() {} }) },
   }, { setTimeout, clearTimeout });
 }
 
@@ -173,17 +185,19 @@ function twoTabs({ delayMs = 20 } = {}) {
   const store = externalStore(1);
   const renders = { home: 0, flow: 0 };
   const tab = (name) => function Tab() {
-    React.useSyncExternalStore(store.subscribe, store.get);
+    const handle = React.useContext(HandleContext);
+    React.useSyncExternalStore(handle.subscribe, handle.get);
     renders[name] += 1;
     return React.createElement('tab', { name });
   };
   const Home = tab('home'); const Flow = tab('flow');
   // selected: which tab the shell shows; shellFocused: no pushed screen or sheet on top.
-  const view = ({ selected, shellFocused }) => React.createElement(React.Fragment, null,
+  const view = ({ selected, shellFocused }) => React.createElement(HandleContext.Provider, { value: store },
+    React.createElement(ValueContext.Provider, { value: store.get() },
     React.createElement(TabFocusGate, { key: 'home', focused: shellFocused && selected === 'home', selected: selected === 'home',
       shellFocused, transitions: shell, delayMs }, React.createElement(Home)),
     React.createElement(TabFocusGate, { key: 'flow', focused: shellFocused && selected === 'flow', selected: selected === 'flow',
-      shellFocused, transitions: shell, delayMs }, React.createElement(Flow)));
+      shellFocused, transitions: shell, delayMs }, React.createElement(Flow))));
   let renderer;
   act(() => { renderer = TestRenderer.create(view({ selected: 'flow', shellFocused: true })); });
   mounted.add(renderer);
@@ -198,6 +212,7 @@ test('iOS: a swipe-back releases only the selected tab; hidden sibling tabs stay
   act(() => { t.renderer.update(t.view({ selected: 'home', shellFocused: false })); }); // Settings pushed
   act(() => { t.shell.emit('transitionStart', true); t.shell.emit('transitionEnd', true); });
   act(() => { t.shell.emit('transitionStart', false); });        // swipe-back to the shell begins
+  await wait(5);                                                    // the held frame, then the catch-up
   const flowBefore = t.renders.flow; const homeBefore = t.renders.home;
   for (let i = 2; i <= 11; i += 1) act(() => { t.store.set(i); });
   assert.equal(t.renders.flow, flowBefore, 'the hidden Flow tab must not wake up on the swipe');

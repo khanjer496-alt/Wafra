@@ -32,6 +32,10 @@ function gateModule({ platform = 'ios', focused = () => true, react = React, glo
       useRoute: () => ({ key: 'flow-key' }), useNavigationState: (select) => select({ index: selectedIndex(), routes: [{ key: 'home-key' }, { key: 'flow-key' }] }) },
     '@/components/freeze-when-covered': freeze,
     '@/lib/covered-screen-freeze': p,
+    '@/lib/after-first-frames': { runAfterFirstFrames: () => ({ cancel() {} }) },
+    // Structure only here; the real pause is proven in tab-held-frame.test.cjs.
+    '@/lib/store': { StorePauseBoundary: ({ children }) => children },
+    '@/lib/tab-prewarm': { scheduleTabPrewarm: () => ({ cancel() {} }) },
   }, globals);
 }
 
@@ -105,37 +109,27 @@ function hookHarness() {
   };
 }
 
-test('lifecycle: skipped until first focus, frozen after it while unfocused, one recompute on refocus', () => {
+test('lifecycle: skipped until first focus (or pre-warm), paused on the store while unfocused, never unmounted', () => {
   const h = hookHarness();
   const { TabFocusGate } = gateModule({ react: h.react, globals: h.globals });
-  const { Tab, calls } = projectionTab();
+  const { Tab } = projectionTab();
   const child = React.createElement(Tab);
   // Unfocused before any visit: nothing at all.
   h.begin();
   assert.equal(TabFocusGate({ focused: false, children: child }), null);
-  // First focus: the content is handed to a live (unfrozen) freeze boundary.
+  // First focus: the content is handed to a live (uncovered) pause boundary.
   h.begin();
   let tree = TabFocusGate({ focused: true, children: child });
   assert.equal(tree.props.covered, false);
-  assert.equal(tree.props.enabled, true);
-  // Leaving the tab: the boundary is told it is covered (it freezes after its delay).
+  assert.equal(tree.props.children, child);
+  // Leaving the tab: the boundary is told it is covered (it pauses after its delay).
   h.begin();
   tree = TabFocusGate({ focused: false, children: child });
   assert.notEqual(tree, null, 'a visited tab stays mounted, keeping its state and scroll position');
   assert.equal(tree.props.covered, true);
-  // While frozen, store changes run no projection; refocus renders exactly once.
-  const { FreezeSuspender } = load(path.join(root, 'src/components/freeze-when-covered.tsx'), {
-    react: React, 'react/jsx-runtime': jsxRuntime, '@/lib/covered-screen-freeze': policy(),
-  });
-  assert.equal(typeof FreezeSuspender, 'function');
-  const frozen = () => renderToStaticMarkup(React.createElement(React.Suspense, { fallback: 'paused' },
-    React.createElement(FreezeSuspender, { freeze: true }, React.createElement(Tab))));
-  for (let storeChange = 0; storeChange < 20; storeChange += 1) assert.match(frozen(), /paused/);
-  assert.equal(calls.n, 0, 'a frozen tab recomputes nothing on store changes');
-  const revealed = renderToStaticMarkup(React.createElement(React.Suspense, { fallback: 'paused' },
-    React.createElement(FreezeSuspender, { freeze: false }, React.createElement(Tab))));
-  assert.match(revealed, /figures/);
-  assert.equal(calls.n, 1, 'refocus recomputes exactly once, from the current store');
+  assert.equal(tree.props.fallback, true, 'a tab left for a sibling pauses on the fallback delay');
+  // No Suspense on iOS tabs any more: hiding and re-showing a suspended tree was the cost on the tap.
+  assert.doesNotMatch(read('src/components/ios-tab-gate.tsx'), /FreezeWhenCovered|FreezeSuspender|Suspense/);
 });
 
 test('every iOS tab route is gated; Android/web route content is unchanged', () => {
@@ -162,7 +156,8 @@ test('capture and History stay outside every gate on iOS', () => {
   }
 });
 
-test('the gate has no data path', () => {
+test('the gate has no data path: from the store it takes only the pause boundary', () => {
   const code = read('src/components/ios-tab-gate.tsx');
-  assert.doesNotMatch(code, /@\/lib\/(store|ledger|dashboard-projection|insights|subscriptions)/);
+  assert.match(code, /^import \{ StorePauseBoundary \} from '@\/lib\/store';$/m);
+  assert.doesNotMatch(code, /useStore|useStoreSelector|@\/lib\/(ledger|dashboard-projection|insights|subscriptions)/);
 });

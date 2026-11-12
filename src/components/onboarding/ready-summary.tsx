@@ -13,7 +13,8 @@ import { ThemedText } from '@/components/themed-text';
 import { GrowBar } from '@/components/ui/grow-bar';
 import { Fonts, Spacing, type BandPalette } from '@/constants/theme';
 
-import { formatMoneyText, type LedgerMoneySpec } from '@/lib/ledger-money';
+import { type LedgerMoneySpec } from '@/lib/ledger-money';
+import { formatMoneyText } from '@/lib/ui-money-text';
 import { onboardingCopy } from '@/lib/onboarding-copy';
 import type { ReadySummary as ReadySummaryData } from '@/lib/onboarding-ready';
 

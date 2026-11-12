@@ -115,6 +115,20 @@ const tapTab = async (page, label) => {
   await page.waitForTimeout(1400);
 };
 
+const proEntryLabel = /^(?:Free automatic capture|Wafra Pro) · /;
+async function freeCaptureDeadlineVisible(page, expired = false) {
+  // Only synthetic first-launch metadata from this disposable browser fixture.
+  const start = await page.evaluate(() => JSON.parse(localStorage.getItem('wafra/state/v1') || '{}').trialStartTs);
+  if (!Number.isFinite(start) || start <= 0) throw new Error('Seeded first-launch timestamp is missing');
+  const end = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'UTC', year: 'numeric', month: 'short', day: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(new Date(start + 3 * 86400000));
+  return !!(await visibleText(page, expired ? 'Free automatic capture ended' : 'Automatic capture is free until')) &&
+    !!(await visibleText(page, end)) &&
+    !!(await visibleText(page, 'After day 3, automatic capture needs Pro. Manual entry, pasted alerts, statement imports and backup stay free.'));
+}
+
 // This oracle runs inside the explicitly English-US browser fixture. The
 // bank pack and AED ledger do not determine its date presentation. Keep it
 // independent of Wafra's formatter and anchor the civil day in UTC.
@@ -209,7 +223,7 @@ const browser = await chromium.launch(
 );
 // Each suite launches its own browser/context; earlier Arabic cases cannot
 // leave a language or localStorage choice in this English smoke fixture.
-const page = await browser.newPage({ viewport: { width: 412, height: 915 }, colorScheme: 'dark', locale: 'en-US' });
+const page = await browser.newPage({ viewport: { width: 412, height: 915 }, colorScheme: 'dark', locale: 'en-US', timezoneId: 'UTC' });
 // Home v3 opens on Spent and the transactions; this suite also reconciles the
 // Due soon and Coming up sections against Bills, so it switches them on (a v3 layout).
 await page.addInitScript(layout => { if (!localStorage.getItem('wafra/ui/home-widgets/v1')) localStorage.setItem('wafra/ui/home-widgets/v1', layout); }, JSON.stringify({ version: 3,
@@ -496,7 +510,8 @@ await tapLabel(page, 'Settings', 1400);
  }
  ok('Settings exposes its capture, notification, appearance, region and privacy sections',sections.every(Boolean));
 }
-ok('Settings keeps Pro and trial status reachable',!!(await visibleText(page,'Wafra Pro'))&&!!(await visibleText(page,/Automatic capture is included for \d+ more day|Trial ended/)));
+ok('Settings keeps Pro entry and the saved free-capture deadline reachable',
+  !!(await visibleText(page, /^(?:Free automatic capture|Wafra Pro)$/i)) && await freeCaptureDeadlineVisible(page));
 ok('Settings reaches Data and help',!!(await visibleText(page,'Data and help')));
 ok('Privacy retains app lock',!!(await visibleText(page,'App lock')));
 
@@ -571,15 +586,20 @@ await tapLabel(page, 'Back', 1200);
 await tapTab(page, 'Home');
 await tapLabel(page, 'Settings', 1400);
 await page.setViewportSize({ width: 402, height: 874 });
-await tapText(page, 'Wafra Pro', 1400);
+await tapLabel(page, proEntryLabel, 1400);
 {
   const hits = await overlappingText(page, 'Wafra Pro');
   ok(`paywall: purchase controls do not overlap plan content at 402×874 (${hits.length} collisions)`,
     hits.length === 0);
   if (hits.length) console.log(hits.slice(0, 4));
 }
-ok('paywall renders plans', !!(await visibleText(page, /GET WAFRA PRO/i)));
-ok('paywall shows the remaining trial', !!(await visibleText(page, /Automatic capture is included for \d+ more days?\./)));
+ok('paywall exposes its checkout control', !!(await visibleText(page, /GET WAFRA PRO/i)));
+// #213: the checkout button is never dead. Without a storefront (web), tapping it
+// must refuse before any store call and say so in place; it must never grant Pro.
+await page.getByTestId('pro-buy').click();
+ok('web checkout refuses without an available storefront and says so',
+  !!(await visibleText(page, 'Purchase unavailable')));
+ok('paywall shows the saved deadline and what stays free', await freeCaptureDeadlineVisible(page));
 
 // ── Hidden-unlock defense: repeated VERSION taps must not grant Pro ──
 //
@@ -618,11 +638,8 @@ await page.waitForTimeout(2000);
 // Web correctly says phone capture is unsupported instead of pretending to be
 // Android/iOS. Verify expiry on the actual cross-platform entitlement surface.
 await tapLabel(page, 'Settings', 1200);
-await tapText(page, 'Wafra Pro', 1200);
-ok('expired trial shows the paused-capture paywall', !!(await visibleText(
-  page,
-  'Automatic bank-message capture is paused. Your ledger and manual entries still work.',
-)));
+await tapLabel(page, proEntryLabel, 1200);
+ok('expired free capture shows the saved end date and free manual features', await freeCaptureDeadlineVisible(page, true));
 
 ok('no page errors', errors.length === 0);
 if (errors.length) console.log(errors.slice(0, 3));
@@ -633,7 +650,7 @@ if (errors.length) console.log(errors.slice(0, 3));
   if (OUT) await page.screenshot({ path: path.join(OUT, 'FAILED.png'), fullPage: true }).catch(() => {});
 } finally {
   if (OUT) writeFileSync(path.join(OUT, 'results.json'), JSON.stringify({
-    base: BASE, generatedAt: new Date().toISOString(), browser: browser.version(),
+    base: BASE, lastUrl: page.url(), generatedAt: new Date().toISOString(), browser: browser.version(),
     pass, fail, aborted, errors, results,
   }, null, 2));
   await browser.close();

@@ -40,14 +40,12 @@ import { normalizeArabicNumerals } from '@/lib/arabic-sms';
 import { bandCopy } from '@/lib/band-copy';
 import { parseAmountWithMoneySpec } from '@/lib/format';
 import { tapped } from '@/lib/haptics';
-import {
-  currencyDisplayLabel,
+import { currencyDisplayLabel,
   formatMinorUnits,
   formatMinorUnitsForInput,
-  formatMoneyText,
   typicalMinorAmount,
-  type LedgerMoneySpec,
-} from '@/lib/ledger-money';
+  type LedgerMoneySpec } from '@/lib/ledger-money';
+import { formatMoneyText } from '@/lib/ui-money-text';
 import { WATCH_CATEGORIES, WATCH_QUICK_REFERENCES, type WatchDraft, type WatchFooterAction } from '@/lib/onboarding-e';
 import { onboardingECopy } from '@/lib/onboarding-e-copy';
 import type { CategoryId } from '@/lib/types';
