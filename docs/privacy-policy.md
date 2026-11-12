@@ -279,7 +279,7 @@ refreshes.
 
 ## Other network activity
 
-- **Logo consent on iOS and Android:** Online logo lookups are off by default, including after upgrading a build without this preference. Bundled images and local fallback icons work without sharing names. You may opt in using Settings → Online merchant logos. Turning it off stops new name searches and artwork downloads; requests already sent cannot be recalled. Your saved local-only preference also blocks online logos. Restoring a backup keeps this device’s logo-sharing and widget-amount privacy choices; the file cannot enable logo sharing or change that widget preference.
+- **Logo consent (iPhone only):** Android does not request online logos in this version. On iPhone, online logo lookups are off by default, including after upgrading a build without this preference. Bundled images and local fallback icons work without sharing names. You may opt in using Settings → Online merchant logos. Turning it off stops new name searches and artwork downloads; requests already sent cannot be recalled. Your saved local-only preference also blocks online logos. Restoring a backup keeps this device’s logo-sharing and widget-amount privacy choices; the file cannot enable logo sharing or change that widget preference.
 
 - **Optional online logos:** 112 merchant logos are bundled with the app and supported
   launch-market banks are matched locally to fixed bank domains. For other
@@ -385,10 +385,8 @@ refreshes.
   account/card identifiers or locally stored first name to Superwall. Store
   purchase, renewal, cancellation and refund reporting can continue independently
   of optional in-app event collection so entitlements remain accurate.
-- **Forwarded bank email:** if the user creates a private forwarding address,
-  the relay parses the forwarded MIME, text, HTML and supported PDF, CSV, or TSV attachments
-  in memory. Raw email and attachments are not stored. Only structured rows,
-  sealed independently to the user's devices, can enter the delivery queue.
+- **Forwarded bank email:** not available in this version; the app does not
+  create a forwarding address, so no bank email is forwarded to or processed by the relay.
 - **PDF statement import:** a user-selected PDF of up to 5 MiB and 100 pages is
   sent to the relay. PDF bytes and extracted text are discarded after parsing;
   only conservative, structured debit or credit rows are sealed and queued.

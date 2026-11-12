@@ -2591,7 +2591,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       cancelLocalSemanticBackgroundWork();
     }
     // Revoke queued logo work before subscribers can schedule another request.
-    setLogoLookupsAllowed(next.hydrated && next.onlineLogosEnabled === true && !next.privateMode);
+    setLogoLookupsAllowed(Platform.OS !== 'android' && next.hydrated && next.onlineLogosEnabled === true && !next.privateMode);
     if ((next.appLock && next.hideWidgetAmountsWhenLocked !== false) !==
         (authoritativeState.current.appLock && authoritativeState.current.hideWidgetAmountsWhenLocked !== false) || replacesLedger) {
       void invalidateWidgetSnapshotSync();
@@ -4125,7 +4125,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <MoneyLocaleProvider localeKey={moneyLocaleKey}>
-      <OnlineLogosContext.Provider value={state.hydrated && state.onlineLogosEnabled === true && !state.privateMode}>
+      <OnlineLogosContext.Provider value={Platform.OS !== 'android' && state.hydrated && state.onlineLogosEnabled === true && !state.privateMode}>
       <PrivateModeContext.Provider value={state.privateMode}>
         <StoreHandleContext.Provider value={handle}>
           <StoreContext.Provider value={value}>{children}</StoreContext.Provider>

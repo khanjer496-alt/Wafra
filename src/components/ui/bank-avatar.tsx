@@ -13,7 +13,10 @@ import { useOnlineLogosAllowed } from '@/lib/store';
 function BankAvatarInner({ account, size = 36 }: { account: Account; size?: number }) {
   const theme = useTheme();
   const dark = useColorScheme() === 'dark';
-  const allowRemote = useOnlineLogosAllowed();
+  // Launch decision: Android never calls Brandfetch, even after opt-in (Google Play
+  // Data safety does not declare it). Android logos need a Data safety update first.
+  const consented = useOnlineLogosAllowed();
+  const allowRemote = Platform.OS !== 'android' && consented;
   // Consent covers both name searches and CDN image requests, including cache hits.
   const [logo, setLogo] = useState<ResolvedBankLogo | null>(null);
   const [failed, setFailed] = useState(false);

@@ -122,7 +122,26 @@ test('Android continues to render a bundled merchant logo offline', () => {
   assert.equal(h.calls, 0);
 });
 
-for (const platform of ['ios', 'android']) for (const kind of ['merchant', 'bank']) {
+// Launch decision: Android never calls Brandfetch, even after opt-in, because Google
+// Play Data safety does not declare it. Android logos need a Data safety update first.
+for (const kind of ['merchant', 'bank']) {
+  test(`Android ${kind}: consent granted still never schedules lookup or renders a CDN image`, async () => {
+    const h = harness(kind, { platform: 'android', consent: true });
+    h.render(); h.flush(); await turn();
+    assert.equal(h.calls, 0);
+    assert.deepEqual(remoteSources(h.render()), []);
+  });
+}
+test('the store gates Android off for both the module gate and the avatar context', () => {
+  const fs = require('node:fs');
+  const store = fs.readFileSync(path.join(root, 'src/lib/store.tsx'), 'utf8');
+  assert.match(store, /setLogoLookupsAllowed\(Platform\.OS !== 'android' && next\.hydrated && next\.onlineLogosEnabled === true && !next\.privateMode\)/);
+  assert.match(store, /OnlineLogosContext\.Provider value=\{Platform\.OS !== 'android' && state\.hydrated/);
+  const settings = fs.readFileSync(path.join(root, 'src/app/settings.tsx'), 'utf8');
+  assert.match(settings, /Platform\.OS !== 'android' \? \(\s*<SettingsSwitchRow\s+title=\{t\('onlineLogosTitle'\)\}/);
+});
+
+for (const platform of ['ios']) for (const kind of ['merchant', 'bank']) {
   test(`${platform} ${kind}: explicit consent enables artwork; revocation removes its URL before effects`, async () => {
     const h = harness(kind, { platform, consent: false });
     h.render(); h.flush(); await turn();

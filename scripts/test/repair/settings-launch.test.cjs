@@ -12,11 +12,19 @@ for (const platform of ['ios', 'android']) for (const language of ['en', 'ar']) 
     const row = id => walk(tree).find(node => node.props?.testID === id);
     const logo = row('settings-online-logos');
     const widgets = row('settings-hide-widget-amounts');
+    const widgetSwitch = walk(widgets).find(node => node.props?.accessibilityRole === 'switch');
+    assert.equal(widgetSwitch.props.accessibilityState.checked, true);
+    if (platform === 'android') {
+      // Launch decision: Android never calls Brandfetch, so there is no consent switch to show.
+      assert.equal(logo, undefined, 'Android offers no online-logo switch');
+      assert.deepEqual(changes, [], 'reading Settings grants no consent');
+      widgetSwitch.props.onPress();
+      assert.deepEqual(changes, [{ hideWidgetAmountsWhenLocked: false }]);
+      return;
+    }
     assert.ok(text(logo).includes('Brandfetch'), 'consent names the third party before activation');
     const logoSwitch = walk(logo).find(node => node.props?.accessibilityRole === 'switch');
-    const widgetSwitch = walk(widgets).find(node => node.props?.accessibilityRole === 'switch');
     assert.equal(logoSwitch.props.accessibilityState.checked, false);
-    assert.equal(widgetSwitch.props.accessibilityState.checked, true);
     assert.deepEqual(changes, [], 'reading Settings grants no consent');
     logoSwitch.props.onPress();
     widgetSwitch.props.onPress();

@@ -1239,14 +1239,16 @@ export default function SettingsScreen() {
             palette={band}
             glyph={<BiometricGlyph kind={biometricKind} size={18} color={band.text} />}
           />
-          <SettingsSwitchRow
-            title={t('onlineLogosTitle')}
-            subtitle={`${t('onlineLogosDetail')}${state.privateMode ? ` ${t('onlineLogosPaused')}` : ''}`}
-            value={state.onlineLogosEnabled === true}
-            onChange={(enabled) => { void setPrivacyPreferences({ onlineLogosEnabled: enabled }).catch(() => Alert.alert(t('notAvailable'), t('privacyPreferenceFailed'))); }}
-            testID="settings-online-logos"
-            palette={band}
-          />
+          {Platform.OS !== 'android' ? (
+            <SettingsSwitchRow
+              title={t('onlineLogosTitle')}
+              subtitle={`${t('onlineLogosDetail')}${state.privateMode ? ` ${t('onlineLogosPaused')}` : ''}`}
+              value={state.onlineLogosEnabled === true}
+              onChange={(enabled) => { void setPrivacyPreferences({ onlineLogosEnabled: enabled }).catch(() => Alert.alert(t('notAvailable'), t('privacyPreferenceFailed'))); }}
+              testID="settings-online-logos"
+              palette={band}
+            />
+          ) : null}
           <SettingsSwitchRow
             title={t('hideLockedWidgetAmountsTitle')}
             subtitle={t('hideLockedWidgetAmountsDetail')}

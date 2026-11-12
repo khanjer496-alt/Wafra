@@ -29,7 +29,10 @@ const LOGO_PLATE = '#F7F4EE';
 
 /** Bundled artwork first; only locally verified identities may use CDN artwork. */
 function MerchantAvatarInner({ title, category, size = 34, plate = false }: MerchantAvatarProps) {
-  const allowRemote = useOnlineLogosAllowed();
+  // Launch decision: Android never calls Brandfetch, even after opt-in (Google Play
+  // Data safety does not declare it). Android logos need a Data safety update first.
+  const consented = useOnlineLogosAllowed();
+  const allowRemote = Platform.OS !== 'android' && consented;
   const ground = useBand('home').glyphGround;
   // Consent covers both name searches and CDN image requests, including cache hits.
   const bundled = merchantLogoFor(title);
