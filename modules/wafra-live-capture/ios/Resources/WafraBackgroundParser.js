@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: a72f39c12b533a2c758e97814cb48aa83350edc50ddd4ee0fabcb77cd1ad5562
+// Generated from normal shipping TypeScript. Source SHA-256: b11700dd148d0f10870b87a158954e84255968d1e2d14a9bb69169b7c6d987a1
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -7777,7 +7777,15 @@ const S = {
     reviewAlertPossibleNotificationReplay: { en: 'Possible repeat notification. Compare it with your saved transactions before adding.', ar: 'قد يكون هذا إشعاراً مكرراً. قارنه بمعاملاتك المحفوظة قبل إضافته.' },
     reviewAlertNotificationSource: { en: 'Notification capture', ar: 'التقاط الإشعارات' },
     reviewAlertPossibleApplePayDuplicate: { en: 'Possible Apple Pay duplicate. A matching Apple Pay purchase is already in your transactions.', ar: 'قد تكون عملية Apple Pay مكررة. توجد عملية Apple Pay مطابقة في معاملاتك بالفعل.' },
-    reviewAlertsFullWaiting: { en: 'Review is full — {count} alerts waiting. Add or dismiss alerts here to make room; waiting alerts are kept on this iPhone until then.', ar: 'قائمة المراجعة ممتلئة — {count} من التنبيهات بالانتظار. أضف تنبيهات أو تجاهلها هنا لإفساح المجال، وستبقى التنبيهات المنتظرة على هذا الآيفون حتى ذلك الحين.' },
+    historyReviewCapacityBody: {
+        en: 'Review is full. Review or dismiss saved alerts, then retry History. Existing expiry limits still apply.',
+        ar: 'قائمة المراجعة ممتلئة. راجع التنبيهات المحفوظة أو تجاهلها، ثم أعد محاولة السجل. تبقى حدود انتهاء الصلاحية سارية.',
+    },
+    historyReviewCapacityBodyIos: {
+        en: 'Review is full. Wafra keeps the messages this history run read for about 1 hour. Review or dismiss saved alerts and retry within that hour; after that, run the history Shortcut again. Existing expiry limits still apply.',
+        ar: 'قائمة المراجعة ممتلئة. تحتفظ وفرة بالرسائل التي قرأها تشغيل السجل هذا لمدة ساعة تقريباً. راجع التنبيهات المحفوظة أو تجاهلها ثم أعد محاولة استيراد السجل خلال هذه الساعة، وبعدها شغّل اختصار السجل مرة أخرى. تبقى حدود انتهاء الصلاحية سارية.',
+    },
+    reviewAlertsFullWaiting: { en: 'Review is full — {count} alerts waiting. Add or dismiss alerts here to make room. Waiting alerts stay on this iPhone for up to 30 days; after that they are counted as expired.', ar: 'قائمة المراجعة ممتلئة — {count} من التنبيهات بالانتظار. أضف تنبيهات أو تجاهلها هنا لإفساح المجال. تبقى التنبيهات المنتظرة على هذا الآيفون لمدة تصل إلى 30 يوماً، وبعد ذلك تُحتسب كمنتهية الصلاحية.' },
     reviewAlertsExpiredCount: { en: 'Expired before review in the last 30 days: {count}', ar: 'انتهت صلاحيتها قبل المراجعة خلال آخر 30 يوماً: {count}' },
     reviewAlertsEvictedCount: { en: 'Alerts that could not be kept for review because Review was full, in the last 30 days: {count}', ar: 'تنبيهات تعذّر الاحتفاظ بها للمراجعة لأن قائمة المراجعة كانت ممتلئة خلال آخر 30 يوماً: {count}' },
     reviewAlertsCurrencyEvictedCount: { en: 'Other-currency alerts not kept for review in the last 30 days: {count}. Review keeps the newest 50 waiting for an exchange rate.', ar: 'تنبيهات بعملة أخرى لم يُحتفظ بها للمراجعة خلال آخر 30 يوماً: {count}. تحتفظ المراجعة بأحدث 50 تنبيهاً بانتظار سعر الصرف.' },
