@@ -1505,7 +1505,7 @@ export default function ImportSmsScreen() {
           } else if (error instanceof IosHistoryImportError && error.code === 'review-capacity') {
             setHistoryCommitState('source-retained');
             setHistoryCapacityWaiting(true);
-            setNotice({ title: t('historyImportReviewReady'), body: t('historyReviewCapacityBody') });
+            setNotice({ title: t('historyImportReviewReady'), body: t('historyReviewCapacityBodyIos') });
           } else if (error instanceof IosHistoryImportError && error.code === 'review-expired') {
             setHistoryCommitState('source-retained');
             setNotice({ title: t('historyImportFailed'), body: t('genericSourceChanged') });

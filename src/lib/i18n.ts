@@ -3059,6 +3059,12 @@ const S = {
     en: 'Review is full. Review or dismiss saved alerts, then retry History. Existing expiry limits still apply.',
     ar: 'قائمة المراجعة ممتلئة. راجع التنبيهات المحفوظة أو تجاهلها، ثم أعد محاولة السجل. تبقى حدود انتهاء الصلاحية سارية.',
   },
+  // iPhone History only: the completed native History session the hold keeps
+  // expires one hour after the History Shortcut finishes (WafraMessageHistoryStore.sessionTTL).
+  historyReviewCapacityBodyIos: {
+    en: 'Review is full. Wafra keeps the messages this history run read for about 1 hour. Review or dismiss saved alerts and retry within that hour; after that, run the history Shortcut again. Existing expiry limits still apply.',
+    ar: 'قائمة المراجعة ممتلئة. يحتفظ وفرة بالرسائل التي قرأها تشغيل السجل هذا لمدة ساعة تقريباً. راجع التنبيهات المحفوظة أو تجاهلها ثم أعد محاولة استيراد السجل خلال هذه الساعة، وبعدها شغّل اختصار السجل مرة أخرى. تبقى حدود انتهاء الصلاحية سارية.',
+  },
   reviewAlertsFullWaiting: { en: 'Review is full — {count} alerts waiting. Add or dismiss alerts here to make room. Waiting alerts stay on this iPhone for up to 30 days; after that they are counted as expired.', ar: 'قائمة المراجعة ممتلئة — {count} من التنبيهات بالانتظار. أضف تنبيهات أو تجاهلها هنا لإفساح المجال. تبقى التنبيهات المنتظرة على هذا الآيفون لمدة تصل إلى 30 يوماً، وبعد ذلك تُحتسب كمنتهية الصلاحية.' },
   reviewAlertsExpiredCount: { en: 'Expired before review in the last 30 days: {count}', ar: 'انتهت صلاحيتها قبل المراجعة خلال آخر 30 يوماً: {count}' },
   reviewAlertsEvictedCount: { en: 'Alerts that could not be kept for review because Review was full, in the last 30 days: {count}', ar: 'تنبيهات تعذّر الاحتفاظ بها للمراجعة لأن قائمة المراجعة كانت ممتلئة خلال آخر 30 يوماً: {count}' },

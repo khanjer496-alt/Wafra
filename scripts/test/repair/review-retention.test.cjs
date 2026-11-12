@@ -248,6 +248,20 @@ test('iOS History passes an expired source and continues, but still stops on an 
     await assert.rejects(history.persistIosHistoryReviewCandidates([item], stage(held)), error => error.code === 'review-capacity');
   }
 });
+test('the iPhone History capacity notice states the exact native session window; Android copy is unchanged', () => {
+  const swift = fs.readFileSync(path.join(root, 'modules/wafra-message-history/ios/WafraMessageHistoryStore.swift'), 'utf8');
+  assert.match(swift, /public static let sessionTTL: TimeInterval = 60 \* 60\n/, 'the completed History session lives one hour');
+  const i18n = fs.readFileSync(path.join(root, 'src/lib/i18n.ts'), 'utf8');
+  const ios = i18n.match(/historyReviewCapacityBodyIos: \{\n\s+en: '([^']+)',\n\s+ar: '([^']+)'/);
+  assert.ok(ios, 'iOS notice has English and Arabic');
+  assert.match(ios[1], /about 1 hour/); assert.match(ios[2], /ساعة/);
+  const shared = i18n.match(/historyReviewCapacityBody: \{\n\s+en: '([^']+)'/);
+  assert.ok(shared && !/hour|iPhone/.test(shared[1]), 'the shared (Android manual scan) notice names no iPhone window');
+  const screen = fs.readFileSync(path.join(root, 'src/app/import-sms.tsx'), 'utf8');
+  assert.equal((screen.match(/t\('historyReviewCapacityBodyIos'\)/g) ?? []).length, 1);
+  assert.match(screen, /error\.code === 'review-capacity'\) \{[\s\S]{0,200}t\('historyReviewCapacityBodyIos'\)/);
+  assert.match(screen, /ReviewImportHold\)\) return false;[\s\S]{0,300}t\('historyReviewCapacityBody'\)/);
+});
 test('retention policy never grants ordinary card-payment expense or income confirmation', () => {
   const item = payment(0); assert.equal(tray.requiresReviewRetention(item), true);
   assert.equal(tray.isMoneyMovementReview(item), false);
