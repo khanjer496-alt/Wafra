@@ -951,6 +951,10 @@ export interface AppState {
   onboarded: boolean;
   userName: string;
   appLock: boolean;
+  /** Explicit opt-in to merchant/bank-name sharing for online artwork. Missing means off. */
+  onlineLogosEnabled?: boolean;
+  /** With App Lock enabled, omit widget amounts even on the unlocked Home Screen. Missing means on. */
+  hideWidgetAmountsWhenLocked?: boolean;
   /** Day of month the reporting month begins (salary day). 1 = calendar months. */
   monthStartDay: number;
   /** Cached Wafra Pro entitlement supplied by the platform stores via Superwall. */

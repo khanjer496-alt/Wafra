@@ -1,21 +1,57 @@
 import { useIsFocused, useNavigation, useNavigationState, useRoute } from '@react-navigation/native';
-import React, { useState } from 'react';
+import React, { startTransition, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 
-import { FreezeWhenCovered, type CoverTransitionNavigation, type CoverTransitionSource } from '@/components/freeze-when-covered';
+import { useCoverFreeze, type CoverTransitionNavigation, type CoverTransitionSource } from '@/components/freeze-when-covered';
+import { runAfterFirstFrames } from '@/lib/after-first-frames';
 import { gateTabsUntilFocus } from '@/lib/covered-screen-freeze';
+import { StorePauseBoundary } from '@/lib/store';
+import { scheduleTabPrewarm } from '@/lib/tab-prewarm';
 
 /**
- * Renders nothing until the tab is first focused, then keeps the content
- * mounted (state and scroll position survive) and pauses it whenever the tab
- * is unfocused: another tab is selected, or a pushed screen covers the tab
- * shell. Refocusing renders it once from the current store.
+ * Pauses a covered tab on the store: it stays mounted and visible to the native
+ * tab view, but store changes re-render and recompute nothing below it. When
+ * the tab is shown again, the first frames are the frame it was paused on (no
+ * catch-up work on the tap); it catches up with the store after those frames.
+ */
+function PauseWhenCovered({
+  covered,
+  delayMs,
+  transitions,
+  fallback,
+  children,
+}: {
+  covered: boolean;
+  delayMs?: number;
+  transitions: CoverTransitionSource | null;
+  fallback: boolean;
+  children: React.ReactNode;
+}) {
+  const frozen = useCoverFreeze({ covered, enabled: true, delayMs, transitions, fallback });
+  const pausedNow = frozen && covered;
+  const [held, setHeld] = useState(false);
+  // Derived during render, so the first paused render already holds.
+  if (pausedNow && !held) setHeld(true);
+  useEffect(() => {
+    if (!held || pausedNow) return undefined;
+    const resume = runAfterFirstFrames(() => setHeld(false), { delayMs: 0, idle: false });
+    return () => resume.cancel();
+  }, [held, pausedNow]);
+  return <StorePauseBoundary paused={held}>{children}</StorePauseBoundary>;
+}
+
+/**
+ * Renders nothing until the tab is first focused or pre-warmed (once, when the
+ * app is idle after launch), then keeps the content mounted (state and scroll
+ * position survive) and pauses it on the store whenever the tab is unfocused:
+ * another tab is selected, or a pushed screen covers the tab shell.
  */
 export function TabFocusGate({
   focused,
   selected = focused,
   transitions,
   delayMs,
+  prewarm = true,
   children,
 }: {
   focused: boolean;
@@ -30,18 +66,26 @@ export function TabFocusGate({
   /** The tab shell's route in the root stack, for push/swipe-back timing. */
   transitions?: CoverTransitionSource | null;
   delayMs?: number;
+  /** Mount once when the app is idle after launch, before the first focus. */
+  prewarm?: boolean;
   children: React.ReactNode;
 }) {
   const [visited, setVisited] = useState(focused);
   // Derived from props during render (React's documented pattern), so the
   // first focused render already shows the content instead of a blank frame.
   if (focused && !visited) setVisited(true);
+  useEffect(() => {
+    if (visited || !prewarm) return undefined;
+    // A transition: the mount yields to a tap that lands while it renders.
+    const job = scheduleTabPrewarm(() => startTransition(() => setVisited(true)));
+    return () => job.cancel();
+  }, [visited, prewarm]);
   if (!visited && !focused) return null;
   return (
-    <FreezeWhenCovered covered={!focused} enabled delayMs={delayMs}
-      transitions={selected ? transitions : null} fallback={!selected}>
+    <PauseWhenCovered covered={!focused} delayMs={delayMs}
+      transitions={selected ? transitions ?? null : null} fallback={!selected}>
       {children}
-    </FreezeWhenCovered>
+    </PauseWhenCovered>
   );
 }
 

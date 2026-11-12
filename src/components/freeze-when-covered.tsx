@@ -80,6 +80,33 @@ export function FreezeWhenCovered({
   fallback?: boolean;
   children: React.ReactNode;
 }) {
+  const frozen = useCoverFreeze({ covered, enabled, delayMs, transitions, fallback });
+  if (!enabled) return <>{children}</>;
+  return (
+    <Suspense fallback={null}>
+      <FreezeSuspender freeze={frozen && covered}>{children}</FreezeSuspender>
+    </Suspense>
+  );
+}
+
+/**
+ * When a covered screen should pause: FreezeWhenCovered's timing (push and
+ * swipe-back transitions, the fallback delay), shared with the iOS tab gate,
+ * which pauses its tabs on the store instead of suspending them.
+ */
+export function useCoverFreeze({
+  covered,
+  enabled,
+  delayMs = COVER_FREEZE_DELAY_MS,
+  transitions,
+  fallback = true,
+}: {
+  covered: boolean;
+  enabled: boolean;
+  delayMs?: number;
+  transitions?: CoverTransitionSource | null;
+  fallback?: boolean;
+}): boolean {
   const [frozen, setFrozen] = useState(false);
   // A covering push has started and not ended yet: the fallback must wait.
   const pushInProgress = useRef(false);
@@ -115,10 +142,5 @@ export function FreezeWhenCovered({
     }, delayMs);
     return () => clearTimeout(timer);
   }, [covered, enabled, delayMs, fallback]);
-  if (!enabled) return <>{children}</>;
-  return (
-    <Suspense fallback={null}>
-      <FreezeSuspender freeze={frozen && covered}>{children}</FreezeSuspender>
-    </Suspense>
-  );
+  return frozen;
 }

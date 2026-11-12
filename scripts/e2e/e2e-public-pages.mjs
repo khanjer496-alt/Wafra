@@ -88,8 +88,8 @@ try {
     assert.ok(headingTop >= 0 && headingTop < 900, 'deletion link scrolls to its heading');
     await page.getByRole('navigation').getByRole('link', { name: 'Support', exact: true }).click();
     await page.getByRole('link', { name: 'Read billing terms' }).click();
-    assert.ok(page.url().endsWith('/terms/#wafra-pro-free-period-and-billing'));
-    const billingTop = await page.locator('#wafra-pro-free-period-and-billing').evaluate((heading) => heading.getBoundingClientRect().top);
+    assert.ok(page.url().endsWith('/terms/#wafra-pro-free-automatic-capture-and-billing'));
+    const billingTop = await page.locator('#wafra-pro-free-automatic-capture-and-billing').evaluate((heading) => heading.getBoundingClientRect().top);
     assert.ok(billingTop >= 0 && billingTop < 900, 'billing link scrolls to its heading');
   }
   assert.deepEqual(failures, [], 'public document assets should load');

@@ -192,7 +192,9 @@ these three facts.
 
 ## Monetization — Wafra Pro
 
-- Model: 3-day free trial, then subscription required for automatic capture.
+- Model: 3 days of free automatic capture, then subscription required for
+  automatic capture. Store listings use the term "free automatic capture",
+  never "free trial" or "free period".
   After the included period, SMS/notification importing pauses until
   subscribed. Viewing existing data, manual entry, pasted alerts, salary-day
   months, and backup/restore keep working without Pro.

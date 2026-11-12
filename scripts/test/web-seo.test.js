@@ -188,7 +188,7 @@ try {
   ok('support uses the existing contact and valid deletion and billing anchors',
     support.includes('mailto:naser@nasidaapps.com') &&
     support.includes('/privacy/#your-choices-and-deletion') && privacy.includes('id="your-choices-and-deletion"') &&
-    support.includes('/terms/#wafra-pro-free-period-and-billing') && terms.includes('id="wafra-pro-free-period-and-billing"'));
+    support.includes('/terms/#wafra-pro-free-automatic-capture-and-billing') && terms.includes('id="wafra-pro-free-automatic-capture-and-billing"'));
   const notFound = read('404.html');
   ok('404 has its own noindex document with a home recovery link',
     notFound.includes('That page is not here.') && notFound.includes('noindex, nofollow, noarchive') &&

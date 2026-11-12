@@ -331,6 +331,7 @@ jobs:
             artifacts/e2e-merchant-entrypoints/
             artifacts/e2e-transaction-ui/
             artifacts/e2e-diagnostic-export/
+            artifacts/e2e-smoke/
             /tmp/wafra-onboarding-e2e/
             /tmp/wafra-transfer-review-e2e/
           if-no-files-found: warn

@@ -20,7 +20,7 @@ import { planLabel } from '@/lib/pro-plans';
 import { t, tf } from '@/lib/i18n';
 import { autoCaptureMethod } from '@/lib/purchases';
 import { proCopy } from '@/lib/pro-copy';
-import { settingsCopy } from '@/lib/settings-copy';
+import { freeCaptureCopy } from '@/lib/free-capture-copy';
 
 type FeatureRow = {
   icon: IconName;
@@ -72,7 +72,7 @@ export default function ProScreen() {
   const router = useRouter();
   const checkout = useProCheckout();
   const {
-    state, billingAction, selectedPlan, selectedOffer, notice, trial, entitled,
+    state, billingAction, selectedPlan, selectedOffer, notice, entitled,
     privacyPolicyUrl, termsOfUseUrl, ctaMode, retryOffers, buySelectedPlan, restore, manage, openLegal,
   } = checkout;
   const proNav: BandNav = { back: true };
@@ -107,12 +107,10 @@ export default function ProScreen() {
     );
   };
 
+  const freePeriod = freeCaptureCopy(state.trialStartTs, language);
   const status = entitled
     ? t('proActiveThanks')
-    : trial > 0
-      // settings-copy's sentence has correct Arabic counts (3 أيام, 11 يومًا).
-      ? settingsCopy(language).proTrialBody(trial)
-      : t('proTrialEndedBody');
+    : freePeriod.status;
 
   return (
     <BandScaffold
@@ -125,6 +123,7 @@ export default function ProScreen() {
         <View style={styles.bandBody} testID="pro-band">
           <BandTitle title={t('wafraPro')} body={t('proOutcomeTitle')} palette={band} />
           <ThemedText type="small" style={{ color: band.onBandSecondary }}>{status}</ThemedText>
+          {!entitled && <ThemedText type="small" style={{ color: band.onBandSecondary }}>{freePeriod.after}</ThemedText>}
         </View>
       )}>
       <View style={styles.section} testID="pro-benefits">

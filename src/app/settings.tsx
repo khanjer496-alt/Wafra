@@ -112,6 +112,7 @@ import { settingsCopy } from '@/lib/settings-copy';
 import { settingsECopy } from '@/lib/settings-e-copy';
 import { settingsSectionScrollY } from '@/lib/settings-layout';
 import { widgetsCopy } from '@/lib/widgets-copy';
+import { freeCaptureCopy } from '@/lib/free-capture-copy';
 import {
   iosCaptureManageIntent,
   iosCaptureSwitchIntent,
@@ -153,6 +154,7 @@ export default function SettingsScreen() {
   const {
     state,
     setAppLock,
+    setPrivacyPreferences,
     setDailySummary,
     setPrivateMode,
     setCaptureOptOut,
@@ -337,7 +339,7 @@ export default function SettingsScreen() {
 
   const toggleAppLock = async (enabled: boolean) => {
     if (!enabled) {
-      setAppLock(false);
+      await setAppLock(false).catch(() => Alert.alert(t('notAvailable'), t('privacyPreferenceFailed')));
       return;
     }
     if (Platform.OS === 'web') {
@@ -365,7 +367,7 @@ export default function SettingsScreen() {
       ...APP_LOCK_AUTH_OPTIONS,
     });
     const outcome = unlockOutcome(result);
-    if (outcome === 'unlocked') setAppLock(true);
+    if (outcome === 'unlocked') await setAppLock(true).catch(() => Alert.alert(t('notAvailable'), t('privacyPreferenceFailed')));
     else if (outcome === 'unavailable') Alert.alert(t('noScreenLock'), t('noScreenLockBody'));
   };
 
@@ -881,13 +883,12 @@ export default function SettingsScreen() {
     [state.transactions],
   );
   const lockTitle = biometricKind ? copy.lockTitle[biometricKind] : t('appLockTitle');
+  const freePeriod = freeCaptureCopy(state.trialStartTs, language);
   const proSubtitle = state.founderPro
     ? t('founderProActive')
     : hasNonTrialAccess(state)
       ? t('activeOnThisDevice')
-      : trial > 0
-        ? copy.proTrialBody(trial)
-        : t('trialEndedBanner');
+      : `${freePeriod.status}\n${freePeriod.after}`;
   const proTitle = !hasNonTrialAccess(state) && trial > 0 ? copy.proTrialTitle : copy.proTitle;
   const proActionLabel = hasNonTrialAccess(state) ? eWords.proDetails : eWords.seePlans;
 
@@ -1237,6 +1238,24 @@ export default function SettingsScreen() {
             testID="settings-app-lock"
             palette={band}
             glyph={<BiometricGlyph kind={biometricKind} size={18} color={band.text} />}
+          />
+          {Platform.OS !== 'android' ? (
+            <SettingsSwitchRow
+              title={t('onlineLogosTitle')}
+              subtitle={`${t('onlineLogosDetail')}${state.privateMode ? ` ${t('onlineLogosPaused')}` : ''}`}
+              value={state.onlineLogosEnabled === true}
+              onChange={(enabled) => { void setPrivacyPreferences({ onlineLogosEnabled: enabled }).catch(() => Alert.alert(t('notAvailable'), t('privacyPreferenceFailed'))); }}
+              testID="settings-online-logos"
+              palette={band}
+            />
+          ) : null}
+          <SettingsSwitchRow
+            title={t('hideLockedWidgetAmountsTitle')}
+            subtitle={t('hideLockedWidgetAmountsDetail')}
+            value={state.hideWidgetAmountsWhenLocked !== false}
+            onChange={(enabled) => { void setPrivacyPreferences({ hideWidgetAmountsWhenLocked: enabled }).catch(() => Alert.alert(t('notAvailable'), t('privacyPreferenceFailed'))); }}
+            testID="settings-hide-widget-amounts"
+            palette={band}
           />
           {Platform.OS !== 'web' && linkRow(
             copy.trustedRow,

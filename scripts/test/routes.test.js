@@ -347,6 +347,9 @@ function sources(dir = SRC) {
   ok('the SMS revoke alert can open the system settings it names',
     /t\('smsRevokeHint'\)[\s\S]{0,300}onConfirm:[\s\S]{0,200}openSmsRevocationSettings\(\)/.test(settings) &&
       /export async function openSmsRevocationSettings\(\)[^{]*\{[\s\S]{0,120}Platform\.OS === 'android'[\s\S]{0,60}Linking\.openSettings\(\)/.test(autoImportSource));
+  ok('the SMS revoke settings helper never re-requests the permission it is revoking',
+    !/requestSmsPermission|ensureAndroidCaptureConsent/.test(
+      autoImportSource.match(/export async function openSmsRevocationSettings\(\)[\s\S]*?\n\}/)?.[0] ?? 'missing'));
 
   // The salary-day grid was removed from Settings AND onboarding at the
   // owner's request (961684b). Its styles outlived it and kept this file

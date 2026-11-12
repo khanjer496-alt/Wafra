@@ -94,7 +94,7 @@ function harness(options = {}) {
       shortDateWithYear: (date) => new Date(`${date}T12:00:00Z`).toLocaleDateString(language === 'ar' ? 'ar-AE' : 'en-GB', { day: 'numeric', month: 'short' }),
       friendlyDate: (date) => new Date(`${date}T12:00:00Z`).toLocaleDateString(language === 'ar' ? 'ar-AE' : 'en-GB', { weekday: 'long', day: 'numeric', month: 'short' }) },
     '@/lib/markets': { ledgerCurrencyCode: () => 'AED', ledgerCurrencyDisplay: () => 'AED' },
-    '@/lib/i18n': { t, hasArabicScript: (s) => /[\u0600-\u06ff]/.test(s), tf: (key, values) => key === 'balanceCoverage' ? `${values.known} of ${values.total} account balances recorded` : key === 'historyImportLiveProgress' ? `${values.scanned} read · ${values.found} found` : `${key} ${values.count ?? ''}` },
+    '@/lib/i18n': { t, getLanguage: () => language, hasArabicScript: (s) => /[\u0600-\u06ff]/.test(s), tf: (key, values) => key === 'balanceCoverage' ? `${values.known} of ${values.total} account balances recorded` : key === 'historyImportLiveProgress' ? `${values.scanned} read · ${values.found} found` : `${key} ${values.count ?? ''}` },
     '@/lib/dashboard-projection': { projectDashboard: (request) => {
       if (request.surface === 'home' && request.includeInsights === false) return dashboard;
       throw new Error('Home requested an unexpected financial projection');

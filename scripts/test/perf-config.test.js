@@ -743,12 +743,12 @@ function fastest(fn, runs = 7) {
   const detail = read('src/components/entry-detail-sheet.tsx');
   const haptics = read('src/lib/haptics.ts');
 
-  ok('merchant avatars subscribe only to Private Mode, not the whole ledger',
-    /usePrivateMode/.test(merchantAvatar) && !/useStore\s*\(/.test(merchantAvatar) && /React\.memo\(MerchantAvatarInner\)/.test(merchantAvatar),
+  ok('merchant avatars subscribe only to logo consent, not the whole ledger',
+    /useOnlineLogosAllowed/.test(merchantAvatar) && !/useStore\s*\(/.test(merchantAvatar) && /React\.memo\(MerchantAvatarInner\)/.test(merchantAvatar),
     'a transaction list can have hundreds of avatars; a full StoreContext subscription rerenders all of them on every unrelated ledger update');
 
-  ok('bank avatars subscribe only to Private Mode, not the whole ledger',
-    /usePrivateMode/.test(bankAvatar) && !/useStore\s*\(/.test(bankAvatar) && /React\.memo\(BankAvatarInner\)/.test(bankAvatar),
+  ok('bank avatars subscribe only to logo consent, not the whole ledger',
+    /useOnlineLogosAllowed/.test(bankAvatar) && !/useStore\s*\(/.test(bankAvatar) && /React\.memo\(BankAvatarInner\)/.test(bankAvatar),
     'account artwork should not rebuild when transactions, budgets, or import progress change');
 
   ok('remote merchant artwork has bounded JS metadata and unresolved work',

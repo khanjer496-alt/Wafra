@@ -565,9 +565,19 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     // Provider plumbing only: the locale key for memoised money text.
     '@/hooks/use-ledger-money': { MoneyLocaleProvider: ({ children }) => children },
     // Native widget bridge: clearAll only asks it to drop the widget summary.
-    '../../modules/wafra-widgets': { clearWidgetSnapshot: () => {}, setWidgetSnapshot: () => {} },
+    '../../modules/wafra-widgets': { clearWidgetSnapshot: () => {}, setWidgetSnapshot: () => {}, setAppPrivacy: async () => {} },
+    '@/lib/logo-cache-lifecycle': { setLogoLookupsAllowed() {} },
+    '@/lib/widget-sync': { invalidateWidgetSnapshotSync: async () => {}, requestWidgetSnapshotSync: () => ({ done: Promise.resolve('unchanged') }) },
     // The real selector helpers (dependency-free).
     '@/lib/store-selection': execute('src/lib/store-selection.ts', () => { throw new Error('store-selection has no imports'); }),
+    // The real pause-boundary factory and rule (store.tsx builds StorePauseBoundary
+    // from them at load). The boundary never renders in this harness.
+    '@/lib/store-pause': execute('src/lib/store-pause.tsx', (id) => {
+      if (id === 'react') return react;
+      if (id === 'react/jsx-runtime') return { jsx: () => ({}), jsxs: () => ({}), Fragment: Symbol('Fragment') };
+      if (id === '@/lib/store-selection') return execute('src/lib/store-selection.ts', () => { throw new Error('store-selection has no imports'); });
+      throw new Error(`unexpected store-pause dependency ${id}`);
+    }),
     // The real one-time BNPL category repair (it reads the real parser).
     '@/lib/bnpl-category-repair': require('./build/bnpl-category-repair'),
     '@/lib/subscriptions': require('./build/subscriptions'),

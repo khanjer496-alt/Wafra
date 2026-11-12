@@ -9,13 +9,13 @@ const turn = () => new Promise(resolve => setImmediate(resolve));
 
 // Executes the real component's state/effect lifecycle while replacing only
 // React/native rendering and the resolver boundary. No device data or network.
-function harness(kind, { platform = 'ios', privateMode = false, bundled = null, merchantCategory = 'groceries' } = {}) {
+function harness(kind, { platform = 'ios', privateMode = false, consent = true, bundled = null, merchantCategory = 'groceries' } = {}) {
   const hooks = [];
   let cursor = 0;
   let effects = [];
   let calls = 0;
   let resolveLogo = async () => identity;
-  const state = { privateMode };
+  const state = { privateMode, consent };
   const identity = { id: 'fixture', domain: 'choithrams.com', logoUrl: 'https://cdn.brandfetch.io/domain/choithrams.com?c=fixture' };
   const react = {
     useState(initial) {
@@ -42,7 +42,7 @@ function harness(kind, { platform = 'ios', privateMode = false, bundled = null, 
     'expo-image': { Image: 'Image' }, '@/constants/theme': { Radius: {}, BandPalettes: { light: { accounts: { glyphGround: '#EEE', tint: '#2F6577', rule: '#DDD' } }, dark: { accounts: { glyphGround: '#222', tint: '#7FB4C4', rule: '#333' } } } },
     // Avatars subscribe to the narrow private-mode context, not the whole
     // store, so a ledger mutation cannot re-render every row's artwork.
-    '@/lib/store': { useStore: () => ({ state }), usePrivateMode: () => state.privateMode },
+    '@/lib/store': { useStore: () => ({ state }), useOnlineLogosAllowed: () => state.consent && !state.privateMode },
     '@/hooks/use-theme': { useTheme: () => ({}) }, '@/components/ui/icon': { Icon: 'Icon' },
     '@/hooks/use-color-scheme': { useColorScheme: () => 'dark' },
     '@/hooks/use-band': { useBand: () => ({ glyphGround: '#2E2A23' }) },
@@ -108,8 +108,8 @@ test('merchant: uncategorised names can still use global logo enrichment', async
 });
 
 for (const kind of ['merchant', 'bank']) {
-  test(`Android ${kind} never schedules a financial-record lookup or renders a CDN image`, async () => {
-    const h = harness(kind, { platform: 'android' });
+  test(`Android ${kind} without consent never schedules lookup or renders a CDN image`, async () => {
+    const h = harness(kind, { platform: 'android', consent: false });
     h.render(); h.flush(); await turn();
     assert.equal(h.calls, 0);
     assert.deepEqual(remoteSources(h.render()), []);
@@ -121,3 +121,35 @@ test('Android continues to render a bundled merchant logo offline', () => {
   assert.equal(node.props.source, 42);
   assert.equal(h.calls, 0);
 });
+
+// Launch decision: Android never calls Brandfetch, even after opt-in, because Google
+// Play Data safety does not declare it. Android logos need a Data safety update first.
+for (const kind of ['merchant', 'bank']) {
+  test(`Android ${kind}: consent granted still never schedules lookup or renders a CDN image`, async () => {
+    const h = harness(kind, { platform: 'android', consent: true });
+    h.render(); h.flush(); await turn();
+    assert.equal(h.calls, 0);
+    assert.deepEqual(remoteSources(h.render()), []);
+  });
+}
+test('the store gates Android off for both the module gate and the avatar context', () => {
+  const fs = require('node:fs');
+  const store = fs.readFileSync(path.join(root, 'src/lib/store.tsx'), 'utf8');
+  assert.match(store, /setLogoLookupsAllowed\(Platform\.OS !== 'android' && next\.hydrated && next\.onlineLogosEnabled === true && !next\.privateMode\)/);
+  assert.match(store, /OnlineLogosContext\.Provider value=\{Platform\.OS !== 'android' && state\.hydrated/);
+  const settings = fs.readFileSync(path.join(root, 'src/app/settings.tsx'), 'utf8');
+  assert.match(settings, /Platform\.OS !== 'android' \? \(\s*<SettingsSwitchRow\s+title=\{t\('onlineLogosTitle'\)\}/);
+});
+
+for (const platform of ['ios']) for (const kind of ['merchant', 'bank']) {
+  test(`${platform} ${kind}: explicit consent enables artwork; revocation removes its URL before effects`, async () => {
+    const h = harness(kind, { platform, consent: false });
+    h.render(); h.flush(); await turn();
+    assert.equal(h.calls, 0);
+    h.state.consent = true; h.render(); h.flush(); await turn();
+    assert.equal(remoteSources(h.render()).length, 1);
+    h.state.consent = false;
+    assert.deepEqual(remoteSources(h.render()), []);
+    h.flush();
+  });
+}

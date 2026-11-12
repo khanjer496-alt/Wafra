@@ -56,3 +56,12 @@ export const GATE_TABS_UNTIL_FOCUS: Readonly<Record<string, boolean>> = {
 
 export const gateTabsUntilFocus = (platformOS: string): boolean =>
   GATE_TABS_UNTIL_FOCUS[platformOS] === true;
+
+/**
+ * A hidden iOS tab that was never opened mounts once on its own, this long
+ * after launch's first frames (and after each previous pre-warm), once the
+ * foreground is idle (tab-prewarm.ts),
+ * so its first open is no slower than when NativeTabs mounted every tab at
+ * launch, without putting that work back on the launch itself.
+ */
+export const TAB_PREWARM_DELAY_MS = 3000;

@@ -40,14 +40,21 @@ test('without a native module the write is a silent success', () => {
 
 test('the iOS module writes off the JS thread on one serial queue, and keeps its guards', () => {
   const swift = fs.readFileSync(path.join(root, 'modules/wafra-widgets/ios/WafraWidgetsModule.swift'), 'utf8');
-  assert.match(swift, /AsyncFunction\("setSnapshot"\) \{ \(json: String\) in/);
+  // Async, and still answers false when the size or App Lock privacy gate refused the write.
+  assert.match(swift, /AsyncFunction\("setSnapshot"\) \{ \(json: String\) -> Bool in/);
   assert.doesNotMatch(swift, /\bFunction\("setSnapshot"\)/, 'setSnapshot is no longer synchronous');
-  assert.match(swift, /private static let queue = DispatchQueue\(label: "app\.wafra\.widgets\.snapshot"\)/);
+  // Module-internal (not private) so WafraPrivacyCover's purge shares the same serial queue.
+  assert.match(swift, /\bstatic let queue = DispatchQueue\(label: "app\.wafra\.widgets\.snapshot"\)/);
+  // The privacy check runs on the queue together with the write, so a write cannot pass the
+  // check and then land after App Lock's purge, which also runs on the queue.
+  assert.match(swift, /AsyncFunction\("setSnapshot"\)[\s\S]*?WafraWidgetsModule\.queue\.sync \{[\s\S]*?!WafraPrivacyCover\.acceptsSnapshot\(json\)[\s\S]*?return false[\s\S]*?defaults\.set\(json/);
+  const cover = fs.readFileSync(path.join(root, 'modules/wafra-widgets/ios/WafraPrivacyCover.swift'), 'utf8');
+  assert.match(cover, /if Self\.hidesWidgetAmounts \{[\s\S]*?WafraWidgetsModule\.queue\.sync \{[\s\S]*?!Self\.acceptsSnapshot\(raw\)[\s\S]*?removeObject\(forKey: WafraWidgetsModule\.snapshotKey\)/);
   // Both write and erase go through the queue, so an erase cannot be overtaken by an older write.
   assert.match(swift, /AsyncFunction\("setSnapshot"\)[\s\S]*?WafraWidgetsModule\.queue\.sync \{[\s\S]*?defaults\.set\(json, forKey: WafraWidgetsModule\.snapshotKey\)[\s\S]*?WafraWidgetsModule\.reloadWidgets\(\)/);
   assert.match(swift, /Function\("clearSnapshot"\) \{\s*WafraWidgetsModule\.queue\.sync \{[\s\S]*?removeObject\(forKey: WafraWidgetsModule\.snapshotKey\)[\s\S]*?reloadWidgets\(\)/);
   // The 64 KB guard still removes the older snapshot instead of leaving it on screen.
-  assert.match(swift, /json\.utf8\.count > WafraWidgetsModule\.maxSnapshotBytes \{[\s\S]*?defaults\.removeObject\(forKey: WafraWidgetsModule\.snapshotKey\)/);
+  assert.match(swift, /json\.utf8\.count > WafraWidgetsModule\.maxSnapshotBytes \|\|\s*!WafraPrivacyCover\.acceptsSnapshot\(json\) \{[\s\S]*?defaults\.removeObject\(forKey: WafraWidgetsModule\.snapshotKey\)/);
   assert.match(swift, /WidgetCenter\.shared\.reloadAllTimelines\(\)/);
   assert.match(swift, /static let appGroup = "group\.app\.wafra\.ios"/);
 });

@@ -11,6 +11,17 @@ const { createWorkflowHarness, walk, text } = require('../workflows/workflow-har
 
 const root = path.resolve(__dirname, '../../..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
+
+for (const surface of ['sheet', 'screen']) for (const language of ['en', 'ar']) {
+  // #213 replaced the disabled button with "load prices again". What must still hold
+  // from #177: with no store offer there is no purchase button at all, only the retry.
+  test(`${surface}/${language}: no store offer leaves no purchase button, only the retry`, () => {
+    const { tree } = sheetHarness({ surface, language, offers: [], legal: true });
+    const ids = walk(tree).map(node => node.props?.testID).filter(Boolean);
+    assert.ok(!ids.includes(surface === 'sheet' ? 'pro-sheet-buy' : 'pro-buy'), 'no buy button without a store offer');
+    assert.ok(ids.includes(surface === 'sheet' ? 'pro-sheet-retry-prices' : 'pro-retry-prices'));
+  });
+}
 const gate = load(path.join(root, 'src/lib/pro-gate.ts'));
 
 test('a gated control asks for Pro only when Pro is not active', () => {

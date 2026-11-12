@@ -49,7 +49,8 @@ import { monthEndISO, monthKey, monthLabel, monthStartISO, shiftMonthKey } from 
 import { daysPhrase, leavingSoon, type Outgoing } from '@/lib/leaving-soon';
 import { markLaunchPhase } from '@/lib/launch-performance';
 import { ledgerCurrencyCode, marketCurrencyCode } from '@/lib/markets';
-import { formatMinorUnits, formatMoneyText, ledgerMoneySpec } from '@/lib/ledger-money';
+import { formatMinorUnits, ledgerMoneySpec } from '@/lib/ledger-money';
+import { formatMoneyText } from '@/lib/ui-money-text';
 import { internalTransferIdsForState, isSpending, liveAccountIds, transferReconciliationForStateInSlices } from '@/lib/ledger';
 import { hasRecordsBefore, liveCaptureTimes, pendingTransferSummary, summarizeHomeToday, type PendingTransferSummary } from '@/lib/home-today';
 import { detectCapturePause } from '@/lib/capture-pause';

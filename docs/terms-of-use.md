@@ -60,11 +60,11 @@ app reads, stores and transmits is set out in the
 Backups and exports you create are files you control. Once you move one off
 your device, its security is in your hands, and these terms stop protecting it.
 
-## Wafra Pro, free period and billing
+## Wafra Pro, free automatic capture and billing
 
 Some features require **Wafra Pro**. Automatic capture is free for the first
-**3 days** after first launch. This is a free period in the app, provided by
-Wafra. It is not a store trial or introductory offer, and it never starts a
+**3 days** after first launch. This free automatic capture is provided in the
+app by Wafra. It is not a store trial or introductory offer, and it never starts a
 subscription or a charge. When it ends, automatic capture requires a
 subscription. Manual entries, pasted bank messages, statement imports and
 backup/restore remain free.
