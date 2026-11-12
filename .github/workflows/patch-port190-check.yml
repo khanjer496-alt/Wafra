@@ -44,7 +44,7 @@ jobs:
           grep -E 'v72|passed, [0-9]+ failed|exit' reread.txt || true
           node --test --test-reporter=tap scripts/test/repair/review-round2-safety.test.cjs > round2.txt 2>&1 || echo "round2 exit $?" >> round2.txt
           grep -E '^# (tests|pass|fail|cancelled|skipped|todo) ' round2.txt || true
-          REFUND_MATRIX_REPORT=matrix-report.json node --test --test-reporter=tap scripts/test/repair/refund-matrix.test.cjs > matrix.txt 2>&1 || echo "matrix exit $?" >> matrix.txt
+          REFUND_MATRIX_REPORT=matrix-report.json REFUND_MATRIX_WRITE_GAPS=written-gaps.json node --test --test-reporter=tap scripts/test/repair/refund-matrix.test.cjs > matrix.txt 2>&1 || echo "matrix exit $?" >> matrix.txt
           grep -E '^# (tests|pass|fail|cancelled|skipped|todo) ' matrix.txt || true
           test -z "$(grep -E 'exit [0-9]+' focused.txt reread.txt round2.txt matrix.txt)"
       - uses: actions/upload-artifact@v4
@@ -57,9 +57,11 @@ jobs:
             round2.txt
             matrix.txt
             matrix-report.json
+            written-gaps.json
             probe.txt
           retention-days: 7
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: refund-final-resources-${{ github.sha }}
           retention-days: 3

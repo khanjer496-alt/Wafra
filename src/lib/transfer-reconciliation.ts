@@ -112,6 +112,14 @@ function withPassCache<T>(work: () => T): T {
   }
 }
 
+/**
+ * A synchronous READ-ONLY pass over rows that nothing mutates while it runs (the Transactions list's
+ * projection and its transfer-id sweep). Inside it the per-row transfer verdicts are computed once per row
+ * object instead of once per question asked about the row: the list asked up to five questions per row per
+ * pass, 15,000 rows long. The memo is dropped when the pass ends, exactly like the graph build's.
+ */
+export const withTransferRowCache: <T>(work: () => T) => T = withPassCache;
+
 function validatedInPass(cache: WeakMap<object, boolean> | undefined, value: unknown, validate: (value: unknown) => boolean): boolean {
   if (!cache || value === null || typeof value !== 'object') return validate(value);
   let valid = cache.get(value);
