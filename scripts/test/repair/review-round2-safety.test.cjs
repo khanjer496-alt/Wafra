@@ -742,6 +742,8 @@ for (const [kind, body] of [
   ['purchase-of-card-then-dotted-shop-refunded', 'Purchase of AED 250.00 with Debit Card ending 1234 at NOON.COM has been refunded.'],
   ['purchase-of-card-then-shop-refunded', 'Purchase of AED 250.00 with Debit Card ending 1234 at NOON has been refunded.'],
   ['purchase-of-dotted-shop-then-card-reversed', 'Purchase of AED 250.00 at NOON.COM with Debit Card ending 1234 has been reversed.'],
+  // Review 4637ac64: a hedged footer about reversals in general is not this refund being taken back.
+  ['refunded-then-hedged-footer', 'Purchase amount of AED 250.00 at NOON.COM on your Debit Card has been refunded. Disputed transactions may be reversed.'],
 ]) {
   test(`refund hardening posts/completed-purchase-refund-${kind}`, () => {
     const session = reader('AE');
@@ -757,12 +759,38 @@ for (const [kind, body] of [
     assert.notEqual(native.route === 'parsed' ? native.notification.direction : null, 'debit', 'native never books the refund as a purchase');
   });
 }
+// CEO 1014684b (b): a completed purchase refund to the user's OWN ACCOUNT is income on all three paths, as "to your card"
+// is; native booked it as a debit.
+for (const [kind, body] of [
+  ['own-account-with-digits', 'Purchase amount of AED 250.00 at NOON.COM on your account ending 1234 has been refunded.'],
+  ['own-account-plain-shop', 'Purchase amount of AED 250.00 at NOON on your account ending 1234 has been refunded.'],
+]) {
+  test(`refund hardening posts/completed-purchase-refund-to-own-${kind}`, () => {
+    const session = reader('AE');
+    assert.equal(nonPostingReason(body), null);
+    for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
+      session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
+      assert.equal(parsed?.kind, 'transaction');
+      assert.equal(parsed.type, 'income');
+      assert.equal(parsed.amountFils, 25000);
+      assert.equal(parsed.currency, 'AED');
+    }
+    const native = confirmationNative(body);
+    assert.equal(native.route, 'parsed', 'native posts it');
+    assert.equal(native.notification.direction, 'credit');
+    assert.deepEqual(native.notification.amount, { currency: 'AED', minorUnits: '25000', exponent: 2 });
+  });
+}
 // The same purchase while its refund is pending, requested or negated stays refused on every path.
 for (const [kind, body] of [
   ['will-be-refunded', 'Purchase amount of AED 250.00 at NOON.COM on your Debit Card will be refunded.'],
   ['has-not-been-refunded', 'Purchase amount of AED 250.00 at NOON.COM on your Debit Card has not been refunded.'],
   ['refund-pending', 'Purchase amount of AED 250.00 at NOON.COM on your Debit Card is pending refund.'],
   ['refund-request-received', 'Your refund request for the purchase amount of AED 250.00 at NOON.COM has been received.'],
+  // Review 4637ac64 (Change Reviewer, on fix4): a bare "has been refunded" that is taken back later is not income either.
+  ['refunded-then-reversed-by-merchant', 'Purchase of AED 250.00 with Debit Card ending 1234 at NOON.COM has been refunded. The refund was reversed by the merchant.'],
+  ['amount-refunded-then-cancelled', 'Purchase amount of AED 250.00 at NOON.COM on your Debit Card has been refunded. This refund has been cancelled.'],
+  ['refunded-and-on-hold', 'Purchase amount of AED 250.00 at NOON.COM on your Debit Card has been refunded to your card and is on hold.'],
 ]) {
   test(`refund hardening refuses/purchase-refund-${kind}`, () => {
     const session = reader('AE');
