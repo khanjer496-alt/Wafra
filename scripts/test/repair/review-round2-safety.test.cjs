@@ -607,6 +607,13 @@ for (const [kind, base, note, minor, nativeRoute] of [
   ['conditional-if-refund-credited', sideNoteDebit, ' If a refund is credited to your card, you will receive an SMS.', 25000, 'ignore'],
   ['plural-refunds-if-any', sideNoteDebit, ' Refunds, if any, will be credited to your card.', 25000, 'ignore'],
   ['future-refund-footer', sideNoteDebit, ' The refund will be credited to your card in 5 days.', 25000, 'ignore'],
+  // Deliberate oracle change (refund matrix, CEO 711485d5 D3 and 1014684b D4): a "not refunded" note, or a refund still being
+  // processed, beside a completed debit posts the debit as an expense. Before the matrix these four were "never auto-posts";
+  // they still never post income.
+  ['purchase-not-refunded', sideNoteDebit, ' Your purchase has not been refunded to your card.', 25000, 'ignore'],
+  ['the-refund-is-being-processed', sideNoteDebit, ' The refund is being processed.', 25000, 'ignore'],
+  ['a-refund-of-the-same-is-being-processed', sideNoteDebit, ' A refund of the same is being processed.', 25000, 'ignore'],
+  ['it-is-being-refunded', sideNoteDebit, ' It is being refunded to your card.', 25000, 'ignore'],
   ['purchase-alert-no-note', sideNotePurchase, '', 5000, 'parsed'],
   ['purchase-alert-negated-fee', sideNotePurchase, negatedFeeNote, 5000, 'parsed'],
   ['confirmed-debit-no-note', confirmedDebit, '', 8500, 'parsed'],
@@ -635,7 +642,6 @@ for (const [kind, base, note, minor, nativeRoute] of [
 for (const [kind, base, note] of [
   ['refund-for-cancelled-order-credited', sideNoteDebit, ' Refund for your cancelled order has been credited to your card.'],
   ['refund-processed-to-card', sideNoteDebit, ' Your refund has been processed to your card.'],
-  ['purchase-not-refunded', sideNoteDebit, ' Your purchase has not been refunded to your card.'],
   ['confirmed-debit-refund-credited', confirmedDebit, ' Refund for your cancelled order has been credited to your card.'],
   ['the-refund-for-another-order-credited', sideNoteDebit, ' The refund for your cancelled order has been credited to your card.'],
   // Review f757be84 (Change Reviewer, on fix3b): a debit sentence only stops being a separate debit when it says the debit
@@ -643,9 +649,6 @@ for (const [kind, base, note] of [
   // counts as the same movement when it is completed, never while it "is being processed" or "is being refunded".
   ['returned-cheque-fee-debit-then-another-refund', 'A returned cheque fee of AED 50.00 was debited from your account ending 1234.', ' Refund for your cancelled order has been credited to your card.'],
   ['reversed-charges-apply-then-another-refund', 'AED 250.00 was debited from your card ending 1234 at NOON.COM (reversed charges apply).', ' Refund for your cancelled order has been credited to your card.'],
-  ['the-refund-is-being-processed', sideNoteDebit, ' The refund is being processed.'],
-  ['a-refund-of-the-same-is-being-processed', sideNoteDebit, ' A refund of the same is being processed.'],
-  ['it-is-being-refunded', sideNoteDebit, ' It is being refunded to your card.'],
 ]) {
   test(`refund hardening side note is ambiguous and never auto-posts/${kind}`, () => {
     const session = reader('AE');
