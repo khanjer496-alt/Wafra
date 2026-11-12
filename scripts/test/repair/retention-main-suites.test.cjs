@@ -21,6 +21,11 @@ const suites = [
   ...['ios-setup-ux', 'relay', 'db', 'review-promotion', 'review-alerts-ui']
     .map(name => [name, [`${name}.test.js`]]),
 ];
+// node --test prints "# tests N"; the script suites print "N passed, M failed",
+// "<suite>: N passed, M failed" or "Universal suites: N/M passed".
+const testsRan = (stdout) => Math.max(0,
+  ...[...stdout.matchAll(/^# tests (\d+)$/gm)].map((match) => Number(match[1])),
+  ...[...stdout.matchAll(/(\d+)(?:\/\d+)? passed/g)].map((match) => Number(match[1])));
 const withoutTestContext = (env) => {
   const copy = { ...env };
   delete copy.NODE_TEST_CONTEXT;
@@ -42,10 +47,8 @@ for (const [name, args] of suites) {
       stderr: (result.stderr ?? '').slice(-8000) });
     assert.equal(result.status, 0, evidence);
     assert.doesNotMatch(result.stderr ?? '', /run\(\) is being called recursively/, evidence);
-    if (args[0] === '--test') {
-      const ran = Number(/^# tests (\d+)$/m.exec(result.stdout ?? '')?.[1] ?? 0);
-      assert.ok(ran > 0, `${name} ran no tests: ${evidence}`);
-    }
+    // A listed suite that ran no tests is a failure, not a pass (CEO 4a8b6cee).
+    assert.ok(testsRan(result.stdout ?? '') > 0, `${name} ran no tests: ${evidence}`);
     console.log(evidence);
   });
 }
