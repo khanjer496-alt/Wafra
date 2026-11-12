@@ -22,6 +22,7 @@ import {
   withMarketPackForParsing,
 } from '@/lib/markets';
 import {
+  creditNoteBesideDebit,
   hasArabicRefundHeading,
   hasMalformedBankAmount,
   hasOnlyUnsettledCredit,
@@ -315,6 +316,17 @@ export const interpretBankAlert = ({
   // The shared credit-settled veto (CEO 080fa431): parseSms refused a credit that is conditional, negated, pending, sent to
   // someone else, taken back or only "processed"; the semantic reader must not book it as income. Review at most.
   if (!usableLegacy && hasOnlyUnsettledCredit(source)) {
+    const pending = inspectUnparsedLaunchAlert(source, sender);
+    return pending.outcome === 'review'
+      ? finalFallback(pending, null)
+      : { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+  }
+  // Beside a separate debit (oracle D rules) parseSms has judged the credit notes too: the debit stands when every note is
+  // unsettled, and a refusing note leaves Review at most. The semantic reader must not read such a note as a refund credit
+  // (it booked "تم خصم … لم يتم استرداد المبلغ إلى بطاقتك." as income).
+  const noteBesideDebit = creditNoteBesideDebit(source);
+  if (noteBesideDebit === 'blank' || noteBesideDebit === 'refuse') {
+    if (usableLegacy && !(usableLegacy.kind === 'transaction' && usableLegacy.type === 'income')) return legacyResult(usableLegacy);
     const pending = inspectUnparsedLaunchAlert(source, sender);
     return pending.outcome === 'review'
       ? finalFallback(pending, null)
