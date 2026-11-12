@@ -522,6 +522,8 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     '@/lib/ledger-money': require('./build/ledger-money'),
     '@/lib/history-import': require('./build/history-import'),
     '@/lib/launch-performance': { markLaunchPhase() {} },
+    // The real source-free timing collector: hydrate records 'store-hydrate'.
+    '@/lib/runtime-performance': require('./build/runtime-performance'),
     '@/lib/onboarding': {
       allOnboardingGoalTitles: () => [],
       buildDeferredOnboardingPlan: () => null,
