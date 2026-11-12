@@ -637,6 +637,7 @@ for (const [kind, base, note] of [
   ['refund-processed-to-card', sideNoteDebit, ' Your refund has been processed to your card.'],
   ['purchase-not-refunded', sideNoteDebit, ' Your purchase has not been refunded to your card.'],
   ['confirmed-debit-refund-credited', confirmedDebit, ' Refund for your cancelled order has been credited to your card.'],
+  ['the-refund-for-another-order-credited', sideNoteDebit, ' The refund for your cancelled order has been credited to your card.'],
 ]) {
   test(`refund hardening side note is ambiguous and never auto-posts/${kind}`, () => {
     const session = reader('AE');
@@ -657,6 +658,28 @@ for (const [kind, body] of [
     assert.equal(parseSms(body, {}, { sender: 'ENBD', observedAt: at }), null);
     assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
     assert.equal(confirmationNative(body).route, 'ignore');
+  });
+}
+// Review ae81e7b9 (Change Reviewer, on fix3): a refund of the debited purchase itself is one movement and still posts as
+// income. A debit sentence that also says it was reversed is not a separate debit, and an unqualified "The refund has been
+// credited" or "A refund of the same has been credited" names that same movement.
+for (const [kind, body] of [
+  ['reversed-debit-then-the-refund', 'AED 250.00 charged at NOON.COM on 01/11 has been reversed. The refund has been credited to your card ending 1234.'],
+  ['charged-then-a-refund-of-the-same', 'Your card ending 1234 was charged AED 250.00 at NOON.COM on 01/11. A refund of the same has been credited to your card.'],
+  ['debit-then-the-refund-credited', `${sideNoteDebit} The refund has been credited to your card.`],
+]) {
+  test(`refund hardening posts/same-movement-refund-${kind}`, () => {
+    const session = reader('AE');
+    assert.equal(nonPostingReason(body), null);
+    for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
+      session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
+      assert.equal(parsed?.kind, 'transaction');
+      assert.equal(parsed.type, 'income');
+      assert.equal(parsed.amountFils, 25000);
+      assert.equal(parsed.currency, 'AED');
+    }
+    const native = confirmationNative(body);
+    assert.notEqual(native.route === 'parsed' ? native.notification.direction : null, 'debit', 'native never books the refund as a purchase');
   });
 }
 test('refund hardening posts/genuine-refund-with-a-negated-fee-footer', () => {
