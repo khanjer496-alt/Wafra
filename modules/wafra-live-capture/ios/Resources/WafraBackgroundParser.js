@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 3337f68d8584550148caf7f904964fdd3751f2101c78e545e2bd8b2f88c6d23c
+// Generated from normal shipping TypeScript. Source SHA-256: a72f39c12b533a2c758e97814cb48aa83350edc50ddd4ee0fabcb77cd1ad5562
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -11097,6 +11097,8 @@ function bankMonogram(name) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.isUnqualifiedPeerTransferClaim = void 0;
 exports.hasClickLinkPrompt = hasClickLinkPrompt;
+exports.hasOnlyWordLinkPrompts = hasOnlyWordLinkPrompts;
+exports.blankWordLinkPrompts = blankWordLinkPrompts;
 exports.hasExplicitPersonalMoneyClaim = hasExplicitPersonalMoneyClaim;
 exports.isLeadingNumericDiscountOffer = isLeadingNumericDiscountOffer;
 exports.hasMobileMoneyCallback = hasMobileMoneyCallback;
@@ -11113,18 +11115,38 @@ exports.isUnqualifiedCardCredit = isUnqualifiedCardCredit;
 const CLICK_LINK_PROMPT = /(?:\b(?:click(?:ing)?|tap(?:ping)?|verify|confirm|update\s+(?:(?:your|the)\s+)?(?:details|information|credentials|account))\b[\s:：]+|(?<![ء-ي])(?:اضغط|إضغط|انقر)[\s:：]+)(?:[^.!?]|\.\d){0,120}?(?:(?:https?|hxxps?):\/\/|\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:[\/?#:]|\b)|www\.|\b(?:here|below|link|url)\b|الرابط|هنا)/giu;
 const ISSUER_MERCHANT_DEBIT_CONFIRMATION = /^confirm\s+that\s+[A-Z]{3}\s+\d[\d,.]*\s+was\s+debited\s+from\s+your\s+account\s+ending\s+\d{4}\s+for\s+(?:a\s+)?purchase\s+at\s+(?:[a-z0-9-]+\.)+[a-z]{2,}$/iu;
 const ISSUER_MERCHANT_HOST_END = /^(?:\*[A-Z0-9]{1,24})?["'”’»)\]]*[.!?;,。、،؛؟۔…]*(?:[^\S\uFEFF]|$)/iu;
+function countsAsLinkPrompt(source, match) {
+    const before = source.slice(Math.max(0, match.index - 60), match.index);
+    if (/(?:\b(?:do\s+not|don['’]t|never|avoid|refrain\s+from)\s+(?:ever\s+)?|\b(?:at|from|merchant\s*:?)\s+|(?:لا|عدم)\s+)$/iu.test(before))
+        return false;
+    return !(ISSUER_MERCHANT_DEBIT_CONFIRMATION.test(match[0]) &&
+        ISSUER_MERCHANT_HOST_END.test(source.slice(match.index + match[0].length)) &&
+        /(?:^|[.!?])\s*(?:Dear\s+Customer[,\s]+)?we\s+$/iu.test(source.slice(0, match.index)));
+}
 function hasClickLinkPrompt(source) {
-    for (const match of source.matchAll(CLICK_LINK_PROMPT)) {
-        const before = source.slice(Math.max(0, match.index - 60), match.index);
-        if (/(?:\b(?:do\s+not|don['’]t|never|avoid|refrain\s+from)\s+(?:ever\s+)?|\b(?:at|from|merchant\s*:?)\s+|(?:لا|عدم)\s+)$/iu.test(before))
-            continue;
-        if (ISSUER_MERCHANT_DEBIT_CONFIRMATION.test(match[0]) &&
-            ISSUER_MERCHANT_HOST_END.test(source.slice(match.index + match[0].length)) &&
-            /(?:^|[.!?])\s*(?:Dear\s+Customer[,\s]+)?we\s+$/iu.test(source.slice(0, match.index)))
-            continue;
-        return true;
-    }
+    for (const match of source.matchAll(CLICK_LINK_PROMPT))
+        if (countsAsLinkPrompt(source, match))
+            return true;
     return false;
+}
+const WORD_ONLY_LINK_TARGET = /(?:\b(?:here|below|link|url)|الرابط|هنا)$/iu;
+const MESSAGE_NAMES_AN_ADDRESS = /(?:https?|hxxps?):\/\/|\bwww\.|\b(?:[a-z0-9-]+\.)+[a-z]{2,}\/\S/iu;
+function hasOnlyWordLinkPrompts(source) {
+    if (MESSAGE_NAMES_AN_ADDRESS.test(source))
+        return false;
+    const counted = [...source.matchAll(CLICK_LINK_PROMPT)].filter((match) => countsAsLinkPrompt(source, match));
+    return counted.length > 0 && counted.every((match) => WORD_ONLY_LINK_TARGET.test(match[0]));
+}
+function blankWordLinkPrompts(source) {
+    if (!hasOnlyWordLinkPrompts(source))
+        return source;
+    let out = source;
+    for (const match of source.matchAll(CLICK_LINK_PROMPT)) {
+        if (!countsAsLinkPrompt(source, match))
+            continue;
+        out = out.slice(0, match.index) + ' '.repeat(match[0].length) + out.slice(match.index + match[0].length);
+    }
+    return out;
 }
 const FIRST_PERSON_MONEY = /^\s*(?:(?:hi|hey|hello)\b(?:[^\r\n.!?]{0,40}[,!:]|\s+)\s*)?(?:I(?:\s+(?:(?:have|just|already)\s+){0,2}|['’]ve\s+(?:(?:just|already)\s+)?)(?:spent|paid|bought|sent|deposited|transferred|refunded)\b|[اأ]نا\s+(?:(?:قد|لقد)\s+)?(?:صرفت|دفعت|اشتريت|حولت|حوّلت|أرسلت|ارسلت)(?=\s))/iu;
 function hasExplicitPersonalMoneyClaim(source) {
@@ -11744,28 +11766,71 @@ function arabicPendingPosting(body) {
 const EXPECTED_FUTURE_MOVEMENT_RE = /\b(?:expected|anticipated)\b(?:[^.]|\.\d){0,80}\b(?:salary|payroll|wages|wps|payment|transfer|credit|deposit|refund|reversal|fee|charge|payout|settlement)\b|\b(?:salary|payroll|wages|wps|payment|transfer|credit|deposit|refund|reversal|fee|charge|payout|settlement)\b(?:[^.]|\.\d){0,80}\b(?:expected|anticipated)\b|(?:راتب|مرتب|دفع|تحويل|ايداع)[\s\S]{0,80}متوقع|سيصل[\s\S]{0,80}(?:راتب|مرتب|دفع|تحويل|ايداع)/iu;
 const REQUEST_RECEIVED_RE = /\b(?:(?:payment|transfer|purchase|redemption|refund)\s+request|request\s+for\s+(?:a\s+)?refund)\b(?:[^.]|\.\d){0,64}\b(?:received|submitted|created|awaiting|pending|registered|being\s+processed|in\s+progress|under\s+(?:review|process(?:ing)?))\b|\b(?:received|submitted|created)\b(?:[^.]|\.\d){0,48}\b(?:(?:payment|transfer|purchase|refund)\s+request|request\s+for\s+(?:a\s+)?refund)\b|تم\s+استلام\s+طلب\s+(?:سداد|دفع|تحويل)/iu;
 const REQUEST_RECEIVED_BLANK_RE = new RegExp(REQUEST_RECEIVED_RE.source, 'giu');
-const REFUND_COMPLETED_CREDIT_RE = /(\brefund(?:ed)?\b(?:[^.\n]|\.(?=\S)){0,300}?)\b(?:has|have|had|was|were)\s+(?:been\s+)?(?:successfully\s+)?(?:credited|refunded|posted)\s+(?:back\s+)?(?:to|into|onto)\s+(?:your\b|the\s+(?:original\s+|same\s+)?(?:card|account|payment\s+(?:method|source))\b)/gi;
-const REFUND_CREDIT_CONDITIONAL_LEAD_RE = /\b(?:if|once|when|whenever|after|until|unless|whether|as\s+soon\s+as)\b/i;
+const REFUND_OWNED_DESTINATION = String.raw `(?:your\b(?:\s+\S+){0,3}?\s+(?:card|account|wallet|balance|payment\s+(?:method|source))\b|the\s+(?:original\s+|same\s+)?(?:card|account|payment\s+(?:method|source))\b)`;
+const REFUND_COMPLETED_CREDIT_RE = new RegExp(String.raw `(\brefund(?:ed)?\b(?:[^.\n]|\.(?=\S)){0,300}?)\b(?:has|have|had|was|were)\s+(?:been\s+)?(?:successfully\s+)?(?:credited|refunded|posted)\s+(?:back\s+)?(?:to|into|onto)\s+` +
+    REFUND_OWNED_DESTINATION, 'gi');
+const REFUND_CREDIT_CONDITIONAL_LEAD_RE = /\b(?:if|once|when|whenever|after|until|unless|whether|as\s+soon\s+as)\b/gi;
+const governsRefundCredit = (lead) => {
+    const leaders = [...lead.matchAll(REFUND_CREDIT_CONDITIONAL_LEAD_RE)];
+    const last = leaders[leaders.length - 1];
+    return last !== undefined && !lead.slice(last.index + last[0].length).includes(',');
+};
 const REFUND_CREDIT_CONDITIONAL_INSIDE_RE = /\b(?:if|once|when|whenever|after|until|unless|whether)\b|\bas\s+soon\s+as\b/;
-const REFUND_CREDIT_REVERSED_TAIL_RE = /\b(?:in\s+error|reversed|will\s+be\s+(?:credited|refunded|reversed|debited|deducted|returned|posted))\b/i;
+const REFUND_CREDIT_REVERSED_RE = /\b(?:in\s+error|reversed)\b/i;
+const REFUND_CREDIT_LATER_RE = /\b(?:will\s+be\s+(?:credited|refunded|reversed|debited|deducted|returned|posted)|subject\s+to\s+(?:\w+\s+){0,2}(?:approval|review|confirmation|verification)|for\s+review|pending\s+(?:approval|review))\b/i;
 const REFUND_AMOUNT_RE = /(?:\b[A-Z]{3}\b|\bDhs?\.?|\bSR\b|[$€£])\s*(\d[\d,]*(?:\.\d+)?)/g;
 const REFUND_SENTENCE_BREAK_RE = /[.!?](?=\s|$)|\n/g;
-const refundAmounts = (text) => [...text.matchAll(REFUND_AMOUNT_RE)].map((match) => Number(match[1].replace(/,/g, '')));
+const REFUND_AMOUNT_AFTER_RE = /(\d[\d,]*(?:\.\d+)?)\s*(?:AED|SAR|USD|EUR|GBP|QAR|KWD|BHD|OMR|EGP|INR|PKR|JOD|Dhs?\b|SR\b)/g;
+const refundAmounts = (text) => [...text.matchAll(REFUND_AMOUNT_RE), ...text.matchAll(REFUND_AMOUNT_AFTER_RE)].map((match) => Number(match[1].replace(/,/g, '')));
+function refundRequestSentences(body) {
+    const parts = [];
+    for (const request of body.matchAll(REQUEST_RECEIVED_BLANK_RE)) {
+        const earlier = [...body.slice(0, request.index).matchAll(REFUND_SENTENCE_BREAK_RE)].pop();
+        const end = request.index + request[0].length;
+        const next = body.slice(end).search(REFUND_SENTENCE_BREAK_RE);
+        parts.push(body.slice(earlier ? earlier.index + 1 : 0, next < 0 ? body.length : end + next));
+    }
+    return parts.join(' ');
+}
 function hasCompletedRefundCredit(rest, request) {
     const requested = refundAmounts(request);
     for (const match of rest.matchAll(REFUND_COMPLETED_CREDIT_RE)) {
         const at = match.index;
         const breaks = [...rest.slice(0, at).matchAll(REFUND_SENTENCE_BREAK_RE)];
         const lead = rest.slice(breaks.length ? breaks[breaks.length - 1].index + 1 : 0, at);
-        if (REFUND_CREDIT_CONDITIONAL_LEAD_RE.test(lead) || REFUND_CREDIT_CONDITIONAL_INSIDE_RE.test(match[1]))
+        if (governsRefundCredit(lead) || REFUND_CREDIT_CONDITIONAL_INSIDE_RE.test(match[1]))
             continue;
-        const tail = rest.slice(at + match[0].length).split(REFUND_SENTENCE_BREAK_RE)[0];
-        if (REFUND_CREDIT_REVERSED_TAIL_RE.test(tail))
+        const remainder = rest.slice(at + match[0].length);
+        if (REFUND_CREDIT_REVERSED_RE.test(remainder) || REFUND_CREDIT_LATER_RE.test(remainder.split(REFUND_SENTENCE_BREAK_RE)[0]))
             continue;
         const credited = refundAmounts(match[0]);
         if (requested.some((amount) => !credited.includes(amount)))
             continue;
         return true;
+    }
+    return false;
+}
+const REFUND_CREDIT_SCAN_RE = /(\brefund(?:ed)?\b(?:[^.\n]|\.(?=\S)){0,300}?)\b(?:credited|refunded|posted|returned)\b(\s+(?:back\s+)?(?:to|into|onto)\s+[^.\n,;]{0,60})?/gi;
+const REFUND_CREDIT_NEGATION_RE = /\b(?:(?:has|have|had|was|were|is|are)\s+(?:not|never)|(?:hasn|haven|wasn|weren|isn|aren)['’]t|yet\s+to\s+be)\s+(?:(?:yet|been|successfully)\s+){0,3}$/;
+const REFUND_THIRD_PARTY_DESTINATION_RE = /^\s*(?:back\s+)?(?:to|into|onto)\s+(?:(?:the|a|an|your|his|her|their|its)\s+)?(?:\w+\s+){0,2}?(?:merchant|beneficiary|seller|vendor|recipient|payee|retailer|supplier|store|shop|restaurant|platform|marketplace)\b/i;
+function refundCreditNotActual(body, request) {
+    const requested = refundAmounts(request);
+    for (const match of body.matchAll(REFUND_CREDIT_SCAN_RE)) {
+        const at = match.index;
+        const breaks = [...body.slice(0, at).matchAll(REFUND_SENTENCE_BREAK_RE)];
+        const lead = body.slice(breaks.length ? breaks[breaks.length - 1].index + 1 : 0, at);
+        if (governsRefundCredit(lead) || REFUND_CREDIT_CONDITIONAL_INSIDE_RE.test(match[1]) || REFUND_CREDIT_NEGATION_RE.test(match[1]))
+            return true;
+        if (match[2] && REFUND_THIRD_PARTY_DESTINATION_RE.test(match[2]))
+            return true;
+        const remainder = body.slice(at + match[0].length - (match[2]?.length ?? 0));
+        if (REFUND_CREDIT_REVERSED_RE.test(remainder) || REFUND_CREDIT_LATER_RE.test(remainder.split(REFUND_SENTENCE_BREAK_RE)[0]))
+            return true;
+        if (requested.length > 0) {
+            const credited = refundAmounts(match[0]);
+            if (requested.some((amount) => !credited.includes(amount)))
+                return true;
+        }
     }
     return false;
 }
@@ -12921,7 +12986,9 @@ function nonPostingReasonInBody(body, suppressible) {
     const requestReceived = REQUEST_RECEIVED_RE.test(body);
     const withoutRequest = requestReceived ? blank(blank(body, REQUEST_RECEIVED_BLANK_RE), FUTURE_CLAUSE_RE) : body;
     const settledRefund = (REFUND_RE.test(body) && (!requestReceived || REFUND_RE.test(withoutRequest))) ||
-        (requestReceived && hasCompletedRefundCredit(withoutRequest, [...body.matchAll(REQUEST_RECEIVED_BLANK_RE)].map((request) => request[0]).join(' ')));
+        (requestReceived && hasCompletedRefundCredit(withoutRequest, refundRequestSentences(body)));
+    if (refundCreditNotActual(body, refundRequestSentences(body)))
+        return 'pending-processing';
     if (VERIFICATION_HOLD_DESCRIPTOR_RE.test(body))
         return 'preauthorisation';
     if (!settledRefund &&
