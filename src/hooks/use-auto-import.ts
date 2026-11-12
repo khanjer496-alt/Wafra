@@ -47,7 +47,7 @@ import {
   subscribeIosCaptureStatusRefresh,
 } from '@/lib/capture';
 import { createCaptureExecutor, type CaptureLedgerAdapter } from '@/lib/capture-executor';
-import { installAndroidLiveCaptureLedger } from '@/lib/android-live-background';
+import { installAndroidLiveCaptureLedger } from '@/lib/android-live-background-api';
 import { syncIosNativeParserContext } from '@/lib/ios-native-parser-context';
 import {
   androidNotificationCaptureEnabled,
@@ -79,6 +79,8 @@ import { historyStatusOnly } from '@/lib/store-selection';
 import { isCaptureTimestamp } from '@/lib/ios-capture-health';
 import { loadIosMessageSetupProgress } from '@/lib/ios-message-onboarding';
 import { createInboxRefreshScheduler } from '@/lib/inbox-refresh-scheduler';
+import { runAfterFirstFrames } from '@/lib/after-first-frames';
+import { createDeferredScan } from '@/lib/deferred-scan';
 import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
 import { historyImportIncomplete } from '@/lib/history-import';
 import type { AppState, IosCaptureWarningState } from '@/lib/types';
@@ -1694,6 +1696,14 @@ export function useAutoImport(
     // real scan even if another scan happened less than 30 seconds earlier.
     let initialScanTimer: ReturnType<typeof setTimeout> | null = null;
     let initialScanCancelled = false;
+    // iPhone: the launch scan and every return to `active` used to run at once,
+    // on top of Home's first frames. They now wait for real frames and the
+    // foreground lease like Android's grace does, coalesced so the scan still
+    // runs once after the last request. Live capture signals (onQueueChanged)
+    // are NOT deferred.
+    const iosScan = Platform.OS === 'ios'
+      ? createDeferredScan((run) => runAfterFirstFrames(run), () => scan())
+      : null;
     if (!state.captureOptOut && entitlementActive) {
       const force = state.lastScanTs <= 0 || captureJustEnabled || entitlementJustActivated;
       if (Platform.OS === 'android') {
@@ -1702,6 +1712,8 @@ export function useAutoImport(
             if (!initialScanCancelled && RNAppState.currentState === 'active') scan(force);
           });
         }, ANDROID_INITIAL_SCAN_GRACE_MS);
+      } else if (iosScan) {
+        iosScan.request();
       } else {
         scan(force);
       }
@@ -1726,11 +1738,14 @@ export function useAutoImport(
     }
 
     const sub = RNAppState.addEventListener('change', (next) => {
-      if (next === 'active' && Platform.OS !== 'android') scan();
+      if (next !== 'active') return;
+      if (iosScan) iosScan.request();
+      else if (Platform.OS !== 'android') scan();
     });
     return () => {
       initialScanCancelled = true;
       if (initialScanTimer !== null) clearTimeout(initialScanTimer);
+      iosScan?.cancel();
       sub.remove();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

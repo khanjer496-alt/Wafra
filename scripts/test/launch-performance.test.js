@@ -174,5 +174,54 @@ ok('the benchmark builder takes the shared test-build lock on Linux and macOS',
   /flock/.test(benchmarkWrapper) && /lockf/.test(benchmarkWrapper) &&
     /WAFRA_TEST_LOCKED/.test(benchmarkWrapper));
 
+// iOS has no Android live capture. Index.js, the root layout, the store and the
+// auto-import hook used to import android-live-background directly, so the
+// iPhone evaluated that whole module before its first screen just to call two
+// functions that returned immediately on iOS. A platform split now keeps it out
+// of the iOS startup graph and leaves Android's untouched.
+{
+  const { reachableFiles } = require('./repair/import-graph.cjs');
+  const repo = path.join(__dirname, '../..');
+  const ios = reachableFiles(repo, 'ios');
+  const android = reachableFiles(repo, 'android');
+  const ANDROID_CAPTURE = 'src/lib/android-live-background.ts';
+  ok('the iOS startup graph does not evaluate the Android live-capture module',
+    !ios.has(ANDROID_CAPTURE) && !ios.has('src/lib/native-background-tasks.ts'));
+  ok('iOS still registers the wake-only relay task at startup',
+    ios.has('src/lib/background-relay.ts') && ios.has('src/lib/native-background-tasks.ios.ts') &&
+      ios.has('src/lib/android-live-background-api.ios.ts'));
+  ok('the Android startup graph still evaluates the live-capture module through both entry paths',
+    android.has(ANDROID_CAPTURE) && android.has('src/lib/native-background-tasks.ts') &&
+      android.has('src/lib/android-live-background-api.ts') && android.has('src/lib/background-relay.ts'));
+  const iosEntry = fs.readFileSync(path.join(repo, 'src/lib/native-background-tasks.ios.ts'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+  ok('the iOS native-background-tasks entry imports only the relay',
+    iosEntry.trim() === "import '@/lib/background-relay';");
+  const apiDefault = fs.readFileSync(path.join(repo, 'src/lib/android-live-background-api.ts'), 'utf8');
+  const apiIos = load(path.join(repo, 'src/lib/android-live-background-api.ios.ts'), {});
+  const names = (source) => [...source.matchAll(/\b(installAndroidLiveCaptureLedger|waitForAndroidBackgroundCaptureIdle)\b/g)]
+    .map((m) => m[1]).filter((n, i, all) => all.indexOf(n) === i).sort();
+  ok('the iOS shim exports exactly the functions the Android build re-exports',
+    JSON.stringify(Object.keys(apiIos).sort()) === JSON.stringify(names(apiDefault)));
+  const realSource = fs.readFileSync(path.join(repo, ANDROID_CAPTURE), 'utf8');
+  ok('the real functions were already no-ops on iOS, which is all the shim does',
+    /export function installAndroidLiveCaptureLedger[\s\S]*?\{\s*if \(Platform\.OS !== 'android'\) return \(\) => \{\};/.test(realSource) &&
+      /export async function waitForAndroidBackgroundCaptureIdle\(\)[\s\S]*?\{\s*if \(Platform\.OS !== 'android'\) return;/.test(realSource));
+  const uninstall = apiIos.installAndroidLiveCaptureLedger({});
+  ok('the iOS shim installs nothing and returns a harmless cleanup',
+    typeof uninstall === 'function' && uninstall() === undefined);
+  const idle = apiIos.waitForAndroidBackgroundCaptureIdle();
+  ok('the iOS shim never waits',
+    typeof idle?.then === 'function' &&
+      /export async function waitForAndroidBackgroundCaptureIdle\(\): Promise<void> \{\}/.test(
+        fs.readFileSync(path.join(repo, 'src/lib/android-live-background-api.ios.ts'), 'utf8')));
+  for (const [name, file] of [['store', 'src/lib/store.tsx'], ['auto-import hook', 'src/hooks/use-auto-import.ts'],
+    ['root layout', 'src/components/app-root-layout.tsx']]) {
+    const source = fs.readFileSync(path.join(repo, file), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    ok(`the ${name} reaches Android live capture only through the platform split`,
+      !/from '@\/lib\/android-live-background'|import '@\/lib\/android-live-background'/.test(source));
+  }
+}
+
 console.log(`\nlaunch-performance: ${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

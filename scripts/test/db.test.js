@@ -539,7 +539,7 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     '@/lib/fx-rates': require('./build/fx-rates'),
     '@/lib/state-storage': { migrateLegacyState: async () => null, stateStorage: {} },
     '@/lib/storage-diagnostics': { recordStorageFailure: () => ({ category: 'unknown' }) },
-    '@/lib/android-live-background': { waitForAndroidBackgroundCaptureIdle: async () => {} },
+    '@/lib/android-live-background-api': { waitForAndroidBackgroundCaptureIdle: async () => {} },
     '@/lib/trusted-bank-notification-packages': {
       bankNotificationAdmissionExpiresAt: () => Date.now() + 86_400_000,
     },
@@ -2865,6 +2865,113 @@ if (!workflow) {
   ok('a hand-typed name competing for the same canonical key blocks the move too',
     contested.merchantOverrides.claude === undefined,
     JSON.stringify(contested.merchantOverrides));
+
+  /* ── launch cost: one title index instead of rules x rows scans ───────────
+   *
+   * The re-key step used to scan the whole ledger (and lowercase every title)
+   * once per merchant rule at every launch. It now answers from one
+   * lowercased-title index. `reference` below is the previous algorithm,
+   * verbatim, run on the same input; the two must agree on every rule, on a
+   * ledger with scoped and unscoped keys, rules with no rows left, hand-typed
+   * rows, competing categories under one canonical name, and raw-link evidence.
+   */
+  const { scopedMerchantOverrideKey } = require('./build/categories');
+  const referenceRekey = (overrides, rows) => {
+    const titleOf = (t) => t.title.trim().toLowerCase();
+    const parserOwned = (t) => t.source === 'sms' && !t.userEdited && !t.titleEdited;
+    const claims = new Map();
+    for (const [key, category] of Object.entries(overrides)) {
+      const scope = key.match(/^(income|expense):/)?.[1];
+      const merchantKey = scope ? key.slice(scope.length + 1) : key;
+      const canonical = normalizeServiceName(merchantKey);
+      if (!canonical) continue;
+      const canonicalMerchant = canonical.trim().toLowerCase();
+      const canonicalKey = scope ? scopedMerchantOverrideKey(canonicalMerchant, scope) : canonicalMerchant;
+      if (canonicalKey === key) continue;
+      if (overrides[canonicalKey] !== undefined) continue;
+      const under = rows.filter((t) => titleOf(t) === merchantKey && (!scope || t.type === scope));
+      const evidenced =
+        !under.some((t) => !parserOwned(t)) &&
+        (under.length > 0 ||
+          rows.some((t) => parserOwned(t) &&
+            titleOf(t) === canonicalMerchant && (!scope || t.type === scope) &&
+            typeof t.raw === 'string' && t.raw.toLowerCase().includes(merchantKey)));
+      const claim = claims.get(canonicalKey);
+      if (claim) { claim.categories.add(category); claim.evidenced ||= evidenced; }
+      else claims.set(canonicalKey, { categories: new Set([category]), evidenced });
+    }
+    const settled = [...claims].filter(([, c]) => c.evidenced && c.categories.size === 1);
+    if (!settled.length) return { ...overrides };
+    const rekeyed = { ...overrides };
+    for (const [canonicalKey, c] of settled) rekeyed[canonicalKey] = [...c.categories][0];
+    return rekeyed;
+  };
+
+  // A deterministic ledger: ~30,000 rows over ~2,000 merchant rules.
+  let seed = 20261111;
+  const rand = (n) => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed % n; };
+  const services = ['netflix.com', 'amazon.ae order', 'spotify ab', 'adobe *creative', 'www.shein.com',
+    'apple.com/bill', 'openai *chatgpt subscr', 'claudes diner', 'google *youtube', 'noon.com', 'carrefour'];
+  const categoriesPool = ['shopping', 'dining', 'groceries', 'software', 'entertainment'];
+  const overrides = {};
+  const rows = [];
+  // Services 0-4 and 8: every spelling agrees on one category, so the group moves onto
+  // the canonical name. Services 5-6: spellings disagree, so nothing moves. Service 7:
+  // the user already set the canonical name themselves, which outranks any re-key.
+  overrides.claude = 'other';
+  for (let i = 0; i < 2000; i += 1) {
+    const s = i % services.length;
+    const base = `${services[s]} ${i}`;
+    const scope = i % 3 === 0 ? 'income:' : i % 3 === 1 ? 'expense:' : '';
+    overrides[`${scope}${base}`] = s === 5 || s === 6
+      ? categoriesPool[rand(categoriesPool.length)]
+      : categoriesPool[s % categoriesPool.length];
+  }
+  const keys = Object.keys(overrides);
+  for (let i = 0; i < 30000; i += 1) {
+    const key = keys[rand(keys.length)];
+    const scope = key.match(/^(income|expense):/)?.[1];
+    const merchant = scope ? key.slice(scope.length + 1) : key;
+    const kind = rand(10);
+    const canonicalTitle = normalizeServiceName(merchant) ?? 'Other';
+    rows.push({
+      id: `r${i}`, type: scope ?? (rand(2) ? 'expense' : 'income'), amountFils: 100 + rand(5000),
+      category: 'other', accountId: 'main', date: '2026-07-01',
+      // 60% still carry the old spelling as their title (tier 1 evidence), 25% are
+      // already renamed and keep the old spelling only in `raw` (tier 2), the rest unrelated.
+      title: kind < 6 ? merchant.toUpperCase() : kind < 8.5 ? canonicalTitle : `Unrelated ${rand(500)}`,
+      source: rand(9) === 0 ? 'manual' : 'sms',
+      ...(rand(11) === 0 ? { userEdited: true } : {}),
+      ...(rand(13) === 0 ? { titleEdited: true } : {}),
+      ...(kind >= 6 && kind < 8.5 ? { raw: `Purchase at ${merchant.toUpperCase()} on 01/07` } : {}),
+    });
+  }
+  const input = () => ({ marketId: 'AE', merchantOverrides: { ...overrides }, transactions: rows.map((t) => ({ ...t })) });
+  const expected = referenceRekey(overrides, rows);
+  const rekeyedCount = Object.keys(expected).length - Object.keys(overrides).length;
+  ok('the large fixture really exercises the re-key (not a vacuous comparison)',
+    rekeyedCount >= 3 && Object.keys(overrides).length >= 1500,
+    `${rekeyedCount} re-keyed, ${Object.keys(overrides).length} rules`);
+  // Count string lowercasing during the migration: a per-rule ledger scan does one
+  // per row per rule (tens of millions here), the index does a few per row.
+  const nativeLower = String.prototype.toLowerCase;
+  let lowercased = 0;
+  String.prototype.toLowerCase = function countedLowerCase() { lowercased += 1; return nativeLower.call(this); };
+  let migrated;
+  const LOWERCASE_BUDGET = 500_000;
+  const t0 = Date.now();
+  try { migrated = real.migratePersistedState(input()); } finally { String.prototype.toLowerCase = nativeLower; }
+  const elapsed = Date.now() - t0;
+  ok('the indexed migration re-keys exactly what the full-ledger scans did (2,000 rules x 30,000 rows)',
+    JSON.stringify(Object.entries(migrated.merchantOverrides).sort()) ===
+      JSON.stringify(Object.entries(expected).sort()),
+    `${Object.keys(migrated.merchantOverrides).length} vs ${Object.keys(expected).length} keys`);
+  console.log(`  (indexed re-key: ${lowercased} lowercasings, ${elapsed} ms)`);
+  ok(`and it no longer lowercases every title once per rule (${lowercased} lowercasings)`,
+    lowercased < LOWERCASE_BUDGET, `${lowercased} >= ${LOWERCASE_BUDGET}`);
+  ok(`and the whole hydration migration of that ledger stays fast (${elapsed} ms)`, elapsed < 4000, `${elapsed} ms`);
+  ok('every row survives the migration', migrated.transactions.length === rows.length, String(migrated.transactions.length));
+
 }
 
 /* ── an income pin is not an answer about an expense row ───────────────────

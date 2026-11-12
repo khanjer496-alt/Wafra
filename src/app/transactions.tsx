@@ -54,6 +54,7 @@ import { TRANSACTION_SOURCE_KINDS, transactionSource, type TransactionSourceKind
 import { transactionsWords } from '@/lib/transactions-copy';
 import { getTransferActivity, transferPartnerIds } from '@/lib/transfer-activity';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
+import { keepEqualSeparation, type TransferSeparation } from '@/lib/transfer-separation';
 import { isTransferCandidate, transferDeclined, transferOwnership } from '@/lib/transfer-reconciliation';
 import { useStoreActions, useStoreSelector } from '@/lib/store';
 import { historyStatusOnly } from '@/lib/store-selection';
@@ -135,19 +136,6 @@ function BandSearchField({ palette, value, onChangeText, label, placeholder, cle
 
 type TransferSeparationState = Parameters<typeof transferReconciliationForState>[0];
 
-interface TransferSeparation {
-  separateTransferIds: ReadonlySet<string>;
-  /**
-   * Transfers waiting for an answer (ownership not settled), whether or not the
-   * reconciler queued them: the same rule as Home's Needs you and the Transfers card.
-   */
-  reviewTransferIds: ReadonlySet<string>;
-  /** Transfer legs still waiting for their other side (the Needs review chip). */
-  pendingTransferIds: ReadonlySet<string>;
-  /** The other leg of each linked or likely own pair among the separated rows, so the strip counts a pair once. */
-  separatedPartnerIds: ReadonlyMap<string, string>;
-}
-
 const NO_PARTNERS: ReadonlyMap<string, string> = new Map();
 const NO_SEPARATION: TransferSeparation = { separateTransferIds: NO_IDS, reviewTransferIds: NO_IDS, pendingTransferIds: NO_IDS,
   separatedPartnerIds: NO_PARTNERS };
@@ -179,7 +167,7 @@ function separationFor(
     return separateTransferCache.value;
   }
   const records = getTransferActivity(transactions, accounts, reconciliation);
-  const value: TransferSeparation = {
+  const computed: TransferSeparation = {
     separateTransferIds: new Set(records.map(item => item.transaction.id)),
     reviewTransferIds: new Set(records.filter(item => !item.confirmed).map(item => item.transaction.id)),
     pendingTransferIds: reconciliation.pendingIds,
@@ -187,6 +175,9 @@ function separationFor(
     // pairs can only name rows that are separated; remembered with it per ledger.
     separatedPartnerIds: transferPartnerIds(records),
   };
+  // An edit replaces the transactions array but rarely changes who is separated:
+  // keep the earlier object then, so nothing downstream re-runs for an equal answer.
+  const value = keepEqualSeparation(separateTransferCache?.value, computed);
   separateTransferCache = { transactions, accounts, reconciliation, value };
   return value;
 }
@@ -207,7 +198,10 @@ function useSeparateTransferIds(state: TransferSeparationState): TransferSeparat
       const input = { transactions, accounts, transferInternalIds, transferNormalizationVersion, historyImport };
       // A graph not yet cached for this receipt is built in short slices.
       graph = transferReconciliationForStateInSlices(input, (reconciliation) => {
-        if (!cancelled) setSeparation(separationFor(input, reconciliation));
+        if (cancelled) return;
+        const next = separationFor(input, reconciliation);
+        // Equal contents keep the same object, and React skips an identical state.
+        setSeparation((previous) => keepEqualSeparation(previous, next));
       });
     };
     // The first one waits out the push animation's first frames; a later
