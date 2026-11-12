@@ -75,3 +75,45 @@ test('a money push review into the full lane still keeps its source held', async
   assert.ok(h.commits[0].some(key => key.includes('money000001')), JSON.stringify(h.commits));
   assert.equal(h.state.reviewTray.pending.length, 50);
 });
+
+// Change Reviewer 747b8ade: the supplemental relay sync builds its own ACK list.
+function supplemental(candidate) {
+  const h = routine(candidate);
+  const acked = [];
+  const { createCaptureExecutor } = load(path.join(root, 'src/lib/capture-executor.ts'), {
+    '@/lib/auto-import': {}, '@/lib/capture': {}, '@/lib/relay': {},
+    '@/lib/capture-trace': { captureTrace: () => {}, captureTraceEnabled: () => false },
+  });
+  const state = h.state;
+  const queued = { parsed: [], declined: [], reviewCandidates: [candidate], ids: ['relay-review-row'],
+    reviewIds: ['relay-review-row'], testIds: [], reviewSourceKeysById: new Map([['relay-review-row', candidate.sourceKey]]) };
+  const executor = createCaptureExecutor({ ledger: {
+    getState: () => state, getStateGeneration: () => 0, ensureDurable: async () => {},
+    importBatch: () => ({ ids: [], durable: Promise.resolve() }),
+    stageReviewAlerts: (items, _qualifications, _bindings, mode) => {
+      const batch = tray.admitPreparedReviewAlerts(state.reviewTray, items, Date.now(), mode);
+      state.reviewTray = batch.state;
+      return { admitted: batch.outcomes.filter(value => value === 'admitted').length, durable: Promise.resolve(),
+        retention: () => tray.reviewRetentionReceipts(state.reviewTray, items, Date.now()) };
+    },
+  }, dependencies: { getRelay: async () => ({ baseUrl: 'https://relay.invalid', syncToken: 't', privateKey: 'k', market: 'AE' }),
+    sync: async () => queued, acknowledge: async (_cfg, ids) => { acked.push(...ids); },
+    planRows: () => ({ txCount: 0, dueCount: 0, healedCount: 0, newAccountCount: 0, billDues: [],
+      batch: { transactions: [], newAccounts: [], newHints: {}, newDues: [], newBills: [], snapshots: {}, bankNames: {},
+        cardTypes: {}, lastScanTs: 0, updates: [] } }) } });
+  return { executor, acked, state };
+}
+
+test('relay sync: an informational review the full lane does not keep is acknowledged', async () => {
+  const h = supplemental(review('info', 2));
+  await h.executor.execute('supplemental');
+  assert.deepEqual(h.acked, ['relay-review-row']);
+  assert.equal(h.state.reviewTray.pending.length, 50);
+});
+
+test('relay sync: a money review into the full lane keeps its relay row held', async () => {
+  const h = supplemental(review('money', 2));
+  await h.executor.execute('supplemental');
+  assert.deepEqual(h.acked, []);
+  assert.equal(h.state.reviewTray.pending.length, 50);
+});

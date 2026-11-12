@@ -659,7 +659,9 @@ export const createCaptureExecutor = ({
       const deferredReviewSources = [
         ...unretainedReviewSources,
         ...capacity.deferred.map(item => canonicalCaptureSourceKey(item.sourceKey, item.observedAt)),
-        ...candidates.map(item => canonicalCaptureSourceKey(item.sourceKey, item.observedAt)).filter(key => !finalClaims.has(key)),
+        // As in the routine: only unclaimed money evidence keeps its relay row.
+        ...candidates.filter(requiresReviewRetention)
+          .map(item => canonicalCaptureSourceKey(item.sourceKey, item.observedAt)).filter(key => !finalClaims.has(key)),
       ];
       acknowledge = acknowledgementsFor(queued, true, deferredReviewSources);
       if (acknowledge.length > 0) {
