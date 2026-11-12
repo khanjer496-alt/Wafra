@@ -673,7 +673,12 @@ export function SuperwallBillingProvider({ children }: { children: React.ReactNo
     eventTrackingBehavior: state.privateMode ? 'none' as const : 'all' as const,
     shouldObservePurchases: true,
     paywalls: {
-      shouldPreload: true,
+      // Off: preloading builds every campaign paywall's web view on the main
+      // thread right after launch. Wafra's own /pro screen is the purchase UI
+      // and buys and restores through the store directly (purchase,
+      // restorePurchases), so nothing there waits on a preloaded paywall; a
+      // campaign or onboarding placement loads its paywall when it is shown.
+      shouldPreload: false,
       isHapticFeedbackEnabled: true,
     },
   }), [state.language, deviceRegion, state.privateMode]);
