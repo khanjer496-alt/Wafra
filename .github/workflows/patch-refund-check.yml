@@ -37,7 +37,9 @@ jobs:
           node --test --test-name-pattern='issuer confirmation|refund acknowledgement|refund request stays refused|Arabic refund|merchant named with AND|refund credit rule|refund hardening|link-word footer|real URL stays refused' scripts/test/repair/review-round2-safety.test.cjs | tee focused.txt
       - name: Temporary side-note probe (side branch only)
         if: always()
-        run: node .github/patch-probe/fix3-probe.cjs "$PWD" | tee probe.txt
+        run: |
+          node .github/patch-probe/fix3-probe.cjs "$PWD" | tee probe.txt
+          node .github/patch-probe/native-event-probe.cjs "$PWD" | tee -a probe.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
