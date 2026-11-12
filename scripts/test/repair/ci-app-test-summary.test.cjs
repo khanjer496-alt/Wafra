@@ -23,3 +23,9 @@ test('success and bounded failure evidence do not depend on timing', () => {
   assert.equal(result.failures.length, 100);
   assert.equal(result.truncated, true);
 });
+
+test('C1 controls, including the 8-bit CSI introducer, are removed too', () => {
+  const result = summarize('not ok 1 - x\u009b31m y\u0085\u009f', 1);
+  assert.equal(result.failures[0].text, 'not ok 1 - x y');
+  assert.doesNotMatch(result.failures[0].text, /[\u0080-\u009f]/);
+});
