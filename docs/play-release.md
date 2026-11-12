@@ -224,15 +224,19 @@ real purchase is checked by hand:
 
 1. From release, check Play Console → Order management hourly for the first 7
    days after launch, then daily until the first real Android purchase is
-   confirmed: a non-test order for `wafra_pro_weekly` or `wafra_pro_yearly`.
+   confirmed: a non-test, Processed (charged) order for `wafra_pro_weekly` or
+   `wafra_pro_yearly`. A Pending or cancelled order doesn't count: keep
+   watching.
 2. Within minutes of that order, Superwall (app 55932) must show the same
    transaction with entitlement `pro` active for that user.
 3. That user gets Pro within minutes: there's no "Pro unlock pending" or
    support report, and Superwall shows `pro` active, not only a transaction.
-4. If the Play order exists but `pro` isn't active within 15 minutes, treat it
-   as a launch incident. Stop paid promotion, tell the CEO agent, and check the
-   product's attachment to `pro` and the Play Billing query before anything
-   else. Never edit Superwall products or Play prices without CEO approval.
+4. If a Processed order exists but `pro` isn't active within 15 minutes, treat
+   it as a launch incident. (A Pending order is not an incident: Wafra correctly
+   keeps Pro off until Play finishes the payment, so wait and recheck.) Ask the
+   CEO agent to stop paid promotion, and check the product's attachment to
+   `pro` and the Play Billing query before anything else. Never edit Superwall
+   products or Play prices without CEO approval.
 5. Record the order time, plan, Superwall time and Pro time (no order id or
    user data) in the launch log, then close this step.
 
