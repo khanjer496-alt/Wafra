@@ -587,6 +587,73 @@ test('refund hardening posts/negated-then-new-clause-credited', () => {
   }
 });
 
+// Review 1e2ad89f (Change Reviewer): a debit alert whose only amount is in its own debit sentence, plus a refund sentence
+// with no amount. A negated "refunded" or a conditional refund credit settles nothing, so the debit posts as an expense
+// (it used to post income, or be dropped). A completed refund sentence without its own amount is a second movement, so the
+// alert never auto-posts (it used to book the debit amount as income). A negated "refunded" with its own amount is refused.
+const sideNoteDebit = 'AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026.';
+for (const [kind, body, minor = 25000] of [
+  ['no-note', sideNoteDebit],
+  ['negated-refunded-fee', `${sideNoteDebit} The annual fee is not refunded to your card.`],
+  ['negated-refunded-has-not-been', `${sideNoteDebit} The annual fee has not been refunded to your card.`],
+  ['conditional-when-refund-credited', `${sideNoteDebit} When a refund is credited to your card you will receive an SMS.`],
+  ['conditional-if-refund-credited', `${sideNoteDebit} If a refund is credited to your card, you will receive an SMS.`],
+  ['plural-refunds-if-any', `${sideNoteDebit} Refunds, if any, will be credited to your card.`],
+  ['purchase-alert-negated-fee', 'Purchase of AED 50.00 with Debit Card ending 1234 at CARREFOUR. The annual fee is not refunded to your card.', 5000],
+]) {
+  test(`refund hardening side note posts the debit/${kind}`, () => {
+    const session = reader('AE');
+    assert.equal(nonPostingReason(body), null);
+    for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
+      session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
+      assert.equal(parsed?.kind, 'transaction');
+      assert.equal(parsed.type, 'expense');
+      assert.equal(parsed.amountFils, minor);
+      assert.equal(parsed.currency, 'AED');
+    }
+    const native = confirmationNative(body);
+    assert.equal(native.route, 'parsed');
+    assert.equal(native.notification.direction, 'debit');
+    assert.deepEqual(native.notification.amount, { currency: 'AED', minorUnits: String(minor), exponent: 2 });
+  });
+}
+for (const [kind, note] of [
+  ['refund-for-cancelled-order-credited', ' Refund for your cancelled order has been credited to your card.'],
+  ['refund-processed-to-card', ' Your refund has been processed to your card.'],
+]) {
+  test(`refund hardening side note is a second movement and never auto-posts/${kind}`, () => {
+    const session = reader('AE');
+    const body = sideNoteDebit + note;
+    assert.equal(parseSms(body), null);
+    assert.equal(parseSms(body, {}, { sender: 'ENBD', observedAt: at }), null);
+    assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
+    assert.notEqual(confirmationNative(body).route, 'parsed');
+  });
+}
+for (const [kind, body] of [
+  ['is-not-refunded', 'AED 100.00 is not refunded to your card ending 1234.'],
+  ['has-not-been-refunded', 'AED 100.00 has not been refunded to your card ending 1234.'],
+]) {
+  test(`refund hardening refuses/negated-refunded-with-its-own-amount-${kind}`, () => {
+    const session = reader('AE');
+    assert.equal(parseSms(body), null);
+    assert.equal(parseSms(body, {}, { sender: 'ENBD', observedAt: at }), null);
+    assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
+    assert.equal(confirmationNative(body).route, 'ignore');
+  });
+}
+test('refund hardening posts/genuine-refund-with-a-negated-fee-footer', () => {
+  const session = reader('AE');
+  const body = 'Refund of AED 100.00 from IKEA has been credited to your card ending 1234. The delivery fee is not refunded.';
+  assert.equal(nonPostingReason(body), null);
+  for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
+    session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
+    assert.equal(parsed?.kind, 'transaction');
+    assert.equal(parsed.type, 'income');
+    assert.equal(parsed.amountFils, 10000);
+  }
+});
+
 // CEO decision 51818dc1 (c): a genuine debit that carries a link-WORD footer ("tap here", "click the link", no URL) must
 // reach Review with its exact money, never be silently dropped; it still never auto-posts. A footer with a real URL
 // stays refused as a link request.
