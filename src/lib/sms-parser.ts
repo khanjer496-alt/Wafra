@@ -2276,23 +2276,46 @@ const REQUEST_RECEIVED_BLANK_RE = new RegExp(REQUEST_RECEIVED_RE.source, 'giu');
 // acknowledgement states one, must be the credited amount. Review c1379af4.
 const REFUND_COMPLETED_CREDIT_RE =
   /(\brefund(?:ed)?\b(?:[^.\n]|\.(?=\S)){0,300}?)\b(?:has|have|had|was|were)\s+(?:been\s+)?(?:successfully\s+)?(?:credited|refunded|posted)\s+(?:back\s+)?(?:to|into|onto)\s+(?:your\b|the\s+(?:original\s+|same\s+)?(?:card|account|payment\s+(?:method|source))\b)/gi;
-const REFUND_CREDIT_CONDITIONAL_LEAD_RE = /\b(?:if|once|when|whenever|after|until|unless|whether|as\s+soon\s+as)\b/i;
+// A leader counts only when it governs the credit: a comma between it and the credit ("After verification,
+// the refund ...") ends its scope, while "If the refund ... has been credited" stays refused.
+const REFUND_CREDIT_CONDITIONAL_LEAD_RE = /\b(?:if|once|when|whenever|after|until|unless|whether|as\s+soon\s+as)\b/gi;
+const governsRefundCredit = (lead: string): boolean => {
+  const leaders = [...lead.matchAll(REFUND_CREDIT_CONDITIONAL_LEAD_RE)];
+  const last = leaders[leaders.length - 1];
+  return last !== undefined && !lead.slice(last.index! + last[0].length).includes(',');
+};
 // Inside the clause only the lowercase wording counts, so a merchant named AFTER EIGHT or ONCE UPON still posts.
 const REFUND_CREDIT_CONDITIONAL_INSIDE_RE = /\b(?:if|once|when|whenever|after|until|unless|whether)\b|\bas\s+soon\s+as\b/;
-const REFUND_CREDIT_REVERSED_TAIL_RE = /\b(?:in\s+error|reversed|will\s+be\s+(?:credited|refunded|reversed|debited|deducted|returned|posted))\b/i;
+// A reversal anywhere after the credit (even in the next sentence) means it did not stay; a hold, a
+// later credit or "subject to ... approval" in the same sentence means it is not an actual credit. Review 11a5b249.
+const REFUND_CREDIT_REVERSED_RE = /\b(?:in\s+error|reversed)\b/i;
+const REFUND_CREDIT_LATER_RE = /\b(?:will\s+be\s+(?:credited|refunded|reversed|debited|deducted|returned|posted)|subject\s+to\s+(?:\w+\s+){0,2}(?:approval|review|confirmation|verification)|for\s+review|pending\s+(?:approval|review))\b/i;
 const REFUND_AMOUNT_RE = /(?:\b[A-Z]{3}\b|\bDhs?\.?|\bSR\b|[$€£])\s*(\d[\d,]*(?:\.\d+)?)/g;
 const REFUND_SENTENCE_BREAK_RE = /[.!?](?=\s|$)|\n/g;
+const REFUND_AMOUNT_AFTER_RE = /(\d[\d,]*(?:\.\d+)?)\s*(?:AED|SAR|USD|EUR|GBP|QAR|KWD|BHD|OMR|EGP|INR|PKR|JOD|Dhs?\b|SR\b)/g;
 const refundAmounts = (text: string): number[] =>
-  [...text.matchAll(REFUND_AMOUNT_RE)].map((match) => Number(match[1].replace(/,/g, '')));
+  [...text.matchAll(REFUND_AMOUNT_RE), ...text.matchAll(REFUND_AMOUNT_AFTER_RE)].map((match) => Number(match[1].replace(/,/g, '')));
+// The whole acknowledgement sentence, not only the words REQUEST_RECEIVED_RE matched: "We have received your
+// refund request of AED 100.00" is matched up to "request", before its amount.
+function refundRequestSentences(body: string): string {
+  const parts: string[] = [];
+  for (const request of body.matchAll(REQUEST_RECEIVED_BLANK_RE)) {
+    const earlier = [...body.slice(0, request.index!).matchAll(REFUND_SENTENCE_BREAK_RE)].pop();
+    const end = request.index! + request[0].length;
+    const next = body.slice(end).search(REFUND_SENTENCE_BREAK_RE);
+    parts.push(body.slice(earlier ? earlier.index! + 1 : 0, next < 0 ? body.length : end + next));
+  }
+  return parts.join(' ');
+}
 function hasCompletedRefundCredit(rest: string, request: string): boolean {
   const requested = refundAmounts(request);
   for (const match of rest.matchAll(REFUND_COMPLETED_CREDIT_RE)) {
     const at = match.index!;
     const breaks = [...rest.slice(0, at).matchAll(REFUND_SENTENCE_BREAK_RE)];
     const lead = rest.slice(breaks.length ? breaks[breaks.length - 1].index! + 1 : 0, at);
-    if (REFUND_CREDIT_CONDITIONAL_LEAD_RE.test(lead) || REFUND_CREDIT_CONDITIONAL_INSIDE_RE.test(match[1])) continue;
-    const tail = rest.slice(at + match[0].length).split(REFUND_SENTENCE_BREAK_RE)[0];
-    if (REFUND_CREDIT_REVERSED_TAIL_RE.test(tail)) continue;
+    if (governsRefundCredit(lead) || REFUND_CREDIT_CONDITIONAL_INSIDE_RE.test(match[1])) continue;
+    const remainder = rest.slice(at + match[0].length);
+    if (REFUND_CREDIT_REVERSED_RE.test(remainder) || REFUND_CREDIT_LATER_RE.test(remainder.split(REFUND_SENTENCE_BREAK_RE)[0])) continue;
     const credited = refundAmounts(match[0]);
     if (requested.some((amount) => !credited.includes(amount))) continue;
     return true;
@@ -5218,8 +5241,7 @@ function nonPostingReasonInBody(
   // current credit still can; remove request and future clauses before looking.
   const withoutRequest = requestReceived ? blank(blank(body, REQUEST_RECEIVED_BLANK_RE), FUTURE_CLAUSE_RE) : body;
   const settledRefund = (REFUND_RE.test(body) && (!requestReceived || REFUND_RE.test(withoutRequest))) ||
-    (requestReceived && hasCompletedRefundCredit(withoutRequest,
-      [...body.matchAll(REQUEST_RECEIVED_BLANK_RE)].map((request) => request[0]).join(' ')));
+    (requestReceived && hasCompletedRefundCredit(withoutRequest, refundRequestSentences(body)));
   if (VERIFICATION_HOLD_DESCRIPTOR_RE.test(body)) return 'preauthorisation';
   if (
     !settledRefund &&
