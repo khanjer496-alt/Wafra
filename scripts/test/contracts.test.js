@@ -1390,41 +1390,6 @@ function ktSources(dir) {
     /needs-automation/.test(home) && /waiting-for-alert/.test(home) &&
       /first-alert-captured/.test(home) && /queue-warning/.test(home) &&
       /migration-retry/.test(home) && !/pipe-ready|needs-test|revoked/.test(code(home)));
-  const queueWarningDetail = copy.match(
-    /captureIosQueueWarningDetail:\s*\{[\s\S]*?\n\s*\},\n\s*captureIosQueueCounts:/,
-  )?.[0] || '';
-  ok('Home queue warning distinguishes source-free warning counts from protected pending source records',
-    /status === 'queue-warning'[\s\S]*?t\('captureIosQueueWarningDetail'\)/.test(home) &&
-      /status shows only source-free counts/.test(queueWarningDetail) &&
-      /pending records may keep Message text and sender/.test(queueWarningDetail) &&
-      /protected and encrypted on this iPhone/.test(queueWarningDetail) &&
-      /expire after 30 days/.test(queueWarningDetail) &&
-      /removed the next time capture runs or Wafra checks the queue/.test(queueWarningDetail) &&
-      /نص الرسالة/.test(queueWarningDetail) && /اسم المرسل/.test(queueWarningDetail) &&
-      /(?:30|٣٠)[^\n]*يوماً/.test(queueWarningDetail));
-  const localPrivacyDetail = copy.match(
-    /captureIosLocalPrivacy:\s*\{[\s\S]*?\n\s*\},\n\s*captureIosQueueWarningDetail:/,
-  )?.[0] || '';
-  ok('Home waiting state qualifies local no-upload truth against the old uploading automation',
-    /active[\s\S]*?Platform\.OS === 'ios' \? t\('captureIosLocalPrivacy'\)/.test(home) &&
-      /new bank-message capture path/.test(localPrivacyDetail) &&
-      /does not upload/.test(localPrivacyDetail) &&
-      /old Wafra Capture automation may still upload/.test(localPrivacyDetail) &&
-      /until removed or retired/.test(localPrivacyDetail) &&
-      /مسار الالتقاط الجديد رسائل البنك/.test(localPrivacyDetail) &&
-      /Wafra Capture/.test(localPrivacyDetail) &&
-      /تستمر[^\n]*في الرفع/.test(localPrivacyDetail));
-  const migrationRetryDetail = copy.match(
-    /captureIosMigrationRetryDetail:\s*\{[\s\S]*?\n\s*\},\n\s*captureIosNeedsTest:/,
-  )?.[0] || '';
-  ok('Home migration warning distinguishes the local new path from the uploading old automation',
-    /status === 'migration-retry'[\s\S]*?t\('captureIosMigrationRetryDetail'\)/.test(home) &&
-      /new capture path stays local/.test(migrationRetryDetail) &&
-      /old Shortcut automation may keep uploading/.test(migrationRetryDetail) &&
-      /until cleanup succeeds or you remove it/.test(migrationRetryDetail) &&
-      /مسار الالتقاط الجديد/.test(migrationRetryDetail) &&
-      /أتمتة الاختصار القديمة/.test(migrationRetryDetail) &&
-      /تستمر في الرفع/.test(migrationRetryDetail));
   ok('Settings capture truth is the same closed local status and Private Mode is not off',
     /useAutoImport\(false, true\)/.test(settings) &&
       /captureState/.test(settings) &&

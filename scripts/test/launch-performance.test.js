@@ -165,7 +165,7 @@ ok('the internal export keeps the closed metric shape',
     Array.isArray(JSON.parse(serializeLaunchMetrics()).metrics));
 ok('usable Home is marked by the focused Home behind a cleared privacy gate',
   !/first-usable-home/.test(rootSource) &&
-    /focused && privacyGateCleared && state\.hydrated && state\.onboarded/.test(homeSource) &&
+    /useFocusEffect\(useCallback\(\(\) => \{\s*if \(!privacyGateCleared \|\| !state\.hydrated \|\| !state\.onboarded\) return;[\s\S]{0,400}markLaunchPhase\('first-usable-home'\);/.test(homeSource) &&
     /const privacyHidden = lockRequired \|\| backgroundCovered/.test(lockSource) &&
     /PrivacyGateContext\.Provider value=\{!privacyHidden\}/.test(lockSource));
 ok('internal Release metrics have a guarded local file export surface',

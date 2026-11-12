@@ -65,7 +65,7 @@ for (const [name, code] of Object.entries({ Home: home, Flow: spendingOverview, 
     /useLargeTextLayout/.test(code) && /large(?:Text)?/.test(code));
 }
 
-ok('Home stacks its hero breakdown for large text', /largeText && styles\.splitLarge/.test(home));
+ok('Home stacks its hero breakdown for large text', /largeText && styles\.stack/.test(source('src/components/home/home-hero.tsx')) && /largeText/.test(home));
 ok('Flow stacks summary and category rows for large text', /large && styles\.stack/.test(spendingOverview) && /<SpendingOverview/.test(flow));
 ok('Bills reflows its header and segments for large text',
   /<BillsSegmentControl/.test(bills) && /flexWrap: 'wrap'/.test(billsSegments) &&
