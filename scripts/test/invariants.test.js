@@ -263,22 +263,29 @@ const hits = parsed.filter((x) => x.p);
 }
 
 {
-  // A full-history import is a hot loop on the JS thread. This tripwire is for ONE thing: accidental
-  // QUADRATIC work in parseSms (a scan over earlier rows or the whole corpus per message, catastrophic
-  // regex backtracking across rows). It is not the parser's performance budget and says nothing about
-  // a phone; the 1.5x parser-cost work is a separate after-launch ticket.
+  // A full-history import is a hot loop on the JS thread. This tripwire is for ONE thing: work that
+  // GROWS WITH THE NUMBER OF MESSAGES ALREADY PARSED in the process (state carried across calls, e.g. an
+  // unbounded cache or history that is scanned for every new message). That is what makes an import
+  // quadratic. It is NOT the parser's performance budget and says nothing about a phone; the 1.5x
+  // parser-cost work is a separate after-launch ticket.
+  //
+  // What it does NOT catch: a uniform per-message slowdown (a costlier regex, a bigger fixed table scan)
+  // scales both batches equally and keeps the ratio near 5. Those are covered only by the 25 ms per-message
+  // and the pathological-input checks above and, loosely, by the absolute hang guard below.
   //
   // Why a ratio and not a speed limit: the same code took ~0.78 s per 5,000 messages on a developer Mac
   // and ~1.4 s (1431 / 1415 / 1417 ms, identical passes) on a hosted runner, and earlier cold single
   // passes read 1.22-1.61 s there. Absolute time measures the machine. The time of 5,000 rows divided by
-  // the time of 1,000 rows of the SAME cycling corpus does not: linear work gives about 5, quadratic
+  // the time of the same 1,000 rows repeated five times does not: linear work gives about 5, quadratic
   // work about 25. Both sizes are timed as the best of three passes after an untimed warm-up, so one
   // slow pass cannot fail it.
   //
   // The absolute ceiling below is only a hang guard (about 2x the hosted steady state of 1.4 s and
   // about 4x a developer Mac), not a speed claim.
-  const batch = Array.from({ length: 5_000 }, (_, i) => corpus[i % corpus.length]);
-  const small = batch.slice(0, 1_000);
+  // The 5,000 rows are the 1,000-row batch repeated five times, so both sizes parse exactly the same
+  // mix of messages (the corpus has more than 1,000 distinct messages, and a plain prefix would not match).
+  const small = Array.from({ length: 1_000 }, (_, i) => corpus[i % corpus.length]);
+  const batch = Array.from({ length: 5_000 }, (_, i) => small[i % small.length]);
   for (const raw of batch.slice(0, 500)) parser.parseSms(raw); // untimed warm-up
   const bestOf = (rows) => {
     const passes = [];
