@@ -74,11 +74,17 @@ export function unlockOutcome(result: { success: boolean; error?: string }): Unl
 export function createUnlockSession(): {
   isUnlocked(): boolean;
   setUnlocked(unlocked: boolean): void;
+  /** When the app left the foreground (epoch ms), or 0: kept here so a remount cannot forget a long absence. */
+  leftAt(): number;
+  setLeftAt(at: number): void;
 } {
   let unlocked = false;
+  let leftAt = 0;
   return {
     isUnlocked: () => unlocked,
     setUnlocked: (next) => { unlocked = next; },
+    leftAt: () => leftAt,
+    setLeftAt: (at) => { leftAt = at; },
   };
 }
 

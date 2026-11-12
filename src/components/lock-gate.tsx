@@ -134,24 +134,26 @@ export function LockGate({ children }: { children: React.ReactNode }) {
    */
   useEffect(() => {
     if (!state.appLock || Platform.OS === 'web') return;
-    let leftAt = 0;
+    // The time the app left the foreground lives in the session, not in this effect: a
+    // remount between 'inactive' and 'active' (the system language changing while the
+    // app was away) must still see a long absence and re-lock.
     const sub = AppState.addEventListener('change', (next) => {
       if (authenticatingRef.current) return;
       if (next === 'background' || next === 'inactive') {
-        leftAt = leftAt || Date.now();
+        appLockSession.setLeftAt(appLockSession.leftAt() || Date.now());
         return;
       }
       // Back from the phone's Settings with the "no screen lock" sheet up:
       // the user may have just set a passcode, so ask again instead of
       // leaving them on a sheet with no unlock button.
       if (next === 'active' && unavailableRef.current) {
-        leftAt = 0;
+        appLockSession.setLeftAt(0);
         setAttempted(false);
         return;
       }
-      if (next === 'active' && leftAt) {
-        const away = Date.now() - leftAt;
-        leftAt = 0;
+      if (next === 'active' && appLockSession.leftAt()) {
+        const away = Date.now() - appLockSession.leftAt();
+        appLockSession.setLeftAt(0);
         if (away > RELOCK_GRACE_MS) {
           markUnlocked(false);
           setAttempted(false);

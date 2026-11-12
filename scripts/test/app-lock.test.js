@@ -76,6 +76,13 @@ ok('turning App Lock on accepts a passcode-only phone',
   eq('a real re-lock still locks the next mount', { unlocked: fresh.isUnlocked() }.unlocked, false);
   const other = lock.createUnlockSession();
   eq('sessions are independent objects (no shared hidden state)', other.isUnlocked(), false);
+  // The time the app was left also survives a remount, so a >20 s absence still re-locks.
+  const away = lock.createUnlockSession();
+  eq('no absence is recorded at first', away.leftAt(), 0);
+  away.setLeftAt(1_000);
+  eq('a remounted gate still sees when the app was left', { leftAt: away.leftAt() }.leftAt, 1_000);
+  away.setLeftAt(0);
+  eq('and a return clears it', away.leftAt(), 0);
   eq('the process session starts locked', lock.appLockSession.isUnlocked(), false);
   lock.appLockSession.setUnlocked(true);
   eq('the process session is one object for every mount', lock.appLockSession.isUnlocked(), true);
@@ -90,6 +97,9 @@ ok('turning App Lock on accepts a passcode-only phone',
       (gate.match(/(?<![.\w])setUnlocked\(/g) ?? []).length === 1 &&
       /markUnlocked\(true\)/.test(gate) && /markUnlocked\(false\)/.test(gate));
   const layout = stripComments(read('src/components/app-root-layout.tsx'));
+  ok('the gate keeps the time it was left in the session, not in a local variable of the effect',
+    !/let leftAt\b/.test(gate) && /appLockSession\.setLeftAt\(appLockSession\.leftAt\(\) \|\| Date\.now\(\)\)/.test(gate) &&
+      /const away = Date\.now\(\) - appLockSession\.leftAt\(\)/.test(gate));
   ok('a language change still remounts the subtree (compiled text is evaluated again)',
     /key=\{language\}/.test(layout) && /<LockGate>/.test(layout));
 }
