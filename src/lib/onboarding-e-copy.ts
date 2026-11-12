@@ -137,13 +137,13 @@ const en = {
   trialTodayBodyOff: 'Automatic capture is yours to turn on. No card needed.',
   /** trialDaysLeft rounds up, so the end is "within", never an exact count. */
   trialEnd: (days: number) => days === 1 ? 'Within a day' : `Within ${days} days`,
-  trialEndBody: 'Automatic capture pauses. Nothing is charged, and your ledger stays.',
+  trialEndBody: 'Automatic capture pauses. Nothing is charged, your ledger stays, and manual entry and imports stay free.',
   continuePro: 'Continue with Pro',
   planYearly: 'Yearly',
   planWeekly: 'Weekly',
-  startFree: (days: number) => `Start the ${days}-day free period`,
+  startFree: (days: number) => `Start ${days} ${days === 1 ? 'day' : 'days'} of free automatic capture`,
   continueFree: 'Continue without Pro',
-  trialTimelineLabel: 'What happens during the free period',
+  trialTimelineLabel: 'What happens with free automatic capture',
 };
 
 type OnboardingECopy = typeof en;
@@ -243,13 +243,13 @@ const ar: OnboardingECopy = {
   trialTodayBodyOff: 'يمكنك تفعيل الالتقاط التلقائي متى شئت. دون بطاقة.',
   trialEnd: (days: number) => days === 1 ? 'خلال يوم'
     : `خلال ${arabicCount(days, { one: 'يوم', two: 'يومين', few: 'أيام', many: 'يوماً', hundreds: 'يوم' })}`,
-  trialEndBody: 'يتوقف الالتقاط التلقائي مؤقتاً. لا يُخصم أي مبلغ، ويبقى سجلك كما هو.',
+  trialEndBody: 'يتوقف الالتقاط التلقائي مؤقتاً. لا يُخصم أي مبلغ، ويبقى سجلك كما هو، ويبقى الإدخال اليدوي والاستيراد مجانياً.',
   continuePro: 'المتابعة مع Pro',
   planYearly: 'سنوي',
   planWeekly: 'أسبوعي',
-  startFree: (days: number) => `ابدأ الفترة المجانية: ${arabicCount(days, { one: 'يوم واحد', two: 'يومان', few: 'أيام', many: 'يوماً', hundreds: 'يوم' })}`,
+  startFree: (days: number) => `ابدأ الالتقاط التلقائي المجاني: ${arabicCount(days, { one: 'يوم واحد', two: 'يومان', few: 'أيام', many: 'يوماً', hundreds: 'يوم' })}`,
   continueFree: 'المتابعة دون Pro',
-  trialTimelineLabel: 'ما يحدث خلال الفترة المجانية',
+  trialTimelineLabel: 'ما يحدث مع الالتقاط التلقائي المجاني',
 };
 
 export const ONBOARDING_E_COPY: Record<Lang, OnboardingECopy> = { en, ar };

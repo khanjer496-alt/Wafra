@@ -11,7 +11,7 @@
  * Plans come from the real billing layer (Superwall via useWafraBilling):
  * the storefront's own price strings, the same purchase call, legal-link and
  * outcome handling as the Pro screen. A plan the store did not return is
- * shown as unavailable, never at a guessed price. "Start the N-day free period"
+ * shown as unavailable, never at a guessed price. "Start N days of free automatic capture"
  * is always there and never needs the store.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
