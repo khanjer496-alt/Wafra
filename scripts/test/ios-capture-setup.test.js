@@ -2485,13 +2485,21 @@ struct WafraBankSenderRegistryTests {
       const moreSa = Array.from({ length: 50 }, () => nextId());
       const aeId = nextId();
       const aeReviewId = nextId();
-      const native = nativeQueue([
+      // The shipped bridge (WafraLiveCaptureModule.swift) pages past held
+      // records; under the fingerprint runtime policy this JS never runs on a
+      // binary without it. Fifty waiting purchases fill a whole page.
+      const native = withNotificationLane(nativeQueue([
         ...moreSa.map((id, index) => envelope({
           id, sender: 'ALRAJHI', text: saBodyAt(50 + index), observedAt: recentIso(3_600_000 - index * 1000),
         })),
         envelope({ id: aeReviewId, text: REVIEW_BODY, sender: 'FAB', observedAt: recentIso(120_000) }),
         envelope({ id: aeId, observedAt: recentIso(60_000) }),
-      ]);
+      ]));
+      native.listPendingRecordsExcluding = async (limit, excludeIds) => {
+        native.calls.push(`listExcluding:${limit}:${excludeIds.length}`);
+        const excluded = new Set(excludeIds);
+        return native.pending().filter((serialized) => !excluded.has(JSON.parse(serialized).id)).slice(0, limit);
+      };
       const outcome = await coordinator(native, ledger).drain();
       const tray = ledger.getState().reviewTray;
       ok('fifty unresolved foreign-currency reviews never block a later AED purchase or AED review',
@@ -2504,8 +2512,10 @@ struct WafraBankSenderRegistryTests {
           tray.pending.filter(trayModule.isCurrencyConflictReview).length === 50 &&
           trayModule.recentlyLostReviewCount(tray, Date.now(), 'currency-evicted') === 0 &&
           trayModule.recentlyLostReviewCount(tray, Date.now(), 'evicted') === 0 &&
-          outcome.deferredReviews === moreSa.length,
-        JSON.stringify({ outcome, pending: native.pending().length, tombstones: tray.tombstones.slice(0, 2) }));
+          outcome.deferredReviews === moreSa.length &&
+          trayModule.reviewCaptureBacklog.get().waiting === moreSa.length,
+        JSON.stringify({ outcome, pending: native.pending().length, tombstones: tray.tombstones.slice(0, 2),
+          backlog: trayModule.reviewCaptureBacklog.get() }));
       const reloaded = trayModule.normalizeAlertReviewTray(JSON.parse(JSON.stringify(tray)), Date.now());
       ok('reloading the tray keeps the foreign-currency lane exactly and counts no loss',
         trayModule.recentlyLostReviewCount(reloaded, Date.now(), 'currency-evicted') === 0 &&
