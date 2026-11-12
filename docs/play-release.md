@@ -212,6 +212,34 @@ these three facts.
 - Side-load builds are not valid billing evidence. A keyed build may initialize
   the SDK, but purchase availability depends on a Play-installed test build.
 
+### After launch: watch the first real Android purchase (owner: Android)
+
+The 1.0.0 Android release ships without a live on-device purchase by a
+license tester. The gate rests on the 6 Nov license-tester Play orders, the
+superwall-android 2.7.24 source trace (`:sw-none` → `pro`), Superwall app 55932's
+products, and the end-to-end purchase test in
+`scripts/test/repair/superwall-attribute-loop.test.cjs` (see
+`Shared/launch-review/android-purchase-evidence-2026-11-12.md`). So the first
+real purchase is checked by hand:
+
+1. From release, check Play Console → Order management hourly for the first 7
+   days after launch, then daily until the first real Android purchase is
+   confirmed: a non-test, Processed (charged) order for `wafra_pro_weekly` or
+   `wafra_pro_yearly`. A Pending or cancelled order doesn't count: keep
+   watching.
+2. Within minutes of that order, Superwall (app 55932) must show the same
+   transaction with entitlement `pro` active for that user.
+3. That user gets Pro within minutes: there's no "Pro unlock pending" or
+   support report, and Superwall shows `pro` active, not only a transaction.
+4. If a Processed order exists but `pro` isn't active within 15 minutes, treat
+   it as a launch incident. (A Pending order is not an incident: Wafra correctly
+   keeps Pro off until Play finishes the payment, so wait and recheck.) Ask the
+   CEO agent to stop paid promotion, and check the product's attachment to
+   `pro` and the Play Billing query before anything else. Never edit Superwall
+   products or Play prices without CEO approval.
+5. Record the order time, plan, Superwall time and Pro time (no order id or
+   user data) in the launch log, then close this step.
+
 ## Roadmap notes borrowed from FinArt parity
 
 - Bank-app **notification listener** as a second capture channel (banks moving
