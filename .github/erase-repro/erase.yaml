@@ -1,0 +1,33 @@
+appId: ${APP_ID}
+---
+- extendedWaitUntil:
+    visible: 'Sign in to Apple.Account'
+    timeout: 4000
+    optional: true
+- runFlow:
+    when:
+      visible: 'Sign in to Apple.Account'
+    commands:
+      - tapOn: 'Cancel'
+- tapOn: 'Settings'
+- scrollUntilVisible:
+    element:
+      id: 'settings-data-and-help'
+    direction: DOWN
+    timeout: 60000
+- tapOn:
+    id: 'settings-data-and-help'
+- extendedWaitUntil:
+    visible:
+      id: 'settings-data-screen'
+    timeout: 20000
+- scrollUntilVisible:
+    element:
+      text: 'Erase all data'
+    direction: DOWN
+    timeout: 60000
+- tapOn: 'Erase all data'
+- waitForAnimationToEnd:
+    timeout: 4000
+- tapOn:
+    text: 'Erase'
