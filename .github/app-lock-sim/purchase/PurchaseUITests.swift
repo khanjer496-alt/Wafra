@@ -68,13 +68,39 @@ final class PurchaseUITests: XCTestCase {
         throw StepFail("still present after \(Int(t))s: \(what)")
     }
 
-    /// Fresh process, past onboarding with sample data (first run only), on the Pro screen.
+    /// Cancel a lingering system alert (a StoreKit "Sign in to Apple Account" sheet is a SpringBoard alert that
+    /// survives app launches). Cancel, never OK: OK on an empty sign-in sheet raises a second alert.
+    func dismissSystemAlerts() {
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        for _ in 0..<4 {
+            let cancel = springboard.alerts.buttons["Cancel"].firstMatch
+            if cancel.waitForExistence(timeout: 2) { note("dismissed a system alert via Cancel"); cancel.tap() } else { break }
+        }
+    }
+
+    /// Onboarding by testID (the sample-data button no longer exists), until the Home surface shows.
+    func reachHome() throws {
+        let advance = ["onboarding-get-started", "onboarding-name-skip", "onboarding-goal-bills", "onboarding-goals-continue",
+                       "onboarding-watch-continue", "onboarding-reminders-not-now", "onboarding-live-continue",
+                       "onboarding-sms-explainer-continue", "onboarding-complete-manual", "onboarding-complete-continue",
+                       "onboarding-pattern-continue", "onboarding-paywall-free"]
+        let end = Date().addingTimeInterval(240)
+        while Date() < end {
+            dismissSystemAlerts()
+            if app.buttons["Settings"].firstMatch.exists { return }
+            var tapped = false
+            for id in advance { let e = el(id); if e.exists && e.isHittable { e.tap(); tapped = true; break } }
+            Thread.sleep(forTimeInterval: tapped ? 2 : 3)
+        }
+        shot("reachHome-timeout")
+        throw StepFail("could not reach Home through onboarding within 240s")
+    }
+
+    /// Fresh process, past onboarding when asked, on the Pro screen.
     func openPro(onboard: Bool) throws {
         app.launch()
-        if onboard {
-            let start = app.buttons["Start with sample data"]
-            if start.waitForExistence(timeout: 90) { start.tap() }
-        }
+        dismissSystemAlerts()
+        if onboard { try reachHome() }
         let settings = app.buttons["Settings"].firstMatch
         try need(settings, "Settings button on Home", 90)
         settings.tap()
@@ -155,8 +181,8 @@ final class PurchaseUITests: XCTestCase {
         step("P3") {
             try requestHostReinstall(1)
             app.launch()
-            let start = app.buttons["Start with sample data"]
-            if start.waitForExistence(timeout: 90) { start.tap() }
+            dismissSystemAlerts()
+            try reachHome()
             try need(app.buttons["Settings"].firstMatch, "Home after reinstall", 90)
             app.buttons["Settings"].firstMatch.tap()
             try need(el("settings-pro-card"), "settings-pro-card", 20)

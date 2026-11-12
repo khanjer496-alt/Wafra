@@ -2,15 +2,110 @@ appId: ${APP_ID}
 ---
 - launchApp:
     clearState: true
+# A StoreKit "Sign in to Apple Account" system alert can cover the app (Superwall configures the store at launch).
+# Cancel it; never OK (OK on an empty sign-in sheet produces a second alert).
 - tapOn:
-    text: '(?i)(allow|ok)'
+    text: 'Cancel'
     optional: true
 - extendedWaitUntil:
-    visible: 'Start with sample data'
+    visible:
+      id: 'onboarding-get-started'
     timeout: 120000
-- tapOn:
-    text: 'Start with sample data'
-    retryTapIfNoChange: true
+# Onboarding by testID, in priority order, until the Home tab bar shows.
+- repeat:
+    times: 16
+    while:
+      notVisible: 'Settings'
+    commands:
+      - runFlow:
+          when:
+            visible:
+              id: 'onboarding-get-started'
+          commands:
+            - tapOn:
+                id: 'onboarding-get-started'
+      - runFlow:
+          when:
+            visible:
+              id: 'onboarding-name-skip'
+          commands:
+            - tapOn:
+                id: 'onboarding-name-skip'
+      - runFlow:
+          when:
+            visible:
+              id: 'onboarding-goal-bills'
+          commands:
+            - tapOn:
+                id: 'onboarding-goal-bills'
+      - runFlow:
+          when:
+            visible:
+              id: 'onboarding-goals-continue'
+          commands:
+            - tapOn:
+                id: 'onboarding-goals-continue'
+      - runFlow:
+          when:
+            visible:
+              id: 'onboarding-watch-continue'
+          commands:
+            - tapOn:
+                id: 'onboarding-watch-continue'
+      - runFlow:
+          when:
+            visible:
+              id: 'onboarding-reminders-not-now'
+          commands:
+            - tapOn:
+                id: 'onboarding-reminders-not-now'
+      - runFlow:
+          when:
+            visible:
+              id: 'onboarding-live-continue'
+          commands:
+            - tapOn:
+                id: 'onboarding-live-continue'
+      - runFlow:
+          when:
+            visible:
+              id: 'onboarding-sms-explainer-continue'
+          commands:
+            - tapOn:
+                id: 'onboarding-sms-explainer-continue'
+      - runFlow:
+          when:
+            visible:
+              id: 'onboarding-complete-manual'
+          commands:
+            - tapOn:
+                id: 'onboarding-complete-manual'
+      - runFlow:
+          when:
+            visible:
+              id: 'onboarding-complete-continue'
+          commands:
+            - tapOn:
+                id: 'onboarding-complete-continue'
+      - runFlow:
+          when:
+            visible:
+              id: 'onboarding-pattern-continue'
+          commands:
+            - tapOn:
+                id: 'onboarding-pattern-continue'
+      - runFlow:
+          when:
+            visible:
+              id: 'onboarding-paywall-free'
+          commands:
+            - tapOn:
+                id: 'onboarding-paywall-free'
+      - tapOn:
+          text: 'Cancel'
+          optional: true
+      - waitForAnimationToEnd:
+          timeout: 3000
 - extendedWaitUntil:
-    visible: '(?i)recent activity'
+    visible: 'Settings'
     timeout: 60000

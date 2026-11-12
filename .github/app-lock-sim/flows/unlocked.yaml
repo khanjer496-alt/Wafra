@@ -1,6 +1,9 @@
 appId: ${APP_ID}
 ---
+- tapOn:
+    text: 'Cancel'
+    optional: true
 - extendedWaitUntil:
-    visible: '(?i)recent activity'
+    visible: 'Settings'
     timeout: 8000
 - assertNotVisible: 'Wafra is locked'
