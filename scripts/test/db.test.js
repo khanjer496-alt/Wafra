@@ -3177,22 +3177,26 @@ asyncSuites.push((async () => {
   const receipt = ledger.stageReviewAlerts([review(50)]);
   await receipt.durable;
   const persisted = saved.at(-1).reviewTray;
-  const evicted = persisted.tombstones.filter((item) => item.outcome === 'evicted');
-  ok('history/relay staging over a full Message lane persists an evicted tombstone for the lost money review',
-    receipt.admitted === 1 && persisted.pending.length === 50 &&
-      !persisted.pending.some((item) => item.id === review(0).id) &&
-      evicted.length === 1 && evicted[0].sourceKey === review(0).sourceKey,
-    JSON.stringify(persisted.tombstones));
+  // Strict retention: acknowledged money evidence is never evicted to make room.
+  // The 51st money review is deferred, its source stays held (no ACK, no cursor
+  // advance), and nothing is lost, so no eviction tombstone is written.
+  const receipts = receipt.retention();
+  ok('history/relay staging over a full Message lane defers the new money review instead of evicting kept evidence',
+    receipt.admitted === 0 && persisted.pending.length === 50 &&
+      persisted.pending.some((item) => item.id === review(0).id) &&
+      !persisted.pending.some((item) => item.id === review(50).id) &&
+      !persisted.tombstones.some((item) => item.outcome === 'evicted') &&
+      receipts.length === 1 && receipts[0].outcome === 'deferred',
+    JSON.stringify({ tombstones: persisted.tombstones, receipts }));
   const reloaded = trayModule.normalizeAlertReviewTray(persisted, Date.now());
-  const reloadedAgain = trayModule.normalizeAlertReviewTray(JSON.parse(JSON.stringify(reloaded)), Date.now());
-  ok('the evicted count survives hydration exactly once',
-    trayModule.recentlyLostReviewCount(reloaded, Date.now(), 'evicted') === 1 &&
-      trayModule.recentlyLostReviewCount(reloadedAgain, Date.now(), 'evicted') === 1);
+  ok('a deferred money review leaves no loss count after hydration',
+    reloaded.pending.length === 50 && trayModule.recentlyLostReviewCount(reloaded, Date.now(), 'evicted') === 0);
   const again = ledger.stageReviewAlerts([review(0)]);
   await again.durable;
-  ok('a re-read of the evicted alert into a still-full lane is not a second loss',
-    ledger.getStateSnapshot().reviewTray.pending.length === 50 &&
-      trayModule.recentlyLostReviewCount(ledger.getStateSnapshot().reviewTray, Date.now(), 'evicted') === 1);
+  ok('a re-read of a kept alert into the full lane is a duplicate, not a loss',
+    again.admitted === 0 && again.retention()[0].outcome === 'pending' &&
+      ledger.getStateSnapshot().reviewTray.pending.length === 50 &&
+      trayModule.recentlyLostReviewCount(ledger.getStateSnapshot().reviewTray, Date.now(), 'evicted') === 0);
 })().catch((error) => ok('history staging eviction integration completes', false, String(error))));
 
 // Replacing the ledger invalidates the real session-only AI cache, including

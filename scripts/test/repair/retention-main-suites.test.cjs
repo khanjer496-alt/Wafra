@@ -16,7 +16,9 @@ const journey = fs.readdirSync(path.join(testDir, 'ios-journey'))
 const suites = [
   ['universal-test', ['../universal-test/run.cjs']],
   ['ios-journey', ['--test', '--test-concurrency=1', ...journey]],
-  ...['ios-capture-setup', 'ios-setup-ux', 'relay', 'db', 'review-promotion', 'review-alerts-ui']
+  // ios-capture-setup also checks the prebuilt native iOS project, which only the
+  // main check job generates, so it is exercised there and not in this job.
+  ...['ios-setup-ux', 'relay', 'db', 'review-promotion', 'review-alerts-ui']
     .map(name => [name, [`${name}.test.js`]]),
 ];
 for (const [name, args] of suites) {
