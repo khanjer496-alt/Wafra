@@ -99,6 +99,27 @@ jobs:
           xcrun simctl spawn "$UDID" notifyutil -p com.apple.BiometricKit.enrollmentChanged
           xcrun simctl ui "$UDID" appearance light || true
 
+      # An UNSIGNED simulator app has no entitlements, so the iOS keychain refuses it (ERR_KEY_CHAIN) and the
+      # app opens on "Your ledger could not be opened". A real build is signed; give the simulator build the same
+      # keychain identity ad hoc (the simulator does not validate the team prefix).
+      - name: Ad-hoc sign the simulator app with simulated entitlements
+        run: |
+          set -euo pipefail
+          APP=$(ls -d build/app/*.app | head -1)
+          BID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")
+          cat > "$RUNNER_TEMP/sim-ent.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>application-identifier</key><string>SIMTEAM000.$BID</string>
+            <key>keychain-access-groups</key><array><string>SIMTEAM000.$BID</string></array>
+            <key>com.apple.security.application-groups</key><array><string>group.$BID</string></array>
+          </dict></plist>
+          EOF
+          sed -i '' 's/^          //' "$RUNNER_TEMP/sim-ent.plist"
+          codesign --force --deep --sign - --entitlements "$RUNNER_TEMP/sim-ent.plist" --timestamp=none "$APP"
+          mkdir -p shots; codesign -d --entitlements - "$APP" 2>&1 | tee shots/app-entitlements.txt
+
       - name: Install the app
         run: |
           set -euo pipefail
