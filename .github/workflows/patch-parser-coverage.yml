@@ -1,0 +1,37 @@
+name: Parser coverage check
+
+# CI-only side branch (never merged): runs the launch-safety suite removed from
+# #190 against the checked-out parser, to see which #190 guards are already
+# covered. Ships nothing; changes no runtime code.
+on:
+  push:
+    branches:
+      - 'patch/parser-coverage-**'
+
+permissions:
+  contents: read
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - name: Install locked dependencies
+        run: |
+          npm ci
+          npm --prefix server ci
+      - name: launch-safety (from #190 53c20628) against this parser
+        run: |
+          node --test --test-reporter=tap scripts/universal-test/launch-safety.test.cjs > coverage.txt 2>&1 || echo "suite exit $?" >> coverage.txt
+          grep -E '^# (tests|pass|fail|cancelled|skipped|todo) ' coverage.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: parser-coverage-${{ github.sha }}
+          path: coverage.txt
+          retention-days: 7
