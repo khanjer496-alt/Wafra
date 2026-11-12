@@ -489,6 +489,104 @@ test('refund hardening Arabic acknowledgement plus credit stays refused/unchange
   assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
 });
 
+// Review 341abedb (Change Reviewer, on the amount-binding patch). An amount glued to its currency ("AED100") must still be
+// read as the requested amount; a credit that can still be taken back (temporary, on hold, under review, provisional, or
+// cancelled in the next sentence) is not income; an ordinary footer must not refuse a genuine credit; and a request
+// reference ("REF 556677") is not a currency amount.
+const holdAck = 'Your refund request has been received.';
+for (const [kind, body] of [
+  ['finding1-glued-currency', `Your refund request for AED100 has been received. A previous refund of AED 20.00 from ${longRefundMerchant} has been credited to your card.`],
+  ['finding1-glued-currency-short-merchant', `Your refund request for AED100 has been received. A previous refund of AED 20.00 from ${shortRefundMerchant} has been credited to your card.`],
+  ['finding2-temporary-credit-pending-investigation', `${holdAck} Refund of AED 100.00 from ${longRefundMerchant} has been credited to your card as a temporary credit pending investigation.`],
+  ['finding2-on-hold', `${holdAck} Refund of AED 100.00 from ${longRefundMerchant} has been credited to your account and is on hold.`],
+  ['finding2-under-review', `${holdAck} Refund of AED 100.00 from ${longRefundMerchant} has been credited to your card and is under review.`],
+  ['finding2-provisionally', `${holdAck} Refund of AED 100.00 from ${longRefundMerchant} has been credited to your card provisionally.`],
+  ['finding2-cancelled-next-sentence', `${holdAck} Refund of AED 100.00 from ${longRefundMerchant} has been credited to your card. The credit was cancelled by the merchant.`],
+  ['finding2-no-ack-on-hold', `Refund of AED 100.00 from ${shortRefundMerchant} has been credited to your card and is on hold.`],
+  ['finding2-no-ack-cancelled-next-sentence', `Refund of AED 100.00 from ${shortRefundMerchant} has been credited to your card. This refund has been withdrawn by the merchant.`],
+  ['finding2-no-ack-and-later-cancelled', `Refund of AED 100.00 from ${shortRefundMerchant} has been credited to your card but was later cancelled.`],
+  ['finding2-credit-is-temporary-next-sentence', `Refund of AED 100.00 from ${shortRefundMerchant} has been credited to your card. The credit is temporary and under review.`],
+]) {
+  test(`refund hardening refuses/${kind}`, () => {
+    const session = reader('AE');
+    assert.equal(parseSms(body), null);
+    assert.equal(parseSms(body, {}, { sender: 'ENBD', observedAt: at }), null);
+    assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
+  });
+}
+for (const [kind, body, minor] of [
+  ['finding3-footer-may-be-reversed', `Refund of AED 100.00 from ${shortRefundMerchant} has been credited to your card ending 1234. Disputed transactions may be reversed.`, 10000],
+  ['finding3-footer-if-credited-in-error', `Refund of AED 100.00 from ${shortRefundMerchant} has been credited to your card ending 1234. If credited in error, call 600 54 0000.`, 10000],
+  ['finding3-ack-footer-may-be-reversed', `${holdAck} Refund of AED 100.00 from ${longRefundMerchant} has been credited to your card ending 1234. Disputed transactions may be reversed.`, 10000],
+  ['finding3-ack-footer-if-credited-in-error', `${holdAck} Refund of AED 100.00 from ${longRefundMerchant} has been credited to your card ending 1234. If credited in error, call 600 54 0000.`, 10000],
+  ['finding3-credit-for-a-cancelled-order', `Refund of AED 100.00 from ${shortRefundMerchant} has been credited to your card ending 1234 for your cancelled order.`, 10000],
+  ['finding3-footer-about-cancelled-orders', `Refund of AED 100.00 from ${shortRefundMerchant} has been credited to your card ending 1234. Orders that were cancelled are refunded within 5 days.`, 10000],
+  ['finding4-request-reference-is-not-a-currency', `Your refund request REF 556677 has been received. Refund of AED 100.00 from ${longRefundMerchant} has been credited to your card ending 1234.`, 10000],
+  ['finding4-amount-before-refund-word', `Your refund request for AED 100.00 has been received. AED 100.00 refund from ${longRefundMerchant} has been credited to your card ending 1234.`, 10000],
+  ['finding4-amount-after-destination', `Your refund request for AED 100.00 has been received. Refund from ${longRefundMerchant} has been credited to your card ending 1234 for AED 100.00.`, 10000],
+  ['finding4-glued-currency-same-amount', `Your refund request for AED100 has been received. Refund of AED 100.00 from ${longRefundMerchant} has been credited to your card ending 1234.`, 10000],
+]) {
+  test(`refund hardening posts/${kind}`, () => {
+    const session = reader('AE');
+    assert.equal(nonPostingReason(body), null);
+    for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
+      session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
+      assert.equal(parsed?.kind, 'transaction');
+      assert.equal(parsed.type, 'income');
+      assert.equal(parsed.amountFils, minor);
+      assert.equal(parsed.currency, 'AED');
+    }
+  });
+}
+
+// Regression from the final #176 head (universal test "negation applies to coordinated refund verbs until an explicit
+// new clause"): a negated credit followed, in the same sentence, by a new clause whose credit is completed is a credit.
+// A negated credit with only a future or no new credit, or a credit in a different sentence, stays refused.
+for (const [kind, body] of [
+  ['negated-then-future-credit', 'Refund of AED 125.00 has not been credited and the refund will be credited to your card in 5 days.'],
+  ['negated-then-credit-in-next-sentence', 'The first refund of AED 125.00 has not been credited. The second refund has been credited to your card.'],
+  ['negated-then-credit-to-merchant', 'Refund of AED 125.00 has not been credited and the refund has now been credited to the merchant.'],
+]) {
+  test(`refund hardening refuses/${kind}`, () => {
+    const session = reader('AE');
+    assert.equal(parseSms(body), null);
+    assert.equal(parseSms(body, {}, { sender: 'ENBD', observedAt: at }), null);
+    assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
+  });
+}
+// Universal test "negation applies to coordinated refund verbs until an explicit new clause": "has not been credited and was
+// debited from your account" is an expense (the new clause has its own auxiliary); without that auxiliary the negation
+// still covers the debit and the message stays refused.
+for (const auxiliary of ['was', 'has been']) {
+  test(`refund hardening posts/negated-credit-then-${auxiliary.replace(' ', '-')}-debited-is-an-expense`, () => {
+    const session = reader('AE');
+    const body = `Refund of AED 125.00 has not been credited and ${auxiliary} debited from your account.`;
+    for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
+      session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
+      assert.equal(parsed?.type, 'expense');
+      assert.equal(parsed.amountFils, 12500);
+    }
+  });
+}
+for (const verb of ['debited from your account', 'charged to your card']) {
+  test(`refund hardening refuses/negation-covers-the-coordinated-${verb.split(' ')[0]}`, () => {
+    const body = `Refund of AED 125.00 has not been credited and ${verb}.`;
+    assert.equal(parseSms(body), null);
+    assert.equal(parseSms(body, {}, { sender: 'ENBD', observedAt: at }), null);
+  });
+}
+test('refund hardening posts/negated-then-new-clause-credited', () => {
+  const session = reader('AE');
+  const body = 'Refund of AED 125.00 has not been credited and the refund has now been credited to your card.';
+  assert.equal(nonPostingReason(body), null);
+  for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
+    session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
+    assert.equal(parsed?.kind, 'transaction');
+    assert.equal(parsed.type, 'income');
+    assert.equal(parsed.amountFils, 12500);
+  }
+});
+
 // CEO decision 51818dc1 (c): a genuine debit that carries a link-WORD footer ("tap here", "click the link", no URL) must
 // reach Review with its exact money, never be silently dropped; it still never auto-posts. A footer with a real URL
 // stays refused as a link request.
