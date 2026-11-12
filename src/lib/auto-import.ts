@@ -25,7 +25,7 @@ import { toISODate } from '@/lib/format';
 import { bodyPrint, statedBalanceInText, type CaptureChannel } from '@/lib/dedupe';
 import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
-import { isUnpostedCardBalanceClaim, isCompletedCardBalanceReceipt } from '@/lib/principal-posting-guards';
+import { isUnpostedCardBalanceClaim, isCompletedCardBalanceReceipt, blankWordLinkPrompts } from '@/lib/principal-posting-guards';
 import {
   nonPostingReason,
   parseForeignAwaitingRate,
@@ -978,22 +978,26 @@ export function inspectSourceFreeRefusedAlert(input: {
   /** Known launch-bank package identity makes worldwide fallback unnecessary. */
   skipUniversalFallback?: boolean;
 }): SourceFreeRefusedAlertDecision {
+  // A footer made of link WORDS only ("If not you, tap here to block your card") names no address, so it cannot be a
+  // phishing link; the debit above it must reach Review, never be dropped. It is blanked for this inspection only:
+  // posting still refuses the original text, and a footer that names a real URL stays refused.
+  const source = blankWordLinkPrompts(input.source);
   // BNPL provider restatement (see bnpl-providers.ts): the bank's
   // card alert is the transaction, so this source never earns a Review card.
   if (isBnplProviderSource(input.sender)) return { kind: 'ignored', reason: 'non-financial' };
   // An explicit non-credit/future balance claim must not acquire actionable
   // money through an unparsed-template fallback. This is no ledger deletion.
-  if (isUnpostedCardBalanceClaim(input.source)) return { kind: 'ignored', reason: 'non-financial' };
-  const reason = nonPostingReason(input.source);
+  if (isUnpostedCardBalanceClaim(source)) return { kind: 'ignored', reason: 'non-financial' };
+  const reason = nonPostingReason(source);
   if (reason) return { kind: 'declined', reason };
   // A generic amount detector can read "Get AED 50 cashback on your next
   // purchase" as a posted purchase. The launch parser already refused it;
   // never turn a bank-app offer into an actionable spending review.
-  if (input.channel === 'push' && isPromotionalBankPush(input.source)) {
+  if (input.channel === 'push' && isPromotionalBankPush(source)) {
     return { kind: 'ignored', reason: 'promotion' };
   }
-  if (!hasBankAlertMoneyHint(input.source) &&
-    !hasGenericBankAlertContext(input.source, input.sender)) {
+  if (!hasBankAlertMoneyHint(source) &&
+    !hasGenericBankAlertContext(source, input.sender)) {
     return { kind: 'ignored', reason: 'non-financial' };
   }
 
@@ -1001,9 +1005,9 @@ export function inspectSourceFreeRefusedAlert(input: {
   // (NGN, ISK, UZS ...) waits in Review in its own currency until a dated
   // rate converts it at promotion. It is never dropped, even when the
   // worldwide fallback below is skipped or cannot read the template.
-  const launchMarket = detectLaunchMarketFromAlert(input.source, input.sender);
+  const launchMarket = detectLaunchMarketFromAlert(source, input.sender);
   const awaitingRate = launchMarket
-    ? withMarketPackForParsing(launchMarket, () => parseForeignAwaitingRate(input.source, undefined, {
+    ? withMarketPackForParsing(launchMarket, () => parseForeignAwaitingRate(source, undefined, {
         sender: input.sender, observedAt: input.observedAt,
       }))
     : null;
@@ -1018,10 +1022,10 @@ export function inspectSourceFreeRefusedAlert(input: {
   // Scam wording is still refused. It is never dropped: a genuine incoming
   // transfer read from iPhone History has no sender at all.
   if (launchMarket && isUnaccountableLaunchSender(input.sender)) {
-    const credit = withMarketPackForParsing(launchMarket, () => parseSms(input.source, undefined, {
+    const credit = withMarketPackForParsing(launchMarket, () => parseSms(source, undefined, {
       sender: input.sender, observedAt: input.observedAt,
     }));
-    if (credit && isHeldLaunchCredit(input.source, input.sender, credit)) {
+    if (credit && isHeldLaunchCredit(source, input.sender, credit)) {
       const { raw: _raw, ...facts } = credit;
       const candidate = parsedFinancialCandidateReview(facts, input.observedAt);
       if (candidate) return { kind: 'review', candidate: { ...candidate, channel: input.channel } };
@@ -1030,9 +1034,9 @@ export function inspectSourceFreeRefusedAlert(input: {
 
   // Prefer typed settlement Review over a generic purchase/income draft. No
   // amount, direction or card identity is invented; missing fields stay open.
-  if (isSafeCardRepaymentReviewSource(input.source) ||
-    (isCompletedCardBalanceReceipt(input.source) && !isNotAutoPostableMoney(input.source))) {
-    const event = inspectGenericBankEventForReview(input.source, input.sender);
+  if (isSafeCardRepaymentReviewSource(source) ||
+    (isCompletedCardBalanceReceipt(source) && !isNotAutoPostableMoney(source))) {
+    const event = inspectGenericBankEventForReview(source, input.sender);
     const review = event?.family === 'card-payment' && (event.status === 'posted' || event.status === 'unknown') ? prepareUniversalReviewAlert({
       id: 'capture_probe_id_0001', sourceKey: 'capture_probe_key_001',
       observedAt: input.observedAt, channel: input.channel, event,
@@ -1042,7 +1046,7 @@ export function inspectSourceFreeRefusedAlert(input: {
       return { kind: 'review', candidate };
     }
   }
-  const inspection = input.existingInspection ?? input.session.inspect(input.source, input.sender);
+  const inspection = input.existingInspection ?? input.session.inspect(source, input.sender);
   const prepared = inspection
     ? prepareReviewAlert({
         id: 'capture_probe_id_0001',
@@ -1055,7 +1059,7 @@ export function inspectSourceFreeRefusedAlert(input: {
   // A globally routed or ambiguous result has already been judged by the
   // global inspector. The launch fallback is only for alerts with no route.
   const launchReview = inspection === null
-    ? inspectUnparsedLaunchAlert(input.source, input.sender)
+    ? inspectUnparsedLaunchAlert(source, input.sender)
     : null;
   const reviewPrepared = prepared ?? (launchReview?.outcome === 'review'
     ? prepareLaunchReviewAlert({
@@ -1074,11 +1078,11 @@ export function inspectSourceFreeRefusedAlert(input: {
     // Leave the encrypted row unresolved for a future parser instead.
     if (input.skipUniversalFallback) return { kind: 'ignored', reason: 'unrecognized' };
     // A Gulf-neighbour route reads its own currency spellings for the amount.
-    const event = inspectGenericBankEventForReview(input.source, input.sender,
+    const event = inspectGenericBankEventForReview(source, input.sender,
       inspection?.route.decision === 'single' ? inspection.route.market : null);
     // The only place the text and the generic reading meet: keep a value-free
     // shape (never the text) so confirming the reading unchanged can share it.
-    const share = event ? buildCandidateShareShape(input.source, input.sender, event) : null;
+    const share = event ? buildCandidateShareShape(source, input.sender, event) : null;
     const universal = event ? prepareUniversalReviewAlert({
       id: 'capture_probe_id_0001',
       sourceKey: 'capture_probe_key_001',
