@@ -30,8 +30,12 @@ export function hasClickLinkPrompt(source: string): boolean {
   return false;
 }
 const WORD_ONLY_LINK_TARGET = /(?:\b(?:here|below|link|url)|الرابط|هنا)$/iu;
-/** Every link instruction is a bare word ("tap here", "click the link"): the text names no address to open. */
+// An address anywhere in the message ("click the link http://bit.ly/x", "tap here: www.x.co") makes it a phishing
+// shape even when the instruction itself ends on a bare word. A merchant domain without a path (AMAZON.COM) is not one.
+const MESSAGE_NAMES_AN_ADDRESS = /(?:https?|hxxps?):\/\/|\bwww\.|\b(?:[a-z0-9-]+\.)+[a-z]{2,}\/\S/iu;
+/** Every link instruction is a bare word ("tap here", "click the link") and the message names no address to open. */
 export function hasOnlyWordLinkPrompts(source: string): boolean {
+  if (MESSAGE_NAMES_AN_ADDRESS.test(source)) return false;
   const counted = [...source.matchAll(CLICK_LINK_PROMPT)].filter((match) => countsAsLinkPrompt(source, match));
   return counted.length > 0 && counted.every((match) => WORD_ONLY_LINK_TARGET.test(match[0]));
 }
