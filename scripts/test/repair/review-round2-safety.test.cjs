@@ -495,7 +495,7 @@ test('refund hardening Arabic acknowledgement plus credit stays refused/unchange
 for (const [kind, source] of [
   ['tap-here-to-block', 'Purchase of AED 50.00 with Debit Card ending 1234 at CARREFOUR. Avl Bal AED 1,000.00. If not you, tap here to block your card.'],
   ['click-the-link-to-report', 'AED 50.00 was debited from your account ending 1234 at CARREFOUR. If you did not make this transaction, click the link to report it.'],
-  ['click-below-to-dispute', 'Purchase of AED 50.00 with Credit Card ending 1234 at CARREFOUR. Unauthorised? Click below to dispute.'],
+  ['click-below-to-report', 'Purchase of AED 50.00 with Credit Card ending 1234 at CARREFOUR. To report a problem with this purchase, click below.'],
 ]) {
   test(`genuine debit with a link-word footer reaches Review/${kind}`, () => {
     const session = reader('AE');
