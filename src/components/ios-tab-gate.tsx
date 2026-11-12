@@ -2,7 +2,7 @@ import { useIsFocused, useNavigation, useNavigationState, useRoute } from '@reac
 import React, { useState } from 'react';
 import { Platform } from 'react-native';
 
-import { FreezeWhenCovered, type CoverTransitionSource } from '@/components/freeze-when-covered';
+import { FreezeWhenCovered, type CoverTransitionNavigation, type CoverTransitionSource } from '@/components/freeze-when-covered';
 import { gateTabsUntilFocus } from '@/lib/covered-screen-freeze';
 
 /**
@@ -58,7 +58,7 @@ export function withIosTabGate<P extends object>(Screen: React.ComponentType<P>)
     // The tab's parent is the tab shell's route in the root stack. Its events
     // time the freeze under a push and release it as a swipe-back begins. A
     // switch between tabs sends none; the gate's fallback delay covers that.
-    const shell = useNavigation().getParent();
+    const shell = useNavigation().getParent<CoverTransitionNavigation | undefined>();
     // The tab bar's current tab, from the NativeTabs navigator state.
     const ownKey = useRoute().key;
     const selected = useNavigationState((state) => state.routes[state.index]?.key) === ownKey;

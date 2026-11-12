@@ -3,7 +3,7 @@ import { Tabs } from 'expo-router';
 import React from 'react';
 import { Platform } from 'react-native';
 
-import { FreezeWhenCovered } from '@/components/freeze-when-covered';
+import { FreezeWhenCovered, type CoverTransitionNavigation } from '@/components/freeze-when-covered';
 import { WafraTabBar } from '@/components/tab-bar';
 import { TabBarMetricsProvider } from '@/components/ui/tab-bar-metrics';
 import { useAutoImport } from '@/hooks/use-auto-import';
@@ -65,7 +65,7 @@ export default function TabsLayout() {
   const covered = !useIsFocused();
   // This route's own navigation in the root stack: its transition events say
   // when a covering push has ended, and when a swipe-back starts to reveal it.
-  const navigation = useNavigation();
+  const navigation = useNavigation<CoverTransitionNavigation>();
   return (
     <TabBarMetricsProvider>
       <CaptureOwner />
