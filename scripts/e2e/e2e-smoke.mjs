@@ -594,7 +594,11 @@ await tapLabel(page, proEntryLabel, 1400);
   if (hits.length) console.log(hits.slice(0, 4));
 }
 ok('paywall exposes its checkout control', !!(await visibleText(page, /GET WAFRA PRO/i)));
-ok('web checkout remains disabled without an available storefront', await page.getByTestId('pro-buy').isDisabled());
+// #213: the checkout button is never dead. Without a storefront (web), tapping it
+// must refuse before any store call and say so in place; it must never grant Pro.
+await page.getByTestId('pro-buy').click();
+ok('web checkout refuses without an available storefront and says so',
+  !!(await visibleText(page, 'Purchase unavailable')));
 ok('paywall shows the saved deadline and what stays free', await freeCaptureDeadlineVisible(page));
 
 // ── Hidden-unlock defense: repeated VERSION taps must not grant Pro ──
