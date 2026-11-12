@@ -62,6 +62,18 @@ test('A later clause with its own completed credit is a credit ("is being revers
   assert.equal(both('AED 250.00 has been reversed to your card and was later reversed.'), 'none / none');
 });
 
+// bank-alert-semantics-matrix "re-credit for reversed purchase": the reason for the credit names the debit that was undone;
+// it is not this credit being taken back. A reversal of the credit itself still is.
+test('A reason phrase ("for reversed purchase") is not a take-back; reversing the credit itself is', () => {
+  assert.equal(both('AED 125.00 re-credited to card 1234 for reversed purchase.'), 'income 12500 / income 12500');
+  // #217 posted these as income on parseSms; a reversal of the credit itself must still refuse.
+  for (const body of [
+    'AED 125.00 re-credited to card 1234 for reversed purchase. This credit was reversed.',
+    'AED 125.00 re-credited to card 1234 and reversed.',
+    'AED 125.00 re-credited to card 1234 for reversed purchase in error.',
+  ]) assert.equal(both(body), 'none / none', body);
+});
+
 // Oracle v2.2 (CEO 73c34ef8, Q1 narrowed; Change Reviewer 4eee941b): a processed refund is settled when the instrument is
 // named by number or a balance/limit line follows, unless a later sentence says it is not there yet; a bare one is Review.
 // A non-refund "processed" alert (salary, bill payment) is not a credit clause and keeps its existing behaviour.
