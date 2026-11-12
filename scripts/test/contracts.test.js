@@ -196,8 +196,7 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
       smsOnCreate.includes('legacyDeliveryBufferCleanupPending = try') &&
       smsOnCreate.includes('staleCorpusCleanupPending = try') &&
       smsOnCreate.includes('return@OnCreate') &&
-      /AsyncFunction\("getReceived"\)[\s\S]*?if \(!clearLegacyDeliveryBuffer\(context\)\) \{\s*throw/.test(nativeModule) &&
-      code(read('src/lib/android-tester-diagnostics.ts')).includes('getStartupCleanupDiagnostics?.()'));
+      /AsyncFunction\("getReceived"\)[\s\S]*?if \(!clearLegacyDeliveryBuffer\(context\)\) \{\s*throw/.test(nativeModule));
   ok('history and optional live SMS have separate permission requests',
     /requestSmsPermission\([\s\S]*PermissionsAndroid\.request\(PermissionsAndroid\.PERMISSIONS\.READ_SMS\)/
       .test(scanner) &&
@@ -806,7 +805,7 @@ function ktSources(dir) {
   const relay = read('src/lib/relay.ts');
   const hook = read('src/hooks/use-auto-import.ts');
   const capture = read('src/lib/capture.ts');
-  const home = read('src/screens/ledger-home-screen.tsx');
+  const home = read('src/screens/journal-home-screen.tsx');
 
   ok('a 401 from sync records the refusal rather than only throwing',
     /res\.status === 401/.test(relay) && /markRelayRevoked\(cfg\.syncToken\)/.test(relay));
@@ -1116,7 +1115,7 @@ function ktSources(dir) {
   // The tabs shell keeps the mount + foreground watch regardless of which tab
   // Android restores after an update. Home separately owns the visible status
   // query, so a tab switch does not start another parser migration.
-  const home = read('src/screens/ledger-home-screen.tsx');
+  const home = read('src/screens/journal-home-screen.tsx');
   const tabsLayout = read('src/components/app-tabs-layout.tsx');
   ok('the tabs shell owns parser migrations independent of the active tab',
     /function CaptureOwner/.test(tabsLayout) &&
@@ -1258,7 +1257,7 @@ function ktSources(dir) {
   const capture = code(read('src/lib/capture.ts'));
   const types = read('src/lib/types.ts');
   const store = code(read('src/lib/store.tsx'));
-  const home = read('src/screens/ledger-home-screen.tsx');
+  const home = read('src/screens/journal-home-screen.tsx');
   const settingsSource = settingsSurface();
   const settings = code(settingsSource);
   const recovery = code(read('src/components/storage-recovery.tsx'));

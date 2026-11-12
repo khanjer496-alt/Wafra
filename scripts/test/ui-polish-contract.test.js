@@ -6,7 +6,7 @@ const ROOT = path.join(__dirname, '../..');
 const read = (relative) => fs.readFileSync(path.join(ROOT, relative), 'utf8');
 const code = (value) => value.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
 
-const home = read('src/screens/ledger-home-screen.tsx');
+const home = read('src/screens/journal-home-screen.tsx');
 assert.match(home, /projectDashboard\(\{/);
 assert.match(home, /netFils=\{dashboard\.hero\.netFils\}/);
 assert.match(home, /incomeFils=\{dashboard\.hero\.incomeFils\}/);
@@ -153,7 +153,7 @@ assert.match(inactiveAccountRows, /onLongPress=\{\(\) => setOptionsFor\(account\
 assert.match(interactionWallet, /accessibilityState=\{\{ expanded: showInactive \}\}/);
 assert.doesNotMatch(interactionWallet, /longPressInactive/);
 
-const task3Home = read('src/screens/ledger-home-screen.tsx');
+const task3Home = read('src/screens/journal-home-screen.tsx');
 assert.match(task3Home, /const homeHeader: ScreenHeaderProps = \{/);
 assert.match(task3Home, /<ScreenScaffold[\s\S]*?tabbed[\s\S]*?header=\{homeHeader\}/);
 assert.match(task3Home, /homeHeader[\s\S]*?searchMerchants[\s\S]*?settingsTitle/);

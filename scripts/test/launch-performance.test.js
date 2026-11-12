@@ -19,7 +19,7 @@ const {
 } = load(path.join(__dirname, '../../src/lib/launch-benchmark.ts'), {}, { Error });
 
 const rootSource = fs.readFileSync(path.join(__dirname, '../../src/components/app-root-layout.tsx'), 'utf8');
-const homeSource = fs.readFileSync(path.join(__dirname, '../../src/screens/ledger-home-screen.tsx'), 'utf8');
+const homeSource = fs.readFileSync(path.join(__dirname, '../../src/screens/journal-home-screen.tsx'), 'utf8');
 const lockSource = fs.readFileSync(path.join(__dirname, '../../src/components/lock-gate.tsx'), 'utf8');
 // The internal metrics export moved with the other exports to Data and help.
 const settingsSource = fs.readFileSync(path.join(__dirname, '../../src/app/settings-data.tsx'), 'utf8');

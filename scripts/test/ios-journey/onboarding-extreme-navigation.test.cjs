@@ -215,8 +215,6 @@ async function gate(options = {}) {
   dependencies['@/components/ui/text-field'] = { TextField: 'TextField' };
   dependencies['@/components/country-picker-sheet'] =
     load(path.join(root, 'src/components/country-picker-sheet.tsx'), dependencies);
-  dependencies['@/components/onboarding/country-confirm'] =
-    load(path.join(root, 'src/components/onboarding/country-confirm.tsx'), dependencies);
   // The iPhone statement step's decorative scene renders from real source too.
   dependencies['./alive-scenes'] = dependencies['@/components/onboarding/alive-scenes'];
   dependencies['@/components/onboarding/statement-scene'] =

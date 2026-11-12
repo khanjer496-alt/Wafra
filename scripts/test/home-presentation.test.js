@@ -22,11 +22,11 @@ function productionFunction(relativePath, name, globals = {}) {
   return exports[name];
 }
 
-const groupPayments = productionFunction('src/screens/ledger-home-screen.tsx', 'homePaymentGroups');
+const groupPayments = productionFunction('src/screens/journal-home-screen.tsx', 'homePaymentGroups');
 const chargePresentation = productionFunction('src/app/(tabs)/bills.tsx', 'recurringChargePresentation');
 const routes = [];
 const jsx = (type, props) => ({ type, props });
-const Hero = productionFunction('src/screens/ledger-home-screen.tsx', 'Hero', {
+const Hero = productionFunction('src/screens/journal-home-screen.tsx', 'Hero', {
   require: (name) => {
     assert.equal(name, 'react/jsx-runtime');
     return { jsx, jsxs: jsx };

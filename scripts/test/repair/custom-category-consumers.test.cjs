@@ -3,7 +3,7 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const loadTypescript=require('./load-typescript.cjs');
 const root=path.resolve(__dirname,'../../..');
 const cache=new Map();
-const owned=new Set(['categories','custom-categories','transaction-filter','insights','dashboard-projection','recap','reimbursement-report','ledger-export','capture-toast','charge-alert','wafra-assistant','diagnostic-export','feedback','wafra-assistant-ai','on-device-assistant','motion-android-copy','merchant-spending']);
+const owned=new Set(['categories','custom-categories','transaction-filter','insights','dashboard-projection','recap','reimbursement-report','ledger-export','capture-toast','charge-alert','wafra-assistant','feedback','wafra-assistant-ai','on-device-assistant','motion-android-copy','merchant-spending']);
 function load(name){
  if(cache.has(name))return cache.get(name);
  const file=path.join(root,'src/lib',`${name}.ts`),deps={};

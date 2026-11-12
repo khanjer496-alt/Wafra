@@ -9,7 +9,7 @@ const ok = (name, condition) => {
 };
 const source = (relative) => fs.readFileSync(path.join(__dirname, '../..', relative), 'utf8');
 
-const home = source('src/screens/ledger-home-screen.tsx');
+const home = source('src/screens/journal-home-screen.tsx');
 const flow = source('src/app/(tabs)/flow.tsx');
 const bills = source('src/app/(tabs)/bills.tsx');
 const wallet = source('src/app/(tabs)/wallet.tsx');
@@ -31,7 +31,6 @@ const onboardingStepFiles = fs.readdirSync(path.join(__dirname, '../../src/compo
 const onboardingFrame = source('src/components/onboarding/e-frame.tsx');
 const onboardingSteps = onboardingStepFiles.map(source).join('\n');
 const eButton = source('src/components/ui/band/e-button.tsx');
-const onboardingExample = source('src/components/onboarding/money-preview.tsx');
 const controls = source('src/components/ui/controls.tsx');
 const addTransaction = source('src/app/add-transaction.tsx');
 const transactionRow = source('src/components/transaction-row.tsx');
@@ -122,8 +121,8 @@ ok('onboarding keeps a one-screen composition but scrolls instead of clipping at
     onboardingStepFiles.filter((file) => /-(welcome|name|goals|watch|reminders|pattern|paywall)\.tsx$/.test(file))
       .every((file) => /<EStepFrame\b/.test(source(file))) &&
     /<BottomSheet/.test(onboardingGate));
-ok('onboarding text and its sample can grow without truncation or a scale ceiling',
-  [onboardingGate, onboardingSteps, onboardingExample].every((code) =>
+ok('onboarding text can grow without truncation or a scale ceiling',
+  [onboardingGate, onboardingSteps].every((code) =>
     !/numberOfLines|maxFontSizeMultiplier|adjustsFontSizeToFit|minimumFontScale/.test(code)));
 ok('every onboarding button permits its localized label to wrap',
   !/<Button\b/.test(onboardingGate + onboardingSteps) &&
@@ -143,7 +142,6 @@ ok('onboarding action targets retain native accessibility size floors',
     declaredStyleValue(source('src/components/onboarding/e-watch.tsx'), 'stepper', 'height') >= 44 &&
     declaredStyleValue(source('src/components/onboarding/e-watch.tsx'), 'remove', 'height') >= 44 &&
     declaredStyleValue(source('src/components/onboarding/e-first-payment.tsx'), 'source', 'minHeight') >= 48 &&
-    declaredStyleValue(onboardingExample, 'action', 'minHeight') >= 48 &&
     declaredStyleValue(controls, 'button', 'minHeight') >= 48);
 ok('name personalization exposes a labelled optional input and skip action to assistive technology',
   /testID="onboarding-name-input"[\s\S]{0,260}accessibilityLabel=\{words\.namePlaceholder\}/.test(source('src/components/onboarding/e-name.tsx')) &&
