@@ -11,7 +11,7 @@ import { LockPattern } from '@/components/settings-band/lock-pattern';
 import { Fonts, ScreenPadding, Spacing } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { APP_LOCK_AUTH_OPTIONS, deviceLockLevel, unlockOutcome } from '@/lib/app-lock';
+import { APP_LOCK_AUTH_OPTIONS, appLockSession, deviceLockLevel, shouldRelockAfterAbsence, unlockOutcome } from '@/lib/app-lock';
 import { useStore } from '@/lib/store';
 import { t } from '@/lib/i18n';
 import { settingsCopy } from '@/lib/settings-copy';
@@ -60,7 +60,19 @@ export function LockGate({ children }: { children: React.ReactNode }) {
   const copy = settingsCopy(state.language);
   // Asked only while App Lock is on; the lock screen is the only reader here.
   const biometricKind = useBiometricKind(state.appLock);
-  const [unlocked, setUnlocked] = useState(false);
+  // Started from the process-wide session, not `false`: changing the language
+  // remounts this gate (see app-root-layout.tsx) and must not ask for the
+  // biometric again. Every change below is written back through markUnlocked.
+  // The long-absence rule is applied HERE too, not only in the effect below: an effect runs
+  // after the first paint, so a remount after a long absence would show one frame of content
+  // before locking. Fail closed from the very first commit.
+  const [unlocked, setUnlocked] = useState(() => appLockSession.isUnlocked() &&
+    !(AppState.currentState === 'active' &&
+      shouldRelockAfterAbsence(appLockSession.leftAt(), Date.now(), RELOCK_GRACE_MS)));
+  const markUnlocked = useCallback((next: boolean) => {
+    appLockSession.setUnlocked(next);
+    setUnlocked(next);
+  }, []);
   const [inactive, setInactive] = useState(AppState.currentState !== 'active');
   const [attempted, setAttempted] = useState(false);
   const [biometric, setBiometric] = useState<BiometricState>('prompting');
@@ -113,14 +125,14 @@ export function LockGate({ children }: { children: React.ReactNode }) {
         authenticatingRef.current = false;
       }
       const outcome = unlockOutcome(result);
-      if (outcome === 'unlocked') setUnlocked(true);
+      if (outcome === 'unlocked') markUnlocked(true);
       else setBiometric(outcome);
     } catch {
       setBiometric('failed');
     } finally {
       setAttempted(true);
     }
-  }, []);
+  }, [markUnlocked]);
 
   useEffect(() => {
     if (lockRequired && !attempted) tryUnlock();
@@ -138,33 +150,43 @@ export function LockGate({ children }: { children: React.ReactNode }) {
    */
   useEffect(() => {
     if (!state.appLock || Platform.OS === 'web') return;
-    let leftAt = 0;
+    // The time the app left the foreground lives in the session, not in this effect: a
+    // remount between 'inactive' and 'active' (the system language changing while the
+    // app was away) must still see a long absence and re-lock.
+    // ...including when this gate registers AFTER the 'active' event already fired: check once now.
+    if (AppState.currentState === 'active' &&
+        shouldRelockAfterAbsence(appLockSession.leftAt(), Date.now(), RELOCK_GRACE_MS)) {
+      appLockSession.setLeftAt(0);
+      markUnlocked(false);
+      setAttempted(false);
+      setBiometric('prompting');
+    }
     const sub = AppState.addEventListener('change', (next) => {
       if (authenticatingRef.current) return;
       if (next === 'background' || next === 'inactive') {
-        leftAt = leftAt || Date.now();
+        appLockSession.setLeftAt(appLockSession.leftAt() || Date.now());
         return;
       }
       // Back from the phone's Settings with the "no screen lock" sheet up:
       // the user may have just set a passcode, so ask again instead of
       // leaving them on a sheet with no unlock button.
       if (next === 'active' && unavailableRef.current) {
-        leftAt = 0;
+        appLockSession.setLeftAt(0);
         setAttempted(false);
         return;
       }
-      if (next === 'active' && leftAt) {
-        const away = Date.now() - leftAt;
-        leftAt = 0;
-        if (away > RELOCK_GRACE_MS) {
-          setUnlocked(false);
+      if (next === 'active' && appLockSession.leftAt()) {
+        const relock = shouldRelockAfterAbsence(appLockSession.leftAt(), Date.now(), RELOCK_GRACE_MS);
+        appLockSession.setLeftAt(0);
+        if (relock) {
+          markUnlocked(false);
           setAttempted(false);
           setBiometric('prompting');
         }
       }
     });
     return () => sub.remove();
-  }, [state.appLock]);
+  }, [state.appLock, markUnlocked]);
 
   /*
     ONE tree shape whether locked or not. This used to return `children`
