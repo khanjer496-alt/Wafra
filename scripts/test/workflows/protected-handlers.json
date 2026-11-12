@@ -114,13 +114,14 @@
     {
       "file": "src/app/import-sms.tsx",
       "name": "applyPlan",
-      "sha256": "3bc731d9034e3211e543f3b25a854aa9f334b1f690c9a207a3d141424ac763e3",
-      "reviewedChange": "2026-09-24: bank Messages that nearly match an already-recorded Apple Pay (Wallet) purchase are withheld by the planner and staged as source-bound possible-duplicate Review items (stageWalletNearMatches) before the scan commits, the history session is discarded, or the source is acknowledged; a full Review lane posts them instead of dropping them. Covered by repair/wallet-near-match*.test.cjs."
+      "sha256": "070b5d6829b6555ecedffb8ddaba75b5d986b4a1102f76c9a3dc6ac6466ba156",
+      "reviewedChange": "2026-09-24: bank Messages that nearly match an already-recorded Apple Pay (Wallet) purchase are withheld by the planner and staged as source-bound possible-duplicate Review items (stageWalletNearMatches) before the scan commits, the history session is discarded, or the source is acknowledged; a full Review lane posts them instead of dropping them. Covered by repair/wallet-near-match*.test.cjs. 2026-11-12 (PR181 strict retention): the inbox apply re-asserts pendingInboxResult.assertReviewRetention() before and after near-match staging; near-match staging uses 'hold-source' (a deferral becomes a same-batch fallback posting, never a loss); every catch shows ReviewImportHold first and returns before import, commit or acknowledgement; parserRereadComplete only for non-History imports; the History discard awaits requireHistoryRetentionBarrier before discardHistorySession. Security Reviewer OK, 0 findings: ed43eb0b. Covered by repair/manual-review-retention.test.cjs and repair/review-admission-callers.test.cjs."
     },
     {
       "file": "src/app/import-sms.tsx",
       "name": "retrySecureSave",
-      "sha256": "a4f4b761384902cfa67df41c2b13db50a2e7a361ba1e61220cb9023d4a144bf7"
+      "sha256": "9d237631d0592cd1792d7258f839b7aac0e42ec27739e608644a44f68670db24",
+      "reviewedChange": "2026-11-12 (PR181 strict retention): the History discard awaits requireHistoryRetentionBarrier before discardHistorySession, and the scan-commit catch shows ReviewImportHold first and returns before acknowledgement. Security Reviewer OK, 0 findings: ed43eb0b."
     },
     {
       "file": "src/app/ios-setup.tsx",
