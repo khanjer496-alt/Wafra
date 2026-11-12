@@ -24,7 +24,17 @@ const BANNED = [
   /الفترة المجانية|فترة مجانية/,
   /التجربة المجانية|تجربة مجانية/,
   /الفترة التجريبية|فترة تجريبية|فترة التجربة|انتهت التجربة/,
+  // Pronoun-suffixed forms ("your free trial", "your free period"). Requiring
+  // مجاني after the noun keeps "خصّص تجربتك" ("make it yours") allowed.
+  /تجرب(?:ة|ت)\S*\s+(?:ال)?مجاني/,
+  /فتر(?:ة|ت)\S*\s+(?:ال)?مجاني/,
 ];
+
+// Published legal docs follow the same rule for the free-period phrases. A bare
+// "trial" stays allowed there because the Terms must say the free capture "is
+// not a store trial or introductory offer".
+const DOC_BANNED = BANNED.filter((re) => !/trial\(\?:s\|/.test(re.source));
+const PUBLISHED_DOCS = ['docs/terms-of-use.md', 'docs/privacy-policy.md'];
 
 // Attributes and call sites whose strings never reach the screen.
 const NON_UI_ATTRIBUTES = new Set(['testID', 'nativeID', 'key', 'id']);
@@ -96,13 +106,25 @@ test('no user-facing copy calls the first 3 days a trial or a free period (EN an
   assert.deepEqual(offenders(strings), []);
 });
 
+test('the published Terms and Privacy Policy never call the first 3 days a free trial or free period', () => {
+  const hits = [];
+  for (const doc of PUBLISHED_DOCS) {
+    fs.readFileSync(path.join(root, doc), 'utf8').split('\n').forEach((line, i) => {
+      if (DOC_BANNED.some((re) => re.test(line)) || /\btrial[- ]day\b/i.test(line)) hits.push(`${doc}:${i + 1}: ${line.trim().slice(0, 120)}`);
+    });
+  }
+  assert.equal(DOC_BANNED.length, BANNED.length - 1, 'only the bare "trial" rule is relaxed for docs');
+  assert.deepEqual(hits, []);
+});
+
 test('the scanner catches the wording it bans, and ignores non-UI strings', () => {
   const samples = [
     'Start the 3-day free period', 'Your free trial ends soon', 'Trial ended', 'Wafra Pro · trial',
     'ابدأ الفترة المجانية', 'انتهت التجربة', 'وفرة برو · فترة تجريبية', 'التجربة المجانية مفعّلة',
+    'انتهت تجربتك المجانية في التطبيق', 'بقيت فترتك المجانية يومين',
   ];
   for (const value of samples) assert.equal(offenders([{ value, where: 'sample' }]).length, 1, value);
-  for (const value of ['Free automatic capture', 'الالتقاط التلقائي المجاني', 'Load demo data', 'تحميل بيانات تجريبية', 'عرض تجربة البداية']) {
+  for (const value of ['Free automatic capture', 'الالتقاط التلقائي المجاني', 'Load demo data', 'تحميل بيانات تجريبية', 'عرض تجربة البداية', 'خصّص تجربتك']) {
     assert.equal(offenders([{ value, where: 'sample' }]).length, 0, value);
   }
   const tmp = path.join(fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'wafra-trial-')), 'sample.tsx');
