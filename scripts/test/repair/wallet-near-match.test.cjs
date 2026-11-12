@@ -11,7 +11,7 @@ const load = require('./load-typescript.cjs');
 const root = path.resolve(__dirname, '../../..');
 const build = process.env.WAFRA_TEST_BUILD_DIR || path.join(root, 'scripts/test/build');
 const cache = new Map();
-const subjects = new Set(['import-plan', 'dedupe', 'wallet-near-match', 'parsed-review-event', 'review-promotion']);
+const subjects = new Set(['import-plan', 'dedupe', 'wallet-near-match', 'parsed-review-event', 'review-promotion', 'alert-review-tray']);
 function current(name) {
   if (cache.has(name)) return cache.get(name);
   if (!subjects.has(name)) return require(path.join(build, `${name}.js`));
@@ -27,7 +27,8 @@ function current(name) {
 const { buildImportPlan } = current('import-plan');
 const { settleWalletNearMatches, walletNearMatchesRetained, stageWalletNearMatches } = current('wallet-near-match');
 const { planReviewPromotion, walletDuplicateBinding } = current('review-promotion');
-const { admitPreparedReviewAlert, emptyAlertReviewTray, pruneAlertReviewTray, resolveReviewAlert, REVIEW_ALERT_TTL_MS } = current('alert-review-tray');
+const { admitPreparedReviewAlert, emptyAlertReviewTray, pruneAlertReviewTray, resolveReviewAlert, REVIEW_ALERT_TTL_MS,
+  recentlyLostReviewCount, recordPossibleDuplicatesPosted } = current('alert-review-tray');
 const { canonicalCaptureSourceKey } = current('capture-source-identity');
 const { reconcileCaptureDuplicates } = current('dedupe');
 const { applyHealPatch } = current('heal');
@@ -133,7 +134,9 @@ test('an SMS too old to stay reviewable keeps the old visible posting instead of
   assert.equal(result.txCount, 1);
 });
 
-test('capacity: a full Review lane posts (or defers) instead of evicting or dropping the SMS', () => {
+// The near-match lane is its own lane of fifty (CEO d81a0462): only a full
+// near-match lane takes this residual path; a full Message lane cannot.
+test('capacity: a full possible-duplicate lane posts (or defers) instead of evicting or dropping the SMS', () => {
   const result = plan([sms()]);
   const empty = settleWalletNearMatches(result, emptyAlertReviewTray(), at + 10 * MIN);
   assert.equal(empty.reviews.length, 1);
@@ -143,7 +146,7 @@ test('capacity: a full Review lane posts (or defers) instead of evicting or drop
   const base = result.walletNearMatches[0].review;
   for (let i = 0; i < 50; i += 1) {
     const suffix = String(i).padStart(4, '0');
-    tray = admitPreparedReviewAlert(tray, { ...base, attentionReason: undefined, id: 'fill_review_id_' + suffix,
+    tray = admitPreparedReviewAlert(tray, { ...base, id: 'fill_review_id_' + suffix,
       sourceKey: 'fill_review_source_' + suffix, observedAt: at + 6 * MIN + i,
       expiresAt: at + 6 * MIN + i + REVIEW_ALERT_TTL_MS }, at + 10 * MIN).state;
   }
@@ -433,4 +436,86 @@ test('an expired but unpruned review still counts as the user\'s open decision',
   const late = new Date(at + REVIEW_ALERT_TTL_MS + 5 * 86_400_000);
   const result = plan([row], state([wallet()], { reviewTray: staged }), late);
   assert.equal(result.txCount, 0, 'no silent second copy before the tray is pruned');
+});
+
+// CEO d81a0462: possible Apple Pay duplicates have their own bounded lane of 50
+// (the foreign-currency pattern), so a full Message lane can never defer or
+// double-post them. Only a full near-match lane takes the residual path: defer
+// where the source is held (iOS), otherwise post WITH a counted, visible record.
+const moneyFiller = (base, i) => {
+  const suffix = String(i).padStart(4, '0');
+  return { ...base, attentionReason: undefined, id: 'fill_review_id_' + suffix, sourceKey: 'fill_review_source_' + suffix,
+    observedAt: at + 6 * MIN + i, expiresAt: at + 6 * MIN + i + REVIEW_ALERT_TTL_MS };
+};
+const nearFiller = (base, i) => {
+  const suffix = String(i).padStart(4, '0');
+  return { ...base, id: 'near_review_id_' + suffix, sourceKey: 'near_review_source_' + suffix,
+    observedAt: at + 6 * MIN + i, expiresAt: at + 6 * MIN + i + REVIEW_ALERT_TTL_MS };
+};
+const fill = (make, base) => {
+  let tray = emptyAlertReviewTray();
+  for (let i = 0; i < 50; i += 1) tray = admitPreparedReviewAlert(tray, make(base, i), at + 10 * MIN, 'hold-source').state;
+  return tray;
+};
+
+test('a full Message lane never defers or double-posts a near-match', async () => {
+  const result = plan([sms()]);
+  const base = result.walletNearMatches[0].review;
+  const tray = fill(moneyFiller, base);
+  assert.equal(tray.pending.length, 50, 'the Message lane is full of money reviews');
+  for (const mode of ['post', 'defer']) {
+    const settled = settleWalletNearMatches(result, tray, at + 10 * MIN, mode);
+    assert.equal(settled.reviews.length, 1, `${mode}: staged as a Review item`);
+    assert.equal(settled.deferred.length, 0, `${mode}: never deferred by the Message lane`);
+    assert.equal(settled.plan.batch.transactions.length, 0, `${mode}: never posted next to the Apple Pay row`);
+  }
+  const admitted = admitPreparedReviewAlert(tray, base, at + 10 * MIN, 'hold-source');
+  assert.equal(admitted.outcome, 'admitted');
+  assert.equal(admitted.state.pending.length, 51);
+  assert.ok(tray.pending.every(item => admitted.state.pending.some(kept => kept.id === item.id)), 'no kept money evicted');
+  let live = tray;
+  const staged = stageWalletNearMatches(result, () => live, items => {
+    for (const item of items) live = admitPreparedReviewAlert(live, item, at + 10 * MIN, 'hold-source').state;
+    return { admitted: items.length, durable: Promise.resolve() };
+  });
+  assert.equal(staged.plan.batch.transactions.length, 0);
+  assert.equal(staged.admitted, 1);
+  await staged.settle();
+});
+
+test('the 51st near-match takes the residual path: posted with a counted record, or deferred where the source is held', () => {
+  const result = plan([sms()]);
+  const base = result.walletNearMatches[0].review;
+  const tray = fill(nearFiller, base);
+  assert.equal(tray.pending.length, 50, 'the near-match lane is full');
+  const posted = settleWalletNearMatches(result, tray, at + 10 * MIN, 'post');
+  assert.equal(posted.reviews.length, 0);
+  assert.equal(posted.plan.batch.transactions.length, 1, 'residual: the row posts');
+  const key = canonicalCaptureSourceKey(base.sourceKey, base.observedAt);
+  assert.deepEqual([...posted.plan.batch.possibleDuplicatesPosted], [key], 'and carries its Review evidence for the count');
+  const deferred = settleWalletNearMatches(result, tray, at + 10 * MIN, 'defer');
+  assert.equal(deferred.deferred.length, 1, 'iOS: the source stays held');
+  assert.equal(deferred.plan.batch.transactions.length, 0);
+  assert.equal(deferred.plan.batch.possibleDuplicatesPosted, undefined);
+  const counted = recordPossibleDuplicatesPosted(tray, [key, key], at + 11 * MIN);
+  assert.equal(recentlyLostReviewCount(counted, at + 11 * MIN, 'duplicate-posted'), 1, 'counted once, visibly');
+  assert.equal(recentlyLostReviewCount(recordPossibleDuplicatesPosted(counted, [key], at + 12 * MIN), at + 12 * MIN, 'duplicate-posted'), 1);
+  assert.equal(counted.pending.length, 50, 'the record never displaces a kept review');
+});
+
+test('the importBatch reducer records the posted possible duplicates in the same write', () => {
+  const store = storeText;
+  const at = store.indexOf("case 'importBatch': {");
+  const reducer = store.slice(at, at + 600);
+  assert.match(reducer, /recordPossibleDuplicatesPosted\(/);
+  assert.match(store, /possibleDuplicatesPosted/);
+});
+
+test('the Review screen counts posted possible duplicates beside the other overflow counts, in both languages', () => {
+  const screen = fs.readFileSync(path.join(root, 'src/app/review-alerts.tsx'), 'utf8');
+  const i18n = fs.readFileSync(path.join(root, 'src/lib/i18n.ts'), 'utf8');
+  assert.match(screen, /recentlyLostReviewCount\(state\.reviewTray, now, 'duplicate-posted'\)/);
+  assert.match(screen, /testID="review-alerts-duplicate-posted"[\s\S]{0,160}reviewAlertsDuplicatePostedCount/);
+  const copy = /reviewAlertsDuplicatePostedCount: \{ en: '([^']+)', ar: '([^']+)' \}/.exec(i18n);
+  assert.ok(copy && copy[1].includes('{count}') && copy[2].includes('{count}') && /[؀-ۿ]/.test(copy[2]));
 });

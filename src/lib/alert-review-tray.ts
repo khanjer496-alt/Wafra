@@ -148,14 +148,21 @@ export const isUniversalReviewAlert = (item: ReviewEntry): item is UniversalRevi
   item.kind === 'universal';
 export const isCurrencyConflictReview = (item: ReviewEntry): boolean =>
   isUniversalReviewAlert(item) && item.currencyConflict === true;
+/** A bank alert withheld as a possible duplicate of an already-posted Apple Pay row. */
+export const isWalletDuplicateReview = (item: ReviewEntry): boolean =>
+  (item as { attentionReason?: unknown }).attentionReason === 'possible-apple-pay-duplicate';
 /**
- * Three independent lanes of up to fifty: foreign-currency money reviews,
- * iOS notification/Wallet reviews, and the Message/relay/history lane.
+ * Four independent lanes of up to fifty: foreign-currency money reviews,
+ * iOS notification/Wallet reviews, possible Apple Pay duplicates, and the
+ * Message/relay/history lane. Possible duplicates have their own lane (CEO
+ * d81a0462) so a Message lane full of money can never defer them into a
+ * second posting next to the Apple Pay row.
  */
-type ReviewLane = 'currency' | 'protected' | 'legacy';
+type ReviewLane = 'currency' | 'protected' | 'wallet-duplicate' | 'legacy';
 const reviewLane = (item: ReviewEntry): ReviewLane =>
   isCurrencyConflictReview(item) ? 'currency'
-    : isProtectedIosCaptureReview(item) ? 'protected' : 'legacy';
+    : isProtectedIosCaptureReview(item) ? 'protected'
+      : isWalletDuplicateReview(item) ? 'wallet-duplicate' : 'legacy';
 
 export interface UniversalReviewAdmissionInput {
   id: string;
@@ -208,13 +215,15 @@ export interface ReviewTombstone {
    * `expired` records an unresolved review that aged out before the user saw
    * it. `evicted` records a possible money movement the full Message lane
    * could not keep; `currency-evicted` records the same for the bounded
-   * foreign-currency lane. All three are counted on the Review screen.
+   * foreign-currency lane. `duplicate-posted` records a possible Apple Pay
+   * duplicate that was posted because even its own lane was full. All of
+   * these are counted on the Review screen.
    */
-  outcome: 'added' | 'dismissed' | 'duplicate' | 'expired' | 'evicted' | 'currency-evicted';
+  outcome: 'added' | 'dismissed' | 'duplicate' | 'expired' | 'evicted' | 'currency-evicted' | 'duplicate-posted';
 }
 
 const TOMBSTONE_OUTCOMES: readonly ReviewTombstone['outcome'][] = [
-  'added', 'dismissed', 'duplicate', 'expired', 'evicted', 'currency-evicted',
+  'added', 'dismissed', 'duplicate', 'expired', 'evicted', 'currency-evicted', 'duplicate-posted',
 ];
 /** Outcomes a user or promotion decision may record; loss outcomes are system-only. */
 export type ReviewResolutionOutcome = Extract<ReviewTombstone['outcome'], 'added' | 'dismissed' | 'duplicate'>;
@@ -506,16 +515,22 @@ export const pruneAlertReviewTray = (
   const currency = fresh.filter(item => reviewLane(item) === 'currency');
   const currencyLost = currency.slice(0, Math.max(0, currency.length - REVIEW_ALERT_CAP));
   const currencyKept = currency.slice(currencyLost.length);
+  // Possible Apple Pay duplicates: the newest fifty in their own lane; each
+  // older one (only from older saved state) leaves a counted tombstone.
+  const walletDuplicates = fresh.filter(item => reviewLane(item) === 'wallet-duplicate');
+  const walletDuplicatesLost = walletDuplicates.slice(0, Math.max(0, walletDuplicates.length - REVIEW_ALERT_CAP));
+  const walletDuplicatesKept = walletDuplicates.slice(walletDuplicatesLost.length);
   const legacy = trimLegacyLane(fresh.filter(item => reviewLane(item) === 'legacy'));
   const known = new Set([...(state.tombstones ?? []), ...expired]
     .map((item) => canonicalUniversalSourceKey(item.sourceKey)));
   const evicted = [
     ...evictionTombstones(known, legacy.lostMoney, 'evicted', now),
     ...evictionTombstones(known, currencyLost, 'currency-evicted', now),
+    ...evictionTombstones(known, walletDuplicatesLost, 'evicted', now),
   ];
   return {
   schemaVersion: 1,
-  pending: [...notifications, ...currencyKept, ...legacy.kept].sort((a, b) => a.observedAt - b.observedAt),
+  pending: [...notifications, ...currencyKept, ...walletDuplicatesKept, ...legacy.kept].sort((a, b) => a.observedAt - b.observedAt),
   tombstones: capTombstones([...(state.tombstones ?? []), ...expired, ...evicted]
     .filter((item) => item.expiresAt > now)),
   templateRules: [...state.templateRules]
@@ -731,7 +746,7 @@ export const reviewExpiresInDays = (
 export const recentlyLostReviewCount = (
   tray: Pick<AlertReviewTrayState, 'tombstones'> | null | undefined,
   now: number,
-  outcome: Extract<ReviewTombstone['outcome'], 'expired' | 'evicted' | 'currency-evicted'>,
+  outcome: Extract<ReviewTombstone['outcome'], 'expired' | 'evicted' | 'currency-evicted' | 'duplicate-posted'>,
 ): number => (tray?.tombstones ?? []).filter((item) => item.outcome === outcome &&
   item.resolvedAt <= now && now - item.resolvedAt < REVIEW_ALERT_TTL_MS).length;
 
@@ -740,6 +755,31 @@ export const recentlyExpiredReviewCount = (
   tray: Pick<AlertReviewTrayState, 'tombstones'> | null | undefined,
   now: number,
 ): number => recentlyLostReviewCount(tray, now, 'expired');
+
+/**
+ * Residual of the possible-duplicate lane (CEO d81a0462): when even that lane
+ * is full and the caller cannot hold its source, the bank row is posted. Keep a
+ * source-free, counted record of each such posting (once per source) so the
+ * Review screen shows how many possible duplicates were posted. Never silent.
+ */
+export const recordPossibleDuplicatesPosted = (
+  tray: AlertReviewTrayState,
+  sourceKeys: readonly string[],
+  now: number,
+): AlertReviewTrayState => {
+  const expiresAt = now + REVIEW_TOMBSTONE_TTL_MS;
+  if (sourceKeys.length === 0 || !validTimestamp(now) || !validTimestamp(expiresAt)) return tray;
+  const known = new Set(tray.tombstones.filter(item => item.outcome === 'duplicate-posted')
+    .map(item => canonicalUniversalSourceKey(item.sourceKey)));
+  const added: ReviewTombstone[] = [];
+  for (const raw of sourceKeys) {
+    const sourceKey = canonicalUniversalSourceKey(raw);
+    if (!sourceKey || known.has(sourceKey)) continue;
+    known.add(sourceKey);
+    added.push({ sourceKey, resolvedAt: now, expiresAt, outcome: 'duplicate-posted' });
+  }
+  return added.length === 0 ? tray : { ...tray, tombstones: capTombstones([...tray.tombstones, ...added]) };
+};
 
 export interface ReviewTrayCapacity {
   /** iOS notification + Apple Pay lane; refusing admission keeps the native record. */

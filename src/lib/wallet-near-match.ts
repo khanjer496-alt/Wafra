@@ -49,9 +49,13 @@ function withFallbackPostings(plan: ImportPlan, fallback: readonly WalletNearMat
     }
     for (const [key, ref] of Object.entries(facts.newHints ?? {})) newHints[key] ??= ref;
   }
+  // Each posted possible duplicate keeps its Review evidence: a counted,
+  // source-free record written with this same batch (recordPossibleDuplicatesPosted).
+  const possibleDuplicatesPosted = [...(plan.batch.possibleDuplicatesPosted ?? []),
+    ...fallback.map((match) => canonicalUniversalSourceKey(match.review.sourceKey, match.review.observedAt))];
   return {
     ...plan,
-    batch: { ...batch, snapshots, bankNames, cardTypes, newHints },
+    batch: { ...batch, snapshots, bankNames, cardTypes, newHints, possibleDuplicatesPosted },
     txCount: plan.txCount + fallback.length,
   };
 }
