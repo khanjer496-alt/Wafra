@@ -191,6 +191,7 @@ test('Android freezes inactive tab rendering while capture remains outside the n
     '@/hooks/use-auto-import': { useAutoImport: (...args) => calls.push(['auto', ...args]) },
     '@/hooks/use-history-import': { useHistoryImport: () => calls.push(['history']) },
     '@/hooks/use-shared-alert-formats': { useSharedAlertFormats: () => calls.push(['shared-formats']) },
+    '@/hooks/use-widget-snapshot-sync': { useWidgetSnapshotSync: () => calls.push(['widgets']) },
   }).default;
   const tree = Component();
   // The navigator now sits inside FreezeWhenCovered (covered-screen-freeze.test.cjs pins that);
@@ -203,7 +204,7 @@ test('Android freezes inactive tab rendering while capture remains outside the n
   assert.equal(navigator.props.detachInactiveScreens, undefined);
   assert.equal(navigator.props.children.length, 4);
   owner.type();
-  assert.deepEqual(calls, [['history'], ['auto', true, false], ['shared-formats']], 'capture must not be inside the frozen tab');
+  assert.deepEqual(calls, [['history'], ['auto', true, false], ['shared-formats'], ['widgets']], 'capture and widgets must not be inside the frozen tab');
   platform = 'ios';
   assert.notEqual(Component().props.children[1].props.children.props.screenOptions.freezeOnBlur, true);
   platform = 'web';

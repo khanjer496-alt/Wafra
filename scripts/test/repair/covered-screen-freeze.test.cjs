@@ -120,6 +120,7 @@ function tabsLayout(platform, focused) {
     '@/hooks/use-auto-import': { useAutoImport: () => {} },
     '@/hooks/use-history-import': { useHistoryImport: () => {} },
     '@/hooks/use-shared-alert-formats': { useSharedAlertFormats: () => {} },
+    '@/hooks/use-widget-snapshot-sync': { useWidgetSnapshotSync: () => {} },
     '@/components/freeze-when-covered': freeze,
     '@/lib/covered-screen-freeze': policy(),
   }).default;
@@ -152,6 +153,7 @@ test('capture and History hooks stay live while covered: they are not under any 
   assert.match(hosts, /useHistoryImport\(\)/);
   assert.match(hosts, /useAutoImport\(true, false\)/);
   assert.match(hosts, /useSharedAlertFormats\(\)/);
+  assert.match(hosts, /useWidgetSnapshotSync\(\)/, 'the widget refresh lives with capture, outside the freeze');
   // The root stack must not freeze the (tabs) route either, or the host would freeze with it.
   const rootLayout = read('src/components/app-root-layout.tsx');
   assert.match(rootLayout, /<Stack\.Screen\s+name="\(tabs\)"\s+options=\{\{[^}]*freezeOnBlur:\s*false/);
@@ -180,7 +182,7 @@ test('capture keeps rendering while covered (Settings or Erase on top); the froz
   // Render-level proof with real React: CaptureOwner and the frozen <Tabs> are siblings, so a
   // store change that re-renders the shell runs the capture hooks and none of the tab content.
   // Effects are not executed by the server renderer; the next assertion covers the effect owner.
-  const calls = { history: 0, auto: 0, shared: 0, tabs: 0 };
+  const calls = { history: 0, auto: 0, shared: 0, widgets: 0, tabs: 0 };
   const Tabs = Object.assign(() => { calls.tabs += 1; return null; }, { Screen: () => null });
   const freeze = freezeModule();
   const p = policy();
@@ -193,6 +195,7 @@ test('capture keeps rendering while covered (Settings or Erase on top); the froz
     '@/hooks/use-auto-import': { useAutoImport: () => { calls.auto += 1; } },
     '@/hooks/use-history-import': { useHistoryImport: () => { calls.history += 1; } },
     '@/hooks/use-shared-alert-formats': { useSharedAlertFormats: () => { calls.shared += 1; } },
+    '@/hooks/use-widget-snapshot-sync': { useWidgetSnapshotSync: () => { calls.widgets += 1; } },
     '@/components/freeze-when-covered': {
       // Already past the push delay: render the frozen state directly.
       FreezeWhenCovered: ({ children }) => React.createElement(React.Suspense, { fallback: null },
@@ -202,7 +205,7 @@ test('capture keeps rendering while covered (Settings or Erase on top); the froz
   }).default;
   for (let storeChange = 1; storeChange <= 5; storeChange += 1) {
     renderToStaticMarkup(React.createElement(Layout));
-    assert.deepEqual(calls, { history: storeChange, auto: storeChange, shared: storeChange, tabs: 0 });
+    assert.deepEqual(calls, { history: storeChange, auto: storeChange, shared: storeChange, widgets: storeChange, tabs: 0 });
   }
 });
 
