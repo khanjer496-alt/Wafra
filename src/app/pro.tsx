@@ -73,7 +73,7 @@ export default function ProScreen() {
   const checkout = useProCheckout();
   const {
     state, billingAction, selectedPlan, selectedOffer, notice, trial, entitled,
-    privacyPolicyUrl, termsOfUseUrl, buySelectedPlan, restore, manage, openLegal,
+    privacyPolicyUrl, termsOfUseUrl, ctaMode, retryOffers, buySelectedPlan, restore, manage, openLegal,
   } = checkout;
   const proNav: BandNav = { back: true };
 
@@ -194,7 +194,7 @@ export default function ProScreen() {
           <>
             <EButton
               palette={band}
-              testID="pro-buy"
+              testID={ctaMode === 'retry' ? 'pro-retry-prices' : 'pro-buy'}
               label={billingAction === 'purchase'
                 ? t('purchaseInProgress')
                 : selectedOffer
@@ -202,9 +202,11 @@ export default function ProScreen() {
                       plan: planLabel(selectedPlan),
                       price: selectedOffer.priceString,
                     })
-                  : t('getPro')}
-              disabled={billingAction !== null}
-              onPress={() => void buySelectedPlan()}
+                  : ctaMode === 'loading'
+                    ? t('priceLoading')
+                    : ctaMode === 'retry' ? t('retryPrices') : t('getPro')}
+              disabled={billingAction !== null || ctaMode === 'loading'}
+              onPress={ctaMode === 'retry' ? () => void retryOffers() : () => void buySelectedPlan()}
             />
             <EButton
               palette={band}
