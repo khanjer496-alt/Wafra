@@ -396,8 +396,16 @@ ok('hydration cannot relabel UAE review money as a foreign ledger amount',
   ok('legacy overflow evicts an informational review before an older money movement',
     mixed.pending.length === 50 && !mixed.pending.some((item) => item.id === informational(900).id) &&
       mixed.pending.some((item) => item.id === legacyFiller(0).id));
+  // Only retention-required money waits at its source; an informational review
+  // is staged, refused by admission, and never displaces kept money.
+  const infoPartition = tray.partitionReviewsByCapacity(fullLegacy, [informational(700)], NOW + 1000);
+  const infoAdmission = admitPreparedReviewAlert(fullLegacy, informational(700), NOW + 1000);
   ok('an informational review cannot displace fifty retained money movements',
-    tray.partitionReviewsByCapacity(fullLegacy, [informational(700)], NOW + 1000).deferred.length === 1);
+    infoPartition.deferred.length === 0 && infoPartition.admit.length === 1 &&
+      infoAdmission.outcome === 'deferred' && infoAdmission.state.pending.length === 50 &&
+      !infoAdmission.state.pending.some((item) => item.id === informational(700).id) &&
+      fullLegacy.pending.every((kept) => infoAdmission.state.pending.some((item) => item.id === kept.id)) &&
+      infoAdmission.state.tombstones.length === 0);
   const infoFull = { ...emptyAlertReviewTray(),
     pending: Array.from({ length: 50 }, (_, index) => informational(index)) };
   const overInfo = tray.partitionReviewsByCapacity(infoFull, [incoming], NOW + 1000);
