@@ -40,7 +40,7 @@ const en = {
   privacyAndSecurity: 'Privacy and security',
   theme: 'Theme',
   proTitle: 'Wafra Pro',
-  proTrialTitle: 'Wafra Pro · trial',
+  proTrialTitle: 'Wafra Pro · free period',
   proTrialBody: (days: number) =>
     `Automatic capture is included for ${days} more ${days === 1 ? 'day' : 'days'}.`,
   captureWorking: (time: string) => `Working · last message ${time}`,
@@ -119,7 +119,7 @@ const ar: SettingsCopy = {
   privacyAndSecurity: 'الخصوصية والأمان',
   theme: 'السمة',
   proTitle: 'وفرة برو',
-  proTrialTitle: 'وفرة برو · فترة تجريبية',
+  proTrialTitle: 'وفرة برو · فترة مجانية',
   proTrialBody: (days: number) =>
     `الالتقاط التلقائي متاح ${arabicCount(days, {
       one: 'ليوم واحد إضافي',

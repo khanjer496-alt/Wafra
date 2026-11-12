@@ -67,11 +67,11 @@ test('E copy: every Arabic line is Arabic and every English line is not', () => 
 
 test('E copy: Arabic counts agree with their nouns', () => {
   const { ar, en } = ONBOARDING_E_COPY;
-  assert.equal(en.startFree(3), 'Start the free 3 days');
-  assert.equal(en.startFree(1), 'Start the free day');
+  assert.equal(en.startFree(3), 'Start the 3-day free period');
+  assert.equal(en.startFree(1), 'Start the 1-day free period');
   assert.equal(en.trialEnd(3), 'Within 3 days', 'trialDaysLeft rounds up, so never an exact count');
-  assert.equal(ar.startFree(3), 'ابدأ 3 أيام مجانية');
-  assert.equal(ar.startFree(2), 'ابدأ اليومين المجانيين');
+  assert.equal(ar.startFree(3), 'ابدأ الفترة المجانية: 3 أيام');
+  assert.equal(ar.startFree(2), 'ابدأ الفترة المجانية: يومان');
   assert.equal(ar.trialEnd(2), 'خلال يومين');
   assert.equal(ar.trialEnd(3), 'خلال 3 أيام');
   assert.equal(ar.trialEnd(11), 'خلال 11 يوماً');
