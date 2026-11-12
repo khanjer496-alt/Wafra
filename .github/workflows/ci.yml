@@ -169,10 +169,31 @@ jobs:
           path: ${{ runner.temp }}/wafra-play-billing-libs
           key: wafra-play-billing-libs-${{ hashFiles('scripts/test/wafra-play-billing-native.cjs') }}
 
+      # NO SECRETS IN THIS JOB: the summary artifact below is downloadable and GitHub masks log views, not artifacts.
+      # The raw log stays on the runner. What leaves it is a small JSON report with the failing test names
+      # and no terminal control bytes (scripts/ci/summarize-app-tests.cjs), uploaded as an artifact below.
+      # The real test exit code is preserved: the summary is evidence, never a replacement gate.
       - name: Test
-        run: npm test
+        run: |
+          set +e
+          npm test 2>&1 | tee "$RUNNER_TEMP/wafra-app-test.log"
+          TEST_STATUS=${PIPESTATUS[0]}
+          mkdir -p artifacts/app-tests
+          TEST_EXIT="$TEST_STATUS" node scripts/ci/summarize-app-tests.cjs \
+            "$RUNNER_TEMP/wafra-app-test.log" > artifacts/app-tests/summary.json
+          exit "$TEST_STATUS"
         env:
           WAFRA_PLAY_BILLING_TEST_LIBS: ${{ runner.temp }}/wafra-play-billing-libs
+
+      - name: Preserve structured app test result
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-test-result-${{ github.sha }}
+          path: artifacts/app-tests/summary.json
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Relay typecheck
         working-directory: server
