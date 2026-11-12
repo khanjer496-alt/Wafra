@@ -26,7 +26,7 @@ import { marketCurrencyCode } from '@/lib/markets';
 // These cached imports also retain registration when this layout is mounted
 // directly by a development or test harness.
 import '@/lib/background-relay';
-import '@/lib/android-live-background';
+import '@/lib/native-background-tasks';
 import { installFeedbackTransport } from '@/lib/feedback-transport';
 import { loadHomeWidgetPreferences } from '@/lib/home-widgets';
 import { markLaunchPhase } from '@/lib/launch-performance';
