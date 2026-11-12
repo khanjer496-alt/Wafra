@@ -1852,12 +1852,26 @@ struct WafraBankSenderRegistryTests {
       let rows = [...initial];
       const calls = [];
       let milestone = firstCapturedAt;
+      // Mirrors WafraLiveCaptureStore.purgeExpiredUnlocked: an unacknowledged
+      // record past recordTTL is deleted, counted in `dropped` and given a warning.
+      let dropped = 0;
+      let warningId = null;
+      let expiring = new Set();
       return {
         calls,
         acknowledged: [],
         milestones: [],
         pending: () => [...rows],
-        async purgeExpired() { calls.push('purge'); return 0; },
+        expire(ids) { expiring = new Set(ids); },
+        async purgeExpired() {
+          calls.push('purge');
+          const before = rows.length;
+          rows = rows.filter((serialized) => !expiring.has(JSON.parse(serialized).id));
+          const expired = before - rows.length;
+          expiring = new Set();
+          if (expired > 0) { dropped += expired; warningId = `warning-${dropped}`; }
+          return expired;
+        },
         async listPendingRecords(limit) {
           calls.push(`list:${limit}`);
           return rows.slice(0, limit);
@@ -1870,8 +1884,8 @@ struct WafraBankSenderRegistryTests {
         },
         async getCaptureStatus() {
           return {
-            enabled: true, pending: rows.length, dropped: 0, corrupt: false,
-            warningId: null,
+            enabled: true, pending: rows.length, dropped, corrupt: false,
+            warningId,
             setupProofVersion: 1, setupProofAt: NOW, firstCapturedAt: milestone,
           };
         },
@@ -2171,6 +2185,21 @@ struct WafraBankSenderRegistryTests {
         native.pending().length === 1 && drainAgain.imported === 0 && drainAgain.reviews === 0 &&
           ledger.getState().reviewTray.pending.length === 50,
         JSON.stringify({ drainAgain, pending: native.pending().length }));
+      // TTL: a purchase still waiting when its native record passes recordTTL
+      // (30 days) is purged by the store and counted as `dropped` with a warning
+      // (pinned natively in native-live-capture-store.swift). The drain must not
+      // keep reporting it as waiting, acknowledge it, or invent a tray loss.
+      const waitingId = JSON.parse(native.pending()[0]).id;
+      native.expire([waitingId]);
+      const afterExpiry = await coordinator(native, ledger).drain();
+      const expiryStatus = await native.getCaptureStatus();
+      ok('a waiting foreign purchase that expires natively is counted as dropped, never silently lost',
+        native.pending().length === 0 && !native.acknowledged.includes(waitingId) &&
+          expiryStatus.dropped === 1 && expiryStatus.warningId !== null &&
+          trayModule.reviewCaptureBacklog.get().waiting === 0 && !afterExpiry.deferredReviews &&
+          afterExpiry.imported === 0 && ledger.getState().reviewTray.pending.length === 50 &&
+          !ledger.getState().reviewTray.tombstones.some((item) => item.outcome === 'currency-evicted'),
+        JSON.stringify({ afterExpiry, expiryStatus, backlog: trayModule.reviewCaptureBacklog.get() }));
       trayModule.reviewCaptureBacklog.reset();
     }
 
