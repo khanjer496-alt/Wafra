@@ -119,6 +119,7 @@
     "globals": "^14.0.0",
     "playwright": "^1.62.0",
     "pod-install": "1.1.0",
+    "react-test-renderer": "19.2.0",
     "typescript": "~5.9.2"
   },
   "overrides": {

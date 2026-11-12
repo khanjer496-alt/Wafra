@@ -19,7 +19,47 @@
       "billingPeriod": "P1W",
       "referencePrice": { "currency": "USD", "amount": "4.99" },
       "approvedBasePrice": { "currency": "USD", "amount": "4.99", "publisherApproved": true },
-      "readBackEvidence": null
+      "readBackEvidence": {
+        "source": "Google Play Console, subscription base plan Price column (read-only), app.wafra.android",
+        "readAt": "2026-11-12T08:12:31Z",
+        "note": "googleConsolePrice is what Play Console is set to. googleVerified/googleFormattedPrice stay unset until a license-tester device read of the Superwall storefront-formatted price; Apple is not read back yet.",
+        "JPY": {
+          "googleConsoleVerified": true,
+          "googleConsolePrice": "JPY 860",
+          "googleStorefront": "Japan",
+          "googleVerified": false,
+          "googleFormattedPrice": null,
+          "appleVerified": false,
+          "appleFormattedPrice": null
+        },
+        "USD": {
+          "googleConsoleVerified": true,
+          "googleConsolePrice": "USD 4.99",
+          "googleStorefront": "United States",
+          "googleVerified": false,
+          "googleFormattedPrice": null,
+          "appleVerified": false,
+          "appleFormattedPrice": null
+        },
+        "KWD": {
+          "googleConsoleVerified": true,
+          "googleConsolePrice": "USD 4.99",
+          "googleStorefront": "Kuwait",
+          "googleConsoleCurrencyNote": "Play bills the Kuwait storefront in USD; there is no KWD price on Google Play.",
+          "googleVerified": false,
+          "googleFormattedPrice": null,
+          "appleVerified": false,
+          "appleFormattedPrice": null
+        },
+        "gulfConsolePrices": {
+          "AE": "AED 18.99",
+          "SA": "SAR 21.99",
+          "KW": "USD 4.99",
+          "QA": "QAR 18.00",
+          "BH": "USD 5.49",
+          "OM": "USD 4.99"
+        }
+      }
     },
     "yearly": {
       "productId": "wafra_pro_yearly",
@@ -27,7 +67,47 @@
       "billingPeriod": "P1Y",
       "referencePrice": { "currency": "USD", "amount": "49.99" },
       "approvedBasePrice": { "currency": "USD", "amount": "49.99", "publisherApproved": true },
-      "readBackEvidence": null
+      "readBackEvidence": {
+        "source": "Google Play Console, subscription base plan Price column (read-only), app.wafra.android",
+        "readAt": "2026-11-12T08:12:31Z",
+        "note": "googleConsolePrice is what Play Console is set to. googleVerified/googleFormattedPrice stay unset until a license-tester device read of the Superwall storefront-formatted price; Apple is not read back yet.",
+        "JPY": {
+          "googleConsoleVerified": true,
+          "googleConsolePrice": "JPY 8,700",
+          "googleStorefront": "Japan",
+          "googleVerified": false,
+          "googleFormattedPrice": null,
+          "appleVerified": false,
+          "appleFormattedPrice": null
+        },
+        "USD": {
+          "googleConsoleVerified": true,
+          "googleConsolePrice": "USD 49.99",
+          "googleStorefront": "United States",
+          "googleVerified": false,
+          "googleFormattedPrice": null,
+          "appleVerified": false,
+          "appleFormattedPrice": null
+        },
+        "KWD": {
+          "googleConsoleVerified": true,
+          "googleConsolePrice": "USD 49.99",
+          "googleStorefront": "Kuwait",
+          "googleConsoleCurrencyNote": "Play bills the Kuwait storefront in USD; there is no KWD price on Google Play.",
+          "googleVerified": false,
+          "googleFormattedPrice": null,
+          "appleVerified": false,
+          "appleFormattedPrice": null
+        },
+        "gulfConsolePrices": {
+          "AE": "AED 194.99",
+          "SA": "SAR 214.99",
+          "KW": "USD 49.99",
+          "QA": "QAR 180.00",
+          "BH": "USD 54.99",
+          "OM": "USD 49.99"
+        }
+      }
     }
   }
 }

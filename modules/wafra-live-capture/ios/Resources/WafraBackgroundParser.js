@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 3287329ea97427e679a169da2d193ca6ca7f83140c192e3394b08105284b26ae
+// Generated from normal shipping TypeScript. Source SHA-256: 7a18a6b0c771d047d5897109651ab138be7e30a402d752a19105aa4ab35e12b4
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -5155,7 +5155,7 @@ const S = {
         ar: 'كشوف طابقتها وفرة مع دفعة بطاقة.',
     },
     paidStatementDue: { en: 'Statement due {date} · paid', ar: 'كشف مستحق {date} · مدفوع' },
-    trialEndedBanner: { en: 'Trial ended · tracking paused', ar: 'انتهت التجربة · توقف التتبع' },
+    trialEndedBanner: { en: 'Free period ended · automatic capture paused', ar: 'انتهت الفترة المجانية · توقف الالتقاط التلقائي' },
     trialEndedBannerSub: { en: 'Subscribe to keep importing your bank SMS', ar: 'اشترك لمواصلة قراءة رسائل البنك' },
     turnOnTracking: { en: 'Turn on automatic tracking', ar: 'فعّل التتبع التلقائي' },
     trackingPrivacy: { en: 'Wafra reads bank SMS on this device only', ar: 'وفرة تقرأ رسائل البنك على هذا الجهاز فقط' },
@@ -6174,8 +6174,8 @@ const S = {
         ar: 'أعد مشاهدة تجربة البداية دون تغيير بياناتك أو إعداداتك',
     },
     settingsTrialDays: {
-        en: 'Free trial · {count} day{s} left',
-        ar: 'تجربة مجانية · متبقٍ {count} يوم',
+        en: 'Free period · {count} day{s} left',
+        ar: 'فترة مجانية · متبقٍ {count} يوم',
     },
     wafraPro: { en: 'Wafra Pro', ar: 'وفرة برو' },
     proActive: { en: 'Active', ar: 'مفعّل' },
@@ -6416,8 +6416,8 @@ const S = {
         ar: 'وفرة برو مفعّل مجدداً على هذا الجهاز.',
     },
     proContinue: { en: 'Continue to Wafra', ar: 'متابعة إلى وفرة' },
-    trialEndedPaywall: { en: 'Your free trial has ended and tracking is paused. Subscribe to keep Wafra working — your data never leaves your phone either way.', ar: 'انتهت تجربتك المجانية وتوقف التتبع. اشترك لمواصلة استخدام وفرة — بياناتك لا تغادر هاتفك في كل الأحوال.' },
-    freeTrialActive: { en: 'FREE TRIAL ACTIVE', ar: 'التجربة المجانية مفعّلة' },
+    trialEndedPaywall: { en: 'Your free period in the app has ended. Automatic capture is paused; manual entries, paste, statements and backup stay free.', ar: 'انتهت الفترة المجانية في التطبيق. توقف الالتقاط التلقائي؛ يظل الإدخال اليدوي واللصق والكشوف والنسخ الاحتياطي مجانياً.' },
+    freeTrialActive: { en: 'FREE PERIOD ACTIVE', ar: 'الفترة المجانية مفعّلة' },
     getPro: { en: 'Get Wafra Pro', ar: 'اشترك في وفرة برو' },
     startPlanWithPrice: {
         en: 'Start {plan} — {price}',

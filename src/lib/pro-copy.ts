@@ -17,7 +17,7 @@ const en = {
   historyTitle: 'Past SMS on this phone',
   historyText: 'Bank texts already in your inbox fill in earlier months.',
   freeTitle: 'Always free',
-  freeText: 'Your ledger, manual entries, pasted bank messages and statement imports never need Pro.',
+  freeText: 'Your ledger, manual entries, pasted bank messages, statement imports and backup never need Pro. The first 3 days are a free period in the app and never start billing automatically.',
   selected: 'Selected',
 };
 
@@ -29,7 +29,7 @@ const ar: ProCopy = {
   historyTitle: 'الرسائل السابقة على هذا الهاتف',
   historyText: 'رسائل البنك الموجودة في صندوق الوارد تملأ الأشهر السابقة.',
   freeTitle: 'مجاني دائمًا',
-  freeText: 'سجلك والإدخال اليدوي ولصق رسائل البنك واستيراد الكشوف لا تحتاج برو أبدًا.',
+  freeText: 'سجلك والإدخال اليدوي ولصق رسائل البنك واستيراد الكشوف والنسخ الاحتياطي لا تحتاج برو أبدًا. أول ٣ أيام فترة مجانية في التطبيق ولا تبدأ الفوترة تلقائياً.',
   selected: 'محدد',
 };
 

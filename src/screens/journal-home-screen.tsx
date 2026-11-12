@@ -56,7 +56,6 @@ import { detectCapturePause } from '@/lib/capture-pause';
 import { loadCapturePauseSnooze, saveCapturePauseSnooze } from '@/lib/capture-pause-state';
 import { isLiveCapture } from '@/lib/transaction-source';
 import { homeSummaryCopy, paymentAgendaCopy } from '@/lib/reference-copy';
-import { invalidateWidgetSnapshotSync, requestWidgetSnapshotSync } from '@/lib/widget-sync';
 import { allocationsOf } from '@/lib/splits';
 import { isFixedCommitment } from '@/lib/categories';
 import { moneyPictureProgress } from '@/lib/money-picture-progress';
@@ -650,44 +649,9 @@ export default function JournalHomeScreen() {
     else void loadPaceMemory().then((memory) => { if (alive) observe(memory); });
     return () => { alive = false; };
   }, [state.hydrated, state.onboarded, livePace, heroKey, projectionDay, revealReady]);
-  // Native widgets use Bills' complete 30-day recurring projection, never
-  // Home's deliberately shorter 9-day list (which adds detected subscriptions
-  // only once that shared projection has an answer).
-  useEffect(() => {
-    if (!state.hydrated || !state.onboarded || state.privateMode) {
-      void invalidateWidgetSnapshotSync();
-      return;
-    }
-    const generation = getStateGeneration();
-    const source = getStateSnapshot();
-    let request: ReturnType<typeof requestWidgetSnapshotSync> | undefined;
-    let cancelled = false;
-    const current = () => {
-      const latest = getStateSnapshot();
-      return !cancelled && generation === getStateGeneration() && latest.hydrated && latest.onboarded && !latest.privateMode
-        && latest.transactions === source.transactions && latest.accounts === source.accounts
-        && latest.budgets === source.budgets && latest.bills === source.bills && latest.cardDues === source.cardDues
-        && latest.notSubscriptions === source.notSubscriptions && latest.cancelledSubscriptions === source.cancelledSubscriptions
-        && latest.transferInternalIds === source.transferInternalIds && latest.transferNormalizationVersion === source.transferNormalizationVersion
-        && latest.ledgerMoney === source.ledgerMoney && latest.marketId === source.marketId && latest.language === source.language
-        && latest.historyImport === source.historyImport
-        // The spending widget names categories, custom ones included (widget-ledger.ts).
-        && latest.customCategories === source.customCategories;
-    };
-    // After Home's first frames and entrance: preparing the snapshot walks the
-    // ledger and the native write re-renders every placed widget.
-    const task = runAfterFirstFrames(() => {
-      if (current()) request = requestWidgetSnapshotSync({ state: source, now: new Date(), moneySpec,
-        language: language === 'ar' ? 'ar' : 'en' }, current);
-    });
-    return () => { cancelled = true; task.cancel(); request?.cancel(); };
-    // Keyed on the day, not the resume clock: every reopen used to rebuild
-    // the snapshot and rewrite the widgets with the same figures. A new day
-    // still refreshes them (todayISO, the week, Coming up all move).
-  }, [state.hydrated, state.onboarded, state.privateMode, state.transactions, state.accounts, state.budgets, state.bills,
-    state.cardDues, state.notSubscriptions, state.cancelledSubscriptions, state.transferInternalIds, state.transferNormalizationVersion,
-    state.ledgerMoney, state.marketId, state.historyImport, state.customCategories, moneySpec, language, projectionDay,
-    getStateGeneration, getStateSnapshot]);
+  // The home-screen widgets are refreshed by the tab shell's CaptureOwner
+  // (use-widget-snapshot-sync.ts), which is never frozen: Home can be paused
+  // while another screen or tab is on top.
   // Recent activity, and which transfers it leaves to the Transfers screen,
   // come from the one dashboard projection rather than a second ledger walk.
   const hasPeriodTransfers = dashboard.hasPeriodTransfers === true;
