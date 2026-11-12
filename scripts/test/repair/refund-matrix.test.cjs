@@ -16,11 +16,17 @@
 //   - any class count in the file above CEILING below, and native ignored income above its ceiling.
 // CEILING may only go DOWN. A change that raises any number in it, or adds an entry to the gap file, is a regression
 // and must be rejected in review. The store gate needs CEILING.falseIncome at zero on every path.
+// On a pull request, CI also runs refund-gaps-no-growth.cjs: the file may only lose entries and paths for rows the base
+// already had, so a fix to one row that breaks another in the same class cannot pass unseen.
+//
+// The oracle itself is pinned (ORACLE_PIN): an edit that adds, drops or relabels rows fails until the pin is updated in
+// the same PR, deliberately and with the reason in review. Dropping rows silently would cut coverage.
 //
 // Set REFUND_MATRIX_REPORT=<file> to write every gap with counts, and REFUND_MATRIX_WRITE_GAPS=<file> to write the
 // current gaps in the gap-file format after a fix (then lower CEILING to the new counts).
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
@@ -41,6 +47,8 @@ const CEILING = {
   postedNotReview: { parseSms: 631, session: 652, native: 10 },
 };
 const NATIVE_IGNORED_INCOME_CEILING = 157;
+// Row count and sha256 of the oracle's "id<TAB>expected" lines, joined by newlines (Reviewer, #217 Low 1).
+const ORACLE_PIN = { rows: 5399, sha256: 'e8aa6f5031caa2cec9c94a3800cb686eaed5e8b07b32ecf9d4e5cfa3226c73f5' };
 
 const PATHS = ['parseSms', 'session', 'native'];
 const at = Date.parse('2026-11-05T10:00:00Z');
@@ -170,8 +178,16 @@ test('refund matrix ratchet: no class grows above its frozen ceiling', () => {
       assert.ok(counts[cls][name] <= byPath[name], `${cls} on ${name}: ${counts[cls][name]} gap entries > ceiling ${byPath[name]}`);
     }
   }
+  // The count is filled by the group tests above; run alone (--test-name-pattern) it would pass with 0 (Change Reviewer).
+  assert.ok(report.incomeRows > 0, 'no income rows were judged: run the whole file, not this test alone');
   assert.ok(report.nativeIgnoredIncome <= NATIVE_IGNORED_INCOME_CEILING,
     `native ignored ${report.nativeIgnoredIncome} income rows > ceiling ${NATIVE_IGNORED_INCOME_CEILING}`);
+});
+
+test('refund matrix oracle is pinned: row count and id+expected hash', () => {
+  const sha256 = crypto.createHash('sha256').update(rows.map((row) => `${row.id}\t${row.expected}`).join('\n')).digest('hex');
+  assert.equal(rows.length, ORACLE_PIN.rows, 'the oracle changed size: update ORACLE_PIN in the same PR and say why in review');
+  assert.equal(sha256, ORACLE_PIN.sha256, 'oracle ids or expected labels changed: update ORACLE_PIN in the same PR and say why in review');
 });
 
 test('refund matrix report', (t) => {
