@@ -11,6 +11,7 @@ MATCH=com.apple.BiometricKit_Sim.pearl.match
 NOMATCH=com.apple.BiometricKit_Sim.pearl.nomatch
 LOCKED_SHOTS=()
 
+mono()  { python3 -c "import time;print(int(time.monotonic()))"; }   # bash SECONDS follows the wall clock, which S6 sets back
 log()   { echo "[$(date -u +%H:%M:%S)] $*"; }
 match() { log "notifyutil $MATCH"; xcrun simctl spawn "$UDID" notifyutil -p "$MATCH"; }
 nomatch() { log "notifyutil $NOMATCH"; xcrun simctl spawn "$UDID" notifyutil -p "$NOMATCH"; }
@@ -72,7 +73,7 @@ else record S1b FAIL "ledger not shown after pearl.match"; fi
 shot 01b-after-match-unlocked
 
 # ---- S4: away < 20 s stays unlocked. simctl calls are slow on the runner, so the absence is MEASURED, not assumed.
-T0=$SECONDS; away; sleep 1; back; ABS=$((SECONDS - T0)); sleep 3; shot 04b-back-after-short-absence
+T0=$(mono); away; sleep 1; back; ABS=$(( $(mono) - T0 )); sleep 3; shot 04b-back-after-short-absence
 if mro unlocked s4; then S4OK=1; else S4OK=0; fi
 if [ "$ABS" -ge 17 ]; then record S4 INCONCLUSIVE "absence measured ${ABS}s, too close to the 20 s grace to prove anything (runner too slow); observed: $([ $S4OK = 1 ] && echo unlocked || echo locked)"
 elif [ $S4OK = 1 ]; then record S4 PASS "away ${ABS}s (<20 s): still unlocked, ledger visible"
@@ -94,12 +95,12 @@ shot 05b-after-recovery-unlocked
 
 # ---- S6: clock set back while away re-locks. The grace is 20 s, so the absence must be SHORT for the clock to be the cause.
 sudo systemsetup -setusingnetworktime off >/dev/null 2>&1 || log "could not disable network time"
-REAL0=$(date +%s); MONO0=$SECONDS
+REAL0=$(date +%s); MONO0=$(mono)
 away; sleep 1
-BACKTO=$((REAL0 + (SECONDS - MONO0) - 3600))
+BACKTO=$((REAL0 + ($(mono) - MONO0) - 3600))
 sudo date -u "$(date -u -r "$BACKTO" +%m%d%H%M%Y.%S)" >/dev/null
-back; ABS=$((SECONDS - MONO0)); sleep 3; shot 06b-back-with-clock-set-back-1h
-REAL=$((REAL0 + (SECONDS - MONO0)))
+back; ABS=$(( $(mono) - MONO0 )); sleep 3; shot 06b-back-with-clock-set-back-1h
+REAL=$((REAL0 + ($(mono) - MONO0)))
 sudo date -u "$(date -u -r "$REAL" +%m%d%H%M%Y.%S)" >/dev/null; log "clock restored: $(date -u)"
 if mro locked s6; then S6L=1; else S6L=0; fi
 if [ $S6L = 1 ] && [ "$ABS" -lt 17 ]; then record S6 PASS "clock set back 1 h, real absence ${ABS}s (<20 s grace, so only the clock rule can explain it): lock screen, no ledger"; LOCKED_SHOTS+=(06b-back-with-clock-set-back-1h)
