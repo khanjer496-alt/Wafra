@@ -44,7 +44,7 @@ function hookHarness({ owner = true, platform = 'android' } = {}) {
     '@/lib/background-relay': { enableRelayBackgroundSync: async () => {} },
     '@/lib/capture': { getIosCaptureNativeModule: () => null, isCaptureAvailable: () => false },
     '@/lib/capture-executor': { createCaptureExecutor: () => ({ execute: async () => ({ kind: 'up-to-date' }) }) },
-    '@/lib/android-live-background': { installAndroidLiveCaptureLedger: () => () => {} },
+    '@/lib/android-live-background-api': { installAndroidLiveCaptureLedger: () => () => {} },
     '@/lib/android-capture-sources': { androidSmsCaptureEnabled: () => false, androidNotificationCaptureEnabled: () => false },
     '@/lib/haptics': {}, '@/lib/capture-toast': {}, '@/lib/i18n': { t: value => value },
     '@/lib/fx-rates': {},
