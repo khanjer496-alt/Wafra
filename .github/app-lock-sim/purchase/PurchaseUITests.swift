@@ -27,6 +27,14 @@ final class PurchaseUITests: XCTestCase {
         session.locale = Locale(identifier: "en_US")
         session.storefront = "USA"
         note("StoreKit test session created from \(path)")
+        // Probe: does a session mutation reach the simulator's storekitd? (Apple FB22237318: not via xcodebuild CLI on
+        // newer runtimes; the app then talks to the real App Store and shows "Sign in to Apple Account".)
+        let sem = DispatchSemaphore(value: 0); var probe = "ok"
+        let s0 = session!
+        Task.detached { do { try await s0.setSimulatedError(nil, forAPI: .purchase) } catch let e { probe = "\(e)" }; sem.signal() }
+        sem.wait()
+        note("SKTestSession mutation probe: \(probe); sim runtime: \(ProcessInfo.processInfo.operatingSystemVersionString)")
+        record("STOREKIT-SESSION", probe == "ok", "mutation probe on \(ProcessInfo.processInfo.operatingSystemVersionString): \(probe)")
     }
 
     // MARK: helpers

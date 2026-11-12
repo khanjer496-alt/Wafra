@@ -46,7 +46,7 @@ diag() { # evidence for a failed setup: entitlements, the app's own storage diag
 }
 
 # ---- setup: seed a small ledger, then turn App Lock on -------------------------------
-if ! mro seed; then
+if ! mro seed && ! { cp "$OUT/maestro-seed.log" "$OUT/maestro-seed-attempt1.log"; sleep 10; mro seed seed-retry; }; then
   dump seed-fail; shot setup-seed-failed; diag; record SETUP FAIL "could not seed the ledger (see maestro-seed.log)"; exit 1
 fi
 shot 00-seeded-home-unlocked

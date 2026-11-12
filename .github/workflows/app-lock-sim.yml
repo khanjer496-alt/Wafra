@@ -18,6 +18,7 @@ jobs:
     timeout-minutes: 120
     env:
       # founder / auto-Pro OFF, like the production profile
+      MAESTRO_DRIVER_STARTUP_TIMEOUT: "300000"
       EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: "0"
       EXPO_PUBLIC_WAFRA_AUTO_FOUNDER_PRO: "0"
       EXPO_PUBLIC_WAFRA_PARSER_RESEARCH: "0"
