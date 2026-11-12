@@ -2269,11 +2269,36 @@ const REQUEST_RECEIVED_BLANK_RE = new RegExp(REQUEST_RECEIVED_RE.source, 'giu');
 // A request acknowledgement beside a COMPLETED credit ("Your refund request has been received.
 // Refund of AED 100.00 from <merchant> has been credited to your card"). REFUND_RE's 40-character
 // window cannot span that clause once the merchant is long or contains a dot, and the acknowledgement
-// would then win and refuse a credit that already happened. This needs a completed auxiliary and an
-// owned destination, so a future, pending, requested or under-process refund is still not settled.
-// The clause continues only across a decimal point or a domain dot (a dot followed by a non-space).
+// would then win and refuse a credit that already happened. The credit must be completed (auxiliary
+// plus credited/refunded/posted), OWNED (your card/account, or the original/same card, account or
+// payment method; not a merchant or beneficiary), ACTUAL (no conditional leader such as if/once/when
+// before it; not in error, reversed or announced for later) and the requested amount, if the
+// acknowledgement states one, must be the credited amount. Review c1379af4.
 const REFUND_COMPLETED_CREDIT_RE =
-  /\brefund(?:ed)?\b(?:[^.\n]|\.(?=\S)){0,300}?\b(?:has|have|had|was|were)\s+(?:been\s+)?(?:successfully\s+)?(?:credited|refunded|posted)\s+(?:back\s+)?(?:to|into|onto)\s+(?:your|the)\b/i;
+  /(\brefund(?:ed)?\b(?:[^.\n]|\.(?=\S)){0,300}?)\b(?:has|have|had|was|were)\s+(?:been\s+)?(?:successfully\s+)?(?:credited|refunded|posted)\s+(?:back\s+)?(?:to|into|onto)\s+(?:your\b|the\s+(?:original\s+|same\s+)?(?:card|account|payment\s+(?:method|source))\b)/gi;
+const REFUND_CREDIT_CONDITIONAL_LEAD_RE = /\b(?:if|once|when|whenever|after|until|unless|whether|as\s+soon\s+as)\b/i;
+// Inside the clause only the lowercase wording counts, so a merchant named AFTER EIGHT or ONCE UPON still posts.
+const REFUND_CREDIT_CONDITIONAL_INSIDE_RE = /\b(?:if|once|when|whenever|after|until|unless|whether)\b|\bas\s+soon\s+as\b/;
+const REFUND_CREDIT_REVERSED_TAIL_RE = /\b(?:in\s+error|reversed|will\s+be\s+(?:credited|refunded|reversed|debited|deducted|returned|posted))\b/i;
+const REFUND_AMOUNT_RE = /(?:\b[A-Z]{3}\b|\bDhs?\.?|\bSR\b|[$€£])\s*(\d[\d,]*(?:\.\d+)?)/g;
+const REFUND_SENTENCE_BREAK_RE = /[.!?](?=\s|$)|\n/g;
+const refundAmounts = (text: string): number[] =>
+  [...text.matchAll(REFUND_AMOUNT_RE)].map((match) => Number(match[1].replace(/,/g, '')));
+function hasCompletedRefundCredit(rest: string, request: string): boolean {
+  const requested = refundAmounts(request);
+  for (const match of rest.matchAll(REFUND_COMPLETED_CREDIT_RE)) {
+    const at = match.index!;
+    const breaks = [...rest.slice(0, at).matchAll(REFUND_SENTENCE_BREAK_RE)];
+    const lead = rest.slice(breaks.length ? breaks[breaks.length - 1].index! + 1 : 0, at);
+    if (REFUND_CREDIT_CONDITIONAL_LEAD_RE.test(lead) || REFUND_CREDIT_CONDITIONAL_INSIDE_RE.test(match[1])) continue;
+    const tail = rest.slice(at + match[0].length).split(REFUND_SENTENCE_BREAK_RE)[0];
+    if (REFUND_CREDIT_REVERSED_TAIL_RE.test(tail)) continue;
+    const credited = refundAmounts(match[0]);
+    if (requested.some((amount) => !credited.includes(amount))) continue;
+    return true;
+  }
+  return false;
+}
 const MANDATE_LIFECYCLE_RE =
   /\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b(?:[^.]|\.\d){0,96}\b(?:will\s+(?:start|begin|commence|activate)|has\s+been\s+(?:created|registered|set\s*up|activated)|is\s+(?:now\s+)?active)\b|\b(?:created|registered|set\s*up|activated)\b(?:[^.]|\.\d){0,64}\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b|تم\s+(?:تسجيل|انشاء|تفعيل)[^\n]{0,64}(?:امر\s+)?(?:خصم\s+(?:تلقايي|مباشر)|تعليمات\s+مستديمه)/iu;
 const CONDITIONAL_PAYOUT_RE =
@@ -5193,7 +5218,8 @@ function nonPostingReasonInBody(
   // current credit still can; remove request and future clauses before looking.
   const withoutRequest = requestReceived ? blank(blank(body, REQUEST_RECEIVED_BLANK_RE), FUTURE_CLAUSE_RE) : body;
   const settledRefund = (REFUND_RE.test(body) && (!requestReceived || REFUND_RE.test(withoutRequest))) ||
-    (requestReceived && REFUND_COMPLETED_CREDIT_RE.test(withoutRequest));
+    (requestReceived && hasCompletedRefundCredit(withoutRequest,
+      [...body.matchAll(REQUEST_RECEIVED_BLANK_RE)].map((request) => request[0]).join(' ')));
   if (VERIFICATION_HOLD_DESCRIPTOR_RE.test(body)) return 'preauthorisation';
   if (
     !settledRefund &&
