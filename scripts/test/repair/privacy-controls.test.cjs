@@ -68,3 +68,14 @@ test('store re-clears the native widget copy only when the effective guard chang
   const scenes = fs.readFileSync(path.join(root, 'src/components/onboarding/alive-scenes.tsx'), 'utf8');
   assert.match(scenes, /const uri = consented && Platform\.OS !== 'android' && domain \? verifiedLogoUrl\(domain\) : null;/);
 });
+
+test('iOS privacy cover observes UIApplication notifications and registers at launch (UIScene-safe)', () => {
+  const fs = require('node:fs'); const path = require('node:path');
+  const swift = fs.readFileSync(path.resolve(__dirname, '../../../modules/wafra-widgets/ios/WafraPrivacyCover.swift'), 'utf8');
+  for (const name of ['willResignActiveNotification', 'didEnterBackgroundNotification', 'didBecomeActiveNotification']) {
+    assert.match(swift, new RegExp(`UIApplication\\.${name}`), name);
+  }
+  assert.match(swift, /didFinishLaunchingWithOptions[\s\S]{0,200}_ = WafraPrivacyCover\.shared/);
+  // The delegate callbacks stay too: covering is idempotent, so both paths are safe.
+  assert.match(swift, /applicationWillResignActive[\s\S]{0,80}resignActive\(\)/);
+});
