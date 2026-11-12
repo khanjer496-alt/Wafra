@@ -817,6 +817,12 @@ const REVERSED_THEN_CREDITED_TO_YOU =
   /\brevers(?:al|ed|e)\b(?:[^.\n]|\.(?=\S)){0,200}?\b(?:is|has\s+been|was)\s+(?:successfully\s+)?credited\s+to\s+your\b/giu;
 const RECOGNISE_CALLBACK_FOOTER =
   /(?<!\p{L})(?:(?:don['’]t|do\s+not|didn['’]t)\s+recogni[sz]e\b[^.!?\n]{0,30}\?\s*(?=(?:call|contact|ring|phone)\b)|si\s+no\s+(?:lo\s+|la\s+)?reconoc(?:e|es)\b[^.!?\n]{0,60}?(?=\bllam(?:a|e|ar)\b)|n[ãa]o\s+reconhece\b[^.!?\n]{0,40}?\??\s*(?=(?:ligue|ligar)\b))/giu;
+// #190 wave 3 (ported, CEO 56bc3c4e): a completed alert may END with a bare fraud question ("… on 01/11/2026. Was this
+// you?") or a reply-to-block footer ("… Not you? Reply NO to block your card."). Only at the very end of the message, with
+// nothing after it: a leading "Was this you? Purchase …", "Was this you? Reply Y", "Reply YES to confirm" or any link keeps
+// refusing through its own arm.
+const CLOSING_FRAUD_FOOTER =
+  /(?:^|(?<=[\s.!?]))(?:was\s+this\s+(?:you|yours)\s*[?？]|not\s+(?:you|u)\s*[?？]\s*reply\s+["']?(?:no|n)["']?\s+to\s+block\s+(?:your\s+)?(?:(?:debit|credit)\s+)?card\s*[.!]?)\s*$/iu;
 // This exact discount instruction names a promo code, not an OTP challenge.
 const NUMERIC_DISCOUNT_CODE = /\b((?:use|enter)\s+)code(\s+\d{4,8}\s+to\s+get\s+\d{1,3}\s?%\s+off\b)/giu;
 // Only closed advice clauses with no quoted digits are benign. A numbered
@@ -834,7 +840,8 @@ const neutraliseBenignShapes = (source: string): string =>
     .replace(EXECUTED_MANDATE_DEBIT, '$1instruction')
     .replace(CREDITED_TOWARDS_REVERSAL, '$1refund')
     .replace(REVERSED_THEN_CREDITED_TO_YOU, (span) => span.replace(/\brevers(?:al|ed|e)\b/giu, 'refunded'))
-    .replace(RECOGNISE_CALLBACK_FOOTER, ' ');
+    .replace(RECOGNISE_CALLBACK_FOOTER, ' ')
+    .replace(CLOSING_FRAUD_FOOTER, ' ');
 
 /** The text the wording guard reads: promo footers set aside when the alert answers for itself. */
 const wordingGuardText = (source: string, sender: string | undefined): { text: string; ownCompleted: boolean } => {
