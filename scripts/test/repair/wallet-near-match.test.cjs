@@ -519,3 +519,21 @@ test('the Review screen counts posted possible duplicates beside the other overf
   const copy = /reviewAlertsDuplicatePostedCount: \{ en: '([^']+)', ar: '([^']+)' \}/.exec(i18n);
   assert.ok(copy && copy[1].includes('{count}') && copy[2].includes('{count}') && /[؀-ۿ]/.test(copy[2]));
 });
+
+test('a re-read after a residual posting adds no second row and no second count (Reviewer note 1)', () => {
+  const row = sms();
+  const result = plan([row]);
+  const base = result.walletNearMatches[0].review;
+  const full = fill(nearFiller, base);
+  const posted = settleWalletNearMatches(result, full, at + 10 * MIN, 'post');
+  assert.equal(posted.plan.batch.transactions.length, 1);
+  const key = canonicalCaptureSourceKey(base.sourceKey, base.observedAt);
+  const counted = recordPossibleDuplicatesPosted(full, [...posted.plan.batch.possibleDuplicatesPosted], at + 11 * MIN);
+  const after = state([wallet(), { ...posted.plan.batch.transactions[0], id: 'residual-posted' }], { reviewTray: counted });
+  const reread = plan([row], after, new Date(at + 12 * MIN));
+  assert.equal(reread.txCount, 0, 'the posted row owns the bank alert identity');
+  assert.equal(reread.walletNearMatches.length, 0, 'it is not withheld or staged again');
+  const again = settleWalletNearMatches(reread, counted, at + 12 * MIN, 'post');
+  assert.equal(again.plan.batch.possibleDuplicatesPosted, undefined, 'no second residual');
+  assert.equal(recentlyLostReviewCount(recordPossibleDuplicatesPosted(counted, [key], at + 12 * MIN), at + 12 * MIN, 'duplicate-posted'), 1);
+});
