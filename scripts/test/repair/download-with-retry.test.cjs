@@ -159,7 +159,8 @@ test('CI caches the jars keyed on the script that pins them and points the test 
   const cache = steps.find((step) => /actions\/cache@/.test(step.uses || '') && /wafra-play-billing-libs/.test(step.with?.path || ''));
   assert.ok(cache, 'a cache step for the native billing test jars exists in the check job');
   assert.match(cache.with.key, /hashFiles\('scripts\/test\/wafra-play-billing-native\.cjs'\)/, 'the key follows the pinned versions and hashes');
-  const test = steps.find((step) => step.run === 'npm test');
+  const test = steps.find((step) => /^\s*npm test\b/m.test(step.run || ''));
+  assert.ok(test, 'the check job runs npm test');
   assert.match(test.env?.WAFRA_PLAY_BILLING_TEST_LIBS || '', /wafra-play-billing-libs/);
   assert.ok(steps.indexOf(cache) < steps.indexOf(test), 'the cache is restored before the tests run');
 });
