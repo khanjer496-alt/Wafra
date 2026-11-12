@@ -576,14 +576,19 @@ function ktSources(dir) {
       /'stay-ahead'/.test(provider) && /'build-buffer'/.test(provider) &&
       /stage: 'remote-handoff'/.test(provider) && /await ensureDurable\(\)/.test(provider));
   ok('the local first name is never sent to Superwall',
-    !/userName/.test(provider) && /user's name/.test(provider));
+    !/userName|setUserAttributes/.test(provider) &&
+      /eventTrackingBehavior: 'none'/.test(provider) &&
+      // The ONE allowed placement param is the app language ("en" | "ar").
+      (provider.match(/params:/g) ?? []).length === 2 &&
+      (provider.match(/params: \{ language: placementLanguage \}/g) ?? []).length === 2 &&
+      /const placementLanguage: 'en' \| 'ar' = state\.language === 'ar' \? 'ar' : 'en';/.test(provider));
   ok('unknown storefront state preserves the cached Pro flag',
     /status\.status === 'UNKNOWN'\) return null/.test(sdk) &&
       /if \(!snapshot\) return/.test(provider));
   ok('resolved entitlements are re-checked and mirrored on launch/foreground',
     /entitlementSnapshot\(\s*subscriptionStatus,\s*customerInfo,/.test(provider) &&
       /AppState\.addEventListener\('change'/.test(provider) &&
-      /await getUserAttributes\(\)/.test(provider) &&
+      /await getCustomerInfo\(\)/.test(provider) &&
       /setPro\(snapshot\.active\)/.test(provider));
   ok('foreground refresh never synthesizes inactive from an empty entitlement fetch',
     !/const resolved: SubscriptionStatus = entitlements\.active/.test(

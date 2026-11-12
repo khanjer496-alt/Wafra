@@ -11,8 +11,10 @@ import { requireOptionalNativeModule } from 'expo-modules-core';
  * are presentation, and a failed write must never affect the app.
  */
 type NativeWidgets = {
+  setAppPrivacy?(enabled: boolean, hideAmounts: boolean): Promise<void>;
   /**
-   * Android answers false when it could not store it; iOS answers nothing. Current
+   * False when storage or the native privacy gate rejected the snapshot (older iOS
+   * binaries answer nothing, which counts as stored). Current
    * iOS binaries expose it as an async function (a Promise), so the App Group write
    * and the WidgetKit reload never run on the JS thread; older binaries return the
    * answer synchronously. Callers handle both.
@@ -27,6 +29,11 @@ type NativeWidgets = {
 export type PinnableWidget = 'today' | 'upcoming' | 'spending';
 
 const native = Platform.OS === 'web' ? null : requireOptionalNativeModule<NativeWidgets>('WafraWidgets');
+
+/** App Lock also protects recents and rejects stale unredacted widget writes. */
+export async function setAppPrivacy(enabled: boolean, hideAmounts: boolean): Promise<void> {
+  await native?.setAppPrivacy?.(enabled, hideAmounts);
+}
 
 let clears = 0;
 // Writes issued since the last erase. An async iOS write that was still queued behind

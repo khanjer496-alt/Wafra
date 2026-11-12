@@ -40,9 +40,7 @@ const en = {
   privacyAndSecurity: 'Privacy and security',
   theme: 'Theme',
   proTitle: 'Wafra Pro',
-  proTrialTitle: 'Wafra Pro · free period',
-  proTrialBody: (days: number) =>
-    `Automatic capture is included for ${days} more ${days === 1 ? 'day' : 'days'}.`,
+  proTrialTitle: 'Free automatic capture',
   captureWorking: (time: string) => `Working · last message ${time}`,
   // "SMS entries", not "added by the reader": a bank message pasted into
   // Import is stored the same way and cannot be told apart.
@@ -119,15 +117,7 @@ const ar: SettingsCopy = {
   privacyAndSecurity: 'الخصوصية والأمان',
   theme: 'السمة',
   proTitle: 'وفرة برو',
-  proTrialTitle: 'وفرة برو · فترة مجانية',
-  proTrialBody: (days: number) =>
-    `الالتقاط التلقائي متاح ${arabicCount(days, {
-      one: 'ليوم واحد إضافي',
-      two: 'ليومين إضافيين',
-      few: 'أيام إضافية',
-      many: 'يومًا إضافيًا',
-      hundreds: 'يوم إضافي',
-    }).replace(/^(\d+)/, 'لمدة $1')}.`,
+  proTrialTitle: 'الالتقاط التلقائي المجاني',
   captureWorking: (time: string) => `يعمل · آخر رسالة ${time}`,
   smsAllowed: (count: number) =>
     count === 0

@@ -1,3 +1,5 @@
+import { useLanguage } from '@/hooks/use-language';
+import { moneyCodeRun } from '@/lib/money-code-run';
 import React from 'react';
 import { StyleSheet, View, useWindowDimensions, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
 
@@ -94,6 +96,7 @@ export function BandFigure({
   label, fils, moneySpec, sign = 'none', decimals, qualifier, palette, size = 'hero',
   color, secondaryColor, rolling = false, fitInset = 0, inlineCurrency = false, style, testID,
 }: BandFigureProps) {
+  const language = useLanguage();
   const contextMoney = useLedgerMoney();
   const localeKey = useMoneyLocaleKey();
   const large = useLargeTextLayout();
@@ -101,8 +104,8 @@ export function BandFigure({
   const spec = moneySpec ?? contextMoney;
   const currency = spec?.currency ?? ledgerCurrencyDisplay();
   const amount = `${signGlyph(fils, sign)}${valueFor(fils, spec, decimals, localeKey)}`;
-  const placement = placementFor(currency, localeKey);
-  const currencyLabel = labelFor(currency, localeKey);
+  const placement = language === 'ar' ? { position: 'after' as const, spaced: true } : placementFor(currency, localeKey);
+  const currencyLabel = language === 'ar' ? currency : labelFor(currency, localeKey);
   const metrics = SIZES[size];
   const fg = color ?? palette.onBand;
   const fg2 = secondaryColor ?? palette.onBandSecondary;
@@ -124,7 +127,7 @@ export function BandFigure({
     fontSize: fittedSize, lineHeight: metrics.lineHeight * fitRatio, letterSpacing: metrics.letterSpacing * fitRatio, color: fg,
   }];
   const prefixStyle: TextStyle = { fontSize: metrics.prefix, lineHeight: Math.round(metrics.prefix * 1.25), color: fg2 };
-  const spoken = [label, `${currency} ${amount}`].filter(Boolean).join(', ') + (qualifier ? `. ${qualifier}` : '');
+  const spoken = [label, moneyCodeRun(amount, currency, language)].filter(Boolean).join(', ') + (qualifier ? `. ${qualifier}` : '');
 
   // Own the currency layout here for both static and rolling figures. A
   // rolling amount gets the identical fitted metrics and an isolated LTR row.

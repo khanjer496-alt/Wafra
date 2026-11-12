@@ -21,6 +21,7 @@ import { tapped } from '@/lib/haptics';
 import { t } from '@/lib/i18n';
 import { onboardingAlertExamples, type OnboardingAlertExample } from '@/lib/onboarding-alert-examples';
 import { onboardingBankRegion, type OnboardingBankExample } from '@/lib/onboarding-bank-examples';
+import { useOnlineLogosAllowed } from '@/lib/store';
 import { verifiedLogoUrl } from '@/lib/verified-logo-identities';
 import { ALERT_DELIVERY_PRESETS, onboardingHistoryGap, onboardingNoAutomaticCapture } from '@/lib/onboarding';
 import type {
@@ -111,8 +112,10 @@ function BrandLogo({ name, domain, color, fallbackIcon, size = 36 }: {
 }) {
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  // Match Android’s offline ledger artwork, including these fictional onboarding examples.
-  const uri = Platform.OS !== 'android' && domain ? verifiedLogoUrl(domain) : null;
+  // Online logos need the same consent as ledger artwork (off by default, off on Android
+  // for launch); without it these fictional examples show their initials locally.
+  const consented = useOnlineLogosAllowed();
+  const uri = consented && Platform.OS !== 'android' && domain ? verifiedLogoUrl(domain) : null;
   const showImage = !!uri && !failed;
   const radius = Math.round(size * 0.32);
   // No brand-coloured or white tile: the logo sits on the night surface. The

@@ -59,7 +59,10 @@ function loadStore({ storePath = 'src/lib/store.tsx', counted = {} } = {}) {
     },
     '@/lib/shared-alert-format-submit': { eraseSharingCredential: async () => {} },
     '@/lib/share-text': { cleanupGeneratedExports: async () => {} },
-    '../../modules/wafra-widgets': { setWidgetSnapshot() {}, clearWidgetSnapshot() {} },
+    '../../modules/wafra-widgets': { setWidgetSnapshot() {}, clearWidgetSnapshot() {}, async setAppPrivacy() {} },
+    // Native/privacy presentation boundaries; monetary reducer modules remain real.
+    '@/lib/logo-cache-lifecycle': { setLogoLookupsAllowed() {} },
+    '@/lib/widget-sync': { async invalidateWidgetSnapshotSync() {}, requestWidgetSnapshotSync: () => ({ done: Promise.resolve('unchanged') }) },
     '@/lib/theme-preference': { getThemePreference: () => 'system', setThemePreference() {} },
     '@/lib/ledger-persistence': {
       createLedgerPersistence: () => ({ load: async () => null, save: async () => true }),

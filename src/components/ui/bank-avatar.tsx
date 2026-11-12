@@ -8,14 +8,16 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
 import { resolveBankLogo, type ResolvedBankLogo } from '@/lib/bank-logo-resolver';
 import type { Account } from '@/lib/types';
-import { usePrivateMode } from '@/lib/store';
+import { useOnlineLogosAllowed } from '@/lib/store';
 
 function BankAvatarInner({ account, size = 36 }: { account: Account; size?: number }) {
   const theme = useTheme();
   const dark = useColorScheme() === 'dark';
-  const privateMode = usePrivateMode();
-  // Android record names may come from bank SMS; even a cached CDN URL reveals the brand.
-  const allowRemote = Platform.OS !== 'android' && !privateMode;
+  // Launch decision: Android never calls Brandfetch, even after opt-in (Google Play
+  // Data safety does not declare it). Android logos need a Data safety update first.
+  const consented = useOnlineLogosAllowed();
+  const allowRemote = Platform.OS !== 'android' && consented;
+  // Consent covers both name searches and CDN image requests, including cache hits.
   const [logo, setLogo] = useState<ResolvedBankLogo | null>(null);
   const [failed, setFailed] = useState(false);
   const [loadedLogo, setLoadedLogo] = useState<string | null>(null);

@@ -35,7 +35,7 @@ function load(name) {
     t: (key) => ({ today: language === 'ar' ? 'اليوم' : 'Today', yesterday: language === 'ar' ? 'أمس' : 'Yesterday' }[key] ?? key),
   };
   if (cache.has(name)) return cache.get(name);
-  assert.ok(['format', 'date-time-locale', 'country-names', 'ledger-money', 'currency-metadata', 'arabic-sms'].includes(name), name);
+  assert.ok(['format', 'money-code-run', 'date-time-locale', 'country-names', 'ledger-money', 'currency-metadata', 'arabic-sms'].includes(name), name);
   const filename = path.join(__dirname, '../../src/lib', `${name}.ts`);
   const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: filename,

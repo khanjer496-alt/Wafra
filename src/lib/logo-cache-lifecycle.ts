@@ -1,11 +1,19 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
 
 // These namespaces include old cache versions, even if a resolver has not
 // loaded this session. Do not clear unrelated AsyncStorage keys or image caches.
 const CACHE_PREFIXES = ['wafra:merchant-logo:', 'wafra:bank-logo:'];
 const resetters = new Set<() => void>();
 let generation = 0;
+let lookupsAllowed = false;
+
+/** Consent is session-gated until the hydrated store has explicitly opted in. */
+export function setLogoLookupsAllowed(allowed: boolean): void {
+  if (lookupsAllowed === allowed) return;
+  lookupsAllowed = allowed;
+  generation += 1;
+  for (const reset of resetters) reset();
+}
 let erasesInProgress = 0;
 let mutationQueue: Promise<unknown> = Promise.resolve();
 
@@ -20,13 +28,13 @@ export function registerLogoCacheReset(reset: () => void): void {
   resetters.add(reset);
 }
 
-/** Android financial records may originate in SMS. Skip cache, search and CDN resolution entirely. */
+/** Both platforms skip cache, search and CDN resolution until explicit opt-in. */
 export function logoCacheGeneration(): number | null {
-  return Platform.OS === 'android' || erasesInProgress > 0 ? null : generation;
+  return !lookupsAllowed || erasesInProgress > 0 ? null : generation;
 }
 
 export function isLogoCacheGenerationCurrent(started: number): boolean {
-  return erasesInProgress === 0 && started === generation;
+  return lookupsAllowed && erasesInProgress === 0 && started === generation;
 }
 
 /**

@@ -126,18 +126,24 @@ an OTA update cannot add the SDK to an older binary.
 
 ## Localization and privacy
 
-Publish English and Arabic variants in Superwall. Wafra passes its saved app
-language and market to each placement so the campaign can deterministically
-select EN/AR even after an in-session language change. Manually QA Arabic RTL.
+Publish English and Arabic variants in Superwall and let Superwall's built-in
+locale localization choose between them: Wafra configures the SDK with a
+`localeIdentifier` built from its saved app language and the device region, and
+sends exactly ONE placement parameter with every `onboarding` and `pro_upgrade`
+request: `language`, with the value `"en"` or `"ar"` taken from the saved app
+language (the SDK's `localeIdentifier` is fixed when the SDK is configured, so
+`language` is what follows an in-session language change, including choosing Arabic
+in first-run onboarding). Use `params.language` to choose the Arabic variant. No
+other placement parameter and NO user attributes are sent, so a rule or template
+that reads `market`, `source`, `focus`, `intention` or `platform` will never match.
+Manually QA Arabic RTL.
 
-Wafra supplies only product/onboarding metadata: language, market, onboarding
-focus/tracking/intention, capture choice and local trial days remaining. It does
-**not** send ledger rows, balances, transaction amounts, SMS bodies, card/account
-identifiers or the locally stored first name to Superwall.
-
-When Wafra's saved local-only preference is active, optional Superwall event
-tracking is set to `none` and Wafra-supplied targeting attributes are withheld.
-Store purchase/restore remains usable.
+Wafra does **not** send ledger rows, balances, transaction amounts, SMS bodies,
+card/account identifiers or the locally stored first name to Superwall. Superwall
+event tracking is set to `none` and external data collection is off for everyone,
+not only in Private Mode. Store purchase/restore remains usable. The SDK still sends
+its own anonymous app-user alias, device fields and the request IP; App Privacy
+declares these.
 
 ## Entitlement behavior
 
