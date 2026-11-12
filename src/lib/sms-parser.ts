@@ -2498,29 +2498,38 @@ const EN_CREDIT_WORDS = {
   notARefundCredit: /\b(?:cash\s*back|rewards?|points|miles|bonus)\b/i,
 };
 type CreditClause = { verbs: string[]; start: number; end: number };
-/** The credit clause of one sentence: its first credit verb, with any "… and credited" coordinated after it. */
-function enCreditClause(sentence: string): CreditClause | null {
-  if (EN_CREDIT_WORDS.notARefundCredit.test(sentence)) return null;
+// "… has not been credited and the refund has now been credited …": a new subject after and/but starts a new clause.
+// "… and was later reversed" (no subject) or "… and the refund was reversed" (a take-back) stays the first clause's tail.
+const EN_NEW_CLAUSE_RE = /(?:\b(?:and|but|while|whereas)\s+(?:the|this|that|your|a|an|it|its|our)\b|;)/i;
+/** The credit clauses of one sentence: each starts at a credit verb, with any "… and credited" coordinated after it. */
+function enCreditClauses(sentence: string): CreditClause[] {
+  if (EN_CREDIT_WORDS.notARefundCredit.test(sentence)) return [];
   const words = EN_CREDIT_WORDS.verb;
   words.lastIndex = 0;
-  let clause: CreditClause | null = null;
+  const clauses: CreditClause[] = [];
   for (let match = words.exec(sentence); match; match = words.exec(sentence)) {
     const at = match.index;
     const lead = sentence.slice(0, at);
     const word = match[0];
+    const clause = clauses[clauses.length - 1];
     if (EN_CREDIT_WORDS.baseNeedsModal.test(word) && !EN_CREDIT_WORDS.modalBefore.test(lead) &&
       !(clause && EN_CREDIT_WORDS.coordinated.test(lead))) continue;
     if (/ing$/i.test(word) && !EN_CREDIT_WORDS.progressiveBefore.test(lead) && !EN_CREDIT_WORDS.pendingBefore.test(lead) &&
       !(clause && EN_CREDIT_WORDS.coordinated.test(lead))) continue;
     if (EN_CREDIT_WORDS.determinerBefore.test(lead) || EN_CREDIT_WORDS.nounAfter.test(sentence.slice(at + word.length))) continue;
     if (clause) {
-      // Only a verb coordinated with the clause's own verb joins it; a later one ("… and was later reversed") is its tail.
-      if (EN_CREDIT_WORDS.coordinated.test(lead) && at - clause.end <= 6) { clause.verbs.push(word.toLowerCase()); clause.end = at + word.length; }
-      break;
+      if (EN_CREDIT_WORDS.coordinated.test(lead) && at - clause.end <= 6) {
+        clause.verbs.push(word.toLowerCase());
+        clause.end = at + word.length;
+        continue;
+      }
+      const between = sentence.slice(clause.end, at);
+      const joint = EN_NEW_CLAUSE_RE.exec(between);
+      if (!joint || REFUND_CREDIT_TAKEN_BACK_RE.test(sentence.slice(clause.end + joint.index))) break;
     }
-    clause = { verbs: [word.toLowerCase()], start: at, end: at + word.length };
+    clauses.push({ verbs: [word.toLowerCase()], start: at, end: at + word.length });
   }
-  return clause;
+  return clauses;
 }
 /** The verdict for one sentence's credit clause; `after` is the text that follows the sentence. */
 export function creditSettlement(sentence: string, clause: CreditClause, after = ''): CreditSettlement {
@@ -2540,14 +2549,20 @@ export function creditSettlement(sentence: string, clause: CreditClause, after =
   return { verdict: 'settled' };
 }
 const CREDIT_SETTLEMENT_DEBIT_RE = /\b(?:debited|charged|deducted|spent|withdrawn|paid|purchased?)\b/i;
-type SettlementSentence = { start: number; text: string; clause: CreditClause | null };
+type SettlementSentence = { start: number; text: string; clauses: CreditClause[] };
+/** One sentence's verdict: a settled clause settles it; otherwise a refusal outranks a note that can be blanked. */
+function sentenceSettlement(s: SettlementSentence, after: string): CreditSettlement {
+  const verdicts = s.clauses.map((clause) => creditSettlement(s.text, clause, after));
+  return verdicts.find((v) => v.verdict === 'settled') ?? verdicts.find((v) => v.verdict === 'refused' || v.verdict === 'unknown') ??
+    verdicts[0];
+}
 function settlementSentences(body: string): SettlementSentence[] {
   const out: SettlementSentence[] = [];
   let start = 0;
   for (const end of [...[...body.matchAll(REFUND_SENTENCE_BREAK_RE)].map((match) => match.index! + match[0].length), body.length]) {
     if (end > start) {
       const text = body.slice(start, end);
-      out.push({ start, text, clause: enCreditClause(text) });
+      out.push({ start, text, clauses: enCreditClauses(text) });
     }
     start = Math.max(start, end);
   }
@@ -2568,17 +2583,17 @@ function settlementSentences(body: string): SettlementSentence[] {
  */
 export function hasOnlyUnsettledCredit(message: string): boolean {
   const sentences = settlementSentences(message);
-  if (sentences.some((s) => !s.clause && CREDIT_SETTLEMENT_DEBIT_RE.test(s.text) && refundAmounts(s.text).length > 0)) return false;
-  const carrying = sentences.filter((s) => s.clause && refundAmounts(s.text).length > 0);
+  if (sentences.some((s) => s.clauses.length === 0 && CREDIT_SETTLEMENT_DEBIT_RE.test(s.text) && refundAmounts(s.text).length > 0)) return false;
+  const carrying = sentences.filter((s) => s.clauses.length > 0 && refundAmounts(s.text).length > 0);
   return carrying.length > 0 && carrying.every((s) =>
-    creditSettlement(s.text, s.clause!, message.slice(s.start + s.text.length)).verdict !== 'settled');
+    sentenceSettlement(s, message.slice(s.start + s.text.length)).verdict !== 'settled');
 }
 function vetoUnsettledCredit(message: string, parsed: ParsedSms, reparse: (text: string) => ParsedSms | null): ParsedSms | null {
   if (parsed.kind !== 'transaction') return parsed;
   const sentences = settlementSentences(message);
-  const credits = sentences.filter((s) => s.clause);
+  const credits = sentences.filter((s) => s.clauses.length > 0);
   if (credits.length === 0) return parsed;
-  const debits = sentences.filter((s) => !s.clause && CREDIT_SETTLEMENT_DEBIT_RE.test(s.text) && refundAmounts(s.text).length > 0);
+  const debits = sentences.filter((s) => s.clauses.length === 0 && CREDIT_SETTLEMENT_DEBIT_RE.test(s.text) && refundAmounts(s.text).length > 0);
   const afterOf = (s: SettlementSentence) => message.slice(s.start + s.text.length);
   if (debits.length > 0) {
     const debitAmounts = debits.flatMap((s) => refundAmounts(s.text));
@@ -2587,7 +2602,7 @@ function vetoUnsettledCredit(message: string, parsed: ParsedSms, reparse: (text:
     let blank = false;
     for (const s of credits) {
       if (refundAmounts(s.text).some((amount) => !debitAmounts.includes(amount))) return null;
-      const verdict = creditSettlement(s.text, s.clause!, afterOf(s));
+      const verdict = sentenceSettlement(s, afterOf(s));
       if (verdict.verdict === 'settled') settled = true;
       else if (verdict.verdict === 'not-settled') {
         blank = true;
@@ -2604,11 +2619,11 @@ function vetoUnsettledCredit(message: string, parsed: ParsedSms, reparse: (text:
   }
   const carrying = credits.filter((s) => refundAmounts(s.text).some((amount) => figures.includes(amount)));
   if (carrying.length === 0) return parsed;
-  const verdicts = carrying.map((s) => ({ s, verdict: creditSettlement(s.text, s.clause!, afterOf(s)) }));
+  const verdicts = carrying.map((s) => ({ s, verdict: sentenceSettlement(s, afterOf(s)) }));
   if (verdicts.some(({ verdict }) => verdict.verdict === 'settled')) return parsed;
   if (parsed.type === 'income') return null;
   const refundVerbExpense = verdicts.every(({ s }) => !CREDIT_SETTLEMENT_DEBIT_RE.test(s.text) &&
-    !s.clause!.verbs.every((verb) => verb.startsWith('process')));
+    !s.clauses.every((clause) => clause.verbs.every((verb) => verb.startsWith('process'))));
   return refundVerbExpense ? null : parsed;
 }
 const MANDATE_LIFECYCLE_RE =
@@ -9566,9 +9581,6 @@ export function parseSms(
     }
   }
   if (!parsed) return null;
-  // The shared credit-settled veto (CEO 080fa431). A blanked re-read has no credit clause left, so it cannot recurse twice.
-  const vetted = vetoUnsettledCredit(message, parsed, (text) => parseSms(text, overrides, options));
-  if (vetted !== parsed) return vetted;
   if (parsed.kind === 'transaction') {
     const context = readPrincipalContext(message, parsed);
     if (context) {
@@ -9587,6 +9599,10 @@ export function parseSms(
       if (hasUnsettledPrincipalInContext(context, parsed)) return null;
     }
   }
+  // The shared credit-settled veto (CEO 080fa431), on the direction the principal context settled. A blanked re-read has
+  // no credit clause left, so it cannot recurse twice.
+  const vetted = vetoUnsettledCredit(message, parsed, (text) => parseSms(text, overrides, options));
+  if (vetted !== parsed) return vetted;
   // An Indian domestic-rail (NEFT/IMPS/RTGS/UPI) movement in a foreign
   // currency is an account at a bank abroad: "HSBC" is a UAE sender too, and an
   // HSBC India credit of INR 3,200 was booked as AED income at the offline
