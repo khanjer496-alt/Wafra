@@ -117,7 +117,15 @@ function harness(options = {}) {
     },
     '@/lib/billing-locale': load(path.join(root, 'src/lib/billing-locale.ts')),
     '@/lib/capture': { subscribeIosCaptureEntitlementReset: () => () => {} },
-    '@/lib/android-play-billing': {
+    // `playNative` runs the real Play wrapper and fakes only the native bridge
+    // (WafraPlayBilling.querySubscriptions, which returns SubscriptionResult.toMap()).
+    '@/lib/android-play-billing': options.playNative ? load(path.join(root, 'src/lib/android-play-billing.ts'), {
+      'expo-modules-core': { requireOptionalNativeModule: name => {
+        assert.equal(name, 'WafraPlayBilling');
+        return { querySubscriptions: async () => { calls.playQueries++; return options.playNative(); } };
+      } },
+      '@/lib/purchases': productContract,
+    }) : {
       isAndroidPlayBillingAvailable: () => options.playQueryAvailable !== false,
       queryAndroidPlaySubscriptions: async () => {
         calls.playQueries++;
@@ -705,3 +713,73 @@ for (const action of ['purchase', 'restore']) {
     assert.equal(h.state.pro, true, 'only the new session response can grant access');
   });
 }
+
+// Android purchase -> Pro, end to end in the app's own code. Only the two native
+// seams are faked: the Superwall SDK's product/purchase replies, and the
+// WafraPlayBilling bridge, which returns exactly what PurchaseProjection makes of
+// a real Play Purchase (PurchaseProjectionTest pins that projection for both
+// plans). Everything between them is the shipping source: purchases.ts (the
+// pinned `<sku>:<plan>:sw-none` request, the offer match), android-play-billing.ts
+// (the Play answer validation) and the provider's purchasePro/refreshAndroid.
+const playProjection = sku => ({ status: 'active', activeProductIds: [sku], pendingProductIds: [], responseCode: 0 });
+const playEmpty = () => ({ status: 'inactive', activeProductIds: [], pendingProductIds: [], responseCode: 0 });
+const realPurchases = load(path.join(root, 'src/lib/purchases.ts'), {
+  'react-native': { Platform: { OS: 'android' } }, '@/lib/complimentary-access': { complimentaryAccessUntil: () => 0 },
+});
+
+for (const plan of ['weekly', 'yearly']) {
+  test(`Android Play purchase of wafra_pro_${plan}:${plan} unlocks Pro through the real id mapping and Play query`, async () => {
+    const pinned = `wafra_pro_${plan}:${plan}:sw-none`;
+    assert.ok(Array.from(realPurchases.proProductIdsForPlatform('android')).includes(pinned),
+      'the app must request the pinned Play base plan with no offer');
+    let owned = null;
+    const h = harness({
+      products: async () => [planProduct('weekly'), planProduct('yearly')],
+      purchase: async id => { owned = id.split(':')[0]; return { type: 'purchased' }; },
+      playNative: () => owned ? playProjection(owned) : playEmpty(),
+    });
+    await h.renderRuntime(3);
+    assert.equal(h.state.pro, false, 'no Play ownership yet');
+    const offer = Array.from(await h.billing().fetchProOffers()).find(item => item.plan === plan);
+    assert.equal(offer?.productId, pinned);
+    assert.equal(await h.billing().purchasePro(offer.productId), 'purchased');
+    assert.deepEqual(h.calls.purchases, [pinned], 'Superwall buys the pinned base plan');
+    assert.equal(h.state.pro, true);
+    assert.deepEqual(h.calls.pro, [true]);
+  });
+}
+
+test('Android id mapping breaks fail closed: a non-pinned SDK id is not sold, another plan is not confirmed', async () => {
+  const autoOnly = harness({
+    products: async () => [{ ...planProduct('weekly'), fullIdentifier: 'wafra_pro_weekly:weekly:sw-auto' }],
+    playNative: playEmpty,
+  });
+  await autoOnly.renderRuntime(3);
+  assert.deepEqual(Array.from(await autoOnly.billing().fetchProOffers()), []);
+  assert.equal(await autoOnly.billing().purchasePro('wafra_pro_weekly:weekly:sw-auto'), 'unavailable');
+  assert.deepEqual(autoOnly.calls.purchases, []);
+
+  let owned = null;
+  const wrongPlan = harness({
+    products: async () => [planProduct('weekly')],
+    purchase: async () => { owned = 'wafra_pro_yearly'; return { type: 'purchased' }; },
+    playNative: () => owned ? playProjection(owned) : playEmpty(),
+  });
+  await wrongPlan.renderRuntime(3);
+  await wrongPlan.billing().fetchProOffers();
+  assert.equal(await wrongPlan.billing().purchasePro(productId('weekly')), 'unconfirmed');
+});
+
+test('Play bridge allowlist and the app product ids stay one list', () => {
+  const java = fs.readFileSync(path.join(root,
+    'modules/wafra-play-billing/android/src/main/java/expo/modules/wafraplaybilling/PurchaseProjection.java'), 'utf8');
+  const allowed = /ALLOWED\s*=\s*new HashSet<>\(Arrays\.asList\(([^)]*)\)\)/.exec(java);
+  assert.ok(allowed, 'PurchaseProjection.ALLOWED not found');
+  const javaIds = [...allowed[1].matchAll(/"([^"]+)"/g)].map(match => match[1]).sort();
+  assert.deepEqual(javaIds, Array.from(realPurchases.PRO_ENTITLEMENT_PRODUCT_IDS).sort());
+  for (const pinned of realPurchases.proProductIdsForPlatform('android')) {
+    // Play reports the bare subscription id; purchasePro confirms on the first segment.
+    assert.ok(javaIds.includes(pinned.split(':')[0]), `${pinned} must confirm against a Play-reported id`);
+    assert.ok(!javaIds.includes(pinned));
+  }
+});
