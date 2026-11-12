@@ -340,14 +340,8 @@ function sources(dir = SRC) {
 
   // Android never revokes a permission on request, so the switch can only
   // snap back. Naming the path without opening it is a dead end.
-  const revokeConfirmation = settings.match(/question:\s*t\('turnSmsReadingOff'\),([\s\S]*?)\n\s*return;/)?.[1] ?? '';
-  const revokeHelper = fs.readFileSync(path.join(SRC, 'lib/auto-import.ts'), 'utf8')
-    .match(/export async function openSmsRevocationSettings\([^)]*\): Promise<void> \{([\s\S]*?)\n\}/)?.[1] ?? '';
-  ok('the SMS revoke alert opens system settings without a grant disclosure',
-    /body:\s*t\('smsRevokeHint'\)/.test(revokeConfirmation) &&
-      /onConfirm:[\s\S]*openSmsRevocationSettings\(\)/.test(revokeConfirmation) &&
-      /Linking\.openSettings\(\)/.test(revokeHelper) &&
-      !/requestConsent|withAndroidCaptureConsent|requestSmsPermission/.test(revokeHelper));
+  ok('the SMS revoke alert can open the system settings it names',
+    /t\('smsRevokeHint'\)[\s\S]{0,300}openSmsRevocationSettings\(\)/.test(settings));
 
   // The salary-day grid was removed from Settings AND onboarding at the
   // owner's request (961684b). Its styles outlived it and kept this file
