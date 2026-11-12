@@ -8,6 +8,8 @@
  * process start. Internal Release builds can expose the fixed snapshot as a
  * local JSON file; production builds do not render that export control.
  */
+import type { RuntimePerformanceSnapshot } from '@/lib/runtime-performance';
+
 export const LAUNCH_PHASES = [
   'js-instrumentation-start',
   'fonts-ready',
@@ -85,14 +87,31 @@ export function getLaunchMetrics(): LaunchMetric[] {
   return launchTimeline.snapshot();
 }
 
-export function isInternalLaunchDiagnosticsEnabled(): boolean {
-  return typeof __DEV__ !== 'undefined' && __DEV__ &&
-    process.env.EXPO_PUBLIC_WAFRA_INTERNAL_DIAGNOSTICS === '1';
+/**
+ * An internal performance-diagnostics build (TestFlight INTERNAL group only).
+ * EXPO_PUBLIC_WAFRA_PERF_DIAG is set by no store profile; a test pins that.
+ */
+export function isPerfDiagnosticsBuild(): boolean {
+  try {
+    return process.env.EXPO_PUBLIC_WAFRA_PERF_DIAG === '1';
+  } catch {
+    return false;
+  }
 }
 
-export function serializeLaunchMetrics(): string {
+export function isInternalLaunchDiagnosticsEnabled(): boolean {
+  return (typeof __DEV__ !== 'undefined' && __DEV__ &&
+    process.env.EXPO_PUBLIC_WAFRA_INTERNAL_DIAGNOSTICS === '1') || isPerfDiagnosticsBuild();
+}
+
+/**
+ * Source-free: fixed phase names, fixed operation tags, counts and
+ * milliseconds only. `runtime` is the stall monitor snapshot when available.
+ */
+export function serializeLaunchMetrics(runtime?: RuntimePerformanceSnapshot): string {
   return JSON.stringify({
     schemaVersion: 1,
     metrics: getLaunchMetrics(),
+    ...(runtime ? { runtime } : {}),
   }, null, 2);
 }

@@ -59,6 +59,7 @@ import { useStoreActions, useStoreSelector } from '@/lib/store';
 import { historyStatusOnly } from '@/lib/store-selection';
 import type { Account, CategoryId, Transaction } from '@/lib/types';
 import { t, tf, type StringKey } from '@/lib/i18n';
+import { measureRuntimeOperation } from '@/lib/runtime-performance';
 
 const NO_IDS: ReadonlySet<string> = new Set();
 
@@ -371,7 +372,8 @@ export default function TransactionsScreen() {
   // Search also matches the account a row belongs to.
   const accountNames = useMemo(() => new Map(state.accounts.map((account) => [account.id,
     [account.name, account.bankName].filter(Boolean).join(' ')] as const)), [state.accounts]);
-  const filterIndex = useMemo(() => createTransactionFilterIndex(state.transactions, language, accountNames, state.customCategories),
+  const filterIndex = useMemo(() => measureRuntimeOperation('transactions-filter-index',
+    () => createTransactionFilterIndex(state.transactions, language, accountNames, state.customCategories)),
     // monthKey follows the current stored salary-day boundary.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.transactions, language, state.monthStartDay, accountNames, state.customCategories]);
@@ -499,7 +501,8 @@ export default function TransactionsScreen() {
     amountExponent: state.ledgerMoney?.exponent ?? 2 }),
   [appliedQuery, merchantFilter, smsOnly, autoAddedActive, currentKey, period, liveAccounts, internal, corroborating,
     separateTransferIds, reviewTransferIds, separatedPartnerIds, transferIds, reviewIds, state.ledgerMoney?.exponent]);
-  const projection = useMemo(() => projectTransactionFilter(filterIndex, appliedFilters, filterOptions),
+  const projection = useMemo(() => measureRuntimeOperation('transactions-projection',
+    () => projectTransactionFilter(filterIndex, appliedFilters, filterOptions)),
     [filterIndex, appliedFilters, filterOptions]);
   const { filtered, totalShown, excluded, separatedTransfers } = projection;
   const transferContributes = separatedTransfers.incomeFils > 0 || separatedTransfers.expenseFils > 0;

@@ -365,9 +365,13 @@ export const runIosLocalCaptureCycle = async (
   if (mode === 'drain') {
     let drain: Awaited<ReturnType<IosLocalCoordinator['drain']>> | null = null;
     if (status.enabled) {
+      const drainStartedAt = Date.now();
       try {
         drain = await dependencies.coordinator.drain();
       } finally {
+        // Wall time of the iOS native-queue drain (parse, Review staging,
+        // durable writes and native ACK). Recorded only where the monitor runs.
+        recordRuntimeOperation('ios-capture-drain', Date.now() - drainStartedAt);
         // A partial page can update native counts or a first-capture milestone
         // before a later durability/ACK step fails. Surfaces must reread those
         // facts even when the drain rejects.
@@ -415,7 +419,12 @@ export const recoverIosCaptureQueue = async (
 
   // This intentionally bypasses the subscription paywall. It drains only the
   // already bounded backlog and never re-enables native admission.
-  await dependencies.coordinator.drain();
+  const drainStartedAt = Date.now();
+  try {
+    await dependencies.coordinator.drain();
+  } finally {
+    recordRuntimeOperation('ios-capture-drain', Date.now() - drainStartedAt);
+  }
   if (!usable()) return false;
 
   const persistWarning = async (status: WafraLiveCaptureStatus): Promise<void> => {

@@ -127,6 +127,7 @@ import {
 } from '@/lib/trusted-bank-notification-packages';
 import SmsReader from '../../modules/sms-reader';
 import { t, tf } from '@/lib/i18n';
+import { beginRuntimeOperation } from '@/lib/runtime-performance';
 
 /**
  * A language is named in its own language, in both languages: an Arabic
@@ -699,6 +700,9 @@ export default function SettingsScreen() {
   const ledgerCurrencyLocked = ledgerStateHasMoney(state);
   const applyLanguage = (next: 'system' | 'en' | 'ar') => {
     if (next === languagePreference) return;
+    // Times the EN-AR navigator remount; the root layout ends the span after
+    // the remounted tree commits. Diagnostics builds only; no effect otherwise.
+    if (next !== 'system' && next !== language) beginRuntimeOperation('language-remount');
     // No alert, and nothing to restart. The strings re-render from this and
     // the layout mirrors from the `direction` style on the root — see the
     // Direction component in app/_layout.tsx for why I18nManager could never

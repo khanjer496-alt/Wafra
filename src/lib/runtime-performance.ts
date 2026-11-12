@@ -8,6 +8,22 @@ import { AppState, Platform } from 'react-native';
  * does not look like a one-hour JS-thread stall.
  */
 
+/**
+ * Android testers always collect these timings. iOS collects them only in an
+ * internal performance-diagnostics build (EXPO_PUBLIC_WAFRA_PERF_DIAG=1, set by
+ * no store profile), so App Store builds keep the exact previous behaviour: no
+ * sampler, no breadcrumb writes and no recorded operations.
+ */
+const perfDiagnosticsBuild = (): boolean => {
+  try {
+    return process.env.EXPO_PUBLIC_WAFRA_PERF_DIAG === '1';
+  } catch {
+    return false;
+  }
+};
+const monitorEnabled = (): boolean =>
+  Platform.OS === 'android' || (Platform.OS === 'ios' && perfDiagnosticsBuild());
+
 const SAMPLE_INTERVAL_MS = 1_000;
 const RECENT_STALLS_MAX = 8;
 const RUNTIME_BREADCRUMB_KEY = 'wafra.runtime-breadcrumb.v1';
@@ -83,7 +99,13 @@ export type RuntimeOperationTag =
   | 'wallet-balances'
   | 'wallet-dues'
   | 'wallet-reissues'
-  | 'wallet-activity';
+  | 'wallet-activity'
+  | 'store-hydrate'
+  | 'transactions-filter-index'
+  | 'transactions-projection'
+  | 'flow-summary'
+  | 'language-remount'
+  | 'ios-capture-drain';
 
 // Runtime validation also protects callers crossing untyped/native boundaries.
 // Record makes additions to the public tag union require an explicit allowlist.
@@ -122,6 +144,12 @@ const OPERATION_TAGS: Record<RuntimeOperationTag, true> = {
   'wallet-dues': true,
   'wallet-reissues': true,
   'wallet-activity': true,
+  'store-hydrate': true,
+  'transactions-filter-index': true,
+  'transactions-projection': true,
+  'flow-summary': true,
+  'language-remount': true,
+  'ios-capture-drain': true,
 };
 const SLOW_OPERATION_MS = 100;
 const OPERATION_TRACE_INTERVAL_MS = 1_000;
@@ -190,7 +218,7 @@ function parsePersistedBreadcrumb(raw: string | null): PersistedRuntimeBreadcrum
 }
 
 function initializeBreadcrumbPersistence(): Promise<void> {
-  if (Platform.OS !== 'android') return Promise.resolve();
+  if (!monitorEnabled()) return Promise.resolve();
   if (breadcrumbInitPromise) return breadcrumbInitPromise;
   breadcrumbInitPromise = AsyncStorage.getItem(RUNTIME_BREADCRUMB_KEY)
     .then((raw) => {
@@ -222,7 +250,7 @@ function currentBreadcrumb(at: number): PersistedRuntimeBreadcrumb {
 }
 
 function writeBreadcrumb(): void {
-  if (Platform.OS !== 'android') return;
+  if (!monitorEnabled()) return;
   const at = now();
   const payload = JSON.stringify(currentBreadcrumb(at));
   lastBreadcrumbWriteAt = at;
@@ -233,7 +261,7 @@ function writeBreadcrumb(): void {
 }
 
 function persistBreadcrumbSoon(urgent = false): void {
-  if (Platform.OS !== 'android') return;
+  if (!monitorEnabled()) return;
   const elapsed = now() - lastBreadcrumbWriteAt;
   const wait = urgent ? 0 : Math.max(0, BREADCRUMB_WRITE_INTERVAL_MS - elapsed);
   if (wait === 0) {
@@ -282,7 +310,7 @@ const sample = () => {
  * no route, merchant, account or arbitrary UI label can enter diagnostics.
  */
 export function recordRuntimeInteraction(tag: RuntimeInteractionTag): void {
-  if (Platform.OS !== 'android') return;
+  if (!monitorEnabled()) return;
   if (tag === 'main-tab-press') {
     const at = now();
     pruneTabPresses(at);
@@ -301,7 +329,7 @@ export function recordRuntimeInteraction(tag: RuntimeInteractionTag): void {
  * contents.
  */
 export function recordRuntimeOperation(tag: RuntimeOperationTag, elapsedMs: number): void {
-  if (Platform.OS !== 'android' || typeof tag !== 'string' ||
+  if (!monitorEnabled() || typeof tag !== 'string' ||
       !Object.hasOwn(OPERATION_TAGS, tag) || !Number.isFinite(elapsedMs) || elapsedMs < 0) return;
   const ms = Math.round(elapsedMs);
   const previous = operationStats.get(tag) ?? { count: 0, maxMs: 0, totalMs: 0, recentMs: [] };
@@ -312,7 +340,9 @@ export function recordRuntimeOperation(tag: RuntimeOperationTag, elapsedMs: numb
     recentMs: [...previous.recentMs, ms].slice(-OPERATION_RECENT_MAX),
   });
 
-  if (process.env.EXPO_PUBLIC_WAFRA_CAPTURE_TRACE !== '1' || elapsedMs < SLOW_OPERATION_MS) return;
+  // The console trace stays an Android tester tool; iOS diagnostics are export-only.
+  if (Platform.OS !== 'android' || process.env.EXPO_PUBLIC_WAFRA_CAPTURE_TRACE !== '1' ||
+      elapsedMs < SLOW_OPERATION_MS) return;
   const at = now();
   if (!nonnegativeFinite(at)) return;
   const last = lastOperationTraceAt.get(tag);
@@ -325,6 +355,25 @@ export function recordRuntimeOperation(tag: RuntimeOperationTag, elapsedMs: numb
   } catch {
     // Local diagnostics must never change application behavior.
   }
+}
+
+/**
+ * A span started in one module and completed in another (for example a
+ * language change that remounts the navigator). Only one span per tag is
+ * open; a span older than a minute is dropped rather than reported.
+ */
+const pendingOperationStarts = new Map<RuntimeOperationTag, number>();
+const PENDING_OPERATION_MAX_MS = 60_000;
+export function beginRuntimeOperation(tag: RuntimeOperationTag): void {
+  if (!monitorEnabled() || typeof tag !== 'string' || !Object.hasOwn(OPERATION_TAGS, tag)) return;
+  pendingOperationStarts.set(tag, now());
+}
+export function endRuntimeOperation(tag: RuntimeOperationTag): void {
+  const startedAt = pendingOperationStarts.get(tag);
+  if (startedAt === undefined) return;
+  pendingOperationStarts.delete(tag);
+  const elapsed = now() - startedAt;
+  if (elapsed <= PENDING_OPERATION_MAX_MS) recordRuntimeOperation(tag, elapsed);
 }
 
 export function measureRuntimeOperation<T>(tag: RuntimeOperationTag, work: () => T): T {
@@ -348,9 +397,9 @@ export async function measureRuntimeOperationAsync<T>(
   }
 }
 
-/** Idempotent; Android only. Returns a cleanup for tests/unusual root unmounts. */
+/** Idempotent; Android, or iOS internal diagnostics builds. Returns a cleanup for tests/unusual root unmounts. */
 export function startRuntimePerformanceMonitor(): () => void {
-  if (Platform.OS !== 'android') return () => {};
+  if (!monitorEnabled()) return () => {};
   if (!started) {
     started = true;
     void initializeBreadcrumbPersistence();
