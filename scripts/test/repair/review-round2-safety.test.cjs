@@ -592,17 +592,26 @@ test('refund hardening posts/negated-then-new-clause-credited', () => {
 // (it used to post income, or be dropped). A completed refund sentence without its own amount is a second movement, so the
 // alert never auto-posts (it used to book the debit amount as income). A negated "refunded" with its own amount is refused.
 const sideNoteDebit = 'AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026.';
-for (const [kind, body, minor = 25000] of [
-  ['no-note', sideNoteDebit],
-  ['negated-refunded-fee', `${sideNoteDebit} The annual fee is not refunded to your card.`],
-  ['negated-refunded-has-not-been', `${sideNoteDebit} The annual fee has not been refunded to your card.`],
-  ['conditional-when-refund-credited', `${sideNoteDebit} When a refund is credited to your card you will receive an SMS.`],
-  ['conditional-if-refund-credited', `${sideNoteDebit} If a refund is credited to your card, you will receive an SMS.`],
-  ['plural-refunds-if-any', `${sideNoteDebit} Refunds, if any, will be credited to your card.`],
-  ['purchase-alert-negated-fee', 'Purchase of AED 50.00 with Debit Card ending 1234 at CARREFOUR. The annual fee is not refunded to your card.', 5000],
+const sideNotePurchase = 'Purchase of AED 50.00 with Debit Card ending 1234 at CARREFOUR.';
+const negatedFeeNote = ' The annual fee is not refunded to your card.';
+const conditionalRefundNote = ' When a refund is credited to your card you will receive an SMS.';
+// The native bundle posts only the issuer-confirmed debit ("We confirm that ..."); it ignores the plain debit with or
+// without a note, so each case pins the native route of its debit alone and, where it posts, a debit of the same amount.
+for (const [kind, base, note, minor, nativeRoute] of [
+  ['no-note', sideNoteDebit, '', 25000, 'ignore'],
+  ['negated-refunded-fee', sideNoteDebit, negatedFeeNote, 25000, 'ignore'],
+  ['negated-refunded-has-not-been', sideNoteDebit, ' The annual fee has not been refunded to your card.', 25000, 'ignore'],
+  ['conditional-when-refund-credited', sideNoteDebit, conditionalRefundNote, 25000, 'ignore'],
+  ['conditional-if-refund-credited', sideNoteDebit, ' If a refund is credited to your card, you will receive an SMS.', 25000, 'ignore'],
+  ['plural-refunds-if-any', sideNoteDebit, ' Refunds, if any, will be credited to your card.', 25000, 'ignore'],
+  ['purchase-alert-negated-fee', sideNotePurchase, negatedFeeNote, 5000, 'ignore'],
+  ['confirmed-debit-no-note', confirmedDebit, '', 8500, 'parsed'],
+  ['confirmed-debit-negated-fee', confirmedDebit, negatedFeeNote, 8500, 'parsed'],
+  ['confirmed-debit-when-refund-credited', confirmedDebit, conditionalRefundNote, 8500, 'parsed'],
 ]) {
   test(`refund hardening side note posts the debit/${kind}`, () => {
     const session = reader('AE');
+    const body = base + note;
     assert.equal(nonPostingReason(body), null);
     for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
       session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
@@ -612,22 +621,27 @@ for (const [kind, body, minor = 25000] of [
       assert.equal(parsed.currency, 'AED');
     }
     const native = confirmationNative(body);
-    assert.equal(native.route, 'parsed');
-    assert.equal(native.notification.direction, 'debit');
-    assert.deepEqual(native.notification.amount, { currency: 'AED', minorUnits: String(minor), exponent: 2 });
+    assert.equal(native.route, nativeRoute);
+    if (nativeRoute === 'parsed') {
+      assert.equal(native.notification.direction, 'debit');
+      assert.deepEqual(native.notification.amount, { currency: 'AED', minorUnits: String(minor), exponent: 2 });
+    }
   });
 }
-for (const [kind, note] of [
-  ['refund-for-cancelled-order-credited', ' Refund for your cancelled order has been credited to your card.'],
-  ['refund-processed-to-card', ' Your refund has been processed to your card.'],
+for (const [kind, base, note] of [
+  ['refund-for-cancelled-order-credited', sideNoteDebit, ' Refund for your cancelled order has been credited to your card.'],
+  ['refund-processed-to-card', sideNoteDebit, ' Your refund has been processed to your card.'],
+  ['refund-will-be-credited', sideNoteDebit, ' The refund will be credited to your card in 5 days.'],
+  ['purchase-not-refunded', sideNoteDebit, ' Your purchase has not been refunded to your card.'],
+  ['confirmed-debit-refund-credited', confirmedDebit, ' Refund for your cancelled order has been credited to your card.'],
 ]) {
-  test(`refund hardening side note is a second movement and never auto-posts/${kind}`, () => {
+  test(`refund hardening side note is ambiguous and never auto-posts/${kind}`, () => {
     const session = reader('AE');
-    const body = sideNoteDebit + note;
+    const body = base + note;
     assert.equal(parseSms(body), null);
     assert.equal(parseSms(body, {}, { sender: 'ENBD', observedAt: at }), null);
     assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
-    assert.notEqual(confirmationNative(body).route, 'parsed');
+    assert.equal(confirmationNative(body).route, 'ignore');
   });
 }
 for (const [kind, body] of [

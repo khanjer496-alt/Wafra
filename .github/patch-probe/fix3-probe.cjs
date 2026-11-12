@@ -13,10 +13,27 @@ markets.setLedgerCurrency('AED', 2);
 const session = createLaunchAlertSession({ overrides: {}, activeMarket: 'AE', pinnedCurrency: 'AED',
   bestEffort: { enabled: true, country: 'AE' } });
 const at = Date.parse('2026-11-05T10:00:00Z');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const resources = `${repo}/modules/wafra-live-capture/ios/Resources`;
+const meta = JSON.parse(fs.readFileSync(`${resources}/WafraBackgroundParser.meta.json`));
+const sandbox = vm.createContext({});
+vm.runInContext(fs.readFileSync(`${resources}/WafraBackgroundParser.js`, 'utf8'), sandbox);
+const native = (body) => {
+  const out = JSON.parse(sandbox.wafraNativeAlertParse(JSON.stringify({ v: 1, body, sender: 'ENBD', observedAt: at,
+    context: { v: 1, country: 'AE', parserMarket: 'AE', ledgerMoney: { currency: 'AED', exponent: 2 }, sourceHash: meta.sourceHash } })));
+  return `${out.route}${out.notification ? ` ${out.notification.direction} ${out.notification.amount?.minorUnits}` : ''}`;
+};
+const confirmed = 'We confirm that AED 85.00 was debited from your account ending 1234 for purchase at AMAZON.COM.';
 const debit = 'AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026.';
 const purchase = 'Purchase of AED 50.00 with Debit Card ending 1234 at CARREFOUR.';
 const bodies = [
   ['debit alone', debit],
+  ['confirmed alone', confirmed],
+  ['confirmed + not refunded to', `${confirmed} The annual fee is not refunded to your card.`],
+  ['confirmed + when refund credited', `${confirmed} When a refund is credited to your card you will receive an SMS.`],
+  ['confirmed + refund for cancelled order', `${confirmed} Refund for your cancelled order has been credited to your card.`],
+  ['M purchase not refunded', `${debit} Your purchase has not been refunded to your card.`],
   ['H not refunded to', `${debit} The annual fee is not refunded to your card.`],
   ['H has not been refunded', `${debit} The annual fee has not been refunded to your card.`],
   ['H non-refundable', `${debit} The annual fee is non-refundable.`],
@@ -50,5 +67,5 @@ for (const [name, body] of bodies) {
     held = `${h.kind}${h.reason ? ` ${h.reason}` : ''}${money ? ` ${money.minorUnits}` : ''}${h.candidate?.event?.direction ? ` ${h.candidate.event.direction}` : ''}`;
   } catch (error) { held = `error ${error.message}`; }
   console.log(JSON.stringify({ name, reason: nonPostingReason(body), parse: p && `${p.type} ${p.amountFils}`,
-    session: s && `${s.type} ${s.amountFils}`, refusedPath: held }));
+    session: s && `${s.type} ${s.amountFils}`, native: native(body), refusedPath: held }));
 }
