@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 35d19f1d1909573fc47e3d5e99438ea488d86e4ede579bb3123200e37915ab9a
+// Generated from normal shipping TypeScript. Source SHA-256: 1c697b8428e2fa5464f386c765a1b8e15e87a8254ee1b436b08e3c29257e4cea
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -2640,6 +2640,7 @@ const EXECUTED_MANDATE_DEBIT = /(\b(?:has\s+been|was)\s+(?:debited|charged|deduc
 const CREDITED_TOWARDS_REVERSAL = /(\b(?:is|has\s+been|was)\s+(?:successfully\s+)?credited\s+with\b(?:[^.\n]|\.(?=\S)){0,80}?\btowards\s+)reversal\b/giu;
 const REVERSED_THEN_CREDITED_TO_YOU = /\brevers(?:al|ed|e)\b(?:[^.\n]|\.(?=\S)){0,200}?\b(?:is|has\s+been|was)\s+(?:successfully\s+)?credited\s+to\s+your\b/giu;
 const RECOGNISE_CALLBACK_FOOTER = /(?<!\p{L})(?:(?:don['’]t|do\s+not|didn['’]t)\s+recogni[sz]e\b[^.!?\n]{0,30}\?\s*(?=(?:call|contact|ring|phone)\b)|si\s+no\s+(?:lo\s+|la\s+)?reconoc(?:e|es)\b[^.!?\n]{0,60}?(?=\bllam(?:a|e|ar)\b)|n[ãa]o\s+reconhece\b[^.!?\n]{0,40}?\??\s*(?=(?:ligue|ligar)\b))/giu;
+const CLOSING_FRAUD_FOOTER = /(?:^|(?<=[\s.!?]))(?:was\s+this\s+(?:you|yours)\s*[?？]|not\s+(?:you|u)\s*[?？]\s*reply\s+["']?(?:no|n)["']?\s+to\s+block\s+(?:your\s+)?(?:(?:debit|credit)\s+)?card\s*[.!]?)\s*$/iu;
 const NUMERIC_DISCOUNT_CODE = /\b((?:use|enter)\s+)code(\s+\d{4,8}\s+to\s+get\s+\d{1,3}\s?%\s+off\b)/giu;
 const CODE_WARNING_NOUN = String.raw `(?:(?:(?:verification|security|authentication|one[-\s]?time)\s+)?codes?|otp(?:\s+code)?|pin|one[-\s]?time\s+password)`;
 const CODE_SAFETY_WARNING = new RegExp(String.raw `(^|[.!?;,\r\n:])\s*(?:please\s+)?(?:(?:do\s+not|don['’]t|never)\s+(?:share|disclose|reveal)\s+(?:(?:your|the|this)\s+)?${CODE_WARNING_NOUN}(?:\s+with\s+(?:anyone|anybody|others))?(?:,?\s+including\s+(?:bank\s+staff|bank\s+employees))?|keep\s+(?:(?:your|the|this)\s+)?${CODE_WARNING_NOUN}\s+confidential)(?=\s*(?:[.!?;\r\n]|$))`, 'giu');
@@ -2650,7 +2651,8 @@ const neutraliseBenignShapes = (source) => source
     .replace(EXECUTED_MANDATE_DEBIT, '$1instruction')
     .replace(CREDITED_TOWARDS_REVERSAL, '$1refund')
     .replace(REVERSED_THEN_CREDITED_TO_YOU, (span) => span.replace(/\brevers(?:al|ed|e)\b/giu, 'refunded'))
-    .replace(RECOGNISE_CALLBACK_FOOTER, ' ');
+    .replace(RECOGNISE_CALLBACK_FOOTER, ' ')
+    .replace(CLOSING_FRAUD_FOOTER, ' ');
 const wordingGuardText = (source, sender) => {
     const withoutFooters = source.replace(PROMO_FOOTER_SENTENCE, ' ');
     const completed = COMPLETED_MOVEMENT.test(withoutFooters);
@@ -9794,7 +9796,7 @@ const inspectGenericBankEventForReview = (source, sender = '', market, sourceCon
         (0, best_effort_autopost_1.refusedOnlyByShopOrPromoWording)(source, sender);
     const senderlessCard = noContext && !sender.trim() ? SENDERLESS_USED_CARD_HINT.exec(source) : null;
     const cardAdmitted = !!senderlessCard && (0, best_effort_autopost_1.namesOwnInstrumentTail)(source, 'debit') &&
-        !(0, sms_parser_1.nonPostingReason)(source) && !(0, best_effort_autopost_1.isNotAutoPostableMoney)(source) &&
+        !(0, sms_parser_1.moneyNoticeKind)(source) && !(0, sms_parser_1.nonPostingReason)(source) && !(0, best_effort_autopost_1.isNotAutoPostableMoney)(source) &&
         !(0, best_effort_autopost_1.hasNonCompletedWording)(source, null, '') && !(0, best_effort_autopost_1.hasLinkFromUnregisteredSender)(source, '');
     let cardCreditAliases;
     const creditSource = /[\uFB50-\uFDFF\uFE70-\uFEFF]/u.test(source) ? (0, alert_draft_1.normalizeAlertText)(source) : source;
@@ -9946,7 +9948,8 @@ const sourceNamesPaidCreditCard = (source, event, last4) => {
 };
 const universalCardPayment = (source, event, ledgerCurrency, ledgerExponent, country, observedAt) => {
     if (event.family !== 'card-payment' || event.decision !== 'review' ||
-        (0, sms_parser_1.nonPostingReason)(source) || ((0, best_effort_autopost_1.isNotAutoPostableMoney)(source) && !(0, best_effort_autopost_1.isSafeCardRepaymentReviewSource)(source)))
+        (0, sms_parser_1.moneyNoticeKind)(source) || (0, sms_parser_1.nonPostingReason)(source) ||
+        ((0, best_effort_autopost_1.isNotAutoPostableMoney)(source) && !(0, best_effort_autopost_1.isSafeCardRepaymentReviewSource)(source)))
         return null;
     const latamCardPayment = event.family === 'card-payment' && (0, latam_alert_templates_1.isLatamOwnCardPayment)(source);
     if (NOT_CARD_OBLIGATION.test(source) || (!CREDIT_CARD_WORDS.test(source) && !latamCardPayment))
@@ -10289,7 +10292,7 @@ const createLaunchAlertSession = ({ overrides, regionHint = null, pinnedCurrency
         return result;
     };
     const parse = (source, sender, inspection = null, forcedMarket, observedAt) => {
-        if ((0, exports.hasPersonalMessagePrefix)(source, sender) || hasNegatedPrincipalMovement(source))
+        if ((0, sms_parser_1.moneyNoticeKind)(source) || (0, exports.hasPersonalMessagePrefix)(source, sender) || hasNegatedPrincipalMovement(source))
             return null;
         if ((0, bnpl_providers_1.isBnplProviderSource)(sender))
             return null;
@@ -10330,7 +10333,7 @@ const createLaunchAlertSession = ({ overrides, regionHint = null, pinnedCurrency
         });
     };
     const parseUnproven = (source, sender, inspection = null, observedAt) => {
-        if ((0, exports.hasPersonalMessagePrefix)(source, sender) || hasNegatedPrincipalMovement(source))
+        if ((0, sms_parser_1.moneyNoticeKind)(source) || (0, exports.hasPersonalMessagePrefix)(source, sender) || hasNegatedPrincipalMovement(source))
             return null;
         if (!bestEffort.enabled)
             return null;
@@ -11507,6 +11510,9 @@ exports.hasArabicRefundHeading = hasArabicRefundHeading;
 exports.isNonCashNotice = isNonCashNotice;
 exports.isInformationOnlyAlert = isInformationOnlyAlert;
 exports.isNonPostingMessage = isNonPostingMessage;
+exports.reversedIncomingCredit = reversedIncomingCredit;
+exports.isUnregisteredCallBack = isUnregisteredCallBack;
+exports.moneyNoticeKind = moneyNoticeKind;
 exports.isDeclinedMessage = isDeclinedMessage;
 exports.extractOutgoingTransferParties = extractOutgoingTransferParties;
 exports.parseForeignAwaitingRate = parseForeignAwaitingRate;
@@ -11556,7 +11562,7 @@ function normalizeArabic(s) {
 }
 const ARABIC_RE = /[\u0600-\u06FF]/;
 const AR_LETTER = '\\u0621-\\u064A';
-exports.PARSER_VERSION = 71;
+exports.PARSER_VERSION = 72;
 exports.PARSER_BACKFILL_VERSION = 50;
 const BANK_PROFILES = {
     'Emirates NBD': { brand: /\benbd\b|emirates\s*nbd|\bliv\b/i, ownPot: /\b(?:liv\s+)?goals?\b|\bsavings?\s+pot\b/i },
@@ -11689,7 +11695,7 @@ const PREAUTH_RE = /pre[\s-]?auth|auth(?:oris|oriz)ation\s+hold|\bauth\s+hold\b|
 const VERIFICATION_HOLD_DESCRIPTOR_RE = /\bgoogle\s*\*?\s*temporary\s+hold\b/i;
 const HOLD_RELEASE_RE = /(?:(?:the|your|this|an?|earlier|previous|original)\s+)*(?:pre[\s-]?auth(?:oris|oriz)ation|auth(?:oris|oriz)ation|temporary|blocked)?\s*hold(?:[^.\n]|\.\d){0,60}?\b(?:released|reversed|removed|lifted|cleared|refunded)\b|\bpre[\s-]?auth(?:oris|oriz)ation\s+(?:(?:has\s+been|is|was)\s+)?(?:released|reversed|removed|lifted|cleared)\b|\bblocked\s+amount(?:[^.\n]|\.\d){0,40}?\b(?:released|reversed|removed)\b|تم الافراج عن المبلغ المحجوز/gi;
 const CONTACT_FOOTER_RE = /\(?\s*(?:\+?[\d·•X][\d·•X\s-]{4,})?\s*if\s+(?:calling|dialing|dialling)\s+from\s+(?:overseas|abroad|outside[^).\n]{0,20})\s*\)?/gi;
-const FRAUD_FOOTER_RE = /\bif\s+(?:this|that|it|the\s+(?:above\s+)?(?:transaction|purchase|payment))\b[^.\n]{0,90}|\bif\s+you\s+(?:have\s*n[o']t|did\s*n[o']t|do\s*n[o']t|didn'?t|haven'?t|don'?t)\b[^.\n]{0,90}|\b(?:to\s+report|report|reporting)\s+(?:an?\s+|any\s+)?unauthoris\w*[^.\n]{0,60}|\b(?:to\s+report|report|reporting)\s+(?:an?\s+|any\s+)?unauthoriz\w*[^.\n]{0,60}|\bunauthoris\w*\s+(?:use|transactions?|access|activity)\b[^.\n]{0,40}|\bunauthoriz\w*\s+(?:use|transactions?|access|activity)\b[^.\n]{0,40}|\bin\s+case\s+of\s+(?:any\s+)?unauthoris\w*[^.\n]{0,60}|\bnot\s+(?:done|made|initiated|authoris\w*|authoriz\w*)\s+by\s+you\b|\bif\s+(?:unauthoris\w*|unauthoriz\w*|not\s+(?:you|recogni[sz]ed|authoris\w*|authoriz\w*))\b[^.\n]{0,90}/gi;
+const FRAUD_FOOTER_RE = /\bif\s+(?:this|that|it|the\s+(?:above\s+)?(?:transaction|purchase|payment))\b[^.\n]{0,90}|\bif\s+you\s+(?:have\s*n[o']t|did\s*n[o']t|do\s*n[o']t|didn'?t|haven'?t|don'?t)\b[^.\n]{0,90}|\b(?:to\s+report|report|reporting)\s+(?:an?\s+|any\s+)?unauthoris\w*[^.\n]{0,60}|\b(?:to\s+report|report|reporting)\s+(?:an?\s+|any\s+)?unauthoriz\w*[^.\n]{0,60}|\bunauthoris\w*\s+(?:use|transactions?|access|activity)\b[^.\n]{0,40}|\bunauthoriz\w*\s+(?:use|transactions?|access|activity)\b[^.\n]{0,40}|\bin\s+case\s+of\s+(?:any\s+)?unauthoris\w*[^.\n]{0,60}|\bunauthori[sz]ed\s*[?？](?=\s|$)|\bnot\s+(?:done|made|initiated|authoris\w*|authoriz\w*)\s+by\s+you\b|\bif\s+(?:unauthoris\w*|unauthoriz\w*|not\s+(?:you|recogni[sz]ed|authoris\w*|authoriz\w*))\b[^.\n]{0,90}/gi;
 const DECLINED_VERB_RE = /\b(?:declined|rejected|refused|denied|failed|unsuccessful|timed\s+out)\s+(?:due\s+to|because|owing\s+to|for\s+(?:insufficient|want\s+of))\b|\b(?:was|is|were|are|has\s+been|have\s+been|been)\s+(?:declined|rejected|refused|denied|unsuccessful|dishonou?red)\b|\b(?:declined|rejected|failed|unsuccessful|timed\s+out)\s*[.!:;]|\btransaction\s+(?:has\s+)?(?:declined|failed|rejected)\b|\b(?:returned|rejected)\s+(?:a\s+)?(?:direct\s+)?debit\s+(?:request|instruction)\b|\bplease\s+(?:retry|try\s+again)\b|\bcould\s+not\s+be\s+(?:processed|completed|authoris\w*|authoriz\w*|approved|honou?red)\b|^\W{0,3}(?:transaction|payment|purchase)\s+error\s*[:!.\-]|\b(?:encountered|experienced|ran\s+into)\s+(?:an?\s+)?(?:issue|error|problem)\s+(?:while\s+)?processing\b/im;
 const DECLINED_RE = /declin|reject(?:ed|ion)|refused|\bdenied\b|not\s+(?:approved|successful|authoris\w*|authoriz\w*|completed|processed|honou?red)|unapproved|disapproved|unauthoris|unauthoriz|unsuccessful|\binsufficient\s+(?:funds?|balance|credit)\b(?![^.\n]{0,24}\b(?:fee|charge|penalty)\b)|could not be (?:processed|completed|authoris\w*|authoriz\w*|approved|verified|honou?red)|unable to (?:process|complete|authoris\w*|authoriz\w*|approve)|has not been (?:processed|approved|completed)|did not (?:go through|succeed|complete)|\bfail(?:ed|ure|s)\b|was stopped|\baborted\b|\bterminated\b|\bvoided\b|\b(?:transaction|txn|purchase|payment|transfer|withdrawal|request)\b(?:[^.\n]|\.\d){0,40}?\s(?:was|is|has\s+been|been)\s+cancell?ed\b|exceeds\s+(?:your\s+)?(?:available\s+)?(?:limit|balance)|limit exceeded|do not honou?r|card\s+(?:has\s+)?expired|expired card|card is blocked|blocked for (?:online|international)|card restricted|invalid\s+(?:card|cvv|pin|otp|expiry|transaction)|\bis invalid\b|incorrect\s+(?:cvv|pin|otp|expiry)|wrong\s+(?:cvv|pin)|pin tries exceeded|no response from (?:the\s+)?issuer|\btimed\s+out\b|\b(?:transaction|txn|request|session|connection|response|network|terminal)\s+time-?\s?outs?\b|مرفوض|تم رفض|لم تتم|لم يتم تنفيذ|فشلت|رصيد غير كاف|غير كافي|عدم كفايه|معكوسه|(?<!(?:اذا|حال|لو)[^.\n]{0,24})(?:رصيد[ \t]+(?:ال)?(?:بطاقه|حساب)(?![ \t]+(?:ال)?نقاط)[^.\n]{0,40}لا\s+يكفي|رصيدك[^.\n]{0,24}لا\s+يكفي\s+(?:ل)?(?:اتمام|اكمال))/i;
 const REVERSAL_RE = /\brevers(?:ed|al)\b|charge-?\s?backs?\b|credited back|re-?credited|returned to your (?:card|account)/i;
@@ -11890,6 +11896,7 @@ const REFUND_SIDE_NOTE_DEBIT_RE = /\b(?:debited|charged|deducted|spent)\b/i;
 const REFUND_SIDE_NOTE_RETURNED_RE = /\b(?:has\s+been|have\s+been|was|were|is\s+now)\s+(?:successfully\s+)?(?:reversed|refunded|returned)\b/i;
 const REFUND_SIDE_NOTE_SAME_MOVEMENT_RE = /^\s*(?:it|(?:this|the|that|your)\s+(?:amount|transaction|purchase|charge|payment|debit)|(?:the|this|that)\s+refund(?=\s+(?:has|have|had|was|were|is)\b)|a\s+refund\s+of\s+(?:the\s+same|this|that))\b/i;
 const REFUND_SIDE_NOTE_FUTURE_RE = /\bwill\b/i;
+const REFUND_SIDE_NOTE_NOT_SETTLED_RE = /\b(?:is|are|was|were|has|have|had|did|does)\s+not\b|\b(?:isn|aren|wasn|weren|hasn|haven|hadn|didn|doesn)['’]t\b|\bnot\s+(?:yet\s+)?been\b|\b(?:is|are)\s+being\b|\bwill\b/i;
 const REFUND_SIDE_NOTE_COMPLETED_RE = /\b(?:has|have|had|was|were)\s+(?:been\s+)?(?:(?:successfully|fully|now)\s+)?(?:credited|refunded|reversed|returned|posted)\b/i;
 function refundSideNotes(body) {
     if (!REFUND_SIDE_NOTE_WORD_RE.test(body))
@@ -11913,7 +11920,7 @@ function refundSideNotes(body) {
         const negated = word[0].toLowerCase() === 'refunded' && REFUND_CREDIT_NEGATION_RE.test(lead);
         const sameMovement = REFUND_SIDE_NOTE_SAME_MOVEMENT_RE.test(text) && !REFUND_SIDE_NOTE_FUTURE_RE.test(text);
         const completedRefund = sameMovement && REFUND_SIDE_NOTE_COMPLETED_RE.test(text);
-        if ((negated && !sameMovement) || (separateDebit && governsRefundCredit(lead))) {
+        if ((negated && !sameMovement) || (separateDebit && (governsRefundCredit(lead) || REFUND_SIDE_NOTE_NOT_SETTLED_RE.test(text)))) {
             out = out.slice(0, at) + ' '.repeat(text.length) + out.slice(at + text.length);
         }
         else if (separateDebit && (negated || (REFUND_RE.test(text) && !completedRefund))) {
@@ -13124,6 +13131,369 @@ function isInformationOnlyAlert(message) {
 function isNonPostingMessage(message) {
     return nonPostingReason(message) !== null;
 }
+const AR_CASH_WITHDRAWAL_CORRECTION_ANY_RE = /^\s*تصحيح[ \t]+(?:عمليه[ \t]+)?سحب[ \t]+نقدي/;
+const AR_WITHDRAWAL_FIELD_RE = /(?<![ء-ي])(?:سحب|صراف)(?![ء-ي])|\b(?:atm|withdrawal)\b/i;
+const AR_CASH_WITHDRAWAL_CORRECTION_HEADER_RE = /^تصحيح[ \t]+(?:عمليه[ \t]+)?سحب[ \t]+نقدي[ \t]*:?[ \t]*(?:\r?\n|$)/;
+const AR_RETURNED_TO_OWN_RE = new RegExp(`(?:(?<![${AR_LETTER}])(?<!(?:اذا|عندما|عند|ان|حال)\\s+)و?تم\\s+(?:ارجاع|اعاده)\\s+(?:ال)?(?:مبلغ|[A-Z]{3}\\s*\\d|\\d)|(?<![${AR_LETTER}])اعاد\\s+(?:[^\\s]+\\s+){1,5}?(?:ال)?مبلغ(?![${AR_LETTER}]))(?:[^.\\n]|\\.(?=\\S)){0,80}?` +
+    `(?<![${AR_LETTER}])(?:الي|في)\\s+(?:بطاقتك|بطاقتكم|حسابك|حسابكم)(?![${AR_LETTER}])`);
+const AR_DEBIT_OR_PAYMENT_RE = new RegExp(`(?<![${AR_LETTER}])(?:ال)?(?:خصم|سحب|دفع|سداد)(?![${AR_LETTER}])`);
+const FEE_PRICE_LEAD_RE = /(?:^|[\n.!?;|]\s{0,3}|^\W{0,4}[^\s:][^:\n]{0,30}:\s{0,3})(?:vat|fees?|charges?|commission|service\s+charges?)\s{0,3}:?\s{0,3}$/i;
+const FEE_PRICE_TAIL_RE = /^\s{0,3}(?:[A-Z]{3}|Dhs?|SR)?\s{0,3}(?:(?:is|are)\s+)?(?:applicable|apply|applies|per\s+(?:transaction|transfer|withdrawal|month|request))\b/i;
+const AR_FEE_PRICE_LEAD_RE = /(?:^|[\n.!?؟;|،]\s{0,3}|^\W{0,4}[^\s:][^:\n]{0,30}:\s{0,3})(?:(?:ال)?رسوم(?:\s+(?:ال)?(?:خدم[هة]|تحويل|سحب|معامل[هة]))?|ضريب[هة]\s+(?:ال)?قيم[هة]\s+(?:ال)?مضاف[هة]|(?:ال)?عمول[هة])\s{0,3}:?\s{0,3}$/;
+const AR_FEE_CODE = String.raw `(?:ر\.س|ريال|درهم|دينار|ر\.ق|ر\.ع|د\.ك|د\.ب|د\.ا|جنيه|[A-Z]{3}|SR|Dhs?)`;
+const AR_FEE_PRICE_TAIL_RE = new RegExp(String.raw `^\s{0,3}${AR_FEE_CODE}?\s{0,3}\.?\s{0,3}(?:تطبق|مطبق[هة]|تنطبق|تستحق|تستوفي|لكل\s+(?:عملي[هة]|تحويل|سحب|معامل[هة]))`);
+const AR_FEE_THEN_DEBIT_RE = new RegExp(String.raw `^\s{0,3}${AR_FEE_CODE}?[^.\n؟!]{0,40}[.\n]\s{0,3}(?:تم\s+)?(?:خصم|سحب|تحويل|شراء|دفع|سداد)(?![ء-ي])[^\n]{0,40}?(?:${AR_FEE_CODE}\s{0,3}\d|\d[\d,]*(?:\.\d+)?\s{0,3}${AR_FEE_CODE})`);
+const AR_FEE_TAKEN_RE = /^[^.\n؟!]{0,48}?(?:خصمت|تم\s+خصم|خصم|استوفيت|اقتطعت)/;
+const INCOMING_MONEY_STATED_RE = new RegExp(String.raw `\byou\s+(?:have\s+|['’]ve\s+)?received\b|\bsent\s+you\b|\b(?:transfer|payment|deposit|money|funds?|remittance)\s+received\b|\breceived\s+from\b` +
+    String.raw `|\b(?:incoming|inward)\s+(?:payment|transfer|remittance)\b|\bsalary\b(?!\s+(?:account|acct|a\/?c)\b)` +
+    `|(?<![${AR_LETTER}])(?:حواله\\s+وارده|ايداع\\s+راتب|راتب|استلمت)(?![${AR_LETTER}])`, 'i');
+const REVERSAL_WORD_RE = new RegExp(String.raw `\brevers(?:ed|al)\b|(?<![${AR_LETTER}])(?:تم\s+)?عكس(?:ه|ها)?(?![${AR_LETTER}])`, 'i');
+const RETURNED_TO_READER_RE = /\brefund|\bcredited\s+back\b|\bre-?credited\b|\breturned\s+to\s+your\b|\breversed\s+(?:to|into)\s+your\b|\breversal\s+of\b(?!\s+(?:your\s+)?(?:salary|incoming|inward|credit|deposit|transfer\s+received|cash\s+deposit))|\b(?:on|to|into)\s+your\s+(?:\w+\s+)?card\b|\bas\s+(?:an?\s+)?reversal\b|^\W{0,4}(?:payment|purchase|transaction|txn)\s+revers(?:ed|al)\b|\b(?:purchase|transaction|merchant|pos|card|payment)\s+reversal\b|\breversal\s+(?:credit|from)\b|\(\s*reversal\s*\)|\b(?:on|to)\s+(?:your\s+)?card\s+(?:no\.?\s*)?[x*•·]+\d|(?<![ء-ي])عكس\s+(?:عمليه\s+)?(?:شراء|سحب|خصم|دفع)(?![ء-ي])|^\W{0,4}(?:transaction\s+)?revers(?:al|ed)\s*:|\bcredited\s+(?:back\s+)?(?:to|into|in)\s+(?:your\s+)?(?:\w+\s+)?(?:account|acct|a\/?c|card)\b|\bcredited\s+(?:back\s+)?(?:to|into|in)\s+your\b|\breceived\b(?:[^.\n]|\.(?=\d)){0,40}?\b(?:back\s+)?(?:in|into|to)\s+your\s+(?:\w+\s+)?(?:account|acct|a\/?c|card)\b|\badded\s+(?:back\s+)?to\s+your\b|\breversed\s+(?:in|into|to)\s+your\b|(?<![ء-ي])(?:الي|ل)\s*(?:بطاقت|حساب)(?:ك|كم)(?![ء-ي])|^\W{0,4}(?:عكس\s+(?:عمليه\s+)?(?:شراء|سحب|خصم|دفع)|استرداد|استرجاع)(?![ء-ي])/i;
+function feePriceFigure(raw, index) {
+    const before = raw.slice(Math.max(0, index - 48), index);
+    if (AR_FEE_PRICE_LEAD_RE.test(before)) {
+        const after = raw.slice(index, index + 80).replace(/^(?:[A-Z]{3}|Dhs?|SR)?\s{0,3}[\d,]{1,20}(?:\.\d{1,3})?/i, '');
+        if (AR_FEE_TAKEN_RE.test(after))
+            return false;
+        return AR_FEE_PRICE_TAIL_RE.test(after) || AR_FEE_THEN_DEBIT_RE.test(after);
+    }
+    if (!FEE_PRICE_LEAD_RE.test(before))
+        return false;
+    const after = raw.slice(index, index + 60).replace(/^(?:[A-Z]{3}|Dhs?|SR)?\s{0,3}[\d,]{1,20}(?:\.\d{1,3})?/i, '');
+    return FEE_PRICE_TAIL_RE.test(after) && !/^[^.\n;]{0,48}?\b(?:debited|deducted|charged|collected|taken|paid)\b/i.test(after);
+}
+function reversedIncomingCredit(message) {
+    const body = foldOrthography(stripInvisible(message)).slice(0, 4000);
+    const REVERSED_VERB = String.raw `\b(?:is|are|has\s+been|have\s+been|was|were)\s+reversed\b(?!\s+(?:to|into|in)\s+your\b)(?!\s+and\s+(?:the\s+amount\s+(?:is\s+|has\s+been\s+)?)?(?:credited|added|refunded|returned)\b)`;
+    const REVERSED_AFTER = String.raw `(?:[^.\n]|\.(?=\d)){0,140}?` + REVERSED_VERB;
+    const creditThenReversed = new RegExp(String.raw `\b(?:credited|deposited|added)\s+(?:to|into|in)\b` + REVERSED_AFTER +
+        String.raw `|\b(?:refund|cashback|cash\s+back|reward|salary|interest|profit|payroll|bonus|dividend)\b` + REVERSED_AFTER, 'i');
+    const incomingReversed = body.split(/[\n|]|\.(?!\d)/).some((sentence) => (creditThenReversed.test(sentence) ||
+        new RegExp(`(?:${INCOMING_MONEY_STATED_RE.source})` + REVERSED_AFTER, 'i').test(sentence)) &&
+        !/\bcredited\s+back\b/i.test(sentence));
+    if (incomingReversed)
+        return true;
+    if (INCOMING_MONEY_STATED_RE.test(body) &&
+        /(?:^|[.\n|]\s*)(?:the|this|your)\s+(?:transfer|payment|credit|deposit|amount|transaction|remittance)\s+(?:has\s+been|was|is)\s+reversed\b(?!\s+(?:to|into|in)\s+your\b)(?!\s+and\s+(?:credited|added|refunded))/i.test(body) &&
+        !/\bcredited\s+back\b/i.test(body))
+        return true;
+    if (INCOMING_MONEY_STATED_RE.test(body) && /(?:^|[\n|(\[]|\s[–—-]\s)[ \t]*reversed[ \t.!)\]]*(?=$|[\n|]|\s+ref\b)/i.test(body) &&
+        !/\brefund|\bcredited\s+back\b/i.test(body))
+        return true;
+    if (/\bcredited\s+(?:to|into|in)\b/i.test(body) && /(?:^|[\n|])[ \t]*(?:status[ \t]*:[ \t]*)?reversed[ \t.!]*(?=$|[\n|]|\s+ref\b)/i.test(body) &&
+        !/\brefund|\bcredited\s+back\b|\b(?:purchase|pos|atm|withdrawal|payment|fee|charge|txn|trx|transaction)\b/i.test(body))
+        return true;
+    if (RETURNED_TO_READER_RE.test(body))
+        return false;
+    const principal = principalMoneyClause(body);
+    if (!principal || principal === 'balance-only')
+        return false;
+    const before = principal.before.replace(/\s+$/, '');
+    const lineAbove = before.slice(before.lastIndexOf('\n', before.lastIndexOf('\n') - 1) + 1);
+    const firstLine = body.slice(0, Math.max(0, body.indexOf('\n')));
+    const scope = firstLine + '\n' + lineAbove + ' ' + principal.clause;
+    return INCOMING_MONEY_STATED_RE.test(body) && REVERSAL_WORD_RE.test(scope) &&
+        !/\b(?:for|any|request|requests)\s+(?:a\s+)?reversal\b|(?<![ء-ي])(?:طلب|لطلب)\s+عكس/i.test(scope);
+}
+const NOTICE_CURRENCY = String.raw `(?:[A-Z]{3}(?![A-Za-z])|(?:[Aa][Ee][Dd]|[Ss][Aa][Rr]|[Uu][Ss][Dd]|[Ee][Uu][Rr]|[Gg][Bb][Pp]|[Qq][Aa][Rr]|[Kk][Ww][Dd]|[Bb][Hh][Dd]|[Oo][Mm][Rr]|[Ee][Gg][Pp]|[Jj][Oo][Dd]|[Ii][Nn][Rr])(?![A-Za-z])|(?:Dhs?|DHS?|dhs?|SR|Sr|sr)(?![A-Za-z])|ر\.س|د\.ا|درهم|ريال|ر\.ق|د\.ك|د\.ب|ر\.ع|ج\.م|جنيه|دينار)`;
+const NOTICE_SHORT_CODE = String.raw `(?:QR|KD|BD|RO|JD|LE)`;
+const NOTICE_MONEY_RE = new RegExp(String.raw `(?<![A-Za-z])${NOTICE_CURRENCY}\.?\s{0,3}[+\-−]?\s{0,3}\d[\d,]{0,20}(?:\.\d+)?|(?<![\w.,])[+\-−]?\d[\d,]{0,20}(?:\.\d+)?\s{0,3}${NOTICE_CURRENCY}` +
+    String.raw `|(?<![A-Za-z])${NOTICE_SHORT_CODE}\.?\s?\d[\d,]{0,20}\.\d{2,3}(?!\d)|(?<![\w.,])\d[\d,]{0,20}\.\d{2,3}\s?${NOTICE_SHORT_CODE}(?![A-Za-z])`, 'g');
+const NOTICE_MONEY_TEST_RE = new RegExp(NOTICE_MONEY_RE.source);
+const NOTICE_IDENTITY_PREFIX_RE = /(?:\bcard|\baccount|\bacct|\ba\/c|\bending(?:\s+(?:in|with))?|\bno\.?|\bnumber|#|بطاقه|حساب|رقم)\s*[:.]?\s*[*xX•·.\-]*\s*$/i;
+const NOTICE_BALANCE_LEAD_RE = new RegExp(String.raw `(?:\b(?:bal(?:ance)?|avl|available\s+(?:credit|limit)|limit)\b|(?<![${AR_LETTER}])(?:ال)?رصيد(?:ك)?(?![${AR_LETTER}])|(?<![${AR_LETTER}])(?:ال)?حد\s+(?:ال)?متاح)` +
+    String.raw `[^\n]{0,64}?(?:\bis|:|هو|(?:ال)?متاح|(?:ال)?حالي)\s*(?:now\s*|currently\s*)?(?:${NOTICE_CURRENCY}\.?\s*)?$` +
+    String.raw `|(?<![${AR_LETTER}])(?:ال)?حد\s+(?:ال)?(?:يومي|شهري|اقصي|ايتماني)(?![${AR_LETTER}])[^\n\d]{0,40}(?:${NOTICE_CURRENCY}\.?\s*)?$`, 'i');
+const NOTICE_CLAUSE_END_RE = /\n|[|;!?؟？]|\.(?=\s|$)/g;
+const NOTICE_LINE_CONTINUES_RE = /^[ \t]*(?:[a-z]|[?？؟])/;
+const NOTICE_LINE_NEGATION_START_RE = /^[ \t]*(?:(?:was|were|is|are|has|have|had)(?:\s+not|n['’]t)\s+(?:yet\s+)?(?:been\s+)?(?:paid|debited|charged|processed|completed|sent|credited|deducted|approved|successful|transferred|withdrawn)\b|could(?:\s+not|n['’]?t)\s+be\s+(?:completed|processed|approved)\b)/i;
+const NOTICE_LINE_OPEN_END_RE = new RegExp(String.raw `(?:\b(?:if|in\s+case|did\s+you|was|were|has|have|had|not)|(?<![${AR_LETTER}])(?:لم\s+يتم|لن\s+يتم|ما\s+تم|لم|لن|تعذر|ربما|قد|اذا|هل|في\s+حال|لو|يحتمل|يبدو|عند))[ \t]*$`, 'i');
+function noticeLineJoins(body, at) {
+    const next = body.slice(at + 1, at + 48).replace(/^(?:[\r\n \t]|\\r)+/, '');
+    const prior = body.slice(Math.max(0, at - 60), at).replace(/(?:[\r\n \t]|\\r)+$/, '');
+    const previousLine = prior.slice(prior.lastIndexOf('\n') + 1);
+    return NOTICE_LINE_CONTINUES_RE.test(next.slice(0, 3)) || NOTICE_LINE_NEGATION_START_RE.test(next) ||
+        NOTICE_LINE_OPEN_END_RE.test(previousLine.slice(-40));
+}
+function principalMoneyClause(text) {
+    const body = text.slice(0, 4000);
+    const bounds = [];
+    NOTICE_CLAUSE_END_RE.lastIndex = 0;
+    let bm;
+    while ((bm = NOTICE_CLAUSE_END_RE.exec(body))) {
+        if (bm[0] === '\n' && noticeLineJoins(body, bm.index))
+            continue;
+        bounds.push({ index: bm.index, mark: bm[0] });
+    }
+    NOTICE_MONEY_RE.lastIndex = 0;
+    let sawMoney = false;
+    let sawFee = false;
+    let bi = 0;
+    let m;
+    while ((m = NOTICE_MONEY_RE.exec(body))) {
+        const at = m.index;
+        const end = at + m[0].length;
+        if (/^[+\-−]?\d/.test(m[0]) && NOTICE_IDENTITY_PREFIX_RE.test(body.slice(Math.max(0, at - 40), at))) {
+            NOTICE_MONEY_RE.lastIndex = at + (/^[+\-−]?\d[\d,]*(?:\.\d+)?/.exec(m[0])?.[0].length ?? 1);
+            continue;
+        }
+        sawMoney = true;
+        while (bi < bounds.length && bounds[bi].index < at)
+            bi++;
+        const start = bi > 0 ? bounds[bi - 1].index + 1 : 0;
+        let after = bi;
+        while (after < bounds.length && bounds[after].index < end)
+            after++;
+        const stop = after < bounds.length ? bounds[after].index : body.length;
+        const mark = after < bounds.length ? bounds[after].mark : '';
+        const lead = body.slice(start, at);
+        if (BALANCE_PREFIX_RE.test(body.slice(Math.max(0, at - 56), at)) || NOTICE_BALANCE_LEAD_RE.test(lead) ||
+            BALANCE_SUFFIX_RE.test(body.slice(end, end + 48)))
+            continue;
+        const feeClause = body.slice(start, stop);
+        if (feePriceFigure(body, at) &&
+            !NOTICE_DONE_VERB_RE.test(feeClause) && !NOTICE_NEGATED_EN_RE.test(feeClause) &&
+            !NOTICE_NEGATED_AR_RE.test(feeClause) && !NOTICE_NOTHING_CHARGED_RE.test(feeClause)) {
+            sawFee = true;
+            continue;
+        }
+        return { clause: body.slice(start, stop), lead, mark, before: body.slice(0, at), after: body.slice(stop), figure: m[0] };
+    }
+    return sawMoney && !sawFee ? 'balance-only' : null;
+}
+const NOTICE_MOVE_VERB = String.raw `(?:paid|debited|deducted|charged|transferred|credited|withdrawn|deposited|sent|received|refunded|posted|processed)`;
+const NOTICE_NEGATED_EN_RE = new RegExp(String.raw `\b(?:(?:was|were|is|are|has|have|had)\s+not|(?:was|were|is|are|has|have|had)n['’]t)\s+(?:yet\s+)?(?:been\s+)?${NOTICE_MOVE_VERB}\b` +
+    String.raw `|\b(?:could(?:\s+not|n['’]?t)|can(?:not|['’]t))\s+be\s+(?:completed|processed|approved|made|paid|authori[sz]ed|charged|debited)\b` +
+    String.raw `|\b(?:were|was|are|is)\s+unable\s+to\s+(?:debit|deduct|charge|collect|process|complete)\b|\bunable\s+to\s+(?:debit|deduct|charge|collect)\b`, 'i');
+const NOTICE_NEGATED_AR_RE = new RegExp(`(?<![${AR_LETTER}])(?<!(?:هو|هي|الذي|التي)\\s)و?(?:لم|لن|ما)\\s+(?:يتم|تتم|يجر|تجر|تم|تمت)\\s+(?:(?:ال)?عمليه\\s+)?(?:ال)?(?:خصم|سداد|دفع|تحويل|شراء|سحب|ايداع|قيد|اضافه|ارجاع|استرداد)(?:ه|ها|هم)?(?![${AR_LETTER}])(?!\\s+(?:اي\\s+)?(?:رسوم|عموله|عمولات))` +
+    `|(?<![${AR_LETTER}])(?:تعذر|يتعذر|استحال)(?:\\s+علينا)?\\s+(?:ال)?(?:خصم|سداد|دفع|تحويل|شراء|سحب|تنفيذ|اتمام)(?![${AR_LETTER}])` +
+    `|(?<![${AR_LETTER}])و?لم\\s+(?:يقم|تقم)\\s+(?:[^\\s]+\\s+){0,4}?ب(?:خصم|سحب|تحصيل|اقتطاع)(?![${AR_LETTER}])` +
+    `|(?<![${AR_LETTER}])و?لم\\s+(?:ي|ت)(?:خصم|سدد|دفع|حول|سحب|قيد)(?:ه|ها)?(?![${AR_LETTER}])`);
+const NOTICE_STATUS_FAILED_RE = new RegExp(String.raw `(?:^|\n|[.|;][ \t]*)[ \t]*(?:(?:ال)?حاله|status)[ \t]*:[ \t]*(?:لم\s+(?:يتم|تتم|تكتمل)|غير\s+ناجح(?:ه)?|failed|declined|unsuccessful|rejected|cancell?ed|not\s+(?:completed|processed|successful)|مرفوض|ملغي|ملغاه|فشل)`, 'i');
+const NOTICE_STATUS_PENDING_RE = new RegExp(String.raw `(?:^|\n|[.|;][ \t]*)[ \t]*(?:(?:ال)?حاله|status)[ \t]*:[ \t]*(?:pending|in\s+progress|processing|معلق|معلقه|قيد\s+(?:الانتظار|المعالجه|التنفيذ))`, 'i');
+const NOTICE_NOTHING_CHARGED_RE = /\b(?:charged|debited|deducted|taken|billed)\s+nothing\b|\bnothing\s+(?:was|has\s+been|is|will\s+be)\s+(?:charged|debited|deducted|taken|billed)\b|\bno\s+(?:amount|money|payment)\s+(?:was|has\s+been)\s+(?:charged|debited|deducted|taken)\b/i;
+const NOTICE_QUESTION_RE = new RegExp(String.raw `\b(?:did|do|have|were|are)\s+you\s+(?:just\s+)?(?:make|made|authori[sz]e|attempt|try|use|send|spend|initiate|perform|recogni[sz]e)\b` +
+    `|(?<![${AR_LETTER}])هل\\s+(?:قمت|اجريت|استخدمت|حولت|دفعت|ارسلت|اشتريت|سحبت)(?![${AR_LETTER}])`, 'i');
+const NOTICE_QUESTION_OPEN_RE = new RegExp(String.raw `^\W{0,4}(?:[^\s:][^:\n]{0,30}:\s*)?(?:fraud\s+alert\s*:?\s*)?(?:did|have|were|are)\s+you\s+(?:just\s+)?(?:make|made|authori[sz]e|attempt|try|use|send|spend|initiate|perform)\b` +
+    `|^\\W{0,4}(?:[^\\s:][^:\\n]{0,30}:\\s*)?هل\\s+(?:قمت|اجريت|استخدمت|حولت|دفعت|ارسلت|اشتريت|سحبت|تؤكد|توكد|تؤكدون|انت\\s+من\\s+(?:قام|اجري|قمت))(?![${AR_LETTER}])` +
+    `|^\\W{0,4}(?:[^\\s:][^:\\n]{0,30}:\\s*)?(?:يرجي|الرجاء|نرجو|فضلا)\\s+(?:ال)?تاكيد(?![${AR_LETTER}])` +
+    String.raw `|^\W{0,4}(?:[^\s:][^:\n]{0,30}:\s*)?please\s+(?:verify|confirm)\b`, 'i');
+const NOTICE_SAME_LINE_CHALLENGE_RE = /\b(?:was|is)\s+(?:this|it)\s+(?:you|yours)\s*[?？]\s*(?:[–—|-]\s*)?(?:please\s+)?reply\s+(?:with\s+)?["'“]?(?:y|yes|n|no|1|2)\b|^\W{0,4}reply\s+(?:y|yes|1)\b|\bdid\s+you\s+(?:make|authori[sz]e|do)\s+(?:this|the)\s+(?:transaction|purchase|payment|transfer)\s*[?？]\s*(?:[–—|-]\s*)?(?:please\s+)?reply\b/i;
+const NOTICE_CHALLENGE_LINE_RE = new RegExp(String.raw `^\W{0,4}(?:[^\s:][^:\n]{0,30}:\s*)?(?:was\s+this\s+(?:you|yours)|is\s+this\s+you|was\s+this\s+(?:transaction|purchase|payment)\s+(?:made\s+by\s+)?(?:you|yours))\s*[?？]` +
+    `|^\\W{0,4}(?:[^\\s:][^:\\n]{0,30}:\\s*)?هل\\s+(?:هذه\\s+(?:عمليتك|العمليه\\s+لك)|قمت\\s+بهذه\\s+العمليه)\\s*[?？؟]` +
+    String.raw `|(?:^|\n)[ \t]*did\s+you\s+make\s+this\s+(?:transaction|purchase|payment)\s*[?？][ \t]*$` +
+    `|(?:^|\\n)[ \\t]*هل\\s+(?:قمت|اجريت)\\s+بهذه\\s+العمليه\\s*[?？؟](?:[ \\t]*(?:ارسل|ارسال)\\s+(?:نعم|1)[^\\n]*)?(?:\\n[ \\t]*(?:رقم\\s+المرجع|ref)[^\\n]*)?[ \\t]*$`, 'i');
+const NOTICE_FOOTER_QUESTION_TAIL_RE = new RegExp(String.raw `(?:^|[\s,–-])(?:not\s+(?:you|u)|didn['’]t\s+(?:make|do)\s+(?:this|it)(?:\s+(?:transaction|purchase|payment|transfer|one))?|wasn['’]t\s+(?:it|this)?\s*you|unrecogni[sz]ed|unauthori[sz]ed(?:\s+(?:transaction|purchase|payment|transfer|use))?|ليس\s+انت|لست\s+انت` +
+    String.raw `|not\s+(?:done|made|authori[sz]ed|initiated)\s+by\s+you|not\s+recogni[sz]ed|(?:looks?\s+)?suspicious|don['’]t\s+recogni[sz]e\s+(?:this|it))\s*$`, 'i');
+const NOTICE_REPLY_CHALLENGE_RE = new RegExp(String.raw `\breply\s+(?:with\s+)?["'“]?(?:yes|y|1)\b|\b(?:yes|y)\s*(?:or|/)\s*(?:no|n)\b` +
+    `|(?<![${AR_LETTER}])ارسل\\s+(?:نعم|1)(?![${AR_LETTER}])|(?<![${AR_LETTER}])للتاكيد\\s+ارسل(?![${AR_LETTER}])`, 'i');
+const NOTICE_REQUEST_RE = new RegExp(String.raw `\b(?:is|are)\s+(?:asking|requesting)\s+(?:you\s+)?(?:to\s+(?:pay|send|transfer)\b|for\b)` +
+    String.raw `|\b(?:payment|money|transfer)\s+request\s+(?:of|for)\b` +
+    String.raw `|\brequested\b(?:[^.\n]|\.\d){0,60}?\bfrom\s+you\b` +
+    String.raw `|\b(?:sent|send|transferred|forwarded)\s+you\s+(?:a\s+)?(?:payment\s+|money\s+)?request\b` +
+    String.raw `|(?:^|[:\n]\s*)(?:payment|money|transfer|pay)\s+request\s*[:\-]` +
+    `|(?<![${AR_LETTER}])طلب\\s+(?:[^\\s]+\\s+){1,4}منك(?![${AR_LETTER}])|(?<![${AR_LETTER}])يطلب\\s+منك(?![${AR_LETTER}])` +
+    `|(?<![${AR_LETTER}])طلب\\s+(?:دفع|تحويل|سداد|اموال)(?![${AR_LETTER}])`, 'i');
+const NOTICE_REQUEST_HEAD_RE = /^\W*(?:[^\s:][^:\n]{0,30}:\s*)?(?:incoming\s+|new\s+)?(?:payment|money|transfer)\s+request\b|\bmoney\s+received\s+request\b|\bthis\s+is\s+a\s+(?:payment|money)\s+request\b/i;
+const NOTICE_REQUEST_DONE_RE = new RegExp(String.raw `\b(?:was|were|has\s+been|have\s+been)\s+(?:successfully\s+)?(?:paid|sent|completed|accepted|approved|transferred|debited|deducted|charged|processed|executed)\b|\byou\s+(?:have\s+)?(?:paid|sent)\b` +
+    String.raw `|\b(?:is|was|has\s+been)\s+(?:now\s+)?(?:successfully\s+)?(?:completed|complete|successful|done)\b|\b(?:is|are)\s+(?:now\s+)?(?:successfully\s+)?(?:processed|executed)\b|\b(?:completed|executed|processed|paid|sent)\s+successfully\b` +
+    `|(?<![${AR_LETTER}])و?تم\\s+(?:ال)?(?:تنفيذ|قبول|سداد|دفع|تحويل|خصم)(?![${AR_LETTER}])`, 'i');
+const NOTICE_WHEN_LEAD_AR_RE = new RegExp(`^\\W*(?:[^\\s:][^:\\n]{0,30}:\\s*)?عند\\s+(?:ال)?(?:شراء|دفع|سحب|تحويل|استخدام)(?![${AR_LETTER}])`);
+const NOTICE_CONDITIONAL_LEAD_RE = new RegExp(String.raw `(?:^|[\s,:(])(?:if|in\s+case|should|unless|whenever)\s+(?:you|your|the|a|an|any|this|we|it)\b` +
+    String.raw `|(?:^|[\s,:(])(?:if|in\s+case|should|unless|whenever)\s+\w{2,6}\s+(?:card|account|a\/c)\s+(?:is|was|gets|has)\b` +
+    `|(?<![${AR_LETTER}])(?:اذا|لو|في\\s+حال|عند\\s+قيامك)(?![${AR_LETTER}])`, 'i');
+const NOTICE_LATER_CONDITION_RE = new RegExp(String.raw `(?:^|[\s,(])(?:if|in\s+case|should|unless)\b` +
+    `|(?<![${AR_LETTER}])(?:اذا|في\\s+حال|لو|ان\\s+لم)(?![${AR_LETTER}])`, 'i');
+const NOTICE_PROMO_SPEND_LEAD_RE = /^\s*(?:[^\s:][^:\n]{0,40}:\s*)?(?:spend|shop\s+for)\s+(?:(?:a\s+)?(?:minimum\s+of|over|more\s+than|at\s+least|only|just)\s+)?$/i;
+const NOTICE_REWARD_RE = /\b(?:earn|get|win|receive|enjoy|unlock|collect)\b/i;
+const NOTICE_PROMO_AR_VERB_RE = new RegExp(`(?<![${AR_LETTER}])(?:احصل|اكسب|اربح|استمتع|تمتع)(?![${AR_LETTER}])`);
+const NOTICE_THRESHOLD_LEAD_AR_RE = new RegExp(`(?:(?<![${AR_LETTER}])ب?(?:اكثر|اعلي)\\s+من|بما\\s+يزيد\\s+عن)\\s*(?:${NOTICE_CURRENCY}\\.?\\s*)?$`);
+const NOTICE_MOVEMENT_WORD_RE = new RegExp(String.raw `\b(?:spent|debited|deducted|credited|charged|withdrawn|withdrawal|transferred|transfer|paid|payment|purchased?|refund(?:ed)?|deposit(?:ed)?|received|sent|reversed|statement|due|minimum|overdue)\b` +
+    `|(?:خصم|شراء|سحب|ايداع|تحويل|حواله|استرداد|استرجاع|دفع|سداد|اضافه|ارجاع|مستحق|كشف|(?:ال)?حد\\s+(?:ال)?ادني)`, 'i');
+const NOTICE_STATUS_LINE_RE = new RegExp(String.raw `(?:\n|[.!][ \t]+)[ \t]*(?:PENDING|DECLINED|FAILED|CANCELL?ED|REJECTED|REVERSED|UNSUCCESSFUL|ON\s+HOLD|NOT\s+COMPLETED|PRE-AUTH)[ \t.!]*(?:[ \t][-–|][ \t][^\n]{1,30})?[^A-Za-z0-9؀-ۿ\n]{0,8}(?:\n[ \t]*[Xx*•·]{2,}\d{2,4}[ \t]*)?$|\n[ \t]*please\s+(?:verify|confirm)\s+this\s+(?:payment|transaction|purchase|transfer)\b[^\n]*$|\n[ \t]*status\s*:\s*(?:failed|declined|pending|rejected|cancell?ed)[ \t.!]*$|\n[ \t]*tap\s+to\s+accept\b` +
+    String.raw `|\n[ \t]*was\s+this\s+(?:you|yours)\s*[?？]\s*reply\s+(?:with\s+)?["']?(?:yes|y)\b[^\n]*$` +
+    `|\\n[ \\t]*(?:مرفوضه|مرفوض|ملغاه|ملغي|معلقه|قيد\\s+(?:المعالجه|الانتظار)|(?:لم|ما)\\s+(?:تتم|يتم|تم)(?:\\s+(?:ال)?(?:عمليه|خصم))?(?:\\s+(?:ال)?مبلغ)?|غير\\s+ناجح(?:ه)?|فشلت?(?:\\s+(?:ال)?عمليه)?)[ \\t.!]*$` +
+    `|\\n[ \\t]*هل\\s+(?:قمت|اجريت)\\s+بهذه\\s+العمليه\\s*[?？؟]\\s*(?:ارسل\\s+(?:نعم|1)[^\\n]*)?$`, 'i');
+const NOTICE_STATUS_WORD_EN_RE = /\b(?:(?<!\d[ \t\u00a0]{0,3})REVERSED|DECLINED|FAILED|CANCELL?ED|REJECTED|ON\s+HOLD|NOT\s+COMPLETED|PRE-AUTH)(?=[ \t]*(?:$|[\n.,;·|])|[ \t]+(?:[oO][nN]|[wW][iI][tT][hH]|[uU][sS][iI][nN][gG]|[vV][iI][aA]|[wW][aA][sS]|[wW][eE][rR][eE]|[hH][aA][sS]|[hH][aA][vV][eE]|[iI][sS]|[pP][aA][iI][dD]|[pP][oO][sS][tT][eE][dD]|[cC][hH][aA][rR][gG][eE][dD]|[sS][eE][nN][tT]|[rR][eE][fF][uU][nN][dD][eE][dD]|[cC][rR][eE][dD][iI][tT][eE][dD]|[dD][eE][bB][iI][tT][eE][dD]|[aA][uU][tT][hH]|[rR][eE][fF]|[rR][eE][fF][eE][rR][eE][nN][cC][eE]|[aA][pP][pP][rR][oO][vV][aA][lL]|[mM][aA][dD][eE]|[aA][vV][aA][iI][lL][aA][bB][lL][eE]|[yY][oO][uU][rR]|[bB][aA][lL]|[bB][aA][lL][aA][nN][cC][eE]|[dD][eE][bB][iI][tT]|[cC][aA][rR][dD]|[aA][vV][lL])\b)/;
+const NOTICE_STATUS_WORD_TITLE_RE = /\b(?:(?<!\d[ \t\u00a0]{0,3})Reversed|Declined|Failed|Cancell?ed|Rejected|On\s+Hold|Not\s+Completed|Pre-[Aa]uth)(?=[ \t]*(?:$|[\n.,;·|])|[ \t]+[Oo][Nn][ \t]+\d)/;
+const NOTICE_STATUS_WORD_AR_RE = new RegExp(`(?<![${AR_LETTER}])(?:ملغاه|ملغيه|معلقه|مرفوضه)(?![${AR_LETTER}])`);
+const NOTICE_THRESHOLD_LEAD_RE = new RegExp(String.raw `\b(?:more\s+than|above|over|exceeding|in\s+excess\s+of)\s*(?:${NOTICE_CURRENCY}\.?\s*)?$` +
+    `|(?<![${AR_LETTER}])ب?(?:اكثر|اعلي)\\s+من\\s*(?:${NOTICE_CURRENCY}\\.?\\s*)?$`, 'i');
+const LOOKALIKE_DOMAIN = String.raw `(?:https?:\/\/)?(?:www\.)?(?:[\w]+(?:\.[\w]+)*-[\w-]*(?:\.[\w-]+)+|[\w-]+(?:\.[\w-]+)*\.(?:info|xyz|top|click|ru|biz|tk|zip)(?![\w.]))`;
+const NOTICE_LOOKALIKE_LURE_RE = new RegExp(String.raw `\b(?:verify|confirm|secure\s+your\s+(?:card|account))\b[^\n]{0,24}?(?:\bat\b|\bon\b|\bvia\b|:)\s*${LOOKALIKE_DOMAIN}` +
+    `|(?<![${AR_LETTER}])(?:للتحقق|للتاكيد|لتحديث\\s+بياناتك)\\s+(?:ادخل|اضغط|زر|توجه)\\s+(?:علي|الي)\\s+${LOOKALIKE_DOMAIN}`, 'i');
+const NOTICE_CALL_BACK_RE = new RegExp(String.raw `\b(?:call|ring|reach\s+us\s+at|contact)\b[^\n]{0,30}?\+?\d[\d\s.-]{6,}` +
+    `|(?<![${AR_LETTER}])اتصل[^\\n]{0,30}?\\+?\\d[\\d\\s.-]{6,}`, 'i');
+const UNREGISTERED_SENDER_RE = /^\s*\+?\d[\d\s-]{6,}\s*$|@/;
+function isUnregisteredCallBack(message, sender) {
+    return !!sender && UNREGISTERED_SENDER_RE.test(sender) &&
+        NOTICE_CALL_BACK_RE.test(foldOrthography(stripInvisible(message)));
+}
+const NOTICE_CHAT_RE = new RegExp(String.raw `^\s*(?:[^\s:][^:\n]{0,30}:\s*)?(?:lol|lmao|haha+|hehe+|omg|bro|dude)\b` +
+    `|(?<![${AR_LETTER}])(?:حول|حولي|ارسل|ارسلي|رجع)\\s+لي(?![${AR_LETTER}])|(?<![${AR_LETTER}])نصيبك(?![${AR_LETTER}])|(?<![${AR_LETTER}])وصلتك\\s*[؟?]`, 'i');
+const NOTICE_AR_REMINDER_RE = new RegExp(`^\\s*(?:[^\\n:]{0,30}:\\s*)?تذكير\\s*:[\\s\\S]*(?<![${AR_LETTER}])(?:ال)?(?:مستحق|مستحقه|تستحق|يستحق)(?![${AR_LETTER}])`);
+const NOTICE_HEDGE_RE = new RegExp(String.raw `\b(?:may|might|could)\s+(?:have\s+)?been\s+(?:used|charged|debited|deducted|spent|made|paid|taken|withdrawn)\b|\bappears?\s+to\s+have\s+been\b|\bit\s+(?:seems|appears|looks\s+like)\b|\bseems\s+like\b|\bpossibly\s+(?:been\s+)?(?:charged|debited|deducted|used|paid|spent)\b` +
+    `|(?<![${AR_LETTER}])(?:ربما|قد\\s+يكون|قد\\s+(?:يتم|تتم)\\s+(?:ال)?(?:خصم|سحب|تحويل|دفع|سداد|اقتطاع)|يحتمل(?:\\s+ان(?:ه|ها)?)?|من\\s+المحتمل\\s+ان(?:ه|ها)?|يبدو(?:\\s+ان(?:ه|ها)?)?)(?![${AR_LETTER}])`, 'i');
+const NOTICE_POSSIBLE_HEAD_RE = /^\W*(?:[^\s:][^:\n]{0,30}:\s*)?possible\s+(?:transaction|charge|purchase|payment|debit)\s*:/i;
+const NOTICE_GLUED_QUESTION_RE = new RegExp(String.raw `(?:,|-|–|\bor\b)\s*(?:was\s+(?:this|it)\s+(?:you|yours)|(?:you\s+)?didn['’]t\s+(?:you\s+)?make\s+(?:this|it)|did\s+you\s+not\s+make\s+(?:this|it)|was\s+(?:it|this)\s+not\s+you|wasn['’]t\s+(?:it|this)\s+you|really\s+not\s+you)\s*$` +
+    `|(?:,|(?<![${AR_LETTER}])ام)\\s*(?:الست\\s+انت|لم\\s+تكن\\s+انت|لم\\s+تقم\\s+بها)\\s*$`, 'i');
+const NOTICE_EXAMPLE_RE = new RegExp(String.raw `^\W*(?:[^\s:][^:\n]{0,30}:\s*|[^\s:][^:\n]{0,30}\n\s*)?(?:for\s+example|example|sample(?:\s+(?:alert|message|notification|sms))?)\s*(?:[:.,–|-]|\n|$)|^\W*e\.g\.` +
+    String.raw `|(?:^|[\n.!|–][ \t]{0,3})(?:[^\s:][^:\n]{0,30}:[ \t]{0,3})?sample\s+(?:alert|message|notification|sms)[ \t]{0,3}(?:[.:!]|\n|$)` +
+    String.raw `|^\W*(?:[^\s:][^:\n]{0,30}:\s*)?(?:for\s+instance|e\.?g\.?)\s*[:,]` +
+    `|^\\W*(?:[^\\s:][^:\\n]{0,30}:\\s*|[^\\s:][^:\\n]{0,30}\\n\\s*)?(?:(?:مثال|مثلا|نموذج)\\s*(?::|\\n|,|–|-|\\||$)|علي\\s+سبيل\\s+المثال)` +
+    `|^\\W*(?:[^\\s:][^:\\n]{0,30}:\\s*)?(?:شكل|نموذج)\\s+(?:ال)?رساله(?:\\s+(?:ال)?جديده)?\\s*:`, 'i');
+const NOTICE_EXAMPLE_BEFORE_RE = /(?:^|[\n.!|–])[ \t]{0,3}(?:for\s+example|example)[ \t]{0,3}:/i;
+const NOTICE_EXAMPLE_OF_RE = /\b(?:an?|the|our)\s+(?:sample|example)\s+of\s+(?:our|the|a|your)\s+(?:new\s+)?(?:alert|message|notification|sms)s?\b/i;
+const NOTICE_LIMIT_EN_RE = /\blimit\s+(?:reached|applies|exceeded|has\s+been\s+(?:reached|exceeded))\b|\b(?:daily|monthly|weekly|spending)\s+limit\b|\b(?:are|is)\s+available\s+with\b/i;
+const NOTICE_WITHIN_LIMIT_RE = /\bwithin\s+(?:your|the|ur)\s+(?:[\w-]+\s+){0,3}?limits?\b/gi;
+const NOTICE_UP_TO_LEAD_RE = new RegExp(String.raw `\bup\s+to\s*(?:${NOTICE_CURRENCY}\.?\s*)?$|(?<![${AR_LETTER}])حتي\s*(?:${NOTICE_CURRENCY}\.?\s*)?$`, 'i');
+const NOTICE_DONE_VERB_RE = new RegExp(String.raw `\b(?:was|were|has\s+been|have\s+been)\s+(?:successfully\s+)?(?:used|debited|charged|deducted|spent|withdrawn|made|paid|transferred|credited)\b|\b(?:spent|debited|deducted|withdrawn|purchased)\b` +
+    `|(?<![${AR_LETTER}])و?تم\\s+(?:ال)?(?:خصم|شراء|سحب|دفع|تحويل|سداد|استخدام)`, 'i');
+const NOTICE_HOLD_RE = new RegExp(String.raw `\b(?:requires?|needs?|awaiting|waiting\s+for)\s+(?:your\s+)?(?:approval|authori[sz]ation|confirmation)\b|\bmay\s+appear\s+on\s+your\s+(?:[\w&-]+\s+){0,3}?(?:card|account|a\/c|debit|credit)\b|\bfor\s+card\s+verification\b|\bsubject\s+to\s+final\s+settlement\b` +
+    `|(?<![${AR_LETTER}])بانتظار\\s+(?:موافقتك|الموافقه|التاكيد|تاكيدك)|(?<![${AR_LETTER}])قيد\\s+الموافقه|(?<![${AR_LETTER}])خاضعه\\s+للتسويه`, 'i');
+const NOTICE_POSTS_LATER_RE = new RegExp(String.raw `\bfinal\s+amount\s+(?:will|may)\s+be\s+updated\b|\b(?:it|this(?:\s+(?:transaction|purchase|charge|payment))?)\s+(?:may|can|could)\s+take\s+(?:up\s+to\s+)?\d+(?:\s*-\s*\d+)?\s+(?:business\s+|working\s+)?days?\s+to\s+(?:post|reflect|appear)\b` +
+    `|(?<![${AR_LETTER}])يستغرق\\s+قيدها`, 'i');
+const NOTICE_APPROVED_RE = new RegExp(String.raw `\b(?:was|has\s+been)\s+approved\b|(?<![${AR_LETTER}])تمت\s+الموافقه`, 'i');
+const NOTICE_RETURNED_RE = new RegExp(String.raw `\b(?:was|has\s+been|were|have\s+been)\s+(?:returned|bounced(?:\s+back)?|sent\s+back)\b(?!\s+(?:back\s+)?(?:to|into|onto)\s+(?:your\s+)?(?:[\w&'-]+\s+){0,4}(?:card|account|a\/c|wallet))|\bbounced\s+back\b|\breported\s+as\s+(?:fraud|fraudulent)\b` +
+    `|(?<![${AR_LETTER}])ارتدت(?![${AR_LETTER}])|(?<![${AR_LETTER}])كعمليه\\s+احتيال|(?<![${AR_LETTER}])تم\\s+الابلاغ\\s+عن`, 'i');
+const NOTICE_REFUND_WORD_RE = new RegExp(String.raw `\b(?:refund(?:ed)?|credited|reversed|reversal)\b|(?<![${AR_LETTER}])(?:استرداد|مسترد|استرجاع)(?![${AR_LETTER}])`, 'i');
+const NOTICE_FOOTER_ACTION_RE = new RegExp(String.raw `^\s*(?:please\s+)?(?:call|contact|block|report|dial|visit)\b|^\s*(?:(?:ف|و)?اتصل|للابلاغ|يرجي\s+الاتصال)(?![${AR_LETTER}])`, 'i');
+const NOTICE_RETURNED_TO_SENDER_RE = /\breturned\s+to\s+(?:the\s+)?sender\b/i;
+const NOTICE_UNCLAIMED_RE = new RegExp(String.raw `\b(?:enrol+|register|sign\s+up|join)\s+(?:now\s+)?to\s+(?:receive|claim|accept|collect|get)\s+(?:it|them|this|the\s+(?:money|payment|transfer|funds|amount)|your\s+(?:money|payment|transfer|funds))\b|\baccept\s+(?:it|them|this|the\s+(?:money|payment|transfer))\s*\?|\baccept\s+(?:it\s+)?within\s+\d+\s+days?\b|\bwaiting\s+for\s+you\s+to\s+(?:enrol+|accept|register|sign\s+up)\b` +
+    `|(?<![${AR_LETTER}])هل\\s+تقبل(?:ه|ها)?(?![${AR_LETTER}])|(?<![${AR_LETTER}])لاستلام(?:ه|ها)(?![${AR_LETTER}])`, 'i');
+const NOTICE_P2P_IN_RE = new RegExp(String.raw `\b(?:you\s+(?:have\s+|['’]ve\s+)?received|(?:sent|transferred|paid)\s+you)\b|(?<![${AR_LETTER}])ارسل\s+(?:لك|لكم)(?![${AR_LETTER}])`, 'i');
+const NOTICE_RENEWAL_RE = /\brenews\s+(?:tomorrow|today|on)\b|\bwill\s+(?:be\s+)?renew(?:ed)?\b|\bfree\s+trial\s+ends\b|\bis\s+coming\s+up\b/i;
+const NOTICE_UNDER_PROCESS_RE = /\b(?:the\s+|this\s+|your\s+)?(?:transaction|payment|transfer|purchase)\s+is\s+(?:still\s+)?(?:under\s+process(?:ing)?|in\s+process|being\s+processed)\b/i;
+const NOTICE_NOT_YET_RE = new RegExp(String.raw `\bwill\s+be\s+(?:approved|authori[sz]ed|confirmed)\b|\b(?:refund|payment|transfer|transaction|credit)\s+pending\b|\b(?:is|are)\s+being\s+(?:sent|processed|transferred|paid)\b|\b(?:has|have)\s+not\s+(?:yet\s+)?(?:arrived|reached)\b|\bnot\s+(?:yet\s+)?arrived\b|\bwill\s+be\s+taken\b` +
+    `|(?<![${AR_LETTER}])جار(?:ي)?\\s+(?:ارسال|تحويل|تنفيذ|معالجه)(?![${AR_LETTER}])|(?<![${AR_LETTER}])لم\\s+(?:تصل|يصل)(?![${AR_LETTER}])`, 'i');
+const TRAILING_REVERSAL_MARK_RE = /(?<!\b(?:been|was|were|is|are|purchase|pos|atm|txn|transaction|payment|withdrawal|charge|debit|wdl|dr)\s{1,3})\breversed[\s.!]*$/i;
+const NOTICE_INCOMING_STATED_RE = new RegExp(String.raw `\byou\s+(?:have\s+|['’]ve\s+)?received\b|\bsent\s+you\b` +
+    String.raw `|\bincoming\s+(?:payment|transfer|remittance)\b|\bsalary\b|(?<![${AR_LETTER}])استلمت(?![${AR_LETTER}])`, 'i');
+const NOTICE_RETURNED_TO_USER_RE = /\brefund|\bcredited\s+back\b|\bre-?credited\b|\breturned\s+to\s+your\b|\breversed\s+(?:to|into)\s+your\b|\breversal\s+of\b/i;
+const NOTICE_PREFIX_CONNECTOR_RE = /^(\W{0,4}[^\s:\n][^:\n]{0,30}?)[ \t]+[–—|-][ \t]+/;
+const NOTICE_REVERSAL_REQUEST_RE = /\b(?:reversal|refund|dispute|chargeback)\s+request\b(?:[^.\n]|\.(?=\d)){0,80}?\b(?:has\s+been\s+|was\s+|is\s+)?(?:received|registered|logged|submitted|raised)\b/i;
+const NOTICE_TOP_UP_RE = /\btop\s+up\s+(?:your\s+)?\w+\s+to\s+complete\b|^\W{0,4}(?:[^\s:][^:\n]{0,30}:\s*)?pending\s*(?::|(?:purchase|transaction|payment|charge|transfer|debit|withdrawal)\b)/i;
+const NOTICE_STATUS_SEGMENT_RE = new RegExp(String.raw `(?:^|\n|\||\s[–—]\s|\s-{1,2}[ \t]*|[(\[]\s*)[ \t]*(?:` +
+    `(?:ما|لم|لن)\\s+(?:تم|تمت|يتم|تتم|تكتمل)(?:\\s+(?:ال)?(?:خصم|عمليه|تنفيذ|سداد|تحويل|دفع))?(?:\\s+(?:ال)?مبلغ)?` +
+    `|غير\\s+ناجح(?:ه)?|مرفوض(?:ه)?|ملغ(?:ي|اه)|فشلت?(?:\\s+(?:ال)?عمليه)?|قيد\\s+(?:ال)?(?:معالجه|انتظار|تنفيذ)` +
+    `|تعذر\\s+(?:ال)?(?:اتمام|تنفيذ|خصم)(?:\\s+(?:ال)?(?:عمليه|مبلغ))?|قد\\s+(?:يتم|تتم)\\s+(?:ال)?خصم(?:\\s+(?:ال)?مبلغ)?` +
+    `|هل\\s+(?:تؤكد|توكد)\\s+(?:هذه\\s+)?(?:ال)?عمليه\\s*[?？؟]?|(?:يرجي|الرجاء)\\s+(?:ال)?تاكيد\\s+(?:ال)?عمليه(?:\\s+بالرد\\s+بنعم)?` +
+    String.raw `|please\s+verify\s+this\s+(?:payment|transaction|purchase|transfer)|tap\s+to\s+accept(?:\s+this\s+(?:payment|transfer))?` +
+    String.raw `|(?:could(?:n['’]?t|\s+not)|can(?:not|['’]t))\s+be\s+(?:completed|processed|approved)` +
+    `|تم\\s+عكس(?:ها|ه)?(?:\\s+(?:ال)?(?:حواله|عمليه|مبلغ))?` +
+    String.raw `|pending(?:\s+(?:approval|authori[sz]ation|confirmation))?|declined|failed|cancell?ed|rejected|reversed|unsuccessful|not\s+completed|on\s+hold)` +
+    String.raw `[ \t.!]*(?:[ \t]+[-–][ \t]+[^\n|]{1,30}|[ \t]+(?:ref(?:erence)?|رقم\s+المرجع)(?:\s*(?:no\.?|number|#))?\s*[:.]?\s*[\w-]+)?[^A-Za-z0-9؀-ۿ\n|]{0,8}(?=\n|\||[)\]]|$)`, 'i');
+function moneyNoticeKindInBody(text) {
+    const body = text.replace(NOTICE_PREFIX_CONNECTOR_RE, '$1: ');
+    if (/\brefund\b/i.test(body)) {
+        const spans = [...body.matchAll(new RegExp(NOTICE_MONEY_RE.source, 'g'))]
+            .map(match => ({ start: match.index, end: match.index + match[0].length }));
+        const refund = principalRefundStatus(body, spans);
+        if (refund === 'completed' || refund === 'paid-out')
+            return null;
+    }
+    if (NOTICE_CHAT_RE.test(body))
+        return 'personal-chat';
+    if (NOTICE_TOP_UP_RE.test(body) || (NOTICE_REVERSAL_REQUEST_RE.test(body) &&
+        (!/\b(?:has\s+been|was|is)\s+(?:credited|refunded|deposited|returned)\b/i.test(body) ||
+            /\b(?:once|when|after|until|will|shall)\b/i.test(body))))
+        return 'not-yet';
+    if (TRAILING_REVERSAL_MARK_RE.test(body) && NOTICE_INCOMING_STATED_RE.test(body) &&
+        !NOTICE_RETURNED_TO_USER_RE.test(body))
+        return 'unproven-direction';
+    if (AR_CASH_WITHDRAWAL_CORRECTION_ANY_RE.test(body) && (!AR_CASH_WITHDRAWAL_CORRECTION_HEADER_RE.test(body) ||
+        AR_WITHDRAWAL_FIELD_RE.test(body.indexOf('\n') < 0 ? '' : body.slice(body.indexOf('\n') + 1))))
+        return 'unproven-direction';
+    if (AR_RETURNED_TO_OWN_RE.test(body) &&
+        (AR_DEBIT_OR_PAYMENT_RE.test(body) || /(?<![ء-ي])(?:ال)?رسوم(?![ء-ي])/.test(body)))
+        return 'unproven-direction';
+    if (NOTICE_AR_REMINDER_RE.test(body) && !SETTLED_MOVEMENT_RE.test(body) && !AR_SETTLED_VERB_RE.test(body)) {
+        return 'reminder';
+    }
+    const principal = principalMoneyClause(body);
+    if (principal === null)
+        return null;
+    if (principal === 'balance-only') {
+        return NOTICE_MOVEMENT_WORD_RE.test(body) ? null : 'balance-only';
+    }
+    const { clause, lead, mark } = principal;
+    if (!NOTICE_MOVEMENT_WORD_RE.test(body) && !/\b(?:after|txn|trx|transaction|using|used|spent)\b|(?<![ء-ي])(?:بعد|عمليه)(?![ء-ي])/i.test(body) &&
+        /\bavail\w*|\bavl\b|متاح/i.test(lead))
+        return 'balance-only';
+    const tail = clause.slice(lead.length);
+    const opener = NOTICE_LATER_CONDITION_RE.exec(tail);
+    const core = opener ? clause.slice(0, lead.length + opener.index) : clause;
+    if (NOTICE_NEGATED_EN_RE.test(core) || NOTICE_NEGATED_AR_RE.test(core) ||
+        NOTICE_NOTHING_CHARGED_RE.test(core) || NOTICE_STATUS_FAILED_RE.test(body))
+        return 'negated';
+    const statusWord = NOTICE_STATUS_WORD_EN_RE.exec(body) ?? NOTICE_STATUS_WORD_TITLE_RE.exec(body);
+    const statusWordCounts = !!statusWord && !(/^cancel/i.test(statusWord[0]) && /\brefund/i.test(body)) &&
+        !(/^reversed/i.test(statusWord[0]) && (/\brefund|\bcredited\s+(?:back\s+)?(?:to|into|in)\s+(?:your\s+)?(?:\w+\s+)?(?:card|account|a\/c)\b/i.test(body) ||
+            /^\W{0,4}(?:[^\s:][^:\n]{0,30}:\s*)?(?:pos\s+)?(?:purchase|transaction|txn|trx)\b/i.test(body)));
+    const segment = NOTICE_STATUS_SEGMENT_RE.exec(body);
+    const segmentCounts = !!segment && !(/revers/i.test(segment[0]) && !INCOMING_MONEY_STATED_RE.test(body) && !reversedIncomingCredit(body) &&
+        /\bcredited\s+(?:back\s+)?(?:to|into|in)\s+(?:your\s+)?(?:\w+\s+)?(?:card|account|a\/c)\b/i.test(body));
+    if (NOTICE_STATUS_LINE_RE.test(body) || segmentCounts || statusWordCounts ||
+        NOTICE_STATUS_WORD_AR_RE.test(body))
+        return 'status';
+    if (NOTICE_LOOKALIKE_LURE_RE.test(body))
+        return 'lure';
+    const asked = mark === '?' || mark === '؟' || mark === '？';
+    if (NOTICE_QUESTION_RE.test(lead) && (asked || NOTICE_REPLY_CHALLENGE_RE.test(body)))
+        return 'question';
+    if (NOTICE_QUESTION_OPEN_RE.test(lead) || NOTICE_CHALLENGE_LINE_RE.test(body) ||
+        NOTICE_SAME_LINE_CHALLENGE_RE.test(body))
+        return 'question';
+    if (asked && !NOTICE_FOOTER_QUESTION_TAIL_RE.test(tail) && !NOTICE_GLUED_QUESTION_RE.test(tail))
+        return 'question';
+    if (asked && NOTICE_GLUED_QUESTION_RE.test(tail) &&
+        (!NOTICE_FOOTER_ACTION_RE.test(principal.after.slice(1)) || /(?:الست|لم\s+تكن)\s+انت|لم\s+تقم\s+بها/.test(tail)))
+        return 'question';
+    if (NOTICE_EXAMPLE_RE.test(body) || NOTICE_EXAMPLE_RE.test(lead) || NOTICE_EXAMPLE_BEFORE_RE.test(principal.before) ||
+        NOTICE_EXAMPLE_OF_RE.test(principal.before))
+        return 'example';
+    if (NOTICE_HEDGE_RE.test(core) || NOTICE_POSSIBLE_HEAD_RE.test(body))
+        return 'hedged';
+    if (NOTICE_HOLD_RE.test(clause) ||
+        (NOTICE_APPROVED_RE.test(clause) && NOTICE_POSTS_LATER_RE.test(body)))
+        return 'hold';
+    if ((NOTICE_RETURNED_RE.test(core) || NOTICE_RETURNED_TO_SENDER_RE.test(body)) &&
+        !NOTICE_REFUND_WORD_RE.test(clause))
+        return 'returned';
+    if (NOTICE_P2P_IN_RE.test(clause) &&
+        NOTICE_UNCLAIMED_RE.test(principal.before.slice(-160) + ' ' + clause + ' ' + principal.after.slice(0, 160)))
+        return 'unclaimed';
+    if (NOTICE_NOT_YET_RE.test(core) || NOTICE_UNDER_PROCESS_RE.test(body) ||
+        NOTICE_STATUS_PENDING_RE.test(body))
+        return 'not-yet';
+    if (NOTICE_RENEWAL_RE.test(core) && !NOTICE_DONE_VERB_RE.test(clause))
+        return 'not-yet';
+    const afterFigure = tail.slice(principal.figure.length);
+    const outsideWithinLimit = (text) => text.replace(NOTICE_WITHIN_LIMIT_RE, ' ');
+    const limitTail = NOTICE_MONEY_TEST_RE.test(afterFigure) ? '' : outsideWithinLimit(afterFigure);
+    if (!NOTICE_DONE_VERB_RE.test(clause) &&
+        (NOTICE_LIMIT_EN_RE.test(outsideWithinLimit(lead)) || NOTICE_LIMIT_EN_RE.test(limitTail) ||
+            NOTICE_UP_TO_LEAD_RE.test(lead) && /\bavailable\b|حد/i.test(clause) ||
+            /بلوغ\s+(?:ال)?حد|تجاوز\s+(?:ال)?حد/.test(limitTail)))
+        return 'limit';
+    if ((NOTICE_REQUEST_RE.test(clause) || NOTICE_REQUEST_HEAD_RE.test(body)) &&
+        !NOTICE_REQUEST_DONE_RE.test(clause))
+        return 'request';
+    if (NOTICE_CONDITIONAL_LEAD_RE.test(lead) || NOTICE_WHEN_LEAD_AR_RE.test(lead))
+        return 'conditional';
+    if (NOTICE_PROMO_SPEND_LEAD_RE.test(lead) && NOTICE_REWARD_RE.test(body))
+        return 'promotion';
+    if (NOTICE_THRESHOLD_LEAD_AR_RE.test(lead) && NOTICE_PROMO_AR_VERB_RE.test(clause))
+        return 'promotion';
+    if (NOTICE_PROMO_AR_VERB_RE.test(lead) && new RegExp(`(?<![${AR_LETTER}])عند(?![${AR_LETTER}])`).test(clause))
+        return 'promotion';
+    if (NOTICE_THRESHOLD_LEAD_RE.test(lead))
+        return 'threshold';
+    return null;
+}
+function moneyNoticeKind(message) {
+    return moneyNoticeKindInBody(foldOrthography(stripInvisible(message.trim())));
+}
 function isDeclinedMessage(message) {
     return nonPostingReason(message) === 'declined';
 }
@@ -13644,6 +14014,8 @@ function parseSmsInner(message, overrides, options) {
     if (nonPostingReasonInBody(raw, suppressible))
         return null;
     if (nonCashNoticeInBody(raw))
+        return null;
+    if (moneyNoticeKindInBody(raw))
         return null;
     const separate = SEPARATE_MOVEMENT_RE.exec(suppressible);
     if ((separate &&
@@ -14383,7 +14755,7 @@ function parseSmsInner(message, overrides, options) {
         return null;
     const isIncomingCreditReversal = INCOMING_CREDIT_REVERSAL_RE.test(prose);
     const isRefund = !isIncomingCreditReversal &&
-        (REFUND_RE.test(refundNotes.body) || REVERSAL_RE.test(prose) || arabicPurchaseRefundHeader ||
+        (REFUND_RE.test(refundNotes.body) || REVERSAL_RE.test(refundNotes.body) || arabicPurchaseRefundHeader ||
             REFUND_HEADING_RE.test(prose));
     if (PROMO_RE.test(raw) && !TXN_EVIDENCE_RE.test(raw))
         return null;

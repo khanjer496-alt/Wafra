@@ -983,6 +983,77 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
     ok('an older re-read receipt can never replace a newer one', older.recentRereadParserVersion === 54);
   }
 
+  {
+    // PARSER_VERSION 72 (#190 guard port). Android 1.0.0 may already be installed on
+    // parser 71 with a ledger that parser wrote. The first scan after the
+    // update re-reads the last 14 days through the normal pipeline. It must
+    // (a) add a completed spend that 70 wrongly refused, once; (b) not add
+    // again a spend the ledger already holds; and (c) neither delete nor
+    // duplicate a row the new guards would now refuse (a "was not paid" row
+    // 71 booked): a re-read only adds, matches by source identity, and removes
+    // nothing that is not a proven decline.
+    const { buildImportPlan } = require('./build/import-plan.js');
+    const { materializeImportBatch, applyMaterializedImportBatch } = require('./build/ledger-import.js');
+    const day = Date.UTC(2026, 10, 1, 9, 0, 0);
+    const nowAt = new Date(day + 6 * 60 * 60 * 1000);
+    const floor = day - 14 * 24 * 60 * 60 * 1000;
+    let ids = 0;
+    const commit = (state, batch) => applyMaterializedImportBatch(state,
+      materializeImportBatch(batch, state, (prefix) => `${prefix}-v72-${ids++}`));
+    const normal = 'Purchase of AED 50.00 at CARREFOUR with Debit Card ending 1234 on 01/11/2026';
+    // A spend the 71-era ledger does not hold (the fixture leaves it out); a wave 3 shape, the "Unauthorised?" footer.
+    const refusedBefore = 'AED 75.00 spent on Mashreq card ending 1234 at TEST MART on 01-NOV-2026 Unauthorised? Call 04 4244444';
+    const notPaid = 'Your payment of AED 12.00 to SAMPLE RIDES was not paid.';
+    const asV71Wrote = [
+      { id: 71_001, address: 'ADCB', body: normal, date: day },
+      // What parser 71 booked from the "not paid" text (an AED 12 expense).
+      { id: 71_003, address: 'ADCB', body: normal.replace('50.00', '12.00').replace('CARREFOUR', 'SAMPLE RIDES'), date: day + 2 * 60 * 60 * 1000 },
+    ];
+    inboxRows = asV71Wrote;
+    const wrote = await scanInbox(0, {}, undefined, 'en-AE');
+    let ledger = commit(baseLedgerState(), buildImportPlan(wrote.parsed, baseLedgerState(), wrote.newestTs).batch);
+    ledger = { ...ledger, parserVersion: 71, recentRereadParserVersion: 71 };
+    const rowKey = (row) => `${row.smsTs ?? ''}:${row.amountFils}:${row.merchant}`;
+    const before = ledger.transactions.map(rowKey).sort();
+    ok('v72 fixture: the 71-era ledger holds the purchase and the AED 12 row, not the AED 75 spend',
+      ledger.transactions.length === 2 && ledger.transactions.some((t) => t.amountFils === 1200) &&
+        !ledger.transactions.some((t) => t.amountFils === 7500), JSON.stringify(before));
+
+    inboxRows = [
+      { id: 71_001, address: 'ADCB', body: normal, date: day },
+      { id: 71_002, address: 'Mashreq', body: refusedBefore, date: day + 60 * 60 * 1000 },
+      { id: 71_003, address: 'ADCB', body: notPaid, date: day + 2 * 60 * 60 * 1000 },
+    ];
+    const reread = await scanInbox(floor, {}, undefined, 'en-AE');
+    ok('v72 re-read: the refused-before spend is read, the not-paid text is not',
+      reread.parsed.some((row) => row.amountFils === 7500) && !reread.parsed.some((row) => row.amountFils === 1200),
+      JSON.stringify(reread.parsed.map((row) => [row.amountFils, row.merchant])));
+    const plan = buildImportPlan(reread.parsed, ledger, reread.newestTs, nowAt, reread.declined);
+    ok('v72 re-read adds exactly the one missing spend',
+      plan.txCount === 1 && plan.batch.transactions[0]?.amountFils === 7500 && plan.batch.transactions[0]?.type === 'expense',
+      JSON.stringify(plan.batch.transactions.map((t) => [t.amountFils, t.merchant])));
+    ok('v72 re-read removes or rewrites nothing the ledger holds',
+      !plan.batch.updates.some((update) => update.remove) && plan.batch.updates.length === 0 &&
+        reread.declined.length === 0,
+      JSON.stringify({ updates: plan.batch.updates, declined: reread.declined }));
+    const after = commit(ledger, { ...plan.batch, recentRereadParserVersion: 72 });
+    const afterKeys = after.transactions.map(rowKey).sort();
+    ok('v72 ledger: every 71-era row survives once (no duplicate, no delete) and the new spend is added',
+      after.transactions.length === 3 && before.every((key) => afterKeys.filter((k) => k === key).length === 1) &&
+        after.recentRereadParserVersion === 72,
+      JSON.stringify(afterKeys));
+    const again = await scanInbox(floor, {}, undefined, 'en-AE');
+    const second = buildImportPlan(again.parsed, after, again.newestTs, nowAt, again.declined);
+    ok('v72 re-reading the same window again changes nothing',
+      second.txCount === 0 && second.batch.updates.length === 0 && !second.batch.updates.some((update) => update.remove),
+      JSON.stringify({ tx: second.batch.transactions, updates: second.batch.updates }));
+    const rereadReview = reread.reviewCandidates.length;
+    ok('v72 re-read leaves no second copy of a booked spend in Review',
+      rereadReview === 0 || reread.reviewCandidates.every((candidate) => !JSON.stringify(candidate).includes('"minorUnits":"5000"')),
+      JSON.stringify(reread.reviewCandidates.map((c) => c.kind ?? c.family)));
+  }
+
+
   inboxRows = [
     { address: 'BNPPARIBAS', body: france, date: NOW + 1_000 },
     { address: 'ADCB', body: uae, date: NOW + 2_000 },
