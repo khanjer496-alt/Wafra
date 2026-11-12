@@ -43,7 +43,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: build/app
-          key: app-lock-sim-app-v2-${{ hashFiles('src/**', 'modules/**', 'assets/**', 'plugins/**', 'app.json', 'package-lock.json', 'babel.config.js', 'metro.config.js', 'eas.json') }}
+          key: app-lock-sim-app-v3-${{ hashFiles('src/**', 'modules/**', 'assets/**', 'plugins/**', 'app.json', 'package-lock.json', 'babel.config.js', 'metro.config.js', 'eas.json') }}
 
       - uses: actions/setup-node@v4
         if: steps.appcache.outputs.cache-hit != 'true'
@@ -66,7 +66,7 @@ jobs:
           SCHEME=$(basename "$WORKSPACE" .xcworkspace)
           xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" -configuration Release \
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath build/dd CODE_SIGNING_ALLOWED=NO -quiet build
+            -derivedDataPath build/dd -quiet build
           APP=$(find build/dd/Build/Products/Release-iphonesimulator -maxdepth 1 -name '*.app' | head -1)
           [ -n "$APP" ] || { echo "no .app produced"; exit 1; }
           mkdir -p build/app && rm -rf build/app/* && cp -R "$APP" build/app/
@@ -78,7 +78,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: build/app
-          key: app-lock-sim-app-v2-${{ hashFiles('src/**', 'modules/**', 'assets/**', 'plugins/**', 'app.json', 'package-lock.json', 'babel.config.js', 'metro.config.js', 'eas.json') }}
+          key: app-lock-sim-app-v3-${{ hashFiles('src/**', 'modules/**', 'assets/**', 'plugins/**', 'app.json', 'package-lock.json', 'babel.config.js', 'metro.config.js', 'eas.json') }}
 
       - name: Boot a simulator and enroll Face ID
         id: sim
@@ -99,26 +99,10 @@ jobs:
           xcrun simctl spawn "$UDID" notifyutil -p com.apple.BiometricKit.enrollmentChanged
           xcrun simctl ui "$UDID" appearance light || true
 
-      # An UNSIGNED simulator app has no entitlements, so the iOS keychain refuses it (ERR_KEY_CHAIN) and the
-      # app opens on "Your ledger could not be opened". A real build is signed; give the simulator build the same
-      # keychain identity ad hoc (the simulator does not validate the team prefix).
-      - name: Ad-hoc sign the simulator app with simulated entitlements
+      - name: Show the app's entitlements (evidence)
         run: |
-          set -euo pipefail
-          APP=$(ls -d build/app/*.app | head -1)
-          BID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")
-          cat > "$RUNNER_TEMP/sim-ent.plist" <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0"><dict>
-            <key>application-identifier</key><string>SIMTEAM000.$BID</string>
-            <key>keychain-access-groups</key><array><string>SIMTEAM000.$BID</string></array>
-            <key>com.apple.security.application-groups</key><array><string>group.$BID</string></array>
-          </dict></plist>
-          EOF
-          sed -i '' 's/^          //' "$RUNNER_TEMP/sim-ent.plist"
-          codesign --force --deep --sign - --entitlements "$RUNNER_TEMP/sim-ent.plist" --timestamp=none "$APP"
-          mkdir -p shots; codesign -d --entitlements - "$APP" 2>&1 | tee shots/app-entitlements.txt
+          mkdir -p shots
+          codesign -dvv --entitlements - "$(ls -d build/app/*.app | head -1)" 2>&1 | tee shots/app-entitlements.txt | head -40
 
       - name: Install the app
         run: |
