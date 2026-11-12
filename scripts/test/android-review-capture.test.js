@@ -1053,6 +1053,63 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
       JSON.stringify(reread.reviewCandidates.map((c) => c.kind ?? c.family)));
   }
 
+  {
+    // PARSER_VERSION 73 (predicate PR 1, CEO 40f47cb9). Build 193 ships parser 72, which books some conditional or
+    // pending refund notes as income. The first scan after the update re-reads the last 14 days with 73. It must
+    // (a) not read such a note as income again; (b) add nothing and remove or rewrite nothing: a re-read only adds and
+    // removes nothing that is not a proven decline, so an income row 72 already booked STAYS (a repair of stored rows
+    // would need PARSER_BACKFILL_VERSION, which stays 50); and (c) record the 73 receipt once.
+    const { PARSER_VERSION } = require('./build/sms-parser.js');
+    ok('PARSER_VERSION is 73 (predicate PR 1)', PARSER_VERSION === 73, String(PARSER_VERSION));
+    const { buildImportPlan } = require('./build/import-plan.js');
+    const { materializeImportBatch, applyMaterializedImportBatch } = require('./build/ledger-import.js');
+    const day = Date.UTC(2026, 10, 2, 9, 0, 0);
+    const nowAt = new Date(day + 6 * 60 * 60 * 1000);
+    const floor = day - 14 * 24 * 60 * 60 * 1000;
+    let ids = 0;
+    const commit = (state, batch) => applyMaterializedImportBatch(state,
+      materializeImportBatch(batch, state, (prefix) => `${prefix}-v73-${ids++}`));
+    const normal = 'Purchase of AED 50.00 at CARREFOUR with Debit Card ending 1234 on 02/11/2026';
+    const conditional = 'If AED 250.00 has been refunded to your card, you will receive an SMS.';
+    const asV72Wrote = [
+      { id: 72_001, address: 'ADCB', body: normal, date: day },
+      // What parser 72 booked from the conditional note (an AED 250 income).
+      { id: 72_002, address: 'ADCB', body: 'AED 250.00 has been refunded to your card.', date: day + 60 * 60 * 1000 },
+    ];
+    inboxRows = asV72Wrote;
+    const wrote = await scanInbox(0, {}, undefined, 'en-AE');
+    let ledger = commit(baseLedgerState(), buildImportPlan(wrote.parsed, baseLedgerState(), wrote.newestTs).batch);
+    ledger = { ...ledger, parserVersion: 72, recentRereadParserVersion: 72 };
+    const rowKey = (row) => `${row.smsTs ?? ''}:${row.type}:${row.amountFils}`;
+    const before = ledger.transactions.map(rowKey).sort();
+    ok('v73 fixture: the 72-era ledger holds the purchase and the AED 250 income',
+      ledger.transactions.length === 2 && ledger.transactions.some((t) => t.amountFils === 25000 && t.type === 'income'),
+      JSON.stringify(before));
+
+    inboxRows = [
+      { id: 72_001, address: 'ADCB', body: normal, date: day },
+      { id: 72_002, address: 'ADCB', body: conditional, date: day + 60 * 60 * 1000 },
+    ];
+    const reread = await scanInbox(floor, {}, undefined, 'en-AE');
+    ok('v73 re-read: the conditional refund note is not read as income',
+      !reread.parsed.some((row) => row.amountFils === 25000 && row.type === 'income'),
+      JSON.stringify(reread.parsed.map((row) => [row.type, row.amountFils])));
+    const plan = buildImportPlan(reread.parsed, ledger, reread.newestTs, nowAt, reread.declined);
+    ok('v73 re-read adds, removes and rewrites nothing',
+      plan.txCount === 0 && plan.batch.updates.length === 0 && reread.declined.length === 0,
+      JSON.stringify({ tx: plan.batch.transactions, updates: plan.batch.updates, declined: reread.declined }));
+    const after = commit(ledger, { ...plan.batch, recentRereadParserVersion: 73 });
+    const afterKeys = after.transactions.map(rowKey).sort();
+    ok('v73 ledger: every 72-era row survives once, including the income 72 booked, and the receipt is 73',
+      after.recentRereadParserVersion === 73 && JSON.stringify(afterKeys) === JSON.stringify(before),
+      JSON.stringify(afterKeys));
+    const again = await scanInbox(floor, {}, undefined, 'en-AE');
+    const second = buildImportPlan(again.parsed, after, again.newestTs, nowAt, again.declined);
+    ok('v73 re-reading the same window again changes nothing',
+      second.txCount === 0 && second.batch.updates.length === 0,
+      JSON.stringify({ tx: second.batch.transactions, updates: second.batch.updates }));
+  }
+
 
   inboxRows = [
     { address: 'BNPPARIBAS', body: france, date: NOW + 1_000 },
