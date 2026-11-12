@@ -865,12 +865,14 @@ jobs:
           ref: ${{ inputs.source_commit || 'main' }}
           fetch-depth: 0
 
-      - name: Pin and verify main-line build source
+      - name: Pin and verify reviewed-line build source
         run: |
           SHA=$(git rev-parse HEAD)
           # The 1.0.0 release base is reviewed and merged on its own branch,
           # which main has not caught up to yet. Accept either reviewed line;
           # anything else (a feature branch, an unmerged PR head) still fails.
+          # Update the release branch name here for each new release line;
+          # ios-local-build-workflow.test.cjs pins this exact pair of checks.
           git merge-base --is-ancestor "$SHA" origin/main \
             || git merge-base --is-ancestor "$SHA" origin/release/1.0.0-rc1-reconciled
           echo "SOURCE_COMMIT=$SHA" >> "$GITHUB_ENV"
