@@ -57,3 +57,14 @@ test('native privacy bridge receives independent lock and widget preferences', a
   await bridge.setAppPrivacy(false, true);
   assert.deepEqual(calls.map(args => Array.from(args)), [[true, true], [true, false], [false, true]]);
 });
+
+test('store re-clears the native widget copy only when the effective guard changed; onboarding logos need consent', () => {
+  const fs = require('node:fs'); const path = require('node:path');
+  const root = path.resolve(__dirname, '../../..');
+  const store = fs.readFileSync(path.join(root, 'src/lib/store.tsx'), 'utf8');
+  assert.match(store, /const changed = appliedWidgetGuard\.current !== null && appliedWidgetGuard\.current !== guard;/);
+  assert.match(store, /if \(changed\) await invalidateWidgetSnapshotSync\(\);/);
+  assert.ok(!/\n\s*await invalidateWidgetSnapshotSync\(\);\s*\n\s*if \(cancelled\) return;\s*\n\s*const current = authoritativeState\.current;/.test(store));
+  const scenes = fs.readFileSync(path.join(root, 'src/components/onboarding/alive-scenes.tsx'), 'utf8');
+  assert.match(scenes, /const uri = consented && Platform\.OS !== 'android' && domain \? verifiedLogoUrl\(domain\) : null;/);
+});

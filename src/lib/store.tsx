@@ -2620,14 +2620,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
   const getStateSnapshot = useCallback(() => authoritativeState.current, []);
 
+  // The effective widget guard last applied by THIS process; null until the first run.
+  const appliedWidgetGuard = useRef<boolean | null>(null);
   useLayoutEffect(() => {
     if (!state.hydrated || Platform.OS === 'web') return;
     let cancelled = false;
+    const guard = state.appLock && state.hideWidgetAmountsWhenLocked !== false;
     // Apply the native guard before republishing widget amounts. A queued
     // snapshot under the old native preference must not be cached as written.
     void setAppPrivacy(state.appLock, state.hideWidgetAmountsWhenLocked !== false).then(async () => {
       if (cancelled) return;
-      await invalidateWidgetSnapshotSync();
+      // Drop the native copy only when the effective guard really changed. On every
+      // other launch the native module has already purged any unredacted snapshot
+      // while configuring the guard, and clearing here would leave widgets empty
+      // until the next publish (and after an unfinished history import, for good).
+      const changed = appliedWidgetGuard.current !== null && appliedWidgetGuard.current !== guard;
+      appliedWidgetGuard.current = guard;
+      if (changed) await invalidateWidgetSnapshotSync();
       if (cancelled) return;
       const current = authoritativeState.current;
       const moneySpec = current.ledgerMoney ?? ledgerMoneySpec(marketCurrencyCode(current.marketId));
