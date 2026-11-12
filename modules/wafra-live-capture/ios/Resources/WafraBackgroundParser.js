@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: a15ebc78ce08f60a893bc96e301e0c27ee9c685900edd3d3446b72d088f253bd
+// Generated from normal shipping TypeScript. Source SHA-256: dd0bbb6ef7039475893be77a7ea7316807bde4e1a9f3656cabb54b143390f16a
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -11877,9 +11877,10 @@ function refundCreditNotActual(body, request) {
 }
 const REFUND_SIDE_NOTE_WORD_RE = /\brefund(?:ed)?\b/i;
 const REFUND_SIDE_NOTE_DEBIT_RE = /\b(?:debited|charged|deducted|spent)\b/i;
-const REFUND_SIDE_NOTE_RETURNED_RE = /\b(?:reversed|refunded|returned)\b/i;
+const REFUND_SIDE_NOTE_RETURNED_RE = /\b(?:has\s+been|have\s+been|was|were|is\s+now)\s+(?:successfully\s+)?(?:reversed|refunded|returned)\b/i;
 const REFUND_SIDE_NOTE_SAME_MOVEMENT_RE = /^\s*(?:it|(?:this|the|that|your)\s+(?:amount|transaction|purchase|charge|payment|debit)|(?:the|this|that)\s+refund(?=\s+(?:has|have|had|was|were|is)\b)|a\s+refund\s+of\s+(?:the\s+same|this|that))\b/i;
 const REFUND_SIDE_NOTE_FUTURE_RE = /\bwill\b/i;
+const REFUND_SIDE_NOTE_COMPLETED_RE = /\b(?:has|have|had|was|were)\s+(?:been\s+)?(?:(?:successfully|fully|now)\s+)?(?:credited|refunded|reversed|returned|posted)\b/i;
 function refundSideNotes(body) {
     if (!REFUND_SIDE_NOTE_WORD_RE.test(body))
         return { body, ambiguous: false };
@@ -11901,10 +11902,11 @@ function refundSideNotes(body) {
         const lead = text.slice(0, word.index);
         const negated = word[0].toLowerCase() === 'refunded' && REFUND_CREDIT_NEGATION_RE.test(lead);
         const sameMovement = REFUND_SIDE_NOTE_SAME_MOVEMENT_RE.test(text) && !REFUND_SIDE_NOTE_FUTURE_RE.test(text);
+        const completedRefund = sameMovement && REFUND_SIDE_NOTE_COMPLETED_RE.test(text);
         if ((negated && !sameMovement) || (separateDebit && governsRefundCredit(lead))) {
             out = out.slice(0, at) + ' '.repeat(text.length) + out.slice(at + text.length);
         }
-        else if (separateDebit && (negated || (REFUND_RE.test(text) && !sameMovement))) {
+        else if (separateDebit && (negated || (REFUND_RE.test(text) && !completedRefund))) {
             ambiguous = true;
         }
     }
