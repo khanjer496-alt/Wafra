@@ -313,10 +313,15 @@ export const createCaptureExecutor = ({
       : { admit: candidates, deferred: [] };
     const reviewCandidates = capacity.admit;
     const deferredReviewSourceKeys = capacity.deferred.map(item => item.sourceKey);
+    // Only retention-required money evidence waits at its source. An
+    // informational review the tray did not keep is acknowledged, so a held
+    // push/relay row is never re-read on every scan until the native queue
+    // trims it (the same rule iOS follows).
     const finalDeferredReviewSources = () => {
       const currentClaims = currentReviewClaims();
       return [...deferredReviewSourceKeys,
-        ...[...knownReviewSourceKeys, ...reviewCandidates.map(item => canonicalCaptureSourceKey(item.sourceKey, item.observedAt))]
+        ...[...knownReviewSourceKeys,
+          ...reviewCandidates.filter(requiresReviewRetention).map(item => canonicalCaptureSourceKey(item.sourceKey, item.observedAt))]
           .filter(key => !currentClaims.has(canonicalCaptureSourceKey(key)))];
     };
     const skippedInboxSources = collected.skippedKnownInboxReviewSourceKeys ?? [];
@@ -740,7 +745,8 @@ export const createCaptureExecutor = ({
       const deferred = [
         ...unretainedReviewSources,
         ...capacity.deferred.map(item => canonicalCaptureSourceKey(item.sourceKey, item.observedAt)),
-        ...candidates.map(item => canonicalCaptureSourceKey(item.sourceKey, item.observedAt)).filter(key => !claims.has(key)),
+        ...candidates.filter(requiresReviewRetention)
+          .map(item => canonicalCaptureSourceKey(item.sourceKey, item.observedAt)).filter(key => !claims.has(key)),
       ];
       const ids = acknowledgementsFor(queued, true, deferred, true);
       if (ids.length > 0) await dependencies.acknowledge(cfg, ids);
