@@ -16,6 +16,7 @@ import { isAutomaticFounderProBuild } from '@/lib/founder-pro';
 import { isScopedSubscriptionKey } from '@/lib/subscriptions';
 
 import { MoneyLocaleProvider } from '@/hooks/use-ledger-money';
+import { appStoreMustBeLive, createStorePauseBoundary } from '@/lib/store-pause';
 import {
   createSelection,
   createStoreHandle,
@@ -4159,6 +4160,18 @@ export function useStoreSelector<T>(
   const snapshot = () => select(handle.get(), selector);
   return useSyncExternalStore(handle.subscribe, snapshot, snapshot);
 }
+
+/**
+ * Pauses everything below it on the store while `paused` (store-pause.tsx).
+ * Private Mode, onboarding, hydration and an erased ledger always pass straight
+ * through (appStoreMustBeLive), so a held frame never shows amounts the user
+ * just hid or data that was just erased.
+ */
+export const StorePauseBoundary = createStorePauseBoundary<StoreValue>(
+  StoreContext,
+  StoreHandleContext,
+  appStoreMustBeLive,
+);
 
 type StoreFunctionKeys = {
   [K in keyof StoreValue]: StoreValue[K] extends (...args: never[]) => unknown ? K : never;

@@ -110,3 +110,53 @@ export function historyStatusOnly<S extends string>(
 export function fieldsEqual<T extends object>(keys: readonly (keyof T)[]) {
   return (a: T, b: T): boolean => a === b || keys.every((key) => Object.is(a[key], b[key]));
 }
+
+/**
+ * A view of a store handle that can be held at one value (a paused screen).
+ *
+ * While held, `get()` returns the held value and source changes reach no
+ * listener, so selectors reading through it keep their cached selection and
+ * nothing below re-renders or recomputes. `resume()` (called during render, so
+ * a selector rendering in the same pass already reads the live value) returns
+ * to the source; `notify()` (after commit) tells each listener once, so a
+ * subscriber that did not re-render re-reads the live store.
+ */
+export interface HeldStoreHandle<T> extends StoreHandle<T> {
+  readonly held: boolean;
+  hold(value: T): void;
+  resume(): void;
+  notify(): void;
+}
+
+export function createHeldHandle<T>(source: StoreHandle<T>): HeldStoreHandle<T> {
+  let held = false;
+  let heldValue: T | undefined;
+  const listeners = new Set<Listener>();
+  return {
+    get held() {
+      return held;
+    },
+    get: () => (held ? (heldValue as T) : source.get()),
+    subscribe: (listener) => {
+      listeners.add(listener);
+      const unsubscribe = source.subscribe(() => {
+        if (!held) listener();
+      });
+      return () => {
+        listeners.delete(listener);
+        unsubscribe();
+      };
+    },
+    hold: (value) => {
+      held = true;
+      heldValue = value;
+    },
+    resume: () => {
+      held = false;
+      heldValue = undefined;
+    },
+    notify: () => {
+      for (const listener of Array.from(listeners)) listener();
+    },
+  };
+}
