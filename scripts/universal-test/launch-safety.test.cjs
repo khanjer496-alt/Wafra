@@ -94,9 +94,12 @@ for (const row of posts) test(`posts: ${row.id}`, () => {
 // fraud question with no full stop before it, a closing "Was this you?", a
 // transfer request that "is processed", and a spend "within your daily limit".
 // All bodies are synthetic. Each shape is a must-post control on Android and
-// both iPhone History paths, on one line and on two. `senderless: false` marks
-// a body the senderless History path never posts for a reason that is not a
-// guard (no bank context without a sender); it must then wait in Review.
+// both iPhone History paths, on one line and on two. `senderless: 'as-control'`
+// marks a body whose senderless History outcome must equal the same purchase
+// WITHOUT its closing "Was this you?" line. #190 (on base c4a54cf3) expected
+// Review there for want of bank context; on #181's base a blank-sender debit
+// posts by design (iPhone History has no sender), so the footer must change
+// nothing rather than force a Review the plain purchase never gets.
 const guardShapes = [
   { id: 'Didn\'t make this transaction? footer, no full stop', country: 'AE', sender: 'EmiratesNBD', type: 'expense', minor: 5000,
     one: 'AED 50.00 spent on your card ending 1234 at TEST MART on 01/11/2026 Didn\'t make this transaction? Call 600540000',
@@ -113,10 +116,10 @@ const guardShapes = [
   { id: 'Unauthorized? footer (US spelling)', country: 'AE', sender: 'Mashreq', type: 'expense', minor: 5000,
     one: 'AED 50.00 spent on Mashreq card ending 1234 at TEST MART on 01-NOV-2026 Unauthorized? Call 04 4244444',
     two: 'AED 50.00 spent on Mashreq card ending 1234 at TEST MART on 01-NOV-2026\nUnauthorized? Call 04 4244444' },
-  { id: 'a closing "Was this you?" line with no reply instruction', country: 'AE', sender: 'EmiratesNBD', type: 'expense', minor: 5000, senderless: false,
+  { id: 'a closing "Was this you?" line with no reply instruction', country: 'AE', sender: 'EmiratesNBD', type: 'expense', minor: 5000, senderless: 'as-control',
     one: 'Purchase of AED 50.00 with Debit Card ending 1234 at TEST MART on 01/11/2026. Was this you?',
     two: 'Purchase of AED 50.00 with Debit Card ending 1234 at TEST MART on 01/11/2026.\nWas this you?' },
-  { id: 'a closing "Was this you?" line under an available balance', country: 'AE', sender: 'EmiratesNBD', type: 'expense', minor: 5000, senderless: false,
+  { id: 'a closing "Was this you?" line under an available balance', country: 'AE', sender: 'EmiratesNBD', type: 'expense', minor: 5000, senderless: 'as-control',
     one: 'Purchase of AED 50.00 with Debit Card ending 1234 at TEST MART on 01/11/2026. Avl Balance AED 1,000.00 Was this you?',
     two: 'Purchase of AED 50.00 with Debit Card ending 1234 at TEST MART on 01/11/2026. Avl Balance AED 1,000.00\nWas this you?' },
   // The two-line form of a prose transfer is not read by the amount grammar on
@@ -135,7 +138,7 @@ for (const shape of guardShapes) for (const [lines, body] of [['1 line', shape.o
   test(`wave 3 posts (${lines}): ${shape.id}`, () => {
     const row = { country: shape.country, sender: shape.sender, body };
     const paths = [['android', android(row)], ['history with sender', history(row)[0]]];
-    if (shape.senderless !== false) paths.push(['history senderless', history(row, '')[0]]);
+    if (shape.senderless !== 'as-control') paths.push(['history senderless', history(row, '')[0]]);
     for (const [path, parsed] of paths) {
       assert.ok(parsed, `${path}: the completed alert is booked`);
       assert.equal(parsed.kind, 'transaction', path);
@@ -143,11 +146,14 @@ for (const shape of guardShapes) for (const [lines, body] of [['1 line', shape.o
       assert.equal(parsed.amountFils, shape.minor, path);
     }
     assert.equal(nonPostingReason(body), null, 'no decline guard names it');
-    if (shape.senderless === false) {
-      // No sender, no bank context: not a guard refusal, and never lost.
-      const out = historyOutcome(row, '');
-      assert.equal(out.parsed.length, 0, 'senderless History does not auto-book without bank context');
-      assert.equal(out.reviewCandidates.length, 1, 'it waits in Review instead');
+    if (shape.senderless === 'as-control') {
+      // No sender: the closing question changes nothing against the same purchase without it, and the money is never lost.
+      const shapeOf = (out) => ({ parsed: out.parsed.map((p) => [p.kind, p.type, p.amountFils]), review: out.reviewCandidates.length });
+      const control = body.replace(/\s*Was this you\?\s*$/u, '');
+      assert.notEqual(control, body, 'the control drops the closing question');
+      const out = shapeOf(historyOutcome(row, ''));
+      assert.deepEqual(out, shapeOf(historyOutcome({ ...row, body: control }, '')), 'senderless History reads it as the plain purchase');
+      assert.ok(out.parsed.length + out.review > 0, 'never lost: booked or waiting in Review');
     }
   });
 }
