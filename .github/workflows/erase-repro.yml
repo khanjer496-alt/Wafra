@@ -51,7 +51,8 @@ jobs:
           BEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
           sudo xcode-select -s "$BEST/Contents/Developer"
           VER=$(xcodebuild -version | head -1 | awk '{print $2}')
-          echo "selected Xcode $VER"; [ "${VER%%.*}" -ge 26 ] || { echo "::error::need Xcode 26+"; exit 1; }
+          echo "::notice::runner image ${ImageOS:-?} ${ImageVersion:-?}; Xcode installs: $(ls -d /Applications/Xcode*.app | tr '\n' ' '); selected $VER"
+          [ "${VER%%.*}" -ge 26 ] || { echo "::error::need Xcode 26+; this runner (image ${ImageVersion:-?}) offers $VER; installs: $(ls -d /Applications/Xcode*.app | tr '\n' ' ')"; exit 1; }
 
       - name: Restore cached Release simulator build
         id: appcache

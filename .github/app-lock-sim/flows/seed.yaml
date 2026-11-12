@@ -1,5 +1,10 @@
 appId: ${APP_ID}
 ---
+- runFlow:
+    when:
+      visible: 'Open in .Wafra.\?'
+    commands:
+      - tapOn: 'Cancel'
 - launchApp:
     clearState: true
 # A StoreKit "Sign in to Apple Account" system alert can cover the app (Superwall configures the store at launch).

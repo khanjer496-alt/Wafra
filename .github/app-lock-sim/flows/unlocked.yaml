@@ -1,5 +1,10 @@
 appId: ${APP_ID}
 ---
+- runFlow:
+    when:
+      visible: 'Open in .Wafra.\?'
+    commands:
+      - tapOn: 'Cancel'
 - extendedWaitUntil:
     visible: 'Sign in to Apple.Account'
     timeout: 6000
