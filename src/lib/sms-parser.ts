@@ -8500,7 +8500,8 @@ function parseSmsInner(
   if (refundNotes.ambiguous) return null;
   const isIncomingCreditReversal = INCOMING_CREDIT_REVERSAL_RE.test(prose);
   const isRefund = !isIncomingCreditReversal &&
-    (REFUND_RE.test(refundNotes.body) || REVERSAL_RE.test(prose) || arabicPurchaseRefundHeader ||
+    // A blanked side note is not a reversal statement either ("… is not returned to your card", "… and was later reversed").
+    (REFUND_RE.test(refundNotes.body) || REVERSAL_RE.test(refundNotes.body) || arabicPurchaseRefundHeader ||
       REFUND_HEADING_RE.test(prose));
 
   if (PROMO_RE.test(raw) && !TXN_EVIDENCE_RE.test(raw)) return null;
