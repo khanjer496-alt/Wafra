@@ -36,9 +36,18 @@ unlock() { # unlock the app with a simulated Face ID match; up to 3 attempts
 away() { xcrun simctl launch "$UDID" com.apple.Preferences >/dev/null; }
 back() { xcrun simctl launch "$UDID" "$APP" >/dev/null; }
 
+diag() { # evidence for a failed setup: entitlements, the app's own storage diagnostics, unified log
+  local c; c=$(xcrun simctl get_app_container "$UDID" "$APP" data 2>/dev/null)
+  { echo "== entitlements"; codesign -d --entitlements - "$(xcrun simctl get_app_container "$UDID" "$APP" app 2>/dev/null)" 2>&1 | head -40
+    echo "== data container: $c"; find "$c" -maxdepth 4 \( -iname '*diag*' -o -iname '*storage*' \) 2>/dev/null | head
+    find "$c" -maxdepth 4 -iname '*diag*' -type f 2>/dev/null | head -3 | while read -r f; do echo "-- $f"; head -c 3000 "$f"; echo; done
+    echo "== unified log (app)"; xcrun simctl spawn "$UDID" log show --last 15m --style compact --predicate 'process == "Wafra" OR eventMessage CONTAINS[c] "wafra" OR eventMessage CONTAINS[c] "keychain" OR eventMessage CONTAINS[c] "securitycheck"' 2>&1 | tail -150
+  } > "$OUT/app-diagnostics.txt" 2>&1
+}
+
 # ---- setup: seed a small ledger, then turn App Lock on -------------------------------
 if ! mro seed; then
-  dump seed-fail; shot setup-seed-failed; record SETUP FAIL "could not seed the ledger (see maestro-seed.log)"; exit 1
+  dump seed-fail; shot setup-seed-failed; diag; record SETUP FAIL "could not seed the ledger (see maestro-seed.log)"; exit 1
 fi
 shot 00-seeded-home-unlocked
 cp "$OUT/00-seeded-home-unlocked.png" "$OUT/.home-reference.png"

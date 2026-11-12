@@ -1,0 +1,69 @@
+{
+  "identifier": "9C2F1D3E-0B5A-4B52-8E0B-5E6B1A4D7A01",
+  "nonRenewingSubscriptions": [],
+  "products": [],
+  "settings": {
+    "_applicationInternalID": "6740000001",
+    "_developerTeamID": "TESTONLY000",
+    "_failTransactionsEnabled": false,
+    "_lastSynchronizedDate": 0,
+    "_locale": "en_US",
+    "_storefront": "USA",
+    "_storeKitErrors": []
+  },
+  "subscriptionGroups": [
+    {
+      "id": "21500001",
+      "localizations": [],
+      "name": "Wafra Pro",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "49.99",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "6740000102",
+          "introductoryOffer": null,
+          "localizations": [
+            {
+              "description": "Yearly (test only)",
+              "displayName": "Wafra Pro Yearly",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "wafra_pro_yearly",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Yearly",
+          "subscriptionGroupID": "21500001",
+          "type": "RecurringSubscription"
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "4.99",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "6740000101",
+          "introductoryOffer": null,
+          "localizations": [
+            {
+              "description": "Weekly (test only)",
+              "displayName": "Wafra Pro Weekly",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "wafra_pro_weekly",
+          "recurringSubscriptionPeriod": "P1W",
+          "referenceName": "Weekly",
+          "subscriptionGroupID": "21500001",
+          "type": "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version": {
+    "major": 4,
+    "minor": 0
+  }
+}

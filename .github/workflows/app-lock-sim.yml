@@ -43,7 +43,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: build/app
-          key: app-lock-sim-app-${{ hashFiles('src/**', 'modules/**', 'assets/**', 'plugins/**', 'app.json', 'package-lock.json', 'babel.config.js', 'metro.config.js', 'eas.json') }}
+          key: app-lock-sim-app-v2-${{ hashFiles('src/**', 'modules/**', 'assets/**', 'plugins/**', 'app.json', 'package-lock.json', 'babel.config.js', 'metro.config.js', 'eas.json') }}
 
       - uses: actions/setup-node@v4
         if: steps.appcache.outputs.cache-hit != 'true'
@@ -55,6 +55,10 @@ jobs:
         timeout-minutes: 60
         run: |
           set -euo pipefail
+          # The real production PUBLIC iOS Superwall key, read from the release build profile (not a secret).
+          KEY=$(jq -r '.build.production.env.EXPO_PUBLIC_SUPERWALL_IOS_API_KEY' eas.json)
+          case "$KEY" in pk_*) ;; *) echo "::error::no production Superwall iOS key in eas.json"; exit 1;; esac
+          export EXPO_PUBLIC_SUPERWALL_IOS_API_KEY="$KEY"
           npm ci
           npx expo prebuild --platform ios --no-install
           npx pod-install ios
@@ -74,7 +78,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: build/app
-          key: app-lock-sim-app-${{ hashFiles('src/**', 'modules/**', 'assets/**', 'plugins/**', 'app.json', 'package-lock.json', 'babel.config.js', 'metro.config.js', 'eas.json') }}
+          key: app-lock-sim-app-v2-${{ hashFiles('src/**', 'modules/**', 'assets/**', 'plugins/**', 'app.json', 'package-lock.json', 'babel.config.js', 'metro.config.js', 'eas.json') }}
 
       - name: Boot a simulator and enroll Face ID
         id: sim
@@ -130,6 +134,18 @@ jobs:
           python3 -I ../.github/app-lock-sim/leakcheck.py ocr.tsv .home-reference.png "${LOCKED[@]}" | tee leakcheck.json
           exit "${PIPESTATUS[0]}"
 
+      - name: Purchase flow (StoreKit test session, no Apple account)
+        id: purchase
+        continue-on-error: true
+        timeout-minutes: 45
+        run: |
+          .github/app-lock-sim/purchase/run-purchase.sh '${{ steps.sim.outputs.udid }}' shots "$PWD/build/app" 2>&1 | tee shots/purchase-run.log
+
+      - name: Strip terminal escapes from the artifact text files
+        if: always()
+        run: |
+          find shots -type f \( -name '*.log' -o -name '*.tsv' -o -name '*.txt' -o -name '*.json' \) -exec perl -pi -e 's/\e\[[0-9;?]*[A-Za-z]//g' {} + || true
+
       - name: Result table
         if: always()
         run: |
@@ -138,8 +154,12 @@ jobs:
             echo "| Step | Result | Detail |"; echo "|---|---|---|"
             [ -f shots/results.tsv ] && awk -F'\t' '{printf "| %s | %s | %s |\n",$1,$2,$3}' shots/results.tsv
             echo "| S7 (no ledger in locked states, OCR) | ${{ steps.leak.outcome == 'success' && 'PASS' || 'FAIL' }} | see leakcheck.json |"
+            echo; echo "## Purchase flow (StoreKit test session)"
+            echo "| Step | Result | Detail |"; echo "|---|---|---|"
+            [ -f shots/purchase-results.tsv ] && awk -F'\t' '{printf "| %s | %s | %s |\n",$1,$2,$3}' shots/purchase-results.tsv
+            [ -f shots/purchase-setup.txt ] && echo "| setup | $(cat shots/purchase-setup.txt) | |"
           } | tee -a "$GITHUB_STEP_SUMMARY"
-          ! grep -q $'\tFAIL\t' shots/results.tsv 2>/dev/null
+          ! grep -q $'\tFAIL\t' shots/results.tsv shots/purchase-results.tsv 2>/dev/null
 
       - uses: actions/upload-artifact@v4
         if: always()
