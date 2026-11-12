@@ -2423,6 +2423,11 @@ function refundSideNotes(body: string): { body: string; ambiguous: boolean } {
   }
   return { body: out, ambiguous };
 }
+/** For the semantic reader (bank-alert-interpreter): it must not re-read a refund side note as a refund credit. */
+export function refundSideNoteVerdict(source: string): 'none' | 'side-note' | 'ambiguous' {
+  const notes = refundSideNotes(source);
+  return notes.ambiguous ? 'ambiguous' : notes.body !== source ? 'side-note' : 'none';
+}
 const MANDATE_LIFECYCLE_RE =
   /\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b(?:[^.]|\.\d){0,96}\b(?:will\s+(?:start|begin|commence|activate)|has\s+been\s+(?:created|registered|set\s*up|activated)|is\s+(?:now\s+)?active)\b|\b(?:created|registered|set\s*up|activated)\b(?:[^.]|\.\d){0,64}\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b|تم\s+(?:تسجيل|انشاء|تفعيل)[^\n]{0,64}(?:امر\s+)?(?:خصم\s+(?:تلقايي|مباشر)|تعليمات\s+مستديمه)/iu;
 const CONDITIONAL_PAYOUT_RE =
@@ -7742,7 +7747,8 @@ function parseSmsInner(
   // is money arriving, and reading the bare noun as a biller turned it into an
   // expense: the same 2x swing pointed the other way.
   const billerPaid = billerSettlement(prose);
-  const creditClause = CREDIT_CLAUSE_RE.test(prose) && !billerPaid;
+  // "... is not refunded to your card" in a blanked refund side note is no credit clause either.
+  const creditClause = CREDIT_CLAUSE_RE.test(refundNotes.body) && !billerPaid;
   const debitClause = DEBIT_CLAUSE_RE.test(prose);
   const type: TransactionType = isBillDue || billerPaid || isIncomingCreditReversal ||
     arabicOwnAccountOutgoing
