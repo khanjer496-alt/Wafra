@@ -7,7 +7,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const yaml = require('yaml');
-const { fetchBytesWithRetry, retryableStatus, DELAYS_MS } = require('../download-with-retry.cjs');
+const crypto = require('node:crypto');
+const { fetchBytesWithRetry, resolveDependency, retryableStatus, DELAYS_MS } = require('../download-with-retry.cjs');
+const sha = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
 
 const root = path.resolve(__dirname, '../../..');
 const body = (text) => ({ ok: true, status: 200, arrayBuffer: async () => Buffer.from(text) });
@@ -71,17 +73,83 @@ test('Retry-After may lengthen a wait but never beyond the 30 s cap, and never s
   assert.deepEqual(waits, [10000, 30000, 8000]);
 });
 
-test('the script verifies every byte against its pinned SHA-256 before using or caching it', () => {
+test('one shared retry budget ends the retrying with the clear error before the outer test timeout', async () => {
+  let t = 0;
+  const now = () => t;
+  const sleep = async (ms) => { t += ms; };
+  // a sustained 429 with Retry-After 30: each wait is 30 s, so a 100 s budget runs out before the 4th wait
+  // (the real shared budget is 150 s across all four jars, so an earlier jar's retries shorten later ones)
+  const { fetchImpl, calls } = sequence(...Array.from({ length: 10 }, () => status(429, { 'retry-after': '30' })));
+  await assert.rejects(fetchBytesWithRetry({ url: 'u', name: 'junit-4.13.2.jar', fetchImpl, sleep, now, deadlineAt: 100_000 }),
+    (error) => /junit-4\.13\.2\.jar \(429\) retry budget exhausted/.test(error.message));
+  assert.ok(t <= 100_000, `never sleeps past the budget (${t} ms)`);
+  assert.equal(calls.length, 4, `${calls.length} attempts: three waits of 30 s, then the budget is exhausted`);
+  // an already exhausted budget fails without a request
+  const none = sequence(body('x'));
+  await assert.rejects(fetchBytesWithRetry({ url: 'u', name: 'x.jar', fetchImpl: none.fetchImpl, sleep, now, deadlineAt: 0 }), /retry budget exhausted/);
+  assert.equal(none.calls.length, 0);
+});
+
+test('the shared budget leaves room for the Kotlin provisioning inside the 290 s outer timeout', () => {
+  const { TOTAL_BUDGET_MS } = require('../download-with-retry.cjs');
+  assert.ok(TOTAL_BUDGET_MS <= 160_000, 'the retry budget must leave most of the 290 s for the compiler and the JUnit run');
+  const wrapper = fs.readFileSync(path.join(root, 'scripts/test/repair/wafra-play-billing-native.test.cjs'), 'utf8');
+  assert.match(wrapper, /timeout: 290_000/);
+});
+
+test('resolveDependency: a good cached file is used without any request', async () => {
+  const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'wafra-deps-'));
+  const good = Buffer.from('the pinned jar');
+  fs.writeFileSync(path.join(dir, 'a.jar'), good);
+  let fetched = 0;
+  const bytes = await resolveDependency({ name: 'a.jar', url: 'u', sha256: sha(good), cacheDir: dir, fetchBytes: async () => { fetched += 1; return good; } });
+  assert.equal(bytes.toString(), 'the pinned jar');
+  assert.equal(fetched, 0);
+});
+
+test('resolveDependency: a corrupt cached file is deleted and replaced by one verified download', async () => {
+  const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'wafra-deps-'));
+  const good = Buffer.from('the pinned jar');
+  fs.writeFileSync(path.join(dir, 'a.jar'), Buffer.from('truncat'));
+  const logs = [];
+  let fetched = 0;
+  const bytes = await resolveDependency({ name: 'a.jar', url: 'u', sha256: sha(good), cacheDir: dir, log: (l) => logs.push(l),
+    fetchBytes: async () => { fetched += 1; return good; } });
+  assert.equal(bytes.toString(), 'the pinned jar');
+  assert.equal(fetched, 1, 'exactly one download');
+  assert.equal(fs.readFileSync(path.join(dir, 'a.jar')).toString(), 'the pinned jar', 'the cache now holds the verified bytes');
+  assert.equal(logs.length, 1);
+});
+
+test('resolveDependency: a wrong download fails loudly, is never retried here, and never reaches the cache', async () => {
+  const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'wafra-deps-'));
+  let fetched = 0;
+  await assert.rejects(resolveDependency({ name: 'a.jar', url: 'u', sha256: sha(Buffer.from('expected')), cacheDir: dir,
+    fetchBytes: async () => { fetched += 1; return Buffer.from('tampered'); } }),
+  /Native test dependency integrity check failed: a\.jar/);
+  assert.equal(fetched, 1);
+  assert.equal(fs.existsSync(path.join(dir, 'a.jar')), false, 'nothing unverified is cached');
+  // a corrupt cache AND a wrong download: still fails, the bad file stays deleted, nothing cached
+  fs.writeFileSync(path.join(dir, 'a.jar'), Buffer.from('bad'));
+  await assert.rejects(resolveDependency({ name: 'a.jar', url: 'u', sha256: sha(Buffer.from('expected')), cacheDir: dir,
+    fetchBytes: async () => Buffer.from('also wrong') }), /integrity check failed/);
+  assert.equal(fs.existsSync(path.join(dir, 'a.jar')), false);
+  // oversize bytes are refused even if the hash were right
+  await assert.rejects(resolveDependency({ name: 'big.jar', url: 'u', sha256: sha(Buffer.alloc(2_000_001)), cacheDir: null,
+    fetchBytes: async () => Buffer.alloc(2_000_001) }), /integrity check failed: big\.jar/);
+});
+
+test('resolveDependency without a cache directory just downloads and verifies', async () => {
+  const good = Buffer.from('jar');
+  assert.equal((await resolveDependency({ name: 'a.jar', url: 'u', sha256: sha(good), cacheDir: undefined, fetchBytes: async () => good })).toString(), 'jar');
+});
+
+test('the script is wired to the helpers, downloads sequentially and keeps all four hashes pinned', () => {
   const script = fs.readFileSync(path.join(root, 'scripts/test/wafra-play-billing-native.cjs'), 'utf8');
   assert.match(script, /require\('\.\/download-with-retry\.cjs'\)/);
   assert.doesNotMatch(script, /Promise\.all\(dependencies/, 'downloads are sequential, not four parallel requests');
-  // cached bytes and downloaded bytes both pass through verified(); the cache is written only from the verified value
-  assert.match(script, /bytes = verified\(fs\.readFileSync\(local\), name, expected\)/);
-  assert.match(script, /bytes = verified\(await fetchBytesWithRetry\(/);
-  assert.ok(script.indexOf('bytes = verified(await fetchBytesWithRetry(') < script.indexOf('fs.writeFileSync(local, bytes'),
-    'the cache file is written after verification');
-  assert.match(script, /integrity check failed/);
-  for (const hash of script.match(/'[0-9a-f]{64}'/g) ?? []) assert.match(hash, /^'[0-9a-f]{64}'$/);
+  assert.match(script, /await resolveDependency\(\{ name, url, sha256, cacheDir: libs, fetchBytes/);
+  assert.match(script, /deadlineAt/);
   assert.equal((script.match(/'[0-9a-f]{64}'/g) ?? []).length, 4, 'all four dependencies stay pinned');
 });
 

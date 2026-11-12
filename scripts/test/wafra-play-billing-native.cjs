@@ -7,7 +7,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const { ensureKotlinc, compilerEnv } = require('./kotlin-compiler.cjs');
-const { fetchBytesWithRetry } = require('./download-with-retry.cjs');
+const { fetchBytesWithRetry, resolveDependency, TOTAL_BUDGET_MS } = require('./download-with-retry.cjs');
 
 const dependencies = [
   ['billing-8.0.0.aar', 'https://dl.google.com/dl/android/maven2/com/android/billingclient/billing/8.0.0/billing-8.0.0.aar', '76b3d92c30d2d5e8d22599f8d9c6d46cda031f3477fcdf2732fe1a88748c4f75'],
@@ -30,24 +30,14 @@ async function main() {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'wafra-play-billing-native-'));
   try {
     // One at a time: four parallel requests to Maven Central from a shared runner are what gets rate-limited.
-    // WAFRA_PLAY_BILLING_TEST_LIBS is a cache directory: a file already there is used (after the same SHA-256 check),
-    // and a file downloaded and verified is written back into it so CI can cache it between runs.
+    // WAFRA_PLAY_BILLING_TEST_LIBS is a cache directory (see resolveDependency): verified jars are used from it and
+    // verified downloads are written back, so CI can cache them. One retry budget covers every download of the run.
     const libs = process.env.WAFRA_PLAY_BILLING_TEST_LIBS;
     if (libs) fs.mkdirSync(libs, { recursive: true });
-    const verified = (bytes, name, expected) => {
-      if (bytes.length > 2_000_000 || crypto.createHash('sha256').update(bytes).digest('hex') !== expected) {
-        throw Error(`Native test dependency integrity check failed: ${name}`);
-      }
-      return bytes;
-    };
-    for (const [name, url, expected] of dependencies) {
-      const local = libs && path.join(libs, name);
-      let bytes;
-      if (local && fs.existsSync(local)) bytes = verified(fs.readFileSync(local), name, expected);
-      else {
-        bytes = verified(await fetchBytesWithRetry({ url, name, log: (line) => console.error(line) }), name, expected);
-        if (local) fs.writeFileSync(local, bytes, { mode: 0o600 });
-      }
+    const deadlineAt = Date.now() + TOTAL_BUDGET_MS;
+    const fetchBytes = ({ url, name }) => fetchBytesWithRetry({ url, name, deadlineAt, log: (line) => console.error(line) });
+    for (const [name, url, sha256] of dependencies) {
+      const bytes = await resolveDependency({ name, url, sha256, cacheDir: libs, fetchBytes, log: (line) => console.error(line) });
       fs.writeFileSync(path.join(temp, name), bytes, { mode: 0o600 });
     }
     fs.writeFileSync(path.join(temp, 'billing.jar'), execFileSync('unzip', ['-p', path.join(temp, 'billing-8.0.0.aar'), 'classes.jar'], { maxBuffer: 2_000_000 }));
