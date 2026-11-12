@@ -2293,9 +2293,22 @@ const governsRefundCredit = (lead: string): boolean => {
 const REFUND_CREDIT_CONDITIONAL_INSIDE_RE = /\b(?:if|once|when|whenever|after|until|unless|whether)\b|\bas\s+soon\s+as\b/;
 // A reversal anywhere after the credit (even in the next sentence) means it did not stay; a hold, a
 // later credit or "subject to ... approval" in the same sentence means it is not an actual credit. Review 11a5b249.
-const REFUND_CREDIT_REVERSED_RE = /\b(?:in\s+error|reversed)\b/i;
-const REFUND_CREDIT_LATER_RE = /\b(?:will\s+be\s+(?:credited|refunded|reversed|debited|deducted|returned|posted)|subject\s+to\s+(?:\w+\s+){0,2}(?:approval|review|confirmation|verification)|for\s+review|pending\s+(?:approval|review))\b/i;
-const REFUND_AMOUNT_RE = /(?:\b[A-Z]{3}\b|\bDhs?\.?|\bSR\b|[$€£])\s*(\d[\d,]*(?:\.\d+)?)/g;
+// Review 341abedb: a credit that can still be taken back (temporary, on hold, under review, provisional, pending an
+// investigation) is not income yet, and a footer that merely mentions reversals must not refuse a genuine credit. In the
+// credit's own sentence "in error"/"reversed" count, and so does "and/but ... was cancelled/withdrawn/revoked" (not "for your
+// cancelled order"). In LATER sentences only a taken-back credit counts: the credit/refund/amount (or "it") is reversed,
+// cancelled, withdrawn, revoked, in error, on hold, temporary or under review; hedged sentences (if/may/can/unless) are skipped.
+const REFUND_CREDIT_REVERSED_RE = /\b(?:in\s+error|reversed)\b|\b(?:and|but)\s+(?:(?:later|then|subsequently)\s+)?(?:was|were|has\s+been|had\s+been|is)\s+(?:\w+\s+)?(?:cancell?ed|withdrawn|revoked)\b/i;
+const REFUND_CREDIT_LATER_RE = /\b(?:will\s+be\s+(?:credited|refunded|reversed|debited|deducted|returned|posted)|subject\s+to\s+(?:\w+\s+){0,2}(?:approval|review|confirmation|verification)|for\s+review|pending\s+(?:approval|review|investigation|verification|confirmation|clearance|settlement|release)|on\s+hold|under\s+(?:review|investigation)|provisional(?:ly)?|temporar(?:y|ily))\b/i;
+const REFUND_CREDIT_TAKEN_BACK_RE = /\b(?:(?:this|the|that)\s+(?:credit|refund|amount)|it)\s+(?:\w+\s+){0,2}?(?:has\s+been|had\s+been|was|is|remains|will\s+be)\s+(?:\w+\s+){0,2}?(?:reversed|cancell?ed|withdrawn|revoked|in\s+error|on\s+hold|temporary|provisional|under\s+(?:review|investigation))\b/i;
+const REFUND_HEDGED_SENTENCE_RE = /^\s*(?:if|in\s+case|should|unless)\b|\b(?:may|can|might|could|unless)\b/i;
+function refundCreditNotFinal(remainder: string): boolean {
+  const sentences = remainder.split(REFUND_SENTENCE_BREAK_RE);
+  if (REFUND_CREDIT_REVERSED_RE.test(sentences[0]) || REFUND_CREDIT_LATER_RE.test(sentences[0])) return true;
+  return sentences.slice(1).some((sentence) => !REFUND_HEDGED_SENTENCE_RE.test(sentence) && REFUND_CREDIT_TAKEN_BACK_RE.test(sentence));
+}
+// Only a real currency code counts ("REF 556677" is a reference), and the digits may follow it directly ("AED100"). Review 341abedb.
+const REFUND_AMOUNT_RE = new RegExp(String.raw`(?:\b(?:${Object.keys(CURRENCY_MINOR_UNITS).join('|')})|\bDhs?\.?|\bSR\b|[$€£])\s*(\d[\d,]*(?:\.\d+)?)`, 'g');
 const REFUND_SENTENCE_BREAK_RE = /[.!?](?=\s|$)|\n/g;
 const REFUND_AMOUNT_AFTER_RE = /(\d[\d,]*(?:\.\d+)?)\s*(?:AED|SAR|USD|EUR|GBP|QAR|KWD|BHD|OMR|EGP|INR|PKR|JOD|Dhs?\b|SR\b)/g;
 const refundAmounts = (text: string): number[] =>
@@ -2320,8 +2333,9 @@ function hasCompletedRefundCredit(rest: string, request: string): boolean {
     const lead = rest.slice(breaks.length ? breaks[breaks.length - 1].index! + 1 : 0, at);
     if (governsRefundCredit(lead) || REFUND_CREDIT_CONDITIONAL_INSIDE_RE.test(match[1])) continue;
     const remainder = rest.slice(at + match[0].length);
-    if (REFUND_CREDIT_REVERSED_RE.test(remainder) || REFUND_CREDIT_LATER_RE.test(remainder.split(REFUND_SENTENCE_BREAK_RE)[0])) continue;
-    const credited = refundAmounts(match[0]);
+    if (refundCreditNotFinal(remainder)) continue;
+    // The credited amount may stand before the word "refund" or after the destination ("credited to your card for AED 100.00").
+    const credited = refundAmounts(lead + match[0] + remainder.split(REFUND_SENTENCE_BREAK_RE)[0]);
     if (requested.some((amount) => !credited.includes(amount))) continue;
     return true;
   }
@@ -2337,23 +2351,32 @@ const REFUND_CREDIT_SCAN_RE =
 const REFUND_CREDIT_NEGATION_RE = /\b(?:(?:has|have|had|was|were|is|are)\s+(?:not|never)|(?:hasn|haven|wasn|weren|isn|aren)['’]t|yet\s+to\s+be)\s+(?:(?:yet|been|successfully)\s+){0,3}$/;
 // A credit sent to a third party is not the reader's money. Deny-list, so an unusual but own destination ("Card ending 1234") still posts.
 const REFUND_THIRD_PARTY_DESTINATION_RE = /^\s*(?:back\s+)?(?:to|into|onto)\s+(?:(?:the|a|an|your|his|her|their|its)\s+)?(?:\w+\s+){0,2}?(?:merchant|beneficiary|seller|vendor|recipient|payee|retailer|supplier|store|shop|restaurant|platform|marketplace)\b/i;
+// A negated credit ("has not been credited") ends at an explicit new clause in the same sentence whose own credit is completed
+// ("... and the refund has now been credited to your card"); a future or later-sentence credit does not lift it.
+const REFUND_COMPLETED_AUXILIARY_RE = /\b(?:has|have|had|was|were)\s+(?:\w+\s+){0,2}$/;
+// "... has not been credited and WAS debited from your account": the new clause has its own auxiliary, so the negation stops and the debit
+// is judged by the ordinary rules (an expense). Without the auxiliary ("... credited and debited") the negation still covers it.
+const REFUND_NEGATED_THEN_DEBIT_RE = /^\s*(?:,\s*)?(?:and|but)\s+(?:was|were|has\s+been|have\s+been|had\s+been)\s+(?:\w+\s+){0,2}?(?:debited|charged|deducted)\b/i;
 function refundCreditNotActual(body: string, request: string): boolean {
   const requested = refundAmounts(request);
+  let negatedEnd = -1;
   for (const match of body.matchAll(REFUND_CREDIT_SCAN_RE)) {
     const at = match.index!;
     const breaks = [...body.slice(0, at).matchAll(REFUND_SENTENCE_BREAK_RE)];
     const lead = body.slice(breaks.length ? breaks[breaks.length - 1].index! + 1 : 0, at);
-    if (governsRefundCredit(lead) || REFUND_CREDIT_CONDITIONAL_INSIDE_RE.test(match[1]) || REFUND_CREDIT_NEGATION_RE.test(match[1])) return true;
+    if (governsRefundCredit(lead) || REFUND_CREDIT_CONDITIONAL_INSIDE_RE.test(match[1])) return true;
+    if (REFUND_CREDIT_NEGATION_RE.test(match[1])) { negatedEnd = at + match[0].length; continue; }
     if (match[2] && REFUND_THIRD_PARTY_DESTINATION_RE.test(match[2])) return true;
     // From the credit verb on, destination included: "credited to your card in error and has been reversed".
     const remainder = body.slice(at + match[0].length - (match[2]?.length ?? 0));
-    if (REFUND_CREDIT_REVERSED_RE.test(remainder) || REFUND_CREDIT_LATER_RE.test(remainder.split(REFUND_SENTENCE_BREAK_RE)[0])) return true;
+    if (refundCreditNotFinal(remainder)) return true;
     if (requested.length > 0) {
-      const credited = refundAmounts(match[0]);
+      const credited = refundAmounts(lead + match[0] + remainder.split(REFUND_SENTENCE_BREAK_RE)[0]);
       if (requested.some((amount) => !credited.includes(amount))) return true;
     }
+    if (negatedEnd >= 0 && REFUND_COMPLETED_AUXILIARY_RE.test(match[1]) && body.slice(negatedEnd, at).search(REFUND_SENTENCE_BREAK_RE) < 0) negatedEnd = -1;
   }
-  return false;
+  return negatedEnd >= 0 && !REFUND_NEGATED_THEN_DEBIT_RE.test(body.slice(negatedEnd));
 }
 const MANDATE_LIFECYCLE_RE =
   /\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b(?:[^.]|\.\d){0,96}\b(?:will\s+(?:start|begin|commence|activate)|has\s+been\s+(?:created|registered|set\s*up|activated)|is\s+(?:now\s+)?active)\b|\b(?:created|registered|set\s*up|activated)\b(?:[^.]|\.\d){0,64}\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b|تم\s+(?:تسجيل|انشاء|تفعيل)[^\n]{0,64}(?:امر\s+)?(?:خصم\s+(?:تلقايي|مباشر)|تعليمات\s+مستديمه)/iu;
