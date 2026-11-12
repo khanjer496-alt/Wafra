@@ -6,16 +6,18 @@
 //   - zero lost genuine refunds: an INCOME_* row posts income of exactly its figure on parseSms and the session;
 //   - native never books a debit on an INCOME_* row, never a credit on any other row, and never posts a REVIEW or
 //     NO_POST row. Native 'ignore' on an INCOME_* row is allowed (it posts only when its event reader agrees) but is
-//     counted against a ceiling, so a lost refund on native stays visible.
+//     listed per row as an ignoredIncome gap on the native path, so a lost refund on native stays visible and the list
+//     can only shrink like any other gap.
 // REVIEW and NO_POST both mean "never auto-posts" here.
 //
 // Today's gaps are listed, per row and per path, in refund-matrix-known-gaps.json. This suite fails on:
 //   - a NEW gap: a path that mismatches the oracle on a row the file does not list for that path;
 //   - a CHANGED gap: a listed path whose wrong outcome is now a different wrong outcome;
 //   - a STALE gap: a listed path that now matches the oracle (delete the entry: the file only shrinks);
-//   - any class count in the file above CEILING below, and native ignored income above its ceiling.
+//   - any class count in the file above CEILING below.
 // CEILING may only go DOWN. A change that raises any number in it, or adds an entry to the gap file, is a regression
-// and must be rejected in review. The store gate needs CEILING.falseIncome at zero on every path.
+// and must be rejected in review; the one exception is a row the same change adds to the oracle, named in its PR body.
+// The store gate needs CEILING.falseIncome at zero on every path.
 //
 // Set REFUND_MATRIX_REPORT=<file> to write every gap with counts, and REFUND_MATRIX_WRITE_GAPS=<file> to write the
 // current gaps in the gap-file format after a fix (then lower CEILING to the new counts).
@@ -32,15 +34,17 @@ const { createLaunchAlertSession } = load('@/lib/launch-alert-parser');
 const { buildOracleRows } = require('./refund-matrix-oracle.cjs');
 
 // Frozen ratchet. Each number is today's count of gap-file entries in that class on that path; it may only go down.
+// Predicate PR 1 (CEO 080fa431): false income 903/911/90 -> 159/179/0, all Arabic. ignoredIncome replaces the aggregate
+// native ceiling of 157: the same 157 oracle v2 rows, plus 6 of the 9 oracle v2.1 controls this PR adds.
 const CEILING = {
-  falseIncome: { parseSms: 903, session: 911, native: 90 },
+  falseIncome: { parseSms: 159, session: 179, native: 0 },
   wrongDirection: { parseSms: 42, session: 40, native: 0 },
   wrongAmount: { parseSms: 0, session: 0, native: 0 },
   lostIncome: { parseSms: 36, session: 36, native: 0 },
   droppedDebit: { parseSms: 207, session: 207, native: 0 },
-  postedNotReview: { parseSms: 631, session: 652, native: 10 },
+  postedNotReview: { parseSms: 359, session: 372, native: 10 },
+  ignoredIncome: { parseSms: 0, session: 0, native: 163 },
 };
-const NATIVE_IGNORED_INCOME_CEILING = 157;
 
 const PATHS = ['parseSms', 'session', 'native'];
 const at = Date.parse('2026-11-05T10:00:00Z');
@@ -71,7 +75,7 @@ function gapClass(expected, pathName, got) {
   if (isIncomeRow(expected)) {
     if (credit) return amount === '25000' ? null : 'wrongAmount';
     if (debit) return 'wrongDirection';
-    return pathName === 'native' ? null : 'lostIncome'; // native 'ignore' is counted separately
+    return pathName === 'native' ? 'ignoredIncome' : 'lostIncome'; // native may ignore (allowed, listed per row)
   }
   if (credit) return 'falseIncome';
   if (expected === 'EXPENSE') {
@@ -170,8 +174,6 @@ test('refund matrix ratchet: no class grows above its frozen ceiling', () => {
       assert.ok(counts[cls][name] <= byPath[name], `${cls} on ${name}: ${counts[cls][name]} gap entries > ceiling ${byPath[name]}`);
     }
   }
-  assert.ok(report.nativeIgnoredIncome <= NATIVE_IGNORED_INCOME_CEILING,
-    `native ignored ${report.nativeIgnoredIncome} income rows > ceiling ${NATIVE_IGNORED_INCOME_CEILING}`);
 });
 
 test('refund matrix report', (t) => {

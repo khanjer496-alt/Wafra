@@ -656,6 +656,12 @@ export interface ParsedCard {
  * only messages with no outcome yet, matches stored rows by source identity,
  * and never removes a row that is not a proven decline, so it cannot duplicate
  * or delete existing rows. PARSER_BACKFILL_VERSION stays 50.
+ * Also in 72, unreleased in the same batch (CEO 080fa431): one shared "credit
+ * is settled to the user's own account" predicate, English table. A refund or
+ * credit that is conditional, negated, pending, sent to a third party, taken
+ * back or only "processed" never posts as income; beside a separate debit such
+ * a note leaves the debit an expense, and a refund figure of its own goes to
+ * Review. If this ships apart from the rest of 72, it needs its own bump.
  */
 export const PARSER_VERSION = 72;
 /**
