@@ -656,17 +656,19 @@ export interface ParsedCard {
  * only messages with no outcome yet, matches stored rows by source identity,
  * and never removes a row that is not a proven decline, so it cannot duplicate
  * or delete existing rows. PARSER_BACKFILL_VERSION stays 50.
- * Also in 72, unreleased in the same batch (CEO 080fa431): one shared "credit
- * is settled to the user's own account" predicate, English table. A refund or
- * credit that is conditional, negated, pending, sent to a third party or taken
- * back never posts as income; a "processed" refund posts only when it names the
- * instrument by number or a balance line follows, and not when the bank says it
- * is not there yet (oracle v2.2). Beside a separate debit such a note leaves the
- * debit an expense, and a refund figure of its own goes to Review. Non-refund
- * "processed" alerts are untouched. If this ships apart from the rest of 72, it
- * needs its own bump.
+ *
+ * 73: one shared "credit is settled to the user's own account" predicate,
+ * English table (CEO 080fa431; its own bump because 72 shipped first, CEO
+ * 40f47cb9). A refund or credit that is conditional, negated, pending, sent to
+ * a third party or taken back never posts as income; a "processed" refund posts
+ * only when it names the instrument by number or a balance line follows, and not
+ * when the bank says it is not there yet (oracle v2.2). Beside a separate debit
+ * such a note leaves the debit an expense, and a refund figure of its own goes
+ * to Review. Non-refund "processed" alerts are untouched. Future capture and the
+ * bounded recent re-read only: the re-read cannot remove an income row 72
+ * already booked. PARSER_BACKFILL_VERSION stays 50.
  */
-export const PARSER_VERSION = 72;
+export const PARSER_VERSION = 73;
 /**
  * Historical-repair contract for already-saved data.
  *
