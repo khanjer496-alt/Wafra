@@ -89,7 +89,13 @@ final class PurchaseUITests: XCTestCase {
             dismissSystemAlerts()
             if app.buttons["Settings"].firstMatch.exists { return }
             var tapped = false
-            for id in advance { let e = el(id); if e.exists && e.isHittable { e.tap(); tapped = true; break } }
+            for id in advance {
+                let e = el(id)
+                guard e.exists && e.isHittable else { continue }
+                // The goal row is a toggle: tap it only while Continue is still disabled, never twice.
+                if id == "onboarding-goal-bills" && el("onboarding-goals-continue").exists && el("onboarding-goals-continue").isEnabled { continue }
+                e.tap(); tapped = true; break
+            }
             Thread.sleep(forTimeInterval: tapped ? 2 : 3)
         }
         shot("reachHome-timeout")

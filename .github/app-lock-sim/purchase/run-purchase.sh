@@ -49,6 +49,9 @@ while kill -0 $TPID 2>/dev/null && [ $SECONDS -lt $END ]; do
 done
 kill -0 $TPID 2>/dev/null && { echo "::error::purchase test timed out"; pkill -f "xcodebuild test-without-building" ; }
 wait $TPID 2>/dev/null
+{ echo "== StoreKit config locations in the simulator (Octane = storekitd's per-app test configuration)";
+  find "$HOME/Library/Developer/CoreSimulator/Devices/$UDID/data/Containers/Shared/AppGroup" -ipath '*Octane*' 2>/dev/null | head -30;
+  echo "== storekit/storekitd processes"; xcrun simctl spawn "$UDID" launchctl list 2>/dev/null | grep -i storekit | head; } > "$OUT/purchase-storekit-diagnostics.txt" 2>&1
 clean < "$WORK/test.raw" | grep -v "^$" > "$OUT/purchase-xcodebuild-test.log"
 cp -R "$WORK/shots/." "$OUT/purchase-shots/" 2>/dev/null
 cp "$WORK/shots/purchase-results.tsv" "$OUT/purchase-results.tsv" 2>/dev/null

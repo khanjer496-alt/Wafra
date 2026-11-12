@@ -4,6 +4,17 @@ appId: ${APP_ID}
     clearState: true
 # A StoreKit "Sign in to Apple Account" system alert can cover the app (Superwall configures the store at launch).
 # Cancel it; never OK (OK on an empty sign-in sheet produces a second alert).
+- extendedWaitUntil:
+    visible: 'Cancel'
+    timeout: 25000
+    optional: true
+- tapOn:
+    text: 'Cancel'
+    optional: true
+- extendedWaitUntil:
+    visible: 'Cancel'
+    timeout: 8000
+    optional: true
 - tapOn:
     text: 'Cancel'
     optional: true
@@ -34,7 +45,8 @@ appId: ${APP_ID}
       - runFlow:
           when:
             visible:
-              id: 'onboarding-goal-bills'
+              id: 'onboarding-goals-continue'
+              enabled: false
           commands:
             - tapOn:
                 id: 'onboarding-goal-bills'

@@ -1,5 +1,11 @@
 appId: ${APP_ID}
 ---
+- runFlow:
+    when:
+      visible: 'Cancel'
+    commands:
+      - tapOn:
+          text: 'Cancel'
 - tapOn:
     text: 'Cancel'
     optional: true
