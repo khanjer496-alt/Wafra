@@ -2274,8 +2274,13 @@ const REQUEST_RECEIVED_BLANK_RE = new RegExp(REQUEST_RECEIVED_RE.source, 'giu');
 // payment method; not a merchant or beneficiary), ACTUAL (no conditional leader such as if/once/when
 // before it; not in error, reversed or announced for later) and the requested amount, if the
 // acknowledgement states one, must be the credited amount. Review c1379af4.
-const REFUND_COMPLETED_CREDIT_RE =
-  /(\brefund(?:ed)?\b(?:[^.\n]|\.(?=\S)){0,300}?)\b(?:has|have|had|was|were)\s+(?:been\s+)?(?:successfully\s+)?(?:credited|refunded|posted)\s+(?:back\s+)?(?:to|into|onto)\s+(?:your\b|the\s+(?:original\s+|same\s+)?(?:card|account|payment\s+(?:method|source))\b)/gi;
+// OWNED destination: "your ... card/account/wallet/balance/payment method" (up to three words between), or the
+// ORIGINAL/SAME card, account or payment method. A bare "your <anything>" is not enough ("your merchant"). Review 87943b58 R2.
+const REFUND_OWNED_DESTINATION =
+  String.raw`(?:your\b(?:\s+\S+){0,3}?\s+(?:card|account|wallet|balance|payment\s+(?:method|source))\b|the\s+(?:original\s+|same\s+)?(?:card|account|payment\s+(?:method|source))\b)`;
+const REFUND_COMPLETED_CREDIT_RE = new RegExp(
+  String.raw`(\brefund(?:ed)?\b(?:[^.\n]|\.(?=\S)){0,300}?)\b(?:has|have|had|was|were)\s+(?:been\s+)?(?:successfully\s+)?(?:credited|refunded|posted)\s+(?:back\s+)?(?:to|into|onto)\s+` +
+  REFUND_OWNED_DESTINATION, 'gi');
 // A leader counts only when it governs the credit: a comma between it and the credit ("After verification,
 // the refund ...") ends its scope, while "If the refund ... has been credited" stays refused.
 const REFUND_CREDIT_CONDITIONAL_LEAD_RE = /\b(?:if|once|when|whenever|after|until|unless|whether|as\s+soon\s+as)\b/gi;
@@ -2319,6 +2324,34 @@ function hasCompletedRefundCredit(rest: string, request: string): boolean {
     const credited = refundAmounts(match[0]);
     if (requested.some((amount) => !credited.includes(amount))) continue;
     return true;
+  }
+  return false;
+}
+// CEO decision 51818dc1: REFUND_RE decides direction and used to double as "settled", so a refund sentence that is
+// conditional, negated, credited to someone else, made in error and reversed, or for another amount than the request
+// still settled and posted income when its merchant fit REFUND_RE's 40-character window. The same guards now apply to
+// every refund-credit clause, with or without an acknowledgement, whatever the merchant length.
+const REFUND_CREDIT_SCAN_RE =
+  /(\brefund(?:ed)?\b(?:[^.\n]|\.(?=\S)){0,300}?)\b(?:credited|refunded|posted|returned)\b(\s+(?:back\s+)?(?:to|into|onto)\s+[^.\n,;]{0,60})?/gi;
+// Only a negation of the credit itself counts ("has not been credited"), not "the item you did not receive".
+const REFUND_CREDIT_NEGATION_RE = /\b(?:(?:has|have|had|was|were|is|are)\s+(?:not|never)|(?:hasn|haven|wasn|weren|isn|aren)['’]t|yet\s+to\s+be)\s+(?:(?:yet|been|successfully)\s+){0,3}$/;
+// A credit sent to a third party is not the reader's money. Deny-list, so an unusual but own destination ("Card ending 1234") still posts.
+const REFUND_THIRD_PARTY_DESTINATION_RE = /^\s*(?:back\s+)?(?:to|into|onto)\s+(?:(?:the|a|an|your|his|her|their|its)\s+)?(?:\w+\s+){0,2}?(?:merchant|beneficiary|seller|vendor|recipient|payee|retailer|supplier|store|shop|restaurant|platform|marketplace)\b/i;
+function refundCreditNotActual(body: string, request: string): boolean {
+  const requested = refundAmounts(request);
+  for (const match of body.matchAll(REFUND_CREDIT_SCAN_RE)) {
+    const at = match.index!;
+    const breaks = [...body.slice(0, at).matchAll(REFUND_SENTENCE_BREAK_RE)];
+    const lead = body.slice(breaks.length ? breaks[breaks.length - 1].index! + 1 : 0, at);
+    if (governsRefundCredit(lead) || REFUND_CREDIT_CONDITIONAL_INSIDE_RE.test(match[1]) || REFUND_CREDIT_NEGATION_RE.test(match[1])) return true;
+    if (match[2] && REFUND_THIRD_PARTY_DESTINATION_RE.test(match[2])) return true;
+    // From the credit verb on, destination included: "credited to your card in error and has been reversed".
+    const remainder = body.slice(at + match[0].length - (match[2]?.length ?? 0));
+    if (REFUND_CREDIT_REVERSED_RE.test(remainder) || REFUND_CREDIT_LATER_RE.test(remainder.split(REFUND_SENTENCE_BREAK_RE)[0])) return true;
+    if (requested.length > 0) {
+      const credited = refundAmounts(match[0]);
+      if (requested.some((amount) => !credited.includes(amount))) return true;
+    }
   }
   return false;
 }
@@ -5242,6 +5275,7 @@ function nonPostingReasonInBody(
   const withoutRequest = requestReceived ? blank(blank(body, REQUEST_RECEIVED_BLANK_RE), FUTURE_CLAUSE_RE) : body;
   const settledRefund = (REFUND_RE.test(body) && (!requestReceived || REFUND_RE.test(withoutRequest))) ||
     (requestReceived && hasCompletedRefundCredit(withoutRequest, refundRequestSentences(body)));
+  if (refundCreditNotActual(body, refundRequestSentences(body))) return 'pending-processing';
   if (VERIFICATION_HOLD_DESCRIPTOR_RE.test(body)) return 'preauthorisation';
   if (
     !settledRefund &&
