@@ -2124,22 +2124,24 @@ struct WafraBankSenderRegistryTests {
           native.acknowledged.includes(aeId),
         JSON.stringify({ outcome, calls: ledger.calls, pending: native.pending().length }));
       // B1: a conflicting-currency purchase is never acknowledged without a
-      // durable, user-visible record. Gap A: foreign-currency reviews use
-      // their own lane and never wait natively for Review space.
+      // durable, user-visible record. Strict retention: the foreign-currency
+      // lane keeps fifty and the overflow waits at its native source instead of
+      // evicting a kept purchase; nothing is lost and AED capture is not blocked.
       const tray = ledger.getState().reviewTray;
       const sarReviews = tray.pending.filter((item) => item.kind === 'universal' &&
         item.event.amount.value?.currency === 'SAR' && item.event.amount.value.exponent === 2);
       const acknowledgedSa = saIds.filter((id) => native.acknowledged.includes(id));
       ok('conflicting-currency purchases become durable SAR Review items, never silent acknowledgements',
-        outcome.reviews === 51 && sarReviews.length === 51 && acknowledgedSa.length === 51 &&
+        outcome.reviews === 50 && sarReviews.length === 50 && acknowledgedSa.length === 50 &&
           sarReviews.every((item) => item.currencyConflict === true) &&
-          !outcome.deferredReviews && native.pending().length === 0 &&
-          !outcome.currencyConflicts && trayModule.reviewCaptureBacklog.get().currencyConflicts === 0 &&
-          trayModule.reviewCaptureBacklog.get().waiting === 0,
+          outcome.deferredReviews === 1 && native.pending().length === 1 &&
+          saIds.every((id) => native.acknowledged.includes(id) || native.pending().some((record) => JSON.parse(record).id === id)) &&
+          !tray.tombstones.some((item) => item.outcome === 'currency-evicted') &&
+          trayModule.reviewCaptureBacklog.get().waiting === 1,
         JSON.stringify({ outcome, backlog: trayModule.reviewCaptureBacklog.get(), sar: sarReviews.length }));
       const hydrated = trayModule.normalizeAlertReviewTray(JSON.parse(JSON.stringify(tray)), Date.now());
       ok('SAR currency-conflict Review items survive persistence and hydration',
-        hydrated.pending.length === 50 && trayModule.recentlyLostReviewCount(hydrated, Date.now(), 'currency-evicted') === 1 &&
+        hydrated.pending.length === 50 && trayModule.recentlyLostReviewCount(hydrated, Date.now(), 'currency-evicted') === 0 &&
           hydrated.pending.every((item) => item.kind === 'universal' &&
             item.event.amount.value?.currency === 'SAR' && item.channel === 'inbox' &&
             /^(?:apple_message_review_source_[0-9a-f]{64}|local_review_source_[0-9a-f]{32})$/.test(item.sourceKey)),
@@ -2165,8 +2167,9 @@ struct WafraBankSenderRegistryTests {
         plan.outcome === 'refused' && plan.reason === 'fx-rate-unavailable',
         JSON.stringify(plan));
       const drainAgain = await coordinator(native, ledger).drain();
-      ok('a second drain finds nothing waiting behind foreign-currency reviews',
-        native.pending().length === 0 && drainAgain.imported === 0 && drainAgain.scanned === 0,
+      ok('a second drain keeps the waiting foreign purchase queued, unduplicated and unlost',
+        native.pending().length === 1 && drainAgain.imported === 0 && drainAgain.reviews === 0 &&
+          ledger.getState().reviewTray.pending.length === 50,
         JSON.stringify({ drainAgain, pending: native.pending().length }));
       trayModule.reviewCaptureBacklog.reset();
     }
@@ -2464,19 +2467,19 @@ struct WafraBankSenderRegistryTests {
       const tray = ledger.getState().reviewTray;
       ok('fifty unresolved foreign-currency reviews never block a later AED purchase or AED review',
         outcome.imported === 1 && native.acknowledged.includes(aeId) &&
-          native.acknowledged.includes(aeReviewId) && native.pending().length === 0 &&
-          !outcome.deferredReviews && trayModule.reviewCaptureBacklog.get().waiting === 0 &&
+          native.acknowledged.includes(aeReviewId) &&
           tray.pending.some((item) => !trayModule.isCurrencyConflictReview(item)),
         JSON.stringify({ outcome, pending: native.pending().length, calls: native.calls }));
-      ok('the foreign-currency overflow is kept as a visible count, never a silent acknowledgement',
-        moreSa.every((id) => native.acknowledged.includes(id)) &&
+      ok('the foreign-currency overflow waits at its source, visible as waiting, never a silent acknowledgement',
+        moreSa.every((id) => !native.acknowledged.includes(id)) && native.pending().length === moreSa.length &&
           tray.pending.filter(trayModule.isCurrencyConflictReview).length === 50 &&
-          trayModule.recentlyLostReviewCount(tray, Date.now(), 'currency-evicted') === 50 &&
-          trayModule.recentlyLostReviewCount(tray, Date.now(), 'evicted') === 0,
-        JSON.stringify(tray.tombstones.slice(0, 2)));
+          trayModule.recentlyLostReviewCount(tray, Date.now(), 'currency-evicted') === 0 &&
+          trayModule.recentlyLostReviewCount(tray, Date.now(), 'evicted') === 0 &&
+          outcome.deferredReviews === moreSa.length,
+        JSON.stringify({ outcome, pending: native.pending().length, tombstones: tray.tombstones.slice(0, 2) }));
       const reloaded = trayModule.normalizeAlertReviewTray(JSON.parse(JSON.stringify(tray)), Date.now());
-      ok('reloading the tray keeps the foreign-currency count exactly once',
-        trayModule.recentlyLostReviewCount(reloaded, Date.now(), 'currency-evicted') === 50 &&
+      ok('reloading the tray keeps the foreign-currency lane exactly and counts no loss',
+        trayModule.recentlyLostReviewCount(reloaded, Date.now(), 'currency-evicted') === 0 &&
           reloaded.pending.length === tray.pending.length);
       trayModule.reviewCaptureBacklog.reset();
     }

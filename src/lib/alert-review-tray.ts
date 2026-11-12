@@ -758,7 +758,13 @@ export const partitionReviewsByCapacity = <T extends ReviewEntry>(
       continue;
     }
     const result = admitPreparedReviewAlert(state, item, now);
-    if (result.outcome === 'deferred') { deferred.push(item); continue; }
+    // Only recoverable money evidence waits at its source for Review space. An
+    // informational review that cannot displace kept money is staged and simply
+    // not admitted, so it never holds a native record or an inbox cursor.
+    if (result.outcome === 'deferred') {
+      if (requiresReviewRetention(item)) deferred.push(item); else admit.push(item);
+      continue;
+    }
     if (lane === 'legacy' && result.outcome === 'admitted' && requiresReviewRetention(item)) {
       const kept = new Set(result.state.pending.map((entry) => entry.id));
       const losesMoneyMovement = !kept.has(item.id) || state.pending.some((entry) =>
