@@ -6,7 +6,8 @@ const key = item => source('lib/capture-source-identity').canonicalCaptureSource
 
 test('actual failed dismissal rehydrates all fifty; nine durable dismissals permit exactly nine new sources', { timeout: 15000 }, async () => {
   const items = Array.from({ length: 59 }, (_, i) => payment(i)); const h = storeHarness();
-  await h.stage(items).durable;
+  // Models a source-holding caller (History/scan), so strict 'hold-source' admission.
+  await h.stage(items, undefined, undefined, 'hold-source').durable;
   h.setWrite(async () => false);
   await assert.rejects(h.dismissDurable(items[0]), /Encrypted review dismissal write failed/);
   assert.equal(h.state.reviewTray.pending.length, 49, 'optimistic memory is not the persisted result');
@@ -16,7 +17,7 @@ test('actual failed dismissal rehydrates all fifty; nine durable dismissals perm
   h.setWrite(async () => true);
   for (const item of items.slice(0, 9)) await h.dismissDurable(item);
   assert.equal(h.persisted.reviewTray.pending.length, 41);
-  const next = h.stage(items); assert.equal(next.admitted, 9);
+  const next = h.stage(items, undefined, undefined, 'hold-source'); assert.equal(next.admitted, 9);
   const receipts = await tray.settleReviewStage(items, next);
   assert.equal(receipts.filter(x => x.outcome === 'resolved').length, 9);
   assert.equal(receipts.filter(x => x.outcome === 'pending').length, 50);
