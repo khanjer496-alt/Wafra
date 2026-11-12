@@ -31,6 +31,8 @@ jobs:
         run: |
           node scripts/generate-ios-background-parser.cjs
           node scripts/generate-ios-background-parser.cjs --check
+      - name: Temporary D3/D4 probe (side branch only)
+        run: node .github/patch-probe/d3d4-probe.cjs "$PWD" | tee probe.txt
       - name: Ported launch-safety suite (TAP) and the bounded re-read test
         run: |
           set -o pipefail
@@ -55,6 +57,7 @@ jobs:
             round2.txt
             matrix.txt
             matrix-report.json
+            probe.txt
           retention-days: 7
       - uses: actions/upload-artifact@v4
         with:
