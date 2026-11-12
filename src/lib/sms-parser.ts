@@ -2370,7 +2370,13 @@ function refundCreditNotActual(body: string, request: string): boolean {
     // "AED 100.00 is not refunded to your card" is no credit; "The delivery fee is not refunded" (no amount) is a footer.
     if (match[1] === undefined) {
       const sentence = lead + match[0] + body.slice(at + match[0].length).split(REFUND_SENTENCE_BREAK_RE)[0];
-      if (REFUND_CREDIT_NEGATION_RE.test(lead) && refundAmounts(sentence).length > 0) negatedEnd = at + match[0].length;
+      if (REFUND_CREDIT_NEGATION_RE.test(lead)) {
+        if (refundAmounts(sentence).length > 0) negatedEnd = at + match[0].length;
+        continue;
+      }
+      // Review 4637ac64: a bare "has been refunded" that is later taken back ("The refund was reversed by the merchant"),
+      // held or under review is no credit either, exactly as for the "refund … credited" form below.
+      if (refundCreditNotFinal(body.slice(at + match[0].length - (match[2]?.length ?? 0)))) return true;
       continue;
     }
     if (governsRefundCredit(lead) || REFUND_CREDIT_CONDITIONAL_INSIDE_RE.test(match[1])) return true;
