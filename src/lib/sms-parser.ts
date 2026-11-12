@@ -2524,6 +2524,10 @@ const EN_NEW_CLAUSE_RE = /(?:\b(?:and|but|while|whereas)\s+(?:the|this|that|your
 // a following "reversed" never is ("… and was later reversed" takes the credit back).
 const EN_NEW_COMPLETED_CREDIT_RE = /\b(?:and|but)\s+(?:(?:was|were|has\s+been|have\s+been|had\s+been)\s+(?:(?:now|then|also|successfully)\s+)?)$/i;
 const EN_CREDIT_IN_RE = /^(?:credited|refunded|deposited|returned)$/i;
+// "re-credited to card 1234 for reversed purchase": the reason names the debit that was undone, not this credit. Only that
+// phrase is skipped by the take-back check; "… and reversed", "This credit was reversed" and "in error" still count.
+const EN_CREDIT_REASON_RE =
+  /\bfor\s+(?:(?:the|your|a|an)\s+)?(?:reversed|cancell?ed)\s+(?:purchases?|transactions?|payments?|charges?|orders?|debits?)\b/gi;
 /** The credit clauses of one sentence: each starts at a credit verb, with any "… and credited" coordinated after it. */
 function enCreditClauses(sentence: string): CreditClause[] {
   if (EN_CREDIT_WORDS.notARefundCredit.test(sentence)) return [];
@@ -2571,7 +2575,7 @@ export function creditSettlement(sentence: string, clause: CreditClause, after =
   const tail = sentence.slice(clause.end);
   const destination = EN_CREDIT_WORDS.destination.exec(tail);
   if (destination && REFUND_THIRD_PARTY_DESTINATION_RE.test(` ${destination[0]}`)) return { verdict: 'refused', reason: 'third-party' };
-  if (refundCreditNotFinal(tail + after)) return { verdict: 'refused', reason: 'taken-back' };
+  if (refundCreditNotFinal((tail + after).replace(EN_CREDIT_REASON_RE, ' '))) return { verdict: 'refused', reason: 'taken-back' };
   if (clause.verbs.every((verb) => verb.startsWith('process'))) {
     // Oracle v2.2 (CEO 73c34ef8, Change Reviewer 4eee941b): a processed refund is settled when it names the instrument by
     // number or a balance/limit line follows, unless a later sentence says the money is not there yet ("It will reflect in
