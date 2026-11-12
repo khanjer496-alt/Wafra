@@ -179,7 +179,7 @@ import {
   storageReadFailureMayRetry,
   type StorageFailure,
 } from '@/lib/storage-diagnostics';
-import { waitForAndroidBackgroundCaptureIdle } from '@/lib/android-live-background';
+import { waitForAndroidBackgroundCaptureIdle } from '@/lib/android-live-background-api';
 import { bankNotificationAdmissionExpiresAt } from '@/lib/trusted-bank-notification-packages';
 import { overrideAppliesTo } from '@/lib/uncategorised';
 import { applyBillAliasToTransactions, billAliasKey, validBillAlias } from '@/lib/bill-alias';
@@ -627,6 +627,37 @@ export function migratePersistedState(
     const titleOf = (t: Transaction) => t.title.trim().toLowerCase();
     const parserOwned = (t: Transaction) =>
       t.source === 'sms' && !t.userEdited && !t.titleEdited;
+    // Every rule below asks "which rows carry this title?". Answering that by
+    // scanning the whole ledger once per rule (and lowercasing every title each
+    // time) made this launch step cost rules x rows; on a big ledger with many
+    // merchant rules that is millions of string operations before Home can
+    // render. One lowercased-title index answers each question from its own
+    // bucket, in the same row order, with identical results. Built on first use
+    // (as the old scans were), so a rule set that never reaches a lookup still
+    // never reads a title.
+    let rowsByTitle: Map<string, Transaction[]> | null = null;
+    const rowsTitled = (title: string): Transaction[] => {
+      if (rowsByTitle === null) {
+        rowsByTitle = new Map();
+        for (const t of rows) {
+          const title = titleOf(t);
+          const bucket = rowsByTitle.get(title);
+          if (bucket) bucket.push(t);
+          else rowsByTitle.set(title, [t]);
+        }
+      }
+      return rowsByTitle.get(title) ?? [];
+    };
+    const rawLower = new Map<Transaction, string>();
+    const rawContains = (t: Transaction, needle: string): boolean => {
+      if (typeof t.raw !== 'string') return false;
+      let lower = rawLower.get(t);
+      if (lower === undefined) {
+        lower = t.raw.toLowerCase();
+        rawLower.set(t, lower);
+      }
+      return lower.includes(needle);
+    };
 
     // EVERY key that would land on this canonical name votes, whether or not
     // the ledger has evidence for it. A key with no rows left behind it is not
@@ -648,19 +679,18 @@ export function migratePersistedState(
       // most recent thing they said about it, and outranks any re-key.
       if (parsed.merchantOverrides[canonicalKey] !== undefined) continue;
 
-      const under = rows.filter((t) => titleOf(t) === merchantKey && (!scope || t.type === scope));
+      const under = rowsTitled(merchantKey).filter((t) => !scope || t.type === scope);
       const evidenced =
         // The user has written this name, so it is theirs however it
         // canonicalises. Not evidence — and it still votes, because refusing
         // is cheap and a rule the user never set is not.
         !under.some((t) => !parserOwned(t)) &&
         (under.length > 0 ||
-          rows.some(
+          rowsTitled(canonicalMerchant).some(
             (t) =>
               parserOwned(t) &&
-              titleOf(t) === canonicalMerchant && (!scope || t.type === scope) &&
-              typeof t.raw === 'string' &&
-              t.raw.toLowerCase().includes(merchantKey),
+              (!scope || t.type === scope) &&
+              rawContains(t, merchantKey),
           ));
 
       const claim = claims.get(canonicalKey);
