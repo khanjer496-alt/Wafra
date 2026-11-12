@@ -370,13 +370,21 @@ function SuperwallRuntime({ onValue }: {
     void setEventTrackingBehavior('none').catch(() => {});
   }, [state.hydrated, isConfigured, setEventTrackingBehavior]);
 
+  // The ONE placement parameter Wafra sends: the saved app language, exactly "en" or "ar".
+  // It is a setting, not personal data, and it lets the onboarding Flow choose the Arabic
+  // pages after an in-session language change (the SDK's localeIdentifier is fixed at
+  // configure time). No market, source, focus, intention, platform or user attribute is sent.
+  const placementLanguage: 'en' | 'ar' = state.language === 'ar' ? 'ar' : 'en';
+
   const presentProPaywall = useCallback(async () => {
     if (!isConfigured) throw new Error('SUPERWALL_NOT_CONFIGURED');
     await proPlacement.registerPlacement({
       placement: SUPERWALL_PLACEMENTS.pro,
+      params: { language: placementLanguage },
     });
   }, [
     proPlacement,
+    placementLanguage,
     isConfigured,
   ]);
 
@@ -384,9 +392,11 @@ function SuperwallRuntime({ onValue }: {
     if (!isConfigured) throw new Error('SUPERWALL_NOT_CONFIGURED');
     await onboardingPlacement.registerPlacement({
       placement: SUPERWALL_PLACEMENTS.onboarding,
+      params: { language: placementLanguage },
     });
   }, [
     onboardingPlacement,
+    placementLanguage,
     isConfigured,
   ]);
 

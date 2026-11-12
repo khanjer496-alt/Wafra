@@ -4,7 +4,8 @@ The provider initializes iOS and Android Superwall with event collection `none`,
 external collection disabled and experimental device variables disabled. Leaving
 Private Mode does not re-enable events. Wafra does not call `identify`, write
 custom user attributes, fetch user attributes during entitlement refresh, or
-attach demographic/onboarding/caller parameters to placement requests.
+attach demographic/onboarding/caller parameters to placement requests. The only placement
+parameter is `language` (`"en"` or `"ar"`, the saved app display language), pinned by tests.
 Store products, purchase, restore and verified entitlement refresh remain active.
 
 ## Pinned SDK limit

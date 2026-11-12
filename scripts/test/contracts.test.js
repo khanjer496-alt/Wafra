@@ -578,7 +578,10 @@ function ktSources(dir) {
   ok('the local first name is never sent to Superwall',
     !/userName|setUserAttributes/.test(provider) &&
       /eventTrackingBehavior: 'none'/.test(provider) &&
-      !/params:/.test(provider));
+      // The ONE allowed placement param is the app language ("en" | "ar").
+      (provider.match(/params:/g) ?? []).length === 2 &&
+      (provider.match(/params: \{ language: placementLanguage \}/g) ?? []).length === 2 &&
+      /const placementLanguage: 'en' \| 'ar' = state\.language === 'ar' \? 'ar' : 'en';/.test(provider));
   ok('unknown storefront state preserves the cached Pro flag',
     /status\.status === 'UNKNOWN'\) return null/.test(sdk) &&
       /if \(!snapshot\) return/.test(provider));

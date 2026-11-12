@@ -102,11 +102,12 @@ native capture/setup step without replaying Focus/Tracking/Intention.
 
 Create English and Arabic variants. Keep Arabic conversational and GCC-friendly,
 keep “Wafra” as the product name, keep CTAs short, and manually review RTL.
-Wafra sends NO placement parameters and NO user attributes. Choose the Arabic
-variant with Superwall's built-in locale localization: the SDK is configured with
-`localeIdentifier` built from Wafra's saved app language and the device region.
-Do not write audience rules on `language`, `market`, `source`, `focus` or
-`intention`: they no longer exist and such a rule silently never matches.
+Wafra sends exactly ONE placement parameter, `language` (`"en"` or `"ar"`, from the
+saved app language), and NO user attributes. Choose the Arabic variant from
+`params.language`: the SDK's `localeIdentifier` (saved language plus device region)
+is fixed at configure time and does not follow an in-session language change.
+Do not write rules on `market`, `source`, `focus`, `intention` or `platform`: they
+are no longer sent and such a rule silently never matches.
 
 ## Failure/fallback rules
 
@@ -118,8 +119,8 @@ onboarding so first run can never become a dead end.
 
 ## Privacy contract
 
-Wafra supplies no targeting metadata: no placement parameters and no user
-attributes. Superwall event tracking is `none` and external data collection is
+Wafra supplies no targeting metadata beyond the single placement parameter
+`language` (`"en"` or `"ar"`, the app display setting) and no user attributes. Superwall event tracking is `none` and external data collection is
 off. Never send the local first name, ledger rows, balances, amounts, SMS bodies
 or card/account identifiers. The SDK still sends its own anonymous app-user alias,
 device fields and the request IP, as declared in App Privacy.

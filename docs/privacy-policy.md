@@ -374,9 +374,10 @@ refreshes.
 
 - **Purchases and paywalls:** when store billing is configured, Apple or Google
   processes payment and Superwall provides paywalls and subscription entitlement
-  state. Wafra configures optional SDK event collection off and does not send
-  custom language, market, onboarding, capture-choice or trial-day targeting
-  attributes. This does not remove the SDK's own billing identifiers: Superwall
+  state. Wafra configures optional SDK event collection off and sends only the
+  app's display language (English or Arabic) with a paywall request so the right
+  language is shown; it does not send market, onboarding, capture-choice or
+  trial-day targeting attributes. This does not remove the SDK's own billing identifiers: Superwall
   can receive purchase/subscription details, SDK-generated user/device identifiers
   including the vendor identifier, device/locale information and the network
   address. Its service may derive approximate location or process install

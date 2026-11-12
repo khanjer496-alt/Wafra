@@ -106,9 +106,14 @@ an OTA update cannot add the SDK to an older binary.
 Publish English and Arabic variants in Superwall and let Superwall's built-in
 locale localization choose between them: Wafra configures the SDK with a
 `localeIdentifier` built from its saved app language and the device region, and
-passes NO placement parameters and NO user attributes. A campaign audience rule or
-paywall template that reads `language`, `market`, `source`, `focus` or `intention`
-will never match. Manually QA Arabic RTL.
+sends exactly ONE placement parameter with every `onboarding` and `pro_upgrade`
+request: `language`, with the value `"en"` or `"ar"` taken from the saved app
+language (the SDK's `localeIdentifier` is fixed when the SDK is configured, so
+`language` is what follows an in-session language change, including choosing Arabic
+in first-run onboarding). Use `params.language` to choose the Arabic variant. No
+other placement parameter and NO user attributes are sent, so a rule or template
+that reads `market`, `source`, `focus`, `intention` or `platform` will never match.
+Manually QA Arabic RTL.
 
 Wafra does **not** send ledger rows, balances, transaction amounts, SMS bodies,
 card/account identifiers or the locally stored first name to Superwall. Superwall

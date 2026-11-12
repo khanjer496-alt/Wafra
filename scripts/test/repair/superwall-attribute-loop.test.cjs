@@ -678,11 +678,29 @@ for (const platform of ['ios', 'android']) test(`${platform}: SDK initializes wi
   assert.equal(config.shouldObservePurchases, true, 'entitlement observation is preserved');
 });
 
-test('paywall and onboarding requests carry no custom targeting or caller attributes', async () => {
-  const h = harness({ platform: 'ios' });
+test('paywall and onboarding requests carry exactly one param, language, from the saved app language', async () => {
+  for (const [saved, want] of [['en', 'en'], ['ar', 'ar'], ['fr', 'en'], [undefined, 'en']]) {
+    const h = harness({ platform: 'ios', state: { language: saved } });
+    await h.renderRuntime(3);
+    // Caller-supplied params are ignored: nothing but the language is ever forwarded.
+    await h.billing().presentProPaywall({ source: 'fixture', merchant: 'private fixture' });
+    await h.billing().presentOnboardingFlow();
+    assert.equal(h.calls.placements.length, 2);
+    for (const request of h.calls.placements) {
+      assert.deepEqual(Object.keys(request).sort(), ['params', 'placement']);
+      assert.deepEqual(request.params, { language: want });
+      assert.deepEqual(Object.keys(request.params), ['language']);
+    }
+    assert.equal(h.calls.attributes.length, 0, 'no user attributes come back');
+  }
+});
+
+test('an in-session language change is reflected in the next placement request', async () => {
+  const h = harness({ platform: 'ios', state: { language: 'en' } });
   await h.renderRuntime(3);
-  await h.billing().presentProPaywall({ source: 'fixture', merchant: 'private fixture' });
   await h.billing().presentOnboardingFlow();
-  assert.equal(h.calls.placements.length, 2);
-  for (const request of h.calls.placements) assert.deepEqual(Object.keys(request), ['placement']);
+  h.state.language = 'ar';
+  await h.renderRuntime(3);
+  await h.billing().presentOnboardingFlow();
+  assert.deepEqual(h.calls.placements.map(request => request.params.language), ['en', 'ar']);
 });
