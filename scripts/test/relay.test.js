@@ -71,6 +71,13 @@ function reviewFixture(label) {
     event: inspectGenericBankEventForReview('Purchase of AED 50.00 at CARREFOUR with Debit Card ending 1234'),
   });
 }
+// Like the store: a stage receipt reports each source from the ledger's current
+// tray, so a retention-required review is ACKed only while it is really kept.
+function fixtureRetention(getState, items) {
+  return () => reviewTrayApi.reviewRetentionReceipts(
+    getState().reviewTray ?? reviewTrayApi.emptyAlertReviewTray(), items, Date.now());
+}
+
 function persistFixtureReviews(state, items) {
   const batch = reviewTrayApi.admitPreparedReviewAlerts(state.reviewTray ?? reviewTrayApi.emptyAlertReviewTray(), items, Date.now());
   state.reviewTray = batch.state;
@@ -2418,7 +2425,7 @@ async function queueItem(id, row, publicKey) {
             stageReviewAlerts(items) {
               persistFixtureReviews(this.getState(), items);
               events.push('review-stage');
-              return { admitted: 1, durable: reviewDurable };
+              return { admitted: 1, durable: reviewDurable, retention: fixtureRetention(() => this.getState(), items) };
             },
           },
           dependencies: {
@@ -2560,6 +2567,7 @@ async function queueItem(id, row, publicKey) {
             ensureDurable: async () => {},
             stageReviewAlerts: (items) => ({
               admitted: persistFixtureReviews(current, items),
+              retention: fixtureRetention(() => current, items),
               durable: new Promise((resolve) => { releaseReview = resolve; }),
             }),
           },
@@ -2598,7 +2606,7 @@ async function queueItem(id, row, publicKey) {
             stageReviewAlerts(items) {
               persistFixtureReviews(this.getState(), items);
               events.push('review-stage');
-              return { admitted: 1, durable: Promise.resolve() };
+              return { admitted: 1, durable: Promise.resolve(), retention: fixtureRetention(() => this.getState(), items) };
             },
             ensureDurable: async () => void events.push('flush'),
             markParserVersion: () => void events.push('parser'),
@@ -2640,7 +2648,7 @@ async function queueItem(id, row, publicKey) {
             stageReviewAlerts(items) {
               persistFixtureReviews(this.getState(), items);
               events.push('review-stage');
-              return { admitted: 1, durable: reviewDurable };
+              return { admitted: 1, durable: reviewDurable, retention: fixtureRetention(() => this.getState(), items) };
             },
           },
           dependencies: {
@@ -2681,7 +2689,7 @@ async function queueItem(id, row, publicKey) {
             stageReviewAlerts(items) {
               persistFixtureReviews(this.getState(), items);
               events.push('review-stage');
-              return { admitted: 1, durable: reviewDurable };
+              return { admitted: 1, durable: reviewDurable, retention: fixtureRetention(() => this.getState(), items) };
             },
             ensureDurable: async () => void events.push('flush'),
             markParserVersion: () => void events.push('parser'),
@@ -2715,7 +2723,7 @@ async function queueItem(id, row, publicKey) {
             stageReviewAlerts(items) {
               persistFixtureReviews(this.getState(), items);
               events.push('review-stage');
-              return { admitted: 1, durable: Promise.resolve() };
+              return { admitted: 1, durable: Promise.resolve(), retention: fixtureRetention(() => this.getState(), items) };
             },
           },
           dependencies: {
@@ -2742,6 +2750,7 @@ async function queueItem(id, row, publicKey) {
               persistFixtureReviews(this.getState(), items);
               events.push('review-stage');
               return {
+                retention: fixtureRetention(() => this.getState(), items),
                 admitted: 1,
                 durable: Promise.reject(new Error('review durability failed')),
               };
@@ -2836,7 +2845,7 @@ async function queueItem(id, row, publicKey) {
             stageReviewAlerts(items) {
               persistFixtureReviews(this.getState(), items);
               events.push('stage-review');
-              return { admitted: 1, durable: Promise.resolve() };
+              return { admitted: 1, durable: Promise.resolve(), retention: fixtureRetention(() => this.getState(), items) };
             },
             importBatch: () => {
               events.push('persist');
@@ -2890,6 +2899,7 @@ async function queueItem(id, row, publicKey) {
               persistFixtureReviews(this.getState(), items);
               events.push('stage-review');
               return {
+                retention: fixtureRetention(() => this.getState(), items),
                 admitted: 1,
                 durable: reviewDurability.promise.then(() => void events.push('review-durable')),
               };
@@ -2993,7 +3003,7 @@ async function queueItem(id, row, publicKey) {
             stageReviewAlerts(items) {
               persistFixtureReviews(this.getState(), items);
               events.push('review-stage');
-              return { admitted: 1, durable: Promise.resolve().then(() => events.push('review-durable')) };
+              return { admitted: 1, durable: Promise.resolve().then(() => events.push('review-durable')), retention: fixtureRetention(() => this.getState(), items) };
             },
           },
           dependencies: {

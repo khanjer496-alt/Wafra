@@ -2803,6 +2803,8 @@ struct WafraBankSenderRegistryTests {
         admitted: items.length,
         qualificationIds: qualifications.map((candidate) => candidate.qualification.id),
         durable: Promise.resolve(),
+        retention: () => items.map((item) => ({
+          sourceKey: requireBuild('@/lib/alert-review-tray').reviewSourceKeyOf(item), outcome: 'pending' })),
       }), 1],
       ['refused', () => ({ admitted: 0, qualificationIds: [], durable: Promise.resolve() }), 0],
       ['rejected', (_items, qualifications = []) => ({
@@ -2855,6 +2857,8 @@ struct WafraBankSenderRegistryTests {
           admitted: 1,
           qualificationIds: [admitted.qualification.id],
           durable: Promise.resolve(),
+          retention: () => requireBuild('@/lib/alert-review-tray')
+            .reviewRetentionReceipts(ledger.getState().reviewTray, items, Date.now()),
         };
       };
       const outcome = await coordinator(native, ledger).drain();
