@@ -60,6 +60,23 @@ test('the kept object is the earlier one, so a later change is still compared ag
   assert.deepEqual([...third.reviewTransferIds].sort(), ['t2', 't3']);
 });
 
+test('every field of TransferSeparation takes part in the equality check (a future field cannot be silently ignored)', () => {
+  const source = fs.readFileSync(path.join(root, 'src/lib/transfer-separation.ts'), 'utf8');
+  const iface = source.match(/export interface TransferSeparation \{([\s\S]*?)\n\}/)[1];
+  const fields = [...iface.matchAll(/^  (\w+)\??:/gm)].map((m) => m[1]);
+  assert.deepEqual(fields.sort(), ['pendingTransferIds', 'reviewTransferIds', 'separateTransferIds', 'separatedPartnerIds'],
+    'a new field must be added here AND to sameTransferSeparation');
+  const comparator = source.slice(source.indexOf('export function sameTransferSeparation'), source.indexOf('/** The previous separation'));
+  for (const field of fields) assert.ok(comparator.includes(`a.${field}`) && comparator.includes(`b.${field}`), `${field} is compared`);
+  // Behaviour: changing just that one field makes the answers differ.
+  const base = separation();
+  const variants = {
+    separateTransferIds: new Set(['t1', 't2', 't3', 'x']), reviewTransferIds: new Set(['t3', 'x']),
+    pendingTransferIds: new Set(['t9', 'x']), separatedPartnerIds: new Map([['t1', 't2'], ['x', 'y']]),
+  };
+  for (const field of fields) assert.equal(sameTransferSeparation(base, separation({ [field]: variants[field] })), false, field);
+});
+
 test('the Transactions screen keeps the previous separation in both places it is produced', () => {
   const screen = fs.readFileSync(path.join(root, 'src/app/transactions.tsx'), 'utf8');
   assert.match(screen, /import \{ keepEqualSeparation, type TransferSeparation \} from '@\/lib\/transfer-separation';/);
