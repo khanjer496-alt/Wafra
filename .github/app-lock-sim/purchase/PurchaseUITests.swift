@@ -34,6 +34,12 @@ final class PurchaseUITests: XCTestCase {
         Task.detached { do { try await s0.setSimulatedError(nil, forAPI: .purchase) } catch let e { probe = "\(e)" }; sem.signal() }
         sem.wait()
         note("SKTestSession mutation probe: \(probe); sim runtime: \(ProcessInfo.processInfo.operatingSystemVersionString)")
+        // storekitd registers the session under THIS test runner's bundle id, not app.wafra.ios: ask the host to copy
+        // the configuration into the app's own Octane folder before the app launches (Apple FB22237318 area).
+        try? "go".write(toFile: "\(hsDir)/storekit-sync.request", atomically: true, encoding: .utf8)
+        let syncEnd = Date().addingTimeInterval(60)
+        while Date() < syncEnd && !FileManager.default.fileExists(atPath: "\(hsDir)/storekit-sync.done") { Thread.sleep(forTimeInterval: 1) }
+        note("host StoreKit config sync: \(FileManager.default.fileExists(atPath: "\(hsDir)/storekit-sync.done") ? "done" : "timed out")")
         record("STOREKIT-SESSION", probe == "ok", "mutation probe on \(ProcessInfo.processInfo.operatingSystemVersionString): \(probe)")
     }
 
@@ -82,7 +88,7 @@ final class PurchaseUITests: XCTestCase {
     func reachHome() throws {
         let advance = ["onboarding-get-started", "onboarding-name-skip", "onboarding-goal-bills", "onboarding-goals-continue",
                        "onboarding-watch-continue", "onboarding-reminders-not-now", "onboarding-live-continue",
-                       "onboarding-sms-explainer-continue", "onboarding-complete-manual", "onboarding-complete-continue",
+                       "onboarding-sms-explainer-continue", "onboarding-source-manual", "onboarding-complete-manual", "onboarding-complete-continue",
                        "onboarding-pattern-continue", "onboarding-paywall-free"]
         let end = Date().addingTimeInterval(240)
         while Date() < end {

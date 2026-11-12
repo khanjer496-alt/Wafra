@@ -40,6 +40,14 @@ TPID=$!
 
 END=$((SECONDS + 1500))
 while kill -0 $TPID 2>/dev/null && [ $SECONDS -lt $END ]; do
+  if [ -f "$WORK/hs/storekit-sync.request" ] && [ ! -f "$WORK/hs/storekit-sync.done" ]; then
+    AG=$(dirname "$(find "$HOME/Library/Developer/CoreSimulator/Devices/$UDID/data/Containers/Shared/AppGroup" -ipath '*Octane/dev.wafra.purchaseuitests.xctrunner/Configuration.storekit' 2>/dev/null | head -1)" 2>/dev/null)
+    if [ -n "$AG" ] && [ -d "$AG" ]; then
+      DEST="$(dirname "$AG")/$APP"; mkdir -p "$DEST"; cp "$AG/Configuration.storekit" "$DEST/Configuration.storekit"
+      echo "[host] copied StoreKit config to $DEST"; ls -la "$DEST"
+    else echo "[host] no Octane config for the test runner found yet"; fi
+    touch "$WORK/hs/storekit-sync.done"
+  fi
   for n in 1 2 3; do
     if [ -f "$WORK/hs/reinstall-$n.request" ] && [ ! -f "$WORK/hs/reinstall-$n.done" ]; then
       echo "[host] reinstall #$n"; fresh_install; touch "$WORK/hs/reinstall-$n.done"

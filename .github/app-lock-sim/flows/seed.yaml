@@ -88,6 +88,13 @@ appId: ${APP_ID}
       - runFlow:
           when:
             visible:
+              id: 'onboarding-source-manual'
+          commands:
+            - tapOn:
+                id: 'onboarding-source-manual'
+      - runFlow:
+          when:
+            visible:
               id: 'onboarding-complete-manual'
           commands:
             - tapOn:
