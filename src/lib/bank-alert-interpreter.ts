@@ -109,18 +109,18 @@ const isCompactCardCreditReturn = (source: string): boolean =>
  * parseSms still owns the amount, date, source and non-posting safeguards.
  * FIX4 (CEO 676bbe7a): a dot inside the shop name ("NOON.COM") no longer ends the clause, and the shop may follow the card
  * ("with Debit Card ending 1234 at NOON.COM has been refunded"), and the Liv/ENBD "Purchase amount ... on your Debit Card"
- * form may omit the card digits: its wording names the card, so only an account source is excluded there. Without this the
+ * form may omit the card digits. CEO 1014684b: that form also names the user's own account ("on your account ending 1234
+ * has been refunded"), a refund to the user like "to your card"; the "Purchase of" form still needs a card. Without this the
  * semantic reader booked the completed refund as a purchase on the launch session and native paths. */
 const isCompletedCardPurchaseReturn = (source: string, legacy: ParsedSms): boolean =>
   legacy.kind === 'transaction' && legacy.type === 'income' &&
   legacy.categoryGuess === 'other' && !legacy.transferHint &&
-  legacy.card?.kind !== 'account' &&
-  ((legacy.card !== null &&
+  ((legacy.card !== null && legacy.card.kind !== 'account' &&
     /^(?:your\s+)?(?:card\s+|pos\s+)?purchase\s+of\b(?:[^.\n]|\.(?=\S)){0,160}?\b(?:with|using|on)\s+(?:your\s+)?(?:(?:credit|debit|covered)\s+)?card\s+(?:ending(?:\s+with)?\s+)?[x*\d -]{4,32}(?:\s+at\s+(?:[^.\n]|\.(?=\S)){1,80}?)?\s+(?:has\s+been|was)\s+(?:successfully\s+)?(?:reversed|refunded)\b/iu.test(source)) ||
     // The Liv/ENBD form names the purchase AMOUNT and its shop before the
     // card: "Purchase amount of AED 120.50 at NOON on your Credit Card ending
     // 1234 has been successfully refunded". Completed wording only.
-    /^purchase\s+(?:amount|amt)\s+of\b(?:[^.\n]|\.(?=\S)){0,160}?\bon\s+your\s+(?:(?:credit|debit|covered|prepaid)\s+)?card(?:\s+(?:ending(?:\s+with)?\s+)?[x*\d -]{4,32})?\s+has\s+been\s+(?:successfully\s+|fully\s+)?refunded\b/iu.test(source)) &&
+    /^purchase\s+(?:amount|amt)\s+of\b(?:[^.\n]|\.(?=\S)){0,160}?\bon\s+your\s+(?:(?:(?:credit|debit|covered|prepaid)\s+)?card|account)(?:\s+(?:ending(?:\s+with)?\s+)?[x*\d -]{4,32})?\s+has\s+been\s+(?:successfully\s+|fully\s+)?refunded\b/iu.test(source)) &&
   !FUTURE_REFUND.test(source);
 /** "…and will be refunded", "will be credited back": a refund not yet made. */
 const FUTURE_REFUND = /\bwill\s+be\s+(?:refunded|reversed|credited)\b/iu;
