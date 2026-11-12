@@ -222,8 +222,9 @@ products, and the end-to-end purchase test in
 `Shared/launch-review/android-purchase-evidence-2026-11-12.md`). So the first
 real purchase is checked by hand:
 
-1. From release, check Play Console → Order management at least hourly until the
-   first non-test order for `wafra_pro_weekly` or `wafra_pro_yearly` appears.
+1. From release, check Play Console → Order management hourly for the first 7
+   days after launch, then daily until the first real Android purchase is
+   confirmed: a non-test order for `wafra_pro_weekly` or `wafra_pro_yearly`.
 2. Within minutes of that order, Superwall (app 55932) must show the same
    transaction with entitlement `pro` active for that user.
 3. That user gets Pro within minutes: there's no "Pro unlock pending" or
