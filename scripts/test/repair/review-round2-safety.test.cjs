@@ -595,8 +595,10 @@ const sideNoteDebit = 'AED 250.00 was debited from your card ending 1234 at NOON
 const sideNotePurchase = 'Purchase of AED 50.00 with Debit Card ending 1234 at CARREFOUR.';
 const negatedFeeNote = ' The annual fee is not refunded to your card.';
 const conditionalRefundNote = ' When a refund is credited to your card you will receive an SMS.';
-// The native bundle posts only the issuer-confirmed debit ("We confirm that ..."); it ignores the plain debit with or
-// without a note, so each case pins the native route of its debit alone and, where it posts, a debit of the same amount.
+// The native bundle posts only when its own event reader agrees with the parser. It ignores the plain "was debited from
+// your card" debit with or without a note, and it still declines the "When a refund is credited ..." footer on the
+// confirmed debit (as before this fix); it never posts any of these as a credit. A future refund footer ("The refund will
+// be credited ...") was already removed by the parser's future-footer rule, so the debit posts, now on every path.
 for (const [kind, base, note, minor, nativeRoute] of [
   ['no-note', sideNoteDebit, '', 25000, 'ignore'],
   ['negated-refunded-fee', sideNoteDebit, negatedFeeNote, 25000, 'ignore'],
@@ -604,10 +606,12 @@ for (const [kind, base, note, minor, nativeRoute] of [
   ['conditional-when-refund-credited', sideNoteDebit, conditionalRefundNote, 25000, 'ignore'],
   ['conditional-if-refund-credited', sideNoteDebit, ' If a refund is credited to your card, you will receive an SMS.', 25000, 'ignore'],
   ['plural-refunds-if-any', sideNoteDebit, ' Refunds, if any, will be credited to your card.', 25000, 'ignore'],
-  ['purchase-alert-negated-fee', sideNotePurchase, negatedFeeNote, 5000, 'ignore'],
+  ['future-refund-footer', sideNoteDebit, ' The refund will be credited to your card in 5 days.', 25000, 'ignore'],
+  ['purchase-alert-no-note', sideNotePurchase, '', 5000, 'parsed'],
+  ['purchase-alert-negated-fee', sideNotePurchase, negatedFeeNote, 5000, 'parsed'],
   ['confirmed-debit-no-note', confirmedDebit, '', 8500, 'parsed'],
   ['confirmed-debit-negated-fee', confirmedDebit, negatedFeeNote, 8500, 'parsed'],
-  ['confirmed-debit-when-refund-credited', confirmedDebit, conditionalRefundNote, 8500, 'parsed'],
+  ['confirmed-debit-when-refund-credited', confirmedDebit, conditionalRefundNote, 8500, 'ignore'],
 ]) {
   test(`refund hardening side note posts the debit/${kind}`, () => {
     const session = reader('AE');
@@ -631,7 +635,6 @@ for (const [kind, base, note, minor, nativeRoute] of [
 for (const [kind, base, note] of [
   ['refund-for-cancelled-order-credited', sideNoteDebit, ' Refund for your cancelled order has been credited to your card.'],
   ['refund-processed-to-card', sideNoteDebit, ' Your refund has been processed to your card.'],
-  ['refund-will-be-credited', sideNoteDebit, ' The refund will be credited to your card in 5 days.'],
   ['purchase-not-refunded', sideNoteDebit, ' Your purchase has not been refunded to your card.'],
   ['confirmed-debit-refund-credited', confirmedDebit, ' Refund for your cancelled order has been credited to your card.'],
 ]) {

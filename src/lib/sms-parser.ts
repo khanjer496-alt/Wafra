@@ -2345,9 +2345,8 @@ function hasCompletedRefundCredit(rest: string, request: string): boolean {
 // conditional, negated, credited to someone else, made in error and reversed, or for another amount than the request
 // still settled and posted income when its merchant fit REFUND_RE's 40-character window. The same guards now apply to
 // every refund-credit clause, with or without an acknowledgement, whatever the merchant length.
-// The second alternative is a lone "refunded" (group 1 unset); it only counts when negated with its own amount. Review 1e2ad89f.
 const REFUND_CREDIT_SCAN_RE =
-  /(?:(\brefund(?:ed)?\b(?:[^.\n]|\.(?=\S)){0,300}?)\b(?:credited|refunded|posted|returned)\b|\brefunded\b)(\s+(?:back\s+)?(?:to|into|onto)\s+[^.\n,;]{0,60})?/gi;
+  /(\brefund(?:ed)?\b(?:[^.\n]|\.(?=\S)){0,300}?)\b(?:credited|refunded|posted|returned)\b(\s+(?:back\s+)?(?:to|into|onto)\s+[^.\n,;]{0,60})?/gi;
 // Only a negation of the credit itself counts ("has not been credited"), not "the item you did not receive".
 const REFUND_CREDIT_NEGATION_RE = /\b(?:(?:has|have|had|was|were|is|are)\s+(?:not|never)|(?:hasn|haven|wasn|weren|isn|aren)['’]t|yet\s+to\s+be)\s+(?:(?:yet|been|successfully)\s+){0,3}$/;
 // A credit sent to a third party is not the reader's money. Deny-list, so an unusual but own destination ("Card ending 1234") still posts.
@@ -2365,12 +2364,6 @@ function refundCreditNotActual(body: string, request: string): boolean {
     const at = match.index!;
     const breaks = [...body.slice(0, at).matchAll(REFUND_SENTENCE_BREAK_RE)];
     const lead = body.slice(breaks.length ? breaks[breaks.length - 1].index! + 1 : 0, at);
-    // "AED 100.00 is not refunded to your card" is no credit; "The delivery fee is not refunded" (no amount) is a footer.
-    if (match[1] === undefined) {
-      const sentence = lead + match[0] + body.slice(at + match[0].length).split(REFUND_SENTENCE_BREAK_RE)[0];
-      if (REFUND_CREDIT_NEGATION_RE.test(lead) && refundAmounts(sentence).length > 0) negatedEnd = at + match[0].length;
-      continue;
-    }
     if (governsRefundCredit(lead) || REFUND_CREDIT_CONDITIONAL_INSIDE_RE.test(match[1])) return true;
     if (REFUND_CREDIT_NEGATION_RE.test(match[1])) { negatedEnd = at + match[0].length; continue; }
     if (match[2] && REFUND_THIRD_PARTY_DESTINATION_RE.test(match[2])) return true;
@@ -2384,49 +2377,6 @@ function refundCreditNotActual(body: string, request: string): boolean {
     if (negatedEnd >= 0 && REFUND_COMPLETED_AUXILIARY_RE.test(match[1]) && body.slice(negatedEnd, at).search(REFUND_SENTENCE_BREAK_RE) < 0) negatedEnd = -1;
   }
   return negatedEnd >= 0 && !REFUND_NEGATED_THEN_DEBIT_RE.test(body.slice(negatedEnd));
-}
-// Review 1e2ad89f: a refund sentence that states no amount of its own.
-// - A negated "refunded" about something else ("The annual fee is not refunded to your card") settles nothing: it is
-//   blanked, so it can never decide direction.
-// - Beside a separate debit sentence with its own amount ("AED 250.00 was debited from your card ..."), a conditional refund
-//   credit ("When a refund is credited to your card you will receive an SMS") is blanked too, so it neither refuses the debit
-//   nor decides its direction. A completed refund of the debit itself ("It has been refunded to your card") is left alone.
-//   Any other refund statement there is ambiguous and the alert is never auto-posted: a second movement with no amount
-//   ("Refund for your cancelled order has been credited to your card") must not book the debit amount as income, and the
-//   debit itself not refunded ("Your purchase has not been refunded") is a refund status, not a new purchase.
-const REFUND_SIDE_NOTE_WORD_RE = /\brefund(?:ed)?\b/i;
-const REFUND_SIDE_NOTE_DEBIT_RE = /\b(?:debited|charged|deducted|spent)\b/i;
-const REFUND_SIDE_NOTE_SAME_MOVEMENT_RE = /^\s*(?:it|(?:this|the|that|your)\s+(?:amount|transaction|purchase|charge|payment|debit))\b/i;
-function refundSideNotes(body: string): { body: string; ambiguous: boolean } {
-  if (!REFUND_SIDE_NOTE_WORD_RE.test(body)) return { body, ambiguous: false };
-  const sentences: Array<{ start: number; text: string }> = [];
-  let start = 0;
-  for (const end of [...[...body.matchAll(REFUND_SENTENCE_BREAK_RE)].map((match) => match.index! + match[0].length), body.length]) {
-    if (end > start) sentences.push({ start, text: body.slice(start, end) });
-    start = Math.max(start, end);
-  }
-  const separateDebit = sentences.some(({ text }) => !REFUND_SIDE_NOTE_WORD_RE.test(text) &&
-    REFUND_SIDE_NOTE_DEBIT_RE.test(text) && refundAmounts(text).length > 0);
-  let out = body;
-  let ambiguous = false;
-  for (const { start: at, text } of sentences) {
-    const word = REFUND_SIDE_NOTE_WORD_RE.exec(text);
-    if (!word || refundAmounts(text).length > 0) continue;
-    const lead = text.slice(0, word.index);
-    const negated = word[0].toLowerCase() === 'refunded' && REFUND_CREDIT_NEGATION_RE.test(lead);
-    const sameMovement = REFUND_SIDE_NOTE_SAME_MOVEMENT_RE.test(text);
-    if ((negated && !sameMovement) || (separateDebit && governsRefundCredit(lead))) {
-      out = out.slice(0, at) + ' '.repeat(text.length) + out.slice(at + text.length);
-    } else if (separateDebit && (negated || (REFUND_RE.test(text) && !sameMovement))) {
-      ambiguous = true;
-    }
-  }
-  return { body: out, ambiguous };
-}
-/** For the semantic reader (bank-alert-interpreter): it must not re-read a refund side note as a refund credit. */
-export function refundSideNoteVerdict(source: string): 'none' | 'side-note' | 'ambiguous' {
-  const notes = refundSideNotes(source);
-  return notes.ambiguous ? 'ambiguous' : notes.body !== source ? 'side-note' : 'none';
 }
 const MANDATE_LIFECYCLE_RE =
   /\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b(?:[^.]|\.\d){0,96}\b(?:will\s+(?:start|begin|commence|activate)|has\s+been\s+(?:created|registered|set\s*up|activated)|is\s+(?:now\s+)?active)\b|\b(?:created|registered|set\s*up|activated)\b(?:[^.]|\.\d){0,64}\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b|تم\s+(?:تسجيل|انشاء|تفعيل)[^\n]{0,64}(?:امر\s+)?(?:خصم\s+(?:تلقايي|مباشر)|تعليمات\s+مستديمه)/iu;
@@ -5343,14 +5293,12 @@ function nonPostingReasonInBody(
   // would create money that never existed. Other settled refunds may outrank
   // generic preauthorisation/pending vocabulary.
   const requestReceived = REQUEST_RECEIVED_RE.test(body);
-  // A refund side note that settles nothing is not read as a refund at all (refundSideNotes).
-  const refundBody = refundSideNotes(body).body;
   // A request being processed cannot prove its own refund settled. A separate
   // current credit still can; remove request and future clauses before looking.
-  const withoutRequest = requestReceived ? blank(blank(refundBody, REQUEST_RECEIVED_BLANK_RE), FUTURE_CLAUSE_RE) : refundBody;
-  const settledRefund = (REFUND_RE.test(refundBody) && (!requestReceived || REFUND_RE.test(withoutRequest))) ||
+  const withoutRequest = requestReceived ? blank(blank(body, REQUEST_RECEIVED_BLANK_RE), FUTURE_CLAUSE_RE) : body;
+  const settledRefund = (REFUND_RE.test(body) && (!requestReceived || REFUND_RE.test(withoutRequest))) ||
     (requestReceived && hasCompletedRefundCredit(withoutRequest, refundRequestSentences(body)));
-  if (refundCreditNotActual(refundBody, refundRequestSentences(body))) return 'pending-processing';
+  if (refundCreditNotActual(body, refundRequestSentences(body))) return 'pending-processing';
   if (VERIFICATION_HOLD_DESCRIPTOR_RE.test(body)) return 'preauthorisation';
   if (
     !settledRefund &&
@@ -7702,12 +7650,9 @@ function parseSmsInner(
 
   // A refund or reversal reverses spending: money coming back IN, whatever
   // verbs the message uses ("Purchase amount of AED X ... has been refunded").
-  // A refund side note never decides direction, and an ambiguous one never auto-posts (refundSideNotes, review 1e2ad89f).
-  const refundNotes = refundSideNotes(prose);
-  if (refundNotes.ambiguous) return null;
   const isIncomingCreditReversal = INCOMING_CREDIT_REVERSAL_RE.test(prose);
   const isRefund = !isIncomingCreditReversal &&
-    (REFUND_RE.test(refundNotes.body) || REVERSAL_RE.test(prose) || arabicPurchaseRefundHeader ||
+    (REFUND_RE.test(prose) || REVERSAL_RE.test(prose) || arabicPurchaseRefundHeader ||
       REFUND_HEADING_RE.test(prose));
 
   if (PROMO_RE.test(raw) && !TXN_EVIDENCE_RE.test(raw)) return null;
@@ -7747,8 +7692,7 @@ function parseSmsInner(
   // is money arriving, and reading the bare noun as a biller turned it into an
   // expense: the same 2x swing pointed the other way.
   const billerPaid = billerSettlement(prose);
-  // "... is not refunded to your card" in a blanked refund side note is no credit clause either.
-  const creditClause = CREDIT_CLAUSE_RE.test(refundNotes.body) && !billerPaid;
+  const creditClause = CREDIT_CLAUSE_RE.test(prose) && !billerPaid;
   const debitClause = DEBIT_CLAUSE_RE.test(prose);
   const type: TransactionType = isBillDue || billerPaid || isIncomingCreditReversal ||
     arabicOwnAccountOutgoing

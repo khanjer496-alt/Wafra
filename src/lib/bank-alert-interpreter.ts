@@ -28,7 +28,6 @@ import {
   isInformationOnlyAlert,
   normalizeArabic,
   parseSms,
-  refundSideNoteVerdict,
   type ParsedSms,
 } from '@/lib/sms-parser';
 import {
@@ -296,17 +295,6 @@ export const interpretBankAlert = ({
         categoryGuess: cashbackCategory, categoryDeliberate: true, categoryPinned: true as const,
       } : {}) }
     : capturedLegacy;
-  // Review 1e2ad89f: a refund sentence with no amount beside the alert's own movement is not a refund credit, so the
-  // semantic reader must not re-read the alert as one (it booked "AED 250.00 was debited ... When a refund is credited to
-  // your card ..." as income). A note that settles nothing keeps the parser's reading; otherwise Review at most.
-  const refundSideNote = refundSideNoteVerdict(source);
-  if (refundSideNote === 'side-note' && usableLegacy) return legacyResult(usableLegacy);
-  if (refundSideNote !== 'none') {
-    const pending = inspectUnparsedLaunchAlert(source, sender);
-    return pending.outcome === 'review'
-      ? finalFallback(pending, null)
-      : { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
-  }
   const semanticText = normalizeArabic(source).replace(/\s+/gu, ' ');
   if (usableLegacy && isCompletedCardPurchaseReturn(semanticText, usableLegacy)) {
     return legacyResult(usableLegacy, 'refund');
