@@ -73,6 +73,24 @@ for (const platform of ['ios', 'android']) {
   });
 }
 
+for (const platform of ['ios', 'android']) {
+  test(`${platform}: a newer request cancels the analysis of the one it supersedes`, async () => {
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const { api, calls } = harness({ platform, detect: async () => { await gate; return null; } });
+    const first = api.syncPaymentReminders(state(), now);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(calls.detect.length, 1, 'the first analysis started');
+    const cancelled = calls.detect[0][5];
+    assert.equal(typeof cancelled, 'function', 'the detector is given a cancelled callback');
+    assert.equal(cancelled(), false, 'it is still the current request');
+    const second = api.syncPaymentReminders(state({ transactions: [{ id: 'a' }, { id: 'b' }] }), now);
+    assert.equal(cancelled(), true, 'a newer request makes the older analysis stop');
+    release();
+    await Promise.all([first, second]);
+  });
+}
+
 test('Android keeps skipping detection while a history import is busy; web does nothing', async () => {
   const busy = harness({ platform: 'android', history: true });
   await busy.api.syncPaymentReminders(state({ historyImport: { status: 'running' } }), now);

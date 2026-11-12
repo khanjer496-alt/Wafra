@@ -286,6 +286,8 @@ async function syncPaymentRemindersNow(
         now,
         liveAccounts,
         internalTransfers,
+        // A newer request supersedes this one: stop analysing for it, as the widget sync does.
+        () => !isCurrent(),
       );
       recordRuntimeOperation('reminder-projection', Date.now() - startedAt);
       if (detected === null) return;
