@@ -143,6 +143,16 @@ const CONTROLS = [
   ['Purchase of AED 250.00 with Debit Card ending 1234 at NOON.COM has been refunded. The refund was reversed by the merchant.', 'NO_POST', 'C9 a bare refund taken back later'],
   ...['MARKS AND SPENCER', 'H AND M', 'BARNES AND NOBLE']
     .map((m) => [`Refund of AED 250.00 from ${m} has been credited to your card ending 1234.`, 'INCOME_REFUND', `C10 merchant named with AND (${m})`]),
+  // Oracle v2.1 (Change Reviewer 82667841): appended, so every earlier row keeps its id.
+  ['AED 250.00 refunded to your card ending 1234.', 'INCOME_REFUND', 'C11 headline: a bare participle is completed'],
+  ['Refund of AED 250.00 credited to your account.', 'INCOME_REFUND', 'C11 headline: refund of … credited'],
+  ['250.00 AED reversed to your card.', 'INCOME_REFUND', 'C11 headline: currency after'],
+  ['استرداد مبلغ 250.00 درهم إلى بطاقتك.', 'INCOME_REFUND', 'C11 Arabic headline: a bare verbal noun'],
+  ['إيداع مبلغ 250.00 درهم في حسابك.', 'INCOME_REFUND', 'C11 Arabic headline: deposit to the own account'],
+  ['Refund of AED 250.00 has been credited to your card and will appear on your next statement.', 'INCOME_REFUND', 'C12 a "will" not bound to the credit'],
+  ['Refund for your pending order of AED 250.00 has been credited to your card.', 'INCOME_REFUND', 'C12 a "pending" not bound to the credit'],
+  ['تم إيداع مبلغ 250.00 درهم في حسابك ولا يلزم أي إجراء.', 'INCOME_REFUND', 'C12 Arabic: a "لا" not bound to the credit'],
+  [`${DEBIT_EN} If a refund of AED 100.00 has been credited to your card, you will receive an SMS.`, 'REVIEW', 'C13 first match: D1 (own figure) before D2 (conditional)'],
 ];
 
 // ── Case selection ───────────────────────────────────────────────────────────────────────────────────────────────────
