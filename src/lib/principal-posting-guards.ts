@@ -145,6 +145,16 @@ const SAME_MONEY_REFERENCE = /^\s*(?:[(\[/=≈~]|equivalent(?:\s+to)?|equiv\.?|a
 const ORIGINAL_MOVEMENT_REFERENCE = /\b(?:for|against|on|of)\s+(?:your|the)\s+(?:original\s+|earlier\s+|previous\s+)?(?:purchase|transaction|payment|charge|order)\s+(?:of|for)?\s*$|(?:لعمليه|عن\s+عمليه|من\s+عمليه)\s+(?:ال)?شراء\s+(?:بمبلغ|بقيمه)?\s*$/i;
 const ORIGINAL_MOVEMENT_CLAUSE = /\b(?:for|against|on|of)\s+(?:your|the)\s+(?:original\s+|earlier\s+|previous\s+)?(?:purchase|transaction|payment|charge|order)\b|(?:لعمليه|عن\s+عمليه|من\s+عمليه)\s+(?:ال)?شراء(?=\s)/iu;
 
+// "and" between capitalised words inside the name a preposition introduces ("from MARKS AND SPENCER
+// has been credited", "H AND M") belongs to that name, not to a second clause. Only a plain "and"
+// counts; everything after the preposition must still be capitalised words (no verb or determiner yet);
+// and the word after "and" must be capitalised and must not open a clause ("the", "your", "a" ...).
+const NAME_BEFORE_AND = /^\s*(?:from|at|to|with|via|by)\s+(?:\p{Lu}[\p{L}\p{N}&.'’-]*\s+)+$/u;
+const NAME_AFTER_AND = /^\p{Lu}[\p{L}\p{N}&.'’-]*(?=\s|$)/u;
+const CLAUSE_OPENER = /^(?:a|an|the|your|this|that|our|my|his|her|its|their|another|separate|additional|new|it|we|you|they|i)(?=\s|$)/iu;
+const isNameJoin = (coordinator: string, before: string, after: string): boolean =>
+  /^and\s+$/iu.test(coordinator) && NAME_BEFORE_AND.test(before) && NAME_AFTER_AND.test(after) && !CLAUSE_OPENER.test(after);
+
 /** Ownership ends when a new monetary subject begins, not merely at punctuation. */
 function refundScope(source: string, own: PrincipalSpan, monetarySpans: readonly PrincipalSpan[]) {
   // Banks wrap a single movement across lines. Its predicate still belongs
@@ -165,6 +175,7 @@ function refundScope(source: string, own: PrincipalSpan, monetarySpans: readonly
     if (!subject) continue;
     const head = subject[1];
     if (continuesRefund(head) || OPEN_ARGUMENT.test(source.slice(own.end, at))) continue;
+    if (isNameJoin(boundary[0], source.slice(own.end, at), source.slice(at + boundary[0].length, end))) continue;
     end = at;
     independentSubject = true;
     break;

@@ -232,3 +232,169 @@ for (const [index, source] of [
     assert.equal(confirmationNative(body).route, 'ignore');
   });
 }
+
+// CEO decision ba68ceef: an acknowledgement sentence plus a COMPLETED credit posts whatever the
+// merchant length; pending, requested or under-process refunds stay refused. The 40-character
+// REFUND_RE window used to drop the settled credit for a 12+ character or dotted merchant, so the
+// acknowledgement then won and the credit was refused as pending-processing.
+const refundAckMerchants = [
+  ['5', 'ADNOC'], ['12', 'GOLDEN SANDS'], ['30', 'GOLDEN SANDS GRAND RESTAURANTS'],
+  // No coordinator word (AND/BUT) in the long names: refundScope treats it as a new subject; that is a separate matter.
+  ['60', 'GOLDEN SANDS GRAND RESTAURANTS CAFE LOUNGE DUBAI MALLS NORTH'],
+  ['dotted-8', 'NOON.COM'], ['dotted-14', 'APPLE.COM/BILL'],
+];
+for (const [label, merchant] of refundAckMerchants) {
+  assert.equal(merchant.length, Number(label.replace('dotted-', '')));
+  for (const [amountText, minor] of [['100.00', 10000], ['1,948.85', 194885]]) {
+    const body = `Your refund request has been received. Refund of AED ${amountText} from ${merchant} has been credited to your card ending 1234.`;
+    test(`refund acknowledgement plus completed credit posts/${label}/${amountText}`, () => {
+      const session = reader('AE');
+      assert.equal(nonPostingReason(body), null);
+      for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
+        session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
+        assert.equal(parsed?.kind, 'transaction');
+        assert.equal(parsed.type, 'income');
+        assert.equal(parsed.amountFils, minor);
+        assert.equal(parsed.currency, 'AED');
+      }
+      // The iOS native bundle ignores this two-sentence shape at every merchant length (unchanged); only the TypeScript paths post it.
+    });
+  }
+}
+const pendingRefundBodies = [
+  ['future', (m) => `Your refund request has been received. Refund of AED 100.00 from ${m} will be credited to your card ending 1234 within 5 working days.`],
+  ['under-process', (m) => `Your refund request is under process. Refund of AED 100.00 from ${m} is being processed.`],
+  ['requested', (m) => `Your refund request has been received. Refund of AED 100.00 from ${m} has been requested and is pending approval.`],
+  ['awaiting-merchant', (m) => `Your refund request has been received. Refund of AED 100.00 from ${m} will be processed once the merchant confirms.`],
+];
+for (const [label, merchant] of refundAckMerchants.slice(0, 4)) {
+  for (const [kind, make] of pendingRefundBodies) {
+    const body = make(merchant);
+    test(`refund request stays refused/${kind}/${label}`, () => {
+      const session = reader('AE');
+      assert.equal(parseSms(body), null);
+      assert.equal(parseSms(body, {}, { sender: 'ENBD', observedAt: at }), null);
+      assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
+      assert.equal(confirmationNative(body).route, 'ignore');
+    });
+  }
+}
+// Arabic: a completed refund names the merchant outside the settled clause, so its result never
+// depended on merchant length; a received or future refund request stays refused.
+for (const merchant of ['نون اي', 'مطعم الشام ال', 'مطعم الشام للمأكولات والمشروبات',
+  'مطعم الشام للمأكولات والمشروبات الشرقية والغربية في دبي مول فرع']) {
+  test(`Arabic refund completed credit posts/${merchant.length}`, () => {
+    const body = `تم استرداد مبلغ 100.00 درهم إلى بطاقتك المنتهية بـ 1234 من ${merchant}.`;
+    const session = reader('AE');
+    for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
+      session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
+      assert.equal(parsed?.kind, 'transaction');
+      assert.equal(parsed.type, 'income');
+      assert.equal(parsed.amountFils, 10000);
+      assert.equal(parsed.currency, 'AED');
+    }
+  });
+  test(`Arabic refund request stays refused/${merchant.length}`, () => {
+    const body = `تم استلام طلب استرداد مبلغ 100.00 درهم من ${merchant}. سيتم استرداد المبلغ إلى بطاقتك خلال 5 أيام عمل.`;
+    const session = reader('AE');
+    assert.equal(parseSms(body), null);
+    assert.equal(parseSms(body, {}, { sender: 'ENBD', observedAt: at }), null);
+    assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
+  });
+}
+
+// CEO decision 3a8291ad: "and" inside a merchant name is not a second clause. Build 190 posted these
+// refunds; the RC base refused them because refundScope read "AND <words> has" as a new subject.
+const andMerchants = [['marks', 'MARKS AND SPENCER'], ['hm', 'H AND M'], ['barnes', 'BARNES AND NOBLE'],
+  ['mixed-case', 'Marks and Spencer'], ['four-words', 'TOM AND JERRYS CAFE']];
+for (const [label, merchant] of andMerchants) {
+  for (const [lead, withAck] of [['plain', ''], ['ack', 'Your refund request has been received. ']]) {
+    for (const [amountText, minor] of [['100.00', 10000], ['1,948.85', 194885]]) {
+      const body = `${withAck}Refund of AED ${amountText} from ${merchant} has been credited to your card ending 1234.`;
+      test(`refund credit from a merchant named with AND posts/${label}/${lead}/${amountText}`, () => {
+        const session = reader('AE');
+        assert.equal(nonPostingReason(body), null);
+        for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
+          session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
+          assert.equal(parsed?.kind, 'transaction');
+          assert.equal(parsed.type, 'income');
+          assert.equal(parsed.amountFils, minor);
+          assert.equal(parsed.currency, 'AED');
+        }
+      });
+    }
+  }
+}
+for (const [label, merchant] of andMerchants.slice(0, 3)) {
+  for (const [kind, make] of [
+    ['future', (m) => `Refund of AED 100.00 from ${m} will be credited to your card ending 1234 within 5 working days.`],
+    ['pending-approval', (m) => `Refund of AED 100.00 from ${m} is pending approval.`],
+    ['in-progress', (m) => `Your refund of AED 100.00 from ${m} is in progress.`],
+    ['ack-requested', (m) => `Your refund request has been received. Refund of AED 100.00 from ${m} has been requested and is pending approval.`],
+  ]) {
+    const body = make(merchant);
+    test(`refund from a merchant named with AND stays refused/${kind}/${label}`, () => {
+      const session = reader('AE');
+      assert.equal(parseSms(body), null);
+      assert.equal(parseSms(body, {}, { sender: 'ENBD', observedAt: at }), null);
+      assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
+      assert.equal(confirmationNative(body).route, 'ignore');
+    });
+  }
+}
+for (const [label, merchant] of [['spaced', 'ماركس و سبنسر'], ['glued', 'ماركس وسبنسر']]) {
+  test(`Arabic refund merchant with waw posts/${label}`, () => {
+    const body = `تم استرداد مبلغ 100.00 درهم إلى بطاقتك المنتهية بـ 1234 من ${merchant}.`;
+    const session = reader('AE');
+    for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
+      session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
+      assert.equal(parsed?.kind, 'transaction');
+      assert.equal(parsed.type, 'income');
+      assert.equal(parsed.amountFils, 10000);
+      assert.equal(parsed.currency, 'AED');
+    }
+  });
+}
+
+// Review c1379af4 (High at 59d00136): the completed-credit rule must not turn a refusal into income.
+// A merchant past the old 40-character window makes the new rule the only thing that can settle the refund.
+const longRefundMerchant = 'CARREFOUR HYPERMARKET MALL OF THE EMIRATES';
+const refundAck = 'Your refund request has been received.';
+for (const [kind, body] of [
+  ['credited-to-merchant', `${refundAck} Refund of AED 100.00 from ${longRefundMerchant} has been credited to the merchant for approval.`],
+  ['credited-to-beneficiary', `${refundAck} Refund of AED 100.00 from ${longRefundMerchant} was credited to the beneficiary account.`],
+  ['posted-to-merchant-then-future', `${refundAck} Refund of AED 100.00 from ${longRefundMerchant} has been posted to the merchant, it will be credited to your card in 5 days.`],
+  ['if-conditional', `${refundAck} If the refund of AED 100.00 from ${longRefundMerchant} has been credited to your card, please ignore this message.`],
+  ['once-conditional', `${refundAck} Once the refund of AED 100.00 from ${longRefundMerchant} has been credited to your card, you will get an SMS.`],
+  ['will-be-notified-when', `${refundAck} You will be notified when the refund of AED 100.00 from ${longRefundMerchant} has been credited to your card.`],
+  ['credited-in-error-reversed', `${refundAck} Refund of AED 100.00 from ${longRefundMerchant} was credited to your card in error and has been reversed.`],
+  ['until-it-has-been-credited', `${refundAck} Your refund of AED 100.00 from ${longRefundMerchant} is not final until it has been credited to your card.`],
+  ['wrong-refund-amount', `Your refund request for AED 100.00 has been received. A previous refund from ${longRefundMerchant} of AED 20.00 has been credited to your card.`],
+]) {
+  test(`refund credit rule refuses/${kind}`, () => {
+    const session = reader('AE');
+    assert.equal(parseSms(body), null);
+    assert.equal(parseSms(body, {}, { sender: 'ENBD', observedAt: at }), null);
+    assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
+    assert.equal(confirmationNative(body).route, 'ignore');
+  });
+}
+for (const [kind, body, minor] of [
+  ['original-payment-method-dotted', `${refundAck} Refund of AED 100.00 from NOON.COM has been credited to the original payment method.`, 10000],
+  ['the-card', `${refundAck} Refund of AED 100.00 from ${longRefundMerchant} has been credited to the card.`, 10000],
+  ['successfully-refunded-dotted', `${refundAck} Refund of AED 100.00 from APPLE.COM/BILL has been successfully refunded to your card.`, 10000],
+  ['credited-back-to-the-account', `${refundAck} Refund of AED 100.00 from ${longRefundMerchant} has been credited back to the account.`, 10000],
+  ['request-states-the-same-amount', `Your refund request for AED 100.00 has been received. Refund of AED 100.00 from ${longRefundMerchant} has been credited to your card.`, 10000],
+]) {
+  test(`refund credit rule posts/${kind}`, () => {
+    const session = reader('AE');
+    assert.equal(nonPostingReason(body), null);
+    for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
+      session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
+      assert.equal(parsed?.kind, 'transaction');
+      assert.equal(parsed.type, 'income');
+      assert.equal(parsed.amountFils, minor);
+      assert.equal(parsed.currency, 'AED');
+    }
+  });
+}
