@@ -1001,7 +1001,7 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
     const commit = (state, batch) => applyMaterializedImportBatch(state,
       materializeImportBatch(batch, state, (prefix) => `${prefix}-v72-${ids++}`));
     const normal = 'Purchase of AED 50.00 at CARREFOUR with Debit Card ending 1234 on 01/11/2026';
-    // A wave 3 shape parser 71 refuses (the "Unauthorised?" footer with no full stop; #190 coverage run 43186092639).
+    // A spend the 71-era ledger does not hold (the fixture leaves it out); a wave 3 shape, the "Unauthorised?" footer.
     const refusedBefore = 'AED 75.00 spent on Mashreq card ending 1234 at TEST MART on 01-NOV-2026 Unauthorised? Call 04 4244444';
     const notPaid = 'Your payment of AED 12.00 to SAMPLE RIDES was not paid.';
     const asV71Wrote = [
