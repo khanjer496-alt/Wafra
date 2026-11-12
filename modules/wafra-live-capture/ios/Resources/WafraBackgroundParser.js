@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 9100395d884827c1cd6119cdbe05a4aaa1312d4297cf074d0de4e0189c424364
+// Generated from normal shipping TypeScript. Source SHA-256: 1c697b8428e2fa5464f386c765a1b8e15e87a8254ee1b436b08e3c29257e4cea
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -7804,6 +7804,7 @@ const S = {
     reviewAlertsExpiredCount: { en: 'Expired before review in the last 30 days: {count}', ar: 'انتهت صلاحيتها قبل المراجعة خلال آخر 30 يوماً: {count}' },
     reviewAlertsEvictedCount: { en: 'Alerts that could not be kept for review because Review was full, in the last 30 days: {count}', ar: 'تنبيهات تعذّر الاحتفاظ بها للمراجعة لأن قائمة المراجعة كانت ممتلئة خلال آخر 30 يوماً: {count}' },
     reviewAlertsCurrencyEvictedCount: { en: 'Other-currency alerts not kept for review in the last 30 days: {count}. Review keeps the newest 50 waiting for an exchange rate.', ar: 'تنبيهات بعملة أخرى لم يُحتفظ بها للمراجعة خلال آخر 30 يوماً: {count}. تحتفظ المراجعة بأحدث 50 تنبيهاً بانتظار سعر الصرف.' },
+    reviewAlertsDuplicatePostedCount: { en: 'Possible Apple Pay duplicates posted because Review was full, in the last 30 days: {count}. Check the Transactions screen for a double entry.', ar: 'عمليات قد تكون مكررة لعمليات Apple Pay سُجّلت لأن قائمة المراجعة كانت ممتلئة خلال آخر 30 يوماً: {count}. راجع شاشة «العمليات» للتحقق من وجود قيد مكرر.' },
     reviewAlertsCurrencySkipped: { en: 'Statements and notices in another currency skipped: {count}. Purchases are converted into your ledger currency instead.', ar: 'كشوف وإشعارات بعملة أخرى تم تخطيها: {count}. أما المشتريات فتُحوَّل إلى عملة سجلك.' },
     reviewAlertExpiresIn: { en: 'Days left to review: {count}', ar: 'الأيام المتبقية للمراجعة: {count}' },
     iosNotificationHelpInput: { en: 'Pass notification text to Capture bank notification. Replace the setup test phrase with Shortcut Input before saving the automation.', ar: 'مرّر نص الإشعار إلى «التقاط إشعار بنكي». استبدل عبارة فحص الإعداد بمتغير إدخال الاختصار قبل حفظ الأتمتة.' },
