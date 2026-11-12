@@ -539,6 +539,33 @@ for (const [kind, body, minor] of [
   });
 }
 
+// Regression from the final #176 head (universal test "negation applies to coordinated refund verbs until an explicit
+// new clause"): a negated credit followed, in the same sentence, by a new clause whose credit is completed is a credit.
+// A negated credit with only a future or no new credit, or a credit in a different sentence, stays refused.
+for (const [kind, body] of [
+  ['negated-then-future-credit', 'Refund of AED 125.00 has not been credited and the refund will be credited to your card in 5 days.'],
+  ['negated-then-credit-in-next-sentence', 'The first refund of AED 125.00 has not been credited. The second refund has been credited to your card.'],
+  ['negated-then-credit-to-merchant', 'Refund of AED 125.00 has not been credited and the refund has now been credited to the merchant.'],
+]) {
+  test(`refund hardening refuses/${kind}`, () => {
+    const session = reader('AE');
+    assert.equal(parseSms(body), null);
+    assert.equal(parseSms(body, {}, { sender: 'ENBD', observedAt: at }), null);
+    assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
+  });
+}
+test('refund hardening posts/negated-then-new-clause-credited', () => {
+  const session = reader('AE');
+  const body = 'Refund of AED 125.00 has not been credited and the refund has now been credited to your card.';
+  assert.equal(nonPostingReason(body), null);
+  for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
+    session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
+    assert.equal(parsed?.kind, 'transaction');
+    assert.equal(parsed.type, 'income');
+    assert.equal(parsed.amountFils, 12500);
+  }
+});
+
 // CEO decision 51818dc1 (c): a genuine debit that carries a link-WORD footer ("tap here", "click the link", no URL) must
 // reach Review with its exact money, never be silently dropped; it still never auto-posts. A footer with a real URL
 // stays refused as a link request.
