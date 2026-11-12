@@ -759,6 +759,28 @@ for (const [kind, body] of [
     assert.notEqual(native.route === 'parsed' ? native.notification.direction : null, 'debit', 'native never books the refund as a purchase');
   });
 }
+// CEO 1014684b (b): a completed purchase refund to the user's OWN ACCOUNT is income on all three paths, as "to your card"
+// is; native booked it as a debit.
+for (const [kind, body] of [
+  ['own-account-with-digits', 'Purchase amount of AED 250.00 at NOON.COM on your account ending 1234 has been refunded.'],
+  ['own-account-plain-shop', 'Purchase amount of AED 250.00 at NOON on your account ending 1234 has been refunded.'],
+]) {
+  test(`refund hardening posts/completed-purchase-refund-to-own-${kind}`, () => {
+    const session = reader('AE');
+    assert.equal(nonPostingReason(body), null);
+    for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
+      session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
+      assert.equal(parsed?.kind, 'transaction');
+      assert.equal(parsed.type, 'income');
+      assert.equal(parsed.amountFils, 25000);
+      assert.equal(parsed.currency, 'AED');
+    }
+    const native = confirmationNative(body);
+    assert.equal(native.route, 'parsed', 'native posts it');
+    assert.equal(native.notification.direction, 'credit');
+    assert.deepEqual(native.notification.amount, { currency: 'AED', minorUnits: '25000', exponent: 2 });
+  });
+}
 // The same purchase while its refund is pending, requested or negated stays refused on every path.
 for (const [kind, body] of [
   ['will-be-refunded', 'Purchase amount of AED 250.00 at NOON.COM on your Debit Card will be refunded.'],
