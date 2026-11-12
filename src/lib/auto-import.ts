@@ -411,7 +411,7 @@ const SMS_HISTORY_DISCLOSURE_KEY = 'wafra.android.sms-history-disclosure.v1';
 const SMS_HISTORY_DISCLOSURE_VERSION = '1';
 
 /** OS permission alone is not evidence that this installation saw the disclosure. */
-export async function hasSmsSystemPermission(): Promise<boolean> {
+async function hasSmsSystemPermission(): Promise<boolean> {
   if (!isSmsScanningAvailable()) return false;
   return PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS);
 }
