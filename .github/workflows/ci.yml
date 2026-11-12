@@ -8,6 +8,9 @@ on:
   push:
     branches:
       - main
+      # Every release-line merge commit gets its own run, so the TestFlight
+      # exact-source CI gate (ios-testflight.yml) never depends on a PR's run.
+      - release/1.0.0-rc1-reconciled
 
 concurrency:
   # Every push to `main` gets its OWN group, keyed on the commit, so no main run
@@ -35,8 +38,11 @@ concurrency:
   #
   # The cost is that rapid pushes to main each pay for a full run. That is the
   # right trade against a silent regression.
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || '' }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  #
+  # The same applies to the release line: its merge commits are what the
+  # TestFlight exact-source gate looks up, so they get per-commit groups too.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/release/1.0.0-rc1-reconciled') && github.sha || '' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/release/1.0.0-rc1-reconciled' }}
 
 permissions:
   contents: read
