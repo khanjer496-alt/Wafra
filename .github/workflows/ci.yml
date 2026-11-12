@@ -160,8 +160,19 @@ jobs:
       - name: Generate native iOS contract fixtures
         run: npx expo prebuild --platform ios --no-install
 
+      # The native Play-billing test downloads four small public jars from Maven Central and Google's
+      # Maven, which rate-limits shared runners (HTTP 429). Cache them (the test verifies each file's pinned
+      # SHA-256 before using it) and let it retry transient failures with backoff.
+      - name: Cache native billing test dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/wafra-play-billing-libs
+          key: wafra-play-billing-libs-${{ hashFiles('scripts/test/wafra-play-billing-native.cjs') }}
+
       - name: Test
         run: npm test
+        env:
+          WAFRA_PLAY_BILLING_TEST_LIBS: ${{ runner.temp }}/wafra-play-billing-libs
 
       - name: Relay typecheck
         working-directory: server
