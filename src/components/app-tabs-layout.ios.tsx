@@ -7,6 +7,7 @@ import { useBandScheme } from '@/hooks/use-band';
 import { useAutoImport } from '@/hooks/use-auto-import';
 import { useSharedAlertFormats } from '@/hooks/use-shared-alert-formats';
 import { useHistoryImport } from '@/hooks/use-history-import';
+import { useWidgetSnapshotSync } from '@/hooks/use-widget-snapshot-sync';
 import { useLanguage } from '@/hooks/use-language';
 import { prioritizeForegroundNavigation } from '@/lib/foreground-history-priority';
 import { tapped } from '@/lib/haptics';
@@ -38,6 +39,9 @@ function CaptureOwner() {
   useHistoryImport();
   useAutoImport(true, false);
   useSharedAlertFormats();
+  // Home-screen widgets follow the ledger here, not in Home, which can be
+  // paused while covered (use-widget-snapshot-sync.ts).
+  useWidgetSnapshotSync();
   return null;
 }
 

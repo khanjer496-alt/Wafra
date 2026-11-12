@@ -9,6 +9,7 @@ import { TabBarMetricsProvider } from '@/components/ui/tab-bar-metrics';
 import { useAutoImport } from '@/hooks/use-auto-import';
 import { useSharedAlertFormats } from '@/hooks/use-shared-alert-formats';
 import { useHistoryImport } from '@/hooks/use-history-import';
+import { useWidgetSnapshotSync } from '@/hooks/use-widget-snapshot-sync';
 import { freezeCoveredScreens } from '@/lib/covered-screen-freeze';
 
 /**
@@ -24,6 +25,9 @@ function CaptureOwner() {
   useHistoryImport();
   useAutoImport(true, false);
   useSharedAlertFormats();
+  // Home-screen widgets follow the ledger here, not in Home, which can be
+  // paused while covered (use-widget-snapshot-sync.ts).
+  useWidgetSnapshotSync();
   return null;
 }
 
