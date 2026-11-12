@@ -139,3 +139,58 @@ test('Veto only: income from other evidence keeps its own path', () => {
     if (p) assert.equal(p.type, 'income', body);
   }
 });
+
+// ── The Arabic table (PR 2; design v2's AR column): the same verdicts on تم/سيتم/جاري/لم يتم + the verbal noun and on the
+// merchant forms قام/سيقوم/يقوم/لم يقم التاجر … ب…. Synthetic bodies in the oracle's grammar.
+const DEBIT_AR = 'تم خصم مبلغ 250.00 درهم من بطاقتك المنتهية بـ 1234 لدى NOON.COM.';
+
+test('Arabic: completed, headline, merchant and coordinated credits stay income', () => {
+  for (const body of [
+    'تم استرداد مبلغ 250.00 درهم إلى بطاقتك.',
+    'تم إيداع مبلغ 250.00 درهم إلى حسابك.',
+    'قام التاجر NOON.COM باسترداد مبلغ 250.00 درهم إلى بطاقتك.',
+    'تم معالجة وإيداع مبلغ 250.00 درهم إلى بطاقتك.',
+    'استرداد مبلغ 250.00 درهم إلى بطاقتك.',
+    'إيداع مبلغ 250.00 درهم في حسابك.',
+    'تم إيداع مبلغ 250.00 درهم في حسابك ولا يلزم أي إجراء.',
+  ]) assert.equal(both(body), 'income 25000 / income 25000', body);
+});
+
+test('Arabic: conditional, pending, negated, third-party and taken-back credits never post', () => {
+  for (const body of [
+    'بمجرد أن يتم إيداع مبلغ 250.00 درهم إلى حسابك، ستصلك رسالة.',
+    'عندما يتم استرداد مبلغ 250.00 درهم إلى بطاقتك، ستصلك رسالة.',
+    'بعد أن يتم معالجة وإيداع مبلغ 250.00 درهم إلى بطاقتك، ستصلك رسالة.',
+    'جاري إيداع مبلغ 250.00 درهم إلى حسابك.',
+    'يقوم التاجر NOON.COM باسترداد مبلغ 250.00 درهم إلى بطاقتك.',
+    'لم يتم معالجة وإيداع مبلغ 250.00 درهم إلى بطاقتك.',
+    'لم يقم التاجر NOON.COM بإيداع مبلغ 250.00 درهم إلى حسابك.',
+    'تم استرداد مبلغ 250.00 درهم إلى التاجر.',
+    'تم إيداع مبلغ 250.00 درهم إلى المستفيد.',
+    'تم استرداد مبلغ 250.00 درهم إلى بطاقتك وتم عكسه لاحقاً.',
+    'تم إيداع مبلغ 250.00 درهم إلى بطاقتك عن طريق الخطأ.',
+  ]) assert.equal(both(body), 'none / none', body);
+});
+
+test('Arabic "processed" (oracle v2.2): the card number settles it; "سيظهر المبلغ … خلال 5-7 أيام" keeps it pending', () => {
+  assert.equal(both('تم معالجة استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234.'), 'income 25000 / income 25000');
+  assert.equal(both('تم معالجة استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234. سيظهر المبلغ في حسابك خلال 5-7 أيام عمل.'),
+    'none / none');
+});
+
+test('Arabic beside a debit: an unsettled note leaves the expense on both paths; a figure of its own or a take-back refuses', () => {
+  for (const note of [
+    'بمجرد أن يتم إيداع المبلغ إلى حسابك، ستصلك رسالة.',
+    'إذا تم استرداد المبلغ إلى بطاقتك، ستصلك رسالة.',
+    'لم يتم استرداد المبلغ إلى بطاقتك.',
+    'سيتم استرداد المبلغ إلى بطاقتك.',
+  ]) assert.equal(both(`${DEBIT_AR} ${note}`), 'expense 25000 / expense 25000', note);
+  for (const note of ['تم استرداد المبلغ إلى بطاقتك وتم عكسه لاحقاً.', 'تم إيداع مبلغ 100.00 درهم إلى حسابك.']) {
+    assert.equal(both(`${DEBIT_AR} ${note}`), 'none / none', note);
+  }
+});
+
+test('Arabic cashback ("استرداد نقدي") is not a refund credit: purchase and cashback keep their own paths', () => {
+  assert.equal(both(`${DEBIT_AR} تم إيداع مبلغ 5.00 درهم كاسترداد نقدي.`), 'expense 25000 / expense 25000');
+  assert.equal(both('تم إيداع مبلغ 25.00 درهم كاسترداد نقدي إلى حسابك.'), 'income 2500 / income 2500');
+});
