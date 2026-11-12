@@ -29,6 +29,11 @@ const debit = 'AED 250.00 was debited from your card ending 1234 at NOON.COM on 
 const purchase = 'Purchase of AED 50.00 with Debit Card ending 1234 at CARREFOUR.';
 const bodies = [
   ['debit alone', debit],
+  ['CR reversed then the refund', 'AED 250.00 charged at NOON.COM on 01/11 has been reversed. The refund has been credited to your card ending 1234.'],
+  ['CR charged then a refund of the same', 'Your card ending 1234 was charged AED 250.00 at NOON.COM on 01/11. A refund of the same has been credited to your card.'],
+  ['debit then the refund credited', `${debit} The refund has been credited to your card.`],
+  ['debit then the refund for another order', `${debit} The refund for your cancelled order has been credited to your card.`],
+  ['debit then it will be refunded', `${debit} It will be refunded to your card in 5 days.`],
   ['confirmed alone', confirmed],
   ['confirmed + not refunded to', `${confirmed} The annual fee is not refunded to your card.`],
   ['confirmed + when refund credited', `${confirmed} When a refund is credited to your card you will receive an SMS.`],
