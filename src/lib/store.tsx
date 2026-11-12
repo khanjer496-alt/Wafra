@@ -16,6 +16,7 @@ import { isAutomaticFounderProBuild } from '@/lib/founder-pro';
 import { isScopedSubscriptionKey } from '@/lib/subscriptions';
 
 import { MoneyLocaleProvider } from '@/hooks/use-ledger-money';
+import { createStorePauseBoundary } from '@/lib/store-pause';
 import {
   createSelection,
   createStoreHandle,
@@ -4116,6 +4117,19 @@ export function useStoreSelector<T>(
   const snapshot = () => select(handle.get(), selector);
   return useSyncExternalStore(handle.subscribe, snapshot, snapshot);
 }
+
+/**
+ * Pauses everything below it on the store while `paused` (store-pause.tsx).
+ * A change to Private Mode or onboarding (Erase Everything) always reaches the
+ * paused content at once, so a held frame can never show amounts the user just
+ * hid or data that was just erased.
+ */
+export const StorePauseBoundary = createStorePauseBoundary<StoreValue>(
+  StoreContext,
+  StoreHandleContext,
+  (live, held) =>
+    live.state.privateMode !== held.state.privateMode || live.state.onboarded !== held.state.onboarded,
+);
 
 type StoreFunctionKeys = {
   [K in keyof StoreValue]: StoreValue[K] extends (...args: never[]) => unknown ? K : never;
