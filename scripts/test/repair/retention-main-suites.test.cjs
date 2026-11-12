@@ -21,19 +21,31 @@ const suites = [
   ...['ios-setup-ux', 'relay', 'db', 'review-promotion', 'review-alerts-ui']
     .map(name => [name, [`${name}.test.js`]]),
 ];
+const withoutTestContext = (env) => {
+  const copy = { ...env };
+  delete copy.NODE_TEST_CONTEXT;
+  return copy;
+};
 for (const [name, args] of suites) {
   // universal-test alone took 163 s on hosted repair at 384983c6 and passed
   // 180 s once fix3 added parser cases; a budget timeout is not a test result.
   test(`main-only retention suite: ${name}`, { timeout: 440000 }, () => {
     const result = spawnSync(process.execPath, ['--max-old-space-size=768', ...args], {
       cwd: testDir, encoding: 'utf8', timeout: 420000, maxBuffer: 8 * 1024 * 1024,
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+      // node:test marks its children with NODE_TEST_CONTEXT; a nested
+      // `node --test` that inherits it skips every file and exits 0.
+      env: { ...withoutTestContext(process.env), FORCE_COLOR: '0', NO_COLOR: '1' },
     });
     const evidence = JSON.stringify({ suite: name, status: result.status, signal: result.signal,
       error: result.error?.message ?? null,
       stdout: (result.stdout ?? '').slice(result.status === 0 ? -1200 : -30000),
       stderr: (result.stderr ?? '').slice(-8000) });
     assert.equal(result.status, 0, evidence);
+    assert.doesNotMatch(result.stderr ?? '', /run\(\) is being called recursively/, evidence);
+    if (args[0] === '--test') {
+      const ran = Number(/^# tests (\d+)$/m.exec(result.stdout ?? '')?.[1] ?? 0);
+      assert.ok(ran > 0, `${name} ran no tests: ${evidence}`);
+    }
     console.log(evidence);
   });
 }
