@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: dd0bbb6ef7039475893be77a7ea7316807bde4e1a9f3656cabb54b143390f16a
+// Generated from normal shipping TypeScript. Source SHA-256: ffd3807e667d9d1aecd0e99dbf1d3e21790e73cb94c280d35721d3a5ff1dab19
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -1763,10 +1763,9 @@ const isCompactCardCreditReturn = (source) => /\bcr\b/iu.test(source) && /\bcard
     /\b(?:pos|(?:card\s+)?pur)\b/iu.test(source);
 const isCompletedCardPurchaseReturn = (source, legacy) => legacy.kind === 'transaction' && legacy.type === 'income' &&
     legacy.categoryGuess === 'other' && !legacy.transferHint &&
-    legacy.card?.kind !== 'account' &&
-    ((legacy.card !== null &&
+    ((legacy.card !== null && legacy.card.kind !== 'account' &&
         /^(?:your\s+)?(?:card\s+|pos\s+)?purchase\s+of\b(?:[^.\n]|\.(?=\S)){0,160}?\b(?:with|using|on)\s+(?:your\s+)?(?:(?:credit|debit|covered)\s+)?card\s+(?:ending(?:\s+with)?\s+)?[x*\d -]{4,32}(?:\s+at\s+(?:[^.\n]|\.(?=\S)){1,80}?)?\s+(?:has\s+been|was)\s+(?:successfully\s+)?(?:reversed|refunded)\b/iu.test(source)) ||
-        /^purchase\s+(?:amount|amt)\s+of\b(?:[^.\n]|\.(?=\S)){0,160}?\bon\s+your\s+(?:(?:credit|debit|covered|prepaid)\s+)?card(?:\s+(?:ending(?:\s+with)?\s+)?[x*\d -]{4,32})?\s+has\s+been\s+(?:successfully\s+|fully\s+)?refunded\b/iu.test(source)) &&
+        /^purchase\s+(?:amount|amt)\s+of\b(?:[^.\n]|\.(?=\S)){0,160}?\bon\s+your\s+(?:(?:(?:credit|debit|covered|prepaid)\s+)?card|account)(?:\s+(?:ending(?:\s+with)?\s+)?[x*\d -]{4,32})?\s+has\s+been\s+(?:successfully\s+|fully\s+)?refunded\b/iu.test(source)) &&
     !FUTURE_REFUND.test(source);
 const FUTURE_REFUND = /\bwill\s+be\s+(?:refunded|reversed|credited)\b/iu;
 const mistookInstrumentLast4ForAmount = (source, market, legacy) => {
@@ -11850,8 +11849,13 @@ function refundCreditNotActual(body, request) {
         const lead = body.slice(breaks.length ? breaks[breaks.length - 1].index + 1 : 0, at);
         if (match[1] === undefined) {
             const sentence = lead + match[0] + body.slice(at + match[0].length).split(REFUND_SENTENCE_BREAK_RE)[0];
-            if (REFUND_CREDIT_NEGATION_RE.test(lead) && refundAmounts(sentence).length > 0)
-                negatedEnd = at + match[0].length;
+            if (REFUND_CREDIT_NEGATION_RE.test(lead)) {
+                if (refundAmounts(sentence).length > 0)
+                    negatedEnd = at + match[0].length;
+                continue;
+            }
+            if (refundCreditNotFinal(body.slice(at + match[0].length - (match[2]?.length ?? 0))))
+                return true;
             continue;
         }
         if (governsRefundCredit(lead) || REFUND_CREDIT_CONDITIONAL_INSIDE_RE.test(match[1]))
@@ -15325,7 +15329,7 @@ const resolve = (items) => {
 };
 const MERCHANT_LABEL = /(?:^|[^\p{L}\p{N}])(?:desc(?:ription)?|narration|merchant|payee|beneficiary|seller|commerçant|bénéficiaire|händler|empfänger|comercio|beneficiario|esercente|begunstigde|利用先|التاجر|المستفيد)\s*[:：=-]\s*/giu;
 const MERCHANT_PREPOSITION = /(?:^|[^\p{L}\p{N}])(?:at|to|trf\s+to|from|chez|bei|von|en|em|an|presso|bij|لدى|عند|لصالح)\s+/giu;
-const MERCHANT_TAIL = /\s+(?:(?:avl|avail(?:able)?)\.?\s*(?:bal(?:ance)?|lmt|limit)\b|(?:on|le|am|el|il|op|em)\s+\d|on\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d|from\s+(?:your\s+)?(?:account|acct?|a\/?c|card|checking|savings)\b|posted\b|(?:with|using|via|über)\b|to\s+(?:(?:your|the)\s+)?(?:card|account)\b|\d{1,2}:\d{2}\b|(?:ref(?:erence)?(?:\s*no)?|refno|txn|transaction\s+(?:id|date))\b|(?:was|has|have|is|were|will|wurde|wurden|ist|wird)\b|con\s+(?:tu|su)\s+tarjeta\b|com\s+o\s+cart[aã]o\b|بتاريخ|رقم\s+(?:المرجع|العملية)|con\s+(?:tu|su|la|el)\s+(?:\p{L}+\s+){0,2}(?:tarjeta|carta|visa|mastercard|d[eé]bito|cr[eé]dito)(?![\p{L}\p{N}])|con\s+carta(?![\p{L}\p{N}])|avec\s+(?:votre|ta)\s+carte(?![\p{L}\p{N}])|mit\s+(?:ihrer\s+|deiner\s+)?(?:\p{L}*karte)(?![\p{L}\p{N}])|para\s+o\s+cart[aã]o(?![\p{L}\p{N}])|on\s+(?:your\s+)?(?:\p{L}+\s+){0,3}card(?![\p{L}\p{N}])|(?:del|alle)\s+\d|(?:current|available|remaining|closing)\s+(?:credit\s+)?(?:balance|limit)(?![\p{L}\p{N}]))/iu;
+const MERCHANT_TAIL = /\s+(?:(?:avl|avail(?:able)?)\.?\s*(?:bal(?:ance)?|lmt|limit)\b|(?:on|le|am|el|il|op|em)\s+\d|on\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d|from\s+(?:your\s+)?(?:account|acct?|a\/?c|card|checking|savings)\b|posted\b|(?:with|using|via|über)\b|to\s+(?:(?:your|the)\s+)?(?:card|account)\b|\d{1,2}:\d{2}\b|(?:ref(?:erence)?(?:\s*no)?|refno|txn|transaction\s+(?:id|date))\b|(?:was|has|have|is|were|will|wurde|wurden|ist|wird)\b|con\s+(?:tu|su)\s+tarjeta\b|com\s+o\s+cart[aã]o\b|بتاريخ|رقم\s+(?:المرجع|العملية)|con\s+(?:tu|su|la|el)\s+(?:\p{L}+\s+){0,2}(?:tarjeta|carta|visa|mastercard|d[eé]bito|cr[eé]dito)(?![\p{L}\p{N}])|con\s+carta(?![\p{L}\p{N}])|avec\s+(?:votre|ta)\s+carte(?![\p{L}\p{N}])|mit\s+(?:ihrer\s+|deiner\s+)?(?:\p{L}*karte)(?![\p{L}\p{N}])|para\s+o\s+cart[aã]o(?![\p{L}\p{N}])|on\s+(?:your\s+)?(?:\p{L}+\s+){0,3}card(?![\p{L}\p{N}])|on\s+(?:your\s+)?(?:\p{L}+\s+){0,2}account(?![\p{L}\p{N}])|(?:del|alle)\s+\d|(?:current|available|remaining|closing)\s+(?:credit\s+)?(?:balance|limit)(?![\p{L}\p{N}]))/iu;
 const MERCHANT_TRAILING_VERB = /\s+(?:made|bezahlt|erhalten|eseguit[oa]|effettuat[oa]|successful(?:ly)?|completed|erfolgreich)$/iu;
 const BALANCE_FIELD_TAIL = /\s+(?:(?:available|current|remaining|closing)\s+(?:credit\s+)?(?:balance|limit)|(?:avl|avail)\.?\s*(?:bal(?:ance)?|limit)|balance|credit\s+limit|الرصيد(?:\s+(?:المتاح|الحالي))?)\s*[:=-]?\s*$/iu;
 const BALANCE_FIELD_BEFORE_MONEY = new RegExp(BALANCE_FIELD_TAIL.source.replace(/\$$/u, '') + String.raw `(?=(?:[A-Z]{3}\s*[+-]?\d|[+-]?\d[\d.,]*\s*[A-Z]{3}\b))`, 'iu');
