@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { AppState } from 'react-native';
+import { AppState as AppLifecycle } from 'react-native';
 
 import { useLanguage } from '@/hooks/use-language';
 import { useToday } from '@/hooks/use-today';
@@ -74,7 +74,7 @@ export function useWidgetSnapshotSync(): void {
         language: language === 'ar' ? 'ar' : 'en' }, current, { debounceMs: WIDGET_SYNC_DEBOUNCE_MS });
     });
     // Leaving the foreground ends the quiet period so the last edit still reaches the widgets.
-    const leaving = AppState.addEventListener('change', (next) => {
+    const leaving = AppLifecycle.addEventListener('change', (next) => {
       if (next !== 'active') request?.flush?.();
     });
     return () => { cancelled = true; task.cancel(); leaving.remove(); request?.cancel(); };

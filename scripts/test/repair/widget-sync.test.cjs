@@ -241,6 +241,6 @@ test('the default quiet period is two seconds and the widget owner asks for it',
   assert.equal(loaded.WIDGET_SYNC_DEBOUNCE_MS, 2000);
   const hook = fs.readFileSync(path.resolve(__dirname, '../../../src/hooks/use-widget-snapshot-sync.ts'), 'utf8');
   assert.match(hook, /requestWidgetSnapshotSync\(\{ state: source[\s\S]*?\}, current, \{ debounceMs: WIDGET_SYNC_DEBOUNCE_MS \}\)/);
-  assert.match(hook, /AppState\.addEventListener\('change', \(next\) => \{\s*if \(next !== 'active'\) request\?\.flush\?\.\(\);\s*\}\);/);
+  assert.match(hook, /AppLifecycle\.addEventListener\('change', \(next\) => \{\s*if \(next !== 'active'\) request\?\.flush\?\.\(\);\s*\}\);/);
   assert.match(hook, /return \(\) => \{ cancelled = true; task\.cancel\(\); leaving\.remove\(\); request\?\.cancel\(\); \};/);
 });
