@@ -1,0 +1,6 @@
+appId: ${APP_ID}
+---
+- extendedWaitUntil:
+    visible: '(?i)recent activity'
+    timeout: 8000
+- assertNotVisible: 'Wafra is locked'

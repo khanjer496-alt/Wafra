@@ -1,0 +1,20 @@
+appId: ${APP_ID}
+---
+- tapOn:
+    text: 'Settings'
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: 'settings-screen'
+    timeout: 20000
+    optional: true
+- scrollUntilVisible:
+    element:
+      id: 'settings-app-lock'
+    direction: DOWN
+    timeout: 30000
+- tapOn:
+    id: 'settings-app-lock'
+- tapOn:
+    text: '(?i)(allow|ok)'
+    optional: true

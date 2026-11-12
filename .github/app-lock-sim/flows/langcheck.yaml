@@ -1,0 +1,5 @@
+appId: ${APP_ID}
+---
+- assertNotVisible: 'Wafra is locked'
+- assertNotVisible: 'وفرة مقفل'
+- assertVisible: '.*الإعدادات.*'

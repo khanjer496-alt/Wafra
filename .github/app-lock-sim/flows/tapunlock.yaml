@@ -1,0 +1,5 @@
+appId: ${APP_ID}
+---
+- tapOn:
+    text: 'Unlock with Face ID'
+    optional: true

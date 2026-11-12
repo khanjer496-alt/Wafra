@@ -1,0 +1,151 @@
+# TEMPORARY, NEVER MERGED. Hosted iOS-simulator proof of the App Lock success path
+# (simulated Face ID) on the release tip. Push trigger is limited to this one branch.
+name: app-lock-sim
+on:
+  push:
+    branches: [test/app-lock-sim-hosted]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-lock-sim
+  cancel-in-progress: true
+
+jobs:
+  sim:
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      # founder / auto-Pro OFF, like the production profile
+      EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: "0"
+      EXPO_PUBLIC_WAFRA_AUTO_FOUNDER_PRO: "0"
+      EXPO_PUBLIC_WAFRA_PARSER_RESEARCH: "0"
+      EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT: "0"
+      WAFRA_SMS_CORPUS_EXPORT: "0"
+      EXPO_PUBLIC_WAFRA_RELAY_URL: ${{ vars.WAFRA_RELAY_URL || 'https://wafra-relay.khanjer496.workers.dev' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 26.2 or newer
+        run: |
+          set -euo pipefail
+          BEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          sudo xcode-select -s "$BEST/Contents/Developer"
+          VER=$(xcodebuild -version | head -1 | awk '{print $2}')
+          echo "selected Xcode $VER from $BEST"
+          [ "${VER%%.*}" -ge 26 ] || { echo "::error::need Xcode 26+, have $VER"; exit 1; }
+
+      # The built .app is cached on the SOURCE that affects it, so re-running the test
+      # script (this directory) does not rebuild for 20 minutes.
+      - name: Restore cached Release simulator build
+        id: appcache
+        uses: actions/cache/restore@v4
+        with:
+          path: build/app
+          key: app-lock-sim-app-${{ hashFiles('src/**', 'modules/**', 'assets/**', 'plugins/**', 'app.json', 'package-lock.json', 'babel.config.js', 'metro.config.js', 'eas.json') }}
+
+      - uses: actions/setup-node@v4
+        if: steps.appcache.outputs.cache-hit != 'true'
+        with:
+          node-version-file: .nvmrc
+
+      - name: Build the Release app for the simulator
+        if: steps.appcache.outputs.cache-hit != 'true'
+        timeout-minutes: 60
+        run: |
+          set -euo pipefail
+          npm ci
+          npx expo prebuild --platform ios --no-install
+          npx pod-install ios
+          WORKSPACE=$(find ios -maxdepth 1 -name '*.xcworkspace' | head -1)
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+          xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" -configuration Release \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/dd CODE_SIGNING_ALLOWED=NO -quiet build
+          APP=$(find build/dd/Build/Products/Release-iphonesimulator -maxdepth 1 -name '*.app' | head -1)
+          [ -n "$APP" ] || { echo "no .app produced"; exit 1; }
+          mkdir -p build/app && rm -rf build/app/* && cp -R "$APP" build/app/
+          # Release proof: the JS bundle is inside the app, no Metro.
+          test -f build/app/*.app/main.jsbundle && ls -l build/app/*.app/main.jsbundle
+
+      - name: Save the build to cache
+        if: steps.appcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: build/app
+          key: app-lock-sim-app-${{ hashFiles('src/**', 'modules/**', 'assets/**', 'plugins/**', 'app.json', 'package-lock.json', 'babel.config.js', 'metro.config.js', 'eas.json') }}
+
+      - name: Boot a simulator and enroll Face ID
+        id: sim
+        run: |
+          set -euo pipefail
+          DEVICE="iPhone 16 Pro Max"
+          UDID=$(xcrun simctl create app-lock-sim "$DEVICE" 2>/dev/null || true)
+          if [ -z "$UDID" ]; then
+            UDID=$(xcrun simctl list devices available -j | jq -r '.devices[][] | select(.name|startswith("iPhone")) | .udid' | tail -1)
+          fi
+          [ -n "$UDID" ] || { xcrun simctl list devices available; exit 1; }
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl list devices | grep -F "$UDID"
+          xcrun simctl spawn "$UDID" sw_vers || true
+          # Face ID enrollment, the scripted equivalent of Features > Face ID > Enrolled
+          xcrun simctl spawn "$UDID" notifyutil -s com.apple.BiometricKit.enrollmentChanged 1
+          xcrun simctl spawn "$UDID" notifyutil -p com.apple.BiometricKit.enrollmentChanged
+          xcrun simctl ui "$UDID" appearance light || true
+
+      - name: Install the app
+        run: |
+          set -euo pipefail
+          APP=$(ls -d build/app/*.app | head -1)
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist"
+          xcrun simctl install '${{ steps.sim.outputs.udid }}' "$APP"
+
+      - name: Install Maestro
+        run: |
+          curl -Ls https://get.maestro.mobile.dev | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Run the App Lock flow
+        id: flow
+        continue-on-error: true
+        timeout-minutes: 40
+        run: |
+          mkdir -p shots
+          .github/app-lock-sim/run.sh '${{ steps.sim.outputs.udid }}' shots 2>&1 | tee shots/run.log
+
+      - name: S7 - ledger content never visible in a locked state (OCR of the locked screenshots)
+        id: leak
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          cd shots
+          [ -s locked-shots.txt ] || { echo "no locked screenshots recorded"; exit 1; }
+          FILES=(".home-reference.png")
+          while read -r n; do FILES+=("$n.png"); done < locked-shots.txt
+          swift ../.github/app-lock-sim/ocr.swift "${FILES[@]}" > ocr.tsv
+          cat ocr.tsv
+          LOCKED=(); for f in "${FILES[@]:1}"; do LOCKED+=("$f"); done
+          python3 -I ../.github/app-lock-sim/leakcheck.py ocr.tsv .home-reference.png "${LOCKED[@]}" | tee leakcheck.json
+          exit "${PIPESTATUS[0]}"
+
+      - name: Result table
+        if: always()
+        run: |
+          {
+            echo "## App Lock simulator run"
+            echo "| Step | Result | Detail |"; echo "|---|---|---|"
+            [ -f shots/results.tsv ] && awk -F'\t' '{printf "| %s | %s | %s |\n",$1,$2,$3}' shots/results.tsv
+            echo "| S7 (no ledger in locked states, OCR) | ${{ steps.leak.outcome == 'success' && 'PASS' || 'FAIL' }} | see leakcheck.json |"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          ! grep -q $'\tFAIL\t' shots/results.tsv 2>/dev/null
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: app-lock-sim-screenshots
+          path: shots/
+          retention-days: 3
+          include-hidden-files: true
+          if-no-files-found: warn

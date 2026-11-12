@@ -1,0 +1,15 @@
+appId: ${APP_ID}
+---
+- tapOn:
+    text: 'Settings'
+- scrollUntilVisible:
+    element:
+      text: 'Language'
+    direction: DOWN
+    timeout: 30000
+- tapOn:
+    text: 'Language'
+- tapOn:
+    text: 'العربية'
+- waitForAnimationToEnd:
+    timeout: 5000

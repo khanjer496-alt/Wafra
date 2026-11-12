@@ -1,0 +1,16 @@
+appId: ${APP_ID}
+---
+- launchApp:
+    clearState: true
+- tapOn:
+    text: '(?i)(allow|ok)'
+    optional: true
+- extendedWaitUntil:
+    visible: 'Start with sample data'
+    timeout: 120000
+- tapOn:
+    text: 'Start with sample data'
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: '(?i)recent activity'
+    timeout: 60000
