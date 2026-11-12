@@ -2428,6 +2428,11 @@ const REFUND_SIDE_NOTE_SAME_MOVEMENT_RE =
 // A refund still to come ("It will be refunded") or under way ("The refund is being processed") is not a completed refund of
 // the debit: the same-movement exemption needs a completed credit verb. Review f757be84.
 const REFUND_SIDE_NOTE_FUTURE_RE = /\bwill\b/i;
+// Refund matrix D3/D4 (CEO 711485d5, 1014684b): beside a separate debit, a refund note that is negated ("has not been
+// refunded", "is not credited") or still pending ("is being processed", "will be credited") does not change the debit: it is
+// blanked and the debit posts as an expense, never income.
+const REFUND_SIDE_NOTE_NOT_SETTLED_RE =
+  /\b(?:is|are|was|were|has|have|had|did|does)\s+not\b|\b(?:isn|aren|wasn|weren|hasn|haven|hadn|didn|doesn)['’]t\b|\bnot\s+(?:yet\s+)?been\b|\b(?:is|are)\s+being\b|\bwill\b/i;
 const REFUND_SIDE_NOTE_COMPLETED_RE =
   /\b(?:has|have|had|was|were)\s+(?:been\s+)?(?:(?:successfully|fully|now)\s+)?(?:credited|refunded|reversed|returned|posted)\b/i;
 function refundSideNotes(body: string): { body: string; ambiguous: boolean } {
@@ -2450,7 +2455,7 @@ function refundSideNotes(body: string): { body: string; ambiguous: boolean } {
     // sameMovement: the note is about the debit itself; completedRefund: and says that refund already happened.
     const sameMovement = REFUND_SIDE_NOTE_SAME_MOVEMENT_RE.test(text) && !REFUND_SIDE_NOTE_FUTURE_RE.test(text);
     const completedRefund = sameMovement && REFUND_SIDE_NOTE_COMPLETED_RE.test(text);
-    if ((negated && !sameMovement) || (separateDebit && governsRefundCredit(lead))) {
+    if ((negated && !sameMovement) || (separateDebit && (governsRefundCredit(lead) || REFUND_SIDE_NOTE_NOT_SETTLED_RE.test(text)))) {
       out = out.slice(0, at) + ' '.repeat(text.length) + out.slice(at + text.length);
     } else if (separateDebit && (negated || (REFUND_RE.test(text) && !completedRefund))) {
       ambiguous = true;
@@ -5478,8 +5483,10 @@ const AR_WITHDRAWAL_FIELD_RE = /(?<![ء-ي])(?:سحب|صراف)(?![ء-ي])|\b(?:
 const AR_CASH_WITHDRAWAL_CORRECTION_HEADER_RE =
   /^تصحيح[ \t]+(?:عمليه[ \t]+)?سحب[ \t]+نقدي[ \t]*:?[ \t]*(?:\r?\n|$)/;
 
+// A conditional leader ("اذا تم ارجاع المبلغ …", "في حال تم …") makes it a footer about a possible return, not a
+// statement that money came back: it must not turn the debit beside it into an unproven direction (port review, CEO 080fa431).
 const AR_RETURNED_TO_OWN_RE = new RegExp(
-  `(?:(?<![${AR_LETTER}])و?تم\\s+(?:ارجاع|اعاده)\\s+(?:ال)?(?:مبلغ|[A-Z]{3}\\s*\\d|\\d)|(?<![${AR_LETTER}])اعاد\\s+(?:[^\\s]+\\s+){1,5}?(?:ال)?مبلغ(?![${AR_LETTER}]))(?:[^.\\n]|\\.(?=\\S)){0,80}?` +
+  `(?:(?<![${AR_LETTER}])(?<!(?:اذا|عندما|عند|ان|حال)\\s+)و?تم\\s+(?:ارجاع|اعاده)\\s+(?:ال)?(?:مبلغ|[A-Z]{3}\\s*\\d|\\d)|(?<![${AR_LETTER}])اعاد\\s+(?:[^\\s]+\\s+){1,5}?(?:ال)?مبلغ(?![${AR_LETTER}]))(?:[^.\\n]|\\.(?=\\S)){0,80}?` +
     `(?<![${AR_LETTER}])(?:الي|في)\\s+(?:بطاقتك|بطاقتكم|حسابك|حسابكم)(?![${AR_LETTER}])`,
 );
 
@@ -8493,7 +8500,8 @@ function parseSmsInner(
   if (refundNotes.ambiguous) return null;
   const isIncomingCreditReversal = INCOMING_CREDIT_REVERSAL_RE.test(prose);
   const isRefund = !isIncomingCreditReversal &&
-    (REFUND_RE.test(refundNotes.body) || REVERSAL_RE.test(prose) || arabicPurchaseRefundHeader ||
+    // A blanked side note is not a reversal statement either ("… is not returned to your card", "… and was later reversed").
+    (REFUND_RE.test(refundNotes.body) || REVERSAL_RE.test(refundNotes.body) || arabicPurchaseRefundHeader ||
       REFUND_HEADING_RE.test(prose));
 
   if (PROMO_RE.test(raw) && !TXN_EVIDENCE_RE.test(raw)) return null;
