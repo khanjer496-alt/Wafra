@@ -53,12 +53,13 @@ on:
         type: string
         default: ''
       profile:
-        description: 'history-beta = founder beta with current local Shortcuts. production / production-candidate = configured public runtime. preview = registered-device ad-hoc build.'
+        description: 'history-beta = founder beta with current local Shortcuts. perf-diagnostics = INTERNAL TestFlight group only: history-beta plus the iOS stall monitor and timing export (never a store release). production / production-candidate = configured public runtime. preview = registered-device ad-hoc build.'
         type: choice
         options:
           - production
           - production-candidate
           - history-beta
+          - perf-diagnostics
           - preview
         default: production
       submit:

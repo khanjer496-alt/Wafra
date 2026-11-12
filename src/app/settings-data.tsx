@@ -69,6 +69,7 @@ import {
   isInternalLaunchDiagnosticsEnabled,
   serializeLaunchMetrics,
 } from '@/lib/launch-performance';
+import { getRuntimePerformanceSnapshot } from '@/lib/runtime-performance';
 import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
 import { buildLedgerCsv } from '@/lib/ledger-export';
 import { displayRegion } from '@/lib/ledger-money';
@@ -301,7 +302,7 @@ export default function SettingsDataScreen() {
   };
 
   const exportLaunchMetrics = () => {
-    shareTextFile('wafra-launch-metrics.json', serializeLaunchMetrics(), {
+    shareTextFile('wafra-launch-metrics.json', serializeLaunchMetrics(getRuntimePerformanceSnapshot()), {
       mimeType: 'application/json',
       dialogTitle: t('launchMetricsDialog'),
     }).catch(() => Alert.alert(t('launchMetricsExportFailed')));

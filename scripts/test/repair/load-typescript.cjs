@@ -183,6 +183,8 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
         return {
           recordRuntimeInteraction() {},
           recordRuntimeOperation() {},
+          beginRuntimeOperation() {},
+          endRuntimeOperation() {},
           measureRuntimeOperation: (_tag, work) => work(),
           measureRuntimeOperationAsync: async (_tag, work) => work(),
         };

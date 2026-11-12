@@ -227,6 +227,28 @@ const checkTesterProBuild = (eas, profile, platform, publicEnv, findings) => {
   }
 };
 
+/**
+ * The iOS stall monitor and timing export are for the INTERNAL TestFlight
+ * group only. Only the isolated perf-diagnostics iOS profile may enable them;
+ * neither a public profile nor a CI/EAS environment value can.
+ */
+const checkPerfDiagnosticsBuild = (eas, profile, platform, publicEnv, findings) => {
+  const resolved = resolvedBuildProfile(eas, profile);
+  if (!resolved) return;
+  const value = { ...resolved.env, ...publicEnv }.EXPO_PUBLIC_WAFRA_PERF_DIAG;
+  const allowed = profile === 'perf-diagnostics' && platform === 'ios' &&
+    resolved.distribution === 'store' && resolved.environment === 'preview' &&
+    resolved.channel === 'perf-diagnostics' && resolved.env?.EXPO_PUBLIC_WAFRA_AUTO_FOUNDER_PRO !== '1';
+  if ((value !== undefined && value !== '0' && value !== '1') || (value === '1' && !allowed)) {
+    findings.push(finding(
+      'perf-diagnostics-build',
+      'Performance diagnostics cannot enter this build',
+      'The iOS stall monitor and timing export are restricted to the isolated perf-diagnostics iOS profile for the internal TestFlight group.',
+      'Remove EXPO_PUBLIC_WAFRA_PERF_DIAG from this profile and environment; use the perf-diagnostics profile for internal timing builds.',
+    ));
+  }
+};
+
 const checkProductionRuntime = (expo, eas, platform, publicEnv, findings) => {
   const extra = expo?.extra ?? {};
   const env = eas?.build?.production?.env ?? {};
@@ -374,6 +396,8 @@ export const assessReleaseReadiness = async ({ root, intent, publicEnv = {} }) =
     checkPlatformIdentity(expo, platform, findings);
     checkBuildProfile(eas, profile, submit, findings);
     checkTesterProBuild(eas, profile, platform, publicEnv, findings);
+    checkPerfDiagnosticsBuild(eas, profile, platform, publicEnv, findings);
+    if (intent.kind === 'store-release') checkPerfDiagnosticsBuild(eas, 'production', platform, publicEnv, findings);
     if (intent.kind === 'store-release' && eas?.build?.development?.developmentClient !== true) {
       findings.push(finding('development-client', 'The development profile is not a development client', 'Device debugging would no longer use the expected client profile.', 'Set eas.json build.development.developmentClient to true.'));
     }

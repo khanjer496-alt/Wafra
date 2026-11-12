@@ -36,7 +36,7 @@ import { hydrateLocalSemanticInboxShadow } from '@/lib/local-semantic-inbox-shad
 import { LOCAL_SEMANTIC_E5_ENABLED } from '@/lib/local-semantic-flags';
 import { getLocalSemanticEncoder, purgeLocalSemanticArtifacts } from '@/lib/local-semantic-runtime';
 import { hydrateLocalSemanticShadow } from '@/lib/local-semantic-shadow';
-import { startRuntimePerformanceMonitor } from '@/lib/runtime-performance';
+import { endRuntimeOperation, startRuntimePerformanceMonitor } from '@/lib/runtime-performance';
 
 // Installed once, at module load, before any screen can offer to send. The
 // capture module keeps its promise of holding no network by taking delivery
@@ -119,6 +119,9 @@ function Direction({ children }: { children: React.ReactNode }) {
     return () => cancelAnimationFrame(frame);
   }, [state.hydrated]);
   const language = state.language === 'ar' ? 'ar' : 'en';
+  // Parent effects run after the remounted children's, so this closes the
+  // language-remount span opened by Settings (a no-op on first mount).
+  useEffect(() => { endRuntimeOperation('language-remount'); }, [language]);
   const moneySpec = state.ledgerMoney ?? ledgerMoneySpec(marketCurrencyCode(state.marketId));
   return (
     <LanguageProvider language={language}>

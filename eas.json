@@ -118,6 +118,27 @@
         "EXPO_PUBLIC_SUPERWALL_IOS_API_KEY": "pk_xwC_I1SLdNOLaL2r2zxx3"
       }
     },
+    "perf-diagnostics": {
+      "extends": "base",
+      "channel": "perf-diagnostics",
+      "distribution": "store",
+      "environment": "preview",
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_WAFRA_PERF_DIAG": "1",
+        "EXPO_PUBLIC_WAFRA_AUTO_FOUNDER_PRO": "0",
+        "EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK": "1",
+        "EXPO_PUBLIC_WAFRA_RELAY_URL": "https://wafra-relay.khanjer496.workers.dev",
+        "EXPO_PUBLIC_WAFRA_PARSER_RESEARCH": "0",
+        "EXPO_PUBLIC_WAFRA_SHORTCUT_URL": "https://www.icloud.com/shortcuts/822bcc1dd2964b9f887ef9b93601441d",
+        "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "0",
+        "WAFRA_SMS_CORPUS_EXPORT": "0",
+        "WAFRA_PAGED_HISTORY_BETA": "0",
+        "EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA": "0",
+        "EXPO_PUBLIC_WAFRA_SHORTCUT_SETUP_CHECK_VERSION": "1",
+        "EXPO_PUBLIC_SUPERWALL_IOS_API_KEY": "pk_xwC_I1SLdNOLaL2r2zxx3"
+      }
+    },
     "ios-parity-device": {
       "extends": "base",
       "channel": "ios-parity-device",
@@ -175,6 +196,9 @@
       "extends": "production"
     },
     "history-beta": {
+      "extends": "production"
+    },
+    "perf-diagnostics": {
       "extends": "production"
     }
   }

@@ -48,6 +48,7 @@ import { spendingCategoryRows, spendingShare, spendingShareLabel } from '@/lib/r
 import { useStoreSelector } from '@/lib/store';
 import { historyStatusOnly } from '@/lib/store-selection';
 import { t, tf } from '@/lib/i18n';
+import { measureRuntimeOperation } from '@/lib/runtime-performance';
 import { merchantSpendingHref } from '@/lib/merchant-spending';
 import type { CategoryId, Transaction } from '@/lib/types';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
@@ -122,7 +123,8 @@ export default function FlowScreen() {
       isTransferCandidate(transaction) && isSpending(transaction, live, internal) &&
       isListedExternalTransfer(transaction, duplicates));
   }, [view, state.transactions, live, internal, period]);
-  const summary = useMemo(() => summarizeMonth(state.transactions, period, live, internal), [state.transactions, period, live, internal]);
+  const summary = useMemo(() => measureRuntimeOperation('flow-summary',
+    () => summarizeMonth(state.transactions, period, live, internal)), [state.transactions, period, live, internal]);
   const foreign = useMemo(() => view === 'categories'
     ? summarizeForeignActivity(
         state.transactions,

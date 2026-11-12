@@ -100,6 +100,7 @@ import {
   type LedgerPersistence,
 } from '@/lib/ledger-persistence';
 import { markLaunchPhase } from '@/lib/launch-performance';
+import { recordRuntimeOperation } from '@/lib/runtime-performance';
 import {
   ledgerMoneySpec,
   ledgerStateHasMoney,
@@ -2696,6 +2697,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const hydrate = useCallback(async (): Promise<boolean> => {
     const run = ++hydrationRun.current;
     markLaunchPhase('ledger-load-start');
+    const hydrateStartedAt = Date.now();
     try {
       // A killed-process SMS/push wake can be finishing a short encrypted write
       // at the exact moment the user opens Wafra. Join that event-driven tail
@@ -2742,6 +2744,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setStorageRecoveryState(null);
       dispatch({ type: 'hydrate', state: next });
       markLaunchPhase('ledger-load-complete');
+      recordRuntimeOperation('store-hydrate', Date.now() - hydrateStartedAt);
       return true;
     } catch (error) {
       if (hydrationRun.current !== run) return false;
