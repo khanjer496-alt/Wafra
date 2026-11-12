@@ -35,11 +35,16 @@ jobs:
         run: |
           set -o pipefail
           node --test --test-name-pattern='issuer confirmation|refund acknowledgement|refund request stays refused|Arabic refund|merchant named with AND|refund credit rule|refund hardening|link-word footer|real URL stays refused' scripts/test/repair/review-round2-safety.test.cjs | tee focused.txt
+      - name: Temporary side-note probe (side branch only)
+        if: always()
+        run: node .github/patch-probe/fix3-probe.cjs "$PWD" | tee probe.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: refund-patch-focused-${{ github.sha }}
-          path: focused.txt
+          path: |
+            focused.txt
+            probe.txt
           retention-days: 7
       - uses: actions/upload-artifact@v4
         with:
