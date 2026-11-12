@@ -125,6 +125,10 @@ import {
 } from '@/lib/apple-pay-card-links';
 import {
   admitPreparedReviewAlerts,
+  type ReviewAdmissionMode,
+  reviewRetentionReceipts,
+  reviewClaimSourceKeys,
+  type ReviewStageReceipt,
   emptyAlertReviewTray,
   normalizeAlertReviewTray,
   stripReviewShareCandidates,
@@ -2237,11 +2241,13 @@ interface StoreValue {
     input: ImportBatchInput,
     qualifications?: readonly LocalCaptureDeclineQualificationMapping[],
   ) => ImportReceipt;
+  /** `mode` 'hold-source' only for a caller that keeps its source on deferral. */
   stageReviewAlerts: (
     items: ReviewEntry[],
     qualifications?: readonly LocalCaptureReviewQualificationCandidate[],
     sourceBindings?: readonly ReviewSourceBinding[],
-  ) => { admitted: number; qualificationIds: string[]; durable: Promise<void> };
+    mode?: ReviewAdmissionMode,
+  ) => ReviewStageReceipt & { qualificationIds: string[] };
   dismissReviewAlert: (id: string, outcome: ReviewResolutionOutcome) => Promise<void>;
   promoteReviewAlert: (input: PromoteReviewAlertInput) => Promise<'added' | 'duplicate'>;
   /**
@@ -3242,15 +3248,52 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     items: ReviewEntry[],
     qualifications?: readonly LocalCaptureReviewQualificationCandidate[],
     sourceBindings?: readonly ReviewSourceBinding[],
+    mode: ReviewAdmissionMode = 'bounded',
   ) => {
-    if (!authoritativeState.current.hydrated || (items.length === 0 && !sourceBindings?.length)) {
-      return { admitted: 0, qualificationIds: [], durable: ensureDurable() };
+    const generation = stateGeneration.current;
+    let persistedTray: typeof authoritativeState.current.reviewTray | null = null;
+    const retention = () => {
+      if (generation !== stateGeneration.current || !authoritativeState.current.hydrated || !persistedTray) {
+        return items.map(item => ({ sourceKey: item.sourceKey, outcome: 'deferred' as const }));
+      }
+      const now = Date.now();
+      const written = reviewRetentionReceipts(persistedTray, items, now);
+      const current = reviewRetentionReceipts(authoritativeState.current.reviewTray, items, now);
+      return written.map((entry, index) => {
+        const live = current[index];
+        if (entry.outcome === 'expired' || live.outcome === 'expired') return { ...entry, outcome: 'expired' as const };
+        if (entry.outcome === 'refused') return entry;
+        // A newer optimistic write cannot qualify this receipt. Both its own
+        // persisted snapshot and the current generation must still carry a claim.
+        if ((entry.outcome === 'pending' || entry.outcome === 'resolved') &&
+            (live.outcome === 'pending' || live.outcome === 'resolved')) return entry;
+        return { ...entry, outcome: 'deferred' as const };
+      });
+    };
+    const retainedSourceKeys = () => {
+      if (generation !== stateGeneration.current || !authoritativeState.current.hydrated || !persistedTray) return [];
+      const now = Date.now();
+      const live = new Set(reviewClaimSourceKeys(authoritativeState.current.reviewTray, now));
+      return reviewClaimSourceKeys(persistedTray, now).filter(key => live.has(key));
+    };
+    if (!authoritativeState.current.hydrated) {
+      return { admitted: 0, qualificationIds: [], durable: ensureDurable(), retention, retainedSourceKeys };
+    }
+    if (items.length === 0 && !sourceBindings?.length) {
+      // A scan may have skipped already-known Review identities. Its completion
+      // still needs its OWN persisted claims, not a later optimistic snapshot.
+      const snapshot = authoritativeState.current;
+      const durable = persist(snapshot).then(written => {
+        if (!written) throw new Error('Encrypted review-tray write failed');
+        persistedTray = snapshot.reviewTray;
+      });
+      return { admitted: 0, qualificationIds: [], durable, retention, retainedSourceKeys };
     }
     const qualificationByReviewId = reviewQualificationMap(items, qualifications);
     const now = Date.now();
     const rebound = reconcileReviewSourceBindings(authoritativeState.current, sourceBindings ?? [], now);
     // One prune for the whole batch: History staging can carry thousands.
-    const batch = admitPreparedReviewAlerts(rebound.reviewTray, items, now);
+    const batch = admitPreparedReviewAlerts(rebound.reviewTray, items, now, mode);
     const reviewTray = batch.state;
     let admitted = 0;
     const admittedQualifications: LocalCaptureQualificationCandidate[] = [];
@@ -3260,9 +3303,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const qualification = qualificationByReviewId.get(item.id);
       if (qualification) admittedQualifications.push(qualification);
     });
-    if (admitted === 0 && !rebound.changed) {
-      return { admitted, qualificationIds: [], durable: ensureDurable() };
-    }
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
@@ -3286,11 +3326,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     });
     const durable = persist(next).then((written) => {
       if (!written) throw new Error('Encrypted review-tray write failed');
+      persistedTray = next.reviewTray;
     });
     return {
       admitted,
       qualificationIds,
       durable,
+      retention,
+      retainedSourceKeys,
     };
   }, [dispatch, ensureDurable, persist]);
 

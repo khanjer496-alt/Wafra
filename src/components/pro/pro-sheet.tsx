@@ -72,7 +72,7 @@ function ProSheetSession({ feature, visible, onClose }: {
   const checkout = useProCheckout();
   const {
     billingAction, selectedPlan, selectedOffer, notice, entitled,
-    privacyPolicyUrl, termsOfUseUrl, buySelectedPlan, restore, openLegal,
+    privacyPolicyUrl, termsOfUseUrl, ctaMode, retryOffers, buySelectedPlan, restore, openLegal,
   } = checkout;
   const busy = billingAction !== null;
 
@@ -89,7 +89,7 @@ function ProSheetSession({ feature, visible, onClose }: {
         <>
           <EButton
             palette={band}
-            testID="pro-sheet-buy"
+            testID={ctaMode === 'retry' ? 'pro-sheet-retry-prices' : 'pro-sheet-buy'}
             label={billingAction === 'purchase'
               ? t('purchaseInProgress')
               : selectedOffer
@@ -97,10 +97,12 @@ function ProSheetSession({ feature, visible, onClose }: {
                     plan: planLabel(selectedPlan),
                     price: selectedOffer.priceString,
                   })
-                : t('getPro')}
-            disabled={busy || !checkout.checkoutReady || checkout.offerState !== 'ready' || !selectedOffer || !privacyPolicyUrl || !termsOfUseUrl}
+                : ctaMode === 'loading'
+                  ? t('priceLoading')
+                  : ctaMode === 'retry' ? t('retryPrices') : t('getPro')}
+            disabled={busy || ctaMode === 'loading'}
             busy={billingAction === 'purchase'}
-            onPress={() => void buySelectedPlan()}
+            onPress={ctaMode === 'retry' ? () => void retryOffers() : () => void buySelectedPlan()}
           />
           <EButton palette={band} variant="quiet" label={t('restorePurchase')} disabled={busy}
             busy={billingAction === 'restore'} onPress={() => void restore()} testID="pro-sheet-restore" />

@@ -1,0 +1,411 @@
+{
+  "provenance": "Synthetic reviewer probe14 families, transcribed without changing source bodies; parser result is transfer or exact-money Review, never ordinary spending/income.",
+  "cases": [
+    {
+      "id": "F1 control",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "ADCB",
+      "body": "Payment received AED 500.00 on your card ending 2517. Thank you",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null
+    },
+    {
+      "id": "F1 header line",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "ADCB",
+      "body": "ADCB Alert\nPayment received AED 500.00 on your card ending 2517.",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null
+    },
+    {
+      "id": "F1 Dear Mr Ahmed",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "ADCB",
+      "body": "Dear Mr Ahmed, Payment received AED 500.00 on your card ending 2517",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null
+    },
+    {
+      "id": "F1 Hi,",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "ADCB",
+      "body": "Hi, payment received AED 500.00 on your card ending 2517",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null
+    },
+    {
+      "id": "F1 lowercase prefix",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "ADCB",
+      "body": "adcb: Payment received AED 500.00 on your card ending 2517",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null
+    },
+    {
+      "id": "F1 payment of X received",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "ADCB",
+      "body": "Payment of AED 500.00 received on your card ending 2517",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null
+    },
+    {
+      "id": "F1 we have received",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "ADCB",
+      "body": "We have received your payment of AED 500.00 on your card ending 2517",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null
+    },
+    {
+      "id": "F1 4-word card name",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "ADCB",
+      "body": "Payment received AED 500.00 on your ADCB Touchpoints Titanium credit card ending 2517",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null
+    },
+    {
+      "id": "F1 amount after",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "ADCB",
+      "body": "Payment received 500.00 AED on your card ending 2517",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null
+    },
+    {
+      "id": "F2 control",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "MASHREQ",
+      "body": "Thank you for your payment of AED 500.00 on your Mashreq credit card ending 2554",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null
+    },
+    {
+      "id": "F2 towards",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "MASHREQ",
+      "body": "Thank you for your payment of AED 500.00 towards your credit card ending 2554",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null
+    },
+    {
+      "id": "F2 thanks",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "MASHREQ",
+      "body": "Thanks for your payment of AED 500.00 on your credit card ending 2554",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null
+    },
+    {
+      "id": "F3 control",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "FAB",
+      "body": "Your payment of AED 500.00 to credit card ending 2591 was successful",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null
+    },
+    {
+      "id": "F3 named card",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "FAB",
+      "body": "Your payment of AED 500.00 to your Mashreq credit card ending 2591 was successful",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null
+    },
+    {
+      "id": "F3 card payment of",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "FAB",
+      "body": "Your credit card payment of AED 500.00 was successful",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null
+    },
+    {
+      "id": "F1 blank sender",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "",
+      "body": "Payment received AED 500.00 on your card ending 2517. Thank you",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null
+    },
+    {
+      "id": "AR blank",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "",
+      "body": "تم إيداع مبلغ 500.00 درهم في بطاقتك الائتمانية المنتهية بـ 2665",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null
+    },
+    {
+      "id": "AR named SA",
+      "expected": "hold",
+      "market": "SA",
+      "sender": "SNB",
+      "body": "تم إيداع مبلغ 500.00 ريال في بطاقتك الائتمانية المنتهية بـ 2665",
+      "minorUnits": 50000,
+      "currency": "SAR",
+      "type": null
+    },
+    {
+      "id": "AR variant payment",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "",
+      "body": "تم استلام سداد بمبلغ 500.00 درهم على بطاقتك الائتمانية المنتهية بـ 2665",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null
+    },
+    {
+      "id": "purchase on your card",
+      "expected": "post",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "Purchase of AED 500.00 on your card ending 2517 at NOON.COM",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": "expense"
+    },
+    {
+      "id": "merchant thank-you receipt",
+      "expected": "post",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "Thank you for your payment of AED 85.00 on your card ending 1234 at CARREFOUR",
+      "minorUnits": 8500,
+      "currency": "AED",
+      "type": "expense"
+    },
+    {
+      "id": "payment to merchant",
+      "expected": "post",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "Your payment of AED 85.00 to CAREEM using your card ending 1234 was successful",
+      "minorUnits": 8500,
+      "currency": "AED",
+      "type": "expense"
+    },
+    {
+      "id": "bill payment w/ card",
+      "expected": "post",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "Thank you for your payment of AED 300.00 on your DEWA bill using card ending 1234",
+      "minorUnits": 30000,
+      "currency": "AED",
+      "type": "expense"
+    },
+    {
+      "id": "refund to credit card",
+      "expected": "post",
+      "market": "AE",
+      "sender": "FAB",
+      "body": "Refund of AED 50.00 from IKEA has been credited to your credit card ending 1234.",
+      "minorUnits": 5000,
+      "currency": "AED",
+      "type": "income"
+    },
+    {
+      "id": "cashback credit card",
+      "expected": "post",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "Your credit card has been credited with cashback amount of AED 20.00",
+      "minorUnits": 2000,
+      "currency": "AED",
+      "type": "income"
+    },
+    {
+      "id": "AR refund to card",
+      "expected": "post",
+      "market": "AE",
+      "sender": "FAB",
+      "body": "تم استرداد مبلغ 50.00 درهم من IKEA إلى بطاقتك الائتمانية المنتهية بـ 1234",
+      "minorUnits": 5000,
+      "currency": "AED",
+      "type": "income"
+    },
+    {
+      "id": "debit card purchase",
+      "expected": "post",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "Purchase of AED 37.00 with Debit Card ending 1234 at SAMPLE MARKET. Avl Bal AED 500.00",
+      "minorUnits": 3700,
+      "currency": "AED",
+      "type": "expense"
+    },
+    {
+      "id": "salary",
+      "expected": "post",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "AED 15,000.00 credited to your account ending 1234. Salary.",
+      "minorUnits": 1500000,
+      "currency": "AED",
+      "type": "income"
+    },
+    {
+      "id": "AR payment with balance",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "",
+      "body": "تم استلام سداد بمبلغ 500.00 درهم على بطاقتك الائتمانية المنتهية بـ 2665. الرصيد المتاح 3,000.00 درهم",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null
+    },
+    {
+      "id": "bank branch receipt",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "ADCB",
+      "body": "Payment received AED 500.00 on your card ending 2517 at ADCB branch.",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null
+    },
+    {
+      "id": "merchant credit-card thank-you receipt",
+      "expected": "post",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "Thank you for your payment of AED 85.00 on your credit card ending 1234 at CARREFOUR",
+      "minorUnits": 8500,
+      "currency": "AED",
+      "type": "expense"
+    },
+    {
+      "id": "posted debit with conditional credit footer",
+      "expected": "post",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "تم خصم مبلغ 37.00 درهم من بطاقتك الائتمانية المنتهية 1234 لدى NOON. إذا تم إيداع الرصيد ستصلك رسالة.",
+      "minorUnits": 3700,
+      "currency": "AED",
+      "type": "expense"
+    },
+    {
+      "id": "notification title Transaction Alert",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "Transaction Alert Payment received AED 500.00 on your card ending 2517. Thank you",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null,
+      "notification": {
+        "title": "Transaction Alert",
+        "text": "Payment received AED 500.00 on your card ending 2517. Thank you"
+      }
+    },
+    {
+      "id": "notification title Mashreq",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "MASHREQ",
+      "body": "Mashreq Thank you for your payment of AED 500.00 on your Mashreq credit card ending 2554",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null,
+      "notification": {
+        "title": "Mashreq",
+        "text": "Thank you for your payment of AED 500.00 on your Mashreq credit card ending 2554"
+      }
+    },
+    {
+      "id": "suffix currency with thank-you",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "Payment received 500.00 AED on your card ending 1234. Thank you",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null
+    },
+    {
+      "id": "Dhs repayment retained",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "Payment received Dhs 500.00 on your card ending 1234. Thank you",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null
+    },
+    {
+      "id": "notification title merchant payment",
+      "expected": "post",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "Transaction Alert Thank you for your payment of AED 85.00 on your card ending 1234 at CARREFOUR",
+      "minorUnits": 8500,
+      "currency": "AED",
+      "type": "expense",
+      "notification": {
+        "title": "Transaction Alert",
+        "text": "Thank you for your payment of AED 85.00 on your card ending 1234 at CARREFOUR"
+      }
+    },
+    {
+      "id": "notification bank title merchant payment",
+      "expected": "post",
+      "market": "AE",
+      "sender": "MASHREQ",
+      "body": "Mashreq Thank you for your payment of AED 85.00 on your credit card ending 1234 at CARREFOUR",
+      "minorUnits": 8500,
+      "currency": "AED",
+      "type": "expense",
+      "notification": {
+        "title": "Mashreq",
+        "text": "Thank you for your payment of AED 85.00 on your credit card ending 1234 at CARREFOUR"
+      }
+    },
+    {
+      "id": "unpunctuated Dear Customer",
+      "expected": "hold",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "Dear Customer Payment received AED 500.00 on your credit card ending 1234",
+      "minorUnits": 50000,
+      "currency": "AED",
+      "type": null
+    }
+  ]
+}

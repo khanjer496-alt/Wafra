@@ -48,10 +48,10 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
         return { ...dependencies[name], useMoneyLocaleKey: () => '' };
       }
       if (Object.hasOwn(dependencies, name)) return dependencies[name];
-      // Date presentation is real shipping logic, not a formatter stub. Load
-      // its pure country data from current source too; explicit fixture
-      // overrides above still win and custom Intl globals follow the module.
-      if (name === '@/lib/date-time-locale' || name === '@/lib/country-names' || name === '@/lib/import-processing-disclosure') {
+      // Pure source policies run as shipped, including the card-receipt
+      // guards imported by capture. Explicit fixture overrides above still
+      // win, and custom globals follow the module.
+      if (name === '@/lib/date-time-locale' || name === '@/lib/country-names' || name === '@/lib/import-processing-disclosure' || name === '@/lib/principal-posting-guards') {
         return loadTypescript(require('node:path').resolve(__dirname, '../../../src', name.slice(2) + '.ts'), dependencies, globals);
       }
       if (name === '@/lib/complimentary-access' || name === '@/lib/complimentary-copy' || name === '@/lib/complimentary-clock') return loadTypescript(require('node:path').resolve(__dirname, '../../../src', name.slice(2) + '.ts'));

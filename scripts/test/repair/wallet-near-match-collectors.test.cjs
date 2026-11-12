@@ -66,14 +66,15 @@ function iosHarness({ retain = true } = {}) {
     getState: () => state, getStateGeneration: () => 1,
     importBatch: batch => { calls.push(['save', batch.transactions.length]); return { durable: Promise.resolve(), ids: [] }; },
     ensureDurable: async () => { calls.push(['barrier']); },
-    stageReviewAlerts: items => {
+    stageReviewAlerts: (items, _qualifications, _bindings, mode) => {
       calls.push(['stage', items.map(item => item.id)]);
       let admitted = 0;
       if (retain) for (const item of items) {
-        const result = tray.admitPreparedReviewAlert(state.reviewTray, item, Date.now());
+        const result = tray.admitPreparedReviewAlert(state.reviewTray, item, Date.now(), mode);
         state.reviewTray = result.state; if (result.outcome === 'admitted') admitted += 1;
       }
-      return { admitted, qualificationIds: [], durable: new Promise(resolve => setTimeout(() => { calls.push(['staged']); resolve(); }, 5)) };
+      return { admitted, qualificationIds: [], durable: new Promise(resolve => setTimeout(() => { calls.push(['staged']); resolve(); }, 5)),
+        retention: () => tray.reviewRetentionReceipts(state.reviewTray, items, Date.now()) };
     },
   }, retireShortcutCapture: async () => 'complete' });
   return { calls, coordinator, state };
@@ -113,9 +114,9 @@ function executorHarness({ retain = true, source = 'relay' } = {}) {
   const executor = createCaptureExecutor({ ledger: {
     getState: () => state, ensureDurable: async () => { events.push('barrier'); },
     importBatch: batch => { events.push(`save:${batch.transactions.length}`); return { ids: [], durable: Promise.resolve() }; },
-    stageReviewAlerts: items => {
+    stageReviewAlerts: (items, _qualifications, _bindings, mode) => {
       events.push('stage');
-      if (retain) for (const item of items) state.reviewTray = tray.admitPreparedReviewAlert(state.reviewTray, item, Date.now()).state;
+      if (retain) for (const item of items) state.reviewTray = tray.admitPreparedReviewAlert(state.reviewTray, item, Date.now(), mode).state;
       return { admitted: retain ? items.length : 0, durable: new Promise(resolve => setTimeout(() => { events.push('staged'); resolve(); }, 5)) };
     },
   }, dependencies: { collectRoutine: async () => collected, planRows: () => nearPlan(collected.parsed[0]),

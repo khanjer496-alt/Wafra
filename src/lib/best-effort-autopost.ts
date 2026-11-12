@@ -3,6 +3,7 @@ import { isUnboundAndroidSourceKey, isUsableCaptureSourceIdentity } from '@/lib/
 import type { FxQuote } from '@/lib/fx';
 import { convertForeignConfirmation, quoteFitsDay, type ReferenceConversion } from '@/lib/fx-rates';
 import { nonPostingReason } from '@/lib/sms-parser';
+import { hasClickLinkPrompt, hasMobileMoneyCallback, isLeadingNumericDiscountOffer, isUnqualifiedPeerTransferClaim, isUnqualifiedCardRepayment, isQualifiedCardRepaymentReceipt, isUnpostedCardBalanceClaim } from '@/lib/principal-posting-guards';
 import type { BestEffortMarker, CaptureInstrument } from '@/lib/types';
 import type { UniversalBankEvent, UniversalMoney } from '@/lib/universal-types';
 
@@ -463,6 +464,9 @@ const hasLinkCallToAction = (source: string): boolean => {
  * JORDAN LEE paid you $48.20, mark it received").
  */
 const NOT_A_SETTLED_FACT: readonly RegExp[] = [
+  // A leading cashback invitation quotes a reward to earn. The launch
+  // semantic fallback must not rebuild its purchase wording as a new debit.
+  /^\s*(?:Dear\s+Customer[,!:]\s*)?(?:[^\n.!?\p{N}]{0,40}?[،,!:\s]\s*)?احصل\s+عل[ىي]\s+(?:استرداد|استرجاع)\s+نقدي/iu,
   // A conditional footer ("In case the transaction is suspicious, call …",
   // "If you notice unusual activity …") is advice, not a fraud prompt.
   /\bfraud\s+alert\b|(?<!\b(?:if|in\s+case|should)\b[^.!?\n]{0,60})\b(?:suspicious\s+(?:activity|transaction|charge|payment|login|purchase)|unusual\s+activity)\b|\bif\s+it\s+was\s+you\b|\bwas\s+this\s+you\b|\bwe\s+(?:have\s+)?(?:blocked|stopped|declined|locked)\b|(?<!\b(?:if|in\s+case|should|can|could|may)\b[^.!?\n]{0,60})\blocked\b|\bunder\s+review\b/iu,
@@ -529,10 +533,19 @@ const OWN_CARD_PAYMENT = /\b(?:[Yy]ou\s+)?paid\b(?:[^.\n]|\.\d){0,40}?\bto\s+you
  * auto-added; whether it then reaches Review is the refusal inspector's
  * decision (on the iPhone History path most of these are simply not imported).
  */
-export const isNotAutoPostableMoney = (source: string): boolean =>
-  hasLinkCallToAction(source) || NOT_A_SETTLED_FACT.some((pattern) => pattern.test(neutraliseBenignShapes(source))) ||
-  NOT_A_NEW_MOVEMENT.some((pattern) => pattern.test(source)) ||
-  (MERCHANT_ORDER_RECEIPT.test(source) && !OWN_BALANCE_STATED.test(source));
+const notAutoPostableMoney = (source: string, repaymentReview: boolean): boolean => {
+  if (hasClickLinkPrompt(source) || hasMobileMoneyCallback(source) || isUnqualifiedPeerTransferClaim(source) ||
+    isUnpostedCardBalanceClaim(source) || isLeadingNumericDiscountOffer(source) ||
+    (!repaymentReview && isUnqualifiedCardRepayment(source)) || hasLinkCallToAction(source)) return true;
+  const wording = neutraliseBenignShapes(source);
+  return NOT_A_SETTLED_FACT.some((pattern) => pattern.test(wording)) ||
+    NOT_A_NEW_MOVEMENT.some((pattern) => pattern.test(source)) ||
+    (MERCHANT_ORDER_RECEIPT.test(source) && !OWN_BALANCE_STATED.test(source));
+};
+export const isNotAutoPostableMoney = (source: string): boolean => notAutoPostableMoney(source, false);
+/** Only the repayment hold itself is exempted; all other wording vetoes remain. */
+export const isSafeCardRepaymentReviewSource = (source: string): boolean =>
+  (isUnqualifiedCardRepayment(source) || isQualifiedCardRepaymentReceipt(source)) && !notAutoPostableMoney(source, true);
 
 /**
  * A link next to the money. Lures always carry one ("confirm your
@@ -763,7 +776,7 @@ const PROMO_AND_SHOP_WORDING: readonly RegExp[] = [
 const REFUND_AVAILABLE = /\brefund\b[^\n]{0,30}?\b(?:is|are)\s+(?:now\s+)?(?:available|ready)\b/iu;
 
 const hardNonCompletedWording = (source: string, market?: string | null): boolean =>
-  nonPostingReason(source) !== null || NON_COMPLETED_WORDING.some((pattern) => pattern.test(source)) ||
+  isUnpostedCardBalanceClaim(source) || nonPostingReason(source) !== null || NON_COMPLETED_WORDING.some((pattern) => pattern.test(source)) ||
   (!!market && LATAM_MARKETS.has(market) && LATAM_NON_COMPLETED_WORDING.some((pattern) => pattern.test(source))) ||
   TEMPORARY_HOLD.test(source) || (AUTHORISATION.test(source) && !COMPLETED.test(source));
 
@@ -804,8 +817,19 @@ const REVERSED_THEN_CREDITED_TO_YOU =
   /\brevers(?:al|ed|e)\b(?:[^.\n]|\.(?=\S)){0,200}?\b(?:is|has\s+been|was)\s+(?:successfully\s+)?credited\s+to\s+your\b/giu;
 const RECOGNISE_CALLBACK_FOOTER =
   /(?<!\p{L})(?:(?:don['’]t|do\s+not|didn['’]t)\s+recogni[sz]e\b[^.!?\n]{0,30}\?\s*(?=(?:call|contact|ring|phone)\b)|si\s+no\s+(?:lo\s+|la\s+)?reconoc(?:e|es)\b[^.!?\n]{0,60}?(?=\bllam(?:a|e|ar)\b)|n[ãa]o\s+reconhece\b[^.!?\n]{0,40}?\??\s*(?=(?:ligue|ligar)\b))/giu;
+// This exact discount instruction names a promo code, not an OTP challenge.
+const NUMERIC_DISCOUNT_CODE = /\b((?:use|enter)\s+)code(\s+\d{4,8}\s+to\s+get\s+\d{1,3}\s?%\s+off\b)/giu;
+// Only closed advice clauses with no quoted digits are benign. A numbered
+// challenge or a following enter/use/confirm instruction remains untouched.
+const CODE_WARNING_NOUN = String.raw`(?:(?:(?:verification|security|authentication|one[-\s]?time)\s+)?codes?|otp(?:\s+code)?|pin|one[-\s]?time\s+password)`;
+const CODE_SAFETY_WARNING = new RegExp(
+  String.raw`(^|[.!?;,\r\n:])\s*(?:please\s+)?(?:(?:do\s+not|don['’]t|never)\s+(?:share|disclose|reveal)\s+(?:(?:your|the|this)\s+)?${CODE_WARNING_NOUN}(?:\s+with\s+(?:anyone|anybody|others))?(?:,?\s+including\s+(?:bank\s+staff|bank\s+employees))?|keep\s+(?:(?:your|the|this)\s+)?${CODE_WARNING_NOUN}\s+confidential)(?=\s*(?:[.!?;\r\n]|$))`,
+  'giu',
+);
 const neutraliseBenignShapes = (source: string): string =>
   source
+    .replace(CODE_SAFETY_WARNING, '$1 ')
+    .replace(NUMERIC_DISCOUNT_CODE, '$1promo code$2')
     .replace(CARD_PRODUCT_NAME, 'card')
     .replace(EXECUTED_MANDATE_DEBIT, '$1instruction')
     .replace(CREDITED_TOWARDS_REVERSAL, '$1refund')

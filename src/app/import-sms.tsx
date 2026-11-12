@@ -83,6 +83,7 @@ import {
   discardIosHistorySession,
   loadIosHistorySession,
   persistIosHistoryReviewCandidates,
+  IosHistoryImportError,
   type LoadedIosHistorySession,
 } from '@/lib/ios-history-import';
 import {
@@ -127,7 +128,8 @@ import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { createPrivateAlertFormatSession } from '@/lib/private-alert-format-runtime';
 import { canEnrichPrivateFormatReview, privateAlertFormatReviewEvent } from '@/lib/private-alert-format-review';
 import { activeCountryDateOrder } from '@/lib/country';
-import { prepareUniversalReviewAlert, type ReviewEntry } from '@/lib/alert-review-tray';
+import { prepareUniversalReviewAlert, requiresReviewRetention, reviewClaimSourceKeys, reviewReceiptSettled, settleReviewStage, type ReviewEntry } from '@/lib/alert-review-tray';
+import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
 import { isDeliberateOtherTitle, PARSER_VERSION } from '@/lib/sms-parser';
 import { collectLegacyReviewSourceKeys } from '@/lib/review-source-bindings';
 import { buildTrackedBillBatch, ImportMoneyError } from '@/lib/import-plan';
@@ -143,6 +145,13 @@ interface PendingInboxResult {
   declined: DeclinedSms[];
   newestTs: number;
   parserRereadComplete: true;
+  assertReviewRetention?: () => void;
+}
+
+class ReviewImportHold extends Error {
+  constructor(readonly reason: 'review-capacity' | 'review-expired' | 'review-changed', readonly count = 1) {
+    super(reason);
+  }
 }
 
 interface PendingPasteSource {
@@ -505,6 +514,7 @@ export default function ImportSmsScreen() {
   const [pendingInboxResult, setPendingInboxResult] = useState<PendingInboxResult | null>(null);
   const [pendingScanCommit, setPendingScanCommit] = useState<(() => Promise<void>) | null>(null);
   const [historyAttempt, setHistoryAttempt] = useState(0);
+  const [historyCapacityWaiting, setHistoryCapacityWaiting] = useState(false);
   const [historyCommitState, setHistoryCommitState] = useState<
     | 'idle'
     | 'writing'
@@ -714,6 +724,17 @@ export default function ImportSmsScreen() {
     if (historyCardState === 'running') void openHistoryRun(false);
   };
 
+  const showReviewRetentionHold = (error: unknown): boolean => {
+    if (!(error instanceof ReviewImportHold)) return false;
+    setPlan(null);
+    setHistoryCommitState('idle');
+    setHistoryCapacityWaiting(error.reason === 'review-capacity');
+    setNotice(error.reason === 'review-capacity'
+      ? { title: t('historyImportReviewReady'), body: t('historyReviewCapacityBody') }
+      : { title: t('historyImportFailed'), body: t('genericSourceChanged') });
+    return true;
+  };
+
   const runScan = async () => {
     // The plan's duplicate checks read state.transactions, so scanning before
     // the ledger has loaded imports the whole inbox a second time.
@@ -735,6 +756,14 @@ export default function ImportSmsScreen() {
     setNotice(null);
     setPendingInboxResult(null);
     setPendingScanCommit(null);
+    setPlan(null);
+    setHistoryCapacityWaiting(false);
+    const generation = getStateGeneration();
+    const assertSameLedger = () => {
+      if (!pasteMounted.current || getStateGeneration() !== generation || !getStateSnapshot().hydrated) {
+        throw new ReviewImportHold('review-changed');
+      }
+    };
     try {
       const granted = await requestSmsPermission();
       if (!granted) {
@@ -744,6 +773,7 @@ export default function ImportSmsScreen() {
         });
         return;
       }
+      assertSameLedger();
       // Full history: fingerprints make rescans safe (no duplicates).
       const {
         parsed,
@@ -752,11 +782,31 @@ export default function ImportSmsScreen() {
         newestTs,
         declined,
         inboxHistoryComplete,
+        deferredInboxReviews,
+        skippedKnownInboxReviewSourceKeys = [],
         commit,
       } = await scanInbox(0, state.merchantOverrides, (scanned, found, detail) =>
-        reportScanProgress(scanned, found, detail), undefined, { legacyReviewSourceKeys: collectLegacyReviewSourceKeys(getStateSnapshot()) });
-      const reviewReceipt = stageReviewAlerts(reviewCandidates, undefined, reviewSourceBindings);
-      await reviewReceipt.durable;
+        reportScanProgress(scanned, found, detail), undefined, {
+          legacyReviewSourceKeys: collectLegacyReviewSourceKeys(getStateSnapshot()),
+          knownReviewSourceKeys: reviewClaimSourceKeys(getStateSnapshot().reviewTray, Date.now()),
+        });
+      assertSameLedger();
+      const reviewReceipt = stageReviewAlerts(reviewCandidates, undefined, reviewSourceBindings, 'hold-source');
+      await settleReviewStage(reviewCandidates, reviewReceipt);
+      const assertReviewRetention = () => {
+        assertSameLedger();
+        const outcomes = reviewReceipt.retention?.() ?? [];
+        const unresolved = reviewCandidates.filter(requiresReviewRetention).map(item =>
+          outcomes.find(entry => entry.sourceKey === canonicalCaptureSourceKey(item.sourceKey, item.observedAt)))
+          .filter(entry => !entry || !reviewReceiptSettled(entry.outcome));
+        const claims = new Set(reviewReceipt.retainedSourceKeys?.() ?? []);
+        if (deferredInboxReviews || unresolved.length ||
+            skippedKnownInboxReviewSourceKeys.some(key => !claims.has(canonicalCaptureSourceKey(key)))) {
+          throw new ReviewImportHold('review-capacity');
+        }
+      };
+      const commitRetained = async () => { assertReviewRetention(); await commit(); };
+      assertReviewRetention();
       // `declined` carried through, exactly as the automatic path does. Without
       // it this screen — the one a user reaches BECAUSE something looks wrong —
       // is the one path that cannot clear a refused transaction the ledger
@@ -765,9 +815,10 @@ export default function ImportSmsScreen() {
       // below commits the source without importing anything.
       const staged = stageWalletNearMatches(
         buildImportPlan(parsed, getStateSnapshot(), newestTs, new Date(), declined),
-        () => getStateSnapshot().reviewTray, (items) => stageReviewAlerts(items));
+        () => getStateSnapshot().reviewTray, (items) => stageReviewAlerts(items, undefined, undefined, 'hold-source'));
       const p = staged.plan;
       await staged.settle();
+      assertReviewRetention();
       if (!inboxHistoryComplete) throw new Error('sms_history_incomplete');
       p.batch.parserRereadComplete = true;
       const completedInbox: PendingInboxResult = {
@@ -775,6 +826,7 @@ export default function ImportSmsScreen() {
         declined,
         newestTs,
         parserRereadComplete: true,
+        assertReviewRetention,
       };
       const txLike = parsed.filter((x) => x.kind === 'transaction' || x.kind === 'cardPayment');
       setSkippedCount(Math.max(0, txLike.length - p.txCount));
@@ -782,14 +834,15 @@ export default function ImportSmsScreen() {
       setTrackedBills(new Set());
       if (p.txCount === 0 && p.dueCount === 0 && p.billDues.length === 0 && p.healedCount === 0) {
         await importBatch(p.batch).durable;
-        await commit();
+        await commitRetained();
         setNotice({ title: t('upToDate'), body: t('inboxAlreadyFiled') });
         setPendingScanCommit(null);
       } else {
         setPendingInboxResult(completedInbox);
-        setPendingScanCommit(() => commit);
+        setPendingScanCommit(() => commitRetained);
       }
     } catch (error) {
+      if (showReviewRetentionHold(error)) return;
       if (!(error instanceof ImportMoneyError)) throw error;
       setPlan(null);
       setNotice({ title: t('importMoneyMismatchTitle'), body: t('importMoneyMismatchBody') });
@@ -1049,6 +1102,14 @@ export default function ImportSmsScreen() {
     }
   };
 
+  // Fail closed: an iOS History session is staged with receipts, so a missing
+  // barrier must stop the discard instead of silently skipping the check.
+  const requireHistoryRetentionBarrier = async (loaded: LoadedIosHistorySession | null) => {
+    const barrier = loaded?.verifyReviewRetention;
+    if (!barrier) throw new Error('review_retention_barrier_unavailable');
+    await barrier();
+  };
+
   const applyPlan = async () => {
     if (!plan || applying || (!history && historyOperationLocked.current)) return;
     if (!history) historyOperationLocked.current = true;
@@ -1074,9 +1135,11 @@ export default function ImportSmsScreen() {
             pendingInboxResult.declined,
           )
         : plan;
+      if (!history) pendingInboxResult?.assertReviewRetention?.();
     } catch (error) {
       setApplying(false);
       historyOperationLocked.current = false;
+      if (showReviewRetentionHold(error)) return;
       if (!(error instanceof ImportMoneyError)) throw error;
       setHistoryCommitState(history ? 'source-retained' : 'idle');
       setNotice({ title: t('importMoneyMismatchTitle'), body: t('importMoneyMismatchBody') });
@@ -1087,17 +1150,19 @@ export default function ImportSmsScreen() {
     let nearMatchSettle: () => Promise<void>;
     try {
       const staged = stageWalletNearMatches(
-        currentPlan, () => getStateSnapshot().reviewTray, (items) => stageReviewAlerts(items));
+        currentPlan, () => getStateSnapshot().reviewTray, (items) => stageReviewAlerts(items, undefined, undefined, 'hold-source'));
       currentPlan = staged.plan;
       nearMatchSettle = staged.settle;
-    } catch {
+      if (!history) pendingInboxResult?.assertReviewRetention?.();
+    } catch (error) {
       setApplying(false);
       historyOperationLocked.current = false;
+      if (showReviewRetentionHold(error)) return;
       setHistoryCommitState(history ? 'source-retained' : 'idle');
       setNotice({ title: t('historyStorageFailed'), body: t(history ? 'historyStorageFailedBody' : 'importStorageFailedBody') });
       return;
     }
-    if (pendingInboxResult?.parserRereadComplete) {
+    if (!history && pendingInboxResult?.parserRereadComplete) {
       currentPlan.batch.parserRereadComplete = true;
     }
     if (history) {
@@ -1114,7 +1179,10 @@ export default function ImportSmsScreen() {
           await receipt.durable;
           await nearMatchSettle();
         },
-        discard: discardHistorySession,
+        discard: async () => {
+          await requireHistoryRetentionBarrier(historyResult);
+          await discardHistorySession();
+        },
       });
       if (result === 'busy') {
         setApplying(false);
@@ -1158,8 +1226,9 @@ export default function ImportSmsScreen() {
           // ledger batch of its own.
           await pendingScanCommit();
           setPendingScanCommit(null);
-        } catch {
+        } catch (error) {
           historyOperationLocked.current = false;
+          if (showReviewRetentionHold(error)) { setApplying(false); return; }
           setNotice({
             title: t('notificationCleanupFailedTitle'),
             body: t('notificationCleanupFailedBody'),
@@ -1204,8 +1273,9 @@ export default function ImportSmsScreen() {
       try {
         await pendingScanCommit();
         setPendingScanCommit(null);
-      } catch {
+      } catch (error) {
         historyOperationLocked.current = false;
+        if (showReviewRetentionHold(error)) { setApplying(false); return; }
         setNotice({
           title: t('notificationCleanupFailedTitle'),
           body: t('notificationCleanupFailedBody'),
@@ -1232,7 +1302,10 @@ export default function ImportSmsScreen() {
     if (history) {
       const result = await historyOperationController.finalize({
         save: ensureDurable,
-        discard: discardHistorySession,
+        discard: async () => {
+          await requireHistoryRetentionBarrier(historyResult);
+          await discardHistorySession();
+        },
       });
       if (result === 'busy') {
         setApplying(false);
@@ -1267,8 +1340,9 @@ export default function ImportSmsScreen() {
       try {
         await pendingScanCommit();
         setPendingScanCommit(null);
-      } catch {
+      } catch (error) {
         historyOperationLocked.current = false;
+        if (showReviewRetentionHold(error)) { setApplying(false); return; }
         setNotice({
           title: t('notificationCleanupFailedTitle'),
           body: t('notificationCleanupFailedBody'),
@@ -1306,6 +1380,7 @@ export default function ImportSmsScreen() {
     processedHistory.current = `${history}:${historyAttempt}`;
     let active = true;
     const load = async () => {
+      const historyGeneration = getStateGeneration();
       let coordinatorLoaded = false;
       setScanning(true);
       setProgress(null);
@@ -1313,6 +1388,7 @@ export default function ImportSmsScreen() {
       setPasteVerdict(null);
       setPlan(null);
       setHistoryResult(null);
+      setHistoryCapacityWaiting(false);
       setHistorySourceSummary(null);
       setShowManual(false);
       setHistoryCommitState('idle');
@@ -1331,6 +1407,8 @@ export default function ImportSmsScreen() {
           sessionId: history,
           native,
           overrides: state.merchantOverrides,
+          stageReviews: stageReviewAlerts,
+          cancelled: () => !active || getStateGeneration() !== historyGeneration,
           onProgress: ({ scanned, matched }) => {
             if (active) setProgress({ scanned, found: matched });
           },
@@ -1345,7 +1423,7 @@ export default function ImportSmsScreen() {
         // can discard the protected history session.
         const stagedHistory = stageWalletNearMatches(
           buildImportPlan(result.parsed, state, 0, new Date(), result.declined),
-          () => getStateSnapshot().reviewTray, (items) => stageReviewAlerts(items));
+          () => getStateSnapshot().reviewTray, (items) => stageReviewAlerts(items, undefined, undefined, 'hold-source'));
         await stagedHistory.settle();
         if (!active) return;
         const nextPlan = withoutExistingBillReminders(
@@ -1394,7 +1472,10 @@ export default function ImportSmsScreen() {
           });
           const finalizeResult = await historyOperationController.finalize({
             save: ensureDurable,
-            discard: () => discardIosHistorySession(native, history),
+            discard: async () => {
+              await requireHistoryRetentionBarrier(result);
+              await discardIosHistorySession(native, history);
+            },
           });
           if (!active) return;
           if (finalizeResult === 'busy') return;
@@ -1421,6 +1502,13 @@ export default function ImportSmsScreen() {
           if (error instanceof ImportMoneyError) {
             setHistoryCommitState('source-retained');
             setNotice({ title: t('importMoneyMismatchTitle'), body: t('importMoneyMismatchBody') });
+          } else if (error instanceof IosHistoryImportError && error.code === 'review-capacity') {
+            setHistoryCommitState('source-retained');
+            setHistoryCapacityWaiting(true);
+            setNotice({ title: t('historyImportReviewReady'), body: t('historyReviewCapacityBodyIos') });
+          } else if (error instanceof IosHistoryImportError && error.code === 'review-expired') {
+            setHistoryCommitState('source-retained');
+            setNotice({ title: t('historyImportFailed'), body: t('genericSourceChanged') });
           } else if (coordinatorLoaded) {
             setHistoryCommitState('source-retained');
             setNotice({ title: t('historyImportFailed'), body: t('historyImportFailedBody') });
@@ -1872,9 +1960,9 @@ export default function ImportSmsScreen() {
         {/* The answer to a tap that could not do what it offered. It sits
             above the plan because it is the reason the plan is empty, or the
             reason there is no plan at all. */}
-        {pasteReviewCount > 0 && !scanning && !firstRun ? (
+        {(pasteReviewCount > 0 || historyCapacityWaiting) && !scanning && !firstRun ? (
           <Section index={1}>
-            <Button label={tf('genericReviewCount', { count: pasteReviewCount, s: pasteReviewCount === 1 ? '' : 's' })}
+            <Button label={historyCapacityWaiting ? t('historyReviewAction') : tf('genericReviewCount', { count: pasteReviewCount, s: pasteReviewCount === 1 ? '' : 's' })}
               onPress={() => router.push('/review-alerts')} />
           </Section>
         ) : null}

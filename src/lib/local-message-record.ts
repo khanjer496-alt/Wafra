@@ -399,7 +399,7 @@ export async function parseLocalMessageRecordWithAi(
   const { envelope, observedAt } = decoded;
   // A deliberate personal-message refusal must not become a model or learned
   // format proposal merely because its currency routes outside the Gulf.
-  if (hasPersonalMessagePrefix(envelope.text)) return baseline;
+  if (hasPersonalMessagePrefix(envelope.text, envelope.sender)) return baseline;
   try {
     if (baseline.kind === 'ignored') {
       const refusal = inspectSourceFreeRefusedAlert({ source: envelope.text, sender: envelope.sender,
@@ -705,7 +705,7 @@ export function parseLocalMessageRecord(
     // This consumes every currency while refusing only explicit personal chat.
     // Do not gate unknown bank formats on a generic-context vocabulary: real
     // compact field lists can lack those words and still carry sound evidence.
-    if (hasPersonalMessagePrefix(envelope.text)) {
+    if (hasPersonalMessagePrefix(envelope.text, envelope.sender)) {
       return { kind: 'ignored', market: expectedMarket, milestone: 'none' };
     }
     const inspection = session.inspect(envelope.text, envelope.sender);

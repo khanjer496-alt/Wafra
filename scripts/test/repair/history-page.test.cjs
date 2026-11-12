@@ -3,20 +3,36 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const path = require('node:path');
 const load = require('./load-typescript.cjs');
+const tray = require('../build/alert-review-tray.js');
 
 function harness(options = {}) {
   const events = [];
+  const at = Date.now();
+  const missing = () => ({ value: null, alternatives: [], evidence: 'missing', spans: [], issues: [] });
+  const reviews = (options.reviews ?? []).map((_, index) => tray.prepareUniversalReviewAlert({
+    id: `history_page_review_${String(index).padStart(8, '0')}`,
+    sourceKey: `history_page_source_${String(index).padStart(8, '0')}`, observedAt: at, channel: 'inbox',
+    event: { version: 1, decision: 'review', family: 'card-payment', status: 'posted', direction: 'credit',
+      amount: { ...missing(), value: { currency: 'AED', minorUnits: '50000', exponent: 2 }, evidence: 'explicit' },
+      statementTotal: missing(), minimumDue: missing(), balance: missing(), creditLimit: missing(),
+      merchant: missing(), transactionDate: missing(), dueDate: missing(), statementDate: missing(),
+      instrument: missing(), observations: [], issues: [] },
+  }));
   let dependencies;
   let allowed = true;
   let state = { historyImport: { status: 'paused' }, marketId: 'AE', merchantOverrides: {},
-    hydrated: true, onboarded: true, captureOptOut: false };
+    hydrated: true, onboarded: true, captureOptOut: false, reviewTray: tray.emptyAlertReviewTray() };
   const store = {
     state, getStateSnapshot: () => state, getStateGeneration: () => 1,
     setHistoryImportProgress: async () => {},
     setMarket: () => options.marketAllowed !== false,
-    stageReviewAlerts: () => {
+    stageReviewAlerts: (items, _qualifications, _bindings, mode) => {
       events.push('review');
-      return { durable: options.reviewFailure ? Promise.reject(new Error('review write failed')) : Promise.resolve() };
+      const result = tray.admitPreparedReviewAlerts(state.reviewTray, items, Date.now(), mode);
+      state.reviewTray = result.state;
+      return { admitted: result.outcomes.filter(outcome => outcome === 'admitted').length,
+        durable: options.reviewFailure ? Promise.reject(new Error('review write failed')) : Promise.resolve(),
+        retention: () => tray.reviewRetentionReceipts(state.reviewTray, items, Date.now()) };
     },
     importBatch: (batch) => {
       events.push('ledger');
@@ -34,6 +50,7 @@ function harness(options = {}) {
       useRef: (value) => ({ current: value }),
     },
     'react-native': native,
+    '@/lib/alert-review-tray': tray,
     '@/lib/review-source-bindings': { collectLegacyReviewSourceKeys: () => [],
       withoutRecordedReviews: require('../build/review-source-bindings.js').withoutRecordedReviews },
     '@/lib/auto-import': {
@@ -59,7 +76,7 @@ function harness(options = {}) {
   hook.useHistoryImport();
   const next = { status: 'running', cursor: { beforeDateMs: 100, beforeId: 7 } };
   const page = {
-    reviewCandidates: options.reviews ?? [], reviewSourceBindings: options.bindings ?? [],
+    reviewCandidates: reviews, reviewSourceBindings: options.bindings ?? [],
     detectedLaunchMarket: options.market ?? null, parsed: [], declined: [], newestTs: 200,
     inboxHistoryComplete: false, scannedCount: 1000,
     commit: async () => { events.push('ack'); },

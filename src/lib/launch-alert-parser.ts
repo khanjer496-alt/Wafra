@@ -3,7 +3,7 @@ import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars'
 import { activeCountryDateOrder, dateOrderForCountry, getActiveCountry } from '@/lib/country';
 import {
   bestEffortAutoPostEnabled, decideBestEffortAutoPost, hasLinkFromUnregisteredSender, hasNonCompletedWording,
-  isNotAutoPostableMoney, isRegisteredAlertSender, isUnverifiedAlertSender, namesOwnInstrumentTail,
+  isNotAutoPostableMoney, isSafeCardRepaymentReviewSource, isRegisteredAlertSender, isUnverifiedAlertSender, namesOwnInstrumentTail,
   refusedOnlyByShopOrPromoWording,
   sharedSymbolCurrencyForCountry,
 } from '@/lib/best-effort-autopost';
@@ -26,6 +26,8 @@ import { decideGulfNeighbourPosting, gulfNeighbourReadSource, isGulfNeighbourMar
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { alertMarketPack } from '@/lib/alert-market-packs';
 import { normalizeAlertText } from '@/lib/alert-draft';
+import { hasExplicitPersonalMoneyClaim, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isQualifiedCardRepaymentReceipt, isUnpostedCardBalanceClaim, isCompletedCardBalanceReceipt } from '@/lib/principal-posting-guards';
+import { unqualifiedCardCreditCurrencyAliases } from '@/lib/universal-money';
 import { isLatamOwnCardPayment, latamOwnTransferTitle, latamPolicySource, matchLatamTemplate } from '@/lib/latam-alert-templates';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { FxQuote } from '@/lib/fx';
@@ -127,8 +129,23 @@ const MONEY_CLAIM_EVIDENCE =
   /(?<!\p{L})(?:\p{L}*bank|banco|banque|wallet|carteira|billetera|account|acct|a\/c|conta|cuenta|compte|konto|rekening|balance|bal|avl|saldo|solde|ref(?:erence)?|txn|trx|tid|transaction|transfer|transferencia|transfer[êe]ncia|virement|[ée]-?transfer|pix|spei|aani|sarie|yape|plin|nequi|daviplata|m-?pesa|mpesa|upi|imps|neft|rtgs|zelle|interac|gcash|maya|paytm|jazzcash|easypaisa|momo|airtel\s+money)(?!\p{L})/iu;
 const TRANSACTION_CODE = /\b(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{8,12}\b/u;
 /** Explicit first-person chat cannot become an issuer alert through a money verb. */
-const PERSONAL_MESSAGE_PREFIX_RE = /^\s*(?:(?:hi|hey|hello)\b(?:[^\r\n.!?]{0,40}[,!:]|\s+)\s*)?(?:I(?:\s+(?:(?:have|just|already)\s+){0,2}|['’]ve\s+(?:(?:just|already)\s+)?)(?:spent|paid|bought|sent|deposited|transferred|refunded)\b|[اأ]نا\s+(?:(?:قد|لقد)\s+)?(?:صرفت|دفعت|اشتريت|حولت|حوّلت|أرسلت|ارسلت)(?=\s))/iu;
-export const hasPersonalMessagePrefix = (source: string): boolean => PERSONAL_MESSAGE_PREFIX_RE.test(source);
+export const hasPersonalMessagePrefix = (source: string, sender = ''): boolean => {
+  const text = source.replace(/^\s*Dear\s+Customer[,!:]\s*/iu, '');
+  if (hasExplicitPersonalMoneyClaim(text)) return true;
+  // Elliptical chats omit "I" and may start with a casual filler. Explicit
+  // personal wording stays refused even if a sender label names a bank.
+  if (!/^\s*(?:(?:hi|hey|hello|lol|ok|just|so)\b[\s,!:]*)*(?:paid|spent|received)\b/iu.test(text)) return false;
+  if (/\b(?:my\s+(?:account|card)|from\s+(?:me|you)|lol|remind\s+me)\b/iu.test(text)) return true;
+  // A named issuer's courtesy footer is not personal chat. Keep other uses of
+  // "thanks" personal, including on named senders, and keep absent senders strict.
+  const personalThanks = isUnaccountableLaunchSender(sender)
+    ? /\bthanks\b/iu : /\bthanks\b(?!\s+for\s+(?:banking|choosing)\b)/iu;
+  if (personalThanks.test(text)) return true;
+  const lacksBankEvidence = !GENERIC_BANK_CONTEXT.test(text) &&
+    !MONEY_CLAIM_EVIDENCE.test(text) && !TRANSACTION_CODE.test(text);
+  return lacksBankEvidence && (/\b(?:for\s+(?:lunch|dinner|breakfast|the\s+taxi)|on\s+groceries\s+today)\b/iu.test(text) ||
+    isUnaccountableLaunchSender(sender));
+};
 
 // Only a leading principal-money claim is checked here. A posted purchase
 // must survive a separate negated fee, balance update or bank-security footer.
@@ -192,7 +209,8 @@ export const inspectGenericBankEventForReview = (
   market?: string | null,
   sourceContext?: UniversalParseContext,
 ): UniversalBankEvent | null => {
-  if (hasPersonalMessagePrefix(source) || hasNegatedPrincipalMovement(source)) return null;
+  if (hasPersonalMessagePrefix(source, sender) || hasNegatedPrincipalMovement(source) ||
+    isUnpostedCardBalanceClaim(source)) return null;
   // An exact LatAm bank template is bank-alert context in its own right.
   const noContext = !hasGenericBankAlertContext(source, sender) && !matchLatamTemplate(source, { sender });
   // A "money arrived" claim from a phone number, e-mail, generic header or
@@ -220,16 +238,41 @@ export const inspectGenericBankEventForReview = (
   const cardAdmitted = !!senderlessCard && namesOwnInstrumentTail(source, 'debit') &&
     !nonPostingReason(source) && !isNotAutoPostableMoney(source) &&
     !hasNonCompletedWording(source, null, '') && !hasLinkFromUnregisteredSender(source, '');
-  if (noContext && !claimAdmitted && !footerAdmitted && !cardAdmitted) return null;
-  const event = isGulfNeighbourMarket(market)
-    ? inspectUniversalBankEvent(gulfNeighbourReadSource(source, market), {
-        sender, market, dateOrder: dateOrderForCountry(market) ?? undefined,
-      })
-    : inspectUniversalBankEvent(source, sourceContext
-        ? { ...sourceContext, sender }
-        : universalSourceParseContext(hasUniversalInstitutionSender(sender)
-          ? inspectUniversalAlert({ source, sender }) : null, sender, getActiveCountry()));
+  // A held Arabic credit-card receipt can lack the generic context spelling
+  // and global currency alias. Admit its exact regional money to Review only.
+  let cardCreditAliases: CurrencyAliasMap | undefined;
+  const creditSource = /[\uFB50-\uFDFF\uFE70-\uFEFF]/u.test(source) ? normalizeAlertText(source) : source;
+  const heldRepayment = isUnqualifiedCardRepayment(creditSource) || isQualifiedCardRepaymentReceipt(creditSource);
+  const cardBalanceReceipt = isCompletedCardBalanceReceipt(creditSource);
+  const safeCardBalanceReview = !nonPostingReason(source) &&
+    !hasNonCompletedWording(source, null, sender) && !hasLinkFromUnregisteredSender(source, sender) &&
+    (heldRepayment ? isSafeCardRepaymentReviewSource(source) : !isNotAutoPostableMoney(source));
+  if (cardBalanceReceipt && safeCardBalanceReview && (heldRepayment ||
+    isUnqualifiedCardCredit(creditSource, { start: 0, end: creditSource.length }))) {
+    const active = getActiveMarket().id;
+    const launch = detectLaunchMarketFromSender(sender) ??
+      (isAbsentLaunchSender(sender) && (active === 'AE' || active === 'SA')
+        ? detectLaunchMarketFromAlert(source) : null);
+    if (launch) cardCreditAliases = unqualifiedCardCreditCurrencyAliases(source, launch, sourceContext?.currencyAliases);
+  }
+  if (noContext && !claimAdmitted && !footerAdmitted && !cardAdmitted && !cardCreditAliases) return null;
+  const context: UniversalParseContext = isGulfNeighbourMarket(market)
+    ? { sender, market, dateOrder: dateOrderForCountry(market) ?? undefined }
+    : sourceContext ? { ...sourceContext, sender }
+      : universalSourceParseContext(hasUniversalInstitutionSender(sender)
+        ? inspectUniversalAlert({ source, sender }) : null, sender, getActiveCountry());
+  let event = inspectUniversalBankEvent(isGulfNeighbourMarket(market)
+    ? gulfNeighbourReadSource(source, market) : source, cardCreditAliases
+      ? { ...context, currencyAliases: { ...cardCreditAliases, ...context.currencyAliases } } : context);
   if (event.decision !== 'review') return null;
+  if (cardCreditAliases) {
+    if (event.status !== 'posted' && event.status !== 'unknown') return null;
+    // The regional past-tense receipt supplies the completion proof missing
+    // from the generic reader. It authorises typed Review, never auto-add.
+    event = { ...event, status: 'posted', family: 'card-payment' };
+  } else if (heldRepayment && safeCardBalanceReview && (event.status === 'posted' || event.status === 'unknown')) {
+    event = { ...event, family: 'card-payment' };
+  }
   // A source-labelled credit limit is not a second purchase. Every other
   // extra figure remains refused: "used for X ... and Y ..." can otherwise
   // look like one explicit principal plus one unknown amount.
@@ -243,7 +286,7 @@ export const inspectGenericBankEventForReview = (
     event.instrument.value?.kind !== 'card' || event.instrument.value.last4 !== senderlessCard?.[1])) return null;
   if (hasNativeCurrencyAccountContext(source) && !hasBankAlertMoneyHint(source) &&
     (event.amount.evidence !== 'explicit' || event.amount.value?.currency !== 'ZAR')) return null;
-  if (noContext && !((event.direction === 'credit' || ((footerAdmitted || cardAdmitted) && event.direction === 'debit')) &&
+  if (noContext && !cardCreditAliases && !((event.direction === 'credit' || ((footerAdmitted || cardAdmitted) && event.direction === 'debit')) &&
     event.status === 'posted' && event.amount.evidence !== 'missing')) return null;
   const hasGroundedMoney =
     event.amount.evidence !== 'missing' ||
@@ -414,7 +457,7 @@ const universalCardPayment = (
   observedAt?: number,
 ): Omit<ParsedSms, 'raw' | 'bestEffort'> | null => {
   if (event.family !== 'card-payment' || event.decision !== 'review' ||
-    nonPostingReason(source) || isNotAutoPostableMoney(source)) return null;
+    nonPostingReason(source) || (isNotAutoPostableMoney(source) && !isSafeCardRepaymentReviewSource(source))) return null;
   // An exact Latin American own card-bill template ("Pagaste ... en la tarjeta
   // de credito *4321 desde la cuenta *1234") names the paid card in Spanish.
   const latamCardPayment = event.family === 'card-payment' && isLatamOwnCardPayment(source);
@@ -795,36 +838,44 @@ const sharedSenderOutsideGulf = (
 };
 
 /**
- * THE UAE/SAUDI GRAMMAR TRUSTS ITS SENDER. A blank sender (an iPhone History
- * record: iOS 26 Find Messages exposes none) or a phone number, e-mail or
- * generic word is not a bank, and the launch grammar would otherwise book
- * "Dear Customer, AED 5,000.00 has been credited to your account. Click
- * https://enbd-verify.com to confirm" or "+971…: You have received AED
- * 1,500.00 from JOHN via Aani." as income. From such a sender:
- *  - a smishing link call-to-action, a fraud prompt or not-a-new-movement
- *    wording (isNotAutoPostableMoney) never posts;
- *  - a credit must name the person's OWN account or card by its tail
+ * UAE/SAUDI sender and wording policy, after the regional grammar:
+ *  - smishing, fraud prompts and not-a-new-movement wording never post,
+ *    including when the sender label names a registered bank;
+ *  - a present unverified sender (phone, e-mail or generic header) waits
+ *    in Review, even when the body looks exactly like a bank template;
+ *  - a blank sender or Wafra transport placeholder retains the grammar, but
+ *    a credit must name the person's OWN account or card by its tail
  *    (namesOwnInstrumentTail: never a payer's "from account XXXX9876"; a
  *    field-labelled "To: **1234" counts), or it is not auto-posted: it waits
  *    in Review with its amount (heldLaunchCreditForReview, auto-import.ts).
  * The parser's own card identity is NOT evidence: it reads a payer's
  * "from card 1234" as readily as the reader's.
- * A registered header (a bank's sender ID) keeps the grammar's decision.
+ * Other named headers keep the grammar's decision after the wording guard.
  */
-/** A blank sender, or a phone number, e-mail or generic word: nobody a bank registered. */
+// These queue labels carry no issuer identity. Swift's notification adapter
+// makes the same normalization before invoking the shared parser bundle.
+const isAbsentLaunchSender = (sender: string): boolean =>
+  !sender.trim() || /^Wafra (?:Automation|Notification)$/.test(sender.trim());
+/** No attested sender, or a phone number, e-mail or generic word. */
 export const isUnaccountableLaunchSender = (sender: string): boolean =>
-  !sender.trim() || isUnverifiedAlertSender(sender);
+  isAbsentLaunchSender(sender) || isUnverifiedAlertSender(sender);
 /**
- * The credit the sender-trust rule held back (no own tail, no scam wording),
- * for the refusal path to offer in Review with its amount. Null otherwise.
+ * Credits held for an unverified sender, or an absent sender without an own
+ * tail, wait in Review with their amount. Scam wording remains refused.
  */
 export const isHeldLaunchCredit = (source: string, sender: string, parsed: ParsedSms | null): boolean =>
   !!parsed && isUnaccountableLaunchSender(sender) && parsed.kind === 'transaction' && parsed.type === 'income' &&
-  !isNotAutoPostableMoney(source) && !namesOwnInstrumentTail(source, 'credit');
+  !isNotAutoPostableMoney(source) && (isUnverifiedAlertSender(sender) || !namesOwnInstrumentTail(source, 'credit'));
 const launchSenderAnswersFor = (source: string, sender: string, parsed: ParsedSms): boolean => {
-  if (sender.trim() && !isUnverifiedAlertSender(sender)) return true;
+  // A familiar sender label cannot make a smishing call-to-action settled
+  // money. Apply the same wording guard as the worldwide posting policy.
+  const provedSettlement = parsed.kind === 'cardPayment' && parsed.transferHint === true &&
+    parsed.card?.kind === 'credit' && /^\d{4}$/u.test(parsed.card.last4) &&
+    parsed.currency === pinnedLedgerCurrencyCode() && parsed.fxSource !== 'fallback' &&
+    isSafeCardRepaymentReviewSource(source) && !hasNonCompletedWording(source, null, sender);
+  if (isNotAutoPostableMoney(source) && !provedSettlement) return false;
+  if (!isAbsentLaunchSender(sender)) return !isUnverifiedAlertSender(sender);
   if (parsed.kind !== 'transaction') return true;
-  if (isNotAutoPostableMoney(source)) return false;
   return parsed.type !== 'income' || namesOwnInstrumentTail(source, 'credit');
 };
 
@@ -887,7 +938,7 @@ export const createLaunchAlertSession = ({
   let detected: 'AE' | 'SA' | null = null;
 
   const inspect = (source: string, sender: string): UniversalAlertReview | null => {
-    if (hasPersonalMessagePrefix(source) || hasNegatedPrincipalMovement(source)) return null;
+    if (hasPersonalMessagePrefix(source, sender) || hasNegatedPrincipalMovement(source)) return null;
     if (!REVIEW_MONEY_HINT.test(source)) return null;
     // A launch-tested issuer can quote any foreign transaction currency. Its
     // exact sender evidence already outranks that currency, and the universal
@@ -966,7 +1017,7 @@ export const createLaunchAlertSession = ({
     forcedMarket?: string,
     observedAt?: number,
   ): ParsedSms | null => {
-    if (hasPersonalMessagePrefix(source) || hasNegatedPrincipalMovement(source)) return null;
+    if (hasPersonalMessagePrefix(source, sender) || hasNegatedPrincipalMovement(source)) return null;
     // A BNPL provider's restatement of a bank card charge (see
     // bnpl-providers.ts). The regional path already refuses it; the
     // worldwide fallback below must not resurrect it on an unpinned ledger.
@@ -1046,7 +1097,7 @@ export const createLaunchAlertSession = ({
     inspection: UniversalAlertReview | null = null,
     observedAt?: number,
   ): ParsedSms | null => {
-    if (hasPersonalMessagePrefix(source) || hasNegatedPrincipalMovement(source)) return null;
+    if (hasPersonalMessagePrefix(source, sender) || hasNegatedPrincipalMovement(source)) return null;
     if (!bestEffort.enabled) return null;
     // Same rule as parse(): an SMS from a BNPL provider's sender ID reaches
     // this path (it is no launch-bank sender) and must not post as an
