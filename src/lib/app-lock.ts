@@ -90,3 +90,11 @@ export function createUnlockSession(): {
 
 /** The one session of this process, shared by every mount of the gate. */
 export const appLockSession = createUnlockSession();
+
+/**
+ * Whether the app was away long enough to re-lock: `leftAt` is when it left the foreground
+ * (0 when it did not), `graceMs` the short trips that must not re-lock (permission sheets).
+ */
+export function shouldRelockAfterAbsence(leftAt: number, now: number, graceMs: number): boolean {
+  return leftAt > 0 && now - leftAt > graceMs;
+}

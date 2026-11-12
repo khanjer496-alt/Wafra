@@ -83,6 +83,10 @@ ok('turning App Lock on accepts a passcode-only phone',
   eq('a remounted gate still sees when the app was left', { leftAt: away.leftAt() }.leftAt, 1_000);
   away.setLeftAt(0);
   eq('and a return clears it', away.leftAt(), 0);
+  eq('an absence longer than the grace re-locks', lock.shouldRelockAfterAbsence(1_000, 22_000, 20_000), true);
+  eq('exactly the grace does not', lock.shouldRelockAfterAbsence(1_000, 21_000, 20_000), false);
+  eq('a short trip (a permission sheet) does not', lock.shouldRelockAfterAbsence(1_000, 6_000, 20_000), false);
+  eq('no recorded absence never re-locks', lock.shouldRelockAfterAbsence(0, 999_999, 20_000), false);
   eq('the process session starts locked', lock.appLockSession.isUnlocked(), false);
   lock.appLockSession.setUnlocked(true);
   eq('the process session is one object for every mount', lock.appLockSession.isUnlocked(), true);
@@ -99,7 +103,10 @@ ok('turning App Lock on accepts a passcode-only phone',
   const layout = stripComments(read('src/components/app-root-layout.tsx'));
   ok('the gate keeps the time it was left in the session, not in a local variable of the effect',
     !/let leftAt\b/.test(gate) && /appLockSession\.setLeftAt\(appLockSession\.leftAt\(\) \|\| Date\.now\(\)\)/.test(gate) &&
-      /const away = Date\.now\(\) - appLockSession\.leftAt\(\)/.test(gate));
+      /appLockSession\.setLeftAt\(0\);\s*if \(relock\) \{/.test(gate));
+  ok('a gate that registers after the active event checks the recorded absence once on mount',
+    /if \(AppState\.currentState === 'active' &&\s*shouldRelockAfterAbsence\(appLockSession\.leftAt\(\), Date\.now\(\), RELOCK_GRACE_MS\)\) \{\s*appLockSession\.setLeftAt\(0\);\s*markUnlocked\(false\);/.test(gate) &&
+      /const relock = shouldRelockAfterAbsence\(appLockSession\.leftAt\(\), Date\.now\(\), RELOCK_GRACE_MS\);/.test(gate));
   ok('a language change still remounts the subtree (compiled text is evaluated again)',
     /key=\{language\}/.test(layout) && /<LockGate>/.test(layout));
 }

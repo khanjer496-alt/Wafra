@@ -11,7 +11,7 @@ import { LockPattern } from '@/components/settings-band/lock-pattern';
 import { Fonts, ScreenPadding, Spacing } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { APP_LOCK_AUTH_OPTIONS, appLockSession, deviceLockLevel, unlockOutcome } from '@/lib/app-lock';
+import { APP_LOCK_AUTH_OPTIONS, appLockSession, deviceLockLevel, shouldRelockAfterAbsence, unlockOutcome } from '@/lib/app-lock';
 import { useStore } from '@/lib/store';
 import { t } from '@/lib/i18n';
 import { settingsCopy } from '@/lib/settings-copy';
@@ -137,6 +137,14 @@ export function LockGate({ children }: { children: React.ReactNode }) {
     // The time the app left the foreground lives in the session, not in this effect: a
     // remount between 'inactive' and 'active' (the system language changing while the
     // app was away) must still see a long absence and re-lock.
+    // ...including when this gate registers AFTER the 'active' event already fired: check once now.
+    if (AppState.currentState === 'active' &&
+        shouldRelockAfterAbsence(appLockSession.leftAt(), Date.now(), RELOCK_GRACE_MS)) {
+      appLockSession.setLeftAt(0);
+      markUnlocked(false);
+      setAttempted(false);
+      setBiometric('prompting');
+    }
     const sub = AppState.addEventListener('change', (next) => {
       if (authenticatingRef.current) return;
       if (next === 'background' || next === 'inactive') {
@@ -152,9 +160,9 @@ export function LockGate({ children }: { children: React.ReactNode }) {
         return;
       }
       if (next === 'active' && appLockSession.leftAt()) {
-        const away = Date.now() - appLockSession.leftAt();
+        const relock = shouldRelockAfterAbsence(appLockSession.leftAt(), Date.now(), RELOCK_GRACE_MS);
         appLockSession.setLeftAt(0);
-        if (away > RELOCK_GRACE_MS) {
+        if (relock) {
           markUnlocked(false);
           setAttempted(false);
           setBiometric('prompting');
