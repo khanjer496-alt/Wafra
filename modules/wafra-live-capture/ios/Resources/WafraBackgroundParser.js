@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: d14375920f822185c2e52c88577f5602873f57af9ab7974992a879da30f9597e
+// Generated from normal shipping TypeScript. Source SHA-256: 88630193594d760f1b0287a9b421efcea8cb84401367421820dc46695cec3d47
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -6397,7 +6397,7 @@ const S = {
     },
     proContinue: { en: 'Continue to Wafra', ar: 'متابعة إلى وفرة' },
     trialEndedPaywall: { en: 'Free automatic capture has ended. Automatic capture needs Pro; manual entry and imports stay free.', ar: 'انتهى الالتقاط التلقائي المجاني. يحتاج الالتقاط التلقائي إلى برو، ويبقى الإدخال اليدوي والاستيراد مجانياً.' },
-    freeTrialActive: { en: 'FREE AUTOMATIC CAPTURE', ar: 'الالتقاط التلقائي المجاني مفعّل' },
+    freeTrialActive: { en: 'FREE AUTOMATIC CAPTURE ACTIVE', ar: 'الالتقاط التلقائي المجاني مفعّل' },
     getPro: { en: 'Get Wafra Pro', ar: 'اشترك في وفرة برو' },
     startPlanWithPrice: {
         en: 'Start {plan} — {price}',
