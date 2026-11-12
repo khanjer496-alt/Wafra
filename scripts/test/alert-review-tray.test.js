@@ -528,6 +528,21 @@ ok('hydration cannot relabel UAE review money as a foreign ledger amount',
       tray.recentlyLostReviewCount(foreignState, NOW + 1000, 'currency-evicted') === 0 &&
       tray.recentlyLostReviewCount(foreignState, NOW + 1000, 'evicted') === 0,
     JSON.stringify(foreignState.tombstones));
+  // M4(ii): admission never grows the lane past fifty, but older saved state
+  // can. Hydration trims it once, as exactly one counted loss, and a second
+  // reload neither adds nor removes a loss record.
+  const overCapForeign = { ...emptyAlertReviewTray(),
+    pending: Array.from({ length: 51 }, (_, index) => currencyItem(index)) };
+  const overCapOnce = normalizeAlertReviewTray(JSON.parse(JSON.stringify(overCapForeign)), NOW + 1000);
+  const overCapTwice = normalizeAlertReviewTray(JSON.parse(JSON.stringify(overCapOnce)), NOW + 1500);
+  const currencyLosses = (state) => state.tombstones.filter((item) => item.outcome === 'currency-evicted').length;
+  ok('an over-cap foreign-currency tray from older state counts exactly one currency-evicted loss, once',
+    overCapOnce.pending.length === 50 && currencyLosses(overCapOnce) === 1 &&
+      tray.recentlyLostReviewCount(overCapOnce, NOW + 1000, 'currency-evicted') === 1 &&
+      overCapOnce.pending.every((item) => overCapForeign.pending.some((kept) => kept.id === item.id)) &&
+      overCapTwice.pending.length === 50 && currencyLosses(overCapTwice) === 1 &&
+      tray.recentlyLostReviewCount(overCapTwice, NOW + 1500, 'currency-evicted') === 1,
+    JSON.stringify({ once: overCapOnce.tombstones, twice: overCapTwice.tombstones }));
   const mixedLanes = pruneAlertReviewTray({ ...emptyAlertReviewTray(),
     pending: [...fullLegacy.pending, ...currencyFull.pending] }, NOW + 1000);
   ok('fifty Message reviews and fifty foreign-currency reviews coexist without eviction',

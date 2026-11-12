@@ -2180,11 +2180,27 @@ struct WafraBankSenderRegistryTests {
       ok('an SAR Review item cannot be posted into the AED ledger without a rate',
         plan.outcome === 'refused' && plan.reason === 'fx-rate-unavailable',
         JSON.stringify(plan));
+      // M2(i): identity, not only counts: the fifty first-admitted purchases are
+      // kept and the newer fifty-first is the one waiting.
+      ok('the kept fifty are the first admitted and the newer purchase is the one waiting',
+        saIds.slice(0, 50).every((id) => native.acknowledged.includes(id)) &&
+          native.pending().length === 1 && JSON.parse(native.pending()[0]).id === saIds[50] &&
+          !native.acknowledged.includes(saIds[50]),
+        JSON.stringify({ pending: native.pending().map((record) => JSON.parse(record).id) }));
+      // M4(i): a fresh session (persisted and hydrated tray, a new coordinator,
+      // an empty in-memory backlog) re-derives the waiting count once.
+      const keysBefore = hydrated.pending.map((item) => item.sourceKey).sort();
+      ledger.setState({ ...ledger.getState(), reviewTray: hydrated });
+      trayModule.reviewCaptureBacklog.reset();
       const drainAgain = await coordinator(native, ledger).drain();
+      const trayAgain = ledger.getState().reviewTray;
       ok('a second drain keeps the waiting foreign purchase queued, unduplicated and unlost',
         native.pending().length === 1 && drainAgain.imported === 0 && drainAgain.reviews === 0 &&
-          ledger.getState().reviewTray.pending.length === 50,
-        JSON.stringify({ drainAgain, pending: native.pending().length }));
+          trayAgain.pending.length === 50 && drainAgain.deferredReviews === 1 &&
+          trayModule.reviewCaptureBacklog.get().waiting === 1 &&
+          new Set(trayAgain.pending.map((item) => item.sourceKey)).size === 50 &&
+          JSON.stringify(trayAgain.pending.map((item) => item.sourceKey).sort()) === JSON.stringify(keysBefore),
+        JSON.stringify({ drainAgain, pending: native.pending().length, backlog: trayModule.reviewCaptureBacklog.get() }));
       // TTL: a purchase still waiting when its native record passes recordTTL
       // (30 days) is purged by the store and counted as `dropped` with a warning
       // (pinned natively in native-live-capture-store.swift). The drain must not
@@ -2505,8 +2521,17 @@ struct WafraBankSenderRegistryTests {
       ok('fifty unresolved foreign-currency reviews never block a later AED purchase or AED review',
         outcome.imported === 1 && native.acknowledged.includes(aeId) &&
           native.acknowledged.includes(aeReviewId) &&
-          tray.pending.some((item) => !trayModule.isCurrencyConflictReview(item)),
-        JSON.stringify({ outcome, pending: native.pending().length, calls: native.calls }));
+          tray.pending.some((item) => !trayModule.isCurrencyConflictReview(item)) &&
+          // M1: the AED purchase is a real ledger row and no AED record stays queued.
+          ledger.getState().transactions.length === 1 &&
+          !native.pending().some((record) => [aeId, aeReviewId].includes(JSON.parse(record).id)),
+        JSON.stringify({ outcome, pending: native.pending().length, calls: native.calls,
+          transactions: ledger.getState().transactions.length }));
+      // M2(i): the kept fifty are exactly the first-admitted purchases.
+      const seededKeys = seededPending.map((item) => item.sourceKey).sort();
+      ok('the kept foreign-currency fifty are the originally admitted purchases',
+        JSON.stringify(tray.pending.filter(trayModule.isCurrencyConflictReview).map((item) => item.sourceKey).sort()) ===
+          JSON.stringify(seededKeys));
       ok('the foreign-currency overflow waits at its source, visible as waiting, never a silent acknowledgement',
         moreSa.every((id) => !native.acknowledged.includes(id)) && native.pending().length === moreSa.length &&
           tray.pending.filter(trayModule.isCurrencyConflictReview).length === 50 &&
@@ -2520,6 +2545,55 @@ struct WafraBankSenderRegistryTests {
       ok('reloading the tray keeps the foreign-currency lane exactly and counts no loss',
         trayModule.recentlyLostReviewCount(reloaded, Date.now(), 'currency-evicted') === 0 &&
           reloaded.pending.length === tray.pending.length);
+      // M2(ii): once the user resolves one foreign review, the next drain admits
+      // exactly one waiting purchase, acknowledges it once and keeps the rest.
+      const resolved = trayModule.resolveReviewAlert(tray, seededPending[0].id, 'dismissed', Date.now());
+      ledger.setState({ ...ledger.getState(), reviewTray: resolved });
+      trayModule.reviewCaptureBacklog.reset();
+      const ackedBefore = native.acknowledged.length;
+      const retry = await coordinator(native, ledger).drain();
+      const retryTray = ledger.getState().reviewTray;
+      const newlyAcked = native.acknowledged.slice(ackedBefore);
+      ok('resolving one foreign review lets exactly one waiting purchase in, once',
+        newlyAcked.length === 1 && newlyAcked[0] === moreSa[0] &&
+          native.pending().length === moreSa.length - 1 &&
+          retryTray.pending.filter(trayModule.isCurrencyConflictReview).length === 50 &&
+          new Set(retryTray.pending.map((item) => item.sourceKey)).size === retryTray.pending.length &&
+          retry.deferredReviews === moreSa.length - 1 &&
+          trayModule.reviewCaptureBacklog.get().waiting === moreSa.length - 1 &&
+          trayModule.recentlyLostReviewCount(retryTray, Date.now(), 'currency-evicted') === 0,
+        JSON.stringify({ retry, newlyAcked, pending: native.pending().length, backlog: trayModule.reviewCaptureBacklog.get() }));
+      trayModule.reviewCaptureBacklog.reset();
+
+      // M3: the held-record bound (MAX_EXCLUDED_RECORDS 2000) stays. Records
+      // beyond it are not read in this drain, but they remain queued natively,
+      // are never acknowledged or dropped, and are counted in the capture
+      // status's pending count ("Waiting to process" in Capture health).
+      const boundSa = Array.from({ length: 2000 }, () => nextId());
+      const boundAe = nextId();
+      const boundNative = withNotificationLane(nativeQueue([
+        ...boundSa.map((id, index) => envelope({
+          id, sender: 'ALRAJHI', text: saBodyAt(100 + index), observedAt: recentIso(7_200_000 - index * 1000),
+        })),
+        envelope({ id: boundAe, observedAt: recentIso(60_000) }),
+      ]));
+      boundNative.listPendingRecordsExcluding = async (limit, excludeIds) => {
+        boundNative.calls.push(`listExcluding:${limit}:${excludeIds.length}`);
+        const excluded = new Set(excludeIds);
+        return boundNative.pending().filter((serialized) => !excluded.has(JSON.parse(serialized).id)).slice(0, limit);
+      };
+      const boundLedger = admittingLedger(retryTray.pending);
+      boundLedger.setState({ ...boundLedger.getState(), ledgerMoney: AED_MONEY });
+      const bounded = await coordinator(boundNative, boundLedger).drain();
+      const boundStatus = await boundNative.getCaptureStatus();
+      ok('beyond the 2,000 held-record bound, records stay queued and counted, never dropped or acknowledged',
+        boundNative.acknowledged.length === 0 && boundNative.pending().length === 2001 &&
+          boundNative.pending().some((record) => JSON.parse(record).id === boundAe) &&
+          bounded.deferredReviews === 2000 && trayModule.reviewCaptureBacklog.get().waiting === 2000 &&
+          bounded.imported === 0 && boundStatus.pending === 2001 && boundStatus.dropped === 0 &&
+          boundLedger.getState().reviewTray.pending.length === retryTray.pending.length,
+        JSON.stringify({ bounded, status: boundStatus, acked: boundNative.acknowledged.length,
+          calls: boundNative.calls.slice(-3) }));
       trayModule.reviewCaptureBacklog.reset();
     }
 
