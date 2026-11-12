@@ -540,7 +540,9 @@ ok('hydration cannot relabel UAE review money as a foreign ledger amount',
       tray.partitionReviewsByCapacity(currencyFull, [incoming], NOW + 1000).deferred.length === 0);
   const moreForeign = Array.from({ length: 5 }, (_, index) => currencyItem(100 + index));
   const foreignPartition = tray.partitionReviewsByCapacity(currencyFull, moreForeign, NOW + 1000);
-  ok('a foreign-currency review never waits for Review space',
+  // Title matches the assertion (App QA F2): a full currency lane defers new
+  // foreign money to its source instead of admitting it.
+  ok('a full foreign-currency lane defers new foreign reviews to their source',
     foreignPartition.deferred.length === 5 && foreignPartition.admit.length === 0);
   let foreignState = currencyFull;
   for (const item of moreForeign) foreignState = admitPreparedReviewAlert(foreignState, item, NOW + 1000, 'hold-source').state;
