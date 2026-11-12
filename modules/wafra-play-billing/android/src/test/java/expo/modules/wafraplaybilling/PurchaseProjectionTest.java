@@ -22,6 +22,17 @@ public class PurchaseProjectionTest {
     assertEquals(Collections.singletonList("wafra_pro_weekly"),r.activeProductIds);
     assertEquals(Integer.valueOf(0),r.responseCode);
   }
+  /** The exact bridge map superwall-attribute-loop.test.cjs feeds the real provider, per plan. */
+  @Test public void eachPlanPurchaseCrossesTheBridgeAsItsBareSkuOnly() throws Exception {
+    for(String sku:Arrays.asList("wafra_pro_weekly","wafra_pro_yearly")) {
+      java.util.Map<String,Object> map=project(row(sku,0)).toMap();
+      assertEquals(Arrays.asList("status","activeProductIds","pendingProductIds","responseCode"),new java.util.ArrayList<>(map.keySet()));
+      assertEquals("active",map.get("status"));
+      assertEquals(Collections.singletonList(sku),map.get("activeProductIds"));
+      assertEquals(Collections.emptyList(),map.get("pendingProductIds"));
+      assertEquals(Integer.valueOf(0),map.get("responseCode"));
+    }
+  }
   @Test public void retiredMonthlyRemainsARecognizedOwnedSubscription() throws Exception {
     assertEquals(Collections.singletonList("wafra_pro_monthly"),project(row("wafra_pro_monthly",0)).activeProductIds);
   }
