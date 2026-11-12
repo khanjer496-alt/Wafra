@@ -63,7 +63,12 @@ export function LockGate({ children }: { children: React.ReactNode }) {
   // Started from the process-wide session, not `false`: changing the language
   // remounts this gate (see app-root-layout.tsx) and must not ask for the
   // biometric again. Every change below is written back through markUnlocked.
-  const [unlocked, setUnlocked] = useState(() => appLockSession.isUnlocked());
+  // The long-absence rule is applied HERE too, not only in the effect below: an effect runs
+  // after the first paint, so a remount after a long absence would show one frame of content
+  // before locking. Fail closed from the very first commit.
+  const [unlocked, setUnlocked] = useState(() => appLockSession.isUnlocked() &&
+    !(AppState.currentState === 'active' &&
+      shouldRelockAfterAbsence(appLockSession.leftAt(), Date.now(), RELOCK_GRACE_MS)));
   const markUnlocked = useCallback((next: boolean) => {
     appLockSession.setUnlocked(next);
     setUnlocked(next);

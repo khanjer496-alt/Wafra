@@ -96,5 +96,6 @@ export const appLockSession = createUnlockSession();
  * (0 when it did not), `graceMs` the short trips that must not re-lock (permission sheets).
  */
 export function shouldRelockAfterAbsence(leftAt: number, now: number, graceMs: number): boolean {
-  return leftAt > 0 && now - leftAt > graceMs;
+  // A clock set BACK while the app was away (now < leftAt) cannot prove a short absence: fail closed.
+  return leftAt > 0 && (now < leftAt || now - leftAt > graceMs);
 }
