@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 1780dda6f395ac01191d44885c90116ec4576f4b580e7d526e366660104eb04d
+// Generated from normal shipping TypeScript. Source SHA-256: 61f9ad06ecdfd097ce7480dc1f7d6d19c8ecaa51f11523a7f2f5269938329136
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -5130,7 +5130,7 @@ const S = {
         ar: 'كشوف طابقتها وفرة مع دفعة بطاقة.',
     },
     paidStatementDue: { en: 'Statement due {date} · paid', ar: 'كشف مستحق {date} · مدفوع' },
-    trialEndedBanner: { en: 'Trial ended · tracking paused', ar: 'انتهت التجربة · توقف التتبع' },
+    trialEndedBanner: { en: 'Free capture ended · automatic capture paused', ar: 'انتهى الالتقاط المجاني · الالتقاط التلقائي متوقف' },
     trialEndedBannerSub: { en: 'Subscribe to keep importing your bank SMS', ar: 'اشترك لمواصلة قراءة رسائل البنك' },
     turnOnTracking: { en: 'Turn on automatic tracking', ar: 'فعّل التتبع التلقائي' },
     trackingPrivacy: { en: 'Wafra reads bank SMS on this device only', ar: 'وفرة تقرأ رسائل البنك على هذا الجهاز فقط' },
@@ -6149,8 +6149,8 @@ const S = {
         ar: 'أعد مشاهدة تجربة البداية دون تغيير بياناتك أو إعداداتك',
     },
     settingsTrialDays: {
-        en: 'Free trial · {count} day{s} left',
-        ar: 'تجربة مجانية · متبقٍ {count} يوم',
+        en: 'Free automatic capture · {count} day{s} left',
+        ar: 'الالتقاط التلقائي المجاني · متبقٍ {count} يوم',
     },
     wafraPro: { en: 'Wafra Pro', ar: 'وفرة برو' },
     proActive: { en: 'Active', ar: 'مفعّل' },
@@ -6166,9 +6166,14 @@ const S = {
         en: 'Privacy is built into Wafra. Your ledger is encrypted on iPhone and Android. Local bank-message capture works without uploading your messages. App lock adds protection when someone else is using your unlocked phone.',
         ar: 'الخصوصية جزء أساسي من وفرة. سجلك مشفّر على آيفون وأندرويد، ويعمل الالتقاط المحلي لرسائل البنك دون رفع رسائلك. ويضيف قفل التطبيق حماية عندما يستخدم شخص آخر هاتفك المفتوح.',
     },
+    onlineLogosTitle: { en: 'Online merchant logos', ar: 'شعارات التجار عبر الإنترنت' },
+    onlineLogosDetail: { en: 'Off by default. When on, merchant and bank names are sent to Brandfetch, a logo service. It also sees your network address.', ar: 'متوقفة افتراضياً. عند تفعيلها تُرسل أسماء التجار والبنوك إلى خدمة الشعارات Brandfetch، التي ترى أيضاً عنوان اتصالك بالشبكة.' },
+    onlineLogosPaused: { en: 'Paused by your local-only preference.', ar: 'متوقفة بسبب تفضيل المعالجة المحلية.' },
+    hideLockedWidgetAmountsTitle: { en: 'Hide widget amounts with App Lock', ar: 'إخفاء مبالغ الودجات مع قفل التطبيق' },
+    hideLockedWidgetAmountsDetail: { en: 'While App Lock is on, amounts stay hidden on Home Screen widgets, even after you unlock Wafra. Names and dates remain visible.', ar: 'عند تشغيل قفل التطبيق تبقى المبالغ مخفية في ودجات الشاشة الرئيسية حتى بعد فتح وفرة. تبقى الأسماء والتواريخ ظاهرة.' },
     privacyLogosBody: {
-        en: 'Logos appear automatically. Many merchant and bank identities ship with the app. For other merchants or banks, Wafra may send only a cleaned brand or institution name — not the amount, account/card number or bank message — to Brandfetch to find a confident match, then load its logo. Brandfetch can see that name lookup, the requested brand domain and your network address.',
-        ar: 'تظهر الشعارات تلقائياً، ويأتي كثير من هويات التجّار والبنوك مع التطبيق. وللتجّار أو البنوك الأخرى قد ترسل وفرة اسم العلامة أو المؤسسة المنظّف فقط — دون المبلغ أو رقم الحساب أو البطاقة أو نص رسالة البنك — إلى Brandfetch للعثور على تطابق موثوق ثم تحميل شعاره. ويمكن لـ Brandfetch رؤية بحث الاسم ونطاق العلامة المطلوب وعنوان اتصالك بالشبكة.',
+        en: 'Online logos are off by default on both platforms. Turn them on in Settings to share names with Brandfetch. Bundled logos appear locally. Many merchant and bank identities ship with the app. For other merchants or banks, Wafra may send only a cleaned brand or institution name — not the amount, account/card number or bank message — to Brandfetch to find a confident match, then load its logo. Brandfetch can see that name lookup, the requested brand domain and your network address.',
+        ar: 'الشعارات المتصلة متوقفة افتراضياً على المنصتين. يمكنك تفعيلها في الإعدادات لمشاركة الأسماء مع Brandfetch. تظهر الشعارات المضمنة محلياً، ويأتي كثير من هويات التجّار والبنوك مع التطبيق. وللتجّار أو البنوك الأخرى قد ترسل وفرة اسم العلامة أو المؤسسة المنظّف فقط — دون المبلغ أو رقم الحساب أو البطاقة أو نص رسالة البنك — إلى Brandfetch للعثور على تطابق موثوق ثم تحميل شعاره. ويمكن لـ Brandfetch رؤية بحث الاسم ونطاق العلامة المطلوب وعنوان اتصالك بالشبكة.',
     },
     privacyLegacyTitle: { en: 'Your earlier local-only choice is saved', ar: 'اختيارك السابق للمعالجة المحلية محفوظ' },
     privacyLegacyBody: {
@@ -6178,8 +6183,8 @@ const S = {
     privacyLegacyReview: { en: 'Review online features', ar: 'مراجعة الميزات المتصلة' },
     privacyResumeTitle: { en: 'Resume optional online features?', ar: 'استئناف الميزات المتصلة الاختيارية؟' },
     privacyResumeBody: {
-        en: 'This restores automatic reference exchange-rate and logo requests, allows you to set up cloud imports, and lets unclear message text stay on this phone for correction. A previously connected relay can resume syncing. Creating a connection or uploading a statement still needs its own action. Previously removed message text cannot be recovered.',
-        ar: 'يستأنف هذا طلبات أسعار الصرف المرجعية والشعارات التلقائية، ويتيح إعداد الاستيراد السحابي والاحتفاظ بنص الرسائل غير الواضحة على هذا الهاتف لتصحيحها. وقد تستأنف خدمة مربوطة سابقاً المزامنة. ويتطلب إنشاء اتصال أو رفع كشف إجراءً منفصلاً. ولا يمكن استعادة نصوص الرسائل المحذوفة سابقاً.',
+        en: 'This restores reference exchange-rate requests and online logos only if you separately enabled them, allows you to set up cloud imports, and lets unclear message text stay on this phone for correction. A previously connected relay can resume syncing. Creating a connection or uploading a statement still needs its own action. Previously removed message text cannot be recovered.',
+        ar: 'يستأنف هذا طلبات أسعار الصرف المرجعية والشعارات المتصلة فقط إذا فعّلتها بشكل منفصل، ويتيح إعداد الاستيراد السحابي والاحتفاظ بنص الرسائل غير الواضحة على هذا الهاتف لتصحيحها. وقد تستأنف خدمة مربوطة سابقاً المزامنة. ويتطلب إنشاء اتصال أو رفع كشف إجراءً منفصلاً. ولا يمكن استعادة نصوص الرسائل المحذوفة سابقاً.',
     },
     privacyResumeAction: { en: 'Resume online features', ar: 'استئناف الميزات المتصلة' },
     privacyPreferenceFailed: { en: 'Wafra could not save this preference. Try again.', ar: 'تعذّر على وفرة حفظ هذا التفضيل. حاول مرة أخرى.' },
@@ -6356,8 +6361,8 @@ const S = {
         ar: 'حافظ على تحديث سجلك تلقائياً.',
     },
     proTrialActiveBody: {
-        en: 'Automatic capture is included for {left} more day{s}.',
-        ar: 'الالتقاط التلقائي مشمول لمدة {left} يوم إضافي.',
+        en: 'Automatic capture is free during the first 3 app days.',
+        ar: 'الالتقاط التلقائي مجاني خلال أول 3 أيام من استخدام التطبيق.',
     },
     proTrialEndedBody: {
         en: 'Automatic bank-message capture is paused. Your ledger and manual entries still work.',
@@ -6391,8 +6396,8 @@ const S = {
         ar: 'وفرة برو مفعّل مجدداً على هذا الجهاز.',
     },
     proContinue: { en: 'Continue to Wafra', ar: 'متابعة إلى وفرة' },
-    trialEndedPaywall: { en: 'Your free trial has ended and tracking is paused. Subscribe to keep Wafra working — your data never leaves your phone either way.', ar: 'انتهت تجربتك المجانية وتوقف التتبع. اشترك لمواصلة استخدام وفرة — بياناتك لا تغادر هاتفك في كل الأحوال.' },
-    freeTrialActive: { en: 'FREE TRIAL ACTIVE', ar: 'التجربة المجانية مفعّلة' },
+    trialEndedPaywall: { en: 'Free automatic capture has ended. Automatic capture needs Pro; manual entry and imports stay free.', ar: 'انتهى الالتقاط التلقائي المجاني. يحتاج الالتقاط التلقائي إلى برو، ويبقى الإدخال اليدوي والاستيراد مجانياً.' },
+    freeTrialActive: { en: 'FREE AUTOMATIC CAPTURE', ar: 'الالتقاط التلقائي المجاني مفعّل' },
     getPro: { en: 'Get Wafra Pro', ar: 'اشترك في وفرة برو' },
     startPlanWithPrice: {
         en: 'Start {plan} — {price}',
