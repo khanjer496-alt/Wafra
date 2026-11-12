@@ -126,6 +126,7 @@ import {
 } from '@/lib/apple-pay-card-links';
 import {
   admitPreparedReviewAlerts,
+  recordPossibleDuplicatesPosted,
   type ReviewAdmissionMode,
   reviewRetentionReceipts,
   reviewClaimSourceKeys,
@@ -1851,7 +1852,11 @@ function reduceState(state: AppState, action: Action): AppState {
     case 'clearSharedAlertFormats':
       return { ...state, sharedAlertFormats: emptySharedAlertFormatState() };
     case 'importBatch': {
-      const imported = applyMaterializedImportBatch(state, action);
+      const applied = applyMaterializedImportBatch(state, action);
+      const imported = action.possibleDuplicatesPosted?.length
+        ? { ...applied, reviewTray: recordPossibleDuplicatesPosted(applied.reviewTray ?? emptyAlertReviewTray(),
+          action.possibleDuplicatesPosted, Date.now()) }
+        : applied;
       return action.localCaptureQualifications
         ? { ...imported, localCaptureQualifications: action.localCaptureQualifications }
         : imported;

@@ -1153,4 +1153,9 @@ export interface ImportBatchInput {
   historyImport?: HistoryImportProgress;
   lastScanTs: number;
   updates?: TxHealUpdate[];
+  /**
+   * Canonical source keys of possible Apple Pay duplicates this batch posts
+   * because their Review lane was full; recorded as counted tray records.
+   */
+  possibleDuplicatesPosted?: string[];
 }
