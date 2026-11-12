@@ -2354,6 +2354,9 @@ const REFUND_THIRD_PARTY_DESTINATION_RE = /^\s*(?:back\s+)?(?:to|into|onto)\s+(?
 // A negated credit ("has not been credited") ends at an explicit new clause in the same sentence whose own credit is completed
 // ("... and the refund has now been credited to your card"); a future or later-sentence credit does not lift it.
 const REFUND_COMPLETED_AUXILIARY_RE = /\b(?:has|have|had|was|were)\s+(?:\w+\s+){0,2}$/;
+// "... has not been credited and WAS debited from your account": the new clause has its own auxiliary, so the negation stops and the debit
+// is judged by the ordinary rules (an expense). Without the auxiliary ("... credited and debited") the negation still covers it.
+const REFUND_NEGATED_THEN_DEBIT_RE = /^\s*(?:,\s*)?(?:and|but)\s+(?:was|were|has\s+been|have\s+been|had\s+been)\s+(?:\w+\s+){0,2}?(?:debited|charged|deducted)\b/i;
 function refundCreditNotActual(body: string, request: string): boolean {
   const requested = refundAmounts(request);
   let negatedEnd = -1;
@@ -2373,7 +2376,7 @@ function refundCreditNotActual(body: string, request: string): boolean {
     }
     if (negatedEnd >= 0 && REFUND_COMPLETED_AUXILIARY_RE.test(match[1]) && body.slice(negatedEnd, at).search(REFUND_SENTENCE_BREAK_RE) < 0) negatedEnd = -1;
   }
-  return negatedEnd >= 0;
+  return negatedEnd >= 0 && !REFUND_NEGATED_THEN_DEBIT_RE.test(body.slice(negatedEnd));
 }
 const MANDATE_LIFECYCLE_RE =
   /\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b(?:[^.]|\.\d){0,96}\b(?:will\s+(?:start|begin|commence|activate)|has\s+been\s+(?:created|registered|set\s*up|activated)|is\s+(?:now\s+)?active)\b|\b(?:created|registered|set\s*up|activated)\b(?:[^.]|\.\d){0,64}\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b|تم\s+(?:تسجيل|انشاء|تفعيل)[^\n]{0,64}(?:امر\s+)?(?:خصم\s+(?:تلقايي|مباشر)|تعليمات\s+مستديمه)/iu;
