@@ -723,13 +723,17 @@ test('debit with a footer that names a real URL stays refused as a link request'
 
 // FIX4 (CEO 676bbe7a, Change Reviewer: High): a completed refund of a card purchase is income on every path. parseSms read
 // "Purchase amount of AED 250.00 at NOON.COM on your Debit Card has been refunded." as income, but the launch session and the
-// native bundle booked it as a AED 250 purchase: the interpreter only kept the parser's refund when the card had digits and
-// the shop name had no dot, and otherwise let its purchase reading win.
+// native bundle booked it as a AED 250 purchase: the interpreter only kept the parser's refund when the shop name had no dot
+// and the card came right before "has been refunded", and otherwise let its purchase reading win. The same dot hid the
+// request in "Your refund request for the purchase amount of AED 250.00 at NOON.COM has been received.", posted as a purchase.
 for (const [kind, body] of [
   ['dotted-shop-no-card-digits', 'Purchase amount of AED 250.00 at NOON.COM on your Debit Card has been refunded.'],
   ['dotted-shop-with-card-digits', 'Purchase amount of AED 250.00 at NOON.COM on your Debit Card ending 1234 has been refunded.'],
   ['plain-shop-no-card-digits', 'Purchase amount of AED 250.00 at NOON on your Debit Card has been refunded.'],
   ['www-shop-successfully-to-card', 'Purchase amount of AED 250.00 at WWW.NOON.COM on your Credit Card ending 1234 has been successfully refunded to your card.'],
+  ['purchase-of-card-then-dotted-shop-refunded', 'Purchase of AED 250.00 with Debit Card ending 1234 at NOON.COM has been refunded.'],
+  ['purchase-of-card-then-shop-refunded', 'Purchase of AED 250.00 with Debit Card ending 1234 at NOON has been refunded.'],
+  ['purchase-of-dotted-shop-then-card-reversed', 'Purchase of AED 250.00 at NOON.COM with Debit Card ending 1234 has been reversed.'],
 ]) {
   test(`refund hardening posts/completed-purchase-refund-${kind}`, () => {
     const session = reader('AE');
