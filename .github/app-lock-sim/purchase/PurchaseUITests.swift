@@ -95,6 +95,11 @@ final class PurchaseUITests: XCTestCase {
             dismissSystemAlerts()
             if app.buttons["Settings"].firstMatch.exists { return }
             var tapped = false
+            // The onboarding paywall lists both plans; its free-path button sits below the fold.
+            if el("onboarding-paywall").exists {
+                let free = el("onboarding-paywall-free")
+                if !(free.exists && free.isHittable) { app.swipeUp(); Thread.sleep(forTimeInterval: 1) }
+            }
             for id in advance {
                 let e = el(id)
                 guard e.exists && e.isHittable else { continue }

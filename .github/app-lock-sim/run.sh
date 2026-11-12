@@ -6,6 +6,7 @@ set -uo pipefail
 UDID=$1; OUT=${2:-shots}; APP=app.wafra.ios
 HERE=$(cd "$(dirname "$0")" && pwd)
 mkdir -p "$OUT"; RESULTS="$OUT/results.tsv"; : > "$RESULTS"
+MARKER=Settings
 MATCH=com.apple.BiometricKit_Sim.pearl.match
 NOMATCH=com.apple.BiometricKit_Sim.pearl.nomatch
 LOCKED_SHOTS=()
@@ -17,7 +18,7 @@ shot()  { xcrun simctl io "$UDID" screenshot "$OUT/$1.png" >/dev/null 2>&1 && lo
 # mro NAME  -> runs flows/NAME.yaml, returns its exit code, keeps the log
 mro() {
   local name=$1 tag=${2:-$1}
-  maestro --device "$UDID" test -e APP_ID="$APP" --test-output-dir "$OUT/maestro-$tag" \
+  maestro --device "$UDID" test -e APP_ID="$APP" -e MARKER="${MARKER:-Settings}" --test-output-dir "$OUT/maestro-$tag" \
     "$HERE/flows/$name.yaml" > "$OUT/maestro-$tag.log" 2>&1
   local rc=$?; log "maestro $name ($tag) rc=$rc"; return $rc
 }
@@ -49,10 +50,14 @@ diag() { # evidence for a failed setup: entitlements, the app's own storage diag
 if ! mro seed && ! { cp "$OUT/maestro-seed.log" "$OUT/maestro-seed-attempt1.log"; sleep 10; mro seed seed-retry; }; then
   dump seed-fail; shot setup-seed-failed; diag; record SETUP FAIL "could not seed the ledger (see maestro-seed.log)"; exit 1
 fi
+if mro addrows && mro seedcheck seedcheck; then MARKER='(?i).*lulu.*'; record SEEDROWS PASS "3 entries added through the Add screen (LULU HYPERMARKET, ADNOC FUEL, CAREEM RIDE); Home lists them"
+else dump addrows-fail; shot 00-addrows-failed; record SEEDROWS FAIL "could not add ledger rows: the lock tests run on an EMPTY ledger (see maestro-addrows.log)"; fi
 shot 00-seeded-home-unlocked
 cp "$OUT/00-seeded-home-unlocked.png" "$OUT/.home-reference.png"
 mro enable || { dump enable-fail; shot 00-enable-failed; record SETUP FAIL "could not reach the App Lock switch"; }
 sleep 2; match; sleep 3; shot 00-after-enable-1; match; sleep 3; shot 00-after-enable-2
+
+away; sleep 2; back; sleep 2   # warm-up: first launch of the Settings app is slow, later ones are not
 
 # ---- S1: cold launch is locked; Face ID match unlocks; ledger shows --------------------
 xcrun simctl terminate "$UDID" "$APP"; sleep 2
@@ -66,11 +71,12 @@ if unlock s1; then record S1b PASS "pearl.match unlocked and the ledger shows (a
 else record S1b FAIL "ledger not shown after pearl.match"; fi
 shot 01b-after-match-unlocked
 
-# ---- S4: away < 20 s stays unlocked -----------------------------------------------------
-away; sleep 5; shot 04a-away-5s-in-Settings-app
-back; sleep 4; shot 04b-back-after-5s
-if mro unlocked s4; then record S4 PASS "5 s away: still unlocked, ledger visible"
-else dump s4; record S4 FAIL "re-locked or ledger missing after 5 s away"; fi
+# ---- S4: away < 20 s stays unlocked. simctl calls are slow on the runner, so the absence is MEASURED, not assumed.
+T0=$SECONDS; away; sleep 1; back; ABS=$((SECONDS - T0)); sleep 3; shot 04b-back-after-short-absence
+if mro unlocked s4; then S4OK=1; else S4OK=0; fi
+if [ "$ABS" -ge 17 ]; then record S4 INCONCLUSIVE "absence measured ${ABS}s, too close to the 20 s grace to prove anything (runner too slow); observed: $([ $S4OK = 1 ] && echo unlocked || echo locked)"
+elif [ $S4OK = 1 ]; then record S4 PASS "away ${ABS}s (<20 s): still unlocked, ledger visible"
+else dump s4; record S4 FAIL "away only ${ABS}s (<20 s) but the app re-locked or the ledger is missing"; fi
 
 # ---- S3: away > 20 s re-locks ----------------------------------------------------------
 away; sleep 25; shot 03a-away-25s-in-Settings-app
@@ -86,18 +92,19 @@ if unlock s5r; then record S5r PASS "recovered: pearl.match after the failed mat
 else record S5r FAIL "could not unlock after the failed match"; fi
 shot 05b-after-recovery-unlocked
 
-# ---- S6: clock set back while away re-locks --------------------------------------------
+# ---- S6: clock set back while away re-locks. The grace is 20 s, so the absence must be SHORT for the clock to be the cause.
 sudo systemsetup -setusingnetworktime off >/dev/null 2>&1 || log "could not disable network time"
 REAL0=$(date +%s); MONO0=$SECONDS
-away; sleep 3
-BACK=$((REAL0 + (SECONDS - MONO0) - 3600))
-sudo date -u "$(date -u -r "$BACK" +%m%d%H%M%Y.%S)" >/dev/null
-log "host clock now $(date -u) ; simulator sees $(xcrun simctl spawn "$UDID" date -u)"
-back; sleep 4; shot 06b-back-with-clock-set-back-1h
+away; sleep 1
+BACKTO=$((REAL0 + (SECONDS - MONO0) - 3600))
+sudo date -u "$(date -u -r "$BACKTO" +%m%d%H%M%Y.%S)" >/dev/null
+back; ABS=$((SECONDS - MONO0)); sleep 3; shot 06b-back-with-clock-set-back-1h
 REAL=$((REAL0 + (SECONDS - MONO0)))
 sudo date -u "$(date -u -r "$REAL" +%m%d%H%M%Y.%S)" >/dev/null; log "clock restored: $(date -u)"
-if mro locked s6; then record S6 PASS "clock set back 1 h while away (<20 s real): lock screen, no ledger"; LOCKED_SHOTS+=(06b-back-with-clock-set-back-1h)
-else dump s6; record S6 FAIL "not locked after the clock was set back"; fi
+if mro locked s6; then S6L=1; else S6L=0; fi
+if [ $S6L = 1 ] && [ "$ABS" -lt 17 ]; then record S6 PASS "clock set back 1 h, real absence ${ABS}s (<20 s grace, so only the clock rule can explain it): lock screen, no ledger"; LOCKED_SHOTS+=(06b-back-with-clock-set-back-1h)
+elif [ $S6L = 1 ]; then record S6 INCONCLUSIVE "locked, but the real absence was ${ABS}s (>= 17 s) so the 20 s rule alone could explain it"; LOCKED_SHOTS+=(06b-back-with-clock-set-back-1h)
+else dump s6; record S6 FAIL "clock set back 1 h with a ${ABS}s absence and the app is NOT locked"; fi
 unlock s6r || true
 
 # ---- S2: language EN -> AR keeps it unlocked ---------------------------------------------

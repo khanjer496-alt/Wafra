@@ -9,10 +9,20 @@ clean() { sed -E 's/\x1b\[[0-9;?]*[A-Za-z]//g'; }
 cp "$HERE/PurchaseUITests.swift" "$WORK/proj/"
 cp "$HERE/WafraTest.storekit" "$WORK/WafraTest.storekit"
 
+# storekitd keeps the test configuration per bundle id in its own app group; copy the one the test session registered
+# (under the test runner's id) to the app's id, now and after every reinstall.
+sync_storekit_config() {
+  local src dest
+  src=$(find "$HOME/Library/Developer/CoreSimulator/Devices/$UDID/data/Containers/Shared/AppGroup" -ipath '*Octane/dev.wafra.purchaseuitests.xctrunner/Configuration.storekit' 2>/dev/null | head -1)
+  [ -n "$src" ] || { echo "[host] no StoreKit test configuration registered yet"; return 1; }
+  dest="$(dirname "$(dirname "$src")")/$APP"; mkdir -p "$dest"; cp "$src" "$dest/Configuration.storekit"
+  echo "[host] StoreKit config copied to $dest"
+}
 fresh_install() {
   xcrun simctl terminate "$UDID" "$APP" >/dev/null 2>&1
   xcrun simctl uninstall "$UDID" "$APP" >/dev/null 2>&1
   xcrun simctl install "$UDID" "$(ls -d "$APPDIR"/*.app | head -1)"
+  sync_storekit_config || true
 }
 
 ( cd "$WORK/proj" && ruby "$HERE/make-project.rb" "$WORK/proj" ) > "$OUT/purchase-project.log" 2>&1 || { echo "::error::could not generate the UI-test project (see purchase-project.log)"; tail -5 "$OUT/purchase-project.log" | sed 's/^/::error::/'; echo "SETUP FAIL no project" > "$OUT/purchase-setup.txt"; exit 1; }

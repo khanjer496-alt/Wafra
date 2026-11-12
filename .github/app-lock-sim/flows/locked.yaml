@@ -1,6 +1,15 @@
 appId: ${APP_ID}
 ---
 - extendedWaitUntil:
+    visible: 'Sign in to Apple.Account'
+    timeout: 6000
+    optional: true
+- runFlow:
+    when:
+      visible: 'Sign in to Apple.Account'
+    commands:
+      - tapOn: 'Cancel'
+- extendedWaitUntil:
     visible: 'Wafra is locked'
     timeout: 15000
 - assertNotVisible: 'Settings'

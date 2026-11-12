@@ -1,0 +1,76 @@
+appId: ${APP_ID}
+---
+- openLink: wafra:///add-transaction
+- tapOn:
+    text: 'Open'
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: 'add-transaction-screen'
+    timeout: 30000
+- tapOn:
+    id: 'amount-keypad-4'
+- tapOn:
+    id: 'amount-keypad-2'
+- tapOn:
+    id: 'add-merchant-field'
+- inputText: 'LULU HYPERMARKET'
+- hideKeyboard
+- tapOn:
+    id: 'suggested-category-.*'
+    optional: true
+- tapOn:
+    id: 'add-save'
+- extendedWaitUntil:
+    visible: 'Settings'
+    timeout: 30000
+- openLink: wafra:///add-transaction
+- tapOn:
+    text: 'Open'
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: 'add-transaction-screen'
+    timeout: 30000
+- tapOn:
+    id: 'amount-keypad-1'
+- tapOn:
+    id: 'amount-keypad-5'
+- tapOn:
+    id: 'amount-keypad-0'
+- tapOn:
+    id: 'add-merchant-field'
+- inputText: 'ADNOC FUEL'
+- hideKeyboard
+- tapOn:
+    id: 'suggested-category-.*'
+    optional: true
+- tapOn:
+    id: 'add-save'
+- extendedWaitUntil:
+    visible: 'Settings'
+    timeout: 30000
+- openLink: wafra:///add-transaction
+- tapOn:
+    text: 'Open'
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: 'add-transaction-screen'
+    timeout: 30000
+- tapOn:
+    id: 'amount-keypad-2'
+- tapOn:
+    id: 'amount-keypad-3'
+- tapOn:
+    id: 'add-merchant-field'
+- inputText: 'CAREEM RIDE'
+- hideKeyboard
+- tapOn:
+    id: 'suggested-category-.*'
+    optional: true
+- tapOn:
+    id: 'add-save'
+- extendedWaitUntil:
+    visible: 'Settings'
+    timeout: 30000
