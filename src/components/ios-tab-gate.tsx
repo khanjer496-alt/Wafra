@@ -1,5 +1,5 @@
 import { useIsFocused, useNavigation, useNavigationState, useRoute } from '@react-navigation/native';
-import React, { useEffect, useState } from 'react';
+import React, { startTransition, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 
 import { useCoverFreeze, type CoverTransitionNavigation, type CoverTransitionSource } from '@/components/freeze-when-covered';
@@ -76,7 +76,8 @@ export function TabFocusGate({
   if (focused && !visited) setVisited(true);
   useEffect(() => {
     if (visited || !prewarm) return undefined;
-    const job = scheduleTabPrewarm(() => setVisited(true));
+    // A transition: the mount yields to a tap that lands while it renders.
+    const job = scheduleTabPrewarm(() => startTransition(() => setVisited(true)));
     return () => job.cancel();
   }, [visited, prewarm]);
   if (!visited && !focused) return null;

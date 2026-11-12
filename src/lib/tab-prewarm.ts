@@ -4,12 +4,16 @@
  * instead of a cold mount on the tap (ios-tab-gate.tsx).
  *
  * Each tab waits for two real frames, TAB_PREWARM_DELAY_MS, and the
- * foreground lease (a tap, a tab switch, Home's entrance) before it mounts,
- * and the next tab waits again after that, so pre-warming never runs during
- * launch or under the user's finger and never mounts two tabs in one frame.
+ * foreground lease (a tap, a tab switch, Home's entrance). The lease is checked
+ * again right before the mount; if the user has tapped since, the tab waits for
+ * another slot. The next tab waits again after that, so pre-warming never runs
+ * during launch, never mounts two tabs in one frame, and never starts under
+ * the user's finger. The mount itself is a transition (ios-tab-gate.tsx), so
+ * React yields it to a tap that arrives while it renders.
  */
 import { runAfterFirstFrames, type DeferredWork } from '@/lib/after-first-frames';
 import { TAB_PREWARM_DELAY_MS } from '@/lib/covered-screen-freeze';
+import { foregroundHistoryBlockedFor } from '@/lib/foreground-history-priority';
 
 interface PrewarmJob {
   run: () => void;
@@ -24,6 +28,11 @@ function pump(): void {
   if (pending || !queue.length) return;
   pending = runAfterFirstFrames(() => {
     pending = null;
+    // A tap since the slot opened: give the screen back and try again later.
+    if (foregroundHistoryBlockedFor() > 0) {
+      pump();
+      return;
+    }
     const job = queue.shift();
     if (job && !job.cancelled) job.run();
     pump();

@@ -12,8 +12,18 @@ import { createHeldHandle, type HeldStoreHandle, type StoreHandle } from '@/lib/
  * told after commit.
  *
  * `mustBeLive(live, held)` true lets a change through at once even while
- * paused (store.tsx: Private Mode and onboarding/Erase Everything), so a held
- * frame never shows something the user just hid or erased.
+ * paused (store.tsx uses appStoreMustBeLive below), so a held frame never
+ * shows something the user just hid or erased.
+ *
+ * Concurrency: hold() and resume() flip the handle during render, so a render
+ * of an EXISTING boundary that React discards (a transition or a Suspense
+ * retry) could leave it held while the committed UI is live. That can't
+ * happen today: store dispatches and navigation focus are never transitions,
+ * and the only transition that reaches a boundary is a tab's pre-warm mount
+ * (ios-tab-gate.tsx), whose boundary is new and leaves nothing behind if
+ * discarded. Even so, the boundary reads the value context, so the next store
+ * change re-renders it and puts the handle right. Keep store dispatches out of
+ * startTransition (store.tsx relies on that for its handle too).
  */
 export function createStorePauseBoundary<T>(
   valueContext: Context<T | null>,
@@ -54,4 +64,31 @@ export function createStorePauseBoundary<T>(
     );
   }
   return StorePauseBoundary;
+}
+
+/** The part of the app store that decides what may never be held back. */
+export interface PauseCriticalStore {
+  state: {
+    privateMode: boolean;
+    onboarded: boolean;
+    hydrated: boolean;
+    transactions: readonly unknown[];
+  };
+}
+
+/**
+ * The app store's pass-through rule (store.tsx). These changes reach a paused
+ * tab at once:
+ * - Private Mode, so a held frame never shows amounts the user just hid;
+ * - `onboarded` and `hydrated`, which change around a reset and restore (Erase
+ *   Everything then blocks persistence, `hydrated` false, and OnboardingGate
+ *   unmounts the tabs);
+ * - a ledger emptied by Erase Everything (clearAll keeps `onboarded`), so even
+ *   before that gate runs, a held tab never shows the erased entries.
+ */
+export function appStoreMustBeLive(live: PauseCriticalStore, held: PauseCriticalStore): boolean {
+  return live.state.privateMode !== held.state.privateMode ||
+    live.state.onboarded !== held.state.onboarded ||
+    live.state.hydrated !== held.state.hydrated ||
+    (live.state.transactions.length === 0 && held.state.transactions.length > 0);
 }

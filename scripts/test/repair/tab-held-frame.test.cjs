@@ -197,21 +197,28 @@ test('pre-warm: a never-opened hidden tab mounts once when its idle slot comes, 
   act(() => { rendererTwo.unmount(); });
 });
 
-test('pre-warm scheduler: one hidden tab per idle slot, in order, cancelled ones skipped', () => {
+test('pre-warm scheduler: one hidden tab per idle slot, in order, cancelled ones skipped, a recent tap defers it', () => {
   const slots = [];
+  let blockedMs = 0;
   const prewarm = load(path.join(root, 'src/lib/tab-prewarm.ts'), {
     '@/lib/after-first-frames': { runAfterFirstFrames: (task, options) => {
       slots.push({ task, options }); return { cancel() {} };
     } },
     '@/lib/covered-screen-freeze': load(path.join(root, 'src/lib/covered-screen-freeze.ts'), {}),
+    '@/lib/foreground-history-priority': { foregroundHistoryBlockedFor: () => blockedMs },
   });
   const ran = [];
   prewarm.scheduleTabPrewarm(() => ran.push('flow'));
   const bills = prewarm.scheduleTabPrewarm(() => ran.push('bills'));
   prewarm.scheduleTabPrewarm(() => ran.push('wallet'));
   assert.equal(slots.length, 1, 'never two tabs waiting on the same frames');
-  assert.equal(slots[0].options.delayMs, 1500);
+  assert.equal(slots[0].options.delayMs, 3000);
   assert.equal(slots[0].options.idle, undefined, 'waits for the foreground lease (the default)');
+  blockedMs = 400;                                                   // the user tapped just before the slot
+  slots.shift().task();
+  assert.deepEqual(ran, [], 'a tap since the slot opened defers the mount');
+  assert.equal(slots.length, 1, 'and the same tab waits for the next slot');
+  blockedMs = 0;
   bills.cancel();
   slots.shift().task();
   assert.deepEqual(ran, ['flow']);
@@ -219,4 +226,44 @@ test('pre-warm scheduler: one hidden tab per idle slot, in order, cancelled ones
   slots.shift().task();
   assert.deepEqual(ran, ['flow', 'wallet'], 'a cancelled tab (opened meanwhile) is skipped');
   assert.equal(slots.length, 0);
+});
+
+test('pre-warm mounts in a transition, so React yields it to a tap', () => {
+  const code = require('node:fs').readFileSync(path.join(root, 'src/components/ios-tab-gate.tsx'), 'utf8');
+  assert.match(code, /scheduleTabPrewarm\(\(\) => startTransition\(\(\) => setVisited\(true\)\)\)/);
+});
+
+// The app store's real pass-through rule, the one store.tsx wires.
+const appState = (state) => ({ state: { privateMode: false, onboarded: true, hydrated: true, transactions: [1, 2, 3], total: 3, ...state } });
+
+test('appStoreMustBeLive: Private Mode, onboarding, hydration and an erased ledger pass through; an edit does not', () => {
+  const held = appState({});
+  assert.equal(pause.appStoreMustBeLive(appState({ privateMode: true }), held), true);
+  assert.equal(pause.appStoreMustBeLive(appState({ onboarded: false }), held), true);
+  assert.equal(pause.appStoreMustBeLive(appState({ hydrated: false }), held), true, 'Erase Everything blocks persistence');
+  assert.equal(pause.appStoreMustBeLive(appState({ transactions: [] }), held), true, 'clearAll keeps onboarded: the emptied ledger itself passes');
+  assert.equal(pause.appStoreMustBeLive(appState({ transactions: [1, 2, 3, 4] }), held), false, 'an ordinary edit stays held');
+  assert.equal(pause.appStoreMustBeLive(appState({ transactions: [] }), appState({ transactions: [] })), false);
+  const store = require('node:fs').readFileSync(path.join(root, 'src/lib/store.tsx'), 'utf8');
+  assert.match(store, /createStorePauseBoundary<StoreValue>\(\s*StoreContext,\s*StoreHandleContext,\s*appStoreMustBeLive,\s*\)/,
+    'store.tsx must pause with exactly this rule');
+});
+
+test('Erase Everything reaches a held tab at once through the real boundary and rule', () => {
+  const AppBoundary = pause.createStorePauseBoundary(ValueContext, HandleContext, pause.appStoreMustBeLive);
+  const store = appStore(appState({}));
+  function Ledger() {
+    const handle = React.useContext(HandleContext);
+    const value = React.useSyncExternalStore(handle.subscribe, handle.get, handle.get);
+    return React.createElement('ledger', null, String(value.state.transactions.length));
+  }
+  const view = () => React.createElement(store.Provider, null,
+    React.createElement(AppBoundary, { paused: true }, React.createElement(Ledger)));
+  let renderer;
+  act(() => { renderer = TestRenderer.create(view()); });
+  act(() => { store.set(appState({ transactions: [1, 2, 3, 4] })); renderer.update(view()); store.handle.notify(); });
+  assert.equal(renderer.root.findByType('ledger').props.children, '3', 'an edit stays held while paused');
+  act(() => { store.set(appState({ transactions: [] })); renderer.update(view()); store.handle.notify(); });
+  assert.equal(renderer.root.findByType('ledger').props.children, '0', 'erased entries are never shown from a held frame');
+  act(() => { renderer.unmount(); });
 });
