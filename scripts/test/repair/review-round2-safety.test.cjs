@@ -720,3 +720,71 @@ test('debit with a footer that names a real URL stays refused as a link request'
   assert.equal(held.kind, 'declined');
   assert.equal(held.reason, 'link-request');
 });
+
+// FIX4 (CEO 676bbe7a, Change Reviewer: High): a completed refund of a card purchase is income on every path. parseSms read
+// "Purchase amount of AED 250.00 at NOON.COM on your Debit Card has been refunded." as income, but the launch session and the
+// native bundle booked it as a AED 250 purchase: the interpreter only kept the parser's refund when the shop name had no dot
+// and the card came right before "has been refunded", and otherwise let its purchase reading win. The same dot hid the
+// request in "Your refund request for the purchase amount of AED 250.00 at NOON.COM has been received.", posted as a purchase.
+for (const [kind, body] of [
+  ['dotted-shop-no-card-digits', 'Purchase amount of AED 250.00 at NOON.COM on your Debit Card has been refunded.'],
+  ['dotted-shop-with-card-digits', 'Purchase amount of AED 250.00 at NOON.COM on your Debit Card ending 1234 has been refunded.'],
+  ['plain-shop-no-card-digits', 'Purchase amount of AED 250.00 at NOON on your Debit Card has been refunded.'],
+  ['www-shop-successfully-to-card', 'Purchase amount of AED 250.00 at WWW.NOON.COM on your Credit Card ending 1234 has been successfully refunded to your card.'],
+  ['purchase-of-card-then-dotted-shop-refunded', 'Purchase of AED 250.00 with Debit Card ending 1234 at NOON.COM has been refunded.'],
+  ['purchase-of-card-then-shop-refunded', 'Purchase of AED 250.00 with Debit Card ending 1234 at NOON has been refunded.'],
+  ['purchase-of-dotted-shop-then-card-reversed', 'Purchase of AED 250.00 at NOON.COM with Debit Card ending 1234 has been reversed.'],
+]) {
+  test(`refund hardening posts/completed-purchase-refund-${kind}`, () => {
+    const session = reader('AE');
+    assert.equal(nonPostingReason(body), null);
+    for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
+      session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
+      assert.equal(parsed?.kind, 'transaction');
+      assert.equal(parsed.type, 'income');
+      assert.equal(parsed.amountFils, 25000);
+      assert.equal(parsed.currency, 'AED');
+    }
+    const native = confirmationNative(body);
+    assert.notEqual(native.route === 'parsed' ? native.notification.direction : null, 'debit', 'native never books the refund as a purchase');
+  });
+}
+// The same purchase while its refund is pending, requested or negated stays refused on every path.
+for (const [kind, body] of [
+  ['will-be-refunded', 'Purchase amount of AED 250.00 at NOON.COM on your Debit Card will be refunded.'],
+  ['has-not-been-refunded', 'Purchase amount of AED 250.00 at NOON.COM on your Debit Card has not been refunded.'],
+  ['refund-pending', 'Purchase amount of AED 250.00 at NOON.COM on your Debit Card is pending refund.'],
+  ['refund-request-received', 'Your refund request for the purchase amount of AED 250.00 at NOON.COM has been received.'],
+]) {
+  test(`refund hardening refuses/purchase-refund-${kind}`, () => {
+    const session = reader('AE');
+    assert.equal(parseSms(body), null);
+    assert.equal(parseSms(body, {}, { sender: 'ENBD', observedAt: at }), null);
+    assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
+    assert.notEqual(confirmationNative(body).route, 'parsed');
+  });
+}
+
+// Known limits of fix3, pinned so a change is deliberate (CEO 676bbe7a).
+// 1. The native bundle declines the confirmed debit with a conditional refund footer (its event reader disagrees); the
+//    parser and the launch session post the expense. Native never books a credit for it.
+test('refund hardening known limit/native declines a confirmed debit with a conditional refund footer', () => {
+  const session = reader('AE');
+  const body = `${confirmedDebit}${conditionalRefundNote}`;
+  for (const parsed of [parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
+    session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
+    assert.equal(parsed?.type, 'expense');
+    assert.equal(parsed.amountFils, 8500);
+  }
+  assert.equal(confirmationNative(body).route, 'ignore');
+});
+// 2. "Purchase of ..." is not a separate debit sentence, so a conditional refund footer on that shape keeps the older
+//    refusal (pending-processing): the purchase is not posted, and nothing is posted as income.
+test('refund hardening known limit/a conditional refund footer on a "Purchase of" alert keeps the old refusal', () => {
+  const session = reader('AE');
+  const body = `${sideNotePurchase}${conditionalRefundNote}`;
+  assert.equal(nonPostingReason(body), 'pending-processing');
+  assert.equal(parseSms(body), null);
+  assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
+  assert.equal(confirmationNative(body).route, 'ignore');
+});
