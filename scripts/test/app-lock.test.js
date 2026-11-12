@@ -109,7 +109,7 @@ ok('turning App Lock on accepts a passcode-only phone',
   ok('the very first commit after a long absence is already locked (no frame of content before the effect)',
     /const \[unlocked, setUnlocked\] = useState\(\(\) => appLockSession\.isUnlocked\(\) &&\s*!\(AppState\.currentState === 'active' &&\s*shouldRelockAfterAbsence\(appLockSession\.leftAt\(\), Date\.now\(\), RELOCK_GRACE_MS\)\)\);/.test(gate) &&
       /const lockRequired = state\.hydrated && state\.appLock && Platform\.OS !== 'web' && !unlocked;/.test(gate) &&
-      /<PrivacyGateContext\.Provider value=\{!lockRequired\}>/.test(gate));
+      /<PrivacyGateContext\.Provider value=\{!privacyHidden\}>/.test(gate));
   // Only the gate may touch the process session: another importer could unlock the app.
   {
     const found = [];
