@@ -14,8 +14,12 @@ public class WafraWidgetsModule: Module {
   static let snapshotKey = "wafra.widget.snapshot"
   /// A real snapshot is well under 4 KB. Anything far larger is not ours.
   static let maxSnapshotBytes = 64 * 1024
-  /// Every snapshot write and erase runs on this one serial queue, so an erase
-  /// can never be overtaken by an older snapshot that was still being written.
+  /// Every snapshot write and erase runs on this one serial queue, so work that
+  /// has already reached it runs in order. The queue alone does not order an
+  /// erase against a write that Expo has not dispatched to it yet: the
+  /// synchronous `clearSnapshot` can run first. The JS bridge
+  /// (modules/wafra-widgets/index.ts) closes that gap by erasing again when such
+  /// a write lands, and Home's sync chain awaits a write before its own clear.
   private static let queue = DispatchQueue(label: "app.wafra.widgets.snapshot")
 
   public func definition() -> ModuleDefinition {

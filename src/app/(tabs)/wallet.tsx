@@ -56,6 +56,7 @@ import { accountGroupsCopy } from '@/lib/reference-copy';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { t, tf, type StringKey } from '@/lib/i18n';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
+import { withIosTabGate } from '@/components/ios-tab-gate';
 
 
 const KIND_META: Record<AccountKind, { labelKey: StringKey; icon: import('@/components/ui/icon').IconName }> = {
@@ -103,7 +104,7 @@ type Confirmation = {
 /** The two things a long press on an account row offers. */
 type AccountAction = 'visibility' | 'bank' | 'delete';
 
-export default function WalletScreen() {
+function WalletScreen() {
   const theme = useTheme();
   // Design language E: Accounts wears the slate band.
   const band = useBand('accounts');
@@ -1142,3 +1143,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 });
+
+// iOS: NativeTabs mounts every tab at launch and never freezes them; see ios-tab-gate.tsx.
+export default withIosTabGate(WalletScreen);

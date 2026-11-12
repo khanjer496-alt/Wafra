@@ -232,15 +232,15 @@ test('the privacy clear is never delayed, and no debounce means the old behaviou
   assert.deepEqual(operations, ['clear', 'write']);
 });
 
-test('the default quiet period is two seconds and Home asks for it', () => {
+test('the default quiet period is two seconds and the widget owner asks for it', () => {
   const fs = require('node:fs');
   const loaded = require('./load-typescript.cjs')(path.resolve(__dirname, '../../../src/lib/widget-sync.ts'), {
     '@/lib/ledger': load('@/lib/ledger'), '@/lib/subscriptions': load('@/lib/subscriptions'), '@/lib/widget-ledger': load('@/lib/widget-ledger'),
     '../../modules/wafra-widgets': { setWidgetSnapshot() {}, clearWidgetSnapshot() {} },
   });
   assert.equal(loaded.WIDGET_SYNC_DEBOUNCE_MS, 2000);
-  const home = fs.readFileSync(path.resolve(__dirname, '../../../src/screens/journal-home-screen.tsx'), 'utf8');
-  assert.match(home, /requestWidgetSnapshotSync\(\{ state: source[\s\S]*?\}, current, \{ debounceMs: WIDGET_SYNC_DEBOUNCE_MS \}\)/);
-  assert.match(home, /AppState\.addEventListener\('change', \(next\) => \{\s*if \(next !== 'active'\) request\?\.flush\?\.\(\);\s*\}\);/);
-  assert.match(home, /return \(\) => \{ cancelled = true; task\.cancel\(\); leaving\.remove\(\); request\?\.cancel\(\); \};/);
+  const hook = fs.readFileSync(path.resolve(__dirname, '../../../src/hooks/use-widget-snapshot-sync.ts'), 'utf8');
+  assert.match(hook, /requestWidgetSnapshotSync\(\{ state: source[\s\S]*?\}, current, \{ debounceMs: WIDGET_SYNC_DEBOUNCE_MS \}\)/);
+  assert.match(hook, /AppState\.addEventListener\('change', \(next\) => \{\s*if \(next !== 'active'\) request\?\.flush\?\.\(\);\s*\}\);/);
+  assert.match(hook, /return \(\) => \{ cancelled = true; task\.cancel\(\); leaving\.remove\(\); request\?\.cancel\(\); \};/);
 });

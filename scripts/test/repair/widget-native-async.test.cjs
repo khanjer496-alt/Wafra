@@ -111,3 +111,15 @@ test('with no erase in between, an async write behaves as before', async () => {
   assert.deepEqual(clearsSeen, []);
 });
 
+test('Erase Everything clears the widgets directly, and that direct erase is safe against an in-flight write', () => {
+  const store = fs.readFileSync(path.join(root, 'src/lib/store.tsx'), 'utf8');
+  // clearAll calls the bridge's synchronous erase outside the sync chain; this pins it so a change must be deliberate.
+  assert.match(store, /\/\/ Widgets hold a copy of a few figures; erasing the ledger erases those too\.\s*clearWidgetSnapshot\(\);/);
+  const bridge = fs.readFileSync(path.join(root, 'modules/wafra-widgets/index.ts'), 'utf8');
+  // ...and its safety is the bridge's repeat-erase for a write that was in flight (tested above).
+  assert.match(bridge, /if \(clears !== clearsBefore && writesSinceClear === 0\) \{\s*try \{ native\?\.clearSnapshot\(\); \} catch/);
+  const swift = fs.readFileSync(path.join(root, 'modules/wafra-widgets/ios/WafraWidgetsModule.swift'), 'utf8');
+  assert.doesNotMatch(swift, /can never be overtaken/, 'the comment must not claim more than the queue guarantees');
+  assert.match(swift, /does not order an\s+\/\/\/ erase against a write that Expo has not dispatched/);
+});
+
