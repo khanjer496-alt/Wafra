@@ -3566,6 +3566,8 @@ struct WafraBankSenderRegistryTests {
           Platform: { OS: 'ios', Version: 16 },
         };
       }
+      // The hook times the iOS drain; diagnostics are inert in this harness.
+      if (id === '@/lib/runtime-performance') return { recordRuntimeOperation: () => {} };
       return {};
     });
     const resolveSurface = hookModule.resolveIosCaptureSurfaceState;
@@ -4321,6 +4323,7 @@ struct WafraBankSenderRegistryTests {
           return { useStore: store, useStoreSelector: (select) => select(store()), useStoreActions: store };
         }
         if (id === '@/lib/store-selection') return execute('src/lib/store-selection.ts', () => ({}));
+        if (id === '@/lib/runtime-performance') return { recordRuntimeOperation: () => {} };
         return {};
       });
       const render = () => runtime.render(() => mountedHookModule.useAutoImport(false, true));
