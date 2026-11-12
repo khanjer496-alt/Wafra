@@ -1,3 +1,4 @@
+import type { NavigationProp, NavigationState, ParamListBase } from '@react-navigation/native';
 import React, { Suspense, useEffect, useRef, useState } from 'react';
 
 import { COVER_FREEZE_DELAY_MS } from '@/lib/covered-screen-freeze';
@@ -35,6 +36,15 @@ export interface CoverTransitionSource {
     listener: (event: { data?: { closing?: boolean } }) => void,
   ): () => void;
 }
+
+/**
+ * A root-stack route's `navigation`, typed with the native-stack transition
+ * events. `useNavigation()` alone is typed with the core events only.
+ */
+export type CoverTransitionNavigation = NavigationProp<
+  ParamListBase, string, string | undefined, NavigationState, {},
+  { transitionStart: { data: { closing: boolean } }; transitionEnd: { data: { closing: boolean } } }
+>;
 
 /**
  * Pauses `children` while `covered` (another screen is on top).
