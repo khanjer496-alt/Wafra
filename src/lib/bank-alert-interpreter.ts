@@ -24,6 +24,7 @@ import {
 import {
   hasArabicRefundHeading,
   hasMalformedBankAmount,
+  hasOnlyUnsettledCredit,
   hasUnsettledPrincipal,
   isInformationOnlyAlert,
   normalizeArabic,
@@ -306,6 +307,14 @@ export const interpretBankAlert = ({
   // your card ..." as income). parseSms has already judged such a note: its row stands, and without one Review at most.
   if (refundSideNoteVerdict(source) !== 'none') {
     if (usableLegacy) return legacyResult(usableLegacy);
+    const pending = inspectUnparsedLaunchAlert(source, sender);
+    return pending.outcome === 'review'
+      ? finalFallback(pending, null)
+      : { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+  }
+  // The shared credit-settled veto (CEO 080fa431): parseSms refused a credit that is conditional, negated, pending, sent to
+  // someone else, taken back or only "processed"; the semantic reader must not book it as income. Review at most.
+  if (!usableLegacy && hasOnlyUnsettledCredit(source)) {
     const pending = inspectUnparsedLaunchAlert(source, sender);
     return pending.outcome === 'review'
       ? finalFallback(pending, null)
