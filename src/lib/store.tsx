@@ -3930,6 +3930,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [dispatch]);
 
   const clearAll = useCallback(async (captureCleanup?: () => Promise<void>) => {
+    // The widgets show a copy of a few figures outside the app. Clear that
+    // native copy first, before any erase step that can throw or crash: on
+    // TestFlight 192 an erase that failed part-way left the Home widget showing
+    // the erased money until the next launch. It is cleared again after the
+    // erase (below) in case an in-flight snapshot write lands in between.
+    clearWidgetSnapshot();
     const afterErase = async () => {
       if (Platform.OS === 'android') {
         const { complimentaryDevice } = await import('@/lib/complimentary-device');

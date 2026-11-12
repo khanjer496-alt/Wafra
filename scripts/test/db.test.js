@@ -3692,6 +3692,41 @@ asyncSuites.push((async () => {
 // The erase-race contract in 2c is behavioural, so it settles after this file
 // finishes executing. Counting before it lands would report a green run that
 // never ran it.
+// Erase all data (TestFlight 192, CEO 61e916a4): the native widget copy is
+// cleared before any erase step that can throw, so a failure or crash part-way
+// can never leave the Home widget showing erased money.
+const eraseHarness = (overrides = {}) => {
+  const events = [];
+  const runtime = loadHydrationExports({
+    '@/lib/ledger-persistence': {
+      createLedgerPersistence: () => ({ load: async () => null, save: async () => true, block() {},
+        reset: async () => { events.push('reset'); }, destroy: async () => {} }),
+      LedgerResetError: class LedgerResetError extends Error {},
+    },
+    '../../modules/wafra-widgets': { clearWidgetSnapshot: () => { events.push('widget-clear'); }, setWidgetSnapshot: () => true },
+    // The real seed: clearAll keeps its Cash account (SEED_ACCOUNTS[2]).
+    '@/lib/seed': require('./build/seed'),
+    // Node has no secure store; the format key erase is a native boundary here.
+    '@/lib/private-alert-format-runtime': { ...require('./build/private-alert-format-runtime'),
+      erasePrivateAlertFormatKey: async () => { events.push('format-key-erase'); } },
+    ...overrides,
+  }, true);
+  return { events, runtime, ledger: runtime.StoreProvider({ children: null }) };
+};
+asyncSuites.push((async () => {
+  const failing = eraseHarness({
+    '@/lib/shared-alert-format-submit': { submitShapeAnonymously: async () => false,
+      eraseSharingCredential: async () => { throw new Error('credential store unavailable'); } },
+  });
+  failing.ledger.restoreBackup(JSON.stringify({ app: 'wafra', version: 1, data: { transactions: [] } }));
+  const failure = await failing.ledger.clearAll().then(() => null, (error) => error);
+  ok('E1: erase clears the native widget before the ledger reset, even when a later cleanup step throws',
+    failure !== null && failing.events.includes('widget-clear') &&
+      failing.events.indexOf('widget-clear') < failing.events.indexOf('reset'),
+    JSON.stringify({ events: failing.events, failure: failure && failure.name }));
+
+})().catch((error) => ok('erase widget integration completes', false, String(error && error.stack || error))));
+
 Promise.all(asyncSuites).then(() => {
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
