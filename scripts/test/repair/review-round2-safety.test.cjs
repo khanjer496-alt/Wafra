@@ -554,6 +554,27 @@ for (const [kind, body] of [
     assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
   });
 }
+// Universal test "negation applies to coordinated refund verbs until an explicit new clause": "has not been credited and was
+// debited from your account" is an expense (the new clause has its own auxiliary); without that auxiliary the negation
+// still covers the debit and the message stays refused.
+for (const auxiliary of ['was', 'has been']) {
+  test(`refund hardening posts/negated-credit-then-${auxiliary.replace(' ', '-')}-debited-is-an-expense`, () => {
+    const session = reader('AE');
+    const body = `Refund of AED 125.00 has not been credited and ${auxiliary} debited from your account.`;
+    for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
+      session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
+      assert.equal(parsed?.type, 'expense');
+      assert.equal(parsed.amountFils, 12500);
+    }
+  });
+}
+for (const verb of ['debited from your account', 'charged to your card']) {
+  test(`refund hardening refuses/negation-covers-the-coordinated-${verb.split(' ')[0]}`, () => {
+    const body = `Refund of AED 125.00 has not been credited and ${verb}.`;
+    assert.equal(parseSms(body), null);
+    assert.equal(parseSms(body, {}, { sender: 'ENBD', observedAt: at }), null);
+  });
+}
 test('refund hardening posts/negated-then-new-clause-credited', () => {
   const session = reader('AE');
   const body = 'Refund of AED 125.00 has not been credited and the refund has now been credited to your card.';
