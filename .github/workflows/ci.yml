@@ -68,6 +68,9 @@ jobs:
               - '.github/workflows/ci.yml'
               - 'modules/wafra-message-history/**'
               - 'modules/wafra-live-capture/**'
+              # App Lock privacy cover and widget snapshot gate (native-ios typecheck).
+              - 'modules/wafra-widgets/ios/**'
+              - 'scripts/test/native-app-privacy-typecheck.sh'
               # The native parser closure is resolved from these shipping
               # modules; new pure dependencies must also trigger native checks.
               - 'src/lib/**'
@@ -249,6 +252,13 @@ jobs:
             scripts/test/native-history-protection-probe.swift \
             -o "$RUNNER_TEMP/wafra-protection-probe"
           "$RUNNER_TEMP/wafra-protection-probe"
+
+      # App Lock's privacy cover and widget-snapshot gate (WafraPrivacyCover.swift),
+      # typechecked against the runner's real UIKit/Foundation iOS SDK. Only the
+      # Expo subscriber boundary and the widgets module are stubbed, so this is a
+      # compile check, not a device lifecycle test.
+      - name: Typecheck the iOS privacy cover against the real UIKit SDK
+        run: bash scripts/test/native-app-privacy-typecheck.sh
 
       - name: Require the approved Claude design baseline
         run: node scripts/check-design-baseline.mjs

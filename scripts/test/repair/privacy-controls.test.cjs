@@ -89,3 +89,15 @@ test('Android setAppPrivacy purges only an unredacted widget snapshot (no empty 
   assert.ok(!/setAppPrivacy[\s\S]{0,500}WafraWidgets\.store\(context, null\)/.test(module_), 'no unconditional clear in setAppPrivacy');
   assert.match(widgets, /fun purgeUnredactedSnapshot[\s\S]{0,400}optBoolean\("hidden", false\)[\s\S]{0,120}if \(!hidden\) store\(context, null\)/);
 });
+
+test('CI typechecks the iOS privacy cover on the macOS native job, and widget changes trigger it', () => {
+  const fs = require('node:fs');
+  const YAML = require('yaml');
+  const ci = YAML.parse(fs.readFileSync(path.resolve(__dirname, '../../../.github/workflows/ci.yml'), 'utf8'));
+  const step = ci.jobs['native-ios'].steps.find((s) => s.run === 'bash scripts/test/native-app-privacy-typecheck.sh');
+  assert.ok(step, 'native-ios runs native-app-privacy-typecheck.sh');
+  assert.match(ci.jobs['native-ios']['runs-on'], /^macos/);
+  const filter = ci.jobs['native-paths'].steps.find((s) => s.id === 'filter').with.filters;
+  assert.match(filter, /- 'modules\/wafra-widgets\/ios\/\*\*'/);
+  assert.match(filter, /- 'scripts\/test\/native-app-privacy-typecheck\.sh'/);
+});
