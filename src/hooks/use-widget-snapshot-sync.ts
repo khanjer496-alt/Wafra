@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { AppState as AppLifecycle } from 'react-native';
 
 import { useLanguage } from '@/hooks/use-language';
 import { useToday } from '@/hooks/use-today';
@@ -8,7 +9,7 @@ import { marketCurrencyCode } from '@/lib/markets';
 import { useStoreActions, useStoreSelector } from '@/lib/store';
 import { fieldsEqual } from '@/lib/store-selection';
 import type { AppState } from '@/lib/types';
-import { invalidateWidgetSnapshotSync, requestWidgetSnapshotSync } from '@/lib/widget-sync';
+import { invalidateWidgetSnapshotSync, requestWidgetSnapshotSync, WIDGET_SYNC_DEBOUNCE_MS } from '@/lib/widget-sync';
 
 /** Every AppState field the widget snapshot reads; nothing else re-renders this owner. */
 const WIDGET_STATE_FIELDS = [
@@ -28,7 +29,12 @@ const dayKey = (now: Date): string =>
  * or tab is on top (covered-screen-freeze, ios-tab-gate), and a paused Home
  * runs no effects, so a capture or History page that landed then left the
  * widgets stale until Home was shown again. The tab shell's CaptureOwner calls
- * this instead: it is never frozen. The effect is unchanged from Home.
+ * this instead: it is never frozen. The effect is Home's, plus a 2 s quiet
+ * period (WIDGET_SYNC_DEBOUNCE_MS): this effect re-runs on every ledger change
+ * and each run cancels the previous one, so a burst of edits (a category change
+ * is usually two dispatches) prepares and writes only the latest figures.
+ * Leaving the foreground flushes the quiet period so the last edit still
+ * reaches the widgets; a privacy clear is never delayed.
  */
 export function useWidgetSnapshotSync(): void {
   const language = useLanguage();
@@ -62,12 +68,16 @@ export function useWidgetSnapshotSync(): void {
         && latest.customCategories === source.customCategories;
     };
     // After the first frames: preparing the snapshot walks the ledger and the
-    // native write re-renders every placed widget.
+    // native write re-renders every placed widget. Then the quiet period.
     const task = runAfterFirstFrames(() => {
       if (current()) request = requestWidgetSnapshotSync({ state: source, now: new Date(), moneySpec,
-        language: language === 'ar' ? 'ar' : 'en' }, current);
+        language: language === 'ar' ? 'ar' : 'en' }, current, { debounceMs: WIDGET_SYNC_DEBOUNCE_MS });
     });
-    return () => { cancelled = true; task.cancel(); request?.cancel(); };
+    // Leaving the foreground ends the quiet period so the last edit still reaches the widgets.
+    const leaving = AppLifecycle.addEventListener('change', (next) => {
+      if (next !== 'active') request?.flush?.();
+    });
+    return () => { cancelled = true; task.cancel(); leaving.remove(); request?.cancel(); };
     // Keyed on the day, not the resume clock: every reopen used to rebuild
     // the snapshot and rewrite the widgets with the same figures. A new day
     // still refreshes them (todayISO, the week, Coming up all move).
