@@ -46,12 +46,14 @@ function probe(initial = baseState()) {
     useStoreActions: () => actions,
   };
   const actions = { getStateSnapshot: () => state, getStateGeneration: () => generation };
-  const counts = { requested: 0, invalidated: 0, cancelled: 0 };
+  const counts = { requested: 0, invalidated: 0, cancelled: 0, flushed: 0, options: [] };
+  const appListeners = new Set();
   const frames = [];
   const dayListeners = [];
   let today = new Date(2026, 10, 12, 9, 0);
   const deps = {
     react: React,
+    'react-native': { AppState: { addEventListener: (_name, listener) => { appListeners.add(listener); return { remove() { appListeners.delete(listener); } }; } } },
     '@/hooks/use-language': { useLanguage: () => state.language },
     '@/hooks/use-today': { useToday: () => {
       const [day, setDay] = React.useState(today);
@@ -63,8 +65,9 @@ function probe(initial = baseState()) {
     '@/lib/markets': { marketCurrencyCode: () => 'AED' },
     '@/lib/store': store,
     '@/lib/widget-sync': {
-      requestWidgetSnapshotSync: (input, isCurrent) => { counts.requested += 1; counts.lastCurrent = isCurrent; counts.lastInput = input;
-        return { cancel() { counts.cancelled += 1; }, done: Promise.resolve('written') }; },
+      WIDGET_SYNC_DEBOUNCE_MS: 2000,
+      requestWidgetSnapshotSync: (input, isCurrent, options) => { counts.requested += 1; counts.lastCurrent = isCurrent; counts.lastInput = input; counts.options.push(options);
+        return { cancel() { counts.cancelled += 1; }, flush() { counts.flushed += 1; }, done: Promise.resolve('written') }; },
       invalidateWidgetSnapshotSync: async () => { counts.invalidated += 1; return 'cleared'; },
     },
   };
@@ -77,6 +80,8 @@ function probe(initial = baseState()) {
     counts,
     settle: () => act(() => { for (const f of frames.splice(0)) if (!f.cancelled) f.work(); }),
     set: (patch) => act(() => { state = { ...state, ...patch }; generation += 1; for (const l of [...listeners]) l(); }),
+    appState: (next) => act(() => { for (const l of [...appListeners]) l(next); }),
+    listeners: () => appListeners.size,
     resume: (nextDay) => act(() => { if (nextDay) today = nextDay; for (const l of dayListeners) l(); }),
   };
 }
@@ -88,6 +93,20 @@ test('the owner requests one snapshot after first frames, without Home', () => {
   assert.equal(p.counts.requested, 1);
   assert.equal(p.counts.lastInput.language, 'en');
   assert.equal(p.counts.lastCurrent(), true);
+});
+
+test('the owner asks for the 2 s quiet period and flushes it when the app leaves the foreground', () => {
+  const p = probe();
+  p.settle();
+  assert.equal(JSON.stringify(p.counts.options), '[{"debounceMs":2000}]', 'a burst of edits writes only the latest figures');
+  p.appState('active');
+  assert.equal(p.counts.flushed, 0, 'staying active does not flush');
+  p.appState('inactive');
+  p.appState('background');
+  assert.equal(p.counts.flushed, 2, 'leaving the foreground ends the quiet period so the last edit still reaches the widgets');
+  assert.equal(p.listeners(), 1, 'one AppState listener while mounted');
+  p.set({ transactions: [{ id: 'tx-1', amountFils: 1000 }] });
+  assert.equal(p.listeners(), 1, 'the effect re-run replaces it, never stacks them');
 });
 
 test('a ledger change while Home is paused still refreshes the widgets, once', () => {
