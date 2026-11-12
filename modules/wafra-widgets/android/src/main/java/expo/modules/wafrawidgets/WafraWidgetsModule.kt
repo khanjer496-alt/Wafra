@@ -44,7 +44,7 @@ class WafraWidgetsModule : Module() {
       applySecureWindow()
       if (enabled && hideAmounts) {
         val context = appContext.reactContext
-        if (context != null) WafraWidgets.store(context, null)
+        if (context != null) WafraWidgets.purgeUnredactedSnapshot(context)
       }
     }.runOnQueue(Queues.MAIN)
 

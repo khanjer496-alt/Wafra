@@ -79,3 +79,13 @@ test('iOS privacy cover observes UIApplication notifications and registers at la
   // The delegate callbacks stay too: covering is idempotent, so both paths are safe.
   assert.match(swift, /applicationWillResignActive[\s\S]{0,80}resignActive\(\)/);
 });
+
+test('Android setAppPrivacy purges only an unredacted widget snapshot (no empty widgets at every launch)', () => {
+  const fs = require('node:fs'); const path = require('node:path');
+  const dir = path.resolve(__dirname, '../../../modules/wafra-widgets/android/src/main/java/expo/modules/wafrawidgets');
+  const module_ = fs.readFileSync(path.join(dir, 'WafraWidgetsModule.kt'), 'utf8');
+  const widgets = fs.readFileSync(path.join(dir, 'WafraWidgets.kt'), 'utf8');
+  assert.match(module_, /if \(context != null\) WafraWidgets\.purgeUnredactedSnapshot\(context\)/);
+  assert.ok(!/setAppPrivacy[\s\S]{0,500}WafraWidgets\.store\(context, null\)/.test(module_), 'no unconditional clear in setAppPrivacy');
+  assert.match(widgets, /fun purgeUnredactedSnapshot[\s\S]{0,400}optBoolean\("hidden", false\)[\s\S]{0,120}if \(!hidden\) store\(context, null\)/);
+});
