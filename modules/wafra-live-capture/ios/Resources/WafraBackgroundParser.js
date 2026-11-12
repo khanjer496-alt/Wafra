@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 417e43af41fe63c39d82f7f8118cf56bb8740a3d93ad8a6fcafd84efe4aa9726
+// Generated from normal shipping TypeScript. Source SHA-256: 3287329ea97427e679a169da2d193ca6ca7f83140c192e3394b08105284b26ae
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -1881,6 +1881,14 @@ const interpretBankAlert = ({ source, sender, market, overrides = {}, observedAt
                 categoryGuess: cashbackCategory, categoryDeliberate: true, categoryPinned: true,
             } : {}) }
         : capturedLegacy;
+    if ((0, sms_parser_1.refundSideNoteVerdict)(source) !== 'none') {
+        if (usableLegacy)
+            return legacyResult(usableLegacy);
+        const pending = (0, unparsed_launch_alert_1.inspectUnparsedLaunchAlert)(source, sender);
+        return pending.outcome === 'review'
+            ? finalFallback(pending, null)
+            : { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+    }
     const semanticText = (0, sms_parser_1.normalizeArabic)(source).replace(/\s+/gu, ' ');
     if (usableLegacy && isCompletedCardPurchaseReturn(semanticText, usableLegacy)) {
         return legacyResult(usableLegacy, 'refund');
@@ -11480,6 +11488,7 @@ exports.stripInvisible = stripInvisible;
 exports.foldOrthography = foldOrthography;
 exports.normalizeArabic = normalizeArabic;
 exports.bankProfileForSender = bankProfileForSender;
+exports.refundSideNoteVerdict = refundSideNoteVerdict;
 exports.hasMalformedBankAmount = hasMalformedBankAmount;
 exports.isBnplPayee = isBnplPayee;
 exports.overrideFitsDirection = overrideFitsDirection;
@@ -11826,7 +11835,7 @@ function hasCompletedRefundCredit(rest, request) {
     }
     return false;
 }
-const REFUND_CREDIT_SCAN_RE = /(\brefund(?:ed)?\b(?:[^.\n]|\.(?=\S)){0,300}?)\b(?:credited|refunded|posted|returned)\b(\s+(?:back\s+)?(?:to|into|onto)\s+[^.\n,;]{0,60})?/gi;
+const REFUND_CREDIT_SCAN_RE = /(?:(\brefund(?:ed)?\b(?:[^.\n]|\.(?=\S)){0,300}?)\b(?:credited|refunded|posted|returned)\b|\brefunded\b)(\s+(?:back\s+)?(?:to|into|onto)\s+[^.\n,;]{0,60})?/gi;
 const REFUND_CREDIT_NEGATION_RE = /\b(?:(?:has|have|had|was|were|is|are)\s+(?:not|never)|(?:hasn|haven|wasn|weren|isn|aren)['’]t|yet\s+to\s+be)\s+(?:(?:yet|been|successfully)\s+){0,3}$/;
 const REFUND_THIRD_PARTY_DESTINATION_RE = /^\s*(?:back\s+)?(?:to|into|onto)\s+(?:(?:the|a|an|your|his|her|their|its)\s+)?(?:\w+\s+){0,2}?(?:merchant|beneficiary|seller|vendor|recipient|payee|retailer|supplier|store|shop|restaurant|platform|marketplace)\b/i;
 const REFUND_COMPLETED_AUXILIARY_RE = /\b(?:has|have|had|was|were)\s+(?:\w+\s+){0,2}$/;
@@ -11838,6 +11847,12 @@ function refundCreditNotActual(body, request) {
         const at = match.index;
         const breaks = [...body.slice(0, at).matchAll(REFUND_SENTENCE_BREAK_RE)];
         const lead = body.slice(breaks.length ? breaks[breaks.length - 1].index + 1 : 0, at);
+        if (match[1] === undefined) {
+            const sentence = lead + match[0] + body.slice(at + match[0].length).split(REFUND_SENTENCE_BREAK_RE)[0];
+            if (REFUND_CREDIT_NEGATION_RE.test(lead) && refundAmounts(sentence).length > 0)
+                negatedEnd = at + match[0].length;
+            continue;
+        }
         if (governsRefundCredit(lead) || REFUND_CREDIT_CONDITIONAL_INSIDE_RE.test(match[1]))
             return true;
         if (REFUND_CREDIT_NEGATION_RE.test(match[1])) {
@@ -11858,6 +11873,43 @@ function refundCreditNotActual(body, request) {
             negatedEnd = -1;
     }
     return negatedEnd >= 0 && !REFUND_NEGATED_THEN_DEBIT_RE.test(body.slice(negatedEnd));
+}
+const REFUND_SIDE_NOTE_WORD_RE = /\brefund(?:ed)?\b/i;
+const REFUND_SIDE_NOTE_DEBIT_RE = /\b(?:debited|charged|deducted|spent)\b/i;
+const REFUND_SIDE_NOTE_SAME_MOVEMENT_RE = /^\s*(?:it|(?:this|the|that|your)\s+(?:amount|transaction|purchase|charge|payment|debit))\b/i;
+function refundSideNotes(body) {
+    if (!REFUND_SIDE_NOTE_WORD_RE.test(body))
+        return { body, ambiguous: false };
+    const sentences = [];
+    let start = 0;
+    for (const end of [...[...body.matchAll(REFUND_SENTENCE_BREAK_RE)].map((match) => match.index + match[0].length), body.length]) {
+        if (end > start)
+            sentences.push({ start, text: body.slice(start, end) });
+        start = Math.max(start, end);
+    }
+    const separateDebit = sentences.some(({ text }) => !REFUND_SIDE_NOTE_WORD_RE.test(text) &&
+        REFUND_SIDE_NOTE_DEBIT_RE.test(text) && refundAmounts(text).length > 0);
+    let out = body;
+    let ambiguous = false;
+    for (const { start: at, text } of sentences) {
+        const word = REFUND_SIDE_NOTE_WORD_RE.exec(text);
+        if (!word || refundAmounts(text).length > 0)
+            continue;
+        const lead = text.slice(0, word.index);
+        const negated = word[0].toLowerCase() === 'refunded' && REFUND_CREDIT_NEGATION_RE.test(lead);
+        const sameMovement = REFUND_SIDE_NOTE_SAME_MOVEMENT_RE.test(text);
+        if ((negated && !sameMovement) || (separateDebit && governsRefundCredit(lead))) {
+            out = out.slice(0, at) + ' '.repeat(text.length) + out.slice(at + text.length);
+        }
+        else if (separateDebit && (negated || (REFUND_RE.test(text) && !sameMovement))) {
+            ambiguous = true;
+        }
+    }
+    return { body: out, ambiguous };
+}
+function refundSideNoteVerdict(source) {
+    const notes = refundSideNotes(source);
+    return notes.ambiguous ? 'ambiguous' : notes.body !== source ? 'side-note' : 'none';
 }
 const MANDATE_LIFECYCLE_RE = /\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b(?:[^.]|\.\d){0,96}\b(?:will\s+(?:start|begin|commence|activate)|has\s+been\s+(?:created|registered|set\s*up|activated)|is\s+(?:now\s+)?active)\b|\b(?:created|registered|set\s*up|activated)\b(?:[^.]|\.\d){0,64}\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b|تم\s+(?:تسجيل|انشاء|تفعيل)[^\n]{0,64}(?:امر\s+)?(?:خصم\s+(?:تلقايي|مباشر)|تعليمات\s+مستديمه)/iu;
 const CONDITIONAL_PAYOUT_RE = /\b(?:merchant|business|seller|vendor|restaurant|platform|marketplace|aggregator|acquirer|sales?|delivery|courier|rider|driver)\b(?:[^.]|\.\d){0,160}\b(?:when|once|if)\s+(?:you\s+)?(?:are\s+)?(?:eligible|qualif(?:y|ied))\b|\b(?:merchant|business|seller|vendor|restaurant|platform|marketplace|aggregator|acquirer|sales?|delivery|courier|rider|driver)\b(?:[^.]|\.\d){0,160}\b(?:after\s+(?:(?:your\s+)?registration|you\s+(?:register|sign\s+up|open\s+(?:an?\s+)?account)|opening\s+(?:an?\s+)?account)|upon\s+(?:registration|sign[ -]?up|account\s+opening))\b/iu;
@@ -13009,10 +13061,11 @@ function nonPostingReasonInBody(body, suppressible) {
         return 'security-challenge';
     }
     const requestReceived = REQUEST_RECEIVED_RE.test(body);
-    const withoutRequest = requestReceived ? blank(blank(body, REQUEST_RECEIVED_BLANK_RE), FUTURE_CLAUSE_RE) : body;
-    const settledRefund = (REFUND_RE.test(body) && (!requestReceived || REFUND_RE.test(withoutRequest))) ||
+    const refundBody = refundSideNotes(body).body;
+    const withoutRequest = requestReceived ? blank(blank(refundBody, REQUEST_RECEIVED_BLANK_RE), FUTURE_CLAUSE_RE) : refundBody;
+    const settledRefund = (REFUND_RE.test(refundBody) && (!requestReceived || REFUND_RE.test(withoutRequest))) ||
         (requestReceived && hasCompletedRefundCredit(withoutRequest, refundRequestSentences(body)));
-    if (refundCreditNotActual(body, refundRequestSentences(body)))
+    if (refundCreditNotActual(refundBody, refundRequestSentences(body)))
         return 'pending-processing';
     if (VERIFICATION_HOLD_DESCRIPTOR_RE.test(body))
         return 'preauthorisation';
@@ -14310,9 +14363,12 @@ function parseSmsInner(message, overrides, options) {
     const hasCredit = statedCredit || (saudiHeadings && SA_TRANSFER_IN_HEADING_RE.test(raw));
     const carrierBilling = /app\s*store|google play|play store|itunes/i.test(raw);
     const isBillDue = BILL_DUE_WORDS.test(raw) && !hasDebit && !hasCredit && !carrierBilling;
+    const refundNotes = refundSideNotes(prose);
+    if (refundNotes.ambiguous)
+        return null;
     const isIncomingCreditReversal = INCOMING_CREDIT_REVERSAL_RE.test(prose);
     const isRefund = !isIncomingCreditReversal &&
-        (REFUND_RE.test(prose) || REVERSAL_RE.test(prose) || arabicPurchaseRefundHeader ||
+        (REFUND_RE.test(refundNotes.body) || REVERSAL_RE.test(prose) || arabicPurchaseRefundHeader ||
             REFUND_HEADING_RE.test(prose));
     if (PROMO_RE.test(raw) && !TXN_EVIDENCE_RE.test(raw))
         return null;
@@ -14323,7 +14379,7 @@ function parseSmsInner(message, overrides, options) {
     if (!money)
         return null;
     const billerPaid = billerSettlement(prose);
-    const creditClause = CREDIT_CLAUSE_RE.test(prose) && !billerPaid;
+    const creditClause = CREDIT_CLAUSE_RE.test(refundNotes.body) && !billerPaid;
     const debitClause = DEBIT_CLAUSE_RE.test(prose);
     const type = isBillDue || billerPaid || isIncomingCreditReversal ||
         arabicOwnAccountOutgoing
