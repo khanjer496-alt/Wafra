@@ -1,0 +1,60 @@
+name: Parser timing A/B
+
+# CI-only diagnosis (never merged): the 5,000-message import tripwire in
+# scripts/test/invariants.test.js, run alternately on two parser builds on the
+# SAME runner with the SAME corpus (this branch's test files). A = fix3b source
+# (66d6534d), B = fix4 source (this head). Budget unchanged; ships nothing.
+on:
+  push:
+    branches:
+      - 'patch/timing-ab-**'
+
+permissions:
+  contents: read
+
+jobs:
+  ab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - name: Install locked dependencies
+        run: |
+          npm ci
+          npm --prefix server ci
+      - name: Build B (fix4, this head)
+        run: |
+          set -euo pipefail
+          node scripts/generate-ios-background-parser.cjs
+          bash scripts/test/build.sh
+          rm -rf /tmp/build-B && cp -r scripts/test/build /tmp/build-B
+      - name: Build A (fix3b source 66d6534d, same test files)
+        run: |
+          set -euo pipefail
+          git checkout 66d6534d -- src
+          node scripts/generate-ios-background-parser.cjs
+          bash scripts/test/build.sh
+          rm -rf /tmp/build-A && cp -r scripts/test/build /tmp/build-A
+          git checkout HEAD -- src
+      - name: Alternate A/B, 5 rounds each
+        run: |
+          set -uo pipefail
+          for round in 1 2 3 4 5; do
+            for side in A B; do
+              rm -rf scripts/test/build && cp -r /tmp/build-$side scripts/test/build
+              line=$(node scripts/test/invariants.test.js 2>&1 | grep -oE '5,000-message import stays bounded \([0-9]+ms\)' || true)
+              echo "round $round $side: $line" | tee -a ab.txt
+            done
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: timing-ab-${{ github.sha }}
+          path: ab.txt
+          retention-days: 7
