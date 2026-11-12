@@ -22,9 +22,11 @@ const suites = [
     .map(name => [name, [`${name}.test.js`]]),
 ];
 for (const [name, args] of suites) {
-  test(`main-only retention suite: ${name}`, { timeout: 200000 }, () => {
+  // universal-test alone took 163 s on hosted repair at 384983c6 and passed
+  // 180 s once fix3 added parser cases; a budget timeout is not a test result.
+  test(`main-only retention suite: ${name}`, { timeout: 440000 }, () => {
     const result = spawnSync(process.execPath, ['--max-old-space-size=768', ...args], {
-      cwd: testDir, encoding: 'utf8', timeout: 180000, maxBuffer: 8 * 1024 * 1024,
+      cwd: testDir, encoding: 'utf8', timeout: 420000, maxBuffer: 8 * 1024 * 1024,
       env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
     });
     const evidence = JSON.stringify({ suite: name, status: result.status, signal: result.signal,
