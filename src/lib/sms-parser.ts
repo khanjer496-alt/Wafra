@@ -2390,13 +2390,22 @@ function refundCreditNotActual(body: string, request: string): boolean {
 //   blanked, so it can never decide direction.
 // - Beside a separate debit sentence with its own amount ("AED 250.00 was debited from your card ..."), a conditional refund
 //   credit ("When a refund is credited to your card you will receive an SMS") is blanked too, so it neither refuses the debit
-//   nor decides its direction. A completed refund of the debit itself ("It has been refunded to your card") is left alone.
+//   nor decides its direction. A completed refund of the debit itself ("It has been refunded to your card", "The refund
+//   has been credited ...", "A refund of the same ...") is left alone, and so is any refund after a debit sentence that
+//   itself says the debit was reversed.
 //   Any other refund statement there is ambiguous and the alert is never auto-posted: a second movement with no amount
 //   ("Refund for your cancelled order has been credited to your card") must not book the debit amount as income, and the
 //   debit itself not refunded ("Your purchase has not been refunded") is a refund status, not a new purchase.
 const REFUND_SIDE_NOTE_WORD_RE = /\brefund(?:ed)?\b/i;
 const REFUND_SIDE_NOTE_DEBIT_RE = /\b(?:debited|charged|deducted|spent)\b/i;
-const REFUND_SIDE_NOTE_SAME_MOVEMENT_RE = /^\s*(?:it|(?:this|the|that|your)\s+(?:amount|transaction|purchase|charge|payment|debit))\b/i;
+// A debit sentence that says the debit came back ("... charged ... has been reversed") is not a separate debit. Review ae81e7b9.
+const REFUND_SIDE_NOTE_RETURNED_RE = /\b(?:reversed|refunded|returned)\b/i;
+// The debit itself, or its unqualified refund ("The refund has been credited", "A refund of the same ..."). Review ae81e7b9.
+// "The refund for your cancelled order" is qualified, so it may be another movement.
+const REFUND_SIDE_NOTE_SAME_MOVEMENT_RE =
+  /^\s*(?:it|(?:this|the|that|your)\s+(?:amount|transaction|purchase|charge|payment|debit)|(?:the|this|that)\s+refund(?=\s+(?:has|have|had|was|were|is)\b)|a\s+refund\s+of\s+(?:the\s+same|this|that))\b/i;
+// A refund still to come ("It will be refunded") is not a completed refund of the debit.
+const REFUND_SIDE_NOTE_FUTURE_RE = /\bwill\b/i;
 function refundSideNotes(body: string): { body: string; ambiguous: boolean } {
   if (!REFUND_SIDE_NOTE_WORD_RE.test(body)) return { body, ambiguous: false };
   const sentences: Array<{ start: number; text: string }> = [];
@@ -2406,7 +2415,7 @@ function refundSideNotes(body: string): { body: string; ambiguous: boolean } {
     start = Math.max(start, end);
   }
   const separateDebit = sentences.some(({ text }) => !REFUND_SIDE_NOTE_WORD_RE.test(text) &&
-    REFUND_SIDE_NOTE_DEBIT_RE.test(text) && refundAmounts(text).length > 0);
+    REFUND_SIDE_NOTE_DEBIT_RE.test(text) && !REFUND_SIDE_NOTE_RETURNED_RE.test(text) && refundAmounts(text).length > 0);
   let out = body;
   let ambiguous = false;
   for (const { start: at, text } of sentences) {
@@ -2414,7 +2423,7 @@ function refundSideNotes(body: string): { body: string; ambiguous: boolean } {
     if (!word || refundAmounts(text).length > 0) continue;
     const lead = text.slice(0, word.index);
     const negated = word[0].toLowerCase() === 'refunded' && REFUND_CREDIT_NEGATION_RE.test(lead);
-    const sameMovement = REFUND_SIDE_NOTE_SAME_MOVEMENT_RE.test(text);
+    const sameMovement = REFUND_SIDE_NOTE_SAME_MOVEMENT_RE.test(text) && !REFUND_SIDE_NOTE_FUTURE_RE.test(text);
     if ((negated && !sameMovement) || (separateDebit && governsRefundCredit(lead))) {
       out = out.slice(0, at) + ' '.repeat(text.length) + out.slice(at + text.length);
     } else if (separateDebit && (negated || (REFUND_RE.test(text) && !sameMovement))) {
