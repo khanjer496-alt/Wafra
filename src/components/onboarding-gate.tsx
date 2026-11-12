@@ -138,6 +138,8 @@ const STEP_TRANSITION_MS = 350;
 type CompletionOutcome = 'automatic' | 'manual' | 'denied' | 'failed';
 type ShortcutCleanupState = 'revoked' | 'uncertain' | null;
 
+declare const __DEV__: boolean | undefined;
+const isDevelopmentBuild = () => typeof __DEV__ !== 'undefined' && __DEV__ === true;
 const isWebPlatform = () => Platform.OS === 'web';
 const isPublicWebSurface = () =>
   isWebPlatform() && process.env.EXPO_PUBLIC_WAFRA_E2E_DEMO !== '1';
@@ -274,7 +276,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     ((statementImportSession.current !== null &&
       params.statementSession === statementImportSession.current) ||
       (Platform.OS === 'ios' && matchesIosStatementHandoff(params.statementSession)));
-  const previewMode = state.onboarded && params.onboarding === 'preview';
+  // Replaying the welcome flow was a testing aid. Release builds never enter it,
+  // whatever the link or route params say; __DEV__ is false there.
+  const previewMode = isDevelopmentBuild() && state.onboarded && params.onboarding === 'preview';
   const previewStarted = useRef(false);
 
   const resetJourneyState = () => {

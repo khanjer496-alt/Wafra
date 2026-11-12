@@ -93,6 +93,15 @@ test('the Settings preview on iOS 15 imports nothing and moves on as adding by h
   assert.equal(calls(h, 'setCaptureOptOut').length, 0);
 });
 
+test('a release build ignores the onboarding preview param and never replays the welcome flow', async () => {
+  for (const params of [{ onboarding: 'preview' }, { onboarding: 'preview', section: 'appearance' }]) {
+    const h = await gate({ version: '26.6', development: false, ledger: { onboarded: true }, params });
+    assert.equal(h.text().includes(h.t('getStarted')), false, 'no welcome screen over an onboarded ledger');
+    assert.ok(navigatorShown(h), 'the app itself stays visible');
+    assert.equal(calls(h, 'setOnboardingProfile').length, 0);
+  }
+});
+
 // A statement or a paste has brought rows in by the time the person is back on step 5.
 const imported = [{ id: 'statement-row-1', type: 'expense', amountFils: 1250, category: 'dining', accountId: '',
   title: 'Cedar Bakery', date: '2026-10-01', source: 'pdf' }];

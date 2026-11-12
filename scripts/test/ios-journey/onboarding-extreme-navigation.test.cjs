@@ -305,7 +305,7 @@ async function gate(options = {}) {
       { setTimeout: setTimer, clearTimeout: clearTimer });
   }
   const component = load(options.sourcePath ?? process.env.WAFRA_ONBOARDING_SOURCE ?? path.join(root, 'src/components/onboarding-gate.tsx'), dependencies, {
-    process: { env: { EXPO_PUBLIC_WAFRA_E2E_DEMO: '1' } },
+    process: { env: { EXPO_PUBLIC_WAFRA_E2E_DEMO: '1' } }, __DEV__: options.development ?? true,
     setTimeout: setTimer, clearTimeout: clearTimer, Date: ClockDate,
   }).OnboardingGate;
   const render = () => {
