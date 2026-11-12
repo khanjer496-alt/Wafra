@@ -768,6 +768,9 @@ test('Android id mapping breaks fail closed: a non-pinned SDK id is not sold, an
   await wrongPlan.renderRuntime(3);
   await wrongPlan.billing().fetchProOffers();
   assert.equal(await wrongPlan.billing().purchasePro(productId('weekly')), 'unconfirmed');
+  // The checkout is unconfirmed, but owned yearly is still Pro: the Play query grants it.
+  assert.equal(wrongPlan.state.pro, true);
+  assert.deepEqual(wrongPlan.calls.pro, [true]);
 });
 
 test('Play bridge allowlist and the app product ids stay one list', () => {
