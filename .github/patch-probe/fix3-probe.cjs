@@ -28,6 +28,11 @@ const confirmed = 'We confirm that AED 85.00 was debited from your account endin
 const debit = 'AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026.';
 const purchase = 'Purchase of AED 50.00 with Debit Card ending 1234 at CARREFOUR.';
 const bodies = [
+  ['3c returned cheque fee + other refund', 'A returned cheque fee of AED 50.00 was debited from your account ending 1234. Refund for your cancelled order has been credited to your card.'],
+  ['3c reversed charges apply + other refund', 'AED 250.00 was debited from your card ending 1234 at NOON.COM (reversed charges apply). Refund for your cancelled order has been credited to your card.'],
+  ['3c the refund is being processed', 'AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. The refund is being processed.'],
+  ['3c CR reversed then the refund', 'AED 250.00 charged at NOON.COM on 01/11 has been reversed. The refund has been credited to your card ending 1234.'],
+  ['3c CR charged then a refund of the same', 'Your card ending 1234 was charged AED 250.00 at NOON.COM on 01/11. A refund of the same has been credited to your card.'],
   ['F4 dotted no digits', 'Purchase amount of AED 250.00 at NOON.COM on your Debit Card has been refunded.'],
   ['F4 dotted digits', 'Purchase amount of AED 250.00 at NOON.COM on your Debit Card ending 1234 has been refunded.'],
   ['F4 plain no digits', 'Purchase amount of AED 250.00 at NOON on your Debit Card has been refunded.'],

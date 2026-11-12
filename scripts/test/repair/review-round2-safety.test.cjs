@@ -638,6 +638,14 @@ for (const [kind, base, note] of [
   ['purchase-not-refunded', sideNoteDebit, ' Your purchase has not been refunded to your card.'],
   ['confirmed-debit-refund-credited', confirmedDebit, ' Refund for your cancelled order has been credited to your card.'],
   ['the-refund-for-another-order-credited', sideNoteDebit, ' The refund for your cancelled order has been credited to your card.'],
+  // Review f757be84 (Change Reviewer, on fix3b): a debit sentence only stops being a separate debit when it says the debit
+  // itself was reversed, not when a word like "returned" or "reversed" sits anywhere in it; and a refund of the debit only
+  // counts as the same movement when it is completed, never while it "is being processed" or "is being refunded".
+  ['returned-cheque-fee-debit-then-another-refund', 'A returned cheque fee of AED 50.00 was debited from your account ending 1234.', ' Refund for your cancelled order has been credited to your card.'],
+  ['reversed-charges-apply-then-another-refund', 'AED 250.00 was debited from your card ending 1234 at NOON.COM (reversed charges apply).', ' Refund for your cancelled order has been credited to your card.'],
+  ['the-refund-is-being-processed', sideNoteDebit, ' The refund is being processed.'],
+  ['a-refund-of-the-same-is-being-processed', sideNoteDebit, ' A refund of the same is being processed.'],
+  ['it-is-being-refunded', sideNoteDebit, ' It is being refunded to your card.'],
 ]) {
   test(`refund hardening side note is ambiguous and never auto-posts/${kind}`, () => {
     const session = reader('AE');
