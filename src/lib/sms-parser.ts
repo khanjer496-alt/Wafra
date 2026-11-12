@@ -2263,8 +2263,10 @@ const EXPECTED_FUTURE_MOVEMENT_RE =
   /\b(?:expected|anticipated)\b(?:[^.]|\.\d){0,80}\b(?:salary|payroll|wages|wps|payment|transfer|credit|deposit|refund|reversal|fee|charge|payout|settlement)\b|\b(?:salary|payroll|wages|wps|payment|transfer|credit|deposit|refund|reversal|fee|charge|payout|settlement)\b(?:[^.]|\.\d){0,80}\b(?:expected|anticipated)\b|(?:راتب|مرتب|دفع|تحويل|ايداع)[\s\S]{0,80}متوقع|سيصل[\s\S]{0,80}(?:راتب|مرتب|دفع|تحويل|ايداع)/iu;
 // A loyalty "Redemption Request registered successfully ... Amount Paid: AED
 // 240.00" is a request, not a posted cash movement.
+// FIX4 (CEO 676bbe7a): a dot inside a name ("... at NOON.COM has been received") no longer ends the request clause; it used to
+// post "Your refund request for the purchase amount of AED 250.00 at NOON.COM has been received." as a AED 250 purchase.
 const REQUEST_RECEIVED_RE =
-  /\b(?:(?:payment|transfer|purchase|redemption|refund)\s+request|request\s+for\s+(?:a\s+)?refund)\b(?:[^.]|\.\d){0,64}\b(?:received|submitted|created|awaiting|pending|registered|being\s+processed|in\s+progress|under\s+(?:review|process(?:ing)?))\b|\b(?:received|submitted|created)\b(?:[^.]|\.\d){0,48}\b(?:(?:payment|transfer|purchase|refund)\s+request|request\s+for\s+(?:a\s+)?refund)\b|تم\s+استلام\s+طلب\s+(?:سداد|دفع|تحويل)/iu;
+  /\b(?:(?:payment|transfer|purchase|redemption|refund)\s+request|request\s+for\s+(?:a\s+)?refund)\b(?:[^.]|\.(?=\S)){0,64}\b(?:received|submitted|created|awaiting|pending|registered|being\s+processed|in\s+progress|under\s+(?:review|process(?:ing)?))\b|\b(?:received|submitted|created)\b(?:[^.]|\.(?=\S)){0,48}\b(?:(?:payment|transfer|purchase|refund)\s+request|request\s+for\s+(?:a\s+)?refund)\b|تم\s+استلام\s+طلب\s+(?:سداد|دفع|تحويل)/iu;
 const REQUEST_RECEIVED_BLANK_RE = new RegExp(REQUEST_RECEIVED_RE.source, 'giu');
 // A request acknowledgement beside a COMPLETED credit ("Your refund request has been received.
 // Refund of AED 100.00 from <merchant> has been credited to your card"). REFUND_RE's 40-character
