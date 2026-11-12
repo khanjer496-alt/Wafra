@@ -370,6 +370,12 @@ for (const [kind, body] of [
   ['credited-in-error-reversed', `${refundAck} Refund of AED 100.00 from ${longRefundMerchant} was credited to your card in error and has been reversed.`],
   ['until-it-has-been-credited', `${refundAck} Your refund of AED 100.00 from ${longRefundMerchant} is not final until it has been credited to your card.`],
   ['wrong-refund-amount', `Your refund request for AED 100.00 has been received. A previous refund from ${longRefundMerchant} of AED 20.00 has been credited to your card.`],
+  // Review 11a5b249 (High): the requested amount must be read from the whole acknowledgement sentence, in either currency order.
+  ['wrong-refund-amount-currency-after', `Your refund request for 100.00 AED has been received. A previous refund of AED 20.00 from ${longRefundMerchant} has been credited to your card.`],
+  ['wrong-refund-amount-request-of', `We have received your refund request of AED 100.00. A previous refund of AED 20.00 from ${longRefundMerchant} has been credited to your card.`],
+  // Review 11a5b249 (Low): a reversal or a hold in the NEXT sentence or "subject to approval" is not an actual credit.
+  ['reversed-in-next-sentence', `${refundAck} Refund of AED 100.00 from ${longRefundMerchant} was credited to your card on 10/11. This credit has been reversed as the merchant cancelled it.`],
+  ['subject-to-merchant-approval', `${refundAck} Refund of AED 100.00 from ${longRefundMerchant} has been posted to your account subject to merchant approval.`],
 ]) {
   test(`refund credit rule refuses/${kind}`, () => {
     const session = reader('AE');
@@ -385,6 +391,8 @@ for (const [kind, body, minor] of [
   ['successfully-refunded-dotted', `${refundAck} Refund of AED 100.00 from APPLE.COM/BILL has been successfully refunded to your card.`, 10000],
   ['credited-back-to-the-account', `${refundAck} Refund of AED 100.00 from ${longRefundMerchant} has been credited back to the account.`, 10000],
   ['request-states-the-same-amount', `Your refund request for AED 100.00 has been received. Refund of AED 100.00 from ${longRefundMerchant} has been credited to your card.`, 10000],
+  // Review 11a5b249 (Low): a leader that a comma separates from the credit does not govern it.
+  ['leader-then-comma-after-verification', `${refundAck} After verification, the refund of AED 100.00 from ${longRefundMerchant} has been credited to your card.`, 10000],
 ]) {
   test(`refund credit rule posts/${kind}`, () => {
     const session = reader('AE');
