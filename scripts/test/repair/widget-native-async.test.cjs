@@ -57,3 +57,57 @@ test('the Android module and its synchronous answer are untouched', () => {
   assert.match(kotlin, /Function\("setSnapshot"\)/);
   assert.doesNotMatch(kotlin, /AsyncFunction\("setSnapshot"\)/);
 });
+
+// Erase Everything calls the SYNCHRONOUS clearSnapshot directly. A write that was still in
+// flight (queued behind Expo's dispatcher, so not yet on the Swift serial queue) can land
+// after it and resurrect the pre-erase figures; the bridge erases again when that happens.
+test('an erase that overtakes an in-flight write is repeated when the write lands', async () => {
+  let release;
+  const clearsSeen = [];
+  const bridge = load(path.join(root, 'modules/wafra-widgets/index.ts'), {
+    'react-native': { Platform: { OS: 'ios' } },
+    'expo-modules-core': { requireOptionalNativeModule: () => ({
+      setSnapshot: () => new Promise((resolve) => { release = resolve; }),
+      clearSnapshot: () => { clearsSeen.push('clear'); },
+    }) },
+  });
+  const write = bridge.setWidgetSnapshot('{"stale":true}');
+  bridge.clearWidgetSnapshot();
+  assert.deepEqual(clearsSeen, ['clear'], 'the erase itself ran at once');
+  release();
+  assert.equal(await write, false, 'a write that lost to the erase is not "stored"');
+  assert.deepEqual(clearsSeen, ['clear', 'clear'], 'and the erase is repeated after it landed');
+  assert.equal(bridge.widgetSnapshotClearCount(), 1, 'the repeat is not a second user-visible erase');
+});
+
+test('a write issued AFTER the erase is the answer to show, and is not wiped by an older write landing', async () => {
+  const releases = [];
+  const clearsSeen = [];
+  const bridge = load(path.join(root, 'modules/wafra-widgets/index.ts'), {
+    'react-native': { Platform: { OS: 'ios' } },
+    'expo-modules-core': { requireOptionalNativeModule: () => ({
+      setSnapshot: () => new Promise((resolve) => { releases.push(resolve); }),
+      clearSnapshot: () => { clearsSeen.push('clear'); },
+    }) },
+  });
+  const older = bridge.setWidgetSnapshot('{"old":1}');
+  bridge.clearWidgetSnapshot();
+  const newer = bridge.setWidgetSnapshot('{"fresh":1}');
+  releases[0]();
+  assert.equal(await older, true, 'the older write is not mistaken for a stale resurrection');
+  releases[1]();
+  assert.equal(await newer, true);
+  assert.deepEqual(clearsSeen, ['clear'], 'only the erase itself; the fresh snapshot is never wiped');
+});
+
+test('with no erase in between, an async write behaves as before', async () => {
+  const clearsSeen = [];
+  const bridge = load(path.join(root, 'modules/wafra-widgets/index.ts'), {
+    'react-native': { Platform: { OS: 'ios' } },
+    'expo-modules-core': { requireOptionalNativeModule: () => ({
+      setSnapshot: async () => undefined, clearSnapshot: () => { clearsSeen.push('clear'); } }) },
+  });
+  assert.equal(await bridge.setWidgetSnapshot('{}'), true);
+  assert.deepEqual(clearsSeen, []);
+});
+

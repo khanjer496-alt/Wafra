@@ -28,6 +28,12 @@ export type PinnableWidget = 'today' | 'upcoming' | 'spending';
 
 const native = Platform.OS === 'web' ? null : requireOptionalNativeModule<NativeWidgets>('WafraWidgets');
 
+let clears = 0;
+// Writes issued since the last erase. An async iOS write that was still queued behind
+// Expo's dispatcher when Erase Everything ran can land AFTER the (synchronous) erase;
+// see setWidgetSnapshot.
+let writesSinceClear = 0;
+
 /**
  * False only when the native side said it could not store the snapshot
  * (Android's module answers false, for example without a React context) or
@@ -35,19 +41,30 @@ const native = Platform.OS === 'web' ? null : requireOptionalNativeModule<Native
  * to avoid skipping later writes of figures that never arrived.
  */
 export function setWidgetSnapshot(json: string): boolean | Promise<boolean> {
+  const clearsBefore = clears;
+  writesSinceClear += 1;
   try {
     const answer = native?.setSnapshot(json);
     if (answer && typeof (answer as Promise<boolean | void>).then === 'function') {
-      return (answer as Promise<boolean | void>).then((stored) => stored !== false, () => false);
+      return (answer as Promise<boolean | void>).then((stored) => {
+        // The erase is synchronous and the write is not: if Erase Everything ran while this
+        // write was in flight, the write may have landed after it and put the pre-erase
+        // figures back. Erase again, and report "not stored". A newer write issued after the
+        // erase (writesSinceClear > 0) is the answer the widgets should show, so leave it.
+        if (clears !== clearsBefore && writesSinceClear === 0) {
+          try { native?.clearSnapshot(); } catch { /* presentation only */ }
+          return false;
+        }
+        return stored !== false;
+      }, () => false);
     }
     return answer !== false;
   } catch { return false; /* presentation only */ }
 }
 
-let clears = 0;
-
 export function clearWidgetSnapshot(): void {
   clears += 1;
+  writesSinceClear = 0;
   try { native?.clearSnapshot(); } catch { /* presentation only */ }
 }
 
