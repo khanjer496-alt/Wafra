@@ -10,23 +10,44 @@ const ISSUER_MERCHANT_DEBIT_CONFIRMATION = /^confirm\s+that\s+[A-Z]{3}\s+\d[\d,.
  * white space in JavaScript but is invisible, so it cannot hide a path behind the host.
  */
 const ISSUER_MERCHANT_HOST_END = /^(?:\*[A-Z0-9]{1,24})?["'”’»)\]]*[.!?;,。、،؛؟۔…]*(?:[^\S\uFEFF]|$)/iu;
+/** One link-prompt match counts unless it is a warning, a merchant name or a closed issuer debit declaration. */
+function countsAsLinkPrompt(source: string, match: RegExpMatchArray): boolean {
+  const before = source.slice(Math.max(0, match.index! - 60), match.index);
+  // A warning against clicking, or a merchant named CLICK HERE, is not a prompt.
+  if (/(?:\b(?:do\s+not|don['’]t|never|avoid|refrain\s+from)\s+(?:ever\s+)?|\b(?:at|from|merchant\s*:?)\s+|(?:لا|عدم)\s+)$/iu.test(before)) return false;
+  // A closed issuer debit declaration names a merchant, not a link to open.
+  // Skip only this match, so a later user-directed instruction is still refused.
+  // Use the complete prefix: a cropped suffix can manufacture a statement start.
+  // Only a complete greeting may bridge comma/newline; not a wrapped "Can we".
+  // Check what follows the host too: ASCII, fullwidth or %-encoded suffixes cannot be enumerated.
+  return !(ISSUER_MERCHANT_DEBIT_CONFIRMATION.test(match[0]) &&
+    ISSUER_MERCHANT_HOST_END.test(source.slice(match.index! + match[0].length)) &&
+    /(?:^|[.!?])\s*(?:Dear\s+Customer[,\s]+)?we\s+$/iu.test(source.slice(0, match.index!)));
+}
 /** A link instruction is never settlement evidence, even with an issuer label. */
 export function hasClickLinkPrompt(source: string): boolean {
-  for (const match of source.matchAll(CLICK_LINK_PROMPT)) {
-    const before = source.slice(Math.max(0, match.index! - 60), match.index);
-    // A warning against clicking, or a merchant named CLICK HERE, is not a prompt.
-    if (/(?:\b(?:do\s+not|don['’]t|never|avoid|refrain\s+from)\s+(?:ever\s+)?|\b(?:at|from|merchant\s*:?)\s+|(?:لا|عدم)\s+)$/iu.test(before)) continue;
-    // A closed issuer debit declaration names a merchant, not a link to open.
-    // Skip only this match, so a later user-directed instruction is still refused.
-    // Use the complete prefix: a cropped suffix can manufacture a statement start.
-    // Only a complete greeting may bridge comma/newline; not a wrapped "Can we".
-    // Check what follows the host too: ASCII, fullwidth or %-encoded suffixes cannot be enumerated.
-    if (ISSUER_MERCHANT_DEBIT_CONFIRMATION.test(match[0]) &&
-        ISSUER_MERCHANT_HOST_END.test(source.slice(match.index! + match[0].length)) &&
-        /(?:^|[.!?])\s*(?:Dear\s+Customer[,\s]+)?we\s+$/iu.test(source.slice(0, match.index!))) continue;
-    return true;
-  }
+  for (const match of source.matchAll(CLICK_LINK_PROMPT)) if (countsAsLinkPrompt(source, match)) return true;
   return false;
+}
+const WORD_ONLY_LINK_TARGET = /(?:\b(?:here|below|link|url)|الرابط|هنا)$/iu;
+/** Every link instruction is a bare word ("tap here", "click the link"): the text names no address to open. */
+export function hasOnlyWordLinkPrompts(source: string): boolean {
+  const counted = [...source.matchAll(CLICK_LINK_PROMPT)].filter((match) => countsAsLinkPrompt(source, match));
+  return counted.length > 0 && counted.every((match) => WORD_ONLY_LINK_TARGET.test(match[0]));
+}
+/**
+ * A genuine debit may carry a footer such as "If not you, tap here to block your card". With no address in it,
+ * it cannot be a phishing link, so the debit above it must reach Review instead of being dropped. The footer is
+ * blanked for that Review inspection only; posting still refuses it.
+ */
+export function blankWordLinkPrompts(source: string): string {
+  if (!hasOnlyWordLinkPrompts(source)) return source;
+  let out = source;
+  for (const match of source.matchAll(CLICK_LINK_PROMPT)) {
+    if (!countsAsLinkPrompt(source, match)) continue;
+    out = out.slice(0, match.index!) + ' '.repeat(match[0].length) + out.slice(match.index! + match[0].length);
+  }
+  return out;
 }
 
 const FIRST_PERSON_MONEY = /^\s*(?:(?:hi|hey|hello)\b(?:[^\r\n.!?]{0,40}[,!:]|\s+)\s*)?(?:I(?:\s+(?:(?:have|just|already)\s+){0,2}|['’]ve\s+(?:(?:just|already)\s+)?)(?:spent|paid|bought|sent|deposited|transferred|refunded)\b|[اأ]نا\s+(?:(?:قد|لقد)\s+)?(?:صرفت|دفعت|اشتريت|حولت|حوّلت|أرسلت|ارسلت)(?=\s))/iu;
