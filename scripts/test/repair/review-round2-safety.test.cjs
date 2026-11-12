@@ -406,3 +406,112 @@ for (const [kind, body, minor] of [
     }
   });
 }
+
+// CEO decision 51818dc1: REFUND_RE's own settled test must run through the same guards. With a merchant inside the old
+// 40-character window these bodies used to settle and post income: credited to the merchant or a beneficiary, a
+// conditional or negated sentence, a credit made in error and reversed, and a previous refund of another amount.
+const shortRefundMerchant = 'IKEA';
+const refundAckAmount = 'Your refund request for AED 100.00 has been received.';
+for (const [kind, body] of [
+  ['credited-to-merchant', `${refundAck} Refund of AED 100.00 from ${shortRefundMerchant} has been credited to the merchant for approval.`],
+  ['credited-to-beneficiary', `${refundAck} Refund of AED 100.00 from ${shortRefundMerchant} was credited to the beneficiary account.`],
+  ['posted-to-merchant-then-future', `${refundAck} Refund of AED 100.00 from ${shortRefundMerchant} has been posted to the merchant, it will be credited to your card in 5 days.`],
+  ['if-conditional', `${refundAck} If the refund of AED 100.00 from ${shortRefundMerchant} has been credited to your card, please ignore this message.`],
+  ['once-conditional', `${refundAck} Once the refund of AED 100.00 from ${shortRefundMerchant} has been credited to your card, you will get an SMS.`],
+  ['notified-when', `${refundAck} You will be notified when the refund of AED 100.00 from ${shortRefundMerchant} has been credited to your card.`],
+  ['credited-in-error-reversed', `${refundAck} Refund of AED 100.00 from ${shortRefundMerchant} was credited to your card in error and has been reversed.`],
+  ['wrong-refund-amount', `${refundAckAmount} A previous refund from ${shortRefundMerchant} of AED 20.00 has been credited to your card.`],
+  ['ack-amount-once', `${refundAckAmount} Once the refund has been credited to your card, you will receive an SMS.`],
+  ['ack-amount-if-already', `${refundAckAmount} If the refund has already been credited to your card, please ignore this message.`],
+  ['ack-amount-not-yet', `${refundAckAmount} The refund has not been credited to your card yet.`],
+  ['ack-amount-after', `${refundAckAmount} You will get an SMS after the refund has been posted to your card.`],
+  ['no-ack-once', 'Once the refund of AED 100.00 has been credited to your card ending 1234, you will receive an SMS.'],
+  ['no-ack-if', 'If the refund of AED 100.00 has been credited to your card, please ignore this message.'],
+  ['no-ack-to-merchant', `Refund of AED 100.00 from ${shortRefundMerchant} has been credited to the merchant for approval.`],
+  ['no-ack-in-error-reversed', `Refund of AED 100.00 from ${shortRefundMerchant} was credited to your card in error and has been reversed.`],
+  ['no-ack-not-yet', 'The refund of AED 100.00 has not been credited to your card yet.'],
+  ['no-ack-after', 'You will get an SMS after the refund of AED 100.00 has been posted to your card.'],
+  ['no-ack-long-merchant-to-merchant', `Refund of AED 100.00 from ${longRefundMerchant} has been credited to the merchant for approval.`],
+  ['owner-is-not-a-card', `${refundAck} Refund of AED 100.00 from ${shortRefundMerchant} has been credited to your merchant for approval.`],
+]) {
+  test(`refund hardening refuses/${kind}`, () => {
+    const session = reader('AE');
+    assert.equal(parseSms(body), null);
+    assert.equal(parseSms(body, {}, { sender: 'ENBD', observedAt: at }), null);
+    assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
+    assert.equal(confirmationNative(body).route, 'ignore');
+  });
+}
+for (const [kind, body, minor] of [
+  ['plain-short-merchant', `Refund of AED 100.00 from ${shortRefundMerchant} has been credited to your card ending 1234.`, 10000],
+  ['plain-credited-to-your-card-from', 'Refund of AED 89.00 has been credited to your card from DELIVEROO', 8900],
+  ['plain-dotted-merchant-original-method', 'Refund of AED 100.00 from NOON.COM has been credited to the original payment method.', 10000],
+  ['plain-long-merchant', `Refund of AED 100.00 from ${longRefundMerchant} has been credited to your card ending 1234.`, 10000],
+  ['plain-credited-back-to-account', `Refund of AED 100.00 from ${shortRefundMerchant} has been credited back to your account.`, 10000],
+  ['plain-multiword-owner', `Refund of AED 100.00 from ${shortRefundMerchant} has been credited to your Mashreq Platinum Credit Card ending 1234.`, 10000],
+  ['plain-then-conditional-footer-sentence', `Refund of AED 100.00 from ${shortRefundMerchant} has been credited to your card ending 1234. If you did not request this refund, call 600 500000.`, 10000],
+  ['plain-and-merchant', 'Refund of AED 100.00 from MARKS AND SPENCER has been credited to your card ending 1234.', 10000],
+  ['ack-short-merchant', `${refundAck} Refund of AED 100.00 from ${shortRefundMerchant} has been credited to your card ending 1234.`, 10000],
+  ['ack-amount-same-short-merchant', `${refundAckAmount} Refund of AED 100.00 from ${shortRefundMerchant} has been credited to your card ending 1234.`, 10000],
+  ['ack-long-merchant', `${refundAck} Refund of AED 100.00 from ${longRefundMerchant} has been credited to your card ending 1234.`, 10000],
+  ['ack-after-verification-comma', `${refundAck} After verification, the refund of AED 100.00 from ${shortRefundMerchant} has been credited to your card.`, 10000],
+]) {
+  test(`refund hardening posts/${kind}`, () => {
+    const session = reader('AE');
+    assert.equal(nonPostingReason(body), null);
+    for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
+      session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
+      assert.equal(parsed?.kind, 'transaction');
+      assert.equal(parsed.type, 'income');
+      assert.equal(parsed.amountFils, minor);
+      assert.equal(parsed.currency, 'AED');
+    }
+  });
+}
+// Arabic: a completed refund posts at a short and a long merchant; an acknowledgement plus credit is refused by the
+// separate Arabic rule at every length, so it cannot be a must-post (pinned as unchanged).
+test('refund hardening Arabic completed refunds post/short and long', () => {
+  const session = reader('AE');
+  for (const merchant of ['نون', 'مطعم الشام للمأكولات والمشروبات الشرقية والغربية في دبي مول فرع']) {
+    const body = `تم استرداد مبلغ 100.00 درهم إلى بطاقتك المنتهية بـ 1234 من ${merchant}.`;
+    for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
+      session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
+      assert.equal(parsed?.kind, 'transaction');
+      assert.equal(parsed.type, 'income');
+      assert.equal(parsed.amountFils, 10000);
+    }
+  }
+});
+test('refund hardening Arabic acknowledgement plus credit stays refused/unchanged', () => {
+  const session = reader('AE');
+  const body = 'تم استلام طلب استرداد مبلغ 100.00 درهم من نون. تم استرداد المبلغ إلى بطاقتك المنتهية بـ 1234.';
+  assert.equal(parseSms(body), null);
+  assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
+});
+
+// CEO decision 51818dc1 (c): a genuine debit that carries a link-WORD footer ("tap here", "click the link", no URL) must
+// reach Review with its exact money, never be silently dropped; it still never auto-posts. A footer with a real URL
+// stays refused as a link request.
+for (const [kind, source] of [
+  ['tap-here-to-block', 'Purchase of AED 50.00 with Debit Card ending 1234 at CARREFOUR. Avl Bal AED 1,000.00. If not you, tap here to block your card.'],
+  ['click-the-link-to-report', 'AED 50.00 was debited from your account ending 1234 at CARREFOUR. If you did not make this transaction, click the link to report it.'],
+  ['click-below-to-dispute', 'Purchase of AED 50.00 with Credit Card ending 1234 at CARREFOUR. Unauthorised? Click below to dispute.'],
+]) {
+  test(`genuine debit with a link-word footer reaches Review/${kind}`, () => {
+    const session = reader('AE');
+    assert.equal(parseSms(source), null, 'never auto-posts');
+    assert.equal(session.parse(source, 'ENBD', session.inspect(source, 'ENBD'), undefined, at), null);
+    const held = inspectSourceFreeRefusedAlert({ source, sender: 'ENBD', observedAt: at, channel: 'inbox', session });
+    assert.equal(held.kind, 'review');
+    const money = held.candidate?.event?.amount.value ?? held.candidate?.amount;
+    assert.deepEqual(JSON.parse(JSON.stringify(money)), { currency: 'AED', minorUnits: '5000', exponent: 2 });
+  });
+}
+test('debit with a footer that names a real URL stays refused as a link request', () => {
+  const session = reader('AE');
+  const source = 'AED 581.48 debited from your account ending 1234. If not you, tap https://secure-rakbank.example/login to cancel.';
+  assert.equal(parseSms(source), null);
+  const held = inspectSourceFreeRefusedAlert({ source, sender: 'ENBD', observedAt: at, channel: 'inbox', session });
+  assert.equal(held.kind, 'declined');
+  assert.equal(held.reason, 'link-request');
+});
