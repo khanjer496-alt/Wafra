@@ -1,0 +1,90 @@
+appId: app.wafra.ios
+---
+- extendedWaitUntil:
+    visible:
+      id: home-screen
+    timeout: 60000
+- assertVisible: ${PERSON_NAME}
+- waitForAnimationToEnd
+- takeScreenshot: 01-home
+- openLink: wafra://statement-import
+- extendedWaitUntil:
+    visible:
+      id: statement-import
+    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      id: statement-choose
+      enabled: true
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: 02-import
+- openLink: wafra://bills
+- extendedWaitUntil:
+    visible:
+      id: bills-summary
+    timeout: 60000
+- assertVisible:
+    id: bills-subscriptions
+- waitForAnimationToEnd
+- takeScreenshot: 03-bills
+- scrollUntilVisible:
+    element:
+      text: 'Netflix.*'
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    text: 'Netflix.*'
+- extendedWaitUntil:
+    visible:
+      id: bill-detail-head
+    timeout: 15000
+- assertVisible:
+    id: bill-detail-amount
+- waitForAnimationToEnd
+- takeScreenshot: 04-subscription-detail
+- tapOn:
+    text: ${CLOSE_LABEL}
+- openLink: wafra://wallet
+- extendedWaitUntil:
+    visible:
+      id: wallet-screen
+    timeout: 20000
+- waitForAnimationToEnd
+- takeScreenshot: 05-accounts
+- openLink: wafra://flow?view=categories
+- extendedWaitUntil:
+    visible:
+      id: spending-categories
+    timeout: 20000
+- waitForAnimationToEnd
+- takeScreenshot: 06-spending
+- scrollUntilVisible:
+    element:
+      id: spending-category-groceries
+    direction: DOWN
+- tapOn:
+    id: spending-category-groceries
+- extendedWaitUntil:
+    visible:
+      id: category-limit
+    timeout: 15000
+- tapOn:
+    id: category-limit
+- extendedWaitUntil:
+    visible:
+      id: limit-sheet
+    timeout: 15000
+- waitForAnimationToEnd
+- takeScreenshot: 07-category-limit
+- tapOn:
+    text: ${CLOSE_LABEL}
+- openLink: wafra://settings
+- extendedWaitUntil:
+    visible:
+      id: settings-title
+    timeout: 20000
+- assertVisible:
+    id: settings-pro-card
+- waitForAnimationToEnd
+- takeScreenshot: 08-settings

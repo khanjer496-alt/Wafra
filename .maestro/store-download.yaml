@@ -1,0 +1,14 @@
+# Setup only: an ordinary synthetic JSON attachment downloaded by Safari.
+appId: com.apple.mobilesafari
+---
+- launchApp
+- tapOn:
+    text: 'Continue'
+    optional: true
+- openLink: ${FIXTURE_URL}
+- extendedWaitUntil:
+    visible: 'Download'
+    timeout: 30000
+- tapOn:
+    text: 'Download'
+- waitForAnimationToEnd

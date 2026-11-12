@@ -1,0 +1,28 @@
+# No clearState/keychain wipe: each pass already owns a new empty simulator.
+appId: app.wafra.ios
+---
+- launchApp:
+    stopApp: false
+- extendedWaitUntil:
+    visible:
+      id: onboarding-restore-backup
+    timeout: 60000
+- tapOn:
+    id: onboarding-restore-backup
+- tapOn:
+    text: 'Recents'
+    optional: true
+- extendedWaitUntil:
+    visible: ${FIXTURE_NAME}
+    timeout: 30000
+- tapOn:
+    text: ${FIXTURE_NAME}
+- extendedWaitUntil:
+    visible: 'Restore backup\?'
+    timeout: 15000
+- tapOn:
+    text: 'Restore'
+- extendedWaitUntil:
+    visible:
+      id: home-screen
+    timeout: 60000
