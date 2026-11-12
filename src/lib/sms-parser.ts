@@ -2351,13 +2351,18 @@ const REFUND_CREDIT_SCAN_RE =
 const REFUND_CREDIT_NEGATION_RE = /\b(?:(?:has|have|had|was|were|is|are)\s+(?:not|never)|(?:hasn|haven|wasn|weren|isn|aren)['’]t|yet\s+to\s+be)\s+(?:(?:yet|been|successfully)\s+){0,3}$/;
 // A credit sent to a third party is not the reader's money. Deny-list, so an unusual but own destination ("Card ending 1234") still posts.
 const REFUND_THIRD_PARTY_DESTINATION_RE = /^\s*(?:back\s+)?(?:to|into|onto)\s+(?:(?:the|a|an|your|his|her|their|its)\s+)?(?:\w+\s+){0,2}?(?:merchant|beneficiary|seller|vendor|recipient|payee|retailer|supplier|store|shop|restaurant|platform|marketplace)\b/i;
+// A negated credit ("has not been credited") ends at an explicit new clause in the same sentence whose own credit is completed
+// ("... and the refund has now been credited to your card"); a future or later-sentence credit does not lift it.
+const REFUND_COMPLETED_AUXILIARY_RE = /\b(?:has|have|had|was|were)\s+(?:\w+\s+){0,2}$/;
 function refundCreditNotActual(body: string, request: string): boolean {
   const requested = refundAmounts(request);
+  let negatedEnd = -1;
   for (const match of body.matchAll(REFUND_CREDIT_SCAN_RE)) {
     const at = match.index!;
     const breaks = [...body.slice(0, at).matchAll(REFUND_SENTENCE_BREAK_RE)];
     const lead = body.slice(breaks.length ? breaks[breaks.length - 1].index! + 1 : 0, at);
-    if (governsRefundCredit(lead) || REFUND_CREDIT_CONDITIONAL_INSIDE_RE.test(match[1]) || REFUND_CREDIT_NEGATION_RE.test(match[1])) return true;
+    if (governsRefundCredit(lead) || REFUND_CREDIT_CONDITIONAL_INSIDE_RE.test(match[1])) return true;
+    if (REFUND_CREDIT_NEGATION_RE.test(match[1])) { negatedEnd = at + match[0].length; continue; }
     if (match[2] && REFUND_THIRD_PARTY_DESTINATION_RE.test(match[2])) return true;
     // From the credit verb on, destination included: "credited to your card in error and has been reversed".
     const remainder = body.slice(at + match[0].length - (match[2]?.length ?? 0));
@@ -2366,8 +2371,9 @@ function refundCreditNotActual(body: string, request: string): boolean {
       const credited = refundAmounts(lead + match[0] + remainder.split(REFUND_SENTENCE_BREAK_RE)[0]);
       if (requested.some((amount) => !credited.includes(amount))) return true;
     }
+    if (negatedEnd >= 0 && REFUND_COMPLETED_AUXILIARY_RE.test(match[1]) && body.slice(negatedEnd, at).search(REFUND_SENTENCE_BREAK_RE) < 0) negatedEnd = -1;
   }
-  return false;
+  return negatedEnd >= 0;
 }
 const MANDATE_LIFECYCLE_RE =
   /\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b(?:[^.]|\.\d){0,96}\b(?:will\s+(?:start|begin|commence|activate)|has\s+been\s+(?:created|registered|set\s*up|activated)|is\s+(?:now\s+)?active)\b|\b(?:created|registered|set\s*up|activated)\b(?:[^.]|\.\d){0,64}\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b|تم\s+(?:تسجيل|انشاء|تفعيل)[^\n]{0,64}(?:امر\s+)?(?:خصم\s+(?:تلقايي|مباشر)|تعليمات\s+مستديمه)/iu;
