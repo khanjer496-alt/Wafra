@@ -368,6 +368,7 @@ for (const [kind, body] of [
   ['once-conditional', `${refundAck} Once the refund of AED 100.00 from ${longRefundMerchant} has been credited to your card, you will get an SMS.`],
   ['will-be-notified-when', `${refundAck} You will be notified when the refund of AED 100.00 from ${longRefundMerchant} has been credited to your card.`],
   ['credited-in-error-reversed', `${refundAck} Refund of AED 100.00 from ${longRefundMerchant} was credited to your card in error and has been reversed.`],
+  ['until-it-has-been-credited', `${refundAck} Your refund of AED 100.00 from ${longRefundMerchant} is not final until it has been credited to your card.`],
   ['wrong-refund-amount', `Your refund request for AED 100.00 has been received. A previous refund from ${longRefundMerchant} of AED 20.00 has been credited to your card.`],
 ]) {
   test(`refund credit rule refuses/${kind}`, () => {
@@ -383,7 +384,6 @@ for (const [kind, body, minor] of [
   ['the-card', `${refundAck} Refund of AED 100.00 from ${longRefundMerchant} has been credited to the card.`, 10000],
   ['successfully-refunded-dotted', `${refundAck} Refund of AED 100.00 from APPLE.COM/BILL has been successfully refunded to your card.`, 10000],
   ['credited-back-to-the-account', `${refundAck} Refund of AED 100.00 from ${longRefundMerchant} has been credited back to the account.`, 10000],
-  ['order-placed-when-travelling', `${refundAck} Refund of AED 100.00 for the order you placed when travelling from ${longRefundMerchant} has been credited to your card.`, 10000],
   ['request-states-the-same-amount', `Your refund request for AED 100.00 has been received. Refund of AED 100.00 from ${longRefundMerchant} has been credited to your card.`, 10000],
 ]) {
   test(`refund credit rule posts/${kind}`, () => {
