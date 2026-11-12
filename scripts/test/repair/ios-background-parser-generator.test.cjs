@@ -276,21 +276,53 @@ test('the actual iOS project fingerprint retains resource hashes when autolinkin
   }
 });
 
-test('current workflows generate and check before native prebuild or build and verify exact packaged parser hashes', () => {
+test('current workflows only CHECK the committed parser bundle before a native build, and release builds still verify the packaged resources', () => {
   for (const relative of ['.github/workflows/ci.yml', '.github/workflows/ios-testflight.yml']) {
     const workflow = YAML.parse(fs.readFileSync(path.join(ROOT, relative), 'utf8'));
     const jobs = relative.endsWith('ci.yml') ? ['check', 'native-ios'] : ['build', 'local-build'];
     for (const name of jobs) {
       const steps = workflow.jobs[name].steps;
-      const generate = steps.findIndex((step) => /node scripts\/generate-ios-background-parser\.cjs\n/.test(step.run || ''));
+      // A build (or CI job) must never regenerate the bundle first: a stale committed bundle
+      // would be silently replaced and could never fail. Release builds ship exactly the
+      // committed, reviewed bundle.
+      const generate = steps.findIndex((step) => /node scripts\/generate-ios-background-parser\.cjs\n/.test(step.run || '') ||
+        /node scripts\/generate-ios-background-parser\.cjs\s*$/m.test(step.run || ''));
+      const checkOnly = steps.findIndex((step) => /^node scripts\/generate-ios-background-parser\.cjs --check\s*$/.test(step.run || ''));
       const build = steps.findIndex((step) => /expo prebuild|eas build --platform ios|args=\(build --platform ios/.test(step.run || ''));
-      assert.ok(generate >= 0 && build > generate, `${relative} ${name}: generate before native build`);
-      assert.match(steps[generate].run, /generate-ios-background-parser\.cjs --check/);
+      assert.equal(generate, -1, `${relative} ${name}: must not regenerate the parser before checking it`);
+      assert.ok(checkOnly >= 0, `${relative} ${name}: must run the read-only --check`);
+      if (build >= 0) assert.ok(build > checkOnly, `${relative} ${name}: check before native build`);
     }
   }
   const ios = YAML.parse(fs.readFileSync(path.join(ROOT, '.github/workflows/ios-testflight.yml'), 'utf8'));
   const verify = ios.jobs['local-build'].steps.find((step) => step.name === 'Verify the actual signed IPA and App Intent resources').run;
   assert.match(verify, /generate-ios-background-parser\.cjs --verify-resource-directory/);
+});
+
+test('no workflow, package script or EAS config runs the parser generator in write mode', () => {
+  const generator = /generate-ios-background-parser\.cjs(?<rest>[^\n]*)/g;
+  const offenders = [];
+  const workflowDir = path.join(ROOT, '.github/workflows');
+  const sources = fs.readdirSync(workflowDir).filter((file) => /\.ya?ml$/.test(file))
+    .map((file) => [`.github/workflows/${file}`, fs.readFileSync(path.join(workflowDir, file), 'utf8')]);
+  sources.push(['package.json', fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')]);
+  sources.push(['eas.json', fs.readFileSync(path.join(ROOT, 'eas.json'), 'utf8')]);
+  for (const [file, text] of sources) {
+    for (const line of text.split('\n')) {
+      if (/^\s*#/.test(line)) continue; // comments may name the command
+      for (const match of line.matchAll(generator)) {
+        // Filename mentions in `paths:` filters are not commands.
+        if (/^\s*-\s*'?scripts\//.test(line)) continue;
+        if (!/--check|--verify-resource-directory/.test(match.groups.rest)) offenders.push(`${file}: ${line.trim()}`);
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], 'only --check and --verify-resource-directory may run in automation');
+  // EAS build hooks would run the generator inside the cloud build; none exist.
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  for (const hook of ['eas-build-pre-install', 'eas-build-post-install', 'eas-build-on-success', 'eas-build-on-error', 'eas-build-on-complete', 'postinstall']) {
+    if (pkg.scripts?.[hook]) assert.doesNotMatch(pkg.scripts[hook], /generate-ios-background-parser/, `${hook} must not run the generator`);
+  }
 });
 
 test('macOS CI runs the actual context and JavaScriptCore suites and watches their sources', () => {
