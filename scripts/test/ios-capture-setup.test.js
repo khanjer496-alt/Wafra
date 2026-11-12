@@ -2337,12 +2337,12 @@ struct WafraBankSenderRegistryTests {
       const ledger = ledgerAdapter();
       ledger.setState({ ...BASE_STATE, reviewTray: { ...BASE_STATE.reviewTray, pending } });
       // Real admission, including the protected-lane capacity refusal.
-      ledger.stageReviewAlerts = (items, reviewQualifications = []) => {
+      ledger.stageReviewAlerts = (items, reviewQualifications = [], _bindings, mode) => {
         ledger.calls.push(`review:${items.length}`);
         let tray = ledger.getState().reviewTray;
         const admittedIds = new Set();
         for (const item of items) {
-          const result = trayModule.admitPreparedReviewAlert(tray, item, Date.now());
+          const result = trayModule.admitPreparedReviewAlert(tray, item, Date.now(), mode);
           tray = result.state;
           if (result.outcome === 'admitted') admittedIds.add(item.id);
         }

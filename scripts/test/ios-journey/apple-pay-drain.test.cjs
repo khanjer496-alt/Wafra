@@ -87,11 +87,11 @@ function harness({ wallet = [record(1)], legacy = ['sms'], failDurable = false, 
   const ledger = { getState: () => state, getStateGeneration: () => generation,
     setMarket: () => { throw Error('Wallet cannot set market'); }, importBatch: () => { throw Error('Wallet cannot post money'); },
     ensureDurable: async () => { calls.push('barrier'); if (failDurable && sms.length === 0) throw Error('disk failed'); },
-    stageReviewAlerts: (items, qualifications) => {
+    stageReviewAlerts: (items, qualifications, _bindings, mode) => {
       assert.equal(qualifications, undefined); let admitted = 0; calls.push('review');
       if (!refuseReview) for (const item of items) {
         if (blockedNotification && tray.isIosNotificationReview(item)) continue;
-        const next = tray.admitPreparedReviewAlert(state.reviewTray, item, now); state.reviewTray = next.state; admitted += next.outcome === 'admitted' ? 1 : 0;
+        const next = tray.admitPreparedReviewAlert(state.reviewTray, item, now, mode); state.reviewTray = next.state; admitted += next.outcome === 'admitted' ? 1 : 0;
       }
       return { admitted, durable: failDurable ? Promise.reject(Error('disk failed')) : Promise.resolve(),
         retention: () => tray.reviewRetentionReceipts(state.reviewTray, items, now) };

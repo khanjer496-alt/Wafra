@@ -113,9 +113,9 @@ test('a full Review tray retains overflow in the native queue until space is ava
   };
   const coordinator = api.createIosLocalCaptureCoordinator({ native, ledger: { getState: () => state, getStateGeneration: () => 1,
     ensureDurable: async () => {}, importBatch: () => { throw Error('review cannot post money'); },
-    stageReviewAlerts: items => {
+    stageReviewAlerts: (items, _qualifications, _bindings, mode) => {
       let admitted = 0;
-      for (const item of items) { const result = tray.admitPreparedReviewAlert(state.reviewTray, item, now); state.reviewTray = result.state; admitted += result.outcome === 'admitted' ? 1 : 0; }
+      for (const item of items) { const result = tray.admitPreparedReviewAlert(state.reviewTray, item, now, mode); state.reviewTray = result.state; admitted += result.outcome === 'admitted' ? 1 : 0; }
       return { admitted, durable: Promise.resolve(), retention: () => tray.reviewRetentionReceipts(state.reviewTray, items, now) };
     },
   }, retireShortcutCapture: async () => { throw Error('notification cannot prove SMS'); } });

@@ -26,9 +26,9 @@ function harness(options = {}) {
     state, getStateSnapshot: () => state, getStateGeneration: () => 1,
     setHistoryImportProgress: async () => {},
     setMarket: () => options.marketAllowed !== false,
-    stageReviewAlerts: items => {
+    stageReviewAlerts: (items, _qualifications, _bindings, mode) => {
       events.push('review');
-      const result = tray.admitPreparedReviewAlerts(state.reviewTray, items, Date.now());
+      const result = tray.admitPreparedReviewAlerts(state.reviewTray, items, Date.now(), mode);
       state.reviewTray = result.state;
       return { admitted: result.outcomes.filter(outcome => outcome === 'admitted').length,
         durable: options.reviewFailure ? Promise.reject(new Error('review write failed')) : Promise.resolve(),

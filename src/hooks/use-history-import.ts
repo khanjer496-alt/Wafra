@@ -159,7 +159,7 @@ export function useHistoryImport(): void {
       let reviewReceipt: ReviewStageReceipt | undefined;
       if (page.reviewCandidates.length > 0 || (page.reviewSourceBindings?.length ?? 0) > 0 ||
           (page.skippedKnownInboxReviewSourceKeys?.length ?? 0) > 0) {
-        reviewReceipt = stageReviewAlerts(page.reviewCandidates, undefined, page.reviewSourceBindings);
+        reviewReceipt = stageReviewAlerts(page.reviewCandidates, undefined, page.reviewSourceBindings, 'hold-source');
         const outcomes = await settleReviewStage(page.reviewCandidates, reviewReceipt);
         if (!canCommit()) return false;
         const unresolved = page.reviewCandidates.filter(requiresReviewRetention).map(item =>
@@ -199,7 +199,7 @@ export function useHistoryImport(): void {
       // Review items in this same turn so the page write below carries them;
       // a full Review lane posts the alert instead of dropping it.
       const nearMatches = stageWalletNearMatches(
-        plan, () => getStateSnapshot().reviewTray, (items) => stageReviewAlerts(items));
+        plan, () => getStateSnapshot().reviewTray, (items) => stageReviewAlerts(items, undefined, undefined, 'hold-source'));
       const claims = new Set(reviewReceipt?.retainedSourceKeys?.() ?? []);
       const finalReviews = reviewReceipt?.retention?.() ?? [];
       if (!canCommit() || (page.skippedKnownInboxReviewSourceKeys ?? []).some(key => !claims.has(key)) ||

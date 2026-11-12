@@ -627,11 +627,23 @@ export const admitReviewAlert = (
   return admitPreparedReviewAlert(state, item, input.observedAt);
 };
 
+/**
+ * How a full Message/relay/history lane admits new evidence.
+ * - 'bounded' (default): the existing policy. The new item is admitted and the
+ *   lane is trimmed to its cap, informational entries first, then the oldest,
+ *   each counted as a visible 'evicted'/'currency-evicted' loss.
+ * - 'hold-source': strict retention. Acknowledged retention-required evidence is
+ *   never replaced; the new item is 'deferred' instead. Only a caller that keeps
+ *   its source queued until a later retry (withheld ACK, held cursor, held
+ *   session, thrown hold) may pass it; otherwise a deferral would lose the item.
+ */
+export type ReviewAdmissionMode = 'bounded' | 'hold-source';
+
 /** Merge an already sanitized capture item through the same dedupe/retention policy. */
 export const admitPreparedReviewAlert = (
-  current: AlertReviewTrayState, input: ReviewEntry, now: number,
+  current: AlertReviewTrayState, input: ReviewEntry, now: number, mode: ReviewAdmissionMode = 'bounded',
 ): ReviewAdmissionResult => {
-  const result = admitPreparedReviewAlerts(current, [input], now);
+  const result = admitPreparedReviewAlerts(current, [input], now, mode);
   return { state: result.state, outcome: result.outcomes[0],
     ...(result.outcomes[0] === 'deferred' ? { reason: 'review-capacity' } : {}) };
 };
@@ -639,6 +651,7 @@ export const admitPreparedReviewAlert = (
 /** Bounded lanes; available subsets survive while remaining source must be retried. */
 export const admitPreparedReviewAlerts = (
   current: AlertReviewTrayState, inputs: readonly ReviewEntry[], now: number,
+  mode: ReviewAdmissionMode = 'bounded',
 ): { state: AlertReviewTrayState; outcomes: ReviewAdmissionResult['outcome'][] } => {
   const state = pruneAlertReviewTray(current, now);
   const working = [...state.pending];
@@ -649,12 +662,17 @@ export const admitPreparedReviewAlerts = (
   const decisions = new Map(state.tombstones.map(entry =>
     [canonicalUniversalSourceKey(entry.sourceKey), entry.outcome]));
   const pendingKey = (entry: ReviewEntry) => canonicalUniversalSourceKey(entry.sourceKey, entry.observedAt);
+  // O(1) replay check: a bounded batch can grow `working` to thousands before its single prune.
+  const workingKeys = new Set(working.map(pendingKey));
+  const workingById = new Map(working.map(entry => [entry.id, entry]));
+  const laneCounts = new Map<string, number>();
+  for (const entry of working) laneCounts.set(reviewLane(entry), (laneCounts.get(reviewLane(entry)) ?? 0) + 1);
   for (const input of inputs) {
     const key = canonicalUniversalSourceKey(input.sourceKey, input.observedAt);
     keys.push(key);
     const item = normalizeReviewEntry(input, now);
     if (!item) { outcomes.push('refused'); continue; }
-    const existing = working.find(entry => entry.id === item.id);
+    const existing = workingById.get(item.id);
     if (existing && (existing.sourceKey !== item.sourceKey || existing.observedAt !== item.observedAt)) {
       outcomes.push('refused'); continue;
     }
@@ -664,11 +682,12 @@ export const admitPreparedReviewAlerts = (
       if (!decision) expiredInputs.push(item);
       outcomes.push('expired'); continue;
     }
-    if (working.some(entry => pendingKey(entry) === key)) { outcomes.push('duplicate'); continue; }
+    if (workingKeys.has(key)) { outcomes.push('duplicate'); continue; }
     const lane = reviewLane(item);
-    const occupants = working.filter(entry => reviewLane(entry) === lane);
-    if (occupants.length >= REVIEW_ALERT_CAP) {
-      // No caller may replace acknowledged evidence with a new observation.
+    if ((laneCounts.get(lane) ?? 0) >= REVIEW_ALERT_CAP && (lane === 'protected' || mode === 'hold-source')) {
+      const occupants = working.filter(entry => reviewLane(entry) === lane);
+      // A source-holding caller never replaces acknowledged evidence with a new
+      // observation. Bounded callers keep the existing trim-and-count policy.
       const disposable = occupants.filter(entry => !requiresReviewRetention(entry))
         .sort((a, b) => a.observedAt - b.observedAt)[0];
       if (lane === 'protected' || !disposable ||
@@ -676,8 +695,14 @@ export const admitPreparedReviewAlerts = (
         outcomes.push('deferred'); continue;
       }
       working.splice(working.indexOf(disposable), 1);
+      workingKeys.delete(pendingKey(disposable));
+      workingById.delete(disposable.id);
+      laneCounts.set(lane, (laneCounts.get(lane) ?? 1) - 1);
     }
     working.push(item);
+    workingKeys.add(key);
+    workingById.set(item.id, item);
+    laneCounts.set(lane, (laneCounts.get(lane) ?? 0) + 1);
     recoveredKeys.add(key);
     outcomes.push('admitted');
   }
@@ -685,6 +710,7 @@ export const admitPreparedReviewAlerts = (
     tombstones: state.tombstones.filter(entry => !(
       (entry.outcome === 'evicted' || entry.outcome === 'currency-evicted') &&
       recoveredKeys.has(canonicalUniversalSourceKey(entry.sourceKey)))) }, now);
+  if (mode === 'bounded') return { state: next, outcomes };
   const retained = new Set(next.pending.map(pendingKey));
   return { state: next, outcomes: outcomes.map((outcome, index) =>
     outcome === 'admitted' && !retained.has(keys[index]) ? 'deferred' : outcome) };
@@ -757,7 +783,7 @@ export const partitionReviewsByCapacity = <T extends ReviewEntry>(
       admit.push(item);
       continue;
     }
-    const result = admitPreparedReviewAlert(state, item, now);
+    const result = admitPreparedReviewAlert(state, item, now, 'hold-source');
     // Only recoverable money evidence waits at its source for Review space. An
     // informational review that cannot displace kept money is staged and simply
     // not admitted, so it never holds a native record or an inbox cursor.

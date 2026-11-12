@@ -182,8 +182,8 @@ async function drainAll(records) {
       state = applyMaterializedImportBatch(state, m);
       return { ids: m.transactions.map((t) => t.id), qualificationIds: [], durable: Promise.resolve() };
     },
-    stageReviewAlerts: (items) => {
-      const batch = admitPreparedReviewAlerts(emptyAlertReviewTray(), items, NOW);
+    stageReviewAlerts: (items, _qualifications, _bindings, mode) => {
+      const batch = admitPreparedReviewAlerts(emptyAlertReviewTray(), items, NOW, mode);
       return { admitted: batch.outcomes.filter((o) => o === 'admitted').length, qualificationIds: [],
         durable: Promise.resolve(), retention: () => reviewRetentionReceipts(batch.state, items, NOW) };
     },

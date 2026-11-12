@@ -279,9 +279,9 @@ test('actual coordinator handles both mixed page orders and failed ACK after use
       acknowledgeRecords: async () => { if (failAck) { failAck = false; throw Error('synthetic ACK failure'); } queue = []; } };
     const coordinator = createIosLocalCaptureCoordinator({ native, ledger: { getState: () => state, getStateGeneration: () => 1,
       ensureDurable: async () => {},
-      stageReviewAlerts: items => {
+      stageReviewAlerts: (items, _qualifications, _bindings, mode) => {
         let admitted = 0;
-        for (const item of items) { const result = tray.admitPreparedReviewAlert(state.reviewTray, item, now.getTime());
+        for (const item of items) { const result = tray.admitPreparedReviewAlert(state.reviewTray, item, now.getTime(), mode);
           state.reviewTray = result.state; admitted += result.outcome === 'admitted' ? 1 : 0; }
         return { admitted, durable: Promise.resolve(), retention: () => tray.reviewRetentionReceipts(state.reviewTray, items, now.getTime()) };
       },

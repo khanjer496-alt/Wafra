@@ -160,9 +160,9 @@ function drainHarness({ initial, sms = [], wallet = [], plan: planner = buildImp
     },
     ensureDurable: async () => {},
     setMarket: () => true,
-    stageReviewAlerts: items => {
+    stageReviewAlerts: (items, _qualifications, _bindings, mode) => {
       calls.push(['stage', items.map(item => item.id)]);
-      const batch = tray.admitPreparedReviewAlerts(current.reviewTray, items, Date.now());
+      const batch = tray.admitPreparedReviewAlerts(current.reviewTray, items, Date.now(), mode);
       current.reviewTray = batch.state;
       return { admitted: batch.outcomes.filter(outcome => outcome === 'admitted').length, qualificationIds: [], durable: Promise.resolve(),
         retention: () => tray.reviewRetentionReceipts(current.reviewTray, items, Date.now()) };

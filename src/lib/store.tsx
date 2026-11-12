@@ -125,6 +125,7 @@ import {
 } from '@/lib/apple-pay-card-links';
 import {
   admitPreparedReviewAlerts,
+  type ReviewAdmissionMode,
   reviewRetentionReceipts,
   reviewClaimSourceKeys,
   type ReviewStageReceipt,
@@ -2224,10 +2225,12 @@ interface StoreValue {
     input: ImportBatchInput,
     qualifications?: readonly LocalCaptureDeclineQualificationMapping[],
   ) => ImportReceipt;
+  /** `mode` 'hold-source' only for a caller that keeps its source on deferral. */
   stageReviewAlerts: (
     items: ReviewEntry[],
     qualifications?: readonly LocalCaptureReviewQualificationCandidate[],
     sourceBindings?: readonly ReviewSourceBinding[],
+    mode?: ReviewAdmissionMode,
   ) => ReviewStageReceipt & { qualificationIds: string[] };
   dismissReviewAlert: (id: string, outcome: ReviewResolutionOutcome) => Promise<void>;
   promoteReviewAlert: (input: PromoteReviewAlertInput) => Promise<'added' | 'duplicate'>;
@@ -3191,6 +3194,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     items: ReviewEntry[],
     qualifications?: readonly LocalCaptureReviewQualificationCandidate[],
     sourceBindings?: readonly ReviewSourceBinding[],
+    mode: ReviewAdmissionMode = 'bounded',
   ) => {
     const generation = stateGeneration.current;
     let persistedTray: typeof authoritativeState.current.reviewTray | null = null;
@@ -3235,7 +3239,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const now = Date.now();
     const rebound = reconcileReviewSourceBindings(authoritativeState.current, sourceBindings ?? [], now);
     // One prune for the whole batch: History staging can carry thousands.
-    const batch = admitPreparedReviewAlerts(rebound.reviewTray, items, now);
+    const batch = admitPreparedReviewAlerts(rebound.reviewTray, items, now, mode);
     const reviewTray = batch.state;
     let admitted = 0;
     const admittedQualifications: LocalCaptureQualificationCandidate[] = [];

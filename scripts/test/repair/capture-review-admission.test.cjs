@@ -147,8 +147,8 @@ function executorHarness(reviewTray = built('alert-review-tray').emptyAlertRevie
   let durable = Promise.resolve(), serial = 0, generation = 0;
   const ledger = {
     getState: () => state, getStateGeneration: () => generation, ensureDurable: () => durable,
-    stageReviewAlerts(items) {
-      const batch = built('alert-review-tray').admitPreparedReviewAlerts(state.reviewTray, items, Date.now());
+    stageReviewAlerts(items, _qualifications, _bindings, mode) {
+      const batch = built('alert-review-tray').admitPreparedReviewAlerts(state.reviewTray, items, Date.now(), mode);
       state = { ...state, reviewTray: batch.state };
       return { admitted: batch.outcomes.filter(value => value === 'admitted').length, durable,
         retention: () => built('alert-review-tray').reviewRetentionReceipts(state.reviewTray, items, Date.now()) };

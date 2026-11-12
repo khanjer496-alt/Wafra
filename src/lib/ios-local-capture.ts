@@ -923,7 +923,7 @@ export function createIosLocalCaptureCoordinator(
           throw sourceFreePageError('Local capture requires review staging');
         }
         if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
-        const reviewReceipt = input.ledger.stageReviewAlerts(reviews, reviewQualifications);
+        const reviewReceipt = input.ledger.stageReviewAlerts(reviews, reviewQualifications, undefined, 'hold-source');
         await settleReviewStage(reviews, reviewReceipt);
         if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
         requireLedgerGeneration(input.ledger, pageGeneration);
@@ -945,7 +945,7 @@ export function createIosLocalCaptureCoordinator(
         if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
         // Generic review can be useful without proving a known-bank automation.
         // It receives no qualification mapping and cannot set firstCapturedAt.
-        const receipt = input.ledger.stageReviewAlerts(unqualifiedReviews);
+        const receipt = input.ledger.stageReviewAlerts(unqualifiedReviews, undefined, undefined, 'hold-source');
         await settleReviewStage(unqualifiedReviews, receipt);
         if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
         requireLedgerGeneration(input.ledger, pageGeneration);
@@ -1028,7 +1028,7 @@ export function createIosLocalCaptureCoordinator(
       if (nearMatchSettlement.reviews.length > 0) {
         if (!input.ledger.stageReviewAlerts) throw sourceFreePageError('Local capture requires review staging');
         if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
-        nearMatchReceipt = input.ledger.stageReviewAlerts(nearMatchSettlement.reviews);
+        nearMatchReceipt = input.ledger.stageReviewAlerts(nearMatchSettlement.reviews, undefined, undefined, 'hold-source');
       }
 
       let imported = 0;
@@ -1232,7 +1232,7 @@ export function createIosLocalCaptureCoordinator(
         if (reviews.length > 0) {
           if (!input.ledger.stageReviewAlerts) throw sourceFreePageError('Apple Pay requires review staging');
           if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
-          const receipt = input.ledger.stageReviewAlerts(reviews);
+          const receipt = input.ledger.stageReviewAlerts(reviews, undefined, undefined, 'hold-source');
           await settleReviewStage(reviews, receipt);
           if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
           requireLedgerGeneration(input.ledger, generation);

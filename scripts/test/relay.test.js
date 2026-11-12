@@ -78,8 +78,9 @@ function fixtureRetention(getState, items) {
     getState().reviewTray ?? reviewTrayApi.emptyAlertReviewTray(), items, Date.now());
 }
 
-function persistFixtureReviews(state, items) {
-  const batch = reviewTrayApi.admitPreparedReviewAlerts(state.reviewTray ?? reviewTrayApi.emptyAlertReviewTray(), items, Date.now());
+// Forwards the caller's admission mode like the real store (ReviewAdmissionMode).
+function persistFixtureReviews(state, items, mode) {
+  const batch = reviewTrayApi.admitPreparedReviewAlerts(state.reviewTray ?? reviewTrayApi.emptyAlertReviewTray(), items, Date.now(), mode);
   state.reviewTray = batch.state;
   return batch.outcomes.filter(value => value === 'admitted').length;
 }
@@ -2422,8 +2423,8 @@ async function queueItem(id, row, publicKey) {
               events.push(`flush:${current.ledgerId}`);
               await ledgerDurable;
             },
-            stageReviewAlerts(items) {
-              persistFixtureReviews(this.getState(), items);
+            stageReviewAlerts(items, _qualifications, _bindings, mode) {
+              persistFixtureReviews(this.getState(), items, mode);
               events.push('review-stage');
               return { admitted: 1, durable: reviewDurable, retention: fixtureRetention(() => this.getState(), items) };
             },
@@ -2565,8 +2566,8 @@ async function queueItem(id, row, publicKey) {
             getState: () => current,
             importBatch: () => ({ ids: [], durable: Promise.resolve() }),
             ensureDurable: async () => {},
-            stageReviewAlerts: (items) => ({
-              admitted: persistFixtureReviews(current, items),
+            stageReviewAlerts: (items, _qualifications, _bindings, mode) => ({
+              admitted: persistFixtureReviews(current, items, mode),
               retention: fixtureRetention(() => current, items),
               durable: new Promise((resolve) => { releaseReview = resolve; }),
             }),
@@ -2603,8 +2604,8 @@ async function queueItem(id, row, publicKey) {
               events.push('persist');
               return { ids: [], durable: Promise.resolve() };
             },
-            stageReviewAlerts(items) {
-              persistFixtureReviews(this.getState(), items);
+            stageReviewAlerts(items, _qualifications, _bindings, mode) {
+              persistFixtureReviews(this.getState(), items, mode);
               events.push('review-stage');
               return { admitted: 1, durable: Promise.resolve(), retention: fixtureRetention(() => this.getState(), items) };
             },
@@ -2645,8 +2646,8 @@ async function queueItem(id, row, publicKey) {
         const executor = executorModule.createCaptureExecutor({
           ledger: {
             ...ledger(Promise.resolve(), events),
-            stageReviewAlerts(items) {
-              persistFixtureReviews(this.getState(), items);
+            stageReviewAlerts(items, _qualifications, _bindings, mode) {
+              persistFixtureReviews(this.getState(), items, mode);
               events.push('review-stage');
               return { admitted: 1, durable: reviewDurable, retention: fixtureRetention(() => this.getState(), items) };
             },
@@ -2686,8 +2687,8 @@ async function queueItem(id, row, publicKey) {
               events.push('persist');
               return { ids: [], durable: Promise.resolve() };
             },
-            stageReviewAlerts(items) {
-              persistFixtureReviews(this.getState(), items);
+            stageReviewAlerts(items, _qualifications, _bindings, mode) {
+              persistFixtureReviews(this.getState(), items, mode);
               events.push('review-stage');
               return { admitted: 1, durable: reviewDurable, retention: fixtureRetention(() => this.getState(), items) };
             },
@@ -2720,8 +2721,8 @@ async function queueItem(id, row, publicKey) {
         const executor = executorModule.createCaptureExecutor({
           ledger: {
             ...ledger(Promise.resolve(), events),
-            stageReviewAlerts(items) {
-              persistFixtureReviews(this.getState(), items);
+            stageReviewAlerts(items, _qualifications, _bindings, mode) {
+              persistFixtureReviews(this.getState(), items, mode);
               events.push('review-stage');
               return { admitted: 1, durable: Promise.resolve(), retention: fixtureRetention(() => this.getState(), items) };
             },
@@ -2746,8 +2747,8 @@ async function queueItem(id, row, publicKey) {
         const executor = executorModule.createCaptureExecutor({
           ledger: {
             ...ledger(Promise.resolve(), events),
-            stageReviewAlerts(items) {
-              persistFixtureReviews(this.getState(), items);
+            stageReviewAlerts(items, _qualifications, _bindings, mode) {
+              persistFixtureReviews(this.getState(), items, mode);
               events.push('review-stage');
               return {
                 retention: fixtureRetention(() => this.getState(), items),
@@ -2842,8 +2843,8 @@ async function queueItem(id, row, publicKey) {
           ledger: {
             getState: () => current,
             setMarket: (market) => { events.push(`market:${market}`); return true; },
-            stageReviewAlerts(items) {
-              persistFixtureReviews(this.getState(), items);
+            stageReviewAlerts(items, _qualifications, _bindings, mode) {
+              persistFixtureReviews(this.getState(), items, mode);
               events.push('stage-review');
               return { admitted: 1, durable: Promise.resolve(), retention: fixtureRetention(() => this.getState(), items) };
             },
@@ -2895,8 +2896,8 @@ async function queueItem(id, row, publicKey) {
         const executor = executorModule.createCaptureExecutor({
           ledger: {
             getState: () => current,
-            stageReviewAlerts(items) {
-              persistFixtureReviews(this.getState(), items);
+            stageReviewAlerts(items, _qualifications, _bindings, mode) {
+              persistFixtureReviews(this.getState(), items, mode);
               events.push('stage-review');
               return {
                 retention: fixtureRetention(() => this.getState(), items),
@@ -3000,8 +3001,8 @@ async function queueItem(id, row, publicKey) {
         const executor = executorModule.createCaptureExecutor({
           ledger: {
             ...ledger(Promise.resolve(), events),
-            stageReviewAlerts(items) {
-              persistFixtureReviews(this.getState(), items);
+            stageReviewAlerts(items, _qualifications, _bindings, mode) {
+              persistFixtureReviews(this.getState(), items, mode);
               events.push('review-stage');
               return { admitted: 1, durable: Promise.resolve().then(() => events.push('review-durable')), retention: fixtureRetention(() => this.getState(), items) };
             },

@@ -791,7 +791,7 @@ export default function ImportSmsScreen() {
           knownReviewSourceKeys: reviewClaimSourceKeys(getStateSnapshot().reviewTray, Date.now()),
         });
       assertSameLedger();
-      const reviewReceipt = stageReviewAlerts(reviewCandidates, undefined, reviewSourceBindings);
+      const reviewReceipt = stageReviewAlerts(reviewCandidates, undefined, reviewSourceBindings, 'hold-source');
       await settleReviewStage(reviewCandidates, reviewReceipt);
       const assertReviewRetention = () => {
         assertSameLedger();
@@ -815,7 +815,7 @@ export default function ImportSmsScreen() {
       // below commits the source without importing anything.
       const staged = stageWalletNearMatches(
         buildImportPlan(parsed, getStateSnapshot(), newestTs, new Date(), declined),
-        () => getStateSnapshot().reviewTray, (items) => stageReviewAlerts(items));
+        () => getStateSnapshot().reviewTray, (items) => stageReviewAlerts(items, undefined, undefined, 'hold-source'));
       const p = staged.plan;
       await staged.settle();
       assertReviewRetention();
@@ -1150,7 +1150,7 @@ export default function ImportSmsScreen() {
     let nearMatchSettle: () => Promise<void>;
     try {
       const staged = stageWalletNearMatches(
-        currentPlan, () => getStateSnapshot().reviewTray, (items) => stageReviewAlerts(items));
+        currentPlan, () => getStateSnapshot().reviewTray, (items) => stageReviewAlerts(items, undefined, undefined, 'hold-source'));
       currentPlan = staged.plan;
       nearMatchSettle = staged.settle;
       if (!history) pendingInboxResult?.assertReviewRetention?.();
@@ -1423,7 +1423,7 @@ export default function ImportSmsScreen() {
         // can discard the protected history session.
         const stagedHistory = stageWalletNearMatches(
           buildImportPlan(result.parsed, state, 0, new Date(), result.declined),
-          () => getStateSnapshot().reviewTray, (items) => stageReviewAlerts(items));
+          () => getStateSnapshot().reviewTray, (items) => stageReviewAlerts(items, undefined, undefined, 'hold-source'));
         await stagedHistory.settle();
         if (!active) return;
         const nextPlan = withoutExistingBillReminders(

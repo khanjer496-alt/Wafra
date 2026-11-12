@@ -103,13 +103,18 @@ export function boundHistoryReviewCandidates(candidates: readonly ReviewEntry[])
   return candidates.filter((item) => !trimmed.has(item));
 }
 
-/** Persist source-free review rows before their protected Message source can be discarded. */
+/**
+ * Persist source-free review rows before their protected Message source can be
+ * discarded. The native History session stays until every row is settled, so
+ * this caller holds its source and stages with strict 'hold-source' admission.
+ */
 export async function persistIosHistoryReviewCandidates(
   items: ReviewEntry[],
-  stage: (items: ReviewEntry[]) => IosHistoryReviewStageReceipt,
+  stage: (items: ReviewEntry[], qualifications?: undefined, bindings?: undefined,
+    mode?: 'hold-source') => IosHistoryReviewStageReceipt,
 ): Promise<number> {
   if (items.length === 0) return 0;
-  const receipt = stage(items);
+  const receipt = stage(items, undefined, undefined, 'hold-source');
   if (!Number.isSafeInteger(receipt.admitted) ||
     receipt.admitted < 0 || receipt.admitted > items.length ||
     !(receipt.durable instanceof Promise)) {
@@ -222,7 +227,8 @@ export async function loadIosHistorySession(input: {
   privateFormatReview?: PrivateAlertFormatSessionOptions;
   cancelled?: () => boolean;
   /** Stage at most one native chunk at a time; a hold leaves the original session intact. */
-  stageReviews?: (items: ReviewEntry[]) => ReviewStageReceipt;
+  stageReviews?: (items: ReviewEntry[], qualifications?: undefined, bindings?: undefined,
+    mode?: 'hold-source') => ReviewStageReceipt;
   /** Internal final-barrier pass: do not duplicate parsed/declined projection arrays. */
   reviewValidationOnly?: boolean;
 }): Promise<LoadedIosHistorySession> {

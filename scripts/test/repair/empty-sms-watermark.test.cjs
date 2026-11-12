@@ -48,8 +48,8 @@ function harness(result = {}, initial = {}, options = {}) {
           ...(batch.parserRereadComplete ? { parserVersion: 39 } : {}) };
         return { ids: [], durable: Promise.resolve().then(() => { events.push('durable'); }) };
       },
-      stageReviewAlerts: items => {
-        const batch = reviewApi.admitPreparedReviewAlerts(current.reviewTray ?? reviewApi.emptyAlertReviewTray(), items, Date.now());
+      stageReviewAlerts: (items, _qualifications, _bindings, mode) => {
+        const batch = reviewApi.admitPreparedReviewAlerts(current.reviewTray ?? reviewApi.emptyAlertReviewTray(), items, Date.now(), mode);
         current = { ...current, reviewTray: batch.state };
         return { admitted: batch.outcomes.filter(value => value === 'admitted').length,
           retention: () => reviewApi.reviewRetentionReceipts(batch.state, items, Date.now()),

@@ -399,7 +399,7 @@ ok('hydration cannot relabel UAE review money as a foreign ledger amount',
   // Only retention-required money waits at its source; an informational review
   // is staged, refused by admission, and never displaces kept money.
   const infoPartition = tray.partitionReviewsByCapacity(fullLegacy, [informational(700)], NOW + 1000);
-  const infoAdmission = admitPreparedReviewAlert(fullLegacy, informational(700), NOW + 1000);
+  const infoAdmission = admitPreparedReviewAlert(fullLegacy, informational(700), NOW + 1000, 'hold-source');
   ok('an informational review cannot displace fifty retained money movements',
     infoPartition.deferred.length === 0 && infoPartition.admit.length === 1 &&
       infoAdmission.outcome === 'deferred' && infoAdmission.state.pending.length === 50 &&
@@ -412,18 +412,29 @@ ok('hydration cannot relabel UAE review money as a foreign ledger amount',
   ok('a money movement is admitted by evicting an informational review instead of waiting',
     overInfo.deferred.length === 0 && overInfo.admit[0] === incoming);
 
-  const overflow = admitPreparedReviewAlert(fullLegacy, incoming, NOW + 1000);
+  // Strict 'hold-source' admission (callers that keep their source) defers.
+  const overflow = admitPreparedReviewAlert(fullLegacy, incoming, NOW + 1000, 'hold-source');
   ok('normal admission defers at capacity without evicting acknowledged evidence',
     overflow.outcome === 'deferred' && overflow.state.pending.length === 50 &&
       overflow.state.pending.some(item => item.id === legacyFiller(0).id) &&
       overflow.state.tombstones.length === 0);
+  // The default bounded admission (callers that do not keep their source, such
+  // as paste) keeps the existing policy: the oldest money review is trimmed and
+  // recorded as a durable, counted 'evicted' loss, never silently.
+  const boundedOverflow = admitPreparedReviewAlert(fullLegacy, incoming, NOW + 1000);
+  ok('evicting a money review from the Message lane records a durable evicted tombstone',
+    boundedOverflow.outcome === 'admitted' && boundedOverflow.state.pending.length === 50 &&
+      !boundedOverflow.state.pending.some((item) => item.id === legacyFiller(0).id) &&
+      boundedOverflow.state.pending.some((item) => item.id === incoming.id) &&
+      tray.recentlyLostReviewCount(boundedOverflow.state, NOW + 1000, 'evicted') === 1,
+    JSON.stringify(boundedOverflow.state.tombstones));
   // Pre-existing corrupt/over-cap hydration still discloses bounded loss.
   const historicalLoss = pruneAlertReviewTray({ ...fullLegacy, pending: [...fullLegacy.pending, incoming] }, NOW + 1000);
-  const reread = admitPreparedReviewAlert(historicalLoss, legacyFiller(0), NOW + 2000);
+  const reread = admitPreparedReviewAlert(historicalLoss, legacyFiller(0), NOW + 2000, 'hold-source');
   ok('re-reading old lost evidence into a full lane defers and retains its loss record',
     reread.outcome === 'deferred' && tray.recentlyLostReviewCount(reread.state, NOW + 2000, 'evicted') === 1);
   const roomAgain = resolveReviewAlert(historicalLoss, legacyFiller(10).id, 'dismissed', NOW + 2000);
-  const recovered = admitPreparedReviewAlert(roomAgain, legacyFiller(0), NOW + 2500);
+  const recovered = admitPreparedReviewAlert(roomAgain, legacyFiller(0), NOW + 2500, 'hold-source');
   ok('re-reading old lost evidence recovers its exact payload once there is room',
     recovered.outcome === 'admitted' && recovered.state.pending.some(item => item.id === legacyFiller(0).id) &&
       tray.recentlyLostReviewCount(recovered.state, NOW + 2500, 'evicted') === 0);
@@ -484,14 +495,27 @@ ok('hydration cannot relabel UAE review money as a foreign ledger amount',
   const started = Date.now();
   const staged = tray.admitPreparedReviewAlerts({ ...emptyAlertReviewTray(), tombstones: Array.from(
     { length: 900 }, (_, index) => ({ sourceKey: `dismissed_source_${String(index).padStart(8, '0')}`,
-      resolvedAt: NOW, expiresAt: NOW + 86_400_000, outcome: 'dismissed' })) }, bigHistory, NOW + 20_000);
+      resolvedAt: NOW, expiresAt: NOW + 86_400_000, outcome: 'dismissed' })) }, bigHistory, NOW + 20_000, 'hold-source');
   const elapsed = Date.now() - started;
+  // History holds its cursor, so it stages with strict 'hold-source' admission.
   ok('staging five thousand History money reviews is one bounded pass',
     elapsed < 2000 && staged.state.pending.length === 50 &&
       staged.outcomes.filter(outcome => outcome === 'admitted').length === 50 &&
       staged.outcomes.filter(outcome => outcome === 'deferred').length === 4950 &&
       staged.state.tombstones.filter((item) => item.outcome === 'dismissed').length === 900,
     JSON.stringify({ elapsed, pending: staged.state.pending.length }));
+  // Bounded default over the same batch: one pass, the lane stays fifty and
+  // every trimmed payload is a counted loss (the pre-PR176 contract).
+  const boundedStarted = Date.now();
+  const boundedStaged = tray.admitPreparedReviewAlerts(emptyAlertReviewTray(), bigHistory, NOW + 20_000);
+  const boundedElapsed = Date.now() - boundedStarted;
+  ok('staging five thousand reviews with the bounded default is one pass and counts every trim',
+    boundedElapsed < 2000 && boundedStaged.state.pending.length === 50 &&
+      boundedStaged.outcomes.every((outcome) => outcome === 'admitted') &&
+      tray.recentlyLostReviewCount(boundedStaged.state, NOW + 20_000, 'evicted') ===
+        Math.min(4950, tray.REVIEW_TOMBSTONE_CAP),
+    JSON.stringify({ boundedElapsed, pending: boundedStaged.state.pending.length,
+      evicted: tray.recentlyLostReviewCount(boundedStaged.state, NOW + 20_000, 'evicted') }));
 
   // Gap A: foreign-currency money reviews can never be posted. They live in
   // their own bounded lane and never occupy the Message lane. Capacity defers new evidence.
@@ -519,7 +543,16 @@ ok('hydration cannot relabel UAE review money as a foreign ledger amount',
   ok('a foreign-currency review never waits for Review space',
     foreignPartition.deferred.length === 5 && foreignPartition.admit.length === 0);
   let foreignState = currencyFull;
-  for (const item of moreForeign) foreignState = admitPreparedReviewAlert(foreignState, item, NOW + 1000).state;
+  for (const item of moreForeign) foreignState = admitPreparedReviewAlert(foreignState, item, NOW + 1000, 'hold-source').state;
+  // Bounded default: the lane keeps fifty and each trimmed foreign review is a
+  // counted 'currency-evicted' loss.
+  let boundedForeign = currencyFull;
+  for (const item of moreForeign) boundedForeign = admitPreparedReviewAlert(boundedForeign, item, NOW + 1000).state;
+  ok('the currency lane keeps its newest fifty and tombstones each evicted foreign alert',
+    boundedForeign.pending.length === 50 && boundedForeign.pending.every(tray.isCurrencyConflictReview) &&
+      moreForeign.every((item) => boundedForeign.pending.some((kept) => kept.id === item.id)) &&
+      tray.recentlyLostReviewCount(boundedForeign, NOW + 1000, 'currency-evicted') === 5,
+    JSON.stringify(boundedForeign.tombstones.slice(0, 2)));
   const currencyTombstones = foreignState.tombstones.filter((item) => item.outcome === 'currency-evicted');
   ok('the currency lane preserves its acknowledged fifty and defers new evidence',
     foreignState.pending.length === 50 && foreignState.pending.every(tray.isCurrencyConflictReview) &&

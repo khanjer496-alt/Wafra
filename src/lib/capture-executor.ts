@@ -83,6 +83,7 @@ export interface CaptureLedgerAdapter {
     items: ReviewEntry[],
     qualifications?: readonly LocalCaptureReviewQualificationCandidate[],
     sourceBindings?: readonly ReviewSourceBinding[],
+    mode?: import('./alert-review-tray').ReviewAdmissionMode,
   // This interface is extracted alone by the pure test compiler.
   ) => import('./alert-review-tray').ReviewStageReceipt & { qualificationIds?: string[] };
 }
@@ -146,7 +147,7 @@ const stageNearMatches = (activeLedger: CaptureLedgerAdapter, plan: ImportPlan) 
     plan,
     () => activeLedger.getState().reviewTray,
     activeLedger.stageReviewAlerts
-      ? (items) => activeLedger.stageReviewAlerts!(items)
+      ? (items) => activeLedger.stageReviewAlerts!(items, undefined, undefined, 'hold-source')
       : undefined,
   );
 
@@ -341,7 +342,7 @@ export const createCaptureExecutor = ({
       // the entire ledger while encrypted review staging is in flight.
       const reviewStarted = tracing ? Date.now() : 0;
       captureTrace('reviews:start', reviewCandidates.length);
-      const reviewReceipt = activeLedger.stageReviewAlerts(reviewCandidates, undefined, collected.reviewSourceBindings);
+      const reviewReceipt = activeLedger.stageReviewAlerts(reviewCandidates, undefined, collected.reviewSourceBindings, 'hold-source');
       reviewAlerts = reviewReceipt.admitted;
       const retention = await settleReviewStage(reviewCandidates, reviewReceipt);
       for (const item of reviewCandidates) {
@@ -569,7 +570,7 @@ export const createCaptureExecutor = ({
         throw new Error('Capture executor requires review staging for review candidates');
       }
       if (supplementalStopped()) return stopped();
-      const reviewReceipt = activeLedger.stageReviewAlerts(reviewCandidates);
+      const reviewReceipt = activeLedger.stageReviewAlerts(reviewCandidates, undefined, undefined, 'hold-source');
       reviewAlerts = reviewReceipt.admitted;
       const retention = await settleReviewStage(reviewCandidates, reviewReceipt);
       for (const item of reviewCandidates) {
@@ -748,7 +749,7 @@ export const createCaptureExecutor = ({
       if (!activeLedger.stageReviewAlerts) {
         throw new Error('Capture executor requires review staging for review candidates');
       }
-      const reviewReceipt = activeLedger.stageReviewAlerts(reviewCandidates);
+      const reviewReceipt = activeLedger.stageReviewAlerts(reviewCandidates, undefined, undefined, 'hold-source');
       const retention = await settleReviewStage(reviewCandidates, reviewReceipt);
       for (const item of reviewCandidates) {
         if (requiresReviewRetention(item) && !retention.some(entry =>

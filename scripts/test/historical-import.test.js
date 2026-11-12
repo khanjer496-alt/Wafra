@@ -565,10 +565,10 @@ async function coordinatorTests() {
       ok('history review staging waits for encrypted durability', false,
         { persistIosHistoryReviewCandidates, review });
     } else {
-      const pending = persistIosHistoryReviewCandidates([review], (items) => {
+      const pending = persistIosHistoryReviewCandidates([review], (items, _qualifications, _bindings, mode) => {
         events.push(`stage:${items.length}`);
         const tray = require('./build/alert-review-tray.js');
-        const batch = tray.admitPreparedReviewAlerts(tray.emptyAlertReviewTray(), items, NOW.getTime());
+        const batch = tray.admitPreparedReviewAlerts(tray.emptyAlertReviewTray(), items, NOW.getTime(), mode);
         return { admitted: items.length, durable,
           retention: () => tray.reviewRetentionReceipts(batch.state, items, NOW.getTime()) };
       }).then((admitted) => {
@@ -715,8 +715,8 @@ async function coordinatorTests() {
     });
     const tray = require('./build/alert-review-tray.js');
     let state = tray.emptyAlertReviewTray();
-    const stageReviews = items => {
-      const batch = tray.admitPreparedReviewAlerts(state, items, NOW.getTime()); state = batch.state;
+    const stageReviews = (items, _qualifications, _bindings, mode) => {
+      const batch = tray.admitPreparedReviewAlerts(state, items, NOW.getTime(), mode); state = batch.state;
       return { admitted: batch.outcomes.filter(outcome => outcome === 'admitted').length, durable: Promise.resolve(),
         retention: () => tray.reviewRetentionReceipts(state, items, NOW.getTime()) };
     };

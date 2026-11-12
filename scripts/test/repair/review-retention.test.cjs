@@ -9,7 +9,8 @@ const { evaluate, source, root, tray, now, payment, storeHarness } = require('./
 test('59 distinct exact-money repayments stage 50 and defer 9 without losing acknowledged payloads', () => {
   const items = Array.from({ length: 59 }, (_, i) => payment(i));
   assert.ok(items.every(Boolean));
-  const batch = tray.admitPreparedReviewAlerts(tray.emptyAlertReviewTray(), items, now);
+  // Strict retention is what a source-holding caller asks for (ReviewAdmissionMode).
+  const batch = tray.admitPreparedReviewAlerts(tray.emptyAlertReviewTray(), items, now, 'hold-source');
   assert.equal(batch.state.pending.length, 50);
   assert.equal(batch.outcomes.filter(value => value === 'admitted').length, 50,
     'admitted must mean a retained payload, never the 59 provisional inserts');
@@ -18,14 +19,26 @@ test('59 distinct exact-money repayments stage 50 and defer 9 without losing ack
   for (let i = 0; i < 50; i++) assert.equal(batch.state.pending[i].sourceKey, items[i].sourceKey);
 });
 
+test('the default bounded mode keeps the existing trim-and-count policy for callers that do not hold their source', () => {
+  // Paste and any caller that does not keep its source: never a silent loss,
+  // never a deferral that nobody retries. The lane stays at fifty and each
+  // trimmed payload is a counted, user-visible 'evicted' loss record.
+  const items = Array.from({ length: 59 }, (_, i) => payment(i));
+  const batch = tray.admitPreparedReviewAlerts(tray.emptyAlertReviewTray(), items, now);
+  assert.equal(batch.state.pending.length, 50);
+  assert.equal(batch.outcomes.filter(value => value === 'deferred').length, 0);
+  assert.equal(tray.recentlyLostReviewCount(batch.state, now, 'evicted'), 9);
+  assert.equal(batch.state.pending.length + tray.recentlyLostReviewCount(batch.state, now, 'evicted'), 59);
+});
+
 for (const count of [49, 50, 51, 59]) test(`actual store stage retains a bounded subset of ${count} sources with truthful durable receipts`, async () => {
   const h = storeHarness(); const items = Array.from({ length: count }, (_, i) => payment(i));
-  const first = h.stage(items); const receipts = await tray.settleReviewStage(items, first);
+  const first = h.stage(items, undefined, undefined, 'hold-source'); const receipts = await tray.settleReviewStage(items, first);
   assert.equal(first.admitted, Math.min(count, 50));
   assert.equal(receipts.filter(x => x.outcome === 'pending').length, Math.min(count, 50));
   assert.equal(receipts.filter(x => x.outcome === 'deferred').length, Math.max(0, count - 50));
   for (const entry of h.state.reviewTray.pending) h.dismiss(entry);
-  const retry = h.stage(items); const final = await tray.settleReviewStage(items, retry);
+  const retry = h.stage(items, undefined, undefined, 'hold-source'); const final = await tray.settleReviewStage(items, retry);
   assert.equal(retry.admitted, Math.max(0, count - 50));
   assert.equal(final.filter(x => x.outcome === 'resolved').length, Math.min(count, 50));
   assert.equal(final.filter(x => x.outcome === 'pending').length, Math.max(0, count - 50));
@@ -40,23 +53,23 @@ test('full and preoccupied trays make partial progress without replacing prior a
   for (const occupiedCount of [1, 49, 50]) {
     const occupied = Array.from({ length: occupiedCount }, (_, i) => payment(100 + i));
     const h = storeHarness(occupied); const items = Array.from({ length: 59 }, (_, i) => payment(i));
-    const first = h.stage(items); await first.durable;
+    const first = h.stage(items, undefined, undefined, 'hold-source'); await first.durable;
     assert.equal(first.admitted, 50 - occupiedCount);
     for (const old of occupied) assert.ok(h.state.reviewTray.pending.some(x => x.id === old.id));
     for (const item of [...h.state.reviewTray.pending]) h.dismiss(item);
-    const next = h.stage(items); await next.durable;
+    const next = h.stage(items, undefined, undefined, 'hold-source'); await next.durable;
     assert.equal(next.admitted, Math.min(50, 59 - (50 - occupiedCount)));
   }
 });
 test('persist failure and replacement cannot become durable success; retry persists optimistic pending state', async () => {
   const h = storeHarness(); const items = [payment(0)];
   h.setWrite(async () => false);
-  await assert.rejects(tray.settleReviewStage(items, h.stage(items)), /Encrypted review-tray write failed/);
+  await assert.rejects(tray.settleReviewStage(items, h.stage(items, undefined, undefined, 'hold-source')), /Encrypted review-tray write failed/);
   h.setWrite(async () => true);
-  const retry = h.stage(items); assert.equal(retry.admitted, 0);
+  const retry = h.stage(items, undefined, undefined, 'hold-source'); assert.equal(retry.admitted, 0);
   assert.equal((await tray.settleReviewStage(items, retry))[0].outcome, 'pending');
   let finish; h.setWrite(() => new Promise(resolve => { finish = resolve; }));
-  const replaced = h.stage([payment(1)]); h.replace(); finish(true);
+  const replaced = h.stage([payment(1)], undefined, undefined, 'hold-source'); h.replace(); finish(true);
   assert.equal((await tray.settleReviewStage([payment(1)], replaced))[0].outcome, 'deferred');
 });
 
@@ -297,9 +310,9 @@ test('a receipt cannot borrow a later optimistic stage as evidence of its own du
   const occupied = Array.from({ length: 50 }, (_, i) => payment(100 + i)); const store = storeHarness(occupied);
   const finishes = [];
   store.setWrite(() => new Promise(resolve => finishes.push(resolve)));
-  const first = store.stage([payment(0)]); assert.equal(first.admitted, 0);
+  const first = store.stage([payment(0)], undefined, undefined, 'hold-source'); assert.equal(first.admitted, 0);
   store.dismiss(occupied[0]);
-  const later = store.stage([payment(0)]); assert.equal(later.admitted, 1);
+  const later = store.stage([payment(0)], undefined, undefined, 'hold-source'); assert.equal(later.admitted, 1);
   const failedLater = assert.rejects(later.durable, /Encrypted review-tray write failed/);
   finishes[0](true);
   const receipts = await tray.settleReviewStage([payment(0)], first);
@@ -330,7 +343,7 @@ for (const intent of ['supplemental', 'setup-verification']) test(`${intent} ACK
     '@/lib/capture-trace': { captureTrace() {}, captureTraceEnabled: () => false },
   }).createCaptureExecutor({ ledger: {
     getState: () => store.state, getStateGeneration: () => store.generation,
-    stageReviewAlerts: items => { const receipt = store.stage(items); staged(); return receipt; },
+    stageReviewAlerts: (items, qualifications, bindings, mode) => { const receipt = store.stage(items, qualifications, bindings, mode); staged(); return receipt; },
     ensureDurable: async () => {},
   }, dependencies: { getRelay: async () => cfg, sync: async () => queued,
     planRows: emptyPlan, acknowledge: async (_, ids) => { acked.push(...ids); },
@@ -338,7 +351,7 @@ for (const intent of ['supplemental', 'setup-verification']) test(`${intent} ACK
   const run = executor.execute(intent);
   await stageStarted;
   store.dismiss(existing);
-  const later = store.stage([candidate]); assert.equal(later.admitted, 1);
+  const later = store.stage([candidate], undefined, undefined, 'hold-source'); assert.equal(later.admitted, 1);
   const failedLater = assert.rejects(later.durable, /Encrypted review-tray write failed/);
   finishes[0](true);
   await run;
