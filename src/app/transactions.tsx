@@ -55,7 +55,7 @@ import { transactionsWords } from '@/lib/transactions-copy';
 import { getTransferActivity, transferPartnerIds } from '@/lib/transfer-activity';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { keepEqualSeparation, type TransferSeparation } from '@/lib/transfer-separation';
-import { isTransferCandidate, transferDeclined, transferOwnership } from '@/lib/transfer-reconciliation';
+import { isTransferCandidate, transferDeclined, transferOwnership, withTransferRowCache } from '@/lib/transfer-reconciliation';
 import { useStoreActions, useStoreSelector } from '@/lib/store';
 import { historyStatusOnly } from '@/lib/store-selection';
 import type { Account, CategoryId, Transaction } from '@/lib/types';
@@ -387,8 +387,11 @@ export default function TransactionsScreen() {
   // interactions settle and holds its last answer during a running import.
   const { separateTransferIds, reviewTransferIds, pendingTransferIds, separatedPartnerIds } = useSeparateTransferIds(state);
   // The Transfers and Needs review chips, from the predicates the rows and
-  // the review screens already use: one pass over the ledger.
-  const { transferIds, reviewIds } = useMemo(() => {
+  // the review screens already use: one pass over the ledger. Only those two chips read the
+  // answer (projectTransactionFilter's `kind` checks), so the pass is skipped for every other
+  // view; on a 15k-row ledger it was ~40-60 ms of every edit's recompute for nothing.
+  const kindNeedsIds = appliedFilters.kind === 'transfers' || appliedFilters.kind === 'review';
+  const { transferIds, reviewIds } = useMemo(() => !kindNeedsIds ? { transferIds: NO_IDS, reviewIds: NO_IDS } : withTransferRowCache(() => {
     const transfers = new Set<string>();
     const review = new Set<string>();
     for (const row of state.transactions) {
@@ -399,7 +402,7 @@ export default function TransactionsScreen() {
         isUnassignedIncome(row) || row.accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID) review.add(row.id);
     }
     return { transferIds: transfers, reviewIds: review };
-  }, [state.transactions, internal, separateTransferIds, pendingTransferIds]);
+  }), [kindNeedsIds, state.transactions, internal, separateTransferIds, pendingTransferIds]);
 
   const accountById = useMemo(
     () => new Map(state.accounts.map((a) => [a.id, a] as const)),
@@ -493,7 +496,8 @@ export default function TransactionsScreen() {
     amountExponent: state.ledgerMoney?.exponent ?? 2 }),
   [appliedQuery, merchantFilter, smsOnly, autoAddedActive, currentKey, period, liveAccounts, internal, corroborating,
     separateTransferIds, reviewTransferIds, separatedPartnerIds, transferIds, reviewIds, state.ledgerMoney?.exponent]);
-  const projection = useMemo(() => projectTransactionFilter(filterIndex, appliedFilters, filterOptions),
+  // One memoized transfer verdict per row for the whole projection, instead of one per question asked of it.
+  const projection = useMemo(() => withTransferRowCache(() => projectTransactionFilter(filterIndex, appliedFilters, filterOptions)),
     [filterIndex, appliedFilters, filterOptions]);
   const { filtered, totalShown, excluded, separatedTransfers } = projection;
   const transferContributes = separatedTransfers.incomeFils > 0 || separatedTransfers.expenseFils > 0;
