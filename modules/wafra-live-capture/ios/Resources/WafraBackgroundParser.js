@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: b11700dd148d0f10870b87a158954e84255968d1e2d14a9bb69169b7c6d987a1
+// Generated from normal shipping TypeScript. Source SHA-256: 417e43af41fe63c39d82f7f8118cf56bb8740a3d93ad8a6fcafd84efe4aa9726
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -11784,9 +11784,17 @@ const governsRefundCredit = (lead) => {
     return last !== undefined && !lead.slice(last.index + last[0].length).includes(',');
 };
 const REFUND_CREDIT_CONDITIONAL_INSIDE_RE = /\b(?:if|once|when|whenever|after|until|unless|whether)\b|\bas\s+soon\s+as\b/;
-const REFUND_CREDIT_REVERSED_RE = /\b(?:in\s+error|reversed)\b/i;
-const REFUND_CREDIT_LATER_RE = /\b(?:will\s+be\s+(?:credited|refunded|reversed|debited|deducted|returned|posted)|subject\s+to\s+(?:\w+\s+){0,2}(?:approval|review|confirmation|verification)|for\s+review|pending\s+(?:approval|review))\b/i;
-const REFUND_AMOUNT_RE = /(?:\b[A-Z]{3}\b|\bDhs?\.?|\bSR\b|[$€£])\s*(\d[\d,]*(?:\.\d+)?)/g;
+const REFUND_CREDIT_REVERSED_RE = /\b(?:in\s+error|reversed)\b|\b(?:and|but)\s+(?:(?:later|then|subsequently)\s+)?(?:was|were|has\s+been|had\s+been|is)\s+(?:\w+\s+)?(?:cancell?ed|withdrawn|revoked)\b/i;
+const REFUND_CREDIT_LATER_RE = /\b(?:will\s+be\s+(?:credited|refunded|reversed|debited|deducted|returned|posted)|subject\s+to\s+(?:\w+\s+){0,2}(?:approval|review|confirmation|verification)|for\s+review|pending\s+(?:approval|review|investigation|verification|confirmation|clearance|settlement|release)|on\s+hold|under\s+(?:review|investigation)|provisional(?:ly)?|temporar(?:y|ily))\b/i;
+const REFUND_CREDIT_TAKEN_BACK_RE = /\b(?:(?:this|the|that)\s+(?:credit|refund|amount)|it)\s+(?:\w+\s+){0,2}?(?:has\s+been|had\s+been|was|is|remains|will\s+be)\s+(?:\w+\s+){0,2}?(?:reversed|cancell?ed|withdrawn|revoked|in\s+error|on\s+hold|temporary|provisional|under\s+(?:review|investigation))\b/i;
+const REFUND_HEDGED_SENTENCE_RE = /^\s*(?:if|in\s+case|should|unless)\b|\b(?:may|can|might|could|unless)\b/i;
+function refundCreditNotFinal(remainder) {
+    const sentences = remainder.split(REFUND_SENTENCE_BREAK_RE);
+    if (REFUND_CREDIT_REVERSED_RE.test(sentences[0]) || REFUND_CREDIT_LATER_RE.test(sentences[0]))
+        return true;
+    return sentences.slice(1).some((sentence) => !REFUND_HEDGED_SENTENCE_RE.test(sentence) && REFUND_CREDIT_TAKEN_BACK_RE.test(sentence));
+}
+const REFUND_AMOUNT_RE = new RegExp(String.raw `(?:\b(?:${Object.keys(currency_metadata_1.CURRENCY_MINOR_UNITS).join('|')})|\bDhs?\.?|\bSR\b|[$€£])\s*(\d[\d,]*(?:\.\d+)?)`, 'g');
 const REFUND_SENTENCE_BREAK_RE = /[.!?](?=\s|$)|\n/g;
 const REFUND_AMOUNT_AFTER_RE = /(\d[\d,]*(?:\.\d+)?)\s*(?:AED|SAR|USD|EUR|GBP|QAR|KWD|BHD|OMR|EGP|INR|PKR|JOD|Dhs?\b|SR\b)/g;
 const refundAmounts = (text) => [...text.matchAll(REFUND_AMOUNT_RE), ...text.matchAll(REFUND_AMOUNT_AFTER_RE)].map((match) => Number(match[1].replace(/,/g, '')));
@@ -11809,9 +11817,9 @@ function hasCompletedRefundCredit(rest, request) {
         if (governsRefundCredit(lead) || REFUND_CREDIT_CONDITIONAL_INSIDE_RE.test(match[1]))
             continue;
         const remainder = rest.slice(at + match[0].length);
-        if (REFUND_CREDIT_REVERSED_RE.test(remainder) || REFUND_CREDIT_LATER_RE.test(remainder.split(REFUND_SENTENCE_BREAK_RE)[0]))
+        if (refundCreditNotFinal(remainder))
             continue;
-        const credited = refundAmounts(match[0]);
+        const credited = refundAmounts(lead + match[0] + remainder.split(REFUND_SENTENCE_BREAK_RE)[0]);
         if (requested.some((amount) => !credited.includes(amount)))
             continue;
         return true;
@@ -11821,26 +11829,35 @@ function hasCompletedRefundCredit(rest, request) {
 const REFUND_CREDIT_SCAN_RE = /(\brefund(?:ed)?\b(?:[^.\n]|\.(?=\S)){0,300}?)\b(?:credited|refunded|posted|returned)\b(\s+(?:back\s+)?(?:to|into|onto)\s+[^.\n,;]{0,60})?/gi;
 const REFUND_CREDIT_NEGATION_RE = /\b(?:(?:has|have|had|was|were|is|are)\s+(?:not|never)|(?:hasn|haven|wasn|weren|isn|aren)['’]t|yet\s+to\s+be)\s+(?:(?:yet|been|successfully)\s+){0,3}$/;
 const REFUND_THIRD_PARTY_DESTINATION_RE = /^\s*(?:back\s+)?(?:to|into|onto)\s+(?:(?:the|a|an|your|his|her|their|its)\s+)?(?:\w+\s+){0,2}?(?:merchant|beneficiary|seller|vendor|recipient|payee|retailer|supplier|store|shop|restaurant|platform|marketplace)\b/i;
+const REFUND_COMPLETED_AUXILIARY_RE = /\b(?:has|have|had|was|were)\s+(?:\w+\s+){0,2}$/;
+const REFUND_NEGATED_THEN_DEBIT_RE = /^\s*(?:,\s*)?(?:and|but)\s+(?:was|were|has\s+been|have\s+been|had\s+been)\s+(?:\w+\s+){0,2}?(?:debited|charged|deducted)\b/i;
 function refundCreditNotActual(body, request) {
     const requested = refundAmounts(request);
+    let negatedEnd = -1;
     for (const match of body.matchAll(REFUND_CREDIT_SCAN_RE)) {
         const at = match.index;
         const breaks = [...body.slice(0, at).matchAll(REFUND_SENTENCE_BREAK_RE)];
         const lead = body.slice(breaks.length ? breaks[breaks.length - 1].index + 1 : 0, at);
-        if (governsRefundCredit(lead) || REFUND_CREDIT_CONDITIONAL_INSIDE_RE.test(match[1]) || REFUND_CREDIT_NEGATION_RE.test(match[1]))
+        if (governsRefundCredit(lead) || REFUND_CREDIT_CONDITIONAL_INSIDE_RE.test(match[1]))
             return true;
+        if (REFUND_CREDIT_NEGATION_RE.test(match[1])) {
+            negatedEnd = at + match[0].length;
+            continue;
+        }
         if (match[2] && REFUND_THIRD_PARTY_DESTINATION_RE.test(match[2]))
             return true;
         const remainder = body.slice(at + match[0].length - (match[2]?.length ?? 0));
-        if (REFUND_CREDIT_REVERSED_RE.test(remainder) || REFUND_CREDIT_LATER_RE.test(remainder.split(REFUND_SENTENCE_BREAK_RE)[0]))
+        if (refundCreditNotFinal(remainder))
             return true;
         if (requested.length > 0) {
-            const credited = refundAmounts(match[0]);
+            const credited = refundAmounts(lead + match[0] + remainder.split(REFUND_SENTENCE_BREAK_RE)[0]);
             if (requested.some((amount) => !credited.includes(amount)))
                 return true;
         }
+        if (negatedEnd >= 0 && REFUND_COMPLETED_AUXILIARY_RE.test(match[1]) && body.slice(negatedEnd, at).search(REFUND_SENTENCE_BREAK_RE) < 0)
+            negatedEnd = -1;
     }
-    return false;
+    return negatedEnd >= 0 && !REFUND_NEGATED_THEN_DEBIT_RE.test(body.slice(negatedEnd));
 }
 const MANDATE_LIFECYCLE_RE = /\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b(?:[^.]|\.\d){0,96}\b(?:will\s+(?:start|begin|commence|activate)|has\s+been\s+(?:created|registered|set\s*up|activated)|is\s+(?:now\s+)?active)\b|\b(?:created|registered|set\s*up|activated)\b(?:[^.]|\.\d){0,64}\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b|تم\s+(?:تسجيل|انشاء|تفعيل)[^\n]{0,64}(?:امر\s+)?(?:خصم\s+(?:تلقايي|مباشر)|تعليمات\s+مستديمه)/iu;
 const CONDITIONAL_PAYOUT_RE = /\b(?:merchant|business|seller|vendor|restaurant|platform|marketplace|aggregator|acquirer|sales?|delivery|courier|rider|driver)\b(?:[^.]|\.\d){0,160}\b(?:when|once|if)\s+(?:you\s+)?(?:are\s+)?(?:eligible|qualif(?:y|ied))\b|\b(?:merchant|business|seller|vendor|restaurant|platform|marketplace|aggregator|acquirer|sales?|delivery|courier|rider|driver)\b(?:[^.]|\.\d){0,160}\b(?:after\s+(?:(?:your\s+)?registration|you\s+(?:register|sign\s+up|open\s+(?:an?\s+)?account)|opening\s+(?:an?\s+)?account)|upon\s+(?:registration|sign[ -]?up|account\s+opening))\b/iu;
