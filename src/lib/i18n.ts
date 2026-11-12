@@ -1605,7 +1605,7 @@ const S = {
   },
   proContinue: { en: 'Continue to Wafra', ar: 'متابعة إلى وفرة' },
   trialEndedPaywall: { en: 'Free automatic capture has ended. Automatic capture needs Pro; manual entry and imports stay free.', ar: 'انتهى الالتقاط التلقائي المجاني. يحتاج الالتقاط التلقائي إلى برو، ويبقى الإدخال اليدوي والاستيراد مجانياً.' },
-  freeTrialActive: { en: 'FREE AUTOMATIC CAPTURE', ar: 'الالتقاط التلقائي المجاني مفعّل' },
+  freeTrialActive: { en: 'FREE AUTOMATIC CAPTURE ACTIVE', ar: 'الالتقاط التلقائي المجاني مفعّل' },
   getPro: { en: 'Get Wafra Pro', ar: 'اشترك في وفرة برو' },
   startPlanWithPrice: {
     en: 'Start {plan} — {price}',
