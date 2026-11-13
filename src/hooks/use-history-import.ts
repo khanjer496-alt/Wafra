@@ -173,6 +173,28 @@ export function useHistoryImport(): void {
           (page.skippedKnownInboxReviewSourceKeys?.length ?? 0) > 0) {
         reviewReceipt = stageReviewAlerts(page.reviewCandidates, undefined, page.reviewSourceBindings, 'hold-source');
         const outcomes = await settleReviewStage(page.reviewCandidates, reviewReceipt);
+        {
+          // DIAGNOSTIC E: categories, booleans and rounded offsets only; no text, amounts or ids.
+          const shape = (key: unknown) => typeof key === 'string'
+            ? key.replace(/[0-9a-f]{6,}/g, 'H').replace(/[0-9]+/g, 'N').slice(0, 48) + '/' + key.length : String(key);
+          const nowMs = Date.now();
+          const tray = getStateSnapshot().reviewTray;
+          wafraDiag('E-stage candidates=' + page.reviewCandidates.length + ' outcomes=' + outcomes.length +
+            ' livePending=' + (tray?.pending?.length ?? -1) + ' liveTombstones=' + (tray?.tombstones?.length ?? -1) +
+            ' hasRetention=' + Number(typeof reviewReceipt.retention === 'function'));
+          page.reviewCandidates.forEach((item, index) => {
+            const key = canonicalCaptureSourceKey(item.sourceKey, item.observedAt);
+            const match = outcomes.find(entry => entry.sourceKey === key);
+            const event = (item as { event?: { family?: unknown; status?: unknown; decision?: unknown } }).event;
+            wafraDiag('E-item ' + index + ' universal=' + Number(!!event) + ' family=' + String(event?.family ?? (item as { kind?: unknown }).kind ?? '-') +
+              ' status=' + String(event?.status ?? '-') + ' decision=' + String(event?.decision ?? '-') +
+              ' retain=' + Number(requiresReviewRetention(item)) + ' outcome=' + String(match?.outcome ?? 'NO-MATCH') +
+              ' ch=' + String(item.channel) + ' key=' + shape(item.sourceKey) + ' canon=' + shape(key) +
+              ' obsMin=' + Math.round((item.observedAt - nowMs) / 60000) +
+              ' expH=' + Math.round((((item as { expiresAt?: number }).expiresAt ?? NaN) - nowMs) / 3600000), index);
+          });
+          outcomes.forEach((entry, index) => wafraDiag('E-receipt ' + index + ' ' + String(entry.outcome) + ' key=' + shape(entry.sourceKey), index));
+        }
         if (!canCommit()) { wafraDiag('commit-false-2'); return false; }
         const unresolved = page.reviewCandidates.filter(requiresReviewRetention).map(item =>
           outcomes.find(entry => entry.sourceKey === canonicalCaptureSourceKey(item.sourceKey, item.observedAt)))
