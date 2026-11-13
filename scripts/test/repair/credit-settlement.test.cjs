@@ -62,6 +62,27 @@ test('A later clause with its own completed credit is a credit ("is being revers
   assert.equal(both('AED 250.00 has been reversed to your card and was later reversed.'), 'none / none');
 });
 
+// Reviewer 956cb08a (Medium): Once/When/Whenever/After/As soon as lead a condition only when something follows the credit
+// in the same sentence (a comma, or "you will …"), or when the credit is not completed. Otherwise they only say when a
+// completed refund happened. "once again" is not a leader. If/Unless/Until/Whether keep their reading.
+test('A temporal lead with a completed refund and nothing after it is not a condition', () => {
+  for (const body of [
+    'After cancellation AED 250.00 has been refunded to your card ending 1234.',
+    'Dear Customer, once again AED 250.00 has been refunded to your card ending 1234.',
+    'Once your order was cancelled AED 250.00 was refunded to your card ending 1234.',
+    // A comma alone (a balance line) is not a main clause after the credit.
+    'After cancellation AED 250.00 has been refunded to your card ending 1234, Avl Bal AED 1,234.00',
+  ]) assert.equal(both(body), 'income 25000 / income 25000', body);
+  for (const body of [
+    'Once AED 250.00 has been reversed to your card, you will receive an SMS.',
+    'Once the refund of AED 250.00 has been credited you will receive an SMS.',
+    'When AED 250.00 is credited to your card you will be notified.',
+    'As soon as AED 250.00 has been credited to your account you can use it.',
+    'After AED 250.00 has been refunded to your card, the balance will update.',
+    'If AED 250.00 has been refunded to your card you will receive an SMS.',
+  ]) assert.equal(both(body), 'none / none', body);
+});
+
 // bank-alert-semantics-matrix "re-credit for reversed purchase": the reason for the credit names the debit that was undone;
 // it is not this credit being taken back. A reversal of the credit itself still is.
 test('A reason phrase ("for reversed purchase") is not a take-back; reversing the credit itself is', () => {

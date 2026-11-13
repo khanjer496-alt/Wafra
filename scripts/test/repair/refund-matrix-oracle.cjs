@@ -176,6 +176,10 @@ const CONTROLS = [
   ['Your salary of AED 250.00 has been processed to your account.', 'INCOME_REFUND', 'C19 a processed salary keeps its income'],
   ['WPS salary of AED 250.00 has been processed to your account. Thank you for banking with us.', 'INCOME_REFUND', 'C19 a processed WPS salary keeps its income'],
   ['Your cash deposit of AED 250.00 has been processed to your account.', 'INCOME_REFUND', 'C19 a processed cash deposit keeps its income'],
+  // Reviewer 956cb08a (Medium): a temporal lead with a completed credit and no clause after it is not a condition.
+  ['After cancellation AED 250.00 has been refunded to your card ending 1234.', 'INCOME_REFUND', 'C20 "After <noun>" leads a completed refund'],
+  ['Dear Customer, once again AED 250.00 has been refunded to your card ending 1234.', 'INCOME_REFUND', 'C20 "once again" is not a leader'],
+  ['Once your order was cancelled AED 250.00 was refunded to your card ending 1234.', 'INCOME_REFUND', 'C20 a completed "once" clause, then the refund'],
 ];
 
 // ── Case selection ───────────────────────────────────────────────────────────────────────────────────────────────────
