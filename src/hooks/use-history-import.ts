@@ -26,6 +26,9 @@ import { recordRuntimeOperation } from '@/lib/runtime-performance';
 import { stageWalletNearMatches } from '@/lib/wallet-near-match';
 import { useStore } from '@/lib/store';
 
+// DIAGNOSTIC BUILD ONLY (android/ab-build-396-diag, never merged): reason codes, no message data.
+const wafraDiag = (code: string, n = 0): void => { try { console.info('WafraHistoryDiag', code, n); } catch { /* diagnostic only */ } };
+
 type HistoryScanPage = ScanResult & HistoryImportPage;
 const BACKGROUND_HISTORY_PAGE_SIZE = 512;
 const BACKGROUND_HISTORY_PAGES_PER_COMMIT = 1;
@@ -65,6 +68,9 @@ export function useHistoryImport(): void {
   } | null>(null);
   const canStart = useCallback(() => {
     const current = getStateSnapshot();
+    wafraDiag('canStart h' + Number(current.hydrated) + ' o' + Number(current.onboarded) + ' sms' + Number(androidSmsCaptureEnabled(current)) +
+      ' pro' + Number(isProActive(current)) + ' st:' + String(current.historyImport?.status) + ' err:' + String(current.historyImport?.error ?? null),
+      current.historyImport?.scanned ?? -1);
     return Platform.OS === 'android' && current.hydrated && current.onboarded &&
       androidSmsCaptureEnabled(current) && isProActive(current) &&
       (current.historyImport?.status === 'paused' || current.historyImport?.status === 'running');
@@ -75,8 +81,13 @@ export function useHistoryImport(): void {
     getGeneration: getStateGeneration,
     shouldContinue: () => {
       const current = getStateSnapshot();
+      const bg = historyBackground.canContinue();
+      if (!bg || !current.hydrated || !current.onboarded || !androidSmsCaptureEnabled(current) || !isProActive(current)) {
+        wafraDiag('shouldContinue-false bg' + Number(bg) + ' h' + Number(current.hydrated) + ' o' + Number(current.onboarded) +
+          ' sms' + Number(androidSmsCaptureEnabled(current)) + ' pro' + Number(isProActive(current)));
+      }
       return Platform.OS === 'android' &&
-        historyBackground.canContinue() &&
+        bg &&
         current.hydrated &&
         current.onboarded &&
         androidSmsCaptureEnabled(current) &&
@@ -95,6 +106,7 @@ export function useHistoryImport(): void {
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
       if (!await hasSmsPermission()) {
+        wafraDiag('scan-no-permission');
         throw Object.assign(new Error('SMS history access requires disclosure and permission'), { code: 'ERR_SMS_INBOX_ACCESS' });
       }
       const snapshot = getStateSnapshot();
@@ -144,7 +156,7 @@ export function useHistoryImport(): void {
     persistProgress: setHistoryImportProgress,
     classifyError: (error) => isSmsInboxAccessError(error) ? 'inbox-access' : 'page-failed',
     commitPage: async (page, next, canCommit) => {
-      if (!canCommit()) return false;
+      if (!canCommit()) { wafraDiag('commit-false-1'); return false; }
       const current = getStateSnapshot();
       if (page.detectedLaunchMarket && page.detectedLaunchMarket !== current.marketId) {
         if (!setMarket(page.detectedLaunchMarket)) throw new Error('market_mismatch');
@@ -161,15 +173,15 @@ export function useHistoryImport(): void {
           (page.skippedKnownInboxReviewSourceKeys?.length ?? 0) > 0) {
         reviewReceipt = stageReviewAlerts(page.reviewCandidates, undefined, page.reviewSourceBindings, 'hold-source');
         const outcomes = await settleReviewStage(page.reviewCandidates, reviewReceipt);
-        if (!canCommit()) return false;
+        if (!canCommit()) { wafraDiag('commit-false-2'); return false; }
         const unresolved = page.reviewCandidates.filter(requiresReviewRetention).map(item =>
           outcomes.find(entry => entry.sourceKey === canonicalCaptureSourceKey(item.sourceKey, item.observedAt)))
           .filter(entry => !entry || !reviewReceiptSettled(entry.outcome));
         // An expired source is a terminal, disclosed loss: History continues.
-        if (unresolved.length) return { paused: 'review-capacity' as const };
+        if (unresolved.length) { wafraDiag('hold-unresolved', unresolved.length); return { paused: 'review-capacity' as const }; }
       }
       // Cropped candidates still live in the provider; do not skip their cursor.
-      if (page.deferredInboxReviews) return { paused: 'review-capacity' as const };
+      if (page.deferredInboxReviews) { wafraDiag('hold-deferred-inbox-reviews', page.reviewCandidates.length); return { paused: 'review-capacity' as const }; }
 
       // Parsing already yields, but planning + reducer reconciliation below are
       // synchronous JS too. Starting that work in the same turn as a user's tap
@@ -182,7 +194,7 @@ export function useHistoryImport(): void {
       } else {
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
-      if (!canCommit()) return false;
+      if (!canCommit()) { wafraDiag('commit-false-3'); return false; }
       const ledger = page.detectedLaunchMarket
         ? { ...getStateSnapshot(), marketId: page.detectedLaunchMarket }
         : getStateSnapshot();
@@ -192,7 +204,7 @@ export function useHistoryImport(): void {
       if (RNAppState.currentState === 'active') {
         await waitForForegroundHistoryIdle();
       }
-      if (!canCommit()) return false;
+      if (!canCommit()) { wafraDiag('commit-false-4'); return false; }
       const saveStartedAt = Date.now();
       const applyStartedAt = Date.now();
       // Possible Apple Pay duplicates were withheld from the batch. Stage their
@@ -205,7 +217,7 @@ export function useHistoryImport(): void {
       if (!canCommit() || (page.skippedKnownInboxReviewSourceKeys ?? []).some(key => !claims.has(key)) ||
           page.reviewCandidates.some(item => requiresReviewRetention(item) && !finalReviews.some(entry =>
             entry.sourceKey === canonicalCaptureSourceKey(item.sourceKey, item.observedAt) &&
-            reviewReceiptSettled(entry.outcome)))) return false;
+            reviewReceiptSettled(entry.outcome)))) { wafraDiag('commit-false-claims-or-unsettled'); return false; }
       const receipt = importBatch({
           ...nearMatches.plan.batch,
           parserRereadComplete: page.inboxHistoryComplete,
@@ -246,21 +258,23 @@ export function useHistoryImport(): void {
     // with real progress belongs to the explicit Continue control: silently
     // resuming it on every cold launch was the cause of the blank/reopening
     // state on large ledgers.
+    wafraDiag('autostart-effect st:' + String(progress?.status) + ' err:' + String(progress?.error ?? null), progress?.scanned ?? -1);
     if (!progress || progress.status !== 'paused' || progress.scanned > 0 || progress.error) return;
     const timer = setTimeout(() => {
-      void run().catch(() => {
+      wafraDiag('autostart-timer-fired');
+      void run().catch((error: unknown) => { wafraDiag('run-rejected ' + String((error as { code?: unknown })?.code ?? (error as Error)?.message ?? 'unknown').slice(0, 80));
         // The coordinator has persisted a body-free failure. Home and Settings
         // own recovery; a failed cursor must not be marked complete to unblock UI.
       });
     }, FOREGROUND_HISTORY_FIRST_RUN_GRACE_MS);
-    return () => clearTimeout(timer);
+    return () => { wafraDiag('autostart-timer-cleared'); clearTimeout(timer); };
   }, [getStateSnapshot, run, runnable, state.captureOptOut, state.androidCaptureSources?.sms,
     state.hydrated, state.onboarded]);
 
   useEffect(() => {
     if (Platform.OS !== 'android') return;
-    const unsubscribe = subscribeHistoryImportRequest(() => { void run().catch(() => {}); });
-    return () => { unsubscribe(); historyBackground.cancel(); };
+    const unsubscribe = subscribeHistoryImportRequest(() => { wafraDiag('continue-request'); void run().catch((error: unknown) => { wafraDiag('run-rejected ' + String((error as { code?: unknown })?.code ?? (error as Error)?.message ?? 'unknown').slice(0, 80)); }); });
+    return () => { wafraDiag('request-effect-cleanup-cancel'); unsubscribe(); historyBackground.cancel(); };
   }, [run]);
 
   // Do not cancel a running history job merely because the Activity becomes

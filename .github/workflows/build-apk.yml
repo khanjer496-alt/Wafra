@@ -12,6 +12,7 @@ name: Build Android APK
 on:
   # A/B internal test APKs without a manual dispatch: a push to an
   # android/ab-build-* branch that touches this file builds that branch once.
+  # Variant D (diagnostic): logs WafraHistoryDiag reason codes; never merged.
   push:
     branches: ['android/ab-build-*']
     paths: ['.github/workflows/build-apk.yml']

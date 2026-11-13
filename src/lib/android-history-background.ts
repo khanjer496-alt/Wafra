@@ -1,6 +1,9 @@
 import { AppRegistry, AppState, Platform } from 'react-native';
 import SmsReader from '../../modules/sms-reader';
 
+// DIAGNOSTIC BUILD ONLY (android/ab-build-396-diag, never merged): reason codes, no message data.
+const wafraDiag = (code: string, n = 0): void => { try { console.info('WafraHistoryDiag', code, n); } catch { /* diagnostic only */ } };
+
 interface HistoryNativeLease {
   startHistoryImport?(id: string): Promise<boolean>;
   isHistoryImportRunning?(id: string): boolean;
@@ -14,12 +17,12 @@ export function createHistoryBackgroundRunner(native: HistoryNativeLease | null,
   let inFlight: Promise<void> | null = null;
 
   const canContinue = (): boolean => {
-    if (!lease || lease.cancelled) return false;
+    if (!lease || lease.cancelled) { wafraDiag('bg-no-lease-or-cancelled ' + String(!!lease)); return false; }
     // A service which was started but then stopped means Pause/timeout, not a
     // reason to silently continue in the foreground after a notification Pause.
     if (lease.started) {
-      try { return native?.isHistoryImportRunning?.(lease.id) === true; }
-      catch { return false; }
+      try { const running = native?.isHistoryImportRunning?.(lease.id) === true; if (!running) wafraDiag('bg-native-not-running'); return running; }
+      catch (error) { wafraDiag('bg-native-running-threw ' + String((error as Error)?.message ?? '').slice(0, 80)); return false; }
     }
     return isForeground(); // Compatibility with older installed binaries.
   };
@@ -27,7 +30,7 @@ export function createHistoryBackgroundRunner(native: HistoryNativeLease | null,
   const run = (job: () => Promise<unknown>, canStart: () => boolean): Promise<void> => {
     if (inFlight) return lease?.cancelled
       ? inFlight.then(() => run(job, canStart)) : inFlight;
-    if (!isForeground() || !canStart()) return Promise.resolve();
+    if (!isForeground() || !canStart()) { wafraDiag('bg-run-refused fg' + Number(isForeground())); return Promise.resolve(); }
     let release!: () => void;
     const current = {
       id: `history-${Date.now()}-${++sequence}`, started: false, cancelled: false,
@@ -38,9 +41,10 @@ export function createHistoryBackgroundRunner(native: HistoryNativeLease | null,
       try {
         if (native?.startHistoryImport && native.isHistoryImportRunning && native.stopHistoryImport) {
           try { current.started = await native.startHistoryImport(current.id); }
-          catch { current.started = false; }
+          catch (error) { wafraDiag('bg-start-threw ' + String((error as Error)?.message ?? '').slice(0, 80)); current.started = false; }
+          wafraDiag('bg-started ' + String(current.started));
         }
-        if (!current.cancelled && canStart()) await job();
+        if (!current.cancelled && canStart()) await job(); else wafraDiag('bg-job-skipped cancelled' + Number(current.cancelled));
       } finally {
         current.cancelled = true;
         current.release();
@@ -59,6 +63,7 @@ export function createHistoryBackgroundRunner(native: HistoryNativeLease | null,
     waitForTask: (id: unknown): Promise<void> => lease && lease.id === id ? lease.done : Promise.resolve(),
     cancel: () => {
       if (!lease) return;
+      wafraDiag('bg-cancel');
       lease.cancelled = true;
       lease.release();
       void native?.stopHistoryImport?.(lease.id).catch(() => {});

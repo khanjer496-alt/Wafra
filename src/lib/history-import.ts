@@ -1,4 +1,6 @@
 /** Durable, body-free progress for Android's first inbox history import. */
+// DIAGNOSTIC BUILD ONLY (android/ab-build-396-diag, never merged): reason codes, no message data.
+const wafraDiag = (code: string, n = 0): void => { try { console.info('WafraHistoryDiag', code, n); } catch { /* diagnostic only */ } };
 export type HistoryImportStatus = 'paused' | 'running' | 'failed' | 'complete';
 export type HistoryImportError = 'page-failed' | 'inbox-access' | 'review-capacity' | 'review-expired';
 export interface HistoryImportHold { paused: 'review-capacity' | 'review-expired' }
@@ -137,6 +139,7 @@ export function createHistoryImportCoordinator<Page extends HistoryImportPage>(
     const canContinue = () => generationIsCurrent() && dependencies.shouldContinue();
     const currentProgress = () => normalizeHistoryImportProgress(dependencies.getProgress());
     let progress = normalizeHistoryImportProgress(dependencies.getProgress());
+    wafraDiag('coord-execute st:' + String(progress?.status), progress?.scanned ?? -1);
     if (!progress || progress.status === 'complete') return progress;
 
     progress = {
@@ -146,11 +149,12 @@ export function createHistoryImportCoordinator<Page extends HistoryImportPage>(
       error: null,
     };
     await dependencies.persistProgress(progress);
-    if (!generationIsCurrent()) return currentProgress();
+    if (!generationIsCurrent()) { wafraDiag('coord-generation-changed-at-start'); return currentProgress(); }
 
     for (;;) {
       if (!generationIsCurrent()) return currentProgress();
       if (!dependencies.shouldContinue()) {
+        wafraDiag('coord-pause-before-scan', progress.scanned);
         progress = {
           ...progress,
           status: 'paused',
@@ -165,6 +169,7 @@ export function createHistoryImportCoordinator<Page extends HistoryImportPage>(
         const page = await dependencies.scanPage(progress.cursor);
         if (!generationIsCurrent()) return currentProgress();
         if (!dependencies.shouldContinue()) {
+          wafraDiag('coord-pause-after-scan', page.scanned);
           progress = {
             ...progress,
             status: 'paused',
@@ -188,6 +193,7 @@ export function createHistoryImportCoordinator<Page extends HistoryImportPage>(
         const committed = await dependencies.commitPage(page, next, canContinue);
         if (!generationIsCurrent()) return currentProgress();
         if (committed === false || (typeof committed === 'object' && committed !== null)) {
+          wafraDiag('coord-pause-commit ' + (typeof committed === 'object' ? committed.paused : 'false'), page.scanned);
           progress = {
             ...progress,
             status: 'paused',
@@ -198,8 +204,11 @@ export function createHistoryImportCoordinator<Page extends HistoryImportPage>(
           return progress;
         }
         progress = next;
+        wafraDiag('coord-page-committed complete' + Number(complete), next.scanned);
         if (complete) return progress;
       } catch (error) {
+        wafraDiag('coord-error ' + String((error as { code?: unknown })?.code ?? (error as Error)?.name ?? 'unknown').slice(0, 60) +
+          ' gen' + Number(generationIsCurrent()) + ' ' + String((error as Error)?.message ?? '').replace(/[0-9]/g, '#').slice(0, 120));
         if (!generationIsCurrent()) return currentProgress();
         if (!dependencies.shouldContinue()) {
           const paused: HistoryImportProgress = {
