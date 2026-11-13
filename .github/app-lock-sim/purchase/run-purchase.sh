@@ -79,16 +79,17 @@ tap = {}
 for l in open(notes, errors='replace'):
     m = re.match(r'(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) \+0000 (P\d) buy tap', l)
     if m: tap[m.group(2)] = datetime.datetime.strptime(m.group(1), '%Y-%m-%d %H:%M:%S')
-want = re.compile(r'purchas|transaction|product|cancel|storekit|superwall|offer|payment|dialog|sheet|session|entitle|\[wafra:|error|fail', re.I)
+want = re.compile(r'purchas|transaction|product|cancel|storekit|superwall|offer|payment|dialog|sheet|entitle|\[wafra:|error|fail|javascript|refus|unavailable|receipt|sandbox|account', re.I)
+noise = re.compile(r'apsd|APSConnection|dt\.xctest|XCTElementQuery|AX element|XCTAutomation|XCUI|accessibility|Accessibility')
 lines = []
 for l in open(raw, errors='replace'):
     m = re.match(r'(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\.\d+ ', l)
     if m: lines.append((datetime.datetime.strptime(m.group(1), '%Y-%m-%d %H:%M:%S'), l.rstrip('\n')))
 for tag, t0 in tap.items():
-    keep = [l[:320] for t, l in lines if -1 <= (t - t0).total_seconds() <= 30 and want.search(l)]
+    keep = [l[:320] for t, l in lines if -1 <= (t - t0).total_seconds() <= 30 and want.search(l) and not noise.search(l)]
     with open(f'{out}/applog-{tag}-around-buy-tap.txt', 'w') as f:
-        f.write(f'# {tag}: log lines (app, StoreKit, Superwall) from -1 s to +30 s around the buy tap at {t0} UTC, purchase-related only; {len(keep)} lines (first 150 kept)\n')
-        f.write('\n'.join(keep[:150]) + '\n')
+        f.write(f'# {tag}: log lines (app, StoreKit, Superwall) from -1 s to +30 s around the buy tap at {t0} UTC, purchase-related only; {len(keep)} lines (first 250 kept)\n')
+        f.write('\n'.join(keep[:250]) + '\n')
 PYEOF
 { echo "== StoreKit config locations in the simulator (Octane = storekitd's per-app test configuration)";
   find "$HOME/Library/Developer/CoreSimulator/Devices/$UDID/data/Containers/Shared/AppGroup" -ipath '*Octane*' 2>/dev/null | head -30;

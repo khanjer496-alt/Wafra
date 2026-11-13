@@ -6,6 +6,33 @@ appId: ${APP_ID}
     commands:
       - tapOn:
           point: '33%,54%'
+- extendedWaitUntil:
+    visible: 'Settings'
+    timeout: 30000
+# A transaction needs an account ("Choose the account this alert belongs to"): create one in Wallet first.
+- tapOn: '^Wallet$'
+- extendedWaitUntil:
+    visible:
+      id: 'wallet-screen'
+    timeout: 20000
+- tapOn:
+    id: 'wallet-add-account'
+- extendedWaitUntil:
+    visible: 'Account name'
+    timeout: 15000
+- takeScreenshot: account-sheet-open
+- tapOn: 'Account name'
+- inputText: 'Main account'
+- pressKey: Enter
+- takeScreenshot: account-name-typed
+- tapOn: 'Add account'
+- waitForAnimationToEnd:
+    timeout: 4000
+- takeScreenshot: account-added
+- tapOn: '^Home$'
+- extendedWaitUntil:
+    visible: 'Settings'
+    timeout: 30000
 - runFlow:
     when:
       visible: 'Add manually'
@@ -53,6 +80,20 @@ appId: ${APP_ID}
 - tapOn:
     id: 'suggested-category-.*'
     optional: true
+- runFlow:
+    when:
+      visible:
+        id: 'account-picker-trigger'
+    commands:
+      - tapOn:
+          id: 'account-picker-trigger'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - tapOn:
+          text: 'Main account'
+          optional: true
+      - waitForAnimationToEnd:
+          timeout: 3000
 - tapOn:
     id: 'add-save'
 - extendedWaitUntil:
@@ -107,6 +148,20 @@ appId: ${APP_ID}
 - tapOn:
     id: 'suggested-category-.*'
     optional: true
+- runFlow:
+    when:
+      visible:
+        id: 'account-picker-trigger'
+    commands:
+      - tapOn:
+          id: 'account-picker-trigger'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - tapOn:
+          text: 'Main account'
+          optional: true
+      - waitForAnimationToEnd:
+          timeout: 3000
 - tapOn:
     id: 'add-save'
 - extendedWaitUntil:
@@ -159,6 +214,20 @@ appId: ${APP_ID}
 - tapOn:
     id: 'suggested-category-.*'
     optional: true
+- runFlow:
+    when:
+      visible:
+        id: 'account-picker-trigger'
+    commands:
+      - tapOn:
+          id: 'account-picker-trigger'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - tapOn:
+          text: 'Main account'
+          optional: true
+      - waitForAnimationToEnd:
+          timeout: 3000
 - tapOn:
     id: 'add-save'
 - extendedWaitUntil:
