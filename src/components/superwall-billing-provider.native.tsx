@@ -528,12 +528,13 @@ function SuperwallRuntime({ onValue }: {
   const purchasePro = useCallback(async (
     productId: string,
   ): Promise<ProPurchaseOutcome> => {
-    if (!isConfigured || !storeQueryAvailable) return 'unavailable';
+    if (!isConfigured || !storeQueryAvailable) { console.warn(`[wafra:purchase-diag] refused before the store: configured=${isConfigured} storeQueryAvailable=${storeQueryAvailable}`); return 'unavailable'; }
     // Only a product from the most recent offer fetch may be bought. A price
     // response that arrived late, or a plan the store has since stopped
     // returning, must not be able to authorize a charge against a figure the
     // screen is no longer showing.
-    if (!purchasableProductIds.current.has(productId)) return 'unavailable';
+    if (!purchasableProductIds.current.has(productId)) { console.warn(`[wafra:purchase-diag] refused before the store: product ${productId} is not in the last offer fetch`); return 'unavailable'; }
+    console.warn(`[wafra:purchase-diag] calling purchase(${productId})`);
     const android = Platform.OS === 'android';
     if (android && androidMoneyAction.current) return 'unavailable';
     const action = android ? { session: androidSessionGeneration.current } : null;
@@ -546,8 +547,10 @@ function SuperwallRuntime({ onValue }: {
       let result: Awaited<ReturnType<typeof purchase>> | null = null;
       try {
         result = await purchase(productId);
-      } catch {
+        console.warn(`[wafra:purchase-diag] purchase() returned ${JSON.stringify(result).slice(0, 300)}`);
+      } catch (error) {
         // SDK failure is not an ownership answer. The Play query remains safe.
+        console.warn(`[wafra:purchase-diag] purchase() threw ${String(error).slice(0, 300)}`);
       }
       const playSnapshot = action ? await refreshAndroid(action) : null;
       if (!result) return 'failed';
