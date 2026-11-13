@@ -233,6 +233,36 @@ const CONTROLS = [
   ].map((body) => [body, 'NO_POST', 'C22 Arabic: another verb after the leader governs the credit']),
   ['عند إرجاع المنتج تم استرداد مبلغ 250.00 درهم إلى بطاقتك.', 'INCOME_REFUND', 'C22 Arabic: "إرجاع المنتج" is a product return, then a completed refund'],
   ['عند مراجعة طلبك تم إيداع مبلغ 250.00 درهم في حسابك المنتهي بـ 1234.', 'INCOME_REFUND', 'C22 Arabic: "عند مراجعة طلبك" leads a completed credit'],
+  // #231 review (Change Reviewer b47be539, Reviewer e4fcce75): purchases and genuine refunds that must keep their path, and
+  // the Arabic conditional, pending and negated forms the table missed.
+  ...[
+    'تمت عملية شراء بمبلغ 250.00 درهم لدى NOON باستخدام بطاقتك. سيتم استرداد مبلغ 250.00 درهم في حال إلغاء الطلب.',
+    'تمت عملية شراء بقيمة AED 250.00 بواسطة بطاقتك لدى NOON. سيتم استرداد مبلغ AED 250.00 في حال إلغاء الطلب.',
+    'عملية شراء بمبلغ 250.00 درهم لدى NOON باستخدام بطاقتك. لم يتم استرداد مبلغ 250.00 درهم.',
+    'تم استخدام بطاقتك لشراء بمبلغ 250.00 درهم لدى NOON. سيتم استرداد مبلغ 250.00 درهم إذا تم إلغاء الطلب.',
+    'تم خصم مبلغ 250.00 درهم من بطاقتك لدى NOON. سيتم استرداد المبلغ خلال 5 أيام، الرصيد المتاح 750.00 درهم.',
+    'AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A refund will be credited within 5 days, available balance AED 750.00.',
+  ].map((body) => [body, 'EXPENSE', 'C24 a purchase with an unsettled note (other debit wording, or a balance figure) posts the expense']),
+  ...[
+    'تم استرداد مبلغ 250.00 درهم إلى بطاقتك عن عملية تم خصمها بالخطأ.',
+    'تم استرداد مبلغ 250.00 درهم الذي تم خصمه عن طريق الخطأ إلى بطاقتك.',
+    'تم إيداع مبلغ 250.00 درهم في حسابك كتعويض عن الخصم بالخطأ.',
+    'تم استرداد مبلغ 250.00 درهم المدفوع إلى التاجر NOON إلى بطاقتك المنتهية بـ 1234.',
+    'تم استرداد مبلغ 250.00 درهم إلى بطاقتك. طلبك الآخر قيد المراجعة.',
+    'قمنا باسترداد مبلغ 250.00 درهم إلى بطاقتك.',
+  ].map((body) => [body, 'INCOME_REFUND', 'C24 Arabic genuine refunds (of an erroneous charge, after a payment to the merchant, first person)']),
+  ...[
+    'سنقوم باسترداد مبلغ 250.00 درهم إلى بطاقتك.',
+    'نقوم حالياً باسترداد مبلغ 250.00 درهم إلى بطاقتك.',
+    'إن تم استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
+    'فور استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
+    'بعد استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
+    'لدى استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
+    'من المتوقع استرداد مبلغ 250.00 درهم إلى بطاقتك خلال 7 أيام.',
+    'في حالة تم استرداد مبلغ 250.00 درهم إلى بطاقتك، ستصلك رسالة.',
+    'لم يتم بعد استرداد مبلغ 250.00 درهم إلى بطاقتك.',
+    'لم يتم رد مبلغ 250.00 درهم إلى بطاقتك.',
+  ].map((body) => [body, 'NO_POST', 'C24 Arabic conditional, pending or negated credits the table missed']),
 ];
 
 // ── Case selection ───────────────────────────────────────────────────────────────────────────────────────────────────

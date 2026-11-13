@@ -328,3 +328,37 @@ test('Arabic: only an event noun, then تم + the credit, reads as "when it happ
     'عندما يوافق البنك تم إيداع مبلغ 250.00 درهم في حسابك.',
   ]) assert.equal(both(body), 'none / none', body);
 });
+
+// #231 review (Change Reviewer b47be539, Reviewer e4fcce75). Regressions first: a real Arabic purchase in other wording, a
+// refund OF an erroneous charge, a payment to the merchant then an own destination, an unrelated later "قيد المراجعة", and a
+// balance figure in the note's own sentence must keep their path. Then Arabic false income the table missed (base-equal).
+test('Arabic review fixes: purchases and genuine refunds keep their path; the missed conditional, pending and negated forms never post', () => {
+  for (const body of [
+    'تمت عملية شراء بمبلغ 250.00 درهم لدى NOON باستخدام بطاقتك. سيتم استرداد مبلغ 250.00 درهم في حال إلغاء الطلب.',
+    'تمت عملية شراء بقيمة AED 250.00 بواسطة بطاقتك لدى NOON. سيتم استرداد مبلغ AED 250.00 في حال إلغاء الطلب.',
+    'عملية شراء بمبلغ 250.00 درهم لدى NOON باستخدام بطاقتك. لم يتم استرداد مبلغ 250.00 درهم.',
+    'تم استخدام بطاقتك لشراء بمبلغ 250.00 درهم لدى NOON. سيتم استرداد مبلغ 250.00 درهم إذا تم إلغاء الطلب.',
+    'تم خصم مبلغ 250.00 درهم من بطاقتك لدى NOON. سيتم استرداد المبلغ خلال 5 أيام، الرصيد المتاح 750.00 درهم.',
+    'AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A refund will be credited within 5 days, available balance AED 750.00.',
+  ]) assert.equal(both(body), 'expense 25000 / expense 25000', body);
+  for (const body of [
+    'تم استرداد مبلغ 250.00 درهم إلى بطاقتك عن عملية تم خصمها بالخطأ.',
+    'تم استرداد مبلغ 250.00 درهم الذي تم خصمه عن طريق الخطأ إلى بطاقتك.',
+    'تم إيداع مبلغ 250.00 درهم في حسابك كتعويض عن الخصم بالخطأ.',
+    'تم استرداد مبلغ 250.00 درهم المدفوع إلى التاجر NOON إلى بطاقتك المنتهية بـ 1234.',
+    'تم استرداد مبلغ 250.00 درهم إلى بطاقتك. طلبك الآخر قيد المراجعة.',
+    'قمنا باسترداد مبلغ 250.00 درهم إلى بطاقتك.',
+  ]) assert.equal(both(body), 'income 25000 / income 25000', body);
+  for (const body of [
+    'سنقوم باسترداد مبلغ 250.00 درهم إلى بطاقتك.',
+    'نقوم حالياً باسترداد مبلغ 250.00 درهم إلى بطاقتك.',
+    'إن تم استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
+    'فور استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
+    'بعد استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
+    'لدى استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
+    'من المتوقع استرداد مبلغ 250.00 درهم إلى بطاقتك خلال 7 أيام.',
+    'في حالة تم استرداد مبلغ 250.00 درهم إلى بطاقتك، ستصلك رسالة.',
+    'لم يتم بعد استرداد مبلغ 250.00 درهم إلى بطاقتك.',
+    'لم يتم رد مبلغ 250.00 درهم إلى بطاقتك.',
+  ]) assert.equal(both(body), 'none / none', body);
+});
