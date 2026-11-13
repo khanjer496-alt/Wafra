@@ -1,0 +1,11 @@
+appId: ${APP_ID}
+---
+# After a failed Face ID match the system sheet offers Cancel / Try Again. Cancel it so the app's own lock screen is
+# what remains on screen (the positive check S5c reads it).
+- runFlow:
+    when:
+      visible: 'Cancel'
+    commands:
+      - tapOn: 'Cancel'
+      - waitForAnimationToEnd:
+          timeout: 3000

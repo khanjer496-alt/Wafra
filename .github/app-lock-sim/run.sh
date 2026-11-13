@@ -120,6 +120,21 @@ else dump s3; record S3 FAIL "not locked after 25 s away"; fi
 nomatch; sleep 5; shot 05a-after-nomatch
 if is_locked s5; then record S5 PASS "pearl.nomatch: still locked, no ledger"; LOCKED_SHOTS+=(05a-after-nomatch)
 else dump s5; record S5 FAIL "not locked after pearl.nomatch"; fi
+# ---- S5c: positive check that the APP's own lock screen is on screen once the system sheet is gone ----
+# (a black screen with only the system sheet would also look "private", so it must not mask a missing lock screen)
+mro cancel-faceid s5c-cancel || true; sleep 3; shot 05c-after-faceid-cancel
+xcrun simctl io "$UDID" screenshot "${RUNNER_TEMP:-/tmp}/lockcheck-s5c.png" >/dev/null 2>&1
+T5C=$("$OCRBIN" "${RUNNER_TEMP:-/tmp}/lockcheck-s5c.png" 2>/dev/null | tr '\n' ' ')
+printf '%s\n' "$T5C" > "$OUT/ocr-lockcheck-s5c.txt"
+C_TITLE=no; C_BODY=no; C_FALLBACK=no; C_BUTTON=no; C_RETRY=no
+printf '%s' "$T5C" | grep -qi "Wafra is locked" && C_TITLE=yes
+printf '%s' "$T5C" | grep -qi "balances stay hidden" && C_BODY=yes
+printf '%s' "$T5C" | grep -qi "passcode works too" && C_FALLBACK=yes
+printf '%s' "$T5C" | grep -qiE "Unlock with (Face ID|passcode|Touch ID)" && C_BUTTON=yes
+printf '%s' "$T5C" | grep -qi "Try again" && C_RETRY=yes
+if printf '%s' "$T5C" | grep -qiE "LULU|ADNOC|CAREEM|Transactions|Spent"; then record S5c FAIL "ledger text visible after the Face ID cancel"
+elif [ $C_TITLE = yes ] && [ $C_BUTTON = yes ]; then record S5c PASS "app lock screen visible after the system sheet closed: title=$C_TITLE body=$C_BODY fallback=$C_FALLBACK button=$C_BUTTON retry-copy=$C_RETRY"; LOCKED_SHOTS+=(05c-after-faceid-cancel)
+else record S5c FAIL "the app's own lock screen copy is NOT on screen after the Face ID cancel: title=$C_TITLE body=$C_BODY fallback=$C_FALLBACK button=$C_BUTTON retry-copy=$C_RETRY (OCR: ${T5C:0:160})"; fi
 if unlock s5r; then record S5r PASS "recovered: pearl.match after the failed match unlocked (attempts: $UNLOCK_ATTEMPTS)"
 else record S5r FAIL "could not unlock after the failed match"; fi
 shot 05b-after-recovery-unlocked
