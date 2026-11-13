@@ -38,7 +38,13 @@ Data that stays on the iPhone is not "collected". Every claim cites the code at 
 | **User Content: Other User Content** | Opt-in shared bank-message formats: sender code, direction, currency and generic wording with placeholders (`src/lib/shared-alert-format-sync.ts:63-80`), stored under an HMAC of the vault ID (`server/src/shared-formats.ts:182`). Trusted-device labels (`src/app/trusted-devices.tsx:79-82`). | App Functionality | **Linked** (decision 1; vault-keyed) | No | Yes. Formats are sent only when `shareAlertFormatsV1 === true`, after a consent prompt (`src/lib/shared-alert-format-share.ts:7-9`, `shared-alert-format-submit.ts:38-56`). |
 | **User Content: Emails or Text Messages** | The legacy relay Shortcut posts message text and sender to `POST /v1/ingest` (`server/src/index.ts:2246-2481`). It is parsed in memory and the raw text is not stored (`server/schema.sql:1-6`). The release app can't create this setup (`shortcutSetupCode` has no callers), but an older TestFlight setup can keep uploading until it is retired (`src/hooks/use-auto-import.ts:128-136`). | App Functionality | Not declared once ingest is switched off (decision 2); declare it if submission happens before that | No | Yes, legacy only |
 
-**Online logos (Brandfetch):** a cleaned merchant or bank name plus an app-wide client ID go to Brandfetch (`src/lib/verified-logo-identities.ts:24-39`, `merchant-logo-resolver.ts:275-298`). The feature is off by default and needs opt-in (`src/lib/store.tsx:316`; toggle `src/app/settings.tsx:1238-1241`). **Recommended (not yet decided by the CEO):** declare it as Other Data, not linked, optional. Alternatively, treat it as real-time serving with no retention by Wafra; Brandfetch's own retention is not verified.
+**Online logos (Brandfetch), declared (CEO, 13 Nov 2026):**
+- **What leaves the device:** for a merchant or bank without a bundled logo, the cleaned merchant or bank name taken from the user's transactions and accounts, at most 80 characters and never amounts, account tails or raw bank text (`brandfetchSearchUrl`, `src/lib/verified-logo-identities.ts:35-39`; called from `src/lib/merchant-logo-resolver.ts:275-298` and `src/lib/bank-logo-resolver.ts:161-167`). Or a validated brand domain for the logo image (`verifiedLogoUrl`, `verified-logo-identities.ts:29-32`). Each request carries Wafra's app-wide Brandfetch client ID (`c=`, `:24-26`), which is the same for every user, and Brandfetch sees the request's IP address.
+- **Category: Financial Info, Other Financial Info.** The names come from the user's financial transactions. Purchase History ("purchases or purchase tendencies") is arguably as close, so use Other Financial Info, and add this purpose to Purchase History too if Apple Review asks.
+- **Purpose:** App Functionality.
+- **Optional:** yes. It's off by default and runs only after the user turns online logos on, never in Private Mode (`src/lib/store.tsx:316, 2636, 4222`; `src/lib/logo-cache-lifecycle.ts:31-34`; toggle `src/app/settings.tsx:1238-1241`).
+- **Linked: No for this flow.** No device, install, account or user ID goes with the request, only the name or domain, the shared client ID and the IP. App Store Connect records linkage per data type, though, and Other Financial Info is already Linked for statement uploads, so the type stays Linked overall.
+- **Tracking:** No.
 
 **FX reference rates (Frankfurter):** only two currency codes and a date are sent (`src/lib/fx.ts:27, 68`). There is no identifier or user content. Recommend: not collected.
 
@@ -59,7 +65,7 @@ Data that stays on the iPhone is not "collected". Every claim cites the code at 
 4. **Apple Search Ads attribution: OFF**, so nothing was changed. The live iOS config that SuperwallKit downloads (`GET api.superwall.me/api/v1/static_config`, production iOS public key, 13 Nov 2026) has `attribution_options = {"apple_search_ads":{"enabled":false},"mmp":{"enabled":false}}`. SuperwallKit 4.16.1 decodes it as `Config.attribution` (`Config/Models/Config.swift:84`) and posts the token only when `appleSearchAds.enabled == true` (`AttributionPoster.swift`, around line 222). The dashboard's Integrations page lists no Apple Search Ads integration. Evidence: `Shared/launch-review/superwall-asa-attribution-2026-11-13.md` and `superwall-integrations-2026-11-13.png` (OpenBot shared folder, outside the repo).
 5. **Superwall device context and usage counters: both declared** (Other Diagnostic Data, Product Interaction), Linked.
 
-Open, not decided: the Brandfetch row (online logos).
+6. **Online logos (Brandfetch): declared** as Other Financial Info, App Functionality, optional, not linked for this flow (see above).
 
 ## Mismatches found (to fix separately)
 
