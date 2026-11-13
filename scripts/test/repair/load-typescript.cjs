@@ -91,6 +91,18 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       // The pure "Open in Wafra" URL rules and one-time token store.
       if (name === '@/lib/incoming-statement-file') return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/incoming-statement-file.ts'));
       if (name === '@/lib/subscriptions') return require('../build/subscriptions.js');
+      // The marker-derived Founder Pro build gates (Home's logo unlock); pure,
+      // no imports. They read process.env, so they run from source with the
+      // harness's own globals (a harness can switch the unlock on), not Node's.
+      // A test's explicit stub above still wins.
+      if (name === '@/lib/founder-pro') {
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/founder-pro.ts'), {}, globals);
+      }
+      // The parser-research build marker reads process.env, so it runs from
+      // source with the harness's own globals (its process.env), not Node's.
+      if (name === '@/lib/parser-research-flag') {
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/parser-research-flag.ts'), {}, globals);
+      }
       // The iOS tab gate is a navigation boundary: screen harnesses execute the
       // real screen, and ios-tab-gate.test.cjs covers the gate itself.
       if (name === '@/components/ios-tab-gate') return { withIosTabGate: (Screen) => Screen };

@@ -176,8 +176,38 @@ these three facts.
         update a side-loaded install and cannot be uploaded to Play.
       - The build fails early, with a message naming the secret at fault, if
         the keystore does not open or lacks the alias.
-- [x] Play **AAB** built by CI as the `wafra-aab` artifact on `main`, or from
-      a manual run with **Also build the Play Store bundle** enabled
+- [x] Play **AAB** built by a manual "Build Android APK" run with **Also build
+      the Play Store bundle** enabled. That run also checks the compiled
+      bundle and APK: it fails if the Founder Pro unlock, automatic tester Pro
+      or the SMS corpus exporter is compiled in (`scripts/android-build-flags.cjs`).
+- [x] **Artifacts are sealed.** The repository is public, so the workflow
+      never uploads a plaintext APK or AAB. It uploads one artifact,
+      `wafra-android-sealed-<run number>`, kept **1 day**:
+      - `wafra-aab.enc` and `wafra-apk.enc` (or `wafra-sms-corpus-apk.enc`),
+        encrypted to `.github/android-artifact-recipient.pem`;
+      - `verification.json`: source commit, run number (= versionCode), and
+        the plaintext SHA-256 and compiled build flags of each file.
+
+      The private key lives only on the release Mac, at
+      `~/.config/wafra-android-artifacts/recipient-key.pem` (mode 600). It is
+      never committed, pasted into chat or copied to shared folders. To open a
+      run within its day:
+
+      ```sh
+      gh run download <run id> -n wafra-android-sealed-<run number> -D /tmp/wafra-sealed
+      node scripts/android-artifact-seal.cjs open \
+        --key ~/.config/wafra-android-artifacts/recipient-key.pem \
+        --in /tmp/wafra-sealed --out <destination>
+      ```
+
+      `open` refuses any file whose SHA-256 differs from `verification.json`,
+      and any file name that isn't a plain name inside `--out`. It needs
+      OpenSSL 3 (`openssl cms`; Homebrew `openssl` on a Mac whose system
+      `openssl` is LibreSSL). CMS encryption doesn't prove who sealed a file,
+      since anyone can encrypt to a public certificate, so open only the
+      artifact of a "Build Android APK" run you dispatched, by its run id.
+      To rotate the key, generate a new pair, commit only the new certificate,
+      and keep the old key until its last artifact has expired.
 - [x] Privacy policy written (landing page section; host on real domain)
 - [x] i18n: English + Arabic UI with RTL; auto-detected, Settings override
 - [ ] Final app icon + adaptive icon + splash pass

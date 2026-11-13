@@ -66,6 +66,7 @@ import { reminderScheduleInputsChanged } from '@/lib/reminders';
 import { inPeriod, periodLabel } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { isProActive } from '@/lib/purchases';
+import { isFounderUnlockBuild } from '@/lib/founder-pro';
 import { useStoreActions, useStoreSelector } from '@/lib/store';
 import { fieldsEqual } from '@/lib/store-selection';
 import { detectSubscriptionsCooperatively, peekSubscriptionDetection, type Subscription } from '@/lib/subscriptions';
@@ -1059,7 +1060,8 @@ export default function JournalHomeScreen() {
         <ThemedText type="meta" style={[styles.grow, { color: band.textSecondary }]}>{homeWords.transfersWaiting(pendingTransfers.count)}</ThemedText>
         <Icon name="chevron-right" size={16} color={band.textSecondary} />
       </Pressable> : null;
-  const founderUnlockEnabled = process.env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK === '1';
+  // The marker-derived build gate (founder-pro.ts), so the packaged-bundle check covers this entry point too.
+  const founderUnlockEnabled = isFounderUnlockBuild();
   const unlockFounder = founderUnlockEnabled && !state.founderPro
     ? () => {
         void unlockFounderPro()
