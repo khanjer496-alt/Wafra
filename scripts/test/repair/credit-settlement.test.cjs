@@ -83,6 +83,33 @@ test('A temporal lead with a completed refund and nothing after it is not a cond
   ]) assert.equal(both(body), 'none / none', body);
 });
 
+// Change Reviewer a41046bc (High) and Reviewer 07a65c13 (Medium): a list of main-clause shapes cannot be complete, so a
+// temporal leader stays a condition whenever the credit's subject follows it directly, or any modal follows the credit;
+// only another phrase between the leader and the subject ("After cancellation AED …") makes it "when it happened".
+test('A temporal leader that directly governs the credit stays a condition, whatever the main clause', () => {
+  for (const body of [
+    "When AED 250.00 has been refunded to your card you'll receive an SMS.",
+    'Once AED 250.00 has been refunded to your card an SMS will be sent.',
+    'When AED 250.00 has been refunded to your card your balance will update.',
+    'After AED 250.00 has been refunded to your card please check your balance.',
+    "Once AED 250.00 has been credited to your account we'll notify you.",
+    'When AED 250.00 has been refunded to your card you receive an SMS.',
+    'As soon as AED 250.00 has been credited to your account Wafra will notify you.',
+    'When AED 250.00 has been credited to your account a confirmation will follow.',
+    'Once AED 250.00 has been refunded to your card. You will receive an SMS.',
+    'Once AED 250.00 has been credited to your account a confirmation SMS will follow.',
+    'Once AED 250.00 has been refunded to your card ending 1234 your card limit will be restored.',
+    'When AED 250.00 has been credited to your card ending 1234 the merchant will be informed.',
+    'Once AED 250.00 has been refunded to your card ending 1234 an SMS will be sent to you.',
+    'After AED 250.00 has been refunded to your card ending 1234 your statement will show it.',
+    'After NOON.COM has refunded AED 250.00 to your card you will receive an SMS.',
+    // Conservative: a modal after the credit keeps the condition, even after "After cancellation".
+    'After cancellation AED 250.00 has been refunded to your card ending 1234 and you can use it now.',
+  ]) assert.equal(both(body), 'none / none', body);
+  // Telegraphic, no auxiliary (Reviewer 07a65c13 Low): the bare participle is completed.
+  assert.equal(both('After cancellation AED 250.00 refunded to your card ending 1234.'), 'income 25000 / income 25000');
+});
+
 // bank-alert-semantics-matrix "re-credit for reversed purchase": the reason for the credit names the debit that was undone;
 // it is not this credit being taken back. A reversal of the credit itself still is.
 test('A reason phrase ("for reversed purchase") is not a take-back; reversing the credit itself is', () => {

@@ -180,6 +180,25 @@ const CONTROLS = [
   ['After cancellation AED 250.00 has been refunded to your card ending 1234.', 'INCOME_REFUND', 'C20 "After <noun>" leads a completed refund'],
   ['Dear Customer, once again AED 250.00 has been refunded to your card ending 1234.', 'INCOME_REFUND', 'C20 "once again" is not a leader'],
   ['Once your order was cancelled AED 250.00 was refunded to your card ending 1234.', 'INCOME_REFUND', 'C20 a completed "once" clause, then the refund'],
+  // Change Reviewer a41046bc (High), Reviewer 07a65c13 (Medium): a leader that directly governs the credit stays a condition,
+  // whatever main clause follows. Reviewer 07a65c13 (Low): a telegraphic bare participle is completed.
+  ...[
+    "When AED 250.00 has been refunded to your card you'll receive an SMS.",
+    'Once AED 250.00 has been refunded to your card an SMS will be sent.',
+    'When AED 250.00 has been refunded to your card your balance will update.',
+    'After AED 250.00 has been refunded to your card please check your balance.',
+    "Once AED 250.00 has been credited to your account we'll notify you.",
+    'When AED 250.00 has been refunded to your card you receive an SMS.',
+    'As soon as AED 250.00 has been credited to your account Wafra will notify you.',
+    'When AED 250.00 has been credited to your account a confirmation will follow.',
+    'Once AED 250.00 has been refunded to your card. You will receive an SMS.',
+    'Once AED 250.00 has been credited to your account a confirmation SMS will follow.',
+    'Once AED 250.00 has been refunded to your card ending 1234 your card limit will be restored.',
+    'When AED 250.00 has been credited to your card ending 1234 the merchant will be informed.',
+    'Once AED 250.00 has been refunded to your card ending 1234 an SMS will be sent to you.',
+    'After AED 250.00 has been refunded to your card ending 1234 your statement will show it.',
+  ].map((body) => [body, 'NO_POST', 'C21 a leader directly governing the credit is a condition, whatever follows']),
+  ['After cancellation AED 250.00 refunded to your card ending 1234.', 'INCOME_REFUND', 'C20 a telegraphic completed refund after "After <noun>"'],
 ];
 
 // ── Case selection ───────────────────────────────────────────────────────────────────────────────────────────────────

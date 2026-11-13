@@ -58,7 +58,7 @@ const NATIVE_IGNORED_CONTROL_ROWS = new Set(['CTL-05402', 'CTL-05403', 'CTL-0540
   'CTL-05416', 'CTL-05427', 'CTL-05429']);
 // Row count and sha256 of the oracle's "id<TAB>expected<TAB>body" lines, joined by newlines (Reviewer, #217 Low 1; the
 // body since #225's review, so a row's text cannot be edited unseen).
-const ORACLE_PIN = { rows: 5429, sha256: 'f38fbeda425cf1bc65233a5f666aed84e1aec49b8515efa4144ca71af39dadb7' };
+const ORACLE_PIN = { rows: 5444, sha256: 'c37ef230eda457c9318baa55f9d9146d1ddc404ae18c8ae574e1dd70b25c41fa' };
 
 const PATHS = ['parseSms', 'session', 'native'];
 const at = Date.parse('2026-11-05T10:00:00Z');
