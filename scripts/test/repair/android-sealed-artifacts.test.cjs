@@ -1,0 +1,143 @@
+'use strict';
+// build-apk.yml must never upload a plaintext APK or AAB (the repository is
+// public), and a Play build must fail if the Founder Pro unlock, automatic
+// tester Pro or the full-inbox SMS exporter is compiled in.
+const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const test = require('node:test');
+const yaml = require('yaml');
+
+const root = path.resolve(__dirname, '../../..');
+const workflowSource = fs.readFileSync(path.join(root, '.github/workflows/build-apk.yml'), 'utf8');
+const steps = yaml.parse(workflowSource).jobs.build.steps;
+const stepIndex = (name) => steps.findIndex((step) => step.name === name);
+const flags = require(path.join(root, 'scripts/android-build-flags.cjs'));
+const sealer = require(path.join(root, 'scripts/android-artifact-seal.cjs'));
+const PLAY_BUILD = "github.event.inputs.bundle == 'true' && github.event.inputs.corpus != 'true'";
+
+const marker = (flag, state) => `wafra-build-flag:${flag}=${state}`;
+const bundleWith = (states) => Buffer.from(`\0hbc\0${Object.entries(states).map(([f, s]) => marker(f, s)).join('\0')}\0`, 'latin1');
+const allOff = Object.fromEntries(flags.FLAGS.map((flag) => [flag, 'off']));
+
+test('the only artifact upload is the sealed directory, kept for one day', () => {
+  const uploads = steps.filter((step) => /actions\/upload-artifact@/.test(step.uses || ''));
+  assert.equal(uploads.length, 1);
+  const [upload] = uploads;
+  assert.equal(upload.with['retention-days'], 1);
+  assert.equal(upload.with['if-no-files-found'], 'error');
+  assert.deepEqual(String(upload.with.path).trim().split('\n').map((line) => line.trim()),
+    ['sealed/*.enc', 'sealed/verification.json']);
+  assert.doesNotMatch(workflowSource, /path:\s*wafra\.(apk|aab)\b/);
+  const seal = stepIndex('Seal outputs for the public artifact store');
+  assert.ok(seal > stepIndex('Rename outputs') && seal < steps.indexOf(upload));
+  assert.match(steps[seal].run, /--recipient \.github\/android-artifact-recipient\.pem --out sealed/);
+  assert.match(steps[seal].run, /rm -f wafra\.apk wafra\.aab/);
+  // sms-corpus.test.js still finds the corpus label in the sealed file name.
+  assert.equal(steps[seal].env.APK_LABEL, "${{ github.event.inputs.corpus == 'true' && 'wafra-sms-corpus-apk' || 'wafra-apk' }}");
+});
+
+test('a Play build verifies the compiled flags in the AAB and APK before sealing', () => {
+  const verify = stepIndex('Verify production build flags in the packaged Play bundle and APK');
+  assert.ok(verify > stepIndex('Rename outputs') && verify < stepIndex('Seal outputs for the public artifact store'));
+  const step = steps[verify];
+  assert.equal(step.if, PLAY_BUILD);
+  assert.equal(steps[stepIndex('Build Play Store bundle (AAB)')].if, PLAY_BUILD, 'same condition as the AAB build');
+  assert.match(step.run, /verify-production wafra\.aab/);
+  assert.match(step.run, /verify-production wafra\.apk/);
+  const native = spawnSync('bash', ['-c', step.run], { encoding: 'utf8', env: { ...process.env, WAFRA_SMS_CORPUS_EXPORT: '1' } });
+  assert.equal(native.status, 1);
+  assert.match(native.stdout + native.stderr, /native exporter must be compiled closed/);
+});
+
+test('verify-production fails closed on any flag that is on, missing or in both states', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wafra-flags-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const run = (buffer) => {
+    const file = path.join(dir, 'index.android.bundle');
+    fs.writeFileSync(file, buffer);
+    return spawnSync(process.execPath, [path.join(root, 'scripts/android-build-flags.cjs'), 'verify-production', file], { encoding: 'utf8' });
+  };
+  assert.equal(run(bundleWith(allOff)).status, 0);
+  for (const flag of flags.FLAGS) {
+    assert.equal(run(bundleWith({ ...allOff, [flag]: 'on' })).status, 1, `${flag}=on`);
+    const { [flag]: _, ...rest } = allOff;
+    assert.equal(run(bundleWith(rest)).status, 1, `${flag} missing`);
+    const both = Buffer.concat([bundleWith(allOff), Buffer.from(marker(flag, 'on'), 'latin1')]);
+    assert.equal(run(both).status, 1, `${flag} in both states`);
+  }
+  assert.deepEqual(flags.report(bundleWith({ ...allOff, 'founder-unlock': 'on' })),
+    { ...allOff, 'founder-unlock': 'on' });
+});
+
+test('the source markers fold to exactly one string under Metro release constant folding, and drive the gates', () => {
+  const babel = require('@babel/core');
+  const { constantFoldingPlugin } = require('metro-transform-plugins');
+  const cases = [
+    ['src/lib/founder-pro.ts', 'FOUNDER_UNLOCK_BUILD_FLAG', 'EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK', 'founder-unlock'],
+    ['src/lib/founder-pro.ts', 'AUTO_FOUNDER_PRO_BUILD_FLAG', 'EXPO_PUBLIC_WAFRA_AUTO_FOUNDER_PRO', 'auto-founder-pro'],
+    ['src/lib/sms-corpus-export.ts', 'SMS_CORPUS_EXPORT_BUILD_FLAG', 'EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT', 'sms-corpus-export'],
+  ];
+  for (const [file, name, env, flag] of cases) {
+    const source = fs.readFileSync(path.join(root, file), 'utf8');
+    const declaration = source.match(new RegExp(`export const ${name} =[\\s\\S]*?;`))?.[0];
+    assert.ok(declaration, `${file} exports ${name}`);
+    for (const [value, expected] of [['"1"', 'on'], ['"0"', 'off'], ['undefined', 'off']]) {
+      // Expo replaces process.env.EXPO_PUBLIC_* with its literal before Metro folds constants.
+      const inlined = declaration.replace(`process.env.${env}`, value);
+      assert.notEqual(inlined, declaration, `${name} reads process.env.${env}`);
+      const code = babel.transformSync(inlined, { babelrc: false, configFile: false, plugins: [constantFoldingPlugin] }).code;
+      const markers = code.match(/wafra-build-flag:[a-z-]+=(on|off)/g) || [];
+      assert.deepEqual(markers, [marker(flag, expected)], `${name} with ${value}`);
+    }
+  }
+  const founder = fs.readFileSync(path.join(root, 'src/lib/founder-pro.ts'), 'utf8');
+  assert.match(founder, /const FOUNDER_UNLOCK_ENABLED = FOUNDER_UNLOCK_BUILD_FLAG\.endsWith\('=on'\);/);
+  assert.match(founder, /const AUTOMATIC_FOUNDER_PRO_ENABLED = AUTO_FOUNDER_PRO_BUILD_FLAG\.endsWith\('=on'\);/);
+  assert.match(fs.readFileSync(path.join(root, 'src/lib/sms-corpus-export.ts'), 'utf8'),
+    /const JS_CORPUS_EXPORT_ENABLED = SMS_CORPUS_EXPORT_BUILD_FLAG\.endsWith\('=on'\);/);
+});
+
+test('the committed recipient is a public certificate only', () => {
+  const pem = fs.readFileSync(path.join(root, '.github/android-artifact-recipient.pem'), 'utf8');
+  assert.doesNotMatch(pem, /PRIVATE KEY/);
+  assert.match(pem, /^-----BEGIN CERTIFICATE-----\n[\s\S]+\n-----END CERTIFICATE-----\n$/);
+  const out = spawnSync('openssl', ['x509', '-noout', '-checkend', String(365 * 24 * 3600)], { input: pem, encoding: 'utf8' });
+  assert.equal(out.status, 0, 'valid for at least another year');
+});
+
+test('seal and open round-trip, and open refuses a tampered file or hash', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wafra-seal-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const key = path.join(dir, 'key.pem');
+  const cert = path.join(dir, 'cert.pem');
+  const made = spawnSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert,
+    '-days', '2', '-subj', '/CN=wafra-test'], { encoding: 'utf8' });
+  assert.equal(made.status, 0, made.stderr);
+  const plain = path.join(dir, 'wafra.apk.bundle');
+  fs.writeFileSync(plain, Buffer.concat([bundleWith(allOff), Buffer.alloc(300_000, 7)]));
+  const sealedDir = path.join(dir, 'sealed');
+  const verification = sealer.seal({ recipient: cert, out: sealedDir, meta: { sourceCommit: 'abc', versionCode: '400' },
+    inputs: [`wafra-apk=${plain}`] });
+  assert.equal(verification.versionCode, '400');
+  assert.deepEqual(verification.files[0].buildFlags, allOff);
+  assert.deepEqual(fs.readdirSync(sealedDir).sort(), ['verification.json', 'wafra-apk.enc']);
+  const sealedBytes = fs.readFileSync(path.join(sealedDir, 'wafra-apk.enc'));
+  assert.equal(sealedBytes.includes(Buffer.from(marker('founder-unlock', 'off'))), false, 'ciphertext hides the content');
+
+  const [opened] = sealer.open({ key, in: sealedDir, out: path.join(dir, 'open') });
+  assert.deepEqual(fs.readFileSync(opened.file), fs.readFileSync(plain));
+
+  const json = path.join(sealedDir, 'verification.json');
+  const record = JSON.parse(fs.readFileSync(json, 'utf8'));
+  fs.writeFileSync(json, JSON.stringify({ ...record, files: [{ ...record.files[0], sha256: '0'.repeat(64) }] }));
+  assert.throws(() => sealer.open({ key, in: sealedDir, out: path.join(dir, 'open2') }), /does not match verification\.json/);
+  assert.equal(fs.existsSync(path.join(dir, 'open2', 'wafra.apk.bundle')), false, 'a mismatching plaintext is removed');
+
+  fs.writeFileSync(json, JSON.stringify(record));
+  sealedBytes[sealedBytes.length - 1] ^= 1;
+  fs.writeFileSync(path.join(sealedDir, 'wafra-apk.enc'), sealedBytes);
+  assert.throws(() => sealer.open({ key, in: sealedDir, out: path.join(dir, 'open3') }), /sealed SHA-256 mismatch/);
+});
