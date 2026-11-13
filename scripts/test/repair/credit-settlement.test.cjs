@@ -275,3 +275,19 @@ test('Arabic: a temporal lead with a completed refund and nothing after it is no
     'إذا تم استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
   ]) assert.equal(both(body), 'none / none', body);
 });
+
+// Change Reviewer a41046bc / Reviewer 07a65c13, in Arabic: a temporal leader that directly governs the credit (only أن and the
+// aspect, or a merchant verb, between them) stays a condition whatever main clause follows; only another phrase between the
+// leader and the credit ("عند إلغاء الطلب تم استرداد …") makes it "when it happened".
+test('Arabic: a temporal leader that directly governs the credit stays a condition, whatever the main clause', () => {
+  for (const body of [
+    'عندما تم استرداد مبلغ 250.00 درهم إلى بطاقتك تصلك رسالة.',
+    'بمجرد أن تم إيداع مبلغ 250.00 درهم في حسابك يرجى مراجعة رصيدك.',
+    'بعد أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك يتم تحديث رصيدك.',
+    'عندما تم إيداع مبلغ 250.00 درهم في حسابك. ستصلك رسالة.',
+    'متى تم استرداد مبلغ 250.00 درهم إلى بطاقتك نرسل لك إشعاراً.',
+    'عندما قام التاجر NOON.COM باسترداد مبلغ 250.00 درهم إلى بطاقتك تصلك رسالة.',
+    'عند استرداد مبلغ 250.00 درهم إلى بطاقتك. ستصلك رسالة.',
+  ]) assert.equal(both(body), 'none / none', body);
+  assert.equal(both('عند إلغاء الطلب تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234.'), 'income 25000 / income 25000');
+});
