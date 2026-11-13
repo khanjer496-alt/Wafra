@@ -1,0 +1,77 @@
+name: Verify parser bundle regeneration
+
+# CI-only, read-only verification: regenerate the native parser resources from
+# the checked-out source with the unchanged shipping generator and compare them
+# byte for byte with the committed files. Ships nothing; changes no runtime code.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'verify/pr181-bundle-**'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies (no scripts)
+        run: npm ci --ignore-scripts
+
+      - name: Record the committed outputs
+        run: |
+          set -euo pipefail
+          mkdir -p verify-out/committed
+          git rev-parse HEAD > verify-out/head.txt
+          node -p "'typescript installed ' + require('typescript').version + ', lockfile ' + require('./package-lock.json').packages['node_modules/typescript'].version" | tee verify-out/typescript.txt
+          for f in modules/wafra-live-capture/ios/Resources/WafraBackgroundParser.js \
+                   modules/wafra-live-capture/ios/Resources/WafraBackgroundParser.meta.json \
+                   src/lib/ios-background-parser-source.generated.ts; do
+            sha256sum "$f" >> verify-out/committed.sha256
+            mkdir -p "verify-out/committed/$(dirname "$f")"
+            cp "$f" "verify-out/committed/$f"
+          done
+          cat verify-out/committed.sha256
+
+      - name: Regenerate once with the shipping generator, then check freshness
+        run: |
+          set -euo pipefail
+          node scripts/generate-ios-background-parser.cjs | tee verify-out/generate.log
+          node scripts/generate-ios-background-parser.cjs --check | tee verify-out/check.log
+
+      - name: Compare byte for byte
+        run: |
+          set -euo pipefail
+          for f in modules/wafra-live-capture/ios/Resources/WafraBackgroundParser.js \
+                   modules/wafra-live-capture/ios/Resources/WafraBackgroundParser.meta.json \
+                   src/lib/ios-background-parser-source.generated.ts; do
+            sha256sum "$f" >> verify-out/regenerated.sha256
+          done
+          cat verify-out/regenerated.sha256
+          diff verify-out/committed.sha256 verify-out/regenerated.sha256 && echo "IDENTICAL: regenerated outputs equal the committed outputs" | tee verify-out/result.txt
+          git diff --exit-code -- modules/wafra-live-capture/ios/Resources src/lib/ios-background-parser-source.generated.ts
+          python3 - <<'PY'
+          import json
+          meta = json.load(open('modules/wafra-live-capture/ios/Resources/WafraBackgroundParser.meta.json'))
+          print({k: meta[k] for k in ('parserVersion', 'sourceHash', 'bundleSha256', 'moduleCount')})
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verify-parser-bundle-${{ github.sha }}
+          retention-days: 14
+          if-no-files-found: error
+          path: verify-out
