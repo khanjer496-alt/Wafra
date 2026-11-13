@@ -320,12 +320,25 @@ const CONTROLS = [
     'AED 250.00 may be refunded to your card and will reflect within 5 working days.',
     'AED 250.00 credited to your account ending 1234 when confirmed by you.',
     'نود إعلامك، إن تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234 فيرجى تجاهل هذه الرسالة.',
-    'نود إعلامك، أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك فيرجى تجاهل هذه الرسالة.',
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك فيرجى تجاهل هذه الرسالة.',
   ].map((body) => [body, 'NO_POST', 'C27 a later clause about the money, a modal credit or an answered condition is not settled']),
   ...[
     'AED 250.00 has been refunded to your card ending 1234; your new card will be activated once approved.',
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك.',
   ].map((body) => [body, 'INCOME_REFUND', 'C27 a non-money subject\'s condition, or ان (that) after a verb of informing']),
+  // #242 review round 3 (Change Reviewer d08237a1, Reviewer b7717543): "أن" after a verb of informing is "that" whatever
+  // follows; a bare-alef "ان" with an answer in its sentence, or a ف-led next sentence, is a condition.
+  ...[
+    'نود إعلامك، أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك. سيظهر المبلغ في كشف حسابك القادم.',
+    'نود إعلامك، أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك. يمكنك مراجعة كشف حسابك في التطبيق.',
+    'نود إعلامك، أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234. للاستفسار يرجى الاتصال على 600540000.',
+    'نحيطكم علماً، أن تم إيداع مبلغ 250.00 درهم في حسابك. يرجى الاحتفاظ بهذه الرسالة.',
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. سيتم إرسال كشف الحساب الشهري قريباً.',
+  ].map((body) => [body, 'INCOME_REFUND', 'C28 أن (that) after a verb of informing, with a courtesy line after it']),
+  ...[
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234 فنرجو تجاهل هذه الرسالة.',
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. فيرجى تجاهل هذه الرسالة.',
+  ].map((body) => [body, 'NO_POST', 'C28 a bare-alef ان answered in its sentence or a ف-led next one is a condition']),
 ];
 
 // ── Case selection ───────────────────────────────────────────────────────────────────────────────────────────────────
