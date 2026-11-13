@@ -1842,6 +1842,12 @@ const S = {
     en: 'The store has not completed this purchase yet. Wafra Pro switches on by itself once it does.',
     ar: 'لم يُكمل المتجر عملية الشراء بعد. سيُفعَّل وفرة برو تلقائياً بمجرد اكتمالها.',
   },
+  // A cancelled answer from the store, or one the SDK gave without a reason. Calm and neutral: it says what
+  // happened and what to do next, and promises nothing about charges (see the purchaseFailedBody contract).
+  purchaseNotCompleted: {
+    en: 'Purchase not completed. You can try again, or restore a previous purchase.',
+    ar: 'لم تكتمل عملية الشراء. يمكنك المحاولة مجدداً أو استعادة عملية شراء سابقة.',
+  },
   purchaseFailed: { en: 'Purchase not confirmed', ar: 'لم يتم تأكيد الشراء' },
   purchaseFailedBody: {
     en: 'The store could not confirm Pro yet. Check your connection, then restore purchases before trying to buy again.',

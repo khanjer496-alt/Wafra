@@ -621,7 +621,17 @@ export function SuperwallBillingProvider({ children }: { children: React.ReactNo
     eventTrackingBehavior: 'none' as const,
     isExternalDataCollectionEnabled: false,
     enableExperimentalDeviceVariables: false,
-    shouldObservePurchases: true,
+    // iOS must NOT observe: SuperwallKit refuses Superwall.shared.purchase()
+    // while this is true, logs "You cannot make purchases using
+    // Superwall.shared.purchase(_:) while the SuperwallOption
+    // shouldObservePurchases is set to true" and returns `cancelled` without
+    // ever calling StoreKit, so Wafra's own Pro button could never buy.
+    // Wafra buys and restores through the SDK (purchasePro, restorePro) and
+    // nothing here observes purchases made outside it. Android is left as it
+    // was: its purchase(productId) has no such refusal (superwall-android
+    // 2.7.24, Superwall.kt), and its observe-mode behaviour is not changed in
+    // this fix.
+    shouldObservePurchases: Platform.OS === 'android',
     paywalls: {
       // Off: preloading builds every campaign paywall's web view on the main
       // thread right after launch. Wafra's own /pro screen is the purchase UI

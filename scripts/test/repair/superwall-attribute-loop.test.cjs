@@ -288,6 +288,19 @@ test('the SDK is configured without preloading paywall web views, on every platf
   }
 });
 
+test('iOS is not configured to observe purchases: SuperwallKit refuses purchase() while observing', async () => {
+  // SuperwallKit 4.16.1 Superwall.purchase(_:) logs "You cannot make purchases using Superwall.shared.purchase(_:)
+  // while the SuperwallOption shouldObservePurchases is set to true" and returns `cancelled` without calling
+  // StoreKit; Wafra's Pro button then did nothing. Observed on a hosted simulator, run 43468388532.
+  for (const state of [{}, { onboarded: false }]) {
+    const h = harness({ configured: false, platform: 'ios', state });
+    await h.renderProvider(4);
+    assert.equal(h.calls.configure, 1);
+    assert.strictEqual(h.calls.configureOptions[0]?.shouldObservePurchases, false,
+      'iOS must not set shouldObservePurchases: the SDK would refuse every purchase');
+  }
+});
+
 test('iOS purchase and restore go straight to the store and need no preloaded paywall', async () => {
   let restores = 0;
   const h = harness({ platform: 'ios',
@@ -718,7 +731,10 @@ for (const platform of ['ios', 'android']) test(`${platform}: SDK initializes wi
   assert.equal(config.eventTrackingBehavior, 'none');
   assert.equal(config.isExternalDataCollectionEnabled, false);
   assert.equal(config.enableExperimentalDeviceVariables, false);
-  assert.equal(config.shouldObservePurchases, true, 'entitlement observation is preserved');
+  // iOS must not observe (SuperwallKit refuses purchase() while observing); the SDK still listens to StoreKit
+  // transaction updates and loads purchased products without it. Android keeps its previous setting.
+  assert.equal(config.shouldObservePurchases, platform === 'android',
+    platform === 'ios' ? 'iOS must not observe purchases' : 'Android observe mode is unchanged');
 });
 
 test('paywall and onboarding requests carry exactly one param, language, from the saved app language', async () => {
