@@ -328,3 +328,35 @@ test('Arabic: only an event noun, then تم + the credit, reads as "when it happ
     'عندما يوافق البنك تم إيداع مبلغ 250.00 درهم في حسابك.',
   ]) assert.equal(both(body), 'none / none', body);
 });
+
+// Change Reviewer 1ae30382 (pre-existing on main 429d32f0): ALL-CAPS leaders and a trailing condition or time window. In a
+// sentence with no lowercase letters, IF/ONCE/WHEN/AFTER/… lead a condition at the sentence start or after a comma (not a
+// merchant name such as "AFTER EIGHT CAFE" mid-sentence), and caps modals count ("YOU WILL"; "MAY" only before a verb). A
+// trailing "if approved / upon verification" leaves the credit conditional, and "within N working days" after a refund verb
+// leaves it pending, in English and Arabic.
+test('ALL-CAPS leaders and a trailing condition or time window never post', () => {
+  for (const body of [
+    'IF AED 250.00 HAS BEEN REFUNDED TO YOUR CARD YOU WILL GET AN SMS.',
+    'WHEN AED 250.00 HAS BEEN REFUNDED TO YOUR CARD, YOU WILL RECEIVE AN SMS.',
+    'DEAR CUSTOMER, ONCE AED 250.00 HAS BEEN CREDITED TO YOUR ACCOUNT YOU WILL BE NOTIFIED.',
+    'AFTER CANCELLATION AED 250.00 HAS BEEN REFUNDED TO YOUR CARD YOU WILL RECEIVE AN SMS.',
+    'WHEN THE MERCHANT HAS REFUNDED AED 250.00 TO YOUR CARD PLEASE CHECK YOUR BALANCE.',
+    'IF AED 250.00 HAS BEEN REFUNDED TO YOUR CARD YOU MAY CHECK YOUR BALANCE.',
+    'AED 250.00 has been credited to your card if approved.',
+    'AED 250.00 has been refunded to your card upon verification.',
+    'AED 250.00 refunded to your card within 7 working days.',
+    'After cancellation AED 250.00 refunded to your card within 7 working days.',
+    'AED 250.00 HAS BEEN REFUNDED TO YOUR CARD WITHIN 5-7 WORKING DAYS.',
+    'تم إيداع مبلغ 250.00 درهم في حسابك في حال الموافقة.',
+    'تم استرداد مبلغ 250.00 درهم إلى بطاقتك خلال 7 أيام عمل.',
+  ]) assert.equal(both(body), 'none / none', body);
+  for (const body of [
+    'AED 250.00 HAS BEEN REFUNDED TO YOUR CARD ENDING 1234.',
+    'REFUND FROM AFTER EIGHT CAFE OF AED 250.00 CREDITED TO YOUR CARD ENDING 1234.',
+    'AFTER CANCELLATION AED 250.00 HAS BEEN REFUNDED TO YOUR CARD ENDING 1234 ON 12 MAY 2026.',
+    'Refund of AED 250.00 has been credited to your card and will appear on your next statement.',
+  ]) assert.equal(both(body), 'income 25000 / income 25000', body);
+  // A time window on a non-refund credit is not a pending refund: the salary keeps its income.
+  assert.equal(both('Your salary of AED 5,000.00 has been credited to your account, available within 2 hours.'),
+    'income 500000 / income 500000');
+});
