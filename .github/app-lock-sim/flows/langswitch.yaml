@@ -1,0 +1,35 @@
+appId: ${APP_ID}
+---
+- runFlow:
+    when:
+      visible: 'Open in .Wafra.\?'
+    commands:
+      - tapOn:
+          point: '33%,54%'
+- extendedWaitUntil:
+    visible: 'Sign in to Apple.Account'
+    timeout: 6000
+    optional: true
+- runFlow:
+    when:
+      visible: 'Sign in to Apple.Account'
+    commands:
+      - tapOn: 'Cancel'
+- runFlow:
+    when:
+      notVisible:
+        id: 'settings-screen'
+    commands:
+      - tapOn:
+          text: 'Settings'
+- scrollUntilVisible:
+    element:
+      text: 'Language.*'
+    direction: DOWN
+    timeout: 30000
+- tapOn:
+    text: 'Language.*'
+- tapOn:
+    text: 'العربية.*'
+- waitForAnimationToEnd:
+    timeout: 5000

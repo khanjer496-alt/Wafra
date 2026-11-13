@@ -1,0 +1,22 @@
+appId: ${APP_ID}
+---
+- runFlow:
+    when:
+      visible: 'Open in .Wafra.\?'
+    commands:
+      - tapOn:
+          point: '33%,54%'
+- extendedWaitUntil:
+    visible: 'Sign in to Apple.Account'
+    timeout: 6000
+    optional: true
+- runFlow:
+    when:
+      visible: 'Sign in to Apple.Account'
+    commands:
+      - tapOn: 'Cancel'
+- extendedWaitUntil:
+    visible: 'Settings'
+    timeout: 8000
+- assertVisible: '${MARKER}'
+- assertNotVisible: 'Wafra is locked'
