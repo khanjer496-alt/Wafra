@@ -371,6 +371,7 @@ const CONTROLS = [
   ...[
     'Reversal of AED 250.00 processed to your card ending 1234; the other reversal is pending.',
     'تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234، وطلبك الآخر قيد المعالجة',
+    'Reversal of AED 250.00 credited to your card ending 1234, your other reversal is under process.',
   ].map((body) => [body, 'INCOME_REFUND', 'RC396 a completed credit beside another pending one']),
 ];
 
