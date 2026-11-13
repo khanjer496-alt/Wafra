@@ -685,7 +685,7 @@ export function SuperwallBillingProvider({ children }: { children: React.ReactNo
     // to update locale. Wafra's own purchase UI follows the saved language.
     localeIdentifier: billingLocaleIdentifier(state.language, deviceRegion),
     eventTrackingBehavior: state.privateMode ? 'none' as const : 'all' as const,
-    shouldObservePurchases: true,
+    shouldObservePurchases: false, // PROOF RUN (test branch only): Superwall.shared.purchase() is refused while this is true
     // DIAGNOSTIC (test branch only, never merged): SDK debug log so the reason for a silent 'cancelled' is visible.
     logging: { level: 'debug' as const, scopes: ['all' as const] },
     paywalls: {
