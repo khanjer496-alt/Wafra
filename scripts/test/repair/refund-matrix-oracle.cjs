@@ -354,6 +354,9 @@ const CONTROLS = [
     'Reversal of AED 250.00 credited to your account ending 1234.',
     'Reversal of AED 250.00 has been credited to your account. Other reversal requests are under process.',
   ].map((body) => [body, 'INCOME_REFUND', 'RC396 a completed reversal credit']),
+  ...[
+    'AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. Your reversal request is under process.',
+  ].map((body) => [body, 'EXPENSE', 'RC396 a reversal still under process, as a side note, leaves the debit']),
 ];
 
 // ── Case selection ───────────────────────────────────────────────────────────────────────────────────────────────────
