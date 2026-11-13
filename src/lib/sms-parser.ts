@@ -2570,31 +2570,35 @@ function enCreditClauses(sentence: string, debitBeside = false): CreditClause[] 
   }
   return clauses;
 }
-// Once/When/Whenever/After/As soon as stay a condition whenever they directly govern the credit: its subject follows the
-// leader straight away ("When AED 250.00 has been refunded …", "Once the refund …", "After NOON.COM has refunded …"), any
-// modal follows the credit ("… you'll / will / can …"), or the credit is not completed. Only when another phrase sits between
-// the leader and the credit's subject ("After cancellation AED 250.00 has been refunded …", "Once your order was cancelled
-// AED …") and none of that holds do they say when a completed refund happened. "once again/more" is not a leader.
-// If/Unless/Until/Whether keep their reading. The default is the safe one: a list of main-clause shapes cannot be complete
-// (Reviewer 956cb08a and 07a65c13, Change Reviewer a41046bc).
+// Once/When/Whenever/After/As soon as govern the credit (a condition), except in one narrow, positive shape that says WHEN a
+// completed refund happened: the leader, then an event noun ("After cancellation", "After your return") or that event in the
+// past ("Once your order was cancelled"), then the refund's amount as the passive subject right before the completed credit
+// verb ("AED 250.00 has been refunded", telegraphic "AED 250.00 refunded"), and no lowercase modal after the credit. "once
+// again/more" is not a leader. Every other temporal lead governs: an amount right after the leader, an agent ("When the
+// merchant / we / noon has refunded AED …"), any other verb ("When the merchant confirms AED …"). A list of governing shapes
+// cannot be complete, so the exception is the list (Reviewer 956cb08a, 07a65c13, c204ca32; Change Reviewer a41046bc,
+// 742367fa). Modals match in lowercase only: "on 12 May 2026" and "MAY STORES" are not "may". If/Unless/Until/Whether are
+// unchanged.
 const EN_TEMPORAL_LEADER_RE = /^(?:once|when(?:ever)?|after|as\s+soon\s+as)$/i;
-const EN_CREDIT_SUBJECT_AFTER_LEADER_RE = new RegExp(String.raw`^\s+(?:(?:(?:the|your|a|an|this|that)\s+)?` +
-  String.raw`(?:refund\w*|amount|credit|money|funds?|payment|sum)\b|it\b|(?:[A-Z]{3}|Dhs?)\.?\s*\d|\d[\d,.]*\s*(?:[A-Z]{3}|Dhs?)\b|` +
-  String.raw`[A-Z0-9][\w.&'’-]*(?:\s+[A-Z0-9][\w.&'’-]*){0,3}\s+(?:has|have|had|is|was|were|will|did|does|refunded|reversed|returned|credited|deposited|processed)\b)`);
-const EN_MODAL_AFTER_CREDIT_RE = /\b(?:will|can|may|shall|should|would|could|must)\b|['’]ll\b/i;
-const EN_COMPLETED_STRETCH_RE = /\b(?:was|were|had|has\s+been|have\s+been)\b/i;
+const EN_EVENT_NOUN_PHRASE_RE = /^\s+(?:(?:your|the|this|our)\s+)?(?:(?:order|purchase|item|transaction|booking)\s+)?(?:cancell?ation|return|refund\s+request|verification|review|investigation|dispute(?:\s+resolution)?|chargeback|reversal)\s*,?\s*$/i;
+const EN_PAST_EVENT_CLAUSE_RE = /^\s+(?:your|the|this)\s+(?:order|purchase|item|transaction|booking|dispute|request|claim|return)\s+(?:was|were|has\s+been|had\s+been)\s+(?:cancell?ed|returned|resolved|approved|reviewed|reversed|completed|received|processed)\s*,?\s*$/i;
+const EN_PASSIVE_AMOUNT_RE = /(?:\b[A-Z]{3}|\bDhs?\.?)\s*\d[\d,]*(?:\.\d+)?|\d[\d,]*(?:\.\d+)?\s*(?:[A-Z]{3}|Dhs?)\b/;
+const EN_COMPLETED_AUXILIARY_RE = /^\s*(?:(?:has|have|had)\s+(?:now\s+)?been|was|were)\s+(?:successfully\s+)?$/i;
+const EN_LOWERCASE_MODAL_RE = /\b(?:will|can|may|shall|should|would|could|must)\b|['’]ll\b/;
 function leaderGovernsCredit(sentence: string, leader: RegExpMatchArray, clause: CreditClause): boolean {
   const word = leader[0].replace(/^[^\p{L}]+/u, '');
   const leaderEnd = leader.index! + leader[0].length;
   if (!EN_TEMPORAL_LEADER_RE.test(word)) return true;
-  const rest = sentence.slice(leaderEnd);
-  if (/^once$/i.test(word) && /^\s+(?:again|more)\b/i.test(rest)) return false;
-  if (EN_CREDIT_SUBJECT_AFTER_LEADER_RE.test(rest) || EN_MODAL_AFTER_CREDIT_RE.test(sentence.slice(clause.end))) return true;
-  const lead = sentence.slice(0, clause.start);
-  // Completed: an auxiliary in the stretch, or a telegraphic -ed participle with no pending or progressive auxiliary.
-  const completed = EN_COMPLETED_STRETCH_RE.test(sentence.slice(leaderEnd, clause.end)) ||
-    (/ed$/i.test(clause.verbs[0]) && !EN_CREDIT_WORDS.pendingBefore.test(lead) && !EN_CREDIT_WORDS.progressiveBefore.test(lead));
-  return !completed;
+  if (/^once$/i.test(word) && /^\s+(?:again|more)\b/i.test(sentence.slice(leaderEnd))) return false;
+  if (EN_LOWERCASE_MODAL_RE.test(sentence.slice(clause.end))) return true;
+  const stretch = sentence.slice(leaderEnd, clause.start);
+  const amount = EN_PASSIVE_AMOUNT_RE.exec(stretch);
+  if (!amount) return true;
+  const event = stretch.slice(0, amount.index);
+  if (!EN_EVENT_NOUN_PHRASE_RE.test(event) && !EN_PAST_EVENT_CLAUSE_RE.test(event)) return true;
+  const auxiliary = stretch.slice(amount.index + amount[0].length);
+  const telegraphic = auxiliary.trim() === '' && /ed$/i.test(clause.verbs[0]);
+  return !(telegraphic || EN_COMPLETED_AUXILIARY_RE.test(auxiliary));
 }
 /** The verdict for one sentence's credit clause; `after` is the text that follows the sentence. */
 export function creditSettlement(sentence: string, clause: CreditClause, after = ''): CreditSettlement {
