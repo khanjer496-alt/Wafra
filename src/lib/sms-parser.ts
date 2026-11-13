@@ -2530,8 +2530,11 @@ const EN_CREDIT_IN_RE = /^(?:credited|refunded|deposited|returned)$/i;
 // phrase is skipped by the take-back check; "… and reversed", "This credit was reversed" and "in error" still count.
 const EN_CREDIT_REASON_RE =
   /\bfor\s+(?:(?:the|your|a|an)\s+)?(?:reversed|cancell?ed)\s+(?:purchases?|transactions?|payments?|charges?|orders?|debits?)\b/gi;
-/** The credit clauses of one sentence: each starts at a credit verb, with any "… and credited" coordinated after it. */
-function enCreditClauses(sentence: string): CreditClause[] {
+/**
+ * The credit clauses of one sentence: each starts at a credit verb, with any "… and credited" coordinated after it.
+ * `debitBeside`: the body also has a sentence that debits an amount.
+ */
+function enCreditClauses(sentence: string, debitBeside = false): CreditClause[] {
   if (EN_CREDIT_WORDS.notARefundCredit.test(sentence)) return [];
   const words = EN_CREDIT_WORDS.verb;
   words.lastIndex = 0;
@@ -2547,8 +2550,11 @@ function enCreditClauses(sentence: string): CreditClause[] {
       !(clause && EN_CREDIT_WORDS.coordinated.test(lead))) continue;
     if (EN_CREDIT_WORDS.determinerBefore.test(lead) || EN_CREDIT_WORDS.nounAfter.test(sentence.slice(at + word.length))) continue;
     // "Your payment … has been processed", "A credit transaction … has been processed on your account": not a refund credit.
+    // Without refund wording, a "processed to your card/account" destination counts only beside a separate debit (D7, "It
+    // has been processed to your card."); alone it is ordinary income, a salary or a deposit (Change Reviewer 2aa1f668).
     if (/^process/i.test(word) && !(clause && EN_CREDIT_WORDS.coordinated.test(lead)) &&
-      !EN_PROCESSED_REFUND_CONTEXT_RE.test(sentence) && !EN_PROCESSED_DESTINATION_RE.test(sentence.slice(at + word.length))) continue;
+      !EN_PROCESSED_REFUND_CONTEXT_RE.test(sentence) &&
+      !(debitBeside && EN_PROCESSED_DESTINATION_RE.test(sentence.slice(at + word.length)))) continue;
     if (clause) {
       if (EN_CREDIT_WORDS.coordinated.test(lead) && at - clause.end <= 6) {
         clause.verbs.push(word.toLowerCase());
@@ -2604,16 +2610,14 @@ function sentenceSettlement(s: SettlementSentence, after: string): CreditSettlem
     verdicts[0];
 }
 function settlementSentences(body: string): SettlementSentence[] {
-  const out: SettlementSentence[] = [];
+  const spans: { start: number; text: string }[] = [];
   let start = 0;
   for (const end of [...[...body.matchAll(REFUND_SENTENCE_BREAK_RE)].map((match) => match.index! + match[0].length), body.length]) {
-    if (end > start) {
-      const text = body.slice(start, end);
-      out.push({ start, text, clauses: enCreditClauses(text) });
-    }
+    if (end > start) spans.push({ start, text: body.slice(start, end) });
     start = Math.max(start, end);
   }
-  return out;
+  const debitBeside = spans.some(({ text }) => CREDIT_SETTLEMENT_DEBIT_RE.test(text) && refundAmounts(text).length > 0);
+  return spans.map((span) => ({ ...span, clauses: enCreditClauses(span.text, debitBeside) }));
 }
 /**
  * The veto, in the oracle's first-match order (oracle.md v2 and its v2.1 note).
