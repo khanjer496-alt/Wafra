@@ -40,13 +40,14 @@ const { buildOracleRows } = require('./refund-matrix-oracle.cjs');
 // Frozen ratchet. Each number is today's count of gap-file entries in that class on that path; it may only go down.
 // Predicate PR 1 lowered every class but droppedDebit, which rose 207 -> 208 only by its own new control row CTL-05422
 // ("processed … will reflect" beside a debit, oracle v2.2; refund-gaps-no-growth.cjs lists it as a new row).
+// Predicate PR 2 (the Arabic table) brought false income to 0 on every path, in both languages: the store gate's number.
 const CEILING = {
-  falseIncome: { parseSms: 160, session: 180, native: 0 },
+  falseIncome: { parseSms: 0, session: 0, native: 0 },
   wrongDirection: { parseSms: 42, session: 40, native: 0 },
   wrongAmount: { parseSms: 0, session: 0, native: 0 },
   lostIncome: { parseSms: 36, session: 36, native: 0 },
   droppedDebit: { parseSms: 208, session: 208, native: 0 },
-  postedNotReview: { parseSms: 359, session: 372, native: 10 },
+  postedNotReview: { parseSms: 21, session: 21, native: 10 },
 };
 const NATIVE_IGNORED_INCOME_CEILING = 157;
 // Control rows added after #217 that native ignores today (oracle v2.1 C11, C12; v2.2 C16). They are pinned by id and kept
