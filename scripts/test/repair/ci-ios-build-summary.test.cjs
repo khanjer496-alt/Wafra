@@ -91,6 +91,26 @@ test('masks slash-split unknown blobs and other legal-name forms', () => {
   assert.match(out, /team "\[team\]"/);
 });
 
+test('seeded random unknown tokens and slash blobs always redact (no known value, no DROP word)', () => {
+  let seed = 0x5eed1234;
+  const rand = () => { seed = (seed * 1103515245 + 12345) >>> 0; return seed / 2 ** 32; };
+  const pick = chars => chars[Math.floor(rand() * chars.length)];
+  const alnum = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const b64 = alnum + '/';
+  const make = (len, chars, ok) => { for (;;) { let t = ''; for (let i = 0; i < len; i++) t += pick(chars); if (ok(t)) return t; } };
+  const mixed = t => /[0-9]/.test(t) && /[A-Za-z]/.test(t);
+  const blobOk = t => mixed(t) && /[a-z]/.test(t) && /[A-Z]/.test(t) && t.includes('/') && !t.startsWith('/') && !t.endsWith('/') && !t.includes('//');
+  const leaks = [];
+  for (let i = 0; i < 500; i++) {
+    const token = make(20 + (i % 8), alnum, mixed);
+    if (summarize([{ name: 't.log', text: `error: unknown ${token} rejected` }], 1).includes(token)) leaks.push(token);
+    const blob = make(40, b64, blobOk);
+    const out = summarize([{ name: 'b.log', text: `error: unknown ${blob} rejected` }], 1);
+    if (blob.split('/').some(part => part.length >= 8 && out.includes(part))) leaks.push(blob);
+  }
+  assert.deepEqual(leaks, []);
+});
+
 test('keeps file paths and long target names readable', () => {
   const log = [
     "/Users/runner/work/Wafra/Wafra/modules/wafra-widgets/ios/WafraPrivacyCover.swift:83:14: error: cannot find type 'ExpoAppDelegateSubscriber' in scope",

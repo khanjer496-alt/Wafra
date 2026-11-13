@@ -31,6 +31,14 @@ const NAMED_VALUE = /\b([\w.-]*(?:token|api[_-]?key|access[_-]?key|auth)[\w.-]*\
 const SIGNING_IDENTITY = /\b(Apple (?:Distribution|Development)|iPhone (?:Distribution|Developer)|iOS (?:Distribution|Development)|Developer ID (?:Application|Installer)):\s*[^(\n]+\(/g;
 // A team named in quotes ("…team \"Jane Q Developer (Individual)\"") is the same legal name.
 const QUOTED_TEAM = /\b(team\s+)(["'])[^"'\n]+\2/gi;
+// Code-name shape (CamelCase words, an optional leading acronym such as "RCT",
+// at most 2 digits): ExpoModulesCore2Info, RCTBridgeModule, React2Core. Random
+// tokens almost never fit it, so only these are spared by the shape rules below.
+function identifierShaped(part) {
+  if (!part) return true;
+  if ((part.match(/[0-9]/g) || []).length > 2) return false;
+  return /^(?:[A-Z]{2,4}(?=[A-Z][a-z]))?(?:[A-Z]?[a-z]{2,}|[0-9])+$/.test(part);
+}
 
 function clean(line) {
   return line.replace(/(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]/g, '').replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '');
@@ -54,22 +62,18 @@ function redactor(secrets) {
       .replace(QUOTED_TEAM, '$1$2[team]$2')
       // Unknown base64 blobs that "/" would otherwise split into short pieces:
       // 24+ chars, not starting with "/" (absolute paths do), mixing digits with
-      // upper and lower case, and dense in capitals (random base64 is about half
-      // upper case; CamelCase path segments such as Pods/Headers/React2Core are not).
+      // upper and lower case, unless every "/" segment is code-name shaped
+      // (Pods/Headers/Public/React2Core).
       .replace(/(^|[^A-Za-z0-9+/=])([A-Za-z0-9+=][A-Za-z0-9+/=]{23,})/g, (m, pre, run) => {
         if (!run.includes('/') || !/[0-9]/.test(run) || !/[a-z]/.test(run) || !/[A-Z]/.test(run)) return m;
-        const letters = run.replace(/[^A-Za-z]/g, '');
-        const upper = letters.replace(/[^A-Z]/g, '').length;
-        return upper / letters.length >= 0.4 || /[+=]/.test(run) ? `${pre}[redacted-blob]` : m;
+        return run.split('/').every(identifierShaped) ? m : `${pre}[redacted-blob]`;
       })
       // Unknown token-shaped runs: 20+ characters mixing letters and digits.
       // "/" and "." split runs so file paths and target names stay readable;
       // known secrets (including base64 key lines) are already caught above.
-      // (20-27 chars need 2+ digits so names like ExpoModulesCore2Info stay readable).
-      .replace(/[A-Za-z0-9+_=-]{20,}/g, run => {
-        const digits = run.replace(/[^0-9]/g, '').length;
-        return /[A-Za-z]/.test(run) && (run.length >= 28 ? digits >= 1 : digits >= 2) ? '[redacted-token]' : run;
-      })
+      // Code names (every "-"/"_" part identifier-shaped) are spared.
+      .replace(/[A-Za-z0-9+_=-]{20,}/g, run =>
+        /[0-9]/.test(run) && /[A-Za-z]/.test(run) && !run.split(/[-_]/).every(identifierShaped) ? '[redacted-token]' : run)
       .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[email]');
   };
 }
