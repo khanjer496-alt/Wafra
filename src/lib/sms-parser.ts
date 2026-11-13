@@ -2749,8 +2749,9 @@ const AR_NEXT_CONDITION_ANSWER_RE = new RegExp(`${AR_NB}ف(?:يرجي|لا(?!\\s
  * ف-answer it carries (Change Reviewer 8924cf97, Reviewer 2ae6e753); only other subjects ("في حال وجود المبلغ …") are checked.
  */
 const AR_NEXT_COURTESY_INQUIRY_RE = new RegExp(
-  `^\\s*في\\s+حال(?:ه)?\\s+(?:(?:وجود|كان\\s+لديك|لديك)\\s+(?:اي\\s+)?(?:استفسار|سوال|سؤال|ملاحظ)|لم\\s+(?:تتعرف|تقم))${AR_NA}|` +
-  `^\\s*في\\s+حال(?:ه)?\\s+(?:وجود|كان\\s+لديك|لديك)\\s+(?:اي\\s+)?ملاحظ[${AR_LETTER}]*`);
+  `^\\s*في\\s+حال(?:ه)?\\s+(?:(?:وجود|كان\\s+لديك|لديك)\\s+(?:اي(?:ه)?\\s+)?(?:استفسار|سوال|سؤال|ملاحظ)[${AR_LETTER}]*|` +
+  // "لم تقم/تتعرف" only about this transaction, not "لم تقم بأي إجراء فسيتم إضافة المبلغ" (Change Reviewer 1ff64666, Reviewer 46d750e7).
+  `لم\\s+(?:تتعرف\\s+علي|تقم\\s+ب)\\s*(?:هذه|هذا)?\\s*(?:ال)?(?:عمليه|معامله|حركه|دفعه|طلب)${AR_NA})`);
 function arNextSentenceAnswers(rawNext: string): boolean {
   const next = rawNext.replace(/[\u064B-\u0652]/g, '');
   // (Change Reviewer e5dbdea7.)
