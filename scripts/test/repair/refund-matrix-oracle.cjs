@@ -226,6 +226,13 @@ const CONTROLS = [
     'عند استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
   ].map((body) => [body, 'NO_POST', 'C22 Arabic: a leader directly governing the credit is a condition, whatever follows']),
   ['عند إلغاء الطلب تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234.', 'INCOME_REFUND', 'C22 Arabic: "عند <noun>" leads a completed refund'],
+  ...[
+    'عندما يؤكد التاجر تم استرداد مبلغ 250.00 درهم إلى بطاقتك.',
+    'متى استلمنا طلبك تم إيداع مبلغ 250.00 درهم في حسابك.',
+    'عندما يوافق البنك تم إيداع مبلغ 250.00 درهم في حسابك.',
+  ].map((body) => [body, 'NO_POST', 'C22 Arabic: another verb after the leader governs the credit']),
+  ['عند إرجاع المنتج تم استرداد مبلغ 250.00 درهم إلى بطاقتك.', 'INCOME_REFUND', 'C22 Arabic: "إرجاع المنتج" is a product return, then a completed refund'],
+  ['عند مراجعة طلبك تم إيداع مبلغ 250.00 درهم في حسابك المنتهي بـ 1234.', 'INCOME_REFUND', 'C22 Arabic: "عند مراجعة طلبك" leads a completed credit'],
 ];
 
 // ── Case selection ───────────────────────────────────────────────────────────────────────────────────────────────────
