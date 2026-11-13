@@ -2739,12 +2739,22 @@ const AR_NEXT_COURTESY_NOUN_RE = new RegExp(`^\\s*(?:فريق|فريقنا|فر�
  * Answer words beyond AR_ANSWER_RE that a noun-led sentence can carry ("فريق خدمة العملاء يرجو منك تجاهل …", "… ينصحك
  * بتجاهل …", "فريقنا لا يطلب منك أي إجراء") (Reviewer ba7371a8).
  */
-const AR_NEXT_NOUN_ANSWER_RE = new RegExp(`${AR_NB}[بلو]?(?:[يتن]رجو|تجاهل|اعتبر)${AR_NA}|${AR_NB}(?:لا|لن)\\s+(?:يطلب|يتطلب|يلزم)${AR_NA}`);
+const AR_NEXT_NOUN_ANSWER_RE = new RegExp(`${AR_NB}[بلو]?(?:[يتن]رجو|تجاهل|اعتبر)${AR_NA}|` +
+  // …but not the security line "… لا يطلب منك أبداً رمز التحقق" (Reviewer 2ae6e753).
+  `${AR_NB}(?:لا|لن)\\s+(?:يطلب|يتطلب|يلزم)${AR_NA}(?!\\s+منك\\s+(?:ابدا\\s+)?(?:رمز|كلمه|بيانات|معلومات))`);
 /** A ف-led answer inside a courtesy-condition sentence ("في حال وجود المبلغ في حسابك فيرجى تجاهل …"), not "فلا تتردد". */
 const AR_NEXT_CONDITION_ANSWER_RE = new RegExp(`${AR_NB}ف(?:يرجي|لا(?!\\s+تتردد)|سوف|س[يتن]|يمكنك|تجاهل|اعتبر|نرجو)`);
+/**
+ * An inquiry or fraud-check condition ("في حال وجود أي استفسار …", "في حال لم تقم بهذه العملية …") is a courtesy footer whatever
+ * ف-answer it carries (Change Reviewer 8924cf97, Reviewer 2ae6e753); only other subjects ("في حال وجود المبلغ …") are checked.
+ */
+const AR_NEXT_COURTESY_INQUIRY_RE = new RegExp(
+  `^\\s*في\\s+حال(?:ه)?\\s+(?:(?:وجود|كان\\s+لديك|لديك)\\s+(?:اي\\s+)?(?:استفسار|سوال|سؤال|ملاحظ)|لم\\s+(?:تتعرف|تقم))${AR_NA}|` +
+  `^\\s*في\\s+حال(?:ه)?\\s+(?:وجود|كان\\s+لديك|لديك)\\s+(?:اي\\s+)?ملاحظ[${AR_LETTER}]*`);
 function arNextSentenceAnswers(rawNext: string): boolean {
   const next = rawNext.replace(/[\u064B-\u0652]/g, '');
   // (Change Reviewer e5dbdea7.)
+  if (AR_NEXT_COURTESY_INQUIRY_RE.test(next)) return false;
   if (AR_NEXT_COURTESY_CONDITION_RE.test(next) && !AR_NEXT_CONDITION_ANSWER_RE.test(next)) return false;
   if (AR_NEXT_COURTESY_NOUN_RE.test(next) && !AR_ANSWER_RE.test(next) && !AR_NEXT_NOUN_ANSWER_RE.test(next)) return false;
   return AR_NEXT_ANSWER_RE.test(next);
