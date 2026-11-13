@@ -256,3 +256,9 @@ test('Arabic cashback ("استرداد نقدي") is not a refund credit: purcha
   assert.equal(both(`${DEBIT_AR} تم إيداع مبلغ 5.00 درهم كاسترداد نقدي.`), 'expense 25000 / expense 25000');
   assert.equal(both('تم إيداع مبلغ 25.00 درهم كاسترداد نقدي إلى حسابك.'), 'income 2500 / income 2500');
 });
+
+// Change Reviewer 2aa1f668 (High), in Arabic: "معالجة" with no refund noun after it and no debit is ordinary income.
+test('Arabic: a processed salary keeps its income; a processed note beside a debit is still D7', () => {
+  assert.equal(both('تمت معالجة راتبك بمبلغ 5,000.00 درهم إلى حسابك.'), 'income 500000 / income 500000');
+  assert.equal(sms.parseSms(`${DEBIT_AR} تم معالجة المبلغ إلى بطاقتك.`, {}, { sender: 'ENBD', observedAt: at }), null, 'D7');
+});
