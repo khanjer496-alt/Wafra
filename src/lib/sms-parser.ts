@@ -2454,8 +2454,14 @@ const REFUND_SIDE_NOTE_NOT_SETTLED_RE =
   /\b(?:is|are|was|were|has|have|had|did|does)\s+not\b|\b(?:isn|aren|wasn|weren|hasn|haven|hadn|didn|doesn)['’]t\b|\bnot\s+(?:yet\s+)?been\b|\b(?:is|are)\s+being\b|\bwill\b/i;
 const REFUND_SIDE_NOTE_COMPLETED_RE =
   /\b(?:has|have|had|was|were)\s+(?:been\s+)?(?:(?:successfully|fully|now)\s+)?(?:credited|refunded|reversed|returned|posted)\b/i;
+// Android RC 396 F2: "AED 40.00 was debited … . Your reversal request is under process." — an amount-free reversal note that
+// is conditional, negated, future or still in process, beside a separate debit, is a side note too: the bare "reversal"
+// must not turn the debit into income. The refund-note rules above are unchanged.
+const REVERSAL_SIDE_NOTE_WORD_RE = /\breversal\b/i;
+const REVERSAL_SIDE_NOTE_IN_PROCESS_RE =
+  /\b(?:is|are)\s+(?:(?:still|currently|now)\s+)?(?:under\s+(?:process(?:ing)?|review)|in\s+(?:process|progress)|being\s+(?:processed|reviewed)|pending|awaiting)\b|\b(?:has|have)\s+been\s+(?:initiated|submitted)\b/i;
 function refundSideNotes(body: string): { body: string; ambiguous: boolean } {
-  if (!REFUND_SIDE_NOTE_WORD_RE.test(body)) return { body, ambiguous: false };
+  if (!REFUND_SIDE_NOTE_WORD_RE.test(body) && !REVERSAL_SIDE_NOTE_WORD_RE.test(body)) return { body, ambiguous: false };
   const sentences: Array<{ start: number; text: string }> = [];
   let start = 0;
   for (const end of [...[...body.matchAll(REFUND_SENTENCE_BREAK_RE)].map((match) => match.index! + match[0].length), body.length]) {
@@ -2478,6 +2484,17 @@ function refundSideNotes(body: string): { body: string; ambiguous: boolean } {
       out = out.slice(0, at) + ' '.repeat(text.length) + out.slice(at + text.length);
     } else if (separateDebit && (negated || (REFUND_RE.test(text) && !completedRefund))) {
       ambiguous = true;
+    }
+  }
+  const separateDebitForReversal = sentences.some(({ text }) => !REFUND_SIDE_NOTE_WORD_RE.test(text) &&
+    !REVERSAL_SIDE_NOTE_WORD_RE.test(text) && REFUND_SIDE_NOTE_DEBIT_RE.test(text) && !REFUND_SIDE_NOTE_RETURNED_RE.test(text) &&
+    refundAmounts(text).length > 0);
+  for (const { start: at, text } of separateDebitForReversal ? sentences : []) {
+    const word = REVERSAL_SIDE_NOTE_WORD_RE.exec(text);
+    if (!word || REFUND_SIDE_NOTE_WORD_RE.test(text) || refundAmounts(text).length > 0) continue;
+    if (governsRefundCredit(text.slice(0, word.index)) || REFUND_SIDE_NOTE_NOT_SETTLED_RE.test(text) ||
+      REVERSAL_SIDE_NOTE_IN_PROCESS_RE.test(text)) {
+      out = out.slice(0, at) + ' '.repeat(text.length) + out.slice(at + text.length);
     }
   }
   return { body: out, ambiguous };
