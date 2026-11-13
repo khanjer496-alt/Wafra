@@ -23,7 +23,9 @@ for attempt in 1 2; do
   note "== attempt $attempt"
   fresh; sleep 2
   mro "$H/.github/app-lock-sim/flows/seed.yaml" "seed$attempt"; note "seed rc=$?"
-  mro "$H/.github/app-lock-sim/flows/addrows.yaml" "rows$attempt"; ROWS=$?; note "addrows rc=$ROWS (0 = three ledger rows were added through the Add screen)"
+  if [ "$attempt" = 2 ]; then
+    mro "$H/.github/app-lock-sim/flows/addrows.yaml" "rows$attempt"; ROWS=$?; note "addrows rc=$ROWS (0 = three ledger rows were added through the Add screen; non-zero = the erase below ran on an EMPTY ledger)"
+  else note "attempt 1 runs on a freshly onboarded, empty ledger (row seeding is only tried in attempt 2)"; fi
   xcrun simctl io "$UDID" screenshot "$OUT/a${attempt}-before-erase.png" >/dev/null 2>&1
   PB=$(app_pid); note "app pid before erase: ${PB:-none}"
   echo "=== ERASE STEP attempt $attempt $(date -u +%T)" >> "$RAW"
@@ -36,6 +38,8 @@ for attempt in 1 2; do
   else note "RESULT attempt $attempt: the same app process is still running after Erase (pid ${PB:-none} -> ${PA:-none}) = NO CRASH"; fi
 done
 kill $LS 2>/dev/null; sleep 1
+# Maestro step logs and failure screenshots carry only UI step names and the synthetic seed; they show whether each flow reached the Erase tap
+mkdir -p "$OUT/maestro"; for f in "${RUNNER_TEMP:-/tmp}"/m-*.log; do [ -f "$f" ] && sed -E 's/\x1b\[[0-9;?]*[A-Za-z]//g' "$f" | grep -vE "^\s+at |analytics" | head -60 > "$OUT/maestro/$(basename "$f")"; done
 note "crashes in 2 attempts: $CRASHES"
 # ---- only the JS-exception / fatal lines
 clean < "$RAW" | grep -nE "Unhandled JS Exception|RCTExceptionsManager|reportFatal|RCTFatal|Terminating app|uncaught exception|SIGABRT|EXC_|Fatal|Uncaught|ERROR|ReferenceError|TypeError|=== ERASE STEP" | cut -c1-1500 | head -400 > "$OUT/js-exception-lines.txt"

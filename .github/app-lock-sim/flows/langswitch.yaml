@@ -4,7 +4,8 @@ appId: ${APP_ID}
     when:
       visible: 'Open in .Wafra.\?'
     commands:
-      - tapOn: 'Cancel'
+      - tapOn:
+          point: '33%,54%'
 - extendedWaitUntil:
     visible: 'Sign in to Apple.Account'
     timeout: 6000
@@ -14,8 +15,13 @@ appId: ${APP_ID}
       visible: 'Sign in to Apple.Account'
     commands:
       - tapOn: 'Cancel'
-- tapOn:
-    text: 'Settings'
+- runFlow:
+    when:
+      notVisible:
+        id: 'settings-screen'
+    commands:
+      - tapOn:
+          text: 'Settings'
 - scrollUntilVisible:
     element:
       text: 'Language'

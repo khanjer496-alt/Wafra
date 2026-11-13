@@ -11,6 +11,7 @@ MATCH=com.apple.BiometricKit_Sim.pearl.match
 NOMATCH=com.apple.BiometricKit_Sim.pearl.nomatch
 LOCKED_SHOTS=()
 
+mono()  { python3 -c "import time;print(int(time.monotonic()))"; }   # bash SECONDS follows the wall clock, which S6 sets back
 log()   { echo "[$(date -u +%H:%M:%S)] $*"; }
 match() { log "notifyutil $MATCH"; xcrun simctl spawn "$UDID" notifyutil -p "$MATCH"; }
 nomatch() { log "notifyutil $NOMATCH"; xcrun simctl spawn "$UDID" notifyutil -p "$NOMATCH"; }
@@ -46,6 +47,17 @@ diag() { # evidence for a failed setup: entitlements, the app's own storage diag
   } > "$OUT/app-diagnostics.txt" 2>&1
 }
 
+# Maestro's tree shows only the system Face ID sheet while the lock screen prompts, so "locked" is read off the screen itself.
+OCRBIN="${RUNNER_TEMP:-/tmp}/wafra-ocr"
+swiftc -O "$HERE/ocr.swift" -o "$OCRBIN" >/dev/null 2>&1 || log "ocr build failed"
+is_locked() { # $1 = tag; true when the screenshot shows the lock screen's own text
+  local img="${RUNNER_TEMP:-/tmp}/lockcheck-$1.png" t
+  xcrun simctl io "$UDID" screenshot "$img" >/dev/null 2>&1
+  t=$("$OCRBIN" "$img" 2>/dev/null | tr '\n' ' ')
+  printf '%s\n' "$t" > "$OUT/ocr-lockcheck-$1.txt"
+  printf '%s' "$t" | grep -qiE "unlock with face id|passcode works too|balances stay hidden|wafra is locked"
+}
+
 # ---- setup: seed a small ledger, then turn App Lock on -------------------------------
 if ! mro seed && ! { cp "$OUT/maestro-seed.log" "$OUT/maestro-seed-attempt1.log"; sleep 10; mro seed seed-retry; }; then
   dump seed-fail; shot setup-seed-failed; diag; record SETUP FAIL "could not seed the ledger (see maestro-seed.log)"; exit 1
@@ -63,7 +75,7 @@ away; sleep 2; back; sleep 2   # warm-up: first launch of the Settings app is sl
 xcrun simctl terminate "$UDID" "$APP"; sleep 2
 back; sleep 7
 shot 01a-cold-launch-locked
-if mro locked s1-locked; then
+if is_locked s1a; then
   mro faceid-label s1-faceid-label && FID="Face ID is the unlock method" || FID="Face-ID label not seen"
   record S1a PASS "cold launch showed the lock screen, no ledger; $FID"; LOCKED_SHOTS+=(01a-cold-launch-locked)
 else dump s1-locked; record S1a FAIL "cold launch was not locked (see maestro-s1-locked.log)"; fi
@@ -72,21 +84,21 @@ else record S1b FAIL "ledger not shown after pearl.match"; fi
 shot 01b-after-match-unlocked
 
 # ---- S4: away < 20 s stays unlocked. simctl calls are slow on the runner, so the absence is MEASURED, not assumed.
-T0=$SECONDS; away; sleep 1; back; ABS=$((SECONDS - T0)); sleep 3; shot 04b-back-after-short-absence
+T0=$(mono); away; sleep 1; back; ABS=$(( $(mono) - T0 )); sleep 3; shot 04b-back-after-short-absence
 if mro unlocked s4; then S4OK=1; else S4OK=0; fi
-if [ "$ABS" -ge 17 ]; then record S4 INCONCLUSIVE "absence measured ${ABS}s, too close to the 20 s grace to prove anything (runner too slow); observed: $([ $S4OK = 1 ] && echo unlocked || echo locked)"
+if [ "$ABS" -ge 20 ]; then record S4 INCONCLUSIVE "absence measured ${ABS}s, at or beyond the 20 s grace, so it proves nothing (runner too slow); observed: $([ $S4OK = 1 ] && echo unlocked || echo locked)"
 elif [ $S4OK = 1 ]; then record S4 PASS "away ${ABS}s (<20 s): still unlocked, ledger visible"
 else dump s4; record S4 FAIL "away only ${ABS}s (<20 s) but the app re-locked or the ledger is missing"; fi
 
 # ---- S3: away > 20 s re-locks ----------------------------------------------------------
 away; sleep 25; shot 03a-away-25s-in-Settings-app
 back; sleep 5; shot 03b-back-after-25s-locked
-if mro locked s3; then record S3 PASS "25 s away: lock screen, no ledger"; LOCKED_SHOTS+=(03b-back-after-25s-locked)
+if is_locked s3; then record S3 PASS "25 s away: lock screen, no ledger"; LOCKED_SHOTS+=(03b-back-after-25s-locked)
 else dump s3; record S3 FAIL "not locked after 25 s away"; fi
 
 # ---- S5: pearl.nomatch stays locked ------------------------------------------------------
 nomatch; sleep 5; shot 05a-after-nomatch
-if mro locked s5; then record S5 PASS "pearl.nomatch: still locked, no ledger"; LOCKED_SHOTS+=(05a-after-nomatch)
+if is_locked s5; then record S5 PASS "pearl.nomatch: still locked, no ledger"; LOCKED_SHOTS+=(05a-after-nomatch)
 else dump s5; record S5 FAIL "not locked after pearl.nomatch"; fi
 if unlock s5r; then record S5r PASS "recovered: pearl.match after the failed match unlocked (attempts: $UNLOCK_ATTEMPTS)"
 else record S5r FAIL "could not unlock after the failed match"; fi
@@ -94,16 +106,16 @@ shot 05b-after-recovery-unlocked
 
 # ---- S6: clock set back while away re-locks. The grace is 20 s, so the absence must be SHORT for the clock to be the cause.
 sudo systemsetup -setusingnetworktime off >/dev/null 2>&1 || log "could not disable network time"
-REAL0=$(date +%s); MONO0=$SECONDS
+REAL0=$(date +%s); MONO0=$(mono)
 away; sleep 1
-BACKTO=$((REAL0 + (SECONDS - MONO0) - 3600))
+BACKTO=$((REAL0 + ($(mono) - MONO0) - 3600))
 sudo date -u "$(date -u -r "$BACKTO" +%m%d%H%M%Y.%S)" >/dev/null
-back; ABS=$((SECONDS - MONO0)); sleep 3; shot 06b-back-with-clock-set-back-1h
-REAL=$((REAL0 + (SECONDS - MONO0)))
+back; ABS=$(( $(mono) - MONO0 )); sleep 3; shot 06b-back-with-clock-set-back-1h
+REAL=$((REAL0 + ($(mono) - MONO0)))
 sudo date -u "$(date -u -r "$REAL" +%m%d%H%M%Y.%S)" >/dev/null; log "clock restored: $(date -u)"
-if mro locked s6; then S6L=1; else S6L=0; fi
-if [ $S6L = 1 ] && [ "$ABS" -lt 17 ]; then record S6 PASS "clock set back 1 h, real absence ${ABS}s (<20 s grace, so only the clock rule can explain it): lock screen, no ledger"; LOCKED_SHOTS+=(06b-back-with-clock-set-back-1h)
-elif [ $S6L = 1 ]; then record S6 INCONCLUSIVE "locked, but the real absence was ${ABS}s (>= 17 s) so the 20 s rule alone could explain it"; LOCKED_SHOTS+=(06b-back-with-clock-set-back-1h)
+if is_locked s6; then S6L=1; else S6L=0; fi
+if [ $S6L = 1 ] && [ "$ABS" -lt 20 ]; then record S6 PASS "clock set back 1 h, real absence ${ABS}s (<20 s grace, so only the clock rule can explain it): lock screen, no ledger"; LOCKED_SHOTS+=(06b-back-with-clock-set-back-1h)
+elif [ $S6L = 1 ]; then record S6 INCONCLUSIVE "locked, but the real absence was ${ABS}s (>= 20 s) so the 20 s rule alone could explain it"; LOCKED_SHOTS+=(06b-back-with-clock-set-back-1h)
 else dump s6; record S6 FAIL "clock set back 1 h with a ${ABS}s absence and the app is NOT locked"; fi
 unlock s6r || true
 

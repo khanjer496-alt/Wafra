@@ -140,5 +140,6 @@ jobs:
             shots/js-exception-lines.txt
             shots/crash-summary.txt
             shots/*.png
+            shots/maestro/*.log
           retention-days: 3
           if-no-files-found: warn

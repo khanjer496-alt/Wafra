@@ -5,13 +5,17 @@ appId: ${APP_ID}
     visible: 'Open in .Wafra.\?'
     timeout: 12000
     optional: true
-- tapOn:
-    text: 'Open'
-    optional: true
+- runFlow:
+    when:
+      visible: 'Open in .Wafra.\?'
+    commands:
+      - tapOn:
+          point: '67%,54%'
 - extendedWaitUntil:
     visible:
       id: 'add-transaction-screen'
     timeout: 30000
+- takeScreenshot: rows-screen-open
 - tapOn:
     id: 'amount-keypad-4'
 - tapOn:
@@ -20,6 +24,7 @@ appId: ${APP_ID}
     id: 'add-merchant-field'
 - inputText: 'LULU HYPERMARKET'
 - hideKeyboard
+- takeScreenshot: rows-typed
 - tapOn:
     id: 'suggested-category-.*'
     optional: true
@@ -33,13 +38,17 @@ appId: ${APP_ID}
     visible: 'Open in .Wafra.\?'
     timeout: 12000
     optional: true
-- tapOn:
-    text: 'Open'
-    optional: true
+- runFlow:
+    when:
+      visible: 'Open in .Wafra.\?'
+    commands:
+      - tapOn:
+          point: '67%,54%'
 - extendedWaitUntil:
     visible:
       id: 'add-transaction-screen'
     timeout: 30000
+- takeScreenshot: rows-screen-open
 - tapOn:
     id: 'amount-keypad-1'
 - tapOn:
@@ -50,6 +59,7 @@ appId: ${APP_ID}
     id: 'add-merchant-field'
 - inputText: 'ADNOC FUEL'
 - hideKeyboard
+- takeScreenshot: rows-typed
 - tapOn:
     id: 'suggested-category-.*'
     optional: true
@@ -63,13 +73,17 @@ appId: ${APP_ID}
     visible: 'Open in .Wafra.\?'
     timeout: 12000
     optional: true
-- tapOn:
-    text: 'Open'
-    optional: true
+- runFlow:
+    when:
+      visible: 'Open in .Wafra.\?'
+    commands:
+      - tapOn:
+          point: '67%,54%'
 - extendedWaitUntil:
     visible:
       id: 'add-transaction-screen'
     timeout: 30000
+- takeScreenshot: rows-screen-open
 - tapOn:
     id: 'amount-keypad-2'
 - tapOn:
@@ -78,6 +92,7 @@ appId: ${APP_ID}
     id: 'add-merchant-field'
 - inputText: 'CAREEM RIDE'
 - hideKeyboard
+- takeScreenshot: rows-typed
 - tapOn:
     id: 'suggested-category-.*'
     optional: true

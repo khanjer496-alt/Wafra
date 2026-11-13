@@ -4,7 +4,8 @@ appId: ${APP_ID}
     when:
       visible: 'Open in .Wafra.\?'
     commands:
-      - tapOn: 'Cancel'
+      - tapOn:
+          point: '33%,54%'
 - extendedWaitUntil:
     visible: 'Sign in to Apple.Account'
     timeout: 6000

@@ -149,6 +149,19 @@ final class PurchaseUITests: XCTestCase {
         sem.wait()
         if let failure = failure { throw failure }
     }
+    /// What the store and the screen said when a purchase did not unlock Pro: transactions the StoreKit session recorded,
+    /// and any visible text that looks like a purchase result (the Pro screen's notice has no test id).
+    func purchaseEvidence() -> String {
+        let tx = session.allTransactions().map { $0.productIdentifier }
+        let words = ["purchase", "store", "confirm", "pending", "Pro", "failed", "unavailable", "Could not"]
+        var seen: [String] = []
+        for t in app.staticTexts.allElementsBoundByIndex.prefix(80) {
+            let l = t.label
+            if words.contains(where: { l.localizedCaseInsensitiveContains($0) }) && !seen.contains(l) { seen.append(String(l.prefix(120))) }
+            if seen.count >= 8 { break }
+        }
+        return "store transactions: \(tx); visible text: \(seen)"
+    }
     var entitled: Bool { !el("pro-buy").exists && !el("pro-plans").exists }
 
     // MARK: the flow
@@ -187,7 +200,8 @@ final class PurchaseUITests: XCTestCase {
             try need(el("pro-buy"), "buy button", 10)
             shot("P2a-before-buying-weekly")
             el("pro-buy").tap()
-            try waitGone(el("pro-plans"), "plan list after buying weekly", 90)
+            do { try waitGone(el("pro-plans"), "plan list after buying weekly", 90) }
+            catch { throw StepFail("\(error); \(purchaseEvidence())") }
             shot("P2b-after-buying-weekly-pro-unlocked")
             let tx = session.allTransactions()
             guard tx.contains(where: { $0.productIdentifier == "wafra_pro_weekly" }) else { throw StepFail("no weekly transaction in the test session") }
@@ -232,7 +246,8 @@ final class PurchaseUITests: XCTestCase {
             try need(el("pro-buy"), "buy button", 10)
             shot("P4a-yearly-selected")
             el("pro-buy").tap()
-            try waitGone(el("pro-plans"), "plan list after buying yearly", 90)
+            do { try waitGone(el("pro-plans"), "plan list after buying yearly", 90) }
+            catch { throw StepFail("\(error); \(purchaseEvidence())") }
             shot("P4b-after-buying-yearly-pro-on")
             app.terminate()
             try openPro(onboard: false)
