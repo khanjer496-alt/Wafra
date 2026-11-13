@@ -2618,6 +2618,8 @@ const AR_NA = `(?![${AR_LETTER}])`;
 const AR_CREDIT_NOUN_RE = new RegExp(`${AR_NB}(و|ب)?(?:ال)?(استرداد|استرجاع|ايداع|ارجاع|اعاده|عكس|معالجه)${AR_NA}`, 'g');
 /** The noun names a request, a fee or a policy, not a movement ("طلب الاسترداد", "رسوم الاسترجاع"). */
 const AR_NOT_A_MOVEMENT_BEFORE_RE = new RegExp(`${AR_NB}(?:طلب|طلبك|رسوم|سياسه|مبلغ)\\s+$`);
+/** "إرجاع المنتج" / "استرجاع السلعة": a product return, not a money movement. */
+const AR_GOODS_RETURN_AFTER_RE = new RegExp(`^\\s+(?:ال)?(?:منتج|سلعه|بضاعه|طلب|مشتريات)`);
 /** Cashback, points and rewards are not refund credits; their own rules judge them ("استرداد نقدي" is cashback). */
 const AR_NOT_A_REFUND_CREDIT_RE = new RegExp(
   `${AR_NB}[كبلو]?(?:ال)?(?:استرداد|استرجاع)\\s+(?:ال)?نقدي${AR_NA}|${AR_NB}كاش\\s*باك${AR_NA}|${AR_NB}[كبلو]?(?:ال)?(?:نقاط|مكافا[ته]|اميال)${AR_NA}`);
@@ -2632,15 +2634,17 @@ const AR_SETTLED_BEFORE_RE = new RegExp(`${AR_NB}(?:قد\\s+)?(?:تم|تمت)\\s
 const AR_CONDITIONAL_RE = new RegExp(`${AR_NB}و?(?:اذا|عندما|عند|بمجرد(?:\\s+ان)?|بعد\\s+ان|في\\s+حال|حال|متي|حينما|حين)${AR_NA}`, 'g');
 /** A verbal noun right after a leader ("عند استرداد …", upon refunding) is its object: not yet a completed credit. */
 const AR_LEADER_BEFORE_RE = new RegExp(`${AR_NB}و?(?:اذا|عندما|عند|بمجرد(?:\\s+ان)?|بعد\\s+ان|في\\s+حال|حال|متي|حينما|حين)\\s+$`);
-// As in English (Reviewer 956cb08a, 07a65c13; Change Reviewer a41046bc): عند/عندما/بمجرد/بعد أن/متى/حين stay a condition
-// whenever they directly govern the credit (only أن and the aspect, or a merchant verb, between them: "عندما تم استرداد …",
-// "عندما قام التاجر … باسترداد …"), a future or imperative main clause follows it ("ستصلك", "سوف", "يرجى"), or the credit is
-// not completed. Only another phrase between the leader and the credit ("عند إلغاء الطلب تم استرداد …"), with none of that,
-// says when a completed refund happened. إذا and (في) حال always do. The default is the safe one.
+// As in English (Reviewer 956cb08a, 07a65c13, c204ca32; Change Reviewer a41046bc, 742367fa): عند/عندما/بمجرد/بعد أن/متى/حين
+// govern the credit (a condition), except in one narrow positive shape that says WHEN a completed credit happened: the leader,
+// then an event noun ("عند إلغاء الطلب", "عند مراجعة طلبك", "عند إرجاع المنتج") or that event in the past ("بعد أن تم إلغاء
+// طلبك"), then تم + the credit, with no future or imperative main clause after it ("ستصلك", "سوف", "يرجى"). Any other verb
+// after the leader ("عندما يؤكد التاجر …", "متى استلمنا …") or the credit right after it governs. إذا and (في) حال always do.
 const AR_TEMPORAL_LEADER_RE = new RegExp(`^و?(?:عندما|عند|بمجرد(?:\\s+ان)?|بعد\\s+ان|متي|حينما|حين)$`);
 const AR_FUTURE_MAIN_CLAUSE_RE = new RegExp(`${AR_NB}(?:س[يتن][${AR_LETTER}]{2,}|سوف\\s+[${AR_LETTER}]+|يرجي|الرجاء)`);
-const AR_CREDIT_DIRECTLY_AFTER_LEADER_RE = new RegExp(`^\\s*(?:ان\\s+)?(?:(?:قد\\s+)?(?:تم|تمت|يتم|تتم|سيتم|ستتم)|سوف\\s+(?:يتم|تتم)|` +
-  `جاري|جار|قيد|(?:لم|لن|لا)\\s+(?:يتم|تتم)|(?:قام|قامت|يقوم|تقوم|سيقوم|ستقوم|(?:لم|لن)\\s+(?:يقم|يقوم|تقم|تقوم))(?:\\s+[^\\s,;\\n]+){0,4})?\\s*$`);
+const AR_EVENT_OBJECT = `(?:\\s+(?:ال)?(?:طلب|طلبك|عمليتك|عمليه|معامله|شراء|منتج|سلعه|بضاعه|مشتريات))?`;
+const AR_EVENT_BEFORE_CREDIT_RE = new RegExp(
+  `^\\s*(?:(?:ال)?(?:الغاء|ارجاع|استرجاع|مراجعه|تحقق|اعتراض|نزاع)${AR_EVENT_OBJECT}|` +
+  `(?:قد\\s+)?(?:تم|تمت)\\s+(?:ال)?(?:الغاء|ارجاع|استرجاع|مراجعه)${AR_EVENT_OBJECT})\\s+و?(?:قد\\s+)?(?:تم|تمت)\\s*$`);
 const AR_THIRD_PARTY_DESTINATION_RE = new RegExp(`${AR_NB}(?:الي|لصالح)\\s+(?:ال)?(?:تاجر|مستفيد|بائع|متجر)${AR_NA}`);
 /** Taken back, in error or still awaiting approval, bound to this credit ("وتم عكسه لاحقاً", "عن طريق الخطأ", "بانتظار الموافقة"). */
 const AR_TAKEN_BACK_RE = new RegExp(
@@ -2682,6 +2686,8 @@ function arCreditClauses(sentence: string, debitBeside = false): CreditClause[] 
       continue;
     }
     if (AR_NOT_A_MOVEMENT_BEFORE_RE.test(lead)) continue;
+    if ((noun === 'ارجاع' || noun === 'استرجاع' || noun === 'اعاده') &&
+      AR_GOODS_RETURN_AFTER_RE.test(sentence.slice(at + match[0].length))) continue;
     let aspect: ArAspect | null = null;
     if (prefix === 'ب') {
       const merchant = AR_MERCHANT_ASPECT_RE.exec(lead);
@@ -2706,8 +2712,8 @@ function arCreditSettlement(sentence: string, clause: CreditClause, rawAfter: st
   const last = leaders[leaders.length - 1];
   const betweenLeaderAndCredit = last ? lead.slice(last.index! + last[0].length) : '';
   if (last && !betweenLeaderAndCredit.includes(',') &&
-    (!AR_TEMPORAL_LEADER_RE.test(last[0]) || AR_CREDIT_DIRECTLY_AFTER_LEADER_RE.test(betweenLeaderAndCredit) ||
-      AR_FUTURE_MAIN_CLAUSE_RE.test(sentence.slice(clause.end)) || (clause.ar !== 'settled' && clause.ar !== 'headline'))) {
+    (!AR_TEMPORAL_LEADER_RE.test(last[0]) || !AR_EVENT_BEFORE_CREDIT_RE.test(betweenLeaderAndCredit) ||
+      AR_FUTURE_MAIN_CLAUSE_RE.test(sentence.slice(clause.end)) || clause.ar !== 'settled')) {
     return { verdict: 'not-settled', reason: 'conditional' };
   }
   if (clause.ar === 'negated') return { verdict: 'not-settled', reason: 'negated' };
