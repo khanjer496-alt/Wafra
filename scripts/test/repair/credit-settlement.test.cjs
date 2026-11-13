@@ -545,6 +545,8 @@ test('a bare-alef ان keeps its income when the next sentence merely starts wit
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. في حال كان لديك أي استفسار فنرجو التواصل معنا.',
     // (With "رمز التحقق" the OTP guard refuses the whole message, on release too; that guard is not this rule's.)
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. فريق خدمة العملاء لا يطلب منك أبداً كلمة المرور.',
+    // Review round 4 (Reviewer 46d750e7 Info): the plural "أية استفسارات" is the same inquiry footer.
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. في حال وجود أية استفسارات، فيرجى الاتصال بنا.',
   ]) assert.equal(both(body), 'income 25000 / income 25000', body);
   for (const body of [
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. فيرجى تجاهل هذه الرسالة.',
@@ -578,5 +580,10 @@ test('a bare-alef ان keeps its income when the next sentence merely starts wit
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234. فريقنا ينصحك بتجاهل هذه الرسالة.',
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. فريقنا لا يطلب منك أي إجراء.',
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. فرعنا لن يطلب منك أي إجراء إضافي.',
+    // Review round 4 (Change Reviewer 1ff64666, Reviewer 46d750e7 Medium): "في حال لم تقم …" is a fraud-check footer only
+    // when its object is this transaction; "if you take no action, the amount will be added" is an answer about the money.
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. في حال لم تقم بأي إجراء فسيتم إضافة المبلغ تلقائياً.',
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234. في حال لم تقم بأي إجراء فسيتم إيداع المبلغ خلال 5 أيام.',
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. في حال لم تقم بالمطالبة فسيتم إلغاء الاسترداد.',
   ]) assert.equal(both(body), 'none / none', body);
 });
