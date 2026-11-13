@@ -519,3 +519,20 @@ test('#242 review round 3: أن after a verb of informing is "that" whatever fol
     'AED 500.00 has been credited to your account ending 1234 once approved by you, please ignore any earlier message.',
   ]) assert.equal(both(body), 'none / none', body);
 });
+
+// #242 follow-up (Reviewer d2988328, Change Reviewer 879298d7, Low): a next sentence counts as the answer to a bare-alef
+// "ان" only when it starts with ف + an answer verb ("فيرجى", "فسوف", "فتحقق" …), not with any ف-word ("في حال وجود أي
+// استفسار …", "فريق خدمة العملاء …", "فقط …").
+test('a bare-alef ان keeps its income when the next sentence merely starts with a ف-word', () => {
+  for (const body of [
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. في حال وجود أي استفسار يرجى الاتصال بنا.',
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. فريق خدمة العملاء في خدمتك دائماً.',
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234. فرعنا الرئيسي يرحب بك.',
+  ]) assert.equal(both(body), 'income 25000 / income 25000', body);
+  for (const body of [
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. فيرجى تجاهل هذه الرسالة.',
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. فسوف نرسل لك رسالة تأكيد.',
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. فتحقق من رصيدك.',
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. ستصلك رسالة تأكيد.',
+  ]) assert.equal(both(body), 'none / none', body);
+});
