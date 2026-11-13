@@ -2628,11 +2628,15 @@ const AR_SETTLED_BEFORE_RE = new RegExp(`${AR_NB}(?:قد\\s+)?(?:تم|تمت)\\s
 const AR_CONDITIONAL_RE = new RegExp(`${AR_NB}و?(?:اذا|عندما|عند|بمجرد(?:\\s+ان)?|بعد\\s+ان|في\\s+حال|حال|متي|حينما|حين)${AR_NA}`, 'g');
 /** A verbal noun right after a leader ("عند استرداد …", upon refunding) is its object: not yet a completed credit. */
 const AR_LEADER_BEFORE_RE = new RegExp(`${AR_NB}و?(?:اذا|عندما|عند|بمجرد(?:\\s+ان)?|بعد\\s+ان|في\\s+حال|حال|متي|حينما|حين)\\s+$`);
-// As in English (Reviewer 956cb08a): عند/عندما/بمجرد/بعد أن/متى/حين lead a condition only when a future main clause follows
-// the credit in the same sentence ("ستصلك رسالة", "سنرسل", "سوف") or the credit is not completed; otherwise they only say
-// when a completed refund happened ("عند إلغاء الطلب تم استرداد …"). إذا and (في) حال always do.
+// As in English (Reviewer 956cb08a, 07a65c13; Change Reviewer a41046bc): عند/عندما/بمجرد/بعد أن/متى/حين stay a condition
+// whenever they directly govern the credit (only أن and the aspect, or a merchant verb, between them: "عندما تم استرداد …",
+// "عندما قام التاجر … باسترداد …"), a future or imperative main clause follows it ("ستصلك", "سوف", "يرجى"), or the credit is
+// not completed. Only another phrase between the leader and the credit ("عند إلغاء الطلب تم استرداد …"), with none of that,
+// says when a completed refund happened. إذا and (في) حال always do. The default is the safe one.
 const AR_TEMPORAL_LEADER_RE = new RegExp(`^و?(?:عندما|عند|بمجرد(?:\\s+ان)?|بعد\\s+ان|متي|حينما|حين)$`);
-const AR_FUTURE_MAIN_CLAUSE_RE = new RegExp(`${AR_NB}(?:س[يتن][${AR_LETTER}]{2,}|سوف\\s+[${AR_LETTER}]+)`);
+const AR_FUTURE_MAIN_CLAUSE_RE = new RegExp(`${AR_NB}(?:س[يتن][${AR_LETTER}]{2,}|سوف\\s+[${AR_LETTER}]+|يرجي|الرجاء)`);
+const AR_CREDIT_DIRECTLY_AFTER_LEADER_RE = new RegExp(`^\\s*(?:ان\\s+)?(?:(?:قد\\s+)?(?:تم|تمت|يتم|تتم|سيتم|ستتم)|سوف\\s+(?:يتم|تتم)|` +
+  `جاري|جار|قيد|(?:لم|لن|لا)\\s+(?:يتم|تتم)|(?:قام|قامت|يقوم|تقوم|سيقوم|ستقوم|(?:لم|لن)\\s+(?:يقم|يقوم|تقم|تقوم))(?:\\s+[^\\s,;\\n]+){0,4})?\\s*$`);
 const AR_THIRD_PARTY_DESTINATION_RE = new RegExp(`${AR_NB}(?:الي|لصالح)\\s+(?:ال)?(?:تاجر|مستفيد|بائع|متجر)${AR_NA}`);
 /** Taken back, in error or still awaiting approval, bound to this credit ("وتم عكسه لاحقاً", "عن طريق الخطأ", "بانتظار الموافقة"). */
 const AR_TAKEN_BACK_RE = new RegExp(
@@ -2696,9 +2700,10 @@ function arCreditSettlement(sentence: string, clause: CreditClause, rawAfter: st
   const lead = sentence.slice(0, clause.start);
   const leaders = [...lead.matchAll(AR_CONDITIONAL_RE)];
   const last = leaders[leaders.length - 1];
-  if (last && !lead.slice(last.index! + last[0].length).includes(',') &&
-    (!AR_TEMPORAL_LEADER_RE.test(last[0]) || AR_FUTURE_MAIN_CLAUSE_RE.test(sentence.slice(clause.end)) ||
-      (clause.ar !== 'settled' && clause.ar !== 'headline'))) {
+  const betweenLeaderAndCredit = last ? lead.slice(last.index! + last[0].length) : '';
+  if (last && !betweenLeaderAndCredit.includes(',') &&
+    (!AR_TEMPORAL_LEADER_RE.test(last[0]) || AR_CREDIT_DIRECTLY_AFTER_LEADER_RE.test(betweenLeaderAndCredit) ||
+      AR_FUTURE_MAIN_CLAUSE_RE.test(sentence.slice(clause.end)) || (clause.ar !== 'settled' && clause.ar !== 'headline'))) {
     return { verdict: 'not-settled', reason: 'conditional' };
   }
   if (clause.ar === 'negated') return { verdict: 'not-settled', reason: 'negated' };
