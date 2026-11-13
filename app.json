@@ -20,7 +20,7 @@
       "icon": "./assets/wafra.icon",
       "bundleIdentifier": "app.wafra.ios",
       "appleTeamId": "UV7YN4GQ66",
-      "buildNumber": "193",
+      "buildNumber": "194",
       "supportsTablet": false,
       "infoPlist": {
         "LSApplicationQueriesSchemes": [
