@@ -164,3 +164,26 @@ test('RC 396 F2 round 1 controls: a completed credit beside a pending one, or af
     'Reversal of AED 40.00, which was requested on 10/11, is under process.',
   ]) assert.equal(paths(body).js, 'none / none', body);
 });
+
+// #249 review round 3 (Change Reviewer a3da9de8 Medium/Low, Reviewer 696b9c8f Medium/Info, at 2da4fa7a; probed at 8cca7923).
+test('RC 396 F2 round 3: a status right after the noun, an amount-first refund, and "; status:" never post', () => {
+  for (const body of [
+    'AED 40.00 refund is under process.',
+    'AED 40.00 reversal is pending.',
+    'Reversal of AED 40.00; status: under process',
+  ]) {
+    const got = paths(body);
+    assert.equal(got.js, 'none / none', body);
+    assert.ok(!/^credit /.test(got.native), `${body} native ${got.native}`);
+  }
+  assert.equal(paths('AED 40.00 was debited from your card ending 1234 at NOON - reversal pending.', 'ENBD').js,
+    'expense 4000 / expense 4000');
+});
+
+test('RC 396 F2 round 3 controls: a telegraphic "processed to your card" before an unrelated status keeps its 40.00', () => {
+  for (const body of [
+    'Reversal of AED 40.00 processed to your card ending 1234 - in progress orders are not affected.',
+    'AED 40.00 refund has been credited to your card ending 1234.',
+    'Refund of AED 40.00 has been credited to your card ending 1234. For refunds pending over 7 days, call us.',
+  ]) assert.equal(paths(body).js, 'income 4000 / income 4000', body);
+});
