@@ -65,7 +65,17 @@ is_locked() { # $1 = tag; true when the screenshot shows the lock screen's own t
     t=$("$OCRBIN" "$img" 2>/dev/null | tr '\n' ' ')
   fi
   printf '%s\n' "$t" > "$OUT/ocr-lockcheck-$1.txt"
-  printf '%s' "$t" | grep -qiE "unlock with face id|passcode works too|balances stay hidden|wafra is locked|you unlock|your balan"
+  printf '%s' "$t" | grep -qiE "unlock with face id|passcode works too|balances stay hidden|wafra is locked|you unlock|your balan" && return 0
+  # The app can hide everything behind a black cover while the system Face ID sheet prompts, so its own words are not on
+  # screen. Accept that only in strict forms, and never when any seeded ledger text is visible: the system sheet alone
+  # ("Face ID"), the sheet after a failed match, or the sheet under the StoreKit sign-in alert.
+  local norm; norm=$(printf '%s' "$t" | tr '|' ' ' | tr -s ' ' | sed 's/^ //; s/ $//')
+  if printf '%s' "$t" | grep -qiE "LULU|ADNOC|CAREEM|Transactions|Spent"; then return 1; fi
+  if [ "$norm" = "Face ID" ] || printf '%s' "$t" | grep -qiE "Face Not Recognized|Try Face ID Again" \
+     || { printf '%s' "$t" | grep -qi "Sign in to Apple Account" && printf '%s' "$t" | grep -qi "Face ID"; }; then
+    echo "system Face ID sheet, no ledger text, no app lock wording" > "$OUT/lockcheck-$1.method"; return 0
+  fi
+  return 1
 }
 
 # ---- setup: seed a small ledger, then turn App Lock on -------------------------------
