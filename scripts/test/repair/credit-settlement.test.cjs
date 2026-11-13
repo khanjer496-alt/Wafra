@@ -235,3 +235,16 @@ test('Arabic: a processed salary keeps its income; a processed note beside a deb
   assert.equal(both('تمت معالجة راتبك بمبلغ 5,000.00 درهم إلى حسابك.'), 'income 500000 / income 500000');
   assert.equal(sms.parseSms(`${DEBIT_AR} تم معالجة المبلغ إلى بطاقتك.`, {}, { sender: 'ENBD', observedAt: at }), null, 'D7');
 });
+
+// Reviewer 956cb08a (Medium), in Arabic: عند/عندما/بمجرد/بعد أن/حين/متى lead a condition only when a future main clause
+// follows the credit ("ستصلك رسالة", "سنرسل") or the credit is not completed; إذا and في حال always do. A noun right after a
+// leader ("عند استرداد …") is the leader's object, not a completed credit.
+test('Arabic: a temporal lead with a completed refund and nothing after it is not a condition', () => {
+  assert.equal(both('عند إلغاء الطلب تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234.'), 'income 25000 / income 25000');
+  for (const body of [
+    'عند استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
+    'عندما يتم إيداع مبلغ 250.00 درهم في حسابك سنرسل لك إشعاراً.',
+    'بمجرد أن يتم استرداد مبلغ 250.00 درهم إلى بطاقتك، ستصلك رسالة.',
+    'إذا تم استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
+  ]) assert.equal(both(body), 'none / none', body);
+});
