@@ -172,6 +172,10 @@ const CONTROLS = [
   ['تم معالجة استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234. سيظهر المبلغ في حسابك خلال 5-7 أيام عمل.', 'REVIEW', 'C17 Arabic: processed, then "سيظهر المبلغ"'],
   [`${DEBIT_EN} The refund has been processed to your card ending 1234. It will reflect in your account within 5-7 working days.`, 'EXPENSE', 'C17 beside a debit: not there yet, the debit posts (D4)'],
   ['The refund of AED 250.00 has been processed to your card on 12/11/2026.', 'REVIEW', 'C18 a date is not an instrument number'],
+  // Change Reviewer 2aa1f668 (High): "processed to your account" with no refund wording and no debit is ordinary income.
+  ['Your salary of AED 250.00 has been processed to your account.', 'INCOME_REFUND', 'C19 a processed salary keeps its income'],
+  ['WPS salary of AED 250.00 has been processed to your account. Thank you for banking with us.', 'INCOME_REFUND', 'C19 a processed WPS salary keeps its income'],
+  ['Your cash deposit of AED 250.00 has been processed to your account.', 'INCOME_REFUND', 'C19 a processed cash deposit keeps its income'],
 ];
 
 // ── Case selection ───────────────────────────────────────────────────────────────────────────────────────────────────

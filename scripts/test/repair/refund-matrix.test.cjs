@@ -55,7 +55,7 @@ const NATIVE_IGNORED_INCOME_CEILING = 157;
 const NATIVE_IGNORED_CONTROL_ROWS = new Set(['CTL-05402', 'CTL-05403', 'CTL-05404', 'CTL-05405', 'CTL-05406', 'CTL-05407',
   'CTL-05416']);
 // Row count and sha256 of the oracle's "id<TAB>expected" lines, joined by newlines (Reviewer, #217 Low 1).
-const ORACLE_PIN = { rows: 5423, sha256: 'f9d9c0d929e7ebcd91ec183fa3a57bf5a24b43a6eb75623d4ab8294126910ae1' };
+const ORACLE_PIN = { rows: 5426, sha256: 'c7b52f07ce12dd268c330b4c64acbe0a565efdd7e02e233ecb3d910c867ee5d2' };
 
 const PATHS = ['parseSms', 'session', 'native'];
 const at = Date.parse('2026-11-05T10:00:00Z');

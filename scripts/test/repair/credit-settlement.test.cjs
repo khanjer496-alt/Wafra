@@ -104,6 +104,20 @@ test('A non-refund "processed" alert keeps its behaviour: no salary or payment s
   assert.equal(sms.hasOnlyUnsettledCredit('Payroll AED 7,500.00 processed to\naccount 1234.'), false);
 });
 
+// Change Reviewer 2aa1f668 (High): with no refund wording and no separate debit, "processed to your account" is not a refund
+// credit clause, so a salary or deposit keeps its income. Beside a debit, "It has been processed to your card." is still D7.
+test('"processed to your account" with no refund wording and no debit keeps its income (salary, WPS, cash deposit)', () => {
+  for (const [body, fils] of [
+    ['Your salary of AED 5,000.00 has been processed to your account.', 500000],
+    ['WPS salary of AED 8,500.00 has been processed to your account. Thank you for banking with us.', 850000],
+    ['Your cash deposit of AED 1,000.00 has been processed to your account.', 100000],
+  ]) {
+    assert.equal(both(body), `income ${fils} / income ${fils}`, body);
+    assert.equal(sms.hasOnlyUnsettledCredit(body), false, body);
+  }
+  assert.equal(sms.parseSms(`${DEBIT} It has been processed to your card.`, {}, { sender: 'ENBD', observedAt: at }), null, 'D7 beside a debit');
+});
+
 test('Beside a debit: an unsettled note leaves the expense, a figure of its own or a third party goes to Review', () => {
   assert.equal(both(`${DEBIT} It is not reversed to your card.`), 'expense 25000 / expense 25000');
   assert.equal(both(`${DEBIT} It is being reversed to your card.`), 'expense 25000 / expense 25000');
