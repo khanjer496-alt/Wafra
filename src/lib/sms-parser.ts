@@ -2458,8 +2458,16 @@ const REFUND_SIDE_NOTE_COMPLETED_RE =
 // is conditional, negated, future or still in process, beside a separate debit, is a side note too: the bare "reversal"
 // must not turn the debit into income. The refund-note rules above are unchanged.
 const REVERSAL_SIDE_NOTE_WORD_RE = /\breversal\b/i;
-const REVERSAL_SIDE_NOTE_IN_PROCESS_RE =
-  /\b(?:is|are)\s+(?:(?:still|currently|now)\s+)?(?:under\s+(?:process(?:ing)?|review)|in\s+(?:process|progress)|being\s+(?:processed|reviewed)|pending|awaiting)\b|\b(?:has|have)\s+been\s+(?:initiated|submitted)\b/i;
+// In-process statuses of a refund or reversal (RC 396 F2; Change Reviewer ad205bc6, Reviewer 85a61c6d). EN: after "is/are",
+// after ":", "-" or "Status:", or bare "under/in process|progress"; a request verb ("has been raised/requested/lodged …",
+// a bare "initiated" not "initiated by"). AR (post-fold): قيد/تحت … and جاري المعالجة/التنفيذ.
+const EN_IN_PROCESS_STATUS = String.raw`(?:under[-\s]+(?:process(?:ing)?|review)|in[-\s]+(?:process|progress|queue)|being\s+(?:processed|reviewed|initiated)|pending|awaiting|awaited|on\s+hold)\b`;
+const EN_IN_PROCESS_LEAD = String.raw`(?:\b(?:is|are)\s+(?:(?:still|currently|now)\s+)?|\s*[:\-–]\s*(?:status\s*[:\-–]?\s*)?|\bstatus\s*(?:is\s+|[:\-–]\s*)|\s(?=(?:under|in)[-\s]+(?:process|progress)))`;
+const EN_IN_PROCESS_REQUESTED = String.raw`\b(?:has\s+been|have\s+been|was|were)\s+(?:initiated|submitted|requested|raised|lodged|registered|logged)\b|\binitiated\b(?!\s+by)`;
+const AR_IN_PROCESS_STATUS = `(?<![${AR_LETTER}])(?:(?:قيد|تحت)\\s+(?:ال)?(?:انتظار|معالجه|تنفيذ|اجراء|مراجعه|دراسه)|جار(?:ي)?\\s+(?:ال)?(?:معالجه|تنفيذ))(?![${AR_LETTER}])`;
+const REVERSAL_SIDE_NOTE_IN_PROCESS_RE = new RegExp(`${EN_IN_PROCESS_LEAD}${EN_IN_PROCESS_STATUS}|${EN_IN_PROCESS_REQUESTED}`, 'i');
+/** A debit sentence that itself states a reversal credit ("reversal of/for …", "reversed"), not "a reversal fee". */
+const REVERSAL_CREDIT_PHRASE_RE = /\breversal\s+(?:of|for)\b|\breversed\b/i;
 function refundSideNotes(body: string): { body: string; ambiguous: boolean } {
   if (!REFUND_SIDE_NOTE_WORD_RE.test(body) && !REVERSAL_SIDE_NOTE_WORD_RE.test(body)) return { body, ambiguous: false };
   const sentences: Array<{ start: number; text: string }> = [];
@@ -2487,7 +2495,7 @@ function refundSideNotes(body: string): { body: string; ambiguous: boolean } {
     }
   }
   const separateDebitForReversal = sentences.some(({ text }) => !REFUND_SIDE_NOTE_WORD_RE.test(text) &&
-    !REVERSAL_SIDE_NOTE_WORD_RE.test(text) && REFUND_SIDE_NOTE_DEBIT_RE.test(text) && !REFUND_SIDE_NOTE_RETURNED_RE.test(text) &&
+    !REVERSAL_CREDIT_PHRASE_RE.test(text) && REFUND_SIDE_NOTE_DEBIT_RE.test(text) && !REFUND_SIDE_NOTE_RETURNED_RE.test(text) &&
     refundAmounts(text).length > 0);
   for (const { start: at, text } of separateDebitForReversal ? sentences : []) {
     const word = REVERSAL_SIDE_NOTE_WORD_RE.exec(text);
@@ -6636,22 +6644,37 @@ const NOTICE_REVERSAL_REQUEST_RE = /\b(?:reversal|refund|dispute|chargeback)\s+r
  * the debit to post.
  */
 const NOTICE_REFUND_IN_PROCESS_RE = new RegExp(
-  String.raw`\b(?:refund|reversal)s?\b(?:[^.\n]|\.(?=\d)){0,80}?\b(?:is|are)\s+(?:(?:still|currently|now)\s+)?` +
-    String.raw`(?:under\s+(?:process(?:ing)?|review)|in\s+(?:process|progress)|being\s+(?:processed|reviewed)|pending|awaiting)\b` +
-    String.raw`|\b(?:refund|reversal)s?\b(?:[^.\n]|\.(?=\d)){0,80}?\b(?:has\s+been|have\s+been|was|were)\s+(?:initiated|submitted)\b` +
-    `|(?<![${AR_LETTER}])(?:عكس|استرداد|استرجاع|ارجاع|اعاده)(?![${AR_LETTER}])(?:[^.\\n؟!]|\\.(?=\\d)){0,80}?(?<![${AR_LETTER}])` +
-    `(?:قيد\\s+(?:ال)?(?:انتظار|معالجه|تنفيذ|اجراء|مراجعه)|تحت\\s+(?:ال)?(?:اجراء|معالجه|مراجعه|تنفيذ))(?![${AR_LETTER}])`,
+  String.raw`\b(?:refund|reversal)s?\b(?:[^.\n;]|\.(?=\d)){0,80}?(?:${EN_IN_PROCESS_LEAD}${EN_IN_PROCESS_STATUS}|${EN_IN_PROCESS_REQUESTED})` +
+    `|(?<![${AR_LETTER}])(?:عكس|استرداد|استرجاع|ارجاع|اعاده)(?![${AR_LETTER}])(?:[^.\\n؟!،؛;]|\\.(?=\\d)){0,80}?${AR_IN_PROCESS_STATUS}`,
   'i',
 );
+/** The refund or reversal noun, which must come before the figure for the clause to be about this money. */
+const NOTICE_REFUND_NOUN_RE = new RegExp(`\\b(?:refund|reversal)s?\\b|(?<![${AR_LETTER}])(?:عكس|استرداد|استرجاع|ارجاع|اعاده)(?![${AR_LETTER}])`, 'i');
+/** A completed refund or reversal credit in the same clause ("… which was pending, has now been credited …", "تم استرداد …"). */
+const NOTICE_REFUND_COMPLETED_RE = new RegExp(
+  String.raw`\b(?:has|have|had)\s+(?:(?:now|already|just)\s+)?been\s+(?:(?:successfully|fully|now)\s+)?(?:credited|refunded|reversed|returned|deposited)\b` +
+    String.raw`|\b(?:was|were)\s+(?:(?:successfully|fully|now)\s+)?(?:credited|refunded|reversed|returned|deposited)\b` +
+    String.raw`|\band\s+(?:has\s+been\s+|was\s+)?(?:credited|refunded|reversed|returned|deposited)\s+(?:back\s+)?(?:to|into)\b` +
+    `|(?<![${AR_LETTER}])تم\\s+(?:عكس|استرداد|استرجاع|ارجاع|ايداع|اضافه|اعاده)(?![${AR_LETTER}])`,
+  'i',
+);
+/** The figure's clause, up to the first ";" or "،" after the figure, says this refund or reversal is still in process. */
+function refundInProcessClause(core: string, lead: string): boolean {
+  const stop = core.slice(lead.length).search(/[;؛،]/);
+  const head = stop < 0 ? core : core.slice(0, lead.length + stop);
+  return NOTICE_REFUND_NOUN_RE.test(lead) && NOTICE_REFUND_IN_PROCESS_RE.test(head) && !NOTICE_REFUND_COMPLETED_RE.test(head);
+}
 /**
- * The body with every sentence that says a refund or reversal is still in process blanked: such a sentence cannot make the
- * message a reversal ("Purchase of AED 40.00 at NOON. Reversal of AED 40.00 is under process." is the purchase). RC 396 F2.
+ * The body with every sentence (or ";"/"،" part) that says a refund or reversal is still in process, and states no completed
+ * credit, blanked, and "reversal fee/charge" blanked: neither can make the message a reversal ("Purchase of AED 40.00 at
+ * NOON. Reversal of AED 40.00 is under process." is the purchase; "… debited … for a reversal fee." is a debit). RC 396 F2.
  */
 function withoutInProcessRefundSentences(body: string): string {
-  let out = body;
+  let out = body.replace(/\breversal\s+(?:fees?|charges?)\b/gi, (fee) => ' '.repeat(fee.length));
   let start = 0;
-  for (const end of [...[...body.matchAll(REFUND_SENTENCE_BREAK_RE)].map((match) => match.index! + match[0].length), body.length]) {
-    if (end > start && NOTICE_REFUND_IN_PROCESS_RE.test(body.slice(start, end))) {
+  for (const end of [...[...body.matchAll(/[.!?](?=\s|$)|[;؛،]|\n/g)].map((match) => match.index! + match[0].length), body.length]) {
+    const text = body.slice(start, end);
+    if (end > start && NOTICE_REFUND_IN_PROCESS_RE.test(text) && !NOTICE_REFUND_COMPLETED_RE.test(text)) {
       out = out.slice(0, start) + ' '.repeat(end - start) + out.slice(end);
     }
     start = Math.max(start, end);
@@ -6770,7 +6793,7 @@ function moneyNoticeKindInBody(text: string): MoneyNoticeKind | null {
   // The ask may sit before the figure, after a blank line, or behind a bar.
   if (NOTICE_P2P_IN_RE.test(clause) &&
     NOTICE_UNCLAIMED_RE.test(principal.before.slice(-160) + ' ' + clause + ' ' + principal.after.slice(0, 160))) return 'unclaimed';
-  if (NOTICE_NOT_YET_RE.test(core) || NOTICE_REFUND_IN_PROCESS_RE.test(core) || NOTICE_UNDER_PROCESS_RE.test(body) ||
+  if (NOTICE_NOT_YET_RE.test(core) || refundInProcessClause(core, lead) || NOTICE_UNDER_PROCESS_RE.test(body) ||
     NOTICE_STATUS_PENDING_RE.test(body)) return 'not-yet';
   // "A charge of QAR 701.46 at SPOTIFY renews tomorrow": an upcoming
   // renewal, unless the clause also says the charge was taken.
