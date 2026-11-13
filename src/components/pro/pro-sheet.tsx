@@ -104,6 +104,10 @@ function ProSheetSession({ feature, visible, onClose }: {
             busy={billingAction === 'purchase'}
             onPress={ctaMode === 'retry' ? () => void retryOffers() : () => void buySelectedPlan()}
           />
+          {notice?.tone === 'neutral' && (
+            <ThemedText type="meta" testID="pro-sheet-purchase-note" accessibilityLiveRegion="polite"
+              style={[styles.purchaseNote, { color: band.textSecondary }]}>{notice.body}</ThemedText>
+          )}
           <EButton palette={band} variant="quiet" label={t('restorePurchase')} disabled={busy}
             busy={billingAction === 'restore'} onPress={() => void restore()} testID="pro-sheet-restore" />
           <EButton palette={band} variant="quiet" label={words.proSheetNotNow} disabled={busy}
@@ -126,7 +130,7 @@ function ProSheetSession({ feature, visible, onClose }: {
         <ProPlanOptions checkout={checkout} palette={band} testIDPrefix="pro-sheet-plan" />
       )}
 
-      {notice && (
+      {notice && notice.tone !== 'neutral' && (
         <View
           accessibilityRole="alert"
           accessibilityLiveRegion="polite"
@@ -178,6 +182,7 @@ function ProSheetFrame({ palette, title, visible, busy, onClose, footer, childre
 
 const styles = StyleSheet.create({
   body: { gap: 14, paddingBottom: 8 },
+  purchaseNote: { textAlign: 'center' },
   notice: { gap: 4, borderWidth: StyleSheet.hairlineWidth, borderRadius: 16, padding: 16 },
   actions: { gap: 4 },
   links: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 18, alignItems: 'center' },

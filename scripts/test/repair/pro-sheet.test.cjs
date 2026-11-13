@@ -75,14 +75,15 @@ const OFFERS = [
 ];
 
 function sheetHarness({ language = 'en', feature = 'capture', offers = OFFERS, legal = false, platform = 'ios', billingAction = null,
-  selectedPlan = 'yearly', largeText = false, surface = 'sheet', available = true, laterOffers = null } = {}) {
+  selectedPlan = 'yearly', largeText = false, surface = 'sheet', available = true, laterOffers = null, notice = null,
+  outcome = 'cancelled' } = {}) {
   // State slots: the sheet's previous feature (0) and open session (1), then
   // useProCheckout's billingAction (2), offers (3), offerState (4),
   // selectedPlan (5) and notice (6). An open sheet is rendered as the session
   // that opening started.
   const offset = surface === 'sheet' ? 2 : 0;
   const states = { [offset]: billingAction, [offset + 1]: offers, [offset + 2]: offers.length ? 'ready' : 'unavailable',
-    [offset + 3]: selectedPlan };
+    [offset + 3]: selectedPlan, [offset + 4]: notice };
   if (surface === 'sheet' && feature) Object.assign(states, { 0: feature, 1: { feature, id: 1 } });
   const h = createWorkflowHarness({ language, platform, largeText, state: { pro: false, founderPro: false }, states });
   const d = h.deps;
@@ -95,7 +96,7 @@ function sheetHarness({ language = 'en', feature = 'capture', offers = OFFERS, l
   d['@/components/superwall-billing-context'] = { useWafraBilling: () => ({
     available, configured: available, configurationError: null,
     fetchProOffers: async () => { fetches.push(1); return laterOffers ?? offers; },
-    purchasePro: async (productId) => { purchases.push(productId); return 'cancelled'; },
+    purchasePro: async (productId) => { purchases.push(productId); return outcome; },
     restorePro: async () => null,
   }) };
   d['@/components/ui/bottom-sheet'] = { BottomSheet: (p) => (p.visible ? h.jsx('BottomSheet', { ...p, children: [p.children, p.footer] }) : null) };
@@ -228,6 +229,71 @@ test('buying from the sheet refuses without legal links and otherwise goes throu
   walk(ready.tree).find((n) => n.props?.testID === 'pro-sheet-buy').props.onPress();
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(ready.purchases, ['fixture.yearly']);
+});
+
+// A cancelled answer (the store's, or one the SDK gave without a reason) is shown as one calm line under the buy
+// button: no title, no alert role, no error styling. Every failure keeps its titled alert box.
+for (const surface of ['sheet', 'screen']) for (const language of ['en', 'ar']) {
+  const ids = surface === 'sheet'
+    ? { buy: 'pro-sheet-buy', note: 'pro-sheet-purchase-note' } : { buy: 'pro-buy', note: 'pro-purchase-note' };
+  test(`${surface}/${language}: a cancelled purchase sets the neutral notice and nothing else`, async () => {
+    const run = sheetHarness({ surface, language, legal: true });
+    walk(run.tree).find((n) => n.props?.testID === ids.buy).props.onPress();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(run.purchases, ['fixture.yearly']);
+    const notices = run.h.events.filter((e) => e[0] === 'state' && e[2] && typeof e[2] === 'object' && 'tone' in e[2]);
+    assert.equal(notices.length, 1, 'exactly one neutral notice is set');
+    const [, , notice] = notices[0];
+    assert.equal(notice.title, '');
+    assert.equal(notice.body, run.t('purchaseNotCompleted'));
+    assert.equal(notice.tone, 'neutral');
+    assert.deepEqual(Object.keys(notice).sort(), ['body', 'title', 'tone']);
+    assert.ok(!run.h.events.some((e) => e[0] === 'state' && e[2]?.title === run.t('purchaseFailed')), 'a cancel is not the purchaseFailed notice');
+  });
+
+  test(`${surface}/${language}: the neutral notice renders as one plain line under the buy button, not as an alert`, () => {
+    const probe = sheetHarness({ surface, language, legal: true });
+    const notice = { title: '', body: probe.t('purchaseNotCompleted'), tone: 'neutral' };
+    const { tree, t } = sheetHarness({ surface, language, legal: true, notice });
+    const nodes = walk(tree);
+    const note = nodes.find((n) => n.props?.testID === ids.note);
+    assert.ok(note, 'the line is drawn');
+    assert.equal(text(note), t('purchaseNotCompleted'));
+    assert.notEqual(note.props.accessibilityRole, 'alert');
+    assert.ok(!nodes.some((n) => n.props?.accessibilityRole === 'alert'), 'no alert box for a cancel');
+    const order = nodes.map((n) => n.props?.testID);
+    assert.ok(order.indexOf(ids.buy) >= 0 && order.indexOf(ids.note) > order.indexOf(ids.buy), 'it sits after the buy button');
+    const button = nodes.find((n) => n.props?.testID === ids.buy);
+    assert.notEqual(button.props.disabled, true, 'the button is idle again');
+    assert.ok(!text(tree).includes(t('purchaseFailed')), 'no failure wording');
+  });
+
+  test(`${surface}/${language}: a failed purchase still shows the titled alert and no neutral line`, () => {
+    const probe = sheetHarness({ surface, language, legal: true });
+    const notice = { title: probe.t('purchaseFailed'), body: probe.t('purchaseFailedBody') };
+    const { tree } = sheetHarness({ surface, language, legal: true, notice });
+    const nodes = walk(tree);
+    assert.ok(nodes.some((n) => n.props?.accessibilityRole === 'alert'));
+    assert.ok(!nodes.some((n) => n.props?.testID === ids.note));
+  });
+}
+
+for (const surface of ['sheet', 'screen']) test(`${surface}: a failed purchase answer reaches the purchaseFailed notice`, async () => {
+  const run = sheetHarness({ surface, legal: true, outcome: 'failed' });
+  walk(run.tree).find((n) => n.props?.testID === (surface === 'sheet' ? 'pro-sheet-buy' : 'pro-buy')).props.onPress();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(run.h.events.some((e) => e[0] === 'state' && e[2]?.title === run.t('purchaseFailed')));
+});
+
+test('the neutral cancel line is English and Arabic and carries no charge promise', () => {
+  const { h } = sheetHarness();
+  const { S } = { S: h.deps['@/lib/i18n'] };
+  const en = S.t('purchaseNotCompleted');
+  assert.match(en, /not completed/i);
+  assert.doesNotMatch(en, /charged|refund|free/i);
+  const ar = sheetHarness({ language: 'ar' }).t('purchaseNotCompleted');
+  assert.match(ar, /[\u0600-\u06FF]/);
+  assert.notEqual(ar, en);
 });
 
 test('while a purchase runs the sheet cannot be dismissed or left', () => {

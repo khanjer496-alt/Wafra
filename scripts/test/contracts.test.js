@@ -2035,9 +2035,14 @@ ok('the spoken label matches the visible repayment exception and direction',
       /missingPlans/.test(code(pro)) &&
       !/\.filter\(\(offer\): offer is ProPlanOffer => offer != null\)/.test(pro));
   ok('a cancelled purchase and a deferred one are not reported as failures',
-    /outcome === 'cancelled'\) return;/.test(code(pro)) &&
+    // A cancel is answered with one calm neutral line (no title, no alert box), never with the purchaseFailed notice.
+    /outcome === 'cancelled'\) \{\s*setNotice\(\{ title: '', body: t\('purchaseNotCompleted'\), tone: 'neutral' \}\);\s*return;\s*\}/.test(code(pro)) &&
+      !/outcome === 'cancelled'[^\n]*purchaseFailed/.test(code(pro)) &&
       /purchasePendingTitle/.test(pro) &&
       /result\.type === 'pending'\) return 'pending'/.test(code(provider)));
+  ok('the neutral cancel line is English and Arabic and promises nothing about charges',
+    /purchaseNotCompleted: \{\s*en: '[^']+',\s*ar: '[^']*[\u0600-\u06FF][^']*',/.test(strings) &&
+      !/purchaseNotCompleted: \{[^}]*(charged|refund|free of charge|خصم|مجان)/i.test(strings));
   ok('an unconfirmed entitlement never guarantees that the store charged nothing',
     !/Nothing has been charged/.test(strings) && !/لم يتم خصم أي مبلغ/.test(strings));
   ok('the paywall exposes one live announcement path instead of announcing twice',
