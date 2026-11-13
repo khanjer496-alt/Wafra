@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: fae700159dc9c09f4d8b573b3a28f11fd7cd37bbe6101b64e683911dc6e4e756
+// Generated from normal shipping TypeScript. Source SHA-256: 9c054aa39ca2508d988f1162a0ff38948f21ae3fc494968c95f5009e30108b2a
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -12022,9 +12022,20 @@ const EN_COMPLETED_AUXILIARY_RE = /^\s*(?:(?:has|have|had)\s+(?:now\s+)?been|was
 const EN_LOWERCASE_MODAL_RE = /\b(?:will|can|may|shall|should|would|could|must)\b|['’]ll\b/;
 const isAllCapsSentence = (sentence) => /[A-Z]/.test(sentence) && !/[a-z]/.test(sentence);
 const EN_CAPS_LEADER_RE = /(?:^\s*|[,;:]\s*)(?:IF|ONCE|WHEN(?:EVER)?|AFTER|UNTIL|UNLESS|WHETHER|AS\s+SOON\s+AS)(?![A-Za-z])/g;
-const EN_CAPS_MODAL_RE = /\b(?:WILL|CAN|SHALL|SHOULD|WOULD|COULD|MUST)\b|['’]LL\b|\bMAY\s+(?:NOT\s+|ALSO\s+)?(?:BE|HAVE|TAKE|REFLECT|APPEAR|SHOW|RECEIVE|CHECK|CONTACT|CALL|VIEW|USE|NEED|GET|SEE)\b/;
-const EN_TRAILING_CONDITION_RE = /\b(?:if|once|when|provided(?:\s+that)?)\s+(?:(?:it|this|they|the\s+\w+)\s+(?:is|are|has\s+been|gets?)\s+)?(?:approved|authori[sz]ed|verified|confirmed|cleared|accepted|validated)\b|\b(?:upon|subject\s+to)\s+(?:(?:the|your|merchant|bank)\s+)?(?:approval|verification|confirmation|clearance|validation)\b/i;
+const EN_CAPS_MODAL_RE = /(?<!\b(?:BY|FROM|AT)\s+)\b(?:WILL|CAN|SHALL|SHOULD|WOULD|COULD|MUST)\b|['’]LL\b|\bMAY\s+(?:NOT\s+|ALSO\s+)?(?:BE|HAVE|TAKE|REFLECT|APPEAR|SHOW|RECEIVE|CHECK|CONTACT|CALL|VIEW|USE|NEED|GET|SEE)\b/;
+const EN_TRAILING_CONDITION_RE = /\b(?:if|once|when|provided(?:\s+that)?)\s+(?:(?:it|this|they|the\s+\w+)\s+(?:is|are|has\s+been|gets?)\s+)?(?:approved|authori[sz]ed|verified|confirmed|cleared|accepted|validated)\b(?!\s+by\s+you\b)|\b(?:upon|subject\s+to)\s+(?:(?:the|your|merchant|bank)\s+)?(?:approval|verification|confirmation|clearance|validation)\b/i;
 const EN_TIME_WINDOW_RE = /\bwithin\s+(?:the\s+next\s+)?\d+(?:\s*[-–]\s*\d+)?\s+(?:working\s+|business\s+|banking\s+)?(?:days?|hours?|weeks?)\b/i;
+const EN_DISPLAY_VERB_RE = /\b(?:will|should|may|can|might|could|would)\s+(?:only\s+|also\s+)?(?:reflect|appear|show|be\s+(?:visible|available|reflected|shown|displayed))\b/i;
+const EN_REFUND_WORD_RE = /\b(?:refund\w*|charge\s*back\w*)\b/i;
+const EN_OTHER_SUBJECT_CLAUSE_RE = /(?:[;,]|\band\b)\s*(?:and\s+)?(?:your|the)\s+(?:[a-z]+\s+){0,2}?(?:will|shall|would|can|may|is|are|has)\b/gi;
+const EN_MONEY_WORD_RE = /\b(?:credit\w*|refund\w*|deposit\w*|revers\w*|return\w*|process\w*|charge\s*back\w*|amount|funds?|money|balance|payment|transaction|dispute|claim|request|case|complaint)\b/i;
+function creditOwnTail(tail) {
+    for (const clause of tail.matchAll(EN_OTHER_SUBJECT_CLAUSE_RE)) {
+        if (!EN_MONEY_WORD_RE.test(tail.slice(clause.index)))
+            return tail.slice(0, clause.index);
+    }
+    return tail;
+}
 function leaderGovernsCredit(sentence, leader, clause) {
     const word = leader[0].replace(/^[^\p{L}]+/u, '');
     const leaderEnd = leader.index + leader[0].length;
@@ -12075,6 +12086,8 @@ const AR_INSTRUMENT_NUMBER_RE = new RegExp(`(?:بطاق|حساب)[${AR_LETTER}]*
 const AR_BALANCE_LINE_RE = new RegExp(`${AR_NB}(?:ال)?(?:رصيد|حد)\\s+(?:ال)?متاح${AR_NA}`);
 const AR_TRAILING_CONDITION_RE = new RegExp(`${AR_NB}(?:في\\s+حال|حال|عند|بشرط|شرط)\\s+(?:ال)?(?:موافقه|اعتماد|تحقق|تاكيد|قبول)${AR_NA}`);
 const AR_TIME_WINDOW_RE = new RegExp(`${AR_NB}خلال\\s+\\d+(?:\\s*[-–]\\s*\\d+)?\\s+(?:ايام|يوم|ساعه|ساعات|اسابيع|اسبوع)${AR_NA}`);
+const AR_DISPLAY_VERB_RE = new RegExp(`${AR_NB}و?(?:سيظهر|ستظهر|سينعكس|ستنعكس|يظهر|تظهر|سوف\\s+(?:يظهر|تظهر|ينعكس|تنعكس))${AR_NA}`);
+const AR_INFORM_BEFORE_RE = new RegExp(`${AR_NB}(?:اعلام|ابلاغ|اخبار|افاده|نفيد|نحيط|نعلم|نخبر|نوكد|علما)[${AR_LETTER}]*\\s*[,:]?\\s*$`);
 const AR_PROCESSED_NOT_YET_RE = new RegExp(`${AR_NB}(?:سيظهر|ستظهر|سينعكس|ستنعكس|سيضاف|ستضاف|سيتم\\s+(?:ايداع|اضافه|اظهار))${AR_NA}|${AR_NB}قد\\s+يستغرق[^.\\n]{0,40}?(?:يوم|ايام)${AR_NA}`);
 const AR_VERB_GLOSS = {
     استرداد: 'refunded', استرجاع: 'refunded', ايداع: 'credited', ارجاع: 'returned', اعاده: 'returned', عكس: 'reversed', معالجه: 'processed',
@@ -12132,7 +12145,9 @@ function arCreditClauses(sentence, debitBeside = false) {
 function arCreditSettlement(sentence, clause, rawAfter) {
     const after = foldOrthography(rawAfter);
     const lead = sentence.slice(0, clause.start);
-    const leaders = [...lead.matchAll(AR_CONDITIONAL_RE)];
+    const answered = AR_FUTURE_MAIN_CLAUSE_RE.test(sentence.slice(clause.end));
+    const leaders = [...lead.matchAll(AR_CONDITIONAL_RE)]
+        .filter((leader) => answered || !/^و?ان$/.test(leader[0]) || !AR_INFORM_BEFORE_RE.test(lead.slice(0, leader.index)));
     const last = leaders[leaders.length - 1];
     const betweenLeaderAndCredit = last ? lead.slice(last.index + last[0].length) : '';
     if (last && !betweenLeaderAndCredit.includes(',') &&
@@ -12155,7 +12170,9 @@ function arCreditSettlement(sentence, clause, rawAfter) {
     }
     if (AR_TRAILING_CONDITION_RE.test(tail))
         return { verdict: 'not-settled', reason: 'conditional' };
-    if (AR_TIME_WINDOW_RE.test(tail) && clause.verbs.some((verb) => verb === 'refunded' || verb === 'returned' || verb === 'reversed')) {
+    const windowMatch = AR_TIME_WINDOW_RE.exec(tail);
+    if (windowMatch && !AR_DISPLAY_VERB_RE.test(tail.slice(0, windowMatch.index)) &&
+        clause.verbs.some((verb) => verb === 'refunded' || verb === 'returned' || verb === 'reversed')) {
         return { verdict: 'not-settled', reason: 'pending' };
     }
     if (clause.verbs.every((verb) => verb === 'processed')) {
@@ -12192,10 +12209,12 @@ function creditSettlement(sentence, clause, after = '') {
         return { verdict: 'refused', reason: 'third-party' };
     if (refundCreditNotFinal((tail + after).replace(EN_CREDIT_REASON_RE, ' ')))
         return { verdict: 'refused', reason: 'taken-back' };
-    if (EN_TRAILING_CONDITION_RE.test(tail))
+    const ownTail = creditOwnTail(tail);
+    if (EN_TRAILING_CONDITION_RE.test(ownTail))
         return { verdict: 'not-settled', reason: 'conditional' };
-    if (EN_TIME_WINDOW_RE.test(tail) &&
-        (clause.verbs.some((verb) => /^(?:refund|revers|return)/.test(verb)) || EN_PROCESSED_REFUND_CONTEXT_RE.test(sentence))) {
+    const windowMatch = EN_TIME_WINDOW_RE.exec(ownTail);
+    if (windowMatch && !EN_DISPLAY_VERB_RE.test(ownTail.slice(0, windowMatch.index)) &&
+        (clause.verbs.some((verb) => /^(?:refund|revers|return)/i.test(verb)) || EN_REFUND_WORD_RE.test(sentence))) {
         return { verdict: 'not-settled', reason: 'pending' };
     }
     if (clause.verbs.every((verb) => verb.startsWith('process'))) {
