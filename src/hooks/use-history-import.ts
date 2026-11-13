@@ -1,5 +1,5 @@
 import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
-import { reviewClaimSourceKeys, reviewReceiptSettled, requiresReviewRetention, settleReviewStage, type ReviewStageReceipt } from '@/lib/alert-review-tray';
+import { reviewClaimSourceKeys, reviewReceiptReleasesPage, requiresReviewRetention, settleReviewStage, type ReviewStageReceipt } from '@/lib/alert-review-tray';
 import { collectLegacyReviewSourceKeys } from '@/lib/review-source-bindings';
 import { AppState as RNAppState, Platform } from 'react-native';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
@@ -164,8 +164,10 @@ export function useHistoryImport(): void {
         if (!canCommit()) return false;
         const unresolved = page.reviewCandidates.filter(requiresReviewRetention).map(item =>
           outcomes.find(entry => entry.sourceKey === canonicalCaptureSourceKey(item.sourceKey, item.observedAt)))
-          .filter(entry => !entry || !reviewReceiptSettled(entry.outcome));
+          .filter(entry => !entry || !reviewReceiptReleasesPage(entry.outcome));
         // An expired source is a terminal, disclosed loss: History continues.
+        // A refused source can never be admitted; holding the page for it would
+        // stop every later message (reviewReceiptReleasesPage).
         if (unresolved.length) return { paused: 'review-capacity' as const };
       }
       // Cropped candidates still live in the provider; do not skip their cursor.
@@ -205,7 +207,7 @@ export function useHistoryImport(): void {
       if (!canCommit() || (page.skippedKnownInboxReviewSourceKeys ?? []).some(key => !claims.has(key)) ||
           page.reviewCandidates.some(item => requiresReviewRetention(item) && !finalReviews.some(entry =>
             entry.sourceKey === canonicalCaptureSourceKey(item.sourceKey, item.observedAt) &&
-            reviewReceiptSettled(entry.outcome)))) return false;
+            reviewReceiptReleasesPage(entry.outcome)))) return false;
       const receipt = importBatch({
           ...nearMatches.plan.batch,
           parserRereadComplete: page.inboxHistoryComplete,

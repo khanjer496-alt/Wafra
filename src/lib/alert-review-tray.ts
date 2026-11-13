@@ -403,6 +403,19 @@ export const reviewSourceKeyOf = (item: Pick<ReviewEntry, 'sourceKey' | 'observe
  */
 export const reviewReceiptSettled = (outcome: ReviewSourceReceipt['outcome'] | undefined): boolean =>
   outcome === 'pending' || outcome === 'resolved' || outcome === 'expired';
+/**
+ * Whether a caller that holds a whole PAGE or cursor behind its sources (the
+ * Android first history import, a manual Import scan, the live inbox cursor,
+ * iOS History) may move past this source. A settled source may. So may a
+ * 'refused' one: the tray will never admit it (it failed Review validation,
+ * or its review id already belongs to another source), so holding the page
+ * cannot retain it and would freeze every later message behind it, as a
+ * single balance SMS did on Android RC 396. Only a missing receipt or a
+ * capacity deferral holds the page. Per-record holds (Wallet and relay ACKs)
+ * keep using reviewReceiptSettled: they withhold one record, not a page.
+ */
+export const reviewReceiptReleasesPage = (outcome: ReviewSourceReceipt['outcome'] | undefined): boolean =>
+  reviewReceiptSettled(outcome) || outcome === 'refused';
 export interface ReviewStageReceipt {
   admitted: number;
   durable: Promise<void>;
