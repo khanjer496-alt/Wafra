@@ -52,6 +52,42 @@ test('a Play build verifies the compiled flags in the AAB and APK before sealing
   assert.match(native.stdout + native.stderr, /native exporter must be compiled closed/);
 });
 
+test('the Play bundle builds ARM only and fails over 100,000,000 bytes or with x86 libraries', (t) => {
+  const build = steps[stepIndex('Build Play Store bundle (AAB)')];
+  assert.match(build.run, /bundleRelease -PreactNativeArchitectures=arm64-v8a,armeabi-v7a /);
+  const index = stepIndex('Verify the Play bundle is ARM only and under the upload limit');
+  assert.ok(index > stepIndex('Build Play Store bundle (AAB)') && index < stepIndex('Rename outputs'));
+  const check = steps[index];
+  assert.equal(check.if, PLAY_BUILD);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wafra-aab-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const aab = (name, entries) => {
+    const tree = path.join(dir, name);
+    for (const entry of entries) {
+      fs.mkdirSync(path.dirname(path.join(tree, entry)), { recursive: true });
+      fs.writeFileSync(path.join(tree, entry), 'x');
+    }
+    const file = path.join(dir, `${name}.aab`);
+    assert.equal(spawnSync('zip', ['-qr', file, '.'], { cwd: tree }).status, 0);
+    return file;
+  };
+  const run = (file) => spawnSync('bash', ['-c', check.run], { encoding: 'utf8', env: { ...process.env, WAFRA_AAB: file } });
+  const arm = ['base/lib/arm64-v8a/libhermes.so', 'base/lib/armeabi-v7a/libhermes.so', 'base/manifest/AndroidManifest.xml'];
+  assert.equal(run(aab('arm', arm)).status, 0);
+  const x86 = run(aab('x86', [...arm, 'base/lib/x86_64/libhermes.so']));
+  assert.equal(x86.status, 1);
+  assert.match(x86.stdout + x86.stderr, /contains x86 native libraries/);
+  const noV7 = run(aab('no-v7', [arm[0], arm[2]]));
+  assert.equal(noV7.status, 1);
+  assert.match(noV7.stdout + noV7.stderr, /no base\/lib\/armeabi-v7a libraries/);
+  const big = path.join(dir, 'big.aab');
+  fs.closeSync(fs.openSync(big, 'w'));
+  fs.truncateSync(big, 100_000_001);
+  const oversize = run(big);
+  assert.equal(oversize.status, 1);
+  assert.match(oversize.stdout + oversize.stderr, /over 100,000,000/);
+});
+
 test('verify-production fails closed on any flag that is on, missing or in both states', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wafra-flags-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
