@@ -88,3 +88,14 @@ test('RC 396 F2 controls: a completed reversal or refund still posts its 40.00',
     'تم استرداد مبلغ 40.00 درهم إلى بطاقتك. طلبك الآخر قيد المراجعة.',
   ]) assert.equal(paths(body).js, 'income 4000 / income 4000', body);
 });
+
+test('RC 396 F2 controls: a refund in process as a side note beside a debit leaves the debit to post', () => {
+  for (const body of [
+    'AED 40.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. The refund is being processed to your card.',
+    'AED 40.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. Your reversal is under process.',
+    'AED 40.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. If the refund is being processed to your card, you will receive an SMS.',
+    // Red on 49e11028: the bare "reversal" in an unsettled note turned the debit into income.
+    'AED 40.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. Your reversal request is under process.',
+    'AED 40.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. The reversal is pending with the merchant.',
+  ]) assert.equal(paths(body, 'ENBD').js, 'expense 4000 / expense 4000', body);
+});
