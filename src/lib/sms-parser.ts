@@ -2727,8 +2727,11 @@ const AR_DISPLAY_VERB_RE = new RegExp(`${AR_NB}و?(?:سيظهر|ستظهر|سي�
 const AR_INFORM_BEFORE_RE = new RegExp(`${AR_NB}(?:اعلام|ابلاغ|اخبار|افاده|نفيد|نحيط|نعلم|نخبر|نوكد|علما)[${AR_LETTER}\\u064B-\\u0652]*\\s*[,:]?\\s*$`);
 const AR_ANSWER_RE = new RegExp(`${AR_NB}ف?(?:س[يتن][${AR_LETTER}]{2,}|سوف\\s+[${AR_LETTER}]+|يرجي|الرجاء|يمكنك|بامكانك|لا\\s+داعي)|` +
   `${AR_NB}ف?(?:نرجو|اعتبر)${AR_NA}|${AR_NB}ف(?:تحقق|اتصل|تجاهل|راجع|تواصل|لا)${AR_NA}`);
-// The ف must lead an answer verb, not any ف-word ("في حال …", "فريق …", "فرعنا …") (Reviewer d2988328, Change Reviewer 879298d7).
-const AR_NEXT_ANSWER_RE = new RegExp(`^\\s*(?:ف(?:يرجي|الرجاء|نرجو|سوف|س[يتن][${AR_LETTER}]{2,}|تحقق|اتصل|تجاهل|راجع|تواصل|لا|اعتبر)|` +
+// A ف-led next sentence answers ان, except a courtesy line that opens with one of these whole words ("في حال …",
+// "فريق …", "فرعنا …", "فقط …") (Reviewer d2988328, Change Reviewer 879298d7). Any other ف-word, also with a diacritic,
+// stays an answer, so an unlisted one is refused rather than posted.
+const AR_NEXT_COURTESY_F = `(?:في|فريق|فريقنا|فرع|فرعنا|فروع|فروعنا|فقط)(?![${AR_LETTER}\\u064B-\\u0652])`;
+const AR_NEXT_ANSWER_RE = new RegExp(`^\\s*(?:(?!${AR_NEXT_COURTESY_F})ف[\\u064B-\\u0652]*[${AR_LETTER}]|` +
   `(?:ستصلك|سيصلك|ستتلقي|سوف\\s+(?:تصلك|يصلك|تتلقي)|سيتم\\s+(?:اشعارك|ابلاغك|اعلامك))${AR_NA})`);
 /** "سيظهر المبلغ في حسابك خلال 5-7 أيام عمل": the processed money is not there yet. */
 const AR_PROCESSED_NOT_YET_RE = new RegExp(
