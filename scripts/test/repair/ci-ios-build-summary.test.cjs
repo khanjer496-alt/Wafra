@@ -46,9 +46,44 @@ test('redacts the job secret values, long tokens and emails, and drops credentia
     assert.ok(!out.includes(secret), `leaked ${secret}`);
   }
   assert.match(out, /request failed for token \[redacted\]/);
-  assert.match(out, /\[redacted-long-token\]/);
+  assert.match(out, /\[redacted-token\]/);
   assert.match(out, /\[email\]/);
   assert.match(out, /^error lines: 4$/m);
+});
+
+test('redacts fragments, credential-named values and passwords that are not in the job env (public artifact)', () => {
+  const token = 'xA9kQ2mZ7vB4nL8pR1tY6uW3sE5dF0gH';
+  const keyLine = 'MIGTAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBHkwdwIBAQQg';
+  const log = [
+    `Error: partial ${token.slice(0, 25)} rejected`,
+    `error: key fragment ${keyLine.slice(0, 20)} bad`,
+    'Error: `fastlane run import_certificate certificate_path:/tmp/a.p12 certificate_password:Wafra2026! keychain_path:/tmp/k` exited with non-zero code: 1',
+    'error: login failed password=hunter2hunter',
+    'error: request token=abcdEFGH1234 refused',
+    'error: secret: s3cr3tValue99',
+    'error: p12 password "Kq9#x2!aP" wrong',
+    'error: security import /tmp/c.p12 -P Kq9x2aP -k /tmp/k',
+    'error: api_key: sk_live_abc123 denied',
+    'error: No signing certificate "Apple Distribution: Jane Q Developer (UV7YN4GQ66)" found',
+    'error: unrecognised gh token ghs_16C7e42F292c6912E7710c838347Ae178B4a here',
+  ].join('\n');
+  const out = summarize([{ name: 'f.log', text: log }], 1, [token, keyLine, 'ghs_16C7e42F292c6912E7710c838347Ae178B4a']);
+  for (const leak of [token.slice(0, 25), keyLine.slice(0, 20), 'Wafra2026!', 'hunter2hunter', 'abcdEFGH1234',
+    's3cr3tValue99', 'Kq9#x2!aP', 'Kq9x2aP', 'sk_live_abc123', 'Jane Q Developer', 'ghs_16C7e42F292c6912E7710c838347Ae178B4a']) {
+    assert.ok(!out.includes(leak), `leaked ${leak}`);
+  }
+  assert.match(out, /error: request token=\[redacted\] refused/);
+  assert.match(out, /Apple Distribution: \[identity\] \(UV7YN4GQ66\)/);
+});
+
+test('keeps file paths and long target names readable', () => {
+  const log = [
+    "/Users/runner/work/Wafra/Wafra/modules/wafra-widgets/ios/WafraPrivacyCover.swift:83:14: error: cannot find type 'ExpoAppDelegateSubscriber' in scope",
+    "error: Build input file cannot be found: '/Users/runner/Library/Developer/Xcode/DerivedData/ExpoModulesCore-ExpoModulesCore_privacy/Info.plist'",
+  ].join('\n');
+  const out = summarize([{ name: 'x.log', text: log }], 65);
+  assert.match(out, /modules\/wafra-widgets\/ios\/WafraPrivacyCover\.swift:83:14: error: cannot find type/);
+  assert.match(out, /ExpoModulesCore-ExpoModulesCore_privacy/);
 });
 
 test('caps entries and line length, and dedupes repeats', () => {
@@ -83,14 +118,15 @@ test('collects the given log plus nested .log files, skipping Pods and node_modu
 
     const keyFile = path.join(dir, 'key.p8');
     fs.writeFileSync(keyFile, '-----BEGIN PRIVATE KEY-----\nMIGTAgEAMBMGByqGSM49AgEGCCqG\n-----END PRIVATE KEY-----\n');
-    fs.writeFileSync(path.join(dir, 'work/logs/xcodebuild.log'), 'error: bad key MIGTAgEAMBMGByqGSM49AgEGCCqG here\nerror: token tok_secret_value\n');
+    fs.writeFileSync(path.join(dir, 'work/logs/xcodebuild.log'), 'error: bad key MIGTAgEAMBMGByqGSM49AgEGCCqG here\nerror: token tok_secret_value\nerror: gh ghs_fakeGithubToken000 used\n');
     const run = spawnSync(process.execPath, [script, path.join(dir, 'work')], {
       encoding: 'utf8',
-      env: { PATH: process.env.PATH, BUILD_EXIT: '1', EXPO_TOKEN: 'tok_secret_value', EXPO_ASC_API_KEY_PATH: keyFile },
+      env: { PATH: process.env.PATH, BUILD_EXIT: '1', EXPO_TOKEN: 'tok_secret_value', GH_TOKEN: 'ghs_fakeGithubToken000', EXPO_ASC_API_KEY_PATH: keyFile },
     });
     assert.equal(run.status, 0, run.stderr);
     assert.ok(!run.stdout.includes('MIGTAgEAMBMGByqGSM49AgEGCCqG'));
     assert.ok(!run.stdout.includes('tok_secret_value'));
+    assert.ok(!run.stdout.includes('ghs_fakeGithubToken000'));
     assert.match(run.stdout, /error: token \[redacted\]/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

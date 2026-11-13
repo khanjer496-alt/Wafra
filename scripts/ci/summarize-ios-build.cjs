@@ -20,21 +20,39 @@ const ERROR_LINE = new RegExp([
 ].join('|'), 'i');
 // An EAS build phase marker, e.g. "[INSTALL_PODS] Installing pods".
 const PHASE = /^\s*\[([A-Z][A-Z0-9_]{2,})\]/;
-// Never emit a line that names credential material, even after redaction.
-const DROP = /BEGIN [A-Z ]*PRIVATE KEY|\bauthorization\s*:|\bbearer\s+\S|\b(?:EXPO_TOKEN|ASC_KEY_P8|ASC_PRIVATE_KEY|EXPO_ASC_API_KEY_P8)\s*=/i;
+// The repository is public, so the artifact is too: fail closed. Never emit a
+// line that names credential material at all, even after redaction. This
+// covers fastlane's import_certificate command line, which carries the p12
+// password from EAS (not from this job's env, so it can't be matched by value).
+const DROP = /BEGIN [A-Z ]*PRIVATE KEY|\bauthorization\s*:|\bbearer\s+\S|password|passphrase|passwd|\bsecret|private[_-]?key|import_certificate|certificate_password|\bsecurity\s+(?:import|unlock-keychain|create-keychain)\b|\s-[pP]\s+\S|\b(?:EXPO_TOKEN|GH_TOKEN|GITHUB_TOKEN|ASC_KEY_P8|ASC_PRIVATE_KEY|EXPO_ASC_API_KEY_P8)\b/i;
+// Credential-named assignments that survive DROP (e.g. "token=…", "api_key: …").
+const NAMED_VALUE = /\b([\w.-]*(?:token|api[_-]?key|access[_-]?key|auth)[\w.-]*\s*[:=]\s*)("[^"]*"|'[^']*'|\S+)/gi;
+// The signing identity carries the developer's legal name.
+const SIGNING_IDENTITY = /\b(Apple (?:Distribution|Development)|iPhone (?:Distribution|Developer)):\s*[^(\n]+\(/g;
 
 function clean(line) {
   return line.replace(/(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]/g, '').replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '');
 }
 
 function redactor(secrets) {
-  const values = [...new Set(secrets.filter(v => typeof v === 'string' && v.trim().length >= 6).map(v => v.trim()))]
+  const values = [...new Set(secrets.filter(v => typeof v === 'string' && v.trim().length >= 4).map(v => v.trim()))]
     .sort((a, b) => b.length - a.length);
+  // Every 8-character window of every known secret: a run containing one is a
+  // fragment of that secret (e.g. a truncated token or one piece of a key line).
+  const windows = new Set();
+  for (const value of values) for (let i = 0; i + 8 <= value.length; i++) windows.add(value.slice(i, i + 8));
+  const fragment = run => { for (let i = 0; i + 8 <= run.length; i++) if (windows.has(run.slice(i, i + 8))) return true; return false; };
   return line => {
     let out = line;
     for (const value of values) out = out.split(value).join('[redacted]');
     return out
-      .replace(/[A-Za-z0-9+/_=-]{32,}/g, '[redacted-long-token]')
+      .replace(/[A-Za-z0-9+/=_-]{8,}/g, run => fragment(run) ? '[redacted]' : run)
+      .replace(NAMED_VALUE, '$1[redacted]')
+      .replace(SIGNING_IDENTITY, '$1: [identity] (')
+      // Unknown token-shaped runs: 20+ characters mixing letters and digits.
+      // "/" and "." split runs so file paths and target names stay readable;
+      // known secrets (including base64 key lines) are already caught above.
+      .replace(/[A-Za-z0-9+_=-]{20,}/g, run => /[0-9]/.test(run) && /[A-Za-z]/.test(run) ? '[redacted-token]' : run)
       .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[email]');
   };
 }
@@ -98,7 +116,7 @@ if (require.main === module) {
   const path = require('node:path');
   const exitCode = Number(process.env.BUILD_EXIT);
   if (!Number.isInteger(exitCode) || exitCode < 0 || exitCode > 255) throw new Error('BUILD_EXIT is required');
-  const secrets = ['EXPO_TOKEN', 'EXPO_ASC_KEY_ID', 'EXPO_ASC_ISSUER_ID', 'ASC_KEY_ID', 'ASC_ISSUER_ID']
+  const secrets = ['EXPO_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN', 'EXPO_ASC_KEY_ID', 'EXPO_ASC_ISSUER_ID', 'ASC_KEY_ID', 'ASC_ISSUER_ID']
     .map(name => process.env[name]);
   for (const keyPath of [process.env.EXPO_ASC_API_KEY_PATH, process.env.ASC_PRIVATE_KEY_PATH]) {
     try { if (keyPath) secrets.push(...fs.readFileSync(keyPath, 'utf8').split(/\r?\n/)); } catch { /* key already removed */ }
