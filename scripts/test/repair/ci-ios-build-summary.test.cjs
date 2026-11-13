@@ -73,7 +73,22 @@ test('redacts fragments, credential-named values and passwords that are not in t
     assert.ok(!out.includes(leak), `leaked ${leak}`);
   }
   assert.match(out, /error: request token=\[redacted\] refused/);
+  assert.match(out, /error lines withheld because they name credential material: [1-9]/);
   assert.match(out, /Apple Distribution: \[identity\] \(UV7YN4GQ66\)/);
+});
+
+test('masks slash-split unknown blobs and other legal-name forms', () => {
+  const log = [
+    'Error: unknown p12 blob MIIKTQIBAzCC/ChcGCSqGSIb3/DQEHAaCCCggE/ggoEMIIKADCC/BL8GCSqG',
+    'error: iOS Distribution: Jane Q Developer (UV7YN4GQ66) has expired',
+    'error: profile not associated with team "Jane Q Developer (Individual)"',
+    'error: Developer ID Application: Jane Q Developer (UV7YN4GQ66) invalid',
+  ].join('\n');
+  const out = summarize([{ name: 'g.log', text: log }], 1);
+  for (const leak of ['MIIKTQIBAzCC', 'ChcGCSqGSIb3', 'Jane Q Developer']) assert.ok(!out.includes(leak), `leaked ${leak}`);
+  assert.match(out, /\[redacted-blob\]/);
+  assert.match(out, /iOS Distribution: \[identity\] \(UV7YN4GQ66\)/);
+  assert.match(out, /team "\[team\]"/);
 });
 
 test('keeps file paths and long target names readable', () => {

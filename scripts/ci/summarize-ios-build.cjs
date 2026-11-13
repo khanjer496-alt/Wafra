@@ -28,7 +28,9 @@ const DROP = /BEGIN [A-Z ]*PRIVATE KEY|\bauthorization\s*:|\bbearer\s+\S|passwor
 // Credential-named assignments that survive DROP (e.g. "token=…", "api_key: …").
 const NAMED_VALUE = /\b([\w.-]*(?:token|api[_-]?key|access[_-]?key|auth)[\w.-]*\s*[:=]\s*)("[^"]*"|'[^']*'|\S+)/gi;
 // The signing identity carries the developer's legal name.
-const SIGNING_IDENTITY = /\b(Apple (?:Distribution|Development)|iPhone (?:Distribution|Developer)):\s*[^(\n]+\(/g;
+const SIGNING_IDENTITY = /\b(Apple (?:Distribution|Development)|iPhone (?:Distribution|Developer)|iOS (?:Distribution|Development)|Developer ID (?:Application|Installer)):\s*[^(\n]+\(/g;
+// A team named in quotes ("…team \"Jane Q Developer (Individual)\"") is the same legal name.
+const QUOTED_TEAM = /\b(team\s+)(["'])[^"'\n]+\2/gi;
 
 function clean(line) {
   return line.replace(/(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]/g, '').replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '');
@@ -49,6 +51,11 @@ function redactor(secrets) {
       .replace(/[A-Za-z0-9+/=_-]{8,}/g, run => fragment(run) ? '[redacted]' : run)
       .replace(NAMED_VALUE, '$1[redacted]')
       .replace(SIGNING_IDENTITY, '$1: [identity] (')
+      .replace(QUOTED_TEAM, '$1$2[team]$2')
+      // Unknown base64 blobs that "/" would otherwise split into short pieces:
+      // 24+ chars, not starting with "/" (paths do), mixing digits, upper and lower case.
+      .replace(/(^|[^A-Za-z0-9+/=])([A-Za-z0-9+=][A-Za-z0-9+/=]{23,})/g, (m, pre, run) =>
+        /[0-9]/.test(run) && /[a-z]/.test(run) && /[A-Z]/.test(run) && run.includes('/') ? `${pre}[redacted-blob]` : m)
       // Unknown token-shaped runs: 20+ characters mixing letters and digits.
       // "/" and "." split runs so file paths and target names stay readable;
       // known secrets (including base64 key lines) are already caught above.
@@ -63,6 +70,7 @@ function summarize(sources, exitCode, secrets = []) {
   const seen = new Set();
   let firstPhase = null;
   let truncated = false;
+  let withheld = 0;
   for (const { name, text } of sources) {
     let phase = null;
     const lines = text.split(/\r?\n/);
@@ -70,7 +78,8 @@ function summarize(sources, exitCode, secrets = []) {
       const line = clean(lines[i]);
       const marker = line.match(PHASE);
       if (marker) phase = marker[1];
-      if (!ERROR_LINE.test(line) || DROP.test(line)) continue;
+      if (!ERROR_LINE.test(line)) continue;
+      if (DROP.test(line)) { withheld++; continue; }
       const body = redact(line.trim()).slice(0, MAX_LINE);
       const key = `${phase}|${body}`;
       if (seen.has(key)) continue;
@@ -86,6 +95,7 @@ function summarize(sources, exitCode, secrets = []) {
     `phase of first error: ${firstPhase || 'none found'}`,
     `sources: ${sources.map(s => `${s.name} (${s.text.split(/\r?\n/).length} lines)`).join(', ') || 'none'}`,
     `error lines: ${entries.length}${truncated ? ` (capped at ${MAX_ENTRIES})` : ''}`,
+    `error lines withheld because they name credential material: ${withheld}`,
     '',
   ];
   return header.concat(entries).join('\n') + '\n';
