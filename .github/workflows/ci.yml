@@ -342,7 +342,7 @@ jobs:
           name: ios-app-icon-${{ github.sha }}
           path: ${{ runner.temp }}/ios-app-icon
           if-no-files-found: ignore
-          retention-days: 14
+          retention-days: 3
 
       - name: Install CocoaPods dependencies
         run: npx pod-install

@@ -60,8 +60,18 @@ if (!large.length) {
 console.log(`1024 px renditions: ${large.map(e => `${e.RenditionName || e.Name} (${e.Idiom || 'universal'}${e.Appearance ? ', ' + e.Appearance : ''})`).join('; ')}`);
 NODE
 
-ICTOOL="$(xcode-select -p)/usr/bin/ictool"
-test -x "$ICTOOL" || ICTOOL="$(xcode-select -p)/../Applications/Icon Composer.app/Contents/Executables/ictool"
+# Xcode's usr/bin/ictool is actool's front end and rejects --export-image;
+# the renderer is the one bundled in Icon Composer.app. Pick by capability.
+ICTOOL=""
+for candidate in "$(xcode-select -p)/../Applications/Icon Composer.app/Contents/Executables/ictool" "$(xcode-select -p)/usr/bin/ictool"; do
+  [ -x "$candidate" ] || continue
+  usage=$("$candidate" 2>&1 || true) # prints usage and exits non-zero
+  case "$usage" in *--export-image*) ICTOOL="$candidate"; break ;; esac
+done
+if [ -z "$ICTOOL" ]; then
+  echo "::error::no ictool with --export-image in $(xcode-select -p)"
+  exit 1
+fi
 for rendition in Default Dark TintedLight TintedDark ClearLight ClearDark; do
   "$ICTOOL" assets/wafra.icon --export-image --output-file "$OUT/renders/$rendition-1024.png" \
     --platform iOS --rendition "$rendition" --width 1024 --height 1024 --scale 1 >/dev/null
