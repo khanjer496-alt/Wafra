@@ -16,14 +16,9 @@ Before submission, record the current binary/library inventory, countries of dis
 
 The `ios-testflight.yml` "Verify the actual signed IPA and App Intent resources" step also runs the checker on the extracted signed app **after build, before submit/upload**. EAS local build signs internally, so this workflow cannot insert a pre-signing gate. `npm run ship:ios` now builds without auto-submission; use the checked workflow for any separately authorized upload. No real IPA or archive was built or checked in this code-fix task.
 
-`ios-submit-verified-artifact.yml` independently extracts the downloaded IPA and
-runs the current product-version checker before submission, including for older
-artifacts whose accompanying hash/signing report predates the checker. A matching
-hash report alone does not clear the version gate. Failure to extract exactly one
-host app, unresolved versions or any host/extension version mismatch stops the
-job before EAS submission.
+`ios-submit-verified-artifact.yml` was retired on 13 November 2026. The repository is public, so `ios-testflight.yml` no longer uploads the signed IPA as an artifact; it uploads only `verification.json`, and a failed submission means a rebuild. The old route's checks are no longer needed.
 
-These checks cover `ios-testflight.yml` and `ios-submit-verified-artifact.yml`.
+These checks cover `ios-testflight.yml`.
 Historical build120/121/150 direct-submit/public workflows remain unchecked
 legacy routes outside this fix; do not dispatch them or edit/push those workflow
 files for the RC (build120 also triggers on a matching push to main). This is not a

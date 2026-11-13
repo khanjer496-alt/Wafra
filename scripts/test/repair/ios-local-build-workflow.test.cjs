@@ -57,7 +57,7 @@ test('source and signing are pinned, and only a verified exact-source build may 
   assert.match(build, /--local --non-interactive/);
   assert.match(build, /--freeze-credentials/);
   const verify = steps.findIndex(s => s.name === 'Verify the actual signed IPA and App Intent resources');
-  const preserve = steps.findIndex(s => s.name === 'Preserve verified installer before submission');
+  const preserve = steps.findIndex(s => s.name === 'Preserve verification report before submission');
   const gate = steps.findIndex(s => s.name === 'Require successful exact-source CI before TestFlight submission');
   const submit = steps.findIndex(s => s.name === 'Submit the verified existing IPA to TestFlight');
   assert.ok(verify < preserve && preserve < gate && gate < submit);
@@ -77,7 +77,7 @@ test('Apple secrets stay in temporary owner-only files and out of uploaded artif
   assert.match(prepare, /0o600/);
   assert.ok(!/print\(|console\.log|echo .*ASC_KEY/.test(prepare));
   const upload = steps.find(s => s.uses === 'actions/upload-artifact@v4');
-  assert.equal(upload.with.path, 'artifacts/ios-local/');
+  assert.equal(upload.with.path, 'artifacts/ios-local/verification.json');
   const cleanup = steps.find(s => s.name === 'Remove temporary Apple API key');
   assert.equal(cleanup.if, 'always()');
   assert.match(cleanup.run, /RUNNER_TEMP.*wafra-local-asc\.p8/);
@@ -118,44 +118,29 @@ test('every dispatch refuses unverified submission routes before either build jo
   assert.match(oldIdRoute, /exit 1/);
 });
 
-test('artifact resubmission checks the downloaded product, including old self-consistent reports', () => {
-  const artifact = YAML.parse(fs.readFileSync(path.join(path.dirname(file), 'ios-submit-verified-artifact.yml'), 'utf8'));
-  const list = artifact.jobs.submit.steps;
-  const gate = list.findIndex(s => s.name === 'Verify downloaded product versions');
-  const downloadCheck = list.findIndex(s => s.name === 'Verify downloaded artifact');
-  const submit = list.findIndex(s => /eas submit/.test(s.run || ''));
-  assert.ok(gate > downloadCheck && gate < submit, 'downloaded IPA needs a product gate before submission');
-  assert.equal(list[gate].if, undefined, 'a failed product gate must stop submission');
-  assert.equal(list[submit].if, undefined, 'submission must retain implicit success()');
-  const os = require('node:os');
-  const python = process.platform === 'darwin' ? '/usr/bin/python3' : 'python3';
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wafra-artifact-version-test-'));
-  try {
-    for (const [host, widget, short, expected, appCount = 1] of [
-      ['192', '192', '1.0.0', true],
-      ['191', '1', '1.0.0', false],
-      ['192', '$(CURRENT_PROJECT_VERSION)', '1.0.0', false],
-      ['192', '192', '1.0', false],
-      ['192', '192', '1.0.0', false, 2],
-      ['192', '192', '1.0.0', false, 0],
-    ]) {
-      const ipa = path.join(dir, 'downloaded artifact.ipa');
-      const fixture = spawnSync(python, ['-c', `import plistlib,sys,zipfile
-with zipfile.ZipFile(sys.argv[1], 'w') as z:
- z.writestr('Payload/readme.txt','synthetic test fixture')
- for index in range(int(sys.argv[5])):
-  app='Wafra' if index == 0 else 'Other'
-  for name,build,short in [(f'Payload/{app}.app/Info.plist',sys.argv[2],'1.0.0'),(f'Payload/{app}.app/PlugIns/Widget.appex/Info.plist',sys.argv[3],sys.argv[4])]:
-   z.writestr(name,plistlib.dumps({'CFBundleVersion':build,'CFBundleShortVersionString':short}))
-`, ipa, host, widget, short, String(appCount)], {encoding: 'utf8'});
-      assert.equal(fixture.status, 0, fixture.stderr);
-      const result = spawnSync('bash', ['-eu', '-o', 'pipefail', '-c', list[gate].run], {
-        cwd: path.resolve(__dirname, '../../..'), encoding: 'utf8',
-        env: {...process.env, IPA_PATH: ipa, RUNNER_TEMP: dir,
-          PATH: process.platform === 'darwin' ? `/usr/bin:/bin:${process.env.PATH}` : process.env.PATH},
-      });
-      assert.equal(result.status === 0, expected, JSON.stringify({host,widget,short,appCount,stdout:result.stdout,stderr:result.stderr}));
-      assert.deepEqual(fs.readdirSync(dir), ['downloaded artifact.ipa'], 'extracted product is cleaned up');
+test('the public repo never receives the signed IPA, and the old resubmission route is retired', () => {
+  const upload = steps.find(s => s.name === 'Preserve verification report before submission');
+  assert.equal(upload.with.path, 'artifacts/ios-local/verification.json');
+  assert.ok(upload.with['retention-days'] <= 3);
+  const ipa = steps.find(s => s.id === 'ipa').run;
+  assert.match(ipa, /target=temp\/f'Wafra-\{version\}-\{number\}\.ipa'/);
+  assert.doesNotMatch(ipa, /artifacts\/ios-local'\)\/f'Wafra-/);
+  assert.ok(!fs.existsSync(path.join(path.dirname(file), 'ios-submit-verified-artifact.yml')),
+    'resubmitting a downloaded IPA needs the IPA artifact, which is no longer uploaded');
+});
+
+test('public-repo artifact policy: no app binaries, short retention everywhere', () => {
+  const dir = path.dirname(file);
+  // build-apk.yml (Android) is handled with the Android owner separately.
+  for (const name of fs.readdirSync(dir).filter(n => n.endsWith('.yml') && n !== 'build-apk.yml')) {
+    const wf = YAML.parse(fs.readFileSync(path.join(dir, name), 'utf8'));
+    for (const [jobName, job] of Object.entries(wf.jobs || {})) for (const step of job.steps || []) {
+      if (!/actions\/upload-artifact@/.test(step.uses || '')) continue;
+      const where = `${name}:${jobName}:${step.name || step.with?.name}`;
+      const days = step.with?.['retention-days'];
+      assert.ok(Number.isInteger(days) && days >= 1 && days <= 7, `${where} needs retention-days 1-7, has ${days}`);
+      const paths = String(step.with?.path || '');
+      assert.doesNotMatch(paths, /\.(?:ipa|aab|xcarchive|p12|p8|mobileprovision)\b/i, `${where} uploads a signed binary or credential`);
     }
-  } finally { fs.rmSync(dir, {recursive: true, force: true}); }
+  }
 });

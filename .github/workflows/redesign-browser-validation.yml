@@ -117,7 +117,7 @@ jobs:
         with:
           name: wafra-redesign-real-validation
           path: browser-evidence
-          retention-days: 7
+          retention-days: 3
       - name: Do not mask any failed gate
         if: always()
         run: |
