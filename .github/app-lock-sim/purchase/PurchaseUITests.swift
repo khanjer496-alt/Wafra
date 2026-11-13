@@ -149,6 +149,21 @@ final class PurchaseUITests: XCTestCase {
         sem.wait()
         if let failure = failure { throw failure }
     }
+    /// Watch SpringBoard for system alerts after a buy tap without dismissing them: records the alert text and buttons
+    /// (Apple's own wording) so a "Sign in to Apple Account" sheet is visible evidence instead of being cancelled.
+    func observeAlerts(_ tag: String, seconds: Int) {
+        let sb = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        var seen = Set<String>()
+        for i in 0..<(seconds / 2) {
+            for a in sb.alerts.allElementsBoundByIndex {
+                let key = String(a.label.prefix(120)) + " | buttons: " + a.buttons.allElementsBoundByIndex.map { String($0.label.prefix(30)) }.joined(separator: ",")
+                if !seen.contains(key) { seen.insert(key); note("\(tag) +\(i * 2)s system alert: \(key)"); shot("\(tag)-alert-\(seen.count)") }
+            }
+            if i == 3 { shot("\(tag)-after-buy-tap-8s") }
+            Thread.sleep(forTimeInterval: 2)
+        }
+        if seen.isEmpty { note("\(tag): no system alert in \(seconds) s after the buy tap") }
+    }
     /// What the store and the screen said when a purchase did not unlock Pro: transactions the StoreKit session recorded,
     /// and any visible text that looks like a purchase result (the Pro screen's notice has no test id).
     func purchaseEvidence() -> String {
@@ -190,6 +205,7 @@ final class PurchaseUITests: XCTestCase {
             try need(el("pro-buy"), "buy button", 10)
             shot("P2a-before-buying-weekly")
             el("pro-buy").tap()
+            observeAlerts("P2", seconds: 24)
             do { try waitGone(el("pro-plans"), "plan list after buying weekly", 90) }
             catch { throw StepFail("\(error); \(purchaseEvidence())") }
             shot("P2b-after-buying-weekly-pro-unlocked")
@@ -236,6 +252,7 @@ final class PurchaseUITests: XCTestCase {
             try need(el("pro-buy"), "buy button", 10)
             shot("P4a-yearly-selected")
             el("pro-buy").tap()
+            observeAlerts("P4", seconds: 24)
             do { try waitGone(el("pro-plans"), "plan list after buying yearly", 90) }
             catch { throw StepFail("\(error); \(purchaseEvidence())") }
             shot("P4b-after-buying-yearly-pro-on")
