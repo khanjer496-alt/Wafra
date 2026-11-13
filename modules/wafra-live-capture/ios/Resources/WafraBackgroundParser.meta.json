@@ -1,8 +1,8 @@
 {
   "v": 1,
-  "parserVersion": 73,
-  "sourceHash": "61e8b5a954eab1493a0ecab554bc748aa3832607fe5edb84b8388d698ed98f1d",
-  "bundleSha256": "674cf6eb7fc2738d2fbfb3dfea131d6c27d1d286d74b44f88976532bf7b05567",
+  "parserVersion": 74,
+  "sourceHash": "147ed3a9730ec35787b0d37f71d1415f40098d66819654e9e4c1baa0722eddf5",
+  "bundleSha256": "b3fa974bebdd17cb9162072b9499fc74925df45b9488506501ef135c220a9f26",
   "moduleCount": 42,
   "currencies": {
     "AED": 2,
