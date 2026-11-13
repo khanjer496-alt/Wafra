@@ -18,10 +18,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: tip-2dba684a
-            sha: 2dba684a64dd9a866103c9d495e0a6d82b0a9566
-          - label: build192-0c21a167
-            sha: 0c21a16719af22da6591f4735b8986be70c3bb08
+          - label: fix-candidate
+            sha: 69d5fb494f4b66e53233faf2f97784db97bd6c4d
     name: erase on ${{ matrix.label }}
     runs-on: macos-15
     timeout-minutes: 120
