@@ -64,7 +64,7 @@ while kill -0 $TPID 2>/dev/null && [ $SECONDS -lt $END ]; do
   fi
   for n in 1 2 3; do
     if [ -f "$WORK/hs/reinstall-$n.request" ] && [ ! -f "$WORK/hs/reinstall-$n.done" ]; then
-      echo "[host] reinstall #$n"; fresh_install; touch "$WORK/hs/reinstall-$n.done"
+      echo "[host] reinstall #$n"; fresh_install; for _i in $(seq 1 30); do xcrun simctl get_app_container "$UDID" "$APP" >/dev/null 2>&1 && break; sleep 1; done; sleep 8; touch "$WORK/hs/reinstall-$n.done"
     fi
   done
   sleep 1
@@ -80,7 +80,7 @@ for l in open(notes, errors='replace'):
     m = re.match(r'(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) \+0000 (P\d) buy tap', l)
     if m: tap[m.group(2)] = datetime.datetime.strptime(m.group(1), '%Y-%m-%d %H:%M:%S')
 want = re.compile(r'purchas|transaction|product|cancel|storekit|superwall|offer|payment|dialog|sheet|entitle|\[wafra:|error|fail|javascript|refus|unavailable|receipt|sandbox|account', re.I)
-noise = re.compile(r'apsd|APSConnection|dt\.xctest|XCTElementQuery|AX element|XCTAutomation|XCUI|accessibility|Accessibility')
+noise = re.compile(r'apsd|APSConnection|dt\.xctest|XCTElementQuery|AX element|XCTAutomation|XCUI|accessibility|Accessibility|launchservices|containermanager|libsystem|FSNode|BindingEvaluator|User Defaults|forced client overrides|xpc:connection|Truncating a list')
 lines = []
 for l in open(raw, errors='replace'):
     m = re.match(r'(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\.\d+ ', l)

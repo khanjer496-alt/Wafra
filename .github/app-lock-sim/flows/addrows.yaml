@@ -10,7 +10,7 @@ appId: ${APP_ID}
     visible: 'Settings'
     timeout: 30000
 # A transaction needs an account ("Choose the account this alert belongs to"): create one in Wallet first.
-- tapOn: '^Wallet$'
+- tapOn: '^Accounts$'
 - extendedWaitUntil:
     visible:
       id: 'wallet-screen'
