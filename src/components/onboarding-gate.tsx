@@ -1550,7 +1550,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       : smsDenied ? t('onboardPermissionChoiceBody')
         : !automaticCompletion ? t(iosImportedResult ? 'onboardIosImportedBody' : 'onboardCompleteManualBody')
           : firstPayment ? null
-            : words.waitingBody;
+            : Platform.OS === 'android' ? words.waitingBodyAndroid : words.waitingBody;
   // Nothing arrived by itself: the watched limit, still whole, as Home's stack.
   const completeWatch = watchedNow && state.ledgerMoney && !failedCompletion && !smsDenied && !finishSaveFailed
     ? <LimitResult palette={stepBand} watch={watchedNow} money={state.ledgerMoney} />

@@ -155,7 +155,7 @@ function actions(options = {}) {
     ReadySummary: 'ReadySummary', Linking: { openSettings: async () => {} },
     stepBand: {}, bandButtonColor: () => ({}), onClose: undefined, revealAfterSetup: false,
     words: { continue: 'continue', addByHand: 'addByHand', manualTitle: 'manualTitle', waitingTitle: 'waitingTitle',
-      waitingBody: 'waitingBody', workingTitle: () => 'workingTitle' },
+      waitingBody: 'waitingBody', waitingBodyAndroid: 'waitingBodyAndroid', workingTitle: () => 'workingTitle' },
     preferredName: null, firstPayment: null, discoveredResult: null, readySummary: null, lang: 'en',
     // iOS 15's imported-rows result wording; these journeys run on iOS 16+ and Android.
     iosImportedResult: false,
