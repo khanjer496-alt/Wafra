@@ -199,6 +199,21 @@ const CONTROLS = [
     'After AED 250.00 has been refunded to your card ending 1234 your statement will show it.',
   ].map((body) => [body, 'NO_POST', 'C21 a leader directly governing the credit is a condition, whatever follows']),
   ['After cancellation AED 250.00 refunded to your card ending 1234.', 'INCOME_REFUND', 'C20 a telegraphic completed refund after "After <noun>"'],
+  // Change Reviewer 742367fa (High), Reviewer c204ca32 (Medium/Low): an agent subject or any other verb after a temporal
+  // leader governs the credit; "May" in a date or a name is not a modal.
+  ...[
+    'When the merchant has refunded AED 250.00 to your card please check your balance.',
+    'Once we have refunded AED 250.00 to your account please check your balance.',
+    'When they have refunded AED 250.00 to your card check your balance.',
+    'When noon has refunded AED 250.00 to your card please check your balance.',
+    'After the store refunded AED 250.00 to your card please verify the balance.',
+    'Once the seller has refunded AED 250.00 to your card you receive an SMS.',
+    'When the bank has credited AED 250.00 to your account kindly verify it in the app.',
+    'When the merchant confirms AED 250.00 has been refunded to your card ending 1234.',
+    'Once NOON confirms AED 250.00 has been refunded to your card ending 1234.',
+  ].map((body) => [body, 'NO_POST', 'C21 an agent or another verb after the leader: the leader governs the credit']),
+  ['After cancellation AED 250.00 has been refunded to your card ending 1234 on 12 May 2026.', 'INCOME_REFUND', 'C20 "May" in a date is not a modal'],
+  ['After your return AED 250.00 has been credited to your card ending 1234 by MAY STORES.', 'INCOME_REFUND', 'C20 "MAY" in a name is not a modal'],
 ];
 
 // ── Case selection ───────────────────────────────────────────────────────────────────────────────────────────────────

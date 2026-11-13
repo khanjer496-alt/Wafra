@@ -110,6 +110,28 @@ test('A temporal leader that directly governs the credit stays a condition, what
   assert.equal(both('After cancellation AED 250.00 refunded to your card ending 1234.'), 'income 25000 / income 25000');
 });
 
+// Change Reviewer 742367fa (High) and Reviewer c204ca32 (Medium/Low): the "when it happened" reading is a narrow positive
+// list (an event noun, or that event in the past, then the amount as the passive subject before the credit verb, and no
+// lowercase modal after the credit). An agent subject or any other verb after the leader governs the credit.
+test('Only an event noun or a past event, then the amount as passive subject, reads as "when it happened"', () => {
+  for (const body of [
+    'When the merchant has refunded AED 250.00 to your card please check your balance.',
+    'Once we have refunded AED 250.00 to your account please check your balance.',
+    'When they have refunded AED 250.00 to your card check your balance.',
+    'When noon has refunded AED 250.00 to your card please check your balance.',
+    'After the store refunded AED 250.00 to your card please verify the balance.',
+    'Once the seller has refunded AED 250.00 to your card you receive an SMS.',
+    'When the bank has credited AED 250.00 to your account kindly verify it in the app.',
+    'When the merchant confirms AED 250.00 has been refunded to your card ending 1234.',
+    'Once NOON confirms AED 250.00 has been refunded to your card ending 1234.',
+  ]) assert.equal(both(body), 'none / none', body);
+  // "May" in a date or a name is not the modal.
+  for (const body of [
+    'After cancellation AED 250.00 has been refunded to your card ending 1234 on 12 May 2026.',
+    'After your return AED 250.00 has been credited to your card ending 1234 by MAY STORES.',
+  ]) assert.equal(both(body), 'income 25000 / income 25000', body);
+});
+
 // bank-alert-semantics-matrix "re-credit for reversed purchase": the reason for the credit names the debit that was undone;
 // it is not this credit being taken back. A reversal of the credit itself still is.
 test('A reason phrase ("for reversed purchase") is not a take-back; reversing the credit itself is', () => {
