@@ -6612,6 +6612,39 @@ const NOTICE_PREFIX_CONNECTOR_RE = /^(\W{0,4}[^\s:\n][^:\n]{0,30}?)[ \t]+[–—
 /** "Top up your balance to complete this payment": the payment has not gone through. */
 /** "Your reversal request for AED 75.00 … has been received": a request, nothing moved yet. */
 const NOTICE_REVERSAL_REQUEST_RE = /\b(?:reversal|refund|dispute|chargeback)\s+request\b(?:[^.\n]|\.(?=\d)){0,80}?\b(?:has\s+been\s+|was\s+|is\s+)?(?:received|registered|logged|submitted|raised)\b/i;
+/**
+ * "Reversal of AED 40.00 is under process", "عكس مبلغ 40.00 درهم قيد المعالجة": the refund or reversal, in its own sentence
+ * (a figure's "." does not end it), is still under way, so nothing has arrived (Android RC 396 F2, App QA Lead corpus N06).
+ */
+const NOTICE_REFUND_IN_PROCESS_RE = new RegExp(
+  String.raw`\b(?:refund|reversal)s?\b(?:[^.\n]|\.(?=\d)){0,80}?\b(?:is|are)\s+(?:(?:still|currently|now)\s+)?` +
+    String.raw`(?:under\s+(?:process(?:ing)?|review)|in\s+(?:process|progress)|being\s+(?:processed|reviewed)|pending|awaiting)\b` +
+    String.raw`|\b(?:refund|reversal)s?\b(?:[^.\n]|\.(?=\d)){0,80}?\b(?:has\s+been|have\s+been|was|were)\s+(?:initiated|submitted)\b` +
+    `|(?<![${AR_LETTER}])(?:عكس|استرداد|استرجاع|ارجاع|اعاده)(?![${AR_LETTER}])(?:[^.\\n؟!]|\\.(?=\\d)){0,80}?(?<![${AR_LETTER}])` +
+    `(?:قيد\\s+(?:ال)?(?:انتظار|معالجه|تنفيذ|اجراء|مراجعه)|تحت\\s+(?:ال)?(?:اجراء|معالجه|مراجعه|تنفيذ))(?![${AR_LETTER}])`,
+  'i',
+);
+/** A sentence that states a completed refund or reversal credit. */
+const NOTICE_REFUND_DONE_RE = new RegExp(
+  String.raw`\b(?:has|have)\s+been\s+(?:(?:successfully|fully|now)\s+)?(?:credited|refunded|deposited|returned|reversed|processed)\b` +
+    String.raw`|\b(?:was|were)\s+(?:(?:successfully|fully)\s+)?(?:credited|refunded|deposited|returned|reversed)\b|\bcredited\s+(?:back\s+)?(?:to|into)\s+your\b` +
+    `|(?<![${AR_LETTER}])تم\\s+(?:عكس|استرداد|استرجاع|ارجاع|ايداع|اضافه|اعاده)(?![${AR_LETTER}])`,
+  'i',
+);
+const NOTICE_REFUND_CONDITION_RE = new RegExp(
+  String.raw`\b(?:if|once|when(?:ever)?|after|until|unless|will|shall)\b` +
+    `|(?<![${AR_LETTER}])(?:عند|بعد|اذا|حال|سيتم|سوف)(?![${AR_LETTER}])`,
+  'i',
+);
+/**
+ * The body says a refund or reversal is still in process, and no other sentence states a completed one without a condition
+ * ("Reversal of AED 40.00 has been credited to your account. Other reversal requests are under process." still posts).
+ */
+function refundStillInProcess(body: string): boolean {
+  if (!NOTICE_REFUND_IN_PROCESS_RE.test(body)) return false;
+  return !body.split(/[.!?؟](?!\d)|\n/).some((sentence) => NOTICE_REFUND_DONE_RE.test(sentence) &&
+    !NOTICE_REFUND_IN_PROCESS_RE.test(sentence) && !NOTICE_REFUND_CONDITION_RE.test(sentence));
+}
 const NOTICE_TOP_UP_RE = /\btop\s+up\s+(?:your\s+)?\w+\s+to\s+complete\b|^\W{0,4}(?:[^\s:][^:\n]{0,30}:\s*)?pending\s*(?::|(?:purchase|transaction|payment|charge|transfer|debit|withdrawal)\b)/i;
 /**
  * A status standing as its OWN segment anywhere in the alert — a line, or the
@@ -6648,6 +6681,7 @@ function moneyNoticeKindInBody(text: string): MoneyNoticeKind | null {
   if (NOTICE_TOP_UP_RE.test(body) || (NOTICE_REVERSAL_REQUEST_RE.test(body) &&
     (!/\b(?:has\s+been|was|is)\s+(?:credited|refunded|deposited|returned)\b/i.test(body) ||
       /\b(?:once|when|after|until|will|shall)\b/i.test(body)))) return 'not-yet';
+  if (refundStillInProcess(body)) return 'not-yet';
   if (TRAILING_REVERSAL_MARK_RE.test(body) && NOTICE_INCOMING_STATED_RE.test(body) &&
     !NOTICE_RETURNED_TO_USER_RE.test(body)) return 'unproven-direction';
   // SNB's "تصحيح سحب نقدي" (cash-withdrawal CORRECTION) is money coming back
