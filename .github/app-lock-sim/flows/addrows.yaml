@@ -1,0 +1,238 @@
+appId: ${APP_ID}
+---
+- runFlow:
+    when:
+      visible: 'Open in .Wafra.\?'
+    commands:
+      - tapOn:
+          point: '33%,54%'
+- extendedWaitUntil:
+    visible: 'Settings'
+    timeout: 30000
+# A transaction needs an account ("Choose the account this alert belongs to"): create one in Wallet first.
+- tapOn:
+    point: '82%,94%'
+- extendedWaitUntil:
+    visible:
+      id: 'wallet-screen'
+    timeout: 20000
+- tapOn:
+    id: 'wallet-add-account'
+- extendedWaitUntil:
+    visible: 'Account name'
+    timeout: 15000
+- takeScreenshot: account-sheet-open
+- tapOn:
+    point: '50%,60%'
+- inputText: 'Main account'
+- pressKey: Enter
+- takeScreenshot: account-name-typed
+- tapOn: 'Add account'
+- waitForAnimationToEnd:
+    timeout: 4000
+- takeScreenshot: account-added
+- tapOn:
+    point: '16%,94%'
+- extendedWaitUntil:
+    visible: 'Settings'
+    timeout: 30000
+- runFlow:
+    when:
+      visible: 'Add manually'
+    commands:
+      - tapOn: 'Add manually'
+- runFlow:
+    when:
+      notVisible:
+        id: 'add-transaction-screen'
+    commands:
+      - tapOn:
+          point: '79%,10%'
+- extendedWaitUntil:
+    visible:
+      id: 'add-transaction-screen'
+    timeout: 30000
+- takeScreenshot: row1-screen-open
+- tapOn:
+    id: 'amount-keypad-1'
+- runFlow:
+    when:
+      visible: 'Choose currency'
+    commands:
+      - tapOn: 'Choose currency'
+      - waitForAnimationToEnd:
+          timeout: 4000
+- runFlow:
+    when:
+      visible: 'Search currency code'
+    commands:
+      - tapOn:
+          point: '50%,34%'
+      - waitForAnimationToEnd:
+          timeout: 4000
+- takeScreenshot: row1-after-currency
+- tapOn:
+    id: 'amount-keypad-4'
+- tapOn:
+    id: 'amount-keypad-2'
+- tapOn:
+    id: 'add-merchant-field'
+- inputText: 'LULU HYPERMARKET'
+- pressKey: Enter
+- takeScreenshot: row1-typed
+- tapOn:
+    id: 'suggested-category-.*'
+    optional: true
+- runFlow:
+    when:
+      visible:
+        id: 'account-picker-trigger'
+    commands:
+      - tapOn:
+          id: 'account-picker-trigger'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - tapOn:
+          text: 'Main account'
+          optional: true
+      - waitForAnimationToEnd:
+          timeout: 3000
+- tapOn:
+    id: 'add-save'
+- extendedWaitUntil:
+    visible: 'Settings'
+    timeout: 30000
+- runFlow:
+    when:
+      visible: 'Add manually'
+    commands:
+      - tapOn: 'Add manually'
+- runFlow:
+    when:
+      notVisible:
+        id: 'add-transaction-screen'
+    commands:
+      - tapOn:
+          point: '79%,10%'
+- extendedWaitUntil:
+    visible:
+      id: 'add-transaction-screen'
+    timeout: 30000
+- takeScreenshot: row2-screen-open
+- tapOn:
+    id: 'amount-keypad-1'
+- runFlow:
+    when:
+      visible: 'Choose currency'
+    commands:
+      - tapOn: 'Choose currency'
+      - waitForAnimationToEnd:
+          timeout: 4000
+- runFlow:
+    when:
+      visible: 'Search currency code'
+    commands:
+      - tapOn:
+          point: '50%,34%'
+      - waitForAnimationToEnd:
+          timeout: 4000
+- takeScreenshot: row2-after-currency
+- tapOn:
+    id: 'amount-keypad-1'
+- tapOn:
+    id: 'amount-keypad-5'
+- tapOn:
+    id: 'amount-keypad-0'
+- tapOn:
+    id: 'add-merchant-field'
+- inputText: 'ADNOC FUEL'
+- pressKey: Enter
+- takeScreenshot: row2-typed
+- tapOn:
+    id: 'suggested-category-.*'
+    optional: true
+- runFlow:
+    when:
+      visible:
+        id: 'account-picker-trigger'
+    commands:
+      - tapOn:
+          id: 'account-picker-trigger'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - tapOn:
+          text: 'Main account'
+          optional: true
+      - waitForAnimationToEnd:
+          timeout: 3000
+- tapOn:
+    id: 'add-save'
+- extendedWaitUntil:
+    visible: 'Settings'
+    timeout: 30000
+- runFlow:
+    when:
+      visible: 'Add manually'
+    commands:
+      - tapOn: 'Add manually'
+- runFlow:
+    when:
+      notVisible:
+        id: 'add-transaction-screen'
+    commands:
+      - tapOn:
+          point: '79%,10%'
+- extendedWaitUntil:
+    visible:
+      id: 'add-transaction-screen'
+    timeout: 30000
+- takeScreenshot: row3-screen-open
+- tapOn:
+    id: 'amount-keypad-1'
+- runFlow:
+    when:
+      visible: 'Choose currency'
+    commands:
+      - tapOn: 'Choose currency'
+      - waitForAnimationToEnd:
+          timeout: 4000
+- runFlow:
+    when:
+      visible: 'Search currency code'
+    commands:
+      - tapOn:
+          point: '50%,34%'
+      - waitForAnimationToEnd:
+          timeout: 4000
+- takeScreenshot: row3-after-currency
+- tapOn:
+    id: 'amount-keypad-2'
+- tapOn:
+    id: 'amount-keypad-3'
+- tapOn:
+    id: 'add-merchant-field'
+- inputText: 'CAREEM RIDE'
+- pressKey: Enter
+- takeScreenshot: row3-typed
+- tapOn:
+    id: 'suggested-category-.*'
+    optional: true
+- runFlow:
+    when:
+      visible:
+        id: 'account-picker-trigger'
+    commands:
+      - tapOn:
+          id: 'account-picker-trigger'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - tapOn:
+          text: 'Main account'
+          optional: true
+      - waitForAnimationToEnd:
+          timeout: 3000
+- tapOn:
+    id: 'add-save'
+- extendedWaitUntil:
+    visible: 'Settings'
+    timeout: 30000

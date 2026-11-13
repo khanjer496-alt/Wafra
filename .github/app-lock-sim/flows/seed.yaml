@@ -1,0 +1,136 @@
+appId: ${APP_ID}
+---
+- runFlow:
+    when:
+      visible: 'Open in .Wafra.\?'
+    commands:
+      - tapOn:
+          point: '33%,54%'
+- launchApp:
+    clearState: true
+# A StoreKit "Sign in to Apple Account" system alert can cover the app (Superwall configures the store at launch).
+# Cancel it; never OK (OK on an empty sign-in sheet produces a second alert).
+- extendedWaitUntil:
+    visible: 'Cancel'
+    timeout: 25000
+    optional: true
+- tapOn:
+    text: 'Cancel'
+    optional: true
+- extendedWaitUntil:
+    visible: 'Cancel'
+    timeout: 8000
+    optional: true
+- tapOn:
+    text: 'Cancel'
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: 'onboarding-get-started'
+    timeout: 120000
+# Onboarding by testID, in priority order, until the Home tab bar shows.
+- repeat:
+    times: 16
+    while:
+      notVisible: 'Settings'
+    commands:
+      - runFlow:
+          when:
+            visible:
+              id: 'onboarding-get-started'
+          commands:
+            - tapOn:
+                id: 'onboarding-get-started'
+      - runFlow:
+          when:
+            visible:
+              id: 'onboarding-name-skip'
+          commands:
+            - tapOn:
+                id: 'onboarding-name-skip'
+      - runFlow:
+          when:
+            visible:
+              id: 'onboarding-goals-continue'
+              enabled: false
+          commands:
+            - tapOn:
+                id: 'onboarding-goal-bills'
+      - runFlow:
+          when:
+            visible:
+              id: 'onboarding-goals-continue'
+          commands:
+            - tapOn:
+                id: 'onboarding-goals-continue'
+      - runFlow:
+          when:
+            visible:
+              id: 'onboarding-watch-continue'
+          commands:
+            - tapOn:
+                id: 'onboarding-watch-continue'
+      - runFlow:
+          when:
+            visible:
+              id: 'onboarding-reminders-not-now'
+          commands:
+            - tapOn:
+                id: 'onboarding-reminders-not-now'
+      - runFlow:
+          when:
+            visible:
+              id: 'onboarding-live-continue'
+          commands:
+            - tapOn:
+                id: 'onboarding-live-continue'
+      - runFlow:
+          when:
+            visible:
+              id: 'onboarding-sms-explainer-continue'
+          commands:
+            - tapOn:
+                id: 'onboarding-sms-explainer-continue'
+      - runFlow:
+          when:
+            visible:
+              id: 'onboarding-source-manual'
+          commands:
+            - tapOn:
+                id: 'onboarding-source-manual'
+      - runFlow:
+          when:
+            visible:
+              id: 'onboarding-complete-manual'
+          commands:
+            - tapOn:
+                id: 'onboarding-complete-manual'
+      - runFlow:
+          when:
+            visible:
+              id: 'onboarding-complete-continue'
+          commands:
+            - tapOn:
+                id: 'onboarding-complete-continue'
+      - runFlow:
+          when:
+            visible:
+              id: 'onboarding-pattern-continue'
+          commands:
+            - tapOn:
+                id: 'onboarding-pattern-continue'
+      - runFlow:
+          when:
+            visible:
+              id: 'onboarding-paywall-free'
+          commands:
+            - tapOn:
+                id: 'onboarding-paywall-free'
+      - tapOn:
+          text: 'Cancel'
+          optional: true
+      - waitForAnimationToEnd:
+          timeout: 3000
+- extendedWaitUntil:
+    visible: 'Settings'
+    timeout: 60000
