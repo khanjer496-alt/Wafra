@@ -66,7 +66,8 @@
     {
       "file": "src/app/settings-data.tsx",
       "name": "eraseAllData",
-      "sha256": "e38709acfd8da916cdc00f40fba6d7ca77b7b4a2bc6cf637e177df34dd11eba1"
+      "sha256": "af945acc9fa344486415813a124074ca6a001b4411c8425ed72600e3cf533b35",
+      "reviewedChange": "2026-11-13 #234: Erase all data now names its failing capture-cleanup step in the closed-vocabulary storage diagnostic. The iOS createIosHistoryPostEraseCleanup call adds onStepFailure, which records destroy:capture, destroy:history, destroy:message-setup or destroy:background; the Android SMS and notification cleanup records destroy:sms or destroy:notifications. Each then rethrows the same error. The steps, their order, the rethrown errors, the Alerts and the ClearAllError handling are unchanged. Reason: the simulator Erase ends in erased-cleanup with only 'destroy failed: Error (ERR_UNEXPECTED)' (Builder runs 43386874313 and 43390295865). Covered by repair/erase-step-diagnostics.test.cjs. Review: PR #234, Reviewer and Security Reviewer."
     },
     {
       "file": "src/app/settings-data.tsx",

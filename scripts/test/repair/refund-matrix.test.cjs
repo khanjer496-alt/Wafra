@@ -41,24 +41,28 @@ const { buildOracleRows } = require('./refund-matrix-oracle.cjs');
 // Frozen ratchet. Each number is today's count of gap-file entries in that class on that path; it may only go down.
 // Predicate PR 1 lowered every class but droppedDebit, which rose 207 -> 208 only by its own new control row CTL-05422
 // ("processed … will reflect" beside a debit, oracle v2.2; refund-gaps-no-growth.cjs lists it as a new row).
+// Predicate PR 2 (the Arabic table) brought false income to 0 on every path, in both languages: the store gate's number.
 const CEILING = {
-  falseIncome: { parseSms: 160, session: 180, native: 0 },
+  falseIncome: { parseSms: 0, session: 0, native: 0 },
   wrongDirection: { parseSms: 42, session: 40, native: 0 },
   wrongAmount: { parseSms: 0, session: 0, native: 0 },
   lostIncome: { parseSms: 36, session: 36, native: 0 },
   droppedDebit: { parseSms: 208, session: 208, native: 0 },
-  postedNotReview: { parseSms: 359, session: 372, native: 10 },
+  postedNotReview: { parseSms: 21, session: 21, native: 10 },
 };
 const NATIVE_IGNORED_INCOME_CEILING = 157;
 // Control rows added after #217 that native ignores today, exactly as #217's own bundle does (oracle v2.1 C11, C12; v2.2
-// C16; the C20 "After cancellation …", "Once your order was cancelled …", telegraphic and dated refunds). They are pinned by id and kept out of
+// C16; the C20 "After cancellation …", "Once your order was cancelled …", telegraphic and dated refunds; the C22 Arabic
+// "عند إلغاء الطلب …", "عند إرجاع المنتج …" and "عند مراجعة طلبك …" refunds; the six C24 Arabic genuine refunds). They are
+// pinned by id and kept out of
 // the count above, so that ceiling still covers #217's rows and a newly ignored row anywhere else fails. Delete an id when
 // native posts its row.
 const NATIVE_IGNORED_CONTROL_ROWS = new Set(['CTL-05402', 'CTL-05403', 'CTL-05404', 'CTL-05405', 'CTL-05406', 'CTL-05407',
-  'CTL-05416', 'CTL-05427', 'CTL-05429', 'CTL-05444', 'CTL-05454']);
+  'CTL-05416', 'CTL-05427', 'CTL-05429', 'CTL-05444', 'CTL-05454', 'CTL-05463', 'CTL-05467', 'CTL-05468', 'CTL-05475', 'CTL-05476',
+  'CTL-05477', 'CTL-05478', 'CTL-05479', 'CTL-05480']);
 // Row count and sha256 of the oracle's "id<TAB>expected<TAB>body" lines, joined by newlines (Reviewer, #217 Low 1; the
 // body since #225's review, so a row's text cannot be edited unseen).
-const ORACLE_PIN = { rows: 5455, sha256: 'ac9abb9a43015854cb5ccf72dc34d8bfea98f2a62dcc912a64321dc59e615b52' };
+const ORACLE_PIN = { rows: 5490, sha256: '115c37eaca86a94e1bbc45e6a47b98605427f3533be447a877bfc042997e2acc' };
 
 const PATHS = ['parseSms', 'session', 'native'];
 const at = Date.parse('2026-11-05T10:00:00Z');

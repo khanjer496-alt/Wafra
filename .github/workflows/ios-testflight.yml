@@ -829,7 +829,7 @@ jobs:
         with:
           name: wafra-ios-build-report
           path: ios-build-evidence/
-          retention-days: 14
+          retention-days: 7
 
       # The key is in RUNNER_TEMP, which GitHub clears anyway, but a private
       # key on disk for no reason is a habit worth not having.
@@ -988,7 +988,7 @@ jobs:
           assert 'ProbeWafraAutomationInputIntent' not in actions
           parser_meta=json.loads((app/'WafraLiveCaptureResources.bundle/WafraBackgroundParser.meta.json').read_text())
           number=str(info['CFBundleVersion']); version=info['CFBundleShortVersionString']
-          source=temp/'Wafra-local.ipa'; target=pathlib.Path('artifacts/ios-local')/f'Wafra-{version}-{number}.ipa'
+          source=temp/'Wafra-local.ipa'; target=temp/f'Wafra-{version}-{number}.ipa'
           shutil.copyfile(source,target)
           report={'sourceCommit':os.environ['SOURCE_COMMIT'],'buildHost':'github-macos','profile':os.environ.get('BUILD_PROFILE','history-beta'),
               'version':version,'buildNumber':number,'bundleIdentifier':info['CFBundleIdentifier'],
@@ -1001,12 +1001,15 @@ jobs:
           print(json.dumps(report,indent=2))
           PY
 
-      - name: Preserve verified installer before submission
+      # The repository is public, so artifacts are downloadable by anyone signed
+      # in to GitHub. Only the verification report (hashes, versions, source) is
+      # uploaded; the signed IPA stays in RUNNER_TEMP for the submit step below.
+      - name: Preserve verification report before submission
         uses: actions/upload-artifact@v4
         with:
           name: wafra-ios-local-${{ steps.ipa.outputs.build_number }}
-          path: artifacts/ios-local/
-          retention-days: 14
+          path: artifacts/ios-local/verification.json
+          retention-days: 3
 
       - name: Require successful exact-source CI before TestFlight submission
         if: inputs.submit
@@ -1019,7 +1022,7 @@ jobs:
             fi
             sleep 20
           done
-          echo 'Exact-source CI has not passed. Verified IPA retained; no TestFlight submission.'
+          echo 'Exact-source CI has not passed. No TestFlight submission; rebuild once CI is green.'
           exit 1
 
       - name: Submit the verified existing IPA to TestFlight

@@ -176,7 +176,7 @@ jobs:
             mobai-ci-out/
             ${{ runner.temp }}/wafra-metro.log
           if-no-files-found: warn
-          retention-days: 7
+          retention-days: 3
 
   publish:
     needs: [resolve, mobai]
@@ -291,7 +291,7 @@ jobs:
             ios-release-evidence/public-beta.json
             child-artifacts/**/verification.json
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 7
 
       - name: Write public TestFlight summary
         if: always()

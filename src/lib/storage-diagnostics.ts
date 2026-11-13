@@ -66,6 +66,27 @@ export type StorageOp =
   | 'write'
   | 'remove'
   | 'destroy'
+  /**
+   * Erase all data, one step each, so a failed erase names its step. The
+   * ledger reset: deleting the SQLCipher file, deleting its key, closing the
+   * handle.
+   */
+  | 'destroy:sqlite'
+  | 'destroy:securestore'
+  | 'destroy:close'
+  /** The cleanup after the reset, in the order the erase runs it. */
+  | 'destroy:complimentary'
+  | 'destroy:private-format-key'
+  | 'destroy:sharing-credential'
+  /** Any capture-queue cleanup failure that no step below named. */
+  | 'destroy:capture-queue'
+  | 'destroy:capture'
+  | 'destroy:history'
+  | 'destroy:message-setup'
+  | 'destroy:background'
+  | 'destroy:sms'
+  | 'destroy:notifications'
+  | 'destroy:exports'
   | 'migrate'
   /** A ROLLBACK that itself failed, leaving the connection poisoned. */
   | 'rollback';

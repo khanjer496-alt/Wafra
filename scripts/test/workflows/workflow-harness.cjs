@@ -83,6 +83,7 @@ function createWorkflowHarness(options={}) {
  d['@/lib/ios-history-setup']={createIosHistoryPostEraseCleanup:()=>()=>{},eraseIosHistorySessions:record('eraseIosHistorySessions'),iosSupportsMessageHistory:()=>true};
  d['@/lib/ios-message-onboarding']={clearIosMessageSetupProgress:record('clearIosMessageSetupProgress'),dispatchIosMessageSetup:record('dispatchIosMessageSetup'),loadIosMessageSetupProgress:async()=>null};
  d['@/lib/shortcut-cleanup']={openShortcutsApp:record('openShortcutsApp'),shortcutCleanupApplies:()=>false};
+ d['@/lib/storage-diagnostics']={recordStorageFailure:op=>{h.events.push(['recordStorageFailure',op]);return {op}}};
  d['@/lib/growth-funnel']={
   GROWTH_PLACEMENTS:{onboarding:'onboarding_main',postImportPro:'post_import_pro',settingsPro:'settings_pro'},
   trackGrowthEvent:()=>{},
