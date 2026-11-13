@@ -39,12 +39,17 @@ for attempt in 1 2; do
   echo "=== TRY AGAIN attempt $attempt $(date -u +%T)" >> "$RAW"
   T1=$("$OCRBIN" "$OUT/a${attempt}-after-erase.png" 2>/dev/null | cut -f2 | tr '\n' ' ')
   note "screen right after the erase (OCR): ${T1:0:240}"
-  mro "$H/.github/erase-repro/tryagain.yaml" "try$attempt"; note "try-again flow rc=$?"
-  sleep 20
-  xcrun simctl io "$UDID" screenshot "$OUT/a${attempt}-after-tryagain.png" >/dev/null 2>&1
-  T2=$("$OCRBIN" "$OUT/a${attempt}-after-tryagain.png" 2>/dev/null | cut -f2 | tr '\n' ' ')
-  note "screen 20 s after Try again (OCR): ${T2:0:240}"
-  if printf '%s' "$T2" | grep -qiE "your data was erased|encrypted captured messages|try again"; then note "RECOVERY after Try again attempt $attempt: the recovery screen is STILL shown"; else note "RECOVERY after Try again attempt $attempt: the recovery screen CLEARED"; fi
+  if printf '%s' "$T1" | grep -qiE "your data was erased|encrypted captured messages|try again"; then
+    note "RECOVERY SCREEN after Erase attempt $attempt: SHOWN"
+    mro "$H/.github/erase-repro/tryagain.yaml" "try$attempt"; note "try-again flow rc=$?"
+    sleep 20
+    xcrun simctl io "$UDID" screenshot "$OUT/a${attempt}-after-tryagain.png" >/dev/null 2>&1
+    T2=$("$OCRBIN" "$OUT/a${attempt}-after-tryagain.png" 2>/dev/null | cut -f2 | tr '\n' ' ')
+    note "screen 20 s after Try again (OCR): ${T2:0:240}"
+    if printf '%s' "$T2" | grep -qiE "your data was erased|encrypted captured messages|try again"; then note "RECOVERY after Try again attempt $attempt: the recovery screen is STILL shown"; else note "RECOVERY after Try again attempt $attempt: the recovery screen CLEARED"; fi
+  else
+    note "RECOVERY SCREEN after Erase attempt $attempt: NOT shown (Try again skipped); screen after the erase (OCR) is the line above"
+  fi
   xcrun simctl get_app_container "$UDID" "$APP" groups >> "$OUT/app-entitlements.txt" 2>&1
   if [ -n "${PB:-}" ] && [ "${PB:-x}" != "-" ] && { [ -z "${PA:-}" ] || [ "${PA:-}" = "-" ] || [ "$PA" != "$PB" ]; }; then
     note "RESULT attempt $attempt: the app process ended or was replaced after Erase (pid $PB -> ${PA:-none}) = CRASH or relaunch"; CRASHES=$((CRASHES+1))

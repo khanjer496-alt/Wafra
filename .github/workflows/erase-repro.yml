@@ -18,8 +18,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: diag-6c4e78f7
-            sha: 6c4e78f7ea2a750142c2f5d51c086c3020e678b7
+          - label: pr245-73f7f930
+            sha: 73f7f93011fe60510dbf9400f2de798ad1b300d4
     name: erase on ${{ matrix.label }}
     runs-on: macos-15
     timeout-minutes: 120
