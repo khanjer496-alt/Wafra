@@ -102,3 +102,55 @@ test('RC 396 F2 controls: a refund in process as a side note beside a debit leav
     'Purchase of AED 40.00 at NOON. Reversal of AED 40.00 has been initiated.',
   ]) assert.equal(paths(body, 'ENBD').js, 'expense 4000 / expense 4000', body);
 });
+
+// #249 review round 1 (Change Reviewer ad205bc6 High/Medium/Low, Reviewer 85a61c6d Medium/Low at 0f2fe7c0; probed again
+// at fe26426a). Telegraphic and other in-process statuses, a "reversal fee" debit, and the completed controls that a
+// ";"/"،" or a debit-first clause must not lose.
+test('RC 396 F2 round 1: telegraphic and further in-process statuses never post', () => {
+  for (const body of [
+    'Reversal of AED 40.00 under process.',
+    'Reversal of AED 40.00 - in progress.',
+    'Reversal of AED 40.00: pending.',
+    'Reversal of AED 40.00 is in-process.',
+    'Reversal AED 40.00 - Status: Under Process',
+    'Reversal of AED 40.00: in process',
+    'Reversal of AED 40.00 is in queue and will be completed shortly.',
+    'Reversal of AED 40.00 is being initiated.',
+    'Reversal of AED 40.00 has been raised.',
+    'Reversal for AED 40.00 has been requested.',
+    'Reversal of AED 40.00 has been lodged.',
+    'Reversal for AED 40.00 initiated. It will reflect in 5 days.',
+    'Refund of AED 40.00 is awaited.',
+    'استرداد مبلغ 40.00 درهم جاري المعالجة',
+    'استرجاع مبلغ 40.00 درهم قيد الدراسة',
+  ]) {
+    const got = paths(body);
+    assert.equal(got.js, 'none / none', body);
+    assert.ok(!/^credit /.test(got.native), `${body} native ${got.native}`);
+  }
+});
+
+test('RC 396 F2 round 1: a debit beside an in-process reversal, or for a reversal fee, stays an expense', () => {
+  for (const body of [
+    'AED 40.00 was debited from your card ending 1234 at NOON. Reversal: under process.',
+    'AED 40.00 was debited from your card ending 1234 for a reversal fee. Your reversal request is under process.',
+    'AED 40.00 was debited from your card ending 1234 for a reversal fee.',
+    'AED 40.00 was debited from your card ending 1234 at NOON, refund of your previous order is pending.',
+    'AED 40.00 was debited from your card ending 1234 at NOON. Reversal of AED 40.00 is under process.',
+    'AED 40.00 was debited from your card ending 1234 at NOON; reversal is in process.',
+  ]) assert.equal(paths(body, 'ENBD').js, 'expense 4000 / expense 4000', body);
+});
+
+test('RC 396 F2 round 1 controls: a completed credit beside a pending one, or after a pending past, keeps its 40.00', () => {
+  for (const body of [
+    'تم استرداد مبلغ 40.00 درهم إلى بطاقتك المنتهية بـ 1234، وطلبك الآخر قيد المعالجة',
+    'Reversal of AED 40.00 processed to your card ending 1234; the other reversal is pending.',
+    'Reversal of AED 40.00 has been credited to your account. Your other reversal is under process.',
+    'Your refund of AED 40.00, which was pending since 10/11, has now been credited to your card.',
+    'Refund of AED 40.00 has been initiated and credited to your card ending 1234.',
+    'Refund for your pending order of AED 40.00 has been credited to your card.',
+    'Refund of AED 40.00 has been credited to your card ending 1234; your other refund is pending.',
+    'Reversal of AED 40.00 which was under process has been credited to your card ending 1234.',
+    'Reversal of AED 40.00 has been credited to your card ending 1234 as requested.',
+  ]) assert.equal(paths(body).js, 'income 4000 / income 4000', body);
+});
