@@ -14,12 +14,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: base
-            sha: ad784e3914f5a2c062060df007dbeb2eb894a117
-          - label: pr1-dead-files
-            sha: b284f7d73318a77e2bb3afeb39720ade898a3ab8
-          - label: pr2-exports
-            sha: 67efd7efe3174b651e3f99e412f9855ec4ad8c94
+          - label: tip
+            sha: a51d0be2e106a9de6271f4adee8c82e0e04ed36f
+          - label: pr259
+            sha: c059bb506b2d9830ce58dd2dc72797fbd51c36a4
+          - label: pr260
+            sha: 19c057252f27d223d400c54a2a46f85fb0fbed1d
+          - label: pr1b3
+            sha: 13a620643a2e63def6dd9cd58000a349d648464c
     name: size ${{ matrix.label }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
