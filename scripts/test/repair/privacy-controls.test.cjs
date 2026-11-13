@@ -101,3 +101,29 @@ test('CI typechecks the iOS privacy cover on the macOS native job, and widget ch
   assert.match(filter, /- 'modules\/wafra-widgets\/ios\/\*\*'/);
   assert.match(filter, /- 'scripts\/test\/native-app-privacy-typecheck\.sh'/);
 });
+
+test('the typecheck stub of WafraWidgetsModule matches the real module for every member the privacy cover uses', () => {
+  // The typecheck compiles WafraPrivacyCover.swift against a stub of
+  // WafraWidgetsModule, not the Expo module itself. Pin the stub to the real
+  // declarations so a rename or value change in the real file fails here.
+  const fs = require('node:fs');
+  const ios = path.resolve(__dirname, '../../../modules/wafra-widgets/ios');
+  const script = fs.readFileSync(path.resolve(__dirname, '../native-app-privacy-typecheck.sh'), 'utf8');
+  const cover = fs.readFileSync(path.join(ios, 'WafraPrivacyCover.swift'), 'utf8');
+  const real = fs.readFileSync(path.join(ios, 'WafraWidgetsModule.swift'), 'utf8');
+  const stub = script.match(/WidgetBridge\.swift" <<'SWIFT'\n([\s\S]*?)\nSWIFT/);
+  assert.ok(stub, 'the script still writes the WidgetBridge.swift stub');
+  const declared = new Map();
+  for (const line of stub[1].split('\n')) {
+    const m = line.trim().match(/^static (?:let|func) (\w+)(.*?)\s*(?:\{\s*\})?$/);
+    if (m) declared.set(m[1], line.trim().replace(/\s*\{\s*\}$/, ''));
+  }
+  const used = new Set([...cover.matchAll(/WafraWidgetsModule\.(\w+)/g)].map((m) => m[1]));
+  assert.ok(used.size > 0, 'the privacy cover uses WafraWidgetsModule');
+  for (const name of used) {
+    assert.ok(declared.has(name), `stub declares WafraWidgetsModule.${name}, which WafraPrivacyCover.swift uses`);
+    const decl = declared.get(name);
+    const escaped = decl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+    assert.match(real, new RegExp(`^\\s*${escaped}\\s*(?:\\{|$)`, 'm'), `real WafraWidgetsModule.swift has: ${decl}`);
+  }
+});
