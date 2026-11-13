@@ -18,8 +18,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: diag-d4cc04a9
-            sha: d4cc04a9dc1d9ffeacb3faf58dc3714551006b35
+          - label: diag-6c4e78f7
+            sha: 6c4e78f7ea2a750142c2f5d51c086c3020e678b7
     name: erase on ${{ matrix.label }}
     runs-on: macos-15
     timeout-minutes: 120
@@ -78,13 +78,30 @@ jobs:
           npx pod-install ios
           WORKSPACE=$(find ios -maxdepth 1 -name '*.xcworkspace' | head -1)
           SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+          set +e
           xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" -configuration Release \
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath build/dd -quiet build
+            -derivedDataPath build/dd -quiet build 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log"
+          RC=${PIPESTATUS[0]}
+          set -e
+          if [ "$RC" -ne 0 ]; then
+            mkdir -p ../shots
+            grep -E 'error:' "$RUNNER_TEMP/xcodebuild.log" | cut -c1-400 | head -60 > ../shots/build-errors.txt || true
+            exit "$RC"
+          fi
           APP=$(find build/dd/Build/Products/Release-iphonesimulator -maxdepth 1 -name '*.app' | head -1)
           [ -n "$APP" ] || { echo "no .app produced"; exit 1; }
           mkdir -p build/app && rm -rf build/app/* && cp -R "$APP" build/app/
           test -f build/app/*.app/main.jsbundle && ls -l build/app/*.app/main.jsbundle
+
+      - name: Upload compiler error lines (build failures only)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: erase-repro-build-errors-${{ matrix.label }}
+          path: shots/build-errors.txt
+          retention-days: 3
+          if-no-files-found: ignore
 
       - name: Save the build to cache
         if: steps.appcache.outputs.cache-hit != 'true'

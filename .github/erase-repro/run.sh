@@ -58,7 +58,7 @@ note "crashes in 2 attempts: $CRASHES"
 clean < "$RAW" | grep -nE "Unhandled JS Exception|RCTExceptionsManager|reportFatal|RCTFatal|Terminating app|uncaught exception|SIGABRT|EXC_|Fatal|Uncaught|ERROR|ReferenceError|TypeError|=== ERASE STEP" | cut -c1-1500 | head -400 > "$OUT/js-exception-lines.txt"
 note "js-exception-lines.txt: $(wc -l < "$OUT/js-exception-lines.txt") lines"
 # The fatal's JS stack is the lines AFTER the "Terminating app" message, and the JS console lines just before it are the breadcrumbs.
-clean < "$RAW" | awk '/=== ERASE STEP/ {on=1} on && (/\[wafra:/ || /Possible Unhandled Promise Rejection/ || /=== ERASE STEP/ || /=== TRY AGAIN/) {print substr($0,1,500)}' | head -300 > "$OUT/app-wafra-lines.txt"
+clean < "$RAW" | awk '/=== ERASE STEP/ {on=1} on && (/\[wafra:/ || /Possible Unhandled Promise Rejection/ || /=== ERASE STEP/ || /=== TRY AGAIN/) {print substr($0,1,900)}' | head -300 > "$OUT/app-wafra-lines.txt"
 grep -F "[wafra:erase-diag]" "$OUT/app-wafra-lines.txt" > "$OUT/erase-diag-lines.txt" || true
 note "app-wafra-lines.txt: $(wc -l < "$OUT/app-wafra-lines.txt") lines"
 clean < "$RAW" | awk '/Terminating app due to uncaught exception/ && !seen {seen=1; n=0} seen && n<90 {print substr($0,1,1500); n++}' > "$OUT/js-fatal-stack.txt"
