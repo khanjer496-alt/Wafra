@@ -44,6 +44,12 @@ note "crashes in 2 attempts: $CRASHES"
 # ---- only the JS-exception / fatal lines
 clean < "$RAW" | grep -nE "Unhandled JS Exception|RCTExceptionsManager|reportFatal|RCTFatal|Terminating app|uncaught exception|SIGABRT|EXC_|Fatal|Uncaught|ERROR|ReferenceError|TypeError|=== ERASE STEP" | cut -c1-1500 | head -400 > "$OUT/js-exception-lines.txt"
 note "js-exception-lines.txt: $(wc -l < "$OUT/js-exception-lines.txt") lines"
+# The fatal's JS stack is the lines AFTER the "Terminating app" message, and the JS console lines just before it are the breadcrumbs.
+clean < "$RAW" | awk '/Terminating app due to uncaught exception/ && !seen {seen=1; n=0} seen && n<90 {print substr($0,1,1500); n++}' > "$OUT/js-fatal-stack.txt"
+clean < "$RAW" | awk '/Unhandled JS Exception/ {print NR}' | head -2 | while read -r L; do
+  clean < "$RAW" | sed -n "$((L>140?L-140:1)),$((L+2))p" | grep -E "com.facebook.react.log:javascript|Unhandled JS Exception|wafra:" | cut -c1-400 | tail -70
+  echo "----"; done > "$OUT/js-breadcrumbs-before-fatal.txt"
+note "js-fatal-stack.txt: $(wc -l < "$OUT/js-fatal-stack.txt") lines; js-breadcrumbs-before-fatal.txt: $(wc -l < "$OUT/js-breadcrumbs-before-fatal.txt") lines"
 # ---- host crash reports for the app, reduced to the fields that identify the failure (no memory contents)
 python3 - "$MARK" "$OUT/crash-summary.txt" <<'PY'
 import glob, json, os, sys

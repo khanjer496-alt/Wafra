@@ -139,6 +139,8 @@ jobs:
             shots/status.txt
             shots/js-exception-lines.txt
             shots/crash-summary.txt
+            shots/js-fatal-stack.txt
+            shots/js-breadcrumbs-before-fatal.txt
             shots/*.png
             shots/maestro/*.log
           retention-days: 3
