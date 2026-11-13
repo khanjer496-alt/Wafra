@@ -166,7 +166,7 @@ final class PurchaseUITests: XCTestCase {
         let end = Date().addingTimeInterval(timeout)
         var tapped = false
         while Date() < end && !tapped {
-            for host in hosts {
+            for host in hosts where host.state != .notRunning {
                 let b = host.buttons["Subscribe"].firstMatch
                 if b.exists {
                     shot("\(tag)-store-sheet"); note("\(tag): store sheet found in \(host.identifier); tapping Subscribe"); b.tap(); tapped = true; break
@@ -177,7 +177,7 @@ final class PurchaseUITests: XCTestCase {
         if !tapped { note("\(tag): no Subscribe button within \(Int(timeout)) s"); return }
         let end2 = Date().addingTimeInterval(25)
         while Date() < end2 {
-            for host in hosts {
+            for host in hosts where host.state != .notRunning {
                 for alert in host.alerts.allElementsBoundByIndex {
                     let label = alert.label
                     shot("\(tag)-after-subscribe-alert")
