@@ -194,6 +194,30 @@ final class PurchaseUITests: XCTestCase {
         }
         note("\(tag): store sheet confirmed, no follow-up alert")
     }
+    /// A real "user cancelled": wait for the StoreKit test purchase sheet, then close it with its own close button
+    /// (never Subscribe). The runner session's simulated error does not reach the app's separate store registration.
+    func cancelStoreSheet(_ tag: String, timeout: TimeInterval = 45) throws {
+        let hosts = [XCUIApplication(bundleIdentifier: "com.apple.springboard"),
+                     XCUIApplication(bundleIdentifier: "com.apple.StoreKitUIService"), app]
+        let end = Date().addingTimeInterval(timeout)
+        while Date() < end {
+            for host in hosts where host.state != .notRunning {
+                guard host.buttons["Subscribe"].firstMatch.exists else { continue }
+                shot("\(tag)-store-sheet-before-cancel")
+                for name in ["Close", "Cancel", "xmark", "Dismiss"] {
+                    let b = host.buttons[name].firstMatch
+                    if b.exists { note("\(tag): store sheet found in \(host.identifier); closing it with '\(name)'"); b.tap(); return }
+                }
+                let labels = host.buttons.allElementsBoundByIndex.map { String($0.label.prefix(30)) }
+                note("\(tag): store sheet has no close button by name; buttons: \(labels)")
+                // the round close button is the sheet's top-right control: tap the one that is not Subscribe
+                if let b = host.buttons.allElementsBoundByIndex.first(where: { $0.label != "Subscribe" && $0.frame.minY > 400 }) { b.tap(); return }
+                throw StepFail("store sheet has no close control: \(labels)")
+            }
+            Thread.sleep(forTimeInterval: 1)
+        }
+        throw StepFail("no store sheet to cancel within \(Int(timeout)) s")
+    }
     /// Watch SpringBoard for system alerts after a buy tap without dismissing them: records the alert text and buttons
     /// (Apple's own wording) so a "Sign in to Apple Account" sheet is visible evidence instead of being cancelled.
     func observeAlerts(_ tag: String, seconds: Int) {
@@ -272,6 +296,7 @@ final class PurchaseUITests: XCTestCase {
             try need(el("settings-pro-card"), "settings-pro-card", 20)
             el("settings-pro-card").tap()
             try need(el("pro-screen"), "pro-screen", 20)
+            note("P3 buy tap (marker only: log window for the store after the reinstall)")
             Thread.sleep(forTimeInterval: 6)
             shot("P3a-after-reinstall-before-restore")
             var how = "Pro came back at launch (store already holds the subscription)"
@@ -318,18 +343,19 @@ final class PurchaseUITests: XCTestCase {
             session.clearTransactions()
             try requestHostReinstall(3)
             try openPro(onboard: true)
-            try simulatePurchaseCancel(true)
-            defer { try? simulatePurchaseCancel(false) }
             retryPrices("pro-plan-weekly")
             try need(el("pro-plan-weekly"), "weekly row", 10)
             el("pro-plan-weekly").tap()
             try need(el("pro-buy"), "buy button", 10)
+            note("P5 buy tap")
             el("pro-buy").tap()
+            try cancelStoreSheet("P5")
             let noteShown = el("pro-purchase-note").waitForExistence(timeout: 20)
             let noteText = noteShown ? el("pro-purchase-note").label : "(none)"
             Thread.sleep(forTimeInterval: 4)
             shot("P5-after-cancelled-purchase")
             guard el("pro-buy").exists, el("pro-plans").exists else { throw StepFail("Pro looks unlocked after a cancelled purchase") }
+            guard noteShown else { throw StepFail("the sheet was closed but the neutral not-completed line did not appear; buy button enabled: \(el("pro-buy").isEnabled)") }
             return "plans and buy button still shown; neutral note shown: \(noteShown) '\(noteText)'; buy button enabled: \(el("pro-buy").isEnabled)"
         }
         try? simulatePurchaseCancel(false)
