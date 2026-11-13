@@ -113,7 +113,9 @@ test('seeded random unknown tokens and slash blobs always redact (no known value
 
 test('long lowercase runs cannot make the summary hang (no catastrophic backtracking)', () => {
   const long = 'a'.repeat(5000);
-  for (const text of [`error: undefined symbol ${long}B_v2`, `error: missing ${long}B/React2Core`, `error: ${long}1`]) {
+  const huge = 'a'.repeat(50000);
+  for (const text of [`error: undefined symbol ${long}B_v2`, `error: missing ${long}B/React2Core`, `error: ${long}1`,
+    `error: ${huge}`, `error: x@${'a.'.repeat(25000)}`, `error: token${'a.'.repeat(25000)}`]) {
     const start = process.hrtime.bigint();
     summarize([{ name: 'slow.log', text }], 1);
     const ms = Number(process.hrtime.bigint() - start) / 1e6;

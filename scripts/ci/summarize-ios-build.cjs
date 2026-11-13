@@ -8,6 +8,10 @@
 
 const MAX_ENTRIES = 120;
 const MAX_LINE = 400;
+// Lines are cut to this length before any matching, so no rule can go
+// superlinear on a huge line (minified JS, inline data). The output is capped
+// at MAX_LINE, so nothing beyond the cut could reach the summary anyway.
+const MAX_SCAN = 2000;
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
 
 const ERROR_LINE = new RegExp([
@@ -26,7 +30,7 @@ const PHASE = /^\s*\[([A-Z][A-Z0-9_]{2,})\]/;
 // password from EAS (not from this job's env, so it can't be matched by value).
 const DROP = /BEGIN [A-Z ]*PRIVATE KEY|\bauthorization\s*:|\bbearer\s+\S|password|passphrase|passwd|\bsecret|private[_-]?key|import_certificate|certificate_password|\bsecurity\s+(?:import|unlock-keychain|create-keychain)\b|\s-[pP]\s+\S|\b(?:EXPO_TOKEN|GH_TOKEN|GITHUB_TOKEN|ASC_KEY_P8|ASC_PRIVATE_KEY|EXPO_ASC_API_KEY_P8)\b/i;
 // Credential-named assignments that survive DROP (e.g. "token=…", "api_key: …").
-const NAMED_VALUE = /\b([\w.-]*(?:token|api[_-]?key|access[_-]?key|auth)[\w.-]*\s*[:=]\s*)("[^"]*"|'[^']*'|\S+)/gi;
+const NAMED_VALUE = /\b([\w.-]{0,64}(?:token|api[_-]?key|access[_-]?key|auth)[\w.-]{0,64}\s*[:=]\s*)("[^"]*"|'[^']*'|\S+)/gi;
 // The signing identity carries the developer's legal name.
 const SIGNING_IDENTITY = /\b(Apple (?:Distribution|Development)|iPhone (?:Distribution|Developer)|iOS (?:Distribution|Development)|Developer ID (?:Application|Installer)):\s*[^(\n]+\(/g;
 // A team named in quotes ("…team \"Jane Q Developer (Individual)\"") is the same legal name.
@@ -76,7 +80,7 @@ function redactor(secrets) {
       // Code names (every "-"/"_" part identifier-shaped) are spared.
       .replace(/[A-Za-z0-9+_=-]{20,}/g, run =>
         /[0-9]/.test(run) && /[A-Za-z]/.test(run) && !run.split(/[-_]/).every(identifierShaped) ? '[redacted-token]' : run)
-      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[email]');
+      .replace(/[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,24}/g, '[email]');
   };
 }
 
@@ -91,7 +95,7 @@ function summarize(sources, exitCode, secrets = []) {
     let phase = null;
     const lines = text.split(/\r?\n/);
     for (let i = 0; i < lines.length; i++) {
-      const line = clean(lines[i]);
+      const line = clean(lines[i].slice(0, MAX_SCAN));
       const marker = line.match(PHASE);
       if (marker) phase = marker[1];
       if (!ERROR_LINE.test(line)) continue;
