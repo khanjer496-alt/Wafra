@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 355a8b7bdb119e23dfaf748ee2ab3bea38dfcedf0f1f7f54dadae6bde4ee4f1e
+// Generated from normal shipping TypeScript. Source SHA-256: 61e8b5a954eab1493a0ecab554bc748aa3832607fe5edb84b8388d698ed98f1d
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -12005,25 +12005,30 @@ function enCreditClauses(sentence, debitBeside = false) {
     return clauses;
 }
 const EN_TEMPORAL_LEADER_RE = /^(?:once|when(?:ever)?|after|as\s+soon\s+as)$/i;
-const EN_CREDIT_SUBJECT_AFTER_LEADER_RE = new RegExp(String.raw `^\s+(?:(?:(?:the|your|a|an|this|that)\s+)?` +
-    String.raw `(?:refund\w*|amount|credit|money|funds?|payment|sum)\b|it\b|(?:[A-Z]{3}|Dhs?)\.?\s*\d|\d[\d,.]*\s*(?:[A-Z]{3}|Dhs?)\b|` +
-    String.raw `[A-Z0-9][\w.&'’-]*(?:\s+[A-Z0-9][\w.&'’-]*){0,3}\s+(?:has|have|had|is|was|were|will|did|does|refunded|reversed|returned|credited|deposited|processed)\b)`);
-const EN_MODAL_AFTER_CREDIT_RE = /\b(?:will|can|may|shall|should|would|could|must)\b|['’]ll\b/i;
-const EN_COMPLETED_STRETCH_RE = /\b(?:was|were|had|has\s+been|have\s+been)\b/i;
+const EN_EVENT_NOUN_PHRASE_RE = /^\s+(?:(?:your|the|this|our)\s+)?(?:(?:order|purchase|item|transaction|booking)\s+)?(?:cancell?ation|return|refund\s+request|verification|review|investigation|dispute(?:\s+resolution)?|chargeback|reversal)\s*,?\s*$/i;
+const EN_PAST_EVENT_CLAUSE_RE = /^\s+(?:your|the|this)\s+(?:order|purchase|item|transaction|booking|dispute|request|claim|return)\s+(?:was|were|has\s+been|had\s+been)\s+(?:cancell?ed|returned|resolved|approved|reviewed|reversed|completed|received|processed)\s*,?\s*$/i;
+const EN_PASSIVE_AMOUNT_RE = /(?:\b[A-Z]{3}|\bDhs?\.?)\s*\d[\d,]*(?:\.\d+)?|\d[\d,]*(?:\.\d+)?\s*(?:[A-Z]{3}|Dhs?)\b/;
+const EN_COMPLETED_AUXILIARY_RE = /^\s*(?:(?:has|have|had)\s+(?:now\s+)?been|was|were)\s+(?:successfully\s+)?$/i;
+const EN_LOWERCASE_MODAL_RE = /\b(?:will|can|may|shall|should|would|could|must)\b|['’]ll\b/;
 function leaderGovernsCredit(sentence, leader, clause) {
     const word = leader[0].replace(/^[^\p{L}]+/u, '');
     const leaderEnd = leader.index + leader[0].length;
     if (!EN_TEMPORAL_LEADER_RE.test(word))
         return true;
-    const rest = sentence.slice(leaderEnd);
-    if (/^once$/i.test(word) && /^\s+(?:again|more)\b/i.test(rest))
+    if (/^once$/i.test(word) && /^\s+(?:again|more)\b/i.test(sentence.slice(leaderEnd)))
         return false;
-    if (EN_CREDIT_SUBJECT_AFTER_LEADER_RE.test(rest) || EN_MODAL_AFTER_CREDIT_RE.test(sentence.slice(clause.end)))
+    if (EN_LOWERCASE_MODAL_RE.test(sentence.slice(clause.end)))
         return true;
-    const lead = sentence.slice(0, clause.start);
-    const completed = EN_COMPLETED_STRETCH_RE.test(sentence.slice(leaderEnd, clause.end)) ||
-        (/ed$/i.test(clause.verbs[0]) && !EN_CREDIT_WORDS.pendingBefore.test(lead) && !EN_CREDIT_WORDS.progressiveBefore.test(lead));
-    return !completed;
+    const stretch = sentence.slice(leaderEnd, clause.start);
+    const amount = EN_PASSIVE_AMOUNT_RE.exec(stretch);
+    if (!amount)
+        return true;
+    const event = stretch.slice(0, amount.index);
+    if (!EN_EVENT_NOUN_PHRASE_RE.test(event) && !EN_PAST_EVENT_CLAUSE_RE.test(event))
+        return true;
+    const auxiliary = stretch.slice(amount.index + amount[0].length);
+    const telegraphic = auxiliary.trim() === '' && /ed$/i.test(clause.verbs[0]);
+    return !(telegraphic || EN_COMPLETED_AUXILIARY_RE.test(auxiliary));
 }
 function creditSettlement(sentence, clause, after = '') {
     const lead = sentence.slice(0, clause.start).replace(EN_CREDIT_WORDS.coordinated, '');
