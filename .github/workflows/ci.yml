@@ -180,14 +180,22 @@ jobs:
       - name: Generate native iOS contract fixtures
         run: npx expo prebuild --platform ios --no-install
 
-      # The native Play-billing test downloads four small public jars from Maven Central and Google's
-      # Maven, which rate-limits shared runners (HTTP 429). Cache them (the test verifies each file's pinned
-      # SHA-256 before using it) and let it retry transient failures with backoff.
-      - name: Cache native billing test dependencies
-        uses: actions/cache@v4
+      # The native Play-billing test needs four small public jars (scripts/test/wafra-play-billing-deps.json:
+      # pinned SHA-256, two mirrors each). Maven Central rate-limits shared runners (429) and has answered 404
+      # for a jar it serves, so the jars are cached under a key made ONLY of their names and pinned hashes:
+      # editing the test or a mirror URL keeps the cache, changing a pin replaces it. The test verifies every
+      # cached or downloaded byte against its pin before use, and only verified files reach the cache.
+      - name: Key native billing test dependencies by their pinned SHA-256
+        id: billing-deps
+        run: |
+          key=$(node -e "const d=require('./scripts/test/wafra-play-billing-deps.json');process.stdout.write(require('crypto').createHash('sha256').update(d.map(x=>x.name+'@'+x.sha256).sort().join('\\n')).digest('hex').slice(0,32))")
+          echo "key=wafra-play-billing-libs-v2-$key" >> "$GITHUB_OUTPUT"
+      - name: Restore native billing test dependencies
+        id: billing-deps-cache
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/wafra-play-billing-libs
-          key: wafra-play-billing-libs-${{ hashFiles('scripts/test/wafra-play-billing-native.cjs') }}
+          key: ${{ steps.billing-deps.outputs.key }}
 
       # NO SECRETS IN THIS JOB: the summary artifact below is downloadable and GitHub masks log views, not artifacts.
       # The raw log stays on the runner. What leaves it is a small JSON report with the failing test names
@@ -205,6 +213,23 @@ jobs:
         env:
           WAFRA_PLAY_BILLING_TEST_LIBS: ${{ runner.temp }}/wafra-play-billing-libs
 
+      # Saved even when an unrelated test fails, so one good download serves later runs. Only when all four
+      # verified files are present (resolveDependency writes nothing unverified).
+      - name: Check native billing test dependencies are complete
+        id: billing-deps-complete
+        if: always() && steps.billing-deps-cache.outputs.cache-hit != 'true'
+        env:
+          LIBS: ${{ runner.temp }}/wafra-play-billing-libs
+        run: |
+          count=$(node -e "const fs=require('fs');const d=require('./scripts/test/wafra-play-billing-deps.json');process.stdout.write(String(d.filter(x=>fs.existsSync(process.env.LIBS+'/'+x.name)).length)+'/'+d.length)")
+          echo "native billing test dependencies cached: $count"
+          if [ "${count%/*}" = "${count#*/}" ]; then echo "complete=true" >> "$GITHUB_OUTPUT"; fi
+      - name: Save native billing test dependencies
+        if: always() && steps.billing-deps-complete.outputs.complete == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/wafra-play-billing-libs
+          key: ${{ steps.billing-deps.outputs.key }}
       - name: Preserve structured app test result
         if: always()
         continue-on-error: true
