@@ -2594,12 +2594,26 @@ const EN_PAST_EVENT_CLAUSE_RE = /^\s+(?:your|the|this)\s+(?:order|purchase|item|
 const EN_PASSIVE_AMOUNT_RE = /(?:\b[A-Z]{3}|\bDhs?\.?)\s*\d[\d,]*(?:\.\d+)?|\d[\d,]*(?:\.\d+)?\s*(?:[A-Z]{3}|Dhs?)\b/;
 const EN_COMPLETED_AUXILIARY_RE = /^\s*(?:(?:has|have|had)\s+(?:now\s+)?been|was|were)\s+(?:successfully\s+)?$/i;
 const EN_LOWERCASE_MODAL_RE = /\b(?:will|can|may|shall|should|would|could|must)\b|['’]ll\b/;
+// An ALL-CAPS alert (a sentence with no lowercase letter) writes its leaders and modals in capitals too (Change Reviewer
+// 1ae30382). There an upper-case leader counts at the sentence start or right after a comma, never mid-sentence, where it may
+// be a merchant name ("REFUND FROM AFTER EIGHT CAFE …"); and "MAY" is a modal only before a verb ("YOU MAY CHECK"), never in
+// a date or a name ("12 MAY 2026", "MAY STORES").
+const isAllCapsSentence = (sentence: string): boolean => /[A-Z]/.test(sentence) && !/[a-z]/.test(sentence);
+const EN_CAPS_LEADER_RE = /(?:^\s*|[,;:]\s*)(?:IF|ONCE|WHEN(?:EVER)?|AFTER|UNTIL|UNLESS|WHETHER|AS\s+SOON\s+AS)(?![A-Za-z])/g;
+const EN_CAPS_MODAL_RE =
+  /\b(?:WILL|CAN|SHALL|SHOULD|WOULD|COULD|MUST)\b|['’]LL\b|\bMAY\s+(?:NOT\s+|ALSO\s+)?(?:BE|HAVE|TAKE|REFLECT|APPEAR|SHOW|RECEIVE|CHECK|CONTACT|CALL|VIEW|USE|NEED|GET|SEE)\b/;
+// A trailing condition on the credit ("… if approved", "… upon verification"), and for a refund a time window ("… within 7
+// working days"), in the credit's own sentence: the money is not settled yet (Change Reviewer 1ae30382). A time window on a
+// salary or a deposit ("available within 2 hours") is not a pending refund.
+const EN_TRAILING_CONDITION_RE =
+  /\b(?:if|once|when|provided(?:\s+that)?)\s+(?:(?:it|this|they|the\s+\w+)\s+(?:is|are|has\s+been|gets?)\s+)?(?:approved|authori[sz]ed|verified|confirmed|cleared|accepted|validated)\b|\b(?:upon|subject\s+to)\s+(?:(?:the|your|merchant|bank)\s+)?(?:approval|verification|confirmation|clearance|validation)\b/i;
+const EN_TIME_WINDOW_RE = /\bwithin\s+(?:the\s+next\s+)?\d+(?:\s*[-–]\s*\d+)?\s+(?:working\s+|business\s+|banking\s+)?(?:days?|hours?|weeks?)\b/i;
 function leaderGovernsCredit(sentence: string, leader: RegExpMatchArray, clause: CreditClause): boolean {
   const word = leader[0].replace(/^[^\p{L}]+/u, '');
   const leaderEnd = leader.index! + leader[0].length;
   if (!EN_TEMPORAL_LEADER_RE.test(word)) return true;
   if (/^once$/i.test(word) && /^\s+(?:again|more)\b/i.test(sentence.slice(leaderEnd))) return false;
-  if (EN_LOWERCASE_MODAL_RE.test(sentence.slice(clause.end))) return true;
+  if ((isAllCapsSentence(sentence) ? EN_CAPS_MODAL_RE : EN_LOWERCASE_MODAL_RE).test(sentence.slice(clause.end))) return true;
   const stretch = sentence.slice(leaderEnd, clause.start);
   const amount = EN_PASSIVE_AMOUNT_RE.exec(stretch);
   if (!amount) return true;
@@ -2666,6 +2680,10 @@ const AR_HEDGED_SENTENCE_RE = new RegExp(`${AR_NB}(?:اذا|في\\s+حال|يم�
 const AR_INSTRUMENT_NUMBER_RE = new RegExp(
   `(?:بطاق|حساب)[${AR_LETTER}]*\\s+(?:(?:ال)?منتهي(?:ه)?\\s+(?:ب\\s*ـ*\\s*)?|رقم\\s+)(?:[xX*•·]+\\s*)?\\d{4,}`);
 const AR_BALANCE_LINE_RE = new RegExp(`${AR_NB}(?:ال)?(?:رصيد|حد)\\s+(?:ال)?متاح${AR_NA}`);
+/** "في حال الموافقة" / "عند التحقق" after the credit: a condition on it. */
+const AR_TRAILING_CONDITION_RE = new RegExp(`${AR_NB}(?:في\\s+حال|حال|عند|بشرط|شرط)\\s+(?:ال)?(?:موافقه|اعتماد|تحقق|تاكيد|قبول)${AR_NA}`);
+/** "خلال 7 أيام عمل" after a refund: within a time window, so not yet there. */
+const AR_TIME_WINDOW_RE = new RegExp(`${AR_NB}خلال\\s+\\d+(?:\\s*[-–]\\s*\\d+)?\\s+(?:ايام|يوم|ساعه|ساعات|اسابيع|اسبوع)${AR_NA}`);
 /** "سيظهر المبلغ في حسابك خلال 5-7 أيام عمل": the processed money is not there yet. */
 const AR_PROCESSED_NOT_YET_RE = new RegExp(
   `${AR_NB}(?:سيظهر|ستظهر|سينعكس|ستنعكس|سيضاف|ستضاف|سيتم\\s+(?:ايداع|اضافه|اظهار))${AR_NA}|${AR_NB}قد\\s+يستغرق[^.\\n]{0,40}?(?:يوم|ايام)${AR_NA}`);
@@ -2737,6 +2755,12 @@ function arCreditSettlement(sentence: string, clause: CreditClause, rawAfter: st
     after.split(REFUND_SENTENCE_BREAK_RE).some((text) => !AR_HEDGED_SENTENCE_RE.test(text) && AR_TAKEN_BACK_LATER_RE.test(text))) {
     return { verdict: 'refused', reason: 'taken-back' };
   }
+  // As in English (Change Reviewer 1ae30382): "في حال الموافقة" (if approved) leaves the credit conditional, and for a refund
+  // "خلال 7 أيام عمل" (within 7 working days) leaves it pending.
+  if (AR_TRAILING_CONDITION_RE.test(tail)) return { verdict: 'not-settled', reason: 'conditional' };
+  if (AR_TIME_WINDOW_RE.test(tail) && clause.verbs.some((verb) => verb === 'refunded' || verb === 'returned' || verb === 'reversed')) {
+    return { verdict: 'not-settled', reason: 'pending' };
+  }
   if (clause.verbs.every((verb) => verb === 'processed')) {
     // Oracle v2.2 in Arabic: settled with the instrument's number or a balance line, unless the bank says it is not there yet.
     if ([tail, ...after.split(REFUND_SENTENCE_BREAK_RE)].some((text) => AR_PROCESSED_NOT_YET_RE.test(text))) {
@@ -2752,6 +2776,8 @@ export function creditSettlement(sentence: string, clause: CreditClause, after =
   if (clause.ar) return arCreditSettlement(sentence, clause, after);
   const lead = sentence.slice(0, clause.start).replace(EN_CREDIT_WORDS.coordinated, '');
   const leaders = [...lead.matchAll(EN_CREDIT_WORDS.conditional)];
+  if (isAllCapsSentence(sentence)) leaders.push(...lead.matchAll(EN_CAPS_LEADER_RE));
+  leaders.sort((a, b) => a.index! - b.index!);
   const last = leaders[leaders.length - 1];
   if (last && !lead.slice(last.index! + last[0].length).includes(',') && leaderGovernsCredit(sentence, last, clause)) {
     return { verdict: 'not-settled', reason: 'conditional' };
@@ -2764,6 +2790,11 @@ export function creditSettlement(sentence: string, clause: CreditClause, after =
   const destination = EN_CREDIT_WORDS.destination.exec(tail);
   if (destination && REFUND_THIRD_PARTY_DESTINATION_RE.test(` ${destination[0]}`)) return { verdict: 'refused', reason: 'third-party' };
   if (refundCreditNotFinal((tail + after).replace(EN_CREDIT_REASON_RE, ' '))) return { verdict: 'refused', reason: 'taken-back' };
+  if (EN_TRAILING_CONDITION_RE.test(tail)) return { verdict: 'not-settled', reason: 'conditional' };
+  if (EN_TIME_WINDOW_RE.test(tail) &&
+    (clause.verbs.some((verb) => /^(?:refund|revers|return)/.test(verb)) || EN_PROCESSED_REFUND_CONTEXT_RE.test(sentence))) {
+    return { verdict: 'not-settled', reason: 'pending' };
+  }
   if (clause.verbs.every((verb) => verb.startsWith('process'))) {
     // Oracle v2.2 (CEO 73c34ef8, Change Reviewer 4eee941b): a processed refund is settled when it names the instrument by
     // number or a balance/limit line follows, unless a later sentence says the money is not there yet ("It will reflect in
