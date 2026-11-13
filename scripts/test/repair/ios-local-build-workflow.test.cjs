@@ -56,6 +56,14 @@ test('source and signing are pinned, and only a verified exact-source build may 
   const build = steps.find(s => s.name === 'Build signed iOS archive on this macOS runner').run;
   assert.match(build, /--local --non-interactive/);
   assert.match(build, /--freeze-credentials/);
+  // A failed archive leaves a redacted summary; the build's own exit code still decides.
+  assert.match(build, /BUILD_STATUS=\$\{PIPESTATUS\[0\]\}/);
+  assert.match(build, /exit "\$BUILD_STATUS"\s*$/);
+  assert.match(build, /node scripts\/ci\/summarize-ios-build\.cjs/);
+  const failureUpload = steps.find(s => s.name === 'Preserve iOS archive failure summary');
+  assert.equal(failureUpload.if, 'failure()');
+  assert.equal(failureUpload.with.path, 'artifacts/ios-build-failure/summary.txt');
+  assert.ok(steps.indexOf(failureUpload) > steps.findIndex(s => s.name === 'Remove temporary Apple API key'));
   const verify = steps.findIndex(s => s.name === 'Verify the actual signed IPA and App Intent resources');
   const preserve = steps.findIndex(s => s.name === 'Preserve verification report before submission');
   const gate = steps.findIndex(s => s.name === 'Require successful exact-source CI before TestFlight submission');
