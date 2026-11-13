@@ -33,7 +33,11 @@ interface DeviceSecretAdapter {
   randomBytes(): Promise<Uint8Array>;
 }
 const nativeSecrets: DeviceSecretAdapter = {
-  async isNative() { return (await import('react-native')).Platform.OS !== 'web'; },
+  // NOT `(await import('react-native')).Platform`: a dynamic import of react-native makes Metro enumerate every export of
+  // the module, which runs the deprecated lazy getters (PushNotificationIOS -> new NativeEventEmitter(null)) and throws a
+  // fatal "Invariant Violation: `new NativeEventEmitter()` requires a non-null argument" on iOS (Erase all data crashed
+  // the app here). A plain require reads only `Platform`, the same pattern capture.ts uses.
+  async isNative() { return (require('react-native') as typeof import('react-native')).Platform.OS !== 'web'; },
   async readSecret() { return (await import('expo-secure-store')).getItemAsync(SECRET_NAME); },
   async writeSecret(value) {
     const secure = await import('expo-secure-store');
