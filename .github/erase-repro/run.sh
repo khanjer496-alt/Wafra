@@ -14,6 +14,9 @@ app_pid() { xcrun simctl spawn "$UDID" launchctl list 2>/dev/null | awk '/UIKitA
 fresh() { xcrun simctl terminate "$UDID" "$APP" >/dev/null 2>&1; xcrun simctl uninstall "$UDID" "$APP" >/dev/null 2>&1
   xcrun simctl install "$UDID" "$(ls -d "$APPDIR"/*.app | head -1)"; }
 
+OCRBIN="${RUNNER_TEMP:-/tmp}/wafra-ocr"; swiftc -O "$H/.github/app-lock-sim/ocr.swift" -o "$OCRBIN" >/dev/null 2>&1 || log "ocr build failed"
+{ echo "== codesign entitlements of the simulator build under test"; codesign -d --entitlements - "$(ls -d "$APPDIR"/*.app | head -1)" 2>&1 | head -60
+  echo; echo "== app-group containers the installed app resolves (simctl get_app_container groups)"; } > "$OUT/app-entitlements.txt"
 xcrun simctl spawn "$UDID" log stream --level debug --style compact \
   --predicate 'process == "Wafra" OR eventMessage CONTAINS "Unhandled JS Exception" OR eventMessage CONTAINS "RCTFatal" OR eventMessage CONTAINS "reportFatal" OR eventMessage CONTAINS "RCTExceptionsManager"' >> "$RAW" 2>&1 &
 LS=$!; sleep 3
@@ -33,6 +36,16 @@ for attempt in 1 2; do
   sleep 25
   PA=$(app_pid); note "app pid 25 s after the Erase tap: ${PA:-none}"
   xcrun simctl io "$UDID" screenshot "$OUT/a${attempt}-after-erase.png" >/dev/null 2>&1
+  echo "=== TRY AGAIN attempt $attempt $(date -u +%T)" >> "$RAW"
+  T1=$("$OCRBIN" "$OUT/a${attempt}-after-erase.png" 2>/dev/null | cut -f2 | tr '\n' ' ')
+  note "screen right after the erase (OCR): ${T1:0:240}"
+  mro "$H/.github/erase-repro/tryagain.yaml" "try$attempt"; note "try-again flow rc=$?"
+  sleep 20
+  xcrun simctl io "$UDID" screenshot "$OUT/a${attempt}-after-tryagain.png" >/dev/null 2>&1
+  T2=$("$OCRBIN" "$OUT/a${attempt}-after-tryagain.png" 2>/dev/null | cut -f2 | tr '\n' ' ')
+  note "screen 20 s after Try again (OCR): ${T2:0:240}"
+  if printf '%s' "$T2" | grep -qiE "your data was erased|encrypted captured messages|try again"; then note "RECOVERY after Try again attempt $attempt: the recovery screen is STILL shown"; else note "RECOVERY after Try again attempt $attempt: the recovery screen CLEARED"; fi
+  xcrun simctl get_app_container "$UDID" "$APP" groups >> "$OUT/app-entitlements.txt" 2>&1
   if [ -n "${PB:-}" ] && [ "${PB:-x}" != "-" ] && { [ -z "${PA:-}" ] || [ "${PA:-}" = "-" ] || [ "$PA" != "$PB" ]; }; then
     note "RESULT attempt $attempt: the app process ended or was replaced after Erase (pid $PB -> ${PA:-none}) = CRASH or relaunch"; CRASHES=$((CRASHES+1))
   else note "RESULT attempt $attempt: the same app process is still running after Erase (pid ${PB:-none} -> ${PA:-none}) = NO CRASH"; fi
@@ -45,6 +58,8 @@ note "crashes in 2 attempts: $CRASHES"
 clean < "$RAW" | grep -nE "Unhandled JS Exception|RCTExceptionsManager|reportFatal|RCTFatal|Terminating app|uncaught exception|SIGABRT|EXC_|Fatal|Uncaught|ERROR|ReferenceError|TypeError|=== ERASE STEP" | cut -c1-1500 | head -400 > "$OUT/js-exception-lines.txt"
 note "js-exception-lines.txt: $(wc -l < "$OUT/js-exception-lines.txt") lines"
 # The fatal's JS stack is the lines AFTER the "Terminating app" message, and the JS console lines just before it are the breadcrumbs.
+clean < "$RAW" | awk '/=== ERASE STEP/ {on=1} on && (/\[wafra:/ || /Possible Unhandled Promise Rejection/ || /=== ERASE STEP/ || /=== TRY AGAIN/) {print substr($0,1,500)}' | head -300 > "$OUT/app-wafra-lines.txt"
+note "app-wafra-lines.txt: $(wc -l < "$OUT/app-wafra-lines.txt") lines"
 clean < "$RAW" | awk '/Terminating app due to uncaught exception/ && !seen {seen=1; n=0} seen && n<90 {print substr($0,1,1500); n++}' > "$OUT/js-fatal-stack.txt"
 clean < "$RAW" | awk '/Unhandled JS Exception/ {print NR}' | head -2 | while read -r L; do
   clean < "$RAW" | sed -n "$((L>140?L-140:1)),$((L+2))p" | grep -E "com.facebook.react.log:javascript|Unhandled JS Exception|wafra:" | cut -c1-400 | tail -70

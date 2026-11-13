@@ -139,6 +139,8 @@ jobs:
             shots/crash-summary.txt
             shots/js-fatal-stack.txt
             shots/js-breadcrumbs-before-fatal.txt
+            shots/app-wafra-lines.txt
+            shots/app-entitlements.txt
             shots/*.png
             shots/maestro/*.log
           retention-days: 3

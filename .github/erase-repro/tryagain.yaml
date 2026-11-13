@@ -1,0 +1,13 @@
+appId: ${APP_ID}
+---
+- runFlow:
+    when:
+      visible: 'Your ledger was erased'
+    commands:
+      - tapOn:
+          point: '50%,59%'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn: 'Try again'
+- waitForAnimationToEnd:
+    timeout: 5000
