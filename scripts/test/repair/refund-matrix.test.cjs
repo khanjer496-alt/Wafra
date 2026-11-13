@@ -19,8 +19,9 @@
 // On a pull request, CI also runs refund-gaps-no-growth.cjs: the file may only lose entries and paths for rows the base
 // already had, so a fix to one row that breaks another in the same class cannot pass unseen.
 //
-// The oracle itself is pinned (ORACLE_PIN): an edit that adds, drops or relabels rows fails until the pin is updated in
-// the same PR, deliberately and with the reason in review. Dropping rows silently would cut coverage.
+// The oracle itself is pinned (ORACLE_PIN): an edit that adds, drops, relabels or rewrites rows fails until the pin is
+// updated in the same PR, deliberately and with the reason in review. Dropping rows, or making a hard row easy, would
+// silently cut coverage.
 //
 // Set REFUND_MATRIX_REPORT=<file> to write every gap with counts, and REFUND_MATRIX_WRITE_GAPS=<file> to write the
 // current gaps in the gap-file format after a fix (then lower CEILING to the new counts).
@@ -54,8 +55,9 @@ const NATIVE_IGNORED_INCOME_CEILING = 157;
 // when native posts its row.
 const NATIVE_IGNORED_CONTROL_ROWS = new Set(['CTL-05402', 'CTL-05403', 'CTL-05404', 'CTL-05405', 'CTL-05406', 'CTL-05407',
   'CTL-05416']);
-// Row count and sha256 of the oracle's "id<TAB>expected" lines, joined by newlines (Reviewer, #217 Low 1).
-const ORACLE_PIN = { rows: 5426, sha256: 'c7b52f07ce12dd268c330b4c64acbe0a565efdd7e02e233ecb3d910c867ee5d2' };
+// Row count and sha256 of the oracle's "id<TAB>expected<TAB>body" lines, joined by newlines (Reviewer, #217 Low 1; the
+// body since #225's review, so a row's text cannot be edited unseen).
+const ORACLE_PIN = { rows: 5426, sha256: '4ae3708dfcaa4d0edeb076aa43a7b767c3e8d03ad4e935a9902ecdc11a954a95' };
 
 const PATHS = ['parseSms', 'session', 'native'];
 const at = Date.parse('2026-11-05T10:00:00Z');
@@ -200,10 +202,10 @@ test('refund matrix ratchet: no class grows above its frozen ceiling', () => {
     `native ignored ${report.nativeIgnoredIncome} income rows > ceiling ${NATIVE_IGNORED_INCOME_CEILING}`);
 });
 
-test('refund matrix oracle is pinned: row count and id+expected hash', () => {
-  const sha256 = crypto.createHash('sha256').update(rows.map((row) => `${row.id}\t${row.expected}`).join('\n')).digest('hex');
+test('refund matrix oracle is pinned: row count and id+expected+body hash', () => {
+  const sha256 = crypto.createHash('sha256').update(rows.map((row) => `${row.id}\t${row.expected}\t${row.body}`).join('\n')).digest('hex');
   assert.equal(rows.length, ORACLE_PIN.rows, 'the oracle changed size: update ORACLE_PIN in the same PR and say why in review');
-  assert.equal(sha256, ORACLE_PIN.sha256, 'oracle ids or expected labels changed: update ORACLE_PIN in the same PR and say why in review');
+  assert.equal(sha256, ORACLE_PIN.sha256, 'oracle ids, labels or bodies changed: update ORACLE_PIN in the same PR and say why in review');
 });
 
 test('refund matrix report', (t) => {
