@@ -441,7 +441,8 @@ for (const seam of [
   'useWafraBilling(', 'billing.purchasePro(', 'billing.restorePro(',
   'subscriptionManagementUrl(', 'legalReady',
 ]) assert.ok(task7Pro.includes(seam), `Pro lost ${seam}`);
-assert.match(task7Pro, /notice && \([\s\S]*?accessibilityLiveRegion="polite"/);
+assert.match(task7Pro, /notice && notice\.tone !== 'neutral' && \([\s\S]*?accessibilityLiveRegion="polite"/);
+assert.match(task7Pro, /notice\?\.tone === 'neutral' && \([\s\S]*?testID="pro-purchase-note"[\s\S]*?accessibilityLiveRegion="polite"/);
 assert.match(task7Pro, /if \(!legalReady\)[\s\S]*?purchaseLegalMissingBody/);
 assert.match(task7Pro, /entitled \? \([\s\S]*?manageSubscription[\s\S]*?proContinue[\s\S]*?: \([\s\S]*?buySelectedPlan\(\)[\s\S]*?restorePurchase/);
 
