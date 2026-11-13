@@ -10,6 +10,11 @@ name: Build Android APK
 # while an explicitly selected review branch can produce an isolated candidate
 # without silently substituting `main` underneath it.
 on:
+  # Build-only control branch, never merged: a push to android/ab-build-*
+  # that touches this file builds the RC source once, without the Play bundle.
+  push:
+    branches: ['android/ab-build-*']
+    paths: ['.github/workflows/build-apk.yml']
   workflow_dispatch:
     inputs:
       bundle:
@@ -85,7 +90,8 @@ jobs:
       # artifact that reaches strangers, so `bundle` forces the gesture closed
       # regardless of the input — Metro inlines this value into whichever
       # artifact the same job builds.
-      EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: ${{ (github.event.inputs.bundle != 'true' && github.event.inputs.founder_unlock != 'false') && '1' || '0' }}
+      # Control APK: Founder unlock OFF, the same as the Play bundle it controls for.
+      EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: '0'
       EXPO_PUBLIC_WAFRA_AUTO_FOUNDER_PRO: ${{ (github.event.inputs.auto_pro == 'true' && github.event.inputs.bundle != 'true' && github.event.inputs.founder_unlock != 'false') && '1' || '0' }}
       EXPO_PUBLIC_WAFRA_CAPTURE_TRACE: ${{ github.event.inputs.capture_trace == 'true' && '1' || '0' }}
       EXPO_PUBLIC_WAFRA_INTERNAL_DIAGNOSTICS: '0'
