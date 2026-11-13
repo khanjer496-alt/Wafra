@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: f957ba3fe40f108c1cd2466f7e42981a1662709669ad55f1b1ca70b2da18df66
+// Generated from normal shipping TypeScript. Source SHA-256: 28a26b3a06cba77b50e4bc7e53d0021cc0d5d1446694eb946ef616be8917d3a6
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -10738,8 +10738,10 @@ const REFUND_SIDE_NOTE_SAME_MOVEMENT_RE = /^\s*(?:it|(?:this|the|that|your)\s+(?
 const REFUND_SIDE_NOTE_FUTURE_RE = /\bwill\b/i;
 const REFUND_SIDE_NOTE_NOT_SETTLED_RE = /\b(?:is|are|was|were|has|have|had|did|does)\s+not\b|\b(?:isn|aren|wasn|weren|hasn|haven|hadn|didn|doesn)['’]t\b|\bnot\s+(?:yet\s+)?been\b|\b(?:is|are)\s+being\b|\bwill\b/i;
 const REFUND_SIDE_NOTE_COMPLETED_RE = /\b(?:has|have|had|was|were)\s+(?:been\s+)?(?:(?:successfully|fully|now)\s+)?(?:credited|refunded|reversed|returned|posted)\b/i;
+const REVERSAL_SIDE_NOTE_WORD_RE = /\breversal\b/i;
+const REVERSAL_SIDE_NOTE_IN_PROCESS_RE = /\b(?:is|are)\s+(?:(?:still|currently|now)\s+)?(?:under\s+(?:process(?:ing)?|review)|in\s+(?:process|progress)|being\s+(?:processed|reviewed)|pending|awaiting)\b|\b(?:has|have)\s+been\s+(?:initiated|submitted)\b/i;
 function refundSideNotes(body) {
-    if (!REFUND_SIDE_NOTE_WORD_RE.test(body))
+    if (!REFUND_SIDE_NOTE_WORD_RE.test(body) && !REVERSAL_SIDE_NOTE_WORD_RE.test(body))
         return { body, ambiguous: false };
     const sentences = [];
     let start = 0;
@@ -10765,6 +10767,18 @@ function refundSideNotes(body) {
         }
         else if (separateDebit && (negated || (REFUND_RE.test(text) && !completedRefund))) {
             ambiguous = true;
+        }
+    }
+    const separateDebitForReversal = sentences.some(({ text }) => !REFUND_SIDE_NOTE_WORD_RE.test(text) &&
+        !REVERSAL_SIDE_NOTE_WORD_RE.test(text) && REFUND_SIDE_NOTE_DEBIT_RE.test(text) && !REFUND_SIDE_NOTE_RETURNED_RE.test(text) &&
+        refundAmounts(text).length > 0);
+    for (const { start: at, text } of separateDebitForReversal ? sentences : []) {
+        const word = REVERSAL_SIDE_NOTE_WORD_RE.exec(text);
+        if (!word || REFUND_SIDE_NOTE_WORD_RE.test(text) || refundAmounts(text).length > 0)
+            continue;
+        if (governsRefundCredit(text.slice(0, word.index)) || REFUND_SIDE_NOTE_NOT_SETTLED_RE.test(text) ||
+            REVERSAL_SIDE_NOTE_IN_PROCESS_RE.test(text)) {
+            out = out.slice(0, at) + ' '.repeat(text.length) + out.slice(at + text.length);
         }
     }
     return { body: out, ambiguous };
@@ -12616,6 +12630,11 @@ const NOTICE_INCOMING_STATED_RE = new RegExp(String.raw `\byou\s+(?:have\s+|['�
 const NOTICE_RETURNED_TO_USER_RE = /\brefund|\bcredited\s+back\b|\bre-?credited\b|\breturned\s+to\s+your\b|\breversed\s+(?:to|into)\s+your\b|\breversal\s+of\b/i;
 const NOTICE_PREFIX_CONNECTOR_RE = /^(\W{0,4}[^\s:\n][^:\n]{0,30}?)[ \t]+[–—|-][ \t]+/;
 const NOTICE_REVERSAL_REQUEST_RE = /\b(?:reversal|refund|dispute|chargeback)\s+request\b(?:[^.\n]|\.(?=\d)){0,80}?\b(?:has\s+been\s+|was\s+|is\s+)?(?:received|registered|logged|submitted|raised)\b/i;
+const NOTICE_REFUND_IN_PROCESS_RE = new RegExp(String.raw `\b(?:refund|reversal)s?\b(?:[^.\n]|\.(?=\d)){0,80}?\b(?:is|are)\s+(?:(?:still|currently|now)\s+)?` +
+    String.raw `(?:under\s+(?:process(?:ing)?|review)|in\s+(?:process|progress)|being\s+(?:processed|reviewed)|pending|awaiting)\b` +
+    String.raw `|\b(?:refund|reversal)s?\b(?:[^.\n]|\.(?=\d)){0,80}?\b(?:has\s+been|have\s+been|was|were)\s+(?:initiated|submitted)\b` +
+    `|(?<![${AR_LETTER}])(?:عكس|استرداد|استرجاع|ارجاع|اعاده)(?![${AR_LETTER}])(?:[^.\\n؟!]|\\.(?=\\d)){0,80}?(?<![${AR_LETTER}])` +
+    `(?:قيد\\s+(?:ال)?(?:انتظار|معالجه|تنفيذ|اجراء|مراجعه)|تحت\\s+(?:ال)?(?:اجراء|معالجه|مراجعه|تنفيذ))(?![${AR_LETTER}])`, 'i');
 const NOTICE_TOP_UP_RE = /\btop\s+up\s+(?:your\s+)?\w+\s+to\s+complete\b|^\W{0,4}(?:[^\s:][^:\n]{0,30}:\s*)?pending\s*(?::|(?:purchase|transaction|payment|charge|transfer|debit|withdrawal)\b)/i;
 const NOTICE_STATUS_SEGMENT_RE = new RegExp(String.raw `(?:^|\n|\||\s[–—]\s|\s-{1,2}[ \t]*|[(\[]\s*)[ \t]*(?:` +
     `(?:ما|لم|لن)\\s+(?:تم|تمت|يتم|تتم|تكتمل)(?:\\s+(?:ال)?(?:خصم|عمليه|تنفيذ|سداد|تحويل|دفع))?(?:\\s+(?:ال)?مبلغ)?` +
@@ -12707,7 +12726,7 @@ function moneyNoticeKindInBody(text) {
     if (NOTICE_P2P_IN_RE.test(clause) &&
         NOTICE_UNCLAIMED_RE.test(principal.before.slice(-160) + ' ' + clause + ' ' + principal.after.slice(0, 160)))
         return 'unclaimed';
-    if (NOTICE_NOT_YET_RE.test(core) || NOTICE_UNDER_PROCESS_RE.test(body) ||
+    if (NOTICE_NOT_YET_RE.test(core) || NOTICE_REFUND_IN_PROCESS_RE.test(core) || NOTICE_UNDER_PROCESS_RE.test(body) ||
         NOTICE_STATUS_PENDING_RE.test(body))
         return 'not-yet';
     if (NOTICE_RENEWAL_RE.test(core) && !NOTICE_DONE_VERB_RE.test(clause))
