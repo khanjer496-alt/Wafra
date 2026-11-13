@@ -382,6 +382,12 @@ const CONTROLS = [
   ...[
     'AED 250.00 was debited from your card ending 1234 at NOON - reversal pending.',
   ].map((body) => [body, 'EXPENSE', 'RC396 a reversal pending right after the noun, beside the debit']),
+  // #249 review round 4 (Change Reviewer 855b7e49, Reviewer 83b35196): a telegraphic credit with its own pending status.
+  ...[
+    'Reversal of AED 250.00 credited to your card: pending.',
+    'Reversal of AED 250.00 credited to your card ending 1234 is pending.',
+    'Refund of AED 250.00 getting credited to your card ending 1234 is in process.',
+  ].map((body) => [body, 'NO_POST', 'RC396 a telegraphic credit with its own in-process status']),
 ];
 
 // ── Case selection ───────────────────────────────────────────────────────────────────────────────────────────────────
