@@ -2615,7 +2615,8 @@ type ArAspect = 'settled' | 'headline' | 'pending' | 'negated';
 const AR_NB = `(?<![${AR_LETTER}])`;
 const AR_NA = `(?![${AR_LETTER}])`;
 /** A credit verbal noun, with the merchant form's "ب" ("قام التاجر … باسترداد"), "و" and the article. */
-const AR_CREDIT_NOUN_RE = new RegExp(`${AR_NB}(و|ب)?(?:ال)?(استرداد|استرجاع|ايداع|ارجاع|اعاده|عكس|معالجه)${AR_NA}`, 'g');
+// "رد" (return of money) only before "(ال)مبلغ": alone it also means "reply" (Reviewer e4fcce75).
+const AR_CREDIT_NOUN_RE = new RegExp(`${AR_NB}(و|ب)?(?:ال)?(استرداد|استرجاع|ايداع|ارجاع|اعاده|عكس|معالجه|رد(?=\\s+(?:ال)?مبلغ))${AR_NA}`, 'g');
 /** The noun names a request, a fee or a policy, not a movement ("طلب الاسترداد", "رسوم الاسترجاع"). */
 const AR_NOT_A_MOVEMENT_BEFORE_RE = new RegExp(`${AR_NB}(?:طلب|طلبك|رسوم|سياسه|مبلغ)\\s+$`);
 /** "إرجاع المنتج" / "استرجاع السلعة": a product return, not a money movement. */
@@ -2626,14 +2627,15 @@ const AR_NOT_A_REFUND_CREDIT_RE = new RegExp(
 // The aspect bound to the noun, read from the words right before it. A merchant subject ("قام التاجر NOON.COM باسترداد")
 // carries the aspect on its verb, a few words back.
 const AR_MERCHANT_ASPECT_RE = new RegExp(
-  `${AR_NB}(?:(لم|لن|لا)\\s+(?:يقم|يقوم|تقم|تقوم)|(سي|سوف\\s+ي|ست|سوف\\s+ت)قوم|(ي|ت)قوم|(قام|قامت))${AR_NA}(?:\\s+[^\\s,;\\n]+){0,4}\\s+$`);
-const AR_NEGATED_BEFORE_RE = new RegExp(`${AR_NB}(?:لم|لن|لا)\\s+(?:يتم|تتم)\\s+$`);
-const AR_PENDING_BEFORE_RE = new RegExp(`${AR_NB}(?:سيتم|ستتم|سوف\\s+(?:يتم|تتم)|جاري|جار|قيد|يتم|تتم)\\s+$`);
+  `${AR_NB}(?:(لم|لن|لا)\\s+(?:يقم|يقوم|تقم|تقوم|نقم|نقوم)|(سي|سوف\\s+ي|ست|سوف\\s+ت|سن|سوف\\s+ن)قوم|(ي|ت|ن)قوم|(قام|قامت|قمنا))${AR_NA}(?:\\s+[^\\s,;\\n]+){0,4}\\s+$`);
+const AR_NEGATED_BEFORE_RE = new RegExp(`${AR_NB}(?:لم|لن|لا)\\s+(?:يتم|تتم)(?:\\s+بعد)?\\s+$`);
+const AR_PENDING_BEFORE_RE = new RegExp(`${AR_NB}(?:سيتم|ستتم|سوف\\s+(?:يتم|تتم)|جاري|جار|قيد|يتم|تتم|من\\s+المتوقع(?:\\s+ان)?(?:\\s+(?:يتم|تتم))?)\\s+$`);
 const AR_SETTLED_BEFORE_RE = new RegExp(`${AR_NB}(?:قد\\s+)?(?:تم|تمت)\\s+$`);
 /** A leader governs the clause unless a comma closes it first (design v2): إذا, عند(ما), بمجرد (أن), بعد أن, (في) حال, متى, حين. */
-const AR_CONDITIONAL_RE = new RegExp(`${AR_NB}و?(?:اذا|عندما|عند|بمجرد(?:\\s+ان)?|بعد\\s+ان|في\\s+حال|حال|متي|حينما|حين)${AR_NA}`, 'g');
+// "إن" folds to "ان", which is also "that": it is a leader only at the sentence start, before تم/يتم/كان (Reviewer e4fcce75).
+const AR_CONDITIONAL_RE = new RegExp(`${AR_NB}و?(?:اذا|عندما|عند|بمجرد(?:\\s+ان)?|بعد\\s+ان|في\\s+حال(?:ه)?|حال(?:ه)?|متي|حينما|حين|(?<=^\\s*)ان(?=\\s+(?:قد\\s+)?(?:تم|يتم|كان)))${AR_NA}`, 'g');
 /** A verbal noun right after a leader ("عند استرداد …", upon refunding) is its object: not yet a completed credit. */
-const AR_LEADER_BEFORE_RE = new RegExp(`${AR_NB}و?(?:اذا|عندما|عند|بمجرد(?:\\s+ان)?|بعد\\s+ان|في\\s+حال|حال|متي|حينما|حين)\\s+$`);
+const AR_LEADER_BEFORE_RE = new RegExp(`${AR_NB}و?(?:اذا|عندما|عند|بمجرد(?:\\s+ان)?|بعد\\s+ان|في\\s+حال(?:ه)?|حال(?:ه)?|متي|حينما|حين|فور|لدي|بعد)\\s+$`);
 // As in English (Reviewer 956cb08a, 07a65c13, c204ca32; Change Reviewer a41046bc, 742367fa): عند/عندما/بمجرد/بعد أن/متى/حين
 // govern the credit (a condition), except in one narrow positive shape that says WHEN a completed credit happened: the leader,
 // then an event noun ("عند إلغاء الطلب", "عند مراجعة طلبك", "عند إرجاع المنتج") or that event in the past ("بعد أن تم إلغاء
@@ -2646,6 +2648,14 @@ const AR_EVENT_BEFORE_CREDIT_RE = new RegExp(
   `^\\s*(?:(?:ال)?(?:الغاء|ارجاع|استرجاع|مراجعه|تحقق|اعتراض|نزاع)${AR_EVENT_OBJECT}|` +
   `(?:قد\\s+)?(?:تم|تمت)\\s+(?:ال)?(?:الغاء|ارجاع|استرجاع|مراجعه)${AR_EVENT_OBJECT})\\s+و?(?:قد\\s+)?(?:تم|تمت)\\s*$`);
 const AR_THIRD_PARTY_DESTINATION_RE = new RegExp(`${AR_NB}(?:الي|لصالح)\\s+(?:ال)?(?:تاجر|مستفيد|بائع|متجر)${AR_NA}`);
+// "المدفوع إلى التاجر … إلى بطاقتك": the original payment to the merchant, then the own destination (Change Reviewer b47be539).
+const AR_PAID_TO_BEFORE_RE = new RegExp(`${AR_NB}(?:ال)?مدفوع(?:ه)?\\s+$`);
+const AR_OWN_DESTINATION_RE = new RegExp(`${AR_NB}(?:الي|في|ل)\\s*(?:بطاقتك|حسابك)${AR_NA}`);
+// "… تم خصمه عن طريق الخطأ", "كتعويض عن الخصم بالخطأ": the error is the charge that is being refunded, not this credit.
+const AR_DEBIT_IN_ERROR_RE = new RegExp(`(?:خصم[${AR_LETTER}]*|الخصم|المدفوع[${AR_LETTER}]*)(?:\\s+[^\\s.]+){0,3}?\\s+(?:عن\\s+طريق\\s+(?:ال)?خطا|بالخطا)${AR_NA}`, 'g');
+// In a LATER sentence only an explicit take-back of this credit counts, not an unrelated "طلبك الآخر قيد المراجعة".
+const AR_TAKEN_BACK_LATER_RE = new RegExp(
+  `${AR_NB}و?(?:تم|قد\\s+تم)\\s+(?:عكس|الغاو|الغا|سحب|استرجاع)(?:ه|ها)${AR_NA}|${AR_NB}و?(?:تم|قد\\s+تم)\\s+(?:عكس|الغاء|سحب)\\s+(?:هذا\\s+)?(?:ال)?(?:مبلغ|ايداع|استرداد)${AR_NA}`);
 /** Taken back, in error or still awaiting approval, bound to this credit ("وتم عكسه لاحقاً", "عن طريق الخطأ", "بانتظار الموافقة"). */
 const AR_TAKEN_BACK_RE = new RegExp(
   `${AR_NB}و?(?:تم|قد\\s+تم)\\s+(?:عكس|الغاو|الغا|سحب|استرجاع)(?:ه|ها)${AR_NA}|${AR_NB}عن\\s+طريق\\s+(?:ال)?خطا${AR_NA}|${AR_NB}بالخطا${AR_NA}` +
@@ -2661,6 +2671,7 @@ const AR_PROCESSED_NOT_YET_RE = new RegExp(
   `${AR_NB}(?:سيظهر|ستظهر|سينعكس|ستنعكس|سيضاف|ستضاف|سيتم\\s+(?:ايداع|اضافه|اظهار))${AR_NA}|${AR_NB}قد\\s+يستغرق[^.\\n]{0,40}?(?:يوم|ايام)${AR_NA}`);
 const AR_VERB_GLOSS: Record<string, string> = {
   استرداد: 'refunded', استرجاع: 'refunded', ايداع: 'credited', ارجاع: 'returned', اعاده: 'returned', عكس: 'reversed', معالجه: 'processed',
+  رد: 'refunded',
 };
 /**
  * The Arabic credit clauses of one folded sentence: a verbal noun with its aspect; "معالجه وايداع" is one clause.
@@ -2719,9 +2730,11 @@ function arCreditSettlement(sentence: string, clause: CreditClause, rawAfter: st
   if (clause.ar === 'negated') return { verdict: 'not-settled', reason: 'negated' };
   if (clause.ar === 'pending') return { verdict: 'not-settled', reason: 'pending' };
   const tail = sentence.slice(clause.end);
-  if (AR_THIRD_PARTY_DESTINATION_RE.test(tail)) return { verdict: 'refused', reason: 'third-party' };
-  if (AR_TAKEN_BACK_RE.test(tail) ||
-    after.split(REFUND_SENTENCE_BREAK_RE).some((text) => !AR_HEDGED_SENTENCE_RE.test(text) && AR_TAKEN_BACK_RE.test(text))) {
+  const thirdParty = AR_THIRD_PARTY_DESTINATION_RE.exec(tail);
+  if (thirdParty && !AR_PAID_TO_BEFORE_RE.test(tail.slice(0, thirdParty.index)) &&
+    !AR_OWN_DESTINATION_RE.test(tail.slice(thirdParty.index + thirdParty[0].length))) return { verdict: 'refused', reason: 'third-party' };
+  if (AR_TAKEN_BACK_RE.test(tail.replace(AR_DEBIT_IN_ERROR_RE, ' ')) ||
+    after.split(REFUND_SENTENCE_BREAK_RE).some((text) => !AR_HEDGED_SENTENCE_RE.test(text) && AR_TAKEN_BACK_LATER_RE.test(text))) {
     return { verdict: 'refused', reason: 'taken-back' };
   }
   if (clause.verbs.every((verb) => verb === 'processed')) {
@@ -2769,11 +2782,18 @@ export function creditSettlement(sentence: string, clause: CreditClause, after =
   return { verdict: 'settled' };
 }
 const CREDIT_SETTLEMENT_DEBIT_RE = new RegExp(
-  String.raw`\b(?:debited|charged|deducted|spent|withdrawn|paid|purchased?)\b|${AR_NB}و?(?:قد\s+)?تم\s+(?:ال)?(?:خصم|شراء|سحب|دفع|سداد)${AR_NA}`, 'i');
+  String.raw`\b(?:debited|charged|deducted|spent|withdrawn|paid|purchased?)\b|${AR_NB}و?(?:قد\s+)?تم\s+(?:ال)?(?:خصم|شراء|سحب|دفع|سداد)${AR_NA}` +
+  // "تمت عملية شراء …", "عملية شراء بمبلغ …", "تم استخدام بطاقتك لشراء …" (Change Reviewer b47be539).
+  String.raw`|${AR_NB}عمليه\s+شراء${AR_NA}|${AR_NB}شراء\s+(?:بمبلغ|بقيمه)${AR_NA}|${AR_NB}استخدام\s+بطاقتك${AR_NA}`, 'i');
 // The predicate's figures: refundAmounts, plus an Arabic currency word on either side ("250.00 درهم", "مبلغ درهم 250.00").
 const AR_CREDIT_AMOUNT_RE = /(\d[\d,]*(?:\.\d+)?)\s*(?:درهم|دراهم|ريال|ر\.س)|(?:درهم|دراهم|ريال)\s*(\d[\d,]*(?:\.\d+)?)/g;
 const creditAmounts = (text: string): number[] => [...refundAmounts(text),
   ...[...text.matchAll(AR_CREDIT_AMOUNT_RE)].map((match) => Number((match[1] ?? match[2]).replace(/,/g, '')))];
+// A balance or limit line inside a note's sentence ("…، الرصيد المتاح 750.00 درهم", "…, available balance AED 750.00") is not
+// a figure of the note's own (D1) (Change Reviewer b47be539).
+const BALANCE_SEGMENT_RE = new RegExp(String.raw`\b(?:avl\.?|avail(?:able|\.)?)\s+(?:cr\.?\s+|credit\s+)?(?:bal(?:ance)?|limit)\b[^;\n]*|\bbalance\s+(?:is|:)[^;\n]*|` +
+  `${AR_NB}(?:ال)?(?:رصيد|حد)\\s+(?:ال)?متاح${AR_NA}[^;\\n]*`, 'gi');
+const noteAmounts = (text: string): number[] => creditAmounts(text.replace(BALANCE_SEGMENT_RE, ' '));
 type SettlementSentence = { start: number; text: string; clauses: CreditClause[] };
 /** One sentence's verdict: a settled clause settles it; otherwise a refusal outranks a note that can be blanked. */
 function sentenceSettlement(s: SettlementSentence, after: string): CreditSettlement {
@@ -2832,7 +2852,7 @@ function besideDebit(message: string, sentences: SettlementSentence[]): BesideDe
   let blanked = message;
   let settled = false;
   for (const s of credits) {
-    if (creditAmounts(s.text).some((amount) => !debitAmounts.includes(amount))) return { kind: 'refuse' };
+    if (noteAmounts(s.text).some((amount) => !debitAmounts.includes(amount))) return { kind: 'refuse' };
     const verdict = sentenceSettlement(s, message.slice(s.start + s.text.length));
     if (verdict.verdict === 'settled') settled = true;
     else if (verdict.verdict === 'not-settled') blanked = blank(blanked, s);
@@ -2880,6 +2900,9 @@ function vetoUnsettledCredit(message: string, parsed: ParsedSms, reparse: (text:
   if (verdicts.length === 0) return parsed;
   if (verdicts.some(({ verdict }) => verdict.verdict === 'settled')) return parsed;
   if (parsed.type === 'income') return null;
+  // The expense's own figure in a sentence with no credit clause is the purchase itself ("تمت عملية شراء بمبلغ 250.00 درهم …"),
+  // whatever its wording: an unsettled note beside it cannot take it away (Change Reviewer b47be539).
+  if (sentences.some((s) => s.clauses.length === 0 && creditAmounts(s.text).some((amount) => figures.includes(amount)))) return parsed;
   const refundVerbExpense = verdicts.every(({ s }) => !CREDIT_SETTLEMENT_DEBIT_RE.test(s.text) &&
     !s.clauses.every((clause) => clause.verbs.every((verb) => verb.startsWith('process'))));
   return refundVerbExpense ? null : parsed;
