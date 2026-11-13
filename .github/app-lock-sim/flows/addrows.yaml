@@ -24,6 +24,16 @@ appId: ${APP_ID}
     timeout: 30000
 - takeScreenshot: row1-screen-open
 - tapOn:
+    id: 'amount-keypad-1'
+- runFlow:
+    when:
+      visible: 'Ledger currency'
+    commands:
+      - tapOn: 'USD.*'
+      - waitForAnimationToEnd:
+          timeout: 4000
+- takeScreenshot: row1-after-currency
+- tapOn:
     id: 'amount-keypad-4'
 - tapOn:
     id: 'amount-keypad-2'
@@ -57,6 +67,16 @@ appId: ${APP_ID}
       id: 'add-transaction-screen'
     timeout: 30000
 - takeScreenshot: row2-screen-open
+- tapOn:
+    id: 'amount-keypad-1'
+- runFlow:
+    when:
+      visible: 'Ledger currency'
+    commands:
+      - tapOn: 'USD.*'
+      - waitForAnimationToEnd:
+          timeout: 4000
+- takeScreenshot: row2-after-currency
 - tapOn:
     id: 'amount-keypad-1'
 - tapOn:
@@ -93,6 +113,16 @@ appId: ${APP_ID}
       id: 'add-transaction-screen'
     timeout: 30000
 - takeScreenshot: row3-screen-open
+- tapOn:
+    id: 'amount-keypad-1'
+- runFlow:
+    when:
+      visible: 'Ledger currency'
+    commands:
+      - tapOn: 'USD.*'
+      - waitForAnimationToEnd:
+          timeout: 4000
+- takeScreenshot: row3-after-currency
 - tapOn:
     id: 'amount-keypad-2'
 - tapOn:
