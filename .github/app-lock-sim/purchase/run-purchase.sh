@@ -64,7 +64,7 @@ while kill -0 $TPID 2>/dev/null && [ $SECONDS -lt $END ]; do
   fi
   for n in 1 2 3; do
     if [ -f "$WORK/hs/reinstall-$n.request" ] && [ ! -f "$WORK/hs/reinstall-$n.done" ]; then
-      echo "[host] reinstall #$n"; fresh_install; for _i in $(seq 1 30); do xcrun simctl get_app_container "$UDID" "$APP" >/dev/null 2>&1 && break; sleep 1; done; sleep 8; touch "$WORK/hs/reinstall-$n.done"
+      echo "[host] reinstall #$n"; fresh_install; for _i in $(seq 1 30); do xcrun simctl get_app_container "$UDID" "$APP" >/dev/null 2>&1 && break; sleep 1; done; sleep 8; sync_storekit_config || true; sleep 10; sync_storekit_config || true; touch "$WORK/hs/reinstall-$n.done"
     fi
   done
   sleep 1
