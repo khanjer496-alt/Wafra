@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: e1057612c99849465e33d93c5660e551e699f69ddf5d1316c161e89420346335
+// Generated from normal shipping TypeScript. Source SHA-256: 20da6fdffa9fb76bd1ea220128fc62f442338962083fd6c45cd5130846f05a20
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -11965,7 +11965,7 @@ const EN_NEW_CLAUSE_RE = /(?:\b(?:and|but|while|whereas)\s+(?:the|this|that|your
 const EN_NEW_COMPLETED_CREDIT_RE = /\b(?:and|but)\s+(?:(?:was|were|has\s+been|have\s+been|had\s+been)\s+(?:(?:now|then|also|successfully)\s+)?)$/i;
 const EN_CREDIT_IN_RE = /^(?:credited|refunded|deposited|returned)$/i;
 const EN_CREDIT_REASON_RE = /\bfor\s+(?:(?:the|your|a|an)\s+)?(?:reversed|cancell?ed)\s+(?:purchases?|transactions?|payments?|charges?|orders?|debits?)\b/gi;
-function enCreditClauses(sentence) {
+function enCreditClauses(sentence, debitBeside = false) {
     if (EN_CREDIT_WORDS.notARefundCredit.test(sentence))
         return [];
     const words = EN_CREDIT_WORDS.verb;
@@ -11985,7 +11985,8 @@ function enCreditClauses(sentence) {
         if (EN_CREDIT_WORDS.determinerBefore.test(lead) || EN_CREDIT_WORDS.nounAfter.test(sentence.slice(at + word.length)))
             continue;
         if (/^process/i.test(word) && !(clause && EN_CREDIT_WORDS.coordinated.test(lead)) &&
-            !EN_PROCESSED_REFUND_CONTEXT_RE.test(sentence) && !EN_PROCESSED_DESTINATION_RE.test(sentence.slice(at + word.length)))
+            !EN_PROCESSED_REFUND_CONTEXT_RE.test(sentence) &&
+            !(debitBeside && EN_PROCESSED_DESTINATION_RE.test(sentence.slice(at + word.length))))
             continue;
         if (clause) {
             if (EN_CREDIT_WORDS.coordinated.test(lead) && at - clause.end <= 6) {
@@ -12041,16 +12042,15 @@ function sentenceSettlement(s, after) {
         verdicts[0];
 }
 function settlementSentences(body) {
-    const out = [];
+    const spans = [];
     let start = 0;
     for (const end of [...[...body.matchAll(REFUND_SENTENCE_BREAK_RE)].map((match) => match.index + match[0].length), body.length]) {
-        if (end > start) {
-            const text = body.slice(start, end);
-            out.push({ start, text, clauses: enCreditClauses(text) });
-        }
+        if (end > start)
+            spans.push({ start, text: body.slice(start, end) });
         start = Math.max(start, end);
     }
-    return out;
+    const debitBeside = spans.some(({ text }) => CREDIT_SETTLEMENT_DEBIT_RE.test(text) && refundAmounts(text).length > 0);
+    return spans.map((span) => ({ ...span, clauses: enCreditClauses(span.text, debitBeside) }));
 }
 function hasOnlyUnsettledCredit(message) {
     const sentences = settlementSentences(message);
