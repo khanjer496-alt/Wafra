@@ -2570,22 +2570,31 @@ function enCreditClauses(sentence: string, debitBeside = false): CreditClause[] 
   }
   return clauses;
 }
-// Once/When/Whenever/After/As soon as lead a condition only when a main clause follows the credit in the same sentence ("…,
-// you will receive an SMS", "… the balance will update") or the credit is not completed. Otherwise they only say when a
-// completed refund happened: "After cancellation AED 250.00 has been refunded to your card ending 1234." A comma alone
-// does not count (", Avl Bal AED 1,234.00"). "once again/more" is not a leader. If/Unless/Until/Whether keep their
-// reading (Reviewer 956cb08a).
+// Once/When/Whenever/After/As soon as stay a condition whenever they directly govern the credit: its subject follows the
+// leader straight away ("When AED 250.00 has been refunded …", "Once the refund …", "After NOON.COM has refunded …"), any
+// modal follows the credit ("… you'll / will / can …"), or the credit is not completed. Only when another phrase sits between
+// the leader and the credit's subject ("After cancellation AED 250.00 has been refunded …", "Once your order was cancelled
+// AED …") and none of that holds do they say when a completed refund happened. "once again/more" is not a leader.
+// If/Unless/Until/Whether keep their reading. The default is the safe one: a list of main-clause shapes cannot be complete
+// (Reviewer 956cb08a and 07a65c13, Change Reviewer a41046bc).
 const EN_TEMPORAL_LEADER_RE = /^(?:once|when(?:ever)?|after|as\s+soon\s+as)$/i;
-const EN_CLAUSE_AFTER_CREDIT_RE =
-  /\b(?:you|it|we|they|this|the\s+(?:amount|balance|refund|money|credit|funds?))\s+(?:will|can|may|shall|should|would|could)\b/i;
+const EN_CREDIT_SUBJECT_AFTER_LEADER_RE = new RegExp(String.raw`^\s+(?:(?:(?:the|your|a|an|this|that)\s+)?` +
+  String.raw`(?:refund\w*|amount|credit|money|funds?|payment|sum)\b|it\b|(?:[A-Z]{3}|Dhs?)\.?\s*\d|\d[\d,.]*\s*(?:[A-Z]{3}|Dhs?)\b|` +
+  String.raw`[A-Z0-9][\w.&'’-]*(?:\s+[A-Z0-9][\w.&'’-]*){0,3}\s+(?:has|have|had|is|was|were|will|did|does|refunded|reversed|returned|credited|deposited|processed)\b)`);
+const EN_MODAL_AFTER_CREDIT_RE = /\b(?:will|can|may|shall|should|would|could|must)\b|['’]ll\b/i;
 const EN_COMPLETED_STRETCH_RE = /\b(?:was|were|had|has\s+been|have\s+been)\b/i;
 function leaderGovernsCredit(sentence: string, leader: RegExpMatchArray, clause: CreditClause): boolean {
   const word = leader[0].replace(/^[^\p{L}]+/u, '');
   const leaderEnd = leader.index! + leader[0].length;
   if (!EN_TEMPORAL_LEADER_RE.test(word)) return true;
-  if (/^once$/i.test(word) && /^\s+(?:again|more)\b/i.test(sentence.slice(leaderEnd))) return false;
-  if (EN_CLAUSE_AFTER_CREDIT_RE.test(sentence.slice(clause.end))) return true;
-  return !EN_COMPLETED_STRETCH_RE.test(sentence.slice(leaderEnd, clause.end));
+  const rest = sentence.slice(leaderEnd);
+  if (/^once$/i.test(word) && /^\s+(?:again|more)\b/i.test(rest)) return false;
+  if (EN_CREDIT_SUBJECT_AFTER_LEADER_RE.test(rest) || EN_MODAL_AFTER_CREDIT_RE.test(sentence.slice(clause.end))) return true;
+  const lead = sentence.slice(0, clause.start);
+  // Completed: an auxiliary in the stretch, or a telegraphic -ed participle with no pending or progressive auxiliary.
+  const completed = EN_COMPLETED_STRETCH_RE.test(sentence.slice(leaderEnd, clause.end)) ||
+    (/ed$/i.test(clause.verbs[0]) && !EN_CREDIT_WORDS.pendingBefore.test(lead) && !EN_CREDIT_WORDS.progressiveBefore.test(lead));
+  return !completed;
 }
 /** The verdict for one sentence's credit clause; `after` is the text that follows the sentence. */
 export function creditSettlement(sentence: string, clause: CreditClause, after = ''): CreditSettlement {
