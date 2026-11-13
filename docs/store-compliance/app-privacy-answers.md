@@ -40,10 +40,10 @@ Data that stays on the iPhone is not "collected". Every claim cites the code at 
 
 **Online logos (Brandfetch), declared (CEO, 13 Nov 2026):**
 - **What leaves the device:** for a merchant or bank without a bundled logo, the cleaned merchant or bank name taken from the user's transactions and accounts, at most 80 characters and never amounts, account tails or raw bank text (`brandfetchSearchUrl`, `src/lib/verified-logo-identities.ts:35-39`; called from `src/lib/merchant-logo-resolver.ts:275-298` and `src/lib/bank-logo-resolver.ts:161-167`). Or a validated brand domain for the logo image (`verifiedLogoUrl`, `verified-logo-identities.ts:29-32`). Each request carries Wafra's app-wide Brandfetch client ID (`c=`, `:24-26`), which is the same for every user, and Brandfetch sees the request's IP address.
-- **Category: Financial Info, Other Financial Info.** The names come from the user's financial transactions. Purchase History ("purchases or purchase tendencies") is arguably as close, so use Other Financial Info, and add this purpose to Purchase History too if Apple Review asks.
+- **Category: both Purchases, Purchase History (the merchant names are the user's purchases) and Financial Info, Other Financial Info (the bank names).** Both types are already declared and Linked, so adding this flow to both costs nothing and avoids under-declaring.
 - **Purpose:** App Functionality.
 - **Optional:** yes. It's off by default and runs only after the user turns online logos on, never in Private Mode (`src/lib/store.tsx:316, 2636, 4222`; `src/lib/logo-cache-lifecycle.ts:31-34`; toggle `src/app/settings.tsx:1238-1241`).
-- **Linked: No for this flow.** No device, install, account or user ID goes with the request, only the name or domain, the shared client ID and the IP. App Store Connect records linkage per data type, though, and Other Financial Info is already Linked for statement uploads, so the type stays Linked overall.
+- **Linked: No for this flow.** No device, install, account or user ID goes with the request, only the name or domain, the shared client ID, the IP and the User-Agent (app name and version, CFNetwork, Darwin). The requests don't strip cookies yet: React Native's `fetch` and expo-image use the system cookie store. A header-only check on 13 Nov 2026 found that `api.brandfetch.io` and `cdn.brandfetch.io` set no cookie. A follow-up code PR passes `credentials: 'omit'`, so this answer can't change silently. App Store Connect records linkage per data type, though, and Other Financial Info is already Linked for statement uploads, so the type stays Linked overall.
 - **Tracking:** No.
 
 **FX reference rates (Frankfurter):** only two currency codes and a date are sent (`src/lib/fx.ts:27, 68`). There is no identifier or user content. Recommend: not collected.
@@ -65,7 +65,7 @@ Data that stays on the iPhone is not "collected". Every claim cites the code at 
 4. **Apple Search Ads attribution: OFF**, so nothing was changed. The live iOS config that SuperwallKit downloads (`GET api.superwall.me/api/v1/static_config`, production iOS public key, 13 Nov 2026) has `attribution_options = {"apple_search_ads":{"enabled":false},"mmp":{"enabled":false}}`. SuperwallKit 4.16.1 decodes it as `Config.attribution` (`Config/Models/Config.swift:84`) and posts the token only when `appleSearchAds.enabled == true` (`AttributionPoster.swift`, around line 222). The dashboard's Integrations page lists no Apple Search Ads integration. Evidence: `Shared/launch-review/superwall-asa-attribution-2026-11-13.md` and `superwall-integrations-2026-11-13.png` (OpenBot shared folder, outside the repo).
 5. **Superwall device context and usage counters: both declared** (Other Diagnostic Data, Product Interaction), Linked.
 
-6. **Online logos (Brandfetch): declared** as Other Financial Info, App Functionality, optional, not linked for this flow (see above).
+6. **Online logos (Brandfetch): declared** under Purchase History and Other Financial Info, App Functionality, optional, not linked for this flow (see above).
 
 ## Mismatches found (to fix separately)
 
