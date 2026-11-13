@@ -339,6 +339,49 @@ const CONTROLS = [
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234 فنرجو تجاهل هذه الرسالة.',
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. فيرجى تجاهل هذه الرسالة.',
   ].map((body) => [body, 'NO_POST', 'C28 a bare-alef ان answered in its sentence or a ف-led next one is a condition']),
+  // Android RC 396 hard gate F2 (App QA Lead corpus N06): a reversal or refund still under process has not arrived.
+  ...[
+    'ADCB: Reversal of AED 250.00 is under process. You will be notified when the amount is refunded.',
+    'Reversal of AED 250.00 is in progress.',
+    'Reversal of AED 250.00 is pending.',
+    'Reversal of AED 250.00 has been initiated.',
+    'Refund of AED 250.00 to your card ending 1234 is under process.',
+    'عكس مبلغ 250.00 درهم قيد المعالجة. سيتم إشعارك عند استرداد المبلغ.',
+    'عملية استرداد مبلغ 250.00 درهم تحت الإجراء.',
+  ].map((body) => [body, 'NO_POST', 'RC396 a reversal or refund under process, pending, in progress or initiated']),
+  ...[
+    'ADCB: Reversal of AED 250.00 has been credited to your account.',
+    'Reversal of AED 250.00 credited to your account ending 1234.',
+    'Reversal of AED 250.00 has been credited to your account. Other reversal requests are under process.',
+  ].map((body) => [body, 'INCOME_REFUND', 'RC396 a completed reversal credit']),
+  ...[
+    'AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. Your reversal request is under process.',
+    'Purchase of AED 250.00 at NOON with card 1234. Reversal of AED 250.00 is under process.',
+    'AED 250.00 was debited from your card ending 1234 for a reversal fee.',
+    'AED 250.00 was debited from your card ending 1234 at NOON, refund of your previous order is pending.',
+  ].map((body) => [body, 'EXPENSE', 'RC396 a reversal still under process, as a side note, leaves the debit']),
+  // #249 review round 1 (Change Reviewer ad205bc6, Reviewer 85a61c6d).
+  ...[
+    'Reversal of AED 250.00 under process.',
+    'Reversal AED 250.00 - Status: Under Process',
+    'Reversal for AED 250.00 has been requested.',
+    'Refund of AED 250.00 is awaited.',
+    'استرداد مبلغ 250.00 درهم جاري المعالجة',
+  ].map((body) => [body, 'NO_POST', 'RC396 a telegraphic or further in-process status']),
+  ...[
+    'Reversal of AED 250.00 processed to your card ending 1234; the other reversal is pending.',
+    'تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234، وطلبك الآخر قيد المعالجة',
+    'Reversal of AED 250.00 credited to your card ending 1234, your other reversal is under process.',
+    'Reversal of AED 250.00 processed to your card ending 1234 - in progress orders are not affected.',
+  ].map((body) => [body, 'INCOME_REFUND', 'RC396 a completed credit beside another pending one']),
+  // #249 review round 3 (Change Reviewer a3da9de8, Reviewer 696b9c8f).
+  ...[
+    'AED 250.00 refund is under process.',
+    'Reversal of AED 250.00; status: under process',
+  ].map((body) => [body, 'NO_POST', 'RC396 an amount-first refund or a "; status:" in process']),
+  ...[
+    'AED 250.00 was debited from your card ending 1234 at NOON - reversal pending.',
+  ].map((body) => [body, 'EXPENSE', 'RC396 a reversal pending right after the noun, beside the debit']),
   // #242 follow-up (Reviewer d2988328, e4c11467; Change Reviewer 879298d7, 7aab2921): a courtesy line opening the next
   // sentence (an explicit new "في حال(ة) …" condition, or فريق/فرع(نا) with no answer of its own) does not answer a
   // bare-alef "ان"; every other ف-led next sentence, "في هذه الحالة …" and "فقط …" included, still does.
