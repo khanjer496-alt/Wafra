@@ -6644,7 +6644,9 @@ const NOTICE_REVERSAL_REQUEST_RE = /\b(?:reversal|refund|dispute|chargeback)\s+r
  * the debit to post.
  */
 const NOTICE_REFUND_IN_PROCESS_RE = new RegExp(
-  String.raw`\b(?:refund|reversal)s?\b(?:[^.\n;]|\.(?=\d)){0,80}?(?:${EN_IN_PROCESS_LEAD}${EN_IN_PROCESS_STATUS}|${EN_IN_PROCESS_REQUESTED})` +
+  String.raw`\b(?:refund|reversal)s?\b(?:[^.\n;]|\.(?=\d)|;(?=\s*status\b)){0,80}?(?:${EN_IN_PROCESS_LEAD}${EN_IN_PROCESS_STATUS}|${EN_IN_PROCESS_REQUESTED})` +
+    // "… - reversal pending", "refund awaited": the status right after the noun (Change Reviewer a3da9de8).
+    String.raw`|\b(?:refund|reversal)s?\s+(?:pending|awaited|on\s+hold)\b` +
     `|(?<![${AR_LETTER}])(?:عكس|استرداد|استرجاع|ارجاع|اعاده)(?![${AR_LETTER}])(?:[^.\\n؟!،؛;]|\\.(?=\\d)){0,80}?${AR_IN_PROCESS_STATUS}`,
   'i',
 );
@@ -6664,18 +6666,25 @@ const NOTICE_REFUND_COMPLETED_RE = new RegExp(
  * amount credited to your card upon approval") (Reviewer 1fce73a5).
  */
 const NOTICE_REFUND_TELEGRAPHIC_CREDIT_RE =
-  /(?<!\b(?:be|being|once|when|if|after|until|unless)\s+)\b(?:credited|refunded|reversed|returned)\s+(?:back\s+)?(?:to|into)\s+your\b/i;
+  /(?<!\b(?:be|being|once|when|if|after|until|unless)\s+)\b(?:credited|refunded|reversed|returned|processed|deposited)\s+(?:back\s+)?(?:to|into)\s+your\b/i;
 /** The text says a refund or reversal is still in process and states no completed credit for it. */
 function refundInProcessUncompleted(text: string): boolean {
   const status = NOTICE_REFUND_IN_PROCESS_RE.exec(text);
   return status !== null && !NOTICE_REFUND_COMPLETED_RE.test(text) &&
     !NOTICE_REFUND_TELEGRAPHIC_CREDIT_RE.test(text.slice(0, status.index + status[0].length));
 }
-/** The figure's clause, up to the first ";" or "،" after the figure, says this refund or reversal is still in process. */
-function refundInProcessClause(core: string, lead: string): boolean {
-  const stop = core.slice(lead.length).search(/[;؛،]/);
+/** A ";"/"،" that ends a clause, not one that only introduces its status ("Reversal of AED 40.00; status: under process"). */
+const NOTICE_CLAUSE_STOP_RE = /[;؛،](?!\s*status\b)/i;
+/**
+ * The figure's clause, up to the first ";" or "،" after the figure, says this refund or reversal is still in process. The
+ * noun comes before the figure ("Reversal of AED 40.00 …") or right after it ("AED 40.00 refund is under process", Reviewer
+ * 696b9c8f), so a debit clause that only mentions another refund keeps its debit.
+ */
+function refundInProcessClause(core: string, lead: string, figure: string): boolean {
+  const stop = core.slice(lead.length).search(NOTICE_CLAUSE_STOP_RE);
   const head = stop < 0 ? core : core.slice(0, lead.length + stop);
-  return NOTICE_REFUND_NOUN_RE.test(lead) && refundInProcessUncompleted(head);
+  const nounFirst = NOTICE_REFUND_NOUN_RE.test(lead) || /^\s*(?:refund|reversal)s?\b/i.test(core.slice(lead.length + figure.length));
+  return nounFirst && refundInProcessUncompleted(head);
 }
 /**
  * The body with every sentence (or ";"/"،" part) that says a refund or reversal is still in process, and states no completed
@@ -6685,7 +6694,7 @@ function refundInProcessClause(core: string, lead: string): boolean {
 function withoutInProcessRefundSentences(body: string): string {
   let out = body.replace(/\breversal\s+(?:fees?|charges?)\b/gi, (fee) => ' '.repeat(fee.length));
   let start = 0;
-  for (const end of [...[...body.matchAll(/[.!?](?=\s|$)|[;؛،]|\n/g)].map((match) => match.index! + match[0].length), body.length]) {
+  for (const end of [...[...body.matchAll(/[.!?](?=\s|$)|[;؛،](?!\s*status\b)|\n/gi)].map((match) => match.index! + match[0].length), body.length]) {
     const text = body.slice(start, end);
     if (end > start && refundInProcessUncompleted(text)) {
       out = out.slice(0, start) + ' '.repeat(end - start) + out.slice(end);
@@ -6806,7 +6815,7 @@ function moneyNoticeKindInBody(text: string): MoneyNoticeKind | null {
   // The ask may sit before the figure, after a blank line, or behind a bar.
   if (NOTICE_P2P_IN_RE.test(clause) &&
     NOTICE_UNCLAIMED_RE.test(principal.before.slice(-160) + ' ' + clause + ' ' + principal.after.slice(0, 160))) return 'unclaimed';
-  if (NOTICE_NOT_YET_RE.test(core) || refundInProcessClause(core, lead) || NOTICE_UNDER_PROCESS_RE.test(body) ||
+  if (NOTICE_NOT_YET_RE.test(core) || refundInProcessClause(core, lead, principal.figure) || NOTICE_UNDER_PROCESS_RE.test(body) ||
     NOTICE_STATUS_PENDING_RE.test(body)) return 'not-yet';
   // "A charge of QAR 701.46 at SPOTIFY renews tomorrow": an upcoming
   // renewal, unless the clause also says the charge was taken.
