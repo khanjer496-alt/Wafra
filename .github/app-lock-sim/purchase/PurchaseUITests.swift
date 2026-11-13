@@ -157,6 +157,43 @@ final class PurchaseUITests: XCTestCase {
             if b.exists { note("price list unavailable; tapping Try loading prices again"); b.tap() }
         }
     }
+    /// The StoreKit test purchase sheet ("Xcode", plan, price, Subscribe) is system UI that the test session does not
+    /// auto-confirm for the app: find its Subscribe button (SpringBoard, StoreKitUIService or the app), tap it, then
+    /// answer a follow-up alert. A "Sign in to Apple Account" alert is cancelled, never confirmed with OK.
+    func confirmStoreSheet(_ tag: String, timeout: TimeInterval = 45) {
+        let hosts = [XCUIApplication(bundleIdentifier: "com.apple.springboard"),
+                     XCUIApplication(bundleIdentifier: "com.apple.StoreKitUIService"), app]
+        let end = Date().addingTimeInterval(timeout)
+        var tapped = false
+        while Date() < end && !tapped {
+            for host in hosts {
+                let b = host.buttons["Subscribe"].firstMatch
+                if b.exists {
+                    shot("\(tag)-store-sheet"); note("\(tag): store sheet found in \(host.identifier); tapping Subscribe"); b.tap(); tapped = true; break
+                }
+            }
+            if !tapped { Thread.sleep(forTimeInterval: 1) }
+        }
+        if !tapped { note("\(tag): no Subscribe button within \(Int(timeout)) s"); return }
+        let end2 = Date().addingTimeInterval(25)
+        while Date() < end2 {
+            for host in hosts {
+                for alert in host.alerts.allElementsBoundByIndex {
+                    let label = alert.label
+                    shot("\(tag)-after-subscribe-alert")
+                    if label.localizedCaseInsensitiveContains("Sign in") {
+                        note("\(tag): sign-in alert after Subscribe (\(label.prefix(80))); cancelling")
+                        alert.buttons["Cancel"].firstMatch.tap()
+                    } else {
+                        note("\(tag): alert after Subscribe: \(label.prefix(100)); buttons: \(alert.buttons.allElementsBoundByIndex.map { $0.label })")
+                        for name in ["OK", "Done", "Continue"] where alert.buttons[name].exists { alert.buttons[name].tap(); return }
+                    }
+                }
+            }
+            Thread.sleep(forTimeInterval: 1)
+        }
+        note("\(tag): store sheet confirmed, no follow-up alert")
+    }
     /// Watch SpringBoard for system alerts after a buy tap without dismissing them: records the alert text and buttons
     /// (Apple's own wording) so a "Sign in to Apple Account" sheet is visible evidence instead of being cancelled.
     func observeAlerts(_ tag: String, seconds: Int) {
@@ -214,7 +251,7 @@ final class PurchaseUITests: XCTestCase {
             shot("P2a-before-buying-weekly")
             note("P2 buy tap")
             el("pro-buy").tap()
-            observeAlerts("P2", seconds: 24)
+            confirmStoreSheet("P2")
             do { try waitGone(el("pro-plans"), "plan list after buying weekly", 90) }
             catch { throw StepFail("\(error); \(purchaseEvidence())") }
             shot("P2b-after-buying-weekly-pro-unlocked")
@@ -263,7 +300,7 @@ final class PurchaseUITests: XCTestCase {
             shot("P4a-yearly-selected")
             note("P4 buy tap")
             el("pro-buy").tap()
-            observeAlerts("P4", seconds: 24)
+            confirmStoreSheet("P4")
             do { try waitGone(el("pro-plans"), "plan list after buying yearly", 90) }
             catch { throw StepFail("\(error); \(purchaseEvidence())") }
             shot("P4b-after-buying-yearly-pro-on")
