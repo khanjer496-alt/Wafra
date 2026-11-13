@@ -53,13 +53,14 @@ const CEILING = {
 const NATIVE_IGNORED_INCOME_CEILING = 157;
 // Control rows added after #217 that native ignores today, exactly as #217's own bundle does (oracle v2.1 C11, C12; v2.2
 // C16; the C20 "After cancellation …", "Once your order was cancelled …", telegraphic and dated refunds; the C22 Arabic
-// "عند إلغاء الطلب …", "عند إرجاع المنتج …" and "عند مراجعة طلبك …" refunds; the six C24 Arabic genuine refunds). They are
+// "عند إلغاء الطلب …", "عند إرجاع المنتج …" and "عند مراجعة طلبك …" refunds; the six C24 Arabic genuine refunds; the dated ALL-CAPS C23
+// refund and the C25 "أن" refund). They are
 // pinned by id and kept out of
 // the count above, so that ceiling still covers #217's rows and a newly ignored row anywhere else fails. Delete an id when
 // native posts its row.
 const NATIVE_IGNORED_CONTROL_ROWS = new Set(['CTL-05402', 'CTL-05403', 'CTL-05404', 'CTL-05405', 'CTL-05406', 'CTL-05407',
   'CTL-05416', 'CTL-05427', 'CTL-05429', 'CTL-05444', 'CTL-05454', 'CTL-05463', 'CTL-05467', 'CTL-05468', 'CTL-05475', 'CTL-05476',
-  'CTL-05477', 'CTL-05478', 'CTL-05479', 'CTL-05480']);
+  'CTL-05477', 'CTL-05478', 'CTL-05479', 'CTL-05480', 'CTL-05504', 'CTL-05507']);
 // Row count and sha256 of the oracle's "id<TAB>expected<TAB>body" lines, joined by newlines (Reviewer, #217 Low 1; the
 // body since #225's review, so a row's text cannot be edited unseen).
 const ORACLE_PIN = { rows: 5507, sha256: 'a619eeabdaae814fc5c25bd77f01084bc6fe7b7f1bd691228218592022f99d48' };
