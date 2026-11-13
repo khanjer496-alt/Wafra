@@ -48,7 +48,7 @@ appId: ${APP_ID}
 - tapOn:
     id: 'add-merchant-field'
 - inputText: 'LULU HYPERMARKET'
-- hideKeyboard
+- pressKey: Enter
 - takeScreenshot: row1-typed
 - tapOn:
     id: 'suggested-category-.*'
@@ -102,7 +102,7 @@ appId: ${APP_ID}
 - tapOn:
     id: 'add-merchant-field'
 - inputText: 'ADNOC FUEL'
-- hideKeyboard
+- pressKey: Enter
 - takeScreenshot: row2-typed
 - tapOn:
     id: 'suggested-category-.*'
@@ -154,7 +154,7 @@ appId: ${APP_ID}
 - tapOn:
     id: 'add-merchant-field'
 - inputText: 'CAREEM RIDE'
-- hideKeyboard
+- pressKey: Enter
 - takeScreenshot: row3-typed
 - tapOn:
     id: 'suggested-category-.*'

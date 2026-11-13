@@ -39,6 +39,10 @@ fi
 
 fresh_install
 mkdir -p "$OUT/purchase-shots"
+# Native log stream (app + StoreKit + Superwall only); after the run only purchase-related lines near each buy tap are kept.
+xcrun simctl spawn "$UDID" log stream --level debug --style compact \
+  --predicate 'process == "Wafra" OR process CONTAINS "torekit" OR subsystem CONTAINS "uperwall" OR subsystem CONTAINS "storekit"' > "$WORK/applog.raw" 2>&1 &
+LSPID=$!
 (
   export TEST_RUNNER_STOREKIT_CONFIG="$WORK/WafraTest.storekit" TEST_RUNNER_SHOTS_DIR="$WORK/shots" TEST_RUNNER_HANDSHAKE_DIR="$WORK/hs"
   mkdir -p "$WORK/shots"
@@ -67,6 +71,25 @@ while kill -0 $TPID 2>/dev/null && [ $SECONDS -lt $END ]; do
 done
 kill -0 $TPID 2>/dev/null && { echo "::error::purchase test timed out"; pkill -f "xcodebuild test-without-building" ; }
 wait $TPID 2>/dev/null
+kill $LSPID 2>/dev/null; wait $LSPID 2>/dev/null
+python3 -I - "$WORK/applog.raw" "$WORK/shots/purchase-notes.log" "$OUT/purchase-shots" <<'PYEOF'
+import re, sys, datetime
+raw, notes, out = sys.argv[1:4]
+tap = {}
+for l in open(notes, errors='replace'):
+    m = re.match(r'(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) \+0000 (P\d) buy tap', l)
+    if m: tap[m.group(2)] = datetime.datetime.strptime(m.group(1), '%Y-%m-%d %H:%M:%S')
+want = re.compile(r'purchas|transaction|product|cancel|storekit|superwall|offer|payment|dialog|sheet|session|entitle|\[wafra:|error|fail', re.I)
+lines = []
+for l in open(raw, errors='replace'):
+    m = re.match(r'(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\.\d+ ', l)
+    if m: lines.append((datetime.datetime.strptime(m.group(1), '%Y-%m-%d %H:%M:%S'), l.rstrip('\n')))
+for tag, t0 in tap.items():
+    keep = [l[:320] for t, l in lines if -1 <= (t - t0).total_seconds() <= 30 and want.search(l)]
+    with open(f'{out}/applog-{tag}-around-buy-tap.txt', 'w') as f:
+        f.write(f'# {tag}: log lines (app, StoreKit, Superwall) from -1 s to +30 s around the buy tap at {t0} UTC, purchase-related only; {len(keep)} lines (first 150 kept)\n')
+        f.write('\n'.join(keep[:150]) + '\n')
+PYEOF
 { echo "== StoreKit config locations in the simulator (Octane = storekitd's per-app test configuration)";
   find "$HOME/Library/Developer/CoreSimulator/Devices/$UDID/data/Containers/Shared/AppGroup" -ipath '*Octane*' 2>/dev/null | head -30;
   echo "== storekit/storekitd processes"; xcrun simctl spawn "$UDID" launchctl list 2>/dev/null | grep -i storekit | head; } > "$OUT/purchase-storekit-diagnostics.txt" 2>&1

@@ -204,6 +204,7 @@ final class PurchaseUITests: XCTestCase {
             el("pro-plan-weekly").tap()
             try need(el("pro-buy"), "buy button", 10)
             shot("P2a-before-buying-weekly")
+            note("P2 buy tap")
             el("pro-buy").tap()
             observeAlerts("P2", seconds: 24)
             do { try waitGone(el("pro-plans"), "plan list after buying weekly", 90) }
@@ -251,6 +252,7 @@ final class PurchaseUITests: XCTestCase {
             el("pro-plan-yearly").tap()
             try need(el("pro-buy"), "buy button", 10)
             shot("P4a-yearly-selected")
+            note("P4 buy tap")
             el("pro-buy").tap()
             observeAlerts("P4", seconds: 24)
             do { try waitGone(el("pro-plans"), "plan list after buying yearly", 90) }
