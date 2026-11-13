@@ -520,19 +520,26 @@ test('#242 review round 3: أن after a verb of informing is "that" whatever fol
   ]) assert.equal(both(body), 'none / none', body);
 });
 
-// #242 follow-up (Reviewer d2988328, Change Reviewer 879298d7, Low): a next sentence counts as the answer to a bare-alef
-// "ان" only when it starts with ف + an answer verb ("فيرجى", "فسوف", "فتحقق" …), not with any ف-word ("في حال وجود أي
-// استفسار …", "فريق خدمة العملاء …", "فقط …").
+// #242 follow-up (Reviewer d2988328, Change Reviewer 879298d7, Low): a next sentence that starts with a courtesy ف-word
+// ("في حال وجود أي استفسار …", "فريق خدمة العملاء …", "فرعنا …", "فقط …") does not answer a bare-alef "ان"; every other
+// ف-led sentence still does ("فيرجى", "فيمكنك", "فرجاءً", "فيُرجى" …), so nothing that release refuses can post.
 test('a bare-alef ان keeps its income when the next sentence merely starts with a ف-word', () => {
   for (const body of [
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. في حال وجود أي استفسار يرجى الاتصال بنا.',
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. فريق خدمة العملاء في خدمتك دائماً.',
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234. فرعنا الرئيسي يرحب بك.',
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. فقط للعلم، سيظهر المبلغ في كشف حسابك.',
   ]) assert.equal(both(body), 'income 25000 / income 25000', body);
   for (const body of [
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. فيرجى تجاهل هذه الرسالة.',
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. فسوف نرسل لك رسالة تأكيد.',
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. فتحقق من رصيدك.',
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. ستصلك رسالة تأكيد.',
+    // Any other ف-word stays an answer, as on release: an allow-list of answer verbs missed these and posted them.
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. فيمكنك تجاهل هذه الرسالة.',
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. فبإمكانك تجاهل هذه الرسالة.',
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. فرجاءً تجاهل هذه الرسالة.',
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. فيُرجى تجاهل هذه الرسالة.',
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. فلا داعي للتواصل معنا.',
   ]) assert.equal(both(body), 'none / none', body);
 });
