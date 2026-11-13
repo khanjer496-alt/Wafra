@@ -103,6 +103,8 @@ const en = {
   captureBodyWeb: 'Add entries yourself here. Automatic capture needs the Android or iPhone app.',
   waitingTitle: 'Waiting for your first payment',
   waitingBody: 'New payments appear here as they arrive, from bank alerts or Apple Pay.',
+  // Android has no Apple Pay; its payments arrive from bank SMS and bank-app alerts.
+  waitingBodyAndroid: 'New payments appear here as they arrive, from your bank alerts.',
   workingTitle: (name: string | null) => name ? `${name}, it’s working.` : 'It’s working.',
   addedByItself: 'Added automatically.',
   ofLimit: (spent: string, limit: string) => `${spent} of ${limit}`,
@@ -213,6 +215,7 @@ const ar: OnboardingECopy = {
   captureBodyWeb: 'أضف العمليات بنفسك هنا. يتطلب الالتقاط التلقائي تطبيق أندرويد أو آيفون.',
   waitingTitle: 'بانتظار أول دفعة لك',
   waitingBody: 'تظهر الدفعات الجديدة هنا فور حدوثها، من تنبيهات البنك أو Apple Pay.',
+  waitingBodyAndroid: 'تظهر الدفعات الجديدة هنا فور حدوثها، من تنبيهات البنك.',
   workingTitle: (name: string | null) => name ? `${name}، كل شيء يعمل.` : 'كل شيء يعمل.',
   addedByItself: 'أُضيفت تلقائياً.',
   ofLimit: (spent: string, limit: string) => `${spent} من ${limit}`,
