@@ -187,3 +187,22 @@ test('RC 396 F2 round 3 controls: a telegraphic "processed to your card" before 
     'Refund of AED 40.00 has been credited to your card ending 1234. For refunds pending over 7 days, call us.',
   ]) assert.equal(paths(body).js, 'income 4000 / income 4000', body);
 });
+
+// #249 review round 4 (Change Reviewer 855b7e49 Medium 2, Reviewer 83b35196 Info, at 8cca7923): a status of the SAME
+// telegraphic credit ("… credited to your card: pending") is in process; only a status with its own qualified subject
+// ("…, your other reversal is under process") leaves the credit completed.
+test('RC 396 F2 round 4: a telegraphic credit with its own pending status never posts', () => {
+  for (const body of [
+    'Reversal of AED 40.00 credited to your card: pending.',
+    'Reversal of AED 40.00 credited to your card ending 1234 is pending.',
+    'Reversal of AED 40.00 credited to your card ending 1234 - status: under process.',
+    'Reversal of AED 40.00 not yet credited to your card ending 1234, status pending.',
+    'Refund of AED 40.00 getting credited to your card ending 1234 is in process.',
+    'Refund of AED 40.00 to get credited to your card ending 1234 is pending.',
+    'Refund of AED 40.00 credited to your card ending 1234 - status: pending',
+  ]) {
+    const got = paths(body);
+    assert.equal(got.js, 'none / none', body);
+    assert.ok(!/^credit /.test(got.native), `${body} native ${got.native}`);
+  }
+});
