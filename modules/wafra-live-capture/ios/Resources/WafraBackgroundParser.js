@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 70e90691824e752e5a8a87160cb3eabd2fe09de42ea503b162ade65caddf2548
+// Generated from normal shipping TypeScript. Source SHA-256: 89f57ba85c78159ddeb6ff6885288a402dcb28d8aaafeb600f55b78c7e36fd05
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -12642,17 +12642,23 @@ const NOTICE_REFUND_COMPLETED_RE = new RegExp(String.raw `\b(?:has|have|had)\s+(
     String.raw `|\b(?:was|were)\s+(?:(?:successfully|fully|now)\s+)?(?:credited|refunded|reversed|returned|deposited)\b` +
     String.raw `|\band\s+(?:has\s+been\s+|was\s+)?(?:credited|refunded|reversed|returned|deposited)\s+(?:back\s+)?(?:to|into)\b` +
     `|(?<![${AR_LETTER}])تم\\s+(?:عكس|استرداد|استرجاع|ارجاع|ايداع|اضافه|اعاده)(?![${AR_LETTER}])`, 'i');
+const NOTICE_REFUND_TELEGRAPHIC_CREDIT_RE = /(?<!\b(?:be|being|once|when|if|after|until|unless)\s+)\b(?:credited|refunded|reversed|returned)\s+(?:back\s+)?(?:to|into)\s+your\b/i;
+function refundInProcessUncompleted(text) {
+    const status = NOTICE_REFUND_IN_PROCESS_RE.exec(text);
+    return status !== null && !NOTICE_REFUND_COMPLETED_RE.test(text) &&
+        !NOTICE_REFUND_TELEGRAPHIC_CREDIT_RE.test(text.slice(0, status.index + status[0].length));
+}
 function refundInProcessClause(core, lead) {
     const stop = core.slice(lead.length).search(/[;؛،]/);
     const head = stop < 0 ? core : core.slice(0, lead.length + stop);
-    return NOTICE_REFUND_NOUN_RE.test(lead) && NOTICE_REFUND_IN_PROCESS_RE.test(head) && !NOTICE_REFUND_COMPLETED_RE.test(head);
+    return NOTICE_REFUND_NOUN_RE.test(lead) && refundInProcessUncompleted(head);
 }
 function withoutInProcessRefundSentences(body) {
     let out = body.replace(/\breversal\s+(?:fees?|charges?)\b/gi, (fee) => ' '.repeat(fee.length));
     let start = 0;
     for (const end of [...[...body.matchAll(/[.!?](?=\s|$)|[;؛،]|\n/g)].map((match) => match.index + match[0].length), body.length]) {
         const text = body.slice(start, end);
-        if (end > start && NOTICE_REFUND_IN_PROCESS_RE.test(text) && !NOTICE_REFUND_COMPLETED_RE.test(text)) {
+        if (end > start && refundInProcessUncompleted(text)) {
             out = out.slice(0, start) + ' '.repeat(end - start) + out.slice(end);
         }
         start = Math.max(start, end);
