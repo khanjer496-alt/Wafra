@@ -3,6 +3,7 @@ import {
   SuperwallProvider,
   usePlacement,
   useSuperwall,
+  useSuperwallEvents,
   type CustomCallback,
   type CustomCallbackResult,
   type SubscriptionStatus,
@@ -185,6 +186,16 @@ function SuperwallRuntime({ onValue }: {
     purchase: sdk.purchase,
   }));
   const proPlacement = usePlacement();
+  // DIAGNOSTIC (test branch only, never merged): forward the SDK's own log lines so a silent 'cancelled' names its branch.
+  const sdkLogCount = useRef(0);
+  useSuperwallEvents({
+    onLog: ({ level, scope, message, error }) => {
+      if (scope !== 'paywallTransactions' && scope !== 'productsManager' && scope !== 'storeKitManager'
+        && scope !== 'superwallCore' && scope !== 'receipts') return;
+      if (sdkLogCount.current++ > 400) return;
+      console.warn(`[wafra:purchase-diag] sdk-log ${level}/${scope}: ${String(message).slice(0, 300)}${error ? ` error=${String(error).slice(0, 200)}` : ''}`);
+    },
+  });
   const currentPro = useRef(state.pro);
   const latestSnapshot = useRef<EntitlementSnapshot | null>(null);
   const applyGeneration = useRef(0);
