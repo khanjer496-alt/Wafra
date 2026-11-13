@@ -359,9 +359,12 @@ jobs:
           fi
           entries=$(unzip -Z1 "$aab")
           # Allow-list: every ABI directory, of native libraries in any module
-          # and of the native debug symbols, must be arm64-v8a or armeabi-v7a.
+          # (<module>/lib/<abi>/, or <module>/root/lib/<abi>/, which lands at the
+          # APK root) and of the native debug symbols, must be arm64-v8a or
+          # armeabi-v7a. Anchored to the module root, so a lib/ folder inside
+          # assets or Java resources is not mistaken for an ABI.
           abis=$(printf '%s\n' "$entries" | sed -n -E \
-            -e 's#^(.*/)?lib/([^/]+)/.*#\2#p' \
+            -e 's#^[^/]+/(root/)?lib/([^/]+)/.*#\2#p' \
             -e 's#^BUNDLE-METADATA/com\.android\.tools\.build\.debugsymbols/([^/]+)/.*#\1#p' | sort -u)
           unexpected=$(printf '%s\n' "$abis" | grep -v -x -E 'arm64-v8a|armeabi-v7a' || true)
           if [ -n "$unexpected" ]; then

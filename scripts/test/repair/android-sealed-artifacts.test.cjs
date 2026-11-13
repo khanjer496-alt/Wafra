@@ -87,6 +87,13 @@ test('the Play bundle builds ARM only and fails over 100,000,000 bytes or with x
     'BUNDLE-METADATA/com.android.tools.build.debugsymbols/arm64-v8a/libhermes.so.sym',
     'BUNDLE-METADATA/com.android.tools.build.debugsymbols/armeabi-v7a/libhermes.so.dbg']));
   assert.equal(armSymbols.status, 0, armSymbols.stdout + armSymbols.stderr);
+  // A lib/ folder inside assets or Java resources is not an ABI directory.
+  const assetsLib = run(aab('assets-lib', [...arm, 'base/assets/lib/fonts/inter.ttf', 'base/root/META-INF/lib/x/y.properties']));
+  assert.equal(assetsLib.status, 0, assetsLib.stdout + assetsLib.stderr);
+  // root/lib/ lands at the APK root, so it is checked like base/lib/.
+  const rootX86 = run(aab('root-x86', [...arm, 'base/root/lib/x86/libextra.so']));
+  assert.equal(rootX86.status, 1);
+  assert.match(rootX86.stdout + rootX86.stderr, /native code or symbols for x86/);
   const noV7 = run(aab('no-v7', [arm[0], arm[2]]));
   assert.equal(noV7.status, 1);
   assert.match(noV7.stdout + noV7.stderr, /no base\/lib\/armeabi-v7a libraries/);
