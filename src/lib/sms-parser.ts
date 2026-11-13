@@ -2461,8 +2461,8 @@ const REVERSAL_SIDE_NOTE_WORD_RE = /\breversal\b/i;
 // In-process statuses of a refund or reversal (RC 396 F2; Change Reviewer ad205bc6, Reviewer 85a61c6d). EN: after "is/are",
 // after ":", "-" or "Status:", or bare "under/in process|progress"; a request verb ("has been raised/requested/lodged …",
 // a bare "initiated" not "initiated by"). AR (post-fold): قيد/تحت … and جاري المعالجة/التنفيذ.
-const EN_IN_PROCESS_STATUS = String.raw`(?:under[-\s]+(?:process(?:ing)?|review)|in[-\s]+(?:process|progress|queue)|being\s+(?:processed|reviewed|initiated)|pending|awaiting|awaited|on\s+hold)\b`;
-const EN_IN_PROCESS_LEAD = String.raw`(?:\b(?:is|are)\s+(?:(?:still|currently|now)\s+)?|\s*[:\-–]\s*(?:status\s*[:\-–]?\s*)?|\bstatus\s*(?:is\s+|[:\-–]\s*)|\s(?=(?:under|in)[-\s]+(?:process|progress)))`;
+const EN_IN_PROCESS_STATUS = String.raw`(?:under[-\s]+(?:process(?:ing)?|review)|in[-\s]+(?:process|progress|queue)|being\s+(?:processed|reviewed|initiated)|pending|awaiting|awaited|on\s+hold)\b(?!\s+(?:orders?|transactions?|items?|requests?|payments?|purchases?)\b)`;
+const EN_IN_PROCESS_LEAD = String.raw`(?:\b(?:is|are)\s+(?:(?:still|currently|now)\s+)?|\s*[:\-–]\s*(?:status\s*[:\-–]?\s*)?|\bstatus\s*(?:is\s+|[:\-–]\s*|\s)|\s(?=(?:under|in)[-\s]+(?:process|progress)))`;
 const EN_IN_PROCESS_REQUESTED = String.raw`\b(?:has\s+been|have\s+been|was|were)\s+(?:initiated|submitted|requested|raised|lodged|registered|logged)\b|\binitiated\b(?!\s+by)`;
 const AR_IN_PROCESS_STATUS = `(?<![${AR_LETTER}])(?:(?:قيد|تحت)\\s+(?:ال)?(?:انتظار|معالجه|تنفيذ|اجراء|مراجعه|دراسه)|جار(?:ي)?\\s+(?:ال)?(?:معالجه|تنفيذ))(?![${AR_LETTER}])`;
 const REVERSAL_SIDE_NOTE_IN_PROCESS_RE = new RegExp(`${EN_IN_PROCESS_LEAD}${EN_IN_PROCESS_STATUS}|${EN_IN_PROCESS_REQUESTED}`, 'i');
@@ -6667,11 +6667,20 @@ const NOTICE_REFUND_COMPLETED_RE = new RegExp(
  */
 const NOTICE_REFUND_TELEGRAPHIC_CREDIT_RE =
   /(?<!\b(?:be|being|once|when|if|after|until|unless)\s+)\b(?:credited|refunded|reversed|returned|processed|deposited)\s+(?:back\s+)?(?:to|into)\s+your\b/i;
-/** The text says a refund or reversal is still in process and states no completed credit for it. */
+/** Another refund or reversal named as the status's own subject ("…, your other reversal is …") (Change Reviewer 855b7e49). */
+const NOTICE_REFUND_OTHER_SUBJECT_RE =
+  /(?:[,;:–-]|\band\b)\s*(?:(?:your|the|any)\s+)?(?:other|another|remaining|second|previous|earlier|older)\s+(?:refund|reversal)s?\b/i;
+/**
+ * The text says a refund or reversal is still in process and states no completed credit for it. A telegraphic credit
+ * before the status completes it only when the status has its own subject; "… credited to your card: pending." and
+ * "… credited to your card ending 1234 is pending." are the same credit, still in process.
+ */
 function refundInProcessUncompleted(text: string): boolean {
   const status = NOTICE_REFUND_IN_PROCESS_RE.exec(text);
-  return status !== null && !NOTICE_REFUND_COMPLETED_RE.test(text) &&
-    !NOTICE_REFUND_TELEGRAPHIC_CREDIT_RE.test(text.slice(0, status.index + status[0].length));
+  if (status === null || NOTICE_REFUND_COMPLETED_RE.test(text)) return false;
+  const upto = text.slice(0, status.index + status[0].length);
+  const credit = NOTICE_REFUND_TELEGRAPHIC_CREDIT_RE.exec(upto);
+  return !(credit && NOTICE_REFUND_OTHER_SUBJECT_RE.test(upto.slice(credit.index + credit[0].length)));
 }
 /** A ";"/"،" that ends a clause, not one that only introduces its status ("Reversal of AED 40.00; status: under process"). */
 const NOTICE_CLAUSE_STOP_RE = /[;؛،](?!\s*status\b)/i;
@@ -6732,7 +6741,8 @@ function moneyNoticeKindInBody(text: string): MoneyNoticeKind | null {
     const spans = [...body.matchAll(new RegExp(NOTICE_MONEY_RE.source, 'g'))]
       .map(match => ({ start: match.index!, end: match.index! + match[0].length }));
     const refund = principalRefundStatus(body, spans);
-    if (refund === 'completed' || refund === 'paid-out') return null;
+    // …unless the body says this refund is still in process ("Refund of AED 40.00 getting credited … is in process.").
+    if ((refund === 'completed' || refund === 'paid-out') && !refundInProcessUncompleted(body)) return null;
   }
 
   if (NOTICE_CHAT_RE.test(body)) return 'personal-chat';
