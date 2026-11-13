@@ -214,14 +214,14 @@ jobs:
           WAFRA_PLAY_BILLING_TEST_LIBS: ${{ runner.temp }}/wafra-play-billing-libs
 
       # Saved even when an unrelated test fails, so one good download serves later runs. Only when all four
-      # verified files are present (resolveDependency writes nothing unverified).
+      # files are present AND match their pinned SHA-256 (a file cut short by a cancelled job is never saved).
       - name: Check native billing test dependencies are complete
         id: billing-deps-complete
         if: always() && steps.billing-deps-cache.outputs.cache-hit != 'true'
         env:
           LIBS: ${{ runner.temp }}/wafra-play-billing-libs
         run: |
-          count=$(node -e "const fs=require('fs');const d=require('./scripts/test/wafra-play-billing-deps.json');process.stdout.write(String(d.filter(x=>fs.existsSync(process.env.LIBS+'/'+x.name)).length)+'/'+d.length)")
+          count=$(node -e "const fs=require('fs'),c=require('crypto');const d=require('./scripts/test/wafra-play-billing-deps.json');const ok=x=>{try{return c.createHash('sha256').update(fs.readFileSync(process.env.LIBS+'/'+x.name)).digest('hex')===x.sha256}catch{return false}};process.stdout.write(String(d.filter(ok).length)+'/'+d.length)")
           echo "native billing test dependencies cached: $count"
           if [ "${count%/*}" = "${count#*/}" ]; then echo "complete=true" >> "$GITHUB_OUTPUT"; fi
       - name: Save native billing test dependencies

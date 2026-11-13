@@ -141,6 +141,16 @@ test('resolveDependency: a wrong download fails loudly, is never retried here, a
     fetchBytes: async () => Buffer.alloc(2_000_001) }), /integrity check failed: big\.jar/);
 });
 
+test('resolveDependency writes the cache through a temp file, never a partial file under the final name', async () => {
+  const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'wafra-deps-'));
+  const good = Buffer.from('the pinned jar');
+  await resolveDependency({ name: 'a.jar', urls: ['u'], sha256: sha(good), cacheDir: dir, fetchBytes: async () => good });
+  assert.deepEqual(fs.readdirSync(dir), ['a.jar'], 'only the final file remains');
+  const source = fs.readFileSync(path.join(root, 'scripts/test/download-with-retry.cjs'), 'utf8');
+  assert.match(source, /writeFileSync\(partial, bytes[\s\S]{0,40}renameSync\(partial, cached\)/);
+  assert.doesNotMatch(source, /writeFileSync\(cached,/);
+});
+
 test('resolveDependency without a cache directory just downloads and verifies', async () => {
   const good = Buffer.from('jar');
   assert.equal((await resolveDependency({ name: 'a.jar', url: 'u', sha256: sha(good), cacheDir: undefined, fetchBytes: async () => good })).toString(), 'jar');
@@ -245,17 +255,27 @@ test('CI caches the jars under a key made only of their pinned hashes, and saves
   assert.equal(keyFor(pins.map((pin) => ({ ...pin, urls: ['https://elsewhere.example/' + pin.name] }))), key, 'mirror edits keep the cache');
   assert.notEqual(keyFor(pins.map((pin, i) => (i === 1 ? { ...pin, sha256: '0'.repeat(64) } : pin))), key, 'a new pin replaces it');
 
-  // The completeness check: only all four files may be saved.
-  const check = (files) => {
+  // The completeness check, run with its own pin file: only all four files with their pinned bytes may be saved.
+  const check = (files, pinFor) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wafra-billing-libs-'));
     try {
-      for (const file of files) fs.writeFileSync(path.join(dir, file), 'x');
+      const libs = path.join(dir, 'libs');
+      fs.mkdirSync(path.join(dir, 'scripts/test'), { recursive: true });
+      fs.mkdirSync(libs);
+      fs.writeFileSync(path.join(dir, 'scripts/test/wafra-play-billing-deps.json'),
+        JSON.stringify(pins.map((pin) => ({ ...pin, sha256: sha(Buffer.from(pinFor(pin.name))) }))));
+      for (const [name, bytes] of files) fs.writeFileSync(path.join(libs, name), bytes);
       const out = path.join(dir, 'out');
-      const run = spawnSync('bash', ['-c', complete.run], { cwd: root, encoding: 'utf8', env: { ...process.env, LIBS: dir, GITHUB_OUTPUT: out } });
+      const run = spawnSync('bash', ['-c', complete.run], { cwd: dir, encoding: 'utf8', env: { ...process.env, LIBS: libs, GITHUB_OUTPUT: out } });
       assert.equal(run.status, 0, run.stderr);
       return fs.existsSync(out) ? fs.readFileSync(out, 'utf8').trim() : '';
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   };
-  assert.equal(check(pins.map((pin) => pin.name)), 'complete=true');
-  assert.equal(check(pins.slice(0, 3).map((pin) => pin.name)), '');
+  const content = (name) => `bytes of ${name}`;
+  const all = pins.map((pin) => [pin.name, content(pin.name)]);
+  assert.equal(check(all, content), 'complete=true');
+  assert.equal(check(all.slice(0, 3), content), '', 'three of four is not complete');
+  assert.equal(check(all.map(([name, bytes], i) => [name, i === 2 ? bytes.slice(0, 5) : bytes]), content), '',
+    'a truncated file (a cancelled job) is never saved');
+  assert.equal(check(all.map(([name]) => [name, 'x']), content), '', 'names alone are not enough');
 });

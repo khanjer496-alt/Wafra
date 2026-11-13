@@ -95,7 +95,12 @@ async function resolveDependency({ name, url, urls = url ? [url] : [], sha256, c
     }
   }
   const bytes = verified(await fetchBytes({ urls, name }));
-  if (cached) fs.writeFileSync(cached, bytes, { mode: 0o600 });
+  if (cached) {
+    // Temp file then rename: a job killed mid-write leaves no truncated file under the final name for CI to cache.
+    const partial = `${cached}.partial-${process.pid}`;
+    fs.writeFileSync(partial, bytes, { mode: 0o600 });
+    fs.renameSync(partial, cached);
+  }
   return bytes;
 }
 
