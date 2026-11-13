@@ -12,7 +12,6 @@ import Animated, {
 
 import { ThemedText } from '@/components/themed-text';
 import { Button } from '@/components/ui/controls';
-import { Icon } from '@/components/ui/icon';
 import { EASE, Motion, Radius, Spacing } from '@/constants/theme';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';

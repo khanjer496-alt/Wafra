@@ -9,8 +9,6 @@
 
 import '@/global.css';
 
-import { Platform } from 'react-native';
-
 // Original palette, with explicit control/inverse roles required by current screens.
 export const Colors = {
   light: {

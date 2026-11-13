@@ -340,12 +340,6 @@ const styles = StyleSheet.create({
     borderTopEndRadius: BandLayout.sheetRadius,
   },
   sheetColumn: { paddingTop: Spacing.four, gap: 12 },
-  sheetCap: {
-    height: BandLayout.sheetOverlap,
-    marginTop: -BandLayout.sheetOverlap,
-    borderTopStartRadius: BandLayout.sheetRadius,
-    borderTopEndRadius: BandLayout.sheetRadius,
-  },
   overscroll: { position: 'absolute', left: 0, right: 0, top: '100%', height: 1000 },
   navWrap: { gap: Spacing.one },
   navRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.two, minHeight: 44, flexWrap: 'wrap' },
