@@ -1,58 +1,11 @@
 import React from 'react';
-import { Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { Icon, type IconName } from '@/components/ui/icon';
-import { WafraMark } from '@/components/wafra-logo';
+import { Icon } from '@/components/ui/icon';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
-import { tapped } from '@/lib/haptics';
 import { workflowCopy } from './workflow-copy';
-
-/** Open ledger section. Owners supply real labels/counts; no decorative panel. */
-export function WorkflowHero({ title, body, icon = 'lock', facts = [], children, style }: {
-  title: string; body: string; icon?: IconName;
-  facts?: readonly { label: string; value: string }[];
-  children?: React.ReactNode; style?: StyleProp<ViewStyle>;
-}) {
-  const theme = useTheme();
-  return <View style={[styles.hero, { borderColor: theme.cardBorder }, style]}>
-    <View style={styles.heroHeading}>
-      <View style={styles.heroIcon}><Icon name={icon} size={22} color={theme.primary} /></View>
-      <ThemedText type="heading" accessibilityRole="header" style={[styles.heroTitle, { color: theme.text }]}>{title}</ThemedText>
-    </View>
-    <ThemedText type="small" style={[styles.heroBody, { color: theme.textSecondary }]}>{body}</ThemedText>
-    {facts.length > 0 && <View style={[styles.facts, { borderTopColor: theme.cardBorder }]}>{facts.map(fact => <View key={fact.label} style={styles.fact}>
-      <ThemedText type="title" tabular style={[styles.factValue, { color: theme.text }]}>{fact.value}</ThemedText>
-      <ThemedText type="meta" style={[styles.heroBody, { color: theme.textSecondary }]}>{fact.label}</ThemedText>
-    </View>)}</View>}
-    {children}
-  </View>;
-}
-
-/** Wrapping section controls: enough touch space, without a second dashboard. */
-export function WorkflowNavigation<T extends string>({ value, items, label, onChange }: {
-  value: T; items: readonly { value: T; label: string; icon: IconName }[];
-  label: string; onChange: (value: T) => void;
-}) {
-  const theme = useTheme();
-  return <View accessibilityLabel={label} style={styles.navigation}>
-    {items.map(item => {
-      const selected = value === item.value;
-      return <Pressable key={item.value} accessibilityRole="button"
-        accessibilityLabel={item.label} accessibilityState={{ selected }}
-        onPress={() => { if (!selected) { tapped(); onChange(item.value); } }}
-        style={({ pressed }) => [styles.navigationItem, {
-          backgroundColor: selected ? theme.primarySoft : 'transparent',
-          borderColor: selected ? theme.primary : theme.cardBorder,
-          opacity: pressed ? 0.78 : 1,
-        }]}>
-        <ThemedText type={selected ? 'smallBold' : 'small'} style={styles.navLabel}
-          themeColor={selected ? 'primary' : 'textSecondary'}>{item.label}</ThemedText>
-      </Pressable>;
-    })}
-  </View>;
-}
 
 /** Progress is a state description, never an invented import percentage. */
 export function ImportSteps({ current }: { current: 'source' | 'review' | 'save' }) {
@@ -68,14 +21,6 @@ export function ImportSteps({ current }: { current: 'source' | 'review' | 'save'
       </View>
       <ThemedText type="meta" themeColor={index === at ? 'text' : 'textSecondary'} style={styles.stepLabel}>{words[step]}</ThemedText>
     </View>)}
-  </View>;
-}
-
-/** Original monogram. No mock cards, balances, leaves or implied bank connection. */
-export function SetupIllustration() {
-  return <View testID="setup-illustration" style={styles.illustration} accessible={false}
-    accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-    <WafraMark size={72} />
   </View>;
 }
 
