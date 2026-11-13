@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 44e626d17c2c3af028b86c494633a0424801f62319506878a4bd410f0cd4f1fb
+// Generated from normal shipping TypeScript. Source SHA-256: f957ba3fe40f108c1cd2466f7e42981a1662709669ad55f1b1ca70b2da18df66
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -10845,7 +10845,10 @@ const EN_LOWERCASE_MODAL_RE = /\b(?:will|can|may|shall|should|would|could|must)\
 const isAllCapsSentence = (sentence) => /[A-Z]/.test(sentence) && !/[a-z]/.test(sentence);
 const EN_CAPS_LEADER_RE = /(?:^\s*|[,;:]\s*)(?:IF|ONCE|WHEN(?:EVER)?|AFTER|UNTIL|UNLESS|WHETHER|AS\s+SOON\s+AS)(?![A-Za-z])/g;
 const EN_CAPS_MODAL_RE = /(?<!\b(?:BY|FROM|AT)\s+)\b(?:WILL|CAN|SHALL|SHOULD|WOULD|COULD|MUST)\b|['’]LL\b|\bMAY\s+(?:NOT\s+|ALSO\s+)?(?:BE|HAVE|TAKE|REFLECT|APPEAR|SHOW|RECEIVE|CHECK|CONTACT|CALL|VIEW|USE|NEED|GET|SEE)\b/;
-const EN_TRAILING_CONDITION_RE = /\b(?:if|once|when|provided(?:\s+that)?)\s+(?:(?:it|this|they|the\s+\w+)\s+(?:is|are|has\s+been|gets?)\s+)?(?:approved|authori[sz]ed|verified|confirmed|cleared|accepted|validated)\b(?!\s+by\s+you\b,?\s+(?:(?:please|kindly)\s+)?(?:ignore|disregard)\b)|\b(?:upon|subject\s+to)\s+(?:(?:the|your|merchant|bank)\s+)?(?:approval|verification|confirmation|clearance|validation)\b/i;
+const EN_CONDITION_VERB = String.raw `(?:(?:it|this|they|the\s+\w+)\s+(?:is|are|has\s+been|gets?)\s+)?(?:approved|authori[sz]ed|verified|confirmed|cleared|accepted|validated)\b`;
+const EN_TRAILING_CONDITION_RE = new RegExp(String.raw `\b(?:once|when|provided(?:\s+that)?)\s+` + EN_CONDITION_VERB +
+    String.raw `|\bif\s+` + EN_CONDITION_VERB + String.raw `(?!\s+by\s+you\b,?\s+(?:(?:please|kindly)\s+)?(?:ignore|disregard)\b)` +
+    String.raw `|\b(?:upon|subject\s+to)\s+(?:(?:the|your|merchant|bank)\s+)?(?:approval|verification|confirmation|clearance|validation)\b`, 'i');
 const EN_TIME_WINDOW_RE = /\bwithin\s+(?:the\s+next\s+)?\d+(?:\s*[-–]\s*\d+)?\s+(?:working\s+|business\s+|banking\s+)?(?:days?|hours?|weeks?)\b/i;
 const EN_DISPLAY_VERB_RE = /\b(?:will|should|may|can|might|could|would)\s+(?:only\s+|also\s+)?(?:reflect|appear|show|be\s+(?:visible|available|reflected|shown|displayed))\b/i;
 const EN_REFUND_WORD_RE = /\b(?:refund\w*|charge\s*back\w*)\b/i;
@@ -10913,9 +10916,10 @@ const AR_BALANCE_LINE_RE = new RegExp(`${AR_NB}(?:ال)?(?:رصيد|حد)\\s+(?:
 const AR_TRAILING_CONDITION_RE = new RegExp(`${AR_NB}(?:في\\s+حال|حال|عند|بشرط|شرط)\\s+(?:ال)?(?:موافقه|اعتماد|تحقق|تاكيد|قبول)${AR_NA}`);
 const AR_TIME_WINDOW_RE = new RegExp(`${AR_NB}خلال\\s+\\d+(?:\\s*[-–]\\s*\\d+)?\\s+(?:ايام|يوم|ساعه|ساعات|اسابيع|اسبوع)${AR_NA}`);
 const AR_DISPLAY_VERB_RE = new RegExp(`${AR_NB}و?(?:سيظهر|ستظهر|سينعكس|ستنعكس|يظهر|تظهر|سوف\\s+(?:يظهر|تظهر|ينعكس|تنعكس))${AR_NA}`);
-const AR_INFORM_BEFORE_RE = new RegExp(`${AR_NB}(?:اعلام|ابلاغ|اخبار|افاده|نفيد|نحيط|نعلم|نخبر|نوكد|علما)[${AR_LETTER}]*\\s*[,:]?\\s*$`);
+const AR_INFORM_BEFORE_RE = new RegExp(`${AR_NB}(?:اعلام|ابلاغ|اخبار|افاده|نفيد|نحيط|نعلم|نخبر|نوكد|علما)[${AR_LETTER}\\u064B-\\u0652]*\\s*[,:]?\\s*$`);
 const AR_ANSWER_RE = new RegExp(`${AR_NB}ف?(?:س[يتن][${AR_LETTER}]{2,}|سوف\\s+[${AR_LETTER}]+|يرجي|الرجاء|يمكنك|بامكانك|لا\\s+داعي)|` +
-    `${AR_NB}ف(?:تحقق|اتصل|تجاهل|راجع|تواصل|لا)${AR_NA}`);
+    `${AR_NB}ف?(?:نرجو|اعتبر)${AR_NA}|${AR_NB}ف(?:تحقق|اتصل|تجاهل|راجع|تواصل|لا)${AR_NA}`);
+const AR_NEXT_ANSWER_RE = new RegExp(`^\\s*(?:ف[${AR_LETTER}]|(?:ستصلك|سيصلك|ستتلقي|سوف\\s+(?:تصلك|يصلك|تتلقي)|سيتم\\s+(?:اشعارك|ابلاغك|اعلامك))${AR_NA})`);
 const AR_PROCESSED_NOT_YET_RE = new RegExp(`${AR_NB}(?:سيظهر|ستظهر|سينعكس|ستنعكس|سيضاف|ستضاف|سيتم\\s+(?:ايداع|اضافه|اظهار))${AR_NA}|${AR_NB}قد\\s+يستغرق[^.\\n]{0,40}?(?:يوم|ايام)${AR_NA}`);
 const AR_VERB_GLOSS = {
     استرداد: 'refunded', استرجاع: 'refunded', ايداع: 'credited', ارجاع: 'returned', اعاده: 'returned', عكس: 'reversed', معالجه: 'processed',
@@ -10974,9 +10978,16 @@ function arCreditSettlement(sentence, clause, rawAfter, raw) {
     const after = foldOrthography(rawAfter);
     const lead = sentence.slice(0, clause.start);
     const next = after.split(REFUND_SENTENCE_BREAK_RE).find((text) => text.trim() !== '') ?? '';
-    const answered = AR_ANSWER_RE.test(sentence.slice(clause.end)) || AR_ANSWER_RE.test(next);
-    const informedThat = (leader) => /^و?ان$/.test(leader[0]) && !answered && raw !== undefined &&
-        raw[leader.index + leader[0].length - 2] !== 'إ' && AR_INFORM_BEFORE_RE.test(lead.slice(0, leader.index));
+    const informedThat = (leader) => {
+        if (!/^و?ان$/.test(leader[0]) || raw === undefined || !AR_INFORM_BEFORE_RE.test(lead.slice(0, leader.index)))
+            return false;
+        const letter = raw[leader.index + leader[0].length - 2];
+        if (letter === 'أ')
+            return true;
+        if (letter !== 'ا')
+            return false;
+        return !AR_ANSWER_RE.test(sentence.slice(clause.end)) && !AR_NEXT_ANSWER_RE.test(next);
+    };
     const leaders = [...lead.matchAll(AR_CONDITIONAL_RE)].filter((leader) => !informedThat(leader));
     const last = leaders[leaders.length - 1];
     const betweenLeaderAndCredit = last ? lead.slice(last.index + last[0].length) : '';
