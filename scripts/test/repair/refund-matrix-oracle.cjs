@@ -282,6 +282,12 @@ const CONTROLS = [
     'REFUND FROM AFTER EIGHT CAFE OF AED 250.00 CREDITED TO YOUR CARD ENDING 1234.',
     'AFTER CANCELLATION AED 250.00 HAS BEEN REFUNDED TO YOUR CARD ENDING 1234 ON 12 MAY 2026.',
   ].map((body) => [body, 'INCOME_REFUND', 'C23 ALL-CAPS completed refunds keep their income']),
+  // Reviewer b329245d (Low): "إن" after "و" or a salutation comma leads a condition; "أن" mid-sentence does not.
+  ...[
+    'وإن تم استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
+    'عزيزي العميل، إن تم استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
+  ].map((body) => [body, 'NO_POST', 'C25 Arabic إن after و or a salutation comma is a condition']),
+  ['نود إعلامك أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك.', 'INCOME_REFUND', 'C25 Arabic أن (that) mid-sentence is not a condition'],
 ];
 
 // ── Case selection ───────────────────────────────────────────────────────────────────────────────────────────────────

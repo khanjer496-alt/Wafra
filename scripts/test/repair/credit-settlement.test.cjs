@@ -394,3 +394,13 @@ test('ALL-CAPS leaders and a trailing condition or time window never post', () =
   assert.equal(both('Your salary of AED 5,000.00 has been credited to your account, available within 2 hours.'),
     'income 500000 / income 500000');
 });
+
+// Reviewer b329245d (Low, base-equal): "إن" (if) also leads after "و" and after a salutation comma; "أن" (that) mid-sentence
+// still does not ("نود إعلامك أن تم استرداد …" keeps its income).
+test('Arabic: إن after و or after a salutation comma is a leader; أن mid-sentence is not', () => {
+  for (const body of [
+    'وإن تم استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
+    'عزيزي العميل، إن تم استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
+  ]) assert.equal(both(body), 'none / none', body);
+  assert.equal(both('نود إعلامك أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك.'), 'income 25000 / income 25000');
+});
