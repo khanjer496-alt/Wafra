@@ -1060,7 +1060,7 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
     // removes nothing that is not a proven decline, so an income row 72 already booked STAYS (a repair of stored rows
     // would need PARSER_BACKFILL_VERSION, which stays 50); and (c) record the 73 receipt once.
     const { PARSER_VERSION } = require('./build/sms-parser.js');
-    ok('PARSER_VERSION is 73 (predicate PR 1)', PARSER_VERSION === 73, String(PARSER_VERSION));
+    ok('PARSER_VERSION is at least 73 (predicate PR 1)', PARSER_VERSION >= 73, String(PARSER_VERSION));
     const { buildImportPlan } = require('./build/import-plan.js');
     const { materializeImportBatch, applyMaterializedImportBatch } = require('./build/ledger-import.js');
     const day = Date.UTC(2026, 10, 2, 9, 0, 0);
@@ -1108,6 +1108,53 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
     ok('v73 re-reading the same window again changes nothing',
       second.txCount === 0 && second.batch.updates.length === 0,
       JSON.stringify({ tx: second.batch.transactions, updates: second.batch.updates }));
+  }
+
+  {
+    // PARSER_VERSION 74 (predicate PR 2, the Arabic table). The same bounded, add-only re-read on a 73-era ledger: an
+    // Arabic pending note ("جاري إيداع …") that 73 booked as income is not read as income again, nothing is added,
+    // removed or rewritten, so that income row stays (PARSER_BACKFILL_VERSION stays 50; issue #228), and the receipt is 74.
+    const { PARSER_VERSION } = require('./build/sms-parser.js');
+    ok('PARSER_VERSION is 74 (predicate PR 2)', PARSER_VERSION === 74, String(PARSER_VERSION));
+    const { buildImportPlan } = require('./build/import-plan.js');
+    const { materializeImportBatch, applyMaterializedImportBatch } = require('./build/ledger-import.js');
+    const day = Date.UTC(2026, 10, 3, 9, 0, 0);
+    const nowAt = new Date(day + 6 * 60 * 60 * 1000);
+    const floor = day - 14 * 24 * 60 * 60 * 1000;
+    let ids = 0;
+    const commit = (state, batch) => applyMaterializedImportBatch(state,
+      materializeImportBatch(batch, state, (prefix) => `${prefix}-v74-${ids++}`));
+    const normal = 'Purchase of AED 50.00 at CARREFOUR with Debit Card ending 1234 on 03/11/2026';
+    const pending = 'جاري إيداع مبلغ 250.00 درهم إلى حسابك.';
+    inboxRows = [
+      { id: 73_001, address: 'ADCB', body: normal, date: day },
+      // What parser 73 booked from the pending note (an AED 250 income).
+      { id: 73_002, address: 'ADCB', body: 'تم إيداع مبلغ 250.00 درهم إلى حسابك.', date: day + 60 * 60 * 1000 },
+    ];
+    const wrote = await scanInbox(0, {}, undefined, 'en-AE');
+    let ledger = commit(baseLedgerState(), buildImportPlan(wrote.parsed, baseLedgerState(), wrote.newestTs).batch);
+    ledger = { ...ledger, parserVersion: 73, recentRereadParserVersion: 73 };
+    const rowKey = (row) => `${row.smsTs ?? ''}:${row.type}:${row.amountFils}`;
+    const before = ledger.transactions.map(rowKey).sort();
+    ok('v74 fixture: the 73-era ledger holds the purchase and the AED 250 income',
+      ledger.transactions.length === 2 && ledger.transactions.some((t) => t.amountFils === 25000 && t.type === 'income'),
+      JSON.stringify(before));
+    inboxRows = [
+      { id: 73_001, address: 'ADCB', body: normal, date: day },
+      { id: 73_002, address: 'ADCB', body: pending, date: day + 60 * 60 * 1000 },
+    ];
+    const reread = await scanInbox(floor, {}, undefined, 'en-AE');
+    ok('v74 re-read: the Arabic pending note is not read as income',
+      !reread.parsed.some((row) => row.amountFils === 25000 && row.type === 'income'),
+      JSON.stringify(reread.parsed.map((row) => [row.type, row.amountFils])));
+    const plan = buildImportPlan(reread.parsed, ledger, reread.newestTs, nowAt, reread.declined);
+    ok('v74 re-read adds, removes and rewrites nothing',
+      plan.txCount === 0 && plan.batch.updates.length === 0 && reread.declined.length === 0,
+      JSON.stringify({ tx: plan.batch.transactions, updates: plan.batch.updates, declined: reread.declined }));
+    const after = commit(ledger, { ...plan.batch, recentRereadParserVersion: 74 });
+    ok('v74 ledger: every 73-era row survives once, including the income 73 booked, and the receipt is 74',
+      after.recentRereadParserVersion === 74 && JSON.stringify(after.transactions.map(rowKey).sort()) === JSON.stringify(before),
+      JSON.stringify(after.transactions.map(rowKey)));
   }
 
 
