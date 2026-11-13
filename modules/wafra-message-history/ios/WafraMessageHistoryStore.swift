@@ -574,10 +574,45 @@ public final class WafraMessageHistoryStore {
   }
 
   public func eraseAll() throws {
-    try coordinated(operation: "erase") { root in
-      try beginEraseIfNeeded(root: root)
-      try completePendingErase(root: root)
+    do {
+      try coordinated(operation: "erase") { root in
+        try beginEraseIfNeeded(root: root)
+        try completePendingErase(root: root)
+      }
+    } catch StoreError.storageFailure {
+      // Only a root whose protection cannot be confirmed (the iOS Simulator)
+      // is erased here; any other storage failure keeps its error.
+      try eraseUnconfirmedProtectionRoot()
     }
+  }
+
+  private func eraseUnconfirmedProtectionRoot() throws {
+    let erased: Bool
+    do {
+      erased = try Self.queue.sync {
+        try WafraUnconfirmedProtectionErase.eraseIfProtectionUnconfirmed(
+          root: try plainRootLocation(),
+          isStoreEntry: { name in
+            name == Self.eraseMarkerName || name.hasPrefix(".invalid-") || Self.validSessionIdentifier(name)
+          },
+          removeItem: removeItemHandler
+        )
+      }
+    } catch {
+      throw StoreError.cleanupFailure
+    }
+    guard erased else { throw StoreError.storageFailure }
+  }
+
+  /// The root's location only: never created and never validated.
+  private func plainRootLocation() throws -> URL {
+    if let configuredRoot { return configuredRoot }
+    return try FileManager.default.url(
+      for: .applicationSupportDirectory,
+      in: .userDomainMask,
+      appropriateFor: nil,
+      create: false
+    ).appendingPathComponent("WafraMessageHistory", isDirectory: true)
   }
 
   private func coordinated<T>(
@@ -1588,5 +1623,83 @@ public final class WafraMessageHistoryStore {
     case ambiguousCompletedSessions
     case storageFailure
     case cleanupFailure
+  }
+}
+
+/// Erase-only fallback for a history store root whose Data Protection class
+/// cannot be confirmed. The iOS Simulator reports no `.protectionKey` for any
+/// directory, so `validateProtectedDirectory` refuses every operation there,
+/// including erase, and "Erase all data" could never finish. Reads and writes
+/// keep that refusal unchanged; only the delete path may run without it,
+/// because deleting data never adds exposure.
+///
+/// Nothing is read: only entry names and file types are inspected. It applies
+/// only when the root is a real directory (not a symlink) whose protection is
+/// not `.complete`, and it refuses (returns false, leaving the caller's
+/// original error) when any entry has a name the store never writes, or when
+/// a symlink appears anywhere under the root.
+enum WafraUnconfirmedProtectionErase {
+  enum Failure: Error { case removal }
+
+  static func eraseIfProtectionUnconfirmed(
+    root: URL,
+    isStoreEntry: (String) -> Bool,
+    removeItem: (URL) throws -> Void
+  ) throws -> Bool {
+    let manager = FileManager.default
+    var rootStatus = stat()
+    guard
+      lstat(root.path, &rootStatus) == 0,
+      (rootStatus.st_mode & S_IFMT) == S_IFDIR
+    else { return false }
+    let attributes = try manager.attributesOfItem(atPath: root.path)
+    guard attributes[.protectionKey] as? FileProtectionType != .complete else { return false }
+
+    // The same cross-process lock the store's coordinated operations take.
+    let lockPath = root.appendingPathComponent(".lock").path
+    let descriptor = open(lockPath, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, S_IRUSR | S_IWUSR)
+    guard descriptor >= 0 else { return false }
+    defer { close(descriptor) }
+    var lockStatus = stat()
+    guard
+      fstat(descriptor, &lockStatus) == 0,
+      (lockStatus.st_mode & S_IFMT) == S_IFREG,
+      lockStatus.st_nlink == 1,
+      flock(descriptor, LOCK_EX) == 0
+    else { return false }
+    defer { flock(descriptor, LOCK_UN) }
+
+    var doomed: [URL] = []
+    for name in try manager.contentsOfDirectory(atPath: root.path) where name != ".lock" {
+      let entry = root.appendingPathComponent(name)
+      guard isStoreEntry(name), try containsNoSymlink(entry) else { return false }
+      doomed.append(entry)
+    }
+    do {
+      for entry in doomed { try removeItem(entry) }
+    } catch {
+      throw Failure.removal
+    }
+    guard try manager.contentsOfDirectory(atPath: root.path).allSatisfy({ $0 == ".lock" }) else {
+      throw Failure.removal
+    }
+    return true
+  }
+
+  /// lstat-only walk: never follows a link and never opens a file.
+  private static func containsNoSymlink(_ url: URL) throws -> Bool {
+    var status = stat()
+    guard lstat(url.path, &status) == 0 else { return false }
+    switch status.st_mode & S_IFMT {
+    case S_IFLNK:
+      return false
+    case S_IFDIR:
+      for name in try FileManager.default.contentsOfDirectory(atPath: url.path) {
+        guard try containsNoSymlink(url.appendingPathComponent(name)) else { return false }
+      }
+      return true
+    default:
+      return true
+    }
   }
 }
