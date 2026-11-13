@@ -444,3 +444,48 @@ test('#242 review: genuine credits keep their income; windows and conditions bou
     'AED 250.00 HAS BEEN REFUNDED TO YOUR CARD ENDING 1234 BY WILL TRADING LLC, YOU WILL GET AN SMS IF APPROVED.',
   ]) assert.equal(both(body), 'none / none', body);
 });
+
+// #242 review round 2 (Reviewer 3ca33c8f, Change Reviewer 823e08b4). Another subject's clause keeps its condition to itself
+// only when that subject is not the money (a card, a PIN, documents …) and the clause does not refer back to it ("it", "the
+// same", "the hold", "release"); otherwise its condition or window is the credit's. "may/can … be refunded" is not completed.
+// An Arabic "إن" (with the hamza below) after a verb of informing is "if"; "أن"/"ان" there is "that" unless an answer follows,
+// with "ف", "يمكنك", or in the next sentence. Only the "… by you, please ignore …" footer is exempt from a trailing condition.
+test('#242 review round 2: a later clause about the money, a modal credit and an answered إن never post', () => {
+  for (const body of [
+    'AED 250.00 has been credited to your account ending 1234, the cheque is subject to clearance.',
+    'AED 250.00 has been credited to your account ending 1234, the cheque will be cleared once verified.',
+    'AED 250.00 has been credited to your account ending 1234; the same will be released once approved.',
+    'AED 250.00 has been credited to your account ending 1234, the sum will be available once verified.',
+    'AED 250.00 has been credited to your account ending 1234 and the transfer will be released once approved.',
+    'Refund of AED 250.00 has been credited to your card ending 1234, the bank will release it within 7 working days.',
+    'Your refund of AED 250.00 has been processed to your card ending 1234, the issuer will post it within 7 working days.',
+    'AED 250.00 has been credited to your account ending 1234, the bank will release it once verified.',
+    'AED 250.00 has been credited to your account ending 1234 and the hold will be lifted once approved.',
+    'AED 250.00 has been refunded to your card ending 1234, the merchant will confirm it once approved.',
+    'AED 250.00 has been refunded to your card ending 1234 and your card will show it within 7 working days if approved.',
+    'AED 250.00 has been refunded to your card ending 1234 and the bank will verify it within 7 working days.',
+    'AED 250.00 may be refunded to your card and will reflect within 5 working days.',
+    'AED 250.00 can be refunded to your card and will reflect within 5 working days.',
+    'AED 250.00 may be refunded to your card.',
+    'نود إعلامك، إن تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234 فيرجى تجاهل هذه الرسالة.',
+    'نود إعلامك، إن تم استرداد مبلغ 250.00 درهم إلى بطاقتك فسوف نرسل لك رسالة.',
+    'نود إعلامك، إن تم استرداد مبلغ 250.00 درهم إلى بطاقتك. ستصلك رسالة تأكيد.',
+    'نود إعلامك، إن تم استرداد مبلغ 250.00 درهم إلى بطاقتك فيرجى التحقق من رصيدك.',
+    'نود إعلامك، إن تم استرداد مبلغ 250.00 درهم إلى بطاقتك يمكنك التحقق من رصيدك.',
+    'نود إعلامك، إن تم استرداد مبلغ 250.00 درهم إلى بطاقتك فتحقق من رصيدك.',
+    'نود إعلامك، أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك فيرجى تجاهل هذه الرسالة.',
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. ستصلك رسالة تأكيد.',
+  ]) assert.equal(both(body), 'none / none', body);
+  for (const body of [
+    'AED 500.00 credited to your account ending 1234 when confirmed by you.',
+    'AED 500.00 has been credited to your wallet once accepted by you in the app.',
+  ]) assert.equal(both(body), 'none / none', body);
+  for (const body of [
+    'AED 250.00 has been refunded to your card ending 1234; your new card will be activated once approved.',
+    'AED 250.00 has been refunded to your card ending 1234; your replacement card will be dispatched once approved.',
+    'Refund of AED 250.00 has been credited to your card ending 1234, if the transaction has been authorised by you please ignore this message.',
+    'AED 250.00 refunded to your card, will reflect within 7 working days.',
+    'نود إعلامك، أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك.',
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك.',
+  ]) assert.equal(both(body), 'income 25000 / income 25000', body);
+});
