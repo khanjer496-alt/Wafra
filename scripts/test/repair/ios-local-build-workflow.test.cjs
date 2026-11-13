@@ -132,15 +132,19 @@ test('the public repo never receives the signed IPA, and the old resubmission ro
 test('public-repo artifact policy: no app binaries, short retention everywhere', () => {
   const dir = path.dirname(file);
   // build-apk.yml (Android) is handled with the Android owner separately.
-  for (const name of fs.readdirSync(dir).filter(n => n.endsWith('.yml') && n !== 'build-apk.yml')) {
+  let checked = 0;
+  for (const name of fs.readdirSync(dir).filter(n => /\.ya?ml$/.test(n) && n !== 'build-apk.yml')) {
     const wf = YAML.parse(fs.readFileSync(path.join(dir, name), 'utf8'));
     for (const [jobName, job] of Object.entries(wf.jobs || {})) for (const step of job.steps || []) {
       if (!/actions\/upload-artifact@/.test(step.uses || '')) continue;
+      checked++;
       const where = `${name}:${jobName}:${step.name || step.with?.name}`;
       const days = step.with?.['retention-days'];
       assert.ok(Number.isInteger(days) && days >= 1 && days <= 7, `${where} needs retention-days 1-7, has ${days}`);
       const paths = String(step.with?.path || '');
-      assert.doesNotMatch(paths, /\.(?:ipa|aab|xcarchive|p12|p8|mobileprovision)\b/i, `${where} uploads a signed binary or credential`);
+      assert.doesNotMatch(paths, /\.(?:ipa|aab|apk|xcarchive|p12|p8|mobileprovision)\b/i, `${where} uploads a signed binary or credential`);
     }
   }
+  // Guard against a vacuous pass (a parser or layout change that finds no steps).
+  assert.ok(checked >= 15, `expected at least 15 upload steps outside build-apk.yml, checked ${checked}`);
 });
