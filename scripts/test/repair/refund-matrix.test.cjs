@@ -55,17 +55,17 @@ const NATIVE_IGNORED_INCOME_CEILING = 157;
 // C16; the C20 "After cancellation …", "Once your order was cancelled …", telegraphic and dated refunds; the C22 Arabic
 // "عند إلغاء الطلب …", "عند إرجاع المنتج …" and "عند مراجعة طلبك …" refunds; the six C24 Arabic genuine refunds; the dated ALL-CAPS C23
 // refund and the C25 "أن" refund; from #242's review, seven of the eight C26 refunds, the C27 bare-alef "ان" refund and the
-// five C28 "أن/ان" refunds; from #242's follow-up, the four C29 bare-alef "ان" refunds). They are pinned by id and kept
+// five C28 "أن/ان" refunds; from #242's follow-up, the five C29 bare-alef "ان" refunds). They are pinned by id and kept
 // out of the count above, so that ceiling still covers #217's rows and a newly ignored row anywhere else fails. Delete an
 // id when native posts its row.
 const NATIVE_IGNORED_CONTROL_ROWS = new Set(['CTL-05402', 'CTL-05403', 'CTL-05404', 'CTL-05405', 'CTL-05406', 'CTL-05407',
   'CTL-05416', 'CTL-05427', 'CTL-05429', 'CTL-05444', 'CTL-05454', 'CTL-05463', 'CTL-05467', 'CTL-05468', 'CTL-05475', 'CTL-05476',
   'CTL-05477', 'CTL-05478', 'CTL-05479', 'CTL-05480', 'CTL-05504', 'CTL-05507', 'CTL-05508', 'CTL-05510', 'CTL-05511',
   'CTL-05512', 'CTL-05513', 'CTL-05514', 'CTL-05515', 'CTL-05531', 'CTL-05532', 'CTL-05533', 'CTL-05534', 'CTL-05535',
-  'CTL-05536', 'CTL-05539', 'CTL-05540', 'CTL-05541', 'CTL-05542']);
+  'CTL-05536', 'CTL-05539', 'CTL-05540', 'CTL-05541', 'CTL-05542', 'CTL-05543']);
 // Row count and sha256 of the oracle's "id<TAB>expected<TAB>body" lines, joined by newlines (Reviewer, #217 Low 1; the
 // body since #225's review, so a row's text cannot be edited unseen).
-const ORACLE_PIN = { rows: 5545, sha256: '9485311b01d32be9bd66d0eaad06af0790fd37d39ea9acbeb031bf589226b57f' };
+const ORACLE_PIN = { rows: 5552, sha256: 'd7b92684aa3bd144f4d35be184be3f9f933394efa94469ba83db27a4cb264121' };
 
 const PATHS = ['parseSms', 'session', 'native'];
 const at = Date.parse('2026-11-05T10:00:00Z');
