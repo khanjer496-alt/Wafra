@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 89f57ba85c78159ddeb6ff6885288a402dcb28d8aaafeb600f55b78c7e36fd05
+// Generated from normal shipping TypeScript. Source SHA-256: 8f51929b38abfd628bd45f1dddd7e70584d19173f06afb6073b79255c431735d
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -12635,28 +12635,31 @@ const NOTICE_INCOMING_STATED_RE = new RegExp(String.raw `\byou\s+(?:have\s+|['�
 const NOTICE_RETURNED_TO_USER_RE = /\brefund|\bcredited\s+back\b|\bre-?credited\b|\breturned\s+to\s+your\b|\breversed\s+(?:to|into)\s+your\b|\breversal\s+of\b/i;
 const NOTICE_PREFIX_CONNECTOR_RE = /^(\W{0,4}[^\s:\n][^:\n]{0,30}?)[ \t]+[–—|-][ \t]+/;
 const NOTICE_REVERSAL_REQUEST_RE = /\b(?:reversal|refund|dispute|chargeback)\s+request\b(?:[^.\n]|\.(?=\d)){0,80}?\b(?:has\s+been\s+|was\s+|is\s+)?(?:received|registered|logged|submitted|raised)\b/i;
-const NOTICE_REFUND_IN_PROCESS_RE = new RegExp(String.raw `\b(?:refund|reversal)s?\b(?:[^.\n;]|\.(?=\d)){0,80}?(?:${EN_IN_PROCESS_LEAD}${EN_IN_PROCESS_STATUS}|${EN_IN_PROCESS_REQUESTED})` +
+const NOTICE_REFUND_IN_PROCESS_RE = new RegExp(String.raw `\b(?:refund|reversal)s?\b(?:[^.\n;]|\.(?=\d)|;(?=\s*status\b)){0,80}?(?:${EN_IN_PROCESS_LEAD}${EN_IN_PROCESS_STATUS}|${EN_IN_PROCESS_REQUESTED})` +
+    String.raw `|\b(?:refund|reversal)s?\s+(?:pending|awaited|on\s+hold)\b` +
     `|(?<![${AR_LETTER}])(?:عكس|استرداد|استرجاع|ارجاع|اعاده)(?![${AR_LETTER}])(?:[^.\\n؟!،؛;]|\\.(?=\\d)){0,80}?${AR_IN_PROCESS_STATUS}`, 'i');
 const NOTICE_REFUND_NOUN_RE = new RegExp(`\\b(?:refund|reversal)s?\\b|(?<![${AR_LETTER}])(?:عكس|استرداد|استرجاع|ارجاع|اعاده)(?![${AR_LETTER}])`, 'i');
 const NOTICE_REFUND_COMPLETED_RE = new RegExp(String.raw `\b(?:has|have|had)\s+(?:(?:now|already|just)\s+)?been\s+(?:(?:successfully|fully|now)\s+)?(?:credited|refunded|reversed|returned|deposited)\b` +
     String.raw `|\b(?:was|were)\s+(?:(?:successfully|fully|now)\s+)?(?:credited|refunded|reversed|returned|deposited)\b` +
     String.raw `|\band\s+(?:has\s+been\s+|was\s+)?(?:credited|refunded|reversed|returned|deposited)\s+(?:back\s+)?(?:to|into)\b` +
     `|(?<![${AR_LETTER}])تم\\s+(?:عكس|استرداد|استرجاع|ارجاع|ايداع|اضافه|اعاده)(?![${AR_LETTER}])`, 'i');
-const NOTICE_REFUND_TELEGRAPHIC_CREDIT_RE = /(?<!\b(?:be|being|once|when|if|after|until|unless)\s+)\b(?:credited|refunded|reversed|returned)\s+(?:back\s+)?(?:to|into)\s+your\b/i;
+const NOTICE_REFUND_TELEGRAPHIC_CREDIT_RE = /(?<!\b(?:be|being|once|when|if|after|until|unless)\s+)\b(?:credited|refunded|reversed|returned|processed|deposited)\s+(?:back\s+)?(?:to|into)\s+your\b/i;
 function refundInProcessUncompleted(text) {
     const status = NOTICE_REFUND_IN_PROCESS_RE.exec(text);
     return status !== null && !NOTICE_REFUND_COMPLETED_RE.test(text) &&
         !NOTICE_REFUND_TELEGRAPHIC_CREDIT_RE.test(text.slice(0, status.index + status[0].length));
 }
-function refundInProcessClause(core, lead) {
-    const stop = core.slice(lead.length).search(/[;؛،]/);
+const NOTICE_CLAUSE_STOP_RE = /[;؛،](?!\s*status\b)/i;
+function refundInProcessClause(core, lead, figure) {
+    const stop = core.slice(lead.length).search(NOTICE_CLAUSE_STOP_RE);
     const head = stop < 0 ? core : core.slice(0, lead.length + stop);
-    return NOTICE_REFUND_NOUN_RE.test(lead) && refundInProcessUncompleted(head);
+    const nounFirst = NOTICE_REFUND_NOUN_RE.test(lead) || /^\s*(?:refund|reversal)s?\b/i.test(core.slice(lead.length + figure.length));
+    return nounFirst && refundInProcessUncompleted(head);
 }
 function withoutInProcessRefundSentences(body) {
     let out = body.replace(/\breversal\s+(?:fees?|charges?)\b/gi, (fee) => ' '.repeat(fee.length));
     let start = 0;
-    for (const end of [...[...body.matchAll(/[.!?](?=\s|$)|[;؛،]|\n/g)].map((match) => match.index + match[0].length), body.length]) {
+    for (const end of [...[...body.matchAll(/[.!?](?=\s|$)|[;؛،](?!\s*status\b)|\n/gi)].map((match) => match.index + match[0].length), body.length]) {
         const text = body.slice(start, end);
         if (end > start && refundInProcessUncompleted(text)) {
             out = out.slice(0, start) + ' '.repeat(end - start) + out.slice(end);
@@ -12756,7 +12759,7 @@ function moneyNoticeKindInBody(text) {
     if (NOTICE_P2P_IN_RE.test(clause) &&
         NOTICE_UNCLAIMED_RE.test(principal.before.slice(-160) + ' ' + clause + ' ' + principal.after.slice(0, 160)))
         return 'unclaimed';
-    if (NOTICE_NOT_YET_RE.test(core) || refundInProcessClause(core, lead) || NOTICE_UNDER_PROCESS_RE.test(body) ||
+    if (NOTICE_NOT_YET_RE.test(core) || refundInProcessClause(core, lead, principal.figure) || NOTICE_UNDER_PROCESS_RE.test(body) ||
         NOTICE_STATUS_PENDING_RE.test(body))
         return 'not-yet';
     if (NOTICE_RENEWAL_RE.test(core) && !NOTICE_DONE_VERB_RE.test(clause))
