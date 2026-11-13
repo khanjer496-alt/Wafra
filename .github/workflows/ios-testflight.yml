@@ -944,12 +944,29 @@ jobs:
           npm run update:check
           node scripts/test/ios-history-native-contract.test.js
 
+      # On failure this step also writes a capped plain-text summary (error lines and
+      # the EAS phase, control bytes stripped, the job's secret values and
+      # credential-shaped strings redacted; scripts/ci/summarize-ios-build.cjs).
+      # It is uploaded below so the cause can be read without the raw log. The
+      # build's real exit code is preserved: the summary is evidence, never a gate.
       - name: Build signed iOS archive on this macOS runner
         run: |
           FREEZE=--freeze-credentials
           if [ "${{ inputs.repair_credentials }}" = "true" ]; then FREEZE=; fi
+          export EAS_LOCAL_BUILD_WORKINGDIR="$RUNNER_TEMP/eas-local-build" EAS_LOCAL_BUILD_SKIP_CLEANUP=1
+          mkdir -p "$EAS_LOCAL_BUILD_WORKINGDIR"
+          set +e
           eas build --platform ios --profile "${{ inputs.profile }}" --local --non-interactive \
-            $FREEZE --output "$RUNNER_TEMP/Wafra-local.ipa"
+            $FREEZE --output "$RUNNER_TEMP/Wafra-local.ipa" 2>&1 | tee "$RUNNER_TEMP/wafra-ios-build.log"
+          BUILD_STATUS=${PIPESTATUS[0]}
+          set -e
+          if [ "$BUILD_STATUS" -ne 0 ]; then
+            mkdir -p artifacts/ios-build-failure
+            BUILD_EXIT="$BUILD_STATUS" node scripts/ci/summarize-ios-build.cjs \
+              "$RUNNER_TEMP/wafra-ios-build.log" "$EAS_LOCAL_BUILD_WORKINGDIR" "$HOME/Library/Logs/gym" \
+              > artifacts/ios-build-failure/summary.txt || echo 'Could not write the build failure summary.'
+          fi
+          exit "$BUILD_STATUS"
 
       - name: Verify the actual signed IPA and App Intent resources
         id: ipa
@@ -1034,3 +1051,13 @@ jobs:
       - name: Remove temporary Apple API key
         if: always()
         run: rm -f "$RUNNER_TEMP/wafra-local-asc.p8"
+      - name: Preserve iOS archive failure summary
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/ios-build-failure/summary.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
