@@ -214,6 +214,18 @@ const CONTROLS = [
   ].map((body) => [body, 'NO_POST', 'C21 an agent or another verb after the leader: the leader governs the credit']),
   ['After cancellation AED 250.00 has been refunded to your card ending 1234 on 12 May 2026.', 'INCOME_REFUND', 'C20 "May" in a date is not a modal'],
   ['After your return AED 250.00 has been credited to your card ending 1234 by MAY STORES.', 'INCOME_REFUND', 'C20 "MAY" in a name is not a modal'],
+  // The same in Arabic (#231): a temporal leader directly governing the credit is a condition whatever follows; another phrase
+  // between the leader and the credit makes it "when it happened".
+  ...[
+    'عندما تم استرداد مبلغ 250.00 درهم إلى بطاقتك تصلك رسالة.',
+    'بمجرد أن تم إيداع مبلغ 250.00 درهم في حسابك يرجى مراجعة رصيدك.',
+    'بعد أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك يتم تحديث رصيدك.',
+    'عندما تم إيداع مبلغ 250.00 درهم في حسابك. ستصلك رسالة.',
+    'متى تم استرداد مبلغ 250.00 درهم إلى بطاقتك نرسل لك إشعاراً.',
+    'عندما قام التاجر NOON.COM باسترداد مبلغ 250.00 درهم إلى بطاقتك تصلك رسالة.',
+    'عند استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
+  ].map((body) => [body, 'NO_POST', 'C22 Arabic: a leader directly governing the credit is a condition, whatever follows']),
+  ['عند إلغاء الطلب تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234.', 'INCOME_REFUND', 'C22 Arabic: "عند <noun>" leads a completed refund'],
 ];
 
 // ── Case selection ───────────────────────────────────────────────────────────────────────────────────────────────────
