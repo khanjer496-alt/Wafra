@@ -6643,6 +6643,21 @@ const NOTICE_REFUND_IN_PROCESS_RE = new RegExp(
     `(?:قيد\\s+(?:ال)?(?:انتظار|معالجه|تنفيذ|اجراء|مراجعه)|تحت\\s+(?:ال)?(?:اجراء|معالجه|مراجعه|تنفيذ))(?![${AR_LETTER}])`,
   'i',
 );
+/**
+ * The body with every sentence that says a refund or reversal is still in process blanked: such a sentence cannot make the
+ * message a reversal ("Purchase of AED 40.00 at NOON. Reversal of AED 40.00 is under process." is the purchase). RC 396 F2.
+ */
+function withoutInProcessRefundSentences(body: string): string {
+  let out = body;
+  let start = 0;
+  for (const end of [...[...body.matchAll(REFUND_SENTENCE_BREAK_RE)].map((match) => match.index! + match[0].length), body.length]) {
+    if (end > start && NOTICE_REFUND_IN_PROCESS_RE.test(body.slice(start, end))) {
+      out = out.slice(0, start) + ' '.repeat(end - start) + out.slice(end);
+    }
+    start = Math.max(start, end);
+  }
+  return out;
+}
 const NOTICE_TOP_UP_RE = /\btop\s+up\s+(?:your\s+)?\w+\s+to\s+complete\b|^\W{0,4}(?:[^\s:][^:\n]{0,30}:\s*)?pending\s*(?::|(?:purchase|transaction|payment|charge|transfer|debit|withdrawal)\b)/i;
 /**
  * A status standing as its OWN segment anywhere in the alert — a line, or the
@@ -9062,7 +9077,7 @@ function parseSmsInner(
   const isIncomingCreditReversal = INCOMING_CREDIT_REVERSAL_RE.test(prose);
   const isRefund = !isIncomingCreditReversal &&
     // A blanked side note is not a reversal statement either ("… is not returned to your card", "… and was later reversed").
-    (REFUND_RE.test(refundNotes.body) || REVERSAL_RE.test(refundNotes.body) || arabicPurchaseRefundHeader ||
+    (REFUND_RE.test(refundNotes.body) || REVERSAL_RE.test(withoutInProcessRefundSentences(refundNotes.body)) || arabicPurchaseRefundHeader ||
       REFUND_HEADING_RE.test(prose));
 
   if (PROMO_RE.test(raw) && !TXN_EVIDENCE_RE.test(raw)) return null;
