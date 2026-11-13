@@ -25,9 +25,39 @@ import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority'
 import { recordRuntimeOperation } from '@/lib/runtime-performance';
 import { stageWalletNearMatches } from '@/lib/wallet-near-match';
 import { useStore } from '@/lib/store';
+import { inspectGenericBankEventForReview as wafraDiagInspect } from '@/lib/launch-alert-parser';
+import { inspectUniversalBankEvent as wafraDiagUniversal } from '@/lib/universal-parser';
+import { prepareUniversalReviewAlert as wafraDiagPrepare, reviewRetentionReceipts as wafraDiagReceipts, emptyAlertReviewTray as wafraDiagEmptyTray } from '@/lib/alert-review-tray';
 
 // DIAGNOSTIC BUILD ONLY (android/ab-build-396-diag, never merged): reason codes, no message data.
 const wafraDiag = (code: string, n = 0): void => { try { console.info('WafraHistoryDiag', code, n); } catch { /* diagnostic only */ } };
+// DIAGNOSTIC F: parse App QA's SYNTHETIC corpus text N13 (hard-coded test text, never user data) once, and log the full result.
+let wafraDiagSelfTested = false;
+const wafraDiagChunks = (label: string, value: unknown, mask = false) => {
+  let text: string;
+  try { text = JSON.stringify(value); } catch (error) { text = 'stringify-failed ' + String((error as Error)?.message); }
+  if (text === undefined) text = String(value);
+  if (mask) text = text.replace(/[0-9]/g, '#');
+  for (let i = 0; i < text.length; i += 800) wafraDiag('F-' + label + ' ' + Math.floor(i / 800) + ' ' + text.slice(i, i + 800), text.length);
+};
+const wafraDiagSelfTest = () => {
+  if (wafraDiagSelfTested) return;
+  wafraDiagSelfTested = true;
+  const n13 = 'ADCB: Your account balance is AED 12,345.67 as on 13/11/2026.';
+  const n12 = 'Pre-approved personal loan up to AED 50,000.00 is waiting for you. Call now to apply.';
+  try { wafraDiagChunks('n13-universal', wafraDiagUniversal(n13, { sender: 'ADCB' })); } catch (error) { wafraDiag('F-n13-universal-threw ' + String((error as Error)?.message).slice(0, 200)); }
+  try {
+    const event = wafraDiagInspect(n13, 'ADCB');
+    wafraDiagChunks('n13-generic', event);
+    if (event) {
+      const now = Date.now();
+      const review = wafraDiagPrepare({ id: 'diag_selftest_review_0001', sourceKey: 'diag_selftest_source_0001', observedAt: now - 60000, channel: 'inbox', event });
+      wafraDiag('F-n13-prepare ' + (review ? 'ok' : 'NULL'));
+      if (review) wafraDiag('F-n13-receipt ' + String(wafraDiagReceipts(wafraDiagEmptyTray(), [review], now)[0]?.outcome));
+    }
+  } catch (error) { wafraDiag('F-n13-generic-threw ' + String((error as Error)?.message).slice(0, 200)); }
+  try { const e12 = wafraDiagInspect(n12, 'ENBD'); wafraDiag('F-n12-generic family=' + String(e12?.family) + ' status=' + String(e12?.status)); } catch (error) { wafraDiag('F-n12-threw ' + String((error as Error)?.message).slice(0, 200)); }
+};
 
 type HistoryScanPage = ScanResult & HistoryImportPage;
 const BACKGROUND_HISTORY_PAGE_SIZE = 512;
@@ -123,6 +153,7 @@ export function useHistoryImport(): void {
         };
       }
       const requestedLegacyReviewKeys = legacyReviewKeys.current?.keys ?? [];
+      wafraDiagSelfTest();
       const scanStartedAt = Date.now();
       const page = await scanInbox(
         0,
@@ -191,7 +222,11 @@ export function useHistoryImport(): void {
               ' retain=' + Number(requiresReviewRetention(item)) + ' outcome=' + String(match?.outcome ?? 'NO-MATCH') +
               ' ch=' + String(item.channel) + ' key=' + shape(item.sourceKey) + ' canon=' + shape(key) +
               ' obsMin=' + Math.round((item.observedAt - nowMs) / 60000) +
-              ' expH=' + Math.round((((item as { expiresAt?: number }).expiresAt ?? NaN) - nowMs) / 3600000), index);
+              ' expH=' + Math.round((((item as { expiresAt?: number }).expiresAt ?? NaN) - nowMs) / 3600000) +
+              ' emptyTrayReceipt=' + String(wafraDiagReceipts(wafraDiagEmptyTray(), [item], nowMs)[0]?.outcome) +
+              ' idDupWithinPage=' + Number(page.reviewCandidates.some((other, j) => j !== index && other.id === item.id)) +
+              ' kind=' + String((item as { kind?: unknown }).kind) + ' obsAfterExp=' + Number(((item as { expiresAt?: number }).expiresAt ?? 0) <= item.observedAt), index);
+            if (Number(requiresReviewRetention(item)) === 1) wafraDiagChunks('item' + index + '-event-digits-masked', event, true);
           });
           outcomes.forEach((entry, index) => wafraDiag('E-receipt ' + index + ' ' + String(entry.outcome) + ' key=' + shape(entry.sourceKey), index));
         }
