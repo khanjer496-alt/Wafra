@@ -372,7 +372,16 @@ const CONTROLS = [
     'Reversal of AED 250.00 processed to your card ending 1234; the other reversal is pending.',
     'تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234، وطلبك الآخر قيد المعالجة',
     'Reversal of AED 250.00 credited to your card ending 1234, your other reversal is under process.',
+    'Reversal of AED 250.00 processed to your card ending 1234 - in progress orders are not affected.',
   ].map((body) => [body, 'INCOME_REFUND', 'RC396 a completed credit beside another pending one']),
+  // #249 review round 3 (Change Reviewer a3da9de8, Reviewer 696b9c8f).
+  ...[
+    'AED 250.00 refund is under process.',
+    'Reversal of AED 250.00; status: under process',
+  ].map((body) => [body, 'NO_POST', 'RC396 an amount-first refund or a "; status:" in process']),
+  ...[
+    'AED 250.00 was debited from your card ending 1234 at NOON - reversal pending.',
+  ].map((body) => [body, 'EXPENSE', 'RC396 a reversal pending right after the noun, beside the debit']),
 ];
 
 // ── Case selection ───────────────────────────────────────────────────────────────────────────────────────────────────
