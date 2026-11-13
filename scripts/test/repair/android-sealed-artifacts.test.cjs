@@ -58,7 +58,9 @@ test('the Play bundle builds ARM only and fails over 100,000,000 bytes or with x
   const index = stepIndex('Verify the Play bundle is ARM only and under the upload limit');
   assert.ok(index > stepIndex('Build Play Store bundle (AAB)') && index < stepIndex('Rename outputs'));
   const check = steps[index];
-  assert.equal(check.if, PLAY_BUILD);
+  // The boolean-input form of PLAY_BUILD, as the update-channel steps use.
+  assert.equal(check.if, 'inputs.bundle && !inputs.corpus');
+  assert.equal(check.if, steps[stepIndex('Verify update channel in the packaged Play bundle')].if);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wafra-aab-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const aab = (name, entries) => {

@@ -347,7 +347,9 @@ jobs:
         run: ./gradlew :wafra-complimentary-transport:testReleaseUnitTest bundleRelease -PreactNativeArchitectures=arm64-v8a,armeabi-v7a --no-daemon
 
       - name: Verify the Play bundle is ARM only and under the upload limit
-        if: github.event.inputs.bundle == 'true' && github.event.inputs.corpus != 'true'
+        # Same condition as the AAB build, in the form the update-channel steps
+        # use; sms-corpus.test.js counts the string-input form exactly twice.
+        if: inputs.bundle && !inputs.corpus
         run: |
           set -euo pipefail
           aab="${WAFRA_AAB:-android/app/build/outputs/bundle/release/app-release.aab}"
