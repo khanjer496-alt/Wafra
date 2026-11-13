@@ -76,7 +76,17 @@ test('the Play bundle builds ARM only and fails over 100,000,000 bytes or with x
   assert.equal(run(aab('arm', arm)).status, 0);
   const x86 = run(aab('x86', [...arm, 'base/lib/x86_64/libhermes.so']));
   assert.equal(x86.status, 1);
-  assert.match(x86.stdout + x86.stderr, /contains x86 native libraries/);
+  assert.match(x86.stdout + x86.stderr, /native code or symbols for x86_64/);
+  const symbols = run(aab('x86-symbols', [...arm, 'BUNDLE-METADATA/com.android.tools.build.debugsymbols/x86/libhermes.so.sym']));
+  assert.equal(symbols.status, 1);
+  assert.match(symbols.stdout + symbols.stderr, /native code or symbols for x86/);
+  const riscv = run(aab('riscv', [...arm, 'feature/lib/riscv64/libextra.so']));
+  assert.equal(riscv.status, 1);
+  assert.match(riscv.stdout + riscv.stderr, /native code or symbols for riscv64/);
+  const armSymbols = run(aab('arm-symbols', [...arm,
+    'BUNDLE-METADATA/com.android.tools.build.debugsymbols/arm64-v8a/libhermes.so.sym',
+    'BUNDLE-METADATA/com.android.tools.build.debugsymbols/armeabi-v7a/libhermes.so.dbg']));
+  assert.equal(armSymbols.status, 0, armSymbols.stdout + armSymbols.stderr);
   const noV7 = run(aab('no-v7', [arm[0], arm[2]]));
   assert.equal(noV7.status, 1);
   assert.match(noV7.stdout + noV7.stderr, /no base\/lib\/armeabi-v7a libraries/);

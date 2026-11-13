@@ -358,9 +358,14 @@ jobs:
             exit 1
           fi
           entries=$(unzip -Z1 "$aab")
-          if printf '%s\n' "$entries" | grep -E '(^|/)lib/x86(_64)?/' >/dev/null; then
-            echo "::error::The Play bundle contains x86 native libraries; it must ship arm64-v8a and armeabi-v7a only."
-            printf '%s\n' "$entries" | grep -E '(^|/)lib/x86(_64)?/' | head -20
+          # Allow-list: every ABI directory, of native libraries in any module
+          # and of the native debug symbols, must be arm64-v8a or armeabi-v7a.
+          abis=$(printf '%s\n' "$entries" | sed -n -E \
+            -e 's#^(.*/)?lib/([^/]+)/.*#\2#p' \
+            -e 's#^BUNDLE-METADATA/com\.android\.tools\.build\.debugsymbols/([^/]+)/.*#\1#p' | sort -u)
+          unexpected=$(printf '%s\n' "$abis" | grep -v -x -E 'arm64-v8a|armeabi-v7a' || true)
+          if [ -n "$unexpected" ]; then
+            echo "::error::The Play bundle contains native code or symbols for $(echo $unexpected); it must ship arm64-v8a and armeabi-v7a only."
             exit 1
           fi
           for abi in arm64-v8a armeabi-v7a; do
