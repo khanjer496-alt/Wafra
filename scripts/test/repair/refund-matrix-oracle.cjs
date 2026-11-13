@@ -357,7 +357,21 @@ const CONTROLS = [
   ...[
     'AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. Your reversal request is under process.',
     'Purchase of AED 250.00 at NOON with card 1234. Reversal of AED 250.00 is under process.',
+    'AED 250.00 was debited from your card ending 1234 for a reversal fee.',
+    'AED 250.00 was debited from your card ending 1234 at NOON, refund of your previous order is pending.',
   ].map((body) => [body, 'EXPENSE', 'RC396 a reversal still under process, as a side note, leaves the debit']),
+  // #249 review round 1 (Change Reviewer ad205bc6, Reviewer 85a61c6d).
+  ...[
+    'Reversal of AED 250.00 under process.',
+    'Reversal AED 250.00 - Status: Under Process',
+    'Reversal for AED 250.00 has been requested.',
+    'Refund of AED 250.00 is awaited.',
+    'استرداد مبلغ 250.00 درهم جاري المعالجة',
+  ].map((body) => [body, 'NO_POST', 'RC396 a telegraphic or further in-process status']),
+  ...[
+    'Reversal of AED 250.00 processed to your card ending 1234; the other reversal is pending.',
+    'تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234، وطلبك الآخر قيد المعالجة',
+  ].map((body) => [body, 'INCOME_REFUND', 'RC396 a completed credit beside another pending one']),
 ];
 
 // ── Case selection ───────────────────────────────────────────────────────────────────────────────────────────────────
