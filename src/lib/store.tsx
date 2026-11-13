@@ -181,6 +181,7 @@ import {
   recordStorageFailure,
   storageReadFailureMayRetry,
   type StorageFailure,
+  type StorageOp,
 } from '@/lib/storage-diagnostics';
 import { waitForAndroidBackgroundCaptureIdle } from '@/lib/android-live-background-api';
 import { bankNotificationAdmissionExpiresAt } from '@/lib/trusted-bank-notification-packages';
@@ -3936,15 +3937,28 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     // the erased money until the next launch. It is cleared again after the
     // erase (below) in case an in-flight snapshot write lands in between.
     clearWidgetSnapshot();
+    // Each cleanup step records its failure under its own closed-vocabulary
+    // op before rethrowing, so a failed erase names the step. The first record
+    // of an error is the one kept, so the generic 'destroy' records below reuse it.
+    const step = async (op: StorageOp, run: () => unknown) => {
+      try {
+        await run();
+      } catch (error) {
+        recordStorageFailure(op, error);
+        throw error;
+      }
+    };
     const afterErase = async () => {
       if (Platform.OS === 'android') {
-        const { complimentaryDevice } = await import('@/lib/complimentary-device');
-        await complimentaryDevice.clear();
+        await step('destroy:complimentary', async () => {
+          const { complimentaryDevice } = await import('@/lib/complimentary-device');
+          await complimentaryDevice.clear();
+        });
       }
-      await erasePrivateAlertFormatKey();
-      await eraseSharingCredential();
-      await captureCleanup?.();
-      await cleanupGeneratedExports({ eraseAll: true });
+      await step('destroy:private-format-key', () => erasePrivateAlertFormatKey());
+      await step('destroy:sharing-credential', () => eraseSharingCredential());
+      await step('destroy:capture-queue', () => captureCleanup?.());
+      await step('destroy:exports', () => cleanupGeneratedExports({ eraseAll: true }));
       // Widgets hold a copy of a few figures; erasing the ledger erases those too.
       clearWidgetSnapshot();
     };
