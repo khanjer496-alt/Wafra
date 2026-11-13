@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 11f0ae0176b3f0e762f2b5d6ffa2547f94ce2f228be8cbf6dc9d1cdff8ab1953
+// Generated from normal shipping TypeScript. Source SHA-256: 70e90691824e752e5a8a87160cb3eabd2fe09de42ea503b162ade65caddf2548
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -10084,7 +10084,7 @@ function isHedgedPrincipal(source, spans) {
 }
 const REFUND_LEAD = /(?:\brefund(?:ed)?\s+(?:of|amount(?:\s+of)?|for)?|(?<![ء-ي])(?:(?:ال)?مبلغ\s+)?(?:ال)?استرداد(?:\s+(?:ال)?مبلغ)?(?:\s+بقيم[هة]|\s+بمبلغ)?)\s*[:\-]?\s*$/iu;
 const NOT_CURRENT_REFUND = /\b(?:if|when|unless|earlier|previous|prior|another|other|last)\b|(?<![ء-ي])(?:اذا|حال|سابق[هة]?|اخري)(?![ء-ي])/iu;
-const REFUND_PENDING = /\b(?:initiated|under\s+process(?:ing)?|in\s+process|in\s+progress|being\s+(?:processed|reversed)|will\s+(?:be|reflect|appear|show)|requested|pending|awaiting|submitted|approved|raised)\b|(?<![ء-ي])(?:قيد\s+(?:ال)?(?:معالج[هة]|تنفيذ|مراجع[هة]|انتظار)|سيتم|سوف|طلب|تمت\s+الموافق[هة])(?![ء-ي])/iu;
+const REFUND_PENDING = /\b(?:initiated|under\s+process(?:ing)?|in\s+process|in\s+progress|being\s+(?:processed|reversed)|will\s+(?:be|reflect|appear|show)|requested|pending|awaiting|awaited|submitted|approved|raised)\b|(?<![ء-ي])(?:قيد\s+(?:ال)?(?:معالج[هة]|تنفيذ|مراجع[هة]|انتظار)|سيتم|سوف|طلب|تمت\s+الموافق[هة])(?![ء-ي])/iu;
 const REFUND_CANCELLED = /\b(?:has\s+been|was|is|got)\s+(?:cancell?ed|declined|rejected|unsuccessful|voided|reversed)\b|\brefund\s+(?:has\s+)?failed\b|(?<![ء-ي])(?:تم\s+)?(?:الغاء|إلغاء|رفض)\s+(?:طلب\s+)?(?:ال)?استرداد|(?:ال)?استرداد\s+(?:ال)?(?:ملغي|ملغى|ملغا|ملغاه|مرفوض)(?![ء-ي])/iu;
 const REFUND_COMPLETED = /\b(?:credited|issued|processed\s+(?:to|into|on)|posted\s+(?:to|into|on)|received\s+(?:on|in|into)|deposited|returned\s+to|added\s+to)\b|(?<![ء-ي])(?:تم\s+(?:[إا]يداع|[إا]ضاف[هة]|استرداد|[إا]رجاع|[إا]عاد[هة])|اضيف|أضيف|اعيد|أعيد|اودع|أودع)(?![ء-ي])/giu;
 const UNSETTLED_PREDICATE = /\b(?:will|would|shall|not|never|hasn['’]t|wasn['’]t|isn['’]t)\b/iu;
@@ -10739,7 +10739,12 @@ const REFUND_SIDE_NOTE_FUTURE_RE = /\bwill\b/i;
 const REFUND_SIDE_NOTE_NOT_SETTLED_RE = /\b(?:is|are|was|were|has|have|had|did|does)\s+not\b|\b(?:isn|aren|wasn|weren|hasn|haven|hadn|didn|doesn)['’]t\b|\bnot\s+(?:yet\s+)?been\b|\b(?:is|are)\s+being\b|\bwill\b/i;
 const REFUND_SIDE_NOTE_COMPLETED_RE = /\b(?:has|have|had|was|were)\s+(?:been\s+)?(?:(?:successfully|fully|now)\s+)?(?:credited|refunded|reversed|returned|posted)\b/i;
 const REVERSAL_SIDE_NOTE_WORD_RE = /\breversal\b/i;
-const REVERSAL_SIDE_NOTE_IN_PROCESS_RE = /\b(?:is|are)\s+(?:(?:still|currently|now)\s+)?(?:under\s+(?:process(?:ing)?|review)|in\s+(?:process|progress)|being\s+(?:processed|reviewed)|pending|awaiting)\b|\b(?:has|have)\s+been\s+(?:initiated|submitted)\b/i;
+const EN_IN_PROCESS_STATUS = String.raw `(?:under[-\s]+(?:process(?:ing)?|review)|in[-\s]+(?:process|progress|queue)|being\s+(?:processed|reviewed|initiated)|pending|awaiting|awaited|on\s+hold)\b`;
+const EN_IN_PROCESS_LEAD = String.raw `(?:\b(?:is|are)\s+(?:(?:still|currently|now)\s+)?|\s*[:\-–]\s*(?:status\s*[:\-–]?\s*)?|\bstatus\s*(?:is\s+|[:\-–]\s*)|\s(?=(?:under|in)[-\s]+(?:process|progress)))`;
+const EN_IN_PROCESS_REQUESTED = String.raw `\b(?:has\s+been|have\s+been|was|were)\s+(?:initiated|submitted|requested|raised|lodged|registered|logged)\b|\binitiated\b(?!\s+by)`;
+const AR_IN_PROCESS_STATUS = `(?<![${AR_LETTER}])(?:(?:قيد|تحت)\\s+(?:ال)?(?:انتظار|معالجه|تنفيذ|اجراء|مراجعه|دراسه)|جار(?:ي)?\\s+(?:ال)?(?:معالجه|تنفيذ))(?![${AR_LETTER}])`;
+const REVERSAL_SIDE_NOTE_IN_PROCESS_RE = new RegExp(`${EN_IN_PROCESS_LEAD}${EN_IN_PROCESS_STATUS}|${EN_IN_PROCESS_REQUESTED}`, 'i');
+const REVERSAL_CREDIT_PHRASE_RE = /\breversal\s+(?:of|for)\b|\breversed\b/i;
 function refundSideNotes(body) {
     if (!REFUND_SIDE_NOTE_WORD_RE.test(body) && !REVERSAL_SIDE_NOTE_WORD_RE.test(body))
         return { body, ambiguous: false };
@@ -10770,7 +10775,7 @@ function refundSideNotes(body) {
         }
     }
     const separateDebitForReversal = sentences.some(({ text }) => !REFUND_SIDE_NOTE_WORD_RE.test(text) &&
-        !REVERSAL_SIDE_NOTE_WORD_RE.test(text) && REFUND_SIDE_NOTE_DEBIT_RE.test(text) && !REFUND_SIDE_NOTE_RETURNED_RE.test(text) &&
+        !REVERSAL_CREDIT_PHRASE_RE.test(text) && REFUND_SIDE_NOTE_DEBIT_RE.test(text) && !REFUND_SIDE_NOTE_RETURNED_RE.test(text) &&
         refundAmounts(text).length > 0);
     for (const { start: at, text } of separateDebitForReversal ? sentences : []) {
         const word = REVERSAL_SIDE_NOTE_WORD_RE.exec(text);
@@ -12630,16 +12635,24 @@ const NOTICE_INCOMING_STATED_RE = new RegExp(String.raw `\byou\s+(?:have\s+|['�
 const NOTICE_RETURNED_TO_USER_RE = /\brefund|\bcredited\s+back\b|\bre-?credited\b|\breturned\s+to\s+your\b|\breversed\s+(?:to|into)\s+your\b|\breversal\s+of\b/i;
 const NOTICE_PREFIX_CONNECTOR_RE = /^(\W{0,4}[^\s:\n][^:\n]{0,30}?)[ \t]+[–—|-][ \t]+/;
 const NOTICE_REVERSAL_REQUEST_RE = /\b(?:reversal|refund|dispute|chargeback)\s+request\b(?:[^.\n]|\.(?=\d)){0,80}?\b(?:has\s+been\s+|was\s+|is\s+)?(?:received|registered|logged|submitted|raised)\b/i;
-const NOTICE_REFUND_IN_PROCESS_RE = new RegExp(String.raw `\b(?:refund|reversal)s?\b(?:[^.\n]|\.(?=\d)){0,80}?\b(?:is|are)\s+(?:(?:still|currently|now)\s+)?` +
-    String.raw `(?:under\s+(?:process(?:ing)?|review)|in\s+(?:process|progress)|being\s+(?:processed|reviewed)|pending|awaiting)\b` +
-    String.raw `|\b(?:refund|reversal)s?\b(?:[^.\n]|\.(?=\d)){0,80}?\b(?:has\s+been|have\s+been|was|were)\s+(?:initiated|submitted)\b` +
-    `|(?<![${AR_LETTER}])(?:عكس|استرداد|استرجاع|ارجاع|اعاده)(?![${AR_LETTER}])(?:[^.\\n؟!]|\\.(?=\\d)){0,80}?(?<![${AR_LETTER}])` +
-    `(?:قيد\\s+(?:ال)?(?:انتظار|معالجه|تنفيذ|اجراء|مراجعه)|تحت\\s+(?:ال)?(?:اجراء|معالجه|مراجعه|تنفيذ))(?![${AR_LETTER}])`, 'i');
+const NOTICE_REFUND_IN_PROCESS_RE = new RegExp(String.raw `\b(?:refund|reversal)s?\b(?:[^.\n;]|\.(?=\d)){0,80}?(?:${EN_IN_PROCESS_LEAD}${EN_IN_PROCESS_STATUS}|${EN_IN_PROCESS_REQUESTED})` +
+    `|(?<![${AR_LETTER}])(?:عكس|استرداد|استرجاع|ارجاع|اعاده)(?![${AR_LETTER}])(?:[^.\\n؟!،؛;]|\\.(?=\\d)){0,80}?${AR_IN_PROCESS_STATUS}`, 'i');
+const NOTICE_REFUND_NOUN_RE = new RegExp(`\\b(?:refund|reversal)s?\\b|(?<![${AR_LETTER}])(?:عكس|استرداد|استرجاع|ارجاع|اعاده)(?![${AR_LETTER}])`, 'i');
+const NOTICE_REFUND_COMPLETED_RE = new RegExp(String.raw `\b(?:has|have|had)\s+(?:(?:now|already|just)\s+)?been\s+(?:(?:successfully|fully|now)\s+)?(?:credited|refunded|reversed|returned|deposited)\b` +
+    String.raw `|\b(?:was|were)\s+(?:(?:successfully|fully|now)\s+)?(?:credited|refunded|reversed|returned|deposited)\b` +
+    String.raw `|\band\s+(?:has\s+been\s+|was\s+)?(?:credited|refunded|reversed|returned|deposited)\s+(?:back\s+)?(?:to|into)\b` +
+    `|(?<![${AR_LETTER}])تم\\s+(?:عكس|استرداد|استرجاع|ارجاع|ايداع|اضافه|اعاده)(?![${AR_LETTER}])`, 'i');
+function refundInProcessClause(core, lead) {
+    const stop = core.slice(lead.length).search(/[;؛،]/);
+    const head = stop < 0 ? core : core.slice(0, lead.length + stop);
+    return NOTICE_REFUND_NOUN_RE.test(lead) && NOTICE_REFUND_IN_PROCESS_RE.test(head) && !NOTICE_REFUND_COMPLETED_RE.test(head);
+}
 function withoutInProcessRefundSentences(body) {
-    let out = body;
+    let out = body.replace(/\breversal\s+(?:fees?|charges?)\b/gi, (fee) => ' '.repeat(fee.length));
     let start = 0;
-    for (const end of [...[...body.matchAll(REFUND_SENTENCE_BREAK_RE)].map((match) => match.index + match[0].length), body.length]) {
-        if (end > start && NOTICE_REFUND_IN_PROCESS_RE.test(body.slice(start, end))) {
+    for (const end of [...[...body.matchAll(/[.!?](?=\s|$)|[;؛،]|\n/g)].map((match) => match.index + match[0].length), body.length]) {
+        const text = body.slice(start, end);
+        if (end > start && NOTICE_REFUND_IN_PROCESS_RE.test(text) && !NOTICE_REFUND_COMPLETED_RE.test(text)) {
             out = out.slice(0, start) + ' '.repeat(end - start) + out.slice(end);
         }
         start = Math.max(start, end);
@@ -12737,7 +12750,7 @@ function moneyNoticeKindInBody(text) {
     if (NOTICE_P2P_IN_RE.test(clause) &&
         NOTICE_UNCLAIMED_RE.test(principal.before.slice(-160) + ' ' + clause + ' ' + principal.after.slice(0, 160)))
         return 'unclaimed';
-    if (NOTICE_NOT_YET_RE.test(core) || NOTICE_REFUND_IN_PROCESS_RE.test(core) || NOTICE_UNDER_PROCESS_RE.test(body) ||
+    if (NOTICE_NOT_YET_RE.test(core) || refundInProcessClause(core, lead) || NOTICE_UNDER_PROCESS_RE.test(body) ||
         NOTICE_STATUS_PENDING_RE.test(body))
         return 'not-yet';
     if (NOTICE_RENEWAL_RE.test(core) && !NOTICE_DONE_VERB_RE.test(clause))
