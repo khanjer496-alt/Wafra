@@ -1,0 +1,11 @@
+appId: ${APP_ID}
+---
+# StoreKit shows a system "Sign in to Apple Account" alert (the simulator has no store account). Over the lock screen it
+# hides the lock text from the OCR check; Cancel it (never OK) and let the lock screen show.
+- runFlow:
+    when:
+      visible: 'Sign in to Apple.Account'
+    commands:
+      - tapOn: 'Cancel'
+      - waitForAnimationToEnd:
+          timeout: 3000

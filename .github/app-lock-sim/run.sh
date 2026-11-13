@@ -54,6 +54,16 @@ is_locked() { # $1 = tag; true when the screenshot shows the lock screen's own t
   local img="${RUNNER_TEMP:-/tmp}/lockcheck-$1.png" t
   xcrun simctl io "$UDID" screenshot "$img" >/dev/null 2>&1
   t=$("$OCRBIN" "$img" 2>/dev/null | tr '\n' ' ')
+  # A system "Sign in to Apple Account" alert (StoreKit, no store account on the simulator) with its keyboard can hide
+  # the lock text: cancel it and look again. Keep the first OCR text as evidence.
+  if printf '%s' "$t" | grep -qi "Sign in to Apple Account"; then
+    printf '%s\n' "$t" > "$OUT/ocr-lockcheck-$1-with-signin-alert.txt"
+    cp "$img" "$OUT/lockcheck-$1-with-signin-alert.png" 2>/dev/null || true
+    mro dismiss-signin "dismiss-$1" || true
+    sleep 2
+    xcrun simctl io "$UDID" screenshot "$img" >/dev/null 2>&1
+    t=$("$OCRBIN" "$img" 2>/dev/null | tr '\n' ' ')
+  fi
   printf '%s\n' "$t" > "$OUT/ocr-lockcheck-$1.txt"
   printf '%s' "$t" | grep -qiE "unlock with face id|passcode works too|balances stay hidden|wafra is locked|you unlock|your balan"
 }

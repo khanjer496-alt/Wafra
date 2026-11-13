@@ -10,7 +10,8 @@ appId: ${APP_ID}
     visible: 'Settings'
     timeout: 30000
 # A transaction needs an account ("Choose the account this alert belongs to"): create one in Wallet first.
-- tapOn: '^Accounts$'
+- tapOn:
+    point: '82%,94%'
 - extendedWaitUntil:
     visible:
       id: 'wallet-screen'
@@ -30,7 +31,8 @@ appId: ${APP_ID}
 - waitForAnimationToEnd:
     timeout: 4000
 - takeScreenshot: account-added
-- tapOn: '^Home$'
+- tapOn:
+    point: '16%,94%'
 - extendedWaitUntil:
     visible: 'Settings'
     timeout: 30000

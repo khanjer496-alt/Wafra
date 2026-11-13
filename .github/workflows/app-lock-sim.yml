@@ -3,13 +3,13 @@
 name: app-lock-sim
 on:
   push:
-    branches: [test/purchase-proof-pr251]
+    branches: [test/applock-pr251]
 
 permissions:
   contents: read
 
 concurrency:
-  group: app-lock-sim
+  group: app-lock-sim-applock-pr251
   cancel-in-progress: true
 
 jobs:
