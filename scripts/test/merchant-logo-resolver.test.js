@@ -38,11 +38,13 @@ const response = rows => ({ ok: true, json: async () => rows });
 
 (async () => {
   let calls = [];
+  const inits = [];
   const data = new Map();
   const m = load({
     data,
-    fetchImpl: async url => {
+    fetchImpl: async (url, init) => {
       calls.push(url);
+      inits.push(init);
       if (url.includes('Aseer%20Time')) return response([
         { name: 'Aseer Time', domain: 'aseertime.com', claimed: false, brandId: 'aseer' },
         { name: 'Discover Aseer', domain: 'discoveraseer.com', claimed: false, brandId: 'other' },
@@ -102,6 +104,8 @@ const response = rows => ({ ok: true, json: async () => rows });
   assert.match(calls[0], /\/v2\/search\/Aseer%20Time\?c=1idPBg9EKr252UlBUPZ$/,
     'only the cleaned merchant name reaches Brand Search');
   assert.doesNotMatch(calls[0], /55|1234|Dubai/i, 'amount, account tail and location are removed before lookup');
+  assert.ok(inits.length > 0 && inits.every(init => init?.credentials === 'omit'),
+    'Brandfetch search sends no cookies, so no cookie can become a per-device identifier');
 
   const payout = await m.resolveRemoteMerchantLogo('Talabat sales');
   assert.equal(payout?.domain, 'talabat.com', 'claimed brand may match a harmless transaction descriptor suffix');
