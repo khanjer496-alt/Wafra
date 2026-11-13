@@ -438,5 +438,9 @@ test('#242 review: genuine credits keep their income; windows and conditions bou
     'AED 250.00 has been credited to your card if approved by the merchant.',
     'تم استرداد مبلغ 250.00 درهم إلى بطاقتك وسيتم إيداعه خلال 7 أيام عمل.',
     'عزيزي العميل، أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
+    // Guards for the fix itself: an answered "إن" after a verb of informing, and another clause that still speaks of the money.
+    'نود إعلامك، إن تم استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
+    'AED 250.00 has been credited to your card ending 1234; your dispute will be resolved once verified.',
+    'AED 250.00 HAS BEEN REFUNDED TO YOUR CARD ENDING 1234 BY WILL TRADING LLC, YOU WILL GET AN SMS IF APPROVED.',
   ]) assert.equal(both(body), 'none / none', body);
 });

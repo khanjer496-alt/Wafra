@@ -2600,14 +2600,35 @@ const EN_LOWERCASE_MODAL_RE = /\b(?:will|can|may|shall|should|would|could|must)\
 // a date or a name ("12 MAY 2026", "MAY STORES").
 const isAllCapsSentence = (sentence: string): boolean => /[A-Z]/.test(sentence) && !/[a-z]/.test(sentence);
 const EN_CAPS_LEADER_RE = /(?:^\s*|[,;:]\s*)(?:IF|ONCE|WHEN(?:EVER)?|AFTER|UNTIL|UNLESS|WHETHER|AS\s+SOON\s+AS)(?![A-Za-z])/g;
+// After BY/FROM/AT a caps "WILL"/"CAN" is a name ("BY WILL TRADING LLC", "FROM CAN TRAVEL LLC") (Change Reviewer 0c8c32fa).
 const EN_CAPS_MODAL_RE =
-  /\b(?:WILL|CAN|SHALL|SHOULD|WOULD|COULD|MUST)\b|['’]LL\b|\bMAY\s+(?:NOT\s+|ALSO\s+)?(?:BE|HAVE|TAKE|REFLECT|APPEAR|SHOW|RECEIVE|CHECK|CONTACT|CALL|VIEW|USE|NEED|GET|SEE)\b/;
+  /(?<!\b(?:BY|FROM|AT)\s+)\b(?:WILL|CAN|SHALL|SHOULD|WOULD|COULD|MUST)\b|['’]LL\b|\bMAY\s+(?:NOT\s+|ALSO\s+)?(?:BE|HAVE|TAKE|REFLECT|APPEAR|SHOW|RECEIVE|CHECK|CONTACT|CALL|VIEW|USE|NEED|GET|SEE)\b/;
 // A trailing condition on the credit ("… if approved", "… upon verification"), and for a refund a time window ("… within 7
 // working days"), in the credit's own sentence: the money is not settled yet (Change Reviewer 1ae30382). A time window on a
-// salary or a deposit ("available within 2 hours") is not a pending refund.
+// salary or a deposit ("available within 2 hours") is not a pending refund. "If the transaction has been authorised by you,
+// please ignore …" is a reassurance footer, not a condition (Reviewer b895dc2e).
 const EN_TRAILING_CONDITION_RE =
-  /\b(?:if|once|when|provided(?:\s+that)?)\s+(?:(?:it|this|they|the\s+\w+)\s+(?:is|are|has\s+been|gets?)\s+)?(?:approved|authori[sz]ed|verified|confirmed|cleared|accepted|validated)\b|\b(?:upon|subject\s+to)\s+(?:(?:the|your|merchant|bank)\s+)?(?:approval|verification|confirmation|clearance|validation)\b/i;
+  /\b(?:if|once|when|provided(?:\s+that)?)\s+(?:(?:it|this|they|the\s+\w+)\s+(?:is|are|has\s+been|gets?)\s+)?(?:approved|authori[sz]ed|verified|confirmed|cleared|accepted|validated)\b(?!\s+by\s+you\b)|\b(?:upon|subject\s+to)\s+(?:(?:the|your|merchant|bank)\s+)?(?:approval|verification|confirmation|clearance|validation)\b/i;
 const EN_TIME_WINDOW_RE = /\bwithin\s+(?:the\s+next\s+)?\d+(?:\s*[-–]\s*\d+)?\s+(?:working\s+|business\s+|banking\s+)?(?:days?|hours?|weeks?)\b/i;
+// A window that a later display verb takes ("… has been credited … and will reflect within 5 working days") says when the
+// completed credit shows, as C12 and the same text as two sentences do; a window bound to the credit itself ("refunded to your
+// card within 7 working days", "will be credited within 7 working days") still leaves it pending (both reviewers on #242).
+const EN_DISPLAY_VERB_RE = /\b(?:will|should|may|can|might|could|would)\s+(?:only\s+|also\s+)?(?:reflect|appear|show|be\s+(?:visible|available|reflected|shown|displayed))\b/i;
+// Only a refund makes a window a pending refund: a refund verb, or the word itself, not a name or "returns" ("RETURN LOGISTICS
+// LLC", "Investment returns", "REVERSE MORTGAGE CO") (Change Reviewer 0c8c32fa).
+const EN_REFUND_WORD_RE = /\b(?:refund\w*|charge\s*back\w*)\b/i;
+// A later clause with its own subject that does not speak of the money ("; your replacement card will be dispatched once
+// approved") carries its own condition, not the credit's (Change Reviewer 0c8c32fa). "; your account will be credited once
+// approved" or ", the refund will be confirmed once …" still speaks of the money, so it stays in the credit's tail.
+const EN_OTHER_SUBJECT_CLAUSE_RE = /(?:[;,]|\band\b)\s*(?:and\s+)?(?:your|the)\s+(?:[a-z]+\s+){0,2}?(?:will|shall|would|can|may|is|are|has)\b/gi;
+const EN_MONEY_WORD_RE =
+  /\b(?:credit\w*|refund\w*|deposit\w*|revers\w*|return\w*|process\w*|charge\s*back\w*|amount|funds?|money|balance|payment|transaction|dispute|claim|request|case|complaint)\b/i;
+function creditOwnTail(tail: string): string {
+  for (const clause of tail.matchAll(EN_OTHER_SUBJECT_CLAUSE_RE)) {
+    if (!EN_MONEY_WORD_RE.test(tail.slice(clause.index!))) return tail.slice(0, clause.index);
+  }
+  return tail;
+}
 function leaderGovernsCredit(sentence: string, leader: RegExpMatchArray, clause: CreditClause): boolean {
   const word = leader[0].replace(/^[^\p{L}]+/u, '');
   const leaderEnd = leader.index! + leader[0].length;
@@ -2686,6 +2707,13 @@ const AR_BALANCE_LINE_RE = new RegExp(`${AR_NB}(?:ال)?(?:رصيد|حد)\\s+(?:
 const AR_TRAILING_CONDITION_RE = new RegExp(`${AR_NB}(?:في\\s+حال|حال|عند|بشرط|شرط)\\s+(?:ال)?(?:موافقه|اعتماد|تحقق|تاكيد|قبول)${AR_NA}`);
 /** "خلال 7 أيام عمل" after a refund: within a time window, so not yet there. */
 const AR_TIME_WINDOW_RE = new RegExp(`${AR_NB}خلال\\s+\\d+(?:\\s*[-–]\\s*\\d+)?\\s+(?:ايام|يوم|ساعه|ساعات|اسابيع|اسبوع)${AR_NA}`);
+/** "… وسيظهر في كشف حسابك خلال 5 أيام عمل": a later display verb takes the window, as in English (Change Reviewer 0c8c32fa). */
+const AR_DISPLAY_VERB_RE = new RegExp(`${AR_NB}و?(?:سيظهر|ستظهر|سينعكس|ستنعكس|يظهر|تظهر|سوف\\s+(?:يظهر|تظهر|ينعكس|تنعكس))${AR_NA}`);
+/**
+ * "نود إعلامك، أن تم …", "يسرنا إبلاغك: أن تم …": after a verb of informing, ان is "that", not "if" (both reviewers on #242),
+ * unless a main clause answers it ("نود إعلامك، إن تم استرداد … ستصلك رسالة" is still a condition).
+ */
+const AR_INFORM_BEFORE_RE = new RegExp(`${AR_NB}(?:اعلام|ابلاغ|اخبار|افاده|نفيد|نحيط|نعلم|نخبر|نوكد|علما)[${AR_LETTER}]*\\s*[,:]?\\s*$`);
 /** "سيظهر المبلغ في حسابك خلال 5-7 أيام عمل": the processed money is not there yet. */
 const AR_PROCESSED_NOT_YET_RE = new RegExp(
   `${AR_NB}(?:سيظهر|ستظهر|سينعكس|ستنعكس|سيضاف|ستضاف|سيتم\\s+(?:ايداع|اضافه|اظهار))${AR_NA}|${AR_NB}قد\\s+يستغرق[^.\\n]{0,40}?(?:يوم|ايام)${AR_NA}`);
@@ -2739,7 +2767,9 @@ function arCreditClauses(sentence: string, debitBeside = false): CreditClause[] 
 function arCreditSettlement(sentence: string, clause: CreditClause, rawAfter: string): CreditSettlement {
   const after = foldOrthography(rawAfter);
   const lead = sentence.slice(0, clause.start);
-  const leaders = [...lead.matchAll(AR_CONDITIONAL_RE)];
+  const answered = AR_FUTURE_MAIN_CLAUSE_RE.test(sentence.slice(clause.end));
+  const leaders = [...lead.matchAll(AR_CONDITIONAL_RE)]
+    .filter((leader) => answered || !/^و?ان$/.test(leader[0]) || !AR_INFORM_BEFORE_RE.test(lead.slice(0, leader.index)));
   const last = leaders[leaders.length - 1];
   const betweenLeaderAndCredit = last ? lead.slice(last.index! + last[0].length) : '';
   if (last && !betweenLeaderAndCredit.includes(',') &&
@@ -2760,7 +2790,9 @@ function arCreditSettlement(sentence: string, clause: CreditClause, rawAfter: st
   // As in English (Change Reviewer 1ae30382): "في حال الموافقة" (if approved) leaves the credit conditional, and for a refund
   // "خلال 7 أيام عمل" (within 7 working days) leaves it pending.
   if (AR_TRAILING_CONDITION_RE.test(tail)) return { verdict: 'not-settled', reason: 'conditional' };
-  if (AR_TIME_WINDOW_RE.test(tail) && clause.verbs.some((verb) => verb === 'refunded' || verb === 'returned' || verb === 'reversed')) {
+  const windowMatch = AR_TIME_WINDOW_RE.exec(tail);
+  if (windowMatch && !AR_DISPLAY_VERB_RE.test(tail.slice(0, windowMatch.index)) &&
+    clause.verbs.some((verb) => verb === 'refunded' || verb === 'returned' || verb === 'reversed')) {
     return { verdict: 'not-settled', reason: 'pending' };
   }
   if (clause.verbs.every((verb) => verb === 'processed')) {
@@ -2792,9 +2824,11 @@ export function creditSettlement(sentence: string, clause: CreditClause, after =
   const destination = EN_CREDIT_WORDS.destination.exec(tail);
   if (destination && REFUND_THIRD_PARTY_DESTINATION_RE.test(` ${destination[0]}`)) return { verdict: 'refused', reason: 'third-party' };
   if (refundCreditNotFinal((tail + after).replace(EN_CREDIT_REASON_RE, ' '))) return { verdict: 'refused', reason: 'taken-back' };
-  if (EN_TRAILING_CONDITION_RE.test(tail)) return { verdict: 'not-settled', reason: 'conditional' };
-  if (EN_TIME_WINDOW_RE.test(tail) &&
-    (clause.verbs.some((verb) => /^(?:refund|revers|return)/.test(verb)) || EN_PROCESSED_REFUND_CONTEXT_RE.test(sentence))) {
+  const ownTail = creditOwnTail(tail);
+  if (EN_TRAILING_CONDITION_RE.test(ownTail)) return { verdict: 'not-settled', reason: 'conditional' };
+  const windowMatch = EN_TIME_WINDOW_RE.exec(ownTail);
+  if (windowMatch && !EN_DISPLAY_VERB_RE.test(ownTail.slice(0, windowMatch.index)) &&
+    (clause.verbs.some((verb) => /^(?:refund|revers|return)/i.test(verb)) || EN_REFUND_WORD_RE.test(sentence))) {
     return { verdict: 'not-settled', reason: 'pending' };
   }
   if (clause.verbs.every((verb) => verb.startsWith('process'))) {
