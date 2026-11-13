@@ -152,7 +152,6 @@ module.exports = async ({ execute, ok, eq, translated }) => {
       '@/components/workflows/workflow-surfaces': { WorkflowHero: 'WorkflowHero' },
       '@/hooks/use-theme': { useTheme: () => ({}) },
       '@/hooks/use-language': { useLanguage: () => 'en' },
-      '@/components/ios-message-setup/setup-journey': { IosSetupJourney: 'IosSetupJourney' },
       '@/lib/ios-setup-journey': execute('src/lib/ios-setup-journey.ts'),
       '@/lib/ios-shortcut-setup-copy': execute('src/lib/ios-shortcut-setup-copy.ts'),
       '@/lib/i18n': execute('src/lib/i18n.ts'),

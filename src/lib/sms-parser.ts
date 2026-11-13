@@ -656,8 +656,19 @@ export interface ParsedCard {
  * only messages with no outcome yet, matches stored rows by source identity,
  * and never removes a row that is not a proven decline, so it cannot duplicate
  * or delete existing rows. PARSER_BACKFILL_VERSION stays 50.
+ *
+ * 73: one shared "credit is settled to the user's own account" predicate,
+ * English table (CEO 080fa431; its own bump because 72 shipped first, CEO
+ * 40f47cb9). A refund or credit that is conditional, negated, pending, sent to
+ * a third party or taken back never posts as income; a "processed" refund posts
+ * only when it names the instrument by number or a balance line follows, and not
+ * when the bank says it is not there yet (oracle v2.2). Beside a separate debit
+ * such a note leaves the debit an expense, and a refund figure of its own goes
+ * to Review. Non-refund "processed" alerts are untouched. Future capture and the
+ * bounded recent re-read only: the re-read cannot remove an income row 72
+ * already booked. PARSER_BACKFILL_VERSION stays 50.
  */
-export const PARSER_VERSION = 72;
+export const PARSER_VERSION = 73;
 /**
  * Historical-repair contract for already-saved data.
  *
@@ -2467,6 +2478,255 @@ function refundSideNotes(body: string): { body: string; ambiguous: boolean } {
 export function refundSideNoteVerdict(source: string): 'none' | 'side-note' | 'ambiguous' {
   const notes = refundSideNotes(source);
   return notes.ambiguous ? 'ambiguous' : notes.body !== source ? 'side-note' : 'none';
+}
+
+// ── One "credit is settled to the user's own account" predicate (CEO 080fa431 item 3; design v2, Change Reviewer
+// 82667841 / 8f1dcaee). It finds the credit clause of each sentence and says whether that credit happened, to the
+// reader, for good. It is a VETO only: a credit clause it does not find changes nothing, and income from other evidence
+// (received, transfer in, salary, Cr, a credit heading) keeps its own path. PR 1: the English table.
+export type CreditSettlement =
+  | { verdict: 'settled' }
+  | { verdict: 'not-settled'; reason: 'conditional' | 'negated' | 'pending' }
+  | { verdict: 'refused'; reason: 'third-party' | 'taken-back' }
+  | { verdict: 'unknown'; reason: 'processed-only' };
+/** English credit verbs: participle, base and -ing forms. A base form is a verb only after a modal ("will refund"). */
+const EN_CREDIT_WORDS = {
+  verb: /\b(?:credit(?:ed|ing)?|refund(?:ed|ing)?|revers(?:ed|e|ing)|return(?:ed|ing)?|deposit(?:ed|ing)?|process(?:ed|ing)?)\b/gi,
+  baseNeedsModal: /^(?:credit|refund|reverse|return|deposit|process)$/i,
+  modalBefore: /\b(?:will|shall|would|can|could|to|did\s+not|does\s+not|do\s+not|didn['’]t|doesn['’]t|don['’]t|won['’]t)\s+(?:(?:not|soon|shortly)\s+)?$/i,
+  // "a returned cheque", "the refunded amount", "(reversed charges apply)": an adjective, not a movement.
+  determinerBefore: /(?:\b(?:the|a|an|your|my|our|their|his|her|its|this|that|any|no|non)[\s-]+|\(\s*)$/i,
+  nounAfter: /^\s+(?:cheques?|checks?|charges?|fees?|items?|goods|orders?|payments?|transactions?|amounts?|mails?|cards?|limits?|balances?)\b/i,
+  // "processed and credited": one clause, so the second verb is judged with the first one's auxiliaries.
+  coordinated: /\b(?:credit|refund|revers|return|deposit|process)\w*\s+and\s+$/i,
+  // Lowercase leaders anywhere, capitalised ones only (not "AFTER EIGHT" or "ONCE UPON" in a merchant name).
+  conditional: /(?:^|[^\p{L}])(?:[Ii]f|[Oo]nce|[Ww]hen(?:ever)?|[Aa]fter|[Uu]ntil|[Uu]nless|[Ww]hether|[Aa]s\s+soon\s+as)(?![\p{L}])/gu,
+  negatedBefore: /(?:\b(?:has|have|had|was|were|is|are|did|does|do|will|would|could|can|shall)\s+(?:not|never)|\b(?:hasn|haven|hadn|wasn|weren|isn|aren|didn|doesn|don|won|wouldn|couldn|can)['’]t|\byet\s+to\s+be|\bnot\s+(?:yet\s+)?been|\bnever\s+been)\s+(?:(?:yet|been|be|successfully|fully|now)\s+){0,3}$/i,
+  pendingBefore: /\b(?:will|shall|would|is\s+going\s+to|are\s+going\s+to)\s+(?:(?:be|soon|shortly|now|then)\s+){0,2}$|\b(?:is|are|am)\s+(?:currently\s+|now\s+)?being\s+$/i,
+  progressiveBefore: /\b(?:is|are|am|be)\s+(?:(?:currently|now)\s+)?$/i,
+  destination: /\b(?:back\s+)?(?:to|into|onto)\s+[^.,;\n]{0,60}/i,
+  // Cashback, rewards and points are not refund credits; their own rules already judge them.
+  notARefundCredit: /\b(?:cash\s*back|rewards?|points|miles|bonus)\b/i,
+};
+type CreditClause = { verbs: string[]; start: number; end: number };
+const EN_PROCESSED_REFUND_CONTEXT_RE = /\b(?:refund\w*|revers\w*|return\w*|charge\s*back\w*)\b/i;
+const EN_PROCESSED_DESTINATION_RE = /^\s+(?:(?:and\s+\w+\s+)?(?:back\s+)?(?:to|into|onto)\b)/i;
+// An instrument named by number (Change Reviewer 4eee941b): card or account, then optionally ending/no./number, then a masked
+// block followed by 4+ digits, or 4+ digits. A date ("on 12/11/2026") or an amount does not count.
+const EN_INSTRUMENT_NUMBER_RE =
+  /\b(?:card|account|a\/c|acct)\.?\s*(?:(?:ending(?:\s+(?:in|with))?|no\.?|number|#)\s*:?\s*)?(?:[xX*•·]+\s*\d{4,}|\d{4,})\b/i;
+const EN_BALANCE_LINE_RE = /\b(?:avl\.?|avail(?:able|\.)?)\s+(?:cr\.?\s+|credit\s+)?(?:bal(?:ance)?|limit)\b|\bbalance\s+(?:is|:)/i;
+const EN_PROCESSED_NOT_YET_RE =
+  /\b(?:will|shall|should)\s+(?:be\s+)?(?:reflect(?:ed)?|appear(?:ed)?|show(?:n)?|credited|available|visible|posted)\b|\bmay\s+take\s+(?:up\s+to\s+)?\d+(?:\s*[-–]\s*\d+)?\s+(?:working\s+|business\s+)?days?\b|\btakes?\s+(?:up\s+to\s+)?\d+(?:\s*[-–]\s*\d+)?\s+(?:working\s+|business\s+)?days?\s+to\s+(?:reflect|appear|show)\b/i;
+const EN_MAY_TAKE_DAYS_RE = /\bmay\s+take\b/i;
+// "… has not been credited and the refund has now been credited …": a new subject after and/but starts a new clause.
+// "… and was later reversed" (no subject) or "… and the refund was reversed" (a take-back) stays the first clause's tail.
+const EN_NEW_CLAUSE_RE = /(?:\b(?:and|but|while|whereas)\s+(?:the|this|that|your|a|an|it|its|our)\b|;)/i;
+// "… is being reversed and was credited to your card": a completed credit-in verb with its own auxiliary is a new clause too;
+// a following "reversed" never is ("… and was later reversed" takes the credit back).
+const EN_NEW_COMPLETED_CREDIT_RE = /\b(?:and|but)\s+(?:(?:was|were|has\s+been|have\s+been|had\s+been)\s+(?:(?:now|then|also|successfully)\s+)?)$/i;
+const EN_CREDIT_IN_RE = /^(?:credited|refunded|deposited|returned)$/i;
+// "re-credited to card 1234 for reversed purchase": the reason names the debit that was undone, not this credit. Only that
+// phrase is skipped by the take-back check; "… and reversed", "This credit was reversed" and "in error" still count.
+const EN_CREDIT_REASON_RE =
+  /\bfor\s+(?:(?:the|your|a|an)\s+)?(?:reversed|cancell?ed)\s+(?:purchases?|transactions?|payments?|charges?|orders?|debits?)\b/gi;
+/**
+ * The credit clauses of one sentence: each starts at a credit verb, with any "… and credited" coordinated after it.
+ * `debitBeside`: the body also has a sentence that debits an amount.
+ */
+function enCreditClauses(sentence: string, debitBeside = false): CreditClause[] {
+  if (EN_CREDIT_WORDS.notARefundCredit.test(sentence)) return [];
+  const words = EN_CREDIT_WORDS.verb;
+  words.lastIndex = 0;
+  const clauses: CreditClause[] = [];
+  for (let match = words.exec(sentence); match; match = words.exec(sentence)) {
+    const at = match.index;
+    const lead = sentence.slice(0, at);
+    const word = match[0];
+    const clause = clauses[clauses.length - 1];
+    if (EN_CREDIT_WORDS.baseNeedsModal.test(word) && !EN_CREDIT_WORDS.modalBefore.test(lead) &&
+      !(clause && EN_CREDIT_WORDS.coordinated.test(lead))) continue;
+    if (/ing$/i.test(word) && !EN_CREDIT_WORDS.progressiveBefore.test(lead) && !EN_CREDIT_WORDS.pendingBefore.test(lead) &&
+      !(clause && EN_CREDIT_WORDS.coordinated.test(lead))) continue;
+    if (EN_CREDIT_WORDS.determinerBefore.test(lead) || EN_CREDIT_WORDS.nounAfter.test(sentence.slice(at + word.length))) continue;
+    // "Your payment … has been processed", "A credit transaction … has been processed on your account": not a refund credit.
+    // Without refund wording, a "processed to your card/account" destination counts only beside a separate debit (D7, "It
+    // has been processed to your card."); alone it is ordinary income, a salary or a deposit (Change Reviewer 2aa1f668).
+    if (/^process/i.test(word) && !(clause && EN_CREDIT_WORDS.coordinated.test(lead)) &&
+      !EN_PROCESSED_REFUND_CONTEXT_RE.test(sentence) &&
+      !(debitBeside && EN_PROCESSED_DESTINATION_RE.test(sentence.slice(at + word.length)))) continue;
+    if (clause) {
+      if (EN_CREDIT_WORDS.coordinated.test(lead) && at - clause.end <= 6) {
+        clause.verbs.push(word.toLowerCase());
+        clause.end = at + word.length;
+        continue;
+      }
+      const between = sentence.slice(clause.end, at);
+      const completedCredit = EN_CREDIT_IN_RE.test(word) && EN_NEW_COMPLETED_CREDIT_RE.test(between);
+      const joint = EN_NEW_CLAUSE_RE.exec(between);
+      if (!completedCredit && (!joint || REFUND_CREDIT_TAKEN_BACK_RE.test(sentence.slice(clause.end + joint.index)))) break;
+    }
+    clauses.push({ verbs: [word.toLowerCase()], start: at, end: at + word.length });
+  }
+  return clauses;
+}
+// Once/When/Whenever/After/As soon as govern the credit (a condition), except in one narrow, positive shape that says WHEN a
+// completed refund happened: the leader, then an event noun ("After cancellation", "After your return") or that event in the
+// past ("Once your order was cancelled"), then the refund's amount as the passive subject right before the completed credit
+// verb ("AED 250.00 has been refunded", telegraphic "AED 250.00 refunded"), and no lowercase modal after the credit. "once
+// again/more" is not a leader. Every other temporal lead governs: an amount right after the leader, an agent ("When the
+// merchant / we / noon has refunded AED …"), any other verb ("When the merchant confirms AED …"). A list of governing shapes
+// cannot be complete, so the exception is the list (Reviewer 956cb08a, 07a65c13, c204ca32; Change Reviewer a41046bc,
+// 742367fa). Modals match in lowercase only: "on 12 May 2026" and "MAY STORES" are not "may". If/Unless/Until/Whether are
+// unchanged.
+const EN_TEMPORAL_LEADER_RE = /^(?:once|when(?:ever)?|after|as\s+soon\s+as)$/i;
+const EN_EVENT_NOUN_PHRASE_RE = /^\s+(?:(?:your|the|this|our)\s+)?(?:(?:order|purchase|item|transaction|booking)\s+)?(?:cancell?ation|return|refund\s+request|verification|review|investigation|dispute(?:\s+resolution)?|chargeback|reversal)\s*,?\s*$/i;
+const EN_PAST_EVENT_CLAUSE_RE = /^\s+(?:your|the|this)\s+(?:order|purchase|item|transaction|booking|dispute|request|claim|return)\s+(?:was|were|has\s+been|had\s+been)\s+(?:cancell?ed|returned|resolved|approved|reviewed|reversed|completed|received|processed)\s*,?\s*$/i;
+const EN_PASSIVE_AMOUNT_RE = /(?:\b[A-Z]{3}|\bDhs?\.?)\s*\d[\d,]*(?:\.\d+)?|\d[\d,]*(?:\.\d+)?\s*(?:[A-Z]{3}|Dhs?)\b/;
+const EN_COMPLETED_AUXILIARY_RE = /^\s*(?:(?:has|have|had)\s+(?:now\s+)?been|was|were)\s+(?:successfully\s+)?$/i;
+const EN_LOWERCASE_MODAL_RE = /\b(?:will|can|may|shall|should|would|could|must)\b|['’]ll\b/;
+function leaderGovernsCredit(sentence: string, leader: RegExpMatchArray, clause: CreditClause): boolean {
+  const word = leader[0].replace(/^[^\p{L}]+/u, '');
+  const leaderEnd = leader.index! + leader[0].length;
+  if (!EN_TEMPORAL_LEADER_RE.test(word)) return true;
+  if (/^once$/i.test(word) && /^\s+(?:again|more)\b/i.test(sentence.slice(leaderEnd))) return false;
+  if (EN_LOWERCASE_MODAL_RE.test(sentence.slice(clause.end))) return true;
+  const stretch = sentence.slice(leaderEnd, clause.start);
+  const amount = EN_PASSIVE_AMOUNT_RE.exec(stretch);
+  if (!amount) return true;
+  const event = stretch.slice(0, amount.index);
+  if (!EN_EVENT_NOUN_PHRASE_RE.test(event) && !EN_PAST_EVENT_CLAUSE_RE.test(event)) return true;
+  const auxiliary = stretch.slice(amount.index + amount[0].length);
+  const telegraphic = auxiliary.trim() === '' && /ed$/i.test(clause.verbs[0]);
+  return !(telegraphic || EN_COMPLETED_AUXILIARY_RE.test(auxiliary));
+}
+/** The verdict for one sentence's credit clause; `after` is the text that follows the sentence. */
+export function creditSettlement(sentence: string, clause: CreditClause, after = ''): CreditSettlement {
+  const lead = sentence.slice(0, clause.start).replace(EN_CREDIT_WORDS.coordinated, '');
+  const leaders = [...lead.matchAll(EN_CREDIT_WORDS.conditional)];
+  const last = leaders[leaders.length - 1];
+  if (last && !lead.slice(last.index! + last[0].length).includes(',') && leaderGovernsCredit(sentence, last, clause)) {
+    return { verdict: 'not-settled', reason: 'conditional' };
+  }
+  if (EN_CREDIT_WORDS.negatedBefore.test(lead)) return { verdict: 'not-settled', reason: 'negated' };
+  const first = clause.verbs[0];
+  if (EN_CREDIT_WORDS.pendingBefore.test(lead) || (/ing$/.test(first) && EN_CREDIT_WORDS.progressiveBefore.test(lead)) ||
+    !/ed$/.test(first)) return { verdict: 'not-settled', reason: 'pending' };
+  const tail = sentence.slice(clause.end);
+  const destination = EN_CREDIT_WORDS.destination.exec(tail);
+  if (destination && REFUND_THIRD_PARTY_DESTINATION_RE.test(` ${destination[0]}`)) return { verdict: 'refused', reason: 'third-party' };
+  if (refundCreditNotFinal((tail + after).replace(EN_CREDIT_REASON_RE, ' '))) return { verdict: 'refused', reason: 'taken-back' };
+  if (clause.verbs.every((verb) => verb.startsWith('process'))) {
+    // Oracle v2.2 (CEO 73c34ef8, Change Reviewer 4eee941b): a processed refund is settled when it names the instrument by
+    // number or a balance/limit line follows, unless a later sentence says the money is not there yet ("It will reflect in
+    // your account within 5-7 working days"); a balance line does not override that. Otherwise it is Review (Q1).
+    const later = [tail, ...after.split(REFUND_SENTENCE_BREAK_RE)];
+    if (later.some((text) => EN_PROCESSED_NOT_YET_RE.test(text) && (EN_MAY_TAKE_DAYS_RE.test(text) || !REFUND_HEDGED_SENTENCE_RE.test(text)))) {
+      return { verdict: 'not-settled', reason: 'pending' };
+    }
+    // The destination may run onto the next line ("processed to\naccount 1234"): read it up to the sentence's full stop.
+    const destination = (tail + after).split(/[.!?](?=\s|$)/)[0];
+    if (EN_INSTRUMENT_NUMBER_RE.test(sentence) || EN_INSTRUMENT_NUMBER_RE.test(destination) || EN_BALANCE_LINE_RE.test(tail + after)) {
+      return { verdict: 'settled' };
+    }
+    return { verdict: 'unknown', reason: 'processed-only' };
+  }
+  return { verdict: 'settled' };
+}
+const CREDIT_SETTLEMENT_DEBIT_RE = /\b(?:debited|charged|deducted|spent|withdrawn|paid|purchased?)\b/i;
+type SettlementSentence = { start: number; text: string; clauses: CreditClause[] };
+/** One sentence's verdict: a settled clause settles it; otherwise a refusal outranks a note that can be blanked. */
+function sentenceSettlement(s: SettlementSentence, after: string): CreditSettlement {
+  const verdicts = s.clauses.map((clause) => creditSettlement(s.text, clause, after));
+  return verdicts.find((v) => v.verdict === 'settled') ?? verdicts.find((v) => v.verdict === 'refused' || v.verdict === 'unknown') ??
+    verdicts[0];
+}
+function settlementSentences(body: string): SettlementSentence[] {
+  const spans: { start: number; text: string }[] = [];
+  let start = 0;
+  for (const end of [...[...body.matchAll(REFUND_SENTENCE_BREAK_RE)].map((match) => match.index! + match[0].length), body.length]) {
+    if (end > start) spans.push({ start, text: body.slice(start, end) });
+    start = Math.max(start, end);
+  }
+  const debitBeside = spans.some(({ text }) => CREDIT_SETTLEMENT_DEBIT_RE.test(text) && refundAmounts(text).length > 0);
+  return spans.map((span) => ({ ...span, clauses: enCreditClauses(span.text, debitBeside) }));
+}
+/**
+ * The veto, in the oracle's first-match order (oracle.md v2 and its v2.1 note).
+ * - Beside a separate debit sentence with its own amount (D rules): a credit clause with a figure of its own (D1), a third-party
+ *   (D5), taken-back (D6) or processed-only (D7) clause refuses the alert; a conditional (D2), negated (D3) or pending (D4)
+ *   clause is blanked and the debit is read again, never as income; a settled clause (D8) leaves the row alone.
+ * - Otherwise only a clause carrying the posted amount can veto it, and only when no settled clause carries it (R rules):
+ *   such income never posts, and neither does a refund-verb expense whose sentence names no debit.
+ */
+/**
+ * For the launch session's semantic reader (bank-alert-interpreter): with no separate debit, the body's only credit clauses
+ * that name a figure are all unsettled, so parseSms's refusal must not come back as a semantic credit. Veto only: a body
+ * with no such clause, or with a settled one, returns false.
+ */
+export function hasOnlyUnsettledCredit(message: string): boolean {
+  const sentences = settlementSentences(message);
+  if (sentences.some((s) => s.clauses.length === 0 && CREDIT_SETTLEMENT_DEBIT_RE.test(s.text) && refundAmounts(s.text).length > 0)) return false;
+  const verdicts = sentences.filter((s) => s.clauses.length > 0 && refundAmounts(s.text).length > 0)
+    .map((s) => sentenceSettlement(s, message.slice(s.start + s.text.length)));
+  return verdicts.length > 0 && verdicts.every((v) => v.verdict !== 'settled');
+}
+type BesideDebit = { kind: 'no-debit' } | { kind: 'keep' } | { kind: 'refuse' } | { kind: 'blank'; text: string };
+/**
+ * The D rules, beside a separate debit sentence with its own amount: a credit note with a figure of its own (D1), a third-party
+ * (D5), taken-back (D6) or processed-only (D7) note refuses; a settled note (D8) keeps the row; when every note is conditional
+ * (D2), negated (D3) or pending (D4), they are blanked, with any "not there yet" follow-up, for the debit to be read again.
+ */
+function besideDebit(message: string, sentences: SettlementSentence[]): BesideDebit {
+  const credits = sentences.filter((s) => s.clauses.length > 0);
+  const debits = sentences.filter((s) => s.clauses.length === 0 && CREDIT_SETTLEMENT_DEBIT_RE.test(s.text) && refundAmounts(s.text).length > 0);
+  if (credits.length === 0 || debits.length === 0) return { kind: 'no-debit' };
+  const debitAmounts = debits.flatMap((s) => refundAmounts(s.text));
+  const blank = (text: string, s: SettlementSentence) => text.slice(0, s.start) + ' '.repeat(s.text.length) + text.slice(s.start + s.text.length);
+  let blanked = message;
+  let settled = false;
+  for (const s of credits) {
+    if (refundAmounts(s.text).some((amount) => !debitAmounts.includes(amount))) return { kind: 'refuse' };
+    const verdict = sentenceSettlement(s, message.slice(s.start + s.text.length));
+    if (verdict.verdict === 'settled') settled = true;
+    else if (verdict.verdict === 'not-settled') blanked = blank(blanked, s);
+    else return { kind: 'refuse' };
+  }
+  if (settled || blanked === message) return { kind: 'keep' };
+  // "It will reflect in your account within 5-7 working days" after a blanked note goes with it.
+  const firstBlank = credits.find((s) => blanked.slice(s.start, s.start + s.text.length).trim() === '')!;
+  for (const s of sentences) {
+    if (s.start > firstBlank.start && s.clauses.length === 0 && refundAmounts(s.text).length === 0 && EN_PROCESSED_NOT_YET_RE.test(s.text)) {
+      blanked = blank(blanked, s);
+    }
+  }
+  return { kind: 'blank', text: blanked };
+}
+function vetoUnsettledCredit(message: string, parsed: ParsedSms, reparse: (text: string) => ParsedSms | null): ParsedSms | null {
+  if (parsed.kind !== 'transaction') return parsed;
+  const sentences = settlementSentences(message);
+  const credits = sentences.filter((s) => s.clauses.length > 0);
+  if (credits.length === 0) return parsed;
+  const afterOf = (s: SettlementSentence) => message.slice(s.start + s.text.length);
+  const beside = besideDebit(message, sentences);
+  if (beside.kind === 'refuse') return null;
+  if (beside.kind === 'keep') return parsed;
+  if (beside.kind === 'blank') {
+    const again = reparse(beside.text);
+    return again && again.kind === 'transaction' && again.type === 'income' ? null : again;
+  }
+  const figures = [parsed.amountFils / 100, parsed.amountFils / 1000];
+  if (parsed.originalMinorUnits !== undefined && parsed.originalExponent !== undefined) {
+    figures.push(Number(parsed.originalMinorUnits) / 10 ** parsed.originalExponent);
+  }
+  const carrying = credits.filter((s) => refundAmounts(s.text).some((amount) => figures.includes(amount)));
+  const verdicts = carrying.map((s) => ({ s, verdict: sentenceSettlement(s, afterOf(s)) }));
+  if (verdicts.length === 0) return parsed;
+  if (verdicts.some(({ verdict }) => verdict.verdict === 'settled')) return parsed;
+  if (parsed.type === 'income') return null;
+  const refundVerbExpense = verdicts.every(({ s }) => !CREDIT_SETTLEMENT_DEBIT_RE.test(s.text) &&
+    !s.clauses.every((clause) => clause.verbs.every((verb) => verb.startsWith('process'))));
+  return refundVerbExpense ? null : parsed;
 }
 const MANDATE_LIFECYCLE_RE =
   /\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b(?:[^.]|\.\d){0,96}\b(?:will\s+(?:start|begin|commence|activate)|has\s+been\s+(?:created|registered|set\s*up|activated)|is\s+(?:now\s+)?active)\b|\b(?:created|registered|set\s*up|activated)\b(?:[^.]|\.\d){0,64}\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b|تم\s+(?:تسجيل|انشاء|تفعيل)[^\n]{0,64}(?:امر\s+)?(?:خصم\s+(?:تلقايي|مباشر)|تعليمات\s+مستديمه)/iu;
@@ -9441,6 +9701,10 @@ export function parseSms(
       if (hasUnsettledPrincipalInContext(context, parsed)) return null;
     }
   }
+  // The shared credit-settled veto (CEO 080fa431), on the direction the principal context settled. A blanked re-read has
+  // no credit clause left, so it cannot recurse twice.
+  const vetted = vetoUnsettledCredit(message, parsed, (text) => parseSms(text, overrides, options));
+  if (vetted !== parsed) return vetted;
   // An Indian domestic-rail (NEFT/IMPS/RTGS/UPI) movement in a foreign
   // currency is an account at a bank abroad: "HSBC" is a UAE sender too, and an
   // HSBC India credit of INR 3,200 was booked as AED income at the offline

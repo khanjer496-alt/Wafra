@@ -157,6 +157,17 @@ jobs:
       - name: Check the committed iOS background parser is fresh
         run: node scripts/generate-ios-background-parser.cjs --check
 
+      # The refund-matrix gap file may only shrink for rows the base already
+      # had: a fix to one row that breaks another in the same class keeps every
+      # CEILING count, so the matrix test alone would not see it.
+      - name: Refund matrix gap file only shrinks against the base
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          node scripts/test/repair/refund-gaps-no-growth.cjs "$BASE_SHA"
+
       - name: Typecheck
         run: npm run typecheck
 

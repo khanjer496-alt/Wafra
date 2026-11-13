@@ -215,8 +215,6 @@ async function gate(options = {}) {
   dependencies['@/components/ui/text-field'] = { TextField: 'TextField' };
   dependencies['@/components/country-picker-sheet'] =
     load(path.join(root, 'src/components/country-picker-sheet.tsx'), dependencies);
-  dependencies['@/components/onboarding/country-confirm'] =
-    load(path.join(root, 'src/components/onboarding/country-confirm.tsx'), dependencies);
   // The iPhone statement step's decorative scene renders from real source too.
   dependencies['./alive-scenes'] = dependencies['@/components/onboarding/alive-scenes'];
   dependencies['@/components/onboarding/statement-scene'] =
@@ -305,7 +303,7 @@ async function gate(options = {}) {
       { setTimeout: setTimer, clearTimeout: clearTimer });
   }
   const component = load(options.sourcePath ?? process.env.WAFRA_ONBOARDING_SOURCE ?? path.join(root, 'src/components/onboarding-gate.tsx'), dependencies, {
-    process: { env: { EXPO_PUBLIC_WAFRA_E2E_DEMO: '1' } },
+    process: { env: { EXPO_PUBLIC_WAFRA_E2E_DEMO: '1' } }, __DEV__: options.development ?? true,
     setTimeout: setTimer, clearTimeout: clearTimer, Date: ClockDate,
   }).OnboardingGate;
   const render = () => {

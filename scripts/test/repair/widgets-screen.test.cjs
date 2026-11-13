@@ -421,7 +421,7 @@ test('the Widgets route exists and both entry points reach it', () => {
   assert.ok(fs.existsSync(path.join(root, 'src/app/widgets.tsx')));
   assert.match(read('src/app/widgets.tsx'), /export default function WidgetsScreen/);
   const settings = read('src/app/settings.tsx');
-  assert.match(settings, /Platform\.OS !== 'web' && linkRow\(\s*widgetWords\.settingsTitle,[\s\S]{0,160}router\.push\('\/widgets'\),\s*\{ icon: 'home', testID: 'settings-widgets' \}/);
+  assert.match(settings, /Platform\.OS !== 'web' && linkRow\(\s*widgetWords\.settingsTitle,[\s\S]{0,160}router\.push\('\/widgets'\),\s*\{ icon: 'home', testID: 'settings-widgets', last: true \}/);
   // In the personalisation group, beside Customize Home.
   const preferences = settings.slice(settings.indexOf("t('settingsPreferencesHeader')"), settings.indexOf('settings-region'));
   assert.ok(preferences.includes('widgetWords.settingsTitle'));

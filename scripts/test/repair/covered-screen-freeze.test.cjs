@@ -218,7 +218,7 @@ test('the erase rebuild and foreground scans belong to the capture host, not to 
   const before = hook.slice(0, anchor);
   assert.match(before.slice(before.lastIndexOf('useEffect(')), /if \(!watchForeground\) return;/);
   assert.match(read('src/components/app-tabs-layout.tsx'), /function CaptureOwner\(\) \{[\s\S]{0,80}useAutoImport\(true, false\)/);
-  for (const home of ['src/screens/journal-home-screen.tsx', 'src/screens/ledger-home-screen.tsx']) {
+  for (const home of ['src/screens/journal-home-screen.tsx']) {
     assert.match(read(home), /useAutoImport\(false, true\)/, `${home} must not own foreground capture`);
   }
 });

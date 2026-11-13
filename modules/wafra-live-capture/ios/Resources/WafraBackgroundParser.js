@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 730f8b22e8456b873bcbafdfdfd269294f32e646537df3593d3cb88cc59ec033
+// Generated from normal shipping TypeScript. Source SHA-256: 2af1ad36774a17efc6daef2e5534f4355eafa7ec5e31a6d4c918cd36eaae3deb
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -1884,6 +1884,12 @@ const interpretBankAlert = ({ source, sender, market, overrides = {}, observedAt
     if ((0, sms_parser_1.refundSideNoteVerdict)(source) !== 'none') {
         if (usableLegacy)
             return legacyResult(usableLegacy);
+        const pending = (0, unparsed_launch_alert_1.inspectUnparsedLaunchAlert)(source, sender);
+        return pending.outcome === 'review'
+            ? finalFallback(pending, null)
+            : { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+    }
+    if (!usableLegacy && (0, sms_parser_1.hasOnlyUnsettledCredit)(source)) {
         const pending = (0, unparsed_launch_alert_1.inspectUnparsedLaunchAlert)(source, sender);
         return pending.outcome === 'review'
             ? finalFallback(pending, null)
@@ -10320,6 +10326,8 @@ exports.foldOrthography = foldOrthography;
 exports.normalizeArabic = normalizeArabic;
 exports.bankProfileForSender = bankProfileForSender;
 exports.refundSideNoteVerdict = refundSideNoteVerdict;
+exports.creditSettlement = creditSettlement;
+exports.hasOnlyUnsettledCredit = hasOnlyUnsettledCredit;
 exports.hasMalformedBankAmount = hasMalformedBankAmount;
 exports.isBnplPayee = isBnplPayee;
 exports.overrideFitsDirection = overrideFitsDirection;
@@ -10384,7 +10392,7 @@ function normalizeArabic(s) {
 }
 const ARABIC_RE = /[\u0600-\u06FF]/;
 const AR_LETTER = '\\u0621-\\u064A';
-exports.PARSER_VERSION = 72;
+exports.PARSER_VERSION = 73;
 exports.PARSER_BACKFILL_VERSION = 50;
 const BANK_PROFILES = {
     'Emirates NBD': { brand: /\benbd\b|emirates\s*nbd|\bliv\b/i, ownPot: /\b(?:liv\s+)?goals?\b|\bsavings?\s+pot\b/i },
@@ -10754,6 +10762,215 @@ function refundSideNotes(body) {
 function refundSideNoteVerdict(source) {
     const notes = refundSideNotes(source);
     return notes.ambiguous ? 'ambiguous' : notes.body !== source ? 'side-note' : 'none';
+}
+const EN_CREDIT_WORDS = {
+    verb: /\b(?:credit(?:ed|ing)?|refund(?:ed|ing)?|revers(?:ed|e|ing)|return(?:ed|ing)?|deposit(?:ed|ing)?|process(?:ed|ing)?)\b/gi,
+    baseNeedsModal: /^(?:credit|refund|reverse|return|deposit|process)$/i,
+    modalBefore: /\b(?:will|shall|would|can|could|to|did\s+not|does\s+not|do\s+not|didn['’]t|doesn['’]t|don['’]t|won['’]t)\s+(?:(?:not|soon|shortly)\s+)?$/i,
+    determinerBefore: /(?:\b(?:the|a|an|your|my|our|their|his|her|its|this|that|any|no|non)[\s-]+|\(\s*)$/i,
+    nounAfter: /^\s+(?:cheques?|checks?|charges?|fees?|items?|goods|orders?|payments?|transactions?|amounts?|mails?|cards?|limits?|balances?)\b/i,
+    coordinated: /\b(?:credit|refund|revers|return|deposit|process)\w*\s+and\s+$/i,
+    conditional: /(?:^|[^\p{L}])(?:[Ii]f|[Oo]nce|[Ww]hen(?:ever)?|[Aa]fter|[Uu]ntil|[Uu]nless|[Ww]hether|[Aa]s\s+soon\s+as)(?![\p{L}])/gu,
+    negatedBefore: /(?:\b(?:has|have|had|was|were|is|are|did|does|do|will|would|could|can|shall)\s+(?:not|never)|\b(?:hasn|haven|hadn|wasn|weren|isn|aren|didn|doesn|don|won|wouldn|couldn|can)['’]t|\byet\s+to\s+be|\bnot\s+(?:yet\s+)?been|\bnever\s+been)\s+(?:(?:yet|been|be|successfully|fully|now)\s+){0,3}$/i,
+    pendingBefore: /\b(?:will|shall|would|is\s+going\s+to|are\s+going\s+to)\s+(?:(?:be|soon|shortly|now|then)\s+){0,2}$|\b(?:is|are|am)\s+(?:currently\s+|now\s+)?being\s+$/i,
+    progressiveBefore: /\b(?:is|are|am|be)\s+(?:(?:currently|now)\s+)?$/i,
+    destination: /\b(?:back\s+)?(?:to|into|onto)\s+[^.,;\n]{0,60}/i,
+    notARefundCredit: /\b(?:cash\s*back|rewards?|points|miles|bonus)\b/i,
+};
+const EN_PROCESSED_REFUND_CONTEXT_RE = /\b(?:refund\w*|revers\w*|return\w*|charge\s*back\w*)\b/i;
+const EN_PROCESSED_DESTINATION_RE = /^\s+(?:(?:and\s+\w+\s+)?(?:back\s+)?(?:to|into|onto)\b)/i;
+const EN_INSTRUMENT_NUMBER_RE = /\b(?:card|account|a\/c|acct)\.?\s*(?:(?:ending(?:\s+(?:in|with))?|no\.?|number|#)\s*:?\s*)?(?:[xX*•·]+\s*\d{4,}|\d{4,})\b/i;
+const EN_BALANCE_LINE_RE = /\b(?:avl\.?|avail(?:able|\.)?)\s+(?:cr\.?\s+|credit\s+)?(?:bal(?:ance)?|limit)\b|\bbalance\s+(?:is|:)/i;
+const EN_PROCESSED_NOT_YET_RE = /\b(?:will|shall|should)\s+(?:be\s+)?(?:reflect(?:ed)?|appear(?:ed)?|show(?:n)?|credited|available|visible|posted)\b|\bmay\s+take\s+(?:up\s+to\s+)?\d+(?:\s*[-–]\s*\d+)?\s+(?:working\s+|business\s+)?days?\b|\btakes?\s+(?:up\s+to\s+)?\d+(?:\s*[-–]\s*\d+)?\s+(?:working\s+|business\s+)?days?\s+to\s+(?:reflect|appear|show)\b/i;
+const EN_MAY_TAKE_DAYS_RE = /\bmay\s+take\b/i;
+const EN_NEW_CLAUSE_RE = /(?:\b(?:and|but|while|whereas)\s+(?:the|this|that|your|a|an|it|its|our)\b|;)/i;
+const EN_NEW_COMPLETED_CREDIT_RE = /\b(?:and|but)\s+(?:(?:was|were|has\s+been|have\s+been|had\s+been)\s+(?:(?:now|then|also|successfully)\s+)?)$/i;
+const EN_CREDIT_IN_RE = /^(?:credited|refunded|deposited|returned)$/i;
+const EN_CREDIT_REASON_RE = /\bfor\s+(?:(?:the|your|a|an)\s+)?(?:reversed|cancell?ed)\s+(?:purchases?|transactions?|payments?|charges?|orders?|debits?)\b/gi;
+function enCreditClauses(sentence, debitBeside = false) {
+    if (EN_CREDIT_WORDS.notARefundCredit.test(sentence))
+        return [];
+    const words = EN_CREDIT_WORDS.verb;
+    words.lastIndex = 0;
+    const clauses = [];
+    for (let match = words.exec(sentence); match; match = words.exec(sentence)) {
+        const at = match.index;
+        const lead = sentence.slice(0, at);
+        const word = match[0];
+        const clause = clauses[clauses.length - 1];
+        if (EN_CREDIT_WORDS.baseNeedsModal.test(word) && !EN_CREDIT_WORDS.modalBefore.test(lead) &&
+            !(clause && EN_CREDIT_WORDS.coordinated.test(lead)))
+            continue;
+        if (/ing$/i.test(word) && !EN_CREDIT_WORDS.progressiveBefore.test(lead) && !EN_CREDIT_WORDS.pendingBefore.test(lead) &&
+            !(clause && EN_CREDIT_WORDS.coordinated.test(lead)))
+            continue;
+        if (EN_CREDIT_WORDS.determinerBefore.test(lead) || EN_CREDIT_WORDS.nounAfter.test(sentence.slice(at + word.length)))
+            continue;
+        if (/^process/i.test(word) && !(clause && EN_CREDIT_WORDS.coordinated.test(lead)) &&
+            !EN_PROCESSED_REFUND_CONTEXT_RE.test(sentence) &&
+            !(debitBeside && EN_PROCESSED_DESTINATION_RE.test(sentence.slice(at + word.length))))
+            continue;
+        if (clause) {
+            if (EN_CREDIT_WORDS.coordinated.test(lead) && at - clause.end <= 6) {
+                clause.verbs.push(word.toLowerCase());
+                clause.end = at + word.length;
+                continue;
+            }
+            const between = sentence.slice(clause.end, at);
+            const completedCredit = EN_CREDIT_IN_RE.test(word) && EN_NEW_COMPLETED_CREDIT_RE.test(between);
+            const joint = EN_NEW_CLAUSE_RE.exec(between);
+            if (!completedCredit && (!joint || REFUND_CREDIT_TAKEN_BACK_RE.test(sentence.slice(clause.end + joint.index))))
+                break;
+        }
+        clauses.push({ verbs: [word.toLowerCase()], start: at, end: at + word.length });
+    }
+    return clauses;
+}
+const EN_TEMPORAL_LEADER_RE = /^(?:once|when(?:ever)?|after|as\s+soon\s+as)$/i;
+const EN_EVENT_NOUN_PHRASE_RE = /^\s+(?:(?:your|the|this|our)\s+)?(?:(?:order|purchase|item|transaction|booking)\s+)?(?:cancell?ation|return|refund\s+request|verification|review|investigation|dispute(?:\s+resolution)?|chargeback|reversal)\s*,?\s*$/i;
+const EN_PAST_EVENT_CLAUSE_RE = /^\s+(?:your|the|this)\s+(?:order|purchase|item|transaction|booking|dispute|request|claim|return)\s+(?:was|were|has\s+been|had\s+been)\s+(?:cancell?ed|returned|resolved|approved|reviewed|reversed|completed|received|processed)\s*,?\s*$/i;
+const EN_PASSIVE_AMOUNT_RE = /(?:\b[A-Z]{3}|\bDhs?\.?)\s*\d[\d,]*(?:\.\d+)?|\d[\d,]*(?:\.\d+)?\s*(?:[A-Z]{3}|Dhs?)\b/;
+const EN_COMPLETED_AUXILIARY_RE = /^\s*(?:(?:has|have|had)\s+(?:now\s+)?been|was|were)\s+(?:successfully\s+)?$/i;
+const EN_LOWERCASE_MODAL_RE = /\b(?:will|can|may|shall|should|would|could|must)\b|['’]ll\b/;
+function leaderGovernsCredit(sentence, leader, clause) {
+    const word = leader[0].replace(/^[^\p{L}]+/u, '');
+    const leaderEnd = leader.index + leader[0].length;
+    if (!EN_TEMPORAL_LEADER_RE.test(word))
+        return true;
+    if (/^once$/i.test(word) && /^\s+(?:again|more)\b/i.test(sentence.slice(leaderEnd)))
+        return false;
+    if (EN_LOWERCASE_MODAL_RE.test(sentence.slice(clause.end)))
+        return true;
+    const stretch = sentence.slice(leaderEnd, clause.start);
+    const amount = EN_PASSIVE_AMOUNT_RE.exec(stretch);
+    if (!amount)
+        return true;
+    const event = stretch.slice(0, amount.index);
+    if (!EN_EVENT_NOUN_PHRASE_RE.test(event) && !EN_PAST_EVENT_CLAUSE_RE.test(event))
+        return true;
+    const auxiliary = stretch.slice(amount.index + amount[0].length);
+    const telegraphic = auxiliary.trim() === '' && /ed$/i.test(clause.verbs[0]);
+    return !(telegraphic || EN_COMPLETED_AUXILIARY_RE.test(auxiliary));
+}
+function creditSettlement(sentence, clause, after = '') {
+    const lead = sentence.slice(0, clause.start).replace(EN_CREDIT_WORDS.coordinated, '');
+    const leaders = [...lead.matchAll(EN_CREDIT_WORDS.conditional)];
+    const last = leaders[leaders.length - 1];
+    if (last && !lead.slice(last.index + last[0].length).includes(',') && leaderGovernsCredit(sentence, last, clause)) {
+        return { verdict: 'not-settled', reason: 'conditional' };
+    }
+    if (EN_CREDIT_WORDS.negatedBefore.test(lead))
+        return { verdict: 'not-settled', reason: 'negated' };
+    const first = clause.verbs[0];
+    if (EN_CREDIT_WORDS.pendingBefore.test(lead) || (/ing$/.test(first) && EN_CREDIT_WORDS.progressiveBefore.test(lead)) ||
+        !/ed$/.test(first))
+        return { verdict: 'not-settled', reason: 'pending' };
+    const tail = sentence.slice(clause.end);
+    const destination = EN_CREDIT_WORDS.destination.exec(tail);
+    if (destination && REFUND_THIRD_PARTY_DESTINATION_RE.test(` ${destination[0]}`))
+        return { verdict: 'refused', reason: 'third-party' };
+    if (refundCreditNotFinal((tail + after).replace(EN_CREDIT_REASON_RE, ' ')))
+        return { verdict: 'refused', reason: 'taken-back' };
+    if (clause.verbs.every((verb) => verb.startsWith('process'))) {
+        const later = [tail, ...after.split(REFUND_SENTENCE_BREAK_RE)];
+        if (later.some((text) => EN_PROCESSED_NOT_YET_RE.test(text) && (EN_MAY_TAKE_DAYS_RE.test(text) || !REFUND_HEDGED_SENTENCE_RE.test(text)))) {
+            return { verdict: 'not-settled', reason: 'pending' };
+        }
+        const destination = (tail + after).split(/[.!?](?=\s|$)/)[0];
+        if (EN_INSTRUMENT_NUMBER_RE.test(sentence) || EN_INSTRUMENT_NUMBER_RE.test(destination) || EN_BALANCE_LINE_RE.test(tail + after)) {
+            return { verdict: 'settled' };
+        }
+        return { verdict: 'unknown', reason: 'processed-only' };
+    }
+    return { verdict: 'settled' };
+}
+const CREDIT_SETTLEMENT_DEBIT_RE = /\b(?:debited|charged|deducted|spent|withdrawn|paid|purchased?)\b/i;
+function sentenceSettlement(s, after) {
+    const verdicts = s.clauses.map((clause) => creditSettlement(s.text, clause, after));
+    return verdicts.find((v) => v.verdict === 'settled') ?? verdicts.find((v) => v.verdict === 'refused' || v.verdict === 'unknown') ??
+        verdicts[0];
+}
+function settlementSentences(body) {
+    const spans = [];
+    let start = 0;
+    for (const end of [...[...body.matchAll(REFUND_SENTENCE_BREAK_RE)].map((match) => match.index + match[0].length), body.length]) {
+        if (end > start)
+            spans.push({ start, text: body.slice(start, end) });
+        start = Math.max(start, end);
+    }
+    const debitBeside = spans.some(({ text }) => CREDIT_SETTLEMENT_DEBIT_RE.test(text) && refundAmounts(text).length > 0);
+    return spans.map((span) => ({ ...span, clauses: enCreditClauses(span.text, debitBeside) }));
+}
+function hasOnlyUnsettledCredit(message) {
+    const sentences = settlementSentences(message);
+    if (sentences.some((s) => s.clauses.length === 0 && CREDIT_SETTLEMENT_DEBIT_RE.test(s.text) && refundAmounts(s.text).length > 0))
+        return false;
+    const verdicts = sentences.filter((s) => s.clauses.length > 0 && refundAmounts(s.text).length > 0)
+        .map((s) => sentenceSettlement(s, message.slice(s.start + s.text.length)));
+    return verdicts.length > 0 && verdicts.every((v) => v.verdict !== 'settled');
+}
+function besideDebit(message, sentences) {
+    const credits = sentences.filter((s) => s.clauses.length > 0);
+    const debits = sentences.filter((s) => s.clauses.length === 0 && CREDIT_SETTLEMENT_DEBIT_RE.test(s.text) && refundAmounts(s.text).length > 0);
+    if (credits.length === 0 || debits.length === 0)
+        return { kind: 'no-debit' };
+    const debitAmounts = debits.flatMap((s) => refundAmounts(s.text));
+    const blank = (text, s) => text.slice(0, s.start) + ' '.repeat(s.text.length) + text.slice(s.start + s.text.length);
+    let blanked = message;
+    let settled = false;
+    for (const s of credits) {
+        if (refundAmounts(s.text).some((amount) => !debitAmounts.includes(amount)))
+            return { kind: 'refuse' };
+        const verdict = sentenceSettlement(s, message.slice(s.start + s.text.length));
+        if (verdict.verdict === 'settled')
+            settled = true;
+        else if (verdict.verdict === 'not-settled')
+            blanked = blank(blanked, s);
+        else
+            return { kind: 'refuse' };
+    }
+    if (settled || blanked === message)
+        return { kind: 'keep' };
+    const firstBlank = credits.find((s) => blanked.slice(s.start, s.start + s.text.length).trim() === '');
+    for (const s of sentences) {
+        if (s.start > firstBlank.start && s.clauses.length === 0 && refundAmounts(s.text).length === 0 && EN_PROCESSED_NOT_YET_RE.test(s.text)) {
+            blanked = blank(blanked, s);
+        }
+    }
+    return { kind: 'blank', text: blanked };
+}
+function vetoUnsettledCredit(message, parsed, reparse) {
+    if (parsed.kind !== 'transaction')
+        return parsed;
+    const sentences = settlementSentences(message);
+    const credits = sentences.filter((s) => s.clauses.length > 0);
+    if (credits.length === 0)
+        return parsed;
+    const afterOf = (s) => message.slice(s.start + s.text.length);
+    const beside = besideDebit(message, sentences);
+    if (beside.kind === 'refuse')
+        return null;
+    if (beside.kind === 'keep')
+        return parsed;
+    if (beside.kind === 'blank') {
+        const again = reparse(beside.text);
+        return again && again.kind === 'transaction' && again.type === 'income' ? null : again;
+    }
+    const figures = [parsed.amountFils / 100, parsed.amountFils / 1000];
+    if (parsed.originalMinorUnits !== undefined && parsed.originalExponent !== undefined) {
+        figures.push(Number(parsed.originalMinorUnits) / 10 ** parsed.originalExponent);
+    }
+    const carrying = credits.filter((s) => refundAmounts(s.text).some((amount) => figures.includes(amount)));
+    const verdicts = carrying.map((s) => ({ s, verdict: sentenceSettlement(s, afterOf(s)) }));
+    if (verdicts.length === 0)
+        return parsed;
+    if (verdicts.some(({ verdict }) => verdict.verdict === 'settled'))
+        return parsed;
+    if (parsed.type === 'income')
+        return null;
+    const refundVerbExpense = verdicts.every(({ s }) => !CREDIT_SETTLEMENT_DEBIT_RE.test(s.text) &&
+        !s.clauses.every((clause) => clause.verbs.every((verb) => verb.startsWith('process'))));
+    return refundVerbExpense ? null : parsed;
 }
 const MANDATE_LIFECYCLE_RE = /\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b(?:[^.]|\.\d){0,96}\b(?:will\s+(?:start|begin|commence|activate)|has\s+been\s+(?:created|registered|set\s*up|activated)|is\s+(?:now\s+)?active)\b|\b(?:created|registered|set\s*up|activated)\b(?:[^.]|\.\d){0,64}\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b|تم\s+(?:تسجيل|انشاء|تفعيل)[^\n]{0,64}(?:امر\s+)?(?:خصم\s+(?:تلقايي|مباشر)|تعليمات\s+مستديمه)/iu;
 const CONDITIONAL_PAYOUT_RE = /\b(?:merchant|business|seller|vendor|restaurant|platform|marketplace|aggregator|acquirer|sales?|delivery|courier|rider|driver)\b(?:[^.]|\.\d){0,160}\b(?:when|once|if)\s+(?:you\s+)?(?:are\s+)?(?:eligible|qualif(?:y|ied))\b|\b(?:merchant|business|seller|vendor|restaurant|platform|marketplace|aggregator|acquirer|sales?|delivery|courier|rider|driver)\b(?:[^.]|\.\d){0,160}\b(?:after\s+(?:(?:your\s+)?registration|you\s+(?:register|sign\s+up|open\s+(?:an?\s+)?account)|opening\s+(?:an?\s+)?account)|upon\s+(?:registration|sign[ -]?up|account\s+opening))\b/iu;
@@ -14177,6 +14394,9 @@ function parseSms(message, overrides, options) {
                 return null;
         }
     }
+    const vetted = vetoUnsettledCredit(message, parsed, (text) => parseSms(text, overrides, options));
+    if (vetted !== parsed)
+        return vetted;
     if (parsed.originalCurrency && parsed.originalCurrency !== (0, markets_1.getActiveMarket)().currency.code &&
         parsed.fxSource !== 'bank' && FOREIGN_DOMESTIC_RAIL_RE.test(message)) {
         return null;
