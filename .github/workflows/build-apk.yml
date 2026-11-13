@@ -10,6 +10,11 @@ name: Build Android APK
 # while an explicitly selected review branch can produce an isolated candidate
 # without silently substituting `main` underneath it.
 on:
+  # A/B internal test APKs without a manual dispatch: a push to an
+  # android/ab-build-* branch that touches this file builds that branch once.
+  push:
+    branches: ['android/ab-build-*']
+    paths: ['.github/workflows/build-apk.yml']
   workflow_dispatch:
     inputs:
       bundle:
@@ -356,17 +361,59 @@ jobs:
             cp android/app/build/outputs/bundle/release/app-release.aab wafra.aab
           fi
 
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ github.event.inputs.corpus == 'true' && 'wafra-sms-corpus-apk' || 'wafra-apk' }}
-          path: wafra.apk
-          retention-days: 30
-
-      - name: Upload Play bundle artifact
+      # The environment above already forces these off for a Play bundle. This
+      # reads what was actually COMPILED: the Founder Pro unlock, automatic
+      # tester Pro and the full-inbox SMS exporter's JavaScript gate each leave
+      # a "wafra-build-flag:<flag>=on|off" string in the Hermes bundle
+      # (src/lib/founder-pro.ts, src/lib/sms-corpus-export.ts). Any "=on", a
+      # missing marker, or both states at once fails the run before anything
+      # is sealed. The same-job APK is checked too, because it is the build App
+      # QA installs to clear this exact versionCode.
+      - name: Verify production build flags in the packaged Play bundle and APK
         if: github.event.inputs.bundle == 'true' && github.event.inputs.corpus != 'true'
+        run: |
+          set -euo pipefail
+          if [ "$WAFRA_SMS_CORPUS_EXPORT" != "0" ]; then
+            echo "::error::WAFRA_SMS_CORPUS_EXPORT is '$WAFRA_SMS_CORPUS_EXPORT'; the native exporter must be compiled closed in a Play build."
+            exit 1
+          fi
+          node scripts/android-build-flags.cjs verify-production wafra.aab
+          node scripts/android-build-flags.cjs verify-production wafra.apk
+          echo "### 🔒 Production build flags verified in the AAB and APK" >> "$GITHUB_STEP_SUMMARY"
+
+      # The repository is PUBLIC: any signed-in GitHub user can download any
+      # Actions artifact. Signed APKs and AABs therefore never leave the runner
+      # in plaintext. They are encrypted to .github/android-artifact-recipient.pem,
+      # whose private key exists only on the release Mac, and kept for one day:
+      # long enough to download, decrypt and hash-check with
+      # `node scripts/android-artifact-seal.cjs open` (docs/play-release.md).
+      - name: Seal outputs for the public artifact store
+        env:
+          APK_LABEL: ${{ github.event.inputs.corpus == 'true' && 'wafra-sms-corpus-apk' || 'wafra-apk' }}
+        run: |
+          set -euo pipefail
+          inputs=("$APK_LABEL=wafra.apk")
+          if [ -f wafra.aab ]; then inputs+=("wafra-aab=wafra.aab"); fi
+          node scripts/android-artifact-seal.cjs seal \
+            --recipient .github/android-artifact-recipient.pem --out sealed \
+            --meta "sourceCommit=$GITHUB_SHA" --meta "ref=$GITHUB_REF_NAME" \
+            --meta "runId=$GITHUB_RUN_ID" --meta "versionCode=$GITHUB_RUN_NUMBER" \
+            "${inputs[@]}"
+          rm -f wafra.apk wafra.aab
+          {
+            echo "### 📦 Sealed artifact"
+            echo "Encrypted to the release Mac's key; plaintext SHA-256 values are in verification.json."
+            echo '```json'
+            cat sealed/verification.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sealed artifact
         uses: actions/upload-artifact@v4
         with:
-          name: wafra-aab
-          path: wafra.aab
-          retention-days: 30
+          name: wafra-android-sealed-${{ github.run_number }}
+          path: |
+            sealed/*.enc
+            sealed/verification.json
+          if-no-files-found: error
+          retention-days: 1
