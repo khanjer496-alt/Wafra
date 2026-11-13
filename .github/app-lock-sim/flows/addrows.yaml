@@ -1,21 +1,28 @@
 appId: ${APP_ID}
 ---
-- openLink: wafra:///add-transaction
-- extendedWaitUntil:
-    visible: 'Open in .Wafra.\?'
-    timeout: 12000
-    optional: true
 - runFlow:
     when:
       visible: 'Open in .Wafra.\?'
     commands:
       - tapOn:
-          point: '67%,54%'
+          point: '33%,54%'
+- runFlow:
+    when:
+      visible: 'Add manually'
+    commands:
+      - tapOn: 'Add manually'
+- runFlow:
+    when:
+      notVisible:
+        id: 'add-transaction-screen'
+    commands:
+      - tapOn:
+          point: '79%,10%'
 - extendedWaitUntil:
     visible:
       id: 'add-transaction-screen'
     timeout: 30000
-- takeScreenshot: rows-screen-open
+- takeScreenshot: row1-screen-open
 - tapOn:
     id: 'amount-keypad-4'
 - tapOn:
@@ -24,7 +31,7 @@ appId: ${APP_ID}
     id: 'add-merchant-field'
 - inputText: 'LULU HYPERMARKET'
 - hideKeyboard
-- takeScreenshot: rows-typed
+- takeScreenshot: row1-typed
 - tapOn:
     id: 'suggested-category-.*'
     optional: true
@@ -33,22 +40,23 @@ appId: ${APP_ID}
 - extendedWaitUntil:
     visible: 'Settings'
     timeout: 30000
-- openLink: wafra:///add-transaction
-- extendedWaitUntil:
-    visible: 'Open in .Wafra.\?'
-    timeout: 12000
-    optional: true
 - runFlow:
     when:
-      visible: 'Open in .Wafra.\?'
+      visible: 'Add manually'
+    commands:
+      - tapOn: 'Add manually'
+- runFlow:
+    when:
+      notVisible:
+        id: 'add-transaction-screen'
     commands:
       - tapOn:
-          point: '67%,54%'
+          point: '79%,10%'
 - extendedWaitUntil:
     visible:
       id: 'add-transaction-screen'
     timeout: 30000
-- takeScreenshot: rows-screen-open
+- takeScreenshot: row2-screen-open
 - tapOn:
     id: 'amount-keypad-1'
 - tapOn:
@@ -59,7 +67,7 @@ appId: ${APP_ID}
     id: 'add-merchant-field'
 - inputText: 'ADNOC FUEL'
 - hideKeyboard
-- takeScreenshot: rows-typed
+- takeScreenshot: row2-typed
 - tapOn:
     id: 'suggested-category-.*'
     optional: true
@@ -68,22 +76,23 @@ appId: ${APP_ID}
 - extendedWaitUntil:
     visible: 'Settings'
     timeout: 30000
-- openLink: wafra:///add-transaction
-- extendedWaitUntil:
-    visible: 'Open in .Wafra.\?'
-    timeout: 12000
-    optional: true
 - runFlow:
     when:
-      visible: 'Open in .Wafra.\?'
+      visible: 'Add manually'
+    commands:
+      - tapOn: 'Add manually'
+- runFlow:
+    when:
+      notVisible:
+        id: 'add-transaction-screen'
     commands:
       - tapOn:
-          point: '67%,54%'
+          point: '79%,10%'
 - extendedWaitUntil:
     visible:
       id: 'add-transaction-screen'
     timeout: 30000
-- takeScreenshot: rows-screen-open
+- takeScreenshot: row3-screen-open
 - tapOn:
     id: 'amount-keypad-2'
 - tapOn:
@@ -92,7 +101,7 @@ appId: ${APP_ID}
     id: 'add-merchant-field'
 - inputText: 'CAREEM RIDE'
 - hideKeyboard
-- takeScreenshot: rows-typed
+- takeScreenshot: row3-typed
 - tapOn:
     id: 'suggested-category-.*'
     optional: true

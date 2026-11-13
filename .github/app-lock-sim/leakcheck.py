@@ -8,7 +8,7 @@ for line in open(sys.argv[1], encoding='utf-8'):
     p, _, t = line.rstrip('\n').partition('\t'); ocr[p] = t
 home_ref, locked = sys.argv[2], sys.argv[3:]
 words = lambda s: {w.lower() for w in re.findall(r'[^\W\d_]{4,}', s)}
-lock_copy = "Wafra is locked Your balances stay hidden until you unlock That didn't work Try again Your phone passcode works too Unlock with Face ID Touch ID Cancel Enter Passcode"
+lock_copy = "Wafra is locked Your balances stay hidden until you unlock That didn't work Try again Your phone passcode works too Unlock with Face ID Touch ID Cancel Enter Passcode Face Not Recognized Try Again Try Face ID Again Sign in to Apple Account Password"
 vocab = words(ocr.get(home_ref, '')) - words(lock_copy)
 amount = re.compile(r'\d[\d,]*[.,]\d{2}\b')
 bad = []

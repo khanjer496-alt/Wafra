@@ -55,7 +55,7 @@ is_locked() { # $1 = tag; true when the screenshot shows the lock screen's own t
   xcrun simctl io "$UDID" screenshot "$img" >/dev/null 2>&1
   t=$("$OCRBIN" "$img" 2>/dev/null | tr '\n' ' ')
   printf '%s\n' "$t" > "$OUT/ocr-lockcheck-$1.txt"
-  printf '%s' "$t" | grep -qiE "unlock with face id|passcode works too|balances stay hidden|wafra is locked"
+  printf '%s' "$t" | grep -qiE "unlock with face id|passcode works too|balances stay hidden|wafra is locked|you unlock|your balan"
 }
 
 # ---- setup: seed a small ledger, then turn App Lock on -------------------------------

@@ -153,14 +153,16 @@ final class PurchaseUITests: XCTestCase {
     /// and any visible text that looks like a purchase result (the Pro screen's notice has no test id).
     func purchaseEvidence() -> String {
         let tx = session.allTransactions().map { $0.productIdentifier }
-        let words = ["purchase", "store", "confirm", "pending", "Pro", "failed", "unavailable", "Could not"]
-        var seen: [String] = []
-        for t in app.staticTexts.allElementsBoundByIndex.prefix(80) {
+        let words = ["failed", "unavailable", "pending", "in progress", "Could not", "couldn", "not been", "refus", "cancel", "legal", "error", "try again", "approval"]
+        var notices: [String] = []
+        for t in app.staticTexts.allElementsBoundByIndex.prefix(200) {
             let l = t.label
-            if words.contains(where: { l.localizedCaseInsensitiveContains($0) }) && !seen.contains(l) { seen.append(String(l.prefix(120))) }
-            if seen.count >= 8 { break }
+            if words.contains(where: { l.localizedCaseInsensitiveContains($0) }) && !notices.contains(l) { notices.append(String(l.prefix(140))) }
+            if notices.count >= 8 { break }
         }
-        return "store transactions: \(tx); visible text: \(seen)"
+        let buttons = app.buttons.allElementsBoundByIndex.prefix(30).map { String($0.label.prefix(60)) }.filter { !$0.isEmpty }
+        let alerts = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.allElementsBoundByIndex.map { String($0.label.prefix(100)) }
+        return "store transactions: \(tx); result-like text: \(notices); buttons: \(buttons); system alerts: \(alerts)"
     }
     var entitled: Bool { !el("pro-buy").exists && !el("pro-plans").exists }
 
