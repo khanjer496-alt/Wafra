@@ -263,6 +263,25 @@ const CONTROLS = [
     'لم يتم بعد استرداد مبلغ 250.00 درهم إلى بطاقتك.',
     'لم يتم رد مبلغ 250.00 درهم إلى بطاقتك.',
   ].map((body) => [body, 'NO_POST', 'C24 Arabic conditional, pending or negated credits the table missed']),
+  // Change Reviewer 1ae30382 (pre-existing): ALL-CAPS leaders, and a trailing condition or time window.
+  ...[
+    'IF AED 250.00 HAS BEEN REFUNDED TO YOUR CARD YOU WILL GET AN SMS.',
+    'WHEN AED 250.00 HAS BEEN REFUNDED TO YOUR CARD, YOU WILL RECEIVE AN SMS.',
+    'DEAR CUSTOMER, ONCE AED 250.00 HAS BEEN CREDITED TO YOUR ACCOUNT YOU WILL BE NOTIFIED.',
+    'AFTER CANCELLATION AED 250.00 HAS BEEN REFUNDED TO YOUR CARD YOU WILL RECEIVE AN SMS.',
+    'WHEN THE MERCHANT HAS REFUNDED AED 250.00 TO YOUR CARD PLEASE CHECK YOUR BALANCE.',
+    'AED 250.00 has been credited to your card if approved.',
+    'AED 250.00 has been refunded to your card upon verification.',
+    'AED 250.00 refunded to your card within 7 working days.',
+    'AED 250.00 HAS BEEN REFUNDED TO YOUR CARD WITHIN 5-7 WORKING DAYS.',
+    'تم إيداع مبلغ 250.00 درهم في حسابك في حال الموافقة.',
+    'تم استرداد مبلغ 250.00 درهم إلى بطاقتك خلال 7 أيام عمل.',
+  ].map((body) => [body, 'NO_POST', 'C23 an ALL-CAPS leader, or a trailing condition or time window: not settled']),
+  ...[
+    'AED 250.00 HAS BEEN REFUNDED TO YOUR CARD ENDING 1234.',
+    'REFUND FROM AFTER EIGHT CAFE OF AED 250.00 CREDITED TO YOUR CARD ENDING 1234.',
+    'AFTER CANCELLATION AED 250.00 HAS BEEN REFUNDED TO YOUR CARD ENDING 1234 ON 12 MAY 2026.',
+  ].map((body) => [body, 'INCOME_REFUND', 'C23 ALL-CAPS completed refunds keep their income']),
 ];
 
 // ── Case selection ───────────────────────────────────────────────────────────────────────────────────────────────────
