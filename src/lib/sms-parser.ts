@@ -2510,7 +2510,7 @@ const EN_CREDIT_WORDS = {
   // Lowercase leaders anywhere, capitalised ones only (not "AFTER EIGHT" or "ONCE UPON" in a merchant name).
   conditional: /(?:^|[^\p{L}])(?:[Ii]f|[Oo]nce|[Ww]hen(?:ever)?|[Aa]fter|[Uu]ntil|[Uu]nless|[Ww]hether|[Aa]s\s+soon\s+as)(?![\p{L}])/gu,
   negatedBefore: /(?:\b(?:has|have|had|was|were|is|are|did|does|do|will|would|could|can|shall)\s+(?:not|never)|\b(?:hasn|haven|hadn|wasn|weren|isn|aren|didn|doesn|don|won|wouldn|couldn|can)['’]t|\byet\s+to\s+be|\bnot\s+(?:yet\s+)?been|\bnever\s+been)\s+(?:(?:yet|been|be|successfully|fully|now)\s+){0,3}$/i,
-  pendingBefore: /\b(?:will|shall|would|is\s+going\s+to|are\s+going\s+to)\s+(?:(?:be|soon|shortly|now|then)\s+){0,2}$|\b(?:is|are|am)\s+(?:currently\s+|now\s+)?being\s+$/i,
+  pendingBefore: /\b(?:will|shall|would|may|might|can|could|should|must|is\s+going\s+to|are\s+going\s+to)\s+(?:(?:be|soon|shortly|now|then)\s+){0,2}$|\b(?:is|are|am)\s+(?:currently\s+|now\s+)?being\s+$/i,
   progressiveBefore: /\b(?:is|are|am|be)\s+(?:(?:currently|now)\s+)?$/i,
   destination: /\b(?:back\s+)?(?:to|into|onto)\s+[^.,;\n]{0,60}/i,
   // Cashback, rewards and points are not refund credits; their own rules already judge them.
@@ -2605,10 +2605,11 @@ const EN_CAPS_MODAL_RE =
   /(?<!\b(?:BY|FROM|AT)\s+)\b(?:WILL|CAN|SHALL|SHOULD|WOULD|COULD|MUST)\b|['’]LL\b|\bMAY\s+(?:NOT\s+|ALSO\s+)?(?:BE|HAVE|TAKE|REFLECT|APPEAR|SHOW|RECEIVE|CHECK|CONTACT|CALL|VIEW|USE|NEED|GET|SEE)\b/;
 // A trailing condition on the credit ("… if approved", "… upon verification"), and for a refund a time window ("… within 7
 // working days"), in the credit's own sentence: the money is not settled yet (Change Reviewer 1ae30382). A time window on a
-// salary or a deposit ("available within 2 hours") is not a pending refund. "If the transaction has been authorised by you,
-// please ignore …" is a reassurance footer, not a condition (Reviewer b895dc2e).
+// salary or a deposit ("available within 2 hours") is not a pending refund. Only the reassurance footer "if the transaction
+// has been authorised by you, please ignore …" is not a condition (Reviewer b895dc2e); "when confirmed by you" still is
+// (Reviewer 3ca33c8f).
 const EN_TRAILING_CONDITION_RE =
-  /\b(?:if|once|when|provided(?:\s+that)?)\s+(?:(?:it|this|they|the\s+\w+)\s+(?:is|are|has\s+been|gets?)\s+)?(?:approved|authori[sz]ed|verified|confirmed|cleared|accepted|validated)\b(?!\s+by\s+you\b)|\b(?:upon|subject\s+to)\s+(?:(?:the|your|merchant|bank)\s+)?(?:approval|verification|confirmation|clearance|validation)\b/i;
+  /\b(?:if|once|when|provided(?:\s+that)?)\s+(?:(?:it|this|they|the\s+\w+)\s+(?:is|are|has\s+been|gets?)\s+)?(?:approved|authori[sz]ed|verified|confirmed|cleared|accepted|validated)\b(?!\s+by\s+you\b,?\s+(?:(?:please|kindly)\s+)?(?:ignore|disregard)\b)|\b(?:upon|subject\s+to)\s+(?:(?:the|your|merchant|bank)\s+)?(?:approval|verification|confirmation|clearance|validation)\b/i;
 const EN_TIME_WINDOW_RE = /\bwithin\s+(?:the\s+next\s+)?\d+(?:\s*[-–]\s*\d+)?\s+(?:working\s+|business\s+|banking\s+)?(?:days?|hours?|weeks?)\b/i;
 // A window that a later display verb takes ("… has been credited … and will reflect within 5 working days") says when the
 // completed credit shows, as C12 and the same text as two sentences do; a window bound to the credit itself ("refunded to your
@@ -2617,12 +2618,16 @@ const EN_DISPLAY_VERB_RE = /\b(?:will|should|may|can|might|could|would)\s+(?:onl
 // Only a refund makes a window a pending refund: a refund verb, or the word itself, not a name or "returns" ("RETURN LOGISTICS
 // LLC", "Investment returns", "REVERSE MORTGAGE CO") (Change Reviewer 0c8c32fa).
 const EN_REFUND_WORD_RE = /\b(?:refund\w*|charge\s*back\w*)\b/i;
-// A later clause with its own subject that does not speak of the money ("; your replacement card will be dispatched once
-// approved") carries its own condition, not the credit's (Change Reviewer 0c8c32fa). "; your account will be credited once
-// approved" or ", the refund will be confirmed once …" still speaks of the money, so it stays in the credit's tail.
-const EN_OTHER_SUBJECT_CLAUSE_RE = /(?:[;,]|\band\b)\s*(?:and\s+)?(?:your|the)\s+(?:[a-z]+\s+){0,2}?(?:will|shall|would|can|may|is|are|has)\b/gi;
-const EN_MONEY_WORD_RE =
-  /\b(?:credit\w*|refund\w*|deposit\w*|revers\w*|return\w*|process\w*|charge\s*back\w*|amount|funds?|money|balance|payment|transaction|dispute|claim|request|case|complaint)\b/i;
+// A later clause whose own subject is a known non-money object ("; your replacement card will be dispatched once approved")
+// carries its own condition, not the credit's (Change Reviewer 0c8c32fa). Only such an allow-listed subject cuts the tail
+// (Change Reviewer 823e08b4, Reviewer 3ca33c8f): "the cheque is subject to clearance", "the bank will release it", "the hold
+// will be lifted" stay in the credit's tail, and so does any clause that refers back to the money ("your card will show it").
+const EN_OTHER_SUBJECT_CLAUSE_RE = new RegExp(String.raw`(?:[;,]|\band\b)\s*(?:and\s+)?(?:your|the)\s+` +
+  String.raw`(?:(?:new|replacement|physical|virtual|supplementary)\s+)?(?:card|pin|otp|password|passcode|profile|kyc|documents?|` +
+  String.raw`cheque\s*book|statement\s+copy|address|e-?mail|mobile\s+number)\s+(?:will|shall|would|can|may|is|are|has)\b`, 'gi');
+const EN_MONEY_WORD_RE = new RegExp(String.raw`\b(?:credit\w*|refund\w*|deposit\w*|revers\w*|return\w*|process\w*|charge\s*back\w*|` +
+  String.raw`amount|funds?|money|balance|payment|transaction|dispute|claim|request|case|complaint|cheque|sum|transfer|hold|lien|` +
+  String.raw`releas\w*|post\w*|clear\w*|it|its|them|this|these|those|same)\b`, 'i');
 function creditOwnTail(tail: string): string {
   for (const clause of tail.matchAll(EN_OTHER_SUBJECT_CLAUSE_RE)) {
     if (!EN_MONEY_WORD_RE.test(tail.slice(clause.index!))) return tail.slice(0, clause.index);
@@ -2711,9 +2716,13 @@ const AR_TIME_WINDOW_RE = new RegExp(`${AR_NB}خلال\\s+\\d+(?:\\s*[-–]\\s*\
 const AR_DISPLAY_VERB_RE = new RegExp(`${AR_NB}و?(?:سيظهر|ستظهر|سينعكس|ستنعكس|يظهر|تظهر|سوف\\s+(?:يظهر|تظهر|ينعكس|تنعكس))${AR_NA}`);
 /**
  * "نود إعلامك، أن تم …", "يسرنا إبلاغك: أن تم …": after a verb of informing, ان is "that", not "if" (both reviewers on #242),
- * unless a main clause answers it ("نود إعلامك، إن تم استرداد … ستصلك رسالة" is still a condition).
+ * unless it is written "إن" (the hamza below is "if", read from the original text) or an answer follows in the sentence or
+ * the next one: "… ستصلك رسالة", "… فيرجى تجاهل …", "… فسوف …", "… يمكنك …", "… فتحقق …" (Reviewer 3ca33c8f, Change Reviewer
+ * 823e08b4).
  */
 const AR_INFORM_BEFORE_RE = new RegExp(`${AR_NB}(?:اعلام|ابلاغ|اخبار|افاده|نفيد|نحيط|نعلم|نخبر|نوكد|علما)[${AR_LETTER}]*\\s*[,:]?\\s*$`);
+const AR_ANSWER_RE = new RegExp(`${AR_NB}ف?(?:س[يتن][${AR_LETTER}]{2,}|سوف\\s+[${AR_LETTER}]+|يرجي|الرجاء|يمكنك|بامكانك|لا\\s+داعي)|` +
+  `${AR_NB}ف(?:تحقق|اتصل|تجاهل|راجع|تواصل|لا)${AR_NA}`);
 /** "سيظهر المبلغ في حسابك خلال 5-7 أيام عمل": the processed money is not there yet. */
 const AR_PROCESSED_NOT_YET_RE = new RegExp(
   `${AR_NB}(?:سيظهر|ستظهر|سينعكس|ستنعكس|سيضاف|ستضاف|سيتم\\s+(?:ايداع|اضافه|اظهار))${AR_NA}|${AR_NB}قد\\s+يستغرق[^.\\n]{0,40}?(?:يوم|ايام)${AR_NA}`);
@@ -2764,12 +2773,15 @@ function arCreditClauses(sentence: string, debitBeside = false): CreditClause[] 
   }
   return clauses.filter((c) => debitBeside || refundObject.has(c) || !c.verbs.every((verb) => verb === 'processed'));
 }
-function arCreditSettlement(sentence: string, clause: CreditClause, rawAfter: string): CreditSettlement {
+function arCreditSettlement(sentence: string, clause: CreditClause, rawAfter: string, raw?: string): CreditSettlement {
   const after = foldOrthography(rawAfter);
   const lead = sentence.slice(0, clause.start);
-  const answered = AR_FUTURE_MAIN_CLAUSE_RE.test(sentence.slice(clause.end));
-  const leaders = [...lead.matchAll(AR_CONDITIONAL_RE)]
-    .filter((leader) => answered || !/^و?ان$/.test(leader[0]) || !AR_INFORM_BEFORE_RE.test(lead.slice(0, leader.index)));
+  const next = after.split(REFUND_SENTENCE_BREAK_RE).find((text) => text.trim() !== '') ?? '';
+  const answered = AR_ANSWER_RE.test(sentence.slice(clause.end)) || AR_ANSWER_RE.test(next);
+  // Without the original text the hamza is unknown, so ان stays a leader.
+  const informedThat = (leader: RegExpMatchArray): boolean => /^و?ان$/.test(leader[0]) && !answered && raw !== undefined &&
+    raw[leader.index! + leader[0].length - 2] !== 'إ' && AR_INFORM_BEFORE_RE.test(lead.slice(0, leader.index));
+  const leaders = [...lead.matchAll(AR_CONDITIONAL_RE)].filter((leader) => !informedThat(leader));
   const last = leaders[leaders.length - 1];
   const betweenLeaderAndCredit = last ? lead.slice(last.index! + last[0].length) : '';
   if (last && !betweenLeaderAndCredit.includes(',') &&
@@ -2805,9 +2817,12 @@ function arCreditSettlement(sentence: string, clause: CreditClause, rawAfter: st
   }
   return { verdict: 'settled' };
 }
-/** The verdict for one sentence's credit clause; `after` is the text that follows the sentence. */
-export function creditSettlement(sentence: string, clause: CreditClause, after = ''): CreditSettlement {
-  if (clause.ar) return arCreditSettlement(sentence, clause, after);
+/**
+ * The verdict for one sentence's credit clause; `after` is the text that follows the sentence, and `raw` the sentence before
+ * foldOrthography (same offsets), which Arabic needs to tell "إن" (if) from "أن" (that).
+ */
+export function creditSettlement(sentence: string, clause: CreditClause, after = '', raw?: string): CreditSettlement {
+  if (clause.ar) return arCreditSettlement(sentence, clause, after, raw);
   const lead = sentence.slice(0, clause.start).replace(EN_CREDIT_WORDS.coordinated, '');
   const leaders = [...lead.matchAll(EN_CREDIT_WORDS.conditional)];
   if (isAllCapsSentence(sentence)) leaders.push(...lead.matchAll(EN_CAPS_LEADER_RE));
@@ -2861,20 +2876,20 @@ const creditAmounts = (text: string): number[] => [...refundAmounts(text),
 const BALANCE_SEGMENT_RE = new RegExp(String.raw`\b(?:avl\.?|avail(?:able|\.)?)\s+(?:cr\.?\s+|credit\s+)?(?:bal(?:ance)?|limit)\b[^;\n]*|\bbalance\s+(?:is|:)[^;\n]*|` +
   `${AR_NB}(?:ال)?(?:رصيد|حد)\\s+(?:ال)?متاح${AR_NA}[^;\\n]*`, 'gi');
 const noteAmounts = (text: string): number[] => creditAmounts(text.replace(BALANCE_SEGMENT_RE, ' '));
-type SettlementSentence = { start: number; text: string; clauses: CreditClause[] };
+type SettlementSentence = { start: number; text: string; raw: string; clauses: CreditClause[] };
 /** One sentence's verdict: a settled clause settles it; otherwise a refusal outranks a note that can be blanked. */
 function sentenceSettlement(s: SettlementSentence, after: string): CreditSettlement {
-  const verdicts = s.clauses.map((clause) => creditSettlement(s.text, clause, after));
+  const verdicts = s.clauses.map((clause) => creditSettlement(s.text, clause, after, s.raw));
   return verdicts.find((v) => v.verdict === 'settled') ?? verdicts.find((v) => v.verdict === 'refused' || v.verdict === 'unknown') ??
     verdicts[0];
 }
 /** The body's sentences, folded (one character to one, so `start` indexes the original too), with their credit clauses. */
 function settlementSentences(original: string): SettlementSentence[] {
   const body = foldOrthography(original);
-  const spans: { start: number; text: string }[] = [];
+  const spans: { start: number; text: string; raw: string }[] = [];
   let start = 0;
   for (const end of [...[...body.matchAll(REFUND_SENTENCE_BREAK_RE)].map((match) => match.index! + match[0].length), body.length]) {
-    if (end > start) spans.push({ start, text: body.slice(start, end) });
+    if (end > start) spans.push({ start, text: body.slice(start, end), raw: original.slice(start, end) });
     start = Math.max(start, end);
   }
   const debitBeside = spans.some(({ text }) => CREDIT_SETTLEMENT_DEBIT_RE.test(text) && creditAmounts(text).length > 0);
