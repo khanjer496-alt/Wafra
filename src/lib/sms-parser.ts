@@ -2454,8 +2454,22 @@ const REFUND_SIDE_NOTE_NOT_SETTLED_RE =
   /\b(?:is|are|was|were|has|have|had|did|does)\s+not\b|\b(?:isn|aren|wasn|weren|hasn|haven|hadn|didn|doesn)['’]t\b|\bnot\s+(?:yet\s+)?been\b|\b(?:is|are)\s+being\b|\bwill\b/i;
 const REFUND_SIDE_NOTE_COMPLETED_RE =
   /\b(?:has|have|had|was|were)\s+(?:been\s+)?(?:(?:successfully|fully|now)\s+)?(?:credited|refunded|reversed|returned|posted)\b/i;
+// Android RC 396 F2: "AED 40.00 was debited … . Your reversal request is under process." — an amount-free reversal note that
+// is conditional, negated, future or still in process, beside a separate debit, is a side note too: the bare "reversal"
+// must not turn the debit into income. The refund-note rules above are unchanged.
+const REVERSAL_SIDE_NOTE_WORD_RE = /\breversal\b/i;
+// In-process statuses of a refund or reversal (RC 396 F2; Change Reviewer ad205bc6, Reviewer 85a61c6d). EN: after "is/are",
+// after ":", "-" or "Status:", or bare "under/in process|progress"; a request verb ("has been raised/requested/lodged …",
+// a bare "initiated" not "initiated by"). AR (post-fold): قيد/تحت … and جاري المعالجة/التنفيذ.
+const EN_IN_PROCESS_STATUS = String.raw`(?:under[-\s]+(?:process(?:ing)?|review)|in[-\s]+(?:process|progress|queue)|being\s+(?:processed|reviewed|initiated)|pending|awaiting|awaited|on\s+hold)\b`;
+const EN_IN_PROCESS_LEAD = String.raw`(?:\b(?:is|are)\s+(?:(?:still|currently|now)\s+)?|\s*[:\-–]\s*(?:status\s*[:\-–]?\s*)?|\bstatus\s*(?:is\s+|[:\-–]\s*)|\s(?=(?:under|in)[-\s]+(?:process|progress)))`;
+const EN_IN_PROCESS_REQUESTED = String.raw`\b(?:has\s+been|have\s+been|was|were)\s+(?:initiated|submitted|requested|raised|lodged|registered|logged)\b|\binitiated\b(?!\s+by)`;
+const AR_IN_PROCESS_STATUS = `(?<![${AR_LETTER}])(?:(?:قيد|تحت)\\s+(?:ال)?(?:انتظار|معالجه|تنفيذ|اجراء|مراجعه|دراسه)|جار(?:ي)?\\s+(?:ال)?(?:معالجه|تنفيذ))(?![${AR_LETTER}])`;
+const REVERSAL_SIDE_NOTE_IN_PROCESS_RE = new RegExp(`${EN_IN_PROCESS_LEAD}${EN_IN_PROCESS_STATUS}|${EN_IN_PROCESS_REQUESTED}`, 'i');
+/** A debit sentence that itself states a reversal credit ("reversal of/for …", "reversed"), not "a reversal fee". */
+const REVERSAL_CREDIT_PHRASE_RE = /\breversal\s+(?:of|for)\b|\breversed\b/i;
 function refundSideNotes(body: string): { body: string; ambiguous: boolean } {
-  if (!REFUND_SIDE_NOTE_WORD_RE.test(body)) return { body, ambiguous: false };
+  if (!REFUND_SIDE_NOTE_WORD_RE.test(body) && !REVERSAL_SIDE_NOTE_WORD_RE.test(body)) return { body, ambiguous: false };
   const sentences: Array<{ start: number; text: string }> = [];
   let start = 0;
   for (const end of [...[...body.matchAll(REFUND_SENTENCE_BREAK_RE)].map((match) => match.index! + match[0].length), body.length]) {
@@ -2478,6 +2492,17 @@ function refundSideNotes(body: string): { body: string; ambiguous: boolean } {
       out = out.slice(0, at) + ' '.repeat(text.length) + out.slice(at + text.length);
     } else if (separateDebit && (negated || (REFUND_RE.test(text) && !completedRefund))) {
       ambiguous = true;
+    }
+  }
+  const separateDebitForReversal = sentences.some(({ text }) => !REFUND_SIDE_NOTE_WORD_RE.test(text) &&
+    !REVERSAL_CREDIT_PHRASE_RE.test(text) && REFUND_SIDE_NOTE_DEBIT_RE.test(text) && !REFUND_SIDE_NOTE_RETURNED_RE.test(text) &&
+    refundAmounts(text).length > 0);
+  for (const { start: at, text } of separateDebitForReversal ? sentences : []) {
+    const word = REVERSAL_SIDE_NOTE_WORD_RE.exec(text);
+    if (!word || REFUND_SIDE_NOTE_WORD_RE.test(text) || refundAmounts(text).length > 0) continue;
+    if (governsRefundCredit(text.slice(0, word.index)) || REFUND_SIDE_NOTE_NOT_SETTLED_RE.test(text) ||
+      REVERSAL_SIDE_NOTE_IN_PROCESS_RE.test(text)) {
+      out = out.slice(0, at) + ' '.repeat(text.length) + out.slice(at + text.length);
     }
   }
   return { body: out, ambiguous };
@@ -6612,6 +6637,72 @@ const NOTICE_PREFIX_CONNECTOR_RE = /^(\W{0,4}[^\s:\n][^:\n]{0,30}?)[ \t]+[–—
 /** "Top up your balance to complete this payment": the payment has not gone through. */
 /** "Your reversal request for AED 75.00 … has been received": a request, nothing moved yet. */
 const NOTICE_REVERSAL_REQUEST_RE = /\b(?:reversal|refund|dispute|chargeback)\s+request\b(?:[^.\n]|\.(?=\d)){0,80}?\b(?:has\s+been\s+|was\s+|is\s+)?(?:received|registered|logged|submitted|raised)\b/i;
+/**
+ * "Reversal of AED 40.00 is under process", "عكس مبلغ 40.00 درهم قيد المعالجة": the refund or reversal that the figure's own
+ * clause states is still under way, so nothing has arrived (Android RC 396 F2, App QA Lead corpus N06). Read on the core
+ * clause only, like NOTICE_NOT_YET_RE: a side note beside a debit ("… debited … . The refund is being processed.") leaves
+ * the debit to post.
+ */
+const NOTICE_REFUND_IN_PROCESS_RE = new RegExp(
+  String.raw`\b(?:refund|reversal)s?\b(?:[^.\n;]|\.(?=\d)|;(?=\s*status\b)){0,80}?(?:${EN_IN_PROCESS_LEAD}${EN_IN_PROCESS_STATUS}|${EN_IN_PROCESS_REQUESTED})` +
+    // "… - reversal pending", "refund awaited": the status right after the noun (Change Reviewer a3da9de8).
+    String.raw`|\b(?:refund|reversal)s?\s+(?:pending|awaited|on\s+hold)\b` +
+    `|(?<![${AR_LETTER}])(?:عكس|استرداد|استرجاع|ارجاع|اعاده)(?![${AR_LETTER}])(?:[^.\\n؟!،؛;]|\\.(?=\\d)){0,80}?${AR_IN_PROCESS_STATUS}`,
+  'i',
+);
+/** The refund or reversal noun, which must come before the figure for the clause to be about this money. */
+const NOTICE_REFUND_NOUN_RE = new RegExp(`\\b(?:refund|reversal)s?\\b|(?<![${AR_LETTER}])(?:عكس|استرداد|استرجاع|ارجاع|اعاده)(?![${AR_LETTER}])`, 'i');
+/** A completed refund or reversal credit in the same clause ("… which was pending, has now been credited …", "تم استرداد …"). */
+const NOTICE_REFUND_COMPLETED_RE = new RegExp(
+  String.raw`\b(?:has|have|had)\s+(?:(?:now|already|just)\s+)?been\s+(?:(?:successfully|fully|now)\s+)?(?:credited|refunded|reversed|returned|deposited)\b` +
+    String.raw`|\b(?:was|were)\s+(?:(?:successfully|fully|now)\s+)?(?:credited|refunded|reversed|returned|deposited)\b` +
+    String.raw`|\band\s+(?:has\s+been\s+|was\s+)?(?:credited|refunded|reversed|returned|deposited)\s+(?:back\s+)?(?:to|into)\b` +
+    `|(?<![${AR_LETTER}])تم\\s+(?:عكس|استرداد|استرجاع|ارجاع|ايداع|اضافه|اعاده)(?![${AR_LETTER}])`,
+  'i',
+);
+/**
+ * A telegraphic completed credit ("Reversal of AED 40.00 credited to your card …"), not under a modal or a condition; it
+ * counts only before the in-process status ("…, your other reversal is under process"), never after it ("… is pending,
+ * amount credited to your card upon approval") (Reviewer 1fce73a5).
+ */
+const NOTICE_REFUND_TELEGRAPHIC_CREDIT_RE =
+  /(?<!\b(?:be|being|once|when|if|after|until|unless)\s+)\b(?:credited|refunded|reversed|returned|processed|deposited)\s+(?:back\s+)?(?:to|into)\s+your\b/i;
+/** The text says a refund or reversal is still in process and states no completed credit for it. */
+function refundInProcessUncompleted(text: string): boolean {
+  const status = NOTICE_REFUND_IN_PROCESS_RE.exec(text);
+  return status !== null && !NOTICE_REFUND_COMPLETED_RE.test(text) &&
+    !NOTICE_REFUND_TELEGRAPHIC_CREDIT_RE.test(text.slice(0, status.index + status[0].length));
+}
+/** A ";"/"،" that ends a clause, not one that only introduces its status ("Reversal of AED 40.00; status: under process"). */
+const NOTICE_CLAUSE_STOP_RE = /[;؛،](?!\s*status\b)/i;
+/**
+ * The figure's clause, up to the first ";" or "،" after the figure, says this refund or reversal is still in process. The
+ * noun comes before the figure ("Reversal of AED 40.00 …") or right after it ("AED 40.00 refund is under process", Reviewer
+ * 696b9c8f), so a debit clause that only mentions another refund keeps its debit.
+ */
+function refundInProcessClause(core: string, lead: string, figure: string): boolean {
+  const stop = core.slice(lead.length).search(NOTICE_CLAUSE_STOP_RE);
+  const head = stop < 0 ? core : core.slice(0, lead.length + stop);
+  const nounFirst = NOTICE_REFUND_NOUN_RE.test(lead) || /^\s*(?:refund|reversal)s?\b/i.test(core.slice(lead.length + figure.length));
+  return nounFirst && refundInProcessUncompleted(head);
+}
+/**
+ * The body with every sentence (or ";"/"،" part) that says a refund or reversal is still in process, and states no completed
+ * credit, blanked, and "reversal fee/charge" blanked: neither can make the message a reversal ("Purchase of AED 40.00 at
+ * NOON. Reversal of AED 40.00 is under process." is the purchase; "… debited … for a reversal fee." is a debit). RC 396 F2.
+ */
+function withoutInProcessRefundSentences(body: string): string {
+  let out = body.replace(/\breversal\s+(?:fees?|charges?)\b/gi, (fee) => ' '.repeat(fee.length));
+  let start = 0;
+  for (const end of [...[...body.matchAll(/[.!?](?=\s|$)|[;؛،](?!\s*status\b)|\n/gi)].map((match) => match.index! + match[0].length), body.length]) {
+    const text = body.slice(start, end);
+    if (end > start && refundInProcessUncompleted(text)) {
+      out = out.slice(0, start) + ' '.repeat(end - start) + out.slice(end);
+    }
+    start = Math.max(start, end);
+  }
+  return out;
+}
 const NOTICE_TOP_UP_RE = /\btop\s+up\s+(?:your\s+)?\w+\s+to\s+complete\b|^\W{0,4}(?:[^\s:][^:\n]{0,30}:\s*)?pending\s*(?::|(?:purchase|transaction|payment|charge|transfer|debit|withdrawal)\b)/i;
 /**
  * A status standing as its OWN segment anywhere in the alert — a line, or the
@@ -6724,7 +6815,7 @@ function moneyNoticeKindInBody(text: string): MoneyNoticeKind | null {
   // The ask may sit before the figure, after a blank line, or behind a bar.
   if (NOTICE_P2P_IN_RE.test(clause) &&
     NOTICE_UNCLAIMED_RE.test(principal.before.slice(-160) + ' ' + clause + ' ' + principal.after.slice(0, 160))) return 'unclaimed';
-  if (NOTICE_NOT_YET_RE.test(core) || NOTICE_UNDER_PROCESS_RE.test(body) ||
+  if (NOTICE_NOT_YET_RE.test(core) || refundInProcessClause(core, lead, principal.figure) || NOTICE_UNDER_PROCESS_RE.test(body) ||
     NOTICE_STATUS_PENDING_RE.test(body)) return 'not-yet';
   // "A charge of QAR 701.46 at SPOTIFY renews tomorrow": an upcoming
   // renewal, unless the clause also says the charge was taken.
@@ -9031,7 +9122,7 @@ function parseSmsInner(
   const isIncomingCreditReversal = INCOMING_CREDIT_REVERSAL_RE.test(prose);
   const isRefund = !isIncomingCreditReversal &&
     // A blanked side note is not a reversal statement either ("… is not returned to your card", "… and was later reversed").
-    (REFUND_RE.test(refundNotes.body) || REVERSAL_RE.test(refundNotes.body) || arabicPurchaseRefundHeader ||
+    (REFUND_RE.test(refundNotes.body) || REVERSAL_RE.test(withoutInProcessRefundSentences(refundNotes.body)) || arabicPurchaseRefundHeader ||
       REFUND_HEADING_RE.test(prose));
 
   if (PROMO_RE.test(raw) && !TXN_EVIDENCE_RE.test(raw)) return null;
