@@ -10,6 +10,11 @@ name: Build Android APK
 # while an explicitly selected review branch can produce an isolated candidate
 # without silently substituting `main` underneath it.
 on:
+  # A/B internal test APKs without a manual dispatch: a push to an
+  # android/ab-build-* branch that touches this file builds that branch once.
+  push:
+    branches: ['android/ab-build-*']
+    paths: ['.github/workflows/build-apk.yml']
   workflow_dispatch:
     inputs:
       bundle:
