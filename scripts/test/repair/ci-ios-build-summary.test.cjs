@@ -99,6 +99,13 @@ test('keeps file paths and long target names readable', () => {
   const out = summarize([{ name: 'x.log', text: log }], 65);
   assert.match(out, /modules\/wafra-widgets\/ios\/WafraPrivacyCover\.swift:83:14: error: cannot find type/);
   assert.match(out, /ExpoModulesCore-ExpoModulesCore_privacy/);
+  const relative = summarize([{ name: 'r.log', text: [
+    "error: Build input file cannot be found: 'ios/Pods/Target Support Files/ExpoModulesCore/ExpoModulesCore2Info.plist'",
+    'error: cannot open Pods/Headers/Public/React2Core/RCTBridgeModule.h',
+  ].join('\n') }], 65);
+  assert.match(relative, /Files\/ExpoModulesCore\/ExpoModulesCore2Info\.plist/);
+  assert.match(relative, /Pods\/Headers\/Public\/React2Core\/RCTBridgeModule\.h/);
+  assert.doesNotMatch(relative, /redacted-blob/);
 });
 
 test('caps entries and line length, and dedupes repeats', () => {

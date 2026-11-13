@@ -53,13 +53,23 @@ function redactor(secrets) {
       .replace(SIGNING_IDENTITY, '$1: [identity] (')
       .replace(QUOTED_TEAM, '$1$2[team]$2')
       // Unknown base64 blobs that "/" would otherwise split into short pieces:
-      // 24+ chars, not starting with "/" (paths do), mixing digits, upper and lower case.
-      .replace(/(^|[^A-Za-z0-9+/=])([A-Za-z0-9+=][A-Za-z0-9+/=]{23,})/g, (m, pre, run) =>
-        /[0-9]/.test(run) && /[a-z]/.test(run) && /[A-Z]/.test(run) && run.includes('/') ? `${pre}[redacted-blob]` : m)
+      // 24+ chars, not starting with "/" (absolute paths do), mixing digits with
+      // upper and lower case, and dense in capitals (random base64 is about half
+      // upper case; CamelCase path segments such as Pods/Headers/React2Core are not).
+      .replace(/(^|[^A-Za-z0-9+/=])([A-Za-z0-9+=][A-Za-z0-9+/=]{23,})/g, (m, pre, run) => {
+        if (!run.includes('/') || !/[0-9]/.test(run) || !/[a-z]/.test(run) || !/[A-Z]/.test(run)) return m;
+        const letters = run.replace(/[^A-Za-z]/g, '');
+        const upper = letters.replace(/[^A-Z]/g, '').length;
+        return upper / letters.length >= 0.4 || /[+=]/.test(run) ? `${pre}[redacted-blob]` : m;
+      })
       // Unknown token-shaped runs: 20+ characters mixing letters and digits.
       // "/" and "." split runs so file paths and target names stay readable;
       // known secrets (including base64 key lines) are already caught above.
-      .replace(/[A-Za-z0-9+_=-]{20,}/g, run => /[0-9]/.test(run) && /[A-Za-z]/.test(run) ? '[redacted-token]' : run)
+      // (20-27 chars need 2+ digits so names like ExpoModulesCore2Info stay readable).
+      .replace(/[A-Za-z0-9+_=-]{20,}/g, run => {
+        const digits = run.replace(/[^0-9]/g, '').length;
+        return /[A-Za-z]/.test(run) && (run.length >= 28 ? digits >= 1 : digits >= 2) ? '[redacted-token]' : run;
+      })
       .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[email]');
   };
 }
