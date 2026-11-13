@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: a7120dc7ef94142670b84a697d8a48179072fc91bedef961a007605ba783b9cc
+// Generated from normal shipping TypeScript. Source SHA-256: 355a8b7bdb119e23dfaf748ee2ab3bea38dfcedf0f1f7f54dadae6bde4ee4f1e
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -12005,18 +12005,25 @@ function enCreditClauses(sentence, debitBeside = false) {
     return clauses;
 }
 const EN_TEMPORAL_LEADER_RE = /^(?:once|when(?:ever)?|after|as\s+soon\s+as)$/i;
-const EN_CLAUSE_AFTER_CREDIT_RE = /\b(?:you|it|we|they|this|the\s+(?:amount|balance|refund|money|credit|funds?))\s+(?:will|can|may|shall|should|would|could)\b/i;
+const EN_CREDIT_SUBJECT_AFTER_LEADER_RE = new RegExp(String.raw `^\s+(?:(?:(?:the|your|a|an|this|that)\s+)?` +
+    String.raw `(?:refund\w*|amount|credit|money|funds?|payment|sum)\b|it\b|(?:[A-Z]{3}|Dhs?)\.?\s*\d|\d[\d,.]*\s*(?:[A-Z]{3}|Dhs?)\b|` +
+    String.raw `[A-Z0-9][\w.&'’-]*(?:\s+[A-Z0-9][\w.&'’-]*){0,3}\s+(?:has|have|had|is|was|were|will|did|does|refunded|reversed|returned|credited|deposited|processed)\b)`);
+const EN_MODAL_AFTER_CREDIT_RE = /\b(?:will|can|may|shall|should|would|could|must)\b|['’]ll\b/i;
 const EN_COMPLETED_STRETCH_RE = /\b(?:was|were|had|has\s+been|have\s+been)\b/i;
 function leaderGovernsCredit(sentence, leader, clause) {
     const word = leader[0].replace(/^[^\p{L}]+/u, '');
     const leaderEnd = leader.index + leader[0].length;
     if (!EN_TEMPORAL_LEADER_RE.test(word))
         return true;
-    if (/^once$/i.test(word) && /^\s+(?:again|more)\b/i.test(sentence.slice(leaderEnd)))
+    const rest = sentence.slice(leaderEnd);
+    if (/^once$/i.test(word) && /^\s+(?:again|more)\b/i.test(rest))
         return false;
-    if (EN_CLAUSE_AFTER_CREDIT_RE.test(sentence.slice(clause.end)))
+    if (EN_CREDIT_SUBJECT_AFTER_LEADER_RE.test(rest) || EN_MODAL_AFTER_CREDIT_RE.test(sentence.slice(clause.end)))
         return true;
-    return !EN_COMPLETED_STRETCH_RE.test(sentence.slice(leaderEnd, clause.end));
+    const lead = sentence.slice(0, clause.start);
+    const completed = EN_COMPLETED_STRETCH_RE.test(sentence.slice(leaderEnd, clause.end)) ||
+        (/ed$/i.test(clause.verbs[0]) && !EN_CREDIT_WORDS.pendingBefore.test(lead) && !EN_CREDIT_WORDS.progressiveBefore.test(lead));
+    return !completed;
 }
 function creditSettlement(sentence, clause, after = '') {
     const lead = sentence.slice(0, clause.start).replace(EN_CREDIT_WORDS.coordinated, '');
