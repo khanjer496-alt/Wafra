@@ -162,7 +162,11 @@ final class PurchaseUITests: XCTestCase {
         }
         let buttons = app.buttons.allElementsBoundByIndex.prefix(30).map { String($0.label.prefix(60)) }.filter { !$0.isEmpty }
         let alerts = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.allElementsBoundByIndex.map { String($0.label.prefix(100)) }
-        return "store transactions: \(tx); result-like text: \(notices); buttons: \(buttons); system alerts: \(alerts)"
+        var sim = "unknown"
+        let s0 = session!; let sem = DispatchSemaphore(value: 0)
+        Task.detached { let e = await s0.simulatedError(forAPI: .purchase); sim = e == nil ? "none" : "\(e!)"; sem.signal() }
+        _ = sem.wait(timeout: .now() + 10)
+        return "simulated purchase error: \(sim); store transactions: \(tx); result-like text: \(notices); buttons: \(buttons); system alerts: \(alerts)"
     }
     var entitled: Bool { !el("pro-buy").exists && !el("pro-plans").exists }
 
@@ -178,22 +182,6 @@ final class PurchaseUITests: XCTestCase {
             guard yearly.label.contains("49.99") else { throw StepFail("yearly row has no 49.99: '\(yearly.label)'") }
             return "weekly '\(weekly.label)' / yearly '\(yearly.label)'"
         }
-
-        // P5: a cancelled purchase leaves Pro off (done first: it needs the not-entitled state)
-        step("P5") {
-            try simulatePurchaseCancel(true)
-            defer { try? simulatePurchaseCancel(false) }
-            try need(el("pro-plan-weekly"), "weekly row", 10)
-            el("pro-plan-weekly").tap()
-            try need(el("pro-buy"), "buy button", 10)
-            el("pro-buy").tap()
-            Thread.sleep(forTimeInterval: 12)
-            shot("P5-after-cancelled-purchase")
-            guard el("pro-buy").exists, el("pro-plans").exists else { throw StepFail("Pro looks unlocked after a cancelled purchase") }
-            guard session.allTransactions().isEmpty else { throw StepFail("a transaction exists after cancel: \(session.allTransactions().count)") }
-            return "plans and buy button still shown; 0 transactions"
-        }
-        try? simulatePurchaseCancel(false)
 
         // P2: buy weekly, Pro unlocks
         step("P2") {
@@ -259,5 +247,25 @@ final class PurchaseUITests: XCTestCase {
             guard session.allTransactions().contains(where: { $0.productIdentifier == "wafra_pro_yearly" }) else { throw StepFail("no yearly transaction") }
             return "yearly bought, Pro on, still on after relaunch"
         }
+
+        // P5: a cancelled purchase leaves Pro off (runs LAST on a fresh, not-entitled install: the simulated cancel must not leak into the buy steps)
+        step("P5") {
+            session.clearTransactions()
+            try requestHostReinstall(3)
+            try openPro(onboard: true)
+            try simulatePurchaseCancel(true)
+            defer { try? simulatePurchaseCancel(false) }
+            try need(el("pro-plan-weekly"), "weekly row", 10)
+            el("pro-plan-weekly").tap()
+            try need(el("pro-buy"), "buy button", 10)
+            el("pro-buy").tap()
+            Thread.sleep(forTimeInterval: 12)
+            shot("P5-after-cancelled-purchase")
+            guard el("pro-buy").exists, el("pro-plans").exists else { throw StepFail("Pro looks unlocked after a cancelled purchase") }
+            guard session.allTransactions().isEmpty else { throw StepFail("a transaction exists after cancel: \(session.allTransactions().count)") }
+            return "plans and buy button still shown; 0 transactions"
+        }
+        try? simulatePurchaseCancel(false)
+
     }
 }

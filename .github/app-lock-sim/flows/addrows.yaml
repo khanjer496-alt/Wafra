@@ -29,7 +29,8 @@ appId: ${APP_ID}
     when:
       visible: 'Ledger currency'
     commands:
-      - tapOn: 'USD.*'
+      - tapOn:
+          point: '50%,34%'
       - waitForAnimationToEnd:
           timeout: 4000
 - takeScreenshot: row1-after-currency
@@ -73,7 +74,8 @@ appId: ${APP_ID}
     when:
       visible: 'Ledger currency'
     commands:
-      - tapOn: 'USD.*'
+      - tapOn:
+          point: '50%,34%'
       - waitForAnimationToEnd:
           timeout: 4000
 - takeScreenshot: row2-after-currency
@@ -119,7 +121,8 @@ appId: ${APP_ID}
     when:
       visible: 'Ledger currency'
     commands:
-      - tapOn: 'USD.*'
+      - tapOn:
+          point: '50%,34%'
       - waitForAnimationToEnd:
           timeout: 4000
 - takeScreenshot: row3-after-currency
