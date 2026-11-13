@@ -3,6 +3,15 @@ appId: ${APP_ID}
 - launchApp:
     stopApp: true
 - extendedWaitUntil:
+    visible: 'Sign in to Apple.Account'
+    timeout: 25000
+    optional: true
+- runFlow:
+    when:
+      visible: 'Sign in to Apple.Account'
+    commands:
+      - tapOn: 'Cancel'
+- extendedWaitUntil:
     visible: 'Settings'
     timeout: 40000
 - runFlow:
