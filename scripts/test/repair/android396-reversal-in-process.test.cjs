@@ -152,5 +152,15 @@ test('RC 396 F2 round 1 controls: a completed credit beside a pending one, or af
     'Refund of AED 40.00 has been credited to your card ending 1234; your other refund is pending.',
     'Reversal of AED 40.00 which was under process has been credited to your card ending 1234.',
     'Reversal of AED 40.00 has been credited to your card ending 1234 as requested.',
+    // Review round 2 (Reviewer 1fce73a5 Low 1, EN): a telegraphic credit before the other reversal's status.
+    'Reversal of AED 40.00 credited to your card ending 1234, your other reversal is under process.',
+    'Refund of AED 40.00 credited to your card ending 1234, your other refund is pending.',
   ]) assert.equal(paths(body).js, 'income 4000 / income 4000', body);
+  // …but a telegraphic credit after the status, or under a modal or a condition, is not a completed one.
+  for (const body of [
+    'Reversal of AED 40.00 is pending, amount credited to your card upon approval.',
+    'Reversal of AED 40.00 is under process; once credited to your card you will be notified.',
+    'Reversal of AED 40.00 is under process and will be credited to your card.',
+    'Reversal of AED 40.00, which was requested on 10/11, is under process.',
+  ]) assert.equal(paths(body).js, 'none / none', body);
 });
