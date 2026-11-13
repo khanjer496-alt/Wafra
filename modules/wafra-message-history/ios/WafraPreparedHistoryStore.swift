@@ -372,10 +372,45 @@ public final class WafraPreparedHistoryStore {
   }
 
   public func eraseAll() throws {
-    try coordinated(operation: "erase") { root in
-      try beginEraseIfNeeded(root: root)
-      try completePendingErase(root: root)
+    do {
+      try coordinated(operation: "erase") { root in
+        try beginEraseIfNeeded(root: root)
+        try completePendingErase(root: root)
+      }
+    } catch StoreError.storageFailure {
+      // Only a root whose protection cannot be confirmed (the iOS Simulator)
+      // is erased here; any other storage failure keeps its error.
+      try eraseUnconfirmedProtectionRoot()
     }
+  }
+
+  private func eraseUnconfirmedProtectionRoot() throws {
+    let erased: Bool
+    do {
+      erased = try Self.queue.sync {
+        try WafraUnconfirmedProtectionErase.eraseIfProtectionUnconfirmed(
+          root: try plainRootLocation(),
+          isStoreEntry: { name in
+            name == Self.eraseMarkerName || name.hasPrefix(".invalid-") || Self.validSessionId(name)
+          },
+          removeItem: removeItemHandler
+        )
+      }
+    } catch {
+      throw StoreError.cleanupFailure
+    }
+    guard erased else { throw StoreError.storageFailure }
+  }
+
+  /// The root's location only: never created and never validated.
+  private func plainRootLocation() throws -> URL {
+    if let configuredRoot { return configuredRoot }
+    return try FileManager.default.url(
+      for: .applicationSupportDirectory,
+      in: .userDomainMask,
+      appropriateFor: nil,
+      create: false
+    ).appendingPathComponent("WafraPreparedMessageHistory", isDirectory: true)
   }
 
   private func coordinated<T>(
