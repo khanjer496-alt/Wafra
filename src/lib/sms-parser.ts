@@ -6658,11 +6658,24 @@ const NOTICE_REFUND_COMPLETED_RE = new RegExp(
     `|(?<![${AR_LETTER}])تم\\s+(?:عكس|استرداد|استرجاع|ارجاع|ايداع|اضافه|اعاده)(?![${AR_LETTER}])`,
   'i',
 );
+/**
+ * A telegraphic completed credit ("Reversal of AED 40.00 credited to your card …"), not under a modal or a condition; it
+ * counts only before the in-process status ("…, your other reversal is under process"), never after it ("… is pending,
+ * amount credited to your card upon approval") (Reviewer 1fce73a5).
+ */
+const NOTICE_REFUND_TELEGRAPHIC_CREDIT_RE =
+  /(?<!\b(?:be|being|once|when|if|after|until|unless)\s+)\b(?:credited|refunded|reversed|returned)\s+(?:back\s+)?(?:to|into)\s+your\b/i;
+/** The text says a refund or reversal is still in process and states no completed credit for it. */
+function refundInProcessUncompleted(text: string): boolean {
+  const status = NOTICE_REFUND_IN_PROCESS_RE.exec(text);
+  return status !== null && !NOTICE_REFUND_COMPLETED_RE.test(text) &&
+    !NOTICE_REFUND_TELEGRAPHIC_CREDIT_RE.test(text.slice(0, status.index + status[0].length));
+}
 /** The figure's clause, up to the first ";" or "،" after the figure, says this refund or reversal is still in process. */
 function refundInProcessClause(core: string, lead: string): boolean {
   const stop = core.slice(lead.length).search(/[;؛،]/);
   const head = stop < 0 ? core : core.slice(0, lead.length + stop);
-  return NOTICE_REFUND_NOUN_RE.test(lead) && NOTICE_REFUND_IN_PROCESS_RE.test(head) && !NOTICE_REFUND_COMPLETED_RE.test(head);
+  return NOTICE_REFUND_NOUN_RE.test(lead) && refundInProcessUncompleted(head);
 }
 /**
  * The body with every sentence (or ";"/"،" part) that says a refund or reversal is still in process, and states no completed
@@ -6674,7 +6687,7 @@ function withoutInProcessRefundSentences(body: string): string {
   let start = 0;
   for (const end of [...[...body.matchAll(/[.!?](?=\s|$)|[;؛،]|\n/g)].map((match) => match.index! + match[0].length), body.length]) {
     const text = body.slice(start, end);
-    if (end > start && NOTICE_REFUND_IN_PROCESS_RE.test(text) && !NOTICE_REFUND_COMPLETED_RE.test(text)) {
+    if (end > start && refundInProcessUncompleted(text)) {
       out = out.slice(0, start) + ' '.repeat(end - start) + out.slice(end);
     }
     start = Math.max(start, end);
