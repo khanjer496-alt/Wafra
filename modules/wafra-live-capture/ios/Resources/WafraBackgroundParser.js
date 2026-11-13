@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 28a26b3a06cba77b50e4bc7e53d0021cc0d5d1446694eb946ef616be8917d3a6
+// Generated from normal shipping TypeScript. Source SHA-256: 11f0ae0176b3f0e762f2b5d6ffa2547f94ce2f228be8cbf6dc9d1cdff8ab1953
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -12635,6 +12635,17 @@ const NOTICE_REFUND_IN_PROCESS_RE = new RegExp(String.raw `\b(?:refund|reversal)
     String.raw `|\b(?:refund|reversal)s?\b(?:[^.\n]|\.(?=\d)){0,80}?\b(?:has\s+been|have\s+been|was|were)\s+(?:initiated|submitted)\b` +
     `|(?<![${AR_LETTER}])(?:عكس|استرداد|استرجاع|ارجاع|اعاده)(?![${AR_LETTER}])(?:[^.\\n؟!]|\\.(?=\\d)){0,80}?(?<![${AR_LETTER}])` +
     `(?:قيد\\s+(?:ال)?(?:انتظار|معالجه|تنفيذ|اجراء|مراجعه)|تحت\\s+(?:ال)?(?:اجراء|معالجه|مراجعه|تنفيذ))(?![${AR_LETTER}])`, 'i');
+function withoutInProcessRefundSentences(body) {
+    let out = body;
+    let start = 0;
+    for (const end of [...[...body.matchAll(REFUND_SENTENCE_BREAK_RE)].map((match) => match.index + match[0].length), body.length]) {
+        if (end > start && NOTICE_REFUND_IN_PROCESS_RE.test(body.slice(start, end))) {
+            out = out.slice(0, start) + ' '.repeat(end - start) + out.slice(end);
+        }
+        start = Math.max(start, end);
+    }
+    return out;
+}
 const NOTICE_TOP_UP_RE = /\btop\s+up\s+(?:your\s+)?\w+\s+to\s+complete\b|^\W{0,4}(?:[^\s:][^:\n]{0,30}:\s*)?pending\s*(?::|(?:purchase|transaction|payment|charge|transfer|debit|withdrawal)\b)/i;
 const NOTICE_STATUS_SEGMENT_RE = new RegExp(String.raw `(?:^|\n|\||\s[–—]\s|\s-{1,2}[ \t]*|[(\[]\s*)[ \t]*(?:` +
     `(?:ما|لم|لن)\\s+(?:تم|تمت|يتم|تتم|تكتمل)(?:\\s+(?:ال)?(?:خصم|عمليه|تنفيذ|سداد|تحويل|دفع))?(?:\\s+(?:ال)?مبلغ)?` +
@@ -14018,7 +14029,7 @@ function parseSmsInner(message, overrides, options) {
         return null;
     const isIncomingCreditReversal = INCOMING_CREDIT_REVERSAL_RE.test(prose);
     const isRefund = !isIncomingCreditReversal &&
-        (REFUND_RE.test(refundNotes.body) || REVERSAL_RE.test(refundNotes.body) || arabicPurchaseRefundHeader ||
+        (REFUND_RE.test(refundNotes.body) || REVERSAL_RE.test(withoutInProcessRefundSentences(refundNotes.body)) || arabicPurchaseRefundHeader ||
             REFUND_HEADING_RE.test(prose));
     if (PROMO_RE.test(raw) && !TXN_EVIDENCE_RE.test(raw))
         return null;
