@@ -675,6 +675,8 @@ export function SuperwallBillingProvider({ children }: { children: React.ReactNo
     localeIdentifier: billingLocaleIdentifier(state.language, deviceRegion),
     eventTrackingBehavior: state.privateMode ? 'none' as const : 'all' as const,
     shouldObservePurchases: true,
+    // DIAGNOSTIC (test branch only, never merged): SDK debug log so the reason for a silent 'cancelled' is visible.
+    logging: { level: 'debug' as const, scopes: ['all' as const] },
     paywalls: {
       // Off: preloading builds every campaign paywall's web view on the main
       // thread right after launch. Wafra's own /pro screen is the purchase UI

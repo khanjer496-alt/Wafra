@@ -88,7 +88,8 @@ for l in open(raw, errors='replace'):
 for tag, t0 in tap.items():
     keep = [l[:320] for t, l in lines if -1 <= (t - t0).total_seconds() <= 30 and want.search(l) and not noise.search(l)]
     with open(f'{out}/purchase-diag-{tag}.txt', 'w') as f:
-        f.write('\n'.join(l[:600] for t, l in lines if -2 <= (t - t0).total_seconds() <= 60 and '[wafra:' in l) + '\n')
+        dl = [l[:420] for t, l in lines if -2 <= (t - t0).total_seconds() <= 40 and ('[wafra:' in l or 'uperwall' in l)]
+        f.write(f'# {len(dl)} lines (first 250 kept)\n' + '\n'.join(dl[:250]) + '\n')
     with open(f'{out}/applog-{tag}-around-buy-tap.txt', 'w') as f:
         f.write(f'# {tag}: log lines (app, StoreKit, Superwall) from -1 s to +30 s around the buy tap at {t0} UTC, purchase-related only, system noise removed; {len(keep)} lines: first 120, then last 120\n')
         f.write('\n'.join(keep[:120]) + '\n')
