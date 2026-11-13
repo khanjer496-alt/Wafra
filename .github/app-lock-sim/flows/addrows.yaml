@@ -21,7 +21,8 @@ appId: ${APP_ID}
     visible: 'Account name'
     timeout: 15000
 - takeScreenshot: account-sheet-open
-- tapOn: 'Account name'
+- tapOn:
+    point: '50%,60%'
 - inputText: 'Main account'
 - pressKey: Enter
 - takeScreenshot: account-name-typed

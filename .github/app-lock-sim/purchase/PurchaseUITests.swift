@@ -149,6 +149,14 @@ final class PurchaseUITests: XCTestCase {
         sem.wait()
         if let failure = failure { throw failure }
     }
+    /// After a reinstall the store can answer "Price unavailable" for a moment: tap "Try loading prices again" and wait.
+    func retryPrices(_ rowId: String) {
+        for _ in 0..<4 {
+            if el(rowId).waitForExistence(timeout: 15) { return }
+            let b = app.buttons["Try loading prices again"].firstMatch
+            if b.exists { note("price list unavailable; tapping Try loading prices again"); b.tap() }
+        }
+    }
     /// Watch SpringBoard for system alerts after a buy tap without dismissing them: records the alert text and buttons
     /// (Apple's own wording) so a "Sign in to Apple Account" sheet is visible evidence instead of being cancelled.
     func observeAlerts(_ tag: String, seconds: Int) {
@@ -247,6 +255,7 @@ final class PurchaseUITests: XCTestCase {
             session.clearTransactions()
             try requestHostReinstall(2)
             try openPro(onboard: true)
+            retryPrices("pro-plan-yearly")
             try need(el("pro-plan-yearly"), "yearly row on the fresh install", 60)
             guard !entitled else { throw StepFail("fresh install is already Pro after clearing the store") }
             el("pro-plan-yearly").tap()
@@ -274,6 +283,7 @@ final class PurchaseUITests: XCTestCase {
             try openPro(onboard: true)
             try simulatePurchaseCancel(true)
             defer { try? simulatePurchaseCancel(false) }
+            retryPrices("pro-plan-weekly")
             try need(el("pro-plan-weekly"), "weekly row", 10)
             el("pro-plan-weekly").tap()
             try need(el("pro-buy"), "buy button", 10)
