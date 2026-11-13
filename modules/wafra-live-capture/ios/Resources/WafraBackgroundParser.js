@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: f957ba3fe40f108c1cd2466f7e42981a1662709669ad55f1b1ca70b2da18df66
+// Generated from normal shipping TypeScript. Source SHA-256: 15090f9e15a45eebb69b05f976bbe73af3004dccd7d06fa5954a9671f7c0c77f
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -10919,7 +10919,9 @@ const AR_DISPLAY_VERB_RE = new RegExp(`${AR_NB}و?(?:سيظهر|ستظهر|سي�
 const AR_INFORM_BEFORE_RE = new RegExp(`${AR_NB}(?:اعلام|ابلاغ|اخبار|افاده|نفيد|نحيط|نعلم|نخبر|نوكد|علما)[${AR_LETTER}\\u064B-\\u0652]*\\s*[,:]?\\s*$`);
 const AR_ANSWER_RE = new RegExp(`${AR_NB}ف?(?:س[يتن][${AR_LETTER}]{2,}|سوف\\s+[${AR_LETTER}]+|يرجي|الرجاء|يمكنك|بامكانك|لا\\s+داعي)|` +
     `${AR_NB}ف?(?:نرجو|اعتبر)${AR_NA}|${AR_NB}ف(?:تحقق|اتصل|تجاهل|راجع|تواصل|لا)${AR_NA}`);
-const AR_NEXT_ANSWER_RE = new RegExp(`^\\s*(?:ف[${AR_LETTER}]|(?:ستصلك|سيصلك|ستتلقي|سوف\\s+(?:تصلك|يصلك|تتلقي)|سيتم\\s+(?:اشعارك|ابلاغك|اعلامك))${AR_NA})`);
+const AR_NEXT_COURTESY_F = `(?:في|فريق|فريقنا|فرع|فرعنا|فروع|فروعنا|فقط)(?![${AR_LETTER}\\u064B-\\u0652])`;
+const AR_NEXT_ANSWER_RE = new RegExp(`^\\s*(?:(?!${AR_NEXT_COURTESY_F})ف[\\u064B-\\u0652]*[${AR_LETTER}]|` +
+    `(?:ستصلك|سيصلك|ستتلقي|سوف\\s+(?:تصلك|يصلك|تتلقي)|سيتم\\s+(?:اشعارك|ابلاغك|اعلامك))${AR_NA})`);
 const AR_PROCESSED_NOT_YET_RE = new RegExp(`${AR_NB}(?:سيظهر|ستظهر|سينعكس|ستنعكس|سيضاف|ستضاف|سيتم\\s+(?:ايداع|اضافه|اظهار))${AR_NA}|${AR_NB}قد\\s+يستغرق[^.\\n]{0,40}?(?:يوم|ايام)${AR_NA}`);
 const AR_VERB_GLOSS = {
     استرداد: 'refunded', استرجاع: 'refunded', ايداع: 'credited', ارجاع: 'returned', اعاده: 'returned', عكس: 'reversed', معالجه: 'processed',
