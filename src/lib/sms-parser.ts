@@ -667,8 +667,16 @@ export interface ParsedCard {
  * to Review. Non-refund "processed" alerts are untouched. Future capture and the
  * bounded recent re-read only: the re-read cannot remove an income row 72
  * already booked. PARSER_BACKFILL_VERSION stays 50.
+ *
+ * 74: the same predicate's Arabic table (تم/سيتم/جاري/لم يتم + the verbal
+ * noun, the merchant forms قام/سيقوم/يقوم/لم يقم, conditional leaders, التاجر/
+ * المستفيد, وتم عكسه/عن طريق الخطأ/بانتظار الموافقة, "سيظهر المبلغ"), Arabic
+ * debits and figures for the D rules, and the session keeps parseSms's verdict
+ * beside a debit. Future capture and the bounded recent re-read only; it cannot
+ * remove an income row 73 already booked (issue #228). PARSER_BACKFILL_VERSION
+ * stays 50.
  */
-export const PARSER_VERSION = 73;
+export const PARSER_VERSION = 74;
 /**
  * Historical-repair contract for already-saved data.
  *
