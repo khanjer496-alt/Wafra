@@ -32,7 +32,6 @@ module.exports = ({ config }) => {
     throw new Error('An explicit valid iOS host build number is required');
   }
   const releaseMetadataPlugin = './modules/wafra-release-metadata/plugin';
-  const {isDevelopmentBuild} = require(releaseMetadataPlugin);
   const nativePlugins = (withNativePerformance.plugins || []).filter(plugin =>
     (Array.isArray(plugin) ? plugin[0] : plugin) !== releaseMetadataPlugin);
   // Register the normally automatic launcher before our final metadata mod;
@@ -40,8 +39,11 @@ module.exports = ({ config }) => {
   if (!nativePlugins.some(plugin => (Array.isArray(plugin) ? plugin[0] : plugin) === 'expo-dev-client')) {
     nativePlugins.push('expo-dev-client');
   }
-  nativePlugins.push([releaseMetadataPlugin, {
-    enabled: !isDevelopmentBuild(process.env.EAS_BUILD_PROFILE, process.env.NODE_ENV),
-  }]);
+  // No options: the expo-updates fingerprint hashes this plugin list, so it
+  // must not depend on EAS_BUILD_PROFILE/NODE_ENV. EAS computes the runtime
+  // version once before the build and again inside it, with different env; an
+  // env-dependent option made those differ and failed the archive. The plugin
+  // reads the env itself when prebuild applies it.
+  nativePlugins.push(releaseMetadataPlugin);
   return { ...withNativePerformance, plugins: nativePlugins, ios: { ...withNativePerformance.ios, buildNumber } };
 };

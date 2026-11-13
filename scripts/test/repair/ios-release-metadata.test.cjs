@@ -10,36 +10,55 @@ const root = path.resolve(__dirname, '../../..');
 const cleanup = './modules/wafra-release-metadata/plugin';
 const pluginName = value => Array.isArray(value) ? value[0] : value;
 
-function configure(profile, nodeEnv) {
+function withEnv(profile, nodeEnv, fn) {
   const before = {...process.env};
-  try {
-    if (profile) process.env.EAS_BUILD_PROFILE = profile; else delete process.env.EAS_BUILD_PROFILE;
-    if (nodeEnv) process.env.NODE_ENV = nodeEnv; else delete process.env.NODE_ENV;
-    return require(path.join(root, 'app.config.js'))({config: {
-      name: 'Wafra', slug: 'wafra', ios: {buildNumber: '192', bundleIdentifier: 'app.wafra.ios'},
-      plugins: [['expo-dev-client', {addGeneratedScheme: false}]],
-    }});
-  } finally {
+  if (profile) process.env.EAS_BUILD_PROFILE = profile; else delete process.env.EAS_BUILD_PROFILE;
+  if (nodeEnv) process.env.NODE_ENV = nodeEnv; else delete process.env.NODE_ENV;
+  const restore = () => {
     for (const key of ['EAS_BUILD_PROFILE', 'NODE_ENV']) {
       if (before[key] === undefined) delete process.env[key]; else process.env[key] = before[key];
     }
-  }
+  };
+  let result;
+  try { result = fn(); } catch (error) { restore(); throw error; }
+  if (result && typeof result.then === 'function') return result.finally(restore);
+  restore();
+  return result;
 }
 
-async function product(profile, fixture, nodeEnv) {
-  const configured = configure(profile, nodeEnv);
-  const dev = configured.plugins.findIndex(p => pluginName(p) === 'expo-dev-client');
-  const last = configured.plugins.findIndex(p => pluginName(p) === cleanup);
-  assert.ok(dev >= 0 && last > dev, 'cleanup must follow explicit dev-client registration');
-  let config = withPlugins({...configured, _internal: {projectRoot: root, autolinkedModules: []}},
-    configured.plugins.filter(p => ['expo-dev-client', cleanup].includes(pluginName(p))));
-  // Reproduce Expo's later automatic legacy pass: run-once history must keep
-  // the launcher from reintroducing its keys after our explicit registration.
-  config = require('@expo/prebuild-config/build/plugins/withDefaultPlugins').withLegacyExpoPlugins(config);
-  const result = await config.mods.ios.infoPlist({...config, modResults: structuredClone(fixture),
-    modRequest: {projectRoot: root, platformProjectRoot: path.join(root, 'ios'), platform: 'ios', modName: 'infoPlist', introspect: true}});
-  return result.modResults;
+function configure(profile, nodeEnv) {
+  return withEnv(profile, nodeEnv, () => require(path.join(root, 'app.config.js'))({config: {
+    name: 'Wafra', slug: 'wafra', ios: {buildNumber: '192', bundleIdentifier: 'app.wafra.ios'},
+    plugins: [['expo-dev-client', {addGeneratedScheme: false}]],
+  }}));
 }
+
+// The plugin reads the env when prebuild applies it, so keep the env set for
+// the whole mod run, as EAS does inside the build.
+function product(profile, fixture, nodeEnv) {
+  return withEnv(profile, nodeEnv, async () => {
+    const configured = configure(profile, nodeEnv);
+    const dev = configured.plugins.findIndex(p => pluginName(p) === 'expo-dev-client');
+    const last = configured.plugins.findIndex(p => pluginName(p) === cleanup);
+    assert.ok(dev >= 0 && last > dev, 'cleanup must follow explicit dev-client registration');
+    let config = withPlugins({...configured, _internal: {projectRoot: root, autolinkedModules: []}},
+      configured.plugins.filter(p => ['expo-dev-client', cleanup].includes(pluginName(p))));
+    // Reproduce Expo's later automatic legacy pass: run-once history must keep
+    // the launcher from reintroducing its keys after our explicit registration.
+    config = require('@expo/prebuild-config/build/plugins/withDefaultPlugins').withLegacyExpoPlugins(config);
+    const result = await config.mods.ios.infoPlist({...config, modResults: structuredClone(fixture),
+      modRequest: {projectRoot: root, platformProjectRoot: path.join(root, 'ios'), platform: 'ios', modName: 'infoPlist', introspect: true}});
+    return result.modResults;
+  });
+}
+
+test('the configured plugin list is identical in every build environment (stable expo-updates fingerprint)', () => {
+  const lists = [['production', 'production'], [undefined, 'production'], [undefined, undefined],
+    ['development', 'development'], ['preview', 'production']]
+    .map(([profile, nodeEnv]) => JSON.stringify(configure(profile, nodeEnv).plugins));
+  for (const list of lists) assert.equal(list, lists[0]);
+  assert.ok(configure('production', 'production').plugins.includes(cleanup), 'cleanup is registered without options');
+});
 
 test('Release mod chain removes only exact Expo artifacts and preserves legitimate permissions', async () => {
   for (const profile of ['production', 'production-candidate', 'history-beta', 'preview']) {
