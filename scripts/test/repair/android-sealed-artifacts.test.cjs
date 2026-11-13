@@ -52,6 +52,61 @@ test('a Play build verifies the compiled flags in the AAB and APK before sealing
   assert.match(native.stdout + native.stderr, /native exporter must be compiled closed/);
 });
 
+test('the Play bundle builds ARM only and fails over 100,000,000 bytes or with x86 libraries', (t) => {
+  const build = steps[stepIndex('Build Play Store bundle (AAB)')];
+  assert.match(build.run, /bundleRelease -PreactNativeArchitectures=arm64-v8a,armeabi-v7a /);
+  const index = stepIndex('Verify the Play bundle is ARM only and under the upload limit');
+  assert.ok(index > stepIndex('Build Play Store bundle (AAB)') && index < stepIndex('Rename outputs'));
+  const check = steps[index];
+  // The boolean-input form of PLAY_BUILD, as the update-channel steps use.
+  assert.equal(check.if, 'inputs.bundle && !inputs.corpus');
+  assert.equal(check.if, steps[stepIndex('Verify update channel in the packaged Play bundle')].if);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wafra-aab-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const aab = (name, entries) => {
+    const tree = path.join(dir, name);
+    for (const entry of entries) {
+      fs.mkdirSync(path.dirname(path.join(tree, entry)), { recursive: true });
+      fs.writeFileSync(path.join(tree, entry), 'x');
+    }
+    const file = path.join(dir, `${name}.aab`);
+    assert.equal(spawnSync('zip', ['-qr', file, '.'], { cwd: tree }).status, 0);
+    return file;
+  };
+  const run = (file) => spawnSync('bash', ['-c', check.run], { encoding: 'utf8', env: { ...process.env, WAFRA_AAB: file } });
+  const arm = ['base/lib/arm64-v8a/libhermes.so', 'base/lib/armeabi-v7a/libhermes.so', 'base/manifest/AndroidManifest.xml'];
+  assert.equal(run(aab('arm', arm)).status, 0);
+  const x86 = run(aab('x86', [...arm, 'base/lib/x86_64/libhermes.so']));
+  assert.equal(x86.status, 1);
+  assert.match(x86.stdout + x86.stderr, /native code or symbols for x86_64/);
+  const symbols = run(aab('x86-symbols', [...arm, 'BUNDLE-METADATA/com.android.tools.build.debugsymbols/x86/libhermes.so.sym']));
+  assert.equal(symbols.status, 1);
+  assert.match(symbols.stdout + symbols.stderr, /native code or symbols for x86/);
+  const riscv = run(aab('riscv', [...arm, 'feature/lib/riscv64/libextra.so']));
+  assert.equal(riscv.status, 1);
+  assert.match(riscv.stdout + riscv.stderr, /native code or symbols for riscv64/);
+  const armSymbols = run(aab('arm-symbols', [...arm,
+    'BUNDLE-METADATA/com.android.tools.build.debugsymbols/arm64-v8a/libhermes.so.sym',
+    'BUNDLE-METADATA/com.android.tools.build.debugsymbols/armeabi-v7a/libhermes.so.dbg']));
+  assert.equal(armSymbols.status, 0, armSymbols.stdout + armSymbols.stderr);
+  // A lib/ folder inside assets or Java resources is not an ABI directory.
+  const assetsLib = run(aab('assets-lib', [...arm, 'base/assets/lib/fonts/inter.ttf', 'base/root/META-INF/lib/x/y.properties']));
+  assert.equal(assetsLib.status, 0, assetsLib.stdout + assetsLib.stderr);
+  // root/lib/ lands at the APK root, so it is checked like base/lib/.
+  const rootX86 = run(aab('root-x86', [...arm, 'base/root/lib/x86/libextra.so']));
+  assert.equal(rootX86.status, 1);
+  assert.match(rootX86.stdout + rootX86.stderr, /native code or symbols for x86/);
+  const noV7 = run(aab('no-v7', [arm[0], arm[2]]));
+  assert.equal(noV7.status, 1);
+  assert.match(noV7.stdout + noV7.stderr, /no base\/lib\/armeabi-v7a libraries/);
+  const big = path.join(dir, 'big.aab');
+  fs.closeSync(fs.openSync(big, 'w'));
+  fs.truncateSync(big, 100_000_001);
+  const oversize = run(big);
+  assert.equal(oversize.status, 1);
+  assert.match(oversize.stdout + oversize.stderr, /over 100,000,000/);
+});
+
 test('verify-production fails closed on any flag that is on, missing or in both states', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wafra-flags-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
