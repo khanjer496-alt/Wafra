@@ -37,7 +37,9 @@ const QUOTED_TEAM = /\b(team\s+)(["'])[^"'\n]+\2/gi;
 function identifierShaped(part) {
   if (!part) return true;
   if ((part.match(/[0-9]/g) || []).length > 2) return false;
-  return /^(?:[A-Z]{2,4}(?=[A-Z][a-z]))?(?:[A-Z]?[a-z]{2,}|[0-9])+$/.test(part);
+  // Each lowercase word is taken greedily ((?![a-z])), so a failing match can't
+  // backtrack through the ways of splitting a long lowercase run (ReDoS).
+  return /^(?:[A-Z]{2,4}(?=[A-Z][a-z]))?(?:[A-Z]?[a-z]{2,}(?![a-z])|[0-9])+$/.test(part);
 }
 
 function clean(line) {

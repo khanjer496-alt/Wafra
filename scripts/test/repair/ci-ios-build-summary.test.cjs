@@ -111,6 +111,16 @@ test('seeded random unknown tokens and slash blobs always redact (no known value
   assert.deepEqual(leaks, []);
 });
 
+test('long lowercase runs cannot make the summary hang (no catastrophic backtracking)', () => {
+  const long = 'a'.repeat(5000);
+  for (const text of [`error: undefined symbol ${long}B_v2`, `error: missing ${long}B/React2Core`, `error: ${long}1`]) {
+    const start = process.hrtime.bigint();
+    summarize([{ name: 'slow.log', text }], 1);
+    const ms = Number(process.hrtime.bigint() - start) / 1e6;
+    assert.ok(ms < 100, `took ${ms.toFixed(1)} ms`);
+  }
+});
+
 test('keeps file paths and long target names readable', () => {
   const log = [
     "/Users/runner/work/Wafra/Wafra/modules/wafra-widgets/ios/WafraPrivacyCover.swift:83:14: error: cannot find type 'ExpoAppDelegateSubscriber' in scope",
