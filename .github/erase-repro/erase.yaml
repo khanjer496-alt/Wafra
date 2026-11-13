@@ -2,23 +2,17 @@ appId: ${APP_ID}
 ---
 - launchApp:
     stopApp: true
+# The StoreKit sign-in sheet can come up a few seconds after launch and covers Home (keyboard up); clear it BEFORE the
+# first assertion, then wait for Settings.
+- extendedWaitUntil:
+    visible: 'Sign in to Apple.Account'
+    timeout: 10000
+    optional: true
+- runFlow: dismiss.yaml
 - extendedWaitUntil:
     visible: 'Settings'
     timeout: 60000
-- runFlow:
-    when:
-      visible: 'Open in .Wafra.\?'
-    commands:
-      - tapOn: 'Cancel'
-- extendedWaitUntil:
-    visible: 'Sign in to Apple.Account'
-    timeout: 4000
-    optional: true
-- runFlow:
-    when:
-      visible: 'Sign in to Apple.Account'
-    commands:
-      - tapOn: 'Cancel'
+- runFlow: dismiss.yaml
 - tapOn: 'Settings'
 - scrollUntilVisible:
     element:
@@ -36,6 +30,7 @@ appId: ${APP_ID}
       text: 'Erase all data'
     direction: DOWN
     timeout: 60000
+- runFlow: dismiss.yaml
 - tapOn: 'Erase all data'
 - waitForAnimationToEnd:
     timeout: 4000

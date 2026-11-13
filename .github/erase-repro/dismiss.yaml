@@ -1,0 +1,26 @@
+appId: ${APP_ID}
+---
+# Cancel the system "Sign in to Apple Account" sheet and the "Open in Wafra?" prompt if either is up. Cancel, never OK
+# (OK on an empty sign-in sheet raises a second alert). Safe to run when neither is showing.
+- runFlow:
+    when:
+      visible: 'Sign in to Apple.Account'
+    commands:
+      - tapOn: 'Cancel'
+      - waitForAnimationToEnd:
+          timeout: 3000
+- runFlow:
+    when:
+      visible: 'Open in .Wafra.\?'
+    commands:
+      - tapOn:
+          point: '33%,54%'
+      - waitForAnimationToEnd:
+          timeout: 3000
+- runFlow:
+    when:
+      visible: 'Sign in to Apple.Account'
+    commands:
+      - tapOn: 'Cancel'
+      - waitForAnimationToEnd:
+          timeout: 3000

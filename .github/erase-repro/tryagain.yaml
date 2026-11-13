@@ -1,5 +1,6 @@
 appId: ${APP_ID}
 ---
+- runFlow: dismiss.yaml
 - runFlow:
     when:
       visible: 'Your ledger was erased'
