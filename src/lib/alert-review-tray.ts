@@ -35,14 +35,14 @@ export const validateReviewShareCandidate = (value: unknown): ReviewShareCandida
 };
 
 export const REVIEW_ALERT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-export const REVIEW_TOMBSTONE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+const REVIEW_TOMBSTONE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 export const REVIEW_ALERT_CAP = 50;
 export const REVIEW_TOMBSTONE_CAP = 1000;
-export const REVIEW_TEMPLATE_RULE_CAP = 200;
+const REVIEW_TEMPLATE_RULE_CAP = 200;
 const APPLE_MESSAGE_ID_RE = /^[0-9a-f]{64}$/;
 
 /** Mirrors WafraLiveCaptureStore.maxApplePayCardOrPassCharacters (UTF-16 units). */
-export const MAX_WALLET_CARD_NAME_LENGTH = 80;
+const MAX_WALLET_CARD_NAME_LENGTH = 80;
 const UNSAFE_WALLET_CARD_RE = /[\u0000-\u001F\u007F-\u009F\u061C\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/u;
 
 /**
@@ -76,7 +76,7 @@ type ReviewableFamily = Extract<AlertFamily,
  * an OS re-delivery; a possible Apple Pay duplicate is a bank alert that
  * nearly matches an already-recorded Wallet purchase. Both only ask.
  */
-export type ReviewAttentionReason = 'possible-notification-replay' | 'possible-apple-pay-duplicate';
+type ReviewAttentionReason = 'possible-notification-replay' | 'possible-apple-pay-duplicate';
 
 export interface ReviewAlert {
   attentionReason?: ReviewAttentionReason;
@@ -149,7 +149,7 @@ export const isUniversalReviewAlert = (item: ReviewEntry): item is UniversalRevi
 export const isCurrencyConflictReview = (item: ReviewEntry): boolean =>
   isUniversalReviewAlert(item) && item.currencyConflict === true;
 /** A bank alert withheld as a possible duplicate of an already-posted Apple Pay row. */
-export const isWalletDuplicateReview = (item: ReviewEntry): boolean =>
+const isWalletDuplicateReview = (item: ReviewEntry): boolean =>
   (item as { attentionReason?: unknown }).attentionReason === 'possible-apple-pay-duplicate';
 /**
  * Four independent lanes of up to fifty: foreign-currency money reviews,
@@ -207,7 +207,7 @@ export interface ReviewTemplateRule {
   updatedAt: number;
 }
 
-export interface ReviewTombstone {
+interface ReviewTombstone {
   sourceKey: string;
   resolvedAt: number;
   expiresAt: number;
@@ -270,7 +270,7 @@ export const stripReviewShareCandidates = (tray: AlertReviewTrayState): AlertRev
   }) };
 };
 
-export interface ReviewAdmissionInput {
+interface ReviewAdmissionInput {
   id: string;
   sourceKey: string;
   observedAt: number;
@@ -278,13 +278,13 @@ export interface ReviewAdmissionInput {
   inspection: UniversalAlertReview;
 }
 
-export interface ReviewAdmissionResult {
+interface ReviewAdmissionResult {
   state: AlertReviewTrayState;
   outcome: 'admitted' | 'duplicate' | 'refused' | 'deferred' | 'expired';
   reason?: string;
 }
 
-export interface LaunchReviewAdmissionInput {
+interface LaunchReviewAdmissionInput {
   id: string;
   sourceKey: string;
   observedAt: number;
@@ -330,7 +330,7 @@ const reviewableFamily = (family: AlertFamily): family is ReviewableFamily => [
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** Rows show a visible expiry countdown during their final week. */
-export const REVIEW_EXPIRY_WARNING_DAYS = 7;
+const REVIEW_EXPIRY_WARNING_DAYS = 7;
 
 /**
  * Expiry is a loss of reviewable money evidence. Record it as a source-free
@@ -794,7 +794,7 @@ export const recordPossibleDuplicatesPosted = (
   return added.length === 0 ? tray : { ...tray, tombstones: capTombstones([...tray.tombstones, ...added]) };
 };
 
-export interface ReviewTrayCapacity {
+interface ReviewTrayCapacity {
   /** iOS notification + Apple Pay lane; refusing admission keeps the native record. */
   protectedFull: boolean;
   /** Message/relay/history lane. */
@@ -864,7 +864,7 @@ export const partitionReviewsByCapacity = <T extends ReviewEntry>(
  * stay in the native queue; this is presentation state, never acknowledgement
  * or durability evidence.
  */
-export interface ReviewCaptureBacklog {
+interface ReviewCaptureBacklog {
   /** Native records waiting for Review space (notification, Message, Apple Pay). */
   waiting: number;
   /**

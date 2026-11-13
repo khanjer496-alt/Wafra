@@ -13,7 +13,7 @@ import { moneyPlacesWords } from '@/lib/money-places-copy';
 import type { Account } from '@/lib/types';
 
 /** The tone of a row's status line: neutral, good news, needs attention, late. */
-export type AccountStatusTone = 'neutral' | 'ok' | 'near' | 'over';
+type AccountStatusTone = 'neutral' | 'ok' | 'near' | 'over';
 
 export interface AccountDisplayRow {
   account: Account;

@@ -99,7 +99,7 @@ export type StorageOp =
  * Anything unrecognised is `unknown` — deliberately useless rather than
  * accidentally revealing.
  */
-export type StorageCategory =
+type StorageCategory =
   /** The key in SecureStore does not open this file. Retrying cannot help. */
   | 'key-mismatch'
   /** Page-level damage. */

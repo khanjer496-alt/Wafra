@@ -11,7 +11,7 @@ import type { Account, Transaction } from '@/lib/types';
  */
 export const CAPTURE_WORKING_WINDOW_MS = 72 * 60 * 60 * 1000;
 
-export type CaptureHealthStatus =
+type CaptureHealthStatus =
   | { kind: 'working'; lastHandledAt: number }
   | { kind: 'quiet'; lastHandledAt: number }
   | { kind: 'never' }

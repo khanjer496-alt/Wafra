@@ -23,7 +23,7 @@ import type { Account, CategoryId, TransactionType } from '@/lib/types';
 
 type FilterIndex = Parameters<typeof projectTransactionFilter>[0];
 type FilterOptions = Parameters<typeof projectTransactionFilter>[2];
-export interface TransactionFilterSheetProps {
+interface TransactionFilterSheetProps {
   initialFilters: Filters;
   resetFilters: Filters;
   accounts: readonly Account[];

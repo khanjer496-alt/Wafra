@@ -67,7 +67,7 @@ export function createStorePauseBoundary<T>(
 }
 
 /** The part of the app store that decides what may never be held back. */
-export interface PauseCriticalStore {
+interface PauseCriticalStore {
   state: {
     privateMode: boolean;
     onboarded: boolean;

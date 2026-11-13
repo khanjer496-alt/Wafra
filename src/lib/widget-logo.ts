@@ -1,5 +1,5 @@
 /** Bundled recurring-service identities only. Exact reviewed aliases; no network or substring guesses. */
-export const WIDGET_LOGO_ALIASES = {
+const WIDGET_LOGO_ALIASES = {
   careem: ["Careem", "Careem Food", "Careem Pay", "Careem Pay Topup", "Careem Pay Top-up", "Careem Pay Top Up", "Careem Plus", "Careem Networks"],
   talabat: ["Talabat", "Talabat Mart", "Talabat Pro", "Talabat.com", "Talabat sales", "Talabat Business", "طلبات"],
   deliveroo: ["Deliveroo", "Deliveroo Plus", "Deliveroo.ae", "ديليفرو", "دليفرو"],

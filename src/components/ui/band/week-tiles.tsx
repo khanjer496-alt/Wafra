@@ -10,7 +10,7 @@ import { formatAmount, shortDate } from '@/lib/format';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
 import { formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
 
-export interface WeekTileDay {
+interface WeekTileDay {
   key: string;
   /** Short visible label ("Fri", or an initial). */
   label: string;

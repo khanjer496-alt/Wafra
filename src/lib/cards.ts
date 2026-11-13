@@ -6,9 +6,9 @@ import { bankIdentityForName } from '@/lib/markets';
 import { isTransferCandidate, reconcileTransfers } from '@/lib/transfer-reconciliation';
 import type { Account, AppState, CardDue, Transaction } from '@/lib/types';
 
-export type DueStatus = 'overdue' | 'urgent' | 'upcoming' | 'settled';
+type DueStatus = 'overdue' | 'urgent' | 'upcoming' | 'settled';
 
-export interface DueWithStatus {
+interface DueWithStatus {
   due: CardDue;
   status: DueStatus;
   /** Days until dueDate; negative when overdue. */
@@ -44,7 +44,7 @@ export interface DueWithStatus {
  * change one and the estimate stops matching the thing that decides whether
  * to trust it.
  */
-export const ESTIMATED_MINIMUM_RATE = 0.05;
+const ESTIMATED_MINIMUM_RATE = 0.05;
 
 /* ── Memoisation ─────────────────────────────────────────────────────────
  *
@@ -1708,7 +1708,7 @@ function computeOpenDues(state: CardState, today: Date): DueWithStatus[] {
  * reached by opening that very card, and answering 0 there is how a balance
  * disappears with nothing anywhere saying it was dropped.
  */
-export interface CardStatementView {
+interface CardStatementView {
   /** Every statement on this physical card, newest due date first. */
   statements: CardDue[];
   /** Payments onto the card, newest first. */
@@ -1884,7 +1884,7 @@ export { bankFromSender } from '@/lib/markets';
  * sat under credit, including Liv/ENBD issuer aliases. None is proof. This only
  * suggests; merging two real cards corrupts the ledger invisibly.
  */
-export interface ReissueSuggestion {
+interface ReissueSuggestion {
   /** The row holding the statement and nothing else. */
   newAccountId: string;
   /** The row holding the history, best candidate first. */
@@ -1973,9 +1973,9 @@ export function reissueSuggestions(state: CardState, today: Date): ReissueSugges
  * quote. A debit card leads with its balance. Spending belongs on the second
  * line, where it reads as context rather than as money you have.
  */
-export type CardFigureKind = 'owed' | 'balance' | 'unknown';
+type CardFigureKind = 'owed' | 'balance' | 'unknown';
 
-export interface CardFigure {
+interface CardFigure {
   kind: CardFigureKind;
   /** Null when nothing authoritative is known — never a guess. */
   fils: number | null;
@@ -2007,7 +2007,7 @@ export function cardFigure(state: CardState, account: Account, today: Date): Car
  * app had failed to recognise. Under a FAB heading, six FAB cards are
  * obviously six FAB cards — and if that is wrong, it is obviously wrong.
  */
-export interface BankGroup {
+interface BankGroup {
   bank: string;
   accounts: Account[];
 }

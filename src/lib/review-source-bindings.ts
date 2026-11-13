@@ -12,7 +12,7 @@ export interface ReviewSourceBinding {
   observedAt: number;
 }
 
-export interface ReviewSourceBindingResult {
+interface ReviewSourceBindingResult {
   reviewTray: AlertReviewTrayState;
   transactionKeyUpdates: { id: string; smsKey: string }[];
   changed: boolean;

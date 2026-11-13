@@ -27,7 +27,7 @@ export const BNPL_CATEGORY_REPAIR_VERSION = 1;
 
 const BNPL_WORD_RE = /\b(?:tabby|tamara|postpay|cashew)\b/i;
 
-export function bnplRepairedCategory(
+function bnplRepairedCategory(
   t: Transaction,
   overrides?: Readonly<Record<string, CategoryId>>,
 ): CategoryId | null {

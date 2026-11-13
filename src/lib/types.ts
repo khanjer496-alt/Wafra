@@ -139,7 +139,7 @@ export interface BestEffortMarker {
   market: string;
 }
 
-export interface StatementOccurrence {
+interface StatementOccurrence {
   importId: string;
   rowIndex: number;
   /** Original statement facts may differ from the live alert's posting facts. */
@@ -598,8 +598,8 @@ export interface OnboardingProfile {
 }
 
 export const LOCAL_CAPTURE_QUALIFICATION_VERSION = 1 as const;
-export const LOCAL_CAPTURE_QUALIFICATION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-export const LOCAL_CAPTURE_QUALIFICATION_CAP = 2_000;
+const LOCAL_CAPTURE_QUALIFICATION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const LOCAL_CAPTURE_QUALIFICATION_CAP = 2_000;
 
 export interface LocalCaptureQualificationCandidate {
   id: string;

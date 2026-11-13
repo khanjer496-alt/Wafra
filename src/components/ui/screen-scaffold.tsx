@@ -18,7 +18,7 @@ import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 
-export type ScreenScaffoldProps = {
+type ScreenScaffoldProps = {
   children: React.ReactNode;
   header?: ScreenHeaderProps;
   headerMode?: 'auto' | 'native' | 'inline';
@@ -43,7 +43,7 @@ export type ScreenScaffoldProps = {
   testID?: string;
 };
 
-export type ScreenContentInsets = {
+type ScreenContentInsets = {
   contentContainerStyle: StyleProp<ViewStyle>;
   contentInset: { top: number; bottom: number };
   scrollIndicatorInsets: { top: number; bottom: number };

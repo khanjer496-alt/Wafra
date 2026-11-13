@@ -61,7 +61,7 @@ export const assistantCopy = {
 type AssistantCopy = { [K in keyof typeof assistantCopy]: (typeof assistantCopy)[K] extends (...args: infer A) => string
   ? (...args: A) => string : string };
 
-export const assistantCopyAr: AssistantCopy = {
+const assistantCopyAr: AssistantCopy = {
   title: 'اسأل وفرة',
   back: 'رجوع',
   heading: 'افهم عملياتك',
@@ -146,7 +146,7 @@ const AR_QUESTIONS: Record<string, string> = {
 };
 
 /** Left-to-right isolate: English inside an Arabic line keeps its own order ("How much?", not "?How much"). */
-export const ltrIsolate = (text: string): string => `\u2066${text}\u2069`;
+const ltrIsolate = (text: string): string => `\u2066${text}\u2069`;
 
 const ARABIC_LETTER = /[\u0600-\u06FF]/;
 

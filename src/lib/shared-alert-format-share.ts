@@ -23,7 +23,6 @@ export async function whileSavingFormatChoice(save: () => Promise<void>): Promis
 // here (like the best-effort auto-post flag). Off until the store has hydrated.
 let sharingActive = false;
 export const setAlertFormatSharingActive = (active: boolean): void => { sharingActive = active === true; };
-export const isAlertFormatSharingActive = (): boolean => sharingActive;
 
 /**
  * Non-Latin boilerplate that may stay as a literal. The name heuristic only
@@ -47,7 +46,7 @@ const hasUnlistedNonLatinWord = (literal: string): boolean => {
 /** Every family but these names a counterparty, so it needs a grounded merchant slot. */
 const EXEMPT_FROM_MERCHANT_SLOT = new Set<string>(['cash-withdrawal', 'fee']);
 
-export interface CandidateShareContext {
+interface CandidateShareContext {
   country?: string | null;
   /** Override for tests; defaults to the mirrored store consent. */
   active?: boolean;

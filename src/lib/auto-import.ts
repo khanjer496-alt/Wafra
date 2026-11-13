@@ -83,7 +83,7 @@ const DEFAULT_PAGE_SIZE = 1_000;
 const MAX_PAGE_SIZE = 2_000;
 const MAX_REVIEW_CANDIDATES = 50;
 
-export interface AndroidNotificationImportDiagnostics {
+interface AndroidNotificationImportDiagnostics {
   attemptedAt: number;
   captured: number;
   autoParsed: number;
@@ -211,7 +211,7 @@ export const CARRIER_DUPLICATE_DATETIME_RE =
  * figure counts (currency code or two decimals), and never "balance
  * transfer", so an offer footer that is identical on every alert does not.
  */
-export const CARRIER_DUPLICATE_BALANCE_RE =
+const CARRIER_DUPLICATE_BALANCE_RE =
   /\b(?:(?:avl|avail(?:able)?|current|curr|ledger|closing|remaining)\.?\s*)?bal(?:ance)?\b(?!\s*transfer)[^0-9٠-٩\n]{0,20}?(?:(?:AED|Dhs?|SAR|SR|QAR|KWD|BHD|OMR|EGP|INR|PKR|PHP|USD|EUR|GBP|CAD|AUD|JPY|CNY|CHF|TRY|GHS|د\.إ|ر\.س|درهم|ريال)\s*[0-9٠-٩][0-9٠-٩,٬]*(?:[.٫][0-9٠-٩]{1,3})?|[0-9٠-٩][0-9٠-٩,٬]*[.٫][0-9٠-٩]{2}(?![0-9٠-٩])|[0-9٠-٩][0-9٠-٩,٬]*(?:[.٫][0-9٠-٩]{1,3})?\s*(?:AED|SAR|QAR|KWD|BHD|OMR|USD|EUR|GBP|د\.إ|ر\.س|درهم|ريال))|رصيد[^0-9٠-٩\n]{0,20}?(?:(?:AED|SAR|د\.إ|ر\.س|درهم|ريال)\s*[0-9٠-٩][0-9٠-٩,٬]*(?:[.٫][0-9٠-٩]{1,3})?|[0-9٠-٩][0-9٠-٩,٬]*[.٫][0-9٠-٩]{2}(?![0-9٠-٩])|[0-9٠-٩][0-9٠-٩,٬]*\s*(?:AED|SAR|د\.إ|ر\.س|درهم|ريال))/i;
 
 /** Whether an identical copy of [body] can only be the same posting. */
@@ -507,12 +507,12 @@ export type { CaptureChannel } from '@/lib/dedupe';
 export type { ScannedSms, DeclinedSms, ImportPlan } from '@/lib/import-plan';
 export { buildImportPlan } from '@/lib/import-plan';
 
-export interface InboxScanCursor {
+interface InboxScanCursor {
   beforeDateMs: number;
   beforeId: number;
 }
 
-export interface ScanInboxOptions {
+interface ScanInboxOptions {
   /** Ready local formats advise Review only; parser-version repair always disables them. */
   privateFormatReview?: PrivateAlertFormatSessionOptions;
   /** Read the bank-app queue without requiring or advancing the SMS inbox. */
@@ -602,7 +602,7 @@ export interface ScanResult {
 }
 
 /** One transaction a running scan has just parsed, as display facts only. */
-export interface ScanFoundPreview {
+interface ScanFoundPreview {
   merchant: string;
   category: import('@/lib/types').CategoryId;
   type: import('@/lib/types').TransactionType;
@@ -779,17 +779,17 @@ async function bindProviderReviewIdentity(
   };
 }
 
-export type SourceFreeReviewCandidate =
+type SourceFreeReviewCandidate =
   | Omit<ReviewAlert, 'id' | 'sourceKey' | 'templateKey'>
   | Omit<UniversalReviewAlert, 'id' | 'sourceKey'>;
 
-export interface SourceFreeReviewIdentity {
+interface SourceFreeReviewIdentity {
   id: string;
   sourceKey: string;
   templateKey?: string;
 }
 
-export type SourceFreeRefusedAlertDecision =
+type SourceFreeRefusedAlertDecision =
   | { kind: 'declined'; reason: NonPostingReason }
   | { kind: 'review'; candidate: SourceFreeReviewCandidate }
   | { kind: 'ignored'; reason: 'promotion' | 'non-financial' | 'unrecognized' };

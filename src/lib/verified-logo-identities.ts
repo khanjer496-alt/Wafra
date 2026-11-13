@@ -1,5 +1,5 @@
 /** Fast-path identities that do not need a Brandfetch name search. */
-export interface VerifiedMerchantIdentity {
+interface VerifiedMerchantIdentity {
   readonly canonicalName: string;
   readonly domain: string;
 }

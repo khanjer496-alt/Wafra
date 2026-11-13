@@ -48,46 +48,6 @@ export function PeriodPill({ onPress }: { onPress: () => void }) {
   );
 }
 
-/**
- * A labelled pill that goes somewhere — the pill's navigation counterpart.
- *
- * Labelled, not a glyph. The one destination this exists for, `/stats`, is the
- * long form of the Flow tab, and the only icon that would say so is `chart` —
- * which is the Flow tab's own glyph, sitting in the bar at the bottom of the
- * same screen. A word cannot be mistaken for the tab you are already on.
- *
- * `label` is already-translated text: this file must not hold an English
- * string, because contracts.test.js scans src/components for them. Callers pass
- * t('…'), which also keeps the accessibility label in the reader's language.
- */
-export function LinkPill({ label, onPress }: { label: string; onPress: () => void }) {
-  const theme = useTheme();
-  return (
-    <SpringPressable
-      // Same tapped() as PeriodPill and IconButton. A pill that navigates
-      // without the tick feels dead next to the two beside it in the header.
-      onPress={() => {
-        tapped();
-        onPress();
-      }}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      hitSlop={6}
-      style={[
-        styles.pill,
-        {
-          backgroundColor: theme.backgroundElement,
-          borderColor: theme.primaryBorder,
-        },
-      ]}>
-      <ThemedText type="meta" themeColor="primary" style={styles.label}>
-        {label}
-      </ThemedText>
-      <Icon name="chevron-right" size={12} color={theme.primary} />
-    </SpringPressable>
-  );
-}
-
 /** @deprecated Import ActionIconButton from ui/action-icon-button. */
 export function IconButton({
   name,

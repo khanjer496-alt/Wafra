@@ -376,12 +376,6 @@ export function cardTitle(name: string): string {
   return name.replace(/\s*[•·*]+\s*\d{3,4}\s*$/, '').trim() || name;
 }
 
-export function greetingForHour(hour: number): string {
-  if (hour < 12) return t('goodMorning');
-  if (hour < 17) return t('goodAfternoon');
-  return t('goodEvening');
-}
-
 
 /**
  * When a transaction happened, to the minute, or null if unknown.

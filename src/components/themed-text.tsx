@@ -25,7 +25,7 @@ export type TextType =
   | 'linkPrimary'
   | 'code';
 
-export type ThemedTextProps = TextProps & {
+type ThemedTextProps = TextProps & {
   type?: TextType;
   themeColor?: ThemeColor;
   /**

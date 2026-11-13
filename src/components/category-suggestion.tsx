@@ -5,7 +5,7 @@ import { categoryAdvisor, type CategoryAdvice } from '@/lib/on-device-category';
 import type { CategoryId } from '@/lib/types';
 import type { DirectionalCategoryRule } from '@/lib/universal-categorization';
 
-export type CategorySuggestionState = CategoryAdvice | 'pending';
+type CategorySuggestionState = CategoryAdvice | 'pending';
 
 /**
  * One suggested category per unresolved merchant, for a list where every row
