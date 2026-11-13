@@ -97,5 +97,8 @@ test('RC 396 F2 controls: a refund in process as a side note beside a debit leav
     // Red on 49e11028: the bare "reversal" in an unsettled note turned the debit into income.
     'AED 40.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. Your reversal request is under process.',
     'AED 40.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. The reversal is pending with the merchant.',
+    // Red on 49e11028 too: a pending reversal sentence with its own amount beside a purchase turned the purchase into income.
+    'Purchase of AED 40.00 at NOON with card 1234. Reversal of AED 40.00 is under process.',
+    'Purchase of AED 40.00 at NOON. Reversal of AED 40.00 has been initiated.',
   ]) assert.equal(paths(body, 'ENBD').js, 'expense 4000 / expense 4000', body);
 });
