@@ -339,6 +339,21 @@ const CONTROLS = [
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234 فنرجو تجاهل هذه الرسالة.',
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. فيرجى تجاهل هذه الرسالة.',
   ].map((body) => [body, 'NO_POST', 'C28 a bare-alef ان answered in its sentence or a ف-led next one is a condition']),
+  // Android RC 396 hard gate F2 (App QA Lead corpus N06): a reversal or refund still under process has not arrived.
+  ...[
+    'ADCB: Reversal of AED 250.00 is under process. You will be notified when the amount is refunded.',
+    'Reversal of AED 250.00 is in progress.',
+    'Reversal of AED 250.00 is pending.',
+    'Reversal of AED 250.00 has been initiated.',
+    'Refund of AED 250.00 to your card ending 1234 is under process.',
+    'عكس مبلغ 250.00 درهم قيد المعالجة. سيتم إشعارك عند استرداد المبلغ.',
+    'عملية استرداد مبلغ 250.00 درهم تحت الإجراء.',
+  ].map((body) => [body, 'NO_POST', 'RC396 a reversal or refund under process, pending, in progress or initiated']),
+  ...[
+    'ADCB: Reversal of AED 250.00 has been credited to your account.',
+    'Reversal of AED 250.00 credited to your account ending 1234.',
+    'Reversal of AED 250.00 has been credited to your account. Other reversal requests are under process.',
+  ].map((body) => [body, 'INCOME_REFUND', 'RC396 a completed reversal credit']),
 ];
 
 // ── Case selection ───────────────────────────────────────────────────────────────────────────────────────────────────
