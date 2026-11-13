@@ -53,16 +53,18 @@ const CEILING = {
 const NATIVE_IGNORED_INCOME_CEILING = 157;
 // Control rows added after #217 that native ignores today, exactly as #217's own bundle does (oracle v2.1 C11, C12; v2.2
 // C16; the C20 "After cancellation …", "Once your order was cancelled …", telegraphic and dated refunds; the C22 Arabic
-// "عند إلغاء الطلب …", "عند إرجاع المنتج …" and "عند مراجعة طلبك …" refunds; the six C24 Arabic genuine refunds). They are
-// pinned by id and kept out of
-// the count above, so that ceiling still covers #217's rows and a newly ignored row anywhere else fails. Delete an id when
-// native posts its row.
+// "عند إلغاء الطلب …", "عند إرجاع المنتج …" and "عند مراجعة طلبك …" refunds; the six C24 Arabic genuine refunds; the dated ALL-CAPS C23
+// refund and the C25 "أن" refund; from #242's review, seven of the eight C26 refunds, the C27 bare-alef "ان" refund and the
+// five C28 "أن/ان" refunds). They are pinned by id and kept out of the count above, so that ceiling still covers #217's
+// rows and a newly ignored row anywhere else fails. Delete an id when native posts its row.
 const NATIVE_IGNORED_CONTROL_ROWS = new Set(['CTL-05402', 'CTL-05403', 'CTL-05404', 'CTL-05405', 'CTL-05406', 'CTL-05407',
   'CTL-05416', 'CTL-05427', 'CTL-05429', 'CTL-05444', 'CTL-05454', 'CTL-05463', 'CTL-05467', 'CTL-05468', 'CTL-05475', 'CTL-05476',
-  'CTL-05477', 'CTL-05478', 'CTL-05479', 'CTL-05480']);
+  'CTL-05477', 'CTL-05478', 'CTL-05479', 'CTL-05480', 'CTL-05504', 'CTL-05507', 'CTL-05508', 'CTL-05510', 'CTL-05511',
+  'CTL-05512', 'CTL-05513', 'CTL-05514', 'CTL-05515', 'CTL-05531', 'CTL-05532', 'CTL-05533', 'CTL-05534', 'CTL-05535',
+  'CTL-05536']);
 // Row count and sha256 of the oracle's "id<TAB>expected<TAB>body" lines, joined by newlines (Reviewer, #217 Low 1; the
 // body since #225's review, so a row's text cannot be edited unseen).
-const ORACLE_PIN = { rows: 5490, sha256: '115c37eaca86a94e1bbc45e6a47b98605427f3533be447a877bfc042997e2acc' };
+const ORACLE_PIN = { rows: 5538, sha256: '10b439f46df140bd9b3715091c1767ce8f9d712429c91f8f2bfa59bd5cac9608' };
 
 const PATHS = ['parseSms', 'session', 'native'];
 const at = Date.parse('2026-11-05T10:00:00Z');

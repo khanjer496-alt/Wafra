@@ -263,6 +263,82 @@ const CONTROLS = [
     'لم يتم بعد استرداد مبلغ 250.00 درهم إلى بطاقتك.',
     'لم يتم رد مبلغ 250.00 درهم إلى بطاقتك.',
   ].map((body) => [body, 'NO_POST', 'C24 Arabic conditional, pending or negated credits the table missed']),
+  // Change Reviewer 1ae30382 (pre-existing): ALL-CAPS leaders, and a trailing condition or time window.
+  ...[
+    'IF AED 250.00 HAS BEEN REFUNDED TO YOUR CARD YOU WILL GET AN SMS.',
+    'WHEN AED 250.00 HAS BEEN REFUNDED TO YOUR CARD, YOU WILL RECEIVE AN SMS.',
+    'DEAR CUSTOMER, ONCE AED 250.00 HAS BEEN CREDITED TO YOUR ACCOUNT YOU WILL BE NOTIFIED.',
+    'AFTER CANCELLATION AED 250.00 HAS BEEN REFUNDED TO YOUR CARD YOU WILL RECEIVE AN SMS.',
+    'WHEN THE MERCHANT HAS REFUNDED AED 250.00 TO YOUR CARD PLEASE CHECK YOUR BALANCE.',
+    'AED 250.00 has been credited to your card if approved.',
+    'AED 250.00 has been refunded to your card upon verification.',
+    'AED 250.00 refunded to your card within 7 working days.',
+    'AED 250.00 HAS BEEN REFUNDED TO YOUR CARD WITHIN 5-7 WORKING DAYS.',
+    'تم إيداع مبلغ 250.00 درهم في حسابك في حال الموافقة.',
+    'تم استرداد مبلغ 250.00 درهم إلى بطاقتك خلال 7 أيام عمل.',
+  ].map((body) => [body, 'NO_POST', 'C23 an ALL-CAPS leader, or a trailing condition or time window: not settled']),
+  ...[
+    'AED 250.00 HAS BEEN REFUNDED TO YOUR CARD ENDING 1234.',
+    'REFUND FROM AFTER EIGHT CAFE OF AED 250.00 CREDITED TO YOUR CARD ENDING 1234.',
+    'AFTER CANCELLATION AED 250.00 HAS BEEN REFUNDED TO YOUR CARD ENDING 1234 ON 12 MAY 2026.',
+  ].map((body) => [body, 'INCOME_REFUND', 'C23 ALL-CAPS completed refunds keep their income']),
+  // Reviewer b329245d (Low): "إن" after "و" or a salutation comma leads a condition; "أن" mid-sentence does not.
+  ...[
+    'وإن تم استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
+    'عزيزي العميل، إن تم استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
+  ].map((body) => [body, 'NO_POST', 'C25 Arabic إن after و or a salutation comma is a condition']),
+  ['نود إعلامك أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك.', 'INCOME_REFUND', 'C25 Arabic أن (that) mid-sentence is not a condition'],
+  // #242 review (Reviewer b895dc2e, Change Reviewer 0c8c32fa): a window that a later display verb takes, a reassurance footer,
+  // another subject's condition, a caps name and Arabic أن after a verb of informing leave a completed refund settled; a window
+  // or condition bound to the credit, or an answered إن, does not.
+  ...[
+    'Refund of AED 250.00 has been credited to your card ending 1234 and will reflect within 5 working days.',
+    'AED 250.00 has been refunded to your card ending 1234 and will be visible within 3-5 business days.',
+    'تم استرداد مبلغ 250.00 درهم إلى بطاقتك وسيظهر في كشف حسابك خلال 5 أيام عمل.',
+    'Refund of AED 250.00 has been credited to your card ending 1234, if the transaction has been authorised by you please ignore this message.',
+    'AED 250.00 has been refunded to your card ending 1234; your replacement card will be dispatched once approved.',
+    'AFTER CANCELLATION AED 250.00 HAS BEEN REFUNDED TO YOUR CARD ENDING 1234 BY WILL TRADING LLC.',
+    'نود إعلامك، أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك.',
+    'يسرنا إبلاغك: أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك.',
+  ].map((body) => [body, 'INCOME_REFUND', 'C26 a completed refund with a display window, footer, other subject, caps name or أن']),
+  ...[
+    'AED 250.00 has been refunded to your card and will be credited within 7 working days.',
+    'AED 250.00 has been refunded to your card ending 1234; your account will be credited once approved.',
+    'تم استرداد مبلغ 250.00 درهم إلى بطاقتك وسيتم إيداعه خلال 7 أيام عمل.',
+    'نود إعلامك، إن تم استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
+  ].map((body) => [body, 'NO_POST', 'C26 a window or condition bound to the credit, or an answered إن, is not settled']),
+  // #242 review round 2 (Reviewer 3ca33c8f, Change Reviewer 823e08b4): a later clause about the money keeps its condition or
+  // window on the credit; a modal + be credit is not completed; an إن-spelled or answered condition after a verb of informing
+  // stays one; "when confirmed by you" is a condition. A non-money subject's clause and a bare-alef ان ("that") still post.
+  ...[
+    'AED 250.00 has been credited to your account ending 1234, the cheque is subject to clearance.',
+    'AED 250.00 has been credited to your account ending 1234; the same will be released once approved.',
+    'AED 250.00 has been credited to your account ending 1234, the sum will be available once verified.',
+    'AED 250.00 has been credited to your account ending 1234, the bank will release it once verified.',
+    'AED 250.00 has been refunded to your card ending 1234, the merchant will confirm it once approved.',
+    'AED 250.00 has been refunded to your card ending 1234 and the bank will verify it within 7 working days.',
+    'AED 250.00 may be refunded to your card and will reflect within 5 working days.',
+    'AED 250.00 credited to your account ending 1234 when confirmed by you.',
+    'نود إعلامك، إن تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234 فيرجى تجاهل هذه الرسالة.',
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك فيرجى تجاهل هذه الرسالة.',
+  ].map((body) => [body, 'NO_POST', 'C27 a later clause about the money, a modal credit or an answered condition is not settled']),
+  ...[
+    'AED 250.00 has been refunded to your card ending 1234; your new card will be activated once approved.',
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك.',
+  ].map((body) => [body, 'INCOME_REFUND', 'C27 a non-money subject\'s condition, or ان (that) after a verb of informing']),
+  // #242 review round 3 (Change Reviewer d08237a1, Reviewer b7717543): "أن" after a verb of informing is "that" whatever
+  // follows; a bare-alef "ان" with an answer in its sentence, or a ف-led next sentence, is a condition.
+  ...[
+    'نود إعلامك، أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك. سيظهر المبلغ في كشف حسابك القادم.',
+    'نود إعلامك، أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك. يمكنك مراجعة كشف حسابك في التطبيق.',
+    'نود إعلامك، أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234. للاستفسار يرجى الاتصال على 600540000.',
+    'نحيطكم علماً، أن تم إيداع مبلغ 250.00 درهم في حسابك. يرجى الاحتفاظ بهذه الرسالة.',
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. سيتم إرسال كشف الحساب الشهري قريباً.',
+  ].map((body) => [body, 'INCOME_REFUND', 'C28 أن (that) after a verb of informing, with a courtesy line after it']),
+  ...[
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234 فنرجو تجاهل هذه الرسالة.',
+    'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. فيرجى تجاهل هذه الرسالة.',
+  ].map((body) => [body, 'NO_POST', 'C28 a bare-alef ان answered in its sentence or a ف-led next one is a condition']),
 ];
 
 // ── Case selection ───────────────────────────────────────────────────────────────────────────────────────────────────
