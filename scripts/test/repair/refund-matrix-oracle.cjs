@@ -288,6 +288,25 @@ const CONTROLS = [
     'عزيزي العميل، إن تم استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
   ].map((body) => [body, 'NO_POST', 'C25 Arabic إن after و or a salutation comma is a condition']),
   ['نود إعلامك أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك.', 'INCOME_REFUND', 'C25 Arabic أن (that) mid-sentence is not a condition'],
+  // #242 review (Reviewer b895dc2e, Change Reviewer 0c8c32fa): a window that a later display verb takes, a reassurance footer,
+  // another subject's condition, a caps name and Arabic أن after a verb of informing leave a completed refund settled; a window
+  // or condition bound to the credit, or an answered إن, does not.
+  ...[
+    'Refund of AED 250.00 has been credited to your card ending 1234 and will reflect within 5 working days.',
+    'AED 250.00 has been refunded to your card ending 1234 and will be visible within 3-5 business days.',
+    'تم استرداد مبلغ 250.00 درهم إلى بطاقتك وسيظهر في كشف حسابك خلال 5 أيام عمل.',
+    'Refund of AED 250.00 has been credited to your card ending 1234, if the transaction has been authorised by you please ignore this message.',
+    'AED 250.00 has been refunded to your card ending 1234; your replacement card will be dispatched once approved.',
+    'AFTER CANCELLATION AED 250.00 HAS BEEN REFUNDED TO YOUR CARD ENDING 1234 BY WILL TRADING LLC.',
+    'نود إعلامك، أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك.',
+    'يسرنا إبلاغك: أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك.',
+  ].map((body) => [body, 'INCOME_REFUND', 'C26 a completed refund with a display window, footer, other subject, caps name or أن']),
+  ...[
+    'AED 250.00 has been refunded to your card and will be credited within 7 working days.',
+    'AED 250.00 has been refunded to your card ending 1234; your account will be credited once approved.',
+    'تم استرداد مبلغ 250.00 درهم إلى بطاقتك وسيتم إيداعه خلال 7 أيام عمل.',
+    'نود إعلامك، إن تم استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
+  ].map((body) => [body, 'NO_POST', 'C26 a window or condition bound to the credit, or an answered إن, is not settled']),
 ];
 
 // ── Case selection ───────────────────────────────────────────────────────────────────────────────────────────────────
