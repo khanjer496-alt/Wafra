@@ -2606,10 +2606,12 @@ const EN_CAPS_MODAL_RE =
 // A trailing condition on the credit ("… if approved", "… upon verification"), and for a refund a time window ("… within 7
 // working days"), in the credit's own sentence: the money is not settled yet (Change Reviewer 1ae30382). A time window on a
 // salary or a deposit ("available within 2 hours") is not a pending refund. Only the reassurance footer "if the transaction
-// has been authorised by you, please ignore …" is not a condition (Reviewer b895dc2e); "when confirmed by you" still is
-// (Reviewer 3ca33c8f).
-const EN_TRAILING_CONDITION_RE =
-  /\b(?:if|once|when|provided(?:\s+that)?)\s+(?:(?:it|this|they|the\s+\w+)\s+(?:is|are|has\s+been|gets?)\s+)?(?:approved|authori[sz]ed|verified|confirmed|cleared|accepted|validated)\b(?!\s+by\s+you\b,?\s+(?:(?:please|kindly)\s+)?(?:ignore|disregard)\b)|\b(?:upon|subject\s+to)\s+(?:(?:the|your|merchant|bank)\s+)?(?:approval|verification|confirmation|clearance|validation)\b/i;
+// has been authorised by you, please ignore …" is not a condition (Reviewer b895dc2e), and only after "if"; "when confirmed
+// by you" and "once approved by you, please ignore …" still are (Reviewer 3ca33c8f, b7717543).
+const EN_CONDITION_VERB = String.raw`(?:(?:it|this|they|the\s+\w+)\s+(?:is|are|has\s+been|gets?)\s+)?(?:approved|authori[sz]ed|verified|confirmed|cleared|accepted|validated)\b`;
+const EN_TRAILING_CONDITION_RE = new RegExp(String.raw`\b(?:once|when|provided(?:\s+that)?)\s+` + EN_CONDITION_VERB +
+  String.raw`|\bif\s+` + EN_CONDITION_VERB + String.raw`(?!\s+by\s+you\b,?\s+(?:(?:please|kindly)\s+)?(?:ignore|disregard)\b)` +
+  String.raw`|\b(?:upon|subject\s+to)\s+(?:(?:the|your|merchant|bank)\s+)?(?:approval|verification|confirmation|clearance|validation)\b`, 'i');
 const EN_TIME_WINDOW_RE = /\bwithin\s+(?:the\s+next\s+)?\d+(?:\s*[-–]\s*\d+)?\s+(?:working\s+|business\s+|banking\s+)?(?:days?|hours?|weeks?)\b/i;
 // A window that a later display verb takes ("… has been credited … and will reflect within 5 working days") says when the
 // completed credit shows, as C12 and the same text as two sentences do; a window bound to the credit itself ("refunded to your
@@ -2715,14 +2717,17 @@ const AR_TIME_WINDOW_RE = new RegExp(`${AR_NB}خلال\\s+\\d+(?:\\s*[-–]\\s*\
 /** "… وسيظهر في كشف حسابك خلال 5 أيام عمل": a later display verb takes the window, as in English (Change Reviewer 0c8c32fa). */
 const AR_DISPLAY_VERB_RE = new RegExp(`${AR_NB}و?(?:سيظهر|ستظهر|سينعكس|ستنعكس|يظهر|تظهر|سوف\\s+(?:يظهر|تظهر|ينعكس|تنعكس))${AR_NA}`);
 /**
- * "نود إعلامك، أن تم …", "يسرنا إبلاغك: أن تم …": after a verb of informing, ان is "that", not "if" (both reviewers on #242),
- * unless it is written "إن" (the hamza below is "if", read from the original text) or an answer follows in the sentence or
- * the next one: "… ستصلك رسالة", "… فيرجى تجاهل …", "… فسوف …", "… يمكنك …", "… فتحقق …" (Reviewer 3ca33c8f, Change Reviewer
- * 823e08b4).
+ * "نود إعلامك، أن تم …", "يسرنا إبلاغك: أن تم …": after a verb of informing, ان is "that", not "if" (both reviewers on #242).
+ * The original letter decides first (Change Reviewer d08237a1, Reviewer b7717543): "أن" (hamza above) is "that" whatever
+ * follows, so a courtesy line (". سيظهر المبلغ …", ". يرجى الاحتفاظ …") keeps the income; "إن" (hamza below) is "if". Only a
+ * bare "ان" looks for an answer: in its own sentence ("… ستصلك رسالة", "… فيرجى/فنرجو تجاهل …", "… يمكنك …", "… فاعتبر …"),
+ * or a next sentence led by ف or saying a message will reach you (". فيرجى …", ". ستصلك رسالة تأكيد").
  */
-const AR_INFORM_BEFORE_RE = new RegExp(`${AR_NB}(?:اعلام|ابلاغ|اخبار|افاده|نفيد|نحيط|نعلم|نخبر|نوكد|علما)[${AR_LETTER}]*\\s*[,:]?\\s*$`);
+// Its suffix may carry diacritics ("نحيطكم علماً،").
+const AR_INFORM_BEFORE_RE = new RegExp(`${AR_NB}(?:اعلام|ابلاغ|اخبار|افاده|نفيد|نحيط|نعلم|نخبر|نوكد|علما)[${AR_LETTER}\\u064B-\\u0652]*\\s*[,:]?\\s*$`);
 const AR_ANSWER_RE = new RegExp(`${AR_NB}ف?(?:س[يتن][${AR_LETTER}]{2,}|سوف\\s+[${AR_LETTER}]+|يرجي|الرجاء|يمكنك|بامكانك|لا\\s+داعي)|` +
-  `${AR_NB}ف(?:تحقق|اتصل|تجاهل|راجع|تواصل|لا)${AR_NA}`);
+  `${AR_NB}ف?(?:نرجو|اعتبر)${AR_NA}|${AR_NB}ف(?:تحقق|اتصل|تجاهل|راجع|تواصل|لا)${AR_NA}`);
+const AR_NEXT_ANSWER_RE = new RegExp(`^\\s*(?:ف[${AR_LETTER}]|(?:ستصلك|سيصلك|ستتلقي|سوف\\s+(?:تصلك|يصلك|تتلقي)|سيتم\\s+(?:اشعارك|ابلاغك|اعلامك))${AR_NA})`);
 /** "سيظهر المبلغ في حسابك خلال 5-7 أيام عمل": the processed money is not there yet. */
 const AR_PROCESSED_NOT_YET_RE = new RegExp(
   `${AR_NB}(?:سيظهر|ستظهر|سينعكس|ستنعكس|سيضاف|ستضاف|سيتم\\s+(?:ايداع|اضافه|اظهار))${AR_NA}|${AR_NB}قد\\s+يستغرق[^.\\n]{0,40}?(?:يوم|ايام)${AR_NA}`);
@@ -2777,10 +2782,14 @@ function arCreditSettlement(sentence: string, clause: CreditClause, rawAfter: st
   const after = foldOrthography(rawAfter);
   const lead = sentence.slice(0, clause.start);
   const next = after.split(REFUND_SENTENCE_BREAK_RE).find((text) => text.trim() !== '') ?? '';
-  const answered = AR_ANSWER_RE.test(sentence.slice(clause.end)) || AR_ANSWER_RE.test(next);
-  // Without the original text the hamza is unknown, so ان stays a leader.
-  const informedThat = (leader: RegExpMatchArray): boolean => /^و?ان$/.test(leader[0]) && !answered && raw !== undefined &&
-    raw[leader.index! + leader[0].length - 2] !== 'إ' && AR_INFORM_BEFORE_RE.test(lead.slice(0, leader.index));
+  // Without the original text the letter is unknown, so ان stays a leader.
+  const informedThat = (leader: RegExpMatchArray): boolean => {
+    if (!/^و?ان$/.test(leader[0]) || raw === undefined || !AR_INFORM_BEFORE_RE.test(lead.slice(0, leader.index))) return false;
+    const letter = raw[leader.index! + leader[0].length - 2];
+    if (letter === 'أ') return true;
+    if (letter !== 'ا') return false;
+    return !AR_ANSWER_RE.test(sentence.slice(clause.end)) && !AR_NEXT_ANSWER_RE.test(next);
+  };
   const leaders = [...lead.matchAll(AR_CONDITIONAL_RE)].filter((leader) => !informedThat(leader));
   const last = leaders[leaders.length - 1];
   const betweenLeaderAndCredit = last ? lead.slice(last.index! + last[0].length) : '';
