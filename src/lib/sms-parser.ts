@@ -2617,6 +2617,13 @@ const AR_PENDING_BEFORE_RE = new RegExp(`${AR_NB}(?:سيتم|ستتم|سوف\\s+
 const AR_SETTLED_BEFORE_RE = new RegExp(`${AR_NB}(?:قد\\s+)?(?:تم|تمت)\\s+$`);
 /** A leader governs the clause unless a comma closes it first (design v2): إذا, عند(ما), بمجرد (أن), بعد أن, (في) حال, متى, حين. */
 const AR_CONDITIONAL_RE = new RegExp(`${AR_NB}و?(?:اذا|عندما|عند|بمجرد(?:\\s+ان)?|بعد\\s+ان|في\\s+حال|حال|متي|حينما|حين)${AR_NA}`, 'g');
+/** A verbal noun right after a leader ("عند استرداد …", upon refunding) is its object: not yet a completed credit. */
+const AR_LEADER_BEFORE_RE = new RegExp(`${AR_NB}و?(?:اذا|عندما|عند|بمجرد(?:\\s+ان)?|بعد\\s+ان|في\\s+حال|حال|متي|حينما|حين)\\s+$`);
+// As in English (Reviewer 956cb08a): عند/عندما/بمجرد/بعد أن/متى/حين lead a condition only when a future main clause follows
+// the credit in the same sentence ("ستصلك رسالة", "سنرسل", "سوف") or the credit is not completed; otherwise they only say
+// when a completed refund happened ("عند إلغاء الطلب تم استرداد …"). إذا and (في) حال always do.
+const AR_TEMPORAL_LEADER_RE = new RegExp(`^و?(?:عندما|عند|بمجرد(?:\\s+ان)?|بعد\\s+ان|متي|حينما|حين)$`);
+const AR_FUTURE_MAIN_CLAUSE_RE = new RegExp(`${AR_NB}(?:س[يتن][${AR_LETTER}]{2,}|سوف\\s+[${AR_LETTER}]+)`);
 const AR_THIRD_PARTY_DESTINATION_RE = new RegExp(`${AR_NB}(?:الي|لصالح)\\s+(?:ال)?(?:تاجر|مستفيد|بائع|متجر)${AR_NA}`);
 /** Taken back, in error or still awaiting approval, bound to this credit ("وتم عكسه لاحقاً", "عن طريق الخطأ", "بانتظار الموافقة"). */
 const AR_TAKEN_BACK_RE = new RegExp(
@@ -2665,7 +2672,7 @@ function arCreditClauses(sentence: string, debitBeside = false): CreditClause[] 
     } else if (prefix !== 'و') {
       if (AR_NEGATED_BEFORE_RE.test(lead)) aspect = 'negated';
       else if (AR_SETTLED_BEFORE_RE.test(lead)) aspect = 'settled';
-      else if (AR_PENDING_BEFORE_RE.test(lead)) aspect = 'pending';
+      else if (AR_PENDING_BEFORE_RE.test(lead) || AR_LEADER_BEFORE_RE.test(lead)) aspect = 'pending';
       else if (lead.trim() === '') aspect = 'headline';
     }
     if (!aspect) continue;
@@ -2680,7 +2687,11 @@ function arCreditSettlement(sentence: string, clause: CreditClause, rawAfter: st
   const lead = sentence.slice(0, clause.start);
   const leaders = [...lead.matchAll(AR_CONDITIONAL_RE)];
   const last = leaders[leaders.length - 1];
-  if (last && !lead.slice(last.index! + last[0].length).includes(',')) return { verdict: 'not-settled', reason: 'conditional' };
+  if (last && !lead.slice(last.index! + last[0].length).includes(',') &&
+    (!AR_TEMPORAL_LEADER_RE.test(last[0]) || AR_FUTURE_MAIN_CLAUSE_RE.test(sentence.slice(clause.end)) ||
+      (clause.ar !== 'settled' && clause.ar !== 'headline'))) {
+    return { verdict: 'not-settled', reason: 'conditional' };
+  }
   if (clause.ar === 'negated') return { verdict: 'not-settled', reason: 'negated' };
   if (clause.ar === 'pending') return { verdict: 'not-settled', reason: 'pending' };
   const tail = sentence.slice(clause.end);
