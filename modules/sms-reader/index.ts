@@ -36,6 +36,8 @@ interface SmsReaderModule {
   getInboxCount?(sinceMs: number, atOrAfterMs: number): Promise<number>;
   /** Present in every binary but returns true only in the temporary corpus build. */
   isCorpusExportEnabled?(): boolean;
+  /** Compiled native build markers, read back by the release workflow. */
+  buildFlags?(): { smsCorpusNative: string };
   /** Unfiltered received SMS page. Throws unless the native corpus flag is enabled. */
   getInboxCorpusPage?(
     beforeDateMs: number,

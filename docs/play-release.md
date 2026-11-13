@@ -200,7 +200,12 @@ these three facts.
         --in /tmp/wafra-sealed --out <destination>
       ```
 
-      `open` refuses any file whose SHA-256 differs from `verification.json`.
+      `open` refuses any file whose SHA-256 differs from `verification.json`,
+      and any file name that isn't a plain name inside `--out`. It needs
+      OpenSSL 3 (`openssl cms`; Homebrew `openssl` on a Mac whose system
+      `openssl` is LibreSSL). CMS encryption doesn't prove who sealed a file,
+      since anyone can encrypt to a public certificate, so open only the
+      artifact of a "Build Android APK" run you dispatched, by its run id.
       To rotate the key, generate a new pair, commit only the new certificate,
       and keep the old key until its last artifact has expired.
 - [x] Privacy policy written (landing page section; host on real domain)

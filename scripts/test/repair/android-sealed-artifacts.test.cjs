@@ -79,6 +79,7 @@ test('the source markers fold to exactly one string under Metro release constant
     ['src/lib/founder-pro.ts', 'FOUNDER_UNLOCK_BUILD_FLAG', 'EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK', 'founder-unlock'],
     ['src/lib/founder-pro.ts', 'AUTO_FOUNDER_PRO_BUILD_FLAG', 'EXPO_PUBLIC_WAFRA_AUTO_FOUNDER_PRO', 'auto-founder-pro'],
     ['src/lib/sms-corpus-export.ts', 'SMS_CORPUS_EXPORT_BUILD_FLAG', 'EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT', 'sms-corpus-export'],
+    ['src/lib/parser-research-source.ts', 'PARSER_RESEARCH_BUILD_FLAG', 'EXPO_PUBLIC_WAFRA_PARSER_RESEARCH', 'parser-research'],
   ];
   for (const [file, name, env, flag] of cases) {
     const source = fs.readFileSync(path.join(root, file), 'utf8');
@@ -98,6 +99,47 @@ test('the source markers fold to exactly one string under Metro release constant
   assert.match(founder, /const AUTOMATIC_FOUNDER_PRO_ENABLED = AUTO_FOUNDER_PRO_BUILD_FLAG\.endsWith\('=on'\);/);
   assert.match(fs.readFileSync(path.join(root, 'src/lib/sms-corpus-export.ts'), 'utf8'),
     /const JS_CORPUS_EXPORT_ENABLED = SMS_CORPUS_EXPORT_BUILD_FLAG\.endsWith\('=on'\);/);
+  assert.match(fs.readFileSync(path.join(root, 'src/lib/parser-research-source.ts'), 'utf8'),
+    /const RESEARCH_BUILD_ENABLED = PARSER_RESEARCH_BUILD_FLAG\.endsWith\('=on'\);/);
+  // Every JavaScript reader of these build switches goes through the marker-derived gates.
+  const direct = spawnSync('git', ['grep', '-n', '-E',
+    'process\\.env\\.EXPO_PUBLIC_WAFRA_(FOUNDER_UNLOCK|AUTO_FOUNDER_PRO|SMS_CORPUS_EXPORT|PARSER_RESEARCH)\\b', '--', 'src', 'modules'],
+  { cwd: root, encoding: 'utf8' }).stdout.trim().split('\n').filter(Boolean)
+    .filter((line) => !/^src\/lib\/(founder-pro|sms-corpus-export|parser-research-source)\.ts:/.test(line));
+  assert.deepEqual(direct, [], 'read the flag through its module, not process.env');
+  assert.match(fs.readFileSync(path.join(root, 'src/screens/journal-home-screen.tsx'), 'utf8'),
+    /const founderUnlockEnabled = isFounderUnlockBuild\(\);/);
+});
+
+test('the native full-inbox gate leaves a compiled marker in the dex, from the same Gradle condition', () => {
+  const gradle = fs.readFileSync(path.join(root, 'modules/sms-reader/android/build.gradle'), 'utf8');
+  assert.match(gradle, /def smsCorpusExportEnabled = System\.getenv\('WAFRA_SMS_CORPUS_EXPORT'\) == '1'/);
+  assert.match(gradle, /buildConfigField 'boolean', 'WAFRA_SMS_CORPUS_EXPORT', smsCorpusExportEnabled\.toString\(\)/);
+  assert.match(gradle, /buildConfigField 'String', 'WAFRA_BUILD_FLAG_SMS_CORPUS_NATIVE',\s*smsCorpusExportEnabled \? '"wafra-build-flag:sms-corpus-native=on"' : '"wafra-build-flag:sms-corpus-native=off"'/);
+  const kotlin = fs.readFileSync(path.join(root, 'modules/sms-reader/android/src/main/java/expo/modules/smsreader/SmsReaderModule.kt'), 'utf8');
+  assert.match(kotlin, /Function\("buildFlags"\) \{\s*mapOf\("smsCorpusNative" to BuildConfig\.WAFRA_BUILD_FLAG_SMS_CORPUS_NATIVE\)\s*\}/);
+  assert.doesNotMatch(kotlin, /WAFRA_BUILD_FLAG_SMS_CORPUS_NATIVE\.(endsWith|contains|equals|startsWith)/, 'no gate derived from the native marker');
+});
+
+test('readBundle scans the JS bundle and every dex of an APK and an AAB', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wafra-zip-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const { 'sms-corpus-native': _, ...js } = allOff;
+  for (const [name, bundle, dex] of [['app.apk', 'assets/index.android.bundle', 'classes2.dex'],
+    ['app.aab', 'base/assets/index.android.bundle', 'base/dex/classes3.dex']]) {
+    const tree = path.join(dir, name + '.d');
+    fs.mkdirSync(path.join(tree, path.dirname(bundle)), { recursive: true });
+    fs.mkdirSync(path.join(tree, path.dirname(dex)), { recursive: true });
+    fs.writeFileSync(path.join(tree, bundle), bundleWith(js));
+    fs.writeFileSync(path.join(tree, dex), bundleWith({ 'sms-corpus-native': 'off' }));
+    const zip = spawnSync('zip', ['-qr', path.join(dir, name), '.'], { cwd: tree });
+    assert.equal(zip.status, 0);
+    assert.deepEqual(flags.report(flags.readBundle(path.join(dir, name))), allOff, name);
+    fs.writeFileSync(path.join(tree, dex), bundleWith({ 'sms-corpus-native': 'on' }));
+    fs.rmSync(path.join(dir, name));
+    spawnSync('zip', ['-qr', path.join(dir, name), '.'], { cwd: tree });
+    assert.equal(flags.report(flags.readBundle(path.join(dir, name)))['sms-corpus-native'], 'on', `${name} native on`);
+  }
 });
 
 test('the committed recipient is a public certificate only', () => {
@@ -135,6 +177,12 @@ test('seal and open round-trip, and open refuses a tampered file or hash', (t) =
   fs.writeFileSync(json, JSON.stringify({ ...record, files: [{ ...record.files[0], sha256: '0'.repeat(64) }] }));
   assert.throws(() => sealer.open({ key, in: sealedDir, out: path.join(dir, 'open2') }), /does not match verification\.json/);
   assert.equal(fs.existsSync(path.join(dir, 'open2', 'wafra.apk.bundle')), false, 'a mismatching plaintext is removed');
+
+  for (const bad of [{ source: '../../escaped.txt' }, { source: '/tmp/abs.apk' }, { sealed: '../wafra-apk.enc' }, { source: 'a/b.apk' }]) {
+    fs.writeFileSync(json, JSON.stringify({ ...record, files: [{ ...record.files[0], ...bad }] }));
+    assert.throws(() => sealer.open({ key, in: sealedDir, out: path.join(dir, 'open-bad') }), /refusing/, JSON.stringify(bad));
+  }
+  assert.equal(fs.existsSync(path.join(dir, 'escaped.txt')), false);
 
   fs.writeFileSync(json, JSON.stringify(record));
   sealedBytes[sealedBytes.length - 1] ^= 1;

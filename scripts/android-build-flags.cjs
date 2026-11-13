@@ -2,11 +2,16 @@
 'use strict';
 // Reads the build-flag markers back out of a packaged Android artifact.
 //
-// src/lib/founder-pro.ts and src/lib/sms-corpus-export.ts export one marker
-// string per flag. Expo inlines the EXPO_PUBLIC_* value and Metro's release
-// constant folding keeps exactly one of "=on" / "=off", so the compiled
-// bundle (Hermes bytecode keeps ASCII string literals verbatim) records how
-// it was built, independent of what the workflow environment claimed.
+// JavaScript: src/lib/founder-pro.ts, src/lib/sms-corpus-export.ts and
+// src/lib/parser-research-source.ts export one marker string per flag. Expo
+// inlines the EXPO_PUBLIC_* value and Metro's release constant folding keeps
+// exactly one of "=on" / "=off", so the Hermes bundle (which keeps ASCII
+// string literals verbatim) records how it was built.
+// Native: modules/sms-reader/android/build.gradle compiles
+// BuildConfig.WAFRA_BUILD_FLAG_SMS_CORPUS_NATIVE from the same Gradle
+// condition as the full-inbox reader's gate, and SmsReaderModule.buildFlags()
+// returns it, so the packaged dex carries the native state too.
+// Both are read from the artifact itself, not from the workflow environment.
 //
 //   node scripts/android-build-flags.cjs report <file.apk|file.aab|bundle>
 //   node scripts/android-build-flags.cjs verify-production <file.apk|file.aab|bundle>
@@ -17,17 +22,23 @@
 const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 
-const FLAGS = ['founder-unlock', 'auto-founder-pro', 'sms-corpus-export'];
-const BUNDLE_ENTRIES = { '.aab': 'base/assets/index.android.bundle', '.apk': 'assets/index.android.bundle' };
+const FLAGS = ['founder-unlock', 'auto-founder-pro', 'sms-corpus-export', 'parser-research', 'sms-corpus-native'];
+const ENTRIES = {
+  '.aab': { bundle: 'base/assets/index.android.bundle', dex: 'base/dex/classes*.dex' },
+  '.apk': { bundle: 'assets/index.android.bundle', dex: 'classes*.dex' },
+};
 
-function readBundle(file) {
-  const entry = Object.entries(BUNDLE_ENTRIES).find(([ext]) => file.endsWith(ext))?.[1];
-  if (!entry) return fs.readFileSync(file);
-  const out = spawnSync('unzip', ['-p', file, entry], { maxBuffer: 512 * 1024 * 1024 });
-  if (out.status !== 0 || out.stdout.length === 0) {
-    throw new Error(`${file} has no ${entry}`);
-  }
+function unzipEntry(file, pattern) {
+  const out = spawnSync('unzip', ['-p', file, pattern], { maxBuffer: 1024 * 1024 * 1024 });
+  if (out.status !== 0 || out.stdout.length === 0) throw new Error(`${file} has no ${pattern}`);
   return out.stdout;
+}
+
+/** The JavaScript bundle plus every dex of an APK/AAB; any other file is read as-is. */
+function readBundle(file) {
+  const entry = Object.entries(ENTRIES).find(([ext]) => file.endsWith(ext))?.[1];
+  if (!entry) return fs.readFileSync(file);
+  return Buffer.concat([unzipEntry(file, entry.bundle), Buffer.from('\0'), unzipEntry(file, entry.dex)]);
 }
 
 function report(buffer) {
@@ -42,7 +53,7 @@ function report(buffer) {
 function main(argv) {
   const [command, file] = argv;
   if (!['report', 'verify-production'].includes(command) || !file) {
-    console.error('usage: android-build-flags.cjs report|verify-production <file.apk|file.aab|bundle>');
+    console.error('usage: android-build-flags.cjs report|verify-production <file.apk|file.aab|bundle+dex>');
     return 2;
   }
   const flags = report(readBundle(file));

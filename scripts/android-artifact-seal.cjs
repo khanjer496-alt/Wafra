@@ -11,7 +11,10 @@
 //     plaintext and sealed SHA-256 of each file, and the compiled build flags.
 // The matching private key never enters the repository, CI or chat; it stays
 // on the release Mac (chmod 600). `open` decrypts and refuses any file whose
-// SHA-256 differs from verification.json.
+// SHA-256 differs from verification.json. CMS encryption does not
+// authenticate the sender (anyone can encrypt to a public certificate), so
+// open only the artifact of a build-apk.yml run you dispatched, by run id.
+// Requires OpenSSL 3 (`openssl cms`); LibreSSL builds may lack it.
 //
 //   node scripts/android-artifact-seal.cjs seal --recipient <cert.pem> --out <dir> \
 //     [--meta key=value ...] <label>=<file> [...]
@@ -23,6 +26,8 @@ const path = require('node:path');
 const flags = require('./android-build-flags.cjs');
 
 const LABEL = /^[a-z0-9][a-z0-9-]*$/;
+const SEALED_NAME = /^[a-z0-9][a-z0-9-]*\.enc$/;
+const SOURCE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 function sha256(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -79,9 +84,19 @@ function open({ key, in: input, out }) {
   if (verification.schema !== 'wafra-android-sealed-v1') throw new Error('unknown verification.json schema');
   fs.mkdirSync(out, { recursive: true });
   return verification.files.map((entry) => {
+    // verification.json comes from a downloaded artifact. Anyone can encrypt to
+    // the public certificate, so its names are untrusted: plain file names
+    // only, of the shapes seal() writes, resolved inside --in and --out.
+    if (typeof entry.sealed !== 'string' || !SEALED_NAME.test(entry.sealed) ||
+        typeof entry.source !== 'string' || !SOURCE_NAME.test(entry.source)) {
+      throw new Error(`refusing file names in verification.json: ${JSON.stringify([entry.sealed, entry.source])}`);
+    }
     const sealed = path.join(input, entry.sealed);
     if (sha256(sealed) !== entry.sealedSha256) throw new Error(`${entry.sealed}: sealed SHA-256 mismatch`);
     const plain = path.join(out, entry.source);
+    if (path.dirname(path.resolve(plain)) !== path.resolve(out) || entry.source.includes('..')) {
+      throw new Error(`refusing to write outside --out: ${entry.source}`);
+    }
     openssl(['cms', '-decrypt', '-binary', '-inform', 'DER', '-in', sealed, '-inkey', key, '-out', plain]);
     const actual = sha256(plain);
     if (actual !== entry.sha256) {
