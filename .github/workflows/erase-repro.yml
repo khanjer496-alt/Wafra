@@ -18,8 +18,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: fix-candidate
-            sha: 69d5fb494f4b66e53233faf2f97784db97bd6c4d
+          - label: diag-d4cc04a9
+            sha: d4cc04a9dc1d9ffeacb3faf58dc3714551006b35
     name: erase on ${{ matrix.label }}
     runs-on: macos-15
     timeout-minutes: 120
@@ -140,6 +140,7 @@ jobs:
             shots/js-fatal-stack.txt
             shots/js-breadcrumbs-before-fatal.txt
             shots/app-wafra-lines.txt
+            shots/erase-diag-lines.txt
             shots/app-entitlements.txt
             shots/*.png
             shots/maestro/*.log
