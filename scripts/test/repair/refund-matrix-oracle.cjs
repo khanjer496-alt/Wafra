@@ -143,6 +143,77 @@ const CONTROLS = [
   ['Purchase of AED 250.00 with Debit Card ending 1234 at NOON.COM has been refunded. The refund was reversed by the merchant.', 'NO_POST', 'C9 a bare refund taken back later'],
   ...['MARKS AND SPENCER', 'H AND M', 'BARNES AND NOBLE']
     .map((m) => [`Refund of AED 250.00 from ${m} has been credited to your card ending 1234.`, 'INCOME_REFUND', `C10 merchant named with AND (${m})`]),
+  // Oracle v2.1 (Change Reviewer 82667841): appended, so every earlier row keeps its id.
+  ['AED 250.00 refunded to your card ending 1234.', 'INCOME_REFUND', 'C11 headline: a bare participle is completed'],
+  ['Refund of AED 250.00 credited to your account.', 'INCOME_REFUND', 'C11 headline: refund of … credited'],
+  ['250.00 AED reversed to your card.', 'INCOME_REFUND', 'C11 headline: currency after'],
+  ['استرداد مبلغ 250.00 درهم إلى بطاقتك.', 'INCOME_REFUND', 'C11 Arabic headline: a bare verbal noun'],
+  ['إيداع مبلغ 250.00 درهم في حسابك.', 'INCOME_REFUND', 'C11 Arabic headline: deposit to the own account'],
+  ['Refund of AED 250.00 has been credited to your card and will appear on your next statement.', 'INCOME_REFUND', 'C12 a "will" not bound to the credit'],
+  ['Refund for your pending order of AED 250.00 has been credited to your card.', 'INCOME_REFUND', 'C12 a "pending" not bound to the credit'],
+  ['تم إيداع مبلغ 250.00 درهم في حسابك ولا يلزم أي إجراء.', 'INCOME_REFUND', 'C12 Arabic: a "لا" not bound to the credit'],
+  [`${DEBIT_EN} If a refund of AED 100.00 has been credited to your card, you will receive an SMS.`, 'REVIEW', 'C13 first match: D1 (own figure) before D2 (conditional)'],
+  // Oracle v2.2 (CEO 73c34ef8, Q1 narrowed): a processed refund to an instrument with digits, or with a balance line, is
+  // settled; a bare one stays Review; a non-refund "processed" alert keeps its behaviour. Appended, so every id stays.
+  ['Refund of AED 250.00 has been processed to your Debit Card ending 4502. Avl Balance is AED 400.00', 'INCOME_REFUND', 'C14 processed to a debit card with digits and a balance'],
+  ['Refund of AED 250.00 has been processed to your Credit Card ending 4110. Avl Cr. Limit is AED 400.00', 'INCOME_REFUND', 'C14 processed to a credit card with digits and a limit'],
+  ['Refund of AED 250.00 from NOON has been processed to your card ending 1234.', 'INCOME_REFUND', 'C14 processed to a card with digits'],
+  ['Refund of AED 250.00 for your Noon order has been processed to your card ending 1234.', 'INCOME_REFUND', 'C14 processed refund for an order, card with digits'],
+  ['The refund of AED 250.00 has been processed to your card. Your available balance is AED 900.00.', 'INCOME_REFUND', 'C14 processed with a balance line after it'],
+  ['The refund of AED 250.00 has been processed to your card.', 'REVIEW', 'C15 a bare processed refund (Q1)'],
+  ['NOON.COM has processed a refund of AED 250.00 to your account.', 'REVIEW', 'C15 a bare processed refund by the merchant (Q1)'],
+  ['A credit transaction of AED 250.00 has been processed on your account XXXX1234 on 26/09/2026. Description: SALARY', 'INCOME_REFUND', 'C16 a processed salary credit keeps its income'],
+  ['Dear Customer, Your payment to the account number 0501232543 has been processed. Amount Due: AED 250.00 Amount Paid: AED 250.00', 'EXPENSE', 'C16 a processed bill payment keeps its expense'],
+  // Change Reviewer 4eee941b: a processed refund the bank says is not there yet stays Review (EXPENSE beside a debit, D4),
+  // whatever balance line it carries; and a date is not an instrument number.
+  ['Refund of AED 250.00 has been processed to your card ending 1234. It will reflect in your account within 5-7 working days.', 'REVIEW', 'C17 processed with digits, then "will reflect"'],
+  ['Refund of AED 250.00 has been processed to your card ending 1234. Avl Balance is AED 400.00. It will reflect in your account within 5-7 working days.', 'REVIEW', 'C17 a balance line does not override "will reflect"'],
+  ['Refund of AED 250.00 has been processed to your card ending 1234. It may take 5 working days to appear.', 'REVIEW', 'C17 processed with digits, then "may take 5 working days"'],
+  ['تم معالجة استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234. سيظهر المبلغ في حسابك خلال 5-7 أيام عمل.', 'REVIEW', 'C17 Arabic: processed, then "سيظهر المبلغ"'],
+  [`${DEBIT_EN} The refund has been processed to your card ending 1234. It will reflect in your account within 5-7 working days.`, 'EXPENSE', 'C17 beside a debit: not there yet, the debit posts (D4)'],
+  ['The refund of AED 250.00 has been processed to your card on 12/11/2026.', 'REVIEW', 'C18 a date is not an instrument number'],
+  // Change Reviewer 2aa1f668 (High): "processed to your account" with no refund wording and no debit is ordinary income.
+  ['Your salary of AED 250.00 has been processed to your account.', 'INCOME_REFUND', 'C19 a processed salary keeps its income'],
+  ['WPS salary of AED 250.00 has been processed to your account. Thank you for banking with us.', 'INCOME_REFUND', 'C19 a processed WPS salary keeps its income'],
+  ['Your cash deposit of AED 250.00 has been processed to your account.', 'INCOME_REFUND', 'C19 a processed cash deposit keeps its income'],
+  // Reviewer 956cb08a (Medium): a temporal lead with a completed credit and no clause after it is not a condition.
+  ['After cancellation AED 250.00 has been refunded to your card ending 1234.', 'INCOME_REFUND', 'C20 "After <noun>" leads a completed refund'],
+  ['Dear Customer, once again AED 250.00 has been refunded to your card ending 1234.', 'INCOME_REFUND', 'C20 "once again" is not a leader'],
+  ['Once your order was cancelled AED 250.00 was refunded to your card ending 1234.', 'INCOME_REFUND', 'C20 a completed "once" clause, then the refund'],
+  // Change Reviewer a41046bc (High), Reviewer 07a65c13 (Medium): a leader that directly governs the credit stays a condition,
+  // whatever main clause follows. Reviewer 07a65c13 (Low): a telegraphic bare participle is completed.
+  ...[
+    "When AED 250.00 has been refunded to your card you'll receive an SMS.",
+    'Once AED 250.00 has been refunded to your card an SMS will be sent.',
+    'When AED 250.00 has been refunded to your card your balance will update.',
+    'After AED 250.00 has been refunded to your card please check your balance.',
+    "Once AED 250.00 has been credited to your account we'll notify you.",
+    'When AED 250.00 has been refunded to your card you receive an SMS.',
+    'As soon as AED 250.00 has been credited to your account Wafra will notify you.',
+    'When AED 250.00 has been credited to your account a confirmation will follow.',
+    'Once AED 250.00 has been refunded to your card. You will receive an SMS.',
+    'Once AED 250.00 has been credited to your account a confirmation SMS will follow.',
+    'Once AED 250.00 has been refunded to your card ending 1234 your card limit will be restored.',
+    'When AED 250.00 has been credited to your card ending 1234 the merchant will be informed.',
+    'Once AED 250.00 has been refunded to your card ending 1234 an SMS will be sent to you.',
+    'After AED 250.00 has been refunded to your card ending 1234 your statement will show it.',
+  ].map((body) => [body, 'NO_POST', 'C21 a leader directly governing the credit is a condition, whatever follows']),
+  ['After cancellation AED 250.00 refunded to your card ending 1234.', 'INCOME_REFUND', 'C20 a telegraphic completed refund after "After <noun>"'],
+  // Change Reviewer 742367fa (High), Reviewer c204ca32 (Medium/Low): an agent subject or any other verb after a temporal
+  // leader governs the credit; "May" in a date or a name is not a modal.
+  ...[
+    'When the merchant has refunded AED 250.00 to your card please check your balance.',
+    'Once we have refunded AED 250.00 to your account please check your balance.',
+    'When they have refunded AED 250.00 to your card check your balance.',
+    'When noon has refunded AED 250.00 to your card please check your balance.',
+    'After the store refunded AED 250.00 to your card please verify the balance.',
+    'Once the seller has refunded AED 250.00 to your card you receive an SMS.',
+    'When the bank has credited AED 250.00 to your account kindly verify it in the app.',
+    'When the merchant confirms AED 250.00 has been refunded to your card ending 1234.',
+    'Once NOON confirms AED 250.00 has been refunded to your card ending 1234.',
+  ].map((body) => [body, 'NO_POST', 'C21 an agent or another verb after the leader: the leader governs the credit']),
+  ['After cancellation AED 250.00 has been refunded to your card ending 1234 on 12 May 2026.', 'INCOME_REFUND', 'C20 "May" in a date is not a modal'],
+  ['After your return AED 250.00 has been credited to your card ending 1234 by MAY STORES.', 'INCOME_REFUND', 'C20 "MAY" in a name is not a modal'],
 ];
 
 // ── Case selection ───────────────────────────────────────────────────────────────────────────────────────────────────
