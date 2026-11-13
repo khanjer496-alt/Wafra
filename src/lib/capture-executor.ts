@@ -25,7 +25,7 @@ import type {
   LocalCaptureDeclineQualificationMapping,
   LocalCaptureReviewQualificationCandidate,
 } from '@/lib/types';
-import { emptyAlertReviewTray, partitionReviewsByCapacity, reviewReceiptSettled, settleReviewStage, requiresReviewRetention, type ReviewEntry } from '@/lib/alert-review-tray';
+import { emptyAlertReviewTray, partitionReviewsByCapacity, reviewReceiptReleasesPage, reviewReceiptSettled, settleReviewStage, requiresReviewRetention, type ReviewEntry } from '@/lib/alert-review-tray';
 import { stageWalletNearMatches } from '@/lib/wallet-near-match';
 import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
 import { captureTrace, captureTraceEnabled } from '@/lib/capture-trace';
@@ -351,8 +351,9 @@ export const createCaptureExecutor = ({
       reviewAlerts = reviewReceipt.admitted;
       const retention = await settleReviewStage(reviewCandidates, reviewReceipt);
       for (const item of reviewCandidates) {
+        // The inbox cursor is a page-level hold: a refused source must not stop it.
         if (requiresReviewRetention(item) && !retention.some(entry => entry.sourceKey === canonicalCaptureSourceKey(item.sourceKey, item.observedAt) &&
-            reviewReceiptSettled(entry.outcome))) {
+            reviewReceiptReleasesPage(entry.outcome))) {
           deferredReviewSourceKeys.push(item.sourceKey);
           if (item.channel !== 'push') deferInbox = true;
         }
