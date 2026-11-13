@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 20da6fdffa9fb76bd1ea220128fc62f442338962083fd6c45cd5130846f05a20
+// Generated from normal shipping TypeScript. Source SHA-256: a7120dc7ef94142670b84a697d8a48179072fc91bedef961a007605ba783b9cc
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -12004,12 +12004,27 @@ function enCreditClauses(sentence, debitBeside = false) {
     }
     return clauses;
 }
+const EN_TEMPORAL_LEADER_RE = /^(?:once|when(?:ever)?|after|as\s+soon\s+as)$/i;
+const EN_CLAUSE_AFTER_CREDIT_RE = /\b(?:you|it|we|they|this|the\s+(?:amount|balance|refund|money|credit|funds?))\s+(?:will|can|may|shall|should|would|could)\b/i;
+const EN_COMPLETED_STRETCH_RE = /\b(?:was|were|had|has\s+been|have\s+been)\b/i;
+function leaderGovernsCredit(sentence, leader, clause) {
+    const word = leader[0].replace(/^[^\p{L}]+/u, '');
+    const leaderEnd = leader.index + leader[0].length;
+    if (!EN_TEMPORAL_LEADER_RE.test(word))
+        return true;
+    if (/^once$/i.test(word) && /^\s+(?:again|more)\b/i.test(sentence.slice(leaderEnd)))
+        return false;
+    if (EN_CLAUSE_AFTER_CREDIT_RE.test(sentence.slice(clause.end)))
+        return true;
+    return !EN_COMPLETED_STRETCH_RE.test(sentence.slice(leaderEnd, clause.end));
+}
 function creditSettlement(sentence, clause, after = '') {
     const lead = sentence.slice(0, clause.start).replace(EN_CREDIT_WORDS.coordinated, '');
     const leaders = [...lead.matchAll(EN_CREDIT_WORDS.conditional)];
     const last = leaders[leaders.length - 1];
-    if (last && !lead.slice(last.index + last[0].length).includes(','))
+    if (last && !lead.slice(last.index + last[0].length).includes(',') && leaderGovernsCredit(sentence, last, clause)) {
         return { verdict: 'not-settled', reason: 'conditional' };
+    }
     if (EN_CREDIT_WORDS.negatedBefore.test(lead))
         return { verdict: 'not-settled', reason: 'negated' };
     const first = clause.verbs[0];
