@@ -404,3 +404,39 @@ test('Arabic: إن after و or after a salutation comma is a leader; أن mid-se
   ]) assert.equal(both(body), 'none / none', body);
   assert.equal(both('نود إعلامك أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك.'), 'income 25000 / income 25000');
 });
+
+// #242 review (Reviewer b895dc2e, Change Reviewer 0c8c32fa). A time window that a later display verb takes ("… has been
+// credited … and will reflect within 5 working days") does not leave the completed credit pending, as C12 and the same text
+// as two sentences already say; a window bound to the credit itself still does. Only a refund verb or the word "refund" makes
+// a window a pending refund, not a name or "returns". A condition in a later clause with its own subject ("; your replacement
+// card will be dispatched once approved") or a reassurance footer ("if the transaction has been authorised by you please
+// ignore …") is not a condition on the credit. Caps WILL/CAN after BY/FROM/AT is a name. Arabic ان after a verb of informing
+// ("نود إعلامك، أن تم …", "يسرنا إبلاغك: أن تم …") is "that", not "if".
+test('#242 review: genuine credits keep their income; windows and conditions bound to the credit still never post', () => {
+  for (const body of [
+    'Refund of AED 250.00 has been credited to your card ending 1234 and will reflect within 5 working days.',
+    'AED 250.00 has been refunded to your card ending 1234 and will be visible within 3-5 business days.',
+    'AED 250.00 HAS BEEN REFUNDED TO YOUR CARD ENDING 1234 AND WILL REFLECT WITHIN 5 WORKING DAYS.',
+    'تم استرداد مبلغ 250.00 درهم إلى بطاقتك وسيظهر في كشف حسابك خلال 5 أيام عمل.',
+    'Refund of AED 250.00 has been credited to your card ending 1234, if the transaction has been authorised by you please ignore this message.',
+    'AED 250.00 has been refunded to your card ending 1234; your replacement card will be dispatched once approved.',
+    'AFTER CANCELLATION AED 250.00 HAS BEEN REFUNDED TO YOUR CARD ENDING 1234 BY WILL TRADING LLC.',
+    'AFTER CANCELLATION AED 250.00 HAS BEEN REFUNDED TO YOUR CARD ENDING 1234 FROM CAN TRAVEL LLC.',
+    'نود إعلامك، أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك.',
+    'يسرنا إبلاغك: أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك.',
+  ]) assert.equal(both(body), 'income 25000 / income 25000', body);
+  for (const body of [
+    'Transfer of AED 500.00 from RETURN LOGISTICS LLC has been credited to your account ending 1234 within 2 hours.',
+    'Investment returns of AED 500.00 have been credited to your account ending 1234 within 2 days.',
+    'AED 500.00 from REVERSE MORTGAGE CO has been credited to your account ending 1234 within 1 day.',
+  ]) assert.equal(both(body), 'income 50000 / income 50000', body);
+  for (const body of [
+    'AED 250.00 has been refunded to your card and will be credited within 7 working days.',
+    'Refund of AED 250.00 has been credited to your card within 7 working days.',
+    'AED 250.00 has been refunded to your card ending 1234; your account will be credited once approved.',
+    'AED 250.00 has been refunded to your card ending 1234, the refund will be confirmed once approved.',
+    'AED 250.00 has been credited to your card if approved by the merchant.',
+    'تم استرداد مبلغ 250.00 درهم إلى بطاقتك وسيتم إيداعه خلال 7 أيام عمل.',
+    'عزيزي العميل، أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
+  ]) assert.equal(both(body), 'none / none', body);
+});
