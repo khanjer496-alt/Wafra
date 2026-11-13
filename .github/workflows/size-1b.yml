@@ -1,0 +1,59 @@
+# TEST-ONLY side branch (never merge): iOS JS bundle size for the cleanup 1B base and both PR heads.
+name: size-1b
+on:
+  push:
+    branches: [test/size-1b]
+permissions:
+  contents: read
+concurrency:
+  group: size-1b
+  cancel-in-progress: true
+jobs:
+  size:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: base
+            sha: ad784e3914f5a2c062060df007dbeb2eb894a117
+          - label: pr1-dead-files
+            sha: b284f7d73318a77e2bb3afeb39720ade898a3ab8
+          - label: pr2-exports
+            sha: 67efd7efe3174b651e3f99e412f9855ec4ad8c94
+    name: size ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+          path: app
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: app/.nvmrc
+      - name: Install
+        working-directory: app
+        run: npm ci
+      - name: Export the iOS bundle (Hermes bytecode, then plain JS)
+        working-directory: app
+        env:
+          EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: "0"
+          EXPO_PUBLIC_WAFRA_AUTO_FOUNDER_PRO: "0"
+          EXPO_PUBLIC_WAFRA_PARSER_RESEARCH: "0"
+          CI: "1"
+        run: |
+          set -euo pipefail
+          npx expo export --platform ios --output-dir "$RUNNER_TEMP/out-hbc" > "$RUNNER_TEMP/export-hbc.log" 2>&1 || { tail -40 "$RUNNER_TEMP/export-hbc.log"; exit 1; }
+          npx expo export --platform ios --no-bytecode --output-dir "$RUNNER_TEMP/out-js" > "$RUNNER_TEMP/export-js.log" 2>&1 || { tail -40 "$RUNNER_TEMP/export-js.log"; exit 1; }
+          {
+            echo "## ${{ matrix.label }} (${{ matrix.sha }})"
+            echo '```'
+            echo "hermes bytecode bundle(s):"; find "$RUNNER_TEMP/out-hbc" -name '*.hbc' -o -name 'index-*.js' | while read -r f; do printf '%s bytes  %s\n' "$(wc -c < "$f" | tr -d ' ')" "${f#$RUNNER_TEMP/}"; done
+            echo "plain JS bundle(s):"; find "$RUNNER_TEMP/out-js" -path '*ios*' -name '*.js' | while read -r f; do printf '%s bytes  %s\n' "$(wc -c < "$f" | tr -d ' ')" "${f#$RUNNER_TEMP/}"; done
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY" > "$RUNNER_TEMP/sizes.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: size-${{ matrix.label }}
+          path: ${{ runner.temp }}/sizes.txt
+          retention-days: 3
