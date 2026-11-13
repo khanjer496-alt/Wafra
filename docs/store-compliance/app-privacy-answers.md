@@ -2,7 +2,7 @@
 
 _Draft, 13 November 2026, for the iOS build on `release/1.0.0-rc1-reconciled` (app source as of `1e5229a4`). Nothing has been entered in App Store Connect. The answers go in only after the CEO approves them, and they must be re-checked against the exact archive that is submitted._
 
-**These answers are valid only for an archive built with the `production` or `production-candidate` EAS profile.** The `capture-beta` profile (store distribution) sets `EXPO_PUBLIC_WAFRA_PARSER_RESEARCH` to `"1"` in `eas.json`. With that on, the parser-research screen sends redacted bank-message shapes and counts. That can start a GitHub Actions run of Claude Code (`.github/workflows/feedback-agent.yml`) and a draft PR with an agent summary (`scripts/feedback-publish.mjs`), so Emails or Text Messages, and Customer Support processed by GitHub and Anthropic, would also need declaring.
+**These answers are valid only for an archive built with the `production` or `production-candidate` EAS profile.** The `capture-beta` profile (store distribution) sets `EXPO_PUBLIC_WAFRA_PARSER_RESEARCH` to `"1"` in `eas.json`. With that on, the parser-research screen sends redacted bank-message shapes and counts. That can start a GitHub Actions run of Claude Code (`.github/workflows/feedback-agent.yml`) and a draft PR with an agent summary (`.github/scripts/feedback-publish.mjs`), so Emails or Text Messages, and Customer Support processed by GitHub and Anthropic, would also need declaring.
 
 This draft follows Apple's definitions:
 
