@@ -18,7 +18,10 @@ function isDevelopmentBuild(profile, nodeEnv, profiles = require('../../../eas.j
   return developmentClient === true;
 }
 
-function withReleaseMetadata(config, {enabled = false} = {}) {
+function withReleaseMetadata(config, {enabled} = {}) {
+  // Decided when prebuild applies the plugin, never from config options, so the
+  // hashed config (and the expo-updates runtime fingerprint) is env-independent.
+  if (enabled === undefined) enabled = !isDevelopmentBuild(process.env.EAS_BUILD_PROFILE, process.env.NODE_ENV);
   if (!enabled) return config;
   const {withBaseMod} = require('@expo/config-plugins');
   return withBaseMod(config, {
