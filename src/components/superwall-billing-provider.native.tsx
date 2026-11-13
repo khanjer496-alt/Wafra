@@ -155,6 +155,13 @@ function onboardingCallbackValue<T>(
   return null;
 }
 
+/**
+ * A `cancelled` answer that arrives faster than a person could dismiss the
+ * store's purchase sheet did not come from a person.
+ */
+export const INSTANT_CANCEL_MS = 300;
+const nowMs = () => (typeof globalThis.performance?.now === 'function' ? globalThis.performance.now() : Date.now());
+
 function SuperwallRuntime({ onValue }: {
   /** Receives every billing value (null once this runtime unmounts); the provider above hands it to the app. */
   onValue?: (value: WafraBillingValue | null) => void;
@@ -492,14 +499,23 @@ function SuperwallRuntime({ onValue }: {
     }
     try {
       let result: Awaited<ReturnType<typeof purchase>> | null = null;
+      const startedAt = nowMs();
       try {
         result = await purchase(productId);
       } catch {
         // SDK failure is not an ownership answer. The Play query remains safe.
       }
+      const answeredAfterMs = nowMs() - startedAt;
       const playSnapshot = action ? await refreshAndroid(action) : null;
       if (!result) return 'failed';
-      if (result.type === 'cancelled') return 'cancelled';
+      if (result.type === 'cancelled') {
+        // The store reports a cancellation only after a person dismisses its
+        // sheet. The SDK also answers `cancelled`, with no reason attached,
+        // when it declines to start a purchase at all (observe mode, a product
+        // it cannot transact). That comes back in milliseconds, so it is a
+        // failure to tell the customer about, not a choice they made.
+        return answeredAfterMs < INSTANT_CANCEL_MS ? 'failed' : 'cancelled';
+      }
       // Deferred approval (Ask to Buy, a pending Play payment). Nothing is
       // entitled yet and nothing has failed; the store finishes it later.
       if (result.type === 'pending') return 'pending';
@@ -621,7 +637,17 @@ export function SuperwallBillingProvider({ children }: { children: React.ReactNo
     eventTrackingBehavior: 'none' as const,
     isExternalDataCollectionEnabled: false,
     enableExperimentalDeviceVariables: false,
-    shouldObservePurchases: true,
+    // iOS must NOT observe: SuperwallKit refuses Superwall.shared.purchase()
+    // while this is true, logs "You cannot make purchases using
+    // Superwall.shared.purchase(_:) while the SuperwallOption
+    // shouldObservePurchases is set to true" and returns `cancelled` without
+    // ever calling StoreKit, so Wafra's own Pro button could never buy.
+    // Wafra buys and restores through the SDK (purchasePro, restorePro) and
+    // nothing here observes purchases made outside it. Android is left as it
+    // was: its purchase(productId) has no such refusal (superwall-android
+    // 2.7.24, Superwall.kt), and its observe-mode behaviour is not changed in
+    // this fix.
+    shouldObservePurchases: Platform.OS === 'android',
     paywalls: {
       // Off: preloading builds every campaign paywall's web view on the main
       // thread right after launch. Wafra's own /pro screen is the purchase UI

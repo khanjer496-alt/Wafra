@@ -164,7 +164,7 @@ function harness(options = {}) {
   let runtimeValue = null;
   const receiveRuntime = value => { runtimeValue = value; };
   return {
-    state, calls, sdk,
+    state, calls, sdk, instantCancelMs: module.exports.INSTANT_CANCEL_MS,
     billing: () => runtimeValue,
     unmountRuntime() {
       for (const slot of contexts.get('runtime')?.slots ?? []) slot?.cleanup?.();
@@ -288,6 +288,37 @@ test('the SDK is configured without preloading paywall web views, on every platf
   }
 });
 
+test('iOS is not configured to observe purchases: SuperwallKit refuses purchase() while observing', async () => {
+  // SuperwallKit 4.16.1 Superwall.purchase(_:) logs "You cannot make purchases using Superwall.shared.purchase(_:)
+  // while the SuperwallOption shouldObservePurchases is set to true" and returns `cancelled` without calling
+  // StoreKit; Wafra's Pro button then did nothing. Observed on a hosted simulator, run 43468388532.
+  for (const state of [{}, { onboarded: false }]) {
+    const h = harness({ configured: false, platform: 'ios', state });
+    await h.renderProvider(4);
+    assert.equal(h.calls.configure, 1);
+    assert.strictEqual(h.calls.configureOptions[0]?.shouldObservePurchases, false,
+      'iOS must not set shouldObservePurchases: the SDK would refuse every purchase');
+  }
+});
+
+test('a cancelled answer that arrives faster than a person could dismiss the sheet is a failure, not a cancel', async () => {
+  const h = harness({ platform: 'ios', products: async () => [planProduct('weekly')], purchase: async () => ({ type: 'cancelled' }) });
+  await h.renderRuntime();
+  const [offer] = await h.billing().fetchProOffers();
+  assert.ok(offer, 'the iOS store lookup returned the weekly plan');
+  assert.ok(h.instantCancelMs > 0 && h.instantCancelMs < 350, 'the floor is below a realistic person-cancel time');
+  assert.equal(await h.billing().purchasePro(offer.productId), 'failed',
+    'an instant cancelled (the SDK declined to start) must reach the purchaseFailed notice');
+  assert.deepEqual(h.calls.purchases, [offer.productId]);
+});
+
+test('a cancel after the store sheet was shown for a while is still a quiet cancel', async () => {
+  const h = harness({ platform: 'ios', products: async () => [planProduct('weekly')], purchase: personCancels });
+  await h.renderRuntime();
+  const [offer] = await h.billing().fetchProOffers();
+  assert.equal(await h.billing().purchasePro(offer.productId), 'cancelled');
+});
+
 test('iOS purchase and restore go straight to the store and need no preloaded paywall', async () => {
   let restores = 0;
   const h = harness({ platform: 'ios',
@@ -396,6 +427,8 @@ const planProduct = plan => ({
   hasFreeTrial: false, subscriptionPeriod: { value: 1, unit: plan === 'weekly' ? 'week' : 'year' },
 });
 const productId = plan => planProduct(plan).fullIdentifier;
+// A person dismissing the store's sheet is never instantaneous; the SDK declining to start is.
+const personCancels = async () => { await new Promise(resolve => setTimeout(resolve, 350)); return { type: 'cancelled' }; };
 function deferredProductReply() {
   let resolve, reject;
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
@@ -436,7 +469,7 @@ test('a thrown latest lookup leaves no previously loaded product authorized', as
 test('an older successful lookup returns no stale offers and cannot replace the latest allowlist', async () => {
   const first = deferredProductReply(), second = deferredProductReply();
   const replies = [first, second];
-  const h = harness({ products: () => replies.shift().promise });
+  const h = harness({ products: () => replies.shift().promise, purchase: personCancels });
   await h.renderRuntime();
   const older = h.billing().fetchProOffers(), latest = h.billing().fetchProOffers();
   second.resolve([planProduct('yearly')]);
@@ -451,7 +484,7 @@ test('an older successful lookup returns no stale offers and cannot replace the 
 test('an older failure cannot revoke a successful newer price lookup', async () => {
   const first = deferredProductReply(), second = deferredProductReply();
   const replies = [first, second];
-  const h = harness({ products: () => replies.shift().promise });
+  const h = harness({ products: () => replies.shift().promise, purchase: personCancels });
   await h.renderRuntime();
   const older = h.billing().fetchProOffers(), latest = h.billing().fetchProOffers();
   second.resolve([planProduct('yearly')]);
@@ -626,6 +659,7 @@ test('overlapping Android money actions cannot open a second checkout or restore
   const first = h.billing().purchasePro(productId('yearly'));
   assert.equal(await h.billing().purchasePro(productId('yearly')), 'unavailable');
   assert.equal(await h.billing().restorePro(), null);
+  await new Promise(resolve => setTimeout(resolve, 350));
   purchase.resolve({ type: 'cancelled' });
   assert.equal(await first, 'cancelled');
   assert.deepEqual(h.calls.purchases, [productId('yearly')]);
@@ -718,7 +752,10 @@ for (const platform of ['ios', 'android']) test(`${platform}: SDK initializes wi
   assert.equal(config.eventTrackingBehavior, 'none');
   assert.equal(config.isExternalDataCollectionEnabled, false);
   assert.equal(config.enableExperimentalDeviceVariables, false);
-  assert.equal(config.shouldObservePurchases, true, 'entitlement observation is preserved');
+  // iOS must not observe (SuperwallKit refuses purchase() while observing); the SDK still listens to StoreKit
+  // transaction updates and loads purchased products without it. Android keeps its previous setting.
+  assert.equal(config.shouldObservePurchases, platform === 'android',
+    platform === 'ios' ? 'iOS must not observe purchases' : 'Android observe mode is unchanged');
 });
 
 test('paywall and onboarding requests carry exactly one param, language, from the saved app language', async () => {
