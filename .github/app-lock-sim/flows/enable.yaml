@@ -1,5 +1,10 @@
 appId: ${APP_ID}
 ---
+- launchApp:
+    stopApp: true
+- extendedWaitUntil:
+    visible: 'Settings'
+    timeout: 40000
 - runFlow:
     when:
       visible: 'Open in .Wafra.\?'

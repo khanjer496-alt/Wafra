@@ -27,7 +27,14 @@ appId: ${APP_ID}
     id: 'amount-keypad-1'
 - runFlow:
     when:
-      visible: 'Ledger currency'
+      visible: 'Choose currency'
+    commands:
+      - tapOn: 'Choose currency'
+      - waitForAnimationToEnd:
+          timeout: 4000
+- runFlow:
+    when:
+      visible: 'Search currency code'
     commands:
       - tapOn:
           point: '50%,34%'
@@ -72,7 +79,14 @@ appId: ${APP_ID}
     id: 'amount-keypad-1'
 - runFlow:
     when:
-      visible: 'Ledger currency'
+      visible: 'Choose currency'
+    commands:
+      - tapOn: 'Choose currency'
+      - waitForAnimationToEnd:
+          timeout: 4000
+- runFlow:
+    when:
+      visible: 'Search currency code'
     commands:
       - tapOn:
           point: '50%,34%'
@@ -119,7 +133,14 @@ appId: ${APP_ID}
     id: 'amount-keypad-1'
 - runFlow:
     when:
-      visible: 'Ledger currency'
+      visible: 'Choose currency'
+    commands:
+      - tapOn: 'Choose currency'
+      - waitForAnimationToEnd:
+          timeout: 4000
+- runFlow:
+    when:
+      visible: 'Search currency code'
     commands:
       - tapOn:
           point: '50%,34%'
