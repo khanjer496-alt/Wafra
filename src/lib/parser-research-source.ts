@@ -7,16 +7,9 @@ import {
   type SmsCorpusMessage,
 } from '@/lib/sms-corpus';
 
-/**
- * Build marker: after Expo's inlining and Metro's release constant folding,
- * only one string reaches the bundle. build-apk.yml fails a Play bundle that
- * carries "=on" (scripts/android-build-flags.cjs). The gate is derived from it.
- */
-export const PARSER_RESEARCH_BUILD_FLAG =
-  process.env.EXPO_PUBLIC_WAFRA_PARSER_RESEARCH === '1'
-    ? 'wafra-build-flag:parser-research=on'
-    : 'wafra-build-flag:parser-research=off';
+import { PARSER_RESEARCH_BUILD_FLAG } from '@/lib/parser-research-flag';
 
+// The gate is derived from the compiled build marker (parser-research-flag.ts).
 const RESEARCH_BUILD_ENABLED = PARSER_RESEARCH_BUILD_FLAG.endsWith('=on');
 
 export const isParserResearchBuild = (): boolean => RESEARCH_BUILD_ENABLED;

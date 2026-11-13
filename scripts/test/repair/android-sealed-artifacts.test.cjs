@@ -79,7 +79,7 @@ test('the source markers fold to exactly one string under Metro release constant
     ['src/lib/founder-pro.ts', 'FOUNDER_UNLOCK_BUILD_FLAG', 'EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK', 'founder-unlock'],
     ['src/lib/founder-pro.ts', 'AUTO_FOUNDER_PRO_BUILD_FLAG', 'EXPO_PUBLIC_WAFRA_AUTO_FOUNDER_PRO', 'auto-founder-pro'],
     ['src/lib/sms-corpus-export.ts', 'SMS_CORPUS_EXPORT_BUILD_FLAG', 'EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT', 'sms-corpus-export'],
-    ['src/lib/parser-research-source.ts', 'PARSER_RESEARCH_BUILD_FLAG', 'EXPO_PUBLIC_WAFRA_PARSER_RESEARCH', 'parser-research'],
+    ['src/lib/parser-research-flag.ts', 'PARSER_RESEARCH_BUILD_FLAG', 'EXPO_PUBLIC_WAFRA_PARSER_RESEARCH', 'parser-research'],
   ];
   for (const [file, name, env, flag] of cases) {
     const source = fs.readFileSync(path.join(root, file), 'utf8');
@@ -101,12 +101,30 @@ test('the source markers fold to exactly one string under Metro release constant
     /const JS_CORPUS_EXPORT_ENABLED = SMS_CORPUS_EXPORT_BUILD_FLAG\.endsWith\('=on'\);/);
   assert.match(fs.readFileSync(path.join(root, 'src/lib/parser-research-source.ts'), 'utf8'),
     /const RESEARCH_BUILD_ENABLED = PARSER_RESEARCH_BUILD_FLAG\.endsWith\('=on'\);/);
-  // Every JavaScript reader of these build switches goes through the marker-derived gates.
-  const direct = spawnSync('git', ['grep', '-n', '-E',
-    'process\\.env\\.EXPO_PUBLIC_WAFRA_(FOUNDER_UNLOCK|AUTO_FOUNDER_PRO|SMS_CORPUS_EXPORT|PARSER_RESEARCH)\\b', '--', 'src', 'modules'],
-  { cwd: root, encoding: 'utf8' }).stdout.trim().split('\n').filter(Boolean)
-    .filter((line) => !/^src\/lib\/(founder-pro|sms-corpus-export|parser-research-source)\.ts:/.test(line));
-  assert.deepEqual(direct, [], 'read the flag through its module, not process.env');
+  assert.match(fs.readFileSync(path.join(root, 'src/lib/feedback-transport.ts'), 'utf8'),
+    /if \(!PARSER_RESEARCH_BUILD_FLAG\.endsWith\('=on'\)\)/);
+  // Every reader of these build switches goes through the marker-derived gates.
+  // A plain file scan (no git, no platform regex dialect), which must first
+  // find the four allowed readers so it cannot pass vacuously.
+  const reader = /process\.env\.EXPO_PUBLIC_WAFRA_(FOUNDER_UNLOCK|AUTO_FOUNDER_PRO|SMS_CORPUS_EXPORT|PARSER_RESEARCH)(?![A-Za-z0-9_])/;
+  const hits = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (!['node_modules', 'build', '.gradle'].includes(entry.name)) walk(full);
+      } else if (/\.(ts|tsx|js|jsx|mjs|cjs)$/.test(entry.name)) {
+        fs.readFileSync(full, 'utf8').split('\n').forEach((line, index) => {
+          if (reader.test(line)) hits.push(`${path.relative(root, full)}:${index + 1}`);
+        });
+      }
+    }
+  };
+  walk(path.join(root, 'src'));
+  walk(path.join(root, 'modules'));
+  const allowed = /^src\/lib\/(founder-pro|sms-corpus-export|parser-research-flag)\.ts:/;
+  assert.equal(hits.filter((hit) => allowed.test(hit)).length, 4, `the four marker declarations: ${hits.join(', ')}`);
+  assert.deepEqual(hits.filter((hit) => !allowed.test(hit)), [], 'read the flag through its marker module, not process.env');
   assert.match(fs.readFileSync(path.join(root, 'src/screens/journal-home-screen.tsx'), 'utf8'),
     /const founderUnlockEnabled = isFounderUnlockBuild\(\);/);
 });
