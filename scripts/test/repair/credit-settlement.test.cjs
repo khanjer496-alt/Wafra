@@ -313,3 +313,18 @@ test('Arabic: a temporal leader that directly governs the credit stays a conditi
   ]) assert.equal(both(body), 'none / none', body);
   assert.equal(both('عند إلغاء الطلب تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234.'), 'income 25000 / income 25000');
 });
+
+// Change Reviewer 742367fa / Reviewer c204ca32, in Arabic: "when it happened" is the narrow positive shape (an event noun such
+// as "عند إلغاء الطلب" / "عند مراجعة طلبك" / "عند إرجاع المنتج", then تم + the credit). Any other verb after the leader governs.
+// "إرجاع المنتج" (a product return) is not a money movement.
+test('Arabic: only an event noun, then تم + the credit, reads as "when it happened"; another verb governs', () => {
+  for (const body of [
+    'عند إرجاع المنتج تم استرداد مبلغ 250.00 درهم إلى بطاقتك.',
+    'عند مراجعة طلبك تم إيداع مبلغ 250.00 درهم في حسابك المنتهي بـ 1234.',
+  ]) assert.equal(both(body), 'income 25000 / income 25000', body);
+  for (const body of [
+    'عندما يؤكد التاجر تم استرداد مبلغ 250.00 درهم إلى بطاقتك.',
+    'متى استلمنا طلبك تم إيداع مبلغ 250.00 درهم في حسابك.',
+    'عندما يوافق البنك تم إيداع مبلغ 250.00 درهم في حسابك.',
+  ]) assert.equal(both(body), 'none / none', body);
+});
