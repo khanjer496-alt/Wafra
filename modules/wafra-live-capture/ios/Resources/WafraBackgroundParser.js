@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 5273054dd6813a44891147971ada14f4304a118d72ec2aa9ce0d38bfc93824ce
+// Generated from normal shipping TypeScript. Source SHA-256: 1de7f1bd4033074f7bf7e365fc9c8562633f5d4b3c042e57d73d929d24eb5dc2
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -10922,10 +10922,11 @@ const AR_ANSWER_RE = new RegExp(`${AR_NB}ف?(?:س[يتن][${AR_LETTER}]{2,}|سو
 const AR_NEXT_ANSWER_RE = new RegExp(`^\\s*(?:ف[${AR_LETTER}]|(?:ستصلك|سيصلك|ستتلقي|سوف\\s+(?:تصلك|يصلك|تتلقي)|سيتم\\s+(?:اشعارك|ابلاغك|اعلامك))${AR_NA})`);
 const AR_NEXT_COURTESY_CONDITION_RE = new RegExp(`^\\s*في\\s+حال(?:ه)?\\s+(?:وجود|كان\\s+لديك|لديك|لم\\s+(?:تتعرف|تقم|تكن))${AR_NA}`);
 const AR_NEXT_COURTESY_NOUN_RE = new RegExp(`^\\s*(?:فريق|فريقنا|فرع|فرعنا|فروع|فروعنا)${AR_NA}`);
-const AR_NEXT_NOUN_ANSWER_RE = new RegExp(`${AR_NB}(?:[يتن]رجو|تجاهل|اعتبر)${AR_NA}`);
+const AR_NEXT_NOUN_ANSWER_RE = new RegExp(`${AR_NB}[بلو]?(?:[يتن]رجو|تجاهل|اعتبر)${AR_NA}|${AR_NB}(?:لا|لن)\\s+(?:يطلب|يتطلب|يلزم)${AR_NA}`);
+const AR_NEXT_CONDITION_ANSWER_RE = new RegExp(`${AR_NB}ف(?:يرجي|لا(?!\\s+تتردد)|سوف|س[يتن]|يمكنك|تجاهل|اعتبر|نرجو)`);
 function arNextSentenceAnswers(rawNext) {
     const next = rawNext.replace(/[\u064B-\u0652]/g, '');
-    if (AR_NEXT_COURTESY_CONDITION_RE.test(next))
+    if (AR_NEXT_COURTESY_CONDITION_RE.test(next) && !AR_NEXT_CONDITION_ANSWER_RE.test(next))
         return false;
     if (AR_NEXT_COURTESY_NOUN_RE.test(next) && !AR_ANSWER_RE.test(next) && !AR_NEXT_NOUN_ANSWER_RE.test(next))
         return false;
