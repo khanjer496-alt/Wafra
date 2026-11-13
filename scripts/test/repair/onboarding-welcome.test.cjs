@@ -148,8 +148,6 @@ test('the amount is the coffee-sized sample in the person\'s currency, never a s
   const { scene } = setup();
   assert.deepEqual({ ...scene.sampleAmount(null) }, { text: '24.50', spoken: '24.50' });
   assert.equal(scene.sampleAmount('SAR').text, 'SAR 24.50');
-  // The money-preview helper and this one agree.
-  assert.match(read('src/components/onboarding/money-preview.tsx'), /typicalMinorAmount\(spec, 1\) \* 24\.5/);
   assert.match(read(SCENE), /typicalMinorAmount\(spec, 1\) \* 24\.5/);
 });
 

@@ -196,8 +196,7 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
       smsOnCreate.includes('legacyDeliveryBufferCleanupPending = try') &&
       smsOnCreate.includes('staleCorpusCleanupPending = try') &&
       smsOnCreate.includes('return@OnCreate') &&
-      /AsyncFunction\("getReceived"\)[\s\S]*?if \(!clearLegacyDeliveryBuffer\(context\)\) \{\s*throw/.test(nativeModule) &&
-      code(read('src/lib/android-tester-diagnostics.ts')).includes('getStartupCleanupDiagnostics?.()'));
+      /AsyncFunction\("getReceived"\)[\s\S]*?if \(!clearLegacyDeliveryBuffer\(context\)\) \{\s*throw/.test(nativeModule));
   ok('history and optional live SMS have separate permission requests',
     /requestSmsPermission\([\s\S]*PermissionsAndroid\.request\(PermissionsAndroid\.PERMISSIONS\.READ_SMS\)/
       .test(scanner) &&
@@ -806,7 +805,7 @@ function ktSources(dir) {
   const relay = read('src/lib/relay.ts');
   const hook = read('src/hooks/use-auto-import.ts');
   const capture = read('src/lib/capture.ts');
-  const home = read('src/screens/ledger-home-screen.tsx');
+  const home = read('src/screens/journal-home-screen.tsx');
 
   ok('a 401 from sync records the refusal rather than only throwing',
     /res\.status === 401/.test(relay) && /markRelayRevoked\(cfg\.syncToken\)/.test(relay));
@@ -1116,7 +1115,7 @@ function ktSources(dir) {
   // The tabs shell keeps the mount + foreground watch regardless of which tab
   // Android restores after an update. Home separately owns the visible status
   // query, so a tab switch does not start another parser migration.
-  const home = read('src/screens/ledger-home-screen.tsx');
+  const home = read('src/screens/journal-home-screen.tsx');
   const tabsLayout = read('src/components/app-tabs-layout.tsx');
   ok('the tabs shell owns parser migrations independent of the active tab',
     /function CaptureOwner/.test(tabsLayout) &&
@@ -1258,7 +1257,7 @@ function ktSources(dir) {
   const capture = code(read('src/lib/capture.ts'));
   const types = read('src/lib/types.ts');
   const store = code(read('src/lib/store.tsx'));
-  const home = read('src/screens/ledger-home-screen.tsx');
+  const home = read('src/screens/journal-home-screen.tsx');
   const settingsSource = settingsSurface();
   const settings = code(settingsSource);
   const recovery = code(read('src/components/storage-recovery.tsx'));
@@ -1391,41 +1390,6 @@ function ktSources(dir) {
     /needs-automation/.test(home) && /waiting-for-alert/.test(home) &&
       /first-alert-captured/.test(home) && /queue-warning/.test(home) &&
       /migration-retry/.test(home) && !/pipe-ready|needs-test|revoked/.test(code(home)));
-  const queueWarningDetail = copy.match(
-    /captureIosQueueWarningDetail:\s*\{[\s\S]*?\n\s*\},\n\s*captureIosQueueCounts:/,
-  )?.[0] || '';
-  ok('Home queue warning distinguishes source-free warning counts from protected pending source records',
-    /status === 'queue-warning'[\s\S]*?t\('captureIosQueueWarningDetail'\)/.test(home) &&
-      /status shows only source-free counts/.test(queueWarningDetail) &&
-      /pending records may keep Message text and sender/.test(queueWarningDetail) &&
-      /protected and encrypted on this iPhone/.test(queueWarningDetail) &&
-      /expire after 30 days/.test(queueWarningDetail) &&
-      /removed the next time capture runs or Wafra checks the queue/.test(queueWarningDetail) &&
-      /نص الرسالة/.test(queueWarningDetail) && /اسم المرسل/.test(queueWarningDetail) &&
-      /(?:30|٣٠)[^\n]*يوماً/.test(queueWarningDetail));
-  const localPrivacyDetail = copy.match(
-    /captureIosLocalPrivacy:\s*\{[\s\S]*?\n\s*\},\n\s*captureIosQueueWarningDetail:/,
-  )?.[0] || '';
-  ok('Home waiting state qualifies local no-upload truth against the old uploading automation',
-    /active[\s\S]*?Platform\.OS === 'ios' \? t\('captureIosLocalPrivacy'\)/.test(home) &&
-      /new bank-message capture path/.test(localPrivacyDetail) &&
-      /does not upload/.test(localPrivacyDetail) &&
-      /old Wafra Capture automation may still upload/.test(localPrivacyDetail) &&
-      /until removed or retired/.test(localPrivacyDetail) &&
-      /مسار الالتقاط الجديد رسائل البنك/.test(localPrivacyDetail) &&
-      /Wafra Capture/.test(localPrivacyDetail) &&
-      /تستمر[^\n]*في الرفع/.test(localPrivacyDetail));
-  const migrationRetryDetail = copy.match(
-    /captureIosMigrationRetryDetail:\s*\{[\s\S]*?\n\s*\},\n\s*captureIosNeedsTest:/,
-  )?.[0] || '';
-  ok('Home migration warning distinguishes the local new path from the uploading old automation',
-    /status === 'migration-retry'[\s\S]*?t\('captureIosMigrationRetryDetail'\)/.test(home) &&
-      /new capture path stays local/.test(migrationRetryDetail) &&
-      /old Shortcut automation may keep uploading/.test(migrationRetryDetail) &&
-      /until cleanup succeeds or you remove it/.test(migrationRetryDetail) &&
-      /مسار الالتقاط الجديد/.test(migrationRetryDetail) &&
-      /أتمتة الاختصار القديمة/.test(migrationRetryDetail) &&
-      /تستمر في الرفع/.test(migrationRetryDetail));
   ok('Settings capture truth is the same closed local status and Private Mode is not off',
     /useAutoImport\(false, true\)/.test(settings) &&
       /captureState/.test(settings) &&

@@ -68,7 +68,7 @@ for f in free-capture-copy money-code-run types routes consent-prompt android-ca
          transfer-reconciliation-types transfer-reconciliation transfer-activity transfer-evidence transfer-review-copy \
          insights seed subscriptions cards cash-flow payment-flow ledger-import launch-alert-parser ios-background-alert-parser ios-background-parser-source.generated ios-native-parser-context analytics growth-funnel period complimentary-clock complimentary-access purchases country-names country markets known-banks i18n system-language balances \
          brand-marks leaving-soon accounts heal bnpl-category-repair accuracy onboarding onboarding-bank-examples reminders reminder-schedule app-lock auto-import android-capture-sources \
-         history-import foreground-history-priority diagnostic-export diagnostic-messages transaction-source transaction-presentation transaction-filter capture-trace \
+         history-import foreground-history-priority transaction-source transaction-presentation transaction-filter capture-trace \
          launch-performance launch-benchmark runtime-performance dashboard-projection \
          relay-protocol trusted-device-contract cloud-import-contract statement-coverage statement-batch statement-import-flow reimbursement-report fx fx-rates \
          fx-summary splits db-schema storage-diagnostics daily-summary charge-alert \
@@ -85,7 +85,7 @@ for f in free-capture-copy money-code-run types routes consent-prompt android-ca
          wafra-assistant wafra-assistant-ai assistant-spending-analysis assistant-patterns home-widget-preferences \
          home-hero home-needs-you home-tilt home-copy \
          local-semantic-model local-semantic-runtime local-semantic-scheduler local-semantic-background-policy local-semantic-shadow local-semantic-inbox-shadow \
-         local-semantic-review local-semantic-review-runtime local-assistant-grounding growth-funnel-diagnostics stability-diagnostics \
+         local-semantic-review local-semantic-review-runtime local-assistant-grounding \
          local-semantic-flags on-device-ai on-device-assistant on-device-category best-effort-autopost; do
   [ -f "../../src/lib/$f.ts" ] || continue
   rewrite ../../src/lib/$f.ts build/$f.ts

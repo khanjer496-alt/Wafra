@@ -156,7 +156,7 @@ test('exactly one owner: CaptureOwner in both tab shells, never Home (no double 
     assert.equal((owner.match(/useWidgetSnapshotSync\(\)/g) ?? []).length, 1, `${file}: CaptureOwner calls it once`);
     assert.equal((source.match(/useWidgetSnapshotSync\(\)/g) ?? []).length, 1, `${file}: nowhere else`);
   }
-  for (const screen of ['src/screens/journal-home-screen.tsx', 'src/screens/ledger-home-screen.tsx']) {
+  for (const screen of ['src/screens/journal-home-screen.tsx']) {
     assert.doesNotMatch(read(screen), /requestWidgetSnapshotSync|useWidgetSnapshotSync/, `${screen} must not also write widgets`);
   }
 });

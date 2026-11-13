@@ -19,7 +19,7 @@ const {
 } = load(path.join(__dirname, '../../src/lib/launch-benchmark.ts'), {}, { Error });
 
 const rootSource = fs.readFileSync(path.join(__dirname, '../../src/components/app-root-layout.tsx'), 'utf8');
-const homeSource = fs.readFileSync(path.join(__dirname, '../../src/screens/ledger-home-screen.tsx'), 'utf8');
+const homeSource = fs.readFileSync(path.join(__dirname, '../../src/screens/journal-home-screen.tsx'), 'utf8');
 const lockSource = fs.readFileSync(path.join(__dirname, '../../src/components/lock-gate.tsx'), 'utf8');
 // The internal metrics export moved with the other exports to Data and help.
 const settingsSource = fs.readFileSync(path.join(__dirname, '../../src/app/settings-data.tsx'), 'utf8');
@@ -165,7 +165,7 @@ ok('the internal export keeps the closed metric shape',
     Array.isArray(JSON.parse(serializeLaunchMetrics()).metrics));
 ok('usable Home is marked by the focused Home behind a cleared privacy gate',
   !/first-usable-home/.test(rootSource) &&
-    /focused && privacyGateCleared && state\.hydrated && state\.onboarded/.test(homeSource) &&
+    /useFocusEffect\(useCallback\(\(\) => \{\s*if \(!privacyGateCleared \|\| !state\.hydrated \|\| !state\.onboarded\) return;[\s\S]{0,400}markLaunchPhase\('first-usable-home'\);/.test(homeSource) &&
     /const privacyHidden = lockRequired \|\| backgroundCovered/.test(lockSource) &&
     /PrivacyGateContext\.Provider value=\{!privacyHidden\}/.test(lockSource));
 ok('internal Release metrics have a guarded local file export surface',
