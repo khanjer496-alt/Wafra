@@ -1,0 +1,45 @@
+name: Closure Hermes CLI evidence (side branch)
+on:
+  push:
+    branches: ['patch/hermes-closure-**']
+permissions:
+  contents: read
+jobs:
+  hermes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      WAFRA_HERMES_TOOLS: ${{ runner.temp }}/hermes-tools
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - name: Generate exact-source parser and install isolated check tools
+        run: |
+          node scripts/generate-ios-background-parser.cjs
+          node scripts/generate-ios-background-parser.cjs --check
+          npm install --prefix "$WAFRA_HERMES_TOOLS" --no-audit --no-fund @babel/core@7.29.13 @babel/runtime@7.29.14 @react-native/babel-preset@0.83.1 esbuild@0.24.2
+          mkdir -p "$RUNNER_TEMP/hermes-cli"
+          gh release download v0.13.0 --repo facebook/hermes --pattern hermes-cli-linux.tar.gz --dir "$RUNNER_TEMP/hermes-cli"
+          tar -xzf "$RUNNER_TEMP/hermes-cli/hermes-cli-linux.tar.gz" -C "$RUNNER_TEMP/hermes-cli"
+      - name: Execute all 443 synthetic cases on Node and Hermes 0.13
+        run: |
+          node .github/closure-probe/hermes-build.cjs
+          NODE_PATH="$WAFRA_HERMES_TOOLS/node_modules" "$WAFRA_HERMES_TOOLS/node_modules/.bin/esbuild" hermes-closure.babel.js --bundle --format=iife --platform=neutral --target=es2016 --supported:bigint=true --main-fields=main,module --outfile=hermes-closure.js
+          node hermes-closure.js > node-hermes-closure.json
+          "$RUNNER_TEMP/hermes-cli/hermes" hermes-closure.js > hermes-closure.json 2> hermes-stderr.txt
+          python3 .github/closure-probe/hermes-compare.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hermes-closure-${{ github.sha }}
+          path: |
+            node-hermes-closure.json
+            hermes-closure.json
+            hermes-summary.json
+            hermes-stderr.txt
+          retention-days: 7
