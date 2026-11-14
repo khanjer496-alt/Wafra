@@ -56,9 +56,23 @@ Shared/launch-review/pr251-storekit-boundary-2026-11-14.md.
 
 ## One bounded diagnostic-only run plan (not executed)
 
-1. After both exact-SHA approvals and CEO permission, publish only that SHA to
-   the dedicated `test/storekit-boundary-approved` branch. Working-branch pushes
-   do not trigger this workflow. Push mode always selects diagnostic.
+1. After both exact-SHA code/plan approvals, obtain CEO authorization for a
+   **temporary test-only PR** from `test/storekit-boundary-approved` into the cache
+   owner `test/purchase-proof-pr251`. No PR/branch/label has been published by this
+   change, and no production PR is duplicated or merged. Publishing the branch,
+   opening the PR or synchronizing it cannot start this workflow. After verifying
+   the PR head still equals the approved SHA, CEO separately authorizes one
+   `run-reviewed-boundary-diagnostic` label event. Checkout pins the immutable PR
+   head SHA from that event. Only this same-repository, exact named source/base
+   route and label are accepted; the case is fixed to diagnostic.
+
+   The old dedicated-branch push proposal is superseded: live read-only cache
+   evidence found ID10523176508/key `app-lock-sim-app-v3-ec3a930937cc50f5fd5f0664d1b1f080535ac1e72d69e387c0eac6b846d5d216`
+   under `refs/heads/test/purchase-proof-pr251`, inaccessible to a sibling push.
+   [GitHub cache restrictions](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache)
+   allow a pull-request run to restore its base branch's cache. This uses that
+   documented read path; it never rebuilds, seeds, copies, moves or bypasses cache
+   access. Recheck cache availability before approval; any eviction/miss stops.
 2. One disposable hosted macOS simulator, serial UI-test runner. Require exact
    existing app cache; cache miss stops without building the shipping app.
    Only the disposable UI-test helper compiles. Job hard bound 15 minutes;
@@ -73,8 +87,9 @@ Shared/launch-review/pr251-storekit-boundary-2026-11-14.md.
    boundary.jsonl, selected-row TSV, UI evidence, guarded log windows and exact
    XCTest exit. Return evidence before proposing any correction or further run.
 
-The optional manual empty/owned selectors remain separately reviewable; neither
-is included in this one diagnostic authorization. No automatic schedule exists.
+The empty/owned script selectors remain independent and separately reviewable;
+neither is exposed by this diagnostic-only label route or authorized to execute.
+No working-push auto-run or automatic schedule exists.
 
 ## Validation limits
 
@@ -123,3 +138,11 @@ relabeled as cached-binary provenance. The final build195 candidate still needs
 independent evidence that it contains #251, and simulator StoreKitTest must not
 be called developer-signed sandbox or TestFlight proof. No release-ready
 conclusion or hosted-run permission is implied by this diagnostic revision.
+
+## Exact-b6a2abcd review and cache plan correction
+
+Reviewer368b764a gives diagnostic CODE REVIEW OK at b6a2abcd. iOS e633fcf6 closes
+code findings but rejects the old one-run cache route. The proposed label-only
+PR/base-cache plan above is a local correction requiring fresh exact-SHA code/plan
+review and explicit CEO permission for any publication and one run. Existing
+code approval is not reinterpreted as permission to create the test PR or label.

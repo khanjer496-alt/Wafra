@@ -2,17 +2,11 @@
 name: app-lock-sim
 # Purchase-only rerun: App Lock has separate passing evidence in run 43532093493.
 on:
-  # Review pushes on the working branch do not run anything. This one-shot
-  # branch may be pushed only after CEO authorization at an approved SHA.
-  push:
-    branches: [test/storekit-boundary-approved]
-  workflow_dispatch:
-    inputs:
-      purchase_case:
-        type: choice
-        description: One independent case (never a combined release verdict)
-        default: diagnostic
-        options: [diagnostic, empty, owned]
+  # Proposed manual approval route only. No opened/synchronize/push trigger.
+  # Creating this temporary test-only PR and applying this label both need CEO go.
+  pull_request:
+    branches: [test/purchase-proof-pr251]
+    types: [labeled]
 
 permissions:
   contents: read
@@ -25,10 +19,14 @@ concurrency:
 jobs:
   sim:
     runs-on: macos-15
-    timeout-minutes: ${{ (inputs.purchase_case == 'empty' || inputs.purchase_case == 'owned') && 25 || 15 }}
+    if: >-
+      github.event.label.name == 'run-reviewed-boundary-diagnostic' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'test/storekit-boundary-approved'
+    timeout-minutes: 15
     env:
-      PURCHASE_CASE: ${{ inputs.purchase_case || 'diagnostic' }}
-      HARNESS_GIT_SHA: ${{ github.sha }}
+      PURCHASE_CASE: diagnostic
+      HARNESS_GIT_SHA: ${{ github.event.pull_request.head.sha }}
       # founder / auto-Pro OFF, like the production profile
       MAESTRO_DRIVER_STARTUP_TIMEOUT: "300000"
       EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: "0"
@@ -39,6 +37,9 @@ jobs:
       EXPO_PUBLIC_WAFRA_RELAY_URL: ${{ vars.WAFRA_RELAY_URL || 'https://wafra-relay.khanjer496.workers.dev' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
 
       - name: Compute exact cache key after checkout
         id: cachekey

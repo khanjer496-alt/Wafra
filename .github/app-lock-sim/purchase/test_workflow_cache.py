@@ -38,6 +38,18 @@ class WorkflowCacheTests(unittest.TestCase):
         self.assertEqual(output, 'key=app-lock-sim-app-v3-' + 'a' * 64 + '\n')
         self.assertEqual(env, 'APP_CACHE_KEY=app-lock-sim-app-v3-' + 'a' * 64 + '\n')
 
+    def test_only_manual_label_uses_owner_base_cache_and_pins_head(self):
+        triggers = self.workflow.get('on', self.workflow.get('true'))
+        self.assertEqual(set(triggers), {'pull_request'})
+        self.assertEqual(triggers['pull_request']['branches'], ['test/purchase-proof-pr251'])
+        self.assertEqual(triggers['pull_request']['types'], ['labeled'])
+        checkout = next(step for step in self.steps if step.get('uses') == 'actions/checkout@v4')
+        self.assertEqual(checkout['with']['ref'], '${{ github.event.pull_request.head.sha }}')
+        job = self.workflow['jobs']['sim']
+        self.assertIn('run-reviewed-boundary-diagnostic', job['if'])
+        self.assertIn('head.repo.full_name == github.repository', job['if'])
+        self.assertEqual(job['env']['PURCHASE_CASE'], 'diagnostic')
+
     def test_empty_and_invalid_digests_stop_without_outputs(self):
         for digest in ('', 'abc', 'g' * 64, 'a' * 64 + '\ninjected=1'):
             rc, output, env = self.run_key(digest)
