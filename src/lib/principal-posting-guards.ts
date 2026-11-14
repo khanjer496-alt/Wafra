@@ -1,4 +1,6 @@
 import { EN_CREDIT_PENDING_STATUS, AR_CREDIT_PENDING_STATUS, hasCreditCondition, hasPendingCreditStatus, mentionsRefund } from '@/lib/credit-settlement-guards';
+import { CURRENCY_MINOR_UNITS, CURRENCY_SYMBOL_CANDIDATES } from '@/lib/currency-metadata';
+
 /** Source-only qualifications of an already selected monetary value. */
 export interface PrincipalSpan { start: number; end: number }
 
@@ -95,8 +97,89 @@ export function hasMobileMoneyCallback(source: string): boolean {
 const MOVEMENT_STATUS = /\bincomplete\s+(?:transaction|txn|purchase|payment|transfer|withdrawal)\b|\b(?:transaction|txn|purchase|payment|transfer|withdrawal)(?:\s+(?:of|for|at|to|from|with|on)\b(?:[^.\n]|\.\d){0,80}?)?\s+(?:was|is|remains?|has\s+been)\s+incomplete\b|\b(?:transaction|txn|purchase|payment|authori[sz]ation)\b(?:[^.\n]|\.\d){0,100}?\s(?:cancell?ed|voided)\s+by\s+(?:the\s+)?(?:merchant|bank|issuer|acquirer)\b|\b(?:transaction|txn|purchase|payment|authori[sz]ation)\b(?:[^.\n]|\.\d){0,100}?\s(?:will\s+be|is\s+being)\s+(?:cancell?ed|voided)\b|[ \t][-–—:|][ \t]*(?:void|voided|cancell?ed)[ \t]*(?=\n|$)|[ \t]*[,:(][ \t]*(?:cancell?ed|voided|void)[ \t]*\)?[ \t]*(?=[.\n]|$)|(?<![ء-ي])(?:تم\s+)?(?:الغاء|ايقاف|تعليق)\s+(?:ال)?(?:عمليه|شراء|دفع|تحويل|حواله|سحب|معامله|حركه)(?![ء-ي])|(?<![ء-ي])(?:الغيت|اوقفت|علقت)\s+(?:ال)?(?:عمليه|شراء|دفع|تحويل|حواله|سحب|معامله|حركه)(?![ء-ي])|(?<![ء-ي])(?:ال)?(?:عمليه|معامله|شراء|دفع|تحويل|حواله|سحب|حركه)\s+(?:غير\s+(?:ناجح|مكتمل)ه?|لم\s+(?:تكتمل|يكتمل|تنجح)|(?:ال)?(?:ملغي|ملغا|ملغاه|موقوف[هة]?))(?![ء-ي])|(?<![ء-ي])(?:و?تم|قد\s+تم)\s+(?:الغاو|الغاي|ايقاف|تعليق)(?:ها|ه)(?![ء-ي])|(?<![ء-ي])تم\s+(?:ال)?الغاء(?![ء-ي])|(?<![ء-ي])لم\s+(?:تكتمل|يكتمل|تنجح)(?![ء-ي])/gi;
 const CONDITIONAL_STATUS = /(?:\b(?:if|unless|please|pls|to|can|may|should)\b|(?<![ء-ي])(?:يرجي|الرجاء|رجاء|يمكنك|يمكنكم|يمكن|بامكانك|بامكانكم|اتصل|ارسل|للابلاغ|لطلب|طلب|خدمه|اذا|حال|تود|ترغب|عليك)(?![ء-ي]))(?:\s+(?:او|و|ب|في|علي|عن|من|كانت|كان|or|and))?(?:\s+\d{1,4})?\s*$/i;
 
+const COMPLETED_MONEY_WORDS = new Set(['made', 'completed', 'processed', 'posted', 'charged', 'debited', 'deducted', 'paid', 'sent', 'withdrawn', 'spent', 'purchased', 'used', 'transferred', 'credited', 'refunded', 'reversed', 'returned', 'deposited', 'received', 'arrived', 'settled', 'done', 'successful']);
+const COMPLETED_MONEY_VERB = new RegExp(`\\b(?:${[...COMPLETED_MONEY_WORDS].join('|')})\\b`, 'iu');
+const ACTIVE_MONEY_VERB = /\b(?:charged|debited|deducted|paid|sent|withdrawn|spent|purchased|used|transferred|credited|refunded|reversed|returned|deposited|received|arrived)\b/giu;
+const PREDICATE_AUXILIARY = /\b(?:was|were|is|are|has|have|had|will|would|shall|should|must|may|might|can|could|not|never|being|yet|scheduled|pending|awaiting|[a-z]+n['’]t)\b/iu;
+const PREDICATE_START = new RegExp(`^(?:${PREDICATE_AUXILIARY.source})`, 'iu');
+const COMPLETION_ADVERBS = new Set(['already', 'just', 'now', 'successfully', 'fully', 'recently', 'actually', 'really']);
+const PRICE_SYMBOLS = Object.keys(CURRENCY_SYMBOL_CANDIDATES).sort((a, b) => b.length - a.length);
+const PRICE_SYMBOL_NAMES = new Set(PRICE_SYMBOLS.map(symbol => symbol.toUpperCase()));
+const STATED_PRICE = new RegExp(`\\b([A-Z]{3})\\s*\\d|\\d[\\d,.]*\\s*([A-Z]{3})\\b|(${PRICE_SYMBOLS.map(symbol => symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\s*\\d`, 'giu');
+
+function firstStatedPrice(text: string): number | null {
+  for (const match of text.matchAll(STATED_PRICE)) {
+    const code = (match[1] ?? match[2] ?? '').toUpperCase();
+    if (!match[3] && !Object.hasOwn(CURRENCY_MINOR_UNITS, code) && !PRICE_SYMBOL_NAMES.has(code)) continue;
+    if (match[3] && /[\p{L}\p{N}]/u.test(text[match.index! - 1] ?? '')) continue;
+    return match.index!;
+  }
+  return null;
+}
+
+/** Reduce one owned predicate; modifiers cannot hide its polarity or aspect. */
+function completedPredicate(fragment: string): boolean {
+  const expanded = fragment.trim().replace(/^['’]ve\b/iu, 'have').replace(/^['’]s\b/iu, 'has').replace(/^['’]re\b/iu, 'are');
+  const words = (expanded.toLowerCase().match(/[a-z]+(?:['’][a-z]+)?|\d+/gu) ?? [])
+    .filter(word => !COMPLETION_ADVERBS.has(word));
+  // A bank may state "paid out/back" without changing the completed aspect.
+  if (['out', 'back'].includes(words[words.length - 1] ?? '') && ['paid', 'sent'].includes(words[words.length - 2] ?? '')) words.pop();
+  const verb = words.pop();
+  if (!verb || !COMPLETED_MONEY_WORDS.has(verb)) return false;
+  const auxiliary = words.join(' ');
+  return auxiliary === '' || /^(?:was|were|has been|have been|had been|has|have|had)$/u.test(auxiliary) ||
+    (verb !== 'made' && /^(?:is|are)$/u.test(auxiliary));
+}
+
+/** null leaves a genuinely terse receipt to the mature grammar. */
+function selectedPredicateCompletion(lead: string, tail: string): boolean | null {
+  const descriptor = /\b(?:using|with|via|at|from|into|on|by|for|merchant|card|account|wallet|date|time|reference|balance)\b|\bto(?!\s+be\b)/iu.exec(tail);
+  const ownedTail = tail.slice(0, descriptor?.index ?? tail.length);
+  const predicate = ownedTail.slice(0, firstStatedPrice(ownedTail) ?? ownedTail.length).trim();
+  const allVerbs = [...lead.matchAll(ACTIVE_MONEY_VERB)];
+  const verbs = allVerbs.filter((verb, index) => {
+    const object = lead.slice(verb.index! + verb[0].length);
+    const prior = lead.slice(index ? allVerbs[index - 1].index! + allVerbs[index - 1][0].length : 0, verb.index);
+    // A returned/reversed item's fee is a new subject with its own predicate:
+    // "a returned cheque fee ... was debited". Do not let the item's modifier
+    // veto that fee, or hide a finite "has not been charged ... fee" predicate.
+    const feeSubject = /\b(?:fees?|charges?|commission|tax|levy)\s*(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(object);
+    return !(feeSubject && !PREDICATE_AUXILIARY.test(prior) &&
+      (index > 0 || PREDICATE_START.test(predicate) || COMPLETED_MONEY_VERB.test(predicate)));
+  });
+  const before = verbs[verbs.length - 1];
+  let active: boolean | null = null;
+  if (before) {
+    let prefix = lead.slice(0, before.index);
+    // Instrument/subject names precede the predicate. A merchant NOT NOW CAFE
+    // following the money is never part of this auxiliary/polarity span.
+    const subjects = [...prefix.matchAll(/\b(?:card|account|wallet|you|payment|purchase|transaction|transfer|withdrawal|salary|deposit|fees?|charges?|commission|tax|levy)\b/giu)];
+    const subject = subjects[subjects.length - 1];
+    if (subject) prefix = prefix.slice(subject.index! + subject[0].length)
+      .replace(/^\s*(?:(?:ending|number|no|with|in)\s*)?[*xX•]*\d{3,4}\b[\s:,-]*/iu, '');
+    else prefix = prefix.slice(Math.max(prefix.lastIndexOf(':'), prefix.lastIndexOf('|'),
+      /^\s*[:=]\s*$/u.test(lead.slice(before.index! + before[0].length)) ? prefix.lastIndexOf('\n') : -1) + 1);
+    const auxiliary = PREDICATE_AUXILIARY.exec(prefix);
+    if (auxiliary) prefix = prefix.slice(auxiliary.index);
+    let bridge = lead.slice(before.index! + before[0].length);
+    // A bank FX quote may put the ledger-currency figure after the original
+    // price. Its predicate ends at that first stated money, not at the quote.
+    bridge = bridge.slice(0, firstStatedPrice(bridge) ?? bridge.length);
+    bridge = bridge.split(/\b(?:using|with|via|at|from|to|into|on|by|for)\b/iu)[0].trim();
+    if (/^(?:fees?|charges?|commission|tax|levy|amount|sum|value)(?:\s+(?:of|for))?\s*[:=]?$/iu.test(bridge) ||
+      /^(?:a|an|the|your|this|that)\s+(?:[a-z'’ -]+\s+)?(?:fees?|charges?|commission|tax|levy|amount|sum|value)(?:\s+(?:of|for))?\s*[:=]?$/iu.test(bridge)) bridge = '';
+    active = completedPredicate(`${prefix} ${before[0]} ${bridge}`);
+  }
+  if (active === false) return false;
+  const nominal = /\b(?:purchase|payment|transfer|withdrawal|transaction)\s+(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(lead);
+  const monetaryTail = COMPLETED_MONEY_VERB.test(predicate);
+  if (predicate && ((monetaryTail && (nominal || PREDICATE_START.test(predicate))) ||
+    (active === null && (nominal || PREDICATE_START.test(predicate))))) return completedPredicate(predicate);
+  return active;
+}
+
 /** Scope indicative status to the selected movement, excluding conditional/previous-event footers. */
-export function isIncompletePrincipal(source: string, span: PrincipalSpan | undefined): boolean {
+export function isIncompletePrincipal(source: string, span: PrincipalSpan | undefined, expensePredicate = false): boolean {
   if (!span) return false;
   const boundary = (at: number) => /[;!?]/u.test(source[at]) ||
     (source[at] === '.' && /^(?:\s|$)/u.test(source[at + 1] ?? ''));
@@ -108,7 +191,9 @@ export function isIncompletePrincipal(source: string, span: PrincipalSpan | unde
   // "was not made" prove an independently completed expense.
   const ownLead = source.slice(start, span.start);
   const ownTail = source.slice(span.end, end);
-  if (/\b(?:purchase|payment|transfer|withdrawal|transaction)\s+(?:(?:of|for|amount)\s*[:=]?\s*|[A-Z]{3}\s*)*$/iu.test(ownLead) &&
+  if (expensePredicate) {
+    if (selectedPredicateCompletion(ownLead, ownTail) === false) return true;
+  } else if (/\b(?:purchase|payment|transfer|withdrawal|transaction)\s+(?:(?:of|for|amount)\s*[:=]?\s*|[A-Z]{3}\s*)*$/iu.test(ownLead) &&
     /^\s*(?:[A-Z]{3}\s*)?(?:(?:will|would|shall|may|might|can|could)\s+(?:not\s+)?be|(?:was|were|is|has\s+been|have\s+been)\s+(?:not|never))\s+(?:made|completed|processed|posted|charged|debited|paid|sent)\b(?!\s+by\s+you)/iu.test(ownTail)) return true;
   const blocks = [source.slice(start, end)];
   const header = source.slice(0, start);

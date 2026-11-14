@@ -10074,37 +10074,46 @@ function hasUnsettledPrincipalInContext(context: PrincipalContext, parsed: Parse
   if (parsed.type === 'income' && principalChargebackDebit(raw, spans[0])) return true;
   // These are capture refusals, not deletion proof for already saved rows.
   // A conditional or previous-movement footer cannot veto this principal.
-  if (isIncompletePrincipal(raw, spans[0])) return true;
+  if (isIncompletePrincipal(raw, spans[0], parsed.type === 'expense')) return true;
   return isHedgedPrincipal(raw, spans) || refund === 'pending' || refund === 'cancelled' ||
     (refund === 'paid-out' && parsed.type === 'income') ||
     (parsed.type === 'expense' && (refund === 'completed' || isCompletedPrincipalRefund(raw, spans[0])));
 }
 
 /** Shared by the semantic fallback so it cannot restore a deliberately refused principal. */
-export function hasUnsettledPrincipal(message: string, parsed: ParsedSms): boolean {
+export function hasUnsettledPrincipal(message: string, parsed: ParsedSms, expensePredicateOnly = false): boolean {
   if (parsed.kind !== 'transaction') return false;
   const context = readPrincipalContext(message, parsed);
+  // A session expense has already passed its reader's amount/source checks.
+  // Separate note amounts cannot erase it; repeat only the original predicate proof.
+  if (expensePredicateOnly) return context ? isIncompletePrincipal(context.raw, context.spans[0], true) : false;
   return context ? hasUnsettledPrincipalInContext(context, parsed) : false;
 }
 
-/** Reuse the mature completed-expense proof for every independent-debit caller. */
+/** One completed-expense proof, including the original principal aspect, for every caller. */
 export function completedDebitBesideCredit(message: string, options?: ParseOptions): { debit: string; credit: string } | null {
-  const legacy = splitDebitBesideCredit(message);
-  if (legacy) return legacy;
   let wholeChecked = false;
   let whole: ParsedSms | null = null;
-  return splitDebitBesideCredit(message, clause => {
+  const prove = (clause: string, wholeRequired: boolean): boolean => {
     if (!wholeChecked) {
       whole = parseSmsCore(message, undefined, options);
       wholeChecked = true;
     }
-    // Clipping a statement or completed refund into an expense-shaped field
-    // cannot create debit authority absent from the original message.
-    if (whole?.kind !== 'transaction' || whole.type !== 'expense') return false;
+    if (whole && whole.kind !== 'transaction') return false;
     const parsed = parseSmsCore(clause, undefined, options);
-    return parsed?.kind === 'transaction' && parsed.type === 'expense' &&
-      parsed.amountFils === whole.amountFils && parsed.currency === whole.currency;
-  });
+    if (parsed?.kind !== 'transaction' || parsed.type !== 'expense') return false;
+    const original = readPrincipalContext(message, parsed);
+    if (original && isIncompletePrincipal(original.raw, original.spans[0], true)) return false;
+    // Clipping a statement or completed refund into an expense-shaped field
+    // cannot authorize a fallback. The legacy receipt grammar now also needs
+    // the same affirmative selected predicate, even when the whole reader
+    // confuses a later completed credit or note with the already stated debit.
+    return !wholeRequired || (whole?.kind === 'transaction' && whole.type === 'expense' &&
+      parsed.amountFils === whole.amountFils && parsed.currency === whole.currency);
+  };
+  const legacy = splitDebitBesideCredit(message);
+  if (legacy && prove(legacy.debit, false)) return legacy;
+  return splitDebitBesideCredit(message, clause => prove(clause, true));
 }
 
 export function parseSms(

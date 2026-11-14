@@ -10,6 +10,25 @@ const { isMoneyMovementReview } = load('@/lib/alert-review-tray');
 const { withoutRecordedReviews } = load('@/lib/review-source-bindings');
 const { admitPreparedReviewAlert, emptyAlertReviewTray } = load('@/lib/alert-review-tray');
 const at = Date.parse('2026-11-14T10:00:00Z');
+for (const row of require('./credit-settlement-review-probes.json').filter(row => row.incompleteExpense)) test(`${row.id}: an incomplete debit cannot reach capture/history money`, () => {
+  load('@/lib/country').setActiveCountry('AE'); load('@/lib/markets').setActiveMarket('AE'); load('@/lib/markets').setLedgerCurrency('AED', 2);
+  const session = createLaunchAlertSession({ overrides: {}, activeMarket: 'AE', pinnedCurrency: 'AED', bestEffort: { enabled: true, country: 'AE' } });
+  assert.equal(session.parse(row.body, row.sender, session.inspect(row.body, row.sender), undefined, at), null);
+  for (const channel of ['inbox', 'delivery', 'push']) {
+    const decision = inspectSourceFreeRefusedAlert({ source: row.body, sender: row.sender, observedAt: at, channel, session });
+    if (decision.kind === 'review') assert.equal(isMoneyMovementReview(decision.candidate), false, `${row.id} ${channel}: ${JSON.stringify(decision.candidate)}`);
+    if (decision.kind === 'review' && decision.candidate.kind === 'universal') {
+      const event = decision.candidate.event;
+      assert.equal(event.status, 'informational', row.id);
+      assert.equal(isMoneyMovementReview({ kind: 'universal', event }), false, row.id);
+      assert.deepEqual(planConfirmedUniversalImport({ hydrated: true }, { ...event, status: 'posted' }, { confirmed: true, postingStatus: 'posted' }), { outcome: 'refused', reason: 'not-posted' });
+    }
+  }
+  const input = JSON.stringify({ v: 1, id: require('node:crypto').createHash('sha256').update(row.id).digest('hex'), text: row.body, sender: row.sender, receivedAt: new Date(at).toISOString() });
+  const history = parseHistoricalMessageRecords([input], {}, new Date(at), new Set(), session);
+  assert.equal(history.parsed.length, 0, row.id);
+  assert.ok(!history.reviewCandidates.some(item => isMoneyMovementReview(item)), row.id);
+});
 for (const [index, [body, sender, amount]] of [
   ['Your refund request for AED 50.00 is under process.', 'ENBD', '5000'],
   ['Refund of AED 250.00 successfully requested.', 'ENBD', '25000'],
