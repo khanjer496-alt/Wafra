@@ -46,3 +46,34 @@ jobs:
             ${{ runner.temp }}/artwork-exports/measurements.json
             ${{ runner.temp }}/artwork-exports/*.log
           retention-days: 3
+
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+      EXPO_PUBLIC_WAFRA_E2E_DEMO: 1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Export and test upgraded consent with no external artwork requests
+        run: |
+          node node_modules/expo/bin/cli export --platform web --output-dir "$RUNNER_TEMP/artwork-web" --max-workers 1
+          node scripts/e2e/serve.mjs "$RUNNER_TEMP/artwork-web" 18172 > "$RUNNER_TEMP/artwork-server.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          BASE=http://localhost:18172 node scripts/e2e/e2e-merchant-logos.mjs
+      - name: Preserve focused browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: store-artwork-browser-${{ github.event.pull_request.head.sha }}
+          path: artifacts/e2e-merchant-logos/
+          retention-days: 3

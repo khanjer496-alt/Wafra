@@ -14,7 +14,11 @@ try {
   for (const mode of ['light', 'dark']) {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: mode, reducedMotion: 'reduce' });
     context.on('request', request => {
-      if (/(?:brandfetch\.io|logo\.clearbit\.com|logo\.url|logos\.world)/i.test(new URL(request.url()).hostname)) requests.push(request.url());
+      const url = new URL(request.url());
+      const logoHost = /(?:brandfetch\.io|logo\.clearbit\.com|logo\.url|logos\.world)/i.test(url.hostname);
+      const externalImage = request.resourceType() === 'image' && url.origin !== new URL(base).origin
+        && !['data:', 'blob:'].includes(url.protocol);
+      if (logoHost || externalImage) requests.push(request.url());
     });
     // Do not abort logo requests: a mistaken request must be observed and fail.
     const page = await context.newPage();
@@ -36,6 +40,8 @@ try {
       assert.equal(await page.locator('[data-testid^="merchant-logo-"], [data-testid^="bank-logo-"]').count(), 0, 'no brand image tiles');
       assert.equal(await page.getByTestId('settings-online-logos').count(), 0, 'no online-logo switch');
     }
+    await page.getByRole('tab', { name: 'Home', exact: true }).click();
+    await page.getByTestId('reference-home-summary').waitFor({ state: 'visible' });
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await page.getByTestId('settings-privacy').waitFor();
     assert.equal(await page.getByTestId('settings-online-logos').count(), 0);
