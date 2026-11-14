@@ -103,6 +103,9 @@ const COMPLETED_MONEY_VERB = new RegExp(`\\b(?:${[...COMPLETED_MONEY_WORDS].join
 const ACTIVE_MONEY_VERB = /\b(?:charged|debited|deducted|paid|sent|withdrawn|spent|purchased|used|transferred|credited|refunded|reversed|returned|deposited|received|arrived)\b/giu;
 const PREDICATE_AUXILIARY = /\b(?:was|were|is|are|has|have|had|will|would|shall|should|must|may|might|can|could|not|never|being|yet|scheduled|pending|awaiting|[a-z]+n['’]t)\b/iu;
 const PREDICATE_START = new RegExp(`^(?:${PREDICATE_AUXILIARY.source})`, 'iu');
+const FINITE_AUXILIARY_SCAN = /\b(?:was|were|is|are|has|have|had|will|would|shall|should|must|may|might|can|could|[a-z]+n['’]t)\b/giu;
+const PREDICATE_DESCRIPTOR = /\b(?:using|with|via|at|from|to(?!\s+be\b)|into|between|on|by|for|merchant|cards?|accounts?|wallets?)\b/iu;
+const NEXT_MONEY_FIELD = /\b(?:(?:available|avail|avl|current|new|closing|remaining|updated)\s+(?:(?:account|credit)\s+)?(?:bal(?:ance)?|limit)|(?:available|left|remaining)\s+to\s+(?:spend|withdraw)|date|time|reference|balance)\b/iu;
 const COMPLETION_ADVERBS = new Set(['already', 'just', 'now', 'successfully', 'fully', 'recently', 'actually', 'really']);
 const DEBIT_OUTCOME = /\b(?:made|completed|processed|posted|charged|debited|deducted|paid|sent|withdrawn|spent|purchased|used|transferred|settled|done|successful)\b/iu;
 const EXPLICIT_DEBIT_OUTCOME = /\b(?:charged|debited|deducted|paid|sent|withdrawn|spent|purchased|used|transferred)\b/iu;
@@ -151,9 +154,24 @@ function selectedPredicateCompletion(lead: string, tail: string, debitOnly = fal
     if (label && (Object.hasOwn(CURRENCY_MINOR_UNITS, label) || PRICE_SYMBOL_NAMES.has(label) ||
       getActiveMarket().currency.aliases.some(alias => alias.trim().toUpperCase() === label))) tail = tail.slice(quote[0].length);
   }
-  const descriptor = /\b(?:(?:available|avail|avl|current|new|closing|remaining|updated)\s+(?:(?:account|credit)\s+)?(?:bal(?:ance)?|limit)|(?:available|left|remaining)\s+to\s+(?:spend|withdraw)|using|with|via|at|from|into|on|by|for|merchant|card|account|wallet|date|time|reference|balance)\b|\bto(?!\s+be\b)/iu.exec(tail);
-  const ownedTail = tail.slice(0, descriptor?.index ?? tail.length);
-  const predicate = ownedTail.slice(0, firstStatedPrice(ownedTail) ?? ownedTail.length).trim().replace(/^[^\p{L}\p{N}]+/u, '');
+  // A descriptor bounds a predicate, but does not end its ownership: "using
+  // card 1234 has not been made" still predicates this selected purchase.
+  // Stop at a separate money/metadata field, not at the first instrument.
+  const field = NEXT_MONEY_FIELD.exec(tail);
+  const ownedTail = tail.slice(0, Math.min(field?.index ?? tail.length, firstStatedPrice(tail) ?? tail.length));
+  const descriptor = PREDICATE_DESCRIPTOR.exec(ownedTail);
+  const predicate = ownedTail.slice(0, descriptor?.index ?? ownedTail.length).trim().replace(/^[^\p{L}\p{N}]+/u, '');
+  const following: string[] = [];
+  if (descriptor) for (const auxiliary of ownedTail.matchAll(FINITE_AUXILIARY_SCAN)) {
+    if (auxiliary.index! < descriptor.index + descriptor[0].length) continue;
+    const rest = ownedTail.slice(auxiliary.index);
+    const finite = rest.slice(0, PREDICATE_DESCRIPTOR.exec(rest)?.index ?? rest.length).trim();
+    // Bare NOT in a merchant name is not a predicate. Nor does a later
+    // refund's verb supply debit authority. Require finite movement/status.
+    if (DEBIT_OUTCOME.test(finite) || /\b(?:pending|awaiting|scheduled|in\s+progress)\b/iu.test(finite)) following.push(finite);
+    // Inner auxiliaries belong to the same reduction (has not been ...).
+    if (following.length) break;
+  }
   const allVerbs = [...lead.matchAll(ACTIVE_MONEY_VERB)];
   const verbs = allVerbs.filter((verb, index) => {
     const object = lead.slice(verb.index! + verb[0].length);
@@ -183,17 +201,21 @@ function selectedPredicateCompletion(lead: string, tail: string, debitOnly = fal
     // A bank FX quote may put the ledger-currency figure after the original
     // price. Its predicate ends at that first stated money, not at the quote.
     bridge = bridge.slice(0, firstStatedPrice(bridge) ?? bridge.length);
-    bridge = bridge.split(/\b(?:using|with|via|at|from|to|into|on|by|for)\b/iu)[0].trim();
+    bridge = bridge.split(PREDICATE_DESCRIPTOR)[0].trim();
     if (/^(?:fees?|charges?|commission|tax|levy|amount|sum|value)(?:\s+(?:of|for))?\s*[:=]?$/iu.test(bridge) ||
       /^(?:a|an|the|your|this|that)\s+(?:[a-z'’ -]+\s+)?(?:fees?|charges?|commission|tax|levy|amount|sum|value)(?:\s+(?:of|for))?\s*[:=]?$/iu.test(bridge)) bridge = '';
     active = completedPredicate(`${prefix} ${before[0]} ${bridge}`, debitOnly);
   }
   if (active === false) return false;
   const nominal = /\b(?:purchase|payment|transfer|withdrawal|transaction)\s+(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(lead);
+  // A completed purchase/payment predicate proves an expense even when it
+  // uses "made". A credit noun cannot acquire that debit authority.
+  const explicitDebitOnly = debitOnly && !nominal;
+  for (const finite of following) if (!completedPredicate(finite, explicitDebitOnly)) return false;
   const monetaryTail = COMPLETED_MONEY_VERB.test(predicate);
   if (predicate && ((monetaryTail && (nominal || PREDICATE_START.test(predicate))) ||
-    (active === null && (nominal || PREDICATE_START.test(predicate))))) return completedPredicate(predicate, debitOnly);
-  return active;
+    (active === null && (nominal || PREDICATE_START.test(predicate))))) return completedPredicate(predicate, explicitDebitOnly);
+  return following.length ? true : active;
 }
 
 function principalClause(source: string, span: PrincipalSpan | undefined): { start: number; end: number } | null {
@@ -209,8 +231,15 @@ function principalClause(source: string, span: PrincipalSpan | undefined): { sta
 /** Positive internal proof; missing/unknown predicates cannot relax a preview refusal. */
 export function isCompletedExpensePrincipal(source: string, span: PrincipalSpan | undefined): boolean {
   const clause = principalClause(source, span);
-  return !!clause && !!span && selectedPredicateCompletion(source.slice(clause.start, span.start), source.slice(span.end, clause.end), true) === true &&
-    !isIncompletePrincipal(source, span, true);
+  if (!clause || !span || isIncompletePrincipal(source, span, true)) return false;
+  const lead = source.slice(clause.start, span.start);
+  const completion = selectedPredicateCompletion(lead, source.slice(span.end, clause.end), true);
+  if (completion !== null) return completion;
+  // Existing Arabic completed debit receipts also provide positive evidence.
+  // Unknown/negated/modal text never becomes proof merely by being unrefused.
+  const arabic = lead.replace(/[أإآٱ]/gu, 'ا').replace(/ة/gu, 'ه');
+  return /(?<![ء-ي])(?:تم|تمت)\s+(?:ال)?(?:خصم|شراء|دفع|سحب)(?:\s+(?:ال)?(?:مبلغ|بمبلغ|بقيمه|بواسطه))*\s*$/u.test(arabic) &&
+    !/(?<![ء-ي])(?:لم|لن|لما|اذا|لو|سوف|قد|يمكن|سيتم)(?![ء-ي])/u.test(arabic);
 }
 
 /** Scope indicative status to the selected movement, excluding conditional/previous-event footers. */
