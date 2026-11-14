@@ -33,15 +33,17 @@ function qualificationScope(source: string): string {
     .replace(/\b(?:from|via)\s+(?:a\s+)?scheduled\s+(?:transfer|payment)\b|\bfor\s+scheduled\s+rent\b/gi, ' ')
     .replace(/(?:من|عبر)\s+تحويل\s+مجدول/g, ' ')
     .replace(/\b(?:and|but|while)\s+(?=(?:your|the|another)\s+)/gi, ' | ');
-  const parts = text.split(/\s*\|+\s*/);
+  const parts = text.split(/\s*(\|+)\s*/);
+  let laterSentence = false;
   const own: string[] = [];
   for (let index = 0; index < parts.length; index++) {
     const part = parts[index].trim();
     if (!part) continue;
+    if (/^\|+$/.test(part)) { laterSentence ||= part.length > 1; continue; }
     const continuation = own.length > 0 && COMPLEMENT_HEAD.test(own[own.length - 1]);
     const other = /^(?:(?:your|the)\s+other|another\b|و?(?:طلبك|طلبكم|الطلب|الاسترداد)\s+(?:الاخر|الاخري))/iu.test(part);
     const independent = /^(?:your|the|a|an|our|their)\s+[^|]+?\b(?:is|are|was|were|has|have|will|shall|can|awaiting|scheduled)\b/iu.test(part) && !OWN_REFERENCE.test(part);
-    if (index === 0 || continuation || (!other && (CONDITION_HEAD.test(part) || OWN_REFERENCE.test(part) || !independent))) own.push(part);
+    if (index === 0 || continuation || (!other && (CONDITION_HEAD.test(part) || OWN_REFERENCE.test(part) || (!laterSentence && !independent)))) own.push(part);
   }
   return own.join(' ')
     .replace(/\bif\s+(?:(?:(?:the|this|your)\s+transaction\s+)?(?:has\s+been\s+|was\s+|is\s+)?(?:not\s+)?authori[sz]ed\s+by\s+you|you\s+did\s+not\s+authori[sz]e\s+(?:this|it))[^|.]*?\b(?:call|contact|ignore|disregard)\b[^|.]*/gi, ' ')
@@ -51,7 +53,7 @@ const EN_PAST_EVENT = /\b(?:after|once|when|following)\s+(?![^|.]*\b(?:will|woul
 const AR_PAST_EVENT = /(?:بعد(?:\s+(?:ان|that_ar))?|عندما|حين)\s+(?:ان\s+)?(?:(?:قد\s+)?(?:وافق|اكد|اعتمد|تحقق)|(?:تم|تمت)\s+(?:ال)?(?:تحقق|تاكيد|اعتماد|موافقه))[^|.]*/gu;
 function withoutPastEvents(text: string): string {
   return text.replace(EN_PAST_EVENT, ' ').replace(AR_PAST_EVENT, ' ')
-    .replace(/\bafter\s+(?:verification|clearance|review)\b/gi, ' ')
+    .replace(/\bafter\s+(?:(?:your|the|this)\s+)?(?:cancell?ation|return|refund\s+request|verification|clearance|review|investigation|dispute(?:\s+resolution)?|chargeback|reversal)\b/gi, ' ')
     .replace(/بعد\s+(?:ال)?تحقق(?:\s+من\s+(?:ال)?طلب)?/g, ' ')
     .replace(/عند\s+(?:الساعه|الوقت)\s+\d[\d:]*|تم\s+(?:ال)?تحقق\s+من\s+(?:ال)?عمليه/g, ' ');
 }
@@ -65,14 +67,14 @@ export function hasCreditCondition(source: string): boolean {
   return CONDITION.test(withoutPastEvents(qualificationScope(source)));
 }
 export function hasPendingCreditStatus(source: string): boolean {
-  const text = qualificationScope(source).replace(/\b(?:pending|in\s+progress|under\s+review)\s+(?:orders?|purchases?|transactions?|applications?)\b/gi, ' ');
+  const text = qualificationScope(source).replace(/\b(?:pending|in\s+progress|under\s+review)\s+(?:orders?|purchases?|transactions?|applications?|authori[sz]ations?)\b/gi, ' ');
   return PENDING.test(text) || /\b(?:will|would|shall|may|might|can|could)\s+(?:(?:not|soon|shortly|be|been)\s+)*(?:credit|refund|revers|return|deposit|receiv)\w*\b/iu.test(text);
 }
 export const hasLeadingCreditCondition = (source: string): boolean => hasCreditCondition(source);
 export function hasSettledCreditReceipt(source: string): boolean {
   const text = qualificationScope(source);
   if (hasCreditCondition(text) || hasPendingCreditStatus(text) || /\b(?:not|never|will|would|shall|may|might|can|could)\b/iu.test(text)) return false;
-  const receipt = /\b(?:credited|refunded|reversed|returned|deposited|received|arrived|applied|complete(?:d)?|successful(?:ly)?|settled|done)\b|(?<![ء-ي])(?:تم|تمت)\s+(?:(?:تاكيد|تنفيذ)\s+)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس|ايداع|اضافه)|^\s*(?:استرداد|ايداع)\s+(?:ال)?مبلغ/iu.test(text);
+  const receipt = /\b(?:credited|refunded|reversed|returned|deposited|received|arrived|applied|complete(?:d)?|successful(?:ly)?|settled|done)\b|(?<![ء-ي])(?:تم|تمت)\s+(?:(?:تاكيد|تنفيذ)\s+)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس|ايداع|اضافه)/iu.test(text) || (/^\s*(?:استرداد|ايداع)\s+(?:ال)?مبلغ/iu.test(text) && !/(?:بعد|عند|بمجرد)/u.test(text));
   if (!receipt) return false;
   // Request receipt/completion is not money receipt; a separate money verb is necessary.
   return !isRefundRequest(text) || /\b(?:credited|refunded|reversed|returned|deposited)\b|(?:تم|تمت)\s+(?:استرداد|ايداع|عكس)/iu.test(text);

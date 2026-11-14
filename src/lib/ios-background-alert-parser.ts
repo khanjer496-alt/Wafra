@@ -1,4 +1,4 @@
-import { creditSourceDisposition } from '@/lib/credit-settlement-guards';
+import { creditSourceDisposition, hasCreditCondition } from '@/lib/credit-settlement-guards';
 import { currencyMinorUnits } from '@/lib/currency-metadata';
 import { normalizeCountryCode, setActiveCountry } from '@/lib/country';
 import { detectLaunchMarketFromSender, setActiveMarket, setLedgerCurrency } from '@/lib/markets';
@@ -238,7 +238,10 @@ export function parseIosBackgroundAlert(input: NativeParserInput): NativeParserR
     setActiveMarket(context.parserMarket);
     setLedgerCurrency(context.ledgerMoney.currency, context.ledgerMoney.exponent);
     const creditReviewOnly = creditSourceDisposition(source) === 'review';
-    if (NON_RECEIPT_PREFIX_RE.test(source) || nonPostingReason(source) || (!creditReviewOnly &&
+    const refusal = nonPostingReason(source);
+    const reviewableRefusal = creditReviewOnly && (refusal === 'pending-processing' ||
+      (refusal === 'declined' && hasCreditCondition(source) && /\b(?:if|unless|whether)\b[^.!?]{0,80}\b(?:rejected|declined)\b/iu.test(source)));
+    if (NON_RECEIPT_PREFIX_RE.test(source) || (refusal && !reviewableRefusal) || (!creditReviewOnly &&
       (isNotAutoPostableMoney(source) || hasNonCompletedWording(source, context.country, sender)))) return ignore();
     const session = createLaunchAlertSession({ overrides: {}, activeMarket: context.parserMarket,
       pinnedCurrency: context.ledgerMoney.currency, fxLookup: () => null,

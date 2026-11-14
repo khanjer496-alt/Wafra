@@ -2911,7 +2911,7 @@ export function creditSettlement(sentence: string, clause: CreditClause, after =
   if (clause.nounOnly) {
     if (isUncompletedRefundRequest(sentence)) return { verdict: 'not-settled', reason: 'pending' };
     const tail = sentence.slice(clause.end);
-    return hasSettledCreditReceipt(sentence)
+    return hasSettledCreditReceipt(sentence + after)
       ? { verdict: 'settled' } : { verdict: 'not-settled', reason: 'pending' };
   }
   const first = clause.verbs[0];

@@ -1,4 +1,4 @@
-import { EN_CREDIT_PENDING_STATUS, AR_CREDIT_PENDING_STATUS, hasCreditCondition } from '@/lib/credit-settlement-guards';
+import { EN_CREDIT_PENDING_STATUS, AR_CREDIT_PENDING_STATUS, hasCreditCondition, hasPendingCreditStatus } from '@/lib/credit-settlement-guards';
 /** Source-only qualifications of an already selected monetary value. */
 export interface PrincipalSpan { start: number; end: number }
 
@@ -239,6 +239,7 @@ const SHARED_REFUND_TRANSITION = /^\s*(?:and|but|then)\s+(?:(?:has|have|had|was|
 function ownedRefundVerdict(sentence: string, principalEnd: number): RefundStatus | null {
   const hits = REFUND_VERDICTS.flatMap(([status, pattern]) => [...sentence.matchAll(pattern)]
     .filter(match => status !== 'completed' || match.index! >= principalEnd)
+    .filter(match => status !== 'pending' || hasPendingCreditStatus(sentence) || !hasPendingCreditStatus(match[0]))
     .map(match => ({ status, start: match.index!, end: match.index! + match[0].length })))
     .sort((a, b) => a.start - b.start || b.end - a.end);
   let owned: { status: RefundStatus; end: number; unsettled: boolean } | null = null;

@@ -263,9 +263,11 @@ export const inspectGenericBankEventForReview = (
     : sourceContext ? { ...sourceContext, sender }
       : universalSourceParseContext(hasUniversalInstitutionSender(sender)
         ? inspectUniversalAlert({ source, sender }) : null, sender, getActiveCountry());
+  const creditReviewMarket = creditReviewOnly ? detectLaunchMarketFromSender(sender) : null;
+  const creditReviewAliases: CurrencyAliasMap = creditReviewMarket === 'AE' ? { 'درهم': ['AED'], 'دراهم': ['AED'] }
+    : creditReviewMarket === 'SA' ? { 'ريال': ['SAR'] } : {};
   let event = inspectUniversalBankEvent(isGulfNeighbourMarket(market)
-    ? gulfNeighbourReadSource(source, market) : source, cardCreditAliases
-      ? { ...context, currencyAliases: { ...cardCreditAliases, ...context.currencyAliases } } : context);
+    ? gulfNeighbourReadSource(source, market) : source, { ...context, currencyAliases: { ...creditReviewAliases, ...cardCreditAliases, ...context.currencyAliases } });
   if (event.decision !== 'review') return null;
   if (cardCreditAliases) {
     if (event.status !== 'posted' && event.status !== 'unknown') return null;
