@@ -205,7 +205,8 @@ function evaluateRows(rows, { onlyPath = null } = {}) {
           event.direction === 'credit' && event.issues.includes('unsettled-credit-not-posting') &&
           event.amount.value?.minorUnits === String(pathRow.expect.amountMinor) &&
           event.amount.value?.currency === (pathRow.expect.currency ?? row.ledger));
-        if (event && planConfirmedUniversalImport({ hydrated: true }, event, { confirmed: true, postingStatus: 'posted' }).outcome === 'refused') {
+        const confirmation = event ? planConfirmedUniversalImport({ hydrated: true }, event, { confirmed: true, postingStatus: 'posted' }) : null;
+        if (confirmation?.outcome === 'refused' && confirmation.reason === 'not-posted') {
           g = { verdict: 'retained', detail: 'exact incoming money retained as informational Review; no confirmation authority' };
         }
       }
