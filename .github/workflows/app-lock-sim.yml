@@ -135,6 +135,7 @@ jobs:
             [ -f shots/purchase-setup.txt ] && echo "| setup | $(cat shots/purchase-setup.txt) | |"
           } | tee -a "$GITHUB_STEP_SUMMARY"
           test -s shots/purchase-results.tsv
+          awk -F'\t' '$1 == "P3b" { n++; if ($2 != "PASS") bad=1 } END { exit (n != 1 || bad) }' shots/purchase-results.tsv
           grep -q '^test rc=0$' shots/purchase-run.log
           awk -F'\t' '$1 ~ /^P[1-5]$/ { seen[$1]++; if ($2 != "PASS") bad=1 } END { for (i=1;i<=5;i++) if (seen["P" i] != 1) bad=1; exit bad }' shots/purchase-results.tsv
 

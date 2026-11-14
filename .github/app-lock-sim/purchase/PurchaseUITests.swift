@@ -85,7 +85,7 @@ final class PurchaseUITests: XCTestCase {
     }
 
     /// Onboarding by testID (the sample-data button no longer exists), until the Home surface shows.
-    func reachHome() throws {
+    func reachHome(stopAtPaywall: Bool = false) throws {
         let advance = ["onboarding-get-started", "onboarding-name-skip", "onboarding-goal-bills", "onboarding-goals-continue",
                        "onboarding-watch-continue", "onboarding-reminders-not-now", "onboarding-live-continue",
                        "onboarding-sms-explainer-continue", "onboarding-source-manual", "onboarding-complete-manual", "onboarding-complete-continue",
@@ -93,7 +93,11 @@ final class PurchaseUITests: XCTestCase {
         let end = Date().addingTimeInterval(240)
         while Date() < end {
             dismissSystemAlerts()
-            if app.buttons["Settings"].firstMatch.exists { return }
+            if stopAtPaywall && el("onboarding-paywall").exists { return }
+            if app.buttons["Settings"].firstMatch.exists {
+                if stopAtPaywall { throw StepFail("reached Home before Restore-button check; onboarding paywall was skipped") }
+                return
+            }
             var tapped = false
             // The onboarding paywall lists both plans; its free-path button sits below the fold.
             if el("onboarding-paywall").exists {
@@ -131,6 +135,7 @@ final class PurchaseUITests: XCTestCase {
         try? "go".write(toFile: "\(hsDir)/reinstall-\(n).request", atomically: true, encoding: .utf8)
         let end = Date().addingTimeInterval(240)
         while Date() < end {
+            if FileManager.default.fileExists(atPath: "\(hsDir)/reinstall-\(n).failed") { throw StepFail("host refused data reset #\(n); no uninstall performed") }
             if FileManager.default.fileExists(atPath: "\(hsDir)/reinstall-\(n).done") { return }
             Thread.sleep(forTimeInterval: 1)
         }
@@ -311,6 +316,42 @@ final class PurchaseUITests: XCTestCase {
             }
             shot("P3b-after-restore-pro-on")
             return how
+        }
+
+        // P3b is a separate build-195 gate: exercise the real Restore button even when
+        // launch already recovered the subscription. The onboarding paywall keeps Restore
+        // available for existing subscribers; /pro intentionally hides it once Pro is active.
+        step("P3b") {
+            try requestHostReinstall(4) // second data-only reset; keep the purchased weekly subscription
+            app.launch()
+            dismissSystemAlerts()
+            try reachHome(stopAtPaywall: true)
+            let paywall = el("onboarding-paywall")
+            try need(paywall, "onboarding paywall before Restore", 20)
+            let restore = el("onboarding-paywall-restore")
+            for _ in 0..<8 {
+                if restore.exists && restore.isHittable { break }
+                app.swipeUp(); Thread.sleep(forTimeInterval: 1)
+            }
+            try need(restore, "onboarding Restore purchase button", 10)
+            guard restore.isHittable && restore.isEnabled else { throw StepFail("Restore purchase is not tappable") }
+            guard restore.label.localizedCaseInsensitiveContains("Restore purchase") else {
+                throw StepFail("unexpected Restore button label: \(restore.label)")
+            }
+            shot("P3b1-before-restore-button")
+            note("P3b Restore purchase button tap; no free-path or purchase button is tapped")
+            restore.tap()
+            // Only a successful restore calls onFinish on this path. A missing/failed
+            // restore leaves the paywall visible with its notice, and fails this check.
+            try waitGone(paywall, "onboarding paywall after Restore purchase", 90)
+            try need(app.buttons["Settings"].firstMatch, "Home reached through successful Restore", 30)
+            shot("P3b2-home-after-restore")
+            try openPro(onboard: false)
+            let active = app.staticTexts["Active on this device. Thank you for supporting Wafra."].firstMatch
+            try need(active, "positive Pro-active copy after explicit Restore", 30)
+            guard entitled else { throw StepFail("plans or Buy button remain after explicit Restore") }
+            shot("P3b3-pro-active-after-restore-button")
+            return "Tapped onboarding Restore purchase after second data-only reset WITHOUT uninstall; successful restore left paywall for Home; positive Pro-active copy confirmed. Launch may already have recovered Pro; this proves explicit Restore API success, not an off-to-on transition."
         }
 
         // P4: yearly on a fresh install, then Pro stays on across a relaunch
