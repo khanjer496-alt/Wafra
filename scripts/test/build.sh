@@ -64,7 +64,7 @@ rewrite() {
 # relay-crypto and relay are deliberately NOT in this list: they import @noble's
 # ESM-only subpath exports, which the node10 resolution implied by
 # `--module commonjs` cannot follow. They get the nodenext .cts pass below.
-for f in free-capture-copy money-code-run types routes consent-prompt android-capture-disclosure import-processing-disclosure onboarding-copy settings-copy biometric-kind format date-time-locale categories custom-categories ledger bill-alias capture-source-identity dedupe arabic-sms bank-amount-tokens bnpl-providers principal-posting-guards sms-parser import-plan bills \
+for f in free-capture-copy money-code-run types routes consent-prompt android-capture-disclosure import-processing-disclosure onboarding-copy settings-copy biometric-kind format date-time-locale categories custom-categories ledger bill-alias capture-source-identity dedupe arabic-sms bank-amount-tokens bnpl-providers principal-posting-guards credit-settlement-guards sms-parser import-plan bills \
          transfer-reconciliation-types transfer-reconciliation transfer-activity transfer-evidence transfer-review-copy \
          insights seed subscriptions cards cash-flow payment-flow ledger-import launch-alert-parser ios-background-alert-parser ios-background-parser-source.generated ios-native-parser-context analytics growth-funnel period complimentary-clock complimentary-access purchases country-names country markets known-banks i18n system-language balances \
          brand-marks leaving-soon accounts heal bnpl-category-repair accuracy onboarding onboarding-bank-examples reminders reminder-schedule app-lock auto-import android-capture-sources \
