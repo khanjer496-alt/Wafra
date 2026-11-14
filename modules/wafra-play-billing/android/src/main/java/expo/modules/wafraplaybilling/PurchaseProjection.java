@@ -21,6 +21,7 @@ final class PurchaseProjection {
     }
     Set<String> active = new TreeSet<>();
     Set<String> pending = new TreeSet<>();
+    boolean needsAcknowledgement = false;
     try {
       for (Purchase purchase : purchases) {
         if (purchase == null) return SubscriptionResult.unknown(code);
@@ -57,11 +58,14 @@ final class PurchaseProjection {
         for (String id : products) {
           if (id == null || id.trim().isEmpty()) return SubscriptionResult.unknown(code);
           if (!ALLOWED.contains(id)) continue;
-          if (state == Purchase.PurchaseState.PURCHASED) active.add(id);
+          if (state == Purchase.PurchaseState.PURCHASED) {
+            active.add(id);
+            if (!purchase.isAcknowledged()) needsAcknowledgement = true;
+          }
           else pending.add(id);
         }
       }
-      return SubscriptionResult.success(new ArrayList<>(active), new ArrayList<>(pending));
+      return SubscriptionResult.success(new ArrayList<>(active), new ArrayList<>(pending), needsAcknowledgement);
     } catch (Exception ignored) {
       // A parser/library failure is not evidence of an empty successful query.
       return SubscriptionResult.unknown(code);

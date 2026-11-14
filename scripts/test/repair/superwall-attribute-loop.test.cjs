@@ -101,6 +101,7 @@ function harness(options = {}) {
   });
   const placement = { state: { status: 'idle' }, registerPlacement: async request => { calls.placements.push(request); } };
   const setPro = value => { calls.pro.push(value); state.pro = value; };
+  const ensureDurable = async () => { await options.ensureDurable?.(); };
   const productContract = load(path.join(root, 'src/lib/purchases.ts'), {
     'react-native': rn, '@/lib/complimentary-access': { complimentaryAccessUntil: () => 0 },
   });
@@ -122,20 +123,30 @@ function harness(options = {}) {
     '@/lib/android-play-billing': options.playNative ? load(path.join(root, 'src/lib/android-play-billing.ts'), {
       'expo-modules-core': { requireOptionalNativeModule: name => {
         assert.equal(name, 'WafraPlayBilling');
-        return { querySubscriptions: async () => { calls.playQueries++; return options.playNative(); } };
+        return {
+          querySubscriptions: async () => { calls.playQueries++; return options.playNative(); },
+          ...(options.acknowledgeNative ? { acknowledgeSubscriptions: async () => options.acknowledgeNative() } : {}),
+        };
       } },
       '@/lib/purchases': productContract,
     }) : {
       isAndroidPlayBillingAvailable: () => options.playQueryAvailable !== false,
+      isAndroidPlayBillingAcknowledgementAvailable: () => options.playAcknowledgementAvailable !== false,
       queryAndroidPlaySubscriptions: async () => {
         calls.playQueries++;
         return options.querySubscriptions ? options.querySubscriptions() : { status: 'inactive', activeProductIds: [], pendingProductIds: [], responseCode: 0 };
+      },
+      recoverAndroidPlayAcknowledgements: async allowed => {
+        if (allowed()) {
+          assert.equal(state.pro, true, 'ACK must follow local grant');
+          await options.acknowledge?.();
+        }
       },
     },
     '@/lib/purchases': { ENTITLEMENT_ID: 'pro', trialDaysLeft: current => current.trialStartTs ? 7 : 0,
       proOffersFromProducts: productContract.proOffersFromProducts,
       proProductIdsForPlatform: productContract.proProductIdsForPlatform },
-    '@/lib/store': { useStore: () => ({ state, setPro, ensureDurable: async () => {}, setOnboardingProfile() {} }) },
+    '@/lib/store': { useStore: () => ({ state, setPro, ensureDurable, setOnboardingProfile() {} }) },
     // Configure waits for Home's first frames; here the frames are always past.
     '@/lib/after-first-frames': { runAfterFirstFrames: task => {
       calls.deferred.push(task);
@@ -819,4 +830,139 @@ test('Play bridge allowlist and the app product ids stay one list', () => {
     assert.ok(javaIds.includes(pinned.split(':')[0]), `${pinned} must confirm against a Play-reported id`);
     assert.ok(!javaIds.includes(pinned));
   }
+});
+
+
+test('startup, Restore and foreground grant durably before acknowledgement; pending never ACKs', async () => {
+  const sequence = []; let pending = false;
+  const h = harness({
+    querySubscriptions: async () => pending ? { status: 'inactive', activeProductIds: [], pendingProductIds: ['wafra_pro_weekly'], responseCode: 0 }
+      : { status: 'active', activeProductIds: ['wafra_pro_weekly'], pendingProductIds: [], responseCode: 0 },
+    ensureDurable: async () => { sequence.push('grant-durable'); },
+    acknowledge: async () => { sequence.push('ack'); },
+  });
+  await h.renderRuntime(2); await tick();
+  assert.deepEqual(sequence, ['grant-durable', 'ack']);
+  sequence.length = 0;
+  assert.equal(await h.billing().restorePro(), true); await tick();
+  assert.deepEqual(sequence, ['grant-durable', 'ack']);
+  sequence.length = 0;
+  for (const listener of h.calls.appListeners) listener('active'); await tick();
+  assert.deepEqual(sequence, ['grant-durable', 'ack']);
+  sequence.length = 0; pending = true;
+  for (const listener of h.calls.appListeners) listener('active'); await tick();
+  assert.deepEqual(sequence, []);
+});
+
+test('local durability failure never acknowledges and does not reject the UI refresh', async () => {
+  let acknowledgements = 0;
+  const h = harness({
+    querySubscriptions: async () => ({ status: 'active', activeProductIds: ['wafra_pro_weekly'], pendingProductIds: [], responseCode: 0 }),
+    ensureDurable: async () => { throw Error('synthetic local storage failure'); },
+    acknowledge: async () => { acknowledgements++; },
+  });
+  await h.renderRuntime(2); await tick();
+  assert.equal(h.state.pro, true); assert.equal(acknowledgements, 0);
+});
+
+
+test('acknowledged Pro foreground refreshes skip whole-ledger persistence and recovery', async () => {
+  let durable = 0; let acknowledgements = 0;
+  const h = harness({ state: { pro: true },
+    querySubscriptions: async () => ({ status: 'active', activeProductIds: ['wafra_pro_weekly'], pendingProductIds: [], responseCode: 0, needsAcknowledgement: false }),
+    ensureDurable: async () => { durable++; }, acknowledge: async () => { acknowledgements++; },
+  });
+  await h.renderRuntime(2); await tick();
+  for (let i = 0; i < 2; i++) { for (const listener of h.calls.appListeners) listener('active'); await tick(); }
+  assert.equal(h.state.pro, true); assert.equal(durable, 0); assert.equal(acknowledgements, 0);
+});
+
+
+test('ACK errors and unanswered ACKs never withhold purchased access or block Restore', async () => {
+  for (const acknowledge of [async () => { throw Error('synthetic ACK outage'); }, () => new Promise(() => {})]) {
+    const h = harness({
+      querySubscriptions: async () => ({ status: 'active', activeProductIds: ['wafra_pro_weekly'], pendingProductIds: [], responseCode: 0, needsAcknowledgement: true }),
+      acknowledge,
+    });
+    await h.renderRuntime(2); await tick();
+    assert.equal(h.state.pro, true);
+    assert.equal(await h.billing().restorePro(), true);
+    assert.equal(h.state.pro, true);
+  }
+});
+
+
+for (const entrypoint of ['startup', 'Restore']) {
+  test(`a missed purchase callback is recovered by Play query on ${entrypoint}`, async () => {
+    // The purchase completes while Wafra cannot receive onPurchasesUpdated
+    // (for example, Play owns the foreground). Do not invoke SDK checkout or
+    // publish any SDK purchase/entitlement event: only Play's next query knows.
+    let purchased = entrypoint === 'startup';
+    let acknowledged = false;
+    let durable = false;
+    let acknowledgements = 0;
+    const snapshot = () => ({
+      status: purchased ? 'active' : 'inactive',
+      activeProductIds: purchased ? ['wafra_pro_weekly'] : [],
+      pendingProductIds: [], responseCode: 0,
+      needsAcknowledgement: purchased && !acknowledged,
+    });
+    const h = harness({
+      playNative: snapshot,
+      ensureDurable: async () => {
+        assert.equal(h.state.pro, true, 'local entitlement must be granted first');
+        durable = true;
+      },
+      acknowledgeNative: async () => {
+        assert.equal(h.state.pro, true);
+        assert.equal(durable, true, 'save the local grant before recovering ACK');
+        assert.equal(purchased, true);
+        assert.equal(acknowledged, false);
+        acknowledgements++;
+        acknowledged = true;
+        return snapshot();
+      },
+    });
+    h.sdk.useSuperwallStore.setState({ subscriptionStatus: { status: 'INACTIVE' } });
+    await h.renderRuntime(2);
+    if (entrypoint === 'Restore') {
+      assert.equal(h.state.pro, false);
+      assert.equal(acknowledgements, 0);
+      purchased = true; // No callback: the next ownership query must discover it.
+      assert.equal(await h.billing().restorePro(), true);
+      await tick();
+    }
+    assert.ok(h.calls.playQueries > 0);
+    assert.deepEqual(h.calls.purchases, [], 'recovery must not run checkout again');
+    assert.equal(h.sdk.useSuperwallStore.getState().subscriptionStatus.status, 'INACTIVE');
+    assert.equal(acknowledged, true);
+    assert.equal(acknowledgements, 1);
+    assert.equal(h.state.pro, true);
+    assert.deepEqual(h.calls.pro, [true], 'grant once despite a missing SDK callback');
+    for (const listener of h.calls.appListeners) listener('active');
+    await tick();
+    assert.equal(await h.billing().restorePro(), true);
+    await tick();
+    assert.equal(h.state.pro, true);
+    assert.equal(acknowledgements, 1, 'later queries see ACK and leave it untouched');
+    assert.deepEqual(h.calls.pro, [true]);
+  });
+}
+
+
+test('OTA on a legacy billing binary grants ownership without unnecessary ledger writes', async () => {
+  let durableWrites = 0;
+  const h = harness({
+    // The old binary can query ownership, but has neither the hint nor ACK method.
+    playNative: () => ({ status: 'active', activeProductIds: ['wafra_pro_weekly'], pendingProductIds: [], responseCode: 0 }),
+    ensureDurable: async () => { durableWrites++; },
+  });
+  await h.renderRuntime(2);
+  for (const listener of h.calls.appListeners) listener('active');
+  await tick();
+  assert.equal(await h.billing().restorePro(), true);
+  await tick();
+  assert.equal(h.state.pro, true);
+  assert.deepEqual(h.calls.pro, [true]);
+  assert.equal(durableWrites, 0, 'missing native ACK support must not force encrypted ledger writes');
 });

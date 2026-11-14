@@ -3,7 +3,7 @@
 Wafra uses Apple/Google for payment and **Superwall** as the storefront seam:
 it supplies the localized products, runs the platform checkout sheet, restores
 purchases and hosts remote campaigns. iOS uses its `pro` entitlement answer;
-Android confirms ownership through an independent read-only Play query, as
+Android confirms ownership through an independent Play ownership query, as
 described below. Wafra's native onboarding owns first run.
 
 **The Pro purchase screen is Wafra's own native `/pro` screen.** It reads the
@@ -150,7 +150,7 @@ declares these.
 `state.pro` is a local cache of the most recent confirmed store ownership answer.
 On iOS, Superwall supplies that answer; its `UNKNOWN` status preserves the cache.
 
-On Android, `WafraPlayBilling.querySubscriptions()` performs a read-only Google
+On Android, `WafraPlayBilling.querySubscriptions()` performs a Google
 Play Billing 8 subscription query when billing is configured, on foreground,
 after checkout/restore, and when SDK events signal a possible change. Only a
 successful response can grant or revoke purchased access. A successful empty
@@ -169,9 +169,34 @@ answer, including paid-through cancellation; no expiry is inferred from the
 SDK's nominal billing-period arithmetic. A new native build is required for this
 module. An older binary without it cannot start a new purchase from Wafra's UI.
 
-The module sends no data to a new service, does not launch purchases or consume
-or acknowledge them, and exports no receipt, order ID, purchase token or account
-identifier. Superwall continues to own product prices and the checkout flow.
+Ownership reads remain query-only. Once a successful Play answer grants Pro
+locally and reports an unacknowledged purchase, Wafra durably saves that grant and starts background
+`WafraPlayBilling.acknowledgeSubscriptions()` recovery. Startup, foreground,
+checkout and Restore all use this path. A local durability failure does not ACK.
+The ownership query exports only a safe `needsAcknowledgement` boolean in addition
+to the existing ownership fields. Already-acknowledged subscriptions skip both the
+full ledger persistence and the second billing query on foreground refresh.
+An OTA bundle on an older native binary without acknowledgeSubscriptions still
+grants queried ownership, but skips forced persistence and recovery entirely.
+
+Recovery queries current Play subscriptions again, then acknowledges only
+PURCHASED, unacknowledged Pro subscriptions. Pending payments, unrelated products
+and already acknowledged purchases are untouched. Errors never revoke access.
+Each attempt is bounded by the existing 12-second native query deadline; failed
+attempts retry after 1 then 2 seconds, at most three attempts. Each retry performs
+a fresh query so a concurrent successful Superwall ACK becomes a no-op. A later
+normal refresh can start another recovery. Revoked or stale local sessions stop
+retries. Release diagnostics are deliberately retained as the bounded field diagnostic.
+Native diagnostics are limited to `ack:recovered` and
+`ack:failed:<numeric-code>`; tokens, orders, receipts and Billing debug messages
+are never logged. Tokens remain native and are not persisted by Wafra.
+
+The module sends no data to a new service, never launches or consumes purchases,
+and exports no receipt, order ID, purchase token or account identifier. Superwall
+continues to own product prices and checkout. In SDK 2.7.24 its automatic purchase
+controller acknowledges successful purchase callbacks, but its startup/restore
+queries do not recover a failed acknowledgement. Wafra's separate recovery closes
+that gap; `shouldObservePurchases` does not gate the automatic controller's ACK.
 
 For iPhone automatic capture, a confirmed active subscription is mirrored into
 the native App Intent gate. When exact transaction expiration is not yet
