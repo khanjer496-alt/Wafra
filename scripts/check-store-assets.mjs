@@ -1,17 +1,11 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
+import { APPLE_SCREENSHOT_TARGET } from './lib/apple-screenshot-target.mjs';
 
 const root = new URL('../', import.meta.url);
 
 const sets = [
-  {
-    label: 'App Store English Dynamic Island medium',
-    directory: 'docs/store-assets/appstore',
-    prefix: 'appstore-6.3-en-',
-    count: 8,
-    width: 1206,
-    height: 2622,
-  },
+  APPLE_SCREENSHOT_TARGET,
   {
     label: 'Google Play global English',
     directory: 'docs/store-assets/play/global-en',

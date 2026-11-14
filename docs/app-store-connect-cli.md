@@ -84,8 +84,10 @@ means that a remote locale should be deleted.
 ## 4. Preview and upload screenshots
 
 The screenshot workflow first runs Wafra's count, dimensions, opacity,
-uniqueness, and localization checks. It targets the 6.9-inch iPhone set
-(`IPHONE_69`) and fans out across `en-US` and `ar-SA`.
+uniqueness, and localization checks. It targets the Dynamic Island medium set
+(`IPHONE_61` in asc 4.4.2), 1206×2622 portrait, using the en-US launch directory.
+The shared target in `scripts/lib/apple-screenshot-target.mjs` also controls
+the asset checker and package prefix (`appstore-6.3-en-`).
 
 ```bash
 npm run asc:screenshots:preview
