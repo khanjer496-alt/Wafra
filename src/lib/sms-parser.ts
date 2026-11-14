@@ -2998,9 +2998,9 @@ function settlementSentences(original: string): SettlementSentence[] {
  * with no such clause, or with a settled one, returns false.
  */
 export function hasOnlyUnsettledCredit(message: string): boolean {
-  if (creditSourceDisposition(message) === 'review') return true;
   const sentences = settlementSentences(message);
   if (sentences.some((s) => s.clauses.length === 0 && CREDIT_SETTLEMENT_DEBIT_RE.test(s.text) && creditAmounts(s.text).length > 0)) return false;
+  if (creditSourceDisposition(message) === 'review') return true;
   const verdicts = sentences.filter((s) => s.clauses.length > 0 && creditAmounts(s.text).length > 0)
     .map((s) => sentenceSettlement(s, message.slice(s.start + s.text.length)));
   return verdicts.length > 0 && verdicts.every((v) => v.verdict !== 'settled');
@@ -10095,14 +10095,15 @@ export function parseSms(
   // Evaluate the original BEFORE any core parser can mask merchants or notes.
   const holdCredit = hasUnsettledCreditToken(message);
   if (mentionsCredit(message) && hasConditionalDebitLead(message)) return null;
+  const parsed = parseSmsCore(message, overrides, options);
+  if (parsed?.kind === 'transaction' && parsed.type === 'expense') return parsed;
   const pair = completedDebitBesideCredit(message);
-  const reason = nonPostingReason(message);
+  const reason = pair ? nonPostingReason(message) : null;
   if (pair && (reason === null || reason === 'pending-processing' || reason === 'declined') && !hasActionableRefundRequest(message) &&
-    !hasExplicitPersonalMoneyClaim(message) && !isBnplProviderSource(options?.sender)) {
+    !hasClickLinkPrompt(message) && !hasExplicitPersonalMoneyClaim(message) && !isBnplProviderSource(options?.sender)) {
     const debit = parseSmsCore(pair.debit, overrides, options);
     if (debit?.kind === 'transaction' && debit.type === 'expense') return { ...debit, raw: message };
   }
-  const parsed = parseSmsCore(message, overrides, options);
   return parsed?.kind === 'transaction' && parsed.type === 'income' && holdCredit ? null : parsed;
 }
 

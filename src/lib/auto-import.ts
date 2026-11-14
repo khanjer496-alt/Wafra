@@ -995,6 +995,8 @@ export function inspectSourceFreeRefusedAlert(input: {
   existingInspection?: UniversalAlertReview | null;
   /** Known launch-bank package identity makes worldwide fallback unnecessary. */
   skipUniversalFallback?: boolean;
+  /** Internal collector context: the primary debit is already accepted. Never authorizes it. */
+  acceptedExpense?: ParsedSms;
 }): SourceFreeRefusedAlertDecision {
   // A footer made of link WORDS only ("If not you, tap here to block your card") names no address, so it cannot be a
   // phishing link; the debit above it must reach Review, never be dropped. It is blanked for this inspection only:
@@ -1007,10 +1009,16 @@ export function inspectSourceFreeRefusedAlert(input: {
   // money through an unparsed-template fallback. This is no ledger deletion.
   if (isUnpostedCardBalanceClaim(source)) return { kind: 'ignored', reason: 'non-financial' };
   const reason = nonPostingReason(source);
-  if ((reason === null || reason === 'pending-processing' || reason === 'declined') && !/https?:\/\/|www\./iu.test(input.source)) {
-    const note = inspectSupplementaryReversal(input.source, input.sender);
-    const review = note ? prepareUniversalReviewAlert({ id: 'capture_probe_id_0001', sourceKey: 'capture_probe_key_001',
-      observedAt: input.observedAt, channel: input.channel, event: note }) : null;
+  if ((reason === null || reason === 'pending-processing' || reason === 'declined') &&
+    completedDebitBesideCredit(input.source) && !/https?:\/\/|www\./iu.test(input.source)) {
+    const accepted = input.acceptedExpense?.kind === 'transaction' && input.acceptedExpense.type === 'expense';
+    const pair = completedDebitBesideCredit(input.source)!;
+    let event = accepted ? inspectSupplementaryReversal(input.source, input.sender)
+      : inspectGenericBankEventForReview(pair.debit, input.sender);
+    if (!accepted && event) event = { ...event, decision: 'review', status: 'informational', direction: 'debit',
+      issues: [...new Set([...event.issues, 'unsettled-credit-not-posting'])] };
+    const review = event ? prepareUniversalReviewAlert({ id: 'capture_probe_id_0001', sourceKey: 'capture_probe_key_001',
+      observedAt: input.observedAt, channel: input.channel, event }) : null;
     if (review) {
       const { id: _id, sourceKey: _sourceKey, ...candidate } = review;
       return { kind: 'review', candidate };
@@ -1291,6 +1299,7 @@ export async function scanInbox(
     notificationId?: string,
     /** The parser read an obligation that this transport may only review. */
     preferParsedFallback = false,
+    acceptedExpense?: ParsedSms,
   ): Promise<SourceFreeRefusedAlertDecision> => {
     let decision = inspectSourceFreeRefusedAlert({
       source: body,
@@ -1300,6 +1309,7 @@ export async function scanInbox(
       session: launchSession,
       existingInspection,
       skipUniversalFallback,
+      acceptedExpense,
     });
     if (preferParsedFallback && parsedFallback && decision.kind === 'review') {
       decision = { kind: 'review', candidate: parsedFallback };
@@ -1558,6 +1568,7 @@ export async function scanInbox(
       const reviewDecision = p && (shouldReviewParsedIncome(p) || supplementary)
         ? await inspectRefused(
             sms.body, sms.date, sms.address, 'inbox', worldwide, sourceEventId,
+            undefined, undefined, false, false, undefined, false, supplementary ? p : undefined,
           )
         : null;
       const reviewed = !supplementary && reviewDecision?.kind === 'review';
@@ -1675,7 +1686,7 @@ export async function scanInbox(
           const supplementary = p?.kind === 'transaction' && p.type === 'expense' && !!completedDebitBesideCredit(sms.body);
           const reviewDecision = p && (heldPayment || shouldReviewParsedIncome(p) || supplementary)
             ? await inspectRefused(sms.body, sms.date, sms.address, 'delivery', worldwide,
-                undefined, undefined, deliveryFallback, false, false, undefined, !!heldPayment)
+                undefined, undefined, deliveryFallback, false, false, undefined, !!heldPayment, supplementary ? p : undefined)
             : null;
           const reviewed = !supplementary && reviewDecision?.kind === 'review';
           if (p && !reviewed && !heldPayment) {
@@ -1949,12 +1960,12 @@ export async function scanInbox(
           ? universalEventReviewCandidate(universalEvent, n.ts)
           : null;
         const reviewFallback = parsedCandidateFallback ?? universalCandidateFallback;
-        const supplementary = p?.kind === 'transaction' && p.type === 'expense' && !!completedDebitBesideCredit(source);
+        const supplementary = p?.kind === 'transaction' && p.type === 'expense' && autoAuthorized && !!completedDebitBesideCredit(source);
         let refusal: SourceFreeRefusedAlertDecision | null = p && (shouldReviewParsedIncome(p) || !autoAuthorized || supplementary)
           ? await inspectRefused(
               source, n.ts, sender, 'push', worldwide, undefined, pushSource,
               reviewFallback, skipKnownLaunchUniversal,
-              false, n.id,
+              false, n.id, false, supplementary ? p : undefined,
             )
           : null;
         const reviewed = !supplementary && refusal?.kind === 'review';

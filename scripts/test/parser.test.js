@@ -21,6 +21,15 @@ function t(name, msg, expect, options) {
   const errs = [];
   if (expect === null) {
     if (p !== null) errs.push(`expected SKIP, got ${JSON.stringify({m:p.merchant,a:p.amountFils,k:p.kind,t:p.type})}`);
+  } else if (expect.review) {
+    if (p !== null) errs.push('uncertain credit must not create a ledger candidate');
+    const { createLaunchAlertSession } = require('./build/launch-alert-parser');
+    const session = createLaunchAlertSession({ overrides: {}, activeMarket: 'AE', pinnedCurrency: 'AED' });
+    const held = require('./build/auto-import').inspectSourceFreeRefusedAlert({ source: msg, sender: options?.sender ?? '',
+      observedAt: Date.parse('2026-11-14T10:00:00Z'), channel: 'inbox', session });
+    const event = held.kind === 'review' && held.candidate.kind === 'universal' ? held.candidate.event : null;
+    if (event?.status !== 'informational' || event.amount.value?.minorUnits !== String(expect.amountFils)) errs.push('exact money must remain in informational Review');
+    if (event && require('./build/alert-review-tray').isMoneyMovementReview({ kind: 'universal', event })) errs.push('informational credit cannot be confirmed into the ledger');
   } else {
     if (!p) errs.push('expected parse, got null');
     else {
@@ -2451,9 +2460,8 @@ t('an automated savings rule is a transfer too',
   'AED 4,000.00 has been debited from your account no. 096XXX13XXX 0007 RULE TRANSFER TO EMERGENCY FUNDS WITH ONE-SHOT SAV. The available balance is AED 4,000.95.',
   { merchant: 'Savings transfer', amountFils: 400000, transfer: true });
 
-t('a refund says so',
-  "We've issued your refund of 58.89 AED for your cancelled order.",
-  { merchant: 'Refund', type: 'income', amountFils: 5889 });
+t('issuing a refund does not prove money reached the account',
+  "We've issued your refund of 58.89 AED for your cancelled order.", null);
 
 t("Etisalat's own app is telecom, not Other",
   'Debit Card Purchase\nCard XXXX5083\nAED 450.45\ne& Digital App        Abu Dhabi       AE \n27/06/26 11:43 \nBalance AED ····3038.72',
@@ -4445,9 +4453,8 @@ bank('(not a bank)', 'merchant and delivery senders',
   'The parser must read what a shop sends too, and must not mistake it for a\n   bank alert.');
 
 // REAL corpus #346 (seen 1x). Suffix currency, no card, no bank.
-fmt('REAL', 'merchant refund with a suffix currency and no card',
-  "We've issued your refund of 58.89 AED for your cancelled order.",
-  { type: 'income', amountFils: 5889, merchant: 'Refund', category: 'other', card: null });
+fmt('REAL', 'issued merchant refund does not prove a settled bank credit',
+  "We've issued your refund of 58.89 AED for your cancelled order.", null);
 
 // ─────────── Sender attribution and the no-sender guarantee ───────────
 bank('(sender plumbing)', 'all of the above', 'That the sender is read, and that omitting it changes nothing.');
@@ -5641,7 +5648,7 @@ t('a purchase that "has been refunded" reverses too',
   { type: 'income', amountFils: 30000 });
 t('the multi-line "Debit Card Refund" header is a refund',
   'Debit Card Refund\nCard XXXX5083\nAED 53.58\nMARK AND SAVE         Dubai           AE\n19/02/26 15:45\nBalance AED 1780.67',
-  { type: 'income', amountFils: 5358 });
+  { review: true, amountFils: 5358 });
 // CONTROL: an ordinary debit-card purchase is still spending. The refund rule
 // may not claim a message just because it names a debit card.
 t('a plain debit-card purchase is untouched by the refund rule',
@@ -6232,11 +6239,12 @@ for (const [merchant, footer] of [
   setActiveMarket('AE');
   const overrides = { 'expense:starbucks': 'groceries', 'income:starbucks': 'other' };
   const expense = parseSms('Purchase of AED 45.00 with Credit Card ending 1234 at STARBUCKS.', overrides);
-  const income = parseSms('Refund of AED 45.00 to your Credit Card ending 1234 from STARBUCKS.', overrides);
+  ok('a bare refund heading cannot acquire posting authority from a category override', parseSms('Refund of AED 45.00 to your Credit Card ending 1234 from STARBUCKS.', overrides) === null);
+  const income = parseSms('Refund of AED 45.00 has been credited to your Credit Card ending 1234 from STARBUCKS.', overrides);
   ok('directional merchant rules give purchases and refunds independent defaults',
     expense.categoryGuess === 'groceries' && expense.categoryPinned === true &&
     income.categoryGuess === 'other' && income.categoryPinned === true);
-  const legacy = parseSms('Refund of AED 45.00 to your Credit Card ending 1234 from STARBUCKS.', { starbucks: 'other' });
+  const legacy = parseSms('Refund of AED 45.00 has been credited to your Credit Card ending 1234 from STARBUCKS.', { starbucks: 'other' });
   ok('legacy expense Other does not silently become an income rule', legacy.categoryPinned !== true);
   ok('direction compatibility accepts Other both ways and rejects unknown IDs',
     overrideFitsDirection('other', 'income') && overrideFitsDirection('other', 'expense') &&

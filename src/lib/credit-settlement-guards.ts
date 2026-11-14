@@ -25,6 +25,7 @@ export const REFUND_REQUEST_NOUN_RE = /\b(?:(?:refund|reversal|chargeback)\s+(?:
 export const isRefundRequest = (source: string): boolean => REFUND_REQUEST_NOUN_RE.test(normalizeCreditText(source).replace(/\|/g, ' '));
 const CREDIT_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|return(?:ed|ing)?|chargeback|disputes?|credit(?:ed|ing)?(?!\s+card)|salary|payroll|deposit(?:ed)?)\b|(?<![ء-ي])و?(?:ب|ك|لل|ل)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس|اعتراض|ايداع|اضافه|راتب)(?:ه|ها)?(?![ء-ي])/iu;
 const REFUND_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|chargeback)\b|(?<![ء-ي])و?(?:ب|ك|لل|ل)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس)(?:ه|ها)?(?![ء-ي])/iu;
+const REVERSAL_NOTE_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|return(?:ed|ing)?|chargeback|disputes?|credited|crediting|credit(?!\s+(?:card|limit|account)))\b|(?<![ء-ي])و?(?:ب|ك|لل|ل)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس|اعتراض|ايداع|اضافه)(?:ه|ها)?(?![ء-ي])/iu;
 // This is deliberately conservative. Always inspect the normalized ORIGINAL,
 // never a merchant-masked, clause-selected or request-note-stripped derivative.
 const UNSETTLED_EN = /\b(?:if|unless|subject|upon|provided|once|when|after|until|pending|awaiting|queued|queuing|queueing|scheduled|process|progress|review|requests?|requir\w*|approval|approve|verification|verify|clearance|eligible|may|can|will)\b/iu;
@@ -38,14 +39,14 @@ export const mentionsCredit = (source: string): boolean => CREDIT_MENTION.test(n
 /** A conditional debit quotation is not the separately completed debit we preserve. */
 export function hasConditionalDebitLead(source: string): boolean {
   const text = normalizeCreditText(source);
-  const amount = text.search(/\b[A-Z]{3}\s*\d|\d[\d.,]*\s*(?:[A-Z]{3}\b|درهم|ريال)/iu);
+  const amount = text.search(/\d/u);
   return amount >= 0 && /\b(?:debited|charged|purchase|spent|withdrawn)\b|(?:تم|تمت)\s+(?:ال)?(?:خصم|شراء|دفع|سحب)/iu.test(text) &&
     hasCreditCondition(text.slice(0, amount));
 }
 
 /** The source spans remain in the original spelling; normalization is detection only. */
 export function completedDebitBesideCredit(source: string): { debit: string; credit: string } | null {
-  if (!mentionsCredit(source) || hasConditionalDebitLead(source)) return null;
+  if (!REVERSAL_NOTE_MENTION.test(normalizeCreditText(source)) || hasConditionalDebitLead(source)) return null;
   const parts = source.split(/(?<=[.!?؟])\s+|[;؛\n]+|\s+(?:but|while)\s+(?=(?:your|the)\s+(?:refund|reversal|charge[\s-]*back))|\s*[-–—]\s*(?=(?:refund|reversal|charge[\s-]*back)\b)/iu);
   const debit = parts.filter(part => {
     const text = normalizeCreditText(part);
@@ -53,7 +54,9 @@ export function completedDebitBesideCredit(source: string): { debit: string; cre
       /\b(?:was\s+debited|has\s+been\s+debited|debited\s+from|charged|purchased|spent|paid\s+(?:at|to)|used\s+(?:at|for)|withdrawn\s+from|(?:made|successful)\s+(?:a\s+)?purchase)\b|^\s*purchase\b|(?:تم|تمت)\s+(?:ال)?(?:خصم|شراء|دفع|سحب)/iu.test(text) &&
       !/\b(?:not|failed|declined|unsuccessful|rejected)\b|(?<![ء-ي])(?:لم|لن|فشل|رفض)(?![ء-ي])/iu.test(text);
   });
-  const credit = parts.filter(part => !debit.includes(part) && mentionsCredit(part));
+  // Account credit-limit/availability fields are not reversal notes. Keep
+  // them with the original receipt so its balance/limit facts survive.
+  const credit = parts.filter(part => !debit.includes(part) && REVERSAL_NOTE_MENTION.test(normalizeCreditText(part)));
   return debit.length === 1 && credit.length > 0 ? { debit: debit[0], credit: credit.join(' ') } : null;
 }
 const OWN_REFERENCE = /^(?:(?:this|the|that|same|your)\s+(?:credit|refund|amount|money|funds|reversal|cheque|check|dispute|claim|hold|lien|bank|sum|transfer|transaction|payment|deposit|approval|verification|confirmation|clearance|permission|consent)|(?:it|its|them)\b|(?:the\s+)?same\b|(?:this|these|those|they)\s+(?=(?:is|are|was|were|will|shall|has|have|can|could|would|may)\b)|status\b|(?:هذا|نفس|ذلك)\s+(?:ال)?(?:مبلغ|استرداد|ايداع)|(?:ال)?(?:مبلغ|استرداد|حاله)(?![ء-ي]))/iu;
@@ -114,7 +117,7 @@ export function hasSettledCreditReceipt(source: string): boolean {
   // A completed process subject (an application, appeal, ticket...) is not the money subject.
   const actualMoneyVerb = /\b(?:credited|refunded|returned|reversed|deposited|posted)\s+(?:back\s+)?(?:to|into|onto|in|on)\s+(?:your|the\s+original)\b/iu.test(text);
   if (!monetaryHead && !actualMoneyVerb) return false;
-  const receipt = /\b(?:credited|refunded|reversed|returned|deposited|posted|received|arrived|applied|processed|complete(?:d)?|successful|settled|done)\b|(?<![ء-ي])(?:تم|تمت)\s+(?:(?:تاكيد|تنفيذ)\s+)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس|ايداع|اضافه|معالجه)/iu.test(text);
+  const receipt = /\b(?:credited|refunded|reversed|returned|deposited|posted|received|arrived|applied|processed|complete(?:d)?|successful|settled|done|paid\s+back)\b|(?<![ء-ي])(?:تم|تمت)\s+(?:(?:تاكيد|تنفيذ)\s+)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس|ايداع|اضافه|معالجه)/iu.test(text);
   if (!receipt) return false;
   // Request receipt/completion is not money receipt; a separate money verb is necessary.
   return !isRefundRequest(text) || /\b(?:credited|refunded|reversed|returned|deposited)\b|(?:تم|تمت)\s+(?:استرداد|ايداع|عكس)/iu.test(text);

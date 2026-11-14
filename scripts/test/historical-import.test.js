@@ -1454,9 +1454,10 @@ async function main() {
     };
     const refund = one('a', 'استرداد شراء\nبطاقة:6612;مدى\nمبلغ:SAR 27.40\nلدى:Hala Bakery\nفي:25-6-21 16:03',
       'AlRajhiBank', '2025-06-21T14:00:00.000Z');
-    ok('history: a Saudi refund heading posts as income on its year-first date',
-      refund.parsed.length === 1 && refund.parsed[0].type === 'income' && refund.parsed[0].amountFils === 2740 &&
-        refund.parsed[0].date === '2025-06-21', refund.parsed);
+    const headingEvent = refund.reviewCandidates[0]?.event;
+    ok('history: a nominal Saudi refund heading retains exact money without settlement authority',
+      refund.parsed.length === 0 && refund.reviewCandidates.length === 1 && headingEvent?.status === 'informational' &&
+        headingEvent.amount.value?.minorUnits === '2740' && headingEvent.amount.value?.currency === 'SAR', refund);
     const code = one('b', 'ننصح بعدم مشاركة الرمز لحمايتك من الاحتيال\nالرمز:572614\nبطاقة:*4417\nمبلغ:SAR 61.25\nلدى:Zain\nفي:24-7-12 18:20',
       'AlRajhiBank', '2024-07-12T16:00:00.000Z');
     ok('history: a labelled Arabic code field never posts', code.parsed.length === 0, code);
@@ -1491,9 +1492,10 @@ async function main() {
       'AlRajhiBank', 'an unfinished refund under a refund heading is never rebuilt as a debit');
     const onRequest = one('p', 'استرداد شراء انترنت\nبطاقة:4471;مدى\nمبلغ:SAR 100\nلدى:NOON\nبناء على طلب الاسترداد المقدم منكم\nفي:26-10-9 21:34',
       'AlRajhiBank', R);
-    ok('history: a refund carried out on request posts as income',
-      onRequest.parsed.length === 1 && onRequest.parsed[0].type === 'income' && onRequest.parsed[0].amountFils === 10000,
-      onRequest.parsed);
+    const requestEvent = onRequest.reviewCandidates[0]?.event;
+    ok('history: a requested refund stays informational with its exact money',
+      onRequest.parsed.length === 0 && onRequest.reviewCandidates.length === 1 && requestEvent?.status === 'informational' &&
+        requestEvent.amount.value?.minorUnits === '10000' && requestEvent.amount.value?.currency === 'SAR', onRequest);
     markets.setLedgerCurrency(null);
     markets.setActiveMarket('AE');
     markets.setLedgerCurrency('AED', 2);

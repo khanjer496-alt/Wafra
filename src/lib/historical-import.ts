@@ -63,6 +63,7 @@ const inspectHistoricalRefusal = (input: {
   nowMs: number;
   session: LaunchAlertSession;
   inspection: ReturnType<LaunchAlertSession['inspect']>;
+  acceptedExpense?: NonNullable<ReturnType<LaunchAlertSession['parse']>>;
 }): HistoricalRefusal => {
   const decision = inspectSourceFreeRefusedAlert({
     source: input.record.text,
@@ -71,6 +72,7 @@ const inspectHistoricalRefusal = (input: {
     channel: 'inbox',
     session: input.session,
     existingInspection: input.inspection,
+    acceptedExpense: input.acceptedExpense,
   });
   if (decision.kind === 'declined') {
     return {
@@ -351,6 +353,7 @@ export function parseHistoricalMessageRecords(
         nowMs: now.getTime(),
         session: launchSession,
         inspection,
+        acceptedExpense: supplementary ? result : undefined,
       });
       if (refusal.kind === 'declined') declined.push(refusal.row);
       if (refusal.kind === 'review') {

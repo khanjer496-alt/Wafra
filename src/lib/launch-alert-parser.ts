@@ -27,7 +27,7 @@ import { decideGulfNeighbourPosting, gulfNeighbourReadSource, isGulfNeighbourMar
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { alertMarketPack } from '@/lib/alert-market-packs';
 import { normalizeAlertText } from '@/lib/alert-draft';
-import { hasExplicitPersonalMoneyClaim, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isQualifiedCardRepaymentReceipt, isUnpostedCardBalanceClaim, isCompletedCardBalanceReceipt } from '@/lib/principal-posting-guards';
+import { hasExplicitPersonalMoneyClaim, hasClickLinkPrompt, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isQualifiedCardRepaymentReceipt, isUnpostedCardBalanceClaim, isCompletedCardBalanceReceipt } from '@/lib/principal-posting-guards';
 import { unqualifiedCardCreditCurrencyAliases } from '@/lib/universal-money';
 import { isLatamOwnCardPayment, latamOwnTransferTitle, latamPolicySource, matchLatamTemplate } from '@/lib/latam-alert-templates';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
@@ -289,8 +289,9 @@ export const inspectGenericBankEventForReview = (
     : creditReviewMarket === 'SA' ? { 'ريال': ['SAR'] } : {};
   let event = inspectUniversalBankEvent(isGulfNeighbourMarket(market)
     ? gulfNeighbourReadSource(source, market) : source, { ...context, currencyAliases: { ...creditReviewAliases, ...cardCreditAliases, ...context.currencyAliases } });
-  if (creditReviewOnly || (event.direction === 'credit' && hasUnsettledCreditToken(source)) ||
-    (mentionsCredit(source) && event.direction === 'unknown' && event.status === 'unknown')) event = informationalCreditReview(source, event);
+  if (!cardCreditAliases && !(event.direction === 'debit' && event.status === 'posted') &&
+    (creditReviewOnly || (event.direction === 'credit' && hasUnsettledCreditToken(source)) ||
+    (mentionsCredit(source) && event.direction === 'unknown' && event.status === 'unknown'))) event = informationalCreditReview(source, event);
   if (event.decision !== 'review') return null;
   if (cardCreditAliases) {
     if (event.status !== 'posted' && event.status !== 'unknown') return null;
@@ -1164,14 +1165,18 @@ export const createLaunchAlertSession = ({
   const guard = (reader: typeof parse): typeof parse => (source, sender, inspection, forcedMarket, observedAt) => {
     const holdCredit = hasUnsettledCreditToken(source);
     if (mentionsCredit(source) && hasConditionalDebitLead(source)) return null;
+    const result = reader(source, sender, inspection, forcedMarket, observedAt);
+    if (result?.kind === 'transaction' && result.type === 'expense') return result;
     const pair = completedDebitBesideCredit(source);
-    const reason = nonPostingReason(source);
-    if (pair && (reason === null || reason === 'pending-processing' || reason === 'declined') && !hasPersonalMessagePrefix(source, sender) &&
-      !/https?:\/\/|www\./iu.test(source)) {
+    const reason = pair ? nonPostingReason(source) : null;
+    // The regional grammar can preserve its known debit. A clipped fragment
+    // must never upgrade an uncertified worldwide format's posting authority.
+    if (pair && (pinnedCurrency === 'AED' || pinnedCurrency === 'SAR') &&
+      (reason === null || reason === 'pending-processing' || reason === 'declined') && !hasPersonalMessagePrefix(source, sender) &&
+      !hasClickLinkPrompt(source) && !/https?:\/\/|www\./iu.test(source)) {
       const debit = reader(pair.debit, sender, inspect(pair.debit, sender), forcedMarket, observedAt);
       if (debit?.kind === 'transaction' && debit.type === 'expense') return { ...debit, raw: source };
     }
-    const result = reader(source, sender, inspection, forcedMarket, observedAt);
     return result?.kind === 'transaction' && result.type === 'income' && holdCredit ? null : result;
   };
   const guardedUnproven = guard((source, sender, inspection, _forcedMarket, observedAt) =>

@@ -167,5 +167,13 @@ test('bundled iOS parser refuses the device non-movements and click prompts with
     ['ENBD', `${purchase} Click:https://www.enbd.example/statements.`],
     ['ENBD', `${purchase} Click to view your statement:\nhttps://www.enbd.example/statements.`],
     ['ENBD', `${purchase} اضغط على الرابط https://www.enbd.example/statements.`],
-  ]) assert.equal(parse(body, sender).route, 'ignore', `${sender}/${body}`);
+  ]) {
+    const got = parse(body, sender);
+    if (body.includes('refund request')) {
+      assert.equal(got.route, 'review'); assert.equal(got.notification.style, 'review');
+      const event = load('@/lib/launch-alert-parser').inspectGenericBankEventForReview(body, sender);
+      assert.equal(event.status, 'informational');
+      assert.equal(load('@/lib/alert-review-tray').isMoneyMovementReview({ kind: 'universal', event }), false);
+    } else assert.equal(got.route, 'ignore', `${sender}/${body}`);
+  }
 });

@@ -426,7 +426,7 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       if (name === '@/lib/private-alert-format-copy') {
         return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/private-alert-format-copy.ts'));
       }
-      if (name === '@/lib/auto-import' || name === '@/lib/local-message-record' || name === '@/lib/credit-settlement-guards') {
+      if (name === '@/lib/auto-import' || name === '@/lib/local-message-record' || name === '@/lib/credit-settlement-guards' || name === '@/lib/universal-types') {
         return require('../build/' + name.slice('@/lib/'.length) + '.js');
       }
       if (name === '@/lib/local-semantic-runtime') {

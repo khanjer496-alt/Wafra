@@ -43,7 +43,7 @@ for (const [index, note, expectedAmount] of [
   const session = createLaunchAlertSession({ overrides: {}, activeMarket: 'AE', pinnedCurrency: 'AED' });
   const parsed = session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at);
   assert.equal(parsed?.type, 'expense'); assert.equal(parsed.amountFils, 25000);
-  const decision = inspectSourceFreeRefusedAlert({ source: body, sender: 'ENBD', observedAt: at, channel: 'inbox', session });
+  const decision = inspectSourceFreeRefusedAlert({ source: body, sender: 'ENBD', observedAt: at, channel: 'inbox', session, acceptedExpense: parsed });
   assert.equal(decision.kind, 'review'); assert.equal(decision.candidate.event.direction, 'none');
   assert.equal(decision.candidate.event.status, 'informational');
   assert.equal(decision.candidate.event.amount.value?.minorUnits ?? null, expectedAmount);
