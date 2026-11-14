@@ -10,6 +10,7 @@ const { isMoneyMovementReview } = load('@/lib/alert-review-tray');
 const at = Date.parse('2026-11-14T10:00:00Z');
 for (const [index, [body, sender, amount]] of [
   ['Your refund request for AED 50.00 is under process.', 'ENBD', '5000'],
+  ['Refund of AED 250.00 successfully requested.', 'ENBD', '25000'],
   ['If approved, AED 250.00 has been refunded to your card.', 'ENBD', '25000'],
   ['ADCB: Reversal of AED 40.00 is under process. You will be notified when the amount is refunded.', 'ADCB', '4000'],
   ['نود اعلامك، ان تم استرداد مبلغ AED 250.00 إلى بطاقتك. فِيرجى تجاهل هذه الرسالة.', 'ENBD', '25000'],

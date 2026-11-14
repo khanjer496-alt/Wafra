@@ -2210,5 +2210,25 @@
     "minorUnits": 25000,
     "acceptInformationalReview": false,
     "requireReview": false
+  },
+  {
+    "id": "parser-followup:process-success-is-not-credit",
+    "origin": "parser-followup",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your chargeback appeal was successful.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "parser-followup:successful-request-is-not-receipt",
+    "origin": "parser-followup",
+    "body": "Refund of AED 250.00 successfully requested.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
   }
 ]
