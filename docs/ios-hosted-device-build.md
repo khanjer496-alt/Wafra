@@ -88,6 +88,19 @@ retained. The public verification manifest excludes the pre-build inventory.
 The full-name audit is encrypted and kept for one day, including on failure.
 No keys, profile contents or device identifiers appear in plaintext artifacts.
 
+Creation failures also preserve `ios-device-signing-failure-<run>-<attempt>`
+for one day, containing only `signing-failure.enc`, a CMS envelope to the same
+recipient. Decrypt it locally like the inventory. It records the phase,
+allowlisted exception class, API method/path (no query), HTTP status and
+allowlisted symbolic Apple error codes, plus the affected known bundle ID
+and the current metadata receipt when available. Source and workflow commits
+are recorded separately: diagnostic retries may use a newer workflow while
+rebuilding the original pinned app source. No response title/detail, device
+identifier, exception text, request body, CSR, token, key or subprocess output
+is retained. Failure diagnostics never print to the job log or enter the
+public metadata receipt. The temporary plaintext diagnostic is removed even
+when encryption fails; failure still exits nonzero and does not retry Apple.
+
 Download only the exact dispatched run. Check encrypted SHA-256 against
 `verification.json`, decrypt each file with OpenSSL 3, then check its plaintext
 SHA-256 before extracting/installing. CMS does not authenticate its sender;

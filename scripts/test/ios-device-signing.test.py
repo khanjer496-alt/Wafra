@@ -15,6 +15,8 @@ import unittest
 import tempfile
 import subprocess
 import sys
+import types
+import urllib.error
 from unittest.mock import patch
 
 path = pathlib.Path(__file__).resolve().parents[1]/'ci/ios-device-signing.py'
@@ -236,6 +238,70 @@ class BuildProvenanceTests(unittest.TestCase):
     def test_rejects_unexpected_extra_appex(self):
         (self.app/'PlugIns/Other.appex').mkdir()
         with self.assertRaises(AssertionError): module.preflight_app(self.app, self.report)
+
+
+class FailureDiagnosticsTests(unittest.TestCase):
+    def test_http_failure_retains_only_status_and_allowlisted_codes(self):
+        payload = {'errors': [{'code': 'ENTITY_ERROR.ATTRIBUTE.INVALID',
+                              'title': 'PRIVATE_NAME', 'detail': 'PRIVATE_TOKEN'},
+                             {'code': 'PRIVATE_TOKEN'}], 'csr': 'PRIVATE_CSR'}
+        error = urllib.error.HTTPError('https://example.invalid', 409, 'PRIVATE_REASON', {},
+                                       io.BytesIO(json.dumps(payload).encode()))
+        fake_jwt = types.SimpleNamespace(encode=lambda *a, **k: 'PRIVATE_JWT')
+        with patch.dict(os.environ, {'ASC_KEY_P8': 'BEGIN PRIVATE KEY fixture',
+                                     'ASC_KEY_ID': 'fixture', 'ASC_ISSUER_ID': 'fixture'}), \
+             patch.dict(sys.modules, {'jwt': fake_jwt}), \
+             patch.object(module.urllib.request, 'urlopen', side_effect=error):
+            with self.assertRaises(module.AppleAPIError) as raised:
+                module.api('POST', 'certificates', {'csr': 'PRIVATE_CSR'})
+        self.assertEqual(raised.exception.status, 409)
+        self.assertEqual(raised.exception.codes, ['ENTITY_ERROR.ATTRIBUTE.INVALID'])
+        self.assertNotIn('PRIVATE', str(raised.exception))
+
+    def test_failure_record_is_sealed_and_plaintext_removed_without_output(self):
+        cwd = pathlib.Path.cwd()
+        captured = []
+        def fake_encrypt(*args):
+            source = pathlib.Path(args[args.index('-in') + 1])
+            captured.append(json.loads(source.read_text()))
+            pathlib.Path(args[args.index('-out') + 1]).write_bytes(b'encrypted fixture')
+        def failing_prepare(root):
+            module.diagnostic_phase('create_profile', module.BUNDLES[1])
+            module._diagnostic_api = {'method': 'POST', 'route': 'profiles'}
+            raise module.AppleAPIError(409, ['ENTITY_ERROR.ATTRIBUTE.INVALID'])
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                os.chdir(tmp); root = pathlib.Path(tmp)/'signing'; root.mkdir()
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with patch.object(module, '_prepare', side_effect=failing_prepare), \
+                     patch.object(module, 'run', side_effect=fake_encrypt), \
+                     patch.dict(os.environ, {'GITHUB_RUN_ID': '123', 'GITHUB_RUN_ATTEMPT': '1'}), \
+                     contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    with self.assertRaises(module.AppleAPIError): module.prepare(root)
+                self.assertEqual(stdout.getvalue() + stderr.getvalue(), '')
+                record = captured[0]
+                self.assertEqual(record['phase'], 'create_profile')
+                self.assertEqual(record['bundleId'], module.BUNDLES[1])
+                self.assertEqual(record['api'], {'method': 'POST', 'route': 'profiles'})
+                self.assertEqual(record['httpStatus'], 409)
+                self.assertEqual(record['appleErrorCodes'], ['ENTITY_ERROR.ATTRIBUTE.INVALID'])
+                self.assertFalse((root/'signing-failure.json').exists())
+                self.assertTrue(pathlib.Path('sealed/signing-failure.enc').is_file())
+                self.assertFalse(pathlib.Path('sealed/signing-failure.json').exists())
+        finally:
+            os.chdir(cwd)
+
+    def test_sealing_failure_still_deletes_plaintext_and_preserves_failure(self):
+        cwd = pathlib.Path.cwd()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                os.chdir(tmp); root = pathlib.Path(tmp)/'signing'; root.mkdir()
+                with patch.object(module, '_prepare', side_effect=AssertionError('PRIVATE_DEVICE')), \
+                     patch.object(module, 'run', side_effect=RuntimeError('PRIVATE_KEY')):
+                    with self.assertRaises(AssertionError): module.prepare(root)
+                self.assertFalse((root/'signing-failure.json').exists())
+        finally:
+            os.chdir(cwd)
 
 
 class InventoryPrivacyTests(unittest.TestCase):
