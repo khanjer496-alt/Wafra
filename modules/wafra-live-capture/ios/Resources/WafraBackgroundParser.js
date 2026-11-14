@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 1514537192d8dd41db851fec8303ef58b131b9150acfc9f1d28a898161c12cc0
+// Generated from normal shipping TypeScript. Source SHA-256: 8707c1e9d94ccce5600528696ae113ebd3f0c52f93155b96796ce34a9b946c20
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -6641,6 +6641,10 @@ const S = {
     purchasePendingBody: {
         en: 'The store has not completed this purchase yet. Wafra Pro switches on by itself once it does.',
         ar: 'لم يُكمل المتجر عملية الشراء بعد. سيُفعَّل وفرة برو تلقائياً بمجرد اكتمالها.',
+    },
+    purchaseNotCompleted: {
+        en: 'Purchase not completed. You can try again, or restore a previous purchase.',
+        ar: 'لم تكتمل عملية الشراء. يمكنك المحاولة مجدداً أو استعادة عملية شراء سابقة.',
     },
     purchaseFailed: { en: 'Purchase not confirmed', ar: 'لم يتم تأكيد الشراء' },
     purchaseFailedBody: {
