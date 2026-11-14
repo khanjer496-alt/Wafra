@@ -10,11 +10,14 @@ const CONDITION = new RegExp(CREDIT_CONDITION_SOURCE, 'iu');
 const PENDING = new RegExp(`${EN_CREDIT_PENDING_STATUS}|${AR_CREDIT_PENDING_STATUS}`, 'iu');
 // The bank's security footer describes what the customer should do, not whether this credit has arrived.
 const IGNORE_FOOTER = /\bif\s+(?:(?:it|this|they|the\s+\w+)\s+(?:is|are|has\s+been|gets?)\s+)?(?:approved|authori[sz]ed|verified|confirmed|cleared|accepted|validated)\s+by\s+you\b,?\s+(?:(?:please|kindly)\s+)?(?:ignore|disregard)\b[^.;\n]*/gi;
+function qualificationScope(text: string): string {
+  return text.split(/[,،;]\s*(?:(?:your|the)\s+other\s+(?:refund|reversal|request|order)|another\s+(?:refund|reversal|request|order)|و?(?:طلبك|طلبكم|الطلب|الاسترداد)\s+(?:الاخر|الآخر|الاخري|الأخرى))/iu)[0];
+}
 export function hasCreditCondition(text: string): boolean {
-  return CONDITION.test(text.replace(IGNORE_FOOTER, ' ').replace(/\bafter\s+(?:(?:your|the|this)\s+)?(?:request|claim|order|verification|review)\s+(?:was|has\s+been|had\s+been)\s+(?:approved|verified|completed|cleared)\b/gi, ' '));
+  return CONDITION.test(qualificationScope(text).replace(IGNORE_FOOTER, ' ').replace(/\bafter\s+(?:(?:your|the|this)\s+)?(?:request|claim|order|verification|review)\s+(?:was|has\s+been|had\s+been)\s+(?:approved|verified|completed|cleared)\b/gi, ' '));
 }
 export function hasPendingCreditStatus(text: string): boolean {
-  return PENDING.test(text);
+  return PENDING.test(qualificationScope(text).replace(/\b(?:pending|in[-\s]+progress|under[-\s]+review)\s+(?:orders?|purchases?|transactions?|applications?)\b/gi, ' '));
 }
 /** Leading explicit conditions do not become historical just because punctuation separates them from the credit. */
 export function hasLeadingCreditCondition(text: string): boolean {

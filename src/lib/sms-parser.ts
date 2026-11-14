@@ -2907,7 +2907,11 @@ export function creditSettlement(sentence: string, clause: CreditClause, after =
     return { verdict: 'not-settled', reason: 'conditional' };
   }
   if (EN_CREDIT_WORDS.negatedBefore.test(lead)) return { verdict: 'not-settled', reason: 'negated' };
-  if (clause.nounOnly) return { verdict: 'not-settled', reason: 'pending' };
+  if (clause.nounOnly) {
+    const tail = sentence.slice(clause.end);
+    return !hasCreditCondition(tail) && !hasPendingCreditStatus(tail) && /\b(?:was|were|is|has\s+been)\s+(?:successfully\s+)?(?:completed|successful|settled)\b/i.test(tail)
+      ? { verdict: 'settled' } : { verdict: 'not-settled', reason: 'pending' };
+  }
   const first = clause.verbs[0];
   if (EN_CREDIT_WORDS.pendingBefore.test(lead) || (/ing$/.test(first) && EN_CREDIT_WORDS.progressiveBefore.test(lead)) ||
     !/ed$/.test(first)) return { verdict: 'not-settled', reason: 'pending' };
