@@ -23,7 +23,7 @@ class BoundaryObservationTests(unittest.TestCase):
         self.installed = self.root / 'installed.app'
         for app in (self.source, self.installed):
             app.mkdir()
-            (app / 'Info.plist').write_bytes(plistlib.dumps({'CFBundleExecutable': 'Wafra', 'CFBundleIdentifier': 'app.wafra.ios'}))
+            (app / 'Info.plist').write_bytes(plistlib.dumps({'CFBundleExecutable': 'Wafra', 'CFBundleIdentifier': 'app.wafra.ios', 'CFBundleVersion': '195', 'CFBundleShortVersionString': '1.0.0'}))
             (app / 'Wafra').write_bytes(b'synthetic executable')
             (app / 'main.jsbundle').write_bytes(b'synthetic JS')
         self.fixture = self.root / 'fixture.storekit'
@@ -36,7 +36,7 @@ class BoundaryObservationTests(unittest.TestCase):
         path.write_bytes(self.fixture.read_bytes())
         return path
 
-    def command(self, args):
+    def command(self, args, timeout=None):
         if args[:3] == ['xcrun', 'simctl', 'get_app_container']:
             return 0, str(self.installed), ''
         if args[0] == 'codesign':
@@ -79,7 +79,7 @@ class BoundaryObservationTests(unittest.TestCase):
         self.assertFalse(self.observe(require=False)['checks_ok'])
 
     def test_daemon_status_command_failure_fails(self):
-        def command(args):
+        def command(args, timeout=None):
             if 'launchctl' in args:
                 return 71, '', 'synthetic interruption'
             return self.command(args)
@@ -88,17 +88,55 @@ class BoundaryObservationTests(unittest.TestCase):
     def test_missing_daemon_service_fails_strict_observation(self):
         for bundle in boundary.BUNDLES:
             self.config(bundle)
-        def command(args):
+        def command(args, timeout=None):
             if 'launchctl' in args:
                 return 0, '', ''
             return self.command(args)
         self.assertFalse(self.observe(command=command)['checks_ok'])
 
     def test_missing_installed_container_is_recorded_failure(self):
-        result = self.observe(command=lambda args: (1, '', 'synthetic missing app'))
+        result = self.observe(command=lambda args, timeout=None: (1, '', 'synthetic missing app'))
         self.assertFalse(result['checks_ok'])
         self.assertEqual(result['commands'][0]['exit'], 1)
-        self.assertIn('container unavailable', result['errors'][0])
+        self.assertIn({'probe': 'installed-container', 'kind': 'Unavailable'}, result['errors'])
+        self.assertIn('configs', result)
+        self.assertTrue(any(c['name'] == 'storekitd_status' for c in result['commands']))
+
+    def test_missing_cached_identity_keeps_configs_and_daemon(self):
+        (self.source / 'main.jsbundle').unlink()
+        for bundle in boundary.BUNDLES:
+            self.config(bundle)
+        result = self.observe()
+        self.assertFalse(result['checks_ok'])
+        self.assertTrue(result['configs']['app.wafra.ios']['matches_fixture'])
+        self.assertTrue(result['daemon_running'])
+
+    def test_sensitive_command_error_and_provenance_are_not_exported(self):
+        secret = 'SYNTHETIC-PRIVATE-SENTINEL'
+        def command(args, timeout=None):
+            return 1, '', 'Authorization: Bearer ' + secret
+        with patch.dict(boundary.os.environ, {'APP_CACHE_KEY': secret, 'HARNESS_GIT_SHA': secret}):
+            result = self.observe(command=command)
+        self.assertNotIn(secret, json.dumps(result))
+        self.assertEqual(result['provenance']['cache_key'], 'unknown')
+
+    def test_probe_timeouts_are_bounded_and_independent(self):
+        observed = []
+        def command(args, timeout=None):
+            observed.append((args, timeout))
+            raise boundary.subprocess.TimeoutExpired(args, timeout)
+        result = self.observe(command=command)
+        self.assertFalse(result['checks_ok'])
+        self.assertTrue(all(0 < t <= 4 for _, t in observed))
+        self.assertTrue(any('launchctl' in args for args, _ in observed))
+        self.assertTrue(all(bundle in result['configs'] for bundle in boundary.BUNDLES))
+        self.assertLess(boundary.BUDGET_SECONDS, 30)
+
+    def test_cached_app_provenance_does_not_claim_git_source(self):
+        result = self.observe(require=False)
+        self.assertEqual(result['cached_app']['build_version'], '195')
+        self.assertEqual(result['cached_app']['short_version'], '1.0.0')
+        self.assertFalse(result['provenance']['git_source_proven'])
 
 
 if __name__ == '__main__':

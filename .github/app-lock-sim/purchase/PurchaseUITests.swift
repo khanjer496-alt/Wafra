@@ -35,7 +35,7 @@ final class PurchaseUITests: XCTestCase {
         // No private-file sync and no daemon restart: host only observes exact code/config
         // identity. A successful observation is NOT a shared-transaction binding proof.
         try "observe".write(toFile: "\(hsDir)/config-observation.request", atomically: true, encoding: .utf8)
-        hostConfigReady = try awaitHost("config-observation", timeout: 45)
+        hostConfigReady = try awaitHost("config-observation", timeout: 30)
         record("CONFIG-FILES", hostConfigReady,
                "identity/config file observation only; transaction binding UNPROVEN")
         if !hostConfigReady && selectedCase != "diagnostic" {
@@ -144,7 +144,22 @@ final class PurchaseUITests: XCTestCase {
     func boundary(_ name: String) throws -> Bool {
         note("\(name) boundary checkpoint; runner transactions=\(session.allTransactions().count); AUT binding UNPROVEN")
         shot(name)
-        try app.debugDescription.write(toFile: "\(shotsDir)/\(name)-ui.txt", atomically: true, encoding: .utf8)
+        let flags: [String: Bool] = [
+            "paywall_present": el("onboarding-paywall").exists,
+            "home_visible": app.buttons["Settings"].firstMatch.exists,
+            "app_foreground": app.state == .runningForeground,
+            "restore_present": el("onboarding-paywall-restore").exists,
+            "restore_enabled": el("onboarding-paywall-restore").exists && el("onboarding-paywall-restore").isEnabled,
+            "restore_hittable": el("onboarding-paywall-restore").exists && el("onboarding-paywall-restore").isHittable,
+            "weekly_offer_visible": el("onboarding-plan-weekly").exists,
+            "yearly_offer_visible": el("onboarding-plan-yearly").exists,
+            "catalog_retry_visible": el("onboarding-plans-retry").exists,
+            "install_hint_visible": app.staticTexts["Install Wafra from the App Store or Google Play to purchase Pro."].firstMatch.exists,
+            "pre_tap_pro_off_proven": false,
+            "restore_call_result_proven": false,
+        ]
+        try JSONSerialization.data(withJSONObject: flags, options: [.sortedKeys])
+            .write(to: URL(fileURLWithPath: "\(shotsDir)/\(name)-ui.json"))
         let request = "boundary-\(name)"
         try "observe".write(toFile: "\(hsDir)/\(request).request", atomically: true, encoding: .utf8)
         return try awaitHost(request, timeout: 30)
@@ -156,17 +171,23 @@ final class PurchaseUITests: XCTestCase {
             throw StepFail("FIXTURE-UNAVAILABLE: install/data/config validation failed; inspect boundary.jsonl")
         }
     }
-    func paywallReady() -> Bool {
-        let restore = el("onboarding-paywall-restore")
-        let plan = el("onboarding-plan-weekly")
-        return app.state == .runningForeground && el("onboarding-paywall").exists &&
-            plan.exists && el("onboarding-paywall-pro").exists && el("onboarding-paywall-pro").isEnabled && restore.exists && restore.isEnabled &&
-            !el("onboarding-plans-unavailable").exists
+    func purchaseOffersVisible() -> Bool {
+        el("onboarding-plan-weekly").exists || el("onboarding-plan-yearly").exists
     }
-    func observePaywallReadiness(_ tag: String) throws -> Bool {
+    func restoreUIReady() -> Bool {
+        let restore = el("onboarding-paywall-restore")
+        // Configured billing with zero offers exposes retry-prices and can still
+        // Restore. Neither a weekly offer nor an enabled Buy is required.
+        let configuredSurface = purchaseOffersVisible() || el("onboarding-plans-retry").exists
+        let installHint = app.staticTexts["Install Wafra from the App Store or Google Play to purchase Pro."].firstMatch
+        return app.state == .runningForeground && el("onboarding-paywall").exists &&
+            !app.buttons["Settings"].firstMatch.exists && configuredSurface && !installHint.exists &&
+            restore.exists && restore.isEnabled
+    }
+    func observePaywallReadiness(_ tag: String) throws -> (configValid: Bool, restoreReady: Bool) {
         let end = Date().addingTimeInterval(30)
         while Date() < end {
-            if paywallReady() { break }
+            if restoreUIReady() { break }
             Thread.sleep(forTimeInterval: 1)
         }
         for _ in 0..<8 {
@@ -174,17 +195,21 @@ final class PurchaseUITests: XCTestCase {
             app.swipeUp(); Thread.sleep(forTimeInterval: 1)
         }
         let configValid = try boundary(tag)
-        let ready = paywallReady() && el("onboarding-paywall-restore").isHittable
-        note("\(tag) boundary readiness: UI_READY=\(ready), CONFIG_FILES_VALID=\(configValid); SDK binding still UNPROVEN")
-        return ready && configValid
+        let ready = restoreUIReady() && el("onboarding-paywall-restore").isHittable
+        note("\(tag) boundary RESTORE_UI_READY=\(ready); PURCHASE_OFFERS_VISIBLE=\(purchaseOffersVisible()); CONFIG_FILES_VALID=\(configValid); binding UNPROVEN")
+        return (configValid, ready)
     }
     func prepareRestorePaywall(_ tag: String) throws {
         app.launch()
         _ = try boundary("\(tag)-launch")
         dismissSystemAlerts()
         try reachHome(stopAtPaywall: true)
-        guard try observePaywallReadiness(tag) else {
-            throw StepFail("FIXTURE-UNAVAILABLE: paywall billing readiness or config identity absent; Restore not tapped")
+        let observation = try observePaywallReadiness(tag)
+        guard observation.configValid else {
+            throw StepFail("IDENTITY_CONFIG_FIXTURE_FAILED: independent host observation failed; Restore not tapped")
+        }
+        guard observation.restoreReady else {
+            throw StepFail("UI_BILLING_NOT_READY_CAUSE_UNKNOWN: separate from host identity/config result; Restore not tapped")
         }
     }
 
@@ -421,7 +446,7 @@ final class PurchaseUITests: XCTestCase {
             dismissSystemAlerts()
             try reachHome(stopAtPaywall: true)
             let ready = try observePaywallReadiness("DIAG-paywall")
-            guard hostConfigReady && launchConfig && ready else {
+            guard hostConfigReady && launchConfig && ready.configValid && ready.restoreReady else {
                 throw StepFail("diagnostic found missing config/identity/UI readiness; no purchase, injection or Restore attempted")
             }
             return "Observed matching source/installed code+JS, runner/AUT config files and ready paywall; transaction binding UNPROVEN. Diagnostic only; does not satisfy either Restore acceptance criterion."
@@ -450,7 +475,7 @@ final class PurchaseUITests: XCTestCase {
             Thread.sleep(forTimeInterval: 3)
             guard app.state == .runningForeground && el("onboarding-paywall").exists &&
                   !app.buttons["Settings"].firstMatch.exists && restore.isEnabled &&
-                  el("onboarding-paywall-pro").isEnabled else {
+                  (el("onboarding-paywall-pro").exists ? el("onboarding-paywall-pro").isEnabled : el("onboarding-plans-retry").isEnabled) else {
                 throw StepFail("empty Restore left paywall, crashed, reached Home, or stranded actions disabled")
             }
             shot("P3c2-no-purchase-found-paywall-stays")
@@ -477,7 +502,16 @@ final class PurchaseUITests: XCTestCase {
             guard try boundary("P3b-injected") else {
                 throw StepFail("FIXTURE-UNAVAILABLE: app/config identity lost after injection; Restore not tapped")
             }
-            note("P3b boundary explicit Restore purchase tap; no free or buy tap")
+            // Re-read AFTER the host observation: it can take up to 18 seconds.
+            // These checks exclude surface/navigation races, but cannot prove
+            // Pro-off on this shipping surface. Never infer causality from them.
+            let preTapProOffProven = false
+            guard app.state == .runningForeground && paywall.exists &&
+                  !app.buttons["Settings"].firstMatch.exists && restore.exists &&
+                  restore.isEnabled && restore.isHittable && restoreUIReady() else {
+                throw StepFail("UNPROVEN: observer-race changed paywall/foreground/Restore before tap")
+            }
+            note("P3b boundary post-observation Pro-off evidence unavailable; explicit Restore UI attempt only")
             restore.tap()
             do { try waitGone(paywall, "paywall after positive Restore", 90) }
             catch { throw StepFail("FIXTURE-UNAVAILABLE or Restore failure: runner weekly may not bind AUT; \(error); \(purchaseEvidence())") }
@@ -488,7 +522,9 @@ final class PurchaseUITests: XCTestCase {
                      "positive Pro-active copy after explicit Restore", 30)
             guard entitled else { throw StepFail("plans or Buy remain after Restore") }
             shot("P3b3-pro-active-after-restore-button")
-            return "Independent owned case; weekly injected with paywall already visible; tapped Restore purchase, success callback reached Home, positive Pro-active copy and no plans/buy. Runner/AUT ownership binding confirmed by this result."
+            record("P3b-UI", true, "Explicit Restore UI attempt reached Home and Pro-active copy; UI outcome only")
+            note("P3b boundary pre-tap Pro-off proven=\(preTapProOffProven); call/result proven=false")
+            throw StepFail("UNPROVEN: no independent pre-tap Pro-off or Restore call/result evidence; UI outcome does not prove binding or causality; positive gate remains with App QA")
         }
     }
 

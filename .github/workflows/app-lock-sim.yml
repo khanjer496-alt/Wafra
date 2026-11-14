@@ -28,6 +28,8 @@ jobs:
     timeout-minutes: ${{ (inputs.purchase_case == 'empty' || inputs.purchase_case == 'owned') && 25 || 15 }}
     env:
       PURCHASE_CASE: ${{ inputs.purchase_case || 'diagnostic' }}
+      APP_CACHE_KEY: app-lock-sim-app-v3-${{ hashFiles('src/**', 'modules/**', 'assets/**', 'plugins/**', 'app.json', 'package-lock.json', 'babel.config.js', 'metro.config.js', 'eas.json') }}
+      HARNESS_GIT_SHA: ${{ github.sha }}
       # founder / auto-Pro OFF, like the production profile
       MAESTRO_DRIVER_STARTUP_TIMEOUT: "300000"
       EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: "0"
@@ -55,7 +57,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: build/app
-          key: app-lock-sim-app-v3-${{ hashFiles('src/**', 'modules/**', 'assets/**', 'plugins/**', 'app.json', 'package-lock.json', 'babel.config.js', 'metro.config.js', 'eas.json') }}
+          key: ${{ env.APP_CACHE_KEY }}
 
       - name: Require existing app cache (never rebuild for this diagnostic)
         run: |
@@ -95,13 +97,18 @@ jobs:
           set -o pipefail
           .github/app-lock-sim/purchase/run-purchase.sh '${{ steps.sim.outputs.udid }}' shots "$PWD/build/app" 2>&1 | tee shots/purchase-run.log
 
+      - name: Apply public text allowlist after output closes
+        id: public_export
+        if: always()
+        run: python3 -I .github/app-lock-sim/purchase/public-export.py --publish shots
+
       - name: Strip terminal escapes from the artifact text files
         if: always()
         run: |
           find shots -type f \( -name '*.log' -o -name '*.tsv' -o -name '*.txt' -o -name '*.json' \) -exec perl -pi -e 's/\e\[[0-9;?]*[A-Za-z]//g' {} + || true
 
       - name: Result table
-        if: always()
+        if: ${{ always() && steps.public_export.outcome == 'success' }}
         run: |
           {
             echo; echo "## Purchase flow (StoreKit test session)"
@@ -121,7 +128,7 @@ jobs:
           echo "Only $ROW was selected. Neither diagnostic success nor one Restore case clears the combined build-195 gate."
 
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: ${{ always() && steps.public_export.outcome == 'success' }}
         with:
           name: app-lock-sim-screenshots
           path: shots/

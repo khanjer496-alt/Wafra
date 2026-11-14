@@ -50,7 +50,7 @@ RC=$?
 clean < "$WORK/build.raw" > "$OUT/purchase-build.log"
 if [ $RC -ne 0 ]; then
   echo "::error::UI-test build failed rc=$RC"
-  grep -E "error:" "$OUT/purchase-build.log" | head -15 | while read -r l; do echo "::error::${l:0:300}"; done
+  python3 -I "$HERE/public-export.py" --publish "$OUT" --skip-run-log || true
   echo "SETUP FAIL build rc=$RC" > "$OUT/purchase-setup.txt"; exit 1
 fi
 
@@ -107,35 +107,14 @@ if kill -0 "$TPID" 2>/dev/null; then
 fi
 wait $TPID 2>/dev/null
 kill $LSPID 2>/dev/null; wait $LSPID 2>/dev/null
-python3 -I - "$WORK/applog.raw" "$WORK/shots/purchase-notes.log" "$OUT/purchase-shots" <<'PYEOF'
-import re, sys, datetime
-raw, notes, out = sys.argv[1:4]
-tap = {}
-for l in open(notes, errors='replace'):
-    m = re.match(r'(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) \+0000 ([A-Z][A-Za-z0-9-]{0,40}) (?:buy tap|boundary)\b', l)
-    if m and len(tap) < 24: tap[f'{m.group(2)}-{len(tap)+1}'] = datetime.datetime.strptime(m.group(1), '%Y-%m-%d %H:%M:%S')
-want = re.compile(r'purchas|transaction|product|cancel|storekit|superwall|offer|payment|dialog|sheet|entitle|\[wafra:|error|fail|javascript|refus|unavailable|receipt|sandbox|account', re.I)
-noise = re.compile(r'apsd|APSConnection|dt\.xctest|XCTElementQuery|AX element|XCTAutomation|XCUI|accessibility|Accessibility|launchservices|containermanager|libsystem|FSNode|BindingEvaluator|User Defaults|forced client overrides|xpc:connection|Truncating a list|AppleMediaServices|CFBundle|AMS')
-lines = []
-for l in open(raw, errors='replace'):
-    m = re.match(r'(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\.\d+ ', l)
-    if m: lines.append((datetime.datetime.strptime(m.group(1), '%Y-%m-%d %H:%M:%S'), l.rstrip('\n')))
-for tag, t0 in tap.items():
-    keep = [l[:320] for t, l in lines if -1 <= (t - t0).total_seconds() <= 30 and want.search(l) and not noise.search(l)]
-    with open(f'{out}/purchase-diag-{tag}.txt', 'w') as f:
-        dl = [l[:420] for t, l in lines if -2 <= (t - t0).total_seconds() <= 40 and ('[wafra:' in l or 'uperwall' in l)]
-        f.write(f'# {len(dl)} lines (first 250 kept)\n' + '\n'.join(dl[:250]) + '\n')
-    with open(f'{out}/applog-{tag}-around-buy-tap.txt', 'w') as f:
-        f.write(f'# {tag}: log lines (app, StoreKit, Superwall) from -1 s to +30 s around the buy tap at {t0} UTC, purchase-related only, system noise removed; {len(keep)} lines: first 120, then last 120\n')
-        f.write('\n'.join(keep[:120]) + '\n')
-        if len(keep) > 120: f.write('# ---- last lines of the window ----\n' + '\n'.join(keep[max(120, len(keep) - 120):]) + '\n')
-PYEOF
-{ echo "== StoreKit config locations in the simulator (Octane = storekitd's per-app test configuration)";
-  find "$HOME/Library/Developer/CoreSimulator/Devices/$UDID/data/Containers/Shared/AppGroup" -ipath '*Octane*' 2>/dev/null | head -30;
-  echo "== storekit/storekitd processes"; xcrun simctl spawn "$UDID" launchctl list 2>/dev/null | grep -i storekit | head; } > "$OUT/purchase-storekit-diagnostics.txt" 2>&1
-clean < "$WORK/test.raw" | grep -v "^$" > "$OUT/purchase-xcodebuild-test.log"
+# Export stage-specific structured events; raw SDK/native/test output stays in WORK.
+python3 -I "$HERE/public-export.py" --native "$WORK/applog.raw" "$WORK/shots/purchase-notes.log" "$OUT/purchase-shots" || {
+  echo "::error::guarded export failed"; exit 1;
+}
+clean < "$WORK/test.raw" > "$OUT/purchase-xcodebuild-test.log"
 cp -R "$WORK/shots/." "$OUT/purchase-shots/" 2>/dev/null
 cp "$WORK/shots/purchase-results.tsv" "$OUT/purchase-results.tsv" 2>/dev/null
+python3 -I "$HERE/public-export.py" --publish "$OUT" --skip-run-log || { echo "::error::public export failed"; exit 1; }
 observe_boundary final || true
 cat "$OUT/purchase-results.tsv" 2>/dev/null
 echo "test rc=$(cat "$WORK/test.rc" 2>/dev/null)"
