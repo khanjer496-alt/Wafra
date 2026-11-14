@@ -25,7 +25,8 @@ function paths(body, sender = 'ENBD', market = 'AE', currency = 'AED') {
   const shape = p => p ? `${p.kind === 'transaction' ? p.type : p.kind}:${p.amountFils}` : 'none';
   const native = JSON.parse(sandbox.wafraNativeAlertParse(JSON.stringify({ v: 1, body, sender, observedAt: at,
     context: { v: 1, country: market, parserMarket: market, ledgerMoney: { currency, exponent: 2 }, sourceHash: meta.sourceHash } })));
-  return { sms: shape(sms.parseSms(body, {}, { sender, observedAt: at })),
+  const event = load('@/lib/launch-alert-parser').inspectGenericBankEventForReview(body, sender);
+  return { review: event ? { status: event.status, decision: event.decision, family: event.family, role: event.observations.find(o => o.field.spans.some(s => event.amount.spans.some(a => a.start === s.start && a.end === s.end)))?.role, confirmable: load('@/lib/alert-review-tray').isMoneyMovementReview({ kind: 'universal', event }) } : null, nativeRoute: native.route, sms: shape(sms.parseSms(body, {}, { sender, observedAt: at })),
     session: shape(selected.parse(body, sender, selected.inspect(body, sender), undefined, at)),
     native: native.route === 'parsed' ? `${native.notification.direction}:${native.notification.amount?.minorUnits}` : native.route };
 }
@@ -98,4 +99,25 @@ for (const row of require('./credit-settlement-sweep.json')) test(`${row.id} ${r
   if (row.nativeExpected === 'no-post') assert.ok(!/^(?:credit|debit):/.test(got.native), `${row.body} ${JSON.stringify(got)}`);
   else if (row.nativeExpected === 'no-credit') assert.ok(!/^credit:/.test(got.native), `${row.body} ${JSON.stringify(got)}`);
   else assert.equal(got.native, `${row.nativeExpected}:25000`, row.body);
+});
+
+for (const row of require('./credit-settlement-review-probes.json')) test(`${row.id}: reviewer probe`, () => {
+  const got = paths(row.body, row.sender);
+  const target = row.expected === 'none' ? 'none' : `${row.expected}:${row.minorUnits}`;
+  const informational = got.review?.decision === 'review' && got.review.status === 'informational' && !got.review.confirmable;
+  const retained = informational && got.nativeRoute === 'review';
+  const acceptedReview = row.acceptInformationalReview && got.sms === 'none' && got.session === 'none' && retained;
+  assert.ok(acceptedReview || got.sms === target, `${row.body} parseSms ${JSON.stringify(got)}`);
+  assert.ok(acceptedReview || got.session === target, `${row.body} session ${JSON.stringify(got)}`);
+  if (row.expected === 'none' && row.requireReview) {
+    assert.ok(retained, `${row.body} must be retained as informational Review on app/native ${JSON.stringify(got)}`);
+    assert.equal(got.review.role, 'transaction', row.body);
+  }
+  if (row.expected === 'expense') assert.ok(!/^credit:/.test(got.native), JSON.stringify(got));
+});
+test('O1: pending N06 refund is informational and cannot be confirmed into the ledger', () => {
+  const got = paths('ADCB: Reversal of AED 40.00 is under process. You will be notified when the amount is refunded.', 'ADCB');
+  assert.equal(got.sms, 'none');assert.equal(got.session, 'none');
+  assert.equal(got.review?.status, 'informational');assert.equal(got.review?.decision, 'review');assert.equal(got.review?.role, 'transaction');
+  assert.equal(got.review?.confirmable, false);assert.equal(got.nativeRoute, 'review');
 });
