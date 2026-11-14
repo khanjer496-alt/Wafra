@@ -1,24 +1,32 @@
-# TEMPORARY, NEVER MERGED. Hosted iOS-simulator proof of the App Lock success path
-# (simulated Face ID) on the release tip. Push trigger is limited to this one branch.
+# TEMPORARY, NEVER MERGED. Read-only boundary diagnostic or independently selected Restore case.
 name: app-lock-sim
 # Purchase-only rerun: App Lock has separate passing evidence in run 43532093493.
 on:
-  push:
+  # Proposed manual approval route only. No opened/synchronize/push trigger.
+  # Creating this temporary test-only PR and applying this label both need CEO go.
+  pull_request:
     branches: [test/purchase-proof-pr251]
+    types: [labeled]
 
 permissions:
   contents: read
 
 concurrency:
-  group: app-lock-sim
+  group: storekit-boundary-${{ github.ref }}
   # Preserve the active build/cache; the next harness revision waits its turn.
   cancel-in-progress: false
 
 jobs:
   sim:
     runs-on: macos-15
-    timeout-minutes: 120
+    if: >-
+      github.event.label.name == 'run-reviewed-boundary-diagnostic' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'test/storekit-boundary-approved'
+    timeout-minutes: 15
     env:
+      PURCHASE_CASE: diagnostic
+      HARNESS_GIT_SHA: ${{ github.event.pull_request.head.sha }}
       # founder / auto-Pro OFF, like the production profile
       MAESTRO_DRIVER_STARTUP_TIMEOUT: "300000"
       EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: "0"
@@ -29,6 +37,23 @@ jobs:
       EXPO_PUBLIC_WAFRA_RELAY_URL: ${{ vars.WAFRA_RELAY_URL || 'https://wafra-relay.khanjer496.workers.dev' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Compute exact cache key after checkout
+        id: cachekey
+        env:
+          SOURCE_DIGEST: ${{ hashFiles('src/**', 'modules/**', 'assets/**', 'plugins/**', 'app.json', 'package-lock.json', 'babel.config.js', 'metro.config.js', 'eas.json') }}
+        run: |
+          set -euo pipefail
+          case "$SOURCE_DIGEST" in
+            ''|*[!0-9a-fA-F]*) echo '::error::source digest absent or invalid'; exit 1 ;;
+          esac
+          [ "${#SOURCE_DIGEST}" -eq 64 ] || { echo '::error::source digest length invalid'; exit 1; }
+          KEY="app-lock-sim-app-v3-$SOURCE_DIGEST"
+          echo "key=$KEY" >> "$GITHUB_OUTPUT"
+          echo "APP_CACHE_KEY=$KEY" >> "$GITHUB_ENV"
 
       - name: Select Xcode 26.2 or newer
         run: |
@@ -46,61 +71,25 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: build/app
-          key: app-lock-sim-app-v3-${{ hashFiles('src/**', 'modules/**', 'assets/**', 'plugins/**', 'app.json', 'package-lock.json', 'babel.config.js', 'metro.config.js', 'eas.json') }}
+          key: ${{ steps.cachekey.outputs.key }}
 
-      - uses: actions/setup-node@v4
-        if: steps.appcache.outputs.cache-hit != 'true'
-        with:
-          node-version-file: .nvmrc
-
-      - name: Build the Release app for the simulator
-        if: steps.appcache.outputs.cache-hit != 'true'
-        timeout-minutes: 60
+      - name: Require existing app cache (never rebuild for this diagnostic)
         run: |
-          set -euo pipefail
-          # The real production PUBLIC iOS Superwall key, read from the release build profile (not a secret).
-          KEY=$(jq -r '.build.production.env.EXPO_PUBLIC_SUPERWALL_IOS_API_KEY' eas.json)
-          case "$KEY" in pk_*) ;; *) echo "::error::no production Superwall iOS key in eas.json"; exit 1;; esac
-          export EXPO_PUBLIC_SUPERWALL_IOS_API_KEY="$KEY"
-          npm ci
-          npx expo prebuild --platform ios --no-install
-          npx pod-install ios
-          WORKSPACE=$(find ios -maxdepth 1 -name '*.xcworkspace' | head -1)
-          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
-          xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" -configuration Release \
-            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath build/dd -quiet build
-          APP=$(find build/dd/Build/Products/Release-iphonesimulator -maxdepth 1 -name '*.app' | head -1)
-          [ -n "$APP" ] || { echo "no .app produced"; exit 1; }
-          mkdir -p build/app && rm -rf build/app/* && cp -R "$APP" build/app/
-          # Release proof: the JS bundle is inside the app, no Metro.
-          test -f build/app/*.app/main.jsbundle && ls -l build/app/*.app/main.jsbundle
+          test '${{ steps.appcache.outputs.cache-hit }}' = true || {
+            echo '::error::app cache unavailable; diagnostic stopped without rebuilding'; exit 1;
+          }
 
-      - name: Save the build to cache
-        if: steps.appcache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: build/app
-          key: app-lock-sim-app-v3-${{ hashFiles('src/**', 'modules/**', 'assets/**', 'plugins/**', 'app.json', 'package-lock.json', 'babel.config.js', 'metro.config.js', 'eas.json') }}
-
-      - name: Boot a simulator and enroll Face ID
+      - name: Boot one disposable simulator
         id: sim
         run: |
           set -euo pipefail
           DEVICE="iPhone 16 Pro Max"
-          UDID=$(xcrun simctl create app-lock-sim "$DEVICE" 2>/dev/null || true)
-          if [ -z "$UDID" ]; then
-            UDID=$(xcrun simctl list devices available -j | jq -r '.devices[][] | select(.name|startswith("iPhone")) | .udid' | tail -1)
-          fi
+          UDID=$(xcrun simctl create storekit-boundary "$DEVICE")
           [ -n "$UDID" ] || { xcrun simctl list devices available; exit 1; }
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
           xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b
           xcrun simctl list devices | grep -F "$UDID"
           xcrun simctl spawn "$UDID" sw_vers || true
-          # Face ID enrollment, the scripted equivalent of Features > Face ID > Enrolled
-          xcrun simctl spawn "$UDID" notifyutil -s com.apple.BiometricKit.enrollmentChanged 1
-          xcrun simctl spawn "$UDID" notifyutil -p com.apple.BiometricKit.enrollmentChanged
-          xcrun simctl ui "$UDID" appearance light || true
 
       - name: Show the app's entitlements (evidence)
         run: |
@@ -117,9 +106,15 @@ jobs:
       - name: Purchase flow (StoreKit test session, no Apple account)
         id: purchase
         continue-on-error: true
-        timeout-minutes: 45
+        timeout-minutes: 12
         run: |
+          set -o pipefail
           .github/app-lock-sim/purchase/run-purchase.sh '${{ steps.sim.outputs.udid }}' shots "$PWD/build/app" 2>&1 | tee shots/purchase-run.log
+
+      - name: Apply public text allowlist after output closes
+        id: public_export
+        if: always()
+        run: python3 -I .github/app-lock-sim/purchase/public-export.py --publish shots
 
       - name: Strip terminal escapes from the artifact text files
         if: always()
@@ -127,7 +122,7 @@ jobs:
           find shots -type f \( -name '*.log' -o -name '*.tsv' -o -name '*.txt' -o -name '*.json' \) -exec perl -pi -e 's/\e\[[0-9;?]*[A-Za-z]//g' {} + || true
 
       - name: Result table
-        if: always()
+        if: ${{ always() && steps.public_export.outcome == 'success' }}
         run: |
           {
             echo; echo "## Purchase flow (StoreKit test session)"
@@ -136,13 +131,18 @@ jobs:
             [ -f shots/purchase-setup.txt ] && echo "| setup | $(cat shots/purchase-setup.txt) | |"
           } | tee -a "$GITHUB_STEP_SUMMARY"
           test -s shots/purchase-results.tsv
-          awk -F'\t' '$1 == "P3b" { n++; if ($2 != "PASS") bad=1 } END { exit (n != 1 || bad) }' shots/purchase-results.tsv
-          awk -F'\t' '$1 == "P3c" { n++; if ($2 != "PASS") bad=1 } END { exit (n != 1 || bad) }' shots/purchase-results.tsv
           grep -q '^test rc=0$' shots/purchase-run.log
-          awk -F'\t' '$1 ~ /^P[1-5]$/ { seen[$1]++; if ($2 != "PASS") bad=1 } END { for (i=1;i<=5;i++) if (seen["P" i] != 1) bad=1; exit bad }' shots/purchase-results.tsv
+          case "$PURCHASE_CASE" in
+            diagnostic) ROW=DIAG ;;
+            empty) ROW=P3c ;;
+            owned) ROW=P3b ;;
+            *) exit 2 ;;
+          esac
+          awk -F'\t' -v row="$ROW" '$1 == row { n++; if ($2 != "PASS") bad=1 } END { exit (n != 1 || bad) }' shots/purchase-results.tsv
+          echo "Only $ROW was selected. Neither diagnostic success nor one Restore case clears the combined build-195 gate."
 
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: ${{ always() && steps.public_export.outcome == 'success' }}
         with:
           name: app-lock-sim-screenshots
           path: shots/
