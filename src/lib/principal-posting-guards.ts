@@ -1,3 +1,4 @@
+import { EN_CREDIT_PENDING_STATUS, AR_CREDIT_PENDING_STATUS, hasCreditCondition, hasPendingCreditStatus } from '@/lib/credit-settlement-guards';
 /** Source-only qualifications of an already selected monetary value. */
 export interface PrincipalSpan { start: number; end: number }
 
@@ -134,7 +135,7 @@ export function isHedgedPrincipal(source: string, spans: readonly PrincipalSpan[
 
 const REFUND_LEAD = /(?:\brefund(?:ed)?\s+(?:of|amount(?:\s+of)?|for)?|(?<![ء-ي])(?:(?:ال)?مبلغ\s+)?(?:ال)?استرداد(?:\s+(?:ال)?مبلغ)?(?:\s+بقيم[هة]|\s+بمبلغ)?)\s*[:\-]?\s*$/iu;
 const NOT_CURRENT_REFUND = /\b(?:if|when|unless|earlier|previous|prior|another|other|last)\b|(?<![ء-ي])(?:اذا|حال|سابق[هة]?|اخري)(?![ء-ي])/iu;
-const REFUND_PENDING = /\b(?:initiated|under\s+process(?:ing)?|in\s+process|in\s+progress|being\s+(?:processed|reversed)|will\s+(?:be|reflect|appear|show)|requested|pending|awaiting|awaited|submitted|approved|raised)\b|(?<![ء-ي])(?:قيد\s+(?:ال)?(?:معالج[هة]|تنفيذ|مراجع[هة]|انتظار)|سيتم|سوف|طلب|تمت\s+الموافق[هة])(?![ء-ي])/iu;
+const REFUND_PENDING = new RegExp("\\b(?:initiated|under\\s+process(?:ing)?|in\\s+process|in\\s+progress|being\\s+(?:processed|reversed)|will\\s+(?:be|reflect|appear|show)|requested|pending|awaiting|awaited|submitted|approved|raised)\\b|(?<![ء-ي])(?:قيد\\s+(?:ال)?(?:معالج[هة]|تنفيذ|مراجع[هة]|انتظار)|سيتم|سوف|طلب|تمت\\s+الموافق[هة])(?![ء-ي])" + `|${EN_CREDIT_PENDING_STATUS}|${AR_CREDIT_PENDING_STATUS}`, 'iu');
 const REFUND_CANCELLED = /\b(?:has\s+been|was|is|got)\s+(?:cancell?ed|declined|rejected|unsuccessful|voided|reversed)\b|\brefund\s+(?:has\s+)?failed\b|(?<![ء-ي])(?:تم\s+)?(?:الغاء|إلغاء|رفض)\s+(?:طلب\s+)?(?:ال)?استرداد|(?:ال)?استرداد\s+(?:ال)?(?:ملغي|ملغى|ملغا|ملغاه|مرفوض)(?![ء-ي])/iu;
 const REFUND_COMPLETED = /\b(?:credited|issued|processed\s+(?:to|into|on)|posted\s+(?:to|into|on)|received\s+(?:on|in|into)|deposited|returned\s+to|added\s+to)\b|(?<![ء-ي])(?:تم\s+(?:[إا]يداع|[إا]ضاف[هة]|استرداد|[إا]رجاع|[إا]عاد[هة])|اضيف|أضيف|اعيد|أعيد|اودع|أودع)(?![ء-ي])/giu;
 const UNSETTLED_PREDICATE = /\b(?:will|would|shall|not|never|hasn['’]t|wasn['’]t|isn['’]t)\b/iu;
@@ -238,6 +239,7 @@ const SHARED_REFUND_TRANSITION = /^\s*(?:and|but|then)\s+(?:(?:has|have|had|was|
 function ownedRefundVerdict(sentence: string, principalEnd: number): RefundStatus | null {
   const hits = REFUND_VERDICTS.flatMap(([status, pattern]) => [...sentence.matchAll(pattern)]
     .filter(match => status !== 'completed' || match.index! >= principalEnd)
+    .filter(match => status !== 'pending' || hasPendingCreditStatus(sentence) || !hasPendingCreditStatus(match[0]))
     .map(match => ({ status, start: match.index!, end: match.index! + match[0].length })))
     .sort((a, b) => a.start - b.start || b.end - a.end);
   let owned: { status: RefundStatus; end: number; unsettled: boolean } | null = null;
@@ -282,6 +284,7 @@ export function refundPrincipalStatus(
   const scope = refundScope(source, own, monetarySpans);
   const sentence = scope.text;
   if (NOT_CURRENT_REFUND.test(source.slice(scope.start, own.start))) return null;
+  if (hasCreditCondition(sentence)) return 'pending';
   const verdict = ownedRefundVerdict(sentence, own.end - scope.start);
   if (verdict) return verdict;
   if (UNSETTLED_PREDICATE.test(sentence)) return 'pending';
@@ -295,7 +298,7 @@ export function refundPrincipalStatus(
 export function isCompletedPrincipalRefund(source: string, span: PrincipalSpan | undefined): boolean {
   if (!span) return false;
   const scope = sentenceAround(source, span);
-  if (NOT_CURRENT_REFUND.test(scope.text) || REFUND_PENDING.test(scope.text)) return false;
+  if (NOT_CURRENT_REFUND.test(scope.text) || REFUND_PENDING.test(scope.text) || hasCreditCondition(scope.text)) return false;
   return /\b(?:purchase|transaction|payment|charge)\b(?:[^.\n]|\.\d){0,120}?\b(?:has\s+been|was|is|have\s+been)\s+(?:fully\s+)?refunded\b|(?<![ء-ي])(?:عمليه\s+)?(?:ال)?شراء(?:[^.\n]|\.(?=\S)){0,120}?\s+(?:و?تم\s+)(?:استرداد|استرجاع|ارجاع)(?:ها|ه)(?![ء-ي])/i.test(scope.text);
 }
 

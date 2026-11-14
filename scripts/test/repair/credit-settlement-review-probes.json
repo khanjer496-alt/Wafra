@@ -1,0 +1,2284 @@
+[
+  {
+    "id": "cross-family-new:N001",
+    "body": "Refund of AED 250.00 received from AMAZON.AE on your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N002",
+    "body": "Refund of AED 250.00 received on your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N003",
+    "body": "Refund of AED 250.00 to your card ending 1234. Status: completed.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N004",
+    "body": "Refund of AED 250.00 to your card ending 1234 was completed.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N005",
+    "body": "Your refund of AED 250.00 is complete.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N006",
+    "body": "AED 250.00 refund received in your account ending 1234.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N007",
+    "body": "Refund of AED 250.00 from NOON.COM has arrived in your account ending 1234.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N008",
+    "body": "AED 250.00 has been refunded to your card ending 1234 after the merchant approved your return.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N009",
+    "body": "AED 250.00 has been refunded to your card ending 1234 after our bank verified the transaction.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N010",
+    "body": "AED 250.00 has been refunded to your card ending 1234 after your claim was approved.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N011",
+    "body": "AED 250.00 has been refunded to your card ending 1234 after the bank has confirmed settlement.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N012",
+    "body": "AED 250.00 has been refunded to your card ending 1234 following approval of your request.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N013",
+    "body": "AED 250.00 has been refunded to your card ending 1234 from PENDING TRADING LLC.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N014",
+    "body": "AED 250.00 has been refunded to your card ending 1234 by QUEUED TRADING LLC.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N015",
+    "body": "AED 250.00 has been refunded to your card ending 1234 for your previously pending purchase.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N016",
+    "body": "AED 250.00 has been refunded to your card ending 1234 ; your loan application is awaiting approval.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N017",
+    "body": "AED 250.00 has been refunded to your card ending 1234 ; your other refund is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N018",
+    "body": "AED 250.00 has been refunded to your card ending 1234 ; another refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N019",
+    "body": "AED 250.00 has been refunded to your card ending 1234 ; the other reversal request is scheduled.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N020",
+    "body": "Your refund of AED 250.00 has been credited to your card ending 1234, subject to final approval.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-new:N021",
+    "body": "Your refund of AED 250.00 has been credited to your card ending 1234; subject to final approval.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-new:N022",
+    "body": "Your refund of AED 250.00 has been credited to your card ending 1234\nsubject to final approval.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-new:N023",
+    "body": "Your refund of AED 250.00 has been credited to your card ending 1234 — subject to final approval.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-new:N024",
+    "body": "Your refund of AED 250.00 has been credited to your card ending 1234, pending approval.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-new:N025",
+    "body": "Your refund of AED 250.00 has been credited to your card ending 1234; pending approval.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-new:N026",
+    "body": "Your refund of AED 250.00 has been credited to your card ending 1234\npending approval.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-new:N027",
+    "body": "Your refund of AED 250.00 has been credited to your card ending 1234 — pending approval.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-new:N028",
+    "body": "Your refund of AED 250.00 has been credited to your card ending 1234, after the merchant approves.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-new:N029",
+    "body": "Your refund of AED 250.00 has been credited to your card ending 1234; after the merchant approves.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-new:N030",
+    "body": "Your refund of AED 250.00 has been credited to your card ending 1234\nafter the merchant approves.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-new:N031",
+    "body": "Your refund of AED 250.00 has been credited to your card ending 1234 — after the merchant approves.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-new:N032",
+    "body": "Your refund of AED 250.00 has been credited to your card ending 1234, once the bank confirms.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-new:N033",
+    "body": "Your refund of AED 250.00 has been credited to your card ending 1234; once the bank confirms.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-new:N034",
+    "body": "Your refund of AED 250.00 has been credited to your card ending 1234\nonce the bank confirms.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-new:N035",
+    "body": "Your refund of AED 250.00 has been credited to your card ending 1234 — once the bank confirms.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-new:N036",
+    "body": "Your refund of AED 250.00 has been credited to your card ending 1234, if approved.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-new:N037",
+    "body": "Your refund of AED 250.00 has been credited to your card ending 1234; if approved.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-new:N038",
+    "body": "Your refund of AED 250.00 has been credited to your card ending 1234\nif approved.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-new:N039",
+    "body": "Your refund of AED 250.00 has been credited to your card ending 1234 — if approved.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-new:N040",
+    "body": "AED 250.00 was debited from your card ending 1234 at CAREEM. Your charge-back request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N041",
+    "body": "AED 250.00 was debited from your card ending 1234 at CAREEM. Your charge back request is scheduled.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N042",
+    "body": "AED 250.00 was debited from your card ending 1234 at CAREEM. Your request for reversal is queued.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N043",
+    "body": "AED 250.00 was debited from your card ending 1234 at CAREEM. Your request to reverse the payment is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N044",
+    "body": "AED 250.00 was debited from your card ending 1234 at CAREEM. Your refund application is awaiting approval.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N045",
+    "body": "AED 250.00 was debited from your card ending 1234 at CAREEM. Your reversal request is pending. The request status was successfully updated.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N046",
+    "body": "Your refund request for AED 250.00 was successfully completed.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-new:N047",
+    "body": "Your reversal request for AED 250.00 is settled.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-new:N048",
+    "body": "Your chargeback request of AED 250.00 is pending. Your refund has been credited to your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N049",
+    "body": "Refund of AED 250.00 has been credited to your card ending 1234. Your other refund is still pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N050",
+    "body": "Your refund of AED 250.00 has been credited to your card ending 1234, your other refund is still pending; this credit is subject to verification.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-new:N051",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك بعد أن وافق التاجر على الإرجاع.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N052",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك من شركة مجدول للتجارة.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N053",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك. طلبك الآخر قيد المراجعة.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-new:N054",
+    "body": "استرداد مبلغ AED 250.00 إلى بطاقتك بعد التحقق من الموافقة.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-new:N055",
+    "body": "بشرط: موافقة التاجر، تم استرداد مبلغ AED 250.00 إلى بطاقتك.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-new:N056",
+    "body": "AED 250.00 has been refunded to your card subject to: merchant approval.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-new:N057",
+    "body": "AED 250.00 has been refunded to your card subject to merchant approval/reference 1234.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-new:N058",
+    "body": "Your reversal request has been processed successfully. AED 250.00 was debited from your card ending 1234 at CAREEM.",
+    "sender": "ENBD",
+    "origin": "cross-family-new",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-confirm:Q01",
+    "body": "AED 250.00 has been refunded to your card ending 1234 for your cancelled scheduled payment.",
+    "sender": "ENBD",
+    "origin": "cross-family-confirm",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-confirm:Q02",
+    "body": "AED 250.00 has been refunded to your card ending 1234 after the merchant approved your return.",
+    "sender": "ENBD",
+    "origin": "cross-family-confirm",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-confirm:Q03",
+    "body": "AED 250.00 has been refunded to your card ending 1234; your loan application is awaiting approval.",
+    "sender": "ENBD",
+    "origin": "cross-family-confirm",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-confirm:Q04",
+    "body": "AED 250.00 was debited from your card ending 1234 at CAREEM. Your charge-back request is scheduled.",
+    "sender": "ENBD",
+    "origin": "cross-family-confirm",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-confirm:Q05",
+    "body": "AED 250.00 was debited from your card ending 1234 at CAREEM. Your charge backs request is scheduled.",
+    "sender": "ENBD",
+    "origin": "cross-family-confirm",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-confirm:Q06",
+    "body": "Refund of AED 250.00 has been received on your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "cross-family-confirm",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-confirm:Q07",
+    "body": "Your refund of AED 250.00 is complete.",
+    "sender": "ENBD",
+    "origin": "cross-family-confirm",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-confirm:Q08",
+    "body": "Your refund of AED 250.00 has been credited to your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "cross-family-confirm",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-confirm:Q09",
+    "body": "AED 250.00 has been refunded to your card subject to final approval.",
+    "sender": "ENBD",
+    "origin": "cross-family-confirm",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-confirm:Q10",
+    "body": "بشرط موافقة التاجر، تم استرداد مبلغ AED 250.00 إلى بطاقتك.",
+    "sender": "ENBD",
+    "origin": "cross-family-confirm",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-confirm:Q11",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك بعد أن وافق التاجر على الإرجاع.",
+    "sender": "ENBD",
+    "origin": "cross-family-confirm",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:U00",
+    "body": "On approval, AED 250.00 has been refunded to your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U01",
+    "body": "On successful verification, AED 250.00 has been refunded to your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U02",
+    "body": "AED 250.00 has been refunded to your card ending 1234, on approval.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U03",
+    "body": "AED 250.00 has been refunded to your card ending 1234 once the merchant signs off.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U04",
+    "body": "AED 250.00 has been refunded to your card ending 1234 if the merchant agrees.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U05",
+    "body": "AED 250.00 has been refunded to your card ending 1234 subject to the dispute outcome.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U06",
+    "body": "AED 250.00 has been refunded to your card ending 1234 subject to review.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U07",
+    "body": "AED 250.00 has been refunded to your card ending 1234. Status: awaiting approval.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U08",
+    "body": "AED 250.00 has been refunded to your card ending 1234 (pending approval).",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U09",
+    "body": "AED 250.00 has been refunded to your card ending 1234 - pending.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U10",
+    "body": "AED 250.00 refund to your card ending 1234 is on hold.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U11",
+    "body": "AED 250.00 has been temporarily credited to your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U12",
+    "body": "A provisional credit of AED 250.00 has been applied to your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U13",
+    "body": "AED 250.00 has been refunded to your card ending 1234 in case the merchant approves.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U14",
+    "body": "In case of approval, AED 250.00 has been refunded to your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U15",
+    "body": "Should the merchant approve, AED 250.00 has been refunded to your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U16",
+    "body": "AED 250.00 has been refunded to your card ending 1234 depending on merchant approval.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U17",
+    "body": "AED 250.00 has been refunded to your card ending 1234 till approval.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U18",
+    "body": "Refund of AED 250.00 to your card ending 1234 is awaiting merchant confirmation.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U19",
+    "body": "Refund of AED 250.00 to your card ending 1234 is not yet complete.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U20",
+    "body": "If approved\nAED 250.00 has been refunded to your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U21",
+    "body": "IF APPROVED, AED 250.00 HAS BEEN REFUNDED TO YOUR CARD ENDING 1234.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U22",
+    "body": "Upon approval — AED 250.00 has been refunded to your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U23",
+    "body": "Your refund request for AED 250.00 has been approved.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U24",
+    "body": "Refund request of AED 250.00 to your card ending 1234 submitted.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U25",
+    "body": "AED 250.00 has been refunded to your card ending 1234, provided that the merchant approves.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U26",
+    "body": "Unless rejected by the merchant, AED 250.00 has been refunded to your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U27",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك المنتهية 1234 لحين الموافقة.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U28",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك المنتهية 1234 حتى تتم الموافقة.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U29",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك المنتهية 1234 بانتظار رد التاجر.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U30",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك المنتهية 1234 وهو معلق.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U31",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك المنتهية 1234 بصفة مؤقتة.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U32",
+    "body": "في حالة موافقة التاجر، تم استرداد مبلغ AED 250.00 إلى بطاقتك.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U33",
+    "body": "لو وافق التاجر، تم استرداد مبلغ AED 250.00 إلى بطاقتك.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U34",
+    "body": "متى وافق التاجر، تم استرداد مبلغ AED 250.00 إلى بطاقتك.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U35",
+    "body": "استرداد مبلغ AED 250.00 إلى بطاقتك معلق.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U36",
+    "body": "طلب استرداد مبلغ AED 250.00 إلى بطاقتك.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U37",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك المنتهية 1234 شرط موافقة البنك.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:U38",
+    "body": "إذا تمت الموافقة\nتم استرداد مبلغ AED 250.00 إلى بطاقتك المنتهية 1234.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer:DB00",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your dispute is under review.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:DB01",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Reversal requested.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:DB02",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your refund claim is pending.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:DB03",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. A reversal has been requested.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:DB04",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your request for reversal is pending.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:DB05",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your chargeback is in progress.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:DB06",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Chargeback initiated.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:DB07",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your reversal request has been received.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:DB08",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your refund request has been accepted.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:DB09",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your reversal request has been approved.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:DB10",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your chargeback request was registered.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:DB11",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your reversal request: pending.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:DB12",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your refund request reference is 12345.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:DB13",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. For refund requests visit www.noon.com.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:DB14",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. To track your refund request, click https://noon.com/r",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false,
+    "policyException": "Existing actionable request-link refusal, explicitly accepted by Reviewer."
+  },
+  {
+    "id": "reviewer:DB15",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM.\nReversal request status: queued",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:DB16",
+    "body": "تم خصم مبلغ AED 250.00 من بطاقتك لدى نون. تم تقديم طلب استرداد المبلغ.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:DB17",
+    "body": "تم خصم مبلغ AED 250.00 من بطاقتك لدى نون. طلبك لاسترداد المبلغ قيد المراجعة.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:DB18",
+    "body": "تم خصم مبلغ AED 250.00 من بطاقتك لدى نون. جاري عكس العملية.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:DB19",
+    "body": "تم خصم مبلغ AED 250.00 من بطاقتك لدى نون. تم استلام طلب الاعتراض.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:DB20",
+    "body": "Purchase of AED 250.00 at NOON.COM with your card ending 1234 approved.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:DB21",
+    "body": "AED 250.00 was debited from your account ending 1234 for transfer request ref 12345.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:DB22",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM after you confirmed the OTP.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:DB23",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. If you did not authorise this, call 600540000.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR00",
+    "body": "AED 250.00 has been refunded to your card ending 1234 after the merchant confirmed the return.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR01",
+    "body": "After review, AED 250.00 has been credited to your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR02",
+    "body": "Once the merchant confirmed the cancellation, AED 250.00 was refunded to your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR03",
+    "body": "Refund of AED 250.00 from AMAZON.AE credited to your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR04",
+    "body": "Refund AED 250.00 AMAZON.AE card ending 1234 14/11/26",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR05",
+    "body": "Refund of AED 250.00 at AMAZON.AE on your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR06",
+    "body": "Reversal of AED 250.00 at NOON.COM on your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR07",
+    "body": "Refund: AED 250.00 from NOON.COM to card ending 1234. Avl bal AED 1,250.00",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR08",
+    "body": "AED 250.00 has been refunded to your card ending 1234. If you did not authorise this, call 600 54 0000.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR09",
+    "body": "AED 250.00 has been refunded to your card ending 1234, if not authorised by you call 600540000.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR10",
+    "body": "AED 250.00 has been refunded to your card ending 1234. Pending authorisations: AED 20.00.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR11",
+    "body": "Your salary of AED 10,000.00 has been credited to your account ending 1234. Available balance AED 12,000.00.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 1000000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR12",
+    "body": "AED 250.00 has been credited to your account ending 1234. Your scheduled transfer of AED 100.00 is on 20/11.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false,
+    "policyException": "Existing two-movement refusal, tracked by #238; no source posting."
+  },
+  {
+    "id": "reviewer:CR13",
+    "body": "AED 250.00 has been credited to your account ending 1234 from AHMED for scheduled rent.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR14",
+    "body": "AED 250.00 has been credited to your account ending 1234 via scheduled transfer.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR15",
+    "body": "Your refund request has been processed. AED 250.00 has been refunded to your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR16",
+    "body": "Your refund request for AED 250.00 has been completed and the amount has been credited to your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR17",
+    "body": "Your chargeback for AED 250.00 at NOON.COM was successful and AED 250.00 has been credited to your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR18",
+    "body": "Chargeback of AED 250.00 at NOON.COM credited to your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR19",
+    "body": "Reversal: AED 250.00 credited to your card ending 1234 from NOON.COM.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR20",
+    "body": "Refund of AED 250.00 to your card ending 1234 was successful.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR21",
+    "body": "Refund of AED 250.00 to your card ending 1234 successful.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR22",
+    "body": "Refund of AED 250.00 to your card ending 1234 has been completed.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR23",
+    "body": "Refund of AED 250.00 to your card ending 1234 is complete.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR24",
+    "body": "AED 250.00 has been refunded to your card ending 1234 after the merchant accepted the return.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR25",
+    "body": "AED 250.00 has been refunded to your card ending 1234 upon receipt of the returned item.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR26",
+    "body": "AED 250.00 has been refunded to your card ending 1234 following approval of your claim.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR27",
+    "body": "Your claim was approved. AED 250.00 has been credited to your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR28",
+    "body": "AED 250.00 has been credited to your account ending 1234 after verification.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR29",
+    "body": "Refund Alert\nAED 250.00 has been refunded to your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR30",
+    "body": "AED 250.00 has been refunded to your card ending 1234.\nIf not authorised by you, call 600 54 0000.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR31",
+    "body": "AED 250.00 has been credited to your account ending 1234 when your cheque cleared.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR32",
+    "body": "Cheque deposit of AED 250.00 has been credited to your account ending 1234 after clearance.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR33",
+    "body": "AED 250.00 has been credited to your account ending 1234. Your pending orders are not affected.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR34",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك المنتهية 1234 من نون.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR35",
+    "body": "تم إيداع راتبك بمبلغ AED 10,000.00 في حسابك المنتهي 1234. للاستفسار اتصل على 600540000.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 1000000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR36",
+    "body": "تم إيداع مبلغ AED 250.00 في حسابك المنتهي 1234. إذا لم تقم بهذه العملية يرجى الاتصال بنا.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR37",
+    "body": "تم إيداع مبلغ AED 250.00 في حسابك المنتهي 1234 عند الساعة 10:00.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR38",
+    "body": "تم إيداع مبلغ AED 250.00 في حسابك المنتهي 1234 من تحويل مجدول.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR39",
+    "body": "تم إيداع مبلغ AED 250.00 في حسابك المنتهي 1234 بعد التحقق.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR40",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك المنتهية 1234 بعد موافقة التاجر.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR41",
+    "body": "تم إيداع مبلغ AED 250.00 في حسابك المنتهي 1234، إن لم تقم بهذه العملية اتصل بنا.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR42",
+    "body": "تم إيداع مبلغ AED 250.00 في حسابك المنتهي 1234 وتم التحقق من العملية.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR43",
+    "body": "نفيدكم بأنه تم إيداع مبلغ AED 250.00 في حسابك المنتهي 1234 بعد اعتماد الطلب.",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer:CR44",
+    "body": "تم ايداع مبلغ AED 250.00 في حسابك المنتهي 1234 علما ان العملية تمت بعد التحقق",
+    "sender": "ENBD",
+    "origin": "reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer-focused:F1",
+    "body": "If approved, AED 250.00 has been refunded to your card.",
+    "sender": "ENBD",
+    "origin": "reviewer-focused",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer-focused:F1colon",
+    "body": "If approved: AED 250.00 has been refunded to your card.",
+    "sender": "ENBD",
+    "origin": "reviewer-focused",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer-focused:F2",
+    "body": "AED 250.00 has been refunded to your card only if the merchant approves.",
+    "sender": "ENBD",
+    "origin": "reviewer-focused",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer-focused:F3",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك في انتظار الموافقة.",
+    "sender": "ENBD",
+    "origin": "reviewer-focused",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer-focused:F3dirham",
+    "body": "تم استرداد مبلغ 250.00 درهم إلى بطاقتك في انتظار الموافقة.",
+    "sender": "ENBD",
+    "origin": "reviewer-focused",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer-focused:F3in",
+    "body": "إن وافق التاجر، تم استرداد مبلغ AED 250.00 إلى بطاقتك.",
+    "sender": "ENBD",
+    "origin": "reviewer-focused",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer-focused:F4",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your reversal request is queued.",
+    "sender": "ENBD",
+    "origin": "reviewer-focused",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer-focused:F4inqueue",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your reversal request is in queue.",
+    "sender": "ENBD",
+    "origin": "reviewer-focused",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer-focused:S1",
+    "body": "Your refund request has been received. AED 250.00 has been credited to your account ending 1234.",
+    "sender": "ENBD",
+    "origin": "reviewer-focused",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer-focused:S2",
+    "body": "Your refund request is under review. AED 250.00 has been refunded to your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "reviewer-focused",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer-focused:S3",
+    "body": "AED 250.00 has been refunded to your card ending 1234, your other refund is pending.",
+    "sender": "ENBD",
+    "origin": "reviewer-focused",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer-focused:S4",
+    "body": "AED 250.00 has been refunded to your card ending 1234. Your other refund request is pending.",
+    "sender": "ENBD",
+    "origin": "reviewer-focused",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer-focused:S5",
+    "body": "تم خصم مبلغ AED 250.00 من بطاقتك لدى أمازون. طلب الاسترداد قيد المراجعة.",
+    "sender": "ENBD",
+    "origin": "reviewer-focused",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer-focused:S6",
+    "body": "تم خصم مبلغ AED 250.00 من بطاقتك لدى أمازون.",
+    "sender": "ENBD",
+    "origin": "reviewer-focused",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer-focused:S7",
+    "body": "AED 250.00 was debited from your card ending 1234 at CAFÉ NÉRO. Your reversal request is queued.",
+    "sender": "ENBD",
+    "origin": "reviewer-focused",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "reviewer-focused:S8",
+    "body": "Refund of AED 250.00 at AMAZON.AE on your card ending 1234 is pending.",
+    "sender": "ENBD",
+    "origin": "reviewer-focused",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "reviewer-focused:S9",
+    "body": "Refund of AED 250.00 at AMAZON.AE on your card ending 1234 processed.",
+    "sender": "ENBD",
+    "origin": "reviewer-focused",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "change-reviewer:CR-G1",
+    "body": "AED 250.00 has been refunded to your card ending 1234 after the merchant approved your return.",
+    "sender": "ENBD",
+    "origin": "change-reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "change-reviewer:CR-G2",
+    "body": "AED 250.00 has been refunded to your card ending 1234 after your return was approved.",
+    "sender": "ENBD",
+    "origin": "change-reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "change-reviewer:CR-G3",
+    "body": "After the merchant confirmed the cancellation, AED 250.00 has been refunded to your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "change-reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "change-reviewer:CR-G4",
+    "body": "تم استرداد مبلغ 250.00 درهم إلى بطاقتك بعد التحقق من الطلب.",
+    "sender": "ENBD",
+    "origin": "change-reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "change-reviewer:CR-G5",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك المنتهية 1234 بعد موافقة التاجر على الإرجاع.",
+    "sender": "ENBD",
+    "origin": "change-reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "change-reviewer:CR-G9",
+    "body": "AED 250.00 has been refunded to your card ending 1234 once the merchant confirmed the return.",
+    "sender": "ENBD",
+    "origin": "change-reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "change-reviewer:CR-G10",
+    "body": "AED 250.00 has been refunded to your card ending 1234 when the merchant accepted the return.",
+    "sender": "ENBD",
+    "origin": "change-reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "change-reviewer:CR-G11",
+    "body": "نود إعلامك أن تم تأكيد استرداد مبلغ 250.00 درهم إلى بطاقتك.",
+    "sender": "ENBD",
+    "origin": "change-reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "change-reviewer:CR-N3",
+    "body": "AED 250.00 has been refunded to your card ending 1234 provided the merchant agrees.",
+    "sender": "ENBD",
+    "origin": "change-reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "change-reviewer:CR-N6",
+    "body": "AED 250.00 has been refunded to your card ending 1234 subject to the merchant's sign-off.",
+    "sender": "ENBD",
+    "origin": "change-reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "change-reviewer:CR-N4",
+    "body": "A provisional credit of AED 250.00 has been posted to your card ending 1234 while we review your dispute.",
+    "sender": "ENBD",
+    "origin": "change-reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "change-reviewer:CR-N5",
+    "body": "Temporary credit of AED 250.00 to your card ending 1234 pending investigation.",
+    "sender": "ENBD",
+    "origin": "change-reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "change-reviewer:CR-N8",
+    "body": "تم استرداد مبلغ 250.00 درهم إلى بطاقتك ريثما تتم الموافقة.",
+    "sender": "ENBD",
+    "origin": "change-reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "change-reviewer:CR-D1",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your refund request for AED 250.00 is pending.",
+    "sender": "ENBD",
+    "origin": "change-reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "change-reviewer:CR-D2",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Chargeback request of AED 250.00 submitted.",
+    "sender": "ENBD",
+    "origin": "change-reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "change-reviewer:CR-K-G6",
+    "body": "Refund request 123456: AED 250.00 refunded to your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "change-reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "change-reviewer:CR-K-G7",
+    "body": "Your refund request was approved. AED 250.00 has been credited to your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "change-reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "change-reviewer:CR-K-G8",
+    "body": "Refund request processed: AED 250.00 has been credited to your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "change-reviewer",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": true,
+    "requireReview": false
+  },
+  {
+    "id": "change-reviewer:CR-K-N1",
+    "body": "AED 250.00 will be refunded to your card ending 1234 in case of approval.",
+    "sender": "ENBD",
+    "origin": "change-reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "change-reviewer:CR-K-N2",
+    "body": "AED 250.00 has been refunded to your card ending 1234, conditional upon merchant approval.",
+    "sender": "ENBD",
+    "origin": "change-reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "change-reviewer:CR-K-N7",
+    "body": "تم استرداد مبلغ 250.00 درهم إلى بطاقتك في حالة الموافقة.",
+    "sender": "ENBD",
+    "origin": "change-reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "change-reviewer:CR-K-N9",
+    "body": "Refund of AED 250.00 to your card is awaiting settlement.",
+    "sender": "ENBD",
+    "origin": "change-reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "change-reviewer:CR-K-N10",
+    "body": "Refund of AED 250.00 to your card: not yet final.",
+    "sender": "ENBD",
+    "origin": "change-reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "change-reviewer:CR-K-G12",
+    "body": "تم استرداد مبلغ 250.00 درهم إلى بطاقتك عند تأكيد الإلغاء من التاجر.",
+    "sender": "ENBD",
+    "origin": "change-reviewer",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "change-reviewer:CR-K-D3",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "change-reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "change-reviewer:CR-K-D4",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Refund request for AED 250.00 was successful.",
+    "sender": "ENBD",
+    "origin": "change-reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "change-reviewer:CR-K-D5",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM; your reversal request has been accepted.",
+    "sender": "ENBD",
+    "origin": "change-reviewer",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "parser-followup:process-success-is-not-credit",
+    "origin": "parser-followup",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your chargeback appeal was successful.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  },
+  {
+    "id": "parser-followup:successful-request-is-not-receipt",
+    "origin": "parser-followup",
+    "body": "Refund of AED 250.00 successfully requested.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "parser-followup:assuming-condition",
+    "origin": "parser-followup",
+    "body": "Assuming the merchant approves, AED 250.00 has been refunded to your card.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "parser-followup:as-long-as-condition",
+    "origin": "parser-followup",
+    "body": "AED 250.00 has been refunded to your card as long as the merchant approves.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "parser-followup:past-event-does-not-release-current-condition",
+    "origin": "parser-followup",
+    "body": "AED 250.00 has been refunded to your card after the merchant approved the return assuming the issuer confirms settlement.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "parser-followup:required-approval",
+    "origin": "parser-followup",
+    "body": "AED 250.00 has been refunded to your card; merchant approval is required.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "parser-followup:unrelated-field-status",
+    "origin": "parser-followup",
+    "body": "AED 250.00 has been refunded to your card; your loan application: awaiting approval.",
+    "sender": "ENBD",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
+  }
+]

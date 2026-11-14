@@ -1,3 +1,4 @@
+import { canReviewCreditRefusal } from '@/lib/credit-settlement-guards';
 import { createAiAlertReviewSession } from '@/lib/ai-alert-reader';
 import { createPrivateAlertFormatSession, type PrivateAlertFormatSessionOptions } from '@/lib/private-alert-format-runtime';
 import { canEnrichPrivateFormatReview, privateAlertFormatReviewEvent } from '@/lib/private-alert-format-review';
@@ -28,6 +29,7 @@ import { isBnplProviderSource } from '@/lib/bnpl-providers';
 import { isUnpostedCardBalanceClaim, isCompletedCardBalanceReceipt, blankWordLinkPrompts } from '@/lib/principal-posting-guards';
 import {
   nonPostingReason,
+  hasOnlyUnsettledCredit,
   parseForeignAwaitingRate,
   parseSms,
   PARSER_VERSION,
@@ -1004,6 +1006,20 @@ export function inspectSourceFreeRefusedAlert(input: {
   // money through an unparsed-template fallback. This is no ledger deletion.
   if (isUnpostedCardBalanceClaim(source)) return { kind: 'ignored', reason: 'non-financial' };
   const reason = nonPostingReason(source);
+  // An unsettled credit is financial evidence, not confirmation authority.
+  // Prefer its typed informational Review before the legacy refusal/template path.
+  if (canReviewCreditRefusal(source, reason) && hasBankAlertMoneyHint(source) &&
+    !(input.channel === 'push' && isPromotionalBankPush(source)) && hasOnlyUnsettledCredit(source)) {
+    const event = inspectGenericBankEventForReview(source, input.sender);
+    const review = event?.decision === 'review' && event.status === 'informational' ? prepareUniversalReviewAlert({
+      id: 'capture_probe_id_0001', sourceKey: 'capture_probe_key_001',
+      observedAt: input.observedAt, channel: input.channel, event,
+    }) : null;
+    if (review) {
+      const { id: _id, sourceKey: _sourceKey, ...candidate } = review;
+      return { kind: 'review', candidate };
+    }
+  }
   if (reason) return { kind: 'declined', reason };
   // A generic amount detector can read "Get AED 50 cashback on your next
   // purchase" as a posted purchase. The launch parser already refused it;

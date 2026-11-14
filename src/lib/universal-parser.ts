@@ -1,3 +1,4 @@
+import { creditSourceDisposition, informationalCreditReview } from '@/lib/credit-settlement-guards';
 import { missingUniversalField, type UniversalBankEvent, type UniversalParseContext } from '@/lib/universal-types';
 import {
   accountMovementDirection, cjkNonPostingVerdict, hasDeclinedWording, inspectMarketAlert, nonPostingTailVerdict, runWithClauseMemo,
@@ -607,10 +608,12 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
     !money.observations.some((observation) => observation.role === 'fee')) {
     family = ownAccountMovementFamily(maskedSource, direction) ?? family;
   }
+  const creditReviewOnly = creditSourceDisposition(source) === 'review';
+
   const authentication = challenge || readings.some((reading) => reading.family === 'authentication');
   const promotion = [...readings, ...wholeReadings].some((reading) => reading.draft.reasons.includes('promotion'));
   const reviewable = hasAmount || hasStatement || hasBalance;
-  const decision = reviewable && status !== 'failed' && !authentication && !pending && !promotion ? 'review' : 'ignore';
+  const decision = reviewable && status !== 'failed' && !authentication && (!pending || creditReviewOnly) && !promotion ? 'review' : 'ignore';
   // Banks with synthetic-only evidence (Plin, Interbank, BBVA Perú, Santander
   // México, Citibanamex) are identified for Review but never post. Only with
   // that market's context: "Interbank transfer of $500.00" is a US alert.
@@ -636,11 +639,13 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
     ...(status === 'failed' ? ['failed-not-posting'] : []),
     ...(promotion ? ['promotion-not-posting'] : []),
   ];
-  return {
+
+  const event: UniversalBankEvent = {
     version: 1, decision, family, status, direction,
     amount: family === 'statement' || family === 'balance' ? missingUniversalField() : money.amount,
     statementTotal: money.statementTotal, minimumDue: money.minimumDue,
     balance: money.balance, creditLimit: money.creditLimit,
     ...fields, observations: money.observations, issues: [...new Set(issues)],
   };
+  return creditReviewOnly ? informationalCreditReview(source, event) : event;
 }

@@ -1,3 +1,4 @@
+import { informationalCreditReview } from '@/lib/credit-settlement-guards';
 import { inspectUniversalAlert, type UniversalAlertReview } from '@/lib/alert-market-detection';
 import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars';
 import { activeCountryDateOrder, dateOrderForCountry, getActiveCountry } from '@/lib/country';
@@ -19,7 +20,7 @@ import {
   pinnedLedgerCurrencyCode,
 } from '@/lib/markets';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
-import { moneyNoticeKind, nonPostingReason, parseSmsBatch, type ParsedSms } from '@/lib/sms-parser';
+import { moneyNoticeKind, nonPostingReason, hasOnlyUnsettledCredit, parseSmsBatch, withoutUncompletedRequestNotes, type ParsedSms } from '@/lib/sms-parser';
 import type { CategoryId } from '@/lib/types';
 import { CURRENCY_SYMBOL_CANDIDATES, currencyMinorUnits } from '@/lib/currency-metadata';
 import { decideGulfNeighbourPosting, gulfNeighbourReadSource, isGulfNeighbourMarket } from '@/lib/gulf-neighbour-alerts';
@@ -209,7 +210,8 @@ export const inspectGenericBankEventForReview = (
   market?: string | null,
   sourceContext?: UniversalParseContext,
 ): UniversalBankEvent | null => {
-  if (hasPersonalMessagePrefix(source, sender) || hasNegatedPrincipalMovement(source) ||
+  const creditReviewOnly = hasOnlyUnsettledCredit(source);
+  if (hasPersonalMessagePrefix(source, sender) || (hasNegatedPrincipalMovement(source) && !creditReviewOnly) ||
     isUnpostedCardBalanceClaim(source)) return null;
   // An exact LatAm bank template is bank-alert context in its own right.
   const noContext = !hasGenericBankAlertContext(source, sender) && !matchLatamTemplate(source, { sender });
@@ -261,9 +263,12 @@ export const inspectGenericBankEventForReview = (
     : sourceContext ? { ...sourceContext, sender }
       : universalSourceParseContext(hasUniversalInstitutionSender(sender)
         ? inspectUniversalAlert({ source, sender }) : null, sender, getActiveCountry());
+  const creditReviewMarket = creditReviewOnly ? detectLaunchMarketFromSender(sender) : null;
+  const creditReviewAliases: CurrencyAliasMap = creditReviewMarket === 'AE' ? { 'درهم': ['AED'], 'دراهم': ['AED'] }
+    : creditReviewMarket === 'SA' ? { 'ريال': ['SAR'] } : {};
   let event = inspectUniversalBankEvent(isGulfNeighbourMarket(market)
-    ? gulfNeighbourReadSource(source, market) : source, cardCreditAliases
-      ? { ...context, currencyAliases: { ...cardCreditAliases, ...context.currencyAliases } } : context);
+    ? gulfNeighbourReadSource(source, market) : source, { ...context, currencyAliases: { ...creditReviewAliases, ...cardCreditAliases, ...context.currencyAliases } });
+  if (creditReviewOnly) event = informationalCreditReview(source, event);
   if (event.decision !== 'review') return null;
   if (cardCreditAliases) {
     if (event.status !== 'posted' && event.status !== 'unknown') return null;
@@ -874,7 +879,7 @@ const launchSenderAnswersFor = (source: string, sender: string, parsed: ParsedSm
     parsed.card?.kind === 'credit' && /^\d{4}$/u.test(parsed.card.last4) &&
     parsed.currency === pinnedLedgerCurrencyCode() && parsed.fxSource !== 'fallback' &&
     isSafeCardRepaymentReviewSource(source) && !hasNonCompletedWording(source, null, sender);
-  if (isNotAutoPostableMoney(source) && !provedSettlement) return false;
+  if (isNotAutoPostableMoney(withoutUncompletedRequestNotes(source)) && !provedSettlement) return false;
   if (!isAbsentLaunchSender(sender)) return !isUnverifiedAlertSender(sender);
   if (parsed.kind !== 'transaction') return true;
   return parsed.type !== 'income' || namesOwnInstrumentTail(source, 'credit');
