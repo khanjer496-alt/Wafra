@@ -129,6 +129,8 @@ test('O1: pending N06 refund is informational and cannot be confirmed into the l
   assert.equal(got.sms, 'none');assert.equal(got.session, 'none');
   assert.equal(got.review?.status, 'informational');assert.equal(got.review?.decision, 'review');assert.equal(got.review?.role, 'transaction');
   assert.equal(got.review?.confirmable, false);assert.equal(got.nativeRoute, 'review');
+  const event = load('@/lib/launch-alert-parser').inspectGenericBankEventForReview('ADCB: Reversal of AED 40.00 is under process. You will be notified when the amount is refunded.', 'ADCB');
+  assert.deepEqual(load('@/lib/universal-import').planConfirmedUniversalImport({ hydrated: true }, event, { confirmed: true, postingStatus: 'posted' }), { outcome: 'refused', reason: 'not-posted' });
 });
 
 test('a pending request cannot turn a quoted previous refund into current income', () => {
