@@ -283,7 +283,7 @@ export const inspectGenericBankEventForReview = (
     : sourceContext ? { ...sourceContext, sender }
       : universalSourceParseContext(hasUniversalInstitutionSender(sender)
         ? inspectUniversalAlert({ source, sender }) : null, sender, getActiveCountry());
-  const creditReviewMarket = detectLaunchMarketFromSender(sender);
+  const creditReviewMarket = creditReviewOnly || mentionsCredit(source) ? detectLaunchMarketFromSender(sender) : null;
   const creditReviewAliases: CurrencyAliasMap = creditReviewMarket === 'AE' ? { 'درهم': ['AED'], 'دراهم': ['AED'] }
     : creditReviewMarket === 'SA' ? { 'ريال': ['SAR'] } : {};
   let event = inspectUniversalBankEvent(isGulfNeighbourMarket(market)

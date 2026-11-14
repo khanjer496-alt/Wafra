@@ -268,7 +268,10 @@ export function parseIosBackgroundAlert(input: NativeParserInput): NativeParserR
     // retains the reversal note in its existing capture/history Review lane.
     const debitSource = pair && parsed?.kind === 'transaction' && parsed.type === 'expense' ? pair.debit : null;
     const principalSource = debitSource ?? source;
-    const event = inspectGenericBankEventForReview(principalSource, sender);
+    const debitAliases = debitSource && senderMarket === 'AE' ? { 'درهم': ['AED'], 'دراهم': ['AED'] }
+      : debitSource && senderMarket === 'SA' ? { 'ريال': ['SAR'] } : undefined;
+    const event = inspectGenericBankEventForReview(principalSource, sender, undefined,
+      debitAliases ? { currencyAliases: debitAliases } : undefined);
     if (futureDate(event, input.observedAt, parsed ?? undefined) && !(creditReviewOnly && !parsed)) return ignore();
     if (parsed && parsed.kind !== 'transaction') return ignore();
     if (event && ['statement', 'balance', 'authentication', 'bill', 'card-payment'].includes(event.family)) return ignore();
