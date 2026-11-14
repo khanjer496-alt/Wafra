@@ -93,3 +93,33 @@ collects independent identity/config/daemon failures within the total budget.
 Cache provenance labels expressly do not claim cached .app source-commit proof.
 The specialist accepted the conservative F2 disposition in adf9ae40, not this
 new SHA or any run. Renewed exact-SHA approval is still required.
+
+## Latest exact-a1889fea findings
+
+Exact iOS708a9a2e and Reviewer10c451bf were NOT OK. This revision computes the
+unchanged full cache key once in a step after checkout, validates the64-hex
+digest, and shares the same key between restore and observer provenance. It
+never uses hashFiles in job env (GitHub's context table permits it in steps).
+Public text publication now strictly validates its own JSON event/stage schema
+and is idempotent: two passes preserve daemon/XCTest/INIT/Restore evidence
+without allowing extra payload fields. The zero-offer negative check branches
+on actual offer availability, not disabled Buy existence; Restore plus usable
+retry/free controls are required when no offer is selected.
+
+Both application preflight gates remain distinct: e-paywall.tsx125 may reject
+before billing.restorePro; superwall-billing-provider.native.tsx443 may reject
+before SDK restorePurchases. SDK Restore entry/result and the later
+verifyProEntitlement result are separate UNKNOWNs without an existing observable.
+A no-tap diagnostic only observes readiness/config lifecycle; no log absence,
+file/PID match or successful UI outcome proves these calls or shared binding.
+Apple documents one shared test environment; runner-local reset/control logs
+do not establish a two-session architecture. Any observed daemon interruption
+invalidates reuse of earlier session observations. Missing lines remain UNKNOWN.
+
+Build versions and cached/installed hashes are observed; cache producer source
+commit, active AUT StoreKit mode, and binary Superwall/runtime identity remain
+UNKNOWN unless independently evidenced. Harness/source metadata must not be
+relabeled as cached-binary provenance. The final build195 candidate still needs
+independent evidence that it contains #251, and simulator StoreKitTest must not
+be called developer-signed sandbox or TestFlight proof. No release-ready
+conclusion or hosted-run permission is implied by this diagnostic revision.

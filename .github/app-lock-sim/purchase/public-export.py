@@ -34,9 +34,25 @@ def event(line):
 def stages(notes):
     answer = []
     for line in notes.splitlines():
-        match = STAGE.match(line)
-        if match and match[2] in STAGES and len(answer) < 24:
-            answer.append((match[2] + '-' + str(len(answer) + 1), datetime.strptime(match[1], '%Y-%m-%d %H:%M:%S')))
+        if len(answer) >= 24:
+            break
+        if line.startswith('{'):
+            try:
+                value = json.loads(line)
+                if not isinstance(value, dict) or set(value) != {'stage', 'utc'}:
+                    continue
+                tag = value['stage']
+                match = re.fullmatch(r'(.+)-([1-9]|1[0-9]|2[0-4])', tag) if isinstance(tag, str) else None
+                if not match or match[1] not in STAGES or not isinstance(value['utc'], str):
+                    continue
+                stamp = datetime.strptime(value['utc'], '%Y-%m-%dT%H:%M:%S')
+                answer.append((tag, stamp))
+            except (ValueError, TypeError):
+                continue
+        else:
+            match = STAGE.match(line)
+            if match and match[2] in STAGES:
+                answer.append((match[2] + '-' + str(len(answer) + 1), datetime.strptime(match[1], '%Y-%m-%d %H:%M:%S')))
     return answer
 
 
@@ -85,6 +101,16 @@ def safe_results(text):
 def safe_test_log(text):
     lines = []
     for line in text.splitlines():
+        if line.startswith('{'):
+            try:
+                value = json.loads(line)
+                if value == {'event': 'daemon_interrupted'}:
+                    lines.append(json.dumps(value))
+                elif isinstance(value, dict) and set(value) == {'event', 'result'} and value['event'] == 'xctest_result' and value['result'] in {'passed', 'failed'}:
+                    lines.append(json.dumps(value))
+            except (ValueError, TypeError):
+                pass
+            continue
         if 'Connection to daemon interrupted' in line:
             lines.append(json.dumps({'event': 'daemon_interrupted'}))
         elif re.search(r"Test (?:Case|Suite).* (?:passed|failed)", line):

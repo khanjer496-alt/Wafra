@@ -174,6 +174,19 @@ final class PurchaseUITests: XCTestCase {
     func purchaseOffersVisible() -> Bool {
         el("onboarding-plan-weekly").exists || el("onboarding-plan-yearly").exists
     }
+    func emptyRestoreActionsUsable() -> Bool {
+        let restore = el("onboarding-paywall-restore")
+        guard restore.exists && restore.isEnabled else { return false }
+        if purchaseOffersVisible() {
+            let buy = el("onboarding-paywall-pro")
+            return buy.exists && buy.isEnabled
+        }
+        // The shipping zero-offer paywall keeps a disabled Buy. Its existence
+        // must not force purchase readiness into a Restore-only assertion.
+        let retry = el("onboarding-plans-retry")
+        let free = el("onboarding-paywall-free")
+        return retry.exists && retry.isEnabled && free.exists && free.isEnabled
+    }
     func restoreUIReady() -> Bool {
         let restore = el("onboarding-paywall-restore")
         // Configured billing with zero offers exposes retry-prices and can still
@@ -475,7 +488,7 @@ final class PurchaseUITests: XCTestCase {
             Thread.sleep(forTimeInterval: 3)
             guard app.state == .runningForeground && el("onboarding-paywall").exists &&
                   !app.buttons["Settings"].firstMatch.exists && restore.isEnabled &&
-                  (el("onboarding-paywall-pro").exists ? el("onboarding-paywall-pro").isEnabled : el("onboarding-plans-retry").isEnabled) else {
+                  emptyRestoreActionsUsable() else {
                 throw StepFail("empty Restore left paywall, crashed, reached Home, or stranded actions disabled")
             }
             shot("P3c2-no-purchase-found-paywall-stays")

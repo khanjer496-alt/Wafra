@@ -50,6 +50,27 @@ class PublicExportTests(unittest.TestCase):
     def test_unknown_stage_names_are_not_public_fields(self):
         self.assertEqual(export.stages('2026-11-15 01:00:00 +0000 SYNTHETIC-TOKEN boundary start'), [])
 
+    def test_two_pass_publication_preserves_events_and_stages_without_secrets(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / 'purchase-xcodebuild-test.log').write_text("Connection to daemon interrupted\nTest Case 'testBoundaryDiagnostic' passed\nSuperwall token=SYNTHETIC-SECRET\n")
+            (root / 'purchase-notes.log').write_text('2026-11-15 01:00:00 +0000 INIT boundary start\n2026-11-15 01:00:01 +0000 P3c boundary Restore\n')
+            (root / 'purchase-results.tsv').write_text('DIAG\tFAIL\taccount=SYNTHETIC-ACCOUNT\n')
+            export.publish(root)
+            first = {p.name: p.read_text() for p in root.iterdir()}
+            export.publish(root)
+            second = {p.name: p.read_text() for p in root.iterdir()}
+            self.assertEqual(first, second)
+            self.assertIn('daemon_interrupted', second['purchase-xcodebuild-test.log'])
+            self.assertIn('xctest_result', second['purchase-xcodebuild-test.log'])
+            self.assertEqual(len(second['purchase-notes.log'].splitlines()), 2)
+            self.assertFalse(any('SYNTHETIC-' in text for text in second.values()))
+
+    def test_structured_events_reject_unknown_fields_and_values(self):
+        self.assertEqual(export.safe_test_log('{"event":"daemon_interrupted","token":"SYNTHETIC-SECRET"}'), '\n')
+        self.assertEqual(export.stages('{"stage":"INIT-1","utc":"2026-11-15T01:00:00","account":"SYNTHETIC-ACCOUNT"}'), [])
+        self.assertEqual(export.safe_test_log('{"event":"xctest_result","result":"SYNTHETIC-SECRET"}'), '\n')
+
     def test_publication_withholds_ui_and_sdk_text(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

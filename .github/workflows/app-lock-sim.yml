@@ -28,7 +28,6 @@ jobs:
     timeout-minutes: ${{ (inputs.purchase_case == 'empty' || inputs.purchase_case == 'owned') && 25 || 15 }}
     env:
       PURCHASE_CASE: ${{ inputs.purchase_case || 'diagnostic' }}
-      APP_CACHE_KEY: app-lock-sim-app-v3-${{ hashFiles('src/**', 'modules/**', 'assets/**', 'plugins/**', 'app.json', 'package-lock.json', 'babel.config.js', 'metro.config.js', 'eas.json') }}
       HARNESS_GIT_SHA: ${{ github.sha }}
       # founder / auto-Pro OFF, like the production profile
       MAESTRO_DRIVER_STARTUP_TIMEOUT: "300000"
@@ -40,6 +39,20 @@ jobs:
       EXPO_PUBLIC_WAFRA_RELAY_URL: ${{ vars.WAFRA_RELAY_URL || 'https://wafra-relay.khanjer496.workers.dev' }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Compute exact cache key after checkout
+        id: cachekey
+        env:
+          SOURCE_DIGEST: ${{ hashFiles('src/**', 'modules/**', 'assets/**', 'plugins/**', 'app.json', 'package-lock.json', 'babel.config.js', 'metro.config.js', 'eas.json') }}
+        run: |
+          set -euo pipefail
+          case "$SOURCE_DIGEST" in
+            ''|*[!0-9a-fA-F]*) echo '::error::source digest absent or invalid'; exit 1 ;;
+          esac
+          [ "${#SOURCE_DIGEST}" -eq 64 ] || { echo '::error::source digest length invalid'; exit 1; }
+          KEY="app-lock-sim-app-v3-$SOURCE_DIGEST"
+          echo "key=$KEY" >> "$GITHUB_OUTPUT"
+          echo "APP_CACHE_KEY=$KEY" >> "$GITHUB_ENV"
 
       - name: Select Xcode 26.2 or newer
         run: |
@@ -57,7 +70,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: build/app
-          key: ${{ env.APP_CACHE_KEY }}
+          key: ${{ steps.cachekey.outputs.key }}
 
       - name: Require existing app cache (never rebuild for this diagnostic)
         run: |
