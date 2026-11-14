@@ -635,6 +635,21 @@ function ktSources(dir) {
   ok('native SQLite is built with SQLCipher', sqlite?.[1]?.useSQLCipher === true);
   ok('Android does not cloud-backup the encrypted database', config.android?.allowBackup === false);
 
+  const accessedApis = config.ios?.privacyManifests?.NSPrivacyAccessedAPITypes ?? [];
+  // App-private settings, App Group widget snapshots, and the parser deadline
+  // use these first-party APIs; SDK manifests do not replace our declaration.
+  const expectedApiReasons = {
+    NSPrivacyAccessedAPICategoryUserDefaults: ['1C8F.1', 'CA92.1'],
+    NSPrivacyAccessedAPICategorySystemBootTime: ['35F9.1'],
+  };
+  ok('first-party required-reason APIs declare app settings, App Group and timer use',
+    accessedApis.length === Object.keys(expectedApiReasons).length &&
+      JSON.stringify(Object.fromEntries(accessedApis.map((entry) =>
+        [entry.NSPrivacyAccessedAPIType, [...entry.NSPrivacyAccessedAPITypeReasons].sort()])
+        .sort(([a], [b]) => a.localeCompare(b)))) ===
+      JSON.stringify(Object.fromEntries(Object.entries(expectedApiReasons)
+        .sort(([a], [b]) => a.localeCompare(b)))));
+
   const collectedData = config.ios?.privacyManifests?.NSPrivacyCollectedDataTypes ?? [];
   const collectedTypes = new Set(collectedData.map((entry) => entry.NSPrivacyCollectedDataType));
   // Matches docs/store-compliance/app-privacy-answers.md and the CEO's 13–14 Nov
