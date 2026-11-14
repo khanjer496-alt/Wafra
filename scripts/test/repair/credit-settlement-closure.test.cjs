@@ -133,6 +133,7 @@ for (const row of require('./credit-settlement-review-probes.json')) test(`${row
   const acceptedReview = (row.expected === 'income' || row.acceptInformationalReview) && got.sms === 'none' && got.session === 'none' && retained;
   assert.ok(acceptedReview || got.sms === target, `${row.body} parseSms ${JSON.stringify(got)}`);
   assert.ok(acceptedReview || got.session === target, `${row.body} session ${JSON.stringify(got)}`);
+  if (row.expected === 'none') assert.ok(!/^(?:credit|debit):/.test(got.native), `${row.body} no native movement ${JSON.stringify(got)}`);
   if (row.expected === 'none' && row.requireReview) {
     assert.ok(retained, `${row.body} must be retained as informational Review on app/native ${JSON.stringify(got)}`);
     assert.equal(got.review.role, 'transaction', row.body);
