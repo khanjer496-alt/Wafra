@@ -9,7 +9,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { homeSummaryCopy } from '@/lib/reference-copy';
 import { transferReviewCopy } from '@/lib/transfer-review-copy';
 
-export interface TransferReviewNoticeProps {
+interface TransferReviewNoticeProps {
   /** Transfers waiting for an answer (transferWaitingSummary; a pair once), or queued rows only Transfers reaches. */
   pendingCount: number;
   incomingFils: number;

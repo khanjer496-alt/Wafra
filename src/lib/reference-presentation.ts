@@ -83,7 +83,7 @@ export function limitedCategorySummary(rows: readonly SpendingCategoryRow[]) {
   return { spentFils, limitFils, count, ratio: limitFils > 0 ? spentFils / limitFils : null };
 }
 
-export type AgendaSection = 'overdue' | 'expected-earlier' | 'soon' | 'later' | 'paid';
+type AgendaSection = 'overdue' | 'expected-earlier' | 'soon' | 'later' | 'paid';
 export type PaymentGroup = 'subscriptions' | 'utilities' | 'cards' | 'loans' | 'other';
 export interface PaymentAgendaItem {
   id: string;
@@ -146,7 +146,7 @@ export function groupPaymentAgenda(items: readonly PaymentAgendaItem[], includeP
   })).filter((group) => group.items.length > 0);
 }
 
-export interface PaymentAgendaWindowSection {
+interface PaymentAgendaWindowSection {
   key: AgendaSection;
   /** Only the highest-priority rows needed for the current rendered window. */
   items: PaymentAgendaItem[];

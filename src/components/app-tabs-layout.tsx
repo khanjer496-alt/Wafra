@@ -1,12 +1,16 @@
+import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { Tabs } from 'expo-router';
 import React from 'react';
 import { Platform } from 'react-native';
 
+import { FreezeWhenCovered, type CoverTransitionNavigation } from '@/components/freeze-when-covered';
 import { WafraTabBar } from '@/components/tab-bar';
 import { TabBarMetricsProvider } from '@/components/ui/tab-bar-metrics';
 import { useAutoImport } from '@/hooks/use-auto-import';
 import { useSharedAlertFormats } from '@/hooks/use-shared-alert-formats';
 import { useHistoryImport } from '@/hooks/use-history-import';
+import { useWidgetSnapshotSync } from '@/hooks/use-widget-snapshot-sync';
+import { freezeCoveredScreens } from '@/lib/covered-screen-freeze';
 
 /**
  * Capture belongs to the signed-in tab shell, not to whichever tab happened
@@ -21,6 +25,9 @@ function CaptureOwner() {
   useHistoryImport();
   useAutoImport(true, false);
   useSharedAlertFormats();
+  // Home-screen widgets follow the ledger here, not in Home, which can be
+  // paused while covered (use-widget-snapshot-sync.ts).
+  useWidgetSnapshotSync();
   return null;
 }
 
@@ -50,20 +57,29 @@ function CaptureOwner() {
  * honest.
  */
 export default function TabsLayout() {
+  // Focus of THIS route in the root stack: false while a pushed screen
+  // (Transactions, Settings, the add sheet) covers the whole tab shell. The tab
+  // navigator cannot see that by itself, so hidden tabs below a covering screen
+  // kept recomputing on every store change. CaptureOwner is a sibling of the
+  // freeze, never inside it: capture and History must keep running.
+  const covered = !useIsFocused();
+  // This route's own navigation in the root stack: its transition events say
+  // when a covering push has ended, and when a swipe-back starts to reveal it.
+  const navigation = useNavigation<CoverTransitionNavigation>();
   return (
     <TabBarMetricsProvider>
       <CaptureOwner />
+      <FreezeWhenCovered covered={covered} enabled={freezeCoveredScreens(Platform.OS)} transitions={navigation}>
       <Tabs
         // Detaching native views alone does not stop hidden React consumers
         // processing each import update. Keep their state, but suspend hidden
         // Android renders. CaptureOwner above remains live outside the tabs.
         //
-        // ANDROID ONLY, deliberately. Every tab subscribes to the whole store,
-        // so freezing iOS too would stop hidden tabs re-running their
-        // projections on each import page — but this navigator's behaviour is
-        // decided by measurement here (see detachInactiveScreens above), and
-        // there is none for iOS. `tab-render-cost.test.cjs` pins the negative
-        // for iOS and web; changing it needs a device pass first.
+        // Android only, because this JS tab navigator is Android/web only: iOS
+        // uses app-tabs-layout.ios.tsx (NativeTabs), whose tabs are paused per
+        // tab by ios-tab-gate.tsx instead (CEO decision, iOS on; App QA Lead's
+        // iOS device pass is the verification). Web keeps every tab live.
+        // `tab-render-cost.test.cjs` pins this navigator's web/iOS negative.
         screenOptions={{ headerShown: false, freezeOnBlur: Platform.OS === 'android' }}
         tabBar={(props) => <WafraTabBar {...props} />}>
         <Tabs.Screen name="index" />
@@ -71,6 +87,7 @@ export default function TabsLayout() {
         <Tabs.Screen name="bills" />
         <Tabs.Screen name="wallet" />
       </Tabs>
+      </FreezeWhenCovered>
     </TabBarMetricsProvider>
   );
 }

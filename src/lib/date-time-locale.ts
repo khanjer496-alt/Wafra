@@ -1,7 +1,7 @@
 import { COUNTRY_NAMES } from '@/lib/country-names';
 
 /** Device presentation preferences, independent of parser country and money. */
-export interface DateTimeLocale {
+interface DateTimeLocale {
   languageTag?: string | null;
   regionCode?: string | null;
   uses24hourClock?: boolean | null;

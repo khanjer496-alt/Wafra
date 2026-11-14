@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 1780dda6f395ac01191d44885c90116ec4576f4b580e7d526e366660104eb04d
+// Generated from normal shipping TypeScript. Source SHA-256: 1514537192d8dd41db851fec8303ef58b131b9150acfc9f1d28a898161c12cc0
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -1763,9 +1763,9 @@ const isCompactCardCreditReturn = (source) => /\bcr\b/iu.test(source) && /\bcard
     /\b(?:pos|(?:card\s+)?pur)\b/iu.test(source);
 const isCompletedCardPurchaseReturn = (source, legacy) => legacy.kind === 'transaction' && legacy.type === 'income' &&
     legacy.categoryGuess === 'other' && !legacy.transferHint &&
-    legacy.card !== null && legacy.card.kind !== 'account' &&
-    (/^(?:your\s+)?(?:card\s+|pos\s+)?purchase\s+of\b(?:[^.\n]|\.(?=\d)){0,160}?\b(?:with|using|on)\s+(?:your\s+)?(?:(?:credit|debit|covered)\s+)?card\s+(?:ending(?:\s+with)?\s+)?[x*\d -]{4,32}\s+(?:has\s+been|was)\s+(?:successfully\s+)?(?:reversed|refunded)\b/iu.test(source) ||
-        /^purchase\s+(?:amount|amt)\s+of\b(?:[^.\n]|\.(?=\d)){0,160}?\bon\s+your\s+(?:(?:credit|debit|covered|prepaid)\s+)?card(?:\s+(?:ending(?:\s+with)?\s+)?[x*\d -]{4,32})?\s+has\s+been\s+(?:successfully\s+|fully\s+)?refunded\b/iu.test(source)) &&
+    ((legacy.card !== null && legacy.card.kind !== 'account' &&
+        /^(?:your\s+)?(?:card\s+|pos\s+)?purchase\s+of\b(?:[^.\n]|\.(?=\S)){0,160}?\b(?:with|using|on)\s+(?:your\s+)?(?:(?:credit|debit|covered)\s+)?card\s+(?:ending(?:\s+with)?\s+)?[x*\d -]{4,32}(?:\s+at\s+(?:[^.\n]|\.(?=\S)){1,80}?)?\s+(?:has\s+been|was)\s+(?:successfully\s+)?(?:reversed|refunded)\b/iu.test(source)) ||
+        /^purchase\s+(?:amount|amt)\s+of\b(?:[^.\n]|\.(?=\S)){0,160}?\bon\s+your\s+(?:(?:(?:credit|debit|covered|prepaid)\s+)?card|account)(?:\s+(?:ending(?:\s+with)?\s+)?[x*\d -]{4,32})?\s+has\s+been\s+(?:successfully\s+|fully\s+)?refunded\b/iu.test(source)) &&
     !FUTURE_REFUND.test(source);
 const FUTURE_REFUND = /\bwill\s+be\s+(?:refunded|reversed|credited)\b/iu;
 const mistookInstrumentLast4ForAmount = (source, market, legacy) => {
@@ -1881,6 +1881,29 @@ const interpretBankAlert = ({ source, sender, market, overrides = {}, observedAt
                 categoryGuess: cashbackCategory, categoryDeliberate: true, categoryPinned: true,
             } : {}) }
         : capturedLegacy;
+    if ((0, sms_parser_1.refundSideNoteVerdict)(source) !== 'none') {
+        if (usableLegacy)
+            return legacyResult(usableLegacy);
+        const pending = (0, unparsed_launch_alert_1.inspectUnparsedLaunchAlert)(source, sender);
+        return pending.outcome === 'review'
+            ? finalFallback(pending, null)
+            : { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+    }
+    if (!usableLegacy && (0, sms_parser_1.hasOnlyUnsettledCredit)(source)) {
+        const pending = (0, unparsed_launch_alert_1.inspectUnparsedLaunchAlert)(source, sender);
+        return pending.outcome === 'review'
+            ? finalFallback(pending, null)
+            : { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+    }
+    const noteBesideDebit = (0, sms_parser_1.creditNoteBesideDebit)(source);
+    if (noteBesideDebit === 'blank' || noteBesideDebit === 'refuse') {
+        if (usableLegacy && !(usableLegacy.kind === 'transaction' && usableLegacy.type === 'income'))
+            return legacyResult(usableLegacy);
+        const pending = (0, unparsed_launch_alert_1.inspectUnparsedLaunchAlert)(source, sender);
+        return pending.outcome === 'review'
+            ? finalFallback(pending, null)
+            : { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+    }
     const semanticText = (0, sms_parser_1.normalizeArabic)(source).replace(/\s+/gu, ' ');
     if (usableLegacy && isCompletedCardPurchaseReturn(semanticText, usableLegacy)) {
         return legacyResult(usableLegacy, 'refund');
@@ -2332,7 +2355,7 @@ function malformedLocalMoneyTokens(text, currencyAliases) {
 "best-effort-autopost":function(module,exports,require){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.appendBestEffortUndo = exports.tombstonesForRemoved = exports.bestEffortUndoKeys = exports.bestEffortCardPaymentObservationKey = exports.bestEffortObservationKey = exports.BEST_EFFORT_UNDO_CAP = exports.refusedOnlyByShopOrPromoWording = exports.hasNonCompletedWording = exports.namesOwnInstrumentTail = exports.isRegisteredAlertSender = exports.isUnverifiedAlertSender = exports.hasLinkFromUnregisteredSender = exports.isNotAutoPostableMoney = exports.sharedSymbolCurrencyForCountry = void 0;
+exports.appendBestEffortUndo = exports.tombstonesForRemoved = exports.bestEffortUndoKeys = exports.bestEffortCardPaymentObservationKey = exports.bestEffortObservationKey = exports.BEST_EFFORT_UNDO_CAP = exports.refusedOnlyByShopOrPromoWording = exports.hasNonCompletedWording = exports.namesOwnInstrumentTail = exports.isRegisteredAlertSender = exports.isUnverifiedAlertSender = exports.hasLinkFromUnregisteredSender = exports.isSafeCardRepaymentReviewSource = exports.isNotAutoPostableMoney = exports.sharedSymbolCurrencyForCountry = void 0;
 exports.decideBestEffortAutoPost = decideBestEffortAutoPost;
 exports.setBestEffortAutoPostEnabled = setBestEffortAutoPostEnabled;
 exports.bestEffortAutoPostEnabled = bestEffortAutoPostEnabled;
@@ -2340,6 +2363,7 @@ const currency_metadata_1 = require("@/lib/currency-metadata");
 const capture_source_identity_1 = require("@/lib/capture-source-identity");
 const fx_rates_1 = require("@/lib/fx-rates");
 const sms_parser_1 = require("@/lib/sms-parser");
+const principal_posting_guards_1 = require("@/lib/principal-posting-guards");
 const SHARED_SYMBOL_COUNTRY_CURRENCY = {
     US: 'USD', PR: 'USD', GU: 'USD', VI: 'USD', AS: 'USD', MP: 'USD', EC: 'USD', SV: 'USD',
     CA: 'CAD', AU: 'AUD', NZ: 'NZD', SG: 'SGD', HK: 'HKD', MX: 'MXN', AR: 'ARS', CL: 'CLP', CO: 'COP',
@@ -2504,6 +2528,7 @@ const hasLinkCallToAction = (source) => {
     return false;
 };
 const NOT_A_SETTLED_FACT = [
+    /^\s*(?:Dear\s+Customer[,!:]\s*)?(?:[^\n.!?\p{N}]{0,40}?[،,!:\s]\s*)?احصل\s+عل[ىي]\s+(?:استرداد|استرجاع)\s+نقدي/iu,
     /\bfraud\s+alert\b|(?<!\b(?:if|in\s+case|should)\b[^.!?\n]{0,60})\b(?:suspicious\s+(?:activity|transaction|charge|payment|login|purchase)|unusual\s+activity)\b|\bif\s+it\s+was\s+you\b|\bwas\s+this\s+you\b|\bwe\s+(?:have\s+)?(?:blocked|stopped|declined|locked)\b|(?<!\b(?:if|in\s+case|should|can|could|may)\b[^.!?\n]{0,60})\blocked\b|\bunder\s+review\b/iu,
     /\bearn\s+(?:up\s+to\s+)?(?:[$€£₹]\s?\d|\d[\d.,]*\s*(?:%|[A-Z]{3}\b))(?:[^.!?\n]|\.\d){0,40}?\b(?:when|every\s+time|each\s+time|for\s+every)\b|\btap\s+to\s+accept\b/iu,
     /\bdid\s+you\s+(?:authori[sz]e|make|attempt|use)\b|\breply\s+(?:y|yes|n|no|1|2)\b|(?<!\b(?:if|in\s+case|should)\b[^.!?\n]{0,40})\brecogni[sz]e\b|\bflagged\b|\bheld\b|\b(?:otp|one[-\s]time|verification|security)\s+code\b|(?<!\b(?:auth|authori[sz]ation|approval|merchant|branch|postal|zip|sort|mcc|promo|category|reference|ref|biller|bsb)\s+)\bcode\s*:?\s*\d{4,}\b/iu,
@@ -2519,10 +2544,20 @@ const NOT_A_NEW_MOVEMENT = [
 const MERCHANT_ORDER_RECEIPT = /\border\s*(?:#|no\.?|number|id)\s*[:.-]?\s*[A-Z0-9-]*\d[\s\S]{0,80}?\b(?:paid|payment)\b|\b(?:paid|payment)\b[\s\S]{0,40}?\border\s*(?:#|no\.?|number|id)\s*[:.-]?\s*[A-Z0-9-]*\d/iu;
 const OWN_BALANCE_STATED = /\b(?:updated|avl\.?|available|new|closing|current)\s+(?:wallet\s+|account\s+|a\/c\s+)?bal(?:ance)?\b|\bbal(?:ance)?\s*(?:is|:)\s*(?:[A-Z]{3}|Rs\.?|[$£€₹])/iu;
 const OWN_CARD_PAYMENT = /\b(?:[Yy]ou\s+)?paid\b(?:[^.\n]|\.\d){0,40}?\bto\s+your\s+(?:(?:[A-Z][\p{L}\p{N}&.'’-]*|credit|charge)\s+){0,4}?[Cc]ard\b/u;
-const isNotAutoPostableMoney = (source) => hasLinkCallToAction(source) || NOT_A_SETTLED_FACT.some((pattern) => pattern.test(neutraliseBenignShapes(source))) ||
-    NOT_A_NEW_MOVEMENT.some((pattern) => pattern.test(source)) ||
-    (MERCHANT_ORDER_RECEIPT.test(source) && !OWN_BALANCE_STATED.test(source));
+const notAutoPostableMoney = (source, repaymentReview) => {
+    if ((0, principal_posting_guards_1.hasClickLinkPrompt)(source) || (0, principal_posting_guards_1.hasMobileMoneyCallback)(source) || (0, principal_posting_guards_1.isUnqualifiedPeerTransferClaim)(source) ||
+        (0, principal_posting_guards_1.isUnpostedCardBalanceClaim)(source) || (0, principal_posting_guards_1.isLeadingNumericDiscountOffer)(source) ||
+        (!repaymentReview && (0, principal_posting_guards_1.isUnqualifiedCardRepayment)(source)) || hasLinkCallToAction(source))
+        return true;
+    const wording = neutraliseBenignShapes(source);
+    return NOT_A_SETTLED_FACT.some((pattern) => pattern.test(wording)) ||
+        NOT_A_NEW_MOVEMENT.some((pattern) => pattern.test(source)) ||
+        (MERCHANT_ORDER_RECEIPT.test(source) && !OWN_BALANCE_STATED.test(source));
+};
+const isNotAutoPostableMoney = (source) => notAutoPostableMoney(source, false);
 exports.isNotAutoPostableMoney = isNotAutoPostableMoney;
+const isSafeCardRepaymentReviewSource = (source) => ((0, principal_posting_guards_1.isUnqualifiedCardRepayment)(source) || (0, principal_posting_guards_1.isQualifiedCardRepaymentReceipt)(source)) && !notAutoPostableMoney(source, true);
+exports.isSafeCardRepaymentReviewSource = isSafeCardRepaymentReviewSource;
 const LINK_RE = /\bhttps?:\/\/|\bwww\.[a-z0-9-]|\b(?:bit\.ly|tinyurl\.com|t\.co|goo\.gl|cutt\.ly|rb\.gy|is\.gd|ow\.ly|shorturl\.at)\/|\b[a-z0-9][a-z0-9-]{0,62}\.[a-z]{2,24}\/[\w-]/u;
 const GENERIC_SENDER = /^(?:info|infos|alert|alerts|notice|notify|sms|msg|message|verify|secure|security|service|support|update|bank|banking)$/i;
 const registeredAlphaSender = (sender) => {
@@ -2603,7 +2638,7 @@ const PROMO_AND_SHOP_WORDING = [
     /\bwill\s+be\s+(?:added|delivered|shipped|dispatched)\b|\btrack\s+your\s+(?:order|parcel|package|shipment)\b|\border\s+(?:update|confirmed)\b/iu,
 ];
 const REFUND_AVAILABLE = /\brefund\b[^\n]{0,30}?\b(?:is|are)\s+(?:now\s+)?(?:available|ready)\b/iu;
-const hardNonCompletedWording = (source, market) => (0, sms_parser_1.nonPostingReason)(source) !== null || NON_COMPLETED_WORDING.some((pattern) => pattern.test(source)) ||
+const hardNonCompletedWording = (source, market) => (0, principal_posting_guards_1.isUnpostedCardBalanceClaim)(source) || (0, sms_parser_1.nonPostingReason)(source) !== null || NON_COMPLETED_WORDING.some((pattern) => pattern.test(source)) ||
     (!!market && LATAM_MARKETS.has(market) && LATAM_NON_COMPLETED_WORDING.some((pattern) => pattern.test(source))) ||
     TEMPORARY_HOLD.test(source) || (AUTHORISATION.test(source) && !COMPLETED.test(source));
 const softNonCompletedWording = (source, ownCompleted) => {
@@ -2620,12 +2655,19 @@ const EXECUTED_MANDATE_DEBIT = /(\b(?:has\s+been|was)\s+(?:debited|charged|deduc
 const CREDITED_TOWARDS_REVERSAL = /(\b(?:is|has\s+been|was)\s+(?:successfully\s+)?credited\s+with\b(?:[^.\n]|\.(?=\S)){0,80}?\btowards\s+)reversal\b/giu;
 const REVERSED_THEN_CREDITED_TO_YOU = /\brevers(?:al|ed|e)\b(?:[^.\n]|\.(?=\S)){0,200}?\b(?:is|has\s+been|was)\s+(?:successfully\s+)?credited\s+to\s+your\b/giu;
 const RECOGNISE_CALLBACK_FOOTER = /(?<!\p{L})(?:(?:don['’]t|do\s+not|didn['’]t)\s+recogni[sz]e\b[^.!?\n]{0,30}\?\s*(?=(?:call|contact|ring|phone)\b)|si\s+no\s+(?:lo\s+|la\s+)?reconoc(?:e|es)\b[^.!?\n]{0,60}?(?=\bllam(?:a|e|ar)\b)|n[ãa]o\s+reconhece\b[^.!?\n]{0,40}?\??\s*(?=(?:ligue|ligar)\b))/giu;
+const CLOSING_FRAUD_FOOTER = /(?:^|(?<=[\s.!?]))(?:was\s+this\s+(?:you|yours)\s*[?？]|not\s+(?:you|u)\s*[?？]\s*reply\s+["']?(?:no|n)["']?\s+to\s+block\s+(?:your\s+)?(?:(?:debit|credit)\s+)?card\s*[.!]?)\s*$/iu;
+const NUMERIC_DISCOUNT_CODE = /\b((?:use|enter)\s+)code(\s+\d{4,8}\s+to\s+get\s+\d{1,3}\s?%\s+off\b)/giu;
+const CODE_WARNING_NOUN = String.raw `(?:(?:(?:verification|security|authentication|one[-\s]?time)\s+)?codes?|otp(?:\s+code)?|pin|one[-\s]?time\s+password)`;
+const CODE_SAFETY_WARNING = new RegExp(String.raw `(^|[.!?;,\r\n:])\s*(?:please\s+)?(?:(?:do\s+not|don['’]t|never)\s+(?:share|disclose|reveal)\s+(?:(?:your|the|this)\s+)?${CODE_WARNING_NOUN}(?:\s+with\s+(?:anyone|anybody|others))?(?:,?\s+including\s+(?:bank\s+staff|bank\s+employees))?|keep\s+(?:(?:your|the|this)\s+)?${CODE_WARNING_NOUN}\s+confidential)(?=\s*(?:[.!?;\r\n]|$))`, 'giu');
 const neutraliseBenignShapes = (source) => source
+    .replace(CODE_SAFETY_WARNING, '$1 ')
+    .replace(NUMERIC_DISCOUNT_CODE, '$1promo code$2')
     .replace(CARD_PRODUCT_NAME, 'card')
     .replace(EXECUTED_MANDATE_DEBIT, '$1instruction')
     .replace(CREDITED_TOWARDS_REVERSAL, '$1refund')
     .replace(REVERSED_THEN_CREDITED_TO_YOU, (span) => span.replace(/\brevers(?:al|ed|e)\b/giu, 'refunded'))
-    .replace(RECOGNISE_CALLBACK_FOOTER, ' ');
+    .replace(RECOGNISE_CALLBACK_FOOTER, ' ')
+    .replace(CLOSING_FRAUD_FOOTER, ' ');
 const wordingGuardText = (source, sender) => {
     const withoutFooters = source.replace(PROMO_FOOTER_SENTENCE, ' ');
     const completed = COMPLETED_MOVEMENT.test(withoutFooters);
@@ -4896,15 +4938,6 @@ const import_processing_disclosure_1 = require("@/lib/import-processing-disclosu
 const S = {
     transactionSearchLabel: { en: 'Search transactions', ar: 'البحث في العمليات' },
     transactionSearchPlaceholder: { en: 'Merchant or category', ar: 'التاجر أو الفئة' },
-    transactionNetPending: { en: 'Net', ar: 'الصافي' },
-    transactionConfirmedSubtotal: {
-        en: 'Confirmed entries: {amount}',
-        ar: 'العمليات المؤكدة: {amount}',
-    },
-    unresolvedTransfersSummary: {
-        en: '{count} transfer{s} excluded from Net',
-        ar: '{count} تحويلات مستبعدة من الصافي',
-    },
     transactionDayTotal: { en: 'Day total', ar: 'إجمالي اليوم' },
     autoAddedCheck: { en: 'Auto-added — check', ar: 'أُضيفت تلقائيًا — راجِعها' },
     autoAddedExplain: {
@@ -4966,10 +4999,6 @@ const S = {
         ar: 'ستستخدم الدفعات القادمة المطابقة لهذا المفوتر {title} · {category}.',
     },
     registeredBillPayment: { en: 'Bill payment', ar: 'دفعة فاتورة' },
-    billPatternHint: {
-        en: 'Wafra found {count} payments with this same bill reference. If the bank’s name is unclear, edit it once and Wafra can remember the name and category for matching payments.',
-        ar: 'وجد وفرة {count} دفعات تحمل مرجع الفاتورة نفسه. إذا كان اسم البنك غير واضح، عدّله مرة واحدة ويمكن لوفرة تذكّر الاسم والفئة للدفعات المطابقة.',
-    },
     accountTransferHistory: { en: 'Transfers', ar: 'التحويلات' },
     transactionDateLabel: { en: 'Transaction date', ar: 'تاريخ العملية' },
     ledgerCurrencyTitle: { en: 'Ledger currency', ar: 'عملة السجل' },
@@ -5049,11 +5078,6 @@ const S = {
     tabFlow: { en: 'Spending', ar: 'الإنفاق' },
     tabBills: { en: 'Bills', ar: 'الفواتير' },
     tabWallet: { en: 'Accounts', ar: 'الحسابات' },
-    tabAdd: { en: 'Add an entry', ar: 'إضافة عملية' },
-    tabAddHint: {
-        en: 'Opens the cash entry form',
-        ar: 'يفتح نموذج إضافة عملية نقدية',
-    },
     cancel: { en: 'Cancel', ar: 'إلغاء' },
     back: { en: 'Back', ar: 'رجوع' },
     close: { en: 'Close', ar: 'إغلاق' },
@@ -5105,32 +5129,15 @@ const S = {
     goodMorning: { en: 'Good morning', ar: 'صباح الخير' },
     goodAfternoon: { en: 'Good afternoon', ar: 'مساء الخير' },
     goodEvening: { en: 'Good evening', ar: 'مساء الخير' },
-    heroSavedCaption: { en: 'Saved so far this month', ar: 'المدخر هذا الشهر' },
-    heroNetCaption: { en: 'Net for this period', ar: 'الصافي لهذه الفترة' },
     inLabel: { en: 'In', ar: 'الدخل' },
     outLabel: { en: 'Spent', ar: 'الإنفاق' },
-    cashOutLabel: { en: 'Cash out', ar: 'النقد الخارج' },
-    cashOutHint: {
-        en: 'Money that actually left your accounts, including card payments once.',
-        ar: 'الأموال التي خرجت فعلياً من حساباتك، بما فيها دفعات البطاقات مرة واحدة.',
-    },
     cashOutBreakdown: {
         en: 'Card repayments {cards} · bank, debit and cash {accounts}',
         ar: 'سداد البطاقات {cards} · البنك والخصم والنقد {accounts}',
     },
     loadingLedger: { en: 'Loading your ledger', ar: 'جارٍ تحميل سجلك المالي' },
-    insightsHeader: { en: 'INSIGHTS', ar: 'ملاحظات' },
-    budgetsHeader: { en: 'BUDGETS', ar: 'الميزانيات' },
-    recentHeader: { en: 'RECENT ACTIVITY', ar: 'أحدث العمليات' },
     manage: { en: 'Manage', ar: 'إدارة' },
-    cardPaymentsDue: { en: 'Card payments due', ar: 'دفعات البطاقات المستحقة' },
-    paidCardsRecently: { en: 'PAID RECENTLY', ar: 'دُفعت مؤخراً' },
-    paidCardsRecentlyHint: {
-        en: 'Statements Wafra matched to a card payment.',
-        ar: 'كشوف طابقتها وفرة مع دفعة بطاقة.',
-    },
-    paidStatementDue: { en: 'Statement due {date} · paid', ar: 'كشف مستحق {date} · مدفوع' },
-    trialEndedBanner: { en: 'Trial ended · tracking paused', ar: 'انتهت التجربة · توقف التتبع' },
+    trialEndedBanner: { en: 'Free capture ended · automatic capture paused', ar: 'انتهى الالتقاط المجاني · الالتقاط التلقائي متوقف' },
     trialEndedBannerSub: { en: 'Subscribe to keep importing your bank SMS', ar: 'اشترك لمواصلة قراءة رسائل البنك' },
     turnOnTracking: { en: 'Turn on automatic tracking', ar: 'فعّل التتبع التلقائي' },
     trackingPrivacy: { en: 'Wafra reads bank SMS on this device only', ar: 'وفرة تقرأ رسائل البنك على هذا الجهاز فقط' },
@@ -5142,10 +5149,6 @@ const S = {
     captureAndroidPrivate: {
         en: 'Parsed here · nothing uploaded',
         ar: 'تُحلَّل هنا · لا يُرفع شيء',
-    },
-    captureIosOn: {
-        en: 'Message automation verified by a bank message',
-        ar: 'تم التحقق من أتمتة الرسائل برسالة بنكية',
     },
     captureIosNeedsAutomation: {
         en: 'Finish the one-time Message automation',
@@ -5215,18 +5218,10 @@ const S = {
         en: 'Connected · run the safe test',
         ar: 'متصل · شغّل الاختبار الآمن',
     },
-    captureIosPipeReady: {
-        en: 'Private pipe verified · Message automation not proven yet',
-        ar: 'تم التحقق من المسار الخاص · لم تثبت أتمتة الرسائل بعد',
-    },
     captureIosOff: { en: 'Set up bank messages', ar: 'إعداد رسائل البنك' },
     captureIosRevoked: {
         en: 'This iPhone was removed · capture stopped',
         ar: 'أُزيل هذا الآيفون · توقّف الالتقاط',
-    },
-    captureIosRevokedDetail: {
-        en: 'Another device removed it from your vault. Set it up again to resume.',
-        ar: 'أزاله جهاز آخر من خزنتك. أعد الإعداد لاستئناف الالتقاط.',
     },
     captureRefreshFailed: {
         en: 'Could not refresh. Pull down to try again.',
@@ -5236,17 +5231,13 @@ const S = {
     captureReady: { en: 'ON', ar: 'مفعّل' },
     captureFinish: { en: 'FINISH', ar: 'أكمل' },
     captureRecover: { en: 'RECOVER', ar: 'استرداد' },
-    captureVerify: { en: 'VERIFY', ar: 'تحقق' },
     captureEnable: { en: 'ENABLE', ar: 'فعّل' },
     capturePaused: { en: 'Tracking paused', ar: 'توقف التتبع' },
     pausedBadge: { en: 'PAUSED', ar: 'متوقف' },
     captureChecking: { en: 'Checking capture…', ar: 'جارٍ التحقق من الالتقاط…' },
-    captureSyncNow: { en: 'Up to date · new alerts are captured automatically', ar: 'محدّث · تُلتقط التنبيهات الجديدة تلقائياً' },
     captureIosSetupDetail: { en: 'Past and future messages', ar: 'الرسائل السابقة والجديدة' },
     captureLatest: { en: 'Latest filed {date}', ar: 'آخر عملية مسجّلة {date}' },
     emptyPeriodBody: { en: 'Pull down to check for new bank activity. One transaction is enough to start the month.', ar: 'اسحب للأسفل للتحقق من نشاط بنكي جديد. تكفي عملية واحدة لبدء الشهر.' },
-    genericMerchantTitle: { en: 'Merchant or description', ar: 'المتجر أو الوصف' },
-    genericShortenTitle: { en: 'Keep the description within 80 characters.', ar: 'اجعل الوصف في حدود ٨٠ حرفاً.' },
     genericUsePasteDate: { en: 'Use date added', ar: 'استخدم تاريخ الإضافة' },
     genericReviewCount: { en: 'Review {count} alert{s}', ar: 'راجع التنبيهات: {count}' },
     genericReviewSaveFailed: { en: 'Could not save these details for review. Try again.', ar: 'تعذر حفظ هذه التفاصيل للمراجعة. حاول مجدداً.' },
@@ -5277,7 +5268,6 @@ const S = {
     genericStatementDate: { en: 'Statement date', ar: 'تاريخ الكشف' },
     genericDueDate: { en: 'Due date', ar: 'تاريخ الاستحقاق' },
     genericMissingStatementTotal: { en: 'The total balance is not stated. A minimum payment is not the full amount owed.', ar: 'لم يُذكر إجمالي المستحق. الحد الأدنى للسداد ليس كامل المبلغ المستحق.' },
-    genericInformational: { en: 'These are account details, not a new transaction.', ar: 'هذه تفاصيل للحساب وليست عملية جديدة.' },
     genericOpenCards: { en: 'Open cards', ar: 'افتح البطاقات' },
     genericOpenWallet: { en: 'Open wallet', ar: 'افتح المحفظة' },
     genericOpenBills: { en: 'Open bills', ar: 'افتح الفواتير' },
@@ -5322,16 +5312,10 @@ const S = {
         en: '{count} could not be added automatically',
         ar: 'تعذّرت إضافة {count} تلقائياً',
     },
-    reviewAlertsNone: { en: 'Nothing waiting', ar: 'لا شيء قيد المراجعة' },
-    reviewAlertsIntro: {
-        en: 'Check the captured details before adding anything to your ledger.',
-        ar: 'راجع التفاصيل الملتقطة قبل إضافة أي شيء إلى سجلك.',
-    },
     reviewAlertsPrivacy: {
         en: 'Only a structured summary is kept here. Message text is not stored.',
         ar: 'يُحفظ هنا ملخص منظّم فقط. لا يُحفظ نص الرسالة.',
     },
-    reviewAlertsEmptyTitle: { en: 'All clear', ar: 'تمت مراجعة كل شيء' },
     reviewAlertsEmptyBody: {
         en: 'Captured alerts that need your review will appear here.',
         ar: 'ستظهر هنا التنبيهات الملتقطة التي تحتاج إلى مراجعتك.',
@@ -5411,16 +5395,8 @@ const S = {
         ar: 'أنشئ حساباً في المحفظة أولاً',
     },
     savingSecurely: { en: 'Saving securely…', ar: 'جارٍ الحفظ بأمان…' },
-    reviewAlertDateA11y: {
-        en: 'Transaction date in year month day format',
-        ar: 'تاريخ العملية بصيغة سنة شهر يوم',
-    },
     foreignActivity: { en: 'Foreign activity', ar: 'العمليات بالعملات الأجنبية' },
     foreignSpending: { en: 'Foreign spending', ar: 'الإنفاق بالعملات الأجنبية' },
-    foreignSpendingSubtitle: {
-        en: 'See foreign-currency spending in the original and ledger currencies.',
-        ar: 'اعرض الإنفاق بالعملات الأجنبية بالعملة الأصلية وعملة السجل.',
-    },
     searchForeignSpending: { en: 'Search merchant or currency', ar: 'ابحث عن تاجر أو عملة' },
     foreignActivityCaption: {
         en: '{count} charge{s} · {currencies} currenc{ending}',
@@ -5430,19 +5406,7 @@ const S = {
         en: 'Spent in foreign currencies',
         ar: 'الإنفاق بالعملات الأجنبية',
     },
-    foreignOriginalsKept: {
-        en: 'Original amounts stay beside the ledger amount on every charge.',
-        ar: 'يبقى المبلغ الأصلي بجانب مبلغ السجل في كل عملية.',
-    },
     currencyBreakdown: { en: 'Currencies', ar: 'العملات' },
-    foreignCurrencyOriginalSummary: {
-        en: '{amount} · {count} charge{s}',
-        ar: '{amount} · {count} عملية',
-    },
-    foreignCurrencyFilter: {
-        en: '{currency} · {count} charge{s}',
-        ar: '{currency} · {count} عملية',
-    },
     foreignSeeAllCurrencies: { en: 'See all {count}', ar: 'عرض كل العملات · {count}' },
     foreignShowFewerCurrencies: { en: 'Show fewer currencies', ar: 'عرض عملات أقل' },
     conversionQuality: { en: 'Conversion quality', ar: 'جودة التحويل' },
@@ -5455,39 +5419,11 @@ const S = {
         ar: 'لا توجد عمليات بعملة أجنبية في هذه الفترة.',
     },
     billsTitle: { en: 'Bills', ar: 'الفواتير' },
-    billsSubtitle: { en: 'Dues, subscriptions and utilities', ar: 'مستحقات واشتراكات وفواتير' },
-    subscriptionsSeg: { en: 'Subscriptions', ar: 'الاشتراكات' },
-    remindersSeg: { en: 'Reminders', ar: 'التذكيرات' },
-    cardsSeg: { en: 'Credit cards', ar: 'البطاقات الائتمانية' },
-    seeAllCategoryTx: { en: 'See all transactions', ar: 'عرض كل العمليات' },
-    utilitiesSeg: { en: 'Utilities', ar: 'المرافق' },
-    billsUpcomingTotal: { en: 'Upcoming total', ar: 'إجمالي الاستحقاقات القادمة' },
     billsCheckingRecurring: { en: 'Checking recurring payments…', ar: 'جارٍ التحقق من الدفعات المتكررة…' },
     billsSubscriptionsTotal: { en: 'Subscriptions due', ar: 'الاشتراكات المستحقة' },
     billsUtilitiesTotal: { en: 'Utilities due', ar: 'المرافق المستحقة' },
     billsCardsTotal: { en: 'Card payments due', ar: 'دفعات البطاقات المستحقة' },
     billsAllTotal: { en: 'Open total', ar: 'إجمالي المستحق المفتوح' },
-    billsSummaryPayments: { en: '{count} payment{s}', ar: '{count} دفعات' },
-    billsSummaryEstimated: { en: '{count} estimated', ar: '{count} تقديرية' },
-    noCardDues: { en: 'No card payments due', ar: 'لا مستحقات على البطاقات' },
-    noCardDuesText: {
-        en: 'When your bank sends a statement message, the amount and pay-by date show up here.',
-        ar: 'عند وصول رسالة كشف الحساب من البنك، يظهر المبلغ وتاريخ السداد هنا.',
-    },
-    dueAcrossCards: { en: 'Due across cards', ar: 'المستحق على البطاقات' },
-    monthlySpendOnly: { en: 'tracking spend only', ar: 'تتبع المصروف فقط' },
-    detectedHint: { en: 'Found automatically from your charges', ar: 'مكتشفة تلقائياً من عملياتك' },
-    stoppedSubs: { en: 'Stopped subscriptions', ar: 'اشتراكات متوقفة' },
-    stoppedSubsHint: { en: 'No charges for over two cycles — most likely cancelled.', ar: 'لا توجد عمليات خصم لدورتين — على الأغلب ملغاة.' },
-    utilitiesHeader: { en: 'Utilities & fixed bills', ar: 'المرافق والفواتير الثابتة' },
-    loansHeader: { en: 'Loans & instalments', ar: 'القروض والأقساط' },
-    otherRecurringHeader: { en: 'Other repeat payments', ar: 'مدفوعات متكررة أخرى' },
-    otherRecurringHint: {
-        en: 'Places you pay on a regular cycle. Not bills — long-press one to stop tracking it.',
-        ar: 'جهات تدفع لها بشكل منتظم. ليست فواتير — اضغط مطولاً لإيقاف تتبعها.',
-    },
-    loansHint: { en: 'Fixed repayments detected from your bank messages. Wafra shows what you have paid so far — it cannot see the loan term or balance.', ar: 'أقساط ثابتة مكتشفة من رسائل البنك. يعرض وفرة ما دفعته حتى الآن فقط — لا يمكنه معرفة مدة القرض أو رصيده.' },
-    paidSoFar: { en: 'Paid so far', ar: 'المدفوع حتى الآن' },
     payingFor: { en: 'Paying for', ar: 'يُدفع منذ' },
     instalment: { en: 'Instalment', ar: 'القسط' },
     payments: { en: 'Payments', ar: 'عدد الدفعات' },
@@ -5508,10 +5444,6 @@ const S = {
     history: { en: 'History', ar: 'السجل' },
     paymentHistory: { en: 'Payment history', ar: 'سجل الدفعات' },
     notASubscription: { en: 'Not a subscription', ar: 'ليس اشتراكاً' },
-    noSubscriptionsTitle: { en: 'No subscriptions detected yet', ar: 'لم تُكتشف اشتراكات بعد' },
-    noSubscriptionsBody: { en: 'Import bank activity and repeat charges will appear here.', ar: 'استورد نشاطك البنكي وستظهر العمليات المتكررة هنا.' },
-    noUtilitiesTitle: { en: 'No utilities yet', ar: 'لا فواتير مرافق بعد' },
-    noUtilitiesBody: { en: 'Tap + to track DEWA, rent, or any monthly payment. Detected charges appear automatically.', ar: 'اضغط + لتتبع ديوا أو الإيجار أو أي دفعة شهرية. تظهر العمليات المكتشفة تلقائياً.' },
     newReminder: { en: 'New reminder', ar: 'تذكير جديد' },
     reminderNamePlaceholder: { en: 'Name (e.g. DEWA, Netflix, Rent)', ar: 'الاسم (مثل ديوا أو نتفلكس أو الإيجار)' },
     amount: { en: 'Amount', ar: 'المبلغ' },
@@ -5536,7 +5468,6 @@ const S = {
     cadenceAsNeeded: { en: 'As needed', ar: 'عند الحاجة' },
     stoppedLast: { en: 'stopped · last {date}', ar: 'متوقف · آخر خصم {date}' },
     stoppedLastCharged: { en: 'stopped · last charged {date}', ar: 'متوقف · آخر خصم {date}' },
-    cadenceNext: { en: '{cadence} · next {date} ({days}d)', ar: '{cadence} · التالي {date} (خلال {days} يوم)' },
     cadenceScheduleList: {
         en: '{cadence} · {date} · {when}',
         ar: '{cadence} · {date} · {when}',
@@ -5557,15 +5488,7 @@ const S = {
         en: 'Last paid {date} · {cadence}',
         ar: 'آخر دفع في {date} · {cadence}',
     },
-    perMonthShort: { en: '/mo', ar: 'شهرياً' },
-    monthlyTotal: {
-        en: '{amount} / month',
-        ar: '\u2066{amount}\u2069 · شهرياً',
-    },
-    perYearShort: { en: '/yr', ar: 'سنوياً' },
-    perWeekShort: { en: '/wk', ar: 'أسبوعياً' },
     remindAboutA11y: { en: 'Remind me about {title}', ar: 'ذكّرني بـ {title}' },
-    detailCadenceMonthly: { en: '{cadence} · {amount}/mo', ar: '{cadence} · {amount} شهرياً' },
     olderCharges: { en: '+ {count} older charges', ar: '+ {count} عمليات خصم أقدم' },
     recurringDetected: { en: 'Recurring · detected', ar: 'متكرر · مكتشف' },
     recurringMeta: { en: '{cadence} · next {date} · {when}', ar: '{cadence} · التالي {date} · {when}' },
@@ -5591,22 +5514,13 @@ const S = {
         ar: 'سيتوقف تتبع {title} كعملية متكررة، ولن تُحتسب ضمن الالتزامات الشهرية.',
     },
     notRecurring: { en: 'Not recurring', ar: 'ليست متكررة' },
-    paidFrom: { en: 'Paid from', ar: 'الدفع من' },
     unknownAccount: { en: 'Unknown account', ar: 'حساب غير معروف' },
     paid: { en: 'Paid', ar: 'مدفوع' },
-    overdueDays: { en: '{days}d overdue', ar: 'متأخر {days} يوم' },
-    lateDays: { en: '{days}d late', ar: 'متأخر {days} يوم' },
     daysShort: { en: '{days}d', ar: '{days} يوم' },
     dueToday: { en: 'Due today', ar: 'مستحق اليوم' },
     dueInDays: { en: 'Due in {days}d', ar: 'مستحق خلال {days} يوم' },
-    longPressDeleteReminder: { en: 'Long-press a reminder to delete it.', ar: 'اضغط مطولاً على التذكير لحذفه.' },
     walletTitle: { en: 'Accounts', ar: 'الحسابات' },
     availableBalances: { en: 'Recorded balances', ar: 'الأرصدة المسجلة' },
-    refTryExample: { en: 'Try an example', ar: 'جرّب مثالاً' },
-    refCategoryHistory: { en: 'Category over six money months', ar: 'اتجاه الفئة خلال ستة أشهر مالية' },
-    refDuesAndMovements: { en: 'Dues & money movements', ar: 'الدفعات وحركة الأموال' },
-    refUpcoming: { en: 'Upcoming', ar: 'القادمة' },
-    refAll: { en: 'All', ar: 'الكل' },
     refUnscheduled: { en: 'Other regular spending', ar: 'مصروفات متكررة أخرى' },
     refStopped: { en: 'Stopped recurring payments', ar: 'الدفعات المتكررة المتوقفة' },
     refHideStopped: { en: 'Hide stopped payments', ar: 'إخفاء الدفعات المتوقفة' },
@@ -5623,63 +5537,18 @@ const S = {
     paidFromAccounts: { en: 'Paid from accounts this month', ar: 'المدفوع من الحسابات هذا الشهر' },
     netWorth: { en: 'Net worth', ar: 'صافي الثروة' },
     estimatedNetWorth: { en: 'Estimated net worth', ar: 'صافي الثروة التقديري' },
-    partialEstimate: { en: 'Partial estimate', ar: 'تقدير جزئي' },
-    allAccountsIncluded: { en: 'All active accounts included', ar: 'تم تضمين كل الحسابات النشطة' },
-    noActiveAccounts: { en: 'No active accounts yet', ar: 'لا توجد حسابات نشطة بعد' },
-    addAccountForEstimate: {
-        en: 'Use + to add an account and start your estimate.',
-        ar: 'استخدم + لإضافة حساب وبدء التقدير.',
-    },
-    knownBalances: { en: 'Known balances', ar: 'الأرصدة المعروفة' },
-    amountsOwed: { en: 'Amounts owed', ar: 'المبالغ المستحقة' },
-    netWorthCoverage: {
-        en: '{known} of {total} active accounts included',
-        ar: 'تم تضمين {known} من أصل {total} حسابات نشطة',
-    },
-    netWorthMissing: {
-        en: 'Accounts excluded until a reliable balance arrives: {count}',
-        ar: 'حسابات مستبعدة حتى يتوفر رصيد موثوق: {count}',
-    },
-    howNetWorthCalculated: { en: 'How this is calculated', ar: 'كيف يتم احتسابه' },
-    netWorthExplanation: {
-        en: 'Wafra adds the latest bank-reported balances and balances you track manually, then subtracts credit-card amounts owed. Inactive accounts and accounts without a reliable balance are left out.',
-        ar: 'تجمع وفرة أحدث الأرصدة الواردة من البنك والأرصدة التي تتابعها يدوياً، ثم تطرح المبالغ المستحقة على البطاقات الائتمانية. لا تُحتسب الحسابات غير النشطة أو التي لا يتوفر لها رصيد موثوق.',
-    },
-    ledgerTrend6mo: { en: 'Recorded movement · 6 months', ar: 'حركة السجل · ٦ أشهر' },
-    ledgerTrendExplanation: {
-        en: 'From opening balances and filed activity—not the estimate above.',
-        ar: 'استناداً إلى الأرصدة الافتتاحية والعمليات المسجلة، وليس التقدير أعلاه.',
-    },
-    moreCards: { en: 'View more cards · {count}', ar: 'عرض بطاقات أخرى · {count}' },
     cardsHeader: { en: 'Payment cards', ar: 'بطاقات الدفع' },
-    moneySourcesHeader: { en: 'Money sources', ar: 'مصادر الأموال' },
-    otherSources: { en: 'Other sources', ar: 'مصادر أخرى' },
-    showMoreSources: { en: 'Show {count} more', ar: 'عرض {count} أخرى' },
-    showFewerSources: { en: 'Show fewer', ar: 'عرض أقل' },
     showMoreRows: { en: 'Show {count} more', ar: 'عرض {count} أخرى' },
-    noMoneySourcesYet: { en: 'No money sources yet.', ar: 'لا توجد مصادر أموال بعد.' },
-    accountsHeader: { en: 'Accounts', ar: 'الحسابات' },
-    inactiveHeader: { en: 'Inactive', ar: 'غير نشطة' },
     goalsHeader: { en: 'Savings goals', ar: 'أهداف الادخار' },
     newGoal: { en: '+ New goal', ar: '+ هدف جديد' },
     outstanding: { en: 'outstanding', ar: 'مستحق' },
     owed: { en: 'owed', ar: 'المستحق عليك' },
     statementLeftToPay: { en: 'statement left to pay', ar: 'المتبقي من الكشف' },
-    nothingSpentThisMonth: { en: 'nothing spent this month', ar: 'لا مصروف هذا الشهر' },
     perBankSms: { en: 'per bank message', ar: 'حسب رسالة البنك' },
     noBalanceYet: { en: 'no balance message yet', ar: 'لا رسالة رصيد بعد' },
     trackedManually: { en: 'Tracked manually', ar: 'يُتابع يدويًا' },
-    recurringHint: {
-        en: 'Tap a row for its charge history, or to set a reminder.',
-        ar: 'اضغط على أي صف لعرض سجل الخصومات أو لضبط تذكير.',
-    },
     improveAccuracy: { en: 'Improve accuracy', ar: 'تحسين الدقة' },
     sortShops: { en: 'Improve categories', ar: 'تحسين التصنيفات' },
-    sortShopsCount: {
-        en: '{count} item{s} need your input',
-        ar: '{count} حالات تحتاج إدخالك',
-    },
-    sortShopsNone: { en: 'Nothing needs your input', ar: 'لا توجد حالات تحتاج إدخالك' },
     sortShopsSettingsDetail: {
         en: 'Review unclear merchant and bank-payment categories',
         ar: 'راجع تصنيفات المتاجر ودفعات البنك غير الواضحة',
@@ -5694,7 +5563,6 @@ const S = {
     },
     couldNotRead: { en: 'Could not read', ar: 'تعذّرت القراءة' },
     noCategoryYet: { en: 'Read, but no category', ar: 'مقروءة بلا تصنيف' },
-    shareUnrecognized: { en: 'Share formats', ar: 'مشاركة الصيغ' },
     readAs: { en: 'Read as', ar: 'قُرئت كـ' },
     noUnrecognized: { en: 'Everything reads clean', ar: 'كل الرسائل مقروءة' },
     noUnrecognizedText: {
@@ -5750,25 +5618,9 @@ const S = {
         ar: 'لم تُقرأ أي رسالة بنكية إلى هذا السجل بعد، فلا يوجد ما يُقاس.',
     },
     categoriseMerchants: { en: 'Improve categories', ar: 'تحسين التصنيفات' },
-    categoriseIntro: {
-        en: 'Wafra reads the shop name off your bank message but cannot know what it sells. Choose once and every entry from that shop moves with it — the ones already in your ledger, and the ones still to come.',
-        ar: 'تقرأ وفرة اسم المتجر من رسالة البنك لكنها لا تعرف ماذا يبيع. اختر التصنيف مرة واحدة وتنتقل معه كل عمليات هذا المتجر: الموجودة في سجلك والقادمة لاحقاً.',
-    },
-    categoriseRemaining: {
-        en: '{count} merchant{s} · {rows} entr{ending}',
-        ar: '{count} متجر · {rows} عملية',
-    },
     categoriseEntries: {
         en: '{count} entr{ending} · last {date}',
         ar: '{count} عملية · آخرها {date}',
-    },
-    categoriseAssigned: {
-        en: '{count} entr{ending} moved to {category}',
-        ar: 'نُقلت {count} عملية إلى {category}',
-    },
-    categorisePurposeAssigned: {
-        en: '{count} matching entr{ending} moved to {category}. Wafra will remember this bill reference.',
-        ar: 'نُقلت {count} دفعة مطابقة إلى {category}. سيتذكر وفرة مرجع هذه الفاتورة.',
     },
     categorisePaymentPurpose: {
         en: 'BANK PAYMENT · PURPOSE UNKNOWN',
@@ -5799,11 +5651,6 @@ const S = {
         en: 'Suggested from the merchant name: {category}',
         ar: 'مقترح من اسم التاجر: {category}',
     },
-    categoriseSuggestionUse: { en: 'Use {category}', ar: 'استخدم {category}' },
-    categoriseSuggestionNote: {
-        en: 'Suggestion only. Nothing changes until you choose. Choosing applies it to {count} entr{ending}.',
-        ar: 'اقتراح فقط. لن يتغير شيء حتى تختار. عند الاختيار يُطبّق على {count} عملية.',
-    },
     categoriseSuggestionChecking: { en: 'Checking the name on your device…', ar: 'جارٍ فحص الاسم على جهازك…' },
     categoriseDone: { en: 'Nothing needs your input', ar: 'لا توجد حالات تحتاج إدخالك' },
     categoriseDoneBody: {
@@ -5826,22 +5673,9 @@ const S = {
         en: 'Review {count} unclear categories',
         ar: 'راجع {count} تصنيفات غير واضحة',
     },
-    spentThisMonthCaption: { en: 'spent this month', ar: 'مصروف هذا الشهر' },
-    cardSpentThisMonth: {
-        en: '{amount} spent this month',
-        ar: 'مصروف الشهر \u2066{amount}\u2069',
-    },
-    longPressHint: { en: 'Long-press a card or account to hide or remove it', ar: 'اضغط مطولاً على بطاقة أو حساب لإخفائه أو حذفه' },
-    walletCurrencies: { en: 'Currencies', ar: 'العملات' },
-    currencyActivityTitle: { en: 'Foreign activity', ar: 'النشاط بالعملات الأجنبية' },
-    currencyActivityDetail: { en: 'Original amounts kept with every charge', ar: 'يُحفظ المبلغ الأصلي مع كل عملية' },
-    chargeWord: { en: 'charge', ar: 'عملية' },
-    chargesWord: { en: 'charges', ar: 'عمليات' },
     cardDetail: { en: 'Card detail', ar: 'تفاصيل البطاقة' },
     credit: { en: 'Credit', ar: 'ائتمانية' },
     debit: { en: 'Debit', ar: 'خصم' },
-    stillOwed: { en: 'Still owed', ar: 'المتبقي عليك' },
-    openStatements: { en: '{count} open statement{s}', ar: '{count} كشف مفتوح' },
     statements: { en: 'Statements', ar: 'كشوف الحساب' },
     dueDate: { en: 'Due {date}', ar: 'مستحق {date}' },
     settled: { en: 'Settled', ar: 'مسدّد' },
@@ -5866,15 +5700,6 @@ const S = {
     settingsTitle: { en: 'Settings', ar: 'الإعدادات' },
     trustedTitle: { en: 'Trusted devices', ar: 'الأجهزة الموثوقة' },
     trustedSettingsRow: { en: 'Trusted devices & family', ar: 'الأجهزة الموثوقة والعائلة' },
-    trustedSettingsDetail: {
-        en: 'Share future relay-delivered supplemental imports with up to 8 devices',
-        ar: 'شارك الواردات الإضافية المستقبلية المرسلة عبر المرحّل مع ما يصل إلى ٨ أجهزة',
-    },
-    trustedHeroTitle: { en: 'One vault. Your trusted phones.', ar: 'خزنة واحدة. لأجهزتك الموثوقة.' },
-    trustedHeroBody: {
-        en: 'New structured captures delivered through Wafra’s relay can reach every trusted device, sealed separately for each one. Your existing ledger is not copied.',
-        ar: 'يمكن لعمليات الالتقاط المنظمة الجديدة المرسلة عبر مرحّل وفرة أن تصل إلى كل جهاز موثوق، مشفّرة لكل جهاز على حدة. لا يُنسخ سجلك الحالي.',
-    },
     trustedAndroidTruth: {
         en: 'Bank SMS still parse only on this Android and are not uploaded. Trusted devices receive only future items delivered through the relay.',
         ar: 'تبقى رسائل البنك على هذا الأندرويد وتُحلَّل محلياً ولا تُرفع. تستقبل الأجهزة الموثوقة فقط العناصر المستقبلية المرسلة عبر المرحّل.',
@@ -5884,13 +5709,11 @@ const S = {
         ar: 'تبقى التقاطات الرسائل المحلية على هذا الآيفون. لا تصل إلى الأجهزة الموثوقة إلا الواردات الإضافية المرسلة بشكل منفصل عبر المرحّل، ولا يسترجع الانضمام العمليات السابقة.',
     },
     trustedPreview: { en: 'SAMPLE HOUSEHOLD', ar: 'عائلة تجريبية' },
-    trustedDisabled: { en: 'DEMO', ar: 'تجريبي' },
     trustedPreviewBody: {
         en: 'See how a family’s trusted phones receive new relayed items. Older transactions are not copied. Invitations are disabled in this demo.',
         ar: 'شاهد كيف تستقبل هواتف العائلة الموثوقة العناصر الجديدة المرسلة عبر المرحّل. لا تُنسخ العمليات السابقة. الدعوات معطلة في هذا العرض التجريبي.',
     },
     trustedPreviewA11y: { en: 'Sample device, controls disabled', ar: 'جهاز تجريبي، عناصر التحكم معطلة' },
-    trustedStartHeader: { en: 'START A TRUSTED VAULT', ar: 'ابدأ خزنة موثوقة' },
     trustedStartBody: {
         en: 'Create the first owner device, or paste a one-use invite from someone you trust. No bank or ledger data is stored in an invite.',
         ar: 'أنشئ جهاز المالك الأول، أو الصق دعوة للاستخدام مرة واحدة من شخص تثق به. لا تحتوي الدعوة على بيانات بنكية أو بيانات السجل.',
@@ -5902,7 +5725,6 @@ const S = {
     trustedConnecting: { en: 'Connecting…', ar: 'جارٍ الاتصال…' },
     trustedCreateVault: { en: 'Create trusted vault', ar: 'أنشئ خزنة موثوقة' },
     trustedJoinVault: { en: 'Join with an invite', ar: 'انضم بدعوة' },
-    trustedDevicesHeader: { en: 'TRUSTED DEVICES', ar: 'الأجهزة الموثوقة' },
     trustedThisDevice: { en: 'THIS DEVICE', ar: 'هذا الجهاز' },
     trustedRoleOwner: { en: 'Owner', ar: 'المالك' },
     trustedRoleMember: { en: 'Member', ar: 'عضو' },
@@ -5916,12 +5738,9 @@ const S = {
         ar: 'المرحّل غير متاح. تُعرض آخر قائمة في هذه الشاشة ولم تُجرَ أي تغييرات.',
     },
     trustedRetry: { en: 'RETRY', ar: 'أعد المحاولة' },
-    trustedInviteHeader: { en: 'ADD SOMEONE YOU TRUST', ar: 'أضف شخصاً تثق به' },
     trustedInviteAction: { en: 'Create 10-minute invite', ar: 'أنشئ دعوة لمدة ١٠ دقائق' },
-    trustedInviteReady: { en: 'One-use invite ready', ar: 'الدعوة صالحة لاستخدام واحد' },
     trustedInviteCountdown: { en: 'Expires in {minutes}:{seconds}', ar: 'تنتهي خلال {minutes}:{seconds}' },
     trustedInviteExpired: { en: 'This invite has expired', ar: 'انتهت صلاحية هذه الدعوة' },
-    trustedInviteUntilExpiry: { en: 'until it expires', ar: 'حتى تنتهي صلاحيتها' },
     trustedRelayOnly: {
         en: 'The phone that joins receives only new items relayed after it joins. Older transactions are not copied.',
         ar: 'يستقبل الهاتف المنضم فقط العناصر الجديدة المرسلة عبر المرحّل بعد انضمامه. لا تُنسخ العمليات السابقة.',
@@ -5937,7 +5756,6 @@ const S = {
         en: 'Join my Wafra trusted vault. Open or paste this one-use link in Wafra within 10 minutes:',
         ar: 'انضم إلى خزنة وفرة الموثوقة. افتح أو الصق هذا الرابط الصالح لاستخدام واحد في وفرة خلال ١٠ دقائق:',
     },
-    trustedVaultHeader: { en: 'TRUSTED VAULT', ar: 'الخزنة الموثوقة' },
     trustedVaultBody: {
         en: 'Deleting the vault revokes every device and removes queued relay captures. Transactions already saved on each phone stay local to that phone.',
         ar: 'حذف الخزنة يلغي وصول كل الأجهزة ويحذف عمليات الالتقاط المنتظرة في المرحّل. تبقى العمليات المحفوظة على كل هاتف محلياً فيه.',
@@ -6021,31 +5839,11 @@ const S = {
         en: 'Try exporting a fresh backup and restoring that.',
         ar: 'جرّب تصدير نسخة احتياطية جديدة ثم استعادتها.',
     },
-    featuresHeader: { en: 'Features', ar: 'الميزات' },
-    dataHeader: { en: 'Data', ar: 'البيانات' },
-    moneyMonthHeader: { en: 'Money month', ar: 'الشهر المالي' },
-    moneyMonthStarts: { en: 'Starts on the {day}', ar: 'يبدأ في اليوم {day}' },
-    moneyMonthDayA11y: {
-        en: 'Money month starts on day {day}',
-        ar: 'يبدأ الشهر المالي في اليوم {day}',
-    },
-    moneyMonthRange: {
-        en: 'Your {month} month runs {from} – {to}, so salary and rent land in the same month.',
-        ar: 'يمتد شهر {month} المالي من {from} إلى {to}، فيقع الراتب والإيجار في الشهر نفسه.',
-    },
-    calendarMonthHint: {
-        en: 'Day 1 means calendar months. Next month starts {date}.',
-        ar: 'اليوم ١ يعني الأشهر الميلادية. يبدأ الشهر التالي في {date}.',
-    },
     appearanceHeader: { en: 'Appearance', ar: 'المظهر' },
     themeSystem: { en: 'System', ar: 'النظام' },
     themeSystemDetail: { en: 'System · follows phone', ar: 'النظام · يتبع الهاتف' },
     themeLight: { en: 'Light', ar: 'فاتح' },
     themeDark: { en: 'Dark', ar: 'داكن' },
-    pinnedTheme: {
-        en: 'Pinned to {theme}, whatever your phone is set to.',
-        ar: 'ثُبّت المظهر على {theme} بغض النظر عن إعداد الهاتف.',
-    },
     privacyHeader: { en: 'Privacy', ar: 'الخصوصية' },
     appLockTitle: { en: 'App lock', ar: 'قفل التطبيق' },
     appLockDetail: {
@@ -6053,10 +5851,6 @@ const S = {
         ar: 'البصمة أو التعرّف على الوجه أو رمز الهاتف',
     },
     readBankSms: { en: 'Read bank SMS', ar: 'قراءة رسائل البنك' },
-    smsGrantedLocal: {
-        en: 'Granted · nothing is uploaded',
-        ar: 'مسموح · لا يُرفع أي شيء',
-    },
     smsOffNoImport: {
         en: 'Off · nothing can import',
         ar: 'متوقف · لن تُستورد أي عملية',
@@ -6069,10 +5863,6 @@ const S = {
     instantAlertsOff: {
         en: 'Off · charges appear when Wafra next opens',
         ar: 'متوقف · تظهر العمليات عند فتح وفرة لاحقاً',
-    },
-    instantAlertsNeedSms: {
-        en: 'Needs bank SMS reading above',
-        ar: 'يحتاج تفعيل قراءة رسائل البنك أعلاه',
     },
     instantAlertsNeedBankSource: {
         en: 'Turn on bank SMS or bank app notifications first',
@@ -6102,61 +5892,14 @@ const S = {
         en: 'On · new bank notifications are added automatically',
         ar: 'مفعّل · تُضاف إشعارات البنك الجديدة تلقائياً',
     },
-    bankPushOff: {
-        en: 'Off · grant bank notification access',
-        ar: 'متوقف · امنح إذن إشعارات البنوك',
-    },
-    regionHeader: { en: 'Language & bank formats', ar: 'اللغة وتنسيقات البنوك' },
-    countryPack: { en: 'Country pack', ar: 'حزمة الدولة' },
     parserPack: { en: 'Bank-message region', ar: 'منطقة رسائل البنك' },
-    countryPackDetail: {
-        en: '{country} · {currency} · bank and shop names in new messages',
-        ar: '{country} · {currency} · أسماء البنوك والمتاجر في الرسائل الجديدة',
-    },
-    parserPackDetail: {
-        en: '{country} · {currency} automatic import; Android can detect other supported formats for review',
-        ar: '{country} · استيراد تلقائي بعملة {currency}؛ يستطيع أندرويد اكتشاف تنسيقات مدعومة أخرى للمراجعة',
-    },
-    globalParserPackDetail: {
-        en: '{currency} ledger · other bank formats may need Review; automatic coverage varies',
-        ar: 'سجل بعملة {currency} · قد تحتاج تنسيقات البنوك الأخرى إلى المراجعة؛ تختلف تغطية الاستيراد التلقائي',
-    },
-    parserPackPickerBody: {
-        en: 'UAE and Saudi packs have tested automatic formats. Android and iPhone History may auto-add other completed movements marked Auto-added — check. Unfamiliar live iPhone alerts wait in Review.',
-        ar: 'تضم حزمتا الإمارات والسعودية تنسيقات مختبرة للاستيراد التلقائي. قد يضيف أندرويد وسجل رسائل الآيفون حركات مكتملة أخرى بعلامة أُضيف تلقائياً — تحقّق. تنتظر تنبيهات الآيفون المباشرة غير المألوفة في المراجعة.',
-    },
-    marketPinned: {
-        en: 'Your money is recorded in {currency}. Switching would relabel it, not convert it.',
-        ar: 'أموالك مسجّلة بـ {currency}. التبديل سيغيّر التسمية فقط ولن يحوّل المبالغ.',
-    },
-    uaeName: { en: 'United Arab Emirates', ar: 'الإمارات العربية المتحدة' },
-    saudiName: { en: 'Saudi Arabia', ar: 'المملكة العربية السعودية' },
-    languageSettingDetail: {
-        en: 'English · العربية is available instantly',
-        ar: 'العربية · English متاحة فوراً',
-    },
-    unreadFormatsCount: {
-        en: '{count} unread message format{s} · digits masked',
-        ar: '{count} صيغة رسالة غير مقروءة · الأرقام مخفية',
-    },
-    settingsTagline: {
-        en: 'Know where it goes. Watch it grow.',
-        ar: 'اعرف أين تذهب أموالك وراقبها تنمو.',
-    },
     settingsViewOnboarding: { en: 'View onboarding', ar: 'عرض تجربة البداية' },
     settingsViewOnboardingDetail: {
         en: 'Replay the welcome flow without changing your data or settings',
         ar: 'أعد مشاهدة تجربة البداية دون تغيير بياناتك أو إعداداتك',
     },
-    settingsTrialDays: {
-        en: 'Free trial · {count} day{s} left',
-        ar: 'تجربة مجانية · متبقٍ {count} يوم',
-    },
     wafraPro: { en: 'Wafra Pro', ar: 'وفرة برو' },
     proActive: { en: 'Active', ar: 'مفعّل' },
-    billsAndSubs: { en: 'Bills and subscriptions', ar: 'الفواتير والاشتراكات' },
-    importFromSms: { en: 'Import from bank SMS', ar: 'استيراد من رسائل البنك' },
-    bankAppNotifs: { en: 'Bank app notifications (beta)', ar: 'إشعارات تطبيقات البنوك (تجريبي)' },
     appLock: { en: 'App lock (biometric)', ar: 'قفل التطبيق (بصمة)' },
     privacyBuiltInDetail: {
         en: 'Protected on your phone. Sharing is your choice.',
@@ -6166,9 +5909,14 @@ const S = {
         en: 'Privacy is built into Wafra. Your ledger is encrypted on iPhone and Android. Local bank-message capture works without uploading your messages. App lock adds protection when someone else is using your unlocked phone.',
         ar: 'الخصوصية جزء أساسي من وفرة. سجلك مشفّر على آيفون وأندرويد، ويعمل الالتقاط المحلي لرسائل البنك دون رفع رسائلك. ويضيف قفل التطبيق حماية عندما يستخدم شخص آخر هاتفك المفتوح.',
     },
+    onlineLogosTitle: { en: 'Online merchant logos', ar: 'شعارات التجار عبر الإنترنت' },
+    onlineLogosDetail: { en: 'Off by default. When on, merchant and bank names are sent to Brandfetch, a logo service. It also sees your network address.', ar: 'متوقفة افتراضياً. عند تفعيلها تُرسل أسماء التجار والبنوك إلى خدمة الشعارات Brandfetch، التي ترى أيضاً عنوان اتصالك بالشبكة.' },
+    onlineLogosPaused: { en: 'Paused by your local-only preference.', ar: 'متوقفة بسبب تفضيل المعالجة المحلية.' },
+    hideLockedWidgetAmountsTitle: { en: 'Hide widget amounts with App Lock', ar: 'إخفاء مبالغ الودجات مع قفل التطبيق' },
+    hideLockedWidgetAmountsDetail: { en: 'While App Lock is on, amounts stay hidden on Home Screen widgets, even after you unlock Wafra. Names and dates remain visible.', ar: 'عند تشغيل قفل التطبيق تبقى المبالغ مخفية في ودجات الشاشة الرئيسية حتى بعد فتح وفرة. تبقى الأسماء والتواريخ ظاهرة.' },
     privacyLogosBody: {
-        en: 'Logos appear automatically. Many merchant and bank identities ship with the app. For other merchants or banks, Wafra may send only a cleaned brand or institution name — not the amount, account/card number or bank message — to Brandfetch to find a confident match, then load its logo. Brandfetch can see that name lookup, the requested brand domain and your network address.',
-        ar: 'تظهر الشعارات تلقائياً، ويأتي كثير من هويات التجّار والبنوك مع التطبيق. وللتجّار أو البنوك الأخرى قد ترسل وفرة اسم العلامة أو المؤسسة المنظّف فقط — دون المبلغ أو رقم الحساب أو البطاقة أو نص رسالة البنك — إلى Brandfetch للعثور على تطابق موثوق ثم تحميل شعاره. ويمكن لـ Brandfetch رؤية بحث الاسم ونطاق العلامة المطلوب وعنوان اتصالك بالشبكة.',
+        en: 'Online logos are off by default. On iPhone you can turn them on in Settings to share names with Brandfetch; Android does not use online logos in this version. Bundled logos appear locally. Many merchant and bank identities ship with the app. For other merchants or banks, Wafra may send only a cleaned brand or institution name — not the amount, account/card number or bank message — to Brandfetch to find a confident match, then load its logo. Brandfetch can see that name lookup, the requested brand domain and your network address.',
+        ar: 'الشعارات المتصلة متوقفة افتراضياً. على آيفون يمكنك تفعيلها في الإعدادات لمشاركة الأسماء مع Brandfetch، ولا يستخدمها أندرويد في هذا الإصدار. تظهر الشعارات المضمنة محلياً، ويأتي كثير من هويات التجّار والبنوك مع التطبيق. وللتجّار أو البنوك الأخرى قد ترسل وفرة اسم العلامة أو المؤسسة المنظّف فقط — دون المبلغ أو رقم الحساب أو البطاقة أو نص رسالة البنك — إلى Brandfetch للعثور على تطابق موثوق ثم تحميل شعاره. ويمكن لـ Brandfetch رؤية بحث الاسم ونطاق العلامة المطلوب وعنوان اتصالك بالشبكة.',
     },
     privacyLegacyTitle: { en: 'Your earlier local-only choice is saved', ar: 'اختيارك السابق للمعالجة المحلية محفوظ' },
     privacyLegacyBody: {
@@ -6178,30 +5926,12 @@ const S = {
     privacyLegacyReview: { en: 'Review online features', ar: 'مراجعة الميزات المتصلة' },
     privacyResumeTitle: { en: 'Resume optional online features?', ar: 'استئناف الميزات المتصلة الاختيارية؟' },
     privacyResumeBody: {
-        en: 'This restores automatic reference exchange-rate and logo requests, allows you to set up cloud imports, and lets unclear message text stay on this phone for correction. A previously connected relay can resume syncing. Creating a connection or uploading a statement still needs its own action. Previously removed message text cannot be recovered.',
-        ar: 'يستأنف هذا طلبات أسعار الصرف المرجعية والشعارات التلقائية، ويتيح إعداد الاستيراد السحابي والاحتفاظ بنص الرسائل غير الواضحة على هذا الهاتف لتصحيحها. وقد تستأنف خدمة مربوطة سابقاً المزامنة. ويتطلب إنشاء اتصال أو رفع كشف إجراءً منفصلاً. ولا يمكن استعادة نصوص الرسائل المحذوفة سابقاً.',
+        en: 'This restores reference exchange-rate requests and online logos only if you separately enabled them, allows you to set up cloud imports, and lets unclear message text stay on this phone for correction. A previously connected relay can resume syncing. Creating a connection or uploading a statement still needs its own action. Previously removed message text cannot be recovered.',
+        ar: 'يستأنف هذا طلبات أسعار الصرف المرجعية والشعارات المتصلة فقط إذا فعّلتها بشكل منفصل، ويتيح إعداد الاستيراد السحابي والاحتفاظ بنص الرسائل غير الواضحة على هذا الهاتف لتصحيحها. وقد تستأنف خدمة مربوطة سابقاً المزامنة. ويتطلب إنشاء اتصال أو رفع كشف إجراءً منفصلاً. ولا يمكن استعادة نصوص الرسائل المحذوفة سابقاً.',
     },
     privacyResumeAction: { en: 'Resume online features', ar: 'استئناف الميزات المتصلة' },
     privacyPreferenceFailed: { en: 'Wafra could not save this preference. Try again.', ar: 'تعذّر على وفرة حفظ هذا التفضيل. حاول مرة أخرى.' },
     privateMode: { en: 'Saved local-only preference', ar: 'تفضيل المعالجة المحلية المحفوظ' },
-    privateModeOn: {
-        en: 'On · local structured data only; raw text is dropped',
-        ar: 'مفعّل · بيانات منظّمة محلية فقط؛ يُحذف النص الخام',
-    },
-    privateModeOff: {
-        en: 'Off · low-confidence text may stay on this phone for correction',
-        ar: 'متوقف · قد يبقى نص العمليات غير الواضحة على الهاتف لتصحيحها',
-    },
-    privateModeEnableTitle: { en: 'Turn on Private Mode?', ar: 'تفعيل الوضع الخاص؟' },
-    privateModeEnableIosBody: {
-        en: 'This removes retained diagnostic message text and disconnects the old relay. Local automatic capture and structured entries on this iPhone stay.',
-        ar: 'سيحذف نصوص الرسائل التشخيصية المحفوظة ويفصل المرحّل القديم. سيبقى الالتقاط التلقائي المحلي والعمليات المنظّمة على هذا الآيفون.',
-    },
-    privateModeEnable: { en: 'Turn on', ar: 'تفعيل' },
-    privateModeFailed: {
-        en: 'Private Mode could not disconnect the relay. Connect to the internet and try again.',
-        ar: 'تعذّر على الوضع الخاص فصل المرحّل. اتصل بالإنترنت وحاول مرة أخرى.',
-    },
     capturePreferenceFailed: {
         en: 'Capture setting didn’t save. Try again.',
         ar: 'لم يُحفظ إعداد الالتقاط. حاول مجدداً.',
@@ -6216,8 +5946,6 @@ const S = {
     },
     country: { en: 'Country', ar: 'الدولة' },
     language: { en: 'Language', ar: 'اللغة' },
-    monthStartsOn: { en: 'Month starts on day', ar: 'يبدأ الشهر في يوم' },
-    calendarMonths: { en: 'Calendar months (1st to end)', ar: 'أشهر ميلادية (من ١ حتى النهاية)' },
     backupJson: { en: 'Back up everything (JSON)', ar: 'نسخ احتياطي كامل (JSON)' },
     restoreBackup: { en: 'Restore from backup', ar: 'استعادة من نسخة احتياطية' },
     exportCsv: { en: 'Export transactions (CSV)', ar: 'تصدير العمليات (CSV)' },
@@ -6247,10 +5975,6 @@ const S = {
         en: 'Launch metrics export failed',
         ar: 'تعذّر تصدير مقاييس التشغيل',
     },
-    smsCorpusExportTitle: {
-        en: 'Export parser corpus (temporary)',
-        ar: 'تصدير مجموعة رسائل للمحلّل (مؤقت)',
-    },
     personalReviewExportTitle: {
         en: 'Export my data for review',
         ar: 'تصدير بياناتي للمراجعة',
@@ -6273,23 +5997,10 @@ const S = {
         ar: 'يستبعد تفضيلك المحفوظ نص الرسائل الأصلية. راجعه في الإعدادات ← الخصوصية والبيانات.',
     },
     personalReviewExportFailed: { en: 'Could not export your data', ar: 'تعذّر تصدير بياناتك' },
-    smsCorpusExportDetail: {
-        en: 'Share every received SMS from this Android phone',
-        ar: 'مشاركة جميع الرسائل المستلمة من هاتف أندرويد هذا',
-    },
     smsCorpusExportProgress: {
         en: 'Preparing {count} messages…',
         ar: 'جارٍ تجهيز {count} رسالة…',
     },
-    smsCorpusConfirmTitle: {
-        en: 'Export every received SMS?',
-        ar: 'تصدير جميع الرسائل المستلمة؟',
-    },
-    smsCorpusConfirmBody: {
-        en: 'This temporary diagnostic reads the full sender, date and text of every received SMS on this phone and prepares a local JSON file. Wafra does not upload it; you choose where to send it in the Android share sheet.',
-        ar: 'تقرأ هذه الأداة التشخيصية المؤقتة اسم المرسل والتاريخ والنص الكامل لكل رسالة مستلمة على هذا الهاتف، ثم تُنشئ ملف JSON محلياً. لا يرفعه وفرة؛ أنت تختار وجهته من قائمة المشاركة في أندرويد.',
-    },
-    smsCorpusConfirmAction: { en: 'Prepare file', ar: 'تجهيز الملف' },
     smsCorpusPermissionTitle: {
         en: 'SMS permission is needed',
         ar: 'يلزم إذن الرسائل',
@@ -6297,10 +6008,6 @@ const S = {
     smsCorpusPermissionBody: {
         en: 'Allow SMS access, then try the temporary export again.',
         ar: 'اسمح بالوصول إلى الرسائل ثم أعد محاولة التصدير المؤقت.',
-    },
-    smsCorpusFailedTitle: {
-        en: 'Corpus export failed',
-        ar: 'تعذّر تصدير مجموعة الرسائل',
     },
     smsCorpusFailedBody: {
         en: 'No file was shared. Keep Wafra open and try again.',
@@ -6314,8 +6021,6 @@ const S = {
     },
     currentMoneyMonth: { en: 'Current money month', ar: 'الشهر المالي الحالي' },
     allExpenses: { en: 'All expenses', ar: 'كل المصروفات' },
-    originalAmount: { en: 'Original amount', ar: 'المبلغ الأصلي' },
-    exchangeRate: { en: 'Exchange rate', ar: 'سعر الصرف' },
     bankQuotedRate: { en: 'Bank-quoted {currency} equivalent', ar: 'ما يعادله بعملة {currency} حسب البنك' },
     datedReferenceRate: { en: 'Dated reference rate · {date}', ar: 'سعر مرجعي بتاريخ {date}' },
     offlineFxEstimate: {
@@ -6343,25 +6048,10 @@ const S = {
     },
     loadDemo: { en: 'Load demo data', ar: 'تحميل بيانات تجريبية' },
     eraseAll: { en: 'Erase all data', ar: 'مسح كل البيانات' },
-    tapToChange: { en: 'tap to change', ar: 'اضغط للتغيير' },
-    languageChanged: { en: 'Language changed', ar: 'تم تغيير اللغة' },
-    mirrorOnNextOpen: {
-        en: 'The text has changed already. Android can only mirror the layout right-to-left when the app starts, so that part arrives next time you open Wafra.',
-        ar: 'تغيّر النص بالفعل. لا يستطيع أندرويد عكس اتجاه الواجهة إلى اليمين إلا عند بدء التطبيق، لذا سيظهر ذلك في المرة القادمة التي تفتح فيها وفرة.',
-    },
-    proTagline: { en: 'A few power features fund the app.', ar: 'ميزات إضافية تدعم استمرار التطبيق.' },
     proActiveThanks: { en: 'Active on this device. Thank you for supporting Wafra.', ar: 'مفعّل على هذا الجهاز. شكراً لدعمك وفرة.' },
     proOutcomeTitle: {
         en: 'Keep your ledger up to date, automatically.',
         ar: 'حافظ على تحديث سجلك تلقائياً.',
-    },
-    proTrialActiveBody: {
-        en: 'Automatic capture is included for {left} more day{s}.',
-        ar: 'الالتقاط التلقائي مشمول لمدة {left} يوم إضافي.',
-    },
-    proTrialEndedBody: {
-        en: 'Automatic bank-message capture is paused. Your ledger and manual entries still work.',
-        ar: 'توقف الالتقاط التلقائي لرسائل البنك. يظل سجلك والإدخال اليدوي متاحين.',
     },
     proBenefitsTitle: { en: 'Included with Pro', ar: 'مشمول مع برو' },
     proChoosePlan: { en: 'Choose your plan', ar: 'اختر خطتك' },
@@ -6391,8 +6081,6 @@ const S = {
         ar: 'وفرة برو مفعّل مجدداً على هذا الجهاز.',
     },
     proContinue: { en: 'Continue to Wafra', ar: 'متابعة إلى وفرة' },
-    trialEndedPaywall: { en: 'Your free trial has ended and tracking is paused. Subscribe to keep Wafra working — your data never leaves your phone either way.', ar: 'انتهت تجربتك المجانية وتوقف التتبع. اشترك لمواصلة استخدام وفرة — بياناتك لا تغادر هاتفك في كل الأحوال.' },
-    freeTrialActive: { en: 'FREE TRIAL ACTIVE', ar: 'التجربة المجانية مفعّلة' },
     getPro: { en: 'Get Wafra Pro', ar: 'اشترك في وفرة برو' },
     startPlanWithPrice: {
         en: 'Start {plan} — {price}',
@@ -6411,8 +6099,6 @@ const S = {
     notificationsOff: { en: 'Notifications are off', ar: 'الإشعارات مغلقة' },
     notificationsOffBody: { en: 'Wafra needs notification permission to alert you. Turn it on in Settings → Apps → Wafra → Notifications.', ar: 'يحتاج وفرة إذن الإشعارات لتنبيهك. فعّله من الإعدادات ← التطبيقات ← وفرة ← الإشعارات.' },
     bankAppNotifsTitle: { en: 'Bank app notifications', ar: 'إشعارات تطبيقات البنوك' },
-    eraseEverythingQ: { en: 'Erase everything on this phone?', ar: 'حذف كل شيء من هذا الهاتف؟' },
-    eraseAction: { en: 'Erase', ar: 'مسح' },
     eraseEverythingBody: {
         en: 'All accounts, entries, bills, and goals will be permanently deleted.',
         ar: 'ستُحذف جميع الحسابات والعمليات والفواتير والأهداف نهائياً.',
@@ -6502,22 +6188,17 @@ const S = {
         ar: 'تعذّر حفظ المنحة المحلية المشفّرة. أبقِ وفرة مفتوحاً وحاول خمس ضغطات مجدداً.',
     },
     wafraLogo: { en: 'Wafra logo', ar: 'شعار وفرة' },
-    followingPhone: { en: 'Following your phone. Wafra turns over when it does.', ar: 'يتبع هاتفك. يتغيّر وفرة بتغيّره.' },
     alertEveryCharge: { en: 'Alert me on every charge', ar: 'نبّهني عند كل عملية' },
-    turnOnSmsFirst: { en: 'Turn on bank SMS first', ar: 'فعّل قراءة رسائل البنك أولاً' },
-    turnOnSmsFirstBody: { en: 'Wafra can only alert you about a charge it is allowed to read.', ar: 'لا يمكن لوفرة تنبيهك عن عملية لا يُسمح له بقراءتها.' },
     unhide: { en: 'Unhide', ar: 'إظهار' },
     hideFromLists: { en: 'Hide from lists', ar: 'إخفاء من القوائم' },
     hidden: { en: 'Hidden', ar: 'مخفي' },
     noActivity90: { en: 'No activity for 90+ days', ar: 'لا نشاط منذ أكثر من 90 يوماً' },
     pasteBankMessage: { en: 'Paste a bank message', ar: 'ألصق رسالة بنكية' },
     inboxNotRead: { en: 'Inbox not read yet', ar: 'لم تُقرأ الرسائل بعد' },
-    inboxNeedsAndroid: { en: 'Reading the inbox needs the Android app; pasting works anywhere', ar: 'قراءة الرسائل تحتاج تطبيق أندرويد؛ اللصق يعمل في كل مكان' },
     deleteCardAndEntries: { en: 'Delete card and its entries', ar: 'حذف البطاقة وعملياتها' },
     notASubscriptionQ: { en: 'Not a subscription?', ar: 'ليس اشتراكاً؟' },
     stillLoading: { en: 'Still loading your data — try again in a second.', ar: 'ما زال تحميل بياناتك جارياً — أعد المحاولة بعد لحظة.' },
     upToDateNoNew: { en: 'Up to date. No new bank messages.', ar: 'كل شيء محدّث. لا رسائل بنكية جديدة.' },
-    rescanHint: { en: 'Rescans your whole inbox and shows what would be filed. Cards are matched automatically and nothing imports twice. You can also paste messages below.', ar: 'يعيد فحص كل رسائلك ويعرض ما سيُسجَّل. تُطابَق البطاقات تلقائياً ولا يُستورد شيء مرتين. يمكنك أيضاً لصق رسائل بالأسفل.' },
     pasteHint: {
         en: `Paste one or more bank messages below, separated by a blank line. ${import_processing_disclosure_1.IMPORT_PROCESSING_DISCLOSURE.en}`,
         ar: `ألصق رسالة بنكية أو أكثر بالأسفل، بينها سطر فارغ. ${import_processing_disclosure_1.IMPORT_PROCESSING_DISCLOSURE.ar}`,
@@ -6542,25 +6223,13 @@ const S = {
     noBankPaymentMatched: { en: 'The paid amount was recorded in Wafra; no bank payment to this card is matched yet.', ar: 'سُجّل المبلغ المدفوع في وفرة، ولم تُطابَق بعد أي دفعة بنكية لهذه البطاقة.' },
     notRecurringQ: { en: 'Not a recurring charge?', ar: 'ليست عملية متكررة؟' },
     notifsAreOff: { en: 'Notifications are off', ar: 'الإشعارات مغلقة' },
-    onboardPrivacyBody: {
-        en: 'Add entries yourself or connect supported bank messages',
-        ar: 'أضف العمليات بنفسك أو اربط رسائل البنوك المدعومة',
-    },
-    readMyInbox: { en: 'Read my inbox', ar: 'اقرأ رسائلي' },
     setCreditLimit: { en: 'Set credit limit', ar: 'تحديد حد الائتمان' },
-    notifAccessBody: { en: 'Some banks send push notifications instead of SMS. Grant Wafra notification access and ', ar: 'ترسل بعض البنوك إشعارات بدل الرسائل. امنح وفرة إذن قراءة الإشعارات و' },
     notAWafraBackup: { en: 'That does not look like a Wafra backup.', ar: 'لا يبدو هذا ملف نسخ احتياطي لوفرة.' },
-    noServerTitle: { en: 'Processed on this phone', ar: 'تُعالَج على هذا الهاتف' },
     restoreReplacesAll: { en: 'This replaces everything currently in the app.', ar: 'سيستبدل هذا كل ما في التطبيق حالياً.' },
     upToDate: { en: 'Up to date', ar: 'كل شيء محدّث' },
     notifsForCardDue: { en: 'Wafra needs notification permission to remind you before a payment is due.', ar: 'يحتاج وفرة إذن الإشعارات لتذكيرك قبل موعد السداد.' },
     notifsForBill: { en: 'Wafra needs notification permission to warn you before a charge lands.', ar: 'يحتاج وفرة إذن الإشعارات لتنبيهك قبل خصم أي مبلغ.' },
-    warnsBeforeMoneyLeaves: { en: 'Warns before the money leaves', ar: 'ينبّهك قبل خروج المال' },
-    readInboxLater: { en: 'You can read your inbox later from Wallet.', ar: 'يمكنك قراءة رسائلك لاحقاً من المحفظة.' },
     dataStillLoading: { en: 'Your data is still loading. Try again in a second.', ar: 'ما زال تحميل بياناتك جارياً. أعد المحاولة بعد لحظة.' },
-    historyIsIn: { en: 'Your history is in.', ar: 'تم إدخال سجلّك.' },
-    inVsOut6: { en: 'Income vs spent · 6 months', ar: 'الدخل مقابل الإنفاق · ٦ أشهر' },
-    noEntriesPeriod: { en: 'No entries in this period yet', ar: 'لا عمليات في هذه الفترة بعد' },
     totalCreditLimit: { en: 'Total credit limit', ar: 'إجمالي حد الائتمان' },
     parsePastedText: { en: 'Parse pasted text', ar: 'تحليل النص الملصق' },
     billRemindersDetected: { en: 'Bill reminders detected', ar: 'تم اكتشاف تذكيرات فواتير' },
@@ -6571,22 +6240,14 @@ const S = {
     cardPaymentDue: { en: 'Card payment due', ar: 'دفعة بطاقة مستحقة' },
     openPhoneSettings: { en: 'Open settings', ar: 'افتح الإعدادات' },
     billRecordsExpense: { en: 'Records an expense of {amount} today.', ar: 'يسجّل مصروفاً بقيمة {amount} اليوم.' },
-    overdueAndLeaving: { en: 'Overdue and leaving in {days} days', ar: 'متأخرة وتخرج خلال {days} أيام' },
     merchantRuleOnly: { en: 'Future imports from {merchant} will use this category.', ar: 'ستستخدم العمليات القادمة من {merchant} هذا التصنيف.' },
     merchantRuleAlso: { en: 'Future imports from {merchant} will use this category. Also update {n} existing {entries}?', ar: 'ستستخدم العمليات القادمة من {merchant} هذا التصنيف. هل تحدّث أيضاً {n} من العمليات الحالية؟' },
-    leavingInDays: { en: 'Leaving in {days} days', ar: 'تخرج خلال {days} أيام' },
     rememberForMerchant: { en: 'Remember for {merchant}?', ar: 'تذكّر لـ {merchant}؟' },
     notifAccessFull: { en: 'This works without SMS access. Android grants access to posted notifications even when Wafra is closed. Wafra filters them on this phone and skips SMS and chat apps. Eligible financial alerts are queued temporarily in encrypted storage, then checked for your ledger or Review.', ar: 'تعمل هذه الميزة من دون إذن الرسائل. يتيح أندرويد الوصول إلى الإشعارات المنشورة حتى عند إغلاق وفرة. يفرزها وفرة محلياً ويتجاهل تطبيقات الرسائل والمحادثة. تُحفظ التنبيهات المالية المؤهلة مؤقتاً في تخزين مشفّر ثم تُفحص لإضافتها إلى سجلك أو عرضها للمراجعة.' },
     notifAccessAutoPrompt: { en: 'Enable notification access to track bank-app payments even when Wafra is closed. Wafra filters posted notifications on this phone, skips SMS and chat apps, and checks financial alerts for your ledger or Review.', ar: 'يمكنك تفعيل الوصول إلى الإشعارات لتتبّع دفعات تطبيقات البنوك حتى عند إغلاق وفرة. يفرز وفرة الإشعارات على جهازك ويتجاهل تطبيقات الرسائل والمحادثة ويفحص التنبيهات المالية لسجلك أو للمراجعة.' },
     notifDiagnosticsTitle: { en: 'Bank notification diagnostics', ar: 'تشخيص إشعارات البنك' },
-    notifDiagnosticsAccess: { en: 'System access: {system} · admission: {admission} · listener connected: {listener}', ar: 'إذن النظام: {system} · السماح المحلي: {admission} · المستمع متصل: {listener}' },
-    notifDiagnosticsVisible: { en: 'Android exposes {active} active notifications · trusted banks: {trusted} · ADCB visible: {adcb} ({adcbCount})', ar: 'يعرض أندرويد {active} إشعاراً نشطاً · بنوك موثوقة: {trusted} · ADCB ظاهر: {adcb} ({adcbCount})' },
-    notifDiagnosticsQueue: { en: 'Encrypted candidates waiting: {queued}', ar: 'العناصر المشفّرة المنتظرة: {queued}' },
-    notifDiagnosticsStages: { en: 'ADCB admission stages: {stages}', ar: 'مراحل قبول ADCB: {stages}' },
-    notifDiagnosticsUnavailable: { en: 'Diagnostics are not available on this build.', ar: 'التشخيص غير متاح في هذا الإصدار.' },
     notifDiagnosticsRefresh: { en: 'Refresh diagnostics', ar: 'تحديث التشخيص' },
     startWithSample: { en: 'Start with sample data', ar: 'ابدأ ببيانات تجريبية' },
-    alsoReadNotifs: { en: 'Also read bank notifications', ar: 'اقرأ أيضاً إشعارات البنوك' },
     storageRecoveryTitle: { en: 'Your ledger could not be opened', ar: 'تعذّر فتح سجلك' },
     storageRecoveryBody: {
         en: 'Wafra could not read the encrypted ledger on this device. Nothing has been changed or deleted — your entries are still here, and saving is paused so nothing can write over them.',
@@ -6645,25 +6306,11 @@ const S = {
         ar: 'تستخدم هذه التنبيهات عملة مختلفة عن سجلك، أو تتضمن مبلغاً لا يمكن لوفرة استيراده بأمان. لم تُضف أي عملية.',
     },
     recommended: { en: 'RECOMMENDED', ar: 'مقترح' },
-    onboardEyebrow: { en: 'YOUR MONEY, MADE CLEAR', ar: 'أموالك، بصورة أوضح' },
-    onboardHeadline: { en: 'Your money,\nfinally clear.', ar: 'أموالك،\nواضحة أخيراً.' },
-    onboardWelcomeBody: {
-        en: 'Bank messages arrive separately. Wafra organizes them into one money view.',
-        ar: 'تصل رسائل البنك بشكل منفصل. ينظّمها وفرة في صورة مالية واحدة.',
-    },
     onboardRegionalExample: { en: 'Examples from your region', ar: 'أمثلة من منطقتك' },
     onboardRegionalBankGeneric: { en: 'Bank', ar: 'بنك' },
     onboardScenePurchase: { en: 'Card purchase', ar: 'شراء بالبطاقة' },
     onboardSceneBill: { en: 'Bill payment', ar: 'دفع فاتورة' },
     onboardSceneIncome: { en: 'Salary credited', ar: 'إيداع الراتب' },
-    onboardSceneToday: { en: 'Today', ar: 'اليوم' },
-    onboardSceneDebitCard: { en: 'Debit card', ar: 'بطاقة خصم' },
-    onboardSceneAccount: { en: 'Account', ar: 'الحساب' },
-    onboardSceneFiledAutomatically: { en: 'Filed automatically', ar: 'صُنّفت تلقائياً' },
-    onboardParseNote: {
-        en: 'Wafra reads the amount, merchant and card. The balance is never stored.',
-        ar: 'يقرأ وفرة المبلغ والتاجر والبطاقة. لا يُحفظ الرصيد أبداً.',
-    },
     onboardSceneGroceries: { en: 'Groceries', ar: 'بقالة' },
     onboardSceneGroceryStore: { en: 'Grocery store', ar: 'متجر بقالة' },
     onboardSceneUtilities: { en: 'Utilities', ar: 'خدمات' },
@@ -6674,11 +6321,6 @@ const S = {
     onboardSceneTelecom: { en: 'Telecom', ar: 'اتصالات' },
     onboardSceneThisMonth: { en: 'THIS MONTH', ar: 'هذا الشهر' },
     onboardSceneDueBills: { en: 'due · 3 bills', ar: 'مستحق · ٣ فواتير' },
-    onboardSceneOrganized: { en: 'Organized automatically', ar: 'منظّمة تلقائياً' },
-    onboardSceneFromAlerts: { en: 'BANK MESSAGES', ar: 'رسائل البنك' },
-    onboardSceneToLedger: { en: 'YOUR LEDGER', ar: 'سجلك' },
-    onboardSceneRevealFootnote: { en: 'Same activity. Less mess.', ar: 'النشاط نفسه. فوضى أقل.' },
-    onboardScenePreviewLabel: { en: 'PREVIEW', ar: 'معاينة' },
     onboardSceneElectricity: { en: 'Electricity', ar: 'الكهرباء' },
     onboardSceneCardDue: { en: 'Card due', ar: 'استحقاق البطاقة' },
     onboardSceneInternet: { en: 'Internet', ar: 'الإنترنت' },
@@ -6686,38 +6328,17 @@ const S = {
     onboardSceneBills: { en: 'Bills', ar: 'الفواتير' },
     onboardSceneAccounts: { en: 'Accounts', ar: 'الحسابات' },
     onboardSceneNet: { en: 'net', ar: 'صافي' },
-    onboardTrackingToday: { en: 'Today', ar: 'اليوم' },
-    onboardTrackingScattered: { en: 'Different places. Different formats.', ar: 'أماكن وصيغ مختلفة.' },
     onboardTrackingOneView: { en: 'Supported bank activity in one view.', ar: 'نشاط البنوك المدعوم في صورة واحدة.' },
     onboardTrackingSpreadsheetScene: { en: 'Wafra keeps new activity organized as it arrives.', ar: 'ينظّم وفرة النشاط الجديد عند وصوله.' },
     onboardTrackingFinanceScene: { en: 'Wafra does not need your bank login.', ar: 'لا يحتاج وفرة إلى تسجيل الدخول إلى بنكك.' },
     onboardTrackingFreshSceneTitle: { en: 'Start clean.', ar: 'ابدأ بصورة نظيفة.' },
     onboardTrackingFreshSceneBody: { en: 'Start with your first entry or a supported bank message.', ar: 'ابدأ بأول عملية أو برسالة بنك مدعومة.' },
-    onboardSceneYourView: { en: 'Your Wafra view', ar: 'صورتك في وفرة' },
     onboardCaptureSceneIncoming: { en: 'Bank activity arrives', ar: 'يصل نشاط البنك' },
     onboardCaptureSceneOrganized: { en: 'Wafra files supported activity into your ledger.', ar: 'ينظّم وفرة النشاط المدعوم في سجلك.' },
-    onboardSceneCoffee: { en: 'Coffee shop', ar: 'مقهى' },
-    onboardSceneUtility: { en: 'Utility bill', ar: 'فاتورة خدمات' },
     onboardSceneAlertsToPicture: { en: '3 ALERTS ORGANIZED', ar: 'تم تنظيم 3 تنبيهات' },
     onboardSceneNetWeek: { en: 'net this week', ar: 'صافي هذا الأسبوع' },
-    onboardBuildingReadAnswers: { en: 'Read your answers', ar: 'قرأنا إجاباتك' },
-    onboardBuildingFormats: { en: 'Loaded alert formats for your region', ar: 'حمّلنا صيغ التنبيهات لمنطقتك' },
-    onboardBuildingArrange: { en: 'Put your first view up front', ar: 'وضعنا صورتك الأولى في المقدمة' },
-    onboardChooseStart: { en: 'Build my money picture', ar: 'ابنِ صورتي المالية' },
-    onboardNameTitle: { en: 'What should we call you?', ar: 'بماذا تحب أن نناديك؟' },
-    onboardNameBody: {
-        en: 'A first name or nickname is enough. We’ll use it for your greetings.',
-        ar: 'يكفي الاسم الأول أو اسم تفضّله. سنستخدمه في تحيتك داخل التطبيق.',
-    },
-    onboardNamePlaceholder: { en: 'Your name', ar: 'اسمك' },
-    onboardNamePreviewEmpty: { en: 'Make Wafra feel like yours.', ar: 'اجعل وفرة أقرب إليك.' },
-    onboardNamePreview: { en: 'Good to meet you, {name}.', ar: 'سعداء بمعرفتك، {name}.' },
-    onboardNameContinue: { en: 'Continue', ar: 'متابعة' },
     onboardNameSkip: { en: 'Skip for now', ar: 'تخطي الآن' },
     onboardNamePrivacy: { en: 'Used only to personalize Wafra on this device.', ar: 'يُستخدم فقط لتخصيص وفرة على هذا الجهاز.' },
-    onboardFocusTitle: { en: 'What do you want to understand first?', ar: 'ما الذي تريد فهمه أولاً؟' },
-    onboardFocusTitleNamed: { en: '{name}, what do you want to understand first?', ar: '{name}، ما الذي تريد فهمه أولاً؟' },
-    onboardFocusBody: { en: 'Wafra will put that view first after setup.', ar: 'سيضع وفرة هذه الصورة في المقدمة بعد الإعداد.' },
     onboardFocusSpending: { en: 'Where my money goes', ar: 'أين تذهب أموالي' },
     onboardFocusSpendingDetail: { en: 'Categories, merchants, and the spending that adds up', ar: 'التصنيفات والتجار والمصروفات التي تتراكم' },
     onboardFocusBills: { en: 'Bills & subscriptions', ar: 'الفواتير والاشتراكات' },
@@ -6726,8 +6347,6 @@ const S = {
     onboardFocusCashflowDetail: { en: 'Understand income, spending, and your real net', ar: 'افهم الدخل والمصروف وصافي التدفق الحقيقي' },
     onboardFocusOverview: { en: 'Give me the full picture', ar: 'أعطني الصورة الكاملة' },
     onboardFocusOverviewDetail: { en: 'A simple overview across spending, bills, and accounts', ar: 'نظرة بسيطة على المصروفات والفواتير والحسابات' },
-    onboardTrackingTitle: { en: 'How do you track money today?', ar: 'كيف تتابع أموالك اليوم؟' },
-    onboardTrackingBody: { en: 'Pick the way you keep track today. Wafra will start from there.', ar: 'اختر الطريقة التي تتابع بها أموالك اليوم. سيبدأ وفرة من هناك.' },
     onboardTrackingNone: { en: 'I don’t track it', ar: 'لا أتابعها حالياً' },
     onboardTrackingNoneDetail: { en: 'Start simple. Wafra will organize the picture for you.', ar: 'ابدأ ببساطة. سينظّم وفرة الصورة لك.' },
     onboardTrackingBankApps: { en: 'I check my bank apps', ar: 'أراجع تطبيقات البنك' },
@@ -6779,14 +6398,11 @@ const S = {
     onboardAlertsReachStatement: { en: 'Needs a statement', ar: 'تحتاج كشف حساب' },
     onboardAlertsReachManual: { en: 'You add these yourself', ar: 'تضيفها بنفسك' },
     onboardAlertsReachUnknown: { en: 'Wafra will check', ar: 'سيتحقق وفرة' },
-    onboardAlertsNotificationHint: { en: 'You said your bank uses notifications — turn on bank notifications below so Wafra sees them.', ar: 'ذكرت أن بنكك يستخدم الإشعارات — فعّل إشعارات البنك أدناه ليتمكن وفرة من رؤيتها.' },
     onboardHistoryGapTitle: { en: 'Your past months need a statement', ar: 'الأشهر السابقة تحتاج كشف حساب' },
     onboardHistoryGapBody: { en: 'Wafra will catch everything from here on its own. To get earlier months right, import a statement — it takes a minute and nothing leaves your phone.', ar: 'سيلتقط وفرة كل ما يأتي من الآن تلقائياً. وللحصول على الأشهر السابقة بدقة، استورد كشف حساب — يستغرق دقيقة ولا تغادر بياناتك هاتفك.' },
     onboardHistoryGapManualTitle: { en: 'This bank needs a statement', ar: 'هذا البنك يحتاج كشف حساب' },
     onboardHistoryGapManualBody: { en: 'A bank that sends nothing leaves Wafra nothing to read, now or later. Import a statement to bring this spending in — you can also add entries yourself. Nothing leaves your phone.', ar: 'البنك الذي لا يرسل شيئاً لا يترك لوفرة ما يقرأه، لا الآن ولا لاحقاً. استورد كشف حساب لإدخال هذه العمليات — ويمكنك أيضاً إضافتها بنفسك. ولا تغادر بياناتك هاتفك.' },
     onboardHistoryGapAction: { en: 'Import a statement', ar: 'استيراد كشف حساب' },
-    onboardIntentionTitle: { en: 'What would make money feel easier?', ar: 'ما الذي سيجعل إدارة المال أسهل؟' },
-    onboardIntentionBody: { en: 'Choose what you want Wafra to make easier first.', ar: 'اختر ما تريد من وفرة أن يجعله أسهل أولاً.' },
     onboardIntentionControl: { en: 'Feel more in control', ar: 'أشعر بسيطرة أكبر' },
     onboardIntentionSpend: { en: 'Spend more intentionally', ar: 'أنفق بوعي أكبر' },
     onboardIntentionAhead: { en: 'Stay ahead of bills', ar: 'أبقى متقدماً على الفواتير' },
@@ -6796,34 +6412,10 @@ const S = {
     onboardIntentionAheadScene: { en: 'See upcoming bills and due dates in one timeline.', ar: 'شاهد الفواتير القادمة ومواعيد الاستحقاق في مسار واحد.' },
     onboardIntentionBufferScene: { en: 'See what is left after money in and money out.', ar: 'شاهد ما يتبقى بعد الداخل والخارج.' },
     onboardPreviewFrom: { en: 'YOU TRACK TODAY', ar: 'طريقتك اليوم' },
-    onboardPreviewForYou: { en: 'YOUR STARTING VIEW', ar: 'صورتك الأولى' },
-    onboardOutcomeTitle: { en: 'Wafra does the organizing.', ar: 'وفرة يتولى التنظيم.' },
-    onboardPersonalizedTitle: { en: 'Your starting view is ready.', ar: 'صورتك الأولى جاهزة.' },
-    onboardPersonalizedTitleNamed: { en: '{name}, your starting view is ready.', ar: '{name}، صورتك الأولى جاهزة.' },
-    onboardPersonalizedBody: {
-        en: 'Wafra will open with the view you chose. You can change it anytime.',
-        ar: 'سيفتح وفرة بالصورة التي اخترتها. ويمكنك تغييرها في أي وقت.',
-    },
-    onboardBasedOnAnswers: { en: 'BASED ON YOUR ANSWERS', ar: 'بناءً على إجاباتك' },
-    onboardConnectMyMoney: { en: 'Choose how to track', ar: 'اختر طريقة التتبع' },
-    onboardOutcomeBody: { en: 'Supported bank messages become a clean ledger, then Wafra turns that ledger into the view you chose.', ar: 'تتحول رسائل البنك المدعومة إلى سجل واضح، ثم يحوّل وفرة هذا السجل إلى الصورة التي اخترتها.' },
-    onboardOutcomeTrackingNone: { en: 'No system to clean up. Wafra can start organizing from your first real entry or supported bank message.', ar: 'لا يوجد نظام قديم لترتيبه. يمكن لوفرة أن يبدأ التنظيم من أول عملية حقيقية أو رسالة بنك مدعومة.' },
-    onboardOutcomeTrackingBankApps: { en: 'Instead of checking separate bank apps, supported alerts can become one organized ledger in Wafra.', ar: 'بدلاً من مراجعة تطبيقات بنوك متعددة، يمكن أن تتحول التنبيهات المدعومة إلى سجل واحد منظم في وفرة.' },
-    onboardOutcomeTrackingSpreadsheet: { en: 'Keep the useful structure without the spreadsheet cleanup. Wafra organizes supported activity as it arrives.', ar: 'احتفظ بالبنية المفيدة دون ترتيب الجداول يدوياً. ينظم وفرة النشاط المدعوم عند وصوله.' },
-    onboardOutcomeTrackingFinanceApp: { en: 'Keep the clarity you expect from a finance app without giving Wafra your bank login.', ar: 'احتفظ بالوضوح الذي تتوقعه من تطبيق مالي دون إعطاء وفرة بيانات تسجيل الدخول إلى البنك.' },
-    onboardOutcomeSpending: { en: 'You’ll land on spending by category and merchant.', ar: 'ستبدأ من المصروفات حسب التصنيف والتاجر.' },
-    onboardOutcomeBills: { en: 'You’ll land on upcoming bills, subscriptions, and utilities.', ar: 'ستبدأ من الفواتير القادمة والاشتراكات والخدمات.' },
-    onboardOutcomeCashflow: { en: 'You’ll land on Money in, Money out, and Net.', ar: 'ستبدأ من الداخل والخارج والصافي.' },
-    onboardOutcomeOverview: { en: 'You’ll land on a simple overview of your money.', ar: 'ستبدأ من نظرة بسيطة على أموالك.' },
-    onboardPrivacyTitle: { en: 'Your data stays under your control.', ar: 'بياناتك تبقى تحت سيطرتك.' },
-    onboardDataControlBody: { en: 'Wafra does not need your bank username or password. You decide whether to connect supported bank messages or enter things manually.', ar: 'لا يحتاج وفرة اسم المستخدم أو كلمة مرور البنك. أنت تقرر إن كنت ستربط رسائل البنك المدعومة أو تضيف العمليات يدوياً.' },
-    onboardPrivacyLocalTitle: { en: 'Processed on your device', ar: 'تتم المعالجة على جهازك' },
-    onboardPrivacyLocalBody: { en: 'Android bank-message text stays on your phone. iPhone setup uses Apple Shortcuts and local processing.', ar: 'يبقى نص رسائل البنك على هاتف أندرويد. ويستخدم إعداد الآيفون اختصارات Apple والمعالجة المحلية.' },
     onboardPrivacyNoLoginTitle: { en: 'No bank login', ar: 'دون تسجيل دخول للبنك' },
     onboardPrivacyNoLoginBody: { en: 'Wafra never asks for your banking password.', ar: 'لا يطلب وفرة كلمة مرور حسابك البنكي.' },
     onboardPrivacyChoiceTitle: { en: 'You can change this later', ar: 'يمكنك تغيير هذا لاحقاً' },
     onboardPrivacyChoiceBody: { en: 'Automatic capture is optional. Manual tracking always remains available.', ar: 'الالتقاط التلقائي اختياري. ويظل الإدخال اليدوي متاحاً دائماً.' },
-    onboardPrivacyContinue: { en: 'Choose how to connect', ar: 'اختر طريقة الربط' },
     onboardInsightSpendingTitle: { en: 'Start with where it went', ar: 'ابدأ من أين ذهبت أموالك' },
     onboardInsightSpendingBody: { en: 'Wafra will open Spending first, with categories and merchants ready as your activity arrives.', ar: 'سيفتح وفرة قسم المصروفات أولاً، مع التصنيفات والتجار كلما وصل نشاطك.' },
     onboardInsightBillsTitle: { en: 'Start with what is coming up', ar: 'ابدأ بما هو قادم' },
@@ -6833,29 +6425,16 @@ const S = {
     onboardInsightOverviewTitle: { en: 'Start with the whole picture', ar: 'ابدأ بالصورة الكاملة' },
     onboardInsightOverviewBody: { en: 'Home will give you the simplest overview first, then you can drill into spending, bills, and accounts.', ar: 'ستمنحك الصفحة الرئيسية أبسط نظرة أولاً، ثم يمكنك التعمق في المصروفات والفواتير والحسابات.' },
     onboardBillsFound: { en: 'bills recognised', ar: 'فواتير تم التعرف عليها' },
-    onboardProPreviewTitle: { en: 'Want Wafra to keep doing more automatically?', ar: 'هل تريد من وفرة أن يواصل العمل تلقائياً؟' },
-    onboardProPreviewBody: { en: 'See what Pro adds after your own activity is already in Wafra.', ar: 'شاهد ما يضيفه Pro بعد أن يصبح نشاطك الحقيقي داخل وفرة.' },
-    onboardProPreviewAction: { en: 'See Wafra Pro', ar: 'شاهد وفرة برو' },
-    onboardOpenSpending: { en: 'Open Spending', ar: 'افتح المصروفات' },
-    onboardOpenBills: { en: 'Open Bills', ar: 'افتح الفواتير' },
-    onboardOpenHome: { en: 'Open Home', ar: 'افتح الرئيسية' },
     onboardSampleBefore: { en: '01 / Bank message', ar: '01 / رسالة البنك' },
     onboardSampleAfter: { en: '02 / In your ledger', ar: '02 / في سجلك' },
     onboardSampleBankAlert: { en: 'A moment in your day', ar: 'لحظة من يومك' },
     onboardSampleInsight: { en: 'Organized by category. Easier to see where it went.', ar: 'مرتّبة حسب التصنيف، لترى أين أنفقتها بسهولة.' },
-    onboardOptionalPlanNote: { en: 'Optional goals and budget style. No amounts to set now.', ar: 'أهداف ونمط ميزانية اختياريان. دون تحديد مبالغ الآن.' },
-    onboardSavedPlanNote: { en: 'Preferences saved. Budget amounts wait for real income.', ar: 'تم حفظ تفضيلاتك. تنتظر مبالغ الميزانية دخلاً حقيقياً.' },
-    onboardEditPlan: { en: 'Edit your preferences', ar: 'عدّل تفضيلاتك' },
-    onboardManualChoiceWebBody: { en: 'Add your own entries. Automatic capture is available in the phone apps.', ar: 'أضف عملياتك بنفسك. الالتقاط التلقائي متاح في تطبيقات الهاتف.' },
     onboardFinishSaveFailedTitle: { en: 'Your choice could not be saved.', ar: 'تعذّر حفظ اختيارك.' },
     onboardFinishSaveFailedBody: { en: 'Try again to save your setup. You can continue once it’s saved.', ar: 'حاول مجدداً لحفظ إعدادك. يمكنك المتابعة بعد حفظه.' },
     onboardSetupWorking: { en: 'Saving your choice…', ar: 'جارٍ حفظ اختيارك…' },
-    onboardAddFirstEntry: { en: 'Add my first entry', ar: 'أضف أول عملية لي' },
-    onboardExploreLedger: { en: 'Explore my ledger', ar: 'استكشف سجلي' },
     onboardRetrySetup: { en: 'Back to setup choices', ar: 'العودة إلى خيارات الإعداد' },
     onboardPermissionChoiceTitle: { en: 'You’re in control.', ar: 'القرار لك.' },
     onboardPermissionChoiceBody: { en: 'SMS access is optional. Retry when you’re ready, or start with manual entries.', ar: 'الوصول للرسائل اختياري. أعد المحاولة عندما تكون مستعداً، أو ابدأ بإدخال يدوي.' },
-    onboardStartNow: { en: 'Start tracking', ar: 'ابدأ التتبع' },
     onboardPersonalizeOptional: { en: 'Make it yours', ar: 'خصّص تجربتك' },
     onboardSampleLabel: { en: 'INTERACTIVE EXAMPLE', ar: 'مثال تفاعلي' },
     onboardSampleMessage: { en: 'Card purchase at Coffee shop. Card ending 4582.', ar: 'شراء بالبطاقة من مقهى. البطاقة المنتهية بـ 4582.' },
@@ -6865,83 +6444,26 @@ const S = {
     onboardSampleCategory: { en: 'Dining · Card purchase', ar: 'مطاعم · شراء بالبطاقة' },
     onboardSampleNote: { en: 'Example only. Nothing is saved.', ar: 'مثال فقط. لا يُحفظ شيء.' },
     onboardResumeError: { en: 'Could not restore setup progress. Try again to continue safely.', ar: 'تعذّر استعادة تقدّم الإعداد. أعد المحاولة للمتابعة بأمان.' },
-    onboardSkipPersonalization: { en: 'Set this up later', ar: 'إعداد هذا لاحقاً' },
-    onboardSub: { en: 'Supported bank messages. One clear ledger.', ar: 'رسائل البنوك المدعومة في سجل واضح.' },
     onboardPersonalizeCta: { en: 'Get started', ar: 'ابدأ الآن' },
-    onboardSetupTime: { en: 'No bank login required', ar: 'لا يتطلب تسجيل الدخول إلى البنك' },
-    onboardPreviewOverline: { en: 'EXAMPLE MONEY STORY', ar: 'مثال لصورة مالية' },
-    onboardPreviewLive: { en: 'WHAT WAFRA CAN ORGANISE', ar: 'ما يمكن لوفرة تنظيمه' },
     onboardPreviewIncome: { en: 'Income received', ar: 'دخل مستلم' },
-    onboardPreviewIncomeDetail: { en: 'Incoming money recognised', ar: 'تم التعرف على المال الوارد' },
     onboardPreviewBill: { en: 'Upcoming bill', ar: 'فاتورة قادمة' },
-    onboardPreviewBillDetail: { en: 'Due date kept visible', ar: 'موعد الاستحقاق يبقى واضحاً' },
-    onboardPreviewCard: { en: 'Card repayment', ar: 'سداد بطاقة' },
-    onboardPreviewCardDetail: { en: 'Matched and counted once', ar: 'تمت مطابقتها واحتسابها مرة واحدة' },
-    onboardPreviewFooter: { en: 'One timeline. No spreadsheet cleanup.', ar: 'مسار واحد، دون ترتيب جداول.' },
-    onboardPreviewAccessibility: {
-        en: 'Example: Wafra can recognise income, bring bills forward, and count matched card payments once.',
-        ar: 'مثال: يمكن لوفرة التعرف على الدخل وعرض الفواتير واحتساب دفعات البطاقات المتطابقة مرة واحدة.',
-    },
     onboardStepOf: { en: 'Step {step} of {total}', ar: 'الخطوة {step} من {total}' },
     onboardBack: { en: 'Back', ar: 'رجوع' },
-    onboardMarketTitle: { en: 'Where does your money live?', ar: 'أين تعيش أموالك؟' },
-    onboardMarketBody: {
-        en: 'This sets the currency and local money calendar across Wafra.',
-        ar: 'يحدّد هذا العملة وتقويمك المالي المحلي في وفرة.',
-    },
-    onboardMarketUae: { en: 'United Arab Emirates', ar: 'الإمارات العربية المتحدة' },
-    onboardMarketUaeDetail: { en: 'AED · UAE bank coverage', ar: 'درهم · دعم البنوك الإماراتية' },
-    onboardMarketSaudi: { en: 'Saudi Arabia', ar: 'المملكة العربية السعودية' },
-    onboardMarketSaudiDetail: { en: 'SAR · Saudi money format', ar: 'ريال · تنسيق الأموال السعودي' },
-    onboardGoalsTitle: { en: 'Your goals', ar: 'أهدافك' },
-    onboardGoalsBody: { en: 'Choose up to two.', ar: 'اختر هدفين كحد أقصى.' },
-    onboardGoalSelectionHint: {
-        en: 'Choose up to two goals.',
-        ar: 'اختر هدفين كحد أقصى.',
-    },
-    onboardGoalMax: { en: 'Two goals is the limit for setup.', ar: 'يمكن اختيار هدفين أثناء الإعداد.' },
     onboardGoalEmergency: { en: 'Emergency fund', ar: 'صندوق الطوارئ' },
     onboardGoalEmergencyDetail: { en: 'A visible safety buffer', ar: 'احتياطي أمان واضح أمامك' },
     onboardGoalTravel: { en: 'A proper holiday', ar: 'إجازة تستحقها' },
     onboardGoalTravelDetail: { en: 'Flights, stays, and spending money', ar: 'رحلات وإقامة ومصروف' },
     onboardGoalHome: { en: 'A home deposit', ar: 'دفعة منزل أولى' },
     onboardGoalHomeDetail: { en: 'Make the first big milestone visible', ar: 'اجعل أول محطة كبيرة واضحة' },
-    onboardBudgetTitle: { en: 'Your spending plan', ar: 'خطة إنفاقك' },
-    onboardBudgetBody: { en: 'Pick a starting style.', ar: 'اختر أسلوباً مبدئياً.' },
     onboardBudgetEssentials: { en: 'Essentials first', ar: 'الأساسيات أولاً' },
     onboardBudgetEssentialsDetail: { en: 'A tighter plan for focused months', ar: 'خطة أدق للأشهر المنضبطة' },
     onboardBudgetBalanced: { en: 'Balanced', ar: 'متوازنة' },
     onboardBudgetBalancedDetail: { en: 'Comfort with clear guardrails', ar: 'راحة مع حدود واضحة' },
     onboardBudgetFlexible: { en: 'More flexible', ar: 'أكثر مرونة' },
     onboardBudgetFlexibleDetail: { en: 'More room for dining and shopping', ar: 'مساحة أكبر للمطاعم والتسوق' },
-    onboardPlanActivatesLater: { en: 'Limits start after real income is recorded.', ar: 'تبدأ الحدود بعد تسجيل دخل حقيقي.' },
     onboardPlanPending: { en: 'Plan saved. Waiting for real income.', ar: 'حُفظت الخطة. بانتظار دخل حقيقي.' },
-    onboardBudgetContinue: { en: 'Save plan', ar: 'حفظ الخطة' },
-    onboardBudgetPreview: {
-        en: '{count} limits · {amount} per month',
-        ar: '{count} حدود · {amount} شهرياً',
-    },
-    onboardMoneyMonthTitle: { en: 'When does your money month begin?', ar: 'متى يبدأ شهرك المالي؟' },
-    onboardMoneyMonthBody: {
-        en: 'Charts, budgets, and insights will all follow this date.',
-        ar: 'ستتبع الرسوم والميزانيات والرؤى هذا التاريخ.',
-    },
-    onboardCalendarMonth: { en: 'Calendar month', ar: 'الشهر الميلادي' },
-    onboardCalendarMonthDetail: { en: 'Starts on day 1', ar: 'يبدأ في اليوم 1' },
-    onboardSalaryDay: { en: 'Salary day', ar: 'يوم الراتب' },
-    onboardDayNumber: { en: 'Day {day}', ar: 'اليوم \u2066{day}\u2069' },
-    onboardCaptureTitleAndroid: { en: 'Choose how to add activity', ar: 'اختر كيف تضيف نشاطك' },
-    onboardCaptureBodyAndroid: { en: 'Connect supported bank messages, or start manually. You can change this later.', ar: 'اربط رسائل البنوك المدعومة أو ابدأ يدوياً. يمكنك تغيير ذلك لاحقاً.' },
     onboardCaptureTitleIos: { en: 'Choose how to add activity', ar: 'اختر كيف تضيف نشاطك' },
     onboardCaptureBodyIos: { en: 'Connect supported bank messages, or start manually. You can change this later.', ar: 'اربط رسائل البنوك المدعومة أو ابدأ يدوياً. يمكنك تغيير ذلك لاحقاً.' },
-    onboardCaptureTitleWeb: { en: 'Start your way', ar: 'ابدأ بطريقتك' },
-    onboardCaptureBodyWeb: {
-        en: 'Automatic bank-message capture is available in the phone apps.',
-        ar: 'التقاط رسائل البنك تلقائياً متاح في تطبيقات الهاتف.',
-    },
-    onboardCaptureAndroidCta: { en: 'Enable SMS capture', ar: 'فعّل التقاط الرسائل' },
-    onboardCaptureIosCta: { en: 'Set up automatic capture', ar: 'إعداد الالتقاط التلقائي' },
-    onboardAutomaticChoice: { en: 'Set up bank SMS', ar: 'إعداد رسائل البنك' },
     onboardAutomaticChoiceAndroidBody: { en: 'Import past SMS and capture new supported alerts. Needs SMS permission. Free for your first 3 app days, then Wafra Pro.', ar: 'استورد رسائل البنك السابقة والتقط التنبيهات المدعومة الجديدة. يتطلب إذن الرسائل. مجاني لأول ٣ أيام من استخدام التطبيق، ثم يتطلب وفرة برو.' },
     onboardAndroidSmsSourceTitle: { en: 'Bank SMS', ar: 'رسائل البنك' },
     onboardAndroidSmsSourceBody: { en: 'Bring in past messages and keep reading supported bank SMS on this phone.', ar: 'استورد الرسائل السابقة واستمر بقراءة رسائل البنوك المدعومة على هذا الهاتف.' },
@@ -6978,22 +6500,6 @@ const S = {
     onboardHowItWorks: {
         en: 'How it works',
         ar: 'كيف يعمل',
-    },
-    onboardPastHowTitle: {
-        en: 'Bank statements',
-        ar: 'كشوف البنك',
-    },
-    onboardPastHowDownload: {
-        en: 'In your bank app, open Statements and download a PDF or CSV.',
-        ar: 'في تطبيق بنكك، افتح «الكشوف» ونزّل ملف PDF أو CSV.',
-    },
-    onboardPastHowPrivacy: {
-        en: 'Wafra’s server reads the file in memory, keeps only the transactions, and sends them encrypted to your devices.',
-        ar: 'يقرأ خادم وفرة الملف في الذاكرة، ويحتفظ بالعمليات فقط، ويرسلها مشفّرة إلى أجهزتك.',
-    },
-    onboardPastHowPassword: {
-        en: 'Password-protected PDFs work. Wafra asks for the password once and does not save it.',
-        ar: 'ملفات PDF المحمية بكلمة مرور مدعومة. يطلب وفرة كلمة المرور مرة واحدة ولا يحفظها.',
     },
     onboardLiveTitle: {
         en: 'Catch new transactions',
@@ -7032,22 +6538,12 @@ const S = {
         en: 'Not now',
         ar: 'ليس الآن',
     },
-    onboardManualChoice: { en: 'Start manually', ar: 'ابدأ يدوياً' },
-    onboardManualChoiceIos: { en: 'Start manually', ar: 'ابدأ يدوياً' },
     onboardManualChoiceBody: { en: 'Add entries yourself. No SMS access. Set up capture later.', ar: 'أضف العمليات بنفسك. دون وصول للرسائل. يمكنك إعداد الالتقاط لاحقاً.' },
     onboardManualChoiceIosBody: { en: 'Add entries yourself. No Messages access. Connect later.', ar: 'أضف العمليات بنفسك. دون وصول إلى الرسائل. يمكنك الربط لاحقاً.' },
-    onboardAlertsChecked: { en: 'alerts checked', ar: 'تنبيهات تم فحصها' },
-    onboardMoneyFound: { en: 'money entries found', ar: 'عمليات مالية وُجدت' },
     onboardEntryFound: { en: 'entry organised', ar: 'عملية تم تنظيمها' },
     onboardEntriesFound: { en: 'entries organised', ar: 'عمليات تم تنظيمها' },
     onboardAccountFound: { en: 'account recognised', ar: 'حساب تم التعرف عليه' },
     onboardAccountsFound: { en: 'accounts recognised', ar: 'حسابات تم التعرف عليها' },
-    onboardCaptureSkip: { en: 'Finish without capture', ar: 'إنهاء دون التقاط' },
-    onboardCaptureNoSms: { en: 'Maximum privacy · no SMS access', ar: 'أقصى خصوصية · دون وصول إلى الرسائل' },
-    onboardCapturePrivacyAndroid: {
-        en: 'Processed on this phone. SMS text is never uploaded.',
-        ar: 'تتم المعالجة على هذا الهاتف. لا يُرفع نص الرسائل أبداً.',
-    },
     onboardCapturePrivacyIos: {
         en: 'Processed on this iPhone. Nothing uploaded.',
         ar: 'تتم المعالجة على هذا الآيفون. لا يُرفع شيء.',
@@ -7060,7 +6556,6 @@ const S = {
         en: 'SMS/Message capture is local. Statement import uses the secure relay only when you choose it.',
         ar: 'يتم التقاط الرسائل محلياً. يستخدم استيراد الكشوف الخدمة الآمنة فقط عندما تختاره.',
     },
-    onboardCaptureLearnMoreAction: { en: 'Learn more', ar: 'معرفة المزيد' },
     onboardCaptureLearnMoreTitle: { en: 'About bank messages', ar: 'حول رسائل البنك' },
     onboardCaptureLearnMorePrivacy: {
         en: 'Wafra does not access your Messages inbox. An Apple automation you create passes new messages to Wafra, which keeps bank messages and discards the rest on this iPhone.',
@@ -7082,78 +6577,11 @@ const S = {
         en: 'SMS access was not granted. You can continue and enable capture later.',
         ar: 'لم يُمنح إذن الرسائل. يمكنك المتابعة وتفعيل الالتقاط لاحقاً.',
     },
-    onboardCompleteTitle: { en: 'Wafra is yours.', ar: 'وفرة أصبح لك.' },
-    onboardCompleteAutomaticTitle: { en: 'You’re ready.', ar: 'أنت جاهز.' },
-    onboardCompleteManualTitle: { en: 'Add your first entry.', ar: 'أضف أول عملية.' },
     onboardCompleteManualBody: { en: 'A coffee, groceries, or your first income is enough to start.', ar: 'تكفي قهوة أو مشتريات أو أول دخل لتبدأ.' },
     onboardCompleteNeedsAttentionTitle: { en: 'Setup needs another look.', ar: 'الإعداد يحتاج إلى مراجعة.' },
     onboardCompleteNeedsAttentionBody: { en: 'Setup could not finish. Try again, or choose manual tracking to continue without message capture.', ar: 'لم يكتمل الإعداد. حاول مجدداً، أو اختر التتبع اليدوي للمتابعة دون التقاط الرسائل.' },
-    onboardCompleteBody: {
-        en: '{goals} goal{s}, {budgets} live budgets, and a money month from day {day}.',
-        ar: '{goals} أهداف و{budgets} ميزانيات مفعّلة، وشهر مالي يبدأ في اليوم \u2066{day}\u2069.',
-    },
-    onboardCompleteBodyAutomatic: {
-        en: 'Open Wafra. Your first history import will continue in the background.',
-        ar: 'افتح وفرة. سيستمر أول استيراد للسجل في الخلفية.',
-    },
-    onboardCompleteBodyAutomaticIos: {
-        en: 'Open Wafra. The view you chose is ready.',
-        ar: 'افتح وفرة. الصورة التي اخترتها جاهزة.',
-    },
-    onboardNotificationsTitle: {
-        en: 'Stay ahead of your money',
-        ar: 'ابقَ على اطلاع بأموالك',
-    },
-    onboardNotificationsBody: {
-        en: 'Get alerts for upcoming bills, card payments, and your daily spending summary.',
-        ar: 'احصل على تنبيهات للفواتير القادمة ودفعات البطاقات وملخص إنفاقك اليومي.',
-    },
-    onboardNotificationsEnable: { en: 'Enable notifications', ar: 'تفعيل الإشعارات' },
-    onboardNotificationsNotNow: { en: 'Not now', ar: 'ليس الآن' },
-    onboardSummaryGoals: { en: 'Savings goals', ar: 'أهداف الادخار' },
-    onboardSummaryBudgets: { en: 'Category budgets', ar: 'ميزانيات التصنيفات' },
-    onboardSummaryMonth: { en: 'Money month', ar: 'الشهر المالي' },
-    onboardSummaryActive: { en: '{count} active', ar: '{count} مفعّلة' },
-    onboardReadsSms: { en: 'Start your way', ar: 'ابدأ بطريقتك' },
-    onboardWarnsDetail: { en: 'Card dues, utility bills, rent, and quiet subscriptions', ar: 'مستحقات البطاقات وفواتير الخدمات والإيجار والاشتراكات الصامتة' },
-    onboardNoServerDetail: {
-        en: 'Android bank-message text is never uploaded',
-        ar: 'لا يُرفع نص رسائل البنك من أندرويد أبداً',
-    },
-    onboardStartTitle: { en: 'Start somewhere.', ar: 'ابدأ من نقطة ما.' },
-    inboxChecked: { en: 'Inbox checked.', ar: 'تم فحص الرسائل.' },
-    onboardStartEmpty: { en: 'Start empty', ar: 'ابدأ بسجل فارغ' },
-    onboardWebChoice: {
-        en: 'Reading SMS works in the Android app. Pick a starting point:',
-        ar: 'قراءة الرسائل تعمل في تطبيق أندرويد. اختر نقطة البداية:',
-    },
-    iosOnboardHeadline: { en: 'Money,\nmade clear.', ar: 'أموالك،\nبوضوح.' },
-    iosOnboardSub: { en: 'Supported bank messages. One clear ledger.', ar: 'رسائل البنوك المدعومة في سجل واضح.' },
-    iosOnboardAutomatic: { en: 'Start your way', ar: 'ابدأ بطريقتك' },
-    iosOnboardAutomaticBody: {
-        en: 'Add entries yourself or connect supported bank messages',
-        ar: 'أضف العمليات بنفسك أو اربط رسائل البنوك المدعومة',
-    },
-    iosOnboardPrivate: { en: 'Raw messages are never kept', ar: 'نص الرسالة الخام لا يُحفظ أبداً' },
-    iosOnboardPrivateBody: {
-        en: 'The relay parses, discards the text, and seals the transaction separately for this iPhone and trusted devices',
-        ar: 'يحلّل المرحّل الرسالة ثم يحذف نصها ويشفّر العملية بشكل منفصل لهذا الآيفون وللأجهزة الموثوقة',
-    },
-    iosOnboardSetupTitle: { en: 'Make it automatic.', ar: 'اجعله تلقائياً.' },
-    iosOnboardSetupBody: {
-        en: 'A guided setup connects the private relay. Your first supported bank message verifies Apple’s automation afterward.',
-        ar: 'إعداد موجه يربط المرحّل الخاص. وبعده تتحقق أول رسالة بنكية مدعومة من أتمتة آبل.',
-    },
-    iosOnboardSetupCta: { en: 'Set up automatic capture', ar: 'إعداد الالتقاط التلقائي' },
-    readingInbox: { en: 'Reading your inbox.', ar: 'جارٍ قراءة رسائلك.' },
     openWafra: { en: 'Open Wafra', ar: 'افتح وفرة' },
     continueWord: { en: 'Continue', ar: 'متابعة' },
-    notifNoteOnboard: {
-        en: 'Android calls this broad “read, reply & control” access. Wafra only reads supported bank messages; it never replies or changes a notification.',
-        ar: 'يسمي أندرويد هذا الإذن الواسع «قراءة ورد وتحكم». وفرة يقرأ رسائل البنوك المدعومة فقط، ولا يرد على إشعار أو يغيّره.',
-    },
-    nothingOutYet: { en: 'No spending in this period yet.', ar: 'لا يوجد إنفاق في هذه الفترة بعد.' },
-    noAccountsYet: { en: 'No bank or cash accounts yet.', ar: 'لا حسابات بنكية أو نقدية بعد.' },
     noStatementYet: { en: 'No statement message has arrived for this card yet.', ar: 'لم تصل رسالة كشف حساب لهذه البطاقة بعد.' },
     debitHasNoStatement: {
         en: 'A debit card has no statement and no bill to pay — it spends the balance in the account.',
@@ -7199,8 +6627,6 @@ const S = {
         en: 'Check your connection and try the link again.',
         ar: 'تحقق من اتصالك وحاول فتح الرابط مرة أخرى.',
     },
-    nothingToRestore: { en: 'Nothing to restore', ar: 'لا شيء لاستعادته' },
-    nothingToRestoreBody: { en: 'Install Wafra from the App Store or Google Play to restore a purchase.', ar: 'ثبّت وفرة من App Store أو Google Play لاستعادة عملية شراء.' },
     noPurchaseFound: { en: 'No purchase found', ar: 'لم يُعثر على عملية شراء' },
     noPurchaseFoundBody: {
         en: 'No previous Wafra Pro purchase was found on this store account.',
@@ -7221,25 +6647,13 @@ const S = {
         en: 'The store could not confirm Pro yet. Check your connection, then restore purchases before trying to buy again.',
         ar: 'لم يتمكن المتجر من تأكيد وفرة برو بعد. تحقق من الاتصال، ثم استعد المشتريات قبل محاولة الشراء مجدداً.',
     },
-    trialDaysLeftPaywall: {
-        en: 'Everything is free for your first {total} days — {left} day{s} left. Keep it going:',
-        ar: 'كل شيء مجاني في أول {total} أيام — تبقّى {left} يوم. تابع الاستخدام:',
-    },
     featAutoTracking: { en: 'Automatic tracking', ar: 'تتبع تلقائي' },
     featAutoTrackingText: { en: 'Bank SMS and app notifications become transactions, cards and dues by themselves.', ar: 'رسائل البنك والإشعارات تتحول تلقائياً إلى عمليات وبطاقات ومستحقات.' },
     featAutoTrackingIosText: { en: 'Supported bank messages passed by your personal automation are processed locally into transactions, cards, dues, or review when needed. Set up once.', ar: 'تُعالج رسائل البنوك المدعومة التي تمررها أتمتتك الشخصية محلياً لتصبح عمليات أو بطاقات أو مستحقات، أو تُرسل للمراجعة عند الحاجة. إعداد مرة واحدة.' },
     featPasteFreeText: { en: 'Reading a bank message you hand over — and typing entries — never needs a subscription, on any phone.', ar: 'قراءة رسالة بنكية تلصقها بنفسك وإضافة العمليات يدوياً لا تحتاج اشتراكاً أبداً على أي هاتف.' },
-    featSalaryMonths: { en: 'Salary-day months', ar: 'الشهر يبدأ يوم الراتب' },
-    featSalaryMonthsText: { en: 'Your money month starts on payday, not the 1st.', ar: 'شهرك المالي يبدأ يوم استلام راتبك.' },
-    obTagline: { en: 'Know where it goes. Watch it grow.', ar: 'اعرف أين تذهب أموالك. وراقبها تنمو.' },
-    obSubtitle: { en: 'Track your money privately, in your own currency.', ar: 'تتبّع أموالك بخصوصية وبعملتك.' },
     getStarted: { en: 'Get started', ar: 'ابدأ الآن' },
-    exploreSample: { en: 'Explore with sample data', ar: 'جرّب ببيانات تجريبية' },
     saved: { en: 'Saved', ar: 'المدخر' },
-    overspent: { en: 'Overspent', ar: 'تجاوزت' },
     netAfterSpending: { en: 'Net after spending', ar: 'الصافي بعد الإنفاق' },
-    spentAboveIncome: { en: 'Spent above income', ar: 'الإنفاق فوق الدخل' },
-    soFarThisMonth: { en: 'so far this month', ar: 'حتى الآن هذا الشهر' },
     homeVsMorePartial: {
         en: '{amount} more spent than {period} at the same point',
         ar: 'صرفت {amount} أكثر من {period} عند النقطة نفسها',
@@ -7265,133 +6679,16 @@ const S = {
         ar: 'الصرف نفسه مقارنةً بـ{period}',
     },
     allTime: { en: 'All time', ar: 'كل الفترات' },
-    inWord: { en: 'in', ar: 'في' },
-    inMinusOut: { en: 'in minus out', ar: 'الدخل ناقص المصروف' },
-    tapToChangePeriod: { en: 'Tap to change period', ar: 'اضغط لتغيير الفترة' },
     projected: { en: 'Projected', ar: 'متوقع' },
     spentLabel: { en: 'Spent', ar: 'المصروف' },
-    biggestChangesVs: { en: 'Biggest changes vs', ar: 'أكبر التغيرات مقابل' },
-    whereMoneyWent: { en: 'Where the money went', ar: 'أين ذهبت الأموال' },
-    spendingByWeekday: { en: 'Spending by weekday', ar: 'الصرف حسب أيام الأسبوع' },
-    netWorth6mo: { en: 'Net worth · 6 months', ar: 'صافي الثروة · ٦ أشهر' },
-    walletChangeSince: {
-        en: '{amount} since {date}',
-        ar: '\u2066{amount}\u2069 منذ {date}',
-    },
-    cashflow6mo: { en: 'Cashflow · 6 months', ar: 'التدفق النقدي · ٦ أشهر' },
-    whatNumbersSay: { en: 'What the numbers say', ar: 'ماذا تقول الأرقام' },
-    tapMonthToOpen: { en: 'Tap a month to open it', ar: 'اضغط على شهر لفتحه' },
-    flowSummary: { en: 'Spent {total}', ar: 'الإنفاق {total}' },
-    flowLimitSummary: {
-        en: '{spent} of {limit} in limits',
-        ar: '{spent} من {limit} ضمن الحدود',
-    },
-    ofWord: { en: 'of', ar: 'من' },
-    inLimits: { en: 'in limits', ar: 'ضمن الحدود' },
-    monthGone: { en: 'of the month gone', ar: 'من الشهر انقضى' },
-    flowMonthGone: { en: '{percent}% of the month gone', ar: 'انقضى {percent}% من الشهر' },
-    moreCategories: { en: '{count} more', ar: '{count} أخرى' },
-    limitsHeader: { en: 'Limits', ar: 'الحدود' },
     totalOut: { en: 'Total spent', ar: 'إجمالي الإنفاق' },
-    limitedSpend: { en: 'With limits', ar: 'ضمن الحدود' },
-    periodProgress: { en: 'Period progress', ar: 'تقدّم الفترة' },
-    fixedPayments: { en: 'Fixed payments', ar: 'الدفعات الثابتة' },
-    itemsTracked: { en: '{count} tracked', ar: '{count} قيد التتبع' },
     newLimit: { en: 'New limit', ar: 'حد جديد' },
-    setLimitCategory: { en: 'Set a limit on a category', ar: 'ضع حداً لتصنيف' },
-    setLimitBody: {
-        en: 'Wafra already knows what you spend. Give one category a number and it will tell you whether you are on pace, not just what you have left.',
-        ar: 'يعرف وفرة مصروفك بالفعل. ضع رقماً لتصنيف واحد وسيخبرك إن كنت على المسار الصحيح، لا بما تبقّى فقط.',
-    },
-    overByAmount: { en: 'Over by {amount}', ar: 'تجاوزت بمقدار {amount}' },
-    amountLeft: { en: '{amount} left', ar: 'متبقي {amount}' },
     daysLeft: { en: '{count} day{s} left', ar: 'متبقي {count} يوم' },
-    fasterThanMonth: { en: 'faster than the month', ar: 'أسرع من وتيرة الشهر' },
-    averageSuffix: { en: 'avg', ar: 'متوسط' },
-    worthKnowing: { en: 'Worth knowing', ar: 'جدير بالمعرفة' },
-    statsTitle: { en: 'Stats', ar: 'الإحصاءات' },
-    statsEmptyTitle: {
-        en: 'Nothing to measure in {period}',
-        ar: 'لا يوجد ما يُقاس في {period}',
-    },
-    statsEmptyBody: {
-        en: 'Stats reads the ledger you already have. Import a month of bank messages, or pick another period, and every section below fills itself in.',
-        ar: 'تقرأ الإحصاءات سجلّك الحالي. استورد شهراً من رسائل البنك أو اختر فترة أخرى، وستمتلئ كل الأقسام أدناه تلقائياً.',
-    },
-    statsWhereItGoes: { en: 'Where it goes', ar: 'أين يذهب المال' },
-    statsWhatChanged: { en: 'What changed', ar: 'ما الذي تغيّر' },
-    statsMoversCaption: {
-        en: 'Against the period before this one.',
-        ar: 'مقارنةً بالفترة السابقة لهذه.',
-    },
-    statsMoverUp: { en: '{category}, up', ar: '{category}، ارتفع' },
-    statsMoverDown: { en: '{category}, down', ar: '{category}، انخفض' },
-    statsCategoryMonths: {
-        en: '{category} · {count} months',
-        ar: '{category} · {count} أشهر',
-    },
-    statsTrendFlat: {
-        en: "{amount} every month for {count} months — it hasn't moved.",
-        ar: '{amount} كل شهر على مدى {count} أشهر — لم يتغيّر إطلاقاً.',
-    },
-    statsTrendOnAverage: {
-        en: '{amount} a month on average, and {month} lands right on it.',
-        ar: '{amount} شهرياً في المتوسط، و{month} جاء مطابقاً له تماماً.',
-    },
-    statsTrendAbove: {
-        en: '{amount} a month on average. {month} came to {latest} — {percent}% above.',
-        ar: '{amount} شهرياً في المتوسط. بلغ {month} مقدار {latest} — أي {percent}% فوق المتوسط.',
-    },
-    statsTrendAboveHighest: {
-        en: '{amount} a month on average. {month} came to {latest} — {percent}% above, the highest of the {count}.',
-        ar: '{amount} شهرياً في المتوسط. بلغ {month} مقدار {latest} — أي {percent}% فوق المتوسط، وهو الأعلى بين الـ{count}.',
-    },
-    statsTrendBelow: {
-        en: '{amount} a month on average. {month} came to {latest} — {percent}% below.',
-        ar: '{amount} شهرياً في المتوسط. بلغ {month} مقدار {latest} — أي {percent}% دون المتوسط.',
-    },
-    statsTrendBelowLowest: {
-        en: '{amount} a month on average. {month} came to {latest} — {percent}% below, the lowest of the {count}.',
-        ar: '{amount} شهرياً في المتوسط. بلغ {month} مقدار {latest} — أي {percent}% دون المتوسط، وهو الأدنى بين الـ{count}.',
-    },
-    statsWhenItGoes: { en: 'When it goes', ar: 'متى يذهب المال' },
-    statsWeekdayCaption: {
-        en: 'Day-to-day spending only. Rent and other fixed commitments land on whichever weekday the standing order falls on, which is a calendar, not a habit.',
-        ar: 'المصروف اليومي فقط. الإيجار وغيره من الالتزامات الثابتة يقع في اليوم الذي يصادفه الأمر المستديم، وهذا تقويم لا عادة.',
-    },
-    statsHeaviestDay: {
-        en: '{day} is your heaviest day — {amount} of the {total} you chose to spend in {period}.',
-        ar: '{day} هو أثقل أيامك — {amount} من أصل {total} اخترت صرفها في {period}.',
-    },
-    statsAlsoWorthALook: { en: 'Also worth a look', ar: 'يستحق النظر أيضاً' },
-    statsNetWorthLink: {
-        en: '{count} months of balance, on Wallet',
-        ar: '{count} أشهر من الرصيد، في المحفظة',
-    },
-    statsNetWorthLinkA11y: {
-        en: 'Net worth over {count} months, on Wallet',
-        ar: 'صافي الثروة خلال {count} أشهر، في المحفظة',
-    },
-    statsInVsOut: { en: 'In vs out', ar: 'الدخل مقابل المصروف' },
-    statsInVsOutLink: {
-        en: '{count} months of earning and spending, on Flow',
-        ar: '{count} أشهر من الدخل والصرف، في التدفق',
-    },
-    statsInVsOutLinkA11y: {
-        en: 'In versus out over {count} months, on Flow',
-        ar: 'الدخل مقابل المصروف خلال {count} أشهر، في التدفق',
-    },
     transactionsTitle: { en: 'Transactions', ar: 'العمليات' },
-    budgetsTitle: { en: 'Budgets', ar: 'الميزانيات' },
     cardsTitle: { en: 'Payment cards', ar: 'بطاقات الدفع' },
-    cardsPurpose: {
-        en: 'Group purchases, balances, and amounts due by card. These are records in Wafra, not bank connections.',
-        ar: 'اجمع المشتريات والأرصدة والمبالغ المستحقة حسب البطاقة. هذه سجلات داخل وفرة وليست روابط مصرفية.',
-    },
     inactiveCards: { en: 'Inactive cards', ar: 'بطاقات غير نشطة' },
     lastUsed: { en: 'Last used', ar: 'آخر استخدام' },
     addTransactionTitle: { en: 'Add transaction', ar: 'إضافة عملية' },
-    addCashEntry: { en: 'Add cash entry', ar: 'إضافة عملية نقدية' },
     expenseLabel: { en: 'Expense', ar: 'مصروف' },
     incomeLabel: { en: 'Income', ar: 'دخل' },
     filtersTitle: { en: 'Filters', ar: 'عوامل التصفية' },
@@ -7445,12 +6742,7 @@ const S = {
     minusWord: { en: 'minus', ar: 'ناقص' },
     cardPayments: { en: 'Card payments', ar: 'دفعات البطاقات' },
     upcomingBills: { en: 'Upcoming bills', ar: 'فواتير قادمة' },
-    budgetsSection: { en: 'Budgets', ar: 'الميزانيات' },
     recentActivity: { en: 'Recent activity', ar: 'أحدث العمليات' },
-    insightsSection: { en: 'Insights', ar: 'ملاحظات' },
-    subscriptionWord: { en: 'subscription', ar: 'اشتراك' },
-    subscriptionsWord: { en: 'subscriptions', ar: 'اشتراكات' },
-    nextWord: { en: 'next', ar: 'التالي' },
     allWord: { en: 'All', ar: 'الكل' },
     moneyPictureTitle: { en: 'Your money picture', ar: 'صورتك المالية' },
     moneyPictureBuilding: {
@@ -7483,7 +6775,6 @@ const S = {
         ar: 'يظهر هنا فقط النشاط الذي تم العثور عليه فعلاً في سجلك.',
     },
     importTitle: { en: 'Import from SMS', ar: 'استيراد من الرسائل' },
-    scanFullInbox: { en: 'Scan full inbox', ar: 'فحص كل الرسائل' },
     historyImportRunningTitle: {
         en: 'Reading your bank-message history',
         ar: 'جارٍ قراءة سجل رسائل البنك',
@@ -7519,23 +6810,12 @@ const S = {
     pasteInstead: { en: 'Paste messages instead', ar: 'الصق الرسائل بدلاً من ذلك' },
     hideManualPaste: { en: 'Hide manual paste', ar: 'إخفاء اللصق اليدوي' },
     importBankActivity: { en: 'Import bank activity', ar: 'استيراد النشاط البنكي' },
-    importBankActivityIosDetail: {
-        en: 'Paste a bank message or add a statement',
-        ar: 'الصق رسالة بنكية أو أضف كشفاً',
-    },
-    parsePasted: { en: 'Parse pasted text', ar: 'تحليل النص الملصق' },
     trySample: { en: 'Try sample', ar: 'جرّب مثالاً' },
-    importPastMessages: { en: 'Import past Messages', ar: 'استيراد الرسائل السابقة' },
-    installHistoryShortcut: { en: 'Install history Shortcut', ar: 'تثبيت اختصار السجل' },
     historyCardTitle: { en: 'Import past alerts', ar: 'استيراد التنبيهات السابقة' },
     historyLast30Days: { en: 'Last 30 days', ar: 'آخر ٣٠ يوماً' },
     historyThisYear: { en: 'This year', ar: 'هذا العام' },
     historyChooseDates: { en: 'Choose dates', ar: 'اختيار التواريخ' },
     historyChooseYear: { en: 'Choose a year', ar: 'اختيار عام' },
-    historyDateChoices: {
-        en: 'Tap Start once. The Shortcut checks the newest and oldest retained Messages automatically; there is no date setup.',
-        ar: 'اضغط «بدء» مرة واحدة. يفحص الاختصار أحدث الرسائل المحتفظ بها وأقدمها تلقائياً من دون إعداد تواريخ.',
-    },
     historyAddAction: { en: 'Add history Shortcut', ar: 'إضافة اختصار السجل' },
     historyAddedAction: { en: 'Continue after adding', ar: 'متابعة بعد الإضافة' },
     historyStartAction: { en: 'Import history', ar: 'استيراد السجل' },
@@ -7588,10 +6868,6 @@ const S = {
     },
     historyFirstRunGuidance: { en: 'Choose Always Allow. Keep the iPhone unlocked while Apple reads Messages. If the import stops, open it again to continue.', ar: 'اختر «السماح دائماً». أبقِ الآيفون مفتوح القفل أثناء قراءة Apple للرسائل. إذا توقف الاستيراد، افتحه مرة أخرى للمتابعة.' },
     historyContinueBody: { en: 'Continue in Shortcuts. Wafra keeps completed progress locally, so you can resume instead of starting over.', ar: 'تابع في الاختصارات. يحتفظ وفرة بالتقدم المكتمل محلياً، لذلك يمكنك الاستئناف بدلاً من البدء من جديد.' },
-    historyReviewBody: {
-        en: 'Review the local matches below. Nothing is filed until you confirm.',
-        ar: 'راجع المطابقات المحلية أدناه. لن يُسجّل شيء حتى تؤكد.',
-    },
     historySourceCounts: {
         en: '{understood} understood · {alreadyFiled} already filed · {notAlreadyFiled} understood, not previously filed · {unread} unread or non-financial',
         ar: 'فُهمت {understood} · سُجّلت سابقاً {alreadyFiled} · فُهمت {notAlreadyFiled} ولم تُسجّل سابقاً · تعذّرت قراءة {unread} أو لم تكن مالية',
@@ -7617,17 +6893,8 @@ const S = {
         en: 'Reading protected local history batches. Message text and sender remain only in temporary protected staging until you save, cancel, or the staging expires; nothing is uploaded.',
         ar: 'تجري قراءة دفعات السجل المحلية المحمية. يبقى نص الرسالة والمرسل فقط في تخزين مؤقت محمي حتى تحفظ أو تلغي أو تنتهي صلاحيته؛ ولا يُرفع أي شيء.',
     },
-    historyReviewPrivacy: {
-        en: 'Review only. The bounded retained-Message coverage check passed on this iPhone; Message text is not uploaded and is removed from staging after a successful save or explicit cancel.',
-        ar: 'للمراجعة فقط. اجتاز فحص التغطية المحدود للرسائل المحتفظ بها على هذا الآيفون؛ لا يُرفع نص الرسائل ويُحذف من التخزين المؤقت بعد الحفظ الناجح أو الإلغاء الصريح.',
-    },
     historyPreparingReview: { en: 'Preparing review…', ar: 'جارٍ إعداد المراجعة…' },
     retryHistoryRead: { en: 'Try reading again', ar: 'إعادة محاولة القراءة' },
-    historyShortcutMissing: { en: 'History Shortcut not installed', ar: 'اختصار السجل غير مثبت' },
-    historyShortcutMissingBody: {
-        en: 'Install “{shortcut}” in Apple Shortcuts, then try again.',
-        ar: 'ثبّت «{shortcut}» في تطبيق اختصارات Apple ثم أعد المحاولة.',
-    },
     historyImportReviewReady: { en: 'Ready for review', ar: 'جاهز للمراجعة' },
     historyImportNoneFound: {
         en: 'No supported bank activity found',
@@ -7733,19 +7000,9 @@ const S = {
         en: 'Slow and experimental. Statements are faster.',
         ar: 'بطيء وتجريبي. الكشوف أسرع.',
     },
-    settingsAdvancedHeader: {
-        en: 'Advanced',
-        ar: 'متقدم',
-    },
-    iosMessageSetupHeading: { en: 'Bank messages', ar: 'رسائل البنك' },
-    iosMessageSetupSubtitle: { en: 'First connect new alerts. Importing old messages is optional.', ar: 'اربط التنبيهات الجديدة أولاً. استيراد الرسائل القديمة اختياري.' },
     iosMessageFutureTitle: {
         en: 'Automatic bank messages',
         ar: 'رسائل البنك التلقائية',
-    },
-    iosMessageFutureDetail: {
-        en: 'Purchases, refunds, income, transfers and statements from supported bank messages.',
-        ar: 'المشتريات والمبالغ المستردة والدخل والتحويلات والكشوف من رسائل البنوك المدعومة.',
     },
     iosMessagePastTitle: { en: 'Past messages · Optional', ar: 'الرسائل السابقة · اختياري' },
     iosMessagePastDetail: {
@@ -7760,10 +7017,19 @@ const S = {
     reviewAlertPossibleNotificationReplay: { en: 'Possible repeat notification. Compare it with your saved transactions before adding.', ar: 'قد يكون هذا إشعاراً مكرراً. قارنه بمعاملاتك المحفوظة قبل إضافته.' },
     reviewAlertNotificationSource: { en: 'Notification capture', ar: 'التقاط الإشعارات' },
     reviewAlertPossibleApplePayDuplicate: { en: 'Possible Apple Pay duplicate. A matching Apple Pay purchase is already in your transactions.', ar: 'قد تكون عملية Apple Pay مكررة. توجد عملية Apple Pay مطابقة في معاملاتك بالفعل.' },
-    reviewAlertsFullWaiting: { en: 'Review is full — {count} alerts waiting. Add or dismiss alerts here to make room; waiting alerts are kept on this iPhone until then.', ar: 'قائمة المراجعة ممتلئة — {count} من التنبيهات بالانتظار. أضف تنبيهات أو تجاهلها هنا لإفساح المجال، وستبقى التنبيهات المنتظرة على هذا الآيفون حتى ذلك الحين.' },
+    historyReviewCapacityBody: {
+        en: 'Review is full. Review or dismiss saved alerts, then retry History. Existing expiry limits still apply.',
+        ar: 'قائمة المراجعة ممتلئة. راجع التنبيهات المحفوظة أو تجاهلها، ثم أعد محاولة السجل. تبقى حدود انتهاء الصلاحية سارية.',
+    },
+    historyReviewCapacityBodyIos: {
+        en: 'Review is full. Wafra keeps the messages this history run read for about 1 hour. Review or dismiss saved alerts and retry within that hour; after that, run the history Shortcut again. Existing expiry limits still apply.',
+        ar: 'قائمة المراجعة ممتلئة. تحتفظ وفرة بالرسائل التي قرأها تشغيل السجل هذا لمدة ساعة تقريباً. راجع التنبيهات المحفوظة أو تجاهلها ثم أعد محاولة استيراد السجل خلال هذه الساعة، وبعدها شغّل اختصار السجل مرة أخرى. تبقى حدود انتهاء الصلاحية سارية.',
+    },
+    reviewAlertsFullWaiting: { en: 'Review is full — {count} alerts waiting. Add or dismiss alerts here to make room. Waiting alerts stay on this iPhone for up to 30 days; after that they are counted as expired.', ar: 'قائمة المراجعة ممتلئة — {count} من التنبيهات بالانتظار. أضف تنبيهات أو تجاهلها هنا لإفساح المجال. تبقى التنبيهات المنتظرة على هذا الآيفون لمدة تصل إلى 30 يوماً، وبعد ذلك تُحتسب كمنتهية الصلاحية.' },
     reviewAlertsExpiredCount: { en: 'Expired before review in the last 30 days: {count}', ar: 'انتهت صلاحيتها قبل المراجعة خلال آخر 30 يوماً: {count}' },
     reviewAlertsEvictedCount: { en: 'Alerts that could not be kept for review because Review was full, in the last 30 days: {count}', ar: 'تنبيهات تعذّر الاحتفاظ بها للمراجعة لأن قائمة المراجعة كانت ممتلئة خلال آخر 30 يوماً: {count}' },
     reviewAlertsCurrencyEvictedCount: { en: 'Other-currency alerts not kept for review in the last 30 days: {count}. Review keeps the newest 50 waiting for an exchange rate.', ar: 'تنبيهات بعملة أخرى لم يُحتفظ بها للمراجعة خلال آخر 30 يوماً: {count}. تحتفظ المراجعة بأحدث 50 تنبيهاً بانتظار سعر الصرف.' },
+    reviewAlertsDuplicatePostedCount: { en: 'Possible Apple Pay duplicates posted because Review was full, in the last 30 days: {count}. Check the Transactions screen for a double entry.', ar: 'عمليات قد تكون مكررة لعمليات Apple Pay سُجّلت لأن قائمة المراجعة كانت ممتلئة خلال آخر 30 يوماً: {count}. راجع شاشة «العمليات» للتحقق من وجود قيد مكرر.' },
     reviewAlertsCurrencySkipped: { en: 'Statements and notices in another currency skipped: {count}. Purchases are converted into your ledger currency instead.', ar: 'كشوف وإشعارات بعملة أخرى تم تخطيها: {count}. أما المشتريات فتُحوَّل إلى عملة سجلك.' },
     reviewAlertExpiresIn: { en: 'Days left to review: {count}', ar: 'الأيام المتبقية للمراجعة: {count}' },
     iosNotificationHelpInput: { en: 'Pass notification text to Capture bank notification. Replace the setup test phrase with Shortcut Input before saving the automation.', ar: 'مرّر نص الإشعار إلى «التقاط إشعار بنكي». استبدل عبارة فحص الإعداد بمتغير إدخال الاختصار قبل حفظ الأتمتة.' },
@@ -7780,10 +7046,8 @@ const S = {
         ar: 'تحديث التطبيق لا يستبدل الاختصار المثبّت. استخدم «إعادة تثبيت الاختصار»، وافتحه في الاختصارات، واختر «استبدال» إذا طُلب منك. أبقِ الأتمتة الحالية مرتبطة بالاختصار الذي ثبّتّه.',
     },
     iosMessageReviewAutomation: { en: 'Automation steps', ar: 'خطوات الأتمتة' },
-    iosMessageRetryCheck: { en: 'Run setup check again', ar: 'إعادة تشغيل فحص الإعداد' },
     iosMessageRetrySetup: { en: 'Try again', ar: 'حاول مجدداً' },
     iosMessageHistoryKeepOpen: { en: 'Keep Shortcuts open and iPhone unlocked.', ar: 'أبقِ الاختصارات مفتوحاً والآيفون دون قفل.' },
-    iosMessageHistoryCoverage: { en: 'Imports saved Messages in smaller batches.', ar: 'يستورد الرسائل المحفوظة على دفعات أصغر.' },
     iosMessageGuideSender: {
         en: "Sender: leave empty · Message Contains: one space",
         ar: "المرسل: اتركه فارغاً · تحتوي الرسالة على: مسافة واحدة",
@@ -7797,14 +7061,12 @@ const S = {
         ar: 'اضغط «إضافة الاختصار»، ثم أضف {shortcut} في الاختصارات.',
     },
     iosMessageFutureReturnHelp: { en: 'Added {shortcut}?', ar: 'أضفت {shortcut}؟' },
-    iosMessagePermissionTitle: { en: 'Setup check', ar: 'فحص الإعداد' },
     iosMessageRunPermissionCheck: {
         en: 'Run test',
         ar: 'تشغيل الاختبار',
     },
     iosMessagePermissionBody: { en: 'Run the setup check with this iPhone unlocked. Allow access to Wafra when Apple asks, then return here. The setup check tests the Shortcut; your first bank message confirms automatic delivery.', ar: 'شغّل فحص الإعداد والآيفون مفتوح. اسمح بالوصول إلى وفرة عندما تطلب Apple ذلك، ثم عد إلى هنا. يختبر فحص الإعداد الاختصار؛ وتؤكد أول رسالة بنكية وصول الرسائل تلقائياً.' },
     iosMessagePermissionLocked: { en: 'If a background run reports a permission error, open the Shortcut’s details → Privacy. Allow Wafra access and enable “Allow Running When Locked” if shown.', ar: 'إذا ظهر خطأ أذونات أثناء التشغيل في الخلفية، افتح تفاصيل الاختصار ← الخصوصية. اسمح بالوصول إلى وفرة وفعّل «السماح بالتشغيل عند القفل» إذا ظهر الخيار.' },
-    iosMessageFutureReadyChoice: { en: 'New alerts are set up. Importing past messages is optional — now or later from Settings.', ar: 'تم إعداد التنبيهات الجديدة. استيراد الرسائل السابقة اختياري — الآن أو لاحقاً من الإعدادات.' },
     iosMessageNextHistory: { en: 'Import past messages', ar: 'استيراد الرسائل السابقة' },
     iosMessageNextFuture: { en: 'Set up new alerts', ar: 'إعداد التنبيهات الجديدة' },
     iosMessageImportAgain: { en: 'Import again', ar: 'استيراد مجدداً' },
@@ -7836,7 +7098,6 @@ const S = {
         ar: 'كيف يعمل',
     },
     iosMessageDone: { en: 'Done', ar: 'تم' },
-    iosMessageCloseSetup: { en: 'Close setup', ar: 'إغلاق الإعداد' },
     iosMessageStatusNotStarted: { en: 'Not started', ar: 'لم يبدأ' },
     iosMessageStatusInProgress: { en: 'In progress', ar: 'قيد الإعداد' },
     iosMessageStatusComplete: { en: 'Complete', ar: 'مكتمل' },
@@ -7851,33 +7112,9 @@ const S = {
     iosMessageHelpProof: { en: 'A real bank message confirms automatic capture.', ar: 'رسالة بنكية حقيقية تؤكد الالتقاط التلقائي.' },
     iosMessagePrivacyDetails: { en: 'Privacy details', ar: 'تفاصيل الخصوصية' },
     iosMessageDetailsTitle: { en: 'Setup help', ar: 'مساعدة الإعداد' },
-    iosMessageFutureDetailsTitle: {
-        en: 'Automatic bank messages',
-        ar: 'رسائل البنك التلقائية',
-    },
-    iosMessagePastDetailsTitle: {
-        en: 'Past alerts',
-        ar: 'التنبيهات السابقة',
-    },
     iosMessageSenderUnavailable: {
         en: "Leave Sender empty for alphanumeric bank SMS IDs. Use one space in Message Contains to avoid filtering by currency. Choose Run Immediately and turn off Notify When Run if shown. Wafra cannot change Apple’s notification settings.",
         ar: "اترك المرسل فارغاً لمعرّفات البنك النصية. استخدم مسافة واحدة في «تحتوي الرسالة على» لتجنب التصفية حسب العملة. اختر «تشغيل فوراً» وأوقف «الإشعار عند التشغيل» إن ظهر. لا يستطيع وفرة تغيير إعدادات إشعارات Apple.",
-    },
-    iosStepConnect: { en: 'Connect', ar: 'الربط' },
-    iosStepBanks: { en: 'Banks', ar: 'البنوك' },
-    iosStepShortcut: { en: 'Add Wafra Capture', ar: 'أضف «Wafra Capture»' },
-    iosStepAutomation: { en: 'Message automation', ar: 'أتمتة الرسائل' },
-    iosStepTest: { en: 'Safe test', ar: 'اختبار آمن' },
-    iosStepProgress: { en: 'Step {n} of {total}: {name}', ar: 'الخطوة {n} من {total}: {name}' },
-    iosLocalStepShortcut: { en: 'Add Shortcut', ar: 'إضافة الاختصار' },
-    iosLocalStepAutomation: { en: 'Message automation', ar: 'أتمتة الرسائل' },
-    iosLocalShortcutTitle: {
-        en: 'Add Wafra Local Capture',
-        ar: 'أضف «Wafra Local Capture»',
-    },
-    iosLocalShortcutBody: {
-        en: 'Add the ordinary Shortcut once. It has no account code to paste and cannot install Apple’s personal automation for you.',
-        ar: 'أضف الاختصار العادي مرة واحدة. لا يحتوي على رمز حساب للصقه، ولا يمكنه تثبيت أتمتة Apple الشخصية نيابةً عنك.',
     },
     iosLocalInstallShortcut: { en: 'Add Shortcut', ar: 'إضافة الاختصار' },
     iosLocalAlreadyAdded: { en: 'I added it', ar: 'أضفته' },
@@ -7896,29 +7133,13 @@ const S = {
         en: 'This version can’t capture messages. Update Wafra.',
         ar: 'هذا الإصدار لا يلتقط الرسائل. حدّث وفرة.',
     },
-    iosLocalPrivacyTitle: {
-        en: 'Processed on this iPhone',
-        ar: 'تُعالج على هذا الآيفون',
-    },
     iosLocalPrivacyBody: {
         en: 'Apple does not give Wafra access to your Messages inbox. A Message automation you create in Shortcuts passes each new Message to Wafra’s protected queue on this iPhone. Apple’s Sender picker lists Contacts only and bank SMS IDs are not Contacts, so the automation runs with an empty Sender for every new message. Wafra checks Content and Sender locally, keeps only supported structured financial results, and uploads no Message data. After a durable local result, Wafra deletes the raw Message. If processing cannot finish, raw Content and Sender stay protected for up to 30 days and are removed on the next capture or queue check.',
         ar: 'لا تمنح Apple وفرة وصولاً إلى صندوق رسائلك. تمرّر أتمتة الرسائل التي تنشئها في الاختصارات كل رسالة جديدة إلى صف وفرة المحمي على هذا الآيفون. تعرض قائمة المرسلين لدى Apple جهات الاتصال فقط ومعرّفات رسائل البنوك ليست جهات اتصال، لذلك تعمل الأتمتة بمرسل فارغ لكل رسالة جديدة. يفحص وفرة المحتوى واسم المرسل محلياً، ويحتفظ فقط بالنتائج المالية المنظمة والمدعومة، ولا يرفع بيانات الرسائل. بعد حفظ نتيجة محلية بشكل دائم، يحذف وفرة الرسالة الخام. وإذا تعذرت المعالجة، يبقى المحتوى الخام واسم المرسل محمياً لمدة تصل إلى ٣٠ يوماً ثم يُحذف عند تشغيل الالتقاط أو فحص الصف في المرة التالية.',
     },
-    iosLocalMigrationTitle: {
-        en: 'Using the older automation?',
-        ar: 'هل تستخدم الأتمتة القديمة؟',
-    },
     iosLocalMigrationBody: {
         en: 'If you still have the old “Wafra Capture” automation, it can continue uploading the bank messages you selected until you delete it or Wafra confirms retirement after the first local bank message.',
         ar: 'إذا كانت أتمتة «Wafra Capture» القديمة ما زالت موجودة، فقد تستمر في رفع رسائل البنوك التي اخترتها إلى أن تحذفها أو تؤكد وفرة إيقافها بعد أول رسالة بنكية محلية.',
-    },
-    iosLocalAutomationTitle: {
-        en: 'Turn on automatic capture',
-        ar: 'فعّل الالتقاط التلقائي',
-    },
-    iosLocalAutomationBody: {
-        en: "Leave Sender empty and type one space in Message Contains. Messages containing a space reach Wafra in any currency. Choose Run Immediately and turn off Notify When Run if shown. Edit your existing Wafra automation instead of adding another.",
-        ar: "اترك المرسل فارغاً واكتب مسافة واحدة في «تحتوي الرسالة على». تصل الرسائل التي تحتوي على مسافة إلى وفرة بأي عملة. اختر «تشغيل فوراً» وأوقف «الإشعار عند التشغيل» إن ظهر. عدّل أتمتة وفرة الحالية بدلاً من إضافة أتمتة أخرى.",
     },
     iosMessageContinueManual: {
         en: 'Skip for now',
@@ -7929,10 +7150,6 @@ const S = {
         en: 'I turned it on',
         ar: 'فعّلتها',
     },
-    iosLocalTestExplainer: {
-        en: 'Confirmation runs only a harmless setup check. It cannot add a purchase or prove that Apple’s Message trigger works.',
-        ar: 'يشغّل التأكيد فحص إعداد آمناً فقط. لا يمكنه إضافة عملية شراء أو إثبات عمل مشغّل الرسائل من Apple.',
-    },
     iosLocalWaitingTitle: { en: 'Waiting for first alert', ar: 'بانتظار أول تنبيه' },
     iosLocalWaitingBody: { en: 'A real bank message confirms the automation.', ar: 'رسالة بنكية حقيقية تؤكد عمل الأتمتة.' },
     iosLocalFirstAlertCaptured: { en: 'First alert received', ar: 'وصل أول تنبيه' },
@@ -7940,18 +7157,6 @@ const S = {
         en: 'Wafra durably processed the first qualifying alert on this iPhone. It may have been filed, reviewed, reconciled, or recognized as an existing entry.',
         ar: 'عالجت وفرة أول تنبيه مؤهل بشكل دائم على هذا الآيفون. ربما سُجّل أو أُرسل للمراجعة أو استُخدم للمطابقة أو تم التعرّف عليه كعملية موجودة.',
     },
-    iosLocalNotProvenTitle: {
-        en: 'Finish the one-time automation',
-        ar: 'أكمل الأتمتة لمرة واحدة',
-    },
-    iosLocalNotProvenBody: {
-        en: 'Wafra cannot create or inspect Apple’s personal automation. Follow the choices below, then confirm it here.',
-        ar: 'لا يمكن لوفرة إنشاء أتمتة Apple الشخصية أو فحصها. اتبع الخيارات أدناه ثم أكّدها هنا.',
-    },
-    iosLocalManualTracking: { en: 'Manual tracking', ar: 'التسجيل اليدوي' },
-    iosLocalImportPast: { en: 'Import past alerts', ar: 'استيراد التنبيهات السابقة' },
-    iosLocalContinue: { en: 'Continue', ar: 'متابعة' },
-    iosLocalBackToShortcut: { en: 'Back to Shortcut', ar: 'العودة إلى الاختصار' },
     iosLocalShortcutInstallFailed: {
         en: 'Shortcuts didn’t open. Tap Add Shortcut to try again.',
         ar: 'لم تُفتح الاختصارات. اضغط «إضافة الاختصار» للمحاولة مجدداً.',
@@ -7960,231 +7165,29 @@ const S = {
         en: 'The test didn’t finish. Unlock your iPhone, then tap Run test.',
         ar: 'لم يكتمل الاختبار. افتح قفل الآيفون، ثم اضغط «تشغيل الاختبار».',
     },
-    iosLocalManualExitFailed: {
-        en: 'Wafra could not stop local capture. Stay on this screen and try again.',
-        ar: 'تعذّر على وفرة إيقاف الالتقاط المحلي. ابقَ في هذه الشاشة وحاول مجدداً.',
-    },
-    iosIntroTitle: { en: 'Set it once. Wafra keeps up.', ar: 'اضبطه مرة. ووفرة يتابع.' },
-    iosIntroBody1: {
-        en: 'Connect this iPhone, add Wafra Capture, run one safe pipe test, then create a Message automation.',
-        ar: 'اربط هذا الآيفون، وأضف «Wafra Capture»، وشغّل اختباراً آمناً للمسار، ثم أنشئ أتمتة «رسالة».',
-    },
-    iosIntroBody2: {
-        en: 'A safe probe verifies the private pipe. Only a later supported bank message can prove Apple’s Message automation runs while Wafra is closed.',
-        ar: 'يتحقق الاختبار الآمن من المسار الخاص. ولا يثبت عمل أتمتة «الرسالة» من Apple ووفرة مغلق إلا رسالة بنكية مدعومة لاحقة.',
-    },
-    iosPreviewTime: {
-        en: 'ABOUT 3 MINUTES · APPLE SHORTCUTS OPENS NEXT',
-        ar: 'نحو ٣ دقائق · سيفتح تطبيق الاختصارات تالياً',
-    },
-    iosPreviewInstall: { en: 'Add Wafra Capture', ar: 'أضف «Wafra Capture»' },
-    iosPreviewInstallBody: {
-        en: 'Paste this iPhone’s private setup code once.',
-        ar: 'ألصق رمز الإعداد الخاص بهذا الآيفون مرة واحدة.',
-    },
-    iosPreviewAutomation: { en: 'Create a Message automation', ar: 'أنشئ أتمتة «رسالة»' },
-    iosPreviewAutomationBody: {
-        en: 'Apple’s sender picker limits exactly which alerts can run.',
-        ar: 'تحدد قائمة مرسلي آبل التنبيهات المسموح بتشغيلها بدقة.',
-    },
-    iosPreviewProof: { en: 'Run one safe test', ar: 'شغّل اختباراً آمناً واحداً' },
-    iosPreviewProofBody: {
-        en: 'A safe probe checks the pipe; the first supported bank message verifies the trigger.',
-        ar: 'يفحص اختبار آمن المسار؛ وتتحقق أول رسالة بنكية مدعومة من المشغّل.',
-    },
-    iosPrivacyNote: {
-        en: 'Apple gives no app access to the Messages inbox. A personal automation passes each new Message to Wafra on this iPhone, where supported bank messages are filtered and processed locally without uploading their text. Protected pending records expire after 30 days and are physically removed on the next capture or queue check.',
-        ar: 'لا تتيح آبل لأي تطبيق الوصول إلى صندوق الرسائل. تمرّر أتمتة شخصية كل رسالة جديدة إلى وفرة على هذا الآيفون، حيث تُرشّح رسائل البنوك المدعومة وتُعالج محلياً من دون رفع نصوصها. تنتهي صلاحية السجلات المعلّقة المحمية بعد ٣٠ يوماً وتُزال فعلياً عند تشغيل الالتقاط أو فحص الصف في المرة التالية.',
-    },
-    iosConnecting: { en: 'Connecting…', ar: 'جارٍ الربط…' },
-    iosConnectCta: { en: 'Connect this iPhone', ar: 'اربط هذا الآيفون' },
-    iosConnectFailed: { en: 'Could not connect.', ar: 'تعذّر الربط.' },
-    iosPushPermissionRequired: {
-        en: 'Silent delivery is disabled in iPhone Settings. Enable Wafra notifications, then try again.',
-        ar: 'التسليم الصامت معطل في إعدادات الآيفون. فعّل إشعارات وفرة ثم أعد المحاولة.',
-    },
-    iosPushSetupFailed: {
-        en: 'Silent capture is not ready in this build. Check the project and push configuration, then try again.',
-        ar: 'الالتقاط الصامت غير جاهز في هذا الإصدار. تحقق من إعدادات المشروع والإشعارات ثم حاول مجدداً.',
-    },
-    iosRelayUnavailable: {
-        en: 'Automatic capture is not configured in this build.',
-        ar: 'الالتقاط التلقائي غير مهيأ في هذا الإصدار.',
-    },
-    iosPrivateModeTitle: {
-        en: 'Turn off Private Mode?',
-        ar: 'إيقاف الوضع الخاص؟',
-    },
-    iosPrivateModeBody: {
-        en: 'iPhone automatic capture needs the relay. Turning Private Mode off allows only bank senders you select to leave this phone; raw text is discarded immediately after parsing.',
-        ar: 'يحتاج الالتقاط التلقائي على الآيفون إلى خادم الترحيل. يسمح إيقاف الوضع الخاص بمغادرة تنبيهات مرسلي البنوك الذين تحددهم فقط؛ ويُتخلص من النص الخام فور تحليله.',
-    },
-    iosTurnOffPrivateMode: {
-        en: 'Turn off & connect',
-        ar: 'أوقفه واتصل',
-    },
-    iosContinueManual: {
-        en: 'Maximum privacy · no Messages access',
-        ar: 'أقصى خصوصية · دون وصول إلى الرسائل',
-    },
     iosBanksTitle: { en: 'Which banks text you?', ar: 'أي البنوك تراسلك؟' },
-    iosBanksBody: {
-        en: 'Pick the banks that send card or account alerts. In the next step, Shortcuts will ask you to select their existing message conversations as senders.',
-        ar: 'اختر البنوك التي ترسل تنبيهات البطاقات أو الحسابات. في الخطوة التالية سيطلب منك تطبيق الاختصارات تحديد محادثاتها الحالية كمرسلين.',
-    },
-    iosSenderCaveat: {
-        en: 'Sender names vary by carrier, and Apple owns the picker. Choose the existing bank conversation—not a typed guess. If it is missing, add that sender to Contacts first. A real future alert is the only complete trigger test.',
-        ar: 'تختلف أسماء المرسلين حسب شركة الاتصالات، وتتحكم آبل في قائمة الاختيار. اختر محادثة البنك الموجودة، لا اسماً تخمينياً. إن لم تظهر فأضف المرسل إلى جهات الاتصال أولاً. التنبيه الحقيقي التالي هو الاختبار الكامل الوحيد للمشغّل.',
-    },
-    iosBanksSelected: { en: 'SELECTED · {n}', ar: 'المحدد · {n}' },
-    iosBanksNext: { en: 'Next', ar: 'التالي' },
-    iosBanksSkip: { en: 'Skip — I will pick later', ar: 'تخطَّ — سأختار لاحقاً' },
-    iosBankSelected: { en: '{name}, selected', ar: '{name}، محدد' },
     accountSetBank: { en: 'Set bank', ar: 'تحديد البنك' },
     accountNoBank: { en: 'No bank', ar: 'بدون بنك' },
     accountBankQuestion: { en: 'Which bank is this account with?', ar: 'مع أي بنك هذا الحساب؟' },
-    iosShortcutTitle: { en: 'Add Wafra Capture', ar: 'أضف «Wafra Capture»' },
-    iosShortcutBody: {
-        en: 'Open the install page, add Wafra Capture, then run it once. Paste this iPhone’s setup code when asked. Return only after Wafra Capture says it is ready.',
-        ar: 'افتح صفحة التثبيت، وأضف «Wafra Capture»، ثم شغّله مرة. الصق رمز إعداد هذا الآيفون عندما يُطلب منك. لا تعد إلا بعد أن يؤكد «Wafra Capture» أنه جاهز.',
-    },
-    iosShortcutReplaceNote: {
-        en: 'Already installed Wafra Capture? Delete the old Shortcut before adding this version. Keeping both can make Apple run the broken copy.',
-        ar: 'هل ثبّتَّ «Wafra Capture» من قبل؟ احذف الاختصار القديم قبل إضافة هذا الإصدار. وجود النسختين قد يجعل Apple تشغّل النسخة المعطلة.',
-    },
-    iosSetupCode: { en: 'THIS IPHONE’S SETUP CODE', ar: 'رمز إعداد هذا الآيفون' },
-    iosYourAddress: { en: 'YOUR ADDRESS', ar: 'عنوانك' },
     iosCopy: { en: 'COPY', ar: 'نسخ' },
-    iosCopied: { en: 'COPIED', ar: 'تم النسخ' },
-    iosCopySetupCode: { en: 'Copy the private setup code', ar: 'انسخ رمز الإعداد الخاص' },
-    iosCopyAddress: { en: 'Copy your Wafra address', ar: 'انسخ عنوان وفرة الخاص بك' },
-    iosCopyToken: { en: 'Copy your secret key', ar: 'انسخ مفتاحك السري' },
-    iosRunFor: { en: 'SET THE AUTOMATION TO RUN FOR', ar: 'اضبط الأتمتة لتعمل مع' },
-    iosOpenShortcut: { en: 'Copy code & open latest Shortcut', ar: 'انسخ الرمز وافتح أحدث اختصار' },
     iosOpenShortcutsApp: { en: 'Open Shortcuts', ar: 'افتح تطبيق الاختصارات' },
-    iosShortcutMissing: {
-        en: 'This build has no published install link. You can still build “Wafra Capture” manually with the address and token below.',
-        ar: 'لا يحتوي هذا الإصدار على رابط تثبيت منشور. ما زال بإمكانك إنشاء «Wafra Capture» يدوياً باستخدام العنوان والرمز أدناه.',
-    },
-    iosInstalledIt: {
-        en: 'I added Wafra Capture',
-        ar: 'أضفت «Wafra Capture»',
-    },
     iosShortcutsMissing: {
         en: 'Apple Shortcuts isn’t installed. Install it, then try again.',
         ar: 'تطبيق «الاختصارات» من Apple غير مثبّت. ثبّته ثم حاول مجدداً.',
-    },
-    iosShortcutsMissingRecovery: {
-        en: 'Install Shortcuts from the App Store, return to Wafra, and try this step again.',
-        ar: 'ثبّت «الاختصارات» من App Store، ثم عد إلى وفرة وأعد محاولة هذه الخطوة.',
     },
     iosInstallShortcuts: {
         en: 'Install Apple Shortcuts',
         ar: 'ثبّت «الاختصارات» من Apple',
     },
-    iosAutomationTitle: { en: 'Create a Message automation', ar: 'أنشئ أتمتة «رسالة»' },
-    iosAutomationBody: {
-        en: 'In Shortcuts → Automation, create a Message automation with these five choices:',
-        ar: 'في الاختصارات ← الأتمتة، أنشئ أتمتة «رسالة» بهذه الخيارات الخمسة:',
-    },
-    iosAutomationTrigger: {
-        en: '1. Trigger: Message',
-        ar: '١. المشغّل: رسالة',
-    },
-    iosAutomationSenders: {
-        en: '2. Sender: choose the bank conversations listed below',
-        ar: '٢. المرسل: اختر محادثات البنوك المدرجة أدناه',
-    },
-    iosAutomationImmediate: {
-        en: '3. Choose Run Immediately',
-        ar: '٣. اختر «تشغيل فوراً»',
-    },
-    iosAutomationAction: {
-        en: '4. Action: Run Shortcut → Wafra Capture',
-        ar: '٤. الإجراء: تشغيل اختصار ← Wafra Capture',
-    },
     iosAutomationInput: {
         en: '5. Input: Received Message (not only Content)',
         ar: '٥. الإدخال: «الرسالة المستلمة» (وليس «المحتوى» فقط)',
-    },
-    iosAutomationReady: {
-        en: 'I chose Run Immediately',
-        ar: 'اخترت «تشغيل فوراً»',
-    },
-    iosTestTitle: { en: 'Run a safe test', ar: 'شغّل اختباراً آمناً' },
-    iosTestBody: {
-        en: 'Wafra Capture sends a harmless probe through the private pipe. The first time, tap Allow when Apple asks for network access. It does not add a transaction.',
-        ar: 'يرسل «Wafra Capture» اختباراً آمناً عبر المسار الخاص. في المرة الأولى، اضغط «سماح» عندما تطلب Apple الوصول إلى الشبكة. ولا يضيف أي عملية.',
     },
     iosTestLimit: {
         en: 'The Shortcut and private sync work. Create the Message automation next. The first supported bank message is the final check: it should appear under the correct bank or card.',
         ar: 'يعمل الاختصار والمزامنة الخاصة. أنشئ أتمتة «الرسالة» تالياً. الرسالة البنكية المدعومة الأولى هي الاختبار الأخير: يجب أن تظهر تحت البنك أو البطاقة الصحيحة.',
     },
-    iosCaught: {
-        en: 'Captured and filed through the same path future alerts use.',
-        ar: 'التُقطت وسُجّلت عبر المسار نفسه الذي ستستخدمه التنبيهات لاحقاً.',
-    },
-    iosTestCaught: {
-        en: 'The Shortcut, relay, and encrypted sync are verified. Automatic capture is not verified yet; create the Message automation next.',
-        ar: 'تم التحقق من الاختصار والترحيل والمزامنة المشفّرة. لم يتم التحقق من الالتقاط التلقائي بعد؛ أنشئ أتمتة «الرسالة» تالياً.',
-    },
-    iosListening: { en: 'Waiting for the Shortcut…', ar: 'في انتظار الاختصار…' },
-    iosWaitingLabel: {
-        en: 'Waiting for the Wafra Capture Shortcut',
-        ar: 'في انتظار اختصار Wafra Capture',
-    },
-    iosTimedOut: {
-        en: 'The Shortcut did not finish. If Shortcuts showed “Invalid file path,” delete the old Wafra Capture and install the latest version below. Otherwise, open the Shortcut once and allow network access, then try again.',
-        ar: 'لم يكتمل تشغيل الاختصار. إذا عرض تطبيق الاختصارات «مسار ملف غير صالح»، فاحذف نسخة Wafra Capture القديمة وثبّت أحدث إصدار أدناه. وإلا فافتح الاختصار مرة واحدة واسمح له بالوصول إلى الشبكة ثم حاول مجدداً.',
-    },
-    iosTryAgain: { en: 'Try again', ar: 'حاول مرة أخرى' },
-    iosStartListening: { en: 'Run capture test', ar: 'شغّل اختبار الالتقاط' },
     iosDone: { en: 'Done', ar: 'تم' },
-    iosSkipForNow: {
-        en: 'Finish for now — manual tracking still works',
-        ar: 'إنهاء الآن — يظل التسجيل اليدوي متاحاً',
-    },
-    iosDisconnect: { en: 'Disconnect this iPhone', ar: 'افصل هذا الآيفون' },
-    iosDisconnecting: { en: 'Disconnecting…', ar: 'جارٍ الفصل…' },
-    iosDisconnectFailed: {
-        en: 'Could not disconnect. Stay online and try again so the relay copy can be erased.',
-        ar: 'تعذّر الفصل. ابقَ متصلاً وحاول مجدداً حتى يمكن مسح نسخة الترحيل.',
-    },
-    iosAlreadyWorkingTitle: { en: 'Automatic capture is verified', ar: 'تم التحقق من الالتقاط التلقائي' },
-    iosAlreadyWorkingBody: {
-        en: 'Wafra received a supported bank message through the Message automation. New matching alerts are captured automatically and filed when Wafra next runs.',
-        ar: 'استلمت وفرة تنبيهاً بنكياً مدعوماً عبر أتمتة «الرسالة». تُلتقط التنبيهات المطابقة تلقائياً وتُسجّل عند تشغيل وفرة لاحقاً.',
-    },
-    iosAutomationWaitingTitle: {
-        en: 'Private pipe verified',
-        ar: 'تم التحقق من المسار الخاص',
-    },
-    iosAutomationWaitingBody: {
-        en: 'Wafra cannot create or inspect Apple’s automation. The next supported bank message will prove that its Message trigger ran. Until then, automatic capture is not verified.',
-        ar: 'لا يمكن لوفرة إنشاء أتمتة Apple أو فحصها. ستثبت الرسالة البنكية المدعومة التالية أن مشغّل «الرسالة» عمل. وحتى ذلك لم يتم التحقق من الالتقاط التلقائي.',
-    },
-    iosContinueToAutomation: {
-        en: 'Create Message automation',
-        ar: 'أنشئ أتمتة الرسائل',
-    },
-    iosRunTestAgain: { en: 'Run the test again', ar: 'أعد تشغيل الاختبار' },
-    iosBackToShortcut: { en: 'Back to the setup code', ar: 'العودة إلى رمز الإعداد' },
-    iosBackToTest: { en: 'Back to the safe test', ar: 'العودة إلى الاختبار الآمن' },
-    iosBackToAutomation: { en: 'Back to the automation steps', ar: 'العودة إلى خطوات الأتمتة' },
-    iosReinstallShortcut: { en: 'Reinstall the Shortcut', ar: 'أعد تثبيت الاختصار' },
-    iosAutomationReadyTest: { en: 'I created the Message automation', ar: 'أنشأت أتمتة «الرسالة»' },
-    iosShortcutInstallFailed: {
-        en: 'Could not open the install page. Check your connection and try again.',
-        ar: 'تعذّر فتح صفحة التثبيت. تحقق من اتصالك ثم حاول مجدداً.',
-    },
-    iosShortcutsOpenFailed: {
-        en: 'Could not open Shortcuts. If it was removed from this iPhone, reinstall it from the App Store, then try again.',
-        ar: 'تعذّر فتح تطبيق الاختصارات. إن كان محذوفاً من هذا الآيفون فأعد تثبيته من App Store ثم حاول مجدداً.',
-    },
-    iosShortcutRunFailed: {
-        en: 'Could not run Wafra Capture. Check that the Shortcut is installed and still named “Wafra Capture”, then try again.',
-        ar: 'تعذّر تشغيل Wafra Capture. تأكد من تثبيت الاختصار ومن بقاء اسمه «Wafra Capture» ثم حاول مجدداً.',
-    },
     yes: { en: 'Yes', ar: 'نعم' },
     no: { en: 'No', ar: 'لا' },
     show: { en: 'Show', ar: 'إظهار' },
@@ -8202,18 +7205,12 @@ const S = {
     editEntry: { en: 'Edit transaction', ar: 'تعديل العملية' },
     entryDetail: { en: 'Transaction details', ar: 'تفاصيل العملية' },
     saveChanges: { en: 'Save changes', ar: 'حفظ التغييرات' },
-    filedOn: { en: 'filed {date}', ar: 'سُجّلت في {date}' },
     transfersNoCategory: {
         en: 'Transfers have no category — this moves money between your own accounts rather than spending it.',
         ar: 'لا تصنيف للتحويلات — فهي تنقل المال بين حساباتك بدلاً من إنفاقه.',
     },
-    merchantCategoryRule: {
-        en: 'This merchant is always {category} — change it once and the other {count} {merchant} charge{s} follow.',
-        ar: 'يُصنّف هذا المتجر دائماً ضمن {category} — غيّره مرة واحدة وستتبع ذلك {count} من عمليات {merchant} الأخرى.',
-    },
     newTransaction: { en: 'New transaction', ar: 'عملية جديدة' },
     saveTransaction: { en: 'Save transaction', ar: 'حفظ العملية' },
-    amountInDirhams: { en: 'Amount', ar: 'المبلغ' },
     amountInLedgerCurrency: { en: 'Amount in your ledger currency', ar: 'المبلغ بعملة سجلك' },
     descriptionOptional: { en: 'Description (optional)', ar: 'الوصف (اختياري)' },
     descriptionOptionalA11y: { en: 'Description, optional', ar: 'الوصف، اختياري' },
@@ -8242,7 +7239,6 @@ const S = {
         ar: 'أعدّ بصمة أو تعرّفاً على الوجه أو رمز PIN ليتمكن وفرة من استخدامه.',
     },
     newLimitTitle: { en: 'New limit', ar: 'حد جديد' },
-    categoryLimit: { en: '{category} limit', ar: 'حد {category}' },
     spentThisMonth: { en: 'Spent this month', ar: 'المصروف هذا الشهر' },
     monthlyLimit: { en: 'Monthly limit', ar: 'الحد الشهري' },
     limitOverBy: { en: 'Over by {amount}', ar: 'تجاوزت بمقدار {amount}' },
@@ -8278,7 +7274,6 @@ const S = {
         en: 'Set the credit limit for {name}.',
         ar: 'حدّد الحد الائتماني لـ {name}.',
     },
-    recurringMonthlyEstimate: { en: 'Monthly estimate', ar: 'تقدير شهري' },
     recurringEstimatedCharge: { en: 'Estimated charge', ar: 'مبلغ متوقع' },
     recurringLastCharge: { en: 'Last charge', ar: 'آخر خصم' },
     homeUpcomingPayments: { en: 'Upcoming payments', ar: 'الدفعات القادمة' },
@@ -8321,15 +7316,12 @@ const S = {
     track: { en: 'Track', ar: 'متابعة' },
     dueDay: { en: 'due day {day}', ar: 'مستحق يوم {day}' },
     justFiled: { en: 'Just filed', ar: 'سُجّلت الآن' },
-    justFiledFirst: { en: 'Just filed · first {shown} of {total}', ar: 'سُجّلت الآن · أول {shown} من {total}' },
     fileEntries: { en: 'File {count} entr{ending}', ar: 'تسجيل {count} عملية' },
     fileCardDues: { en: 'File {count} card due{s}', ar: 'تسجيل {count} مستحق بطاقة' },
     fixEntries: { en: 'Fix {count} entr{ending}', ar: 'تصحيح {count} عملية' },
     noEntriesInMonth: { en: 'No entries in {month} yet', ar: 'لا عمليات في {month} بعد' },
-    emptyMonthHelp: { en: 'Add an entry or check bank messages.', ar: 'أضف عملية أو تحقّق من رسائل البنك.' },
     readInbox: { en: 'Read inbox', ar: 'قراءة الرسائل' },
     checkBankAlerts: { en: 'Check alerts', ar: 'تحقق من التنبيهات' },
-    emptyMonthCaptureHelp: { en: 'Add your first entry.', ar: 'أضف عمليتك الأولى.' },
     addManually: { en: 'Add manually', ar: 'إضافة يدوية' },
     smsAccessOff: { en: 'SMS access is off, so nothing can import', ar: 'إذن الرسائل متوقف، لذا لا يمكن استيراد شيء' },
     smsPermissionPath: {
@@ -8343,10 +7335,6 @@ const S = {
         en: '{month}, income {income}, spending {spending}',
         ar: '{month}، الدخل {income}، المصروف {spending}',
     },
-    monthCashflowNoDataA11y: {
-        en: '{month}, no activity recorded',
-        ar: '{month}، لا توجد عمليات مسجلة',
-    },
     accountKindBank: { en: 'Bank', ar: 'حساب بنكي' },
     accountKindCard: { en: 'Card', ar: 'بطاقة' },
     accountKindCash: { en: 'Cash', ar: 'نقد' },
@@ -8355,10 +7343,6 @@ const S = {
     hoursAgo: { en: '{count}h ago', ar: 'قبل {count} س' },
     differentCard: { en: 'Different card', ar: 'بطاقة مختلفة' },
     sameCardRenewed: { en: 'Same physical card?', ar: 'هل هذه البطاقة نفسها؟' },
-    renewedCardBody: {
-        en: 'Move entries from {old} to {next}. Link only when both rows are the same physical card.',
-        ar: 'انقل العمليات من {old} إلى {next}. اربطهما فقط إذا كان السطران للبطاقة الفعلية نفسها.',
-    },
     longPressInactive: { en: 'Long-press to unhide or delete', ar: 'اضغط مطولاً للإظهار أو الحذف' },
     setSavingsGoal: { en: 'Set a savings goal', ar: 'ضع هدفاً للادخار' },
     savingsGoalHint: {
@@ -8379,22 +7363,11 @@ const S = {
     createGoal: { en: 'Create goal', ar: 'إنشاء الهدف' },
     deleteGoalTitle: { en: 'Delete goal?', ar: 'حذف الهدف؟' },
     walletSince: { en: 'since {date}', ar: 'منذ {date}' },
-    addToGoal: { en: 'Add to {goal}', ar: 'أضف إلى {goal}' },
-    amountInAed: { en: 'Amount', ar: 'المبلغ' },
     removeAccountTitle: { en: 'Remove account?', ar: 'إزالة الحساب؟' },
     removeAccountBody: {
         en: '“{name}” and all its transactions will be deleted. This cannot be undone.',
         ar: 'سيُحذف «{name}» وجميع عملياته. لا يمكن التراجع عن ذلك.',
     },
-    payAccountTitle: { en: 'Pay {name}?', ar: 'سداد {name}؟' },
-    payAccountBody: {
-        en: 'Marks {amount} as paid and records the transfer.',
-        ar: 'يسجّل {amount} كمدفوع ويسجّل التحويل.',
-    },
-    payByWithDays: { en: 'Pay by {date} · {days}d left', ar: 'السداد قبل {date} · متبقي {days} يوم' },
-    minimumAmountShort: { en: 'min {amount}', ar: 'الحد الأدنى {amount}' },
-    markAccountPaidA11y: { en: 'Mark {name} as paid', ar: 'علّم {name} كمدفوع' },
-    totalSuffix: { en: '{amount} total', ar: 'الإجمالي {amount}' },
     renewedCardDetected: {
         en: 'Card •{last4} has a statement but its spending is under {name}. Link only if they are the same card; then payments can settle the right bill.',
         ar: 'للبطاقة •{last4} كشف حساب، لكن مصروفاتها ظهرت تحت {name}. اربطهما فقط إذا كانتا البطاقة نفسها؛ عندها تسوّي الدفعات الفاتورة الصحيحة.',
@@ -8409,12 +7382,10 @@ const S = {
         ar: 'قُرئت {count} عملية على هذا الجهاز · لم يُرفع شيء',
     },
     moreItems: { en: '{count} more', ar: '{count} أخرى' },
-    unreadMessageCount: { en: '{count} message{s} we could not read', ar: '{count} رسالة تعذّرت قراءتها' },
     unreadMessageHint: {
         en: 'Send them over and they get recognised next release. Digits are masked.',
         ar: 'أرسلها لتصبح معروفة في الإصدار القادم. الأرقام مخفية.',
     },
-    seeBreakdown: { en: 'See the breakdown', ar: 'عرض التفاصيل' },
     dismiss: { en: 'Dismiss', ar: 'تجاهل' },
     seeUpcomingPaymentsA11y: {
         en: 'See all {count} upcoming payments',
@@ -8437,32 +7408,10 @@ const S = {
     undo: { en: 'Undo', ar: 'تراجع' },
     allActivity: { en: 'All activity', ar: 'كل العمليات' },
     seenCount: { en: 'seen {count}×', ar: 'ظهرت {count}×' },
-    shareCardDiagnostic: { en: 'Share card diagnostic', ar: 'مشاركة تشخيص البطاقات' },
-    shareCardDiagnosticHint: {
-        en: 'Cards, statements, and every row filed against a card — with what each was counted as.',
-        ar: 'البطاقات وكشوفها وكل عملية مرتبطة ببطاقة، مع كيفية احتسابها.',
-    },
-    accuracyShareTitle: {
-        en: 'Wafra — bank SMS the app is not reading well:',
-        ar: 'وفرة — رسائل بنكية لا يقرأها التطبيق جيداً:',
-    },
-    accuracyShareUnread: { en: 'COULD NOT READ — no merchant found', ar: 'تعذّرت القراءة — لم يُعثر على متجر' },
-    accuracyShareRow: {
-        en: '#{index} (seen {count}x, read as “{title}” / {category}):\n{raw}',
-        ar: '#{index} (ظهرت {count}x، قُرئت كـ «{title}» / {category}):\n{raw}',
-    },
     sendFeedback: { en: 'Send feedback', ar: 'إرسال ملاحظة' },
     sendFeedbackDetail: {
         en: 'Send a note or improve the bank parser',
         ar: 'أرسل ملاحظة أو ساعد في تحسين محلّل البنك',
-    },
-    parserResearchSettingsTitle: {
-        en: 'Send parser samples',
-        ar: 'إرسال عينات للمحلّل',
-    },
-    parserResearchSettingsDetail: {
-        en: 'Tester tool · redacted templates only',
-        ar: 'أداة اختبار · قوالب منقّحة فقط',
     },
     parserResearchTitle: { en: 'Parser samples', ar: 'عينات المحلّل' },
     parserResearchUnavailable: {
@@ -8567,66 +7516,30 @@ const S = {
         en: 'Nothing was uploaded. Keep Wafra open and try again.',
         ar: 'لم يُرفع شيء. أبقِ وفرة مفتوحاً وحاول مرة أخرى.',
     },
-    supportHeader: { en: 'Support & feedback', ar: 'الدعم والملاحظات' },
     settingsStatusHeader: { en: 'Current state', ar: 'الحالة الحالية' },
-    settingsMoneyHeader: { en: 'Money', ar: 'المال' },
     settingsImportsHeader: { en: 'Capture', ar: 'الالتقاط' },
     settingsNotificationsHeader: { en: 'Notifications', ar: 'الإشعارات' },
     insightsTitle: { en: 'Insight', ar: 'معلومة' },
     homeWidgetAssistantTitle: { en: 'Ask Wafra', ar: 'اسأل وفرة' },
     homeWidgetAssistantDetail: { en: 'Questions and quick financial analysis.', ar: 'أسئلة وتحليل مالي سريع.' },
     homeWidgetInsightTitle: { en: 'Insight', ar: 'معلومة' },
-    homeWidgetInsightDetail: { en: 'One useful observation from your current period.', ar: 'ملاحظة مفيدة واحدة عن فترتك الحالية.' },
     homeWidgetDueTitle: { en: 'Due payments', ar: 'الدفعات المستحقة' },
-    homeWidgetDueDetail: { en: 'Bills and card payments that need attention.', ar: 'الفواتير ودفعات البطاقات التي تحتاج انتباهك.' },
-    homeWidgetActivityTitle: { en: 'Recent activity', ar: 'أحدث العمليات' },
-    homeWidgetActivityDetail: { en: 'Your latest ledger transactions.', ar: 'أحدث عملياتك في السجل.' },
-    homeWidgetUpcomingTitle: { en: 'Upcoming payments', ar: 'الدفعات القادمة' },
-    homeWidgetUpcomingDetail: { en: 'Payments expected soon.', ar: 'الدفعات المتوقعة قريباً.' },
     homeCustomizeTitle: { en: 'Customize Home', ar: 'تخصيص الرئيسية' },
-    homeCustomizeBody: { en: 'Choose which Home sections appear and arrange the whole page in your order.', ar: 'اختر أقسام الرئيسية التي تظهر ورتّب الصفحة كاملة كما يناسبك.' },
     homeCustomizeDetail: { en: 'Choose and reorder Home sections', ar: 'اختر أقسام الرئيسية ورتّبها' },
     moveUp: { en: 'Move up', ar: 'نقل للأعلى' },
     moveDown: { en: 'Move down', ar: 'نقل للأسفل' },
-    assistantTitle: { en: 'Wafra Assistant', ar: 'مساعد وفرة' },
-    assistantBack: { en: 'Back', ar: 'رجوع' },
-    assistantHeading: { en: 'Ask about your money', ar: 'اسأل عن أموالك' },
-    assistantPrivacy: {
-        en: 'Wafra calculates answers from your ledger locally. Raw bank messages are not sent anywhere.',
-        ar: 'يحسب وفرة الإجابات من سجلك محلياً على جهازك. لا يتم إرسال رسائل البنك الخام إلى أي مكان.',
-    },
-    assistantPlaceholder: {
-        en: 'Ask about spending, income, merchants or subscriptions',
-        ar: 'اسأل عن الإنفاق أو الدخل أو المتاجر أو الاشتراكات',
-    },
-    assistantAsk: { en: 'Ask Wafra', ar: 'اسأل وفرة' },
-    settingsAppearanceLanguageHeader: { en: 'Appearance & language', ar: 'المظهر واللغة' },
     settingsPreferencesHeader: { en: 'Appearance', ar: 'المظهر' },
     settingsDangerHeader: { en: 'Danger zone', ar: 'منطقة الخطر' },
     supportWebsite: { en: 'Support', ar: 'الدعم' },
     publicLinkUnavailable: { en: 'Unavailable in this build', ar: 'غير متاح في هذا الإصدار' },
-    settingStatusOn: { en: 'On', ar: 'مفعّل' },
-    settingStatusOff: { en: 'Off', ar: 'متوقف' },
     settingStatusChecking: { en: 'Checking', ar: 'جارٍ التحقق' },
     settingStatusYes: { en: 'yes', ar: 'نعم' },
     settingStatusNo: { en: 'no', ar: 'لا' },
-    settingStatusSetup: { en: 'Set up', ar: 'يحتاج إعداداً' },
-    settingStatusPipeVerified: { en: 'Pipe verified', ar: 'تم التحقق من المسار' },
-    settingStatusAutomationVerified: {
-        en: 'Automation verified',
-        ar: 'تم التحقق من الأتمتة',
-    },
-    feedbackIntro: {
-        en: 'Send a note directly to Wafra maintainers. Nothing from your ledger is attached, and nothing leaves this phone until you confirm.',
-        ar: 'أرسل ملاحظة مباشرة إلى مشرفي وفرة. لا يُرفق شيء من سجلك، ولا يغادر شيء الهاتف حتى تؤكد.',
-    },
-    feedbackParserHeader: { en: 'BANK MESSAGE PROBLEM', ar: 'مشكلة في رسالة بنكية' },
     feedbackParserTitle: { en: 'Improve the bank parser', ar: 'تحسين محلّل البنك' },
     feedbackParserDetail: {
         en: 'Prepare a redacted JSON file, then attach it to Codex yourself.',
         ar: 'جهّز ملف JSON منقّحاً، ثم أرفقه بنفسك في Codex.',
     },
-    feedbackWriteHeader: { en: 'WHAT WENT WRONG', ar: 'ما الذي حدث' },
     feedbackPlaceholder: {
         en: 'Tuesday’s charge was filed twice.',
         ar: 'سُجّلت عملية الثلاثاء مرتين.',
@@ -8637,28 +7550,8 @@ const S = {
         ar: 'تُخفى الأرقام الطويلة التي تكتبها قبل الإرسال.',
     },
     feedbackChars: { en: '{used} of {max}', ar: '{used} من {max}' },
-    feedbackAttachHeader: { en: 'WHAT TO ATTACH', ar: 'ما الذي يُرفق' },
     feedbackAttachRow: { en: 'Attached', ar: 'المرفق' },
-    feedbackDetailNone: { en: 'Just what you wrote', ar: 'ما كتبته فقط' },
-    feedbackDetailNoneHint: { en: 'Nothing from your ledger.', ar: 'لا شيء من سجلك.' },
-    feedbackDetailShapes: { en: 'And the message shapes', ar: 'وأشكال الرسائل' },
-    feedbackDetailShapesHint: {
-        en: 'Bank messages with every digit blanked and every name replaced. Send this if an entry was read wrong.',
-        ar: 'رسائل البنك مع حذف كل رقم واستبدال كل اسم. أرسل هذا إذا قُرئت عملية بشكل خاطئ.',
-    },
     feedbackDetailFigures: { en: 'And the amounts behind your totals', ar: 'والمبالغ خلف مجاميعك' },
-    feedbackDetailFiguresHint: {
-        en: 'Adds balances and statement figures. Still no names. Send this if a total looks wrong.',
-        ar: 'يضيف الأرصدة وأرقام الكشوف. ولا أسماء أيضاً. أرسل هذا إذا بدا أحد المجاميع خاطئاً.',
-    },
-    feedbackPrivateOn: {
-        en: 'Private Mode is on, so only your message can be sent.',
-        ar: 'الوضع الخاص مفعّل، لذا لا يمكن إرسال سوى رسالتك.',
-    },
-    feedbackPrivateBlocked: {
-        en: 'Private Mode keeps your ledger on this phone.',
-        ar: 'الوضع الخاص يُبقي سجلك على هذا الهاتف.',
-    },
     feedbackPreviewHeader: { en: 'EXACTLY WHAT WILL BE SENT', ar: 'ما سيُرسل بالضبط' },
     feedbackPreviewNote: {
         en: 'This is everything sent to Wafra maintainers: your message, the type you picked, and the app version, platform, language, market and currency shown here. No ledger, bank message, amount, account, or merchant is attached.',
@@ -8682,10 +7575,6 @@ const S = {
     feedbackNoTransportBody: {
         en: 'This build has no direct feedback connection, so nothing was uploaded. Install a newer Wafra test build.',
         ar: 'لا تتضمن هذه النسخة اتصالاً مباشراً للملاحظات، لذا لم يُرفع شيء. ثبّت نسخة اختبار أحدث من وفرة.',
-    },
-    feedbackPreparing: {
-        en: 'Preparing the attachment…',
-        ar: 'جارٍ تجهيز المرفق…',
     },
     feedbackFailedTitle: { en: 'Could not send', ar: 'تعذّر الإرسال' },
     feedbackFailedBody: {
@@ -8716,16 +7605,6 @@ const S = {
         en: 'The server is limiting how many reports it takes per hour. Save a copy and send it again in a while.',
         ar: 'يحدّ الخادم عدد التقارير المقبولة في الساعة. احفظ نسخة وأعد الإرسال بعد قليل.',
     },
-    onboardImportResult: {
-        en: '{entries} entr{ending} filed{cards}. Nothing left the phone.',
-        ar: 'سُجّلت {entries} عملية{cards}. لم يغادر شيء الهاتف.',
-    },
-    onboardCardsFound: { en: ' · {count} card{s} found', ar: ' · عُثر على {count} بطاقة' },
-    onboardScanProgress: {
-        en: '{read} messages read · {matched} matched.',
-        ar: 'قُرئت {read} رسالة · طابقت {matched}.',
-    },
-    seeCategoryEntriesA11y: { en: '{category}, see entries', ar: '{category}، عرض العمليات' },
     insightTrendingHigher: { en: 'Trending {percent}% higher', ar: 'يتجه للارتفاع {percent}٪' },
     insightTrendingLower: { en: 'Trending {percent}% lower', ar: 'يتجه للانخفاض {percent}٪' },
     insightPaceBody: {
@@ -8817,7 +7696,6 @@ const S = {
         en: 'The link may be old. Your ledger is fine.',
         ar: 'ربما الرابط قديم. سجلّك سليم.',
     },
-    goHome: { en: 'Go to Home', ar: 'الذهاب إلى الرئيسية' },
     titleAtmWithdrawal: { en: 'ATM withdrawal', ar: 'سحب من الصراف' },
     titleBankFee: { en: 'Bank fee', ar: 'رسوم بنكية' },
     titleAnnualCardFee: { en: 'Annual card fee', ar: 'رسوم البطاقة السنوية' },
@@ -9669,6 +8547,8 @@ const gulf_neighbour_alerts_1 = require("@/lib/gulf-neighbour-alerts");
 const universal_parser_1 = require("@/lib/universal-parser");
 const alert_market_packs_1 = require("@/lib/alert-market-packs");
 const alert_draft_1 = require("@/lib/alert-draft");
+const principal_posting_guards_1 = require("@/lib/principal-posting-guards");
+const universal_money_1 = require("@/lib/universal-money");
 const latam_alert_templates_1 = require("@/lib/latam-alert-templates");
 const universal_categorization_1 = require("@/lib/universal-categorization");
 const fx_rates_1 = require("@/lib/fx-rates");
@@ -9696,8 +8576,23 @@ const GENERIC_BANK_CONTEXT = /\b(?:(?:credit|debit|covered|prepaid|charge)\s+car
 const MONEY_ARRIVED_CLAIM = /(?<!\p{L})(?:you\s+have\s+received|you\s+received|received\s+(?:from|for)|(?:is|has\s+been|was)\s+credited|credited\s+(?:to|in|into|with)|deposited|refund(?:ed)?|recebeu|recebid[oa]|creditad[oa]|estorno|recibiste|recibid[oa]|te\s+(?:envi[óo]|ha\s+enviado)|yape[óo]|abonad[oa]|acreditad[oa]|reembolso|devoluci[óo]n|re[çc]u|cr[ée]dit[ée]e?|gutgeschrieben|diterima|dikreditkan)(?!\p{L})/iu;
 const MONEY_CLAIM_EVIDENCE = /(?<!\p{L})(?:\p{L}*bank|banco|banque|wallet|carteira|billetera|account|acct|a\/c|conta|cuenta|compte|konto|rekening|balance|bal|avl|saldo|solde|ref(?:erence)?|txn|trx|tid|transaction|transfer|transferencia|transfer[êe]ncia|virement|[ée]-?transfer|pix|spei|aani|sarie|yape|plin|nequi|daviplata|m-?pesa|mpesa|upi|imps|neft|rtgs|zelle|interac|gcash|maya|paytm|jazzcash|easypaisa|momo|airtel\s+money)(?!\p{L})/iu;
 const TRANSACTION_CODE = /\b(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{8,12}\b/u;
-const PERSONAL_MESSAGE_PREFIX_RE = /^\s*(?:(?:hi|hey|hello)\b(?:[^\r\n.!?]{0,40}[,!:]|\s+)\s*)?(?:I(?:\s+(?:(?:have|just|already)\s+){0,2}|['’]ve\s+(?:(?:just|already)\s+)?)(?:spent|paid|bought|sent|deposited|transferred|refunded)\b|[اأ]نا\s+(?:(?:قد|لقد)\s+)?(?:صرفت|دفعت|اشتريت|حولت|حوّلت|أرسلت|ارسلت)(?=\s))/iu;
-const hasPersonalMessagePrefix = (source) => PERSONAL_MESSAGE_PREFIX_RE.test(source);
+const hasPersonalMessagePrefix = (source, sender = '') => {
+    const text = source.replace(/^\s*Dear\s+Customer[,!:]\s*/iu, '');
+    if ((0, principal_posting_guards_1.hasExplicitPersonalMoneyClaim)(text))
+        return true;
+    if (!/^\s*(?:(?:hi|hey|hello|lol|ok|just|so)\b[\s,!:]*)*(?:paid|spent|received)\b/iu.test(text))
+        return false;
+    if (/\b(?:my\s+(?:account|card)|from\s+(?:me|you)|lol|remind\s+me)\b/iu.test(text))
+        return true;
+    const personalThanks = (0, exports.isUnaccountableLaunchSender)(sender)
+        ? /\bthanks\b/iu : /\bthanks\b(?!\s+for\s+(?:banking|choosing)\b)/iu;
+    if (personalThanks.test(text))
+        return true;
+    const lacksBankEvidence = !GENERIC_BANK_CONTEXT.test(text) &&
+        !MONEY_CLAIM_EVIDENCE.test(text) && !TRANSACTION_CODE.test(text);
+    return lacksBankEvidence && (/\b(?:for\s+(?:lunch|dinner|breakfast|the\s+taxi)|on\s+groceries\s+today)\b/iu.test(text) ||
+        (0, exports.isUnaccountableLaunchSender)(sender));
+};
 exports.hasPersonalMessagePrefix = hasPersonalMessagePrefix;
 const NEGATED_PRINCIPAL_MOVEMENT_RE = /^\s*(?:Dear\s+Customer[,!:]\s*)?((?:[A-Z]{3}|\p{Sc})\s*\d[\d,.]*)\s+(?:(?:has|have)\s+not\s+been|hasn['’]t\s+been|(?:was|were|is|are)\s+not|(?:was|were|is|are)n['’]t)\s+(?:transferred|debited|credited|deducted|charged|withdrawn|paid|deposited|refunded)\b/iu;
 const hasNegatedPrincipalMovement = (source) => {
@@ -9727,7 +8622,8 @@ const hasGenericBankAlertContext = (source, sender = '') => {
 exports.hasGenericBankAlertContext = hasGenericBankAlertContext;
 const SENDERLESS_USED_CARD_HINT = /^\s*your\s+(?:cr\.\s*)?card\s+(?:[*xX•·]{1,24}\s*)?(\d{4})(?![\p{L}\p{N}]|[ \t-]+\d)[ \t]+(?:was|has[ \t]+been)[ \t]+used[ \t]+for\b/iu;
 const inspectGenericBankEventForReview = (source, sender = '', market, sourceContext) => {
-    if ((0, exports.hasPersonalMessagePrefix)(source) || hasNegatedPrincipalMovement(source))
+    if ((0, exports.hasPersonalMessagePrefix)(source, sender) || hasNegatedPrincipalMovement(source) ||
+        (0, principal_posting_guards_1.isUnpostedCardBalanceClaim)(source))
         return null;
     const noContext = !(0, exports.hasGenericBankAlertContext)(source, sender) && !(0, latam_alert_templates_1.matchLatamTemplate)(source, { sender });
     const claimAdmitted = noContext && (!sender.trim() || (0, best_effort_autopost_1.isUnverifiedAlertSender)(sender)) &&
@@ -9737,20 +8633,44 @@ const inspectGenericBankEventForReview = (source, sender = '', market, sourceCon
         (0, best_effort_autopost_1.refusedOnlyByShopOrPromoWording)(source, sender);
     const senderlessCard = noContext && !sender.trim() ? SENDERLESS_USED_CARD_HINT.exec(source) : null;
     const cardAdmitted = !!senderlessCard && (0, best_effort_autopost_1.namesOwnInstrumentTail)(source, 'debit') &&
-        !(0, sms_parser_1.nonPostingReason)(source) && !(0, best_effort_autopost_1.isNotAutoPostableMoney)(source) &&
+        !(0, sms_parser_1.moneyNoticeKind)(source) && !(0, sms_parser_1.nonPostingReason)(source) && !(0, best_effort_autopost_1.isNotAutoPostableMoney)(source) &&
         !(0, best_effort_autopost_1.hasNonCompletedWording)(source, null, '') && !(0, best_effort_autopost_1.hasLinkFromUnregisteredSender)(source, '');
-    if (noContext && !claimAdmitted && !footerAdmitted && !cardAdmitted)
+    let cardCreditAliases;
+    const creditSource = /[\uFB50-\uFDFF\uFE70-\uFEFF]/u.test(source) ? (0, alert_draft_1.normalizeAlertText)(source) : source;
+    const heldRepayment = (0, principal_posting_guards_1.isUnqualifiedCardRepayment)(creditSource) || (0, principal_posting_guards_1.isQualifiedCardRepaymentReceipt)(creditSource);
+    const cardBalanceReceipt = (0, principal_posting_guards_1.isCompletedCardBalanceReceipt)(creditSource);
+    const safeCardBalanceReview = !(0, sms_parser_1.nonPostingReason)(source) &&
+        !(0, best_effort_autopost_1.hasNonCompletedWording)(source, null, sender) && !(0, best_effort_autopost_1.hasLinkFromUnregisteredSender)(source, sender) &&
+        (heldRepayment ? (0, best_effort_autopost_1.isSafeCardRepaymentReviewSource)(source) : !(0, best_effort_autopost_1.isNotAutoPostableMoney)(source));
+    if (cardBalanceReceipt && safeCardBalanceReview && (heldRepayment ||
+        (0, principal_posting_guards_1.isUnqualifiedCardCredit)(creditSource, { start: 0, end: creditSource.length }))) {
+        const active = (0, markets_1.getActiveMarket)().id;
+        const launch = (0, markets_1.detectLaunchMarketFromSender)(sender) ??
+            (isAbsentLaunchSender(sender) && (active === 'AE' || active === 'SA')
+                ? (0, markets_1.detectLaunchMarketFromAlert)(source) : null);
+        if (launch)
+            cardCreditAliases = (0, universal_money_1.unqualifiedCardCreditCurrencyAliases)(source, launch, sourceContext?.currencyAliases);
+    }
+    if (noContext && !claimAdmitted && !footerAdmitted && !cardAdmitted && !cardCreditAliases)
         return null;
-    const event = (0, gulf_neighbour_alerts_1.isGulfNeighbourMarket)(market)
-        ? (0, universal_parser_1.inspectUniversalBankEvent)((0, gulf_neighbour_alerts_1.gulfNeighbourReadSource)(source, market), {
-            sender, market, dateOrder: (0, country_1.dateOrderForCountry)(market) ?? undefined,
-        })
-        : (0, universal_parser_1.inspectUniversalBankEvent)(source, sourceContext
-            ? { ...sourceContext, sender }
+    const context = (0, gulf_neighbour_alerts_1.isGulfNeighbourMarket)(market)
+        ? { sender, market, dateOrder: (0, country_1.dateOrderForCountry)(market) ?? undefined }
+        : sourceContext ? { ...sourceContext, sender }
             : (0, exports.universalSourceParseContext)((0, alert_institution_grammars_1.hasUniversalInstitutionSender)(sender)
-                ? (0, alert_market_detection_1.inspectUniversalAlert)({ source, sender }) : null, sender, (0, country_1.getActiveCountry)()));
+                ? (0, alert_market_detection_1.inspectUniversalAlert)({ source, sender }) : null, sender, (0, country_1.getActiveCountry)());
+    let event = (0, universal_parser_1.inspectUniversalBankEvent)((0, gulf_neighbour_alerts_1.isGulfNeighbourMarket)(market)
+        ? (0, gulf_neighbour_alerts_1.gulfNeighbourReadSource)(source, market) : source, cardCreditAliases
+        ? { ...context, currencyAliases: { ...cardCreditAliases, ...context.currencyAliases } } : context);
     if (event.decision !== 'review')
         return null;
+    if (cardCreditAliases) {
+        if (event.status !== 'posted' && event.status !== 'unknown')
+            return null;
+        event = { ...event, status: 'posted', family: 'card-payment' };
+    }
+    else if (heldRepayment && safeCardBalanceReview && (event.status === 'posted' || event.status === 'unknown')) {
+        event = { ...event, family: 'card-payment' };
+    }
     const hasOtherCardMoney = cardAdmitted && event.observations.some(observation => observation.role !== 'transaction' && observation.role !== 'credit-limit');
     if (cardAdmitted && (event.family !== 'purchase' || event.status !== 'posted' || event.direction !== 'debit' ||
         event.amount.evidence !== 'explicit' || !event.amount.value || event.amount.spans.length !== 1 ||
@@ -9762,7 +8682,7 @@ const inspectGenericBankEventForReview = (source, sender = '', market, sourceCon
     if (hasNativeCurrencyAccountContext(source) && !(0, exports.hasBankAlertMoneyHint)(source) &&
         (event.amount.evidence !== 'explicit' || event.amount.value?.currency !== 'ZAR'))
         return null;
-    if (noContext && !((event.direction === 'credit' || ((footerAdmitted || cardAdmitted) && event.direction === 'debit')) &&
+    if (noContext && !cardCreditAliases && !((event.direction === 'credit' || ((footerAdmitted || cardAdmitted) && event.direction === 'debit')) &&
         event.status === 'posted' && event.amount.evidence !== 'missing'))
         return null;
     const hasGroundedMoney = event.amount.evidence !== 'missing' ||
@@ -9865,7 +8785,8 @@ const sourceNamesPaidCreditCard = (source, event, last4) => {
 };
 const universalCardPayment = (source, event, ledgerCurrency, ledgerExponent, country, observedAt) => {
     if (event.family !== 'card-payment' || event.decision !== 'review' ||
-        (0, sms_parser_1.nonPostingReason)(source) || (0, best_effort_autopost_1.isNotAutoPostableMoney)(source))
+        (0, sms_parser_1.moneyNoticeKind)(source) || (0, sms_parser_1.nonPostingReason)(source) ||
+        ((0, best_effort_autopost_1.isNotAutoPostableMoney)(source) && !(0, best_effort_autopost_1.isSafeCardRepaymentReviewSource)(source)))
         return null;
     const latamCardPayment = event.family === 'card-payment' && (0, latam_alert_templates_1.isLatamOwnCardPayment)(source);
     if (NOT_CARD_OBLIGATION.test(source) || (!CREDIT_CARD_WORDS.test(source) && !latamCardPayment))
@@ -10128,18 +9049,23 @@ const sharedSenderOutsideGulf = (source, inspection, pinnedCurrency, sender = ''
         .map((match) => match[1]).filter((code) => (0, currency_metadata_1.currencyMinorUnits)(code) !== null));
     return codes.size === 1 && codes.has(pinnedCurrency);
 };
-const isUnaccountableLaunchSender = (sender) => !sender.trim() || (0, best_effort_autopost_1.isUnverifiedAlertSender)(sender);
+const isAbsentLaunchSender = (sender) => !sender.trim() || /^Wafra (?:Automation|Notification)$/.test(sender.trim());
+const isUnaccountableLaunchSender = (sender) => isAbsentLaunchSender(sender) || (0, best_effort_autopost_1.isUnverifiedAlertSender)(sender);
 exports.isUnaccountableLaunchSender = isUnaccountableLaunchSender;
 const isHeldLaunchCredit = (source, sender, parsed) => !!parsed && (0, exports.isUnaccountableLaunchSender)(sender) && parsed.kind === 'transaction' && parsed.type === 'income' &&
-    !(0, best_effort_autopost_1.isNotAutoPostableMoney)(source) && !(0, best_effort_autopost_1.namesOwnInstrumentTail)(source, 'credit');
+    !(0, best_effort_autopost_1.isNotAutoPostableMoney)(source) && ((0, best_effort_autopost_1.isUnverifiedAlertSender)(sender) || !(0, best_effort_autopost_1.namesOwnInstrumentTail)(source, 'credit'));
 exports.isHeldLaunchCredit = isHeldLaunchCredit;
 const launchSenderAnswersFor = (source, sender, parsed) => {
-    if (sender.trim() && !(0, best_effort_autopost_1.isUnverifiedAlertSender)(sender))
-        return true;
+    const provedSettlement = parsed.kind === 'cardPayment' && parsed.transferHint === true &&
+        parsed.card?.kind === 'credit' && /^\d{4}$/u.test(parsed.card.last4) &&
+        parsed.currency === (0, markets_1.pinnedLedgerCurrencyCode)() && parsed.fxSource !== 'fallback' &&
+        (0, best_effort_autopost_1.isSafeCardRepaymentReviewSource)(source) && !(0, best_effort_autopost_1.hasNonCompletedWording)(source, null, sender);
+    if ((0, best_effort_autopost_1.isNotAutoPostableMoney)(source) && !provedSettlement)
+        return false;
+    if (!isAbsentLaunchSender(sender))
+        return !(0, best_effort_autopost_1.isUnverifiedAlertSender)(sender);
     if (parsed.kind !== 'transaction')
         return true;
-    if ((0, best_effort_autopost_1.isNotAutoPostableMoney)(source))
-        return false;
     return parsed.type !== 'income' || (0, best_effort_autopost_1.namesOwnInstrumentTail)(source, 'credit');
 };
 const createLaunchAlertSession = ({ overrides, regionHint = null, pinnedCurrency = (0, markets_1.pinnedLedgerCurrencyCode)(), activeMarket = (0, markets_1.getActiveMarket)().id, fxLookup = (base, quote, date) => (0, fx_rates_1.cachedReferenceQuote)(base, quote, date), bestEffort = { enabled: (0, best_effort_autopost_1.bestEffortAutoPostEnabled)(), country: (0, country_1.getActiveCountry)() }, }) => {
@@ -10152,7 +9078,7 @@ const createLaunchAlertSession = ({ overrides, regionHint = null, pinnedCurrency
     let sessionMarket = pinnedCurrency === 'AED' ? 'AE' : pinnedCurrency === 'SAR' ? 'SA' : null;
     let detected = null;
     const inspect = (source, sender) => {
-        if ((0, exports.hasPersonalMessagePrefix)(source) || hasNegatedPrincipalMovement(source))
+        if ((0, exports.hasPersonalMessagePrefix)(source, sender) || hasNegatedPrincipalMovement(source))
             return null;
         if (!exports.REVIEW_MONEY_HINT.test(source))
             return null;
@@ -10203,7 +9129,7 @@ const createLaunchAlertSession = ({ overrides, regionHint = null, pinnedCurrency
         return result;
     };
     const parse = (source, sender, inspection = null, forcedMarket, observedAt) => {
-        if ((0, exports.hasPersonalMessagePrefix)(source) || hasNegatedPrincipalMovement(source))
+        if ((0, sms_parser_1.moneyNoticeKind)(source) || (0, exports.hasPersonalMessagePrefix)(source, sender) || hasNegatedPrincipalMovement(source))
             return null;
         if ((0, bnpl_providers_1.isBnplProviderSource)(sender))
             return null;
@@ -10244,7 +9170,7 @@ const createLaunchAlertSession = ({ overrides, regionHint = null, pinnedCurrency
         });
     };
     const parseUnproven = (source, sender, inspection = null, observedAt) => {
-        if ((0, exports.hasPersonalMessagePrefix)(source) || hasNegatedPrincipalMovement(source))
+        if ((0, sms_parser_1.moneyNoticeKind)(source) || (0, exports.hasPersonalMessagePrefix)(source, sender) || hasNegatedPrincipalMovement(source))
             return null;
         if (!bestEffort.enabled)
             return null;
@@ -10847,7 +9773,7 @@ function setActiveMarket(id) {
     active = id === country_1.NEUTRAL_MARKET_ID ? NEUTRAL : exports.MARKETS.find((m) => m.id === id);
     return true;
 }
-const AED_ALERT = /\b(?:AED|Dhs?\.?)\b|د\.?[إا]\.?|دراهم|درهم/iu;
+const AED_ALERT = /\b(?:AED|Dhs?\.?)\b|(?<![ء-ي])د\.?[إا]\.?(?![ء-ي])|دراهم|درهم/iu;
 const SAR_ALERT = /\b(?:SAR|SR)\b|ر\.?\s?س\.?|ريال/iu;
 const SAR_GLUED_ALERT = /(?<=\d)(?:SAR|SR)\b/iu;
 const AED_GLUED_ALERT = /(?<![^\s(:])AED(?=[0-9][0-9,]*(?:\.[0-9]+)?(?![0-9A-Za-z]))|(?<![^\s(:])[0-9][0-9,]*(?:\.[0-9]+)?AED\b/u;
@@ -11031,11 +9957,92 @@ function bankMonogram(name) {
 "principal-posting-guards":function(module,exports,require){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.isUnqualifiedPeerTransferClaim = void 0;
+exports.hasClickLinkPrompt = hasClickLinkPrompt;
+exports.hasOnlyWordLinkPrompts = hasOnlyWordLinkPrompts;
+exports.blankWordLinkPrompts = blankWordLinkPrompts;
+exports.hasExplicitPersonalMoneyClaim = hasExplicitPersonalMoneyClaim;
+exports.isLeadingNumericDiscountOffer = isLeadingNumericDiscountOffer;
+exports.hasMobileMoneyCallback = hasMobileMoneyCallback;
 exports.isIncompletePrincipal = isIncompletePrincipal;
 exports.isHedgedPrincipal = isHedgedPrincipal;
 exports.refundPrincipalStatus = refundPrincipalStatus;
 exports.isCompletedPrincipalRefund = isCompletedPrincipalRefund;
+exports.isQualifiedCardRepaymentReceipt = isQualifiedCardRepaymentReceipt;
+exports.isUnqualifiedCardRepayment = isUnqualifiedCardRepayment;
+exports.isUnpostedCardBalanceClaim = isUnpostedCardBalanceClaim;
+exports.isCompletedCardBalanceReceipt = isCompletedCardBalanceReceipt;
+exports.isCompletedCardRepaymentPrincipal = isCompletedCardRepaymentPrincipal;
 exports.isUnqualifiedCardCredit = isUnqualifiedCardCredit;
+const CLICK_LINK_PROMPT = /(?:\b(?:click(?:ing)?|tap(?:ping)?|verify|confirm|update\s+(?:(?:your|the)\s+)?(?:details|information|credentials|account))\b[\s:：]+|(?<![ء-ي])(?:اضغط|إضغط|انقر)[\s:：]+)(?:[^.!?]|\.\d){0,120}?(?:(?:https?|hxxps?):\/\/|\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:[\/?#:]|\b)|www\.|\b(?:here|below|link|url)\b|الرابط|هنا)/giu;
+const ISSUER_MERCHANT_DEBIT_CONFIRMATION = /^confirm\s+that\s+[A-Z]{3}\s+\d[\d,.]*\s+was\s+debited\s+from\s+your\s+account\s+ending\s+\d{4}\s+for\s+(?:a\s+)?purchase\s+at\s+(?:[a-z0-9-]+\.)+[a-z]{2,}$/iu;
+const ISSUER_MERCHANT_HOST_END = /^(?:\*[A-Z0-9]{1,24})?["'”’»)\]]*[.!?;,。、،؛؟۔…]*(?:[^\S\uFEFF]|$)/iu;
+function countsAsLinkPrompt(source, match) {
+    const before = source.slice(Math.max(0, match.index - 60), match.index);
+    if (/(?:\b(?:do\s+not|don['’]t|never|avoid|refrain\s+from)\s+(?:ever\s+)?|\b(?:at|from|merchant\s*:?)\s+|(?:لا|عدم)\s+)$/iu.test(before))
+        return false;
+    return !(ISSUER_MERCHANT_DEBIT_CONFIRMATION.test(match[0]) &&
+        ISSUER_MERCHANT_HOST_END.test(source.slice(match.index + match[0].length)) &&
+        /(?:^|[.!?])\s*(?:Dear\s+Customer[,\s]+)?we\s+$/iu.test(source.slice(0, match.index)));
+}
+function hasClickLinkPrompt(source) {
+    for (const match of source.matchAll(CLICK_LINK_PROMPT))
+        if (countsAsLinkPrompt(source, match))
+            return true;
+    return false;
+}
+const WORD_ONLY_LINK_TARGET = /(?:\b(?:here|below|link|url)|الرابط|هنا)$/iu;
+const MESSAGE_NAMES_AN_ADDRESS = /(?:https?|hxxps?):\/\/|\bwww\.|\b(?:[a-z0-9-]+\.)+[a-z]{2,}\/\S/iu;
+function hasOnlyWordLinkPrompts(source) {
+    if (MESSAGE_NAMES_AN_ADDRESS.test(source))
+        return false;
+    const counted = [...source.matchAll(CLICK_LINK_PROMPT)].filter((match) => countsAsLinkPrompt(source, match));
+    return counted.length > 0 && counted.every((match) => WORD_ONLY_LINK_TARGET.test(match[0]));
+}
+function blankWordLinkPrompts(source) {
+    if (!hasOnlyWordLinkPrompts(source))
+        return source;
+    let out = source;
+    for (const match of source.matchAll(CLICK_LINK_PROMPT)) {
+        if (!countsAsLinkPrompt(source, match))
+            continue;
+        out = out.slice(0, match.index) + ' '.repeat(match[0].length) + out.slice(match.index + match[0].length);
+    }
+    return out;
+}
+const FIRST_PERSON_MONEY = /^\s*(?:(?:hi|hey|hello)\b(?:[^\r\n.!?]{0,40}[,!:]|\s+)\s*)?(?:I(?:\s+(?:(?:have|just|already)\s+){0,2}|['’]ve\s+(?:(?:just|already)\s+)?)(?:spent|paid|bought|sent|deposited|transferred|refunded)\b|[اأ]نا\s+(?:(?:قد|لقد)\s+)?(?:صرفت|دفعت|اشتريت|حولت|حوّلت|أرسلت|ارسلت)(?=\s))/iu;
+function hasExplicitPersonalMoneyClaim(source) {
+    const text = source.replace(/^\s*Dear\s+Customer[,!:]\s*/iu, '');
+    if (FIRST_PERSON_MONEY.test(text) || /^\s*they\s+charged\s+me\b/iu.test(text))
+        return true;
+    if (!/^\s*(?:(?:hi|hey|hello|lol|ok|just|so)\b[\s,!:]*)*(?:paid|spent|received)\b/iu.test(text))
+        return false;
+    if (/\b(?:card|account|acct?|a\/c|balance|bal|avl|reference|ref|transaction|txn)\b/iu.test(text))
+        return false;
+    return /^\s*lol\b/iu.test(text) ||
+        /\b(?:for\s+(?:lunch|dinner|breakfast|the\s+taxi)|on\s+groceries\s+today)\b/iu.test(text);
+}
+function isLeadingNumericDiscountOffer(source) {
+    return /^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?(?:use|enter)\s+(?:code\s+)?\d{4,8}\s+to\s+get\s+\d{1,3}\s?%\s+off\b/iu.test(source) ||
+        (source.includes('خصم') && /^\s*(?:Dear\s+Customer[,!:]\s*)?(?:[^\n.!?\p{N}]{0,40}?[،,!:\s]\s*)?(?:استمتع\s+ب)?خصم\s*\p{Nd}{1,3}\s*[%٪]/iu.test(source));
+}
+const isUnqualifiedPeerTransferClaim = (source) => /^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?transferred\b(?:[^.\n]|\.\d){0,96}?\bto\s+(?:you|u)\b/iu.test(source);
+exports.isUnqualifiedPeerTransferClaim = isUnqualifiedPeerTransferClaim;
+const MOBILE_MONEY_CALLBACK = /\b(?:call|phone|ring|contact)\s+(?:(?:us|me|support|on|at)\s+){0,3}(?:\+|00)(?:971|966)[\s().-]*5(?:[\s().-]*\d){8}(?![\s().-]*\d)/giu;
+function hasMobileMoneyCallback(source) {
+    if (!/(?:\+|00)(?:971|966)/u.test(source))
+        return false;
+    for (const match of source.matchAll(MOBILE_MONEY_CALLBACK)) {
+        const before = source.slice(Math.max(0, match.index - 60), match.index);
+        if (/\b(?:do\s+not|don['’]t|never|avoid)\s*$/iu.test(before))
+            continue;
+        const after = source.slice(match.index + match[0].length, match.index + match[0].length + 60);
+        if (/^\s*(?:to|for)\s+(?:cancel|verify|confirm|approve|authori[sz]e|secure|unblock|release)\b/iu.test(after) ||
+            /\bto\s+(?:cancel|verify|confirm|approve|authori[sz]e|secure|unblock|release)[^.!?\n]{0,30}$/iu.test(before))
+            return true;
+    }
+    return false;
+}
 const MOVEMENT_STATUS = /\bincomplete\s+(?:transaction|txn|purchase|payment|transfer|withdrawal)\b|\b(?:transaction|txn|purchase|payment|transfer|withdrawal)(?:\s+(?:of|for|at|to|from|with|on)\b(?:[^.\n]|\.\d){0,80}?)?\s+(?:was|is|remains?|has\s+been)\s+incomplete\b|\b(?:transaction|txn|purchase|payment|authori[sz]ation)\b(?:[^.\n]|\.\d){0,100}?\s(?:cancell?ed|voided)\s+by\s+(?:the\s+)?(?:merchant|bank|issuer|acquirer)\b|\b(?:transaction|txn|purchase|payment|authori[sz]ation)\b(?:[^.\n]|\.\d){0,100}?\s(?:will\s+be|is\s+being)\s+(?:cancell?ed|voided)\b|[ \t][-–—:|][ \t]*(?:void|voided|cancell?ed)[ \t]*(?=\n|$)|[ \t]*[,:(][ \t]*(?:cancell?ed|voided|void)[ \t]*\)?[ \t]*(?=[.\n]|$)|(?<![ء-ي])(?:تم\s+)?(?:الغاء|ايقاف|تعليق)\s+(?:ال)?(?:عمليه|شراء|دفع|تحويل|حواله|سحب|معامله|حركه)(?![ء-ي])|(?<![ء-ي])(?:الغيت|اوقفت|علقت)\s+(?:ال)?(?:عمليه|شراء|دفع|تحويل|حواله|سحب|معامله|حركه)(?![ء-ي])|(?<![ء-ي])(?:ال)?(?:عمليه|معامله|شراء|دفع|تحويل|حواله|سحب|حركه)\s+(?:غير\s+(?:ناجح|مكتمل)ه?|لم\s+(?:تكتمل|يكتمل|تنجح)|(?:ال)?(?:ملغي|ملغا|ملغاه|موقوف[هة]?))(?![ء-ي])|(?<![ء-ي])(?:و?تم|قد\s+تم)\s+(?:الغاو|الغاي|ايقاف|تعليق)(?:ها|ه)(?![ء-ي])|(?<![ء-ي])تم\s+(?:ال)?الغاء(?![ء-ي])|(?<![ء-ي])لم\s+(?:تكتمل|يكتمل|تنجح)(?![ء-ي])/gi;
 const CONDITIONAL_STATUS = /(?:\b(?:if|unless|please|pls|to|can|may|should)\b|(?<![ء-ي])(?:يرجي|الرجاء|رجاء|يمكنك|يمكنكم|يمكن|بامكانك|بامكانكم|اتصل|ارسل|للابلاغ|لطلب|طلب|خدمه|اذا|حال|تود|ترغب|عليك)(?![ء-ي]))(?:\s+(?:او|و|ب|في|علي|عن|من|كانت|كان|or|and))?(?:\s+\d{1,4})?\s*$/i;
 function isIncompletePrincipal(source, span) {
@@ -11077,7 +10084,7 @@ function isHedgedPrincipal(source, spans) {
 }
 const REFUND_LEAD = /(?:\brefund(?:ed)?\s+(?:of|amount(?:\s+of)?|for)?|(?<![ء-ي])(?:(?:ال)?مبلغ\s+)?(?:ال)?استرداد(?:\s+(?:ال)?مبلغ)?(?:\s+بقيم[هة]|\s+بمبلغ)?)\s*[:\-]?\s*$/iu;
 const NOT_CURRENT_REFUND = /\b(?:if|when|unless|earlier|previous|prior|another|other|last)\b|(?<![ء-ي])(?:اذا|حال|سابق[هة]?|اخري)(?![ء-ي])/iu;
-const REFUND_PENDING = /\b(?:initiated|under\s+process(?:ing)?|in\s+process|in\s+progress|being\s+(?:processed|reversed)|will\s+(?:be|reflect|appear|show)|requested|pending|awaiting|submitted|approved|raised)\b|(?<![ء-ي])(?:قيد\s+(?:ال)?(?:معالج[هة]|تنفيذ|مراجع[هة]|انتظار)|سيتم|سوف|طلب|تمت\s+الموافق[هة])(?![ء-ي])/iu;
+const REFUND_PENDING = /\b(?:initiated|under\s+process(?:ing)?|in\s+process|in\s+progress|being\s+(?:processed|reversed)|will\s+(?:be|reflect|appear|show)|requested|pending|awaiting|awaited|submitted|approved|raised)\b|(?<![ء-ي])(?:قيد\s+(?:ال)?(?:معالج[هة]|تنفيذ|مراجع[هة]|انتظار)|سيتم|سوف|طلب|تمت\s+الموافق[هة])(?![ء-ي])/iu;
 const REFUND_CANCELLED = /\b(?:has\s+been|was|is|got)\s+(?:cancell?ed|declined|rejected|unsuccessful|voided|reversed)\b|\brefund\s+(?:has\s+)?failed\b|(?<![ء-ي])(?:تم\s+)?(?:الغاء|إلغاء|رفض)\s+(?:طلب\s+)?(?:ال)?استرداد|(?:ال)?استرداد\s+(?:ال)?(?:ملغي|ملغى|ملغا|ملغاه|مرفوض)(?![ء-ي])/iu;
 const REFUND_COMPLETED = /\b(?:credited|issued|processed\s+(?:to|into|on)|posted\s+(?:to|into|on)|received\s+(?:on|in|into)|deposited|returned\s+to|added\s+to)\b|(?<![ء-ي])(?:تم\s+(?:[إا]يداع|[إا]ضاف[هة]|استرداد|[إا]رجاع|[إا]عاد[هة])|اضيف|أضيف|اعيد|أعيد|اودع|أودع)(?![ء-ي])/giu;
 const UNSETTLED_PREDICATE = /\b(?:will|would|shall|not|never|hasn['’]t|wasn['’]t|isn['’]t)\b/iu;
@@ -11108,6 +10115,10 @@ function continuesRefund(text) {
 const SAME_MONEY_REFERENCE = /^\s*(?:[(\[/=≈~]|equivalent(?:\s+to)?|equiv\.?|approx\.?|i\.?e\.?|بما\s+يعادل|ما\s+يعادل|يعادل)\s*$/i;
 const ORIGINAL_MOVEMENT_REFERENCE = /\b(?:for|against|on|of)\s+(?:your|the)\s+(?:original\s+|earlier\s+|previous\s+)?(?:purchase|transaction|payment|charge|order)\s+(?:of|for)?\s*$|(?:لعمليه|عن\s+عمليه|من\s+عمليه)\s+(?:ال)?شراء\s+(?:بمبلغ|بقيمه)?\s*$/i;
 const ORIGINAL_MOVEMENT_CLAUSE = /\b(?:for|against|on|of)\s+(?:your|the)\s+(?:original\s+|earlier\s+|previous\s+)?(?:purchase|transaction|payment|charge|order)\b|(?:لعمليه|عن\s+عمليه|من\s+عمليه)\s+(?:ال)?شراء(?=\s)/iu;
+const NAME_BEFORE_AND = /^\s*(?:from|at|to|with|via|by)\s+(?:\p{Lu}[\p{L}\p{N}&.'’-]*\s+)+$/u;
+const NAME_AFTER_AND = /^\p{Lu}[\p{L}\p{N}&.'’-]*(?=\s|$)/u;
+const CLAUSE_OPENER = /^(?:a|an|the|your|this|that|our|my|his|her|its|their|another|separate|additional|new|it|we|you|they|i)(?=\s|$)/iu;
+const isNameJoin = (coordinator, before, after) => /^and\s+$/iu.test(coordinator) && NAME_BEFORE_AND.test(before) && NAME_AFTER_AND.test(after) && !CLAUSE_OPENER.test(after);
 function refundScope(source, own, monetarySpans) {
     const sentence = sentenceAround(source, own, true);
     let end = sentence.end;
@@ -11124,6 +10135,8 @@ function refundScope(source, own, monetarySpans) {
             continue;
         const head = subject[1];
         if (continuesRefund(head) || OPEN_ARGUMENT.test(source.slice(own.end, at)))
+            continue;
+        if (isNameJoin(boundary[0], source.slice(own.end, at), source.slice(at + boundary[0].length, end)))
             continue;
         end = at;
         independentSubject = true;
@@ -11223,6 +10236,83 @@ function isCompletedPrincipalRefund(source, span) {
 }
 const CARD_CREDIT_TARGET = /\bcredit\s+card\b|بطاق(?:تك|ه|ة)\s+(?:ال)?ا[يئ]تماني[هة]/iu;
 const CARD_CREDIT_MOVEMENT = /\bcredited(?:\s+with|\s+to)?\b|(?<![ء-ي])(?:تم\s+)?(?:إيداع|ايداع|إضافة|اضافه|اضافة)(?![ء-ي])/iu;
+const REPAYMENT_MONEY = String.raw `(?:[A-Z]{3}|Dhs?\.?|SR|[$€£])\s*\p{Nd}+(?:[.,٫٬]\p{Nd}+)*`;
+const REPAYMENT_CARD = String.raw `(?:(?!(?:bill|invoice|loan|finance|mortgage|account|utility|electricity|water|using|via|with|through|from|to|for|by|on|at|and|of)\b)[\p{L}\p{N}.'’-]+\s+){0,3}?card\b`;
+const REPAYMENT_DESTINATION_CARD = String.raw `(?:(?!(?:bill|invoice|loan|finance|mortgage|account|utility|electricity|water|using|via|with|through|from|to|for|by|on|at|and)\b)[\p{L}\p{N}.'’-]+\s+){0,6}?card\b`;
+const REPAYMENT_NUMBER = String.raw `\p{Nd}+(?:[.,٫٬]\p{Nd}+)*`;
+const REPAYMENT_UNIT = String.raw `(?:[A-Z]{3}|Dhs?\.?|SR|[$€£])`;
+const REPAYMENT_ANY_MONEY = String.raw `(?:${REPAYMENT_UNIT}\s*${REPAYMENT_NUMBER}|${REPAYMENT_NUMBER}\s*${REPAYMENT_UNIT})`;
+const REPAYMENT_DESTINATION = String.raw `(?:on|to|towards?)\s+(?:your\s+)?${REPAYMENT_DESTINATION_CARD}`;
+const REPAYMENT_GREETING = String.raw `(?:(?:Dear\s+[^\n.!?\p{N},:!]{1,40}|Hi|Hello)[,!:]\s*)?`;
+const AR_REPAYMENT_MONEY = String.raw `(?:${REPAYMENT_ANY_MONEY}|${REPAYMENT_NUMBER}\s*(?:درهم|دراهم|ريال)|(?:درهم|دراهم|ريال)\s*${REPAYMENT_NUMBER})`;
+const COMPLETED_CARD_BALANCE_RECEIPT = new RegExp(String.raw `^تم\s+(?:(?:[إا]يداع|[إا]ضاف[هة])\s+(?:مبلغ\s+)?|استلام\s+سداد\s+(?:بمبلغ|مبلغ)\s+)${AR_REPAYMENT_MONEY}`, 'iu');
+const UNQUALIFIED_REPAYMENT = new RegExp(String.raw `(?:^|[\n.!?]\s*)\s*(?:[A-Z][A-Z0-9 .&-]{1,32}(?::\s*|\s+))?${REPAYMENT_GREETING}(?:` +
+    String.raw `payment\s+(?:received|credited)\s+${REPAYMENT_ANY_MONEY}\s+${REPAYMENT_DESTINATION}` +
+    String.raw `|we\s+(?:have\s+)?received\s+(?:your\s+)?payment\s+(?:of\s+)?${REPAYMENT_ANY_MONEY}\s+${REPAYMENT_DESTINATION}` +
+    String.raw `|payment\s+(?:of\s+)?${REPAYMENT_ANY_MONEY}\s+(?:was\s+)?received\s+${REPAYMENT_DESTINATION}` +
+    String.raw `|(?:thank\s+you|thanks)\s+for\s+(?:your\s+)?payment\s+of\s+${REPAYMENT_ANY_MONEY}\s+${REPAYMENT_DESTINATION}` +
+    String.raw `|your\s+payment\s+of\s+${REPAYMENT_ANY_MONEY}\s+to\s+(?:your\s+)?${REPAYMENT_DESTINATION_CARD}(?:[^.\n]|\.\d){0,80}\bsuccessful\b` +
+    String.raw `|your\s+(?:(?:[\p{L}.'’-]+)\s+){0,4}?(?:credit|charge|covered)\s+card\s+payment\s+of\s+${REPAYMENT_ANY_MONEY}(?:[^.\n]|\.\d){0,60}\bsuccessful\b` +
+    String.raw `|تم\s+استلام\s+سداد\s+(?:بمبلغ|مبلغ)\s+${AR_REPAYMENT_MONEY}\s+(?:على|علي|إلى|الى|الي|في)\s+بطاق(?:تك|تكم|ه|ة)\s+(?:ال)?ا[يئ]تماني[هة])`, 'giu');
+const QUALIFIED_REPAYMENT_RECEIPT = new RegExp(String.raw `^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?(?:` +
+    String.raw `payment\s+received|thank\s+you\s+for\s+(?:your\s+)?payment\s+of` +
+    String.raw `)\s+(${REPAYMENT_MONEY})\s+on\s+your\s+${REPAYMENT_CARD}\s+(?:ending(?:\s+(?:in|with))?|number|no\.?)\s*(?:[*xX•·-]\s*)*\p{Nd}{4}(?!\p{Nd})` +
+    String.raw `(?=\s*(?:[.!?\n]|$|(?:thank|avl|available|balance|for\s+(?:queries|help|details|information))\b))`, 'iu');
+const QUALIFIED_MATURE_REPAYMENT_RECEIPT = new RegExp(String.raw `^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?payment\s+of\s+(${REPAYMENT_MONEY})\s+(?:has\s+been\s+)?received\s+(?:towards?|on)\s+your\s+${REPAYMENT_CARD}\s+(?:ending(?:\s+(?:in|with))?|number|no\.?)\s*(?:[*xX•·-]\s*)*\p{Nd}{4}(?!\p{Nd})` +
+    String.raw `(?=\s*(?:[.!?\n]|$|(?:thank|avl|available|balance|for\s+(?:queries|help|details|information))\b))`, 'iu');
+function isQualifiedCardRepaymentReceipt(source, expectedCurrency) {
+    const match = QUALIFIED_REPAYMENT_RECEIPT.exec(source) ?? QUALIFIED_MATURE_REPAYMENT_RECEIPT.exec(source);
+    if (!match || /\b(?:debit|prepaid)\b/iu.test(match[0]))
+        return false;
+    if (/\bthank\s+you\b/iu.test(match[0]) && !/\b(?:credit|charge|covered)\b/iu.test(match[0]))
+        return false;
+    if (expectedCurrency === undefined)
+        return true;
+    const token = match[1].match(/^[^\p{Nd}]+/u)?.[0].trim().replace(/\.$/u, '').toUpperCase();
+    const code = token === 'DH' || token === 'DHS' ? 'AED' : token === 'SR' ? 'SAR' : token;
+    return code === expectedCurrency;
+}
+function isUnqualifiedCardRepayment(source) {
+    if (!/\bpayment\b|سداد|[\u0640\u064B-\u065F\u0670\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFB50-\uFEFF\uFF01-\uFFEF]/iu.test(source))
+        return false;
+    const text = repaymentReadingText(source);
+    if (!/\bpayment\b|سداد/iu.test(text) || isQualifiedCardRepaymentReceipt(text))
+        return false;
+    for (const match of text.matchAll(UNQUALIFIED_REPAYMENT)) {
+        const after = text.slice(match.index + match[0].length).split(/[\n!?;]|\.(?=\s|$)/u)[0];
+        const clause = match[0] + after;
+        const merchantAt = /\bat\s+\p{L}/iu.test(clause) &&
+            !/\bat\s+(?:the\s+)?(?:atm\b|[\p{L}]*bank\b|(?:[\p{L}]+\s+){0,3}branch\b)/iu.test(clause);
+        if (merchantAt || /\b(?:from|using)\s+(?!your\b|the\s+(?:bank|account)\b)\p{L}/iu.test(clause))
+            continue;
+        return true;
+    }
+    return false;
+}
+function repaymentReadingText(source) {
+    return (/[\uFB50-\uFEFF\uFF01-\uFFEF]/u.test(source) ? source.normalize('NFKC') : source)
+        .replace(/[\u0640\u064B-\u065F\u0670\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/gu, '');
+}
+function cardBalanceReceiptText(source) {
+    return repaymentReadingText(source)
+        .replace(/^\s*[A-Z][A-Z .&'-]{1,32}(?:alert|bank|sms)\s*\r?\n\s*/iu, '')
+        .replace(/^\s*[A-Z][A-Z0-9 .&'-]{1,32}:\s*/iu, '')
+        .replace(/^\s*(?:Dear\s+[^\n.!?\p{N},:!]{1,40}|Hi|Hello)[,!:]\s*/iu, '').trim();
+}
+function isUnpostedCardBalanceClaim(source) {
+    if (!/[إا]يداع|[إا]ضاف|سداد|[\u0640\u064B-\u065F\u0670\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFB50-\uFEFF\uFF01-\uFFEF]/u.test(source))
+        return false;
+    const text = cardBalanceReceiptText(source);
+    return CARD_CREDIT_TARGET.test(text) && /^(?:(?:(?:لم|لن)\s+يتم|سيتم|سوف\s+يتم|(?:[إا]ذا|لو|في\s+حال[هة]?)\s+تم)\s+(?:[إا]يداع|[إا]ضاف[هة]|استلام\s+سداد)|تم\s+استلام\s+طلب\s+(?:[إا]يداع|[إا]ضاف[هة]|سداد)|تم\s+(?:[إا]يداع|[إا]ضاف[هة])\s+طلب)(?![ء-ي])/u.test(text);
+}
+function isCompletedCardBalanceReceipt(source) {
+    const text = cardBalanceReceiptText(source);
+    return CARD_CREDIT_TARGET.test(text) && COMPLETED_CARD_BALANCE_RECEIPT.test(text);
+}
+function isCompletedCardRepaymentPrincipal(source, span) {
+    const clause = sentenceAround(source, span).text;
+    return isCompletedCardBalanceReceipt(clause) && isUnqualifiedCardRepayment(clause);
+}
 function isUnqualifiedCardCredit(source, span) {
     if (!span || !CARD_CREDIT_TARGET.test(source) || !CARD_CREDIT_MOVEMENT.test(source))
         return false;
@@ -11244,6 +10334,10 @@ exports.stripInvisible = stripInvisible;
 exports.foldOrthography = foldOrthography;
 exports.normalizeArabic = normalizeArabic;
 exports.bankProfileForSender = bankProfileForSender;
+exports.refundSideNoteVerdict = refundSideNoteVerdict;
+exports.creditSettlement = creditSettlement;
+exports.hasOnlyUnsettledCredit = hasOnlyUnsettledCredit;
+exports.creditNoteBesideDebit = creditNoteBesideDebit;
 exports.hasMalformedBankAmount = hasMalformedBankAmount;
 exports.isBnplPayee = isBnplPayee;
 exports.overrideFitsDirection = overrideFitsDirection;
@@ -11256,6 +10350,9 @@ exports.hasArabicRefundHeading = hasArabicRefundHeading;
 exports.isNonCashNotice = isNonCashNotice;
 exports.isInformationOnlyAlert = isInformationOnlyAlert;
 exports.isNonPostingMessage = isNonPostingMessage;
+exports.reversedIncomingCredit = reversedIncomingCredit;
+exports.isUnregisteredCallBack = isUnregisteredCallBack;
+exports.moneyNoticeKind = moneyNoticeKind;
 exports.isDeclinedMessage = isDeclinedMessage;
 exports.extractOutgoingTransferParties = extractOutgoingTransferParties;
 exports.parseForeignAwaitingRate = parseForeignAwaitingRate;
@@ -11305,7 +10402,7 @@ function normalizeArabic(s) {
 }
 const ARABIC_RE = /[\u0600-\u06FF]/;
 const AR_LETTER = '\\u0621-\\u064A';
-exports.PARSER_VERSION = 70;
+exports.PARSER_VERSION = 74;
 exports.PARSER_BACKFILL_VERSION = 50;
 const BANK_PROFILES = {
     'Emirates NBD': { brand: /\benbd\b|emirates\s*nbd|\bliv\b/i, ownPot: /\b(?:liv\s+)?goals?\b|\bsavings?\s+pot\b/i },
@@ -11410,7 +10507,7 @@ const OTP_CODE_DIGITS = String.raw `(?<![\d.,])\d{4,8}\b(?![.,]\d)`;
 const OTP_RE = new RegExp(`${OTP_CODE_WORD}(?:\\s+(?:code|otp|password|pin|number))?\\s*(?:is|:|-|=|هو)?\\s*${OTP_CODE_DIGITS}` +
     `|${OTP_CODE_WORD}(?:[^.\\n]|\\.\\d|\\.(?=(?:com|ae|sa|net|org|io|co|in|me)\\b)){0,80}?(?:\\bis\\b|[:=]|هو)\\s*${OTP_CODE_DIGITS}` +
     `|\\b\\d{4,8}\\s+is\\s+(?:your|the)\\s+(?:[a-z]+[\\s-]?){0,2}(?:code|otp|pin|password|passcode)\\b` +
-    `|\\b(?:use|enter)\\s+\\d{4,8}\\s+to\\b` +
+    `|\\b(?:use|enter)\\s+(?:code\\s+)?\\d{4,8}\\s+to\\b(?!\\s+get\\s+\\d{1,3}\\s?%\\s+off\\b)` +
     `|(?:code|otp|password|pin)\\s+(?:for|to\\s+complete)\\s+(?:your\\s+)?3-?d\\s*secure`, 'i');
 const OTP_FOOTER_RE = new RegExp(`do not (?:share|disclose|reveal|give)|never (?:share|disclose|reveal|ask)|will never ask|beware of fraud` +
     `|${OTP_CODE_WORD}` +
@@ -11425,10 +10522,10 @@ const CODE_VALIDITY_WINDOW_RE = new RegExp(String.raw `\b(?:use|enter|submit)\b(
     String.raw `|\b(?:use|enter|submit)\s+(?:it\s+|this\s+(?:\w+\s+){0,2})?in\s+\d{1,3}\s*(?:sec|min|hour|hr)` +
     String.raw `|${CODE_SUBJECT}\bexpires?\s+(?:in|after|within)\s+(?:the\s+next\s+)?\d{1,3}\s*(?:sec|min|hour|hr)` +
     String.raw `|${CODE_SUBJECT}\b(?:is\s+)?valid\s+(?:for|till|until|upto|up\s+to)\s+(?:the\s+next\s+)?\d{1,3}\s*(?:sec|min|hour|hr)`, 'i');
-const TRANSACTION_APPROVAL_REQUEST_RE = /(?:^|[.!?]\s*)\s*(?:please\s+)?(?:tap\s+(?:here\s+)?to\s+)?(?:approve|confirm|authoris(?:e|z)e)\s+(?:this\s+|the\s+|your\s+)?(?:card\s+)?(?:purchase|payment|transaction|transfer)\b|\b(?:open|use)\s+(?:the\s+|your\s+)?(?:bank|mobile)?\s*app\s+to\s+(?:approve|confirm|authoris(?:e|z)e)\s+(?:this\s+|the\s+|your\s+)?(?:card\s+)?(?:purchase|payment|transaction|transfer)\b|^\s*(?:(?:يرجي|الرجاء)\s+(?:الموافقه|التاكيد)\s+علي|قم\s+ب?(?:الموافقه|تاكيد))\s+(?:عمليه\s+)?(?:شراء|دفع|تحويل)(?![\u0621-\u064A])/i;
+const TRANSACTION_APPROVAL_REQUEST_RE = /(?:^|[.!?:]\s*)\s*(?:please\s+)?(?:tap\s+(?:here\s+)?to\s+)?(?:approve|confirm|authori[sz]e)\s+(?:this\s+|the\s+|your\s+)?(?:(?:[A-Z]{3}|Dhs?\.?)\s*\d[\d,]*(?:\.\d{1,3})?\s+)?(?:card\s+)?(?:purchase|payment|transaction|transfer)\b|\b(?:open|use)\s+(?:the\s+|your\s+)?(?:bank|mobile)?\s*app\s+to\s+(?:approve|confirm|authori[sz]e)\s+(?:this\s+|the\s+|your\s+)?(?:(?:[A-Z]{3}|Dhs?\.?)\s*\d[\d,]*(?:\.\d{1,3})?\s+)?(?:card\s+)?(?:purchase|payment|transaction|transfer)\b|^\s*(?:(?:يرجي|الرجاء)\s+(?:الموافقه|التاكيد)\s+علي|قم\s+ب?(?:الموافقه|تاكيد))\s+(?:عمليه\s+)?(?:شراء|دفع|تحويل)(?![\u0621-\u064A])/i;
 const GLUED_OTP_REQUEST_RE = new RegExp(String.raw `\b(?:requires?|enter|use)\s+(?:your\s+)?otp${OTP_CODE_DIGITS}(?=\s*(?:[.!?;]|$|\b(?:to|for|within|before)\b))`, 'i');
-const TRANSACTION_CODE_REQUEST_RE = new RegExp(String.raw `\b(?:code|pin|password|passcode)\s*[:=-]?\s*${OTP_CODE_DIGITS}\s+(?:to|for)\s+(?:complete|confirm|authoris(?:e|z)e|authenticate|initiate|make)\s+(?:the\s+|this\s+|your\s+)?(?:payment|purchase|transaction|transfer)\b` +
-    String.raw `|\b(?:use|enter)\s+(?:the\s+|your\s+)?(?:code|pin|password|passcode)\s*[:=-]?\s*${OTP_CODE_DIGITS}\s+(?:to|for)\s+(?:complete|confirm|authoris(?:e|z)e|authenticate|initiate|make)\s+(?:the\s+|this\s+|your\s+)?(?:payment|purchase|transaction|transfer)\b`, 'i');
+const TRANSACTION_CODE_REQUEST_RE = new RegExp(String.raw `\b(?:code|pin|password|passcode)\s*[:=-]?\s*${OTP_CODE_DIGITS}\s+(?:to|for)\s+(?:complete|confirm|authori[sz]e|authenticate|initiate|make)\s+(?:the\s+|this\s+|your\s+)?(?:payment|purchase|transaction|transfer)\b` +
+    String.raw `|\b(?:use|enter)\s+(?:the\s+|your\s+)?(?:code|pin|password|passcode)\s*[:=-]?\s*${OTP_CODE_DIGITS}\s+(?:to|for)\s+(?:complete|confirm|authori[sz]e|authenticate|initiate|make)\s+(?:the\s+|this\s+|your\s+)?(?:payment|purchase|transaction|transfer)\b`, 'i');
 const PIN_TRANSACTION_CHALLENGE_RE = new RegExp(String.raw `^\s*pin\b(?:[^.\n]|\.\d){0,180}?\b(?:transaction|payment|purchase|transfer)\b(?:[^.\n]|\.\d){0,180}?\b(?:is|:)\s*${OTP_CODE_DIGITS}`, 'i');
 const AR_CODE_CHALLENGE_RE = new RegExp(String.raw `(?:^|\n)[ \t]*(?:ال)?رمز[ \t]*:[ \t]*${OTP_CODE_DIGITS}[ \t]*(?:\r?\n|$)` +
     String.raw `|رمز[ \t]+(?:ال)?تفعيل[ \t]*:?[ \t]*${OTP_CODE_DIGITS}` +
@@ -11438,7 +10535,7 @@ const PREAUTH_RE = /pre[\s-]?auth|auth(?:oris|oriz)ation\s+hold|\bauth\s+hold\b|
 const VERIFICATION_HOLD_DESCRIPTOR_RE = /\bgoogle\s*\*?\s*temporary\s+hold\b/i;
 const HOLD_RELEASE_RE = /(?:(?:the|your|this|an?|earlier|previous|original)\s+)*(?:pre[\s-]?auth(?:oris|oriz)ation|auth(?:oris|oriz)ation|temporary|blocked)?\s*hold(?:[^.\n]|\.\d){0,60}?\b(?:released|reversed|removed|lifted|cleared|refunded)\b|\bpre[\s-]?auth(?:oris|oriz)ation\s+(?:(?:has\s+been|is|was)\s+)?(?:released|reversed|removed|lifted|cleared)\b|\bblocked\s+amount(?:[^.\n]|\.\d){0,40}?\b(?:released|reversed|removed)\b|تم الافراج عن المبلغ المحجوز/gi;
 const CONTACT_FOOTER_RE = /\(?\s*(?:\+?[\d·•X][\d·•X\s-]{4,})?\s*if\s+(?:calling|dialing|dialling)\s+from\s+(?:overseas|abroad|outside[^).\n]{0,20})\s*\)?/gi;
-const FRAUD_FOOTER_RE = /\bif\s+(?:this|that|it|the\s+(?:above\s+)?(?:transaction|purchase|payment))\b[^.\n]{0,90}|\bif\s+you\s+(?:have\s*n[o']t|did\s*n[o']t|do\s*n[o']t|didn'?t|haven'?t|don'?t)\b[^.\n]{0,90}|\b(?:to\s+report|report|reporting)\s+(?:an?\s+|any\s+)?unauthoris\w*[^.\n]{0,60}|\b(?:to\s+report|report|reporting)\s+(?:an?\s+|any\s+)?unauthoriz\w*[^.\n]{0,60}|\bunauthoris\w*\s+(?:use|transactions?|access|activity)\b[^.\n]{0,40}|\bunauthoriz\w*\s+(?:use|transactions?|access|activity)\b[^.\n]{0,40}|\bin\s+case\s+of\s+(?:any\s+)?unauthoris\w*[^.\n]{0,60}|\bnot\s+(?:done|made|initiated|authoris\w*|authoriz\w*)\s+by\s+you\b|\bif\s+(?:unauthoris\w*|unauthoriz\w*|not\s+(?:you|recogni[sz]ed|authoris\w*|authoriz\w*))\b[^.\n]{0,90}/gi;
+const FRAUD_FOOTER_RE = /\bif\s+(?:this|that|it|the\s+(?:above\s+)?(?:transaction|purchase|payment))\b[^.\n]{0,90}|\bif\s+you\s+(?:have\s*n[o']t|did\s*n[o']t|do\s*n[o']t|didn'?t|haven'?t|don'?t)\b[^.\n]{0,90}|\b(?:to\s+report|report|reporting)\s+(?:an?\s+|any\s+)?unauthoris\w*[^.\n]{0,60}|\b(?:to\s+report|report|reporting)\s+(?:an?\s+|any\s+)?unauthoriz\w*[^.\n]{0,60}|\bunauthoris\w*\s+(?:use|transactions?|access|activity)\b[^.\n]{0,40}|\bunauthoriz\w*\s+(?:use|transactions?|access|activity)\b[^.\n]{0,40}|\bin\s+case\s+of\s+(?:any\s+)?unauthoris\w*[^.\n]{0,60}|\bunauthori[sz]ed\s*[?？](?=\s|$)|\bnot\s+(?:done|made|initiated|authoris\w*|authoriz\w*)\s+by\s+you\b|\bif\s+(?:unauthoris\w*|unauthoriz\w*|not\s+(?:you|recogni[sz]ed|authoris\w*|authoriz\w*))\b[^.\n]{0,90}/gi;
 const DECLINED_VERB_RE = /\b(?:declined|rejected|refused|denied|failed|unsuccessful|timed\s+out)\s+(?:due\s+to|because|owing\s+to|for\s+(?:insufficient|want\s+of))\b|\b(?:was|is|were|are|has\s+been|have\s+been|been)\s+(?:declined|rejected|refused|denied|unsuccessful|dishonou?red)\b|\b(?:declined|rejected|failed|unsuccessful|timed\s+out)\s*[.!:;]|\btransaction\s+(?:has\s+)?(?:declined|failed|rejected)\b|\b(?:returned|rejected)\s+(?:a\s+)?(?:direct\s+)?debit\s+(?:request|instruction)\b|\bplease\s+(?:retry|try\s+again)\b|\bcould\s+not\s+be\s+(?:processed|completed|authoris\w*|authoriz\w*|approved|honou?red)\b|^\W{0,3}(?:transaction|payment|purchase)\s+error\s*[:!.\-]|\b(?:encountered|experienced|ran\s+into)\s+(?:an?\s+)?(?:issue|error|problem)\s+(?:while\s+)?processing\b/im;
 const DECLINED_RE = /declin|reject(?:ed|ion)|refused|\bdenied\b|not\s+(?:approved|successful|authoris\w*|authoriz\w*|completed|processed|honou?red)|unapproved|disapproved|unauthoris|unauthoriz|unsuccessful|\binsufficient\s+(?:funds?|balance|credit)\b(?![^.\n]{0,24}\b(?:fee|charge|penalty)\b)|could not be (?:processed|completed|authoris\w*|authoriz\w*|approved|verified|honou?red)|unable to (?:process|complete|authoris\w*|authoriz\w*|approve)|has not been (?:processed|approved|completed)|did not (?:go through|succeed|complete)|\bfail(?:ed|ure|s)\b|was stopped|\baborted\b|\bterminated\b|\bvoided\b|\b(?:transaction|txn|purchase|payment|transfer|withdrawal|request)\b(?:[^.\n]|\.\d){0,40}?\s(?:was|is|has\s+been|been)\s+cancell?ed\b|exceeds\s+(?:your\s+)?(?:available\s+)?(?:limit|balance)|limit exceeded|do not honou?r|card\s+(?:has\s+)?expired|expired card|card is blocked|blocked for (?:online|international)|card restricted|invalid\s+(?:card|cvv|pin|otp|expiry|transaction)|\bis invalid\b|incorrect\s+(?:cvv|pin|otp|expiry)|wrong\s+(?:cvv|pin)|pin tries exceeded|no response from (?:the\s+)?issuer|\btimed\s+out\b|\b(?:transaction|txn|request|session|connection|response|network|terminal)\s+time-?\s?outs?\b|مرفوض|تم رفض|لم تتم|لم يتم تنفيذ|فشلت|رصيد غير كاف|غير كافي|عدم كفايه|معكوسه|(?<!(?:اذا|حال|لو)[^.\n]{0,24})(?:رصيد[ \t]+(?:ال)?(?:بطاقه|حساب)(?![ \t]+(?:ال)?نقاط)[^.\n]{0,40}لا\s+يكفي|رصيدك[^.\n]{0,24}لا\s+يكفي\s+(?:ل)?(?:اتمام|اكمال))/i;
 const REVERSAL_RE = /\brevers(?:ed|al)\b|charge-?\s?backs?\b|credited back|re-?credited|returned to your (?:card|account)/i;
@@ -11474,7 +10571,7 @@ const PROMO_SENTENCE_RE = new RegExp(`${PROMO_SENTENCE_CHAR}*(?:` +
     String.raw `|\bt&cs?\b|\bconditions\s+apply\b|\bterms\s+apply\b` +
     `)${PROMO_SENTENCE_CHAR}*`, 'gi');
 const PROMO_SENTENCE_TRIGGER_RE = /%|\bredeem\b|\b(?:pay|manage)\b|\bt&cs?\b|\bconditions\s+apply\b|\bterms\s+apply\b/i;
-const TXN_EVIDENCE_RE = /purchase (?:of|amount)|purchase\s+(?:aed|dhs?|sar)\b|\d{4}\s+purchase\b|was used for|\bused (?:for|at|on)\b|\bspent\b|\bdebited\b|\bdeducted\b|has been (?:debited|deducted|credited|received)|debited from|deducted from|credited to|withdraw|avl\.?\s*(?:bal|cr|limit)|available (?:balance|credit|limit)|(?:^|\n)\s*bal(?:ance)?\s+(?:aed|dhs?|sar)\b|bill amount|payment due|due (?:on|by|date)|pay by/i;
+const TXN_EVIDENCE_RE = /purchase (?:of|amount)|purchase\s+(?:aed|dhs?|sar)\b|\d{4}\s+purchase\b|was used for|\bused (?:for|at|on)\b|\bspent\b|\bdebited\b|\bdeducted\b|has\s+been\s+(?:debited|deducted|credited|received)|debited from|deducted from|credited to|withdraw|avl\.?\s*(?:bal|cr|limit)|available (?:balance|credit|limit)|(?:^|\n)\s*bal(?:ance)?\s+(?:aed|dhs?|sar)\b|bill amount|payment due|due (?:on|by|date)|pay by/i;
 const POSTED_CLAUSE_RE = /\b(?:purchase|transaction|payment|withdrawal|transfer|debit)\s+of\b|\b(?:has|have)\s+been\s+(?:successfully\s+)?(?:debited|deducted|credited|charged|paid|posted|processed|made|used|reversed|refunded)\b|\bwas\s+(?:successfully\s+)?(?:used|debited|deducted|charged|made|posted|processed|paid|spent)\b|\b(?:spent|debited|deducted|withdrawn|charged|paid|purchase)\s+(?:at|from|on|to|via|using|with)\b|\bavl\.?\s*(?:bal|balance|cr|limit)\b|\bavailable\s+(?:balance|limit|credit)\b|\b(?:refunded|reversed|credited|transferred|remitted|deposited)\s+(?:back\s+)?(?:to|from|into)\b|\b(?:transaction|txn|purchase|payment|card|debit|credit)\s+alerts?\b|\bnew\s+bal(?:ance)?\b|شراء بمبلغ|تم شراء|تم خصم|تم الخصم|تم سحب|تم دفع|تم الدفع|تم استرداد/i;
 function hasPostedEvidence(raw, card) {
     if (amountWithFx(raw) === null)
@@ -11499,7 +10596,7 @@ const SPEND_SUMMARY_RE = new RegExp(String.raw `\bspent\b(?:[^.\n]|\.\d){0,60}?\
     String.raw `|\bso\s+far\s+this\s+(?:month|week|year)\b|\b(?:total|monthly|weekly|yearly)\s+spend(?:ing|s)?\b|\bspend(?:ing)?\s+(?:summary|breakdown|report|insights?|analysis)\b|\byour\s+(?:month|week)\s+in\s+review\b|انفقت خلال هذا الشهر|ملخص الانفاق`, 'i');
 const OFFER_RE = /^\s*(?:(?:offer|promo(?:tion)?|deal)\s*[:!-]|عرض\b)|\bpurchases?\s+(?:above|over|worth|starting\s+(?:at|from))\s+(?:aed|dhs|sar)\b|\bat\s+any\s+(?:store|shop|merchant|outlet|retailer|branch)\b|\bon\s+purchases\s+(?:above|over)\b|\boff\s+your\s+(?:next|first)\b|\b(?:aed|dhs|sar)\s*[\d,]+(?:\.\d{1,2})?\s+off\b|\bup\s+to\s+(?:aed|dhs|sar)\s*[\d,]+(?:\.\d{1,2})?\s+(?:off|cashback|back)\b|\b(?:for|on|per)\s+(?:every|each)\s+(?:aed|dhs|sar)\s*[\d,]+(?:\.\d{1,2})?\b|\b(?:on|for)\s+(?:aed|dhs|sar)\s*[\d,]+(?:\.\d{1,2})?\s+spent\b|\bup\s+to\s+\d{1,3}\s*x\b|\beach\s+of\s+[\d,]+(?:\.\d{1,2})?\s*(?:aed|dhs|sar)\b/i;
 const ARABIC_OFFER_RE = /^\s*عرض(?:\s|$)/u;
-const ARABIC_MARKETING_RE = /عرض|عروض|هديه|لا\s+تفوت|تسوق\s+لدي|اشترك|للاشتراك|لعدم\s+استلام[^.\n]{0,40}الرسائل|قد\s+تربح|فرصه\s+(?:ربح|للفوز)|اربح|السحب\s+الكبير|اول\s+يوم\s+اشتراك\s+مجاني/i;
+const ARABIC_MARKETING_RE = /عرض|عروض|هديه|احصل\s+علي\s+(?:استرداد|استرجاع)\s+نقدي|لا\s+تفوت|تسوق\s+لدي|اشترك|للاشتراك|لعدم\s+استلام[^.\n]{0,40}الرسائل|قد\s+تربح|فرصه\s+(?:ربح|للفوز)|اربح|السحب\s+الكبير|اول\s+يوم\s+اشتراك\s+مجاني/i;
 const ARABIC_MONTHLY_BILL_RE = /فاتورتك\s+لشهر[\s\S]{0,220}?اجمالي\s+المبلغ\s+المستحق\s+دفعه\s+قبل\s+تاريخ/i;
 const REWARD_RATE_RE = /\b(?:earn|get)\b[^.\n]{0,40}?\b(?:points?|touchpoints?|rewards?|miles?|tps?)\b[^.\n]{0,48}?\b(?:for|per)\s+(?:every\s+|each\s+)?(?:(?:aed|dhs?|sar)\s*[\d,.]+|[\d,.]+\s*(?:aed|dhs?|sar)\b)(?:\s+spent\b)?/i;
 const PERCENT_PURCHASE_OFFER_RE = /\b(?:get|enjoy|save|avail|grab|extra|flat|up\s+to)\b[^.\n]{0,32}?\b\d{1,3}\s*%[^.\n]{0,64}?\bon\b[^.\n]{0,28}?\bpurchases?\b[^.\n]{0,28}?\b(?:aed|dhs?|sar)\b/i;
@@ -11536,7 +10633,586 @@ function arabicPendingPosting(body) {
     return (AR_PENDING_IDIOM_RE.test(body) && !AR_COMPLETED_RE.test(body)) || AR_NOT_YET_RE.test(body);
 }
 const EXPECTED_FUTURE_MOVEMENT_RE = /\b(?:expected|anticipated)\b(?:[^.]|\.\d){0,80}\b(?:salary|payroll|wages|wps|payment|transfer|credit|deposit|refund|reversal|fee|charge|payout|settlement)\b|\b(?:salary|payroll|wages|wps|payment|transfer|credit|deposit|refund|reversal|fee|charge|payout|settlement)\b(?:[^.]|\.\d){0,80}\b(?:expected|anticipated)\b|(?:راتب|مرتب|دفع|تحويل|ايداع)[\s\S]{0,80}متوقع|سيصل[\s\S]{0,80}(?:راتب|مرتب|دفع|تحويل|ايداع)/iu;
-const REQUEST_RECEIVED_RE = /\b(?:payment|transfer|purchase|redemption)\s+request\b(?:[^.]|\.\d){0,64}\b(?:received|submitted|created|awaiting|pending|registered)\b|\b(?:received|submitted|created)\b(?:[^.]|\.\d){0,48}\b(?:payment|transfer|purchase)\s+request\b|تم\s+استلام\s+طلب\s+(?:سداد|دفع|تحويل)/iu;
+const REQUEST_RECEIVED_RE = /\b(?:(?:payment|transfer|purchase|redemption|refund)\s+request|request\s+for\s+(?:a\s+)?refund)\b(?:[^.]|\.(?=\S)){0,64}\b(?:received|submitted|created|awaiting|pending|registered|being\s+processed|in\s+progress|under\s+(?:review|process(?:ing)?))\b|\b(?:received|submitted|created)\b(?:[^.]|\.(?=\S)){0,48}\b(?:(?:payment|transfer|purchase|refund)\s+request|request\s+for\s+(?:a\s+)?refund)\b|تم\s+استلام\s+طلب\s+(?:سداد|دفع|تحويل)/iu;
+const REQUEST_RECEIVED_BLANK_RE = new RegExp(REQUEST_RECEIVED_RE.source, 'giu');
+const REFUND_OWNED_DESTINATION = String.raw `(?:your\b(?:\s+\S+){0,3}?\s+(?:card|account|wallet|balance|payment\s+(?:method|source))\b|the\s+(?:original\s+|same\s+)?(?:card|account|payment\s+(?:method|source))\b)`;
+const REFUND_COMPLETED_CREDIT_RE = new RegExp(String.raw `(\brefund(?:ed)?\b(?:[^.\n]|\.(?=\S)){0,300}?)\b(?:has|have|had|was|were)\s+(?:been\s+)?(?:successfully\s+)?(?:credited|refunded|posted)\s+(?:back\s+)?(?:to|into|onto)\s+` +
+    REFUND_OWNED_DESTINATION, 'gi');
+const REFUND_CREDIT_CONDITIONAL_LEAD_RE = /\b(?:if|once|when|whenever|after|until|unless|whether|as\s+soon\s+as)\b/gi;
+const governsRefundCredit = (lead) => {
+    const leaders = [...lead.matchAll(REFUND_CREDIT_CONDITIONAL_LEAD_RE)];
+    const last = leaders[leaders.length - 1];
+    return last !== undefined && !lead.slice(last.index + last[0].length).includes(',');
+};
+const REFUND_CREDIT_CONDITIONAL_INSIDE_RE = /\b(?:if|once|when|whenever|after|until|unless|whether)\b|\bas\s+soon\s+as\b/;
+const REFUND_CREDIT_REVERSED_RE = /\b(?:in\s+error|reversed)\b|\b(?:and|but)\s+(?:(?:later|then|subsequently)\s+)?(?:was|were|has\s+been|had\s+been|is)\s+(?:\w+\s+)?(?:cancell?ed|withdrawn|revoked)\b/i;
+const REFUND_CREDIT_LATER_RE = /\b(?:will\s+be\s+(?:credited|refunded|reversed|debited|deducted|returned|posted)|subject\s+to\s+(?:\w+\s+){0,2}(?:approval|review|confirmation|verification)|for\s+review|pending\s+(?:approval|review|investigation|verification|confirmation|clearance|settlement|release)|on\s+hold|under\s+(?:review|investigation)|provisional(?:ly)?|temporar(?:y|ily))\b/i;
+const REFUND_CREDIT_TAKEN_BACK_RE = /\b(?:(?:this|the|that)\s+(?:credit|refund|amount)|it)\s+(?:\w+\s+){0,2}?(?:has\s+been|had\s+been|was|is|remains|will\s+be)\s+(?:\w+\s+){0,2}?(?:reversed|cancell?ed|withdrawn|revoked|in\s+error|on\s+hold|temporary|provisional|under\s+(?:review|investigation))\b/i;
+const REFUND_HEDGED_SENTENCE_RE = /^\s*(?:if|in\s+case|should|unless)\b|\b(?:may|can|might|could|unless)\b/i;
+function refundCreditNotFinal(remainder) {
+    const sentences = remainder.split(REFUND_SENTENCE_BREAK_RE);
+    if (REFUND_CREDIT_REVERSED_RE.test(sentences[0]) || REFUND_CREDIT_LATER_RE.test(sentences[0]))
+        return true;
+    return sentences.slice(1).some((sentence) => !REFUND_HEDGED_SENTENCE_RE.test(sentence) && REFUND_CREDIT_TAKEN_BACK_RE.test(sentence));
+}
+const REFUND_AMOUNT_RE = new RegExp(String.raw `(?:\b(?:${Object.keys(currency_metadata_1.CURRENCY_MINOR_UNITS).join('|')})|\bDhs?\.?|\bSR\b|[$€£])\s*(\d[\d,]*(?:\.\d+)?)`, 'g');
+const REFUND_SENTENCE_BREAK_RE = /[.!?](?=\s|$)|\n/g;
+const REFUND_AMOUNT_AFTER_RE = /(\d[\d,]*(?:\.\d+)?)\s*(?:AED|SAR|USD|EUR|GBP|QAR|KWD|BHD|OMR|EGP|INR|PKR|JOD|Dhs?\b|SR\b)/g;
+const refundAmounts = (text) => [...text.matchAll(REFUND_AMOUNT_RE), ...text.matchAll(REFUND_AMOUNT_AFTER_RE)].map((match) => Number(match[1].replace(/,/g, '')));
+function refundRequestSentences(body) {
+    const parts = [];
+    for (const request of body.matchAll(REQUEST_RECEIVED_BLANK_RE)) {
+        const earlier = [...body.slice(0, request.index).matchAll(REFUND_SENTENCE_BREAK_RE)].pop();
+        const end = request.index + request[0].length;
+        const next = body.slice(end).search(REFUND_SENTENCE_BREAK_RE);
+        parts.push(body.slice(earlier ? earlier.index + 1 : 0, next < 0 ? body.length : end + next));
+    }
+    return parts.join(' ');
+}
+function hasCompletedRefundCredit(rest, request) {
+    const requested = refundAmounts(request);
+    for (const match of rest.matchAll(REFUND_COMPLETED_CREDIT_RE)) {
+        const at = match.index;
+        const breaks = [...rest.slice(0, at).matchAll(REFUND_SENTENCE_BREAK_RE)];
+        const lead = rest.slice(breaks.length ? breaks[breaks.length - 1].index + 1 : 0, at);
+        if (governsRefundCredit(lead) || REFUND_CREDIT_CONDITIONAL_INSIDE_RE.test(match[1]))
+            continue;
+        const remainder = rest.slice(at + match[0].length);
+        if (refundCreditNotFinal(remainder))
+            continue;
+        const credited = refundAmounts(lead + match[0] + remainder.split(REFUND_SENTENCE_BREAK_RE)[0]);
+        if (requested.some((amount) => !credited.includes(amount)))
+            continue;
+        return true;
+    }
+    return false;
+}
+const REFUND_CREDIT_SCAN_RE = /(?:(\brefund(?:ed)?\b(?:[^.\n]|\.(?=\S)){0,300}?)\b(?:credited|refunded|posted|returned)\b|\brefunded\b)(\s+(?:back\s+)?(?:to|into|onto)\s+[^.\n,;]{0,60})?/gi;
+const REFUND_CREDIT_NEGATION_RE = /\b(?:(?:has|have|had|was|were|is|are)\s+(?:not|never)|(?:hasn|haven|wasn|weren|isn|aren)['’]t|yet\s+to\s+be)\s+(?:(?:yet|been|successfully)\s+){0,3}$/;
+const REFUND_THIRD_PARTY_DESTINATION_RE = /^\s*(?:back\s+)?(?:to|into|onto)\s+(?:(?:the|a|an|your|his|her|their|its)\s+)?(?:\w+\s+){0,2}?(?:merchant|beneficiary|seller|vendor|recipient|payee|retailer|supplier|store|shop|restaurant|platform|marketplace)\b/i;
+const REFUND_COMPLETED_AUXILIARY_RE = /\b(?:has|have|had|was|were)\s+(?:\w+\s+){0,2}$/;
+const REFUND_NEGATED_THEN_DEBIT_RE = /^\s*(?:,\s*)?(?:and|but)\s+(?:was|were|has\s+been|have\s+been|had\s+been)\s+(?:\w+\s+){0,2}?(?:debited|charged|deducted)\b/i;
+function refundCreditNotActual(body, request) {
+    const requested = refundAmounts(request);
+    let negatedEnd = -1;
+    for (const match of body.matchAll(REFUND_CREDIT_SCAN_RE)) {
+        const at = match.index;
+        const breaks = [...body.slice(0, at).matchAll(REFUND_SENTENCE_BREAK_RE)];
+        const lead = body.slice(breaks.length ? breaks[breaks.length - 1].index + 1 : 0, at);
+        if (match[1] === undefined) {
+            const sentence = lead + match[0] + body.slice(at + match[0].length).split(REFUND_SENTENCE_BREAK_RE)[0];
+            if (REFUND_CREDIT_NEGATION_RE.test(lead)) {
+                if (refundAmounts(sentence).length > 0)
+                    negatedEnd = at + match[0].length;
+                continue;
+            }
+            if (refundCreditNotFinal(body.slice(at + match[0].length - (match[2]?.length ?? 0))))
+                return true;
+            continue;
+        }
+        if (governsRefundCredit(lead) || REFUND_CREDIT_CONDITIONAL_INSIDE_RE.test(match[1]))
+            return true;
+        if (REFUND_CREDIT_NEGATION_RE.test(match[1])) {
+            negatedEnd = at + match[0].length;
+            continue;
+        }
+        if (match[2] && REFUND_THIRD_PARTY_DESTINATION_RE.test(match[2]))
+            return true;
+        const remainder = body.slice(at + match[0].length - (match[2]?.length ?? 0));
+        if (refundCreditNotFinal(remainder))
+            return true;
+        if (requested.length > 0) {
+            const credited = refundAmounts(lead + match[0] + remainder.split(REFUND_SENTENCE_BREAK_RE)[0]);
+            if (requested.some((amount) => !credited.includes(amount)))
+                return true;
+        }
+        if (negatedEnd >= 0 && REFUND_COMPLETED_AUXILIARY_RE.test(match[1]) && body.slice(negatedEnd, at).search(REFUND_SENTENCE_BREAK_RE) < 0)
+            negatedEnd = -1;
+    }
+    return negatedEnd >= 0 && !REFUND_NEGATED_THEN_DEBIT_RE.test(body.slice(negatedEnd));
+}
+const REFUND_SIDE_NOTE_WORD_RE = /\brefund(?:ed)?\b/i;
+const REFUND_SIDE_NOTE_DEBIT_RE = /\b(?:debited|charged|deducted|spent)\b/i;
+const REFUND_SIDE_NOTE_RETURNED_RE = /\b(?:has\s+been|have\s+been|was|were|is\s+now)\s+(?:successfully\s+)?(?:reversed|refunded|returned)\b/i;
+const REFUND_SIDE_NOTE_SAME_MOVEMENT_RE = /^\s*(?:it|(?:this|the|that|your)\s+(?:amount|transaction|purchase|charge|payment|debit)|(?:the|this|that)\s+refund(?=\s+(?:has|have|had|was|were|is)\b)|a\s+refund\s+of\s+(?:the\s+same|this|that))\b/i;
+const REFUND_SIDE_NOTE_FUTURE_RE = /\bwill\b/i;
+const REFUND_SIDE_NOTE_NOT_SETTLED_RE = /\b(?:is|are|was|were|has|have|had|did|does)\s+not\b|\b(?:isn|aren|wasn|weren|hasn|haven|hadn|didn|doesn)['’]t\b|\bnot\s+(?:yet\s+)?been\b|\b(?:is|are)\s+being\b|\bwill\b/i;
+const REFUND_SIDE_NOTE_COMPLETED_RE = /\b(?:has|have|had|was|were)\s+(?:been\s+)?(?:(?:successfully|fully|now)\s+)?(?:credited|refunded|reversed|returned|posted)\b/i;
+const REVERSAL_SIDE_NOTE_WORD_RE = /\breversal\b/i;
+const EN_IN_PROCESS_STATUS = String.raw `(?:under[-\s]+(?:process(?:ing)?|review)|in[-\s]+(?:process|progress|queue)|being\s+(?:processed|reviewed|initiated)|pending|awaiting|awaited|on\s+hold)\b`;
+const EN_IN_PROCESS_LEAD = String.raw `(?:\b(?:is|are)\s+(?:(?:still|currently|now)\s+)?|\s*[:\-–]\s*(?:status\s*[:\-–]?\s*)?|\bstatus\s*(?:is\s+|[:\-–]\s*)|\s(?=(?:under|in)[-\s]+(?:process|progress)))`;
+const EN_IN_PROCESS_REQUESTED = String.raw `\b(?:has\s+been|have\s+been|was|were)\s+(?:initiated|submitted|requested|raised|lodged|registered|logged)\b|\binitiated\b(?!\s+by)`;
+const AR_IN_PROCESS_STATUS = `(?<![${AR_LETTER}])(?:(?:قيد|تحت)\\s+(?:ال)?(?:انتظار|معالجه|تنفيذ|اجراء|مراجعه|دراسه)|جار(?:ي)?\\s+(?:ال)?(?:معالجه|تنفيذ))(?![${AR_LETTER}])`;
+const REVERSAL_SIDE_NOTE_IN_PROCESS_RE = new RegExp(`${EN_IN_PROCESS_LEAD}${EN_IN_PROCESS_STATUS}|${EN_IN_PROCESS_REQUESTED}`, 'i');
+const REVERSAL_CREDIT_PHRASE_RE = /\breversal\s+(?:of|for)\b|\breversed\b/i;
+function refundSideNotes(body) {
+    if (!REFUND_SIDE_NOTE_WORD_RE.test(body) && !REVERSAL_SIDE_NOTE_WORD_RE.test(body))
+        return { body, ambiguous: false };
+    const sentences = [];
+    let start = 0;
+    for (const end of [...[...body.matchAll(REFUND_SENTENCE_BREAK_RE)].map((match) => match.index + match[0].length), body.length]) {
+        if (end > start)
+            sentences.push({ start, text: body.slice(start, end) });
+        start = Math.max(start, end);
+    }
+    const separateDebit = sentences.some(({ text }) => !REFUND_SIDE_NOTE_WORD_RE.test(text) &&
+        REFUND_SIDE_NOTE_DEBIT_RE.test(text) && !REFUND_SIDE_NOTE_RETURNED_RE.test(text) && refundAmounts(text).length > 0);
+    let out = body;
+    let ambiguous = false;
+    for (const { start: at, text } of sentences) {
+        const word = REFUND_SIDE_NOTE_WORD_RE.exec(text);
+        if (!word || refundAmounts(text).length > 0)
+            continue;
+        const lead = text.slice(0, word.index);
+        const negated = word[0].toLowerCase() === 'refunded' && REFUND_CREDIT_NEGATION_RE.test(lead);
+        const sameMovement = REFUND_SIDE_NOTE_SAME_MOVEMENT_RE.test(text) && !REFUND_SIDE_NOTE_FUTURE_RE.test(text);
+        const completedRefund = sameMovement && REFUND_SIDE_NOTE_COMPLETED_RE.test(text);
+        if ((negated && !sameMovement) || (separateDebit && (governsRefundCredit(lead) || REFUND_SIDE_NOTE_NOT_SETTLED_RE.test(text)))) {
+            out = out.slice(0, at) + ' '.repeat(text.length) + out.slice(at + text.length);
+        }
+        else if (separateDebit && (negated || (REFUND_RE.test(text) && !completedRefund))) {
+            ambiguous = true;
+        }
+    }
+    const separateDebitForReversal = sentences.some(({ text }) => !REFUND_SIDE_NOTE_WORD_RE.test(text) &&
+        !REVERSAL_CREDIT_PHRASE_RE.test(text) && REFUND_SIDE_NOTE_DEBIT_RE.test(text) && !REFUND_SIDE_NOTE_RETURNED_RE.test(text) &&
+        refundAmounts(text).length > 0);
+    for (const { start: at, text } of separateDebitForReversal ? sentences : []) {
+        const word = REVERSAL_SIDE_NOTE_WORD_RE.exec(text);
+        if (!word || REFUND_SIDE_NOTE_WORD_RE.test(text) || refundAmounts(text).length > 0)
+            continue;
+        if (governsRefundCredit(text.slice(0, word.index)) || REFUND_SIDE_NOTE_NOT_SETTLED_RE.test(text) ||
+            REVERSAL_SIDE_NOTE_IN_PROCESS_RE.test(text)) {
+            out = out.slice(0, at) + ' '.repeat(text.length) + out.slice(at + text.length);
+        }
+    }
+    return { body: out, ambiguous };
+}
+function refundSideNoteVerdict(source) {
+    const notes = refundSideNotes(source);
+    return notes.ambiguous ? 'ambiguous' : notes.body !== source ? 'side-note' : 'none';
+}
+const EN_CREDIT_WORDS = {
+    verb: /\b(?:credit(?:ed|ing)?|refund(?:ed|ing)?|revers(?:ed|e|ing)|return(?:ed|ing)?|deposit(?:ed|ing)?|process(?:ed|ing)?)\b/gi,
+    baseNeedsModal: /^(?:credit|refund|reverse|return|deposit|process)$/i,
+    modalBefore: /\b(?:will|shall|would|can|could|to|did\s+not|does\s+not|do\s+not|didn['’]t|doesn['’]t|don['’]t|won['’]t)\s+(?:(?:not|soon|shortly)\s+)?$/i,
+    determinerBefore: /(?:\b(?:the|a|an|your|my|our|their|his|her|its|this|that|any|no|non)[\s-]+|\(\s*)$/i,
+    nounAfter: /^\s+(?:cheques?|checks?|charges?|fees?|items?|goods|orders?|payments?|transactions?|amounts?|mails?|cards?|limits?|balances?)\b/i,
+    coordinated: /\b(?:credit|refund|revers|return|deposit|process)\w*\s+and\s+$/i,
+    conditional: /(?:^|[^\p{L}])(?:[Ii]f|[Oo]nce|[Ww]hen(?:ever)?|[Aa]fter|[Uu]ntil|[Uu]nless|[Ww]hether|[Aa]s\s+soon\s+as)(?![\p{L}])/gu,
+    negatedBefore: /(?:\b(?:has|have|had|was|were|is|are|did|does|do|will|would|could|can|shall)\s+(?:not|never)|\b(?:hasn|haven|hadn|wasn|weren|isn|aren|didn|doesn|don|won|wouldn|couldn|can)['’]t|\byet\s+to\s+be|\bnot\s+(?:yet\s+)?been|\bnever\s+been)\s+(?:(?:yet|been|be|successfully|fully|now)\s+){0,3}$/i,
+    pendingBefore: /\b(?:will|shall|would|may|might|can|could|should|must|is\s+going\s+to|are\s+going\s+to)\s+(?:(?:be|soon|shortly|now|then)\s+){0,2}$|\b(?:is|are|am)\s+(?:currently\s+|now\s+)?being\s+$/i,
+    progressiveBefore: /\b(?:is|are|am|be)\s+(?:(?:currently|now)\s+)?$/i,
+    destination: /\b(?:back\s+)?(?:to|into|onto)\s+[^.,;\n]{0,60}/i,
+    notARefundCredit: /\b(?:cash\s*back|rewards?|points|miles|bonus)\b/i,
+};
+const EN_PROCESSED_REFUND_CONTEXT_RE = /\b(?:refund\w*|revers\w*|return\w*|charge\s*back\w*)\b/i;
+const EN_PROCESSED_DESTINATION_RE = /^\s+(?:(?:and\s+\w+\s+)?(?:back\s+)?(?:to|into|onto)\b)/i;
+const EN_INSTRUMENT_NUMBER_RE = /\b(?:card|account|a\/c|acct)\.?\s*(?:(?:ending(?:\s+(?:in|with))?|no\.?|number|#)\s*:?\s*)?(?:[xX*•·]+\s*\d{4,}|\d{4,})\b/i;
+const EN_BALANCE_LINE_RE = /\b(?:avl\.?|avail(?:able|\.)?)\s+(?:cr\.?\s+|credit\s+)?(?:bal(?:ance)?|limit)\b|\bbalance\s+(?:is|:)/i;
+const EN_PROCESSED_NOT_YET_RE = /\b(?:will|shall|should)\s+(?:be\s+)?(?:reflect(?:ed)?|appear(?:ed)?|show(?:n)?|credited|available|visible|posted)\b|\bmay\s+take\s+(?:up\s+to\s+)?\d+(?:\s*[-–]\s*\d+)?\s+(?:working\s+|business\s+)?days?\b|\btakes?\s+(?:up\s+to\s+)?\d+(?:\s*[-–]\s*\d+)?\s+(?:working\s+|business\s+)?days?\s+to\s+(?:reflect|appear|show)\b/i;
+const EN_MAY_TAKE_DAYS_RE = /\bmay\s+take\b/i;
+const EN_NEW_CLAUSE_RE = /(?:\b(?:and|but|while|whereas)\s+(?:the|this|that|your|a|an|it|its|our)\b|;)/i;
+const EN_NEW_COMPLETED_CREDIT_RE = /\b(?:and|but)\s+(?:(?:was|were|has\s+been|have\s+been|had\s+been)\s+(?:(?:now|then|also|successfully)\s+)?)$/i;
+const EN_CREDIT_IN_RE = /^(?:credited|refunded|deposited|returned)$/i;
+const EN_CREDIT_REASON_RE = /\bfor\s+(?:(?:the|your|a|an)\s+)?(?:reversed|cancell?ed)\s+(?:purchases?|transactions?|payments?|charges?|orders?|debits?)\b/gi;
+function enCreditClauses(sentence, debitBeside = false) {
+    if (EN_CREDIT_WORDS.notARefundCredit.test(sentence))
+        return [];
+    const words = EN_CREDIT_WORDS.verb;
+    words.lastIndex = 0;
+    const clauses = [];
+    for (let match = words.exec(sentence); match; match = words.exec(sentence)) {
+        const at = match.index;
+        const lead = sentence.slice(0, at);
+        const word = match[0];
+        const clause = clauses[clauses.length - 1];
+        if (EN_CREDIT_WORDS.baseNeedsModal.test(word) && !EN_CREDIT_WORDS.modalBefore.test(lead) &&
+            !(clause && EN_CREDIT_WORDS.coordinated.test(lead)))
+            continue;
+        if (/ing$/i.test(word) && !EN_CREDIT_WORDS.progressiveBefore.test(lead) && !EN_CREDIT_WORDS.pendingBefore.test(lead) &&
+            !(clause && EN_CREDIT_WORDS.coordinated.test(lead)))
+            continue;
+        if (EN_CREDIT_WORDS.determinerBefore.test(lead) || EN_CREDIT_WORDS.nounAfter.test(sentence.slice(at + word.length)))
+            continue;
+        if (/^process/i.test(word) && !(clause && EN_CREDIT_WORDS.coordinated.test(lead)) &&
+            !EN_PROCESSED_REFUND_CONTEXT_RE.test(sentence) &&
+            !(debitBeside && EN_PROCESSED_DESTINATION_RE.test(sentence.slice(at + word.length))))
+            continue;
+        if (clause) {
+            if (EN_CREDIT_WORDS.coordinated.test(lead) && at - clause.end <= 6) {
+                clause.verbs.push(word.toLowerCase());
+                clause.end = at + word.length;
+                continue;
+            }
+            const between = sentence.slice(clause.end, at);
+            const completedCredit = EN_CREDIT_IN_RE.test(word) && EN_NEW_COMPLETED_CREDIT_RE.test(between);
+            const joint = EN_NEW_CLAUSE_RE.exec(between);
+            if (!completedCredit && (!joint || REFUND_CREDIT_TAKEN_BACK_RE.test(sentence.slice(clause.end + joint.index))))
+                break;
+        }
+        clauses.push({ verbs: [word.toLowerCase()], start: at, end: at + word.length });
+    }
+    return clauses;
+}
+const EN_TEMPORAL_LEADER_RE = /^(?:once|when(?:ever)?|after|as\s+soon\s+as)$/i;
+const EN_EVENT_NOUN_PHRASE_RE = /^\s+(?:(?:your|the|this|our)\s+)?(?:(?:order|purchase|item|transaction|booking)\s+)?(?:cancell?ation|return|refund\s+request|verification|review|investigation|dispute(?:\s+resolution)?|chargeback|reversal)\s*,?\s*$/i;
+const EN_PAST_EVENT_CLAUSE_RE = /^\s+(?:your|the|this)\s+(?:order|purchase|item|transaction|booking|dispute|request|claim|return)\s+(?:was|were|has\s+been|had\s+been)\s+(?:cancell?ed|returned|resolved|approved|reviewed|reversed|completed|received|processed)\s*,?\s*$/i;
+const EN_PASSIVE_AMOUNT_RE = /(?:\b[A-Z]{3}|\bDhs?\.?)\s*\d[\d,]*(?:\.\d+)?|\d[\d,]*(?:\.\d+)?\s*(?:[A-Z]{3}|Dhs?)\b/;
+const EN_COMPLETED_AUXILIARY_RE = /^\s*(?:(?:has|have|had)\s+(?:now\s+)?been|was|were)\s+(?:successfully\s+)?$/i;
+const EN_LOWERCASE_MODAL_RE = /\b(?:will|can|may|shall|should|would|could|must)\b|['’]ll\b/;
+const isAllCapsSentence = (sentence) => /[A-Z]/.test(sentence) && !/[a-z]/.test(sentence);
+const EN_CAPS_LEADER_RE = /(?:^\s*|[,;:]\s*)(?:IF|ONCE|WHEN(?:EVER)?|AFTER|UNTIL|UNLESS|WHETHER|AS\s+SOON\s+AS)(?![A-Za-z])/g;
+const EN_CAPS_MODAL_RE = /(?<!\b(?:BY|FROM|AT)\s+)\b(?:WILL|CAN|SHALL|SHOULD|WOULD|COULD|MUST)\b|['’]LL\b|\bMAY\s+(?:NOT\s+|ALSO\s+)?(?:BE|HAVE|TAKE|REFLECT|APPEAR|SHOW|RECEIVE|CHECK|CONTACT|CALL|VIEW|USE|NEED|GET|SEE)\b/;
+const EN_CONDITION_VERB = String.raw `(?:(?:it|this|they|the\s+\w+)\s+(?:is|are|has\s+been|gets?)\s+)?(?:approved|authori[sz]ed|verified|confirmed|cleared|accepted|validated)\b`;
+const EN_TRAILING_CONDITION_RE = new RegExp(String.raw `\b(?:once|when|provided(?:\s+that)?)\s+` + EN_CONDITION_VERB +
+    String.raw `|\bif\s+` + EN_CONDITION_VERB + String.raw `(?!\s+by\s+you\b,?\s+(?:(?:please|kindly)\s+)?(?:ignore|disregard)\b)` +
+    String.raw `|\b(?:upon|subject\s+to)\s+(?:(?:the|your|merchant|bank)\s+)?(?:approval|verification|confirmation|clearance|validation)\b`, 'i');
+const EN_TIME_WINDOW_RE = /\bwithin\s+(?:the\s+next\s+)?\d+(?:\s*[-–]\s*\d+)?\s+(?:working\s+|business\s+|banking\s+)?(?:days?|hours?|weeks?)\b/i;
+const EN_DISPLAY_VERB_RE = /\b(?:will|should|may|can|might|could|would)\s+(?:only\s+|also\s+)?(?:reflect|appear|show|be\s+(?:visible|available|reflected|shown|displayed))\b/i;
+const EN_REFUND_WORD_RE = /\b(?:refund\w*|charge\s*back\w*)\b/i;
+const EN_OTHER_SUBJECT_CLAUSE_RE = new RegExp(String.raw `(?:[;,]|\band\b)\s*(?:and\s+)?(?:your|the)\s+` +
+    String.raw `(?:(?:new|replacement|physical|virtual|supplementary)\s+)?(?:card|pin|otp|password|passcode|profile|kyc|documents?|` +
+    String.raw `cheque\s*book|statement\s+copy|address|e-?mail|mobile\s+number)\s+(?:will|shall|would|can|may|is|are|has)\b`, 'gi');
+const EN_MONEY_WORD_RE = new RegExp(String.raw `\b(?:credit\w*|refund\w*|deposit\w*|revers\w*|return\w*|process\w*|charge\s*back\w*|` +
+    String.raw `amount|funds?|money|balance|payment|transaction|dispute|claim|request|case|complaint|cheque|sum|transfer|hold|lien|` +
+    String.raw `releas\w*|post\w*|clear\w*|it|its|them|this|these|those|same)\b`, 'i');
+function creditOwnTail(tail) {
+    for (const clause of tail.matchAll(EN_OTHER_SUBJECT_CLAUSE_RE)) {
+        if (!EN_MONEY_WORD_RE.test(tail.slice(clause.index)))
+            return tail.slice(0, clause.index);
+    }
+    return tail;
+}
+function leaderGovernsCredit(sentence, leader, clause) {
+    const word = leader[0].replace(/^[^\p{L}]+/u, '');
+    const leaderEnd = leader.index + leader[0].length;
+    if (!EN_TEMPORAL_LEADER_RE.test(word))
+        return true;
+    if (/^once$/i.test(word) && /^\s+(?:again|more)\b/i.test(sentence.slice(leaderEnd)))
+        return false;
+    if ((isAllCapsSentence(sentence) ? EN_CAPS_MODAL_RE : EN_LOWERCASE_MODAL_RE).test(sentence.slice(clause.end)))
+        return true;
+    const stretch = sentence.slice(leaderEnd, clause.start);
+    const amount = EN_PASSIVE_AMOUNT_RE.exec(stretch);
+    if (!amount)
+        return true;
+    const event = stretch.slice(0, amount.index);
+    if (!EN_EVENT_NOUN_PHRASE_RE.test(event) && !EN_PAST_EVENT_CLAUSE_RE.test(event))
+        return true;
+    const auxiliary = stretch.slice(amount.index + amount[0].length);
+    const telegraphic = auxiliary.trim() === '' && /ed$/i.test(clause.verbs[0]);
+    return !(telegraphic || EN_COMPLETED_AUXILIARY_RE.test(auxiliary));
+}
+const AR_NB = `(?<![${AR_LETTER}])`;
+const AR_NA = `(?![${AR_LETTER}])`;
+const AR_CREDIT_NOUN_RE = new RegExp(`${AR_NB}(و|ب)?(?:ال)?(استرداد|استرجاع|ايداع|ارجاع|اعاده|عكس|معالجه|رد(?=\\s+(?:ال)?مبلغ))${AR_NA}`, 'g');
+const AR_NOT_A_MOVEMENT_BEFORE_RE = new RegExp(`${AR_NB}(?:طلب|طلبك|رسوم|سياسه|مبلغ)\\s+$`);
+const AR_GOODS_RETURN_AFTER_RE = new RegExp(`^\\s+(?:ال)?(?:منتج|سلعه|بضاعه|طلب|مشتريات)`);
+const AR_NOT_A_REFUND_CREDIT_RE = new RegExp(`${AR_NB}[كبلو]?(?:ال)?(?:استرداد|استرجاع)\\s+(?:ال)?نقدي${AR_NA}|${AR_NB}كاش\\s*باك${AR_NA}|${AR_NB}[كبلو]?(?:ال)?(?:نقاط|مكافا[ته]|اميال)${AR_NA}`);
+const AR_MERCHANT_ASPECT_RE = new RegExp(`${AR_NB}(?:(لم|لن|لا)\\s+(?:يقم|يقوم|تقم|تقوم|نقم|نقوم)|(سي|سوف\\s+ي|ست|سوف\\s+ت|سن|سوف\\s+ن)قوم|(ي|ت|ن)قوم|(قام|قامت|قمنا))${AR_NA}(?:\\s+[^\\s,;\\n]+){0,4}\\s+$`);
+const AR_NEGATED_BEFORE_RE = new RegExp(`${AR_NB}(?:لم|لن|لا)\\s+(?:يتم|تتم)(?:\\s+بعد)?\\s+$`);
+const AR_PENDING_BEFORE_RE = new RegExp(`${AR_NB}(?:سيتم|ستتم|سوف\\s+(?:يتم|تتم)|جاري|جار|قيد|يتم|تتم|من\\s+المتوقع(?:\\s+ان)?(?:\\s+(?:يتم|تتم))?)\\s+$`);
+const AR_SETTLED_BEFORE_RE = new RegExp(`${AR_NB}(?:قد\\s+)?(?:تم|تمت)\\s+$`);
+const AR_CONDITIONAL_RE = new RegExp(`${AR_NB}(?:و?(?:اذا|عندما|عند|بمجرد(?:\\s+ان)?|بعد\\s+ان|في\\s+حال(?:ه)?|حال(?:ه)?|متي|حينما|حين)|` +
+    `(?<=(?:^|[,:])\\s*)و?ان(?=\\s+(?:قد\\s+)?(?:تم|يتم|كان)))${AR_NA}`, 'g');
+const AR_LEADER_BEFORE_RE = new RegExp(`${AR_NB}و?(?:اذا|عندما|عند|بمجرد(?:\\s+ان)?|بعد\\s+ان|في\\s+حال(?:ه)?|حال(?:ه)?|متي|حينما|حين|فور|لدي|بعد)\\s+$`);
+const AR_TEMPORAL_LEADER_RE = new RegExp(`^و?(?:عندما|عند|بمجرد(?:\\s+ان)?|بعد\\s+ان|متي|حينما|حين)$`);
+const AR_FUTURE_MAIN_CLAUSE_RE = new RegExp(`${AR_NB}(?:س[يتن][${AR_LETTER}]{2,}|سوف\\s+[${AR_LETTER}]+|يرجي|الرجاء)`);
+const AR_EVENT_OBJECT = `(?:\\s+(?:ال)?(?:طلب|طلبك|عمليتك|عمليه|معامله|شراء|منتج|سلعه|بضاعه|مشتريات))?`;
+const AR_EVENT_BEFORE_CREDIT_RE = new RegExp(`^\\s*(?:(?:ال)?(?:الغاء|ارجاع|استرجاع|مراجعه|تحقق|اعتراض|نزاع)${AR_EVENT_OBJECT}|` +
+    `(?:قد\\s+)?(?:تم|تمت)\\s+(?:ال)?(?:الغاء|ارجاع|استرجاع|مراجعه)${AR_EVENT_OBJECT})\\s+و?(?:قد\\s+)?(?:تم|تمت)\\s*$`);
+const AR_THIRD_PARTY_DESTINATION_RE = new RegExp(`${AR_NB}(?:الي|لصالح)\\s+(?:ال)?(?:تاجر|مستفيد|بائع|متجر)${AR_NA}`);
+const AR_PAID_TO_BEFORE_RE = new RegExp(`${AR_NB}(?:ال)?مدفوع(?:ه)?\\s+$`);
+const AR_OWN_DESTINATION_RE = new RegExp(`${AR_NB}(?:الي|في|ل)\\s*(?:بطاقتك|حسابك)${AR_NA}`);
+const AR_DEBIT_IN_ERROR_RE = new RegExp(`(?:خصم[${AR_LETTER}]*|الخصم|المدفوع[${AR_LETTER}]*)(?:\\s+[^\\s.]+){0,3}?\\s+(?:عن\\s+طريق\\s+(?:ال)?خطا|بالخطا)${AR_NA}`, 'g');
+const AR_TAKEN_BACK_LATER_RE = new RegExp(`${AR_NB}و?(?:تم|قد\\s+تم)\\s+(?:عكس|الغاو|الغا|سحب|استرجاع)(?:ه|ها)${AR_NA}|${AR_NB}و?(?:تم|قد\\s+تم)\\s+(?:عكس|الغاء|سحب)\\s+(?:هذا\\s+)?(?:ال)?(?:مبلغ|ايداع|استرداد)${AR_NA}`);
+const AR_TAKEN_BACK_RE = new RegExp(`${AR_NB}و?(?:تم|قد\\s+تم)\\s+(?:عكس|الغاو|الغا|سحب|استرجاع)(?:ه|ها)${AR_NA}|${AR_NB}عن\\s+طريق\\s+(?:ال)?خطا${AR_NA}|${AR_NB}بالخطا${AR_NA}` +
+    `|${AR_NB}بانتظار\\s+(?:ال)?موافقه${AR_NA}|${AR_NB}قيد\\s+(?:ال)?(?:مراجعه|تحقيق)${AR_NA}|${AR_NB}(?:ب?صوره\\s+)?موقت(?:ه|ا)?${AR_NA}`);
+const AR_HEDGED_SENTENCE_RE = new RegExp(`${AR_NB}(?:اذا|في\\s+حال|يمكن|ربما|يحتمل)${AR_NA}|${AR_NB}قد\\s+[يت]`);
+const AR_INSTRUMENT_NUMBER_RE = new RegExp(`(?:بطاق|حساب)[${AR_LETTER}]*\\s+(?:(?:ال)?منتهي(?:ه)?\\s+(?:ب\\s*ـ*\\s*)?|رقم\\s+)(?:[xX*•·]+\\s*)?\\d{4,}`);
+const AR_BALANCE_LINE_RE = new RegExp(`${AR_NB}(?:ال)?(?:رصيد|حد)\\s+(?:ال)?متاح${AR_NA}`);
+const AR_TRAILING_CONDITION_RE = new RegExp(`${AR_NB}(?:في\\s+حال|حال|عند|بشرط|شرط)\\s+(?:ال)?(?:موافقه|اعتماد|تحقق|تاكيد|قبول)${AR_NA}`);
+const AR_TIME_WINDOW_RE = new RegExp(`${AR_NB}خلال\\s+\\d+(?:\\s*[-–]\\s*\\d+)?\\s+(?:ايام|يوم|ساعه|ساعات|اسابيع|اسبوع)${AR_NA}`);
+const AR_DISPLAY_VERB_RE = new RegExp(`${AR_NB}و?(?:سيظهر|ستظهر|سينعكس|ستنعكس|يظهر|تظهر|سوف\\s+(?:يظهر|تظهر|ينعكس|تنعكس))${AR_NA}`);
+const AR_INFORM_BEFORE_RE = new RegExp(`${AR_NB}(?:اعلام|ابلاغ|اخبار|افاده|نفيد|نحيط|نعلم|نخبر|نوكد|علما)[${AR_LETTER}\\u064B-\\u0652]*\\s*[,:]?\\s*$`);
+const AR_ANSWER_RE = new RegExp(`${AR_NB}ف?(?:س[يتن][${AR_LETTER}]{2,}|سوف\\s+[${AR_LETTER}]+|يرجي|الرجاء|يمكنك|بامكانك|لا\\s+داعي)|` +
+    `${AR_NB}ف?(?:نرجو|اعتبر)${AR_NA}|${AR_NB}ف(?:تحقق|اتصل|تجاهل|راجع|تواصل|لا)${AR_NA}`);
+const AR_NEXT_ANSWER_RE = new RegExp(`^\\s*(?:ف[${AR_LETTER}]|(?:ستصلك|سيصلك|ستتلقي|سوف\\s+(?:تصلك|يصلك|تتلقي)|سيتم\\s+(?:اشعارك|ابلاغك|اعلامك))${AR_NA})`);
+const AR_NEXT_COURTESY_CONDITION_RE = new RegExp(`^\\s*في\\s+حال(?:ه)?\\s+(?:وجود|كان\\s+لديك|لديك|لم\\s+(?:تتعرف|تقم|تكن))${AR_NA}`);
+const AR_NEXT_COURTESY_NOUN_RE = new RegExp(`^\\s*(?:فريق|فريقنا|فرع|فرعنا|فروع|فروعنا)${AR_NA}`);
+const AR_NEXT_NOUN_ANSWER_RE = new RegExp(`${AR_NB}[بلو]?(?:[يتن]رجو|تجاهل|اعتبر)${AR_NA}|` +
+    `${AR_NB}(?:لا|لن)\\s+(?:يطلب|يتطلب|يلزم)${AR_NA}(?!\\s+منك\\s+(?:ابدا\\s+)?(?:رمز|كلمه|بيانات|معلومات))`);
+const AR_NEXT_CONDITION_ANSWER_RE = new RegExp(`${AR_NB}ف(?:يرجي|لا(?!\\s+تتردد)|سوف|س[يتن]|يمكنك|تجاهل|اعتبر|نرجو)`);
+const AR_NEXT_COURTESY_INQUIRY_RE = new RegExp(`^\\s*في\\s+حال(?:ه)?\\s+(?:(?:وجود|كان\\s+لديك|لديك)\\s+(?:اي(?:ه)?\\s+)?(?:استفسار|سوال|سؤال|ملاحظ)[${AR_LETTER}]*|` +
+    `لم\\s+(?:تتعرف\\s+علي|تقم\\s+ب)\\s*(?:هذه|هذا)?\\s*(?:ال)?(?:عمليه|معامله|حركه|دفعه|طلب)${AR_NA})`);
+function arNextSentenceAnswers(rawNext) {
+    const next = rawNext.replace(/[\u064B-\u0652]/g, '');
+    if (AR_NEXT_COURTESY_INQUIRY_RE.test(next))
+        return false;
+    if (AR_NEXT_COURTESY_CONDITION_RE.test(next) && !AR_NEXT_CONDITION_ANSWER_RE.test(next))
+        return false;
+    if (AR_NEXT_COURTESY_NOUN_RE.test(next) && !AR_ANSWER_RE.test(next) && !AR_NEXT_NOUN_ANSWER_RE.test(next))
+        return false;
+    return AR_NEXT_ANSWER_RE.test(next);
+}
+const AR_PROCESSED_NOT_YET_RE = new RegExp(`${AR_NB}(?:سيظهر|ستظهر|سينعكس|ستنعكس|سيضاف|ستضاف|سيتم\\s+(?:ايداع|اضافه|اظهار))${AR_NA}|${AR_NB}قد\\s+يستغرق[^.\\n]{0,40}?(?:يوم|ايام)${AR_NA}`);
+const AR_VERB_GLOSS = {
+    استرداد: 'refunded', استرجاع: 'refunded', ايداع: 'credited', ارجاع: 'returned', اعاده: 'returned', عكس: 'reversed', معالجه: 'processed',
+    رد: 'refunded',
+};
+function arCreditClauses(sentence, debitBeside = false) {
+    if (AR_NOT_A_REFUND_CREDIT_RE.test(sentence))
+        return [];
+    const clauses = [];
+    const refundObject = new Set();
+    AR_CREDIT_NOUN_RE.lastIndex = 0;
+    for (let match = AR_CREDIT_NOUN_RE.exec(sentence); match; match = AR_CREDIT_NOUN_RE.exec(sentence)) {
+        const [, prefix, noun] = match;
+        const at = match.index;
+        const lead = sentence.slice(0, at);
+        const clause = clauses[clauses.length - 1];
+        const verb = AR_VERB_GLOSS[noun];
+        if (clause && at - clause.end <= 2 && clause.verbs[clause.verbs.length - 1] === 'processed') {
+            if (prefix === 'و')
+                clause.verbs.push(verb);
+            else if (verb !== 'processed')
+                refundObject.add(clause);
+            clause.end = at + match[0].length;
+            continue;
+        }
+        if (AR_NOT_A_MOVEMENT_BEFORE_RE.test(lead))
+            continue;
+        if ((noun === 'ارجاع' || noun === 'استرجاع' || noun === 'اعاده') &&
+            AR_GOODS_RETURN_AFTER_RE.test(sentence.slice(at + match[0].length)))
+            continue;
+        let aspect = null;
+        if (prefix === 'ب') {
+            const merchant = AR_MERCHANT_ASPECT_RE.exec(lead);
+            if (merchant)
+                aspect = merchant[1] ? 'negated' : merchant[2] || merchant[3] ? 'pending' : 'settled';
+        }
+        else if (prefix !== 'و') {
+            if (AR_NEGATED_BEFORE_RE.test(lead))
+                aspect = 'negated';
+            else if (AR_SETTLED_BEFORE_RE.test(lead))
+                aspect = 'settled';
+            else if (AR_PENDING_BEFORE_RE.test(lead) || AR_LEADER_BEFORE_RE.test(lead))
+                aspect = 'pending';
+            else if (lead.trim() === '')
+                aspect = 'headline';
+        }
+        if (!aspect)
+            continue;
+        if (clause)
+            break;
+        clauses.push({ verbs: [verb], start: at, end: at + match[0].length, ar: aspect });
+    }
+    return clauses.filter((c) => debitBeside || refundObject.has(c) || !c.verbs.every((verb) => verb === 'processed'));
+}
+function arCreditSettlement(sentence, clause, rawAfter, raw) {
+    const after = foldOrthography(rawAfter);
+    const lead = sentence.slice(0, clause.start);
+    const next = after.split(REFUND_SENTENCE_BREAK_RE).find((text) => text.trim() !== '') ?? '';
+    const informedThat = (leader) => {
+        if (!/^و?ان$/.test(leader[0]) || raw === undefined || !AR_INFORM_BEFORE_RE.test(lead.slice(0, leader.index)))
+            return false;
+        const letter = raw[leader.index + leader[0].length - 2];
+        if (letter === 'أ')
+            return true;
+        if (letter !== 'ا')
+            return false;
+        return !AR_ANSWER_RE.test(sentence.slice(clause.end)) && !arNextSentenceAnswers(next);
+    };
+    const leaders = [...lead.matchAll(AR_CONDITIONAL_RE)].filter((leader) => !informedThat(leader));
+    const last = leaders[leaders.length - 1];
+    const betweenLeaderAndCredit = last ? lead.slice(last.index + last[0].length) : '';
+    if (last && !betweenLeaderAndCredit.includes(',') &&
+        (!AR_TEMPORAL_LEADER_RE.test(last[0]) || !AR_EVENT_BEFORE_CREDIT_RE.test(betweenLeaderAndCredit) ||
+            AR_FUTURE_MAIN_CLAUSE_RE.test(sentence.slice(clause.end)) || clause.ar !== 'settled')) {
+        return { verdict: 'not-settled', reason: 'conditional' };
+    }
+    if (clause.ar === 'negated')
+        return { verdict: 'not-settled', reason: 'negated' };
+    if (clause.ar === 'pending')
+        return { verdict: 'not-settled', reason: 'pending' };
+    const tail = sentence.slice(clause.end);
+    const thirdParty = AR_THIRD_PARTY_DESTINATION_RE.exec(tail);
+    if (thirdParty && !AR_PAID_TO_BEFORE_RE.test(tail.slice(0, thirdParty.index)) &&
+        !AR_OWN_DESTINATION_RE.test(tail.slice(thirdParty.index + thirdParty[0].length)))
+        return { verdict: 'refused', reason: 'third-party' };
+    if (AR_TAKEN_BACK_RE.test(tail.replace(AR_DEBIT_IN_ERROR_RE, ' ')) ||
+        after.split(REFUND_SENTENCE_BREAK_RE).some((text) => !AR_HEDGED_SENTENCE_RE.test(text) && AR_TAKEN_BACK_LATER_RE.test(text))) {
+        return { verdict: 'refused', reason: 'taken-back' };
+    }
+    if (AR_TRAILING_CONDITION_RE.test(tail))
+        return { verdict: 'not-settled', reason: 'conditional' };
+    const windowMatch = AR_TIME_WINDOW_RE.exec(tail);
+    if (windowMatch && !AR_DISPLAY_VERB_RE.test(tail.slice(0, windowMatch.index)) &&
+        clause.verbs.some((verb) => verb === 'refunded' || verb === 'returned' || verb === 'reversed')) {
+        return { verdict: 'not-settled', reason: 'pending' };
+    }
+    if (clause.verbs.every((verb) => verb === 'processed')) {
+        if ([tail, ...after.split(REFUND_SENTENCE_BREAK_RE)].some((text) => AR_PROCESSED_NOT_YET_RE.test(text))) {
+            return { verdict: 'not-settled', reason: 'pending' };
+        }
+        if (AR_INSTRUMENT_NUMBER_RE.test(sentence) || AR_BALANCE_LINE_RE.test(tail + after))
+            return { verdict: 'settled' };
+        return { verdict: 'unknown', reason: 'processed-only' };
+    }
+    return { verdict: 'settled' };
+}
+function creditSettlement(sentence, clause, after = '', raw) {
+    if (clause.ar)
+        return arCreditSettlement(sentence, clause, after, raw);
+    const lead = sentence.slice(0, clause.start).replace(EN_CREDIT_WORDS.coordinated, '');
+    const leaders = [...lead.matchAll(EN_CREDIT_WORDS.conditional)];
+    if (isAllCapsSentence(sentence))
+        leaders.push(...lead.matchAll(EN_CAPS_LEADER_RE));
+    leaders.sort((a, b) => a.index - b.index);
+    const last = leaders[leaders.length - 1];
+    if (last && !lead.slice(last.index + last[0].length).includes(',') && leaderGovernsCredit(sentence, last, clause)) {
+        return { verdict: 'not-settled', reason: 'conditional' };
+    }
+    if (EN_CREDIT_WORDS.negatedBefore.test(lead))
+        return { verdict: 'not-settled', reason: 'negated' };
+    const first = clause.verbs[0];
+    if (EN_CREDIT_WORDS.pendingBefore.test(lead) || (/ing$/.test(first) && EN_CREDIT_WORDS.progressiveBefore.test(lead)) ||
+        !/ed$/.test(first))
+        return { verdict: 'not-settled', reason: 'pending' };
+    const tail = sentence.slice(clause.end);
+    const destination = EN_CREDIT_WORDS.destination.exec(tail);
+    if (destination && REFUND_THIRD_PARTY_DESTINATION_RE.test(` ${destination[0]}`))
+        return { verdict: 'refused', reason: 'third-party' };
+    if (refundCreditNotFinal((tail + after).replace(EN_CREDIT_REASON_RE, ' ')))
+        return { verdict: 'refused', reason: 'taken-back' };
+    const ownTail = creditOwnTail(tail);
+    if (EN_TRAILING_CONDITION_RE.test(ownTail))
+        return { verdict: 'not-settled', reason: 'conditional' };
+    const windowMatch = EN_TIME_WINDOW_RE.exec(ownTail);
+    if (windowMatch && !EN_DISPLAY_VERB_RE.test(ownTail.slice(0, windowMatch.index)) &&
+        (clause.verbs.some((verb) => /^(?:refund|revers|return)/i.test(verb)) || EN_REFUND_WORD_RE.test(sentence))) {
+        return { verdict: 'not-settled', reason: 'pending' };
+    }
+    if (clause.verbs.every((verb) => verb.startsWith('process'))) {
+        const later = [tail, ...after.split(REFUND_SENTENCE_BREAK_RE)];
+        if (later.some((text) => EN_PROCESSED_NOT_YET_RE.test(text) && (EN_MAY_TAKE_DAYS_RE.test(text) || !REFUND_HEDGED_SENTENCE_RE.test(text)))) {
+            return { verdict: 'not-settled', reason: 'pending' };
+        }
+        const destination = (tail + after).split(/[.!?](?=\s|$)/)[0];
+        if (EN_INSTRUMENT_NUMBER_RE.test(sentence) || EN_INSTRUMENT_NUMBER_RE.test(destination) || EN_BALANCE_LINE_RE.test(tail + after)) {
+            return { verdict: 'settled' };
+        }
+        return { verdict: 'unknown', reason: 'processed-only' };
+    }
+    return { verdict: 'settled' };
+}
+const CREDIT_SETTLEMENT_DEBIT_RE = new RegExp(String.raw `\b(?:debited|charged|deducted|spent|withdrawn|paid|purchased?)\b|${AR_NB}و?(?:قد\s+)?تم\s+(?:ال)?(?:خصم|شراء|سحب|دفع|سداد)${AR_NA}` +
+    String.raw `|${AR_NB}عمليه\s+شراء${AR_NA}|${AR_NB}شراء\s+(?:بمبلغ|بقيمه)${AR_NA}|${AR_NB}استخدام\s+بطاقتك${AR_NA}`, 'i');
+const AR_CREDIT_AMOUNT_RE = /(\d[\d,]*(?:\.\d+)?)\s*(?:درهم|دراهم|ريال|ر\.س)|(?:درهم|دراهم|ريال)\s*(\d[\d,]*(?:\.\d+)?)/g;
+const creditAmounts = (text) => [...refundAmounts(text),
+    ...[...text.matchAll(AR_CREDIT_AMOUNT_RE)].map((match) => Number((match[1] ?? match[2]).replace(/,/g, '')))];
+const BALANCE_SEGMENT_RE = new RegExp(String.raw `\b(?:avl\.?|avail(?:able|\.)?)\s+(?:cr\.?\s+|credit\s+)?(?:bal(?:ance)?|limit)\b[^;\n]*|\bbalance\s+(?:is|:)[^;\n]*|` +
+    `${AR_NB}(?:ال)?(?:رصيد|حد)\\s+(?:ال)?متاح${AR_NA}[^;\\n]*`, 'gi');
+const noteAmounts = (text) => creditAmounts(text.replace(BALANCE_SEGMENT_RE, ' '));
+function sentenceSettlement(s, after) {
+    const verdicts = s.clauses.map((clause) => creditSettlement(s.text, clause, after, s.raw));
+    return verdicts.find((v) => v.verdict === 'settled') ?? verdicts.find((v) => v.verdict === 'refused' || v.verdict === 'unknown') ??
+        verdicts[0];
+}
+function settlementSentences(original) {
+    const body = foldOrthography(original);
+    const spans = [];
+    let start = 0;
+    for (const end of [...[...body.matchAll(REFUND_SENTENCE_BREAK_RE)].map((match) => match.index + match[0].length), body.length]) {
+        if (end > start)
+            spans.push({ start, text: body.slice(start, end), raw: original.slice(start, end) });
+        start = Math.max(start, end);
+    }
+    const debitBeside = spans.some(({ text }) => CREDIT_SETTLEMENT_DEBIT_RE.test(text) && creditAmounts(text).length > 0);
+    return spans.map((span) => {
+        const ar = ARABIC_RE.test(span.text) ? arCreditClauses(span.text, debitBeside) : [];
+        return { ...span, clauses: ar.length ? ar : enCreditClauses(span.text, debitBeside) };
+    });
+}
+function hasOnlyUnsettledCredit(message) {
+    const sentences = settlementSentences(message);
+    if (sentences.some((s) => s.clauses.length === 0 && CREDIT_SETTLEMENT_DEBIT_RE.test(s.text) && creditAmounts(s.text).length > 0))
+        return false;
+    const verdicts = sentences.filter((s) => s.clauses.length > 0 && creditAmounts(s.text).length > 0)
+        .map((s) => sentenceSettlement(s, message.slice(s.start + s.text.length)));
+    return verdicts.length > 0 && verdicts.every((v) => v.verdict !== 'settled');
+}
+function besideDebit(message, sentences) {
+    const credits = sentences.filter((s) => s.clauses.length > 0);
+    const debits = sentences.filter((s) => s.clauses.length === 0 && CREDIT_SETTLEMENT_DEBIT_RE.test(s.text) && creditAmounts(s.text).length > 0);
+    if (credits.length === 0 || debits.length === 0)
+        return { kind: 'no-debit' };
+    const debitAmounts = debits.flatMap((s) => creditAmounts(s.text));
+    const blank = (text, s) => text.slice(0, s.start) + ' '.repeat(s.text.length) + text.slice(s.start + s.text.length);
+    let blanked = message;
+    let settled = false;
+    for (const s of credits) {
+        if (noteAmounts(s.text).some((amount) => !debitAmounts.includes(amount)))
+            return { kind: 'refuse' };
+        const verdict = sentenceSettlement(s, message.slice(s.start + s.text.length));
+        if (verdict.verdict === 'settled')
+            settled = true;
+        else if (verdict.verdict === 'not-settled')
+            blanked = blank(blanked, s);
+        else
+            return { kind: 'refuse' };
+    }
+    if (settled || blanked === message)
+        return { kind: 'keep' };
+    const firstBlank = credits.find((s) => blanked.slice(s.start, s.start + s.text.length).trim() === '');
+    for (const s of sentences) {
+        if (s.start > firstBlank.start && s.clauses.length === 0 && creditAmounts(s.text).length === 0 &&
+            (EN_PROCESSED_NOT_YET_RE.test(s.text) || AR_PROCESSED_NOT_YET_RE.test(s.text))) {
+            blanked = blank(blanked, s);
+        }
+    }
+    return { kind: 'blank', text: blanked };
+}
+function creditNoteBesideDebit(message) {
+    const kind = besideDebit(message, settlementSentences(message)).kind;
+    return kind === 'no-debit' ? 'none' : kind;
+}
+function vetoUnsettledCredit(message, parsed, reparse) {
+    if (parsed.kind !== 'transaction')
+        return parsed;
+    const sentences = settlementSentences(message);
+    const credits = sentences.filter((s) => s.clauses.length > 0);
+    if (credits.length === 0)
+        return parsed;
+    const afterOf = (s) => message.slice(s.start + s.text.length);
+    const beside = besideDebit(message, sentences);
+    if (beside.kind === 'refuse')
+        return null;
+    if (beside.kind === 'keep')
+        return parsed;
+    if (beside.kind === 'blank') {
+        const again = reparse(beside.text);
+        return again && again.kind === 'transaction' && again.type === 'income' ? null : again;
+    }
+    const figures = [parsed.amountFils / 100, parsed.amountFils / 1000];
+    if (parsed.originalMinorUnits !== undefined && parsed.originalExponent !== undefined) {
+        figures.push(Number(parsed.originalMinorUnits) / 10 ** parsed.originalExponent);
+    }
+    const carrying = credits.filter((s) => creditAmounts(s.text).some((amount) => figures.includes(amount)));
+    const verdicts = carrying.map((s) => ({ s, verdict: sentenceSettlement(s, afterOf(s)) }));
+    if (verdicts.length === 0)
+        return parsed;
+    if (verdicts.some(({ verdict }) => verdict.verdict === 'settled'))
+        return parsed;
+    if (parsed.type === 'income')
+        return null;
+    if (sentences.some((s) => s.clauses.length === 0 && creditAmounts(s.text).some((amount) => figures.includes(amount))))
+        return parsed;
+    const refundVerbExpense = verdicts.every(({ s }) => !CREDIT_SETTLEMENT_DEBIT_RE.test(s.text) &&
+        !s.clauses.every((clause) => clause.verbs.every((verb) => verb.startsWith('process'))));
+    return refundVerbExpense ? null : parsed;
+}
 const MANDATE_LIFECYCLE_RE = /\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b(?:[^.]|\.\d){0,96}\b(?:will\s+(?:start|begin|commence|activate)|has\s+been\s+(?:created|registered|set\s*up|activated)|is\s+(?:now\s+)?active)\b|\b(?:created|registered|set\s*up|activated)\b(?:[^.]|\.\d){0,64}\b(?:direct debit|auto[ -]?pay|standing order|mandate)\b|تم\s+(?:تسجيل|انشاء|تفعيل)[^\n]{0,64}(?:امر\s+)?(?:خصم\s+(?:تلقايي|مباشر)|تعليمات\s+مستديمه)/iu;
 const CONDITIONAL_PAYOUT_RE = /\b(?:merchant|business|seller|vendor|restaurant|platform|marketplace|aggregator|acquirer|sales?|delivery|courier|rider|driver)\b(?:[^.]|\.\d){0,160}\b(?:when|once|if)\s+(?:you\s+)?(?:are\s+)?(?:eligible|qualif(?:y|ied))\b|\b(?:merchant|business|seller|vendor|restaurant|platform|marketplace|aggregator|acquirer|sales?|delivery|courier|rider|driver)\b(?:[^.]|\.\d){0,160}\b(?:after\s+(?:(?:your\s+)?registration|you\s+(?:register|sign\s+up|open\s+(?:an?\s+)?account)|opening\s+(?:an?\s+)?account)|upon\s+(?:registration|sign[ -]?up|account\s+opening))\b/iu;
 const CONDITIONAL_MOVEMENT_RE = /\b(?:salary|payroll|wages|wps|monthly\s+pay|remuneration|emoluments?|refund|payout|settlement|proceeds|earnings|disbursement)\b(?:[^.]|\.\d){0,144}\b(?:if|when|once|upon)\s+(?:it\s+is\s+|you\s+are\s+)?(?:approved|authori[sz]ed|verified)\b|\b(?:salary|payroll|wages|wps|monthly\s+pay|remuneration|emoluments?|refund|payout|settlement|proceeds|earnings|disbursement)\b(?:[^.]|\.\d){0,144}\bafter\s+(?:completing\s+)?(?:onboarding|registration|verification|account\s+opening)\b/iu;
@@ -12650,15 +12326,31 @@ function maskMerchantNames(text) {
     return out;
 }
 function declinedInBody(body, suppressible) {
-    return DECLINED_RE.test(suppressible) || DECLINED_VERB_RE.test(body);
+    if (DECLINED_RE.test(suppressible) || DECLINED_VERB_RE.test(body))
+        return true;
+    if (!body.includes('تعذر'))
+        return false;
+    for (const match of body.matchAll(/(?<![ء-ي])تعذر(?:ت)?\s+(?:(?:اتمام|تنفيذ|اكمال)\s+)?(?:ال)?(?:عمليه(?:\s+(?:ال)?(?:شراء|دفع|تحويل|سحب))?|شراء|دفع|تحويل|معامله|حواله|سحب)(?![ء-ي])/gu)) {
+        const before = body.slice(Math.max(0, match.index - 40), match.index);
+        if (/(?<![ء-ي])(?:اذا|لو|حال|حاله|عند|ان|لم|لن|لا)\s*$/u.test(before))
+            continue;
+        return true;
+    }
+    return false;
 }
 const CARD_LIFECYCLE_NOTICE_RE = /(?:\b(?:credit|debit|covered|prepaid)?\s*card\b[^.\n]{0,120}\bexpir(?:y|e[sd]?|ing)\b|\bexpir(?:y|e[sd]?|ing)\b[^.\n]{0,120}\b(?:credit|debit|covered|prepaid)?\s*card\b)/i;
-const AR_PURCHASE_CONFIRMATION_CODE_RE = /(?:الرقم السري|الرمز السري|رمز|كلمه السر|كلمه المرور)\s+(?:ل|ال)?(?:تاكيد|اتمام)\s+(?:عمليه\s+)?(?:ال)?(?:شراء|دفع|عمليه)/;
+const AR_PURCHASE_CONFIRMATION_CODE_RE = new RegExp(String.raw `(?:الرقم السري|الرمز السري|(?:ال)?رمز|كلمه السر|كلمه المرور)(?:\s*[:=]\s*|\s+)(?:${OTP_CODE_DIGITS}\s+)?(?:ل|ال)?(?:تاكيد|اتمام)\s+(?:عمليه\s+)?(?:ال)?(?:شراء|دفع|عمليه)`);
 function nonPostingReasonInBody(body, suppressible) {
+    if (/[^\S\r\n ]| {2}/u.test(body)) {
+        body = body.replace(/[^\S\r\n]+/gu, ' ');
+        suppressible = suppressible.replace(/[^\S\r\n]+/gu, ' ');
+    }
     if (CARD_LIFECYCLE_NOTICE_RE.test(suppressible))
         return 'card-lifecycle';
     if (declinedInBody(body, suppressible))
         return 'declined';
+    if ((0, principal_posting_guards_1.hasClickLinkPrompt)(body))
+        return 'link-request';
     if (OTP_RE.test(body) ||
         GLUED_OTP_REQUEST_RE.test(body) ||
         TRANSACTION_CODE_REQUEST_RE.test(body) ||
@@ -12670,7 +12362,13 @@ function nonPostingReasonInBody(body, suppressible) {
             CODE_VALIDITY_WINDOW_RE.test(body))) {
         return 'security-challenge';
     }
-    const settledRefund = REFUND_RE.test(body);
+    const requestReceived = REQUEST_RECEIVED_RE.test(body);
+    const refundBody = refundSideNotes(body).body;
+    const withoutRequest = requestReceived ? blank(blank(refundBody, REQUEST_RECEIVED_BLANK_RE), FUTURE_CLAUSE_RE) : refundBody;
+    const settledRefund = (REFUND_RE.test(refundBody) && (!requestReceived || REFUND_RE.test(withoutRequest))) ||
+        (requestReceived && hasCompletedRefundCredit(withoutRequest, refundRequestSentences(body)));
+    if (refundCreditNotActual(refundBody, refundRequestSentences(body)))
+        return 'pending-processing';
     if (VERIFICATION_HOLD_DESCRIPTOR_RE.test(body))
         return 'preauthorisation';
     if (!settledRefund &&
@@ -12682,7 +12380,7 @@ function nonPostingReasonInBody(body, suppressible) {
     if (!settledRefund && (PENDING_PROCESSING_RE.test(body) ||
         arabicPendingPosting(body) ||
         EXPECTED_FUTURE_MOVEMENT_RE.test(body) ||
-        REQUEST_RECEIVED_RE.test(body) || MANDATE_LIFECYCLE_RE.test(body) ||
+        requestReceived || MANDATE_LIFECYCLE_RE.test(body) ||
         CONDITIONAL_PAYOUT_RE.test(body) || CONDITIONAL_MOVEMENT_RE.test(body))) {
         return 'pending-processing';
     }
@@ -12712,6 +12410,402 @@ function isInformationOnlyAlert(message) {
 }
 function isNonPostingMessage(message) {
     return nonPostingReason(message) !== null;
+}
+const AR_CASH_WITHDRAWAL_CORRECTION_ANY_RE = /^\s*تصحيح[ \t]+(?:عمليه[ \t]+)?سحب[ \t]+نقدي/;
+const AR_WITHDRAWAL_FIELD_RE = /(?<![ء-ي])(?:سحب|صراف)(?![ء-ي])|\b(?:atm|withdrawal)\b/i;
+const AR_CASH_WITHDRAWAL_CORRECTION_HEADER_RE = /^تصحيح[ \t]+(?:عمليه[ \t]+)?سحب[ \t]+نقدي[ \t]*:?[ \t]*(?:\r?\n|$)/;
+const AR_RETURNED_TO_OWN_RE = new RegExp(`(?:(?<![${AR_LETTER}])(?<!(?:اذا|عندما|عند|ان|حال)\\s+)و?تم\\s+(?:ارجاع|اعاده)\\s+(?:ال)?(?:مبلغ|[A-Z]{3}\\s*\\d|\\d)|(?<![${AR_LETTER}])اعاد\\s+(?:[^\\s]+\\s+){1,5}?(?:ال)?مبلغ(?![${AR_LETTER}]))(?:[^.\\n]|\\.(?=\\S)){0,80}?` +
+    `(?<![${AR_LETTER}])(?:الي|في)\\s+(?:بطاقتك|بطاقتكم|حسابك|حسابكم)(?![${AR_LETTER}])`);
+const AR_DEBIT_OR_PAYMENT_RE = new RegExp(`(?<![${AR_LETTER}])(?:ال)?(?:خصم|سحب|دفع|سداد)(?![${AR_LETTER}])`);
+const FEE_PRICE_LEAD_RE = /(?:^|[\n.!?;|]\s{0,3}|^\W{0,4}[^\s:][^:\n]{0,30}:\s{0,3})(?:vat|fees?|charges?|commission|service\s+charges?)\s{0,3}:?\s{0,3}$/i;
+const FEE_PRICE_TAIL_RE = /^\s{0,3}(?:[A-Z]{3}|Dhs?|SR)?\s{0,3}(?:(?:is|are)\s+)?(?:applicable|apply|applies|per\s+(?:transaction|transfer|withdrawal|month|request))\b/i;
+const AR_FEE_PRICE_LEAD_RE = /(?:^|[\n.!?؟;|،]\s{0,3}|^\W{0,4}[^\s:][^:\n]{0,30}:\s{0,3})(?:(?:ال)?رسوم(?:\s+(?:ال)?(?:خدم[هة]|تحويل|سحب|معامل[هة]))?|ضريب[هة]\s+(?:ال)?قيم[هة]\s+(?:ال)?مضاف[هة]|(?:ال)?عمول[هة])\s{0,3}:?\s{0,3}$/;
+const AR_FEE_CODE = String.raw `(?:ر\.س|ريال|درهم|دينار|ر\.ق|ر\.ع|د\.ك|د\.ب|د\.ا|جنيه|[A-Z]{3}|SR|Dhs?)`;
+const AR_FEE_PRICE_TAIL_RE = new RegExp(String.raw `^\s{0,3}${AR_FEE_CODE}?\s{0,3}\.?\s{0,3}(?:تطبق|مطبق[هة]|تنطبق|تستحق|تستوفي|لكل\s+(?:عملي[هة]|تحويل|سحب|معامل[هة]))`);
+const AR_FEE_THEN_DEBIT_RE = new RegExp(String.raw `^\s{0,3}${AR_FEE_CODE}?[^.\n؟!]{0,40}[.\n]\s{0,3}(?:تم\s+)?(?:خصم|سحب|تحويل|شراء|دفع|سداد)(?![ء-ي])[^\n]{0,40}?(?:${AR_FEE_CODE}\s{0,3}\d|\d[\d,]*(?:\.\d+)?\s{0,3}${AR_FEE_CODE})`);
+const AR_FEE_TAKEN_RE = /^[^.\n؟!]{0,48}?(?:خصمت|تم\s+خصم|خصم|استوفيت|اقتطعت)/;
+const INCOMING_MONEY_STATED_RE = new RegExp(String.raw `\byou\s+(?:have\s+|['’]ve\s+)?received\b|\bsent\s+you\b|\b(?:transfer|payment|deposit|money|funds?|remittance)\s+received\b|\breceived\s+from\b` +
+    String.raw `|\b(?:incoming|inward)\s+(?:payment|transfer|remittance)\b|\bsalary\b(?!\s+(?:account|acct|a\/?c)\b)` +
+    `|(?<![${AR_LETTER}])(?:حواله\\s+وارده|ايداع\\s+راتب|راتب|استلمت)(?![${AR_LETTER}])`, 'i');
+const REVERSAL_WORD_RE = new RegExp(String.raw `\brevers(?:ed|al)\b|(?<![${AR_LETTER}])(?:تم\s+)?عكس(?:ه|ها)?(?![${AR_LETTER}])`, 'i');
+const RETURNED_TO_READER_RE = /\brefund|\bcredited\s+back\b|\bre-?credited\b|\breturned\s+to\s+your\b|\breversed\s+(?:to|into)\s+your\b|\breversal\s+of\b(?!\s+(?:your\s+)?(?:salary|incoming|inward|credit|deposit|transfer\s+received|cash\s+deposit))|\b(?:on|to|into)\s+your\s+(?:\w+\s+)?card\b|\bas\s+(?:an?\s+)?reversal\b|^\W{0,4}(?:payment|purchase|transaction|txn)\s+revers(?:ed|al)\b|\b(?:purchase|transaction|merchant|pos|card|payment)\s+reversal\b|\breversal\s+(?:credit|from)\b|\(\s*reversal\s*\)|\b(?:on|to)\s+(?:your\s+)?card\s+(?:no\.?\s*)?[x*•·]+\d|(?<![ء-ي])عكس\s+(?:عمليه\s+)?(?:شراء|سحب|خصم|دفع)(?![ء-ي])|^\W{0,4}(?:transaction\s+)?revers(?:al|ed)\s*:|\bcredited\s+(?:back\s+)?(?:to|into|in)\s+(?:your\s+)?(?:\w+\s+)?(?:account|acct|a\/?c|card)\b|\bcredited\s+(?:back\s+)?(?:to|into|in)\s+your\b|\breceived\b(?:[^.\n]|\.(?=\d)){0,40}?\b(?:back\s+)?(?:in|into|to)\s+your\s+(?:\w+\s+)?(?:account|acct|a\/?c|card)\b|\badded\s+(?:back\s+)?to\s+your\b|\breversed\s+(?:in|into|to)\s+your\b|(?<![ء-ي])(?:الي|ل)\s*(?:بطاقت|حساب)(?:ك|كم)(?![ء-ي])|^\W{0,4}(?:عكس\s+(?:عمليه\s+)?(?:شراء|سحب|خصم|دفع)|استرداد|استرجاع)(?![ء-ي])/i;
+function feePriceFigure(raw, index) {
+    const before = raw.slice(Math.max(0, index - 48), index);
+    if (AR_FEE_PRICE_LEAD_RE.test(before)) {
+        const after = raw.slice(index, index + 80).replace(/^(?:[A-Z]{3}|Dhs?|SR)?\s{0,3}[\d,]{1,20}(?:\.\d{1,3})?/i, '');
+        if (AR_FEE_TAKEN_RE.test(after))
+            return false;
+        return AR_FEE_PRICE_TAIL_RE.test(after) || AR_FEE_THEN_DEBIT_RE.test(after);
+    }
+    if (!FEE_PRICE_LEAD_RE.test(before))
+        return false;
+    const after = raw.slice(index, index + 60).replace(/^(?:[A-Z]{3}|Dhs?|SR)?\s{0,3}[\d,]{1,20}(?:\.\d{1,3})?/i, '');
+    return FEE_PRICE_TAIL_RE.test(after) && !/^[^.\n;]{0,48}?\b(?:debited|deducted|charged|collected|taken|paid)\b/i.test(after);
+}
+function reversedIncomingCredit(message) {
+    const body = foldOrthography(stripInvisible(message)).slice(0, 4000);
+    const REVERSED_VERB = String.raw `\b(?:is|are|has\s+been|have\s+been|was|were)\s+reversed\b(?!\s+(?:to|into|in)\s+your\b)(?!\s+and\s+(?:the\s+amount\s+(?:is\s+|has\s+been\s+)?)?(?:credited|added|refunded|returned)\b)`;
+    const REVERSED_AFTER = String.raw `(?:[^.\n]|\.(?=\d)){0,140}?` + REVERSED_VERB;
+    const creditThenReversed = new RegExp(String.raw `\b(?:credited|deposited|added)\s+(?:to|into|in)\b` + REVERSED_AFTER +
+        String.raw `|\b(?:refund|cashback|cash\s+back|reward|salary|interest|profit|payroll|bonus|dividend)\b` + REVERSED_AFTER, 'i');
+    const incomingReversed = body.split(/[\n|]|\.(?!\d)/).some((sentence) => (creditThenReversed.test(sentence) ||
+        new RegExp(`(?:${INCOMING_MONEY_STATED_RE.source})` + REVERSED_AFTER, 'i').test(sentence)) &&
+        !/\bcredited\s+back\b/i.test(sentence));
+    if (incomingReversed)
+        return true;
+    if (INCOMING_MONEY_STATED_RE.test(body) &&
+        /(?:^|[.\n|]\s*)(?:the|this|your)\s+(?:transfer|payment|credit|deposit|amount|transaction|remittance)\s+(?:has\s+been|was|is)\s+reversed\b(?!\s+(?:to|into|in)\s+your\b)(?!\s+and\s+(?:credited|added|refunded))/i.test(body) &&
+        !/\bcredited\s+back\b/i.test(body))
+        return true;
+    if (INCOMING_MONEY_STATED_RE.test(body) && /(?:^|[\n|(\[]|\s[–—-]\s)[ \t]*reversed[ \t.!)\]]*(?=$|[\n|]|\s+ref\b)/i.test(body) &&
+        !/\brefund|\bcredited\s+back\b/i.test(body))
+        return true;
+    if (/\bcredited\s+(?:to|into|in)\b/i.test(body) && /(?:^|[\n|])[ \t]*(?:status[ \t]*:[ \t]*)?reversed[ \t.!]*(?=$|[\n|]|\s+ref\b)/i.test(body) &&
+        !/\brefund|\bcredited\s+back\b|\b(?:purchase|pos|atm|withdrawal|payment|fee|charge|txn|trx|transaction)\b/i.test(body))
+        return true;
+    if (RETURNED_TO_READER_RE.test(body))
+        return false;
+    const principal = principalMoneyClause(body);
+    if (!principal || principal === 'balance-only')
+        return false;
+    const before = principal.before.replace(/\s+$/, '');
+    const lineAbove = before.slice(before.lastIndexOf('\n', before.lastIndexOf('\n') - 1) + 1);
+    const firstLine = body.slice(0, Math.max(0, body.indexOf('\n')));
+    const scope = firstLine + '\n' + lineAbove + ' ' + principal.clause;
+    return INCOMING_MONEY_STATED_RE.test(body) && REVERSAL_WORD_RE.test(scope) &&
+        !/\b(?:for|any|request|requests)\s+(?:a\s+)?reversal\b|(?<![ء-ي])(?:طلب|لطلب)\s+عكس/i.test(scope);
+}
+const NOTICE_CURRENCY = String.raw `(?:[A-Z]{3}(?![A-Za-z])|(?:[Aa][Ee][Dd]|[Ss][Aa][Rr]|[Uu][Ss][Dd]|[Ee][Uu][Rr]|[Gg][Bb][Pp]|[Qq][Aa][Rr]|[Kk][Ww][Dd]|[Bb][Hh][Dd]|[Oo][Mm][Rr]|[Ee][Gg][Pp]|[Jj][Oo][Dd]|[Ii][Nn][Rr])(?![A-Za-z])|(?:Dhs?|DHS?|dhs?|SR|Sr|sr)(?![A-Za-z])|ر\.س|د\.ا|درهم|ريال|ر\.ق|د\.ك|د\.ب|ر\.ع|ج\.م|جنيه|دينار)`;
+const NOTICE_SHORT_CODE = String.raw `(?:QR|KD|BD|RO|JD|LE)`;
+const NOTICE_MONEY_RE = new RegExp(String.raw `(?<![A-Za-z])${NOTICE_CURRENCY}\.?\s{0,3}[+\-−]?\s{0,3}\d[\d,]{0,20}(?:\.\d+)?|(?<![\w.,])[+\-−]?\d[\d,]{0,20}(?:\.\d+)?\s{0,3}${NOTICE_CURRENCY}` +
+    String.raw `|(?<![A-Za-z])${NOTICE_SHORT_CODE}\.?\s?\d[\d,]{0,20}\.\d{2,3}(?!\d)|(?<![\w.,])\d[\d,]{0,20}\.\d{2,3}\s?${NOTICE_SHORT_CODE}(?![A-Za-z])`, 'g');
+const NOTICE_MONEY_TEST_RE = new RegExp(NOTICE_MONEY_RE.source);
+const NOTICE_IDENTITY_PREFIX_RE = /(?:\bcard|\baccount|\bacct|\ba\/c|\bending(?:\s+(?:in|with))?|\bno\.?|\bnumber|#|بطاقه|حساب|رقم)\s*[:.]?\s*[*xX•·.\-]*\s*$/i;
+const NOTICE_BALANCE_LEAD_RE = new RegExp(String.raw `(?:\b(?:bal(?:ance)?|avl|available\s+(?:credit|limit)|limit)\b|(?<![${AR_LETTER}])(?:ال)?رصيد(?:ك)?(?![${AR_LETTER}])|(?<![${AR_LETTER}])(?:ال)?حد\s+(?:ال)?متاح)` +
+    String.raw `[^\n]{0,64}?(?:\bis|:|هو|(?:ال)?متاح|(?:ال)?حالي)\s*(?:now\s*|currently\s*)?(?:${NOTICE_CURRENCY}\.?\s*)?$` +
+    String.raw `|(?<![${AR_LETTER}])(?:ال)?حد\s+(?:ال)?(?:يومي|شهري|اقصي|ايتماني)(?![${AR_LETTER}])[^\n\d]{0,40}(?:${NOTICE_CURRENCY}\.?\s*)?$`, 'i');
+const NOTICE_CLAUSE_END_RE = /\n|[|;!?؟？]|\.(?=\s|$)/g;
+const NOTICE_LINE_CONTINUES_RE = /^[ \t]*(?:[a-z]|[?？؟])/;
+const NOTICE_LINE_NEGATION_START_RE = /^[ \t]*(?:(?:was|were|is|are|has|have|had)(?:\s+not|n['’]t)\s+(?:yet\s+)?(?:been\s+)?(?:paid|debited|charged|processed|completed|sent|credited|deducted|approved|successful|transferred|withdrawn)\b|could(?:\s+not|n['’]?t)\s+be\s+(?:completed|processed|approved)\b)/i;
+const NOTICE_LINE_OPEN_END_RE = new RegExp(String.raw `(?:\b(?:if|in\s+case|did\s+you|was|were|has|have|had|not)|(?<![${AR_LETTER}])(?:لم\s+يتم|لن\s+يتم|ما\s+تم|لم|لن|تعذر|ربما|قد|اذا|هل|في\s+حال|لو|يحتمل|يبدو|عند))[ \t]*$`, 'i');
+function noticeLineJoins(body, at) {
+    const next = body.slice(at + 1, at + 48).replace(/^(?:[\r\n \t]|\\r)+/, '');
+    const prior = body.slice(Math.max(0, at - 60), at).replace(/(?:[\r\n \t]|\\r)+$/, '');
+    const previousLine = prior.slice(prior.lastIndexOf('\n') + 1);
+    return NOTICE_LINE_CONTINUES_RE.test(next.slice(0, 3)) || NOTICE_LINE_NEGATION_START_RE.test(next) ||
+        NOTICE_LINE_OPEN_END_RE.test(previousLine.slice(-40));
+}
+function principalMoneyClause(text) {
+    const body = text.slice(0, 4000);
+    const bounds = [];
+    NOTICE_CLAUSE_END_RE.lastIndex = 0;
+    let bm;
+    while ((bm = NOTICE_CLAUSE_END_RE.exec(body))) {
+        if (bm[0] === '\n' && noticeLineJoins(body, bm.index))
+            continue;
+        bounds.push({ index: bm.index, mark: bm[0] });
+    }
+    NOTICE_MONEY_RE.lastIndex = 0;
+    let sawMoney = false;
+    let sawFee = false;
+    let bi = 0;
+    let m;
+    while ((m = NOTICE_MONEY_RE.exec(body))) {
+        const at = m.index;
+        const end = at + m[0].length;
+        if (/^[+\-−]?\d/.test(m[0]) && NOTICE_IDENTITY_PREFIX_RE.test(body.slice(Math.max(0, at - 40), at))) {
+            NOTICE_MONEY_RE.lastIndex = at + (/^[+\-−]?\d[\d,]*(?:\.\d+)?/.exec(m[0])?.[0].length ?? 1);
+            continue;
+        }
+        sawMoney = true;
+        while (bi < bounds.length && bounds[bi].index < at)
+            bi++;
+        const start = bi > 0 ? bounds[bi - 1].index + 1 : 0;
+        let after = bi;
+        while (after < bounds.length && bounds[after].index < end)
+            after++;
+        const stop = after < bounds.length ? bounds[after].index : body.length;
+        const mark = after < bounds.length ? bounds[after].mark : '';
+        const lead = body.slice(start, at);
+        if (BALANCE_PREFIX_RE.test(body.slice(Math.max(0, at - 56), at)) || NOTICE_BALANCE_LEAD_RE.test(lead) ||
+            BALANCE_SUFFIX_RE.test(body.slice(end, end + 48)))
+            continue;
+        const feeClause = body.slice(start, stop);
+        if (feePriceFigure(body, at) &&
+            !NOTICE_DONE_VERB_RE.test(feeClause) && !NOTICE_NEGATED_EN_RE.test(feeClause) &&
+            !NOTICE_NEGATED_AR_RE.test(feeClause) && !NOTICE_NOTHING_CHARGED_RE.test(feeClause)) {
+            sawFee = true;
+            continue;
+        }
+        return { clause: body.slice(start, stop), lead, mark, before: body.slice(0, at), after: body.slice(stop), figure: m[0] };
+    }
+    return sawMoney && !sawFee ? 'balance-only' : null;
+}
+const NOTICE_MOVE_VERB = String.raw `(?:paid|debited|deducted|charged|transferred|credited|withdrawn|deposited|sent|received|refunded|posted|processed)`;
+const NOTICE_NEGATED_EN_RE = new RegExp(String.raw `\b(?:(?:was|were|is|are|has|have|had)\s+not|(?:was|were|is|are|has|have|had)n['’]t)\s+(?:yet\s+)?(?:been\s+)?${NOTICE_MOVE_VERB}\b` +
+    String.raw `|\b(?:could(?:\s+not|n['’]?t)|can(?:not|['’]t))\s+be\s+(?:completed|processed|approved|made|paid|authori[sz]ed|charged|debited)\b` +
+    String.raw `|\b(?:were|was|are|is)\s+unable\s+to\s+(?:debit|deduct|charge|collect|process|complete)\b|\bunable\s+to\s+(?:debit|deduct|charge|collect)\b`, 'i');
+const NOTICE_NEGATED_AR_RE = new RegExp(`(?<![${AR_LETTER}])(?<!(?:هو|هي|الذي|التي)\\s)و?(?:لم|لن|ما)\\s+(?:يتم|تتم|يجر|تجر|تم|تمت)\\s+(?:(?:ال)?عمليه\\s+)?(?:ال)?(?:خصم|سداد|دفع|تحويل|شراء|سحب|ايداع|قيد|اضافه|ارجاع|استرداد)(?:ه|ها|هم)?(?![${AR_LETTER}])(?!\\s+(?:اي\\s+)?(?:رسوم|عموله|عمولات))` +
+    `|(?<![${AR_LETTER}])(?:تعذر|يتعذر|استحال)(?:\\s+علينا)?\\s+(?:ال)?(?:خصم|سداد|دفع|تحويل|شراء|سحب|تنفيذ|اتمام)(?![${AR_LETTER}])` +
+    `|(?<![${AR_LETTER}])و?لم\\s+(?:يقم|تقم)\\s+(?:[^\\s]+\\s+){0,4}?ب(?:خصم|سحب|تحصيل|اقتطاع)(?![${AR_LETTER}])` +
+    `|(?<![${AR_LETTER}])و?لم\\s+(?:ي|ت)(?:خصم|سدد|دفع|حول|سحب|قيد)(?:ه|ها)?(?![${AR_LETTER}])`);
+const NOTICE_STATUS_FAILED_RE = new RegExp(String.raw `(?:^|\n|[.|;][ \t]*)[ \t]*(?:(?:ال)?حاله|status)[ \t]*:[ \t]*(?:لم\s+(?:يتم|تتم|تكتمل)|غير\s+ناجح(?:ه)?|failed|declined|unsuccessful|rejected|cancell?ed|not\s+(?:completed|processed|successful)|مرفوض|ملغي|ملغاه|فشل)`, 'i');
+const NOTICE_STATUS_PENDING_RE = new RegExp(String.raw `(?:^|\n|[.|;][ \t]*)[ \t]*(?:(?:ال)?حاله|status)[ \t]*:[ \t]*(?:pending|in\s+progress|processing|معلق|معلقه|قيد\s+(?:الانتظار|المعالجه|التنفيذ))`, 'i');
+const NOTICE_NOTHING_CHARGED_RE = /\b(?:charged|debited|deducted|taken|billed)\s+nothing\b|\bnothing\s+(?:was|has\s+been|is|will\s+be)\s+(?:charged|debited|deducted|taken|billed)\b|\bno\s+(?:amount|money|payment)\s+(?:was|has\s+been)\s+(?:charged|debited|deducted|taken)\b/i;
+const NOTICE_QUESTION_RE = new RegExp(String.raw `\b(?:did|do|have|were|are)\s+you\s+(?:just\s+)?(?:make|made|authori[sz]e|attempt|try|use|send|spend|initiate|perform|recogni[sz]e)\b` +
+    `|(?<![${AR_LETTER}])هل\\s+(?:قمت|اجريت|استخدمت|حولت|دفعت|ارسلت|اشتريت|سحبت)(?![${AR_LETTER}])`, 'i');
+const NOTICE_QUESTION_OPEN_RE = new RegExp(String.raw `^\W{0,4}(?:[^\s:][^:\n]{0,30}:\s*)?(?:fraud\s+alert\s*:?\s*)?(?:did|have|were|are)\s+you\s+(?:just\s+)?(?:make|made|authori[sz]e|attempt|try|use|send|spend|initiate|perform)\b` +
+    `|^\\W{0,4}(?:[^\\s:][^:\\n]{0,30}:\\s*)?هل\\s+(?:قمت|اجريت|استخدمت|حولت|دفعت|ارسلت|اشتريت|سحبت|تؤكد|توكد|تؤكدون|انت\\s+من\\s+(?:قام|اجري|قمت))(?![${AR_LETTER}])` +
+    `|^\\W{0,4}(?:[^\\s:][^:\\n]{0,30}:\\s*)?(?:يرجي|الرجاء|نرجو|فضلا)\\s+(?:ال)?تاكيد(?![${AR_LETTER}])` +
+    String.raw `|^\W{0,4}(?:[^\s:][^:\n]{0,30}:\s*)?please\s+(?:verify|confirm)\b`, 'i');
+const NOTICE_SAME_LINE_CHALLENGE_RE = /\b(?:was|is)\s+(?:this|it)\s+(?:you|yours)\s*[?？]\s*(?:[–—|-]\s*)?(?:please\s+)?reply\s+(?:with\s+)?["'“]?(?:y|yes|n|no|1|2)\b|^\W{0,4}reply\s+(?:y|yes|1)\b|\bdid\s+you\s+(?:make|authori[sz]e|do)\s+(?:this|the)\s+(?:transaction|purchase|payment|transfer)\s*[?？]\s*(?:[–—|-]\s*)?(?:please\s+)?reply\b/i;
+const NOTICE_CHALLENGE_LINE_RE = new RegExp(String.raw `^\W{0,4}(?:[^\s:][^:\n]{0,30}:\s*)?(?:was\s+this\s+(?:you|yours)|is\s+this\s+you|was\s+this\s+(?:transaction|purchase|payment)\s+(?:made\s+by\s+)?(?:you|yours))\s*[?？]` +
+    `|^\\W{0,4}(?:[^\\s:][^:\\n]{0,30}:\\s*)?هل\\s+(?:هذه\\s+(?:عمليتك|العمليه\\s+لك)|قمت\\s+بهذه\\s+العمليه)\\s*[?？؟]` +
+    String.raw `|(?:^|\n)[ \t]*did\s+you\s+make\s+this\s+(?:transaction|purchase|payment)\s*[?？][ \t]*$` +
+    `|(?:^|\\n)[ \\t]*هل\\s+(?:قمت|اجريت)\\s+بهذه\\s+العمليه\\s*[?？؟](?:[ \\t]*(?:ارسل|ارسال)\\s+(?:نعم|1)[^\\n]*)?(?:\\n[ \\t]*(?:رقم\\s+المرجع|ref)[^\\n]*)?[ \\t]*$`, 'i');
+const NOTICE_FOOTER_QUESTION_TAIL_RE = new RegExp(String.raw `(?:^|[\s,–-])(?:not\s+(?:you|u)|didn['’]t\s+(?:make|do)\s+(?:this|it)(?:\s+(?:transaction|purchase|payment|transfer|one))?|wasn['’]t\s+(?:it|this)?\s*you|unrecogni[sz]ed|unauthori[sz]ed(?:\s+(?:transaction|purchase|payment|transfer|use))?|ليس\s+انت|لست\s+انت` +
+    String.raw `|not\s+(?:done|made|authori[sz]ed|initiated)\s+by\s+you|not\s+recogni[sz]ed|(?:looks?\s+)?suspicious|don['’]t\s+recogni[sz]e\s+(?:this|it))\s*$`, 'i');
+const NOTICE_REPLY_CHALLENGE_RE = new RegExp(String.raw `\breply\s+(?:with\s+)?["'“]?(?:yes|y|1)\b|\b(?:yes|y)\s*(?:or|/)\s*(?:no|n)\b` +
+    `|(?<![${AR_LETTER}])ارسل\\s+(?:نعم|1)(?![${AR_LETTER}])|(?<![${AR_LETTER}])للتاكيد\\s+ارسل(?![${AR_LETTER}])`, 'i');
+const NOTICE_REQUEST_RE = new RegExp(String.raw `\b(?:is|are)\s+(?:asking|requesting)\s+(?:you\s+)?(?:to\s+(?:pay|send|transfer)\b|for\b)` +
+    String.raw `|\b(?:payment|money|transfer)\s+request\s+(?:of|for)\b` +
+    String.raw `|\brequested\b(?:[^.\n]|\.\d){0,60}?\bfrom\s+you\b` +
+    String.raw `|\b(?:sent|send|transferred|forwarded)\s+you\s+(?:a\s+)?(?:payment\s+|money\s+)?request\b` +
+    String.raw `|(?:^|[:\n]\s*)(?:payment|money|transfer|pay)\s+request\s*[:\-]` +
+    `|(?<![${AR_LETTER}])طلب\\s+(?:[^\\s]+\\s+){1,4}منك(?![${AR_LETTER}])|(?<![${AR_LETTER}])يطلب\\s+منك(?![${AR_LETTER}])` +
+    `|(?<![${AR_LETTER}])طلب\\s+(?:دفع|تحويل|سداد|اموال)(?![${AR_LETTER}])`, 'i');
+const NOTICE_REQUEST_HEAD_RE = /^\W*(?:[^\s:][^:\n]{0,30}:\s*)?(?:incoming\s+|new\s+)?(?:payment|money|transfer)\s+request\b|\bmoney\s+received\s+request\b|\bthis\s+is\s+a\s+(?:payment|money)\s+request\b/i;
+const NOTICE_REQUEST_DONE_RE = new RegExp(String.raw `\b(?:was|were|has\s+been|have\s+been)\s+(?:successfully\s+)?(?:paid|sent|completed|accepted|approved|transferred|debited|deducted|charged|processed|executed)\b|\byou\s+(?:have\s+)?(?:paid|sent)\b` +
+    String.raw `|\b(?:is|was|has\s+been)\s+(?:now\s+)?(?:successfully\s+)?(?:completed|complete|successful|done)\b|\b(?:is|are)\s+(?:now\s+)?(?:successfully\s+)?(?:processed|executed)\b|\b(?:completed|executed|processed|paid|sent)\s+successfully\b` +
+    `|(?<![${AR_LETTER}])و?تم\\s+(?:ال)?(?:تنفيذ|قبول|سداد|دفع|تحويل|خصم)(?![${AR_LETTER}])`, 'i');
+const NOTICE_WHEN_LEAD_AR_RE = new RegExp(`^\\W*(?:[^\\s:][^:\\n]{0,30}:\\s*)?عند\\s+(?:ال)?(?:شراء|دفع|سحب|تحويل|استخدام)(?![${AR_LETTER}])`);
+const NOTICE_CONDITIONAL_LEAD_RE = new RegExp(String.raw `(?:^|[\s,:(])(?:if|in\s+case|should|unless|whenever)\s+(?:you|your|the|a|an|any|this|we|it)\b` +
+    String.raw `|(?:^|[\s,:(])(?:if|in\s+case|should|unless|whenever)\s+\w{2,6}\s+(?:card|account|a\/c)\s+(?:is|was|gets|has)\b` +
+    `|(?<![${AR_LETTER}])(?:اذا|لو|في\\s+حال|عند\\s+قيامك)(?![${AR_LETTER}])`, 'i');
+const NOTICE_LATER_CONDITION_RE = new RegExp(String.raw `(?:^|[\s,(])(?:if|in\s+case|should|unless)\b` +
+    `|(?<![${AR_LETTER}])(?:اذا|في\\s+حال|لو|ان\\s+لم)(?![${AR_LETTER}])`, 'i');
+const NOTICE_PROMO_SPEND_LEAD_RE = /^\s*(?:[^\s:][^:\n]{0,40}:\s*)?(?:spend|shop\s+for)\s+(?:(?:a\s+)?(?:minimum\s+of|over|more\s+than|at\s+least|only|just)\s+)?$/i;
+const NOTICE_REWARD_RE = /\b(?:earn|get|win|receive|enjoy|unlock|collect)\b/i;
+const NOTICE_PROMO_AR_VERB_RE = new RegExp(`(?<![${AR_LETTER}])(?:احصل|اكسب|اربح|استمتع|تمتع)(?![${AR_LETTER}])`);
+const NOTICE_THRESHOLD_LEAD_AR_RE = new RegExp(`(?:(?<![${AR_LETTER}])ب?(?:اكثر|اعلي)\\s+من|بما\\s+يزيد\\s+عن)\\s*(?:${NOTICE_CURRENCY}\\.?\\s*)?$`);
+const NOTICE_MOVEMENT_WORD_RE = new RegExp(String.raw `\b(?:spent|debited|deducted|credited|charged|withdrawn|withdrawal|transferred|transfer|paid|payment|purchased?|refund(?:ed)?|deposit(?:ed)?|received|sent|reversed|statement|due|minimum|overdue)\b` +
+    `|(?:خصم|شراء|سحب|ايداع|تحويل|حواله|استرداد|استرجاع|دفع|سداد|اضافه|ارجاع|مستحق|كشف|(?:ال)?حد\\s+(?:ال)?ادني)`, 'i');
+const NOTICE_STATUS_LINE_RE = new RegExp(String.raw `(?:\n|[.!][ \t]+)[ \t]*(?:PENDING|DECLINED|FAILED|CANCELL?ED|REJECTED|REVERSED|UNSUCCESSFUL|ON\s+HOLD|NOT\s+COMPLETED|PRE-AUTH)[ \t.!]*(?:[ \t][-–|][ \t][^\n]{1,30})?[^A-Za-z0-9؀-ۿ\n]{0,8}(?:\n[ \t]*[Xx*•·]{2,}\d{2,4}[ \t]*)?$|\n[ \t]*please\s+(?:verify|confirm)\s+this\s+(?:payment|transaction|purchase|transfer)\b[^\n]*$|\n[ \t]*status\s*:\s*(?:failed|declined|pending|rejected|cancell?ed)[ \t.!]*$|\n[ \t]*tap\s+to\s+accept\b` +
+    String.raw `|\n[ \t]*was\s+this\s+(?:you|yours)\s*[?？]\s*reply\s+(?:with\s+)?["']?(?:yes|y)\b[^\n]*$` +
+    `|\\n[ \\t]*(?:مرفوضه|مرفوض|ملغاه|ملغي|معلقه|قيد\\s+(?:المعالجه|الانتظار)|(?:لم|ما)\\s+(?:تتم|يتم|تم)(?:\\s+(?:ال)?(?:عمليه|خصم))?(?:\\s+(?:ال)?مبلغ)?|غير\\s+ناجح(?:ه)?|فشلت?(?:\\s+(?:ال)?عمليه)?)[ \\t.!]*$` +
+    `|\\n[ \\t]*هل\\s+(?:قمت|اجريت)\\s+بهذه\\s+العمليه\\s*[?？؟]\\s*(?:ارسل\\s+(?:نعم|1)[^\\n]*)?$`, 'i');
+const NOTICE_STATUS_WORD_EN_RE = /\b(?:(?<!\d[ \t\u00a0]{0,3})REVERSED|DECLINED|FAILED|CANCELL?ED|REJECTED|ON\s+HOLD|NOT\s+COMPLETED|PRE-AUTH)(?=[ \t]*(?:$|[\n.,;·|])|[ \t]+(?:[oO][nN]|[wW][iI][tT][hH]|[uU][sS][iI][nN][gG]|[vV][iI][aA]|[wW][aA][sS]|[wW][eE][rR][eE]|[hH][aA][sS]|[hH][aA][vV][eE]|[iI][sS]|[pP][aA][iI][dD]|[pP][oO][sS][tT][eE][dD]|[cC][hH][aA][rR][gG][eE][dD]|[sS][eE][nN][tT]|[rR][eE][fF][uU][nN][dD][eE][dD]|[cC][rR][eE][dD][iI][tT][eE][dD]|[dD][eE][bB][iI][tT][eE][dD]|[aA][uU][tT][hH]|[rR][eE][fF]|[rR][eE][fF][eE][rR][eE][nN][cC][eE]|[aA][pP][pP][rR][oO][vV][aA][lL]|[mM][aA][dD][eE]|[aA][vV][aA][iI][lL][aA][bB][lL][eE]|[yY][oO][uU][rR]|[bB][aA][lL]|[bB][aA][lL][aA][nN][cC][eE]|[dD][eE][bB][iI][tT]|[cC][aA][rR][dD]|[aA][vV][lL])\b)/;
+const NOTICE_STATUS_WORD_TITLE_RE = /\b(?:(?<!\d[ \t\u00a0]{0,3})Reversed|Declined|Failed|Cancell?ed|Rejected|On\s+Hold|Not\s+Completed|Pre-[Aa]uth)(?=[ \t]*(?:$|[\n.,;·|])|[ \t]+[Oo][Nn][ \t]+\d)/;
+const NOTICE_STATUS_WORD_AR_RE = new RegExp(`(?<![${AR_LETTER}])(?:ملغاه|ملغيه|معلقه|مرفوضه)(?![${AR_LETTER}])`);
+const NOTICE_THRESHOLD_LEAD_RE = new RegExp(String.raw `\b(?:more\s+than|above|over|exceeding|in\s+excess\s+of)\s*(?:${NOTICE_CURRENCY}\.?\s*)?$` +
+    `|(?<![${AR_LETTER}])ب?(?:اكثر|اعلي)\\s+من\\s*(?:${NOTICE_CURRENCY}\\.?\\s*)?$`, 'i');
+const LOOKALIKE_DOMAIN = String.raw `(?:https?:\/\/)?(?:www\.)?(?:[\w]+(?:\.[\w]+)*-[\w-]*(?:\.[\w-]+)+|[\w-]+(?:\.[\w-]+)*\.(?:info|xyz|top|click|ru|biz|tk|zip)(?![\w.]))`;
+const NOTICE_LOOKALIKE_LURE_RE = new RegExp(String.raw `\b(?:verify|confirm|secure\s+your\s+(?:card|account))\b[^\n]{0,24}?(?:\bat\b|\bon\b|\bvia\b|:)\s*${LOOKALIKE_DOMAIN}` +
+    `|(?<![${AR_LETTER}])(?:للتحقق|للتاكيد|لتحديث\\s+بياناتك)\\s+(?:ادخل|اضغط|زر|توجه)\\s+(?:علي|الي)\\s+${LOOKALIKE_DOMAIN}`, 'i');
+const NOTICE_CALL_BACK_RE = new RegExp(String.raw `\b(?:call|ring|reach\s+us\s+at|contact)\b[^\n]{0,30}?\+?\d[\d\s.-]{6,}` +
+    `|(?<![${AR_LETTER}])اتصل[^\\n]{0,30}?\\+?\\d[\\d\\s.-]{6,}`, 'i');
+const UNREGISTERED_SENDER_RE = /^\s*\+?\d[\d\s-]{6,}\s*$|@/;
+function isUnregisteredCallBack(message, sender) {
+    return !!sender && UNREGISTERED_SENDER_RE.test(sender) &&
+        NOTICE_CALL_BACK_RE.test(foldOrthography(stripInvisible(message)));
+}
+const NOTICE_CHAT_RE = new RegExp(String.raw `^\s*(?:[^\s:][^:\n]{0,30}:\s*)?(?:lol|lmao|haha+|hehe+|omg|bro|dude)\b` +
+    `|(?<![${AR_LETTER}])(?:حول|حولي|ارسل|ارسلي|رجع)\\s+لي(?![${AR_LETTER}])|(?<![${AR_LETTER}])نصيبك(?![${AR_LETTER}])|(?<![${AR_LETTER}])وصلتك\\s*[؟?]`, 'i');
+const NOTICE_AR_REMINDER_RE = new RegExp(`^\\s*(?:[^\\n:]{0,30}:\\s*)?تذكير\\s*:[\\s\\S]*(?<![${AR_LETTER}])(?:ال)?(?:مستحق|مستحقه|تستحق|يستحق)(?![${AR_LETTER}])`);
+const NOTICE_HEDGE_RE = new RegExp(String.raw `\b(?:may|might|could)\s+(?:have\s+)?been\s+(?:used|charged|debited|deducted|spent|made|paid|taken|withdrawn)\b|\bappears?\s+to\s+have\s+been\b|\bit\s+(?:seems|appears|looks\s+like)\b|\bseems\s+like\b|\bpossibly\s+(?:been\s+)?(?:charged|debited|deducted|used|paid|spent)\b` +
+    `|(?<![${AR_LETTER}])(?:ربما|قد\\s+يكون|قد\\s+(?:يتم|تتم)\\s+(?:ال)?(?:خصم|سحب|تحويل|دفع|سداد|اقتطاع)|يحتمل(?:\\s+ان(?:ه|ها)?)?|من\\s+المحتمل\\s+ان(?:ه|ها)?|يبدو(?:\\s+ان(?:ه|ها)?)?)(?![${AR_LETTER}])`, 'i');
+const NOTICE_POSSIBLE_HEAD_RE = /^\W*(?:[^\s:][^:\n]{0,30}:\s*)?possible\s+(?:transaction|charge|purchase|payment|debit)\s*:/i;
+const NOTICE_GLUED_QUESTION_RE = new RegExp(String.raw `(?:,|-|–|\bor\b)\s*(?:was\s+(?:this|it)\s+(?:you|yours)|(?:you\s+)?didn['’]t\s+(?:you\s+)?make\s+(?:this|it)|did\s+you\s+not\s+make\s+(?:this|it)|was\s+(?:it|this)\s+not\s+you|wasn['’]t\s+(?:it|this)\s+you|really\s+not\s+you)\s*$` +
+    `|(?:,|(?<![${AR_LETTER}])ام)\\s*(?:الست\\s+انت|لم\\s+تكن\\s+انت|لم\\s+تقم\\s+بها)\\s*$`, 'i');
+const NOTICE_EXAMPLE_RE = new RegExp(String.raw `^\W*(?:[^\s:][^:\n]{0,30}:\s*|[^\s:][^:\n]{0,30}\n\s*)?(?:for\s+example|example|sample(?:\s+(?:alert|message|notification|sms))?)\s*(?:[:.,–|-]|\n|$)|^\W*e\.g\.` +
+    String.raw `|(?:^|[\n.!|–][ \t]{0,3})(?:[^\s:][^:\n]{0,30}:[ \t]{0,3})?sample\s+(?:alert|message|notification|sms)[ \t]{0,3}(?:[.:!]|\n|$)` +
+    String.raw `|^\W*(?:[^\s:][^:\n]{0,30}:\s*)?(?:for\s+instance|e\.?g\.?)\s*[:,]` +
+    `|^\\W*(?:[^\\s:][^:\\n]{0,30}:\\s*|[^\\s:][^:\\n]{0,30}\\n\\s*)?(?:(?:مثال|مثلا|نموذج)\\s*(?::|\\n|,|–|-|\\||$)|علي\\s+سبيل\\s+المثال)` +
+    `|^\\W*(?:[^\\s:][^:\\n]{0,30}:\\s*)?(?:شكل|نموذج)\\s+(?:ال)?رساله(?:\\s+(?:ال)?جديده)?\\s*:`, 'i');
+const NOTICE_EXAMPLE_BEFORE_RE = /(?:^|[\n.!|–])[ \t]{0,3}(?:for\s+example|example)[ \t]{0,3}:/i;
+const NOTICE_EXAMPLE_OF_RE = /\b(?:an?|the|our)\s+(?:sample|example)\s+of\s+(?:our|the|a|your)\s+(?:new\s+)?(?:alert|message|notification|sms)s?\b/i;
+const NOTICE_LIMIT_EN_RE = /\blimit\s+(?:reached|applies|exceeded|has\s+been\s+(?:reached|exceeded))\b|\b(?:daily|monthly|weekly|spending)\s+limit\b|\b(?:are|is)\s+available\s+with\b/i;
+const NOTICE_WITHIN_LIMIT_RE = /\bwithin\s+(?:your|the|ur)\s+(?:[\w-]+\s+){0,3}?limits?\b/gi;
+const NOTICE_UP_TO_LEAD_RE = new RegExp(String.raw `\bup\s+to\s*(?:${NOTICE_CURRENCY}\.?\s*)?$|(?<![${AR_LETTER}])حتي\s*(?:${NOTICE_CURRENCY}\.?\s*)?$`, 'i');
+const NOTICE_DONE_VERB_RE = new RegExp(String.raw `\b(?:was|were|has\s+been|have\s+been)\s+(?:successfully\s+)?(?:used|debited|charged|deducted|spent|withdrawn|made|paid|transferred|credited)\b|\b(?:spent|debited|deducted|withdrawn|purchased)\b` +
+    `|(?<![${AR_LETTER}])و?تم\\s+(?:ال)?(?:خصم|شراء|سحب|دفع|تحويل|سداد|استخدام)`, 'i');
+const NOTICE_HOLD_RE = new RegExp(String.raw `\b(?:requires?|needs?|awaiting|waiting\s+for)\s+(?:your\s+)?(?:approval|authori[sz]ation|confirmation)\b|\bmay\s+appear\s+on\s+your\s+(?:[\w&-]+\s+){0,3}?(?:card|account|a\/c|debit|credit)\b|\bfor\s+card\s+verification\b|\bsubject\s+to\s+final\s+settlement\b` +
+    `|(?<![${AR_LETTER}])بانتظار\\s+(?:موافقتك|الموافقه|التاكيد|تاكيدك)|(?<![${AR_LETTER}])قيد\\s+الموافقه|(?<![${AR_LETTER}])خاضعه\\s+للتسويه`, 'i');
+const NOTICE_POSTS_LATER_RE = new RegExp(String.raw `\bfinal\s+amount\s+(?:will|may)\s+be\s+updated\b|\b(?:it|this(?:\s+(?:transaction|purchase|charge|payment))?)\s+(?:may|can|could)\s+take\s+(?:up\s+to\s+)?\d+(?:\s*-\s*\d+)?\s+(?:business\s+|working\s+)?days?\s+to\s+(?:post|reflect|appear)\b` +
+    `|(?<![${AR_LETTER}])يستغرق\\s+قيدها`, 'i');
+const NOTICE_APPROVED_RE = new RegExp(String.raw `\b(?:was|has\s+been)\s+approved\b|(?<![${AR_LETTER}])تمت\s+الموافقه`, 'i');
+const NOTICE_RETURNED_RE = new RegExp(String.raw `\b(?:was|has\s+been|were|have\s+been)\s+(?:returned|bounced(?:\s+back)?|sent\s+back)\b(?!\s+(?:back\s+)?(?:to|into|onto)\s+(?:your\s+)?(?:[\w&'-]+\s+){0,4}(?:card|account|a\/c|wallet))|\bbounced\s+back\b|\breported\s+as\s+(?:fraud|fraudulent)\b` +
+    `|(?<![${AR_LETTER}])ارتدت(?![${AR_LETTER}])|(?<![${AR_LETTER}])كعمليه\\s+احتيال|(?<![${AR_LETTER}])تم\\s+الابلاغ\\s+عن`, 'i');
+const NOTICE_REFUND_WORD_RE = new RegExp(String.raw `\b(?:refund(?:ed)?|credited|reversed|reversal)\b|(?<![${AR_LETTER}])(?:استرداد|مسترد|استرجاع)(?![${AR_LETTER}])`, 'i');
+const NOTICE_FOOTER_ACTION_RE = new RegExp(String.raw `^\s*(?:please\s+)?(?:call|contact|block|report|dial|visit)\b|^\s*(?:(?:ف|و)?اتصل|للابلاغ|يرجي\s+الاتصال)(?![${AR_LETTER}])`, 'i');
+const NOTICE_RETURNED_TO_SENDER_RE = /\breturned\s+to\s+(?:the\s+)?sender\b/i;
+const NOTICE_UNCLAIMED_RE = new RegExp(String.raw `\b(?:enrol+|register|sign\s+up|join)\s+(?:now\s+)?to\s+(?:receive|claim|accept|collect|get)\s+(?:it|them|this|the\s+(?:money|payment|transfer|funds|amount)|your\s+(?:money|payment|transfer|funds))\b|\baccept\s+(?:it|them|this|the\s+(?:money|payment|transfer))\s*\?|\baccept\s+(?:it\s+)?within\s+\d+\s+days?\b|\bwaiting\s+for\s+you\s+to\s+(?:enrol+|accept|register|sign\s+up)\b` +
+    `|(?<![${AR_LETTER}])هل\\s+تقبل(?:ه|ها)?(?![${AR_LETTER}])|(?<![${AR_LETTER}])لاستلام(?:ه|ها)(?![${AR_LETTER}])`, 'i');
+const NOTICE_P2P_IN_RE = new RegExp(String.raw `\b(?:you\s+(?:have\s+|['’]ve\s+)?received|(?:sent|transferred|paid)\s+you)\b|(?<![${AR_LETTER}])ارسل\s+(?:لك|لكم)(?![${AR_LETTER}])`, 'i');
+const NOTICE_RENEWAL_RE = /\brenews\s+(?:tomorrow|today|on)\b|\bwill\s+(?:be\s+)?renew(?:ed)?\b|\bfree\s+trial\s+ends\b|\bis\s+coming\s+up\b/i;
+const NOTICE_UNDER_PROCESS_RE = /\b(?:the\s+|this\s+|your\s+)?(?:transaction|payment|transfer|purchase)\s+is\s+(?:still\s+)?(?:under\s+process(?:ing)?|in\s+process|being\s+processed)\b/i;
+const NOTICE_NOT_YET_RE = new RegExp(String.raw `\bwill\s+be\s+(?:approved|authori[sz]ed|confirmed)\b|\b(?:refund|payment|transfer|transaction|credit)\s+pending\b|\b(?:is|are)\s+being\s+(?:sent|processed|transferred|paid)\b|\b(?:has|have)\s+not\s+(?:yet\s+)?(?:arrived|reached)\b|\bnot\s+(?:yet\s+)?arrived\b|\bwill\s+be\s+taken\b` +
+    `|(?<![${AR_LETTER}])جار(?:ي)?\\s+(?:ارسال|تحويل|تنفيذ|معالجه)(?![${AR_LETTER}])|(?<![${AR_LETTER}])لم\\s+(?:تصل|يصل)(?![${AR_LETTER}])`, 'i');
+const TRAILING_REVERSAL_MARK_RE = /(?<!\b(?:been|was|were|is|are|purchase|pos|atm|txn|transaction|payment|withdrawal|charge|debit|wdl|dr)\s{1,3})\breversed[\s.!]*$/i;
+const NOTICE_INCOMING_STATED_RE = new RegExp(String.raw `\byou\s+(?:have\s+|['’]ve\s+)?received\b|\bsent\s+you\b` +
+    String.raw `|\bincoming\s+(?:payment|transfer|remittance)\b|\bsalary\b|(?<![${AR_LETTER}])استلمت(?![${AR_LETTER}])`, 'i');
+const NOTICE_RETURNED_TO_USER_RE = /\brefund|\bcredited\s+back\b|\bre-?credited\b|\breturned\s+to\s+your\b|\breversed\s+(?:to|into)\s+your\b|\breversal\s+of\b/i;
+const NOTICE_PREFIX_CONNECTOR_RE = /^(\W{0,4}[^\s:\n][^:\n]{0,30}?)[ \t]+[–—|-][ \t]+/;
+const NOTICE_REVERSAL_REQUEST_RE = /\b(?:reversal|refund|dispute|chargeback)\s+request\b(?:[^.\n]|\.(?=\d)){0,80}?\b(?:has\s+been\s+|was\s+|is\s+)?(?:received|registered|logged|submitted|raised)\b/i;
+const NOTICE_REFUND_IN_PROCESS_RE = new RegExp(String.raw `\b(?:refund|reversal)s?\b(?:[^.\n;]|\.(?=\d)|;(?=\s*status\b)){0,80}?(?:${EN_IN_PROCESS_LEAD}${EN_IN_PROCESS_STATUS}|${EN_IN_PROCESS_REQUESTED})` +
+    String.raw `|\b(?:refund|reversal)s?\s+(?:pending|awaited|on\s+hold)\b` +
+    `|(?<![${AR_LETTER}])(?:عكس|استرداد|استرجاع|ارجاع|اعاده)(?![${AR_LETTER}])(?:[^.\\n؟!،؛;]|\\.(?=\\d)){0,80}?${AR_IN_PROCESS_STATUS}`, 'i');
+const NOTICE_REFUND_NOUN_RE = new RegExp(`\\b(?:refund|reversal)s?\\b|(?<![${AR_LETTER}])(?:عكس|استرداد|استرجاع|ارجاع|اعاده)(?![${AR_LETTER}])`, 'i');
+const NOTICE_REFUND_COMPLETED_RE = new RegExp(String.raw `\b(?:has|have|had)\s+(?:(?:now|already|just)\s+)?been\s+(?:(?:successfully|fully|now)\s+)?(?:credited|refunded|reversed|returned|deposited)\b` +
+    String.raw `|\b(?:was|were)\s+(?:(?:successfully|fully|now)\s+)?(?:credited|refunded|reversed|returned|deposited)\b` +
+    String.raw `|\band\s+(?:has\s+been\s+|was\s+)?(?:credited|refunded|reversed|returned|deposited)\s+(?:back\s+)?(?:to|into)\b` +
+    `|(?<![${AR_LETTER}])تم\\s+(?:عكس|استرداد|استرجاع|ارجاع|ايداع|اضافه|اعاده)(?![${AR_LETTER}])`, 'i');
+const NOTICE_REFUND_TELEGRAPHIC_CREDIT_RE = /(?<!\b(?:be|being|once|when|if|after|until|unless)\s+)\b(?:credited|refunded|reversed|returned|processed|deposited)\s+(?:back\s+)?(?:to|into)\s+your\b/i;
+function refundInProcessUncompleted(text) {
+    const status = NOTICE_REFUND_IN_PROCESS_RE.exec(text);
+    return status !== null && !NOTICE_REFUND_COMPLETED_RE.test(text) &&
+        !NOTICE_REFUND_TELEGRAPHIC_CREDIT_RE.test(text.slice(0, status.index + status[0].length));
+}
+const NOTICE_CLAUSE_STOP_RE = /[;؛،](?!\s*status\b)/i;
+function refundInProcessClause(core, lead, figure) {
+    const stop = core.slice(lead.length).search(NOTICE_CLAUSE_STOP_RE);
+    const head = stop < 0 ? core : core.slice(0, lead.length + stop);
+    const nounFirst = NOTICE_REFUND_NOUN_RE.test(lead) || /^\s*(?:refund|reversal)s?\b/i.test(core.slice(lead.length + figure.length));
+    return nounFirst && refundInProcessUncompleted(head);
+}
+function withoutInProcessRefundSentences(body) {
+    let out = body.replace(/\breversal\s+(?:fees?|charges?)\b/gi, (fee) => ' '.repeat(fee.length));
+    let start = 0;
+    for (const end of [...[...body.matchAll(/[.!?](?=\s|$)|[;؛،](?!\s*status\b)|\n/gi)].map((match) => match.index + match[0].length), body.length]) {
+        const text = body.slice(start, end);
+        if (end > start && refundInProcessUncompleted(text)) {
+            out = out.slice(0, start) + ' '.repeat(end - start) + out.slice(end);
+        }
+        start = Math.max(start, end);
+    }
+    return out;
+}
+const NOTICE_TOP_UP_RE = /\btop\s+up\s+(?:your\s+)?\w+\s+to\s+complete\b|^\W{0,4}(?:[^\s:][^:\n]{0,30}:\s*)?pending\s*(?::|(?:purchase|transaction|payment|charge|transfer|debit|withdrawal)\b)/i;
+const NOTICE_STATUS_SEGMENT_RE = new RegExp(String.raw `(?:^|\n|\||\s[–—]\s|\s-{1,2}[ \t]*|[(\[]\s*)[ \t]*(?:` +
+    `(?:ما|لم|لن)\\s+(?:تم|تمت|يتم|تتم|تكتمل)(?:\\s+(?:ال)?(?:خصم|عمليه|تنفيذ|سداد|تحويل|دفع))?(?:\\s+(?:ال)?مبلغ)?` +
+    `|غير\\s+ناجح(?:ه)?|مرفوض(?:ه)?|ملغ(?:ي|اه)|فشلت?(?:\\s+(?:ال)?عمليه)?|قيد\\s+(?:ال)?(?:معالجه|انتظار|تنفيذ)` +
+    `|تعذر\\s+(?:ال)?(?:اتمام|تنفيذ|خصم)(?:\\s+(?:ال)?(?:عمليه|مبلغ))?|قد\\s+(?:يتم|تتم)\\s+(?:ال)?خصم(?:\\s+(?:ال)?مبلغ)?` +
+    `|هل\\s+(?:تؤكد|توكد)\\s+(?:هذه\\s+)?(?:ال)?عمليه\\s*[?？؟]?|(?:يرجي|الرجاء)\\s+(?:ال)?تاكيد\\s+(?:ال)?عمليه(?:\\s+بالرد\\s+بنعم)?` +
+    String.raw `|please\s+verify\s+this\s+(?:payment|transaction|purchase|transfer)|tap\s+to\s+accept(?:\s+this\s+(?:payment|transfer))?` +
+    String.raw `|(?:could(?:n['’]?t|\s+not)|can(?:not|['’]t))\s+be\s+(?:completed|processed|approved)` +
+    `|تم\\s+عكس(?:ها|ه)?(?:\\s+(?:ال)?(?:حواله|عمليه|مبلغ))?` +
+    String.raw `|pending(?:\s+(?:approval|authori[sz]ation|confirmation))?|declined|failed|cancell?ed|rejected|reversed|unsuccessful|not\s+completed|on\s+hold)` +
+    String.raw `[ \t.!]*(?:[ \t]+[-–][ \t]+[^\n|]{1,30}|[ \t]+(?:ref(?:erence)?|رقم\s+المرجع)(?:\s*(?:no\.?|number|#))?\s*[:.]?\s*[\w-]+)?[^A-Za-z0-9؀-ۿ\n|]{0,8}(?=\n|\||[)\]]|$)`, 'i');
+function moneyNoticeKindInBody(text) {
+    const body = text.replace(NOTICE_PREFIX_CONNECTOR_RE, '$1: ');
+    if (/\brefund\b/i.test(body)) {
+        const spans = [...body.matchAll(new RegExp(NOTICE_MONEY_RE.source, 'g'))]
+            .map(match => ({ start: match.index, end: match.index + match[0].length }));
+        const refund = principalRefundStatus(body, spans);
+        if (refund === 'completed' || refund === 'paid-out')
+            return null;
+    }
+    if (NOTICE_CHAT_RE.test(body))
+        return 'personal-chat';
+    if (NOTICE_TOP_UP_RE.test(body) || (NOTICE_REVERSAL_REQUEST_RE.test(body) &&
+        (!/\b(?:has\s+been|was|is)\s+(?:credited|refunded|deposited|returned)\b/i.test(body) ||
+            /\b(?:once|when|after|until|will|shall)\b/i.test(body))))
+        return 'not-yet';
+    if (TRAILING_REVERSAL_MARK_RE.test(body) && NOTICE_INCOMING_STATED_RE.test(body) &&
+        !NOTICE_RETURNED_TO_USER_RE.test(body))
+        return 'unproven-direction';
+    if (AR_CASH_WITHDRAWAL_CORRECTION_ANY_RE.test(body) && (!AR_CASH_WITHDRAWAL_CORRECTION_HEADER_RE.test(body) ||
+        AR_WITHDRAWAL_FIELD_RE.test(body.indexOf('\n') < 0 ? '' : body.slice(body.indexOf('\n') + 1))))
+        return 'unproven-direction';
+    if (AR_RETURNED_TO_OWN_RE.test(body) &&
+        (AR_DEBIT_OR_PAYMENT_RE.test(body) || /(?<![ء-ي])(?:ال)?رسوم(?![ء-ي])/.test(body)))
+        return 'unproven-direction';
+    if (NOTICE_AR_REMINDER_RE.test(body) && !SETTLED_MOVEMENT_RE.test(body) && !AR_SETTLED_VERB_RE.test(body)) {
+        return 'reminder';
+    }
+    const principal = principalMoneyClause(body);
+    if (principal === null)
+        return null;
+    if (principal === 'balance-only') {
+        return NOTICE_MOVEMENT_WORD_RE.test(body) ? null : 'balance-only';
+    }
+    const { clause, lead, mark } = principal;
+    if (!NOTICE_MOVEMENT_WORD_RE.test(body) && !/\b(?:after|txn|trx|transaction|using|used|spent)\b|(?<![ء-ي])(?:بعد|عمليه)(?![ء-ي])/i.test(body) &&
+        /\bavail\w*|\bavl\b|متاح/i.test(lead))
+        return 'balance-only';
+    const tail = clause.slice(lead.length);
+    const opener = NOTICE_LATER_CONDITION_RE.exec(tail);
+    const core = opener ? clause.slice(0, lead.length + opener.index) : clause;
+    if (NOTICE_NEGATED_EN_RE.test(core) || NOTICE_NEGATED_AR_RE.test(core) ||
+        NOTICE_NOTHING_CHARGED_RE.test(core) || NOTICE_STATUS_FAILED_RE.test(body))
+        return 'negated';
+    const statusWord = NOTICE_STATUS_WORD_EN_RE.exec(body) ?? NOTICE_STATUS_WORD_TITLE_RE.exec(body);
+    const statusWordCounts = !!statusWord && !(/^cancel/i.test(statusWord[0]) && /\brefund/i.test(body)) &&
+        !(/^reversed/i.test(statusWord[0]) && (/\brefund|\bcredited\s+(?:back\s+)?(?:to|into|in)\s+(?:your\s+)?(?:\w+\s+)?(?:card|account|a\/c)\b/i.test(body) ||
+            /^\W{0,4}(?:[^\s:][^:\n]{0,30}:\s*)?(?:pos\s+)?(?:purchase|transaction|txn|trx)\b/i.test(body)));
+    const segment = NOTICE_STATUS_SEGMENT_RE.exec(body);
+    const segmentCounts = !!segment && !(/revers/i.test(segment[0]) && !INCOMING_MONEY_STATED_RE.test(body) && !reversedIncomingCredit(body) &&
+        /\bcredited\s+(?:back\s+)?(?:to|into|in)\s+(?:your\s+)?(?:\w+\s+)?(?:card|account|a\/c)\b/i.test(body));
+    if (NOTICE_STATUS_LINE_RE.test(body) || segmentCounts || statusWordCounts ||
+        NOTICE_STATUS_WORD_AR_RE.test(body))
+        return 'status';
+    if (NOTICE_LOOKALIKE_LURE_RE.test(body))
+        return 'lure';
+    const asked = mark === '?' || mark === '؟' || mark === '？';
+    if (NOTICE_QUESTION_RE.test(lead) && (asked || NOTICE_REPLY_CHALLENGE_RE.test(body)))
+        return 'question';
+    if (NOTICE_QUESTION_OPEN_RE.test(lead) || NOTICE_CHALLENGE_LINE_RE.test(body) ||
+        NOTICE_SAME_LINE_CHALLENGE_RE.test(body))
+        return 'question';
+    if (asked && !NOTICE_FOOTER_QUESTION_TAIL_RE.test(tail) && !NOTICE_GLUED_QUESTION_RE.test(tail))
+        return 'question';
+    if (asked && NOTICE_GLUED_QUESTION_RE.test(tail) &&
+        (!NOTICE_FOOTER_ACTION_RE.test(principal.after.slice(1)) || /(?:الست|لم\s+تكن)\s+انت|لم\s+تقم\s+بها/.test(tail)))
+        return 'question';
+    if (NOTICE_EXAMPLE_RE.test(body) || NOTICE_EXAMPLE_RE.test(lead) || NOTICE_EXAMPLE_BEFORE_RE.test(principal.before) ||
+        NOTICE_EXAMPLE_OF_RE.test(principal.before))
+        return 'example';
+    if (NOTICE_HEDGE_RE.test(core) || NOTICE_POSSIBLE_HEAD_RE.test(body))
+        return 'hedged';
+    if (NOTICE_HOLD_RE.test(clause) ||
+        (NOTICE_APPROVED_RE.test(clause) && NOTICE_POSTS_LATER_RE.test(body)))
+        return 'hold';
+    if ((NOTICE_RETURNED_RE.test(core) || NOTICE_RETURNED_TO_SENDER_RE.test(body)) &&
+        !NOTICE_REFUND_WORD_RE.test(clause))
+        return 'returned';
+    if (NOTICE_P2P_IN_RE.test(clause) &&
+        NOTICE_UNCLAIMED_RE.test(principal.before.slice(-160) + ' ' + clause + ' ' + principal.after.slice(0, 160)))
+        return 'unclaimed';
+    if (NOTICE_NOT_YET_RE.test(core) || refundInProcessClause(core, lead, principal.figure) || NOTICE_UNDER_PROCESS_RE.test(body) ||
+        NOTICE_STATUS_PENDING_RE.test(body))
+        return 'not-yet';
+    if (NOTICE_RENEWAL_RE.test(core) && !NOTICE_DONE_VERB_RE.test(clause))
+        return 'not-yet';
+    const afterFigure = tail.slice(principal.figure.length);
+    const outsideWithinLimit = (text) => text.replace(NOTICE_WITHIN_LIMIT_RE, ' ');
+    const limitTail = NOTICE_MONEY_TEST_RE.test(afterFigure) ? '' : outsideWithinLimit(afterFigure);
+    if (!NOTICE_DONE_VERB_RE.test(clause) &&
+        (NOTICE_LIMIT_EN_RE.test(outsideWithinLimit(lead)) || NOTICE_LIMIT_EN_RE.test(limitTail) ||
+            NOTICE_UP_TO_LEAD_RE.test(lead) && /\bavailable\b|حد/i.test(clause) ||
+            /بلوغ\s+(?:ال)?حد|تجاوز\s+(?:ال)?حد/.test(limitTail)))
+        return 'limit';
+    if ((NOTICE_REQUEST_RE.test(clause) || NOTICE_REQUEST_HEAD_RE.test(body)) &&
+        !NOTICE_REQUEST_DONE_RE.test(clause))
+        return 'request';
+    if (NOTICE_CONDITIONAL_LEAD_RE.test(lead) || NOTICE_WHEN_LEAD_AR_RE.test(lead))
+        return 'conditional';
+    if (NOTICE_PROMO_SPEND_LEAD_RE.test(lead) && NOTICE_REWARD_RE.test(body))
+        return 'promotion';
+    if (NOTICE_THRESHOLD_LEAD_AR_RE.test(lead) && NOTICE_PROMO_AR_VERB_RE.test(clause))
+        return 'promotion';
+    if (NOTICE_PROMO_AR_VERB_RE.test(lead) && new RegExp(`(?<![${AR_LETTER}])عند(?![${AR_LETTER}])`).test(clause))
+        return 'promotion';
+    if (NOTICE_THRESHOLD_LEAD_RE.test(lead))
+        return 'threshold';
+    return null;
+}
+function moneyNoticeKind(message) {
+    return moneyNoticeKindInBody(foldOrthography(stripInvisible(message.trim())));
 }
 function isDeclinedMessage(message) {
     return nonPostingReason(message) === 'declined';
@@ -13234,6 +13328,8 @@ function parseSmsInner(message, overrides, options) {
         return null;
     if (nonCashNoticeInBody(raw))
         return null;
+    if (moneyNoticeKindInBody(raw))
+        return null;
     const separate = SEPARATE_MOVEMENT_RE.exec(suppressible);
     if ((separate &&
         MONEY_FIGURE_RE.test(separate[0]) &&
@@ -13565,11 +13661,14 @@ function parseSmsInner(message, overrides, options) {
             categoryGuess: 'other', categoryDeliberate: true, currency, reference, raw: source,
         };
     }
-    if (card?.kind !== 'account' && card && CARD_PAYMENT_RE.test(raw)) {
+    const qualifiedReceipt = card !== null && (0, principal_posting_guards_1.isQualifiedCardRepaymentReceipt)(raw);
+    if (qualifiedReceipt && !(0, principal_posting_guards_1.isQualifiedCardRepaymentReceipt)(raw, currency))
+        return null;
+    if (card?.kind !== 'account' && card && (CARD_PAYMENT_RE.test(raw) || qualifiedReceipt)) {
         const amountFils = amountWithFx(raw);
         if (!amountFils)
             return null;
-        const side = cardPaymentLeg(raw);
+        const side = qualifiedReceipt ? 'receipt' : cardPaymentLeg(raw);
         const correctedDate = side === 'receipt' ? sourceBackedReceiptDate(raw, date, options) : null;
         return {
             kind: 'cardPayment',
@@ -13964,9 +14063,12 @@ function parseSmsInner(message, overrides, options) {
     const hasCredit = statedCredit || (saudiHeadings && SA_TRANSFER_IN_HEADING_RE.test(raw));
     const carrierBilling = /app\s*store|google play|play store|itunes/i.test(raw);
     const isBillDue = BILL_DUE_WORDS.test(raw) && !hasDebit && !hasCredit && !carrierBilling;
+    const refundNotes = refundSideNotes(prose);
+    if (refundNotes.ambiguous)
+        return null;
     const isIncomingCreditReversal = INCOMING_CREDIT_REVERSAL_RE.test(prose);
     const isRefund = !isIncomingCreditReversal &&
-        (REFUND_RE.test(prose) || REVERSAL_RE.test(prose) || arabicPurchaseRefundHeader ||
+        (REFUND_RE.test(refundNotes.body) || REVERSAL_RE.test(withoutInProcessRefundSentences(refundNotes.body)) || arabicPurchaseRefundHeader ||
             REFUND_HEADING_RE.test(prose));
     if (PROMO_RE.test(raw) && !TXN_EVIDENCE_RE.test(raw))
         return null;
@@ -13977,7 +14079,7 @@ function parseSmsInner(message, overrides, options) {
     if (!money)
         return null;
     const billerPaid = billerSettlement(prose);
-    const creditClause = CREDIT_CLAUSE_RE.test(prose) && !billerPaid;
+    const creditClause = CREDIT_CLAUSE_RE.test(refundNotes.body) && !billerPaid;
     const debitClause = DEBIT_CLAUSE_RE.test(prose);
     const type = isBillDue || billerPaid || isIncomingCreditReversal ||
         arabicOwnAccountOutgoing
@@ -14497,6 +14599,8 @@ function hasUnsettledPrincipalInContext(context, parsed) {
     const { raw, spans, refund } = context;
     if (hasUnsupportedPrincipal(raw, parsed, spans[0]))
         return true;
+    if (parsed.kind === 'transaction' && ((0, principal_posting_guards_1.isUnqualifiedCardRepayment)(raw) || (0, principal_posting_guards_1.isQualifiedCardRepaymentReceipt)(raw)))
+        return true;
     if (parsed.type === 'income' && (0, principal_posting_guards_1.isUnqualifiedCardCredit)(raw, spans[0]))
         return true;
     if (principalNeedsTransferReview(raw, spans[0], parsed))
@@ -14520,6 +14624,10 @@ function hasUnsettledPrincipal(message, parsed) {
     return context ? hasUnsettledPrincipalInContext(context, parsed) : false;
 }
 function parseSms(message, overrides, options) {
+    if ((0, principal_posting_guards_1.isLeadingNumericDiscountOffer)(message) || (0, principal_posting_guards_1.isUnqualifiedPeerTransferClaim)(message) ||
+        (0, principal_posting_guards_1.hasMobileMoneyCallback)(message) || (0, principal_posting_guards_1.isUnpostedCardBalanceClaim)(message) ||
+        (0, principal_posting_guards_1.hasExplicitPersonalMoneyClaim)(message))
+        return null;
     if ((0, bnpl_providers_1.isBnplProviderSource)(options?.sender))
         return null;
     let parsed = parseSmsInner(message, overrides, options);
@@ -14560,6 +14668,9 @@ function parseSms(message, overrides, options) {
                 return null;
         }
     }
+    const vetted = vetoUnsettledCredit(message, parsed, (text) => parseSms(text, overrides, options));
+    if (vetted !== parsed)
+        return vetted;
     if (parsed.originalCurrency && parsed.originalCurrency !== (0, markets_1.getActiveMarket)().currency.code &&
         parsed.fxSource !== 'bank' && FOREIGN_DOMESTIC_RAIL_RE.test(message)) {
         return null;
@@ -14912,7 +15023,7 @@ const resolve = (items) => {
 };
 const MERCHANT_LABEL = /(?:^|[^\p{L}\p{N}])(?:desc(?:ription)?|narration|merchant|payee|beneficiary|seller|commerçant|bénéficiaire|händler|empfänger|comercio|beneficiario|esercente|begunstigde|利用先|التاجر|المستفيد)\s*[:：=-]\s*/giu;
 const MERCHANT_PREPOSITION = /(?:^|[^\p{L}\p{N}])(?:at|to|trf\s+to|from|chez|bei|von|en|em|an|presso|bij|لدى|عند|لصالح)\s+/giu;
-const MERCHANT_TAIL = /\s+(?:(?:avl|avail(?:able)?)\.?\s*(?:bal(?:ance)?|lmt|limit)\b|(?:on|le|am|el|il|op|em)\s+\d|on\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d|from\s+(?:your\s+)?(?:account|acct?|a\/?c|card|checking|savings)\b|posted\b|(?:with|using|via|über)\b|to\s+(?:(?:your|the)\s+)?(?:card|account)\b|\d{1,2}:\d{2}\b|(?:ref(?:erence)?(?:\s*no)?|refno|txn|transaction\s+(?:id|date))\b|(?:was|has|have|is|were|will|wurde|wurden|ist|wird)\b|con\s+(?:tu|su)\s+tarjeta\b|com\s+o\s+cart[aã]o\b|بتاريخ|رقم\s+(?:المرجع|العملية)|con\s+(?:tu|su|la|el)\s+(?:\p{L}+\s+){0,2}(?:tarjeta|carta|visa|mastercard|d[eé]bito|cr[eé]dito)(?![\p{L}\p{N}])|con\s+carta(?![\p{L}\p{N}])|avec\s+(?:votre|ta)\s+carte(?![\p{L}\p{N}])|mit\s+(?:ihrer\s+|deiner\s+)?(?:\p{L}*karte)(?![\p{L}\p{N}])|para\s+o\s+cart[aã]o(?![\p{L}\p{N}])|on\s+(?:your\s+)?(?:\p{L}+\s+){0,3}card(?![\p{L}\p{N}])|(?:del|alle)\s+\d|(?:current|available|remaining|closing)\s+(?:credit\s+)?(?:balance|limit)(?![\p{L}\p{N}]))/iu;
+const MERCHANT_TAIL = /\s+(?:(?:avl|avail(?:able)?)\.?\s*(?:bal(?:ance)?|lmt|limit)\b|(?:on|le|am|el|il|op|em)\s+\d|on\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d|from\s+(?:your\s+)?(?:account|acct?|a\/?c|card|checking|savings)\b|posted\b|(?:with|using|via|über)\b|to\s+(?:(?:your|the)\s+)?(?:card|account)\b|\d{1,2}:\d{2}\b|(?:ref(?:erence)?(?:\s*no)?|refno|txn|transaction\s+(?:id|date))\b|(?:was|has|have|is|were|will|wurde|wurden|ist|wird)\b|con\s+(?:tu|su)\s+tarjeta\b|com\s+o\s+cart[aã]o\b|بتاريخ|رقم\s+(?:المرجع|العملية)|con\s+(?:tu|su|la|el)\s+(?:\p{L}+\s+){0,2}(?:tarjeta|carta|visa|mastercard|d[eé]bito|cr[eé]dito)(?![\p{L}\p{N}])|con\s+carta(?![\p{L}\p{N}])|avec\s+(?:votre|ta)\s+carte(?![\p{L}\p{N}])|mit\s+(?:ihrer\s+|deiner\s+)?(?:\p{L}*karte)(?![\p{L}\p{N}])|para\s+o\s+cart[aã]o(?![\p{L}\p{N}])|on\s+(?:your\s+)?(?:\p{L}+\s+){0,3}card(?![\p{L}\p{N}])|on\s+(?:your\s+)?(?:\p{L}+\s+){0,2}account(?![\p{L}\p{N}])|(?:del|alle)\s+\d|(?:current|available|remaining|closing)\s+(?:credit\s+)?(?:balance|limit)(?![\p{L}\p{N}]))/iu;
 const MERCHANT_TRAILING_VERB = /\s+(?:made|bezahlt|erhalten|eseguit[oa]|effettuat[oa]|successful(?:ly)?|completed|erfolgreich)$/iu;
 const BALANCE_FIELD_TAIL = /\s+(?:(?:available|current|remaining|closing)\s+(?:credit\s+)?(?:balance|limit)|(?:avl|avail)\.?\s*(?:bal(?:ance)?|limit)|balance|credit\s+limit|الرصيد(?:\s+(?:المتاح|الحالي))?)\s*[:=-]?\s*$/iu;
 const BALANCE_FIELD_BEFORE_MONEY = new RegExp(BALANCE_FIELD_TAIL.source.replace(/\$$/u, '') + String.raw `(?=(?:[A-Z]{3}\s*[+-]?\d|[+-]?\d[\d.,]*\s*[A-Z]{3}\b))`, 'iu');
@@ -15066,12 +15177,14 @@ function extractUniversalFields(source, context = {}, moneySpans = []) {
 "universal-money":function(module,exports,require){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.unqualifiedCardCreditCurrencyAliases = unqualifiedCardCreditCurrencyAliases;
 exports.inspectUniversalMoneyDraft = inspectUniversalMoneyDraft;
 exports.extractUniversalMoney = extractUniversalMoney;
 const alert_draft_1 = require("@/lib/alert-draft");
 const alert_market_packs_1 = require("@/lib/alert-market-packs");
 const currency_metadata_1 = require("@/lib/currency-metadata");
 const universal_fields_1 = require("@/lib/universal-fields");
+const principal_posting_guards_1 = require("@/lib/principal-posting-guards");
 const universal_types_1 = require("@/lib/universal-types");
 const SOURCE_UNIT_ALIASES = {
     KSh: currency_metadata_1.CURRENCY_SYMBOL_CANDIDATES.KSh,
@@ -15082,6 +15195,17 @@ const sourceCurrencyAliases = (context) => {
     return { ...SOURCE_UNIT_ALIASES, ...(market ? (0, alert_market_packs_1.alertMarketPack)(market).currencyAliases : {}),
         ...context.currencyAliases };
 };
+function unqualifiedCardCreditCurrencyAliases(source, market, existing) {
+    const units = market === 'AE'
+        ? { 'درهم': ['AED'], 'دراهم': ['AED'] } : { 'ريال': ['SAR'] };
+    const currencyAliases = { ...units, ...existing };
+    const draft = (0, alert_draft_1.inspectAlertDraft)(source, { currencyAliases });
+    const credits = draft.candidates.filter(candidate => candidate.currency === (market === 'AE' ? 'AED' : 'SAR') &&
+        candidate.minorUnits !== null && /^[1-9]\d*$/u.test(candidate.minorUnits) &&
+        ((0, principal_posting_guards_1.isUnqualifiedCardCredit)(draft.normalizedText, candidate.span) ||
+            (0, principal_posting_guards_1.isCompletedCardRepaymentPrincipal)(draft.normalizedText, candidate.span)));
+    return credits.length === 1 ? currencyAliases : undefined;
+}
 const LB = String.raw `(?<![A-Za-z\u00C0-\u024F\u1E00-\u1EFF\p{N}_])`;
 const RB = String.raw `(?![A-Za-z\u00C0-\u024F\u1E00-\u1EFF\p{N}_])`;
 const RS = String.raw `[A-Za-z\u00C0-\u024F\u1E00-\u1EFF]*${RB}`;
@@ -15114,8 +15238,23 @@ const LABEL_ROLES = {
     minimum: 'minimum-due', total: 'statement-total', limit: 'credit-limit',
     balance: 'balance', bill: 'bill-due', fee: 'fee', feeweak: 'fee', transaction: 'transaction',
 };
+function execAll(pattern, text) {
+    if (!pattern.global)
+        throw new Error('execAll needs a global pattern');
+    const found = [];
+    pattern.lastIndex = 0;
+    for (let match = pattern.exec(text); match !== null; match = pattern.exec(text)) {
+        found.push(match);
+        if (match[0] === '') {
+            const code = text.codePointAt(pattern.lastIndex);
+            pattern.lastIndex += pattern.unicode && code !== undefined && code > 0xffff ? 2 : 1;
+        }
+    }
+    pattern.lastIndex = 0;
+    return found;
+}
 function labels(text, marketLabels = null) {
-    const found = [...text.matchAll(LABEL)].map((match) => {
+    const found = execAll(LABEL, text).map((match) => {
         const group = Object.keys(match.groups ?? {}).find((key) => match.groups?.[key] !== undefined);
         return { role: LABEL_ROLES[group], start: match.index, text: match[0], weak: group === 'feeweak' };
     });
@@ -16099,7 +16238,7 @@ const inspectUnparsedLaunchAlert = (source, sender) => {
 exports.inspectUnparsedLaunchAlert = inspectUnparsedLaunchAlert;
 }
 };
-const mappings={"alert-draft":{"@/lib/currency-metadata":"currency-metadata"},"alert-event-evidence":{},"alert-institution-grammars":{},"alert-market-detection":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-semantics":"alert-semantics","@/lib/markets":"markets"},"alert-market-packs":{"@/lib/alert-market-packs.india-me":"alert-market-packs.india-me","@/lib/alert-market-packs.us-eu":"alert-market-packs.us-eu","@/lib/alert-market-packs.world":"alert-market-packs.world"},"alert-market-packs.india-me":{},"alert-market-packs.us-eu":{},"alert-market-packs.world":{},"alert-semantics":{"@/lib/alert-draft":"alert-draft","@/lib/alert-event-evidence":"alert-event-evidence","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-market-packs":"alert-market-packs","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"alert-source-ownership":{"@/lib/alert-draft":"alert-draft"},"bank-alert-interpreter":{"@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules","@/lib/categories":"categories","@/lib/bank-alert-semantic-output":"bank-alert-semantic-output","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser","@/lib/unparsed-launch-alert":"unparsed-launch-alert"},"bank-alert-semantic-output":{},"bank-alert-semantic-rules":{"@/lib/sms-parser":"sms-parser"},"bank-amount-tokens":{},"best-effort-autopost":{"@/lib/currency-metadata":"currency-metadata","@/lib/capture-source-identity":"capture-source-identity","@/lib/fx-rates":"fx-rates","@/lib/sms-parser":"sms-parser"},"bnpl-providers":{},"brand-categories":{},"capture-source-identity":{},"categories":{"@/lib/i18n":"i18n"},"country":{"@/lib/country-names":"country-names"},"country-names":{},"currency-metadata":{},"fx":{"@/lib/currency-metadata":"currency-metadata","@/lib/ledger-money":"ledger-money"},"fx-rates":{"@/lib/fx":"fx"},"gulf-neighbour-alerts":{"@/lib/best-effort-autopost":"best-effort-autopost","@/lib/country":"country","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/gulf-neighbour-templates":"gulf-neighbour-templates","@/lib/sms-parser":"sms-parser","@/lib/universal-parser":"universal-parser"},"gulf-neighbour-templates":{"@/lib/best-effort-autopost":"best-effort-autopost"},"i18n":{"@/lib/import-processing-disclosure":"import-processing-disclosure"},"import-processing-disclosure":{},"ios-background-alert-parser":{"@/lib/currency-metadata":"currency-metadata","@/lib/country":"country","@/lib/markets":"markets","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/launch-alert-parser":"launch-alert-parser","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/fx":"fx","@/lib/sms-parser":"sms-parser"},"latam-alert-templates":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/sms-parser":"sms-parser","@/lib/universal-types":"universal-types"},"launch-alert-parser":{"@/lib/alert-market-detection":"alert-market-detection","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/country":"country","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/bank-alert-interpreter":"bank-alert-interpreter","@/lib/markets":"markets","@/lib/bnpl-providers":"bnpl-providers","@/lib/sms-parser":"sms-parser","@/lib/currency-metadata":"currency-metadata","@/lib/gulf-neighbour-alerts":"gulf-neighbour-alerts","@/lib/universal-parser":"universal-parser","@/lib/alert-market-packs":"alert-market-packs","@/lib/alert-draft":"alert-draft","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/universal-categorization":"universal-categorization","@/lib/fx-rates":"fx-rates"},"ledger-money":{"@/lib/currency-metadata":"currency-metadata"},"markets":{"@/lib/country":"country"},"principal-posting-guards":{},"sms-parser":{"@/lib/categories":"categories","@/lib/markets":"markets","@/lib/bank-amount-tokens":"bank-amount-tokens","@/lib/fx":"fx","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/bnpl-providers":"bnpl-providers","@/lib/country":"country","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/universal-money":"universal-money"},"universal-categorization":{"@/lib/brand-categories":"brand-categories","@/lib/categories":"categories","@/lib/sms-parser":"sms-parser"},"universal-dates":{"@/lib/alert-source-ownership":"alert-source-ownership","@/lib/universal-types":"universal-types"},"universal-fields":{"@/lib/universal-types":"universal-types","@/lib/alert-draft":"alert-draft","@/lib/universal-dates":"universal-dates"},"universal-money":{"@/lib/alert-draft":"alert-draft","@/lib/alert-market-packs":"alert-market-packs","@/lib/currency-metadata":"currency-metadata","@/lib/universal-fields":"universal-fields","@/lib/universal-types":"universal-types"},"universal-parser":{"@/lib/universal-types":"universal-types","@/lib/alert-semantics":"alert-semantics","@/lib/universal-fields":"universal-fields","@/lib/universal-money":"universal-money","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"universal-types":{},"unparsed-launch-alert":{"@/lib/alert-draft":"alert-draft","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser"}};
+const mappings={"alert-draft":{"@/lib/currency-metadata":"currency-metadata"},"alert-event-evidence":{},"alert-institution-grammars":{},"alert-market-detection":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-semantics":"alert-semantics","@/lib/markets":"markets"},"alert-market-packs":{"@/lib/alert-market-packs.india-me":"alert-market-packs.india-me","@/lib/alert-market-packs.us-eu":"alert-market-packs.us-eu","@/lib/alert-market-packs.world":"alert-market-packs.world"},"alert-market-packs.india-me":{},"alert-market-packs.us-eu":{},"alert-market-packs.world":{},"alert-semantics":{"@/lib/alert-draft":"alert-draft","@/lib/alert-event-evidence":"alert-event-evidence","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-market-packs":"alert-market-packs","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"alert-source-ownership":{"@/lib/alert-draft":"alert-draft"},"bank-alert-interpreter":{"@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules","@/lib/categories":"categories","@/lib/bank-alert-semantic-output":"bank-alert-semantic-output","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser","@/lib/unparsed-launch-alert":"unparsed-launch-alert"},"bank-alert-semantic-output":{},"bank-alert-semantic-rules":{"@/lib/sms-parser":"sms-parser"},"bank-amount-tokens":{},"best-effort-autopost":{"@/lib/currency-metadata":"currency-metadata","@/lib/capture-source-identity":"capture-source-identity","@/lib/fx-rates":"fx-rates","@/lib/sms-parser":"sms-parser","@/lib/principal-posting-guards":"principal-posting-guards"},"bnpl-providers":{},"brand-categories":{},"capture-source-identity":{},"categories":{"@/lib/i18n":"i18n"},"country":{"@/lib/country-names":"country-names"},"country-names":{},"currency-metadata":{},"fx":{"@/lib/currency-metadata":"currency-metadata","@/lib/ledger-money":"ledger-money"},"fx-rates":{"@/lib/fx":"fx"},"gulf-neighbour-alerts":{"@/lib/best-effort-autopost":"best-effort-autopost","@/lib/country":"country","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/gulf-neighbour-templates":"gulf-neighbour-templates","@/lib/sms-parser":"sms-parser","@/lib/universal-parser":"universal-parser"},"gulf-neighbour-templates":{"@/lib/best-effort-autopost":"best-effort-autopost"},"i18n":{"@/lib/import-processing-disclosure":"import-processing-disclosure"},"import-processing-disclosure":{},"ios-background-alert-parser":{"@/lib/currency-metadata":"currency-metadata","@/lib/country":"country","@/lib/markets":"markets","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/launch-alert-parser":"launch-alert-parser","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/fx":"fx","@/lib/sms-parser":"sms-parser"},"latam-alert-templates":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/sms-parser":"sms-parser","@/lib/universal-types":"universal-types"},"launch-alert-parser":{"@/lib/alert-market-detection":"alert-market-detection","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/country":"country","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/bank-alert-interpreter":"bank-alert-interpreter","@/lib/markets":"markets","@/lib/bnpl-providers":"bnpl-providers","@/lib/sms-parser":"sms-parser","@/lib/currency-metadata":"currency-metadata","@/lib/gulf-neighbour-alerts":"gulf-neighbour-alerts","@/lib/universal-parser":"universal-parser","@/lib/alert-market-packs":"alert-market-packs","@/lib/alert-draft":"alert-draft","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/universal-money":"universal-money","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/universal-categorization":"universal-categorization","@/lib/fx-rates":"fx-rates"},"ledger-money":{"@/lib/currency-metadata":"currency-metadata"},"markets":{"@/lib/country":"country"},"principal-posting-guards":{},"sms-parser":{"@/lib/categories":"categories","@/lib/markets":"markets","@/lib/bank-amount-tokens":"bank-amount-tokens","@/lib/fx":"fx","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/bnpl-providers":"bnpl-providers","@/lib/country":"country","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/universal-money":"universal-money"},"universal-categorization":{"@/lib/brand-categories":"brand-categories","@/lib/categories":"categories","@/lib/sms-parser":"sms-parser"},"universal-dates":{"@/lib/alert-source-ownership":"alert-source-ownership","@/lib/universal-types":"universal-types"},"universal-fields":{"@/lib/universal-types":"universal-types","@/lib/alert-draft":"alert-draft","@/lib/universal-dates":"universal-dates"},"universal-money":{"@/lib/alert-draft":"alert-draft","@/lib/alert-market-packs":"alert-market-packs","@/lib/currency-metadata":"currency-metadata","@/lib/universal-fields":"universal-fields","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/universal-types":"universal-types"},"universal-parser":{"@/lib/universal-types":"universal-types","@/lib/alert-semantics":"alert-semantics","@/lib/universal-fields":"universal-fields","@/lib/universal-money":"universal-money","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"universal-types":{},"unparsed-launch-alert":{"@/lib/alert-draft":"alert-draft","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser"}};
 const cache=Object.create(null);
 function load(id){
 if(Object.prototype.hasOwnProperty.call(cache,id))return cache[id].exports;

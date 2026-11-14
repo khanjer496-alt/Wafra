@@ -39,12 +39,16 @@ function hookHarness({ owner = true, platform = 'android' } = {}) {
   const hook = load(path.join(root, 'src/hooks/use-auto-import.ts'), {
     react, 'react-native': { AppState: appState, Platform: { OS: platform } },
     'expo-router': { useRouter: () => ({}), useFocusEffect() {} },
+    // iOS launch and `active` scans are deferred in production (runAfterFirstFrames); this harness
+    // tests the scan itself, so the deferral runs it at once, as it did before.
+    '@/lib/after-first-frames': { runAfterFirstFrames: (run) => { run(); return { cancel() {} }; } },
+    '@/lib/deferred-scan': load(path.join(root, 'src/lib/deferred-scan.ts')),
     '@/components/ui/toast': { useToast: () => ({ show() {} }) }, '@/components/lock-gate': { usePrivacyGateCleared: () => true },
     '@/lib/auto-import': { isSmsScanningAvailable: () => false, hasBankNotificationAccess: () => false, hasBankNotificationSystemAccess: () => false },
     '@/lib/background-relay': { enableRelayBackgroundSync: async () => {} },
     '@/lib/capture': { getIosCaptureNativeModule: () => null, isCaptureAvailable: () => false },
     '@/lib/capture-executor': { createCaptureExecutor: () => ({ execute: async () => ({ kind: 'up-to-date' }) }) },
-    '@/lib/android-live-background': { installAndroidLiveCaptureLedger: () => () => {} },
+    '@/lib/android-live-background-api': { installAndroidLiveCaptureLedger: () => () => {} },
     '@/lib/android-capture-sources': { androidSmsCaptureEnabled: () => false, androidNotificationCaptureEnabled: () => false },
     '@/lib/haptics': {}, '@/lib/capture-toast': {}, '@/lib/i18n': { t: value => value },
     '@/lib/fx-rates': {},

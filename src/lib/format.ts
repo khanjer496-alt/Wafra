@@ -1,3 +1,4 @@
+import { moneyCodeRun } from '@/lib/money-code-run';
 import { normalizeArabicNumerals } from '@/lib/arabic-sms';
 import {
   CANONICAL_NUMBER_CONVENTIONS,
@@ -124,13 +125,14 @@ export function ledgerCurrencyLabel(code?: string): string {
  * Settings into a silent relabelling of every figure in the app. See
  * `ledgerCurrency` in markets.ts.
  *
+ * Arabic uses an isolated number-then-code run; other languages retain code-first text.
  * Always the ISO code, never a symbol: this string also feeds accessibility
  * labels and notification text, where "CA$" or "$US" read badly aloud. The
  * visual Money prefix uses the symbol (ledgerCurrencyLabel). Digits follow the
  * device's number conventions ("EUR 1.234,56" on a German phone).
  */
 export function formatAED(fils: number, opts?: { decimals?: boolean }): string {
-  return `${ledgerCurrencyDisplay()} ${formatAmount(fils, opts)}`;
+  return moneyCodeRun(formatAmount(fils, opts), ledgerCurrencyDisplay(), getLanguage());
 }
 
 /**
@@ -372,12 +374,6 @@ export function weekdayShort(index: number): string {
  */
 export function cardTitle(name: string): string {
   return name.replace(/\s*[•·*]+\s*\d{3,4}\s*$/, '').trim() || name;
-}
-
-export function greetingForHour(hour: number): string {
-  if (hour < 12) return t('goodMorning');
-  if (hour < 17) return t('goodAfternoon');
-  return t('goodEvening');
 }
 
 

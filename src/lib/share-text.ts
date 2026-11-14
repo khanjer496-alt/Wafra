@@ -3,7 +3,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { Platform } from 'react-native';
 
-export type TextFileShareErrorCode =
+type TextFileShareErrorCode =
   | 'download_unavailable'
   | 'cache_unavailable'
   | 'share_unavailable'

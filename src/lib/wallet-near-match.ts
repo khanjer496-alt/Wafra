@@ -22,7 +22,7 @@ import { canonicalUniversalSourceKey } from '@/lib/universal-import';
  * made (a visible duplicate is recoverable); `defer` hands it back so a
  * queue-backed collector can keep its native record for a later drain.
  */
-export interface WalletNearMatchSettlement {
+interface WalletNearMatchSettlement {
   plan: ImportPlan;
   reviews: ReviewEntry[];
   deferred: WalletNearMatch[];
@@ -49,9 +49,13 @@ function withFallbackPostings(plan: ImportPlan, fallback: readonly WalletNearMat
     }
     for (const [key, ref] of Object.entries(facts.newHints ?? {})) newHints[key] ??= ref;
   }
+  // Each posted possible duplicate keeps its Review evidence: a counted,
+  // source-free record written with this same batch (recordPossibleDuplicatesPosted).
+  const possibleDuplicatesPosted = [...(plan.batch.possibleDuplicatesPosted ?? []),
+    ...fallback.map((match) => canonicalUniversalSourceKey(match.review.sourceKey, match.review.observedAt))];
   return {
     ...plan,
-    batch: { ...batch, snapshots, bankNames, cardTypes, newHints },
+    batch: { ...batch, snapshots, bankNames, cardTypes, newHints, possibleDuplicatesPosted },
     txCount: plan.txCount + fallback.length,
   };
 }
@@ -101,7 +105,7 @@ export class WalletNearMatchStagingError extends Error {
   }
 }
 
-export interface StagedWalletNearMatches {
+interface StagedWalletNearMatches {
   /** The plan to import (with fallback postings when Review was full). */
   plan: ImportPlan;
   /** Newly admitted review items (0 for replays of already staged ones). */

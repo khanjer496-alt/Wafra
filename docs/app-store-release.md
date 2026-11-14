@@ -85,7 +85,12 @@ test Shortcut action. Do not provide a real user's token or bank message.
 - [ ] EAS project UUID and APNs credentials configured.
 - [ ] Superwall iOS public key, products, `pro` entitlement, `pro_upgrade` and
       `onboarding` placements configured and tested in StoreKit sandbox. Do not add an introductory store trial
-      while the app's local three-day trial is enabled.
+      while the app's local three days of free automatic capture are enabled.
+- [ ] App Store and Play listing text, App Store Connect subscription descriptions,
+      What's New, screenshot captions, review notes and Superwall paywall copy call the
+      first 3 days "free automatic capture" (Arabic "الالتقاط التلقائي المجاني"), never
+      "trial", "free trial" or "free period". The in-app copy is enforced by
+      scripts/test/repair/no-trial-wording.test.cjs; store and Superwall copy is not.
 - [ ] Production relay URL, D1 database, push access token, and public iCloud
       Shortcut URL configured.
 - [ ] Legal entity, jurisdiction, support email, support URL, and hosted privacy

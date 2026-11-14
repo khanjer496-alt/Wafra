@@ -2,7 +2,7 @@ import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import { categoryLabel } from '@/lib/categories';
 import type { Account, CategoryId, CustomCategory, Transaction } from '@/lib/types';
 
-export interface ExpenseReportOptions {
+interface ExpenseReportOptions {
   transactions: Transaction[];
   accounts: Account[];
   currency: string;

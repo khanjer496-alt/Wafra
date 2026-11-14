@@ -24,6 +24,7 @@ import {
 import { subscriptionManagementUrl } from '@/lib/billing';
 import { t } from '@/lib/i18n';
 import { billingStore, hasNonTrialAccess, trialDaysLeft, yearlySavingPercent, type ProPlan } from '@/lib/purchases';
+import { proCopy } from '@/lib/pro-copy';
 import { PLAN_ORDER } from '@/lib/pro-plans';
 import { configuredPublicUrl } from '@/lib/public-links';
 import { useStore } from '@/lib/store';
@@ -61,10 +62,10 @@ export function useProCheckout() {
   const billingRef = useRef(billing);
   billingRef.current = billing;
 
-  const loadOffers = useCallback(async () => {
+  const loadOffers = useCallback(async (): Promise<ProPlanOffer[] | null> => {
     if (entitled || !checkoutReady) {
       setOfferState('unavailable');
-      return;
+      return [];
     }
     const request = ++offerRequest.current;
     setOfferState('loading');
@@ -73,11 +74,12 @@ export function useProCheckout() {
     // charge, and the storefront it came from may no longer be this one.
     setOffers([]);
     const loaded = await billingRef.current.fetchProOffers();
-    if (request !== offerRequest.current) return;
+    if (request !== offerRequest.current) return null;
     setOffers(loaded);
     setOfferState(loaded.length > 0 ? 'ready' : 'unavailable');
     setSelectedPlan((current) =>
       loaded.some((offer) => offer.plan === current) ? current : loaded[0]?.plan ?? current);
+    return loaded;
   }, [checkoutReady, entitled]);
 
   useEffect(() => {
@@ -92,6 +94,24 @@ export function useProCheckout() {
     (plan) => !offers.some((offer) => offer.plan === plan));
   // From the two prices this storefront returned; null hides the badge.
   const savingPercent = offerState === 'ready' ? yearlySavingPercent(offers) : null;
+
+  /**
+   * The primary button while the store has returned no plan. It used to stay "Get Wafra Pro" and answer a tap
+   * with the same "price unavailable" text the panel above it already showed, which read as a dead button. It
+   * now says what it will do (load the prices again), shows progress, and when the store still returns nothing
+   * it says so plainly. It never reaches the purchase path: with no store price there is nothing to charge.
+   */
+  const ctaMode: 'buy' | 'retry' | 'loading' = selectedOffer || !checkoutReady
+    ? 'buy'
+    : offerState === 'loading' ? 'loading' : 'retry';
+  const retryOffers = useCallback(async () => {
+    setNotice(null);
+    const loaded = await loadOffers();
+    if (loaded !== null && loaded.length === 0) {
+      const copy = proCopy(state.language);
+      setNotice({ title: copy.pricesStillUnavailable, body: copy.pricesStillUnavailableBody });
+    }
+  }, [loadOffers, state.language]);
 
   /**
    * The one action that can charge money. It refuses before the store is asked
@@ -215,6 +235,8 @@ export function useProCheckout() {
     store,
     checkoutReady,
     loadOffers,
+    ctaMode,
+    retryOffers,
     buySelectedPlan,
     restore,
     manage,

@@ -48,10 +48,10 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
         return { ...dependencies[name], useMoneyLocaleKey: () => '' };
       }
       if (Object.hasOwn(dependencies, name)) return dependencies[name];
-      // Date presentation is real shipping logic, not a formatter stub. Load
-      // its pure country data from current source too; explicit fixture
-      // overrides above still win and custom Intl globals follow the module.
-      if (name === '@/lib/date-time-locale' || name === '@/lib/country-names' || name === '@/lib/import-processing-disclosure') {
+      // Pure source policies run as shipped, including the card-receipt
+      // guards imported by capture. Explicit fixture overrides above still
+      // win, and custom globals follow the module.
+      if (name === '@/lib/date-time-locale' || name === '@/lib/country-names' || name === '@/lib/import-processing-disclosure' || name === '@/lib/principal-posting-guards') {
         return loadTypescript(require('node:path').resolve(__dirname, '../../../src', name.slice(2) + '.ts'), dependencies, globals);
       }
       if (name === '@/lib/complimentary-access' || name === '@/lib/complimentary-copy' || name === '@/lib/complimentary-clock') return loadTypescript(require('node:path').resolve(__dirname, '../../../src', name.slice(2) + '.ts'));
@@ -91,6 +91,21 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       // The pure "Open in Wafra" URL rules and one-time token store.
       if (name === '@/lib/incoming-statement-file') return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/incoming-statement-file.ts'));
       if (name === '@/lib/subscriptions') return require('../build/subscriptions.js');
+      // The marker-derived Founder Pro build gates (Home's logo unlock); pure,
+      // no imports. They read process.env, so they run from source with the
+      // harness's own globals (a harness can switch the unlock on), not Node's.
+      // A test's explicit stub above still wins.
+      if (name === '@/lib/founder-pro') {
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/founder-pro.ts'), {}, globals);
+      }
+      // The parser-research build marker reads process.env, so it runs from
+      // source with the harness's own globals (its process.env), not Node's.
+      if (name === '@/lib/parser-research-flag') {
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/parser-research-flag.ts'), {}, globals);
+      }
+      // The iOS tab gate is a navigation boundary: screen harnesses execute the
+      // real screen, and ios-tab-gate.test.cjs covers the gate itself.
+      if (name === '@/components/ios-tab-gate') return { withIosTabGate: (Screen) => Screen };
       // Setup videos are an opaque presentation child in route harnesses;
       // their optional native player/lifecycle has its own behavioral suite.
       if (name === '@/components/ios-setup-video-card') {
@@ -123,6 +138,15 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       // Pure selection helpers used by screens; always the real source.
       if (name === '@/lib/store-selection') {
         return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/store-selection.ts'));
+      }
+      // The store's pause-boundary factory and pass-through rule (store.tsx and
+      // ios-tab-gate import it). A .tsx, so never in build/; always the real
+      // source, with the harness's own React when it supplies one.
+      if (name === '@/lib/store-pause') {
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/store-pause.tsx'), {
+          react: dependencies.react ?? require('react'),
+          'react/jsx-runtime': dependencies['react/jsx-runtime'] ?? require('react/jsx-runtime'),
+        }, globals);
       }
       // The shared per-snapshot row index (entry sheet, Transfers); pure.
       if (name === '@/lib/rows-by-id') {
@@ -217,6 +241,12 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       // The real unproven-format policy (pure; the setting mirror defaults on).
       if (name === '@/lib/best-effort-autopost') {
         return require('../build/best-effort-autopost.js');
+      }
+      if (name === '@/lib/ui-money-text') {
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/ui-money-text.ts'), dependencies, globals);
+      }
+      if (name === '@/lib/free-capture-copy' || name === '@/lib/money-code-run') {
+        return require('../build/' + name.slice('@/lib/'.length) + '.js');
       }
       if (name === '@/lib/country') {
         return require('../build/country.js');

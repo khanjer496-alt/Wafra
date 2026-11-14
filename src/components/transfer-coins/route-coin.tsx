@@ -9,7 +9,7 @@ import { useMotionPreference } from '@/hooks/use-reduced-motion';
 import { cueIsFresh, type CoinCue } from '@/components/transfer-coins/coin-cues';
 
 /** The travelling coin's diameter. */
-export const ROUTE_COIN = 12;
+const ROUTE_COIN = 12;
 /** How far past the lane's start the coin's journey begins, over the source chip. */
 const REACH = 20;
 const REACH_STACKED = 6;

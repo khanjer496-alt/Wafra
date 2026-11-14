@@ -37,7 +37,7 @@ export function readIosCaptureHealth(value: unknown): IosCaptureHealth | null {
   };
 }
 
-export type IosCaptureHealthMode = 'unknown' | 'off' | 'paused' | 'attention' | 'queued' | 'empty';
+type IosCaptureHealthMode = 'unknown' | 'off' | 'paused' | 'attention' | 'queued' | 'empty';
 export function iosCaptureHealthMode(health: IosCaptureHealth | null): IosCaptureHealthMode {
   if (!health) return 'unknown';
   if (!health.enabled) return 'off';

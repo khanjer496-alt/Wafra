@@ -79,11 +79,14 @@ test('no snapshot is previewed when the app writes none (private mode, not onboa
   }
 });
 
-test('Home delegates widgets to the cooperative full-ledger producer, independent of its short payment list', () => {
+test('widgets come from the cooperative full-ledger producer, owned by the tab shell, not Home\'s short payment list', () => {
+  // The sync moved from Home to CaptureOwner's hook so a paused Home cannot leave widgets stale.
+  const owner = read('src/hooks/use-widget-snapshot-sync.ts');
+  assert.match(owner, /requestWidgetSnapshotSync\(/);
+  assert.match(owner, /invalidateWidgetSnapshotSync\(/);
   const home = read('src/screens/journal-home-screen.tsx');
-  assert.match(home, /requestWidgetSnapshotSync\(/);
-  assert.match(home, /invalidateWidgetSnapshotSync\(/);
   assert.doesNotMatch(home, /upcoming: widgetUpcomingInput\(payments\)/);
+  assert.doesNotMatch(home, /requestWidgetSnapshotSync\(/);
 });
 
 // ── Pure preview rules mirror the native widgets ───────────────────────────
@@ -418,7 +421,7 @@ test('the Widgets route exists and both entry points reach it', () => {
   assert.ok(fs.existsSync(path.join(root, 'src/app/widgets.tsx')));
   assert.match(read('src/app/widgets.tsx'), /export default function WidgetsScreen/);
   const settings = read('src/app/settings.tsx');
-  assert.match(settings, /Platform\.OS !== 'web' && linkRow\(\s*widgetWords\.settingsTitle,[\s\S]{0,160}router\.push\('\/widgets'\),\s*\{ icon: 'home', testID: 'settings-widgets' \}/);
+  assert.match(settings, /Platform\.OS !== 'web' && linkRow\(\s*widgetWords\.settingsTitle,[\s\S]{0,160}router\.push\('\/widgets'\),\s*\{ icon: 'home', testID: 'settings-widgets', last: true \}/);
   // In the personalisation group, beside Customize Home.
   const preferences = settings.slice(settings.indexOf("t('settingsPreferencesHeader')"), settings.indexOf('settings-region'));
   assert.ok(preferences.includes('widgetWords.settingsTitle'));

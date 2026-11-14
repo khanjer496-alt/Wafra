@@ -58,7 +58,7 @@ export interface SealedBlob {
   ct: string;
 }
 
-export interface DeviceKeypair {
+interface DeviceKeypair {
   /** Never leaves the phone. Never sent, never logged, never backed up off-device. */
   secretKey: Uint8Array;
   /** The half that goes to POST /v1/pair. */

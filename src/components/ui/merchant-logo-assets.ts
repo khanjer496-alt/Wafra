@@ -1,5 +1,5 @@
 /** Curated, bundled artwork. Source and rights notes live in assets/merchants/. */
-export interface MerchantLogo {
+interface MerchantLogo {
   readonly id: string;
   /** Metro's static asset identifier; remote image URLs are not supported. */
   readonly source: number;

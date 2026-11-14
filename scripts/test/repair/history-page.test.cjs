@@ -3,20 +3,40 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const path = require('node:path');
 const load = require('./load-typescript.cjs');
+const tray = require('../build/alert-review-tray.js');
 
 function harness(options = {}) {
   const events = [];
+  const at = Date.now();
+  const missing = () => ({ value: null, alternatives: [], evidence: 'missing', spans: [], issues: [] });
+  const reviews = (options.reviews ?? []).map((_, index) => tray.prepareUniversalReviewAlert({
+    id: `history_page_review_${String(options.sameReviewId ? 0 : index).padStart(8, '0')}`,
+    sourceKey: `history_page_source_${String(index).padStart(8, '0')}`, observedAt: at, channel: 'inbox',
+    event: { version: 1, decision: 'review', family: 'card-payment', status: 'posted', direction: 'credit',
+      amount: { ...missing(), value: { currency: 'AED', minorUnits: '50000', exponent: 2 }, evidence: 'explicit' },
+      statementTotal: missing(), minimumDue: missing(), balance: missing(), creditLimit: missing(),
+      merchant: missing(), transactionDate: missing(), dueDate: missing(), statementDate: missing(),
+      instrument: missing(), observations: [], issues: [] },
+  }));
   let dependencies;
   let allowed = true;
   let state = { historyImport: { status: 'paused' }, marketId: 'AE', merchantOverrides: {},
-    hydrated: true, onboarded: true, captureOptOut: false };
+    hydrated: true, onboarded: true, captureOptOut: false, reviewTray: tray.emptyAlertReviewTray() };
   const store = {
     state, getStateSnapshot: () => state, getStateGeneration: () => 1,
     setHistoryImportProgress: async () => {},
     setMarket: () => options.marketAllowed !== false,
-    stageReviewAlerts: () => {
+    stageReviewAlerts: (items, _qualifications, _bindings, mode) => {
       events.push('review');
-      return { durable: options.reviewFailure ? Promise.reject(new Error('review write failed')) : Promise.resolve() };
+      const result = options.refuseAll
+        ? { state: state.reviewTray, outcomes: items.map(() => 'refused') }
+        : tray.admitPreparedReviewAlerts(state.reviewTray, items, Date.now(), mode);
+      state.reviewTray = result.state;
+      return { admitted: result.outcomes.filter(outcome => outcome === 'admitted').length,
+        durable: options.reviewFailure ? Promise.reject(new Error('review write failed')) : Promise.resolve(),
+        retention: () => options.refuseAll
+          ? items.map(item => ({ sourceKey: tray.reviewSourceKeyOf(item), outcome: 'refused' }))
+          : tray.reviewRetentionReceipts(state.reviewTray, items, Date.now()) };
     },
     importBatch: (batch) => {
       events.push('ledger');
@@ -34,6 +54,7 @@ function harness(options = {}) {
       useRef: (value) => ({ current: value }),
     },
     'react-native': native,
+    '@/lib/alert-review-tray': tray,
     '@/lib/review-source-bindings': { collectLegacyReviewSourceKeys: () => [],
       withoutRecordedReviews: require('../build/review-source-bindings.js').withoutRecordedReviews },
     '@/lib/auto-import': {
@@ -59,7 +80,7 @@ function harness(options = {}) {
   hook.useHistoryImport();
   const next = { status: 'running', cursor: { beforeDateMs: 100, beforeId: 7 } };
   const page = {
-    reviewCandidates: options.reviews ?? [], reviewSourceBindings: options.bindings ?? [],
+    reviewCandidates: reviews, reviewSourceBindings: options.bindings ?? [],
     detectedLaunchMarket: options.market ?? null, parsed: [], declined: [], newestTs: 200,
     inboxHistoryComplete: false, scannedCount: 1000,
     commit: async () => { events.push('ack'); },
@@ -77,6 +98,20 @@ test('review candidates retain their required durability before ledger planning'
   const h = harness({ reviews: [{ id: 'review' }] });
   await h.commit();
   assert.deepEqual(h.events, ['review', 'yield', 'plan', 'yield', 'ledger', 'mark', 'ack']);
+});
+test('a refused retention-required review cannot freeze the page (RC 396 F1)', async () => {
+  // Two exact-money reviews that share a review id: the tray admits the first
+  // and refuses the second for ever. Before the fix the page paused as
+  // review-capacity, saved nothing, and every retry was refused again.
+  const h = harness({ reviews: [{}, {}], sameReviewId: true });
+  const result = await h.commit();
+  assert.equal(result, true, 'the page commits instead of holding for a source the tray will never admit');
+  assert.deepEqual(h.events, ['review', 'yield', 'plan', 'yield', 'ledger', 'mark', 'ack']);
+});
+test('a lone refused retention-required review also lets the page commit', async () => {
+  const h = harness({ reviews: [{}], refuseAll: true });
+  assert.equal(await h.commit(), true);
+  assert.ok(h.events.includes('ledger'));
 });
 test('source-identity migration is NOT skipped when the review list is empty', async () => {
   const h = harness({ bindings: [{ legacyId: 'old', id: 'new' }] });

@@ -45,7 +45,6 @@ function createWorkflowHarness(options={}) {
  d['@/components/ui/bottom-sheet']={BottomSheet:p=>p.visible?jsx('BottomSheet',p):null};
  h.local('@/lib/country-names','src/lib/country-names.ts');h.local('@/lib/country','src/lib/country.ts');
  h.local('@/components/country-picker-sheet');
- h.local('@/components/onboarding/country-confirm');
  d['./alive-scenes']=d['@/components/onboarding/alive-scenes'];h.local('@/components/onboarding/statement-scene');h.local('@/components/onboarding/setup-intro-step');
  const copy=h.local('@/components/workflows/workflow-copy','src/components/workflows/workflow-copy.ts');
  d['./workflow-copy']=copy;h.local('@/components/workflows/workflow-surfaces');
@@ -69,8 +68,6 @@ function createWorkflowHarness(options={}) {
   ...Object.fromEntries(['isCurrencyConflictReview','recentlyExpiredReviewCount','recentlyLostReviewCount','reviewCaptureBacklog','reviewExpiresInDays','reviewTrayCapacity']
    .map(name=>[name,require('../build/alert-review-tray.js')[name]]))};
  d['@/components/universal-review-fields']={universalMoneyLabel:v=>v?`${v.currency} ${v.amountMinor/100}`:''};
- d['@/components/diagnostic-export-control']={DiagnosticExportControl:()=>null};
- d['@/components/tester-diagnostics-control']={TesterDiagnosticsControl:()=>null};
  d['@/lib/ledger-export']={buildLedgerCsv:()=>''};
  d['@/lib/app-lock']=require('../build/app-lock.js');
  d['@/lib/sms-corpus-export']={isSmsCorpusExportAvailable:()=>false,sharePersonalDataForReview:record('sharePersonalDataForReview')};
@@ -86,6 +83,7 @@ function createWorkflowHarness(options={}) {
  d['@/lib/ios-history-setup']={createIosHistoryPostEraseCleanup:()=>()=>{},eraseIosHistorySessions:record('eraseIosHistorySessions'),iosSupportsMessageHistory:()=>true};
  d['@/lib/ios-message-onboarding']={clearIosMessageSetupProgress:record('clearIosMessageSetupProgress'),dispatchIosMessageSetup:record('dispatchIosMessageSetup'),loadIosMessageSetupProgress:async()=>null};
  d['@/lib/shortcut-cleanup']={openShortcutsApp:record('openShortcutsApp'),shortcutCleanupApplies:()=>false};
+ d['@/lib/storage-diagnostics']={recordStorageFailure:op=>{h.events.push(['recordStorageFailure',op]);return {op}}};
  d['@/lib/growth-funnel']={
   GROWTH_PLACEMENTS:{onboarding:'onboarding_main',postImportPro:'post_import_pro',settingsPro:'settings_pro'},
   trackGrowthEvent:()=>{},
@@ -167,8 +165,6 @@ function createWorkflowHarness(options={}) {
    d['./ios-capture-health']=h.local('@/lib/ios-capture-health','src/lib/ios-capture-health.ts');
    h.local('@/lib/ios-setup-journey','src/lib/ios-setup-journey.ts');
    h.local('@/lib/ios-shortcut-setup-copy','src/lib/ios-shortcut-setup-copy.ts');
-   d['./capture-health']=h.local('@/components/ios-message-setup/capture-health');
-   h.local('@/components/ios-message-setup/setup-journey');
    h.local('@/lib/ios-capture-setup','src/lib/ios-capture-setup.ts');
    // iOS 15's statement action hands the importer the gate's one-time token.
    h.local('@/lib/ios-statement-handoff','src/lib/ios-statement-handoff.ts');

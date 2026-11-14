@@ -4,7 +4,7 @@ import { HOME_WIDGETS_LAYOUT_VERSION, loadHomeWidgetPreferences, saveHomeWidgetP
 import { repairGoalOrderedHome } from '@/lib/onboarding-e';
 
 /** Set once the check has run on this device, whatever it found. */
-export const GOAL_ORDER_REPAIR_KEY = 'wafra/ui/home-widgets/goal-order-repair/v1';
+const GOAL_ORDER_REPAIR_KEY = 'wafra/ui/home-widgets/goal-order-repair/v1';
 const HOME_WIDGETS_KEY = 'wafra/ui/home-widgets/v1';
 
 let running: Promise<void> | null = null;

@@ -492,8 +492,10 @@ for (const section of ['Capture', 'Notifications', 'Appearance', 'Country and cu
   ok(`settings: ${section} section is reachable`, !!(await waitForReachable(page, section)));
 }
 const settingsSweep = await pressEverything('settings', settings, { fullScroll: true });
+// This fresh, unsubscribed fixture is inside its free-capture period. Paid
+// and expired states are covered by the billing/smoke cases separately.
 for (const control of [
-  'Wafra Pro', 'Add bank statements', 'Daily spend summary', 'Theme',
+  'Free automatic capture', 'Add bank statements', 'Daily spend summary', 'Theme',
   'Language', 'Customize Home', 'App lock', 'Privacy and data', 'Data and help',
 ]) {
   ok(`settings: complete sweep includes ${control}`, settingsSweep.controls.some(key => key === control || key.startsWith(control)));

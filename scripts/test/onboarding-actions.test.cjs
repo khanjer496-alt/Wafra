@@ -155,8 +155,10 @@ function actions(options = {}) {
     ReadySummary: 'ReadySummary', Linking: { openSettings: async () => {} },
     stepBand: {}, bandButtonColor: () => ({}), onClose: undefined, revealAfterSetup: false,
     words: { continue: 'continue', addByHand: 'addByHand', manualTitle: 'manualTitle', waitingTitle: 'waitingTitle',
-      waitingBody: 'waitingBody', workingTitle: () => 'workingTitle' },
+      waitingBody: 'waitingBody', waitingBodyAndroid: 'waitingBodyAndroid', workingTitle: () => 'workingTitle' },
     preferredName: null, firstPayment: null, discoveredResult: null, readySummary: null, lang: 'en',
+    // iOS 15's imported-rows result wording; these journeys run on iOS 16+ and Android.
+    iosImportedResult: false,
     importsStillReading: false, showHistoryGapOffer: false, selectedAlerts: null, legacyFocus: null, legacyTracking: null,
     onboardingNoAutomaticCapture: () => false, showPattern() { record('showPattern'); }, openStatementImport() {},
     styles: new Proxy({}, { get: () => ({}) }), night: new Proxy({}, { get: () => 'color' }),
@@ -636,40 +638,6 @@ test('automatic capture final-save failure retains the overlay and rendered Retr
   assert.equal(calls(h, 'committed').length, 1);
 });
 
-// The complete preview module gets only rendering, localization and haptic
-// dependencies. Any future store, parser, native or persistence import fails
-// closed rather than supplying a mock that could silently accept a write.
-function preview(language) {
-  const hooks = []; let index = 0;
-  const jsx = (type, props = {}) => ({ type, props });
-  const themes = load(path.join(root, 'src/constants/theme.ts'), {
-    '@/global.css': {}, 'react-native': { Platform: { select: values => values.android } },
-  });
-  const i18n = load(process.env.WAFRA_ONBOARDING_I18N || path.join(root, 'src/lib/i18n.ts'));
-  const deps = {
-    react: { useState(initial) {
-      const position = index++;
-      if (!(position in hooks)) hooks[position] = typeof initial === 'function' ? initial() : initial;
-      return [hooks[position], value => { hooks[position] = typeof value === 'function' ? value(hooks[position]) : value; }];
-    } },
-    'react/jsx-runtime': { jsx, jsxs: jsx },
-    'react-native': { Pressable: 'Pressable', View: 'View', StyleSheet: { create: value => value, hairlineWidth: 1 } },
-    'react-native-reanimated': { __esModule: true, default: { View: 'Animated.View' },
-      FadeIn: { duration: () => ({}) }, FadeInDown: { duration: () => ({}) } },
-    '@/components/themed-text': { ThemedText: 'Text' },
-    '@/components/ui/icon': { Icon: 'Icon' },
-    '@/constants/theme': themes,
-    '@/hooks/use-language': { useLanguage: () => language },
-    '@/lib/i18n': i18n,
-    '@/lib/haptics': { tapped() {} },
-    '@/lib/ledger-money': load(path.join(root, 'src/lib/ledger-money.ts'), {
-      '@/lib/currency-metadata': load(path.join(root, 'src/lib/currency-metadata.ts')),
-    }),
-  };
-  const module = load(process.env.WAFRA_ONBOARDING_PREVIEW || path.join(root, 'src/components/onboarding/money-preview.tsx'), deps);
-  const component = module.MoneyPreview;
-  return { render(props = {}) { index = 0; return component({ reducedMotion: true, ...props }); }, i18n, sampleAmount: module.sampleAmount };
-}
 function walk(node, out = []) {
   if (Array.isArray(node)) node.forEach(child => walk(child, out));
   else if (node && typeof node === 'object') { out.push(node); walk(node.props?.children, out); walk(node.props?.footer, out); }
@@ -682,38 +650,6 @@ function text(node) {
 }
 /** The rendered actions: the E buttons and the quiet text actions. */
 const actionsOf = tree => walk(tree).filter(node => node.type === 'EButton' || node.type === 'ETextAction');
-for (const language of ['en', 'ar']) {
-  test(`sample interaction remains local and labeled before and after reveal/reset: ${language}`, () => {
-    const h = preview(language);
-    let tree = h.render();
-    for (let press = 0; press < 3; press++) {
-      assert.ok(text(tree).includes(h.i18n.t('onboardSampleLabel', language)));
-      assert.ok(text(tree).includes(h.i18n.t('onboardSampleNote', language)));
-      const button = walk(tree).find(node => node.type === 'Pressable' && typeof node.props.onPress === 'function');
-      assert.ok(button, 'The real preview has an interactive action');
-      const previous = text(tree);
-      button.props.onPress(); tree = h.render();
-      assert.notEqual(text(tree), previous, 'The actual action changes its preview');
-      assert.equal(walk(tree).filter(node => node.type === 'Animated.View' && node.props.entering !== undefined).length, 0,
-        'Reduced-motion render does not request an entering animation');
-    }
-  });
-}
-
-test('the sample amount follows the chosen ledger currency and never defaults to AED', () => {
-  const h = preview('en');
-  const sample = h.sampleAmount;
-  assert.deepEqual({ ...sample(null) }, { text: '24.50', spoken: '24.50' });
-  assert.equal(sample('AED').text, 'AED 24.50', 'the UAE sample is unchanged');
-  assert.equal(sample('SAR').text, 'SAR 24.50');
-  assert.equal(sample('JPY').text, 'JPY 2,450');
-  assert.equal(sample('KWD').text, 'KWD 2.450');
-  assert.equal(sample('INR').text, 'INR 245');
-  assert.equal(sample('ZZZ').text, '24.50', 'an unknown code is not printed as money');
-  assert.ok(text(h.render({ currency: 'EUR' })).includes('EUR 24.50'));
-  assert.ok(!text(h.render()).includes('AED'));
-});
-
 
 test('Not now on the shared SMS disclosure leaves onboarding usable without an OS-denied result', async () => {
   const h = actions({ requestSmsPermission: async options => { options.onDisclosureDeclined(); return false; } });

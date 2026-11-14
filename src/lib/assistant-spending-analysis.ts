@@ -18,7 +18,7 @@ export interface SpendingChangeDriver<Key extends string = string> {
   previousContributionsFils: Record<string, number>;
 }
 
-export interface SpendingChangeAnalysis {
+interface SpendingChangeAnalysis {
   currentFils: number;
   previousFils: number;
   deltaFils: number;

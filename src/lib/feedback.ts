@@ -80,7 +80,7 @@ export const FEEDBACK_SCHEMA = 2;
  * How much of the ledger the user chose to attach. Nested: `figures` contains
  * everything `shapes` does, and `shapes` everything `none` does.
  */
-export type FeedbackDetail = 'none' | 'shapes' | 'figures';
+type FeedbackDetail = 'none' | 'shapes' | 'figures';
 
 /** In the order they are offered, safest first. */
 export const FEEDBACK_DETAILS: readonly FeedbackDetail[] = ['none', 'shapes', 'figures'];
@@ -99,7 +99,7 @@ export const FEEDBACK_MESSAGE_MAX = 2000;
 export const FEEDBACK_SHAPES_MAX = 25;
 
 /** Everything about the build, none of it about the user. */
-export interface FeedbackBuild {
+interface FeedbackBuild {
   /** `Constants.expoConfig.version`. */
   version: string;
   /** `Platform.OS` — passed in, because this module has no react-native. */
@@ -115,7 +115,7 @@ export interface FeedbackBuild {
 }
 
 /** The read-only slice of the ledger a report can be built from. */
-export interface FeedbackLedger {
+interface FeedbackLedger {
   accounts: Account[];
   transactions: Transaction[];
   cardDues: CardDue[];
@@ -123,7 +123,7 @@ export interface FeedbackLedger {
   customCategories?: readonly { id: string; name: string; type: string }[];
 }
 
-export interface FeedbackInput {
+interface FeedbackInput {
   /** What the report is about, if the user picked a type. */
   topic?: FeedbackTopic | null;
   /** The user's own words. Truncated and digit-masked, never otherwise edited. */
@@ -135,7 +135,7 @@ export interface FeedbackInput {
 }
 
 /** One bank-message format the parser could not read, with the digits gone. */
-export interface FeedbackShape {
+interface FeedbackShape {
   /** The message with every digit replaced by `#` and known names aliased. */
   shape: string;
   /** What the parser made of it: an alias, or a title it minted itself. */
@@ -156,7 +156,7 @@ export interface FeedbackShape {
  * report and cannot be worked back to a transaction. Withheld at `none`
  * anyway, so that "message only" means exactly that.
  */
-export interface FeedbackCounts {
+interface FeedbackCounts {
   accounts: number;
   transactions: number;
   cardDues: number;
@@ -762,7 +762,7 @@ export interface FeedbackReceipt {
 }
 
 /** Implement this. It is the entire surface between capture and transport. */
-export type FeedbackTransport = (payload: FeedbackPayload) => Promise<FeedbackReceipt>;
+type FeedbackTransport = (payload: FeedbackPayload) => Promise<FeedbackReceipt>;
 
 /**
  * Thrown by `submitFeedback` when no transport has been installed.

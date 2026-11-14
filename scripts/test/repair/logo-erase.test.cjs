@@ -85,6 +85,7 @@ function harness(platform) {
     }, { filename: file });
     return exports;
   }
+  if (platform !== 'android') load('@/lib/logo-cache-lifecycle').setLogoLookupsAllowed(true);
   const state = load(platform !== 'web' ? '@/lib/state-storage.native' : '@/lib/state-storage').stateStorage;
   return {
     data, storage, state, load,

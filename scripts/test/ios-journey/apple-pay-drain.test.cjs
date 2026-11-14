@@ -55,7 +55,7 @@ test('Wallet and notifications share a non-evicting quota but retain distinct id
   assert.equal(tray.normalizeAlertReviewTray(JSON.parse(JSON.stringify(state)), now).pending.length, 100);
 });
 
-function harness({ wallet = [record(1)], legacy = ['sms'], failDurable = false, refuseReview = false, failAck = false, blockedNotification = false } = {}) {
+function harness({ wallet = [record(1)], legacy = ['sms'], failDurable = false, refuseReview = false, failAck = false, blockedNotification = false, smsReview = false } = {}) {
   let applePay = [...wallet], sms = [...legacy], generation = 1;
   const calls = [], state = { hydrated: true, captureOptOut: false, marketId: 'AE', transactions: [], accounts: [],
     lastScanTs: 0, reviewTray: tray.emptyAlertReviewTray(), localCaptureQualifications: [] };
@@ -69,7 +69,9 @@ function harness({ wallet = [record(1)], legacy = ['sms'], failDurable = false, 
     '@/lib/ios-notification-replay': { createIosNotificationReplayGuard: () => outcome => outcome },
     '@/lib/local-message-record': { ...records,
       preflightLocalMessageRecord: value => value === 'sms' ? { id: 'sms-id', valid: true, market: null } : records.preflightLocalMessageRecord(value, new Date(now)),
-      parseLocalMessageRecord: value => { assert.equal(value, 'sms'); calls.push('sms-parse'); return blockedNotification
+      parseLocalMessageRecord: value => { assert.equal(value, 'sms'); calls.push('sms-parse'); return smsReview
+        ? { kind: 'review', market: null, milestone: 'none', item: { ...entry(600), channel: 'inbox', id: 'sms_review_identity_600', sourceKey: 'sms_review_source_600' } }
+        : blockedNotification
         ? { kind: 'review', market: null, milestone: 'none', item: { ...entry(500), id: 'notification_review_blocked', sourceKey: 'local_review_source_' + 'f'.repeat(32) } }
         : { kind: 'ignored', market: null, milestone: 'none' }; },
     },
@@ -85,13 +87,14 @@ function harness({ wallet = [record(1)], legacy = ['sms'], failDurable = false, 
   const ledger = { getState: () => state, getStateGeneration: () => generation,
     setMarket: () => { throw Error('Wallet cannot set market'); }, importBatch: () => { throw Error('Wallet cannot post money'); },
     ensureDurable: async () => { calls.push('barrier'); if (failDurable && sms.length === 0) throw Error('disk failed'); },
-    stageReviewAlerts: (items, qualifications) => {
+    stageReviewAlerts: (items, qualifications, _bindings, mode) => {
       assert.equal(qualifications, undefined); let admitted = 0; calls.push('review');
       if (!refuseReview) for (const item of items) {
         if (blockedNotification && tray.isIosNotificationReview(item)) continue;
-        const next = tray.admitPreparedReviewAlert(state.reviewTray, item, now); state.reviewTray = next.state; admitted += next.outcome === 'admitted' ? 1 : 0;
+        const next = tray.admitPreparedReviewAlert(state.reviewTray, item, now, mode); state.reviewTray = next.state; admitted += next.outcome === 'admitted' ? 1 : 0;
       }
-      return { admitted, durable: failDurable ? Promise.reject(Error('disk failed')) : Promise.resolve() };
+      return { admitted, durable: failDurable ? Promise.reject(Error('disk failed')) : Promise.resolve(),
+        retention: () => tray.reviewRetentionReceipts(state.reviewTray, items, now) };
     },
   };
   const coordinator = api.createIosLocalCaptureCoordinator({ native, ledger, retireShortcutCapture: async () => { throw Error('Wallet cannot retire SMS'); } });
@@ -153,4 +156,56 @@ test('held Wallet head does not starve valid neighbors on the next bounded page'
   assert.equal(result.reviews, 50); assert.equal(result.scanned, 52, '51 Wallet records plus one SMS');
   assert.equal(result.deferredApplePay, 1); assert.equal(h.queue().length, 1);
   assert.ok(h.calls.filter(x => x === 'wallet-read').length <= 4);
+});
+
+// Acknowledgement must consume each stage call's OWN settled receipt. A live
+// tray read after the write can still show the source pending (a later
+// optimistic write) while this receipt's snapshot does not carry it.
+const withReceipt = (h, outcome) => {
+  const original = h.ledger.stageReviewAlerts;
+  h.ledger.stageReviewAlerts = (...args) => { const result = original(...args);
+    return { ...result, retention: () => tray.reviewRetentionReceipts(tray.emptyAlertReviewTray(), args[0], now)
+      .map(entry => ({ ...entry, outcome })) }; };
+};
+const acked = h => h.calls.filter(x => Array.isArray(x) && x[0] === 'ack').flatMap(x => x.slice(1));
+
+test('Wallet ACK waits for its own pending/resolved receipt, not a live pending read', async () => {
+  for (const outcome of ['deferred', 'refused']) {
+    const h = harness(); withReceipt(h, outcome);
+    const result = await h.coordinator.drain();
+    assert.equal(h.state.reviewTray.pending.length, 1, 'the live tray does carry the source');
+    assert.equal(h.queue().length, 1, `${outcome} receipt keeps the native record`);
+    assert.equal(result.deferredApplePay, 1); assert.equal(acked(h).includes(id(1)), false);
+  }
+  for (const outcome of ['pending', 'resolved']) {
+    const h = harness(); withReceipt(h, outcome); await h.coordinator.drain();
+    assert.equal(h.queue().length, 0, `${outcome} receipt releases it`);
+  }
+});
+
+test('an expired Wallet source is a terminal counted loss: ACKed exactly once, evicted-like stays held', async () => {
+  const h = harness(); withReceipt(h, 'expired');
+  await h.coordinator.drain();
+  assert.equal(h.queue().length, 0, 'expired releases the native record');
+  assert.equal(acked(h).filter(x => x === id(1)).length, 1, 'ACKed exactly once');
+  await h.coordinator.drain();
+  assert.equal(acked(h).filter(x => x === id(1)).length, 1, 'a later drain never re-ACKs or re-stages');
+  const held = harness(); withReceipt(held, 'deferred'); await held.coordinator.drain();
+  assert.equal(held.queue().length, 1, 'an evicted/deferred source stays queued');
+});
+
+test('a receipt-less stage never authorizes a Wallet ACK', async () => {
+  const h = harness(); const original = h.ledger.stageReviewAlerts;
+  h.ledger.stageReviewAlerts = (...args) => { const { retention, ...rest } = original(...args); return rest; };
+  const result = await h.coordinator.drain();
+  assert.equal(h.queue().length, 1); assert.equal(result.deferredApplePay, 1);
+});
+
+test('generic non-push card-payment Review is ACKed only behind its own pending/resolved receipt', async () => {
+  const held = harness({ smsReview: true }); withReceipt(held, 'deferred');
+  const result = await held.coordinator.drain();
+  assert.equal(acked(held).includes('sms-id'), false, 'deferred receipt keeps the SMS source');
+  assert.ok(result.deferredReviews >= 1);
+  const kept = harness({ smsReview: true }); await kept.coordinator.drain();
+  assert.equal(acked(kept).includes('sms-id'), true, 'a pending receipt releases it');
 });

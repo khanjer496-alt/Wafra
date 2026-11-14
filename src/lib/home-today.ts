@@ -9,7 +9,7 @@ import type { Budget, CategoryId, Transaction } from '@/lib/types';
  * spending. It has no other app imports, so Home's test harness can load it
  * as-is.
  */
-export interface HomeWeekDay {
+interface HomeWeekDay {
   /** Local calendar date, YYYY-MM-DD. */
   dateISO: string;
   /** 0 = Sunday … 6 = Saturday, from the local calendar. */
@@ -18,7 +18,7 @@ export interface HomeWeekDay {
   today: boolean;
 }
 
-export interface HomeBudgetPace {
+interface HomeBudgetPace {
   limitFils: number;
   /** Spending in budgeted categories only. */
   spentFils: number;
@@ -60,7 +60,7 @@ export interface HomeToday {
   averageDays: number[] | null;
 }
 
-export interface HomeTodayInput {
+interface HomeTodayInput {
   transactions: readonly Transaction[];
   budgets: readonly Budget[];
   now: Date;

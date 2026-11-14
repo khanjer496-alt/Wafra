@@ -134,5 +134,12 @@ ok('production emergency cost switches are explicit and enabled by default',
 
 ok('the deploy runbook exists', fs.existsSync(path.join(root, 'DEPLOY.md')));
 
+// The finance relay must not persist URL-bearing request logs.
+const obs = toml.split('[observability]')[1]?.split('[[send_email]]')[0] ?? '';
+ok('observability redacts query strings', /^redact_query_string\s*=\s*true$/m.test(obs));
+const logs = toml.split('[observability.logs]')[1]?.split(/\n\[/)[0] ?? '';
+ok('automatic invocation logs are disabled', /^invocation_logs\s*=\s*false$/m.test(logs));
+ok('logs are not persisted', /^persist\s*=\s*false$/m.test(logs));
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

@@ -25,6 +25,7 @@ import { toISODate } from '@/lib/format';
 import { bodyPrint, statedBalanceInText, type CaptureChannel } from '@/lib/dedupe';
 import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
+import { isUnpostedCardBalanceClaim, isCompletedCardBalanceReceipt, blankWordLinkPrompts } from '@/lib/principal-posting-guards';
 import {
   nonPostingReason,
   parseForeignAwaitingRate,
@@ -64,7 +65,7 @@ import {
 } from '@/lib/markets';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { dateOrderForCountry, getActiveCountry } from '@/lib/country';
-import { bestEffortAutoPostEnabled, decideBestEffortAutoPost } from '@/lib/best-effort-autopost';
+import { bestEffortAutoPostEnabled, decideBestEffortAutoPost, isSafeCardRepaymentReviewSource, isNotAutoPostableMoney } from '@/lib/best-effort-autopost';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { UniversalBankEvent } from '@/lib/universal-types';
 import { certifyUniversalTemplate } from '@/lib/universal-template-certification';
@@ -82,7 +83,7 @@ const DEFAULT_PAGE_SIZE = 1_000;
 const MAX_PAGE_SIZE = 2_000;
 const MAX_REVIEW_CANDIDATES = 50;
 
-export interface AndroidNotificationImportDiagnostics {
+interface AndroidNotificationImportDiagnostics {
   attemptedAt: number;
   captured: number;
   autoParsed: number;
@@ -210,7 +211,7 @@ export const CARRIER_DUPLICATE_DATETIME_RE =
  * figure counts (currency code or two decimals), and never "balance
  * transfer", so an offer footer that is identical on every alert does not.
  */
-export const CARRIER_DUPLICATE_BALANCE_RE =
+const CARRIER_DUPLICATE_BALANCE_RE =
   /\b(?:(?:avl|avail(?:able)?|current|curr|ledger|closing|remaining)\.?\s*)?bal(?:ance)?\b(?!\s*transfer)[^0-9٠-٩\n]{0,20}?(?:(?:AED|Dhs?|SAR|SR|QAR|KWD|BHD|OMR|EGP|INR|PKR|PHP|USD|EUR|GBP|CAD|AUD|JPY|CNY|CHF|TRY|GHS|د\.إ|ر\.س|درهم|ريال)\s*[0-9٠-٩][0-9٠-٩,٬]*(?:[.٫][0-9٠-٩]{1,3})?|[0-9٠-٩][0-9٠-٩,٬]*[.٫][0-9٠-٩]{2}(?![0-9٠-٩])|[0-9٠-٩][0-9٠-٩,٬]*(?:[.٫][0-9٠-٩]{1,3})?\s*(?:AED|SAR|QAR|KWD|BHD|OMR|USD|EUR|GBP|د\.إ|ر\.س|درهم|ريال))|رصيد[^0-9٠-٩\n]{0,20}?(?:(?:AED|SAR|د\.إ|ر\.س|درهم|ريال)\s*[0-9٠-٩][0-9٠-٩,٬]*(?:[.٫][0-9٠-٩]{1,3})?|[0-9٠-٩][0-9٠-٩,٬]*[.٫][0-9٠-٩]{2}(?![0-9٠-٩])|[0-9٠-٩][0-9٠-٩,٬]*\s*(?:AED|SAR|د\.إ|ر\.س|درهم|ريال))/i;
 
 /** Whether an identical copy of [body] can only be the same posting. */
@@ -410,7 +411,7 @@ const SMS_HISTORY_DISCLOSURE_KEY = 'wafra.android.sms-history-disclosure.v1';
 const SMS_HISTORY_DISCLOSURE_VERSION = '1';
 
 /** OS permission alone is not evidence that this installation saw the disclosure. */
-export async function hasSmsSystemPermission(): Promise<boolean> {
+async function hasSmsSystemPermission(): Promise<boolean> {
   if (!isSmsScanningAvailable()) return false;
   return PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS);
 }
@@ -506,12 +507,12 @@ export type { CaptureChannel } from '@/lib/dedupe';
 export type { ScannedSms, DeclinedSms, ImportPlan } from '@/lib/import-plan';
 export { buildImportPlan } from '@/lib/import-plan';
 
-export interface InboxScanCursor {
+interface InboxScanCursor {
   beforeDateMs: number;
   beforeId: number;
 }
 
-export interface ScanInboxOptions {
+interface ScanInboxOptions {
   /** Ready local formats advise Review only; parser-version repair always disables them. */
   privateFormatReview?: PrivateAlertFormatSessionOptions;
   /** Read the bank-app queue without requiring or advancing the SMS inbox. */
@@ -601,7 +602,7 @@ export interface ScanResult {
 }
 
 /** One transaction a running scan has just parsed, as display facts only. */
-export interface ScanFoundPreview {
+interface ScanFoundPreview {
   merchant: string;
   category: import('@/lib/types').CategoryId;
   type: import('@/lib/types').TransactionType;
@@ -666,13 +667,28 @@ class ReviewIdentityError extends Error {
 type ExpoDigest = {
   CryptoDigestAlgorithm: { SHA256: unknown };
   digestStringAsync(algorithm: unknown, data: string): Promise<string>;
+  digest?(algorithm: unknown, data: Uint8Array): Promise<ArrayBuffer>;
 };
 
-const sha256 = (data: string): Promise<string> => {
+const sha256 = async (data: string): Promise<string> => {
   // The test harness intentionally stubs only Crypto's random-byte surface.
   // Cast at this private seam while production calls Expo SDK 55's documented
-  // digestStringAsync/CryptoDigestAlgorithm pair directly.
+  // digest/digestStringAsync/CryptoDigestAlgorithm API directly.
   const digest = Crypto as unknown as ExpoDigest;
+  // Android hashes BYTES. expo-modules-core (SDK 55) converts every String
+  // argument on Android with env->NewStringUTF(utf8.c_str()), which stops at
+  // the first NUL, and the review identity joins its fields with U+0000: on a
+  // device every Android review hashed only its constant domain prefix, so all
+  // reviews got ONE id and the tray refused all but the first (Android RC 396
+  // F1). A typed array crosses the bridge intact, and SHA-256 of the UTF-8
+  // bytes is exactly what digestStringAsync computes where strings survive, so
+  // the identity is the documented one and iOS keeps its existing path.
+  if (Platform.OS === 'android' && typeof digest.digest === 'function' && typeof TextEncoder === 'function') {
+    const bytes = new Uint8Array(await digest.digest(digest.CryptoDigestAlgorithm.SHA256, new TextEncoder().encode(data)));
+    let hex = '';
+    for (const byte of bytes) hex += byte.toString(16).padStart(2, '0');
+    return hex;
+  }
   return digest.digestStringAsync(digest.CryptoDigestAlgorithm.SHA256, data);
 };
 
@@ -763,17 +779,17 @@ async function bindProviderReviewIdentity(
   };
 }
 
-export type SourceFreeReviewCandidate =
+type SourceFreeReviewCandidate =
   | Omit<ReviewAlert, 'id' | 'sourceKey' | 'templateKey'>
   | Omit<UniversalReviewAlert, 'id' | 'sourceKey'>;
 
-export interface SourceFreeReviewIdentity {
+interface SourceFreeReviewIdentity {
   id: string;
   sourceKey: string;
   templateKey?: string;
 }
 
-export type SourceFreeRefusedAlertDecision =
+type SourceFreeRefusedAlertDecision =
   | { kind: 'declined'; reason: NonPostingReason }
   | { kind: 'review'; candidate: SourceFreeReviewCandidate }
   | { kind: 'ignored'; reason: 'promotion' | 'non-financial' | 'unrecognized' };
@@ -977,19 +993,26 @@ export function inspectSourceFreeRefusedAlert(input: {
   /** Known launch-bank package identity makes worldwide fallback unnecessary. */
   skipUniversalFallback?: boolean;
 }): SourceFreeRefusedAlertDecision {
+  // A footer made of link WORDS only ("If not you, tap here to block your card") names no address, so it cannot be a
+  // phishing link; the debit above it must reach Review, never be dropped. It is blanked for this inspection only:
+  // posting still refuses the original text, and a footer that names a real URL stays refused.
+  const source = blankWordLinkPrompts(input.source);
   // BNPL provider restatement (see bnpl-providers.ts): the bank's
   // card alert is the transaction, so this source never earns a Review card.
   if (isBnplProviderSource(input.sender)) return { kind: 'ignored', reason: 'non-financial' };
-  const reason = nonPostingReason(input.source);
+  // An explicit non-credit/future balance claim must not acquire actionable
+  // money through an unparsed-template fallback. This is no ledger deletion.
+  if (isUnpostedCardBalanceClaim(source)) return { kind: 'ignored', reason: 'non-financial' };
+  const reason = nonPostingReason(source);
   if (reason) return { kind: 'declined', reason };
   // A generic amount detector can read "Get AED 50 cashback on your next
   // purchase" as a posted purchase. The launch parser already refused it;
   // never turn a bank-app offer into an actionable spending review.
-  if (input.channel === 'push' && isPromotionalBankPush(input.source)) {
+  if (input.channel === 'push' && isPromotionalBankPush(source)) {
     return { kind: 'ignored', reason: 'promotion' };
   }
-  if (!hasBankAlertMoneyHint(input.source) &&
-    !hasGenericBankAlertContext(input.source, input.sender)) {
+  if (!hasBankAlertMoneyHint(source) &&
+    !hasGenericBankAlertContext(source, input.sender)) {
     return { kind: 'ignored', reason: 'non-financial' };
   }
 
@@ -997,9 +1020,9 @@ export function inspectSourceFreeRefusedAlert(input: {
   // (NGN, ISK, UZS ...) waits in Review in its own currency until a dated
   // rate converts it at promotion. It is never dropped, even when the
   // worldwide fallback below is skipped or cannot read the template.
-  const launchMarket = detectLaunchMarketFromAlert(input.source, input.sender);
+  const launchMarket = detectLaunchMarketFromAlert(source, input.sender);
   const awaitingRate = launchMarket
-    ? withMarketPackForParsing(launchMarket, () => parseForeignAwaitingRate(input.source, undefined, {
+    ? withMarketPackForParsing(launchMarket, () => parseForeignAwaitingRate(source, undefined, {
         sender: input.sender, observedAt: input.observedAt,
       }))
     : null;
@@ -1009,22 +1032,36 @@ export function inspectSourceFreeRefusedAlert(input: {
     if (candidate) return { kind: 'review', candidate: { ...candidate, channel: input.channel } };
   }
 
-  // A UAE/Saudi credit the sender-trust rule held back (blank, phone, e-mail
-  // or generic sender; no own account or card tail; no scam wording) waits in
-  // Review with its amount filled in. It is never dropped: a genuine incoming
+  // A UAE/Saudi credit held for a phone, e-mail or generic sender, or a blank
+  // sender without an own tail, waits in Review with its amount filled in.
+  // Scam wording is still refused. It is never dropped: a genuine incoming
   // transfer read from iPhone History has no sender at all.
   if (launchMarket && isUnaccountableLaunchSender(input.sender)) {
-    const credit = withMarketPackForParsing(launchMarket, () => parseSms(input.source, undefined, {
+    const credit = withMarketPackForParsing(launchMarket, () => parseSms(source, undefined, {
       sender: input.sender, observedAt: input.observedAt,
     }));
-    if (credit && isHeldLaunchCredit(input.source, input.sender, credit)) {
+    if (credit && isHeldLaunchCredit(source, input.sender, credit)) {
       const { raw: _raw, ...facts } = credit;
       const candidate = parsedFinancialCandidateReview(facts, input.observedAt);
       if (candidate) return { kind: 'review', candidate: { ...candidate, channel: input.channel } };
     }
   }
 
-  const inspection = input.existingInspection ?? input.session.inspect(input.source, input.sender);
+  // Prefer typed settlement Review over a generic purchase/income draft. No
+  // amount, direction or card identity is invented; missing fields stay open.
+  if (isSafeCardRepaymentReviewSource(source) ||
+    (isCompletedCardBalanceReceipt(source) && !isNotAutoPostableMoney(source))) {
+    const event = inspectGenericBankEventForReview(source, input.sender);
+    const review = event?.family === 'card-payment' && (event.status === 'posted' || event.status === 'unknown') ? prepareUniversalReviewAlert({
+      id: 'capture_probe_id_0001', sourceKey: 'capture_probe_key_001',
+      observedAt: input.observedAt, channel: input.channel, event,
+    }) : null;
+    if (review) {
+      const { id: _id, sourceKey: _sourceKey, ...candidate } = review;
+      return { kind: 'review', candidate };
+    }
+  }
+  const inspection = input.existingInspection ?? input.session.inspect(source, input.sender);
   const prepared = inspection
     ? prepareReviewAlert({
         id: 'capture_probe_id_0001',
@@ -1037,7 +1074,7 @@ export function inspectSourceFreeRefusedAlert(input: {
   // A globally routed or ambiguous result has already been judged by the
   // global inspector. The launch fallback is only for alerts with no route.
   const launchReview = inspection === null
-    ? inspectUnparsedLaunchAlert(input.source, input.sender)
+    ? inspectUnparsedLaunchAlert(source, input.sender)
     : null;
   const reviewPrepared = prepared ?? (launchReview?.outcome === 'review'
     ? prepareLaunchReviewAlert({
@@ -1056,11 +1093,11 @@ export function inspectSourceFreeRefusedAlert(input: {
     // Leave the encrypted row unresolved for a future parser instead.
     if (input.skipUniversalFallback) return { kind: 'ignored', reason: 'unrecognized' };
     // A Gulf-neighbour route reads its own currency spellings for the amount.
-    const event = inspectGenericBankEventForReview(input.source, input.sender,
+    const event = inspectGenericBankEventForReview(source, input.sender,
       inspection?.route.decision === 'single' ? inspection.route.market : null);
     // The only place the text and the generic reading meet: keep a value-free
     // shape (never the text) so confirming the reading unchanged can share it.
-    const share = event ? buildCandidateShareShape(input.source, input.sender, event) : null;
+    const share = event ? buildCandidateShareShape(source, input.sender, event) : null;
     const universal = event ? prepareUniversalReviewAlert({
       id: 'capture_probe_id_0001',
       sourceKey: 'capture_probe_key_001',

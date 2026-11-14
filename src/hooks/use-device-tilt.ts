@@ -38,11 +38,6 @@ function deviceMotion(): DeviceMotionModule | null {
   return motionModule;
 }
 
-/** Whether this build can tilt at all (the native sensor module is present). */
-export function deviceTiltSupported(): boolean {
-  return deviceMotion() !== null;
-}
-
 export function useDeviceTilt(hold: boolean): { x: Animated.Value; y: Animated.Value } {
   const motion = useMotionPreference();
   const active = useAppActive();

@@ -147,10 +147,11 @@ function executorHarness(reviewTray = built('alert-review-tray').emptyAlertRevie
   let durable = Promise.resolve(), serial = 0, generation = 0;
   const ledger = {
     getState: () => state, getStateGeneration: () => generation, ensureDurable: () => durable,
-    stageReviewAlerts(items) {
-      const batch = built('alert-review-tray').admitPreparedReviewAlerts(state.reviewTray, items, Date.now());
+    stageReviewAlerts(items, _qualifications, _bindings, mode) {
+      const batch = built('alert-review-tray').admitPreparedReviewAlerts(state.reviewTray, items, Date.now(), mode);
       state = { ...state, reviewTray: batch.state };
-      return { admitted: batch.outcomes.filter(value => value === 'admitted').length, durable };
+      return { admitted: batch.outcomes.filter(value => value === 'admitted').length, durable,
+        retention: () => built('alert-review-tray').reviewRetentionReceipts(state.reviewTray, items, Date.now()) };
     },
     importBatch(batch) {
       const api = built('ledger-import');
@@ -170,6 +171,13 @@ function executorHarness(reviewTray = built('alert-review-tray').emptyAlertRevie
       const tombstones = outcome ? state.reviewTray.pending.map(item => ({ sourceKey: item.sourceKey,
         resolvedAt: Date.now(), expiresAt: Date.now() + 86400000, outcome })) : [];
       state = { ...state, reviewTray: { ...state.reviewTray, pending: [], tombstones } };
+    },
+    // A real expiry tombstone carries the canonical source key (with observedAt).
+    expirePending() {
+      const trayModule = built('alert-review-tray');
+      const keys = state.reviewTray.pending.map(item => trayModule.reviewSourceKeyOf(item));
+      state = { ...state, reviewTray: { ...state.reviewTray, pending: [], tombstones: keys.map(sourceKey => ({
+        sourceKey, resolvedAt: Date.now(), expiresAt: Date.now() + 86400000, outcome: 'expired' })) } };
     },
     resolveOldest() {
       state = { ...state, reviewTray: built('alert-review-tray').resolveReviewAlert(
@@ -429,7 +437,7 @@ test('a known in-memory review is ACKed only after durability and cannot survive
   assert.equal(h.state.reviewTray.pending.length, 1);
   assert.equal(notifications.length, 0);
 });
-for (const outcome of [undefined, 'evicted', 'expired']) test(`a same-generation ${outcome ?? 'missing'} review cannot authorize native ACK`, async () => {
+for (const outcome of [undefined, 'evicted']) test(`a same-generation ${outcome ?? 'missing'} review cannot authorize native ACK`, async () => {
   reset(); notifications = [row(120)];
   const h = executorHarness(); await h.run();
   notifications = [row(120)]; acknowledged = [];
@@ -441,6 +449,31 @@ for (const outcome of [undefined, 'evicted', 'expired']) test(`a same-generation
   release(); await pending;
   assert.equal(acknowledged.length, 0);
   assert.equal(notifications.length, 1);
+});
+test('a same-generation expired review is a counted terminal loss and may be ACKed once', async () => {
+  reset(); notifications = [row(120)];
+  const h = executorHarness(); await h.run();
+  notifications = [row(120)]; acknowledged = [];
+  let release;
+  h.setDurable(new Promise(resolve => { release = resolve; }));
+  const pending = h.run();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  h.loseReviews('expired');
+  release(); await pending;
+  assert.equal(notifications.length, 0);
+  assert.equal(h.state.reviewTray.tombstones.filter(x => x.outcome === 'expired').length, 1, 'counted exactly once');
+});
+test('an expired inbox source no longer holds the cursor or parser receipt and is never re-staged', async () => {
+  reset();
+  inbox = [{ id: 99, address: 'BNPPARIBAS', body: 'BNP Paribas: Paiement par carte débité de EUR 42,34 chez PRIVATE-BOUTIQUE', date: now }];
+  const h = executorHarness(); await h.run(false);
+  const watermark = h.state.lastScanTs;
+  h.expirePending();
+  inbox.push({ id: 100, address: 'BNPPARIBAS', body: 'Account settings updated.', date: now + 1000 });
+  await h.run(false);
+  assert.equal(h.state.reviewTray.pending.length, 0, 'an expired source is never re-staged');
+  assert.equal(h.state.reviewTray.tombstones.filter(x => x.outcome === 'expired').length, 1, 'counted once, not per read');
+  assert.ok(h.state.lastScanTs > watermark, 'only expired sources remain, so the cursor advances');
 });
 test('a vanished skipped inbox review cannot advance its cursor or parser receipt', async () => {
   reset(); notifications = [row(120)];

@@ -6,11 +6,10 @@ const ROOT = path.join(__dirname, '../..');
 const read = (relative) => fs.readFileSync(path.join(ROOT, relative), 'utf8');
 const code = (value) => value.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
 
-const home = read('src/screens/ledger-home-screen.tsx');
+const home = read('src/screens/journal-home-screen.tsx');
 assert.match(home, /projectDashboard\(\{/);
-assert.match(home, /netFils=\{dashboard\.hero\.netFils\}/);
-assert.match(home, /incomeFils=\{dashboard\.hero\.incomeFils\}/);
-assert.match(home, /expenseFils=\{dashboard\.hero\.expenseFils\}/);
+// The shipping Home hands the hero its three figures straight from the dashboard projection.
+assert.match(home, /incomeFils: dashboard\.hero\.incomeFils, expenseFils: dashboard\.hero\.expenseFils, netFils: dashboard\.hero\.netFils,/);
 
 const transactions = read('src/app/transactions.tsx');
 for (const parameter of ['source', 'type', 'category', 'merchant']) {
@@ -153,13 +152,6 @@ assert.match(inactiveAccountRows, /onLongPress=\{\(\) => setOptionsFor\(account\
 assert.match(interactionWallet, /accessibilityState=\{\{ expanded: showInactive \}\}/);
 assert.doesNotMatch(interactionWallet, /longPressInactive/);
 
-const task3Home = read('src/screens/ledger-home-screen.tsx');
-assert.match(task3Home, /const homeHeader: ScreenHeaderProps = \{/);
-assert.match(task3Home, /<ScreenScaffold[\s\S]*?tabbed[\s\S]*?header=\{homeHeader\}/);
-assert.match(task3Home, /homeHeader[\s\S]*?searchMerchants[\s\S]*?settingsTitle/);
-assert.match(task3Home, /function Hero[\s\S]*?<PeriodPill onPress=\{onChangePeriod\}/);
-assert.match(task3Home, /<Hero[\s\S]*?onChangePeriod=\{\(\) => setPeriodSheetOpen\(true\)\}/);
-
 const task3Transactions = read('src/app/transactions.tsx');
 // Design language E: an ink band (nav, search, type chips) over a sheet that
 // holds the virtualized list; the sheet clears the home indicator itself.
@@ -219,11 +211,8 @@ const task4Stats = read('src/app/stats.tsx');
 assert.match(task4Stats,/import \{ Redirect \} from 'expo-router'/);
 assert.match(task4Stats,/<Redirect href="\/flow\?view=trends"/);
 
-const task4DataVizPath = path.join(ROOT, 'src/components/ui/data-viz.ts');
-assert.ok(fs.existsSync(task4DataVizPath), 'Task 4 data-viz helper exists');
 const task4Charts = read('src/components/ui/charts.tsx');
 assert.match(task4Charts, /import \{[^}]*\bDataViz\b[^}]*\} from '@\/constants\/theme'/);
-assert.match(task4Charts, /from '@\/components\/ui\/data-viz'/);
 assert.doesNotMatch(read('src/lib/categories.ts'), /CATEGORY_RAMP|rampColor|onRampColor/);
 const overview=read('src/components/spending/spending-overview.tsx');
 const trends=read('src/components/spending/spending-trends.tsx');

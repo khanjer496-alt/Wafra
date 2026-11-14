@@ -4,8 +4,17 @@ import { Platform } from 'react-native';
 import SmsReader from '../../modules/sms-reader';
 import { collectSmsCorpus, serializeSmsCorpus } from '@/lib/sms-corpus';
 
-const JS_CORPUS_EXPORT_ENABLED =
-  process.env.EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT === '1';
+/**
+ * Build marker: after Expo's inlining and Metro's release constant folding,
+ * only one string reaches the bundle. build-apk.yml fails a Play bundle that
+ * carries "=on" (scripts/android-build-flags.cjs). The gate is derived from it.
+ */
+export const SMS_CORPUS_EXPORT_BUILD_FLAG =
+  process.env.EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT === '1'
+    ? 'wafra-build-flag:sms-corpus-export=on'
+    : 'wafra-build-flag:sms-corpus-export=off';
+
+const JS_CORPUS_EXPORT_ENABLED = SMS_CORPUS_EXPORT_BUILD_FLAG.endsWith('=on');
 
 /** Both the JavaScript bundle and native binary must opt into raw export. */
 export const isSmsCorpusExportAvailable = (): boolean => {

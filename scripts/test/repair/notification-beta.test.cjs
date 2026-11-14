@@ -389,8 +389,6 @@ test('foreground notification drain is independent of SMS freshness and self-hea
   const diagnosticsEnd = module.indexOf('AsyncFunction("sweepVisible")');
   assert.doesNotMatch(module.slice(diagnosticsStart, diagnosticsEnd), /sweepOrRequestRebind|sweepConnected/,
     'reading diagnostic counts must not sweep the full shade');
-  const tester = read('src/lib/android-tester-diagnostics.ts');
-  assert.match(tester, /getAndroidNotificationImportDiagnostics\(\)/);
   assert.match(scanner, /acknowledgementPlanned/);
   assert.match(scanner, /unresolved/);
   assert.match(scanner, /unresolvedTrustedBank/);

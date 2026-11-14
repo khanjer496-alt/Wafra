@@ -49,14 +49,14 @@ import { monthEndISO, monthKey, monthLabel, monthStartISO, shiftMonthKey } from 
 import { daysPhrase, leavingSoon, type Outgoing } from '@/lib/leaving-soon';
 import { markLaunchPhase } from '@/lib/launch-performance';
 import { ledgerCurrencyCode, marketCurrencyCode } from '@/lib/markets';
-import { formatMinorUnits, formatMoneyText, ledgerMoneySpec } from '@/lib/ledger-money';
+import { formatMinorUnits, ledgerMoneySpec } from '@/lib/ledger-money';
+import { formatMoneyText } from '@/lib/ui-money-text';
 import { internalTransferIdsForState, isSpending, liveAccountIds, transferReconciliationForStateInSlices } from '@/lib/ledger';
 import { hasRecordsBefore, liveCaptureTimes, pendingTransferSummary, summarizeHomeToday, type PendingTransferSummary } from '@/lib/home-today';
 import { detectCapturePause } from '@/lib/capture-pause';
 import { loadCapturePauseSnooze, saveCapturePauseSnooze } from '@/lib/capture-pause-state';
 import { isLiveCapture } from '@/lib/transaction-source';
 import { homeSummaryCopy, paymentAgendaCopy } from '@/lib/reference-copy';
-import { invalidateWidgetSnapshotSync, requestWidgetSnapshotSync } from '@/lib/widget-sync';
 import { allocationsOf } from '@/lib/splits';
 import { isFixedCommitment } from '@/lib/categories';
 import { moneyPictureProgress } from '@/lib/money-picture-progress';
@@ -66,6 +66,7 @@ import { reminderScheduleInputsChanged } from '@/lib/reminders';
 import { inPeriod, periodLabel } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { isProActive } from '@/lib/purchases';
+import { isFounderUnlockBuild } from '@/lib/founder-pro';
 import { useStoreActions, useStoreSelector } from '@/lib/store';
 import { fieldsEqual } from '@/lib/store-selection';
 import { detectSubscriptionsCooperatively, peekSubscriptionDetection, type Subscription } from '@/lib/subscriptions';
@@ -123,7 +124,7 @@ const sameHomeWidgets = (a: HomeWidgetPreferences, b: HomeWidgetPreferences): bo
   a === b || JSON.stringify(a) === JSON.stringify(b);
 
 /** Every Recent transactions row painted for one period since Home mounted, by id (never the rows themselves). */
-export interface ShownActivity {
+interface ShownActivity {
   scope: string;
   ids: ReadonlySet<string>;
   /** The row that arrived last, kept so its arrival is not cut short by the next render. */
@@ -650,44 +651,9 @@ export default function JournalHomeScreen() {
     else void loadPaceMemory().then((memory) => { if (alive) observe(memory); });
     return () => { alive = false; };
   }, [state.hydrated, state.onboarded, livePace, heroKey, projectionDay, revealReady]);
-  // Native widgets use Bills' complete 30-day recurring projection, never
-  // Home's deliberately shorter 9-day list (which adds detected subscriptions
-  // only once that shared projection has an answer).
-  useEffect(() => {
-    if (!state.hydrated || !state.onboarded || state.privateMode) {
-      void invalidateWidgetSnapshotSync();
-      return;
-    }
-    const generation = getStateGeneration();
-    const source = getStateSnapshot();
-    let request: ReturnType<typeof requestWidgetSnapshotSync> | undefined;
-    let cancelled = false;
-    const current = () => {
-      const latest = getStateSnapshot();
-      return !cancelled && generation === getStateGeneration() && latest.hydrated && latest.onboarded && !latest.privateMode
-        && latest.transactions === source.transactions && latest.accounts === source.accounts
-        && latest.budgets === source.budgets && latest.bills === source.bills && latest.cardDues === source.cardDues
-        && latest.notSubscriptions === source.notSubscriptions && latest.cancelledSubscriptions === source.cancelledSubscriptions
-        && latest.transferInternalIds === source.transferInternalIds && latest.transferNormalizationVersion === source.transferNormalizationVersion
-        && latest.ledgerMoney === source.ledgerMoney && latest.marketId === source.marketId && latest.language === source.language
-        && latest.historyImport === source.historyImport
-        // The spending widget names categories, custom ones included (widget-ledger.ts).
-        && latest.customCategories === source.customCategories;
-    };
-    // After Home's first frames and entrance: preparing the snapshot walks the
-    // ledger and the native write re-renders every placed widget.
-    const task = runAfterFirstFrames(() => {
-      if (current()) request = requestWidgetSnapshotSync({ state: source, now: new Date(), moneySpec,
-        language: language === 'ar' ? 'ar' : 'en' }, current);
-    });
-    return () => { cancelled = true; task.cancel(); request?.cancel(); };
-    // Keyed on the day, not the resume clock: every reopen used to rebuild
-    // the snapshot and rewrite the widgets with the same figures. A new day
-    // still refreshes them (todayISO, the week, Coming up all move).
-  }, [state.hydrated, state.onboarded, state.privateMode, state.transactions, state.accounts, state.budgets, state.bills,
-    state.cardDues, state.notSubscriptions, state.cancelledSubscriptions, state.transferInternalIds, state.transferNormalizationVersion,
-    state.ledgerMoney, state.marketId, state.historyImport, state.customCategories, moneySpec, language, projectionDay,
-    getStateGeneration, getStateSnapshot]);
+  // The home-screen widgets are refreshed by the tab shell's CaptureOwner
+  // (use-widget-snapshot-sync.ts), which is never frozen: Home can be paused
+  // while another screen or tab is on top.
   // Recent activity, and which transfers it leaves to the Transfers screen,
   // come from the one dashboard projection rather than a second ledger walk.
   const hasPeriodTransfers = dashboard.hasPeriodTransfers === true;
@@ -1094,7 +1060,8 @@ export default function JournalHomeScreen() {
         <ThemedText type="meta" style={[styles.grow, { color: band.textSecondary }]}>{homeWords.transfersWaiting(pendingTransfers.count)}</ThemedText>
         <Icon name="chevron-right" size={16} color={band.textSecondary} />
       </Pressable> : null;
-  const founderUnlockEnabled = process.env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK === '1';
+  // The marker-derived build gate (founder-pro.ts), so the packaged-bundle check covers this entry point too.
+  const founderUnlockEnabled = isFounderUnlockBuild();
   const unlockFounder = founderUnlockEnabled && !state.founderPro
     ? () => {
         void unlockFounderPro()

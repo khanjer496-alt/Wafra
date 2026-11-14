@@ -63,7 +63,7 @@ export type ReviewPromotionFailure = UniversalImportRefusal | 'source-changed'
   | 'possible-duplicate'
   | 'fx-rate-unavailable';
 
-export type ReviewPromotionPlan =
+type ReviewPromotionPlan =
   | {
       outcome: 'added';
       transaction: Transaction;
@@ -451,7 +451,7 @@ export const planReviewPromotion = (
  * `walletBound` marker. The row's clock, date, title, account, category and
  * amount are untouched.
  */
-export interface WalletDuplicateBinding {
+interface WalletDuplicateBinding {
   id: string;
   smsKey: string;
   viaPush: false;

@@ -93,11 +93,7 @@ function stripComments(text) {
 const GATED_LAYOUT_ENTRY_TAB_SCREENS = [
   'src/app/(tabs)/bills.tsx',
 ];
-// The shipping Home: `src/app/(tabs)/index.tsx` re-exports it. The
-// ledger-home-screen list further down keeps its persistent-reveal contract
-// for the day that screen is rendered again; today nothing imports it, so a
-// stall there is not a stall the user can hit, and this list guards the Home
-// that is.
+// The shipping Home: `src/app/(tabs)/index.tsx` re-exports it; this list guards it.
 const SHIPPING_TAB_SCREENS_WITHOUT_LAYOUT_ANIMATION = [
   'src/screens/journal-home-screen.tsx',
 ];
@@ -149,9 +145,6 @@ for (const rel of ['src/app/(tabs)/flow.tsx', 'src/components/spending/spending-
  const src=stripComments(read(rel));
  ok(`${rel}: no hidden entrance work reintroduced`, !/entering=|useScreenEntering|FadeIn/.test(src));
 }
-const PERSISTENT_REVEAL_TAB_SCREENS = [
-  'src/screens/ledger-home-screen.tsx',
-];
 
 // ---------------------------------------------------------------------------
 // The navigator: the failed fix must stay gone.
@@ -224,28 +217,6 @@ for (const rel of GATED_LAYOUT_ENTRY_TAB_SCREENS) {
     'Section animates itself and does not know it is on a tab');
 }
 
-// Home needs a visible Android entrance, but never another layout animation on
-// a detachable native screen. MotionReveal animates only opacity/transform via
-// one persistent shared value, so tab reattachment cannot register or replay
-// an entering transition.
-for (const rel of PERSISTENT_REVEAL_TAB_SCREENS) {
-  const src = stripComments(read(rel));
-
-  ok(`${rel}: uses persistent paint-only reveals`,
-    /import \{ MotionReveal \} from '@\/components\/ui\/motion-reveal'/.test(src) &&
-      (src.match(/<MotionReveal\b/g) ?? []).length >= 4,
-    'the Android-visible choreography must stay on the persistent reveal primitive');
-
-  ok(`${rel}: has no detachable-screen layout animation`,
-    !/\bentering=\{/.test(src) && !/\bexiting=\{/.test(src) && !/\blayout=\{/.test(src),
-    'entering/exiting/layout animations can replay when react-native-screens reattaches a tab');
-
-  ok(`${rel}: does not use Section, which carries its own entrance`,
-    !/\bSection\b(?![A-Za-z])[^\n]*from '@\/components\/ui\/layout'/.test(src) &&
-      !/import \{[^}]*\bSection\b[^}]*\} from '@\/components\/ui\/layout'/.test(src),
-    'Section registers a layout entrance and does not know it is on a detachable tab');
-}
-
 for (const rel of SHIPPING_TAB_SCREENS_WITHOUT_LAYOUT_ANIMATION) {
   const src = stripComments(read(rel));
   ok(`${rel}: has no detachable-screen layout animation`,
@@ -256,26 +227,6 @@ for (const rel of SHIPPING_TAB_SCREENS_WITHOUT_LAYOUT_ANIMATION) {
       !/import \{[^}]*\bSection\b[^}]*\} from '@\/components\/ui\/layout'/.test(src),
     'Section registers a layout entrance and does not know it is on a detachable tab');
 }
-
-const motionReveal = stripComments(read('src/components/ui/motion-reveal.tsx'));
-
-ok('MotionReveal animates persistent paint properties, not layout',
-  /useSharedValue\(/.test(motionReveal) &&
-    /useAnimatedStyle\(/.test(motionReveal) &&
-    /opacity:/.test(motionReveal) &&
-    /translateY:/.test(motionReveal) &&
-    /scale:/.test(motionReveal) &&
-    !/\bentering=\{/.test(motionReveal) &&
-    !/\bexiting=\{/.test(motionReveal) &&
-    !/\blayout=\{/.test(motionReveal),
-  'the reveal must remain a shared-value paint animation so tab attach cannot replay it');
-
-ok('MotionReveal honours the app reduced-motion policy',
-  /useMotionPreference\(\)/.test(motionReveal) &&
-    /if \(!ready\) return/.test(motionReveal) &&
-    /if \(reducedMotion\)/.test(motionReveal) &&
-    /progress\.value = 1/.test(motionReveal),
-  'wait for screen-reader detection, then settle immediately when motion is reduced');
 
 // ---------------------------------------------------------------------------
 // The tab bar. Not a tab screen, and that is exactly why it was missed.
@@ -743,12 +694,12 @@ function fastest(fn, runs = 7) {
   const detail = read('src/components/entry-detail-sheet.tsx');
   const haptics = read('src/lib/haptics.ts');
 
-  ok('merchant avatars subscribe only to Private Mode, not the whole ledger',
-    /usePrivateMode/.test(merchantAvatar) && !/useStore\s*\(/.test(merchantAvatar) && /React\.memo\(MerchantAvatarInner\)/.test(merchantAvatar),
+  ok('merchant avatars subscribe only to logo consent, not the whole ledger',
+    /useOnlineLogosAllowed/.test(merchantAvatar) && !/useStore\s*\(/.test(merchantAvatar) && /React\.memo\(MerchantAvatarInner\)/.test(merchantAvatar),
     'a transaction list can have hundreds of avatars; a full StoreContext subscription rerenders all of them on every unrelated ledger update');
 
-  ok('bank avatars subscribe only to Private Mode, not the whole ledger',
-    /usePrivateMode/.test(bankAvatar) && !/useStore\s*\(/.test(bankAvatar) && /React\.memo\(BankAvatarInner\)/.test(bankAvatar),
+  ok('bank avatars subscribe only to logo consent, not the whole ledger',
+    /useOnlineLogosAllowed/.test(bankAvatar) && !/useStore\s*\(/.test(bankAvatar) && /React\.memo\(BankAvatarInner\)/.test(bankAvatar),
     'account artwork should not rebuild when transactions, budgets, or import progress change');
 
   ok('remote merchant artwork has bounded JS metadata and unresolved work',
@@ -1124,14 +1075,6 @@ function bodyOf(source, header) {
       /waitForForegroundHistoryIdle\(SESSION_REMINDER_SYNC_GRACE_MS\)/.test(autoImport) &&
       /syncPaymentReminders\(current\)/.test(autoImport),
     'launch reminder setup runs after Home appears; recurrence analysis must yield between slices instead of freezing Hermes');
-
-  const testerDiagnostics = stripComments(read('src/lib/android-tester-diagnostics.ts'));
-  const diagnosticMessages = stripComments(read('src/lib/diagnostic-messages.ts'));
-  ok('one-tap tester diagnostics page the native inbox instead of reading 1,000 SMS in one JS turn',
-    /maxPageSize: 50/.test(testerDiagnostics) &&
-      /maxPageSize\?: number/.test(read('src/lib/diagnostic-messages.ts')) &&
-      /Math\.min\(maxPage, remaining\)/.test(diagnosticMessages),
-    'a 14k-row ledger plus a 1,000-message inbox read froze the support button for 5-20s');
 
   const smsReaderNative = stripComments(read(
     'modules/sms-reader/android/src/main/java/expo/modules/smsreader/SmsReaderModule.kt'));

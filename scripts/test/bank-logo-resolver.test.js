@@ -30,6 +30,7 @@ function load({ fetchImpl = async () => ({ ok: false, json: async () => [] }), d
     }, { filename });
     return exports;
   }
+  requireModule('@/lib/logo-cache-lifecycle').setLogoLookupsAllowed(true);
   return {
     ...requireModule('@/lib/bank-logo-resolver'),
     marketBanks: requireModule('@/lib/markets').MARKETS.flatMap(market => market.banks),
@@ -44,10 +45,12 @@ const response = rows => ({ ok: true, json: async () => rows });
 (async () => {
   const data = new Map();
   const calls = [];
+  const inits = [];
   const m = load({
     data,
-    fetchImpl: async url => {
+    fetchImpl: async (url, init) => {
       calls.push(url);
+      inits.push(init);
       if (url.includes('Bank%20of%20America')) return response([
         { name: 'Bank of America', domain: 'bankofamerica.com', claimed: true },
         { name: 'Bank of America Private Bank', domain: 'privatebank.bankofamerica.com', claimed: false },
@@ -110,6 +113,8 @@ const response = rows => ({ ok: true, json: async () => rows });
   assert.equal(boa?.domain, 'bankofamerica.com');
   assert.equal(boa?.source, 'search');
   assert.match(calls[0], /\/v2\/search\/Bank%20of%20America\?c=1idPBg9EKr252UlBUPZ$/);
+  assert.ok(inits.length > 0 && inits.every(init => init?.credentials === 'omit'),
+    'Brandfetch search sends no cookies, so no cookie can become a per-device identifier');
 
   const lloyds = await m.resolveBankLogo('Lloyds Bank');
   assert.equal(lloyds?.domain, 'lloydsbank.com');

@@ -41,7 +41,6 @@ import {
   localCaptureEntitlementLease,
   proOffersFromProducts,
   proProductIdsForPlatform,
-  trialDaysLeft,
 } from '@/lib/purchases';
 import { useStore } from '@/lib/store';
 import type { OnboardingFocus, OnboardingIntention, OnboardingTracking } from '@/lib/types';
@@ -166,7 +165,7 @@ function SuperwallRuntime({ onValue }: {
   // store in a writing effect creates an endless native write/event loop.
   const {
     isConfigured, configurationError, subscriptionStatus, customerInfo,
-    setUserAttributes, setEventTrackingBehavior, getUserAttributes,
+    setEventTrackingBehavior,
     getCustomerInfo, getEntitlements, restorePurchases, dismiss,
     products, purchase,
   } = useSuperwall((sdk) => ({
@@ -174,9 +173,7 @@ function SuperwallRuntime({ onValue }: {
     configurationError: sdk.configurationError,
     subscriptionStatus: sdk.subscriptionStatus,
     customerInfo: sdk.customerInfo,
-    setUserAttributes: sdk.setUserAttributes,
     setEventTrackingBehavior: sdk.setEventTrackingBehavior,
-    getUserAttributes: sdk.getUserAttributes,
     getCustomerInfo: sdk.getCustomerInfo,
     getEntitlements: sdk.getEntitlements,
     restorePurchases: sdk.restorePurchases,
@@ -278,18 +275,10 @@ function SuperwallRuntime({ onValue }: {
       return { status: 'failure', data: { reason: 'onboarding_handoff_not_durable' } };
     }
 
-    if (!state.privateMode) {
-      void setUserAttributes({
-        wafra_onboarding_focus: focus,
-        wafra_onboarding_tracking: tracking,
-        wafra_onboarding_intention: intention,
-        wafra_onboarding_value_flow_complete: true,
-      }).catch(() => {});
-    }
+    // These preferences stay on the device; billing does not need targeting attributes.
     void dismiss().catch(() => {});
     return { status: 'success', data: { next: 'native_name_then_capture' } };
-  }, [ensureDurable, setOnboardingProfile, state.onboardingProfile?.startedAt, state.privateMode,
-    dismiss, setUserAttributes]);
+  }, [ensureDurable, setOnboardingProfile, state.onboardingProfile?.startedAt, dismiss]);
 
   const onboardingPlacement = usePlacement({
     onCustomCallback: finishRemoteOnboarding,
@@ -349,14 +338,13 @@ function SuperwallRuntime({ onValue }: {
       return;
     }
     try {
-      await getUserAttributes();
       // `UNKNOWN` is a real state. Never synthesize INACTIVE from an empty or
       // partial entitlement fetch during foreground refresh.
       await getCustomerInfo();
     } catch {
       // Unreachable store/configuration is UNKNOWN, not evidence of cancellation.
     }
-  }, [getCustomerInfo, getUserAttributes, isConfigured, refreshAndroid]);
+  }, [getCustomerInfo, isConfigured, refreshAndroid]);
 
   useEffect(() => {
     if (Platform.OS !== 'ios') return;
@@ -374,63 +362,29 @@ function SuperwallRuntime({ onValue }: {
     return () => subscription.remove();
   }, [refresh]);
 
-  // The saved local-only preference keeps purchases available but disables
-  // optional Superwall event collection and Wafra-supplied targeting metadata.
+  // Optional analytics stay off even when the saved local-only mode is lifted.
+  // This is the SDK's supported event/MMP opt-out, not proof that its separate
+  // server-configured ASA or enrichment network paths are disabled.
   useEffect(() => {
     if (!isConfigured || !state.hydrated) return;
-    void setEventTrackingBehavior(state.privateMode ? 'none' : 'all').catch(() => {});
-  }, [state.hydrated, state.privateMode, isConfigured, setEventTrackingBehavior]);
+    void setEventTrackingBehavior('none').catch(() => {});
+  }, [state.hydrated, isConfigured, setEventTrackingBehavior]);
 
-  const trialDaysRemaining = trialDaysLeft(state);
+  // The ONE placement parameter Wafra sends: the saved app language, exactly "en" or "ar".
+  // It is a setting, not personal data, and it lets the onboarding Flow choose the Arabic
+  // pages after an in-session language change (the SDK's localeIdentifier is fixed at
+  // configure time). No market, source, focus, intention, platform or user attribute is sent.
+  const placementLanguage: 'en' | 'ar' = state.language === 'ar' ? 'ar' : 'en';
 
-  // Product/onboarding metadata only. Never ledger rows, balances, transaction
-  // amounts, SMS bodies, account/card identifiers, or the user's name.
-  useEffect(() => {
-    if (!isConfigured || !state.hydrated || state.privateMode) return;
-    void setUserAttributes({
-      wafra_language: state.language === 'ar' ? 'ar' : 'en',
-      wafra_market: state.marketId,
-      wafra_onboarded: state.onboarded,
-      wafra_onboarding_focus: state.onboardingProfile?.focus ?? null,
-      wafra_onboarding_tracking: state.onboardingProfile?.tracking ?? null,
-      wafra_onboarding_intention: state.onboardingProfile?.intention ?? null,
-      wafra_capture_choice: state.captureOptOut ? 'manual' : 'automatic',
-      wafra_trial_days_left: trialDaysRemaining,
-    }).catch(() => {});
-  }, [
-    state.captureOptOut,
-    state.hydrated,
-    state.language,
-    state.marketId,
-    state.onboarded,
-    state.privateMode,
-    state.onboardingProfile?.focus,
-    state.onboardingProfile?.intention,
-    state.onboardingProfile?.tracking,
-    trialDaysRemaining,
-    setUserAttributes,
-    isConfigured,
-  ]);
-
-  const presentProPaywall = useCallback(async (params: Record<string, unknown> = {}) => {
+  const presentProPaywall = useCallback(async () => {
     if (!isConfigured) throw new Error('SUPERWALL_NOT_CONFIGURED');
     await proPlacement.registerPlacement({
       placement: SUPERWALL_PLACEMENTS.pro,
-      params: {
-        source: 'wafra_pro',
-        language: state.language === 'ar' ? 'ar' : 'en',
-        market: state.marketId,
-        focus: state.onboardingProfile?.focus ?? null,
-        intention: state.onboardingProfile?.intention ?? null,
-        ...params,
-      },
+      params: { language: placementLanguage },
     });
   }, [
     proPlacement,
-    state.language,
-    state.marketId,
-    state.onboardingProfile?.focus,
-    state.onboardingProfile?.intention,
+    placementLanguage,
     isConfigured,
   ]);
 
@@ -438,17 +392,11 @@ function SuperwallRuntime({ onValue }: {
     if (!isConfigured) throw new Error('SUPERWALL_NOT_CONFIGURED');
     await onboardingPlacement.registerPlacement({
       placement: SUPERWALL_PLACEMENTS.onboarding,
-      params: {
-        source: 'first_run',
-        language: state.language === 'ar' ? 'ar' : 'en',
-        market: state.marketId,
-        platform: Platform.OS,
-      },
+      params: { language: placementLanguage },
     });
   }, [
     onboardingPlacement,
-    state.language,
-    state.marketId,
+    placementLanguage,
     isConfigured,
   ]);
 
@@ -670,13 +618,20 @@ export function SuperwallBillingProvider({ children }: { children: React.ReactNo
     // Read the real region before that configuration; never remount the SDK
     // to update locale. Wafra's own purchase UI follows the saved language.
     localeIdentifier: billingLocaleIdentifier(state.language, deviceRegion),
-    eventTrackingBehavior: state.privateMode ? 'none' as const : 'all' as const,
+    eventTrackingBehavior: 'none' as const,
+    isExternalDataCollectionEnabled: false,
+    enableExperimentalDeviceVariables: false,
     shouldObservePurchases: true,
     paywalls: {
-      shouldPreload: true,
+      // Off: preloading builds every campaign paywall's web view on the main
+      // thread right after launch. Wafra's own /pro screen is the purchase UI
+      // and buys and restores through the store directly (purchase,
+      // restorePurchases), so nothing there waits on a preloaded paywall; a
+      // campaign or onboarding placement loads its paywall when it is shown.
+      shouldPreload: false,
       isHapticFeedbackEnabled: true,
     },
-  }), [state.language, deviceRegion, state.privateMode]);
+  }), [state.language, deviceRegion]);
 
   /*
     ONE tree shape for the app below, before and after hydration and before

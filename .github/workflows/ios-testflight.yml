@@ -410,11 +410,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Generate and check the shipping iOS background parser
+      # Read-only on purpose: a release build ships exactly the committed, reviewed
+      # parser bundle and fails when it is stale. It never regenerates one. Fix a
+      # stale bundle with `node scripts/generate-ios-background-parser.cjs` on a
+      # branch, review and commit the result, then build.
+      - name: Check the committed iOS background parser is fresh
         if: inputs.submit_build_id == ''
-        run: |
-          node scripts/generate-ios-background-parser.cjs
-          node scripts/generate-ios-background-parser.cjs --check
+        run: node scripts/generate-ios-background-parser.cjs --check
 
       - name: Validate OTA-enabled store build configuration
         if: inputs.submit_build_id == '' && inputs.profile != 'preview'
@@ -827,7 +829,7 @@ jobs:
         with:
           name: wafra-ios-build-report
           path: ios-build-evidence/
-          retention-days: 14
+          retention-days: 7
 
       # The key is in RUNNER_TEMP, which GitHub clears anyway, but a private
       # key on disk for no reason is a habit worth not having.
@@ -863,10 +865,16 @@ jobs:
           ref: ${{ inputs.source_commit || 'main' }}
           fetch-depth: 0
 
-      - name: Pin and verify main-line build source
+      - name: Pin and verify reviewed-line build source
         run: |
           SHA=$(git rev-parse HEAD)
-          git merge-base --is-ancestor "$SHA" origin/main
+          # The 1.0.0 release base is reviewed and merged on its own branch,
+          # which main has not caught up to yet. Accept either reviewed line;
+          # anything else (a feature branch, an unmerged PR head) still fails.
+          # Update the release branch name here for each new release line;
+          # ios-local-build-workflow.test.cjs pins this exact pair of checks.
+          git merge-base --is-ancestor "$SHA" origin/main \
+            || git merge-base --is-ancestor "$SHA" origin/release/1.0.0-rc1-reconciled
           echo "SOURCE_COMMIT=$SHA" >> "$GITHUB_ENV"
           node scripts/check-design-baseline.mjs
 
@@ -899,10 +907,10 @@ jobs:
           fastlane --version
           pod --version
 
-      - name: Generate and check the shipping iOS background parser
-        run: |
-          node scripts/generate-ios-background-parser.cjs
-          node scripts/generate-ios-background-parser.cjs --check
+      # Read-only on purpose (see the check in the build job): the local build
+      # ships the committed bundle or fails; it never regenerates one.
+      - name: Check the committed iOS background parser is fresh
+        run: node scripts/generate-ios-background-parser.cjs --check
 
       - name: Prepare existing Apple credentials without printing them
         env:
@@ -936,12 +944,29 @@ jobs:
           npm run update:check
           node scripts/test/ios-history-native-contract.test.js
 
+      # On failure this step also writes a capped plain-text summary (error lines and
+      # the EAS phase, control bytes stripped, the job's secret values and
+      # credential-shaped strings redacted; scripts/ci/summarize-ios-build.cjs).
+      # It is uploaded below so the cause can be read without the raw log. The
+      # build's real exit code is preserved: the summary is evidence, never a gate.
       - name: Build signed iOS archive on this macOS runner
         run: |
           FREEZE=--freeze-credentials
           if [ "${{ inputs.repair_credentials }}" = "true" ]; then FREEZE=; fi
+          export EAS_LOCAL_BUILD_WORKINGDIR="$RUNNER_TEMP/eas-local-build" EAS_LOCAL_BUILD_SKIP_CLEANUP=1
+          mkdir -p "$EAS_LOCAL_BUILD_WORKINGDIR"
+          set +e
           eas build --platform ios --profile "${{ inputs.profile }}" --local --non-interactive \
-            $FREEZE --output "$RUNNER_TEMP/Wafra-local.ipa"
+            $FREEZE --output "$RUNNER_TEMP/Wafra-local.ipa" 2>&1 | tee "$RUNNER_TEMP/wafra-ios-build.log"
+          BUILD_STATUS=${PIPESTATUS[0]}
+          set -e
+          if [ "$BUILD_STATUS" -ne 0 ]; then
+            mkdir -p artifacts/ios-build-failure
+            BUILD_EXIT="$BUILD_STATUS" node scripts/ci/summarize-ios-build.cjs \
+              "$RUNNER_TEMP/wafra-ios-build.log" "$EAS_LOCAL_BUILD_WORKINGDIR" "$HOME/Library/Logs/gym" \
+              > artifacts/ios-build-failure/summary.txt || echo 'Could not write the build failure summary.'
+          fi
+          exit "$BUILD_STATUS"
 
       - name: Verify the actual signed IPA and App Intent resources
         id: ipa
@@ -980,7 +1005,7 @@ jobs:
           assert 'ProbeWafraAutomationInputIntent' not in actions
           parser_meta=json.loads((app/'WafraLiveCaptureResources.bundle/WafraBackgroundParser.meta.json').read_text())
           number=str(info['CFBundleVersion']); version=info['CFBundleShortVersionString']
-          source=temp/'Wafra-local.ipa'; target=pathlib.Path('artifacts/ios-local')/f'Wafra-{version}-{number}.ipa'
+          source=temp/'Wafra-local.ipa'; target=temp/f'Wafra-{version}-{number}.ipa'
           shutil.copyfile(source,target)
           report={'sourceCommit':os.environ['SOURCE_COMMIT'],'buildHost':'github-macos','profile':os.environ.get('BUILD_PROFILE','history-beta'),
               'version':version,'buildNumber':number,'bundleIdentifier':info['CFBundleIdentifier'],
@@ -993,12 +1018,15 @@ jobs:
           print(json.dumps(report,indent=2))
           PY
 
-      - name: Preserve verified installer before submission
+      # The repository is public, so artifacts are downloadable by anyone signed
+      # in to GitHub. Only the verification report (hashes, versions, source) is
+      # uploaded; the signed IPA stays in RUNNER_TEMP for the submit step below.
+      - name: Preserve verification report before submission
         uses: actions/upload-artifact@v4
         with:
           name: wafra-ios-local-${{ steps.ipa.outputs.build_number }}
-          path: artifacts/ios-local/
-          retention-days: 14
+          path: artifacts/ios-local/verification.json
+          retention-days: 3
 
       - name: Require successful exact-source CI before TestFlight submission
         if: inputs.submit
@@ -1011,7 +1039,7 @@ jobs:
             fi
             sleep 20
           done
-          echo 'Exact-source CI has not passed. Verified IPA retained; no TestFlight submission.'
+          echo 'Exact-source CI has not passed. No TestFlight submission; rebuild once CI is green.'
           exit 1
 
       - name: Submit the verified existing IPA to TestFlight
@@ -1023,3 +1051,13 @@ jobs:
       - name: Remove temporary Apple API key
         if: always()
         run: rm -f "$RUNNER_TEMP/wafra-local-asc.p8"
+      - name: Preserve iOS archive failure summary
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/ios-build-failure/summary.txt
+          if-no-files-found: ignore
+          retention-days: 7
+

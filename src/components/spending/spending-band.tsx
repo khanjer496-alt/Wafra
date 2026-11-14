@@ -1,3 +1,4 @@
+import { formatMoneyText } from '@/lib/ui-money-text';
 import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -13,7 +14,6 @@ import type { ComparableSpend } from '@/lib/analytics';
 import { CATEGORY_REST, categoryColors } from '@/lib/category-colors';
 import { everydayBandCopy } from '@/lib/everyday-band-copy';
 import { formatAED } from '@/lib/format';
-import { formatMinorUnits } from '@/lib/ledger-money';
 import { spendingTrendsCopy } from '@/lib/reference-copy';
 import { spendingShare, spendingShareLabel, type SpendingCategoryRow } from '@/lib/reference-presentation';
 import { compareDirection } from '@/lib/spending-compare';
@@ -22,7 +22,7 @@ import { compareDirection } from '@/lib/spending-compare';
 function useMoneyLabel(): (fils: number) => string {
   const moneySpec = useLedgerMoney();
   return (fils) => moneySpec
-    ? `${moneySpec.currency} ${formatMinorUnits(Math.round(fils), moneySpec)}` : formatAED(fils);
+    ? formatMoneyText(Math.round(fils), moneySpec) : formatAED(fils);
 }
 
 /**

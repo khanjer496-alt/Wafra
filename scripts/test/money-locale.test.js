@@ -20,7 +20,7 @@ function load(name) {
   };
   if (name === 'i18n') return { getLanguage: () => language, t: (key) => key };
   if (cache.has(name)) return cache.get(name);
-  assert.ok(['format', 'date-time-locale', 'country-names', 'ledger-money', 'currency-metadata', 'arabic-sms'].includes(name), name);
+  assert.ok(['format', 'money-code-run', 'date-time-locale', 'country-names', 'ledger-money', 'currency-metadata', 'arabic-sms'].includes(name), name);
   const filename = path.join(__dirname, '../../src/lib', `${name}.ts`);
   const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -264,7 +264,8 @@ try {
 
   money.setDisplayMoneyLocale({ locale: 'ar-AE', decimalSeparator: '.', groupSeparator: ',' });
   currency = 'AED'; exponent = 2; language = 'ar';
-  assert.equal(display.formatAED(123456), 'AED 1,234.56', 'Arabic UI in the UAE is unchanged');
+  assert.equal(display.formatAED(123456), '\u20661,234.56\u00a0AED\u2069', 'Arabic keeps the exact amount before its ISO code in one isolated run');
+  assert.equal(display.formatAED(-123456), '\u2066-1,234.56\u00a0AED\u2069', 'Arabic keeps the minus before the number');
   assert.equal(display.parseAmountToFils('١٬٢٣٤٫٥٦'), 123456);
 } finally {
   money.setDisplayMoneyLocale(null);

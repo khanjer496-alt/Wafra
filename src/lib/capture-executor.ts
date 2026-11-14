@@ -25,16 +25,16 @@ import type {
   LocalCaptureDeclineQualificationMapping,
   LocalCaptureReviewQualificationCandidate,
 } from '@/lib/types';
-import { emptyAlertReviewTray, partitionReviewsByCapacity, type ReviewEntry } from '@/lib/alert-review-tray';
+import { emptyAlertReviewTray, partitionReviewsByCapacity, reviewReceiptReleasesPage, reviewReceiptSettled, settleReviewStage, requiresReviewRetention, type ReviewEntry } from '@/lib/alert-review-tray';
 import { stageWalletNearMatches } from '@/lib/wallet-near-match';
 import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
 import { captureTrace, captureTraceEnabled } from '@/lib/capture-trace';
 import { recordRuntimeOperation } from '@/lib/runtime-performance';
 import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
 
-export type CaptureIntent = 'routine' | 'notification-only' | 'supplemental' | 'setup-verification' | 'background';
+type CaptureIntent = 'routine' | 'notification-only' | 'supplemental' | 'setup-verification' | 'background';
 
-export interface CaptureImportSummary {
+interface CaptureImportSummary {
   /** Relay returned a full page; supplemental callers should drain another page after yielding. */
   moreQueued?: boolean;
   /** Review rows retained on the relay, so filing is not complete. */
@@ -50,7 +50,7 @@ export interface CaptureImportSummary {
   reviewAlerts: number;
 }
 
-export type CaptureExecutionOutcome =
+type CaptureExecutionOutcome =
   | { kind: 'not-hydrated' }
   | { kind: 'needs-setup' }
   | ({ kind: 'up-to-date'; source: CaptureSource } & CaptureImportSummary)
@@ -83,10 +83,12 @@ export interface CaptureLedgerAdapter {
     items: ReviewEntry[],
     qualifications?: readonly LocalCaptureReviewQualificationCandidate[],
     sourceBindings?: readonly ReviewSourceBinding[],
-  ) => { admitted: number; qualificationIds?: string[]; durable: Promise<void> };
+    mode?: import('./alert-review-tray').ReviewAdmissionMode,
+  // This interface is extracted alone by the pure test compiler.
+  ) => import('./alert-review-tray').ReviewStageReceipt & { qualificationIds?: string[] };
 }
 
-export interface BackgroundCaptureAdapter {
+interface BackgroundCaptureAdapter {
   /** Persist parsed rows in the after-first-unlock encrypted inbox. */
   stage: (rows: ScannedSms[]) => Promise<ScannedSms[]>;
   /** Announce only rows that were not already staged. */
@@ -114,7 +116,7 @@ interface CaptureExecutorDependencies {
   ) => Promise<void>;
 }
 
-export interface CaptureExecutorOptions {
+interface CaptureExecutorOptions {
   ledger?: CaptureLedgerAdapter;
   background?: BackgroundCaptureAdapter;
   /** Internal seams used by interface-level tests. Production callers omit this. */
@@ -145,7 +147,7 @@ const stageNearMatches = (activeLedger: CaptureLedgerAdapter, plan: ImportPlan) 
     plan,
     () => activeLedger.getState().reviewTray,
     activeLedger.stageReviewAlerts
-      ? (items) => activeLedger.stageReviewAlerts!(items)
+      ? (items) => activeLedger.stageReviewAlerts!(items, undefined, undefined, 'hold-source')
       : undefined,
   );
 
@@ -192,7 +194,7 @@ const reviewSourceClaims = (state: AppState): Set<string> => {
   return new Set([
     ...(state.reviewTray?.pending ?? []).filter(item => item.expiresAt > now),
     ...(state.reviewTray?.tombstones ?? []).filter(item => item.expiresAt > now &&
-      (item.outcome === 'added' || item.outcome === 'dismissed' || item.outcome === 'duplicate')),
+      (item.outcome === 'added' || item.outcome === 'dismissed' || item.outcome === 'duplicate' || item.outcome === 'expired')),
   ].map(item => canonicalCaptureSourceKey(item.sourceKey, 'observedAt' in item ? item.observedAt : undefined)));
 };
 
@@ -311,10 +313,15 @@ export const createCaptureExecutor = ({
       : { admit: candidates, deferred: [] };
     const reviewCandidates = capacity.admit;
     const deferredReviewSourceKeys = capacity.deferred.map(item => item.sourceKey);
+    // Only retention-required money evidence waits at its source. An
+    // informational review the tray did not keep is acknowledged, so a held
+    // push/relay row is never re-read on every scan until the native queue
+    // trims it (the same rule iOS follows).
     const finalDeferredReviewSources = () => {
       const currentClaims = currentReviewClaims();
       return [...deferredReviewSourceKeys,
-        ...[...knownReviewSourceKeys, ...reviewCandidates.map(item => canonicalCaptureSourceKey(item.sourceKey, item.observedAt))]
+        ...[...knownReviewSourceKeys,
+          ...reviewCandidates.filter(requiresReviewRetention).map(item => canonicalCaptureSourceKey(item.sourceKey, item.observedAt))]
           .filter(key => !currentClaims.has(canonicalCaptureSourceKey(key)))];
     };
     const skippedInboxSources = collected.skippedKnownInboxReviewSourceKeys ?? [];
@@ -340,9 +347,17 @@ export const createCaptureExecutor = ({
       // the entire ledger while encrypted review staging is in flight.
       const reviewStarted = tracing ? Date.now() : 0;
       captureTrace('reviews:start', reviewCandidates.length);
-      const reviewReceipt = activeLedger.stageReviewAlerts(reviewCandidates, undefined, collected.reviewSourceBindings);
+      const reviewReceipt = activeLedger.stageReviewAlerts(reviewCandidates, undefined, collected.reviewSourceBindings, 'hold-source');
       reviewAlerts = reviewReceipt.admitted;
-      await reviewReceipt.durable;
+      const retention = await settleReviewStage(reviewCandidates, reviewReceipt);
+      for (const item of reviewCandidates) {
+        // The inbox cursor is a page-level hold: a refused source must not stop it.
+        if (requiresReviewRetention(item) && !retention.some(entry => entry.sourceKey === canonicalCaptureSourceKey(item.sourceKey, item.observedAt) &&
+            reviewReceiptReleasesPage(entry.outcome))) {
+          deferredReviewSourceKeys.push(item.sourceKey);
+          if (item.channel !== 'push') deferInbox = true;
+        }
+      }
       captureTrace('reviews:done', reviewAlerts, tracing ? Date.now() - reviewStarted : 0);
       if (routineStopped(collected.source)) {
         return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
@@ -555,14 +570,22 @@ export const createCaptureExecutor = ({
     const candidates = queued.reviewCandidates ?? [];
     const capacity = partitionReviewsByCapacity(state.reviewTray ?? emptyAlertReviewTray(), candidates, Date.now());
     const reviewCandidates = capacity.admit;
+    const unretainedReviewSources = new Set<string>();
     if (reviewCandidates.length > 0) {
       if (!activeLedger.stageReviewAlerts) {
         throw new Error('Capture executor requires review staging for review candidates');
       }
       if (supplementalStopped()) return stopped();
-      const reviewReceipt = activeLedger.stageReviewAlerts(reviewCandidates);
+      const reviewReceipt = activeLedger.stageReviewAlerts(reviewCandidates, undefined, undefined, 'hold-source');
       reviewAlerts = reviewReceipt.admitted;
-      await reviewReceipt.durable;
+      const retention = await settleReviewStage(reviewCandidates, reviewReceipt);
+      for (const item of reviewCandidates) {
+        if (requiresReviewRetention(item) && !retention.some(entry =>
+            entry.sourceKey === canonicalCaptureSourceKey(item.sourceKey, item.observedAt) &&
+            reviewReceiptSettled(entry.outcome))) {
+          unretainedReviewSources.add(canonicalCaptureSourceKey(item.sourceKey, item.observedAt));
+        }
+      }
       if (supplementalStopped()) return stopped();
       state = activeLedger.getState();
     }
@@ -635,8 +658,11 @@ export const createCaptureExecutor = ({
       if (supplementalStopped()) return stopped();
       const finalClaims = reviewSourceClaims(activeLedger.getState());
       const deferredReviewSources = [
+        ...unretainedReviewSources,
         ...capacity.deferred.map(item => canonicalCaptureSourceKey(item.sourceKey, item.observedAt)),
-        ...candidates.map(item => canonicalCaptureSourceKey(item.sourceKey, item.observedAt)).filter(key => !finalClaims.has(key)),
+        // As in the routine: only unclaimed money evidence keeps its relay row.
+        ...candidates.filter(requiresReviewRetention)
+          .map(item => canonicalCaptureSourceKey(item.sourceKey, item.observedAt)).filter(key => !finalClaims.has(key)),
       ];
       acknowledge = acknowledgementsFor(queued, true, deferredReviewSources);
       if (acknowledge.length > 0) {
@@ -715,12 +741,15 @@ export const createCaptureExecutor = ({
     const candidates = queued.reviewCandidates ?? [];
     const capacity = partitionReviewsByCapacity(activeLedger.getState().reviewTray ?? emptyAlertReviewTray(), candidates, Date.now());
     const reviewCandidates = capacity.admit;
+    const unretainedReviewSources = new Set<string>();
     const acknowledgeSetup = async () => {
       if (setupStopped()) return;
       const claims = reviewSourceClaims(activeLedger.getState());
       const deferred = [
+        ...unretainedReviewSources,
         ...capacity.deferred.map(item => canonicalCaptureSourceKey(item.sourceKey, item.observedAt)),
-        ...candidates.map(item => canonicalCaptureSourceKey(item.sourceKey, item.observedAt)).filter(key => !claims.has(key)),
+        ...candidates.filter(requiresReviewRetention)
+          .map(item => canonicalCaptureSourceKey(item.sourceKey, item.observedAt)).filter(key => !claims.has(key)),
       ];
       const ids = acknowledgementsFor(queued, true, deferred, true);
       if (ids.length > 0) await dependencies.acknowledge(cfg, ids);
@@ -729,7 +758,15 @@ export const createCaptureExecutor = ({
       if (!activeLedger.stageReviewAlerts) {
         throw new Error('Capture executor requires review staging for review candidates');
       }
-      await activeLedger.stageReviewAlerts(reviewCandidates).durable;
+      const reviewReceipt = activeLedger.stageReviewAlerts(reviewCandidates, undefined, undefined, 'hold-source');
+      const retention = await settleReviewStage(reviewCandidates, reviewReceipt);
+      for (const item of reviewCandidates) {
+        if (requiresReviewRetention(item) && !retention.some(entry =>
+            entry.sourceKey === canonicalCaptureSourceKey(item.sourceKey, item.observedAt) &&
+            reviewReceiptSettled(entry.outcome))) {
+          unretainedReviewSources.add(canonicalCaptureSourceKey(item.sourceKey, item.observedAt));
+        }
+      }
       if (setupStopped()) return { kind: 'setup-waiting' };
     }
 

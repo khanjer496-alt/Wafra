@@ -17,7 +17,8 @@ const builtPath = path.join(__dirname, 'build/history-import.js');
 const history = fs.existsSync(builtPath) ? require(builtPath) : {};
 const storeSource = fs.readFileSync(path.join(__dirname, '../../src/lib/store.tsx'), 'utf8');
 const autoImportSource = fs.readFileSync(path.join(__dirname, '../../src/hooks/use-auto-import.ts'), 'utf8');
-const homeSource = fs.readFileSync(path.join(__dirname, '../../src/screens/ledger-home-screen.tsx'), 'utf8');
+const homeSource = fs.readFileSync(path.join(__dirname, '../../src/screens/journal-home-screen.tsx'), 'utf8');
+const historyStatusSource = fs.readFileSync(path.join(__dirname, '../../src/components/history-reading-status.tsx'), 'utf8');
 const settingsSource = fs.readFileSync(path.join(__dirname, '../../src/app/settings.tsx'), 'utf8');
 const historyHookSource = fs.readFileSync(path.join(__dirname, '../../src/hooks/use-history-import.ts'), 'utf8');
 const tabBarSource = fs.readFileSync(path.join(__dirname, '../../src/components/tab-bar.tsx'), 'utf8');
@@ -60,10 +61,12 @@ const smsReaderNativeSource = fs.readFileSync(path.join(
   );
   ok(
     'Home exposes live, saved, and failed history progress with retry',
-    /HistoryImportNotice/.test(homeSource) &&
+    /<HistoryReadingStatus progress=\{history\} onResume=\{retryHistory\}/.test(homeSource) &&
       /state\.historyImport/.test(homeSource) &&
       /beginHistoryImport/.test(homeSource) &&
-      /accessibilityRole="progressbar"/.test(homeSource),
+      /const retryHistory = \(\) => \{[\s\S]{0,400}beginHistoryImport\(\)/.test(homeSource) &&
+      /progress\.status === 'running'/.test(historyStatusSource) && /progress\.status === 'failed'/.test(historyStatusSource) &&
+      /accessibilityRole="button"[\s\S]{0,80}onPress=\{onResume\}/.test(historyStatusSource),
   );
   ok(
     'Settings exposes the same durable history state and retry control',

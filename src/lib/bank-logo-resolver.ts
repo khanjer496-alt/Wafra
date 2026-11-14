@@ -164,7 +164,7 @@ async function searchBrandfetch(candidate: string, generation: number): Promise<
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
   try {
-    const response = await fetch(url, { method: 'GET', signal: controller.signal });
+    const response = await fetch(url, { method: 'GET', credentials: 'omit', signal: controller.signal });
     if (!response.ok || !isLogoCacheGenerationCurrent(generation)) return undefined;
     const raw = await response.json();
     if (!Array.isArray(raw)) return undefined;
@@ -232,7 +232,7 @@ export function getBankLogoCacheDiagnostics() {
   };
 }
 
-export function clearBankLogoMemoryCache(): void {
+function clearBankLogoMemoryCache(): void {
   memory.clear();
   pending.clear();
   peakMemoryEntries = 0;

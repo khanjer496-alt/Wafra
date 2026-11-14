@@ -48,7 +48,7 @@ import {
   unpairDevice,
 } from '@/lib/relay';
 import { openShortcutsApp, shortcutCleanupApplies } from '@/lib/shortcut-cleanup';
-import type { StorageFailure } from '@/lib/storage-diagnostics';
+import { recordStorageFailure, type StorageFailure } from '@/lib/storage-diagnostics';
 import { useStore, type StorageRecoveryState } from '@/lib/store';
 import NotificationReader from '../../modules/notification-reader';
 import SmsReader from '../../modules/sms-reader';
@@ -110,14 +110,27 @@ export function StorageRecovery({
             clearBackground: async () => {
               await clearBackgroundRelayRows();
             },
+            onStepFailure: (step, error) => {
+              recordStorageFailure(`destroy:${step}`, error);
+            },
           })
         : Platform.OS === 'android'
           ? async () => {
-              if (!SmsReader?.clearCaptured || !(await SmsReader.clearCaptured())) {
-                throw new Error('sms_capture_cleanup_failed');
+              try {
+                if (!SmsReader?.clearCaptured || !(await SmsReader.clearCaptured())) {
+                  throw new Error('sms_capture_cleanup_failed');
+                }
+              } catch (error) {
+                recordStorageFailure('destroy:sms', error);
+                throw error;
               }
-              if (notificationReader && !(await notificationReader.clearCaptured())) {
-                throw new Error('notification_capture_cleanup_failed');
+              try {
+                if (notificationReader && !(await notificationReader.clearCaptured())) {
+                  throw new Error('notification_capture_cleanup_failed');
+                }
+              } catch (error) {
+                recordStorageFailure('destroy:notifications', error);
+                throw error;
               }
             }
           : undefined;

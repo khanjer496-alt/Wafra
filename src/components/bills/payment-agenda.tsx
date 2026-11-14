@@ -12,6 +12,7 @@ import { useLedgerMoney } from '@/hooks/use-ledger-money';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { formatAED, shortDate } from '@/lib/format';
 import { formatMinorUnits } from '@/lib/ledger-money';
+import { moneyCodeRun } from '@/lib/money-code-run';
 import { measureRuntimeOperation } from '@/lib/runtime-performance';
 import {
   groupPaymentAgendaWindow,
@@ -61,7 +62,7 @@ export const PaymentAgenda = React.memo(function PaymentAgenda({ items, accounts
     [accounts],
   );
   const moneyLabel = (fils: number) => moneySpec
-    ? `${moneySpec.currency} ${formatMinorUnits(Math.round(fils), moneySpec)}` : formatAED(fils);
+    ? moneyCodeRun(formatMinorUnits(Math.round(fils), moneySpec), moneySpec.currency, lang) : formatAED(fils);
   const w = copy[lang === 'ar' ? 'ar' : 'en'];
   const [renderLimit, setRenderLimit] = useState(PAYMENT_AGENDA_PAGE_SIZE);
   useEffect(() => {

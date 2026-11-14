@@ -33,7 +33,11 @@ interface DeviceSecretAdapter {
   randomBytes(): Promise<Uint8Array>;
 }
 const nativeSecrets: DeviceSecretAdapter = {
-  async isNative() { return (await import('react-native')).Platform.OS !== 'web'; },
+  // NOT `(await import('react-native')).Platform`: a dynamic import of react-native makes Metro enumerate every export of
+  // the module, which runs the deprecated lazy getters (PushNotificationIOS -> new NativeEventEmitter(null)) and throws a
+  // fatal "Invariant Violation: `new NativeEventEmitter()` requires a non-null argument" on iOS (Erase all data crashed
+  // the app here). A plain require reads only `Platform`, the same pattern capture.ts uses.
+  async isNative() { return (require('react-native') as typeof import('react-native')).Platform.OS !== 'web'; },
   async readSecret() { return (await import('expo-secure-store')).getItemAsync(SECRET_NAME); },
   async writeSecret(value) {
     const secure = await import('expo-secure-store');
@@ -44,7 +48,7 @@ const nativeSecrets: DeviceSecretAdapter = {
   async removeSecret() { await (await import('expo-secure-store')).deleteItemAsync(SECRET_NAME); },
   async randomBytes() { return (await import('expo-crypto')).getRandomValues(new Uint8Array(32)); },
 };
-export interface PrivateFormatMatch {
+interface PrivateFormatMatch {
   kind: 'prefill';
   fields: LearnedFields;
   /** Ephemeral only: capture must not persist this device-keyed identifier. */
@@ -55,7 +59,7 @@ export interface PrivateAlertFormatSessionOptions extends PrivateAlertMatchOptio
   cancelled?: () => boolean;
   historyRepair?: boolean;
 }
-export interface PrivateAlertFormatSource {
+interface PrivateAlertFormatSource {
   source: string;
   sender: string | null | undefined;
   observedAt: number;

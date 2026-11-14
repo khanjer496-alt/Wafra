@@ -2,6 +2,7 @@ import { inspectAlertDraft, type AlertDraft, type CurrencyAliasMap, type MoneyCa
 import { alertMarketPack } from '@/lib/alert-market-packs';
 import { CURRENCY_SYMBOL_CANDIDATES } from '@/lib/currency-metadata';
 import { extractUniversalFields } from '@/lib/universal-fields';
+import { isUnqualifiedCardCredit, isCompletedCardRepaymentPrincipal } from '@/lib/principal-posting-guards';
 import {
   missingUniversalField,
   type UniversalField,
@@ -37,6 +38,23 @@ const sourceCurrencyAliases = (context: UniversalParseContext): CurrencyAliasMap
   return { ...SOURCE_UNIT_ALIASES, ...(market ? alertMarketPack(market).currencyAliases : {}),
     ...context.currencyAliases };
 };
+
+/** Exact local money for a held card-credit Review, never posting authority. */
+export function unqualifiedCardCreditCurrencyAliases(
+  source: string,
+  market: 'AE' | 'SA',
+  existing?: CurrencyAliasMap,
+): CurrencyAliasMap | undefined {
+  const units: CurrencyAliasMap = market === 'AE'
+    ? { 'درهم': ['AED'], 'دراهم': ['AED'] } : { 'ريال': ['SAR'] };
+  const currencyAliases = { ...units, ...existing };
+  const draft = inspectAlertDraft(source, { currencyAliases });
+  const credits = draft.candidates.filter(candidate => candidate.currency === (market === 'AE' ? 'AED' : 'SAR') &&
+    candidate.minorUnits !== null && /^[1-9]\d*$/u.test(candidate.minorUnits) &&
+    (isUnqualifiedCardCredit(draft.normalizedText, candidate.span) ||
+      isCompletedCardRepaymentPrincipal(draft.normalizedText, candidate.span)));
+  return credits.length === 1 ? currencyAliases : undefined;
+}
 
 // ASCII \b does not treat accented or Vietnamese letters as word characters, so
 // "crédité" or "débité" never matched a \b(...)\b label. These edges are
@@ -116,8 +134,29 @@ const LABEL_ROLES: Record<string, UniversalMoneyRole> = {
 
 type RoleLabel = { role: UniversalMoneyRole; start: number; text: string; weak?: boolean };
 
+/**
+ * Every match of a global pattern, read with RegExp.prototype.exec. Hermes (the Android engine) returns
+ * String.prototype.matchAll results WITHOUT named groups, while exec keeps them; reading `match.groups` from matchAll
+ * silently dropped every money-role label on the device (App QA build F, synthetic N13: "account balance is AED …" read
+ * as an unattributed amount). Empty matches advance like matchAll does (by code point with the u flag).
+ */
+function execAll(pattern: RegExp, text: string): RegExpExecArray[] {
+  if (!pattern.global) throw new Error('execAll needs a global pattern');
+  const found: RegExpExecArray[] = [];
+  pattern.lastIndex = 0;
+  for (let match = pattern.exec(text); match !== null; match = pattern.exec(text)) {
+    found.push(match);
+    if (match[0] === '') {
+      const code = text.codePointAt(pattern.lastIndex);
+      pattern.lastIndex += pattern.unicode && code !== undefined && code > 0xffff ? 2 : 1;
+    }
+  }
+  pattern.lastIndex = 0;
+  return found;
+}
+
 function labels(text: string, marketLabels: RegExp | null = null): RoleLabel[] {
-  const found: RoleLabel[] = [...text.matchAll(LABEL)].map((match) => {
+  const found: RoleLabel[] = execAll(LABEL, text).map((match) => {
     const group = Object.keys(match.groups ?? {}).find((key) => match.groups?.[key] !== undefined)!;
     return { role: LABEL_ROLES[group], start: match.index!, text: match[0], weak: group === 'feeweak' };
   });

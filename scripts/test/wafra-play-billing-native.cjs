@@ -7,13 +7,10 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const { ensureKotlinc, compilerEnv } = require('./kotlin-compiler.cjs');
+const { fetchBytesWithRetry, resolveDependency, TOTAL_BUDGET_MS } = require('./download-with-retry.cjs');
 
-const dependencies = [
-  ['billing-8.0.0.aar', 'https://dl.google.com/dl/android/maven2/com/android/billingclient/billing/8.0.0/billing-8.0.0.aar', '76b3d92c30d2d5e8d22599f8d9c6d46cda031f3477fcdf2732fe1a88748c4f75'],
-  ['junit-4.13.2.jar', 'https://repo.maven.apache.org/maven2/junit/junit/4.13.2/junit-4.13.2.jar', '8e495b634469d64fb8acfa3495a065cbacc8a0fff55ce1e31007be4c16dc57d3'],
-  ['hamcrest-core-1.3.jar', 'https://repo.maven.apache.org/maven2/org/hamcrest/hamcrest-core/1.3/hamcrest-core-1.3.jar', '66fdef91e9739348df7a096aa384a5685f4e875584cce89386a7a47251c4d8e9'],
-  ['json-20250517.jar', 'https://repo.maven.apache.org/maven2/org/json/json/20250517/json-20250517.jar', '3ea61b2a06e31edf1c91134fe9106b0ebb16628be169f3db75bc7a2b06b45796'],
-];
+// Pinned SHA-256 and two mirrors per file. CI's cache key is derived from these hashes (ci.yml).
+const dependencies = require('./wafra-play-billing-deps.json');
 const filesIn = directory => fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry =>
   entry.isDirectory() ? filesIn(path.join(directory, entry.name)) : [path.join(directory, entry.name)]);
 
@@ -28,20 +25,17 @@ async function main() {
   const executable = name => javaHome ? path.join(javaHome, 'bin', name) : name;
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'wafra-play-billing-native-'));
   try {
-    await Promise.all(dependencies.map(async ([name, url, expected]) => {
-      const local = process.env.WAFRA_PLAY_BILLING_TEST_LIBS && path.join(process.env.WAFRA_PLAY_BILLING_TEST_LIBS, name);
-      let bytes;
-      if (local && fs.existsSync(local)) bytes = fs.readFileSync(local);
-      else {
-        const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-        if (!response.ok) throw Error(`Public native test dependency failed: ${name} (${response.status})`);
-        bytes = Buffer.from(await response.arrayBuffer());
-      }
-      if (bytes.length > 2_000_000 || crypto.createHash('sha256').update(bytes).digest('hex') !== expected) {
-        throw Error(`Native test dependency integrity check failed: ${name}`);
-      }
+    // One at a time: four parallel requests to Maven Central from a shared runner are what gets rate-limited.
+    // WAFRA_PLAY_BILLING_TEST_LIBS is a cache directory (see resolveDependency): verified jars are used from it and
+    // verified downloads are written back, so CI can cache them. One retry budget covers every download of the run.
+    const libs = process.env.WAFRA_PLAY_BILLING_TEST_LIBS;
+    if (libs) fs.mkdirSync(libs, { recursive: true });
+    const deadlineAt = Date.now() + TOTAL_BUDGET_MS;
+    const fetchBytes = ({ urls, name }) => fetchBytesWithRetry({ urls, name, deadlineAt, log: (line) => console.error(line) });
+    for (const { name, urls, sha256 } of dependencies) {
+      const bytes = await resolveDependency({ name, urls, sha256, cacheDir: libs, fetchBytes, log: (line) => console.error(line) });
       fs.writeFileSync(path.join(temp, name), bytes, { mode: 0o600 });
-    }));
+    }
     fs.writeFileSync(path.join(temp, 'billing.jar'), execFileSync('unzip', ['-p', path.join(temp, 'billing-8.0.0.aar'), 'classes.jar'], { maxBuffer: 2_000_000 }));
     const classes = path.join(temp, 'classes'); fs.mkdirSync(classes);
     // Real org.json must precede the android.jar's non-runnable JVM stubs.

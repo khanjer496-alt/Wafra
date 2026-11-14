@@ -1,8 +1,8 @@
 import { CATEGORIES, categorySupportsType, isCustomCategoryId, isRegisteredCategory } from '@/lib/categories';
 import type { CategoryId, CustomCategory, CustomCategoryId, TransactionType } from '@/lib/types';
 
-export const MAX_CUSTOM_CATEGORIES = 100;
-export type CustomCategoryFailure = 'invalid-name' | 'duplicate-name' | 'limit' | 'not-ready';
+const MAX_CUSTOM_CATEGORIES = 100;
+type CustomCategoryFailure = 'invalid-name' | 'duplicate-name' | 'limit' | 'not-ready';
 export type CreateCustomCategoryResult = { ok: true; id: CustomCategoryId } | { ok: false; reason: CustomCategoryFailure };
 
 /** Controls are rejected before whitespace normalization; never hide source text. */

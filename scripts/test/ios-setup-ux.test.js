@@ -54,7 +54,12 @@ const execute = (relative, dependencies = {}) => {
   )(
     (request) => dependencies[request] ??
       (request === 'expo-crypto' ? { randomUUID: () => 'ui-capture-attempt-1' } :
+        request === '@/lib/import-processing-disclosure'
+          ? execute('src/lib/import-processing-disclosure.ts') :
         request === './ios-capture-health' ? execute('src/lib/ios-capture-health.ts') :
+        // i18n.ts reads the shared import-processing disclosure (cedfc47); without the
+        // real module the empty stub made `IMPORT_PROCESSING_DISCLOSURE.en` throw.
+        request === '@/lib/import-processing-disclosure' ? execute('src/lib/import-processing-disclosure.ts') :
         request === './ios-setup-availability' || request === '@/lib/ios-setup-availability'
           ? execute('src/lib/ios-setup-availability.ts') : {}),
     loaded,

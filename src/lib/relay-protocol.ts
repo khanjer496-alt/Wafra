@@ -9,9 +9,9 @@
 export const RELAY_TEST_MESSAGE = 'WAFRA_CAPTURE_TEST_V1';
 
 /** The shared Shortcut's stable name, used by Apple's `shortcuts://` URL. */
-export const RELAY_SHORTCUT_NAME = 'Wafra Capture';
+const RELAY_SHORTCUT_NAME = 'Wafra Capture';
 
-export interface RelayShortcutSetup {
+interface RelayShortcutSetup {
   v: 1;
   url: string;
   token: string;

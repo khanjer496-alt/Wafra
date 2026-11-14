@@ -84,14 +84,14 @@ export function linkedBankAccount<T extends Pick<Account, 'id' | 'kind' | 'cardT
 /* ── A credit card's one figure and its statement line ──────────────── */
 
 /** What a credit card's figure is: what the bank quoted, or what is left of a statement. */
-export type CreditFigureKind = 'owed' | 'used' | 'statement' | 'unknown';
+type CreditFigureKind = 'owed' | 'used' | 'statement' | 'unknown';
 
 /** The statement line under a credit card's figure, or null when there is none to state. */
-export type CreditStatementLine =
+type CreditStatementLine =
   | { kind: 'paid' }
   | { kind: 'left'; fils: number; dueISO: string; overdue: boolean };
 
-export interface CreditCardStanding {
+interface CreditCardStanding {
   /** The one figure: null when the bank quoted nothing and no statement is open. */
   figureFils: number | null;
   figureKind: CreditFigureKind;
@@ -173,7 +173,7 @@ export function capturedCardSpendFils(
 
 export type CardPaymentChoice = 'full' | 'minimum' | 'other';
 
-export interface CardPaymentOptions {
+interface CardPaymentOptions {
   /** What is still owed on this statement. Recording it settles the statement. */
   fullFils: number;
   /**
@@ -199,7 +199,7 @@ export function cardPaymentOptions(input: {
   };
 }
 
-export type CardPaymentResolution =
+type CardPaymentResolution =
   | { ok: true; amountFils: number; settles: boolean }
   | { ok: false; reason: 'nothing-owed' | 'no-minimum' | 'invalid' | 'over-remaining' };
 
@@ -234,7 +234,7 @@ export function resolveCardPayment(
 
 /* ── One account's month, as recorded ──────────────────────────────── */
 
-export interface AccountMonthFlow {
+interface AccountMonthFlow {
   inFils: number;
   outFils: number;
   /** Rows counted; zero means "nothing recorded", not "nothing happened". */
@@ -291,7 +291,7 @@ export function recentAccountTransactions(
 
 /* ── Goals ──────────────────────────────────────────────────────────── */
 
-export interface GoalProgress {
+interface GoalProgress {
   ratio: number;
   percent: number;
   leftFils: number;
@@ -313,13 +313,13 @@ export function goalProgress(goal: Pick<Goal, 'savedFils' | 'targetFils'>): Goal
 
 /* ── Bills timeline ─────────────────────────────────────────────────── */
 
-export interface TimelineInput {
+interface TimelineInput {
   id: string;
   title: string;
   dateISO: string;
 }
 
-export interface TimelinePin extends TimelineInput {
+interface TimelinePin extends TimelineInput {
   /** Days from today, 0 … windowDays. */
   day: number;
   /** Position along the strip, 0–1. */

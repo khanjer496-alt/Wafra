@@ -139,7 +139,7 @@ export interface BestEffortMarker {
   market: string;
 }
 
-export interface StatementOccurrence {
+interface StatementOccurrence {
   importId: string;
   rowIndex: number;
   /** Original statement facts may differ from the live alert's posting facts. */
@@ -598,8 +598,8 @@ export interface OnboardingProfile {
 }
 
 export const LOCAL_CAPTURE_QUALIFICATION_VERSION = 1 as const;
-export const LOCAL_CAPTURE_QUALIFICATION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-export const LOCAL_CAPTURE_QUALIFICATION_CAP = 2_000;
+const LOCAL_CAPTURE_QUALIFICATION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const LOCAL_CAPTURE_QUALIFICATION_CAP = 2_000;
 
 export interface LocalCaptureQualificationCandidate {
   id: string;
@@ -951,6 +951,10 @@ export interface AppState {
   onboarded: boolean;
   userName: string;
   appLock: boolean;
+  /** Explicit opt-in to merchant/bank-name sharing for online artwork. Missing means off. */
+  onlineLogosEnabled?: boolean;
+  /** With App Lock enabled, omit widget amounts even on the unlocked Home Screen. Missing means on. */
+  hideWidgetAmountsWhenLocked?: boolean;
   /** Day of month the reporting month begins (salary day). 1 = calendar months. */
   monthStartDay: number;
   /** Cached Wafra Pro entitlement supplied by the platform stores via Superwall. */
@@ -1149,4 +1153,9 @@ export interface ImportBatchInput {
   historyImport?: HistoryImportProgress;
   lastScanTs: number;
   updates?: TxHealUpdate[];
+  /**
+   * Canonical source keys of possible Apple Pay duplicates this batch posts
+   * because their Review lane was full; recorded as counted tray records.
+   */
+  possibleDuplicatesPosted?: string[];
 }

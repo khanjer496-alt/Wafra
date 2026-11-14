@@ -39,14 +39,26 @@ Create these subscriptions in both stores:
 The reference prices are documentation only. The shipped paywall must use the
 storefront-formatted prices supplied by Apple/Google through Superwall.
 
-Suggested storefront prices, pending commercial approval (store prices include
-VAT; pick the nearest price point each store offers):
+Google Play prices as set in Play Console (base plans `weekly` and `yearly`,
+both Active, no offers), read back on 12 Nov 2026. These are the console's
+"Price" column; the "Tax" column is shown for reference. App Store prices are
+not read back yet.
 
-| storefront | weekly | yearly |
-| --- | --- | --- |
-| United Arab Emirates | AED 18.99 | AED 189.99 |
-| Saudi Arabia | SAR 19.99 | SAR 199.99 |
-| Kuwait, Qatar, Bahrain, Oman | store equivalent of US$4.99 | store equivalent of US$49.99 |
+| storefront | weekly | yearly | tax column |
+| --- | --- | --- | --- |
+| United Arab Emirates | AED 18.99 | AED 194.99 | 5% |
+| Saudi Arabia | SAR 21.99 | SAR 214.99 | 15% |
+| Kuwait | USD 4.99 | USD 49.99 | No VAT |
+| Qatar | QAR 18.00 | QAR 180.00 | No VAT |
+| Bahrain | USD 5.49 | USD 54.99 | 10% |
+| Oman | USD 4.99 | USD 49.99 | 5% |
+| United States | USD 4.99 | USD 49.99 | No VAT |
+| Japan | JPY 860 | JPY 8,700 | 10% |
+
+Play bills Kuwait, Bahrain and Oman in US dollars, so there is no KWD price on
+Google Play. The earlier suggestion of AED 189.99 yearly and SAR 19.99 /
+199.99 differs from what Play is set to; this table replaces it. Changing a store
+price is a separate, approved store action, not a docs edit.
 
 The paywall lists yearly first and preselects it, with "Most popular", the
 saving against 52 weekly payments and the per-week cost of the yearly plan.
@@ -82,6 +94,17 @@ return `wafra_pro_weekly:<base plan id>`; Wafra matches on the first segment,
 so either identifier works — but a product that is not connected to the app in
 Superwall returns nothing, and `/pro` then reports the price as unavailable.
 
+On Android Wafra requests `wafra_pro_weekly:weekly:sw-none` and
+`wafra_pro_yearly:yearly:sw-none` (`src/lib/purchases.ts`): the base plan
+pinned and `sw-none` meaning "no offer", so a store trial can never be chosen.
+The Superwall dashboard imports the same products as `…:sw-auto`; that is
+fine. In superwall-android 2.7.24 the SDK queries Play by the subscription id
+and returns the product with the id Wafra asked for (`QueryProductDetailsUseCase`),
+and a purchase maps to `pro` by falling back from the exact id to
+`<sku>:<base plan>:` and then the bare sku (`Entitlements.byProductId`). With no
+offers in Play, `sw-auto` and `sw-none` select the same base plan. Do not add a
+Play offer while the local trial ships: `sw-auto` paywall slots would pick it.
+
 A product purchase that is not attached to `pro` is misconfigured: the store
 may charge successfully while Wafra correctly remains non-Pro.
 
@@ -103,18 +126,24 @@ an OTA update cannot add the SDK to an older binary.
 
 ## Localization and privacy
 
-Publish English and Arabic variants in Superwall. Wafra passes its saved app
-language and market to each placement so the campaign can deterministically
-select EN/AR even after an in-session language change. Manually QA Arabic RTL.
+Publish English and Arabic variants in Superwall and let Superwall's built-in
+locale localization choose between them: Wafra configures the SDK with a
+`localeIdentifier` built from its saved app language and the device region, and
+sends exactly ONE placement parameter with every `onboarding` and `pro_upgrade`
+request: `language`, with the value `"en"` or `"ar"` taken from the saved app
+language (the SDK's `localeIdentifier` is fixed when the SDK is configured, so
+`language` is what follows an in-session language change, including choosing Arabic
+in first-run onboarding). Use `params.language` to choose the Arabic variant. No
+other placement parameter and NO user attributes are sent, so a rule or template
+that reads `market`, `source`, `focus`, `intention` or `platform` will never match.
+Manually QA Arabic RTL.
 
-Wafra supplies only product/onboarding metadata: language, market, onboarding
-focus/tracking/intention, capture choice and local trial days remaining. It does
-**not** send ledger rows, balances, transaction amounts, SMS bodies, card/account
-identifiers or the locally stored first name to Superwall.
-
-When Wafra's saved local-only preference is active, optional Superwall event
-tracking is set to `none` and Wafra-supplied targeting attributes are withheld.
-Store purchase/restore remains usable.
+Wafra does **not** send ledger rows, balances, transaction amounts, SMS bodies,
+card/account identifiers or the locally stored first name to Superwall. Superwall
+event tracking is set to `none` and external data collection is off for everyone,
+not only in Private Mode. Store purchase/restore remains usable. The SDK still sends
+its own anonymous app-user alias, device fields and the request IP; App Privacy
+declares these.
 
 ## Entitlement behavior
 

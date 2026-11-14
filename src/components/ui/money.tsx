@@ -7,6 +7,8 @@ import { useTheme } from '@/hooks/use-theme';
 import { useLedgerMoney, useMoneyLocaleKey } from '@/hooks/use-ledger-money';
 import { scaleTextStyleForE2E } from '@/lib/e2e-font-scale';
 import { formatAmount } from '@/lib/format';
+import { moneyCodeRun } from '@/lib/money-code-run';
+import { useLanguage } from '@/hooks/use-language';
 import { figureFontMultiplier, MIN_FIGURE_SCALE } from '@/lib/large-text-figure';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
 import { currencyDisplayLabel, currencyPlacement, formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
@@ -71,14 +73,14 @@ const labelFor = (code: string, _localeKey: string) => currencyDisplayLabel(code
  * ("€", "₹", "CA$"), else the ISO code. AED and SAR always show their code.
  * Screen readers hear the ISO code, never a bare symbol.
  */
-function CurrencyPrefix({ label, color }: { label?: string; color?: string }) {
+function CurrencyPrefix({ label, color, isoCode = false }: { label?: string; color?: string; isoCode?: boolean }) {
   const ledgerMoney = useLedgerMoney();
   const localeKey = useMoneyLocaleKey();
   const code = label ?? ledgerMoney?.currency ?? ledgerCurrencyDisplay();
   return (
     <ThemedText themeColor="textSecondary" style={[styles.currencyPrefix, color ? { color } : undefined]}
       accessibilityLabel={code}>
-      {labelFor(code, localeKey)}
+      {isoCode ? code : labelFor(code, localeKey)}
     </ThemedText>
   );
 }
@@ -93,7 +95,7 @@ const HERO_FIGURE: Partial<Record<TextType, { size: number; cap: number }>> = {
   amount: { size: 32, cap: 1.8 },
 };
 /** figureFontMultiplier for the hero figure types (see src/lib/large-text-figure.ts). */
-export function heroFigureMultiplier(
+function heroFigureMultiplier(
   chars: number,
   type: TextType,
   availableWidth: number,
@@ -127,18 +129,19 @@ export function Money({
   style,
   fitInset,
 }: MoneyProps) {
+  const language = useLanguage();
   const contextMoney = useLedgerMoney();
   const localeKey = useMoneyLocaleKey();
   const denomination = moneySpec ?? contextMoney;
   const currency = denomination?.currency ?? ledgerCurrencyDisplay();
   const value = figureText(fils, denomination, decimals, localeKey);
   const amount = `${signGlyph(fils, sign)}${value}`;
-  const label = `${prefix ? `${currency} ` : ''}${amount}`;
+  const label = prefix ? moneyCodeRun(amount, currency, language) : amount;
   // The locale's own pattern: "1.234,56 €" in de-DE, "$1,234.56" in en-US;
-  // AED/SAR and any code-labelled currency stay "AED 1,234.56". The screen
-  // reader label above always speaks the ISO code first.
-  const placement = placementFor(currency, localeKey);
-  const currencyNode = prefix ? <CurrencyPrefix label={currency} color={currencyColor} /> : null;
+  // Arabic keeps one number-then-ISO-code run, matching inline ledger text. The screen
+  // reader label always uses the ISO code.
+  const placement = language === 'ar' ? { position: 'after' as const, spaced: true } : placementFor(currency, localeKey);
+  const currencyNode = prefix ? <CurrencyPrefix label={currency} color={currencyColor} isoCode={language === 'ar'} /> : null;
   const fitMultiplier = useHeroFigureMultiplier(amount, type, fitInset);
   // A figure has no good place to break: "AED 1,752.6" over "7" is a wrong
   // number. At every text size it keeps its full width and the row around it
@@ -159,7 +162,7 @@ export function Money({
   const [first, second] = placement.position === 'after' ? [figure, currencyNode] : [currencyNode, figure];
   return (
     <View accessible accessibilityRole="text" accessibilityLabel={label}
-      style={[styles.inline, !placement.spaced && styles.tight, style]}>
+      style={[styles.inline, { direction: 'ltr' }, !placement.spaced && styles.tight, style]}>
       {first}
       {second}
     </View>

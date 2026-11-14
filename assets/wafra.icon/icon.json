@@ -1,22 +1,31 @@
 {
   "fill" : {
-    "automatic-gradient" : "extended-srgb:0.12157,0.41961,0.32157,1.00000"
+    "solid" : "extended-srgb:0.12157,0.41961,0.32157,1.00000"
   },
   "groups" : [
     {
       "layers" : [
         {
+          "fill-specializations" : [
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "extended-srgb:0.34118,0.72157,0.58039,1.00000"
+              }
+            }
+          ],
           "image-name" : "wafra-mark.svg",
           "name" : "wafra-mark"
         }
       ],
       "shadow" : {
-        "kind" : "neutral",
-        "opacity" : 0.5
+        "kind" : "none",
+        "opacity" : 0
       },
+      "specular" : false,
       "translucency" : {
-        "enabled" : true,
-        "value" : 0.5
+        "enabled" : false,
+        "value" : 0
       }
     }
   ],

@@ -9,7 +9,7 @@ import { tapped } from '@/lib/haptics';
 import { t, type StringKey } from '@/lib/i18n';
 import type { IosMessageSetupStatus } from '@/lib/ios-message-onboarding';
 
-export interface ChecklistRowProps {
+interface ChecklistRowProps {
   palette?: BandPalette;
   title: string;
   detail?: string;

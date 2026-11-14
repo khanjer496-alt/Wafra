@@ -6,7 +6,7 @@
  */
 export type LimitStatus = 'ok' | 'near' | 'over';
 
-export const NEAR_LIMIT_RATIO = 0.85;
+const NEAR_LIMIT_RATIO = 0.85;
 
 export function limitStatus(spentMinor: number, limitMinor: number): LimitStatus {
   if (!(limitMinor > 0)) return spentMinor > 0 ? 'over' : 'ok';
