@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { createHash } = require('node:crypto');
 const load = require('./load-ts.cjs').createLoader();
+const { assertCreditRetained } = require('./credit-retention.cjs');
 const { createLaunchAlertSession } = load('@/lib/launch-alert-parser');
 const { parseHistoricalMessageRecords } = load('@/lib/historical-import');
 const { setActiveCountry } = load('@/lib/country');
@@ -588,6 +589,11 @@ for (const [name, row, minor, type] of [
   ['a refund for a cancelled order', ae("We've issued your refund of 58.89 AED for your cancelled order."), 5889, 'income'],
 ]) {
   test(`round 11 control: ${name} keeps ${type} ${minor}`, () => {
+    if (name === 'a refund for a cancelled order') {
+      assert.equal(android(row), null);
+      assertCreditRetained(load, row.body, { minor, reviewOnly: true });
+      return;
+    }
     const parsed = android(row);
     assert.equal(parsed?.type, type, JSON.stringify(brief(parsed)));
     assert.equal(parsed.amountFils, minor);

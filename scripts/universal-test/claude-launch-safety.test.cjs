@@ -2,6 +2,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const load = require('./load-ts.cjs').createLoader();
+const { assertCreditRetained } = require('./credit-retention.cjs');
 const { createLaunchAlertSession } = load('@/lib/launch-alert-parser');
 const { parseSms, nonPostingReason } = load('@/lib/sms-parser');
 const { inspectUniversalBankEvent } = load('@/lib/universal-parser');
@@ -129,7 +130,12 @@ for (const body of [
   'Refund of AED 125.00 from NOON has been initiated and a processing fee was charged to your card.',
   'Refund of AED 125.00 from NOON has been initiated and a levy was deducted from your account.',
 ]) test(`a refund that has not arrived never posts: ${body.slice(0, 45)}`, () => {
-  for (const parsed of readers(body)) assert.equal(parsed, null);
+  for (const parsed of readers(body)) {
+    if (/processing fee AED 5/.test(body) && parsed) {
+      assert.equal(parsed.type, 'expense');
+      assert.equal(parsed.amountFils, 500, 'only the separately stated completed fee moves');
+    } else assert.equal(parsed, null);
+  }
 });
 
 test('a chargeback debited from the account cannot be income', () => {
@@ -182,7 +188,12 @@ for (const body of [
   'Refund of AED 125.00 from NOON has not been credited yet\nA levy was deducted from your account.',
   'Refund of AED 125.00 from NOON has not been credited yet\nA processing fee was deducted from your account.',
 ]) test(`a new fee line cannot settle a pending refund: ${body.slice(-45)}`, () => {
-  for (const parsed of readers(body)) assert.equal(parsed, null);
+  for (const parsed of readers(body)) {
+    if (/Processing fee AED 5/.test(body) && parsed) {
+      assert.equal(parsed.type, 'expense');
+      assert.equal(parsed.amountFils, 500);
+    } else assert.equal(parsed, null);
+  }
 });
 
 test('a new unquantified fee line cannot debit a completed refund', () => {
@@ -195,10 +206,7 @@ test('a repeated reference to the same refund can confirm its completion across 
   for (const wordsPerLine of [1, 2, 3, 5]) {
     const wrapped = body.split(' ').map((word, index) =>
       `${index ? (index % wordsPerLine ? ' ' : '\n') : ''}${word}`).join('');
-    for (const parsed of readers(wrapped)) {
-      assert.equal(parsed?.type, 'income');
-      assert.equal(parsed.amountFils, 12500);
-    }
+    assertCreditRetained(load, wrapped, { minor: 12500 });
   }
 });
 
@@ -264,7 +272,7 @@ test('negation applies to coordinated refund verbs until an explicit new clause'
   }
   for (const body of ['Refund of AED 125.00 has been initiated and credited to your card.',
     'Refund of AED 125.00 has not been credited and the refund has now been credited to your card.']) {
-    for (const parsed of readers(body)) assert.equal(parsed?.type, 'income');
+    assertCreditRetained(load, body, { minor: 12500 });
   }
   for (const auxiliary of ['was', 'has been']) {
     for (const parsed of readers(`Refund of AED 125.00 has not been credited and ${auxiliary} debited from your account.`)) {
@@ -293,6 +301,10 @@ for (const [body, country, type, amount] of [
   ['تم دفع قيمة شحن رصيد 50 ر.س لدى STC', 'SA', 'expense', 5000],
   ['شراء رصيد 50 ر.س لدى نون بطاقة 1234', 'SA', 'expense', 5000],
 ]) test(`completed control remains exact: ${body.slice(0, 45)}`, () => {
+  if (type === 'income') {
+    assertCreditRetained(load, body, { minor: amount, country, currency: country === 'SA' ? 'SAR' : 'AED' });
+    return;
+  }
   for (const parsed of readers(body, country)) {
     assert.equal(parsed?.type, type);
     assert.equal(parsed.amountFils, amount);
@@ -303,9 +315,10 @@ test('a conditional cancellation footer is not deletion evidence for saved rows'
   assert.equal(nonPostingReason('شراء بمبلغ 50 ر.س لدى نون. في حال تم إلغاء العملية يرجى التواصل مع المتجر.'), null);
 });
 
-test('two independently settled amounts stay reviewable rather than flipping one into the other direction', () => {
+test('a separately completed chargeback debit retains its own expense beside a refund', () => {
   for (const parsed of readers('Refund of AED 125.00 from NOON was credited to your account 1234; chargeback of AED 20.00 was debited from your account 1234.')) {
-    assert.ok(!parsed || (parsed.type === 'income' && parsed.amountFils === 12500));
+    assert.equal(parsed?.type, 'expense');
+    assert.equal(parsed.amountFils, 2000, 'the debit does not borrow the 125.00 refund figure');
   }
 });
 
