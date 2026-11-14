@@ -232,7 +232,7 @@ export function getBankLogoCacheDiagnostics() {
   };
 }
 
-export function clearBankLogoMemoryCache(): void {
+function clearBankLogoMemoryCache(): void {
   memory.clear();
   pending.clear();
   peakMemoryEntries = 0;

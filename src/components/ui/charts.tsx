@@ -44,7 +44,7 @@ export { ProgressBar } from '@/components/ui/progress-bar';
 
 /* ── Donut ───────────────────────────────────────────────────────────── */
 
-export interface DonutSlice {
+interface DonutSlice {
   key: string;
   label: string;
   value: number;
@@ -236,7 +236,7 @@ export function CategoryDonut({
 
 /* ── Composition bar ─────────────────────────────────────────────────── */
 
-export interface CompositionSegment {
+interface CompositionSegment {
   key: string;
   label: string;
   value: number;
@@ -320,7 +320,7 @@ export function CompositionBar({
 /** Bars and pins grow 50ms apart (design language E motion). */
 const BAR_STAGGER = 50;
 
-export interface MonthPair {
+interface MonthPair {
   label: string;
   inFils: number;
   outFils: number;
@@ -453,7 +453,7 @@ export function PairedBars({
 /* ── Curve ───────────────────────────────────────────────────────────── */
 
 /** Only the value: the axis labels belong to the caller, under the chart. */
-export interface CurvePoint {
+interface CurvePoint {
   fils: number;
 }
 

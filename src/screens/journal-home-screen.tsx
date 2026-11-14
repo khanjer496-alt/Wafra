@@ -124,7 +124,7 @@ const sameHomeWidgets = (a: HomeWidgetPreferences, b: HomeWidgetPreferences): bo
   a === b || JSON.stringify(a) === JSON.stringify(b);
 
 /** Every Recent transactions row painted for one period since Home mounted, by id (never the rows themselves). */
-export interface ShownActivity {
+interface ShownActivity {
   scope: string;
   ids: ReadonlySet<string>;
   /** The row that arrived last, kept so its arrival is not cut short by the next render. */

@@ -174,7 +174,7 @@ export function distinctCaptureEvents(a: string | undefined, b: string | undefin
 }
 
 /** Day, amount and name — the everyday duplicate check. */
-export function dedupeKey(date: string, amountFils: number, title: string): string {
+function dedupeKey(date: string, amountFils: number, title: string): string {
   return `${date}|${amountFils}|${title.toLowerCase()}`;
 }
 
@@ -182,7 +182,7 @@ export function dedupeKey(date: string, amountFils: number, title: string): stri
  * Day, amount and direction — everything a push notification can be held to,
  * since it words the same event differently from the SMS about it.
  */
-export function crossChannelKey(date: string, amountFils: number, type: string): string {
+function crossChannelKey(date: string, amountFils: number, type: string): string {
   return `${date}|${amountFils}|${type}`;
 }
 
@@ -345,7 +345,7 @@ export const validAbsorbedSourceKeys = (keys: unknown): string[] =>
     ? keys.slice(0, MAX_ABSORBED_SOURCE_KEYS).filter((key): key is string => typeof key === 'string' && ABSORBED_SOURCE_KEY.test(key))
     : [];
 
-export interface DuplicateGuard {
+interface DuplicateGuard {
   /** True when the ledger already has this, by any of the three tests. */
   has(c: DuplicateCandidate): boolean;
   /**
@@ -413,7 +413,7 @@ const CROSS_CHANNEL_EVENT_MS = 120_000;
  * one-to-one. Two identical charges on one channel never use this path; they
  * keep the two-minute same-event rule, so two equal coffees stay two.
  */
-export const CROSS_CHANNEL_INSTRUMENT_EVENT_MS = 15 * 60_000;
+const CROSS_CHANNEL_INSTRUMENT_EVENT_MS = 15 * 60_000;
 /** Debit-account confirmation and card receipt can be several minutes apart. */
 const CARD_PAYMENT_PAIR_MS = 30 * 60_000;
 
@@ -505,7 +505,7 @@ function sameNamedMerchant(a: string, b: string): boolean {
  * CROSS_CHANNEL_INSTRUMENT_EVENT_MS. Exported for the hydration repair and
  * tests; callers still enforce opposite channels and one-to-one consumption.
  */
-export function laggedCrossChannelEvent(
+function laggedCrossChannelEvent(
   a: { ts: number | null; title: string; captureInstrument?: CaptureInstrument; userEdited?: boolean; textClock?: number },
   b: { ts: number | null; title: string; captureInstrument?: CaptureInstrument; userEdited?: boolean; textClock?: number },
 ): boolean {
@@ -657,7 +657,7 @@ function isLiveMessageObservationRow(t: Transaction): boolean {
   return hasMessageObservationId(t) && t.smsKey?.startsWith('h') !== true;
 }
 
-export interface DuplicateGuardOptions {
+interface DuplicateGuardOptions {
   /** Issuer identity of a ledger account, for statement/alert compatibility. */
   accountBankIdentity?: (accountId: string) => string | undefined;
   /**
@@ -817,7 +817,7 @@ const DESCRIPTOR_ALIASES: Record<string, string[]> = {
  * suffix removed, nothing else. Location, legal and number words are kept;
  * descriptorOverlap decides where they may be ignored.
  */
-export function statementMerchantWords(value: string): string[] {
+function statementMerchantWords(value: string): string[] {
   const text = value.toLowerCase().normalize('NFKC')
     .replace(/^(?:nfc|iap)\s*-\s*\(g-pay\)\s*-\s*/i, '')
     .replace(/^(?:paypal|gpay|pos|sq|tst|pp)\s*\*\s*/i, '')

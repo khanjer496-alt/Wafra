@@ -351,7 +351,7 @@ export function getMerchantLogoCacheDiagnostics() {
   };
 }
 
-export function clearMerchantLogoMemoryCache(): void {
+function clearMerchantLogoMemoryCache(): void {
   memory.clear();
   pending.clear();
   peakMemoryEntries = 0;

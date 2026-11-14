@@ -29,7 +29,7 @@ export const captureBandCopyTables = {
   },
 };
 
-export type CaptureBandCopy = (typeof captureBandCopyTables)['en'];
+type CaptureBandCopy = (typeof captureBandCopyTables)['en'];
 
 export function captureBandCopy(language: string): CaptureBandCopy {
   return language === 'ar' ? captureBandCopyTables.ar : captureBandCopyTables.en;

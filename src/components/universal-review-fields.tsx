@@ -8,7 +8,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { t, type StringKey } from '@/lib/i18n';
 import type { UniversalBankEvent, UniversalField, UniversalInstrument, UniversalMoney } from '@/lib/universal-types';
 
-export const moneyChoiceKey = (money: UniversalMoney): string =>
+const moneyChoiceKey = (money: UniversalMoney): string =>
   money.currency + ':' + money.exponent + ':' + money.minorUnits;
 
 /** Decimal strings keep every minor unit, including zero/three-decimal currencies. */
@@ -20,7 +20,7 @@ export function universalMoneyLabel(money: UniversalMoney): string {
   return money.currency + ' ' + (negative ? '−' : '') + number;
 }
 
-export function universalChoices<T>(field: UniversalField<T>, key: (value: T) => string): T[] {
+function universalChoices<T>(field: UniversalField<T>, key: (value: T) => string): T[] {
   const values = field.value === null ? field.alternatives : [field.value, ...field.alternatives];
   return [...new Map(values.map((value) => [key(value), value])).values()];
 }

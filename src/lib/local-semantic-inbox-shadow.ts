@@ -20,7 +20,7 @@ import type { InboxSms } from '../../modules/sms-reader';
  * the queue starts dropping. Single-flight: a second call while one is
  * running returns the running pass.
  */
-export interface LocalSemanticInboxShadowStatus {
+interface LocalSemanticInboxShadowStatus {
   state: 'idle' | 'running' | 'complete' | 'stopped' | 'failed';
   checked: number;
   eligible: number;
@@ -67,7 +67,7 @@ export const localSemanticInboxShadowStatus = (): LocalSemanticInboxShadowStatus
 
 const yieldTurn = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
-export type InboxPageReader = (beforeDateMs: number, beforeId: number, max: number) => Promise<InboxSms[]>;
+type InboxPageReader = (beforeDateMs: number, beforeId: number, max: number) => Promise<InboxSms[]>;
 
 export function runLocalSemanticInboxShadow(
   read: InboxPageReader,

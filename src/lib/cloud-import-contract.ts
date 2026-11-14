@@ -92,7 +92,7 @@ export interface EmailForwardingCredential {
   forwardingAddress: string;
 }
 
-export type CloudImportErrorCode =
+type CloudImportErrorCode =
   | 'network'
   | 'unauthorized'
   | 'invalid_pdf'
@@ -133,7 +133,7 @@ export type CloudImportErrorCode =
  * file (so the phone can see whether it holds any of its rows) and the
  * day/month order it was read with.
  */
-export interface StatementConflictDetail {
+interface StatementConflictDetail {
   statementImportId?: string;
   /** Every id the relay knows for this file on this device. */
   statementImportIds?: string[];

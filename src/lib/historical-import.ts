@@ -39,7 +39,7 @@ export interface HistoricalMessageRecord {
   receivedAt: string;
 }
 
-export interface HistoricalImportResult {
+interface HistoricalImportResult {
   parsed: ScannedSms[];
   reviewCandidates: ReviewEntry[];
   declined: DeclinedSms[];

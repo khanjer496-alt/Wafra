@@ -1,7 +1,7 @@
 import type { Transaction } from '@/lib/types';
 import type { TransferReviewGroup } from '@/lib/transfer-reconciliation-types';
 
-export type TransferHistoryScope = 'recent' | 'all';
+type TransferHistoryScope = 'recent' | 'all';
 export const TRANSFER_HISTORY_PAGE_SIZE = 20;
 
 /** Display only: never use a label, search match or date window as ownership evidence. */
@@ -21,11 +21,11 @@ export function transferRecentStart(todayISO: string): string {
   return date.toISOString().slice(0, 10);
 }
 
-export function newestTransferFirst(a: Transaction, b: Transaction): number {
+function newestTransferFirst(a: Transaction, b: Transaction): number {
   return b.date.localeCompare(a.date) || (b.ts ?? 0) - (a.ts ?? 0) || a.id.localeCompare(b.id);
 }
 
-export type TransferBrowseGroup = TransferReviewGroup & { rows: Transaction[] };
+type TransferBrowseGroup = TransferReviewGroup & { rows: Transaction[] };
 
 /** One reusable, source-free search index per ledger/account/denomination snapshot. */
 export function indexTransferHistory(groups: readonly TransferReviewGroup[], rowsById: ReadonlyMap<string, Transaction>,

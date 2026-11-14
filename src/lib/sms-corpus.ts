@@ -1,4 +1,4 @@
-export interface SmsCorpusRow {
+interface SmsCorpusRow {
   id: number;
   address: string;
   body: string;
@@ -12,13 +12,13 @@ export interface SmsCorpusMessage {
   receivedAtMs: number;
 }
 
-export interface SmsCorpusDocument {
+interface SmsCorpusDocument {
   schema: 'wafra-sms-corpus-v1';
   exportedAt: string;
   messages: SmsCorpusMessage[];
 }
 
-export type SmsCorpusPageReader = (
+type SmsCorpusPageReader = (
   beforeDateMs: number,
   beforeId: number,
   max: number,

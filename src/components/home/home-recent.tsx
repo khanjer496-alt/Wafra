@@ -26,7 +26,7 @@ import type { Account, Transaction } from '@/lib/types';
 let settledThisSession = false;
 
 /** Recent rows grouped by their date, newest first, in display order. */
-export function recentDays(rows: readonly Transaction[]): { date: string; rows: Transaction[] }[] {
+function recentDays(rows: readonly Transaction[]): { date: string; rows: Transaction[] }[] {
   const days: { date: string; rows: Transaction[] }[] = [];
   for (const row of rows) {
     const last = days.at(-1);

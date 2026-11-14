@@ -18,7 +18,7 @@ import NativeOnDeviceAI, {
  * anything unexpected, callers keep their deterministic result.
  */
 
-export type OnDeviceAIStatus =
+type OnDeviceAIStatus =
   | 'available'
   | 'unsupported-os'
   | 'device-not-eligible'
@@ -26,7 +26,7 @@ export type OnDeviceAIStatus =
   | 'model-not-ready'
   | 'unavailable';
 export type OnDeviceAIProvider = 'apple-foundation-models' | 'gemini-nano';
-export type OnDeviceAITask = 'ask-plan' | 'categorize' | 'alert-review';
+type OnDeviceAITask = 'ask-plan' | 'categorize' | 'alert-review';
 export type OnDeviceAILanguage = 'en' | 'ar';
 
 export interface OnDeviceAIAvailability {
@@ -37,7 +37,7 @@ export interface OnDeviceAIAvailability {
   canPrepare: boolean;
 }
 
-export type OnDeviceClosedField =
+type OnDeviceClosedField =
   | { name: string; description?: string; choices: readonly string[] }
   | { name: string; description?: string; maxLength: number };
 
@@ -46,7 +46,7 @@ export interface OnDeviceClosedSchema {
   fields: readonly OnDeviceClosedField[];
 }
 
-export interface OnDeviceAIRequest {
+interface OnDeviceAIRequest {
   task: OnDeviceAITask;
   instructions: string;
   prompt: string;
@@ -57,7 +57,7 @@ export interface OnDeviceAIRequest {
   cancelled?: () => boolean;
 }
 
-export type OnDeviceAIFailureKind =
+type OnDeviceAIFailureKind =
   | 'unavailable'
   | 'language-unsupported'
   | 'invalid-request'
@@ -68,7 +68,7 @@ export type OnDeviceAIFailureKind =
   | 'invalid-output'
   | 'failed';
 
-export type OnDeviceAIResult =
+type OnDeviceAIResult =
   | { kind: 'ok'; value: Readonly<Record<string, string>>; provider: OnDeviceAIProvider }
   | { kind: OnDeviceAIFailureKind };
 
@@ -79,7 +79,7 @@ const TASKS: readonly OnDeviceAITask[] = ['ask-plan', 'categorize', 'alert-revie
 const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
 const MAX_PROMPT = 6_000;
 const MAX_OUTPUT = 4_096;
-export const ON_DEVICE_AI_DEFAULT_TIMEOUT_MS = 8_000;
+const ON_DEVICE_AI_DEFAULT_TIMEOUT_MS = 8_000;
 
 const UNAVAILABLE: OnDeviceAIAvailability = Object.freeze({
   status: 'unavailable', provider: null, languages: null, canPrepare: false,

@@ -6,7 +6,7 @@ import type { BandPalette } from '@/constants/theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { tapped } from '@/lib/haptics';
 
-export interface BandSegment<T extends string> {
+interface BandSegment<T extends string> {
   value: T;
   label: string;
   accessibilityHint?: string;

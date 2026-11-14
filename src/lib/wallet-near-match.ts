@@ -22,7 +22,7 @@ import { canonicalUniversalSourceKey } from '@/lib/universal-import';
  * made (a visible duplicate is recoverable); `defer` hands it back so a
  * queue-backed collector can keep its native record for a later drain.
  */
-export interface WalletNearMatchSettlement {
+interface WalletNearMatchSettlement {
   plan: ImportPlan;
   reviews: ReviewEntry[];
   deferred: WalletNearMatch[];
@@ -105,7 +105,7 @@ export class WalletNearMatchStagingError extends Error {
   }
 }
 
-export interface StagedWalletNearMatches {
+interface StagedWalletNearMatches {
   /** The plan to import (with fallback postings when Review was full). */
   plan: ImportPlan;
   /** Newly admitted review items (0 for replays of already staged ones). */

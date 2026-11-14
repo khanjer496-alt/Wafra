@@ -1491,7 +1491,7 @@ export function reconcileTransfers(transactions: Transaction[], accounts: Accoun
 }
 
 /** A graph build that runs in slices; see `beginTransferReconciliation`. */
-export interface SlicedTransferReconciliation {
+interface SlicedTransferReconciliation {
   /**
    * Run for about `sliceMs` (at least one step), then stop at the next yield.
    * Returns the result once the build has finished, otherwise undefined.

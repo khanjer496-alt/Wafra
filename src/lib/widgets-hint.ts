@@ -13,11 +13,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
  */
 const STORAGE_KEY = 'wafra/ui/widgets-hint/v1';
 
-export const WIDGETS_HINT_MIN_DAYS = 7;
+const WIDGETS_HINT_MIN_DAYS = 7;
 
 export type WidgetsHintDone = 'dismissed' | 'opened';
 
-export interface WidgetsHintInput {
+interface WidgetsHintInput {
   hydrated: boolean;
   onboarded: boolean;
   /** Automatic capture is set up and expected to be delivering. */

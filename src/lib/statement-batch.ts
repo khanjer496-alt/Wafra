@@ -27,7 +27,7 @@ export function nextUploadDelay(starts: readonly number[], now: number): number 
   return Math.max(0, Math.min(UPLOAD_WINDOW_MS, oldestThatMustAge + UPLOAD_WINDOW_MS + WINDOW_MARGIN_MS - now));
 }
 
-export type PluralForms = {
+type PluralForms = {
   zero?: string;
   one: string;
   two?: string;

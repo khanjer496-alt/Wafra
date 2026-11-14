@@ -15,7 +15,7 @@ import type { UniversalBankEvent, UniversalField, UniversalInstrument, Universal
  * The host must bind these choices, sourceKey and observedAt to the same
  * immutable captured source that produced the reviewed UniversalBankEvent.
  */
-export interface UniversalImportConfirmation {
+interface UniversalImportConfirmation {
   confirmed: true;
   postingStatus: 'posted';
   amount: UniversalMoney;
@@ -41,7 +41,7 @@ export type UniversalImportRefusal =
   /** Foreign money with no dated reference rate yet: stays in Review, nothing posts. */
   | 'fx-rate-unavailable';
 
-export type ConfirmedUniversalImportPlan =
+type ConfirmedUniversalImportPlan =
   | { outcome: 'ready'; batch: ImportBatchInput }
   | { outcome: 'duplicate'; transactionId: string }
   | { outcome: 'refused'; reason: UniversalImportRefusal };

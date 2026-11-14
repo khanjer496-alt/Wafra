@@ -40,7 +40,7 @@ function shortAmount(fils: number, spec: LedgerMoneySpec | null): string {
   return `${value}`;
 }
 
-export type MonthFlow = { key: string; incomeFils: number; expenseFils: number };
+type MonthFlow = { key: string; incomeFils: number; expenseFils: number };
 type Props = {
   months: readonly MonthFlow[];
   selectedKey: string;
