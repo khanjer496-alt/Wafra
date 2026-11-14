@@ -1,5 +1,7 @@
 import { inspectAlertDraft, normalizeAlertText, type CurrencyAliasMap, type MoneyCandidate } from '@/lib/alert-draft';
 import { hasNonCompletedWording } from '@/lib/best-effort-autopost';
+import { hasPendingCreditStatus, hasUnsettledCreditToken } from '@/lib/credit-settlement-guards';
+import { hasClickLinkPrompt, hasLinkCallToAction } from '@/lib/principal-posting-guards';
 import { dateOrderForCountry } from '@/lib/country';
 import { CURRENCY_SYMBOL_CANDIDATES, currencyMinorUnits, type CurrencyCode } from '@/lib/currency-metadata';
 import { detectLaunchMarketFromSender } from '@/lib/markets';
@@ -269,8 +271,19 @@ const HARD_REASONS = new Set([
   'aggregate-or-summary', 'balance-only', 'input-too-long',
 ]);
 
-const refusesWording = (text: string): boolean =>
-  hasNonCompletedWording(text) || inspectAlertDraft(text).reasons.some((reason) => HARD_REASONS.has(reason));
+const refusesWording = (text: string): boolean => {
+  const originalRefuses = hasNonCompletedWording(text);
+  // A manually confirmed private template only prefills Review. A dispute
+  // address must not masquerade as financial non-completion. Read every
+  // condition/status on the original first; posting keeps its original link gate.
+  const privateDisputeFooter = originalRefuses && /\b(?:report\s+dispute|to\s+dispute\s+(?:this|the)\s+(?:charge|transaction))\b/iu.test(text) &&
+    hasLinkCallToAction(text) && !hasClickLinkPrompt(text) &&
+    !hasUnsettledCreditToken(text) && !hasPendingCreditStatus(text);
+  const completionRefuses = privateDisputeFooter
+    ? hasNonCompletedWording(text.replace(/\b(?:https?:\/\/|www\.)\S+|\b(?:[a-z0-9-]+\.)+[a-z]{2,12}\/\S*/giu, ' '))
+    : originalRefuses;
+  return completionRefuses || inspectAlertDraft(text).reasons.some((reason) => HARD_REASONS.has(reason));
+};
 
 /* ── currency spellings ──────────────────────────────────────────────── */
 

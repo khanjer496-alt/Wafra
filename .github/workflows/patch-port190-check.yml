@@ -33,6 +33,9 @@ jobs:
       - name: Reproduce repaired history and notification consumers
         if: ${{ !cancelled() }}
         run: node --test --test-concurrency=1 scripts/test/repair/credit-review-retention.test.cjs scripts/test/repair/history-receipt-date-context.test.cjs scripts/test/repair/history-scheduling.test.cjs scripts/test/repair/notification-beta.test.cjs > consumers.txt 2>&1
+      - name: Private template teaching with original source guards
+        if: ${{ !cancelled() }}
+        run: node --test --test-concurrency=1 scripts/test/learned-alert-formats.test.cjs > learning.txt 2>&1
       - name: Three-path matrix
         if: ${{ !cancelled() }}
         run: REFUND_MATRIX_REPORT=matrix-report.json node --test --test-concurrency=1 scripts/test/repair/refund-matrix.test.cjs > matrix.txt 2>&1
@@ -47,6 +50,7 @@ jobs:
             typecheck.txt
             closure.txt
             consumers.txt
+            learning.txt
             matrix.txt
             matrix-report.json
           retention-days: 7
