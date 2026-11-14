@@ -288,7 +288,8 @@ export const inspectGenericBankEventForReview = (
     : creditReviewMarket === 'SA' ? { 'ريال': ['SAR'] } : {};
   let event = inspectUniversalBankEvent(isGulfNeighbourMarket(market)
     ? gulfNeighbourReadSource(source, market) : source, { ...context, currencyAliases: { ...creditReviewAliases, ...cardCreditAliases, ...context.currencyAliases } });
-  if (creditReviewOnly || (event.direction === 'credit' && hasUnsettledCreditToken(source))) event = informationalCreditReview(source, event);
+  if (creditReviewOnly || (event.direction === 'credit' && hasUnsettledCreditToken(source)) ||
+    (mentionsCredit(source) && event.direction === 'unknown')) event = informationalCreditReview(source, event);
   if (event.decision !== 'review') return null;
   if (cardCreditAliases) {
     if (event.status !== 'posted' && event.status !== 'unknown') return null;
@@ -1163,7 +1164,7 @@ export const createLaunchAlertSession = ({
     const holdCredit = hasUnsettledCreditToken(source);
     const pair = completedDebitBesideCredit(source);
     const reason = nonPostingReason(source);
-    if (pair && (reason === null || reason === 'pending-processing') && !hasPersonalMessagePrefix(source, sender) &&
+    if (pair && (reason === null || reason === 'pending-processing' || reason === 'declined') && !hasPersonalMessagePrefix(source, sender) &&
       !/https?:\/\/|www\./iu.test(source)) {
       const debit = reader(pair.debit, sender, inspect(pair.debit, sender), forcedMarket, observedAt);
       if (debit?.kind === 'transaction' && debit.type === 'expense') return { ...debit, raw: source };

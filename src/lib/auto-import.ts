@@ -1,4 +1,4 @@
-import { canReviewCreditRefusal, hasUnsettledCreditToken, completedDebitBesideCredit } from '@/lib/credit-settlement-guards';
+import { canReviewCreditRefusal, hasUnsettledCreditToken, completedDebitBesideCredit, mentionsCredit } from '@/lib/credit-settlement-guards';
 import { createAiAlertReviewSession } from '@/lib/ai-alert-reader';
 import { createPrivateAlertFormatSession, type PrivateAlertFormatSessionOptions } from '@/lib/private-alert-format-runtime';
 import { canEnrichPrivateFormatReview, privateAlertFormatReviewEvent } from '@/lib/private-alert-format-review';
@@ -1007,7 +1007,7 @@ export function inspectSourceFreeRefusedAlert(input: {
   // money through an unparsed-template fallback. This is no ledger deletion.
   if (isUnpostedCardBalanceClaim(source)) return { kind: 'ignored', reason: 'non-financial' };
   const reason = nonPostingReason(source);
-  if ((reason === null || reason === 'pending-processing') && !/https?:\/\/|www\./iu.test(input.source)) {
+  if ((reason === null || reason === 'pending-processing' || reason === 'declined') && !/https?:\/\/|www\./iu.test(input.source)) {
     const note = inspectSupplementaryReversal(input.source, input.sender);
     const review = note ? prepareUniversalReviewAlert({ id: 'capture_probe_id_0001', sourceKey: 'capture_probe_key_001',
       observedAt: input.observedAt, channel: input.channel, event: note }) : null;
@@ -1020,7 +1020,7 @@ export function inspectSourceFreeRefusedAlert(input: {
   // Prefer its typed informational Review before the legacy refusal/template path.
   if (canReviewCreditRefusal(source, reason) && hasBankAlertMoneyHint(source) &&
     !(input.channel === 'push' && isPromotionalBankPush(source)) &&
-    (hasOnlyUnsettledCredit(input.source) || hasUnsettledCreditToken(input.source))) {
+    (hasOnlyUnsettledCredit(input.source) || hasUnsettledCreditToken(input.source) || mentionsCredit(input.source))) {
     const event = inspectGenericBankEventForReview(input.source, input.sender);
     const review = event?.decision === 'review' && event.status === 'informational' ? prepareUniversalReviewAlert({
       id: 'capture_probe_id_0001', sourceKey: 'capture_probe_key_001',

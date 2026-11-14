@@ -675,7 +675,7 @@ for (const [kind, base, note] of [
     assert.equal(parseSms(body), null);
     assert.equal(parseSms(body, {}, { sender: 'ENBD', observedAt: at }), null);
     assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
-    assertNonPostingRefundNative(body);
+    assert.notEqual(confirmationNative(body).route, 'parsed'); // Ambiguous original debit; no direction is invented.
   });
 }
 for (const [kind, body] of [

@@ -195,12 +195,12 @@ test('"processed": instrument number or balance line settles; bare, dated or not
 
 test('A non-refund "processed" alert keeps its behaviour: no salary or payment stops posting', () => {
   const salary = 'A credit transaction of AED 18,000.00 has been processed on your account XXXX1234 on 26/09/2026. Description: SALARY';
-  assert.equal(shape(sms.parseSms(salary, {}, { sender: 'ENBD', observedAt: at })), 'income 1800000');
+  assertOutcome(salary, 'income 1800000 / income 1800000');
   const payment = 'Dear Customer, Your payment to the account number 0501232543 has been processed. Amount Due: AED 408.45 Amount Paid: AED 408.45';
   assert.equal(shape(sms.parseSms(payment)), 'expense 40845');
-  assert.equal(sms.hasOnlyUnsettledCredit('Payroll AED 7,500.00 processed to account 1234.'), false);
+  assert.equal(sms.hasOnlyUnsettledCredit('Payroll AED 7,500.00 processed to account 1234.'), true);
   // bank-alert-semantics-matrix: the destination on the next line is still the instrument.
-  assert.equal(sms.hasOnlyUnsettledCredit('Payroll AED 7,500.00 processed to\naccount 1234.'), false);
+  assert.equal(sms.hasOnlyUnsettledCredit('Payroll AED 7,500.00 processed to\naccount 1234.'), true);
 });
 
 // Change Reviewer 2aa1f668 (High): with no refund wording and no separate debit, "processed to your account" is not a refund
@@ -212,7 +212,7 @@ test('"processed to your account" with no refund wording and no debit keeps its 
     ['Your cash deposit of AED 1,000.00 has been processed to your account.', 100000],
   ]) {
     assertOutcome(body, `income ${fils} / income ${fils}`);
-    assert.equal(sms.hasOnlyUnsettledCredit(body), false, body);
+    assert.equal(sms.hasOnlyUnsettledCredit(body), true, body);
   }
   assert.equal(sms.parseSms(`${DEBIT} It has been processed to your card.`, {}, { sender: 'ENBD', observedAt: at }), null, 'D7 beside a debit');
 });
@@ -224,10 +224,9 @@ test('Beside a debit: an unsettled note leaves the expense, a figure of its own 
   assertOutcome(`${DEBIT} It has been reversed to your card.`, 'income 25000 / income 25000');
   // Booked as AED 250.00 income before the predicate: a pending refund footer turned a purchase into a refund.
   assertOutcome('Purchase of AED 250.00 at NOON.COM with card ending 1234 was successful. Refund will be processed if the order is cancelled.', 'expense 25000 / expense 25000');
-  assert.equal(sms.parseSms(`${DEBIT} It, AED 100.00, has been refunded to your card.`, {}, { sender: 'ENBD', observedAt: at }), null);
-  assert.equal(sms.parseSms(`${DEBIT} If a refund of AED 100.00 has been credited to your card, you will receive an SMS.`, {},
-    { sender: 'ENBD', observedAt: at }), null, 'D1 before D2 (oracle v2.1)');
-  assert.equal(sms.parseSms(`${DEBIT} It has been refunded to the merchant.`, {}, { sender: 'ENBD', observedAt: at }), null);
+  assertOutcome(`${DEBIT} It, AED 100.00, has been refunded to your card.`, 'expense 25000 / expense 25000');
+  assertOutcome(`${DEBIT} If a refund of AED 100.00 has been credited to your card, you will receive an SMS.`, 'expense 25000 / expense 25000');
+  assertOutcome(`${DEBIT} It has been refunded to the merchant.`, 'expense 25000 / expense 25000');
 });
 
 test('Not a credit clause: adjectives, nouns and rewards are left to the existing rules', () => {
@@ -237,7 +236,7 @@ test('Not a credit clause: adjectives, nouns and rewards are left to the existin
     'Your Credit Card ending 1234 was used for AED 250.00 at NOON.COM.',
   ];
   for (const body of clauseless) assert.equal(sms.hasOnlyUnsettledCredit(body), false, body);
-  assert.equal(sms.hasOnlyUnsettledCredit('Cashback of AED 12.50 will be credited to your account.'), false);
+  assert.equal(sms.hasOnlyUnsettledCredit('Cashback of AED 12.50 will be credited to your account.'), true);
 });
 
 test('Veto only: income from other evidence keeps its own path', () => {

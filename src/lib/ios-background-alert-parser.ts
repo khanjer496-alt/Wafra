@@ -1,4 +1,4 @@
-import { canReviewCreditRefusal, hasUnsettledCreditToken, completedDebitBesideCredit } from '@/lib/credit-settlement-guards';
+import { canReviewCreditRefusal, hasUnsettledCreditToken, completedDebitBesideCredit, mentionsCredit } from '@/lib/credit-settlement-guards';
 import { currencyMinorUnits } from '@/lib/currency-metadata';
 import { normalizeCountryCode, setActiveCountry } from '@/lib/country';
 import { detectLaunchMarketFromSender, setActiveMarket, setLedgerCurrency } from '@/lib/markets';
@@ -239,9 +239,9 @@ export function parseIosBackgroundAlert(input: NativeParserInput): NativeParserR
     setActiveCountry(context.country);
     setActiveMarket(context.parserMarket);
     setLedgerCurrency(context.ledgerMoney.currency, context.ledgerMoney.exponent);
-    const creditReviewOnly = hasOnlyUnsettledCredit(source) || holdCredit;
+    const creditReviewOnly = hasOnlyUnsettledCredit(source) || holdCredit || mentionsCredit(source);
     const refusal = nonPostingReason(source);
-    const reviewableRefusal = (creditReviewOnly || !!pair) && canReviewCreditRefusal(source, refusal);
+    const reviewableRefusal = (creditReviewOnly && canReviewCreditRefusal(source, refusal)) || (!!pair && refusal === 'declined');
     if (NON_RECEIPT_PREFIX_RE.test(source) || (refusal && !reviewableRefusal) || (!(creditReviewOnly || pair) &&
       (isNotAutoPostableMoney(source) || hasNonCompletedWording(source, context.country, sender)))) return ignore();
     const session = createLaunchAlertSession({ overrides: {}, activeMarket: context.parserMarket,

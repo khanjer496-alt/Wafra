@@ -10096,7 +10096,7 @@ export function parseSms(
   const holdCredit = hasUnsettledCreditToken(message);
   const pair = completedDebitBesideCredit(message);
   const reason = nonPostingReason(message);
-  if (pair && (reason === null || reason === 'pending-processing') && !hasActionableRefundRequest(message) &&
+  if (pair && (reason === null || reason === 'pending-processing' || reason === 'declined') && !hasActionableRefundRequest(message) &&
     !hasExplicitPersonalMoneyClaim(message) && !isBnplProviderSource(options?.sender)) {
     const debit = parseSmsCore(pair.debit, overrides, options);
     if (debit?.kind === 'transaction' && debit.type === 'expense') return { ...debit, raw: message };
