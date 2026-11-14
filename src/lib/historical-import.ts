@@ -1,5 +1,5 @@
 import { toISODate } from '@/lib/format';
-import { completedDebitBesideCredit } from '@/lib/credit-settlement-guards';
+import { completedDebitBesideCredit } from '@/lib/sms-parser';
 import {
   identifySourceFreeReviewAlert,
   inspectSourceFreeRefusedAlert,
@@ -345,7 +345,7 @@ export function parseHistoricalMessageRecords(
       else ignoredCount += 1;
       continue;
     }
-    const supplementary = result.kind === 'transaction' && result.type === 'expense' && !!completedDebitBesideCredit(record.text);
+    const supplementary = result.kind === 'transaction' && result.type === 'expense' && !!completedDebitBesideCredit(record.text, { sender });
     if (shouldReviewParsedIncome(result) || supplementary) {
       const refusal = inspectHistoricalRefusal({
         record,

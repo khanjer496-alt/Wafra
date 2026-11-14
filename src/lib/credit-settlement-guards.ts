@@ -29,11 +29,14 @@ const REFUND_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|cha
 const REVERSAL_NOTE_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|return(?:ed|ing)?|chargeback|disputes?|credited|crediting|credit(?!\s+(?:card|limit|account)))\b|(?<![ء-ي])و?(?:ب|ك|لل|ل)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس|اعتراض|ايداع|اضافه)(?:ه|ها)?(?![ء-ي])/iu;
 // This is deliberately conservative. Always inspect the normalized ORIGINAL,
 // never a merchant-masked, clause-selected or request-note-stripped derivative.
-const UNSETTLED_EN = /\b(?:if|unless|subject|upon|provided|once|when|after|until|pending|awaiting|queued|queuing|queueing|scheduled|process|progress|review|requests?|requir\w*|approval|approve|verification|verify|clearance|eligible|may|can|will)\b/iu;
-const UNSETTLED_AR = /(?<![ء-ي])(?:if_ar|[وف]?(?:اذا|لو|عند|بعد|فور|حين|شرط|بشرط|شريطه|رهن|مرهون|(?:في\s+|ب)?انتظار|قيد|جار[ي]?|طلب(?:ك|كم)?|يتطلب|تتطلب|موافقه|تحقق|تسويه|سوف|يمكن)|[وف]?(?:ال|بال|لل)(?:شرط|انتظار|طلب|موافقه|تحقق|تسويه))(?![ء-ي])/iu;
+const UNSETTLED_EN = /\b(?:if|unless|subject|upon|provided|once|when|after|until|pending|awaiting|queued|queuing|queueing|scheduled|process|progress|review|request(?:s|ed)?|requir\w*|approval|approve|verification|verify|clearance|eligible|may|can|will)\b/iu;
+const UNSETTLED_AR = /(?<![ء-ي])(?:if_ar|[وف]?(?:اذا|لو|عند|بعد|فور|حين|شرط|بشرط|شريطه|رهن|مرهون|(?:في\s+|ب)?انتظار|قيد|جار[ي]?|طلب[ء-ي]*|يتطلب|تتطلب|موافقه|تحقق|تسويه|سوف|يمكن)|[وف]?(?:ال|بال|لل)(?:شرط|انتظار|طلب[ء-ي]*|موافقه|تحقق|تسويه))(?![ء-ي])/iu;
 export const hasUnsettledCreditToken = (source: string): boolean => {
   const original = normalizeCreditText(source);
-  return UNSETTLED_EN.test(original) || UNSETTLED_AR.test(original);
+  // Productive سـ + present-tense prefix, including conjunctions and folded
+  // first-person alef. This is a conservative Review hold, never proof of money.
+  const futureArabic = /(?<![ء-ي])[وف]?س[يتنا][ء-ي]{2,}(?![ء-ي])/u.test(original);
+  return UNSETTLED_EN.test(original) || UNSETTLED_AR.test(original) || futureArabic;
 };
 const CREDIT_MENTION_SCAN = new RegExp(CREDIT_MENTION.source, 'giu');
 export function mentionsCredit(source: string): boolean {
@@ -61,14 +64,15 @@ export function hasConditionalDebitLead(source: string): boolean {
 }
 
 /** The source spans remain in the original spelling; normalization is detection only. */
-export function completedDebitBesideCredit(source: string): { debit: string; credit: string } | null {
+export function completedDebitBesideCredit(source: string, provesExpense?: (clause: string) => boolean): { debit: string; credit: string } | null {
   if (!REVERSAL_NOTE_MENTION.test(normalizeCreditText(source)) || hasConditionalDebitLead(source)) return null;
   const parts = source.split(/(?<=[.!?؟])\s+|[;؛\n]+|(?<![0-9٠-٩۰-۹])[,،]|[,،](?![0-9٠-٩۰-۹])|\s+(?:but|while)\s+(?=(?:your|the)\s+(?:refund|reversal|charge[\s-]*back))|\s*[-–—]\s*(?=(?:refund|reversal|charge[\s-]*back)\b)/iu);
   const debit = parts.filter(part => {
     const text = normalizeCreditText(part);
     return /\d/.test(text) &&
-      /\b(?:was\s+debited|has\s+been\s+debited|debited\s+from|charged|purchased|spent|paid\s+(?:at|to)|used\s+(?:at|for)|withdrawn\s+from|(?:made|successful)\s+(?:a\s+)?purchase)\b|(?:^|\|)\s*purchase\b|\b(?:debit|credit)\s+card\s+purchase\b|(?:تم|تمت)\s+(?:ال)?(?:خصم|شراء|دفع|سحب)/iu.test(text) &&
-      !/\b(?:not|failed|declined|unsuccessful|rejected)\b|(?<![ء-ي])(?:لم|لن|فشل|رفض)(?![ء-ي])/iu.test(text);
+      (provesExpense ? provesExpense(part) :
+        /\b(?:was\s+debited|has\s+been\s+debited|debited\s+from|charged|purchased|spent|paid\s+(?:at|to)|used\s+(?:at|for)|withdrawn\s+from|(?:made|successful)\s+(?:a\s+)?purchase)\b|(?:^|\|)\s*purchase\b|\b(?:debit|credit)\s+card\s+purchase\b|(?:تم|تمت)\s+(?:ال)?(?:خصم|شراء|دفع|سحب)/iu.test(text) &&
+          !/\b(?:not|failed|declined|unsuccessful|rejected)\b|(?<![ء-ي])(?:لم|لن|فشل|رفض)(?![ء-ي])/iu.test(text));
   });
   // Account credit-limit/availability fields are not reversal notes. Keep
   // them with the original receipt so its balance/limit facts survive.

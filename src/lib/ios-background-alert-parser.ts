@@ -1,4 +1,4 @@
-import { canReviewCreditRefusal, hasUnsettledCreditToken, completedDebitBesideCredit, mentionsCredit } from '@/lib/credit-settlement-guards';
+import { canReviewCreditRefusal, hasUnsettledCreditToken, mentionsCredit } from '@/lib/credit-settlement-guards';
 import { currencyMinorUnits } from '@/lib/currency-metadata';
 import { normalizeCountryCode, setActiveCountry } from '@/lib/country';
 import { detectLaunchMarketFromSender, setActiveMarket, setLedgerCurrency } from '@/lib/markets';
@@ -6,7 +6,7 @@ import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars'
 import { createLaunchAlertSession, inspectGenericBankEventForReview } from '@/lib/launch-alert-parser';
 import { hasNonCompletedWording, isNotAutoPostableMoney } from '@/lib/best-effort-autopost';
 import { originalMoneyOf } from '@/lib/fx';
-import { PARSER_VERSION, nonPostingReason, hasOnlyUnsettledCredit, type ParsedSms } from '@/lib/sms-parser';
+import { PARSER_VERSION, completedDebitBesideCredit, nonPostingReason, hasOnlyUnsettledCredit, type ParsedSms } from '@/lib/sms-parser';
 import type { UniversalBankEvent, UniversalMoney, UniversalParseContext } from '@/lib/universal-types';
 
 export type NativeParserExponent = 0 | 2 | 3;
@@ -235,10 +235,10 @@ export function parseIosBackgroundAlert(input: NativeParserInput): NativeParserR
       ? '' : input.sender.trim();
     const source = input.body;
     const holdCredit = hasUnsettledCreditToken(source);
-    const pair = completedDebitBesideCredit(source);
     setActiveCountry(context.country);
     setActiveMarket(context.parserMarket);
     setLedgerCurrency(context.ledgerMoney.currency, context.ledgerMoney.exponent);
+    const pair = completedDebitBesideCredit(source, { sender });
     const creditReviewOnly = hasOnlyUnsettledCredit(source) || holdCredit || mentionsCredit(source);
     const refusal = nonPostingReason(source);
     const incomplete = isNotAutoPostableMoney(source) || hasNonCompletedWording(source, context.country, sender);
