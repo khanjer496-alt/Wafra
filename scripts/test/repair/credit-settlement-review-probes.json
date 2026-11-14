@@ -2230,5 +2230,55 @@
     "minorUnits": 25000,
     "acceptInformationalReview": false,
     "requireReview": true
+  },
+  {
+    "id": "parser-followup:assuming-condition",
+    "origin": "parser-followup",
+    "body": "Assuming the merchant approves, AED 250.00 has been refunded to your card.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "parser-followup:as-long-as-condition",
+    "origin": "parser-followup",
+    "body": "AED 250.00 has been refunded to your card as long as the merchant approves.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "parser-followup:past-event-does-not-release-current-condition",
+    "origin": "parser-followup",
+    "body": "AED 250.00 has been refunded to your card after the merchant approved the return assuming the issuer confirms settlement.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "parser-followup:required-approval",
+    "origin": "parser-followup",
+    "body": "AED 250.00 has been refunded to your card; merchant approval is required.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": true
+  },
+  {
+    "id": "parser-followup:unrelated-field-status",
+    "origin": "parser-followup",
+    "body": "AED 250.00 has been refunded to your card; your loan application: awaiting approval.",
+    "sender": "ENBD",
+    "expected": "income",
+    "minorUnits": 25000,
+    "acceptInformationalReview": false,
+    "requireReview": false
   }
 ]
