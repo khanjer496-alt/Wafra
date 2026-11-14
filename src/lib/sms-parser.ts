@@ -1,3 +1,4 @@
+import { EN_CREDIT_PENDING_STATUS, AR_CREDIT_PENDING_STATUS, hasCreditCondition, hasLeadingCreditCondition, hasPendingCreditStatus } from '@/lib/credit-settlement-guards';
 import { categorySupportsType, readMerchantCategoryOverride } from '@/lib/categories';
 import {
   bankFromMessage,
@@ -2457,14 +2458,14 @@ const REFUND_SIDE_NOTE_COMPLETED_RE =
 // Android RC 396 F2: "AED 40.00 was debited … . Your reversal request is under process." — an amount-free reversal note that
 // is conditional, negated, future or still in process, beside a separate debit, is a side note too: the bare "reversal"
 // must not turn the debit into income. The refund-note rules above are unchanged.
-const REVERSAL_SIDE_NOTE_WORD_RE = /\breversal\b/i;
+const REVERSAL_SIDE_NOTE_WORD_RE = /\b(?:reversal|chargeback)\b/i;
 // In-process statuses of a refund or reversal (RC 396 F2; Change Reviewer ad205bc6, Reviewer 85a61c6d). EN: after "is/are",
 // after ":", "-" or "Status:", or bare "under/in process|progress"; a request verb ("has been raised/requested/lodged …",
 // a bare "initiated" not "initiated by"). AR (post-fold): قيد/تحت … and جاري المعالجة/التنفيذ.
-const EN_IN_PROCESS_STATUS = String.raw`(?:under[-\s]+(?:process(?:ing)?|review)|in[-\s]+(?:process|progress|queue)|being\s+(?:processed|reviewed|initiated)|pending|awaiting|awaited|on\s+hold)\b`;
+const EN_IN_PROCESS_STATUS = EN_CREDIT_PENDING_STATUS;
 const EN_IN_PROCESS_LEAD = String.raw`(?:\b(?:is|are)\s+(?:(?:still|currently|now)\s+)?|\s*[:\-–]\s*(?:status\s*[:\-–]?\s*)?|\bstatus\s*(?:is\s+|[:\-–]\s*)|\s(?=(?:under|in)[-\s]+(?:process|progress)))`;
 const EN_IN_PROCESS_REQUESTED = String.raw`\b(?:has\s+been|have\s+been|was|were)\s+(?:initiated|submitted|requested|raised|lodged|registered|logged)\b|\binitiated\b(?!\s+by)`;
-const AR_IN_PROCESS_STATUS = `(?<![${AR_LETTER}])(?:(?:قيد|تحت)\\s+(?:ال)?(?:انتظار|معالجه|تنفيذ|اجراء|مراجعه|دراسه)|جار(?:ي)?\\s+(?:ال)?(?:معالجه|تنفيذ))(?![${AR_LETTER}])`;
+const AR_IN_PROCESS_STATUS = AR_CREDIT_PENDING_STATUS;
 const REVERSAL_SIDE_NOTE_IN_PROCESS_RE = new RegExp(`${EN_IN_PROCESS_LEAD}${EN_IN_PROCESS_STATUS}|${EN_IN_PROCESS_REQUESTED}`, 'i');
 /** A debit sentence that itself states a reversal credit ("reversal of/for …", "reversed"), not "a reversal fee". */
 const REVERSAL_CREDIT_PHRASE_RE = /\breversal\s+(?:of|for)\b|\breversed\b/i;
@@ -2488,7 +2489,7 @@ function refundSideNotes(body: string): { body: string; ambiguous: boolean } {
     // sameMovement: the note is about the debit itself; completedRefund: and says that refund already happened.
     const sameMovement = REFUND_SIDE_NOTE_SAME_MOVEMENT_RE.test(text) && !REFUND_SIDE_NOTE_FUTURE_RE.test(text);
     const completedRefund = sameMovement && REFUND_SIDE_NOTE_COMPLETED_RE.test(text);
-    if ((negated && !sameMovement) || (separateDebit && (governsRefundCredit(lead) || REFUND_SIDE_NOTE_NOT_SETTLED_RE.test(text)))) {
+    if (isUncompletedRefundRequest(text) || (negated && !sameMovement) || (separateDebit && (governsRefundCredit(lead) || REFUND_SIDE_NOTE_NOT_SETTLED_RE.test(text)))) {
       out = out.slice(0, at) + ' '.repeat(text.length) + out.slice(at + text.length);
     } else if (separateDebit && (negated || (REFUND_RE.test(text) && !completedRefund))) {
       ambiguous = true;
@@ -2500,7 +2501,7 @@ function refundSideNotes(body: string): { body: string; ambiguous: boolean } {
   for (const { start: at, text } of separateDebitForReversal ? sentences : []) {
     const word = REVERSAL_SIDE_NOTE_WORD_RE.exec(text);
     if (!word || REFUND_SIDE_NOTE_WORD_RE.test(text) || refundAmounts(text).length > 0) continue;
-    if (governsRefundCredit(text.slice(0, word.index)) || REFUND_SIDE_NOTE_NOT_SETTLED_RE.test(text) ||
+    if (isUncompletedRefundRequest(text) || governsRefundCredit(text.slice(0, word.index)) || REFUND_SIDE_NOTE_NOT_SETTLED_RE.test(text) ||
       REVERSAL_SIDE_NOTE_IN_PROCESS_RE.test(text)) {
       out = out.slice(0, at) + ' '.repeat(text.length) + out.slice(at + text.length);
     }
@@ -2542,7 +2543,7 @@ const EN_CREDIT_WORDS = {
   notARefundCredit: /\b(?:cash\s*back|rewards?|points|miles|bonus)\b/i,
 };
 /** `ar` is set on an Arabic clause: the aspect bound to its verbal noun, read when the clause is found. */
-type CreditClause = { verbs: string[]; start: number; end: number; ar?: ArAspect };
+type CreditClause = { verbs: string[]; start: number; end: number; ar?: ArAspect; nounOnly?: boolean };
 const EN_PROCESSED_REFUND_CONTEXT_RE = /\b(?:refund\w*|revers\w*|return\w*|charge\s*back\w*)\b/i;
 const EN_PROCESSED_DESTINATION_RE = /^\s+(?:(?:and\s+\w+\s+)?(?:back\s+)?(?:to|into|onto)\b)/i;
 // An instrument named by number (Change Reviewer 4eee941b): card or account, then optionally ending/no./number, then a masked
@@ -2601,6 +2602,10 @@ function enCreditClauses(sentence: string, debitBeside = false): CreditClause[] 
       if (!completedCredit && (!joint || REFUND_CREDIT_TAKEN_BACK_RE.test(sentence.slice(clause.end + joint.index)))) break;
     }
     clauses.push({ verbs: [word.toLowerCase()], start: at, end: at + word.length });
+  }
+  if (clauses.length === 0) {
+    const noun = /\b(?:refund|reversal|chargeback)\b/i.exec(sentence);
+    if (noun) clauses.push({ verbs: [], start: noun.index, end: noun.index + noun[0].length, nounOnly: true });
   }
   return clauses;
 }
@@ -2670,7 +2675,7 @@ function leaderGovernsCredit(sentence: string, leader: RegExpMatchArray, clause:
   const stretch = sentence.slice(leaderEnd, clause.start);
   const amount = EN_PASSIVE_AMOUNT_RE.exec(stretch);
   if (!amount) return true;
-  const event = stretch.slice(0, amount.index);
+  const event = stretch.slice(0, amount.index).replace(/(?:the\s+)?refund\s+of\s*$/i, '');
   if (!EN_EVENT_NOUN_PHRASE_RE.test(event) && !EN_PAST_EVENT_CLAUSE_RE.test(event)) return true;
   const auxiliary = stretch.slice(amount.index + amount[0].length);
   const telegraphic = auxiliary.trim() === '' && /ed$/i.test(clause.verbs[0]);
@@ -2848,13 +2853,17 @@ function arCreditSettlement(sentence: string, clause: CreditClause, rawAfter: st
     return !AR_ANSWER_RE.test(sentence.slice(clause.end)) && !arNextSentenceAnswers(next);
   };
   const leaders = [...lead.matchAll(AR_CONDITIONAL_RE)].filter((leader) => !informedThat(leader));
+  // Original hamza-below إن is unambiguously conditional with any subject or active verb.
+  if (raw) leaders.push(...raw.slice(0, clause.start).matchAll(/(?<![ء-ي])و?إن(?![ء-ي])/g));
+  leaders.sort((a, b) => a.index! - b.index!);
   const last = leaders[leaders.length - 1];
   const betweenLeaderAndCredit = last ? lead.slice(last.index! + last[0].length) : '';
-  if (last && !betweenLeaderAndCredit.includes(',') &&
+  if (hasLeadingCreditCondition(lead) || (last &&
     (!AR_TEMPORAL_LEADER_RE.test(last[0]) || !AR_EVENT_BEFORE_CREDIT_RE.test(betweenLeaderAndCredit) ||
-      AR_FUTURE_MAIN_CLAUSE_RE.test(sentence.slice(clause.end)) || clause.ar !== 'settled')) {
+      AR_FUTURE_MAIN_CLAUSE_RE.test(sentence.slice(clause.end)) || clause.ar !== 'settled'))) {
     return { verdict: 'not-settled', reason: 'conditional' };
   }
+  if (hasPendingCreditStatus(sentence.slice(clause.end))) return { verdict: 'not-settled', reason: 'pending' };
   if (clause.ar === 'negated') return { verdict: 'not-settled', reason: 'negated' };
   if (clause.ar === 'pending') return { verdict: 'not-settled', reason: 'pending' };
   const tail = sentence.slice(clause.end);
@@ -2867,7 +2876,7 @@ function arCreditSettlement(sentence: string, clause: CreditClause, rawAfter: st
   }
   // As in English (Change Reviewer 1ae30382): "في حال الموافقة" (if approved) leaves the credit conditional, and for a refund
   // "خلال 7 أيام عمل" (within 7 working days) leaves it pending.
-  if (AR_TRAILING_CONDITION_RE.test(tail)) return { verdict: 'not-settled', reason: 'conditional' };
+  if (AR_TRAILING_CONDITION_RE.test(tail) || hasCreditCondition(tail)) return { verdict: 'not-settled', reason: 'conditional' };
   const windowMatch = AR_TIME_WINDOW_RE.exec(tail);
   if (windowMatch && !AR_DISPLAY_VERB_RE.test(tail.slice(0, windowMatch.index)) &&
     clause.verbs.some((verb) => verb === 'refunded' || verb === 'returned' || verb === 'reversed')) {
@@ -2894,10 +2903,11 @@ export function creditSettlement(sentence: string, clause: CreditClause, after =
   if (isAllCapsSentence(sentence)) leaders.push(...lead.matchAll(EN_CAPS_LEADER_RE));
   leaders.sort((a, b) => a.index! - b.index!);
   const last = leaders[leaders.length - 1];
-  if (last && !lead.slice(last.index! + last[0].length).includes(',') && leaderGovernsCredit(sentence, last, clause)) {
+  if (hasLeadingCreditCondition(lead) || (last && leaderGovernsCredit(sentence, last, clause))) {
     return { verdict: 'not-settled', reason: 'conditional' };
   }
   if (EN_CREDIT_WORDS.negatedBefore.test(lead)) return { verdict: 'not-settled', reason: 'negated' };
+  if (clause.nounOnly) return { verdict: 'not-settled', reason: 'pending' };
   const first = clause.verbs[0];
   if (EN_CREDIT_WORDS.pendingBefore.test(lead) || (/ing$/.test(first) && EN_CREDIT_WORDS.progressiveBefore.test(lead)) ||
     !/ed$/.test(first)) return { verdict: 'not-settled', reason: 'pending' };
@@ -2906,7 +2916,8 @@ export function creditSettlement(sentence: string, clause: CreditClause, after =
   if (destination && REFUND_THIRD_PARTY_DESTINATION_RE.test(` ${destination[0]}`)) return { verdict: 'refused', reason: 'third-party' };
   if (refundCreditNotFinal((tail + after).replace(EN_CREDIT_REASON_RE, ' '))) return { verdict: 'refused', reason: 'taken-back' };
   const ownTail = creditOwnTail(tail);
-  if (EN_TRAILING_CONDITION_RE.test(ownTail)) return { verdict: 'not-settled', reason: 'conditional' };
+  if (hasPendingCreditStatus(ownTail)) return { verdict: 'not-settled', reason: 'pending' };
+  if (EN_TRAILING_CONDITION_RE.test(ownTail) || hasCreditCondition(ownTail)) return { verdict: 'not-settled', reason: 'conditional' };
   const windowMatch = EN_TIME_WINDOW_RE.exec(ownTail);
   if (windowMatch && !EN_DISPLAY_VERB_RE.test(ownTail.slice(0, windowMatch.index)) &&
     (clause.verbs.some((verb) => /^(?:refund|revers|return)/i.test(verb)) || EN_REFUND_WORD_RE.test(sentence))) {
@@ -2951,7 +2962,7 @@ function sentenceSettlement(s: SettlementSentence, after: string): CreditSettlem
 }
 /** The body's sentences, folded (one character to one, so `start` indexes the original too), with their credit clauses. */
 function settlementSentences(original: string): SettlementSentence[] {
-  const body = foldOrthography(original);
+  const body = foldOrthography(original).replace(/[^.!?;\n]+\n(?=[^\n]*\b(?:refunded|credited|reversed)\b)/gi, text => hasCreditCondition(text) || /\b(?:if|unless|until|whether)\b/i.test(text) ? text.replace(/\n/g, ' ') : text);
   const spans: { start: number; text: string; raw: string }[] = [];
   let start = 0;
   for (const end of [...[...body.matchAll(REFUND_SENTENCE_BREAK_RE)].map((match) => match.index! + match[0].length), body.length]) {
@@ -6699,6 +6710,27 @@ const NOTICE_REFUND_COMPLETED_RE = new RegExp(
  */
 const NOTICE_REFUND_TELEGRAPHIC_CREDIT_RE =
   /(?<!\b(?:be|being|once|when|if|after|until|unless)\s+)\b(?:credited|refunded|reversed|returned|processed|deposited)\s+(?:back\s+)?(?:to|into)\s+your\b/i;
+/** Remove only amount-free request sentences beside a separately stated movement. */
+function withoutUncompletedRequestNotes(message: string): string {
+  const folded = foldOrthography(stripInvisible(message));
+  const spans = [...folded.matchAll(/[.!?](?=\s|$)|[;؛]|\n/g)].map(m => m.index! + m[0].length);
+  spans.push(folded.length);
+  let start = 0;
+  const parts = spans.map(end => { const part = { start, end, text: folded.slice(start, end) }; start = end; return part; });
+  const independent = parts.some(p => creditAmounts(p.text).length > 0 && !isUncompletedRefundRequest(p.text) &&
+    (CREDIT_SETTLEMENT_DEBIT_RE.test(p.text) || NOTICE_REFUND_COMPLETED_RE.test(p.text)));
+  if (!independent) return message;
+  let out = folded;
+  for (const p of parts) if (creditAmounts(p.text).length === 0 && isUncompletedRefundRequest(p.text)) {
+    out = out.slice(0, p.start) + ' '.repeat(p.end - p.start) + out.slice(p.end);
+  }
+  return out === folded ? message : out;
+}
+/** A request records intent. Only a separate, completed money verb can establish a credit. */
+function isUncompletedRefundRequest(text: string): boolean {
+  return /\b(?:reversal|refund|chargeback)\s+request\b|(?<![ء-ي])طلب\s+(?:ال)?(?:عكس|استرداد|استرجاع|اعاده|اعتراض)(?![ء-ي])/.test(text.toLowerCase()) &&
+    !NOTICE_REFUND_COMPLETED_RE.test(text);
+}
 /** The text says a refund or reversal is still in process and states no completed credit for it. */
 function refundInProcessUncompleted(text: string): boolean {
   const status = NOTICE_REFUND_IN_PROCESS_RE.exec(text);
@@ -6728,7 +6760,7 @@ function withoutInProcessRefundSentences(body: string): string {
   let start = 0;
   for (const end of [...[...body.matchAll(/[.!?](?=\s|$)|[;؛،](?!\s*status\b)|\n/gi)].map((match) => match.index! + match[0].length), body.length]) {
     const text = body.slice(start, end);
-    if (end > start && refundInProcessUncompleted(text)) {
+    if (end > start && (isUncompletedRefundRequest(text) || refundInProcessUncompleted(text))) {
       out = out.slice(0, start) + ' '.repeat(end - start) + out.slice(end);
     }
     start = Math.max(start, end);
@@ -6756,7 +6788,7 @@ const NOTICE_STATUS_SEGMENT_RE = new RegExp(
     String.raw`[ \t.!]*(?:[ \t]+[-–][ \t]+[^\n|]{1,30}|[ \t]+(?:ref(?:erence)?|رقم\s+المرجع)(?:\s*(?:no\.?|number|#))?\s*[:.]?\s*[\w-]+)?[^A-Za-z0-9؀-ۿ\n|]{0,8}(?=\n|\||[)\]]|$)`,
   'i');
 function moneyNoticeKindInBody(text: string): MoneyNoticeKind | null {
-  const body = text.replace(NOTICE_PREFIX_CONNECTOR_RE, '$1: ');
+  const body = withoutUncompletedRequestNotes(text).replace(NOTICE_PREFIX_CONNECTOR_RE, '$1: ');
   // rc1's newer principal lifecycle reader understands wrapped refunds and
   // an explicit new settled clause after an earlier negation. Preserve that
   // proof instead of letting the older notice classifier veto it.
@@ -9154,7 +9186,7 @@ function parseSmsInner(
   const isIncomingCreditReversal = INCOMING_CREDIT_REVERSAL_RE.test(prose);
   const isRefund = !isIncomingCreditReversal &&
     // A blanked side note is not a reversal statement either ("… is not returned to your card", "… and was later reversed").
-    (REFUND_RE.test(refundNotes.body) || REVERSAL_RE.test(withoutInProcessRefundSentences(refundNotes.body)) || arabicPurchaseRefundHeader ||
+    (REFUND_RE.test(withoutInProcessRefundSentences(refundNotes.body)) || REVERSAL_RE.test(withoutInProcessRefundSentences(refundNotes.body)) || arabicPurchaseRefundHeader ||
       REFUND_HEADING_RE.test(prose));
 
   if (PROMO_RE.test(raw) && !TXN_EVIDENCE_RE.test(raw)) return null;
@@ -10054,6 +10086,11 @@ export function parseSms(
   // bnpl-providers.ts. Every kind, both directions: the provider's refund
   // notice duplicates the bank's refund credit exactly as its charge does.
   if (isBnplProviderSource(options?.sender)) return null;
+  const withoutRequests = withoutUncompletedRequestNotes(message);
+  if (withoutRequests !== message) {
+    const movement = parseSms(withoutRequests, overrides, options);
+    return movement ? { ...movement, raw: message } : null;
+  }
   let parsed = parseSmsInner(message, overrides, options);
   if (!parsed) {
     // A currency outside the offline table: convert only with a dated rate
