@@ -1,4 +1,4 @@
-import { creditSourceDisposition } from '@/lib/credit-settlement-guards';
+import { informationalCreditReview } from '@/lib/credit-settlement-guards';
 import { inspectUniversalAlert, type UniversalAlertReview } from '@/lib/alert-market-detection';
 import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars';
 import { activeCountryDateOrder, dateOrderForCountry, getActiveCountry } from '@/lib/country';
@@ -20,7 +20,7 @@ import {
   pinnedLedgerCurrencyCode,
 } from '@/lib/markets';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
-import { moneyNoticeKind, nonPostingReason, parseSmsBatch, withoutUncompletedRequestNotes, type ParsedSms } from '@/lib/sms-parser';
+import { moneyNoticeKind, nonPostingReason, hasOnlyUnsettledCredit, parseSmsBatch, withoutUncompletedRequestNotes, type ParsedSms } from '@/lib/sms-parser';
 import type { CategoryId } from '@/lib/types';
 import { CURRENCY_SYMBOL_CANDIDATES, currencyMinorUnits } from '@/lib/currency-metadata';
 import { decideGulfNeighbourPosting, gulfNeighbourReadSource, isGulfNeighbourMarket } from '@/lib/gulf-neighbour-alerts';
@@ -210,7 +210,7 @@ export const inspectGenericBankEventForReview = (
   market?: string | null,
   sourceContext?: UniversalParseContext,
 ): UniversalBankEvent | null => {
-  const creditReviewOnly = creditSourceDisposition(source) === 'review';
+  const creditReviewOnly = hasOnlyUnsettledCredit(source);
   if (hasPersonalMessagePrefix(source, sender) || (hasNegatedPrincipalMovement(source) && !creditReviewOnly) ||
     isUnpostedCardBalanceClaim(source)) return null;
   // An exact LatAm bank template is bank-alert context in its own right.
@@ -268,6 +268,7 @@ export const inspectGenericBankEventForReview = (
     : creditReviewMarket === 'SA' ? { 'ريال': ['SAR'] } : {};
   let event = inspectUniversalBankEvent(isGulfNeighbourMarket(market)
     ? gulfNeighbourReadSource(source, market) : source, { ...context, currencyAliases: { ...creditReviewAliases, ...cardCreditAliases, ...context.currencyAliases } });
+  if (creditReviewOnly) event = informationalCreditReview(source, event);
   if (event.decision !== 'review') return null;
   if (cardCreditAliases) {
     if (event.status !== 'posted' && event.status !== 'unknown') return null;

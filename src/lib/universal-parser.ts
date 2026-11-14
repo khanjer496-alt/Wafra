@@ -1,4 +1,4 @@
-import { creditSourceDisposition } from '@/lib/credit-settlement-guards';
+import { creditSourceDisposition, informationalCreditReview } from '@/lib/credit-settlement-guards';
 import { missingUniversalField, type UniversalBankEvent, type UniversalParseContext } from '@/lib/universal-types';
 import {
   accountMovementDirection, cjkNonPostingVerdict, hasDeclinedWording, inspectMarketAlert, nonPostingTailVerdict, runWithClauseMemo,
@@ -609,11 +609,7 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
     family = ownAccountMovementFamily(maskedSource, direction) ?? family;
   }
   const creditReviewOnly = creditSourceDisposition(source) === 'review';
-  if (creditReviewOnly && hasAmount && status !== 'failed') {
-    status = 'informational';
-    if (family === 'unknown') family = /refund|reversal|charge[ -]*back|استرداد|استرجاع|عكس/iu.test(source) ? 'refund' : 'transfer';
-    if (direction === 'unknown' || direction === 'none') direction = 'credit';
-  }
+
   const authentication = challenge || readings.some((reading) => reading.family === 'authentication');
   const promotion = [...readings, ...wholeReadings].some((reading) => reading.draft.reasons.includes('promotion'));
   const reviewable = hasAmount || hasStatement || hasBalance;
@@ -643,10 +639,8 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
     ...(status === 'failed' ? ['failed-not-posting'] : []),
     ...(promotion ? ['promotion-not-posting'] : []),
   ];
-  const observations = creditReviewOnly ? money.observations.map(observation =>
-    observation.field.spans.some(span => money.amount.spans.some(primary => primary.start === span.start && primary.end === span.end))
-      ? { ...observation, role: 'transaction' as const } : observation) : money.observations;
-  return {
+
+  const event: UniversalBankEvent = {
     version: 1, decision, family, status, direction,
     amount: family === 'statement' || family === 'balance' ? missingUniversalField() : money.amount,
     statementTotal: money.statementTotal, minimumDue: money.minimumDue,

@@ -1,4 +1,4 @@
-import { creditSourceDisposition, hasCreditCondition, normalizeCreditText } from '@/lib/credit-settlement-guards';
+import { hasCreditCondition, normalizeCreditText } from '@/lib/credit-settlement-guards';
 import { currencyMinorUnits } from '@/lib/currency-metadata';
 import { normalizeCountryCode, setActiveCountry } from '@/lib/country';
 import { detectLaunchMarketFromSender, setActiveMarket, setLedgerCurrency } from '@/lib/markets';
@@ -6,7 +6,7 @@ import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars'
 import { createLaunchAlertSession, inspectGenericBankEventForReview } from '@/lib/launch-alert-parser';
 import { hasNonCompletedWording, isNotAutoPostableMoney } from '@/lib/best-effort-autopost';
 import { originalMoneyOf } from '@/lib/fx';
-import { PARSER_VERSION, nonPostingReason, type ParsedSms } from '@/lib/sms-parser';
+import { PARSER_VERSION, nonPostingReason, hasOnlyUnsettledCredit, type ParsedSms } from '@/lib/sms-parser';
 import type { UniversalBankEvent, UniversalMoney } from '@/lib/universal-types';
 
 export type NativeParserExponent = 0 | 2 | 3;
@@ -237,7 +237,7 @@ export function parseIosBackgroundAlert(input: NativeParserInput): NativeParserR
     setActiveCountry(context.country);
     setActiveMarket(context.parserMarket);
     setLedgerCurrency(context.ledgerMoney.currency, context.ledgerMoney.exponent);
-    const creditReviewOnly = creditSourceDisposition(source) === 'review';
+    const creditReviewOnly = hasOnlyUnsettledCredit(source);
     const refusal = nonPostingReason(source);
     const reviewableRefusal = creditReviewOnly && (refusal === 'pending-processing' ||
       (refusal === 'declined' && ((hasCreditCondition(source) && /\b(?:if|unless|whether)\b[^.!?]{0,80}\b(?:rejected|declined)\b/iu.test(source)) ||

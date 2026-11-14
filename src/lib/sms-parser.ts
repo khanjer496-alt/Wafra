@@ -10148,7 +10148,7 @@ export function parseSms(
   }
   // The shared credit-settled veto (CEO 080fa431), on the direction the principal context settled. A blanked re-read has
   // no credit clause left, so it cannot recurse twice.
-  if (parsed.kind === 'transaction' && parsed.type === 'income' && creditSourceDisposition(message) === 'review') return null;
+  if (parsed.kind === 'transaction' && parsed.type === 'income' && hasOnlyUnsettledCredit(message)) return null;
   const vetted = vetoUnsettledCredit(message, parsed, (text) => parseSms(text, overrides, options));
   if (vetted !== parsed) return vetted;
   // An Indian domestic-rail (NEFT/IMPS/RTGS/UPI) movement in a foreign

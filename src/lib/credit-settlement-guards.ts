@@ -1,3 +1,4 @@
+import type { UniversalBankEvent } from '@/lib/universal-types';
 /** Qualifications of a credit, shared by posting, principal selection and informational Review. */
 const normalized = new Map<string, string>();
 export function normalizeCreditText(source: string): string {
@@ -92,4 +93,17 @@ export function creditSourceDisposition(source: string): CreditSourceDisposition
   for (const later of sentences.slice(index + 1)) if (OWN_REFERENCE.test(later.trim())) owned.push(later);
   const scope = owned.join(' | ');
   return hasCreditCondition(scope) || hasPendingCreditStatus(scope) || !hasSettledCreditReceipt(scope) ? 'review' : 'post';
+}
+
+/** The existing Review contract: retain uncertain credit evidence, never confirmation authority. */
+export function informationalCreditReview(source: string, event: UniversalBankEvent): UniversalBankEvent {
+  if (event.amount.evidence === 'missing' || ['authentication', 'balance', 'statement', 'bill', 'card-payment'].includes(event.family) ||
+    event.issues.some(issue => /^(?:authentication|promotion|failed)-not-posting$/.test(issue))) return event;
+  return { ...event, decision: 'review', status: 'informational',
+    family: event.family === 'unknown' ? (/refund|reversal|charge[ -]*back|استرداد|استرجاع|عكس/iu.test(source) ? 'refund' : 'transfer') : event.family,
+    direction: event.direction === 'unknown' || event.direction === 'none' ? 'credit' : event.direction,
+    observations: event.observations.map(observation => observation.field.spans.some(span =>
+      event.amount.spans.some(primary => primary.start === span.start && primary.end === span.end))
+        ? { ...observation, role: 'transaction' as const } : observation),
+    issues: [...new Set([...event.issues, 'unsettled-credit-not-posting'])] };
 }
