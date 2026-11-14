@@ -29,3 +29,26 @@ test('owned transfer completion ends before its account descriptor', () => {
   assert.equal(guards.isIncompletePrincipal(body, { start: 0, end: 'AED 5,000.00'.length }, true), false);
   assert.equal(guards.isCompletedExpensePrincipal(body, { start: 0, end: 'AED 5,000.00'.length }), true);
 });
+
+for (const [body, price] of [
+  ['Your payment of AED 200.00 was received towards your account. Card 1234 was used at NOON.', 'AED 200.00'],
+  ['Payment of AED 350.00 received towards your DEWA account. Thank you.', 'AED 350.00'],
+  ['Beneficiary AHMED received AED 700.00 from your account 002 via instant transfer.', 'AED 700.00'],
+  ['AED 250.00 purchase at NOON with Credit Card 4110 is currently pending settlement.', 'AED 250.00'],
+  ['Purchase posted: AED 62.00 at Harbor Lamp Bakery.', 'AED 62.00'],
+  ['Refund AED 47.99 to card 1234 was reversed and debited from your account.', 'AED 47.99'],
+  ['Purchase of AED 50.00 at SAMPLE SHOP with card ending 1234 on 12/10/2026, if this transaction was not processed by you call 600 000000', 'AED 50.00'],
+  ['AED 250.00 was debited from your card ending 1234 at NOON, refund of your previous order is pending.', 'AED 250.00'],
+]) test(`existing principal is not vetoed by another owner: ${body}`, () => {
+  const start = body.indexOf(price);
+  assert.equal(guards.isIncompletePrincipal(body, { start, end: start + price.length }, true), false, body);
+});
+
+for (const body of [
+  'Purchase of AED 50.00 with Debit Card ending 1234 at CARREFOUR.',
+  'Purchase of AED 50.00 with Debit Card ending 1234 at NOT NOW CAFE.',
+  'تم سحب مبلغ AED 50.00 من حسابك لدى SAMPLE',
+]) test(`a genuine receipt supplies positive debit evidence: ${body}`, () => {
+  const start = body.indexOf('AED 50.00');
+  assert.equal(guards.isCompletedExpensePrincipal(body, { start, end: start + 'AED 50.00'.length }), true, body);
+});

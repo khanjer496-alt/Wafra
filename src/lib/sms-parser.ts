@@ -10102,7 +10102,9 @@ export function completedDebitBesideCredit(message: string, options?: ParseOptio
     if (whole && whole.kind !== 'transaction') return false;
     const parsed = parseSmsCore(clause, undefined, options);
     if (parsed?.kind !== 'transaction' || parsed.type !== 'expense') return false;
-    const original = readPrincipalContext(message, parsed);
+    // This verbatim source clause owns the selected debit, even if an equal
+    // refund amount occurs earlier in the original message.
+    const original = readPrincipalContext(clause, parsed);
     if (!original || !isCompletedExpensePrincipal(original.raw, original.spans[0])) return false;
     // Clipping a statement or completed refund into an expense-shaped field
     // cannot authorize a fallback. The legacy receipt grammar now also needs
