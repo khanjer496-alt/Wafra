@@ -1,5 +1,6 @@
 import { EN_CREDIT_PENDING_STATUS, AR_CREDIT_PENDING_STATUS, hasCreditCondition, hasPendingCreditStatus, mentionsRefund } from '@/lib/credit-settlement-guards';
 import { CURRENCY_MINOR_UNITS, CURRENCY_SYMBOL_CANDIDATES } from '@/lib/currency-metadata';
+import { getActiveMarket } from '@/lib/markets';
 
 /** Source-only qualifications of an already selected monetary value. */
 export interface PrincipalSpan { start: number; end: number }
@@ -103,6 +104,7 @@ const ACTIVE_MONEY_VERB = /\b(?:charged|debited|deducted|paid|sent|withdrawn|spe
 const PREDICATE_AUXILIARY = /\b(?:was|were|is|are|has|have|had|will|would|shall|should|must|may|might|can|could|not|never|being|yet|scheduled|pending|awaiting|[a-z]+n['’]t)\b/iu;
 const PREDICATE_START = new RegExp(`^(?:${PREDICATE_AUXILIARY.source})`, 'iu');
 const COMPLETION_ADVERBS = new Set(['already', 'just', 'now', 'successfully', 'fully', 'recently', 'actually', 'really']);
+const DEBIT_OUTCOME = /\b(?:made|completed|processed|posted|charged|debited|deducted|paid|sent|withdrawn|spent|purchased|used|transferred|settled|done|successful)\b/iu;
 const PRICE_SYMBOLS = Object.keys(CURRENCY_SYMBOL_CANDIDATES).sort((a, b) => b.length - a.length);
 const PRICE_SYMBOL_NAMES = new Set(PRICE_SYMBOLS.map(symbol => symbol.toUpperCase()));
 const STATED_PRICE = new RegExp(`\\b([A-Z]{3})\\s*\\d|\\d[\\d,.]*\\s*([A-Z]{3})\\b|(${PRICE_SYMBOLS.map(symbol => symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\s*\\d`, 'giu');
@@ -119,7 +121,12 @@ function firstStatedPrice(text: string): number | null {
 
 /** Reduce one owned predicate; modifiers cannot hide its polarity or aspect. */
 function completedPredicate(fragment: string): boolean {
-  const expanded = fragment.trim().replace(/^['’]ve\b/iu, 'have').replace(/^['’]s\b/iu, 'has').replace(/^['’]re\b/iu, 'are');
+  // A new explicit auxiliary reopens polarity: "not credited and was debited"
+  // states a debit; "not credited and debited" still shares the negation.
+  const clauses = fragment.split(/\b(?:and|but)\s+(?=(?:was|were|is|are|has|have|had|will|would|shall|should|must|may|might|can|could)\b)/iu);
+  const debits = clauses.filter(clause => DEBIT_OUTCOME.test(clause));
+  const owned = debits.length ? debits[debits.length - 1] : fragment;
+  const expanded = owned.trim().replace(/^['’]ve\b/iu, 'have').replace(/^['’]s\b/iu, 'has').replace(/^['’]re\b/iu, 'are');
   const words = (expanded.toLowerCase().match(/[a-z]+(?:['’][a-z]+)?|\d+/gu) ?? [])
     .filter(word => !COMPLETION_ADVERBS.has(word));
   // A bank may state "paid out/back" without changing the completed aspect.
@@ -133,9 +140,18 @@ function completedPredicate(fragment: string): boolean {
 
 /** null leaves a genuinely terse receipt to the mature grammar. */
 function selectedPredicateCompletion(lead: string, tail: string): boolean | null {
+  // A parenthetical stated FX price is an amount annotation, not the selected
+  // amount's verb. Never inspect its value as completion or select that quote.
+  const quote = /^\s*\(([^()]*)\)\s*/u.exec(tail);
+  if (quote) {
+    const money = /^\s*([^\d()]+?)\s*\d[\d,.]*\s*$|^\s*\d[\d,.]*\s*([^\d()]+?)\s*$/u.exec(quote[1]);
+    const label = (money?.[1] ?? money?.[2] ?? '').trim().toUpperCase();
+    if (label && (Object.hasOwn(CURRENCY_MINOR_UNITS, label) || PRICE_SYMBOL_NAMES.has(label) ||
+      getActiveMarket().currency.aliases.some(alias => alias.trim().toUpperCase() === label))) tail = tail.slice(quote[0].length);
+  }
   const descriptor = /\b(?:using|with|via|at|from|into|on|by|for|merchant|card|account|wallet|date|time|reference|balance)\b|\bto(?!\s+be\b)/iu.exec(tail);
   const ownedTail = tail.slice(0, descriptor?.index ?? tail.length);
-  const predicate = ownedTail.slice(0, firstStatedPrice(ownedTail) ?? ownedTail.length).trim();
+  const predicate = ownedTail.slice(0, firstStatedPrice(ownedTail) ?? ownedTail.length).trim().replace(/^[^\p{L}\p{N}]+/u, '');
   const allVerbs = [...lead.matchAll(ACTIVE_MONEY_VERB)];
   const verbs = allVerbs.filter((verb, index) => {
     const object = lead.slice(verb.index! + verb[0].length);
