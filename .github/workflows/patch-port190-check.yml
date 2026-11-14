@@ -1,0 +1,48 @@
+name: Exact-head original reviewer harness
+on:
+  push:
+    branches: [patch/port190-pr7-c2e4-exact-harness]
+permissions:
+  contents: read
+jobs:
+  original-harness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Prove exact source parent
+        run: |
+          test "$(git rev-parse HEAD^)" = c2e4a10555a61a7aac1d70887497e1f0d71fff37
+          git diff --exit-code HEAD^ HEAD -- src modules scripts/test
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - name: Check committed parser resources
+        run: |
+          node scripts/generate-ios-background-parser.cjs --check > generation-check.txt 2>&1
+          git diff --exit-code -- src modules scripts/test
+      - name: Run both original reviewer harnesses
+        run: |
+          mkdir -p /tmp/wafra-ts59 .github/reviewer-gate/scratch
+          ln -s "$PWD/node_modules" /tmp/wafra-ts59/node_modules
+          ln -s "$PWD" ".github/reviewer-gate/scratch/$GITHUB_SHA"
+          node -e "require('fs').writeFileSync('reviewer-harness-cases.json',JSON.stringify([...require('./scripts/test/repair/credit-settlement-sweep.json'),...require('./scripts/test/repair/credit-settlement-review-probes.json')]))"
+          REV="$GITHUB_SHA" node .github/reviewer-gate/legacy-probe.cjs reviewer-harness-cases.json legacy-harness-results.json > legacy-harness-summary.txt
+          REV="$GITHUB_SHA" node .github/reviewer-gate/r4-original-probe.cjs reviewer-harness-cases.json reviewer-harness-results.json > reviewer-harness-rows.txt
+          python3 .github/reviewer-gate/reviewer-compare.py > reviewer-harness-check.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exact-reviewer-harness-${{ github.sha }}
+          path: |
+            generation-check.txt
+            reviewer-harness-cases.json
+            legacy-harness-results.json
+            reviewer-harness-results.json
+            reviewer-harness-summary.json
+            reviewer-harness-check.txt
+          retention-days: 7
