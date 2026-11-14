@@ -44,13 +44,13 @@ const { buildOracleRows } = require('./refund-matrix-oracle.cjs');
 // Predicate PR 2 (the Arabic table) brought false income to 0 on every path, in both languages: the store gate's number.
 const CEILING = {
   falseIncome: { parseSms: 0, session: 0, native: 0 },
-  wrongDirection: { parseSms: 42, session: 40, native: 0 },
+  wrongDirection: { parseSms: 0, session: 0, native: 0 },
   wrongAmount: { parseSms: 0, session: 0, native: 0 },
-  lostIncome: { parseSms: 36, session: 36, native: 0 },
-  droppedDebit: { parseSms: 208, session: 208, native: 0 },
+  lostIncome: { parseSms: 0, session: 0, native: 0 },
+  droppedDebit: { parseSms: 37, session: 37, native: 0 },
   postedNotReview: { parseSms: 21, session: 21, native: 10 },
 };
-const NATIVE_IGNORED_INCOME_CEILING = 157;
+const NATIVE_IGNORED_INCOME_CEILING = 38;
 // Control rows added after #217 that native ignores today, exactly as #217's own bundle does (oracle v2.1 C11, C12; v2.2
 // C16; the C20 "After cancellation …", "Once your order was cancelled …", telegraphic and dated refunds; the C22 Arabic
 // "عند إلغاء الطلب …", "عند إرجاع المنتج …" and "عند مراجعة طلبك …" refunds; the six C24 Arabic genuine refunds; the dated ALL-CAPS C23

@@ -27,7 +27,7 @@ function paths(body, sender = 'ENBD', market = 'AE', currency = 'AED') {
     context: { v: 1, country: market, parserMarket: market, ledgerMoney: { currency, exponent: 2 }, sourceHash: meta.sourceHash } })));
   const event = load('@/lib/launch-alert-parser').inspectGenericBankEventForReview(body, sender);
   const parsed = sms.parseSms(body, {}, { sender, observedAt: at });
-  return { merchant: parsed?.merchant ?? null, review: event ? { status: event.status, decision: event.decision, family: event.family, role: event.observations.find(o => o.field.spans.some(s => event.amount.spans.some(a => a.start === s.start && a.end === s.end)))?.role, confirmable: load('@/lib/alert-review-tray').isMoneyMovementReview({ kind: 'universal', event }) } : null, nativeRoute: native.route, sms: shape(sms.parseSms(body, {}, { sender, observedAt: at })),
+  return { nativeMinorUnits: native.notification?.amount?.minorUnits ?? null, merchant: parsed?.merchant ?? null, review: event ? { status: event.status, decision: event.decision, family: event.family, role: event.observations.find(o => o.field.spans.some(s => event.amount.spans.some(a => a.start === s.start && a.end === s.end)))?.role, minorUnits: event.amount.value?.minorUnits ?? null, confirmable: load('@/lib/alert-review-tray').isMoneyMovementReview({ kind: 'universal', event }) } : null, nativeRoute: native.route, sms: shape(sms.parseSms(body, {}, { sender, observedAt: at })),
     session: shape(selected.parse(body, sender, selected.inspect(body, sender), undefined, at)),
     native: native.route === 'parsed' ? `${native.notification.direction}:${native.notification.amount?.minorUnits}` : native.route };
 }
@@ -152,4 +152,15 @@ test('a completed continuation cannot release an explicit condition inside the p
   const body = 'Reversal of AED 250.00 which was under process if approved has been credited to your card ending 1234.';
   assert.equal(load('@/lib/credit-settlement-guards').creditSourceDisposition(body), 'review');
   const got = paths(body);assert.equal(got.sms, 'none');assert.equal(got.session, 'none');assert.equal(got.review?.status, 'informational');assert.equal(got.nativeRoute, 'review');
+});
+
+// The final policy is about the ORIGINAL, including names and reference data.
+// This tests the real APIs, not just the lexical helper used by those APIs.
+for (const token of require('./credit-unsettled-tokens.json')) test(`original-text token cannot escape through a company field: ${token}`, () => {
+  const body = `AED 250.00 has been refunded to your card ending 1234 by ${token} LTD.`;
+  const got = paths(body);
+  assert.equal(got.sms, 'none', JSON.stringify(got)); assert.equal(got.session, 'none', JSON.stringify(got));
+  assert.equal(got.review?.status, 'informational', JSON.stringify(got)); assert.equal(got.review?.confirmable, false, JSON.stringify(got));
+  assert.equal(got.review?.minorUnits, '25000', JSON.stringify(got)); assert.equal(got.nativeRoute, 'review', JSON.stringify(got));
+  assert.equal(got.nativeMinorUnits, '25000', JSON.stringify(got));
 });

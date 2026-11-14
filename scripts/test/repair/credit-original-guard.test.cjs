@@ -3,11 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const load = require('../../universal-test/load-ts.cjs').createLoader();
 const guard = load('@/lib/credit-settlement-guards');
-const tokens = ['if', 'unless', 'subject', 'upon', 'provided', 'once', 'when', 'after', 'until',
-  'pending', 'awaiting', 'queued', 'scheduled', 'process', 'progress', 'review', 'request',
-  'require', 'required', 'requires', 'requiring', 'requirements', 'approval', 'approve', 'verification', 'verify', 'clearance',
-  'eligible', 'may', 'can', 'will', 'إن', 'إذا', 'لو', 'عند', 'بعد', 'فور', 'حين', 'بشرط',
-  'شريطة', 'رهن', 'مرهون', 'انتظار', 'قيد', 'جارٍ', 'طلب', 'يتطلب', 'تتطلب', 'موافقة', 'تحقق', 'تسوية', 'سوف', 'يمكن'];
+const tokens = require('./credit-unsettled-tokens.json');
 test('the final guard reads every CEO unsettled token in the unmasked original', () => {
   for (const token of tokens) {
     assert.equal(guard.hasUnsettledCreditToken(`AED 250.00 has been refunded by ${token.toUpperCase()} LTD.`), true, token);

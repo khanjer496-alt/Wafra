@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: e64c509dc983e0db46a2bddd45c045b2356f474c23ee88849ad740e47a8ff9cb
+// Generated from normal shipping TypeScript. Source SHA-256: 5e3ecbcfbca62fed5776e317ff082d58e2d4cda2107d81196ff81667996db4fa
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -4142,8 +4142,10 @@ exports.COUNTRY_NAMES = Object.freeze({
 "credit-settlement-guards":function(module,exports,require){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.isHistoricalCreditClaim = exports.hasLeadingCreditCondition = exports.CREDIT_CONDITION_SOURCE = exports.hasPastCreditEvent = exports.isRefundRequest = exports.REFUND_REQUEST_NOUN_RE = exports.AR_CREDIT_PENDING_STATUS = exports.EN_CREDIT_PENDING_STATUS = void 0;
+exports.isHistoricalCreditClaim = exports.hasLeadingCreditCondition = exports.CREDIT_CONDITION_SOURCE = exports.hasPastCreditEvent = exports.mentionsCredit = exports.hasUnsettledCreditToken = exports.isRefundRequest = exports.REFUND_REQUEST_NOUN_RE = exports.AR_CREDIT_PENDING_STATUS = exports.EN_CREDIT_PENDING_STATUS = void 0;
 exports.normalizeCreditText = normalizeCreditText;
+exports.hasConditionalDebitLead = hasConditionalDebitLead;
+exports.completedDebitBesideCredit = completedDebitBesideCredit;
 exports.creditQualificationScope = creditQualificationScope;
 exports.hasCreditCondition = hasCreditCondition;
 exports.hasPendingCreditStatus = hasPendingCreditStatus;
@@ -4159,7 +4161,7 @@ function normalizeCreditText(source) {
         return cached;
     const text = source.normalize('NFKC')
         .replace(/[\u0640\u064B-\u0655\u0670\u200B-\u200F\u061C\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
-        .replace(/(?<![ء-ي])أن(?![ء-ي])/g, ' that_ar ').replace(/(?<![ء-ي])إن(?![ء-ي])/g, ' if_ar ')
+        .replace(/(?<![ء-ي])([وف]?)أن(?![ء-ي])/g, '$1 that_ar ').replace(/(?<![ء-ي])([وف]?)إن(?![ء-ي])/g, '$1 if_ar ')
         .replace(/[أإآٱ]/g, 'ا').replace(/[ىئ]/g, 'ي').replace(/ؤ/g, 'و').replace(/ة/g, 'ه')
         .replace(/[٠-٩۰-۹]/g, c => String(c.charCodeAt(0) - (c >= '۰' ? 0x06f0 : 0x0660)))
         .replace(/\bcharge[\s\-–—]*backs?\b/gi, 'chargeback')
@@ -4176,58 +4178,39 @@ const PENDING = new RegExp(`${exports.EN_CREDIT_PENDING_STATUS}|${exports.AR_CRE
 exports.REFUND_REQUEST_NOUN_RE = /\b(?:(?:refund|reversal|chargeback)\s+(?:requests?|claims?|applications?)|requests?\s+(?:for|to)\s+(?:(?:a|the|your)\s+)?(?:refund|reversal|reverse|chargeback))\b|(?<![ء-ي])(?:طلب(?:ك|كم)?\s+(?:ال)?(?:ل?استرداد|ل?استرجاع|ل?عكس|اعاده|اعتراض)|طلبك\s+لاسترداد)(?![ء-ي])/iu;
 const isRefundRequest = (source) => exports.REFUND_REQUEST_NOUN_RE.test(normalizeCreditText(source).replace(/\|/g, ' '));
 exports.isRefundRequest = isRefundRequest;
-const CREDIT_MENTION = /\b(?:refund(?:ed|ing)?|reversal|reversed|chargeback|credited|credit(?!\s+card))\b|(?<![ء-ي])(?:استرداد|استرجاع|ارجاع|اعاده|عكس|ايداع|اضافه)(?![ء-ي])/iu;
+const CREDIT_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|return(?:ed|ing)?|chargeback|disputes?|credit(?:ed|ing)?(?!\s+card)|salary|payroll|deposit(?:ed)?)\b|(?<![ء-ي])و?(?:ب|ك|لل|ل)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس|اعتراض|ايداع|اضافه|راتب)(?:ه|ها)?(?![ء-ي])/iu;
+const REFUND_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|chargeback)\b|(?<![ء-ي])و?(?:ب|ك|لل|ل)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس)(?:ه|ها)?(?![ء-ي])/iu;
+const UNSETTLED_EN = /\b(?:if|unless|subject|upon|provided|once|when|after|until|pending|awaiting|queued|queuing|queueing|scheduled|process|progress|review|requests?|requir\w*|approval|approve|verification|verify|clearance|eligible|may|can|will)\b/iu;
+const UNSETTLED_AR = /(?<![ء-ي])(?:if_ar|[وف]?(?:اذا|لو|عند|بعد|فور|حين|شرط|بشرط|شريطه|رهن|مرهون|(?:في\s+|ب)?انتظار|قيد|جار[ي]?|طلب(?:ك|كم)?|يتطلب|تتطلب|موافقه|تحقق|تسويه|سوف|يمكن)|[وف]?(?:ال|بال|لل)(?:شرط|انتظار|طلب|موافقه|تحقق|تسويه))(?![ء-ي])/iu;
+const hasUnsettledCreditToken = (source) => {
+    const original = normalizeCreditText(source);
+    return UNSETTLED_EN.test(original) || UNSETTLED_AR.test(original);
+};
+exports.hasUnsettledCreditToken = hasUnsettledCreditToken;
+const mentionsCredit = (source) => CREDIT_MENTION.test(normalizeCreditText(source));
+exports.mentionsCredit = mentionsCredit;
+function hasConditionalDebitLead(source) {
+    const text = normalizeCreditText(source);
+    const amount = text.search(/\b[A-Z]{3}\s*\d|\d[\d.,]*\s*(?:[A-Z]{3}\b|درهم|ريال)/iu);
+    return amount >= 0 && /\b(?:debited|charged|purchase|spent|withdrawn)\b|(?:تم|تمت)\s+(?:ال)?(?:خصم|شراء|دفع|سحب)/iu.test(text) &&
+        hasCreditCondition(text.slice(0, amount));
+}
+function completedDebitBesideCredit(source) {
+    if (!(0, exports.mentionsCredit)(source) || hasConditionalDebitLead(source))
+        return null;
+    const parts = source.split(/(?<=[.!?؟])\s+|[;؛\n]+|\s+(?:but|while)\s+(?=(?:your|the)\s+(?:refund|reversal|charge[\s-]*back))|\s*[-–—]\s*(?=(?:refund|reversal|charge[\s-]*back)\b)/iu);
+    const debit = parts.filter(part => {
+        const text = normalizeCreditText(part);
+        return /\d/.test(text) &&
+            /\b(?:was\s+debited|has\s+been\s+debited|debited\s+from|charged|purchased|spent|paid\s+(?:at|to)|used\s+(?:at|for)|withdrawn\s+from|(?:made|successful)\s+(?:a\s+)?purchase)\b|^\s*purchase\b|(?:تم|تمت)\s+(?:ال)?(?:خصم|شراء|دفع|سحب)/iu.test(text) &&
+            !/\b(?:not|failed|declined|unsuccessful|rejected)\b|(?<![ء-ي])(?:لم|لن|فشل|رفض)(?![ء-ي])/iu.test(text);
+    });
+    const credit = parts.filter(part => !debit.includes(part) && (0, exports.mentionsCredit)(part));
+    return debit.length === 1 && credit.length > 0 ? { debit: debit[0], credit: credit.join(' ') } : null;
+}
 const OWN_REFERENCE = /^(?:(?:this|the|that|same|your)\s+(?:credit|refund|amount|money|funds|reversal|cheque|check|dispute|claim|hold|lien|bank|sum|transfer|transaction|payment|deposit|approval|verification|confirmation|clearance|permission|consent)|(?:it|its|them)\b|(?:the\s+)?same\b|(?:this|these|those|they)\s+(?=(?:is|are|was|were|will|shall|has|have|can|could|would|may)\b)|status\b|(?:هذا|نفس|ذلك)\s+(?:ال)?(?:مبلغ|استرداد|ايداع)|(?:ال)?(?:مبلغ|استرداد|حاله)(?![ء-ي]))/iu;
-const CONDITION_HEAD = /^(?:only\s+)?(?:if\b|unless\b|until\b|whether\b|once\b|when\b|after\b|upon\b|on\b|subject\b|provided\b|providing\b|conditional\b|contingent\b|depending\b|in\s+case\b|should\b|assuming\b|as\s+long\s+as\b|so\s+long\s+as\b|pending\b|awaiting\b|under\b|in\s+(?:process|progress|queue)\b|if_ar\b|اذا(?![ء-ي])|ان(?![ء-ي])|لو(?![ء-ي])|في\s+حال|عند(?![ء-ي])|بمجرد(?![ء-ي])|بشرط(?![ء-ي])|شريطه(?![ء-ي])|رهن(?![ء-ي])|مرهون(?![ء-ي])|لحين(?![ء-ي])|حتي(?![ء-ي])|ريثما(?![ء-ي])|بانتظار(?![ء-ي])|في\s+انتظار(?![ء-ي])|قيد(?![ء-ي])|تحت(?![ء-ي]))/iu;
-const COMPLEMENT_HEAD = /(?:\b(?:subject\s+to|conditional\s+(?:on|upon)|contingent\s+on|depending\s+on|on|upon|under|in|status)|(?:بشرط|شريطه|شرط|رهن|لحين|حتي|ريثما))\s*$/iu;
 function creditQualificationScope(source) {
-    const text = normalizeCreditText(source)
-        .replace(/(\|\|)\s*if\s+you\s+did\s+not\s+(?:request|initiate|authori[sz]e)\s+(?:this|the)\s+(?:refund|transaction|payment)\s*(?:\|\s*)?(?:(?:please|kindly)\s+)?(?:call|contact|notify)\b[^|.]*/gi, '$1 ')
-        .replace(/(\|\|)\s*if\s+(?:(?:it|this|the\s+(?:amount|credit|refund))\s+(?:(?:was|has\s+been)\s+)?)?(?:credited|refunded|received|reversed)\s+in\s+error\s*(?:\|\s*)?(?:(?:please|kindly)\s+)?(?:call|contact|notify)\b[^|.]*/gi, '$1 ')
-        .replace(/\bif\s+(?:(?:(?:the|this|your)\s+transaction\s+)?(?:has\s+been\s+|was\s+|is\s+)?(?:not\s+)?authori[sz]ed\s+by\s+you|you\s+did\s+not\s+authori[sz]e\s+(?:this|it))\s*(?:\|\s*)?(?:(?:please|kindly)\s+)?(?:call|contact|ignore|disregard)\b[^|.]*/gi, ' ')
-        .replace(/\bwhich\s+(?:was|had\s+been)\s+([^|.]*?)(?=\s+(?:(?:has|have)\s+(?:now\s+)?been|was)\s+(?:now\s+)?(?:credited|refunded|returned|deposited)\b)/gi, (all, previous) => PENDING.test(previous) && !CONDITION.test(previous) ? ' ' : all)
-        .replace(/\b(?:from|FROM|by|BY)\s+[A-Z][\p{Lu}\p{N}.&'’]*(?:\s+(?!(?:HAS|HAVE|HAD|WAS|WERE|IS|ARE|CREDITED|REFUNDED|REVERSED|RETURNED|DEPOSITED|PROCESSED|RECEIVED)\b)[\p{Lu}\p{N}.&'’]+)*/gu, ' ')
-        .replace(/(?:من|لدي|بواسطه)\s+(?:شركه|موسسه)\s+[^|.]+/g, ' ')
-        .replace(/\bfor\s+(?:your|the)\s+(?:(?:cancelled|canceled|previously|original|pending|scheduled|reversed)\s+)+(?:payment|purchase|order|transaction)\b/gi, ' ')
-        .replace(/\b(?:from|via)\s+(?:a\s+)?scheduled\s+(?:transfer|payment)\b|\bfor\s+scheduled\s+rent\b/gi, ' ')
-        .replace(/(?:من|عبر)\s+تحويل\s+مجدول/g, ' ')
-        .replace(/\b(?:and|but|while)\s+(?=(?:your|the|another)\s+)/gi, ' | ')
-        .replace(/\b(?:and|but)\s+(?=(?:has|have|had|was|were)\b)/gi, ' | ');
-    const parts = text.split(/\s*(\|+)\s*/);
-    let laterSentence = false;
-    let unrelatedSubject = false;
-    const own = [];
-    for (let index = 0; index < parts.length; index++) {
-        const part = parts[index].trim();
-        if (!part)
-            continue;
-        if (/^\|+$/.test(part)) {
-            laterSentence || (laterSentence = part.length > 1);
-            continue;
-        }
-        const continuation = own.length > 0 && COMPLEMENT_HEAD.test(own[own.length - 1]);
-        const other = /^(?:(?:your|the)\s+other|another\b|و?(?:طلبك|طلبكم|الطلب|الاسترداد)\s+(?:الاخر|الاخري))/iu.test(part);
-        const referencesMoney = /\b(?:show|post|releas|confirm|verif|clear|reflect|restore|credit|refund|return)\w*\s+(?:it|them|the\s+same|(?:this|that|the)\s+(?:amount|credit|refund|funds))\b/iu.test(part);
-        const explicitReference = OWN_REFERENCE.test(part) || referencesMoney;
-        const freshMovement = /^(?:[A-Z]{3}\s*\d|\d[\d,.]*\s*[A-Z]{3}\b|(?:refund|reversal|chargeback)\b|(?:تم|تمت)\s+(?:استرداد|ايداع|اضافه))/iu.test(part);
-        const independent = /^(?:your|the|a|an|our|their)\s+[\p{L}]/iu.test(part) && !explicitReference;
-        if (index > 0 && !continuation && !CONDITION_HEAD.test(part) && (other || independent)) {
-            unrelatedSubject = true;
-            continue;
-        }
-        if (unrelatedSubject && !continuation && !explicitReference && !freshMovement && !CONDITION.test(part))
-            continue;
-        if (explicitReference || freshMovement)
-            unrelatedSubject = false;
-        if (/^(?:(?:(?:the|this|your)\s+(?:refund|amount)|it|which)\s+)?(?:(?:has|have|had)\s+(?:now\s+)?been|was|were)\s+(?:(?:now|successfully|already)\s+)?(?:credited|refunded|returned|deposited)\b/iu.test(part) &&
-            /\b(?:not|never|pending|awaiting|being|will|shall)\b/iu.test(own.join(' ')) && !/\b(?:if|unless|whether|subject|until|once|when)\b|if_ar|اذا|بشرط/iu.test(own.join(' ')))
-            own.length = 0;
-        if (index === 0 || continuation || (!other && (CONDITION_HEAD.test(part) || explicitReference || freshMovement || (!laterSentence && !independent))))
-            own.push(part);
-    }
-    return own.join(' ')
-        .replace(/\bif\s+(?:(?:(?:the|this|your)\s+transaction\s+)?(?:has\s+been\s+|was\s+|is\s+)?(?:not\s+)?authori[sz]ed\s+by\s+you|you\s+did\s+not\s+authori[sz]e\s+(?:this|it))[^|.]*?\b(?:call|contact|ignore|disregard)\b[^|.]*/gi, ' ')
-        .replace(/(?:if_ar|اذا|ان|في\s+حال)\s+لم\s+(?:تقم|تتعرف)[^|.]*?(?:اتصل|الاتصال|يرجي)[^|.]*/g, ' ');
+    return normalizeCreditText(source);
 }
 const EN_PAST_EVENT = /\b(?:after|once|when|following)\s+(?![^|.]*\b(?:will|would|shall|may|might|if|unless)\b)([^|.]*?)\b(?:approved|verified|confirmed|cleared|accepted|completed|cancell?ed|signed\s+off)\b/giu;
 const AR_PAST_EVENT = /(?:بعد(?:\s+(?:ان|that_ar))?|عندما|حين)\s+(?:ان\s+)?(?:(?:قد\s+)?(?:وافق|اكد|اعتمد|تحقق)|(?:تم|تمت)\s+(?:ال)?(?:تحقق|تاكيد|اعتماد|موافقه|الغاء|ارجاع|استرجاع|مراجعه))/gu;
@@ -4245,12 +4228,27 @@ const hasPastCreditEvent = (text) => {
 };
 exports.hasPastCreditEvent = hasPastCreditEvent;
 exports.CREDIT_CONDITION_SOURCE = String.raw `\b(?:subject\s+to|conditional\s+(?:on|upon)|contingent\s+(?:on|upon)|depending\s+on|assuming|(?:as|so)\s+long\s+as|on\s+condition(?:\s+that)?|in\s+(?:the\s+)?event(?:\s+of)?|in\s+case(?:\s+of)?|provided(?:\s+that)?|providing(?:\s+that)?|if|unless|until|whether|till|should)\b|\b(?:once|when|after|upon)\s+|\bon\s+(?:(?:successful|final|merchant|bank)\s+)*(?:approval|verification|clearance|confirmation|receipt)\b|(?<![ء-ي])(?:if_ar|اذا|لو|في\s+حال(?:ه)?|بشرط|شريطه|شرط|رهن|مرهون|لحين|حتي|ريثما|بمجرد|عند|عندما|متي|حينما|حين)(?![ء-ي])|(?<![ء-ي])بعد\s+(?:ال)?(?:موافقه|اعتماد)(?![ء-ي])`;
-const CONDITION = new RegExp(exports.CREDIT_CONDITION_SOURCE, 'iu');
+const CONDITION_SCAN = new RegExp(exports.CREDIT_CONDITION_SOURCE, 'giu');
 function hasCreditCondition(source) {
-    return CONDITION.test(withoutPastEvents(creditQualificationScope(source)));
+    const original = normalizeCreditText(source);
+    CONDITION_SCAN.lastIndex = 0;
+    try {
+        for (let match = CONDITION_SCAN.exec(original); match; match = CONDITION_SCAN.exec(original)) {
+            const prior = original.lastIndexOf('||', match.index);
+            const end = original.indexOf('||', match.index);
+            const sentence = original.slice(prior < 0 ? 0 : prior + 2, end < 0 ? original.length : end).trim();
+            if (prior < 0 || CREDIT_MENTION.test(sentence) || OWN_REFERENCE.test(sentence) ||
+                OWN_REFERENCE.test(original.slice(match.index + match[0].length).trim()))
+                return true;
+        }
+        return false;
+    }
+    finally {
+        CONDITION_SCAN.lastIndex = 0;
+    }
 }
 function hasPendingCreditStatus(source) {
-    const text = creditQualificationScope(source).replace(/\b(?:pending|in\s+progress|under\s+review)\s+(?:orders?|purchases?|transactions?|applications?|authori[sz]ations?)\b/gi, ' ');
+    const text = normalizeCreditText(source);
     const workflowText = text.replace(/\bas\s+requested\b/gi, ' ');
     const workflow = /\b(?:initiated|submitted|requested|raised|lodged|registered|logged)\b/iu.test(workflowText);
     const completedMoney = /\b(?:has|have|had)\s+(?:(?:now|already|just)\s+)?been\s+(?:(?:successfully|fully|now)\s+)?(?:credited|refunded|reversed|returned|deposited|posted)\b|\b(?:was|were)\s+(?:(?:successfully|fully|now)\s+)?(?:credited|refunded|reversed|returned|deposited|posted)\b|(?<!\b(?:be|being|if|once|when|until)\s+)\b(?:credited|refunded|reversed|returned|deposited|posted)\s+(?:back\s+)?(?:to|into|onto)\s+your\b/iu.test(text);
@@ -4273,13 +4271,17 @@ function hasSettledCreditReceipt(source) {
     const actualMoneyVerb = /\b(?:credited|refunded|returned|reversed|deposited|posted)\s+(?:back\s+)?(?:to|into|onto|in|on)\s+(?:your|the\s+original)\b/iu.test(text);
     if (!monetaryHead && !actualMoneyVerb)
         return false;
-    const receipt = /\b(?:credited|refunded|reversed|returned|deposited|posted|received|arrived|applied|processed|complete(?:d)?|successful|settled|done)\b|(?<![ء-ي])(?:تم|تمت)\s+(?:(?:تاكيد|تنفيذ)\s+)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس|ايداع|اضافه|معالجه)/iu.test(text) || (/^\s*(?:استرداد|ايداع)\s+(?:ال)?مبلغ/iu.test(text) && !/(?:بعد|عند|بمجرد)/u.test(text));
+    const receipt = /\b(?:credited|refunded|reversed|returned|deposited|posted|received|arrived|applied|processed|complete(?:d)?|successful|settled|done)\b|(?<![ء-ي])(?:تم|تمت)\s+(?:(?:تاكيد|تنفيذ)\s+)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس|ايداع|اضافه|معالجه)/iu.test(text);
     if (!receipt)
         return false;
     return !(0, exports.isRefundRequest)(text) || /\b(?:credited|refunded|reversed|returned|deposited)\b|(?:تم|تمت)\s+(?:استرداد|ايداع|عكس)/iu.test(text);
 }
 function creditSourceDisposition(source) {
     const text = normalizeCreditText(source);
+    if (CREDIT_MENTION.test(text) && ((0, exports.hasUnsettledCreditToken)(source) || hasPendingCreditStatus(source)))
+        return 'review';
+    if (!REFUND_MENTION.test(text))
+        return 'not-credit';
     if (/\b(?:cash\s*back|rewards?|points|miles|bonus)\b|(?:استرداد|استرجاع)\s+(?:ال)?نقدي/iu.test(text))
         return 'not-credit';
     const sentences = text.split(/\s*\|\|\s*/);
@@ -4295,13 +4297,26 @@ function creditSourceDisposition(source) {
     return bareActiveCondition || hasCreditCondition(scope) || hasPendingCreditStatus(scope) || !hasSettledCreditReceipt(scope) ? 'review' : 'post';
 }
 function informationalCreditReview(source, event) {
-    if (event.amount.evidence === 'missing' || ['authentication', 'balance', 'statement', 'bill', 'card-payment'].includes(event.family) ||
-        event.issues.some(issue => /^(?:authentication|promotion|failed)-not-posting$/.test(issue)))
+    if (event.family === 'authentication' || event.family === 'card-payment' ||
+        event.issues.some(issue => /^(?:authentication|promotion)-not-posting$/.test(issue)))
         return event;
-    return { ...event, decision: 'review', status: 'informational',
-        family: event.family === 'unknown' ? (/refund|reversal|charge[ -]*back|استرداد|استرجاع|عكس/iu.test(source) ? 'refund' : 'transfer') : event.family,
+    const transactionFields = event.observations.filter(o => o.role === 'transaction' && o.field.evidence === 'explicit');
+    let amount = event.amount.evidence !== 'missing' ? event.amount
+        : transactionFields.length === 1 ? transactionFields[0].field : event.amount;
+    if (amount.evidence === 'ambiguous' && amount.alternatives.length > 1 && amount.alternatives.every(money => money.currency === amount.alternatives[0].currency && money.exponent === amount.alternatives[0].exponent &&
+        money.minorUnits === amount.alternatives[0].minorUnits)) {
+        amount = { ...amount, value: amount.alternatives[0], evidence: 'explicit', alternatives: [] };
+    }
+    if (amount.evidence === 'missing')
+        return event;
+    const obligation = ['balance', 'statement', 'bill', 'card-payment'].includes(event.family);
+    if (obligation && (transactionFields.length !== 1 || event.statementTotal.evidence === 'explicit' ||
+        event.minimumDue.evidence === 'explicit'))
+        return event;
+    return { ...event, amount, decision: 'review', status: 'informational',
+        family: event.family === 'unknown' || obligation ? (/refund|reversal|charge[ -]*back|استرداد|استرجاع|عكس/iu.test(source) ? 'refund' : 'transfer') : event.family,
         direction: event.direction === 'unknown' || event.direction === 'none' ? 'credit' : event.direction,
-        observations: event.observations.map(observation => observation.field.spans.some(span => event.amount.spans.some(primary => primary.start === span.start && primary.end === span.end))
+        observations: event.observations.map(observation => observation.field.spans.some(span => amount.spans.some(primary => primary.start === span.start && primary.end === span.end))
             ? { ...observation, role: 'transaction' } : observation),
         issues: [...new Set([...event.issues, 'unsettled-credit-not-posting'])] };
 }
@@ -8197,14 +8212,17 @@ function parseIosBackgroundAlert(input) {
         const sender = /^(?:wafra(?:\s+(?:automation|shortcut))?|shortcut|automation|unknown|none|null)$/i.test(input.sender.trim())
             ? '' : input.sender.trim();
         const source = input.body;
+        const holdCredit = (0, credit_settlement_guards_1.hasUnsettledCreditToken)(source);
+        const pair = (0, credit_settlement_guards_1.completedDebitBesideCredit)(source);
         (0, country_1.setActiveCountry)(context.country);
         (0, markets_1.setActiveMarket)(context.parserMarket);
         (0, markets_1.setLedgerCurrency)(context.ledgerMoney.currency, context.ledgerMoney.exponent);
-        const creditReviewOnly = (0, sms_parser_1.hasOnlyUnsettledCredit)(source);
+        const creditReviewOnly = (0, sms_parser_1.hasOnlyUnsettledCredit)(source) || holdCredit || (0, credit_settlement_guards_1.mentionsCredit)(source);
         const refusal = (0, sms_parser_1.nonPostingReason)(source);
-        const reviewableRefusal = creditReviewOnly && (0, credit_settlement_guards_1.canReviewCreditRefusal)(source, refusal);
-        if (NON_RECEIPT_PREFIX_RE.test(source) || (refusal && !reviewableRefusal) || (!creditReviewOnly &&
-            ((0, best_effort_autopost_1.isNotAutoPostableMoney)(source) || (0, best_effort_autopost_1.hasNonCompletedWording)(source, context.country, sender))))
+        const incomplete = (0, best_effort_autopost_1.isNotAutoPostableMoney)(source) || (0, best_effort_autopost_1.hasNonCompletedWording)(source, context.country, sender);
+        const reviewableRefusal = (creditReviewOnly && (0, credit_settlement_guards_1.canReviewCreditRefusal)(source, refusal)) || (!!pair && refusal === 'declined');
+        if (NON_RECEIPT_PREFIX_RE.test(source) || (refusal && !reviewableRefusal) || (!(creditReviewOnly || pair) &&
+            incomplete))
             return ignore();
         const session = (0, launch_alert_parser_1.createLaunchAlertSession)({ overrides: {}, activeMarket: context.parserMarket,
             pinnedCurrency: context.ledgerMoney.currency, fxLookup: () => null,
@@ -8214,16 +8232,26 @@ function parseIosBackgroundAlert(input) {
         if (unbankedSender && !(0, alert_institution_grammars_1.hasUniversalInstitutionSender)(sender) && !/^\d{3,6}$/.test(sender))
             return ignore();
         const inspection = session.inspect(source, sender);
-        const parsed = unbankedSender ? null
+        let parsed = unbankedSender ? null
             : session.parse(source, sender, inspection, senderMarket ?? undefined, input.observedAt);
-        const event = (0, launch_alert_parser_1.inspectGenericBankEventForReview)(source, sender);
-        if (futureDate(event, input.observedAt, parsed ?? undefined))
+        if (parsed?.kind === 'transaction' && parsed.type === 'expense' && !pair && incomplete)
+            return ignore();
+        const debitSource = pair && parsed?.kind === 'transaction' && parsed.type === 'expense' ? pair.debit : null;
+        const principalSource = debitSource ?? source;
+        const debitAliases = parsed && senderMarket === 'AE' ? { 'درهم': ['AED'], 'دراهم': ['AED'] }
+            : parsed && senderMarket === 'SA' ? { 'ريال': ['SAR'] } : undefined;
+        const event = (0, launch_alert_parser_1.inspectGenericBankEventForReview)(principalSource, sender, undefined, debitAliases ? { currencyAliases: debitAliases } : undefined);
+        if (futureDate(event, input.observedAt, parsed ?? undefined) && !(creditReviewOnly && !parsed))
             return ignore();
         if (parsed && parsed.kind !== 'transaction')
             return ignore();
+        if (parsed?.type === 'income' && event?.status === 'informational')
+            parsed = null;
         if (event && ['statement', 'balance', 'authentication', 'bill', 'card-payment'].includes(event.family))
             return ignore();
-        if (!event || !singleSourcePrincipal(source, event, parsed))
+        const informationalCredit = creditReviewOnly && !parsed && event?.status === 'informational' &&
+            event.amount.evidence === 'explicit' && event.amount.spans.length > 0;
+        if (!event || (!informationalCredit && !singleSourcePrincipal(principalSource, event, parsed)))
             return ignore();
         if (parsed && (['failed', 'future', 'informational'].includes(event.status) || event.direction === 'none' ||
             ((event.direction === 'debit' || event.direction === 'credit') &&
@@ -8240,12 +8268,16 @@ function parseIosBackgroundAlert(input) {
         }
         else {
             const reviewMoney = event?.amount.evidence === 'explicit' ? sourceMoney(event.amount.value) : null;
-            if (!event || (event.status !== 'posted' && !(creditReviewOnly && event.status === 'informational')) || !movementFamily(event.family) ||
+            if (!event || (event.status !== 'posted' && !((creditReviewOnly || holdCredit) && event.status === 'informational')) || !movementFamily(event.family) ||
                 (event.direction !== 'debit' && event.direction !== 'credit') || !reviewMoney)
                 return ignore();
             result = { v: 1, parserVersion: sms_parser_1.PARSER_VERSION, route: 'review', provenance: 'unverified',
                 notification: { style: 'review', family: event.family, direction: event.direction, amount: reviewMoney,
                     merchant: merchant(event.merchant.evidence === 'explicit' ? event.merchant.value : null), instrument: instrument(event) } };
+        }
+        if (result.route === 'parsed' && result.notification?.direction === 'credit' && holdCredit) {
+            result = { ...result, route: 'review', provenance: 'unverified',
+                notification: { ...result.notification, style: 'review' } };
         }
         return boundedUtf8(JSON.stringify(result), 2048) ? result : ignore();
     }
@@ -8713,6 +8745,7 @@ exports.latamTemplateIds = latamTemplateIds;
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.parsePastedBankAlerts = exports.createLaunchAlertSession = exports.isHeldLaunchCredit = exports.isUnaccountableLaunchSender = exports.universalSourceParseContext = exports.inspectGenericBankEventForReview = exports.hasGenericBankAlertContext = exports.hasPersonalMessagePrefix = exports.shouldTryUniversalPosting = exports.hasBankAlertMoneyHint = exports.REVIEW_MONEY_HINT = void 0;
+exports.inspectSupplementaryReversal = inspectSupplementaryReversal;
 const credit_settlement_guards_1 = require("@/lib/credit-settlement-guards");
 const alert_market_detection_1 = require("@/lib/alert-market-detection");
 const alert_institution_grammars_1 = require("@/lib/alert-institution-grammars");
@@ -8732,6 +8765,25 @@ const universal_money_1 = require("@/lib/universal-money");
 const latam_alert_templates_1 = require("@/lib/latam-alert-templates");
 const universal_categorization_1 = require("@/lib/universal-categorization");
 const fx_rates_1 = require("@/lib/fx-rates");
+const universal_types_1 = require("@/lib/universal-types");
+function inspectSupplementaryReversal(source, sender) {
+    const pair = (0, credit_settlement_guards_1.completedDebitBesideCredit)(source);
+    if (!pair)
+        return null;
+    const debit = (0, sms_parser_1.parseSms)(pair.debit, undefined, { sender });
+    if (debit?.kind !== 'transaction' || debit.type !== 'expense')
+        return null;
+    const market = (0, markets_1.detectLaunchMarketFromSender)(sender);
+    const currencyAliases = market === 'AE' ? { 'درهم': ['AED'], 'دراهم': ['AED'] }
+        : market === 'SA' ? { 'ريال': ['SAR'] } : {};
+    const event = (0, universal_parser_1.inspectUniversalBankEvent)(pair.credit, { sender, currencyAliases });
+    return { ...event, decision: 'review', family: 'refund', status: 'informational', direction: 'none',
+        amount: event.amount.evidence === 'explicit' ? event.amount : (0, universal_types_1.missingUniversalField)(),
+        statementTotal: (0, universal_types_1.missingUniversalField)(), minimumDue: (0, universal_types_1.missingUniversalField)(), balance: (0, universal_types_1.missingUniversalField)(),
+        creditLimit: (0, universal_types_1.missingUniversalField)(), observations: event.amount.evidence === 'explicit'
+            ? [{ role: 'transaction', field: event.amount }] : [],
+        issues: [...new Set([...event.issues, 'supplementary-reversal-info'])] };
+}
 exports.REVIEW_MONEY_HINT = /\b(?:USD|GBP|EUR|INR|QAR|KWD|BHD|OMR|EGP|JOD|CAD|AUD|BRL|MXN|SGD|Rs\.?|KD|BD|RO|R\.O\.|LE|L\.E\.|JD)\b|\bQR\s{0,3}\d{1,3}(?:,\d{3})*\.\d{2}(?!\d)|(?<![\d.,])\d{1,3}(?:,\d{3})*\.\d{2}\s{0,3}QR\b|\b(?:COP|PEN)\s?\d|(?<![\p{L}\p{N}/.])S\/\.?\s?\d|[$€£₹]|ر\.ق|د\.ك|د\.ب|ر\.ع|ج\.م|د\.[أا]|دينار\s+(?:كويتي|بحريني)|ريال\s+(?:قطري|عماني)/iu;
 const LAUNCH_MONEY_HINT = /(?:\b|(?<=\d))(?:AED|Dhs?\.?|SAR|SR)\b|د\.?[إا]\.?|دراهم|درهم|ر\.?\s?س\.?|ريال/iu;
 const hasBankAlertMoneyHint = (source) => exports.REVIEW_MONEY_HINT.test(source) || LAUNCH_MONEY_HINT.test(source) ||
@@ -8802,7 +8854,7 @@ const hasGenericBankAlertContext = (source, sender = '') => {
 exports.hasGenericBankAlertContext = hasGenericBankAlertContext;
 const SENDERLESS_USED_CARD_HINT = /^\s*your\s+(?:cr\.\s*)?card\s+(?:[*xX•·]{1,24}\s*)?(\d{4})(?![\p{L}\p{N}]|[ \t-]+\d)[ \t]+(?:was|has[ \t]+been)[ \t]+used[ \t]+for\b/iu;
 const inspectGenericBankEventForReview = (source, sender = '', market, sourceContext) => {
-    const creditReviewOnly = (0, sms_parser_1.hasOnlyUnsettledCredit)(source);
+    const creditReviewOnly = (0, sms_parser_1.hasOnlyUnsettledCredit)(source) || ((0, credit_settlement_guards_1.mentionsCredit)(source) && (0, credit_settlement_guards_1.hasUnsettledCreditToken)(source));
     if ((0, exports.hasPersonalMessagePrefix)(source, sender) || (hasNegatedPrincipalMovement(source) && !creditReviewOnly) ||
         (0, principal_posting_guards_1.isUnpostedCardBalanceClaim)(source))
         return null;
@@ -8839,12 +8891,14 @@ const inspectGenericBankEventForReview = (source, sender = '', market, sourceCon
         : sourceContext ? { ...sourceContext, sender }
             : (0, exports.universalSourceParseContext)((0, alert_institution_grammars_1.hasUniversalInstitutionSender)(sender)
                 ? (0, alert_market_detection_1.inspectUniversalAlert)({ source, sender }) : null, sender, (0, country_1.getActiveCountry)());
-    const creditReviewMarket = creditReviewOnly ? (0, markets_1.detectLaunchMarketFromSender)(sender) : null;
+    const creditReviewMarket = creditReviewOnly || (0, credit_settlement_guards_1.creditSourceDisposition)(source) !== 'not-credit'
+        ? (0, markets_1.detectLaunchMarketFromSender)(sender) : null;
     const creditReviewAliases = creditReviewMarket === 'AE' ? { 'درهم': ['AED'], 'دراهم': ['AED'] }
         : creditReviewMarket === 'SA' ? { 'ريال': ['SAR'] } : {};
     let event = (0, universal_parser_1.inspectUniversalBankEvent)((0, gulf_neighbour_alerts_1.isGulfNeighbourMarket)(market)
         ? (0, gulf_neighbour_alerts_1.gulfNeighbourReadSource)(source, market) : source, { ...context, currencyAliases: { ...creditReviewAliases, ...cardCreditAliases, ...context.currencyAliases } });
-    if (creditReviewOnly)
+    if (creditReviewOnly || (event.direction === 'credit' && (0, credit_settlement_guards_1.hasUnsettledCreditToken)(source)) ||
+        ((0, credit_settlement_guards_1.mentionsCredit)(source) && event.direction === 'unknown' && event.status === 'unknown'))
         event = (0, credit_settlement_guards_1.informationalCreditReview)(source, event);
     if (event.decision !== 'review')
         return null;
@@ -9387,7 +9441,23 @@ const createLaunchAlertSession = ({ overrides, regionHint = null, pinnedCurrency
             inspection,
         });
     };
-    return { inspect, parse, parseUnproven, detectedMarket: () => detected };
+    const guard = (reader) => (source, sender, inspection, forcedMarket, observedAt) => {
+        const holdCredit = (0, credit_settlement_guards_1.hasUnsettledCreditToken)(source);
+        if ((0, credit_settlement_guards_1.mentionsCredit)(source) && (0, credit_settlement_guards_1.hasConditionalDebitLead)(source))
+            return null;
+        const pair = (0, credit_settlement_guards_1.completedDebitBesideCredit)(source);
+        const reason = (0, sms_parser_1.nonPostingReason)(source);
+        if (pair && (reason === null || reason === 'pending-processing' || reason === 'declined') && !(0, exports.hasPersonalMessagePrefix)(source, sender) &&
+            !/https?:\/\/|www\./iu.test(source)) {
+            const debit = reader(pair.debit, sender, inspect(pair.debit, sender), forcedMarket, observedAt);
+            if (debit?.kind === 'transaction' && debit.type === 'expense')
+                return { ...debit, raw: source };
+        }
+        const result = reader(source, sender, inspection, forcedMarket, observedAt);
+        return result?.kind === 'transaction' && result.type === 'income' && holdCredit ? null : result;
+    };
+    const guardedUnproven = guard((source, sender, inspection, _forcedMarket, observedAt) => parseUnproven(source, sender, inspection, observedAt));
+    return { inspect, parse: guard(parse), parseUnproven: (source, sender, inspection, observedAt) => guardedUnproven(source, sender, inspection, undefined, observedAt), detectedMarket: () => detected };
 };
 exports.createLaunchAlertSession = createLaunchAlertSession;
 const parsePastedBankAlerts = (text, overrides, onRefused) => {
@@ -14866,6 +14936,21 @@ function hasUnsettledPrincipal(message, parsed) {
     return context ? hasUnsettledPrincipalInContext(context, parsed) : false;
 }
 function parseSms(message, overrides, options) {
+    const holdCredit = (0, credit_settlement_guards_1.hasUnsettledCreditToken)(message);
+    if ((0, credit_settlement_guards_1.mentionsCredit)(message) && (0, credit_settlement_guards_1.hasConditionalDebitLead)(message))
+        return null;
+    const pair = (0, credit_settlement_guards_1.completedDebitBesideCredit)(message);
+    const reason = nonPostingReason(message);
+    if (pair && (reason === null || reason === 'pending-processing' || reason === 'declined') && !hasActionableRefundRequest(message) &&
+        !(0, principal_posting_guards_1.hasExplicitPersonalMoneyClaim)(message) && !(0, bnpl_providers_1.isBnplProviderSource)(options?.sender)) {
+        const debit = parseSmsCore(pair.debit, overrides, options);
+        if (debit?.kind === 'transaction' && debit.type === 'expense')
+            return { ...debit, raw: message };
+    }
+    const parsed = parseSmsCore(message, overrides, options);
+    return parsed?.kind === 'transaction' && parsed.type === 'income' && holdCredit ? null : parsed;
+}
+function parseSmsCore(message, overrides, options) {
     if ((0, principal_posting_guards_1.isLeadingNumericDiscountOffer)(message) || (0, principal_posting_guards_1.isUnqualifiedPeerTransferClaim)(message) ||
         (0, principal_posting_guards_1.hasMobileMoneyCallback)(message) || (0, principal_posting_guards_1.isUnpostedCardBalanceClaim)(message) ||
         (0, principal_posting_guards_1.hasExplicitPersonalMoneyClaim)(message))
@@ -16492,7 +16577,7 @@ const inspectUnparsedLaunchAlert = (source, sender) => {
 exports.inspectUnparsedLaunchAlert = inspectUnparsedLaunchAlert;
 }
 };
-const mappings={"alert-draft":{"@/lib/currency-metadata":"currency-metadata"},"alert-event-evidence":{},"alert-institution-grammars":{},"alert-market-detection":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-semantics":"alert-semantics","@/lib/markets":"markets"},"alert-market-packs":{"@/lib/alert-market-packs.india-me":"alert-market-packs.india-me","@/lib/alert-market-packs.us-eu":"alert-market-packs.us-eu","@/lib/alert-market-packs.world":"alert-market-packs.world"},"alert-market-packs.india-me":{},"alert-market-packs.us-eu":{},"alert-market-packs.world":{},"alert-semantics":{"@/lib/alert-draft":"alert-draft","@/lib/alert-event-evidence":"alert-event-evidence","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-market-packs":"alert-market-packs","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"alert-source-ownership":{"@/lib/alert-draft":"alert-draft"},"bank-alert-interpreter":{"@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules","@/lib/categories":"categories","@/lib/bank-alert-semantic-output":"bank-alert-semantic-output","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser","@/lib/unparsed-launch-alert":"unparsed-launch-alert"},"bank-alert-semantic-output":{},"bank-alert-semantic-rules":{"@/lib/sms-parser":"sms-parser"},"bank-amount-tokens":{},"best-effort-autopost":{"@/lib/currency-metadata":"currency-metadata","@/lib/capture-source-identity":"capture-source-identity","@/lib/fx-rates":"fx-rates","@/lib/sms-parser":"sms-parser","@/lib/principal-posting-guards":"principal-posting-guards"},"bnpl-providers":{},"brand-categories":{},"capture-source-identity":{},"categories":{"@/lib/i18n":"i18n"},"country":{"@/lib/country-names":"country-names"},"country-names":{},"credit-settlement-guards":{"@/lib/currency-metadata":"currency-metadata"},"currency-metadata":{},"fx":{"@/lib/currency-metadata":"currency-metadata","@/lib/ledger-money":"ledger-money"},"fx-rates":{"@/lib/fx":"fx"},"gulf-neighbour-alerts":{"@/lib/best-effort-autopost":"best-effort-autopost","@/lib/country":"country","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/gulf-neighbour-templates":"gulf-neighbour-templates","@/lib/sms-parser":"sms-parser","@/lib/universal-parser":"universal-parser"},"gulf-neighbour-templates":{"@/lib/best-effort-autopost":"best-effort-autopost"},"i18n":{"@/lib/import-processing-disclosure":"import-processing-disclosure"},"import-processing-disclosure":{},"ios-background-alert-parser":{"@/lib/credit-settlement-guards":"credit-settlement-guards","@/lib/currency-metadata":"currency-metadata","@/lib/country":"country","@/lib/markets":"markets","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/launch-alert-parser":"launch-alert-parser","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/fx":"fx","@/lib/sms-parser":"sms-parser"},"latam-alert-templates":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/sms-parser":"sms-parser","@/lib/universal-types":"universal-types"},"launch-alert-parser":{"@/lib/credit-settlement-guards":"credit-settlement-guards","@/lib/alert-market-detection":"alert-market-detection","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/country":"country","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/bank-alert-interpreter":"bank-alert-interpreter","@/lib/markets":"markets","@/lib/bnpl-providers":"bnpl-providers","@/lib/sms-parser":"sms-parser","@/lib/currency-metadata":"currency-metadata","@/lib/gulf-neighbour-alerts":"gulf-neighbour-alerts","@/lib/universal-parser":"universal-parser","@/lib/alert-market-packs":"alert-market-packs","@/lib/alert-draft":"alert-draft","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/universal-money":"universal-money","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/universal-categorization":"universal-categorization","@/lib/fx-rates":"fx-rates"},"ledger-money":{"@/lib/currency-metadata":"currency-metadata"},"markets":{"@/lib/country":"country"},"principal-posting-guards":{"@/lib/credit-settlement-guards":"credit-settlement-guards"},"sms-parser":{"@/lib/credit-settlement-guards":"credit-settlement-guards","@/lib/categories":"categories","@/lib/markets":"markets","@/lib/bank-amount-tokens":"bank-amount-tokens","@/lib/fx":"fx","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/bnpl-providers":"bnpl-providers","@/lib/country":"country","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/universal-money":"universal-money"},"universal-categorization":{"@/lib/brand-categories":"brand-categories","@/lib/categories":"categories","@/lib/sms-parser":"sms-parser"},"universal-dates":{"@/lib/alert-source-ownership":"alert-source-ownership","@/lib/universal-types":"universal-types"},"universal-fields":{"@/lib/universal-types":"universal-types","@/lib/alert-draft":"alert-draft","@/lib/universal-dates":"universal-dates"},"universal-money":{"@/lib/alert-draft":"alert-draft","@/lib/alert-market-packs":"alert-market-packs","@/lib/currency-metadata":"currency-metadata","@/lib/universal-fields":"universal-fields","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/universal-types":"universal-types"},"universal-parser":{"@/lib/credit-settlement-guards":"credit-settlement-guards","@/lib/universal-types":"universal-types","@/lib/alert-semantics":"alert-semantics","@/lib/universal-fields":"universal-fields","@/lib/universal-money":"universal-money","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"universal-types":{},"unparsed-launch-alert":{"@/lib/alert-draft":"alert-draft","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser"}};
+const mappings={"alert-draft":{"@/lib/currency-metadata":"currency-metadata"},"alert-event-evidence":{},"alert-institution-grammars":{},"alert-market-detection":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-semantics":"alert-semantics","@/lib/markets":"markets"},"alert-market-packs":{"@/lib/alert-market-packs.india-me":"alert-market-packs.india-me","@/lib/alert-market-packs.us-eu":"alert-market-packs.us-eu","@/lib/alert-market-packs.world":"alert-market-packs.world"},"alert-market-packs.india-me":{},"alert-market-packs.us-eu":{},"alert-market-packs.world":{},"alert-semantics":{"@/lib/alert-draft":"alert-draft","@/lib/alert-event-evidence":"alert-event-evidence","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-market-packs":"alert-market-packs","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"alert-source-ownership":{"@/lib/alert-draft":"alert-draft"},"bank-alert-interpreter":{"@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules","@/lib/categories":"categories","@/lib/bank-alert-semantic-output":"bank-alert-semantic-output","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser","@/lib/unparsed-launch-alert":"unparsed-launch-alert"},"bank-alert-semantic-output":{},"bank-alert-semantic-rules":{"@/lib/sms-parser":"sms-parser"},"bank-amount-tokens":{},"best-effort-autopost":{"@/lib/currency-metadata":"currency-metadata","@/lib/capture-source-identity":"capture-source-identity","@/lib/fx-rates":"fx-rates","@/lib/sms-parser":"sms-parser","@/lib/principal-posting-guards":"principal-posting-guards"},"bnpl-providers":{},"brand-categories":{},"capture-source-identity":{},"categories":{"@/lib/i18n":"i18n"},"country":{"@/lib/country-names":"country-names"},"country-names":{},"credit-settlement-guards":{"@/lib/currency-metadata":"currency-metadata"},"currency-metadata":{},"fx":{"@/lib/currency-metadata":"currency-metadata","@/lib/ledger-money":"ledger-money"},"fx-rates":{"@/lib/fx":"fx"},"gulf-neighbour-alerts":{"@/lib/best-effort-autopost":"best-effort-autopost","@/lib/country":"country","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/gulf-neighbour-templates":"gulf-neighbour-templates","@/lib/sms-parser":"sms-parser","@/lib/universal-parser":"universal-parser"},"gulf-neighbour-templates":{"@/lib/best-effort-autopost":"best-effort-autopost"},"i18n":{"@/lib/import-processing-disclosure":"import-processing-disclosure"},"import-processing-disclosure":{},"ios-background-alert-parser":{"@/lib/credit-settlement-guards":"credit-settlement-guards","@/lib/currency-metadata":"currency-metadata","@/lib/country":"country","@/lib/markets":"markets","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/launch-alert-parser":"launch-alert-parser","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/fx":"fx","@/lib/sms-parser":"sms-parser"},"latam-alert-templates":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/sms-parser":"sms-parser","@/lib/universal-types":"universal-types"},"launch-alert-parser":{"@/lib/credit-settlement-guards":"credit-settlement-guards","@/lib/alert-market-detection":"alert-market-detection","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/country":"country","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/bank-alert-interpreter":"bank-alert-interpreter","@/lib/markets":"markets","@/lib/bnpl-providers":"bnpl-providers","@/lib/sms-parser":"sms-parser","@/lib/currency-metadata":"currency-metadata","@/lib/gulf-neighbour-alerts":"gulf-neighbour-alerts","@/lib/universal-parser":"universal-parser","@/lib/alert-market-packs":"alert-market-packs","@/lib/alert-draft":"alert-draft","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/universal-money":"universal-money","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/universal-categorization":"universal-categorization","@/lib/fx-rates":"fx-rates","@/lib/universal-types":"universal-types"},"ledger-money":{"@/lib/currency-metadata":"currency-metadata"},"markets":{"@/lib/country":"country"},"principal-posting-guards":{"@/lib/credit-settlement-guards":"credit-settlement-guards"},"sms-parser":{"@/lib/credit-settlement-guards":"credit-settlement-guards","@/lib/categories":"categories","@/lib/markets":"markets","@/lib/bank-amount-tokens":"bank-amount-tokens","@/lib/fx":"fx","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/bnpl-providers":"bnpl-providers","@/lib/country":"country","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/universal-money":"universal-money"},"universal-categorization":{"@/lib/brand-categories":"brand-categories","@/lib/categories":"categories","@/lib/sms-parser":"sms-parser"},"universal-dates":{"@/lib/alert-source-ownership":"alert-source-ownership","@/lib/universal-types":"universal-types"},"universal-fields":{"@/lib/universal-types":"universal-types","@/lib/alert-draft":"alert-draft","@/lib/universal-dates":"universal-dates"},"universal-money":{"@/lib/alert-draft":"alert-draft","@/lib/alert-market-packs":"alert-market-packs","@/lib/currency-metadata":"currency-metadata","@/lib/universal-fields":"universal-fields","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/universal-types":"universal-types"},"universal-parser":{"@/lib/credit-settlement-guards":"credit-settlement-guards","@/lib/universal-types":"universal-types","@/lib/alert-semantics":"alert-semantics","@/lib/universal-fields":"universal-fields","@/lib/universal-money":"universal-money","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"universal-types":{},"unparsed-launch-alert":{"@/lib/alert-draft":"alert-draft","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser"}};
 const cache=Object.create(null);
 function load(id){
 if(Object.prototype.hasOwnProperty.call(cache,id))return cache[id].exports;
