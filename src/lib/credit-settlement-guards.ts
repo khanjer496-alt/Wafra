@@ -8,7 +8,7 @@ export function normalizeCreditText(source: string): string {
   const text = source.normalize('NFKC')
     .replace(/[\u0640\u064B-\u0655\u0670\u200B-\u200F\u061C\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
     // Preserve grammatical information before folding the Arabic letters: إن is if, أن is that.
-    .replace(/(?<![ء-ي])أن(?![ء-ي])/g, ' that_ar ').replace(/(?<![ء-ي])إن(?![ء-ي])/g, ' if_ar ')
+    .replace(/(?<![ء-ي])([وف]?)أن(?![ء-ي])/g, '$1 that_ar ').replace(/(?<![ء-ي])([وف]?)إن(?![ء-ي])/g, '$1 if_ar ')
     .replace(/[أإآٱ]/g, 'ا').replace(/[ىئ]/g, 'ي').replace(/ؤ/g, 'و').replace(/ة/g, 'ه')
     .replace(/[٠-٩۰-۹]/g, c => String(c.charCodeAt(0) - (c >= '۰' ? 0x06f0 : 0x0660)))
     .replace(/\bcharge[\s\-–—]*backs?\b/gi, 'chargeback')
@@ -28,7 +28,7 @@ const REFUND_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|cha
 // This is deliberately conservative. Always inspect the normalized ORIGINAL,
 // never a merchant-masked, clause-selected or request-note-stripped derivative.
 const UNSETTLED_EN = /\b(?:if|unless|subject|upon|provided|once|when|after|until|pending|awaiting|queued|queuing|queueing|scheduled|process|progress|review|requests?|requir\w*|approval|approve|verification|verify|clearance|eligible|may|can|will)\b/iu;
-const UNSETTLED_AR = /(?<![ء-ي])(?:if_ar|و?(?:اذا|لو|عند|بعد|فور|حين|شرط|بشرط|شريطه|رهن|مرهون|(?:في\s+|ب)?انتظار|قيد|جار[ي]?|طلب(?:ك|كم)?|يتطلب|تتطلب|موافقه|تحقق|تسويه|سوف|يمكن)|(?:ال|بال|لل)(?:شرط|انتظار|طلب|موافقه|تحقق|تسويه))(?![ء-ي])/iu;
+const UNSETTLED_AR = /(?<![ء-ي])(?:if_ar|[وف]?(?:اذا|لو|عند|بعد|فور|حين|شرط|بشرط|شريطه|رهن|مرهون|(?:في\s+|ب)?انتظار|قيد|جار[ي]?|طلب(?:ك|كم)?|يتطلب|تتطلب|موافقه|تحقق|تسويه|سوف|يمكن)|[وف]?(?:ال|بال|لل)(?:شرط|انتظار|طلب|موافقه|تحقق|تسويه))(?![ء-ي])/iu;
 export const hasUnsettledCreditToken = (source: string): boolean => {
   const original = normalizeCreditText(source);
   return UNSETTLED_EN.test(original) || UNSETTLED_AR.test(original);

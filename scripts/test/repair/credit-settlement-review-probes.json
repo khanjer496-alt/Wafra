@@ -2379,5 +2379,21 @@
     "expected": "none",
     "minorUnits": 25000,
     "requireReview": true
+  },
+  {
+    "id": "r3-ar-prefixed-if",
+    "body": "وإن وافق التاجر، تم استرداد مبلغ AED 250.00 إلى بطاقتك.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "r3-ar-prefixed-approval",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك والموافقة مطلوبة.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
   }
 ]
