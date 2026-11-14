@@ -1,0 +1,33 @@
+name: Universal source controls (side branch)
+on:
+  push:
+    branches: ['patch/universal-closure-**']
+permissions:
+  contents: read
+jobs:
+  universal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - run: node scripts/generate-ios-background-parser.cjs
+      - name: Run every universal source suite with individual reports
+        run: |
+          mkdir -p out
+          failed=0
+          for file in scripts/universal-test/*.test.cjs; do
+            name="${file##*/}"
+            node "$file" > "out/$name.txt" 2>&1 || failed=1
+          done
+          exit "$failed"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: universal-source-${{ github.sha }}
+          path: out/
+          retention-days: 7

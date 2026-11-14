@@ -103,6 +103,13 @@ export function isIncompletePrincipal(source: string, span: PrincipalSpan | unde
   let start = span.start, end = span.end;
   while (start > 0 && !boundary(start - 1)) start--;
   while (end < source.length && !boundary(end)) end++;
+  // The selected purchase's own passive predicate must be completed too.
+  // A later refund/request sentence cannot make "will be made" or
+  // "was not made" prove an independently completed expense.
+  const ownLead = source.slice(start, span.start);
+  const ownTail = source.slice(span.end, end);
+  if (/\b(?:purchase|payment|transfer|withdrawal|transaction)\s+(?:(?:of|for|amount)\s*[:=]?\s*|[A-Z]{3}\s*)*$/iu.test(ownLead) &&
+    /^\s*(?:[A-Z]{3}\s*)?(?:(?:will|would|shall|may|might|can|could)\s+(?:not\s+)?be|(?:was|were|is|has\s+been|have\s+been)\s+(?:not|never))\s+(?:made|completed|processed|posted|charged|debited|paid|sent)\b(?!\s+by\s+you)/iu.test(ownTail)) return true;
   const blocks = [source.slice(start, end)];
   const header = source.slice(0, start);
   // A leading verdict still owns the field-list amount that follows it:
