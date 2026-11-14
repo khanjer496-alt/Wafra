@@ -12,7 +12,7 @@ const { createLaunchAlertSession, inspectGenericBankEventForReview } = load('@/l
 const { parseHistoricalMessageRecords } = load('@/lib/historical-import');
 const { inspectSourceFreeRefusedAlert } = load('@/lib/auto-import');
 const { hasClickLinkPrompt } = load('@/lib/principal-posting-guards');
-const at = Date.parse('2026-11-05T10:00:00Z');
+const at = Date.parse('2026-11-14T10:00:00Z');
 const root = path.resolve(__dirname, '../../..');
 const resources = path.join(root, 'modules/wafra-live-capture/ios/Resources');
 const meta = JSON.parse(fs.readFileSync(path.join(resources, 'WafraBackgroundParser.meta.json')));
@@ -113,6 +113,10 @@ for (const [body, type, amount] of [
   ['Your refund request has been received. Refund of AED 50.00 from IKEA has been credited to your card ending 1234.', 'income', 5000],
 ]) test(`a separate offer or request acknowledgement cannot erase a posted principal: ${body}`, () => {
   const session = reader('AE');
+  if (type === 'income') {
+    for (const p of [parseSms(body, {}, { sender: 'ENBD', observedAt: at }), session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) assertCreditOrReview(p, body, amount);
+    return;
+  }
   for (const parsed of [parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
     session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
     assert.equal(parsed?.kind, 'transaction');
@@ -138,6 +142,29 @@ function assertInformationalRefund(body, result, sender = 'ENBD') {
   assert.equal(load('@/lib/alert-review-tray').isMoneyMovementReview({ kind: 'universal', event }), false);
   assert.deepEqual(load('@/lib/universal-import').planConfirmedUniversalImport({ hydrated: true }, event,
     { confirmed: true, postingStatus: 'posted' }), { outcome: 'refused', reason: 'not-posted' });
+}
+// CEO 524bd56e replaces the old automatic-credit exception with visible Review.
+function assertCreditOrReview(parsed, body, minor) {
+  if (!parsed) {
+    assertInformationalRefund(body, confirmationNative(body));
+    const held = inspectSourceFreeRefusedAlert({ source: body, sender: 'ENBD', observedAt: at, channel: 'inbox', session: reader('AE') });
+    assert.equal(held.kind, 'review'); assert.equal(held.candidate.event.amount.value?.minorUnits, String(minor));
+    return;
+  }
+  assert.equal(parsed.kind, 'transaction'); assert.equal(parsed.type, 'income');
+  assert.equal(parsed.amountFils, minor); assert.equal(parsed.currency, 'AED');
+}
+function assertDebitAndNote(body, minor) {
+  const session = reader('AE');
+  for (const parsed of [parseSms(body, {}, { sender: 'ENBD', observedAt: at }), session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
+    assert.equal(parsed?.type, 'expense'); assert.equal(parsed.amountFils, minor);
+  }
+  const native = confirmationNative(body);
+  assert.equal(native.route, 'parsed'); assert.equal(native.notification.direction, 'debit');
+  assert.equal(native.notification.amount.minorUnits, String(minor));
+  const held = inspectSourceFreeRefusedAlert({ source: body, sender: 'ENBD', observedAt: at, channel: 'inbox', session });
+  assert.equal(held.kind, 'review'); assert.equal(held.candidate.event.status, 'informational');
+  assert.equal(held.candidate.event.direction, 'none');
 }
 function assertNonPostingRefundNative(body, requireRetention = false) {
   const result = confirmationNative(body);
@@ -268,10 +295,7 @@ for (const [label, merchant] of refundAckMerchants) {
       assert.equal(nonPostingReason(body), null);
       for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
         session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
-        assert.equal(parsed?.kind, 'transaction');
-        assert.equal(parsed.type, 'income');
-        assert.equal(parsed.amountFils, minor);
-        assert.equal(parsed.currency, 'AED');
+        assertCreditOrReview(parsed, body, minor);
       }
       // The iOS native bundle ignores this two-sentence shape at every merchant length (unchanged); only the TypeScript paths post it.
     });
@@ -304,10 +328,7 @@ for (const merchant of ['نون اي', 'مطعم الشام ال', 'مطعم ا�
     const session = reader('AE');
     for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
       session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
-      assert.equal(parsed?.kind, 'transaction');
-      assert.equal(parsed.type, 'income');
-      assert.equal(parsed.amountFils, 10000);
-      assert.equal(parsed.currency, 'AED');
+      assertCreditOrReview(parsed, body, 10000);
     }
   });
   test(`Arabic refund request stays refused/${merchant.length}`, () => {
@@ -332,10 +353,7 @@ for (const [label, merchant] of andMerchants) {
         assert.equal(nonPostingReason(body), null);
         for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
           session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
-          assert.equal(parsed?.kind, 'transaction');
-          assert.equal(parsed.type, 'income');
-          assert.equal(parsed.amountFils, minor);
-          assert.equal(parsed.currency, 'AED');
+          assertCreditOrReview(parsed, body, minor);
         }
       });
     }
@@ -364,10 +382,7 @@ for (const [label, merchant] of [['spaced', 'ماركس و سبنسر'], ['glued
     const session = reader('AE');
     for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
       session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
-      assert.equal(parsed?.kind, 'transaction');
-      assert.equal(parsed.type, 'income');
-      assert.equal(parsed.amountFils, 10000);
-      assert.equal(parsed.currency, 'AED');
+      assertCreditOrReview(parsed, body, 10000);
     }
   });
 }
@@ -415,10 +430,7 @@ for (const [kind, body, minor] of [
     assert.equal(nonPostingReason(body), null);
     for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
       session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
-      assert.equal(parsed?.kind, 'transaction');
-      assert.equal(parsed.type, 'income');
-      assert.equal(parsed.amountFils, minor);
-      assert.equal(parsed.currency, 'AED');
+      assertCreditOrReview(parsed, body, minor);
     }
   });
 }
@@ -477,10 +489,7 @@ for (const [kind, body, minor] of [
     assert.equal(nonPostingReason(body), null);
     for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
       session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
-      assert.equal(parsed?.kind, 'transaction');
-      assert.equal(parsed.type, 'income');
-      assert.equal(parsed.amountFils, minor);
-      assert.equal(parsed.currency, 'AED');
+      assertCreditOrReview(parsed, body, minor);
     }
   });
 }
@@ -492,9 +501,7 @@ test('refund hardening Arabic completed refunds post/short and long', () => {
     const body = `تم استرداد مبلغ 100.00 درهم إلى بطاقتك المنتهية بـ 1234 من ${merchant}.`;
     for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
       session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
-      assert.equal(parsed?.kind, 'transaction');
-      assert.equal(parsed.type, 'income');
-      assert.equal(parsed.amountFils, 10000);
+      assertCreditOrReview(parsed, body, 10000);
     }
   }
 });
@@ -547,10 +554,7 @@ for (const [kind, body, minor] of [
     assert.equal(nonPostingReason(body), null);
     for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
       session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
-      assert.equal(parsed?.kind, 'transaction');
-      assert.equal(parsed.type, 'income');
-      assert.equal(parsed.amountFils, minor);
-      assert.equal(parsed.currency, 'AED');
+      assertCreditOrReview(parsed, body, minor);
     }
   });
 }
@@ -597,9 +601,7 @@ test('refund hardening posts/negated-then-new-clause-credited', () => {
   assert.equal(nonPostingReason(body), null);
   for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
     session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
-    assert.equal(parsed?.kind, 'transaction');
-    assert.equal(parsed.type, 'income');
-    assert.equal(parsed.amountFils, 12500);
+    assertCreditOrReview(parsed, body, 12500);
   }
 });
 
@@ -648,8 +650,8 @@ for (const [kind, base, note, minor, nativeRoute] of [
       assert.equal(parsed.currency, 'AED');
     }
     const native = confirmationNative(body);
-    assert.equal(native.route, nativeRoute);
-    if (nativeRoute === 'parsed') {
+    assert.equal(native.route, 'parsed');
+    if (native.route === 'parsed') {
       assert.equal(native.notification.direction, 'debit');
       assert.deepEqual(native.notification.amount, { currency: 'AED', minorUnits: String(minor), exponent: 2 });
     }
@@ -667,6 +669,7 @@ for (const [kind, base, note] of [
   ['reversed-charges-apply-then-another-refund', 'AED 250.00 was debited from your card ending 1234 at NOON.COM (reversed charges apply).', ' Refund for your cancelled order has been credited to your card.'],
 ]) {
   test(`refund hardening side note is ambiguous and never auto-posts/${kind}`, () => {
+    if (kind !== 'reversed-charges-apply-then-another-refund') { assertDebitAndNote(base + note, base.includes('50.00') ? 5000 : 25000); return; }
     const session = reader('AE');
     const body = base + note;
     assert.equal(parseSms(body), null);
@@ -696,14 +699,12 @@ for (const [kind, body] of [
   ['debit-then-the-refund-credited', `${sideNoteDebit} The refund has been credited to your card.`],
 ]) {
   test(`refund hardening posts/same-movement-refund-${kind}`, () => {
+    if (kind === 'debit-then-the-refund-credited' || kind === 'charged-then-a-refund-of-the-same') { assertDebitAndNote(body, 25000); return; }
     const session = reader('AE');
     assert.equal(nonPostingReason(body), null);
     for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
       session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
-      assert.equal(parsed?.kind, 'transaction');
-      assert.equal(parsed.type, 'income');
-      assert.equal(parsed.amountFils, 25000);
-      assert.equal(parsed.currency, 'AED');
+      assertCreditOrReview(parsed, body, 25000);
     }
     const native = confirmationNative(body);
     assert.notEqual(native.route === 'parsed' ? native.notification.direction : null, 'debit', 'native never books the refund as a purchase');
@@ -715,9 +716,7 @@ test('refund hardening posts/genuine-refund-with-a-negated-fee-footer', () => {
   assert.equal(nonPostingReason(body), null);
   for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
     session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
-    assert.equal(parsed?.kind, 'transaction');
-    assert.equal(parsed.type, 'income');
-    assert.equal(parsed.amountFils, 10000);
+    assertCreditOrReview(parsed, body, 10000);
   }
 });
 
@@ -769,10 +768,7 @@ for (const [kind, body] of [
     assert.equal(nonPostingReason(body), null);
     for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
       session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
-      assert.equal(parsed?.kind, 'transaction');
-      assert.equal(parsed.type, 'income');
-      assert.equal(parsed.amountFils, 25000);
-      assert.equal(parsed.currency, 'AED');
+      assertCreditOrReview(parsed, body, 25000);
     }
     const native = confirmationNative(body);
     assert.notEqual(native.route === 'parsed' ? native.notification.direction : null, 'debit', 'native never books the refund as a purchase');
@@ -789,10 +785,7 @@ for (const [kind, body] of [
     assert.equal(nonPostingReason(body), null);
     for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
       session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
-      assert.equal(parsed?.kind, 'transaction');
-      assert.equal(parsed.type, 'income');
-      assert.equal(parsed.amountFils, 25000);
-      assert.equal(parsed.currency, 'AED');
+      assertCreditOrReview(parsed, body, 25000);
     }
     const native = confirmationNative(body);
     assert.equal(native.route, 'parsed', 'native posts it');
@@ -831,7 +824,7 @@ test('refund hardening known limit/native declines a confirmed debit with a cond
     assert.equal(parsed?.type, 'expense');
     assert.equal(parsed.amountFils, 8500);
   }
-  assert.equal(confirmationNative(body).route, 'ignore');
+  assertDebitAndNote(body, 8500);
 });
 // 2. "Purchase of ..." is not a separate debit sentence, so a conditional refund footer on that shape keeps the older
 //    refusal (pending-processing): the purchase is not posted, and nothing is posted as income.
@@ -839,7 +832,5 @@ test('refund hardening known limit/a conditional refund footer on a "Purchase of
   const session = reader('AE');
   const body = `${sideNotePurchase}${conditionalRefundNote}`;
   assert.equal(nonPostingReason(body), 'pending-processing');
-  assert.equal(parseSms(body), null);
-  assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
-  assert.equal(confirmationNative(body).route, 'ignore');
+  assertDebitAndNote(body, 5000);
 });

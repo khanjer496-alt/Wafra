@@ -23,7 +23,7 @@ export const AR_CREDIT_PENDING_STATUS = String.raw`(?<![ء-ي])(?:(?:في\s+[ا�
 const PENDING = new RegExp(`${EN_CREDIT_PENDING_STATUS}|${AR_CREDIT_PENDING_STATUS}`, 'iu');
 export const REFUND_REQUEST_NOUN_RE = /\b(?:(?:refund|reversal|chargeback)\s+(?:requests?|claims?|applications?)|requests?\s+(?:for|to)\s+(?:(?:a|the|your)\s+)?(?:refund|reversal|reverse|chargeback))\b|(?<![ء-ي])(?:طلب(?:ك|كم)?\s+(?:ال)?(?:ل?استرداد|ل?استرجاع|ل?عكس|اعاده|اعتراض)|طلبك\s+لاسترداد)(?![ء-ي])/iu;
 export const isRefundRequest = (source: string): boolean => REFUND_REQUEST_NOUN_RE.test(normalizeCreditText(source).replace(/\|/g, ' '));
-const CREDIT_MENTION = /\b(?:refund(?:ed|ing)?|reversal|reversed|chargeback|credited|credit(?!\s+card))\b|(?<![ء-ي])(?:استرداد|استرجاع|ارجاع|اعاده|عكس|ايداع|اضافه)(?![ء-ي])/iu;
+const CREDIT_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|return(?:ed|ing)?|chargeback|credited|credit(?!\s+card)|salary|payroll|deposit(?:ed)?)\b|(?<![ء-ي])(?:و?ب?)(?:استرداد|استرجاع|ارجاع|اعاده|عكس|ايداع|اضافه|راتب)(?:ه|ها)?(?![ء-ي])/iu;
 // This is deliberately conservative. Always inspect the normalized ORIGINAL,
 // never a merchant-masked, clause-selected or request-note-stripped derivative.
 const UNSETTLED_EN = /\b(?:if|unless|subject|upon|provided|once|when|after|until|pending|awaiting|queued|queuing|queueing|scheduled|process(?:ed|ing)?|progress|review(?:ed|ing)?|requests?|require[ds]?|approval|approv(?:e[ds]?|ing)|verification|verif(?:y|ied|ying)|clearance|eligible|may|can|will)\b/iu;
@@ -40,11 +40,11 @@ export function completedDebitBesideCredit(source: string): { debit: string; cre
   const parts = source.split(/(?<=[.!?؟])\s+|[;؛\n]+|\s+(?:but|while)\s+(?=(?:your|the)\s+(?:refund|reversal|charge[\s-]*back))|\s*[-–—]\s*(?=(?:refund|reversal|charge[\s-]*back)\b)/iu);
   const debit = parts.filter(part => {
     const text = normalizeCreditText(part);
-    return !CREDIT_MENTION.test(text) && /\d/.test(text) &&
-      /\b(?:was\s+debited|has\s+been\s+debited|debited\s+from|purchase(?:\s+of)?|purchased|spent|paid\s+(?:at|to)|used\s+(?:at|for)|withdrawn\s+from)\b|(?:تم|تمت)\s+(?:ال)?(?:خصم|شراء|دفع|سحب)/iu.test(text) &&
-      !hasUnsettledCreditToken(part) && !/\b(?:not|failed|declined|unsuccessful|rejected|reversed)\b|(?:لم|لن|فشل|رفض)/iu.test(text);
+    return /\d/.test(text) &&
+      /\b(?:was\s+debited|has\s+been\s+debited|debited\s+from|charged|purchase(?:\s+of)?|purchased|spent|paid\s+(?:at|to)|used\s+(?:at|for)|withdrawn\s+from)\b|(?:تم|تمت)\s+(?:ال)?(?:خصم|شراء|دفع|سحب)/iu.test(text) &&
+      !/\b(?:not|failed|declined|unsuccessful|rejected)\b|(?:لم|لن|فشل|رفض)/iu.test(text);
   });
-  const credit = parts.filter(part => mentionsCredit(part));
+  const credit = parts.filter(part => !debit.includes(part) && mentionsCredit(part));
   return debit.length === 1 && credit.length > 0 ? { debit: debit[0], credit: credit.join(' ') } : null;
 }
 const OWN_REFERENCE = /^(?:(?:this|the|that|same|your)\s+(?:credit|refund|amount|money|funds|reversal|cheque|check|dispute|claim|hold|lien|bank|sum|transfer|transaction|payment|deposit|approval|verification|confirmation|clearance|permission|consent)|(?:it|its|them)\b|(?:the\s+)?same\b|(?:this|these|those|they)\s+(?=(?:is|are|was|were|will|shall|has|have|can|could|would|may)\b)|status\b|(?:هذا|نفس|ذلك)\s+(?:ال)?(?:مبلغ|استرداد|ايداع)|(?:ال)?(?:مبلغ|استرداد|حاله)(?![ء-ي]))/iu;
@@ -115,13 +115,19 @@ export function creditSourceDisposition(source: string): CreditSourceDisposition
 
 /** The existing Review contract: retain uncertain credit evidence, never confirmation authority. */
 export function informationalCreditReview(source: string, event: UniversalBankEvent): UniversalBankEvent {
-  if (event.amount.evidence === 'missing' || ['authentication', 'balance', 'statement', 'bill', 'card-payment'].includes(event.family) ||
-    event.issues.some(issue => /^(?:authentication|promotion|failed)-not-posting$/.test(issue))) return event;
-  return { ...event, decision: 'review', status: 'informational',
-    family: event.family === 'unknown' ? (/refund|reversal|charge[ -]*back|استرداد|استرجاع|عكس/iu.test(source) ? 'refund' : 'transfer') : event.family,
+  if (event.family === 'authentication' || event.issues.some(issue => /^(?:authentication|promotion)-not-posting$/.test(issue))) return event;
+  const transactionFields = event.observations.filter(o => o.role === 'transaction' && o.field.evidence === 'explicit');
+  const amount = event.amount.evidence !== 'missing' ? event.amount
+    : transactionFields.length === 1 ? transactionFields[0].field : event.amount;
+  if (amount.evidence === 'missing') return event;
+  const obligation = ['balance', 'statement', 'bill', 'card-payment'].includes(event.family);
+  if (obligation && (transactionFields.length !== 1 || event.statementTotal.evidence === 'explicit' ||
+    event.minimumDue.evidence === 'explicit')) return event;
+  return { ...event, amount, decision: 'review', status: 'informational',
+    family: event.family === 'unknown' || obligation ? (/refund|reversal|charge[ -]*back|استرداد|استرجاع|عكس/iu.test(source) ? 'refund' : 'transfer') : event.family,
     direction: event.direction === 'unknown' || event.direction === 'none' ? 'credit' : event.direction,
     observations: event.observations.map(observation => observation.field.spans.some(span =>
-      event.amount.spans.some(primary => primary.start === span.start && primary.end === span.end))
+      amount.spans.some(primary => primary.start === span.start && primary.end === span.end))
         ? { ...observation, role: 'transaction' as const } : observation),
     issues: [...new Set([...event.issues, 'unsettled-credit-not-posting'])] };
 }

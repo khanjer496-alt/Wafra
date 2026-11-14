@@ -35,7 +35,7 @@ const load = require('../../universal-test/load-ts.cjs').createLoader();
 const markets = load('@/lib/markets');
 const country = load('@/lib/country');
 const { parseSms } = load('@/lib/sms-parser');
-const { createLaunchAlertSession } = load('@/lib/launch-alert-parser');
+const { createLaunchAlertSession, inspectGenericBankEventForReview, inspectSupplementaryReversal } = load('@/lib/launch-alert-parser');
 const { buildOracleRows } = require('./refund-matrix-oracle.cjs');
 
 // Frozen ratchet. Each number is today's count of gap-file entries in that class on that path; it may only go down.
@@ -70,7 +70,9 @@ const NATIVE_IGNORED_CONTROL_ROWS = new Set(['CTL-05402', 'CTL-05403', 'CTL-0540
 const ORACLE_PIN = { rows: 5586, sha256: '8622534b13c09b1f57797ea07fea2c515bff75239745e21c402001b2a8e205c7' };
 
 const PATHS = ['parseSms', 'session', 'native'];
-const at = Date.parse('2026-11-05T10:00:00Z');
+// The synthetic completed receipts are dated Nov 12/13. Observe them after
+// those dates; a future-date preview refusal is a different, separately tested policy.
+const at = Date.parse('2026-11-14T10:00:00Z');
 const root = path.resolve(__dirname, '../../..');
 const resources = path.join(root, 'modules/wafra-live-capture/ios/Resources');
 const meta = JSON.parse(fs.readFileSync(path.join(resources, 'WafraBackgroundParser.meta.json')));
@@ -116,6 +118,22 @@ function judge(row) {
     native: nativeShape(native(row.body)),
   };
   const gaps = {};
+  const event = inspectGenericBankEventForReview(row.body, 'ENBD');
+  const heldInformational = isIncomeRow(row.expected) && got.parseSms === 'none' && got.session === 'none' &&
+    got.native === 'review' && event?.decision === 'review' && event.status === 'informational';
+  // CEO 524bd56e: retain the independently stated completed debit instead of
+  // interpreting its reversal note as income. The original oracle is kept
+  // pinned; this explicit product-policy overlay does not rewrite its rows.
+  const c = row.case;
+  const debitWithCreditNote = c?.debit && (c.verb !== 'processed' || /refund/.test(c.subject) || c.trail === 'reversed');
+  if (debitWithCreditNote) {
+    const note = inspectSupplementaryReversal(row.body, 'ENBD');
+    assert.deepEqual(got, { parseSms: 'expense 25000', session: 'expense 25000', native: 'debit 25000' }, `${row.id} debit parity ${row.body}`);
+    assert.equal(note?.status, 'informational', `${row.id} supplementary reversal retained`);
+    assert.equal(note?.direction, 'none', row.id);
+  }
+  if (heldInformational || debitWithCreditNote) return { got, gaps, nativeIgnoredIncome: false,
+    policy: heldInformational ? 'held-informational' : 'debit-plus-note' };
   for (const name of PATHS) if (gapClass(row.expected, name, got[name])) gaps[name] = got[name];
   const nativeIgnoredIncome = isIncomeRow(row.expected) && !/^(credit|debit) /.test(got.native);
   return { got, gaps, nativeIgnoredIncome };
@@ -134,7 +152,7 @@ for (const row of rows) {
 }
 
 const current = {};
-const report = { total: rows.length, gaps: [], nativeIgnoredIncome: 0, nativeIgnoredPinned: 0, incomeRows: 0, counts: {},
+const report = { total: rows.length, gaps: [], policy: [], nativeIgnoredIncome: 0, nativeIgnoredPinned: 0, incomeRows: 0, counts: {},
   falseIncomeByLang: {} };
 for (const [key, list] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
   test(`refund matrix ${key} (${list.length} cases)`, (t) => {
@@ -143,6 +161,10 @@ for (const [key, list] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
     let pinned = 0;
     for (const row of list) {
       const verdict = judge(row);
+      if (verdict.policy) {
+        report.policy.push({ id: row.id, policy: verdict.policy, expected: row.expected, ...verdict.got });
+        continue;
+      }
       if (NATIVE_IGNORED_CONTROL_ROWS.has(row.id)) {
         if (verdict.nativeIgnoredIncome) pinned++;
         else failures.push(`${row.id} STALE native ignore: native now ${verdict.got.native}; delete it from NATIVE_IGNORED_CONTROL_ROWS`);

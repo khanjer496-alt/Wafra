@@ -268,7 +268,9 @@ export function parseIosBackgroundAlert(input: NativeParserInput): NativeParserR
     if (futureDate(event, input.observedAt, parsed ?? undefined) && !(creditReviewOnly && !parsed)) return ignore();
     if (parsed && parsed.kind !== 'transaction') return ignore();
     if (event && ['statement', 'balance', 'authentication', 'bill', 'card-payment'].includes(event.family)) return ignore();
-    if (!event || !singleSourcePrincipal(principalSource, event, parsed)) return ignore();
+    const informationalCredit = creditReviewOnly && !parsed && event?.status === 'informational' &&
+      event.amount.evidence === 'explicit' && event.amount.spans.length === 1;
+    if (!event || (!informationalCredit && !singleSourcePrincipal(principalSource, event, parsed))) return ignore();
     if (parsed && (['failed', 'future', 'informational'].includes(event.status) || event.direction === 'none' ||
       ((event.direction === 'debit' || event.direction === 'credit') &&
         event.direction !== (parsed.type === 'income' ? 'credit' : 'debit')))) return ignore();

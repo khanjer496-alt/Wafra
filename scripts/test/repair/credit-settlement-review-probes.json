@@ -2280,5 +2280,53 @@
     "minorUnits": 25000,
     "acceptInformationalReview": false,
     "requireReview": false
+  },
+  {
+    "id": "r3-en-active-requirement",
+    "body": "AED 250.00 has been refunded to your card but requires merchant approval.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "r3-ar-active-requirement",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك ويتطلب موافقة التاجر.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "r3-merchant-token",
+    "body": "AED 250.00 has been refunded by MAY LTD.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "r3-ar-company-token",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك من شركة قيد للتجارة.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "r3-note-reparse-original",
+    "body": "AED 250.00 has been refunded to your card. Your other chargeback request is scheduled.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "r3-unrelated-pending-authorisation",
+    "body": "AED 250.00 has been refunded to your card ending 1234. Pending authorisations: AED 20.00.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
   }
 ]
