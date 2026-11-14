@@ -61,3 +61,13 @@ for (const [index, note, expectedAmount] of [
   const staged = admitPreparedReviewAlert(emptyAlertReviewTray(), item, at);
   assert.equal(staged.outcome, 'admitted'); assert.equal(staged.state.pending.length, 1);
 });
+
+test('a refusal without an accepted primary expense cannot hide its debit amount behind a supplementary note', () => {
+  load('@/lib/country').setActiveCountry('AE'); load('@/lib/markets').setActiveMarket('AE'); load('@/lib/markets').setLedgerCurrency('AED', 2);
+  const session = createLaunchAlertSession({ overrides: {}, activeMarket: 'AE', pinnedCurrency: 'AED' });
+  const body = 'AED 250.00 was debited from your card ending 1234 at NOON.COM. Your reversal request is pending.';
+  const decision = inspectSourceFreeRefusedAlert({ source: body, sender: 'ENBD', observedAt: at, channel: 'inbox', session });
+  assert.equal(decision.kind, 'review'); assert.equal(decision.candidate.event.direction, 'debit');
+  assert.equal(decision.candidate.event.status, 'informational'); assert.equal(decision.candidate.event.amount.value.minorUnits, '25000');
+  assert.equal(decision.candidate.event.issues.includes('supplementary-reversal-info'), false);
+});

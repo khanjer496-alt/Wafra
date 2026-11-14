@@ -6577,9 +6577,9 @@ t('the single-movement twin of the two-movement Arabic alert still posts',
 t('the single-movement twin of the two-movement English alert still posts',
   'Purchase posted: AED 62.00 at Harbor Lamp Bakery.',
   { amountFils: 6200, type: 'expense', merchant: 'Harbor Lamp Bakery' });
-t('two separate movements in one alert are not posted as one',
+t('a completed debit remains its own expense beside a separate refund note',
   'Purchase posted: AED 62.00 at Harbor Lamp Bakery. A separate refund of AED 18.50 from Olive Crate Store was also credited today.',
-  null);
+  { type: 'expense', amountFils: 6200, merchant: 'Harbor Lamp Bakery' });
 t('two separate Arabic movements in one alert are not posted as one',
   'تم خصم AED ٩٠ لعملية شراء لدى مكتبة الفنار، وتم تنفيذ تحويل صادر منفصل بمبلغ AED ٣٠٠.',
   null);
