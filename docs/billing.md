@@ -176,6 +176,8 @@ checkout and Restore all use this path. A local durability failure does not ACK.
 The ownership query exports only a safe `needsAcknowledgement` boolean in addition
 to the existing ownership fields. Already-acknowledged subscriptions skip both the
 full ledger persistence and the second billing query on foreground refresh.
+An OTA bundle on an older native binary without acknowledgeSubscriptions still
+grants queried ownership, but skips forced persistence and recovery entirely.
 
 Recovery queries current Play subscriptions again, then acknowledges only
 PURCHASED, unacknowledged Pro subscriptions. Pending payments, unrelated products

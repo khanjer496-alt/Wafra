@@ -27,6 +27,10 @@ export function isAndroidPlayBillingAvailable(): boolean {
   return typeof native?.querySubscriptions === 'function';
 }
 
+export function isAndroidPlayBillingAcknowledgementAvailable(): boolean {
+  return typeof native?.acknowledgeSubscriptions === 'function';
+}
+
 function unknown(): AndroidPlaySubscriptionSnapshot {
   return { status: 'unknown', activeProductIds: [], pendingProductIds: [], responseCode: null };
 }

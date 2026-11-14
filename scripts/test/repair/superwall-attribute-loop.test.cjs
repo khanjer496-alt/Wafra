@@ -131,6 +131,7 @@ function harness(options = {}) {
       '@/lib/purchases': productContract,
     }) : {
       isAndroidPlayBillingAvailable: () => options.playQueryAvailable !== false,
+      isAndroidPlayBillingAcknowledgementAvailable: () => options.playAcknowledgementAvailable !== false,
       queryAndroidPlaySubscriptions: async () => {
         calls.playQueries++;
         return options.querySubscriptions ? options.querySubscriptions() : { status: 'inactive', activeProductIds: [], pendingProductIds: [], responseCode: 0 };
@@ -947,3 +948,21 @@ for (const entrypoint of ['startup', 'Restore']) {
     assert.deepEqual(h.calls.pro, [true]);
   });
 }
+
+
+test('OTA on a legacy billing binary grants ownership without unnecessary ledger writes', async () => {
+  let durableWrites = 0;
+  const h = harness({
+    // The old binary can query ownership, but has neither the hint nor ACK method.
+    playNative: () => ({ status: 'active', activeProductIds: ['wafra_pro_weekly'], pendingProductIds: [], responseCode: 0 }),
+    ensureDurable: async () => { durableWrites++; },
+  });
+  await h.renderRuntime(2);
+  for (const listener of h.calls.appListeners) listener('active');
+  await tick();
+  assert.equal(await h.billing().restorePro(), true);
+  await tick();
+  assert.equal(h.state.pro, true);
+  assert.deepEqual(h.calls.pro, [true]);
+  assert.equal(durableWrites, 0, 'missing native ACK support must not force encrypted ledger writes');
+});

@@ -22,6 +22,7 @@ import {
 import { runAfterFirstFrames } from '@/lib/after-first-frames';
 import {
   isAndroidPlayBillingAvailable,
+  isAndroidPlayBillingAcknowledgementAvailable,
   queryAndroidPlaySubscriptions,
   recoverAndroidPlayAcknowledgements,
   type AndroidPlaySubscriptionSnapshot,
@@ -233,7 +234,8 @@ function SuperwallRuntime({ onValue }: {
         setPro(active);
       }
     }
-    if (snapshot.status === 'active' && snapshot.needsAcknowledgement !== false) {
+    if (snapshot.status === 'active' && snapshot.needsAcknowledgement !== false &&
+        isAndroidPlayBillingAcknowledgementAvailable()) {
       const session = androidSessionGeneration.current;
       if (acknowledgementSession.current.generation !== session) {
         acknowledgementSession.current = { generation: session, key: {} };
