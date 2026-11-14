@@ -15,7 +15,7 @@ const { MonogramAvatar } = load(path.join(root, 'src/components/ui/monogram-avat
 dependencies['@/components/ui/monogram-avatar'] = { MonogramAvatar };
 const { MerchantAvatar } = load(path.join(root, 'src/components/ui/merchant-avatar.tsx'), dependencies);
 const { BankAvatar } = load(path.join(root, 'src/components/ui/bank-avatar.tsx'), dependencies);
-for (const [name, initial] of [['Careem', 'C'], ['كريم', 'ك'], ['  Noon One ', 'N'], ['', '—'], ['éclair', 'É']]) {
+for (const [name, initial] of [['Careem', 'C'], ['كريم', 'ك'], ['  Noon One ', 'N'], ['', '—'], ['éclair', 'É'], ['\u200F\u200BExample', 'E'], ['e\u0301clair', 'E\u0301'], ['👩🏽‍💻 Cafe', 'C'], ['👩🏽‍💻', '—']]) {
   const node = MerchantAvatar({ title: name, category: 'other', size: 44 });
   assert.equal(node.type, MonogramAvatar);
   assert.equal(node.props.name, name, 'presentation never rewrites the merchant');

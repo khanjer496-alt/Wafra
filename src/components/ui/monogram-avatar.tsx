@@ -10,7 +10,8 @@ export function MonogramAvatar({ name, size = 36, ground, color }: {
   name: string; size?: number; ground?: string; color?: string;
 }) {
   const theme = useTheme();
-  const initial = Array.from(name.trim())[0]?.toLocaleUpperCase() ?? '—';
+  // Skip invisible format characters and emoji; retain marks on the first letter.
+  const initial = name.match(/[\p{L}\p{N}]\p{M}*/u)?.[0].toUpperCase() ?? '—';
   return <View testID="monogram-avatar" accessible={false} accessibilityElementsHidden
     importantForAccessibility="no-hide-descendants" pointerEvents="none"
     style={{ width: size, height: size, borderRadius: size >= 40 ? Radius.control : Radius.tile,
