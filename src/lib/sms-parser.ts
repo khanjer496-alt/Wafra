@@ -1,4 +1,4 @@
-import { EN_CREDIT_PENDING_STATUS, AR_CREDIT_PENDING_STATUS, hasCreditCondition, hasLeadingCreditCondition, hasPendingCreditStatus, normalizeCreditText, isRefundRequest, hasSettledCreditReceipt, hasPastCreditEvent, creditSourceDisposition, isHistoricalCreditClaim, creditQualificationScope, hasUnsettledCreditToken, completedDebitBesideCredit, hasConditionalDebitLead, mentionsCredit } from '@/lib/credit-settlement-guards';
+import { EN_CREDIT_PENDING_STATUS, AR_CREDIT_PENDING_STATUS, hasCreditCondition, hasLeadingCreditCondition, hasPendingCreditStatus, normalizeCreditText, isRefundRequest, hasSettledCreditReceipt, hasPastCreditEvent, creditSourceDisposition, isHistoricalCreditClaim, creditQualificationScope, hasUnsettledCreditToken, completedDebitBesideCredit as splitDebitBesideCredit, hasConditionalDebitLead, mentionsCredit } from '@/lib/credit-settlement-guards';
 import { categorySupportsType, readMerchantCategoryOverride } from '@/lib/categories';
 import {
   bankFromMessage,
@@ -10087,6 +10087,14 @@ export function hasUnsettledPrincipal(message: string, parsed: ParsedSms): boole
   return context ? hasUnsettledPrincipalInContext(context, parsed) : false;
 }
 
+/** Reuse the mature completed-expense proof for every independent-debit caller. */
+export function completedDebitBesideCredit(message: string, options?: ParseOptions): { debit: string; credit: string } | null {
+  return splitDebitBesideCredit(message, clause => {
+    const parsed = parseSmsCore(clause, undefined, options);
+    return parsed?.kind === 'transaction' && parsed.type === 'expense';
+  });
+}
+
 export function parseSms(
   message: string,
   overrides?: Record<string, CategoryId>,
@@ -10098,7 +10106,7 @@ export function parseSms(
   if (mentionsCredit(message) && hasConditionalDebitLead(message)) return null;
   const parsed = parseSmsCore(message, overrides, options);
   if (parsed?.kind === 'transaction' && parsed.type === 'expense') return parsed;
-  const pair = completedDebitBesideCredit(message);
+  const pair = completedDebitBesideCredit(message, options);
   const reason = pair ? nonPostingReason(message) : null;
   if (pair && (reason === null || reason === 'pending-processing' || reason === 'declined') && !hasActionableRefundRequest(message) &&
     !hasClickLinkPrompt(message) && !hasExplicitPersonalMoneyClaim(message) && !isBnplProviderSource(options?.sender)) {
