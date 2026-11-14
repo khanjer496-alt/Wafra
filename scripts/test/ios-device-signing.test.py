@@ -2,14 +2,19 @@
 """Fail-closed profile checks; runs without Apple, keychain or device access."""
 import copy
 import base64
+import contextlib
 import datetime
 import hashlib
 import importlib.util
 import json
+import io
+import os
 import pathlib
 import plistlib
 import unittest
 import tempfile
+import subprocess
+import sys
 from unittest.mock import patch
 
 path = pathlib.Path(__file__).resolve().parents[1]/'ci/ios-device-signing.py'
@@ -231,6 +236,42 @@ class BuildProvenanceTests(unittest.TestCase):
     def test_rejects_unexpected_extra_appex(self):
         (self.app/'PlugIns/Other.appex').mkdir()
         with self.assertRaises(AssertionError): module.preflight_app(self.app, self.report)
+
+
+class InventoryPrivacyTests(unittest.TestCase):
+    def test_only_ids_and_types_public_counts_only_in_stdout(self):
+        certificate = {'id': 'EXAMPLECERT', 'attributes': {'certificateType': 'DEVELOPMENT',
+                       'name': 'Apple Development: EXAMPLE_PERSON'}}
+        profile = {'id': 'EXAMPLEPROFILE', 'attributes': {'profileType': 'IOS_APP_DEVELOPMENT',
+                   'name': 'EXAMPLE_PERSON personal profile'}}
+        stdout = io.StringIO()
+        cwd = pathlib.Path.cwd()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = pathlib.Path(tmp); (root/'private').mkdir(); os.chdir(root)
+                with patch.object(module, 'api_list', side_effect=[[certificate], [profile]]), \
+                     patch.object(module, 'run') as encrypt, contextlib.redirect_stdout(stdout):
+                    public = module.inventory(root/'private')
+                self.assertEqual(public, {'certificates': [{'id': 'EXAMPLECERT', 'type': 'DEVELOPMENT'}],
+                                          'profiles': [{'id': 'EXAMPLEPROFILE', 'type': 'IOS_APP_DEVELOPMENT'}]})
+                self.assertNotIn('EXAMPLE_PERSON', stdout.getvalue())
+                self.assertIn('EXAMPLE_PERSON', (root/'private/signing-inventory.json').read_text())
+                self.assertIn('sealed/signing-inventory.enc', encrypt.call_args.args)
+        finally:
+            os.chdir(cwd)
+
+    def test_certificate_name_is_recorded_as_digest_only(self):
+        cert = {'id': 'EXAMPLE', 'attributes': {'certificateType': 'DEVELOPMENT',
+                'displayName': 'EXAMPLE_PERSON', 'serialNumber': '123',
+                'certificateContent': base64.b64encode(b'fixture').decode()}}
+        metadata = module.cert_metadata(cert)
+        self.assertNotIn('EXAMPLE_PERSON', json.dumps(metadata))
+        self.assertEqual(metadata['nameSha256'], hashlib.sha256(b'EXAMPLE_PERSON').hexdigest())
+
+    def test_optimized_python_cannot_disable_signing_guards(self):
+        result = subprocess.run([sys.executable, '-O', str(path), 'unknown', '/tmp'], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Optimized Python is refused', result.stderr)
 
 
 if __name__ == '__main__': unittest.main()

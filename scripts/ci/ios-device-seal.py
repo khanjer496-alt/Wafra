@@ -26,7 +26,8 @@ def main():
                 'buildProvenance': json.loads((temp/'ios-build-provenance.json').read_text()),
                 'wdaSource': {'package': 'appium-webdriveragent', 'version': '16.12.5',
                               'sha256': sha256(temp/'wda.tgz')},
-                'signing': json.loads((signing/'state.json').read_text()), 'files': []}
+                'signing': {key: value for key, value in json.loads((signing/'state.json').read_text()).items()
+                            if key != 'before'}, 'files': []}
     for name, verified in [('Wafra-dev.ipa', 'wafra-verified.json'), ('WDA-Products.tar.gz', 'wda-verified.json')]:
         source = temp/name
         sealed = output/(name + '.enc')

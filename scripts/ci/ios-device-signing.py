@@ -15,6 +15,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+if not __debug__:
+    raise RuntimeError('Optimized Python is refused: signing guards must remain enabled')
+
 TEAM = 'UV7YN4GQ66'
 REFERENCE_PROFILE = '7996Y2NL26'  # Wafra QA UI Tests 2026-11, a57e79a7…
 BUNDLES = ('app.wafra.qa.wda.xctrunner', 'app.wafra.ios', 'app.wafra.ios.widget')
@@ -67,12 +70,12 @@ def api_list(route):
 def cert_metadata(cert):
     attrs = cert['attributes']
     return {'id': cert['id'], 'type': attrs['certificateType'],
-            'name': attrs.get('name') or attrs['displayName'],
+            'nameSha256': hashlib.sha256((attrs.get('name') or attrs['displayName']).encode()).hexdigest(),
             'serial': attrs['serialNumber'],
             'sha1': hashlib.sha1(base64.b64decode(attrs['certificateContent'])).hexdigest().upper()}
 
 
-def inventory():
+def inventory(root):
     certificates = api_list('certificates?limit=200')
     profiles = api_list('profiles?limit=200')
     result = {'certificates': [{'id': c['id'], 'type': c['attributes']['certificateType'],
@@ -80,15 +83,25 @@ def inventory():
                               for c in certificates],
               'profiles': [{'id': p['id'], 'type': p['attributes']['profileType'],
                             'name': p['attributes']['name']} for p in profiles]}
-    print('Pre-creation signing inventory: ' + json.dumps(result, sort_keys=True), flush=True)
-    return result
+    # CEO requires a name audit; this PUBLIC repository must never receive it
+    # in plaintext. Retain the full names only in a CMS envelope for this Mac.
+    private = root/'signing-inventory.json'
+    write_json(private, result)
+    output = pathlib.Path('sealed')
+    output.mkdir(exist_ok=True)
+    run('openssl', 'cms', '-encrypt', '-binary', '-aes-256-cbc', '-outform', 'DER',
+        '-in', str(private), '-out', str(output/'signing-inventory.enc'),
+        '.github/android-artifact-recipient.pem')
+    print(f'Pre-creation inventory sealed: {len(certificates)} certificates, {len(profiles)} profiles', flush=True)
+    return {kind: [{key: item[key] for key in ('id', 'type')} for item in entries]
+            for kind, entries in result.items()}
 
 
 def prepare(root):
     os.umask(0o077)
     root.mkdir(parents=True, exist_ok=True)
     state = {'team': TEAM, 'profiles': {}, 'runId': os.environ['GITHUB_RUN_ID'],
-             'runAttempt': os.environ['GITHUB_RUN_ATTEMPT'], 'before': inventory()}
+             'runAttempt': os.environ['GITHUB_RUN_ATTEMPT'], 'before': inventory(root)}
     # Receipt is persisted immediately after each mutation, even on later failure.
     receipt = pathlib.Path('sealed/signing-receipt.json')
     receipt.parent.mkdir(exist_ok=True)
@@ -157,8 +170,8 @@ def prepare(root):
             (dest/(attrs['uuid'] + '.mobileprovision')).write_bytes(content)
     write_json(root/'state.json', state)
     write_json(receipt, state)
-    print('Created signing IDs: ' + json.dumps({'certificate': state['certificate'],
-                                              'profiles': state['profiles']}, sort_keys=True), flush=True)
+    print('Created signing IDs: ' + json.dumps({'certificateId': state['certificateId'],
+             'profileIds': [p['id'] for p in state['profiles'].values()]}, sort_keys=True), flush=True)
 
 
 def linked_profiles(certificate_id):

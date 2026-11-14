@@ -63,12 +63,13 @@ jobs:
           [[ "$CERTIFICATE_ID" =~ ^[A-Z0-9]+$ && "$PROFILE_IDS" =~ ^[A-Z0-9]+(,[A-Z0-9]+)*$ ]]
           [[ "$QA_PASS_MESSAGE_ID" =~ ^[0-9a-fA-F-]{36}$ ]]
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" > "$RUNNER_TEMP/source-run.json"
-          python3 <<'PY'
+          python3 -I <<'PY'
           import json,os,pathlib
           run=json.loads((pathlib.Path(os.environ['RUNNER_TEMP'])/'source-run.json').read_text())
           assert run['path']=='.github/workflows/ios-device-build.yml'
           assert run['event']=='workflow_dispatch' and run['status']=='completed'
           assert run['repository']['full_name']==os.environ['GITHUB_REPOSITORY']
+          assert run['head_branch'] in ('main','release/1.0.0-rc1-reconciled')
           PY
       - uses: actions/download-artifact@v4
         with:
@@ -97,4 +98,4 @@ jobs:
           name: ios-device-cleanup-report-${{ github.run_id }}-${{ github.run_attempt }}
           path: cleanup-report.json
           if-no-files-found: ignore
-          retention-days: 30
+          retention-days: 7

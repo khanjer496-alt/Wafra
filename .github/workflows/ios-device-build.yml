@@ -82,8 +82,6 @@ jobs:
         run: |
           gem install fastlane -v 2.238.0 --no-document
           gem install cocoapods -v 1.16.2 --no-document
-          python3 -m venv "$RUNNER_TEMP/signing-venv"
-          "$RUNNER_TEMP/signing-venv/bin/pip" install PyJWT==2.10.1 cryptography==46.0.3
           npm ci
           npm install -g eas-cli@22.4.0
           node scripts/generate-ios-background-parser.cjs --check
@@ -135,6 +133,10 @@ jobs:
           ditto -x -k "$RUNNER_TEMP/store.ipa" "$RUNNER_TEMP/wafra"
           codesign --verify --deep --strict "$RUNNER_TEMP/wafra/Payload/Wafra.app"
           python3 scripts/ci/ios-device-signing.py preflight-app "$RUNNER_TEMP/wafra/Payload/Wafra.app" "$RUNNER_TEMP/ios-build-provenance.json"
+      - name: Create clean signing API toolchain after dependency builds
+        run: |
+          python3 -I -m venv --clear "$RUNNER_TEMP/signing-venv"
+          "$RUNNER_TEMP/signing-venv/bin/pip" install PyJWT==2.10.1 cryptography==46.0.3
       - name: Create runner-local development key and device profiles
         env:
           ASC_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
@@ -185,7 +187,15 @@ jobs:
           name: ios-device-signing-receipt-${{ github.run_id }}-${{ github.run_attempt }}
           path: sealed/signing-receipt.json
           if-no-files-found: ignore
-          retention-days: 30
+          retention-days: 7
+      - name: Preserve encrypted name audit even after failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-device-private-inventory-${{ github.run_id }}-${{ github.run_attempt }}
+          path: sealed/signing-inventory.enc
+          if-no-files-found: ignore
+          retention-days: 1
       - name: Remove runner signing keychain and private material
         if: always()
         run: |

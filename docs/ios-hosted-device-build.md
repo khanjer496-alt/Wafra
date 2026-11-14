@@ -37,8 +37,10 @@ runner therefore creates one new Apple Development certificate and three new
 development profiles for the existing runner, app and widget bundle IDs. It
 reads the two enabled devices from the existing Wafra QA UI Tests 2026-11
 reference profile (`7996Y2NL26`, UUID `a57e79a7-02f7-49b5-808c-9e88b1e81cd8`).
-Before creation it logs a paginated account inventory (certificate/profile IDs,
-types and names). It changes no existing profile, certificate, App ID or capability. New profiles
+Before creation it reads a paginated account inventory. IDs/types are recorded
+in the cleanup receipt; full names are logged only to the encrypted
+`signing-inventory.enc` audit for this Mac. Public logs contain counts and new
+IDs only. It changes no existing profile, certificate, App ID or capability. New profiles
 must match the new certificate, both reference devices, team, app group and
 development APNs entitlement before use. A certificate-limit failure stops;
 never revoke an existing identity to make room.
@@ -64,9 +66,13 @@ is reused for CMS AES-256-CBC envelopes. Its private key stays on this Mac at
 `~/.config/wafra-android-artifacts/recipient-key.pem`. Artifacts last one day and
 contain only `*.enc` and `verification.json`; signed installers, profiles,
 private keys, EAS logs and WDA logs never upload in plaintext. A separate
-metadata-only `signing-receipt.json` is preserved for 30 days, including on
-failure. It contains the pre-build inventory and created IDs/names/fingerprints,
-never keys, profile contents or device identifiers.
+metadata-only `signing-receipt.json` is preserved for 7 days, including on
+failure. Its pre-build inventory contains only IDs/types; the created
+certificate's Apple-assigned name is recorded as SHA-256 for exact comparison,
+never plaintext. Newly created generic CI-profile names and fingerprints are
+retained. The public verification manifest excludes the pre-build inventory.
+The full-name audit is encrypted and kept for one day, including on failure.
+No keys, profile contents or device identifiers appear in plaintext artifacts.
 
 Download only the exact dispatched run. Check encrypted SHA-256 against
 `verification.json`, decrypt each file with OpenSSL 3, then check its plaintext
@@ -96,9 +102,10 @@ certificate ID, comma-separated profile IDs, App QA message UUID and
 `cleanup_approval=DELETE_COMPLETED_QA_SIGNING`. The operator checks the actual
 QA message; the workflow records its UUID but cannot verify OpenBot chat.
 
-Cleanup downloads the original run's immutable receipt. It refuses IDs present
+Cleanup requires the source run to be from main or the release branch, and
+downloads that run's immutable receipt. It refuses IDs present
 in the pre-build inventory. The certificate must match the receipt's ID,
-SHA-1, serial, DEVELOPMENT type and Apple-assigned name, and be linked only to
+SHA-1, serial, DEVELOPMENT type and Apple-assigned name SHA-256, and be linked only to
 the recorded CI-named profiles. Before each profile deletion it re-reads the
 exact ID, UUID, development type, certificate link and exact name ending in
 `CI <run>-<attempt>`. Before certificate revocation it checks the identity again
@@ -106,10 +113,17 @@ and proves no remaining profile references it. Distribution certificates and
 App Store/TestFlight profiles cannot pass these gates. Deleted/revoked IDs are
 preserved even if a later cleanup step fails.
 
-iOS Release downloads each build/cleanup receipt and appends its created or
+iOS Release downloads each build/cleanup receipt and encrypted audit within
+the retention windows, keeps a local copy, and appends its created or
 deleted IDs and run URL to `Shared/launch-review/ios-account-status.md` on this
 Mac. The hosted runner cannot write that local file. A failed or cancelled run
 is not a passing build; inspect its receipt before any approved retry to avoid
 consuming signing-certificate slots. Never delete an existing identity to free
-capacity. A stale receipt or partially completed cleanup fails closed and needs
-review before another dispatch.
+capacity. Complete normal cleanup within seven days of creation. If QA slips
+beyond retention, the normal dispatch refuses; the local receipt/audit must
+be reviewed with CEO before a separate recovery procedure, never used to
+bypass the workflow guards. A stale receipt or partially completed cleanup
+fails closed and needs review before another dispatch. An Apple POST can
+succeed while its response times out; unrecorded resources then make the
+linked-set check fail closed. Investigate the encrypted inventory, exact CI
+names and Apple state with CEO before any manual recovery; never guess IDs.
