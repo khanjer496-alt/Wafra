@@ -2859,7 +2859,7 @@ function arCreditSettlement(sentence: string, clause: CreditClause, rawAfter: st
   leaders.sort((a, b) => a.index! - b.index!);
   const last = leaders[leaders.length - 1];
   const betweenLeaderAndCredit = last ? lead.slice(last.index! + last[0].length) : '';
-  if (hasLeadingCreditCondition(lead) || (last && !hasPastCreditEvent(lead) &&
+  if (hasLeadingCreditCondition(lead) || (last && (!hasPastCreditEvent(lead) || AR_FUTURE_MAIN_CLAUSE_RE.test(sentence.slice(clause.end))) &&
     (!AR_TEMPORAL_LEADER_RE.test(last[0]) || !AR_EVENT_BEFORE_CREDIT_RE.test(betweenLeaderAndCredit) ||
       AR_FUTURE_MAIN_CLAUSE_RE.test(sentence.slice(clause.end)) || clause.ar !== 'settled'))) {
     return { verdict: 'not-settled', reason: 'conditional' };
@@ -2904,7 +2904,7 @@ export function creditSettlement(sentence: string, clause: CreditClause, after =
   if (isAllCapsSentence(sentence)) leaders.push(...lead.matchAll(EN_CAPS_LEADER_RE));
   leaders.sort((a, b) => a.index! - b.index!);
   const last = leaders[leaders.length - 1];
-  if (hasLeadingCreditCondition(lead) || (last && !hasPastCreditEvent(lead) && leaderGovernsCredit(sentence, last, clause))) {
+  if (hasLeadingCreditCondition(lead) || (last && (!hasPastCreditEvent(lead) || (isAllCapsSentence(sentence) ? EN_CAPS_MODAL_RE : EN_LOWERCASE_MODAL_RE).test(sentence.slice(clause.end))) && leaderGovernsCredit(sentence, last, clause))) {
     return { verdict: 'not-settled', reason: 'conditional' };
   }
   if (EN_CREDIT_WORDS.negatedBefore.test(lead)) return { verdict: 'not-settled', reason: 'negated' };
