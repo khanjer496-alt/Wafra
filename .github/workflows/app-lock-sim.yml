@@ -134,7 +134,9 @@ jobs:
             [ -f shots/purchase-results.tsv ] && awk -F'\t' '{printf "| %s | %s | %s |\n",$1,$2,$3}' shots/purchase-results.tsv
             [ -f shots/purchase-setup.txt ] && echo "| setup | $(cat shots/purchase-setup.txt) | |"
           } | tee -a "$GITHUB_STEP_SUMMARY"
-          ! grep -q $'\tFAIL\t' shots/purchase-results.tsv 2>/dev/null
+          test -s shots/purchase-results.tsv
+          grep -q '^test rc=0$' shots/purchase-run.log
+          awk -F'\t' '$1 ~ /^P[1-5]$/ { seen[$1]++; if ($2 != "PASS") bad=1 } END { for (i=1;i<=5;i++) if (seen["P" i] != 1) bad=1; exit bad }' shots/purchase-results.tsv
 
       - uses: actions/upload-artifact@v4
         if: always()
