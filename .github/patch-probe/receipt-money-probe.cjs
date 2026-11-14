@@ -1,6 +1,9 @@
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
+const results = [];
+let outerError = null;
+try {
 const load = require(path.resolve('scripts/universal-test/load-ts.cjs')).createLoader();
 load('@/lib/country').setActiveCountry('AE');
 load('@/lib/markets').setActiveMarket('AE');
@@ -13,12 +16,15 @@ const rows = [
   'Purchase of AED 50.00 with Debit Card ending 1234 at MAY CAFE. Your refund request is pending.',
 ];
 const sourceHash = JSON.parse(fs.readFileSync('modules/wafra-live-capture/ios/Resources/WafraBackgroundParser.meta.json')).sourceHash;
-const report = rows.map(body => {
+for (const body of rows) {
+try {
   const money = load('@/lib/universal-money').extractUniversalMoney(body, { sender: 'ENBD', market: 'AE' });
-  return { body, sourceHash,
+  results.push({ body, sourceHash,
     money: { amount: money.amount, observations: money.observations },
     rawEvent: load('@/lib/universal-parser').inspectUniversalBankEvent(body, { sender: 'ENBD', market: 'AE' }),
     generic: load('@/lib/launch-alert-parser').inspectGenericBankEventForReview(body, 'ENBD'),
-    parsed: load('@/lib/sms-parser').parseSms(body, {}, { sender: 'ENBD', observedAt: Date.parse('2026-11-14T10:00:00Z') }) };
-});
-fs.writeFileSync('receipt-money-probe.json', JSON.stringify(report, null, 2));
+    parsed: load('@/lib/sms-parser').parseSms(body, {}, { sender: 'ENBD', observedAt: Date.parse('2026-11-14T10:00:00Z') }) });
+} catch (error) { results.push({ body, error: String(error.stack || error) }); }
+}
+} catch (error) { outerError = String(error.stack || error); }
+fs.writeFileSync('receipt-money-probe.json', JSON.stringify({results, outerError}, (_, value) => typeof value === 'bigint' ? value.toString() + 'n' : value, 2));
