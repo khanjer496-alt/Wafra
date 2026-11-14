@@ -259,7 +259,7 @@ export function parseIosBackgroundAlert(input: NativeParserInput): NativeParserR
     const unbankedSender = sender !== '' && senderMarket === null;
     if (unbankedSender && !hasUniversalInstitutionSender(sender) && !/^\d{3,6}$/.test(sender)) return ignore();
     const inspection = session.inspect(source, sender);
-    const parsed = unbankedSender ? null
+    let parsed = unbankedSender ? null
       : session.parse(source, sender, inspection, senderMarket ?? undefined, input.observedAt);
     // Relaxing a refusal for informational CREDIT Review cannot authorize a
     // debit that the original source's completed-movement checks refused.
@@ -268,12 +268,13 @@ export function parseIosBackgroundAlert(input: NativeParserInput): NativeParserR
     // retains the reversal note in its existing capture/history Review lane.
     const debitSource = pair && parsed?.kind === 'transaction' && parsed.type === 'expense' ? pair.debit : null;
     const principalSource = debitSource ?? source;
-    const debitAliases = debitSource && senderMarket === 'AE' ? { 'درهم': ['AED'], 'دراهم': ['AED'] }
-      : debitSource && senderMarket === 'SA' ? { 'ريال': ['SAR'] } : undefined;
+    const debitAliases = parsed && senderMarket === 'AE' ? { 'درهم': ['AED'], 'دراهم': ['AED'] }
+      : parsed && senderMarket === 'SA' ? { 'ريال': ['SAR'] } : undefined;
     const event = inspectGenericBankEventForReview(principalSource, sender, undefined,
       debitAliases ? { currencyAliases: debitAliases } : undefined);
     if (futureDate(event, input.observedAt, parsed ?? undefined) && !(creditReviewOnly && !parsed)) return ignore();
     if (parsed && parsed.kind !== 'transaction') return ignore();
+    if (parsed?.type === 'income' && event?.status === 'informational') parsed = null;
     if (event && ['statement', 'balance', 'authentication', 'bill', 'card-payment'].includes(event.family)) return ignore();
     const informationalCredit = creditReviewOnly && !parsed && event?.status === 'informational' &&
       event.amount.evidence === 'explicit' && event.amount.spans.length > 0;
