@@ -1,4 +1,4 @@
-import { EN_CREDIT_PENDING_STATUS, AR_CREDIT_PENDING_STATUS, hasCreditCondition, hasLeadingCreditCondition, hasPendingCreditStatus, normalizeCreditText, isRefundRequest, hasSettledCreditReceipt, hasPastCreditEvent, creditSourceDisposition, isHistoricalCreditClaim, creditQualificationScope, hasUnsettledCreditToken, completedDebitBesideCredit } from '@/lib/credit-settlement-guards';
+import { EN_CREDIT_PENDING_STATUS, AR_CREDIT_PENDING_STATUS, hasCreditCondition, hasLeadingCreditCondition, hasPendingCreditStatus, normalizeCreditText, isRefundRequest, hasSettledCreditReceipt, hasPastCreditEvent, creditSourceDisposition, isHistoricalCreditClaim, creditQualificationScope, hasUnsettledCreditToken, completedDebitBesideCredit, hasConditionalDebitLead, mentionsCredit } from '@/lib/credit-settlement-guards';
 import { categorySupportsType, readMerchantCategoryOverride } from '@/lib/categories';
 import {
   bankFromMessage,
@@ -10094,6 +10094,7 @@ export function parseSms(
 ): ParsedSms | null {
   // Evaluate the original BEFORE any core parser can mask merchants or notes.
   const holdCredit = hasUnsettledCreditToken(message);
+  if (mentionsCredit(message) && hasConditionalDebitLead(message)) return null;
   const pair = completedDebitBesideCredit(message);
   const reason = nonPostingReason(message);
   if (pair && (reason === null || reason === 'pending-processing' || reason === 'declined') && !hasActionableRefundRequest(message) &&

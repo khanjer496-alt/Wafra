@@ -34,9 +34,17 @@ export const hasUnsettledCreditToken = (source: string): boolean => {
 };
 export const mentionsCredit = (source: string): boolean => CREDIT_MENTION.test(normalizeCreditText(source));
 
+/** A conditional debit quotation is not the separately completed debit we preserve. */
+export function hasConditionalDebitLead(source: string): boolean {
+  const text = normalizeCreditText(source);
+  const amount = text.search(/\b[A-Z]{3}\s*\d|\d[\d.,]*\s*(?:[A-Z]{3}\b|درهم|ريال)/iu);
+  return amount >= 0 && /\b(?:debited|charged|purchase|spent|withdrawn)\b|(?:تم|تمت)\s+(?:ال)?(?:خصم|شراء|دفع|سحب)/iu.test(text) &&
+    hasCreditCondition(text.slice(0, amount));
+}
+
 /** The source spans remain in the original spelling; normalization is detection only. */
 export function completedDebitBesideCredit(source: string): { debit: string; credit: string } | null {
-  if (!mentionsCredit(source)) return null;
+  if (!mentionsCredit(source) || hasConditionalDebitLead(source)) return null;
   const parts = source.split(/(?<=[.!?؟])\s+|[;؛\n]+|\s+(?:but|while)\s+(?=(?:your|the)\s+(?:refund|reversal|charge[\s-]*back))|\s*[-–—]\s*(?=(?:refund|reversal|charge[\s-]*back)\b)/iu);
   const debit = parts.filter(part => {
     const text = normalizeCreditText(part);

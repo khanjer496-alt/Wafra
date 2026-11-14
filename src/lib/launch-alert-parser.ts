@@ -1,4 +1,4 @@
-import { informationalCreditReview, hasUnsettledCreditToken, completedDebitBesideCredit, mentionsCredit } from '@/lib/credit-settlement-guards';
+import { informationalCreditReview, hasUnsettledCreditToken, completedDebitBesideCredit, mentionsCredit, hasConditionalDebitLead } from '@/lib/credit-settlement-guards';
 import { inspectUniversalAlert, type UniversalAlertReview } from '@/lib/alert-market-detection';
 import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars';
 import { activeCountryDateOrder, dateOrderForCountry, getActiveCountry } from '@/lib/country';
@@ -1162,6 +1162,7 @@ export const createLaunchAlertSession = ({
   // reparsing, pass the same original-text credit veto.
   const guard = (reader: typeof parse): typeof parse => (source, sender, inspection, forcedMarket, observedAt) => {
     const holdCredit = hasUnsettledCreditToken(source);
+    if (mentionsCredit(source) && hasConditionalDebitLead(source)) return null;
     const pair = completedDebitBesideCredit(source);
     const reason = nonPostingReason(source);
     if (pair && (reason === null || reason === 'pending-processing' || reason === 'declined') && !hasPersonalMessagePrefix(source, sender) &&

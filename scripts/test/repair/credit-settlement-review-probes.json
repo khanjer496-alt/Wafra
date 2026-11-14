@@ -2328,5 +2328,13 @@
     "expected": "none",
     "minorUnits": 25000,
     "requireReview": true
+  },
+  {
+    "id": "r3-conditional-debit-not-completed",
+    "body": "If approved, AED 250.00 was debited from your card at NOON. Your chargeback request is pending.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
   }
 ]
