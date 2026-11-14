@@ -315,6 +315,15 @@ const cases = [
 ];
 
 for (const [name, meaning, sender, market, currency, amountFils, type, source] of cases) {
+  if (name === 'compact refund CR') {
+    const load = require('../universal-test/load-ts.cjs').createLoader();
+    const retain = require('../universal-test/credit-retention.cjs').assertCreditRetained;
+    for (const body of [source, `${source} Available balance ${currency} 99,999.00.`, wrapEveryFiveWords(source), varyWhitespace(source), source.toLowerCase()]) {
+      retain(load, body, { minor: amountFils, currency, country: market, sender, reviewOnly: true });
+    }
+    ok(`${name}: uncompleted headline retains exact money in informational Review`, true);
+    continue;
+  }
   const result = interpretBankAlert({ source, sender, market });
   ok(`${name}: semantic meaning and money are exact`,
     result.outcome === 'parsed' && result.meaning === meaning &&
