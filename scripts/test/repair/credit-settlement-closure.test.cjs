@@ -107,6 +107,7 @@ for (const row of require('./credit-settlement-sweep.json')) test(`${row.id} ${r
     assert.equal(got.review?.role, 'transaction', row.id);
     assert.equal(got.nativeRoute, 'review', `${row.id} native Review ${JSON.stringify(got)}`);
   }
+  if (row.requireDebitParity) assert.equal(got.native, 'debit:25000', JSON.stringify(got));
   if (row.nativeExpected === 'no-credit') assert.ok(!/^credit:/.test(got.native), `${row.body} ${JSON.stringify(got)}`);
   else if (row.nativeExpected !== 'no-post') assert.equal(got.native, `${row.nativeExpected}:25000`, row.body);
 });
@@ -125,6 +126,7 @@ for (const row of require('./credit-settlement-review-probes.json')) test(`${row
     assert.equal(got.review.role, 'transaction', row.body);
   }
   if (row.expected === 'expense') assert.ok(!/^credit:/.test(got.native), JSON.stringify(got));
+  if (row.requireDebitParity) assert.equal(got.native, `debit:${row.minorUnits}`, JSON.stringify(got));
 });
 test('O1: pending N06 refund is informational and cannot be confirmed into the ledger', () => {
   const got = paths('ADCB: Reversal of AED 40.00 is under process. You will be notified when the amount is refunded.', 'ADCB');

@@ -397,7 +397,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "cross-family-new:N041",
@@ -407,7 +408,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "cross-family-new:N042",
@@ -417,7 +419,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "cross-family-new:N043",
@@ -427,7 +430,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "cross-family-new:N044",
@@ -437,7 +441,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "cross-family-new:N045",
@@ -447,7 +452,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "cross-family-new:N046",
@@ -577,7 +583,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "cross-family-confirm:Q01",
@@ -617,7 +624,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "cross-family-confirm:Q05",
@@ -627,7 +635,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "cross-family-confirm:Q06",
@@ -1087,7 +1096,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "reviewer:DB01",
@@ -1097,7 +1107,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "reviewer:DB02",
@@ -1107,7 +1118,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "reviewer:DB03",
@@ -1117,7 +1129,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "reviewer:DB04",
@@ -1127,7 +1140,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "reviewer:DB05",
@@ -1137,7 +1151,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "reviewer:DB06",
@@ -1147,7 +1162,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "reviewer:DB07",
@@ -1157,7 +1173,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "reviewer:DB08",
@@ -1167,7 +1184,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "reviewer:DB09",
@@ -1177,7 +1195,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "reviewer:DB10",
@@ -1187,7 +1206,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "reviewer:DB11",
@@ -1197,7 +1217,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "reviewer:DB12",
@@ -1207,7 +1228,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "reviewer:DB13",
@@ -1217,7 +1239,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "reviewer:DB14",
@@ -1238,7 +1261,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "reviewer:DB16",
@@ -1248,7 +1272,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "reviewer:DB17",
@@ -1258,7 +1283,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "reviewer:DB18",
@@ -1268,7 +1294,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "reviewer:DB19",
@@ -1278,7 +1305,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "reviewer:DB20",
@@ -1288,7 +1316,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "reviewer:DB21",
@@ -1298,7 +1327,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "reviewer:DB22",
@@ -1308,7 +1338,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "nativeParityExemption": "Existing native authentication-wording refusal on a completed debit without a reversal note; source/session expense preserved, native must never credit."
   },
   {
     "id": "reviewer:DB23",
@@ -1318,7 +1349,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "reviewer:CR00",
@@ -1839,7 +1871,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "reviewer-focused:F4inqueue",
@@ -1849,7 +1882,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "reviewer-focused:S1",
@@ -1899,7 +1933,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "reviewer-focused:S6",
@@ -1909,7 +1944,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "reviewer-focused:S7",
@@ -1919,7 +1955,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "reviewer-focused:S8",
@@ -2079,7 +2116,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "change-reviewer:CR-D2",
@@ -2089,7 +2127,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "change-reviewer:CR-K-G6",
@@ -2189,7 +2228,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "change-reviewer:CR-K-D4",
@@ -2199,7 +2239,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "change-reviewer:CR-K-D5",
@@ -2209,7 +2250,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "parser-followup:process-success-is-not-credit",
@@ -2219,7 +2261,8 @@
     "expected": "expense",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": false
+    "requireReview": false,
+    "requireDebitParity": true
   },
   {
     "id": "parser-followup:successful-request-is-not-receipt",

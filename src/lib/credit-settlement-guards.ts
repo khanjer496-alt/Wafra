@@ -23,7 +23,7 @@ export const AR_CREDIT_PENDING_STATUS = String.raw`(?<![ء-ي])(?:(?:في\s+[ا�
 const PENDING = new RegExp(`${EN_CREDIT_PENDING_STATUS}|${AR_CREDIT_PENDING_STATUS}`, 'iu');
 export const REFUND_REQUEST_NOUN_RE = /\b(?:(?:refund|reversal|chargeback)\s+(?:requests?|claims?|applications?)|requests?\s+(?:for|to)\s+(?:(?:a|the|your)\s+)?(?:refund|reversal|reverse|chargeback))\b|(?<![ء-ي])(?:طلب(?:ك|كم)?\s+(?:ال)?(?:ل?استرداد|ل?استرجاع|ل?عكس|اعاده|اعتراض)|طلبك\s+لاسترداد)(?![ء-ي])/iu;
 export const isRefundRequest = (source: string): boolean => REFUND_REQUEST_NOUN_RE.test(normalizeCreditText(source).replace(/\|/g, ' '));
-const CREDIT_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|return(?:ed|ing)?|chargeback|credit(?:ed|ing)?(?!\s+card)|salary|payroll|deposit(?:ed)?)\b|(?<![ء-ي])(?:و?ب?)(?:استرداد|استرجاع|ارجاع|اعاده|عكس|ايداع|اضافه|راتب)(?:ه|ها)?(?![ء-ي])/iu;
+const CREDIT_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|return(?:ed|ing)?|chargeback|credit(?:ed|ing)?(?!\s+card)|salary|payroll|deposit(?:ed)?)\b|(?<![ء-ي])و?(?:ب|ك|لل|ل)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس|ايداع|اضافه|راتب)(?:ه|ها)?(?![ء-ي])/iu;
 // This is deliberately conservative. Always inspect the normalized ORIGINAL,
 // never a merchant-masked, clause-selected or request-note-stripped derivative.
 const UNSETTLED_EN = /\b(?:if|unless|subject|upon|provided|once|when|after|until|pending|awaiting|queued|queuing|queueing|scheduled|process(?:ed|ing)?|progress|review(?:ed|ing)?|request\w*|requir\w*|approv\w*|verif\w*|clearance|eligible|may|can|will)\b/iu;
