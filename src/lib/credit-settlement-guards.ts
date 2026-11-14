@@ -34,7 +34,8 @@ function qualificationScope(source: string): string {
     .replace(/\bfor\s+(?:your|the)\s+(?:(?:cancelled|canceled|previously|original|pending|scheduled|reversed)\s+)+(?:payment|purchase|order|transaction)\b/gi, ' ')
     .replace(/\b(?:from|via)\s+(?:a\s+)?scheduled\s+(?:transfer|payment)\b|\bfor\s+scheduled\s+rent\b/gi, ' ')
     .replace(/(?:من|عبر)\s+تحويل\s+مجدول/g, ' ')
-    .replace(/\b(?:and|but|while)\s+(?=(?:your|the|another)\s+)/gi, ' | ');
+    .replace(/\b(?:and|but|while)\s+(?=(?:your|the|another)\s+)/gi, ' | ')
+    .replace(/\b(?:and|but)\s+(?=(?:has|have|had|was|were)\b)/gi, ' | ');
   const parts = text.split(/\s*(\|+)\s*/);
   let laterSentence = false;
   const own: string[] = [];
@@ -45,8 +46,8 @@ function qualificationScope(source: string): string {
     const continuation = own.length > 0 && COMPLEMENT_HEAD.test(own[own.length - 1]);
     const other = /^(?:(?:your|the)\s+other|another\b|و?(?:طلبك|طلبكم|الطلب|الاسترداد)\s+(?:الاخر|الاخري))/iu.test(part);
     const independent = /^(?:your|the|a|an|our|their)\s+[^|]+?\b(?:is|are|was|were|has|have|will|shall|can|awaiting|scheduled)\b/iu.test(part) && !OWN_REFERENCE.test(part);
-    if (/^(?:(?:the|this|your)\s+(?:refund|amount)|it)\s+(?:(?:has|have|had)\s+(?:now\s+)?been|was|were)\s+(?:(?:now|successfully|already)\s+)?(?:credited|refunded|returned|deposited)\b/iu.test(part) &&
-      /\b(?:not|never|pending|awaiting|being)\b/iu.test(own.join(' ')) && !/\b(?:if|unless|whether|subject|until|once|when)\b|if_ar|اذا|بشرط/iu.test(own.join(' '))) own.length = 0;
+    if (/^(?:(?:(?:the|this|your)\s+(?:refund|amount)|it|which)\s+)?(?:(?:has|have|had)\s+(?:now\s+)?been|was|were)\s+(?:(?:now|successfully|already)\s+)?(?:credited|refunded|returned|deposited)\b/iu.test(part) &&
+      /\b(?:not|never|pending|awaiting|being|will|shall)\b/iu.test(own.join(' ')) && !/\b(?:if|unless|whether|subject|until|once|when)\b|if_ar|اذا|بشرط/iu.test(own.join(' '))) own.length = 0;
     if (index === 0 || continuation || (!other && (CONDITION_HEAD.test(part) || OWN_REFERENCE.test(part) || (!laterSentence && !independent)))) own.push(part);
   }
   return own.join(' ')
