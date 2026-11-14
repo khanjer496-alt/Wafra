@@ -123,7 +123,10 @@ function harness(options = {}) {
     '@/lib/android-play-billing': options.playNative ? load(path.join(root, 'src/lib/android-play-billing.ts'), {
       'expo-modules-core': { requireOptionalNativeModule: name => {
         assert.equal(name, 'WafraPlayBilling');
-        return { querySubscriptions: async () => { calls.playQueries++; return options.playNative(); } };
+        return {
+          querySubscriptions: async () => { calls.playQueries++; return options.playNative(); },
+          ...(options.acknowledgeNative ? { acknowledgeSubscriptions: async () => options.acknowledgeNative() } : {}),
+        };
       } },
       '@/lib/purchases': productContract,
     }) : {
@@ -886,3 +889,61 @@ test('ACK errors and unanswered ACKs never withhold purchased access or block Re
     assert.equal(h.state.pro, true);
   }
 });
+
+
+for (const entrypoint of ['startup', 'Restore']) {
+  test(`a missed purchase callback is recovered by Play query on ${entrypoint}`, async () => {
+    // The purchase completes while Wafra cannot receive onPurchasesUpdated
+    // (for example, Play owns the foreground). Do not invoke SDK checkout or
+    // publish any SDK purchase/entitlement event: only Play's next query knows.
+    let purchased = entrypoint === 'startup';
+    let acknowledged = false;
+    let durable = false;
+    let acknowledgements = 0;
+    const snapshot = () => ({
+      status: purchased ? 'active' : 'inactive',
+      activeProductIds: purchased ? ['wafra_pro_weekly'] : [],
+      pendingProductIds: [], responseCode: 0,
+      needsAcknowledgement: purchased && !acknowledged,
+    });
+    const h = harness({
+      playNative: snapshot,
+      ensureDurable: async () => {
+        assert.equal(h.state.pro, true, 'local entitlement must be granted first');
+        durable = true;
+      },
+      acknowledgeNative: async () => {
+        assert.equal(h.state.pro, true);
+        assert.equal(durable, true, 'save the local grant before recovering ACK');
+        assert.equal(purchased, true);
+        assert.equal(acknowledged, false);
+        acknowledgements++;
+        acknowledged = true;
+        return snapshot();
+      },
+    });
+    h.sdk.useSuperwallStore.setState({ subscriptionStatus: { status: 'INACTIVE' } });
+    await h.renderRuntime(2);
+    if (entrypoint === 'Restore') {
+      assert.equal(h.state.pro, false);
+      assert.equal(acknowledgements, 0);
+      purchased = true; // No callback: the next ownership query must discover it.
+      assert.equal(await h.billing().restorePro(), true);
+      await tick();
+    }
+    assert.ok(h.calls.playQueries > 0);
+    assert.deepEqual(h.calls.purchases, [], 'recovery must not run checkout again');
+    assert.equal(h.sdk.useSuperwallStore.getState().subscriptionStatus.status, 'INACTIVE');
+    assert.equal(acknowledged, true);
+    assert.equal(acknowledgements, 1);
+    assert.equal(h.state.pro, true);
+    assert.deepEqual(h.calls.pro, [true], 'grant once despite a missing SDK callback');
+    for (const listener of h.calls.appListeners) listener('active');
+    await tick();
+    assert.equal(await h.billing().restorePro(), true);
+    await tick();
+    assert.equal(h.state.pro, true);
+    assert.equal(acknowledgements, 1, 'later queries see ACK and leave it untouched');
+    assert.deepEqual(h.calls.pro, [true]);
+  });
+}
