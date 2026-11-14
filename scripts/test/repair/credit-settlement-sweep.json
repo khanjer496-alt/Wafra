@@ -1477,7 +1477,7 @@
     "expected": "expense",
     "nativeExpected": "no-credit",
     "requirement": "must-still-post",
-    "sessionExpected": "none"
+    "sessionExpected": "expense"
   },
   {
     "id": "S0149",
@@ -1627,7 +1627,7 @@
     "expected": "expense",
     "nativeExpected": "no-credit",
     "requirement": "must-still-post",
-    "sessionExpected": "none"
+    "sessionExpected": "expense"
   },
   {
     "id": "S0164",
@@ -1777,7 +1777,7 @@
     "expected": "expense",
     "nativeExpected": "no-credit",
     "requirement": "must-still-post",
-    "sessionExpected": "none"
+    "sessionExpected": "expense"
   },
   {
     "id": "S0179",
@@ -4291,7 +4291,7 @@
     "expected": "expense",
     "nativeExpected": "no-credit",
     "requirement": "must-still-post",
-    "sessionExpected": "none"
+    "sessionExpected": "expense"
   },
   {
     "id": "X0068",
@@ -4303,7 +4303,7 @@
     "expected": "expense",
     "nativeExpected": "no-credit",
     "requirement": "must-still-post",
-    "sessionExpected": "none"
+    "sessionExpected": "expense"
   },
   {
     "id": "X0069",
@@ -4315,7 +4315,7 @@
     "expected": "expense",
     "nativeExpected": "no-credit",
     "requirement": "must-still-post",
-    "sessionExpected": "none"
+    "sessionExpected": "expense"
   },
   {
     "id": "X0070",

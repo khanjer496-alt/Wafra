@@ -19,7 +19,7 @@ import {
   pinnedLedgerCurrencyCode,
 } from '@/lib/markets';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
-import { moneyNoticeKind, nonPostingReason, parseSmsBatch, type ParsedSms } from '@/lib/sms-parser';
+import { moneyNoticeKind, nonPostingReason, parseSmsBatch, withoutUncompletedRequestNotes, type ParsedSms } from '@/lib/sms-parser';
 import type { CategoryId } from '@/lib/types';
 import { CURRENCY_SYMBOL_CANDIDATES, currencyMinorUnits } from '@/lib/currency-metadata';
 import { decideGulfNeighbourPosting, gulfNeighbourReadSource, isGulfNeighbourMarket } from '@/lib/gulf-neighbour-alerts';
@@ -874,7 +874,7 @@ const launchSenderAnswersFor = (source: string, sender: string, parsed: ParsedSm
     parsed.card?.kind === 'credit' && /^\d{4}$/u.test(parsed.card.last4) &&
     parsed.currency === pinnedLedgerCurrencyCode() && parsed.fxSource !== 'fallback' &&
     isSafeCardRepaymentReviewSource(source) && !hasNonCompletedWording(source, null, sender);
-  if (isNotAutoPostableMoney(source) && !provedSettlement) return false;
+  if (isNotAutoPostableMoney(withoutUncompletedRequestNotes(source)) && !provedSettlement) return false;
   if (!isAbsentLaunchSender(sender)) return !isUnverifiedAlertSender(sender);
   if (parsed.kind !== 'transaction') return true;
   return parsed.type !== 'income' || namesOwnInstrumentTail(source, 'credit');

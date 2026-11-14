@@ -6719,7 +6719,7 @@ const NOTICE_REFUND_COMPLETED_RE = new RegExp(
 const NOTICE_REFUND_TELEGRAPHIC_CREDIT_RE =
   /(?<!\b(?:be|being|once|when|if|after|until|unless)\s+)\b(?:credited|refunded|reversed|returned|processed|deposited)\s+(?:back\s+)?(?:to|into)\s+your\b/i;
 /** Remove only amount-free request sentences beside a separately stated movement. */
-function withoutUncompletedRequestNotes(message: string): string {
+export function withoutUncompletedRequestNotes(message: string): string {
   if (!/request|طلب/i.test(message) || hasActionableRefundRequest(message)) return message;
   const folded = foldOrthography(stripInvisible(message));
   const spans = [...folded.matchAll(/[.!?](?=\s|$)|[;؛]|\n/g)].map(m => m.index! + m[0].length);
