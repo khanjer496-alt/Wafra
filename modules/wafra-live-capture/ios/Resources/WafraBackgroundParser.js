@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 98001dded6b6659ed0d8ac0b4d95dc4b4632c43f3fb87b01089fe18f92bd2236
+// Generated from normal shipping TypeScript. Source SHA-256: a2531964737fce1012444ac34e9acfd8f12d4a4d45e61182a8b1dd7f292e2788
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -8855,6 +8855,11 @@ const inspectGenericBankEventForReview = (source, sender = '', market, sourceCon
     const moneySource = source.replace(/\u0640(?=[0-9٠-٩۰-۹])/g, ' ');
     let event = (0, universal_parser_1.inspectUniversalBankEvent)((0, gulf_neighbour_alerts_1.isGulfNeighbourMarket)(market)
         ? (0, gulf_neighbour_alerts_1.gulfNeighbourReadSource)(moneySource, market) : moneySource, { ...context, currencyAliases: { ...creditReviewAliases, ...cardCreditAliases, ...context.currencyAliases } });
+    if ((0, credit_settlement_guards_1.hasUnsettledCreditToken)(source) && event.status === 'unknown' &&
+        (event.direction === 'unknown' || event.direction === 'none')) {
+        event = { ...event, status: 'informational',
+            issues: [...new Set([...event.issues, 'unsettled-credit-not-posting'])] };
+    }
     if (!cardCreditAliases && !(event.direction === 'debit' && event.status === 'posted') &&
         (creditReviewOnly || (event.direction === 'credit' && (0, credit_settlement_guards_1.hasUnsettledCreditToken)(source)) ||
             ((0, credit_settlement_guards_1.mentionsCredit)(source) && (event.direction === 'unknown' || event.direction === 'none') &&
