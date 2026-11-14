@@ -1,4 +1,4 @@
-import { EN_CREDIT_PENDING_STATUS, AR_CREDIT_PENDING_STATUS, hasCreditCondition, hasLeadingCreditCondition, hasPendingCreditStatus, normalizeCreditText, isRefundRequest, hasSettledCreditReceipt, hasPastCreditEvent, creditSourceDisposition, isHistoricalCreditClaim } from '@/lib/credit-settlement-guards';
+import { EN_CREDIT_PENDING_STATUS, AR_CREDIT_PENDING_STATUS, hasCreditCondition, hasLeadingCreditCondition, hasPendingCreditStatus, normalizeCreditText, isRefundRequest, hasSettledCreditReceipt, hasPastCreditEvent, creditSourceDisposition, isHistoricalCreditClaim, creditQualificationScope } from '@/lib/credit-settlement-guards';
 import { categorySupportsType, readMerchantCategoryOverride } from '@/lib/categories';
 import {
   bankFromMessage,
@@ -2921,7 +2921,7 @@ export function creditSettlement(sentence: string, clause: CreditClause, after =
   const destination = EN_CREDIT_WORDS.destination.exec(tail);
   if (destination && REFUND_THIRD_PARTY_DESTINATION_RE.test(` ${destination[0]}`)) return { verdict: 'refused', reason: 'third-party' };
   if (refundCreditNotFinal((tail + after).replace(EN_CREDIT_REASON_RE, ' '))) return { verdict: 'refused', reason: 'taken-back' };
-  const ownTail = creditOwnTail(tail + after);
+  const ownTail = creditQualificationScope(creditOwnTail(tail + after));
   if (hasPendingCreditStatus(ownTail)) return { verdict: 'not-settled', reason: 'pending' };
   if (EN_TRAILING_CONDITION_RE.test(ownTail) || hasCreditCondition(ownTail)) return { verdict: 'not-settled', reason: 'conditional' };
   const windowMatch = EN_TIME_WINDOW_RE.exec(ownTail);

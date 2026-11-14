@@ -26,8 +26,9 @@ const CREDIT_MENTION = /\b(?:refund(?:ed|ing)?|reversal|reversed|chargeback|cred
 const OWN_REFERENCE = /^(?:(?:this|the|that|same|your)\s+(?:credit|refund|amount|money|funds|reversal)|it\b|status\b|(?:هذا|نفس|ذلك)\s+(?:ال)?(?:مبلغ|استرداد|ايداع)|(?:ال)?(?:مبلغ|استرداد|حاله)(?![ء-ي]))/iu;
 const CONDITION_HEAD = /^(?:only\s+)?(?:if\b|unless\b|until\b|whether\b|once\b|when\b|after\b|upon\b|on\b|subject\b|provided\b|providing\b|conditional\b|contingent\b|depending\b|in\s+case\b|should\b|pending\b|awaiting\b|under\b|in\s+(?:process|progress|queue)\b|if_ar\b|اذا(?![ء-ي])|ان(?![ء-ي])|لو(?![ء-ي])|في\s+حال|عند(?![ء-ي])|بمجرد(?![ء-ي])|بشرط(?![ء-ي])|شريطه(?![ء-ي])|رهن(?![ء-ي])|مرهون(?![ء-ي])|لحين(?![ء-ي])|حتي(?![ء-ي])|ريثما(?![ء-ي])|بانتظار(?![ء-ي])|في\s+انتظار(?![ء-ي])|قيد(?![ء-ي])|تحت(?![ء-ي]))/iu;
 const COMPLEMENT_HEAD = /(?:\b(?:subject\s+to|conditional\s+(?:on|upon)|contingent\s+on|depending\s+on|on|upon|under|in|status)|(?:بشرط|شريطه|شرط|رهن|لحين|حتي|ريثما))\s*$/iu;
-function qualificationScope(source: string): string {
+export function creditQualificationScope(source: string): string {
   const text = normalizeCreditText(source)
+    .replace(/(\|\|)\s*if\s+you\s+did\s+not\s+(?:request|initiate|authori[sz]e)\s+(?:this|the)\s+(?:refund|transaction|payment)\s*(?:\|\s*)?(?:(?:please|kindly)\s+)?(?:call|contact|notify)\b[^|.]*/gi, '$1 ')
     .replace(/(\|\|)\s*if\s+(?:(?:it|this|the\s+(?:amount|credit|refund))\s+(?:(?:was|has\s+been)\s+)?)?(?:credited|refunded|received|reversed)\s+in\s+error\s*(?:\|\s*)?(?:(?:please|kindly)\s+)?(?:call|contact|notify)\b[^|.]*/gi, '$1 ')
     .replace(/\bif\s+(?:(?:(?:the|this|your)\s+transaction\s+)?(?:has\s+been\s+|was\s+|is\s+)?(?:not\s+)?authori[sz]ed\s+by\s+you|you\s+did\s+not\s+authori[sz]e\s+(?:this|it))\s*(?:\|\s*)?(?:(?:please|kindly)\s+)?(?:call|contact|ignore|disregard)\b[^|.]*/gi, ' ')
     .replace(/\bwhich\s+(?:was|had\s+been)\s+([^|.]*?)(?=\s+(?:(?:has|have)\s+(?:now\s+)?been|was)\s+(?:now\s+)?(?:credited|refunded|returned|deposited)\b)/gi, (all, previous) => PENDING.test(previous) && !CONDITION.test(previous) ? ' ' : all)
@@ -67,23 +68,23 @@ function withoutPastEvents(text: string): string {
     .replace(/عند\s+(?:الساعه|الوقت)\s+\d[\d:]*|تم\s+(?:ال)?تحقق\s+من\s+(?:ال)?عمليه/g, ' ');
 }
 export const hasPastCreditEvent = (text: string): boolean => {
-  const scope = qualificationScope(text);
+  const scope = creditQualificationScope(text);
   return withoutPastEvents(scope) !== scope;
 };
 export const CREDIT_CONDITION_SOURCE = String.raw`\b(?:subject\s+to|conditional\s+(?:on|upon)|contingent\s+on|depending\s+on|in\s+case(?:\s+of)?|provided(?:\s+that)?|providing(?:\s+that)?|if|unless|until|whether|till|should)\b|\b(?:once|when|after|upon)\s+|\bon\s+(?:(?:successful|final|merchant|bank)\s+)*(?:approval|verification|clearance|confirmation|receipt)\b|(?<![ء-ي])(?:if_ar|اذا|لو|في\s+حال(?:ه)?|بشرط|شريطه|شرط|رهن|مرهون|لحين|حتي|ريثما|بمجرد|عند|عندما|متي|حينما|حين)(?![ء-ي])|(?<![ء-ي])بعد\s+(?:ال)?(?:موافقه|اعتماد)(?![ء-ي])`;
 const CONDITION = new RegExp(CREDIT_CONDITION_SOURCE, 'iu');
 export function hasCreditCondition(source: string): boolean {
-  return CONDITION.test(withoutPastEvents(qualificationScope(source)));
+  return CONDITION.test(withoutPastEvents(creditQualificationScope(source)));
 }
 export function hasPendingCreditStatus(source: string): boolean {
-  const text = qualificationScope(source).replace(/\b(?:pending|in\s+progress|under\s+review)\s+(?:orders?|purchases?|transactions?|applications?|authori[sz]ations?)\b/gi, ' ');
+  const text = creditQualificationScope(source).replace(/\b(?:pending|in\s+progress|under\s+review)\s+(?:orders?|purchases?|transactions?|applications?|authori[sz]ations?)\b/gi, ' ');
   return PENDING.test(text) || /\b(?:will|would|shall|may|might|can|could)\s+(?:(?:not|soon|shortly|be|been)\s+)*(?:credit|refund|revers|return|deposit|receiv)\w*\b/iu.test(text);
 }
 export const hasLeadingCreditCondition = (source: string): boolean => hasCreditCondition(source);
 export const isHistoricalCreditClaim = (source: string): boolean => /(?:^|\|)\s*(?:(?:a|the|your)\s+)?(?:previous|earlier|prior|old)\s+(?:refund|reversal|credit)\b/iu.test(normalizeCreditText(source));
 export function hasSettledCreditReceipt(source: string): boolean {
   if (isHistoricalCreditClaim(source)) return false;
-  const text = qualificationScope(source);
+  const text = creditQualificationScope(source);
   if (hasCreditCondition(text) || hasPendingCreditStatus(text) || /\b(?:not|never)\s+(?:(?:yet|been|be|successfully)\s+)*(?:credited|refunded|reversed|returned|deposited|received|completed|settled)\b/iu.test(text)) return false;
   const receipt = /\b(?:credited|refunded|reversed|returned|deposited|received|arrived|applied|processed|complete(?:d)?|successful(?:ly)?|settled|done)\b|(?<![ء-ي])(?:تم|تمت)\s+(?:(?:تاكيد|تنفيذ)\s+)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس|ايداع|اضافه|معالجه)/iu.test(text) || (/^\s*(?:استرداد|ايداع)\s+(?:ال)?مبلغ/iu.test(text) && !/(?:بعد|عند|بمجرد)/u.test(text));
   if (!receipt) return false;
