@@ -645,6 +645,7 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
     amount: family === 'statement' || family === 'balance' ? missingUniversalField() : money.amount,
     statementTotal: money.statementTotal, minimumDue: money.minimumDue,
     balance: money.balance, creditLimit: money.creditLimit,
-    ...fields, observations, issues: [...new Set([...issues, ...(creditReviewOnly ? ['unsettled-credit-not-posting'] : [])])],
+    ...fields, observations: money.observations, issues: [...new Set(issues)],
   };
+  return creditReviewOnly ? informationalCreditReview(source, event) : event;
 }
