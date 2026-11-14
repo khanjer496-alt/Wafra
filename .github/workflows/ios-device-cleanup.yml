@@ -1,0 +1,44 @@
+# Default-branch registration only. Real reviewed jobs live on the release ref.
+# No signing, credentials, environment approval, checkout or artifacts on main.
+name: iOS completed device QA signing cleanup
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Original iOS device build run ID (receipt must still exist)
+        required: true
+        type: string
+      source_run_attempt:
+        description: Original run attempt
+        required: true
+        default: "1"
+        type: string
+      certificate_id:
+        description: Exact DEVELOPMENT certificate ID from original receipt
+        required: true
+        type: string
+      profile_ids:
+        description: Exact comma-separated profile IDs from original receipt, no spaces
+        required: true
+        type: string
+      qa_pass_message_id:
+        description: App QA completed iPhone-pass message UUID, checked by CEO before
+          dispatch
+        required: true
+        type: string
+      cleanup_approval:
+        description: "CEO go after App QA completion: DELETE_COMPLETED_QA_SIGNING"
+        required: true
+        type: string
+permissions: {}
+jobs:
+  registration-only:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Select the reviewed release ref
+        run: >
+          echo "::error::Registration only on main. Select ref
+          release/1.0.0-rc1-reconciled for the reviewed workflow. No operation
+          performed."
+
+          exit 1

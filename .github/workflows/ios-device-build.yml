@@ -1,0 +1,27 @@
+# Default-branch registration only. Real reviewed jobs live on the release ref.
+# No signing, credentials, environment approval, checkout or artifacts on main.
+name: iOS sealed device build
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Full merged release SHA, TestFlight 194 source or newer
+        required: true
+        type: string
+      signing_approval:
+        description: "CEO approval: CREATE_QA_SIGNING (creates one dev cert and three
+          profiles; retains them for QA)"
+        required: true
+        type: string
+permissions: {}
+jobs:
+  registration-only:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Select the reviewed release ref
+        run: >
+          echo "::error::Registration only on main. Select ref
+          release/1.0.0-rc1-reconciled for the reviewed workflow. No operation
+          performed."
+
+          exit 1
