@@ -1,0 +1,65 @@
+name: Credit closure check (side branch)
+on:
+  push:
+    branches: ['patch/port190-closure-**']
+permissions:
+  contents: read
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - name: Source closure and existing settlement controls
+        run: |
+          SOURCE_ONLY=1 node --test scripts/test/repair/credit-settlement-closure.test.cjs > closure-source.txt 2>&1
+          node --test scripts/test/repair/credit-settlement.test.cjs > settlement.txt 2>&1
+          node --test scripts/test/repair/android396-reversal-in-process.test.cjs > android396.txt 2>&1
+      - name: Generate final native resources once
+        run: |
+          node scripts/generate-ios-background-parser.cjs
+          node scripts/generate-ios-background-parser.cjs --check
+      - name: Three paths and Hermes emulation
+        run: |
+          node --test scripts/test/repair/credit-settlement-closure.test.cjs > closure.txt 2>&1
+          node --test scripts/test/repair/hermes-matchall-groups.test.cjs > hermes.txt 2>&1
+      - name: Matrix and gap ratchet
+        run: |
+          REFUND_MATRIX_REPORT=matrix-report.json REFUND_MATRIX_WRITE_GAPS=written-gaps.json node --test scripts/test/repair/refund-matrix.test.cjs > matrix.txt 2>&1
+          git fetch --no-tags --depth=1 origin 4ce3b68f6b3fb8154209e8522730b4273dfaadc7
+          node scripts/test/repair/refund-gaps-no-growth.cjs 4ce3b68f6b3fb8154209e8522730b4273dfaadc7 > nogrowth.txt 2>&1
+      - name: Existing parser controls
+        run: |
+          node --test scripts/test/repair/review-round2-safety.test.cjs > round2.txt 2>&1
+          node --test scripts/universal-test/launch-safety.test.cjs > launch-safety.txt 2>&1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: closure-focused-${{ github.sha }}
+          path: |
+            closure-source.txt
+            settlement.txt
+            android396.txt
+            closure.txt
+            hermes.txt
+            matrix.txt
+            matrix-report.json
+            written-gaps.json
+            nogrowth.txt
+            round2.txt
+            launch-safety.txt
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: closure-final-resources-${{ github.sha }}
+          path: |
+            modules/wafra-live-capture/ios/Resources/WafraBackgroundParser.js
+            modules/wafra-live-capture/ios/Resources/WafraBackgroundParser.meta.json
+            src/lib/ios-background-parser-source.generated.ts
+          retention-days: 3
