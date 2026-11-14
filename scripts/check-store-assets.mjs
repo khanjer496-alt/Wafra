@@ -5,12 +5,12 @@ const root = new URL('../', import.meta.url);
 
 const sets = [
   {
-    label: 'App Store English 6.9-inch',
+    label: 'App Store English Dynamic Island medium',
     directory: 'docs/store-assets/appstore',
-    prefix: 'appstore-6.9-dark-en-',
+    prefix: 'appstore-6.3-en-',
     count: 8,
-    width: 1320,
-    height: 2868,
+    width: 1206,
+    height: 2622,
   },
   {
     label: 'Google Play global English',
