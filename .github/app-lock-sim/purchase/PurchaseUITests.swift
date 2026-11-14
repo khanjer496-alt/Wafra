@@ -285,7 +285,7 @@ final class PurchaseUITests: XCTestCase {
             return "plan list gone (Pro active, buy sheet confirmed); runner-session transactions (informational): \(tx.count)"
         }
 
-        // P3: delete + reinstall, Restore brings Pro back
+        // P3 alternative: clear app data WITHOUT uninstall; store-owned Pro must recover at launch or via Restore
         step("P3") {
             try requestHostReinstall(1)
             app.launch()
@@ -299,7 +299,7 @@ final class PurchaseUITests: XCTestCase {
             note("P3 buy tap (marker only: log window for the store after the reinstall)")
             Thread.sleep(forTimeInterval: 6)
             shot("P3a-after-reinstall-before-restore")
-            var how = "Pro came back at launch (store already holds the subscription)"
+            var how = "Pro recovered at launch after app-data reset WITHOUT uninstall (store still owns subscription; Restore button not exercised)"
             if !entitled {
                 let restore = app.buttons["Restore purchase"].firstMatch
                 let alt = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'restore'")).firstMatch

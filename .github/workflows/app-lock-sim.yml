@@ -1,6 +1,7 @@
 # TEMPORARY, NEVER MERGED. Hosted iOS-simulator proof of the App Lock success path
 # (simulated Face ID) on the release tip. Push trigger is limited to this one branch.
 name: app-lock-sim
+# Purchase-only rerun: App Lock has separate passing evidence in run 43532093493.
 on:
   push:
     branches: [test/purchase-proof-pr251]
@@ -112,34 +113,6 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist"
           xcrun simctl install '${{ steps.sim.outputs.udid }}' "$APP"
 
-      - name: Install Maestro
-        run: |
-          curl -Ls https://get.maestro.mobile.dev | bash
-          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
-
-      - name: Run the App Lock flow
-        id: flow
-        continue-on-error: true
-        timeout-minutes: 40
-        run: |
-          mkdir -p shots
-          .github/app-lock-sim/run.sh '${{ steps.sim.outputs.udid }}' shots 2>&1 | tee shots/run.log
-
-      - name: S7 - ledger content never visible in a locked state (OCR of the locked screenshots)
-        id: leak
-        continue-on-error: true
-        run: |
-          set -uo pipefail
-          cd shots
-          [ -s locked-shots.txt ] || { echo "no locked screenshots recorded"; exit 1; }
-          FILES=(".home-reference.png")
-          while read -r n; do FILES+=("$n.png"); done < locked-shots.txt
-          swift ../.github/app-lock-sim/ocr.swift "${FILES[@]}" > ocr.tsv
-          cat ocr.tsv
-          LOCKED=(); for f in "${FILES[@]:1}"; do LOCKED+=("$f"); done
-          python3 -I ../.github/app-lock-sim/leakcheck.py ocr.tsv .home-reference.png "${LOCKED[@]}" | tee leakcheck.json
-          exit "${PIPESTATUS[0]}"
-
       - name: Purchase flow (StoreKit test session, no Apple account)
         id: purchase
         continue-on-error: true
@@ -156,16 +129,12 @@ jobs:
         if: always()
         run: |
           {
-            echo "## App Lock simulator run"
-            echo "| Step | Result | Detail |"; echo "|---|---|---|"
-            [ -f shots/results.tsv ] && awk -F'\t' '{printf "| %s | %s | %s |\n",$1,$2,$3}' shots/results.tsv
-            echo "| S7 (no ledger in locked states, OCR) | ${{ steps.leak.outcome == 'success' && 'PASS' || 'FAIL' }} | see leakcheck.json |"
             echo; echo "## Purchase flow (StoreKit test session)"
             echo "| Step | Result | Detail |"; echo "|---|---|---|"
             [ -f shots/purchase-results.tsv ] && awk -F'\t' '{printf "| %s | %s | %s |\n",$1,$2,$3}' shots/purchase-results.tsv
             [ -f shots/purchase-setup.txt ] && echo "| setup | $(cat shots/purchase-setup.txt) | |"
           } | tee -a "$GITHUB_STEP_SUMMARY"
-          ! grep -q $'\tFAIL\t' shots/results.tsv shots/purchase-results.tsv 2>/dev/null
+          ! grep -q $'\tFAIL\t' shots/purchase-results.tsv 2>/dev/null
 
       - uses: actions/upload-artifact@v4
         if: always()
