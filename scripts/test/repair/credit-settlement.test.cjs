@@ -198,9 +198,9 @@ test('A non-refund "processed" alert keeps its behaviour: no salary or payment s
   assertOutcome(salary, 'income 1800000 / income 1800000');
   const payment = 'Dear Customer, Your payment to the account number 0501232543 has been processed. Amount Due: AED 408.45 Amount Paid: AED 408.45';
   assert.equal(shape(sms.parseSms(payment)), 'expense 40845');
-  assert.equal(sms.hasOnlyUnsettledCredit('Payroll AED 7,500.00 processed to account 1234.'), true);
+  assert.equal(sms.hasOnlyUnsettledCredit('Payroll AED 7,500.00 processed to account 1234.'), false);
   // bank-alert-semantics-matrix: the destination on the next line is still the instrument.
-  assert.equal(sms.hasOnlyUnsettledCredit('Payroll AED 7,500.00 processed to\naccount 1234.'), true);
+  assert.equal(sms.hasOnlyUnsettledCredit('Payroll AED 7,500.00 processed to\naccount 1234.'), false);
 });
 
 // Change Reviewer 2aa1f668 (High): with no refund wording and no separate debit, "processed to your account" is not a refund
@@ -212,7 +212,7 @@ test('"processed to your account" with no refund wording and no debit keeps its 
     ['Your cash deposit of AED 1,000.00 has been processed to your account.', 100000],
   ]) {
     assertOutcome(body, `income ${fils} / income ${fils}`);
-    assert.equal(sms.hasOnlyUnsettledCredit(body), true, body);
+    assert.equal(sms.hasOnlyUnsettledCredit(body), false, body);
   }
   assert.equal(sms.parseSms(`${DEBIT} It has been processed to your card.`, {}, { sender: 'ENBD', observedAt: at }), null, 'D7 beside a debit');
 });
