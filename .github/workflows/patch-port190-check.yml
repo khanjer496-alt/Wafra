@@ -1,0 +1,27 @@
+name: Retention baseline evidence
+on:
+  push:
+    branches: ['patch/retention-base-**']
+permissions:
+  contents: read
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - run: bash scripts/test/build.sh > baseline-compile.txt 2>&1
+      - run: node .github/reviewer-gate/retention-diagnostic.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: retention-baseline-${{ github.sha }}
+          path: |
+            retention-diagnostic.json
+            baseline-compile.txt
+          retention-days: 7
