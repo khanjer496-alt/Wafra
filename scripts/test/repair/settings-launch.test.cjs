@@ -14,21 +14,10 @@ for (const platform of ['ios', 'android']) for (const language of ['en', 'ar']) 
     const widgets = row('settings-hide-widget-amounts');
     const widgetSwitch = walk(widgets).find(node => node.props?.accessibilityRole === 'switch');
     assert.equal(widgetSwitch.props.accessibilityState.checked, true);
-    if (platform === 'android') {
-      // Launch decision: Android never calls Brandfetch, so there is no consent switch to show.
-      assert.equal(logo, undefined, 'Android offers no online-logo switch');
-      assert.deepEqual(changes, [], 'reading Settings grants no consent');
-      widgetSwitch.props.onPress();
-      assert.deepEqual(changes, [{ hideWidgetAmountsWhenLocked: false }]);
-      return;
-    }
-    assert.ok(text(logo).includes('Brandfetch'), 'consent names the third party before activation');
-    const logoSwitch = walk(logo).find(node => node.props?.accessibilityRole === 'switch');
-    assert.equal(logoSwitch.props.accessibilityState.checked, false);
-    assert.deepEqual(changes, [], 'reading Settings grants no consent');
-    logoSwitch.props.onPress();
+    assert.equal(logo, undefined, 'store builds offer no online-logo switch on either platform');
+    assert.deepEqual(changes, [], 'reading Settings changes no privacy setting');
     widgetSwitch.props.onPress();
-    assert.deepEqual(changes, [{ onlineLogosEnabled: true }, { hideWidgetAmountsWhenLocked: false }]);
+    assert.deepEqual(changes, [{ hideWidgetAmountsWhenLocked: false }]);
   });
 }
 

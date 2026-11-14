@@ -168,7 +168,7 @@ test('Coming up: tiles on their dates, nudged apart, next one lifted, mirrored i
   assert.match(widgets, /internal const val UPCOMING_STRIP_DP = 28/);
   assert.match(widgets, /3 -> heightDp >= UPCOMING_THREE_ROWS_MIN_HEIGHT_DP \+ UPCOMING_STRIP_DP\s+2 -> heightDp >= UPCOMING_TWO_ROWS_MIN_HEIGHT_DP \+ UPCOMING_STRIP_DP\s+else -> false/);
   assert.match(widgets, /center = if \(rtl\) width - centers\[index\] else centers\[index\]/);
-  assert.match(widgets, /LOGO_DRAWABLES\[bill\.logoId\]\?\.let \{ BitmapFactory\.decodeResource/, 'only bundled, allowlisted logos');
+  assert.doesNotMatch(widgets, /LOGO_DRAWABLES|BitmapFactory|R\.drawable\.wafra_logo_/);
   const upcoming = read(`${res}/layout/wafra_widget_upcoming.xml`);
   const strip = upcoming.slice(upcoming.indexOf('android:id="@+id/wafra_upcoming_strip"'), upcoming.indexOf('</FrameLayout>', upcoming.indexOf('android:id="@+id/wafra_upcoming_strip"')));
   assert.match(strip, /importantForAccessibility="noHideDescendants"/);

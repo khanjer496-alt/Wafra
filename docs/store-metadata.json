@@ -153,8 +153,8 @@
   },
   "screenshots": {
     "apple": {
-      "device": "6.9-inch iPhone",
-      "pixels": "1320x2868",
+      "device": "iPhone with Dynamic Island (medium display)",
+      "pixels": "1206x2622",
       "launchLocales": [
         "en-US"
       ],

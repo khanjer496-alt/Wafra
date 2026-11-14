@@ -1,3 +1,5 @@
+import { APPLE_SCREENSHOT_TARGET } from './apple-screenshot-target.mjs';
+
 export const ASC_CLI_VERSION = '4.4.2';
 export const ASC_METADATA_CONFIRMATION = 'APPLY_REVIEWED_APPLE_METADATA';
 export const ASC_SCREENSHOT_CONFIRMATION = 'UPLOAD_REVIEWED_APPLE_SCREENSHOTS';
@@ -68,14 +70,14 @@ export const buildAppStoreConnectPlan = (task, context) => {
     'screenshots-preview': {
       requiredPaths: [context.screenshotsDir],
       commands: [
-        command('Preview Apple screenshot uploads', ['screenshots', 'upload', ...common, ...version, '--platform', 'IOS', '--path', context.screenshotsDir, '--device-type', 'IPHONE_69', '--max-screenshots', '10', '--skip-existing', '--dry-run', '--output', 'table']),
+        command('Preview Apple screenshot uploads', ['screenshots', 'upload', ...common, ...version, '--platform', 'IOS', '--path', context.screenshotsDir, '--device-type', APPLE_SCREENSHOT_TARGET.deviceType, '--max-screenshots', '10', '--skip-existing', '--dry-run', '--output', 'table']),
       ],
     },
     'screenshots-apply': {
       confirmation: ASC_SCREENSHOT_CONFIRMATION,
       requiredPaths: [context.screenshotsDir],
       commands: [
-        command('Upload reviewed Apple screenshots', ['screenshots', 'upload', ...common, ...version, '--platform', 'IOS', '--path', context.screenshotsDir, '--device-type', 'IPHONE_69', '--max-screenshots', '10', '--skip-existing', '--output', 'table']),
+        command('Upload reviewed Apple screenshots', ['screenshots', 'upload', ...common, ...version, '--platform', 'IOS', '--path', context.screenshotsDir, '--device-type', APPLE_SCREENSHOT_TARGET.deviceType, '--max-screenshots', '10', '--skip-existing', '--output', 'table']),
       ],
     },
   };
