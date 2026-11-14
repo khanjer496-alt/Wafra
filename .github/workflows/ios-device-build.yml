@@ -1,0 +1,166 @@
+name: iOS sealed device build
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: 'Full merged release SHA, TestFlight 194 source or newer'
+        required: true
+        type: string
+      signing_approval:
+        description: 'CEO approval: CREATE_QA_SIGNING (creates one dev cert and three profiles; retains them for QA)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wafra-ios-device-signing
+  cancel-in-progress: false
+
+jobs:
+  github-macos:
+    runs-on: macos-26
+    timeout-minutes: 100
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      EXPO_NO_TELEMETRY: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate dispatch before secrets
+        env:
+          SOURCE: ${{ inputs.source_commit }}
+          APPROVAL: ${{ inputs.signing_approval }}
+        run: |
+          set -euo pipefail
+          test "$APPROVAL" = CREATE_QA_SIGNING
+          [[ "$SOURCE" =~ ^[0-9a-f]{40}$ ]]
+          echo "SIGNING_DIR=$RUNNER_TEMP/device-signing" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_commit }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Pin release source and production environment
+        working-directory: source
+        run: |
+          set -euo pipefail
+          SHA=$(git rev-parse HEAD)
+          git merge-base --is-ancestor "$SHA" origin/release/1.0.0-rc1-reconciled
+          git merge-base --is-ancestor a51d0be2e106a9de6271f4adee8c82e0e04ed36f "$SHA"
+          echo "SOURCE_COMMIT=$SHA" >> "$GITHUB_ENV"
+          # Same profile/environment as the TestFlight candidate; no dev client,
+          # founder grants or JS edits. Only signatures are changed afterward.
+          node -e 'const e=require("./eas.json").build.production.env; for(const [k,v] of Object.entries(e)) console.log(`${k}=${v}`)' >> "$GITHUB_ENV"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+          cache-dependency-path: source/package-lock.json
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Select Xcode with an iOS platform
+        run: |
+          set -euo pipefail
+          BEST=$(ls -d /Applications/Xcode*.app | grep -vi beta | sort -V | tail -1)
+          sudo xcode-select -s "$BEST/Contents/Developer"
+          xcodebuild -version
+          VER=$(xcodebuild -version | sed -n '1s/Xcode //p')
+          node -e 'const [a,b]=process.argv[1].split(".").map(Number); if(!(a>26||(a===26&&b>=2)))process.exit(1)' "$VER"
+          xcrun --sdk iphoneos --show-sdk-path
+      - name: Install pinned toolchain and app dependencies
+        working-directory: source
+        run: |
+          gem install fastlane -v 2.238.0 --no-document
+          gem install cocoapods -v 1.16.2 --no-document
+          python3 -m venv "$RUNNER_TEMP/signing-venv"
+          "$RUNNER_TEMP/signing-venv/bin/pip" install PyJWT==2.10.1 cryptography==46.0.3
+          npm ci
+          npm install -g eas-cli@22.4.0
+          node scripts/generate-ios-background-parser.cjs --check
+      - name: Build unchanged release IPA using existing EAS signing
+        working-directory: source
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Raw EAS logs can contain generated certificate passwords. Never
+          # upload or print them, including on failure.
+          eas build --platform ios --profile production-candidate --local --non-interactive \
+            --freeze-credentials --output "$RUNNER_TEMP/store.ipa" \
+            > "$RUNNER_TEMP/eas-private.log" 2>&1
+      - name: Create runner-local development key and device profiles
+        env:
+          ASC_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+        run: |
+          "$RUNNER_TEMP/signing-venv/bin/python" scripts/ci/ios-device-signing.py prepare "$SIGNING_DIR"
+      - name: Fetch pinned App QA WebDriverAgent version
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/wda"
+          curl --fail --silent --show-error --location \
+            https://registry.npmjs.org/appium-webdriveragent/-/appium-webdriveragent-16.12.5.tgz \
+            -o "$RUNNER_TEMP/wda.tgz"
+          node -e 'const f=require("fs"),c=require("crypto"); const got=c.createHash("sha512").update(f.readFileSync(process.argv[1])).digest("base64"); if(got!=="nbRew3haPfDCHUG+bxP1FKrBkZYnzM5Ey0FYXEQhW5pWjE9t77X6n22MZ2QrWXoy15fmuJk7WVgG2CEWzYCn+Q==")process.exit(1)' "$RUNNER_TEMP/wda.tgz"
+          tar -xzf "$RUNNER_TEMP/wda.tgz" -C "$RUNNER_TEMP/wda" --strip-components=1
+          ruby <<'RUBY'
+          require 'json'; require 'xcodeproj'
+          state=JSON.parse(File.read(File.join(ENV.fetch('SIGNING_DIR'),'state.json')))
+          project=Xcodeproj::Project.open(File.join(ENV.fetch('RUNNER_TEMP'),'wda/WebDriverAgent.xcodeproj'))
+          target=project.targets.find { |t| t.name=='WebDriverAgentRunner' }; raise 'Missing runner' unless target
+          target.build_configurations.each do |config|
+            config.build_settings.merge!({'CODE_SIGN_STYLE'=>'Manual','DEVELOPMENT_TEAM'=>state.fetch('team'),
+              'PRODUCT_BUNDLE_IDENTIFIER'=>'app.wafra.qa.wda','CODE_SIGN_IDENTITY[sdk=iphoneos*]'=>'Apple Development',
+              'PROVISIONING_PROFILE_SPECIFIER'=>state.fetch('profiles').fetch('app.wafra.qa.wda.xctrunner').fetch('uuid')})
+          end
+          project.save
+          RUBY
+      - name: Build WDA and re-sign Wafra for development
+        run: |
+          set -euo pipefail
+          xcodebuild build-for-testing -project "$RUNNER_TEMP/wda/WebDriverAgent.xcodeproj" \
+            -scheme WebDriverAgentRunner -configuration Debug -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/wda-build" > "$RUNNER_TEMP/wda-private.log" 2>&1
+          ditto -x -k "$RUNNER_TEMP/store.ipa" "$RUNNER_TEMP/wafra"
+          codesign --verify --deep --strict "$RUNNER_TEMP/wafra/Payload/Wafra.app"
+          python3 scripts/ci/ios-device-signing.py resign "$SIGNING_DIR" "$RUNNER_TEMP/wafra/Payload/Wafra.app"
+          python3 scripts/ci/ios-device-signing.py verify "$SIGNING_DIR" "$RUNNER_TEMP/wafra/Payload/Wafra.app" "$SIGNING_DIR/wafra-verified.json"
+          python3 scripts/ci/ios-device-signing.py verify "$SIGNING_DIR" "$RUNNER_TEMP/wda-build/Build/Products/Debug-iphoneos/WebDriverAgentRunner-Runner.app" "$SIGNING_DIR/wda-verified.json"
+          test -d "$RUNNER_TEMP/wda-build/Build/Products/Debug-iphoneos/WebDriverAgentLib.framework"
+          find "$RUNNER_TEMP/wda-build/Build/Products" -name '*.xctestrun' | grep -q .
+          ditto -c -k --keepParent "$RUNNER_TEMP/wafra/Payload" "$RUNNER_TEMP/Wafra-dev.ipa"
+          tar -czf "$RUNNER_TEMP/WDA-Products.tar.gz" -C "$RUNNER_TEMP/wda-build/Build" Products
+      - name: Seal installers to this Mac (public certificate only)
+        run: python3 scripts/ci/ios-device-seal.py
+      - name: Upload only sealed installers and verification
+        uses: actions/upload-artifact@v4
+        with:
+          name: wafra-ios-device-sealed-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            sealed/*.enc
+            sealed/verification.json
+          if-no-files-found: error
+          retention-days: 1
+      - name: Preserve account creation receipt on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-device-signing-receipt-${{ github.run_id }}-${{ github.run_attempt }}
+          path: sealed/signing-receipt.json
+          if-no-files-found: ignore
+          retention-days: 1
+      - name: Remove runner signing keychain and private material
+        if: always()
+        run: |
+          security delete-keychain "$SIGNING_DIR/qa.keychain-db" 2>/dev/null || true
+          rm -rf "$SIGNING_DIR" "$RUNNER_TEMP/eas-private.log" "$RUNNER_TEMP/wda-private.log"
