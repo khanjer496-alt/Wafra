@@ -84,7 +84,9 @@ jobs:
           gem install cocoapods -v 1.16.2 --no-document
           npm ci
           npm install -g eas-cli@22.4.0
-          node scripts/generate-ios-background-parser.cjs --check
+      - name: Check the committed iOS background parser is fresh
+        working-directory: source
+        run: node scripts/generate-ios-background-parser.cjs --check
       - name: Check signing and cleanup refusal guards (mock API only)
         run: python3 scripts/test/ios-device-signing.test.py
       - name: Preserve committed build number for this QA rebuild
