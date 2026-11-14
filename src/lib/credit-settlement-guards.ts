@@ -34,7 +34,20 @@ export const hasUnsettledCreditToken = (source: string): boolean => {
   const original = normalizeCreditText(source);
   return UNSETTLED_EN.test(original) || UNSETTLED_AR.test(original);
 };
-export const mentionsCredit = (source: string): boolean => CREDIT_MENTION.test(normalizeCreditText(source));
+const CREDIT_MENTION_SCAN = new RegExp(CREDIT_MENTION.source, 'giu');
+export function mentionsCredit(source: string): boolean {
+  const original = normalizeCreditText(source);
+  CREDIT_MENTION_SCAN.lastIndex = 0;
+  try {
+    for (let match = CREDIT_MENTION_SCAN.exec(original); match; match = CREDIT_MENTION_SCAN.exec(original)) {
+      if (match[0].toLowerCase() === 'credit' &&
+        (/\b(?:available|avail|avl)\s*(?:\|+\s*)?$/iu.test(original.slice(Math.max(0, match.index - 24), match.index)) ||
+          /^\s*(?:\|+\s*)?(?:card|limit)\b/iu.test(original.slice(match.index + match[0].length)))) continue;
+      return true;
+    }
+    return false;
+  } finally { CREDIT_MENTION_SCAN.lastIndex = 0; }
+}
 export const mentionsRefund = (source: string): boolean => REFUND_MENTION.test(normalizeCreditText(source));
 
 /** A conditional debit quotation is not the separately completed debit we preserve. */
@@ -127,7 +140,7 @@ export function hasSettledCreditReceipt(source: string): boolean {
 export type CreditSourceDisposition = 'post' | 'review' | 'not-credit';
 export function creditSourceDisposition(source: string): CreditSourceDisposition {
   const text = normalizeCreditText(source);
-  if (CREDIT_MENTION.test(text) && (hasUnsettledCreditToken(source) || hasPendingCreditStatus(source))) return 'review';
+  if (mentionsCredit(source) && (hasUnsettledCreditToken(source) || hasPendingCreditStatus(source))) return 'review';
   // Headline completion is a refund/reversal rule. Typed account credits,
   // payroll and deposits retain their mature receipt grammar; the final
   // original-text token guard still governs ANY incoming transaction.

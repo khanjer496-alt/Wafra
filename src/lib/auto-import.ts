@@ -1,4 +1,4 @@
-import { canReviewCreditRefusal, hasUnsettledCreditToken, completedDebitBesideCredit, mentionsCredit } from '@/lib/credit-settlement-guards';
+import { canReviewCreditRefusal, hasUnsettledCreditToken, completedDebitBesideCredit, mentionsCredit, informationalCreditReview } from '@/lib/credit-settlement-guards';
 import { createAiAlertReviewSession } from '@/lib/ai-alert-reader';
 import { createPrivateAlertFormatSession, type PrivateAlertFormatSessionOptions } from '@/lib/private-alert-format-runtime';
 import { canEnrichPrivateFormatReview, privateAlertFormatReviewEvent } from '@/lib/private-alert-format-review';
@@ -70,7 +70,7 @@ import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { dateOrderForCountry, getActiveCountry } from '@/lib/country';
 import { bestEffortAutoPostEnabled, decideBestEffortAutoPost, isSafeCardRepaymentReviewSource, isNotAutoPostableMoney } from '@/lib/best-effort-autopost';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
-import type { UniversalBankEvent } from '@/lib/universal-types';
+import { missingUniversalField, type UniversalBankEvent } from '@/lib/universal-types';
 import { certifyUniversalTemplate } from '@/lib/universal-template-certification';
 import { isGulfNeighbourMarket } from '@/lib/gulf-neighbour-alerts';
 import { latamOwnTransferTitle, latamPolicySource } from '@/lib/latam-alert-templates';
@@ -986,7 +986,7 @@ function parsedUniversalPosting(
  * capture. Source and sender are consumed only while inspecting; neither can
  * appear in the returned decision.
  */
-export function inspectSourceFreeRefusedAlert(input: {
+function inspectSourceFreeRefusedAlertCore(input: {
   source: string;
   sender: string;
   observedAt: number;
@@ -1154,6 +1154,37 @@ export function inspectSourceFreeRefusedAlert(input: {
   return { kind: 'review', candidate };
 }
 
+/** Last-line authority guard also covers registered templates and enrichment. */
+function guardIncomingReview(source: string, decision: SourceFreeRefusedAlertDecision, hold: boolean): SourceFreeRefusedAlertDecision {
+  if (decision.kind !== 'review' || !hold) return decision;
+  const candidate = decision.candidate;
+  if (candidate.kind === 'universal') {
+    if (candidate.event.direction !== 'credit' && !(candidate.event.direction === 'unknown' && mentionsCredit(source))) return decision;
+    return { kind: 'review', candidate: { ...candidate, event: informationalCreditReview(source, candidate.event) } };
+  }
+  if (candidate.direction !== 'credit') return decision;
+  const amount = { value: candidate.amount, evidence: 'explicit' as const, spans: [], alternatives: [], issues: [] };
+  const event: UniversalBankEvent = { version: 1, decision: 'review', family: candidate.family,
+    status: 'informational', direction: 'credit', amount,
+    statementTotal: missingUniversalField(), minimumDue: missingUniversalField(), balance: missingUniversalField(),
+    creditLimit: missingUniversalField(), merchant: missingUniversalField(), transactionDate: missingUniversalField(),
+    dueDate: missingUniversalField(), statementDate: missingUniversalField(), instrument: candidate.instrument
+      ? { value: candidate.instrument, evidence: 'explicit', spans: [], alternatives: [], issues: [] } : missingUniversalField(),
+    observations: [{ role: 'transaction', field: amount }], issues: ['unsettled-credit-not-posting'] };
+  const prepared = prepareUniversalReviewAlert({ id: 'capture_probe_id_0001', sourceKey: 'capture_probe_key_001',
+    observedAt: candidate.observedAt, channel: candidate.channel, event });
+  if (!prepared) return { kind: 'ignored', reason: 'unrecognized' };
+  const { id: _id, sourceKey: _sourceKey, ...free } = prepared;
+  return { kind: 'review', candidate: free };
+}
+
+export function inspectSourceFreeRefusedAlert(
+  input: Parameters<typeof inspectSourceFreeRefusedAlertCore>[0],
+): SourceFreeRefusedAlertDecision {
+  const hold = hasUnsettledCreditToken(input.source) || hasOnlyUnsettledCredit(input.source);
+  return guardIncomingReview(input.source, inspectSourceFreeRefusedAlertCore(input), hold);
+}
+
 /** Attach an opaque identity only after review admission has removed source. */
 export function identifySourceFreeReviewAlert(
   candidate: SourceFreeReviewCandidate,
@@ -1301,6 +1332,7 @@ export async function scanInbox(
     preferParsedFallback = false,
     acceptedExpense?: ParsedSms,
   ): Promise<SourceFreeRefusedAlertDecision> => {
+    const holdIncomingOriginal = hasUnsettledCreditToken(body) || hasOnlyUnsettledCredit(body);
     let decision = inspectSourceFreeRefusedAlert({
       source: body,
       sender,
@@ -1343,6 +1375,7 @@ export async function scanInbox(
         } else decision = { kind: 'review', candidate: aiCandidate };
       }
     }
+    decision = guardIncomingReview(body, decision, holdIncomingOriginal);
     // Counted, not classified: a text already set aside that reads as an
     // offer (the same wording test the bank-app path uses to skip them) and
     // came from a business sender ID. Letters in the sender mark an
