@@ -11,14 +11,9 @@ for (const os of ['ios', 'android']) {
     });
     assert.equal(logos.logoCacheGeneration(), null, 'fresh and upgraded installs start offline');
     logos.setLogoLookupsAllowed(true);
-    const generation = logos.logoCacheGeneration();
-    assert.equal(typeof generation, 'number');
-    assert.equal(logos.isLogoCacheGenerationCurrent(generation), true);
-    logos.setLogoLookupsAllowed(false);
-    assert.equal(logos.logoCacheGeneration(), null);
-    assert.equal(logos.isLogoCacheGenerationCurrent(generation), false, 'queued search/cache results lose authority');
-    logos.setLogoLookupsAllowed(true);
-    assert.notEqual(logos.logoCacheGeneration(), generation, 'old request cannot regain authority after opt-in');
+    assert.equal(logos.logoCacheGeneration(), null, 'retired artwork stays offline even with old opt-in');
+    assert.equal(logos.isLogoCacheGenerationCurrent(0), false);
+
   });
 }
 
@@ -66,7 +61,7 @@ test('store re-clears the native widget copy only when the effective guard chang
   assert.match(store, /if \(changed\) await invalidateWidgetSnapshotSync\(\);/);
   assert.ok(!/\n\s*await invalidateWidgetSnapshotSync\(\);\s*\n\s*if \(cancelled\) return;\s*\n\s*const current = authoritativeState\.current;/.test(store));
   const scenes = fs.readFileSync(path.join(root, 'src/components/onboarding/alive-scenes.tsx'), 'utf8');
-  assert.match(scenes, /const uri = consented && Platform\.OS !== 'android' && domain \? verifiedLogoUrl\(domain\) : null;/);
+  assert.doesNotMatch(scenes, /verifiedLogoUrl|expo-image|useOnlineLogosAllowed/);
 });
 
 test('iOS privacy cover observes UIApplication notifications and registers at launch (UIScene-safe)', () => {

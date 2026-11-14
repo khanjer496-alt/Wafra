@@ -31,8 +31,7 @@ enum WafraLanguage: String {
 
 /// Only these bundled identities may name an asset; JSON never supplies a file path or URL.
 enum WafraLogo {
-  static let ids: Set<String> = ["amazon", "netflix", "spotify", "youtube", "apple", "google", "claude", "github", "notion", "discord", "telegram", "dropbox", "osn", "anghami", "audible", "shahid", "chatgpt", "crunchyroll", "disney", "deezer", "playstation", "xbox", "zoom", "du", "etisalat", "dewa", "sewa", "careem", "talabat", "deliveroo", "noon", "uber", "vercel"]
-  static let monochrome: Set<String> = ["apple", "github", "notion", "uber", "vercel"]
+  static let ids: Set<String> = []
   static func validated(_ value: String?) -> String? {
     guard let value, ids.contains(value) else { return nil }
     return value
