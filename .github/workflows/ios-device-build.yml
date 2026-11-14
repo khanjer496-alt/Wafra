@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       signing_approval:
-        description: 'CEO approval: CREATE_QA_SIGNING (creates one dev cert and three profiles; retains them for QA)'
+        description: 'CEO approval: BUILD_ONLY_NO_QA_SIGNING (sealed inputs for local signing)'
         required: true
         type: string
 
@@ -37,9 +37,8 @@ jobs:
           APPROVAL: ${{ inputs.signing_approval }}
         run: |
           set -euo pipefail
-          test "$APPROVAL" = CREATE_QA_SIGNING
+          test "$APPROVAL" = BUILD_ONLY_NO_QA_SIGNING
           [[ "$SOURCE" =~ ^[0-9a-f]{40}$ ]]
-          echo "SIGNING_DIR=$RUNNER_TEMP/device-signing" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.source_commit }}
@@ -88,7 +87,9 @@ jobs:
         working-directory: source
         run: node scripts/generate-ios-background-parser.cjs --check
       - name: Check signing and cleanup refusal guards (mock API only)
-        run: python3 scripts/test/ios-device-signing.test.py
+        run: |
+          python3 scripts/test/ios-device-signing.test.py
+          python3 scripts/test/ios-device-local-sign.test.py
       - name: Preserve committed build number for this QA rebuild
         run: python3 scripts/ci/ios-device-signing.py pin-build source "$RUNNER_TEMP/ios-build-provenance.json"
       - name: Build unchanged release IPA using existing EAS signing
@@ -122,7 +123,7 @@ jobs:
           end
           project.save
           RUBY
-      - name: Preflight unsigned WDA and store IPA before Apple mutations
+      - name: Build unsigned WDA and verify re-signable Wafra
         run: |
           set -euo pipefail
           xcodebuild build-for-testing -project "$RUNNER_TEMP/wda/WebDriverAgent.xcodeproj" \
@@ -135,43 +136,12 @@ jobs:
           ditto -x -k "$RUNNER_TEMP/store.ipa" "$RUNNER_TEMP/wafra"
           codesign --verify --deep --strict "$RUNNER_TEMP/wafra/Payload/Wafra.app"
           python3 scripts/ci/ios-device-signing.py preflight-app "$RUNNER_TEMP/wafra/Payload/Wafra.app" "$RUNNER_TEMP/ios-build-provenance.json"
-      - name: Create clean signing API toolchain after dependency builds
-        run: |
-          python3 -I -m venv --clear "$RUNNER_TEMP/signing-venv"
-          "$RUNNER_TEMP/signing-venv/bin/pip" install PyJWT==2.10.1 cryptography==46.0.3
-      - name: Create runner-local development key and device profiles
-        env:
-          ASC_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
-          ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
-        run: |
-          "$RUNNER_TEMP/signing-venv/bin/python" scripts/ci/ios-device-signing.py prepare "$SIGNING_DIR"
-      - name: Bind validated WDA to the new development profile
-        run: |
-          ruby <<'RUBY'
-          require 'json'; require 'xcodeproj'
-          state=JSON.parse(File.read(File.join(ENV.fetch('SIGNING_DIR'),'state.json')))
-          project=Xcodeproj::Project.open(File.join(ENV.fetch('RUNNER_TEMP'),'wda/WebDriverAgent.xcodeproj'))
-          target=project.targets.find { |t| t.name=='WebDriverAgentRunner' }; raise 'Missing runner' unless target
-          target.build_configurations.each do |config|
-            config.build_settings['PROVISIONING_PROFILE_SPECIFIER']=state.fetch('profiles').fetch('app.wafra.qa.wda.xctrunner').fetch('uuid')
-          end
-          project.save
-          RUBY
-      - name: Build WDA and re-sign Wafra for development
+      - name: Package inputs for local signing (no QA signing account changes)
         run: |
           set -euo pipefail
-          xcodebuild build-for-testing -project "$RUNNER_TEMP/wda/WebDriverAgent.xcodeproj" \
-            -scheme WebDriverAgentRunner -configuration Debug -destination 'generic/platform=iOS' \
-            -derivedDataPath "$RUNNER_TEMP/wda-build" CODE_SIGNING_ALLOWED=YES > "$RUNNER_TEMP/wda-private.log" 2>&1
-          python3 scripts/ci/ios-device-signing.py resign "$SIGNING_DIR" "$RUNNER_TEMP/wafra/Payload/Wafra.app"
-          python3 scripts/ci/ios-device-signing.py verify "$SIGNING_DIR" "$RUNNER_TEMP/wafra/Payload/Wafra.app" "$SIGNING_DIR/wafra-verified.json"
-          python3 scripts/ci/ios-device-signing.py verify "$SIGNING_DIR" "$RUNNER_TEMP/wda-build/Build/Products/Debug-iphoneos/WebDriverAgentRunner-Runner.app" "$SIGNING_DIR/wda-verified.json"
-          test -d "$RUNNER_TEMP/wda-build/Build/Products/Debug-iphoneos/WebDriverAgentLib.framework"
-          find "$RUNNER_TEMP/wda-build/Build/Products" -name '*.xctestrun' | grep -q .
-          ditto -c -k --keepParent "$RUNNER_TEMP/wafra/Payload" "$RUNNER_TEMP/Wafra-dev.ipa"
-          tar -czf "$RUNNER_TEMP/WDA-Products.tar.gz" -C "$RUNNER_TEMP/wda-build/Build" Products
-      - name: Seal installers to this Mac (public certificate only)
+          tar -czhf "$RUNNER_TEMP/Wafra-resignable.tar.gz" -C "$RUNNER_TEMP/wafra" Payload
+          tar -czhf "$RUNNER_TEMP/WDA-Products-unsigned.tar.gz" -C "$RUNNER_TEMP/wda-build/Build" Products
+      - name: Seal re-signable Wafra and unsigned WDA to this Mac
         run: python3 scripts/ci/ios-device-seal.py
       - name: Upload only sealed installers and verification
         uses: actions/upload-artifact@v4
@@ -182,32 +152,9 @@ jobs:
             sealed/verification.json
           if-no-files-found: error
           retention-days: 1
-      - name: Preserve signing inventory and creation receipt (metadata only)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-device-signing-receipt-${{ github.run_id }}-${{ github.run_attempt }}
-          path: sealed/signing-receipt.json
-          if-no-files-found: ignore
-          retention-days: 7
-      - name: Preserve encrypted name audit even after failure
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-device-private-inventory-${{ github.run_id }}-${{ github.run_attempt }}
-          path: sealed/signing-inventory.enc
-          if-no-files-found: ignore
-          retention-days: 1
-      - name: Preserve sealed signing failure receipt
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-device-signing-failure-${{ github.run_id }}-${{ github.run_attempt }}
-          path: sealed/signing-failure.enc
-          if-no-files-found: ignore
-          retention-days: 1
-      - name: Remove runner signing keychain and private material
+      - name: Remove temporary build products and private logs
         if: always()
         run: |
-          security delete-keychain "$SIGNING_DIR/qa.keychain-db" 2>/dev/null || true
-          rm -rf "$SIGNING_DIR" "$RUNNER_TEMP/eas-private.log" "$RUNNER_TEMP/wda-private.log"
+          rm -rf "$RUNNER_TEMP/eas-private.log" "$RUNNER_TEMP/wda-private.log" \
+            "$RUNNER_TEMP/wafra" "$RUNNER_TEMP/wda-build" "$RUNNER_TEMP/store.ipa" \
+            "$RUNNER_TEMP/Wafra-resignable.tar.gz" "$RUNNER_TEMP/WDA-Products-unsigned.tar.gz"
