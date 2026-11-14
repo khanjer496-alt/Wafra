@@ -8,7 +8,7 @@ const load = require('../../universal-test/load-ts.cjs').createLoader();
 const markets = load('@/lib/markets');
 const country = load('@/lib/country');
 const { parseSms, nonPostingReason } = load('@/lib/sms-parser');
-const { createLaunchAlertSession } = load('@/lib/launch-alert-parser');
+const { createLaunchAlertSession, inspectGenericBankEventForReview } = load('@/lib/launch-alert-parser');
 const { parseHistoricalMessageRecords } = load('@/lib/historical-import');
 const { inspectSourceFreeRefusedAlert } = load('@/lib/auto-import');
 const { hasClickLinkPrompt } = load('@/lib/principal-posting-guards');
@@ -70,7 +70,8 @@ for (const [index, [market, named, body, reason]] of refused.entries()) {
       const result = JSON.parse(sandbox.wafraNativeAlertParse(JSON.stringify({ v: 1, body: layout, sender,
         observedAt: at, context: { v: 1, country: market, parserMarket: market,
           ledgerMoney: { currency: market === 'SA' ? 'SAR' : 'AED', exponent: 2 }, sourceHash: meta.sourceHash } })));
-      assert.equal(result.route, 'ignore');
+      if (reason === 'pending-processing' && sender) assertInformationalRefund(layout, result, sender);
+      else assert.equal(result.route, 'ignore');
     });
   }
 }
@@ -127,6 +128,21 @@ function confirmationNative(body) {
   return JSON.parse(sandbox.wafraNativeAlertParse(JSON.stringify({ v: 1, body, sender: 'ENBD', observedAt: at,
     context: { v: 1, country: 'AE', parserMarket: 'AE', ledgerMoney: { currency: 'AED', exponent: 2 },
       sourceHash: meta.sourceHash } })));
+}
+// Refusal means no automatic posting. Unsettled financial evidence may now be
+// retained as informational Review, which cannot be promoted by confirmation.
+function assertInformationalRefund(body, result, sender = 'ENBD') {
+  assert.equal(result.route, 'review');assert.equal(result.notification.style, 'review');
+  const event = inspectGenericBankEventForReview(body, sender);
+  assert.equal(event?.decision, 'review');assert.equal(event?.status, 'informational');
+  assert.equal(load('@/lib/alert-review-tray').isMoneyMovementReview({ kind: 'universal', event }), false);
+  assert.deepEqual(load('@/lib/universal-import').planConfirmedUniversalImport({ hydrated: true }, event,
+    { confirmed: true, postingStatus: 'posted' }), { outcome: 'refused', reason: 'not-posted' });
+}
+function assertNonPostingRefundNative(body, requireRetention = false) {
+  const result = confirmationNative(body);
+  assert.ok(result.route === 'ignore' || result.route === 'review', body);
+  if (requireRetention || result.route === 'review') assertInformationalRefund(body, result);
 }
 for (const [layout, body, expectedMinor = 8500] of [
   ['original', confirmedDebit],
@@ -275,7 +291,7 @@ for (const [label, merchant] of refundAckMerchants.slice(0, 4)) {
       assert.equal(parseSms(body), null);
       assert.equal(parseSms(body, {}, { sender: 'ENBD', observedAt: at }), null);
       assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
-      assert.equal(confirmationNative(body).route, 'ignore');
+      assertNonPostingRefundNative(body, true);
     });
   }
 }
@@ -338,7 +354,7 @@ for (const [label, merchant] of andMerchants.slice(0, 3)) {
       assert.equal(parseSms(body), null);
       assert.equal(parseSms(body, {}, { sender: 'ENBD', observedAt: at }), null);
       assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
-      assert.equal(confirmationNative(body).route, 'ignore');
+      assertNonPostingRefundNative(body);
     });
   }
 }
@@ -382,7 +398,7 @@ for (const [kind, body] of [
     assert.equal(parseSms(body), null);
     assert.equal(parseSms(body, {}, { sender: 'ENBD', observedAt: at }), null);
     assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
-    assert.equal(confirmationNative(body).route, 'ignore');
+    assertNonPostingRefundNative(body);
   });
 }
 for (const [kind, body, minor] of [
@@ -439,7 +455,7 @@ for (const [kind, body] of [
     assert.equal(parseSms(body), null);
     assert.equal(parseSms(body, {}, { sender: 'ENBD', observedAt: at }), null);
     assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
-    assert.equal(confirmationNative(body).route, 'ignore');
+    assertNonPostingRefundNative(body);
   });
 }
 for (const [kind, body, minor] of [
@@ -656,7 +672,7 @@ for (const [kind, base, note] of [
     assert.equal(parseSms(body), null);
     assert.equal(parseSms(body, {}, { sender: 'ENBD', observedAt: at }), null);
     assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
-    assert.equal(confirmationNative(body).route, 'ignore');
+    assertNonPostingRefundNative(body);
   });
 }
 for (const [kind, body] of [
@@ -668,7 +684,7 @@ for (const [kind, body] of [
     assert.equal(parseSms(body), null);
     assert.equal(parseSms(body, {}, { sender: 'ENBD', observedAt: at }), null);
     assert.equal(session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at), null);
-    assert.equal(confirmationNative(body).route, 'ignore');
+    assertNonPostingRefundNative(body);
   });
 }
 // Review ae81e7b9 (Change Reviewer, on fix3): a refund of the debited purchase itself is one movement and still posts as

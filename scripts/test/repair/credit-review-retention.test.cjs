@@ -17,7 +17,7 @@ for (const [index, [body, sender, amount]] of [
   load('@/lib/country').setActiveCountry('AE');load('@/lib/markets').setActiveMarket('AE');load('@/lib/markets').setLedgerCurrency('AED', 2);
   const session = createLaunchAlertSession({ overrides: {}, activeMarket: 'AE', pinnedCurrency: 'AED', bestEffort: { enabled: true, country: 'AE' } });
   assert.equal(session.parse(body, sender, session.inspect(body, sender), undefined, at), null);
-  const decision = inspectSourceFreeRefusedAlert({ source: body, sender, observedAt: at, channel: 'sms', session });
+  const decision = inspectSourceFreeRefusedAlert({ source: body, sender, observedAt: at, channel: 'inbox', session });
   assert.equal(decision.kind, 'review');assert.equal(decision.candidate.kind, 'universal');
   const event = decision.candidate.event;
   assert.equal(event.status, 'informational');assert.equal(event.amount.value.minorUnits, amount);
