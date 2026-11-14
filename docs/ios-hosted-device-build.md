@@ -18,7 +18,8 @@ runner therefore creates one new Apple Development certificate and three new
 development profiles for the existing runner, app and widget bundle IDs. It
 reads the two enabled devices from the existing Wafra QA UI Tests 2026-11
 reference profile (`7996Y2NL26`, UUID `a57e79a7-02f7-49b5-808c-9e88b1e81cd8`).
-It changes no existing profile, certificate, App ID or capability. New profiles
+Before creation it logs a paginated account inventory (certificate/profile IDs,
+types and names). It changes no existing profile, certificate, App ID or capability. New profiles
 must match the new certificate, both reference devices, team, app group and
 development APNs entitlement before use. A certificate-limit failure stops;
 never revoke an existing identity to make room.
@@ -35,8 +36,10 @@ The #239 public recipient certificate `.github/android-artifact-recipient.pem`
 is reused for CMS AES-256-CBC envelopes. Its private key stays on this Mac at
 `~/.config/wafra-android-artifacts/recipient-key.pem`. Artifacts last one day and
 contain only `*.enc` and `verification.json`; signed installers, profiles,
-private keys, EAS logs and WDA logs never upload in plaintext. A failure can
-upload `signing-receipt.json`, containing only IDs needed for later cleanup.
+private keys, EAS logs and WDA logs never upload in plaintext. A separate
+metadata-only `signing-receipt.json` is preserved for 30 days, including on
+failure. It contains the pre-build inventory and created IDs/names/fingerprints,
+never keys, profile contents or device identifiers.
 
 Download only the exact dispatched run. Check encrypted SHA-256 against
 `verification.json`, decrypt each file with OpenSSL 3, then check its plaintext
@@ -60,6 +63,26 @@ App Lock/Face ID and language switch, app-switcher/widget privacy, and lag.
 The runner keychain/private key are removed at job end. The new Apple
 certificate and profiles **remain active through the device pass**; revoking
 early invalidates the installers. They are listed in `verification.json` or
-the failure receipt. After QA, CEO approves deletion/revocation of only those
-new IDs. A failed or cancelled run is not a passing build; inspect its receipt
-before any approved retry to avoid consuming signing-certificate slots.
+the receipt. After App QA reports the iPhone pass complete, CEO separately
+approves `ios-device-cleanup.yml`. Supply the original build run/attempt,
+certificate ID, comma-separated profile IDs, App QA message UUID and
+`cleanup_approval=DELETE_COMPLETED_QA_SIGNING`. The operator checks the actual
+QA message; the workflow records its UUID but cannot verify OpenBot chat.
+
+Cleanup downloads the original run's immutable receipt. It refuses IDs present
+in the pre-build inventory. The certificate must match the receipt's ID,
+SHA-1, serial, DEVELOPMENT type and Apple-assigned name, and be linked only to
+the recorded CI-named profiles. Before each profile deletion it re-reads the
+exact ID, UUID, development type, certificate link and exact name ending in
+`CI <run>-<attempt>`. Before certificate revocation it checks the identity again
+and proves no remaining profile references it. Distribution certificates and
+App Store/TestFlight profiles cannot pass these gates. Deleted/revoked IDs are
+preserved even if a later cleanup step fails.
+
+iOS Release downloads each build/cleanup receipt and appends its created or
+deleted IDs and run URL to `Shared/launch-review/ios-account-status.md` on this
+Mac. The hosted runner cannot write that local file. A failed or cancelled run
+is not a passing build; inspect its receipt before any approved retry to avoid
+consuming signing-certificate slots. Never delete an existing identity to free
+capacity. A stale receipt or partially completed cleanup fails closed and needs
+review before another dispatch.

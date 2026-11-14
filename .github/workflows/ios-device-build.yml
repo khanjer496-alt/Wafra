@@ -86,6 +86,8 @@ jobs:
           npm ci
           npm install -g eas-cli@22.4.0
           node scripts/generate-ios-background-parser.cjs --check
+      - name: Check signing and cleanup refusal guards (mock API only)
+        run: python3 scripts/test/ios-device-signing.test.py
       - name: Build unchanged release IPA using existing EAS signing
         working-directory: source
         env:
@@ -151,14 +153,14 @@ jobs:
             sealed/verification.json
           if-no-files-found: error
           retention-days: 1
-      - name: Preserve account creation receipt on failure
-        if: failure()
+      - name: Preserve signing inventory and creation receipt (metadata only)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ios-device-signing-receipt-${{ github.run_id }}-${{ github.run_attempt }}
           path: sealed/signing-receipt.json
           if-no-files-found: ignore
-          retention-days: 1
+          retention-days: 30
       - name: Remove runner signing keychain and private material
         if: always()
         run: |

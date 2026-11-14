@@ -42,16 +42,53 @@ def api(method, route, body=None):
                                           'Content-Type': 'application/json'}, method=method)
     try:
         with urllib.request.urlopen(req, timeout=60) as response:
+            if response.status == 204:
+                return {}
             return json.load(response)
     except urllib.error.HTTPError as error:
         # Apple's response can include profileContent and device identifiers.
         raise RuntimeError(f'Apple {method} {route.split("?")[0]} returned HTTP {error.code}') from None
 
 
+def api_list(route):
+    items = []
+    while route:
+        response = api('GET', route)
+        items.extend(response['data'])
+        next_url = response.get('links', {}).get('next')
+        if next_url:
+            assert next_url.startswith('https://api.appstoreconnect.apple.com/v1/')
+            route = next_url.removeprefix('https://api.appstoreconnect.apple.com/v1/')
+        else:
+            route = None
+    return items
+
+
+def cert_metadata(cert):
+    attrs = cert['attributes']
+    return {'id': cert['id'], 'type': attrs['certificateType'],
+            'name': attrs.get('name') or attrs['displayName'],
+            'serial': attrs['serialNumber'],
+            'sha1': hashlib.sha1(base64.b64decode(attrs['certificateContent'])).hexdigest().upper()}
+
+
+def inventory():
+    certificates = api_list('certificates?limit=200')
+    profiles = api_list('profiles?limit=200')
+    result = {'certificates': [{'id': c['id'], 'type': c['attributes']['certificateType'],
+                               'name': c['attributes'].get('name') or c['attributes'].get('displayName')}
+                              for c in certificates],
+              'profiles': [{'id': p['id'], 'type': p['attributes']['profileType'],
+                            'name': p['attributes']['name']} for p in profiles]}
+    print('Pre-creation signing inventory: ' + json.dumps(result, sort_keys=True), flush=True)
+    return result
+
+
 def prepare(root):
     os.umask(0o077)
     root.mkdir(parents=True, exist_ok=True)
-    state = {'team': TEAM, 'profiles': {}}
+    state = {'team': TEAM, 'profiles': {}, 'runId': os.environ['GITHUB_RUN_ID'],
+             'runAttempt': os.environ['GITHUB_RUN_ATTEMPT'], 'before': inventory()}
     # Receipt is persisted immediately after each mutation, even on later failure.
     receipt = pathlib.Path('sealed/signing-receipt.json')
     receipt.parent.mkdir(exist_ok=True)
@@ -60,10 +97,20 @@ def prepare(root):
     assert len(devices) == 2 and all(d['attributes']['status'] == 'ENABLED' for d in devices)
     device_ids = [{'type': 'devices', 'id': d['id']} for d in devices]
     run('openssl', 'req', '-new', '-newkey', 'rsa:2048', '-nodes', '-keyout', str(root/'key.pem'),
-        '-out', str(root/'request.csr'), '-subj', '/CN=Wafra Hosted Device QA')
-    cert = api('POST', 'certificates', {'data': {'type': 'certificates', 'attributes': {
-        'certificateType': 'DEVELOPMENT', 'csrContent': (root/'request.csr').read_text()}}})['data']
+        '-out', str(root/'request.csr'), '-subj',
+        '/CN=Wafra QA CI ' + state['runId'] + '-' + state['runAttempt'])
+    try:
+        cert = api('POST', 'certificates', {'data': {'type': 'certificates', 'attributes': {
+            'certificateType': 'DEVELOPMENT', 'csrContent': (root/'request.csr').read_text()}}})['data']
+    except RuntimeError:
+        print('STOP: Apple refused development certificate creation. Check certificate capacity/permissions; '
+              'no retry, deletion or revocation will be attempted.', flush=True)
+        raise
     state['certificateId'] = cert['id']
+    write_json(receipt, state)
+    print('Created development certificate id: ' + cert['id'], flush=True)
+    state['certificate'] = cert_metadata(cert)
+    assert cert['id'] not in {c['id'] for c in state['before']['certificates']}
     write_json(receipt, state)
     der = base64.b64decode(cert['attributes']['certificateContent'])
     (root/'cert.der').write_bytes(der)
@@ -96,8 +143,9 @@ def prepare(root):
                 'certificates': {'data': [{'type': 'certificates', 'id': cert['id']}]},
                 'devices': {'data': device_ids}}}})['data']
         attrs = profile['attributes']
-        state['profiles'][bundle] = {'id': profile['id'], 'uuid': attrs['uuid'], 'name': name}
+        state['profiles'][bundle] = {'id': profile['id'], 'uuid': attrs.get('uuid'), 'name': name}
         write_json(receipt, state)
+        print('Created CI profile id: ' + profile['id'], flush=True)
         content = base64.b64decode(attrs['profileContent'])
         profile_path = root/(bundle + '.mobileprovision')
         profile_path.write_bytes(content)
@@ -109,6 +157,66 @@ def prepare(root):
             (dest/(attrs['uuid'] + '.mobileprovision')).write_bytes(content)
     write_json(root/'state.json', state)
     write_json(receipt, state)
+    print('Created signing IDs: ' + json.dumps({'certificate': state['certificate'],
+                                              'profiles': state['profiles']}, sort_keys=True), flush=True)
+
+
+def linked_profiles(certificate_id):
+    linked = []
+    for profile in api_list('profiles?limit=200'):
+        certs = api_list('profiles/' + profile['id'] + '/certificates?limit=200')
+        if any(cert['id'] == certificate_id for cert in certs):
+            linked.append(profile)
+    return linked
+
+
+def cleanup(receipt, certificate_id, profile_ids, qa_message, output):
+    """Called only by a separately authorized dispatch after App QA completion."""
+    import re
+    assert re.fullmatch(r'[0-9a-fA-F-]{36}', qa_message)
+    assert receipt['team'] == TEAM
+    assert certificate_id == receipt['certificateId'] == receipt['certificate']['id']
+    assert certificate_id not in {c['id'] for c in receipt['before']['certificates']}
+    expected = {p['id']: p for p in receipt['profiles'].values()}
+    assert set(profile_ids) == set(expected) and len(profile_ids) == len(expected)
+    assert not set(profile_ids) & {p['id'] for p in receipt['before']['profiles']}
+    marker = ' CI ' + receipt['runId'] + '-' + receipt['runAttempt']
+    assert all(p['name'].endswith(marker) for p in expected.values())
+
+    def verify_certificate():
+        metadata = cert_metadata(api('GET', 'certificates/' + certificate_id)['data'])
+        assert metadata == receipt['certificate'] and metadata['type'] == 'DEVELOPMENT'
+
+    def verify_profile(profile):
+        expected_profile = expected[profile['id']]
+        attrs = profile['attributes']
+        assert attrs['profileType'] == 'IOS_APP_DEVELOPMENT'
+        assert attrs['name'] == expected_profile['name'] and attrs['name'].endswith(marker)
+        assert attrs['uuid'] == expected_profile['uuid']
+        linked = api_list('profiles/' + profile['id'] + '/certificates?limit=200')
+        assert {c['id'] for c in linked} == {certificate_id}
+
+    verify_certificate()
+    linked = linked_profiles(certificate_id)
+    assert {p['id'] for p in linked} == set(expected)
+    for profile in linked:
+        verify_profile(profile)
+    events = {'sourceRunId': receipt['runId'], 'sourceRunAttempt': receipt['runAttempt'],
+              'qaPassMessageId': qa_message, 'deletedProfileIds': [], 'revokedCertificateId': None}
+    write_json(output, events)
+    # Re-read each exact ID and name immediately before its destructive call.
+    for profile_id in profile_ids:
+        verify_profile(api('GET', 'profiles/' + profile_id)['data'])
+        api('DELETE', 'profiles/' + profile_id)
+        events['deletedProfileIds'].append(profile_id)
+        write_json(output, events)
+        print('Deleted CI profile id: ' + profile_id, flush=True)
+    verify_certificate()
+    assert not linked_profiles(certificate_id)
+    api('DELETE', 'certificates/' + certificate_id)
+    events['revokedCertificateId'] = certificate_id
+    write_json(output, events)
+    print('Revoked CI development certificate id: ' + certificate_id, flush=True)
 
 
 def assert_profile(profile, bundle, state, devices=None):
@@ -187,6 +295,12 @@ if __name__ == '__main__':
             resign(root, pathlib.Path(args[0]))
         elif command == 'verify':
             write_json(pathlib.Path(args[1]), verify(root, pathlib.Path(args[0])))
+        elif command == 'cleanup':
+            receipt = json.loads(root.read_text())
+            assert receipt['runId'] == os.environ['SOURCE_RUN_ID']
+            assert receipt['runAttempt'] == os.environ['SOURCE_RUN_ATTEMPT']
+            cleanup(receipt, os.environ['CERTIFICATE_ID'], os.environ['PROFILE_IDS'].split(','),
+                    os.environ['QA_PASS_MESSAGE_ID'], pathlib.Path('cleanup-report.json'))
         else:
             raise ValueError('Unknown command')
     except Exception as error:
