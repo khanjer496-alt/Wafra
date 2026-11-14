@@ -107,7 +107,7 @@ function completedPredicate(fragment: string): boolean {
   const words = (fragment.toLowerCase().match(/[a-z]+(?:['’][a-z]+)?|\d+/gu) ?? [])
     .filter(word => !COMPLETION_ADVERBS.has(word));
   // A bank may state "paid out/back" without changing the completed aspect.
-  if (['out', 'back'].includes(words.at(-1) ?? '') && ['paid', 'sent'].includes(words.at(-2) ?? '')) words.pop();
+  if (['out', 'back'].includes(words[words.length - 1] ?? '') && ['paid', 'sent'].includes(words[words.length - 2] ?? '')) words.pop();
   const verb = words.pop();
   if (!verb || !COMPLETED_MONEY_WORDS.has(verb)) return false;
   const auxiliary = words.join(' ');
@@ -118,14 +118,14 @@ function completedPredicate(fragment: string): boolean {
 /** null leaves a genuinely terse receipt to the mature grammar. */
 function selectedPredicateCompletion(lead: string, tail: string): boolean | null {
   const verbs = [...lead.matchAll(ACTIVE_MONEY_VERB)];
-  const before = verbs.at(-1);
+  const before = verbs[verbs.length - 1];
   let active: boolean | null = null;
   if (before) {
     let prefix = lead.slice(0, before.index);
     // Instrument/subject names precede the predicate. A merchant NOT NOW CAFE
     // following the money is never part of this auxiliary/polarity span.
     const subjects = [...prefix.matchAll(/\b(?:card|account|wallet|you|payment|purchase|transaction|transfer|withdrawal|salary|deposit)\b/giu)];
-    const subject = subjects.at(-1);
+    const subject = subjects[subjects.length - 1];
     if (subject) prefix = prefix.slice(subject.index! + subject[0].length)
       .replace(/^\s*(?:(?:ending|number|no|with|in)\s*)?[*xX•]*\d{3,4}\b[\s:,-]*/iu, '');
     else prefix = prefix.slice(Math.max(prefix.lastIndexOf(':'), prefix.lastIndexOf('|')) + 1);
@@ -133,12 +133,13 @@ function selectedPredicateCompletion(lead: string, tail: string): boolean | null
     if (auxiliary) prefix = prefix.slice(auxiliary.index);
     active = completedPredicate(`${prefix} ${before[0]}`);
   }
+  if (active === false) return false;
   const descriptor = /\b(?:using|with|via|at|from|into|on|by|for|merchant|card|account|wallet|date|time|reference|balance)\b|\bto(?!\s+be\b)/iu.exec(tail);
   const predicate = tail.slice(0, descriptor?.index ?? tail.length).trim();
   const nominal = /\b(?:purchase|payment|transfer|withdrawal|transaction)\s+(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(lead);
   const monetaryTail = COMPLETED_MONEY_VERB.test(predicate);
   if (predicate && ((monetaryTail && (nominal || PREDICATE_START.test(predicate))) ||
-    (active === null && PREDICATE_START.test(predicate)))) return completedPredicate(predicate);
+    (active === null && (nominal || PREDICATE_START.test(predicate))))) return completedPredicate(predicate);
   return active;
 }
 

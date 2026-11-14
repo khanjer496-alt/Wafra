@@ -1028,10 +1028,11 @@ function inspectSourceFreeRefusedAlertCore(input: {
   // An unsettled credit is financial evidence, not confirmation authority.
   // Prefer its typed informational Review before the legacy refusal/template path.
   if (canReviewCreditRefusal(source, reason) && hasBankAlertMoneyHint(source) &&
-    !(input.channel === 'push' && isPromotionalBankPush(source)) &&
-    (hasOnlyUnsettledCredit(input.source) || hasUnsettledCreditToken(input.source) || mentionsCredit(input.source))) {
+    !(input.channel === 'push' && isPromotionalBankPush(source))) {
     const event = inspectGenericBankEventForReview(input.source, input.sender);
-    const review = event?.decision === 'review' && event.status === 'informational' ? prepareUniversalReviewAlert({
+    const heldMoney = event?.issues.includes('unsettled-credit-not-posting') || hasOnlyUnsettledCredit(input.source) ||
+      hasUnsettledCreditToken(input.source) || mentionsCredit(input.source);
+    const review = heldMoney && event?.decision === 'review' && event.status === 'informational' ? prepareUniversalReviewAlert({
       id: 'capture_probe_id_0001', sourceKey: 'capture_probe_key_001',
       observedAt: input.observedAt, channel: input.channel, event,
     }) : null;

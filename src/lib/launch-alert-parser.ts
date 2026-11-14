@@ -295,8 +295,11 @@ export const inspectGenericBankEventForReview = (
   let event = inspectUniversalBankEvent(isGulfNeighbourMarket(market)
     ? gulfNeighbourReadSource(moneySource, market) : moneySource, { ...context, currencyAliases: { ...creditReviewAliases, ...cardCreditAliases, ...context.currencyAliases } });
   const incompletePrincipal = event.amount.spans.some(span => {
-    const lead = moneySource.slice(0, span.start).split(/(?<=[.!?])\s+|[;؛\n]/u).at(-1) ?? '';
-    const debit = /\b(?:debited|charged|deducted|spent|withdrawn|paid|purchased|used)\b/iu.test(lead) ||
+    const leads = moneySource.slice(0, span.start).split(/(?<=[.!?])\s+|[;؛\n]/u);
+    const lead = leads[leads.length - 1] ?? '';
+    const tail = moneySource.slice(span.end).split(/(?<=[.!?])\s+|[;؛\n]/u)[0]
+      .split(/\b(?:using|with|via|at|from|to|into|on|by|for|merchant|card|account|wallet)\b/iu)[0];
+    const debit = /\b(?:debited|charged|deducted|spent|withdrawn|paid|purchased|used)\b/iu.test(lead + ' ' + tail) ||
       /(?:^|[:|])\s*(?:(?:a|the|your)\s+)?(?:purchase|payment|withdrawal|transaction)\s+(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(lead);
     return debit && isIncompletePrincipal(moneySource, span, true);
   });
