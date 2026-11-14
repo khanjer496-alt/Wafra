@@ -49,7 +49,7 @@ export const ASSISTANT_TOOL_CATALOG: readonly {
   { tool: 'data-coverage', purpose: 'Describe recorded activity and known import limitations without claiming full bank coverage', arguments: PERIOD_FILTER_ARGUMENTS },
 ] as const;
 
-export interface AssistantInterpretationEnvelope {
+interface AssistantInterpretationEnvelope {
   v: 1;
   question: string;
   tools: typeof ASSISTANT_TOOL_CATALOG;
@@ -64,7 +64,7 @@ export function buildAssistantInterpretationEnvelope(question: string): Assistan
   };
 }
 
-export interface AssistantExplanationEnvelope {
+interface AssistantExplanationEnvelope {
   v: 1;
   question: string;
   tool: AssistantTool;

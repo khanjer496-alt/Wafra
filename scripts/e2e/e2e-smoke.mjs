@@ -260,7 +260,9 @@ const homePayments = await page.evaluate(() => {
     // Exclude the heading's count-and-total action; it is checked below.
     .filter(node => (node.textContent || '').trim() && !(node.getAttribute('data-testid') || '').endsWith('-total'))
     .map(node => {
-      const leaves = [...node.querySelectorAll('div,span')].filter(n => !n.children.length && n.textContent.trim());
+      // Decorative initials are not payment fields (title/date/amount).
+      const leaves = [...node.querySelectorAll('div,span')].filter(n =>
+        !n.children.length && n.textContent.trim() && !n.closest('[data-testid="monogram-avatar"]'));
       const text = leaves.map(n => n.textContent.trim());
       // Money now paints its currency and exact digits separately; keep
       // that complete visible amount together, including an estimate mark.

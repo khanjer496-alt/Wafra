@@ -19,27 +19,15 @@ const PROFILES = [
 await mkdir(OUT, { recursive: true });
 const browser = await chromium.launch({ channel: 'chrome' });
 const results = [], requests = [], errors = [], layouts = [], cdnResponses = [];
-const expectedDomains = new Set(['choithrams.com','aseertime.com','bankfab.com','emiratesnbd.com','alrajhibank.com.sa','nestogroup.com','sharafdg.com','starbucks.com']);
 const words = {
   en: { home:'Home', spending:'Spending', activity:'Activity', bills:'Bills', accounts:'Accounts', privacy:'Messages & privacy', review:'Review online features', close:'Close', cancel:'Cancel' },
   ar: { home:'الرئيسية', spending:'المصروفات', activity:'العمليات', bills:'الفواتير', accounts:'الحسابات', privacy:'الرسائل والخصوصية', review:'مراجعة الميزات المتصلة', close:'إغلاق', cancel:'إلغاء' },
 };
-async function intercept(context, name, permitImages) {
+async function intercept(context, name) {
   await context.route('**/*', route => {
     const request = route.request(); const url = new URL(request.url());
-    if (url.origin === new URL(BASE).origin || ['data:','blob:'].includes(url.protocol)) return route.continue();
-    requests.push({ scenario:name, url:url.href, resource:request.resourceType() });
-    // Brand Search is mocked: this run must never depend on provider search
-    // availability and the only searched name is a public synthetic fixture.
-    if (permitImages && url.hostname === 'api.brandfetch.io' && url.pathname.startsWith('/v2/search/')) {
-      const name = decodeURIComponent(url.pathname.slice('/v2/search/'.length));
-      return route.fulfill({ status:200, contentType:'application/json', body:JSON.stringify(
-        name === 'Aseer Time' ? [{name:'Aseer Time',domain:'aseertime.com',claimed:false,brandId:'fixture-aseer'}] : []) });
-    }
-    // Count AND block all other external traffic. Only approved image domains
-    // may reach the CDN; fixtures contain no actual account or message data.
-    if (permitImages && url.hostname === 'cdn.brandfetch.io' && request.resourceType() === 'image' &&
-      expectedDomains.has(decodeURIComponent(url.pathname.replace('/domain/', '')))) return route.continue();
+    if (url.origin === new URL(BASE).origin || ['data:', 'blob:'].includes(url.protocol)) return route.continue();
+    requests.push({ scenario: name, url: url.href, resource: request.resourceType() });
     return route.abort();
   });
 }
@@ -169,72 +157,8 @@ try {
     await check(name+'-cancel-preserves-optout',async()=>assert.equal((await readState(page)).privateMode,true),page);
     await context.close();
   }
-  if(!FILTER||FILTER.test('cdn-mock')){
-    const{context,page}=await contextFor('cdn-mock');
-    // A one-pixel synthetic PNG proves the app image branch independently of
-    // provider policy/availability. It is not evidence of the actual artwork.
-    const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64');
-    await context.route('https://cdn.brandfetch.io/domain/**',route=>{
-      const url=new URL(route.request().url());
-      const domain=decodeURIComponent(url.pathname.replace('/domain/',''));
-      requests.push({scenario:'cdn-mock',url:url.href,resource:route.request().resourceType(),mocked:true});
-      return expectedDomains.has(domain)?route.fulfill({status:200,contentType:'image/png',body:png}):route.abort();
-    });
-    await page.goto(BASE+'/',{waitUntil:'networkidle'});await page.getByTestId('reference-home-summary').waitFor({state:'visible'});
-    await check('bundled-merchant-images-decode',async()=>{
-      const images=page.locator('[data-testid^="merchant-logo-"] img').filter({visible:true});
-      await images.first().waitFor({state:'visible'});
-      const dimensions=await images.evaluateAll(nodes=>Promise.all(nodes.filter(node=>node.src.startsWith(location.origin)).map(async node=>{await node.decode();return {width:node.naturalWidth,height:node.naturalHeight};})));
-      assert.ok(dimensions.length>0);assert.ok(dimensions.every(value=>value.width===128&&value.height===128));return dimensions;
-    },page);
-    for(const[route,domain]of [['/merchant?name=Choithrams','choithrams.com'],['/wallet','bankfab.com']]){
-      await page.goto(BASE+route,{waitUntil:'networkidle'});
-      await check('mocked-image-renders-'+domain,async()=>{
-        const img=page.locator(`img[src*="cdn.brandfetch.io/domain/${domain}"]`).first();
-        await img.waitFor({state:'visible'});await img.evaluate(node=>node.decode());
-        assert.equal(await img.evaluate(node=>node.naturalWidth),1);
-      },page);
-    }
-    await context.close();
-  }
-  if(!FILTER||FILTER.test('cdn-live')){
-    // A normal headed browser distinguishes real embedding from the provider's
-    // explicit automated_traffic rejection of headless Chrome. No UA override,
-    // stealth flags, token changes, or other bypass is used.
-    const headed=await chromium.launch({channel:'chrome',headless:false});
-    try{
-      const{context,page}=await contextFor('cdn-live',{},headed);
-      await page.goto(BASE+'/merchant?name=Choithrams',{waitUntil:'networkidle'});
-      await check('cdn-live-choithrams-decodes',async()=>{
-        const img=page.locator('img[src*="cdn.brandfetch.io/domain/choithrams.com"]').first();
-        await img.waitFor({state:'visible'});await img.evaluate(node=>node.decode());
-        assert.ok(await img.evaluate(node=>node.naturalWidth>0));
-        await shot(page,'headed-chrome-choithrams');
-        return await img.evaluate(node=>({url:node.src,width:node.naturalWidth,height:node.naturalHeight}));
-      },page);
-      await page.goto(BASE+'/wallet',{waitUntil:'networkidle'});await page.getByTestId('account-groups').waitFor({state:'visible'});
-      await check('cdn-live-bank-logos-decode',async()=>{
-        const decoded=[];
-        for(const domain of ['bankfab.com','emiratesnbd.com']){
-          const img=page.locator(`img[src*="cdn.brandfetch.io/domain/${domain}"]`).first();
-          await img.waitFor({state:'visible'});await img.evaluate(node=>node.decode());
-          decoded.push(await img.evaluate(node=>({url:node.src,width:node.naturalWidth,height:node.naturalHeight})));
-        }
-        assert.ok(decoded.every(img=>img.width>0));await shot(page,'headed-chrome-bank-logos');return decoded;
-      },page);
-      await context.close();
-    }finally{await headed.close();}
-  }
-  await check('local-only-blocks-brandfetch-searches',async()=>assert.equal(
-    requests.filter(item=>item.scenario?.startsWith('legacy-')&&/api\.brandfetch\.io\/v2\/search/.test(item.url)).length,0));
-  await check('global-brandfetch-search-uses-clean-name-only',async()=>{
-    const searches=requests.filter(item=>/api\.brandfetch\.io\/v2\/search/.test(item.url));
-    assert.ok(searches.some(item=>decodeURIComponent(new URL(item.url).pathname).endsWith('/Aseer Time')),'global merchant lookup requested');
-    assert.ok(searches.every(item=>!/222|account|card|sms/i.test(decodeURIComponent(new URL(item.url).pathname))),'financial details never enter the search path');
-  });
-  await check('fixed-merchant-and-bank-CDN-requests-preserved',async()=>{
-    assert.ok(requests.some(item=>item.url.includes('cdn.brandfetch.io/domain/choithrams.com')),'fixed merchant artwork requested');
-    assert.ok(requests.some(item=>item.url.includes('cdn.brandfetch.io/domain/bankfab.com')),'verified bank artwork requested');
+  await check('store-builds-never-request-brand-artwork', async () => {
+    assert.equal(requests.filter(item => /(?:api|cdn)\.brandfetch\.io|logo\.clearbit\.com/.test(item.url)).length, 0);
   });
   await check('no-application-errors',async()=>assert.deepEqual(errors,[]));
 }catch(error){results.push({name:'run',passed:false,error:error.stack??String(error)});console.error(error);}

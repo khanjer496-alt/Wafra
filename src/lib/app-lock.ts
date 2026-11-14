@@ -20,14 +20,14 @@
  */
 
 /** expo-local-authentication's `SecurityLevel` values (SDK 55). */
-export const SECURITY_LEVEL = {
+const SECURITY_LEVEL = {
   NONE: 0,
   SECRET: 1,
   BIOMETRIC_WEAK: 2,
   BIOMETRIC_STRONG: 3,
 } as const;
 
-export type DeviceLockLevel = 'none' | 'passcode' | 'biometric';
+type DeviceLockLevel = 'none' | 'passcode' | 'biometric';
 
 export function deviceLockLevel(securityLevel: number | null | undefined): DeviceLockLevel {
   if (securityLevel === SECURITY_LEVEL.SECRET) return 'passcode';
@@ -44,7 +44,7 @@ export function deviceLockLevel(securityLevel: number | null | undefined): Devic
  */
 export const APP_LOCK_AUTH_OPTIONS = { disableDeviceFallback: false } as const;
 
-export type UnlockOutcome = 'unlocked' | 'failed' | 'unavailable';
+type UnlockOutcome = 'unlocked' | 'failed' | 'unavailable';
 
 /**
  * What an `authenticateAsync` result means for the gate. Only the two errors

@@ -71,7 +71,7 @@ function baseEligible(transaction: Transaction, now: Date): boolean {
     !(transaction.paymentFlowSide === 'receipt' && !transaction.paymentInstrumentSource);
 }
 
-export interface AssistantPatternCoverage {
+interface AssistantPatternCoverage {
   eligibleCount: number;
   skippedFxCount: number;
   skippedSplitCount: number;

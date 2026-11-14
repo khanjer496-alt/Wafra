@@ -31,7 +31,7 @@ export interface LedgerPersistence {
   reset(snapshotAfterErase: () => { snapshot: AppState; revision: number }): Promise<void>;
 }
 
-export type LedgerResetStage = 'destroy' | 'initialize';
+type LedgerResetStage = 'destroy' | 'initialize';
 
 /**
  * Closed-vocabulary reset attribution. The native error stays available to

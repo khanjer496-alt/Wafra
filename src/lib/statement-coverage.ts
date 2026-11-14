@@ -8,7 +8,7 @@ import type { StatementCoverageEntry } from '@/lib/types';
  * nor two transactions months apart proves that the intervening activity is
  * complete. Keep this distinction in the shared model, not only the UI copy.
  */
-export type CoverageSummary = {
+type CoverageSummary = {
   sourceKey: string;
   label: string;
   range: string;

@@ -39,7 +39,7 @@ export function useAnimatedNumber(initial: number): Animated.Value {
   return ref.current;
 }
 
-export interface CoinSpring {
+interface CoinSpring {
   stiffness: number;
   damping: number;
   mass: number;
@@ -69,7 +69,7 @@ const CURVE_TOLERANCE = 0.002;
  * once a frame and thinned to the points a straight line between cannot
  * stand in for.
  */
-export function springCurve(spring: CoinSpring): CoinCurve {
+function springCurve(spring: CoinSpring): CoinCurve {
   const k = spring.stiffness;
   const m = spring.mass;
   const zeta = spring.damping / (2 * Math.sqrt(k * m));
@@ -193,7 +193,7 @@ export interface CoinClock {
 
 const linear = (t: number) => t;
 
-export function createCoinClock(): CoinClock {
+function createCoinClock(): CoinClock {
   const value = new Animated.Value(0);
   let reserved = 0;
   return {

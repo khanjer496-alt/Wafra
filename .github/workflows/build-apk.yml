@@ -332,10 +332,54 @@ jobs:
           fi
 
       # Only needed to upload to Play, which is not what most builds are for.
+      #
+      # The Play bundle ships ARM only (arm64-v8a, armeabi-v7a). With all four
+      # ABIs it was 113 MB (396: x86 + x86_64 libraries 20.8 MB, plus their
+      # share of the native debug symbols), over the 100 MiB browser upload
+      # limit. x86 Android phones are essentially extinct, ChromeOS on x86 runs
+      # ARM apps through translation, and arm64 meets Play's 64-bit rule. Native
+      # debug symbols stay in the bundle, so crash reports stay symbolicated.
+      # The APK step above keeps its own ABI choice (universal by default), so
+      # QA can still install on an x86_64 emulator.
       - name: Build Play Store bundle (AAB)
         if: github.event.inputs.bundle == 'true' && github.event.inputs.corpus != 'true'
         working-directory: android
-        run: ./gradlew :wafra-complimentary-transport:testReleaseUnitTest bundleRelease --no-daemon
+        run: ./gradlew :wafra-complimentary-transport:testReleaseUnitTest bundleRelease -PreactNativeArchitectures=arm64-v8a,armeabi-v7a --no-daemon
+
+      - name: Verify the Play bundle is ARM only and under the upload limit
+        # Same condition as the AAB build, in the form the update-channel steps
+        # use; sms-corpus.test.js counts the string-input form exactly twice.
+        if: inputs.bundle && !inputs.corpus
+        run: |
+          set -euo pipefail
+          aab="${WAFRA_AAB:-android/app/build/outputs/bundle/release/app-release.aab}"
+          size=$(wc -c < "$aab" | tr -d ' ')
+          echo "Play bundle size: $size bytes"
+          if [ "$size" -gt 100000000 ]; then
+            echo "::error::The Play bundle is $size bytes, over 100,000,000 (the browser upload limit is 104,857,600)."
+            exit 1
+          fi
+          entries=$(unzip -Z1 "$aab")
+          # Allow-list: every ABI directory, of native libraries in any module
+          # (<module>/lib/<abi>/, or <module>/root/lib/<abi>/, which lands at the
+          # APK root) and of the native debug symbols, must be arm64-v8a or
+          # armeabi-v7a. Anchored to the module root, so a lib/ folder inside
+          # assets or Java resources is not mistaken for an ABI.
+          abis=$(printf '%s\n' "$entries" | sed -n -E \
+            -e 's#^[^/]+/(root/)?lib/([^/]+)/.*#\2#p' \
+            -e 's#^BUNDLE-METADATA/com\.android\.tools\.build\.debugsymbols/([^/]+)/.*#\1#p' | sort -u)
+          unexpected=$(printf '%s\n' "$abis" | grep -v -x -E 'arm64-v8a|armeabi-v7a' || true)
+          if [ -n "$unexpected" ]; then
+            echo "::error::The Play bundle contains native code or symbols for $(echo $unexpected); it must ship arm64-v8a and armeabi-v7a only."
+            exit 1
+          fi
+          for abi in arm64-v8a armeabi-v7a; do
+            if ! printf '%s\n' "$entries" | grep -E "^base/lib/$abi/[^/]+\.so$" >/dev/null; then
+              echo "::error::The Play bundle has no base/lib/$abi libraries."
+              exit 1
+            fi
+          done
+          printf '%s\n' "$entries" | grep -E '^base/lib/[^/]+/' | cut -d/ -f3 | sort | uniq -c
 
       - name: Verify update channel in the packaged Play bundle
         if: inputs.bundle && !inputs.corpus

@@ -348,7 +348,7 @@ export function percentChange(currentFils: number, previousFils: number): number
   return Math.round((currentFils - previousFils) / previousFils * 100);
 }
 
-export interface MonthComparison {
+interface MonthComparison {
   /** The month compared with, or null when the selected one is the first. */
   previousKey: string | null;
   /** The selected month against `previousKey`, in percent. */
@@ -390,7 +390,7 @@ export function monthComparison(
   };
 }
 
-export interface TrendShape {
+interface TrendShape {
   averageFils: number;
   latestFils: number;
   minFils: number;

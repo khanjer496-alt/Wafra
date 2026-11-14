@@ -22,8 +22,8 @@ const LIP_WIDTH = 92;
 const LIP_HEIGHT = 10;
 const LID_WIDTH = 102;
 const LID_HEIGHT = 16;
-export const JAR_HEIGHT = LID_HEIGHT + LIP_HEIGHT - 2 + BODY_HEIGHT;
-export const JAR_WIDTH = BODY_WIDTH;
+const JAR_HEIGHT = LID_HEIGHT + LIP_HEIGHT - 2 + BODY_HEIGHT;
+const JAR_WIDTH = BODY_WIDTH;
 
 /** Strength of the band's text colour in the glass: the tint, and the outline. */
 const GLASS_FILL = 0.08;

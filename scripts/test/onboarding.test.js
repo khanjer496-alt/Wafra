@@ -689,7 +689,7 @@ ok(
     !/setUiLanguage|I18nManager|onboarding-language-switch/.test(gateSource + stepSource('e-welcome')) &&
     /WafraMark/.test(aliveScenesSource) &&
     /onboardingBankRegion/.test(aliveScenesSource) &&
-    /verifiedLogoUrl/.test(aliveScenesSource) &&
+    !/verifiedLogoUrl|expo-image/.test(aliveScenesSource) &&
     /US:[\s\S]*GB:[\s\S]*FR:[\s\S]*DE:[\s\S]*IN:[\s\S]*QA:[\s\S]*KW:/.test(onboardingBankExamplesSource) &&
     !/useStore|importBatch|addTransaction|setOnboarded|setCaptureOptOut|loadDemoData/.test(aliveScenesSource) &&
     !/Gmail|Excel|fake contact/i.test(aliveScenesSource),

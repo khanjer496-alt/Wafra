@@ -161,14 +161,14 @@ export interface SupplementImportsPreview {
 }
 
 /** The two parts of the importer, for a screen that puts one on its band. */
-export interface SupplementImportsParts {
+interface SupplementImportsParts {
   /** The plain line, the upload disclosure and the choose-file control. */
   band: React.ReactNode;
   /** Files, results, the password step, what to download and the date note. */
   sheet: React.ReactNode;
 }
 
-export interface SupplementImportsProps {
+interface SupplementImportsProps {
   /** First-run setup: a footer to move on, with or without a statement. */
   onboarding?: { onContinue(): void };
   preview?: SupplementImportsPreview;

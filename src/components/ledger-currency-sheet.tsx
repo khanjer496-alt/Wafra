@@ -18,7 +18,7 @@ const COMMON = [
 ] as const;
 
 /** Currencies the ledger can represent exactly today (ISO exponents 0, 2 or 3). */
-export const supportedLedgerCurrencies = (): string[] => Object.keys(CURRENCY_MINOR_UNITS)
+const supportedLedgerCurrencies = (): string[] => Object.keys(CURRENCY_MINOR_UNITS)
   .filter((code) => ledgerMoneySpec(code) !== null)
   .sort();
 

@@ -83,7 +83,7 @@ const DEFAULT_PAGE_SIZE = 1_000;
 const MAX_PAGE_SIZE = 2_000;
 const MAX_REVIEW_CANDIDATES = 50;
 
-export interface AndroidNotificationImportDiagnostics {
+interface AndroidNotificationImportDiagnostics {
   attemptedAt: number;
   captured: number;
   autoParsed: number;
@@ -211,7 +211,7 @@ export const CARRIER_DUPLICATE_DATETIME_RE =
  * figure counts (currency code or two decimals), and never "balance
  * transfer", so an offer footer that is identical on every alert does not.
  */
-export const CARRIER_DUPLICATE_BALANCE_RE =
+const CARRIER_DUPLICATE_BALANCE_RE =
   /\b(?:(?:avl|avail(?:able)?|current|curr|ledger|closing|remaining)\.?\s*)?bal(?:ance)?\b(?!\s*transfer)[^0-9٠-٩\n]{0,20}?(?:(?:AED|Dhs?|SAR|SR|QAR|KWD|BHD|OMR|EGP|INR|PKR|PHP|USD|EUR|GBP|CAD|AUD|JPY|CNY|CHF|TRY|GHS|د\.إ|ر\.س|درهم|ريال)\s*[0-9٠-٩][0-9٠-٩,٬]*(?:[.٫][0-9٠-٩]{1,3})?|[0-9٠-٩][0-9٠-٩,٬]*[.٫][0-9٠-٩]{2}(?![0-9٠-٩])|[0-9٠-٩][0-9٠-٩,٬]*(?:[.٫][0-9٠-٩]{1,3})?\s*(?:AED|SAR|QAR|KWD|BHD|OMR|USD|EUR|GBP|د\.إ|ر\.س|درهم|ريال))|رصيد[^0-9٠-٩\n]{0,20}?(?:(?:AED|SAR|د\.إ|ر\.س|درهم|ريال)\s*[0-9٠-٩][0-9٠-٩,٬]*(?:[.٫][0-9٠-٩]{1,3})?|[0-9٠-٩][0-9٠-٩,٬]*[.٫][0-9٠-٩]{2}(?![0-9٠-٩])|[0-9٠-٩][0-9٠-٩,٬]*\s*(?:AED|SAR|د\.إ|ر\.س|درهم|ريال))/i;
 
 /** Whether an identical copy of [body] can only be the same posting. */
@@ -507,12 +507,12 @@ export type { CaptureChannel } from '@/lib/dedupe';
 export type { ScannedSms, DeclinedSms, ImportPlan } from '@/lib/import-plan';
 export { buildImportPlan } from '@/lib/import-plan';
 
-export interface InboxScanCursor {
+interface InboxScanCursor {
   beforeDateMs: number;
   beforeId: number;
 }
 
-export interface ScanInboxOptions {
+interface ScanInboxOptions {
   /** Ready local formats advise Review only; parser-version repair always disables them. */
   privateFormatReview?: PrivateAlertFormatSessionOptions;
   /** Read the bank-app queue without requiring or advancing the SMS inbox. */
@@ -602,7 +602,7 @@ export interface ScanResult {
 }
 
 /** One transaction a running scan has just parsed, as display facts only. */
-export interface ScanFoundPreview {
+interface ScanFoundPreview {
   merchant: string;
   category: import('@/lib/types').CategoryId;
   type: import('@/lib/types').TransactionType;
@@ -667,13 +667,28 @@ class ReviewIdentityError extends Error {
 type ExpoDigest = {
   CryptoDigestAlgorithm: { SHA256: unknown };
   digestStringAsync(algorithm: unknown, data: string): Promise<string>;
+  digest?(algorithm: unknown, data: Uint8Array): Promise<ArrayBuffer>;
 };
 
-const sha256 = (data: string): Promise<string> => {
+const sha256 = async (data: string): Promise<string> => {
   // The test harness intentionally stubs only Crypto's random-byte surface.
   // Cast at this private seam while production calls Expo SDK 55's documented
-  // digestStringAsync/CryptoDigestAlgorithm pair directly.
+  // digest/digestStringAsync/CryptoDigestAlgorithm API directly.
   const digest = Crypto as unknown as ExpoDigest;
+  // Android hashes BYTES. expo-modules-core (SDK 55) converts every String
+  // argument on Android with env->NewStringUTF(utf8.c_str()), which stops at
+  // the first NUL, and the review identity joins its fields with U+0000: on a
+  // device every Android review hashed only its constant domain prefix, so all
+  // reviews got ONE id and the tray refused all but the first (Android RC 396
+  // F1). A typed array crosses the bridge intact, and SHA-256 of the UTF-8
+  // bytes is exactly what digestStringAsync computes where strings survive, so
+  // the identity is the documented one and iOS keeps its existing path.
+  if (Platform.OS === 'android' && typeof digest.digest === 'function' && typeof TextEncoder === 'function') {
+    const bytes = new Uint8Array(await digest.digest(digest.CryptoDigestAlgorithm.SHA256, new TextEncoder().encode(data)));
+    let hex = '';
+    for (const byte of bytes) hex += byte.toString(16).padStart(2, '0');
+    return hex;
+  }
   return digest.digestStringAsync(digest.CryptoDigestAlgorithm.SHA256, data);
 };
 
@@ -764,17 +779,17 @@ async function bindProviderReviewIdentity(
   };
 }
 
-export type SourceFreeReviewCandidate =
+type SourceFreeReviewCandidate =
   | Omit<ReviewAlert, 'id' | 'sourceKey' | 'templateKey'>
   | Omit<UniversalReviewAlert, 'id' | 'sourceKey'>;
 
-export interface SourceFreeReviewIdentity {
+interface SourceFreeReviewIdentity {
   id: string;
   sourceKey: string;
   templateKey?: string;
 }
 
-export type SourceFreeRefusedAlertDecision =
+type SourceFreeRefusedAlertDecision =
   | { kind: 'declined'; reason: NonPostingReason }
   | { kind: 'review'; candidate: SourceFreeReviewCandidate }
   | { kind: 'ignored'; reason: 'promotion' | 'non-financial' | 'unrecognized' };

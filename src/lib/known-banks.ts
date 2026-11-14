@@ -12,7 +12,7 @@ import type { Account } from '@/lib/types';
  * say nothing about which one sent a given alert, so the account is left for
  * the picker instead of guessed.
  */
-export interface KnownBank {
+interface KnownBank {
   name: string;
   color: string;
   domain?: string;

@@ -1,8 +1,7 @@
-import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getLocales } from 'expo-localization';
-import React, { useEffect, useMemo, useState } from 'react';
-import { Platform, Pressable, StyleSheet, View } from 'react-native';
+import React, { useEffect, useMemo } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
   Easing,
   FadeIn,
@@ -21,8 +20,6 @@ import { tapped } from '@/lib/haptics';
 import { t } from '@/lib/i18n';
 import { onboardingAlertExamples, type OnboardingAlertExample } from '@/lib/onboarding-alert-examples';
 import { onboardingBankRegion, type OnboardingBankExample } from '@/lib/onboarding-bank-examples';
-import { useOnlineLogosAllowed } from '@/lib/store';
-import { verifiedLogoUrl } from '@/lib/verified-logo-identities';
 import { ALERT_DELIVERY_PRESETS, onboardingHistoryGap, onboardingNoAutomaticCapture } from '@/lib/onboarding';
 import type {
   OnboardingAlertDelivery,
@@ -107,29 +104,16 @@ function lift(hex: string): string {
 
 const initials = (name: string): string => name.split(/\s+/).filter(Boolean).slice(0, 3).map(word => word[0]!.toUpperCase()).join('');
 
-function BrandLogo({ name, domain, color, fallbackIcon, size = 36 }: {
+function BrandLogo({ name, color, fallbackIcon, size = 36 }: {
   name: string; domain?: string | null; color?: string; fallbackIcon?: IconName; size?: number;
 }) {
-  const [failed, setFailed] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  // Online logos need the same consent as ledger artwork (off by default, off on Android
-  // for launch); without it these fictional examples show their initials locally.
-  const consented = useOnlineLogosAllowed();
-  const uri = consented && Platform.OS !== 'android' && domain ? verifiedLogoUrl(domain) : null;
-  const showImage = !!uri && !failed;
   const radius = Math.round(size * 0.32);
-  // No brand-coloured or white tile: the logo sits on the night surface. The
-  // hairline ring gives a dark mark (or the initials fallback) an edge on the
-  // charcoal ground; artwork with its own square ground is clipped round.
   const initialsColor = color && color.toUpperCase() !== '#000000' ? lift(color) : night.text;
   return <View style={[styles.logo, { width: size, height: size, borderRadius: radius }]} accessible={false}>
-    {!(showImage && loaded) && (fallbackIcon
+    {fallbackIcon
       ? <Icon name={fallbackIcon} size={Math.round(size * 0.46)} color={night.primary} />
       : <ThemedText allowFontScaling={false}
-        style={[styles.logoInitials, { color: initialsColor, fontSize: Math.max(9, Math.round(size * 0.28)) }]}>{initials(name)}</ThemedText>)}
-    {showImage && <Image source={{ uri }} contentFit="contain" cachePolicy="memory-disk" transition={0}
-      onLoad={() => setLoaded(true)} onError={() => setFailed(true)}
-      style={StyleSheet.absoluteFillObject} accessible={false} />}
+        style={[styles.logoInitials, { color: initialsColor, fontSize: Math.max(9, Math.round(size * 0.28)) }]}>{initials(name)}</ThemedText>}
   </View>;
 }
 

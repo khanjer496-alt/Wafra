@@ -60,14 +60,14 @@ function datesAreNewestFirst(transactions: readonly Transaction[]): boolean {
 }
 
 /** Beyond five slices the ramp stops being readable, so the tail is pooled. */
-export const MAX_COMPOSITION_SLICES = 5;
+const MAX_COMPOSITION_SLICES = 5;
 
 /**
  * The month's spending broken into the slices Flow draws. Slices and their
  * total retain exact minor units so grouping categories cannot change the
  * amount reported as spending. Any abbreviated chart label is a display concern.
  */
-export interface CompositionSlice {
+interface CompositionSlice {
   key: string;
   /** The single category, or null for the pooled tail. */
   category: CategoryId | null;
@@ -179,7 +179,7 @@ export function spentInMonthForCategory(
   return total;
 }
 
-export type InsightTone = 'positive' | 'warning' | 'neutral';
+type InsightTone = 'positive' | 'warning' | 'neutral';
 
 /**
  * Every screen an insight is allowed to send you to.
@@ -192,10 +192,10 @@ export type InsightTone = 'positive' | 'warning' | 'neutral';
  */
 export const INSIGHT_DESTINATIONS = ['/flow', '/bills', '/transactions', '/wallet'] as const;
 
-export type InsightDestination = (typeof INSIGHT_DESTINATIONS)[number];
+type InsightDestination = (typeof INSIGHT_DESTINATIONS)[number];
 
 /** A declared destination, optionally scoped by a query. */
-export type InsightHref = InsightDestination | `${InsightDestination}?${string}`;
+type InsightHref = InsightDestination | `${InsightDestination}?${string}`;
 
 /**
  * Build a destination.

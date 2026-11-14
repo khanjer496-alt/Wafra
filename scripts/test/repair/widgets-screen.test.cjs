@@ -467,14 +467,14 @@ test('the small Today widget labels its seven bars with the exact complete seven
   // The bars are never alone: the labelled exact total sits right under them.
   assert.match(source, /words\.widgetLast7Total[\s\S]{0,400}<WeekBars snapshot=\{snapshot\}[\s\S]{0,400}\{weekShown\}/);
   assert.deepEqual(preview.widgetWeekShares(snapshot).map((v) => Math.round(v * 7)), [1, 2, 3, 4, 5, 6, 7]);
-  assert.match(source, /Image source=\{row\.logo\.source\}/);
+  assert.doesNotMatch(source, /expo-image|merchantLogoFor/);
 });
 
 
 test('subscription preview logos match native allowlisted snapshot identities with old-snapshot fallback', async () => {
   const bill = { title: 'Netflix', amountMinor: 3900, estimated: true, dueISO: '2026-09-27' };
   const withLogo = await screen({ snapshotOverride: { bills: [{ ...bill, logoId: 'netflix' }] } });
-  assert.equal(walk(withLogo.find('widgets-preview-upcoming')).filter(n => n.type === 'Image').length, 1);
+  assert.equal(walk(withLogo.find('widgets-preview-upcoming')).filter(n => n.type === 'Image').length, 0);
   for (const logoId of [undefined, 'unknown', '../netflix']) {
     const withoutLogo = await screen({ snapshotOverride: { bills: [{ ...bill, logoId }] } });
     assert.equal(walk(withoutLogo.find('widgets-preview-upcoming')).filter(n => n.type === 'Image').length, 0);

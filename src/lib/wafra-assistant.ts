@@ -74,7 +74,7 @@ export type AssistantTool =
  * but it never receives authority to calculate a financial figure itself.
  * Every amount still comes from Wafra's local ledger through this executor.
  */
-export interface AssistantFilters {
+interface AssistantFilters {
   accountIds?: string[];
   merchant?: string;
   category?: CategoryId;
@@ -2488,7 +2488,7 @@ export function executeAssistantTool(
  * Execute recurrence-backed chat tools without monopolising a foreground turn.
  * All other deterministic tools retain the normal synchronous path.
  */
-export async function executeAssistantToolCooperatively(
+async function executeAssistantToolCooperatively(
   state: AppState,
   request: AssistantToolRequest,
   now = new Date(),

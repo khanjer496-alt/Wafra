@@ -20,7 +20,7 @@ const FILL_SPRING = {
   reduceMotion: ReduceMotion.System,
 } as const;
 
-export interface ProgressBarProps {
+interface ProgressBarProps {
   /** 0..1; values above 1 are clamped but can switch the color to danger. */
   ratio: number;
   color: string;

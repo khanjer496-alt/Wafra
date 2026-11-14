@@ -37,10 +37,10 @@ export async function waitForLocalSemanticPreparation(
   if (cancelled()) throw new Error('local-semantic-runtime:cancelled');
 }
 
-export const isLocalSemanticPreparationCancelled = (error: unknown): boolean =>
+const isLocalSemanticPreparationCancelled = (error: unknown): boolean =>
   error instanceof Error && error.message === 'local-semantic-runtime:cancelled';
 
-export function createLocalSemanticPreparationController(background: boolean, waitForIdle: () => Promise<void>) {
+function createLocalSemanticPreparationController(background: boolean, waitForIdle: () => Promise<void>) {
   const lifecycleCancelled = localSemanticBackgroundCancellation();
   let optional = background;
   let promote!: () => void;
@@ -57,7 +57,7 @@ export function createLocalSemanticPreparationController(background: boolean, wa
   };
 }
 
-export type LocalSemanticPreparationController = ReturnType<typeof createLocalSemanticPreparationController>;
+type LocalSemanticPreparationController = ReturnType<typeof createLocalSemanticPreparationController>;
 
 /** Interactive callers promote the same preparation; a cancelled attempt settles before one retry. */
 export function createLocalSemanticPreparationFlight<T>(

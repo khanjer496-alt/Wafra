@@ -98,12 +98,12 @@ test('a month without spending is an empty month, not a missing one', () => {
 
 test('only exact bundled identities enter the widget snapshot; no paths or network hints', () => {
   const s = buildWidgetSnapshot(base);
-  assert.equal(s.bills[0].logoId, 'netflix');
+  assert.equal(s.bills[0].logoId, null);
   assert.equal(s.bills[1].logoId, null);
   for (const value of ['Cafe near Netflix', 'netflix.com/other', '../netflix', 'https://netflix.com', 'Netflix\u200e']) {
     assert.equal(logos.widgetLogoIdFor(value), null, value);
   }
-  assert.equal(logos.widgetLogoIdFor('نتفليكس'), 'netflix');
-  assert.equal(logos.widgetLogoIdFor('Apple.com/bill'), 'apple');
+  assert.equal(logos.widgetLogoIdFor('نتفليكس'), null);
+  assert.equal(logos.widgetLogoIdFor('Apple.com/bill'), null);
   assert.equal(logos.isWidgetLogoId('../../apple'), false);
 });

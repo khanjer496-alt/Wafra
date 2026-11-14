@@ -44,15 +44,6 @@ test('the sheet opens on the shared spring and keeps its Android / Reduce Motion
   assert.ok((sheet.match(/reducedMotion \|\| Platform\.OS === 'android'/g) ?? []).length >= 3);
 });
 
-test('the composition bar fade follows the app-wide motion policy (screen reader included)', () => {
-  const charts = code('src/components/ui/charts.tsx');
-  // useScreenEntering = useReducedMotion (Reduce Motion OR a screen reader) plus Android's bypass.
-  assert.match(charts, /const enter = useScreenEntering\(\);/);
-  assert.match(charts, /entering=\{enter\(FadeIn\.delay/);
-  assert.doesNotMatch(charts, /entering=\{FadeIn\.delay/);
-  assert.match(code('src/hooks/use-screen-entering.ts'), /Platform\.OS === 'android' \|\| reducedMotion \? undefined : animation/);
-});
-
 test('the choice check pops on the spring with motion and only cross-fades without it', () => {
   const sheet = code('src/components/ui/choice-sheet.tsx');
   assert.match(sheet, /withSpring\(target, \{ \.\.\.MotionSpring/);

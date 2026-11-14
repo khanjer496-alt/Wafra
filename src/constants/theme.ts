@@ -9,8 +9,6 @@
 
 import '@/global.css';
 
-import { Platform } from 'react-native';
-
 // Original palette, with explicit control/inverse roles required by current screens.
 export const Colors = {
   light: {
@@ -218,7 +216,6 @@ export const CoinColors = {
  */
 export const ScreenPadding = 18;
 
-export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
 export const MaxContentWidth = 800;
 
 /* ─────────────────────────────────────────────────────────────────────────

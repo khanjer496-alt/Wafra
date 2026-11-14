@@ -12,7 +12,7 @@ import { isTransferCandidate } from '@/lib/transfer-reconciliation';
 import { uncategorisedMerchants, worthPrompting, type UncategorisedSummary } from '@/lib/uncategorised';
 import type { Account, AppState, Transaction } from '@/lib/types';
 
-export interface DashboardProjectionRequest {
+interface DashboardProjectionRequest {
   state: AppState;
   period: Period;
   now: Date;
@@ -27,7 +27,7 @@ export interface DashboardProjectionRequest {
   activityLimit?: number;
 }
 
-export interface DashboardProjection {
+interface DashboardProjection {
   live: boolean;
   hero: {
     incomeFils: number; expenseFils: number; cashOutFils: number;
@@ -45,7 +45,7 @@ export interface DashboardProjection {
   uncategorised: { summary: UncategorisedSummary; shouldPrompt: boolean };
 }
 
-export interface HomeDashboardProjection extends Pick<DashboardProjection,
+interface HomeDashboardProjection extends Pick<DashboardProjection,
   'upcoming' | 'activityRows' | 'accountById' | 'internalTransactionIds' | 'uncategorised'> {
   hero: Pick<DashboardProjection['hero'], 'incomeFils' | 'expenseFils' | 'netFils'>;
   /** The period has transfer records on live accounts; Home links to Transfers. */

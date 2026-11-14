@@ -97,7 +97,7 @@ const ar: typeof en = {
 
 export const motionAndroidCopyTables = { en, ar } as const;
 
-export type MotionAndroidCopy = typeof en;
+type MotionAndroidCopy = typeof en;
 
 /** The table for `language`, read at render time (never at import time). */
 export const motionAndroidCopy = (language: string = getLanguage()): MotionAndroidCopy =>

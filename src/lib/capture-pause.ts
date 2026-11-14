@@ -20,21 +20,21 @@
 
 export const DAY_MS = 86_400_000;
 /** History needed before a "usual" rhythm exists. */
-export const MIN_HISTORY_MS = 14 * DAY_MS;
+const MIN_HISTORY_MS = 14 * DAY_MS;
 /** Floor on the silence that can ever count as stopped. */
-export const MIN_SILENCE_MS = 3 * DAY_MS;
+const MIN_SILENCE_MS = 3 * DAY_MS;
 /** How much longer than usual the silence must be. */
-export const GAP_MULTIPLIER = 3;
+const GAP_MULTIPLIER = 3;
 /** Captures needed in the window for a median to mean anything. */
-export const MIN_CAPTURES = 6;
+const MIN_CAPTURES = 6;
 /** Rhythm is read from recent captures only; habits change. */
-export const RHYTHM_WINDOW_MS = 90 * DAY_MS;
+const RHYTHM_WINDOW_MS = 90 * DAY_MS;
 /** A clock skewed into the future is not evidence of a recent capture. */
 const FUTURE_TOLERANCE_MS = DAY_MS;
 
-export type CaptureRhythm = 'several-a-day' | 'about-daily' | 'every-few-days';
+type CaptureRhythm = 'several-a-day' | 'about-daily' | 'every-few-days';
 
-export interface CapturePauseInput {
+interface CapturePauseInput {
   /** Epoch ms of live captures (bank text, app alert, Apple Pay). Any order. */
   captureTimes: readonly number[];
   nowMs: number;
@@ -42,7 +42,7 @@ export interface CapturePauseInput {
   snoozedAtMs: number | null;
 }
 
-export interface CapturePause {
+interface CapturePause {
   stopped: boolean;
   lastCaptureMs: number;
   /** Whole days since the last capture (not since the snooze). */
@@ -58,7 +58,7 @@ function median(values: number[]): number {
   return sorted.length % 2 === 1 ? sorted[mid]! : Math.round((sorted[mid - 1]! + sorted[mid]!) / 2);
 }
 
-export function captureRhythm(typicalGapMs: number): CaptureRhythm {
+function captureRhythm(typicalGapMs: number): CaptureRhythm {
   if (typicalGapMs <= DAY_MS / 2) return 'several-a-day';
   if (typicalGapMs <= DAY_MS * 1.5) return 'about-daily';
   return 'every-few-days';

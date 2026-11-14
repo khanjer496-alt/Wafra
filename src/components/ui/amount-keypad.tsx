@@ -127,7 +127,7 @@ interface KeypadAmountDisplayProps {
 }
 
 /** What a form can do with the display: move assistive focus to it. */
-export interface KeypadAmountDisplayHandle {
+interface KeypadAmountDisplayHandle {
   focus: () => void;
 }
 

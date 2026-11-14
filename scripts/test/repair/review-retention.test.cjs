@@ -252,12 +252,16 @@ test('an expired tombstone is a dedupe barrier that eviction records cannot trim
   assert.equal(pruned.tombstones.filter(x => x.outcome === 'evicted').length, tray.REVIEW_TOMBSTONE_CAP - 1);
   assert.equal(tray.admitPreparedReviewAlerts(pruned, [{ ...item, expiresAt: now + tray.REVIEW_ALERT_TTL_MS }], now).outcomes[0], 'expired');
 });
-test('iOS History passes an expired source and continues, but still stops on an evicted or deferred one', async () => {
+test('iOS History passes an expired or refused source and continues, but still stops on a deferred one', async () => {
   const history = source('lib/ios-history-import'); const item = payment(0);
   const key = tray.reviewRetentionReceipts(tray.emptyAlertReviewTray(), [item], now)[0].sourceKey;
   const stage = outcome => () => ({ admitted: 0, durable: Promise.resolve(), retention: () => [{ sourceKey: key, outcome }] });
   assert.equal(await history.persistIosHistoryReviewCandidates([item], stage('expired')), 0);
-  for (const held of ['deferred', 'refused']) {
+  // A refused source can never be admitted: holding History for it froze every
+  // later message (Android RC 396 F1). It passes like expired; only a capacity
+  // deferral (or a missing receipt) holds.
+  assert.equal(await history.persistIosHistoryReviewCandidates([item], stage('refused')), 0);
+  for (const held of ['deferred']) {
     await assert.rejects(history.persistIosHistoryReviewCandidates([item], stage(held)), error => error.code === 'review-capacity');
   }
 });
