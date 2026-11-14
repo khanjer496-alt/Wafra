@@ -6721,7 +6721,7 @@ const NOTICE_REFUND_TELEGRAPHIC_CREDIT_RE =
   /(?<!\b(?:be|being|once|when|if|after|until|unless)\s+)\b(?:credited|refunded|reversed|returned|processed|deposited)\s+(?:back\s+)?(?:to|into)\s+your\b/i;
 /** Remove only amount-free request sentences beside a separately stated movement. */
 export function withoutUncompletedRequestNotes(message: string): string {
-  if (!/request|طلب|claim|application/i.test(message) || hasActionableRefundRequest(message)) return message;
+  if (!/request|طلب|claim|application|dispute/i.test(message) || hasActionableRefundRequest(message)) return message;
   const ends = [...message.matchAll(/[.!?](?=\s|$)|[;؛]|\n/g)].map(m => m.index! + m[0].length);
   ends.push(message.length);
   let start = 0;
@@ -6742,7 +6742,7 @@ function hasActionableRefundRequest(message: string): boolean {
 }
 /** A request records intent. Only a separate, completed money verb can establish a credit. */
 function isUncompletedRefundRequest(text: string): boolean {
-  return isRefundRequest(text) && !NOTICE_REFUND_COMPLETED_RE.test(normalizeCreditText(text).replace(/\|/g, ' '));
+  return (isRefundRequest(text) || /\b(?:your|the)\s+dispute\b/iu.test(text) && hasPendingCreditStatus(text)) && !NOTICE_REFUND_COMPLETED_RE.test(normalizeCreditText(text).replace(/\|/g, ' '));
 }
 /** The text says a refund or reversal is still in process and states no completed credit for it. */
 function refundInProcessUncompleted(text: string): boolean {

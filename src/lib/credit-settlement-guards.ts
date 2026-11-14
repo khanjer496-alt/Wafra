@@ -27,6 +27,7 @@ const CONDITION_HEAD = /^(?:only\s+)?(?:if\b|unless\b|until\b|whether\b|once\b|w
 const COMPLEMENT_HEAD = /(?:\b(?:subject\s+to|conditional\s+(?:on|upon)|contingent\s+on|depending\s+on|on|upon|under|in|status)|(?:بشرط|شريطه|شرط|رهن|لحين|حتي|ريثما))\s*$/iu;
 function qualificationScope(source: string): string {
   const text = normalizeCreditText(source)
+    .replace(/\bif\s+(?:(?:(?:the|this|your)\s+transaction\s+)?(?:has\s+been\s+|was\s+|is\s+)?(?:not\s+)?authori[sz]ed\s+by\s+you|you\s+did\s+not\s+authori[sz]e\s+(?:this|it))\s*(?:\|\s*)?(?:(?:please|kindly)\s+)?(?:call|contact|ignore|disregard)\b[^|.]*/gi, ' ')
     .replace(/\b(?:from|FROM|by|BY)\s+[A-Z][\p{Lu}\p{N} .&'’]+/gu, ' ')
     .replace(/(?:من|لدي|بواسطه)\s+(?:شركه|موسسه)\s+[^|.]+/g, ' ')
     .replace(/\bfor\s+(?:your|the)\s+(?:(?:cancelled|canceled|previously|original|pending|scheduled|reversed)\s+)+(?:payment|purchase|order|transaction)\b/gi, ' ')
