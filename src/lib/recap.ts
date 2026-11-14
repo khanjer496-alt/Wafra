@@ -7,14 +7,14 @@ import { allocationsOf, dominantCategory } from '@/lib/splits';
 import type { Account, AppState, CategoryId, Transaction } from '@/lib/types';
 
 export type RecapKind = 'month' | 'year';
-export type RecapTimeBucket = 'morning' | 'afternoon' | 'evening' | 'night';
+type RecapTimeBucket = 'morning' | 'afternoon' | 'evening' | 'night';
 export const RECAP_TIME_BUCKETS: readonly RecapTimeBucket[] = ['morning', 'afternoon', 'evening', 'night'];
 
 export type RecapDescriptor =
   | { id: string; kind: 'month'; key: string; period: Period; label: string }
   | { id: string; kind: 'year'; year: number; period: Period; label: string };
 
-export interface RecapMerchant {
+interface RecapMerchant {
   key: string;
   title: string;
   category: CategoryId;
@@ -22,14 +22,14 @@ export interface RecapMerchant {
   count: number;
 }
 
-export interface RecapCategory {
+interface RecapCategory {
   category: CategoryId;
   label: string;
   spendFils: number;
   percent: number;
 }
 
-export interface RecapAccount {
+interface RecapAccount {
   account: Account;
   label: string;
   spendFils: number;

@@ -195,7 +195,7 @@ const reminderScheduler: ReminderSchedulerApi = {
   },
 };
 
-export interface ReminderSyncOptions {
+interface ReminderSyncOptions {
   /** Headless capture updates known obligations without rescanning recurrence. */
   obligationsOnly?: boolean;
 }

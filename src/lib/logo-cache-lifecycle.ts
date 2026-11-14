@@ -7,10 +7,12 @@ const resetters = new Set<() => void>();
 let generation = 0;
 let lookupsAllowed = false;
 
-/** Consent is session-gated until the hydrated store has explicitly opted in. */
+/** Retired compatibility API: old opt-in values cannot enable artwork in 1.0. */
 export function setLogoLookupsAllowed(allowed: boolean): void {
-  if (lookupsAllowed === allowed) return;
-  lookupsAllowed = allowed;
+  // Artwork networking is retired for 1.0 on every platform.
+  void allowed;
+  if (!lookupsAllowed) return;
+  lookupsAllowed = false;
   generation += 1;
   for (const reset of resetters) reset();
 }
@@ -28,7 +30,7 @@ export function registerLogoCacheReset(reset: () => void): void {
   resetters.add(reset);
 }
 
-/** Both platforms skip cache, search and CDN resolution until explicit opt-in. */
+/** No caller can obtain authority to resolve or persist artwork in 1.0. */
 export function logoCacheGeneration(): number | null {
   return !lookupsAllowed || erasesInProgress > 0 ? null : generation;
 }

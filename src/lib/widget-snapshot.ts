@@ -18,7 +18,7 @@ import type { HomeToday } from '@/lib/home-today';
 export const WIDGET_SNAPSHOT_VERSION = 1;
 export const WIDGET_UPCOMING_DAYS = 30;
 /** Categories the Spending widget names or draws as their own segment. */
-export const WIDGET_SPENDING_CATEGORIES = 6;
+const WIDGET_SPENDING_CATEGORIES = 6;
 
 export interface WidgetBill {
   /** Optional, bundled artwork id. Older snapshots safely fall back to an initial. */
@@ -176,6 +176,6 @@ function widgetSpending(
 }
 
 /** "#RRGGBB" only: the native readers accept nothing else. */
-export function isWidgetColor(value: unknown): value is string {
+function isWidgetColor(value: unknown): value is string {
   return typeof value === 'string' && /^#[0-9A-Fa-f]{6}$/.test(value);
 }

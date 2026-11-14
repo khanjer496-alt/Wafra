@@ -2,7 +2,7 @@ import { requestConsent, type ConsentPrompt } from '@/lib/consent-prompt';
 import { t, type Lang } from '@/lib/i18n';
 import { onboardingCopy } from '@/lib/onboarding-copy';
 
-export type AndroidCaptureDisclosure = NonNullable<ConsentPrompt['androidCapture']>;
+type AndroidCaptureDisclosure = NonNullable<ConsentPrompt['androidCapture']>;
 
 /** The host localizes this same disclosure for every Android entry point. */
 export function androidCaptureDisclosure(kind: AndroidCaptureDisclosure, language: Lang): ConsentPrompt {

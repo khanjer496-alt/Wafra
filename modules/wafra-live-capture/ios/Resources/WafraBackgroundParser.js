@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: aa7da6169cf080d12453cec9421cfc3943e781e82b568aa166b771c001aa2863
+// Generated from normal shipping TypeScript. Source SHA-256: 8707c1e9d94ccce5600528696ae113ebd3f0c52f93155b96796ce34a9b946c20
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -10943,6 +10943,23 @@ const AR_INFORM_BEFORE_RE = new RegExp(`${AR_NB}(?:اعلام|ابلاغ|اخب�
 const AR_ANSWER_RE = new RegExp(`${AR_NB}ف?(?:س[يتن][${AR_LETTER}]{2,}|سوف\\s+[${AR_LETTER}]+|يرجي|الرجاء|يمكنك|بامكانك|لا\\s+داعي)|` +
     `${AR_NB}ف?(?:نرجو|اعتبر)${AR_NA}|${AR_NB}ف(?:تحقق|اتصل|تجاهل|راجع|تواصل|لا)${AR_NA}`);
 const AR_NEXT_ANSWER_RE = new RegExp(`^\\s*(?:ف[${AR_LETTER}]|(?:ستصلك|سيصلك|ستتلقي|سوف\\s+(?:تصلك|يصلك|تتلقي)|سيتم\\s+(?:اشعارك|ابلاغك|اعلامك))${AR_NA})`);
+const AR_NEXT_COURTESY_CONDITION_RE = new RegExp(`^\\s*في\\s+حال(?:ه)?\\s+(?:وجود|كان\\s+لديك|لديك|لم\\s+(?:تتعرف|تقم|تكن))${AR_NA}`);
+const AR_NEXT_COURTESY_NOUN_RE = new RegExp(`^\\s*(?:فريق|فريقنا|فرع|فرعنا|فروع|فروعنا)${AR_NA}`);
+const AR_NEXT_NOUN_ANSWER_RE = new RegExp(`${AR_NB}[بلو]?(?:[يتن]رجو|تجاهل|اعتبر)${AR_NA}|` +
+    `${AR_NB}(?:لا|لن)\\s+(?:يطلب|يتطلب|يلزم)${AR_NA}(?!\\s+منك\\s+(?:ابدا\\s+)?(?:رمز|كلمه|بيانات|معلومات))`);
+const AR_NEXT_CONDITION_ANSWER_RE = new RegExp(`${AR_NB}ف(?:يرجي|لا(?!\\s+تتردد)|سوف|س[يتن]|يمكنك|تجاهل|اعتبر|نرجو)`);
+const AR_NEXT_COURTESY_INQUIRY_RE = new RegExp(`^\\s*في\\s+حال(?:ه)?\\s+(?:(?:وجود|كان\\s+لديك|لديك)\\s+(?:اي(?:ه)?\\s+)?(?:استفسار|سوال|سؤال|ملاحظ)[${AR_LETTER}]*|` +
+    `لم\\s+(?:تتعرف\\s+علي|تقم\\s+ب)\\s*(?:هذه|هذا)?\\s*(?:ال)?(?:عمليه|معامله|حركه|دفعه|طلب)${AR_NA})`);
+function arNextSentenceAnswers(rawNext) {
+    const next = rawNext.replace(/[\u064B-\u0652]/g, '');
+    if (AR_NEXT_COURTESY_INQUIRY_RE.test(next))
+        return false;
+    if (AR_NEXT_COURTESY_CONDITION_RE.test(next) && !AR_NEXT_CONDITION_ANSWER_RE.test(next))
+        return false;
+    if (AR_NEXT_COURTESY_NOUN_RE.test(next) && !AR_ANSWER_RE.test(next) && !AR_NEXT_NOUN_ANSWER_RE.test(next))
+        return false;
+    return AR_NEXT_ANSWER_RE.test(next);
+}
 const AR_PROCESSED_NOT_YET_RE = new RegExp(`${AR_NB}(?:سيظهر|ستظهر|سينعكس|ستنعكس|سيضاف|ستضاف|سيتم\\s+(?:ايداع|اضافه|اظهار))${AR_NA}|${AR_NB}قد\\s+يستغرق[^.\\n]{0,40}?(?:يوم|ايام)${AR_NA}`);
 const AR_VERB_GLOSS = {
     استرداد: 'refunded', استرجاع: 'refunded', ايداع: 'credited', ارجاع: 'returned', اعاده: 'returned', عكس: 'reversed', معالجه: 'processed',
@@ -11009,7 +11026,7 @@ function arCreditSettlement(sentence, clause, rawAfter, raw) {
             return true;
         if (letter !== 'ا')
             return false;
-        return !AR_ANSWER_RE.test(sentence.slice(clause.end)) && !AR_NEXT_ANSWER_RE.test(next);
+        return !AR_ANSWER_RE.test(sentence.slice(clause.end)) && !arNextSentenceAnswers(next);
     };
     const leaders = [...lead.matchAll(AR_CONDITIONAL_RE)].filter((leader) => !informedThat(leader));
     const last = leaders[leaders.length - 1];
@@ -15225,8 +15242,23 @@ const LABEL_ROLES = {
     minimum: 'minimum-due', total: 'statement-total', limit: 'credit-limit',
     balance: 'balance', bill: 'bill-due', fee: 'fee', feeweak: 'fee', transaction: 'transaction',
 };
+function execAll(pattern, text) {
+    if (!pattern.global)
+        throw new Error('execAll needs a global pattern');
+    const found = [];
+    pattern.lastIndex = 0;
+    for (let match = pattern.exec(text); match !== null; match = pattern.exec(text)) {
+        found.push(match);
+        if (match[0] === '') {
+            const code = text.codePointAt(pattern.lastIndex);
+            pattern.lastIndex += pattern.unicode && code !== undefined && code > 0xffff ? 2 : 1;
+        }
+    }
+    pattern.lastIndex = 0;
+    return found;
+}
 function labels(text, marketLabels = null) {
-    const found = [...text.matchAll(LABEL)].map((match) => {
+    const found = execAll(LABEL, text).map((match) => {
         const group = Object.keys(match.groups ?? {}).find((key) => match.groups?.[key] !== undefined);
         return { role: LABEL_ROLES[group], start: match.index, text: match[0], weak: group === 'feeweak' };
     });

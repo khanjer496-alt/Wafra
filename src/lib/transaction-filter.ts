@@ -10,7 +10,7 @@ import type { CategoryId, CustomCategory, Transaction, TransactionType } from '@
 export type DatePreset = 'selected' | 'all' | 'month' | 'lastMonth' | '3months' | 'custom';
 export type SortMode = 'newest' | 'oldest' | 'largest';
 /** The Transactions type chips beyond plain direction: transfers, and rows needing a check. */
-export type TransactionKind = 'transfers' | 'review';
+type TransactionKind = 'transfers' | 'review';
 export interface TransactionFilters {
   type: TransactionType | null; accountId: string | null; categories: Set<CategoryId>;
   datePreset: DatePreset; dateFrom: string | null; dateTo: string | null;

@@ -1,4 +1,4 @@
-export interface DonutHitSlice {
+interface DonutHitSlice {
   key: string;
   value: number;
 }

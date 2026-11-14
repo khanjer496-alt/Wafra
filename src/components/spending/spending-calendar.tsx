@@ -27,7 +27,7 @@ type Props = {
 };
 
 /** A day's short spoken date ("10 Sept"). */
-export function calendarDayLabel(iso: string, language: string): string {
+function calendarDayLabel(iso: string, language: string): string {
   return new Date(`${iso}T12:00:00Z`)
     .toLocaleDateString(language === 'ar' ? 'ar-AE' : 'en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 }

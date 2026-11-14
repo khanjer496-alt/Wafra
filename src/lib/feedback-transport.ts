@@ -38,7 +38,7 @@ interface FeedbackResponse {
   dispatched?: unknown;
 }
 
-export interface TesterDiagnosticWirePayload {
+interface TesterDiagnosticWirePayload {
   schema: 1;
   text: 'Android tester diagnostics.';
   appVersion: string;

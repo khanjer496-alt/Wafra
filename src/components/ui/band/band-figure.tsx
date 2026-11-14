@@ -12,7 +12,7 @@ import { formatAmount } from '@/lib/format';
 import { currencyDisplayLabel, currencyPlacement, formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
 
-export type BandFigureSize = 'hero' | 'large' | 'medium';
+type BandFigureSize = 'hero' | 'large' | 'medium';
 
 /** Band figures: Geist SemiBold with tabular digits, never Geist Mono (its comma spaces out "5 , 480"). */
 const SIZES: Record<BandFigureSize, { fontSize: number; lineHeight: number; letterSpacing: number; cap: number; prefix: number }> = {
@@ -52,7 +52,7 @@ function signGlyph(fils: number, sign: Sign): string {
   return fils < 0 ? '−' : '';
 }
 
-export interface BandFigureProps {
+interface BandFigureProps {
   /** What the figure is ("Spent this month"). Spoken first. */
   label?: string;
   fils: number;

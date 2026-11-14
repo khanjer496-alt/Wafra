@@ -14,7 +14,7 @@ import Svg, { Circle, Path } from 'react-native-svg';
 import { sparklinePath, sparklinePoints } from '@/lib/home-hero';
 import { isRTL } from '@/lib/i18n';
 
-export const SPARKLINE_HEIGHT = 30;
+const SPARKLINE_HEIGHT = 30;
 
 export const HomeSparkline = React.memo(function HomeSparkline({ cumulative, monthDays, ceiling = 0, width, color, dotColor, progress, testID }: {
   cumulative: readonly number[];

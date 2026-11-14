@@ -10,7 +10,7 @@
  * Widget"; Android launchers say "home screen" and "Widgets".
  */
 type Platform = 'ios' | 'android';
-export type WidgetKind = 'today' | 'upcoming' | 'spending';
+type WidgetKind = 'today' | 'upcoming' | 'spending';
 
 /** Arabic count of payments, as the iOS widget and the Android plurals say it. */
 function arabicPayments(count: number): string {

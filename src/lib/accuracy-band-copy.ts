@@ -30,7 +30,7 @@ export const accuracyBandCopyTables = {
   },
 };
 
-export type AccuracyBandCopy = (typeof accuracyBandCopyTables)['en'];
+type AccuracyBandCopy = (typeof accuracyBandCopyTables)['en'];
 
 export function accuracyBandCopy(language: string): AccuracyBandCopy {
   return language === 'ar' ? accuracyBandCopyTables.ar : accuracyBandCopyTables.en;

@@ -6,14 +6,14 @@ import { assessUniversalEventConfidence } from '@/lib/universal-confidence';
 import { certifiedLatamTemplateId } from '@/lib/latam-alert-templates';
 import type { UniversalBankEvent } from '@/lib/universal-types';
 
-export type UniversalTemplateCertificationDecision =
+type UniversalTemplateCertificationDecision =
   | 'automatic'
   | 'semantic-generalized'
   | 'review'
   | 'never-post'
   | 'adapter-required';
 
-export interface UniversalTemplateCertificationInput {
+interface UniversalTemplateCertificationInput {
   market: UniversalMarket;
   institution: string | null;
   source: string;
@@ -28,7 +28,7 @@ export interface UniversalTemplateCertificationInput {
   allowSemanticGeneralization?: boolean;
 }
 
-export interface UniversalTemplateCertification {
+interface UniversalTemplateCertification {
   decision: UniversalTemplateCertificationDecision;
   /** Stable code-owned grammar id. Never derived from source text. */
   templateId: string | null;

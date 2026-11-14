@@ -35,13 +35,13 @@ export const MAX_APPLE_PAY_CARD_LINKS = 32;
  * same window the planner and Review use for a possible Apple Pay duplicate.
  * Inside it the same amount always asks, whatever the merchant text says.
  */
-export const APPLE_PAY_AUTO_POST_OVERLAP_MS = 10 * 60_000;
+const APPLE_PAY_AUTO_POST_OVERLAP_MS = 10 * 60_000;
 /**
  * A bank alert can also arrive hours or days late. Within this window the same
  * amount still asks unless the two merchant texts clearly name different
  * shops. A needless question is cheap; a double count is not.
  */
-export const APPLE_PAY_LATE_MATCH_MS = 3 * 24 * 60 * 60_000;
+const APPLE_PAY_LATE_MATCH_MS = 3 * 24 * 60 * 60_000;
 
 const ACCOUNT_ID_RE = /^[A-Za-z0-9_.:-]{1,128}$/;
 /** Words that say nothing about which shop it was. */
@@ -203,7 +203,7 @@ function mayAlreadyBeRecorded(
   });
 }
 
-export interface LinkedApplePayPlan {
+interface LinkedApplePayPlan {
   /** New ledger rows, one per posted review, newest first. */
   transactions: Transaction[];
   /** The tray with each posted review resolved as 'added' (its replay barrier). */

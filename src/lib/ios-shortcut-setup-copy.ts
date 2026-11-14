@@ -133,5 +133,5 @@ const copy = {
     oneToggleBody: 'أضفه، ثم فعّل الأتمتة الخاصة به.',
   },
 };
-export type IosShortcutSetupCopy = (typeof copy)['en'];
+type IosShortcutSetupCopy = (typeof copy)['en'];
 export const iosShortcutSetupCopy = (language: string): IosShortcutSetupCopy => copy[language === 'ar' ? 'ar' : 'en'];

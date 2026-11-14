@@ -60,7 +60,7 @@ const MAX_PAGES = 40;
 const MAX_EXCLUDED_RECORDS = 2000;
 const MAX_APPLE_PAY_PAGES = 4;
 
-export interface IosLocalCaptureOutcome {
+interface IosLocalCaptureOutcome {
   scanned: number;
   imported: number;
   reviews: number;
@@ -84,7 +84,7 @@ export interface IosLocalCaptureOutcome {
   currencyConflicts?: number;
 }
 
-export interface IosLocalCaptureCoordinator {
+interface IosLocalCaptureCoordinator {
   drain(): Promise<IosLocalCaptureOutcome>;
   retryRetirementIfNeeded(): Promise<'not-needed' | 'complete' | 'retry-needed'>;
 }

@@ -635,26 +635,65 @@ function ktSources(dir) {
   ok('native SQLite is built with SQLCipher', sqlite?.[1]?.useSQLCipher === true);
   ok('Android does not cloud-backup the encrypted database', config.android?.allowBackup === false);
 
+  const accessedApis = config.ios?.privacyManifests?.NSPrivacyAccessedAPITypes ?? [];
+  // App-private settings/files, App Group widget snapshots, and the parser
+  // deadline use first-party APIs; SDK manifests do not replace our declaration.
+  const expectedApiReasons = {
+    NSPrivacyAccessedAPICategoryUserDefaults: ['1C8F.1', 'CA92.1'],
+    NSPrivacyAccessedAPICategorySystemBootTime: ['35F9.1'],
+    NSPrivacyAccessedAPICategoryFileTimestamp: ['C617.1'],
+  };
+  ok('first-party required-reason APIs declare app settings, files, App Group and timer use',
+    accessedApis.length === Object.keys(expectedApiReasons).length &&
+      JSON.stringify(Object.fromEntries(accessedApis.map((entry) =>
+        [entry.NSPrivacyAccessedAPIType, [...entry.NSPrivacyAccessedAPITypeReasons].sort()])
+        .sort(([a], [b]) => a.localeCompare(b)))) ===
+      JSON.stringify(Object.fromEntries(Object.entries(expectedApiReasons)
+        .sort(([a], [b]) => a.localeCompare(b)))));
+
+  const widgetPrivacy = read('targets/widget/PrivacyInfo.xcprivacy');
+  ok('the widget executable has its own App Group defaults reason',
+    /<key>NSPrivacyAccessedAPIType<\/key>\s*<string>NSPrivacyAccessedAPICategoryUserDefaults<\/string>/.test(widgetPrivacy) &&
+      /<key>NSPrivacyAccessedAPITypeReasons<\/key>\s*<array>\s*<string>1C8F\.1<\/string>\s*<\/array>/.test(widgetPrivacy) &&
+      /<key>NSPrivacyTracking<\/key>\s*<false\s*\/>/.test(widgetPrivacy));
+
   const collectedData = config.ios?.privacyManifests?.NSPrivacyCollectedDataTypes ?? [];
   const collectedTypes = new Set(collectedData.map((entry) => entry.NSPrivacyCollectedDataType));
-  const expectedCollectedTypes = [
-    'NSPrivacyCollectedDataTypeOtherFinancialInfo',
-    'NSPrivacyCollectedDataTypePurchaseHistory',
-    'NSPrivacyCollectedDataTypeDeviceID',
-    'NSPrivacyCollectedDataTypeCustomerSupport',
-    'NSPrivacyCollectedDataTypeOtherUserContent',
-  ];
-  ok('the iOS config declares the data retained by Wafra services',
-    expectedCollectedTypes.every((type) => collectedTypes.has(type)) &&
+  // Matches docs/store-compliance/app-privacy-answers.md and the CEO's 13–14 Nov
+  // decisions. Emails or Text Messages is excluded only after legacy /v1/ingest
+  // is disabled: that server-side submission gate remains mandatory.
+  const AF = 'NSPrivacyCollectedDataTypePurposeAppFunctionality';
+  const AN = 'NSPrivacyCollectedDataTypePurposeAnalytics';
+  const expectedPurposes = {
+    NSPrivacyCollectedDataTypePurchaseHistory: [AF, AN].sort(),
+    NSPrivacyCollectedDataTypeDeviceID: [AF],
+    NSPrivacyCollectedDataTypeUserID: [AF],
+    NSPrivacyCollectedDataTypeCrashData: [AF],
+    NSPrivacyCollectedDataTypeOtherDiagnosticData: [AF, AN].sort(),
+    NSPrivacyCollectedDataTypeProductInteraction: [AF, AN].sort(),
+    NSPrivacyCollectedDataTypeCoarseLocation: [AF, AN].sort(),
+    NSPrivacyCollectedDataTypeOtherFinancialInfo: [AF],
+    NSPrivacyCollectedDataTypeCustomerSupport: [AF],
+    NSPrivacyCollectedDataTypeOtherUserContent: [AF],
+  };
+  const expectedCollectedTypes = Object.keys(expectedPurposes);
+  ok('the iOS config declares exactly the approved data types with no tracking',
+    collectedData.length === expectedCollectedTypes.length &&
+      !collectedTypes.has('NSPrivacyCollectedDataTypeEmailsOrTextMessages') &&
+      config.ios?.privacyManifests?.NSPrivacyTracking === false &&
+      expectedCollectedTypes.every((type) => collectedTypes.has(type)) &&
       collectedData.every((entry) =>
-        typeof entry.NSPrivacyCollectedDataTypeLinked === 'boolean' &&
-        entry.NSPrivacyCollectedDataTypeTracking === false &&
-        entry.NSPrivacyCollectedDataTypePurposes?.includes(
-          'NSPrivacyCollectedDataTypePurposeAppFunctionality',
-        )));
+        entry.NSPrivacyCollectedDataTypeTracking === false));
+  ok('pseudonymous data is linked, with only unlinked customer support excepted',
+    collectedData.every((entry) => entry.NSPrivacyCollectedDataTypeLinked ===
+      (entry.NSPrivacyCollectedDataType !== 'NSPrivacyCollectedDataTypeCustomerSupport')));
+  ok('each declared data type carries exactly its approved purposes',
+    JSON.stringify(Object.fromEntries(collectedData.map((entry) =>
+      [entry.NSPrivacyCollectedDataType, [...entry.NSPrivacyCollectedDataTypePurposes].sort()]).sort(([a], [b]) => a.localeCompare(b)))) ===
+    JSON.stringify(Object.fromEntries(Object.entries(expectedPurposes).sort(([a], [b]) => a.localeCompare(b)))));
   const purchaseHistory = collectedData.find((entry) =>
     entry.NSPrivacyCollectedDataType === 'NSPrivacyCollectedDataTypePurchaseHistory');
-  ok('RevenueCat purchase history declares both entitlement and dashboard use',
+  ok('Superwall purchase history declares both entitlement and analytics use',
     purchaseHistory?.NSPrivacyCollectedDataTypePurposes?.includes(
       'NSPrivacyCollectedDataTypePurposeAnalytics',
     ));
@@ -2343,9 +2382,6 @@ ok('the spoken label matches the visible repayment exception and direction',
     // them with typed placeholders before anything is embedded; it is a
     // redactor, and its own contract below keeps it away from ledger writers.
     'local-semantic-model.ts',
-    // Type-only: the AI gate's country-scoped currency aliases share the
-    // draft's alias-map type. Neither module writes the ledger.
-    'ai-alert-cues.ts',
     // Per-user learned formats ground the confirmed amount on a draft money
     // token; they store slot types and anchors only, never message text.
     'learned-alert-formats.ts',
@@ -2412,10 +2448,7 @@ ok('the spoken label matches the visible repayment exception and direction',
     // Any ISO purchase currency is read at its own exponent; outside the
     // offline table it converts only with a dated rate or waits in Review.
     'sms-parser.ts',
-    // The AI-reading gate checks a grounded amount's exponent; the cue module
-    // types its country-scoped aliases; learned formats re-check exponents.
-    'ai-alert-extractor.ts',
-    'ai-alert-cues.ts',
+    // Learned formats re-check exponents.
     'learned-alert-formats.ts',
     // Gulf-neighbour posting checks the launch grammar's original amount is
     // at its own currency's exponent (KWD/BHD/OMR three, QAR two).

@@ -12,7 +12,6 @@ import Animated, {
 
 import { ThemedText } from '@/components/themed-text';
 import { Button } from '@/components/ui/controls';
-import { Icon } from '@/components/ui/icon';
 import { EASE, Motion, Radius, Spacing } from '@/constants/theme';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
@@ -144,37 +143,6 @@ export function EmptyMonth({
 }
 
 /* ── Permission denied ───────────────────────────────────────────────── */
-
-export function PermissionDenied({
-  onOpenSettings,
-  onKeepManual,
-}: {
-  onOpenSettings: () => void;
-  onKeepManual?: () => void;
-}) {
-  const theme = useTheme();
-  return (
-    <View
-      style={[
-        styles.deniedBlock,
-        { backgroundColor: theme.expenseSoftBg, borderColor: theme.expenseSoftBorder },
-      ]}>
-      <View style={styles.deniedHead}>
-        <Icon name="alert" size={17} color={theme.expense} />
-        <ThemedText type="small" style={{ color: theme.expense }}>
-          {t('smsAccessOff')}
-        </ThemedText>
-      </View>
-      <ThemedText type="default" themeColor="textSecondary">
-        {t('smsPermissionPath')}
-      </ThemedText>
-      <View style={styles.actions}>
-        <Button inline label={t('openSettings')} onPress={onOpenSettings} />
-        {onKeepManual && <Button inline variant="outline" label={t('keepManual')} onPress={onKeepManual} />}
-      </View>
-    </View>
-  );
-}
 
 const styles = StyleSheet.create({
   skeletonList: {

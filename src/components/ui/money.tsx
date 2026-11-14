@@ -95,7 +95,7 @@ const HERO_FIGURE: Partial<Record<TextType, { size: number; cap: number }>> = {
   amount: { size: 32, cap: 1.8 },
 };
 /** figureFontMultiplier for the hero figure types (see src/lib/large-text-figure.ts). */
-export function heroFigureMultiplier(
+function heroFigureMultiplier(
   chars: number,
   type: TextType,
   availableWidth: number,

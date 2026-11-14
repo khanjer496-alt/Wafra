@@ -3,7 +3,7 @@ import { formatMinorUnits, formatMoneyText, type LedgerMoneySpec } from '@/lib/l
 import { motionAndroidCopy } from '@/lib/motion-android-copy';
 import type { CustomCategory, Transaction } from '@/lib/types';
 
-export interface CaptureToastContent {
+interface CaptureToastContent {
   /** "Starbucks added · Dining" */
   message: string;
   /** The amount, in the device's money pattern: "USD 6.75", "$6.75". */

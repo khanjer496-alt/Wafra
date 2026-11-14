@@ -26,7 +26,7 @@ public class PurchaseProjectionTest {
   @Test public void eachPlanPurchaseCrossesTheBridgeAsItsBareSkuOnly() throws Exception {
     for(String sku:Arrays.asList("wafra_pro_weekly","wafra_pro_yearly")) {
       java.util.Map<String,Object> map=project(row(sku,0)).toMap();
-      assertEquals(Arrays.asList("status","activeProductIds","pendingProductIds","responseCode"),new java.util.ArrayList<>(map.keySet()));
+      assertEquals(Arrays.asList("status","activeProductIds","pendingProductIds","responseCode","needsAcknowledgement"),new java.util.ArrayList<>(map.keySet()));
       assertEquals("active",map.get("status"));
       assertEquals(Collections.singletonList(sku),map.get("activeProductIds"));
       assertEquals(Collections.emptyList(),map.get("pendingProductIds"));
@@ -80,9 +80,9 @@ public class PurchaseProjectionTest {
   @Test public void nullPurchaseMakesWholeAnswerUnknown() throws Exception {
     assertEquals("unknown",project(row("wafra_pro_weekly",0),null).status);
   }
-  @Test public void returnedMapContainsOnlyFourSafeFields() throws Exception {
+  @Test public void returnedMapContainsOnlyFiveSafeFields() throws Exception {
     SubscriptionResult r=project(row("wafra_pro_weekly",0));
-    assertEquals(new HashSet<>(Arrays.asList("status","activeProductIds","pendingProductIds","responseCode")),r.toMap().keySet());
+    assertEquals(new HashSet<>(Arrays.asList("status","activeProductIds","pendingProductIds","responseCode","needsAcknowledgement")),r.toMap().keySet());
     assertFalse(r.toMap().toString().contains("synthetic-private")); assertFalse(r.toMap().toString().contains("signature"));
   }
   @Test public void exportedListsCannotMutateTheStoredResult() throws Exception {
@@ -90,4 +90,12 @@ public class PurchaseProjectionTest {
     ((List<?>)r.toMap().get("activeProductIds")).clear();
     assertEquals(1,r.activeProductIds.size());
   }
+  @Test public void acknowledgementHintUsesOnlyValidatedPurchasedProRows() throws Exception {
+    assertTrue(project(purchase("{\"productId\":\"wafra_pro_weekly\",\"purchaseState\":0,\"acknowledged\":false}")).needsAcknowledgement);
+    assertFalse(project(row("wafra_pro_weekly",4)).needsAcknowledgement);
+    assertFalse(project(row("other_subscription",0)).needsAcknowledgement);
+    assertFalse(project(purchase("{\"productId\":\"wafra_pro_weekly\",\"purchaseState\":0,\"acknowledged\":true}")).needsAcknowledgement);
+    assertFalse(PurchaseProjection.project(2,Collections.singletonList(row("wafra_pro_weekly",0))).needsAcknowledgement);
+  }
+
 }

@@ -9,8 +9,9 @@
  *
  * So this says the small true thing instead, in the app's own voice, and puts
  * the way out where a thumb already is. It should be unreachable: every link
- * the app generates is an `AppRoute` (see `@/lib/routes`), and `tsc` rejects a
- * destination with no screen behind it. This is the net under that.
+ * the app generates is checked by expo-router's typed routes (`app.json`
+ * `experiments.typedRoutes`), and `tsc` rejects a destination with no screen
+ * behind it. This is the net under that.
  *
  * Design language E: a plain sand screen — "Page not found", one line, one
  * button back to Home. No stamp, no mono eyebrow, no illustration.

@@ -149,7 +149,6 @@ module.exports = async ({ execute, ok, eq, translated }) => {
       '@/hooks/use-band': { useBand: () => ({}) },
       '@/hooks/use-large-text-layout': { useLargeTextLayout: () => false },
       '@/components/workflows/workflow-copy': execute('src/lib/workflow-copy.ts'),
-      '@/components/workflows/workflow-surfaces': { WorkflowHero: 'WorkflowHero' },
       '@/hooks/use-theme': { useTheme: () => ({}) },
       '@/hooks/use-language': { useLanguage: () => 'en' },
       '@/lib/ios-setup-journey': execute('src/lib/ios-setup-journey.ts'),

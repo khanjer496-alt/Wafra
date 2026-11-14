@@ -44,18 +44,13 @@ import type { createPrivateAlertFormatSession } from '@/lib/private-alert-format
 import { canEnrichPrivateFormatReview, privateAlertFormatReviewEvent } from '@/lib/private-alert-format-review';
 import { activeCountryDateOrder, getActiveCountry } from '@/lib/country';
 
-export const LOCAL_MESSAGE_RECORD_VERSION = 1 as const;
-export const MAX_LOCAL_MESSAGE_TEXT_BYTES = 16 * 1024;
-export const MAX_LOCAL_MESSAGE_SENDER_CHARACTERS = 80;
-export const LOCAL_MESSAGE_FUTURE_SKEW_MS = 5 * 60_000;
+const LOCAL_MESSAGE_RECORD_VERSION = 1 as const;
+const MAX_LOCAL_MESSAGE_TEXT_BYTES = 16 * 1024;
+const MAX_LOCAL_MESSAGE_SENDER_CHARACTERS = 80;
+const LOCAL_MESSAGE_FUTURE_SKEW_MS = 5 * 60_000;
 /** Shortcut input cannot attest which app actually delivered a notification. */
 export const LOCAL_NOTIFICATION_SENDER = 'Wafra Notification';
 export const LOCAL_APPLE_PAY_SENDER = 'Wafra Apple Pay';
-/**
- * What the native store records when the Message automation exposes no sender
- * (WafraLiveCaptureStore.automationSender, and the plain-text fallback).
- */
-export const LOCAL_AUTOMATION_SENDER = 'Wafra Automation';
 /**
  * Sender values that name nobody: the store's placeholder and the words an
  * automation renders for a missing contact. The same vocabulary the native
@@ -81,7 +76,7 @@ interface LocalMessageEnvelope {
   source: 'message' | 'notification' | 'apple-pay';
 }
 
-export interface LocalMessageRecordPreflight {
+interface LocalMessageRecordPreflight {
   id: string;
   observedAt: number | null;
   attribution: IosBankSenderAttribution | null;
@@ -91,7 +86,7 @@ export interface LocalMessageRecordPreflight {
   source?: 'apple-pay';
 }
 
-export interface IosBankSenderAttribution {
+interface IosBankSenderAttribution {
   market: 'AE' | 'SA';
   bankId: string;
   bankHint: string;
@@ -111,7 +106,7 @@ export type LocalApplePayParseOutcome =
   | { kind: 'held'; market: null; milestone: 'none' };
 
 /** UTF-8 length with an explicit malformed-surrogate failure for Hermes. */
-export function localMessageUtf8Bytes(value: string): number | null {
+function localMessageUtf8Bytes(value: string): number | null {
   let bytes = 0;
   for (let index = 0; index < value.length; index += 1) {
     const code = value.charCodeAt(index);
@@ -133,7 +128,7 @@ export function localMessageUtf8Bytes(value: string): number | null {
   return bytes;
 }
 
-export function parseLocalMessageObservedAt(value: unknown, nowMs: number): number | null {
+function parseLocalMessageObservedAt(value: unknown, nowMs: number): number | null {
   if (typeof value !== 'string' || !UTC_INSTANT_RE.test(value)) return null;
   const timestamp = Date.parse(value);
   if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString() !== value) return null;

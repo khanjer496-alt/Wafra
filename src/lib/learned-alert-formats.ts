@@ -117,12 +117,12 @@ export interface LearnedTemplate {
   updatedAt: number;
 }
 
-export interface LearnedFormatStore {
+interface LearnedFormatStore {
   version: 1;
   templates: LearnedTemplate[];
 }
 
-export interface LearnContext {
+interface LearnContext {
   /** User's ISO country; supplies the numeric date order when dateOrder is absent. */
   country?: string | null;
   dateOrder?: LearnedDateOrder | null;
@@ -134,7 +134,7 @@ export interface LearnContext {
   launchRoute?: boolean;
 }
 
-export interface ConfirmedFields {
+interface ConfirmedFields {
   amountMinor: number | string;
   currency: string;
   exponent: number;
@@ -152,7 +152,7 @@ export interface LearnInput {
   now: number;
 }
 
-export type LearnRefusal =
+type LearnRefusal =
   | 'invalid-input'
   | 'launch-market'
   | 'non-completed-wording'
@@ -163,7 +163,7 @@ export type LearnRefusal =
   | 'too-few-anchors'
   | 'too-long';
 
-export type LearnResult = { ok: true; template: LearnedTemplate } | { ok: false; reason: LearnRefusal };
+type LearnResult = { ok: true; template: LearnedTemplate } | { ok: false; reason: LearnRefusal };
 
 export interface LearnedFields {
   amountMinor: number;
@@ -175,7 +175,7 @@ export interface LearnedFields {
   cardLast4?: string;
 }
 
-export type LearnedMatch =
+type LearnedMatch =
   | { kind: 'none' }
   | { kind: 'prefill'; fields: LearnedFields; templateId: string; confirmations: number }
   | { kind: 'post'; fields: LearnedFields; templateId: string; confirmations: number };
@@ -189,7 +189,7 @@ export interface MatchOptions {
   launchRoute?: boolean;
 }
 
-export const LEARNED_FORMATS_MAX_TEMPLATES = 200;
+const LEARNED_FORMATS_MAX_TEMPLATES = 200;
 export const LEARNED_FORMATS_MAX_PER_KEY = 40;
 const MAX_SOURCE = 1000;
 const MAX_TOKENS = 160;
@@ -736,7 +736,7 @@ const enforceCaps = (templates: LearnedTemplate[], protect?: string): LearnedTem
  * same shape) blocks the template; a blocked template stays blocked until it
  * is removed.
  */
-export function addOrUpdateLearnedTemplate(store: LearnedFormatStore, template: LearnedTemplate, now: number = template.updatedAt): LearnedFormatStore {
+function addOrUpdateLearnedTemplate(store: LearnedFormatStore, template: LearnedTemplate, now: number = template.updatedAt): LearnedFormatStore {
   const templates = [...(store?.templates ?? [])];
   const index = templates.findIndex((row) => row.id === template.id);
   if (index < 0) {
@@ -966,7 +966,7 @@ export function matchLearnedFormat(
 
 /* ── settings ────────────────────────────────────────────────────────── */
 
-export interface LearnedFormatSettingsItem {
+interface LearnedFormatSettingsItem {
   id: string;
   sender: string | null;
   /** Masked shape, e.g. "Card ••{CARD} charged {AMOUNT} at {MERCHANT} on {DATE}". */

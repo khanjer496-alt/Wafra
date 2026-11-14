@@ -9,11 +9,11 @@ import { BandPalettes } from '@/constants/theme';
 import { blendHex, contrastRatio } from '@/lib/spending-calendar-tiles';
 
 /** WCAG AA for the bank name and last four digits on a card face. */
-export const FACE_TEXT_CONTRAST = 4.5;
+const FACE_TEXT_CONTRAST = 4.5;
 
 const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
 
-export interface CardFaceColors {
+interface CardFaceColors {
   /** The card's own colour, deepened or lifted only when no text colour reads on it. */
   face: string;
   /** Light (cream) or dark (ink) text, whichever reads better on `face`. */
@@ -51,16 +51,16 @@ export const STACK_PEEK = 14;
 /** Cards deeper than this sit exactly behind the deepest visible one. */
 export const STACK_MAX_DEPTH = 3;
 /** Each card further back is drawn this much smaller, so depth reads from size, not only tilt. */
-export const DEPTH_SCALE = 0.07;
+const DEPTH_SCALE = 0.07;
 /** Tilt of the stacked cards, as if lying on a table seen from just above; slight, so the
  * front card's near edge does not visibly splay wider than its far edge. */
 export const STACK_TILT_DEG = 2;
 /** A card further back is shaded this much more (fraction of the ink overlay). */
-export const DEPTH_SHADE = 0.12;
+const DEPTH_SHADE = 0.12;
 /** Perspective distance for the tilt. */
 export const PERSPECTIVE = 900;
 
-export interface StackPlacement {
+interface StackPlacement {
   /** 0 = front card. */
   depth: number;
   /** Top edge in the fanned list (the layout position). */
@@ -73,7 +73,7 @@ export interface StackPlacement {
   stackedShade: number;
 }
 
-export interface StackLayout {
+interface StackLayout {
   placements: StackPlacement[];
   stackedHeight: number;
   fannedHeight: number;

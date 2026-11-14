@@ -4,7 +4,7 @@ const PHASES = new Set([
   'plan:start', 'plan:done', 'save:start', 'save:done', 'routine:done',
   'inbox:start', 'page:read', 'page:progress', 'page:done', 'inbox:done',
 ] as const);
-export type CaptureTracePhase = typeof PHASES extends Set<infer T> ? T : never;
+type CaptureTracePhase = typeof PHASES extends Set<infer T> ? T : never;
 
 export function captureTraceEnabled(): boolean {
   return typeof process !== 'undefined' && process.env.EXPO_PUBLIC_WAFRA_CAPTURE_TRACE === '1';

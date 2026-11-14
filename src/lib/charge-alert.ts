@@ -76,7 +76,7 @@ export const ALERT_MAX_SKEW_MS = 60 * 60 * 1000;
 /** Charges named individually in a grouped banner before "+N more". */
 export const ALERT_ROWS = 5;
 
-export interface ChargeAlert {
+interface ChargeAlert {
   title: string;
   /** May be empty — a title alone is a valid notification. */
   body: string;
@@ -153,7 +153,7 @@ export function isAnnounceable(row: ScannedSms, nowMs: number): boolean {
 }
 
 /** Every row from this sync worth a banner, largest first. */
-export function announceableCharges(rows: readonly ScannedSms[], nowMs: number): ScannedSms[] {
+function announceableCharges(rows: readonly ScannedSms[], nowMs: number): ScannedSms[] {
   // Largest first, for the reason the daily summary sorts the same way: a
   // banner read on a lock screen gets four seconds, and the AED 2,400 row is
   // the one worth those seconds.

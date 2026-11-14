@@ -13,7 +13,7 @@ import type { Transaction } from '@/lib/types';
  * Callers close the sheet or advance on 'saved' and 'unsaved' only: 'unsaved'
  * means the answer is applied in memory but the ledger write is still pending.
  */
-export type TransferAnswerResult = 'saved' | 'unsaved' | 'changed' | 'failed' | 'busy';
+type TransferAnswerResult = 'saved' | 'unsaved' | 'changed' | 'failed' | 'busy';
 
 type Outcome = Exclude<TransferAnswerResult, 'busy'>;
 

@@ -20,7 +20,7 @@ import { transactionsWords } from '@/lib/transactions-copy';
 import { isTransferCandidate, transferOwnership } from '@/lib/transfer-reconciliation';
 import { transferReviewCopy } from '@/lib/transfer-review-copy';
 
-export interface RowAccessibilityAction { name: string; label: string }
+interface RowAccessibilityAction { name: string; label: string }
 
 interface TransactionRowProps {
   transaction: Transaction;

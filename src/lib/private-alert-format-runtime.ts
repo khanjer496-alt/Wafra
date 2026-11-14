@@ -48,7 +48,7 @@ const nativeSecrets: DeviceSecretAdapter = {
   async removeSecret() { await (await import('expo-secure-store')).deleteItemAsync(SECRET_NAME); },
   async randomBytes() { return (await import('expo-crypto')).getRandomValues(new Uint8Array(32)); },
 };
-export interface PrivateFormatMatch {
+interface PrivateFormatMatch {
   kind: 'prefill';
   fields: LearnedFields;
   /** Ephemeral only: capture must not persist this device-keyed identifier. */
@@ -59,7 +59,7 @@ export interface PrivateAlertFormatSessionOptions extends PrivateAlertMatchOptio
   cancelled?: () => boolean;
   historyRepair?: boolean;
 }
-export interface PrivateAlertFormatSource {
+interface PrivateAlertFormatSource {
   source: string;
   sender: string | null | undefined;
   observedAt: number;

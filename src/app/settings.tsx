@@ -1233,16 +1233,6 @@ export default function SettingsScreen() {
             palette={band}
             glyph={<BiometricGlyph kind={biometricKind} size={18} color={band.text} />}
           />
-          {Platform.OS !== 'android' ? (
-            <SettingsSwitchRow
-              title={t('onlineLogosTitle')}
-              subtitle={`${t('onlineLogosDetail')}${state.privateMode ? ` ${t('onlineLogosPaused')}` : ''}`}
-              value={state.onlineLogosEnabled === true}
-              onChange={(enabled) => { void setPrivacyPreferences({ onlineLogosEnabled: enabled }).catch(() => Alert.alert(t('notAvailable'), t('privacyPreferenceFailed'))); }}
-              testID="settings-online-logos"
-              palette={band}
-            />
-          ) : null}
           <SettingsSwitchRow
             title={t('hideLockedWidgetAmountsTitle')}
             subtitle={t('hideLockedWidgetAmountsDetail')}
@@ -1284,7 +1274,7 @@ export default function SettingsScreen() {
             reviewed paragraph leads with its first sentence, and every other
             sentence is one line under it. None is dropped or reworded. */}
         <View style={styles.privacySheet} testID="settings-privacy-sheet">
-          {[t('privacyBuiltInBody'), t('privacyRetentionExact'), t('privacySecurityExact'), t('privacyLogosBody')].map((body) => {
+          {[t('privacyBuiltInBody'), t('privacyRetentionExact'), t('privacySecurityExact')].map((body) => {
             const [lead, ...points] = privacySentences(body);
             return <View key={lead} style={styles.privacySection}>
               <ThemedText type="smallBold" accessibilityRole="header" style={{ color: band.text }}>{lead}</ThemedText>

@@ -6,7 +6,7 @@ import type { UniversalBankEvent } from '@/lib/universal-types';
 import type { LocalParserFamilyAdvisoryResult } from '@/lib/local-semantic-model';
 
 type Advisory = Extract<LocalParserFamilyAdvisoryResult, { kind: 'parser-family-advisory' }>;
-export type LocalReviewSuggestion = Advisory | { kind: 'pending' | 'unavailable' };
+type LocalReviewSuggestion = Advisory | { kind: 'pending' | 'unavailable' };
 const reviewFamilies = new Set(['purchase', 'transfer', 'cash-withdrawal', 'refund', 'fee', 'utility', 'recurring-payment']);
 const unsafe = new Set(['authentication-not-posting', 'pending-not-posting', 'failed-not-posting',
   'promotion-not-posting', 'multiple-event-adapter-required', 'settlement-adapter-required']);
@@ -72,5 +72,5 @@ export function createLocalReviewAdvisor(evaluate: Evaluate, enabled: () => bool
 }
 
 export const localReviewAdvisor = createLocalReviewAdvisor(evaluateLocalReviewWindow, () => LOCAL_SEMANTIC_E5_ENABLED);
-export const clearLocalReviewSuggestions = (): void => localReviewAdvisor.clear();
+const clearLocalReviewSuggestions = (): void => localReviewAdvisor.clear();
 onLocalSemanticBackgroundCancelled(clearLocalReviewSuggestions);
