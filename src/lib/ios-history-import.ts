@@ -1,7 +1,7 @@
 import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
 import type { CategoryId } from '@/lib/types';
 import { REVIEW_ALERT_CAP, REVIEW_ALERT_TTL_MS, appleMessageReviewIdentity, isUniversalReviewAlert,
-  requiresReviewRetention, reviewReceiptSettled, settleReviewStage, type ReviewStageReceipt, type ReviewEntry } from '@/lib/alert-review-tray';
+  requiresReviewRetention, reviewReceiptReleasesPage, settleReviewStage, type ReviewStageReceipt, type ReviewEntry } from '@/lib/alert-review-tray';
 import { createLaunchAlertSession } from '@/lib/launch-alert-parser';
 import { MAX_HISTORICAL_RECORDS, parseHistoricalMessageRecords, type HistoricalMessageRecord } from '@/lib/historical-import';
 import { createAiAlertReviewSession, type AiAlertReviewOptions } from '@/lib/ai-alert-reader';
@@ -125,7 +125,8 @@ export async function persistIosHistoryReviewCandidates(
   for (const item of required) {
     const result = outcomes.find(entry => entry.sourceKey === canonicalCaptureSourceKey(item.sourceKey, item.observedAt));
     // Expired is a terminal, counted loss (its tombstone); History continues.
-    if (!result || !reviewReceiptSettled(result.outcome)) {
+    // Refused can never be admitted, so it must not stop History either.
+    if (!result || !reviewReceiptReleasesPage(result.outcome)) {
       throw new IosHistoryImportError('review-capacity');
     }
   }

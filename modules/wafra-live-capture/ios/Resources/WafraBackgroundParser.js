@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 809d66d4122c0af3e03b160d8117bdb99d4ca4ea642e1a535642f255309875ff
+// Generated from normal shipping TypeScript. Source SHA-256: 1514537192d8dd41db851fec8303ef58b131b9150acfc9f1d28a898161c12cc0
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -15238,8 +15238,23 @@ const LABEL_ROLES = {
     minimum: 'minimum-due', total: 'statement-total', limit: 'credit-limit',
     balance: 'balance', bill: 'bill-due', fee: 'fee', feeweak: 'fee', transaction: 'transaction',
 };
+function execAll(pattern, text) {
+    if (!pattern.global)
+        throw new Error('execAll needs a global pattern');
+    const found = [];
+    pattern.lastIndex = 0;
+    for (let match = pattern.exec(text); match !== null; match = pattern.exec(text)) {
+        found.push(match);
+        if (match[0] === '') {
+            const code = text.codePointAt(pattern.lastIndex);
+            pattern.lastIndex += pattern.unicode && code !== undefined && code > 0xffff ? 2 : 1;
+        }
+    }
+    pattern.lastIndex = 0;
+    return found;
+}
 function labels(text, marketLabels = null) {
-    const found = [...text.matchAll(LABEL)].map((match) => {
+    const found = execAll(LABEL, text).map((match) => {
         const group = Object.keys(match.groups ?? {}).find((key) => match.groups?.[key] !== undefined);
         return { role: LABEL_ROLES[group], start: match.index, text: match[0], weak: group === 'feeweak' };
     });

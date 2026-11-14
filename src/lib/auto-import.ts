@@ -667,13 +667,28 @@ class ReviewIdentityError extends Error {
 type ExpoDigest = {
   CryptoDigestAlgorithm: { SHA256: unknown };
   digestStringAsync(algorithm: unknown, data: string): Promise<string>;
+  digest?(algorithm: unknown, data: Uint8Array): Promise<ArrayBuffer>;
 };
 
-const sha256 = (data: string): Promise<string> => {
+const sha256 = async (data: string): Promise<string> => {
   // The test harness intentionally stubs only Crypto's random-byte surface.
   // Cast at this private seam while production calls Expo SDK 55's documented
-  // digestStringAsync/CryptoDigestAlgorithm pair directly.
+  // digest/digestStringAsync/CryptoDigestAlgorithm API directly.
   const digest = Crypto as unknown as ExpoDigest;
+  // Android hashes BYTES. expo-modules-core (SDK 55) converts every String
+  // argument on Android with env->NewStringUTF(utf8.c_str()), which stops at
+  // the first NUL, and the review identity joins its fields with U+0000: on a
+  // device every Android review hashed only its constant domain prefix, so all
+  // reviews got ONE id and the tray refused all but the first (Android RC 396
+  // F1). A typed array crosses the bridge intact, and SHA-256 of the UTF-8
+  // bytes is exactly what digestStringAsync computes where strings survive, so
+  // the identity is the documented one and iOS keeps its existing path.
+  if (Platform.OS === 'android' && typeof digest.digest === 'function' && typeof TextEncoder === 'function') {
+    const bytes = new Uint8Array(await digest.digest(digest.CryptoDigestAlgorithm.SHA256, new TextEncoder().encode(data)));
+    let hex = '';
+    for (const byte of bytes) hex += byte.toString(16).padStart(2, '0');
+    return hex;
+  }
   return digest.digestStringAsync(digest.CryptoDigestAlgorithm.SHA256, data);
 };
 
