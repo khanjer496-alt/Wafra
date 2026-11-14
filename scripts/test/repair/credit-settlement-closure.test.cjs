@@ -32,6 +32,13 @@ function paths(body, sender = 'ENBD', market = 'AE', currency = 'AED') {
 const EN = 'AED 250.00 has been refunded to your card ending 1234';
 const AR = 'تم استرداد مبلغ AED 250.00 إلى بطاقتك المنتهية 1234';
 const NO_POST = [
+  'AED 250.00 was debited from your card ending 1234 at NOON.COM. Your refund request is pending click https://bank-confirm.example/verify to confirm your account.',
+  'Your refund request for AED 250.00 was successful.',
+  'Your reversal request for AED 250.00 was successful.',
+  `IF your claim succeeds, ${EN}.`,
+  `Subject to approval by the senior operations team of the acquiring merchant bank and the independent verification and settlement department: ${EN}.`,
+  `إن وافق التاجر\n${AR}.`,
+  `بشرط موافقة التاجر\n${AR}.`,
   ...['If approved,', 'Unless verified,', 'Until cleared:', 'Whether approved,',
     'Subject to merchant approval:', 'Upon approval:', 'Provided that the bank approves,',
     'If the merchant approves,\n'].map(lead => `${lead} ${EN}.`),
@@ -81,6 +88,7 @@ for (const body of KEEP_CREDIT) test(`settled credit preserved: ${body}`, () => 
   const got = paths(body);
   assert.equal(got.sms, 'income:25000', JSON.stringify(got));
   assert.equal(got.session, 'income:25000', JSON.stringify(got));
+  if (!process.env.SOURCE_ONLY && (body === `${EN}.` || body === `${AR}.`)) assert.equal(got.native, 'credit:25000', JSON.stringify(got));
 });
 for (const row of require('./credit-settlement-sweep.json')) test(`${row.id} ${row.class}: ${row.requirement}`, () => {
   const got = paths(row.body, row.sender, row.market, row.currency);
