@@ -162,7 +162,7 @@ function assertDebitAndNote(body, minor) {
   const native = confirmationNative(body);
   assert.equal(native.route, 'parsed'); assert.equal(native.notification.direction, 'debit');
   assert.equal(native.notification.amount.minorUnits, String(minor));
-  const held = inspectSourceFreeRefusedAlert({ source: body, sender: 'ENBD', observedAt: at, channel: 'inbox', session });
+  const held = inspectSourceFreeRefusedAlert({ source: body, sender: 'ENBD', observedAt: at, channel: 'inbox', session, acceptedExpense: session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at) });
   assert.equal(held.kind, 'review'); assert.equal(held.candidate.event.status, 'informational');
   assert.equal(held.candidate.event.direction, 'none');
 }
