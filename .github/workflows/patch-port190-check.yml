@@ -25,9 +25,8 @@ jobs:
           bash scripts/test/build.sh > observer-compile.txt 2>&1
       - name: Inspect actual shipping automation rather than the transport-only workflow
         run: |
-          cp .github/workflows/patch-port190-check.yml transport-workflow.yml
-          node -e 'const fs=require("fs"),cp=require("child_process"),p=".github/workflows/patch-port190-check.yml";const r=cp.spawnSync("git",["show","967315725b7e7ad7cb53b4a07d41d34d99335d04:"+p]);if(r.status===0)fs.writeFileSync(p,r.stdout);else fs.unlinkSync(p)'
-          git diff --exit-code 967315725b7e7ad7cb53b4a07d41d34d99335d04 -- .github/workflows
+          git fetch --depth=1 origin 967315725b7e7ad7cb53b4a07d41d34d99335d04
+          node .github/patch-probe/restore-shipping-ci-inputs.cjs
       - name: Prepare existing native contract fixtures
         run: npx expo prebuild --platform ios --no-install
       - name: Collect receipt evidence without changing expectations
@@ -47,6 +46,7 @@ jobs:
             observer-generation.txt
             observer-compile.txt
             transport-workflow.yml
+            shipping-ci-inputs.json
             observer-proof.txt
             receipt-money-probe.json
           retention-days: 7

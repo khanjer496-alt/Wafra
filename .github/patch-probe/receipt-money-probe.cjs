@@ -18,10 +18,10 @@ const rows = [
 const sourceHash = JSON.parse(fs.readFileSync('modules/wafra-live-capture/ios/Resources/WafraBackgroundParser.meta.json')).sourceHash;
 for (const body of rows) {
 try {
-  const money = load('@/lib/universal-money').extractUniversalMoney(body, { sender: 'ENBD', market: 'AE' });
+  const money = load('@/lib/universal-money').extractUniversalMoney(body, { sender: 'ENBD' });
   results.push({ body, sourceHash,
     money: { amount: money.amount, observations: money.observations },
-    rawEvent: load('@/lib/universal-parser').inspectUniversalBankEvent(body, { sender: 'ENBD', market: 'AE' }),
+    rawEvent: load('@/lib/universal-parser').inspectUniversalBankEvent(body, { sender: 'ENBD' }),
     generic: load('@/lib/launch-alert-parser').inspectGenericBankEventForReview(body, 'ENBD'),
     parsed: load('@/lib/sms-parser').parseSms(body, {}, { sender: 'ENBD', observedAt: Date.parse('2026-11-14T10:00:00Z') }) });
 } catch (error) { results.push({ body, error: String(error.stack || error) }); }
