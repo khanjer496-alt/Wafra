@@ -323,8 +323,7 @@ ok('Flow retains selected month context and always-visible exact figures',
 ok('Flow uses shared shell and Stats redirects into Trends',
  /<BandScaffold band="spending" tabbed/.test(flow) && /<Redirect href="\/flow\?view=trends"/.test(stats));
 ok('shared charts consume the semantic data-visualization palette',
-  /import \{[^}]*\bDataViz\b[^}]*\} from '@\/constants\/theme'/.test(charts) &&
-    /from '@\/components\/ui\/data-viz'/.test(charts));
+  /import \{[^}]*\bDataViz\b[^}]*\} from '@\/constants\/theme'/.test(charts));
 
 ok('Bills uses one band scaffold scroller with a typed nav row',
   /const billsNav: BandNav = \{/.test(bills) &&

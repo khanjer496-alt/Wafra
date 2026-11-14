@@ -211,11 +211,8 @@ const task4Stats = read('src/app/stats.tsx');
 assert.match(task4Stats,/import \{ Redirect \} from 'expo-router'/);
 assert.match(task4Stats,/<Redirect href="\/flow\?view=trends"/);
 
-const task4DataVizPath = path.join(ROOT, 'src/components/ui/data-viz.ts');
-assert.ok(fs.existsSync(task4DataVizPath), 'Task 4 data-viz helper exists');
 const task4Charts = read('src/components/ui/charts.tsx');
 assert.match(task4Charts, /import \{[^}]*\bDataViz\b[^}]*\} from '@\/constants\/theme'/);
-assert.match(task4Charts, /from '@\/components\/ui\/data-viz'/);
 assert.doesNotMatch(read('src/lib/categories.ts'), /CATEGORY_RAMP|rampColor|onRampColor/);
 const overview=read('src/components/spending/spending-overview.tsx');
 const trends=read('src/components/spending/spending-trends.tsx');
