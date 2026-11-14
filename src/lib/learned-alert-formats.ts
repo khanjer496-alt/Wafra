@@ -276,7 +276,9 @@ const refusesWording = (text: string): boolean => {
   // A manually confirmed private template only prefills Review. A dispute
   // address must not masquerade as financial non-completion. Read every
   // condition/status on the original first; posting keeps its original link gate.
-  const privateDisputeFooter = originalRefuses && /\b(?:report\s+dispute|to\s+dispute\s+(?:this|the)\s+(?:charge|transaction))\b/iu.test(text) &&
+  const completedDebit = /\b(?:charged|debited|deducted|withdrawn|spent|paid|used|purchased)\b/iu.test(text) &&
+    !/\b(?:not|never|being|will|would|shall|should|must|may|might|can|could)\b|n['’]t\b|(?<![ء-ي])(?:لم|لن|ليس|ليست|لا)(?![ء-ي])/iu.test(text);
+  const privateDisputeFooter = originalRefuses && completedDebit && /\b(?:report\s+dispute|to\s+dispute\s+(?:this|the)\s+(?:charge|transaction))\b/iu.test(text) &&
     hasLinkCallToAction(text) && !hasClickLinkPrompt(text) &&
     !hasUnsettledCreditToken(text) && !hasPendingCreditStatus(text);
   const completionRefuses = privateDisputeFooter
