@@ -1,188 +1,29 @@
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
 const path = require('node:path');
-const vm = require('node:vm');
-const ts = require('typescript');
-const { createHash } = require('node:crypto');
-
+const load = require('./repair/load-typescript.cjs');
 const root = path.resolve(__dirname, '../..');
-function compile(relative, require) {
-  const filename = path.join(root, relative);
-  const exports = {};
-  const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
-    fileName: filename,
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022,
-      jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
-  }).outputText;
-  // No fetch, XMLHttpRequest, network modules, or user-data services in scope.
-  vm.runInNewContext(output, { exports, require }, { filename });
-  return exports;
-}
-const manifest = JSON.parse(fs.readFileSync(path.join(root, 'assets/merchants/sources.json'), 'utf8'));
-assert.equal(new Set(manifest.map(row => row.id)).size, manifest.length, 'unique provenance identity');
-assert.equal(new Set(manifest.map(row => row.file)).size, manifest.length, 'unique provenance filename');
-const assets = new Map();
-const catalog = compile('src/components/ui/merchant-logo-assets.ts', (id) => {
-  assert.match(id, /^\.\.\/\.\.\/\.\.\/assets\/merchants\/[a-z0-9]+\.png$/,
-    'runtime may only import the bundled PNG allowlist, never a network/data service');
-  const file = path.basename(id);
-  const evidence = manifest.find(row => row.file === file);
-  assert.ok(evidence, `missing provenance for ${file}`);
-  const bytes = fs.readFileSync(path.join(root, 'assets/merchants', file));
-  assert.equal(bytes.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
-  assert.equal(bytes.readUInt32BE(16), 128, `${file}: width`);
-  assert.equal(bytes.readUInt32BE(20), 128, `${file}: height`);
-  assert.equal(evidence.width, 128);
-  assert.equal(evidence.height, 128);
-  assert.equal(createHash('sha256').update(bytes).digest('hex'), evidence.sha256, `${file}: reviewed bytes`);
-  assert.equal(bytes.length, evidence.bytes);
-  assert.match(evidence.sourceUrl, /^https:\/\//);
-  assert.ok(evidence.retrievedOn && evidence.transformation);
-  assets.set(file, assets.size + 1);
-  return assets.get(file);
-});
-const matches = {
-  Careem: 'careem', 'Careem Food': 'careem', 'Careem Dubai': 'careem',
-  Talabat: 'talabat', 'Talabat sales': 'talabat', 'Talabat Business': 'talabat', 'طلبات': 'talabat', 'Talabat.com UAE': 'talabat',
-  Deliveroo: 'deliveroo', 'Carrefour': 'carrefour', 'CARREFOUR HYPER #004 DUBAI ARE': 'carrefour',
-  'كارفور الشارقة': 'carrefour', 'Lulu Hypermarket': 'lulu', 'LuLu Hyper Market': 'lulu',
-  'لُولُو هايبرماركت': 'lulu', Spinneys: 'spinneys', 'Noon.com': 'noon', 'Noon Send': 'noon', 'نون': 'noon',
-  'Amazon.ae': 'amazon', 'Amazon Prime': 'amazon', 'أمازون': 'amazon',
-  Netflix: 'netflix', 'NETFLIX.COM': 'netflix', 'Spotify Premium': 'spotify',
-  'YouTube Premium': 'youtube', 'GOOGLE *YOUTUBE PREMIUM': 'youtube',
-  'Apple.com/bill': 'apple', 'iCloud+': 'apple', 'Apple Store US': 'apple',
-  'Google One': 'google', 'Starbucks Coffee': 'starbucks', 'ستاربكس': 'starbucks',
-  "McDonald’s": 'mcdonalds', KFC: 'kfc', IKEA: 'ikea', 'Uber *Trip': 'uber',
-  Emirates: 'emirates', 'طيران الإمارات': 'emirates', 'Booking.com': 'bookingdotcom',
-  Airbnb: 'airbnb', Claude: 'claude', Anthropic: 'claude', 'GitHub Copilot': 'github',
-  Notion: 'notion', 'Discord Nitro': 'discord', 'Telegram Premium': 'telegram', Dropbox: 'dropbox',
-  'RTA Nol Top-up': 'rta', 'ENOC Fuel': 'enoc', 'EPPCO': 'enoc',
-  'Emirates Petroleum': 'enoc', 'Emirates Petroleum Com': 'enoc', 'ADNOC Oasis': 'adnoc',
-  'Careem Pay Topup': 'careem',
-  'du Home Internet': 'du', 'Etisalat Postpaid': 'etisalat', 'e& UAE': 'etisalat',
-  'OSN+': 'osn', 'DEWA Bill': 'dewa', '  Ｃａｒｅｅｍ  ': 'careem',
+const jsx = (type, props) => ({ type, props });
+const dependencies = {
+  react: { memo: f => f }, 'react/jsx-runtime': { jsx, jsxs: jsx },
+  'react-native': { View: 'View' }, '@/components/themed-text': { ThemedText: 'Text' },
+  '@/hooks/use-theme': { useTheme: () => ({ text: '#111', primary: '#222', primarySoft: '#EEE' }) },
+  '@/hooks/use-band': { useBand: () => ({ glyphGround: '#EEE' }) },
+  '@/hooks/use-color-scheme': { useColorScheme: () => 'dark' },
+  '@/constants/theme': { Radius: { tile: 8, control: 12 }, BandPalettes: { dark: { accounts: { glyphGround: '#123', tint: '#FFF' } } } },
 };
-const expanded = JSON.parse(fs.readFileSync(path.join(root, 'scripts/test/fixtures/merchant-logo-identities.json'), 'utf8'));
-assert.equal(expanded.length, 78, 'expansion retains every reviewed identity');
-for (const { id, aliases } of expanded) {
-  assert.match(id, /^[a-z0-9]+$/);
-  assert.ok(aliases.length > 0, `${id}: at least one usable title`);
-  for (const title of aliases) {
-    assert.ok(typeof title === 'string' && title.trim().length > 0 && title.length <= 240);
-    assert.ok(!Object.hasOwn(matches, title) || matches[title] === id, `conflicting alias: ${title}`);
-    matches[title] = id;
-  }
+const { MonogramAvatar } = load(path.join(root, 'src/components/ui/monogram-avatar.tsx'), dependencies);
+dependencies['@/components/ui/monogram-avatar'] = { MonogramAvatar };
+const { MerchantAvatar } = load(path.join(root, 'src/components/ui/merchant-avatar.tsx'), dependencies);
+const { BankAvatar } = load(path.join(root, 'src/components/ui/bank-avatar.tsx'), dependencies);
+for (const [name, initial] of [['Careem', 'C'], ['كريم', 'ك'], ['  Noon One ', 'N'], ['', '—'], ['éclair', 'É']]) {
+  const node = MerchantAvatar({ title: name, category: 'other', size: 44 });
+  assert.equal(node.type, MonogramAvatar);
+  assert.equal(node.props.name, name, 'presentation never rewrites the merchant');
+  const tile = node.type(node.props);
+  assert.equal(tile.props.children.props.children, initial);
+  assert.equal(tile.props.accessibilityElementsHidden, true);
+  assert.equal(tile.props.style.width, 44);
 }
-for (const [title, id] of Object.entries(matches)) {
-  const logo = catalog.merchantLogoFor(title);
-  assert.equal(logo?.id, id, `${title}: correct bundled identity`);
-  assert.equal(typeof logo.source, 'number', 'Metro static asset ID, not a URL');
-  assert.equal(logo.source, assets.get(id + '.png'));
-  assert.equal(catalog.merchantLogoFor(title), logo, 'stable identity avoids allocations in scrolling rows');
-  assert.ok(Object.isFrozen(logo), 'callers cannot mutate shared merchant identity');
-  assert.equal(catalog.merchantLogoFor(`  ${title.toUpperCase()}  `), logo, `${title}: case and whitespace`);
-  assert.equal(catalog.merchantLogoFor('Cafe near ' + title), null, `${title}: never match a brand substring`);
-  assert.equal(catalog.merchantLogoFor(title + ' unrelated merchant'), null, `${title}: reject unknown suffixes`);
-}
-assert.equal(new Set(Object.values(matches)).size, assets.size, 'every shipped brand has a positive test');
-assert.equal(assets.size, 112, 'an empty or accidentally reduced catalogue must fail');
-assert.equal(manifest.length, assets.size, 'provenance and shipped assets stay in sync');
-assert.deepEqual(fs.readdirSync(path.join(root, 'assets/merchants')).filter(file => file.endsWith('.png')).sort(), [...assets.keys()].sort());
-assert.ok(manifest.reduce((sum, row) => sum + row.bytes, 0) < 1024 * 1024, 'keep all 112 offline logos below 1 MiB');
-
-const samples = ['', null, undefined, 123, 'LuLu Exchange', 'Lulu International Exchange',
-  'لولو للصرافة', 'كريم', 'كَرِيم', 'كريم دبي', 'كَرِيم دبي', 'كريم للبشرة', 'Cafe near Carrefour', 'PayPal Talabat',
-  'Talabat Starbucks', 'Apple Cafe', 'Pineapple Cafe', 'Amazon Cafe', 'Noon Saloon',
-  'Emirates NBD', 'Emirates Islamic Dubai', 'Emirates Cooperative Society',
-  'Emirates Petroleum Cafe',
-  'Uberoi Restaurant', 'Notionally Trading', 'Shop at IKEA', 'Google Unknown Shop',
-  'ADNOC employee transfer', 'DU BAI CAFE', 'Unknown Place', 'constructor', '__proto__',
-  'toString', 'https://merchant.invalid/logo.png', 'Careem' + ' '.repeat(241),
-  'Carrefour\nContact support', 'Talabat; Starbucks', 'Etihad Rail', 'Etihad Credit Insurance',
-  'Tabby Tailoring', 'Tamara Restaurant', 'Aster Trading', 'Life Cafe', 'Salik Restaurant',
-  'Microsoft 365', 'Nikee', 'Zaraa', 'PAYPAL *NIKE', 'Noon by Namshi', 'Canva Trading',
-  'Canvas Trading', 'Steam Laundry', 'Crypto.com Cafe', 'OpenAI Cafe', 'Zoom Cafeteria',
-  'Nesto', 'Subway', 'Decathlon'];
-for (const title of samples) {
-  assert.equal(catalog.merchantLogoFor(title), null,
-    `${title}: ambiguous/unrecognised merchants must use the category fallback`);
-}
-
-let failed = false;
-let themeText = '#F5F4EF';
-let colorScheme = 'dark';
-const jsx = (type, props, key) => ({ type, props, key });
-function loadAvatar(identities) {
-  return compile('src/components/ui/merchant-avatar.tsx', (id) => {
-    switch (id) {
-      case 'react/jsx-runtime': return { jsx, jsxs: jsx };
-      // The avatar is a React.memo component; the harness calls it directly.
-      case 'react': return { useState: () => [failed, (value) => { failed = value; }], useEffect: () => undefined, memo: (component) => component };
-      case 'react-native': return { Platform: { OS: 'android' }, StyleSheet: { create: (value) => value }, View: 'view' };
-      case 'expo-image': return { Image: 'image' };
-      case '@/components/ui/category-avatar': return { CategoryAvatar: 'category' };
-      case '@/components/ui/merchant-logo-assets': return identities;
-      case '@/lib/store': return { useStore: () => ({ state: { privateMode: false } }), useOnlineLogosAllowed: () => false };
-      case '@/hooks/use-theme': return { useTheme: () => ({ text: themeText }) };
-      case '@/hooks/use-color-scheme': return { useColorScheme: () => colorScheme };
-      case '@/hooks/use-band': return { useBand: () => ({ glyphGround: '#2E2A23' }) };
-      case '@/lib/merchant-logo-resolver': return { resolveRemoteMerchantLogo: async () => null };
-      case '@/constants/theme': return { Radius: { control: 12, tile: 8 } };
-      default: throw new Error(`Unexpected runtime dependency: ${id}`);
-    }
-  }).MerchantAvatar;
-}
-const MerchantAvatar = loadAvatar(catalog);
-for (const title of samples) {
-  const fallback = MerchantAvatar({ title, category: 'other', size: 44 });
-  assert.equal(fallback.type, 'category');
-  assert.equal(fallback.props.category, 'other');
-  assert.equal(fallback.props.size, 44);
-}
-
-// Exercise the retained image branch with an explicit synthetic asset fixture;
-// no third-party logo is required or distributed by this test.
-const PrototypeAvatar = loadAvatar({ merchantLogoFor: (title) =>
-  title === 'QA Shop' ? { id: 'qa-one', source: 1 } : { id: 'qa-two', source: 2 } });
-const known = PrototypeAvatar({ title: 'QA Shop', category: 'groceries', size: 44 });
-assert.equal(known.key, 'qa-one', 'identity changes remount failed-image state');
-const tile = known.type(known.props);
-assert.equal(tile.props.accessibilityElementsHidden, true, 'merchant row supplies accessible identity');
-const image = tile.props.children;
-assert.equal(image.type, 'image');
-assert.equal(image.props.source, 1);
-assert.equal(image.props.contentFit, 'contain', 'preserve artwork proportions');
-assert.equal(image.props.style.width, 44, 'artwork fills the avatar without white padding');
-assert.equal(image.props.style.height, 44);
-assert.equal(Object.assign({}, ...tile.props.style).backgroundColor, undefined, 'transparent tile has no white backing');
-assert.equal(image.props.tintColor, undefined, 'colored artwork keeps its brand colors');
-assert.equal(image.props.accessible, false);
-assert.equal(image.props.cachePolicy, 'memory-disk');
-assert.equal(image.props.recyclingKey, 'qa-one');
-assert.equal(image.props.transition, 0, 'no row animations or logo cross-fades while scrolling');
-image.props.onError();
-assert.equal(known.type(known.props).type, 'category', 'an unreadable image falls back immediately');
-assert.notEqual(PrototypeAvatar({ title: 'Another QA Shop', category: 'transport' }).key, known.key);
-failed = false;
-for (const ink of ['#F5F4EF', '#161510']) {
-  themeText = ink;
-  colorScheme = ink === '#F5F4EF' ? 'dark' : 'light';
-  const apple = MerchantAvatar({ title: 'Apple', category: 'shopping', size: 34 });
-  assert.equal(apple.type(apple.props).props.children.props.tintColor, ink, 'single-ink logo stays readable in each theme');
-  const tabby = MerchantAvatar({ title: 'Tabby', category: 'shopping', size: 34 });
-  assert.equal(tabby.type(tabby.props).props.children.props.tintColor, undefined, 'Tabby retains its green artwork');
-  const qatar = MerchantAvatar({ title: 'Qatar Airways', category: 'travel', size: 34 });
-  assert.equal(qatar.type(qatar.props).props.children.props.tintColor, colorScheme === 'dark' ? ink : undefined,
-    'Qatar Airways uses a readable dark-mode rendition and keeps burgundy in light mode');
-}
-const real = MerchantAvatar({ title: 'Lulu Hypermarket', category: 'groceries', size: 64 });
-assert.equal(real.key, 'lulu');
-assert.equal(real.type(real.props).props.testID, 'merchant-logo-lulu');
-const detail = fs.readFileSync(path.join(root, 'src/components/entry-detail-sheet.tsx'), 'utf8');
-assert.match(detail, /MerchantAvatar title=\{transaction.title\} category=\{transaction.category\} size=\{44\}/,
-  'transaction details keep the merchant logo tile, 44pt beside the name (compact sheet, design language E)');
-const avatarSource = fs.readFileSync(path.join(root, 'src/components/ui/merchant-avatar.tsx'), 'utf8');
-assert.match(avatarSource,
-  /Platform\.OS === 'android' && typeof source !== 'number' \? 'disk' : 'memory-disk'/,
-  'Android remote merchant artwork stays off the process-wide decoded-image memory cache');
-console.log(`✓ ${assets.size} bundled logos; ${Object.keys(matches).length} identity cases; ${samples.length} negative cases; asset integrity, privacy, accessibility and failure recovery`);
+assert.equal(BankAvatar({ account: { bankName: 'Example Bank', name: 'Savings', kind: 'bank' } }).props.name, 'Example Bank');
+assert.equal(BankAvatar({ account: { name: 'Savings', kind: 'bank' } }).props.name, 'Savings');
+console.log('✓ local merchant and bank monograms, EN/AR initials, sizing and decorative accessibility');

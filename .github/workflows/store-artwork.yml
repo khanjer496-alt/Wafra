@@ -1,0 +1,48 @@
+name: Store artwork export
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'assets/merchants/**'
+      - 'modules/wafra-widgets/**'
+      - 'targets/widget/**'
+      - 'scripts/measure-store-artwork.cjs'
+      - '.github/workflows/store-artwork.yml'
+permissions:
+  contents: read
+concurrency:
+  group: store-artwork-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - name: Export baseline and exact head, one worker and platform at a time
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/artwork-base" "$BASE_SHA"
+          ln -s "$PWD/node_modules" "$RUNNER_TEMP/artwork-base/node_modules"
+          node scripts/measure-store-artwork.cjs "$RUNNER_TEMP/artwork-base" "$PWD" "$RUNNER_TEMP/artwork-exports"
+          cat "$RUNNER_TEMP/artwork-exports/measurements.json" >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve measured sizes and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: store-artwork-${{ github.event.pull_request.head.sha }}
+          path: |
+            ${{ runner.temp }}/artwork-exports/measurements.json
+            ${{ runner.temp }}/artwork-exports/*.log
+          retention-days: 3
