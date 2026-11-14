@@ -37,10 +37,10 @@ function harness(options = {}) {
   ].map(([id, title, amountFils, category, date]) => ({ id, title, amountFils, category, date, accountId: 'bank', type: 'expense', source: 'sms' }));
   const state = {
     hydrated: options.hydrated ?? true, onboarded: true, language,
-    captureOptOut: options.optOut ?? false, historyImport: options.history ?? null, privateMode: true,
+    captureOptOut: options.optOut ?? false, androidCaptureSources: options.androidCaptureSources, historyImport: options.history ?? null, privateMode: true,
     trialStartTs: options.trialStartTs ?? 0,
     founderPro: options.founderPro ?? false,
-    transactions: options.empty ? [] : transactions, accounts: [account], budgets: options.budgets ?? [], bills: [], cardDues: options.cardDues ?? [],
+    transactions: options.empty ? [] : transactions, accounts: options.accounts ?? [account], budgets: options.budgets ?? [], bills: [], cardDues: options.cardDues ?? [],
     notSubscriptions: [], merchantOverrides: {}, marketId: 'AE', ledgerMoney: { currency: 'AED', exponent: 2 },
     reviewTray: { pending: options.reviews ? [{ expiresAt: Date.now() + 86400000 }] : [] },
   };
