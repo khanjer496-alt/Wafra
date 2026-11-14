@@ -113,6 +113,12 @@ const PRICE_SYMBOLS = Object.keys(CURRENCY_SYMBOL_CANDIDATES).sort((a, b) => b.l
 const PRICE_SYMBOL_NAMES = new Set(PRICE_SYMBOLS.map(symbol => symbol.toUpperCase()));
 const STATED_PRICE = new RegExp(`\\b([A-Z]{3})\\s*\\d|\\d[\\d,.]*\\s*([A-Z]{3})\\b|(${PRICE_SYMBOLS.map(symbol => symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\s*\\d`, 'giu');
 
+function predicateDescriptor(text: string): RegExpExecArray | undefined {
+  return [PREDICATE_DESCRIPTOR.exec(text), NEXT_MONEY_FIELD.exec(text)]
+    .filter((match): match is RegExpExecArray => match !== null)
+    .sort((a, b) => a.index - b.index)[0];
+}
+
 function firstStatedPrice(text: string): number | null {
   for (const match of text.matchAll(STATED_PRICE)) {
     const code = (match[1] ?? match[2] ?? '').toUpperCase();
@@ -165,9 +171,7 @@ function selectedPredicateCompletion(lead: string, tail: string, debitOnly = fal
   // merchant descriptors ("at BALANCE CAFE"), so they cannot erase a later
   // finite predicate either.
   const ownedTail = tail.slice(0, firstStatedPrice(tail) ?? tail.length);
-  const descriptor = [PREDICATE_DESCRIPTOR.exec(ownedTail), NEXT_MONEY_FIELD.exec(ownedTail)]
-    .filter((match): match is RegExpExecArray => match !== null)
-    .sort((a, b) => a.index - b.index)[0];
+  const descriptor = predicateDescriptor(ownedTail);
   const predicate = ownedTail.slice(0, descriptor?.index ?? ownedTail.length).trim().replace(/^[^\p{L}\p{N}]+/u, '');
   const following: string[] = [];
   if (descriptor) for (const auxiliary of ownedTail.matchAll(FINITE_AUXILIARY_SCAN)) {
@@ -178,7 +182,7 @@ function selectedPredicateCompletion(lead: string, tail: string, debitOnly = fal
     // instruction, not the purchase whose amount was already selected.
     if (/(?:[,;]|\band\b)\s*(?:(?:your|a|the|this|another|separate|a\s+separate)\s+)?(?:refund|reversal|charge[ -]?back|credit)\b/iu.test(before) ||
       (/\b(?:if|unless)\b/iu.test(before) && /\bby\s+you\b[^.!?]{0,48}\b(?:call|contact|ignore)\b/iu.test(rest))) continue;
-    const finite = rest.slice(0, PREDICATE_DESCRIPTOR.exec(rest)?.index ?? rest.length).trim();
+    const finite = rest.slice(0, predicateDescriptor(rest)?.index ?? rest.length).trim();
     // Bare NOT in a merchant name is not a predicate. Nor does a later
     // refund's verb supply debit authority. Require finite movement/status.
     if (DEBIT_OUTCOME.test(finite) || /\b(?:pending|awaiting|scheduled|in\s+progress|not|never|been|being|be|have)\b/iu.test(finite)) following.push(finite);

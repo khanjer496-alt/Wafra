@@ -8090,5 +8090,49 @@
     "descriptor": "via wallet ending 1234",
     "status": "was allegedly made",
     "incompleteExpense": true
+  },
+  {
+    "id": "owned-descriptor-order:77",
+    "body": "A purchase of AED 250.00 using card ending 1234 has not been made.Available balance is AED 1,070.75.",
+    "sender": "ENBD",
+    "origin": "r8-owned-metadata-boundary",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": false,
+    "acceptInformationalReview": false,
+    "incompleteExpense": true
+  },
+  {
+    "id": "owned-descriptor-order:78",
+    "body": "A purchase of AED 250.00 using card ending 1234 has not been made.Available balance is AED 1,070.75. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "r8-owned-metadata-boundary",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": false,
+    "acceptInformationalReview": false,
+    "incompleteExpense": true
+  },
+  {
+    "id": "owned-descriptor-order:79",
+    "body": "A purchase of AED 250.00 using card ending 1234 will soon be made.Available balance is AED 1,070.75.",
+    "sender": "ENBD",
+    "origin": "r8-owned-metadata-boundary",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": false,
+    "acceptInformationalReview": false,
+    "incompleteExpense": true
+  },
+  {
+    "id": "owned-descriptor-order:80",
+    "body": "A purchase of AED 250.00 using card ending 1234 will soon be made.Available balance is AED 1,070.75. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "r8-owned-metadata-boundary",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": false,
+    "acceptInformationalReview": false,
+    "incompleteExpense": true
   }
 ]
