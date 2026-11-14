@@ -107,7 +107,6 @@ for (const language of ['en', 'ar']) {
   test(`${language}: feedback parser disclosure points onward and opens its named route`, () => {
     const h = createHarness({ language });
     h.deps['expo-constants'] = { expoConfig: { version: 'test' } };
-    h.deps['@/components/workflows/workflow-surfaces'] = { WorkflowHero: props => h.jsx('Hero', props) };
     h.deps['@/components/workflows/workflow-copy'] = { workflowCopy: () => ({}) };
     h.deps['@/components/ui/section-header'] = { SectionHeader: props => h.jsx('SectionHeader', props) };
     h.local('@/components/ui/layout');

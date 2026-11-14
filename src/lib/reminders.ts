@@ -29,7 +29,7 @@ import { internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
 import { daysUntilNext, detectSubscriptions, isCancelledByUser, isSubscriptionDismissed, subscriptionKey, subscriptionLabel, subscriptionMatchesBill, type Subscription } from '@/lib/subscriptions';
 import type { AppState } from '@/lib/types';
 
-export type ReminderKind = 'bill' | 'card' | 'subscription';
+type ReminderKind = 'bill' | 'card' | 'subscription';
 
 export interface PaymentReminder {
   /** Stable across rebuilds: the same obligation on the same day is the same id. */
@@ -47,7 +47,7 @@ export interface PaymentReminder {
 export const MAX_REMINDERS = 24;
 
 /** How far ahead a bill reminder is planned. */
-export const BILL_REMINDER_WINDOW_DAYS = 30;
+const BILL_REMINDER_WINDOW_DAYS = 30;
 
 /**
  * Whether rebuilding the native reminder schedule can produce a different

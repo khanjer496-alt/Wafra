@@ -12,7 +12,7 @@
  * never freezes its tabs; app-tabs-layout.tsx is Android/web only.
  * Web is off: there is no native stack to cover anything.
  */
-export const FREEZE_COVERED_SCREENS: Readonly<Record<string, boolean>> = {
+const FREEZE_COVERED_SCREENS: Readonly<Record<string, boolean>> = {
   android: true,
   ios: true,
   web: false,
@@ -48,7 +48,7 @@ export const COVER_FREEZE_DELAY_MS = 600;
  * four. Android tabs are already lazy and freeze on blur; web is unaffected.
  * Gating work until focus changes when a tab renders, never what it shows.
  */
-export const GATE_TABS_UNTIL_FOCUS: Readonly<Record<string, boolean>> = {
+const GATE_TABS_UNTIL_FOCUS: Readonly<Record<string, boolean>> = {
   ios: true,
   android: false,
   web: false,

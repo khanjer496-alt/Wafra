@@ -1,6 +1,6 @@
 import manifest from '../../assets/videos/ios-setup/recordings-manifest.json';
 
-export interface IosSetupRecording {
+interface IosSetupRecording {
   source: number;
   poster: number;
   durationSeconds: number;

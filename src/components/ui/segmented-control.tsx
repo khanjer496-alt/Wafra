@@ -5,7 +5,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { tapped } from '@/lib/haptics';
 
 export type Segment<T extends string> = { value: T; label: string; accessibilityHint?: string };
-export type SegmentedControlProps<T extends string> = {
+type SegmentedControlProps<T extends string> = {
   segments: Segment<T>[]; value: T; onChange: (value: T) => void; label: string;
 };
 /** One compact control shared by tabs-within-a-tab and all form selectors. */

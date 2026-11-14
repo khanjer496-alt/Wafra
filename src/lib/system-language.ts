@@ -7,7 +7,7 @@ type LocaleLike = {
   languageTag?: string;
 };
 
-export function resolveSystemLanguage(locales: readonly LocaleLike[]): Lang {
+function resolveSystemLanguage(locales: readonly LocaleLike[]): Lang {
   const locale = locales[0];
   const code = locale?.languageCode ?? locale?.languageTag ?? '';
   return /^ar(?:-|$)/i.test(code) ? 'ar' : 'en';

@@ -63,7 +63,7 @@ export const bandCopyTables = {
   },
 };
 
-export type BandCopy = (typeof bandCopyTables)['en'];
+type BandCopy = (typeof bandCopyTables)['en'];
 
 export function bandCopy(language: string): BandCopy {
   return language === 'ar' ? bandCopyTables.ar : bandCopyTables.en;

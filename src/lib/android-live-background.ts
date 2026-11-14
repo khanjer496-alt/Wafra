@@ -45,7 +45,7 @@ import { activatePrivateAlertFormats, invalidatePrivateAlertFormats } from '@/li
 import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
 import type { AppState, ImportBatchInput, Transaction } from '@/lib/types';
 
-export const ANDROID_LIVE_CAPTURE_TASK = 'WafraLiveCapture';
+const ANDROID_LIVE_CAPTURE_TASK = 'WafraLiveCapture';
 const STORAGE_KEY = 'wafra/state/v1';
 const TX_CHUNK_SIZE = 400;
 const TX_CHUNK_ORDER = 'oldest-first' as const;

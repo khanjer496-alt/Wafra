@@ -25,7 +25,7 @@ export {
 } from '@/lib/parser-research-contract';
 export const PARSER_RESEARCH_PASTE_MAX = 120_000;
 
-export interface ParserResearchBuild {
+interface ParserResearchBuild {
   version: string;
   platform: string;
   language: string;
@@ -33,14 +33,14 @@ export interface ParserResearchBuild {
   currency: string;
 }
 
-export interface ParserResearchShape {
+interface ParserResearchShape {
   sender: string;
   template: string;
   outcome: 'needs-parser-work';
   count: number;
 }
 
-export interface ParsedParserResearchShape {
+interface ParsedParserResearchShape {
   sender: string;
   template: string;
   outcome: 'parsed';
@@ -53,12 +53,12 @@ export interface ParsedParserResearchShape {
   };
 }
 
-export interface ManualParserResearchSamples {
+interface ManualParserResearchSamples {
   unparsed: ParserResearchShape[];
   parsed: ParsedParserResearchShape[];
 }
 
-export interface ManualParserResearchCounts {
+interface ManualParserResearchCounts {
   checked: number;
   financial: number;
   parsedMessages: number;
@@ -70,7 +70,7 @@ export interface ManualParserResearchCounts {
   includedTemplates: number;
 }
 
-export interface ParserResearchCounts {
+interface ParserResearchCounts {
   checked: number;
   financial: number;
   sensitiveExcluded: number;
@@ -94,11 +94,11 @@ export interface ParserResearchProgress {
   total: number;
 }
 
-export interface ParserResearchCooperativeOptions {
+interface ParserResearchCooperativeOptions {
   shouldContinue?: () => boolean;
 }
 
-export interface ManualParserResearchExport {
+interface ManualParserResearchExport {
   schema: 2;
   kind: 'wafra-parser-report';
   notice: string;
@@ -172,7 +172,7 @@ export function serializeManualParserResearchExport(
   return JSON.stringify(report, null, 2);
 }
 
-export interface ManualParserResearchSerializationProgress {
+interface ManualParserResearchSerializationProgress {
   completed: number;
   total: number;
 }

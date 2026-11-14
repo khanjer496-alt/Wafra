@@ -71,7 +71,7 @@ type BottomSheetCommonProps = {
   palette?: BandPalette;
 };
 
-export type BottomSheetProps = BottomSheetCommonProps & (
+type BottomSheetProps = BottomSheetCommonProps & (
   | { dismissible?: true; footer?: React.ReactNode }
   | { dismissible: false; footer: React.ReactElement }
 );

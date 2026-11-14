@@ -32,9 +32,9 @@ import { captureTrace, captureTraceEnabled } from '@/lib/capture-trace';
 import { recordRuntimeOperation } from '@/lib/runtime-performance';
 import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
 
-export type CaptureIntent = 'routine' | 'notification-only' | 'supplemental' | 'setup-verification' | 'background';
+type CaptureIntent = 'routine' | 'notification-only' | 'supplemental' | 'setup-verification' | 'background';
 
-export interface CaptureImportSummary {
+interface CaptureImportSummary {
   /** Relay returned a full page; supplemental callers should drain another page after yielding. */
   moreQueued?: boolean;
   /** Review rows retained on the relay, so filing is not complete. */
@@ -50,7 +50,7 @@ export interface CaptureImportSummary {
   reviewAlerts: number;
 }
 
-export type CaptureExecutionOutcome =
+type CaptureExecutionOutcome =
   | { kind: 'not-hydrated' }
   | { kind: 'needs-setup' }
   | ({ kind: 'up-to-date'; source: CaptureSource } & CaptureImportSummary)
@@ -88,7 +88,7 @@ export interface CaptureLedgerAdapter {
   ) => import('./alert-review-tray').ReviewStageReceipt & { qualificationIds?: string[] };
 }
 
-export interface BackgroundCaptureAdapter {
+interface BackgroundCaptureAdapter {
   /** Persist parsed rows in the after-first-unlock encrypted inbox. */
   stage: (rows: ScannedSms[]) => Promise<ScannedSms[]>;
   /** Announce only rows that were not already staged. */
@@ -116,7 +116,7 @@ interface CaptureExecutorDependencies {
   ) => Promise<void>;
 }
 
-export interface CaptureExecutorOptions {
+interface CaptureExecutorOptions {
   ledger?: CaptureLedgerAdapter;
   background?: BackgroundCaptureAdapter;
   /** Internal seams used by interface-level tests. Production callers omit this. */

@@ -5,7 +5,7 @@ import { Radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { tapped } from '@/lib/haptics';
 
-export type ActionIconButtonProps = {
+type ActionIconButtonProps = {
   icon: IconName;
   label: string;
   onPress: () => void;

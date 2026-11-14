@@ -36,7 +36,7 @@ export interface TransferBatchItem {
 }
 
 /** One picked item drawn as its Transfers route. */
-export interface TransferBatchPreview {
+interface TransferBatchPreview {
   from: RouteEnd; to: RouteEnd;
   fromLabel: string; toLabel: string;
   amountFils: number;

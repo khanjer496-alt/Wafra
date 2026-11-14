@@ -5,7 +5,7 @@ import type { AppState } from '@/lib/types';
 import type { WidgetSnapshot } from '@/lib/widget-snapshot';
 import { clearWidgetSnapshot, setWidgetSnapshot, widgetSnapshotClearCount } from '../../modules/wafra-widgets';
 
-export function widgetSnapshotAllowed(input: WidgetLedgerInput): boolean {
+function widgetSnapshotAllowed(input: WidgetLedgerInput): boolean {
   return input.state.hydrated && input.state.onboarded && !input.state.privateMode;
 }
 
@@ -38,7 +38,7 @@ export async function prepareWidgetSnapshot(
  * `unchanged`: the native copy already holds these figures (written by this
  * process, not cleared since, and recently enough), so nothing was rewritten.
  */
-export type WidgetSyncOutcome = 'written' | 'unchanged' | 'cleared' | 'pending' | 'cancelled' | 'failed';
+type WidgetSyncOutcome = 'written' | 'unchanged' | 'cleared' | 'pending' | 'cancelled' | 'failed';
 interface WidgetSyncDependencies {
   /** False (or a rejection) when the native copy was not stored. */
   write(json: string): void | boolean | Promise<void | boolean>;
@@ -61,7 +61,7 @@ interface WidgetSyncDependencies {
  */
 export const WIDGET_SYNC_DEBOUNCE_MS = 2_000;
 
-export interface WidgetSyncRequestOptions {
+interface WidgetSyncRequestOptions {
   /** Wait this long (cancelled by a newer request, a clear or cancel()) before preparing. */
   debounceMs?: number;
 }
@@ -76,7 +76,7 @@ export interface WidgetSyncRequestOptions {
 export const WIDGET_REWRITE_AFTER_MS = 3 * 60 * 60_000;
 
 /** A snapshot without its clock: two snapshots with the same key draw the same widgets. */
-export function widgetSnapshotContentKey(snapshot: WidgetSnapshot): string {
+function widgetSnapshotContentKey(snapshot: WidgetSnapshot): string {
   return JSON.stringify({ ...snapshot, generatedAt: 0 });
 }
 

@@ -40,7 +40,7 @@ export const spendingDetailsCopyTables = {
   },
 };
 
-export type SpendingDetailsCopy = (typeof spendingDetailsCopyTables)['en'];
+type SpendingDetailsCopy = (typeof spendingDetailsCopyTables)['en'];
 
 export function spendingDetailsCopy(language: string): SpendingDetailsCopy {
   return language === 'ar' ? spendingDetailsCopyTables.ar : spendingDetailsCopyTables.en;

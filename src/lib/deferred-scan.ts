@@ -11,7 +11,7 @@
  * request covers every earlier one. Only cancel() (the screen is leaving)
  * discards a pending request, and the next mount or `active` event asks again.
  */
-export interface DeferredScan {
+interface DeferredScan {
   /** Ask for a scan; joins one that is already pending. */
   request(): void;
   /** Drop a pending request (the owner is unmounting). */

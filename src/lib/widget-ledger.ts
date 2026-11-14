@@ -28,7 +28,7 @@ import { buildWidgetSnapshot, WIDGET_UPCOMING_DAYS, type WidgetSnapshot, type Wi
  * Today, the week and budget pace for the live month, whatever period Home is
  * showing: widgets always describe the current month.
  */
-export function widgetMonthToday(input: {
+function widgetMonthToday(input: {
   transactions: readonly Transaction[];
   budgets: readonly Budget[];
   now: Date;
@@ -59,7 +59,7 @@ export function widgetMonthToday(input: {
  * with each category named in the widget's language. Limits are left out:
  * the widget draws shares of what was spent.
  */
-export function widgetMonthSpending(input: {
+function widgetMonthSpending(input: {
   state: Pick<AppState, 'transactions' | 'budgets' | 'customCategories'>;
   now: Date;
   liveAccounts: ReadonlySet<string>;

@@ -15,9 +15,9 @@ import type { Account } from '@/lib/types';
 export const QUIET_AFTER_DAYS = 14;
 
 /** Who put the latest balance figure on an account. */
-export type SnapshotOrigin = 'bank' | 'manual';
+type SnapshotOrigin = 'bank' | 'manual';
 
-export interface AccountFreshness {
+interface AccountFreshness {
   label: string;
   /** No new figure for QUIET_AFTER_DAYS or more. */
   quiet: boolean;

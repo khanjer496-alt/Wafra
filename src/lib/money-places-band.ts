@@ -15,7 +15,7 @@ import type { PaymentAgendaItem } from '@/lib/reference-presentation';
 import type { Account, CategoryId } from '@/lib/types';
 
 /** What the Bills band says: the open total, how many payments, and how many are estimates. */
-export interface AgendaSummary {
+interface AgendaSummary {
   totalFils: number;
   count: number;
   estimated: number;
@@ -36,7 +36,7 @@ export function openAgendaSummary(items: readonly Pick<PaymentAgendaItem, 'amoun
 }
 
 /** A window's band figure: what falls due from today on, with what is already late kept apart. */
-export interface WindowAgendaSummary extends AgendaSummary {
+interface WindowAgendaSummary extends AgendaSummary {
   overdueFils: number;
   overdueCount: number;
 }
@@ -61,7 +61,7 @@ export function windowAgendaSummary(
   return { ...upcoming, overdueFils, overdueCount };
 }
 
-export interface BillsPin {
+interface BillsPin {
   key: string;
   /** Days from today; 0 is today. */
   dayOffset: number;

@@ -237,7 +237,7 @@ export type BackgroundRelayConfig = Pick<
 
 type RelaySyncConfig = Pick<RelayConfig, 'baseUrl' | 'syncToken' | 'privateKey'>;
 
-export function normalizeRelayBaseUrl(value: string | null | undefined): string | null {
+function normalizeRelayBaseUrl(value: string | null | undefined): string | null {
   if (!value?.trim()) return null;
   try {
     const url = new URL(value.trim());
@@ -298,7 +298,7 @@ export function isLegacyShortcutCaptureActive(
 }
 
 /** A market id the app actually ships a pack for, or null. */
-export function validRelayMarket(value: unknown): string | null {
+function validRelayMarket(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const id = value.trim().toUpperCase();
   return MARKETS.some((market) => market.id === id) ? id : null;
@@ -608,7 +608,7 @@ async function requireLocalRelayCredentialCleanup(cfg: RelayConfig): Promise<voi
 }
 
 /** The relay refused this credential; the pairing is over, not merely stalled. */
-export const RELAY_REVOKED = 'device_revoked';
+const RELAY_REVOKED = 'device_revoked';
 
 /** True for the one error that means "re-pair", not "try again later". */
 export function isRelayRevokedError(error: unknown): boolean {
@@ -1303,7 +1303,7 @@ interface RelayReviewRowBase {
   captureSource: 'shortcut';
 }
 
-export type RelayReviewRow = RelayReviewRowBase & (
+type RelayReviewRow = RelayReviewRowBase & (
   | { reviewKind?: 'launch'; review: UnparsedLaunchAlertReview; event?: never }
   | { reviewKind: 'universal'; event: UniversalBankEvent; review?: never }
 );
@@ -1311,7 +1311,7 @@ export type RelayReviewRow = RelayReviewRowBase & (
 const opaqueReviewKey = (value: unknown): value is string =>
   typeof value === 'string' && /^[A-Za-z0-9_-]{16,128}$/.test(value);
 
-export const isRelayReviewRow = (value: unknown): value is RelayReviewRow => {
+const isRelayReviewRow = (value: unknown): value is RelayReviewRow => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const row = value as Record<string, unknown>;
   if (row.relayReview !== true || row.captureSource !== 'shortcut' ||
@@ -1346,7 +1346,7 @@ export const isRelayReviewRow = (value: unknown): value is RelayReviewRow => {
   }
 };
 
-export const relayReviewRowToReviewAlert = (row: RelayReviewRow): ReviewEntry => {
+const relayReviewRowToReviewAlert = (row: RelayReviewRow): ReviewEntry => {
   if (row.reviewKind === 'universal') {
     const prepared = prepareUniversalReviewAlert({
       id: row.id,
@@ -1410,7 +1410,7 @@ export function relayRowNamesItsBank(row: Pick<ParsedRelayRow, 'bankHint' | 'sen
   return Boolean((row.bankHint ? bankFromName(row.bankHint) : null) ?? bankFromSender(row.sender));
 }
 
-export interface ShortcutCaptureHealth {
+interface ShortcutCaptureHealth {
   /** Show the "update your Shortcut" prompt. */
   warn: boolean;
   /** Rows seen and rows whose bank could be named, for the counter's own state. */

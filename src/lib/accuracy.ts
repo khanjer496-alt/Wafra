@@ -17,12 +17,12 @@ import type { AppState, Transaction } from '@/lib/types';
  * rule. Calling all of that "could not read" overstated the problem and buried
  * the handful of messages the grammar genuinely cannot parse.
  */
-export type UnreadReason = 'unread' | 'uncategorized';
+type UnreadReason = 'unread' | 'uncategorized';
 
 /** The title the parser falls back to when it cannot find a merchant at all. */
 const GENERIC_MERCHANT = 'Card purchase';
 
-export interface UnreadFormat {
+interface UnreadFormat {
   /** One representative message for this format. */
   raw: string;
   title: string;
@@ -376,7 +376,7 @@ export const REPORT_PROMPT_THRESHOLD = 3;
  * runtime: it can inspect retained local misses, while old relay rows remain
  * structurally source-free.
  */
-export type NoFormatsReason = 'none-found' | 'ios-local' | 'relay' | 'private';
+type NoFormatsReason = 'none-found' | 'ios-local' | 'relay' | 'private';
 
 export function noFormatsReason(opts: {
   relayPlatform: boolean;
@@ -477,7 +477,7 @@ function namesNoMerchant(title: string): boolean {
   return isDeliberateOtherTitle(t) || NO_MERCHANT_TITLES.has(t) || CARD_PAYMENT_TITLE_RE.test(t);
 }
 
-export interface ParserCoverage {
+interface ParserCoverage {
   /** Ledger rows the parser itself wrote, from a bank message. */
   imported: number;
   /**
