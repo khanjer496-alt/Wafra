@@ -501,8 +501,11 @@ const compactParsed = compactMessages.flatMap((message) => {
     sourceEventId: `a${message.id}`,
   }] : [];
 });
-ok('every compact bank shorthand alert survives the launch parser',
-  compactParsed.length === compactMessages.length, compactParsed.length);
+ok('compact posted receipts survive; the noun refund headline stays out of the ledger',
+  compactParsed.length === compactMessages.length - 1, compactParsed.length);
+require('../universal-test/credit-retention.cjs').assertCreditRetained(
+  require('../universal-test/load-ts.cjs').createLoader(), compactMessages[9].body,
+  { minor: 12500, sender: 'FAB', reviewOnly: true });
 ok('compact meanings retain their accounting roles before import',
   compactParsed[0].type === 'income' && compactParsed[0].categoryGuess === 'salary' &&
     compactParsed[1].type === 'income' && compactParsed[1].categoryGuess === 'business' &&
@@ -512,8 +515,7 @@ ok('compact meanings retain their accounting roles before import',
     compactParsed[6].categoryGuess === 'utilities' &&
     compactParsed[6].paymentFlowSide === 'receipt' &&
     compactParsed[7].categoryGuess === 'cash-withdrawal' &&
-    compactParsed[8].merchant === 'Annual card fee' &&
-    compactParsed[9].type === 'income' && compactParsed[9].merchant === 'Refund');
+    compactParsed[8].merchant === 'Annual card fee');
 const compactPlan = buildImportPlan(
   compactParsed,
   BASE,
@@ -529,7 +531,7 @@ const compactState = applyMaterializedImportBatch(BASE, compactBatch);
 const compactSummary = summarizeMonth(compactState.transactions, month);
 const compactCashOut = summarizeCashOutflow(compactState, month);
 ok('compact bank shorthand produces exact income, spending and cash-out totals',
-  compactSummary.incomeFils === 887500 && compactSummary.expenseFils === 70799 &&
+  compactSummary.incomeFils === 875000 && compactSummary.expenseFils === 70799 &&
     compactCashOut.totalFils === 261000 && compactCashOut.cardPaymentsFils === 90000 &&
     compactCashOut.accountOutflowFils === 171000,
   JSON.stringify({ compactSummary, compactCashOut }));
