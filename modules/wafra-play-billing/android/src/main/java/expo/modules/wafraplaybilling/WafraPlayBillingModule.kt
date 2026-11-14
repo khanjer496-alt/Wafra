@@ -9,25 +9,31 @@ import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 
 class WafraPlayBillingModule : Module() {
-  private val queries by lazy {
+  private fun newQueries(recoverAcknowledgements: Boolean) =
     SubscriptionQuery(AndroidSubscriptionClient.MainScheduler()) {
       val context = appContext.reactContext?.applicationContext ?: throw IllegalStateException()
-      AndroidSubscriptionClient(context)
+      AndroidSubscriptionClient(context, recoverAcknowledgements)
     }
-  }
+
+  private val queries by lazy { newQueries(false) }
+  private val acknowledgements by lazy { newQueries(true) }
+
+  private suspend fun query(queue: SubscriptionQuery): Map<String, Any?> =
+    withContext(Dispatchers.Main.immediate) {
+      suspendCancellableCoroutine { continuation ->
+        val ticket = queue.query { result ->
+          if (continuation.isActive) continuation.resume(result.toMap())
+        }
+        continuation.invokeOnCancellation { queue.cancel(ticket) }
+      }
+    }
 
   override fun definition() = ModuleDefinition {
     Name("WafraPlayBilling")
-    AsyncFunction("querySubscriptions") Coroutine { ->
-      withContext(Dispatchers.Main.immediate) {
-        suspendCancellableCoroutine<Map<String, Any?>> { continuation ->
-          val ticket = queries.query { result ->
-            if (continuation.isActive) continuation.resume(result.toMap())
-          }
-          continuation.invokeOnCancellation { queries.cancel(ticket) }
-        }
-      }
-    }
-    OnDestroy { queries.destroy() }
+    AsyncFunction("querySubscriptions") Coroutine { -> query(queries) }
+    // JS must grant and durably save the queried Pro entitlement before invoking this.
+    // Purchase tokens are queried and acknowledged entirely on the native side.
+    AsyncFunction("acknowledgeSubscriptions") Coroutine { -> query(acknowledgements) }
+    OnDestroy { queries.destroy(); acknowledgements.destroy() }
   }
 }
