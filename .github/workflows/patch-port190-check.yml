@@ -21,6 +21,8 @@ jobs:
         run: node scripts/generate-ios-background-parser.cjs --check > generation-check.txt 2>&1
       - name: Compile shipping modules for existing consumer tests
         run: bash scripts/test/build.sh > compile.txt 2>&1
+      - name: Diagnose native refusal boundaries
+        run: node .github/reviewer-gate/delayed-diagnostic.cjs > native-diagnostic.json 2>&1
       - name: Three-path original and delayed reviewer probes
         if: ${{ !cancelled() }}
         run: node --test --test-concurrency=1 scripts/test/repair/credit-settlement-closure.test.cjs > closure.txt 2>&1
@@ -32,6 +34,7 @@ jobs:
         with:
           name: delayed-review-evidence-${{ github.sha }}
           path: |
+            native-diagnostic.json
             generation-check.txt
             compile.txt
             closure.txt
