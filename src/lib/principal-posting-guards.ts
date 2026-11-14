@@ -1,5 +1,5 @@
 import { EN_CREDIT_PENDING_STATUS, AR_CREDIT_PENDING_STATUS, hasCreditCondition, hasPendingCreditStatus, mentionsRefund } from '@/lib/credit-settlement-guards';
-import { CURRENCY_MINOR_UNITS } from '@/lib/currency-metadata';
+import { CURRENCY_MINOR_UNITS, CURRENCY_SYMBOL_CANDIDATES } from '@/lib/currency-metadata';
 
 /** Source-only qualifications of an already selected monetary value. */
 export interface PrincipalSpan { start: number; end: number }
@@ -103,10 +103,24 @@ const ACTIVE_MONEY_VERB = /\b(?:charged|debited|deducted|paid|sent|withdrawn|spe
 const PREDICATE_AUXILIARY = /\b(?:was|were|is|are|has|have|had|will|would|shall|should|must|may|might|can|could|not|never|being|yet|scheduled|pending|awaiting|[a-z]+n['’]t)\b/iu;
 const PREDICATE_START = new RegExp(`^(?:${PREDICATE_AUXILIARY.source})`, 'iu');
 const COMPLETION_ADVERBS = new Set(['already', 'just', 'now', 'successfully', 'fully', 'recently', 'actually', 'really']);
+const PRICE_SYMBOLS = Object.keys(CURRENCY_SYMBOL_CANDIDATES).sort((a, b) => b.length - a.length);
+const PRICE_SYMBOL_NAMES = new Set(PRICE_SYMBOLS.map(symbol => symbol.toUpperCase()));
+const STATED_PRICE = new RegExp(`\\b([A-Z]{3})\\s*\\d|\\d[\\d,.]*\\s*([A-Z]{3})\\b|(${PRICE_SYMBOLS.map(symbol => symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\s*\\d`, 'giu');
+
+function firstStatedPrice(text: string): number | null {
+  for (const match of text.matchAll(STATED_PRICE)) {
+    const code = (match[1] ?? match[2] ?? '').toUpperCase();
+    if (!match[3] && !Object.hasOwn(CURRENCY_MINOR_UNITS, code) && !PRICE_SYMBOL_NAMES.has(code)) continue;
+    if (match[3] && /[\p{L}\p{N}]/u.test(text[match.index! - 1] ?? '')) continue;
+    return match.index!;
+  }
+  return null;
+}
 
 /** Reduce one owned predicate; modifiers cannot hide its polarity or aspect. */
 function completedPredicate(fragment: string): boolean {
-  const words = (fragment.toLowerCase().match(/[a-z]+(?:['’][a-z]+)?|\d+/gu) ?? [])
+  const expanded = fragment.trim().replace(/^['’]ve\b/iu, 'have').replace(/^['’]s\b/iu, 'has').replace(/^['’]re\b/iu, 'are');
+  const words = (expanded.toLowerCase().match(/[a-z]+(?:['’][a-z]+)?|\d+/gu) ?? [])
     .filter(word => !COMPLETION_ADVERBS.has(word));
   // A bank may state "paid out/back" without changing the completed aspect.
   if (['out', 'back'].includes(words[words.length - 1] ?? '') && ['paid', 'sent'].includes(words[words.length - 2] ?? '')) words.pop();
@@ -120,7 +134,8 @@ function completedPredicate(fragment: string): boolean {
 /** null leaves a genuinely terse receipt to the mature grammar. */
 function selectedPredicateCompletion(lead: string, tail: string): boolean | null {
   const descriptor = /\b(?:using|with|via|at|from|into|on|by|for|merchant|card|account|wallet|date|time|reference|balance)\b|\bto(?!\s+be\b)/iu.exec(tail);
-  const predicate = tail.slice(0, descriptor?.index ?? tail.length).trim();
+  const ownedTail = tail.slice(0, descriptor?.index ?? tail.length);
+  const predicate = ownedTail.slice(0, firstStatedPrice(ownedTail) ?? ownedTail.length).trim();
   const allVerbs = [...lead.matchAll(ACTIVE_MONEY_VERB)];
   const verbs = allVerbs.filter((verb, index) => {
     const object = lead.slice(verb.index! + verb[0].length);
@@ -138,22 +153,21 @@ function selectedPredicateCompletion(lead: string, tail: string): boolean | null
     let prefix = lead.slice(0, before.index);
     // Instrument/subject names precede the predicate. A merchant NOT NOW CAFE
     // following the money is never part of this auxiliary/polarity span.
-    const subjects = [...prefix.matchAll(/\b(?:card|account|wallet|you|payment|purchase|transaction|transfer|withdrawal|salary|deposit)\b/giu)];
+    const subjects = [...prefix.matchAll(/\b(?:card|account|wallet|you|payment|purchase|transaction|transfer|withdrawal|salary|deposit|fees?|charges?|commission|tax|levy)\b/giu)];
     const subject = subjects[subjects.length - 1];
     if (subject) prefix = prefix.slice(subject.index! + subject[0].length)
       .replace(/^\s*(?:(?:ending|number|no|with|in)\s*)?[*xX•]*\d{3,4}\b[\s:,-]*/iu, '');
-    else prefix = prefix.slice(Math.max(prefix.lastIndexOf(':'), prefix.lastIndexOf('|')) + 1);
+    else prefix = prefix.slice(Math.max(prefix.lastIndexOf(':'), prefix.lastIndexOf('|'),
+      /^\s*[:=]\s*$/u.test(lead.slice(before.index! + before[0].length)) ? prefix.lastIndexOf('\n') : -1) + 1);
     const auxiliary = PREDICATE_AUXILIARY.exec(prefix);
     if (auxiliary) prefix = prefix.slice(auxiliary.index);
     let bridge = lead.slice(before.index! + before[0].length);
     // A bank FX quote may put the ledger-currency figure after the original
     // price. Its predicate ends at that first stated money, not at the quote.
-    const priorPrice = [...bridge.matchAll(/\b([A-Z]{3})\s*\d|\d[\d,.]*\s*([A-Z]{3})\b|([$€£₹])\s*\d/giu)]
-      .find(match => !!match[3] || Object.hasOwn(CURRENCY_MINOR_UNITS, (match[1] ?? match[2]).toUpperCase()));
-    if (priorPrice) bridge = bridge.slice(0, priorPrice.index);
+    bridge = bridge.slice(0, firstStatedPrice(bridge) ?? bridge.length);
     bridge = bridge.split(/\b(?:using|with|via|at|from|to|into|on|by|for)\b/iu)[0].trim();
-    if (/^(?:fees?|charges?|commission|tax|levy|amount|sum|value)(?:\s+(?:of|for))?$/iu.test(bridge) ||
-      /^(?:a|an|the|your|this|that)\s+(?:[a-z'’ -]+\s+)?(?:fees?|charges?|commission|tax|levy|amount|sum|value)(?:\s+(?:of|for))?$/iu.test(bridge)) bridge = '';
+    if (/^(?:fees?|charges?|commission|tax|levy|amount|sum|value)(?:\s+(?:of|for))?\s*[:=]?$/iu.test(bridge) ||
+      /^(?:a|an|the|your|this|that)\s+(?:[a-z'’ -]+\s+)?(?:fees?|charges?|commission|tax|levy|amount|sum|value)(?:\s+(?:of|for))?\s*[:=]?$/iu.test(bridge)) bridge = '';
     active = completedPredicate(`${prefix} ${before[0]} ${bridge}`);
   }
   if (active === false) return false;
