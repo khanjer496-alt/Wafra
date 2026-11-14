@@ -39,12 +39,16 @@ function hookHarness({ owner = true, platform = 'android' } = {}) {
   const hook = load(path.join(root, 'src/hooks/use-auto-import.ts'), {
     react, 'react-native': { AppState: appState, Platform: { OS: platform } },
     'expo-router': { useRouter: () => ({}), useFocusEffect() {} },
+    // iOS launch and `active` scans are deferred in production (runAfterFirstFrames); this harness
+    // tests the scan itself, so the deferral runs it at once, as it did before.
+    '@/lib/after-first-frames': { runAfterFirstFrames: (run) => { run(); return { cancel() {} }; } },
+    '@/lib/deferred-scan': load(path.join(root, 'src/lib/deferred-scan.ts')),
     '@/components/ui/toast': { useToast: () => ({ show() {} }) }, '@/components/lock-gate': { usePrivacyGateCleared: () => true },
     '@/lib/auto-import': { isSmsScanningAvailable: () => false, hasBankNotificationAccess: () => false, hasBankNotificationSystemAccess: () => false },
     '@/lib/background-relay': { enableRelayBackgroundSync: async () => {} },
     '@/lib/capture': { getIosCaptureNativeModule: () => null, isCaptureAvailable: () => false },
     '@/lib/capture-executor': { createCaptureExecutor: () => ({ execute: async () => ({ kind: 'up-to-date' }) }) },
-    '@/lib/android-live-background': { installAndroidLiveCaptureLedger: () => () => {} },
+    '@/lib/android-live-background-api': { installAndroidLiveCaptureLedger: () => () => {} },
     '@/lib/android-capture-sources': { androidSmsCaptureEnabled: () => false, androidNotificationCaptureEnabled: () => false },
     '@/lib/haptics': {}, '@/lib/capture-toast': {}, '@/lib/i18n': { t: value => value },
     '@/lib/fx-rates': {},
@@ -163,17 +167,20 @@ test('non-owner consumers never schedule reactive reminders', async t => {
   assert.equal(h.calls.length, 0);
 });
 
-function backgroundHarness(liveSmsConsent = true) {
+function backgroundHarness(liveSmsConsent = true, historyAccess = true) {
   let state = { ...baseState(), pro: true }, handler;
   let next = {}, durable = Promise.resolve(), failSync = false;
-  const calls = [], summaries = [];
+  const calls = [], summaries = []; let executions = 0;
   const api = load(path.join(root, 'src/lib/android-live-background.ts'), {
     'react-native': { Platform: { OS: 'android' }, AppState: { currentState: 'background' }, AppRegistry: { registerHeadlessTask: (_name, factory) => { handler = factory(); } } },
     '../../modules/notification-reader': { __esModule: true, default: { isAdmissionActive: () => true } },
     '../../modules/sms-reader': { __esModule: true, default: { hasLiveSmsConsent: () => liveSmsConsent } },
     '@/lib/android-capture-sources': { androidSmsCaptureEnabled: () => true, androidNotificationCaptureEnabled: () => true },
-    '@/lib/auto-import': {},
+    // These reminder cases start after effective history disclosure + OS
+    // access. Native live consent remains independently modeled below.
+    '@/lib/auto-import': { hasSmsPermission: async () => historyAccess },
     '@/lib/capture-executor': { createCaptureExecutor: () => ({ execute: async () => {
+      executions++;
       state = { ...state, ...next }; await durable;
       return { kind: 'imported', transactionIds: [] };
     } }) },
@@ -190,7 +197,7 @@ function backgroundHarness(liveSmsConsent = true) {
     '@/lib/notifications': { syncDailySummary: async state => { summaries.push(state); }, syncPaymentReminders: async (...args) => { calls.push(args); if (failSync) throw new Error('OS denied scheduling'); } },
   });
   const uninstall = api.installAndroidLiveCaptureLedger({ getState: () => state });
-  return { calls, summaries, uninstall, run: () => handler({ source: 'sms', observedAt: 1000 }),
+  return { calls, summaries, uninstall, get executions() { return executions; }, run: () => handler({ source: 'sms', observedAt: 1000 }),
     change: patch => { next = patch; }, setDurable: promise => { durable = promise; }, failSync: () => { failSync = true; } };
 }
 
@@ -198,6 +205,16 @@ test('an already-scheduled SMS task stops if live SMS was disabled', async t => 
   const h = backgroundHarness(false); t.after(h.uninstall);
   h.change({ accounts: [account], cardDues: [due] });
   await h.run();
+  assert.equal(h.calls.length, 0);
+  assert.equal(h.summaries.length, 0);
+  assert.equal(h.executions, 0);
+});
+
+test('native live consent alone cannot start a headless task without effective history access', async t => {
+  const h = backgroundHarness(true, false); t.after(h.uninstall);
+  h.change({ accounts: [account], cardDues: [due] });
+  await h.run();
+  assert.equal(h.executions, 0);
   assert.equal(h.calls.length, 0);
   assert.equal(h.summaries.length, 0);
 });

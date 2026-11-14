@@ -86,10 +86,18 @@ test('every iOS profile installs the bundled History Shortcut and retains the na
     EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: 'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v6-20260919/Wafra-History-v6.signed.shortcut',
   } } });
   assert.equal(retired.PAGED_HISTORY_INSTALL_URL, null);
-  const base = { name: 'Wafra', plugins: ['original'] };
+  const base = { name: 'Wafra', ios: { buildNumber: '1' }, plugins: ['original'] };
   const factory = require(path.join(root, 'app.config.js'));
-  assert.deepEqual(factory({ config: base }).plugins,
+  const plugins = factory({ config: base }).plugins;
+  assert.deepEqual(plugins.slice(0, 3),
     ['original', './modules/wafra-message-history/plugin/paged', './modules/wafra-high-refresh/plugin']);
+  // The release-metadata cleanup registers the dev-client launcher and then its
+  // own final mod, always last, after every earlier plugin. It takes no options:
+  // the expo-updates fingerprint hashes this list, so it must not depend on the
+  // build env (the plugin reads EAS_BUILD_PROFILE itself at prebuild).
+  assert.equal(plugins[3], 'expo-dev-client');
+  assert.equal(plugins.length, 5);
+  assert.equal(plugins[4], './modules/wafra-release-metadata/plugin');
 });
 test('normal setup routes to bounded history without retiring the published original', () => {
   const screen = fs.readFileSync(path.join(root, 'src/app/ios-setup.tsx'), 'utf8');

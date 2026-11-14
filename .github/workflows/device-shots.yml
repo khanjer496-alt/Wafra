@@ -108,42 +108,19 @@ jobs:
       - name: Boot the simulator
         id: sim
         run: |
-          # 16 Pro MAX, not 16 Pro, and the difference is an App Store rejection.
-          #
-          # Apple's screenshot specification (App Store Connect help →
-          # "Screenshot specifications", re-verified 2026-08-06) makes the 6.9"
-          # display the one a submission needs: it accepts 1320x2868, 1290x2796
-          # or 1260x2736 there, and 6.5" is only required if no 6.9" set is
-          # provided. Everything smaller is optional and gets scaled down
-          # automatically. The 16 Pro is a 6.3" panel, so this job could not
-          # natively produce a submittable image no matter how well the tour ran
-          # — while the 16 Pro Max is 1320x2868, the exact accepted size.
-          #
-          # That matters more than it sounds: the only store assets in this repo
-          # today are react-native-web approximations from scripts/e2e/capture.mjs,
-          # made on a box with no Mac. This job is the path to real ones.
-          #
-          # CHANGING THIS NAME CHANGES THE PIXEL SIZE OF EVERY ARTIFACT. If a
-          # future runner image drops this device and the fallback below picks
-          # something else, the capture step prints the device it actually used
-          # so a wrong size is visible in the log instead of at review time.
+          # Match the approved 1206x2622 Dynamic Island medium target.
+          # This optional simulator lane is native rendering evidence; final
+          # App Store captures still require the cleared signed candidate 195.
+          # Fail rather than silently producing a different display size.
           set -uo pipefail
-          DEVICE="iPhone 16 Pro Max"
+          DEVICE="iPhone 16 Pro"
           UDID=$(xcrun simctl create wafra-shots "$DEVICE" 2>/dev/null || true)
           if [ -z "$UDID" ]; then
             UDID=$(xcrun simctl list devices available -j \
               | jq -r --arg d "$DEVICE" '.devices[][] | select(.name==$d) | .udid' | head -1)
           fi
-          # Last resort: any available iPhone, so the job still produces images
-          # rather than dying on `simctl boot ""`. It says so in as many words,
-          # because those images will NOT be a submittable size.
           if [ -z "$UDID" ]; then
-            UDID=$(xcrun simctl list devices available -j \
-              | jq -r '.devices[][] | select(.name|startswith("iPhone")) | .udid' | head -1)
-            echo "::warning::'$DEVICE' is not on this runner. Falling back to another iPhone — the screenshots will not be the 6.9\" App Store size (1320x2868)."
-          fi
-          if [ -z "$UDID" ]; then
-            echo "::error::no iOS simulator available on this runner"
+            echo "::error::$DEVICE unavailable; refusing a different screenshot size"
             xcrun simctl list devices available
             exit 1
           fi
@@ -305,6 +282,7 @@ jobs:
         with:
           name: ios-screenshots
           path: shots/
+          retention-days: 3
           if-no-files-found: warn
 
   android:
@@ -451,4 +429,5 @@ jobs:
         with:
           name: android-screenshots
           path: shots/
+          retention-days: 3
           if-no-files-found: warn

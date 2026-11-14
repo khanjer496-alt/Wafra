@@ -1,6 +1,96 @@
 /** Source-only qualifications of an already selected monetary value. */
 export interface PrincipalSpan { start: number; end: number }
 
+const CLICK_LINK_PROMPT = /(?:\b(?:click(?:ing)?|tap(?:ping)?|verify|confirm|update\s+(?:(?:your|the)\s+)?(?:details|information|credentials|account))\b[\s:：]+|(?<![ء-ي])(?:اضغط|إضغط|انقر)[\s:：]+)(?:[^.!?]|\.\d){0,120}?(?:(?:https?|hxxps?):\/\/|\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:[\/?#:]|\b)|www\.|\b(?:here|below|link|url)\b|الرابط|هنا)/giu;
+const ISSUER_MERCHANT_DEBIT_CONFIRMATION = /^confirm\s+that\s+[A-Z]{3}\s+\d[\d,.]*\s+was\s+debited\s+from\s+your\s+account\s+ending\s+\d{4}\s+for\s+(?:a\s+)?purchase\s+at\s+(?:[a-z0-9-]+\.)+[a-z]{2,}$/iu;
+/**
+ * Only a closed sentence end may follow a declared merchant host; any other character may continue a URL.
+ * Closed means: an optional card descriptor (`*2K1AB3CD0`), closing brackets/quotes, sentence punctuation
+ * (ASCII, ideographic, Arabic or ellipsis), then visible white space or the end. U+FEFF counts as
+ * white space in JavaScript but is invisible, so it cannot hide a path behind the host.
+ */
+const ISSUER_MERCHANT_HOST_END = /^(?:\*[A-Z0-9]{1,24})?["'”’»)\]]*[.!?;,。、،؛؟۔…]*(?:[^\S\uFEFF]|$)/iu;
+/** One link-prompt match counts unless it is a warning, a merchant name or a closed issuer debit declaration. */
+function countsAsLinkPrompt(source: string, match: RegExpMatchArray): boolean {
+  const before = source.slice(Math.max(0, match.index! - 60), match.index);
+  // A warning against clicking, or a merchant named CLICK HERE, is not a prompt.
+  if (/(?:\b(?:do\s+not|don['’]t|never|avoid|refrain\s+from)\s+(?:ever\s+)?|\b(?:at|from|merchant\s*:?)\s+|(?:لا|عدم)\s+)$/iu.test(before)) return false;
+  // A closed issuer debit declaration names a merchant, not a link to open.
+  // Skip only this match, so a later user-directed instruction is still refused.
+  // Use the complete prefix: a cropped suffix can manufacture a statement start.
+  // Only a complete greeting may bridge comma/newline; not a wrapped "Can we".
+  // Check what follows the host too: ASCII, fullwidth or %-encoded suffixes cannot be enumerated.
+  return !(ISSUER_MERCHANT_DEBIT_CONFIRMATION.test(match[0]) &&
+    ISSUER_MERCHANT_HOST_END.test(source.slice(match.index! + match[0].length)) &&
+    /(?:^|[.!?])\s*(?:Dear\s+Customer[,\s]+)?we\s+$/iu.test(source.slice(0, match.index!)));
+}
+/** A link instruction is never settlement evidence, even with an issuer label. */
+export function hasClickLinkPrompt(source: string): boolean {
+  for (const match of source.matchAll(CLICK_LINK_PROMPT)) if (countsAsLinkPrompt(source, match)) return true;
+  return false;
+}
+const WORD_ONLY_LINK_TARGET = /(?:\b(?:here|below|link|url)|الرابط|هنا)$/iu;
+// An address anywhere in the message ("click the link http://bit.ly/x", "tap here: www.x.co") makes it a phishing
+// shape even when the instruction itself ends on a bare word. A merchant domain without a path (AMAZON.COM) is not one.
+const MESSAGE_NAMES_AN_ADDRESS = /(?:https?|hxxps?):\/\/|\bwww\.|\b(?:[a-z0-9-]+\.)+[a-z]{2,}\/\S/iu;
+/** Every link instruction is a bare word ("tap here", "click the link") and the message names no address to open. */
+export function hasOnlyWordLinkPrompts(source: string): boolean {
+  if (MESSAGE_NAMES_AN_ADDRESS.test(source)) return false;
+  const counted = [...source.matchAll(CLICK_LINK_PROMPT)].filter((match) => countsAsLinkPrompt(source, match));
+  return counted.length > 0 && counted.every((match) => WORD_ONLY_LINK_TARGET.test(match[0]));
+}
+/**
+ * A genuine debit may carry a footer such as "If not you, tap here to block your card". With no address in it,
+ * it cannot be a phishing link, so the debit above it must reach Review instead of being dropped. The footer is
+ * blanked for that Review inspection only; posting still refuses it.
+ */
+export function blankWordLinkPrompts(source: string): string {
+  if (!hasOnlyWordLinkPrompts(source)) return source;
+  let out = source;
+  for (const match of source.matchAll(CLICK_LINK_PROMPT)) {
+    if (!countsAsLinkPrompt(source, match)) continue;
+    out = out.slice(0, match.index!) + ' '.repeat(match[0].length) + out.slice(match.index! + match[0].length);
+  }
+  return out;
+}
+
+const FIRST_PERSON_MONEY = /^\s*(?:(?:hi|hey|hello)\b(?:[^\r\n.!?]{0,40}[,!:]|\s+)\s*)?(?:I(?:\s+(?:(?:have|just|already)\s+){0,2}|['’]ve\s+(?:(?:just|already)\s+)?)(?:spent|paid|bought|sent|deposited|transferred|refunded)\b|[اأ]نا\s+(?:(?:قد|لقد)\s+)?(?:صرفت|دفعت|اشتريت|حولت|حوّلت|أرسلت|ارسلت)(?=\s))/iu;
+/** Explicit personal money wording cannot become a bank event at either entry point. */
+export function hasExplicitPersonalMoneyClaim(source: string): boolean {
+  const text = source.replace(/^\s*Dear\s+Customer[,!:]\s*/iu, '');
+  if (FIRST_PERSON_MONEY.test(text) || /^\s*they\s+charged\s+me\b/iu.test(text)) return true;
+  if (!/^\s*(?:(?:hi|hey|hello|lol|ok|just|so)\b[\s,!:]*)*(?:paid|spent|received)\b/iu.test(text)) return false;
+  // A bank receipt may name lunch or a shop; an instrument, reference or
+  // balance keeps it eligible for the normal evidence-based parser.
+  if (/\b(?:card|account|acct?|a\/c|balance|bal|avl|reference|ref|transaction|txn)\b/iu.test(text)) return false;
+  return /^\s*lol\b/iu.test(text) ||
+    /\b(?:for\s+(?:lunch|dinner|breakfast|the\s+taxi)|on\s+groceries\s+today)\b/iu.test(text);
+}
+
+/** A leading coupon invitation is an offer; the same wording may be a receipt footer. */
+export function isLeadingNumericDiscountOffer(source: string): boolean {
+  return /^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?(?:use|enter)\s+(?:code\s+)?\d{4,8}\s+to\s+get\s+\d{1,3}\s?%\s+off\b/iu.test(source) ||
+    (source.includes('خصم') && /^\s*(?:Dear\s+Customer[,!:]\s*)?(?:[^\n.!?\p{N}]{0,40}?[،,!:\s]\s*)?(?:استمتع\s+ب)?خصم\s*\p{Nd}{1,3}\s*[%٪]/iu.test(source));
+}
+
+/** A peer says they sent money TO the reader; this cannot prove an outgoing debit. */
+export const isUnqualifiedPeerTransferClaim = (source: string): boolean =>
+  /^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?transferred\b(?:[^.\n]|\.\d){0,96}?\bto\s+(?:you|u)\b/iu.test(source);
+
+const MOBILE_MONEY_CALLBACK = /\b(?:call|phone|ring|contact)\s+(?:(?:us|me|support|on|at)\s+){0,3}(?:\+|00)(?:971|966)[\s().-]*5(?:[\s().-]*\d){8}(?![\s().-]*\d)/giu;
+/** A private mobile callback needs Review; it does not prove a stored debit imaginary. */
+export function hasMobileMoneyCallback(source: string): boolean {
+  if (!/(?:\+|00)(?:971|966)/u.test(source)) return false;
+  for (const match of source.matchAll(MOBILE_MONEY_CALLBACK)) {
+    const before = source.slice(Math.max(0, match.index! - 60), match.index);
+    if (/\b(?:do\s+not|don['’]t|never|avoid)\s*$/iu.test(before)) continue;
+    const after = source.slice(match.index! + match[0].length, match.index! + match[0].length + 60);
+    if (/^\s*(?:to|for)\s+(?:cancel|verify|confirm|approve|authori[sz]e|secure|unblock|release)\b/iu.test(after) ||
+      /\bto\s+(?:cancel|verify|confirm|approve|authori[sz]e|secure|unblock|release)[^.!?\n]{0,30}$/iu.test(before)) return true;
+  }
+  return false;
+}
+
 const MOVEMENT_STATUS = /\bincomplete\s+(?:transaction|txn|purchase|payment|transfer|withdrawal)\b|\b(?:transaction|txn|purchase|payment|transfer|withdrawal)(?:\s+(?:of|for|at|to|from|with|on)\b(?:[^.\n]|\.\d){0,80}?)?\s+(?:was|is|remains?|has\s+been)\s+incomplete\b|\b(?:transaction|txn|purchase|payment|authori[sz]ation)\b(?:[^.\n]|\.\d){0,100}?\s(?:cancell?ed|voided)\s+by\s+(?:the\s+)?(?:merchant|bank|issuer|acquirer)\b|\b(?:transaction|txn|purchase|payment|authori[sz]ation)\b(?:[^.\n]|\.\d){0,100}?\s(?:will\s+be|is\s+being)\s+(?:cancell?ed|voided)\b|[ \t][-–—:|][ \t]*(?:void|voided|cancell?ed)[ \t]*(?=\n|$)|[ \t]*[,:(][ \t]*(?:cancell?ed|voided|void)[ \t]*\)?[ \t]*(?=[.\n]|$)|(?<![ء-ي])(?:تم\s+)?(?:الغاء|ايقاف|تعليق)\s+(?:ال)?(?:عمليه|شراء|دفع|تحويل|حواله|سحب|معامله|حركه)(?![ء-ي])|(?<![ء-ي])(?:الغيت|اوقفت|علقت)\s+(?:ال)?(?:عمليه|شراء|دفع|تحويل|حواله|سحب|معامله|حركه)(?![ء-ي])|(?<![ء-ي])(?:ال)?(?:عمليه|معامله|شراء|دفع|تحويل|حواله|سحب|حركه)\s+(?:غير\s+(?:ناجح|مكتمل)ه?|لم\s+(?:تكتمل|يكتمل|تنجح)|(?:ال)?(?:ملغي|ملغا|ملغاه|موقوف[هة]?))(?![ء-ي])|(?<![ء-ي])(?:و?تم|قد\s+تم)\s+(?:الغاو|الغاي|ايقاف|تعليق)(?:ها|ه)(?![ء-ي])|(?<![ء-ي])تم\s+(?:ال)?الغاء(?![ء-ي])|(?<![ء-ي])لم\s+(?:تكتمل|يكتمل|تنجح)(?![ء-ي])/gi;
 const CONDITIONAL_STATUS = /(?:\b(?:if|unless|please|pls|to|can|may|should)\b|(?<![ء-ي])(?:يرجي|الرجاء|رجاء|يمكنك|يمكنكم|يمكن|بامكانك|بامكانكم|اتصل|ارسل|للابلاغ|لطلب|طلب|خدمه|اذا|حال|تود|ترغب|عليك)(?![ء-ي]))(?:\s+(?:او|و|ب|في|علي|عن|من|كانت|كان|or|and))?(?:\s+\d{1,4})?\s*$/i;
 
@@ -44,7 +134,7 @@ export function isHedgedPrincipal(source: string, spans: readonly PrincipalSpan[
 
 const REFUND_LEAD = /(?:\brefund(?:ed)?\s+(?:of|amount(?:\s+of)?|for)?|(?<![ء-ي])(?:(?:ال)?مبلغ\s+)?(?:ال)?استرداد(?:\s+(?:ال)?مبلغ)?(?:\s+بقيم[هة]|\s+بمبلغ)?)\s*[:\-]?\s*$/iu;
 const NOT_CURRENT_REFUND = /\b(?:if|when|unless|earlier|previous|prior|another|other|last)\b|(?<![ء-ي])(?:اذا|حال|سابق[هة]?|اخري)(?![ء-ي])/iu;
-const REFUND_PENDING = /\b(?:initiated|under\s+process(?:ing)?|in\s+process|in\s+progress|being\s+(?:processed|reversed)|will\s+(?:be|reflect|appear|show)|requested|pending|awaiting|submitted|approved|raised)\b|(?<![ء-ي])(?:قيد\s+(?:ال)?(?:معالج[هة]|تنفيذ|مراجع[هة]|انتظار)|سيتم|سوف|طلب|تمت\s+الموافق[هة])(?![ء-ي])/iu;
+const REFUND_PENDING = /\b(?:initiated|under\s+process(?:ing)?|in\s+process|in\s+progress|being\s+(?:processed|reversed)|will\s+(?:be|reflect|appear|show)|requested|pending|awaiting|awaited|submitted|approved|raised)\b|(?<![ء-ي])(?:قيد\s+(?:ال)?(?:معالج[هة]|تنفيذ|مراجع[هة]|انتظار)|سيتم|سوف|طلب|تمت\s+الموافق[هة])(?![ء-ي])/iu;
 const REFUND_CANCELLED = /\b(?:has\s+been|was|is|got)\s+(?:cancell?ed|declined|rejected|unsuccessful|voided|reversed)\b|\brefund\s+(?:has\s+)?failed\b|(?<![ء-ي])(?:تم\s+)?(?:الغاء|إلغاء|رفض)\s+(?:طلب\s+)?(?:ال)?استرداد|(?:ال)?استرداد\s+(?:ال)?(?:ملغي|ملغى|ملغا|ملغاه|مرفوض)(?![ء-ي])/iu;
 const REFUND_COMPLETED = /\b(?:credited|issued|processed\s+(?:to|into|on)|posted\s+(?:to|into|on)|received\s+(?:on|in|into)|deposited|returned\s+to|added\s+to)\b|(?<![ء-ي])(?:تم\s+(?:[إا]يداع|[إا]ضاف[هة]|استرداد|[إا]رجاع|[إا]عاد[هة])|اضيف|أضيف|اعيد|أعيد|اودع|أودع)(?![ء-ي])/giu;
 const UNSETTLED_PREDICATE = /\b(?:will|would|shall|not|never|hasn['’]t|wasn['’]t|isn['’]t)\b/iu;
@@ -80,6 +170,16 @@ const SAME_MONEY_REFERENCE = /^\s*(?:[(\[/=≈~]|equivalent(?:\s+to)?|equiv\.?|a
 const ORIGINAL_MOVEMENT_REFERENCE = /\b(?:for|against|on|of)\s+(?:your|the)\s+(?:original\s+|earlier\s+|previous\s+)?(?:purchase|transaction|payment|charge|order)\s+(?:of|for)?\s*$|(?:لعمليه|عن\s+عمليه|من\s+عمليه)\s+(?:ال)?شراء\s+(?:بمبلغ|بقيمه)?\s*$/i;
 const ORIGINAL_MOVEMENT_CLAUSE = /\b(?:for|against|on|of)\s+(?:your|the)\s+(?:original\s+|earlier\s+|previous\s+)?(?:purchase|transaction|payment|charge|order)\b|(?:لعمليه|عن\s+عمليه|من\s+عمليه)\s+(?:ال)?شراء(?=\s)/iu;
 
+// "and" between capitalised words inside the name a preposition introduces ("from MARKS AND SPENCER
+// has been credited", "H AND M") belongs to that name, not to a second clause. Only a plain "and"
+// counts; everything after the preposition must still be capitalised words (no verb or determiner yet);
+// and the word after "and" must be capitalised and must not open a clause ("the", "your", "a" ...).
+const NAME_BEFORE_AND = /^\s*(?:from|at|to|with|via|by)\s+(?:\p{Lu}[\p{L}\p{N}&.'’-]*\s+)+$/u;
+const NAME_AFTER_AND = /^\p{Lu}[\p{L}\p{N}&.'’-]*(?=\s|$)/u;
+const CLAUSE_OPENER = /^(?:a|an|the|your|this|that|our|my|his|her|its|their|another|separate|additional|new|it|we|you|they|i)(?=\s|$)/iu;
+const isNameJoin = (coordinator: string, before: string, after: string): boolean =>
+  /^and\s+$/iu.test(coordinator) && NAME_BEFORE_AND.test(before) && NAME_AFTER_AND.test(after) && !CLAUSE_OPENER.test(after);
+
 /** Ownership ends when a new monetary subject begins, not merely at punctuation. */
 function refundScope(source: string, own: PrincipalSpan, monetarySpans: readonly PrincipalSpan[]) {
   // Banks wrap a single movement across lines. Its predicate still belongs
@@ -100,6 +200,7 @@ function refundScope(source: string, own: PrincipalSpan, monetarySpans: readonly
     if (!subject) continue;
     const head = subject[1];
     if (continuesRefund(head) || OPEN_ARGUMENT.test(source.slice(own.end, at))) continue;
+    if (isNameJoin(boundary[0], source.slice(own.end, at), source.slice(at + boundary[0].length, end))) continue;
     end = at;
     independentSubject = true;
     break;
@@ -196,4 +297,121 @@ export function isCompletedPrincipalRefund(source: string, span: PrincipalSpan |
   const scope = sentenceAround(source, span);
   if (NOT_CURRENT_REFUND.test(scope.text) || REFUND_PENDING.test(scope.text)) return false;
   return /\b(?:purchase|transaction|payment|charge)\b(?:[^.\n]|\.\d){0,120}?\b(?:has\s+been|was|is|have\s+been)\s+(?:fully\s+)?refunded\b|(?<![ء-ي])(?:عمليه\s+)?(?:ال)?شراء(?:[^.\n]|\.(?=\S)){0,120}?\s+(?:و?تم\s+)(?:استرداد|استرجاع|ارجاع)(?:ها|ه)(?![ء-ي])/i.test(scope.text);
+}
+
+const CARD_CREDIT_TARGET = /\bcredit\s+card\b|بطاق(?:تك|ه|ة)\s+(?:ال)?ا[يئ]تماني[هة]/iu;
+const CARD_CREDIT_MOVEMENT = /\bcredited(?:\s+with|\s+to)?\b|(?<![ء-ي])(?:تم\s+)?(?:إيداع|ايداع|إضافة|اضافه|اضافة)(?![ء-ي])/iu;
+
+const REPAYMENT_MONEY = String.raw`(?:[A-Z]{3}|Dhs?\.?|SR|[$€£])\s*\p{Nd}+(?:[.,٫٬]\p{Nd}+)*`;
+// A card is the destination, never an instrument used to pay a merchant/bill.
+const REPAYMENT_CARD = String.raw`(?:(?!(?:bill|invoice|loan|finance|mortgage|account|utility|electricity|water|using|via|with|through|from|to|for|by|on|at|and|of)\b)[\p{L}\p{N}.'’-]+\s+){0,3}?card\b`;
+const REPAYMENT_DESTINATION_CARD = String.raw`(?:(?!(?:bill|invoice|loan|finance|mortgage|account|utility|electricity|water|using|via|with|through|from|to|for|by|on|at|and)\b)[\p{L}\p{N}.'’-]+\s+){0,6}?card\b`;
+const REPAYMENT_NUMBER = String.raw`\p{Nd}+(?:[.,٫٬]\p{Nd}+)*`;
+const REPAYMENT_UNIT = String.raw`(?:[A-Z]{3}|Dhs?\.?|SR|[$€£])`;
+const REPAYMENT_ANY_MONEY = String.raw`(?:${REPAYMENT_UNIT}\s*${REPAYMENT_NUMBER}|${REPAYMENT_NUMBER}\s*${REPAYMENT_UNIT})`;
+const REPAYMENT_DESTINATION = String.raw`(?:on|to|towards?)\s+(?:your\s+)?${REPAYMENT_DESTINATION_CARD}`;
+const REPAYMENT_GREETING = String.raw`(?:(?:Dear\s+[^\n.!?\p{N},:!]{1,40}|Hi|Hello)[,!:]\s*)?`;
+const AR_REPAYMENT_MONEY = String.raw`(?:${REPAYMENT_ANY_MONEY}|${REPAYMENT_NUMBER}\s*(?:درهم|دراهم|ريال)|(?:درهم|دراهم|ريال)\s*${REPAYMENT_NUMBER})`;
+const COMPLETED_CARD_BALANCE_RECEIPT = new RegExp(
+  String.raw`^تم\s+(?:(?:[إا]يداع|[إا]ضاف[هة])\s+(?:مبلغ\s+)?|استلام\s+سداد\s+(?:بمبلغ|مبلغ)\s+)${AR_REPAYMENT_MONEY}`, 'iu',
+);
+const UNQUALIFIED_REPAYMENT = new RegExp(
+  // Android joins a short notification title and body with a space. This
+  // prefix only holds a repayment; it never qualifies a title as an issuer.
+  String.raw`(?:^|[\n.!?]\s*)\s*(?:[A-Z][A-Z0-9 .&-]{1,32}(?::\s*|\s+))?${REPAYMENT_GREETING}(?:` +
+  String.raw`payment\s+(?:received|credited)\s+${REPAYMENT_ANY_MONEY}\s+${REPAYMENT_DESTINATION}` +
+  String.raw`|we\s+(?:have\s+)?received\s+(?:your\s+)?payment\s+(?:of\s+)?${REPAYMENT_ANY_MONEY}\s+${REPAYMENT_DESTINATION}` +
+  String.raw`|payment\s+(?:of\s+)?${REPAYMENT_ANY_MONEY}\s+(?:was\s+)?received\s+${REPAYMENT_DESTINATION}` +
+  String.raw`|(?:thank\s+you|thanks)\s+for\s+(?:your\s+)?payment\s+of\s+${REPAYMENT_ANY_MONEY}\s+${REPAYMENT_DESTINATION}` +
+  String.raw`|your\s+payment\s+of\s+${REPAYMENT_ANY_MONEY}\s+to\s+(?:your\s+)?${REPAYMENT_DESTINATION_CARD}(?:[^.\n]|\.\d){0,80}\bsuccessful\b` +
+  String.raw`|your\s+(?:(?:[\p{L}.'’-]+)\s+){0,4}?(?:credit|charge|covered)\s+card\s+payment\s+of\s+${REPAYMENT_ANY_MONEY}(?:[^.\n]|\.\d){0,60}\bsuccessful\b` +
+  String.raw`|تم\s+استلام\s+سداد\s+(?:بمبلغ|مبلغ)\s+${AR_REPAYMENT_MONEY}\s+(?:على|علي|إلى|الى|الي|في)\s+بطاق(?:تك|تكم|ه|ة)\s+(?:ال)?ا[يئ]تماني[هة])`,
+  'giu',
+);
+const QUALIFIED_REPAYMENT_RECEIPT = new RegExp(
+  String.raw`^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?(?:` +
+  String.raw`payment\s+received|thank\s+you\s+for\s+(?:your\s+)?payment\s+of` +
+  String.raw`)\s+(${REPAYMENT_MONEY})\s+on\s+your\s+${REPAYMENT_CARD}\s+(?:ending(?:\s+(?:in|with))?|number|no\.?)\s*(?:[*xX•·-]\s*)*\p{Nd}{4}(?!\p{Nd})` +
+  String.raw`(?=\s*(?:[.!?\n]|$|(?:thank|avl|available|balance|for\s+(?:queries|help|details|information))\b))`,
+  'iu',
+);
+// Preserve the mature receipt grammar already used by settlement pairing.
+const QUALIFIED_MATURE_REPAYMENT_RECEIPT = new RegExp(
+  String.raw`^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?payment\s+of\s+(${REPAYMENT_MONEY})\s+(?:has\s+been\s+)?received\s+(?:towards?|on)\s+your\s+${REPAYMENT_CARD}\s+(?:ending(?:\s+(?:in|with))?|number|no\.?)\s*(?:[*xX•·-]\s*)*\p{Nd}{4}(?!\p{Nd})` +
+    String.raw`(?=\s*(?:[.!?\n]|$|(?:thank|avl|available|balance|for\s+(?:queries|help|details|information))\b))`,
+  'iu',
+);
+/** A receipt names the person's destination card and tail, never a merchant instrument. */
+export function isQualifiedCardRepaymentReceipt(source: string, expectedCurrency?: string): boolean {
+  const match = QUALIFIED_REPAYMENT_RECEIPT.exec(source) ?? QUALIFIED_MATURE_REPAYMENT_RECEIPT.exec(source);
+  if (!match || /\b(?:debit|prepaid)\b/iu.test(match[0])) return false;
+  if (/\bthank\s+you\b/iu.test(match[0]) && !/\b(?:credit|charge|covered)\b/iu.test(match[0])) return false;
+  if (expectedCurrency === undefined) return true;
+  const token = match[1].match(/^[^\p{Nd}]+/u)?.[0].trim().replace(/\.$/u, '').toUpperCase();
+  const code = token === 'DH' || token === 'DHS' ? 'AED' : token === 'SR' ? 'SAR' : token;
+  // This newly admitted family needs source-local currency proof; never price
+  // a foreign card settlement through the core parser's fallback FX table.
+  return code === expectedCurrency;
+}
+
+/** Weaker receipt claims cannot prove new spending/income. Keep them in Review. */
+export function isUnqualifiedCardRepayment(source: string): boolean {
+  if (!/\bpayment\b|سداد|[\u0640\u064B-\u065F\u0670\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFB50-\uFEFF\uFF01-\uFFEF]/iu.test(source)) return false;
+  const text = repaymentReadingText(source);
+  if (!/\bpayment\b|سداد/iu.test(text) || isQualifiedCardRepaymentReceipt(text)) return false;
+  for (const match of text.matchAll(UNQUALIFIED_REPAYMENT)) {
+    const after = text.slice(match.index! + match[0].length).split(/[\n!?;]|\.(?=\s|$)/u)[0];
+    const clause = match[0] + after;
+    // A shop receipt names the merchant; a bank/ATM/branch is a payment rail.
+    const merchantAt = /\bat\s+\p{L}/iu.test(clause) &&
+      !/\bat\s+(?:the\s+)?(?:atm\b|[\p{L}]*bank\b|(?:[\p{L}]+\s+){0,3}branch\b)/iu.test(clause);
+    if (merchantAt || /\b(?:from|using)\s+(?!your\b|the\s+(?:bank|account)\b)\p{L}/iu.test(clause)) continue;
+    return true;
+  }
+  return false;
+}
+
+function repaymentReadingText(source: string): string {
+  return (/[\uFB50-\uFEFF\uFF01-\uFFEF]/u.test(source) ? source.normalize('NFKC') : source)
+    .replace(/[\u0640\u064B-\u065F\u0670\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/gu, '');
+}
+
+function cardBalanceReceiptText(source: string): string {
+  return repaymentReadingText(source)
+    .replace(/^\s*[A-Z][A-Z .&'-]{1,32}(?:alert|bank|sms)\s*\r?\n\s*/iu, '')
+    .replace(/^\s*[A-Z][A-Z0-9 .&'-]{1,32}:\s*/iu, '')
+    .replace(/^\s*(?:Dear\s+[^\n.!?\p{N},:!]{1,40}|Hi|Hello)[,!:]\s*/iu, '').trim();
+}
+
+/** Explicit absence/future credit is not an actionable card-balance event. */
+export function isUnpostedCardBalanceClaim(source: string): boolean {
+  if (!/[إا]يداع|[إا]ضاف|سداد|[\u0640\u064B-\u065F\u0670\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFB50-\uFEFF\uFF01-\uFFEF]/u.test(source)) return false;
+  const text = cardBalanceReceiptText(source);
+  return CARD_CREDIT_TARGET.test(text) && /^(?:(?:(?:لم|لن)\s+يتم|سيتم|سوف\s+يتم|(?:[إا]ذا|لو|في\s+حال[هة]?)\s+تم)\s+(?:[إا]يداع|[إا]ضاف[هة]|استلام\s+سداد)|تم\s+استلام\s+طلب\s+(?:[إا]يداع|[إا]ضاف[هة]|سداد)|تم\s+(?:[إا]يداع|[إا]ضاف[هة])\s+طلب)(?![ء-ي])/u.test(text);
+}
+
+/** Regional past-tense proof may qualify Review, never automatic settlement. */
+export function isCompletedCardBalanceReceipt(source: string): boolean {
+  const text = cardBalanceReceiptText(source);
+  return CARD_CREDIT_TARGET.test(text) && COMPLETED_CARD_BALANCE_RECEIPT.test(text);
+}
+
+/** A balance in another clause cannot become the repayment principal. */
+export function isCompletedCardRepaymentPrincipal(source: string, span: PrincipalSpan): boolean {
+  const clause = sentenceAround(source, span).text;
+  return isCompletedCardBalanceReceipt(clause) && isUnqualifiedCardRepayment(clause);
+}
+
+/** A credit to the credit-card balance may be a settlement, not new income.
+ * Leave ambiguous credits in Review; explicit refunds retain their own rules.
+ */
+export function isUnqualifiedCardCredit(source: string, span: PrincipalSpan | undefined): boolean {
+  // Most purchases have neither predicate. Avoid scanning sentence boundaries
+  // and running refund checks unless both are present somewhere in the source.
+  if (!span || !CARD_CREDIT_TARGET.test(source) || !CARD_CREDIT_MOVEMENT.test(source)) return false;
+  const clause = sentenceAround(source, span).text;
+  if (/\bcash\s*back\s+(?:amount\s+)?of\b/iu.test(clause)) return false;
+  if (/\bbooking\b[^.\n]{0,80}\bwas\s+cancell?ed\s+and\b/iu.test(clause)) return false;
+  if (isCompletedPrincipalRefund(source, span) || /\brefund(?:ed)?\b|استرداد/iu.test(clause)) return false;
+  return CARD_CREDIT_TARGET.test(clause) && CARD_CREDIT_MOVEMENT.test(clause);
 }

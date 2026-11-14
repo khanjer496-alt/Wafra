@@ -31,7 +31,7 @@ import { bandCopy } from '@/lib/band-copy';
 /** Side gutter inside the band and the sheet (the boards' 20pt). */
 export const BAND_GUTTER = 20;
 
-export interface BandAction {
+interface BandAction {
   icon: IconName;
   /** Spoken label; the action shows only its icon. */
   label: string;
@@ -56,7 +56,7 @@ export interface BandNav {
   trailing?: React.ReactNode;
 }
 
-export type BandScaffoldProps = {
+type BandScaffoldProps = {
   /** Which tab colour the screen wears. Detail screens take their parent's. */
   band: BandId;
   /** The nav row. Omit for a band with no row. */
@@ -112,7 +112,7 @@ export function BandIconButton({ action, palette }: { action: BandAction; palett
  * Under the accessibility text sizes the title takes its own line so it is
  * never squeezed between the controls.
  */
-export function BandNavRow({ nav, palette }: { nav: BandNav; palette: BandPalette }) {
+function BandNavRow({ nav, palette }: { nav: BandNav; palette: BandPalette }) {
   const router = useRouter();
   const words = bandCopy(useLanguage());
   const largeText = useLargeTextLayout();
@@ -148,7 +148,7 @@ export function BandNavRow({ nav, palette }: { nav: BandNav; palette: BandPalett
  * it; a screen with its own virtualized list can render it as the list header
  * (with `BandSheetCap` right after) to keep the band scrolling away.
  */
-export function BandHeader({ palette, nav, children, style, testID, topInset = 0 }: {
+function BandHeader({ palette, nav, children, style, testID, topInset = 0 }: {
   palette: BandPalette;
   nav?: BandNav;
   children?: React.ReactNode;
@@ -174,11 +174,6 @@ export function useBandBottomInset({ tabbed = false, floatingClearance = 0 }: { 
   const tabBarClearance = useTabBarClearance();
   const systemBottom = tabbed ? tabBarClearance : Platform.OS === 'android' ? 0 : insets.bottom;
   return systemBottom + (tabbed ? 0 : Spacing.four) + floatingClearance;
-}
-
-/** The sheet's rounded top edge, for list screens that compose their own sheet. */
-export function BandSheetCap({ palette }: { palette: BandPalette }) {
-  return <View style={[styles.sheetCap, { backgroundColor: palette.sheet }]} />;
 }
 
 /**
@@ -345,12 +340,6 @@ const styles = StyleSheet.create({
     borderTopEndRadius: BandLayout.sheetRadius,
   },
   sheetColumn: { paddingTop: Spacing.four, gap: 12 },
-  sheetCap: {
-    height: BandLayout.sheetOverlap,
-    marginTop: -BandLayout.sheetOverlap,
-    borderTopStartRadius: BandLayout.sheetRadius,
-    borderTopEndRadius: BandLayout.sheetRadius,
-  },
   overscroll: { position: 'absolute', left: 0, right: 0, top: '100%', height: 1000 },
   navWrap: { gap: Spacing.one },
   navRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.two, minHeight: 44, flexWrap: 'wrap' },

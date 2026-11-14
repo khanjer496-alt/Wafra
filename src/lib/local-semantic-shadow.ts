@@ -17,7 +17,7 @@ import {
 } from '@/lib/local-semantic-runtime';
 import type { UniversalBankEvent, UniversalField } from '@/lib/universal-types';
 
-export interface LocalSemanticShadowSnapshot {
+interface LocalSemanticShadowSnapshot {
   schemaVersion: 1;
   observed: number;
   modelUnavailable: number;

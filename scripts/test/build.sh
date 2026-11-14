@@ -64,18 +64,18 @@ rewrite() {
 # relay-crypto and relay are deliberately NOT in this list: they import @noble's
 # ESM-only subpath exports, which the node10 resolution implied by
 # `--module commonjs` cannot follow. They get the nodenext .cts pass below.
-for f in types routes consent-prompt format date-time-locale categories custom-categories ledger bill-alias capture-source-identity dedupe arabic-sms bank-amount-tokens bnpl-providers principal-posting-guards sms-parser import-plan bills \
+for f in free-capture-copy money-code-run types  consent-prompt android-capture-disclosure import-processing-disclosure onboarding-copy settings-copy biometric-kind format date-time-locale categories custom-categories ledger bill-alias capture-source-identity dedupe arabic-sms bank-amount-tokens bnpl-providers principal-posting-guards sms-parser import-plan bills \
          transfer-reconciliation-types transfer-reconciliation transfer-activity transfer-evidence transfer-review-copy \
          insights seed subscriptions cards cash-flow payment-flow ledger-import launch-alert-parser ios-background-alert-parser ios-background-parser-source.generated ios-native-parser-context analytics growth-funnel period complimentary-clock complimentary-access purchases country-names country markets known-banks i18n system-language balances \
-         brand-marks leaving-soon accounts heal bnpl-category-repair accuracy onboarding onboarding-bank-examples reminders reminder-schedule app-lock auto-import android-capture-sources \
-         history-import foreground-history-priority diagnostic-export diagnostic-messages transaction-source transaction-presentation transaction-filter capture-trace \
+          leaving-soon accounts heal bnpl-category-repair accuracy onboarding onboarding-bank-examples reminders reminder-schedule app-lock auto-import android-capture-sources \
+         history-import foreground-history-priority transaction-source transaction-presentation transaction-filter capture-trace \
          launch-performance launch-benchmark runtime-performance dashboard-projection \
          relay-protocol trusted-device-contract cloud-import-contract statement-coverage statement-batch statement-import-flow reimbursement-report fx fx-rates \
          fx-summary splits db-schema storage-diagnostics daily-summary charge-alert \
          background-relay-storage uncategorised currency-metadata alert-draft bank-alert-semantic-types \
          bank-alert-semantic-rules bank-alert-semantic-output bank-alert-interpreter \
          alert-event-evidence alert-institution-grammars alert-market-detection alert-review-tray generic-review-entry review-source-bindings unparsed-launch-alert \
-         universal-types universal-dates universal-fields universal-money universal-parser universal-confidence gulf-neighbour-templates gulf-neighbour-alerts universal-template-certification universal-import brand-categories universal-categorization ai-alert-words ai-alert-cues ai-alert-gates ai-alert-flags ai-alert-model-manifest ai-alert-model ai-alert-extractor ai-alert-source-contract ai-alert-reader \
+         universal-types universal-dates universal-fields universal-money universal-parser universal-confidence gulf-neighbour-templates gulf-neighbour-alerts universal-template-certification universal-import brand-categories universal-categorization ai-alert-flags ai-alert-source-contract ai-alert-reader \
          learned-alert-formats shared-alert-formats shared-alert-format-sync shared-alert-format-share private-alert-formats private-alert-format-runtime shared-alert-format-active private-alert-format-review private-alert-teaching alert-source-ownership \
          ledger-money paste-sample backup-validation ledger-export parsed-review-event wallet-near-match review-promotion apple-pay-card-links launch-review-rollout trusted-bank-notification-packages \
          sms-corpus parser-research-contract parser-research founder-pro large-text-figure \
@@ -85,7 +85,7 @@ for f in types routes consent-prompt format date-time-locale categories custom-c
          wafra-assistant wafra-assistant-ai assistant-spending-analysis assistant-patterns home-widget-preferences \
          home-hero home-needs-you home-tilt home-copy \
          local-semantic-model local-semantic-runtime local-semantic-scheduler local-semantic-background-policy local-semantic-shadow local-semantic-inbox-shadow \
-         local-semantic-review local-semantic-review-runtime local-assistant-grounding growth-funnel-diagnostics stability-diagnostics \
+         local-semantic-review local-semantic-review-runtime local-assistant-grounding \
          local-semantic-flags on-device-ai on-device-assistant on-device-category best-effort-autopost; do
   [ -f "../../src/lib/$f.ts" ] || continue
   rewrite ../../src/lib/$f.ts build/$f.ts

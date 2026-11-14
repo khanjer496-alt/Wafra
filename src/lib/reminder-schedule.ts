@@ -27,9 +27,9 @@
 import type { PaymentReminder } from '@/lib/reminders';
 
 /** Every identifier Wafra itself chooses starts with this. */
-export const WAFRA_NOTIFICATION_PREFIX = 'wafra-';
+const WAFRA_NOTIFICATION_PREFIX = 'wafra-';
 /** Payment reminders specifically. */
-export const REMINDER_ID_PREFIX = 'wafra-reminder-';
+const REMINDER_ID_PREFIX = 'wafra-reminder-';
 
 export function reminderNotificationId(reminderId: string): string {
   return `${REMINDER_ID_PREFIX}${reminderId}`;
@@ -54,7 +54,7 @@ export interface ReminderSchedulerApi {
   schedule(identifier: string, reminder: PaymentReminder): Promise<void>;
 }
 
-export type ReminderApplyResult = 'applied' | 'superseded';
+type ReminderApplyResult = 'applied' | 'superseded';
 
 /**
  * Make the OS schedule match `plan`. Idempotent: applying the same plan twice

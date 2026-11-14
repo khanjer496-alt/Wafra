@@ -7,8 +7,10 @@ import {
   type SmsCorpusMessage,
 } from '@/lib/sms-corpus';
 
-const RESEARCH_BUILD_ENABLED =
-  process.env.EXPO_PUBLIC_WAFRA_PARSER_RESEARCH === '1';
+import { PARSER_RESEARCH_BUILD_FLAG } from '@/lib/parser-research-flag';
+
+// The gate is derived from the compiled build marker (parser-research-flag.ts).
+const RESEARCH_BUILD_ENABLED = PARSER_RESEARCH_BUILD_FLAG.endsWith('=on');
 
 export const isParserResearchBuild = (): boolean => RESEARCH_BUILD_ENABLED;
 

@@ -1,6 +1,6 @@
 import { accountGroupsCopy as copy } from '@/lib/reference-copy';
 import React from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import { AccountTile } from '@/components/ui/tile';
@@ -13,7 +13,7 @@ import { moneyPlacesWords } from '@/lib/money-places-copy';
 import type { Account } from '@/lib/types';
 
 /** The tone of a row's status line: neutral, good news, needs attention, late. */
-export type AccountStatusTone = 'neutral' | 'ok' | 'near' | 'over';
+type AccountStatusTone = 'neutral' | 'ok' | 'near' | 'over';
 
 export interface AccountDisplayRow {
   account: Account;
@@ -58,6 +58,7 @@ export function AccountGroups({ rows, onOpen, onManage, onUpdateBalance, onHide,
   const lang = useLanguage(); const large = useLargeTextLayout();
   const w = copy[lang === 'ar' ? 'ar' : 'en'];
   const m = moneyPlacesWords(lang);
+  const compactFigure = useWindowDimensions().width < 360;
   const groups: { key: GroupKey; rows: AccountDisplayRow[] }[] = [
     { key: 'bank', rows: [] }, { key: 'credit', rows: [] },
     { key: 'debit', rows: [] }, { key: 'cash', rows: [] },
@@ -95,10 +96,17 @@ export function AccountGroups({ rows, onOpen, onManage, onUpdateBalance, onHide,
         <View style={styles.body}>
           <View style={[styles.line, large && styles.lineStacked]}>
             <ThemedText type="smallBold" numberOfLines={large ? undefined : 2} style={styles.name}>{a.name}</ThemedText>
-            {item.kind === 'card' ? null : item.figureFils === null
+            {item.kind === 'card' || item.kind === 'credit' ? null : item.figureFils === null
               ? <ThemedText type="smallBold" style={{ color: palette.textSecondary }}>—</ThemedText>
               : <Money fils={item.figureFils} type="smallBold" style={styles.figure} />}
           </View>
+          {item.kind === 'credit' ? (
+            <ThemedText type="smallBold" testID={`wallet-figure-label-${a.id}`}
+              numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}
+              style={{ color: palette.text, fontSize: compactFigure ? 13 : undefined }}>
+              {item.figureFils === null ? '—' : `${item.figureCaption}\u00a0${formatAED(item.figureFils).replace(/ /g, '\u00a0')}`}
+            </ThemedText>
+          ) : null}
           <View style={[styles.line, large && styles.lineStacked]}>
             <ThemedText type="meta"
               testID={item.quiet ? 'wallet-quiet-line' : `wallet-status-${a.id}`}
@@ -107,8 +115,6 @@ export function AccountGroups({ rows, onOpen, onManage, onUpdateBalance, onHide,
               {a.last4 ? <ThemedText type="meta" style={{ color: palette.textSecondary }}>{`\u2066•• ${a.last4}\u2069 · `}</ThemedText> : null}
               {item.status}
             </ThemedText>
-            {item.figureCaption ? <ThemedText type="meta" numberOfLines={1} style={{ color: palette.textSecondary }}>
-              {item.figureCaption}</ThemedText> : null}
           </View>
         </View>
       </Pressable>

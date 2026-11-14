@@ -353,16 +353,29 @@ export const eraseIosHistoryData = async (input: {
   await input.clearSetup();
 };
 
+/** The iOS post-erase cleanup steps, named for the erase diagnostic. */
+export type IosPostEraseStep = 'capture' | 'history' | 'message-setup' | 'background';
+
 export const createIosHistoryPostEraseCleanup = (input: {
   eraseCapture: () => Promise<void>;
   eraseHistory: () => Promise<void>;
   clearMessageSetup: () => Promise<void>;
   clearBackground: () => Promise<void>;
+  /** Told which step failed, before the error is rethrown unchanged. */
+  onStepFailure?: (step: IosPostEraseStep, error: unknown) => void;
 }): (() => Promise<void>) => async () => {
-  await input.eraseCapture();
-  await input.eraseHistory();
-  await input.clearMessageSetup();
-  await input.clearBackground();
+  const step = async (name: IosPostEraseStep, run: () => Promise<void>) => {
+    try {
+      await run();
+    } catch (error) {
+      input.onStepFailure?.(name, error);
+      throw error;
+    }
+  };
+  await step('capture', input.eraseCapture);
+  await step('history', input.eraseHistory);
+  await step('message-setup', input.clearMessageSetup);
+  await step('background', input.clearBackground);
 };
 
 export const createIosHistoryActionGuard = (): IosHistoryActionGuard => {

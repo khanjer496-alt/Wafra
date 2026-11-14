@@ -25,7 +25,7 @@ export const TRUSTED_BANK_NOTIFICATION_PACKAGES = {
   'com.hdfcbank.android.now': 'IN',
 } as const;
 
-export type TrustedBankNotificationMarket =
+type TrustedBankNotificationMarket =
   typeof TRUSTED_BANK_NOTIFICATION_PACKAGES[keyof typeof TRUSTED_BANK_NOTIFICATION_PACKAGES];
 
 /** Native availability never replaces Android notification-access consent. */

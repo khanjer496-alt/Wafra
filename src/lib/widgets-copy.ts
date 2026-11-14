@@ -10,7 +10,7 @@
  * Widget"; Android launchers say "home screen" and "Widgets".
  */
 type Platform = 'ios' | 'android';
-export type WidgetKind = 'today' | 'upcoming' | 'spending';
+type WidgetKind = 'today' | 'upcoming' | 'spending';
 
 /** Arabic count of payments, as the iOS widget and the Android plurals say it. */
 function arabicPayments(count: number): string {
@@ -40,7 +40,7 @@ export const widgetsCopyTables = {
       ? kind === 'today' ? 'Small' : kind === 'upcoming' ? 'Small or medium' : 'Medium'
       : kind === 'today' ? '2 × 2' : '4 × 2',
     previewLabel: (name: string) => `${name} widget preview`,
-    lockNote: 'On the Lock Screen and in StandBy the amounts are hidden; the words stay.',
+    lockNote: 'App Lock hides Home Screen widget amounts by default. Change this in Settings. Lock Screen and StandBy amounts also use system privacy redaction; names and dates remain visible.',
     privateNote: 'Private mode keeps figures off your widgets, so they ask you to open Wafra instead.',
     howTitle: 'How to add a widget',
     steps: (platform: Platform): string[] => platform === 'ios'
@@ -103,7 +103,7 @@ export const widgetsCopyTables = {
       ? kind === 'today' ? 'صغيرة' : kind === 'upcoming' ? 'صغيرة أو متوسطة' : 'متوسطة'
       : kind === 'today' ? '2 × 2' : '4 × 2',
     previewLabel: (name: string) => `معاينة أداة ${name}`,
-    lockNote: 'على شاشة القفل وفي وضع الاستعداد تُخفى المبالغ وتبقى الكلمات.',
+    lockNote: 'يخفي قفل التطبيق مبالغ ودجات الشاشة الرئيسية افتراضياً. يمكنك تغيير ذلك في الإعدادات. تستخدم مبالغ شاشة القفل والاستعداد أيضاً حماية النظام، وتبقى الأسماء والتواريخ ظاهرة.',
     privateNote: 'الوضع الخاص يُبعد الأرقام عن الأدوات، فتطلب منك فتح وفرة بدلاً منها.',
     howTitle: 'طريقة إضافة أداة',
     steps: (platform: Platform) => platform === 'ios'

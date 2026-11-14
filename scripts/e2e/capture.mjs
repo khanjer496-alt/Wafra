@@ -18,13 +18,14 @@
  *   node scripts/e2e/capture.mjs --out DIR --all      # both schemes, both languages
  *
  *   # Web review captures at App Store dimensions — never upload these:
- *   node scripts/e2e/capture.mjs --out DIR --store [--device iphone-6.9] [--all]
+ *   node scripts/e2e/capture.mjs --out DIR --store [--device iphone-6.3] [--all]
  *   node scripts/e2e/capture.mjs --out DIR --store --device iphone-6.5
  */
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { chromium } from 'playwright';
 import { stripAlpha, readPngHeader } from './png-rgb.mjs';
+import { APPLE_SCREENSHOT_TARGET } from '../lib/apple-screenshot-target.mjs';
 
 const argv = process.argv.slice(2);
 const arg = (name, fallback) => {
@@ -56,21 +57,18 @@ fs.mkdirSync(OUT, { recursive: true });
  * Each width/height below is a real iPhone's logical size, chosen so that
  * logical x scale lands exactly on an accepted size with no rounding:
  *
- *   440 x 956 @3 = 1320 x 2868   accepted 6.9" size
- *   428 x 926 @3 = 1284 x 2778   accepted 6.5" size
+ *   402 x 874 @3 = 1206 x 2622   required Dynamic Island medium target
+ *   440 x 956 @3 = 1320 x 2868   optional large-display review target
+ *   428 x 926 @3 = 1284 x 2778   optional older-display review target
  *
- * Sizes verified against Apple's "Screenshot specifications" page (App Store
- * Connect help) on 2026-08-06. Apple accepts three portrait sizes for the 6.9"
- * class — 1260x2736, 1290x2796 and 1320x2868 — and 1320x2868 is the native
- * panel of the current Pro Max, so it is the default here. RE-CHECK THE PAGE
- * AT UPLOAD TIME; Apple revises it whenever the hardware line changes.
- *
- * A submission needs the 6.9" set. 6.5" is only required if 6.9" is absent —
- * Apple scales 6.9" down for every smaller display class automatically.
+ * Verified against Apple's Screenshot specifications on 2026-11-14.
+ * These are web review renders, never native submission assets. The approved
+ * 1.0 upload set comes from the cleared candidate 195 on the iPhone 16 Pro.
  */
 const DEVICES = {
   review: { width: 390, height: 844, scale: 2 },
-  'iphone-6.9': { width: 440, height: 956, scale: 3, label: '6.9-inch (required)' },
+  'iphone-6.3': { width: APPLE_SCREENSHOT_TARGET.logicalWidth, height: APPLE_SCREENSHOT_TARGET.logicalHeight, scale: APPLE_SCREENSHOT_TARGET.scale, label: 'Dynamic Island medium (required)' },
+  'iphone-6.9': { width: 440, height: 956, scale: 3, label: '6.9-inch (optional)' },
   'iphone-6.5': { width: 428, height: 926, scale: 3, label: '6.5-inch (fallback)' },
 };
 
@@ -306,7 +304,7 @@ async function captureRun(browser, { scheme, lang, device = 'review', store = fa
 }
 
 const store = flag('store');
-const device = store ? arg('device', 'iphone-6.9') : 'review';
+const device = store ? arg('device', 'iphone-6.3') : 'review';
 // Only meaningful in store mode; the review sweep always uses `review`, and
 // validating unconditionally rejected the default run outright.
 if (store && (!DEVICES[device] || device === 'review')) {

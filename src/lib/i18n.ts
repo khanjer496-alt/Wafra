@@ -8,21 +8,14 @@
  * follows the market pack, not this setting.
  */
 
+import { IMPORT_PROCESSING_DISCLOSURE, importProcessingDisclosure } from '@/lib/import-processing-disclosure';
+
 export type Lang = 'en' | 'ar';
 
 const S = {
   // Transaction list and details: concise visible labels, complete semantics.
   transactionSearchLabel: { en: 'Search transactions', ar: 'البحث في العمليات' },
   transactionSearchPlaceholder: { en: 'Merchant or category', ar: 'التاجر أو الفئة' },
-  transactionNetPending: { en: 'Net', ar: 'الصافي' },
-  transactionConfirmedSubtotal: {
-    en: 'Confirmed entries: {amount}',
-    ar: 'العمليات المؤكدة: {amount}',
-  },
-  unresolvedTransfersSummary: {
-    en: '{count} transfer{s} excluded from Net',
-    ar: '{count} تحويلات مستبعدة من الصافي',
-  },
   transactionDayTotal: { en: 'Day total', ar: 'إجمالي اليوم' },
   // Rows added automatically from an unverified bank-alert format.
   autoAddedCheck: { en: 'Auto-added — check', ar: 'أُضيفت تلقائيًا — راجِعها' },
@@ -85,10 +78,6 @@ const S = {
     ar: 'ستستخدم الدفعات القادمة المطابقة لهذا المفوتر {title} · {category}.',
   },
   registeredBillPayment: { en: 'Bill payment', ar: 'دفعة فاتورة' },
-  billPatternHint: {
-    en: 'Wafra found {count} payments with this same bill reference. If the bank’s name is unclear, edit it once and Wafra can remember the name and category for matching payments.',
-    ar: 'وجد وفرة {count} دفعات تحمل مرجع الفاتورة نفسه. إذا كان اسم البنك غير واضح، عدّله مرة واحدة ويمكن لوفرة تذكّر الاسم والفئة للدفعات المطابقة.',
-  },
   accountTransferHistory: { en: 'Transfers', ar: 'التحويلات' },
   transactionDateLabel: { en: 'Transaction date', ar: 'تاريخ العملية' },
   ledgerCurrencyTitle: { en: 'Ledger currency', ar: 'عملة السجل' },
@@ -170,11 +159,6 @@ const S = {
   tabFlow: { en: 'Spending', ar: 'الإنفاق' },
   tabBills: { en: 'Bills', ar: 'الفواتير' },
   tabWallet: { en: 'Accounts', ar: 'الحسابات' },
-  tabAdd: { en: 'Add an entry', ar: 'إضافة عملية' },
-  tabAddHint: {
-    en: 'Opens the cash entry form',
-    ar: 'يفتح نموذج إضافة عملية نقدية',
-  },
 
   // Common actions
   cancel: { en: 'Cancel', ar: 'إلغاء' },
@@ -232,32 +216,15 @@ const S = {
   goodEvening: { en: 'Good evening', ar: 'مساء الخير' },
 
   // Home
-  heroSavedCaption: { en: 'Saved so far this month', ar: 'المدخر هذا الشهر' },
-  heroNetCaption: { en: 'Net for this period', ar: 'الصافي لهذه الفترة' },
   inLabel: { en: 'In', ar: 'الدخل' },
   outLabel: { en: 'Spent', ar: 'الإنفاق' },
-  cashOutLabel: { en: 'Cash out', ar: 'النقد الخارج' },
-  cashOutHint: {
-    en: 'Money that actually left your accounts, including card payments once.',
-    ar: 'الأموال التي خرجت فعلياً من حساباتك، بما فيها دفعات البطاقات مرة واحدة.',
-  },
   cashOutBreakdown: {
     en: 'Card repayments {cards} · bank, debit and cash {accounts}',
     ar: 'سداد البطاقات {cards} · البنك والخصم والنقد {accounts}',
   },
   loadingLedger: { en: 'Loading your ledger', ar: 'جارٍ تحميل سجلك المالي' },
-  insightsHeader: { en: 'INSIGHTS', ar: 'ملاحظات' },
-  budgetsHeader: { en: 'BUDGETS', ar: 'الميزانيات' },
-  recentHeader: { en: 'RECENT ACTIVITY', ar: 'أحدث العمليات' },
   manage: { en: 'Manage', ar: 'إدارة' },
-  cardPaymentsDue: { en: 'Card payments due', ar: 'دفعات البطاقات المستحقة' },
-  paidCardsRecently: { en: 'PAID RECENTLY', ar: 'دُفعت مؤخراً' },
-  paidCardsRecentlyHint: {
-    en: 'Statements Wafra matched to a card payment.',
-    ar: 'كشوف طابقتها وفرة مع دفعة بطاقة.',
-  },
-  paidStatementDue: { en: 'Statement due {date} · paid', ar: 'كشف مستحق {date} · مدفوع' },
-  trialEndedBanner: { en: 'Trial ended · tracking paused', ar: 'انتهت التجربة · توقف التتبع' },
+  trialEndedBanner: { en: 'Free capture ended · automatic capture paused', ar: 'انتهى الالتقاط المجاني · الالتقاط التلقائي متوقف' },
   trialEndedBannerSub: { en: 'Subscribe to keep importing your bank SMS', ar: 'اشترك لمواصلة قراءة رسائل البنك' },
   turnOnTracking: { en: 'Turn on automatic tracking', ar: 'فعّل التتبع التلقائي' },
   trackingPrivacy: { en: 'Wafra reads bank SMS on this device only', ar: 'وفرة تقرأ رسائل البنك على هذا الجهاز فقط' },
@@ -269,10 +236,6 @@ const S = {
   captureAndroidPrivate: {
     en: 'Parsed here · nothing uploaded',
     ar: 'تُحلَّل هنا · لا يُرفع شيء',
-  },
-  captureIosOn: {
-    en: 'Message automation verified by a bank message',
-    ar: 'تم التحقق من أتمتة الرسائل برسالة بنكية',
   },
   captureIosNeedsAutomation: {
     en: 'Finish the one-time Message automation',
@@ -342,18 +305,10 @@ const S = {
     en: 'Connected · run the safe test',
     ar: 'متصل · شغّل الاختبار الآمن',
   },
-  captureIosPipeReady: {
-    en: 'Private pipe verified · Message automation not proven yet',
-    ar: 'تم التحقق من المسار الخاص · لم تثبت أتمتة الرسائل بعد',
-  },
   captureIosOff: { en: 'Set up bank messages', ar: 'إعداد رسائل البنك' },
   captureIosRevoked: {
     en: 'This iPhone was removed · capture stopped',
     ar: 'أُزيل هذا الآيفون · توقّف الالتقاط',
-  },
-  captureIosRevokedDetail: {
-    en: 'Another device removed it from your vault. Set it up again to resume.',
-    ar: 'أزاله جهاز آخر من خزنتك. أعد الإعداد لاستئناف الالتقاط.',
   },
   captureRefreshFailed: {
     en: 'Could not refresh. Pull down to try again.',
@@ -363,12 +318,10 @@ const S = {
   captureReady: { en: 'ON', ar: 'مفعّل' },
   captureFinish: { en: 'FINISH', ar: 'أكمل' },
   captureRecover: { en: 'RECOVER', ar: 'استرداد' },
-  captureVerify: { en: 'VERIFY', ar: 'تحقق' },
   captureEnable: { en: 'ENABLE', ar: 'فعّل' },
   capturePaused: { en: 'Tracking paused', ar: 'توقف التتبع' },
   pausedBadge: { en: 'PAUSED', ar: 'متوقف' },
   captureChecking: { en: 'Checking capture…', ar: 'جارٍ التحقق من الالتقاط…' },
-  captureSyncNow: { en: 'Up to date · new alerts are captured automatically', ar: 'محدّث · تُلتقط التنبيهات الجديدة تلقائياً' },
   captureIosSetupDetail: { en: 'Past and future messages', ar: 'الرسائل السابقة والجديدة' },
   captureLatest: { en: 'Latest filed {date}', ar: 'آخر عملية مسجّلة {date}' },
   emptyPeriodBody: { en: 'Pull down to check for new bank activity. One transaction is enough to start the month.', ar: 'اسحب للأسفل للتحقق من نشاط بنكي جديد. تكفي عملية واحدة لبدء الشهر.' },
@@ -376,8 +329,6 @@ const S = {
   // Structured global-alert review. These items are deliberately described as
   // possible activity, never as parser failures, and none of this copy claims
   // an item has entered the ledger.
-  genericMerchantTitle: { en: 'Merchant or description', ar: 'المتجر أو الوصف' },
-  genericShortenTitle: { en: 'Keep the description within 80 characters.', ar: 'اجعل الوصف في حدود ٨٠ حرفاً.' },
   genericUsePasteDate: { en: 'Use date added', ar: 'استخدم تاريخ الإضافة' },
   genericReviewCount: { en: 'Review {count} alert{s}', ar: 'راجع التنبيهات: {count}' },
   genericReviewSaveFailed: { en: 'Could not save these details for review. Try again.', ar: 'تعذر حفظ هذه التفاصيل للمراجعة. حاول مجدداً.' },
@@ -408,7 +359,6 @@ const S = {
   genericStatementDate: { en: 'Statement date', ar: 'تاريخ الكشف' },
   genericDueDate: { en: 'Due date', ar: 'تاريخ الاستحقاق' },
   genericMissingStatementTotal: { en: 'The total balance is not stated. A minimum payment is not the full amount owed.', ar: 'لم يُذكر إجمالي المستحق. الحد الأدنى للسداد ليس كامل المبلغ المستحق.' },
-  genericInformational: { en: 'These are account details, not a new transaction.', ar: 'هذه تفاصيل للحساب وليست عملية جديدة.' },
   genericOpenCards: { en: 'Open cards', ar: 'افتح البطاقات' },
   genericOpenWallet: { en: 'Open wallet', ar: 'افتح المحفظة' },
   genericOpenBills: { en: 'Open bills', ar: 'افتح الفواتير' },
@@ -453,16 +403,10 @@ const S = {
     en: '{count} could not be added automatically',
     ar: 'تعذّرت إضافة {count} تلقائياً',
   },
-  reviewAlertsNone: { en: 'Nothing waiting', ar: 'لا شيء قيد المراجعة' },
-  reviewAlertsIntro: {
-    en: 'Check the captured details before adding anything to your ledger.',
-    ar: 'راجع التفاصيل الملتقطة قبل إضافة أي شيء إلى سجلك.',
-  },
   reviewAlertsPrivacy: {
     en: 'Only a structured summary is kept here. Message text is not stored.',
     ar: 'يُحفظ هنا ملخص منظّم فقط. لا يُحفظ نص الرسالة.',
   },
-  reviewAlertsEmptyTitle: { en: 'All clear', ar: 'تمت مراجعة كل شيء' },
   reviewAlertsEmptyBody: {
     en: 'Captured alerts that need your review will appear here.',
     ar: 'ستظهر هنا التنبيهات الملتقطة التي تحتاج إلى مراجعتك.',
@@ -542,18 +486,10 @@ const S = {
     ar: 'أنشئ حساباً في المحفظة أولاً',
   },
   savingSecurely: { en: 'Saving securely…', ar: 'جارٍ الحفظ بأمان…' },
-  reviewAlertDateA11y: {
-    en: 'Transaction date in year month day format',
-    ar: 'تاريخ العملية بصيغة سنة شهر يوم',
-  },
 
   // Foreign-currency activity
   foreignActivity: { en: 'Foreign activity', ar: 'العمليات بالعملات الأجنبية' },
   foreignSpending: { en: 'Foreign spending', ar: 'الإنفاق بالعملات الأجنبية' },
-  foreignSpendingSubtitle: {
-    en: 'See foreign-currency spending in the original and ledger currencies.',
-    ar: 'اعرض الإنفاق بالعملات الأجنبية بالعملة الأصلية وعملة السجل.',
-  },
   searchForeignSpending: { en: 'Search merchant or currency', ar: 'ابحث عن تاجر أو عملة' },
   foreignActivityCaption: {
     en: '{count} charge{s} · {currencies} currenc{ending}',
@@ -563,19 +499,7 @@ const S = {
     en: 'Spent in foreign currencies',
     ar: 'الإنفاق بالعملات الأجنبية',
   },
-  foreignOriginalsKept: {
-    en: 'Original amounts stay beside the ledger amount on every charge.',
-    ar: 'يبقى المبلغ الأصلي بجانب مبلغ السجل في كل عملية.',
-  },
   currencyBreakdown: { en: 'Currencies', ar: 'العملات' },
-  foreignCurrencyOriginalSummary: {
-    en: '{amount} · {count} charge{s}',
-    ar: '{amount} · {count} عملية',
-  },
-  foreignCurrencyFilter: {
-    en: '{currency} · {count} charge{s}',
-    ar: '{currency} · {count} عملية',
-  },
   foreignSeeAllCurrencies: { en: 'See all {count}', ar: 'عرض كل العملات · {count}' },
   foreignShowFewerCurrencies: { en: 'Show fewer currencies', ar: 'عرض عملات أقل' },
   conversionQuality: { en: 'Conversion quality', ar: 'جودة التحويل' },
@@ -590,39 +514,11 @@ const S = {
 
   // Bills
   billsTitle: { en: 'Bills', ar: 'الفواتير' },
-  billsSubtitle: { en: 'Dues, subscriptions and utilities', ar: 'مستحقات واشتراكات وفواتير' },
-  subscriptionsSeg: { en: 'Subscriptions', ar: 'الاشتراكات' },
-  remindersSeg: { en: 'Reminders', ar: 'التذكيرات' },
-  cardsSeg: { en: 'Credit cards', ar: 'البطاقات الائتمانية' },
-  seeAllCategoryTx: { en: 'See all transactions', ar: 'عرض كل العمليات' },
-  utilitiesSeg: { en: 'Utilities', ar: 'المرافق' },
-  billsUpcomingTotal: { en: 'Upcoming total', ar: 'إجمالي الاستحقاقات القادمة' },
   billsCheckingRecurring: { en: 'Checking recurring payments…', ar: 'جارٍ التحقق من الدفعات المتكررة…' },
   billsSubscriptionsTotal: { en: 'Subscriptions due', ar: 'الاشتراكات المستحقة' },
   billsUtilitiesTotal: { en: 'Utilities due', ar: 'المرافق المستحقة' },
   billsCardsTotal: { en: 'Card payments due', ar: 'دفعات البطاقات المستحقة' },
   billsAllTotal: { en: 'Open total', ar: 'إجمالي المستحق المفتوح' },
-  billsSummaryPayments: { en: '{count} payment{s}', ar: '{count} دفعات' },
-  billsSummaryEstimated: { en: '{count} estimated', ar: '{count} تقديرية' },
-  noCardDues: { en: 'No card payments due', ar: 'لا مستحقات على البطاقات' },
-  noCardDuesText: {
-    en: 'When your bank sends a statement message, the amount and pay-by date show up here.',
-    ar: 'عند وصول رسالة كشف الحساب من البنك، يظهر المبلغ وتاريخ السداد هنا.',
-  },
-  dueAcrossCards: { en: 'Due across cards', ar: 'المستحق على البطاقات' },
-  monthlySpendOnly: { en: 'tracking spend only', ar: 'تتبع المصروف فقط' },
-  detectedHint: { en: 'Found automatically from your charges', ar: 'مكتشفة تلقائياً من عملياتك' },
-  stoppedSubs: { en: 'Stopped subscriptions', ar: 'اشتراكات متوقفة' },
-  stoppedSubsHint: { en: 'No charges for over two cycles — most likely cancelled.', ar: 'لا توجد عمليات خصم لدورتين — على الأغلب ملغاة.' },
-  utilitiesHeader: { en: 'Utilities & fixed bills', ar: 'المرافق والفواتير الثابتة' },
-  loansHeader: { en: 'Loans & instalments', ar: 'القروض والأقساط' },
-  otherRecurringHeader: { en: 'Other repeat payments', ar: 'مدفوعات متكررة أخرى' },
-  otherRecurringHint: {
-    en: 'Places you pay on a regular cycle. Not bills — long-press one to stop tracking it.',
-    ar: 'جهات تدفع لها بشكل منتظم. ليست فواتير — اضغط مطولاً لإيقاف تتبعها.',
-  },
-  loansHint: { en: 'Fixed repayments detected from your bank messages. Wafra shows what you have paid so far — it cannot see the loan term or balance.', ar: 'أقساط ثابتة مكتشفة من رسائل البنك. يعرض وفرة ما دفعته حتى الآن فقط — لا يمكنه معرفة مدة القرض أو رصيده.' },
-  paidSoFar: { en: 'Paid so far', ar: 'المدفوع حتى الآن' },
   payingFor: { en: 'Paying for', ar: 'يُدفع منذ' },
   instalment: { en: 'Instalment', ar: 'القسط' },
   payments: { en: 'Payments', ar: 'عدد الدفعات' },
@@ -643,10 +539,6 @@ const S = {
   history: { en: 'History', ar: 'السجل' },
   paymentHistory: { en: 'Payment history', ar: 'سجل الدفعات' },
   notASubscription: { en: 'Not a subscription', ar: 'ليس اشتراكاً' },
-  noSubscriptionsTitle: { en: 'No subscriptions detected yet', ar: 'لم تُكتشف اشتراكات بعد' },
-  noSubscriptionsBody: { en: 'Import bank activity and repeat charges will appear here.', ar: 'استورد نشاطك البنكي وستظهر العمليات المتكررة هنا.' },
-  noUtilitiesTitle: { en: 'No utilities yet', ar: 'لا فواتير مرافق بعد' },
-  noUtilitiesBody: { en: 'Tap + to track DEWA, rent, or any monthly payment. Detected charges appear automatically.', ar: 'اضغط + لتتبع ديوا أو الإيجار أو أي دفعة شهرية. تظهر العمليات المكتشفة تلقائياً.' },
   newReminder: { en: 'New reminder', ar: 'تذكير جديد' },
   reminderNamePlaceholder: { en: 'Name (e.g. DEWA, Netflix, Rent)', ar: 'الاسم (مثل ديوا أو نتفلكس أو الإيجار)' },
   amount: { en: 'Amount', ar: 'المبلغ' },
@@ -671,7 +563,6 @@ const S = {
   cadenceAsNeeded: { en: 'As needed', ar: 'عند الحاجة' },
   stoppedLast: { en: 'stopped · last {date}', ar: 'متوقف · آخر خصم {date}' },
   stoppedLastCharged: { en: 'stopped · last charged {date}', ar: 'متوقف · آخر خصم {date}' },
-  cadenceNext: { en: '{cadence} · next {date} ({days}d)', ar: '{cadence} · التالي {date} (خلال {days} يوم)' },
   cadenceScheduleList: {
     en: '{cadence} · {date} · {when}',
     ar: '{cadence} · {date} · {when}',
@@ -692,15 +583,7 @@ const S = {
     en: 'Last paid {date} · {cadence}',
     ar: 'آخر دفع في {date} · {cadence}',
   },
-  perMonthShort: { en: '/mo', ar: 'شهرياً' },
-  monthlyTotal: {
-    en: '{amount} / month',
-    ar: '\u2066{amount}\u2069 · شهرياً',
-  },
-  perYearShort: { en: '/yr', ar: 'سنوياً' },
-  perWeekShort: { en: '/wk', ar: 'أسبوعياً' },
   remindAboutA11y: { en: 'Remind me about {title}', ar: 'ذكّرني بـ {title}' },
-  detailCadenceMonthly: { en: '{cadence} · {amount}/mo', ar: '{cadence} · {amount} شهرياً' },
   olderCharges: { en: '+ {count} older charges', ar: '+ {count} عمليات خصم أقدم' },
   recurringDetected: { en: 'Recurring · detected', ar: 'متكرر · مكتشف' },
   recurringMeta: { en: '{cadence} · next {date} · {when}', ar: '{cadence} · التالي {date} · {when}' },
@@ -726,24 +609,15 @@ const S = {
     ar: 'سيتوقف تتبع {title} كعملية متكررة، ولن تُحتسب ضمن الالتزامات الشهرية.',
   },
   notRecurring: { en: 'Not recurring', ar: 'ليست متكررة' },
-  paidFrom: { en: 'Paid from', ar: 'الدفع من' },
   unknownAccount: { en: 'Unknown account', ar: 'حساب غير معروف' },
   paid: { en: 'Paid', ar: 'مدفوع' },
-  overdueDays: { en: '{days}d overdue', ar: 'متأخر {days} يوم' },
-  lateDays: { en: '{days}d late', ar: 'متأخر {days} يوم' },
   daysShort: { en: '{days}d', ar: '{days} يوم' },
   dueToday: { en: 'Due today', ar: 'مستحق اليوم' },
   dueInDays: { en: 'Due in {days}d', ar: 'مستحق خلال {days} يوم' },
-  longPressDeleteReminder: { en: 'Long-press a reminder to delete it.', ar: 'اضغط مطولاً على التذكير لحذفه.' },
 
   // Wallet
   walletTitle: { en: 'Accounts', ar: 'الحسابات' },
   availableBalances: { en: 'Recorded balances', ar: 'الأرصدة المسجلة' },
-  refTryExample: { en: 'Try an example', ar: 'جرّب مثالاً' },
-  refCategoryHistory: { en: 'Category over six money months', ar: 'اتجاه الفئة خلال ستة أشهر مالية' },
-  refDuesAndMovements: { en: 'Dues & money movements', ar: 'الدفعات وحركة الأموال' },
-  refUpcoming: { en: 'Upcoming', ar: 'القادمة' },
-  refAll: { en: 'All', ar: 'الكل' },
   // Regular spending that is not a bill (a grocer, toll top-ups). Some show a
   // usual next date, so the heading says what they are, not that they have no
   // schedule; they stay out of the bills total either way.
@@ -763,51 +637,15 @@ const S = {
   paidFromAccounts: { en: 'Paid from accounts this month', ar: 'المدفوع من الحسابات هذا الشهر' },
   netWorth: { en: 'Net worth', ar: 'صافي الثروة' },
   estimatedNetWorth: { en: 'Estimated net worth', ar: 'صافي الثروة التقديري' },
-  partialEstimate: { en: 'Partial estimate', ar: 'تقدير جزئي' },
-  allAccountsIncluded: { en: 'All active accounts included', ar: 'تم تضمين كل الحسابات النشطة' },
-  noActiveAccounts: { en: 'No active accounts yet', ar: 'لا توجد حسابات نشطة بعد' },
-  addAccountForEstimate: {
-    en: 'Use + to add an account and start your estimate.',
-    ar: 'استخدم + لإضافة حساب وبدء التقدير.',
-  },
-  knownBalances: { en: 'Known balances', ar: 'الأرصدة المعروفة' },
-  amountsOwed: { en: 'Amounts owed', ar: 'المبالغ المستحقة' },
-  netWorthCoverage: {
-    en: '{known} of {total} active accounts included',
-    ar: 'تم تضمين {known} من أصل {total} حسابات نشطة',
-  },
-  netWorthMissing: {
-    en: 'Accounts excluded until a reliable balance arrives: {count}',
-    ar: 'حسابات مستبعدة حتى يتوفر رصيد موثوق: {count}',
-  },
-  howNetWorthCalculated: { en: 'How this is calculated', ar: 'كيف يتم احتسابه' },
-  netWorthExplanation: {
-    en: 'Wafra adds the latest bank-reported balances and balances you track manually, then subtracts credit-card amounts owed. Inactive accounts and accounts without a reliable balance are left out.',
-    ar: 'تجمع وفرة أحدث الأرصدة الواردة من البنك والأرصدة التي تتابعها يدوياً، ثم تطرح المبالغ المستحقة على البطاقات الائتمانية. لا تُحتسب الحسابات غير النشطة أو التي لا يتوفر لها رصيد موثوق.',
-  },
-  ledgerTrend6mo: { en: 'Recorded movement · 6 months', ar: 'حركة السجل · ٦ أشهر' },
-  ledgerTrendExplanation: {
-    en: 'From opening balances and filed activity—not the estimate above.',
-    ar: 'استناداً إلى الأرصدة الافتتاحية والعمليات المسجلة، وليس التقدير أعلاه.',
-  },
-  moreCards: { en: 'View more cards · {count}', ar: 'عرض بطاقات أخرى · {count}' },
   cardsHeader: { en: 'Payment cards', ar: 'بطاقات الدفع' },
-  moneySourcesHeader: { en: 'Money sources', ar: 'مصادر الأموال' },
-  otherSources: { en: 'Other sources', ar: 'مصادر أخرى' },
-  showMoreSources: { en: 'Show {count} more', ar: 'عرض {count} أخرى' },
-  showFewerSources: { en: 'Show fewer', ar: 'عرض أقل' },
   /** Paged long lists (Categorise, Improve accuracy); {count} is the next page, not the total. */
   showMoreRows: { en: 'Show {count} more', ar: 'عرض {count} أخرى' },
-  noMoneySourcesYet: { en: 'No money sources yet.', ar: 'لا توجد مصادر أموال بعد.' },
-  accountsHeader: { en: 'Accounts', ar: 'الحسابات' },
-  inactiveHeader: { en: 'Inactive', ar: 'غير نشطة' },
   goalsHeader: { en: 'Savings goals', ar: 'أهداف الادخار' },
   newGoal: { en: '+ New goal', ar: '+ هدف جديد' },
   outstanding: { en: 'outstanding', ar: 'مستحق' },
   owed: { en: 'owed', ar: 'المستحق عليك' },
   // A credit card's open statement, less what was paid on it: not the card's whole balance.
   statementLeftToPay: { en: 'statement left to pay', ar: 'المتبقي من الكشف' },
-  nothingSpentThisMonth: { en: 'nothing spent this month', ar: 'لا مصروف هذا الشهر' },
   perBankSms: { en: 'per bank message', ar: 'حسب رسالة البنك' },
   noBalanceYet: { en: 'no balance message yet', ar: 'لا رسالة رصيد بعد' },
   trackedManually: { en: 'Tracked manually', ar: 'يُتابع يدويًا' },
@@ -818,21 +656,12 @@ const S = {
   // wins — so the chip would have read the alert's wording anyway while `tsc`
   // failed the build with TS1117. One key, one string: "Reminder set" is right
   // on a row that has one and right as the title of the alert that sets it.
-  recurringHint: {
-    en: 'Tap a row for its charge history, or to set a reminder.',
-    ar: 'اضغط على أي صف لعرض سجل الخصومات أو لضبط تذكير.',
-  },
   improveAccuracy: { en: 'Improve accuracy', ar: 'تحسين الدقة' },
   // The permanent way into /categorise. Home's prompt has a floor under it, so
   // without this row a user who sorts down to two merchants is locked out of
   // the screen mid-job and left fixing rows one at a time — the exact chore
   // the screen exists to replace.
   sortShops: { en: 'Improve categories', ar: 'تحسين التصنيفات' },
-  sortShopsCount: {
-    en: '{count} item{s} need your input',
-    ar: '{count} حالات تحتاج إدخالك',
-  },
-  sortShopsNone: { en: 'Nothing needs your input', ar: 'لا توجد حالات تحتاج إدخالك' },
   sortShopsSettingsDetail: {
     en: 'Review unclear merchant and bank-payment categories',
     ar: 'راجع تصنيفات المتاجر ودفعات البنك غير الواضحة',
@@ -847,7 +676,6 @@ const S = {
   },
   couldNotRead: { en: 'Could not read', ar: 'تعذّرت القراءة' },
   noCategoryYet: { en: 'Read, but no category', ar: 'مقروءة بلا تصنيف' },
-  shareUnrecognized: { en: 'Share formats', ar: 'مشاركة الصيغ' },
   readAs: { en: 'Read as', ar: 'قُرئت كـ' },
   noUnrecognized: { en: 'Everything reads clean', ar: 'كل الرسائل مقروءة' },
   noUnrecognizedText: {
@@ -933,25 +761,9 @@ const S = {
   // will ever know what "AL BAIT ALHAMAWI SUP" sells. Only the user knows, so
   // the app asks them once per shop instead of shipping another release.
   categoriseMerchants: { en: 'Improve categories', ar: 'تحسين التصنيفات' },
-  categoriseIntro: {
-    en: 'Wafra reads the shop name off your bank message but cannot know what it sells. Choose once and every entry from that shop moves with it — the ones already in your ledger, and the ones still to come.',
-    ar: 'تقرأ وفرة اسم المتجر من رسالة البنك لكنها لا تعرف ماذا يبيع. اختر التصنيف مرة واحدة وتنتقل معه كل عمليات هذا المتجر: الموجودة في سجلك والقادمة لاحقاً.',
-  },
-  categoriseRemaining: {
-    en: '{count} merchant{s} · {rows} entr{ending}',
-    ar: '{count} متجر · {rows} عملية',
-  },
   categoriseEntries: {
     en: '{count} entr{ending} · last {date}',
     ar: '{count} عملية · آخرها {date}',
-  },
-  categoriseAssigned: {
-    en: '{count} entr{ending} moved to {category}',
-    ar: 'نُقلت {count} عملية إلى {category}',
-  },
-  categorisePurposeAssigned: {
-    en: '{count} matching entr{ending} moved to {category}. Wafra will remember this bill reference.',
-    ar: 'نُقلت {count} دفعة مطابقة إلى {category}. سيتذكر وفرة مرجع هذه الفاتورة.',
   },
   categorisePaymentPurpose: {
     en: 'BANK PAYMENT · PURPOSE UNKNOWN',
@@ -982,11 +794,6 @@ const S = {
     en: 'Suggested from the merchant name: {category}',
     ar: 'مقترح من اسم التاجر: {category}',
   },
-  categoriseSuggestionUse: { en: 'Use {category}', ar: 'استخدم {category}' },
-  categoriseSuggestionNote: {
-    en: 'Suggestion only. Nothing changes until you choose. Choosing applies it to {count} entr{ending}.',
-    ar: 'اقتراح فقط. لن يتغير شيء حتى تختار. عند الاختيار يُطبّق على {count} عملية.',
-  },
   categoriseSuggestionChecking: { en: 'Checking the name on your device…', ar: 'جارٍ فحص الاسم على جهازك…' },
   categoriseDone: { en: 'Nothing needs your input', ar: 'لا توجد حالات تحتاج إدخالك' },
   categoriseDoneBody: {
@@ -1011,22 +818,9 @@ const S = {
     en: 'Review {count} unclear categories',
     ar: 'راجع {count} تصنيفات غير واضحة',
   },
-  spentThisMonthCaption: { en: 'spent this month', ar: 'مصروف هذا الشهر' },
-  cardSpentThisMonth: {
-    en: '{amount} spent this month',
-    ar: 'مصروف الشهر \u2066{amount}\u2069',
-  },
-  longPressHint: { en: 'Long-press a card or account to hide or remove it', ar: 'اضغط مطولاً على بطاقة أو حساب لإخفائه أو حذفه' },
-  walletCurrencies: { en: 'Currencies', ar: 'العملات' },
-  currencyActivityTitle: { en: 'Foreign activity', ar: 'النشاط بالعملات الأجنبية' },
-  currencyActivityDetail: { en: 'Original amounts kept with every charge', ar: 'يُحفظ المبلغ الأصلي مع كل عملية' },
-  chargeWord: { en: 'charge', ar: 'عملية' },
-  chargesWord: { en: 'charges', ar: 'عمليات' },
   cardDetail: { en: 'Card detail', ar: 'تفاصيل البطاقة' },
   credit: { en: 'Credit', ar: 'ائتمانية' },
   debit: { en: 'Debit', ar: 'خصم' },
-  stillOwed: { en: 'Still owed', ar: 'المتبقي عليك' },
-  openStatements: { en: '{count} open statement{s}', ar: '{count} كشف مفتوح' },
   statements: { en: 'Statements', ar: 'كشوف الحساب' },
   dueDate: { en: 'Due {date}', ar: 'مستحق {date}' },
   settled: { en: 'Settled', ar: 'مسدّد' },
@@ -1053,15 +847,6 @@ const S = {
   settingsTitle: { en: 'Settings', ar: 'الإعدادات' },
   trustedTitle: { en: 'Trusted devices', ar: 'الأجهزة الموثوقة' },
   trustedSettingsRow: { en: 'Trusted devices & family', ar: 'الأجهزة الموثوقة والعائلة' },
-  trustedSettingsDetail: {
-    en: 'Share future relay-delivered supplemental imports with up to 8 devices',
-    ar: 'شارك الواردات الإضافية المستقبلية المرسلة عبر المرحّل مع ما يصل إلى ٨ أجهزة',
-  },
-  trustedHeroTitle: { en: 'One vault. Your trusted phones.', ar: 'خزنة واحدة. لأجهزتك الموثوقة.' },
-  trustedHeroBody: {
-    en: 'New structured captures delivered through Wafra’s relay can reach every trusted device, sealed separately for each one. Your existing ledger is not copied.',
-    ar: 'يمكن لعمليات الالتقاط المنظمة الجديدة المرسلة عبر مرحّل وفرة أن تصل إلى كل جهاز موثوق، مشفّرة لكل جهاز على حدة. لا يُنسخ سجلك الحالي.',
-  },
   trustedAndroidTruth: {
     en: 'Bank SMS still parse only on this Android and are not uploaded. Trusted devices receive only future items delivered through the relay.',
     ar: 'تبقى رسائل البنك على هذا الأندرويد وتُحلَّل محلياً ولا تُرفع. تستقبل الأجهزة الموثوقة فقط العناصر المستقبلية المرسلة عبر المرحّل.',
@@ -1071,7 +856,6 @@ const S = {
     ar: 'تبقى التقاطات الرسائل المحلية على هذا الآيفون. لا تصل إلى الأجهزة الموثوقة إلا الواردات الإضافية المرسلة بشكل منفصل عبر المرحّل، ولا يسترجع الانضمام العمليات السابقة.',
   },
   trustedPreview: { en: 'SAMPLE HOUSEHOLD', ar: 'عائلة تجريبية' },
-  trustedDisabled: { en: 'DEMO', ar: 'تجريبي' },
   // Relay-only: trusted phones receive new relayed items after they join;
   // nothing already in a ledger is copied, so there is no "one shared ledger".
   trustedPreviewBody: {
@@ -1079,7 +863,6 @@ const S = {
     ar: 'شاهد كيف تستقبل هواتف العائلة الموثوقة العناصر الجديدة المرسلة عبر المرحّل. لا تُنسخ العمليات السابقة. الدعوات معطلة في هذا العرض التجريبي.',
   },
   trustedPreviewA11y: { en: 'Sample device, controls disabled', ar: 'جهاز تجريبي، عناصر التحكم معطلة' },
-  trustedStartHeader: { en: 'START A TRUSTED VAULT', ar: 'ابدأ خزنة موثوقة' },
   trustedStartBody: {
     en: 'Create the first owner device, or paste a one-use invite from someone you trust. No bank or ledger data is stored in an invite.',
     ar: 'أنشئ جهاز المالك الأول، أو الصق دعوة للاستخدام مرة واحدة من شخص تثق به. لا تحتوي الدعوة على بيانات بنكية أو بيانات السجل.',
@@ -1091,7 +874,6 @@ const S = {
   trustedConnecting: { en: 'Connecting…', ar: 'جارٍ الاتصال…' },
   trustedCreateVault: { en: 'Create trusted vault', ar: 'أنشئ خزنة موثوقة' },
   trustedJoinVault: { en: 'Join with an invite', ar: 'انضم بدعوة' },
-  trustedDevicesHeader: { en: 'TRUSTED DEVICES', ar: 'الأجهزة الموثوقة' },
   trustedThisDevice: { en: 'THIS DEVICE', ar: 'هذا الجهاز' },
   trustedRoleOwner: { en: 'Owner', ar: 'المالك' },
   trustedRoleMember: { en: 'Member', ar: 'عضو' },
@@ -1105,12 +887,9 @@ const S = {
     ar: 'المرحّل غير متاح. تُعرض آخر قائمة في هذه الشاشة ولم تُجرَ أي تغييرات.',
   },
   trustedRetry: { en: 'RETRY', ar: 'أعد المحاولة' },
-  trustedInviteHeader: { en: 'ADD SOMEONE YOU TRUST', ar: 'أضف شخصاً تثق به' },
   trustedInviteAction: { en: 'Create 10-minute invite', ar: 'أنشئ دعوة لمدة ١٠ دقائق' },
-  trustedInviteReady: { en: 'One-use invite ready', ar: 'الدعوة صالحة لاستخدام واحد' },
   trustedInviteCountdown: { en: 'Expires in {minutes}:{seconds}', ar: 'تنتهي خلال {minutes}:{seconds}' },
   trustedInviteExpired: { en: 'This invite has expired', ar: 'انتهت صلاحية هذه الدعوة' },
-  trustedInviteUntilExpiry: { en: 'until it expires', ar: 'حتى تنتهي صلاحيتها' },
   // Relay-only: a phone that joins receives items relayed AFTER it joins.
   // Nothing already in the ledger is copied to it.
   trustedRelayOnly: {
@@ -1128,7 +907,6 @@ const S = {
     en: 'Join my Wafra trusted vault. Open or paste this one-use link in Wafra within 10 minutes:',
     ar: 'انضم إلى خزنة وفرة الموثوقة. افتح أو الصق هذا الرابط الصالح لاستخدام واحد في وفرة خلال ١٠ دقائق:',
   },
-  trustedVaultHeader: { en: 'TRUSTED VAULT', ar: 'الخزنة الموثوقة' },
   trustedVaultBody: {
     en: 'Deleting the vault revokes every device and removes queued relay captures. Transactions already saved on each phone stay local to that phone.',
     ar: 'حذف الخزنة يلغي وصول كل الأجهزة ويحذف عمليات الالتقاط المنتظرة في المرحّل. تبقى العمليات المحفوظة على كل هاتف محلياً فيه.',
@@ -1212,31 +990,11 @@ const S = {
     en: 'Try exporting a fresh backup and restoring that.',
     ar: 'جرّب تصدير نسخة احتياطية جديدة ثم استعادتها.',
   },
-  featuresHeader: { en: 'Features', ar: 'الميزات' },
-  dataHeader: { en: 'Data', ar: 'البيانات' },
-  moneyMonthHeader: { en: 'Money month', ar: 'الشهر المالي' },
-  moneyMonthStarts: { en: 'Starts on the {day}', ar: 'يبدأ في اليوم {day}' },
-  moneyMonthDayA11y: {
-    en: 'Money month starts on day {day}',
-    ar: 'يبدأ الشهر المالي في اليوم {day}',
-  },
-  moneyMonthRange: {
-    en: 'Your {month} month runs {from} – {to}, so salary and rent land in the same month.',
-    ar: 'يمتد شهر {month} المالي من {from} إلى {to}، فيقع الراتب والإيجار في الشهر نفسه.',
-  },
-  calendarMonthHint: {
-    en: 'Day 1 means calendar months. Next month starts {date}.',
-    ar: 'اليوم ١ يعني الأشهر الميلادية. يبدأ الشهر التالي في {date}.',
-  },
   appearanceHeader: { en: 'Appearance', ar: 'المظهر' },
   themeSystem: { en: 'System', ar: 'النظام' },
   themeSystemDetail: { en: 'System · follows phone', ar: 'النظام · يتبع الهاتف' },
   themeLight: { en: 'Light', ar: 'فاتح' },
   themeDark: { en: 'Dark', ar: 'داكن' },
-  pinnedTheme: {
-    en: 'Pinned to {theme}, whatever your phone is set to.',
-    ar: 'ثُبّت المظهر على {theme} بغض النظر عن إعداد الهاتف.',
-  },
   privacyHeader: { en: 'Privacy', ar: 'الخصوصية' },
   appLockTitle: { en: 'App lock', ar: 'قفل التطبيق' },
   appLockDetail: {
@@ -1244,10 +1002,6 @@ const S = {
     ar: 'البصمة أو التعرّف على الوجه أو رمز الهاتف',
   },
   readBankSms: { en: 'Read bank SMS', ar: 'قراءة رسائل البنك' },
-  smsGrantedLocal: {
-    en: 'Granted · nothing is uploaded',
-    ar: 'مسموح · لا يُرفع أي شيء',
-  },
   smsOffNoImport: {
     en: 'Off · nothing can import',
     ar: 'متوقف · لن تُستورد أي عملية',
@@ -1260,10 +1014,6 @@ const S = {
   instantAlertsOff: {
     en: 'Off · charges appear when Wafra next opens',
     ar: 'متوقف · تظهر العمليات عند فتح وفرة لاحقاً',
-  },
-  instantAlertsNeedSms: {
-    en: 'Needs bank SMS reading above',
-    ar: 'يحتاج تفعيل قراءة رسائل البنك أعلاه',
   },
   instantAlertsNeedBankSource: {
     en: 'Turn on bank SMS or bank app notifications first',
@@ -1293,33 +1043,7 @@ const S = {
     en: 'On · new bank notifications are added automatically',
     ar: 'مفعّل · تُضاف إشعارات البنك الجديدة تلقائياً',
   },
-  bankPushOff: {
-    en: 'Off · grant bank notification access',
-    ar: 'متوقف · امنح إذن إشعارات البنوك',
-  },
-  regionHeader: { en: 'Language & bank formats', ar: 'اللغة وتنسيقات البنوك' },
-  countryPack: { en: 'Country pack', ar: 'حزمة الدولة' },
   parserPack: { en: 'Bank-message region', ar: 'منطقة رسائل البنك' },
-  // What the pack changes, stated as what it changes: which banks and shops
-  // are recognised in NEW messages. It does not restate the currency as
-  // something the pack sets, because on a ledger that already holds money it
-  // cannot — see marketPinned below.
-  countryPackDetail: {
-    en: '{country} · {currency} · bank and shop names in new messages',
-    ar: '{country} · {currency} · أسماء البنوك والمتاجر في الرسائل الجديدة',
-  },
-  parserPackDetail: {
-    en: '{country} · {currency} automatic import; Android can detect other supported formats for review',
-    ar: '{country} · استيراد تلقائي بعملة {currency}؛ يستطيع أندرويد اكتشاف تنسيقات مدعومة أخرى للمراجعة',
-  },
-  globalParserPackDetail: {
-    en: '{currency} ledger · other bank formats may need Review; automatic coverage varies',
-    ar: 'سجل بعملة {currency} · قد تحتاج تنسيقات البنوك الأخرى إلى المراجعة؛ تختلف تغطية الاستيراد التلقائي',
-  },
-  parserPackPickerBody: {
-    en: 'UAE and Saudi packs have tested automatic formats. Android and iPhone History may auto-add other completed movements marked Auto-added — check. Unfamiliar live iPhone alerts wait in Review.',
-    ar: 'تضم حزمتا الإمارات والسعودية تنسيقات مختبرة للاستيراد التلقائي. قد يضيف أندرويد وسجل رسائل الآيفون حركات مكتملة أخرى بعلامة أُضيف تلقائياً — تحقّق. تنتظر تنبيهات الآيفون المباشرة غير المألوفة في المراجعة.',
-  },
   /**
    * Why a differently-denominated pack is greyed out.
    *
@@ -1329,38 +1053,13 @@ const S = {
    * and no rate that could have converted it. So the pack is refused, and the
    * row says which currency the money is already in and what the way out is.
    */
-  marketPinned: {
-    en: 'Your money is recorded in {currency}. Switching would relabel it, not convert it.',
-    ar: 'أموالك مسجّلة بـ {currency}. التبديل سيغيّر التسمية فقط ولن يحوّل المبالغ.',
-  },
-  uaeName: { en: 'United Arab Emirates', ar: 'الإمارات العربية المتحدة' },
-  saudiName: { en: 'Saudi Arabia', ar: 'المملكة العربية السعودية' },
-  languageSettingDetail: {
-    en: 'English · العربية is available instantly',
-    ar: 'العربية · English متاحة فوراً',
-  },
-  unreadFormatsCount: {
-    en: '{count} unread message format{s} · digits masked',
-    ar: '{count} صيغة رسالة غير مقروءة · الأرقام مخفية',
-  },
-  settingsTagline: {
-    en: 'Know where it goes. Watch it grow.',
-    ar: 'اعرف أين تذهب أموالك وراقبها تنمو.',
-  },
   settingsViewOnboarding: { en: 'View onboarding', ar: 'عرض تجربة البداية' },
   settingsViewOnboardingDetail: {
     en: 'Replay the welcome flow without changing your data or settings',
     ar: 'أعد مشاهدة تجربة البداية دون تغيير بياناتك أو إعداداتك',
   },
-  settingsTrialDays: {
-    en: 'Free trial · {count} day{s} left',
-    ar: 'تجربة مجانية · متبقٍ {count} يوم',
-  },
   wafraPro: { en: 'Wafra Pro', ar: 'وفرة برو' },
   proActive: { en: 'Active', ar: 'مفعّل' },
-  billsAndSubs: { en: 'Bills and subscriptions', ar: 'الفواتير والاشتراكات' },
-  importFromSms: { en: 'Import from bank SMS', ar: 'استيراد من رسائل البنك' },
-  bankAppNotifs: { en: 'Bank app notifications (beta)', ar: 'إشعارات تطبيقات البنوك (تجريبي)' },
   appLock: { en: 'App lock (biometric)', ar: 'قفل التطبيق (بصمة)' },
   privacyBuiltInDetail: {
     en: 'Protected on your phone. Sharing is your choice.',
@@ -1370,9 +1069,14 @@ const S = {
     en: 'Privacy is built into Wafra. Your ledger is encrypted on iPhone and Android. Local bank-message capture works without uploading your messages. App lock adds protection when someone else is using your unlocked phone.',
     ar: 'الخصوصية جزء أساسي من وفرة. سجلك مشفّر على آيفون وأندرويد، ويعمل الالتقاط المحلي لرسائل البنك دون رفع رسائلك. ويضيف قفل التطبيق حماية عندما يستخدم شخص آخر هاتفك المفتوح.',
   },
+  onlineLogosTitle: { en: 'Online merchant logos', ar: 'شعارات التجار عبر الإنترنت' },
+  onlineLogosDetail: { en: 'Off by default. When on, merchant and bank names are sent to Brandfetch, a logo service. It also sees your network address.', ar: 'متوقفة افتراضياً. عند تفعيلها تُرسل أسماء التجار والبنوك إلى خدمة الشعارات Brandfetch، التي ترى أيضاً عنوان اتصالك بالشبكة.' },
+  onlineLogosPaused: { en: 'Paused by your local-only preference.', ar: 'متوقفة بسبب تفضيل المعالجة المحلية.' },
+  hideLockedWidgetAmountsTitle: { en: 'Hide widget amounts with App Lock', ar: 'إخفاء مبالغ الودجات مع قفل التطبيق' },
+  hideLockedWidgetAmountsDetail: { en: 'While App Lock is on, amounts stay hidden on Home Screen widgets, even after you unlock Wafra. Names and dates remain visible.', ar: 'عند تشغيل قفل التطبيق تبقى المبالغ مخفية في ودجات الشاشة الرئيسية حتى بعد فتح وفرة. تبقى الأسماء والتواريخ ظاهرة.' },
   privacyLogosBody: {
-    en: 'Logos appear automatically. Many merchant and bank identities ship with the app. For other merchants or banks, Wafra may send only a cleaned brand or institution name — not the amount, account/card number or bank message — to Brandfetch to find a confident match, then load its logo. Brandfetch can see that name lookup, the requested brand domain and your network address.',
-    ar: 'تظهر الشعارات تلقائياً، ويأتي كثير من هويات التجّار والبنوك مع التطبيق. وللتجّار أو البنوك الأخرى قد ترسل وفرة اسم العلامة أو المؤسسة المنظّف فقط — دون المبلغ أو رقم الحساب أو البطاقة أو نص رسالة البنك — إلى Brandfetch للعثور على تطابق موثوق ثم تحميل شعاره. ويمكن لـ Brandfetch رؤية بحث الاسم ونطاق العلامة المطلوب وعنوان اتصالك بالشبكة.',
+    en: 'Online logos are off by default. On iPhone you can turn them on in Settings to share names with Brandfetch; Android does not use online logos in this version. Bundled logos appear locally. Many merchant and bank identities ship with the app. For other merchants or banks, Wafra may send only a cleaned brand or institution name — not the amount, account/card number or bank message — to Brandfetch to find a confident match, then load its logo. Brandfetch can see that name lookup, the requested brand domain and your network address.',
+    ar: 'الشعارات المتصلة متوقفة افتراضياً. على آيفون يمكنك تفعيلها في الإعدادات لمشاركة الأسماء مع Brandfetch، ولا يستخدمها أندرويد في هذا الإصدار. تظهر الشعارات المضمنة محلياً، ويأتي كثير من هويات التجّار والبنوك مع التطبيق. وللتجّار أو البنوك الأخرى قد ترسل وفرة اسم العلامة أو المؤسسة المنظّف فقط — دون المبلغ أو رقم الحساب أو البطاقة أو نص رسالة البنك — إلى Brandfetch للعثور على تطابق موثوق ثم تحميل شعاره. ويمكن لـ Brandfetch رؤية بحث الاسم ونطاق العلامة المطلوب وعنوان اتصالك بالشبكة.',
   },
   privacyLegacyTitle: { en: 'Your earlier local-only choice is saved', ar: 'اختيارك السابق للمعالجة المحلية محفوظ' },
   privacyLegacyBody: {
@@ -1382,30 +1086,12 @@ const S = {
   privacyLegacyReview: { en: 'Review online features', ar: 'مراجعة الميزات المتصلة' },
   privacyResumeTitle: { en: 'Resume optional online features?', ar: 'استئناف الميزات المتصلة الاختيارية؟' },
   privacyResumeBody: {
-    en: 'This restores automatic reference exchange-rate and logo requests, allows you to set up cloud imports, and lets unclear message text stay on this phone for correction. A previously connected relay can resume syncing. Creating a connection or uploading a statement still needs its own action. Previously removed message text cannot be recovered.',
-    ar: 'يستأنف هذا طلبات أسعار الصرف المرجعية والشعارات التلقائية، ويتيح إعداد الاستيراد السحابي والاحتفاظ بنص الرسائل غير الواضحة على هذا الهاتف لتصحيحها. وقد تستأنف خدمة مربوطة سابقاً المزامنة. ويتطلب إنشاء اتصال أو رفع كشف إجراءً منفصلاً. ولا يمكن استعادة نصوص الرسائل المحذوفة سابقاً.',
+    en: 'This restores reference exchange-rate requests and online logos only if you separately enabled them, allows you to set up cloud imports, and lets unclear message text stay on this phone for correction. A previously connected relay can resume syncing. Creating a connection or uploading a statement still needs its own action. Previously removed message text cannot be recovered.',
+    ar: 'يستأنف هذا طلبات أسعار الصرف المرجعية والشعارات المتصلة فقط إذا فعّلتها بشكل منفصل، ويتيح إعداد الاستيراد السحابي والاحتفاظ بنص الرسائل غير الواضحة على هذا الهاتف لتصحيحها. وقد تستأنف خدمة مربوطة سابقاً المزامنة. ويتطلب إنشاء اتصال أو رفع كشف إجراءً منفصلاً. ولا يمكن استعادة نصوص الرسائل المحذوفة سابقاً.',
   },
   privacyResumeAction: { en: 'Resume online features', ar: 'استئناف الميزات المتصلة' },
   privacyPreferenceFailed: { en: 'Wafra could not save this preference. Try again.', ar: 'تعذّر على وفرة حفظ هذا التفضيل. حاول مرة أخرى.' },
   privateMode: { en: 'Saved local-only preference', ar: 'تفضيل المعالجة المحلية المحفوظ' },
-  privateModeOn: {
-    en: 'On · local structured data only; raw text is dropped',
-    ar: 'مفعّل · بيانات منظّمة محلية فقط؛ يُحذف النص الخام',
-  },
-  privateModeOff: {
-    en: 'Off · low-confidence text may stay on this phone for correction',
-    ar: 'متوقف · قد يبقى نص العمليات غير الواضحة على الهاتف لتصحيحها',
-  },
-  privateModeEnableTitle: { en: 'Turn on Private Mode?', ar: 'تفعيل الوضع الخاص؟' },
-  privateModeEnableIosBody: {
-    en: 'This removes retained diagnostic message text and disconnects the old relay. Local automatic capture and structured entries on this iPhone stay.',
-    ar: 'سيحذف نصوص الرسائل التشخيصية المحفوظة ويفصل المرحّل القديم. سيبقى الالتقاط التلقائي المحلي والعمليات المنظّمة على هذا الآيفون.',
-  },
-  privateModeEnable: { en: 'Turn on', ar: 'تفعيل' },
-  privateModeFailed: {
-    en: 'Private Mode could not disconnect the relay. Connect to the internet and try again.',
-    ar: 'تعذّر على الوضع الخاص فصل المرحّل. اتصل بالإنترنت وحاول مرة أخرى.',
-  },
   capturePreferenceFailed: {
     en: 'Capture setting didn’t save. Try again.',
     ar: 'لم يُحفظ إعداد الالتقاط. حاول مجدداً.',
@@ -1420,8 +1106,6 @@ const S = {
   },
   country: { en: 'Country', ar: 'الدولة' },
   language: { en: 'Language', ar: 'اللغة' },
-  monthStartsOn: { en: 'Month starts on day', ar: 'يبدأ الشهر في يوم' },
-  calendarMonths: { en: 'Calendar months (1st to end)', ar: 'أشهر ميلادية (من ١ حتى النهاية)' },
   backupJson: { en: 'Back up everything (JSON)', ar: 'نسخ احتياطي كامل (JSON)' },
   restoreBackup: { en: 'Restore from backup', ar: 'استعادة من نسخة احتياطية' },
   exportCsv: { en: 'Export transactions (CSV)', ar: 'تصدير العمليات (CSV)' },
@@ -1451,10 +1135,6 @@ const S = {
     en: 'Launch metrics export failed',
     ar: 'تعذّر تصدير مقاييس التشغيل',
   },
-  smsCorpusExportTitle: {
-    en: 'Export parser corpus (temporary)',
-    ar: 'تصدير مجموعة رسائل للمحلّل (مؤقت)',
-  },
   personalReviewExportTitle: {
     en: 'Export my data for review',
     ar: 'تصدير بياناتي للمراجعة',
@@ -1477,23 +1157,10 @@ const S = {
     ar: 'يستبعد تفضيلك المحفوظ نص الرسائل الأصلية. راجعه في الإعدادات ← الخصوصية والبيانات.',
   },
   personalReviewExportFailed: { en: 'Could not export your data', ar: 'تعذّر تصدير بياناتك' },
-  smsCorpusExportDetail: {
-    en: 'Share every received SMS from this Android phone',
-    ar: 'مشاركة جميع الرسائل المستلمة من هاتف أندرويد هذا',
-  },
   smsCorpusExportProgress: {
     en: 'Preparing {count} messages…',
     ar: 'جارٍ تجهيز {count} رسالة…',
   },
-  smsCorpusConfirmTitle: {
-    en: 'Export every received SMS?',
-    ar: 'تصدير جميع الرسائل المستلمة؟',
-  },
-  smsCorpusConfirmBody: {
-    en: 'This temporary diagnostic reads the full sender, date and text of every received SMS on this phone and prepares a local JSON file. Wafra does not upload it; you choose where to send it in the Android share sheet.',
-    ar: 'تقرأ هذه الأداة التشخيصية المؤقتة اسم المرسل والتاريخ والنص الكامل لكل رسالة مستلمة على هذا الهاتف، ثم تُنشئ ملف JSON محلياً. لا يرفعه وفرة؛ أنت تختار وجهته من قائمة المشاركة في أندرويد.',
-  },
-  smsCorpusConfirmAction: { en: 'Prepare file', ar: 'تجهيز الملف' },
   smsCorpusPermissionTitle: {
     en: 'SMS permission is needed',
     ar: 'يلزم إذن الرسائل',
@@ -1501,10 +1168,6 @@ const S = {
   smsCorpusPermissionBody: {
     en: 'Allow SMS access, then try the temporary export again.',
     ar: 'اسمح بالوصول إلى الرسائل ثم أعد محاولة التصدير المؤقت.',
-  },
-  smsCorpusFailedTitle: {
-    en: 'Corpus export failed',
-    ar: 'تعذّر تصدير مجموعة الرسائل',
   },
   smsCorpusFailedBody: {
     en: 'No file was shared. Keep Wafra open and try again.',
@@ -1518,8 +1181,6 @@ const S = {
   },
   currentMoneyMonth: { en: 'Current money month', ar: 'الشهر المالي الحالي' },
   allExpenses: { en: 'All expenses', ar: 'كل المصروفات' },
-  originalAmount: { en: 'Original amount', ar: 'المبلغ الأصلي' },
-  exchangeRate: { en: 'Exchange rate', ar: 'سعر الصرف' },
   bankQuotedRate: { en: 'Bank-quoted {currency} equivalent', ar: 'ما يعادله بعملة {currency} حسب البنك' },
   datedReferenceRate: { en: 'Dated reference rate · {date}', ar: 'سعر مرجعي بتاريخ {date}' },
   offlineFxEstimate: {
@@ -1547,27 +1208,12 @@ const S = {
   },
   loadDemo: { en: 'Load demo data', ar: 'تحميل بيانات تجريبية' },
   eraseAll: { en: 'Erase all data', ar: 'مسح كل البيانات' },
-  tapToChange: { en: 'tap to change', ar: 'اضغط للتغيير' },
-  languageChanged: { en: 'Language changed', ar: 'تم تغيير اللغة' },
-  mirrorOnNextOpen: {
-    en: 'The text has changed already. Android can only mirror the layout right-to-left when the app starts, so that part arrives next time you open Wafra.',
-    ar: 'تغيّر النص بالفعل. لا يستطيع أندرويد عكس اتجاه الواجهة إلى اليمين إلا عند بدء التطبيق، لذا سيظهر ذلك في المرة القادمة التي تفتح فيها وفرة.',
-  },
 
   // Paywall
-  proTagline: { en: 'A few power features fund the app.', ar: 'ميزات إضافية تدعم استمرار التطبيق.' },
   proActiveThanks: { en: 'Active on this device. Thank you for supporting Wafra.', ar: 'مفعّل على هذا الجهاز. شكراً لدعمك وفرة.' },
   proOutcomeTitle: {
     en: 'Keep your ledger up to date, automatically.',
     ar: 'حافظ على تحديث سجلك تلقائياً.',
-  },
-  proTrialActiveBody: {
-    en: 'Automatic capture is included for {left} more day{s}.',
-    ar: 'الالتقاط التلقائي مشمول لمدة {left} يوم إضافي.',
-  },
-  proTrialEndedBody: {
-    en: 'Automatic bank-message capture is paused. Your ledger and manual entries still work.',
-    ar: 'توقف الالتقاط التلقائي لرسائل البنك. يظل سجلك والإدخال اليدوي متاحين.',
   },
   proBenefitsTitle: { en: 'Included with Pro', ar: 'مشمول مع برو' },
   proChoosePlan: { en: 'Choose your plan', ar: 'اختر خطتك' },
@@ -1597,8 +1243,6 @@ const S = {
     ar: 'وفرة برو مفعّل مجدداً على هذا الجهاز.',
   },
   proContinue: { en: 'Continue to Wafra', ar: 'متابعة إلى وفرة' },
-  trialEndedPaywall: { en: 'Your free trial has ended and tracking is paused. Subscribe to keep Wafra working — your data never leaves your phone either way.', ar: 'انتهت تجربتك المجانية وتوقف التتبع. اشترك لمواصلة استخدام وفرة — بياناتك لا تغادر هاتفك في كل الأحوال.' },
-  freeTrialActive: { en: 'FREE TRIAL ACTIVE', ar: 'التجربة المجانية مفعّلة' },
   getPro: { en: 'Get Wafra Pro', ar: 'اشترك في وفرة برو' },
   startPlanWithPrice: {
     en: 'Start {plan} — {price}',
@@ -1618,8 +1262,6 @@ const S = {
   notificationsOff: { en: 'Notifications are off', ar: 'الإشعارات مغلقة' },
   notificationsOffBody: { en: 'Wafra needs notification permission to alert you. Turn it on in Settings → Apps → Wafra → Notifications.', ar: 'يحتاج وفرة إذن الإشعارات لتنبيهك. فعّله من الإعدادات ← التطبيقات ← وفرة ← الإشعارات.' },
   bankAppNotifsTitle: { en: 'Bank app notifications', ar: 'إشعارات تطبيقات البنوك' },
-  eraseEverythingQ: { en: 'Erase everything on this phone?', ar: 'حذف كل شيء من هذا الهاتف؟' },
-  eraseAction: { en: 'Erase', ar: 'مسح' },
   eraseEverythingBody: {
     en: 'All accounts, entries, bills, and goals will be permanently deleted.',
     ar: 'ستُحذف جميع الحسابات والعمليات والفواتير والأهداف نهائياً.',
@@ -1730,23 +1372,29 @@ const S = {
     ar: 'تعذّر حفظ المنحة المحلية المشفّرة. أبقِ وفرة مفتوحاً وحاول خمس ضغطات مجدداً.',
   },
   wafraLogo: { en: 'Wafra logo', ar: 'شعار وفرة' },
-  followingPhone: { en: 'Following your phone. Wafra turns over when it does.', ar: 'يتبع هاتفك. يتغيّر وفرة بتغيّره.' },
   alertEveryCharge: { en: 'Alert me on every charge', ar: 'نبّهني عند كل عملية' },
-  turnOnSmsFirst: { en: 'Turn on bank SMS first', ar: 'فعّل قراءة رسائل البنك أولاً' },
-  turnOnSmsFirstBody: { en: 'Wafra can only alert you about a charge it is allowed to read.', ar: 'لا يمكن لوفرة تنبيهك عن عملية لا يُسمح له بقراءتها.' },
   unhide: { en: 'Unhide', ar: 'إظهار' },
   hideFromLists: { en: 'Hide from lists', ar: 'إخفاء من القوائم' },
   hidden: { en: 'Hidden', ar: 'مخفي' },
   noActivity90: { en: 'No activity for 90+ days', ar: 'لا نشاط منذ أكثر من 90 يوماً' },
   pasteBankMessage: { en: 'Paste a bank message', ar: 'ألصق رسالة بنكية' },
   inboxNotRead: { en: 'Inbox not read yet', ar: 'لم تُقرأ الرسائل بعد' },
-  inboxNeedsAndroid: { en: 'Reading the inbox needs the Android app; pasting works anywhere', ar: 'قراءة الرسائل تحتاج تطبيق أندرويد؛ اللصق يعمل في كل مكان' },
   deleteCardAndEntries: { en: 'Delete card and its entries', ar: 'حذف البطاقة وعملياتها' },
   notASubscriptionQ: { en: 'Not a subscription?', ar: 'ليس اشتراكاً؟' },
   stillLoading: { en: 'Still loading your data — try again in a second.', ar: 'ما زال تحميل بياناتك جارياً — أعد المحاولة بعد لحظة.' },
   upToDateNoNew: { en: 'Up to date. No new bank messages.', ar: 'كل شيء محدّث. لا رسائل بنكية جديدة.' },
-  rescanHint: { en: 'Rescans your whole inbox and shows what would be filed. Cards are matched automatically and nothing imports twice. You can also paste messages below.', ar: 'يعيد فحص كل رسائلك ويعرض ما سيُسجَّل. تُطابَق البطاقات تلقائياً ولا يُستورد شيء مرتين. يمكنك أيضاً لصق رسائل بالأسفل.' },
-  pasteHint: { en: 'Paste one or more bank messages below, separated by a blank line. Everything is read on this device.', ar: 'ألصق رسالة بنكية أو أكثر بالأسفل، بينها سطر فارغ. تُقرأ كلها على هذا الجهاز.' },
+  pasteHint: {
+    en: `Paste one or more bank messages below, separated by a blank line. ${IMPORT_PROCESSING_DISCLOSURE.en}`,
+    ar: `ألصق رسالة بنكية أو أكثر بالأسفل، بينها سطر فارغ. ${IMPORT_PROCESSING_DISCLOSURE.ar}`,
+  },
+  pasteHintIos: {
+    en: `Paste one or more bank messages below, separated by a blank line. ${importProcessingDisclosure('en', 'ios')}`,
+    ar: `ألصق رسالة بنكية أو أكثر بالأسفل، بينها سطر فارغ. ${importProcessingDisclosure('ar', 'ios')}`,
+  },
+  pasteHintWeb: {
+    en: `Paste one or more bank messages below, separated by a blank line. ${importProcessingDisclosure('en', 'web')}`,
+    ar: `ألصق رسالة بنكية أو أكثر بالأسفل، بينها سطر فارغ. ${importProcessingDisclosure('ar', 'web')}`,
+  },
   whereItWent: { en: 'Where it went', ar: 'أين ذهبت' },
   addedByHand: { en: 'Added by hand', ar: 'أُضيفت يدوياً' },
   appLockPhoneOnly: { en: 'App lock works on the phone app only.', ar: 'قفل التطبيق يعمل على تطبيق الهاتف فقط.' },
@@ -1759,25 +1407,13 @@ const S = {
   noBankPaymentMatched: { en: 'The paid amount was recorded in Wafra; no bank payment to this card is matched yet.', ar: 'سُجّل المبلغ المدفوع في وفرة، ولم تُطابَق بعد أي دفعة بنكية لهذه البطاقة.' },
   notRecurringQ: { en: 'Not a recurring charge?', ar: 'ليست عملية متكررة؟' },
   notifsAreOff: { en: 'Notifications are off', ar: 'الإشعارات مغلقة' },
-  onboardPrivacyBody: {
-    en: 'Add entries yourself or connect supported bank messages',
-    ar: 'أضف العمليات بنفسك أو اربط رسائل البنوك المدعومة',
-  },
-  readMyInbox: { en: 'Read my inbox', ar: 'اقرأ رسائلي' },
   setCreditLimit: { en: 'Set credit limit', ar: 'تحديد حد الائتمان' },
-  notifAccessBody: { en: 'Some banks send push notifications instead of SMS. Grant Wafra notification access and ', ar: 'ترسل بعض البنوك إشعارات بدل الرسائل. امنح وفرة إذن قراءة الإشعارات و' },
   notAWafraBackup: { en: 'That does not look like a Wafra backup.', ar: 'لا يبدو هذا ملف نسخ احتياطي لوفرة.' },
-  noServerTitle: { en: 'Processed on this phone', ar: 'تُعالَج على هذا الهاتف' },
   restoreReplacesAll: { en: 'This replaces everything currently in the app.', ar: 'سيستبدل هذا كل ما في التطبيق حالياً.' },
   upToDate: { en: 'Up to date', ar: 'كل شيء محدّث' },
   notifsForCardDue: { en: 'Wafra needs notification permission to remind you before a payment is due.', ar: 'يحتاج وفرة إذن الإشعارات لتذكيرك قبل موعد السداد.' },
   notifsForBill: { en: 'Wafra needs notification permission to warn you before a charge lands.', ar: 'يحتاج وفرة إذن الإشعارات لتنبيهك قبل خصم أي مبلغ.' },
-  warnsBeforeMoneyLeaves: { en: 'Warns before the money leaves', ar: 'ينبّهك قبل خروج المال' },
-  readInboxLater: { en: 'You can read your inbox later from Wallet.', ar: 'يمكنك قراءة رسائلك لاحقاً من المحفظة.' },
   dataStillLoading: { en: 'Your data is still loading. Try again in a second.', ar: 'ما زال تحميل بياناتك جارياً. أعد المحاولة بعد لحظة.' },
-  historyIsIn: { en: 'Your history is in.', ar: 'تم إدخال سجلّك.' },
-  inVsOut6: { en: 'Income vs spent · 6 months', ar: 'الدخل مقابل الإنفاق · ٦ أشهر' },
-  noEntriesPeriod: { en: 'No entries in this period yet', ar: 'لا عمليات في هذه الفترة بعد' },
   totalCreditLimit: { en: 'Total credit limit', ar: 'إجمالي حد الائتمان' },
   parsePastedText: { en: 'Parse pasted text', ar: 'تحليل النص الملصق' },
   billRemindersDetected: { en: 'Bill reminders detected', ar: 'تم اكتشاف تذكيرات فواتير' },
@@ -1788,22 +1424,14 @@ const S = {
   cardPaymentDue: { en: 'Card payment due', ar: 'دفعة بطاقة مستحقة' },
   openPhoneSettings: { en: 'Open settings', ar: 'افتح الإعدادات' },
   billRecordsExpense: { en: 'Records an expense of {amount} today.', ar: 'يسجّل مصروفاً بقيمة {amount} اليوم.' },
-  overdueAndLeaving: { en: 'Overdue and leaving in {days} days', ar: 'متأخرة وتخرج خلال {days} أيام' },
   merchantRuleOnly: { en: 'Future imports from {merchant} will use this category.', ar: 'ستستخدم العمليات القادمة من {merchant} هذا التصنيف.' },
   merchantRuleAlso: { en: 'Future imports from {merchant} will use this category. Also update {n} existing {entries}?', ar: 'ستستخدم العمليات القادمة من {merchant} هذا التصنيف. هل تحدّث أيضاً {n} من العمليات الحالية؟' },
-  leavingInDays: { en: 'Leaving in {days} days', ar: 'تخرج خلال {days} أيام' },
   rememberForMerchant: { en: 'Remember for {merchant}?', ar: 'تذكّر لـ {merchant}؟' },
   notifAccessFull: { en: 'This works without SMS access. Android grants access to posted notifications even when Wafra is closed. Wafra filters them on this phone and skips SMS and chat apps. Eligible financial alerts are queued temporarily in encrypted storage, then checked for your ledger or Review.', ar: 'تعمل هذه الميزة من دون إذن الرسائل. يتيح أندرويد الوصول إلى الإشعارات المنشورة حتى عند إغلاق وفرة. يفرزها وفرة محلياً ويتجاهل تطبيقات الرسائل والمحادثة. تُحفظ التنبيهات المالية المؤهلة مؤقتاً في تخزين مشفّر ثم تُفحص لإضافتها إلى سجلك أو عرضها للمراجعة.' },
   notifAccessAutoPrompt: { en: 'Enable notification access to track bank-app payments even when Wafra is closed. Wafra filters posted notifications on this phone, skips SMS and chat apps, and checks financial alerts for your ledger or Review.', ar: 'يمكنك تفعيل الوصول إلى الإشعارات لتتبّع دفعات تطبيقات البنوك حتى عند إغلاق وفرة. يفرز وفرة الإشعارات على جهازك ويتجاهل تطبيقات الرسائل والمحادثة ويفحص التنبيهات المالية لسجلك أو للمراجعة.' },
   notifDiagnosticsTitle: { en: 'Bank notification diagnostics', ar: 'تشخيص إشعارات البنك' },
-  notifDiagnosticsAccess: { en: 'System access: {system} · admission: {admission} · listener connected: {listener}', ar: 'إذن النظام: {system} · السماح المحلي: {admission} · المستمع متصل: {listener}' },
-  notifDiagnosticsVisible: { en: 'Android exposes {active} active notifications · trusted banks: {trusted} · ADCB visible: {adcb} ({adcbCount})', ar: 'يعرض أندرويد {active} إشعاراً نشطاً · بنوك موثوقة: {trusted} · ADCB ظاهر: {adcb} ({adcbCount})' },
-  notifDiagnosticsQueue: { en: 'Encrypted candidates waiting: {queued}', ar: 'العناصر المشفّرة المنتظرة: {queued}' },
-  notifDiagnosticsStages: { en: 'ADCB admission stages: {stages}', ar: 'مراحل قبول ADCB: {stages}' },
-  notifDiagnosticsUnavailable: { en: 'Diagnostics are not available on this build.', ar: 'التشخيص غير متاح في هذا الإصدار.' },
   notifDiagnosticsRefresh: { en: 'Refresh diagnostics', ar: 'تحديث التشخيص' },
   startWithSample: { en: 'Start with sample data', ar: 'ابدأ ببيانات تجريبية' },
-  alsoReadNotifs: { en: 'Also read bank notifications', ar: 'اقرأ أيضاً إشعارات البنوك' },
   // Storage recovery. Shown INSTEAD of onboarding when the encrypted ledger
   // could not be read: the app cannot tell a new phone from an unreadable one,
   // and offering a fresh start to the second is how the ledger gets destroyed.
@@ -1869,25 +1497,11 @@ const S = {
     ar: 'تستخدم هذه التنبيهات عملة مختلفة عن سجلك، أو تتضمن مبلغاً لا يمكن لوفرة استيراده بأمان. لم تُضف أي عملية.',
   },
   recommended: { en: 'RECOMMENDED', ar: 'مقترح' },
-  onboardEyebrow: { en: 'YOUR MONEY, MADE CLEAR', ar: 'أموالك، بصورة أوضح' },
-  onboardHeadline: { en: 'Your money,\nfinally clear.', ar: 'أموالك،\nواضحة أخيراً.' },
-  onboardWelcomeBody: {
-    en: 'Bank messages arrive separately. Wafra organizes them into one money view.',
-    ar: 'تصل رسائل البنك بشكل منفصل. ينظّمها وفرة في صورة مالية واحدة.',
-  },
   onboardRegionalExample: { en: 'Examples from your region', ar: 'أمثلة من منطقتك' },
   onboardRegionalBankGeneric: { en: 'Bank', ar: 'بنك' },
   onboardScenePurchase: { en: 'Card purchase', ar: 'شراء بالبطاقة' },
   onboardSceneBill: { en: 'Bill payment', ar: 'دفع فاتورة' },
   onboardSceneIncome: { en: 'Salary credited', ar: 'إيداع الراتب' },
-  onboardSceneToday: { en: 'Today', ar: 'اليوم' },
-  onboardSceneDebitCard: { en: 'Debit card', ar: 'بطاقة خصم' },
-  onboardSceneAccount: { en: 'Account', ar: 'الحساب' },
-  onboardSceneFiledAutomatically: { en: 'Filed automatically', ar: 'صُنّفت تلقائياً' },
-  onboardParseNote: {
-    en: 'Wafra reads the amount, merchant and card. The balance is never stored.',
-    ar: 'يقرأ وفرة المبلغ والتاجر والبطاقة. لا يُحفظ الرصيد أبداً.',
-  },
   onboardSceneGroceries: { en: 'Groceries', ar: 'بقالة' },
   onboardSceneGroceryStore: { en: 'Grocery store', ar: 'متجر بقالة' },
   onboardSceneUtilities: { en: 'Utilities', ar: 'خدمات' },
@@ -1898,11 +1512,6 @@ const S = {
   onboardSceneTelecom: { en: 'Telecom', ar: 'اتصالات' },
   onboardSceneThisMonth: { en: 'THIS MONTH', ar: 'هذا الشهر' },
   onboardSceneDueBills: { en: 'due · 3 bills', ar: 'مستحق · ٣ فواتير' },
-  onboardSceneOrganized: { en: 'Organized automatically', ar: 'منظّمة تلقائياً' },
-  onboardSceneFromAlerts: { en: 'BANK MESSAGES', ar: 'رسائل البنك' },
-  onboardSceneToLedger: { en: 'YOUR LEDGER', ar: 'سجلك' },
-  onboardSceneRevealFootnote: { en: 'Same activity. Less mess.', ar: 'النشاط نفسه. فوضى أقل.' },
-  onboardScenePreviewLabel: { en: 'PREVIEW', ar: 'معاينة' },
   onboardSceneElectricity: { en: 'Electricity', ar: 'الكهرباء' },
   onboardSceneCardDue: { en: 'Card due', ar: 'استحقاق البطاقة' },
   onboardSceneInternet: { en: 'Internet', ar: 'الإنترنت' },
@@ -1910,38 +1519,17 @@ const S = {
   onboardSceneBills: { en: 'Bills', ar: 'الفواتير' },
   onboardSceneAccounts: { en: 'Accounts', ar: 'الحسابات' },
   onboardSceneNet: { en: 'net', ar: 'صافي' },
-  onboardTrackingToday: { en: 'Today', ar: 'اليوم' },
-  onboardTrackingScattered: { en: 'Different places. Different formats.', ar: 'أماكن وصيغ مختلفة.' },
   onboardTrackingOneView: { en: 'Supported bank activity in one view.', ar: 'نشاط البنوك المدعوم في صورة واحدة.' },
   onboardTrackingSpreadsheetScene: { en: 'Wafra keeps new activity organized as it arrives.', ar: 'ينظّم وفرة النشاط الجديد عند وصوله.' },
   onboardTrackingFinanceScene: { en: 'Wafra does not need your bank login.', ar: 'لا يحتاج وفرة إلى تسجيل الدخول إلى بنكك.' },
   onboardTrackingFreshSceneTitle: { en: 'Start clean.', ar: 'ابدأ بصورة نظيفة.' },
   onboardTrackingFreshSceneBody: { en: 'Start with your first entry or a supported bank message.', ar: 'ابدأ بأول عملية أو برسالة بنك مدعومة.' },
-  onboardSceneYourView: { en: 'Your Wafra view', ar: 'صورتك في وفرة' },
   onboardCaptureSceneIncoming: { en: 'Bank activity arrives', ar: 'يصل نشاط البنك' },
   onboardCaptureSceneOrganized: { en: 'Wafra files supported activity into your ledger.', ar: 'ينظّم وفرة النشاط المدعوم في سجلك.' },
-  onboardSceneCoffee: { en: 'Coffee shop', ar: 'مقهى' },
-  onboardSceneUtility: { en: 'Utility bill', ar: 'فاتورة خدمات' },
   onboardSceneAlertsToPicture: { en: '3 ALERTS ORGANIZED', ar: 'تم تنظيم 3 تنبيهات' },
   onboardSceneNetWeek: { en: 'net this week', ar: 'صافي هذا الأسبوع' },
-  onboardBuildingReadAnswers: { en: 'Read your answers', ar: 'قرأنا إجاباتك' },
-  onboardBuildingFormats: { en: 'Loaded alert formats for your region', ar: 'حمّلنا صيغ التنبيهات لمنطقتك' },
-  onboardBuildingArrange: { en: 'Put your first view up front', ar: 'وضعنا صورتك الأولى في المقدمة' },
-  onboardChooseStart: { en: 'Build my money picture', ar: 'ابنِ صورتي المالية' },
-  onboardNameTitle: { en: 'What should we call you?', ar: 'بماذا تحب أن نناديك؟' },
-  onboardNameBody: {
-    en: 'A first name or nickname is enough. We’ll use it for your greetings.',
-    ar: 'يكفي الاسم الأول أو اسم تفضّله. سنستخدمه في تحيتك داخل التطبيق.',
-  },
-  onboardNamePlaceholder: { en: 'Your name', ar: 'اسمك' },
-  onboardNamePreviewEmpty: { en: 'Make Wafra feel like yours.', ar: 'اجعل وفرة أقرب إليك.' },
-  onboardNamePreview: { en: 'Good to meet you, {name}.', ar: 'سعداء بمعرفتك، {name}.' },
-  onboardNameContinue: { en: 'Continue', ar: 'متابعة' },
   onboardNameSkip: { en: 'Skip for now', ar: 'تخطي الآن' },
   onboardNamePrivacy: { en: 'Used only to personalize Wafra on this device.', ar: 'يُستخدم فقط لتخصيص وفرة على هذا الجهاز.' },
-  onboardFocusTitle: { en: 'What do you want to understand first?', ar: 'ما الذي تريد فهمه أولاً؟' },
-  onboardFocusTitleNamed: { en: '{name}, what do you want to understand first?', ar: '{name}، ما الذي تريد فهمه أولاً؟' },
-  onboardFocusBody: { en: 'Wafra will put that view first after setup.', ar: 'سيضع وفرة هذه الصورة في المقدمة بعد الإعداد.' },
   onboardFocusSpending: { en: 'Where my money goes', ar: 'أين تذهب أموالي' },
   onboardFocusSpendingDetail: { en: 'Categories, merchants, and the spending that adds up', ar: 'التصنيفات والتجار والمصروفات التي تتراكم' },
   onboardFocusBills: { en: 'Bills & subscriptions', ar: 'الفواتير والاشتراكات' },
@@ -1950,8 +1538,6 @@ const S = {
   onboardFocusCashflowDetail: { en: 'Understand income, spending, and your real net', ar: 'افهم الدخل والمصروف وصافي التدفق الحقيقي' },
   onboardFocusOverview: { en: 'Give me the full picture', ar: 'أعطني الصورة الكاملة' },
   onboardFocusOverviewDetail: { en: 'A simple overview across spending, bills, and accounts', ar: 'نظرة بسيطة على المصروفات والفواتير والحسابات' },
-  onboardTrackingTitle: { en: 'How do you track money today?', ar: 'كيف تتابع أموالك اليوم؟' },
-  onboardTrackingBody: { en: 'Pick the way you keep track today. Wafra will start from there.', ar: 'اختر الطريقة التي تتابع بها أموالك اليوم. سيبدأ وفرة من هناك.' },
   onboardTrackingNone: { en: 'I don’t track it', ar: 'لا أتابعها حالياً' },
   onboardTrackingNoneDetail: { en: 'Start simple. Wafra will organize the picture for you.', ar: 'ابدأ ببساطة. سينظّم وفرة الصورة لك.' },
   onboardTrackingBankApps: { en: 'I check my bank apps', ar: 'أراجع تطبيقات البنك' },
@@ -2003,14 +1589,11 @@ const S = {
   onboardAlertsReachStatement: { en: 'Needs a statement', ar: 'تحتاج كشف حساب' },
   onboardAlertsReachManual: { en: 'You add these yourself', ar: 'تضيفها بنفسك' },
   onboardAlertsReachUnknown: { en: 'Wafra will check', ar: 'سيتحقق وفرة' },
-  onboardAlertsNotificationHint: { en: 'You said your bank uses notifications — turn on bank notifications below so Wafra sees them.', ar: 'ذكرت أن بنكك يستخدم الإشعارات — فعّل إشعارات البنك أدناه ليتمكن وفرة من رؤيتها.' },
   onboardHistoryGapTitle: { en: 'Your past months need a statement', ar: 'الأشهر السابقة تحتاج كشف حساب' },
   onboardHistoryGapBody: { en: 'Wafra will catch everything from here on its own. To get earlier months right, import a statement — it takes a minute and nothing leaves your phone.', ar: 'سيلتقط وفرة كل ما يأتي من الآن تلقائياً. وللحصول على الأشهر السابقة بدقة، استورد كشف حساب — يستغرق دقيقة ولا تغادر بياناتك هاتفك.' },
   onboardHistoryGapManualTitle: { en: 'This bank needs a statement', ar: 'هذا البنك يحتاج كشف حساب' },
   onboardHistoryGapManualBody: { en: 'A bank that sends nothing leaves Wafra nothing to read, now or later. Import a statement to bring this spending in — you can also add entries yourself. Nothing leaves your phone.', ar: 'البنك الذي لا يرسل شيئاً لا يترك لوفرة ما يقرأه، لا الآن ولا لاحقاً. استورد كشف حساب لإدخال هذه العمليات — ويمكنك أيضاً إضافتها بنفسك. ولا تغادر بياناتك هاتفك.' },
   onboardHistoryGapAction: { en: 'Import a statement', ar: 'استيراد كشف حساب' },
-  onboardIntentionTitle: { en: 'What would make money feel easier?', ar: 'ما الذي سيجعل إدارة المال أسهل؟' },
-  onboardIntentionBody: { en: 'Choose what you want Wafra to make easier first.', ar: 'اختر ما تريد من وفرة أن يجعله أسهل أولاً.' },
   onboardIntentionControl: { en: 'Feel more in control', ar: 'أشعر بسيطرة أكبر' },
   onboardIntentionSpend: { en: 'Spend more intentionally', ar: 'أنفق بوعي أكبر' },
   onboardIntentionAhead: { en: 'Stay ahead of bills', ar: 'أبقى متقدماً على الفواتير' },
@@ -2020,34 +1603,10 @@ const S = {
   onboardIntentionAheadScene: { en: 'See upcoming bills and due dates in one timeline.', ar: 'شاهد الفواتير القادمة ومواعيد الاستحقاق في مسار واحد.' },
   onboardIntentionBufferScene: { en: 'See what is left after money in and money out.', ar: 'شاهد ما يتبقى بعد الداخل والخارج.' },
   onboardPreviewFrom: { en: 'YOU TRACK TODAY', ar: 'طريقتك اليوم' },
-  onboardPreviewForYou: { en: 'YOUR STARTING VIEW', ar: 'صورتك الأولى' },
-  onboardOutcomeTitle: { en: 'Wafra does the organizing.', ar: 'وفرة يتولى التنظيم.' },
-  onboardPersonalizedTitle: { en: 'Your starting view is ready.', ar: 'صورتك الأولى جاهزة.' },
-  onboardPersonalizedTitleNamed: { en: '{name}, your starting view is ready.', ar: '{name}، صورتك الأولى جاهزة.' },
-  onboardPersonalizedBody: {
-    en: 'Wafra will open with the view you chose. You can change it anytime.',
-    ar: 'سيفتح وفرة بالصورة التي اخترتها. ويمكنك تغييرها في أي وقت.',
-  },
-  onboardBasedOnAnswers: { en: 'BASED ON YOUR ANSWERS', ar: 'بناءً على إجاباتك' },
-  onboardConnectMyMoney: { en: 'Choose how to track', ar: 'اختر طريقة التتبع' },
-  onboardOutcomeBody: { en: 'Supported bank messages become a clean ledger, then Wafra turns that ledger into the view you chose.', ar: 'تتحول رسائل البنك المدعومة إلى سجل واضح، ثم يحوّل وفرة هذا السجل إلى الصورة التي اخترتها.' },
-  onboardOutcomeTrackingNone: { en: 'No system to clean up. Wafra can start organizing from your first real entry or supported bank message.', ar: 'لا يوجد نظام قديم لترتيبه. يمكن لوفرة أن يبدأ التنظيم من أول عملية حقيقية أو رسالة بنك مدعومة.' },
-  onboardOutcomeTrackingBankApps: { en: 'Instead of checking separate bank apps, supported alerts can become one organized ledger in Wafra.', ar: 'بدلاً من مراجعة تطبيقات بنوك متعددة، يمكن أن تتحول التنبيهات المدعومة إلى سجل واحد منظم في وفرة.' },
-  onboardOutcomeTrackingSpreadsheet: { en: 'Keep the useful structure without the spreadsheet cleanup. Wafra organizes supported activity as it arrives.', ar: 'احتفظ بالبنية المفيدة دون ترتيب الجداول يدوياً. ينظم وفرة النشاط المدعوم عند وصوله.' },
-  onboardOutcomeTrackingFinanceApp: { en: 'Keep the clarity you expect from a finance app without giving Wafra your bank login.', ar: 'احتفظ بالوضوح الذي تتوقعه من تطبيق مالي دون إعطاء وفرة بيانات تسجيل الدخول إلى البنك.' },
-  onboardOutcomeSpending: { en: 'You’ll land on spending by category and merchant.', ar: 'ستبدأ من المصروفات حسب التصنيف والتاجر.' },
-  onboardOutcomeBills: { en: 'You’ll land on upcoming bills, subscriptions, and utilities.', ar: 'ستبدأ من الفواتير القادمة والاشتراكات والخدمات.' },
-  onboardOutcomeCashflow: { en: 'You’ll land on Money in, Money out, and Net.', ar: 'ستبدأ من الداخل والخارج والصافي.' },
-  onboardOutcomeOverview: { en: 'You’ll land on a simple overview of your money.', ar: 'ستبدأ من نظرة بسيطة على أموالك.' },
-  onboardPrivacyTitle: { en: 'Your data stays under your control.', ar: 'بياناتك تبقى تحت سيطرتك.' },
-  onboardDataControlBody: { en: 'Wafra does not need your bank username or password. You decide whether to connect supported bank messages or enter things manually.', ar: 'لا يحتاج وفرة اسم المستخدم أو كلمة مرور البنك. أنت تقرر إن كنت ستربط رسائل البنك المدعومة أو تضيف العمليات يدوياً.' },
-  onboardPrivacyLocalTitle: { en: 'Processed on your device', ar: 'تتم المعالجة على جهازك' },
-  onboardPrivacyLocalBody: { en: 'Android bank-message text stays on your phone. iPhone setup uses Apple Shortcuts and local processing.', ar: 'يبقى نص رسائل البنك على هاتف أندرويد. ويستخدم إعداد الآيفون اختصارات Apple والمعالجة المحلية.' },
   onboardPrivacyNoLoginTitle: { en: 'No bank login', ar: 'دون تسجيل دخول للبنك' },
   onboardPrivacyNoLoginBody: { en: 'Wafra never asks for your banking password.', ar: 'لا يطلب وفرة كلمة مرور حسابك البنكي.' },
   onboardPrivacyChoiceTitle: { en: 'You can change this later', ar: 'يمكنك تغيير هذا لاحقاً' },
   onboardPrivacyChoiceBody: { en: 'Automatic capture is optional. Manual tracking always remains available.', ar: 'الالتقاط التلقائي اختياري. ويظل الإدخال اليدوي متاحاً دائماً.' },
-  onboardPrivacyContinue: { en: 'Choose how to connect', ar: 'اختر طريقة الربط' },
   onboardInsightSpendingTitle: { en: 'Start with where it went', ar: 'ابدأ من أين ذهبت أموالك' },
   onboardInsightSpendingBody: { en: 'Wafra will open Spending first, with categories and merchants ready as your activity arrives.', ar: 'سيفتح وفرة قسم المصروفات أولاً، مع التصنيفات والتجار كلما وصل نشاطك.' },
   onboardInsightBillsTitle: { en: 'Start with what is coming up', ar: 'ابدأ بما هو قادم' },
@@ -2057,29 +1616,16 @@ const S = {
   onboardInsightOverviewTitle: { en: 'Start with the whole picture', ar: 'ابدأ بالصورة الكاملة' },
   onboardInsightOverviewBody: { en: 'Home will give you the simplest overview first, then you can drill into spending, bills, and accounts.', ar: 'ستمنحك الصفحة الرئيسية أبسط نظرة أولاً، ثم يمكنك التعمق في المصروفات والفواتير والحسابات.' },
   onboardBillsFound: { en: 'bills recognised', ar: 'فواتير تم التعرف عليها' },
-  onboardProPreviewTitle: { en: 'Want Wafra to keep doing more automatically?', ar: 'هل تريد من وفرة أن يواصل العمل تلقائياً؟' },
-  onboardProPreviewBody: { en: 'See what Pro adds after your own activity is already in Wafra.', ar: 'شاهد ما يضيفه Pro بعد أن يصبح نشاطك الحقيقي داخل وفرة.' },
-  onboardProPreviewAction: { en: 'See Wafra Pro', ar: 'شاهد وفرة برو' },
-  onboardOpenSpending: { en: 'Open Spending', ar: 'افتح المصروفات' },
-  onboardOpenBills: { en: 'Open Bills', ar: 'افتح الفواتير' },
-  onboardOpenHome: { en: 'Open Home', ar: 'افتح الرئيسية' },
   onboardSampleBefore: { en: '01 / Bank message', ar: '01 / رسالة البنك' },
   onboardSampleAfter: { en: '02 / In your ledger', ar: '02 / في سجلك' },
   onboardSampleBankAlert: { en: 'A moment in your day', ar: 'لحظة من يومك' },
   onboardSampleInsight: { en: 'Organized by category. Easier to see where it went.', ar: 'مرتّبة حسب التصنيف، لترى أين أنفقتها بسهولة.' },
-  onboardOptionalPlanNote: { en: 'Optional goals and budget style. No amounts to set now.', ar: 'أهداف ونمط ميزانية اختياريان. دون تحديد مبالغ الآن.' },
-  onboardSavedPlanNote: { en: 'Preferences saved. Budget amounts wait for real income.', ar: 'تم حفظ تفضيلاتك. تنتظر مبالغ الميزانية دخلاً حقيقياً.' },
-  onboardEditPlan: { en: 'Edit your preferences', ar: 'عدّل تفضيلاتك' },
-  onboardManualChoiceWebBody: { en: 'Add your own entries. Automatic capture is available in the phone apps.', ar: 'أضف عملياتك بنفسك. الالتقاط التلقائي متاح في تطبيقات الهاتف.' },
   onboardFinishSaveFailedTitle: { en: 'Your choice could not be saved.', ar: 'تعذّر حفظ اختيارك.' },
   onboardFinishSaveFailedBody: { en: 'Try again to save your setup. You can continue once it’s saved.', ar: 'حاول مجدداً لحفظ إعدادك. يمكنك المتابعة بعد حفظه.' },
   onboardSetupWorking: { en: 'Saving your choice…', ar: 'جارٍ حفظ اختيارك…' },
-  onboardAddFirstEntry: { en: 'Add my first entry', ar: 'أضف أول عملية لي' },
-  onboardExploreLedger: { en: 'Explore my ledger', ar: 'استكشف سجلي' },
   onboardRetrySetup: { en: 'Back to setup choices', ar: 'العودة إلى خيارات الإعداد' },
   onboardPermissionChoiceTitle: { en: 'You’re in control.', ar: 'القرار لك.' },
   onboardPermissionChoiceBody: { en: 'SMS access is optional. Retry when you’re ready, or start with manual entries.', ar: 'الوصول للرسائل اختياري. أعد المحاولة عندما تكون مستعداً، أو ابدأ بإدخال يدوي.' },
-  onboardStartNow: { en: 'Start tracking', ar: 'ابدأ التتبع' },
   onboardPersonalizeOptional: { en: 'Make it yours', ar: 'خصّص تجربتك' },
   onboardSampleLabel: { en: 'INTERACTIVE EXAMPLE', ar: 'مثال تفاعلي' },
   onboardSampleMessage: { en: 'Card purchase at Coffee shop. Card ending 4582.', ar: 'شراء بالبطاقة من مقهى. البطاقة المنتهية بـ 4582.' },
@@ -2089,83 +1635,26 @@ const S = {
   onboardSampleCategory: { en: 'Dining · Card purchase', ar: 'مطاعم · شراء بالبطاقة' },
   onboardSampleNote: { en: 'Example only. Nothing is saved.', ar: 'مثال فقط. لا يُحفظ شيء.' },
   onboardResumeError: { en: 'Could not restore setup progress. Try again to continue safely.', ar: 'تعذّر استعادة تقدّم الإعداد. أعد المحاولة للمتابعة بأمان.' },
-  onboardSkipPersonalization: { en: 'Set this up later', ar: 'إعداد هذا لاحقاً' },
-  onboardSub: { en: 'Supported bank messages. One clear ledger.', ar: 'رسائل البنوك المدعومة في سجل واضح.' },
   onboardPersonalizeCta: { en: 'Get started', ar: 'ابدأ الآن' },
-  onboardSetupTime: { en: 'No bank login required', ar: 'لا يتطلب تسجيل الدخول إلى البنك' },
-  onboardPreviewOverline: { en: 'EXAMPLE MONEY STORY', ar: 'مثال لصورة مالية' },
-  onboardPreviewLive: { en: 'WHAT WAFRA CAN ORGANISE', ar: 'ما يمكن لوفرة تنظيمه' },
   onboardPreviewIncome: { en: 'Income received', ar: 'دخل مستلم' },
-  onboardPreviewIncomeDetail: { en: 'Incoming money recognised', ar: 'تم التعرف على المال الوارد' },
   onboardPreviewBill: { en: 'Upcoming bill', ar: 'فاتورة قادمة' },
-  onboardPreviewBillDetail: { en: 'Due date kept visible', ar: 'موعد الاستحقاق يبقى واضحاً' },
-  onboardPreviewCard: { en: 'Card repayment', ar: 'سداد بطاقة' },
-  onboardPreviewCardDetail: { en: 'Matched and counted once', ar: 'تمت مطابقتها واحتسابها مرة واحدة' },
-  onboardPreviewFooter: { en: 'One timeline. No spreadsheet cleanup.', ar: 'مسار واحد، دون ترتيب جداول.' },
-  onboardPreviewAccessibility: {
-    en: 'Example: Wafra can recognise income, bring bills forward, and count matched card payments once.',
-    ar: 'مثال: يمكن لوفرة التعرف على الدخل وعرض الفواتير واحتساب دفعات البطاقات المتطابقة مرة واحدة.',
-  },
   onboardStepOf: { en: 'Step {step} of {total}', ar: 'الخطوة {step} من {total}' },
   onboardBack: { en: 'Back', ar: 'رجوع' },
-  onboardMarketTitle: { en: 'Where does your money live?', ar: 'أين تعيش أموالك؟' },
-  onboardMarketBody: {
-    en: 'This sets the currency and local money calendar across Wafra.',
-    ar: 'يحدّد هذا العملة وتقويمك المالي المحلي في وفرة.',
-  },
-  onboardMarketUae: { en: 'United Arab Emirates', ar: 'الإمارات العربية المتحدة' },
-  onboardMarketUaeDetail: { en: 'AED · UAE bank coverage', ar: 'درهم · دعم البنوك الإماراتية' },
-  onboardMarketSaudi: { en: 'Saudi Arabia', ar: 'المملكة العربية السعودية' },
-  onboardMarketSaudiDetail: { en: 'SAR · Saudi money format', ar: 'ريال · تنسيق الأموال السعودي' },
-  onboardGoalsTitle: { en: 'Your goals', ar: 'أهدافك' },
-  onboardGoalsBody: { en: 'Choose up to two.', ar: 'اختر هدفين كحد أقصى.' },
-  onboardGoalSelectionHint: {
-    en: 'Choose up to two goals.',
-    ar: 'اختر هدفين كحد أقصى.',
-  },
-  onboardGoalMax: { en: 'Two goals is the limit for setup.', ar: 'يمكن اختيار هدفين أثناء الإعداد.' },
   onboardGoalEmergency: { en: 'Emergency fund', ar: 'صندوق الطوارئ' },
   onboardGoalEmergencyDetail: { en: 'A visible safety buffer', ar: 'احتياطي أمان واضح أمامك' },
   onboardGoalTravel: { en: 'A proper holiday', ar: 'إجازة تستحقها' },
   onboardGoalTravelDetail: { en: 'Flights, stays, and spending money', ar: 'رحلات وإقامة ومصروف' },
   onboardGoalHome: { en: 'A home deposit', ar: 'دفعة منزل أولى' },
   onboardGoalHomeDetail: { en: 'Make the first big milestone visible', ar: 'اجعل أول محطة كبيرة واضحة' },
-  onboardBudgetTitle: { en: 'Your spending plan', ar: 'خطة إنفاقك' },
-  onboardBudgetBody: { en: 'Pick a starting style.', ar: 'اختر أسلوباً مبدئياً.' },
   onboardBudgetEssentials: { en: 'Essentials first', ar: 'الأساسيات أولاً' },
   onboardBudgetEssentialsDetail: { en: 'A tighter plan for focused months', ar: 'خطة أدق للأشهر المنضبطة' },
   onboardBudgetBalanced: { en: 'Balanced', ar: 'متوازنة' },
   onboardBudgetBalancedDetail: { en: 'Comfort with clear guardrails', ar: 'راحة مع حدود واضحة' },
   onboardBudgetFlexible: { en: 'More flexible', ar: 'أكثر مرونة' },
   onboardBudgetFlexibleDetail: { en: 'More room for dining and shopping', ar: 'مساحة أكبر للمطاعم والتسوق' },
-  onboardPlanActivatesLater: { en: 'Limits start after real income is recorded.', ar: 'تبدأ الحدود بعد تسجيل دخل حقيقي.' },
   onboardPlanPending: { en: 'Plan saved. Waiting for real income.', ar: 'حُفظت الخطة. بانتظار دخل حقيقي.' },
-  onboardBudgetContinue: { en: 'Save plan', ar: 'حفظ الخطة' },
-  onboardBudgetPreview: {
-    en: '{count} limits · {amount} per month',
-    ar: '{count} حدود · {amount} شهرياً',
-  },
-  onboardMoneyMonthTitle: { en: 'When does your money month begin?', ar: 'متى يبدأ شهرك المالي؟' },
-  onboardMoneyMonthBody: {
-    en: 'Charts, budgets, and insights will all follow this date.',
-    ar: 'ستتبع الرسوم والميزانيات والرؤى هذا التاريخ.',
-  },
-  onboardCalendarMonth: { en: 'Calendar month', ar: 'الشهر الميلادي' },
-  onboardCalendarMonthDetail: { en: 'Starts on day 1', ar: 'يبدأ في اليوم 1' },
-  onboardSalaryDay: { en: 'Salary day', ar: 'يوم الراتب' },
-  onboardDayNumber: { en: 'Day {day}', ar: 'اليوم \u2066{day}\u2069' },
-  onboardCaptureTitleAndroid: { en: 'Choose how to add activity', ar: 'اختر كيف تضيف نشاطك' },
-  onboardCaptureBodyAndroid: { en: 'Connect supported bank messages, or start manually. You can change this later.', ar: 'اربط رسائل البنوك المدعومة أو ابدأ يدوياً. يمكنك تغيير ذلك لاحقاً.' },
   onboardCaptureTitleIos: { en: 'Choose how to add activity', ar: 'اختر كيف تضيف نشاطك' },
   onboardCaptureBodyIos: { en: 'Connect supported bank messages, or start manually. You can change this later.', ar: 'اربط رسائل البنوك المدعومة أو ابدأ يدوياً. يمكنك تغيير ذلك لاحقاً.' },
-  onboardCaptureTitleWeb: { en: 'Start your way', ar: 'ابدأ بطريقتك' },
-  onboardCaptureBodyWeb: {
-    en: 'Automatic bank-message capture is available in the phone apps.',
-    ar: 'التقاط رسائل البنك تلقائياً متاح في تطبيقات الهاتف.',
-  },
-  onboardCaptureAndroidCta: { en: 'Enable SMS capture', ar: 'فعّل التقاط الرسائل' },
-  onboardCaptureIosCta: { en: 'Set up automatic capture', ar: 'إعداد الالتقاط التلقائي' },
-  onboardAutomaticChoice: { en: 'Set up bank SMS', ar: 'إعداد رسائل البنك' },
   onboardAutomaticChoiceAndroidBody: { en: 'Import past SMS and capture new supported alerts. Needs SMS permission. Free for your first 3 app days, then Wafra Pro.', ar: 'استورد رسائل البنك السابقة والتقط التنبيهات المدعومة الجديدة. يتطلب إذن الرسائل. مجاني لأول ٣ أيام من استخدام التطبيق، ثم يتطلب وفرة برو.' },
   onboardAndroidSmsSourceTitle: { en: 'Bank SMS', ar: 'رسائل البنك' },
   onboardAndroidSmsSourceBody: { en: 'Bring in past messages and keep reading supported bank SMS on this phone.', ar: 'استورد الرسائل السابقة واستمر بقراءة رسائل البنوك المدعومة على هذا الهاتف.' },
@@ -2203,22 +1692,6 @@ const S = {
     en: 'How it works',
     ar: 'كيف يعمل',
   },
-  onboardPastHowTitle: {
-    en: 'Bank statements',
-    ar: 'كشوف البنك',
-  },
-  onboardPastHowDownload: {
-    en: 'In your bank app, open Statements and download a PDF or CSV.',
-    ar: 'في تطبيق بنكك، افتح «الكشوف» ونزّل ملف PDF أو CSV.',
-  },
-  onboardPastHowPrivacy: {
-    en: 'Wafra’s server reads the file in memory, keeps only the transactions, and sends them encrypted to your devices.',
-    ar: 'يقرأ خادم وفرة الملف في الذاكرة، ويحتفظ بالعمليات فقط، ويرسلها مشفّرة إلى أجهزتك.',
-  },
-  onboardPastHowPassword: {
-    en: 'Password-protected PDFs work. Wafra asks for the password once and does not save it.',
-    ar: 'ملفات PDF المحمية بكلمة مرور مدعومة. يطلب وفرة كلمة المرور مرة واحدة ولا يحفظها.',
-  },
   onboardLiveTitle: {
     en: 'Catch new transactions',
     ar: 'التقط العمليات الجديدة',
@@ -2231,26 +1704,40 @@ const S = {
     en: 'Set up',
     ar: 'إعداد',
   },
+  // The same step on iOS 15, where automatic capture cannot be set up.
+  onboardLiveUnsupportedTitle: {
+    en: 'Start with your statements',
+    ar: 'ابدأ بكشوف حسابك',
+  },
+  onboardLiveUnsupportedBody: {
+    en: 'Automatic capture needs iOS 16 or later. Import a bank statement to bring in your transactions, or paste bank messages as they arrive.',
+    ar: 'يتطلب الالتقاط التلقائي iOS 16 أو أحدث. استورد كشف حساب بنكي لإضافة عملياتك، أو الصق رسائل البنك عند وصولها.',
+  },
+  onboardPasteMessagesBody: {
+    en: 'Paste a bank text into Wafra. Processed on this iPhone; no automatic access to Messages.',
+    ar: 'الصق رسالة البنك في وفرة. تُعالج على هذا الآيفون؛ دون وصول تلقائي إلى الرسائل.',
+  },
+  // "I'll add by hand" on iOS 15, where capture cannot be turned on later.
+  onboardManualIosUnsupportedBody: {
+    en: 'Add entries yourself. Statements and pasting stay available.',
+    ar: 'أضف العمليات بنفسك. يبقى استيراد الكشوف واللصق متاحاً.',
+  },
+  // The iOS 15 result once a statement or paste brought transactions in.
+  onboardIosImportedTitle: { en: 'Your transactions are in.', ar: 'وصلت عملياتك إلى وفرة.' },
+  onboardIosImportedBody: {
+    en: 'Add more any time from Accounts: import another statement, or paste bank messages.',
+    ar: 'أضف المزيد متى شئت من الحسابات: استورد كشف حساب آخر، أو الصق رسائل البنك.',
+  },
   onboardNotNow: {
     en: 'Not now',
     ar: 'ليس الآن',
   },
-  onboardManualChoice: { en: 'Start manually', ar: 'ابدأ يدوياً' },
-  onboardManualChoiceIos: { en: 'Start manually', ar: 'ابدأ يدوياً' },
   onboardManualChoiceBody: { en: 'Add entries yourself. No SMS access. Set up capture later.', ar: 'أضف العمليات بنفسك. دون وصول للرسائل. يمكنك إعداد الالتقاط لاحقاً.' },
   onboardManualChoiceIosBody: { en: 'Add entries yourself. No Messages access. Connect later.', ar: 'أضف العمليات بنفسك. دون وصول إلى الرسائل. يمكنك الربط لاحقاً.' },
-  onboardAlertsChecked: { en: 'alerts checked', ar: 'تنبيهات تم فحصها' },
-  onboardMoneyFound: { en: 'money entries found', ar: 'عمليات مالية وُجدت' },
   onboardEntryFound: { en: 'entry organised', ar: 'عملية تم تنظيمها' },
   onboardEntriesFound: { en: 'entries organised', ar: 'عمليات تم تنظيمها' },
   onboardAccountFound: { en: 'account recognised', ar: 'حساب تم التعرف عليه' },
   onboardAccountsFound: { en: 'accounts recognised', ar: 'حسابات تم التعرف عليها' },
-  onboardCaptureSkip: { en: 'Finish without capture', ar: 'إنهاء دون التقاط' },
-  onboardCaptureNoSms: { en: 'Maximum privacy · no SMS access', ar: 'أقصى خصوصية · دون وصول إلى الرسائل' },
-  onboardCapturePrivacyAndroid: {
-    en: 'Processed on this phone. SMS text is never uploaded.',
-    ar: 'تتم المعالجة على هذا الهاتف. لا يُرفع نص الرسائل أبداً.',
-  },
   onboardCapturePrivacyIos: {
     en: 'Processed on this iPhone. Nothing uploaded.',
     ar: 'تتم المعالجة على هذا الآيفون. لا يُرفع شيء.',
@@ -2263,7 +1750,6 @@ const S = {
     en: 'SMS/Message capture is local. Statement import uses the secure relay only when you choose it.',
     ar: 'يتم التقاط الرسائل محلياً. يستخدم استيراد الكشوف الخدمة الآمنة فقط عندما تختاره.',
   },
-  onboardCaptureLearnMoreAction: { en: 'Learn more', ar: 'معرفة المزيد' },
   onboardCaptureLearnMoreTitle: { en: 'About bank messages', ar: 'حول رسائل البنك' },
   onboardCaptureLearnMorePrivacy: {
     en: 'Wafra does not access your Messages inbox. An Apple automation you create passes new messages to Wafra, which keeps bank messages and discards the rest on this iPhone.',
@@ -2285,78 +1771,11 @@ const S = {
     en: 'SMS access was not granted. You can continue and enable capture later.',
     ar: 'لم يُمنح إذن الرسائل. يمكنك المتابعة وتفعيل الالتقاط لاحقاً.',
   },
-  onboardCompleteTitle: { en: 'Wafra is yours.', ar: 'وفرة أصبح لك.' },
-  onboardCompleteAutomaticTitle: { en: 'You’re ready.', ar: 'أنت جاهز.' },
-  onboardCompleteManualTitle: { en: 'Add your first entry.', ar: 'أضف أول عملية.' },
   onboardCompleteManualBody: { en: 'A coffee, groceries, or your first income is enough to start.', ar: 'تكفي قهوة أو مشتريات أو أول دخل لتبدأ.' },
   onboardCompleteNeedsAttentionTitle: { en: 'Setup needs another look.', ar: 'الإعداد يحتاج إلى مراجعة.' },
   onboardCompleteNeedsAttentionBody: { en: 'Setup could not finish. Try again, or choose manual tracking to continue without message capture.', ar: 'لم يكتمل الإعداد. حاول مجدداً، أو اختر التتبع اليدوي للمتابعة دون التقاط الرسائل.' },
-  onboardCompleteBody: {
-    en: '{goals} goal{s}, {budgets} live budgets, and a money month from day {day}.',
-    ar: '{goals} أهداف و{budgets} ميزانيات مفعّلة، وشهر مالي يبدأ في اليوم \u2066{day}\u2069.',
-  },
-  onboardCompleteBodyAutomatic: {
-    en: 'Open Wafra. Your first history import will continue in the background.',
-    ar: 'افتح وفرة. سيستمر أول استيراد للسجل في الخلفية.',
-  },
-  onboardCompleteBodyAutomaticIos: {
-    en: 'Open Wafra. The view you chose is ready.',
-    ar: 'افتح وفرة. الصورة التي اخترتها جاهزة.',
-  },
-  onboardNotificationsTitle: {
-    en: 'Stay ahead of your money',
-    ar: 'ابقَ على اطلاع بأموالك',
-  },
-  onboardNotificationsBody: {
-    en: 'Get alerts for upcoming bills, card payments, and your daily spending summary.',
-    ar: 'احصل على تنبيهات للفواتير القادمة ودفعات البطاقات وملخص إنفاقك اليومي.',
-  },
-  onboardNotificationsEnable: { en: 'Enable notifications', ar: 'تفعيل الإشعارات' },
-  onboardNotificationsNotNow: { en: 'Not now', ar: 'ليس الآن' },
-  onboardSummaryGoals: { en: 'Savings goals', ar: 'أهداف الادخار' },
-  onboardSummaryBudgets: { en: 'Category budgets', ar: 'ميزانيات التصنيفات' },
-  onboardSummaryMonth: { en: 'Money month', ar: 'الشهر المالي' },
-  onboardSummaryActive: { en: '{count} active', ar: '{count} مفعّلة' },
-  onboardReadsSms: { en: 'Start your way', ar: 'ابدأ بطريقتك' },
-  onboardWarnsDetail: { en: 'Card dues, utility bills, rent, and quiet subscriptions', ar: 'مستحقات البطاقات وفواتير الخدمات والإيجار والاشتراكات الصامتة' },
-  onboardNoServerDetail: {
-    en: 'Android bank-message text is never uploaded',
-    ar: 'لا يُرفع نص رسائل البنك من أندرويد أبداً',
-  },
-  onboardStartTitle: { en: 'Start somewhere.', ar: 'ابدأ من نقطة ما.' },
-  inboxChecked: { en: 'Inbox checked.', ar: 'تم فحص الرسائل.' },
-  onboardStartEmpty: { en: 'Start empty', ar: 'ابدأ بسجل فارغ' },
-  onboardWebChoice: {
-    en: 'Reading SMS works in the Android app. Pick a starting point:',
-    ar: 'قراءة الرسائل تعمل في تطبيق أندرويد. اختر نقطة البداية:',
-  },
-  iosOnboardHeadline: { en: 'Money,\nmade clear.', ar: 'أموالك،\nبوضوح.' },
-  iosOnboardSub: { en: 'Supported bank messages. One clear ledger.', ar: 'رسائل البنوك المدعومة في سجل واضح.' },
-  iosOnboardAutomatic: { en: 'Start your way', ar: 'ابدأ بطريقتك' },
-  iosOnboardAutomaticBody: {
-    en: 'Add entries yourself or connect supported bank messages',
-    ar: 'أضف العمليات بنفسك أو اربط رسائل البنوك المدعومة',
-  },
-  iosOnboardPrivate: { en: 'Raw messages are never kept', ar: 'نص الرسالة الخام لا يُحفظ أبداً' },
-  iosOnboardPrivateBody: {
-    en: 'The relay parses, discards the text, and seals the transaction separately for this iPhone and trusted devices',
-    ar: 'يحلّل المرحّل الرسالة ثم يحذف نصها ويشفّر العملية بشكل منفصل لهذا الآيفون وللأجهزة الموثوقة',
-  },
-  iosOnboardSetupTitle: { en: 'Make it automatic.', ar: 'اجعله تلقائياً.' },
-  iosOnboardSetupBody: {
-    en: 'A guided setup connects the private relay. Your first supported bank message verifies Apple’s automation afterward.',
-    ar: 'إعداد موجه يربط المرحّل الخاص. وبعده تتحقق أول رسالة بنكية مدعومة من أتمتة آبل.',
-  },
-  iosOnboardSetupCta: { en: 'Set up automatic capture', ar: 'إعداد الالتقاط التلقائي' },
-  readingInbox: { en: 'Reading your inbox.', ar: 'جارٍ قراءة رسائلك.' },
   openWafra: { en: 'Open Wafra', ar: 'افتح وفرة' },
   continueWord: { en: 'Continue', ar: 'متابعة' },
-  notifNoteOnboard: {
-    en: 'Android calls this broad “read, reply & control” access. Wafra only reads supported bank messages; it never replies or changes a notification.',
-    ar: 'يسمي أندرويد هذا الإذن الواسع «قراءة ورد وتحكم». وفرة يقرأ رسائل البنوك المدعومة فقط، ولا يرد على إشعار أو يغيّره.',
-  },
-  nothingOutYet: { en: 'No spending in this period yet.', ar: 'لا يوجد إنفاق في هذه الفترة بعد.' },
-  noAccountsYet: { en: 'No bank or cash accounts yet.', ar: 'لا حسابات بنكية أو نقدية بعد.' },
   noStatementYet: { en: 'No statement message has arrived for this card yet.', ar: 'لم تصل رسالة كشف حساب لهذه البطاقة بعد.' },
   // Not "none yet" — none ever. A debit card spends the money already in the
   // account, so it issues no statement and there is no bill to pay toward it.
@@ -2404,8 +1823,6 @@ const S = {
     en: 'Check your connection and try the link again.',
     ar: 'تحقق من اتصالك وحاول فتح الرابط مرة أخرى.',
   },
-  nothingToRestore: { en: 'Nothing to restore', ar: 'لا شيء لاستعادته' },
-  nothingToRestoreBody: { en: 'Install Wafra from the App Store or Google Play to restore a purchase.', ar: 'ثبّت وفرة من App Store أو Google Play لاستعادة عملية شراء.' },
   noPurchaseFound: { en: 'No purchase found', ar: 'لم يُعثر على عملية شراء' },
   noPurchaseFoundBody: {
     en: 'No previous Wafra Pro purchase was found on this store account.',
@@ -2430,10 +1847,6 @@ const S = {
     en: 'The store could not confirm Pro yet. Check your connection, then restore purchases before trying to buy again.',
     ar: 'لم يتمكن المتجر من تأكيد وفرة برو بعد. تحقق من الاتصال، ثم استعد المشتريات قبل محاولة الشراء مجدداً.',
   },
-  trialDaysLeftPaywall: {
-    en: 'Everything is free for your first {total} days — {left} day{s} left. Keep it going:',
-    ar: 'كل شيء مجاني في أول {total} أيام — تبقّى {left} يوم. تابع الاستخدام:',
-  },
   featAutoTracking: { en: 'Automatic tracking', ar: 'تتبع تلقائي' },
   featAutoTrackingText: { en: 'Bank SMS and app notifications become transactions, cards and dues by themselves.', ar: 'رسائل البنك والإشعارات تتحول تلقائياً إلى عمليات وبطاقات ومستحقات.' },
   // iPhone gets the same feature by a different road — Apple lets no app read
@@ -2441,20 +1854,12 @@ const S = {
   // there would promise something the platform forbids.
   featAutoTrackingIosText: { en: 'Supported bank messages passed by your personal automation are processed locally into transactions, cards, dues, or review when needed. Set up once.', ar: 'تُعالج رسائل البنوك المدعومة التي تمررها أتمتتك الشخصية محلياً لتصبح عمليات أو بطاقات أو مستحقات، أو تُرسل للمراجعة عند الحاجة. إعداد مرة واحدة.' },
   featPasteFreeText: { en: 'Reading a bank message you hand over — and typing entries — never needs a subscription, on any phone.', ar: 'قراءة رسالة بنكية تلصقها بنفسك وإضافة العمليات يدوياً لا تحتاج اشتراكاً أبداً على أي هاتف.' },
-  featSalaryMonths: { en: 'Salary-day months', ar: 'الشهر يبدأ يوم الراتب' },
-  featSalaryMonthsText: { en: 'Your money month starts on payday, not the 1st.', ar: 'شهرك المالي يبدأ يوم استلام راتبك.' },
   // Onboarding
-  obTagline: { en: 'Know where it goes. Watch it grow.', ar: 'اعرف أين تذهب أموالك. وراقبها تنمو.' },
-  obSubtitle: { en: 'Track your money privately, in your own currency.', ar: 'تتبّع أموالك بخصوصية وبعملتك.' },
   getStarted: { en: 'Get started', ar: 'ابدأ الآن' },
-  exploreSample: { en: 'Explore with sample data', ar: 'جرّب ببيانات تجريبية' },
 
   // Hero caption
   saved: { en: 'Saved', ar: 'المدخر' },
-  overspent: { en: 'Overspent', ar: 'تجاوزت' },
   netAfterSpending: { en: 'Net after spending', ar: 'الصافي بعد الإنفاق' },
-  spentAboveIncome: { en: 'Spent above income', ar: 'الإنفاق فوق الدخل' },
-  soFarThisMonth: { en: 'so far this month', ar: 'حتى الآن هذا الشهر' },
 
   /**
    * The line under the hero figure — the same period before this one, over the
@@ -2495,147 +1900,21 @@ const S = {
     ar: 'الصرف نفسه مقارنةً بـ{period}',
   },
   allTime: { en: 'All time', ar: 'كل الفترات' },
-  inWord: { en: 'in', ar: 'في' },
-  inMinusOut: { en: 'in minus out', ar: 'الدخل ناقص المصروف' },
 
   // Insights (stats) screen
-  tapToChangePeriod: { en: 'Tap to change period', ar: 'اضغط لتغيير الفترة' },
   projected: { en: 'Projected', ar: 'متوقع' },
   spentLabel: { en: 'Spent', ar: 'المصروف' },
-  biggestChangesVs: { en: 'Biggest changes vs', ar: 'أكبر التغيرات مقابل' },
-  whereMoneyWent: { en: 'Where the money went', ar: 'أين ذهبت الأموال' },
-  spendingByWeekday: { en: 'Spending by weekday', ar: 'الصرف حسب أيام الأسبوع' },
-  netWorth6mo: { en: 'Net worth · 6 months', ar: 'صافي الثروة · ٦ أشهر' },
-  walletChangeSince: {
-    en: '{amount} since {date}',
-    ar: '\u2066{amount}\u2069 منذ {date}',
-  },
-  cashflow6mo: { en: 'Cashflow · 6 months', ar: 'التدفق النقدي · ٦ أشهر' },
-  whatNumbersSay: { en: 'What the numbers say', ar: 'ماذا تقول الأرقام' },
-  tapMonthToOpen: { en: 'Tap a month to open it', ar: 'اضغط على شهر لفتحه' },
-  flowSummary: { en: 'Spent {total}', ar: 'الإنفاق {total}' },
-  flowLimitSummary: {
-    en: '{spent} of {limit} in limits',
-    ar: '{spent} من {limit} ضمن الحدود',
-  },
-  ofWord: { en: 'of', ar: 'من' },
-  inLimits: { en: 'in limits', ar: 'ضمن الحدود' },
-  monthGone: { en: 'of the month gone', ar: 'من الشهر انقضى' },
-  flowMonthGone: { en: '{percent}% of the month gone', ar: 'انقضى {percent}% من الشهر' },
-  moreCategories: { en: '{count} more', ar: '{count} أخرى' },
-  limitsHeader: { en: 'Limits', ar: 'الحدود' },
   totalOut: { en: 'Total spent', ar: 'إجمالي الإنفاق' },
-  limitedSpend: { en: 'With limits', ar: 'ضمن الحدود' },
-  periodProgress: { en: 'Period progress', ar: 'تقدّم الفترة' },
-  fixedPayments: { en: 'Fixed payments', ar: 'الدفعات الثابتة' },
-  itemsTracked: { en: '{count} tracked', ar: '{count} قيد التتبع' },
   newLimit: { en: 'New limit', ar: 'حد جديد' },
-  setLimitCategory: { en: 'Set a limit on a category', ar: 'ضع حداً لتصنيف' },
-  setLimitBody: {
-    en: 'Wafra already knows what you spend. Give one category a number and it will tell you whether you are on pace, not just what you have left.',
-    ar: 'يعرف وفرة مصروفك بالفعل. ضع رقماً لتصنيف واحد وسيخبرك إن كنت على المسار الصحيح، لا بما تبقّى فقط.',
-  },
-  overByAmount: { en: 'Over by {amount}', ar: 'تجاوزت بمقدار {amount}' },
-  amountLeft: { en: '{amount} left', ar: 'متبقي {amount}' },
   daysLeft: { en: '{count} day{s} left', ar: 'متبقي {count} يوم' },
-  fasterThanMonth: { en: 'faster than the month', ar: 'أسرع من وتيرة الشهر' },
-  averageSuffix: { en: 'avg', ar: 'متوسط' },
-  worthKnowing: { en: 'Worth knowing', ar: 'جدير بالمعرفة' },
 
-  // ── The /stats screen ──
-  //
-  // This screen shipped with all of its copy written straight into the JSX and
-  // not one call to t(), which is how it arrived at this merge as the last
-  // failure of contracts.test.js's "no screen writes an English sentence of its
-  // own". Every sentence it prints is here as a WHOLE sentence rather than as
-  // fragments the screen joins: the trend line has four variants and the
-  // heaviest-day line one, because Arabic cannot be assembled by concatenating
-  // a translated "above" onto a translated ", the highest of the six".
-  statsTitle: { en: 'Stats', ar: 'الإحصاءات' },
-  statsEmptyTitle: {
-    en: 'Nothing to measure in {period}',
-    ar: 'لا يوجد ما يُقاس في {period}',
-  },
-  statsEmptyBody: {
-    en: 'Stats reads the ledger you already have. Import a month of bank messages, or pick another period, and every section below fills itself in.',
-    ar: 'تقرأ الإحصاءات سجلّك الحالي. استورد شهراً من رسائل البنك أو اختر فترة أخرى، وستمتلئ كل الأقسام أدناه تلقائياً.',
-  },
-  statsWhereItGoes: { en: 'Where it goes', ar: 'أين يذهب المال' },
-  statsWhatChanged: { en: 'What changed', ar: 'ما الذي تغيّر' },
-  statsMoversCaption: {
-    en: 'Against the period before this one.',
-    ar: 'مقارنةً بالفترة السابقة لهذه.',
-  },
-  statsMoverUp: { en: '{category}, up', ar: '{category}، ارتفع' },
-  statsMoverDown: { en: '{category}, down', ar: '{category}، انخفض' },
-  statsCategoryMonths: {
-    en: '{category} · {count} months',
-    ar: '{category} · {count} أشهر',
-  },
-  statsTrendFlat: {
-    en: "{amount} every month for {count} months — it hasn't moved.",
-    ar: '{amount} كل شهر على مدى {count} أشهر — لم يتغيّر إطلاقاً.',
-  },
-  statsTrendOnAverage: {
-    en: '{amount} a month on average, and {month} lands right on it.',
-    ar: '{amount} شهرياً في المتوسط، و{month} جاء مطابقاً له تماماً.',
-  },
-  statsTrendAbove: {
-    en: '{amount} a month on average. {month} came to {latest} — {percent}% above.',
-    ar: '{amount} شهرياً في المتوسط. بلغ {month} مقدار {latest} — أي {percent}% فوق المتوسط.',
-  },
-  statsTrendAboveHighest: {
-    en: '{amount} a month on average. {month} came to {latest} — {percent}% above, the highest of the {count}.',
-    ar: '{amount} شهرياً في المتوسط. بلغ {month} مقدار {latest} — أي {percent}% فوق المتوسط، وهو الأعلى بين الـ{count}.',
-  },
-  statsTrendBelow: {
-    en: '{amount} a month on average. {month} came to {latest} — {percent}% below.',
-    ar: '{amount} شهرياً في المتوسط. بلغ {month} مقدار {latest} — أي {percent}% دون المتوسط.',
-  },
-  statsTrendBelowLowest: {
-    en: '{amount} a month on average. {month} came to {latest} — {percent}% below, the lowest of the {count}.',
-    ar: '{amount} شهرياً في المتوسط. بلغ {month} مقدار {latest} — أي {percent}% دون المتوسط، وهو الأدنى بين الـ{count}.',
-  },
-  statsWhenItGoes: { en: 'When it goes', ar: 'متى يذهب المال' },
-  statsWeekdayCaption: {
-    en: 'Day-to-day spending only. Rent and other fixed commitments land on whichever weekday the standing order falls on, which is a calendar, not a habit.',
-    ar: 'المصروف اليومي فقط. الإيجار وغيره من الالتزامات الثابتة يقع في اليوم الذي يصادفه الأمر المستديم، وهذا تقويم لا عادة.',
-  },
-  statsHeaviestDay: {
-    en: '{day} is your heaviest day — {amount} of the {total} you chose to spend in {period}.',
-    ar: '{day} هو أثقل أيامك — {amount} من أصل {total} اخترت صرفها في {period}.',
-  },
-  statsAlsoWorthALook: { en: 'Also worth a look', ar: 'يستحق النظر أيضاً' },
-  statsNetWorthLink: {
-    en: '{count} months of balance, on Wallet',
-    ar: '{count} أشهر من الرصيد، في المحفظة',
-  },
-  statsNetWorthLinkA11y: {
-    en: 'Net worth over {count} months, on Wallet',
-    ar: 'صافي الثروة خلال {count} أشهر، في المحفظة',
-  },
-  statsInVsOut: { en: 'In vs out', ar: 'الدخل مقابل المصروف' },
-  statsInVsOutLink: {
-    en: '{count} months of earning and spending, on Flow',
-    ar: '{count} أشهر من الدخل والصرف، في التدفق',
-  },
-  statsInVsOutLinkA11y: {
-    en: 'In versus out over {count} months, on Flow',
-    ar: 'الدخل مقابل المصروف خلال {count} أشهر، في التدفق',
-  },
 
   // Other screens
   transactionsTitle: { en: 'Transactions', ar: 'العمليات' },
-  budgetsTitle: { en: 'Budgets', ar: 'الميزانيات' },
   cardsTitle: { en: 'Payment cards', ar: 'بطاقات الدفع' },
-  cardsPurpose: {
-    en: 'Group purchases, balances, and amounts due by card. These are records in Wafra, not bank connections.',
-    ar: 'اجمع المشتريات والأرصدة والمبالغ المستحقة حسب البطاقة. هذه سجلات داخل وفرة وليست روابط مصرفية.',
-  },
   inactiveCards: { en: 'Inactive cards', ar: 'بطاقات غير نشطة' },
   lastUsed: { en: 'Last used', ar: 'آخر استخدام' },
   addTransactionTitle: { en: 'Add transaction', ar: 'إضافة عملية' },
-  addCashEntry: { en: 'Add cash entry', ar: 'إضافة عملية نقدية' },
   expenseLabel: { en: 'Expense', ar: 'مصروف' },
   incomeLabel: { en: 'Income', ar: 'دخل' },
   filtersTitle: { en: 'Filters', ar: 'عوامل التصفية' },
@@ -2694,12 +1973,7 @@ const S = {
   // Home sections
   cardPayments: { en: 'Card payments', ar: 'دفعات البطاقات' },
   upcomingBills: { en: 'Upcoming bills', ar: 'فواتير قادمة' },
-  budgetsSection: { en: 'Budgets', ar: 'الميزانيات' },
   recentActivity: { en: 'Recent activity', ar: 'أحدث العمليات' },
-  insightsSection: { en: 'Insights', ar: 'ملاحظات' },
-  subscriptionWord: { en: 'subscription', ar: 'اشتراك' },
-  subscriptionsWord: { en: 'subscriptions', ar: 'اشتراكات' },
-  nextWord: { en: 'next', ar: 'التالي' },
   allWord: { en: 'All', ar: 'الكل' },
   moneyPictureTitle: { en: 'Your money picture', ar: 'صورتك المالية' },
   moneyPictureBuilding: {
@@ -2734,7 +2008,6 @@ const S = {
 
   // Import screen
   importTitle: { en: 'Import from SMS', ar: 'استيراد من الرسائل' },
-  scanFullInbox: { en: 'Scan full inbox', ar: 'فحص كل الرسائل' },
   historyImportRunningTitle: {
     en: 'Reading your bank-message history',
     ar: 'جارٍ قراءة سجل رسائل البنك',
@@ -2770,23 +2043,12 @@ const S = {
   pasteInstead: { en: 'Paste messages instead', ar: 'الصق الرسائل بدلاً من ذلك' },
   hideManualPaste: { en: 'Hide manual paste', ar: 'إخفاء اللصق اليدوي' },
   importBankActivity: { en: 'Import bank activity', ar: 'استيراد النشاط البنكي' },
-  importBankActivityIosDetail: {
-    en: 'Paste a bank message or add a statement',
-    ar: 'الصق رسالة بنكية أو أضف كشفاً',
-  },
-  parsePasted: { en: 'Parse pasted text', ar: 'تحليل النص الملصق' },
   trySample: { en: 'Try sample', ar: 'جرّب مثالاً' },
-  importPastMessages: { en: 'Import past Messages', ar: 'استيراد الرسائل السابقة' },
-  installHistoryShortcut: { en: 'Install history Shortcut', ar: 'تثبيت اختصار السجل' },
   historyCardTitle: { en: 'Import past alerts', ar: 'استيراد التنبيهات السابقة' },
   historyLast30Days: { en: 'Last 30 days', ar: 'آخر ٣٠ يوماً' },
   historyThisYear: { en: 'This year', ar: 'هذا العام' },
   historyChooseDates: { en: 'Choose dates', ar: 'اختيار التواريخ' },
   historyChooseYear: { en: 'Choose a year', ar: 'اختيار عام' },
-  historyDateChoices: {
-    en: 'Tap Start once. The Shortcut checks the newest and oldest retained Messages automatically; there is no date setup.',
-    ar: 'اضغط «بدء» مرة واحدة. يفحص الاختصار أحدث الرسائل المحتفظ بها وأقدمها تلقائياً من دون إعداد تواريخ.',
-  },
   historyAddAction: { en: 'Add history Shortcut', ar: 'إضافة اختصار السجل' },
   historyAddedAction: { en: 'Continue after adding', ar: 'متابعة بعد الإضافة' },
   historyStartAction: { en: 'Import history', ar: 'استيراد السجل' },
@@ -2839,10 +2101,6 @@ const S = {
   },
   historyFirstRunGuidance: { en: 'Choose Always Allow. Keep the iPhone unlocked while Apple reads Messages. If the import stops, open it again to continue.', ar: 'اختر «السماح دائماً». أبقِ الآيفون مفتوح القفل أثناء قراءة Apple للرسائل. إذا توقف الاستيراد، افتحه مرة أخرى للمتابعة.' },
   historyContinueBody: { en: 'Continue in Shortcuts. Wafra keeps completed progress locally, so you can resume instead of starting over.', ar: 'تابع في الاختصارات. يحتفظ وفرة بالتقدم المكتمل محلياً، لذلك يمكنك الاستئناف بدلاً من البدء من جديد.' },
-  historyReviewBody: {
-    en: 'Review the local matches below. Nothing is filed until you confirm.',
-    ar: 'راجع المطابقات المحلية أدناه. لن يُسجّل شيء حتى تؤكد.',
-  },
   historySourceCounts: {
     en: '{understood} understood · {alreadyFiled} already filed · {notAlreadyFiled} understood, not previously filed · {unread} unread or non-financial',
     ar: 'فُهمت {understood} · سُجّلت سابقاً {alreadyFiled} · فُهمت {notAlreadyFiled} ولم تُسجّل سابقاً · تعذّرت قراءة {unread} أو لم تكن مالية',
@@ -2868,17 +2126,8 @@ const S = {
     en: 'Reading protected local history batches. Message text and sender remain only in temporary protected staging until you save, cancel, or the staging expires; nothing is uploaded.',
     ar: 'تجري قراءة دفعات السجل المحلية المحمية. يبقى نص الرسالة والمرسل فقط في تخزين مؤقت محمي حتى تحفظ أو تلغي أو تنتهي صلاحيته؛ ولا يُرفع أي شيء.',
   },
-  historyReviewPrivacy: {
-    en: 'Review only. The bounded retained-Message coverage check passed on this iPhone; Message text is not uploaded and is removed from staging after a successful save or explicit cancel.',
-    ar: 'للمراجعة فقط. اجتاز فحص التغطية المحدود للرسائل المحتفظ بها على هذا الآيفون؛ لا يُرفع نص الرسائل ويُحذف من التخزين المؤقت بعد الحفظ الناجح أو الإلغاء الصريح.',
-  },
   historyPreparingReview: { en: 'Preparing review…', ar: 'جارٍ إعداد المراجعة…' },
   retryHistoryRead: { en: 'Try reading again', ar: 'إعادة محاولة القراءة' },
-  historyShortcutMissing: { en: 'History Shortcut not installed', ar: 'اختصار السجل غير مثبت' },
-  historyShortcutMissingBody: {
-    en: 'Install “{shortcut}” in Apple Shortcuts, then try again.',
-    ar: 'ثبّت «{shortcut}» في تطبيق اختصارات Apple ثم أعد المحاولة.',
-  },
   historyImportReviewReady: { en: 'Ready for review', ar: 'جاهز للمراجعة' },
   historyImportNoneFound: {
     en: 'No supported bank activity found',
@@ -2991,19 +2240,9 @@ const S = {
     en: 'Slow and experimental. Statements are faster.',
     ar: 'بطيء وتجريبي. الكشوف أسرع.',
   },
-  settingsAdvancedHeader: {
-    en: 'Advanced',
-    ar: 'متقدم',
-  },
-  iosMessageSetupHeading: { en: 'Bank messages', ar: 'رسائل البنك' },
-  iosMessageSetupSubtitle: { en: 'First connect new alerts. Importing old messages is optional.', ar: 'اربط التنبيهات الجديدة أولاً. استيراد الرسائل القديمة اختياري.' },
   iosMessageFutureTitle: {
     en: 'Automatic bank messages',
     ar: 'رسائل البنك التلقائية',
-  },
-  iosMessageFutureDetail: {
-    en: 'Purchases, refunds, income, transfers and statements from supported bank messages.',
-    ar: 'المشتريات والمبالغ المستردة والدخل والتحويلات والكشوف من رسائل البنوك المدعومة.',
   },
   iosMessagePastTitle: { en: 'Past messages · Optional', ar: 'الرسائل السابقة · اختياري' },
   iosMessagePastDetail: {
@@ -3018,10 +2257,21 @@ const S = {
   reviewAlertPossibleNotificationReplay: { en: 'Possible repeat notification. Compare it with your saved transactions before adding.', ar: 'قد يكون هذا إشعاراً مكرراً. قارنه بمعاملاتك المحفوظة قبل إضافته.' },
   reviewAlertNotificationSource: { en: 'Notification capture', ar: 'التقاط الإشعارات' },
   reviewAlertPossibleApplePayDuplicate: { en: 'Possible Apple Pay duplicate. A matching Apple Pay purchase is already in your transactions.', ar: 'قد تكون عملية Apple Pay مكررة. توجد عملية Apple Pay مطابقة في معاملاتك بالفعل.' },
-  reviewAlertsFullWaiting: { en: 'Review is full — {count} alerts waiting. Add or dismiss alerts here to make room; waiting alerts are kept on this iPhone until then.', ar: 'قائمة المراجعة ممتلئة — {count} من التنبيهات بالانتظار. أضف تنبيهات أو تجاهلها هنا لإفساح المجال، وستبقى التنبيهات المنتظرة على هذا الآيفون حتى ذلك الحين.' },
+  historyReviewCapacityBody: {
+    en: 'Review is full. Review or dismiss saved alerts, then retry History. Existing expiry limits still apply.',
+    ar: 'قائمة المراجعة ممتلئة. راجع التنبيهات المحفوظة أو تجاهلها، ثم أعد محاولة السجل. تبقى حدود انتهاء الصلاحية سارية.',
+  },
+  // iPhone History only: the completed native History session the hold keeps
+  // expires one hour after the History Shortcut finishes (WafraMessageHistoryStore.sessionTTL).
+  historyReviewCapacityBodyIos: {
+    en: 'Review is full. Wafra keeps the messages this history run read for about 1 hour. Review or dismiss saved alerts and retry within that hour; after that, run the history Shortcut again. Existing expiry limits still apply.',
+    ar: 'قائمة المراجعة ممتلئة. تحتفظ وفرة بالرسائل التي قرأها تشغيل السجل هذا لمدة ساعة تقريباً. راجع التنبيهات المحفوظة أو تجاهلها ثم أعد محاولة استيراد السجل خلال هذه الساعة، وبعدها شغّل اختصار السجل مرة أخرى. تبقى حدود انتهاء الصلاحية سارية.',
+  },
+  reviewAlertsFullWaiting: { en: 'Review is full — {count} alerts waiting. Add or dismiss alerts here to make room. Waiting alerts stay on this iPhone for up to 30 days; after that they are counted as expired.', ar: 'قائمة المراجعة ممتلئة — {count} من التنبيهات بالانتظار. أضف تنبيهات أو تجاهلها هنا لإفساح المجال. تبقى التنبيهات المنتظرة على هذا الآيفون لمدة تصل إلى 30 يوماً، وبعد ذلك تُحتسب كمنتهية الصلاحية.' },
   reviewAlertsExpiredCount: { en: 'Expired before review in the last 30 days: {count}', ar: 'انتهت صلاحيتها قبل المراجعة خلال آخر 30 يوماً: {count}' },
   reviewAlertsEvictedCount: { en: 'Alerts that could not be kept for review because Review was full, in the last 30 days: {count}', ar: 'تنبيهات تعذّر الاحتفاظ بها للمراجعة لأن قائمة المراجعة كانت ممتلئة خلال آخر 30 يوماً: {count}' },
   reviewAlertsCurrencyEvictedCount: { en: 'Other-currency alerts not kept for review in the last 30 days: {count}. Review keeps the newest 50 waiting for an exchange rate.', ar: 'تنبيهات بعملة أخرى لم يُحتفظ بها للمراجعة خلال آخر 30 يوماً: {count}. تحتفظ المراجعة بأحدث 50 تنبيهاً بانتظار سعر الصرف.' },
+  reviewAlertsDuplicatePostedCount: { en: 'Possible Apple Pay duplicates posted because Review was full, in the last 30 days: {count}. Check the Transactions screen for a double entry.', ar: 'عمليات قد تكون مكررة لعمليات Apple Pay سُجّلت لأن قائمة المراجعة كانت ممتلئة خلال آخر 30 يوماً: {count}. راجع شاشة «العمليات» للتحقق من وجود قيد مكرر.' },
   reviewAlertsCurrencySkipped: { en: 'Statements and notices in another currency skipped: {count}. Purchases are converted into your ledger currency instead.', ar: 'كشوف وإشعارات بعملة أخرى تم تخطيها: {count}. أما المشتريات فتُحوَّل إلى عملة سجلك.' },
   reviewAlertExpiresIn: { en: 'Days left to review: {count}', ar: 'الأيام المتبقية للمراجعة: {count}' },
   iosNotificationHelpInput: { en: 'Pass notification text to Capture bank notification. Replace the setup test phrase with Shortcut Input before saving the automation.', ar: 'مرّر نص الإشعار إلى «التقاط إشعار بنكي». استبدل عبارة فحص الإعداد بمتغير إدخال الاختصار قبل حفظ الأتمتة.' },
@@ -3038,10 +2288,8 @@ const S = {
     ar: 'تحديث التطبيق لا يستبدل الاختصار المثبّت. استخدم «إعادة تثبيت الاختصار»، وافتحه في الاختصارات، واختر «استبدال» إذا طُلب منك. أبقِ الأتمتة الحالية مرتبطة بالاختصار الذي ثبّتّه.',
   },
   iosMessageReviewAutomation: { en: 'Automation steps', ar: 'خطوات الأتمتة' },
-  iosMessageRetryCheck: { en: 'Run setup check again', ar: 'إعادة تشغيل فحص الإعداد' },
   iosMessageRetrySetup: { en: 'Try again', ar: 'حاول مجدداً' },
   iosMessageHistoryKeepOpen: { en: 'Keep Shortcuts open and iPhone unlocked.', ar: 'أبقِ الاختصارات مفتوحاً والآيفون دون قفل.' },
-  iosMessageHistoryCoverage: { en: 'Imports saved Messages in smaller batches.', ar: 'يستورد الرسائل المحفوظة على دفعات أصغر.' },
   iosMessageGuideSender: {
     en: "Sender: leave empty · Message Contains: one space",
     ar: "المرسل: اتركه فارغاً · تحتوي الرسالة على: مسافة واحدة",
@@ -3055,14 +2303,12 @@ const S = {
     ar: 'اضغط «إضافة الاختصار»، ثم أضف {shortcut} في الاختصارات.',
   },
   iosMessageFutureReturnHelp: { en: 'Added {shortcut}?', ar: 'أضفت {shortcut}؟' },
-  iosMessagePermissionTitle: { en: 'Setup check', ar: 'فحص الإعداد' },
   iosMessageRunPermissionCheck: {
     en: 'Run test',
     ar: 'تشغيل الاختبار',
   },
   iosMessagePermissionBody: { en: 'Run the setup check with this iPhone unlocked. Allow access to Wafra when Apple asks, then return here. The setup check tests the Shortcut; your first bank message confirms automatic delivery.', ar: 'شغّل فحص الإعداد والآيفون مفتوح. اسمح بالوصول إلى وفرة عندما تطلب Apple ذلك، ثم عد إلى هنا. يختبر فحص الإعداد الاختصار؛ وتؤكد أول رسالة بنكية وصول الرسائل تلقائياً.' },
   iosMessagePermissionLocked: { en: 'If a background run reports a permission error, open the Shortcut’s details → Privacy. Allow Wafra access and enable “Allow Running When Locked” if shown.', ar: 'إذا ظهر خطأ أذونات أثناء التشغيل في الخلفية، افتح تفاصيل الاختصار ← الخصوصية. اسمح بالوصول إلى وفرة وفعّل «السماح بالتشغيل عند القفل» إذا ظهر الخيار.' },
-  iosMessageFutureReadyChoice: { en: 'New alerts are set up. Importing past messages is optional — now or later from Settings.', ar: 'تم إعداد التنبيهات الجديدة. استيراد الرسائل السابقة اختياري — الآن أو لاحقاً من الإعدادات.' },
   iosMessageNextHistory: { en: 'Import past messages', ar: 'استيراد الرسائل السابقة' },
   iosMessageNextFuture: { en: 'Set up new alerts', ar: 'إعداد التنبيهات الجديدة' },
   iosMessageImportAgain: { en: 'Import again', ar: 'استيراد مجدداً' },
@@ -3094,7 +2340,6 @@ const S = {
     ar: 'كيف يعمل',
   },
   iosMessageDone: { en: 'Done', ar: 'تم' },
-  iosMessageCloseSetup: { en: 'Close setup', ar: 'إغلاق الإعداد' },
   iosMessageStatusNotStarted: { en: 'Not started', ar: 'لم يبدأ' },
   iosMessageStatusInProgress: { en: 'In progress', ar: 'قيد الإعداد' },
   iosMessageStatusComplete: { en: 'Complete', ar: 'مكتمل' },
@@ -3109,70 +2354,38 @@ const S = {
   iosMessageHelpProof: { en: 'A real bank message confirms automatic capture.', ar: 'رسالة بنكية حقيقية تؤكد الالتقاط التلقائي.' },
   iosMessagePrivacyDetails: { en: 'Privacy details', ar: 'تفاصيل الخصوصية' },
   iosMessageDetailsTitle: { en: 'Setup help', ar: 'مساعدة الإعداد' },
-  iosMessageFutureDetailsTitle: {
-    en: 'Automatic bank messages',
-    ar: 'رسائل البنك التلقائية',
-  },
-  iosMessagePastDetailsTitle: {
-    en: 'Past alerts',
-    ar: 'التنبيهات السابقة',
-  },
   iosMessageSenderUnavailable: {
     en: "Leave Sender empty for alphanumeric bank SMS IDs. Use one space in Message Contains to avoid filtering by currency. Choose Run Immediately and turn off Notify When Run if shown. Wafra cannot change Apple’s notification settings.",
     ar: "اترك المرسل فارغاً لمعرّفات البنك النصية. استخدم مسافة واحدة في «تحتوي الرسالة على» لتجنب التصفية حسب العملة. اختر «تشغيل فوراً» وأوقف «الإشعار عند التشغيل» إن ظهر. لا يستطيع وفرة تغيير إعدادات إشعارات Apple.",
   },
-  iosStepConnect: { en: 'Connect', ar: 'الربط' },
-  iosStepBanks: { en: 'Banks', ar: 'البنوك' },
-  iosStepShortcut: { en: 'Add Wafra Capture', ar: 'أضف «Wafra Capture»' },
-  iosStepAutomation: { en: 'Message automation', ar: 'أتمتة الرسائل' },
-  iosStepTest: { en: 'Safe test', ar: 'اختبار آمن' },
-  iosStepProgress: { en: 'Step {n} of {total}: {name}', ar: 'الخطوة {n} من {total}: {name}' },
 
   // Two-stage, device-local iPhone capture setup.
-  iosLocalStepShortcut: { en: 'Add Shortcut', ar: 'إضافة الاختصار' },
-  iosLocalStepAutomation: { en: 'Message automation', ar: 'أتمتة الرسائل' },
-  iosLocalShortcutTitle: {
-    en: 'Add Wafra Local Capture',
-    ar: 'أضف «Wafra Local Capture»',
-  },
-  iosLocalShortcutBody: {
-    en: 'Add the ordinary Shortcut once. It has no account code to paste and cannot install Apple’s personal automation for you.',
-    ar: 'أضف الاختصار العادي مرة واحدة. لا يحتوي على رمز حساب للصقه، ولا يمكنه تثبيت أتمتة Apple الشخصية نيابةً عنك.',
-  },
   iosLocalInstallShortcut: { en: 'Add Shortcut', ar: 'إضافة الاختصار' },
   iosLocalAlreadyAdded: { en: 'I added it', ar: 'أضفته' },
   iosLocalShortcutUnavailable: {
     en: 'This build can’t add the shortcut. Update Wafra.',
     ar: 'لا يمكن لهذا الإصدار إضافة الاختصار. حدّث وفرة.',
   },
-  iosLocalUnsupported: { en: 'Requires iOS 16 or later.', ar: 'يتطلب iOS 16 أو أحدث.' },
+  // iOS 15: no App Intents, so no automatic capture. Statements and pasted
+  // messages remain available. Pasting is local; statement files use the import service.
+  iosLocalUnsupported: { en: 'Automatic capture needs iOS 16 or later', ar: 'يتطلب الالتقاط التلقائي iOS 16 أو أحدث' },
+  iosLocalUnsupportedBody: {
+    en: importProcessingDisclosure('en', 'ios'),
+    ar: importProcessingDisclosure('ar', 'ios'),
+  },
+  iosLocalUnsupportedStatement: { en: 'Import a statement', ar: 'استيراد كشف حساب' },
+  iosLocalUnsupportedPaste: { en: 'Paste bank messages', ar: 'لصق رسائل البنك' },
   iosLocalUpdateRequired: {
     en: 'This version can’t capture messages. Update Wafra.',
     ar: 'هذا الإصدار لا يلتقط الرسائل. حدّث وفرة.',
-  },
-  iosLocalPrivacyTitle: {
-    en: 'Processed on this iPhone',
-    ar: 'تُعالج على هذا الآيفون',
   },
   iosLocalPrivacyBody: {
     en: 'Apple does not give Wafra access to your Messages inbox. A Message automation you create in Shortcuts passes each new Message to Wafra’s protected queue on this iPhone. Apple’s Sender picker lists Contacts only and bank SMS IDs are not Contacts, so the automation runs with an empty Sender for every new message. Wafra checks Content and Sender locally, keeps only supported structured financial results, and uploads no Message data. After a durable local result, Wafra deletes the raw Message. If processing cannot finish, raw Content and Sender stay protected for up to 30 days and are removed on the next capture or queue check.',
     ar: 'لا تمنح Apple وفرة وصولاً إلى صندوق رسائلك. تمرّر أتمتة الرسائل التي تنشئها في الاختصارات كل رسالة جديدة إلى صف وفرة المحمي على هذا الآيفون. تعرض قائمة المرسلين لدى Apple جهات الاتصال فقط ومعرّفات رسائل البنوك ليست جهات اتصال، لذلك تعمل الأتمتة بمرسل فارغ لكل رسالة جديدة. يفحص وفرة المحتوى واسم المرسل محلياً، ويحتفظ فقط بالنتائج المالية المنظمة والمدعومة، ولا يرفع بيانات الرسائل. بعد حفظ نتيجة محلية بشكل دائم، يحذف وفرة الرسالة الخام. وإذا تعذرت المعالجة، يبقى المحتوى الخام واسم المرسل محمياً لمدة تصل إلى ٣٠ يوماً ثم يُحذف عند تشغيل الالتقاط أو فحص الصف في المرة التالية.',
   },
-  iosLocalMigrationTitle: {
-    en: 'Using the older automation?',
-    ar: 'هل تستخدم الأتمتة القديمة؟',
-  },
   iosLocalMigrationBody: {
     en: 'If you still have the old “Wafra Capture” automation, it can continue uploading the bank messages you selected until you delete it or Wafra confirms retirement after the first local bank message.',
     ar: 'إذا كانت أتمتة «Wafra Capture» القديمة ما زالت موجودة، فقد تستمر في رفع رسائل البنوك التي اخترتها إلى أن تحذفها أو تؤكد وفرة إيقافها بعد أول رسالة بنكية محلية.',
-  },
-  iosLocalAutomationTitle: {
-    en: 'Turn on automatic capture',
-    ar: 'فعّل الالتقاط التلقائي',
-  },
-  iosLocalAutomationBody: {
-    en: "Leave Sender empty and type one space in Message Contains. Messages containing a space reach Wafra in any currency. Choose Run Immediately and turn off Notify When Run if shown. Edit your existing Wafra automation instead of adding another.",
-    ar: "اترك المرسل فارغاً واكتب مسافة واحدة في «تحتوي الرسالة على». تصل الرسائل التي تحتوي على مسافة إلى وفرة بأي عملة. اختر «تشغيل فوراً» وأوقف «الإشعار عند التشغيل» إن ظهر. عدّل أتمتة وفرة الحالية بدلاً من إضافة أتمتة أخرى.",
   },
   iosMessageContinueManual: {
     en: 'Skip for now',
@@ -3183,10 +2396,6 @@ const S = {
     en: 'I turned it on',
     ar: 'فعّلتها',
   },
-  iosLocalTestExplainer: {
-    en: 'Confirmation runs only a harmless setup check. It cannot add a purchase or prove that Apple’s Message trigger works.',
-    ar: 'يشغّل التأكيد فحص إعداد آمناً فقط. لا يمكنه إضافة عملية شراء أو إثبات عمل مشغّل الرسائل من Apple.',
-  },
   iosLocalWaitingTitle: { en: 'Waiting for first alert', ar: 'بانتظار أول تنبيه' },
   iosLocalWaitingBody: { en: 'A real bank message confirms the automation.', ar: 'رسالة بنكية حقيقية تؤكد عمل الأتمتة.' },
   iosLocalFirstAlertCaptured: { en: 'First alert received', ar: 'وصل أول تنبيه' },
@@ -3194,18 +2403,6 @@ const S = {
     en: 'Wafra durably processed the first qualifying alert on this iPhone. It may have been filed, reviewed, reconciled, or recognized as an existing entry.',
     ar: 'عالجت وفرة أول تنبيه مؤهل بشكل دائم على هذا الآيفون. ربما سُجّل أو أُرسل للمراجعة أو استُخدم للمطابقة أو تم التعرّف عليه كعملية موجودة.',
   },
-  iosLocalNotProvenTitle: {
-    en: 'Finish the one-time automation',
-    ar: 'أكمل الأتمتة لمرة واحدة',
-  },
-  iosLocalNotProvenBody: {
-    en: 'Wafra cannot create or inspect Apple’s personal automation. Follow the choices below, then confirm it here.',
-    ar: 'لا يمكن لوفرة إنشاء أتمتة Apple الشخصية أو فحصها. اتبع الخيارات أدناه ثم أكّدها هنا.',
-  },
-  iosLocalManualTracking: { en: 'Manual tracking', ar: 'التسجيل اليدوي' },
-  iosLocalImportPast: { en: 'Import past alerts', ar: 'استيراد التنبيهات السابقة' },
-  iosLocalContinue: { en: 'Continue', ar: 'متابعة' },
-  iosLocalBackToShortcut: { en: 'Back to Shortcut', ar: 'العودة إلى الاختصار' },
   iosLocalShortcutInstallFailed: {
     en: 'Shortcuts didn’t open. Tap Add Shortcut to try again.',
     ar: 'لم تُفتح الاختصارات. اضغط «إضافة الاختصار» للمحاولة مجدداً.',
@@ -3214,243 +2411,37 @@ const S = {
     en: 'The test didn’t finish. Unlock your iPhone, then tap Run test.',
     ar: 'لم يكتمل الاختبار. افتح قفل الآيفون، ثم اضغط «تشغيل الاختبار».',
   },
-  iosLocalManualExitFailed: {
-    en: 'Wafra could not stop local capture. Stay on this screen and try again.',
-    ar: 'تعذّر على وفرة إيقاف الالتقاط المحلي. ابقَ في هذه الشاشة وحاول مجدداً.',
-  },
 
-  iosIntroTitle: { en: 'Set it once. Wafra keeps up.', ar: 'اضبطه مرة. ووفرة يتابع.' },
-  iosIntroBody1: {
-    en: 'Connect this iPhone, add Wafra Capture, run one safe pipe test, then create a Message automation.',
-    ar: 'اربط هذا الآيفون، وأضف «Wafra Capture»، وشغّل اختباراً آمناً للمسار، ثم أنشئ أتمتة «رسالة».',
-  },
-  iosIntroBody2: {
-    en: 'A safe probe verifies the private pipe. Only a later supported bank message can prove Apple’s Message automation runs while Wafra is closed.',
-    ar: 'يتحقق الاختبار الآمن من المسار الخاص. ولا يثبت عمل أتمتة «الرسالة» من Apple ووفرة مغلق إلا رسالة بنكية مدعومة لاحقة.',
-  },
-  iosPreviewTime: {
-    en: 'ABOUT 3 MINUTES · APPLE SHORTCUTS OPENS NEXT',
-    ar: 'نحو ٣ دقائق · سيفتح تطبيق الاختصارات تالياً',
-  },
-  iosPreviewInstall: { en: 'Add Wafra Capture', ar: 'أضف «Wafra Capture»' },
-  iosPreviewInstallBody: {
-    en: 'Paste this iPhone’s private setup code once.',
-    ar: 'ألصق رمز الإعداد الخاص بهذا الآيفون مرة واحدة.',
-  },
-  iosPreviewAutomation: { en: 'Create a Message automation', ar: 'أنشئ أتمتة «رسالة»' },
-  iosPreviewAutomationBody: {
-    en: 'Apple’s sender picker limits exactly which alerts can run.',
-    ar: 'تحدد قائمة مرسلي آبل التنبيهات المسموح بتشغيلها بدقة.',
-  },
-  iosPreviewProof: { en: 'Run one safe test', ar: 'شغّل اختباراً آمناً واحداً' },
-  iosPreviewProofBody: {
-    en: 'A safe probe checks the pipe; the first supported bank message verifies the trigger.',
-    ar: 'يفحص اختبار آمن المسار؛ وتتحقق أول رسالة بنكية مدعومة من المشغّل.',
-  },
   /** Retained for old screen snapshots; current setup uses iosLocalPrivacyBody. */
-  iosPrivacyNote: {
-    en: 'Apple gives no app access to the Messages inbox. A personal automation passes each new Message to Wafra on this iPhone, where supported bank messages are filtered and processed locally without uploading their text. Protected pending records expire after 30 days and are physically removed on the next capture or queue check.',
-    ar: 'لا تتيح آبل لأي تطبيق الوصول إلى صندوق الرسائل. تمرّر أتمتة شخصية كل رسالة جديدة إلى وفرة على هذا الآيفون، حيث تُرشّح رسائل البنوك المدعومة وتُعالج محلياً من دون رفع نصوصها. تنتهي صلاحية السجلات المعلّقة المحمية بعد ٣٠ يوماً وتُزال فعلياً عند تشغيل الالتقاط أو فحص الصف في المرة التالية.',
-  },
-  iosConnecting: { en: 'Connecting…', ar: 'جارٍ الربط…' },
-  iosConnectCta: { en: 'Connect this iPhone', ar: 'اربط هذا الآيفون' },
-  iosConnectFailed: { en: 'Could not connect.', ar: 'تعذّر الربط.' },
-  iosPushPermissionRequired: {
-    en: 'Silent delivery is disabled in iPhone Settings. Enable Wafra notifications, then try again.',
-    ar: 'التسليم الصامت معطل في إعدادات الآيفون. فعّل إشعارات وفرة ثم أعد المحاولة.',
-  },
-  iosPushSetupFailed: {
-    en: 'Silent capture is not ready in this build. Check the project and push configuration, then try again.',
-    ar: 'الالتقاط الصامت غير جاهز في هذا الإصدار. تحقق من إعدادات المشروع والإشعارات ثم حاول مجدداً.',
-  },
-  iosRelayUnavailable: {
-    en: 'Automatic capture is not configured in this build.',
-    ar: 'الالتقاط التلقائي غير مهيأ في هذا الإصدار.',
-  },
-  iosPrivateModeTitle: {
-    en: 'Turn off Private Mode?',
-    ar: 'إيقاف الوضع الخاص؟',
-  },
-  iosPrivateModeBody: {
-    en: 'iPhone automatic capture needs the relay. Turning Private Mode off allows only bank senders you select to leave this phone; raw text is discarded immediately after parsing.',
-    ar: 'يحتاج الالتقاط التلقائي على الآيفون إلى خادم الترحيل. يسمح إيقاف الوضع الخاص بمغادرة تنبيهات مرسلي البنوك الذين تحددهم فقط؛ ويُتخلص من النص الخام فور تحليله.',
-  },
-  iosTurnOffPrivateMode: {
-    en: 'Turn off & connect',
-    ar: 'أوقفه واتصل',
-  },
-  iosContinueManual: {
-    en: 'Maximum privacy · no Messages access',
-    ar: 'أقصى خصوصية · دون وصول إلى الرسائل',
-  },
 
   iosBanksTitle: { en: 'Which banks text you?', ar: 'أي البنوك تراسلك؟' },
-  iosBanksBody: {
-    en: 'Pick the banks that send card or account alerts. In the next step, Shortcuts will ask you to select their existing message conversations as senders.',
-    ar: 'اختر البنوك التي ترسل تنبيهات البطاقات أو الحسابات. في الخطوة التالية سيطلب منك تطبيق الاختصارات تحديد محادثاتها الحالية كمرسلين.',
-  },
-  iosSenderCaveat: {
-    en: 'Sender names vary by carrier, and Apple owns the picker. Choose the existing bank conversation—not a typed guess. If it is missing, add that sender to Contacts first. A real future alert is the only complete trigger test.',
-    ar: 'تختلف أسماء المرسلين حسب شركة الاتصالات، وتتحكم آبل في قائمة الاختيار. اختر محادثة البنك الموجودة، لا اسماً تخمينياً. إن لم تظهر فأضف المرسل إلى جهات الاتصال أولاً. التنبيه الحقيقي التالي هو الاختبار الكامل الوحيد للمشغّل.',
-  },
-  iosBanksSelected: { en: 'SELECTED · {n}', ar: 'المحدد · {n}' },
-  iosBanksNext: { en: 'Next', ar: 'التالي' },
-  iosBanksSkip: { en: 'Skip — I will pick later', ar: 'تخطَّ — سأختار لاحقاً' },
-  iosBankSelected: { en: '{name}, selected', ar: '{name}، محدد' },
   accountSetBank: { en: 'Set bank', ar: 'تحديد البنك' },
   accountNoBank: { en: 'No bank', ar: 'بدون بنك' },
   accountBankQuestion: { en: 'Which bank is this account with?', ar: 'مع أي بنك هذا الحساب؟' },
 
-  iosShortcutTitle: { en: 'Add Wafra Capture', ar: 'أضف «Wafra Capture»' },
-  iosShortcutBody: {
-    en: 'Open the install page, add Wafra Capture, then run it once. Paste this iPhone’s setup code when asked. Return only after Wafra Capture says it is ready.',
-    ar: 'افتح صفحة التثبيت، وأضف «Wafra Capture»، ثم شغّله مرة. الصق رمز إعداد هذا الآيفون عندما يُطلب منك. لا تعد إلا بعد أن يؤكد «Wafra Capture» أنه جاهز.',
-  },
-  iosShortcutReplaceNote: {
-    en: 'Already installed Wafra Capture? Delete the old Shortcut before adding this version. Keeping both can make Apple run the broken copy.',
-    ar: 'هل ثبّتَّ «Wafra Capture» من قبل؟ احذف الاختصار القديم قبل إضافة هذا الإصدار. وجود النسختين قد يجعل Apple تشغّل النسخة المعطلة.',
-  },
-  iosSetupCode: { en: 'THIS IPHONE’S SETUP CODE', ar: 'رمز إعداد هذا الآيفون' },
-  iosYourAddress: { en: 'YOUR ADDRESS', ar: 'عنوانك' },
   iosCopy: { en: 'COPY', ar: 'نسخ' },
-  iosCopied: { en: 'COPIED', ar: 'تم النسخ' },
-  iosCopySetupCode: { en: 'Copy the private setup code', ar: 'انسخ رمز الإعداد الخاص' },
-  iosCopyAddress: { en: 'Copy your Wafra address', ar: 'انسخ عنوان وفرة الخاص بك' },
-  iosCopyToken: { en: 'Copy your secret key', ar: 'انسخ مفتاحك السري' },
-  iosRunFor: { en: 'SET THE AUTOMATION TO RUN FOR', ar: 'اضبط الأتمتة لتعمل مع' },
-  iosOpenShortcut: { en: 'Copy code & open latest Shortcut', ar: 'انسخ الرمز وافتح أحدث اختصار' },
   iosOpenShortcutsApp: { en: 'Open Shortcuts', ar: 'افتح تطبيق الاختصارات' },
-  iosShortcutMissing: {
-    en: 'This build has no published install link. You can still build “Wafra Capture” manually with the address and token below.',
-    ar: 'لا يحتوي هذا الإصدار على رابط تثبيت منشور. ما زال بإمكانك إنشاء «Wafra Capture» يدوياً باستخدام العنوان والرمز أدناه.',
-  },
-  iosInstalledIt: {
-    en: 'I added Wafra Capture',
-    ar: 'أضفت «Wafra Capture»',
-  },
 
   iosShortcutsMissing: {
     en: 'Apple Shortcuts isn’t installed. Install it, then try again.',
     ar: 'تطبيق «الاختصارات» من Apple غير مثبّت. ثبّته ثم حاول مجدداً.',
-  },
-  iosShortcutsMissingRecovery: {
-    en: 'Install Shortcuts from the App Store, return to Wafra, and try this step again.',
-    ar: 'ثبّت «الاختصارات» من App Store، ثم عد إلى وفرة وأعد محاولة هذه الخطوة.',
   },
   iosInstallShortcuts: {
     en: 'Install Apple Shortcuts',
     ar: 'ثبّت «الاختصارات» من Apple',
   },
 
-  iosAutomationTitle: { en: 'Create a Message automation', ar: 'أنشئ أتمتة «رسالة»' },
-  iosAutomationBody: {
-    en: 'In Shortcuts → Automation, create a Message automation with these five choices:',
-    ar: 'في الاختصارات ← الأتمتة، أنشئ أتمتة «رسالة» بهذه الخيارات الخمسة:',
-  },
-  iosAutomationTrigger: {
-    en: '1. Trigger: Message',
-    ar: '١. المشغّل: رسالة',
-  },
-  iosAutomationSenders: {
-    en: '2. Sender: choose the bank conversations listed below',
-    ar: '٢. المرسل: اختر محادثات البنوك المدرجة أدناه',
-  },
-  iosAutomationImmediate: {
-    en: '3. Choose Run Immediately',
-    ar: '٣. اختر «تشغيل فوراً»',
-  },
-  iosAutomationAction: {
-    en: '4. Action: Run Shortcut → Wafra Capture',
-    ar: '٤. الإجراء: تشغيل اختصار ← Wafra Capture',
-  },
   iosAutomationInput: {
     en: '5. Input: Received Message (not only Content)',
     ar: '٥. الإدخال: «الرسالة المستلمة» (وليس «المحتوى» فقط)',
   },
-  iosAutomationReady: {
-    en: 'I chose Run Immediately',
-    ar: 'اخترت «تشغيل فوراً»',
-  },
 
-  iosTestTitle: { en: 'Run a safe test', ar: 'شغّل اختباراً آمناً' },
-  iosTestBody: {
-    en: 'Wafra Capture sends a harmless probe through the private pipe. The first time, tap Allow when Apple asks for network access. It does not add a transaction.',
-    ar: 'يرسل «Wafra Capture» اختباراً آمناً عبر المسار الخاص. في المرة الأولى، اضغط «سماح» عندما تطلب Apple الوصول إلى الشبكة. ولا يضيف أي عملية.',
-  },
   iosTestLimit: {
     en: 'The Shortcut and private sync work. Create the Message automation next. The first supported bank message is the final check: it should appear under the correct bank or card.',
     ar: 'يعمل الاختصار والمزامنة الخاصة. أنشئ أتمتة «الرسالة» تالياً. الرسالة البنكية المدعومة الأولى هي الاختبار الأخير: يجب أن تظهر تحت البنك أو البطاقة الصحيحة.',
   },
-  iosCaught: {
-    en: 'Captured and filed through the same path future alerts use.',
-    ar: 'التُقطت وسُجّلت عبر المسار نفسه الذي ستستخدمه التنبيهات لاحقاً.',
-  },
-  iosTestCaught: {
-    en: 'The Shortcut, relay, and encrypted sync are verified. Automatic capture is not verified yet; create the Message automation next.',
-    ar: 'تم التحقق من الاختصار والترحيل والمزامنة المشفّرة. لم يتم التحقق من الالتقاط التلقائي بعد؛ أنشئ أتمتة «الرسالة» تالياً.',
-  },
-  iosListening: { en: 'Waiting for the Shortcut…', ar: 'في انتظار الاختصار…' },
-  iosWaitingLabel: {
-    en: 'Waiting for the Wafra Capture Shortcut',
-    ar: 'في انتظار اختصار Wafra Capture',
-  },
-  iosTimedOut: {
-    en: 'The Shortcut did not finish. If Shortcuts showed “Invalid file path,” delete the old Wafra Capture and install the latest version below. Otherwise, open the Shortcut once and allow network access, then try again.',
-    ar: 'لم يكتمل تشغيل الاختصار. إذا عرض تطبيق الاختصارات «مسار ملف غير صالح»، فاحذف نسخة Wafra Capture القديمة وثبّت أحدث إصدار أدناه. وإلا فافتح الاختصار مرة واحدة واسمح له بالوصول إلى الشبكة ثم حاول مجدداً.',
-  },
-  iosTryAgain: { en: 'Try again', ar: 'حاول مرة أخرى' },
-  iosStartListening: { en: 'Run capture test', ar: 'شغّل اختبار الالتقاط' },
   iosDone: { en: 'Done', ar: 'تم' },
-  iosSkipForNow: {
-    en: 'Finish for now — manual tracking still works',
-    ar: 'إنهاء الآن — يظل التسجيل اليدوي متاحاً',
-  },
-  iosDisconnect: { en: 'Disconnect this iPhone', ar: 'افصل هذا الآيفون' },
-  iosDisconnecting: { en: 'Disconnecting…', ar: 'جارٍ الفصل…' },
-  iosDisconnectFailed: {
-    en: 'Could not disconnect. Stay online and try again so the relay copy can be erased.',
-    ar: 'تعذّر الفصل. ابقَ متصلاً وحاول مجدداً حتى يمكن مسح نسخة الترحيل.',
-  },
 
-  // Recovery and back-navigation copy. Each of these exists because the setup
-  // flow had a reachable state where the screen said nothing about what to do
-  // next: a failure with no undo, a step with no way back to the one that
-  // caused it, or a finished setup that still asked to be proved.
-  iosAlreadyWorkingTitle: { en: 'Automatic capture is verified', ar: 'تم التحقق من الالتقاط التلقائي' },
-  iosAlreadyWorkingBody: {
-    en: 'Wafra received a supported bank message through the Message automation. New matching alerts are captured automatically and filed when Wafra next runs.',
-    ar: 'استلمت وفرة تنبيهاً بنكياً مدعوماً عبر أتمتة «الرسالة». تُلتقط التنبيهات المطابقة تلقائياً وتُسجّل عند تشغيل وفرة لاحقاً.',
-  },
-  iosAutomationWaitingTitle: {
-    en: 'Private pipe verified',
-    ar: 'تم التحقق من المسار الخاص',
-  },
-  iosAutomationWaitingBody: {
-    en: 'Wafra cannot create or inspect Apple’s automation. The next supported bank message will prove that its Message trigger ran. Until then, automatic capture is not verified.',
-    ar: 'لا يمكن لوفرة إنشاء أتمتة Apple أو فحصها. ستثبت الرسالة البنكية المدعومة التالية أن مشغّل «الرسالة» عمل. وحتى ذلك لم يتم التحقق من الالتقاط التلقائي.',
-  },
-  iosContinueToAutomation: {
-    en: 'Create Message automation',
-    ar: 'أنشئ أتمتة الرسائل',
-  },
-  iosRunTestAgain: { en: 'Run the test again', ar: 'أعد تشغيل الاختبار' },
-  iosBackToShortcut: { en: 'Back to the setup code', ar: 'العودة إلى رمز الإعداد' },
-  iosBackToTest: { en: 'Back to the safe test', ar: 'العودة إلى الاختبار الآمن' },
-  iosBackToAutomation: { en: 'Back to the automation steps', ar: 'العودة إلى خطوات الأتمتة' },
-  iosReinstallShortcut: { en: 'Reinstall the Shortcut', ar: 'أعد تثبيت الاختصار' },
-  iosAutomationReadyTest: { en: 'I created the Message automation', ar: 'أنشأت أتمتة «الرسالة»' },
-  iosShortcutInstallFailed: {
-    en: 'Could not open the install page. Check your connection and try again.',
-    ar: 'تعذّر فتح صفحة التثبيت. تحقق من اتصالك ثم حاول مجدداً.',
-  },
-  iosShortcutsOpenFailed: {
-    en: 'Could not open Shortcuts. If it was removed from this iPhone, reinstall it from the App Store, then try again.',
-    ar: 'تعذّر فتح تطبيق الاختصارات. إن كان محذوفاً من هذا الآيفون فأعد تثبيته من App Store ثم حاول مجدداً.',
-  },
-  iosShortcutRunFailed: {
-    en: 'Could not run Wafra Capture. Check that the Shortcut is installed and still named “Wafra Capture”, then try again.',
-    ar: 'تعذّر تشغيل Wafra Capture. تأكد من تثبيت الاختصار ومن بقاء اسمه «Wafra Capture» ثم حاول مجدداً.',
-  },
 
   // Remaining cross-screen UI. Keeping complete sentences here is
   // especially important for Arabic: word order and plural forms cannot be
@@ -3472,19 +2463,13 @@ const S = {
   editEntry: { en: 'Edit transaction', ar: 'تعديل العملية' },
   entryDetail: { en: 'Transaction details', ar: 'تفاصيل العملية' },
   saveChanges: { en: 'Save changes', ar: 'حفظ التغييرات' },
-  filedOn: { en: 'filed {date}', ar: 'سُجّلت في {date}' },
   transfersNoCategory: {
     en: 'Transfers have no category — this moves money between your own accounts rather than spending it.',
     ar: 'لا تصنيف للتحويلات — فهي تنقل المال بين حساباتك بدلاً من إنفاقه.',
   },
-  merchantCategoryRule: {
-    en: 'This merchant is always {category} — change it once and the other {count} {merchant} charge{s} follow.',
-    ar: 'يُصنّف هذا المتجر دائماً ضمن {category} — غيّره مرة واحدة وستتبع ذلك {count} من عمليات {merchant} الأخرى.',
-  },
 
   newTransaction: { en: 'New transaction', ar: 'عملية جديدة' },
   saveTransaction: { en: 'Save transaction', ar: 'حفظ العملية' },
-  amountInDirhams: { en: 'Amount', ar: 'المبلغ' },
   amountInLedgerCurrency: { en: 'Amount in your ledger currency', ar: 'المبلغ بعملة سجلك' },
   descriptionOptional: { en: 'Description (optional)', ar: 'الوصف (اختياري)' },
   descriptionOptionalA11y: { en: 'Description, optional', ar: 'الوصف، اختياري' },
@@ -3516,7 +2501,6 @@ const S = {
   },
 
   newLimitTitle: { en: 'New limit', ar: 'حد جديد' },
-  categoryLimit: { en: '{category} limit', ar: 'حد {category}' },
   spentThisMonth: { en: 'Spent this month', ar: 'المصروف هذا الشهر' },
   monthlyLimit: { en: 'Monthly limit', ar: 'الحد الشهري' },
   limitOverBy: { en: 'Over by {amount}', ar: 'تجاوزت بمقدار {amount}' },
@@ -3553,7 +2537,6 @@ const S = {
     en: 'Set the credit limit for {name}.',
     ar: 'حدّد الحد الائتماني لـ {name}.',
   },
-  recurringMonthlyEstimate: { en: 'Monthly estimate', ar: 'تقدير شهري' },
   recurringEstimatedCharge: { en: 'Estimated charge', ar: 'مبلغ متوقع' },
   recurringLastCharge: { en: 'Last charge', ar: 'آخر خصم' },
   homeUpcomingPayments: { en: 'Upcoming payments', ar: 'الدفعات القادمة' },
@@ -3597,16 +2580,13 @@ const S = {
   track: { en: 'Track', ar: 'متابعة' },
   dueDay: { en: 'due day {day}', ar: 'مستحق يوم {day}' },
   justFiled: { en: 'Just filed', ar: 'سُجّلت الآن' },
-  justFiledFirst: { en: 'Just filed · first {shown} of {total}', ar: 'سُجّلت الآن · أول {shown} من {total}' },
   fileEntries: { en: 'File {count} entr{ending}', ar: 'تسجيل {count} عملية' },
   fileCardDues: { en: 'File {count} card due{s}', ar: 'تسجيل {count} مستحق بطاقة' },
   fixEntries: { en: 'Fix {count} entr{ending}', ar: 'تصحيح {count} عملية' },
 
   noEntriesInMonth: { en: 'No entries in {month} yet', ar: 'لا عمليات في {month} بعد' },
-  emptyMonthHelp: { en: 'Add an entry or check bank messages.', ar: 'أضف عملية أو تحقّق من رسائل البنك.' },
   readInbox: { en: 'Read inbox', ar: 'قراءة الرسائل' },
   checkBankAlerts: { en: 'Check alerts', ar: 'تحقق من التنبيهات' },
-  emptyMonthCaptureHelp: { en: 'Add your first entry.', ar: 'أضف عمليتك الأولى.' },
   addManually: { en: 'Add manually', ar: 'إضافة يدوية' },
   smsAccessOff: { en: 'SMS access is off, so nothing can import', ar: 'إذن الرسائل متوقف، لذا لا يمكن استيراد شيء' },
   smsPermissionPath: {
@@ -3620,10 +2600,6 @@ const S = {
     en: '{month}, income {income}, spending {spending}',
     ar: '{month}، الدخل {income}، المصروف {spending}',
   },
-  monthCashflowNoDataA11y: {
-    en: '{month}, no activity recorded',
-    ar: '{month}، لا توجد عمليات مسجلة',
-  },
 
   accountKindBank: { en: 'Bank', ar: 'حساب بنكي' },
   accountKindCard: { en: 'Card', ar: 'بطاقة' },
@@ -3633,10 +2609,6 @@ const S = {
   hoursAgo: { en: '{count}h ago', ar: 'قبل {count} س' },
   differentCard: { en: 'Different card', ar: 'بطاقة مختلفة' },
   sameCardRenewed: { en: 'Same physical card?', ar: 'هل هذه البطاقة نفسها؟' },
-  renewedCardBody: {
-    en: 'Move entries from {old} to {next}. Link only when both rows are the same physical card.',
-    ar: 'انقل العمليات من {old} إلى {next}. اربطهما فقط إذا كان السطران للبطاقة الفعلية نفسها.',
-  },
   longPressInactive: { en: 'Long-press to unhide or delete', ar: 'اضغط مطولاً للإظهار أو الحذف' },
   setSavingsGoal: { en: 'Set a savings goal', ar: 'ضع هدفاً للادخار' },
   savingsGoalHint: {
@@ -3657,22 +2629,11 @@ const S = {
   createGoal: { en: 'Create goal', ar: 'إنشاء الهدف' },
   deleteGoalTitle: { en: 'Delete goal?', ar: 'حذف الهدف؟' },
   walletSince: { en: 'since {date}', ar: 'منذ {date}' },
-  addToGoal: { en: 'Add to {goal}', ar: 'أضف إلى {goal}' },
-  amountInAed: { en: 'Amount', ar: 'المبلغ' },
   removeAccountTitle: { en: 'Remove account?', ar: 'إزالة الحساب؟' },
   removeAccountBody: {
     en: '“{name}” and all its transactions will be deleted. This cannot be undone.',
     ar: 'سيُحذف «{name}» وجميع عملياته. لا يمكن التراجع عن ذلك.',
   },
-  payAccountTitle: { en: 'Pay {name}?', ar: 'سداد {name}؟' },
-  payAccountBody: {
-    en: 'Marks {amount} as paid and records the transfer.',
-    ar: 'يسجّل {amount} كمدفوع ويسجّل التحويل.',
-  },
-  payByWithDays: { en: 'Pay by {date} · {days}d left', ar: 'السداد قبل {date} · متبقي {days} يوم' },
-  minimumAmountShort: { en: 'min {amount}', ar: 'الحد الأدنى {amount}' },
-  markAccountPaidA11y: { en: 'Mark {name} as paid', ar: 'علّم {name} كمدفوع' },
-  totalSuffix: { en: '{amount} total', ar: 'الإجمالي {amount}' },
   renewedCardDetected: {
     en: 'Card •{last4} has a statement but its spending is under {name}. Link only if they are the same card; then payments can settle the right bill.',
     ar: 'للبطاقة •{last4} كشف حساب، لكن مصروفاتها ظهرت تحت {name}. اربطهما فقط إذا كانتا البطاقة نفسها؛ عندها تسوّي الدفعات الفاتورة الصحيحة.',
@@ -3688,12 +2649,10 @@ const S = {
   },
 
   moreItems: { en: '{count} more', ar: '{count} أخرى' },
-  unreadMessageCount: { en: '{count} message{s} we could not read', ar: '{count} رسالة تعذّرت قراءتها' },
   unreadMessageHint: {
     en: 'Send them over and they get recognised next release. Digits are masked.',
     ar: 'أرسلها لتصبح معروفة في الإصدار القادم. الأرقام مخفية.',
   },
-  seeBreakdown: { en: 'See the breakdown', ar: 'عرض التفاصيل' },
   dismiss: { en: 'Dismiss', ar: 'تجاهل' },
   seeUpcomingPaymentsA11y: {
     en: 'See all {count} upcoming payments',
@@ -3716,24 +2675,6 @@ const S = {
   undo: { en: 'Undo', ar: 'تراجع' },
   allActivity: { en: 'All activity', ar: 'كل العمليات' },
   seenCount: { en: 'seen {count}×', ar: 'ظهرت {count}×' },
-  // Card diagnostic. Offered even when nothing is unread, because the bugs it
-  // answers — a payment counted twice, a statement filed against the wrong
-  // card — happen to messages the parser read confidently and so never show up
-  // in the unrecognised list.
-  shareCardDiagnostic: { en: 'Share card diagnostic', ar: 'مشاركة تشخيص البطاقات' },
-  shareCardDiagnosticHint: {
-    en: 'Cards, statements, and every row filed against a card — with what each was counted as.',
-    ar: 'البطاقات وكشوفها وكل عملية مرتبطة ببطاقة، مع كيفية احتسابها.',
-  },
-  accuracyShareTitle: {
-    en: 'Wafra — bank SMS the app is not reading well:',
-    ar: 'وفرة — رسائل بنكية لا يقرأها التطبيق جيداً:',
-  },
-  accuracyShareUnread: { en: 'COULD NOT READ — no merchant found', ar: 'تعذّرت القراءة — لم يُعثر على متجر' },
-  accuracyShareRow: {
-    en: '#{index} (seen {count}x, read as “{title}” / {category}):\n{raw}',
-    ar: '#{index} (ظهرت {count}x، قُرئت كـ «{title}» / {category}):\n{raw}',
-  },
 
   // Feedback. The register here is the same as the privacy section's: say what
   // leaves the phone, say it before it leaves, and never describe the feature
@@ -3743,14 +2684,6 @@ const S = {
   sendFeedbackDetail: {
     en: 'Send a note or improve the bank parser',
     ar: 'أرسل ملاحظة أو ساعد في تحسين محلّل البنك',
-  },
-  parserResearchSettingsTitle: {
-    en: 'Send parser samples',
-    ar: 'إرسال عينات للمحلّل',
-  },
-  parserResearchSettingsDetail: {
-    en: 'Tester tool · redacted templates only',
-    ar: 'أداة اختبار · قوالب منقّحة فقط',
   },
   parserResearchTitle: { en: 'Parser samples', ar: 'عينات المحلّل' },
   parserResearchUnavailable: {
@@ -3855,66 +2788,30 @@ const S = {
     en: 'Nothing was uploaded. Keep Wafra open and try again.',
     ar: 'لم يُرفع شيء. أبقِ وفرة مفتوحاً وحاول مرة أخرى.',
   },
-  supportHeader: { en: 'Support & feedback', ar: 'الدعم والملاحظات' },
   settingsStatusHeader: { en: 'Current state', ar: 'الحالة الحالية' },
-  settingsMoneyHeader: { en: 'Money', ar: 'المال' },
   settingsImportsHeader: { en: 'Capture', ar: 'الالتقاط' },
   settingsNotificationsHeader: { en: 'Notifications', ar: 'الإشعارات' },
   insightsTitle: { en: 'Insight', ar: 'معلومة' },
   homeWidgetAssistantTitle: { en: 'Ask Wafra', ar: 'اسأل وفرة' },
   homeWidgetAssistantDetail: { en: 'Questions and quick financial analysis.', ar: 'أسئلة وتحليل مالي سريع.' },
   homeWidgetInsightTitle: { en: 'Insight', ar: 'معلومة' },
-  homeWidgetInsightDetail: { en: 'One useful observation from your current period.', ar: 'ملاحظة مفيدة واحدة عن فترتك الحالية.' },
   homeWidgetDueTitle: { en: 'Due payments', ar: 'الدفعات المستحقة' },
-  homeWidgetDueDetail: { en: 'Bills and card payments that need attention.', ar: 'الفواتير ودفعات البطاقات التي تحتاج انتباهك.' },
-  homeWidgetActivityTitle: { en: 'Recent activity', ar: 'أحدث العمليات' },
-  homeWidgetActivityDetail: { en: 'Your latest ledger transactions.', ar: 'أحدث عملياتك في السجل.' },
-  homeWidgetUpcomingTitle: { en: 'Upcoming payments', ar: 'الدفعات القادمة' },
-  homeWidgetUpcomingDetail: { en: 'Payments expected soon.', ar: 'الدفعات المتوقعة قريباً.' },
   homeCustomizeTitle: { en: 'Customize Home', ar: 'تخصيص الرئيسية' },
-  homeCustomizeBody: { en: 'Choose which Home sections appear and arrange the whole page in your order.', ar: 'اختر أقسام الرئيسية التي تظهر ورتّب الصفحة كاملة كما يناسبك.' },
   homeCustomizeDetail: { en: 'Choose and reorder Home sections', ar: 'اختر أقسام الرئيسية ورتّبها' },
   moveUp: { en: 'Move up', ar: 'نقل للأعلى' },
   moveDown: { en: 'Move down', ar: 'نقل للأسفل' },
-  assistantTitle: { en: 'Wafra Assistant', ar: 'مساعد وفرة' },
-  assistantBack: { en: 'Back', ar: 'رجوع' },
-  assistantHeading: { en: 'Ask about your money', ar: 'اسأل عن أموالك' },
-  assistantPrivacy: {
-    en: 'Wafra calculates answers from your ledger locally. Raw bank messages are not sent anywhere.',
-    ar: 'يحسب وفرة الإجابات من سجلك محلياً على جهازك. لا يتم إرسال رسائل البنك الخام إلى أي مكان.',
-  },
-  assistantPlaceholder: {
-    en: 'Ask about spending, income, merchants or subscriptions',
-    ar: 'اسأل عن الإنفاق أو الدخل أو المتاجر أو الاشتراكات',
-  },
-  assistantAsk: { en: 'Ask Wafra', ar: 'اسأل وفرة' },
-  settingsAppearanceLanguageHeader: { en: 'Appearance & language', ar: 'المظهر واللغة' },
   settingsPreferencesHeader: { en: 'Appearance', ar: 'المظهر' },
   settingsDangerHeader: { en: 'Danger zone', ar: 'منطقة الخطر' },
   supportWebsite: { en: 'Support', ar: 'الدعم' },
   publicLinkUnavailable: { en: 'Unavailable in this build', ar: 'غير متاح في هذا الإصدار' },
-  settingStatusOn: { en: 'On', ar: 'مفعّل' },
-  settingStatusOff: { en: 'Off', ar: 'متوقف' },
   settingStatusChecking: { en: 'Checking', ar: 'جارٍ التحقق' },
   settingStatusYes: { en: 'yes', ar: 'نعم' },
   settingStatusNo: { en: 'no', ar: 'لا' },
-  settingStatusSetup: { en: 'Set up', ar: 'يحتاج إعداداً' },
-  settingStatusPipeVerified: { en: 'Pipe verified', ar: 'تم التحقق من المسار' },
-  settingStatusAutomationVerified: {
-    en: 'Automation verified',
-    ar: 'تم التحقق من الأتمتة',
-  },
-  feedbackIntro: {
-    en: 'Send a note directly to Wafra maintainers. Nothing from your ledger is attached, and nothing leaves this phone until you confirm.',
-    ar: 'أرسل ملاحظة مباشرة إلى مشرفي وفرة. لا يُرفق شيء من سجلك، ولا يغادر شيء الهاتف حتى تؤكد.',
-  },
-  feedbackParserHeader: { en: 'BANK MESSAGE PROBLEM', ar: 'مشكلة في رسالة بنكية' },
   feedbackParserTitle: { en: 'Improve the bank parser', ar: 'تحسين محلّل البنك' },
   feedbackParserDetail: {
     en: 'Prepare a redacted JSON file, then attach it to Codex yourself.',
     ar: 'جهّز ملف JSON منقّحاً، ثم أرفقه بنفسك في Codex.',
   },
-  feedbackWriteHeader: { en: 'WHAT WENT WRONG', ar: 'ما الذي حدث' },
   feedbackPlaceholder: {
     en: 'Tuesday’s charge was filed twice.',
     ar: 'سُجّلت عملية الثلاثاء مرتين.',
@@ -3925,28 +2822,8 @@ const S = {
     ar: 'تُخفى الأرقام الطويلة التي تكتبها قبل الإرسال.',
   },
   feedbackChars: { en: '{used} of {max}', ar: '{used} من {max}' },
-  feedbackAttachHeader: { en: 'WHAT TO ATTACH', ar: 'ما الذي يُرفق' },
   feedbackAttachRow: { en: 'Attached', ar: 'المرفق' },
-  feedbackDetailNone: { en: 'Just what you wrote', ar: 'ما كتبته فقط' },
-  feedbackDetailNoneHint: { en: 'Nothing from your ledger.', ar: 'لا شيء من سجلك.' },
-  feedbackDetailShapes: { en: 'And the message shapes', ar: 'وأشكال الرسائل' },
-  feedbackDetailShapesHint: {
-    en: 'Bank messages with every digit blanked and every name replaced. Send this if an entry was read wrong.',
-    ar: 'رسائل البنك مع حذف كل رقم واستبدال كل اسم. أرسل هذا إذا قُرئت عملية بشكل خاطئ.',
-  },
   feedbackDetailFigures: { en: 'And the amounts behind your totals', ar: 'والمبالغ خلف مجاميعك' },
-  feedbackDetailFiguresHint: {
-    en: 'Adds balances and statement figures. Still no names. Send this if a total looks wrong.',
-    ar: 'يضيف الأرصدة وأرقام الكشوف. ولا أسماء أيضاً. أرسل هذا إذا بدا أحد المجاميع خاطئاً.',
-  },
-  feedbackPrivateOn: {
-    en: 'Private Mode is on, so only your message can be sent.',
-    ar: 'الوضع الخاص مفعّل، لذا لا يمكن إرسال سوى رسالتك.',
-  },
-  feedbackPrivateBlocked: {
-    en: 'Private Mode keeps your ledger on this phone.',
-    ar: 'الوضع الخاص يُبقي سجلك على هذا الهاتف.',
-  },
   feedbackPreviewHeader: { en: 'EXACTLY WHAT WILL BE SENT', ar: 'ما سيُرسل بالضبط' },
   // The preview carries more than the message: the chosen type and the build
   // lines (app version, platform, language, market and currency) travel too.
@@ -3972,10 +2849,6 @@ const S = {
   feedbackNoTransportBody: {
     en: 'This build has no direct feedback connection, so nothing was uploaded. Install a newer Wafra test build.',
     ar: 'لا تتضمن هذه النسخة اتصالاً مباشراً للملاحظات، لذا لم يُرفع شيء. ثبّت نسخة اختبار أحدث من وفرة.',
-  },
-  feedbackPreparing: {
-    en: 'Preparing the attachment…',
-    ar: 'جارٍ تجهيز المرفق…',
   },
   feedbackFailedTitle: { en: 'Could not send', ar: 'تعذّر الإرسال' },
   /**
@@ -4023,16 +2896,6 @@ const S = {
     en: 'The server is limiting how many reports it takes per hour. Save a copy and send it again in a while.',
     ar: 'يحدّ الخادم عدد التقارير المقبولة في الساعة. احفظ نسخة وأعد الإرسال بعد قليل.',
   },
-  onboardImportResult: {
-    en: '{entries} entr{ending} filed{cards}. Nothing left the phone.',
-    ar: 'سُجّلت {entries} عملية{cards}. لم يغادر شيء الهاتف.',
-  },
-  onboardCardsFound: { en: ' · {count} card{s} found', ar: ' · عُثر على {count} بطاقة' },
-  onboardScanProgress: {
-    en: '{read} messages read · {matched} matched.',
-    ar: 'قُرئت {read} رسالة · طابقت {matched}.',
-  },
-  seeCategoryEntriesA11y: { en: '{category}, see entries', ar: '{category}، عرض العمليات' },
   insightTrendingHigher: { en: 'Trending {percent}% higher', ar: 'يتجه للارتفاع {percent}٪' },
   insightTrendingLower: { en: 'Trending {percent}% lower', ar: 'يتجه للانخفاض {percent}٪' },
   insightPaceBody: {
@@ -4141,7 +3004,6 @@ const S = {
     en: 'The link may be old. Your ledger is fine.',
     ar: 'ربما الرابط قديم. سجلّك سليم.',
   },
-  goHome: { en: 'Go to Home', ar: 'الذهاب إلى الرئيسية' },
 
   // ── Titles the PARSER mints ──
   //

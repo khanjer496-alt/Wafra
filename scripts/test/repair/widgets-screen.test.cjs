@@ -79,11 +79,14 @@ test('no snapshot is previewed when the app writes none (private mode, not onboa
   }
 });
 
-test('Home delegates widgets to the cooperative full-ledger producer, independent of its short payment list', () => {
+test('widgets come from the cooperative full-ledger producer, owned by the tab shell, not Home\'s short payment list', () => {
+  // The sync moved from Home to CaptureOwner's hook so a paused Home cannot leave widgets stale.
+  const owner = read('src/hooks/use-widget-snapshot-sync.ts');
+  assert.match(owner, /requestWidgetSnapshotSync\(/);
+  assert.match(owner, /invalidateWidgetSnapshotSync\(/);
   const home = read('src/screens/journal-home-screen.tsx');
-  assert.match(home, /requestWidgetSnapshotSync\(/);
-  assert.match(home, /invalidateWidgetSnapshotSync\(/);
   assert.doesNotMatch(home, /upcoming: widgetUpcomingInput\(payments\)/);
+  assert.doesNotMatch(home, /requestWidgetSnapshotSync\(/);
 });
 
 // ── Pure preview rules mirror the native widgets ───────────────────────────
@@ -418,7 +421,7 @@ test('the Widgets route exists and both entry points reach it', () => {
   assert.ok(fs.existsSync(path.join(root, 'src/app/widgets.tsx')));
   assert.match(read('src/app/widgets.tsx'), /export default function WidgetsScreen/);
   const settings = read('src/app/settings.tsx');
-  assert.match(settings, /Platform\.OS !== 'web' && linkRow\(\s*widgetWords\.settingsTitle,[\s\S]{0,160}router\.push\('\/widgets'\),\s*\{ icon: 'home', testID: 'settings-widgets' \}/);
+  assert.match(settings, /Platform\.OS !== 'web' && linkRow\(\s*widgetWords\.settingsTitle,[\s\S]{0,160}router\.push\('\/widgets'\),\s*\{ icon: 'home', testID: 'settings-widgets', last: true \}/);
   // In the personalisation group, beside Customize Home.
   const preferences = settings.slice(settings.indexOf("t('settingsPreferencesHeader')"), settings.indexOf('settings-region'));
   assert.ok(preferences.includes('widgetWords.settingsTitle'));
@@ -464,14 +467,14 @@ test('the small Today widget labels its seven bars with the exact complete seven
   // The bars are never alone: the labelled exact total sits right under them.
   assert.match(source, /words\.widgetLast7Total[\s\S]{0,400}<WeekBars snapshot=\{snapshot\}[\s\S]{0,400}\{weekShown\}/);
   assert.deepEqual(preview.widgetWeekShares(snapshot).map((v) => Math.round(v * 7)), [1, 2, 3, 4, 5, 6, 7]);
-  assert.match(source, /Image source=\{row\.logo\.source\}/);
+  assert.doesNotMatch(source, /expo-image|merchantLogoFor/);
 });
 
 
 test('subscription preview logos match native allowlisted snapshot identities with old-snapshot fallback', async () => {
   const bill = { title: 'Netflix', amountMinor: 3900, estimated: true, dueISO: '2026-09-27' };
   const withLogo = await screen({ snapshotOverride: { bills: [{ ...bill, logoId: 'netflix' }] } });
-  assert.equal(walk(withLogo.find('widgets-preview-upcoming')).filter(n => n.type === 'Image').length, 1);
+  assert.equal(walk(withLogo.find('widgets-preview-upcoming')).filter(n => n.type === 'Image').length, 0);
   for (const logoId of [undefined, 'unknown', '../netflix']) {
     const withoutLogo = await screen({ snapshotOverride: { bills: [{ ...bill, logoId }] } });
     assert.equal(walk(withoutLogo.find('widgets-preview-upcoming')).filter(n => n.type === 'Image').length, 0);

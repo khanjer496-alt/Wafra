@@ -1,0 +1,101 @@
+name: iOS completed device QA signing cleanup
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 'Original iOS device build run ID (receipt must still exist)'
+        required: true
+        type: string
+      source_run_attempt:
+        description: 'Original run attempt'
+        required: true
+        default: '1'
+        type: string
+      certificate_id:
+        description: 'Exact DEVELOPMENT certificate ID from original receipt'
+        required: true
+        type: string
+      profile_ids:
+        description: 'Exact comma-separated profile IDs from original receipt, no spaces'
+        required: true
+        type: string
+      qa_pass_message_id:
+        description: 'App QA completed iPhone-pass message UUID, checked by CEO before dispatch'
+        required: true
+        type: string
+      cleanup_approval:
+        description: 'CEO go after App QA completion: DELETE_COMPLETED_QA_SIGNING'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: wafra-ios-device-signing
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: macos-26
+    environment: ios-device-qa
+    timeout-minutes: 15
+    env:
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+      SOURCE_RUN_ATTEMPT: ${{ inputs.source_run_attempt }}
+      CERTIFICATE_ID: ${{ inputs.certificate_id }}
+      PROFILE_IDS: ${{ inputs.profile_ids }}
+      QA_PASS_MESSAGE_ID: ${{ inputs.qa_pass_message_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Require completed QA and separate CEO cleanup go
+        env:
+          APPROVAL: ${{ inputs.cleanup_approval }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$APPROVAL" = DELETE_COMPLETED_QA_SIGNING
+          [[ "$SOURCE_RUN_ID" =~ ^[0-9]+$ && "$SOURCE_RUN_ATTEMPT" =~ ^[0-9]+$ ]]
+          [[ "$CERTIFICATE_ID" =~ ^[A-Z0-9]+$ && "$PROFILE_IDS" =~ ^[A-Z0-9]+(,[A-Z0-9]+)*$ ]]
+          [[ "$QA_PASS_MESSAGE_ID" =~ ^[0-9a-fA-F-]{36}$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" > "$RUNNER_TEMP/source-run.json"
+          python3 -I <<'PY'
+          import json,os,pathlib
+          run=json.loads((pathlib.Path(os.environ['RUNNER_TEMP'])/'source-run.json').read_text())
+          assert run['path']=='.github/workflows/ios-device-build.yml'
+          assert run['event']=='workflow_dispatch' and run['status']=='completed'
+          assert run['repository']['full_name']==os.environ['GITHUB_REPOSITORY']
+          assert run['head_branch'] in ('main','release/1.0.0-rc1-reconciled')
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          name: ios-device-signing-receipt-${{ inputs.source_run_id }}-${{ inputs.source_run_attempt }}
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+          path: receipt
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install signing API dependencies
+        run: |
+          python3 -m venv "$RUNNER_TEMP/signing-venv"
+          "$RUNNER_TEMP/signing-venv/bin/pip" install PyJWT==2.10.1 cryptography==46.0.3
+      - name: Delete only verified profiles and revoke only the recorded development cert
+        env:
+          ASC_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+        run: |
+          "$RUNNER_TEMP/signing-venv/bin/python" scripts/ci/ios-device-signing.py cleanup receipt/signing-receipt.json
+      - name: Preserve deletion IDs for the local account log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-device-cleanup-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: cleanup-report.json
+          if-no-files-found: ignore
+          retention-days: 7

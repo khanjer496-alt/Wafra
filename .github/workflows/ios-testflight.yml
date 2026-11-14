@@ -62,7 +62,7 @@ on:
           - preview
         default: production
       submit:
-        description: 'Also send the finished store-signed build to TestFlight. Supported by production, production-candidate and history-beta; preview is ad-hoc only.'
+        description: 'Submit only a github-macos build after its signed IPA checks. Hosted EAS and existing-build submissions are refused.'
         type: boolean
         default: false
       wait:
@@ -78,7 +78,7 @@ on:
         type: boolean
         default: false
       submit_build_id:
-        description: 'Submit a build that ALREADY EXISTS instead of making a new one. Paste an EAS build id. Use this when a build succeeded but its submission did not — rebuilding to retry a submission wastes 20-40 minutes for a binary that is already sitting on EAS. Every other input is ignored.'
+        description: 'Disabled: existing build IDs cannot bypass signed-IPA verification. Use github-macos for a separately authorized checked upload.'
         type: string
         default: ''
 
@@ -98,7 +98,27 @@ defaults:
     shell: bash
 
 jobs:
+  validate-request:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse unchecked submission routes
+        env:
+          BUILD_HOST: ${{ inputs.build_host }}
+          WANT_SUBMIT: ${{ inputs.submit }}
+          SUBMIT_BUILD_ID: ${{ inputs.submit_build_id }}
+        run: |
+          case "$BUILD_HOST" in eas|github-macos) ;; *) echo 'Unknown build host.' >&2; exit 1 ;; esac
+          if [ -n "$SUBMIT_BUILD_ID" ]; then
+            echo 'submit_build_id is disabled: an existing IPA has not passed this workflow verification.' >&2
+            exit 1
+          fi
+          if [ "$WANT_SUBMIT" = "true" ] && [ "$BUILD_HOST" != "github-macos" ]; then
+            echo 'Submission requires build_host=github-macos and the signed IPA verification step.' >&2
+            exit 1
+          fi
+
   build:
+    needs: validate-request
     if: inputs.build_host != 'github-macos' || inputs.submit_build_id != ''
     runs-on: ubuntu-latest
     # Generous because `wait = true` sits through the EAS queue plus a ~20
@@ -390,11 +410,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Generate and check the shipping iOS background parser
+      # Read-only on purpose: a release build ships exactly the committed, reviewed
+      # parser bundle and fails when it is stale. It never regenerates one. Fix a
+      # stale bundle with `node scripts/generate-ios-background-parser.cjs` on a
+      # branch, review and commit the result, then build.
+      - name: Check the committed iOS background parser is fresh
         if: inputs.submit_build_id == ''
-        run: |
-          node scripts/generate-ios-background-parser.cjs
-          node scripts/generate-ios-background-parser.cjs --check
+        run: node scripts/generate-ios-background-parser.cjs --check
 
       - name: Validate OTA-enabled store build configuration
         if: inputs.submit_build_id == '' && inputs.profile != 'preview'
@@ -462,53 +484,12 @@ jobs:
       #      which is Enterprise-only, so build 7 compiled and its submission
       #      was refused. The build id was in the log; there was nothing that
       #      could take it.
-      - name: Submit an existing build
+      - name: Refuse unchecked existing build submission
         id: submit_only
         if: inputs.submit_build_id != ''
-        env:
-          BUILD_ID: ${{ inputs.submit_build_id }}
         run: |
-          set -o pipefail
-          if ! printf '%s' "$BUILD_ID" | grep -qiE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'; then
-            {
-              echo "# Not started — \`submit_build_id\` is not an EAS build id"
-              echo
-              echo "It should be a UUID, e.g. \`0f7dcb34-5ac1-42a9-80f9-60cac2170905\`. It is the last"
-              echo "path segment of the build page URL, and it is printed as **Build ID** in the log of"
-              echo "the run that made it."
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-
-          set +e
-          eas submit --platform ios --profile production --id "$BUILD_ID" --non-interactive 2>&1 | tee submit.log
-          status=${PIPESTATUS[0]}
-          set -e
-
-          if [ "$status" = "0" ]; then
-            {
-              echo "# 🚀 Submitted to TestFlight"
-              echo
-              echo "Build \`$BUILD_ID\` was handed to App Store Connect. **No new build was made.**"
-              echo
-              echo "Apple processing takes 10-15 minutes. After that it is installable from the"
-              echo "TestFlight app for **internal** testers, with no Beta App Review."
-              echo
-              echo "Set the \"What to Test\" note by hand in App Store Connect → TestFlight — this"
-              echo "workflow cannot send one on a non-Enterprise plan."
-            } >> "$GITHUB_STEP_SUMMARY"
-          else
-            {
-              echo "# ❌ The submission failed"
-              echo
-              echo "The build itself is untouched and still on EAS. Nothing needs rebuilding."
-              echo
-              echo '```'
-              tail -20 submit.log
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
-          exit "$status"
+          echo 'Existing build submission is disabled; use the checked github-macos route.' >&2
+          exit 1
 
       - name: Start the iOS build
         id: build
@@ -527,8 +508,8 @@ jobs:
           if [ "$WAIT" = "true" ]; then args+=(--wait); else args+=(--no-wait); fi
 
           if [ "$WANT_SUBMIT" = "true" ]; then
-            args+=(--auto-submit-with-profile "$PROFILE")
-            if [ -n "$WHAT_TO_TEST" ]; then args+=(--what-to-test "$WHAT_TO_TEST"); fi
+            echo 'Hosted EAS submission is disabled; use the checked github-macos route.' >&2
+            exit 1
           fi
 
           args+=(--message "GitHub Actions run ${GITHUB_RUN_NUMBER} (${GITHUB_REF_NAME})")
@@ -705,9 +686,9 @@ jobs:
                 echo "→ TestFlight, which every plan can do."
                 echo
               fi
-              echo "## Send this build without rebuilding"
+              echo "## Upload remains gated"
               echo
-              echo "Run this workflow again with **submit_build_id** set to:"
+              echo "Existing-build submission is disabled. Record this Build ID for provenance:"
               echo
               if [ -n "$SUBMITTED_BUILD_ID" ]; then
                 echo '```'
@@ -717,7 +698,7 @@ jobs:
                 echo "the **Build ID** printed in the _Start the iOS build_ step above."
               fi
               echo
-              echo "Every other input is ignored in that mode, and no build minutes are spent."
+              echo "Use a separately authorized github-macos request; its IPA must pass verification before upload."
               echo
             } >> "$GITHUB_STEP_SUMMARY"
           elif [ "$EAS_STATUS" = "0" ]; then
@@ -848,7 +829,7 @@ jobs:
         with:
           name: wafra-ios-build-report
           path: ios-build-evidence/
-          retention-days: 14
+          retention-days: 7
 
       # The key is in RUNNER_TEMP, which GitHub clears anyway, but a private
       # key on disk for no reason is a habit worth not having.
@@ -857,6 +838,7 @@ jobs:
         run: rm -f "$RUNNER_TEMP/asc-api-key.p8"
 
   local-build:
+    needs: validate-request
     if: inputs.build_host == 'github-macos' && inputs.submit_build_id == ''
     runs-on: macos-26
     timeout-minutes: 90
@@ -883,10 +865,16 @@ jobs:
           ref: ${{ inputs.source_commit || 'main' }}
           fetch-depth: 0
 
-      - name: Pin and verify main-line build source
+      - name: Pin and verify reviewed-line build source
         run: |
           SHA=$(git rev-parse HEAD)
-          git merge-base --is-ancestor "$SHA" origin/main
+          # The 1.0.0 release base is reviewed and merged on its own branch,
+          # which main has not caught up to yet. Accept either reviewed line;
+          # anything else (a feature branch, an unmerged PR head) still fails.
+          # Update the release branch name here for each new release line;
+          # ios-local-build-workflow.test.cjs pins this exact pair of checks.
+          git merge-base --is-ancestor "$SHA" origin/main \
+            || git merge-base --is-ancestor "$SHA" origin/release/1.0.0-rc1-reconciled
           echo "SOURCE_COMMIT=$SHA" >> "$GITHUB_ENV"
           node scripts/check-design-baseline.mjs
 
@@ -919,10 +907,10 @@ jobs:
           fastlane --version
           pod --version
 
-      - name: Generate and check the shipping iOS background parser
-        run: |
-          node scripts/generate-ios-background-parser.cjs
-          node scripts/generate-ios-background-parser.cjs --check
+      # Read-only on purpose (see the check in the build job): the local build
+      # ships the committed bundle or fails; it never regenerates one.
+      - name: Check the committed iOS background parser is fresh
+        run: node scripts/generate-ios-background-parser.cjs --check
 
       - name: Prepare existing Apple credentials without printing them
         env:
@@ -956,12 +944,29 @@ jobs:
           npm run update:check
           node scripts/test/ios-history-native-contract.test.js
 
+      # On failure this step also writes a capped plain-text summary (error lines and
+      # the EAS phase, control bytes stripped, the job's secret values and
+      # credential-shaped strings redacted; scripts/ci/summarize-ios-build.cjs).
+      # It is uploaded below so the cause can be read without the raw log. The
+      # build's real exit code is preserved: the summary is evidence, never a gate.
       - name: Build signed iOS archive on this macOS runner
         run: |
           FREEZE=--freeze-credentials
           if [ "${{ inputs.repair_credentials }}" = "true" ]; then FREEZE=; fi
+          export EAS_LOCAL_BUILD_WORKINGDIR="$RUNNER_TEMP/eas-local-build" EAS_LOCAL_BUILD_SKIP_CLEANUP=1
+          mkdir -p "$EAS_LOCAL_BUILD_WORKINGDIR"
+          set +e
           eas build --platform ios --profile "${{ inputs.profile }}" --local --non-interactive \
-            $FREEZE --output "$RUNNER_TEMP/Wafra-local.ipa"
+            $FREEZE --output "$RUNNER_TEMP/Wafra-local.ipa" 2>&1 | tee "$RUNNER_TEMP/wafra-ios-build.log"
+          BUILD_STATUS=${PIPESTATUS[0]}
+          set -e
+          if [ "$BUILD_STATUS" -ne 0 ]; then
+            mkdir -p artifacts/ios-build-failure
+            BUILD_EXIT="$BUILD_STATUS" node scripts/ci/summarize-ios-build.cjs \
+              "$RUNNER_TEMP/wafra-ios-build.log" "$EAS_LOCAL_BUILD_WORKINGDIR" "$HOME/Library/Logs/gym" \
+              > artifacts/ios-build-failure/summary.txt || echo 'Could not write the build failure summary.'
+          fi
+          exit "$BUILD_STATUS"
 
       - name: Verify the actual signed IPA and App Intent resources
         id: ipa
@@ -971,6 +976,7 @@ jobs:
           ditto -x -k "$RUNNER_TEMP/Wafra-local.ipa" "$RUNNER_TEMP/wafra-ipa-check"
           APP="$RUNNER_TEMP/wafra-ipa-check/Payload/Wafra.app"
           test -d "$APP"
+          python3 scripts/check-ios-product-versions.py "$APP"
           codesign --verify --deep --strict --verbose=2 "$APP"
           codesign -d --entitlements :- "$APP" > "$RUNNER_TEMP/wafra-entitlements.plist"
           security cms -D -i "$APP/embedded.mobileprovision" > "$RUNNER_TEMP/wafra-profile.plist"
@@ -999,7 +1005,7 @@ jobs:
           assert 'ProbeWafraAutomationInputIntent' not in actions
           parser_meta=json.loads((app/'WafraLiveCaptureResources.bundle/WafraBackgroundParser.meta.json').read_text())
           number=str(info['CFBundleVersion']); version=info['CFBundleShortVersionString']
-          source=temp/'Wafra-local.ipa'; target=pathlib.Path('artifacts/ios-local')/f'Wafra-{version}-{number}.ipa'
+          source=temp/'Wafra-local.ipa'; target=temp/f'Wafra-{version}-{number}.ipa'
           shutil.copyfile(source,target)
           report={'sourceCommit':os.environ['SOURCE_COMMIT'],'buildHost':'github-macos','profile':os.environ.get('BUILD_PROFILE','history-beta'),
               'version':version,'buildNumber':number,'bundleIdentifier':info['CFBundleIdentifier'],
@@ -1012,12 +1018,15 @@ jobs:
           print(json.dumps(report,indent=2))
           PY
 
-      - name: Preserve verified installer before submission
+      # The repository is public, so artifacts are downloadable by anyone signed
+      # in to GitHub. Only the verification report (hashes, versions, source) is
+      # uploaded; the signed IPA stays in RUNNER_TEMP for the submit step below.
+      - name: Preserve verification report before submission
         uses: actions/upload-artifact@v4
         with:
           name: wafra-ios-local-${{ steps.ipa.outputs.build_number }}
-          path: artifacts/ios-local/
-          retention-days: 14
+          path: artifacts/ios-local/verification.json
+          retention-days: 3
 
       - name: Require successful exact-source CI before TestFlight submission
         if: inputs.submit
@@ -1030,7 +1039,7 @@ jobs:
             fi
             sleep 20
           done
-          echo 'Exact-source CI has not passed. Verified IPA retained; no TestFlight submission.'
+          echo 'Exact-source CI has not passed. No TestFlight submission; rebuild once CI is green.'
           exit 1
 
       - name: Submit the verified existing IPA to TestFlight
@@ -1042,3 +1051,13 @@ jobs:
       - name: Remove temporary Apple API key
         if: always()
         run: rm -f "$RUNNER_TEMP/wafra-local-asc.p8"
+      - name: Preserve iOS archive failure summary
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/ios-build-failure/summary.txt
+          if-no-files-found: ignore
+          retention-days: 7
+

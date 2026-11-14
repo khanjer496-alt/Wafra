@@ -8,6 +8,7 @@ import {
   type ParserResearchWirePayload,
   serializeFeedbackWire,
 } from '@/lib/feedback-wire';
+import { PARSER_RESEARCH_BUILD_FLAG } from '@/lib/parser-research-flag';
 import { DEFAULT_RELAY_URL } from '@/lib/relay';
 
 /**
@@ -37,7 +38,7 @@ interface FeedbackResponse {
   dispatched?: unknown;
 }
 
-export interface TesterDiagnosticWirePayload {
+interface TesterDiagnosticWirePayload {
   schema: 1;
   text: 'Android tester diagnostics.';
   appVersion: string;
@@ -168,7 +169,8 @@ async function postFeedback(payload: FeedbackPayload): Promise<FeedbackReceipt> 
 export async function submitParserResearchFeedback(
   wire: ParserResearchWirePayload,
 ): Promise<FeedbackReceipt> {
-  if (process.env.EXPO_PUBLIC_WAFRA_PARSER_RESEARCH !== '1') {
+  // Derived from the compiled build marker (parser-research-flag.ts).
+  if (!PARSER_RESEARCH_BUILD_FLAG.endsWith('=on')) {
     throw new FeedbackSendError('Parser research is unavailable in this build.', 'disabled');
   }
   if (!DEFAULT_RELAY_URL) {

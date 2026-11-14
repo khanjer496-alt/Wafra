@@ -30,10 +30,33 @@ for (const language of ['en', 'ar']) for (const largeText of [false, true]) {
     const { AssistantMonthChart } = load(path.join(root, 'src/components/assistant-answer-extras.tsx'), h.deps);
     const money = { currency: 'KWD', exponent: 3 };
     const assistant = AssistantMonthChart({ series: months.map(month => ({ month: month.key, totalFils: month.fils })), money, language, largeText, palette });
-    for (const month of months) assert.ok(text(assistant).includes(h.deps['@/lib/ledger-money'].formatMoneyText(month.fils, money)));
+    for (const month of months) {
+      const amount = h.deps['@/lib/ledger-money'].formatMinorUnits(month.fils, money);
+      const expected = language === 'ar' ? `\u2066${amount}\u00a0KWD\u2069`
+        : h.deps['@/lib/ledger-money'].formatMoneyText(month.fils, money);
+      assert.ok(walk(assistant).some(node => node.type === 'Text' && text(node) === expected),
+        'the exact amount and code remain one visible run, including Arabic isolates');
+      assert.ok(walk(assistant).some(node => node.props?.accessible && node.props.accessibilityLabel?.includes(expected)),
+        'the same isolated amount/code run is spoken by the month row');
+    }
     assert.equal(walk(assistant).filter(node => node.type === 'GrowBar')[0].props.size, 0);
   });
 }
+test('Arabic assistant rows retain exact isolates, minus sign, zero and KWD precision', () => {
+  const h = createHarness({ language: 'ar', width: 320 });
+  h.deps['@/components/ui/grow-bar'] = { GrowBar: props => h.jsx('GrowBar', props) };
+  const { AssistantMonthChart } = load(path.join(root, 'src/components/assistant-answer-extras.tsx'), h.deps);
+  const series = [{ month: '2026-07', totalFils: 0 }, { month: '2026-08', totalFils: -7 }, { month: '2026-09', totalFils: 123456789 }];
+  const before = JSON.stringify(series);
+  const tree = AssistantMonthChart({ series, money: { currency: 'KWD', exponent: 3 }, language: 'ar', largeText: false,
+    palette: h.deps['@/constants/theme'].bandPalette('spending', 'light') });
+  for (const expected of ['\u20660\u00a0KWD\u2069', '\u2066-0.007\u00a0KWD\u2069', '\u2066123,456.789\u00a0KWD\u2069']) {
+    assert.ok(walk(tree).some(node => node.type === 'Text' && text(node) === expected));
+    assert.ok(walk(tree).some(node => node.props?.accessible && node.props.accessibilityLabel?.includes(expected)));
+  }
+  assert.equal(JSON.stringify(series), before, 'rendering does not alter signed minor units');
+});
+
 test('limit history keeps exact monthly amounts and one shared limit position on every track', () => {
   const h = createHarness({ states: { 1: '1500.25' } });
   const state = h.deps['@/lib/store'].useStore().state;

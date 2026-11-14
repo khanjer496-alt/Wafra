@@ -66,7 +66,7 @@ export function billDueISO(dueDay: number, key: string): string {
   return dueDateInMonth(key, dueDay);
 }
 
-export type BillStatus = 'paid' | 'overdue' | 'due-soon' | 'upcoming';
+type BillStatus = 'paid' | 'overdue' | 'due-soon' | 'upcoming';
 
 export interface BillWithStatus {
   bill: Bill;

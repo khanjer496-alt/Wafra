@@ -195,7 +195,7 @@ const reminderScheduler: ReminderSchedulerApi = {
   },
 };
 
-export interface ReminderSyncOptions {
+interface ReminderSyncOptions {
   /** Headless capture updates known obligations without rescanning recurrence. */
   obligationsOnly?: boolean;
 }
@@ -266,12 +266,14 @@ async function syncPaymentRemindersNow(
   }
 
   // Recurrence detection is a complete-ledger analysis. On a 10k-20k row
-  // Android ledger the synchronous detector can monopolise Hermes for seconds
+  // ledger the synchronous detector can monopolise Hermes for seconds
   // immediately after Home becomes visible, which looks exactly like a launch
   // freeze. Bills already uses the cooperative detector; reminder setup must do
-  // the same because it runs automatically once per app launch.
+  // the same because it runs automatically once per app launch, on iOS (where it
+  // re-arms about 8 s after every ledger change) as well as on Android. Without a
+  // detected list, buildPaymentReminders would fall back to the synchronous one.
   let detectedSubscriptions: readonly Subscription[] | undefined = obligationsOnly ? [] : undefined;
-  if (Platform.OS === 'android' && !obligationsOnly) {
+  if ((Platform.OS === 'android' || Platform.OS === 'ios') && !obligationsOnly) {
     if (historyBusy) {
       detectedSubscriptions = [];
     } else {
@@ -284,6 +286,8 @@ async function syncPaymentRemindersNow(
         now,
         liveAccounts,
         internalTransfers,
+        // A newer request supersedes this one: stop analysing for it, as the widget sync does.
+        () => !isCurrent(),
       );
       recordRuntimeOperation('reminder-projection', Date.now() - startedAt);
       if (detected === null) return;

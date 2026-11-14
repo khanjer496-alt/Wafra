@@ -103,6 +103,8 @@ const en = {
   captureBodyWeb: 'Add entries yourself here. Automatic capture needs the Android or iPhone app.',
   waitingTitle: 'Waiting for your first payment',
   waitingBody: 'New payments appear here as they arrive, from bank alerts or Apple Pay.',
+  // Android has no Apple Pay; its payments arrive from bank SMS and bank-app alerts.
+  waitingBodyAndroid: 'New payments appear here as they arrive, from your bank alerts.',
   workingTitle: (name: string | null) => name ? `${name}, it’s working.` : 'It’s working.',
   addedByItself: 'Added automatically.',
   ofLimit: (spent: string, limit: string) => `${spent} of ${limit}`,
@@ -137,13 +139,13 @@ const en = {
   trialTodayBodyOff: 'Automatic capture is yours to turn on. No card needed.',
   /** trialDaysLeft rounds up, so the end is "within", never an exact count. */
   trialEnd: (days: number) => days === 1 ? 'Within a day' : `Within ${days} days`,
-  trialEndBody: 'Automatic capture pauses. Nothing is charged, and your ledger stays.',
+  trialEndBody: 'Automatic capture pauses. Nothing is charged, your ledger stays, and manual entry and imports stay free.',
   continuePro: 'Continue with Pro',
   planYearly: 'Yearly',
   planWeekly: 'Weekly',
-  startFree: (days: number) => days === 1 ? 'Start the free day' : `Start the free ${days} days`,
+  startFree: (days: number) => `Start ${days} ${days === 1 ? 'day' : 'days'} of free automatic capture`,
   continueFree: 'Continue without Pro',
-  trialTimelineLabel: 'What happens during the free days',
+  trialTimelineLabel: 'What happens with free automatic capture',
 };
 
 type OnboardingECopy = typeof en;
@@ -213,6 +215,7 @@ const ar: OnboardingECopy = {
   captureBodyWeb: 'أضف العمليات بنفسك هنا. يتطلب الالتقاط التلقائي تطبيق أندرويد أو آيفون.',
   waitingTitle: 'بانتظار أول دفعة لك',
   waitingBody: 'تظهر الدفعات الجديدة هنا فور حدوثها، من تنبيهات البنك أو Apple Pay.',
+  waitingBodyAndroid: 'تظهر الدفعات الجديدة هنا فور حدوثها، من تنبيهات البنك.',
   workingTitle: (name: string | null) => name ? `${name}، كل شيء يعمل.` : 'كل شيء يعمل.',
   addedByItself: 'أُضيفت تلقائياً.',
   ofLimit: (spent: string, limit: string) => `${spent} من ${limit}`,
@@ -243,15 +246,13 @@ const ar: OnboardingECopy = {
   trialTodayBodyOff: 'يمكنك تفعيل الالتقاط التلقائي متى شئت. دون بطاقة.',
   trialEnd: (days: number) => days === 1 ? 'خلال يوم'
     : `خلال ${arabicCount(days, { one: 'يوم', two: 'يومين', few: 'أيام', many: 'يوماً', hundreds: 'يوم' })}`,
-  trialEndBody: 'يتوقف الالتقاط التلقائي مؤقتاً. لا يُخصم أي مبلغ، ويبقى سجلك كما هو.',
+  trialEndBody: 'يتوقف الالتقاط التلقائي مؤقتاً. لا يُخصم أي مبلغ، ويبقى سجلك كما هو، ويبقى الإدخال اليدوي والاستيراد مجانيَّين.',
   continuePro: 'المتابعة مع Pro',
   planYearly: 'سنوي',
   planWeekly: 'أسبوعي',
-  startFree: (days: number) => days === 1 ? 'ابدأ اليوم المجاني'
-    : days === 2 ? 'ابدأ اليومين المجانيين'
-      : `ابدأ ${arabicCount(days, { one: 'يوماً مجانياً', two: 'يومين مجانيين', few: 'أيام مجانية', many: 'يوماً مجانياً', hundreds: 'يوم مجاني' })}`,
+  startFree: (days: number) => `ابدأ الالتقاط التلقائي المجاني: ${arabicCount(days, { one: 'يوم واحد', two: 'يومان', few: 'أيام', many: 'يوماً', hundreds: 'يوم' })}`,
   continueFree: 'المتابعة دون Pro',
-  trialTimelineLabel: 'ما يحدث خلال الأيام المجانية',
+  trialTimelineLabel: 'ما يحدث مع الالتقاط التلقائي المجاني',
 };
 
 export const ONBOARDING_E_COPY: Record<Lang, OnboardingECopy> = { en, ar };

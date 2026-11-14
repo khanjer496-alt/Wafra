@@ -37,10 +37,25 @@ for (const language of ['en', 'ar']) for (const fontScale of [1, 1.3, 3.1]) {
       assert.equal(rolling.props.maxFontSizeMultiplier, digits.props.maxFontSizeMultiplier);
       assert.equal(rolling.props.prefix, false, 'currency layout is shared by static and rolling');
       assert.equal(staticTree.props.accessibilityLabel, rollingTree.props.accessibilityLabel);
-      assert.ok(staticTree.props.accessibilityLabel.includes(`AED ${amount}`));
+      assert.equal(staticTree.props.accessibilityLabel, language === 'ar'
+        ? `\u2066${amount}\u00a0AED\u2069` : `AED ${amount}`,
+      'the whole exact amount/code run keeps Arabic isolates and nonbreaking space');
     }
   });
 }
+for (const language of ['en', 'ar']) test(`spoken band runs keep exact signs and non-AED precision (${language})`, () => {
+  const h = createHarness({ language, width: 320 });
+  const { BandFigure } = h.deps['@/components/ui/band/band-figure'];
+  const palette = h.deps['@/constants/theme'].bandPalette('home', 'light');
+  for (const [fils, sign, figure] of [[-828, 'auto', '−0.828'], [828, 'plus', '+0.828'], [0, 'none', '0']]) {
+    const expected = language === 'ar' ? `Net, \u2066${figure}\u00a0KWD\u2069. Today` : `Net, KWD ${figure}. Today`;
+    for (const rolling of [false, true]) {
+      const tree = BandFigure({ fils, sign, rolling, palette, moneySpec: { currency: 'KWD', exponent: 3 }, label: 'Net', qualifier: 'Today' });
+      assert.equal(tree.props.accessibilityLabel, expected);
+    }
+  }
+});
+
 test('short amounts retain their intended size and locale currency placement', () => {
   const h = createHarness({ width: 390 });
   const { BandFigure } = h.deps['@/components/ui/band/band-figure'];

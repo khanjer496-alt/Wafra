@@ -4,7 +4,7 @@ import { inPeriod, type PeriodLike } from '@/lib/period';
 import type { Account, AppState } from '@/lib/types';
 import { transferOwnership } from '@/lib/transfer-reconciliation';
 
-export interface CashOutflowSummary {
+interface CashOutflowSummary {
   /** Cash that actually left bank, debit-card, or cash accounts. */
   totalFils: number;
   /** Distinct credit-card settlements included once. */
@@ -15,7 +15,7 @@ export interface CashOutflowSummary {
   transactionIds: ReadonlySet<string>;
 }
 
-export interface CashOutflowScope {
+interface CashOutflowScope {
   live?: ReadonlySet<string>;
   internal?: ReadonlySet<string>;
 }

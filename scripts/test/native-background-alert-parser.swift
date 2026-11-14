@@ -263,6 +263,31 @@ struct NativeBackgroundAlertParserTests {
     let runtime = WafraBackgroundAlertParserRuntime(scriptURL: script, metadataURL: metadata)
     let domestic = await read(runtime, body: "Purchase of AED 24.86 with Debit Card ending 1234 at SAMPLE STORE.", sender: "ADCB", context: context(hash: hash))
     check("shipping resource preserves domestic source amount", domestic?.formattedAmount == "AED 24.86")
+    let codeWarnings = ["Do not share your verification code.", "Do not share your verification code with anyone.",
+      "Please do not disclose your security code.", "Keep your one-time code confidential.",
+      "Never share your OTP.", "Do not share the code with anyone, including bank staff."]
+    for (index, warning) in codeWarnings.enumerated() {
+      for balance in ["", " Avl Bal AED 5,000.00."] {
+        let preview = await read(runtime,
+          body: "Your card ending 1354 was used for AED 37.00 at CARREFOUR.\(balance) \(warning)",
+          sender: "ENBD", context: context(hash: hash))
+        check("shipping warning footer \(index)/\(!balance.isEmpty) retains a purchase preview",
+          preview?.style == "movement" && preview?.direction == "debit" && preview?.formattedAmount == "AED 37.00")
+      }
+    }
+    for (index, held) in [
+      "ADCB Alert\nPayment received AED 500.00 on your card ending 2517.",
+      "Hi, payment received AED 500.00 on your card ending 2517",
+      "Thanks for your payment of AED 500.00 on your credit card ending 2554",
+      "Your credit card payment of AED 500.00 was successful",
+      "تم استلام سداد بمبلغ 500.00 درهم على بطاقتك الائتمانية المنتهية بـ 2665",
+      "لم يتم إيداع مبلغ 500.00 درهم في بطاقتك الائتمانية المنتهية بـ 2665",
+      "سيتم إيداع مبلغ 500.00 درهم في بطاقتك الائتمانية المنتهية بـ 2665 خلال 3 أيام عمل",
+      "تم إيداع مبلغ 500.00 درهم في بطاقتك الائتمانية المنتهية بـ 2665 اضغط على الرابط http://bit.ly/abc123"
+    ].enumerated() {
+      check("held repayment/non-event \(index) cannot emit an ordinary movement",
+        await read(runtime, body: held, sender: "ADCB", context: context(hash: hash)) == nil)
+    }
     let submillisecond = observedAt.addingTimeInterval(0.00075)
     let fractionalDomestic = await read(runtime, body: "Purchase of AED 24.86 with Debit Card ending 1234 at SAMPLE STORE.", sender: "ADCB", context: context(hash: hash), observedDate: submillisecond)
     check("shipping parser reads normal submillisecond capture timestamp", fractionalDomestic?.formattedAmount == "AED 24.86")
@@ -271,6 +296,27 @@ struct NativeBackgroundAlertParserTests {
     check("shipping parser accepts independently valid market and country", independent?.formattedAmount == "SAR 125.50")
     let foreign = await read(runtime, body: "Purchase of USD 24.86 with Debit Card ending 1234 at SAMPLE STORE.", sender: "ADCB", context: context(hash: hash))
     check("shipping resource preserves foreign source amount", foreign?.formattedAmount == "USD 24.86")
+    // The frozen corpus compared these source-currency notification previews
+    // against AED ledger expectations. Check every exact synthetic input in
+    // the real Swift/JavaScriptCore host, including senderless capture.
+    let corpusURL = URL(fileURLWithPath: "scripts/test/fixtures/ios-corpus-money.json")
+    let corpus = try JSONSerialization.jsonObject(with: Data(contentsOf: corpusURL)) as! [String: Any]
+    let moneyCases = corpus["cases"] as! [[String: Any]]
+    check("native money audit retains all ten frozen cases", moneyCases.count == 10)
+    for row in moneyCases {
+      let id = row["id"] as! String
+      let expected = row["expectedSource"] as! [String: Any]
+      for sender in ["ENBD", ""] {
+        let notification = await read(runtime, body: row["body"] as! String, sender: sender,
+          context: context(hash: hash), observedDate: Date(timeIntervalSince1970: 1_793_872_800))
+        check("\(id)/\(sender.isEmpty ? "blank" : "named") preserves exact source money",
+          notification?.style == "movement" && notification?.family == "purchase" &&
+          notification?.direction == "debit" && notification?.amount.currency == expected["currency"] as? String &&
+          notification?.amount.minorUnits == expected["minorUnits"] as? String &&
+          notification?.amount.exponent == expected["exponent"] as? Int &&
+          notification?.formattedAmount == row["expectedSourceFormatted"] as? String)
+      }
+    }
     let jod = await read(runtime, body: "Purchase of JOD 24.501 with Debit Card ending 1234 at SAMPLE STORE.", sender: "ENBD", context: context(hash: hash))
     check("shipping resource preserves three-decimal source units", jod?.formattedAmount == "JOD 24.501")
     let jpy = await read(runtime, body: "Purchase of JPY 2400 with Debit Card ending 1234 at SAMPLE STORE.", sender: "ENBD", context: context(hash: hash))

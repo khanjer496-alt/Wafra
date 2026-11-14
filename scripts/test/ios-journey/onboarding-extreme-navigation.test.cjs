@@ -141,7 +141,7 @@ async function gate(options = {}) {
   const dependencies = {
     '@/lib/ios-statement-handoff': statementHandoff,
     react, 'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
-    'react-native': { Platform: { OS: options.platform ?? 'ios', Version: '26.6', select: values => values.ios ?? values.default }, I18nManager: { isRTL: language === 'ar' }, View: 'View', Text: 'Text', TextInput: 'TextInput', Pressable: 'Pressable',
+    'react-native': { Platform: { OS: options.platform ?? 'ios', Version: options.version ?? '26.6', select: values => values.ios ?? values.default }, I18nManager: { isRTL: language === 'ar' }, View: 'View', Text: 'Text', TextInput: 'TextInput', Pressable: 'Pressable',
       Switch: 'Switch', ActivityIndicator: 'ActivityIndicator', PanResponder: { create: () => ({ panHandlers: {} }) },
       useWindowDimensions: () => ({ width: 390, height: 844 }),
       AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) }, ScrollView: 'ScrollView', StyleSheet: { create: value => value, hairlineWidth: 1, absoluteFillObject: {} },
@@ -184,7 +184,7 @@ async function gate(options = {}) {
     '@/components/ui/confirm-sheet': { ConfirmSheet: 'ConfirmSheet' }, '@/components/ui/controls': { Button: 'Button' },
     '@/components/ui/icon': { Icon: 'Icon' },
     '@/components/wafra-logo': { WafraMark: 'WafraMark' }, '@/constants/theme': theme,
-    '@/lib/auto-import': { isSmsScanningAvailable: () => true, requestSmsPermission: () => call('requestSmsPermission', undefined, true), hasSmsPermission: () => call('hasSmsPermission', undefined, false), hasBankNotificationSystemAccess: () => options.notificationAccess ?? false, openBankNotificationAccessSettings: () => call('openBankNotificationAccessSettings', undefined, true) },
+    '@/lib/auto-import': { isSmsScanningAvailable: () => true, requestSmsPermission: () => call('requestSmsPermission', undefined, true), hasSmsPermission: () => call('hasSmsPermission', undefined, false), hasBankNotificationSystemAccess: () => options.notificationAccess ?? false, openBankNotificationAccessSettings: async flow => { if (flow?.onAccepted && !await flow.onAccepted()) return false; return call('openBankNotificationAccessSettings', undefined, true); } },
     '@/lib/haptics': { committed: () => record('committed'), tapped() {} },
     '@/lib/notifications': { cancelDailySummary: () => call('cancelDailySummary'), syncDailySummary: () => call('syncDailySummary'),
       requestVisibleNotificationPermission: () => call('requestVisibleNotificationPermission', undefined, false) },
@@ -215,8 +215,6 @@ async function gate(options = {}) {
   dependencies['@/components/ui/text-field'] = { TextField: 'TextField' };
   dependencies['@/components/country-picker-sheet'] =
     load(path.join(root, 'src/components/country-picker-sheet.tsx'), dependencies);
-  dependencies['@/components/onboarding/country-confirm'] =
-    load(path.join(root, 'src/components/onboarding/country-confirm.tsx'), dependencies);
   // The iPhone statement step's decorative scene renders from real source too.
   dependencies['./alive-scenes'] = dependencies['@/components/onboarding/alive-scenes'];
   dependencies['@/components/onboarding/statement-scene'] =
@@ -305,7 +303,7 @@ async function gate(options = {}) {
       { setTimeout: setTimer, clearTimeout: clearTimer });
   }
   const component = load(options.sourcePath ?? process.env.WAFRA_ONBOARDING_SOURCE ?? path.join(root, 'src/components/onboarding-gate.tsx'), dependencies, {
-    process: { env: { EXPO_PUBLIC_WAFRA_E2E_DEMO: '1' } },
+    process: { env: { EXPO_PUBLIC_WAFRA_E2E_DEMO: '1' } }, __DEV__: options.development ?? true,
     setTimeout: setTimer, clearTimeout: clearTimer, Date: ClockDate,
   }).OnboardingGate;
   const render = () => {

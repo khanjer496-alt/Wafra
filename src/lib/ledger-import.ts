@@ -59,6 +59,7 @@ export interface MaterializedImportBatch {
   historyImport: ImportBatchInput['historyImport'];
   lastScanTs: number;
   updates: TxHealUpdate[];
+  possibleDuplicatesPosted?: string[];
 }
 
 const recentReread = (value: unknown): value is number =>
@@ -119,6 +120,7 @@ export const materializeImportBatch = (
     ...(recentReread(input.recentRereadParserVersion)
       ? { recentRereadParserVersion: input.recentRereadParserVersion } : {}),
     historyImport: input.historyImport,
+    ...(input.possibleDuplicatesPosted?.length ? { possibleDuplicatesPosted: [...input.possibleDuplicatesPosted] } : {}),
     lastScanTs: input.lastScanTs,
     updates: (input.updates ?? []).map((update) => ({
       ...update,

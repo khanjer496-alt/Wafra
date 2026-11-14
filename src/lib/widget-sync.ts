@@ -5,7 +5,7 @@ import type { AppState } from '@/lib/types';
 import type { WidgetSnapshot } from '@/lib/widget-snapshot';
 import { clearWidgetSnapshot, setWidgetSnapshot, widgetSnapshotClearCount } from '../../modules/wafra-widgets';
 
-export function widgetSnapshotAllowed(input: WidgetLedgerInput): boolean {
+function widgetSnapshotAllowed(input: WidgetLedgerInput): boolean {
   return input.state.hydrated && input.state.onboarded && !input.state.privateMode;
 }
 
@@ -38,7 +38,7 @@ export async function prepareWidgetSnapshot(
  * `unchanged`: the native copy already holds these figures (written by this
  * process, not cleared since, and recently enough), so nothing was rewritten.
  */
-export type WidgetSyncOutcome = 'written' | 'unchanged' | 'cleared' | 'pending' | 'cancelled' | 'failed';
+type WidgetSyncOutcome = 'written' | 'unchanged' | 'cleared' | 'pending' | 'cancelled' | 'failed';
 interface WidgetSyncDependencies {
   /** False (or a rejection) when the native copy was not stored. */
   write(json: string): void | boolean | Promise<void | boolean>;
@@ -48,6 +48,22 @@ interface WidgetSyncDependencies {
   now?: () => number;
   /** Changes whenever something outside this sync erased the native copy (Erase everything). */
   externalClears?: () => number;
+  /** Timer for the debounce; replaceable so tests need no real clock. */
+  schedule?: (run: () => void, ms: number) => { cancel(): void };
+}
+
+/**
+ * How long Home waits after the last ledger change before it prepares and writes
+ * a widget snapshot. Preparing walks the ledger and the native write re-renders
+ * every placed widget; a burst of edits (changing a category, then "remember for
+ * this merchant") used to do that once per edit. Only the latest change within
+ * this window is written, and going to the background flushes it at once.
+ */
+export const WIDGET_SYNC_DEBOUNCE_MS = 2_000;
+
+interface WidgetSyncRequestOptions {
+  /** Wait this long (cancelled by a newer request, a clear or cancel()) before preparing. */
+  debounceMs?: number;
 }
 
 /**
@@ -60,7 +76,7 @@ interface WidgetSyncDependencies {
 export const WIDGET_REWRITE_AFTER_MS = 3 * 60 * 60_000;
 
 /** A snapshot without its clock: two snapshots with the same key draw the same widgets. */
-export function widgetSnapshotContentKey(snapshot: WidgetSnapshot): string {
+function widgetSnapshotContentKey(snapshot: WidgetSnapshot): string {
   return JSON.stringify({ ...snapshot, generatedAt: 0 });
 }
 
@@ -105,15 +121,36 @@ export function createWidgetSnapshotSync(dependencies: WidgetSyncDependencies) {
     // An in-flight native write is followed by this clear before completion.
     return enqueue(() => mine === generation, clearNative);
   };
-  const request = (input: WidgetLedgerInput, isCurrent: () => boolean = () => true) => {
+  const schedule = dependencies.schedule ?? ((run: () => void, ms: number) => {
+    const timer = setTimeout(run, ms);
+    return { cancel: () => clearTimeout(timer) };
+  });
+  const request = (
+    input: WidgetLedgerInput,
+    isCurrent: () => boolean = () => true,
+    options: WidgetSyncRequestOptions = {},
+  ) => {
     const mine = ++generation;
     let cancelled = false;
     const current = () => !cancelled && mine === generation && isCurrent();
+    // The quiet period before any work. Cancelling (or a newer request or a clear,
+    // which make `current()` false) ends it without preparing or writing anything.
+    let endWait: (() => void) | null = null;
+    let waitTimer: { cancel(): void } | null = null;
+    // A privacy clear (not allowed to draw) is never delayed.
+    const quiet = widgetSnapshotAllowed(input) && options.debounceMs && options.debounceMs > 0
+      ? new Promise<void>((resolve) => {
+        endWait = () => { waitTimer?.cancel(); waitTimer = null; endWait = null; resolve(); };
+        waitTimer = schedule(() => endWait?.(), options.debounceMs!);
+      })
+      : null;
     const done = !widgetSnapshotAllowed(input)
       // Privacy cleanup must not be lost merely because the caller unmounts.
       ? enqueue(() => mine === generation, clearNative)
       : (async (): Promise<WidgetSyncOutcome> => {
         try {
+          if (quiet) await quiet;
+          if (!current()) return 'cancelled';
           const snapshot = await (dependencies.prepare ?? prepareWidgetSnapshot)(input, () => !current());
           if (!current()) return 'cancelled';
           if (snapshot === undefined) return 'pending';
@@ -125,7 +162,12 @@ export function createWidgetSnapshotSync(dependencies: WidgetSyncDependencies) {
           return 'failed';
         }
       })();
-    return { cancel: () => { cancelled = true; }, done };
+    return {
+      cancel: () => { cancelled = true; endWait?.(); },
+      /** End the quiet period now (the app is leaving the foreground). */
+      flush: () => { endWait?.(); },
+      done,
+    };
   };
   return { request, clear };
 }

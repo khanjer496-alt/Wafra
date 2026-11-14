@@ -5,7 +5,7 @@ import {
 import type { MoneyDirection, PostingStatus, UniversalMarket } from '@/lib/alert-market-pack-types';
 import { extractUniversalFields } from '@/lib/universal-fields';
 import { extractUniversalMoney, inspectUniversalMoneyDraft } from '@/lib/universal-money';
-import { isHedgedPrincipal, refundPrincipalStatus } from '@/lib/principal-posting-guards';
+import { isUnqualifiedCardCredit, isHedgedPrincipal, refundPrincipalStatus } from '@/lib/principal-posting-guards';
 import {
   isReviewOnlyLatamInstitution,
   latamTemplateEvent,
@@ -592,9 +592,15 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
   )?.[1] ?? null;
   const personReceivedYourTransfer = personSubject !== null &&
     !/\b(?:revolut|n26|paypal|wise|monzo|starling|bunq|venmo|cash\s*app|zelle|klarna|ltd|limited|inc|gmbh|plc|llc|bank|account|space|pocket|vault|savings|wallet|card)\b/iu.test(personSubject);
-  const direction = counterpartyReceipt && readDirection === 'credit' ? 'unknown'
+  let direction = counterpartyReceipt && readDirection === 'credit' ? 'unknown'
     : receivedYourTransfer && readDirection === 'credit' ? personReceivedYourTransfer ? 'debit' : 'unknown'
       : readDirection;
+  // Reward/fee footers on purchases do not turn their debit into a card credit.
+  // Only refuse a resolved incoming movement, after identifying repayments.
+  if (direction === 'credit' && family !== 'card-payment' && isUnqualifiedCardCredit(source, money.amount.spans[0])) {
+    status = 'informational';
+    direction = 'none';
+  }
   if (family === 'unknown' && families.length === 0 && status === 'posted' && !roleUnresolved && !directionConflict &&
     (direction === 'debit' || direction === 'credit') &&
     // A separate fee line may or may not be inside the charge: leave it to the person.

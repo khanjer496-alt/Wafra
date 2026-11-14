@@ -196,10 +196,9 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
       smsOnCreate.includes('legacyDeliveryBufferCleanupPending = try') &&
       smsOnCreate.includes('staleCorpusCleanupPending = try') &&
       smsOnCreate.includes('return@OnCreate') &&
-      /AsyncFunction\("getReceived"\)[\s\S]*?if \(!clearLegacyDeliveryBuffer\(context\)\) \{\s*throw/.test(nativeModule) &&
-      code(read('src/lib/android-tester-diagnostics.ts')).includes('getStartupCleanupDiagnostics?.()'));
+      /AsyncFunction\("getReceived"\)[\s\S]*?if \(!clearLegacyDeliveryBuffer\(context\)\) \{\s*throw/.test(nativeModule));
   ok('history and optional live SMS have separate permission requests',
-    /requestSmsPermission\(\)[\s\S]*PermissionsAndroid\.request\(PermissionsAndroid\.PERMISSIONS\.READ_SMS\)/
+    /requestSmsPermission\([\s\S]*PermissionsAndroid\.request\(PermissionsAndroid\.PERMISSIONS\.READ_SMS\)/
       .test(scanner) &&
       /requestSmsDeliveryPermission\([\s\S]*PermissionsAndroid\.PERMISSIONS\.RECEIVE_SMS/
         .test(scanner) &&
@@ -576,14 +575,19 @@ function ktSources(dir) {
       /'stay-ahead'/.test(provider) && /'build-buffer'/.test(provider) &&
       /stage: 'remote-handoff'/.test(provider) && /await ensureDurable\(\)/.test(provider));
   ok('the local first name is never sent to Superwall',
-    !/userName/.test(provider) && /user's name/.test(provider));
+    !/userName|setUserAttributes/.test(provider) &&
+      /eventTrackingBehavior: 'none'/.test(provider) &&
+      // The ONE allowed placement param is the app language ("en" | "ar").
+      (provider.match(/params:/g) ?? []).length === 2 &&
+      (provider.match(/params: \{ language: placementLanguage \}/g) ?? []).length === 2 &&
+      /const placementLanguage: 'en' \| 'ar' = state\.language === 'ar' \? 'ar' : 'en';/.test(provider));
   ok('unknown storefront state preserves the cached Pro flag',
     /status\.status === 'UNKNOWN'\) return null/.test(sdk) &&
       /if \(!snapshot\) return/.test(provider));
   ok('resolved entitlements are re-checked and mirrored on launch/foreground',
     /entitlementSnapshot\(\s*subscriptionStatus,\s*customerInfo,/.test(provider) &&
       /AppState\.addEventListener\('change'/.test(provider) &&
-      /await getUserAttributes\(\)/.test(provider) &&
+      /await getCustomerInfo\(\)/.test(provider) &&
       /setPro\(snapshot\.active\)/.test(provider));
   ok('foreground refresh never synthesizes inactive from an empty entitlement fetch',
     !/const resolved: SubscriptionStatus = entitlements\.active/.test(
@@ -631,26 +635,65 @@ function ktSources(dir) {
   ok('native SQLite is built with SQLCipher', sqlite?.[1]?.useSQLCipher === true);
   ok('Android does not cloud-backup the encrypted database', config.android?.allowBackup === false);
 
+  const accessedApis = config.ios?.privacyManifests?.NSPrivacyAccessedAPITypes ?? [];
+  // App-private settings/files, App Group widget snapshots, and the parser
+  // deadline use first-party APIs; SDK manifests do not replace our declaration.
+  const expectedApiReasons = {
+    NSPrivacyAccessedAPICategoryUserDefaults: ['1C8F.1', 'CA92.1'],
+    NSPrivacyAccessedAPICategorySystemBootTime: ['35F9.1'],
+    NSPrivacyAccessedAPICategoryFileTimestamp: ['C617.1'],
+  };
+  ok('first-party required-reason APIs declare app settings, files, App Group and timer use',
+    accessedApis.length === Object.keys(expectedApiReasons).length &&
+      JSON.stringify(Object.fromEntries(accessedApis.map((entry) =>
+        [entry.NSPrivacyAccessedAPIType, [...entry.NSPrivacyAccessedAPITypeReasons].sort()])
+        .sort(([a], [b]) => a.localeCompare(b)))) ===
+      JSON.stringify(Object.fromEntries(Object.entries(expectedApiReasons)
+        .sort(([a], [b]) => a.localeCompare(b)))));
+
+  const widgetPrivacy = read('targets/widget/PrivacyInfo.xcprivacy');
+  ok('the widget executable has its own App Group defaults reason',
+    /<key>NSPrivacyAccessedAPIType<\/key>\s*<string>NSPrivacyAccessedAPICategoryUserDefaults<\/string>/.test(widgetPrivacy) &&
+      /<key>NSPrivacyAccessedAPITypeReasons<\/key>\s*<array>\s*<string>1C8F\.1<\/string>\s*<\/array>/.test(widgetPrivacy) &&
+      /<key>NSPrivacyTracking<\/key>\s*<false\s*\/>/.test(widgetPrivacy));
+
   const collectedData = config.ios?.privacyManifests?.NSPrivacyCollectedDataTypes ?? [];
   const collectedTypes = new Set(collectedData.map((entry) => entry.NSPrivacyCollectedDataType));
-  const expectedCollectedTypes = [
-    'NSPrivacyCollectedDataTypeOtherFinancialInfo',
-    'NSPrivacyCollectedDataTypePurchaseHistory',
-    'NSPrivacyCollectedDataTypeDeviceID',
-    'NSPrivacyCollectedDataTypeCustomerSupport',
-    'NSPrivacyCollectedDataTypeOtherUserContent',
-  ];
-  ok('the iOS config declares the data retained by Wafra services',
-    expectedCollectedTypes.every((type) => collectedTypes.has(type)) &&
+  // Matches docs/store-compliance/app-privacy-answers.md and the CEO's 13–14 Nov
+  // decisions. Emails or Text Messages is excluded only after legacy /v1/ingest
+  // is disabled: that server-side submission gate remains mandatory.
+  const AF = 'NSPrivacyCollectedDataTypePurposeAppFunctionality';
+  const AN = 'NSPrivacyCollectedDataTypePurposeAnalytics';
+  const expectedPurposes = {
+    NSPrivacyCollectedDataTypePurchaseHistory: [AF, AN].sort(),
+    NSPrivacyCollectedDataTypeDeviceID: [AF],
+    NSPrivacyCollectedDataTypeUserID: [AF],
+    NSPrivacyCollectedDataTypeCrashData: [AF],
+    NSPrivacyCollectedDataTypeOtherDiagnosticData: [AF, AN].sort(),
+    NSPrivacyCollectedDataTypeProductInteraction: [AF, AN].sort(),
+    NSPrivacyCollectedDataTypeCoarseLocation: [AF, AN].sort(),
+    NSPrivacyCollectedDataTypeOtherFinancialInfo: [AF],
+    NSPrivacyCollectedDataTypeCustomerSupport: [AF],
+    NSPrivacyCollectedDataTypeOtherUserContent: [AF],
+  };
+  const expectedCollectedTypes = Object.keys(expectedPurposes);
+  ok('the iOS config declares exactly the approved data types with no tracking',
+    collectedData.length === expectedCollectedTypes.length &&
+      !collectedTypes.has('NSPrivacyCollectedDataTypeEmailsOrTextMessages') &&
+      config.ios?.privacyManifests?.NSPrivacyTracking === false &&
+      expectedCollectedTypes.every((type) => collectedTypes.has(type)) &&
       collectedData.every((entry) =>
-        typeof entry.NSPrivacyCollectedDataTypeLinked === 'boolean' &&
-        entry.NSPrivacyCollectedDataTypeTracking === false &&
-        entry.NSPrivacyCollectedDataTypePurposes?.includes(
-          'NSPrivacyCollectedDataTypePurposeAppFunctionality',
-        )));
+        entry.NSPrivacyCollectedDataTypeTracking === false));
+  ok('pseudonymous data is linked, with only unlinked customer support excepted',
+    collectedData.every((entry) => entry.NSPrivacyCollectedDataTypeLinked ===
+      (entry.NSPrivacyCollectedDataType !== 'NSPrivacyCollectedDataTypeCustomerSupport')));
+  ok('each declared data type carries exactly its approved purposes',
+    JSON.stringify(Object.fromEntries(collectedData.map((entry) =>
+      [entry.NSPrivacyCollectedDataType, [...entry.NSPrivacyCollectedDataTypePurposes].sort()]).sort(([a], [b]) => a.localeCompare(b)))) ===
+    JSON.stringify(Object.fromEntries(Object.entries(expectedPurposes).sort(([a], [b]) => a.localeCompare(b)))));
   const purchaseHistory = collectedData.find((entry) =>
     entry.NSPrivacyCollectedDataType === 'NSPrivacyCollectedDataTypePurchaseHistory');
-  ok('RevenueCat purchase history declares both entitlement and dashboard use',
+  ok('Superwall purchase history declares both entitlement and analytics use',
     purchaseHistory?.NSPrivacyCollectedDataTypePurposes?.includes(
       'NSPrivacyCollectedDataTypePurposeAnalytics',
     ));
@@ -801,7 +844,7 @@ function ktSources(dir) {
   const relay = read('src/lib/relay.ts');
   const hook = read('src/hooks/use-auto-import.ts');
   const capture = read('src/lib/capture.ts');
-  const home = read('src/screens/ledger-home-screen.tsx');
+  const home = read('src/screens/journal-home-screen.tsx');
 
   ok('a 401 from sync records the refusal rather than only throwing',
     /res\.status === 401/.test(relay) && /markRelayRevoked\(cfg\.syncToken\)/.test(relay));
@@ -1111,7 +1154,7 @@ function ktSources(dir) {
   // The tabs shell keeps the mount + foreground watch regardless of which tab
   // Android restores after an update. Home separately owns the visible status
   // query, so a tab switch does not start another parser migration.
-  const home = read('src/screens/ledger-home-screen.tsx');
+  const home = read('src/screens/journal-home-screen.tsx');
   const tabsLayout = read('src/components/app-tabs-layout.tsx');
   ok('the tabs shell owns parser migrations independent of the active tab',
     /function CaptureOwner/.test(tabsLayout) &&
@@ -1253,7 +1296,7 @@ function ktSources(dir) {
   const capture = code(read('src/lib/capture.ts'));
   const types = read('src/lib/types.ts');
   const store = code(read('src/lib/store.tsx'));
-  const home = read('src/screens/ledger-home-screen.tsx');
+  const home = read('src/screens/journal-home-screen.tsx');
   const settingsSource = settingsSurface();
   const settings = code(settingsSource);
   const recovery = code(read('src/components/storage-recovery.tsx'));
@@ -1386,41 +1429,6 @@ function ktSources(dir) {
     /needs-automation/.test(home) && /waiting-for-alert/.test(home) &&
       /first-alert-captured/.test(home) && /queue-warning/.test(home) &&
       /migration-retry/.test(home) && !/pipe-ready|needs-test|revoked/.test(code(home)));
-  const queueWarningDetail = copy.match(
-    /captureIosQueueWarningDetail:\s*\{[\s\S]*?\n\s*\},\n\s*captureIosQueueCounts:/,
-  )?.[0] || '';
-  ok('Home queue warning distinguishes source-free warning counts from protected pending source records',
-    /status === 'queue-warning'[\s\S]*?t\('captureIosQueueWarningDetail'\)/.test(home) &&
-      /status shows only source-free counts/.test(queueWarningDetail) &&
-      /pending records may keep Message text and sender/.test(queueWarningDetail) &&
-      /protected and encrypted on this iPhone/.test(queueWarningDetail) &&
-      /expire after 30 days/.test(queueWarningDetail) &&
-      /removed the next time capture runs or Wafra checks the queue/.test(queueWarningDetail) &&
-      /نص الرسالة/.test(queueWarningDetail) && /اسم المرسل/.test(queueWarningDetail) &&
-      /(?:30|٣٠)[^\n]*يوماً/.test(queueWarningDetail));
-  const localPrivacyDetail = copy.match(
-    /captureIosLocalPrivacy:\s*\{[\s\S]*?\n\s*\},\n\s*captureIosQueueWarningDetail:/,
-  )?.[0] || '';
-  ok('Home waiting state qualifies local no-upload truth against the old uploading automation',
-    /active[\s\S]*?Platform\.OS === 'ios' \? t\('captureIosLocalPrivacy'\)/.test(home) &&
-      /new bank-message capture path/.test(localPrivacyDetail) &&
-      /does not upload/.test(localPrivacyDetail) &&
-      /old Wafra Capture automation may still upload/.test(localPrivacyDetail) &&
-      /until removed or retired/.test(localPrivacyDetail) &&
-      /مسار الالتقاط الجديد رسائل البنك/.test(localPrivacyDetail) &&
-      /Wafra Capture/.test(localPrivacyDetail) &&
-      /تستمر[^\n]*في الرفع/.test(localPrivacyDetail));
-  const migrationRetryDetail = copy.match(
-    /captureIosMigrationRetryDetail:\s*\{[\s\S]*?\n\s*\},\n\s*captureIosNeedsTest:/,
-  )?.[0] || '';
-  ok('Home migration warning distinguishes the local new path from the uploading old automation',
-    /status === 'migration-retry'[\s\S]*?t\('captureIosMigrationRetryDetail'\)/.test(home) &&
-      /new capture path stays local/.test(migrationRetryDetail) &&
-      /old Shortcut automation may keep uploading/.test(migrationRetryDetail) &&
-      /until cleanup succeeds or you remove it/.test(migrationRetryDetail) &&
-      /مسار الالتقاط الجديد/.test(migrationRetryDetail) &&
-      /أتمتة الاختصار القديمة/.test(migrationRetryDetail) &&
-      /تستمر في الرفع/.test(migrationRetryDetail));
   ok('Settings capture truth is the same closed local status and Private Mode is not off',
     /useAutoImport\(false, true\)/.test(settings) &&
       /captureState/.test(settings) &&
@@ -2369,9 +2377,6 @@ ok('the spoken label matches the visible repayment exception and direction',
     // them with typed placeholders before anything is embedded; it is a
     // redactor, and its own contract below keeps it away from ledger writers.
     'local-semantic-model.ts',
-    // Type-only: the AI gate's country-scoped currency aliases share the
-    // draft's alias-map type. Neither module writes the ledger.
-    'ai-alert-cues.ts',
     // Per-user learned formats ground the confirmed amount on a draft money
     // token; they store slot types and anchors only, never message text.
     'learned-alert-formats.ts',
@@ -2438,10 +2443,7 @@ ok('the spoken label matches the visible repayment exception and direction',
     // Any ISO purchase currency is read at its own exponent; outside the
     // offline table it converts only with a dated rate or waits in Review.
     'sms-parser.ts',
-    // The AI-reading gate checks a grounded amount's exponent; the cue module
-    // types its country-scoped aliases; learned formats re-check exponents.
-    'ai-alert-extractor.ts',
-    'ai-alert-cues.ts',
+    // Learned formats re-check exponents.
     'learned-alert-formats.ts',
     // Gulf-neighbour posting checks the launch grammar's original amount is
     // at its own currency's exponent (KWD/BHD/OMR three, QAR two).

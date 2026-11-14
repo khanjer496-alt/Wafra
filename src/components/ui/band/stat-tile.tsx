@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'rea
 import { ThemedText } from '@/components/themed-text';
 import type { BandPalette } from '@/constants/theme';
 
-export type StatTileTone = 'band' | 'accent';
+type StatTileTone = 'band' | 'accent';
 
 /** Background and text colours of a stat tile, for figures set inside it. */
 export function statTileColors(palette: BandPalette, tone: StatTileTone): { bg: string; fg: string; fgSecondary: string } {

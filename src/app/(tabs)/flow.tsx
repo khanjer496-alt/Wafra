@@ -53,6 +53,7 @@ import type { CategoryId, Transaction } from '@/lib/types';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { duplicateTransactionIds, isListedExternalTransfer } from '@/lib/transfer-activity';
 import { isTransferCandidate } from '@/lib/transfer-reconciliation';
+import { withIosTabGate } from '@/components/ios-tab-gate';
 
 type ViewMode = 'categories' | 'compare' | 'calendar';
 /**
@@ -67,7 +68,7 @@ const viewFromParam = (value: unknown): ViewMode | null => VIEW_ALIASES[String(v
 const ACTIVITY_PREVIEW_LIMIT = 8;
 const shortMonthLabel = (key: string) => monthLabel(key, true).replace(/\s+\d{4}$/, '');
 
-export default function FlowScreen() {
+function FlowScreen() {
   const { categoryLabel } = useCategoryCatalog();
   // Design language E: Spending wears the clay band in both schemes.
   const band = useBand('spending'); const language = useLanguage(); const router = useRouter();
@@ -588,3 +589,6 @@ const styles = StyleSheet.create({
   categoryInsightText: { flex: 1, minWidth: 0 },
   categoryAskButton: { alignSelf: 'flex-start', minHeight: 40, paddingHorizontal: 0, paddingVertical: 6 },
 });
+
+// iOS: NativeTabs mounts every tab at launch and never freezes them; see ios-tab-gate.tsx.
+export default withIosTabGate(FlowScreen);

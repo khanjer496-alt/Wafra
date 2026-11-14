@@ -332,10 +332,54 @@ jobs:
           fi
 
       # Only needed to upload to Play, which is not what most builds are for.
+      #
+      # The Play bundle ships ARM only (arm64-v8a, armeabi-v7a). With all four
+      # ABIs it was 113 MB (396: x86 + x86_64 libraries 20.8 MB, plus their
+      # share of the native debug symbols), over the 100 MiB browser upload
+      # limit. x86 Android phones are essentially extinct, ChromeOS on x86 runs
+      # ARM apps through translation, and arm64 meets Play's 64-bit rule. Native
+      # debug symbols stay in the bundle, so crash reports stay symbolicated.
+      # The APK step above keeps its own ABI choice (universal by default), so
+      # QA can still install on an x86_64 emulator.
       - name: Build Play Store bundle (AAB)
         if: github.event.inputs.bundle == 'true' && github.event.inputs.corpus != 'true'
         working-directory: android
-        run: ./gradlew :wafra-complimentary-transport:testReleaseUnitTest bundleRelease --no-daemon
+        run: ./gradlew :wafra-complimentary-transport:testReleaseUnitTest bundleRelease -PreactNativeArchitectures=arm64-v8a,armeabi-v7a --no-daemon
+
+      - name: Verify the Play bundle is ARM only and under the upload limit
+        # Same condition as the AAB build, in the form the update-channel steps
+        # use; sms-corpus.test.js counts the string-input form exactly twice.
+        if: inputs.bundle && !inputs.corpus
+        run: |
+          set -euo pipefail
+          aab="${WAFRA_AAB:-android/app/build/outputs/bundle/release/app-release.aab}"
+          size=$(wc -c < "$aab" | tr -d ' ')
+          echo "Play bundle size: $size bytes"
+          if [ "$size" -gt 100000000 ]; then
+            echo "::error::The Play bundle is $size bytes, over 100,000,000 (the browser upload limit is 104,857,600)."
+            exit 1
+          fi
+          entries=$(unzip -Z1 "$aab")
+          # Allow-list: every ABI directory, of native libraries in any module
+          # (<module>/lib/<abi>/, or <module>/root/lib/<abi>/, which lands at the
+          # APK root) and of the native debug symbols, must be arm64-v8a or
+          # armeabi-v7a. Anchored to the module root, so a lib/ folder inside
+          # assets or Java resources is not mistaken for an ABI.
+          abis=$(printf '%s\n' "$entries" | sed -n -E \
+            -e 's#^[^/]+/(root/)?lib/([^/]+)/.*#\2#p' \
+            -e 's#^BUNDLE-METADATA/com\.android\.tools\.build\.debugsymbols/([^/]+)/.*#\1#p' | sort -u)
+          unexpected=$(printf '%s\n' "$abis" | grep -v -x -E 'arm64-v8a|armeabi-v7a' || true)
+          if [ -n "$unexpected" ]; then
+            echo "::error::The Play bundle contains native code or symbols for $(echo $unexpected); it must ship arm64-v8a and armeabi-v7a only."
+            exit 1
+          fi
+          for abi in arm64-v8a armeabi-v7a; do
+            if ! printf '%s\n' "$entries" | grep -E "^base/lib/$abi/[^/]+\.so$" >/dev/null; then
+              echo "::error::The Play bundle has no base/lib/$abi libraries."
+              exit 1
+            fi
+          done
+          printf '%s\n' "$entries" | grep -E '^base/lib/[^/]+/' | cut -d/ -f3 | sort | uniq -c
 
       - name: Verify update channel in the packaged Play bundle
         if: inputs.bundle && !inputs.corpus
@@ -356,17 +400,59 @@ jobs:
             cp android/app/build/outputs/bundle/release/app-release.aab wafra.aab
           fi
 
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ github.event.inputs.corpus == 'true' && 'wafra-sms-corpus-apk' || 'wafra-apk' }}
-          path: wafra.apk
-          retention-days: 30
-
-      - name: Upload Play bundle artifact
+      # The environment above already forces these off for a Play bundle. This
+      # reads what was actually COMPILED: the Founder Pro unlock, automatic
+      # tester Pro and the full-inbox SMS exporter's JavaScript gate each leave
+      # a "wafra-build-flag:<flag>=on|off" string in the Hermes bundle
+      # (src/lib/founder-pro.ts, src/lib/sms-corpus-export.ts). Any "=on", a
+      # missing marker, or both states at once fails the run before anything
+      # is sealed. The same-job APK is checked too, because it is the build App
+      # QA installs to clear this exact versionCode.
+      - name: Verify production build flags in the packaged Play bundle and APK
         if: github.event.inputs.bundle == 'true' && github.event.inputs.corpus != 'true'
+        run: |
+          set -euo pipefail
+          if [ "$WAFRA_SMS_CORPUS_EXPORT" != "0" ]; then
+            echo "::error::WAFRA_SMS_CORPUS_EXPORT is '$WAFRA_SMS_CORPUS_EXPORT'; the native exporter must be compiled closed in a Play build."
+            exit 1
+          fi
+          node scripts/android-build-flags.cjs verify-production wafra.aab
+          node scripts/android-build-flags.cjs verify-production wafra.apk
+          echo "### 🔒 Production build flags verified in the AAB and APK" >> "$GITHUB_STEP_SUMMARY"
+
+      # The repository is PUBLIC: any signed-in GitHub user can download any
+      # Actions artifact. Signed APKs and AABs therefore never leave the runner
+      # in plaintext. They are encrypted to .github/android-artifact-recipient.pem,
+      # whose private key exists only on the release Mac, and kept for one day:
+      # long enough to download, decrypt and hash-check with
+      # `node scripts/android-artifact-seal.cjs open` (docs/play-release.md).
+      - name: Seal outputs for the public artifact store
+        env:
+          APK_LABEL: ${{ github.event.inputs.corpus == 'true' && 'wafra-sms-corpus-apk' || 'wafra-apk' }}
+        run: |
+          set -euo pipefail
+          inputs=("$APK_LABEL=wafra.apk")
+          if [ -f wafra.aab ]; then inputs+=("wafra-aab=wafra.aab"); fi
+          node scripts/android-artifact-seal.cjs seal \
+            --recipient .github/android-artifact-recipient.pem --out sealed \
+            --meta "sourceCommit=$GITHUB_SHA" --meta "ref=$GITHUB_REF_NAME" \
+            --meta "runId=$GITHUB_RUN_ID" --meta "versionCode=$GITHUB_RUN_NUMBER" \
+            "${inputs[@]}"
+          rm -f wafra.apk wafra.aab
+          {
+            echo "### 📦 Sealed artifact"
+            echo "Encrypted to the release Mac's key; plaintext SHA-256 values are in verification.json."
+            echo '```json'
+            cat sealed/verification.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sealed artifact
         uses: actions/upload-artifact@v4
         with:
-          name: wafra-aab
-          path: wafra.aab
-          retention-days: 30
+          name: wafra-android-sealed-${{ github.run_number }}
+          path: |
+            sealed/*.enc
+            sealed/verification.json
+          if-no-files-found: error
+          retention-days: 1

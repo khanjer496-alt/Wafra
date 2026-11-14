@@ -6,13 +6,13 @@ import { Icon, type IconName } from '@/components/ui/icon';
 import { BandLayout, type BandPalette } from '@/constants/theme';
 import { committed, tapped } from '@/lib/haptics';
 
-export type EButtonVariant = 'primary' | 'secondary' | 'quiet';
+type EButtonVariant = 'primary' | 'secondary' | 'quiet';
 /**
  * `regular` is the 56pt E button. `compact` (48pt, a smaller label) is for a
  * sheet's row of two or three actions, so a footer stays one short row and
  * every label stays on one line; it still clears the 44pt target.
  */
-export type EButtonSize = 'regular' | 'compact';
+type EButtonSize = 'regular' | 'compact';
 
 /**
  * The plain E button: 56pt tall, 16pt radius, label centred. No arrow in a

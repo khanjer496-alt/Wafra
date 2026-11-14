@@ -1,10 +1,7 @@
-import { Image } from 'expo-image';
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { merchantLogoFor } from '@/components/ui/merchant-logo-assets';
-import { isWidgetLogoId } from '@/lib/widget-logo';
 import { Icon } from '@/components/ui/icon';
 import { useFitText } from '@/hooks/use-fit-text';
 import { Fonts, type BandPalette } from '@/constants/theme';
@@ -149,11 +146,6 @@ export function UpcomingWidgetPreview({ snapshot, palette, words, testID }: {
     title: widgetBillTitle(bill, snapshot),
     spokenTitle: bill.title || '—',
     initial: widgetInitial(bill.title),
-    logo: (() => {
-      const id = isWidgetLogoId(bill.logoId) ? bill.logoId : null;
-      const logo = merchantLogoFor(bill.title);
-      return logo?.id === id ? logo : null;
-    })(),
     due: widgetDueLabel(bill.dueISO, snapshot.todayISO, words),
     amount: widgetBillAmount(bill, snapshot),
   })) : [];
@@ -176,8 +168,7 @@ export function UpcomingWidgetPreview({ snapshot, palette, words, testID }: {
     </View> : <View style={styles.rows}>
       {rows.map((row) => <View key={row.key} style={styles.row}>
         <View style={[styles.tile, { backgroundColor: palette.tile }]}>
-          {row.logo ? <Image source={row.logo.source} contentFit="contain" style={styles.logo}
-            tintColor={row.logo.tint === 'theme' ? palette.onBand : row.logo.tint === 'dark' ? '#16130F' : undefined} /> : row.initial
+          {row.initial
             ? <ThemedText type="smallBold" maxFontSizeMultiplier={1} style={[styles.initial, { color: palette.onBand }]}>{row.initial}</ThemedText>
             : <Icon name="calendar" size={14} color={palette.onBand} />}
         </View>

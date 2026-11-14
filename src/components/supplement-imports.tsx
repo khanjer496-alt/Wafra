@@ -14,6 +14,7 @@ import { Fonts, Radius, Spacing, type BandPalette } from '@/constants/theme';
 import { useAppActive } from '@/hooks/use-app-active';
 import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
+import { importProcessingDisclosure } from '@/lib/import-processing-disclosure';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { createCaptureExecutor } from '@/lib/capture-executor';
 import {
@@ -160,14 +161,14 @@ export interface SupplementImportsPreview {
 }
 
 /** The two parts of the importer, for a screen that puts one on its band. */
-export interface SupplementImportsParts {
+interface SupplementImportsParts {
   /** The plain line, the upload disclosure and the choose-file control. */
   band: React.ReactNode;
   /** Files, results, the password step, what to download and the date note. */
   sheet: React.ReactNode;
 }
 
-export interface SupplementImportsProps {
+interface SupplementImportsProps {
   /** First-run setup: a footer to move on, with or without a statement. */
   onboarding?: { onContinue(): void };
   preview?: SupplementImportsPreview;
@@ -188,7 +189,9 @@ export interface SupplementImportsProps {
 export function SupplementImports({ onboarding, preview, frame, incomingStatement }: SupplementImportsProps = {}) {
   const router = useRouter();
   const language = useLanguage();
-  const copy = SUPPLEMENT_COPY[language];
+  const copy = useMemo(() => ({ ...SUPPLEMENT_COPY[language],
+    uploadDisclosure: importProcessingDisclosure(language, Platform.OS),
+  }), [language]);
   const band = useBand('settings');
   const largeText = useLargeTextLayout();
   const {

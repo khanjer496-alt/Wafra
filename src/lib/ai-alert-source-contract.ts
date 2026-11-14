@@ -15,12 +15,12 @@ import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { missingUniversalField, type UniversalBankEvent, type UniversalField, type UniversalMoney,
   type UniversalParseContext } from '@/lib/universal-types';
 
-export interface AiSourceReviewContext extends UniversalParseContext {
+interface AiSourceReviewContext extends UniversalParseContext {
   /** Capture time constrains future dates; it never supplies an absent year. */
   observedAt?: number;
 }
 
-export interface PreparedAiSourceReview {
+interface PreparedAiSourceReview {
   readonly request: {
     readonly instructions: string;
     readonly prompt: string;

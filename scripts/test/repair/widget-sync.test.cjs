@@ -137,3 +137,110 @@ test('untouched paused native fixture publishes Spotify renewal and manual Netfl
     ['Netflix', '2026-09-28', 999, false], ['Spotify', '2026-10-26', 999, true],
   ]);
 });
+
+// ── The quiet period: a burst of edits writes only the latest figures ─────
+const manualClock = () => {
+  const timers = [];
+  return {
+    schedule: (run, ms) => {
+      const timer = { run, ms, cancelled: false };
+      timers.push(timer);
+      return { cancel() { timer.cancelled = true; } };
+    },
+    fire() { for (const timer of timers.splice(0)) if (!timer.cancelled) timer.run(); },
+    active: () => timers.filter(timer => !timer.cancelled).length,
+    delays: () => timers.map(timer => timer.ms),
+  };
+};
+
+test('a debounced request prepares and writes nothing until its quiet period ends', async () => {
+  const clock = manualClock(), prepared = [], written = [];
+  const sync = createWidgetSnapshotSync({ schedule: clock.schedule,
+    prepare: async () => { prepared.push(1); return { ...sample, todayCount: 7 }; },
+    write: json => { written.push(JSON.parse(json).todayCount); }, clear() {} });
+  const job = sync.request(input, () => true, { debounceMs: 2000 });
+  await tick(); await tick();
+  assert.deepEqual([prepared.length, written.length], [0, 0], 'no ledger walk and no native write while waiting');
+  assert.deepEqual(clock.delays(), [2000]);
+  clock.fire();
+  assert.equal(await job.done, 'written');
+  assert.deepEqual(written, [7]);
+});
+
+test('latest wins: each newer request (and the cancel Home does on cleanup) leaves exactly one write', async () => {
+  const clock = manualClock(), written = [];
+  let calls = 0;
+  const sync = createWidgetSnapshotSync({ schedule: clock.schedule,
+    prepare: async () => ({ ...sample, todayCount: ++calls }), write: json => { written.push(JSON.parse(json).todayCount); }, clear() {} });
+  const first = sync.request(input, () => true, { debounceMs: 2000 });
+  first.cancel();                       // Home's cleanup before the next ledger change
+  const second = sync.request(input, () => true, { debounceMs: 2000 });
+  second.cancel();
+  const third = sync.request(input, () => true, { debounceMs: 2000 });
+  assert.equal(clock.active(), 1, 'cancelled requests release their timers');
+  clock.fire();
+  assert.equal(await third.done, 'written');
+  assert.equal(await first.done, 'cancelled');
+  assert.equal(await second.done, 'cancelled');
+  assert.deepEqual(written, [1], 'only the latest request prepared and wrote');
+});
+
+test('a superseded request that was not cancelled still writes nothing', async () => {
+  const clock = manualClock(), written = [];
+  const sync = createWidgetSnapshotSync({ schedule: clock.schedule,
+    prepare: async () => ({ ...sample, todayCount: 3 }), write: json => { written.push(JSON.parse(json).todayCount); }, clear() {} });
+  const older = sync.request(input, () => true, { debounceMs: 2000 });
+  const newer = sync.request(input, () => true, { debounceMs: 2000 });
+  clock.fire();
+  assert.equal(await older.done, 'cancelled');
+  assert.equal(await newer.done, 'written');
+  assert.deepEqual(written, [3]);
+});
+
+test('flush ends the quiet period at once, so leaving the app still writes the last edit', async () => {
+  const clock = manualClock(), written = [];
+  const sync = createWidgetSnapshotSync({ schedule: clock.schedule,
+    prepare: async () => ({ ...sample, todayCount: 9 }), write: json => { written.push(JSON.parse(json).todayCount); }, clear() {} });
+  const job = sync.request(input, () => true, { debounceMs: 2000 });
+  job.flush();
+  assert.equal(await job.done, 'written');
+  assert.deepEqual(written, [9]);
+  assert.equal(clock.active(), 0, 'the pending timer was released');
+});
+
+test('a clear while waiting wins: nothing is written afterwards', async () => {
+  const clock = manualClock(), operations = [];
+  const sync = createWidgetSnapshotSync({ schedule: clock.schedule,
+    prepare: async () => ({ ...sample }), write: () => operations.push('write'), clear: () => operations.push('clear') });
+  const waiting = sync.request(input, () => true, { debounceMs: 2000 });
+  assert.equal(await sync.clear(), 'cleared');
+  clock.fire();
+  assert.equal(await waiting.done, 'cancelled');
+  assert.deepEqual(operations, ['clear']);
+});
+
+test('the privacy clear is never delayed, and no debounce means the old behaviour', async () => {
+  const clock = manualClock(), operations = [];
+  const sync = createWidgetSnapshotSync({ schedule: clock.schedule,
+    prepare: async () => ({ ...sample }), write: () => operations.push('write'), clear: () => operations.push('clear') });
+  const hidden = sync.request({ ...input, state: { ...state, privateMode: true } }, () => true, { debounceMs: 2000 });
+  assert.equal(await hidden.done, 'cleared');
+  assert.equal(clock.active(), 0, 'no timer was started for a clear');
+  const immediate = sync.request(input);
+  assert.equal(await immediate.done, 'written');
+  assert.equal(clock.active(), 0);
+  assert.deepEqual(operations, ['clear', 'write']);
+});
+
+test('the default quiet period is two seconds and the widget owner asks for it', () => {
+  const fs = require('node:fs');
+  const loaded = require('./load-typescript.cjs')(path.resolve(__dirname, '../../../src/lib/widget-sync.ts'), {
+    '@/lib/ledger': load('@/lib/ledger'), '@/lib/subscriptions': load('@/lib/subscriptions'), '@/lib/widget-ledger': load('@/lib/widget-ledger'),
+    '../../modules/wafra-widgets': { setWidgetSnapshot() {}, clearWidgetSnapshot() {} },
+  });
+  assert.equal(loaded.WIDGET_SYNC_DEBOUNCE_MS, 2000);
+  const hook = fs.readFileSync(path.resolve(__dirname, '../../../src/hooks/use-widget-snapshot-sync.ts'), 'utf8');
+  assert.match(hook, /requestWidgetSnapshotSync\(\{ state: source[\s\S]*?\}, current, \{ debounceMs: WIDGET_SYNC_DEBOUNCE_MS \}\)/);
+  assert.match(hook, /AppLifecycle\.addEventListener\('change', \(next\) => \{\s*if \(next !== 'active'\) request\?\.flush\?\.\(\);\s*\}\);/);
+  assert.match(hook, /return \(\) => \{ cancelled = true; task\.cancel\(\); leaving\.remove\(\); request\?\.cancel\(\); \};/);
+});

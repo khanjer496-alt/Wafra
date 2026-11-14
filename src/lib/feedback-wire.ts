@@ -29,7 +29,7 @@ export const FEEDBACK_DELIVERY: FeedbackDeliveryDisclosure = {
   thirdPartyAi: false,
 };
 
-export interface ParserResearchDeliveryDisclosure {
+interface ParserResearchDeliveryDisclosure {
   retentionDays: 14;
   reviewedBy: 'wafra-maintainers';
   thirdPartyAi: true;
@@ -135,7 +135,7 @@ export function toFeedbackWirePayload(payload: FeedbackWireSource): FeedbackWire
   };
 }
 
-export interface SerializedFeedbackWire {
+interface SerializedFeedbackWire {
   body: string;
   bodyBytes: number;
   diagnosticBytes: number;

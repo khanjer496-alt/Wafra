@@ -339,7 +339,7 @@ export const moneyPlacesCopy = {
   },
 } as const;
 
-export type MoneyPlacesWords = (typeof moneyPlacesCopy)['en'];
+type MoneyPlacesWords = (typeof moneyPlacesCopy)['en'];
 
 export function moneyPlacesWords(language: string): MoneyPlacesWords {
   return (language === 'ar' ? moneyPlacesCopy.ar : moneyPlacesCopy.en) as MoneyPlacesWords;

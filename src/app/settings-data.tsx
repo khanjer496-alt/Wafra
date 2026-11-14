@@ -49,7 +49,7 @@ import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { noFormatsReason, unreadFormatCount } from '@/lib/accuracy';
 import { clearBackgroundRelayRows } from '@/lib/background-relay';
-import { hasSmsPermission, isSmsScanningAvailable, requestSmsPermission } from '@/lib/auto-import';
+import { isSmsScanningAvailable, requestSmsPermission } from '@/lib/auto-import';
 import { eraseIosCaptureStore, isCaptureAvailable, setIosCaptureEnabled } from '@/lib/capture';
 import {
   EMPTY_FOUNDER_TAP_SEQUENCE,
@@ -94,6 +94,7 @@ import { readBackupPickerCopy, shareGeneratedPdf, shareTextFile, TextFileShareEr
 import { openShortcutsApp, shortcutCleanupApplies } from '@/lib/shortcut-cleanup';
 import { isSmsCorpusExportAvailable, sharePersonalDataForReview } from '@/lib/sms-corpus-export';
 import { ClearAllError, useStore } from '@/lib/store';
+import { recordStorageFailure } from '@/lib/storage-diagnostics';
 import { uncategorisedMerchants } from '@/lib/uncategorised';
 import NotificationReader from '../../modules/notification-reader';
 import SmsReader from '../../modules/sms-reader';
@@ -267,7 +268,7 @@ export default function SettingsDataScreen() {
     const active = () => personalReviewFocused.current && epoch === personalReviewEpoch.current &&
       generation === getStateGeneration() && !getStateSnapshot().privateMode && RNAppState.currentState === 'active';
     try {
-      const granted = await hasSmsPermission() || await requestSmsPermission();
+      const granted = await requestSmsPermission();
       if (!active()) return;
       if (!granted) {
         Alert.alert(t('smsCorpusPermissionTitle'), t('smsCorpusPermissionBody'));
@@ -464,14 +465,27 @@ export default function SettingsDataScreen() {
             clearBackground: async () => {
               await clearBackgroundRelayRows();
             },
+            onStepFailure: (step, error) => {
+              recordStorageFailure(`destroy:${step}`, error);
+            },
           })
         : Platform.OS === 'android'
           ? async () => {
-              if (!SmsReader?.clearCaptured || !(await SmsReader.clearCaptured())) {
-                throw new Error('sms_capture_cleanup_failed');
+              try {
+                if (!SmsReader?.clearCaptured || !(await SmsReader.clearCaptured())) {
+                  throw new Error('sms_capture_cleanup_failed');
+                }
+              } catch (error) {
+                recordStorageFailure('destroy:sms', error);
+                throw error;
               }
-              if (notificationReader && !(await notificationReader.clearCaptured())) {
-                throw new Error('notification_capture_cleanup_failed');
+              try {
+                if (notificationReader && !(await notificationReader.clearCaptured())) {
+                  throw new Error('notification_capture_cleanup_failed');
+                }
+              } catch (error) {
+                recordStorageFailure('destroy:notifications', error);
+                throw error;
               }
             }
           : undefined;

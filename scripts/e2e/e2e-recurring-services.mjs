@@ -105,7 +105,7 @@ try {
       await openBills(page);
       for (const tail of ['1111', '2222']) {
         assert.equal(await agendaRows(page, tail).count(), 1, `one recognizable ${tail} row`);
-        assert.equal(await agendaRows(page, tail).locator('[data-testid^="merchant-logo-"]').count(), 1, 'canonical merchant logo retained');
+        assert.equal(await agendaRows(page, tail).getByTestId('monogram-avatar').count(), 1, 'local merchant monogram retained');
         assert.match(await agendaRows(page, tail).innerText(), /estimated/i,
           'a past receipt establishes history, not a confirmed future amount');
       }

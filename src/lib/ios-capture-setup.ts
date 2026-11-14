@@ -1,6 +1,6 @@
 import { Linking, Platform } from 'react-native';
 import { randomUUID } from 'expo-crypto';
-import { iosSupportsApplePayAutomation } from './ios-setup-availability';
+import { iosSupportsApplePayAutomation, iosSupportsLiveCapture } from './ios-setup-availability';
 
 import type {
   WafraLiveCaptureNativeModule,
@@ -26,10 +26,10 @@ import {
 
 export { iosSupportsApplePayAutomation } from './ios-setup-availability';
 
-export const SHORTCUTS_APP_STORE_URL =
+const SHORTCUTS_APP_STORE_URL =
   'https://apps.apple.com/app/shortcuts/id1462947752';
 
-export type IosSetupStage = 'shortcut' | 'automation';
+type IosSetupStage = 'shortcut' | 'automation';
 export type IosSetupReadiness =
   | 'not-added'
   | 'shortcut-proven'
@@ -41,20 +41,20 @@ export type IosSetupFailure =
   | 'automation-open'
   | 'shortcuts-missing'
   | null;
-export type IosShortcutCallbackResult = 'success' | 'cancel' | 'error';
-export type IosFutureSetupStep =
+type IosShortcutCallbackResult = 'success' | 'cancel' | 'error';
+type IosFutureSetupStep =
   | 'add-shortcut'
   | 'confirm-shortcut'
   | 'create-automation'
   | 'prove-shortcut'
   | 'ready';
 
-export interface IosMessageAutomationTrigger {
+interface IosMessageAutomationTrigger {
   selectedSenderCount: unknown;
   messageContains: unknown;
 }
 
-export interface IosMessageOnboardingCompletionInput {
+interface IosMessageOnboardingCompletionInput {
   retryRequired: boolean;
   ensureDurable(): Promise<void>;
   markFinished(): Promise<void>;
@@ -62,7 +62,7 @@ export interface IosMessageOnboardingCompletionInput {
   setOnboarded(): void;
 }
 
-export type IosMessageOnboardingCompletionResult = 'complete' | 'retry-required';
+type IosMessageOnboardingCompletionResult = 'complete' | 'retry-required';
 
 export interface IosSetupModel {
   loading: boolean;
@@ -105,14 +105,14 @@ export type IosSetupIntent =
   | { type: 'open-shortcuts-store' }
   | { type: 'clear-failure' };
 
-export interface IosCaptureSetupController {
+interface IosCaptureSetupController {
   getModel(): IosSetupModel;
   subscribe(listener: (model: IosSetupModel) => void): () => void;
   send(intent: IosSetupIntent): Promise<void>;
   dispose(): void;
 }
 
-export interface IosSetupDependencies {
+interface IosSetupDependencies {
   isSupported(): boolean;
   getNativeModule(): Pick<
     WafraLiveCaptureNativeModule,
@@ -126,7 +126,7 @@ export interface IosSetupDependencies {
   subscribeCaptureStatus?(listener: () => void): () => void;
 }
 
-export interface IosCaptureSetupOptions {
+interface IosCaptureSetupOptions {
   fromOnboarding?: boolean;
   /** Internal seams for deterministic interface tests. Production omits this. */
   dependencies?: Partial<IosSetupDependencies>;
@@ -145,13 +145,6 @@ export const INITIAL_IOS_SETUP_MODEL: IosSetupModel = {
   notificationSupported: false,
         applePaySupported: false,
         applePayReadiness: 'not-added',
-};
-
-const iosVersionMajor = (): number => {
-  const value = Platform.Version;
-  if (typeof value === 'number') return Math.trunc(value);
-  const parsed = Number.parseInt(String(value), 10);
-  return Number.isFinite(parsed) ? parsed : 0;
 };
 
 export function iosSupportsNotificationAutomation(version: unknown): boolean {
@@ -223,14 +216,14 @@ export function iosMessageAutomationVerified(
 // country and currency. The connection check cannot read or certify the user's
 // actual filter or whether Apple shows an automation notification.
 /** Shortcuts' own route to the New Automation trigger picker. */
-export const IOS_CREATE_AUTOMATION_URL = 'shortcuts://create-automation';
+const IOS_CREATE_AUTOMATION_URL = 'shortcuts://create-automation';
 const UNFILTERED_MESSAGE_TRIGGER = {
   selectedSenderCount: 0,
   messageContains: ' ',
 } as const;
 
 const defaultDependencies = (): IosSetupDependencies => ({
-  isSupported: () => Platform.OS === 'ios' && iosVersionMajor() >= 16,
+  isSupported: () => Platform.OS === 'ios' && iosSupportsLiveCapture(Platform.Version),
   getNativeModule: getIosCaptureNativeModule,
   shortcutUrl: IOS_LOCAL_CAPTURE_SHORTCUT_URL,
   canOpenUrl: async (url) => Linking.canOpenURL(url),
@@ -311,7 +304,7 @@ export const resolveIosFutureSetupStep = (
 };
 
 /** The numbered step the guided setup shows: Add → Test → Automate, then done. */
-export type IosCaptureGuideStage = 1 | 2 | 3 | 'done';
+type IosCaptureGuideStage = 1 | 2 | 3 | 'done';
 
 /**
  * Presentation only. The order and gates stay those of
@@ -345,7 +338,7 @@ export const IOS_AUTOMATION_GUIDE_SCREENS = 5;
  */
 export const IOS_ONE_TOGGLE_CAPTURE_SHORTCUT_BUNDLED = false;
 
-export const iosMajorVersion = (version: unknown): number => {
+const iosMajorVersion = (version: unknown): number => {
   const value = String(version);
   return /^\d+(?:\.\d+)*$/.test(value) ? Number(value.split('.')[0]) : 0;
 };

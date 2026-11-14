@@ -335,7 +335,7 @@ test('500 queued notification candidates process without touching SMS and ACK on
 });
 
 
-test('eligible Android users are auto-admitted and prompted only for the unavoidable system grant', () => {
+test('eligible Android users reach the shared disclosure before notification settings', () => {
   const hook = read('src/hooks/use-auto-import.ts');
   const autoImport = read('src/lib/auto-import.ts');
   assert.match(hook, /if \(!current\.hydrated \|\| !current\.onboarded \|\| current\.captureOptOut \|\| !isProActive\(current\)\) return;/);
@@ -343,7 +343,8 @@ test('eligible Android users are auto-admitted and prompted only for the unavoid
   assert.match(hook, /hasBankNotificationSystemAccess\(\)/);
   assert.match(hook, /openBankNotificationAccessSettings\(\)/);
   assert.match(autoImport, /NotificationReader\.hasSystemAccess\?\.\(\) === true/);
-  assert.match(autoImport, /NotificationReader\.openSettings\?\.\(\) === true/);
+  assert.match(autoImport, /withAndroidCaptureConsent\('bank-notifications', async \(\) => \{/);
+  assert.match(autoImport, /reader\.openSettings\?\.\(\) === true/);
 });
 
 test('Settings and draining use the same availability gate while permission revocation still blocks draining', () => {
@@ -351,7 +352,7 @@ test('Settings and draining use the same availability gate while permission revo
   assert.match(settings, /isBankNotificationCaptureAvailable\(NotificationReader\?\.isAvailable\?\.\(\) === true\)/);
   assert.match(scan, /isBankNotificationCaptureAvailable\(notificationReader\?\.isAvailable\?\.\(\) === true\)/);
   assert.match(scan, /notificationReader\?\.isEnabled\?\.\(\)/);
-  assert.match(settings, /notifAccessFull/);
+  assert.match(read('src/lib/android-capture-disclosure.ts'), /'notifAccessFull'/);
   const copy = load(path.join(root, 'src/lib/i18n.ts'));
   assert.match(copy.t('notifAccessFull', 'en'), /without SMS access/);
   assert.match(copy.t('notifAccessFull', 'ar'), /دون إذن الرسائل/);
@@ -388,8 +389,6 @@ test('foreground notification drain is independent of SMS freshness and self-hea
   const diagnosticsEnd = module.indexOf('AsyncFunction("sweepVisible")');
   assert.doesNotMatch(module.slice(diagnosticsStart, diagnosticsEnd), /sweepOrRequestRebind|sweepConnected/,
     'reading diagnostic counts must not sweep the full shade');
-  const tester = read('src/lib/android-tester-diagnostics.ts');
-  assert.match(tester, /getAndroidNotificationImportDiagnostics\(\)/);
   assert.match(scanner, /acknowledgementPlanned/);
   assert.match(scanner, /unresolved/);
   assert.match(scanner, /unresolvedTrustedBank/);

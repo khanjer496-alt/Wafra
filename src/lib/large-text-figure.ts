@@ -14,7 +14,7 @@
  */
 
 /** Geist Mono's advance per em, with room for the separators' tracking. */
-export const MONO_ADVANCE = 0.62;
+const MONO_ADVANCE = 0.62;
 
 /** The smallest share of the requested Larger Text size a figure may shrink to. */
 export const MIN_FIGURE_SCALE = 0.6;

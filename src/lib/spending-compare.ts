@@ -7,7 +7,7 @@
  */
 import type { ComparableSpend } from '@/lib/analytics';
 
-export type CompareDirection = 'more' | 'less' | 'same';
+type CompareDirection = 'more' | 'less' | 'same';
 
 export function compareDirection(comparison: ComparableSpend, noiseFloorFils: number): CompareDirection {
   const floor = Math.max(noiseFloorFils, comparison.previousFils * 0.02, 1);

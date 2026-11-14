@@ -8,7 +8,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.content.res.Resources
-import android.graphics.BitmapFactory
 import android.os.Build
 import android.text.SpannableString
 import android.text.Spanned
@@ -50,42 +49,6 @@ internal object WafraWidgets {
   private val BILL_LOGOS = intArrayOf(R.id.wafra_bill_logo_1, R.id.wafra_bill_logo_2, R.id.wafra_bill_logo_3)
   private val BILL_MONO_LOGOS = intArrayOf(R.id.wafra_bill_logo_mono_1, R.id.wafra_bill_logo_mono_2, R.id.wafra_bill_logo_mono_3)
   private val SPENDING_TOP = intArrayOf(R.id.wafra_spending_top_1, R.id.wafra_spending_top_2, R.id.wafra_spending_top_3)
-  private val LOGO_DRAWABLES = mapOf(
-    "amazon" to R.drawable.wafra_logo_amazon,
-    "netflix" to R.drawable.wafra_logo_netflix,
-    "spotify" to R.drawable.wafra_logo_spotify,
-    "youtube" to R.drawable.wafra_logo_youtube,
-    "apple" to R.drawable.wafra_logo_apple,
-    "google" to R.drawable.wafra_logo_google,
-    "claude" to R.drawable.wafra_logo_claude,
-    "github" to R.drawable.wafra_logo_github,
-    "notion" to R.drawable.wafra_logo_notion,
-    "discord" to R.drawable.wafra_logo_discord,
-    "telegram" to R.drawable.wafra_logo_telegram,
-    "dropbox" to R.drawable.wafra_logo_dropbox,
-    "osn" to R.drawable.wafra_logo_osn,
-    "anghami" to R.drawable.wafra_logo_anghami,
-    "audible" to R.drawable.wafra_logo_audible,
-    "shahid" to R.drawable.wafra_logo_shahid,
-    "chatgpt" to R.drawable.wafra_logo_chatgpt,
-    "crunchyroll" to R.drawable.wafra_logo_crunchyroll,
-    "disney" to R.drawable.wafra_logo_disney,
-    "deezer" to R.drawable.wafra_logo_deezer,
-    "playstation" to R.drawable.wafra_logo_playstation,
-    "xbox" to R.drawable.wafra_logo_xbox,
-    "zoom" to R.drawable.wafra_logo_zoom,
-    "du" to R.drawable.wafra_logo_du,
-    "etisalat" to R.drawable.wafra_logo_etisalat,
-    "dewa" to R.drawable.wafra_logo_dewa,
-    "sewa" to R.drawable.wafra_logo_sewa,
-    "careem" to R.drawable.wafra_logo_careem,
-    "talabat" to R.drawable.wafra_logo_talabat,
-    "deliveroo" to R.drawable.wafra_logo_deliveroo,
-    "noon" to R.drawable.wafra_logo_noon,
-    "uber" to R.drawable.wafra_logo_uber,
-    "vercel" to R.drawable.wafra_logo_vercel,
-  )
-  private val MONOCHROME_LOGOS = setOf("apple", "github", "notion", "uber", "vercel")
   private const val DAY_MS = 24L * 60L * 60L * 1000L
 
   /**
@@ -129,6 +92,17 @@ internal object WafraWidgets {
   }
 
   fun isRefreshAction(action: String?): Boolean = action != null && action in REFRESH_ACTIONS
+
+  /**
+   * Remove the stored snapshot only when it is not already redacted (or unreadable). A redacted
+   * snapshot stays, so launching with App Lock on does not empty the widgets, matching iOS.
+   */
+  fun purgeUnredactedSnapshot(context: Context) {
+    val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    val raw = prefs.getString(KEY, null) ?: return
+    val hidden = try { org.json.JSONObject(raw).optBoolean("hidden", false) } catch (error: Exception) { false }
+    if (!hidden) store(context, null)
+  }
 
   fun store(context: Context, json: String?) {
     val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -404,20 +378,11 @@ internal object WafraWidgets {
     for ((i, bill) in bills.withIndex()) {
       views.setViewVisibility(BILL_ROWS[i], View.VISIBLE)
       views.setTextViewText(BILL_TITLES[i], bill.title.ifEmpty { WidgetSnapshot.DASH })
-      // JSON can select only a compiled resource; never a URI or arbitrary path.
-      val logo = LOGO_DRAWABLES[bill.logoId]
+      // Ignore legacy logo ids: 1.0 draws only local letters and generic glyphs.
       val initial = initialOf(bill.title)
-      // Single-ink marks go in a view tinted by a colour resource, so they
-      // follow the launcher's light or dark mode; multicolour brands keep
-      // their bundled pixels.
-      val mono = logo != null && bill.logoId in MONOCHROME_LOGOS
-      views.setViewVisibility(BILL_LOGOS[i], if (logo != null && !mono) View.VISIBLE else View.GONE)
-      views.setViewVisibility(BILL_MONO_LOGOS[i], if (mono) View.VISIBLE else View.GONE)
-      if (logo != null) {
-        views.setImageViewResource(if (mono) BILL_MONO_LOGOS[i] else BILL_LOGOS[i], logo)
-        views.setViewVisibility(BILL_TILES[i], View.GONE)
-        views.setViewVisibility(BILL_GLYPHS[i], View.GONE)
-      } else if (initial != null) {
+      views.setViewVisibility(BILL_LOGOS[i], View.GONE)
+      views.setViewVisibility(BILL_MONO_LOGOS[i], View.GONE)
+      if (initial != null) {
         views.setTextViewText(BILL_TILES[i], initial)
         views.setViewVisibility(BILL_TILES[i], View.VISIBLE)
         views.setViewVisibility(BILL_GLYPHS[i], View.GONE)
@@ -449,15 +414,13 @@ internal object WafraWidgets {
     val tile = WidgetGraphics.STRIP_TILE_DP * density
     val centers = WidgetGraphics.stripCenters(bills.map { daysAhead(todayISO, it.dueISO) ?: 0 }, width.toFloat(), tile)
     val pins = bills.mapIndexed { index, bill ->
-      val logo = LOGO_DRAWABLES[bill.logoId]?.let { BitmapFactory.decodeResource(context.resources, it) }
-      val mono = logo != null && bill.logoId in MONOCHROME_LOGOS
-      val initial = if (logo == null) initialOf(bill.title) else null
+      val initial = initialOf(bill.title)
       WidgetGraphics.StripPin(
         center = if (rtl) width - centers[index] else centers[index],
-        logo = if (mono) null else logo,
-        monoLogo = if (mono) logo else null,
+        logo = null,
+        monoLogo = null,
         initial = initial,
-        glyph = if (logo == null && initial == null) context.getDrawable(R.drawable.wafra_widget_glyph_calendar)?.mutate() else null,
+        glyph = if (initial == null) context.getDrawable(R.drawable.wafra_widget_glyph_calendar)?.mutate() else null,
       )
     }
     val layers = WidgetGraphics.billStrip(pins, width, density, rtl)

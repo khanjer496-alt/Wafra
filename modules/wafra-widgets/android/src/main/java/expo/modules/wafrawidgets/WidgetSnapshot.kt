@@ -89,7 +89,7 @@ internal data class WidgetSnapshot(
   }
 
   companion object {
-    val LOGO_IDS = setOf("amazon", "netflix", "spotify", "youtube", "apple", "google", "claude", "github", "notion", "discord", "telegram", "dropbox", "osn", "anghami", "audible", "shahid", "chatgpt", "crunchyroll", "disney", "deezer", "playstation", "xbox", "zoom", "du", "etisalat", "dewa", "sewa", "careem", "talabat", "deliveroo", "noon", "uber", "vercel")
+    val LOGO_IDS = emptySet<String>()
     const val DASH = "—"
     const val MAX_AGE_MS = 36L * 60L * 60L * 1000L
     private const val FUTURE_SKEW_MS = 60L * 60L * 1000L

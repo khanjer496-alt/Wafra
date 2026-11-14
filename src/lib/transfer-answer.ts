@@ -130,7 +130,7 @@ export const transferWriteLock = {
 };
 
 /** The decision each row should carry once these decisions are applied (a linked pair names each other). */
-export interface ExpectedTransferDecision { ownership: TransferAnswer; counterpartId?: string }
+interface ExpectedTransferDecision { ownership: TransferAnswer; counterpartId?: string }
 
 export function expectedTransferDecisions(
   decisions: readonly { ids: readonly string[]; ownership: TransferAnswer | null; counterpartId?: string }[],
