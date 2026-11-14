@@ -43,6 +43,15 @@ jobs:
       - name: Private teaching
         if: ${{ !cancelled() }}
         run: node --test --test-concurrency=1 scripts/test/learned-alert-formats.test.cjs > learning.txt 2>&1
+      - name: Existing parser controls
+        if: ${{ !cancelled() }}
+        run: node scripts/test/parser.test.js > parser.txt 2>&1
+      - name: Existing bank-corpus controls
+        if: ${{ !cancelled() }}
+        run: node scripts/test/bank-corpus.test.js > bank-corpus.txt 2>&1
+      - name: Existing parser invariants
+        if: ${{ !cancelled() }}
+        run: node scripts/test/invariants.test.js > invariants.txt 2>&1
       - name: Three-path matrix
         if: ${{ !cancelled() }}
         run: REFUND_MATRIX_REPORT=matrix-report.json node --test --test-concurrency=1 scripts/test/repair/refund-matrix.test.cjs > matrix.txt 2>&1
@@ -57,6 +66,9 @@ jobs:
             closure.txt
             consumers.txt
             learning.txt
+            parser.txt
+            bank-corpus.txt
+            invariants.txt
             matrix.txt
             matrix-report.json
             reviewer-harness-cases.json
