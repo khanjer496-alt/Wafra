@@ -128,9 +128,9 @@ function judge(row) {
   const debitWithCreditNote = c?.debit && (c.verb !== 'processed' || /refund/.test(c.subject) || c.trail === 'reversed');
   if (debitWithCreditNote) {
     const note = inspectSupplementaryReversal(row.body, 'ENBD');
-    assert.deepEqual(got, { parseSms: 'expense 25000', session: 'expense 25000', native: 'debit 25000' }, `${row.id} debit parity ${row.body}`);
-    assert.equal(note?.status, 'informational', `${row.id} supplementary reversal retained`);
-    assert.equal(note?.direction, 'none', row.id);
+    if (got.parseSms !== 'expense 25000' || got.session !== 'expense 25000' || got.native !== 'debit 25000' ||
+      note?.status !== 'informational' || note?.direction !== 'none') return { got, gaps, nativeIgnoredIncome: false,
+        policyError: { id: row.id, body: row.body, ...got, note: note?.status ?? null } };
   }
   if (heldInformational || debitWithCreditNote) return { got, gaps, nativeIgnoredIncome: false,
     policy: heldInformational ? 'held-informational' : 'debit-plus-note' };
@@ -152,7 +152,7 @@ for (const row of rows) {
 }
 
 const current = {};
-const report = { total: rows.length, gaps: [], policy: [], nativeIgnoredIncome: 0, nativeIgnoredPinned: 0, incomeRows: 0, counts: {},
+const report = { total: rows.length, gaps: [], policy: [], policyFailures: [], nativeIgnoredIncome: 0, nativeIgnoredPinned: 0, incomeRows: 0, counts: {},
   falseIncomeByLang: {} };
 for (const [key, list] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
   test(`refund matrix ${key} (${list.length} cases)`, (t) => {
@@ -161,6 +161,9 @@ for (const [key, list] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
     let pinned = 0;
     for (const row of list) {
       const verdict = judge(row);
+      if (verdict.policyError) {
+        report.policyFailures.push(verdict.policyError); failures.push(`${row.id} debit parity ${JSON.stringify(verdict.policyError)}`); continue;
+      }
       if (verdict.policy) {
         report.policy.push({ id: row.id, policy: verdict.policy, expected: row.expected, ...verdict.got });
         continue;

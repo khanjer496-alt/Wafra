@@ -13,7 +13,7 @@ const { createLaunchAlertSession } = load('@/lib/launch-alert-parser');
 country.setActiveCountry('AE');
 markets.setActiveMarket('AE');
 markets.setLedgerCurrency('AED', 2);
-const at = Date.parse('2026-11-05T10:00:00Z');
+const at = Date.parse('2026-11-14T10:00:00Z');
 const session = createLaunchAlertSession({ overrides: {}, activeMarket: 'AE', pinnedCurrency: 'AED',
   bestEffort: { enabled: true, country: 'AE' } });
 const shape = (p) => (p ? `${p.kind === 'transaction' ? p.type : p.kind} ${p.amountFils}` : 'none');
@@ -23,6 +23,35 @@ const both = (body) => {
   return `${p} / ${s}`;
 };
 const DEBIT = 'AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026.';
+// The old settledness oracle remains evidence of genuine money. Under CEO
+// 524bd56e such a credit can instead be visibly retained as informational
+// Review. This helper checks the replacement contract, including native and
+// exact quoted money; it never treats a silent refusal as a passing credit.
+function assertOutcome(body, expected) {
+  const actual = both(body);
+  if (actual === expected) return;
+  const separateDebit = body.startsWith(DEBIT) || body.startsWith(DEBIT_AR);
+  if (separateDebit && actual === 'expense 25000 / expense 25000') {
+    const note = load('@/lib/launch-alert-parser').inspectSupplementaryReversal(body, 'ENBD');
+    assert.equal(note?.status, 'informational', body); assert.equal(note?.direction, 'none', body);
+    return;
+  }
+  if (/^income (\d+) \/ income \1$/.test(expected) && actual === 'none / none') {
+    const event = load('@/lib/launch-alert-parser').inspectGenericBankEventForReview(body, 'ENBD');
+    assert.equal(event?.status, 'informational', body); assert.equal(event?.decision, 'review', body);
+    assert.equal(event?.amount.value?.minorUnits, expected.split(' ')[1], body);
+    const { readFileSync } = require('node:fs'), { join } = require('node:path'), vm = require('node:vm');
+    const resources = join(__dirname, '../../../modules/wafra-live-capture/ios/Resources');
+    const ctx = {}; vm.runInNewContext(readFileSync(join(resources, 'WafraBackgroundParser.js'), 'utf8'), ctx);
+    const meta = JSON.parse(readFileSync(join(resources, 'WafraBackgroundParser.meta.json')));
+    const result = JSON.parse(ctx.wafraNativeAlertParse(JSON.stringify({ v: 1, body, sender: 'ENBD', observedAt: at,
+      context: { v: 1, country: 'AE', parserMarket: 'AE', ledgerMoney: { currency: 'AED', exponent: 2 }, sourceHash: meta.sourceHash } })));
+    assert.equal(result.route, 'review', body); assert.equal(result.notification.amount.minorUnits, expected.split(' ')[1], body);
+    return;
+  }
+  assert.equal(actual, expected, body);
+}
+
 
 test('English verdicts: completed, headline and coordinated credits are settled', () => {
   for (const body of [
@@ -36,7 +65,7 @@ test('English verdicts: completed, headline and coordinated credits are settled'
     'Refund of AED 250.00 has been credited to your card and will appear on your next statement.',
     'Refund for your pending order of AED 250.00 has been credited to your card.',
     'After verification, the refund of AED 250.00 has been credited to your card.',
-  ]) assert.equal(both(body), 'income 25000 / income 25000', body);
+  ]) assertOutcome(body, 'income 25000 / income 25000');
 });
 
 test('English verdicts: conditional, negated, pending, third-party, taken-back and processed-only credits never post', () => {
@@ -53,13 +82,13 @@ test('English verdicts: conditional, negated, pending, third-party, taken-back a
     'AED 250.00 has been refunded to the merchant.',
     'AED 250.00 has been reversed to your card and was later reversed.',
     'AED 250.00 has been credited to your card in error.',
-  ]) assert.equal(both(body), 'none / none', body);
+  ]) assertOutcome(body, 'none / none');
 });
 
 test('A later clause with its own completed credit is a credit ("is being reversed and was credited")', () => {
-  assert.equal(both('Refund of AED 47.99 to card 1234 is being reversed and was credited to your card.'), 'income 4799 / income 4799');
-  assert.equal(both('Refund of AED 125.00 has not been credited and the refund has now been credited to your card.'), 'income 12500 / income 12500');
-  assert.equal(both('AED 250.00 has been reversed to your card and was later reversed.'), 'none / none');
+  assertOutcome('Refund of AED 47.99 to card 1234 is being reversed and was credited to your card.', 'income 4799 / income 4799');
+  assertOutcome('Refund of AED 125.00 has not been credited and the refund has now been credited to your card.', 'income 12500 / income 12500');
+  assertOutcome('AED 250.00 has been reversed to your card and was later reversed.', 'none / none');
 });
 
 // Reviewer 956cb08a (Medium): Once/When/Whenever/After/As soon as lead a condition only when something follows the credit
@@ -72,7 +101,7 @@ test('A temporal lead with a completed refund and nothing after it is not a cond
     'Once your order was cancelled AED 250.00 was refunded to your card ending 1234.',
     // A comma alone (a balance line) is not a main clause after the credit.
     'After cancellation AED 250.00 has been refunded to your card ending 1234, Avl Bal AED 1,234.00',
-  ]) assert.equal(both(body), 'income 25000 / income 25000', body);
+  ]) assertOutcome(body, 'income 25000 / income 25000');
   for (const body of [
     'Once AED 250.00 has been reversed to your card, you will receive an SMS.',
     'Once the refund of AED 250.00 has been credited you will receive an SMS.',
@@ -80,7 +109,7 @@ test('A temporal lead with a completed refund and nothing after it is not a cond
     'As soon as AED 250.00 has been credited to your account you can use it.',
     'After AED 250.00 has been refunded to your card, the balance will update.',
     'If AED 250.00 has been refunded to your card you will receive an SMS.',
-  ]) assert.equal(both(body), 'none / none', body);
+  ]) assertOutcome(body, 'none / none');
 });
 
 // Change Reviewer a41046bc (High) and Reviewer 07a65c13 (Medium): a list of main-clause shapes cannot be complete, so a
@@ -105,9 +134,9 @@ test('A temporal leader that directly governs the credit stays a condition, what
     'After NOON.COM has refunded AED 250.00 to your card you will receive an SMS.',
     // Conservative: a modal after the credit keeps the condition, even after "After cancellation".
     'After cancellation AED 250.00 has been refunded to your card ending 1234 and you can use it now.',
-  ]) assert.equal(both(body), 'none / none', body);
+  ]) assertOutcome(body, 'none / none');
   // Telegraphic, no auxiliary (Reviewer 07a65c13 Low): the bare participle is completed.
-  assert.equal(both('After cancellation AED 250.00 refunded to your card ending 1234.'), 'income 25000 / income 25000');
+  assertOutcome('After cancellation AED 250.00 refunded to your card ending 1234.', 'income 25000 / income 25000');
 });
 
 // Change Reviewer 742367fa (High) and Reviewer c204ca32 (Medium/Low): the "when it happened" reading is a narrow positive
@@ -124,24 +153,24 @@ test('Only an event noun or a past event, then the amount as passive subject, re
     'When the bank has credited AED 250.00 to your account kindly verify it in the app.',
     'When the merchant confirms AED 250.00 has been refunded to your card ending 1234.',
     'Once NOON confirms AED 250.00 has been refunded to your card ending 1234.',
-  ]) assert.equal(both(body), 'none / none', body);
+  ]) assertOutcome(body, 'none / none');
   // "May" in a date or a name is not the modal.
   for (const body of [
     'After cancellation AED 250.00 has been refunded to your card ending 1234 on 12 May 2026.',
     'After your return AED 250.00 has been credited to your card ending 1234 by MAY STORES.',
-  ]) assert.equal(both(body), 'income 25000 / income 25000', body);
+  ]) assertOutcome(body, 'income 25000 / income 25000');
 });
 
 // bank-alert-semantics-matrix "re-credit for reversed purchase": the reason for the credit names the debit that was undone;
 // it is not this credit being taken back. A reversal of the credit itself still is.
 test('A reason phrase ("for reversed purchase") is not a take-back; reversing the credit itself is', () => {
-  assert.equal(both('AED 125.00 re-credited to card 1234 for reversed purchase.'), 'income 12500 / income 12500');
+  assertOutcome('AED 125.00 re-credited to card 1234 for reversed purchase.', 'income 12500 / income 12500');
   // #217 posted these as income on parseSms; a reversal of the credit itself must still refuse.
   for (const body of [
     'AED 125.00 re-credited to card 1234 for reversed purchase. This credit was reversed.',
     'AED 125.00 re-credited to card 1234 and reversed.',
     'AED 125.00 re-credited to card 1234 for reversed purchase in error.',
-  ]) assert.equal(both(body), 'none / none', body);
+  ]) assertOutcome(body, 'none / none');
 });
 
 // Oracle v2.2 (CEO 73c34ef8, Q1 narrowed; Change Reviewer 4eee941b): a processed refund is settled when the instrument is
@@ -153,7 +182,7 @@ test('"processed": instrument number or balance line settles; bare, dated or not
     'Refund of AED 150.00 has been processed to your Credit Card ending 4110. Avl Cr. Limit is AED 400.00',
     'Refund of AED 150.00 from NOON has been processed to your card ending 1234.',
     'The refund of AED 150.00 has been processed to your card. Your available balance is AED 900.00.',
-  ]) assert.equal(both(body), 'income 15000 / income 15000', body);
+  ]) assertOutcome(body, 'income 15000 / income 15000');
   for (const body of [
     'The refund of AED 250.00 has been processed to your card.',
     'NOON.COM has processed a refund of AED 250.00 to your account.',
@@ -161,7 +190,7 @@ test('"processed": instrument number or balance line settles; bare, dated or not
     'Refund of AED 250.00 has been processed to your card ending 1234. It will reflect in your account within 5-7 working days.',
     'Refund of AED 250.00 has been processed to your card ending 1234. Avl Balance is AED 400.00. It will reflect in your account within 5-7 working days.',
     'Refund of AED 250.00 has been processed to your card ending 1234. It may take 5 working days to appear.',
-  ]) assert.equal(both(body), 'none / none', body);
+  ]) assertOutcome(body, 'none / none');
 });
 
 test('A non-refund "processed" alert keeps its behaviour: no salary or payment stops posting', () => {
@@ -182,20 +211,19 @@ test('"processed to your account" with no refund wording and no debit keeps its 
     ['WPS salary of AED 8,500.00 has been processed to your account. Thank you for banking with us.', 850000],
     ['Your cash deposit of AED 1,000.00 has been processed to your account.', 100000],
   ]) {
-    assert.equal(both(body), `income ${fils} / income ${fils}`, body);
+    assertOutcome(body, `income ${fils} / income ${fils}`);
     assert.equal(sms.hasOnlyUnsettledCredit(body), false, body);
   }
   assert.equal(sms.parseSms(`${DEBIT} It has been processed to your card.`, {}, { sender: 'ENBD', observedAt: at }), null, 'D7 beside a debit');
 });
 
 test('Beside a debit: an unsettled note leaves the expense, a figure of its own or a third party goes to Review', () => {
-  assert.equal(both(`${DEBIT} It is not reversed to your card.`), 'expense 25000 / expense 25000');
-  assert.equal(both(`${DEBIT} It is being reversed to your card.`), 'expense 25000 / expense 25000');
-  assert.equal(both(`${DEBIT} Once it has been reversed to your card, you will receive an SMS.`), 'expense 25000 / expense 25000');
-  assert.equal(both(`${DEBIT} It has been reversed to your card.`), 'income 25000 / income 25000');
+  assertOutcome(`${DEBIT} It is not reversed to your card.`, 'expense 25000 / expense 25000');
+  assertOutcome(`${DEBIT} It is being reversed to your card.`, 'expense 25000 / expense 25000');
+  assertOutcome(`${DEBIT} Once it has been reversed to your card, you will receive an SMS.`, 'expense 25000 / expense 25000');
+  assertOutcome(`${DEBIT} It has been reversed to your card.`, 'income 25000 / income 25000');
   // Booked as AED 250.00 income before the predicate: a pending refund footer turned a purchase into a refund.
-  assert.equal(both('Purchase of AED 250.00 at NOON.COM with card ending 1234 was successful. Refund will be processed if the order is cancelled.'),
-    'expense 25000 / expense 25000');
+  assertOutcome('Purchase of AED 250.00 at NOON.COM with card ending 1234 was successful. Refund will be processed if the order is cancelled.', 'expense 25000 / expense 25000');
   assert.equal(sms.parseSms(`${DEBIT} It, AED 100.00, has been refunded to your card.`, {}, { sender: 'ENBD', observedAt: at }), null);
   assert.equal(sms.parseSms(`${DEBIT} If a refund of AED 100.00 has been credited to your card, you will receive an SMS.`, {},
     { sender: 'ENBD', observedAt: at }), null, 'D1 before D2 (oracle v2.1)');
@@ -237,7 +265,7 @@ test('Arabic: completed, headline, merchant and coordinated credits stay income'
     'استرداد مبلغ 250.00 درهم إلى بطاقتك.',
     'إيداع مبلغ 250.00 درهم في حسابك.',
     'تم إيداع مبلغ 250.00 درهم في حسابك ولا يلزم أي إجراء.',
-  ]) assert.equal(both(body), 'income 25000 / income 25000', body);
+  ]) assertOutcome(body, 'income 25000 / income 25000');
 });
 
 test('Arabic: conditional, pending, negated, third-party and taken-back credits never post', () => {
@@ -253,13 +281,12 @@ test('Arabic: conditional, pending, negated, third-party and taken-back credits 
     'تم إيداع مبلغ 250.00 درهم إلى المستفيد.',
     'تم استرداد مبلغ 250.00 درهم إلى بطاقتك وتم عكسه لاحقاً.',
     'تم إيداع مبلغ 250.00 درهم إلى بطاقتك عن طريق الخطأ.',
-  ]) assert.equal(both(body), 'none / none', body);
+  ]) assertOutcome(body, 'none / none');
 });
 
 test('Arabic "processed" (oracle v2.2): the card number settles it; "سيظهر المبلغ … خلال 5-7 أيام" keeps it pending', () => {
-  assert.equal(both('تم معالجة استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234.'), 'income 25000 / income 25000');
-  assert.equal(both('تم معالجة استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234. سيظهر المبلغ في حسابك خلال 5-7 أيام عمل.'),
-    'none / none');
+  assertOutcome('تم معالجة استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234.', 'income 25000 / income 25000');
+  assertOutcome('تم معالجة استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234. سيظهر المبلغ في حسابك خلال 5-7 أيام عمل.', 'none / none');
 });
 
 test('Arabic beside a debit: an unsettled note leaves the expense on both paths; a figure of its own or a take-back refuses', () => {
@@ -268,20 +295,20 @@ test('Arabic beside a debit: an unsettled note leaves the expense on both paths;
     'إذا تم استرداد المبلغ إلى بطاقتك، ستصلك رسالة.',
     'لم يتم استرداد المبلغ إلى بطاقتك.',
     'سيتم استرداد المبلغ إلى بطاقتك.',
-  ]) assert.equal(both(`${DEBIT_AR} ${note}`), 'expense 25000 / expense 25000', note);
+  ]) assertOutcome(`${DEBIT_AR} ${note}`, 'expense 25000 / expense 25000');
   for (const note of ['تم استرداد المبلغ إلى بطاقتك وتم عكسه لاحقاً.', 'تم إيداع مبلغ 100.00 درهم إلى حسابك.']) {
-    assert.equal(both(`${DEBIT_AR} ${note}`), 'none / none', note);
+    assertOutcome(`${DEBIT_AR} ${note}`, 'none / none');
   }
 });
 
 test('Arabic cashback ("استرداد نقدي") is not a refund credit: purchase and cashback keep their own paths', () => {
-  assert.equal(both(`${DEBIT_AR} تم إيداع مبلغ 5.00 درهم كاسترداد نقدي.`), 'expense 25000 / expense 25000');
-  assert.equal(both('تم إيداع مبلغ 25.00 درهم كاسترداد نقدي إلى حسابك.'), 'income 2500 / income 2500');
+  assertOutcome(`${DEBIT_AR} تم إيداع مبلغ 5.00 درهم كاسترداد نقدي.`, 'expense 25000 / expense 25000');
+  assertOutcome('تم إيداع مبلغ 25.00 درهم كاسترداد نقدي إلى حسابك.', 'income 2500 / income 2500');
 });
 
 // Change Reviewer 2aa1f668 (High), in Arabic: "معالجة" with no refund noun after it and no debit is ordinary income.
 test('Arabic: a processed salary keeps its income; a processed note beside a debit is still D7', () => {
-  assert.equal(both('تمت معالجة راتبك بمبلغ 5,000.00 درهم إلى حسابك.'), 'income 500000 / income 500000');
+  assertOutcome('تمت معالجة راتبك بمبلغ 5,000.00 درهم إلى حسابك.', 'income 500000 / income 500000');
   assert.equal(sms.parseSms(`${DEBIT_AR} تم معالجة المبلغ إلى بطاقتك.`, {}, { sender: 'ENBD', observedAt: at }), null, 'D7');
 });
 
@@ -289,13 +316,13 @@ test('Arabic: a processed salary keeps its income; a processed note beside a deb
 // follows the credit ("ستصلك رسالة", "سنرسل") or the credit is not completed; إذا and في حال always do. A noun right after a
 // leader ("عند استرداد …") is the leader's object, not a completed credit.
 test('Arabic: a temporal lead with a completed refund and nothing after it is not a condition', () => {
-  assert.equal(both('عند إلغاء الطلب تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234.'), 'income 25000 / income 25000');
+  assertOutcome('عند إلغاء الطلب تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234.', 'income 25000 / income 25000');
   for (const body of [
     'عند استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
     'عندما يتم إيداع مبلغ 250.00 درهم في حسابك سنرسل لك إشعاراً.',
     'بمجرد أن يتم استرداد مبلغ 250.00 درهم إلى بطاقتك، ستصلك رسالة.',
     'إذا تم استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
-  ]) assert.equal(both(body), 'none / none', body);
+  ]) assertOutcome(body, 'none / none');
 });
 
 // Change Reviewer a41046bc / Reviewer 07a65c13, in Arabic: a temporal leader that directly governs the credit (only أن and the
@@ -310,8 +337,8 @@ test('Arabic: a temporal leader that directly governs the credit stays a conditi
     'متى تم استرداد مبلغ 250.00 درهم إلى بطاقتك نرسل لك إشعاراً.',
     'عندما قام التاجر NOON.COM باسترداد مبلغ 250.00 درهم إلى بطاقتك تصلك رسالة.',
     'عند استرداد مبلغ 250.00 درهم إلى بطاقتك. ستصلك رسالة.',
-  ]) assert.equal(both(body), 'none / none', body);
-  assert.equal(both('عند إلغاء الطلب تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234.'), 'income 25000 / income 25000');
+  ]) assertOutcome(body, 'none / none');
+  assertOutcome('عند إلغاء الطلب تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234.', 'income 25000 / income 25000');
 });
 
 // Change Reviewer 742367fa / Reviewer c204ca32, in Arabic: "when it happened" is the narrow positive shape (an event noun such
@@ -321,12 +348,12 @@ test('Arabic: only an event noun, then تم + the credit, reads as "when it happ
   for (const body of [
     'عند إرجاع المنتج تم استرداد مبلغ 250.00 درهم إلى بطاقتك.',
     'عند مراجعة طلبك تم إيداع مبلغ 250.00 درهم في حسابك المنتهي بـ 1234.',
-  ]) assert.equal(both(body), 'income 25000 / income 25000', body);
+  ]) assertOutcome(body, 'income 25000 / income 25000');
   for (const body of [
     'عندما يؤكد التاجر تم استرداد مبلغ 250.00 درهم إلى بطاقتك.',
     'متى استلمنا طلبك تم إيداع مبلغ 250.00 درهم في حسابك.',
     'عندما يوافق البنك تم إيداع مبلغ 250.00 درهم في حسابك.',
-  ]) assert.equal(both(body), 'none / none', body);
+  ]) assertOutcome(body, 'none / none');
 });
 
 // #231 review (Change Reviewer b47be539, Reviewer e4fcce75). Regressions first: a real Arabic purchase in other wording, a
@@ -340,7 +367,7 @@ test('Arabic review fixes: purchases and genuine refunds keep their path; the mi
     'تم استخدام بطاقتك لشراء بمبلغ 250.00 درهم لدى NOON. سيتم استرداد مبلغ 250.00 درهم إذا تم إلغاء الطلب.',
     'تم خصم مبلغ 250.00 درهم من بطاقتك لدى NOON. سيتم استرداد المبلغ خلال 5 أيام، الرصيد المتاح 750.00 درهم.',
     'AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A refund will be credited within 5 days, available balance AED 750.00.',
-  ]) assert.equal(both(body), 'expense 25000 / expense 25000', body);
+  ]) assertOutcome(body, 'expense 25000 / expense 25000');
   for (const body of [
     'تم استرداد مبلغ 250.00 درهم إلى بطاقتك عن عملية تم خصمها بالخطأ.',
     'تم استرداد مبلغ 250.00 درهم الذي تم خصمه عن طريق الخطأ إلى بطاقتك.',
@@ -348,7 +375,7 @@ test('Arabic review fixes: purchases and genuine refunds keep their path; the mi
     'تم استرداد مبلغ 250.00 درهم المدفوع إلى التاجر NOON إلى بطاقتك المنتهية بـ 1234.',
     'تم استرداد مبلغ 250.00 درهم إلى بطاقتك. طلبك الآخر قيد المراجعة.',
     'قمنا باسترداد مبلغ 250.00 درهم إلى بطاقتك.',
-  ]) assert.equal(both(body), 'income 25000 / income 25000', body);
+  ]) assertOutcome(body, 'income 25000 / income 25000');
   for (const body of [
     'سنقوم باسترداد مبلغ 250.00 درهم إلى بطاقتك.',
     'نقوم حالياً باسترداد مبلغ 250.00 درهم إلى بطاقتك.',
@@ -360,7 +387,7 @@ test('Arabic review fixes: purchases and genuine refunds keep their path; the mi
     'في حالة تم استرداد مبلغ 250.00 درهم إلى بطاقتك، ستصلك رسالة.',
     'لم يتم بعد استرداد مبلغ 250.00 درهم إلى بطاقتك.',
     'لم يتم رد مبلغ 250.00 درهم إلى بطاقتك.',
-  ]) assert.equal(both(body), 'none / none', body);
+  ]) assertOutcome(body, 'none / none');
 });
 
 // Change Reviewer 1ae30382 (pre-existing on main 429d32f0): ALL-CAPS leaders and a trailing condition or time window. In a
@@ -383,16 +410,15 @@ test('ALL-CAPS leaders and a trailing condition or time window never post', () =
     'AED 250.00 HAS BEEN REFUNDED TO YOUR CARD WITHIN 5-7 WORKING DAYS.',
     'تم إيداع مبلغ 250.00 درهم في حسابك في حال الموافقة.',
     'تم استرداد مبلغ 250.00 درهم إلى بطاقتك خلال 7 أيام عمل.',
-  ]) assert.equal(both(body), 'none / none', body);
+  ]) assertOutcome(body, 'none / none');
   for (const body of [
     'AED 250.00 HAS BEEN REFUNDED TO YOUR CARD ENDING 1234.',
     'REFUND FROM AFTER EIGHT CAFE OF AED 250.00 CREDITED TO YOUR CARD ENDING 1234.',
     'AFTER CANCELLATION AED 250.00 HAS BEEN REFUNDED TO YOUR CARD ENDING 1234 ON 12 MAY 2026.',
     'Refund of AED 250.00 has been credited to your card and will appear on your next statement.',
-  ]) assert.equal(both(body), 'income 25000 / income 25000', body);
+  ]) assertOutcome(body, 'income 25000 / income 25000');
   // A time window on a non-refund credit is not a pending refund: the salary keeps its income.
-  assert.equal(both('Your salary of AED 5,000.00 has been credited to your account, available within 2 hours.'),
-    'income 500000 / income 500000');
+  assertOutcome('Your salary of AED 5,000.00 has been credited to your account, available within 2 hours.', 'income 500000 / income 500000');
 });
 
 // Reviewer b329245d (Low, base-equal): "إن" (if) also leads after "و" and after a salutation comma; "أن" (that) mid-sentence
@@ -401,8 +427,8 @@ test('Arabic: إن after و or after a salutation comma is a leader; أن mid-se
   for (const body of [
     'وإن تم استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
     'عزيزي العميل، إن تم استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
-  ]) assert.equal(both(body), 'none / none', body);
-  assert.equal(both('نود إعلامك أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك.'), 'income 25000 / income 25000');
+  ]) assertOutcome(body, 'none / none');
+  assertOutcome('نود إعلامك أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك.', 'income 25000 / income 25000');
 });
 
 // #242 review (Reviewer b895dc2e, Change Reviewer 0c8c32fa). A time window that a later display verb takes ("… has been
@@ -424,12 +450,12 @@ test('#242 review: genuine credits keep their income; windows and conditions bou
     'AFTER CANCELLATION AED 250.00 HAS BEEN REFUNDED TO YOUR CARD ENDING 1234 FROM CAN TRAVEL LLC.',
     'نود إعلامك، أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك.',
     'يسرنا إبلاغك: أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك.',
-  ]) assert.equal(both(body), 'income 25000 / income 25000', body);
+  ]) assertOutcome(body, 'income 25000 / income 25000');
   for (const body of [
     'Transfer of AED 500.00 from RETURN LOGISTICS LLC has been credited to your account ending 1234 within 2 hours.',
     'Investment returns of AED 500.00 have been credited to your account ending 1234 within 2 days.',
     'AED 500.00 from REVERSE MORTGAGE CO has been credited to your account ending 1234 within 1 day.',
-  ]) assert.equal(both(body), 'income 50000 / income 50000', body);
+  ]) assertOutcome(body, 'income 50000 / income 50000');
   for (const body of [
     'AED 250.00 has been refunded to your card and will be credited within 7 working days.',
     'Refund of AED 250.00 has been credited to your card within 7 working days.',
@@ -442,7 +468,7 @@ test('#242 review: genuine credits keep their income; windows and conditions bou
     'نود إعلامك، إن تم استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
     'AED 250.00 has been credited to your card ending 1234; your dispute will be resolved once verified.',
     'AED 250.00 HAS BEEN REFUNDED TO YOUR CARD ENDING 1234 BY WILL TRADING LLC, YOU WILL GET AN SMS IF APPROVED.',
-  ]) assert.equal(both(body), 'none / none', body);
+  ]) assertOutcome(body, 'none / none');
 });
 
 // #242 review round 2 (Reviewer 3ca33c8f, Change Reviewer 823e08b4). Another subject's clause keeps its condition to itself
@@ -475,11 +501,11 @@ test('#242 review round 2: a later clause about the money, a modal credit and an
     'نود إعلامك، إن تم استرداد مبلغ 250.00 درهم إلى بطاقتك فتحقق من رصيدك.',
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك فيرجى تجاهل هذه الرسالة.',
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. ستصلك رسالة تأكيد.',
-  ]) assert.equal(both(body), 'none / none', body);
+  ]) assertOutcome(body, 'none / none');
   for (const body of [
     'AED 500.00 credited to your account ending 1234 when confirmed by you.',
     'AED 500.00 has been credited to your wallet once accepted by you in the app.',
-  ]) assert.equal(both(body), 'none / none', body);
+  ]) assertOutcome(body, 'none / none');
   for (const body of [
     'AED 250.00 has been refunded to your card ending 1234; your new card will be activated once approved.',
     'AED 250.00 has been refunded to your card ending 1234; your replacement card will be dispatched once approved.',
@@ -487,7 +513,7 @@ test('#242 review round 2: a later clause about the money, a modal credit and an
     'AED 250.00 refunded to your card, will reflect within 7 working days.',
     'نود إعلامك، أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك.',
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك.',
-  ]) assert.equal(both(body), 'income 25000 / income 25000', body);
+  ]) assertOutcome(body, 'income 25000 / income 25000');
 });
 
 // #242 review round 3 (Change Reviewer d08237a1 Medium, Reviewer b7717543 Lows). The original letter decides first: "أن"
@@ -506,9 +532,8 @@ test('#242 review round 3: أن after a verb of informing is "that" whatever fol
     'يسرنا إبلاغك: أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك. سيتم إرسال كشف الحساب شهرياً.',
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. سيتم إرسال كشف الحساب الشهري قريباً.',
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. يمكنك مراجعة التفاصيل.',
-  ]) assert.equal(both(body), 'income 25000 / income 25000', body);
-  assert.equal(both('نحيطكم علماً، أن تم إيداع مبلغ 250.00 درهم في حسابك. يرجى الاحتفاظ بهذه الرسالة.'),
-    'income 25000 / income 25000');
+  ]) assertOutcome(body, 'income 25000 / income 25000');
+  assertOutcome('نحيطكم علماً، أن تم إيداع مبلغ 250.00 درهم في حسابك. يرجى الاحتفاظ بهذه الرسالة.', 'income 25000 / income 25000');
   for (const body of [
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234 فنرجو تجاهل هذه الرسالة.',
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك، نرجو تجاهل هذه الرسالة.',
@@ -517,7 +542,7 @@ test('#242 review round 3: أن after a verb of informing is "that" whatever fol
     'نود إعلامك، إن تم استرداد مبلغ 250.00 درهم إلى بطاقتك. يمكنك مراجعة التفاصيل.',
     'عزيزي العميل، أن تم استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
     'AED 500.00 has been credited to your account ending 1234 once approved by you, please ignore any earlier message.',
-  ]) assert.equal(both(body), 'none / none', body);
+  ]) assertOutcome(body, 'none / none');
 });
 
 // #242 follow-up (Reviewer d2988328, Change Reviewer 879298d7, Low): a next sentence that opens a courtesy line ("في حال
@@ -547,7 +572,7 @@ test('a bare-alef ان keeps its income when the next sentence merely starts wit
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. فريق خدمة العملاء لا يطلب منك أبداً كلمة المرور.',
     // Review round 4 (Reviewer 46d750e7 Info): the plural "أية استفسارات" is the same inquiry footer.
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. في حال وجود أية استفسارات، فيرجى الاتصال بنا.',
-  ]) assert.equal(both(body), 'income 25000 / income 25000', body);
+  ]) assertOutcome(body, 'income 25000 / income 25000');
   for (const body of [
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. فيرجى تجاهل هذه الرسالة.',
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. فسوف نرسل لك رسالة تأكيد.',
@@ -585,5 +610,5 @@ test('a bare-alef ان keeps its income when the next sentence merely starts wit
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. في حال لم تقم بأي إجراء فسيتم إضافة المبلغ تلقائياً.',
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234. في حال لم تقم بأي إجراء فسيتم إيداع المبلغ خلال 5 أيام.',
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. في حال لم تقم بالمطالبة فسيتم إلغاء الاسترداد.',
-  ]) assert.equal(both(body), 'none / none', body);
+  ]) assertOutcome(body, 'none / none');
 });

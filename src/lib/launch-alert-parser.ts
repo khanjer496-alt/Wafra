@@ -20,7 +20,7 @@ import {
   pinnedLedgerCurrencyCode,
 } from '@/lib/markets';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
-import { moneyNoticeKind, nonPostingReason, hasOnlyUnsettledCredit, parseSmsBatch, withoutUncompletedRequestNotes, type ParsedSms } from '@/lib/sms-parser';
+import { moneyNoticeKind, nonPostingReason, hasOnlyUnsettledCredit, parseSms, parseSmsBatch, withoutUncompletedRequestNotes, type ParsedSms } from '@/lib/sms-parser';
 import type { CategoryId } from '@/lib/types';
 import { CURRENCY_SYMBOL_CANDIDATES, currencyMinorUnits } from '@/lib/currency-metadata';
 import { decideGulfNeighbourPosting, gulfNeighbourReadSource, isGulfNeighbourMarket } from '@/lib/gulf-neighbour-alerts';
@@ -41,6 +41,8 @@ type CurrencyAliasMap = NonNullable<UniversalParseContext['currencyAliases']>;
 export function inspectSupplementaryReversal(source: string, sender: string): UniversalBankEvent | null {
   const pair = completedDebitBesideCredit(source);
   if (!pair) return null;
+  const debit = parseSms(pair.debit, undefined, { sender });
+  if (debit?.kind !== 'transaction' || debit.type !== 'expense') return null;
   const market = detectLaunchMarketFromSender(sender);
   const currencyAliases: CurrencyAliasMap = market === 'AE' ? { 'درهم': ['AED'], 'دراهم': ['AED'] }
     : market === 'SA' ? { 'ريال': ['SAR'] } : {};
@@ -281,7 +283,7 @@ export const inspectGenericBankEventForReview = (
     : sourceContext ? { ...sourceContext, sender }
       : universalSourceParseContext(hasUniversalInstitutionSender(sender)
         ? inspectUniversalAlert({ source, sender }) : null, sender, getActiveCountry());
-  const creditReviewMarket = creditReviewOnly ? detectLaunchMarketFromSender(sender) : null;
+  const creditReviewMarket = detectLaunchMarketFromSender(sender);
   const creditReviewAliases: CurrencyAliasMap = creditReviewMarket === 'AE' ? { 'درهم': ['AED'], 'دراهم': ['AED'] }
     : creditReviewMarket === 'SA' ? { 'ريال': ['SAR'] } : {};
   let event = inspectUniversalBankEvent(isGulfNeighbourMarket(market)

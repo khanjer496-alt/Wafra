@@ -26,7 +26,7 @@ export const isRefundRequest = (source: string): boolean => REFUND_REQUEST_NOUN_
 const CREDIT_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|return(?:ed|ing)?|chargeback|credited|credit(?!\s+card)|salary|payroll|deposit(?:ed)?)\b|(?<![ء-ي])(?:و?ب?)(?:استرداد|استرجاع|ارجاع|اعاده|عكس|ايداع|اضافه|راتب)(?:ه|ها)?(?![ء-ي])/iu;
 // This is deliberately conservative. Always inspect the normalized ORIGINAL,
 // never a merchant-masked, clause-selected or request-note-stripped derivative.
-const UNSETTLED_EN = /\b(?:if|unless|subject|upon|provided|once|when|after|until|pending|awaiting|queued|queuing|queueing|scheduled|process(?:ed|ing)?|progress|review(?:ed|ing)?|requests?|require[ds]?|approval|approv(?:e[ds]?|ing)|verification|verif(?:y|ied|ying)|clearance|eligible|may|can|will)\b/iu;
+const UNSETTLED_EN = /\b(?:if|unless|subject|upon|provided|once|when|after|until|pending|awaiting|queued|queuing|queueing|scheduled|process(?:ed|ing)?|progress|review(?:ed|ing)?|request\w*|requir\w*|approv\w*|verif\w*|clearance|eligible|may|can|will)\b/iu;
 const UNSETTLED_AR = /(?<![ء-ي])(?:if_ar|و?(?:اذا|لو|عند|بعد|فور|حين|شرط|بشرط|شريطه|رهن|مرهون|(?:في\s+|ب)?انتظار|قيد|جار[ي]?|طلب(?:ك|كم)?|يتطلب|تتطلب|موافقه|تحقق|تسويه|سوف|يمكن)|(?:ال|بال|لل)(?:شرط|انتظار|طلب|موافقه|تحقق|تسويه))(?![ء-ي])/iu;
 export const hasUnsettledCreditToken = (source: string): boolean => {
   const original = normalizeCreditText(source);
@@ -41,8 +41,8 @@ export function completedDebitBesideCredit(source: string): { debit: string; cre
   const debit = parts.filter(part => {
     const text = normalizeCreditText(part);
     return /\d/.test(text) &&
-      /\b(?:was\s+debited|has\s+been\s+debited|debited\s+from|charged|purchase(?:\s+of)?|purchased|spent|paid\s+(?:at|to)|used\s+(?:at|for)|withdrawn\s+from)\b|(?:تم|تمت)\s+(?:ال)?(?:خصم|شراء|دفع|سحب)/iu.test(text) &&
-      !/\b(?:not|failed|declined|unsuccessful|rejected)\b|(?:لم|لن|فشل|رفض)/iu.test(text);
+      /\b(?:was\s+debited|has\s+been\s+debited|debited\s+from|charged|purchased|spent|paid\s+(?:at|to)|used\s+(?:at|for)|withdrawn\s+from|(?:made|successful)\s+(?:a\s+)?purchase)\b|^\s*purchase\b|(?:تم|تمت)\s+(?:ال)?(?:خصم|شراء|دفع|سحب)/iu.test(text) &&
+      !/\b(?:not|failed|declined|unsuccessful|rejected)\b|(?<![ء-ي])(?:لم|لن|فشل|رفض)(?![ء-ي])/iu.test(text);
   });
   const credit = parts.filter(part => !debit.includes(part) && mentionsCredit(part));
   return debit.length === 1 && credit.length > 0 ? { debit: debit[0], credit: credit.join(' ') } : null;
@@ -117,8 +117,15 @@ export function creditSourceDisposition(source: string): CreditSourceDisposition
 export function informationalCreditReview(source: string, event: UniversalBankEvent): UniversalBankEvent {
   if (event.family === 'authentication' || event.issues.some(issue => /^(?:authentication|promotion)-not-posting$/.test(issue))) return event;
   const transactionFields = event.observations.filter(o => o.role === 'transaction' && o.field.evidence === 'explicit');
-  const amount = event.amount.evidence !== 'missing' ? event.amount
+  let amount = event.amount.evidence !== 'missing' ? event.amount
     : transactionFields.length === 1 ? transactionFields[0].field : event.amount;
+  if (amount.evidence === 'ambiguous' && amount.alternatives.length > 1 && amount.alternatives.every(money =>
+    money.currency === amount.alternatives[0].currency && money.exponent === amount.alternatives[0].exponent &&
+    money.minorUnits === amount.alternatives[0].minorUnits)) {
+    // Equal quoted figures may describe a request and its credit. This proves
+    // only the displayed value, never completion or a second posting.
+    amount = { ...amount, value: amount.alternatives[0], evidence: 'explicit', alternatives: [] };
+  }
   if (amount.evidence === 'missing') return event;
   const obligation = ['balance', 'statement', 'bill', 'card-payment'].includes(event.family);
   if (obligation && (transactionFields.length !== 1 || event.statementTotal.evidence === 'explicit' ||

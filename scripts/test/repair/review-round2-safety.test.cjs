@@ -669,7 +669,7 @@ for (const [kind, base, note] of [
   ['reversed-charges-apply-then-another-refund', 'AED 250.00 was debited from your card ending 1234 at NOON.COM (reversed charges apply).', ' Refund for your cancelled order has been credited to your card.'],
 ]) {
   test(`refund hardening side note is ambiguous and never auto-posts/${kind}`, () => {
-    if (kind !== 'reversed-charges-apply-then-another-refund') { assertDebitAndNote(base + note, base.includes('50.00') ? 5000 : 25000); return; }
+    if (kind !== 'reversed-charges-apply-then-another-refund') { assertDebitAndNote(base + note, base === sideNotePurchase || base.startsWith('A returned cheque') ? 5000 : base === confirmedDebit ? 8500 : 25000); return; }
     const session = reader('AE');
     const body = base + note;
     assert.equal(parseSms(body), null);
