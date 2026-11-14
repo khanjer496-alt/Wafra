@@ -7,7 +7,7 @@ import { createLaunchAlertSession, inspectGenericBankEventForReview } from '@/li
 import { hasNonCompletedWording, isNotAutoPostableMoney } from '@/lib/best-effort-autopost';
 import { originalMoneyOf } from '@/lib/fx';
 import { PARSER_VERSION, nonPostingReason, hasOnlyUnsettledCredit, type ParsedSms } from '@/lib/sms-parser';
-import type { UniversalBankEvent, UniversalMoney } from '@/lib/universal-types';
+import type { UniversalBankEvent, UniversalMoney, UniversalParseContext } from '@/lib/universal-types';
 
 export type NativeParserExponent = 0 | 2 | 3;
 export interface NativeParserContext {
@@ -268,7 +268,7 @@ export function parseIosBackgroundAlert(input: NativeParserInput): NativeParserR
     // retains the reversal note in its existing capture/history Review lane.
     const debitSource = pair && parsed?.kind === 'transaction' && parsed.type === 'expense' ? pair.debit : null;
     const principalSource = debitSource ?? source;
-    const debitAliases = parsed && senderMarket === 'AE' ? { 'درهم': ['AED'], 'دراهم': ['AED'] }
+    const debitAliases: UniversalParseContext['currencyAliases'] = parsed && senderMarket === 'AE' ? { 'درهم': ['AED'], 'دراهم': ['AED'] }
       : parsed && senderMarket === 'SA' ? { 'ريال': ['SAR'] } : undefined;
     const event = inspectGenericBankEventForReview(principalSource, sender, undefined,
       debitAliases ? { currencyAliases: debitAliases } : undefined);

@@ -23,7 +23,7 @@ export const AR_CREDIT_PENDING_STATUS = String.raw`(?<![ء-ي])(?:(?:في\s+[ا�
 const PENDING = new RegExp(`${EN_CREDIT_PENDING_STATUS}|${AR_CREDIT_PENDING_STATUS}`, 'iu');
 export const REFUND_REQUEST_NOUN_RE = /\b(?:(?:refund|reversal|chargeback)\s+(?:requests?|claims?|applications?)|requests?\s+(?:for|to)\s+(?:(?:a|the|your)\s+)?(?:refund|reversal|reverse|chargeback))\b|(?<![ء-ي])(?:طلب(?:ك|كم)?\s+(?:ال)?(?:ل?استرداد|ل?استرجاع|ل?عكس|اعاده|اعتراض)|طلبك\s+لاسترداد)(?![ء-ي])/iu;
 export const isRefundRequest = (source: string): boolean => REFUND_REQUEST_NOUN_RE.test(normalizeCreditText(source).replace(/\|/g, ' '));
-const CREDIT_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|return(?:ed|ing)?|chargeback|credit(?:ed|ing)?(?!\s+card)|salary|payroll|deposit(?:ed)?)\b|(?<![ء-ي])و?(?:ب|ك|لل|ل)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس|ايداع|اضافه|راتب)(?:ه|ها)?(?![ء-ي])/iu;
+const CREDIT_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|return(?:ed|ing)?|chargeback|disputes?|credit(?:ed|ing)?(?!\s+card)|salary|payroll|deposit(?:ed)?)\b|(?<![ء-ي])و?(?:ب|ك|لل|ل)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس|اعتراض|ايداع|اضافه|راتب)(?:ه|ها)?(?![ء-ي])/iu;
 const REFUND_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|chargeback)\b|(?<![ء-ي])و?(?:ب|ك|لل|ل)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس)(?:ه|ها)?(?![ء-ي])/iu;
 // This is deliberately conservative. Always inspect the normalized ORIGINAL,
 // never a merchant-masked, clause-selected or request-note-stripped derivative.
@@ -122,11 +122,11 @@ export function hasSettledCreditReceipt(source: string): boolean {
 export type CreditSourceDisposition = 'post' | 'review' | 'not-credit';
 export function creditSourceDisposition(source: string): CreditSourceDisposition {
   const text = normalizeCreditText(source);
+  if (CREDIT_MENTION.test(text) && (hasUnsettledCreditToken(source) || hasPendingCreditStatus(source))) return 'review';
   // Headline completion is a refund/reversal rule. Typed account credits,
   // payroll and deposits retain their mature receipt grammar; the final
   // original-text token guard still governs ANY incoming transaction.
   if (!REFUND_MENTION.test(text)) return 'not-credit';
-  if (hasUnsettledCreditToken(source)) return 'review';
   if (/\b(?:cash\s*back|rewards?|points|miles|bonus)\b|(?:استرداد|استرجاع)\s+(?:ال)?نقدي/iu.test(text)) return 'not-credit';
   const sentences = text.split(/\s*\|\|\s*/);
   const index = sentences.findIndex(sentence => CREDIT_MENTION.test(sentence) && /(?:\b[A-Z]{3}\s*\d|\d[\d,.]*\s*(?:[A-Z]{3}\b|درهم|ريال))|(?:درهم|ريال)\s*\d/iu.test(sentence));

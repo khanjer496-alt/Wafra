@@ -1328,7 +1328,7 @@
     "minorUnits": 25000,
     "acceptInformationalReview": false,
     "requireReview": false,
-    "requireDebitParity": true
+    "nativeParityExemption": "Existing native request-reference refusal on a completed debit without a reversal note; source/session expense preserved, native must never credit."
   },
   {
     "id": "reviewer:DB22",
