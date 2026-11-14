@@ -69,7 +69,7 @@ is_locked() { # $1 = tag; true when the screenshot shows the lock screen's own t
   # The app can hide everything behind a black cover while the system Face ID sheet prompts, so its own words are not on
   # screen. Accept that only in strict forms, and never when any seeded ledger text is visible: the system sheet alone
   # ("Face ID"), the sheet after a failed match, or the sheet under the StoreKit sign-in alert.
-  local norm; norm=$(printf '%s' "$t" | tr '|' ' ' | tr -s ' ' | sed 's/^ //; s/ $//')
+  local norm; norm=$(printf '%s' "$t" | sed 's#^[^[:space:]]*\.png[[:space:]]*##' | tr '|' ' ' | tr -s ' ' | sed 's/^ //; s/ $//')
   if printf '%s' "$t" | grep -qiE "LULU|ADNOC|CAREEM|Transactions|Spent"; then return 1; fi
   if [ "$norm" = "Face ID" ] || printf '%s' "$t" | grep -qiE "Face Not Recognized|Try Face ID Again" \
      || { printf '%s' "$t" | grep -qi "Sign in to Apple Account" && printf '%s' "$t" | grep -qi "Face ID"; }; then
