@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: a98b08dce79d610f341cb5f42e5fa8221739c299ec13d7d1e3b5e638419332fd
+// Generated from normal shipping TypeScript. Source SHA-256: e3543ec710559355a667f4bb634921b06d2fd38eb0cf0ad5237ff133d0bd3762
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -4102,11 +4102,12 @@ exports.isRefundRequest = isRefundRequest;
 const CREDIT_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|return(?:ed|ing)?|chargeback|disputes?|credit(?:ed|ing)?(?!\s+card)|salary|payroll|deposit(?:ed)?)\b|(?<![ء-ي])و?(?:ب|ك|لل|ل)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس|اعتراض|ايداع|اضافه|راتب)(?:ه|ها)?(?![ء-ي])/iu;
 const REFUND_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|chargeback)\b|(?<![ء-ي])و?(?:ب|ك|لل|ل)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس)(?:ه|ها)?(?![ء-ي])/iu;
 const REVERSAL_NOTE_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|return(?:ed|ing)?|chargeback|disputes?|credited|crediting|credit(?!\s+(?:card|limit|account)))\b|(?<![ء-ي])و?(?:ب|ك|لل|ل)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس|اعتراض|ايداع|اضافه)(?:ه|ها)?(?![ء-ي])/iu;
-const UNSETTLED_EN = /\b(?:if|unless|subject|upon|provided|once|when|after|until|pending|awaiting|queued|queuing|queueing|scheduled|process|progress|review|requests?|requir\w*|approval|approve|verification|verify|clearance|eligible|may|can|will)\b/iu;
+const UNSETTLED_EN = /\b(?:if|unless|subject|upon|provided|once|when|after|until|pending|awaiting|queued|queuing|queueing|scheduled|process|progress|review|request(?:s|ed)?|requir\w*|approval|approve|verification|verify|clearance|eligible|may|can|will)\b/iu;
 const UNSETTLED_AR = /(?<![ء-ي])(?:if_ar|[وف]?(?:اذا|لو|عند|بعد|فور|حين|شرط|بشرط|شريطه|رهن|مرهون|(?:في\s+|ب)?انتظار|قيد|جار[ي]?|طلب(?:ك|كم)?|يتطلب|تتطلب|موافقه|تحقق|تسويه|سوف|يمكن)|[وف]?(?:ال|بال|لل)(?:شرط|انتظار|طلب|موافقه|تحقق|تسويه))(?![ء-ي])/iu;
 const hasUnsettledCreditToken = (source) => {
     const original = normalizeCreditText(source);
-    return UNSETTLED_EN.test(original) || UNSETTLED_AR.test(original);
+    const futureArabic = /(?<![ء-ي])[وف]?س[يتنا][ء-ي]{2,}(?![ء-ي])/u.test(original);
+    return UNSETTLED_EN.test(original) || UNSETTLED_AR.test(original) || futureArabic;
 };
 exports.hasUnsettledCreditToken = hasUnsettledCreditToken;
 const CREDIT_MENTION_SCAN = new RegExp(CREDIT_MENTION.source, 'giu');
@@ -4137,14 +4138,15 @@ function hasConditionalDebitLead(source) {
     return amount >= 0 && /\b(?:debited|charged|purchase|spent|withdrawn)\b|(?:تم|تمت)\s+(?:ال)?(?:خصم|شراء|دفع|سحب)/iu.test(text) &&
         hasCreditCondition(text.slice(0, amount));
 }
-function completedDebitBesideCredit(source) {
+function completedDebitBesideCredit(source, provesExpense) {
     if (!REVERSAL_NOTE_MENTION.test(normalizeCreditText(source)) || hasConditionalDebitLead(source))
         return null;
     const parts = source.split(/(?<=[.!?؟])\s+|[;؛\n]+|(?<![0-9٠-٩۰-۹])[,،]|[,،](?![0-9٠-٩۰-۹])|\s+(?:but|while)\s+(?=(?:your|the)\s+(?:refund|reversal|charge[\s-]*back))|\s*[-–—]\s*(?=(?:refund|reversal|charge[\s-]*back)\b)/iu);
     const debit = parts.filter(part => {
         const text = normalizeCreditText(part);
         return /\d/.test(text) &&
-            /\b(?:was\s+debited|has\s+been\s+debited|debited\s+from|charged|purchased|spent|paid\s+(?:at|to)|used\s+(?:at|for)|withdrawn\s+from|(?:made|successful)\s+(?:a\s+)?purchase)\b|(?:^|\|)\s*purchase\b|\b(?:debit|credit)\s+card\s+purchase\b|(?:تم|تمت)\s+(?:ال)?(?:خصم|شراء|دفع|سحب)/iu.test(text) &&
+            (provesExpense ? provesExpense(part) :
+                /\b(?:was\s+debited|has\s+been\s+debited|debited\s+from|charged|purchased|spent|paid\s+(?:at|to)|used\s+(?:at|for)|withdrawn\s+from|(?:made|successful)\s+(?:a\s+)?purchase)\b|(?:^|\|)\s*purchase\b|\b(?:debit|credit)\s+card\s+purchase\b|(?:تم|تمت)\s+(?:ال)?(?:خصم|شراء|دفع|سحب)/iu.test(text)) &&
             !/\b(?:not|failed|declined|unsuccessful|rejected)\b|(?<![ء-ي])(?:لم|لن|فشل|رفض)(?![ء-ي])/iu.test(text);
     });
     const credit = parts.filter(part => !debit.includes(part) && REVERSAL_NOTE_MENTION.test(normalizeCreditText(part)));
@@ -8164,7 +8166,7 @@ function parseIosBackgroundAlert(input) {
             ? '' : input.sender.trim();
         const source = input.body;
         const holdCredit = (0, credit_settlement_guards_1.hasUnsettledCreditToken)(source);
-        const pair = (0, credit_settlement_guards_1.completedDebitBesideCredit)(source);
+        const pair = (0, sms_parser_1.completedDebitBesideCredit)(source, { sender });
         (0, country_1.setActiveCountry)(context.country);
         (0, markets_1.setActiveMarket)(context.parserMarket);
         (0, markets_1.setLedgerCurrency)(context.ledgerMoney.currency, context.ledgerMoney.exponent);
@@ -8718,7 +8720,7 @@ const universal_categorization_1 = require("@/lib/universal-categorization");
 const fx_rates_1 = require("@/lib/fx-rates");
 const universal_types_1 = require("@/lib/universal-types");
 function inspectSupplementaryReversal(source, sender) {
-    const pair = (0, credit_settlement_guards_1.completedDebitBesideCredit)(source);
+    const pair = (0, sms_parser_1.completedDebitBesideCredit)(source, { sender });
     if (!pair)
         return null;
     const debit = (0, sms_parser_1.parseSms)(pair.debit, undefined, { sender });
@@ -9404,7 +9406,7 @@ const createLaunchAlertSession = ({ overrides, regionHint = null, pinnedCurrency
         const result = reader(source, sender, inspection, forcedMarket, observedAt);
         if (result?.kind === 'transaction' && result.type === 'expense')
             return result;
-        const pair = (0, credit_settlement_guards_1.completedDebitBesideCredit)(source);
+        const pair = (0, sms_parser_1.completedDebitBesideCredit)(source, { sender });
         const reason = pair ? (0, sms_parser_1.nonPostingReason)(source) : null;
         if (pair && (pinnedCurrency === 'AED' || pinnedCurrency === 'SAR') &&
             (reason === null || reason === 'pending-processing' || reason === 'declined') && !(0, exports.hasPersonalMessagePrefix)(source, sender) &&
@@ -10658,6 +10660,7 @@ exports.isDeclinedMessage = isDeclinedMessage;
 exports.extractOutgoingTransferParties = extractOutgoingTransferParties;
 exports.parseForeignAwaitingRate = parseForeignAwaitingRate;
 exports.hasUnsettledPrincipal = hasUnsettledPrincipal;
+exports.completedDebitBesideCredit = completedDebitBesideCredit;
 exports.parseSms = parseSms;
 exports.parseSmsBatch = parseSmsBatch;
 const credit_settlement_guards_1 = require("@/lib/credit-settlement-guards");
@@ -14976,6 +14979,12 @@ function hasUnsettledPrincipal(message, parsed) {
     const context = readPrincipalContext(message, parsed);
     return context ? hasUnsettledPrincipalInContext(context, parsed) : false;
 }
+function completedDebitBesideCredit(message, options) {
+    return (0, credit_settlement_guards_1.completedDebitBesideCredit)(message, clause => {
+        const parsed = parseSmsCore(clause, undefined, options);
+        return parsed?.kind === 'transaction' && parsed.type === 'expense';
+    });
+}
 function parseSms(message, overrides, options) {
     const holdCredit = (0, credit_settlement_guards_1.hasUnsettledCreditToken)(message);
     if ((0, principal_posting_guards_1.hasClickLinkPrompt)(message) || (0, principal_posting_guards_1.hasLinkCallToAction)(message))
@@ -14985,7 +14994,7 @@ function parseSms(message, overrides, options) {
     const parsed = parseSmsCore(message, overrides, options);
     if (parsed?.kind === 'transaction' && parsed.type === 'expense')
         return parsed;
-    const pair = (0, credit_settlement_guards_1.completedDebitBesideCredit)(message);
+    const pair = completedDebitBesideCredit(message, options);
     const reason = pair ? nonPostingReason(message) : null;
     if (pair && (reason === null || reason === 'pending-processing' || reason === 'declined') && !hasActionableRefundRequest(message) &&
         !(0, principal_posting_guards_1.hasClickLinkPrompt)(message) && !(0, principal_posting_guards_1.hasExplicitPersonalMoneyClaim)(message) && !(0, bnpl_providers_1.isBnplProviderSource)(options?.sender)) {
