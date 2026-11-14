@@ -1,4 +1,4 @@
-import { canReviewCreditRefusal, hasUnsettledCreditToken, completedDebitBesideCredit, mentionsCredit, informationalCreditReview } from '@/lib/credit-settlement-guards';
+import { canReviewCreditRefusal, hasUnsettledCreditToken, mentionsCredit, informationalCreditReview } from '@/lib/credit-settlement-guards';
 import { createAiAlertReviewSession } from '@/lib/ai-alert-reader';
 import { createPrivateAlertFormatSession, type PrivateAlertFormatSessionOptions } from '@/lib/private-alert-format-runtime';
 import { canEnrichPrivateFormatReview, privateAlertFormatReviewEvent } from '@/lib/private-alert-format-review';
@@ -28,6 +28,7 @@ import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
 import { isUnpostedCardBalanceClaim, isCompletedCardBalanceReceipt, blankWordLinkPrompts } from '@/lib/principal-posting-guards';
 import {
+  completedDebitBesideCredit,
   nonPostingReason,
   hasOnlyUnsettledCredit,
   parseForeignAwaitingRate,
@@ -1010,9 +1011,9 @@ function inspectSourceFreeRefusedAlertCore(input: {
   if (isUnpostedCardBalanceClaim(source)) return { kind: 'ignored', reason: 'non-financial' };
   const reason = nonPostingReason(source);
   if ((reason === null || reason === 'pending-processing' || reason === 'declined') &&
-    completedDebitBesideCredit(input.source) && !/https?:\/\/|www\./iu.test(input.source)) {
+    completedDebitBesideCredit(input.source, { sender: input.sender }) && !/https?:\/\/|www\./iu.test(input.source)) {
     const accepted = input.acceptedExpense?.kind === 'transaction' && input.acceptedExpense.type === 'expense';
-    const pair = completedDebitBesideCredit(input.source)!;
+    const pair = completedDebitBesideCredit(input.source, { sender: input.sender })!;
     const note = inspectSupplementaryReversal(input.source, input.sender);
     let event = accepted ? note : note ? inspectGenericBankEventForReview(pair.debit, input.sender) : null;
     if (!accepted && event) event = { ...event, decision: 'review', status: 'informational', direction: 'debit',
@@ -1597,7 +1598,7 @@ export async function scanInbox(
         const shadowInspection = inspectGenericBankEventForReview(sms.body, sms.address);
         if (shadowInspection) queueLocalSemanticParserShadow(sms.body, shadowInspection);
       }
-      const supplementary = p?.kind === 'transaction' && p.type === 'expense' && !!completedDebitBesideCredit(sms.body);
+      const supplementary = p?.kind === 'transaction' && p.type === 'expense' && !!completedDebitBesideCredit(sms.body, { sender: sms.address });
       const reviewDecision = p && (shouldReviewParsedIncome(p) || supplementary)
         ? await inspectRefused(
             sms.body, sms.date, sms.address, 'inbox', worldwide, sourceEventId,
@@ -1716,7 +1717,7 @@ export async function scanInbox(
           const heldPayment = p?.kind === 'cardPayment' && p.bestEffort ? p : null;
           const obligation = heldPayment ? parsedFinancialCandidateReview(heldPayment, sms.date) : null;
           const deliveryFallback = obligation ? { ...obligation, channel: 'delivery' as const } : null;
-          const supplementary = p?.kind === 'transaction' && p.type === 'expense' && !!completedDebitBesideCredit(sms.body);
+          const supplementary = p?.kind === 'transaction' && p.type === 'expense' && !!completedDebitBesideCredit(sms.body, { sender: sms.address });
           const reviewDecision = p && (heldPayment || shouldReviewParsedIncome(p) || supplementary)
             ? await inspectRefused(sms.body, sms.date, sms.address, 'delivery', worldwide,
                 undefined, undefined, deliveryFallback, false, false, undefined, !!heldPayment, supplementary ? p : undefined)
@@ -1993,7 +1994,7 @@ export async function scanInbox(
           ? universalEventReviewCandidate(universalEvent, n.ts)
           : null;
         const reviewFallback = parsedCandidateFallback ?? universalCandidateFallback;
-        const supplementary = p?.kind === 'transaction' && p.type === 'expense' && autoAuthorized && !!completedDebitBesideCredit(source);
+        const supplementary = p?.kind === 'transaction' && p.type === 'expense' && autoAuthorized && !!completedDebitBesideCredit(source, { sender });
         let refusal: SourceFreeRefusedAlertDecision | null = p && (shouldReviewParsedIncome(p) || !autoAuthorized || supplementary)
           ? await inspectRefused(
               source, n.ts, sender, 'push', worldwide, undefined, pushSource,
