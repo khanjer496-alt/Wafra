@@ -97,8 +97,15 @@ for (const row of require('./credit-settlement-sweep.json')) test(`${row.id} ${r
   assert.equal(got.sms, expected, `${row.body} parseSms ${JSON.stringify(got)}`);
   assert.equal(got.session, row.sessionExpected === 'none' ? 'none' : `${row.sessionExpected}:25000`, `${row.body} session ${JSON.stringify(got)}`);
   if (row.nativeExpected === 'no-post') assert.ok(!/^(?:credit|debit):/.test(got.native), `${row.body} ${JSON.stringify(got)}`);
-  else if (row.nativeExpected === 'no-credit') assert.ok(!/^credit:/.test(got.native), `${row.body} ${JSON.stringify(got)}`);
-  else assert.equal(got.native, `${row.nativeExpected}:25000`, row.body);
+  if (row.expected === 'none') {
+    assert.equal(got.review?.decision, 'review', `${row.id} app Review ${JSON.stringify(got)}`);
+    assert.equal(got.review?.status, 'informational', `${row.id} non-confirmable ${JSON.stringify(got)}`);
+    assert.equal(got.review?.confirmable, false, row.id);
+    assert.equal(got.review?.role, 'transaction', row.id);
+    assert.equal(got.nativeRoute, 'review', `${row.id} native Review ${JSON.stringify(got)}`);
+  }
+  if (row.nativeExpected === 'no-credit') assert.ok(!/^credit:/.test(got.native), `${row.body} ${JSON.stringify(got)}`);
+  else if (row.nativeExpected !== 'no-post') assert.equal(got.native, `${row.nativeExpected}:25000`, row.body);
 });
 
 for (const row of require('./credit-settlement-review-probes.json')) test(`${row.id}: reviewer probe`, () => {
