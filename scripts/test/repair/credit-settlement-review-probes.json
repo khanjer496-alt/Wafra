@@ -2395,5 +2395,33 @@
     "expected": "none",
     "minorUnits": 25000,
     "requireReview": true
+  },
+  {
+    "id": "r3-wrapped-retained-credit-1",
+    "body": "Refund\nof\nAED\n125.00\nfrom\nNOON\nhas\nbeen\ninitiated\nand\nthe\nrefund\nhas\nnow\nbeen\ncredited\nto\nyour\ncard.",
+    "sender": "ENBD",
+    "expected": "income",
+    "minorUnits": 12500
+  },
+  {
+    "id": "r3-wrapped-retained-credit-2",
+    "body": "Refund of\nAED 125.00\nfrom NOON\nhas been\ninitiated and\nthe refund\nhas now\nbeen credited\nto your\ncard.",
+    "sender": "ENBD",
+    "expected": "income",
+    "minorUnits": 12500
+  },
+  {
+    "id": "r3-wrapped-retained-credit-3",
+    "body": "Refund of AED\n125.00 from NOON\nhas been initiated\nand the refund\nhas now been\ncredited to your\ncard.",
+    "sender": "ENBD",
+    "expected": "income",
+    "minorUnits": 12500
+  },
+  {
+    "id": "r3-wrapped-retained-credit-5",
+    "body": "Refund of AED 125.00 from\nNOON has been initiated and\nthe refund has now been\ncredited to your card.",
+    "sender": "ENBD",
+    "expected": "income",
+    "minorUnits": 12500
   }
 ]

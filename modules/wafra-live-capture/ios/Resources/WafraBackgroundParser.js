@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 3f5d93ab43cfc17819558ef6ea16cf5ee913a0d4cf27dcf531ed2eae5138c842
+// Generated from normal shipping TypeScript. Source SHA-256: a98b08dce79d610f341cb5f42e5fa8221739c299ec13d7d1e3b5e638419332fd
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -8853,7 +8853,8 @@ const inspectGenericBankEventForReview = (source, sender = '', market, sourceCon
         ? (0, gulf_neighbour_alerts_1.gulfNeighbourReadSource)(moneySource, market) : moneySource, { ...context, currencyAliases: { ...creditReviewAliases, ...cardCreditAliases, ...context.currencyAliases } });
     if (!cardCreditAliases && !(event.direction === 'debit' && event.status === 'posted') &&
         (creditReviewOnly || (event.direction === 'credit' && (0, credit_settlement_guards_1.hasUnsettledCreditToken)(source)) ||
-            ((0, credit_settlement_guards_1.mentionsCredit)(source) && event.direction === 'unknown' && event.status === 'unknown')))
+            ((0, credit_settlement_guards_1.mentionsCredit)(source) && (event.direction === 'unknown' || event.direction === 'none') &&
+                (event.status === 'unknown' || event.status === 'informational'))))
         event = (0, credit_settlement_guards_1.informationalCreditReview)(source, event);
     if (event.decision !== 'review')
         return null;

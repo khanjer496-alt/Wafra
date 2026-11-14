@@ -296,7 +296,8 @@ export const inspectGenericBankEventForReview = (
     ? gulfNeighbourReadSource(moneySource, market) : moneySource, { ...context, currencyAliases: { ...creditReviewAliases, ...cardCreditAliases, ...context.currencyAliases } });
   if (!cardCreditAliases && !(event.direction === 'debit' && event.status === 'posted') &&
     (creditReviewOnly || (event.direction === 'credit' && hasUnsettledCreditToken(source)) ||
-    (mentionsCredit(source) && event.direction === 'unknown' && event.status === 'unknown'))) event = informationalCreditReview(source, event);
+    (mentionsCredit(source) && (event.direction === 'unknown' || event.direction === 'none') &&
+      (event.status === 'unknown' || event.status === 'informational')))) event = informationalCreditReview(source, event);
   if (event.decision !== 'review') return null;
   if (cardCreditAliases) {
     if (event.status !== 'posted' && event.status !== 'unknown') return null;
