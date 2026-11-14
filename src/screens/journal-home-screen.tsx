@@ -262,7 +262,7 @@ let manualReminderTail: Promise<void> = Promise.resolve();
  * one of those helpers starts reading it.
  */
 export const HOME_STATE_FIELDS = [
-  'hydrated', 'onboarded', 'language', 'userName', 'privateMode', 'captureOptOut',
+  'hydrated', 'onboarded', 'language', 'userName', 'privateMode', 'captureOptOut', 'androidCaptureSources',
   'pro', 'founderPro', 'complimentaryIssuedAt', 'trialStartTs', 'marketId', 'ledgerMoney',
   'transactions', 'accounts', 'budgets', 'bills', 'cardDues', 'notSubscriptions', 'cancelledSubscriptions',
   'merchantOverrides', 'billAliases', 'transferInternalIds', 'transferNormalizationVersion',
@@ -809,10 +809,14 @@ export default function JournalHomeScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [privacyGateCleared, state.hydrated, state.onboarded, historyAnalysisBlocked, state.transactions, state.accounts,
     state.transferInternalIds, state.transferNormalizationVersion]));
+  // Saved import cursors can exist even after the person chooses manual entry.
+  // Per-source settings are absent on legacy installs, where SMS remains enabled.
+  const importProgressEnabled = !state.captureOptOut &&
+    (Platform.OS !== 'android' || state.androidCaptureSources?.sms !== false);
   const history = state.historyImport?.status !== 'complete' ? state.historyImport : null;
   const status: CaptureSurfaceState = state.captureOptOut || needsPermission ? 'off'
     : Platform.OS === 'android' && !isProActive(state) ? 'paused' : captureState;
-  const moneyPicture = moneyPictureProgress({
+  const moneyPicture = importProgressEnabled ? moneyPictureProgress({
     nowMs: now.getTime(),
     trialStartTs: state.trialStartTs,
     history: state.historyImport,
@@ -821,7 +825,7 @@ export default function JournalHomeScreen() {
     obligationCount: state.bills.length + state.cardDues.length,
     captureReady: status === 'waiting-for-alert' || status === 'first-alert-captured' ||
       (Platform.OS === 'android' && !state.captureOptOut && !needsPermission),
-  });
+  }) : null;
 
   useEffect(() => {
     if (!state.hydrated || state.privateMode) return;
@@ -1293,7 +1297,7 @@ export default function JournalHomeScreen() {
         {pillInline ? needsYouPill : null}
         {/* First week: one truthful progress surface. After it retires, blocking
             history states keep their existing compact recovery card. */}
-        {history ? (moneyPicture ? <MoneyPictureProgress model={moneyPicture} onResume={retryHistory} />
+        {importProgressEnabled && history ? (moneyPicture ? <MoneyPictureProgress model={moneyPicture} onResume={retryHistory} />
           : <HistoryReadingStatus progress={history} onResume={retryHistory} />) : null}
 
 

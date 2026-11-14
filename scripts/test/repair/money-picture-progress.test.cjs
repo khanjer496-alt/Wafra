@@ -71,3 +71,42 @@ test('after the first week an unfinished history import keeps the existing recov
   assert.equal(walk(h.tree).filter((node) => node.props?.testID === 'money-picture-progress').length, 0);
   assert.equal(walk(h.tree).filter((node) => node.props?.testID === 'history-reading-status').length, 1);
 });
+
+
+test('manual first-run hides both import surfaces in EN/AR and light/dark', () => {
+  const now = Date.now();
+  for (const language of ['en', 'ar']) for (const theme of ['light', 'dark']) {
+    for (const history of [null, { status: 'paused', scanned: 0, found: 0, cursor: null, startedAt: now, updatedAt: now, error: null }]) {
+      const h = harness({ empty: true, optOut: true, trialStartTs: now, history, language, theme });
+      assert.equal(walk(h.tree).filter(node => ['money-picture-progress', 'history-reading-status'].includes(node.props?.testID)).length, 0);
+    }
+  }
+});
+
+test('notification-only capture does not advertise an SMS history import, but enabled SMS retains recovery', () => {
+  const now = Date.now();
+  const history = { status: 'paused', scanned: 0, found: 0, cursor: null, startedAt: now, updatedAt: now, error: null };
+  for (const sms of [false, true]) {
+    const h = harness({ empty: true, trialStartTs: now, history, androidCaptureSources: { sms, notifications: true } });
+    assert.equal(walk(h.tree).filter(node => node.props?.testID === 'money-picture-progress').length, sms ? 1 : 0);
+    assert.equal(walk(h.tree).filter(node => node.props?.testID === 'history-reading-status').length, 0);
+  }
+});
+
+
+test('manual users also hide an older saved import without deleting its progress', () => {
+  const now = Date.now();
+  const history = { status: 'paused', scanned: 50, found: 8, cursor: null, startedAt: now - DAY, updatedAt: now, error: null };
+  const h = harness({ optOut: true, trialStartTs: now - 8 * DAY, history });
+  assert.equal(walk(h.tree).filter(node => ['money-picture-progress', 'history-reading-status'].includes(node.props?.testID)).length, 0);
+  assert.equal(history.scanned, 50); assert.equal(history.found, 8); assert.equal(history.status, 'paused');
+});
+
+
+test('legacy Android installs with absent per-source settings retain saved import recovery', () => {
+  const now = Date.now();
+  const h = harness({ androidCaptureSources: undefined, trialStartTs: now,
+    history: { status: 'paused', scanned: 50, found: 8, cursor: null, startedAt: now, updatedAt: now, error: null },
+  });
+  assert.equal(walk(h.tree).filter(node => node.props?.testID === 'money-picture-progress').length, 1);
+});
