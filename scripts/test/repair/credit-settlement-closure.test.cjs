@@ -143,3 +143,9 @@ test('the shared existing Arabic veto also makes Review informational after norm
   assert.equal(got.sms, 'none');assert.equal(got.session, 'none');
   assert.equal(got.review?.status, 'informational');assert.equal(got.review?.confirmable, false);assert.equal(got.nativeRoute, 'review');
 });
+
+test('a completed continuation cannot release an explicit condition inside the prior-state clause', () => {
+  const body = 'Reversal of AED 250.00 which was under process if approved has been credited to your card ending 1234.';
+  assert.equal(load('@/lib/credit-settlement-guards').creditSourceDisposition(body), 'review');
+  const got = paths(body);assert.equal(got.sms, 'none');assert.equal(got.session, 'none');assert.equal(got.review?.status, 'informational');assert.equal(got.nativeRoute, 'review');
+});

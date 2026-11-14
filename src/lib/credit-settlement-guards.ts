@@ -28,8 +28,9 @@ const CONDITION_HEAD = /^(?:only\s+)?(?:if\b|unless\b|until\b|whether\b|once\b|w
 const COMPLEMENT_HEAD = /(?:\b(?:subject\s+to|conditional\s+(?:on|upon)|contingent\s+on|depending\s+on|on|upon|under|in|status)|(?:بشرط|شريطه|شرط|رهن|لحين|حتي|ريثما))\s*$/iu;
 function qualificationScope(source: string): string {
   const text = normalizeCreditText(source)
+    .replace(/(\|\|)\s*if\s+(?:(?:it|this|the\s+(?:amount|credit|refund))\s+(?:(?:was|has\s+been)\s+)?)?(?:credited|refunded|received|reversed)\s+in\s+error\s*(?:\|\s*)?(?:(?:please|kindly)\s+)?(?:call|contact|notify)\b[^|.]*/gi, '$1 ')
     .replace(/\bif\s+(?:(?:(?:the|this|your)\s+transaction\s+)?(?:has\s+been\s+|was\s+|is\s+)?(?:not\s+)?authori[sz]ed\s+by\s+you|you\s+did\s+not\s+authori[sz]e\s+(?:this|it))\s*(?:\|\s*)?(?:(?:please|kindly)\s+)?(?:call|contact|ignore|disregard)\b[^|.]*/gi, ' ')
-    .replace(/\bwhich\s+(?:was|had\s+been)\s+([^|.]*?)(?=\s+(?:(?:has|have)\s+(?:now\s+)?been|was)\s+(?:now\s+)?(?:credited|refunded|returned|deposited)\b)/gi, (all, previous) => PENDING.test(previous) ? ' ' : all)
+    .replace(/\bwhich\s+(?:was|had\s+been)\s+([^|.]*?)(?=\s+(?:(?:has|have)\s+(?:now\s+)?been|was)\s+(?:now\s+)?(?:credited|refunded|returned|deposited)\b)/gi, (all, previous) => PENDING.test(previous) && !CONDITION.test(previous) ? ' ' : all)
     .replace(/\b(?:from|FROM|by|BY)\s+[A-Z][\p{Lu}\p{N}.&'’]*(?:\s+(?!(?:HAS|HAVE|HAD|WAS|WERE|IS|ARE|CREDITED|REFUNDED|REVERSED|RETURNED|DEPOSITED|PROCESSED|RECEIVED)\b)[\p{Lu}\p{N}.&'’]+)*/gu, ' ')
     .replace(/(?:من|لدي|بواسطه)\s+(?:شركه|موسسه)\s+[^|.]+/g, ' ')
     .replace(/\bfor\s+(?:your|the)\s+(?:(?:cancelled|canceled|previously|original|pending|scheduled|reversed)\s+)+(?:payment|purchase|order|transaction)\b/gi, ' ')
