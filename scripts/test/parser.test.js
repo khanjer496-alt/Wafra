@@ -10,7 +10,7 @@ const {
   isInformationOnlyAlert,
 } = require('./build/sms-parser');
 
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, retainedCredits = 0;
 /**
  * `options` is the optional third argument to parseSms — today just
  * `{ sender }`. Every call that omits it exercises the no-sender path, which
@@ -19,16 +19,20 @@ let pass = 0, fail = 0;
 function t(name, msg, expect, options) {
   const p = parseSms(msg, undefined, options);
   const errs = [];
+  let retained = false;
   if (expect === null) {
     if (p !== null) errs.push(`expected SKIP, got ${JSON.stringify({m:p.merchant,a:p.amountFils,k:p.kind,t:p.type})}`);
-  } else if (expect.review) {
+  } else if (expect.review || (!p && expect.type === 'income')) {
     if (p !== null) errs.push('uncertain credit must not create a ledger candidate');
     const { createLaunchAlertSession } = require('./build/launch-alert-parser');
-    const session = createLaunchAlertSession({ overrides: {}, activeMarket: 'AE', pinnedCurrency: 'AED' });
+    const current = require('./build/markets').getActiveMarket();
+    const session = createLaunchAlertSession({ overrides: {}, activeMarket: current.id, pinnedCurrency: expect.currency ?? current.currency.code });
     const held = require('./build/auto-import').inspectSourceFreeRefusedAlert({ source: msg, sender: options?.sender ?? '',
       observedAt: Date.parse('2026-11-14T10:00:00Z'), channel: 'inbox', session });
     const event = held.kind === 'review' && held.candidate.kind === 'universal' ? held.candidate.event : null;
-    if (event?.status !== 'informational' || event.amount.value?.minorUnits !== String(expect.amountFils)) errs.push('exact money must remain in informational Review');
+    if (event?.status !== 'informational' || event.amount.value?.minorUnits !== String(expect.amountFils) ||
+      (expect.currency && event.amount.value?.currency !== expect.currency)) errs.push('exact money must remain in informational Review');
+    retained = event?.status === 'informational' && errs.length === 0;
     if (event && require('./build/alert-review-tray').isMoneyMovementReview({ kind: 'universal', event })) errs.push('informational credit cannot be confirmed into the ledger');
   } else {
     if (!p) errs.push('expected parse, got null');
@@ -75,7 +79,7 @@ function t(name, msg, expect, options) {
     }
   }
   if (errs.length) { fail++; console.log(`✗ ${name}\n    ${errs.join('\n    ')}`); }
-  else { pass++; console.log(`✓ ${name}`); }
+  else { pass++; if (retained) retainedCredits++; console.log(`✓ ${name}${retained ? " [informational, not posted]" : ""}`); }
 }
 
 /** For the handful of claims that are about something other than one parse. */
@@ -7439,5 +7443,5 @@ t('control: a payment credited to a named biller account stays an expense',
   ok('fold review control: the spaced four-digit ADCB tail is •6383', adcb?.card?.last4 === '6383', adcb?.card);
 }
 
-console.log(`\n${pass} passed, ${fail} failed`);
+console.log(`\n${pass} passed, ${fail} failed; ${retainedCredits} incoming controls retained informationally`);
 process.exit(fail ? 1 : 0);

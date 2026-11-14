@@ -1,4 +1,4 @@
-import { EN_CREDIT_PENDING_STATUS, AR_CREDIT_PENDING_STATUS, hasCreditCondition, hasPendingCreditStatus } from '@/lib/credit-settlement-guards';
+import { EN_CREDIT_PENDING_STATUS, AR_CREDIT_PENDING_STATUS, hasCreditCondition, hasPendingCreditStatus, mentionsRefund } from '@/lib/credit-settlement-guards';
 /** Source-only qualifications of an already selected monetary value. */
 export interface PrincipalSpan { start: number; end: number }
 
@@ -284,7 +284,7 @@ export function refundPrincipalStatus(
   const scope = refundScope(source, own, monetarySpans);
   const sentence = scope.text;
   if (NOT_CURRENT_REFUND.test(source.slice(scope.start, own.start))) return null;
-  if (hasCreditCondition(sentence)) return 'pending';
+  if (mentionsRefund(sentence) && hasCreditCondition(sentence)) return 'pending';
   const verdict = ownedRefundVerdict(sentence, own.end - scope.start);
   if (verdict) return verdict;
   if (UNSETTLED_PREDICATE.test(sentence)) return 'pending';

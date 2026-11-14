@@ -35,6 +35,7 @@ export const hasUnsettledCreditToken = (source: string): boolean => {
   return UNSETTLED_EN.test(original) || UNSETTLED_AR.test(original);
 };
 export const mentionsCredit = (source: string): boolean => CREDIT_MENTION.test(normalizeCreditText(source));
+export const mentionsRefund = (source: string): boolean => REFUND_MENTION.test(normalizeCreditText(source));
 
 /** A conditional debit quotation is not the separately completed debit we preserve. */
 export function hasConditionalDebitLead(source: string): boolean {
@@ -144,6 +145,7 @@ export function creditSourceDisposition(source: string): CreditSourceDisposition
 
 /** The existing Review contract: retain uncertain credit evidence, never confirmation authority. */
 export function informationalCreditReview(source: string, event: UniversalBankEvent): UniversalBankEvent {
+  if (event.direction === 'debit' && event.status === 'posted') return event;
   if (event.family === 'authentication' || event.family === 'card-payment' ||
     event.issues.some(issue => /^(?:authentication|promotion)-not-posting$/.test(issue))) return event;
   const transactionFields = event.observations.filter(o => o.role === 'transaction' && o.field.evidence === 'explicit');
