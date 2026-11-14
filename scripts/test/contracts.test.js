@@ -637,46 +637,35 @@ function ktSources(dir) {
 
   const collectedData = config.ios?.privacyManifests?.NSPrivacyCollectedDataTypes ?? [];
   const collectedTypes = new Set(collectedData.map((entry) => entry.NSPrivacyCollectedDataType));
-  // Matches Shared/launch-review/wafra-data-flow-audit-2026-11-12.md: nine types,
-  // none linked or used for tracking. Crash Data and Other User Content are NOT
-  // collected (no crash SDK; SMS/email content is Emails or Text Messages).
-  const expectedCollectedTypes = [
-    'NSPrivacyCollectedDataTypeEmailsOrTextMessages',
-    'NSPrivacyCollectedDataTypeOtherFinancialInfo',
-    'NSPrivacyCollectedDataTypePurchaseHistory',
-    'NSPrivacyCollectedDataTypeCustomerSupport',
-    'NSPrivacyCollectedDataTypeUserID',
-    'NSPrivacyCollectedDataTypeDeviceID',
-    'NSPrivacyCollectedDataTypeProductInteraction',
-    'NSPrivacyCollectedDataTypeCoarseLocation',
-    'NSPrivacyCollectedDataTypeOtherDiagnosticData',
-  ];
-  ok('the iOS config declares exactly the data audited as collected, unlinked, untracked',
-    collectedData.length === expectedCollectedTypes.length &&
-      !collectedTypes.has('NSPrivacyCollectedDataTypeCrashData') &&
-      !collectedTypes.has('NSPrivacyCollectedDataTypeOtherUserContent') &&
-      config.ios?.privacyManifests?.NSPrivacyTracking === false &&
-      expectedCollectedTypes.every((type) => collectedTypes.has(type)) &&
-      collectedData.every((entry) =>
-        entry.NSPrivacyCollectedDataTypeLinked === false &&
-        entry.NSPrivacyCollectedDataTypeTracking === false &&
-        entry.NSPrivacyCollectedDataTypePurposes?.includes(
-          'NSPrivacyCollectedDataTypePurposeAppFunctionality',
-        )));
+  // Matches docs/store-compliance/app-privacy-answers.md and the CEO's 13–14 Nov
+  // decisions. Emails or Text Messages is excluded only after legacy /v1/ingest
+  // is disabled: that server-side submission gate remains mandatory.
   const AF = 'NSPrivacyCollectedDataTypePurposeAppFunctionality';
   const AN = 'NSPrivacyCollectedDataTypePurposeAnalytics';
   const expectedPurposes = {
-    NSPrivacyCollectedDataTypeEmailsOrTextMessages: [AF],
-    NSPrivacyCollectedDataTypeOtherFinancialInfo: [AF],
     NSPrivacyCollectedDataTypePurchaseHistory: [AF, AN].sort(),
-    NSPrivacyCollectedDataTypeCustomerSupport: [AF],
-    NSPrivacyCollectedDataTypeUserID: [AF, AN].sort(),
-    NSPrivacyCollectedDataTypeDeviceID: [AF, AN].sort(),
+    NSPrivacyCollectedDataTypeDeviceID: [AF],
+    NSPrivacyCollectedDataTypeUserID: [AF],
+    NSPrivacyCollectedDataTypeCrashData: [AF],
+    NSPrivacyCollectedDataTypeOtherDiagnosticData: [AF, AN].sort(),
     NSPrivacyCollectedDataTypeProductInteraction: [AF, AN].sort(),
     NSPrivacyCollectedDataTypeCoarseLocation: [AF, AN].sort(),
-    NSPrivacyCollectedDataTypeOtherDiagnosticData: [AF, AN].sort(),
+    NSPrivacyCollectedDataTypeOtherFinancialInfo: [AF],
+    NSPrivacyCollectedDataTypeCustomerSupport: [AF],
+    NSPrivacyCollectedDataTypeOtherUserContent: [AF],
   };
-  ok('each declared data type carries exactly its audited purposes',
+  const expectedCollectedTypes = Object.keys(expectedPurposes);
+  ok('the iOS config declares exactly the approved data types with no tracking',
+    collectedData.length === expectedCollectedTypes.length &&
+      !collectedTypes.has('NSPrivacyCollectedDataTypeEmailsOrTextMessages') &&
+      config.ios?.privacyManifests?.NSPrivacyTracking === false &&
+      expectedCollectedTypes.every((type) => collectedTypes.has(type)) &&
+      collectedData.every((entry) =>
+        entry.NSPrivacyCollectedDataTypeTracking === false));
+  ok('pseudonymous data is linked, with only unlinked customer support excepted',
+    collectedData.every((entry) => entry.NSPrivacyCollectedDataTypeLinked ===
+      (entry.NSPrivacyCollectedDataType !== 'NSPrivacyCollectedDataTypeCustomerSupport')));
+  ok('each declared data type carries exactly its approved purposes',
     JSON.stringify(Object.fromEntries(collectedData.map((entry) =>
       [entry.NSPrivacyCollectedDataType, [...entry.NSPrivacyCollectedDataTypePurposes].sort()]).sort(([a], [b]) => a.localeCompare(b)))) ===
     JSON.stringify(Object.fromEntries(Object.entries(expectedPurposes).sort(([a], [b]) => a.localeCompare(b)))));
