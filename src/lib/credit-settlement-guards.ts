@@ -39,6 +39,7 @@ export const mentionsCredit = (source: string): boolean => CREDIT_MENTION.test(n
 /** A conditional debit quotation is not the separately completed debit we preserve. */
 export function hasConditionalDebitLead(source: string): boolean {
   const text = normalizeCreditText(source);
+  if (!REVERSAL_NOTE_MENTION.test(text)) return false;
   const amount = text.search(/\d/u);
   return amount >= 0 && /\b(?:debited|charged|purchase|spent|withdrawn)\b|(?:تم|تمت)\s+(?:ال)?(?:خصم|شراء|دفع|سحب)/iu.test(text) &&
     hasCreditCondition(text.slice(0, amount));

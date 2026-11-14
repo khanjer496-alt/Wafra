@@ -15,7 +15,7 @@ import { CURRENCY_MINOR_UNITS } from '@/lib/currency-metadata';
 import { cachedReferenceQuote, quoteFitsDay } from '@/lib/fx-rates';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
 import { getActiveCountry } from '@/lib/country';
-import { hasExplicitPersonalMoneyClaim, hasClickLinkPrompt, hasMobileMoneyCallback, isLeadingNumericDiscountOffer, isUnqualifiedPeerTransferClaim, isUnpostedCardBalanceClaim, isQualifiedCardRepaymentReceipt, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isCompletedPrincipalRefund, isHedgedPrincipal, isIncompletePrincipal, refundPrincipalStatus, type PrincipalSpan } from '@/lib/principal-posting-guards';
+import { hasExplicitPersonalMoneyClaim, hasClickLinkPrompt, hasLinkCallToAction, hasMobileMoneyCallback, isLeadingNumericDiscountOffer, isUnqualifiedPeerTransferClaim, isUnpostedCardBalanceClaim, isQualifiedCardRepaymentReceipt, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isCompletedPrincipalRefund, isHedgedPrincipal, isIncompletePrincipal, refundPrincipalStatus, type PrincipalSpan } from '@/lib/principal-posting-guards';
 import { extractUniversalMoney } from '@/lib/universal-money';
 
 /* ────────────────────────── Arabic normalisation ──────────────────────────
@@ -5970,7 +5970,7 @@ function nonPostingReasonInBody(
   }
   if (CARD_LIFECYCLE_NOTICE_RE.test(suppressible)) return 'card-lifecycle';
   if (declinedInBody(body, suppressible)) return 'declined';
-  if (hasClickLinkPrompt(body)) return 'link-request';
+  if (hasClickLinkPrompt(body) || hasLinkCallToAction(body)) return 'link-request';
   if (
     OTP_RE.test(body) ||
     GLUED_OTP_REQUEST_RE.test(body) ||
@@ -10094,6 +10094,7 @@ export function parseSms(
 ): ParsedSms | null {
   // Evaluate the original BEFORE any core parser can mask merchants or notes.
   const holdCredit = hasUnsettledCreditToken(message);
+  if (hasClickLinkPrompt(message) || hasLinkCallToAction(message)) return null;
   if (mentionsCredit(message) && hasConditionalDebitLead(message)) return null;
   const parsed = parseSmsCore(message, overrides, options);
   if (parsed?.kind === 'transaction' && parsed.type === 'expense') return parsed;

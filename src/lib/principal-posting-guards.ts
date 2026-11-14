@@ -418,3 +418,128 @@ export function isUnqualifiedCardCredit(source: string, span: PrincipalSpan | un
   if (isCompletedPrincipalRefund(source, span) || /\brefund(?:ed)?\b|استرداد/iu.test(clause)) return false;
   return CARD_CREDIT_TARGET.test(clause) && CARD_CREDIT_MOVEMENT.test(clause);
 }
+
+/**
+ * A web address, with or without a scheme: `http://x`, `www.x`, or a bare
+ * `host.tld/path` (a path is required without a scheme, so "Amazon.com" as a
+ * merchant name is not a link). Group 1 is the host.
+ */
+const LINK = String.raw`(?:https?:\/\/|www\.)([^\s/?#]+)[^\s]*|\b([a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.[a-z]{2,12})\/[^\s]*`;
+/**
+ * What a smishing text asks the reader to do at its link. The weak verbs
+ * (update, log in, sign in, receive, get) are ordinary bank-footer verbs ("Log
+ * in: https://www.chase.com", "Update the app: …"); they count only for the
+ * person's own details/money or at a bait host.
+ */
+const STRONG_ACTION = String.raw`dispute|verify|validate|confirm|cancel|claim|collect|unlock|unblock|reactivate|restore|redeem|reverse|accept`;
+const WEAK_ACTION = String.raw`update|log\s?in|sign\s?in|receive|get`;
+const LINK_ACTION = `${STRONG_ACTION}|${WEAK_ACTION}`;
+const ACTION_THEN_LINK = new RegExp(String.raw`\b(${LINK_ACTION})\b([^.!?\n]{0,30}?)(?:${LINK})`, 'giu');
+const LINK_THEN_ACTION = new RegExp(String.raw`(?:${LINK})[^.!?\n]{0,12}?\bto\s+(?:${LINK_ACTION})\b`, 'giu');
+const WEAK_ACTION_ONLY = new RegExp(String.raw`^(?:${WEAK_ACTION})$`, 'iu');
+const OWN_DETAILS = /^\s*(?:your\s+)(?:details|information|info|account|card|kyc|money|funds|payment|refund|reward)\b/iu;
+/** Link shorteners hide the destination; a bank footer that uses one is still a bait shape. */
+const SHORTENER = /^(?:bit\.ly|tinyurl\.com|rb\.gy|t\.co|cutt\.ly|is\.gd|goo\.gl|ow\.ly|shorturl\.at|tiny\.cc|s\.id|t\.ly)$/iu;
+/** App stores are where a bank's own "update the app" footer points. */
+const APP_STORE = /^(?:apps\.apple\.com|play\.google\.com)$/iu;
+/** Lookalike registrable domains spell the action or security words into the name. */
+const BAIT_HOST = /verify|secure|dispute|claim|refund|login|signin|support|help|billing|unlock|update|confirm|account/iu;
+/**
+ * The registrable domain: the last two labels, or three under a two-letter
+ * country code with a generic second level (`bank.co.uk`). A bank's own
+ * subdomain (`secure.chase.com`) is judged as `chase.com`.
+ */
+const registrableDomain = (host: string): string => {
+  const labels = host.toLowerCase().replace(/^www\./u, '').replace(/[:.]+$/u, '').split('.');
+  const take = labels.length >= 3 && /^[a-z]{2}$/u.test(labels.at(-1)!) &&
+    /^(?:co|com|net|org|gov|ac|edu|bank)$/u.test(labels.at(-2)!) ? 3 : 2;
+  return labels.slice(-take).join('.');
+};
+/**
+ * "chase.com-refund.example": a real-looking domain spelled into another one.
+ * Judged after `www.` is stripped, and only when another label follows, so a
+ * real hyphenated host ("co-operativebank.co.uk", "net-banking…") is not one.
+ */
+const SPOOFED_TLD = /\.(?:com|net|org|bank)-[^.]+\./iu;
+const spoofedHost = (host: string): boolean => SPOOFED_TLD.test(host.replace(/^www\./iu, ''));
+/** Brand and security words a lookalike domain borrows. */
+const LOOKALIKE_WORD = /chase|paypal|amazon|apple|bank|secure|verify|login|refund|wells|citi|hsbc|barclays|venmo|zelle|account|support|help/iu;
+const letters = (value: string): string => value.toLowerCase().replace(/[^a-z0-9]/gu, '');
+/** The brand the alert names in its header ("Chase: …", "Co-operative Bank: …"). */
+const headerBrand = (source: string): string | null => {
+  const header = source.match(/^\s*([\p{L}][\p{L}&' .-]{1,40}?)\s*:/u)?.[1];
+  return header ? letters(header) : null;
+};
+/** The link is the alert's own brand domain: its first label spells the header brand exactly. */
+const ownBrandHost = (host: string, brand: string | null): boolean => {
+  if (!brand) return false;
+  const label = letters(registrableDomain(host).split('.')[0]);
+  return label.length >= 3 && (label === brand || brand.startsWith(label) && /^(?:bank|uk|us|card|cards)?$/u.test(brand.slice(label.length)));
+};
+const baitHost = (host: string | undefined): boolean => {
+  if (!host) return false;
+  if (APP_STORE.test(host.replace(/^www\./iu, ''))) return false;
+  return SHORTENER.test(host) || spoofedHost(host) || BAIT_HOST.test(registrableDomain(host));
+};
+/** A "Not you?" / "If this wasn't you" / "to stop this payment" sentence. */
+const DENIAL_CONTEXT = /\bnot\s+you\b|\bwasn['’]t\s+you\b|\bwas\s+not\s+you\b|\bdidn['’]t\s+make\b|\bstop\s+this\s+(?:payment|transaction|charge)\b/iu;
+const ANY_LINK = new RegExp(LINK, 'giu');
+/**
+ * Footer noun phrases that name a service, not an action on this money:
+ * UCO Bank's "Report Dispute <link>" and "To cancel alerts, visit …".
+ */
+const FOOTER_SERVICE = /\breport\s+dispute\b|\b(?:cancel|stop|unsubscribe\s+from)\s+(?:these\s+|all\s+|text\s+|sms\s+|account\s+)?alerts?\b/giu;
+
+/**
+ * A LINK WHOSE CALL TO ACTION IS DISPUTE/VERIFY/CANCEL/CLAIM is the shape of
+ * smishing ("Your card has been charged $499 … If this wasn't you, dispute
+ * here: http://…"). The money sentence before it is bait, not a bank fact, so
+ * such a message never auto-posts. It is bait when a strong action is
+ * imperative at the link ("dispute here:", "Claim it now", "Verify: …"), a
+ * weak one names the person's own details or money ("update your details"),
+ * or the link is a shortener, a lookalike registrable domain or a spoofed one
+ * ("chase.com-refund.example"); in a "Not you?" sentence any hyphenated or
+ * lookalike domain is bait. A purpose-clause footer to a plain domain ("To
+ * dispute this charge visit www.chase.com/dispute"), a bank subdomain ("Sign
+ * in at secure.chase.com"), an app store, "Report Dispute", "To cancel
+ * alerts" and "Not you? Visit chase.com/fraud" are not.
+ */
+export const hasLinkCallToAction = (source: string): boolean => {
+  const text = source.replace(FOOTER_SERVICE, (phrase) => ' '.repeat(phrase.length));
+  const brand = headerBrand(source);
+  for (const match of text.matchAll(ACTION_THEN_LINK)) {
+    const action = match[1] ?? '';
+    const between = match[2] ?? '';
+    const host = match[3] ?? match[4];
+    if (baitHost(host)) return true;
+    if (WEAK_ACTION_ONLY.test(action)) {
+      if (OWN_DETAILS.test(between)) return true;
+      // "Log in now: http://…" is bait unless the link is the brand's own
+      // domain ("Chase: … Log in: https://www.chase.com").
+      if (/\b(?:here|now|immediately|below)\b|:/iu.test(between) && !(host && (ownBrandHost(host, brand) || APP_STORE.test(host.replace(/^www\./iu, ''))))) return true;
+      continue;
+    }
+    const purpose = /\bto\s*$/iu.test(text.slice(Math.max(0, match.index! - 4), match.index!));
+    if (!purpose && /\b(?:here|now|immediately|below)\b|:/iu.test(between)) return true;
+  }
+  for (const match of text.matchAll(LINK_THEN_ACTION)) {
+    if (baitHost(match[1] ?? match[2])) return true;
+  }
+  const sentences = text.split(/(?<=[.!?\n])\s+/u);
+  for (const [index, sentence] of sentences.entries()) {
+    // "Not you? Click …" puts the question in the sentence before the link.
+    const context = `${sentences[index - 1] ?? ''} ${sentence}`;
+    for (const match of sentence.matchAll(ANY_LINK)) {
+      const host = match[1] ?? match[2];
+      if (host && spoofedHost(host)) return true;
+      // In a "Not you?" sentence a hyphenated domain is bait only when it also
+      // borrows a brand/security word and is not the alert's own brand:
+      // "chase-x.example" is, "first-direct.com" and "credit-agricole.fr" are not.
+      const label = host ? registrableDomain(host).split('.')[0] : '';
+      if (host && DENIAL_CONTEXT.test(context) && !APP_STORE.test(host.replace(/^www\./iu, '')) &&
+        !ownBrandHost(host, brand) &&
+        (baitHost(host) || (label.includes('-') && LOOKALIKE_WORD.test(label)))) return true;
+    }
+  }
+  return false;
+};
