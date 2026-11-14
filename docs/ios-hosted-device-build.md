@@ -13,6 +13,20 @@ EAS/ASC secrets are retained because the other release workflows use them;
 this PR does not migrate or remove them. The environment gate protects these
 two jobs, not access from every existing workflow in the repository.
 
+Operational approval follows the CEO's explicit delegation: after CEO merges
+the workflow and gives a specific dispatch go in OpenBot, iOS Release approves
+that run's pending environment deployment in the owner's signed-in GitHub UI,
+quoting the CEO go message ID in the approval comment. Never approve without
+that go, and never bypass the environment checks. Cleanup needs its own CEO go
+after App QA completion. If GitHub refuses self-approval, report to CEO before
+changing any environment setting; this must not become a user handoff.
+
+Residual: agents and CEO use the same GitHub owner identity and self-review is
+allowed. The gate records approval by that account; it does not prove an
+independent CEO or human identity. The delegation rule above controls its use.
+A separate reviewer identity and a QA-only environment-scoped ASC key are
+possible later hardening; they are outside this change.
+
 The hosted macOS runner rebuilds `production-candidate` using the existing
 `EXPO_TOKEN` EAS signing, which temporarily downloads EAS's distribution signing
 material to the ephemeral runner. Its raw build logs stay private. The workflow
