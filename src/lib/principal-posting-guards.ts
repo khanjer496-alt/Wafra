@@ -98,7 +98,7 @@ export function hasMobileMoneyCallback(source: string): boolean {
 const MOVEMENT_STATUS = /\bincomplete\s+(?:transaction|txn|purchase|payment|transfer|withdrawal)\b|\b(?:transaction|txn|purchase|payment|transfer|withdrawal)(?:\s+(?:of|for|at|to|from|with|on)\b(?:[^.\n]|\.\d){0,80}?)?\s+(?:was|is|remains?|has\s+been)\s+incomplete\b|\b(?:transaction|txn|purchase|payment|authori[sz]ation)\b(?:[^.\n]|\.\d){0,100}?\s(?:cancell?ed|voided)\s+by\s+(?:the\s+)?(?:merchant|bank|issuer|acquirer)\b|\b(?:transaction|txn|purchase|payment|authori[sz]ation)\b(?:[^.\n]|\.\d){0,100}?\s(?:will\s+be|is\s+being)\s+(?:cancell?ed|voided)\b|[ \t][-–—:|][ \t]*(?:void|voided|cancell?ed)[ \t]*(?=\n|$)|[ \t]*[,:(][ \t]*(?:cancell?ed|voided|void)[ \t]*\)?[ \t]*(?=[.\n]|$)|(?<![ء-ي])(?:تم\s+)?(?:الغاء|ايقاف|تعليق)\s+(?:ال)?(?:عمليه|شراء|دفع|تحويل|حواله|سحب|معامله|حركه)(?![ء-ي])|(?<![ء-ي])(?:الغيت|اوقفت|علقت)\s+(?:ال)?(?:عمليه|شراء|دفع|تحويل|حواله|سحب|معامله|حركه)(?![ء-ي])|(?<![ء-ي])(?:ال)?(?:عمليه|معامله|شراء|دفع|تحويل|حواله|سحب|حركه)\s+(?:غير\s+(?:ناجح|مكتمل)ه?|لم\s+(?:تكتمل|يكتمل|تنجح)|(?:ال)?(?:ملغي|ملغا|ملغاه|موقوف[هة]?))(?![ء-ي])|(?<![ء-ي])(?:و?تم|قد\s+تم)\s+(?:الغاو|الغاي|ايقاف|تعليق)(?:ها|ه)(?![ء-ي])|(?<![ء-ي])تم\s+(?:ال)?الغاء(?![ء-ي])|(?<![ء-ي])لم\s+(?:تكتمل|يكتمل|تنجح)(?![ء-ي])/gi;
 const CONDITIONAL_STATUS = /(?:\b(?:if|unless|please|pls|to|can|may|should)\b|(?<![ء-ي])(?:يرجي|الرجاء|رجاء|يمكنك|يمكنكم|يمكن|بامكانك|بامكانكم|اتصل|ارسل|للابلاغ|لطلب|طلب|خدمه|اذا|حال|تود|ترغب|عليك)(?![ء-ي]))(?:\s+(?:او|و|ب|في|علي|عن|من|كانت|كان|or|and))?(?:\s+\d{1,4})?\s*$/i;
 
-const COMPLETED_MONEY_WORDS = new Set(['made', 'completed', 'processed', 'posted', 'charged', 'debited', 'deducted', 'paid', 'sent', 'withdrawn', 'spent', 'purchased', 'used', 'transferred', 'credited', 'refunded', 'reversed', 'returned', 'deposited', 'received', 'arrived', 'settled', 'done', 'successful']);
+const COMPLETED_MONEY_WORDS = new Set(['made', 'completed', 'processed', 'posted', 'charged', 'debited', 'deducted', 'paid', 'sent', 'withdrawn', 'spent', 'purchased', 'used', 'transferred', 'credited', 'refunded', 'reversed', 'returned', 'deposited', 'received', 'arrived', 'settled', 'done', 'successful', 'applied', 'assessed']);
 const COMPLETED_MONEY_VERB = new RegExp(`\\b(?:${[...COMPLETED_MONEY_WORDS].join('|')})\\b`, 'iu');
 const ACTIVE_MONEY_VERB = /\b(?:charged|debited|deducted|paid|sent|withdrawn|spent|purchased|used|transferred|credited|refunded|reversed|returned|deposited|received|arrived|made|completed|processed|posted|settled|done)\b/giu;
 const PREDICATE_AUXILIARY = /\b(?:was|were|is|are|has|have|had|will|would|shall|should|must|may|might|can|could|not|never|being|yet|scheduled|pending|awaiting|[a-z]+n['’]t)\b/iu;
@@ -124,7 +124,7 @@ function firstStatedPrice(text: string): number | null {
 }
 
 /** Reduce one owned predicate; modifiers cannot hide its polarity or aspect. */
-function completedPredicate(fragment: string, debitOnly = false): boolean {
+function completedPredicate(fragment: string, debitOnly = false, feePredicate = false): boolean {
   // A new explicit auxiliary reopens polarity: "not credited and was debited"
   // states a debit; "not credited and debited" still shares the negation.
   const clauses = fragment.split(/\b(?:and|but)\s+(?=(?:was|were|is|are|has|have|had|will|would|shall|should|must|may|might|can|could)\b)/iu);
@@ -134,7 +134,7 @@ function completedPredicate(fragment: string, debitOnly = false): boolean {
   // With no new auxiliary, coordinated verbs share the original polarity:
   // "was reversed and debited" completes both; "not ... and debited" does not.
   const shared = owned.split(/\b(?:and|but)\b/iu);
-  if (shared.length > 1) return shared.every(part => completedPredicate(part));
+  if (shared.length > 1) return shared.every(part => completedPredicate(part, false, feePredicate));
   const expanded = owned.trim().replace(/^['’]ve\b/iu, 'have').replace(/^['’]s\b/iu, 'has').replace(/^['’]re\b/iu, 'are');
   const words = (expanded.toLowerCase().match(/[a-z]+(?:['’][a-z]+)?|\d+/gu) ?? [])
     .filter(word => !COMPLETION_ADVERBS.has(word));
@@ -142,6 +142,7 @@ function completedPredicate(fragment: string, debitOnly = false): boolean {
   if (['out', 'back'].includes(words[words.length - 1] ?? '') && ['paid', 'sent'].includes(words[words.length - 2] ?? '')) words.pop();
   const verb = words.pop();
   if (!verb || !COMPLETED_MONEY_WORDS.has(verb)) return false;
+  if ((verb === 'applied' || verb === 'assessed') && !feePredicate) return false;
   const auxiliary = words.join(' ');
   return auxiliary === '' || /^(?:was|were|has been|have been|had been|has|have|had)$/u.test(auxiliary) ||
     (verb !== 'made' && /^(?:is|are)$/u.test(auxiliary));
@@ -160,10 +161,13 @@ function selectedPredicateCompletion(lead: string, tail: string, debitOnly = fal
   }
   // A descriptor bounds a predicate, but does not end its ownership: "using
   // card 1234 has not been made" still predicates this selected purchase.
-  // Stop at a separate money/metadata field, not at the first instrument.
-  const field = NEXT_MONEY_FIELD.exec(tail);
-  const ownedTail = tail.slice(0, Math.min(field?.index ?? tail.length, firstStatedPrice(tail) ?? tail.length));
-  const descriptor = PREDICATE_DESCRIPTOR.exec(ownedTail);
+  // A distinct stated price is a money boundary. Metadata words can also be
+  // merchant descriptors ("at BALANCE CAFE"), so they cannot erase a later
+  // finite predicate either.
+  const ownedTail = tail.slice(0, firstStatedPrice(tail) ?? tail.length);
+  const descriptor = [PREDICATE_DESCRIPTOR.exec(ownedTail), NEXT_MONEY_FIELD.exec(ownedTail)]
+    .filter((match): match is RegExpExecArray => match !== null)
+    .sort((a, b) => a.index - b.index)[0];
   const predicate = ownedTail.slice(0, descriptor?.index ?? ownedTail.length).trim().replace(/^[^\p{L}\p{N}]+/u, '');
   const following: string[] = [];
   if (descriptor) for (const auxiliary of ownedTail.matchAll(FINITE_AUXILIARY_SCAN)) {
@@ -220,18 +224,19 @@ function selectedPredicateCompletion(lead: string, tail: string, debitOnly = fal
   if (active === false) return false;
   const nounLabel = /^(?:purchase|payment|transfer|withdrawal|transaction)$/iu.test(predicate);
   const nominal = nounLabel || /\b(?:purchase|payment|transfer|withdrawal|transaction)\s+(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(lead);
+  const feePredicate = /\b(?:fees?|charges?|commission|tax|levy)\s*(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(lead);
   // A completed purchase/payment predicate proves an expense even when it
   // uses "made". A credit noun cannot acquire that debit authority.
-  const explicitDebitOnly = debitOnly && !nominal;
+  const explicitDebitOnly = debitOnly && !nominal && !feePredicate;
   for (const finite of following) {
     // Existing purchase receipts distinguish pending settlement of an
     // authorised charge from a pending purchase/authorisation itself.
     if (nominal && /^is\s+(?:currently\s+)?pending\s+settlement$/iu.test(finite)) continue;
-    if (!completedPredicate(finite, explicitDebitOnly)) return false;
+    if (!completedPredicate(finite, explicitDebitOnly, feePredicate)) return false;
   }
   const monetaryTail = COMPLETED_MONEY_VERB.test(predicate);
   if (predicate && !(nounLabel && following.length) && ((monetaryTail && (nominal || PREDICATE_START.test(predicate))) ||
-    (active === null && (nominal || PREDICATE_START.test(predicate))))) return completedPredicate(predicate, explicitDebitOnly);
+    (active === null && (nominal || PREDICATE_START.test(predicate))))) return completedPredicate(predicate, explicitDebitOnly, feePredicate);
   return following.length ? true : active;
 }
 

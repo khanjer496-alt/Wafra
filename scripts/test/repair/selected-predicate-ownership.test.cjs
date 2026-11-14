@@ -39,6 +39,7 @@ for (const [body, price] of [
   ['Refund AED 47.99 to card 1234 was reversed and debited from your account.', 'AED 47.99'],
   ['Purchase of AED 50.00 at SAMPLE SHOP with card ending 1234 on 12/10/2026, if this transaction was not processed by you call 600 000000', 'AED 50.00'],
   ['AED 250.00 was debited from your card ending 1234 at NOON, refund of your previous order is pending.', 'AED 250.00'],
+  ['Account maintenance fee AED 25.00 has been applied to account 1234.', 'AED 25.00'],
 ]) test(`existing principal is not vetoed by another owner: ${body}`, () => {
   const start = body.indexOf(price);
   assert.equal(guards.isIncompletePrincipal(body, { start, end: start + price.length }, true), false, body);
