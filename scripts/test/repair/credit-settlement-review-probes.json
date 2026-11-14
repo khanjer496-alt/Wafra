@@ -2423,5 +2423,538 @@
     "sender": "ENBD",
     "expected": "income",
     "minorUnits": 12500
+  },
+  {
+    "id": "cross-family-91-new:1",
+    "body": "AED 250.00 has been refunded to your card ending 1234 as requested.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-91-new:2",
+    "body": "AED 250.00 has been refunded to your card ending 1234 after verification.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-91-new:3",
+    "body": "AED 250.00 has been refunded to your card ending 1234 subject to merchant approval.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-91-new:4",
+    "body": "AED 250.00 has been refunded to your card ending 1234 from NOON.COM ONLY IF APPROVED.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-91-new:5",
+    "body": "AED 250.00 has been refunded to your card ending 1234 but requires merchant approval.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-91-new:6",
+    "body": "AED 250.00 has been refunded to your card ending 1234 upon approval.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-91-new:7",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك المنتهية 1234 سيتوفر في حسابك غدا.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-91-new:8",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك المنتهية 1234 سيتم إيداعه بعد التحقق.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-91-new:9",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك المنتهية 1234 طلبنا استرداده.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-91-new:10",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك المنتهية 1234 ويتطلب موافقة التاجر.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-91-new:11",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك المنتهية 1234 من شركة نون إذا وافق البنك.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-91-new:12",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your refund request is pending.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null
+  },
+  {
+    "id": "cross-family-91-new:13",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your charge-back request for AED 40.00 is queued.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "cross-family-91-new:14",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your refund request for AED 40.00 was received.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "cross-family-91-new:15",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your reversal request is declined.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null
+  },
+  {
+    "id": "cross-family-91-new:16",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your chargeback is in progress.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null
+  },
+  {
+    "id": "cross-family-91-new:17",
+    "body": "Your card ending 1234 was charged AED 250.00 at CAREEM. Your refund request is pending.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null
+  },
+  {
+    "id": "cross-family-91-new:18",
+    "body": "Your card ending 1234 was charged AED 250.00 at CAREEM. Your charge-back request for AED 40.00 is queued.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "cross-family-91-new:19",
+    "body": "Your card ending 1234 was charged AED 250.00 at CAREEM. Your refund request for AED 40.00 was received.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "cross-family-91-new:20",
+    "body": "Your card ending 1234 was charged AED 250.00 at CAREEM. Your reversal request is declined.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null
+  },
+  {
+    "id": "cross-family-91-new:21",
+    "body": "Your card ending 1234 was charged AED 250.00 at CAREEM. Your chargeback is in progress.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null
+  },
+  {
+    "id": "cross-family-91-new:22",
+    "body": "A purchase of AED 250.00 was made using card ending 1234 at AMAZON.AE. Your refund request is pending.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null
+  },
+  {
+    "id": "cross-family-91-new:23",
+    "body": "A purchase of AED 250.00 was made using card ending 1234 at AMAZON.AE. Your charge-back request for AED 40.00 is queued.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "cross-family-91-new:24",
+    "body": "A purchase of AED 250.00 was made using card ending 1234 at AMAZON.AE. Your refund request for AED 40.00 was received.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "cross-family-91-new:25",
+    "body": "A purchase of AED 250.00 was made using card ending 1234 at AMAZON.AE. Your reversal request is declined.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null
+  },
+  {
+    "id": "cross-family-91-new:26",
+    "body": "A purchase of AED 250.00 was made using card ending 1234 at AMAZON.AE. Your chargeback is in progress.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null
+  },
+  {
+    "id": "cross-family-91-new:27",
+    "body": "تم خصم مبلغ AED 250.00 من بطاقتك لدى نون. Your refund request is pending.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null
+  },
+  {
+    "id": "cross-family-91-new:28",
+    "body": "تم خصم مبلغ AED 250.00 من بطاقتك لدى نون. Your charge-back request for AED 40.00 is queued.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "cross-family-91-new:29",
+    "body": "تم خصم مبلغ AED 250.00 من بطاقتك لدى نون. Your refund request for AED 40.00 was received.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "cross-family-91-new:30",
+    "body": "تم خصم مبلغ AED 250.00 من بطاقتك لدى نون. Your reversal request is declined.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null
+  },
+  {
+    "id": "cross-family-91-new:31",
+    "body": "تم خصم مبلغ AED 250.00 من بطاقتك لدى نون. Your chargeback is in progress.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null
+  },
+  {
+    "id": "cross-family-91-new:32",
+    "body": "Your salary of AED 250.00 has been credited to your account ending 1234 as requested.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-91-new:33",
+    "body": "Your account ending 1234 received AED 250.00. Please verify your statement.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-91-new:34",
+    "body": "AED 250.00 has been refunded to your card ending 1234. Approval requested.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-91-new:35",
+    "body": "AED 250.00 has been refunded to your card ending 1234, requested by you.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-91-confirm:Q1",
+    "body": "A purchase of AED 250.00 was made using card ending 1234 at AMAZON.AE.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true
+  },
+  {
+    "id": "cross-family-91-confirm:Q2",
+    "body": "A purchase of AED 250.00 was made using card ending 1234 at AMAZON.AE. Your refund request is pending.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null
+  },
+  {
+    "id": "cross-family-91-confirm:Q3",
+    "body": "AED 250.00 was debited from your card ending 1234 at AMAZON.AE. Your refund request is pending.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null
+  },
+  {
+    "id": "cross-family-91-confirm:Q4",
+    "body": "AED 250.00 has been refunded to your card ending 1234 as requested.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-91-confirm:Q5",
+    "body": "Refund of AED 250.00 to your card ending 1234 was successfully requested.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-91-confirm:Q6",
+    "body": "AED 250.00 has been refunded to your card ending 1234; verification requested.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-91-confirm:Q7",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك المنتهية 1234 سيتوفر في حسابك غدا.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-91-confirm:Q8",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك المنتهية 1234 سوف يتوفر في حسابك غدا.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-91-boundary:B1",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. AED 250.00 has now been refunded to your card ending 1234.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 25000
+  },
+  {
+    "id": "cross-family-91-boundary:B2",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your refund of AED 250.00 has been credited to your card ending 1234.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 25000
+  },
+  {
+    "id": "cross-family-91-boundary:B3",
+    "body": "Refund received AED 12.50 from PAYMENT REQUEST APPROVED SHOP.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 1250,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-91-boundary:B4",
+    "body": "Your salary of AED 250.00 has been credited to your account ending 1234 when requested by you.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-91-boundary:B5",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك. سيتم قيده في الحساب غدا.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "cross-family-91-boundary:B6",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك. سيضاف إلى رصيدك غدا.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "r3-ar-productive-future-0",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك. سيتم المبلغ في الحساب غدا.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "r3-ar-productive-future-1",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك. سيضاف المبلغ في الحساب غدا.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "r3-ar-productive-future-2",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك. سيتوفر المبلغ في الحساب غدا.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "r3-ar-productive-future-3",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك. سيعود المبلغ في الحساب غدا.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "r3-ar-productive-future-4",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك. ستصل المبلغ في الحساب غدا.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "r3-ar-productive-future-5",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك. سنقيد المبلغ في الحساب غدا.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "r3-ar-productive-future-6",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك. سأضيف المبلغ في الحساب غدا.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "r3-ar-productive-future-7",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك. وَسَيُقْيَد المبلغ في الحساب غدا.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "r3-ar-productive-future-8",
+    "body": "تم استرداد مبلغ AED 250.00 إلى بطاقتك. فسيودع المبلغ في الحساب غدا.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "r3-passive-debit-not-completed-0",
+    "body": "If approved, A purchase of AED 250.00 was made using card ending 1234 at AMAZON.AE. Your refund request is pending.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000
+  },
+  {
+    "id": "r3-passive-debit-not-completed-1",
+    "body": "A purchase of AED 250.00 will be made using card ending 1234 at AMAZON.AE. Your refund request is pending.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000
+  },
+  {
+    "id": "r3-passive-debit-not-completed-2",
+    "body": "A purchase of AED 250.00 was not made using card ending 1234 at AMAZON.AE. Your refund request is pending.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000
   }
 ]

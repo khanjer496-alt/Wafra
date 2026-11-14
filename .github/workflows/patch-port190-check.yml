@@ -1,0 +1,36 @@
+name: Application source reports (side branch)
+on:
+  push:
+    branches: ['patch/app-closure-**']
+permissions:
+  contents: read
+jobs:
+  app:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - name: Generate and compile
+        run: |
+          mkdir -p out
+          node scripts/generate-ios-background-parser.cjs > out/generate.txt 2>&1
+          bash scripts/test/build.sh > out/compile.txt 2>&1
+      - name: Run application suites with individual reports
+        run: |
+          failed=0
+          for file in scripts/test/*.test.js; do
+            name="${file##*/}"
+            node "$file" > "out/$name.txt" 2>&1 || failed=1
+          done
+          exit "$failed"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: app-source-${{ github.sha }}
+          path: out/
+          retention-days: 7
