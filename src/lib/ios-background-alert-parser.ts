@@ -241,9 +241,10 @@ export function parseIosBackgroundAlert(input: NativeParserInput): NativeParserR
     setLedgerCurrency(context.ledgerMoney.currency, context.ledgerMoney.exponent);
     const creditReviewOnly = hasOnlyUnsettledCredit(source) || holdCredit || mentionsCredit(source);
     const refusal = nonPostingReason(source);
+    const incomplete = isNotAutoPostableMoney(source) || hasNonCompletedWording(source, context.country, sender);
     const reviewableRefusal = (creditReviewOnly && canReviewCreditRefusal(source, refusal)) || (!!pair && refusal === 'declined');
     if (NON_RECEIPT_PREFIX_RE.test(source) || (refusal && !reviewableRefusal) || (!(creditReviewOnly || pair) &&
-      (isNotAutoPostableMoney(source) || hasNonCompletedWording(source, context.country, sender)))) return ignore();
+      incomplete)) return ignore();
     const session = createLaunchAlertSession({ overrides: {}, activeMarket: context.parserMarket,
       pinnedCurrency: context.ledgerMoney.currency, fxLookup: () => null,
       bestEffort: { enabled: false, country: context.country } });
@@ -260,6 +261,9 @@ export function parseIosBackgroundAlert(input: NativeParserInput): NativeParserR
     const inspection = session.inspect(source, sender);
     const parsed = unbankedSender ? null
       : session.parse(source, sender, inspection, senderMarket ?? undefined, input.observedAt);
+    // Relaxing a refusal for informational CREDIT Review cannot authorize a
+    // debit that the original source's completed-movement checks refused.
+    if (parsed?.kind === 'transaction' && parsed.type === 'expense' && !pair && incomplete) return ignore();
     // Native has one notification. Keep the actual debit; the app separately
     // retains the reversal note in its existing capture/history Review lane.
     const debitSource = pair && parsed?.kind === 'transaction' && parsed.type === 'expense' ? pair.debit : null;
