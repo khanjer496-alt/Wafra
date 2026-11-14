@@ -101,6 +101,7 @@ function harness(options = {}) {
   });
   const placement = { state: { status: 'idle' }, registerPlacement: async request => { calls.placements.push(request); } };
   const setPro = value => { calls.pro.push(value); state.pro = value; };
+  const ensureDurable = async () => { await options.ensureDurable?.(); };
   const productContract = load(path.join(root, 'src/lib/purchases.ts'), {
     'react-native': rn, '@/lib/complimentary-access': { complimentaryAccessUntil: () => 0 },
   });
@@ -131,11 +132,17 @@ function harness(options = {}) {
         calls.playQueries++;
         return options.querySubscriptions ? options.querySubscriptions() : { status: 'inactive', activeProductIds: [], pendingProductIds: [], responseCode: 0 };
       },
+      recoverAndroidPlayAcknowledgements: async allowed => {
+        if (allowed()) {
+          assert.equal(state.pro, true, 'ACK must follow local grant');
+          await options.acknowledge?.();
+        }
+      },
     },
     '@/lib/purchases': { ENTITLEMENT_ID: 'pro', trialDaysLeft: current => current.trialStartTs ? 7 : 0,
       proOffersFromProducts: productContract.proOffersFromProducts,
       proProductIdsForPlatform: productContract.proProductIdsForPlatform },
-    '@/lib/store': { useStore: () => ({ state, setPro, ensureDurable: async () => {}, setOnboardingProfile() {} }) },
+    '@/lib/store': { useStore: () => ({ state, setPro, ensureDurable, setOnboardingProfile() {} }) },
     // Configure waits for Home's first frames; here the frames are always past.
     '@/lib/after-first-frames': { runAfterFirstFrames: task => {
       calls.deferred.push(task);
@@ -818,5 +825,64 @@ test('Play bridge allowlist and the app product ids stay one list', () => {
     // Play reports the bare subscription id; purchasePro confirms on the first segment.
     assert.ok(javaIds.includes(pinned.split(':')[0]), `${pinned} must confirm against a Play-reported id`);
     assert.ok(!javaIds.includes(pinned));
+  }
+});
+
+
+test('startup, Restore and foreground grant durably before acknowledgement; pending never ACKs', async () => {
+  const sequence = []; let pending = false;
+  const h = harness({
+    querySubscriptions: async () => pending ? { status: 'inactive', activeProductIds: [], pendingProductIds: ['wafra_pro_weekly'], responseCode: 0 }
+      : { status: 'active', activeProductIds: ['wafra_pro_weekly'], pendingProductIds: [], responseCode: 0 },
+    ensureDurable: async () => { sequence.push('grant-durable'); },
+    acknowledge: async () => { sequence.push('ack'); },
+  });
+  await h.renderRuntime(2); await tick();
+  assert.deepEqual(sequence, ['grant-durable', 'ack']);
+  sequence.length = 0;
+  assert.equal(await h.billing().restorePro(), true); await tick();
+  assert.deepEqual(sequence, ['grant-durable', 'ack']);
+  sequence.length = 0;
+  for (const listener of h.calls.appListeners) listener('active'); await tick();
+  assert.deepEqual(sequence, ['grant-durable', 'ack']);
+  sequence.length = 0; pending = true;
+  for (const listener of h.calls.appListeners) listener('active'); await tick();
+  assert.deepEqual(sequence, []);
+});
+
+test('local durability failure never acknowledges and does not reject the UI refresh', async () => {
+  let acknowledgements = 0;
+  const h = harness({
+    querySubscriptions: async () => ({ status: 'active', activeProductIds: ['wafra_pro_weekly'], pendingProductIds: [], responseCode: 0 }),
+    ensureDurable: async () => { throw Error('synthetic local storage failure'); },
+    acknowledge: async () => { acknowledgements++; },
+  });
+  await h.renderRuntime(2); await tick();
+  assert.equal(h.state.pro, true); assert.equal(acknowledgements, 0);
+});
+
+
+test('acknowledged Pro foreground refreshes skip whole-ledger persistence and recovery', async () => {
+  let durable = 0; let acknowledgements = 0;
+  const h = harness({ state: { pro: true },
+    querySubscriptions: async () => ({ status: 'active', activeProductIds: ['wafra_pro_weekly'], pendingProductIds: [], responseCode: 0, needsAcknowledgement: false }),
+    ensureDurable: async () => { durable++; }, acknowledge: async () => { acknowledgements++; },
+  });
+  await h.renderRuntime(2); await tick();
+  for (let i = 0; i < 2; i++) { for (const listener of h.calls.appListeners) listener('active'); await tick(); }
+  assert.equal(h.state.pro, true); assert.equal(durable, 0); assert.equal(acknowledgements, 0);
+});
+
+
+test('ACK errors and unanswered ACKs never withhold purchased access or block Restore', async () => {
+  for (const acknowledge of [async () => { throw Error('synthetic ACK outage'); }, () => new Promise(() => {})]) {
+    const h = harness({
+      querySubscriptions: async () => ({ status: 'active', activeProductIds: ['wafra_pro_weekly'], pendingProductIds: [], responseCode: 0, needsAcknowledgement: true }),
+      acknowledge,
+    });
+    await h.renderRuntime(2); await tick();
+    assert.equal(h.state.pro, true);
+    assert.equal(await h.billing().restorePro(), true);
+    assert.equal(h.state.pro, true);
   }
 });

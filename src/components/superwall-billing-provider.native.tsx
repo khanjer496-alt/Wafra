@@ -23,6 +23,7 @@ import { runAfterFirstFrames } from '@/lib/after-first-frames';
 import {
   isAndroidPlayBillingAvailable,
   queryAndroidPlaySubscriptions,
+  recoverAndroidPlayAcknowledgements,
   type AndroidPlaySubscriptionSnapshot,
 } from '@/lib/android-play-billing';
 import {
@@ -192,6 +193,7 @@ function SuperwallRuntime({ onValue }: {
   const androidQueryGeneration = useRef(0);
   const androidMoneyAction = useRef<AndroidMoneyAction | null>(null);
   const androidSessionGeneration = useRef(0);
+  const acknowledgementSession = useRef({ generation: 0, key: {} });
   const androidRefreshDeferred = useRef(false);
   const billingReady = useRef(state.hydrated && isConfigured);
   const mounted = useRef(true);
@@ -231,8 +233,22 @@ function SuperwallRuntime({ onValue }: {
         setPro(active);
       }
     }
+    if (snapshot.status === 'active' && snapshot.needsAcknowledgement !== false) {
+      const session = androidSessionGeneration.current;
+      if (acknowledgementSession.current.generation !== session) {
+        acknowledgementSession.current = { generation: session, key: {} };
+      }
+      const recoveryKey = acknowledgementSession.current.key;
+      const isStillEntitled = () => mounted.current && billingReady.current && currentPro.current &&
+        session === androidSessionGeneration.current;
+      // setPro updates the store synchronously; ensureDurable persists that grant
+      // before Play is told it was delivered. Recovery stays off the UI's await path.
+      void ensureDurable().then(() => {
+        if (isStillEntitled()) return recoverAndroidPlayAcknowledgements(isStillEntitled, recoveryKey);
+      }).catch(() => { /* Do not ACK content that could not be saved locally. */ });
+    }
     return snapshot;
-  }, [setPro]);
+  }, [ensureDurable, setPro]);
 
   const finishAndroidAction = useCallback((action: AndroidMoneyAction) => {
     if (androidMoneyAction.current !== action) return;

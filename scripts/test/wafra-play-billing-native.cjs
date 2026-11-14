@@ -44,7 +44,8 @@ async function main() {
     const sources = filesIn(source).filter(file => file.endsWith('.java'));
     execFileSync(executable('javac'), ['-Xlint:none', '-cp', classpath, '-d', classes, ...sources], { stdio: 'pipe', timeout: 30_000 });
     const output = execFileSync(executable('java'), ['-cp', [classes, classpath].join(path.delimiter), 'org.junit.runner.JUnitCore',
-      'expo.modules.wafraplaybilling.SubscriptionQueryTest', 'expo.modules.wafraplaybilling.PurchaseProjectionTest'],
+      'expo.modules.wafraplaybilling.SubscriptionQueryTest', 'expo.modules.wafraplaybilling.PurchaseProjectionTest',
+      'expo.modules.wafraplaybilling.PurchaseAcknowledgementTest'],
     { encoding: 'utf8', timeout: 30_000 });
     process.stdout.write(output);
 
