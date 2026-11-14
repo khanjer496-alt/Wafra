@@ -4,6 +4,17 @@ const assert = require('node:assert/strict');
 const load = require('../../universal-test/load-ts.cjs').createLoader();
 const guards = load('@/lib/principal-posting-guards');
 
+test('a closed own-card receipt keeps its amount without inventing card digits', () => {
+  load('@/lib/country').setActiveCountry('AE');
+  load('@/lib/markets').setActiveMarket('AE');
+  load('@/lib/markets').setLedgerCurrency('AED', 2);
+  const body = 'Your Credit Card XXX 250.00 AED purchase at NOON';
+  const parsed = load('@/lib/sms-parser').parseSms(body, {}, { sender: 'ENBD' });
+  assert.equal(parsed?.type, 'expense');
+  assert.equal(parsed.amountFils, 25000);
+  assert.equal(parsed.card?.last4 ?? null, null);
+});
+
 // The instrument/merchant may precede, follow or interrupt the predicate.
 // Its spelling is not settlement evidence and cannot hide finite wording.
 const rows = require('./credit-settlement-review-probes.json').filter(row =>

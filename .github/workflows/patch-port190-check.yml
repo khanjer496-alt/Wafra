@@ -1,0 +1,35 @@
+name: Exact receipt retention red control
+on:
+  push:
+    branches: [patch/probe-pr7-967-receipt-red]
+permissions:
+  contents: read
+jobs:
+  red:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - name: Run strict receipt and finite-predicate controls on unchanged967source
+        run: |
+          set +e
+          node --test --test-concurrency=1 scripts/test/repair/selected-predicate-ownership.test.cjs > units.txt 2>&1
+          A=$?
+          node --test --test-concurrency=1 scripts/test/repair/credit-settlement-closure.test.cjs > closure.txt 2>&1
+          B=$?
+          printf '{"units":%s,"closure":%s}\n' "$A" "$B" > exits.json
+          test "$A" = 0 && test "$B" = 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: receipt-retention-red-${{ github.sha }}
+          path: |
+            units.txt
+            closure.txt
+            exits.json
+          retention-days: 7
