@@ -1,0 +1,62 @@
+name: Parse trace (side branch)
+
+# CI-only side-branch check, never merged. Runs the parser-facing suites with a tracer
+# (.github/patch-probe/parse-trace.cjs) that records every exported parseSms / interpretBankAlert call as
+# body + sender -> result shapes, so two heads can be compared row by row. Ships nothing.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'patch/trace-**'
+
+permissions:
+  contents: read
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+      - name: Install locked dependencies
+        run: |
+          npm ci
+          npm --prefix server ci
+      - name: Regenerate the native bundle, then compile the shipping modules
+        run: |
+          node scripts/generate-ios-background-parser.cjs
+          bash scripts/test/build.sh > build.log 2>&1
+      - name: Traced suites (test results are not the point; the trace is)
+        env:
+          WAFRA_PARSE_TRACE_DIR: ${{ runner.temp }}/trace
+        run: |
+          set +e
+          export NODE_OPTIONS="--require $PWD/.github/patch-probe/parse-trace.cjs"
+          cd scripts/test
+          : > "$RUNNER_TEMP/exits.txt"
+          node --test --test-concurrency=2 --test-reporter=dot repair/*.test.cjs > /dev/null 2>&1; echo "repair $?" >> "$RUNNER_TEMP/exits.txt"
+          for t in ../universal-test/run.cjs ../universal-evidence/nonposting-regressions.test.cjs ../universal-evidence/money-regressions.test.cjs ../universal-evidence/evaluator.test.cjs ../universal-evidence-round2/run.cjs; do
+            node "$t" > /dev/null 2>&1; echo "$t $?" >> "$RUNNER_TEMP/exits.txt"
+          done
+          for t in *.test.js; do
+            node "$t" > /dev/null 2>&1; echo "$t $?" >> "$RUNNER_TEMP/exits.txt"
+          done
+          exit 0
+      - name: Merge the trace
+        run: |
+          mkdir -p out
+          cp "$RUNNER_TEMP/exits.txt" out/exits.txt
+          node .github/patch-probe/merge-trace.cjs "$RUNNER_TEMP/trace" out/trace.jsonl | tee out/summary.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: parse-trace-${{ github.sha }}
+          path: out/
+          retention-days: 7
