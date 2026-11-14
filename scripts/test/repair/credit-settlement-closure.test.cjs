@@ -76,28 +76,26 @@ for (const body of NO_POST) test(`no automatic posting: ${body}`, () => {
   const got = paths(body);
   assert.equal(got.sms, 'none', `parseSms: ${JSON.stringify(got)}`);
   assert.equal(got.session, 'none', `session: ${JSON.stringify(got)}`);
-  if (!process.env.SOURCE_ONLY) assert.ok(!/^(?:credit|debit):/.test(got.native), `native: ${JSON.stringify(got)}`);
+  assert.ok(!/^(?:credit|debit):/.test(got.native), `native: ${JSON.stringify(got)}`);
 });
 for (const body of KEEP_DEBIT) test(`request never reverses a debit: ${body}`, () => {
   const got = paths(body);
   assert.equal(got.sms, 'expense:25000', JSON.stringify(got));
   assert.equal(got.session, 'expense:25000', JSON.stringify(got));
-  if (!process.env.SOURCE_ONLY) assert.ok(!/^credit:/.test(got.native), JSON.stringify(got));
+  assert.ok(!/^credit:/.test(got.native), JSON.stringify(got));
 });
 for (const body of KEEP_CREDIT) test(`settled credit preserved: ${body}`, () => {
   const got = paths(body);
   assert.equal(got.sms, 'income:25000', JSON.stringify(got));
   assert.equal(got.session, 'income:25000', JSON.stringify(got));
-  if (!process.env.SOURCE_ONLY && (body === `${EN}.` || body === `${AR}.`)) assert.equal(got.native, 'credit:25000', JSON.stringify(got));
+  if (body === `${EN}.` || body === `${AR}.`) assert.equal(got.native, 'credit:25000', JSON.stringify(got));
 });
 for (const row of require('./credit-settlement-sweep.json')) test(`${row.id} ${row.class}: ${row.requirement}`, () => {
   const got = paths(row.body, row.sender, row.market, row.currency);
   const expected = row.expected === 'none' ? 'none' : `${row.expected}:25000`;
   assert.equal(got.sms, expected, `${row.body} parseSms ${JSON.stringify(got)}`);
   assert.equal(got.session, row.sessionExpected === 'none' ? 'none' : `${row.sessionExpected}:25000`, `${row.body} session ${JSON.stringify(got)}`);
-  if (!process.env.SOURCE_ONLY) {
-    if (row.nativeExpected === 'no-post') assert.ok(!/^(?:credit|debit):/.test(got.native), `${row.body} ${JSON.stringify(got)}`);
-    else if (row.nativeExpected === 'no-credit') assert.ok(!/^credit:/.test(got.native), `${row.body} ${JSON.stringify(got)}`);
-    else assert.equal(got.native, `${row.nativeExpected}:25000`, row.body);
-  }
+  if (row.nativeExpected === 'no-post') assert.ok(!/^(?:credit|debit):/.test(got.native), `${row.body} ${JSON.stringify(got)}`);
+  else if (row.nativeExpected === 'no-credit') assert.ok(!/^credit:/.test(got.native), `${row.body} ${JSON.stringify(got)}`);
+  else assert.equal(got.native, `${row.nativeExpected}:25000`, row.body);
 });
