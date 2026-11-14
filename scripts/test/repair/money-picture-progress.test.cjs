@@ -77,7 +77,7 @@ test('manual first-run hides both import surfaces in EN/AR and light/dark', () =
   const now = Date.now();
   for (const language of ['en', 'ar']) for (const theme of ['light', 'dark']) {
     for (const history of [null, { status: 'paused', scanned: 0, found: 0, cursor: null, startedAt: now, updatedAt: now, error: null }]) {
-      const h = harness({ empty: true, optOut: true, trialStartTs: now, history, language, theme });
+      const h = harness({ empty: true, accounts: [], optOut: true, trialStartTs: now, history, language, theme });
       assert.equal(walk(h.tree).filter(node => ['money-picture-progress', 'history-reading-status'].includes(node.props?.testID)).length, 0);
     }
   }
@@ -109,4 +109,24 @@ test('legacy Android installs with absent per-source settings retain saved impor
     history: { status: 'paused', scanned: 50, found: 8, cursor: null, startedAt: now, updatedAt: now, error: null },
   });
   assert.equal(walk(h.tree).filter(node => node.props?.testID === 'money-picture-progress').length, 1);
+});
+
+
+test('notification-only first week keeps generic setup for empty or disabled SMS history', () => {
+  const now = Date.now();
+  const paused = { status: 'paused', scanned: 0, found: 0, cursor: null, startedAt: now, updatedAt: now, error: null };
+  for (const language of ['en', 'ar']) for (const theme of ['light', 'dark']) for (const history of [null, paused]) {
+    const h = harness({ empty: true, accounts: [], trialStartTs: now, history,
+      androidCaptureSources: { sms: false, notifications: true }, captureState: 'waiting-for-alert', language, theme,
+    });
+    const pictures = walk(h.tree).filter(node => node.props?.testID === 'money-picture-progress');
+    assert.equal(pictures.length, 1, 'notification capture keeps the first-week money picture');
+    assert.match(text(pictures[0]), /moneyPictureBuilding/);
+    assert.doesNotMatch(text(pictures[0]), /moneyPictureMessagesChecked|moneyPictureSaved/);
+    assert.equal(walk(h.tree).filter(node => node.props?.testID === 'history-reading-status').length, 0);
+    assert.equal(walk(h.tree).filter(node => node.props?.testID === 'journal-import-controls').length, 1,
+      'first-week setup keeps capture visible even when its saved section preference is hidden');
+    const hint = walk(h.tree).find(node => node.type === 'WidgetsHint');
+    assert.equal(hint?.props.firstDays, true);
+  }
 });
