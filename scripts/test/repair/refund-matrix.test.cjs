@@ -123,7 +123,8 @@ function judge(row) {
   // pinned; this explicit product-policy overlay does not rewrite its rows.
   const c = row.case;
   const debitWithCreditNote = EXPLICIT_DEBIT_CONTROL_MINOR_UNITS[row.id] ||
-    (c?.debit && (c.verb !== 'processed' || /refund/.test(c.subject) || c.subject === 'merchant' || c.trail === 'reversed'));
+    (c?.debit && (c.verb !== 'processed' || /refund/.test(c.subject) ||
+      (row.lang === 'EN' && c.subject === 'merchant') || c.trail === 'reversed'));
   if (debitWithCreditNote) {
     const note = inspectSupplementaryReversal(row.body, 'ENBD');
     const minor = EXPLICIT_DEBIT_CONTROL_MINOR_UNITS[row.id] ?? '25000';

@@ -18,7 +18,7 @@ const { createLaunchAlertSession } = load('@/lib/launch-alert-parser');
 country.setActiveCountry('AE');
 markets.setActiveMarket('AE');
 markets.setLedgerCurrency('AED', 2);
-const at = Date.parse('2026-11-05T10:00:00Z');
+const at = Date.parse('2026-11-14T10:00:00Z');
 const session = createLaunchAlertSession({ overrides: {}, activeMarket: 'AE', pinnedCurrency: 'AED',
   bestEffort: { enabled: true, country: 'AE' } });
 const resources = path.resolve(__dirname, '../../../modules/wafra-live-capture/ios/Resources');
@@ -35,6 +35,16 @@ const paths = (body, sender = 'ADCB') => {
   const native = n.route === 'parsed' ? `${n.notification.direction} ${n.notification.amount?.minorUnits}` : n.route;
   return { js: `${p} / ${s}`, native };
 };
+
+// CEO 524bd56e: completed credits can be held, with exact visible money.
+function assertCreditOutcome(body) {
+  const got = paths(body);
+  if (got.js === 'income 4000 / income 4000') return;
+  assert.equal(got.js, 'none / none', body); assert.equal(got.native, 'review', body);
+  const event = load('@/lib/launch-alert-parser').inspectGenericBankEventForReview(body, 'ADCB');
+  assert.equal(event?.status, 'informational', body); assert.equal(event.amount.value?.minorUnits, '4000', body);
+  assert.equal(load('@/lib/alert-review-tray').isMoneyMovementReview({ kind: 'universal', event }), false);
+}
 
 test('RC 396 F2: a reversal or refund still under process never posts (EN)', () => {
   for (const body of [
@@ -86,7 +96,7 @@ test('RC 396 F2 controls: a completed reversal or refund still posts its 40.00',
     'Refund for your pending order of AED 40.00 has been credited to your card.',
     'تم استرداد مبلغ 40.00 درهم إلى بطاقتك المنتهية بـ 1234.',
     'تم استرداد مبلغ 40.00 درهم إلى بطاقتك. طلبك الآخر قيد المراجعة.',
-  ]) assert.equal(paths(body).js, 'income 4000 / income 4000', body);
+  ]) assertCreditOutcome(body);
 });
 
 test('RC 396 F2 controls: a refund in process as a side note beside a debit leaves the debit to post', () => {
@@ -155,7 +165,7 @@ test('RC 396 F2 round 1 controls: a completed credit beside a pending one, or af
     // Review round 2 (Reviewer 1fce73a5 Low 1, EN): a telegraphic credit before the other reversal's status.
     'Reversal of AED 40.00 credited to your card ending 1234, your other reversal is under process.',
     'Refund of AED 40.00 credited to your card ending 1234, your other refund is pending.',
-  ]) assert.equal(paths(body).js, 'income 4000 / income 4000', body);
+  ]) assertCreditOutcome(body);
   // …but a telegraphic credit after the status, or under a modal or a condition, is not a completed one.
   for (const body of [
     'Reversal of AED 40.00 is pending, amount credited to your card upon approval.',
@@ -185,5 +195,5 @@ test('RC 396 F2 round 3 controls: a telegraphic "processed to your card" before 
     'Reversal of AED 40.00 processed to your card ending 1234 - in progress orders are not affected.',
     'AED 40.00 refund has been credited to your card ending 1234.',
     'Refund of AED 40.00 has been credited to your card ending 1234. For refunds pending over 7 days, call us.',
-  ]) assert.equal(paths(body).js, 'income 4000 / income 4000', body);
+  ]) assertCreditOutcome(body);
 });
