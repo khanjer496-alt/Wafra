@@ -1,4 +1,4 @@
-import { informationalCreditReview, hasUnsettledCreditToken, completedDebitBesideCredit, mentionsCredit, mentionsRefund, hasConditionalDebitLead, creditSourceDisposition } from '@/lib/credit-settlement-guards';
+import { informationalCreditReview, hasUnsettledCreditToken, mentionsCredit, mentionsRefund, hasConditionalDebitLead, creditSourceDisposition } from '@/lib/credit-settlement-guards';
 import { inspectUniversalAlert, type UniversalAlertReview } from '@/lib/alert-market-detection';
 import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars';
 import { activeCountryDateOrder, dateOrderForCountry, getActiveCountry } from '@/lib/country';
@@ -20,7 +20,7 @@ import {
   pinnedLedgerCurrencyCode,
 } from '@/lib/markets';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
-import { moneyNoticeKind, nonPostingReason, hasOnlyUnsettledCredit, parseSms, parseSmsBatch, withoutUncompletedRequestNotes, type ParsedSms } from '@/lib/sms-parser';
+import { completedDebitBesideCredit, moneyNoticeKind, nonPostingReason, hasOnlyUnsettledCredit, parseSms, parseSmsBatch, withoutUncompletedRequestNotes, type ParsedSms } from '@/lib/sms-parser';
 import type { CategoryId } from '@/lib/types';
 import { CURRENCY_SYMBOL_CANDIDATES, currencyMinorUnits } from '@/lib/currency-metadata';
 import { decideGulfNeighbourPosting, gulfNeighbourReadSource, isGulfNeighbourMarket } from '@/lib/gulf-neighbour-alerts';
@@ -39,7 +39,7 @@ type CurrencyAliasMap = NonNullable<UniversalParseContext['currencyAliases']>;
 
 /** A note about the requested reversal, not a second movement or an income. */
 export function inspectSupplementaryReversal(source: string, sender: string): UniversalBankEvent | null {
-  const pair = completedDebitBesideCredit(source);
+  const pair = completedDebitBesideCredit(source, { sender });
   if (!pair) return null;
   const debit = parseSms(pair.debit, undefined, { sender });
   if (debit?.kind !== 'transaction' || debit.type !== 'expense') return null;
@@ -1173,7 +1173,7 @@ export const createLaunchAlertSession = ({
     if (mentionsCredit(source) && hasConditionalDebitLead(source)) return null;
     const result = reader(source, sender, inspection, forcedMarket, observedAt);
     if (result?.kind === 'transaction' && result.type === 'expense') return result;
-    const pair = completedDebitBesideCredit(source);
+    const pair = completedDebitBesideCredit(source, { sender });
     const reason = pair ? nonPostingReason(source) : null;
     // The regional grammar can preserve its known debit. A clipped fragment
     // must never upgrade an uncertified worldwide format's posting authority.
