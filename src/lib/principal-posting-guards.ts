@@ -105,6 +105,7 @@ const PREDICATE_AUXILIARY = /\b(?:was|were|is|are|has|have|had|will|would|shall|
 const PREDICATE_START = new RegExp(`^(?:${PREDICATE_AUXILIARY.source})`, 'iu');
 const COMPLETION_ADVERBS = new Set(['already', 'just', 'now', 'successfully', 'fully', 'recently', 'actually', 'really']);
 const DEBIT_OUTCOME = /\b(?:made|completed|processed|posted|charged|debited|deducted|paid|sent|withdrawn|spent|purchased|used|transferred|settled|done|successful)\b/iu;
+const EXPLICIT_DEBIT_OUTCOME = /\b(?:charged|debited|deducted|paid|sent|withdrawn|spent|purchased|used|transferred)\b/iu;
 const PRICE_SYMBOLS = Object.keys(CURRENCY_SYMBOL_CANDIDATES).sort((a, b) => b.length - a.length);
 const PRICE_SYMBOL_NAMES = new Set(PRICE_SYMBOLS.map(symbol => symbol.toUpperCase()));
 const STATED_PRICE = new RegExp(`\\b([A-Z]{3})\\s*\\d|\\d[\\d,.]*\\s*([A-Z]{3})\\b|(${PRICE_SYMBOLS.map(symbol => symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\s*\\d`, 'giu');
@@ -120,12 +121,13 @@ function firstStatedPrice(text: string): number | null {
 }
 
 /** Reduce one owned predicate; modifiers cannot hide its polarity or aspect. */
-function completedPredicate(fragment: string): boolean {
+function completedPredicate(fragment: string, debitOnly = false): boolean {
   // A new explicit auxiliary reopens polarity: "not credited and was debited"
   // states a debit; "not credited and debited" still shares the negation.
   const clauses = fragment.split(/\b(?:and|but)\s+(?=(?:was|were|is|are|has|have|had|will|would|shall|should|must|may|might|can|could)\b)/iu);
   const debits = clauses.filter(clause => DEBIT_OUTCOME.test(clause));
   const owned = debits.length ? debits[debits.length - 1] : fragment;
+  if (debitOnly && !EXPLICIT_DEBIT_OUTCOME.test(owned)) return false;
   const expanded = owned.trim().replace(/^['’]ve\b/iu, 'have').replace(/^['’]s\b/iu, 'has').replace(/^['’]re\b/iu, 'are');
   const words = (expanded.toLowerCase().match(/[a-z]+(?:['’][a-z]+)?|\d+/gu) ?? [])
     .filter(word => !COMPLETION_ADVERBS.has(word));
@@ -139,7 +141,7 @@ function completedPredicate(fragment: string): boolean {
 }
 
 /** null leaves a genuinely terse receipt to the mature grammar. */
-function selectedPredicateCompletion(lead: string, tail: string): boolean | null {
+function selectedPredicateCompletion(lead: string, tail: string, debitOnly = false): boolean | null {
   // A parenthetical stated FX price is an amount annotation, not the selected
   // amount's verb. Never inspect its value as completion or select that quote.
   const quote = /^\s*\(([^()]*)\)\s*/u.exec(tail);
@@ -184,13 +186,13 @@ function selectedPredicateCompletion(lead: string, tail: string): boolean | null
     bridge = bridge.split(/\b(?:using|with|via|at|from|to|into|on|by|for)\b/iu)[0].trim();
     if (/^(?:fees?|charges?|commission|tax|levy|amount|sum|value)(?:\s+(?:of|for))?\s*[:=]?$/iu.test(bridge) ||
       /^(?:a|an|the|your|this|that)\s+(?:[a-z'’ -]+\s+)?(?:fees?|charges?|commission|tax|levy|amount|sum|value)(?:\s+(?:of|for))?\s*[:=]?$/iu.test(bridge)) bridge = '';
-    active = completedPredicate(`${prefix} ${before[0]} ${bridge}`);
+    active = completedPredicate(`${prefix} ${before[0]} ${bridge}`, debitOnly);
   }
   if (active === false) return false;
   const nominal = /\b(?:purchase|payment|transfer|withdrawal|transaction)\s+(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(lead);
   const monetaryTail = COMPLETED_MONEY_VERB.test(predicate);
   if (predicate && ((monetaryTail && (nominal || PREDICATE_START.test(predicate))) ||
-    (active === null && (nominal || PREDICATE_START.test(predicate))))) return completedPredicate(predicate);
+    (active === null && (nominal || PREDICATE_START.test(predicate))))) return completedPredicate(predicate, debitOnly);
   return active;
 }
 
@@ -207,7 +209,7 @@ function principalClause(source: string, span: PrincipalSpan | undefined): { sta
 /** Positive internal proof; missing/unknown predicates cannot relax a preview refusal. */
 export function isCompletedExpensePrincipal(source: string, span: PrincipalSpan | undefined): boolean {
   const clause = principalClause(source, span);
-  return !!clause && !!span && selectedPredicateCompletion(source.slice(clause.start, span.start), source.slice(span.end, clause.end)) === true &&
+  return !!clause && !!span && selectedPredicateCompletion(source.slice(clause.start, span.start), source.slice(span.end, clause.end), true) === true &&
     !isIncompletePrincipal(source, span, true);
 }
 

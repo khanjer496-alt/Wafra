@@ -271,8 +271,16 @@ export function parseIosBackgroundAlert(input: NativeParserInput): NativeParserR
     const principalSource = debitSource ?? source;
     const debitAliases: UniversalParseContext['currencyAliases'] = parsed && senderMarket === 'AE' ? { 'درهم': ['AED'], 'دراهم': ['AED'] }
       : parsed && senderMarket === 'SA' ? { 'ريال': ['SAR'] } : undefined;
-    const event = inspectGenericBankEventForReview(principalSource, sender, undefined,
+    let event = inspectGenericBankEventForReview(principalSource, sender, undefined,
       debitAliases ? { currencyAliases: debitAliases } : undefined);
+    const completedExpense = parsed?.kind === 'transaction' && parsed.type === 'expense' && !unsafeMoney &&
+      event?.amount.evidence === 'explicit' && event.amount.spans.length === 1 &&
+      isCompletedExpensePrincipal(principalSource, event.amount.spans[0]);
+    // The generic reader can retain the denied credit rather than the new
+    // debit. Reconcile only this local preview with positive debit evidence;
+    // source/unsafe-money gates and money/principal validation still apply.
+    if (completedExpense && event?.status === 'informational' && movementFamily(event.family) &&
+      event.issues.includes('unsettled-credit-not-posting')) event = { ...event, status: 'posted', direction: 'debit' };
     if (parsed?.kind === 'transaction' && parsed.type === 'expense' && !pair && incomplete &&
       (unsafeMoney || !event || event.amount.spans.length !== 1 || !isCompletedExpensePrincipal(source, event.amount.spans[0]))) return ignore();
     if (futureDate(event, input.observedAt, parsed ?? undefined) && !(creditReviewOnly && !parsed)) return ignore();
