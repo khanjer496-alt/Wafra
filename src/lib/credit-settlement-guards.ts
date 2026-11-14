@@ -28,7 +28,7 @@ const COMPLEMENT_HEAD = /(?:\b(?:subject\s+to|conditional\s+(?:on|upon)|continge
 function qualificationScope(source: string): string {
   const text = normalizeCreditText(source)
     .replace(/\bif\s+(?:(?:(?:the|this|your)\s+transaction\s+)?(?:has\s+been\s+|was\s+|is\s+)?(?:not\s+)?authori[sz]ed\s+by\s+you|you\s+did\s+not\s+authori[sz]e\s+(?:this|it))\s*(?:\|\s*)?(?:(?:please|kindly)\s+)?(?:call|contact|ignore|disregard)\b[^|.]*/gi, ' ')
-    .replace(/\b(?:from|FROM|by|BY)\s+[A-Z][\p{Lu}\p{N} .&'’]+/gu, ' ')
+    .replace(/\b(?:from|FROM|by|BY)\s+[A-Z][\p{Lu}\p{N}.&'’]*(?:\s+(?!(?:HAS|HAVE|HAD|WAS|WERE|IS|ARE)\b)[\p{Lu}\p{N}.&'’]+)*/gu, ' ')
     .replace(/(?:من|لدي|بواسطه)\s+(?:شركه|موسسه)\s+[^|.]+/g, ' ')
     .replace(/\bfor\s+(?:your|the)\s+(?:(?:cancelled|canceled|previously|original|pending|scheduled|reversed)\s+)+(?:payment|purchase|order|transaction)\b/gi, ' ')
     .replace(/\b(?:from|via)\s+(?:a\s+)?scheduled\s+(?:transfer|payment)\b|\bfor\s+scheduled\s+rent\b/gi, ' ')
@@ -74,7 +74,7 @@ export function hasPendingCreditStatus(source: string): boolean {
 export const hasLeadingCreditCondition = (source: string): boolean => hasCreditCondition(source);
 export function hasSettledCreditReceipt(source: string): boolean {
   const text = qualificationScope(source);
-  if (hasCreditCondition(text) || hasPendingCreditStatus(text) || /\b(?:not|never|will|would|shall|may|might|can|could)\b/iu.test(text)) return false;
+  if (hasCreditCondition(text) || hasPendingCreditStatus(text) || /\b(?:not|never)\s+(?:(?:yet|been|be|successfully)\s+)*(?:credited|refunded|reversed|returned|deposited|received|completed|settled)\b/iu.test(text)) return false;
   const receipt = /\b(?:credited|refunded|reversed|returned|deposited|received|arrived|applied|complete(?:d)?|successful(?:ly)?|settled|done)\b|(?<![ء-ي])(?:تم|تمت)\s+(?:(?:تاكيد|تنفيذ)\s+)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس|ايداع|اضافه)/iu.test(text) || (/^\s*(?:استرداد|ايداع)\s+(?:ال)?مبلغ/iu.test(text) && !/(?:بعد|عند|بمجرد)/u.test(text));
   if (!receipt) return false;
   // Request receipt/completion is not money receipt; a separate money verb is necessary.
