@@ -52,13 +52,14 @@ const AR_PAST_EVENT = /(?:بعد(?:\s+(?:ان|that_ar))?|عندما|حين)\s+(?
 function withoutPastEvents(text: string): string {
   return text.replace(EN_PAST_EVENT, ' ').replace(AR_PAST_EVENT, ' ')
     .replace(/\bafter\s+(?:verification|clearance|review)\b/gi, ' ')
-    .replace(/بعد\s+(?:ال)?تحقق(?:\s+من\s+(?:ال)?طلب)?/g, ' ');
+    .replace(/بعد\s+(?:ال)?تحقق(?:\s+من\s+(?:ال)?طلب)?/g, ' ')
+    .replace(/عند\s+(?:الساعه|الوقت)\s+\d[\d:]*|تم\s+(?:ال)?تحقق\s+من\s+(?:ال)?عمليه/g, ' ');
 }
 export const hasPastCreditEvent = (text: string): boolean => {
   const scope = qualificationScope(text);
   return withoutPastEvents(scope) !== scope;
 };
-export const CREDIT_CONDITION_SOURCE = String.raw`\b(?:subject\s+to|conditional\s+(?:on|upon)|contingent\s+on|depending\s+on|in\s+case(?:\s+of)?|provided(?:\s+that)?|providing(?:\s+that)?|if|unless|until|whether|till|should)\b|\b(?:once|when|after|upon)\s+|\bon\s+(?:(?:successful|final|merchant|bank)\s+)*(?:approval|verification|clearance|confirmation|receipt)\b|(?<![ء-ي])(?:if_ar|اذا|لو|في\s+حال(?:ه)?|بشرط|شريطه|شرط|رهن|مرهون|لحين|حتي|ريثما|بمجرد|عند)(?![ء-ي])|^\s*و?ان\s+|(?<![ء-ي])بعد\s+(?:ال)?(?:موافقه|اعتماد)(?![ء-ي])`;
+export const CREDIT_CONDITION_SOURCE = String.raw`\b(?:subject\s+to|conditional\s+(?:on|upon)|contingent\s+on|depending\s+on|in\s+case(?:\s+of)?|provided(?:\s+that)?|providing(?:\s+that)?|if|unless|until|whether|till|should)\b|\b(?:once|when|after|upon)\s+|\bon\s+(?:(?:successful|final|merchant|bank)\s+)*(?:approval|verification|clearance|confirmation|receipt)\b|(?<![ء-ي])(?:if_ar|اذا|لو|في\s+حال(?:ه)?|بشرط|شريطه|شرط|رهن|مرهون|لحين|حتي|ريثما|بمجرد|عند|عندما|متي|حينما|حين)(?![ء-ي])|^\s*و?ان\s+|(?<![ء-ي])بعد\s+(?:ال)?(?:موافقه|اعتماد)(?![ء-ي])`;
 const CONDITION = new RegExp(CREDIT_CONDITION_SOURCE, 'iu');
 export function hasCreditCondition(source: string): boolean {
   return CONDITION.test(withoutPastEvents(qualificationScope(source)));
@@ -71,7 +72,7 @@ export const hasLeadingCreditCondition = (source: string): boolean => hasCreditC
 export function hasSettledCreditReceipt(source: string): boolean {
   const text = qualificationScope(source);
   if (hasCreditCondition(text) || hasPendingCreditStatus(text) || /\b(?:not|never|will|would|shall|may|might|can|could)\b/iu.test(text)) return false;
-  const receipt = /\b(?:credited|refunded|reversed|returned|deposited|received|arrived|applied|complete(?:d)?|successful(?:ly)?|settled|done)\b|(?<![ء-ي])(?:تم|تمت)\s+(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس|ايداع|اضافه)|^\s*(?:استرداد|ايداع)\s+(?:ال)?مبلغ/iu.test(text);
+  const receipt = /\b(?:credited|refunded|reversed|returned|deposited|received|arrived|applied|complete(?:d)?|successful(?:ly)?|settled|done)\b|(?<![ء-ي])(?:تم|تمت)\s+(?:(?:تاكيد|تنفيذ)\s+)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس|ايداع|اضافه)|^\s*(?:استرداد|ايداع)\s+(?:ال)?مبلغ/iu.test(text);
   if (!receipt) return false;
   // Request receipt/completion is not money receipt; a separate money verb is necessary.
   return !isRefundRequest(text) || /\b(?:credited|refunded|reversed|returned|deposited)\b|(?:تم|تمت)\s+(?:استرداد|ايداع|عكس)/iu.test(text);
