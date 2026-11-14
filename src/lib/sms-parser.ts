@@ -2752,7 +2752,39 @@ const AR_DISPLAY_VERB_RE = new RegExp(`${AR_NB}و?(?:سيظهر|ستظهر|سي�
 const AR_INFORM_BEFORE_RE = new RegExp(`${AR_NB}(?:اعلام|ابلاغ|اخبار|افاده|نفيد|نحيط|نعلم|نخبر|نوكد|علما)[${AR_LETTER}\\u064B-\\u0652]*\\s*[,:]?\\s*$`);
 const AR_ANSWER_RE = new RegExp(`${AR_NB}ف?(?:س[يتن][${AR_LETTER}]{2,}|سوف\\s+[${AR_LETTER}]+|يرجي|الرجاء|يمكنك|بامكانك|لا\\s+داعي)|` +
   `${AR_NB}ف?(?:نرجو|اعتبر)${AR_NA}|${AR_NB}ف(?:تحقق|اتصل|تجاهل|راجع|تواصل|لا)${AR_NA}`);
+// A next sentence led by ف or saying a message will reach you answers a bare-alef ان, except a courtesy line that opens
+// with an explicit new condition ("في حال(ة) وجود أي استفسار …", "في حال لم تتعرف …") or with فريق/فرع(نا)/فروع(نا) and
+// no answer of its own ("فريق خدمة العملاء في خدمتك", not "فريقنا سيتواصل معك"). Bare "في" ("في هذه الحالة يرجى …") and
+// "فقط" stay answers. Diacritics are dropped first, so "فِي حال" is the same opener. (Reviewer d2988328, e4c11467; Change
+// Reviewer 879298d7, 7aab2921.)
 const AR_NEXT_ANSWER_RE = new RegExp(`^\\s*(?:ف[${AR_LETTER}]|(?:ستصلك|سيصلك|ستتلقي|سوف\\s+(?:تصلك|يصلك|تتلقي)|سيتم\\s+(?:اشعارك|ابلاغك|اعلامك))${AR_NA})`);
+const AR_NEXT_COURTESY_CONDITION_RE = new RegExp(`^\\s*في\\s+حال(?:ه)?\\s+(?:وجود|كان\\s+لديك|لديك|لم\\s+(?:تتعرف|تقم|تكن))${AR_NA}`);
+const AR_NEXT_COURTESY_NOUN_RE = new RegExp(`^\\s*(?:فريق|فريقنا|فرع|فرعنا|فروع|فروعنا)${AR_NA}`);
+/**
+ * Answer words beyond AR_ANSWER_RE that a noun-led sentence can carry ("فريق خدمة العملاء يرجو منك تجاهل …", "… ينصحك
+ * بتجاهل …", "فريقنا لا يطلب منك أي إجراء") (Reviewer ba7371a8).
+ */
+const AR_NEXT_NOUN_ANSWER_RE = new RegExp(`${AR_NB}[بلو]?(?:[يتن]رجو|تجاهل|اعتبر)${AR_NA}|` +
+  // …but not the security line "… لا يطلب منك أبداً رمز التحقق" (Reviewer 2ae6e753).
+  `${AR_NB}(?:لا|لن)\\s+(?:يطلب|يتطلب|يلزم)${AR_NA}(?!\\s+منك\\s+(?:ابدا\\s+)?(?:رمز|كلمه|بيانات|معلومات))`);
+/** A ف-led answer inside a courtesy-condition sentence ("في حال وجود المبلغ في حسابك فيرجى تجاهل …"), not "فلا تتردد". */
+const AR_NEXT_CONDITION_ANSWER_RE = new RegExp(`${AR_NB}ف(?:يرجي|لا(?!\\s+تتردد)|سوف|س[يتن]|يمكنك|تجاهل|اعتبر|نرجو)`);
+/**
+ * An inquiry or fraud-check condition ("في حال وجود أي استفسار …", "في حال لم تقم بهذه العملية …") is a courtesy footer whatever
+ * ف-answer it carries (Change Reviewer 8924cf97, Reviewer 2ae6e753); only other subjects ("في حال وجود المبلغ …") are checked.
+ */
+const AR_NEXT_COURTESY_INQUIRY_RE = new RegExp(
+  `^\\s*في\\s+حال(?:ه)?\\s+(?:(?:وجود|كان\\s+لديك|لديك)\\s+(?:اي(?:ه)?\\s+)?(?:استفسار|سوال|سؤال|ملاحظ)[${AR_LETTER}]*|` +
+  // "لم تقم/تتعرف" only about this transaction, not "لم تقم بأي إجراء فسيتم إضافة المبلغ" (Change Reviewer 1ff64666, Reviewer 46d750e7).
+  `لم\\s+(?:تتعرف\\s+علي|تقم\\s+ب)\\s*(?:هذه|هذا)?\\s*(?:ال)?(?:عمليه|معامله|حركه|دفعه|طلب)${AR_NA})`);
+function arNextSentenceAnswers(rawNext: string): boolean {
+  const next = rawNext.replace(/[\u064B-\u0652]/g, '');
+  // (Change Reviewer e5dbdea7.)
+  if (AR_NEXT_COURTESY_INQUIRY_RE.test(next)) return false;
+  if (AR_NEXT_COURTESY_CONDITION_RE.test(next) && !AR_NEXT_CONDITION_ANSWER_RE.test(next)) return false;
+  if (AR_NEXT_COURTESY_NOUN_RE.test(next) && !AR_ANSWER_RE.test(next) && !AR_NEXT_NOUN_ANSWER_RE.test(next)) return false;
+  return AR_NEXT_ANSWER_RE.test(next);
+}
 /** "سيظهر المبلغ في حسابك خلال 5-7 أيام عمل": the processed money is not there yet. */
 const AR_PROCESSED_NOT_YET_RE = new RegExp(
   `${AR_NB}(?:سيظهر|ستظهر|سينعكس|ستنعكس|سيضاف|ستضاف|سيتم\\s+(?:ايداع|اضافه|اظهار))${AR_NA}|${AR_NB}قد\\s+يستغرق[^.\\n]{0,40}?(?:يوم|ايام)${AR_NA}`);
@@ -2813,7 +2845,7 @@ function arCreditSettlement(sentence: string, clause: CreditClause, rawAfter: st
     const letter = raw[leader.index! + leader[0].length - 2];
     if (letter === 'أ') return true;
     if (letter !== 'ا') return false;
-    return !AR_ANSWER_RE.test(sentence.slice(clause.end)) && !AR_NEXT_ANSWER_RE.test(next);
+    return !AR_ANSWER_RE.test(sentence.slice(clause.end)) && !arNextSentenceAnswers(next);
   };
   const leaders = [...lead.matchAll(AR_CONDITIONAL_RE)].filter((leader) => !informedThat(leader));
   const last = leaders[leaders.length - 1];
