@@ -650,6 +650,12 @@ function ktSources(dir) {
       JSON.stringify(Object.fromEntries(Object.entries(expectedApiReasons)
         .sort(([a], [b]) => a.localeCompare(b)))));
 
+  const widgetPrivacy = read('targets/widget/PrivacyInfo.xcprivacy');
+  ok('the widget executable has its own App Group defaults reason',
+    /<key>NSPrivacyAccessedAPIType<\/key>\s*<string>NSPrivacyAccessedAPICategoryUserDefaults<\/string>/.test(widgetPrivacy) &&
+      /<key>NSPrivacyAccessedAPITypeReasons<\/key>\s*<array>\s*<string>1C8F\.1<\/string>\s*<\/array>/.test(widgetPrivacy) &&
+      /<key>NSPrivacyTracking<\/key>\s*<false\s*\/>/.test(widgetPrivacy));
+
   const collectedData = config.ios?.privacyManifests?.NSPrivacyCollectedDataTypes ?? [];
   const collectedTypes = new Set(collectedData.map((entry) => entry.NSPrivacyCollectedDataType));
   // Matches docs/store-compliance/app-privacy-answers.md and the CEO's 13–14 Nov
