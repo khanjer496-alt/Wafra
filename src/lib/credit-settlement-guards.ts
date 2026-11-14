@@ -72,7 +72,9 @@ export function hasPendingCreditStatus(source: string): boolean {
   return PENDING.test(text) || /\b(?:will|would|shall|may|might|can|could)\s+(?:(?:not|soon|shortly|be|been)\s+)*(?:credit|refund|revers|return|deposit|receiv)\w*\b/iu.test(text);
 }
 export const hasLeadingCreditCondition = (source: string): boolean => hasCreditCondition(source);
+export const isHistoricalCreditClaim = (source: string): boolean => /(?:^|\|)\s*(?:(?:a|the|your)\s+)?(?:previous|earlier|prior|old)\s+(?:refund|reversal|credit)\b/iu.test(normalizeCreditText(source));
 export function hasSettledCreditReceipt(source: string): boolean {
+  if (isHistoricalCreditClaim(source)) return false;
   const text = qualificationScope(source);
   if (hasCreditCondition(text) || hasPendingCreditStatus(text) || /\b(?:not|never)\s+(?:(?:yet|been|be|successfully)\s+)*(?:credited|refunded|reversed|returned|deposited|received|completed|settled)\b/iu.test(text)) return false;
   const receipt = /\b(?:credited|refunded|reversed|returned|deposited|received|arrived|applied|complete(?:d)?|successful(?:ly)?|settled|done)\b|(?<![ء-ي])(?:تم|تمت)\s+(?:(?:تاكيد|تنفيذ)\s+)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس|ايداع|اضافه)/iu.test(text) || (/^\s*(?:استرداد|ايداع)\s+(?:ال)?مبلغ/iu.test(text) && !/(?:بعد|عند|بمجرد)/u.test(text));

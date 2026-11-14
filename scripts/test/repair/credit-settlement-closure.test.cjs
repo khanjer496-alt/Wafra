@@ -130,3 +130,8 @@ test('O1: pending N06 refund is informational and cannot be confirmed into the l
   assert.equal(got.review?.status, 'informational');assert.equal(got.review?.decision, 'review');assert.equal(got.review?.role, 'transaction');
   assert.equal(got.review?.confirmable, false);assert.equal(got.nativeRoute, 'review');
 });
+
+test('a pending request cannot turn a quoted previous refund into current income', () => {
+  const got = paths('Your refund request for AED 100.00 has been received. A previous refund of AED 20.00 from NOON.COM has been credited to your card.');
+  assert.equal(got.sms, 'none');assert.equal(got.session, 'none');assert.ok(!/^credit:/.test(got.native));
+});

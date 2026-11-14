@@ -1,4 +1,4 @@
-import { EN_CREDIT_PENDING_STATUS, AR_CREDIT_PENDING_STATUS, hasCreditCondition, hasLeadingCreditCondition, hasPendingCreditStatus, normalizeCreditText, isRefundRequest, hasSettledCreditReceipt, hasPastCreditEvent, creditSourceDisposition } from '@/lib/credit-settlement-guards';
+import { EN_CREDIT_PENDING_STATUS, AR_CREDIT_PENDING_STATUS, hasCreditCondition, hasLeadingCreditCondition, hasPendingCreditStatus, normalizeCreditText, isRefundRequest, hasSettledCreditReceipt, hasPastCreditEvent, creditSourceDisposition, isHistoricalCreditClaim } from '@/lib/credit-settlement-guards';
 import { categorySupportsType, readMerchantCategoryOverride } from '@/lib/categories';
 import {
   bankFromMessage,
@@ -6727,7 +6727,7 @@ export function withoutUncompletedRequestNotes(message: string): string {
   let start = 0;
   const parts = ends.map(end => { const part = { start, end, text: message.slice(start, end) }; start = end; return part; });
   const control = (text: string) => foldOrthography(stripInvisible(text));
-  const independent = parts.some(p => creditAmounts(control(p.text)).length > 0 && !isUncompletedRefundRequest(p.text) &&
+  const independent = parts.some(p => creditAmounts(control(p.text)).length > 0 && !isUncompletedRefundRequest(p.text) && !isHistoricalCreditClaim(p.text) &&
     (CREDIT_SETTLEMENT_DEBIT_RE.test(control(p.text)) || NOTICE_REFUND_COMPLETED_RE.test(control(p.text))));
   if (!independent) return message;
   let out = message;
