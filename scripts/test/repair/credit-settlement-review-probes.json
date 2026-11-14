@@ -5775,5 +5775,90 @@
     "requireDebitParity": true,
     "requireSupplementaryNote": true,
     "noteMinorUnits": 4000
+  },
+  {
+    "id": "r4-predicate-ownership:fee-completed",
+    "body": "A returned cheque fee of AED 50.00 was debited from your account ending 1234. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "r4-predicate-ownership",
+    "expected": "expense",
+    "minorUnits": 5000,
+    "requireReview": false,
+    "acceptInformationalReview": false,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null
+  },
+  {
+    "id": "r4-predicate-ownership:fee-completed-attribute",
+    "body": "A previously returned cheque fee of AED 50.00 was recently debited from your account ending 1234. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "r4-predicate-ownership",
+    "expected": "expense",
+    "minorUnits": 5000,
+    "requireReview": false,
+    "acceptInformationalReview": false,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null
+  },
+  {
+    "id": "r4-predicate-ownership:fee-future",
+    "body": "A returned cheque fee of AED 50.00 will soon be debited from your account ending 1234. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "r4-predicate-ownership",
+    "expected": "none",
+    "minorUnits": 5000,
+    "requireReview": false,
+    "acceptInformationalReview": false,
+    "incompleteExpense": true
+  },
+  {
+    "id": "r4-predicate-ownership:fee-negated",
+    "body": "Your card ending 1234 has not been charged the returned cheque fee of AED 50.00. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "r4-predicate-ownership",
+    "expected": "none",
+    "minorUnits": 5000,
+    "requireReview": false,
+    "acceptInformationalReview": false,
+    "incompleteExpense": true
+  },
+  {
+    "id": "r4-predicate-ownership:post-verb-unknown",
+    "body": "Your card ending 1234 was charged hypothetically AED 250.00 at NOT NOW CAFE. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "r4-predicate-ownership",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": false,
+    "acceptInformationalReview": false,
+    "incompleteExpense": true
+  },
+  {
+    "id": "r4-predicate-ownership:post-verb-completed",
+    "body": "Your card ending 1234 was charged successfully AED 250.00 at NOT NOW CAFE. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "r4-predicate-ownership",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireReview": false,
+    "acceptInformationalReview": false,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null
+  },
+  {
+    "id": "r4-predicate-ownership:fee-active-completed",
+    "body": "Your card ending 1234 has been charged the returned cheque fee of AED 50.00. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "r4-predicate-ownership",
+    "expected": "expense",
+    "minorUnits": 5000,
+    "requireReview": false,
+    "acceptInformationalReview": false,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null
   }
 ]

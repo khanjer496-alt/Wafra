@@ -1,4 +1,6 @@
 import { EN_CREDIT_PENDING_STATUS, AR_CREDIT_PENDING_STATUS, hasCreditCondition, hasPendingCreditStatus, mentionsRefund } from '@/lib/credit-settlement-guards';
+import { CURRENCY_MINOR_UNITS } from '@/lib/currency-metadata';
+
 /** Source-only qualifications of an already selected monetary value. */
 export interface PrincipalSpan { start: number; end: number }
 
@@ -117,7 +119,19 @@ function completedPredicate(fragment: string): boolean {
 
 /** null leaves a genuinely terse receipt to the mature grammar. */
 function selectedPredicateCompletion(lead: string, tail: string): boolean | null {
-  const verbs = [...lead.matchAll(ACTIVE_MONEY_VERB)];
+  const descriptor = /\b(?:using|with|via|at|from|into|on|by|for|merchant|card|account|wallet|date|time|reference|balance)\b|\bto(?!\s+be\b)/iu.exec(tail);
+  const predicate = tail.slice(0, descriptor?.index ?? tail.length).trim();
+  const allVerbs = [...lead.matchAll(ACTIVE_MONEY_VERB)];
+  const verbs = allVerbs.filter((verb, index) => {
+    const object = lead.slice(verb.index! + verb[0].length);
+    const prior = lead.slice(index ? allVerbs[index - 1].index! + allVerbs[index - 1][0].length : 0, verb.index);
+    // A returned/reversed item's fee is a new subject with its own predicate:
+    // "a returned cheque fee ... was debited". Do not let the item's modifier
+    // veto that fee, or hide a finite "has not been charged ... fee" predicate.
+    const feeSubject = /\b(?:fees?|charges?|commission|tax|levy)\s*(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(object);
+    return !(feeSubject && !PREDICATE_AUXILIARY.test(prior) &&
+      (index > 0 || PREDICATE_START.test(predicate) || COMPLETED_MONEY_VERB.test(predicate)));
+  });
   const before = verbs[verbs.length - 1];
   let active: boolean | null = null;
   if (before) {
@@ -131,11 +145,18 @@ function selectedPredicateCompletion(lead: string, tail: string): boolean | null
     else prefix = prefix.slice(Math.max(prefix.lastIndexOf(':'), prefix.lastIndexOf('|')) + 1);
     const auxiliary = PREDICATE_AUXILIARY.exec(prefix);
     if (auxiliary) prefix = prefix.slice(auxiliary.index);
-    active = completedPredicate(`${prefix} ${before[0]}`);
+    let bridge = lead.slice(before.index! + before[0].length);
+    // A bank FX quote may put the ledger-currency figure after the original
+    // price. Its predicate ends at that first stated money, not at the quote.
+    const priorPrice = [...bridge.matchAll(/\b([A-Z]{3})\s*\d|\d[\d,.]*\s*([A-Z]{3})\b/giu)]
+      .find(match => Object.hasOwn(CURRENCY_MINOR_UNITS, (match[1] ?? match[2]).toUpperCase()));
+    if (priorPrice) bridge = bridge.slice(0, priorPrice.index);
+    bridge = bridge.split(/\b(?:using|with|via|at|from|to|into|on|by|for)\b/iu)[0].trim();
+    if (/^(?:fees?|charges?|commission|tax|levy|amount|sum|value)(?:\s+(?:of|for))?$/iu.test(bridge) ||
+      /^(?:a|an|the|your|this|that)\s+(?:[a-z'’ -]+\s+)?(?:fees?|charges?|commission|tax|levy|amount|sum|value)(?:\s+(?:of|for))?$/iu.test(bridge)) bridge = '';
+    active = completedPredicate(`${prefix} ${before[0]} ${bridge}`);
   }
   if (active === false) return false;
-  const descriptor = /\b(?:using|with|via|at|from|into|on|by|for|merchant|card|account|wallet|date|time|reference|balance)\b|\bto(?!\s+be\b)/iu.exec(tail);
-  const predicate = tail.slice(0, descriptor?.index ?? tail.length).trim();
   const nominal = /\b(?:purchase|payment|transfer|withdrawal|transaction)\s+(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(lead);
   const monetaryTail = COMPLETED_MONEY_VERB.test(predicate);
   if (predicate && ((monetaryTail && (nominal || PREDICATE_START.test(predicate))) ||
