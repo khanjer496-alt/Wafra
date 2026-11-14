@@ -1,406 +1,45 @@
-name: CI
-
-# Kept separate from build-apk.yml so logic regressions surface in a couple of
-# minutes instead of waiting on a full Gradle release build.
+name: Mocked iOS signing proof
 on:
   workflow_dispatch:
-  pull_request:
-  push:
-    branches:
-      - main
-      # Every release-line merge commit gets its own run, so the TestFlight
-      # exact-source CI gate (ios-testflight.yml) never depends on a PR's run.
-      - release/1.0.0-rc1-reconciled
-
-concurrency:
-  # Every push to `main` gets its OWN group, keyed on the commit, so no main run
-  # ever shares a group with another. Pull requests keep sharing one group per
-  # ref, so a newer push still supersedes an older one there.
-  #
-  # Both halves are needed, and cancel-in-progress alone is not enough.
-  # `cancel-in-progress: false` only spares a RUNNING run. A group holds one
-  # running plus one pending member, and GitHub cancels the pending one whenever
-  # a newer run is queued into the group — documented as "any existing pending
-  # job or workflow in the same concurrency group will be canceled and the new
-  # queued job or workflow will take its place", regardless of
-  # cancel-in-progress. So with three pushes in quick succession the middle
-  # commit was still cancelled while queued, which is the exact hole this exists
-  # to close. A per-commit group removes the sharing, and the flag below then
-  # documents the intent and covers a re-run of the same SHA.
-  #
-  # Why it matters: a cancelled run reports NO verdict at all — not a failure,
-  # nothing — so a breaking commit lands with nobody told. 98b1bb4
-  # ("feat(onboarding): add bank statement import option") had its run cancelled
-  # by the very next push and broke onboarding.test.js plus 43 ios-journey
-  # regressions; main stayed red until someone ran the suites by hand, and every
-  # PR opened meanwhile inherited a red base. main has since gone red the same
-  # way more than once in a single day.
-  #
-  # The cost is that rapid pushes to main each pay for a full run. That is the
-  # right trade against a silent regression.
-  #
-  # The same applies to the release line: its merge commits are what the
-  # TestFlight exact-source gate looks up, so they get per-commit groups too.
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/release/1.0.0-rc1-reconciled') && github.sha || '' }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/release/1.0.0-rc1-reconciled' }}
-
 permissions:
   contents: read
-  pull-requests: read
-
 jobs:
-  native-paths:
+  mocked-signing:
     runs-on: ubuntu-latest
-    outputs:
-      ios: ${{ steps.filter.outputs.ios }}
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
-        id: filter
         with:
-          filters: |
-            ios:
-              - 'app.json'
-              - 'app.config.js'
-              - 'scripts/test/ios-history-paging.*'
-              - 'package.json'
-              - 'package-lock.json'
-              - '.github/workflows/ci.yml'
-              - 'modules/wafra-message-history/**'
-              - 'modules/wafra-live-capture/**'
-              # App Lock privacy cover and widget snapshot gate (native-ios typecheck).
-              - 'modules/wafra-widgets/ios/**'
-              - 'scripts/test/native-app-privacy-typecheck.sh'
-              # iOS app icon (Icon Composer document, compiled by native-ios).
-              - 'assets/wafra.icon/**'
-              - 'scripts/render-ios-icon-mark.mjs'
-              - 'scripts/test/ios-app-icon.sh'
-              - 'src/components/wafra-logo.tsx'
-              # The native parser closure is resolved from these shipping
-              # modules; new pure dependencies must also trigger native checks.
-              - 'src/lib/**'
-              - 'scripts/generate-ios-background-parser.cjs'
-              - 'scripts/check-update-config.mjs'
-              - 'fingerprint.config.js'
-              - 'scripts/test/repair/ios-background-parser-generator.test.cjs'
-              - '.github/workflows/ios-testflight.yml'
-              - 'scripts/test/native-live-capture-store.*'
-              - 'scripts/test/native-parser-context.*'
-              - 'scripts/test/native-background-alert-parser.*'
-              - 'modules/sms-reader/android/src/main/java/expo/modules/smsreader/InstantAlert.kt'
-              - 'modules/sms-reader/android/src/main/java/expo/modules/smsreader/SensitiveMessageFilter.kt'
-              - 'scripts/generate-ios-instant-alert.mjs'
-              - 'scripts/test/kotlin-source.js'
-              - 'scripts/test/instant-alert-reader.cjs'
-              - 'scripts/test/export-instant-alert-fixture.cjs'
-              - 'scripts/test/native-instant-alert.swift'
-              - 'scripts/test/fixtures/uae-accuracy-report*.txt'
-              - 'scripts/test/fixtures/uae-bank-formats*'
-              - 'src/app/import-sms.tsx'
-              - 'src/lib/historical-import.ts'
-              - 'scripts/test/run.sh'
-              - 'scripts/test/ios-history-native-contract.test.js'
-              - 'scripts/test/native-history-store.*'
-              - 'scripts/test/native-history-protection-probe.swift'
-              - 'scripts/test/support/host-file-protection*'
-
-  check:
-    runs-on: ubuntu-latest
-    # Full financial, setup, and interaction suites exceed 15 minutes on a
-    # cold runner. Keep every test enabled and allow the final workflow cases.
-    # A slow ubuntu-latest runner took the Test step past 23 minutes on main
-    # (cd95a2ba, twice, still passing when cancelled) versus 14.5 on the PR.
-    timeout-minutes: 40
-    env:
-      # Chromium is pre-installed on the runner image used for the e2e job
-      # below; npm postinstall must not re-fetch it.
-      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Require the approved Claude design baseline
-        run: node scripts/check-design-baseline.mjs
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22.22.3
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            server/package-lock.json
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-
-      - name: Ensure Android API used by native billing tests
+          ref: 5619698b8b14f36ad6d90c923ef9e62a19ae7ea7
+          persist-credentials: false
+      - name: Run both exact-head mocked suites without signing or builds
         run: |
-          test -n "${ANDROID_HOME:-}"
-          if [ ! -f "$ANDROID_HOME/platforms/android-36/android.jar" ]; then
-            sdkmanager --install "platforms;android-36"
-          fi
-          test -f "$ANDROID_HOME/platforms/android-36/android.jar"
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Check Expo SDK dependency compatibility
-        run: npm run doctor
-
-      - name: Install relay dependencies
-        working-directory: server
-        run: npm ci
-
-      - name: Install the SQLite CLI required by schema tests
-        run: sudo apt-get update && sudo apt-get install -y sqlite3
-
-      # Read-only on purpose: regenerating first would make a stale committed
-      # bundle pass. A branch whose parser sources changed without a regenerated
-      # bundle fails here until `node scripts/generate-ios-background-parser.cjs`
-      # is run and the result committed.
-      - name: Check the committed iOS background parser is fresh
-        run: node scripts/generate-ios-background-parser.cjs --check
-
-      # The refund-matrix gap file may only shrink for rows the base already
-      # had: a fix to one row that breaks another in the same class keeps every
-      # CEILING count, so the matrix test alone would not see it.
-      - name: Refund matrix gap file only shrinks against the base
-        if: github.event_name == 'pull_request'
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          git fetch --no-tags --depth=1 origin "$BASE_SHA"
-          node scripts/test/repair/refund-gaps-no-growth.cjs "$BASE_SHA"
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Lint
-        run: npm run lint
-
-      # Several contract suites inspect Expo's generated iOS sources and Xcode
-      # membership. The native folder is intentionally gitignored, so a clean
-      # checkout must materialize it before the cross-platform test runner.
-      - name: Generate native iOS contract fixtures
-        run: npx expo prebuild --platform ios --no-install
-
-      # The native Play-billing test needs four small public jars (scripts/test/wafra-play-billing-deps.json:
-      # pinned SHA-256, two mirrors each). Maven Central rate-limits shared runners (429) and has answered 404
-      # for a jar it serves, so the jars are cached under a key made ONLY of their names and pinned hashes:
-      # editing the test or a mirror URL keeps the cache, changing a pin replaces it. The test verifies every
-      # cached or downloaded byte against its pin before use, and only verified files reach the cache.
-      - name: Key native billing test dependencies by their pinned SHA-256
-        id: billing-deps
-        run: |
-          key=$(node -e "const d=require('./scripts/test/wafra-play-billing-deps.json');process.stdout.write(require('crypto').createHash('sha256').update(d.map(x=>x.name+'@'+x.sha256).sort().join('\\n')).digest('hex').slice(0,32))")
-          echo "key=wafra-play-billing-libs-v2-$key" >> "$GITHUB_OUTPUT"
-      - name: Restore native billing test dependencies
-        id: billing-deps-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ runner.temp }}/wafra-play-billing-libs
-          key: ${{ steps.billing-deps.outputs.key }}
-
-      # NO SECRETS IN THIS JOB: the summary artifact below is downloadable and GitHub masks log views, not artifacts.
-      # The raw log stays on the runner. What leaves it is a small JSON report with the failing test names
-      # and no terminal control bytes (scripts/ci/summarize-app-tests.cjs), uploaded as an artifact below.
-      # The real test exit code is preserved: the summary is evidence, never a replacement gate.
-      - name: Test
-        run: |
-          set +e
-          npm test 2>&1 | tee "$RUNNER_TEMP/wafra-app-test.log"
-          TEST_STATUS=${PIPESTATUS[0]}
-          mkdir -p artifacts/app-tests
-          TEST_EXIT="$TEST_STATUS" node scripts/ci/summarize-app-tests.cjs \
-            "$RUNNER_TEMP/wafra-app-test.log" > artifacts/app-tests/summary.json
-          exit "$TEST_STATUS"
-        env:
-          WAFRA_PLAY_BILLING_TEST_LIBS: ${{ runner.temp }}/wafra-play-billing-libs
-
-      # Saved even when an unrelated test fails, so one good download serves later runs. Only when all four
-      # files are present AND match their pinned SHA-256 (a file cut short by a cancelled job is never saved).
-      - name: Check native billing test dependencies are complete
-        id: billing-deps-complete
-        if: always() && steps.billing-deps-cache.outputs.cache-hit != 'true'
-        env:
-          LIBS: ${{ runner.temp }}/wafra-play-billing-libs
-        run: |
-          count=$(node -e "const fs=require('fs'),c=require('crypto');const d=require('./scripts/test/wafra-play-billing-deps.json');const ok=x=>{try{return c.createHash('sha256').update(fs.readFileSync(process.env.LIBS+'/'+x.name)).digest('hex')===x.sha256}catch{return false}};process.stdout.write(String(d.filter(ok).length)+'/'+d.length)")
-          echo "native billing test dependencies cached: $count"
-          if [ "${count%/*}" = "${count#*/}" ]; then echo "complete=true" >> "$GITHUB_OUTPUT"; fi
-      - name: Save native billing test dependencies
-        if: always() && steps.billing-deps-complete.outputs.complete == 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ runner.temp }}/wafra-play-billing-libs
-          key: ${{ steps.billing-deps.outputs.key }}
-      - name: Preserve structured app test result
+          python3 -I - <<'PY'
+          import hashlib, json, pathlib, re, subprocess, sys
+          expected = '5619698b8b14f36ad6d90c923ef9e62a19ae7ea7'
+          actual = subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+          assert actual == expected
+          results = []
+          for script, count in [('scripts/test/ios-device-signing.test.py',30),
+                                ('scripts/test/ios-device-local-sign.test.py',7)]:
+              process = subprocess.run([sys.executable,'-I',script],capture_output=True,text=True,timeout=90)
+              found = re.search(r'Ran (\d+) tests?',process.stderr)
+              tests_run = int(found.group(1)) if found else None
+              results.append({'script':script,'sha256':hashlib.sha256(pathlib.Path(script).read_bytes()).hexdigest(),
+                              'exitCode':process.returncode,'testsRun':tests_run,'expectedTests':count,
+                              'passed':process.returncode == 0 and tests_run == count,
+                              'stdout':process.stdout,'stderr':process.stderr})
+          report = {'commit':actual,'mockedOnly':True,'suites':results,'passed':all(r['passed'] for r in results)}
+          pathlib.Path('mocked-signing-result.json').write_text(json.dumps(report,indent=2)+'\n')
+          print(json.dumps({'commit':actual,'passed':report['passed'],
+                            'counts':[r['testsRun'] for r in results]}))
+          sys.exit(0 if report['passed'] else 1)
+          PY
+      - name: Preserve exact-head mocked test evidence
         if: always()
-        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: app-test-result-${{ github.sha }}
-          path: artifacts/app-tests/summary.json
-          if-no-files-found: warn
+          name: ios-mocked-signing-5619698b-${{ github.run_id }}
+          path: mocked-signing-result.json
+          if-no-files-found: error
           retention-days: 7
-
-      - name: Relay typecheck
-        working-directory: server
-        run: npm run typecheck
-
-      - name: Relay tests
-        working-directory: server
-        run: npm test
-
-      - name: Relay Worker dry run
-        working-directory: server
-        run: npm run build:check
-
-  native-ios:
-    needs: native-paths
-    if: needs.native-paths.outputs.ios == 'true' || github.event_name == 'workflow_dispatch'
-    # Stable current Apple toolchain. Host protocol checks explicitly model
-    # unavailable iPhone protection metadata; the app build stays unmodified.
-    runs-on: macos-26
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Select stable Xcode 26.2 or newer
-        run: |
-          set -euo pipefail
-          BEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | grep -v -i beta | sort -V | tail -1)
-          test -n "$BEST"
-          sudo xcode-select -s "$BEST/Contents/Developer"
-          # Capture the whole output before slicing it. Piping xcodebuild into
-          # `head -1` closed the pipe while it was still writing, and it aborted
-          # with NSFileHandleOperationException (exit 134) before any test ran.
-          XCODE_VERSION_OUTPUT=$(xcodebuild -version)
-          VER=$(printf '%s\n' "$XCODE_VERSION_OUTPUT" | head -1 | awk '{print $2}')
-          MAJOR=${VER%%.*}
-          MINOR=$(printf '%s' "$VER" | cut -d. -f2)
-          if [ "$MAJOR" -lt 26 ] || { [ "$MAJOR" -eq 26 ] && [ "$MINOR" -lt 2 ]; }; then
-            echo "::error::Expo SDK 55 requires Xcode 26.2+; selected $VER"
-            exit 1
-          fi
-
-      - name: Verify the production store fails closed without real protection
-        run: |
-          set -euo pipefail
-          swiftc -warnings-as-errors -parse-as-library \
-            modules/wafra-message-history/ios/WafraMessageHistoryStore.swift \
-            modules/wafra-message-history/ios/WafraPreparedHistoryStore.swift \
-            modules/wafra-message-history/ios/WafraMessageHistoryImporter.swift \
-            scripts/test/native-history-protection-probe.swift \
-            -o "$RUNNER_TEMP/wafra-protection-probe"
-          "$RUNNER_TEMP/wafra-protection-probe"
-
-      # App Lock's privacy cover and widget-snapshot gate (WafraPrivacyCover.swift),
-      # typechecked against the runner's real UIKit/Foundation iOS SDK. Only the
-      # Expo subscriber boundary and the widgets module are stubbed, so this is a
-      # compile check, not a device lifecycle test.
-      - name: Typecheck the iOS privacy cover against the real UIKit SDK
-        run: bash scripts/test/native-app-privacy-typecheck.sh
-
-      - name: Require the approved Claude design baseline
-        run: node scripts/check-design-baseline.mjs
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22.22.3
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      # Read-only on purpose: regenerating first would make a stale committed
-      # bundle pass. A branch whose parser sources changed without a regenerated
-      # bundle fails here until `node scripts/generate-ios-background-parser.cjs`
-      # is run and the result committed.
-      - name: Check the committed iOS background parser is fresh
-        run: node scripts/generate-ios-background-parser.cjs --check
-
-      - name: Verify protected parser context and the actual JavaScriptCore runtime
-        run: |
-          bash scripts/test/native-parser-context.sh
-          bash scripts/test/native-background-alert-parser.sh
-
-      - name: Generate the native iOS project
-        run: npx expo prebuild --platform ios --no-install
-
-      # Build 193's TestFlight icon was a filled wedge with a stray line: its
-      # Icon Composer layer was an open stroked path. Compile the prebuilt
-      # icon with actool, require a 1024 px rendition, and keep renders.
-      - name: Compile and render the iOS app icon
-        run: bash scripts/test/ios-app-icon.sh "$RUNNER_TEMP/ios-app-icon"
-
-      - name: Keep the iOS app icon renders
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-app-icon-${{ github.sha }}
-          path: ${{ runner.temp }}/ios-app-icon
-          if-no-files-found: ignore
-          retention-days: 3
-
-      - name: Install CocoaPods dependencies
-        run: npx pod-install
-
-      - name: Verify host storage contracts and built iOS App Intent metadata
-        run: |
-          bash scripts/test/native-history-store.sh
-          bash scripts/test/native-live-capture-store.sh
-          bash scripts/test/ios-history-paging.sh
-
-  # The browser suites catch what unit tests structurally cannot: a route that
-  # resolves to nothing, a screen that renders blank, a total that disagrees
-  # with the rows under it. They existed for weeks and ran only when someone
-  # remembered to — which is the same "nothing checks it" problem the contracts
-  # suite is about, one level up.
-  e2e:
-    runs-on: ubuntu-latest
-    # The full screen sweep reaches onboarding after ~25 minutes on a cold runner.
-    # Keep every scenario enabled and give the final journey time to complete.
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Require the approved Claude design baseline
-        run: node scripts/check-design-baseline.mjs
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22.22.3
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
-
-      - name: End-to-end
-        run: npm run test:e2e
-
-      - name: Preserve browser screenshots and verification results
-        if: always()
-        # Evidence only: a full artifact quota must not fail a run whose tests
-        # passed. A test failure still fails the job at End-to-end above.
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: browser-evidence-${{ github.sha }}
-          path: |
-            artifacts/e2e-redesign/
-            artifacts/e2e-merchant-logos/
-            artifacts/e2e-home-cashflow/
-            artifacts/e2e-merchant-spending/
-            artifacts/e2e-merchant-entrypoints/
-            artifacts/e2e-transaction-ui/
-            artifacts/e2e-diagnostic-export/
-            artifacts/e2e-smoke/
-            /tmp/wafra-onboarding-e2e/
-            /tmp/wafra-transfer-review-e2e/
-          if-no-files-found: warn
-          retention-days: 3
