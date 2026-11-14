@@ -198,6 +198,14 @@ jobs:
           path: sealed/signing-inventory.enc
           if-no-files-found: ignore
           retention-days: 1
+      - name: Preserve sealed signing failure receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-device-signing-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: sealed/signing-failure.enc
+          if-no-files-found: ignore
+          retention-days: 1
       - name: Remove runner signing keychain and private material
         if: always()
         run: |

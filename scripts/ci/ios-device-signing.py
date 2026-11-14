@@ -7,6 +7,7 @@ import json
 import os
 import pathlib
 import plistlib
+import re
 import shutil
 import subprocess
 import sys
@@ -21,6 +22,59 @@ if not __debug__:
 TEAM = 'UV7YN4GQ66'
 REFERENCE_PROFILE = '7996Y2NL26'  # Wafra QA UI Tests 2026-11, a57e79a7…
 BUNDLES = ('app.wafra.qa.wda.xctrunner', 'app.wafra.ios', 'app.wafra.ios.widget')
+_diagnostic_context = {'phase': 'start'}
+_diagnostic_api = None
+
+
+class AppleAPIError(RuntimeError):
+    def __init__(self, status, codes):
+        self.status = status
+        # No response prose, request bodies, credentials, CSR or device data.
+        pattern = (r'(?:ENTITY_ERROR|PARAMETER_ERROR|STATE_ERROR|RESOURCE_ERROR|FORBIDDEN_ERROR|'
+                   r'NOT_FOUND|NOT_AUTHORIZED|UNAUTHORIZED|RATE_LIMIT_EXCEEDED|UNEXPECTED_ERROR)'
+                   r'(?:\.[A-Z0-9_]+)*')
+        self.codes = [c for c in codes[:10] if isinstance(c, str) and len(c) <= 100
+                      and re.fullmatch(pattern, c)]
+        super().__init__('Apple API request failed')
+
+
+def diagnostic_phase(phase, bundle=None):
+    global _diagnostic_context, _diagnostic_api
+    _diagnostic_context = {'phase': phase}
+    if bundle in BUNDLES:
+        _diagnostic_context['bundleId'] = bundle
+    _diagnostic_api = None
+
+
+def seal_failure(root, error):
+    record = dict(_diagnostic_context, schema='wafra-ios-signing-failure-v1',
+                  runId=os.environ.get('GITHUB_RUN_ID'), runAttempt=os.environ.get('GITHUB_RUN_ATTEMPT'))
+    for env, key in [('SOURCE_COMMIT', 'sourceCommit'), ('GITHUB_SHA', 'workflowCommit')]:
+        value = os.environ.get(env, '')
+        if re.fullmatch(r'[0-9a-f]{40}', value):
+            record[key] = value
+    allowed = {'AppleAPIError', 'AssertionError', 'RuntimeError', 'CalledProcessError',
+               'TimeoutExpired', 'URLError', 'TimeoutError', 'KeyError', 'ValueError',
+               'FileNotFoundError', 'PermissionError', 'JSONDecodeError'}
+    record['errorClass'] = type(error).__name__ if type(error).__name__ in allowed else 'OtherError'
+    if _diagnostic_api:
+        record['api'] = _diagnostic_api
+    if isinstance(error, AppleAPIError):
+        record.update(httpStatus=error.status, appleErrorCodes=error.codes)
+    # The public receipt remains metadata-only. Diagnostics have a separate
+    # CMS envelope, never an unencrypted artifact or exception string.
+    output = pathlib.Path('sealed'); output.mkdir(exist_ok=True)
+    receipt = output/'signing-receipt.json'
+    if receipt.is_file():
+        record['receipt'] = json.loads(receipt.read_text())
+    private = root/'signing-failure.json'
+    try:
+        write_json(private, record)
+        run('openssl', 'cms', '-encrypt', '-binary', '-aes-256-cbc', '-outform', 'DER',
+            '-in', str(private), '-out', str(output/'signing-failure.enc'),
+            '.github/android-artifact-recipient.pem')
+    finally:
+        private.unlink(missing_ok=True)
 
 
 def run(*args):
@@ -32,6 +86,12 @@ def write_json(path, value):
 
 
 def api(method, route, body=None):
+    global _diagnostic_api
+    _diagnostic_api = None
+    path = route.split('?')[0]
+    if method in ('GET', 'POST', 'DELETE') and re.fullmatch(
+            r'(?:certificates|profiles|bundleIds)(?:/[A-Z0-9]{10})?(?:/devices|/certificates)?', path):
+        _diagnostic_api = {'method': method, 'route': path}
     import jwt
     key = os.environ['ASC_KEY_P8'].encode()
     if b'BEGIN PRIVATE KEY' not in key:
@@ -49,8 +109,13 @@ def api(method, route, body=None):
                 return {}
             return json.load(response)
     except urllib.error.HTTPError as error:
-        # Apple's response can include profileContent and device identifiers.
-        raise RuntimeError(f'Apple {method} {route.split("?")[0]} returned HTTP {error.code}') from None
+        # Extract only allowlisted symbolic codes from a bounded response.
+        try:
+            errors = json.loads(error.read(65536)).get('errors', [])
+            codes = [item.get('code') for item in errors if isinstance(item, dict)]
+        except (ValueError, AttributeError, TypeError):
+            codes = []
+        raise AppleAPIError(error.code, codes) from None
 
 
 def api_list(route):
@@ -98,36 +163,51 @@ def inventory(root):
 
 
 def prepare(root):
+    diagnostic_phase('start')
+    try:
+        return _prepare(root)
+    except Exception as error:
+        try:
+            seal_failure(root, error)
+        except Exception:
+            # Preserve the signing failure even if encryption/disk fails.
+            # Never print a diagnostic, stderr, exception or encryption input.
+            pass
+        raise
+
+
+def _prepare(root):
     os.umask(0o077)
     root.mkdir(parents=True, exist_ok=True)
+    diagnostic_phase('inventory')
     state = {'team': TEAM, 'profiles': {}, 'runId': os.environ['GITHUB_RUN_ID'],
              'runAttempt': os.environ['GITHUB_RUN_ATTEMPT'], 'before': inventory(root)}
     # Receipt is persisted immediately after each mutation, even on later failure.
     receipt = pathlib.Path('sealed/signing-receipt.json')
     receipt.parent.mkdir(exist_ok=True)
     write_json(receipt, state)
+    diagnostic_phase('reference_devices')
     devices = api('GET', f'profiles/{REFERENCE_PROFILE}/devices')['data']
     assert len(devices) == 2 and all(d['attributes']['status'] == 'ENABLED' for d in devices)
     device_ids = [{'type': 'devices', 'id': d['id']} for d in devices]
+    diagnostic_phase('generate_csr')
     run('openssl', 'req', '-new', '-newkey', 'rsa:2048', '-nodes', '-keyout', str(root/'key.pem'),
         '-out', str(root/'request.csr'), '-subj',
         '/CN=Wafra QA CI ' + state['runId'] + '-' + state['runAttempt'])
-    try:
-        cert = api('POST', 'certificates', {'data': {'type': 'certificates', 'attributes': {
-            'certificateType': 'DEVELOPMENT', 'csrContent': (root/'request.csr').read_text()}}})['data']
-    except RuntimeError:
-        print('STOP: Apple refused development certificate creation. Check certificate capacity/permissions; '
-              'no retry, deletion or revocation will be attempted.', flush=True)
-        raise
+    diagnostic_phase('create_certificate')
+    cert = api('POST', 'certificates', {'data': {'type': 'certificates', 'attributes': {
+        'certificateType': 'DEVELOPMENT', 'csrContent': (root/'request.csr').read_text()}}})['data']
     state['certificateId'] = cert['id']
     write_json(receipt, state)
     print('Created development certificate id: ' + cert['id'], flush=True)
+    diagnostic_phase('certificate_metadata')
     state['certificate'] = cert_metadata(cert)
     assert cert['id'] not in {c['id'] for c in state['before']['certificates']}
     write_json(receipt, state)
     der = base64.b64decode(cert['attributes']['certificateContent'])
     (root/'cert.der').write_bytes(der)
     state['identitySha1'] = hashlib.sha1(der).hexdigest().upper()
+    diagnostic_phase('import_identity')
     run('openssl', 'x509', '-inform', 'DER', '-in', str(root/'cert.der'), '-out', str(root/'cert.pem'))
     password = base64.b64encode(os.urandom(32)).decode()
     # Password never enters GITHUB_ENV, stdout, an artifact or a build log.
@@ -145,11 +225,13 @@ def prepare(root):
     run('security', 'list-keychains', '-d', 'user', '-s', keychain,
         str(pathlib.Path.home()/'Library/Keychains/login.keychain-db'))
     for bundle in BUNDLES:
+        diagnostic_phase('find_bundle', bundle)
         query = urllib.parse.urlencode({'filter[identifier]': bundle})
         matches = api('GET', 'bundleIds?' + query)['data']
         assert len(matches) == 1
         name = ('Wafra QA UI Tests 2026-11' if bundle == BUNDLES[0] else 'Wafra QA ' + bundle)
         name += ' CI ' + os.environ['GITHUB_RUN_ID'] + '-' + os.environ['GITHUB_RUN_ATTEMPT']
+        diagnostic_phase('create_profile', bundle)
         profile = api('POST', 'profiles', {'data': {'type': 'profiles', 'attributes': {
             'name': name, 'profileType': 'IOS_APP_DEVELOPMENT'}, 'relationships': {
                 'bundleId': {'data': {'type': 'bundleIds', 'id': matches[0]['id']}},
@@ -159,6 +241,7 @@ def prepare(root):
         state['profiles'][bundle] = {'id': profile['id'], 'uuid': attrs.get('uuid'), 'name': name}
         write_json(receipt, state)
         print('Created CI profile id: ' + profile['id'], flush=True)
+        diagnostic_phase('validate_profile', bundle)
         content = base64.b64decode(attrs['profileContent'])
         profile_path = root/(bundle + '.mobileprovision')
         profile_path.write_bytes(content)
@@ -393,5 +476,6 @@ if __name__ == '__main__':
             raise ValueError('Unknown command')
     except Exception as error:
         # Never print subprocess output or env; either can contain credentials.
-        print('Device signing failed: ' + type(error).__name__, file=sys.stderr)
+        if sys.argv[1:2] != ['prepare']:
+            print('Device signing failed: ' + type(error).__name__, file=sys.stderr)
         sys.exit(1)
