@@ -2677,7 +2677,8 @@ function leaderGovernsCredit(sentence: string, leader: RegExpMatchArray, clause:
   if (!amount) return true;
   const event = stretch.slice(0, amount.index).replace(/(?:the\s+)?refund\s+of\s*$/i, '');
   if (!EN_EVENT_NOUN_PHRASE_RE.test(event) && !EN_PAST_EVENT_CLAUSE_RE.test(event)) return true;
-  const auxiliary = stretch.slice(amount.index + amount[0].length);
+  const auxiliary = stretch.slice(amount.index + amount[0].length)
+    .replace(/^\s+from\s+[^,;:]+?(?=\s+(?:has|have|had|was|were)\b)/i, ' ');
   const telegraphic = auxiliary.trim() === '' && /ed$/i.test(clause.verbs[0]);
   return !(telegraphic || EN_COMPLETED_AUXILIARY_RE.test(auxiliary));
 }
@@ -2863,7 +2864,6 @@ function arCreditSettlement(sentence: string, clause: CreditClause, rawAfter: st
       AR_FUTURE_MAIN_CLAUSE_RE.test(sentence.slice(clause.end)) || clause.ar !== 'settled'))) {
     return { verdict: 'not-settled', reason: 'conditional' };
   }
-  if (hasPendingCreditStatus(sentence.slice(clause.end))) return { verdict: 'not-settled', reason: 'pending' };
   if (clause.ar === 'negated') return { verdict: 'not-settled', reason: 'negated' };
   if (clause.ar === 'pending') return { verdict: 'not-settled', reason: 'pending' };
   const tail = sentence.slice(clause.end);
@@ -2874,6 +2874,7 @@ function arCreditSettlement(sentence: string, clause: CreditClause, rawAfter: st
     after.split(REFUND_SENTENCE_BREAK_RE).some((text) => !AR_HEDGED_SENTENCE_RE.test(text) && AR_TAKEN_BACK_LATER_RE.test(text))) {
     return { verdict: 'refused', reason: 'taken-back' };
   }
+  if (hasPendingCreditStatus(tail)) return { verdict: 'not-settled', reason: 'pending' };
   // As in English (Change Reviewer 1ae30382): "في حال الموافقة" (if approved) leaves the credit conditional, and for a refund
   // "خلال 7 أيام عمل" (within 7 working days) leaves it pending.
   if (AR_TRAILING_CONDITION_RE.test(tail) || hasCreditCondition(tail)) return { verdict: 'not-settled', reason: 'conditional' };
