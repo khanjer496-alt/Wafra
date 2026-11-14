@@ -20,14 +20,14 @@ import {
   pinnedLedgerCurrencyCode,
 } from '@/lib/markets';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
-import { completedDebitBesideCredit, moneyNoticeKind, nonPostingReason, hasOnlyUnsettledCredit, parseSms, parseSmsBatch, withoutUncompletedRequestNotes, type ParsedSms } from '@/lib/sms-parser';
+import { completedDebitBesideCredit, moneyNoticeKind, nonPostingReason, hasOnlyUnsettledCredit, hasUnsettledPrincipal, parseSms, parseSmsBatch, withoutUncompletedRequestNotes, type ParsedSms } from '@/lib/sms-parser';
 import type { CategoryId } from '@/lib/types';
 import { CURRENCY_SYMBOL_CANDIDATES, currencyMinorUnits } from '@/lib/currency-metadata';
 import { decideGulfNeighbourPosting, gulfNeighbourReadSource, isGulfNeighbourMarket } from '@/lib/gulf-neighbour-alerts';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { alertMarketPack } from '@/lib/alert-market-packs';
 import { normalizeAlertText } from '@/lib/alert-draft';
-import { hasExplicitPersonalMoneyClaim, hasClickLinkPrompt, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isQualifiedCardRepaymentReceipt, isUnpostedCardBalanceClaim, isCompletedCardBalanceReceipt } from '@/lib/principal-posting-guards';
+import { hasExplicitPersonalMoneyClaim, hasClickLinkPrompt, isIncompletePrincipal, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isQualifiedCardRepaymentReceipt, isUnpostedCardBalanceClaim, isCompletedCardBalanceReceipt } from '@/lib/principal-posting-guards';
 import { unqualifiedCardCreditCurrencyAliases } from '@/lib/universal-money';
 import { isLatamOwnCardPayment, latamOwnTransferTitle, latamPolicySource, matchLatamTemplate } from '@/lib/latam-alert-templates';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
@@ -294,14 +294,15 @@ export const inspectGenericBankEventForReview = (
   const moneySource = source.replace(/\u0640(?=[0-9٠-٩۰-۹])/g, ' ');
   let event = inspectUniversalBankEvent(isGulfNeighbourMarket(market)
     ? gulfNeighbourReadSource(moneySource, market) : moneySource, { ...context, currencyAliases: { ...creditReviewAliases, ...cardCreditAliases, ...context.currencyAliases } });
+  const incompletePrincipal = event.amount.spans.some(span => isIncompletePrincipal(moneySource, span));
   // Unknown direction is not completion evidence. Keep the original token
   // hold on Review authority without inventing an incoming/outgoing direction.
-  if (hasUnsettledCreditToken(source) && event.status === 'unknown' &&
-    (event.direction === 'unknown' || event.direction === 'none')) {
+  if (incompletePrincipal || (hasUnsettledCreditToken(source) && event.status === 'unknown' &&
+    (event.direction === 'unknown' || event.direction === 'none'))) {
     event = { ...event, status: 'informational',
       issues: [...new Set([...event.issues, 'unsettled-credit-not-posting'])] };
   }
-  if (!cardCreditAliases && !(event.direction === 'debit' && event.status === 'posted') &&
+  if (!incompletePrincipal && !cardCreditAliases && !(event.direction === 'debit' && event.status === 'posted') &&
     (creditReviewOnly || (event.direction === 'credit' && hasUnsettledCreditToken(source)) ||
     (mentionsCredit(source) && (event.direction === 'unknown' || event.direction === 'none') &&
       (event.status === 'unknown' || event.status === 'informational')))) event = informationalCreditReview(source, event);
@@ -1179,7 +1180,7 @@ export const createLaunchAlertSession = ({
     const holdCredit = hasUnsettledCreditToken(source);
     if (mentionsCredit(source) && hasConditionalDebitLead(source)) return null;
     const result = reader(source, sender, inspection, forcedMarket, observedAt);
-    if (result?.kind === 'transaction' && result.type === 'expense') return result;
+    if (result?.kind === 'transaction' && result.type === 'expense') return hasUnsettledPrincipal(source, result) ? null : result;
     const pair = completedDebitBesideCredit(source, { sender });
     const reason = pair ? nonPostingReason(source) : null;
     // The regional grammar can preserve its known debit. A clipped fragment

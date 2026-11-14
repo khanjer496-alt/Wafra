@@ -10087,10 +10087,8 @@ export function hasUnsettledPrincipal(message: string, parsed: ParsedSms): boole
   return context ? hasUnsettledPrincipalInContext(context, parsed) : false;
 }
 
-/** Reuse the mature completed-expense proof for every independent-debit caller. */
+/** One completed-expense proof, including the original principal aspect, for every caller. */
 export function completedDebitBesideCredit(message: string, options?: ParseOptions): { debit: string; credit: string } | null {
-  const legacy = splitDebitBesideCredit(message);
-  if (legacy) return legacy;
   let wholeChecked = false;
   let whole: ParsedSms | null = null;
   return splitDebitBesideCredit(message, clause => {
