@@ -143,7 +143,7 @@ function selectedPredicateCompletion(lead: string, tail: string): boolean | null
 }
 
 /** Scope indicative status to the selected movement, excluding conditional/previous-event footers. */
-export function isIncompletePrincipal(source: string, span: PrincipalSpan | undefined): boolean {
+export function isIncompletePrincipal(source: string, span: PrincipalSpan | undefined, expensePredicate = false): boolean {
   if (!span) return false;
   const boundary = (at: number) => /[;!?]/u.test(source[at]) ||
     (source[at] === '.' && /^(?:\s|$)/u.test(source[at + 1] ?? ''));
@@ -155,7 +155,10 @@ export function isIncompletePrincipal(source: string, span: PrincipalSpan | unde
   // "was not made" prove an independently completed expense.
   const ownLead = source.slice(start, span.start);
   const ownTail = source.slice(span.end, end);
-  if (selectedPredicateCompletion(ownLead, ownTail) === false) return true;
+  if (expensePredicate) {
+    if (selectedPredicateCompletion(ownLead, ownTail) === false) return true;
+  } else if (/\b(?:purchase|payment|transfer|withdrawal|transaction)\s+(?:(?:of|for|amount)\s*[:=]?\s*|[A-Z]{3}\s*)*$/iu.test(ownLead) &&
+    /^\s*(?:[A-Z]{3}\s*)?(?:(?:will|would|shall|may|might|can|could)\s+(?:not\s+)?be|(?:was|were|is|has\s+been|have\s+been)\s+(?:not|never))\s+(?:made|completed|processed|posted|charged|debited|paid|sent)\b(?!\s+by\s+you)/iu.test(ownTail)) return true;
   const blocks = [source.slice(start, end)];
   const header = source.slice(0, start);
   // A leading verdict still owns the field-list amount that follows it:

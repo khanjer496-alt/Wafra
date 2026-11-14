@@ -294,7 +294,12 @@ export const inspectGenericBankEventForReview = (
   const moneySource = source.replace(/\u0640(?=[0-9٠-٩۰-۹])/g, ' ');
   let event = inspectUniversalBankEvent(isGulfNeighbourMarket(market)
     ? gulfNeighbourReadSource(moneySource, market) : moneySource, { ...context, currencyAliases: { ...creditReviewAliases, ...cardCreditAliases, ...context.currencyAliases } });
-  const incompletePrincipal = event.amount.spans.some(span => isIncompletePrincipal(moneySource, span));
+  const incompletePrincipal = event.amount.spans.some(span => {
+    const lead = moneySource.slice(0, span.start).split(/(?<=[.!?])\s+|[;؛\n]/u).at(-1) ?? '';
+    const debit = /\b(?:debited|charged|deducted|spent|withdrawn|paid|purchased|used)\b/iu.test(lead) ||
+      /(?:^|[:|])\s*(?:(?:a|the|your)\s+)?(?:purchase|payment|withdrawal|transaction)\s+(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(lead);
+    return debit && isIncompletePrincipal(moneySource, span, true);
+  });
   // Unknown direction is not completion evidence. Keep the original token
   // hold on Review authority without inventing an incoming/outgoing direction.
   if (incompletePrincipal || (hasUnsettledCreditToken(source) && event.status === 'unknown' &&
@@ -1180,7 +1185,7 @@ export const createLaunchAlertSession = ({
     const holdCredit = hasUnsettledCreditToken(source);
     if (mentionsCredit(source) && hasConditionalDebitLead(source)) return null;
     const result = reader(source, sender, inspection, forcedMarket, observedAt);
-    if (result?.kind === 'transaction' && result.type === 'expense') return hasUnsettledPrincipal(source, result) ? null : result;
+    if (result?.kind === 'transaction' && result.type === 'expense') return hasUnsettledPrincipal(source, result, true) ? null : result;
     const pair = completedDebitBesideCredit(source, { sender });
     const reason = pair ? nonPostingReason(source) : null;
     // The regional grammar can preserve its known debit. A clipped fragment
