@@ -1013,8 +1013,8 @@ function inspectSourceFreeRefusedAlertCore(input: {
     completedDebitBesideCredit(input.source) && !/https?:\/\/|www\./iu.test(input.source)) {
     const accepted = input.acceptedExpense?.kind === 'transaction' && input.acceptedExpense.type === 'expense';
     const pair = completedDebitBesideCredit(input.source)!;
-    let event = accepted ? inspectSupplementaryReversal(input.source, input.sender)
-      : inspectGenericBankEventForReview(pair.debit, input.sender);
+    const note = inspectSupplementaryReversal(input.source, input.sender);
+    let event = accepted ? note : note ? inspectGenericBankEventForReview(pair.debit, input.sender) : null;
     if (!accepted && event) event = { ...event, decision: 'review', status: 'informational', direction: 'debit',
       issues: [...new Set([...event.issues, 'unsettled-credit-not-posting'])] };
     const review = event ? prepareUniversalReviewAlert({ id: 'capture_probe_id_0001', sourceKey: 'capture_probe_key_001',

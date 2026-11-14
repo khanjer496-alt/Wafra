@@ -1,4 +1,4 @@
-import { informationalCreditReview, hasUnsettledCreditToken, completedDebitBesideCredit, mentionsCredit, hasConditionalDebitLead, creditSourceDisposition } from '@/lib/credit-settlement-guards';
+import { informationalCreditReview, hasUnsettledCreditToken, completedDebitBesideCredit, mentionsCredit, mentionsRefund, hasConditionalDebitLead, creditSourceDisposition } from '@/lib/credit-settlement-guards';
 import { inspectUniversalAlert, type UniversalAlertReview } from '@/lib/alert-market-detection';
 import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars';
 import { activeCountryDateOrder, dateOrderForCountry, getActiveCountry } from '@/lib/country';
@@ -235,6 +235,8 @@ export const inspectGenericBankEventForReview = (
     isUnpostedCardBalanceClaim(source)) return null;
   // An exact LatAm bank template is bank-alert context in its own right.
   const noContext = !hasGenericBankAlertContext(source, sender) && !matchLatamTemplate(source, { sender });
+  const informationalRefundClaim = noContext && mentionsRefund(source) &&
+    creditSourceDisposition(source) === 'review' && hasBankAlertMoneyHint(source);
   // A "money arrived" claim from a phone number, e-mail, generic header or
   // no sender has no bank context of its own. From an unverified sender the
   // best-effort policy will not auto-add it (unverified-sender); without a
@@ -277,7 +279,7 @@ export const inspectGenericBankEventForReview = (
         ? detectLaunchMarketFromAlert(source) : null);
     if (launch) cardCreditAliases = unqualifiedCardCreditCurrencyAliases(source, launch, sourceContext?.currencyAliases);
   }
-  if (noContext && !claimAdmitted && !footerAdmitted && !cardAdmitted && !cardCreditAliases) return null;
+  if (noContext && !informationalRefundClaim && !claimAdmitted && !footerAdmitted && !cardAdmitted && !cardCreditAliases) return null;
   const context: UniversalParseContext = isGulfNeighbourMarket(market)
     ? { sender, market, dateOrder: dateOrderForCountry(market) ?? undefined }
     : sourceContext ? { ...sourceContext, sender }
@@ -287,8 +289,11 @@ export const inspectGenericBankEventForReview = (
     ? detectLaunchMarketFromSender(sender) : null;
   const creditReviewAliases: CurrencyAliasMap = creditReviewMarket === 'AE' ? { 'درهم': ['AED'], 'دراهم': ['AED'] }
     : creditReviewMarket === 'SA' ? { 'ريال': ['SAR'] } : {};
+  // A tatweel used before a number is an amount separator. Replace it 1:1
+  // for field reading so source spans remain exact; guards see the original.
+  const moneySource = source.replace(/\u0640(?=[0-9٠-٩۰-۹])/g, ' ');
   let event = inspectUniversalBankEvent(isGulfNeighbourMarket(market)
-    ? gulfNeighbourReadSource(source, market) : source, { ...context, currencyAliases: { ...creditReviewAliases, ...cardCreditAliases, ...context.currencyAliases } });
+    ? gulfNeighbourReadSource(moneySource, market) : moneySource, { ...context, currencyAliases: { ...creditReviewAliases, ...cardCreditAliases, ...context.currencyAliases } });
   if (!cardCreditAliases && !(event.direction === 'debit' && event.status === 'posted') &&
     (creditReviewOnly || (event.direction === 'credit' && hasUnsettledCreditToken(source)) ||
     (mentionsCredit(source) && event.direction === 'unknown' && event.status === 'unknown'))) event = informationalCreditReview(source, event);
@@ -314,7 +319,7 @@ export const inspectGenericBankEventForReview = (
     event.instrument.value?.kind !== 'card' || event.instrument.value.last4 !== senderlessCard?.[1])) return null;
   if (hasNativeCurrencyAccountContext(source) && !hasBankAlertMoneyHint(source) &&
     (event.amount.evidence !== 'explicit' || event.amount.value?.currency !== 'ZAR')) return null;
-  if (noContext && !cardCreditAliases && !((event.direction === 'credit' || ((footerAdmitted || cardAdmitted) && event.direction === 'debit')) &&
+  if (noContext && !informationalRefundClaim && !cardCreditAliases && !((event.direction === 'credit' || ((footerAdmitted || cardAdmitted) && event.direction === 'debit')) &&
     event.status === 'posted' && event.amount.evidence !== 'missing')) return null;
   const hasGroundedMoney =
     event.amount.evidence !== 'missing' ||

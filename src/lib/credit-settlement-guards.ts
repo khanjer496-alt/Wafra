@@ -6,6 +6,7 @@ export function normalizeCreditText(source: string): string {
   const cached = normalized.get(source);
   if (cached !== undefined) return cached;
   const text = source.normalize('NFKC')
+    .replace(/\u0640(?=[0-9٠-٩۰-۹])/g, ' ')
     .replace(/[\u0640\u064B-\u0655\u0670\u200B-\u200F\u061C\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
     // Preserve grammatical information before folding the Arabic letters: إن is if, أن is that.
     .replace(/(?<![ء-ي])([وف]?)أن(?![ء-ي])/g, '$1 that_ar ').replace(/(?<![ء-ي])([وف]?)إن(?![ء-ي])/g, '$1 if_ar ')
@@ -62,11 +63,11 @@ export function hasConditionalDebitLead(source: string): boolean {
 /** The source spans remain in the original spelling; normalization is detection only. */
 export function completedDebitBesideCredit(source: string): { debit: string; credit: string } | null {
   if (!REVERSAL_NOTE_MENTION.test(normalizeCreditText(source)) || hasConditionalDebitLead(source)) return null;
-  const parts = source.split(/(?<=[.!?؟])\s+|[;؛\n]+|\s+(?:but|while)\s+(?=(?:your|the)\s+(?:refund|reversal|charge[\s-]*back))|\s*[-–—]\s*(?=(?:refund|reversal|charge[\s-]*back)\b)/iu);
+  const parts = source.split(/(?<=[.!?؟])\s+|[;؛\n]+|(?<![0-9٠-٩۰-۹])[,،]|[,،](?![0-9٠-٩۰-۹])|\s+(?:but|while)\s+(?=(?:your|the)\s+(?:refund|reversal|charge[\s-]*back))|\s*[-–—]\s*(?=(?:refund|reversal|charge[\s-]*back)\b)/iu);
   const debit = parts.filter(part => {
     const text = normalizeCreditText(part);
     return /\d/.test(text) &&
-      /\b(?:was\s+debited|has\s+been\s+debited|debited\s+from|charged|purchased|spent|paid\s+(?:at|to)|used\s+(?:at|for)|withdrawn\s+from|(?:made|successful)\s+(?:a\s+)?purchase)\b|^\s*purchase\b|(?:تم|تمت)\s+(?:ال)?(?:خصم|شراء|دفع|سحب)/iu.test(text) &&
+      /\b(?:was\s+debited|has\s+been\s+debited|debited\s+from|charged|purchased|spent|paid\s+(?:at|to)|used\s+(?:at|for)|withdrawn\s+from|(?:made|successful)\s+(?:a\s+)?purchase)\b|(?:^|\|)\s*purchase\b|\b(?:debit|credit)\s+card\s+purchase\b|(?:تم|تمت)\s+(?:ال)?(?:خصم|شراء|دفع|سحب)/iu.test(text) &&
       !/\b(?:not|failed|declined|unsuccessful|rejected)\b|(?<![ء-ي])(?:لم|لن|فشل|رفض)(?![ء-ي])/iu.test(text);
   });
   // Account credit-limit/availability fields are not reversal notes. Keep
@@ -158,7 +159,10 @@ export function creditSourceDisposition(source: string): CreditSourceDisposition
 
 /** The existing Review contract: retain uncertain credit evidence, never confirmation authority. */
 export function informationalCreditReview(source: string, event: UniversalBankEvent): UniversalBankEvent {
-  if (event.direction === 'debit' && event.status === 'posted') return event;
+  const original = normalizeCreditText(source);
+  const debitMovement = /\b(?:debited|charged|withdrawn|paid\s+out|used\s+(?:at|for)|spent)\b|(?:تم|تمت)\s+(?:ال)?(?:خصم|سحب|دفع)/iu.test(original);
+  const refundClaim = mentionsRefund(source) && !debitMovement && !completedDebitBesideCredit(source);
+  if (event.direction === 'debit' && event.status === 'posted' && !refundClaim) return event;
   if (event.family === 'authentication' || event.family === 'card-payment' ||
     event.issues.some(issue => /^(?:authentication|promotion)-not-posting$/.test(issue))) return event;
   const transactionFields = event.observations.filter(o => o.role === 'transaction' && o.field.evidence === 'explicit');
@@ -176,8 +180,8 @@ export function informationalCreditReview(source: string, event: UniversalBankEv
   if (obligation && (transactionFields.length !== 1 || event.statementTotal.evidence === 'explicit' ||
     event.minimumDue.evidence === 'explicit')) return event;
   return { ...event, amount, decision: 'review', status: 'informational',
-    family: event.family === 'unknown' || obligation ? (/refund|reversal|charge[ -]*back|استرداد|استرجاع|عكس/iu.test(source) ? 'refund' : 'transfer') : event.family,
-    direction: event.direction === 'unknown' || event.direction === 'none' ? 'credit' : event.direction,
+    family: refundClaim ? 'refund' : event.family === 'unknown' || obligation ? (/refund|reversal|charge[ -]*back|استرداد|استرجاع|عكس/iu.test(source) ? 'refund' : 'transfer') : event.family,
+    direction: refundClaim || event.direction === 'unknown' || event.direction === 'none' ? 'credit' : event.direction,
     observations: event.observations.map(observation => observation.field.spans.some(span =>
       amount.spans.some(primary => primary.start === span.start && primary.end === span.end))
         ? { ...observation, role: 'transaction' as const } : observation),
