@@ -17,8 +17,12 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm ci
-      - name: Check unchanged generated resources
-        run: node scripts/generate-ios-background-parser.cjs --check > generation-check.txt 2>&1
+      - name: Generate and verify the candidate native resources
+        run: |
+          node scripts/generate-ios-background-parser.cjs > generation-check.txt 2>&1
+          node scripts/generate-ios-background-parser.cjs --check >> generation-check.txt 2>&1
+      - name: Typecheck
+        run: node node_modules/typescript/bin/tsc --noEmit > typecheck.txt 2>&1
       - name: Compile shipping modules for existing consumer tests
         run: bash scripts/test/build.sh > compile.txt 2>&1
       - name: Diagnose native refusal boundaries
@@ -28,7 +32,10 @@ jobs:
         run: node --test --test-concurrency=1 scripts/test/repair/credit-settlement-closure.test.cjs > closure.txt 2>&1
       - name: Reproduce repaired history and notification consumers
         if: ${{ !cancelled() }}
-        run: node --test --test-concurrency=1 scripts/test/repair/history-receipt-date-context.test.cjs scripts/test/repair/history-scheduling.test.cjs scripts/test/repair/notification-beta.test.cjs > consumers.txt 2>&1
+        run: node --test --test-concurrency=1 scripts/test/repair/credit-review-retention.test.cjs scripts/test/repair/history-receipt-date-context.test.cjs scripts/test/repair/history-scheduling.test.cjs scripts/test/repair/notification-beta.test.cjs > consumers.txt 2>&1
+      - name: Three-path matrix
+        if: ${{ !cancelled() }}
+        run: REFUND_MATRIX_REPORT=matrix-report.json node --test --test-concurrency=1 scripts/test/repair/refund-matrix.test.cjs > matrix.txt 2>&1
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -37,6 +44,18 @@ jobs:
             native-diagnostic.json
             generation-check.txt
             compile.txt
+            typecheck.txt
             closure.txt
             consumers.txt
+            matrix.txt
+            matrix-report.json
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: delayed-review-resources-${{ github.sha }}
+          path: |
+            modules/wafra-live-capture/ios/Resources/WafraBackgroundParser.js
+            modules/wafra-live-capture/ios/Resources/WafraBackgroundParser.meta.json
+            src/lib/ios-background-parser-source.generated.ts
           retention-days: 7

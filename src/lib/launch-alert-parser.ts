@@ -294,6 +294,13 @@ export const inspectGenericBankEventForReview = (
   const moneySource = source.replace(/\u0640(?=[0-9٠-٩۰-۹])/g, ' ');
   let event = inspectUniversalBankEvent(isGulfNeighbourMarket(market)
     ? gulfNeighbourReadSource(moneySource, market) : moneySource, { ...context, currencyAliases: { ...creditReviewAliases, ...cardCreditAliases, ...context.currencyAliases } });
+  // Unknown direction is not completion evidence. Keep the original token
+  // hold on Review authority without inventing an incoming/outgoing direction.
+  if (hasUnsettledCreditToken(source) && event.status === 'unknown' &&
+    (event.direction === 'unknown' || event.direction === 'none')) {
+    event = { ...event, status: 'informational',
+      issues: [...new Set([...event.issues, 'unsettled-credit-not-posting'])] };
+  }
   if (!cardCreditAliases && !(event.direction === 'debit' && event.status === 'posted') &&
     (creditReviewOnly || (event.direction === 'credit' && hasUnsettledCreditToken(source)) ||
     (mentionsCredit(source) && (event.direction === 'unknown' || event.direction === 'none') &&

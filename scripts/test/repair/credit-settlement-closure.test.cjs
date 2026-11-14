@@ -27,7 +27,7 @@ function paths(body, sender = 'ENBD', market = 'AE', currency = 'AED') {
     context: { v: 1, country: market, parserMarket: market, ledgerMoney: { currency, exponent: 2 }, sourceHash: meta.sourceHash } })));
   const event = load('@/lib/launch-alert-parser').inspectGenericBankEventForReview(body, sender);
   const parsed = sms.parseSms(body, {}, { sender, observedAt: at });
-  return { nativeMinorUnits: native.notification?.amount?.minorUnits ?? null, merchant: parsed?.merchant ?? null, review: event ? { status: event.status, decision: event.decision, family: event.family, role: event.observations.find(o => o.field.spans.some(s => event.amount.spans.some(a => a.start === s.start && a.end === s.end)))?.role, minorUnits: event.amount.value?.minorUnits ?? null, confirmable: load('@/lib/alert-review-tray').isMoneyMovementReview({ kind: 'universal', event }) } : null, nativeRoute: native.route, sms: shape(sms.parseSms(body, {}, { sender, observedAt: at })),
+  return { nativeMinorUnits: native.notification?.amount?.minorUnits ?? null, merchant: parsed?.merchant ?? null, review: event ? { status: event.status, decision: event.decision, family: event.family, role: event.observations.find(o => o.field.spans.some(s => event.amount.spans.some(a => a.start === s.start && a.end === s.end)))?.role, alternatives: event.amount.alternatives.map(m => m.minorUnits), minorUnits: event.amount.value?.minorUnits ?? null, confirmable: load('@/lib/alert-review-tray').isMoneyMovementReview({ kind: 'universal', event }) } : null, nativeRoute: native.route, sms: shape(sms.parseSms(body, {}, { sender, observedAt: at })),
     session: shape(selected.parse(body, sender, selected.inspect(body, sender), undefined, at)),
     native: native.route === 'parsed' ? `${native.notification.direction}:${native.notification.amount?.minorUnits}` : native.route };
 }
@@ -115,6 +115,18 @@ for (const row of require('./credit-settlement-sweep.json')) test(`${row.id} ${r
 for (const row of require('./credit-settlement-review-probes.json')) test(`${row.id}: reviewer probe`, () => {
   const got = paths(row.body, row.sender);
   if (row.id === 'reviewer-focused:S5' && got.sms !== 'none') assert.equal(got.merchant, 'أمازون', row.body);
+  if (row.nativeKnownBoundary) {
+    assert.ok(['preauthorisation', 'multiple-money-fields', 'untrusted-sender', 'unresolved-direction'].includes(row.nativeKnownBoundary), row.id);
+    assert.equal(got.sms, 'none', JSON.stringify(got)); assert.equal(got.session, 'none', JSON.stringify(got));
+    assert.equal(got.nativeRoute, 'ignore', `${row.nativeKnownBoundary}: ${JSON.stringify(got)}`);
+    assert.equal(got.review?.decision, 'review', JSON.stringify(got));
+    assert.equal(got.review.status, 'informational', JSON.stringify(got)); assert.equal(got.review.confirmable, false, row.id);
+    if (row.nativeKnownBoundary === 'multiple-money-fields') {
+      assert.equal(got.review.minorUnits, null, 'ambiguous facts cannot borrow either amount');
+      assert.deepEqual([...got.review.alternatives].sort(), [...row.reviewAlternatives].sort(), row.id);
+    } else assert.equal(got.review.minorUnits, String(row.minorUnits), row.id);
+    return; // Explicit native coverage limit, not native Review/parity proof.
+  }
   const target = row.expected === 'none' ? 'none' : `${row.expected}:${row.minorUnits}`;
   const informational = got.review?.decision === 'review' && got.review.status === 'informational' && !got.review.confirmable;
   const retained = informational && got.nativeRoute === 'review';

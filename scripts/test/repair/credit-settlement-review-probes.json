@@ -3141,7 +3141,8 @@
     "minorUnits": 1000000,
     "acceptInformationalReview": true,
     "requireReview": false,
-    "independentFinding": "Info pre-existing lost income"
+    "independentFinding": "Info pre-existing lost income",
+    "nativeKnownBoundary": "preauthorisation"
   },
   {
     "id": "change-reviewer-ebc:CR2-G5",
@@ -3152,7 +3153,12 @@
     "minorUnits": 25000,
     "acceptInformationalReview": true,
     "requireReview": false,
-    "independentFinding": "Info pre-existing lost income"
+    "independentFinding": "Info pre-existing lost income",
+    "nativeKnownBoundary": "multiple-money-fields",
+    "reviewAlternatives": [
+      "25000",
+      "10000"
+    ]
   },
   {
     "id": "change-reviewer-ebc:CR2-D4",
@@ -3263,7 +3269,8 @@
     "minorUnits": 25000,
     "acceptInformationalReview": false,
     "requireReview": true,
-    "independentFinding": "control"
+    "independentFinding": "control",
+    "nativeKnownBoundary": "preauthorisation"
   },
   {
     "id": "change-reviewer-ebc:CR2-N2",
@@ -3545,7 +3552,8 @@
     "expected": "none",
     "minorUnits": 25000,
     "acceptInformationalReview": false,
-    "requireReview": true
+    "requireReview": true,
+    "nativeKnownBoundary": "unresolved-direction"
   },
   {
     "id": "reviewer-ebc:NU18",
@@ -3585,7 +3593,12 @@
     "expected": "income",
     "minorUnits": 25000,
     "acceptInformationalReview": true,
-    "requireReview": false
+    "requireReview": false,
+    "nativeKnownBoundary": "multiple-money-fields",
+    "reviewAlternatives": [
+      "25000",
+      "10000"
+    ]
   },
   {
     "id": "reviewer-ebc:NC01",
@@ -3595,7 +3608,12 @@
     "expected": "income",
     "minorUnits": 25000,
     "acceptInformationalReview": true,
-    "requireReview": false
+    "requireReview": false,
+    "nativeKnownBoundary": "multiple-money-fields",
+    "reviewAlternatives": [
+      "25000",
+      "10000"
+    ]
   },
   {
     "id": "reviewer-ebc:NC02",
@@ -3675,7 +3693,12 @@
     "expected": "income",
     "minorUnits": 25000,
     "acceptInformationalReview": true,
-    "requireReview": false
+    "requireReview": false,
+    "nativeKnownBoundary": "multiple-money-fields",
+    "reviewAlternatives": [
+      "25000",
+      "5000"
+    ]
   },
   {
     "id": "reviewer-ebc:NC10",
@@ -3735,7 +3758,12 @@
     "expected": "income",
     "minorUnits": 25000,
     "acceptInformationalReview": true,
-    "requireReview": false
+    "requireReview": false,
+    "nativeKnownBoundary": "multiple-money-fields",
+    "reviewAlternatives": [
+      "25000",
+      "10000"
+    ]
   },
   {
     "id": "reviewer-ebc:NC16",
@@ -3880,7 +3908,8 @@
     "expected": "income",
     "minorUnits": 5889,
     "acceptInformationalReview": true,
-    "requireReview": false
+    "requireReview": false,
+    "nativeKnownBoundary": "untrusted-sender"
   },
   {
     "id": "cross-family-ebc-new:X001",
