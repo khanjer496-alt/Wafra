@@ -2909,6 +2909,7 @@ export function creditSettlement(sentence: string, clause: CreditClause, after =
   }
   if (EN_CREDIT_WORDS.negatedBefore.test(lead)) return { verdict: 'not-settled', reason: 'negated' };
   if (clause.nounOnly) {
+    if (isUncompletedRefundRequest(sentence)) return { verdict: 'not-settled', reason: 'pending' };
     const tail = sentence.slice(clause.end);
     return !hasCreditCondition(tail) && !hasPendingCreditStatus(tail) && /\b(?:was|were|is|has\s+been)\s+(?:successfully\s+)?(?:completed|successful|settled)\b/i.test(tail)
       ? { verdict: 'settled' } : { verdict: 'not-settled', reason: 'pending' };
@@ -2967,7 +2968,9 @@ function sentenceSettlement(s: SettlementSentence, after: string): CreditSettlem
 }
 /** The body's sentences, folded (one character to one, so `start` indexes the original too), with their credit clauses. */
 function settlementSentences(original: string): SettlementSentence[] {
-  const body = foldOrthography(original).replace(/[^.!?;\n]+\n(?=[^\n]*\b(?:refunded|credited|reversed)\b)/gi, text => hasCreditCondition(text) || /\b(?:if|unless|until|whether)\b/i.test(text) ? text.replace(/\n/g, ' ') : text);
+  const body = foldOrthography(original).replace(/[^.!?;\n]+\n/g, text =>
+    creditAmounts(text).length === 0 && (hasCreditCondition(text) || /\b(?:if|unless|until|whether)\b|(?<![ء-ي])(?:ان|اذا|بشرط|شريطه|في\s+حال)(?![ء-ي])/i.test(text))
+      ? text.replace(/\n/g, ' ') : text);
   const spans: { start: number; text: string; raw: string }[] = [];
   let start = 0;
   for (const end of [...[...body.matchAll(REFUND_SENTENCE_BREAK_RE)].map((match) => match.index! + match[0].length), body.length]) {
@@ -6717,6 +6720,7 @@ const NOTICE_REFUND_TELEGRAPHIC_CREDIT_RE =
   /(?<!\b(?:be|being|once|when|if|after|until|unless)\s+)\b(?:credited|refunded|reversed|returned|processed|deposited)\s+(?:back\s+)?(?:to|into)\s+your\b/i;
 /** Remove only amount-free request sentences beside a separately stated movement. */
 function withoutUncompletedRequestNotes(message: string): string {
+  if (!/request|طلب/i.test(message) || hasActionableRefundRequest(message)) return message;
   const folded = foldOrthography(stripInvisible(message));
   const spans = [...folded.matchAll(/[.!?](?=\s|$)|[;؛]|\n/g)].map(m => m.index! + m[0].length);
   spans.push(folded.length);
@@ -6730,6 +6734,10 @@ function withoutUncompletedRequestNotes(message: string): string {
     out = out.slice(0, p.start) + ' '.repeat(p.end - p.start) + out.slice(p.end);
   }
   return out === folded ? message : out;
+}
+function hasActionableRefundRequest(message: string): boolean {
+  return isUncompletedRefundRequest(message) && /https?:\/\/|www\./i.test(message) &&
+    /\b(?:click|tap|verify|confirm|update)\b|اضغط|تحقق|تاكيد|تأكيد/i.test(message);
 }
 /** A request records intent. Only a separate, completed money verb can establish a credit. */
 function isUncompletedRefundRequest(text: string): boolean {
@@ -6793,6 +6801,7 @@ const NOTICE_STATUS_SEGMENT_RE = new RegExp(
     String.raw`[ \t.!]*(?:[ \t]+[-–][ \t]+[^\n|]{1,30}|[ \t]+(?:ref(?:erence)?|رقم\s+المرجع)(?:\s*(?:no\.?|number|#))?\s*[:.]?\s*[\w-]+)?[^A-Za-z0-9؀-ۿ\n|]{0,8}(?=\n|\||[)\]]|$)`,
   'i');
 function moneyNoticeKindInBody(text: string): MoneyNoticeKind | null {
+  if (hasActionableRefundRequest(text)) return 'request';
   const body = withoutUncompletedRequestNotes(text).replace(NOTICE_PREFIX_CONNECTOR_RE, '$1: ');
   // rc1's newer principal lifecycle reader understands wrapped refunds and
   // an explicit new settled clause after an earlier negation. Preserve that
@@ -10091,6 +10100,7 @@ export function parseSms(
   // bnpl-providers.ts. Every kind, both directions: the provider's refund
   // notice duplicates the bank's refund credit exactly as its charge does.
   if (isBnplProviderSource(options?.sender)) return null;
+  if (hasActionableRefundRequest(message)) return null;
   const withoutRequests = withoutUncompletedRequestNotes(message);
   if (withoutRequests !== message) {
     const movement = parseSms(withoutRequests, overrides, options);

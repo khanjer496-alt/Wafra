@@ -42,7 +42,7 @@ const NO_POST = [
   ...['If approved,', 'Unless verified,', 'Until cleared:', 'Whether approved,',
     'Subject to merchant approval:', 'Upon approval:', 'Provided that the bank approves,',
     'If the merchant approves,\n'].map(lead => `${lead} ${EN}.`),
-  ...['only if the merchant approves', 'if our acquiring bank verifies the transaction',
+  ...['only if the senior operations team of the acquiring merchant bank and the independent payment verification and settlement department approves', 'only if the merchant approves', 'if our acquiring bank verifies the transaction',
     'when the issuer clears the funds', 'upon successful verification', 'subject to final merchant approval',
     'upon receipt of funds', 'only after approval', 'only after the bank verifies the payment'].map(tail => `${EN} ${tail}.`),
   ...['If approved,', 'Subject to merchant approval:'].map(lead => `${lead} ${EN.toUpperCase()}.`),

@@ -2,7 +2,7 @@
 export const EN_CREDIT_PENDING_STATUS = String.raw`(?:under[-\s]+(?:process(?:ing)?|review)|in[-\s]+(?:process|progress|queue)|being\s+(?:processed|reviewed|initiated)|pending|awaiting|awaited|on\s+hold|queued|queuing|queueing|scheduled|provisional|not\s+yet\s+final)\b`;
 export const AR_CREDIT_PENDING_STATUS = String.raw`(?<![ء-ي])(?:(?:في\s+انتظار|ب[اإا]نتظار)\s+(?:ال)?(?:موافق[هة]|اعتماد|تسوي[هة]|تحقق|تاكيد|تأكيد)|(?:قيد|تحت)\s+(?:ال)?(?:انتظار|معالج[هة]|تنفيذ|اجراء|إجراء|مراجع[هة]|دراس[هة]|تحقيق|تدقيق|تسوي[هة])|جار[يى]?[\u064B-\u0652]*\s+(?:ال)?(?:معالج[هة]|تنفيذ|تحقق|تدقيق|تسوي[هة])|مجدول[هة]?|لم\s+تتم\s+تسويت[هها]+\s+بعد)(?![ء-ي])`;
 const DECISION = String.raw`(?:approv(?:e[sd]?|al)|authori[sz](?:e[sd]?|ation)|verif(?:y|ies|ied|ication)|confirm(?:s|ed|ation)?|clear(?:s|ed|ance)?|accept(?:s|ed|ance)?|validat(?:e[sd]?|ion)|settlement|upheld|receipt\s+of\s+(?:the\s+)?funds)\b`;
-const WORDS = String.raw`(?:[\p{L}'’\-]+\s+){0,12}`;
+const WORDS = String.raw`(?:[\p{L}\p{N}'’\-]+\s+)*`;
 const EN_CONDITION = String.raw`\b(?:if|unless|until|whether|once|when|after|pending|provided(?:\s+that)?|providing(?:\s+that)?|upon|subject\s+to|conditional\s+on|contingent\s+on)\s+${WORDS}${DECISION}`;
 const AR_DECISION = String.raw`(?:ال)?(?:موافق[هة]|اعتماد|تحقق|تاكيد|تأكيد|قبول|تسوي[هة]|وافق|يوافق|توافق|اعتمد|يعتمد|تحقق|يتحقق|اكد|أكد|يوكد|يؤكد)(?![ء-ي])`;
 export const CREDIT_CONDITION_SOURCE = String.raw`${EN_CONDITION}|(?<![ء-ي])(?:رهن|مرهون[هة]?\s+ب?|بشرط|شريط[هة]|شرط|عند|بمجرد|بعد|في\s+حال[هة]?|اذا|إذا|ان|إن)\s*${WORDS}${AR_DECISION}`;
