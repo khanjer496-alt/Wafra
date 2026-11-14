@@ -636,13 +636,14 @@ function ktSources(dir) {
   ok('Android does not cloud-backup the encrypted database', config.android?.allowBackup === false);
 
   const accessedApis = config.ios?.privacyManifests?.NSPrivacyAccessedAPITypes ?? [];
-  // App-private settings, App Group widget snapshots, and the parser deadline
-  // use these first-party APIs; SDK manifests do not replace our declaration.
+  // App-private settings/files, App Group widget snapshots, and the parser
+  // deadline use first-party APIs; SDK manifests do not replace our declaration.
   const expectedApiReasons = {
     NSPrivacyAccessedAPICategoryUserDefaults: ['1C8F.1', 'CA92.1'],
     NSPrivacyAccessedAPICategorySystemBootTime: ['35F9.1'],
+    NSPrivacyAccessedAPICategoryFileTimestamp: ['C617.1'],
   };
-  ok('first-party required-reason APIs declare app settings, App Group and timer use',
+  ok('first-party required-reason APIs declare app settings, files, App Group and timer use',
     accessedApis.length === Object.keys(expectedApiReasons).length &&
       JSON.stringify(Object.fromEntries(accessedApis.map((entry) =>
         [entry.NSPrivacyAccessedAPIType, [...entry.NSPrivacyAccessedAPITypeReasons].sort()])
