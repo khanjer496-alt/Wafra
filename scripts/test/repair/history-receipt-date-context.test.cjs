@@ -6,6 +6,7 @@ const load = require('./load-typescript.cjs');
 const build = path.resolve(__dirname, '../build');
 const markets = require(path.join(build, 'markets.js'));
 const historical = load(path.resolve(__dirname, '../../../src/lib/historical-import.ts'), {
+  '@/lib/sms-parser': require(path.join(build, 'sms-parser.js')),
   '@/lib/format': require(path.join(build, 'format.js')),
   '@/lib/auto-import': require(path.join(build, 'auto-import.js')),
   '@/lib/alert-review-tray': require(path.join(build, 'alert-review-tray.js')),

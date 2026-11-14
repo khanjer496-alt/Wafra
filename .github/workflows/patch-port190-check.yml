@@ -1,0 +1,39 @@
+name: Parser delayed-review evidence
+on:
+  push:
+    branches: [patch/port190-pr7-delayed-probes-r5]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Check unchanged generated resources
+        run: node scripts/generate-ios-background-parser.cjs --check > generation-check.txt 2>&1
+      - name: Compile shipping modules for existing consumer tests
+        run: bash scripts/test/build.sh > compile.txt 2>&1
+      - name: Three-path original and delayed reviewer probes
+        if: ${{ !cancelled() }}
+        run: node --test --test-concurrency=1 scripts/test/repair/credit-settlement-closure.test.cjs > closure.txt 2>&1
+      - name: Reproduce repaired history and notification consumers
+        if: ${{ !cancelled() }}
+        run: node --test --test-concurrency=1 scripts/test/repair/history-receipt-date-context.test.cjs scripts/test/repair/history-scheduling.test.cjs scripts/test/repair/notification-beta.test.cjs > consumers.txt 2>&1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: delayed-review-evidence-${{ github.sha }}
+          path: |
+            generation-check.txt
+            compile.txt
+            closure.txt
+            consumers.txt
+          retention-days: 7
