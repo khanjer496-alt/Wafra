@@ -22,6 +22,13 @@ restart_storekitd() { # make storekitd re-read the per-app test configuration (a
   { xcrun simctl spawn "$UDID" launchctl kickstart -k system/com.apple.storekitd 2>&1 || xcrun simctl spawn "$UDID" launchctl stop com.apple.storekitd 2>&1; } | sed 's/^/[host] storekitd restart: /'
   sleep 6
 }
+wipe_app_data() { # "reinstall with the purchase still on the store": the simulator drops an app's StoreKit test state when the app is
+  # uninstalled (the real App Store keeps the subscription), so empty the app's own data and keep the install and its store state.
+  local c; xcrun simctl terminate "$UDID" "$APP" >/dev/null 2>&1
+  c=$(xcrun simctl get_app_container "$UDID" "$APP" data 2>/dev/null)
+  if [ -n "$c" ] && [ -d "$c" ]; then find "$c" -mindepth 1 -maxdepth 1 -exec rm -rf {} + ; echo "[host] emptied the app data container (install and store state kept): $(ls -A "$c" | wc -l) entries left"
+  else echo "[host] no data container found; falling back to a full reinstall"; fresh_install; fi
+}
 fresh_install() {
   xcrun simctl terminate "$UDID" "$APP" >/dev/null 2>&1
   xcrun simctl uninstall "$UDID" "$APP" >/dev/null 2>&1
@@ -68,7 +75,7 @@ while kill -0 $TPID 2>/dev/null && [ $SECONDS -lt $END ]; do
   fi
   for n in 1 2 3; do
     if [ -f "$WORK/hs/reinstall-$n.request" ] && [ ! -f "$WORK/hs/reinstall-$n.done" ]; then
-      echo "[host] reinstall #$n"; fresh_install; for _i in $(seq 1 30); do xcrun simctl get_app_container "$UDID" "$APP" >/dev/null 2>&1 && break; sleep 1; done; sleep 8; sync_storekit_config || true; sleep 10; sync_storekit_config || true; restart_storekitd; touch "$WORK/hs/reinstall-$n.done"
+      echo "[host] reinstall #$n"; if [ "$n" = 1 ]; then wipe_app_data; else fresh_install; fi; for _i in $(seq 1 30); do xcrun simctl get_app_container "$UDID" "$APP" >/dev/null 2>&1 && break; sleep 1; done; sleep 8; if [ "$n" != 1 ]; then sync_storekit_config || true; sleep 10; sync_storekit_config || true; restart_storekitd; fi; touch "$WORK/hs/reinstall-$n.done"
     fi
   done
   sleep 1
