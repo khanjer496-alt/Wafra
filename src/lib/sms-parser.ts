@@ -1,4 +1,4 @@
-import { EN_CREDIT_PENDING_STATUS, AR_CREDIT_PENDING_STATUS, hasCreditCondition, hasLeadingCreditCondition, hasPendingCreditStatus } from '@/lib/credit-settlement-guards';
+import { EN_CREDIT_PENDING_STATUS, AR_CREDIT_PENDING_STATUS, hasCreditCondition, hasLeadingCreditCondition, hasPendingCreditStatus, normalizeCreditText, isRefundRequest, hasSettledCreditReceipt, hasPastCreditEvent, creditSourceDisposition } from '@/lib/credit-settlement-guards';
 import { categorySupportsType, readMerchantCategoryOverride } from '@/lib/categories';
 import {
   bankFromMessage,
@@ -2458,7 +2458,7 @@ const REFUND_SIDE_NOTE_COMPLETED_RE =
 // Android RC 396 F2: "AED 40.00 was debited … . Your reversal request is under process." — an amount-free reversal note that
 // is conditional, negated, future or still in process, beside a separate debit, is a side note too: the bare "reversal"
 // must not turn the debit into income. The refund-note rules above are unchanged.
-const REVERSAL_SIDE_NOTE_WORD_RE = /\b(?:reversal|chargeback)\b/i;
+const REVERSAL_SIDE_NOTE_WORD_RE = /\b(?:reversal|charge[ -]*backs?)\b/i;
 // In-process statuses of a refund or reversal (RC 396 F2; Change Reviewer ad205bc6, Reviewer 85a61c6d). EN: after "is/are",
 // after ":", "-" or "Status:", or bare "under/in process|progress"; a request verb ("has been raised/requested/lodged …",
 // a bare "initiated" not "initiated by"). AR (post-fold): قيد/تحت … and جاري المعالجة/التنفيذ.
@@ -2859,7 +2859,7 @@ function arCreditSettlement(sentence: string, clause: CreditClause, rawAfter: st
   leaders.sort((a, b) => a.index! - b.index!);
   const last = leaders[leaders.length - 1];
   const betweenLeaderAndCredit = last ? lead.slice(last.index! + last[0].length) : '';
-  if (hasLeadingCreditCondition(lead) || (last &&
+  if (hasLeadingCreditCondition(lead) || (last && !hasPastCreditEvent(lead) &&
     (!AR_TEMPORAL_LEADER_RE.test(last[0]) || !AR_EVENT_BEFORE_CREDIT_RE.test(betweenLeaderAndCredit) ||
       AR_FUTURE_MAIN_CLAUSE_RE.test(sentence.slice(clause.end)) || clause.ar !== 'settled'))) {
     return { verdict: 'not-settled', reason: 'conditional' };
@@ -2904,14 +2904,14 @@ export function creditSettlement(sentence: string, clause: CreditClause, after =
   if (isAllCapsSentence(sentence)) leaders.push(...lead.matchAll(EN_CAPS_LEADER_RE));
   leaders.sort((a, b) => a.index! - b.index!);
   const last = leaders[leaders.length - 1];
-  if (hasLeadingCreditCondition(lead) || (last && leaderGovernsCredit(sentence, last, clause))) {
+  if (hasLeadingCreditCondition(lead) || (last && !hasPastCreditEvent(lead) && leaderGovernsCredit(sentence, last, clause))) {
     return { verdict: 'not-settled', reason: 'conditional' };
   }
   if (EN_CREDIT_WORDS.negatedBefore.test(lead)) return { verdict: 'not-settled', reason: 'negated' };
   if (clause.nounOnly) {
     if (isUncompletedRefundRequest(sentence)) return { verdict: 'not-settled', reason: 'pending' };
     const tail = sentence.slice(clause.end);
-    return !hasCreditCondition(tail) && !hasPendingCreditStatus(tail) && /\b(?:was|were|is|has\s+been)\s+(?:successfully\s+)?(?:completed|successful|settled)\b/i.test(tail)
+    return hasSettledCreditReceipt(sentence)
       ? { verdict: 'settled' } : { verdict: 'not-settled', reason: 'pending' };
   }
   const first = clause.verbs[0];
@@ -2921,7 +2921,7 @@ export function creditSettlement(sentence: string, clause: CreditClause, after =
   const destination = EN_CREDIT_WORDS.destination.exec(tail);
   if (destination && REFUND_THIRD_PARTY_DESTINATION_RE.test(` ${destination[0]}`)) return { verdict: 'refused', reason: 'third-party' };
   if (refundCreditNotFinal((tail + after).replace(EN_CREDIT_REASON_RE, ' '))) return { verdict: 'refused', reason: 'taken-back' };
-  const ownTail = creditOwnTail(tail);
+  const ownTail = creditOwnTail(tail + after);
   if (hasPendingCreditStatus(ownTail)) return { verdict: 'not-settled', reason: 'pending' };
   if (EN_TRAILING_CONDITION_RE.test(ownTail) || hasCreditCondition(ownTail)) return { verdict: 'not-settled', reason: 'conditional' };
   const windowMatch = EN_TIME_WINDOW_RE.exec(ownTail);
@@ -2998,6 +2998,7 @@ function settlementSentences(original: string): SettlementSentence[] {
  * with no such clause, or with a settled one, returns false.
  */
 export function hasOnlyUnsettledCredit(message: string): boolean {
+  if (creditSourceDisposition(message) === 'review') return true;
   const sentences = settlementSentences(message);
   if (sentences.some((s) => s.clauses.length === 0 && CREDIT_SETTLEMENT_DEBIT_RE.test(s.text) && creditAmounts(s.text).length > 0)) return false;
   const verdicts = sentences.filter((s) => s.clauses.length > 0 && creditAmounts(s.text).length > 0)
@@ -6720,20 +6721,20 @@ const NOTICE_REFUND_TELEGRAPHIC_CREDIT_RE =
   /(?<!\b(?:be|being|once|when|if|after|until|unless)\s+)\b(?:credited|refunded|reversed|returned|processed|deposited)\s+(?:back\s+)?(?:to|into)\s+your\b/i;
 /** Remove only amount-free request sentences beside a separately stated movement. */
 export function withoutUncompletedRequestNotes(message: string): string {
-  if (!/request|طلب/i.test(message) || hasActionableRefundRequest(message)) return message;
-  const folded = foldOrthography(stripInvisible(message));
-  const spans = [...folded.matchAll(/[.!?](?=\s|$)|[;؛]|\n/g)].map(m => m.index! + m[0].length);
-  spans.push(folded.length);
+  if (!/request|طلب|claim|application/i.test(message) || hasActionableRefundRequest(message)) return message;
+  const ends = [...message.matchAll(/[.!?](?=\s|$)|[;؛]|\n/g)].map(m => m.index! + m[0].length);
+  ends.push(message.length);
   let start = 0;
-  const parts = spans.map(end => { const part = { start, end, text: folded.slice(start, end) }; start = end; return part; });
-  const independent = parts.some(p => creditAmounts(p.text).length > 0 && !isUncompletedRefundRequest(p.text) &&
-    (CREDIT_SETTLEMENT_DEBIT_RE.test(p.text) || NOTICE_REFUND_COMPLETED_RE.test(p.text)));
+  const parts = ends.map(end => { const part = { start, end, text: message.slice(start, end) }; start = end; return part; });
+  const control = (text: string) => foldOrthography(stripInvisible(text));
+  const independent = parts.some(p => creditAmounts(control(p.text)).length > 0 && !isUncompletedRefundRequest(p.text) &&
+    (CREDIT_SETTLEMENT_DEBIT_RE.test(control(p.text)) || NOTICE_REFUND_COMPLETED_RE.test(control(p.text))));
   if (!independent) return message;
-  let out = folded;
-  for (const p of parts) if (creditAmounts(p.text).length === 0 && isUncompletedRefundRequest(p.text)) {
+  let out = message;
+  for (const p of parts) if (isUncompletedRefundRequest(p.text) && !CREDIT_SETTLEMENT_DEBIT_RE.test(control(p.text))) {
     out = out.slice(0, p.start) + ' '.repeat(p.end - p.start) + out.slice(p.end);
   }
-  return out === folded ? message : out;
+  return out;
 }
 function hasActionableRefundRequest(message: string): boolean {
   return isUncompletedRefundRequest(message) && /https?:\/\/|www\./i.test(message) &&
@@ -6741,8 +6742,7 @@ function hasActionableRefundRequest(message: string): boolean {
 }
 /** A request records intent. Only a separate, completed money verb can establish a credit. */
 function isUncompletedRefundRequest(text: string): boolean {
-  return /\b(?:reversal|refund|chargeback)\s+request\b|(?<![ء-ي])طلب\s+(?:ال)?(?:عكس|استرداد|استرجاع|اعاده|اعتراض)(?![ء-ي])/.test(text.toLowerCase()) &&
-    !NOTICE_REFUND_COMPLETED_RE.test(text);
+  return isRefundRequest(text) && !NOTICE_REFUND_COMPLETED_RE.test(normalizeCreditText(text).replace(/\|/g, ' '));
 }
 /** The text says a refund or reversal is still in process and states no completed credit for it. */
 function refundInProcessUncompleted(text: string): boolean {
@@ -10148,6 +10148,7 @@ export function parseSms(
   }
   // The shared credit-settled veto (CEO 080fa431), on the direction the principal context settled. A blanked re-read has
   // no credit clause left, so it cannot recurse twice.
+  if (parsed.kind === 'transaction' && parsed.type === 'income' && creditSourceDisposition(message) === 'review') return null;
   const vetted = vetoUnsettledCredit(message, parsed, (text) => parseSms(text, overrides, options));
   if (vetted !== parsed) return vetted;
   // An Indian domestic-rail (NEFT/IMPS/RTGS/UPI) movement in a foreign

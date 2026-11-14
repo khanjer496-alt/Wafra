@@ -1,3 +1,4 @@
+import { creditSourceDisposition } from '@/lib/credit-settlement-guards';
 import { inspectUniversalAlert, type UniversalAlertReview } from '@/lib/alert-market-detection';
 import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars';
 import { activeCountryDateOrder, dateOrderForCountry, getActiveCountry } from '@/lib/country';
@@ -209,7 +210,8 @@ export const inspectGenericBankEventForReview = (
   market?: string | null,
   sourceContext?: UniversalParseContext,
 ): UniversalBankEvent | null => {
-  if (hasPersonalMessagePrefix(source, sender) || hasNegatedPrincipalMovement(source) ||
+  const creditReviewOnly = creditSourceDisposition(source) === 'review';
+  if (hasPersonalMessagePrefix(source, sender) || (hasNegatedPrincipalMovement(source) && !creditReviewOnly) ||
     isUnpostedCardBalanceClaim(source)) return null;
   // An exact LatAm bank template is bank-alert context in its own right.
   const noContext = !hasGenericBankAlertContext(source, sender) && !matchLatamTemplate(source, { sender });

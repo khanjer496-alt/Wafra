@@ -1,3 +1,4 @@
+import { creditSourceDisposition } from '@/lib/credit-settlement-guards';
 import { currencyMinorUnits } from '@/lib/currency-metadata';
 import { normalizeCountryCode, setActiveCountry } from '@/lib/country';
 import { detectLaunchMarketFromSender, setActiveMarket, setLedgerCurrency } from '@/lib/markets';
@@ -236,8 +237,9 @@ export function parseIosBackgroundAlert(input: NativeParserInput): NativeParserR
     setActiveCountry(context.country);
     setActiveMarket(context.parserMarket);
     setLedgerCurrency(context.ledgerMoney.currency, context.ledgerMoney.exponent);
-    if (NON_RECEIPT_PREFIX_RE.test(source) || nonPostingReason(source) || isNotAutoPostableMoney(source) ||
-      hasNonCompletedWording(source, context.country, sender)) return ignore();
+    const creditReviewOnly = creditSourceDisposition(source) === 'review';
+    if (NON_RECEIPT_PREFIX_RE.test(source) || nonPostingReason(source) || (!creditReviewOnly &&
+      (isNotAutoPostableMoney(source) || hasNonCompletedWording(source, context.country, sender)))) return ignore();
     const session = createLaunchAlertSession({ overrides: {}, activeMarket: context.parserMarket,
       pinnedCurrency: context.ledgerMoney.currency, fxLookup: () => null,
       bestEffort: { enabled: false, country: context.country } });
@@ -272,7 +274,7 @@ export function parseIosBackgroundAlert(input: NativeParserInput): NativeParserR
           merchant: parsedMerchant(parsed, event, family), instrument: instrument(event, parsed) } };
     } else {
       const reviewMoney = event?.amount.evidence === 'explicit' ? sourceMoney(event.amount.value) : null;
-      if (!event || event.status !== 'posted' || !movementFamily(event.family) ||
+      if (!event || (event.status !== 'posted' && !(creditReviewOnly && event.status === 'informational')) || !movementFamily(event.family) ||
         (event.direction !== 'debit' && event.direction !== 'credit') || !reviewMoney) return ignore();
       result = { v: 1, parserVersion: PARSER_VERSION, route: 'review', provenance: 'unverified',
         notification: { style: 'review', family: event.family, direction: event.direction, amount: reviewMoney,

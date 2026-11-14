@@ -1,3 +1,4 @@
+import { creditSourceDisposition } from '@/lib/credit-settlement-guards';
 import { missingUniversalField, type UniversalBankEvent, type UniversalParseContext } from '@/lib/universal-types';
 import {
   accountMovementDirection, cjkNonPostingVerdict, hasDeclinedWording, inspectMarketAlert, nonPostingTailVerdict, runWithClauseMemo,
@@ -607,10 +608,16 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
     !money.observations.some((observation) => observation.role === 'fee')) {
     family = ownAccountMovementFamily(maskedSource, direction) ?? family;
   }
+  const creditReviewOnly = creditSourceDisposition(source) === 'review';
+  if (creditReviewOnly && hasAmount && status !== 'failed') {
+    status = 'informational';
+    if (family === 'unknown') family = /refund|reversal|charge[ -]*back|استرداد|استرجاع|عكس/iu.test(source) ? 'refund' : 'transfer';
+    if (direction === 'unknown' || direction === 'none') direction = 'credit';
+  }
   const authentication = challenge || readings.some((reading) => reading.family === 'authentication');
   const promotion = [...readings, ...wholeReadings].some((reading) => reading.draft.reasons.includes('promotion'));
   const reviewable = hasAmount || hasStatement || hasBalance;
-  const decision = reviewable && status !== 'failed' && !authentication && !pending && !promotion ? 'review' : 'ignore';
+  const decision = reviewable && status !== 'failed' && !authentication && (!pending || creditReviewOnly) && !promotion ? 'review' : 'ignore';
   // Banks with synthetic-only evidence (Plin, Interbank, BBVA Perú, Santander
   // México, Citibanamex) are identified for Review but never post. Only with
   // that market's context: "Interbank transfer of $500.00" is a US alert.
@@ -636,11 +643,14 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
     ...(status === 'failed' ? ['failed-not-posting'] : []),
     ...(promotion ? ['promotion-not-posting'] : []),
   ];
+  const observations = creditReviewOnly ? money.observations.map(observation =>
+    observation.field.spans.some(span => money.amount.spans.some(primary => primary.start === span.start && primary.end === span.end))
+      ? { ...observation, role: 'transaction' as const } : observation) : money.observations;
   return {
     version: 1, decision, family, status, direction,
     amount: family === 'statement' || family === 'balance' ? missingUniversalField() : money.amount,
     statementTotal: money.statementTotal, minimumDue: money.minimumDue,
     balance: money.balance, creditLimit: money.creditLimit,
-    ...fields, observations: money.observations, issues: [...new Set(issues)],
+    ...fields, observations, issues: [...new Set([...issues, ...(creditReviewOnly ? ['unsettled-credit-not-posting'] : [])])],
   };
 }
