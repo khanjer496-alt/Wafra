@@ -7,6 +7,8 @@ const { inspectSourceFreeRefusedAlert } = load('@/lib/auto-import');
 const { parseHistoricalMessageRecords } = load('@/lib/historical-import');
 const { planConfirmedUniversalImport } = load('@/lib/universal-import');
 const { isMoneyMovementReview } = load('@/lib/alert-review-tray');
+const { withoutRecordedReviews } = load('@/lib/review-source-bindings');
+const { admitPreparedReviewAlert, emptyAlertReviewTray } = load('@/lib/alert-review-tray');
 const at = Date.parse('2026-11-14T10:00:00Z');
 for (const [index, [body, sender, amount]] of [
   ['Your refund request for AED 50.00 is under process.', 'ENBD', '5000'],
@@ -29,4 +31,31 @@ for (const [index, [body, sender, amount]] of [
   const history = parseHistoricalMessageRecords([input], {}, new Date(at), new Set(), session);
   assert.equal(history.parsed.length, 0);assert.equal(history.reviewCandidates.length, 1);
   assert.equal(history.reviewCandidates[0].kind, 'universal');assert.equal(history.reviewCandidates[0].event.status, 'informational');
+});
+
+for (const [index, note, expectedAmount] of [
+  [0, 'Your charge-back request is scheduled.', null],
+  [1, 'Your reversal request for AED 40.00 is pending.', '4000'],
+  [2, 'Your refund request is queued.', null],
+]) test(`a completed debit and its separate informational reversal survive capture/history ${index}`, () => {
+  load('@/lib/country').setActiveCountry('AE'); load('@/lib/markets').setActiveMarket('AE'); load('@/lib/markets').setLedgerCurrency('AED', 2);
+  const body = `AED 250.00 was debited from your card ending 1234 at NOON.COM. ${note}`;
+  const session = createLaunchAlertSession({ overrides: {}, activeMarket: 'AE', pinnedCurrency: 'AED' });
+  const parsed = session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at);
+  assert.equal(parsed?.type, 'expense'); assert.equal(parsed.amountFils, 25000);
+  const decision = inspectSourceFreeRefusedAlert({ source: body, sender: 'ENBD', observedAt: at, channel: 'inbox', session });
+  assert.equal(decision.kind, 'review'); assert.equal(decision.candidate.event.direction, 'none');
+  assert.equal(decision.candidate.event.status, 'informational');
+  assert.equal(decision.candidate.event.amount.value?.minorUnits ?? null, expectedAmount);
+  assert.deepEqual(planConfirmedUniversalImport({ hydrated: true }, decision.candidate.event, { confirmed: true, postingStatus: 'posted' }), { outcome: 'refused', reason: 'not-posted' });
+  const input = JSON.stringify({ v: 1, id: String(index + 6).repeat(64), text: body, sender: 'ENBD', receivedAt: new Date(at).toISOString() });
+  const history = parseHistoricalMessageRecords([input], {}, new Date(at), new Set(), session);
+  assert.equal(history.parsed.length, 1); assert.equal(history.parsed[0].type, 'expense'); assert.equal(history.parsed[0].amountFils, 25000);
+  assert.equal(history.reviewCandidates.length, 1);
+  const item = history.reviewCandidates[0];
+  assert.equal(item.event.amount.value?.minorUnits ?? null, expectedAmount);
+  assert.equal(isMoneyMovementReview(item), false);
+  assert.equal(withoutRecordedReviews([item], [{ smsKey: item.sourceKey, ts: at }]).length, 1);
+  const staged = admitPreparedReviewAlert(emptyAlertReviewTray(), item, at);
+  assert.equal(staged.outcome, 'admitted'); assert.equal(staged.state.pending.length, 1);
 });

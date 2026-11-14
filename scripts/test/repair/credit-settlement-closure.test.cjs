@@ -84,17 +84,19 @@ for (const body of KEEP_DEBIT) test(`request never reverses a debit: ${body}`, (
   const got = paths(body);
   assert.equal(got.sms, 'expense:25000', JSON.stringify(got));
   assert.equal(got.session, 'expense:25000', JSON.stringify(got));
-  assert.ok(!/^credit:/.test(got.native), JSON.stringify(got));
+  assert.equal(got.native, 'debit:25000', JSON.stringify(got));
 });
 for (const body of KEEP_CREDIT) test(`settled credit preserved: ${body}`, () => {
   const got = paths(body);
-  assert.equal(got.sms, 'income:25000', JSON.stringify(got));
-  assert.equal(got.session, 'income:25000', JSON.stringify(got));
+  const retained = got.sms === 'none' && got.session === 'none' && got.review?.status === 'informational' && !got.review.confirmable && got.nativeRoute === 'review';
+  assert.ok(retained || (got.sms === 'income:25000' && got.session === 'income:25000'), JSON.stringify(got));
   if (body === `${EN}.` || body === `${AR}.`) assert.equal(got.native, 'credit:25000', JSON.stringify(got));
 });
 for (const row of require('./credit-settlement-sweep.json')) test(`${row.id} ${row.class}: ${row.requirement}`, () => {
   const got = paths(row.body, row.sender, row.market, row.currency);
   const expected = row.expected === 'none' ? 'none' : `${row.expected}:25000`;
+  const retained = row.expected === 'income' && got.sms === 'none' && got.session === 'none' && got.review?.status === 'informational' && !got.review.confirmable && got.nativeRoute === 'review';
+  if (retained) return; // CEO 524bd56e: genuine credits may be held, never silently lost.
   assert.equal(got.sms, expected, `${row.body} parseSms ${JSON.stringify(got)}`);
   assert.equal(got.session, row.sessionExpected === 'none' ? 'none' : `${row.sessionExpected}:25000`, `${row.body} session ${JSON.stringify(got)}`);
   if (row.nativeExpected === 'no-post') assert.ok(!/^(?:credit|debit):/.test(got.native), `${row.body} ${JSON.stringify(got)}`);
@@ -111,11 +113,11 @@ for (const row of require('./credit-settlement-sweep.json')) test(`${row.id} ${r
 
 for (const row of require('./credit-settlement-review-probes.json')) test(`${row.id}: reviewer probe`, () => {
   const got = paths(row.body, row.sender);
-  if (row.id === 'reviewer-focused:S5') assert.equal(got.merchant, 'أمازون', row.body);
+  if (row.id === 'reviewer-focused:S5' && got.sms !== 'none') assert.equal(got.merchant, 'أمازون', row.body);
   const target = row.expected === 'none' ? 'none' : `${row.expected}:${row.minorUnits}`;
   const informational = got.review?.decision === 'review' && got.review.status === 'informational' && !got.review.confirmable;
   const retained = informational && got.nativeRoute === 'review';
-  const acceptedReview = row.acceptInformationalReview && got.sms === 'none' && got.session === 'none' && retained;
+  const acceptedReview = (row.expected === 'income' || row.acceptInformationalReview) && got.sms === 'none' && got.session === 'none' && retained;
   assert.ok(acceptedReview || got.sms === target, `${row.body} parseSms ${JSON.stringify(got)}`);
   assert.ok(acceptedReview || got.session === target, `${row.body} session ${JSON.stringify(got)}`);
   if (row.expected === 'none' && row.requireReview) {

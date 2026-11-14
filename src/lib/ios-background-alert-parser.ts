@@ -1,4 +1,4 @@
-import { canReviewCreditRefusal } from '@/lib/credit-settlement-guards';
+import { canReviewCreditRefusal, hasUnsettledCreditToken, completedDebitBesideCredit } from '@/lib/credit-settlement-guards';
 import { currencyMinorUnits } from '@/lib/currency-metadata';
 import { normalizeCountryCode, setActiveCountry } from '@/lib/country';
 import { detectLaunchMarketFromSender, setActiveMarket, setLedgerCurrency } from '@/lib/markets';
@@ -234,13 +234,15 @@ export function parseIosBackgroundAlert(input: NativeParserInput): NativeParserR
     const sender = /^(?:wafra(?:\s+(?:automation|shortcut))?|shortcut|automation|unknown|none|null)$/i.test(input.sender.trim())
       ? '' : input.sender.trim();
     const source = input.body;
+    const holdCredit = hasUnsettledCreditToken(source);
+    const pair = completedDebitBesideCredit(source);
     setActiveCountry(context.country);
     setActiveMarket(context.parserMarket);
     setLedgerCurrency(context.ledgerMoney.currency, context.ledgerMoney.exponent);
-    const creditReviewOnly = hasOnlyUnsettledCredit(source);
+    const creditReviewOnly = hasOnlyUnsettledCredit(source) || holdCredit;
     const refusal = nonPostingReason(source);
-    const reviewableRefusal = creditReviewOnly && canReviewCreditRefusal(source, refusal);
-    if (NON_RECEIPT_PREFIX_RE.test(source) || (refusal && !reviewableRefusal) || (!creditReviewOnly &&
+    const reviewableRefusal = (creditReviewOnly || !!pair) && canReviewCreditRefusal(source, refusal);
+    if (NON_RECEIPT_PREFIX_RE.test(source) || (refusal && !reviewableRefusal) || (!(creditReviewOnly || pair) &&
       (isNotAutoPostableMoney(source) || hasNonCompletedWording(source, context.country, sender)))) return ignore();
     const session = createLaunchAlertSession({ overrides: {}, activeMarket: context.parserMarket,
       pinnedCurrency: context.ledgerMoney.currency, fxLookup: () => null,
@@ -258,11 +260,15 @@ export function parseIosBackgroundAlert(input: NativeParserInput): NativeParserR
     const inspection = session.inspect(source, sender);
     const parsed = unbankedSender ? null
       : session.parse(source, sender, inspection, senderMarket ?? undefined, input.observedAt);
-    const event = inspectGenericBankEventForReview(source, sender);
-    if (futureDate(event, input.observedAt, parsed ?? undefined)) return ignore();
+    // Native has one notification. Keep the actual debit; the app separately
+    // retains the reversal note in its existing capture/history Review lane.
+    const debitSource = pair && parsed?.kind === 'transaction' && parsed.type === 'expense' ? pair.debit : null;
+    const principalSource = debitSource ?? source;
+    const event = inspectGenericBankEventForReview(principalSource, sender);
+    if (futureDate(event, input.observedAt, parsed ?? undefined) && !(creditReviewOnly && !parsed)) return ignore();
     if (parsed && parsed.kind !== 'transaction') return ignore();
     if (event && ['statement', 'balance', 'authentication', 'bill', 'card-payment'].includes(event.family)) return ignore();
-    if (!event || !singleSourcePrincipal(source, event, parsed)) return ignore();
+    if (!event || !singleSourcePrincipal(principalSource, event, parsed)) return ignore();
     if (parsed && (['failed', 'future', 'informational'].includes(event.status) || event.direction === 'none' ||
       ((event.direction === 'debit' || event.direction === 'credit') &&
         event.direction !== (parsed.type === 'income' ? 'credit' : 'debit')))) return ignore();
@@ -276,11 +282,15 @@ export function parseIosBackgroundAlert(input: NativeParserInput): NativeParserR
           merchant: parsedMerchant(parsed, event, family), instrument: instrument(event, parsed) } };
     } else {
       const reviewMoney = event?.amount.evidence === 'explicit' ? sourceMoney(event.amount.value) : null;
-      if (!event || (event.status !== 'posted' && !(creditReviewOnly && event.status === 'informational')) || !movementFamily(event.family) ||
+      if (!event || (event.status !== 'posted' && !((creditReviewOnly || holdCredit) && event.status === 'informational')) || !movementFamily(event.family) ||
         (event.direction !== 'debit' && event.direction !== 'credit') || !reviewMoney) return ignore();
       result = { v: 1, parserVersion: PARSER_VERSION, route: 'review', provenance: 'unverified',
         notification: { style: 'review', family: event.family, direction: event.direction, amount: reviewMoney,
           merchant: merchant(event.merchant.evidence === 'explicit' ? event.merchant.value : null), instrument: instrument(event) } };
+    }
+    if (result.route === 'parsed' && result.notification?.direction === 'credit' && holdCredit) {
+      result = { ...result, route: 'review', provenance: 'unverified',
+        notification: { ...result.notification, style: 'review' } };
     }
     return boundedUtf8(JSON.stringify(result), 2048) ? result : ignore();
   } catch {

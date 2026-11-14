@@ -382,6 +382,8 @@ export const requiresReviewRetention = (item: ReviewEntry): boolean => {
   if (isMoneyMovementReview(item)) return true;
   if (!isUniversalReviewAlert(item)) return false;
   const event = sanitizeUniversalReviewEvent(item.event);
+  if (event?.status === 'informational' && (event.issues.includes('unsettled-credit-not-posting') ||
+    event.issues.includes('supplementary-reversal-info'))) return true;
   return event?.family === 'card-payment' && event.amount.evidence === 'explicit' &&
     event.amount.value !== null && positiveMinorUnits(event.amount.value.minorUnits) &&
     event.amount.alternatives.length === 0;

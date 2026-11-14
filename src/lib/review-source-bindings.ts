@@ -52,7 +52,8 @@ export function withoutRecordedReviews(
     const legacy = row.smsKey.match(/^s(\d+)-\d+$/);
     if (legacy) legacyTimes.add(Number(legacy[1]));
   }
-  return candidates.filter((item) => typeof item.sourceKey !== 'string' || (
+  return candidates.filter((item) => (item.kind === 'universal' && item.event.status === 'informational' &&
+    item.event.direction === 'none' && item.event.issues.includes('supplementary-reversal-info')) || typeof item.sourceKey !== 'string' || (
     !recorded.has(canonicalUniversalSourceKey(item.sourceKey, item.observedAt)) &&
     !legacyTimes.has(item.observedAt)));
 }

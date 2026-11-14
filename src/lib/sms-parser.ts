@@ -1,4 +1,4 @@
-import { EN_CREDIT_PENDING_STATUS, AR_CREDIT_PENDING_STATUS, hasCreditCondition, hasLeadingCreditCondition, hasPendingCreditStatus, normalizeCreditText, isRefundRequest, hasSettledCreditReceipt, hasPastCreditEvent, creditSourceDisposition, isHistoricalCreditClaim, creditQualificationScope } from '@/lib/credit-settlement-guards';
+import { EN_CREDIT_PENDING_STATUS, AR_CREDIT_PENDING_STATUS, hasCreditCondition, hasLeadingCreditCondition, hasPendingCreditStatus, normalizeCreditText, isRefundRequest, hasSettledCreditReceipt, hasPastCreditEvent, creditSourceDisposition, isHistoricalCreditClaim, creditQualificationScope, hasUnsettledCreditToken, completedDebitBesideCredit } from '@/lib/credit-settlement-guards';
 import { categorySupportsType, readMerchantCategoryOverride } from '@/lib/categories';
 import {
   bankFromMessage,
@@ -10088,6 +10088,24 @@ export function hasUnsettledPrincipal(message: string, parsed: ParsedSms): boole
 }
 
 export function parseSms(
+  message: string,
+  overrides?: Record<string, CategoryId>,
+  options?: ParseOptions,
+): ParsedSms | null {
+  // Evaluate the original BEFORE any core parser can mask merchants or notes.
+  const holdCredit = hasUnsettledCreditToken(message);
+  const pair = completedDebitBesideCredit(message);
+  const reason = nonPostingReason(message);
+  if (pair && (reason === null || reason === 'pending-processing') && !hasActionableRefundRequest(message) &&
+    !hasExplicitPersonalMoneyClaim(message) && !isBnplProviderSource(options?.sender)) {
+    const debit = parseSmsCore(pair.debit, overrides, options);
+    if (debit?.kind === 'transaction' && debit.type === 'expense') return { ...debit, raw: message };
+  }
+  const parsed = parseSmsCore(message, overrides, options);
+  return parsed?.kind === 'transaction' && parsed.type === 'income' && holdCredit ? null : parsed;
+}
+
+function parseSmsCore(
   message: string,
   overrides?: Record<string, CategoryId>,
   options?: ParseOptions,

@@ -1,4 +1,5 @@
 import { toISODate } from '@/lib/format';
+import { completedDebitBesideCredit } from '@/lib/credit-settlement-guards';
 import {
   identifySourceFreeReviewAlert,
   inspectSourceFreeRefusedAlert,
@@ -342,7 +343,8 @@ export function parseHistoricalMessageRecords(
       else ignoredCount += 1;
       continue;
     }
-    if (shouldReviewParsedIncome(result)) {
+    const supplementary = result.kind === 'transaction' && result.type === 'expense' && !!completedDebitBesideCredit(record.text);
+    if (shouldReviewParsedIncome(result) || supplementary) {
       const refusal = inspectHistoricalRefusal({
         record,
         timestamp,
@@ -353,7 +355,7 @@ export function parseHistoricalMessageRecords(
       if (refusal.kind === 'declined') declined.push(refusal.row);
       if (refusal.kind === 'review') {
         reviewCandidates.push(refusal.item);
-        continue;
+        if (!supplementary) continue;
       }
     }
 
