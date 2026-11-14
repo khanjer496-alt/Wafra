@@ -535,7 +535,9 @@ function sources(dir = SRC) {
       "title: t('proRestoreSuccessTitle')",
     ].filter((s) => pro.includes(s));
     ok(`every native Superwall fallback outcome reaches the screen (${outcomes.length} of 4)`, outcomes.length === 4);
-    ok('the paywall renders the answer it just produced', /\{notice && \(/.test(pro));
+    // A cancel is drawn as the neutral line under the buy button, every other answer in the titled alert box.
+    ok('the paywall renders the answer it just produced',
+      /\{notice && notice\.tone !== 'neutral' && \(/.test(pro) && /notice\?\.tone === 'neutral'/.test(pro));
   }
 
   {

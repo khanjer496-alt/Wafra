@@ -39,7 +39,9 @@ export function useProCheckout() {
   const [offers, setOffers] = useState<ProPlanOffer[]>([]);
   const [offerState, setOfferState] = useState<OfferState>('loading');
   const [selectedPlan, setSelectedPlan] = useState<ProPlan>('yearly');
-  const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
+  // `tone: 'neutral'` is the calm one-line answer to a cancelled purchase (no title, no alert styling); the
+  // surfaces draw it under the buy button, and every other notice keeps its titled alert box.
+  const [notice, setNotice] = useState<{ title: string; body: string; tone?: 'neutral' } | null>(null);
   const offerRequest = useRef(0);
   // `billingAction` is React state, so it is not visible to a second tap that
   // lands in the same frame. A money action needs a guard that closes on the
@@ -147,7 +149,10 @@ export function useProCheckout() {
       actionLatch.current = false;
       setBillingAction(null);
     }
-    if (outcome === 'cancelled') return;
+    if (outcome === 'cancelled') {
+      setNotice({ title: '', body: t('purchaseNotCompleted'), tone: 'neutral' });
+      return;
+    }
     if (outcome === 'purchased') {
       setNotice({ title: t('proPurchaseSuccessTitle'), body: t('proPurchaseSuccessBody') });
       return;

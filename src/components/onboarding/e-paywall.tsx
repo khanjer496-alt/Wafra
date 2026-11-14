@@ -50,7 +50,7 @@ export function paywallBackdropOpacity(scheme: 'light' | 'dark'): number {
 /** The backdrop's top, under the safe area: just below the header's 52pt row. */
 export const PAYWALL_BACKDROP_TOP = 56;
 
-type Notice = { title: string; body: string } | null;
+type Notice = { title: string; body: string; tone?: 'neutral' } | null;
 
 /**
  * The Pro screen's purchase rules, for onboarding: refuse before the store is
@@ -112,7 +112,7 @@ function useOnboardingCheckout(enabled: boolean, onPurchased: () => void) {
       latch.current = false;
       setBusy(null);
     }
-    if (outcome === 'cancelled') return;
+    if (outcome === 'cancelled') { setNotice({ title: '', body: t('purchaseNotCompleted'), tone: 'neutral' }); return; }
     if (outcome === 'purchased') { onPurchased(); return; }
     if (outcome === 'pending') { setNotice({ title: t('purchasePendingTitle'), body: t('purchasePendingBody') }); return; }
     if (outcome === 'unavailable') { setNotice({ title: t('purchaseUnavailable'), body: t('playOnlyBody') }); return; }
@@ -402,6 +402,9 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, tr
           label={checkout.busy === 'purchase' ? t('purchaseInProgress') : words.continuePro}
           onPress={() => void checkout.purchase()} disabled={busy || preview || !checkout.selected} busy={checkout.busy === 'purchase'}
           testID="onboarding-paywall-pro" /> : null}
+        {proShown && checkout.notice?.tone === 'neutral' ? <ThemedText type="meta" testID="onboarding-paywall-purchase-note"
+          accessibilityLiveRegion="polite" style={[styles.purchaseNote, { color: band.onBandSecondary }]}>
+          {checkout.notice.body}</ThemedText> : null}
         {proShown ? <ETextAction palette={band} label={freeLabel} onPress={onFinish} disabled={busy} testID="onboarding-paywall-free" />
           : <EButton palette={band} color={{ fill: band.accent, text: band.onAccent }} label={freeLabel}
             onPress={onFinish} disabled={busy} testID="onboarding-paywall-free" />}
@@ -441,7 +444,7 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, tr
           {checkout.checkoutReady ? <ETextAction palette={band} label={t('retryPrices')}
             onPress={() => void checkout.load()} disabled={busy || preview} testID="onboarding-plans-retry" /> : null}
         </View>}
-      {checkout.notice ? <View accessibilityRole="alert" accessibilityLiveRegion="polite"
+      {checkout.notice && checkout.notice.tone !== 'neutral' ? <View accessibilityRole="alert" accessibilityLiveRegion="polite"
         style={[styles.notice, { backgroundColor: band.sheet }]} testID="onboarding-paywall-notice">
         <ThemedText type="smallBold" style={{ color: band.text }}>{checkout.notice.title}</ThemedText>
         <ThemedText type="meta" style={{ color: band.textSecondary }}>{checkout.notice.body}</ThemedText>
@@ -480,6 +483,7 @@ const styles = StyleSheet.create({
   plan: { width: '100%', minHeight: 112, borderRadius: 20, padding: 14, gap: 4, borderWidth: 1.5 },
   radio: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
   radioDot: { width: 10, height: 10, borderRadius: 5 },
+  purchaseNote: { textAlign: 'center' },
   notice: { borderRadius: 16, padding: 14, gap: 4 },
   legal: { flexDirection: 'row', flexWrap: 'wrap', gap: 16 },
   legalLink: { minHeight: 44, maxWidth: '100%', flexShrink: 1, justifyContent: 'center' },

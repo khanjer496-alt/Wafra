@@ -165,7 +165,7 @@ export default function ProScreen() {
         </View>
       </View>
 
-      {notice && (
+      {notice && notice.tone !== 'neutral' && (
         <View
           accessibilityRole="alert"
           accessibilityLiveRegion="polite"
@@ -207,6 +207,10 @@ export default function ProScreen() {
               disabled={billingAction !== null || ctaMode === 'loading'}
               onPress={ctaMode === 'retry' ? () => void retryOffers() : () => void buySelectedPlan()}
             />
+            {notice?.tone === 'neutral' && (
+              <ThemedText type="meta" testID="pro-purchase-note" accessibilityLiveRegion="polite"
+                style={[styles.purchaseNote, { color: band.textSecondary }]}>{notice.body}</ThemedText>
+            )}
             <EButton
               palette={band}
               variant="quiet"
@@ -242,6 +246,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   inlineAction: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
+  purchaseNote: { textAlign: 'center' },
   notice: {
     gap: Spacing.one,
     borderWidth: StyleSheet.hairlineWidth,
