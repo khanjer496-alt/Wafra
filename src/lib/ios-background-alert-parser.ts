@@ -1,4 +1,4 @@
-import { hasCreditCondition, normalizeCreditText } from '@/lib/credit-settlement-guards';
+import { canReviewCreditRefusal } from '@/lib/credit-settlement-guards';
 import { currencyMinorUnits } from '@/lib/currency-metadata';
 import { normalizeCountryCode, setActiveCountry } from '@/lib/country';
 import { detectLaunchMarketFromSender, setActiveMarket, setLedgerCurrency } from '@/lib/markets';
@@ -239,9 +239,7 @@ export function parseIosBackgroundAlert(input: NativeParserInput): NativeParserR
     setLedgerCurrency(context.ledgerMoney.currency, context.ledgerMoney.exponent);
     const creditReviewOnly = hasOnlyUnsettledCredit(source);
     const refusal = nonPostingReason(source);
-    const reviewableRefusal = creditReviewOnly && (refusal === 'pending-processing' ||
-      (refusal === 'declined' && ((hasCreditCondition(source) && /\b(?:if|unless|whether)\b[^.!?]{0,80}\b(?:rejected|declined)\b/iu.test(source)) ||
-        /لم\s+(?:يتم|تتم)\s+(?:تسويت|تسويه|معالجه|تنفيذ)[^|]{0,20}\s+بعد/u.test(normalizeCreditText(source)))));
+    const reviewableRefusal = creditReviewOnly && canReviewCreditRefusal(source, refusal);
     if (NON_RECEIPT_PREFIX_RE.test(source) || (refusal && !reviewableRefusal) || (!creditReviewOnly &&
       (isNotAutoPostableMoney(source) || hasNonCompletedWording(source, context.country, sender)))) return ignore();
     const session = createLaunchAlertSession({ overrides: {}, activeMarket: context.parserMarket,

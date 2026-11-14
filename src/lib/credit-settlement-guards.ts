@@ -117,3 +117,11 @@ export function informationalCreditReview(source: string, event: UniversalBankEv
         ? { ...observation, role: 'transaction' as const } : observation),
     issues: [...new Set([...event.issues, 'unsettled-credit-not-posting'])] };
 }
+
+/** Unsettled bank money can be retained, while authentication, links and actual failures keep their refusal. */
+export function canReviewCreditRefusal(source: string, reason: string | null): boolean {
+  if (reason === null || reason === 'pending-processing') return true;
+  if (reason !== 'declined') return false;
+  return (hasCreditCondition(source) && /\b(?:if|unless|whether)\b[^.!?]{0,80}\b(?:rejected|declined)\b/iu.test(source)) ||
+    /لم\s+(?:يتم|تتم)\s+(?:تسويت|تسويه|معالجه|تنفيذ)[^|]{0,20}\s+بعد/u.test(normalizeCreditText(source));
+}
