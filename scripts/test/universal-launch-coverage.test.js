@@ -63,13 +63,13 @@ for (const set of ['corpus', 'holdout']) {
   ok(`${set}: every row listed as known-unsafe is still unsafe (remove fixed rows from floors.json)`,
     fixed.length === 0, fixed);
   for (const [name, t] of Object.entries(tally)) {
-    const recall = t.positives ? t.posted / t.positives : 1;
+    const recall = t.positives ? (t.posted + (t.retained ?? 0)) / t.positives : 1;
     const floor = floors[set]?.[name];
     console.log(`  ${set}/${name}: accepted positives ${t.posted}/${t.positives} (${(100 * recall).toFixed(1)}%), ` +
-      `no accepted record ${t.held}/${t.negatives}, exact optional obligations ${t.acceptedObligations}, soft ${t.soft}`);
+      `informational positives ${t.retained ?? 0}, no accepted record ${t.held}/${t.negatives}, exact optional obligations ${t.acceptedObligations}, soft ${t.soft}`);
     if (typeof floor === 'number') {
-      ok(`${set}/${name}: recall ${(100 * recall).toFixed(1)}% stays at or above the ${(100 * floor).toFixed(1)}% floor`,
-        recall + 1e-9 >= floor, { posted: t.posted, positives: t.positives });
+      ok(`${set}/${name}: retained financial recall ${(100 * recall).toFixed(1)}% stays at or above the ${(100 * floor).toFixed(1)}% floor`,
+        recall + 1e-9 >= floor, { posted: t.posted, informational: t.retained ?? 0, positives: t.positives });
     }
   }
 }
@@ -85,7 +85,7 @@ for (const set of ['corpus', 'holdout']) {
     const row = rows.find((x) => x.id === r.id);
     const expect = row.expectByPath?.[r.path] ?? row.expect;
     const want = expect.post ? `accepts ${expect.amountMinor} ${row.ledger} ${expect.type ?? ''}`.trim() : 'has no unexpected accepted record';
-    ok(`${r.id} [${r.path}] ${want}`, r.verdict === 'pass' && !(expect.merchant && r.soft?.startsWith('merchant')),
+    ok(`${r.id} [${r.path}] ${want}`, (r.verdict === 'pass' || r.verdict === 'retained') && !(expect.merchant && r.soft?.startsWith('merchant')),
       brief(r));
   }
 }

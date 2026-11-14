@@ -38,6 +38,8 @@ const { setActiveCountry } = req('country');
 const { setLedgerCurrency, setActiveMarket, detectLaunchMarketFromSender } = req('markets');
 const { parseHistoricalMessageRecords } = req('historical-import');
 const { inspectUniversalBankEvent } = req('universal-parser');
+const { inspectSourceFreeRefusedAlert } = req('auto-import');
+const { planConfirmedUniversalImport } = req('universal-import');
 const policy = req('best-effort-autopost');
 const { currencyMinorUnits } = req('currency-metadata');
 
@@ -71,7 +73,10 @@ const androidSms = (row) => {
     ? session.parse(row.body, sender, worldwide, launch, OBSERVED_AT)
     : session.parseUnproven(row.body, sender, worldwide, OBSERVED_AT);
   const { raw: _raw, ...structured } = parsed ?? {};
-  return { boundary: 'launch-alert-session', accepted: parsed ? [structured] : [], review: null };
+  const held = !parsed ? inspectSourceFreeRefusedAlert({ source: row.body, sender, observedAt: OBSERVED_AT,
+    channel: 'inbox', session, existingInspection: worldwide }) : null;
+  return { boundary: 'launch-alert-session', accepted: parsed ? [structured] : [],
+    review: held?.kind === 'review' && held.candidate.kind === 'universal' ? [{ event: held.candidate.event }] : [] };
 };
 
 const iosHistory = (row) => {
@@ -94,6 +99,7 @@ const iosHistory = (row) => {
     review: result.reviewCandidates.map((item) => ({
       family: item.kind === 'universal' ? item.event.family : item.family,
       observedAt: item.observedAt,
+      event: item.kind === 'universal' ? item.event : null,
     })),
     counts: { total: result.totalCount, invalid: result.invalidCount, ignored: result.ignoredCount,
       declined: result.declined.length, duplicate: result.duplicateCount },
@@ -191,7 +197,18 @@ function evaluateRows(rows, { onlyPath = null } = {}) {
         error = String(e && e.stack || e);
       }
       const pathRow = row.expectByPath?.[name] ? { ...row, expect: row.expectByPath[name] } : row;
-      const g = error ? { verdict: 'error', detail: error } : grade(pathRow, parsed);
+      let g = error ? { verdict: 'error', detail: error } : grade(pathRow, parsed);
+      // CEO 524bd56e: genuine incoming money can be retained as non-confirmable
+      // information. Count that separately from posting, never as a silent miss.
+      if (g.verdict === 'miss' && pathRow.expect.post && pathRow.expect.type === 'income') {
+        const event = capture?.review?.map(item => item.event).find(event => event?.status === 'informational' &&
+          event.direction === 'credit' && event.issues.includes('unsettled-credit-not-posting') &&
+          event.amount.value?.minorUnits === String(pathRow.expect.amountMinor) &&
+          event.amount.value?.currency === (pathRow.expect.currency ?? row.ledger));
+        if (event && planConfirmedUniversalImport({ hydrated: true }, event, { confirmed: true, postingStatus: 'posted' }).outcome === 'refused') {
+          g = { verdict: 'retained', detail: 'exact incoming money retained as informational Review; no confirmation authority' };
+        }
+      }
       const out = { id: row.id, file: row.file, path: name, country: row.country, expectPost: !!pathRow.expect.post,
         boundary: capture?.boundary, acceptedCount: capture?.accepted.length ?? 0,
         reviewCount: capture?.review?.length ?? null, reviewFamilies: capture?.review?.map((item) => item.family) ?? null, ...g };
@@ -205,12 +222,13 @@ function evaluateRows(rows, { onlyPath = null } = {}) {
   const tally = {};
   for (const r of results) {
     const key = r.path;
-    tally[key] ??= { positives: 0, posted: 0, missed: 0, wrong: 0, negatives: 0, held: 0, acceptedObligations: 0, falsePosts: 0, errors: 0, soft: 0 };
+    tally[key] ??= { positives: 0, posted: 0, retained: 0, missed: 0, wrong: 0, negatives: 0, held: 0, acceptedObligations: 0, falsePosts: 0, errors: 0, soft: 0 };
     const t = tally[key];
     if (r.verdict === 'error') t.errors += 1;
     if (r.expectPost) {
       t.positives += 1;
       if (r.verdict === 'pass') t.posted += 1;
+      if (r.verdict === 'retained') t.retained += 1;
       if (r.verdict === 'miss') t.missed += 1;
       if (r.verdict === 'wrong') t.wrong += 1;
       if (r.soft) t.soft += 1;

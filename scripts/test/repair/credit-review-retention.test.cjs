@@ -26,6 +26,8 @@ for (const [index, [body, sender, amount]] of [
   assert.equal(event.status, 'informational');assert.equal(event.amount.value.minorUnits, amount);
   assert.equal(isMoneyMovementReview({ kind: 'universal', event }), false);
   assert.deepEqual(planConfirmedUniversalImport({ hydrated: true }, event, { confirmed: true, postingStatus: 'posted' }), { outcome: 'refused', reason: 'not-posted' });
+  assert.deepEqual(planConfirmedUniversalImport({ hydrated: true }, { ...event, status: 'posted' }, { confirmed: true, postingStatus: 'posted' }), { outcome: 'refused', reason: 'not-posted' });
+  assert.equal(load('@/lib/generic-review-entry').mergeAiReviewEvent(event, { ...event, status: 'unknown', issues: ['learned-format'] }).status, 'informational');
   assert.equal(JSON.stringify(decision).includes(body), false, 'retained facts contain no raw SMS body');
   const input = JSON.stringify({ v: 1, id: String(index + 1).repeat(64), text: body, sender, receivedAt: new Date(at).toISOString() });
   const history = parseHistoricalMessageRecords([input], {}, new Date(at), new Set(), session);

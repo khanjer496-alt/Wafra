@@ -110,7 +110,8 @@ export const mergeAiReviewEvent = (
   family: prior.family === 'unknown' ? proposed.family : prior.family,
   direction: prior.direction === 'unknown' && proposed.issues.includes('learned-format')
     ? proposed.direction : prior.direction,
-  status: proposed.issues.includes('learned-format') && proposed.status === 'unknown' ? 'unknown' : prior.status,
+  status: prior.issues.some(issue => issue === 'unsettled-credit-not-posting' || issue === 'supplementary-reversal-info')
+    ? 'informational' : proposed.issues.includes('learned-format') && proposed.status === 'unknown' ? 'unknown' : prior.status,
   amount: prior.amount.evidence === 'missing' ? proposed.amount : prior.amount,
   merchant: prior.merchant.evidence === 'missing' ||
     proposed.merchant.issues.includes('source-profile-field-excluded') ? proposed.merchant : prior.merchant,
