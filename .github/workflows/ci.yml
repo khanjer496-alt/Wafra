@@ -5,6 +5,9 @@ name: CI
 on:
   workflow_dispatch:
   pull_request:
+    # Non-shipping diagnostic PRs on this dedicated base run only the separately
+    # reviewed label-gated observer. Main/release PR and push checks are unchanged.
+    branches-ignore: [test/purchase-proof-pr251]
   push:
     branches:
       - main

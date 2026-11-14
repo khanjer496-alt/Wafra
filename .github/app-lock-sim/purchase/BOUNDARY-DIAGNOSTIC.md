@@ -64,7 +64,13 @@ Shared/launch-review/pr251-storekit-boundary-2026-11-14.md.
    the PR head still equals the approved SHA, CEO separately authorizes one
    `run-reviewed-boundary-diagnostic` label event. Checkout pins the immutable PR
    head SHA from that event. Only this same-repository, exact named source/base
-   route and label are accepted; the case is fixed to diagnostic.
+   route and label are accepted; the case is fixed to diagnostic. The inherited
+   broad CI workflow excludes only this non-shipping test base, so opening the
+   proposed PR cannot silently start the full application suites. Main/release
+   PR and push checks remain unchanged; do not merge this diagnostic PR into a
+   shipping branch. Other path/label-gated workflows match no changed shipping
+   files and the proposed diagnostic label is not device-shots. This narrow
+   test-base exclusion is part of the code/plan review, not an execution grant.
 
    The old dedicated-branch push proposal is superseded: live read-only cache
    evidence found ID10523176508/key `app-lock-sim-app-v3-ec3a930937cc50f5fd5f0664d1b1f080535ac1e72d69e387c0eac6b846d5d216`

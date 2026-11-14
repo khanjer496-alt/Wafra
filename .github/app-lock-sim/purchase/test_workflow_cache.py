@@ -50,6 +50,14 @@ class WorkflowCacheTests(unittest.TestCase):
         self.assertIn('head.repo.full_name == github.repository', job['if'])
         self.assertEqual(job['env']['PURCHASE_CASE'], 'diagnostic')
 
+    def test_nonshipping_test_base_does_not_start_broad_app_ci(self):
+        path = WORKFLOW.with_name('ci.yml')
+        workflow = json.loads(subprocess.check_output(['ruby', '-rjson', '-ryaml', '-e',
+            'puts JSON.generate(YAML.load_file(ARGV[0]))', str(path)], text=True))
+        triggers = workflow.get('on', workflow.get('true'))
+        self.assertEqual(triggers['pull_request']['branches-ignore'], ['test/purchase-proof-pr251'])
+        self.assertEqual(triggers['push']['branches'], ['main', 'release/1.0.0-rc1-reconciled'])
+
     def test_empty_and_invalid_digests_stop_without_outputs(self):
         for digest in ('', 'abc', 'g' * 64, 'a' * 64 + '\ninjected=1'):
             rc, output, env = self.run_key(digest)
