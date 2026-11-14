@@ -75,7 +75,7 @@ while kill -0 $TPID 2>/dev/null && [ $SECONDS -lt $END ]; do
   fi
   for n in 1 2 3 4; do
     if [ -f "$WORK/hs/reinstall-$n.request" ] && [ ! -f "$WORK/hs/reinstall-$n.done" ]; then
-      echo "[host] reinstall #$n"; if [ "$n" = 1 ] || [ "$n" = 4 ]; then wipe_app_data || { echo "data-only reset failed; no uninstall attempted" > "$WORK/hs/reinstall-$n.failed"; continue; }; else fresh_install; fi; for _i in $(seq 1 30); do xcrun simctl get_app_container "$UDID" "$APP" >/dev/null 2>&1 && break; sleep 1; done; sleep 8; if [ "$n" != 1 ] && [ "$n" != 4 ]; then sync_storekit_config || true; sleep 10; sync_storekit_config || true; restart_storekitd; fi; touch "$WORK/hs/reinstall-$n.done"
+      echo "[host] reinstall #$n"; if [ "$n" = 1 ]; then wipe_app_data || { echo "data-only reset failed; no uninstall attempted" > "$WORK/hs/reinstall-$n.failed"; continue; }; else fresh_install; fi; for _i in $(seq 1 30); do xcrun simctl get_app_container "$UDID" "$APP" >/dev/null 2>&1 && break; sleep 1; done; sleep 8; if [ "$n" != 1 ]; then sync_storekit_config || true; sleep 10; sync_storekit_config || true; restart_storekitd; fi; touch "$WORK/hs/reinstall-$n.done"
     fi
   done
   sleep 1

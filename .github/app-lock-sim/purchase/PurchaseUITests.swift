@@ -318,42 +318,6 @@ final class PurchaseUITests: XCTestCase {
             return how
         }
 
-        // P3b is a separate build-195 gate: exercise the real Restore button even when
-        // launch already recovered the subscription. The onboarding paywall keeps Restore
-        // available for existing subscribers; /pro intentionally hides it once Pro is active.
-        step("P3b") {
-            try requestHostReinstall(4) // second data-only reset; keep the purchased weekly subscription
-            app.launch()
-            dismissSystemAlerts()
-            try reachHome(stopAtPaywall: true)
-            let paywall = el("onboarding-paywall")
-            try need(paywall, "onboarding paywall before Restore", 20)
-            let restore = el("onboarding-paywall-restore")
-            for _ in 0..<8 {
-                if restore.exists && restore.isHittable { break }
-                app.swipeUp(); Thread.sleep(forTimeInterval: 1)
-            }
-            try need(restore, "onboarding Restore purchase button", 10)
-            guard restore.isHittable && restore.isEnabled else { throw StepFail("Restore purchase is not tappable") }
-            guard restore.label.localizedCaseInsensitiveContains("Restore purchase") else {
-                throw StepFail("unexpected Restore button label: \(restore.label)")
-            }
-            shot("P3b1-before-restore-button")
-            note("P3b Restore purchase button tap; no free-path or purchase button is tapped")
-            restore.tap()
-            // Only a successful restore calls onFinish on this path. A missing/failed
-            // restore leaves the paywall visible with its notice, and fails this check.
-            try waitGone(paywall, "onboarding paywall after Restore purchase", 90)
-            try need(app.buttons["Settings"].firstMatch, "Home reached through successful Restore", 30)
-            shot("P3b2-home-after-restore")
-            try openPro(onboard: false)
-            let active = app.staticTexts["Active on this device. Thank you for supporting Wafra."].firstMatch
-            try need(active, "positive Pro-active copy after explicit Restore", 30)
-            guard entitled else { throw StepFail("plans or Buy button remain after explicit Restore") }
-            shot("P3b3-pro-active-after-restore-button")
-            return "Tapped onboarding Restore purchase after second data-only reset WITHOUT uninstall; successful restore left paywall for Home; positive Pro-active copy confirmed. Launch may already have recovered Pro; this proves explicit Restore API success, not an off-to-on transition."
-        }
-
         // P4: yearly on a fresh install, then Pro stays on across a relaunch
         step("P4") {
             session.clearTransactions()
@@ -398,6 +362,73 @@ final class PurchaseUITests: XCTestCase {
             guard el("pro-buy").exists, el("pro-plans").exists else { throw StepFail("Pro looks unlocked after a cancelled purchase") }
             guard noteShown else { throw StepFail("the sheet was closed but the neutral not-completed line did not appear; buy button enabled: \(el("pro-buy").isEnabled)") }
             return "plans and buy button still shown; neutral note shown: \(noteShown) '\(noteText)'; buy button enabled: \(el("pro-buy").isEnabled)"
+        }
+        // Separate build-195 Restore gates. Start with a truly fresh, empty-store install
+        // and reach the paywall BEFORE introducing ownership, avoiding launch recovery.
+        var emptyRestoreProven = false
+        step("P3c") {
+            session.clearTransactions()
+            try requestHostReinstall(4)
+            app.launch()
+            dismissSystemAlerts()
+            try reachHome(stopAtPaywall: true)
+            let restore = el("onboarding-paywall-restore")
+            for _ in 0..<8 {
+                if restore.exists && restore.isHittable { break }
+                app.swipeUp(); Thread.sleep(forTimeInterval: 1)
+            }
+            try need(restore, "Restore purchase on empty-store paywall", 20)
+            guard restore.isEnabled && restore.isHittable else { throw StepFail("empty-store Restore is not tappable") }
+            guard restore.label.localizedCaseInsensitiveContains("Restore purchase") else { throw StepFail("wrong Restore button label") }
+            shot("P3c1-empty-store-before-restore")
+            note("P3c explicit Restore purchase tap; fresh install, no owned subscription")
+            restore.tap()
+            let notice = el("onboarding-paywall-notice")
+            try need(notice, "no-purchase-found notice after empty Restore", 60)
+            let title = app.staticTexts["No purchase found"].firstMatch
+            let body = app.staticTexts["No previous Wafra Pro purchase was found on this store account."].firstMatch
+            try need(title, "No purchase found title", 10)
+            try need(body, "no previous Wafra Pro purchase body", 10)
+            Thread.sleep(forTimeInterval: 3)
+            guard app.state == .runningForeground && el("onboarding-paywall").exists &&
+                  !app.buttons["Settings"].firstMatch.exists && restore.isEnabled &&
+                  el("onboarding-paywall-pro").isEnabled else {
+                throw StepFail("empty Restore left paywall, crashed, reached Home, or stranded actions disabled")
+            }
+            shot("P3c2-no-purchase-found-paywall-stays")
+            emptyRestoreProven = true
+            return "Fresh empty-store install; tapped Restore purchase; exact No purchase found title and body shown, paywall stays, no Home, app foreground and purchase/restore actions enabled."
+        }
+
+        step("P3b") {
+            guard emptyRestoreProven && el("onboarding-paywall").exists else {
+                throw StepFail("FIXTURE-UNAVAILABLE: P3c must prove empty ownership with paywall visible first")
+            }
+            // Apple documents this as an external purchase. CLI runner and AUT may have
+            // separate registrations: record injected ownership and fail closed if the
+            // real app's Restore cannot see it. Never count runner ownership alone as PASS.
+            try session.buyProduct(productIdentifier: "wafra_pro_weekly")
+            let owned = session.allTransactions().contains { $0.productIdentifier == "wafra_pro_weekly" }
+            guard owned else { throw StepFail("FIXTURE-UNAVAILABLE: runner did not record injected weekly") }
+            note("P3b fixture: injected weekly recorded in runner; AUT binding still unproven until Restore succeeds")
+            let paywall = el("onboarding-paywall")
+            let restore = el("onboarding-paywall-restore")
+            try need(paywall, "paywall immediately before positive Restore", 10)
+            try need(restore, "Restore purchase after external weekly injection", 10)
+            guard restore.isEnabled && restore.isHittable else { throw StepFail("Restore is not tappable after injection") }
+            shot("P3b1-owned-before-restore-button")
+            note("P3b explicit Restore purchase tap; no free or buy tap")
+            restore.tap()
+            do { try waitGone(paywall, "paywall after positive Restore", 90) }
+            catch { throw StepFail("FIXTURE-UNAVAILABLE or Restore failure: runner weekly may not bind AUT; \(error); \(purchaseEvidence())") }
+            try need(app.buttons["Settings"].firstMatch, "Home after positive Restore callback", 30)
+            shot("P3b2-home-after-restore")
+            try openPro(onboard: false)
+            try need(app.staticTexts["Active on this device. Thank you for supporting Wafra."].firstMatch,
+                     "positive Pro-active copy after explicit Restore", 30)
+            guard entitled else { throw StepFail("plans or Buy remain after Restore") }
+            shot("P3b3-pro-active-after-restore-button")
+            return "Empty ownership first proven by P3c; weekly injected with paywall already visible; tapped Restore purchase, success callback reached Home, positive Pro-active copy and no plans/buy. Runner/AUT ownership binding confirmed by this result."
         }
         try? simulatePurchaseCancel(false)
 
