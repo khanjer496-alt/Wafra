@@ -149,7 +149,7 @@ function selectedPredicateCompletion(lead: string, tail: string): boolean | null
     if (label && (Object.hasOwn(CURRENCY_MINOR_UNITS, label) || PRICE_SYMBOL_NAMES.has(label) ||
       getActiveMarket().currency.aliases.some(alias => alias.trim().toUpperCase() === label))) tail = tail.slice(quote[0].length);
   }
-  const descriptor = /\b(?:using|with|via|at|from|into|on|by|for|merchant|card|account|wallet|date|time|reference|balance)\b|\bto(?!\s+be\b)/iu.exec(tail);
+  const descriptor = /\b(?:(?:available|avail|avl|current|new|closing|remaining|updated)\s+(?:(?:account|credit)\s+)?(?:bal(?:ance)?|limit)|(?:available|left|remaining)\s+to\s+(?:spend|withdraw)|using|with|via|at|from|into|on|by|for|merchant|card|account|wallet|date|time|reference|balance)\b|\bto(?!\s+be\b)/iu.exec(tail);
   const ownedTail = tail.slice(0, descriptor?.index ?? tail.length);
   const predicate = ownedTail.slice(0, firstStatedPrice(ownedTail) ?? ownedTail.length).trim().replace(/^[^\p{L}\p{N}]+/u, '');
   const allVerbs = [...lead.matchAll(ACTIVE_MONEY_VERB)];
@@ -194,14 +194,28 @@ function selectedPredicateCompletion(lead: string, tail: string): boolean | null
   return active;
 }
 
-/** Scope indicative status to the selected movement, excluding conditional/previous-event footers. */
-export function isIncompletePrincipal(source: string, span: PrincipalSpan | undefined, expensePredicate = false): boolean {
-  if (!span) return false;
+function principalClause(source: string, span: PrincipalSpan | undefined): { start: number; end: number } | null {
+  if (!span) return null;
   const boundary = (at: number) => /[;!?]/u.test(source[at]) ||
     (source[at] === '.' && /^(?:\s|$)/u.test(source[at + 1] ?? ''));
   let start = span.start, end = span.end;
   while (start > 0 && !boundary(start - 1)) start--;
   while (end < source.length && !boundary(end)) end++;
+  return { start, end };
+}
+
+/** Positive internal proof; missing/unknown predicates cannot relax a preview refusal. */
+export function isCompletedExpensePrincipal(source: string, span: PrincipalSpan | undefined): boolean {
+  const clause = principalClause(source, span);
+  return !!clause && !!span && selectedPredicateCompletion(source.slice(clause.start, span.start), source.slice(span.end, clause.end)) === true &&
+    !isIncompletePrincipal(source, span, true);
+}
+
+/** Scope indicative status to the selected movement, excluding conditional/previous-event footers. */
+export function isIncompletePrincipal(source: string, span: PrincipalSpan | undefined, expensePredicate = false): boolean {
+  const clause = principalClause(source, span);
+  if (!clause || !span) return false;
+  const { start, end } = clause;
   // The selected purchase's own passive predicate must be completed too.
   // A later refund/request sentence cannot make "will be made" or
   // "was not made" prove an independently completed expense.

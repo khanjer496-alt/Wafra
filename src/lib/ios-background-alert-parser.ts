@@ -6,6 +6,7 @@ import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars'
 import { createLaunchAlertSession, inspectGenericBankEventForReview } from '@/lib/launch-alert-parser';
 import { hasNonCompletedWording, isNotAutoPostableMoney } from '@/lib/best-effort-autopost';
 import { originalMoneyOf } from '@/lib/fx';
+import { isCompletedExpensePrincipal } from '@/lib/principal-posting-guards';
 import { PARSER_VERSION, completedDebitBesideCredit, nonPostingReason, hasOnlyUnsettledCredit, type ParsedSms } from '@/lib/sms-parser';
 import type { UniversalBankEvent, UniversalMoney, UniversalParseContext } from '@/lib/universal-types';
 
@@ -241,7 +242,8 @@ export function parseIosBackgroundAlert(input: NativeParserInput): NativeParserR
     const pair = completedDebitBesideCredit(source, { sender });
     const creditReviewOnly = hasOnlyUnsettledCredit(source) || holdCredit || mentionsCredit(source);
     const refusal = nonPostingReason(source);
-    const incomplete = isNotAutoPostableMoney(source) || hasNonCompletedWording(source, context.country, sender);
+    const unsafeMoney = isNotAutoPostableMoney(source);
+    const incomplete = unsafeMoney || hasNonCompletedWording(source, context.country, sender);
     const reviewableRefusal = (creditReviewOnly && canReviewCreditRefusal(source, refusal)) || (!!pair && refusal === 'declined');
     if (NON_RECEIPT_PREFIX_RE.test(source) || (refusal && !reviewableRefusal) || (!(creditReviewOnly || pair) &&
       incomplete)) return ignore();
@@ -263,7 +265,6 @@ export function parseIosBackgroundAlert(input: NativeParserInput): NativeParserR
       : session.parse(source, sender, inspection, senderMarket ?? undefined, input.observedAt);
     // Relaxing a refusal for informational CREDIT Review cannot authorize a
     // debit that the original source's completed-movement checks refused.
-    if (parsed?.kind === 'transaction' && parsed.type === 'expense' && !pair && incomplete) return ignore();
     // Native has one notification. Keep the actual debit; the app separately
     // retains the reversal note in its existing capture/history Review lane.
     const debitSource = pair && parsed?.kind === 'transaction' && parsed.type === 'expense' ? pair.debit : null;
@@ -272,6 +273,8 @@ export function parseIosBackgroundAlert(input: NativeParserInput): NativeParserR
       : parsed && senderMarket === 'SA' ? { 'ريال': ['SAR'] } : undefined;
     const event = inspectGenericBankEventForReview(principalSource, sender, undefined,
       debitAliases ? { currencyAliases: debitAliases } : undefined);
+    if (parsed?.kind === 'transaction' && parsed.type === 'expense' && !pair && incomplete &&
+      (unsafeMoney || !event || event.amount.spans.length !== 1 || !isCompletedExpensePrincipal(source, event.amount.spans[0]))) return ignore();
     if (futureDate(event, input.observedAt, parsed ?? undefined) && !(creditReviewOnly && !parsed)) return ignore();
     if (parsed && parsed.kind !== 'transaction') return ignore();
     if (parsed?.type === 'income' && event?.status === 'informational') parsed = null;
