@@ -70,7 +70,7 @@ for (const [index, [market, named, body, reason]] of refused.entries()) {
       const result = JSON.parse(sandbox.wafraNativeAlertParse(JSON.stringify({ v: 1, body: layout, sender,
         observedAt: at, context: { v: 1, country: market, parserMarket: market,
           ledgerMoney: { currency: market === 'SA' ? 'SAR' : 'AED', exponent: 2 }, sourceHash: meta.sourceHash } })));
-      if (reason === 'pending-processing' && sender) assertInformationalRefund(layout, result, sender);
+      if (reason === 'pending-processing') assertInformationalRefund(layout, result, sender);
       else assert.equal(result.route, 'ignore');
     });
   }
