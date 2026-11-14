@@ -148,8 +148,8 @@ function selectedPredicateCompletion(lead: string, tail: string): boolean | null
     let bridge = lead.slice(before.index! + before[0].length);
     // A bank FX quote may put the ledger-currency figure after the original
     // price. Its predicate ends at that first stated money, not at the quote.
-    const priorPrice = [...bridge.matchAll(/\b([A-Z]{3})\s*\d|\d[\d,.]*\s*([A-Z]{3})\b/giu)]
-      .find(match => Object.hasOwn(CURRENCY_MINOR_UNITS, (match[1] ?? match[2]).toUpperCase()));
+    const priorPrice = [...bridge.matchAll(/\b([A-Z]{3})\s*\d|\d[\d,.]*\s*([A-Z]{3})\b|([$€£₹])\s*\d/giu)]
+      .find(match => !!match[3] || Object.hasOwn(CURRENCY_MINOR_UNITS, (match[1] ?? match[2]).toUpperCase()));
     if (priorPrice) bridge = bridge.slice(0, priorPrice.index);
     bridge = bridge.split(/\b(?:using|with|via|at|from|to|into|on|by|for)\b/iu)[0].trim();
     if (/^(?:fees?|charges?|commission|tax|levy|amount|sum|value)(?:\s+(?:of|for))?$/iu.test(bridge) ||
