@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: b1aa3ccaaa504a8152f7619d02cb4ece6dda991b75a9292dd6b42c92f3af3311
+// Generated from normal shipping TypeScript. Source SHA-256: c16d827a1fefa530aaccdc0dc52b3abfa3fbd323bdba801b90e0ac8523b7ec3c
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -7989,6 +7989,7 @@ const alert_institution_grammars_1 = require("@/lib/alert-institution-grammars")
 const launch_alert_parser_1 = require("@/lib/launch-alert-parser");
 const best_effort_autopost_1 = require("@/lib/best-effort-autopost");
 const fx_1 = require("@/lib/fx");
+const principal_posting_guards_1 = require("@/lib/principal-posting-guards");
 const sms_parser_1 = require("@/lib/sms-parser");
 const ignore = () => ({
     v: 1, parserVersion: sms_parser_1.PARSER_VERSION, route: 'ignore', provenance: null, notification: null,
@@ -8174,7 +8175,8 @@ function parseIosBackgroundAlert(input) {
         const pair = (0, sms_parser_1.completedDebitBesideCredit)(source, { sender });
         const creditReviewOnly = (0, sms_parser_1.hasOnlyUnsettledCredit)(source) || holdCredit || (0, credit_settlement_guards_1.mentionsCredit)(source);
         const refusal = (0, sms_parser_1.nonPostingReason)(source);
-        const incomplete = (0, best_effort_autopost_1.isNotAutoPostableMoney)(source) || (0, best_effort_autopost_1.hasNonCompletedWording)(source, context.country, sender);
+        const unsafeMoney = (0, best_effort_autopost_1.isNotAutoPostableMoney)(source);
+        const incomplete = unsafeMoney || (0, best_effort_autopost_1.hasNonCompletedWording)(source, context.country, sender);
         const reviewableRefusal = (creditReviewOnly && (0, credit_settlement_guards_1.canReviewCreditRefusal)(source, refusal)) || (!!pair && refusal === 'declined');
         if (NON_RECEIPT_PREFIX_RE.test(source) || (refusal && !reviewableRefusal) || (!(creditReviewOnly || pair) &&
             incomplete))
@@ -8189,13 +8191,20 @@ function parseIosBackgroundAlert(input) {
         const inspection = session.inspect(source, sender);
         let parsed = unbankedSender ? null
             : session.parse(source, sender, inspection, senderMarket ?? undefined, input.observedAt);
-        if (parsed?.kind === 'transaction' && parsed.type === 'expense' && !pair && incomplete)
-            return ignore();
         const debitSource = pair && parsed?.kind === 'transaction' && parsed.type === 'expense' ? pair.debit : null;
         const principalSource = debitSource ?? source;
         const debitAliases = parsed && senderMarket === 'AE' ? { 'درهم': ['AED'], 'دراهم': ['AED'] }
             : parsed && senderMarket === 'SA' ? { 'ريال': ['SAR'] } : undefined;
-        const event = (0, launch_alert_parser_1.inspectGenericBankEventForReview)(principalSource, sender, undefined, debitAliases ? { currencyAliases: debitAliases } : undefined);
+        let event = (0, launch_alert_parser_1.inspectGenericBankEventForReview)(principalSource, sender, undefined, debitAliases ? { currencyAliases: debitAliases } : undefined);
+        const completedExpense = parsed?.kind === 'transaction' && parsed.type === 'expense' && !unsafeMoney &&
+            event?.amount.evidence === 'explicit' && event.amount.spans.length === 1 &&
+            (0, principal_posting_guards_1.isCompletedExpensePrincipal)(principalSource, event.amount.spans[0]);
+        if (completedExpense && event?.status === 'informational' && movementFamily(event.family) &&
+            event.issues.includes('unsettled-credit-not-posting'))
+            event = { ...event, status: 'posted', direction: 'debit' };
+        if (parsed?.kind === 'transaction' && parsed.type === 'expense' && !pair && incomplete &&
+            (unsafeMoney || !event || event.amount.spans.length !== 1 || !(0, principal_posting_guards_1.isCompletedExpensePrincipal)(source, event.amount.spans[0])))
+            return ignore();
         if (futureDate(event, input.observedAt, parsed ?? undefined) && !(creditReviewOnly && !parsed))
             return ignore();
         if (parsed && parsed.kind !== 'transaction')
@@ -10196,6 +10205,7 @@ exports.blankWordLinkPrompts = blankWordLinkPrompts;
 exports.hasExplicitPersonalMoneyClaim = hasExplicitPersonalMoneyClaim;
 exports.isLeadingNumericDiscountOffer = isLeadingNumericDiscountOffer;
 exports.hasMobileMoneyCallback = hasMobileMoneyCallback;
+exports.isCompletedExpensePrincipal = isCompletedExpensePrincipal;
 exports.isIncompletePrincipal = isIncompletePrincipal;
 exports.isHedgedPrincipal = isHedgedPrincipal;
 exports.refundPrincipalStatus = refundPrincipalStatus;
@@ -10208,6 +10218,7 @@ exports.isCompletedCardRepaymentPrincipal = isCompletedCardRepaymentPrincipal;
 exports.isUnqualifiedCardCredit = isUnqualifiedCardCredit;
 const credit_settlement_guards_1 = require("@/lib/credit-settlement-guards");
 const currency_metadata_1 = require("@/lib/currency-metadata");
+const markets_1 = require("@/lib/markets");
 const CLICK_LINK_PROMPT = /(?:\b(?:click(?:ing)?|tap(?:ping)?|verify|confirm|update\s+(?:(?:your|the)\s+)?(?:details|information|credentials|account))\b[\s:：]+|(?<![ء-ي])(?:اضغط|إضغط|انقر)[\s:：]+)(?:[^.!?]|\.\d){0,120}?(?:(?:https?|hxxps?):\/\/|\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:[\/?#:]|\b)|www\.|\b(?:here|below|link|url)\b|الرابط|هنا)/giu;
 const ISSUER_MERCHANT_DEBIT_CONFIRMATION = /^confirm\s+that\s+[A-Z]{3}\s+\d[\d,.]*\s+was\s+debited\s+from\s+your\s+account\s+ending\s+\d{4}\s+for\s+(?:a\s+)?purchase\s+at\s+(?:[a-z0-9-]+\.)+[a-z]{2,}$/iu;
 const ISSUER_MERCHANT_HOST_END = /^(?:\*[A-Z0-9]{1,24})?["'”’»)\]]*[.!?;,。、،؛؟۔…]*(?:[^\S\uFEFF]|$)/iu;
@@ -10285,6 +10296,8 @@ const ACTIVE_MONEY_VERB = /\b(?:charged|debited|deducted|paid|sent|withdrawn|spe
 const PREDICATE_AUXILIARY = /\b(?:was|were|is|are|has|have|had|will|would|shall|should|must|may|might|can|could|not|never|being|yet|scheduled|pending|awaiting|[a-z]+n['’]t)\b/iu;
 const PREDICATE_START = new RegExp(`^(?:${PREDICATE_AUXILIARY.source})`, 'iu');
 const COMPLETION_ADVERBS = new Set(['already', 'just', 'now', 'successfully', 'fully', 'recently', 'actually', 'really']);
+const DEBIT_OUTCOME = /\b(?:made|completed|processed|posted|charged|debited|deducted|paid|sent|withdrawn|spent|purchased|used|transferred|settled|done|successful)\b/iu;
+const EXPLICIT_DEBIT_OUTCOME = /\b(?:charged|debited|deducted|paid|sent|withdrawn|spent|purchased|used|transferred)\b/iu;
 const PRICE_SYMBOLS = Object.keys(currency_metadata_1.CURRENCY_SYMBOL_CANDIDATES).sort((a, b) => b.length - a.length);
 const PRICE_SYMBOL_NAMES = new Set(PRICE_SYMBOLS.map(symbol => symbol.toUpperCase()));
 const STATED_PRICE = new RegExp(`\\b([A-Z]{3})\\s*\\d|\\d[\\d,.]*\\s*([A-Z]{3})\\b|(${PRICE_SYMBOLS.map(symbol => symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\s*\\d`, 'giu');
@@ -10299,8 +10312,13 @@ function firstStatedPrice(text) {
     }
     return null;
 }
-function completedPredicate(fragment) {
-    const expanded = fragment.trim().replace(/^['’]ve\b/iu, 'have').replace(/^['’]s\b/iu, 'has').replace(/^['’]re\b/iu, 'are');
+function completedPredicate(fragment, debitOnly = false) {
+    const clauses = fragment.split(/\b(?:and|but)\s+(?=(?:was|were|is|are|has|have|had|will|would|shall|should|must|may|might|can|could)\b)/iu);
+    const debits = clauses.filter(clause => DEBIT_OUTCOME.test(clause));
+    const owned = debits.length ? debits[debits.length - 1] : fragment;
+    if (debitOnly && !EXPLICIT_DEBIT_OUTCOME.test(owned))
+        return false;
+    const expanded = owned.trim().replace(/^['’]ve\b/iu, 'have').replace(/^['’]s\b/iu, 'has').replace(/^['’]re\b/iu, 'are');
     const words = (expanded.toLowerCase().match(/[a-z]+(?:['’][a-z]+)?|\d+/gu) ?? [])
         .filter(word => !COMPLETION_ADVERBS.has(word));
     if (['out', 'back'].includes(words[words.length - 1] ?? '') && ['paid', 'sent'].includes(words[words.length - 2] ?? ''))
@@ -10312,10 +10330,18 @@ function completedPredicate(fragment) {
     return auxiliary === '' || /^(?:was|were|has been|have been|had been|has|have|had)$/u.test(auxiliary) ||
         (verb !== 'made' && /^(?:is|are)$/u.test(auxiliary));
 }
-function selectedPredicateCompletion(lead, tail) {
-    const descriptor = /\b(?:using|with|via|at|from|into|on|by|for|merchant|card|account|wallet|date|time|reference|balance)\b|\bto(?!\s+be\b)/iu.exec(tail);
+function selectedPredicateCompletion(lead, tail, debitOnly = false) {
+    const quote = /^\s*\(([^()]*)\)\s*/u.exec(tail);
+    if (quote) {
+        const money = /^\s*([^\d()]+?)\s*\d[\d,.]*\s*$|^\s*\d[\d,.]*\s*([^\d()]+?)\s*$/u.exec(quote[1]);
+        const label = (money?.[1] ?? money?.[2] ?? '').trim().toUpperCase();
+        if (label && (Object.hasOwn(currency_metadata_1.CURRENCY_MINOR_UNITS, label) || PRICE_SYMBOL_NAMES.has(label) ||
+            (0, markets_1.getActiveMarket)().currency.aliases.some(alias => alias.trim().toUpperCase() === label)))
+            tail = tail.slice(quote[0].length);
+    }
+    const descriptor = /\b(?:(?:available|avail|avl|current|new|closing|remaining|updated)\s+(?:(?:account|credit)\s+)?(?:bal(?:ance)?|limit)|(?:available|left|remaining)\s+to\s+(?:spend|withdraw)|using|with|via|at|from|into|on|by|for|merchant|card|account|wallet|date|time|reference|balance)\b|\bto(?!\s+be\b)/iu.exec(tail);
     const ownedTail = tail.slice(0, descriptor?.index ?? tail.length);
-    const predicate = ownedTail.slice(0, firstStatedPrice(ownedTail) ?? ownedTail.length).trim();
+    const predicate = ownedTail.slice(0, firstStatedPrice(ownedTail) ?? ownedTail.length).trim().replace(/^[^\p{L}\p{N}]+/u, '');
     const allVerbs = [...lead.matchAll(ACTIVE_MONEY_VERB)];
     const verbs = allVerbs.filter((verb, index) => {
         const object = lead.slice(verb.index + verb[0].length);
@@ -10344,7 +10370,7 @@ function selectedPredicateCompletion(lead, tail) {
         if (/^(?:fees?|charges?|commission|tax|levy|amount|sum|value)(?:\s+(?:of|for))?\s*[:=]?$/iu.test(bridge) ||
             /^(?:a|an|the|your|this|that)\s+(?:[a-z'’ -]+\s+)?(?:fees?|charges?|commission|tax|levy|amount|sum|value)(?:\s+(?:of|for))?\s*[:=]?$/iu.test(bridge))
             bridge = '';
-        active = completedPredicate(`${prefix} ${before[0]} ${bridge}`);
+        active = completedPredicate(`${prefix} ${before[0]} ${bridge}`, debitOnly);
     }
     if (active === false)
         return false;
@@ -10352,12 +10378,12 @@ function selectedPredicateCompletion(lead, tail) {
     const monetaryTail = COMPLETED_MONEY_VERB.test(predicate);
     if (predicate && ((monetaryTail && (nominal || PREDICATE_START.test(predicate))) ||
         (active === null && (nominal || PREDICATE_START.test(predicate)))))
-        return completedPredicate(predicate);
+        return completedPredicate(predicate, debitOnly);
     return active;
 }
-function isIncompletePrincipal(source, span, expensePredicate = false) {
+function principalClause(source, span) {
     if (!span)
-        return false;
+        return null;
     const boundary = (at) => /[;!?]/u.test(source[at]) ||
         (source[at] === '.' && /^(?:\s|$)/u.test(source[at + 1] ?? ''));
     let start = span.start, end = span.end;
@@ -10365,6 +10391,18 @@ function isIncompletePrincipal(source, span, expensePredicate = false) {
         start--;
     while (end < source.length && !boundary(end))
         end++;
+    return { start, end };
+}
+function isCompletedExpensePrincipal(source, span) {
+    const clause = principalClause(source, span);
+    return !!clause && !!span && selectedPredicateCompletion(source.slice(clause.start, span.start), source.slice(span.end, clause.end), true) === true &&
+        !isIncompletePrincipal(source, span, true);
+}
+function isIncompletePrincipal(source, span, expensePredicate = false) {
+    const clause = principalClause(source, span);
+    if (!clause || !span)
+        return false;
+    const { start, end } = clause;
     const ownLead = source.slice(start, span.start);
     const ownTail = source.slice(span.end, end);
     if (expensePredicate) {
@@ -16753,7 +16791,7 @@ const inspectUnparsedLaunchAlert = (source, sender) => {
 exports.inspectUnparsedLaunchAlert = inspectUnparsedLaunchAlert;
 }
 };
-const mappings={"alert-draft":{"@/lib/currency-metadata":"currency-metadata"},"alert-event-evidence":{},"alert-institution-grammars":{},"alert-market-detection":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-semantics":"alert-semantics","@/lib/markets":"markets"},"alert-market-packs":{"@/lib/alert-market-packs.india-me":"alert-market-packs.india-me","@/lib/alert-market-packs.us-eu":"alert-market-packs.us-eu","@/lib/alert-market-packs.world":"alert-market-packs.world"},"alert-market-packs.india-me":{},"alert-market-packs.us-eu":{},"alert-market-packs.world":{},"alert-semantics":{"@/lib/alert-draft":"alert-draft","@/lib/alert-event-evidence":"alert-event-evidence","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-market-packs":"alert-market-packs","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"alert-source-ownership":{"@/lib/alert-draft":"alert-draft"},"bank-alert-interpreter":{"@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules","@/lib/categories":"categories","@/lib/bank-alert-semantic-output":"bank-alert-semantic-output","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser","@/lib/unparsed-launch-alert":"unparsed-launch-alert"},"bank-alert-semantic-output":{},"bank-alert-semantic-rules":{"@/lib/sms-parser":"sms-parser"},"bank-amount-tokens":{},"best-effort-autopost":{"@/lib/currency-metadata":"currency-metadata","@/lib/capture-source-identity":"capture-source-identity","@/lib/fx-rates":"fx-rates","@/lib/sms-parser":"sms-parser","@/lib/principal-posting-guards":"principal-posting-guards"},"bnpl-providers":{},"brand-categories":{},"capture-source-identity":{},"categories":{"@/lib/i18n":"i18n"},"country":{"@/lib/country-names":"country-names"},"country-names":{},"credit-settlement-guards":{"@/lib/currency-metadata":"currency-metadata"},"currency-metadata":{},"fx":{"@/lib/currency-metadata":"currency-metadata","@/lib/ledger-money":"ledger-money"},"fx-rates":{"@/lib/fx":"fx"},"gulf-neighbour-alerts":{"@/lib/best-effort-autopost":"best-effort-autopost","@/lib/country":"country","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/gulf-neighbour-templates":"gulf-neighbour-templates","@/lib/sms-parser":"sms-parser","@/lib/universal-parser":"universal-parser"},"gulf-neighbour-templates":{"@/lib/best-effort-autopost":"best-effort-autopost"},"i18n":{"@/lib/import-processing-disclosure":"import-processing-disclosure"},"import-processing-disclosure":{},"ios-background-alert-parser":{"@/lib/credit-settlement-guards":"credit-settlement-guards","@/lib/currency-metadata":"currency-metadata","@/lib/country":"country","@/lib/markets":"markets","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/launch-alert-parser":"launch-alert-parser","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/fx":"fx","@/lib/sms-parser":"sms-parser"},"latam-alert-templates":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/sms-parser":"sms-parser","@/lib/universal-types":"universal-types"},"launch-alert-parser":{"@/lib/credit-settlement-guards":"credit-settlement-guards","@/lib/alert-market-detection":"alert-market-detection","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/country":"country","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/bank-alert-interpreter":"bank-alert-interpreter","@/lib/markets":"markets","@/lib/bnpl-providers":"bnpl-providers","@/lib/sms-parser":"sms-parser","@/lib/currency-metadata":"currency-metadata","@/lib/gulf-neighbour-alerts":"gulf-neighbour-alerts","@/lib/universal-parser":"universal-parser","@/lib/alert-market-packs":"alert-market-packs","@/lib/alert-draft":"alert-draft","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/universal-money":"universal-money","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/universal-categorization":"universal-categorization","@/lib/fx-rates":"fx-rates","@/lib/universal-types":"universal-types"},"ledger-money":{"@/lib/currency-metadata":"currency-metadata"},"markets":{"@/lib/country":"country"},"principal-posting-guards":{"@/lib/credit-settlement-guards":"credit-settlement-guards","@/lib/currency-metadata":"currency-metadata"},"sms-parser":{"@/lib/credit-settlement-guards":"credit-settlement-guards","@/lib/categories":"categories","@/lib/markets":"markets","@/lib/bank-amount-tokens":"bank-amount-tokens","@/lib/fx":"fx","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/bnpl-providers":"bnpl-providers","@/lib/country":"country","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/universal-money":"universal-money"},"universal-categorization":{"@/lib/brand-categories":"brand-categories","@/lib/categories":"categories","@/lib/sms-parser":"sms-parser"},"universal-dates":{"@/lib/alert-source-ownership":"alert-source-ownership","@/lib/universal-types":"universal-types"},"universal-fields":{"@/lib/universal-types":"universal-types","@/lib/alert-draft":"alert-draft","@/lib/universal-dates":"universal-dates"},"universal-money":{"@/lib/alert-draft":"alert-draft","@/lib/alert-market-packs":"alert-market-packs","@/lib/currency-metadata":"currency-metadata","@/lib/universal-fields":"universal-fields","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/universal-types":"universal-types"},"universal-parser":{"@/lib/credit-settlement-guards":"credit-settlement-guards","@/lib/universal-types":"universal-types","@/lib/alert-semantics":"alert-semantics","@/lib/universal-fields":"universal-fields","@/lib/universal-money":"universal-money","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"universal-types":{},"unparsed-launch-alert":{"@/lib/alert-draft":"alert-draft","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser"}};
+const mappings={"alert-draft":{"@/lib/currency-metadata":"currency-metadata"},"alert-event-evidence":{},"alert-institution-grammars":{},"alert-market-detection":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-semantics":"alert-semantics","@/lib/markets":"markets"},"alert-market-packs":{"@/lib/alert-market-packs.india-me":"alert-market-packs.india-me","@/lib/alert-market-packs.us-eu":"alert-market-packs.us-eu","@/lib/alert-market-packs.world":"alert-market-packs.world"},"alert-market-packs.india-me":{},"alert-market-packs.us-eu":{},"alert-market-packs.world":{},"alert-semantics":{"@/lib/alert-draft":"alert-draft","@/lib/alert-event-evidence":"alert-event-evidence","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/alert-market-packs":"alert-market-packs","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"alert-source-ownership":{"@/lib/alert-draft":"alert-draft"},"bank-alert-interpreter":{"@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules","@/lib/categories":"categories","@/lib/bank-alert-semantic-output":"bank-alert-semantic-output","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser","@/lib/unparsed-launch-alert":"unparsed-launch-alert"},"bank-alert-semantic-output":{},"bank-alert-semantic-rules":{"@/lib/sms-parser":"sms-parser"},"bank-amount-tokens":{},"best-effort-autopost":{"@/lib/currency-metadata":"currency-metadata","@/lib/capture-source-identity":"capture-source-identity","@/lib/fx-rates":"fx-rates","@/lib/sms-parser":"sms-parser","@/lib/principal-posting-guards":"principal-posting-guards"},"bnpl-providers":{},"brand-categories":{},"capture-source-identity":{},"categories":{"@/lib/i18n":"i18n"},"country":{"@/lib/country-names":"country-names"},"country-names":{},"credit-settlement-guards":{"@/lib/currency-metadata":"currency-metadata"},"currency-metadata":{},"fx":{"@/lib/currency-metadata":"currency-metadata","@/lib/ledger-money":"ledger-money"},"fx-rates":{"@/lib/fx":"fx"},"gulf-neighbour-alerts":{"@/lib/best-effort-autopost":"best-effort-autopost","@/lib/country":"country","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/gulf-neighbour-templates":"gulf-neighbour-templates","@/lib/sms-parser":"sms-parser","@/lib/universal-parser":"universal-parser"},"gulf-neighbour-templates":{"@/lib/best-effort-autopost":"best-effort-autopost"},"i18n":{"@/lib/import-processing-disclosure":"import-processing-disclosure"},"import-processing-disclosure":{},"ios-background-alert-parser":{"@/lib/credit-settlement-guards":"credit-settlement-guards","@/lib/currency-metadata":"currency-metadata","@/lib/country":"country","@/lib/markets":"markets","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/launch-alert-parser":"launch-alert-parser","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/fx":"fx","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/sms-parser":"sms-parser"},"latam-alert-templates":{"@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/sms-parser":"sms-parser","@/lib/universal-types":"universal-types"},"launch-alert-parser":{"@/lib/credit-settlement-guards":"credit-settlement-guards","@/lib/alert-market-detection":"alert-market-detection","@/lib/alert-institution-grammars":"alert-institution-grammars","@/lib/country":"country","@/lib/best-effort-autopost":"best-effort-autopost","@/lib/bank-alert-interpreter":"bank-alert-interpreter","@/lib/markets":"markets","@/lib/bnpl-providers":"bnpl-providers","@/lib/sms-parser":"sms-parser","@/lib/currency-metadata":"currency-metadata","@/lib/gulf-neighbour-alerts":"gulf-neighbour-alerts","@/lib/universal-parser":"universal-parser","@/lib/alert-market-packs":"alert-market-packs","@/lib/alert-draft":"alert-draft","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/universal-money":"universal-money","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/universal-categorization":"universal-categorization","@/lib/fx-rates":"fx-rates","@/lib/universal-types":"universal-types"},"ledger-money":{"@/lib/currency-metadata":"currency-metadata"},"markets":{"@/lib/country":"country"},"principal-posting-guards":{"@/lib/credit-settlement-guards":"credit-settlement-guards","@/lib/currency-metadata":"currency-metadata","@/lib/markets":"markets"},"sms-parser":{"@/lib/credit-settlement-guards":"credit-settlement-guards","@/lib/categories":"categories","@/lib/markets":"markets","@/lib/bank-amount-tokens":"bank-amount-tokens","@/lib/fx":"fx","@/lib/currency-metadata":"currency-metadata","@/lib/fx-rates":"fx-rates","@/lib/bnpl-providers":"bnpl-providers","@/lib/country":"country","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/universal-money":"universal-money"},"universal-categorization":{"@/lib/brand-categories":"brand-categories","@/lib/categories":"categories","@/lib/sms-parser":"sms-parser"},"universal-dates":{"@/lib/alert-source-ownership":"alert-source-ownership","@/lib/universal-types":"universal-types"},"universal-fields":{"@/lib/universal-types":"universal-types","@/lib/alert-draft":"alert-draft","@/lib/universal-dates":"universal-dates"},"universal-money":{"@/lib/alert-draft":"alert-draft","@/lib/alert-market-packs":"alert-market-packs","@/lib/currency-metadata":"currency-metadata","@/lib/universal-fields":"universal-fields","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/universal-types":"universal-types"},"universal-parser":{"@/lib/credit-settlement-guards":"credit-settlement-guards","@/lib/universal-types":"universal-types","@/lib/alert-semantics":"alert-semantics","@/lib/universal-fields":"universal-fields","@/lib/universal-money":"universal-money","@/lib/principal-posting-guards":"principal-posting-guards","@/lib/latam-alert-templates":"latam-alert-templates","@/lib/bank-alert-semantic-rules":"bank-alert-semantic-rules"},"universal-types":{},"unparsed-launch-alert":{"@/lib/alert-draft":"alert-draft","@/lib/markets":"markets","@/lib/sms-parser":"sms-parser"}};
 const cache=Object.create(null);
 function load(id){
 if(Object.prototype.hasOwnProperty.call(cache,id))return cache[id].exports;

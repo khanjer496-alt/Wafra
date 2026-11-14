@@ -5860,5 +5860,49 @@
     "requireDebitParity": true,
     "requireSupplementaryNote": true,
     "noteMinorUnits": null
+  },
+  {
+    "id": "r6-official-control:fx-negated",
+    "body": "Purchase of USD 9.99 (AED 36.70) has not been made with Credit Card ending 4821 at NETFLIX. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "r6-official-control",
+    "expected": "none",
+    "minorUnits": 3670,
+    "requireReview": false,
+    "acceptInformationalReview": false,
+    "incompleteExpense": true
+  },
+  {
+    "id": "r6-official-control:fx-future",
+    "body": "Purchase of USD 9.99 (AED 36.70) will soon be made with Credit Card ending 4821 at NETFLIX. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "r6-official-control",
+    "expected": "none",
+    "minorUnits": 3670,
+    "requireReview": false,
+    "acceptInformationalReview": false,
+    "incompleteExpense": true
+  },
+  {
+    "id": "r6-official-control:credit-negated-debit-was",
+    "body": "Refund of AED 125.00 has not been credited and was debited from your account.",
+    "sender": "ENBD",
+    "origin": "r6-official-control",
+    "expected": "expense",
+    "minorUnits": 12500,
+    "requireReview": false,
+    "acceptInformationalReview": false,
+    "requireDebitParity": true
+  },
+  {
+    "id": "r6-official-control:credit-negated-debit-perfect",
+    "body": "Refund of AED 125.00 has not been credited and has been debited from your account.",
+    "sender": "ENBD",
+    "origin": "r6-official-control",
+    "expected": "expense",
+    "minorUnits": 12500,
+    "requireReview": false,
+    "acceptInformationalReview": false,
+    "requireDebitParity": true
   }
 ]
