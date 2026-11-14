@@ -2338,9 +2338,6 @@ ok('the spoken label matches the visible repayment exception and direction',
     // them with typed placeholders before anything is embedded; it is a
     // redactor, and its own contract below keeps it away from ledger writers.
     'local-semantic-model.ts',
-    // Type-only: the AI gate's country-scoped currency aliases share the
-    // draft's alias-map type. Neither module writes the ledger.
-    'ai-alert-cues.ts',
     // Per-user learned formats ground the confirmed amount on a draft money
     // token; they store slot types and anchors only, never message text.
     'learned-alert-formats.ts',
@@ -2407,10 +2404,7 @@ ok('the spoken label matches the visible repayment exception and direction',
     // Any ISO purchase currency is read at its own exponent; outside the
     // offline table it converts only with a dated rate or waits in Review.
     'sms-parser.ts',
-    // The AI-reading gate checks a grounded amount's exponent; the cue module
-    // types its country-scoped aliases; learned formats re-check exponents.
-    'ai-alert-extractor.ts',
-    'ai-alert-cues.ts',
+    // Learned formats re-check exponents.
     'learned-alert-formats.ts',
     // Gulf-neighbour posting checks the launch grammar's original amount is
     // at its own currency's exponent (KWD/BHD/OMR three, QAR two).
